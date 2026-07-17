@@ -5,6 +5,7 @@ import type {
 import type { Stroke } from '../../../src/types'
 import type { RecognitionResources } from './handwritingDb'
 import type { NeuralTextRecognitionResult } from './neuralTextRecognition'
+import { wordDistance } from './neuralWordContext'
 import {
   fusePersonalizedTextRecognition,
   personalizedTextFusionSelectionScore,
@@ -209,6 +210,8 @@ export const recognizePersonalizedTextLine = async (
   neural: NeuralTextRecognitionResult,
   language: RecognitionLanguage,
   includeCandidateScores = false,
+  sourceWidth = 900,
+  sourceHeight = 1_273,
 ): Promise<PersonalizedLineRecognition> => {
   const recognition = await import('../../../src/lib/recognition')
   const physicalLines = recognition.groupRecognitionLines(strokes)
@@ -467,7 +470,125 @@ export const recognizePersonalizedTextLine = async (
       }
     })
     .sort((first, second) => second.score - first.score)
-  const selected = ranked[0]
+  let selected = ranked[0]
+
+  // Stroke-based segmentation is strongest when pen lifts and accessory
+  // strokes remain available. A screenshot-style raster provides an
+  // independent second view for the remaining one-word failures: adjacent
+  // letters may share a connected component, but their complete pixel bodies
+  // still form separate low-cost cuts. Keep this path lazy and tightly scoped
+  // so normal sentences, formulas and startup never pay its cost.
+  const rawNeuralWord = neural.text.trim()
+  const rasterWordPattern = language === 'de'
+    ? /^[A-Za-zÄÖÜäöü]{2,24}[.,;:!?]?$/u
+    : /^[A-Za-z]{2,24}[.,;:!?]?$/u
+  const personalLetterSamples = resources.samples.filter((sample) => /^\p{L}$/u.test(sample.label))
+  const personalLetterClasses = new Set(personalLetterSamples.map((sample) => sample.labelId)).size
+  if (
+    physicalLines.length === 1
+    && rasterWordPattern.test(rawNeuralWord)
+    && personalLetterSamples.length >= 32
+    && personalLetterClasses >= 12
+    && Number.isFinite(sourceWidth) && sourceWidth >= 200 && sourceWidth <= 4_096
+    && Number.isFinite(sourceHeight) && sourceHeight >= 200 && sourceHeight <= 4_096
+  ) {
+    try {
+      const { recognizePersonalRasterPixels, renderPersonalRasterLine } = await import('./personalizedRasterRecognition')
+      const rendered = renderPersonalRasterLine(physicalLines[0].strokes, sourceWidth, sourceHeight)
+      const raster = rendered
+        ? await recognizePersonalRasterPixels(rendered, resources.samples, rawNeuralWord, language)
+        : null
+      const best = raster?.candidates[0]
+      const rasterText = raster?.prediction ?? ''
+      const rasterCharacters = Array.from(rasterText)
+      const neuralLetters = Array.from(rawNeuralWord).filter((character) => /^\p{L}$/u.test(character)).join('')
+      const topBeam = best?.sequenceBeams[0]
+      const visuallySupportedCharacters = best?.segments.filter((segment, index) => {
+        const selectedCharacter = rasterCharacters[index]
+        const bestCost = segment.alternatives[0]?.cost ?? Number.POSITIVE_INFINITY
+        const selectedCost = segment.alternatives.find((alternative) => alternative.char === selectedCharacter)?.cost
+        return selectedCost !== undefined && selectedCost - bestCost <= 0.14
+      }).length ?? 0
+      const visualSupportRatio = visuallySupportedCharacters / Math.max(1, rasterCharacters.length)
+      const safeRasterDecision = Boolean(
+        best
+        && /^\p{L}{2,24}$/u.test(rasterText)
+        && rasterCharacters.length === best.targetCount
+        && best.score <= 0.13
+        && best.averageVisualCost <= 0.14
+        && best.cutInk <= 0.45
+        && wordDistance(
+          rasterText.toLocaleLowerCase(language),
+          neuralLetters.toLocaleLowerCase(language),
+        ) <= 3
+        && (topBeam?.known || visualSupportRatio >= 0.6)
+      )
+      if (safeRasterDecision && rasterText !== selected.fusion.text) {
+        const matching = ranked.find((entry) => (
+          entry.tokens.filter((token) => !token.isLayout).length === rasterCharacters.length
+        )) ?? selected
+        let visibleIndex = 0
+        let mappedPersonalCharacters = 0
+        const rewrittenTokens = matching.tokens.map((token) => {
+          if (token.isLayout) return token
+          const char = rasterCharacters[visibleIndex++]
+          const alternative = token.alternatives.find((entry) => entry.char === char)
+          const label = resources.labels.find((entry) => entry.char === char)
+          if ((alternative?.personalSupport ?? 0) > 0) mappedPersonalCharacters += 1
+          const previousAlternative = {
+            labelId: token.labelId,
+            char: token.char,
+            name: token.name,
+            confidence: token.confidence,
+            personalSupport: token.personalSupport,
+            personalConfidence: token.personalConfidence,
+          }
+          const alternatives = [previousAlternative, ...token.alternatives]
+            .filter((entry) => entry.char !== char)
+            .filter((entry, index, entries) => entries.findIndex((candidate) => candidate.labelId === entry.labelId) === index)
+            .slice(0, 8)
+          return {
+            ...token,
+            labelId: alternative?.labelId ?? label?.id ?? token.labelId,
+            char,
+            name: alternative?.name ?? label?.name ?? char,
+            latex: label?.latex ?? char,
+            confidence: Math.max(token.confidence, alternative?.confidence ?? 0),
+            personalSupport: Math.max(token.personalSupport ?? 0, alternative?.personalSupport ?? 0),
+            personalConfidence: Math.max(token.personalConfidence ?? 0, alternative?.personalConfidence ?? 0),
+            visualLabelId: alternative?.labelId ?? label?.id ?? token.visualLabelId,
+            alternatives,
+            context: {
+              word: rasterText,
+              knownWord: Boolean(topBeam?.known),
+              changed: char !== token.char,
+              scoreMargin: 0,
+              // A multi-model recognition decision is not explicit user
+              // feedback and must never silently become training data.
+              autoLearn: false,
+            },
+          }
+        })
+        selected = {
+          ...matching,
+          tokens: rewrittenTokens,
+          fusion: {
+            ...matching.fusion,
+            text: rasterText,
+            source: mappedPersonalCharacters >= rasterCharacters.length * 0.8 ? 'personalized' : 'hybrid',
+            personalizedCharacters: Math.max(mappedPersonalCharacters, visuallySupportedCharacters),
+            neuralCharacters: Math.max(0, rasterCharacters.length - Math.max(mappedPersonalCharacters, visuallySupportedCharacters)),
+            classicalCharacters: 0,
+            unsupportedChanges: 0,
+          },
+        }
+      }
+    } catch (error) {
+      // The existing stroke/line fusion remains fully usable if an imported
+      // image is corrupt or the browser cannot allocate a temporary canvas.
+      console.warn('Persönliche Raster-Sequenz wurde übersprungen.', error)
+    }
+  }
   return {
     tokens: selected.tokens,
     fusion: selected.fusion,

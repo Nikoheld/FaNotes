@@ -1,7 +1,7 @@
 {
   "name": "fanotes",
   "productName": "FaNotes",
-  "version": "2026.7.1",
+  "version": "2026.7.2",
   "description": "Lokale Markdown-Notizen mit Handschrift für Schule, UNI, Privatleben und Arbeit",
   "author": "FaNotes",
   "license": "MIT",
@@ -20,6 +20,7 @@
     "audit:recognition:uji": "node scripts/audit-uji-personal-recognition.mjs",
     "audit:recognition:uji-pairs": "node scripts/audit-uji-pair-segmentation.mjs",
     "audit:trocr:preprocessing": "node scripts/sweep-trocr-preprocessing.mjs",
+    "audit:recognition:nas-holdout": "node scripts/audit-nas-handwriting-holdout.mjs",
     "audit:recognition:uji-personalized": "FANOTES_TROCR_AUDIT_MODE=personalized node scripts/sweep-trocr-preprocessing.mjs",
     "check:recognition:guided": "node scripts/check-neural-guided-personal-segmentation.mjs",
     "check:connected-recognition": "node scripts/check-connected-recognition.mjs",
@@ -61,8 +62,8 @@
     "start": "electron .",
     "dist:linux": "npm run build:web && electron-builder --linux AppImage --x64 && npm run dist:harden-appimage && npm run dist:portable",
     "dist:windows": "npm run build:web && electron-builder --win --x64",
-    "dist:harden-appimage": "node scripts/harden-appimage.cjs release/FaNotes-2026.7.1-x86_64.AppImage",
-    "dist:portable": "tar -C release --sort=name --owner=0 --group=0 --numeric-owner --mtime='@0' --mode='u+rwX,go+rX,go-w' --transform='s#^linux-unpacked#FaNotes-2026.7.1-x86_64#' -czf release/FaNotes-2026.7.1-x86_64.tar.gz linux-unpacked",
+    "dist:harden-appimage": "node scripts/harden-appimage.cjs release/FaNotes-2026.7.2-x86_64.AppImage",
+    "dist:portable": "tar -C release --sort=name --owner=0 --group=0 --numeric-owner --mtime='@0' --mode='u+rwX,go+rX,go-w' --transform='s#^linux-unpacked#FaNotes-2026.7.2-x86_64#' -czf release/FaNotes-2026.7.2-x86_64.tar.gz linux-unpacked",
     "dist:dir": "npm run build:web && electron-builder --linux dir --x64"
   },
   "devDependencies": {

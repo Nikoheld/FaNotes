@@ -2195,6 +2195,9 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
               loaded,
               neural,
               settings.recognitionLanguage,
+              false,
+              SOURCE_WIDTH,
+              sourceHeight,
             )
             const fused = personalized.fusion
             recognized = personalized.tokens
@@ -2378,6 +2381,9 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
                 loaded,
                 neural,
                 settings.recognitionLanguage,
+                false,
+                SOURCE_WIDTH,
+                sourceHeight,
               )
               chunkTextTokens = personalized.tokens
               neuralValue = personalized.fusion.text.trim()

@@ -46,6 +46,13 @@ if (betaNumber === null) {
   const expected = stable.length + 1
   if (stableNumber !== expected) throw new Error(`The next stable release this month must be number ${expected}.`)
 } else {
+  const targetedStableNumber = stable.length + 1
+  if (stableNumber !== targetedStableNumber) {
+    throw new Error(
+      `The next beta must target Stable ${year}.${month}.${targetedStableNumber}; ` +
+      `a prerelease for ${year}.${month}.${stableNumber} would not be newer than the installed Stable channel.`,
+    )
+  }
   const matchingBetas = monthly
     .map((release) => new RegExp(`^v${year}\\.${month}\\.${stableNumber}-beta\\.(\\d+)$`, 'u').exec(release.tag_name))
     .filter(Boolean)

@@ -1,5 +1,15 @@
 # Änderungsverlauf
 
+## 2026.7.2
+
+- Stable- und Beta-Versionen folgen jetzt einem strikt aufsteigenden Zyklus: nach Stable `2026.7.2` beginnen Vorabversionen bei `2026.7.3-beta.1`, sodass eine Stable-Installation beim Wechsel in den Beta-Kanal niemals an einer semantisch älteren Vorabversion hängen bleibt
+- der produktive persönliche Rasterpfad segmentiert eine handgeschriebene Zeile gemeinsam nach vollständigen Buchstabenkörpern, variablen Schnittpositionen, sichtbarer Tinte, persönlichen GlyphenWerk-Prototypen und deutschem beziehungsweise englischem Wortkontext; dadurch werden zwei Nachbarbuchstaben nicht länger als ein breites Zeichen zusammengezogen
+- eine sichere Fusionsschranke übernimmt den persönlichen Rasterkandidaten nur bei enger visueller Übereinstimmung, passender Wortstruktur und höchstens drei Änderungen gegenüber dem allgemeinen Zeilenmodell; Modellvorhersagen werden weiterhin niemals automatisch als Trainingsdaten gespeichert
+- der isolierte NAS-Holdout erkennt `Aufenthalt`, `Auftragsquote`, `Glykose`, `Leistung`, `Mappe`, `Prozessor`, `Rendevous` und `Zertifikat` mit 0 von 71 Zeichenfehlern; als Training dient ausschließlich der separate GlyphenWerk-Export, während alle acht PNG-Dateien nur einmalig und mit undurchsichtigen IDs ausgewertet werden
+- die deutsch-englische Kontextsuche sortiert Wortlisten jetzt in exakt derselben Codepunktreihenfolge wie ihre Binärsuche; Wörter vor und nach Umlauten bleiben dadurch auffindbar und können die visuelle Erkennung zuverlässig absichern
+- der neue Rasterpfad lädt erst bei einer tatsächlich geeigneten persönlichen Einwortzeile, begrenzt die Anzahl zwischengespeicherter Prototypen und verwendet vorallokierte Distanzberechnungen; normale Tastatur-, Mathematik- und untrainierte Erkennungspfade erhalten dadurch keine zusätzliche Startlast
+- die ressourcenbegrenzten Regressionen bestehen mit 0 Byte Swap: verbundene Text- und Mathematikerkennung, 1.217 personalisierte Holdouts, echte IAM-OnDB-Handschrift, Wurzeln, Brüche, Mathe-Löser, Mathe-Korrigierer, signierte Delta-Updates und die Stable-Release-Policy bleiben grün
+
 ## 2026.7.1
 
 - der erste Stable-Release mit Kalender-Versionierung bündelt die vollständig geprüften Beta-1- und Beta-2-Änderungen; bestehende Installationen auf `2.50.3` erhalten dadurch zuerst die neue Stable-/Beta-Kanalwahl und können anschließend in den Einstellungen zuverlässig zwischen beiden Kanälen wechseln

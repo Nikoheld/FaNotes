@@ -19,6 +19,7 @@ try {
     applyMeasuredNeuralWordContext,
     applyNeuralWordContext,
     installNeuralWordContextCandidates,
+    isExtendedNeuralContextWord,
   } = await server.ssrLoadModule('/src/lib/neuralWordContext.ts')
   const {
     hasDecisiveMathLayout,
@@ -27,6 +28,14 @@ try {
   } = await server.ssrLoadModule('/src/lib/recognitionModeSelection.ts')
   const { BASE_CATALOG } = await server.ssrLoadModule('/../src/data/catalog.ts')
   const labelByChar = new Map(BASE_CATALOG.map((label) => [label.char, label]))
+
+  const orderedDictionaryProbe = ['abend', 'test', 'zebra', 'äpfel', 'über']
+  installNeuralWordContextCandidates('de', orderedDictionaryProbe)
+  orderedDictionaryProbe.forEach((word) => assert.equal(
+    isExtendedNeuralContextWord(word, 'de'),
+    true,
+    `Die Binärsuche muss ${word} auch über die Umlautgrenze hinweg im exakt gleich sortierten Index finden.`,
+  ))
 
   const token = (char, confidence, alternatives, index, bbox = [0.05 + index * 0.055, 0.2, 0.05, 0.1]) => {
     const label = labelByChar.get(char)

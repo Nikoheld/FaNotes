@@ -172,6 +172,9 @@ export function GlyphenWerkWorkspace({ activeView, appearance, onClose, onViewCh
         resources,
         neural,
         message.language,
+        false,
+        900,
+        560,
       )
       respond({
         text: personalized.fusion.text.slice(0, 4_000),

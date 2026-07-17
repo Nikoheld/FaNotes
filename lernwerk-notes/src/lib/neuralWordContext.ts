@@ -36,19 +36,27 @@ export const installNeuralWordContextCandidates = (
     else byLength.set(length, [word])
   })
   byLength.forEach((bucket) => {
-    (bucket as string[]).sort((first, second) => first.localeCompare(second, language))
+    // `sortedIncludes` below performs a code-unit binary search. Keep the
+    // index in that exact order; locale collation (notably around umlauts)
+    // produces a different sequence and makes valid dictionary entries
+    // intermittently unreachable.
+    (bucket as string[]).sort((first, second) => first < second ? -1 : first > second ? 1 : 0)
   })
   EXTENDED_WORDS[language] = byLength
 }
 
-const sortedIncludes = (words: readonly string[], source: string, language: RecognitionLanguage) => {
+const sortedIncludes = (words: readonly string[], source: string) => {
   let low = 0
   let high = words.length - 1
   while (low <= high) {
     const middle = (low + high) >>> 1
     const value = words[middle]
     if (value === source) return true
-    if (value.localeCompare(source, language) < 0) low = middle + 1
+    // The candidate resource is validated and stored in JavaScript's stable
+    // code-unit order. A locale-aware comparison uses a different collation
+    // (especially around umlauts) and therefore invalidates binary search for
+    // otherwise ordinary words elsewhere in the list.
+    if (value < source) low = middle + 1
     else high = middle - 1
   }
   return false
@@ -59,7 +67,7 @@ export const isExtendedNeuralContextWord = (
   language: RecognitionLanguage,
 ) => {
   const words = EXTENDED_WORDS[language]?.get(Array.from(source).length)
-  return Boolean(words && sortedIncludes(words, source, language))
+  return Boolean(words && sortedIncludes(words, source))
 }
 
 export const nearestNeuralWordContextCandidates = (
