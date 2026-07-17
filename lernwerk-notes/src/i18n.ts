@@ -162,8 +162,10 @@ function translateCore(source: string): string {
   if (closeNamed) return `Close ${closeNamed[1]}`
   const canvasWith = /^Zeichenfläche mit (.+)$/u.exec(source)
   if (canvasWith) return `Canvas with ${canvasWith[1]}`
-  const currentVersion = /^(FaNotes(?: Web)? [\d.]+) ist aktuell$/u.exec(source)
+  const currentVersion = /^(FaNotes(?: Web)? \d+(?:\.\d+){2}(?:-beta\.\d+)?) ist aktuell$/u.exec(source)
   if (currentVersion) return `${currentVersion[1]} is up to date`
+  const availableVersion = /^(FaNotes(?: Web)? \d+(?:\.\d+){2}(?:-beta\.\d+)?) ist verfügbar$/u.exec(source)
+  if (availableVersion) return `${availableVersion[1]} is available`
   const learnedCorrection = /^Korrektur sofort gelernt: (.+)$/u.exec(source)
   if (learnedCorrection) return `Correction learned immediately: ${learnedCorrection[1]}`
   const localAiStatus = /^(.+) verarbeitet die Notiz über (.+)$/u.exec(source)

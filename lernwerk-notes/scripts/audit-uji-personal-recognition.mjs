@@ -108,7 +108,35 @@ try {
   const encoded = /<pre id="result">([\s\S]*?)<\/pre>/u.exec(stdout)?.[1]
   assert.ok(encoded, `Kein UJI-Ergebnis: ${stdout.slice(-1800)}`)
   const result = JSON.parse(encoded.replaceAll('&quot;', '"').replaceAll('&amp;', '&'))
-  console.log(JSON.stringify(result, null, 2))
+  console.log(JSON.stringify(process.env.FANOTES_UJI_AUDIT_SUMMARY === '1' ? {
+    datasetSamples: result.datasetSamples,
+    datasetWriters: result.datasetWriters,
+    personal: {
+      writer: result.personal.writer,
+      trainingSamples: result.personal.trainingSamples,
+      samples: result.personal.samples,
+      buildMs: result.personal.buildMs,
+      accuracy: result.personal.accuracy,
+      unhintedAccuracy: result.personal.unhintedAccuracy,
+      caseNormalizedAccuracy: result.personal.caseNormalizedAccuracy,
+      top3Accuracy: result.personal.top3Accuracy,
+      top8Accuracy: result.personal.top8Accuracy,
+      topConfusions: result.personal.topConfusions,
+    },
+    writerIndependent: {
+      trainingWriters: result.writerIndependent.trainingWriters,
+      holdoutWriter: result.writerIndependent.holdoutWriter,
+      trainingSamples: result.writerIndependent.trainingSamples,
+      samples: result.writerIndependent.samples,
+      buildMs: result.writerIndependent.buildMs,
+      accuracy: result.writerIndependent.accuracy,
+      unhintedAccuracy: result.writerIndependent.unhintedAccuracy,
+      caseNormalizedAccuracy: result.writerIndependent.caseNormalizedAccuracy,
+      top3Accuracy: result.writerIndependent.top3Accuracy,
+      top8Accuracy: result.writerIndependent.top8Accuracy,
+      topConfusions: result.writerIndependent.topConfusions,
+    },
+  } : result, null, 2))
   if (process.env.FANOTES_UJI_AUDIT_STRICT === '1') {
     assert.ok(result.personal.accuracy >= 90, `Sitzungsübergreifende Personalisierung ist zu schwach: ${JSON.stringify(result.personal)}`)
     assert.ok(result.writerIndependent.accuracy >= 90, `Der 992-Beispiele-Holdout ist zu schwach: ${JSON.stringify(result.writerIndependent)}`)

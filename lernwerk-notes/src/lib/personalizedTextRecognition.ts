@@ -634,15 +634,42 @@ const chooseAlignedCharacter = (
   const personalizedScore = personal.personalConfidence + supportBonus
   const neuralCandidate = tokenCandidates(token).find((candidate) => candidate.char === neural.char)
   const neuralScore = neural.confidence + Math.min(12, (neuralCandidate?.confidence ?? 0) * 0.12)
+  const visualCharacter = token.visualLabelId
+    ? token.alternatives.find((candidate) => candidate.labelId === token.visualLabelId)?.char ?? token.char
+    : token.char
+  const locale = language === 'de' ? 'de-CH' : 'en-US'
+  const caseOnlyDifference = (
+    personal.char !== neural.char &&
+    personal.char.toLocaleLowerCase(locale) === neural.char.toLocaleLowerCase(locale)
+  )
+  const decisiveSelectedOneShot = (
+    personal.personalSupport >= 1 &&
+    personal.char === token.char &&
+    personal.char === visualCharacter &&
+    !caseOnlyDifference &&
+    personal.personalConfidence >= 18 &&
+    personal.confidence >= 68 &&
+    // One example may repair an uncertain line model, but never discard a
+    // near-certain 96% sequence decision by itself. This keeps fast personal
+    // learning for real holdout errors (normally around 70–85%) without
+    // teaching a deliberately mislabeled shape as ground truth.
+    neural.confidence <= 91 &&
+    personal.confidence >= neural.confidence - 2 &&
+    personal.confidence >= (neuralCandidate?.confidence ?? 0) + 10
+  )
   const personalizedWins = (
     personal.personalSupport >= 8 && personal.personalConfidence >= 42
   ) || (
     personal.personalSupport >= 3 && personalizedScore >= neuralScore - 4
   ) || (
     personal.personalConfidence >= 78 && personalizedScore >= neuralScore - 12
-  )
+  ) || decisiveSelectedOneShot
   return personalizedWins
-    ? { char: personal.char, source: 'personalized' as const, confidence: personal.personalConfidence }
+    ? {
+        char: personal.char,
+        source: 'personalized' as const,
+        confidence: Math.max(personal.confidence, personal.personalConfidence),
+      }
     : { char: neural.char, source: 'neural' as const, confidence: neural.confidence }
 }
 
@@ -741,6 +768,15 @@ export const personalizedTextFusionSelectionScore = (
         !/[\p{L}\s.,;:!?"'()[\]{}\-]/u.test(character)
       )).length
     : 0
+  const lexicalKnownWordRatio = knownWordRatio(fusion.text, language)
+  const cleanKnownWordRatio = unexpectedTextCharacters > 0
+    ? lexicalKnownWordRatio * clamp(
+        1 - unexpectedTextCharacters / Math.max(1, fusedCharacterCount) * 4,
+      )
+    : lexicalKnownWordRatio
+  const lengthAwareKnownWordRatio = lengthDifference > 0
+    ? cleanKnownWordRatio * clamp(personalRatio - classicalRatio + 0.2)
+    : cleanKnownWordRatio
   const textDistanceFromNeural = wordDistance(
     fusion.text.toLocaleLowerCase(language === 'de' ? 'de-CH' : 'en-US'),
     neuralResult.text.toLocaleLowerCase(language === 'de' ? 'de-CH' : 'en-US'),
@@ -751,12 +787,12 @@ export const personalizedTextFusionSelectionScore = (
     fusion.confidence / 100
     + personalRatio * 1.32
     + classicalRatio * 0.12
-    + knownWordRatio(fusion.text, language) * 0.82
-    - lengthDifference * 0.18 * personalLengthProtection
+    + lengthAwareKnownWordRatio * 0.82
+    - lengthDifference * 0.24 * personalLengthProtection
     // A plausible substring must not hide obviously spurious OCR debris.
     // This only activates when the neural line itself is ordinary language,
     // so real mixed text such as “x_1” or “Version 2” remains untouched.
-    - unexpectedTextCharacters / Math.max(1, fusedCharacterCount) * 0.54
+    - unexpectedTextCharacters / Math.max(1, fusedCharacterCount) * 0.72
     - unsupportedChanges * 0.24
   )
 }
@@ -1150,6 +1186,19 @@ export const fusePersonalizedTextRecognition = (
     classicalNeuralDistance >= 2 &&
     classicalConfidence >= (observedClassicalRatio >= 0.6 ? 0.56 : 0.7)
   )
+  const visuallySupportedUnknownWord = (
+    /^\p{Ll}{4,}$/u.test(sequenceClassicalText) &&
+    !lexicons[language].has(normalizedClassicalSequence) &&
+    neuralIsSingleWord &&
+    neuralRatio < 0.5 &&
+    observedClassicalRatio >= 0.84 &&
+    trainedClassicalRatio >= 0.84 &&
+    visuallyConfirmedClassicalRatio >= 0.5 &&
+    classicalConfidence >= 0.66 &&
+    comparableSequenceLengths &&
+    Math.abs(classicalVisibleCharacters - neuralVisibleCharacters) <= 1 &&
+    classicalNeuralDistance >= 2
+  )
   let text = contextualized
   let selectedClassicalSequence = false
   // A language-model correction may improve an uncertain geometric sequence,
@@ -1157,7 +1206,7 @@ export const fusePersonalizedTextRecognition = (
   // repeated GlyphenWerk samples. This is especially important once many
   // classes are trained: every alternative then has "personal" support, while
   // only the winning token still carries the correct visual ordering.
-  if (visuallySupportedProperName) {
+  if (visuallySupportedProperName || visuallySupportedUnknownWord) {
     // Neural word decoders are intentionally biased towards frequent words.
     // When a complete, equally long, visibly capitalized unknown word differs
     // in multiple positions, that prior is exactly wrong: it can turn a name
@@ -1324,7 +1373,11 @@ export const fusePersonalizedTextRecognition = (
     selectedCharacters.length === measuredCharacterCount &&
     neuralCharactersForSupport.length !== measuredCharacterCount
   )
-  if (selectedMatchesIndependentCount) unsupportedChanges = 0
+  if (
+    selectedMatchesIndependentCount ||
+    visuallySupportedProperName ||
+    visuallySupportedUnknownWord
+  ) unsupportedChanges = 0
   const weakExtendedDictionaryCorrection = (
     selectedCompact !== neuralCompact &&
     /^\p{L}{2,24}$/u.test(selectedCompact) &&
@@ -1333,7 +1386,7 @@ export const fusePersonalizedTextRecognition = (
     repeatedClassicalRatio < 0.5
   )
   if (
-    !visuallySupportedProperName && (weakExtendedDictionaryCorrection || (
+    !visuallySupportedProperName && !visuallySupportedUnknownWord && (weakExtendedDictionaryCorrection || (
       unsupportedChanges > 0 &&
       selectedCharacters.length === neuralCharactersForSupport.length &&
       neuralRatio >= 0.99 &&

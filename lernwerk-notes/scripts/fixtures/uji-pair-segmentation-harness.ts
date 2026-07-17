@@ -88,6 +88,89 @@ const pairStrokes = (
   return [...left.strokes, ...right.strokes]
 }
 
+const strokePathLength = (stroke: Stroke) => stroke.points.slice(1).reduce((sum, point, index) => {
+  const previous = stroke.points[index]
+  return sum + Math.hypot(
+    (point.x - previous.x) * SOURCE_WIDTH,
+    (point.y - previous.y) * SOURCE_HEIGHT,
+  )
+}, 0)
+
+/**
+ * Joins the dominant body stroke of two real UJI glyphs into one uninterrupted
+ * pen-down path. All remaining strokes are deliberately delayed until after
+ * the complete body, matching writers who add dots/crossbars at word end.
+ */
+const connectedPairStrokes = (
+  first: UjiPairRecord,
+  second: UjiPairRecord,
+  gapPixels = -3,
+) => {
+  const left = positionGlyph(first, 0.18, 0)
+  const right = positionGlyph(second, 0.18 + left.width + gapPixels / SOURCE_WIDTH, left.nextTime)
+  const primaryIndex = (strokes: Stroke[]) => strokes
+    .map((stroke, index) => ({ index, length: strokePathLength(stroke) }))
+    .sort((a, b) => b.length - a.length)[0]?.index ?? 0
+  const leftPrimaryIndex = primaryIndex(left.strokes)
+  const rightPrimaryIndex = primaryIndex(right.strokes)
+  const orient = (stroke: Stroke, edge: 'left' | 'right') => {
+    const points = stroke.points.map((point) => ({ ...point }))
+    if (points.length < 2) return points
+    const firstPoint = points[0]
+    const lastPoint = points.at(-1)!
+    const reverse = edge === 'right'
+      ? lastPoint.x < firstPoint.x
+      : firstPoint.x > lastPoint.x
+    return reverse ? points.reverse() : points
+  }
+  const leftBody = orient(left.strokes[leftPrimaryIndex], 'right')
+  const rightBody = orient(right.strokes[rightPrimaryIndex], 'left')
+  const connector = {
+    ...leftBody.at(-1)!,
+    x: (leftBody.at(-1)!.x + rightBody[0].x) / 2,
+    y: (leftBody.at(-1)!.y + rightBody[0].y) / 2,
+  }
+  let time = 0
+  const joinedBody: Stroke = {
+    baseWidth: 3.7,
+    pressureEnabled: false,
+    points: [...leftBody, connector, ...rightBody].map((point) => ({ ...point, t: time++ })),
+  }
+  const delayed = [
+    ...left.strokes.flatMap((stroke, index) => index === leftPrimaryIndex ? [] : [{ owner: 0, stroke }]),
+    ...right.strokes.flatMap((stroke, index) => index === rightPrimaryIndex ? [] : [{ owner: 1, stroke }]),
+  ].map(({ owner, stroke }) => {
+    time += 7
+    const delayedStroke = {
+      ...stroke,
+      points: stroke.points.map((point) => ({ ...point, t: time++ })),
+    }
+    return { owner, stroke: delayedStroke }
+  })
+  return {
+    strokes: [joinedBody, ...delayed.map((entry) => entry.stroke)],
+    delayed,
+    joinX: (0.18 + left.width + 0.18 + left.width + gapPixels / SOURCE_WIDTH) / 2,
+  }
+}
+
+const completeStrokePart = (
+  parts: Array<{ strokes: Stroke[] }>,
+  reference: Stroke,
+) => {
+  const referenceTimes = reference.points.map((point) => point.t)
+  const matches = parts.flatMap((part, partIndex) => part.strokes.flatMap((stroke) => (
+    stroke.points.some((point) => referenceTimes.includes(point.t))
+      ? [{ partIndex, stroke }]
+      : []
+  )))
+  return matches.length === 1 &&
+    matches[0].stroke.points.length === reference.points.length &&
+    matches[0].stroke.points.every((point, index) => point.t === referenceTimes[index])
+    ? matches[0].partIndex
+    : null
+}
+
 type PairResult = {
   writer: string
   expected: string
@@ -135,6 +218,37 @@ export const runUjiPairSegmentationAudit = (records: UjiPairRecord[]) => {
   const offsets = [1, 7, 19]
   const gaps = [-4, 0, 1]
   const results: PairResult[] = []
+  const connectedResults: Array<{
+    writer: string
+    expected: string
+    strokeCounts: [number, number]
+    pointCount: number
+    physicalAspect: number
+    joinX: number
+    longestBodySegments: Array<{ x: number; length: number; deltaX: number }>
+    baseClusters: number
+    detachedConnectorRanges: [number, number][]
+    hypothesisSizes: number[]
+    cutCandidates: ReturnType<typeof textCutCandidatesForTests>
+    hypotheses: number
+    hasTwoPartPath: boolean
+    hasUnfragmentedPath: boolean
+    hasOwnerCorrectPath: boolean
+    delayedStrokeBounds: Array<{
+      owner: number
+      minX: number
+      maxX: number
+      minY: number
+      maxY: number
+      endpointSpan: number
+      horizontalTravel: number
+      verticalTravel: number
+    }>
+    hypothesisAllocations: Array<{
+      parts: Array<[number, number]>
+      delayedParts: Array<number | null>
+    }>
+  }> = []
 
   writers.forEach((writer) => {
     const lookup = new Map(records
@@ -168,6 +282,85 @@ export const runUjiPairSegmentationAudit = (records: UjiPairRecord[]) => {
               clusters.length === 1 && hypothesisSizes.includes(2)
             ),
           })
+        })
+
+        const connected = connectedPairStrokes(first, second)
+        const connectedClusters = segmentStrokes(connected.strokes, 'text')
+        const connectedPoints = connected.strokes.flatMap((stroke) => stroke.points)
+        const connectedMinX = Math.min(...connectedPoints.map((point) => point.x))
+        const connectedMaxX = Math.max(...connectedPoints.map((point) => point.x))
+        const connectedMinY = Math.min(...connectedPoints.map((point) => point.y))
+        const connectedMaxY = Math.max(...connectedPoints.map((point) => point.y))
+        // Production recognition adds the same bounded whole-line path when
+        // a dot/crossbar temporarily forms its own geometric cluster. Audit
+        // that real path rather than declaring every detached i-dot a second
+        // character before segmentation has even run.
+        const combinedCluster = {
+          strokes: connected.strokes,
+          minX: connectedMinX,
+          maxX: connectedMaxX,
+          minY: connectedMinY,
+          maxY: connectedMaxY,
+        }
+        const allConnectedHypotheses = connectedTextSegmentationHypotheses(combinedCluster, 2)
+        const twoPartHypotheses = allConnectedHypotheses
+          .filter((hypothesis) => hypothesis.length === 2)
+        const hasUnfragmentedPath = twoPartHypotheses.some((hypothesis) => (
+          connected.delayed.every(({ stroke }) => completeStrokePart(hypothesis, stroke) !== null)
+        ))
+        const hasOwnerCorrectPath = twoPartHypotheses.some((hypothesis) => (
+          connected.delayed.every(({ owner, stroke }) => completeStrokePart(hypothesis, stroke) === owner)
+        ))
+        connectedResults.push({
+          writer,
+          expected: `${firstChar}${secondChar}`,
+          strokeCounts: [first.strokes.length, second.strokes.length],
+          pointCount: connectedPoints.length,
+          physicalAspect: Math.round(
+            (connectedMaxX - connectedMinX) * SOURCE_WIDTH /
+            Math.max(1, (connectedMaxY - connectedMinY) * SOURCE_HEIGHT) * 1_000,
+          ) / 1_000,
+          joinX: connected.joinX,
+          longestBodySegments: connected.strokes[0].points.slice(1).map((point, index) => {
+            const previous = connected.strokes[0].points[index]
+            return {
+              x: (previous.x + point.x) / 2,
+              length: Math.hypot(
+                (point.x - previous.x) * SOURCE_WIDTH,
+                (point.y - previous.y) * SOURCE_HEIGHT,
+              ),
+              deltaX: (point.x - previous.x) * SOURCE_WIDTH,
+            }
+          }).sort((a, b) => b.length - a.length).slice(0, 6),
+          baseClusters: connectedClusters.length,
+          detachedConnectorRanges: connectedClusters[0]?.detachedTextConnectorRanges ?? [],
+          hypothesisSizes: [...new Set(allConnectedHypotheses.map((hypothesis) => hypothesis.length))],
+          cutCandidates: textCutCandidatesForTests(connected.strokes),
+          hypotheses: twoPartHypotheses.length,
+          hasTwoPartPath: twoPartHypotheses.length > 0,
+          hasUnfragmentedPath,
+          hasOwnerCorrectPath,
+          delayedStrokeBounds: connected.delayed.map(({ owner, stroke }) => {
+            const points = stroke.points
+            return {
+              owner,
+              minX: Math.min(...points.map((point) => point.x)),
+              maxX: Math.max(...points.map((point) => point.x)),
+              minY: Math.min(...points.map((point) => point.y)),
+              maxY: Math.max(...points.map((point) => point.y)),
+              endpointSpan: Math.abs(points.at(-1)!.x - points[0].x) * SOURCE_WIDTH,
+              horizontalTravel: points.slice(1).reduce((sum, point, index) => (
+                sum + Math.abs(point.x - points[index].x) * SOURCE_WIDTH
+              ), 0),
+              verticalTravel: points.slice(1).reduce((sum, point, index) => (
+                sum + Math.abs(point.y - points[index].y) * SOURCE_HEIGHT
+              ), 0),
+            }
+          }),
+          hypothesisAllocations: twoPartHypotheses.map((hypothesis) => ({
+            parts: hypothesis.map((part) => [part.minX, part.maxX]),
+            delayedParts: connected.delayed.map(({ stroke }) => completeStrokePart(hypothesis, stroke)),
+          })),
         })
       })
     })
@@ -203,6 +396,12 @@ export const runUjiPairSegmentationAudit = (records: UjiPairRecord[]) => {
   unsafeSingles.forEach((entry) => (
     unsafeByCharacter.set(entry.char, (unsafeByCharacter.get(entry.char) ?? 0) + 1)
   ))
+  const connectedFailures = connectedResults.filter((entry) => !entry.hasTwoPartPath)
+  const connectedFragmentationFailures = connectedResults.filter((entry) => !entry.hasUnfragmentedPath)
+  const connectedOwnershipFailures = connectedResults.filter((entry) => !entry.hasOwnerCorrectPath)
+  const percent = (passed: number, total: number) => (
+    Math.round(passed / Math.max(1, total) * 10_000) / 100
+  )
 
   return {
     writers: writers.length,
@@ -215,6 +414,24 @@ export const runUjiPairSegmentationAudit = (records: UjiPairRecord[]) => {
         .sort((first, second) => second[1] - first[1] || first[0].localeCompare(second[0]))
         .slice(0, 30),
       failures: unsafeSingles.slice(0, 60),
+    },
+    connected: {
+      pairs: connectedResults.length,
+      available: connectedResults.length - connectedFailures.length,
+      availability: percent(connectedResults.length - connectedFailures.length, connectedResults.length),
+      unfragmented: connectedResults.length - connectedFragmentationFailures.length,
+      unfragmentedRate: percent(
+        connectedResults.length - connectedFragmentationFailures.length,
+        connectedResults.length,
+      ),
+      ownerCorrect: connectedResults.length - connectedOwnershipFailures.length,
+      ownerCorrectRate: percent(
+        connectedResults.length - connectedOwnershipFailures.length,
+        connectedResults.length,
+      ),
+      failures: connectedFailures.slice(0, 60),
+      fragmentationFailures: connectedFragmentationFailures.slice(0, 60),
+      ownershipFailures: connectedOwnershipFailures.slice(0, 60),
     },
     ...summarize(results),
   }

@@ -92,6 +92,8 @@ export type RecognitionModelEntry = FeatureVector & {
   sessionId: string
   labelId: string
   strokeCount: number
+  /** Physical width/height before the glyph crop is normalized. */
+  physicalAspect: number
   geometry: StrokeGeometry
   variants: FeatureVector[]
   standard: boolean
@@ -104,6 +106,15 @@ export type RecognitionLabelStats = {
   trustedCount: number
   radius: number
   reliability: number
+  /** Robust personal width/height prior in logarithmic space. */
+  aspectMedian: number
+  aspectSpread: number
+}
+
+type RecognitionAspectStats = {
+  median: number
+  spread: number
+  personal: boolean
 }
 
 export type RecognitionModel = RecognitionModelEntry[] & {
@@ -112,6 +123,7 @@ export type RecognitionModel = RecognitionModelEntry[] & {
   prototypes: Map<string, RecognitionModelEntry>
   prototypeSets: Map<string, RecognitionModelEntry[]>
   labelStats: Map<string, RecognitionLabelStats>
+  aspectStats: Map<string, RecognitionAspectStats>
   estimatedAccuracy: number | null
   evaluatedSamples: number
 }
@@ -203,6 +215,7 @@ export const createEmptyRecognitionModel = (): RecognitionModel => {
   model.prototypes = new Map()
   model.prototypeSets = new Map()
   model.labelStats = new Map()
+  model.aspectStats = new Map()
   model.estimatedAccuracy = null
   model.evaluatedSamples = 0
   return model
@@ -469,6 +482,26 @@ const geometryFromStrokes = (strokes: Stroke[]): StrokeGeometry => {
   }
 }
 
+/**
+ * Keeps the original writing proportions that disappear when every glyph is
+ * rendered into the same square classifier crop. Two adjacent letters can
+ * look deceptively similar to one trained glyph after that normalization;
+ * their physical aspect ratio still exposes the accidental merge.
+ */
+const physicalInkAspect = (strokes: Stroke[]) => {
+  const points = strokes.flatMap((stroke) => stroke.points)
+  if (!points.length) return 1
+  const width = (
+    Math.max(...points.map((point) => point.x)) -
+    Math.min(...points.map((point) => point.x))
+  ) * SOURCE_WIDTH
+  const height = (
+    Math.max(...points.map((point) => point.y)) -
+    Math.min(...points.map((point) => point.y))
+  ) * SOURCE_HEIGHT
+  return clamp(width / Math.max(1, height), 0.035, 12)
+}
+
 const featureFromCanvas = (source: HTMLCanvasElement): FeatureVector => {
   const canvas = document.createElement('canvas')
   canvas.width = ANALYSIS_SIZE
@@ -684,6 +717,7 @@ export const buildRecognitionModel = async (samples: Sample[]): Promise<Recognit
         sessionId: sample.sessionId,
         labelId: sample.labelId,
         strokeCount: sample.strokeCount,
+        physicalAspect: physicalInkAspect(sample.strokes),
         geometry: geometryFromStrokes(sample.strokes),
         variants: (labelTotals.get(sample.labelId) ?? 0) <= 4 ? augmented : [],
         standard,
@@ -732,6 +766,7 @@ export const buildRecognitionModel = async (samples: Sample[]): Promise<Recognit
   model.prototypeSets = buildClassPrototypeSets(entries, model.weights)
   model.classifierEntries = buildClassifierEntries(entries, model.prototypeSets)
   model.labelStats = buildLabelStats(personalEntries, model.prototypeSets, model.weights)
+  model.aspectStats = buildAspectStats(entries)
   const evaluation = modelEvaluation ?? estimateModelAccuracy(personalEntries, model.weights)
   model.estimatedAccuracy = evaluation.accuracy
   model.evaluatedSamples = evaluation.count
@@ -836,6 +871,34 @@ const isHorizontalBarStroke = (bounds: ReturnType<typeof strokeBounds>) => {
   return width >= 0.065 && width >= height * 3.2
 }
 
+/** Bounding-box aspect alone is insufficient for crossbars: a complete
+ * cursive word is often wider than it is tall as well. A genuine detached
+ * bar has predominantly horizontal travel and nearly spans its own box. */
+const resemblesStraightHorizontalAccessoryStroke = (
+  stroke: Stroke,
+  bounds = strokeBounds(stroke),
+) => {
+  if (stroke.points.length < 2) return false
+  const width = (bounds.maxX - bounds.minX) * SOURCE_WIDTH
+  const height = (bounds.maxY - bounds.minY) * SOURCE_HEIGHT
+  if (width < 8 || width / Math.max(1, height) < 1.75) return false
+  let horizontalTravel = 0
+  let verticalTravel = 0
+  stroke.points.slice(1).forEach((point, index) => {
+    horizontalTravel += Math.abs(point.x - stroke.points[index].x) * SOURCE_WIDTH
+    verticalTravel += Math.abs(point.y - stroke.points[index].y) * SOURCE_HEIGHT
+  })
+  const endpointSpan = Math.abs(stroke.points.at(-1)!.x - stroke.points[0].x) * SOURCE_WIDTH
+  return (
+    // Some writers start a bar near its centre, sweep to one edge and then
+    // finish at the other. Its endpoints therefore need not span the full
+    // box even though the trajectory remains overwhelmingly horizontal.
+    endpointSpan >= width * 0.34 &&
+    horizontalTravel <= width * 2.8 + 10 &&
+    verticalTravel <= Math.max(14, horizontalTravel * 0.42)
+  )
+}
+
 const combinedBounds = (
   first: ReturnType<typeof strokeBounds>,
   second: ReturnType<typeof strokeBounds>,
@@ -887,6 +950,154 @@ const splitTextCluster = (cluster: StrokeCluster, boundaries: number[]) => {
     const index = bandFor(x)
     return index < 0 ? cuts.length : index
   }
+  const strokePathLength = (stroke: Stroke) => stroke.points.slice(1).reduce((sum, point, index) => (
+    sum + Math.hypot(
+      (point.x - stroke.points[index].x) * SOURCE_WIDTH,
+      (point.y - stroke.points[index].y) * SOURCE_HEIGHT,
+    )
+  ), 0)
+  const strokeStartTime = (stroke: Stroke) => Math.min(
+    ...stroke.points.map((point) => Number.isFinite(point.t) ? point.t : Number.MAX_SAFE_INTEGER),
+  )
+  const primaryContinuousStroke = [...cluster.strokes]
+    .filter((stroke) => stroke.points.length >= 2)
+    .filter((stroke) => {
+      if (!resemblesStraightHorizontalAccessoryStroke(stroke)) return true
+      const bounds = strokeBounds(stroke)
+      const strokeHeight = (bounds.maxY - bounds.minY) * SOURCE_HEIGHT
+      const clusterHeight = Math.max(1, (cluster.maxY - cluster.minY) * SOURCE_HEIGHT)
+      // A wide two-letter trajectory may have strong horizontal progress but
+      // still spans the full writing height. Only genuinely shallow bars are
+      // excluded from primary-body selection.
+      return strokeHeight >= Math.max(22, clusterHeight * 0.42)
+    })
+    .sort((first, second) => (
+      strokeStartTime(first) - strokeStartTime(second) ||
+      (strokeBounds(second).maxX - strokeBounds(second).minX) -
+        (strokeBounds(first).maxX - strokeBounds(first).minX) ||
+      strokePathLength(second) - strokePathLength(first)
+    ))[0]
+
+  /**
+   * A crossbar or dot can be drawn after an entire cursive word. In that
+   * case its body is one long stroke and its global bounding box no longer
+   * resembles a narrow stem. Find the *local* stem/contact instead. This
+   * keeps the accessory stroke indivisible even for a candidate cut passing
+   * through it; the candidate may still lose on recognition score, but it
+   * can never manufacture an extra glyph from half a T bar.
+   */
+  const localAccessoryOwnerBand = (
+    accessoryStroke: Stroke,
+    accessoryBounds: ReturnType<typeof strokeBounds>,
+  ) => {
+    const width = (accessoryBounds.maxX - accessoryBounds.minX) * SOURCE_WIDTH
+    const height = (accessoryBounds.maxY - accessoryBounds.minY) * SOURCE_HEIGHT
+    const clusterHeight = Math.max(1, (cluster.maxY - cluster.minY) * SOURCE_HEIGHT)
+    const horizontal = resemblesStraightHorizontalAccessoryStroke(accessoryStroke, accessoryBounds) &&
+      width >= 8 && width <= Math.max(160, clusterHeight * 2.6)
+    const compact = Math.max(width, height) <= Math.max(66, clusterHeight * 0.56) &&
+      width / Math.max(1, height) <= 2.8
+    if (!horizontal && !compact) return null
+
+    const centerX = (accessoryBounds.minX + accessoryBounds.maxX) / 2
+    const centerY = (accessoryBounds.minY + accessoryBounds.maxY) / 2
+    const candidates: Array<{ band: number; score: number }> = []
+    cluster.strokes.forEach((bodyStroke) => {
+      if (bodyStroke === accessoryStroke || bodyStroke.points.length < 2) return
+      bodyStroke.points.slice(1).forEach((second, pointIndex) => {
+        const first = bodyStroke.points[pointIndex]
+        const deltaX = (second.x - first.x) * SOURCE_WIDTH
+        const deltaY = (second.y - first.y) * SOURCE_HEIGHT
+        const segmentHeight = Math.abs(deltaY)
+        const segmentWidth = Math.abs(deltaX)
+        if (horizontal) {
+          // A t/T crossbar is owned by a locally tall stroke that actually
+          // reaches its y-level. Merely lying underneath the bar is not
+          // enough and would let a following round e steal an overhang.
+          const minimumY = Math.min(first.y, second.y) - 5 / SOURCE_HEIGHT
+          const maximumY = Math.max(first.y, second.y) + 5 / SOURCE_HEIGHT
+          if (
+            segmentHeight < Math.max(9, clusterHeight * 0.075) ||
+            segmentHeight / Math.max(1, segmentWidth) < 0.72 ||
+            centerY < minimumY || centerY > maximumY
+          ) return
+          const progress = Math.abs(second.y - first.y) < Number.EPSILON
+            ? 0.5
+            : clamp((centerY - first.y) / (second.y - first.y))
+          const intersectionX = first.x + (second.x - first.x) * progress
+          const horizontalGap = Math.max(
+            0,
+            accessoryBounds.minX - intersectionX,
+            intersectionX - accessoryBounds.maxX,
+          ) * SOURCE_WIDTH
+          if (horizontalGap > Math.max(8, width * 0.16)) return
+          candidates.push({
+            band: normalizedBand(intersectionX),
+            score: horizontalGap * 2.4 + segmentWidth * 0.08 - segmentHeight * 0.16,
+          })
+          return
+        }
+
+        // Detached i/j/umlaut dots sit above their body. Attribute a dot to
+        // the closest locally lower segment, while rejecting neighbouring
+        // crossbars and body-sized loops through the compactness guard above.
+        const segmentCenterX = (first.x + second.x) / 2
+        const horizontalDistance = Math.abs(segmentCenterX - centerX) * SOURCE_WIDTH
+        const segmentTop = Math.min(first.y, second.y)
+        const verticalGap = Math.max(0, segmentTop - accessoryBounds.maxY) * SOURCE_HEIGHT
+        if (
+          horizontalDistance > Math.max(34, clusterHeight * 0.42) ||
+          verticalGap > Math.max(90, clusterHeight * 1.15)
+        ) return
+        candidates.push({
+          band: normalizedBand(segmentCenterX),
+          score: horizontalDistance + verticalGap * 0.58 - segmentHeight * 0.035,
+        })
+      })
+    })
+    return candidates.sort((first, second) => first.score - second.score)[0]?.band ?? null
+  }
+
+  /** Keeps a complete pen-lift stroke with its letter when only a tiny
+   * overhang crosses a proposed boundary. This is common for the right arm of
+   * T/W/x and prevents that arm from becoming a separate character. The long
+   * cursive body itself is still split because it carries substantial ink on
+   * both sides of the boundary. */
+  const dominantStrokeOwnerBand = (
+    stroke: Stroke,
+    bounds: ReturnType<typeof strokeBounds>,
+  ) => {
+    if (stroke.points.length < 2 || cuts.length === 0) return null
+    const weights = groups.map(() => 0)
+    stroke.points.slice(1).forEach((second, pointIndex) => {
+      const first = stroke.points[pointIndex]
+      const deltaX = (second.x - first.x) * SOURCE_WIDTH
+      const deltaY = (second.y - first.y) * SOURCE_HEIGHT
+      const length = Math.hypot(deltaX, deltaY)
+      const steps = Math.max(1, Math.ceil(Math.max(Math.abs(deltaX), Math.abs(deltaY)) / 3))
+      for (let step = 0; step < steps; step += 1) {
+        const progress = (step + 0.5) / steps
+        weights[normalizedBand(first.x + (second.x - first.x) * progress)] += length / steps
+      }
+    })
+    const total = weights.reduce((sum, weight) => sum + weight, 0)
+    if (total <= Number.EPSILON) return null
+    const dominant = weights
+      .map((weight, band) => ({ band, weight }))
+      .sort((first, second) => second.weight - first.weight)[0]
+    if (!dominant || dominant.weight / total < 0.66) return null
+    const lowerBoundary = dominant.band === 0 ? -Infinity : cuts[dominant.band - 1]
+    const upperBoundary = dominant.band === cuts.length ? Infinity : cuts[dominant.band]
+    const leftOverhang = Number.isFinite(lowerBoundary)
+      ? Math.max(0, lowerBoundary - bounds.minX) * SOURCE_WIDTH
+      : 0
+    const rightOverhang = Number.isFinite(upperBoundary)
+      ? Math.max(0, bounds.maxX - upperBoundary) * SOURCE_WIDTH
+      : 0
+    const clusterHeight = Math.max(1, (cluster.maxY - cluster.minY) * SOURCE_HEIGHT)
+    if (Math.max(leftOverhang, rightOverhang) > Math.max(18, clusterHeight * 0.22)) return null
+    return dominant.band
+  }
 
   cluster.strokes.forEach((stroke) => {
     const bounds = strokeBounds(stroke)
@@ -895,6 +1106,8 @@ const splitTextCluster = (cluster: StrokeCluster, boundaries: number[]) => {
       const crossingWidth = (bounds.maxX - bounds.minX) * SOURCE_WIDTH
       const crossingHeight = (bounds.maxY - bounds.minY) * SOURCE_HEIGHT
       const crossingExtent = Math.max(crossingWidth, crossingHeight)
+      const wholeLineBody = stroke === primaryContinuousStroke &&
+        crossingWidth >= (cluster.maxX - cluster.minX) * SOURCE_WIDTH * 0.68
       const attachedBody = cluster.strokes
         .filter((candidate) => candidate !== stroke && candidate.points.length)
         .map((candidate) => ({
@@ -902,11 +1115,12 @@ const splitTextCluster = (cluster: StrokeCluster, boundaries: number[]) => {
           bounds: strokeBounds(candidate),
         }))
         .filter((candidate) => {
+          if (wholeLineBody) return false
           const candidateWidth = (candidate.bounds.maxX - candidate.bounds.minX) * SOURCE_WIDTH
           const candidateHeight = (candidate.bounds.maxY - candidate.bounds.minY) * SOURCE_HEIGHT
           const candidateExtent = Math.max(candidateWidth, candidateHeight)
           const crossingIsCrossbar = (
-            crossingWidth / Math.max(1, crossingHeight) >= 1.75 &&
+            resemblesStraightHorizontalAccessoryStroke(stroke, bounds) &&
             resemblesTextCrossbarPair(bounds, candidate.bounds)
           )
           const crossingIsDot = (
@@ -917,14 +1131,28 @@ const splitTextCluster = (cluster: StrokeCluster, boundaries: number[]) => {
           return crossingIsCrossbar || crossingIsDot
         })
         .sort((first, second) => {
-          const center = (bounds.minX + bounds.maxX) / 2
-          const firstDistance = Math.abs((first.bounds.minX + first.bounds.maxX) / 2 - center)
-          const secondDistance = Math.abs((second.bounds.minX + second.bounds.maxX) / 2 - center)
-          return firstDistance - secondDistance
+          return textAccessoryAttachmentScore(bounds, first.bounds) -
+            textAccessoryAttachmentScore(bounds, second.bounds)
         })[0]
       if (attachedBody) {
         const bodyCenter = (attachedBody.bounds.minX + attachedBody.bounds.maxX) / 2
         groups[normalizedBand(bodyCenter)].push({
+          ...stroke,
+          points: stroke.points.map((point) => ({ ...point })),
+        })
+        return
+      }
+      const localOwnerBand = wholeLineBody ? null : localAccessoryOwnerBand(stroke, bounds)
+      if (localOwnerBand !== null) {
+        groups[localOwnerBand].push({
+          ...stroke,
+          points: stroke.points.map((point) => ({ ...point })),
+        })
+        return
+      }
+      const dominantOwnerBand = wholeLineBody ? null : dominantStrokeOwnerBand(stroke, bounds)
+      if (dominantOwnerBand !== null) {
+        groups[dominantOwnerBand].push({
           ...stroke,
           points: stroke.points.map((point) => ({ ...point })),
         })
@@ -1087,6 +1315,69 @@ const textCutCandidates = (cluster: StrokeCluster): TextCutCandidate[] => {
     else candidates.push({ x, score, source: 'ink-gap' })
   }
   return candidates.sort((first, second) => first.x - second.x)
+}
+
+/**
+ * Returns only valleys that can leave a complete letter-sized body on both
+ * sides. This does not force a cut; it merely opens a competing hypothesis.
+ * The classifier, the learned personal aspect and the complete word decoder
+ * still decide whether the valley was an inter-letter connector or an inner
+ * passage of a broad single glyph.
+ */
+const strongInternalTextBoundaries = (
+  cluster: StrokeCluster,
+  candidates = textCutCandidates(cluster),
+) => {
+  const physicalHeight = Math.max(1, (cluster.maxY - cluster.minY) * SOURCE_HEIGHT)
+  const physicalWidth = Math.max(1, (cluster.maxX - cluster.minX) * SOURCE_WIDTH)
+  // Below this ratio there is not enough horizontal room for two ordinary
+  // text bodies. Loops inside a, c, m, o or u can still contain deep raster
+  // valleys, but they must never turn an isolated glyph into a short word.
+  if (physicalWidth / physicalHeight < 0.9) return []
+  const minimumWidth = Math.max(4.5, physicalHeight * 0.055)
+  const minimumHeight = Math.max(13, physicalHeight * 0.36)
+  const edgeGuard = Math.max(5, physicalHeight * 0.065)
+  return candidates.filter((candidate) => {
+    if (candidate.source === 'density' && candidate.score > 0.3) return false
+    if ((candidate.x - cluster.minX) * SOURCE_WIDTH < edgeGuard) return false
+    if ((cluster.maxX - candidate.x) * SOURCE_WIDTH < edgeGuard) return false
+    if (cluster.detachedTextConnectorRanges?.some(([minX, maxX]) => (
+      candidate.x >= minX - 0.004 && candidate.x <= maxX + 0.004
+    ))) return false
+    const parts = splitTextCluster(cluster, [candidate.x])
+    if (parts.length !== 2) return false
+    return parts.every((part) => (
+      (part.maxX - part.minX) * SOURCE_WIDTH >= minimumWidth &&
+      (part.maxY - part.minY) * SOURCE_HEIGHT >= minimumHeight
+    ))
+  })
+}
+
+const textSegmentationEvidence = (
+  source: StrokeCluster,
+  parts: StrokeCluster[],
+  candidates = textCutCandidates(source),
+) => {
+  if (parts.length < 2) return 0
+  const physicalHeight = Math.max(1, (source.maxY - source.minY) * SOURCE_HEIGHT)
+  const physicalAspect = (source.maxX - source.minX) * SOURCE_WIDTH / physicalHeight
+  const compactDensityScale = clamp((physicalAspect - 1.16) / 0.5)
+  const tolerance = Math.max(4, physicalHeight * 0.055) / SOURCE_WIDTH
+  let evidence = 0
+  for (let index = 1; index < parts.length; index += 1) {
+    const boundary = (parts[index - 1].maxX + parts[index].minX) / 2
+    const match = candidates
+      .filter((candidate) => Math.abs(candidate.x - boundary) <= tolerance)
+      .sort((first, second) => (
+        Math.abs(first.x - boundary) - Math.abs(second.x - boundary) ||
+        first.score - second.score
+      ))[0]
+    if (!match) continue
+    evidence += match.source === 'ink-gap'
+      ? 0.54
+      : clamp((0.34 - match.score) / 0.34) * 0.34 * compactDensityScale
+  }
+  return Math.min(0.74, evidence / Math.max(1, parts.length - 1))
 }
 
 const distinctInkGapBoundaries = (
@@ -1398,14 +1689,97 @@ const snappedTextBoundaries = (
   return selected.sort((first, second) => first.x - second.x).map((candidate) => candidate.x)
 }
 
+/**
+ * Tablet drivers can coalesce a narrow pair such as `Ei`, `jJ` or `x1` so
+ * aggressively that the rendered raster contains no density valley at all.
+ * The pen trajectory still exposes a transition: connector segments are
+ * locally long and usually make forward x progress. These candidates are
+ * evaluated only with an explicit two-character prior; they never trigger a
+ * speculative split of an isolated glyph.
+ */
+const guidedTwoPartTrajectoryBoundaries = (cluster: StrokeCluster) => {
+  const physicalHeight = Math.max(1, (cluster.maxY - cluster.minY) * SOURCE_HEIGHT)
+  const edgeGuard = Math.max(5, physicalHeight * 0.06) / SOURCE_WIDTH
+  const stroke = [...cluster.strokes]
+    .filter((entry) => entry.points.length >= 3)
+    .map((entry) => ({
+      stroke: entry,
+      length: entry.points.slice(1).reduce((sum, point, index) => sum + Math.hypot(
+        (point.x - entry.points[index].x) * SOURCE_WIDTH,
+        (point.y - entry.points[index].y) * SOURCE_HEIGHT,
+      ), 0),
+    }))
+    .sort((first, second) => second.length - first.length)[0]?.stroke
+  if (!stroke) return []
+  const segments = stroke.points.slice(1).map((point, index) => {
+    const previous = stroke.points[index]
+    return {
+      index,
+      x: (previous.x + point.x) / 2,
+      deltaX: (point.x - previous.x) * SOURCE_WIDTH,
+      length: Math.hypot(
+        (point.x - previous.x) * SOURCE_WIDTH,
+        (point.y - previous.y) * SOURCE_HEIGHT,
+      ),
+    }
+  }).filter((entry) => entry.length > 0.2)
+  if (!segments.length) return []
+  const typicalLength = Math.max(1, median(segments.map((entry) => entry.length)))
+  const candidates: Array<{ x: number; score: number }> = []
+  segments.forEach((segment) => {
+    const interior = segment.x > cluster.minX + edgeGuard && segment.x < cluster.maxX - edgeGuard
+    if (!interior || segment.length < Math.max(5, typicalLength * 1.55)) return
+    candidates.push({
+      x: segment.x,
+      score: segment.length / typicalLength + Math.max(0, segment.deltaX) / physicalHeight * 0.8,
+    })
+  })
+  for (let index = 1; index < segments.length; index += 1) {
+    const incoming = segments[index - 1]
+    const outgoing = segments[index]
+    const point = stroke.points[incoming.index + 1]
+    if (
+      point.x <= cluster.minX + edgeGuard ||
+      point.x >= cluster.maxX - edgeGuard ||
+      Math.min(incoming.length, outgoing.length) < Math.max(4, typicalLength * 1.35)
+    ) continue
+    const balance = Math.min(incoming.length, outgoing.length) /
+      Math.max(incoming.length, outgoing.length)
+    const forwardProgress = Math.max(0, incoming.deltaX + outgoing.deltaX)
+    candidates.push({
+      x: point.x,
+      score: (
+        Math.min(incoming.length, outgoing.length) / typicalLength * 0.75 +
+        balance * 0.65 +
+        forwardProgress / physicalHeight * 0.9
+      ),
+    })
+  }
+  const minimumSpacing = Math.max(4, physicalHeight * 0.045) / SOURCE_WIDTH
+  const selected: Array<{ x: number; score: number }> = []
+  candidates.sort((first, second) => second.score - first.score).forEach((candidate) => {
+    if (selected.some((entry) => Math.abs(entry.x - candidate.x) < minimumSpacing)) return
+    selected.push(candidate)
+  })
+  return selected.slice(0, 6).map((entry) => entry.x)
+}
+
 /** Returns the untouched cluster plus a small, bounded set of cursive splits. */
 export const connectedTextSegmentationHypotheses = (
   cluster: StrokeCluster,
   preferredParts?: number,
+  allowCompactDensitySplit = false,
 ): StrokeCluster[][] => {
   const points = cluster.strokes.flatMap((stroke) => stroke.points)
   const temporalPartitions = temporalPenLiftTextPartitions(cluster, preferredParts)
-  if (points.length < 8) return [[cluster], ...temporalPartitions]
+  // Very economical handwriting can encode two letters in only four to
+  // seven sampled points (especially when a tablet driver coalesces events).
+  // An explicit line-model/count prior must still be able to open a spatial
+  // split. Without such a prior the conservative single-glyph behaviour is
+  // retained, so sparse I/l/T strokes are never split speculatively.
+  if (points.length < 4 || (points.length < 8 && preferredParts === undefined)) {
+    return [[cluster], ...temporalPartitions]
+  }
   const minX = Math.min(...points.map((point) => point.x))
   const maxX = Math.max(...points.map((point) => point.x))
   const minY = Math.min(...points.map((point) => point.y))
@@ -1435,6 +1809,7 @@ export const connectedTextSegmentationHypotheses = (
   const penLiftBodyBoundaries = distinctPenLiftBodyBoundaries(cluster)
   const penLiftBodyParts = penLiftTextBodyClusters(cluster)
   const candidates = textCutCandidates(cluster)
+  const strongInternalBoundaries = strongInternalTextBoundaries(cluster, candidates)
   if (
     !candidates.length &&
     usablePreferredParts === null &&
@@ -1449,7 +1824,8 @@ export const connectedTextSegmentationHypotheses = (
     aspect < 1.62 &&
     usablePreferredParts === null &&
     !penLiftBodyBoundaries.length &&
-    !temporalPartitions.length
+    !temporalPartitions.length &&
+    !(allowCompactDensitySplit && strongInternalBoundaries.length)
   ) return [[cluster]]
 
   // Real blank ink bands between separately written letters are much
@@ -1491,6 +1867,9 @@ export const connectedTextSegmentationHypotheses = (
     ))
     return [snapped, uniform].filter((boundaries) => boundaries.length)
   })
+  if (usablePreferredParts === 2) {
+    boundarySets.unshift(...guidedTwoPartTrajectoryBoundaries(cluster).map((boundary) => [boundary]))
+  }
 
   const minimumSpacing = Math.max(0.012, physicalHeight * 0.2 / SOURCE_WIDTH)
   const strong: TextCutCandidate[] = []
@@ -1554,7 +1933,7 @@ export const connectedTextSegmentationHypotheses = (
     ...temporalPartitions,
   ]
   boundarySets.forEach((boundaries) => {
-    const crossesProtectedConnector = boundaries.some((boundary) => (
+    const crossesProtectedConnector = usablePreferredParts === null && boundaries.some((boundary) => (
       cluster.detachedTextConnectorRanges?.some(([connectorMinX, connectorMaxX]) => {
         const protection = Math.max(0.012, physicalHeight * 0.18 / SOURCE_WIDTH)
         return boundary >= connectorMinX - protection && boundary <= connectorMaxX + protection * 0.35
@@ -1650,7 +2029,11 @@ const resemblesTextCrossbarPair = (
     horizontal.width < 8 ||
     vertical.height < 18 ||
     vertical.height / Math.max(1, vertical.width) < 1.35 ||
-    horizontal.width > Math.max(100, vertical.height * 1.55)
+    // A hand-drawn upper-case T often overhangs strongly on the side where
+    // the next letter begins. It is still one indivisible top bar as long as
+    // it really meets a tall stem. The old 1.55 limit caused the outer part
+    // to be cut off and classified as an extra glyph.
+    horizontal.width > Math.max(160, vertical.height * 2.6)
   ) return false
   const horizontalCenterX = (horizontal.bounds.minX + horizontal.bounds.maxX) / 2
   const verticalCenterX = (vertical.bounds.minX + vertical.bounds.maxX) / 2
@@ -1716,6 +2099,51 @@ const resemblesTextDotPair = (
     verticalGap <= Math.max(220, bodyHeight * 2.15) &&
     bodyWidth <= Math.max(290, bodyHeight * 2.35) &&
     bodyWidth / Math.max(1, bodyHeight) <= 2.25
+  )
+}
+
+/**
+ * Selects the body that genuinely owns a detached dot or crossbar. Merely
+ * taking the nearest bounding-box centre is unsafe: a wide T bar can have its
+ * centre inside the following letter even though it physically starts on the
+ * T stem. The score favours a real vertical contact, the expected vertical
+ * placement and, only then, horizontal proximity.
+ */
+const textAccessoryAttachmentScore = (
+  accessory: ReturnType<typeof strokeBounds>,
+  body: ReturnType<typeof strokeBounds>,
+) => {
+  const accessoryWidth = (accessory.maxX - accessory.minX) * SOURCE_WIDTH
+  const accessoryHeight = (accessory.maxY - accessory.minY) * SOURCE_HEIGHT
+  const bodyWidth = Math.max(1, (body.maxX - body.minX) * SOURCE_WIDTH)
+  const bodyHeight = Math.max(1, (body.maxY - body.minY) * SOURCE_HEIGHT)
+  const accessoryCenterX = (accessory.minX + accessory.maxX) / 2
+  const bodyCenterX = (body.minX + body.maxX) / 2
+  const horizontalDistance = Math.abs(accessoryCenterX - bodyCenterX) * SOURCE_WIDTH
+  const horizontalOverlap = Math.max(
+    0,
+    (Math.min(accessory.maxX, body.maxX) - Math.max(accessory.minX, body.minX)) * SOURCE_WIDTH,
+  )
+  const verticalGap = Math.max(
+    0,
+    Math.max(accessory.minY, body.minY) - Math.min(accessory.maxY, body.maxY),
+  ) * SOURCE_HEIGHT
+  const horizontal = accessoryWidth / Math.max(1, accessoryHeight) >= 1.75
+  if (!horizontal) {
+    return horizontalDistance + verticalGap * 0.72
+  }
+  const accessoryCenterY = (accessory.minY + accessory.maxY) / 2
+  const relativeY = (accessoryCenterY - body.minY) / Math.max(0.0001, body.maxY - body.minY)
+  const verticalPlacementPenalty = relativeY < -0.22
+    ? (-0.22 - relativeY) * bodyHeight
+    : relativeY > 0.8 ? (relativeY - 0.8) * bodyHeight : 0
+  const bodyAspect = bodyWidth / bodyHeight
+  return (
+    horizontalDistance * 0.22 +
+    verticalGap * 2.1 +
+    verticalPlacementPenalty * 0.72 +
+    bodyAspect * 5.5 -
+    Math.min(horizontalOverlap, bodyWidth) * 0.34
   )
 }
 
@@ -2123,8 +2551,12 @@ export const groupRecognitionLines = (strokes: Stroke[]): RecognitionInkLine[] =
       verticalGap <= Math.max(10, typicalHeight * 0.42) &&
       Math.abs(first.centerY - second.centerY) * SOURCE_HEIGHT <= Math.max(15, largestHeight * 0.78)
     )
+    const resemblesLongMathMark = (entry: (typeof entries)[number]) => (
+      entry.width >= typicalHeight * 1.5 &&
+      entry.height <= Math.max(12, typicalHeight * 0.62)
+    )
     const longMathMark = (
-      (first.width >= typicalHeight * 1.5 || second.width >= typicalHeight * 1.5) &&
+      (resemblesLongMathMark(first) || resemblesLongMathMark(second)) &&
       horizontalGap <= Math.max(18, typicalHeight * 0.62) &&
       verticalGap <= Math.max(39, largestHeight * 1.7)
     )
@@ -2378,34 +2810,51 @@ const trajectorySetDistance = (first: Float32Array[], second: Float32Array[]) =>
     trajectoryPathDistance(path, candidate, true),
   )))
 
-  // Exact assignment for normal glyphs. The greedy fallback only applies to
-  // unusually fragmented samples with many pen lifts.
+  // Exact assignment for normal glyphs. Use a compact numeric DP instead of
+  // allocating a Map and closures for every training-sample comparison: this
+  // function is called hundreds of thousands of times for a large personal
+  // model. The result is identical, but the hot path creates far less garbage
+  // and therefore avoids long GC pauses while writing connected words.
   let matched = 0
-  if (larger.length <= 8) {
-    let states = new Map<number, number>([[0, 0]])
+  if (smaller.length === 1) {
+    matched = Math.min(...costs[0])
+  } else if (larger.length <= 8) {
+    const stateCount = 1 << larger.length
+    let states = new Float64Array(stateCount)
+    states.fill(Number.POSITIVE_INFINITY)
+    states[0] = 0
     costs.forEach((row) => {
-      const next = new Map<number, number>()
-      states.forEach((score, mask) => {
-        row.forEach((cost, index) => {
-          if (mask & (1 << index)) return
+      const next = new Float64Array(stateCount)
+      next.fill(Number.POSITIVE_INFINITY)
+      for (let mask = 0; mask < stateCount; mask += 1) {
+        const score = states[mask]
+        if (!Number.isFinite(score)) continue
+        for (let index = 0; index < row.length; index += 1) {
+          if (mask & (1 << index)) continue
           const nextMask = mask | (1 << index)
-          const nextScore = score + cost
-          next.set(nextMask, Math.min(next.get(nextMask) ?? Number.POSITIVE_INFINITY, nextScore))
-        })
-      })
+          next[nextMask] = Math.min(next[nextMask], score + row[index])
+        }
+      }
       states = next
     })
-    matched = Math.min(...states.values())
+    matched = Number.POSITIVE_INFINITY
+    for (let mask = 0; mask < stateCount; mask += 1) {
+      matched = Math.min(matched, states[mask])
+    }
   } else {
     const used = new Set<number>()
     costs.forEach((row) => {
-      const best = row
-        .map((cost, index) => ({ cost, index }))
-        .filter(({ index }) => !used.has(index))
-        .sort((left, right) => left.cost - right.cost)[0]
-      if (best) {
-        used.add(best.index)
-        matched += best.cost
+      let bestIndex = -1
+      let bestCost = Number.POSITIVE_INFINITY
+      for (let index = 0; index < row.length; index += 1) {
+        if (!used.has(index) && row[index] < bestCost) {
+          bestIndex = index
+          bestCost = row[index]
+        }
+      }
+      if (bestIndex >= 0) {
+        used.add(bestIndex)
+        matched += bestCost
       }
     })
   }
@@ -2436,9 +2885,17 @@ const channelDistances = (
   strokes: Math.min(1, Math.abs(firstStrokeCount - secondStrokeCount) / 3),
 })
 
-const weightedDistance = (channels: FeatureWeights, weights: FeatureWeights) =>
-  (Object.keys(weights) as (keyof FeatureWeights)[])
-    .reduce((sum, key) => sum + channels[key] * weights[key], 0)
+const weightedDistance = (channels: FeatureWeights, weights: FeatureWeights) => (
+  channels.raster * weights.raster +
+  channels.hog * weights.hog +
+  channels.projections * weights.projections +
+  channels.shape * weights.shape +
+  channels.directions * weights.directions +
+  channels.geometry * weights.geometry +
+  channels.trajectory * weights.trajectory +
+  channels.holes * weights.holes +
+  channels.strokes * weights.strokes
+)
 
 const featureDistance = (
   feature: FeatureVector,
@@ -2447,12 +2904,15 @@ const featureDistance = (
   geometry: StrokeGeometry,
   weights: FeatureWeights,
 ) => {
-  const distance = Math.min(
-    ...([training, ...training.variants].map((variant) => weightedDistance(
-      channelDistances(feature, variant, geometry, training.geometry, strokeCount, training.strokeCount),
-      training.standard ? STANDARD_WEIGHTS : weights,
-    ))),
-  )
+  let distance = Number.POSITIVE_INFINITY
+  const activeWeights = training.standard ? STANDARD_WEIGHTS : weights
+  const variants = [training, ...training.variants]
+  for (let index = 0; index < variants.length; index += 1) {
+    distance = Math.min(distance, weightedDistance(
+      channelDistances(feature, variants[index], geometry, training.geometry, strokeCount, training.strokeCount),
+      activeWeights,
+    ))
+  }
   // A close personal match is more informative than a generic printed form.
   // The augmentation and shrinkage prototype keep this one-shot preference
   // bounded even when only a single personal sample exists.
@@ -2527,6 +2987,7 @@ const buildClassPrototypes = (entries: RecognitionModelEntry[]) => {
           )
         : Math.round(mean(basis.map((entry) => entry.holes))),
       strokeCount: Math.round(mean(basis.map((entry) => entry.strokeCount))),
+      physicalAspect: Math.exp(mean(basis.map((entry) => Math.log(entry.physicalAspect)))),
       geometry: {
         directions: averageVector(basis.map((entry) => entry.geometry.directions), true),
         normalizedLength: mean(basis.map((entry) => entry.geometry.normalizedLength)),
@@ -2701,6 +3162,31 @@ const percentile = (values: number[], fraction: number) => {
   return sorted[Math.min(sorted.length - 1, Math.floor((sorted.length - 1) * fraction))]
 }
 
+const buildAspectStats = (entries: RecognitionModelEntry[]) => {
+  const groups = new Map<string, RecognitionModelEntry[]>()
+  entries.forEach((entry) => {
+    const group = groups.get(entry.labelId) ?? []
+    group.push(entry)
+    groups.set(entry.labelId, group)
+  })
+  const result = new Map<string, RecognitionAspectStats>()
+  groups.forEach((group, labelId) => {
+    const personal = group.filter((entry) => !entry.standard && entry.trust >= 0.3)
+    const basis = personal.length ? personal : group
+    const logs = basis.map((entry) => Math.log(entry.physicalAspect))
+    const center = percentile(logs, 0.5)
+    const deviations = logs.map((value) => Math.abs(value - center))
+    result.set(labelId, {
+      median: Math.exp(center),
+      spread: basis.length > 1
+        ? clamp(percentile(deviations, 0.86) * 1.7 + 0.08, 0.14, personal.length ? 0.48 : 0.58)
+        : personal.length ? 0.3 : 0.38,
+      personal: personal.length > 0,
+    })
+  })
+  return result
+}
+
 const buildLabelStats = (
   entries: RecognitionModelEntry[],
   prototypes: Map<string, RecognitionModelEntry[]>,
@@ -2734,6 +3220,15 @@ const buildLabelStats = (
     })
     const measuredReliability = separationScores.reduce((sum, value) => sum + value, 0) /
       Math.max(1, separationScores.length)
+    const aspectLogs = group.map((entry) => Math.log(entry.physicalAspect))
+    const aspectMedianLog = percentile(aspectLogs, 0.5)
+    const aspectDeviations = aspectLogs.map((value) => Math.abs(value - aspectMedianLog))
+    // A minimum spread accepts natural day-to-day size variation. A large
+    // imported corpus may widen it, but never enough for a two-letter group
+    // to become a normal example of one trained character.
+    const aspectSpread = group.length > 1
+      ? clamp(percentile(aspectDeviations, 0.86) * 1.7 + 0.08, 0.14, 0.48)
+      : 0.3
     const trustedCount = group.filter((entry) => entry.trust >= 0.8).length
     const trustedRatio = trustedCount / Math.max(1, group.length)
     const reliability = measuredReliability * (0.42 + trustedRatio * 0.58)
@@ -2741,6 +3236,8 @@ const buildLabelStats = (
       personalCount: group.length,
       trustedCount,
       radius,
+      aspectMedian: Math.exp(aspectMedianLog),
+      aspectSpread,
       reliability: group.length === 1
         ? Math.max(0.58, reliability)
         : clamp(reliability, 0.22, 1),
@@ -4027,9 +4524,9 @@ const textGeometryCandidateScore = (
 
   if (/^\p{Lu}$/u.test(char)) {
     if (position === 0) score += relativeHeight >= 1.08 ? 0.16 : -0.04
-    else score += relativeHeight >= 1.16 ? -0.04 : -0.18
+    else score += relativeHeight >= 1.16 ? -0.04 : -0.28
   } else if (/^\p{Ll}$/u.test(char)) {
-    if (position > 0 && relativeHeight <= 1.12) score += 0.08
+    if (position > 0 && relativeHeight <= 1.12) score += 0.12
     if (position === 0 && relativeHeight >= 1.2) score -= 0.08
   }
 
@@ -4169,7 +4666,35 @@ const rerankTextChunk = (
   // fragments (for example "taboo") even though every visible glyph was
   // individually correct. Keeping the purely visual beam here still allows
   // Tost -> Test because both hypotheses retain title case.
-  const best = languageOverwritesVisualName ? visualBest : languageBest
+  const languageVisualLabels = languageBest?.choices.map((candidate) => candidate.label.id) ?? []
+  const languageChangedIndexes = languageVisualLabels.flatMap((labelId, index) => (
+    labelId === (chunk[index].visualLabelId ?? chunk[index].labelId) ? [] : [index]
+  ))
+  const languageChangedVisualLosses = languageChangedIndexes.map((index) => {
+    const visualLabelId = chunk[index].visualLabelId ?? chunk[index].labelId
+    const visualConfidence = chunk[index].visualConfidence ??
+      chunk[index].alternatives.find((alternative) => alternative.labelId === visualLabelId)?.confidence ??
+      chunk[index].confidence
+    return Math.max(0, visualConfidence - (languageBest?.choices[index]?.confidence ?? 0))
+  })
+  const shortWord = chunk.length <= 2
+  const maximumLanguageChanges = shortWord ? 1 : Math.max(1, Math.ceil(chunk.length * 0.34))
+  const maximumLossPerChangedGlyph = shortWord ? 3 : 24
+  const languageCorrectionHasVisualSupport = Boolean(
+    languageBest?.evidence?.knownWord &&
+    languageChangedIndexes.length <= maximumLanguageChanges &&
+    languageChangedVisualLosses.every((loss) => loss <= maximumLossPerChangedGlyph) &&
+    languageChangedIndexes.every((index) => languageBest!.choices[index].confidence >= 32)
+  )
+  // Very short dictionary entries carry a disproportionately large prior:
+  // without this gate a clear `ac` became `an`, `os` became `an`, and two
+  // lower-confidence letters could turn into an unrelated common word.  A
+  // language prior may resolve genuinely close shapes, but it cannot replace
+  // multiple visible glyphs or pay a large visual penalty. Longer words keep
+  // the wider one-letter ambiguity needed for corrections such as Tost→Test.
+  const best = languageOverwritesVisualName || (
+    languageChangedIndexes.length > 0 && !languageCorrectionHasVisualSupport
+  ) ? visualBest : languageBest
   if (!best) return
   const runnerUp = ranked.find((beam) => beam.value !== best.value)
   const scoreMargin = Math.max(0, best.score - (runnerUp?.score ?? best.score - 2))
@@ -4268,10 +4793,11 @@ export const recognizeExpression = (
         isLayout: true,
         layout: cluster.fraction,
       }
-      return { token, distance: 0 }
+      return { token, distance: 0, aspectFit: 0 }
     }
     const feature = featureFromCanvas(rendered.canvas)
     const geometry = geometryFromStrokes(cluster.strokes)
+    const physicalAspect = physicalInkAspect(cluster.strokes)
     const recognitionVariants = [{ feature, geometry, strokeCount: cluster.strokes.length }]
     if (mode === 'text' && cluster.detachedTextConnectorStrokes?.length) {
       const connectors = new Set(cluster.detachedTextConnectorStrokes)
@@ -4301,6 +4827,9 @@ export const recognizeExpression = (
         ))),
       }))
       .sort((first, second) => first.distance - second.distance)
+    const prototypeDistanceByLabel = new Map(
+      personalPrototypeRanking.map((entry) => [entry.labelId, entry.distance]),
+    )
     const personalShortlist = new Set(
       personalPrototypeRanking
         .filter((entry, index, entries) => (
@@ -4359,6 +4888,16 @@ export const recognizeExpression = (
           model.prototypes.get(labelId) ? [model.prototypes.get(labelId)!] : []
         )
         const stats = model.labelStats.get(labelId)
+        const aspectStats = model.aspectStats.get(labelId)
+        // Accidental merges expand a crop horizontally. Deliberately narrow
+        // or compressed handwriting must remain valid, so this is an upper
+        // envelope rather than a symmetric distance from the median.
+        const aspectLogDistance = aspectStats
+          ? Math.max(0, Math.log(physicalAspect / Math.max(0.035, aspectStats.median)))
+          : 0
+        const aspectFit = aspectStats
+          ? Math.exp(-Math.pow(aspectLogDistance / Math.max(0.18, aspectStats.spread + 0.1), 2))
+          : 0
         const bestPersonalDistance = personal.length
           ? sorted[0] + PERSONAL_SAMPLE_DISTANCE_BONUS
           : null
@@ -4367,7 +4906,11 @@ export const recognizeExpression = (
           : clamp(1 - bestPersonalDistance / Math.max(0.08, (stats?.radius ?? 0.19) * 1.75))
         const reliability = stats?.reliability ?? (personal.length ? 0.58 : 0)
         if (personal.length && prototypes.length) {
-          const prototypeDistance = Math.min(...prototypes.flatMap((prototype) => (
+          // Already computed above to form the personal shortlist. Reusing
+          // it avoids another full prototype/variant comparison per label
+          // for every candidate segment in a connected word.
+          const cachedPrototypeDistance = prototypeDistanceByLabel.get(labelId)
+          const prototypeDistance = cachedPrototypeDistance ?? Math.min(...prototypes.flatMap((prototype) => (
             recognitionVariants.map((variant, index) => (
               featureDistance(
                 variant.feature,
@@ -4382,6 +4925,15 @@ export const recognizeExpression = (
           aggregate -= Math.min(0.034, 0.009 + Math.log2(personal.length + 1) * 0.005) *
             (0.38 + reliability * 0.42 + personalFit * 0.2)
           aggregate += (1 - reliability) * 0.024 + (1 - personalFit) * 0.012
+          // Square normalization can make two adjacent letters resemble one
+          // well trained glyph. Penalize only the portion outside the robust
+          // personal aspect band; ordinary size changes remain untouched.
+          aggregate += Math.max(0, aspectLogDistance - aspectStats!.spread - 0.1) * 0.3
+        } else if (aspectStats) {
+          // Generic handwriting references also retain their physical shape.
+          // Their wider style spread receives a lighter penalty than the
+          // writer-specific model, but still rejects obvious multi-glyph crops.
+          aggregate += Math.max(0, aspectLogDistance - aspectStats.spread - 0.14) * 0.14
         }
         aggregate = Math.max(0, aggregate + (
           mode === 'math'
@@ -4396,6 +4948,7 @@ export const recognizeExpression = (
           distance: aggregate,
           personalSupport: stats?.trustedCount ?? personal.length,
           personalConfidence,
+          aspectFit,
         }
       })
       .sort((a, b) => a.distance - b.distance)
@@ -4443,12 +4996,12 @@ export const recognizeExpression = (
       personalConfidence: best?.personalConfidence ?? 0,
       layout: cluster.fraction,
     }
-    return { token, distance: best?.distance ?? 1 }
+    return { token, distance: best?.distance ?? 1, aspectFit: best?.aspectFit ?? 0 }
   }
 
   const textHypothesisScore = (
     source: StrokeCluster,
-    classified: { token: RecognitionToken; distance: number }[],
+    classified: { token: RecognitionToken; distance: number; aspectFit: number }[],
     independentSegmentationEvidence = 0,
   ) => {
     const reranked = applyTextReranking(classified.map((entry) => entry.token), labels, language)
@@ -4459,6 +5012,7 @@ export const recognizeExpression = (
     const physicalWidth = (source.maxX - source.minX) * SOURCE_WIDTH
     const physicalHeight = Math.max(1, (source.maxY - source.minY) * SOURCE_HEIGHT)
     const aspect = physicalWidth / physicalHeight
+    const strongBoundaries = strongInternalTextBoundaries(source)
     const expectedParts = Math.max(1, Math.min(10, Math.round(aspect / 0.78)))
     const referenceTokenHeight = Math.max(0.01, median(
       reranked
@@ -4502,9 +5056,39 @@ export const recognizeExpression = (
         untouchedPersonalGlyph.confidence / 100 * 0.5 +
         personalFit * 0.66 +
         support * 0.18
-      ) * (0.78 + aspectPlausibility * 0.22)
+      ) * (0.78 + aspectPlausibility * 0.22) * (
+        0.22 + classified[0].aspectFit * 0.78
+      )
+      const decisiveRepeatedWholeGlyph = (
+        (untouchedPersonalGlyph.personalSupport ?? 0) >= 3 &&
+        untouchedPersonalGlyph.confidence >= 80 &&
+        (untouchedPersonalGlyph.personalConfidence ?? 0) >= 20
+      )
+      if (decisiveRepeatedWholeGlyph) {
+        // The complete personal classifier is independent evidence that this
+        // broad ink is one glyph.  Do not let a coincidental internal valley
+        // plus a two-letter dictionary word split a 93%-certain trained n into
+        // "in", or d into "Ja".  Real connected words do not pass all three
+        // repeated whole-form gates at once.
+        score += 1.28 * (0.65 + aspectPlausibility * 0.35)
+      }
     }
-    if (reranked.length === 1 && aspect > 1.12) score -= Math.min(0.72, (aspect - 1.12) * 0.3)
+    if (reranked.length === 1) {
+      // A close physical match to either the personal or generic reference is
+      // independent whole-glyph evidence. It prevents internal loops in a/c/o
+      // and arches in m/u from winning merely because their fragments spell a
+      // frequent short dictionary word.
+      score += classified[0].aspectFit * 0.36
+      if (aspect > 1.12) score -= Math.min(0.72, (aspect - 1.12) * 0.3)
+      if (strongBoundaries.length) {
+        const boundaryStrength = strongBoundaries.reduce((best, candidate) => (
+          Math.max(best, candidate.source === 'ink-gap'
+            ? 1
+            : clamp((0.34 - candidate.score) / 0.34))
+        ), 0)
+        score -= boundaryStrength * 0.46 * (1 - classified[0].aspectFit * 0.82)
+      }
+    }
     if (reranked.length > 1) {
       score -= (reranked.length - 1) * 0.026
       // A cut through a cursive connector can look like a surprisingly
@@ -4530,6 +5114,7 @@ export const recognizeExpression = (
     return { tokens: reranked, score }
   }
 
+  let wholeTextAssessmentTokens: RecognitionToken[] | null = null
   const tokens = mode === 'text'
     ? (() => {
         const guidedClusterCounts = (
@@ -4565,11 +5150,40 @@ export const recognizeExpression = (
           const clusterCharacterCountHint = clusters.length === 1
             ? textCharacterCountHint
             : guidedClusterCounts?.[clusterIndex]
-          const hypotheses = clusterCharacterCountHint === 1
+          const clusterAspect = (
+            (cluster.maxX - cluster.minX) * SOURCE_WIDTH /
+            Math.max(1, (cluster.maxY - cluster.minY) * SOURCE_HEIGHT)
+          )
+          const wholeAssessment = clusterCharacterCountHint === undefined
+            ? classifyCluster(cluster, `${clusterIndex}-whole-assessment`)
+            : null
+          if (clusters.length === 1 && wholeAssessment) {
+            // Keep the untouched full-ink assessment until after the same
+            // single-character reranking used by the count=1 path.  The raw
+            // classifier can contain the trained glyph as its visual winner
+            // while its final personal confidence is only established by
+            // that reranker; testing the raw token here used to miss exactly
+            // the broad trained d/n shapes that were later split into Ja/in.
+            wholeTextAssessmentTokens = [wholeAssessment.token]
+          }
+          const compactWholeAssessment = clusterAspect < 1.62 ? wholeAssessment : null
+          const allowCompactDensitySplit = Boolean(compactWholeAssessment && (
+            compactWholeAssessment.token.confidence < 48 ||
+            (
+              (compactWholeAssessment.token.personalSupport ?? 0) >= 2 &&
+              compactWholeAssessment.aspectFit < 0.24
+            )
+          ))
+          const decisiveRepeatedWholeGlyph = Boolean(wholeAssessment && (
+            (wholeAssessment.token.personalSupport ?? 0) >= 3 &&
+            wholeAssessment.token.confidence >= 80
+          ))
+          const hypotheses = clusterCharacterCountHint === 1 || decisiveRepeatedWholeGlyph
             ? [[cluster]]
             : connectedTextSegmentationHypotheses(
                 cluster,
                 clusterCharacterCountHint,
+                allowCompactDensitySplit,
               )
           const scored = hypotheses
             .map((hypothesis, hypothesisIndex) => {
@@ -4577,10 +5191,13 @@ export const recognizeExpression = (
                 hypothesis.reduce((sum, part) => sum + part.strokes.length, 0) === cluster.strokes.length &&
                 hypothesis.every((part) => part.strokes.every((stroke) => cluster.strokes.includes(stroke)))
               )
+              const spatialEvidence = textSegmentationEvidence(cluster, hypothesis)
               return textHypothesisScore(
                 cluster,
-                hypothesis.map((part, partIndex) => classifyCluster(part, `${clusterIndex}-${hypothesisIndex}-${partIndex}`)),
-                wholePenLiftPartition ? 0.62 : 0,
+                hypothesis.length === 1 && hypothesis[0] === cluster && wholeAssessment
+                  ? [wholeAssessment]
+                  : hypothesis.map((part, partIndex) => classifyCluster(part, `${clusterIndex}-${hypothesisIndex}-${partIndex}`)),
+                Math.max(wholePenLiftPartition ? 0.62 : 0, spatialEvidence),
               )
             })
             .sort((first, second) => second.score - first.score)
@@ -4613,6 +5230,7 @@ export const recognizeExpression = (
                     part,
                     `combined-${hypothesisIndex}-${partIndex}`,
                   )),
+                  textSegmentationEvidence(combined, hypothesis),
                 ))
                 .sort((first, second) => second.score - first.score)
               const exact = scored.filter((entry) => entry.tokens.length === textCharacterCountHint)
@@ -4738,6 +5356,28 @@ export const recognizeExpression = (
   if (mode === 'text') {
     const reranked = applyTextReranking(tokens, labels, language)
     const visibleCount = reranked.filter((token) => !token.isLayout).length
+    // The assessment is assigned inside the segmentation callback. Preserve
+    // its explicit nullable type because TypeScript's closure flow analysis
+    // cannot observe that synchronous assignment.
+    const completeWholeAssessment = wholeTextAssessmentTokens as RecognitionToken[] | null
+    if (visibleCount > 1 && completeWholeAssessment) {
+      const rerankedWhole = applyTextReranking(completeWholeAssessment.map((token) => ({
+        ...token,
+        alternatives: token.alternatives.map((alternative) => ({ ...alternative })),
+        context: token.context ? { ...token.context } : undefined,
+      })), labels, language)
+      const whole = rerankedWhole.find((token) => !token.isLayout)
+      if (
+        whole &&
+        (whole.personalSupport ?? 0) >= 3 &&
+        whole.confidence >= 80 &&
+        (whole.personalConfidence ?? 0) >= 20
+      ) {
+        // A later line-level lexical pass must not reintroduce alternatives
+        // that the decisive complete-glyph gate already ruled out locally.
+        return rerankedWhole
+      }
+    }
     if (
       Number.isInteger(textCharacterCountHint) &&
       textCharacterCountHint! > 0 &&
@@ -4759,6 +5399,7 @@ export const recognizeExpression = (
               part,
               `guided-fallback-${hypothesisIndex}-${partIndex}`,
             )),
+            textSegmentationEvidence(combined, hypothesis),
           ))
           .sort((first, second) => second.score - first.score)
         : []

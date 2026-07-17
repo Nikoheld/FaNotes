@@ -80,10 +80,33 @@ try {
   const encoded = /<pre id="result">([\s\S]*?)<\/pre>/u.exec(stdout)?.[1]
   assert.ok(encoded, `Kein Paar-Ergebnis: ${stdout.slice(-1800)}`)
   const result = JSON.parse(encoded.replaceAll('&quot;', '"').replaceAll('&amp;', '&'))
-  console.log(JSON.stringify(result, null, 2))
+  console.log(JSON.stringify(process.env.FANOTES_UJI_PAIR_SUMMARY === '1' ? {
+    writers: result.writers,
+    characters: result.characters,
+    singles: {
+      samples: result.singles.samples,
+      safety: result.singles.safety,
+    },
+    separated: {
+      pairs: result.pairs,
+      availability: result.availability,
+    },
+    connected: {
+      pairs: result.connected.pairs,
+      availability: result.connected.availability,
+      unfragmentedRate: result.connected.unfragmentedRate,
+      ownerCorrectRate: result.connected.ownerCorrectRate,
+      failures: result.connected.failures.slice(0, 8),
+      fragmentationFailures: result.connected.fragmentationFailures.slice(0, 8),
+      ownershipFailures: result.connected.ownershipFailures.slice(0, 8),
+    },
+  } : result, null, 2))
   if (process.env.FANOTES_UJI_PAIR_STRICT === '1') {
     assert.equal(result.singles.safety, 100, `Einzelbuchstaben werden fälschlich aufgetrennt: ${JSON.stringify(result.singles.failures.slice(0, 20))}`)
     assert.equal(result.availability, 100, `Echte Buchstabenpaare besitzen nicht immer einen Zwei-Zeichen-Pfad: ${JSON.stringify(result.failures.slice(0, 20))}`)
+    assert.equal(result.connected.availability, 100, `Durchgehend verbundene Buchstabenpaare besitzen nicht immer einen Zwei-Zeichen-Pfad: ${JSON.stringify(result.connected.failures.slice(0, 20))}`)
+    assert.equal(result.connected.unfragmentedRate, 100, `Verspätete Zubehörstriche werden in verbundenen Paaren zerschnitten: ${JSON.stringify(result.connected.fragmentationFailures.slice(0, 20))}`)
+    assert.ok(result.connected.ownerCorrectRate >= 98.5, `Zubehörstriche besitzen zu selten eine Segmentierung mit dem richtigen Buchstaben: ${JSON.stringify(result.connected.ownershipFailures.slice(0, 20))}`)
   }
 } finally {
   fs.rmSync(temporary, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })

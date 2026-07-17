@@ -44,6 +44,11 @@ try {
   const encoded = /<pre id="result">([\s\S]*?)<\/pre>/u.exec(stdout)?.[1]
   assert.ok(encoded, `Kein Ergebnis der verbundenen Erkennung: ${stdout.slice(-1000)}`)
   const result = JSON.parse(encoded.replaceAll('&quot;', '"').replaceAll('&amp;', '&'))
+  if (process.env.FANOTES_SEGMENTATION_DEBUG === '1') console.log(JSON.stringify({
+    continuousGuidedPairs: result.continuousGuidedPairs,
+    delayedAccessoryPair: result.delayedAccessoryPair,
+    delayedOverhangingT: result.delayedOverhangingT,
+  }, null, 2))
   assert.equal(result.baseClusterCount, 1, 'Der verbundene Teststrich muss zunächst als eine physische Komponente vorliegen.')
   assert.ok(result.hypothesisSizes.includes(4), `Die Vier-Buchstaben-Hypothese fehlt: ${JSON.stringify({ sizes: result.hypothesisSizes, bounds: result.baseStrokeBounds, cuts: result.baseCutCandidates })}`)
   assert.ok(result.baselineTokenCount >= 3, `Das Standardmodell muss verbundene Tinte ohne Training auftrennen: ${JSON.stringify(result)}`)
@@ -105,6 +110,9 @@ try {
     automaticTextCases: result.automaticTextCases,
     incrementalTextCases: result.incrementalTextCases,
     rapidClosePairs: result.rapidClosePairs,
+    continuousGuidedPairs: result.continuousGuidedPairs,
+    delayedAccessoryPair: result.delayedAccessoryPair,
+    delayedOverhangingT: result.delayedOverhangingT,
     realDoubleIntegralAutomatic: result.realDoubleIntegralAutomatic,
     personalSentenceAutomatic: result.largePersonalBenchmark.sentenceAutomatic,
   }, null, 2))

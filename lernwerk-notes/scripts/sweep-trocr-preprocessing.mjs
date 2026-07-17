@@ -23,6 +23,10 @@ const archive = path.join(temporary, 'uji.zip')
 const dataset = path.join(temporary, 'ujipenchars2.txt')
 const output = path.join(temporary, 'dist')
 const profile = path.join(temporary, 'chromium')
+const requestedHeapMb = Number(process.env.FANOTES_UJI_CHROMIUM_HEAP_MB ?? '1024')
+const chromiumHeapMb = Number.isFinite(requestedHeapMb)
+  ? Math.max(512, Math.min(1536, Math.round(requestedHeapMb)))
+  : 1024
 const mime = new Map([
   ['.html', 'text/html; charset=utf-8'], ['.js', 'text/javascript; charset=utf-8'],
   ['.mjs', 'text/javascript; charset=utf-8'], ['.json', 'application/json; charset=utf-8'],
@@ -103,7 +107,7 @@ try {
   const port = server.address().port
   const chromium = spawn('chromium', [
     '--headless=new', '--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage',
-    '--js-flags=--max-old-space-size=1536', `--user-data-dir=${profile}`,
+    `--js-flags=--max-old-space-size=${chromiumHeapMb}`, `--user-data-dir=${profile}`,
     '--remote-debugging-address=127.0.0.1', '--remote-debugging-port=0',
     `http://127.0.0.1:${port}/?${new URLSearchParams({
       ...(process.env.FANOTES_UJI_WRITER ? { writer: process.env.FANOTES_UJI_WRITER } : {}),
@@ -126,6 +130,10 @@ try {
       ...(process.env.FANOTES_UJI_DIAGNOSTIC_EXPECTED_COUNT === '1'
         ? { 'diagnostic-count': 'expected' }
         : {}),
+      ...(process.env.FANOTES_UJI_DIAGNOSTIC_INDEX
+        ? { 'diagnostic-index': process.env.FANOTES_UJI_DIAGNOSTIC_INDEX }
+        : {}),
+      ...(process.env.FANOTES_UJI_MOCK_NEURAL === '1' ? { 'mock-neural': '1' } : {}),
     })}`,
   ], { stdio: ['ignore', 'pipe', 'pipe'] })
   let stderr = ''
@@ -181,6 +189,13 @@ try {
   assert.equal(state?.error, '', state?.error)
   assert.ok(state?.result, stderr.slice(-3_000))
   const result = JSON.parse(state.result)
+  if (process.env.FANOTES_UJI_STRICT === '1') {
+    assert.equal(
+      result.fusedEdits,
+      0,
+      `Die personalisierte UJI-Fusion enthält noch Zeichenfehler: ${JSON.stringify(result.cases?.filter((entry) => entry.fusedEdits > 0))}`,
+    )
+  }
   const printable = process.env.FANOTES_UJI_WORD_DIAGNOSTICS_COMPACT === '1'
     ? {
         neuralCer: result.neuralCer,

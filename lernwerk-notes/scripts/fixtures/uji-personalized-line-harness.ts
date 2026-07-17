@@ -55,6 +55,11 @@ export const runUjiPersonalizedLineAudit = async (records: UjiRecord[]) => {
   const includeDiagnostics = parameters.get('diagnostics') !== '0'
   const includeWordDiagnostics = parameters.get('word-diagnostics') === '1'
   const expectedCountDiagnosticsOnly = parameters.get('diagnostic-count') === 'expected'
+  const requestedDiagnosticSegmentationIndex = Number(parameters.get('diagnostic-index') ?? '')
+  const diagnosticSegmentationIndex = Number.isInteger(requestedDiagnosticSegmentationIndex)
+    ? Math.max(0, Math.min(8, requestedDiagnosticSegmentationIndex))
+    : null
+  const useDeterministicNeuralFixture = parameters.get('mock-neural') === '1'
   const requestedLimit = Number(parameters.get('limit') ?? '12')
   const writerLimit = Number.isSafeInteger(requestedLimit) ? Math.max(1, Math.min(60, requestedLimit)) : 12
   const requestedWriterOffset = Number(parameters.get('writer-offset') ?? '0')
@@ -137,6 +142,35 @@ export const runUjiPersonalizedLineAudit = async (records: UjiRecord[]) => {
   let fusedEdits = 0
   let characters = 0
 
+  const deterministicNeuralFixture = (expected: string): NeuralTextRecognitionResult => {
+    const text = ({
+      fenster: 'heinster',
+      mathe: 'münt',
+      garten: 'sarten',
+    } as Record<string, string>)[expected] ?? expected
+    const visible = Array.from(text).filter((character) => !/\s/u.test(character))
+    const confidence = text === expected ? 83 : 71
+    return {
+      text,
+      confidence,
+      engine: 'trocr-bilingual',
+      wordCount: text.trim().split(/\s+/u).filter(Boolean).length,
+      knownWordRatio: text === expected ? 1 : 0,
+      lines: [{
+        text,
+        rawText: text,
+        confidence,
+        bbox: [0.04, 0.13, 0.9, 0.2],
+        characters: visible.map((char, index) => ({
+          char,
+          confidence,
+          start: index / Math.max(1, visible.length),
+          end: (index + 1) / Math.max(1, visible.length),
+        })),
+      }],
+    }
+  }
+
   for (let writerIndex = 0; writerIndex < writers.length; writerIndex += 1) {
     const writer = writers[writerIndex]
     const writerWordIndex = allWriters.indexOf(writer)
@@ -168,10 +202,12 @@ export const runUjiPersonalizedLineAudit = async (records: UjiRecord[]) => {
           ? createUjiWordStrokes(records, writer, 2, expected, 0.04, 0.20, 0.066, 0.0035)
           : createUjiWordStrokes(records, writer, 2, expected)
       const neuralStartedAt = performance.now()
-      const neural = await recognizeNeuralText(strokes, 'de', 900, 560)
+      const neural = useDeterministicNeuralFixture
+        ? deterministicNeuralFixture(expected)
+        : await recognizeNeuralText(strokes, 'de', 900, 560)
       const neuralMs = Math.round(performance.now() - neuralStartedAt)
       const personalizedStartedAt = performance.now()
-      const personalized = await recognizePersonalizedTextLine(strokes, resources, neural, 'de')
+      const personalized = await recognizePersonalizedTextLine(strokes, resources, neural, 'de', true)
       const personalizedMs = Math.round(performance.now() - personalizedStartedAt)
       const neuralText = neural.text.toLocaleLowerCase('de')
       const fusedText = personalized.fusion.text.toLocaleLowerCase('de')
@@ -190,7 +226,9 @@ export const runUjiPersonalizedLineAudit = async (records: UjiRecord[]) => {
             Array.from(expected).filter((character) => !/\s/u.test(character)).length,
           ])].flatMap((count) => {
             if (count < 1) return []
-            const segmentationIndexes = expectedCountDiagnosticsOnly ? [0, 1, 2] : [0]
+            const segmentationIndexes = diagnosticSegmentationIndex !== null
+              ? [diagnosticSegmentationIndex]
+              : expectedCountDiagnosticsOnly ? [0, 1, 2] : [0]
             return segmentationIndexes.map((segmentationIndex) => {
               const tokens = recognizeExpression(
                 strokes,
@@ -316,6 +354,7 @@ export const runUjiPersonalizedLineAudit = async (records: UjiRecord[]) => {
         neuralMs,
         personalizedMs,
         fusion: personalized.fusion,
+        candidateScores: personalized.candidateScores,
         penLiftCharacterCount: estimatePenLiftTextCharacterCount(strokes),
         segmentationCandidates,
         segmentationHypotheses,

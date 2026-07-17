@@ -45,6 +45,8 @@ const regularFile = async (filePath) => {
   return stats
 }
 
+const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')
+
 void (async () => {
   const args = argumentsFrom(process.argv.slice(2))
   const root = path.resolve(__dirname, '..')
@@ -66,15 +68,41 @@ void (async () => {
     if (packagedVersion !== version) throw new Error(`Falsche app.asar-Version ${packagedVersion} in ${candidate}`)
   }
 
-  const deltaFiles = {
+  const requiredDeltaFiles = {
     linux: path.join(buildStage, `FaNotes-Delta-linux-x64-${baseVersion}-to-${version}.fndelta`),
     windows: path.join(buildStage, `FaNotes-Delta-windows-x64-${baseVersion}-to-${version}.fndelta`),
   }
-  for (const [platform, candidate] of Object.entries(deltaFiles)) {
+  for (const [platform, candidate] of Object.entries(requiredDeltaFiles)) {
     const { header } = await inspectDeltaPatch(candidate)
     if (header.platform !== platform || header.baseVersion !== baseVersion || header.targetVersion !== version) {
       throw new Error(`Das ${platform}-Delta gehört nicht zu ${baseVersion} → ${version}.`)
     }
+  }
+
+  // Keep every validated direct base for the target release. Beta users need
+  // the previous beta as a base, while users switching from Stable need the
+  // latest stable package. Omitting either path would silently force a full
+  // application download even though an exact differential update exists.
+  const deltaPattern = new RegExp(`^FaNotes-Delta-(linux|windows)-x64-(.+)-to-${escapeRegExp(version)}\\.fndelta$`, 'u')
+  const validatedDeltaFiles = new Map()
+  for (const entry of await fsp.readdir(buildStage, { withFileTypes: true })) {
+    if (!entry.isFile()) continue
+    const match = deltaPattern.exec(entry.name)
+    if (!match) continue
+    const [, platform, candidateBaseVersion] = match
+    if (!VERSION_PATTERN.test(candidateBaseVersion)) throw new Error(`Ungültige Delta-Basis in ${entry.name}.`)
+    const candidate = path.join(buildStage, entry.name)
+    await regularFile(candidate)
+    const { header } = await inspectDeltaPatch(candidate)
+    if (
+      header.platform !== platform ||
+      header.baseVersion !== candidateBaseVersion ||
+      header.targetVersion !== version
+    ) throw new Error(`Das zusätzliche Delta ${entry.name} besitzt einen widersprüchlichen Kopf.`)
+    validatedDeltaFiles.set(entry.name, candidate)
+  }
+  for (const candidate of Object.values(requiredDeltaFiles)) {
+    if (!validatedDeltaFiles.has(path.basename(candidate))) throw new Error(`Pflicht-Delta fehlt: ${candidate}`)
   }
 
   const sources = new Map([
@@ -83,8 +111,6 @@ void (async () => {
     [`FaNotes-Setup-${version}-x64.exe`, path.join(buildStage, `FaNotes-Setup-${version}-x64.exe`)],
     [`FaNotes-Setup-${version}-x64.exe.blockmap`, path.join(buildStage, `FaNotes-Setup-${version}-x64.exe.blockmap`)],
     [`FaNotes-Portable-${version}-x64.exe`, path.join(buildStage, `FaNotes-Portable-${version}-x64.exe`)],
-    [path.basename(deltaFiles.linux), deltaFiles.linux],
-    [path.basename(deltaFiles.windows), deltaFiles.windows],
     [`app-${version}-linux.asar`, linuxAsar],
     [`app-${version}-windows.asar`, windowsAsar],
     ['CHANGELOG.md', path.join(root, 'CHANGELOG.md')],
@@ -102,6 +128,7 @@ void (async () => {
     ['fanotes.desktop', path.join(root, 'packaging', 'fanotes.desktop')],
     ['fanotes.svg', path.join(root, 'packaging', 'fanotes.svg')],
   ])
+  for (const [fileName, source] of validatedDeltaFiles) sources.set(fileName, source)
 
   await fsp.mkdir(output, { recursive: true, mode: 0o700 })
   for (const [fileName, source] of sources) {

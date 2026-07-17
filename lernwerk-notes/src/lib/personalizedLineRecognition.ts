@@ -14,6 +14,15 @@ import {
 export type PersonalizedLineRecognition = {
   tokens: RecognitionToken[]
   fusion: PersonalizedTextRecognitionResult
+  /** Bounded local diagnostics used by deterministic recognition audits. */
+  candidateScores?: Array<{
+    text: string
+    score: number
+    tokenCount: number
+    personalizedCharacters: number
+    neuralCharacters: number
+    classicalCharacters: number
+  }>
 }
 
 type RecognitionModule = typeof import('../../../src/lib/recognition')
@@ -199,8 +208,45 @@ export const recognizePersonalizedTextLine = async (
   resources: RecognitionResources,
   neural: NeuralTextRecognitionResult,
   language: RecognitionLanguage,
+  includeCandidateScores = false,
 ): Promise<PersonalizedLineRecognition> => {
   const recognition = await import('../../../src/lib/recognition')
+  const physicalLines = recognition.groupRecognitionLines(strokes)
+  const neuralTextLines = neural.text.split(/\r?\n/u)
+  if (
+    physicalLines.length >= 2 &&
+    neural.lines.length !== physicalLines.length &&
+    neuralTextLines.length === physicalLines.length
+  ) {
+    // Compatibility models and external OCR providers may return correct
+    // newlines in `text` while flattening their structured `lines` array into
+    // one entry.  The old fusion then replaced the physical page break with a
+    // normal word space. Reconstruct only the missing line metadata from the
+    // two independent signals (ink rows + explicit newlines); never invent a
+    // break merely from whitespace.
+    neural = {
+      ...neural,
+      lines: neuralTextLines.map((text, lineIndex) => {
+        const visible = Array.from(text).filter((character) => !/\s/u.test(character))
+        const line = physicalLines[lineIndex]
+        const points = line.strokes.flatMap((stroke) => stroke.points)
+        const minX = Math.min(...points.map((point) => point.x))
+        const maxX = Math.max(...points.map((point) => point.x))
+        return {
+          text,
+          rawText: text,
+          confidence: neural.confidence,
+          bbox: [minX, line.minY, maxX - minX, line.maxY - line.minY],
+          characters: visible.map((char, index) => ({
+            char,
+            confidence: neural.confidence,
+            start: index / Math.max(1, visible.length),
+            end: (index + 1) / Math.max(1, visible.length),
+          })),
+        }
+      }),
+    }
+  }
   let primary: RecognitionToken[] | null = null
   const getPrimary = () => {
     primary ??= recognition.recognizeExpression(
@@ -221,7 +267,6 @@ export const recognizePersonalizedTextLine = async (
   // Verified physical word partitions avoid the much more expensive global
   // beam; ambiguous/connected lines retain that unrestricted fallback so one
   // missing neural character cannot erase a repeatedly trained personal glyph.
-  const physicalLines = recognition.groupRecognitionLines(strokes)
   const penLiftCounts = physicalLines.map((line, lineIndex) => {
     const measured = recognition.estimatePenLiftTextCharacterCount(line.strokes)
     const neuralLine = neural.lines[lineIndex]
@@ -241,7 +286,20 @@ export const recognizePersonalizedTextLine = async (
       measured <= visibleWords + 1 &&
       visibleCharacters >= measured * 2
     )
-    return collapsedToWordCount ? null : measured
+    // On connected handwriting the estimator observes independent pen-lift
+    // bodies, not necessarily characters.  This also affects a single word:
+    // `garten` can legitimately contain only three bodies and `mathe` two.
+    // Passing that component count into sequence fusion rewarded a three-token
+    // path over the six-character line model and produced fluent but unrelated
+    // words.  A physical count remains independent evidence only while it is
+    // reasonably close to the visible line length; a severe collapse is kept
+    // out of both the final length prior and its mismatch penalty.
+    const collapsedToInkComponents = (
+      visibleCharacters >= 4 &&
+      visibleCharacters - measured >= 2 &&
+      measured <= Math.floor(visibleCharacters * 0.6)
+    )
+    return collapsedToWordCount || collapsedToInkComponents ? null : measured
   })
   if (
     neural.lines.length > 0
@@ -295,11 +353,15 @@ export const recognizePersonalizedTextLine = async (
       // a competing hypothesis, then add the measured pen-lift length below.
       const countDeltas = hasDistinctPenLiftPrior
         ? [0, ...penLiftIntermediateDeltas]
+        : !neuralLooksSuspicious
+          // A confident dictionary word still receives the unrestricted and
+          // exact-count personal paths. Trying ±1/±2 lengths as well cannot
+          // improve a same-length character correction, but multiplied CPU
+          // time for normal lines such as "computer" by five.
+          ? [0]
         : hasPersonalSequencePrior && primaryCountMismatch >= 2
-        ? [0, -1, 1, -2, 2]
-        : hasPersonalSequencePrior || neuralLooksSuspicious
-          ? [0, -1, 1]
-          : [0]
+          ? [0, -1, 1, -2, 2]
+          : [0, -1, 1]
       const strategies: Array<{ delta: number; penLift: boolean; segmentationIndex: number }> = countDeltas
         .map((delta) => ({ delta, penLift: false, segmentationIndex: 0 }))
       if (
@@ -361,11 +423,32 @@ export const recognizePersonalizedTextLine = async (
 
   if (!candidates.length) candidates.push(getPrimary())
 
+  if (physicalLines.length >= 2) {
+    candidates.forEach((candidate) => {
+      const positioned = candidate.map((token, originalIndex) => {
+        const centerY = token.bbox[1] + token.bbox[3] / 2
+        const lineIndex = physicalLines
+          .map((line, index) => ({ index, distance: Math.abs(centerY - line.centerY) }))
+          .sort((first, second) => first.distance - second.distance)[0]?.index ?? 0
+        return { token, originalIndex, lineIndex }
+      }).sort((first, second) => (
+        first.lineIndex - second.lineIndex ||
+        first.token.bbox[0] - second.token.bbox[0] ||
+        first.originalIndex - second.originalIndex
+      ))
+      positioned.forEach(({ token, lineIndex }, index) => {
+        const previousLine = positioned[index - 1]?.lineIndex
+        token.lineBreakBefore = lineIndex > 0 && lineIndex !== previousLine
+      })
+      candidate.splice(0, candidate.length, ...positioned.map(({ token }) => token))
+    })
+  }
+
   const measuredCharacterCount = penLiftCounts.length > 0 && penLiftCounts.every(Boolean)
     ? penLiftCounts.reduce<number>((sum, count) => sum + (count ?? 0), 0)
     : null
 
-  return candidates
+  const ranked = candidates
     .map((tokens) => {
       const fusion = fusePersonalizedTextRecognition(
         tokens,
@@ -383,5 +466,20 @@ export const recognizePersonalizedTextLine = async (
         score: personalizedTextFusionSelectionScore(fusion, neural, language) - penLiftMismatch * 0.22,
       }
     })
-    .sort((first, second) => second.score - first.score)[0]
+    .sort((first, second) => second.score - first.score)
+  const selected = ranked[0]
+  return {
+    tokens: selected.tokens,
+    fusion: selected.fusion,
+    ...(includeCandidateScores ? {
+      candidateScores: ranked.slice(0, 12).map((entry) => ({
+        text: entry.fusion.text,
+        score: Math.round(entry.score * 10_000) / 10_000,
+        tokenCount: entry.tokens.filter((token) => !token.isLayout).length,
+        personalizedCharacters: entry.fusion.personalizedCharacters,
+        neuralCharacters: entry.fusion.neuralCharacters,
+        classicalCharacters: entry.fusion.classicalCharacters,
+      })),
+    } : {}),
+  }
 }

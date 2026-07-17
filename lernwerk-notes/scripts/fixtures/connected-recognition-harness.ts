@@ -404,6 +404,108 @@ const run = async () => {
       estimatedPenLiftCount: estimatePenLiftTextCharacterCount(pairStrokes),
     }
   })
+  const continuousGuidedPairs = ['te', 'st', 'ac', 'os', 'ti'].map((expected, index) => {
+    // `connectedWord` deliberately creates one uninterrupted main pen stroke
+    // for both letters. Crossbars and dots are drawn only after that complete
+    // body, matching a common real-world tablet writing order.
+    const pairStrokes = connectedWord(expected, .00325 + index * .00009)
+    const tokens = recognizeExpression(
+      pairStrokes,
+      baselineModel,
+      BASE_CATALOG,
+      'text',
+      [],
+      'de',
+      2,
+      expected,
+    )
+    return {
+      expected,
+      value: recognizedSentence(tokens).toLocaleLowerCase('de'),
+      tokenCount: tokens.length,
+      tokens: tokens.map((token) => ({
+        char: token.char,
+        confidence: token.confidence,
+        bbox: token.bbox,
+        alternatives: token.alternatives.slice(0, 16).map((alternative) => ({
+          char: alternative.char,
+          confidence: alternative.confidence,
+          personalSupport: alternative.personalSupport,
+        })),
+      })),
+      baseClusters: segmentStrokes(pairStrokes, 'text').length,
+      hypothesisSizes: segmentStrokes(pairStrokes, 'text').flatMap((cluster) => (
+        connectedTextSegmentationHypotheses(cluster, 2).map((hypothesis) => hypothesis.length)
+      )),
+    }
+  })
+  const delayedAccessoryPair = connectedWord('ti', .0037)
+  const delayedAccessoryClusters = segmentStrokes(delayedAccessoryPair, 'text')
+  const delayedAccessoryHypotheses = delayedAccessoryClusters.flatMap((cluster) => (
+    connectedTextSegmentationHypotheses(cluster, 2).filter((hypothesis) => hypothesis.length === 2)
+  ))
+  const delayedTBar = delayedAccessoryPair.find((stroke) => (
+    stroke.points.some((entry) => entry.t >= 10_000 && entry.t < 10_100)
+  ))!
+  const delayedIDot = delayedAccessoryPair.find((stroke) => (
+    stroke.points.some((entry) => entry.t >= 10_100)
+  ))!
+  const completeAccessoryInPart = (parts: Array<{ strokes: Stroke[] }>, reference: Stroke, expectedPart: number) => {
+    const referenceTimes = reference.points.map((entry) => entry.t)
+    const matches = parts.flatMap((part, partIndex) => part.strokes.flatMap((stroke) => (
+      stroke.points.some((entry) => referenceTimes.includes(entry.t)) ? [{ partIndex, stroke }] : []
+    )))
+    return matches.length === 1 && matches[0].partIndex === expectedPart &&
+      matches[0].stroke.points.length === reference.points.length &&
+      matches[0].stroke.points.every((entry, index) => entry.t === referenceTimes[index])
+  }
+  const completeAccessoryPart = (parts: Array<{ strokes: Stroke[] }>, reference: Stroke) => {
+    const referenceTimes = reference.points.map((entry) => entry.t)
+    const matches = parts.flatMap((part, partIndex) => part.strokes.flatMap((stroke) => (
+      stroke.points.some((entry) => referenceTimes.includes(entry.t)) ? [{ partIndex, stroke }] : []
+    )))
+    return matches.length === 1 &&
+      matches[0].stroke.points.length === reference.points.length &&
+      matches[0].stroke.points.every((entry, index) => entry.t === referenceTimes[index])
+      ? matches[0].partIndex
+      : null
+  }
+  const delayedAccessoryTokens = recognizeExpression(
+    delayedAccessoryPair,
+    baselineModel,
+    BASE_CATALOG,
+    'text',
+    [],
+    'de',
+    2,
+    'ti',
+  )
+  const delayedAccessoryRecognitionCandidates = [0, 1, 2].map((segmentationIndex) => {
+    const candidate = recognizeExpression(
+      delayedAccessoryPair,
+      baselineModel,
+      BASE_CATALOG,
+      'text',
+      [],
+      'de',
+      2,
+      'ti',
+      segmentationIndex,
+    )
+    return {
+      segmentationIndex,
+      value: recognizedSentence(candidate).toLocaleLowerCase('de'),
+      tokens: candidate.map((token) => ({
+        char: token.char,
+        bbox: token.bbox,
+        confidence: token.confidence,
+        alternatives: token.alternatives.slice(0, 20).map((alternative) => ({
+          char: alternative.char,
+          confidence: alternative.confidence,
+        })),
+      })),
+    }
+  })
   const automaticEquation = recognizeAutomaticExpression([
     ...mathAt('digit_1', .22, .3, .06, .18),
     ...mathAt('operator_plus', .34, .3, .06, .18),
@@ -474,6 +576,43 @@ const run = async () => {
   }
   const wideTWithCloseETwoPartHypotheses = wideTWithCloseEHypotheses
     .filter((hypothesis) => hypothesis.length === 2)
+  const delayedOverhangingTStem: Stroke = {
+    ...wideTStem,
+    points: wideTStem.points.map((entry, index) => ({ ...entry, x: entry.x - .015, t: index })),
+  }
+  const delayedOverhangingE = translatedStrokes(isolatedLetter('e', .0007), .062, -.02)
+    .map((stroke, strokeIndex) => ({
+      ...stroke,
+      points: stroke.points.map((entry, pointIndex) => ({
+        ...entry,
+        t: 30 + strokeIndex * 20 + pointIndex,
+      })),
+    }))
+  const delayedOverhangingTBar: Stroke = {
+    baseWidth: 3.8,
+    pressureEnabled: true,
+    points: [
+      point(.25, .25, 200),
+      point(.33, .248, 201),
+      point(.41, .251, 202),
+      point(.49, .249, 203),
+      point(.57, .252, 204),
+    ],
+  }
+  // The complete next letter is written before returning to the very wide T
+  // bar. Centre-only attachment used to assign its right-hand portion to e.
+  const delayedOverhangingT = [
+    delayedOverhangingTStem,
+    ...delayedOverhangingE,
+    delayedOverhangingTBar,
+  ]
+  const delayedOverhangingClusters = segmentStrokes(delayedOverhangingT, 'text')
+  const delayedOverhangingHypotheses = delayedOverhangingClusters.flatMap((cluster) => (
+    connectedTextSegmentationHypotheses(cluster, 2).filter((hypothesis) => hypothesis.length === 2)
+  ))
+  const delayedOverhangingBarPreserved = delayedOverhangingHypotheses.filter((parts) => (
+    completeAccessoryInPart(parts, delayedOverhangingTBar, 0)
+  )).length
   const normalTMathTokens = recognizeExpression(
     normalUppercaseT,
     baselineModel,
@@ -575,17 +714,32 @@ const run = async () => {
     ] as [number, number, number, number],
   }
   const correctionResegmentation = resegmentTextTokensForCorrection([mergedCorrectionToken], [4])
-  const zeroShotIsolated = Object.keys(shapes).map((expected, index) => ({
-    expected,
-    recognized: recognizedSentence(recognizeExpression(
-      isolatedLetter(expected, .0009 + index * .00007),
+  const zeroShotIsolated = Object.keys(shapes).map((expected, index) => {
+    const strokes = isolatedLetter(expected, .0009 + index * .00007)
+    const isolatedClusters = segmentStrokes(strokes, 'text')
+    const points = strokes.flatMap((stroke) => stroke.points)
+    const physicalAspect = (
+      (Math.max(...points.map((entry) => entry.x)) - Math.min(...points.map((entry) => entry.x))) * SOURCE_WIDTH /
+      Math.max(1, (Math.max(...points.map((entry) => entry.y)) - Math.min(...points.map((entry) => entry.y))) * SOURCE_HEIGHT)
+    )
+    return {
+      expected,
+      recognized: recognizedSentence(recognizeExpression(
+      strokes,
       baselineModel,
       BASE_CATALOG,
       'text',
       [],
       'de',
-    )).toLocaleLowerCase('de'),
-  }))
+      )).toLocaleLowerCase('de'),
+      physicalAspect,
+      baseClusters: isolatedClusters.length,
+      hypothesisSizes: isolatedClusters.flatMap((cluster) => (
+        connectedTextSegmentationHypotheses(cluster).map((hypothesis) => hypothesis.length)
+      )),
+      cuts: textCutCandidatesForTests(strokes),
+    }
+  })
   const zeroShotWords = ['test', 'hallo', 'lernen', 'mathe', 'computer'].map((expected, index) => {
     const tokens = recognizeExpression(
       connectedWord(expected, .0011 + index * .00017),
@@ -1061,6 +1215,11 @@ const run = async () => {
       tokenCount: wideTWithCloseETokens.length,
       selectedTopBarComplete: preservesCompleteTTopBar(wideTWithCloseETokens),
     },
+    delayedOverhangingT: {
+      baseClusters: delayedOverhangingClusters.length,
+      twoPartHypotheses: delayedOverhangingHypotheses.length,
+      preservedTopBarHypotheses: delayedOverhangingBarPreserved,
+    },
     conflictResolvedT: {
       mode: conflictResolvedT.mode,
       value: conflictResolvedT.value,
@@ -1099,6 +1258,27 @@ const run = async () => {
     automaticTextCases,
     incrementalTextCases,
     rapidClosePairs,
+    continuousGuidedPairs,
+    delayedAccessoryPair: {
+      baseClusters: delayedAccessoryClusters.length,
+      twoPartHypotheses: delayedAccessoryHypotheses.length,
+      intactHypotheses: delayedAccessoryHypotheses.filter((parts) => (
+        completeAccessoryInPart(parts, delayedTBar, 0) &&
+        completeAccessoryInPart(parts, delayedIDot, 1)
+      )).length,
+      unfragmentedHypotheses: delayedAccessoryHypotheses.filter((parts) => (
+        completeAccessoryPart(parts, delayedTBar) !== null &&
+        completeAccessoryPart(parts, delayedIDot) !== null
+      )).length,
+      accessoryParts: delayedAccessoryHypotheses.map((parts) => ({
+        tBar: completeAccessoryPart(parts, delayedTBar),
+        iDot: completeAccessoryPart(parts, delayedIDot),
+        bounds: parts.map((part) => [part.minX, part.maxX]),
+      })),
+      value: recognizedSentence(delayedAccessoryTokens).toLocaleLowerCase('de'),
+      tokenCount: delayedAccessoryTokens.length,
+      recognitionCandidates: delayedAccessoryRecognitionCandidates,
+    },
     incrementalTextRecovery: {
       mode: incrementalTextRecovery.mode,
       value: incrementalTextRecovery.value,

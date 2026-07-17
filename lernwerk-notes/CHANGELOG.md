@@ -1,5 +1,16 @@
 # Änderungsverlauf
 
+## 2026.7.1-beta.2
+
+- die Segmentierungsengine bewertet verbundene Handschrift jetzt als Sequenz vollständiger Buchstabenkörper statt über überlappende Begrenzungsrahmen allein; zwei berührende oder über einen Anschlussstrich verbundene Buchstaben bleiben dadurch getrennt, und der vorherige Buchstabe darf keine Teile seines Nachbarn mehr übernehmen
+- Punkte, Querstriche und nachträglich gesetzte Anschlussstriche werden über Position, Grösse, zeitliche Stiftreihenfolge und Körpernähe ihrem tatsächlichen Buchstaben zugeordnet; insbesondere bleibt der obere Strich eines `T` vollständig beim Stamm, während ein rechts abgesetzter Anschlussstrich nicht als zusätzlicher Buchstabe erscheint
+- wiederholt trainierte breite oder mehrstrichige Einzelzeichen behalten nun eine starke Ganzzeichen-Hypothese: ein korrekt angelerntes `T`, `d` oder `n` wird weder in mehrere scheinbare Buchstaben zerlegt noch durch einen zufälligen Wörterbuchbonus zu einem Integral- oder Wortfragment umgedeutet
+- persönliche GlyphenWerk-Prototypen, das lokale Zeilenmodell, die unabhängig gemessene Zeichenanzahl, echte Abstände sowie deutsche und englische Wortfolgen werden gemeinsam bewertet; sichere Gesamtwörter bleiben erhalten, während visuell gestützte persönliche Folgen fehlerhafte neuronale Wörter korrigieren können
+- Gross- und Kleinschreibung sowie unbekannte Eigennamen werden stärker durch die tatsächliche Zeichenform geschützt; eine Sprachkorrektur darf nur innerhalb eines eng begrenzten visuellen Verlusts eingreifen und verändert kurze gültige Wörter oder Namen nicht aufgrund eines bloss häufigeren Wörterbuchtreffers
+- mehrere physische Schreibzeilen werden anhand ihrer Tintenlage rekonstruiert, auch wenn ein Erkennungsanbieter flache Tokenmetadaten liefert; Zeilenumbrüche bleiben durch persönliche Segmentierung, Wortkontext und sichtbare Ausgabe erhalten, ohne lange normale Wörter als mathematische Trennstriche an die nächste Zeile zu hängen
+- der persönliche Erkennungspfad vermeidet unnötige Längenhypothesen bei bereits sicheren bekannten Wörtern und verwendet vorallokierte numerische Distanzberechnungen statt kurzlebiger Maps und Sortierungen; die geprüften realen UJI-Wörter benötigen dadurch typischerweise rund 1,5 bis 2,7 Sekunden statt 3,8 bis 10,4 Sekunden bei identischer Ausgabe
+- die ressourcenbegrenzten Regressionen bestehen mit 0 Byte Swap: 128 persönliche Holdouts erreichen im kontrollierten 39-Klassen-Audit 128/128 Treffer, der 60-Schreibenden-Paaraudit hält für 3.720 Einzelzeichen sowie 44.640 getrennte und vollständig verbundene Paare den korrekten Segmentierungspfad bereit, und die End-to-End-Prüfung umfasst Text, Mathematik, Mehrzeiligkeit, Wurzeln, Brüche, Indizes und Integrationsgrenzen
+
 ## 2026.7.1-beta.1
 
 - FaNotes besitzt jetzt getrennte Stable- und Beta-Updatekanäle: Stable bündelt gründlich geprüfte Änderungen in zwei bis höchstens vier Veröffentlichungen pro Monat, während Beta einzelne Neuerungen früher als klar gekennzeichnete Vorabversion ausliefert

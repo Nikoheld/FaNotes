@@ -49,6 +49,8 @@ try {
   assert.equal(result.integratedTokenCount, 4, JSON.stringify(result))
   assert.equal(result.phraseIntegratedText.toLocaleLowerCase('de'), 'test test', JSON.stringify(result))
   assert.equal(result.phraseIntegratedTokenCount, 8, JSON.stringify(result))
+  assert.equal(result.multiLineIntegratedText.toLocaleLowerCase('de'), 'test\ntest', JSON.stringify(result))
+  assert.equal(result.multiLineIntegratedTokenCount, 8, JSON.stringify(result))
   assert.ok(result.preferredHypothesisSizes.includes(4), JSON.stringify(result))
   console.log(`Neuronengeführte persönliche Segmentierung: ${result.unguided} → ${result.guided} → ${result.integratedText} (${result.integratedSource}) mit ${result.integratedTokenCount} Zeichen.`)
 } finally {

@@ -82,6 +82,26 @@ try {
   assert.equal(recognizedSentence(guarded), 'Tost', 'Der Wortkontext darf eine visuell unplausible Alternative nicht erzwingen.')
   assert.equal(guarded.some((entry) => entry.context?.autoLearn), false, 'Ein unbekanntes Wort darf keine Pseudo-Labels erzeugen.')
 
+  const shortUnknown = [
+    token('a', 82, [['a', 82], ['o', 67]], 0),
+    token('c', 69, [['c', 69], ['n', 64]], 1),
+  ]
+  assert.equal(
+    recognizedSentence(applyTextReranking(shortUnknown, BASE_CATALOG, 'de')),
+    'ac',
+    'Ein starkes Zwei-Zeichen-Wörterbuchprior darf ein sichtbar besseres c nicht zu n und damit ac zu an umschreiben.',
+  )
+
+  const shortDoubleRewrite = [
+    token('o', 80, [['o', 80], ['a', 74]], 0),
+    token('s', 58, [['s', 58], ['n', 44]], 1),
+  ]
+  assert.equal(
+    recognizedSentence(applyTextReranking(shortDoubleRewrite, BASE_CATALOG, 'de')),
+    'os',
+    'Ein kurzes bekanntes Wort darf niemals durch den Austausch beider sichtbaren Buchstaben entstehen.',
+  )
+
   const unknown = [
     token('Q', 96, [['Q', 96]], 0),
     token('z', 95, [['z', 95]], 1),
@@ -123,6 +143,18 @@ try {
     recognizedSentence(applyTextReranking(caseAware, BASE_CATALOG, 'de')),
     'Test',
     'Zeichenhöhe und Wortposition müssen Gross- und Kleinbuchstaben auseinanderhalten.',
+  )
+
+  const internalCaseAware = [...'fensTer'].map((char, index) => token(
+    char,
+    char === 'T' ? 78 : 82,
+    char === 'T' ? [['T', 78], ['t', 68]] : [[char, 82]],
+    index,
+  ))
+  assert.equal(
+    recognizedSentence(applyTextReranking(internalCaseAware, BASE_CATALOG, 'de')),
+    'fenster',
+    'Ein höhengleicher innerer Buchstabe muss bei einer nahen Kleinbuchstabenform klein bleiben.',
   )
 
   const lowLine = [
@@ -224,6 +256,106 @@ try {
     engine: 'trocr-bilingual',
     lines: [neuralLine(text, confidence)],
   })
+  const cleanPersonalWordScore = personalizedTextFusionSelectionScore({
+    text: 'mathe',
+    confidence: 71,
+    source: 'personalized',
+    personalizedCharacters: 5,
+    neuralCharacters: 0,
+    classicalCharacters: 0,
+    unsupportedChanges: 4,
+  }, neuralResult('münt', 71), 'de')
+  const partialWordWithDebrisScore = personalizedTextFusionSelectionScore({
+    text: 'man2',
+    confidence: 71,
+    source: 'hybrid',
+    personalizedCharacters: 3,
+    neuralCharacters: 0,
+    classicalCharacters: 1,
+    unsupportedChanges: 1,
+  }, neuralResult('münt', 71), 'de')
+  assert.ok(
+    cleanPersonalWordScore > partialWordWithDebrisScore,
+    `Ein bekanntes Teilwort darf angehängten OCR-/Mathematikmüll nicht vor einer vollständigen persönlichen Buchstabenfolge verstecken: ${JSON.stringify({ cleanPersonalWordScore, partialWordWithDebrisScore })}`,
+  )
+  const oneShotGarten = [...'garten'].map((char, index) => {
+    const confidence = [73, 69, 56, 74, 70, 51][index]
+    const base = token(
+      char,
+      confidence,
+      index === 0 ? [['g', 73], ['s', 55]] : [[char, confidence]],
+      index,
+    )
+    return {
+      ...base,
+      personalSupport: 1,
+      personalConfidence: [30, 23, 0, 32, 25, 0][index],
+      alternatives: base.alternatives.map((alternative) => ({
+        ...alternative,
+        personalSupport: alternative.char === char ? 1 : 0,
+        personalConfidence: alternative.char === char
+          ? [30, 23, 0, 32, 25, 0][index]
+          : 0,
+      })),
+    }
+  })
+  assert.equal(
+    fusePersonalizedTextRecognition(oneShotGarten, neuralResult('sarten', 71), 'de', 6).text,
+    'garten',
+    'Ein klar ausgewähltes persönliches Einmalbeispiel muss einen schwächeren gleich langen Zeilenmodell-Buchstaben korrigieren.',
+  )
+  const completeGartenScore = personalizedTextFusionSelectionScore({
+    text: 'garten',
+    confidence: 71,
+    source: 'hybrid',
+    personalizedCharacters: 4,
+    neuralCharacters: 2,
+    classicalCharacters: 0,
+    unsupportedChanges: 0,
+  }, neuralResult('sarten', 71), 'de')
+  const mergedSagenScore = personalizedTextFusionSelectionScore({
+    text: 'sagen',
+    confidence: 71,
+    source: 'hybrid',
+    personalizedCharacters: 3,
+    neuralCharacters: 0,
+    classicalCharacters: 2,
+    unsupportedChanges: 2,
+  }, neuralResult('sarten', 71), 'de')
+  assert.ok(
+    completeGartenScore > mergedSagenScore,
+    `Ein kürzeres bekanntes Wort darf einen vollständigen gleich langen persönlichen Buchstabenpfad nicht verdrängen: ${JSON.stringify({ completeGartenScore, mergedSagenScore })}`,
+  )
+  const oneShotFenster = [...'fenster'].map((char, index) => {
+    const confidence = [72, 58, 77, 71, 68, 58, 89][index]
+    const personalConfidence = [28, 4, 38, 26, 21, 4, 59][index]
+    const base = token(char, confidence, [[char, confidence]], index)
+    return {
+      ...base,
+      personalSupport: 1,
+      personalConfidence,
+      alternatives: base.alternatives.map((alternative) => ({
+        ...alternative,
+        personalSupport: 1,
+        personalConfidence,
+      })),
+    }
+  })
+  const oneShotFensterFusion = fusePersonalizedTextRecognition(
+    oneShotFenster,
+    neuralResult('heinster', 71),
+    'de',
+  )
+  assert.equal(
+    oneShotFensterFusion.text,
+    'fenster',
+    'Eine vollständig sichtbare, persönlich belegte unbekannte Wortform muss eine Einfügung plus Ersetzung des Zeilenmodells schlagen.',
+  )
+  assert.equal(
+    oneShotFensterFusion.unsupportedChanges,
+    0,
+    'Die streng bestätigte vollständige persönliche Unbekanntwortfolge darf nicht zugleich als unbelegte Abweichung gewertet werden.',
+  )
   for (const language of ['de', 'en']) {
     const visibleFabio = [...'Fabio'].map((char, index) => {
       const base = token(

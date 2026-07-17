@@ -202,6 +202,46 @@ const run = async () => {
     },
     'de',
   )
+  const multiLineStrokes = [
+    ...strokes,
+    ...strokes.map((stroke) => ({
+      ...stroke,
+      points: stroke.points.map((entry) => ({ ...entry, y: entry.y + .35, t: entry.t + 40_000 })),
+    })),
+  ]
+  const multiLineIntegrated = await recognizePersonalizedTextLine(
+    multiLineStrokes,
+    {
+      model,
+      samples: personal,
+      labels: BASE_CATALOG,
+      layoutExamples: [],
+      sampleCount: personal.length,
+      classCount: 3,
+      baselineSampleCount: standard.length,
+      modelClassCount: new Set(model.map((entry) => entry.labelId)).size,
+    },
+    {
+      text: 'test\ntest',
+      confidence: 91,
+      engine: 'trocr-bilingual',
+      // Compatibility-provider regression: text contains the real page
+      // break, but structured metadata was flattened into a single line.
+      lines: [{
+        text: 'test\ntest',
+        rawText: 'test\ntest',
+        confidence: 91,
+        bbox: [.12, .28, .13, .51],
+        characters: Array.from('testtest').map((char, index) => ({
+          char,
+          confidence: 91,
+          start: index / 8,
+          end: (index + 1) / 8,
+        })),
+      }],
+    },
+    'de',
+  )
   const cluster = segmentStrokes(strokes, 'text')[0]
   return {
     unguided: recognizedSentence(unguided),
@@ -217,6 +257,8 @@ const run = async () => {
     integratedTokenCount: integrated.tokens.length,
     phraseIntegratedText: phraseIntegrated.fusion.text,
     phraseIntegratedTokenCount: phraseIntegrated.tokens.length,
+    multiLineIntegratedText: multiLineIntegrated.fusion.text,
+    multiLineIntegratedTokenCount: multiLineIntegrated.tokens.length,
     preferredHypothesisSizes: connectedTextSegmentationHypotheses(cluster, 4).map((entry) => entry.length),
   }
 }

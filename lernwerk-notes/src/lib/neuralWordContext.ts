@@ -256,7 +256,11 @@ export const applyMeasuredNeuralWordContext = (
   // handwritten word (for example "korrekt vor"). Compact that boundary only
   // when the first fragment is already substantial; short genuine phrases
   // such as "das ist" retain their spacing.
-  const normalized = wordParts.length === 2 && Array.from(wordParts[0]).length >= 4
+  const normalized = (
+    !/\r?\n/u.test(rawNormalized) &&
+    wordParts.length === 2 &&
+    Array.from(wordParts[0]).length >= 4
+  )
     ? wordParts.join('')
     : rawNormalized
   const pattern = language === 'de' ? /^[A-Za-zÄÖÜäöü]+$/u : /^[A-Za-z]+$/u
