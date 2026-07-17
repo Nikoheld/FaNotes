@@ -189,8 +189,8 @@ export function createBrowserPreviewApi(): LernwerkApi {
   const updateState: UpdateState = {
     status: 'up-to-date',
     supported: false,
-    currentVersion: '2026.7.1-beta.2',
-    latestVersion: '2026.7.1-beta.2',
+    currentVersion: '2026.7.1',
+    latestVersion: '2026.7.1',
     publishedAt: new Date().toISOString(),
     releaseNotes: [],
     downloadedBytes: 0,

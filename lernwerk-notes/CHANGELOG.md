@@ -1,5 +1,17 @@
 # Änderungsverlauf
 
+## 2026.7.1
+
+- der erste Stable-Release mit Kalender-Versionierung bündelt die vollständig geprüften Beta-1- und Beta-2-Änderungen; bestehende Installationen auf `2.50.3` erhalten dadurch zuerst die neue Stable-/Beta-Kanalwahl und können anschließend in den Einstellungen zuverlässig zwischen beiden Kanälen wechseln
+- Stable und Beta verwenden getrennte signierte Manifeste, Downloads und differentielle Updatepfade; ein Kanalwechsel verwirft fremde vorgeladene Pakete, erzwingt niemals ein Downgrade und behält Ed25519-Signatur, SHA-256, exakte Delta-Basis, Range-Fortsetzung, atomaren Wechsel und Rollback-Schutz bei
+- die Segmentierungsengine bewertet verbundene Handschrift als Sequenz vollständiger Buchstabenkörper: berührende oder durch Anschlussstriche verbundene Buchstaben bleiben getrennt, und ein Buchstabe darf keine Teilstriche seines rechten Nachbarn mehr übernehmen
+- Punkte, Querstriche und nachträglich gesetzte Anschlussstriche werden anhand von Position, Grösse, zeitlicher Stiftreihenfolge und Körpernähe zugeordnet; der obere Strich eines `T` bleibt beim Stamm, während ein rechts abgesetzter Anschlussstrich nicht als zusätzlicher Buchstabe erscheint
+- wiederholt trainierte breite oder mehrstrichige Einzelzeichen behalten eine starke Ganzzeichen-Hypothese und werden weder in scheinbare Wörter aufgeteilt noch zu Integralen umgedeutet; persönliche GlyphenWerk-Daten erhalten dabei mehr Gewicht, ohne sichere visuelle Evidenz des allgemeinen Modells zu verdrängen
+- das lokale Zeilenmodell, persönliche Prototypen, unabhängig gemessene Zeichenanzahl, Abstände sowie deutsche und englische Wortfolgen werden gemeinsam bewertet; Gross-/Kleinschreibung, unbekannte Eigennamen, kurze gültige Wörter und mehrere physische Schreibzeilen bleiben geschützt
+- der optimierte persönliche Erkennungspfad vermeidet unnötige Längenhypothesen und kurzlebige Distanzdaten; die geprüften realen UJI-Wörter benötigen typischerweise rund 1,5 bis 2,7 Sekunden statt 3,8 bis 10,4 Sekunden bei identischer Ausgabe
+- die begrenzten Regressionen bestehen mit 0 Byte Swap: 128 persönliche Holdouts erreichen 128/128 Treffer, der 60-Schreibenden-Audit hält für 3.720 Einzelzeichen sowie 44.640 getrennte und vollständig verbundene Paare den korrekten Segmentierungspfad bereit, und Text, Mathematik, Mehrzeiligkeit, Wurzeln, Brüche, Indizes sowie Integrationsgrenzen bleiben grün
+- Linux, Windows und die Web-App verwenden denselben Erkennungs-, Korrektur- und Trainingskern; die deutsche und englische Oberfläche einschließlich Beta-Versionsstatus, GlyphenWerk, PWA, Backup und Offline-Neustart wurde vor der Stable-Freigabe erneut vollständig geprüft
+
 ## 2026.7.1-beta.2
 
 - die Segmentierungsengine bewertet verbundene Handschrift jetzt als Sequenz vollständiger Buchstabenkörper statt über überlappende Begrenzungsrahmen allein; zwei berührende oder über einen Anschlussstrich verbundene Buchstaben bleiben dadurch getrennt, und der vorherige Buchstabe darf keine Teile seines Nachbarn mehr übernehmen
