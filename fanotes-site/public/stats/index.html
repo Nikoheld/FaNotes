@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="de-CH">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="robots" content="noindex,nofollow,noarchive" />
+    <meta name="theme-color" content="#0b0b12" />
+    <title>FaNotes Statistics</title>
+    <link rel="icon" href="/assets/fanotes.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/stats/stats.css?v=20260715.1" />
+    <script src="/stats/stats.js?v=20260715.1" defer></script>
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="/" aria-label="FaNotes Website">
+        <span><img src="/assets/fanotes.svg" alt="" /></span>
+        <b>FaNotes</b>
+      </a>
+      <div class="live"><i></i><span data-copy="live">Live · anonym aggregiert</span></div>
+      <button class="refresh" type="button" data-refresh><span>↻</span><b data-copy="refresh">Aktualisieren</b></button>
+    </header>
+
+    <main>
+      <section class="intro">
+        <div>
+          <span class="eyebrow" data-copy="eyebrow">Private Produktstatistik</span>
+          <h1 data-copy="title">Was FaNotes<br /><em>gerade erreicht.</em></h1>
+        </div>
+        <div class="intro-copy">
+          <p data-copy="lead">Website, Downloads und App-Starts auf einen Blick – ohne Profile, Cookies oder Gerätekennungen.</p>
+          <small><span></span><b data-collecting>Erfassung wird geladen …</b></small>
+        </div>
+      </section>
+
+      <nav class="periods" aria-label="Zeitraum">
+        <button type="button" data-days="7" data-copy="days7">7 Tage</button>
+        <button class="active" type="button" data-days="30" data-copy="days30">30 Tage</button>
+        <button type="button" data-days="90" data-copy="days90">90 Tage</button>
+        <button type="button" data-days="all" data-copy="all">Gesamt</button>
+      </nav>
+
+      <section class="metrics" aria-label="Kennzahlen">
+        <article class="metric violet"><div><span data-copy="websiteViews">Website-Aufrufe</span><i>↗</i></div><strong data-metric="websiteViews">–</strong><small data-today="websiteViews">–</small></article>
+        <article class="metric mint"><div><span data-copy="downloads">Downloads</span><i>↓</i></div><strong data-metric="downloads">–</strong><small data-today="downloads">–</small></article>
+        <article class="metric orange"><div><span data-copy="desktopOpens">Desktop-App-Starts</span><i>⌁</i></div><strong data-metric="desktopAppOpens">–</strong><small data-today="desktopAppOpens">–</small></article>
+        <article class="metric blue"><div><span data-copy="webOpens">Web-App-Starts</span><i>◎</i></div><strong data-metric="webAppOpens">–</strong><small data-today="webAppOpens">–</small></article>
+      </section>
+
+      <section class="panel trend-panel">
+        <div class="panel-head">
+          <div><span data-copy="development">Entwicklung</span><h2 data-copy="activity">Aktivität im gewählten Zeitraum</h2></div>
+          <div class="legend"><span class="violet" data-copy="websiteShort">Website</span><span class="mint" data-copy="downloads">Downloads</span><span class="orange" data-copy="desktopShort">Desktop</span><span class="blue" data-copy="webShort">Web-App</span></div>
+        </div>
+        <div class="chart" data-chart role="img" aria-label="Zeitverlauf"><div class="chart-empty" data-copy="noData">Noch keine Daten in diesem Zeitraum.</div></div>
+      </section>
+
+      <section class="detail-grid">
+        <article class="panel countries-panel">
+          <div class="panel-head"><div><span data-copy="origin">Herkunft</span><h2 data-copy="countries">Länder</h2></div><small data-copy="countryHint">Nur Ländercodes, keine IP-Adressen</small></div>
+          <div class="country-list" data-countries></div>
+        </article>
+
+        <div class="side-stack">
+          <article class="panel compact-panel">
+            <div class="panel-head"><div><span data-copy="distribution">Verteilung</span><h2 data-copy="downloadTypes">Download-Typen</h2></div></div>
+            <div class="breakdown" data-downloads></div>
+          </article>
+          <article class="panel compact-panel">
+            <div class="panel-head"><div><span data-copy="usage">Nutzung</span><h2 data-copy="appStarts">App-Starts</h2></div></div>
+            <div class="breakdown split" data-platforms></div>
+            <div class="versions" data-versions></div>
+          </article>
+        </div>
+      </section>
+
+      <section class="privacy-note">
+        <span class="privacy-icon">✓</span>
+        <div><strong data-copy="anonymousTitle">Tatsächlich anonym</strong><p data-copy="anonymousText">Gespeichert werden ausschließlich tägliche Summen nach Land, Plattform und Version. Keine IP-Adresse, kein Cookie, keine Geräte-ID und kein einzelnes Rohereignis landet in der Statistikdatei.</p></div>
+        <code data-copy="daily">DAILY AGGREGATES</code>
+      </section>
+    </main>
+
+    <div class="error" data-error hidden><strong data-copy="errorTitle">Statistik nicht erreichbar</strong><span data-error-message></span></div>
+  </body>
+</html>

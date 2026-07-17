@@ -1,0 +1,18 @@
+{
+  "format": "fanotes-trocr-runtime-v1",
+  "package": "@huggingface/transformers",
+  "transformersVersion": "3.8.1",
+  "onnxRuntimeVersion": "1.22.0-dev.20250409-89f8206ba4",
+  "assets": [
+    {
+      "file": "ort-wasm-simd-threaded.mjs",
+      "size": 20856,
+      "sha256": "43c25054b6b9ac000f786c65545ff83a45f871e0e310e8c2f4d48a363bb66db4"
+    },
+    {
+      "file": "ort-wasm-simd-threaded.wasm",
+      "size": 11133407,
+      "sha256": "f061472c6e77d6d50d079aacdc0ff9b63fee287ddd2cbf46cf62438d3891de2b"
+    }
+  ]
+}

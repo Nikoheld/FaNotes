@@ -1,0 +1,34 @@
+# Dependencies and generated application bundles
+node_modules/
+dist/
+release/
+*.tsbuildinfo
+vite.config.js
+vite.config.d.ts
+
+# Generated mirrors and historical binary archives
+lernwerk-notes/delivery/
+lernwerk-notes/public/glyphenwerk/
+lernwerk-notes/public/spell/
+fanotes-site/public/notes/
+
+# Local caches and test output
+__pycache__/
+*.py[cod]
+*.log
+.cache/
+.vite/
+coverage/
+playwright-report/
+test-results/
+
+# Local configuration, vaults and credentials
+.env
+.env.*
+!.env.example
+*private*.pem
+*signing*.key
+*.p12
+*.pfx
+.DS_Store
+Thumbs.db

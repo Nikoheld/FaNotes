@@ -1,0 +1,317 @@
+<!doctype html>
+<html lang="de" data-theme="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#0b0b12" />
+    <meta name="description" content="FaNotes verbindet Markdown, Grafiktablett, Dokumente und lokale Handschrifterkennung in einer ruhigen Notizen-App für Schule, UNI, Privatleben und Arbeit." />
+    <meta property="og:type" content="website" />
+    <meta property="og:locale" content="de_CH" />
+    <meta property="og:title" content="FaNotes – Handschrift trifft Markdown" />
+    <meta property="og:description" content="Eine lokale, tabletfreundliche Wissensbasis für Schule, UNI, Privatleben und Arbeit. Für Windows und Linux." />
+    <meta property="og:image" content="https://fanotes.fasrv.ch/assets/app-overview.webp" />
+    <meta property="og:url" content="https://fanotes.fasrv.ch/" />
+    <link rel="canonical" href="https://fanotes.fasrv.ch/" />
+    <link rel="icon" href="/assets/fanotes.svg" type="image/svg+xml" />
+    <link rel="preload" href="/assets/hero-desk.webp" as="image" type="image/webp" />
+    <link rel="stylesheet" href="/fanotes-site.css?v=20260715.6" />
+    <script src="/fanotes-i18n.js?v=20260715.6" defer></script>
+    <script src="/fanotes-site.js?v=20260715.6" defer></script>
+    <title>FaNotes – Handschrift trifft Markdown</title>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Zum Inhalt springen</a>
+    <div class="scroll-progress" aria-hidden="true"><span data-scroll-progress></span></div>
+    <div class="page-noise" aria-hidden="true"></div>
+
+    <header class="site-header" data-header>
+      <a class="brand" href="#top" aria-label="FaNotes Startseite">
+        <span class="brand-mark"><img src="/assets/fanotes.svg" alt="" /></span>
+        <span>FaNotes</span>
+      </a>
+      <nav class="main-nav" aria-label="Hauptnavigation" data-nav>
+        <a href="#features">Features</a>
+        <a href="/notes/">Web-App</a>
+        <a href="#download">Download</a>
+        <a href="#faq">FAQ</a>
+      </nav>
+      <div class="header-actions">
+        <button class="icon-button theme-toggle" type="button" aria-label="Farbschema wechseln" data-theme-toggle>
+          <svg class="sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3.5"/><path d="M12 2v2M12 20v2M4.93 4.93l1.42 1.42M17.65 17.65l1.42 1.42M2 12h2M20 12h2M4.93 19.07l1.42-1.42M17.65 6.35l1.42-1.42"/></svg>
+          <svg class="moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 15.2A8.5 8.5 0 0 1 8.8 4 8.5 8.5 0 1 0 20 15.2Z"/></svg>
+        </button>
+        <a class="header-download" href="#download" data-primary-download>Download <span data-version>…</span></a>
+        <button class="icon-button menu-toggle" type="button" aria-label="Navigation öffnen" aria-expanded="false" data-menu-toggle>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path class="menu-line menu-line-top" d="M4 7h16"/><path class="menu-line menu-line-mid" d="M4 12h16"/><path class="menu-line menu-line-bottom" d="M4 17h16"/></svg>
+        </button>
+      </div>
+    </header>
+
+    <main id="main">
+      <section class="hero" id="top">
+        <div class="hero-photo" aria-hidden="true"></div>
+        <div class="hero-overlay" aria-hidden="true"></div>
+        <div class="hero-inner">
+          <div class="hero-copy reveal">
+            <div class="eyebrow"><span></span> Notizen, die mitdenken</div>
+            <h1>Deine Gedanken.<br /><em>Handschriftlich.</em><br />Durchsuchbar.</h1>
+            <p class="hero-lead">FaNotes vereint die Freiheit eines Blatts Papier mit einem leistungsfähigen Markdown-Vault – für Schule, UNI, Privatleben und Arbeit, lokal und für dein Grafiktablett gemacht.</p>
+            <div class="hero-actions">
+              <a class="button primary" href="/notes/">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v12H4V5Zm4 16h8M9 17v4m6-4v4"/></svg>
+                <span><strong>FaNotes im Browser starten</strong><small>Ohne Download · sofort bereit</small></span>
+              </a>
+              <a class="button web" href="#download">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 20h14"/></svg>
+                Desktop-App herunterladen
+              </a>
+              <a class="button ghost" href="#features">Funktionen ansehen <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg></a>
+            </div>
+            <div class="release-line">
+              <span class="status-dot"></span>
+              <span>Aktuell: <strong>FaNotes <span data-version>…</span></strong></span>
+              <span class="release-separator"></span>
+              <span>Windows &amp; Linux x64</span>
+              <span class="release-separator"></span>
+              <span>Local first</span>
+            </div>
+          </div>
+          <div class="hero-card reveal" data-delay="1">
+            <div class="hero-card-top"><span>Eine Seite. Zwei Eingaben.</span><span class="live-pill"><i></i> lokal</span></div>
+            <div class="paper-preview">
+              <div class="paper-toolbar"><i></i><i></i><i></i><span></span><b></b><b></b></div>
+              <div class="paper-body">
+                <div class="type-lines"><strong>Mechanik</strong><span></span><span></span><span></span></div>
+                <svg class="ink-equation" viewBox="0 0 440 160" aria-label="Handschriftliches F gleich m mal a wird als gesetzte Formel erkannt">
+                  <path d="M22 27c-1 28-1 57 0 85m0-84c18-3 34-3 50-1M22 65c15-2 28-2 41-2M84 56c17-2 33-2 49-1M85 77c17-2 33-2 49-1m16-9c1 13 1 28 2 42m0-31c6-13 18-15 22-2 2 10 1 22 1 33m0-30c7-14 19-16 23-2 3 10 1 22 2 32m18-18c1-1 2-1 3 0m22-13c-9-6-19 1-19 14 0 12 9 20 18 8m1-22c-1 11-2 24 3 31"/>
+                  <path class="mint" d="M294 42h116M294 113h116"/>
+                  <text x="318" y="91">F = m · a</text>
+                </svg>
+                <div class="convert-chip"><svg viewBox="0 0 24 24"><path d="m12 3 1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5L12 3Z"/></svg> Handschrift erkannt</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="hero-scroll" aria-hidden="true"><span></span> Entdecken</div>
+      </section>
+
+      <section class="trust-strip" aria-label="FaNotes Eigenschaften">
+        <div><svg viewBox="0 0 24 24"><path d="M12 3 4.5 6v5.5c0 4.3 3 7.8 7.5 9.5 4.5-1.7 7.5-5.2 7.5-9.5V6L12 3Z"/><path d="m8.5 12 2.2 2.2 4.8-5"/></svg><span><strong>Privat by design</strong><small>Keine Cloud nötig</small></span></div>
+        <div><svg viewBox="0 0 24 24"><path d="M4 5h6l2 2h8v12H4V5Z"/><path d="M8 11h8M8 15h5"/></svg><span><strong>Echte Dateien</strong><small>Markdown bleibt Markdown</small></span></div>
+        <div><svg viewBox="0 0 24 24"><path d="M5 19 16.5 7.5l-3-3L2 16v3h3Z"/><path d="m14 4 3 3M11 19h10"/></svg><span><strong>Tabletbereit</strong><small>Druck & Radierer</small></span></div>
+        <div><svg viewBox="0 0 24 24"><path d="M12 2v20M2 12h20M5 5l14 14M19 5 5 19"/></svg><span><strong>Mathe inklusive</strong><small>Erkennen, lösen, prüfen</small></span></div>
+      </section>
+
+      <section class="section web-app-spotlight" id="web-app" aria-labelledby="web-app-title">
+        <div class="web-app-shell reveal">
+          <div class="web-app-copy">
+            <span class="section-kicker">Direkt im Browser</span>
+            <h2 id="web-app-title">Dein FaNotes.<br /><em>Ohne Installation.</em></h2>
+            <p>Öffne die vollständige Web-App und beginne sofort. Markdown, Stifteingabe, Mathematik, GlyphenWerk, Arbeitsblätter und AI-Werkzeuge stehen direkt im Browser bereit.</p>
+            <div class="web-app-benefits" role="list" aria-label="Vorteile der FaNotes Web-App">
+              <span role="listitem"><i>✓</i> Sofort und kostenlos starten</span>
+              <span role="listitem"><i>✓</i> Lokaler, privater Browser-Vault</span>
+              <span role="listitem"><i>✓</i> Optionales verschlüsseltes Server-Backup</span>
+            </div>
+            <div class="web-app-actions">
+              <a class="button primary" href="/notes/"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14m-6-6 6 6-6 6"/></svg> Web-App jetzt öffnen</a>
+              <a class="web-app-text-link" href="#download">Oder Desktop-App herunterladen <span>→</span></a>
+            </div>
+            <small class="web-app-privacy"><span></span> Notizen bleiben standardmäßig nur auf diesem Gerät.</small>
+          </div>
+          <a class="web-app-browser" href="/notes/" aria-label="FaNotes Web-App in einem neuen Bereich öffnen">
+            <div class="web-app-browser-bar"><span></span><span></span><span></span><b>fanotes.fasrv.ch/notes</b><em>Live</em></div>
+            <div class="web-app-screen"><img src="/assets/app-overview.webp" alt="FaNotes Web-App mit Notizseite, Ordnern und Stiftwerkzeugen" loading="lazy" /></div>
+            <span class="web-app-float web-app-float-one">Kein Download</span>
+            <span class="web-app-float web-app-float-two">Im Browser gespeichert</span>
+          </a>
+        </div>
+      </section>
+
+      <section class="section use-cases" aria-labelledby="use-cases-title">
+        <div class="section-heading centered reveal">
+          <span class="section-kicker">Für jeden Teil deines Lebens</span>
+          <h2 id="use-cases-title">Ein Werkzeug.<br />Vier mögliche Starts.</h2>
+          <p>Wähle beim ersten Start ein Profil. FaNotes bereitet passende Ordner vor, ohne Funktionen einzuschränken – und alles bleibt jederzeit frei anpassbar.</p>
+        </div>
+        <div class="use-case-grid reveal" data-delay="1" role="list">
+          <article role="listitem"><span aria-hidden="true">01</span><i aria-hidden="true">⌁</i><h3>Schule</h3><p>Fächer, Aufgaben, Arbeitsblätter und Prüfungen übersichtlich an einem Ort.</p></article>
+          <article role="listitem"><span aria-hidden="true">02</span><i aria-hidden="true">△</i><h3>UNI</h3><p>Vorlesungen, Seminare, Forschung und Literatur sauber miteinander verbinden.</p></article>
+          <article role="listitem"><span aria-hidden="true">03</span><i aria-hidden="true">⌂</i><h3>Privat</h3><p>Ideen, Tagebuch, Projekte, Reisepläne und wichtige Dokumente festhalten.</p></article>
+          <article role="listitem"><span aria-hidden="true">04</span><i aria-hidden="true">□</i><h3>Arbeit</h3><p>Meetings, Aufgaben, Projektnotizen und Wissen zuverlässig organisieren.</p></article>
+        </div>
+      </section>
+
+      <section class="section features" id="features">
+        <div class="section-heading reveal">
+          <div><span class="section-kicker">Warum FaNotes</span><h2>Alles, was du festhalten möchtest.<br />Auf einer gemeinsamen Seite.</h2></div>
+          <p>Kein Wechsel zwischen Zeichen-App, Markdown-Editor und PDF-Werkzeug. FaNotes bringt alle Ebenen auf eine gemeinsame, ruhige Seite.</p>
+        </div>
+
+        <div class="bento-grid" aria-label="FaNotes Funktionen">
+          <article class="feature-card feature-large ink-card reveal">
+            <div class="feature-copy"><span class="feature-number">01</span><h3>Schreiben und zeichnen wie auf Papier.</h3><p>Stift, Tastatur und Dokumente leben auf derselben Seite. Acht Pinsel, freie Farben, Spezialtinten sowie 25 direkt platzierbare Icons und Piktogramme machen Notizen vielseitig; Druck, Radierer und Undo bleiben selbstverständlich.</p><span class="feature-tag">Windows Ink · Wayland · X11</span></div>
+            <div class="ink-demo"><span class="cursor-ring" aria-hidden="true"></span><svg viewBox="0 0 560 260" aria-hidden="true"><path d="M30 170c42-118 75-118 90-9 16 112 54 66 63-3 11-83 42-96 61-2 18 91 52 87 78 3 27-88 58-80 65 2 8 89 48 101 74 2 11-42 30-70 64-50"/></svg><div class="pressure-meter"><i></i><span>Druckdynamik</span></div><button class="demo-replay" type="button" data-ink-replay aria-label="Stiftanimation erneut abspielen"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7"/></svg></button></div>
+          </article>
+
+          <article class="feature-card vault-card reveal" data-delay="1">
+            <span class="feature-number">02</span><div class="feature-icon violet"><svg viewBox="0 0 24 24"><path d="M4 5h6l2 2h8v12H4V5Z"/><path d="M8 11h8M8 15h5"/></svg></div><h3>Dein Vault. Deine Dateien.</h3><p>Bereiche, Ordner, Wikilinks und echte Markdown-Dateien – offen für Syncthing, Git und dein NAS.</p>
+            <div class="vault-preview"><div class="folder-stack" role="group" aria-label="Beispielbereich auswählen"><button class="is-active" type="button" style="--i:0" data-vault-folder="Schule" aria-pressed="true"><span>Schule</span><i>12</i></button><button type="button" style="--i:1" data-vault-folder="Privat" aria-pressed="false"><span>Privat</span><i>8</i></button><button type="button" style="--i:2" data-vault-folder="Arbeit" aria-pressed="false"><span>Arbeit</span><i>15</i></button></div></div>
+          </article>
+
+          <article class="feature-card recognition-card reveal" data-delay="2">
+            <span class="feature-number">03</span><div class="feature-icon mint"><svg viewBox="0 0 24 24"><path d="m12 3 1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5L12 3Z"/><path d="m19 15 .8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8L19 15Z"/></svg></div><h3>Erkennung, die dich lernt.</h3><p>GlyphenWerk ist direkt integriert: trainieren, ganze Sätze oder Gleichungen live testen und bestätigte Korrekturen sofort im lokalen Modell verwenden.</p>
+            <div class="recognition-stage"><div class="recognition-sample" data-recognition-sample aria-live="polite">∫₀⁵ f(x) dx</div><div class="micro-tabs" role="group" aria-label="Erkennungsbeispiel auswählen"><button class="is-active" type="button" data-recognition-choice="math" aria-pressed="true">∑ Mathe</button><button type="button" data-recognition-choice="text" aria-pressed="false">Aa Text</button></div><div class="recognition-result"><div><small>Erkannt als</small><strong data-recognition-mode>Mathematik</strong></div><span data-recognition-confidence>94%</span></div></div>
+          </article>
+
+          <article class="feature-card worksheet-card reveal">
+            <span class="feature-number">04</span><div class="feature-icon orange"><svg viewBox="0 0 24 24"><path d="M6 2h9l4 4v16H6V2Z"/><path d="M14 2v5h5M9 12h7M9 16h5"/></svg></div><h3>Arbeitsblätter direkt ausfüllen.</h3><p>PDFs und Bilder importieren, Textfelder platzieren oder mit dem Stift direkt darüber schreiben.</p><div class="worksheet-mini" aria-hidden="true"><span></span><span></span><i></i><b>Antwort</b></div>
+            <div class="worksheet-controls" role="group" aria-label="Eingabeart auswählen"><button class="is-active" type="button" data-worksheet-mode="pen" aria-pressed="true">Stift</button><button type="button" data-worksheet-mode="keyboard" aria-pressed="false">Tastatur</button></div>
+          </article>
+
+          <article class="feature-card ai-card reveal" data-delay="1">
+            <span class="feature-number">05</span><div class="feature-icon blue"><svg viewBox="0 0 24 24"><path d="M9 3h6v3h3v6h-3v3H9v-3H6V6h3V3Z"/><path d="M4 9H2M22 9h-2M12 17v5"/></svg></div><h3>Deine AI, deine Wahl.</h3><p>LM Studio, Ollama, OpenAI, Gemini, Anthropic oder OpenCode korrigieren, verlinken, strukturieren und fassen zusammen. Mehrere Aktionen lassen sich kombinieren.</p><div class="ai-flow"><div class="ai-actions" role="group" aria-label="AI-Aktion auswählen"><button class="is-active" type="button" data-ai-action="correct" aria-pressed="true">Korrigieren</button><button type="button" data-ai-action="link" aria-pressed="false">Verlinken</button><button type="button" data-ai-action="summary" aria-pressed="false">Zusammenfassen</button></div><div class="ai-status" aria-live="polite"><i></i><span data-ai-status>Rechtschreibung wird mit deiner AI geprüft</span></div></div>
+          </article>
+
+          <article class="feature-card feature-wide markdown-card reveal" data-delay="2">
+            <div class="feature-copy"><span class="feature-number">06</span><h3>Markdown, ohne Markdown-Wand.</h3><p>Die FaNotes-Live-Ansicht setzt Überschriften, Tabellen, Aufgaben und KaTeX direkt beim Schreiben. Tippfehler werden wie in Word rot markiert; Deutsch und Englisch erkennt FaNotes automatisch.</p><span class="feature-tag">GFM · KaTeX · Wikilinks · Rechtschreibung</span></div>
+            <div class="markdown-demo"><div class="markdown-demo-head"><span>Notiz · Physik</span><div class="micro-tabs" role="tablist" aria-label="Markdown-Darstellung"><button class="is-active" type="button" role="tab" data-markdown-mode="live" aria-selected="true">Live</button><button type="button" role="tab" data-markdown-mode="source" aria-selected="false">Quelle</button></div></div><div class="markdown-panel" data-markdown-panel="live"><strong>Energieerhaltung</strong><p>In einem abgeschlossenen System bleibt die Gesamtenergie konstant.</p><div class="markdown-task"><i>✓</i> Grundlagen verstehen</div><span><b>E</b><sub>ges</sub> = <b>E</b><sub>kin</sub> + <b>E</b><sub>pot</sub></span></div><div class="markdown-panel markdown-source" data-markdown-panel="source" hidden><code><i>#</i> Energieerhaltung<br><br>In einem abgeschlossenen System bleibt die<br>Gesamtenergie konstant.<br><br><i>- [x]</i> Grundlagen verstehen<br><br><i>$$</i> E_{ges} = E_{kin} + E_{pot} <i>$$</i></code></div></div>
+          </article>
+        </div>
+      </section>
+
+      <section class="math-section">
+        <div class="math-orbit orbit-one" aria-hidden="true">∫</div><div class="math-orbit orbit-two" aria-hidden="true">Σ</div><div class="math-orbit orbit-three" aria-hidden="true">√</div>
+        <div class="math-inner reveal">
+          <span class="section-kicker light">Mathematik, verstanden und gelöst</span>
+          <h2>Nicht nur Zeichen.<br /><em>Ein Rechenweg.</em></h2>
+          <p>FaNotes betrachtet, wo du schreibst: Zähler über Nennern, Grenzen an Integralen, Indizes an Summen und Zahlen unter Wurzeln. Ein Doppeltipp löst Gleichungen; der neue Mathe-Korrigierer prüft einen eingerahmten Rechenweg Schritt für Schritt und markiert den ersten beweisbaren Fehler direkt auf deiner Handschrift.</p>
+          <div class="formula-row" aria-label="Beispiele unterstützter Mathematik"><span><i>∫</i><sup>5</sup><sub>b</sub> f(x) dx</span><span><i>Σ</i><sup>n</sup><sub>i=1</sub> i²</span><span class="root-formula">√<b>7 + x</b></span><span><sup>a + b</sup>⁄<sub>c</sub></span></div>
+        </div>
+      </section>
+
+      <section class="section download-section" id="download">
+        <div class="download-shell reveal">
+          <div class="download-glow" aria-hidden="true"></div>
+          <div class="download-heading"><span class="section-kicker light">Bereit, wenn du es bist</span><h2>Hol dir FaNotes.</h2><p>Immer der neueste geprüfte Release – danach hält dich der integrierte Updater automatisch aktuell. Ohne Konto und ohne Cloud-Abo.</p></div>
+          <div class="platform-switch" role="tablist" aria-label="Betriebssystem auswählen" data-platform-tabs>
+            <button type="button" role="tab" aria-selected="true" data-platform-tab="windows"><span class="platform-mark">⊞</span><span><strong>Windows</strong><small>Windows 10 &amp; 11 · x64</small></span></button>
+            <button type="button" role="tab" aria-selected="false" data-platform-tab="linux"><span class="platform-mark">⌁</span><span><strong>Linux</strong><small>Arch &amp; moderne Distributionen</small></span></button>
+          </div>
+          <div class="download-grid" data-platform-panel="windows">
+            <article class="download-card recommended">
+              <span class="recommended-label">Empfohlen</span>
+              <div class="format-icon"><svg viewBox="0 0 24 24"><path d="M12 2 4 6v12l8 4 8-4V6l-8-4Z"/><path d="m4 6 8 4 8-4M12 10v12"/></svg></div>
+              <div><small>Empfohlene Installation</small><h3>Windows-Installer</h3><p>Installiert FaNotes im Benutzerkonto, legt Startmenü- und Desktop-Verknüpfungen an und übernimmt spätere Updates automatisch.</p></div>
+              <dl><div><dt>Version</dt><dd data-windows-version>…</dd></div><div><dt>Größe</dt><dd data-windows-installer-size>…</dd></div><div><dt>System</dt><dd>Windows 10/11 x64</dd></div></dl>
+              <a class="button primary full" href="/download/windows-installer" data-download-windows-installer><svg viewBox="0 0 24 24"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 20h14"/></svg> Installer laden</a>
+            </article>
+            <article class="download-card">
+              <div class="format-icon"><svg viewBox="0 0 24 24"><path d="M4 6h16v13H4V6Z"/><path d="m8 3 1 3M16 3l-1 3M8 11h8M8 15h5"/></svg></div>
+              <div><small>Ohne Installation</small><h3>Windows Portable</h3><p>Eine einzelne EXE, die direkt startet. Ideal für einen USB-Stick oder Rechner ohne feste Installation.</p></div>
+              <dl><div><dt>Version</dt><dd data-windows-version>…</dd></div><div><dt>Größe</dt><dd data-windows-portable-size>…</dd></div><div><dt>Format</dt><dd>Portable EXE</dd></div></dl>
+              <a class="button outline full" href="/download/windows-portable" data-download-windows-portable><svg viewBox="0 0 24 24"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 20h14"/></svg> Portable EXE laden</a>
+            </article>
+          </div>
+          <div class="download-grid" data-platform-panel="linux" hidden>
+            <article class="download-card recommended">
+              <span class="recommended-label">Empfohlen</span>
+              <div class="format-icon"><svg viewBox="0 0 24 24"><path d="M12 2 4 6v12l8 4 8-4V6l-8-4Z"/><path d="m4 6 8 4 8-4M12 10v12"/></svg></div>
+              <div><small>Einfach starten</small><h3>AppImage</h3><p>Eine Datei herunterladen, ausführbar machen und öffnen. Ideal für die meisten Arch-Systeme.</p></div>
+              <dl><div><dt>Version</dt><dd data-version>…</dd></div><div><dt>Größe</dt><dd data-appimage-size>…</dd></div><div><dt>Architektur</dt><dd>x86_64</dd></div></dl>
+              <a class="button primary full" href="/download/appimage" data-download-appimage><svg viewBox="0 0 24 24"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 20h14"/></svg> AppImage laden</a>
+            </article>
+            <article class="download-card">
+              <div class="format-icon"><svg viewBox="0 0 24 24"><path d="M4 6h16v13H4V6Z"/><path d="m8 3 1 3M16 3l-1 3M8 11h8M8 15h5"/></svg></div>
+              <div><small>Flexibel installieren</small><h3>Linux Portable</h3><p>Das vollständige Electron-Bundle als tar.gz – passend für manuelle Installation und PKGBUILD.</p></div>
+              <dl><div><dt>Version</dt><dd data-version>…</dd></div><div><dt>Größe</dt><dd data-portable-size>…</dd></div><div><dt>Format</dt><dd>tar.gz</dd></div></dl>
+              <a class="button outline full" href="/download/portable" data-download-portable><svg viewBox="0 0 24 24"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 20h14"/></svg> Archiv laden</a>
+            </article>
+          </div>
+          <div class="download-meta"><span><svg viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></svg> SHA-256 geprüft</span><span><svg viewBox="0 0 24 24"><path d="M12 3 4.5 6v5.5c0 4.3 3 7.8 7.5 9.5 4.5-1.7 7.5-5.2 7.5-9.5V6L12 3Z"/></svg> Signierter Update-Kanal</span><span><svg viewBox="0 0 24 24"><path d="M5 12h14M12 5v14"/></svg> Windows &amp; Linux</span><a href="/download/checksums" data-checksums>Prüfsummen ansehen →</a></div>
+        </div>
+
+        <div class="install-guide reveal" data-platform-install-guide="windows">
+          <div class="install-intro"><span class="section-kicker">Windows-Installation</span><h3>In wenigen Sekunden bereit.</h3><p>Der Installer richtet FaNotes im Benutzerkonto ein. Für die portable Ausgabe sind keine Installation und keine Administratorrechte nötig.</p></div>
+          <div class="install-panel">
+            <div class="install-tabs" role="tablist" aria-label="Windows-Installationsvarianten" data-install-tabs>
+              <button role="tab" aria-selected="true" aria-controls="install-windows" id="tab-windows" tabindex="0" data-install-tab="windows-installer">Installer</button>
+              <button role="tab" aria-selected="false" aria-controls="install-windows-portable" id="tab-windows-portable" tabindex="-1" data-install-tab="windows-portable">Portable</button>
+            </div>
+            <div class="code-panel" role="tabpanel" id="install-windows" aria-labelledby="tab-windows" data-install-panel="windows-installer">
+              <div><span>Empfohlen · Benutzerinstallation</span></div>
+              <pre><code data-command="windows-installer">1. FaNotes-Setup-VERSION-x64.exe öffnen
+2. Windows-Sicherheitsdialog bestätigen
+3. FaNotes über das Startmenü öffnen</code></pre>
+            </div>
+            <div class="code-panel" role="tabpanel" id="install-windows-portable" aria-labelledby="tab-windows-portable" data-install-panel="windows-portable" hidden>
+              <div><span>Ohne Installation</span></div>
+              <pre><code data-command="windows-portable">1. FaNotes-Portable-VERSION-x64.exe laden
+2. Datei in den gewünschten Ordner verschieben
+3. EXE direkt öffnen</code></pre>
+            </div>
+            <a class="install-details" href="/download/windows-guide">Vollständige Windows-Anleitung herunterladen <span>↗</span></a>
+          </div>
+        </div>
+
+        <div class="install-guide reveal" data-platform-install-guide="linux" hidden>
+          <div class="install-intro"><span class="section-kicker">Linux-Installation</span><h3>In wenigen Sekunden bereit.</h3><p>Wähle den Weg, der zu deinem System passt. Die Befehle verwenden automatisch die aktuelle Versionsnummer.</p></div>
+          <div class="install-panel">
+            <div class="install-tabs" role="tablist" aria-label="Linux-Installationsvarianten" data-install-tabs>
+              <button role="tab" aria-selected="true" aria-controls="install-appimage" id="tab-appimage" tabindex="0" data-install-tab="appimage">AppImage</button>
+              <button role="tab" aria-selected="false" aria-controls="install-portable" id="tab-portable" tabindex="-1" data-install-tab="portable">Portable</button>
+              <button role="tab" aria-selected="false" aria-controls="install-pacman" id="tab-pacman" tabindex="-1" data-install-tab="pacman">Pacman</button>
+            </div>
+            <div class="code-panel" role="tabpanel" id="install-appimage" aria-labelledby="tab-appimage" data-install-panel="appimage">
+              <div><span>Terminal</span><button type="button" data-copy-target="command-appimage">Kopieren</button></div>
+              <pre><code id="command-appimage" data-command="appimage">chmod +x FaNotes-VERSION-x86_64.AppImage
+./FaNotes-VERSION-x86_64.AppImage</code></pre>
+            </div>
+            <div class="code-panel" role="tabpanel" id="install-portable" aria-labelledby="tab-portable" data-install-panel="portable" hidden>
+              <div><span>Terminal</span><button type="button" data-copy-target="command-portable">Kopieren</button></div>
+              <pre><code id="command-portable" data-command="portable">mkdir -p "$HOME/.local/opt"
+tar -xzf FaNotes-VERSION-x86_64.tar.gz -C "$HOME/.local/opt"
+"$HOME/.local/opt/FaNotes-VERSION-x86_64/fanotes"</code></pre>
+            </div>
+            <div class="code-panel" role="tabpanel" id="install-pacman" aria-labelledby="tab-pacman" data-install-panel="pacman" hidden>
+              <div><span>Terminal · im Ordner mit PKGBUILD</span><button type="button" data-copy-target="command-pacman">Kopieren</button></div>
+              <pre><code id="command-pacman" data-command="pacman">sudo pacman -S --needed base-devel pacman-contrib
+updpkgsums
+makepkg --cleanbuild --syncdeps --install</code></pre>
+            </div>
+            <a class="install-details" href="/download/install-guide">Vollständige Arch-Anleitung herunterladen <span>↗</span></a>
+          </div>
+        </div>
+      </section>
+
+      <section class="section privacy-section">
+        <div class="privacy-visual reveal" aria-hidden="true"><div class="privacy-ring ring-a"></div><div class="privacy-ring ring-b"></div><div class="privacy-lock"><svg viewBox="0 0 24 24"><rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3M12 14v3"/></svg></div><span class="data-chip chip-one">.md</span><span class="data-chip chip-two">PDF</span><span class="data-chip chip-three">JSON</span></div>
+        <div class="privacy-copy reveal" data-delay="1"><span class="section-kicker">Deine Daten gehören dir</span><h2>Local first ist kein Etikett.<br />Es ist die Architektur.</h2><p>Notizen, Zeichnungen, Arbeitsblätter und Trainingsdaten bleiben auf deinem Gerät. FaNotes braucht weder Konto noch Cloud; externe AI wird nur verwendet, wenn du sie selbst auswählst.</p><ul><li><span></span>Echte Markdown-Dateien im selbst gewählten Vault</li><li><span></span>Handschrifterkennung vollständig auf dem Gerät</li><li><span></span>LM Studio, Ollama und OpenCode direkt lokal nutzbar</li><li><span></span>Cloud-AI optional und nur mit deinem eigenen Schlüssel</li><li><span></span>Anonyme Tageszähler für Website, Downloads und App-Starts – ohne IP oder Geräte-ID</li><li><span></span>Vault frei sicherbar per NAS, Git oder Syncthing</li></ul></div>
+      </section>
+
+      <section class="section release-notes reveal">
+        <div><span class="section-kicker">Neu in <span data-version>…</span></span><h2>Der aktuelle Release.</h2><p data-release-date>Veröffentlichungsdatum wird geladen …</p></div>
+        <ol data-changelog><li><span>01</span><p>Release-Informationen werden geladen …</p></li></ol>
+      </section>
+
+      <section class="section faq" id="faq">
+        <div class="faq-heading reveal"><span class="section-kicker">FAQ</span><h2>Noch Fragen?</h2><p>Die wichtigsten Antworten vor deinem ersten Start.</p></div>
+        <div class="faq-list reveal" data-delay="1">
+          <details><summary>Auf welchen Systemen läuft FaNotes?<span></span></summary><p>FaNotes gibt es mit identischem Funktionsumfang für Windows 10/11 x64 sowie Linux x86_64. Unter Linux ist die Ausgabe auf Arch ausgerichtet; das AppImage funktioniert meist auch auf anderen modernen Distributionen.</p></details>
+          <details><summary>Brauche ich ein FaNotes-Konto?<span></span></summary><p>Nein. FaNotes besitzt keinen Konto- oder Cloud-Zwang. Du bestimmst den lokalen Vault-Ordner und behältst die Kontrolle über alle Dateien.</p></details>
+          <details><summary>Wie funktioniert die Handschrifterkennung?<span></span></summary><p>GlyphenWerk ist vollständig in FaNotes integriert. Dort trainierst und testest du persönliche Zeichen, Sätze, Gleichungen sowie mathematische Layouts; bestätigte Beispiele sind direkt im lokalen FaNotes-Modell aktiv. ZIP-Import und -Export bleiben für Backups verfügbar.</p></details>
+          <details><summary>Kann ich PDFs mit dem Stift ausfüllen?<span></span></summary><p>Ja. Importiere ein Bild oder PDF in eine neue oder vorhandene Notiz. Danach kannst du Textfelder platzieren und direkt mit dem Grafiktablett über das Arbeitsblatt schreiben.</p></details>
+          <details><summary>Wie erhalte ich neue Versionen?<span></span></summary><p>FaNotes prüft im Hintergrund die signierte Update-API. Du entscheidest in der App, wann ein Update heruntergeladen und installiert wird; deine Notizen bleiben dabei unangetastet.</p></details>
+          <details><summary>Wie prüfe ich den Download?<span></span></summary><p>Alle Linux- und Windows-Dateien stehen gemeinsam in <code>SHA256SUMS</code>. Unter Windows lässt sich ein Wert mit <code>Get-FileHash -Algorithm SHA256</code>, unter Linux mit <code>sha256sum</code> prüfen.</p></details>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="footer-main"><a class="brand footer-brand" href="#top"><span class="brand-mark"><img src="/assets/fanotes.svg" alt="" /></span><span>FaNotes</span></a><p>Handschrift trifft Markdown.<br />Gebaut für deine Gedanken – in jedem Bereich.</p><a class="footer-download" href="#download" data-primary-download>FaNotes <span data-version>…</span> herunterladen <span>↗</span></a></div>
+      <div class="footer-bottom"><span>© <span data-year></span> FaNotes</span><span>Windows · Linux · Local first · Made in Switzerland</span><div><a href="#features">Features</a><a href="#download">Download</a><a href="/api/health">Status</a></div></div>
+    </footer>
+
+    <div class="toast" role="status" aria-live="polite" data-toast></div>
+  </body>
+</html>

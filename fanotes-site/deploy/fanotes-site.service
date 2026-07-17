@@ -1,0 +1,48 @@
+[Unit]
+Description=FaNotes public download website
+After=network-online.target remote-fs.target clamav-daemon.service
+Wants=network-online.target clamav-daemon.service
+RequiresMountsFor=/mnt/truenas/Fabio/FaNotes-Arch-x86_64
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/opt/fanotes-site
+Environment=NODE_ENV=production
+Environment=FANOTES_HOST=127.0.0.1
+Environment=FANOTES_PORT=18185
+Environment=FANOTES_RELEASE_DIR=/mnt/truenas/Fabio/FaNotes-Arch-x86_64
+Environment=FANOTES_UPDATE_SIGNING_KEY=/etc/fanotes/update-signing-private.pem
+Environment=FANOTES_BACKUP_DIR=/var/lib/fanotes-backups
+Environment=FANOTES_BACKUP_ENROLLMENT_TOKEN_PATH=/etc/fanotes/backup-enrollment-token
+Environment=FANOTES_ANALYTICS_DIR=/var/lib/fanotes-analytics
+ExecStart=/usr/bin/node /opt/fanotes-site/server.mjs
+Restart=on-failure
+RestartSec=3s
+TimeoutStopSec=15s
+NoNewPrivileges=true
+UMask=0077
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictRealtime=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+TasksMax=64
+MemoryHigh=1200M
+MemoryMax=1600M
+SystemCallArchitectures=native
+ReadOnlyPaths=/mnt/truenas/Fabio/FaNotes-Arch-x86_64
+ReadOnlyPaths=/etc/fanotes
+ReadWritePaths=/var/lib/fanotes-backups
+ReadWritePaths=/var/lib/fanotes-analytics
+
+[Install]
+WantedBy=multi-user.target

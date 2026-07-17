@@ -1,0 +1,32 @@
+{
+  "format": "fanotes-neural-handwriting-v3",
+  "models": {
+    "desktop": {
+      "name": "PyLaia_IAM_CTC",
+      "precision": "fp32",
+      "file": "pylaia-iam.onnx",
+      "size": 21334652,
+      "sha256": "d0e277a2c7d996d24be314d44d7e21484b39b63e1a9a6da59e896b5ef07aed9b"
+    },
+    "web": {
+      "name": "PyLaia_IAM_CTC",
+      "precision": "q8-dynamic",
+      "file": "pylaia-iam-q8.onnx",
+      "size": 5488416,
+      "sha256": "b29583e264948190140844c19fef127041fcd912195391973e5e3eba6c5c3e6f"
+    }
+  },
+  "runtime": {
+    "name": "onnxruntime-web",
+    "version": "1.22.0",
+    "file": "ort-wasm-simd-threaded.wasm",
+    "size": 11210254,
+    "sha256": "71aef04959c5c1b6de461b6538e2058e306610034a85aad2742d0c7fd4533fe4"
+  },
+  "characters": {
+    "file": "pylaia-characters.json",
+    "count": 80,
+    "size": 566,
+    "sha256": "ceb2a07923ddf991edda687948039fe46f59242d30199c60204336cfbc487d28"
+  }
+}

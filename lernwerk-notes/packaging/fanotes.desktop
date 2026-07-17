@@ -1,0 +1,18 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=FaNotes
+GenericName=Markdown Notes
+GenericName[de]=Markdown-Notizen
+Comment=Local Markdown notes with handwriting recognition
+Comment[de]=Lokale Markdown-Notizen mit Handschrifterkennung
+Exec=fanotes
+TryExec=fanotes
+Icon=fanotes
+Terminal=false
+Categories=Education;Office;Utility;
+Keywords=Markdown;Notes;School;Handwriting;Tablet;Math;
+Keywords[de]=Markdown;Notizen;Schule;Handschrift;Tablet;Mathematik;
+StartupNotify=true
+StartupWMClass=fanotes
+X-GNOME-SingleWindow=true

@@ -1,0 +1,24 @@
+{
+  "id": "./",
+  "name": "FaNotes Web",
+  "short_name": "FaNotes",
+  "description": "Markdown, handwriting, mathematics, and worksheets in a local browser app.",
+  "lang": "en",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone", "minimal-ui"],
+  "orientation": "any",
+  "background_color": "#0b0c12",
+  "theme_color": "#11131a",
+  "categories": ["education", "productivity", "utilities"],
+  "icons": [
+    {
+      "src": "./fanotes-app.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
+

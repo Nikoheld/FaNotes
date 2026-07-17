@@ -1,0 +1,53 @@
+{
+  "format": "fanotes-trocr-web-v1",
+  "model": "FaNotes_TrOCR_DE_EN",
+  "opset": 18,
+  "quantization": "q8-encoder-q8-decoder",
+  "assets": [
+    {
+      "file": "config.json",
+      "size": 1554,
+      "sha256": "dfd3eb71ff1dd0f9addd1da0c0ca853328059004f26ce0d3e461eeff5b4ebbb9"
+    },
+    {
+      "file": "generation_config.json",
+      "size": 163,
+      "sha256": "6a34fdaef26464e49cc159ca7c7ecec17a4cb8e1f81b7de60273e13e4b7c00cc"
+    },
+    {
+      "file": "onnx/decoder_model_merged.onnx",
+      "size": 40503785,
+      "sha256": "218c7d78f708ef05836887e2bf959977217f4373515ae6c0564990306d8b4067"
+    },
+    {
+      "file": "onnx/encoder_model.onnx",
+      "size": 23012794,
+      "sha256": "72f74ad8bcd18925021e01f4a916625ec19b0be0fcf421d9015ff521abd9e663"
+    },
+    {
+      "file": "preprocessor_config.json",
+      "size": 450,
+      "sha256": "36a945a7cc645688b9ef64dabae16979cf5f7c1c448569cc306694edc0598b9b"
+    },
+    {
+      "file": "sentencepiece.bpe.model",
+      "size": 1356293,
+      "sha256": "6f5e2fefcf793761a76a6bfb8ad35489f9c203b25557673284b6d032f41043f4"
+    },
+    {
+      "file": "special_tokens_map.json",
+      "size": 963,
+      "sha256": "66e573bfc6c3b062381e41274f7fd4143daaf01926888ffbd880c87aa6368443"
+    },
+    {
+      "file": "tokenizer.json",
+      "size": 4494705,
+      "sha256": "40bc714001008e5dc62303941dc5c0584d8b9fa69c6032bea37b1deb00d77711"
+    },
+    {
+      "file": "tokenizer_config.json",
+      "size": 1268,
+      "sha256": "0836517b3d82dcc162f06172e0b50bc1df3024cce7cf2d71ed009acd4d8c75ea"
+    }
+  ]
+}
