@@ -125,6 +125,17 @@ class GitHub:
                     continue
                 detail = data.decode("utf-8", errors="replace")[:2000]
                 raise RuntimeError(f"GitHub API {method} {path}: HTTP {response.status}: {detail}")
+            except (OSError, http.client.HTTPException) as error:
+                if attempt + 1 < MAX_RETRIES:
+                    print(
+                        f"GitHub API network retry {attempt + 1}: {type(error).__name__}",
+                        flush=True,
+                    )
+                    time.sleep(2 ** attempt)
+                    continue
+                raise RuntimeError(
+                    f"GitHub API {method} {path}: network retry limit reached"
+                ) from error
             finally:
                 connection.close()
         raise RuntimeError(f"GitHub API {method} {path}: retry limit reached")
@@ -167,6 +178,17 @@ class GitHub:
                     continue
                 detail = data.decode("utf-8", errors="replace")[:2000]
                 raise RuntimeError(f"GitHub upload {asset_name}: HTTP {response.status}: {detail}")
+            except (OSError, http.client.HTTPException) as error:
+                if attempt + 1 < MAX_RETRIES:
+                    print(
+                        f"    Upload network retry {attempt + 1}: {type(error).__name__}",
+                        flush=True,
+                    )
+                    time.sleep(2 ** attempt)
+                    continue
+                raise RuntimeError(
+                    f"GitHub upload {asset_name}: network retry limit reached"
+                ) from error
             finally:
                 connection.close()
         raise RuntimeError(f"GitHub upload {asset_name}: retry limit reached")
