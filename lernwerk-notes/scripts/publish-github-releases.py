@@ -284,6 +284,22 @@ def main() -> int:
         # to a draft: GitHub can detach its tag when that draft is republished.
         publish_atomically = requested_version is not None
         release = by_tag.get(tag)
+        if release is None and publish_atomically:
+            # GitHub can detach the requested tag from an interrupted draft
+            # and expose it as `untagged-<id>`. Recover that exact draft so a
+            # resumed publication retains already verified large assets.
+            detached_drafts = [
+                candidate
+                for candidate in existing
+                if candidate.get("draft")
+                and candidate.get("name") == f"FaNotes {version}"
+                and str(candidate.get("tag_name", "")).startswith("untagged-")
+            ]
+            if len(detached_drafts) > 1:
+                raise RuntimeError(f"Multiple detached GitHub drafts found for {tag}.")
+            if detached_drafts:
+                release = detached_drafts[0]
+                print(f"Recovering detached draft for {tag}.", flush=True)
         if release is None:
             release = github.request(
                 "POST",
@@ -305,6 +321,8 @@ def main() -> int:
         else:
             keep_as_draft = publish_atomically and bool(release.get("draft"))
             patch: dict[str, Any] = {
+                "tag_name": tag,
+                "target_commitish": repository["default_branch"],
                 "name": f"FaNotes {version}",
                 "body": body,
                 "draft": keep_as_draft,
@@ -319,6 +337,8 @@ def main() -> int:
             if keep_as_draft:
                 releases_to_publish.add(tag)
             print(f"Updated release {tag}.", flush=True)
+        if release.get("tag_name") != tag:
+            raise RuntimeError(f"GitHub did not preserve the requested draft tag {tag}.")
         by_tag[tag] = release
 
     with tempfile.TemporaryDirectory(prefix="fanotes-github-releases-") as temp:
@@ -369,6 +389,8 @@ def main() -> int:
                 "PATCH",
                 f"/repos/{OWNER}/{REPOSITORY}/releases/{release['id']}",
                 {
+                    "tag_name": tag,
+                    "target_commitish": repository["default_branch"],
                     "draft": False,
                     "prerelease": prerelease,
                     "make_latest": "false" if prerelease else ("true" if version == latest_stable_version else "false"),
