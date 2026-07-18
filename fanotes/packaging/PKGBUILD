@@ -1,0 +1,103 @@
+# Maintainer: FaNotes contributors
+
+pkgname=fanotes-bin
+pkgver=2026.7.4.beta.3
+_release_version=2026.7.4-beta.6
+pkgrel=1
+pkgdesc='Lokale Markdown-Notizen mit Grafiktablett und Handschrifterkennung'
+arch=('x86_64')
+license=('MIT')
+depends=(
+  'alsa-lib'
+  'at-spi2-core'
+  'cairo'
+  'dbus'
+  'expat'
+  'glib2'
+  'glibc'
+  'gtk3'
+  'libcups'
+  'libdrm'
+  'libgcc'
+  'libx11'
+  'libxcb'
+  'libxcomposite'
+  'libxdamage'
+  'libxext'
+  'libxfixes'
+  'libxkbcommon'
+  'libxrandr'
+  'libxss'
+  'mesa'
+  'nspr'
+  'nss'
+  'pango'
+  'systemd-libs'
+  'xdg-utils'
+)
+optdepends=(
+  'kde-cli-tools: Papierkorb-Integration unter KDE Plasma'
+  'libinput: Grafiktablett-Diagnose mit libinput list-devices'
+  'trash-cli: alternative Papierkorb-Integration'
+  'xf86-input-wacom: Wacom-Konfiguration unter X11'
+)
+provides=('fanotes' 'lernwerk-notes')
+conflicts=('fanotes' 'lernwerk-notes' 'lernwerk-notes-bin')
+replaces=('lernwerk-notes-bin')
+options=('!strip')
+
+_archive="FaNotes-${_release_version}-x86_64.tar.gz"
+_archive_root="FaNotes-${_release_version}-x86_64"
+_install_root='fanotes'
+
+# Das portable Archiv wird lokal erzeugt. Deshalb ist dessen Hash in dieser
+# Vorlage bewusst SKIP. Vor jedem Paketbau mit `updpkgsums` festschreiben.
+source=(
+  "${_archive}"
+  'fanotes.desktop'
+  'fanotes.svg'
+  'LICENSE'
+)
+noextract=("${_archive}")
+sha256sums=(
+  'SKIP'
+  '8eeb96bfe7915338a03cded93f47ef5bb79880953747c9964538e50343f8817a'
+  '37a77c21f0c1e6e9f5a781ec91a405bf4667a7b3fd7a93c635999d2636fc366d'
+  '231edceb1f4fba5805df054ce554285a10532b2ea33370b8f42e53e222a03d09'
+)
+
+package() {
+  local destination="${pkgdir}/opt/${_install_root}"
+  local extracted="${pkgdir}/opt/${_archive_root}"
+
+  install -d -m755 "${pkgdir}/opt"
+  tar -xf "${srcdir}/${_archive}" -C "${pkgdir}/opt"
+
+  if [[ ! -x "${extracted}/fanotes" ]]; then
+    printf 'Fehler: %s enthält nicht den erwarteten Ordner %s.\n' \
+      "${_archive}" "${_archive_root}" >&2
+    return 1
+  fi
+
+  mv "${extracted}" "${destination}"
+  # Builds can run with a restrictive umask. Normalize the portable tree so
+  # every installed user can traverse directories and read application files.
+  chmod -R u=rwX,go=rX "${destination}"
+  chmod 755 "${destination}/fanotes"
+
+  # Chromium verwendet dies als Fallback, wenn unprivilegierte User-Namespaces
+  # auf dem Zielsystem deaktiviert sind. Im Pacman-Paket gehört die Datei root.
+  if [[ -f "${destination}/chrome-sandbox" ]]; then
+    chmod 4755 "${destination}/chrome-sandbox"
+  fi
+
+  install -d -m755 "${pkgdir}/usr/bin"
+  ln -s "/opt/${_install_root}/fanotes" \
+    "${pkgdir}/usr/bin/fanotes"
+  install -Dm644 "${srcdir}/fanotes.desktop" \
+    "${pkgdir}/usr/share/applications/fanotes.desktop"
+  install -Dm644 "${srcdir}/fanotes.svg" \
+    "${pkgdir}/usr/share/icons/hicolor/scalable/apps/fanotes.svg"
+  install -Dm644 "${srcdir}/LICENSE" \
+    "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+}

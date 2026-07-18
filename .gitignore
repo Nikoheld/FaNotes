@@ -7,9 +7,9 @@ vite.config.js
 vite.config.d.ts
 
 # Generated mirrors and historical binary archives
-lernwerk-notes/delivery/
-lernwerk-notes/public/glyphenwerk/
-lernwerk-notes/public/spell/
+fanotes/delivery/
+fanotes/public/glyphenwerk/
+fanotes/public/spell/
 fanotes-site/public/notes/
 
 # Local caches and test output
