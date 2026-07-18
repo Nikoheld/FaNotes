@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#11131a" />
+    <meta name="color-scheme" content="dark light" />
+    <meta name="description" content="FaNotes Web – Markdown, Handschrift, Mathematik und Arbeitsblätter direkt im Browser." />
+    <meta name="application-name" content="FaNotes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="FaNotes" />
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="icon" href="./fanotes-app.svg" type="image/svg+xml" />
+    <title>FaNotes</title>
+    <style>
+      html, body, #root { width: 100%; height: 100%; margin: 0; }
+      body { overflow: hidden; background: #0b0c12; color: #f4f2fa; font-family: system-ui, sans-serif; }
+      .boot-surface { width: 100%; height: 100%; display: grid; place-items: center; background: radial-gradient(circle at 50% 35%, #1c1a31 0, #0b0c12 46%); }
+      .boot-card { display: grid; justify-items: center; gap: 12px; }
+      .boot-mark { width: 46px; height: 46px; display: grid; place-items: center; border-radius: 14px; background: #8b7cff; color: #fff; font-size: 24px; font-weight: 750; box-shadow: 0 14px 40px #8b7cff3d; }
+      .boot-card strong { font-size: 15px; letter-spacing: -.02em; }
+      .boot-card small { color: #9e9ba9; font-size: 10px; }
+      .boot-progress { width: 128px; height: 3px; overflow: hidden; border-radius: 99px; background: #2a2934; }
+      .boot-progress::after { content: ''; display: block; width: 48%; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #8b7cff, #45c9b7); animation: boot-slide 1s ease-in-out infinite alternate; }
+      @keyframes boot-slide { to { transform: translateX(140%); } }
+    </style>
+  </head>
+  <body>
+    <div id="root"><div class="boot-surface"><div class="boot-card"><div class="boot-mark">F</div><strong>FaNotes</strong><small data-boot-status>Arbeitsbereich wird geöffnet</small><div class="boot-progress"></div></div></div></div>
+    <script type="module" src="/src/boot-language.ts"></script>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

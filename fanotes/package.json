@@ -1,0 +1,230 @@
+{
+  "name": "fanotes",
+  "productName": "FaNotes",
+  "version": "2026.7.4-beta.6",
+  "description": "Lokale Markdown-Notizen mit Handschrift für Schule, UNI, Privatleben und Arbeit",
+  "author": "FaNotes",
+  "license": "MIT",
+  "private": true,
+  "desktopName": "fanotes.desktop",
+  "main": "electron/main.cjs",
+  "scripts": {
+    "dev": "npm run build:glyphenwerk && concurrently -k \"vite --host 0.0.0.0\" \"wait-on http://127.0.0.1:5174 && cross-env VITE_DEV_SERVER_URL=http://127.0.0.1:5174 electron .\"",
+    "dev:web": "npm run build:glyphenwerk && vite --host 0.0.0.0",
+    "typecheck": "tsc -b",
+    "check:themes": "node scripts/check-theme-contrast.cjs",
+    "check:visual": "node scripts/check-visual-rendering.cjs",
+    "check:notes": "node scripts/check-note-creation.cjs",
+    "check:markdown": "node scripts/check-markdown.mjs",
+    "check:recognition": "node scripts/check-context-recognition.mjs",
+    "audit:recognition": "node scripts/audit-personal-recognition.mjs",
+    "audit:recognition:uji": "node scripts/audit-uji-personal-recognition.mjs",
+    "audit:recognition:uji-pairs": "node scripts/audit-uji-pair-segmentation.mjs",
+    "audit:trocr:preprocessing": "node scripts/sweep-trocr-preprocessing.mjs",
+    "audit:recognition:nas-holdout": "node scripts/audit-nas-handwriting-holdout.mjs",
+    "audit:recognition:uji-personalized": "FANOTES_TROCR_AUDIT_MODE=personalized node scripts/sweep-trocr-preprocessing.mjs",
+    "check:recognition:guided": "node scripts/check-neural-guided-personal-segmentation.mjs",
+    "check:connected-recognition": "node scripts/check-connected-recognition.mjs",
+    "check:neural-text-recognition": "node scripts/check-neural-text-recognition.mjs",
+    "check:trocr": "node scripts/check-trocr-integration.cjs",
+    "check:native-ocr": "node scripts/check-native-ocr.cjs",
+    "check:packaged-native-ocr": "node scripts/check-packaged-native-ocr.cjs",
+    "check:standard-recognition": "node scripts/check-standard-recognition.cjs",
+    "check:text-to-handwriting": "node scripts/check-text-to-handwriting.mjs",
+    "check:scribble-erase": "node scripts/check-scribble-erase.mjs",
+    "check:drawing": "node scripts/check-drawing-mode.cjs",
+    "check:menus": "node scripts/check-menu-ux.cjs",
+    "check:ai": "node scripts/check-ai-providers.cjs",
+    "check:welcome": "node scripts/check-welcome-note.cjs",
+    "check:onboarding": "node scripts/check-first-run-onboarding.cjs",
+    "check:glyphenwerk": "node scripts/check-glyphenwerk-integration.cjs",
+    "check:glyphenwerk-visible": "node scripts/check-glyphenwerk-visible-recognition.mjs",
+    "check:glyphenwerk-input": "node scripts/check-drawing-canvas-input.mjs",
+    "check:math-solver": "node scripts/check-math-solver.mjs",
+    "check:math-corrector": "node scripts/check-math-corrector.mjs",
+    "check:efficiency": "node scripts/check-efficiency.mjs",
+    "check:startup": "node scripts/check-startup-preflight.cjs",
+    "measure:startup:linux": "node scripts/measure-linux-startup.cjs",
+    "measure:efficiency:linux": "node scripts/measure-linux-efficiency.cjs",
+    "check:updater": "node scripts/check-updater.cjs",
+    "release:policy": "node scripts/check-release-policy.mjs",
+    "release:github": "python3 scripts/publish-github-releases.py",
+    "check:windows": "node scripts/check-windows-release.cjs",
+    "check:web": "node scripts/check-web-app.cjs",
+    "check:i18n": "node scripts/check-i18n.cjs",
+    "build:glyphenwerk": "npm --prefix .. run build && node scripts/stage-glyphenwerk.cjs",
+    "build:spelling": "node scripts/build-spelling-filters.cjs",
+    "stage:trocr-model": "node scripts/stage-trocr-model.cjs",
+    "stage:trocr-runtime": "node scripts/stage-trocr-runtime.cjs",
+    "check:spelling": "node scripts/check-spelling.mjs",
+    "check:orthography": "node scripts/check-swiss-orthography.mjs",
+    "check:onenote": "node scripts/check-onenote-import.cjs",
+    "build:web": "npm run build:glyphenwerk && npm run build:spelling && npm run stage:trocr-runtime && tsc -b && vite build && node scripts/build-web-pwa.mjs",
+    "build": "npm run build:web",
+    "start": "electron .",
+    "dist:linux": "npm run build:web && electron-builder --linux AppImage --x64 && npm run dist:harden-appimage && npm run dist:portable",
+    "dist:windows": "npm run build:web && electron-builder --win --x64",
+    "dist:harden-appimage": "node scripts/harden-appimage.cjs release/FaNotes-2026.7.4-beta.6-x86_64.AppImage",
+    "dist:portable": "tar -C release --sort=name --owner=0 --group=0 --numeric-owner --mtime='@0' --mode='u+rwX,go+rX,go-w' --transform='s#^linux-unpacked#FaNotes-2026.7.4-beta.6-x86_64#' -czf release/FaNotes-2026.7.4-beta.6-x86_64.tar.gz linux-unpacked",
+    "dist:dir": "npm run build:web && electron-builder --linux dir --x64"
+  },
+  "devDependencies": {
+    "@codemirror/autocomplete": "^6.18.6",
+    "@codemirror/commands": "^6.8.1",
+    "@codemirror/lang-markdown": "^6.3.3",
+    "@codemirror/language": "^6.11.3",
+    "@codemirror/search": "^6.5.11",
+    "@codemirror/state": "^6.5.2",
+    "@codemirror/view": "^6.38.1",
+    "@fontsource/dm-sans": "^5.2.8",
+    "@fontsource/jetbrains-mono": "^5.2.8",
+    "@huggingface/transformers": "^3.8.1",
+    "@types/node": "^24.0.13",
+    "@types/react": "^19.1.8",
+    "@types/react-dom": "^19.1.6",
+    "@vitejs/plugin-react": "^4.6.0",
+    "7zip-bin": "5.2.0",
+    "concurrently": "^9.2.0",
+    "cross-env": "^10.0.0",
+    "dictionary-de": "^3.0.0",
+    "dictionary-en": "^4.0.0",
+    "electron": "^43.1.0",
+    "electron-builder": "^26.15.3",
+    "jszip": "^3.10.1",
+    "katex": "^0.16.22",
+    "lucide-react": "^0.525.0",
+    "nerdamer": "^1.1.13",
+    "nspell": "^2.1.5",
+    "onnxruntime-node": "1.21.0",
+    "onnxruntime-web": "1.22.0",
+    "pdfjs-dist": "^6.1.200",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "react-markdown": "^10.1.0",
+    "rehype-katex": "^7.0.1",
+    "rehype-raw": "^7.0.0",
+    "rehype-sanitize": "^6.0.0",
+    "remark-gfm": "^4.0.1",
+    "remark-math": "^6.0.0",
+    "typescript": "^5.8.3",
+    "vite": "^7.0.4",
+    "wait-on": "^8.0.4"
+  },
+  "build": {
+    "appId": "ch.fanotes.app",
+    "productName": "FaNotes",
+    "artifactName": "FaNotes-${version}-x86_64.${ext}",
+    "asar": true,
+    "asarUnpack": [
+      "dist/ocr/pylaia-iam.onnx"
+    ],
+    "electronLanguages": [
+      "de",
+      "en-US"
+    ],
+    "compression": "normal",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "dist/**/*",
+      "!dist/ocr/fanotes-trocr-web/**/*",
+      "!dist/ocr/pylaia-iam-q8.onnx",
+      "electron/**/*",
+      "resources/onenote/**/*",
+      "package.json"
+    ],
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "category": "Education;Office",
+      "icon": "build/icon.png",
+      "executableName": "fanotes",
+      "syncDesktopName": true,
+      "synopsis": "Markdown-Notizen mit Handschrift für jeden Lebensbereich",
+      "description": "Lokale Markdown-Wissensbasis mit Tablet-Zeichnungen und lernender Handschrifterkennung",
+      "extraResources": [
+        {
+          "from": "node_modules/onnxruntime-node",
+          "to": "native-ocr/node_modules/onnxruntime-node",
+          "filter": [
+            "package.json",
+            "dist/*.js",
+            "bin/napi-v3/linux/x64/onnxruntime_binding.node",
+            "bin/napi-v3/linux/x64/libonnxruntime.so.1"
+          ]
+        },
+        {
+          "from": "node_modules/onnxruntime-node/node_modules/onnxruntime-common",
+          "to": "native-ocr/node_modules/onnxruntime-common",
+          "filter": [
+            "package.json",
+            "dist/cjs/**/*"
+          ]
+        }
+      ]
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.ico",
+      "executableName": "FaNotes",
+      "requestedExecutionLevel": "asInvoker",
+      "extraResources": [
+        {
+          "from": "node_modules/onnxruntime-node",
+          "to": "native-ocr/node_modules/onnxruntime-node",
+          "filter": [
+            "package.json",
+            "dist/*.js",
+            "bin/napi-v3/win32/x64/onnxruntime_binding.node",
+            "bin/napi-v3/win32/x64/onnxruntime.dll"
+          ]
+        },
+        {
+          "from": "node_modules/onnxruntime-node/node_modules/onnxruntime-common",
+          "to": "native-ocr/node_modules/onnxruntime-common",
+          "filter": [
+            "package.json",
+            "dist/cjs/**/*"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "artifactName": "FaNotes-Setup-${version}-x64.${ext}",
+      "oneClick": true,
+      "perMachine": false,
+      "createDesktopShortcut": "always",
+      "createStartMenuShortcut": true,
+      "shortcutName": "FaNotes",
+      "deleteAppDataOnUninstall": false,
+      "runAfterFinish": true,
+      "installerLanguages": [
+        "de_DE",
+        "en_US"
+      ]
+    },
+    "portable": {
+      "artifactName": "FaNotes-Portable-${version}-x64.${ext}",
+      "requestExecutionLevel": "user"
+    },
+    "appImage": {
+      "executableArgs": []
+    }
+  }
+}

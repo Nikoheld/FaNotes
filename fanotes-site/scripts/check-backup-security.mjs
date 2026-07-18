@@ -116,7 +116,7 @@ try {
       schemaVersion: 1,
       files: [{ path: 'Mathematik/Test.md', content: '# Sicher\n\n$E=mc^2$', modifiedAt: new Date().toISOString() }],
       folders: [{ path: 'Mathematik', color: '#8b7cff' }],
-      assets: [{ path: '.lernwerk/assets/example.png', digest: cleanAsset.digest, mimeType: cleanAsset.mimeType, size: cleanAsset.size }],
+      assets: [{ path: '.fanotes/assets/example.png', digest: cleanAsset.digest, mimeType: cleanAsset.mimeType, size: cleanAsset.size }],
       drawings: [], worksheets: [], settings: { theme: 'dark', lmStudioApiToken: 'must-not-survive' }, onboardingComplete: true,
       training: { samples: [], labels: [], layouts: [] },
     }),
