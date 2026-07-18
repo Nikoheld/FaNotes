@@ -1,6 +1,7 @@
 import { ENGLISH_COMMON_WORDS } from '../../../src/data/englishLanguage'
 import { GERMAN_COMMON_WORDS } from '../../../src/data/germanLanguage'
 import {
+  calibratePersonalBaseEvidence,
   recognizedSentence,
   type RecognitionLanguage,
   type RecognitionToken,
@@ -20,6 +21,7 @@ import { normalizeGermanSharpS } from '../../../src/lib/orthography'
 type CharacterEvidence = {
   char: string
   confidence: number
+  baseConfidence: number
   personalSupport: number
   personalConfidence: number
 }
@@ -70,11 +72,13 @@ const tokenCandidates = (token: RecognitionToken): CharacterEvidence[] => {
   const candidates = [{
     char: token.char,
     confidence: token.confidence,
+    baseConfidence: token.baseConfidence ?? 0,
     personalSupport: token.personalSupport ?? 0,
     personalConfidence: token.personalConfidence ?? 0,
   }, ...token.alternatives.map((alternative) => ({
     char: alternative.char,
     confidence: alternative.confidence,
+    baseConfidence: alternative.baseConfidence ?? 0,
     personalSupport: alternative.personalSupport ?? 0,
     personalConfidence: alternative.personalConfidence ?? 0,
   }))]
@@ -84,6 +88,7 @@ const tokenCandidates = (token: RecognitionToken): CharacterEvidence[] => {
     merged.set(candidate.char, previous ? {
       char: candidate.char,
       confidence: Math.max(previous.confidence, candidate.confidence),
+      baseConfidence: Math.max(previous.baseConfidence, candidate.baseConfidence),
       personalSupport: Math.max(previous.personalSupport, candidate.personalSupport),
       personalConfidence: Math.max(previous.personalConfidence, candidate.personalConfidence),
     } : candidate)
@@ -105,6 +110,24 @@ const strongestPersonalCandidate = (token: RecognitionToken) => tokenCandidates(
 // must remain classical unless the selected `I` has its own personal sample.
 const selectedPersonalCandidate = (token: RecognitionToken) => tokenCandidates(token)
   .find((candidate) => candidate.char === token.char && candidate.personalSupport > 0) ?? null
+
+const personalCalibrationForToken = (
+  token: RecognitionToken,
+  evidence: CharacterEvidence,
+) => calibratePersonalBaseEvidence(
+  evidence,
+  tokenCandidates(token).reduce((peak, candidate) => Math.max(peak, candidate.baseConfidence), 0),
+)
+
+const isReliablePersonalEvidence = (
+  token: RecognitionToken,
+  evidence: CharacterEvidence,
+) => {
+  const calibration = personalCalibrationForToken(token, evidence)
+  return !calibration.conflict || (
+    evidence.personalSupport >= 3 && calibration.decisive
+  )
+}
 
 const normalizedLineCharacters = (
   lineText: string,
@@ -261,11 +284,13 @@ const alignWordToTokens = (
     for (let characterIndex = 1; characterIndex < columns; characterIndex += 1) {
       const character = characters[characterIndex - 1]
       const evidence = candidateEvidence(token, character, language)
+      const calibration = evidence ? personalCalibrationForToken(token, evidence) : null
       const exact = normalizedCharacter(visualCharacter, language) === normalizedCharacter(character, language)
       const match = evidence
         ? evidence.confidence / 100 * 0.78
           + evidence.personalConfidence / 100 * 0.84
           + Math.min(0.24, Math.log2(evidence.personalSupport + 1) * 0.07)
+          + (calibration?.scoreAdjustment ?? 0) * 0.4
           + (exact ? 0.14 : 0)
         : -0.92
       const diagonal = scores[tokenIndex - 1][characterIndex - 1] + match
@@ -386,6 +411,9 @@ const personalizedDictionaryWord = (
       const token = tokens[alignedTokenIndex]
       const replacement = candidateEvidence(token, character, language)
       const original = candidateEvidence(token, sourceCharacters[index], language)
+      const reliableReplacement = Boolean(
+        replacement && isReliablePersonalEvidence(token, replacement),
+      )
       if (
         replacement &&
         (replacement.confidence >= 22 || replacement.personalConfidence >= 3) &&
@@ -393,6 +421,7 @@ const personalizedDictionaryWord = (
       ) visuallyPlausibleChanges += 1
       if (
         replacement?.personalSupport &&
+        reliableReplacement &&
         evidenceStrength(replacement) >= evidenceStrength(original) + 2
       ) supportedChanges += 1
       if (
@@ -578,8 +607,13 @@ const chooseAlignedCharacter = (
   if (token && !neural) {
     const personal = strongestPersonalCandidate(token)
     if (personal && (
-      personal.personalSupport >= 3 ||
-      personal.personalConfidence >= 72
+      (
+        personal.personalSupport >= 3 &&
+        isReliablePersonalEvidence(token, personal)
+      ) || (
+        personal.personalConfidence >= 72 &&
+        !personalCalibrationForToken(token, personal).conflict
+      )
     )) {
       return { char: personal.char, source: 'personalized' as const, confidence: personal.personalConfidence }
     }
@@ -600,8 +634,10 @@ const chooseAlignedCharacter = (
   // recognizer instead of silently flattening German words.
   const selectedGermanSpecialLetter = germanCandidate?.char === token.char
   const trainedGermanSpecialLetter = Boolean(germanCandidate && (
-    (germanCandidate.personalSupport >= 3 && germanCandidate.personalConfidence >= 24) ||
-    germanCandidate.personalConfidence >= 54
+    isReliablePersonalEvidence(token, germanCandidate) && (
+      (germanCandidate.personalSupport >= 3 && germanCandidate.personalConfidence >= 24) ||
+      germanCandidate.personalConfidence >= 54
+    )
   ))
   if (germanCandidate && (
     trainedGermanSpecialLetter ||
@@ -638,9 +674,12 @@ const chooseAlignedCharacter = (
       confidence: Math.max(personal.personalConfidence, neural.confidence),
     }
   }
+  const candidates = tokenCandidates(token)
+  const personalCalibration = personalCalibrationForToken(token, personal)
   const supportBonus = Math.min(26, Math.log2(personal.personalSupport + 1) * 8)
   const personalizedScore = personal.personalConfidence + supportBonus
-  const neuralCandidate = tokenCandidates(token).find((candidate) => candidate.char === neural.char)
+    + personalCalibration.scoreAdjustment * 100
+  const neuralCandidate = candidates.find((candidate) => candidate.char === neural.char)
   const neuralScore = neural.confidence + Math.min(12, (neuralCandidate?.confidence ?? 0) * 0.12)
   const visualCharacter = token.visualLabelId
     ? token.alternatives.find((candidate) => candidate.labelId === token.visualLabelId)?.char ?? token.char
@@ -657,6 +696,7 @@ const chooseAlignedCharacter = (
     !caseOnlyDifference &&
     personal.personalConfidence >= 18 &&
     personal.confidence >= 68 &&
+    !personalCalibration.conflict &&
     // One example may repair an uncertain line model, but never discard a
     // near-certain 96% sequence decision by itself. This keeps fast personal
     // learning for real holdout errors (normally around 70–85%) without
@@ -665,13 +705,29 @@ const chooseAlignedCharacter = (
     personal.confidence >= neural.confidence - 2 &&
     personal.confidence >= (neuralCandidate?.confidence ?? 0) + 10
   )
+  const baseConsensusWins = (
+    personal.personalSupport >= 1 &&
+    personal.char === token.char &&
+    personal.char === visualCharacter &&
+    !caseOnlyDifference &&
+    personalCalibration.consensus &&
+    !personalCalibration.conflict &&
+    personal.baseConfidence >= 76 &&
+    personal.baseConfidence >= (neuralCandidate?.baseConfidence ?? 0) + 5 &&
+    personal.personalConfidence >= 12 &&
+    personal.confidence >= neural.confidence - 12 &&
+    neural.confidence <= 94
+  )
   const personalizedWins = (
     personal.personalSupport >= 8 && personal.personalConfidence >= 42
   ) || (
     personal.personalSupport >= 3 && personalizedScore >= neuralScore - 4
   ) || (
-    personal.personalConfidence >= 78 && personalizedScore >= neuralScore - 12
-  ) || decisiveSelectedOneShot
+    personal.personalSupport >= 2 &&
+    personal.personalConfidence >= 78 &&
+    !personalCalibration.conflict &&
+    personalizedScore >= neuralScore - 12
+  ) || baseConsensusWins || decisiveSelectedOneShot
   return personalizedWins
     ? {
         char: personal.char,
@@ -814,7 +870,10 @@ export const fusePersonalizedTextRecognition = (
 ): PersonalizedTextRecognitionResult => {
   const classicalText = recognizedSentence(tokens).trim()
   if (!neuralResult.text.trim()) {
-    const personalCharacters = tokens.filter((token) => Boolean(selectedPersonalCandidate(token))).length
+    const personalCharacters = tokens.filter((token) => {
+      const selected = selectedPersonalCandidate(token)
+      return Boolean(selected && isReliablePersonalEvidence(token, selected))
+    }).length
     const visibleCharacters = Array.from(classicalText).filter((char) => !/\s/u.test(char)).length
     return {
       text: classicalText,
@@ -928,7 +987,8 @@ export const fusePersonalizedTextRecognition = (
     if (!neuralLine) {
       outputLines.push(recognizedSentence(lineTokens))
       lineTokens.forEach((token) => {
-        if (strongestPersonalCandidate(token)) personalizedCharacters += 1
+        const personal = strongestPersonalCandidate(token)
+        if (personal && isReliablePersonalEvidence(token, personal)) personalizedCharacters += 1
         else classicalCharacters += 1
       })
       confidenceTotal += lineTokens.reduce((sum, token) => sum + token.confidence, 0)
@@ -984,7 +1044,11 @@ export const fusePersonalizedTextRecognition = (
   const hasPersonallyLetterLikeSeparator = visibleTokens.some((token) => {
     if (!/^[-−_]$/u.test(token.char)) return false
     const personal = strongestPersonalCandidate(token)
-    return Boolean(personal?.personalSupport && /^\p{L}$/u.test(personal.char))
+    return Boolean(
+      personal?.personalSupport &&
+      /^\p{L}$/u.test(personal.char) &&
+      isReliablePersonalEvidence(token, personal),
+    )
   })
   const separatorCompactedClassicalText = hasPersonallyLetterLikeSeparator
     ? classicalText.replace(/(\p{L})[-−_](?=\p{L})/gu, '$1')
@@ -999,6 +1063,7 @@ export const fusePersonalizedTextRecognition = (
         .filter((candidate) => (
           /^\p{L}$/u.test(candidate.char) &&
           candidate.personalSupport > 0 &&
+          isReliablePersonalEvidence(token, candidate) &&
           candidate.confidence >= 44 &&
           candidate.confidence >= token.confidence - 20
         ))
@@ -1045,7 +1110,8 @@ export const fusePersonalizedTextRecognition = (
   const neuralRatio = knownWordRatio(measuredNeuralText, language)
   const strongClassicalPersonal = visibleTokens.flatMap((token) => {
     const personal = strongestPersonalCandidate(token)
-    return personal?.char === token.char && personal.personalSupport >= 3 && (
+    return personal?.char === token.char && personal.personalSupport >= 3 &&
+      isReliablePersonalEvidence(token, personal) && (
       token.confidence >= 72 || personal.personalConfidence >= 42
     ) ? [{ token, personal }] : []
   })
@@ -1055,7 +1121,8 @@ export const fusePersonalizedTextRecognition = (
     Math.max(1, visibleTokens.length)
   const trainedClassicalPersonal = visibleTokens.flatMap((token) => {
     const personal = strongestPersonalCandidate(token)
-    return personal?.char === token.char && personal.personalSupport >= 1 && (
+    return personal?.char === token.char && personal.personalSupport >= 1 &&
+      isReliablePersonalEvidence(token, personal) && (
       token.confidence >= 60 || personal.personalConfidence >= 4
     ) ? [{ token, personal }] : []
   })
@@ -1067,6 +1134,7 @@ export const fusePersonalizedTextRecognition = (
     const personal = tokenCandidates(token)
       .filter((candidate) => (
         candidate.personalSupport >= 1 &&
+        isReliablePersonalEvidence(token, candidate) &&
         (
           normalizedCharacter(candidate.char, language) === normalizedCharacter(expectedCharacter, language) ||
           normalizedCharacter(candidate.char, language) === normalizedCharacter(token.char, language)
@@ -1363,10 +1431,15 @@ export const fusePersonalizedTextRecognition = (
         ? token.alternatives.find((alternative) => alternative.labelId === token.visualLabelId)?.char ?? token.char
         : token.char
       if (evidence && (
-        evidence.personalSupport >= 3 ||
-        evidence.personalConfidence >= 18 ||
+        (
+          isReliablePersonalEvidence(token, evidence) && (
+            evidence.personalSupport >= 3 ||
+            evidence.personalConfidence >= 18
+          )
+        ) ||
         (
           evidence.personalSupport >= 1 &&
+          isReliablePersonalEvidence(token, evidence) &&
           normalizedCharacter(visualCharacter, language) === normalizedCharacter(character, language)
         )
       )) supportedSelectedChanges += 1

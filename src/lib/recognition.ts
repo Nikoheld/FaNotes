@@ -25,6 +25,10 @@ const TRAJECTORY_POINTS = 24
 const MAX_EXAMPLES_PER_LABEL = 96
 const MAX_FEATURE_EXAMPLES_PER_LABEL = 1_024
 const MAX_CLASSIFIER_EXAMPLES_PER_LABEL = 48
+// Three deliberately spread generic styles are enough to measure an
+// independent baseline beside a trained class without re-running the full
+// generic catalogue for every segment of a connected word.
+const MAX_BASE_CLASSIFIER_EXAMPLES_PER_LABEL = 3
 const MAX_CONTEXT_EXAMPLES_PER_LABEL = 16
 const MAX_TEXT_SEGMENTATION_HYPOTHESES = 18
 const PERSONAL_SAMPLE_DISTANCE_BONUS = 0.058
@@ -133,6 +137,8 @@ export type RecognitionAlternative = {
   char: string
   name: string
   confidence: number
+  /** Independent confidence of the generic, unpersonalized base model. */
+  baseConfidence?: number
   personalSupport?: number
   personalConfidence?: number
 }
@@ -174,6 +180,8 @@ export type RecognitionToken = {
   /** Visual decision before the local language model considers the word. */
   visualLabelId?: string
   visualConfidence?: number
+  /** Independent evidence from the unpersonalized base recognizer. */
+  baseConfidence?: number
   /** Direct evidence from this writer's trusted GlyphenWerk examples. */
   personalSupport?: number
   personalConfidence?: number
@@ -222,6 +230,81 @@ export const createEmptyRecognitionModel = (): RecognitionModel => {
 }
 
 const clamp = (value: number, min = 0, max = 1) => Math.max(min, Math.min(max, value))
+
+export type PersonalBaseEvidenceCalibration = {
+  authority: number
+  scoreAdjustment: number
+  consensus: boolean
+  conflict: boolean
+  decisive: boolean
+}
+
+/**
+ * Calibrates personal evidence without treating either source as universally
+ * correct. Agreement between the independent base model and GlyphenWerk is
+ * stronger than either source alone. A single conflicting example remains
+ * deliberately conservative, while repeated close personal samples can
+ * still teach a genuinely different writing style.
+ */
+export const calibratePersonalBaseEvidence = (
+  evidence: Pick<RecognitionAlternative, 'confidence' | 'baseConfidence' | 'personalSupport' | 'personalConfidence'>,
+  strongestBaseConfidence: number,
+): PersonalBaseEvidenceCalibration => {
+  const support = Math.max(0, evidence.personalSupport ?? 0)
+  if (!support) return {
+    authority: 0,
+    scoreAdjustment: 0,
+    consensus: false,
+    conflict: false,
+    decisive: false,
+  }
+  const fit = clamp((evidence.personalConfidence ?? 0) / 100)
+  const visual = clamp(evidence.confidence / 100)
+  const base = clamp((evidence.baseConfidence ?? 0) / 100)
+  const basePeak = clamp(strongestBaseConfidence / 100)
+  const baseGap = Math.max(0, basePeak - base)
+  const consensus = base >= 0.42 && baseGap <= 0.09
+  const conflict = basePeak >= 0.68 && baseGap >= 0.24
+  const supportStrength = clamp(Math.log2(support + 1) / 4)
+  const authority = clamp(
+    fit * 0.46 +
+    supportStrength * 0.34 +
+    visual * 0.2 +
+    (consensus ? 0.12 : 0) -
+    (conflict ? (support < 3 ? 0.2 : 0.06) : 0),
+  )
+  const decisive = (
+    (support >= 8 && fit >= 0.34) ||
+    (support >= 3 && fit >= 0.54) ||
+    (support >= 1 && fit >= 0.82 && visual >= 0.72)
+  )
+  const scoreAdjustment = consensus
+    ? 0.08 + authority * 0.1
+    : decisive
+      ? 0.02 + authority * 0.08
+      : authority * 0.04 - Math.min(0.2, baseGap * (support < 3 ? 0.34 : 0.12))
+  return { authority, scoreAdjustment, consensus, conflict, decisive }
+}
+
+const selectedTokenPersonalCalibration = (token: RecognitionToken) => {
+  const strongestBaseConfidence = [
+    token.baseConfidence ?? 0,
+    ...token.alternatives.map((alternative) => alternative.baseConfidence ?? 0),
+  ].reduce((peak, confidence) => Math.max(peak, confidence), 0)
+  return calibratePersonalBaseEvidence({
+    confidence: token.confidence,
+    baseConfidence: token.baseConfidence,
+    personalSupport: token.personalSupport,
+    personalConfidence: token.personalConfidence,
+  }, strongestBaseConfidence)
+}
+
+const hasReliableSelectedPersonalEvidence = (token: RecognitionToken) => {
+  const calibration = selectedTokenPersonalCalibration(token)
+  return !calibration.conflict || (
+    (token.personalSupport ?? 0) >= 3 && calibration.decisive
+  )
+}
 
 const relationVector = (
   anchor: [number, number, number, number],
@@ -659,6 +742,14 @@ const spreadAcrossHistory = <T,>(samples: T[], maximum: number): T[] => {
     selected.push(history[sourceIndex])
   }
   return selected
+}
+
+const evenlySpaced = <T,>(values: T[], maximum: number): T[] => {
+  if (values.length <= maximum) return values
+  if (maximum <= 1) return values.slice(0, Math.max(0, maximum))
+  return Array.from({ length: maximum }, (_, index) => (
+    values[Math.round(index * (values.length - 1) / (maximum - 1))]
+  ))
 }
 
 export const buildRecognitionModel = async (samples: Sample[]): Promise<RecognitionModel> => {
@@ -3301,7 +3392,21 @@ const buildClassifierEntries = (
     group.push(entry)
     groups.set(entry.labelId, group)
   })
-  const standard = entries.filter((entry) => entry.standard && !groups.has(entry.labelId))
+  const standardGroups = new Map<string, RecognitionModelEntry[]>()
+  entries.filter((entry) => entry.standard).forEach((entry) => {
+    const group = standardGroups.get(entry.labelId) ?? []
+    group.push(entry)
+    standardGroups.set(entry.labelId, group)
+  })
+  const standard = [...standardGroups.entries()].flatMap(([labelId, group]) => (
+    groups.has(labelId)
+      // Keep a compact, style-spanning base reference beside trained classes.
+      // The main classifier below still uses only personal examples for a
+      // trained label; these entries exist solely as an independent baseline
+      // for calibrated consensus/conflict decisions.
+      ? evenlySpaced(group, MAX_BASE_CLASSIFIER_EXAMPLES_PER_LABEL)
+      : group
+  ))
   const personal = [...groups.entries()].flatMap(([labelId, group]) => {
     if (group.length <= MAX_CLASSIFIER_EXAMPLES_PER_LABEL) return group
     const prototypes = prototypeSets.get(labelId) ?? []
@@ -4628,21 +4733,49 @@ const refineTextSpacing = (
 type TextCandidate = {
   label: LabelDefinition
   confidence: number
+  baseConfidence: number
+  personalSupport: number
+  personalConfidence: number
 }
 
 const candidatesForTextToken = (
   token: RecognitionToken,
   labelMap: Map<string, LabelDefinition>,
 ): TextCandidate[] => {
-  const byId = new Map<string, number>()
-  byId.set(token.labelId, token.confidence)
-  token.alternatives.forEach((alternative) => {
-    byId.set(alternative.labelId, Math.max(byId.get(alternative.labelId) ?? 0, alternative.confidence))
-  })
+  const byId = new Map<string, Omit<TextCandidate, 'label'>>()
+  const add = (
+    labelId: string,
+    confidence: number,
+    baseConfidence = 0,
+    personalSupport = 0,
+    personalConfidence = 0,
+  ) => {
+    const previous = byId.get(labelId)
+    byId.set(labelId, previous ? {
+      confidence: Math.max(previous.confidence, confidence),
+      baseConfidence: Math.max(previous.baseConfidence, baseConfidence),
+      personalSupport: Math.max(previous.personalSupport, personalSupport),
+      personalConfidence: Math.max(previous.personalConfidence, personalConfidence),
+    } : { confidence, baseConfidence, personalSupport, personalConfidence })
+  }
+  add(
+    token.labelId,
+    token.confidence,
+    token.baseConfidence ?? 0,
+    token.personalSupport ?? 0,
+    token.personalConfidence ?? 0,
+  )
+  token.alternatives.forEach((alternative) => add(
+    alternative.labelId,
+    alternative.confidence,
+    alternative.baseConfidence ?? 0,
+    alternative.personalSupport ?? 0,
+    alternative.personalConfidence ?? 0,
+  ))
   const candidates = [...byId.entries()]
-    .flatMap(([labelId, confidence]) => {
+    .flatMap(([labelId, evidence]) => {
       const label = labelMap.get(labelId)
-      return isTextLabel(label) ? [{ label: label!, confidence }] : []
+      return isTextLabel(label) ? [{ label: label!, ...evidence }] : []
     })
     .sort((first, second) => second.confidence - first.confidence)
   const peak = candidates[0]?.confidence ?? 0
@@ -4861,11 +4994,13 @@ const rerankTextChunk = (
     const personalCandidates = [{
       labelId: token.labelId,
       confidence: token.visualConfidence ?? token.confidence,
+      baseConfidence: token.baseConfidence ?? 0,
       personalSupport: token.personalSupport ?? 0,
       personalConfidence: token.personalConfidence ?? 0,
     }, ...token.alternatives.map((alternative) => ({
       labelId: alternative.labelId,
       confidence: alternative.confidence,
+      baseConfidence: alternative.baseConfidence ?? 0,
       personalSupport: alternative.personalSupport ?? 0,
       personalConfidence: alternative.personalConfidence ?? 0,
     }))]
@@ -4880,14 +5015,18 @@ const rerankTextChunk = (
       })
       .filter((candidate) => candidate.personalSupport >= 2 && candidate.personalConfidence > 0)
       .filter((candidate) => candidate.confidence >= (token.visualConfidence ?? token.confidence) - 8)
-      .sort((first, second) => (
-        second.personalConfidence +
-        Math.min(18, Math.log2(second.personalSupport + 1) * 5) +
-        second.confidence * 0.16 -
-        first.personalConfidence -
-        Math.min(18, Math.log2(first.personalSupport + 1) * 5) -
-        first.confidence * 0.16
-      ))
+    const strongestBaseConfidence = personalCandidates.reduce((peak, candidate) => (
+      Math.max(peak, candidate.baseConfidence)
+    ), 0)
+    personalCandidates.sort((first, second) => {
+      const score = (candidate: typeof first) => (
+        candidate.personalConfidence +
+        Math.min(18, Math.log2(candidate.personalSupport + 1) * 5) +
+        candidate.confidence * 0.16 +
+        calibratePersonalBaseEvidence(candidate, strongestBaseConfidence).scoreAdjustment * 30
+      )
+      return score(second) - score(first)
+    })
     const selected = personalCandidates[0]
     const label = selected ? labelMap.get(selected.labelId) : undefined
     if (selected && label) {
@@ -4896,6 +5035,7 @@ const rerankTextChunk = (
       token.name = label.name
       token.latex = label.latex
       token.confidence = Math.max(selected.confidence, selected.personalConfidence)
+      token.baseConfidence = selected.baseConfidence
       token.personalSupport = selected.personalSupport
       token.personalConfidence = selected.personalConfidence
     }
@@ -5033,6 +5173,9 @@ const rerankTextChunk = (
     token.name = candidate.label.name
     token.latex = candidate.label.latex
     token.confidence = candidate.confidence
+    token.baseConfidence = candidate.baseConfidence
+    token.personalSupport = candidate.personalSupport
+    token.personalConfidence = candidate.personalConfidence
     token.context = {
       word: best.evidence?.word ?? normalizedWord(best.value, language),
       knownWord: exactKnownWord,
@@ -5177,6 +5320,7 @@ export const recognizeExpression = (
     const ranked = [...byLabel.entries()]
       .map(([labelId, candidates]) => {
         const personal = candidates.filter((candidate) => !candidate.standard)
+        const standard = candidates.filter((candidate) => candidate.standard)
         const sortedCandidates = [...(personal.length ? personal : candidates)]
           .sort((first, second) => (
             first.distance - second.distance ||
@@ -5193,6 +5337,23 @@ export const recognizeExpression = (
         const selected = sorted.slice(0, weights.length)
         const weightTotal = weights.slice(0, selected.length).reduce((sum, weight) => sum + weight, 0)
         let aggregate = selected.reduce((sum, distance, index) => sum + distance * weights[index], 0) / weightTotal
+        // Preserve an independent base-model measurement even after a class
+        // has personal examples. Previously the generic candidates vanished
+        // from this point onward, so later fusion could not distinguish
+        // personal/base consensus from a real conflict.
+        const standardDistances = standard
+          .map((candidate) => candidate.distance)
+          .sort((first, second) => first - second)
+        const standardWeights = [0.92, 0.08]
+        const selectedStandard = standardDistances.slice(0, standardWeights.length)
+        const standardWeightTotal = standardWeights
+          .slice(0, selectedStandard.length)
+          .reduce((sum, weight) => sum + weight, 0)
+        const baseAggregate = selectedStandard.length
+          ? selectedStandard.reduce((sum, distance, index) => (
+              sum + distance * standardWeights[index]
+            ), 0) / standardWeightTotal
+          : null
         const prototypes = model.prototypeSets.get(labelId) ?? (
           model.prototypes.get(labelId) ? [model.prototypes.get(labelId)!] : []
         )
@@ -5244,18 +5405,30 @@ export const recognizeExpression = (
           // writer-specific model, but still rejects obvious multi-glyph crops.
           aggregate += Math.max(0, aspectLogDistance - aspectStats.spread - 0.14) * 0.14
         }
-        aggregate = Math.max(0, aggregate + (
+        const geometryAdjustment = (
           mode === 'math'
             ? mathGeometryAdjustment(labelId, cluster)
             : textGeometryAdjustment(labelId, cluster)
-        ))
+        )
+        aggregate = Math.max(0, aggregate + geometryAdjustment)
+        const baseDistance = baseAggregate === null
+          ? null
+          : Math.max(0, baseAggregate + geometryAdjustment)
+        const baseConfidence = baseDistance === null
+          ? 0
+          : Math.round(clamp(1 - baseDistance / 0.62) * 100)
         const personalConfidence = bestPersonalDistance === null
           ? 0
           : Math.round(clamp(personalFit * (0.72 + reliability * 0.28)) * 100)
         return {
           labelId,
           distance: aggregate,
-          personalSupport: stats?.trustedCount ?? personal.length,
+          baseConfidence,
+          // A class may still have historical training statistics while its
+          // personal shapes were rejected by the input-specific shortlist.
+          // In that case only the base references actually matched, so do not
+          // misreport dormant training as direct evidence for this crop.
+          personalSupport: personal.length ? (stats?.trustedCount ?? personal.length) : 0,
           personalConfidence,
           aspectFit,
         }
@@ -5283,6 +5456,7 @@ export const recognizeExpression = (
         char: label.char,
         name: label.name,
         confidence: Math.round(clamp(1 - entry.distance / 0.62) * 100),
+        baseConfidence: entry.baseConfidence,
         personalSupport: entry.personalSupport,
         personalConfidence: entry.personalConfidence,
       }]
@@ -5301,6 +5475,7 @@ export const recognizeExpression = (
       alternatives,
       visualLabelId: bestLabel?.id ?? '',
       visualConfidence: confidence,
+      baseConfidence: best?.baseConfidence ?? 0,
       personalSupport: best?.personalSupport ?? 0,
       personalConfidence: best?.personalConfidence ?? 0,
       layout: cluster.fraction,
@@ -5345,6 +5520,7 @@ export const recognizeExpression = (
     if (
       untouchedPersonalGlyph &&
       (untouchedPersonalGlyph.personalSupport ?? 0) >= 2 &&
+      hasReliableSelectedPersonalEvidence(untouchedPersonalGlyph) &&
       untouchedPersonalGlyph.confidence >= 56 &&
       (
         (untouchedPersonalGlyph.personalConfidence ?? 0) >= 4 ||
@@ -5485,6 +5661,7 @@ export const recognizeExpression = (
           ))
           const decisiveRepeatedWholeGlyph = Boolean(wholeAssessment && (
             (wholeAssessment.token.personalSupport ?? 0) >= 3 &&
+            hasReliableSelectedPersonalEvidence(wholeAssessment.token) &&
             wholeAssessment.token.confidence >= 80
           ))
           const hypotheses = clusterCharacterCountHint === 1 || decisiveRepeatedWholeGlyph
@@ -5679,6 +5856,7 @@ export const recognizeExpression = (
       if (
         whole &&
         (whole.personalSupport ?? 0) >= 3 &&
+        hasReliableSelectedPersonalEvidence(whole) &&
         whole.confidence >= 80 &&
         (whole.personalConfidence ?? 0) >= 20
       ) {
@@ -6560,6 +6738,7 @@ export const recognizeAutomaticExpression = (
         name: label.name,
         latex: label.latex,
         confidence: Math.max(token.confidence, matching.confidence),
+        baseConfidence: matching.baseConfidence ?? 0,
         personalSupport: matching.personalSupport ?? 0,
         personalConfidence: matching.personalConfidence ?? 0,
         context: {

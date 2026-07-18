@@ -641,6 +641,7 @@ export const recognizePersonalizedTextLine = async (
             char: token.char,
             name: token.name,
             confidence: token.confidence,
+            baseConfidence: token.baseConfidence,
             personalSupport: token.personalSupport,
             personalConfidence: token.personalConfidence,
           }
@@ -655,8 +656,9 @@ export const recognizePersonalizedTextLine = async (
             name: alternative?.name ?? label?.name ?? char,
             latex: label?.latex ?? char,
             confidence: Math.max(token.confidence, alternative?.confidence ?? 0),
-            personalSupport: Math.max(token.personalSupport ?? 0, alternative?.personalSupport ?? 0),
-            personalConfidence: Math.max(token.personalConfidence ?? 0, alternative?.personalConfidence ?? 0),
+            baseConfidence: alternative?.baseConfidence ?? 0,
+            personalSupport: alternative?.personalSupport ?? 0,
+            personalConfidence: alternative?.personalConfidence ?? 0,
             visualLabelId: alternative?.labelId ?? label?.id ?? token.visualLabelId,
             alternatives,
             context: {
