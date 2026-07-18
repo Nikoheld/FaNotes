@@ -247,11 +247,18 @@ def main() -> int:
     latest_stable_version = max(stable_versions, key=version_key)
     existing = github.request("GET", f"/repos/{OWNER}/{REPOSITORY}/releases?per_page=100")
     by_tag = {release["tag_name"]: release for release in existing}
+    releases_to_publish: set[str] = set()
+    expected_assets_by_tag: dict[str, dict[str, int]] = {}
 
     for version, notes in changelog:
         tag = f"v{version}"
         body = release_body(version, notes, translations)
         prerelease = "-beta." in version
+        # A new targeted publication must never expose a release whose assets
+        # are still being uploaded. An interrupted draft remains a draft on the
+        # next run. A release which is already public must not be converted back
+        # to a draft: GitHub can detach its tag when that draft is republished.
+        publish_atomically = requested_version is not None
         release = by_tag.get(tag)
         if release is None:
             release = github.request(
@@ -262,18 +269,21 @@ def main() -> int:
                     "target_commitish": repository["default_branch"],
                     "name": f"FaNotes {version}",
                     "body": body,
-                    "draft": False,
+                    "draft": publish_atomically,
                     "prerelease": prerelease,
                     "make_latest": "false" if prerelease else ("true" if version == latest_stable_version else "false"),
                 },
                 expected=(201,),
             )
+            if publish_atomically:
+                releases_to_publish.add(tag)
             print(f"Created release {tag}.", flush=True)
         else:
+            keep_as_draft = publish_atomically and bool(release.get("draft"))
             patch: dict[str, Any] = {
                 "name": f"FaNotes {version}",
                 "body": body,
-                "draft": False,
+                "draft": keep_as_draft,
                 "prerelease": prerelease,
                 "make_latest": "false" if prerelease else ("true" if version == latest_stable_version else "false"),
             }
@@ -282,6 +292,8 @@ def main() -> int:
                 f"/repos/{OWNER}/{REPOSITORY}/releases/{release['id']}",
                 patch,
             )
+            if keep_as_draft:
+                releases_to_publish.add(tag)
             print(f"Updated release {tag}.", flush=True)
         by_tag[tag] = release
 
@@ -292,7 +304,9 @@ def main() -> int:
             if not assets:
                 continue
             assets.append(checksum_asset(version, assets, temp_dir))
-            release = by_tag[f"v{version}"]
+            tag = f"v{version}"
+            expected_assets_by_tag[tag] = {path.name: path.stat().st_size for path in assets}
+            release = by_tag[tag]
             current_assets = {asset["name"]: asset for asset in release.get("assets", [])}
             print(f"Assets for v{version}: {len(assets)} files.", flush=True)
             for path in assets:
@@ -311,12 +325,43 @@ def main() -> int:
                 if uploaded.get("size") != path.stat().st_size or uploaded.get("state") != "uploaded":
                     raise RuntimeError(f"GitHub did not confirm {path.name} as a complete upload.")
 
-    final_releases = github.request("GET", f"/repos/{OWNER}/{REPOSITORY}/releases?per_page=100")
-    final_tags = {release["tag_name"] for release in final_releases}
+    if releases_to_publish:
+        for version, _notes in changelog:
+            tag = f"v{version}"
+            if tag not in releases_to_publish:
+                continue
+            prerelease = "-beta." in version
+            release = by_tag[tag]
+            release = github.request(
+                "PATCH",
+                f"/repos/{OWNER}/{REPOSITORY}/releases/{release['id']}",
+                {
+                    "draft": False,
+                    "prerelease": prerelease,
+                    "make_latest": "false" if prerelease else ("true" if version == latest_stable_version else "false"),
+                },
+            )
+            by_tag[tag] = release
+            print(f"Published v{version} after all assets were verified.", flush=True)
+
     expected_tags = {f"v{version}" for version, _notes in changelog}
-    missing = sorted(expected_tags - final_tags)
-    if missing:
-        raise RuntimeError(f"Missing releases after publication: {', '.join(missing)}")
+    if requested_version is not None:
+        for version, _notes in changelog:
+            tag = f"v{version}"
+            release = github.request("GET", f"/repos/{OWNER}/{REPOSITORY}/releases/tags/{quote(tag, safe='')}")
+            if release.get("draft") or bool(release.get("prerelease")) != ("-beta." in version):
+                raise RuntimeError(f"GitHub returned an invalid publication state for {tag}.")
+            remote_assets = {asset["name"]: asset for asset in release.get("assets", [])}
+            for name, size in expected_assets_by_tag.get(tag, {}).items():
+                asset = remote_assets.get(name)
+                if not asset or asset.get("state") != "uploaded" or asset.get("size") != size:
+                    raise RuntimeError(f"GitHub did not preserve the verified asset {name} for {tag}.")
+    else:
+        final_releases = github.request("GET", f"/repos/{OWNER}/{REPOSITORY}/releases?per_page=100")
+        final_tags = {release["tag_name"] for release in final_releases}
+        missing = sorted(expected_tags - final_tags)
+        if missing:
+            raise RuntimeError(f"Missing releases after publication: {', '.join(missing)}")
     print(
         f"Verified {len(expected_tags)} GitHub release(s); latest stable is v{latest_stable_version}.",
         flush=True,
