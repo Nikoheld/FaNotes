@@ -2,6 +2,7 @@ import { loadBrowserHandwritingRecognitionResources } from '../../src/lib/handwr
 import {
   applyNeuralWordContext,
   groupNeuralTextLines,
+  preferNeuralContextCandidateForTests,
   recognizeNeuralText,
 } from '../../src/lib/neuralTextRecognition'
 import type { Stroke, StrokePoint } from '../../../src/types'
@@ -145,6 +146,7 @@ const run = async () => {
       greedyText: iamOnline.lines[0]?.greedyText,
       confidence: iamOnline.confidence,
       engine: iamOnline.engine,
+      trocrFailures: iamOnline.trocrFailures,
       durationMs: Math.round(performance.now() - iamStartedAt),
     },
     preservedUnknownWords: applyNeuralWordContext('FaNotes Niko Fabio Livia Aylin OpenCode', 'de'),
@@ -153,6 +155,11 @@ const run = async () => {
       applyNeuralWordContext('tst', 'de'),
       applyNeuralWordContext('lernn', 'de'),
     ],
+    ensembleGuards: {
+      preservesUnknownName: !preferNeuralContextCandidateForTests('Fabio', 84, 'radio', 86, 'de', true),
+      preservesMixedCaseTerm: !preferNeuralContextCandidateForTests('OpenCode', 82, 'open code', 86, 'en', true),
+      acceptsClearFallback: preferNeuralContextCandidateForTests('xqzz', 54, 'test', 86, 'de'),
+    },
   }
 }
 

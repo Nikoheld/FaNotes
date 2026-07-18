@@ -897,7 +897,7 @@ const trocrLineAssessment = (
   const minimumCharacters = aspect >= 3 ? Math.max(2, Math.floor(aspect * 0.42)) : 1
   const maximumCharacters = Math.max(4, Math.ceil(aspect * 4.8 + 7))
   const invalid = visible.length - letters - digits - punctuation
-  const suspicious = (
+  const structurallySuspicious = (
     visible.length === 0
     || visible.length < minimumCharacters
     || visible.length > maximumCharacters
@@ -914,14 +914,122 @@ const trocrLineAssessment = (
     && visible.length <= 10
     && letters === visible.length
     && knownWords === 0
-  const needsFallback = suspicious || unsupportedShortWord
+  const needsContext = structurallySuspicious || unsupportedShortWord
   const lengthFit = visible.length >= minimumCharacters && visible.length <= maximumCharacters ? 0.8 : -2.4
   const score = neuralTextHypothesisScore(text, language, wordMembership)
     + lengthFit
     + Math.min(0.8, knownRatio * 0.8)
     + Math.min(0.45, (letters + digits) / Math.max(1, visible.length) * 0.45)
   const confidence = Math.round(clamp(68 + knownRatio * 12 + lengthFit * 4 - invalid * 8, 35, 88))
-  return { suspicious: needsFallback, score, confidence }
+  return {
+    suspicious: structurallySuspicious,
+    needsContext,
+    lexicallyUnsupported: unsupportedShortWord,
+    score,
+    confidence,
+  }
+}
+
+const contextShouldReplaceCompact = (
+  compact: Omit<NeuralTextLine, 'bbox'>,
+  compactAssessment: ReturnType<typeof trocrLineAssessment>,
+  context: Omit<NeuralTextLine, 'bbox'>,
+  contextAssessment: ReturnType<typeof trocrLineAssessment>,
+  language: RecognitionLanguage,
+  wordMembership?: WordMembership,
+  preferContextModel = false,
+) => {
+  const locale = language === 'de' ? 'de-CH' : 'en-US'
+  const compactSurface = normalizeGermanSharpS(compact.text).trim()
+  const contextSurface = normalizeGermanSharpS(context.text).trim()
+  if (!contextSurface || contextSurface === compactSurface) return Boolean(contextSurface)
+  const compactLetters = compactSurface.replace(/[^\p{L}\p{N}]/gu, '')
+  const contextLetters = contextSurface.replace(/[^\p{L}\p{N}]/gu, '')
+  const compactLower = compactSurface.toLocaleLowerCase(locale)
+  const compactWords = compactLower.match(language === 'de' ? /[a-zäöü]{2,}/giu : /[a-z]{2,}/giu) ?? []
+  const compactHasKnownWord = compactWords.some((word) => (
+    LANGUAGE_WORDS[language].has(word) || wordMembership?.(word)
+  ))
+  const contextWords = contextSurface.toLocaleLowerCase(locale)
+    .match(language === 'de' ? /[a-zäöü]{2,}/giu : /[a-z]{2,}/giu) ?? []
+  const contextHasKnownWord = contextWords.some((word) => (
+    LANGUAGE_WORDS[language].has(word) || wordMembership?.(word)
+  ))
+  const singleCompactSpan = /^\p{L}[\p{L}\p{N}_-]*$/u.test(compactSurface)
+  const titleCaseUnknown = (
+    /^\p{Lu}\p{Ll}{2,}$/u.test(compactSurface) &&
+    !compactHasKnownWord
+  )
+  const intentionalMixedCase = singleCompactSpan && /\p{Ll}\p{Lu}/u.test(compactSurface)
+  const disagreement = wordDistance(compactLower, contextSurface.toLocaleLowerCase(locale))
+  const disagreementRatio = disagreement / Math.max(1, compactLetters.length, contextLetters.length)
+  const highConfidenceVisualText = compact.confidence >= 72
+  if (highConfidenceVisualText && (titleCaseUnknown || intentionalMixedCase)) return false
+  // The Web model is a compact, quantized context recognizer and remains the
+  // stronger primary path for ordinary words and complete sentences. The
+  // standalone name/CamelCase guard above is the only visual veto required
+  // there; desktop can apply the stricter disagreement guard below.
+  if (preferContextModel) return true
+  if (compactAssessment.suspicious !== contextAssessment.suspicious) {
+    return compactAssessment.suspicious
+  }
+  if (contextAssessment.suspicious) return false
+  if (
+    highConfidenceVisualText &&
+    singleCompactSpan &&
+    !contextHasKnownWord &&
+    disagreementRatio > 0.34 &&
+    context.confidence < compact.confidence + 8
+  ) return false
+  return (
+    contextAssessment.score > compactAssessment.score + 0.12 ||
+    (
+      contextAssessment.score >= compactAssessment.score - 0.04 &&
+      context.confidence > compact.confidence
+    )
+  )
+}
+
+export const preferNeuralContextCandidateForTests = (
+  compactText: string,
+  compactConfidence: number,
+  contextText: string,
+  contextConfidence: number,
+  language: RecognitionLanguage,
+  preferContextModel = false,
+) => {
+  const length = Math.max(3, Array.from(compactText).length, Array.from(contextText).length)
+  const line = lineFromEntries([{
+    stroke: { baseWidth: 3, pressureEnabled: true, points: [] },
+    minX: 0,
+    minY: 0,
+    maxX: length * 18,
+    maxY: 60,
+    centerY: 30,
+    width: length * 18,
+    height: 60,
+  }])
+  const compact = {
+    text: compactText,
+    rawText: compactText,
+    confidence: compactConfidence,
+    characters: evenlySpacedCharacters(compactText, compactConfidence),
+  }
+  const context = {
+    text: contextText,
+    rawText: contextText,
+    confidence: contextConfidence,
+    characters: evenlySpacedCharacters(contextText, contextConfidence),
+  }
+  return contextShouldReplaceCompact(
+    compact,
+    trocrLineAssessment(compactText, line, language),
+    context,
+    trocrLineAssessment(contextText, line, language),
+    language,
+    undefined,
+    preferContextModel,
+  )
 }
 
 const recognizeCtcLine = async (
@@ -998,29 +1106,37 @@ const recognizeSeparatedWordLine = async (
     // A confident dictionary-backed CTC word needs no second inference. This
     // keeps clear multi-word lines faster than recognizing the complete line
     // and then rerunning every word.
-    if (useExtendedModel && (!selected || selectedAssessment?.suspicious)) {
+    if (useExtendedModel && (!selected || selectedAssessment?.needsContext)) {
       try {
         const rawText = normalizeGermanSharpS(await recognizeTrocrLine(image.pixels, image.width, image.height))
           .normalize('NFC')
           .trim()
         const text = normalizedTrocrText(rawText, language, physicalWord)
         const assessment = trocrLineAssessment(text, physicalWord, language, wordMembership)
+        const contextCandidate = text ? {
+          text,
+          rawText,
+          greedyText: text,
+          confidence: assessment.confidence,
+          characters: evenlySpacedCharacters(text, assessment.confidence),
+        } : null
         if (
-          text &&
+          contextCandidate &&
           (
             !selected ||
-            assessment.score > (selectedAssessment?.score ?? Number.NEGATIVE_INFINITY) + 0.12 ||
-            (assessment.score >= (selectedAssessment?.score ?? Number.NEGATIVE_INFINITY) - 0.04
-              && assessment.confidence > selected.confidence)
+            !selectedAssessment ||
+            contextShouldReplaceCompact(
+              selected,
+              selectedAssessment,
+              contextCandidate,
+              assessment,
+              language,
+              wordMembership,
+              window.lernwerk.platform === 'web',
+            )
           )
         ) {
-          selected = {
-            text,
-            rawText,
-            greedyText: text,
-            confidence: assessment.confidence,
-            characters: evenlySpacedCharacters(text, assessment.confidence),
-          }
+          selected = contextCandidate
           selectedAssessment = assessment
           usedTrocr = true
         }
@@ -1093,10 +1209,53 @@ export async function recognizeNeuralText(
     if (separated?.usedTrocr) trocrLines += 1
     if (!selected) {
       try {
-        const compact = await recognizeCtcLine(image, language, wordMembership)
+        let compact = await recognizeCtcLine(image, language, wordMembership)
+        let compactAssessment = compact.text
+          ? trocrLineAssessment(compact.text, line, language, wordMembership)
+          : null
+        const compactVisible = Array.from(compact.text).filter((character) => !/\s/u.test(character))
+        const uncertainSingleWord = (
+          compact.confidence < 80 &&
+          compactVisible.length >= 4 &&
+          compactVisible.length <= 14 &&
+          /^\p{L}+$/u.test(compact.text)
+        )
+        if (uncertainSingleWord) {
+          try {
+            // A slightly tighter crop changes the relative x-height and ink
+            // thickness seen by CTC. Running it only for a low-confidence
+            // single word recovers valid-word confusions such as
+            // rennen/lernen without doubling normal sentence work.
+            const alternateImage = renderLineImage(line, sourceWidth, sourceHeight, {
+              marginYRatio: 0.32,
+              inkScale: 0.92,
+            })
+            const alternate = await recognizeCtcLine(alternateImage, language, wordMembership)
+            const alternateAssessment = alternate.text
+              ? trocrLineAssessment(alternate.text, line, language, wordMembership)
+              : null
+            if (
+              alternateAssessment &&
+              compactAssessment &&
+              (
+                (compactAssessment.suspicious && !alternateAssessment.suspicious) ||
+                alternateAssessment.score > compactAssessment.score + 0.08 ||
+                (
+                  alternateAssessment.score >= compactAssessment.score - 0.04 &&
+                  alternate.confidence >= compact.confidence + 2
+                )
+              )
+            ) {
+              compact = alternate
+              compactAssessment = alternateAssessment
+            }
+          } catch {
+            // The original compact result remains valid and already loaded.
+          }
+        }
         if (compact.text) {
           selected = compact
-          primaryAssessment = trocrLineAssessment(compact.text, line, language, wordMembership)
+          primaryAssessment = compactAssessment
           ctcLines += 1
         }
       } catch {
@@ -1110,7 +1269,7 @@ export async function recognizeNeuralText(
       !LANGUAGE_WORDS[language].has(word) && !wordMembership?.(word)
     ))
     const isWebRuntime = window.lernwerk.platform === 'web'
-    if (useContextModel && (isWebRuntime || !selected || primaryAssessment?.suspicious || containsUnknownWord)) {
+    if (useContextModel && (isWebRuntime || !selected || primaryAssessment?.needsContext || containsUnknownWord)) {
       try {
         const rawText = normalizeGermanSharpS(await recognizeTrocrLine(image.pixels, image.width, image.height))
           .normalize('NFC')
@@ -1127,33 +1286,42 @@ export async function recognizeNeuralText(
           suspicious: true,
           score: contextAssessment.score - Math.min(0.7, contextualEdits * 0.24),
         }
-        if (
-          text
-          && (
-            isWebRuntime
-            || !selected
-            || contextAssessment.score > (primaryAssessment?.score ?? Number.NEGATIVE_INFINITY) + 0.12
-            || (contextAssessment.score >= (primaryAssessment?.score ?? Number.NEGATIVE_INFINITY) - 0.04
-              && contextAssessment.confidence > selected.confidence)
-          )
-        ) {
-          const compactContextText = selected
-            ? normalizedTrocrSurface(applyFinalNeuralWordContext(selected.text, language), line)
-            : ''
-          const fusedText = selected
-            ? fuseCompactAndContextWords(compactContextText, selected.rawText, text, language, wordMembership)
-            : text
-          const fusedAssessment = trocrLineAssessment(fusedText, line, language, wordMembership)
-          const fusedConfidence = Math.max(selected?.confidence ?? 0, contextAssessment.confidence)
-          selected = {
-            text: fusedText,
+        if (text) {
+          const contextCandidate = {
+            text,
             rawText,
-            greedyText: fusedText,
-            confidence: fusedConfidence,
-            characters: evenlySpacedCharacters(fusedText, fusedConfidence),
+            greedyText: text,
+            confidence: contextAssessment.confidence,
+            characters: evenlySpacedCharacters(text, contextAssessment.confidence),
           }
-          primaryAssessment = fusedAssessment
-          trocrLines += 1
+          const useContext = !selected || !primaryAssessment || contextShouldReplaceCompact(
+            selected,
+            primaryAssessment,
+            contextCandidate,
+            contextAssessment,
+            language,
+            wordMembership,
+            isWebRuntime,
+          )
+          if (useContext) {
+            const compactContextText = selected
+              ? normalizedTrocrSurface(applyFinalNeuralWordContext(selected.text, language), line)
+              : ''
+            const fusedText = selected
+              ? fuseCompactAndContextWords(compactContextText, selected.rawText, text, language, wordMembership)
+              : text
+            const fusedAssessment = trocrLineAssessment(fusedText, line, language, wordMembership)
+            const fusedConfidence = Math.max(selected?.confidence ?? 0, contextAssessment.confidence)
+            selected = {
+              text: fusedText,
+              rawText,
+              greedyText: fusedText,
+              confidence: fusedConfidence,
+              characters: evenlySpacedCharacters(fusedText, fusedConfidence),
+            }
+            primaryAssessment = fusedAssessment
+            trocrLines += 1
+          }
         }
       } catch (error) {
         trocrFailures.push((error instanceof Error ? error.message : String(error)).slice(0, 500))

@@ -14,7 +14,7 @@ welchen welcher welches welt wenn werde werden wer wie wieder will wir wird wo w
 arbeit auto bild browser computer danke datei daten deutsch deutschland direkt dürfen erkennen erkennung familie frage frau
 freund freunde früh gehen geld geschichte hand haus herr hoch jahr jahren kind kinder klar klein land lang lange liebe
 lösung mal mann minute monat möglich name neu nummer online ort person programm satz schule schön schöne schönen seite
-sicher software sprache stadt stark stift stunde system tablet teil test uhr vater wasser wichtig wissen woche wort
+sicher software sprache stadt stark stift stunde system tablet teil test uhr vater wasser wichtig wissen woche wort gut
 zeit zeichen ziel zuhause zusammen notiz notizen papier abstand tabelle rechnen grenze funktion
 anfang antwort brauchen diesem dinge eigentlich einfach einmal einige ersten fragen geben gemacht genau gesehen heute
 immer jeder keine machen möglich müssen natürlich neuen sagen sollen unter viele vielleicht wollen

@@ -4798,6 +4798,27 @@ const textGeometryCandidateScore = (
   const char = candidate.label.char
   let score = 0
 
+  const strokeBoundsWithExtent = token.strokes
+    .filter((stroke) => stroke.points.length)
+    .map((stroke) => {
+      const bounds = strokeBounds(stroke)
+      return {
+        bounds,
+        extent: Math.max(
+          (bounds.maxX - bounds.minX) * SOURCE_WIDTH,
+          (bounds.maxY - bounds.minY) * SOURCE_HEIGHT,
+        ),
+      }
+    })
+    .sort((first, second) => second.extent - first.extent)
+  const primaryBody = strokeBoundsWithExtent[0]
+  const detachedUpperDots = primaryBody
+    ? strokeBoundsWithExtent.slice(1).filter((entry) => (
+        entry.extent <= Math.max(60, primaryBody.extent * 0.55) &&
+        resemblesTextDotPair(primaryBody.bounds, entry.bounds)
+      )).length
+    : 0
+
   if (/^\p{Lu}$/u.test(char)) {
     if (position === 0) score += relativeHeight >= 1.08 ? 0.16 : -0.04
     else score += relativeHeight >= 1.16 ? -0.04 : -0.28
@@ -4813,6 +4834,18 @@ const textGeometryCandidateScore = (
     const expectedCenter = baseline - referenceHeight * 0.46
     const normalizedDistance = Math.abs(centerY - expectedCenter) / referenceHeight
     score += normalizedDistance <= 0.25 ? 0.31 : -Math.min(0.38, normalizedDistance * 0.34)
+  }
+  // A delayed i/j dot is independent geometric evidence and must survive a
+  // word split.  Square-normalized glyph crops otherwise make dotted i look
+  // almost identical to l/I/1. Two detached upper dots similarly distinguish
+  // a real umlaut from its undiacritized base letter.
+  if (detachedUpperDots === 1) {
+    if (/^[ij]$/u.test(char)) score += 0.42
+    if (/^[lI1]$/u.test(char)) score -= 0.4
+  } else if (detachedUpperDots >= 2) {
+    if (/^[ÄÖÜäöü]$/u.test(char)) score += 0.5
+    if (/^[AaOoUu]$/u.test(char)) score -= 0.38
+    if (/^[ij]$/u.test(char)) score -= 0.2
   }
   return score
 }
