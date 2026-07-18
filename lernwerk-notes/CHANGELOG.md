@@ -1,5 +1,13 @@
 # Änderungsverlauf
 
+## 2026.7.4-beta.5
+
+- Grunderkennung und persönliche GlyphenWerk-Daten bleiben jetzt als zwei unabhängige Evidenzquellen erhalten, selbst wenn für eine Zeichenklasse bereits eigene Beispiele existieren; FaNotes kann dadurch echte Zustimmung von einem Konflikt unterscheiden, statt das Grundmodell nach dem ersten Training vollständig auszublenden
+- ein einzelnes widersprüchliches Trainingsbeispiel überschreibt keine sehr sichere Grund- oder Zeilenentscheidung mehr; stimmen Grundform und persönliche Form überein, kann bereits ein nahes Beispiel helfen, während mehrere wiederholt passende Beispiele weiterhin einen tatsächlich individuellen Schreibstil zuverlässig erlernen und gegenüber der Standardform durchsetzen
+- Zeichen-, Wort-, Satz- und Segmentierungsentscheidungen verwenden dieselbe kalibrierte Konfliktlogik: schwaches Fehltraining zählt weder als Buchstabenstütze noch als Schutz einer falschen Ganzzeichen-Hypothese, wiederholte nahe Beispiele behalten dagegen ihre höhere persönliche Autorität
+- Sprachkorrekturen, Zeichenhinweise und der persönliche Raster-Fallback übernehmen Basis- und Trainingswerte ausschließlich vom tatsächlich gewählten Zeichen; verworfene Buchstaben können ihre Beispielanzahl oder Konfidenz nicht länger an ein später ausgewähltes Zeichen vererben
+- drei über die gebündelten Schreibstile verteilte Basisreferenzen pro trainierter Klasse halten die zusätzliche Prüfung kompakt; Typprüfung, sichtbarer GlyphenWerk-Pfad, reale IAM-OnDB-Zeile, verbundene Mehrzeilenschrift sowie 1.001 persönliche Text- und 216 Mathematikbeispiele bestehen unter festen RAM-, CPU- und Null-Swap-Limits
+
 ## 2026.7.4-beta.4
 
 - die allgemeine Texterkennung trennt jetzt visuelle Sicherheit von Sprachkontext: eine unbekannte, aber sauber geschriebene Wortform gilt nicht länger als geometrisch fehlerhaft; dadurch bleiben insbesondere Eigennamen wie `Fabio` und bewusst gemischte Fach- oder Produktnamen wie `OpenCode` erhalten, während Satzkontext weiterhin echte Lesefehler korrigiert

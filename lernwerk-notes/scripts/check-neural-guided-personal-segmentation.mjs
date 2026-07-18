@@ -69,6 +69,14 @@ try {
   const result = JSON.parse(encoded.replaceAll('&quot;', '"').replaceAll('&amp;', '&'))
   assert.equal(result.guided.toLocaleLowerCase('de'), 'test', JSON.stringify(result))
   assert.equal(result.guidedTokenCount, 4, JSON.stringify(result))
+  assert.ok(
+    result.guidedTokens.every((token) => token.alternatives.some((alternative) => (
+      alternative.char === token.char &&
+      alternative.personalSupport > 0 &&
+      alternative.baseConfidence > 0
+    ))),
+    `Trainierte Zeichen müssen gleichzeitig persönliche und unabhängige Basisevidenz behalten: ${JSON.stringify(result.guidedTokens)}`,
+  )
   assert.equal(result.integratedText.toLocaleLowerCase('de'), 'test', JSON.stringify(result))
   assert.equal(result.integratedTokenCount, 4, JSON.stringify(result))
   assert.deepEqual(

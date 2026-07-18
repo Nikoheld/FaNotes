@@ -9,7 +9,11 @@ const server = await createServer({
 })
 
 try {
-  const { applyTextReranking, recognizedSentence } = await server.ssrLoadModule('/../src/lib/recognition.ts')
+  const {
+    applyTextReranking,
+    calibratePersonalBaseEvidence,
+    recognizedSentence,
+  } = await server.ssrLoadModule('/../src/lib/recognition.ts')
   const {
     fusePersonalizedTextRecognition,
     personalizedTextFusionSelectionScore,
@@ -80,6 +84,63 @@ try {
   assert.equal(german[1].context?.knownWord, true)
   assert.equal(german[1].context?.autoLearn, true, 'Eine visuell plausible, eindeutige Kontextkorrektur soll lernbar sein.')
   assert.ok(german[1].context.scoreMargin >= 0.5)
+
+  const untrainedCalibration = calibratePersonalBaseEvidence({
+    confidence: 82,
+    baseConfidence: 82,
+    personalSupport: 0,
+    personalConfidence: 0,
+  }, 82)
+  const consensusCalibration = calibratePersonalBaseEvidence({
+    confidence: 84,
+    baseConfidence: 88,
+    personalSupport: 1,
+    personalConfidence: 30,
+  }, 91)
+  const weakConflictCalibration = calibratePersonalBaseEvidence({
+    confidence: 84,
+    baseConfidence: 20,
+    personalSupport: 1,
+    personalConfidence: 70,
+  }, 95)
+  const repeatedConflictCalibration = calibratePersonalBaseEvidence({
+    confidence: 84,
+    baseConfidence: 20,
+    personalSupport: 8,
+    personalConfidence: 75,
+  }, 95)
+  assert.equal(untrainedCalibration.scoreAdjustment, 0, 'Ohne Trainingsdaten darf die Kalibrierung die Grunderkennung nicht verändern.')
+  assert.equal(consensusCalibration.consensus, true)
+  assert.ok(
+    consensusCalibration.scoreAdjustment > weakConflictCalibration.scoreAdjustment,
+    'Übereinstimmende Grund- und Trainingsdaten müssen stärker sein als ein einzelnes widersprüchliches Beispiel.',
+  )
+  assert.equal(weakConflictCalibration.decisive, false)
+  assert.equal(repeatedConflictCalibration.decisive, true, 'Viele passende persönliche Beispiele müssen einen echten individuellen Schreibstil lernen dürfen.')
+  assert.ok(repeatedConflictCalibration.authority > weakConflictCalibration.authority)
+
+  const mixedEvidenceTest = ambiguousTest.map((entry, index) => index !== 1 ? entry : ({
+    ...entry,
+    baseConfidence: 82,
+    personalSupport: 1,
+    personalConfidence: 10,
+    alternatives: entry.alternatives.map((alternative) => alternative.char === 'e' ? {
+      ...alternative,
+      baseConfidence: 80,
+      personalSupport: 4,
+      personalConfidence: 60,
+    } : {
+      ...alternative,
+      baseConfidence: 82,
+      personalSupport: 1,
+      personalConfidence: 10,
+    }),
+  }))
+  const mixedEvidenceGerman = applyTextReranking(mixedEvidenceTest, BASE_CATALOG, 'de')
+  assert.equal(recognizedSentence(mixedEvidenceGerman), 'Test')
+  assert.equal(mixedEvidenceGerman[1].personalSupport, 4, 'Eine Sprachkorrektur muss die Trainingsstützung des gewählten Zeichens übernehmen.')
+  assert.equal(mixedEvidenceGerman[1].personalConfidence, 60, 'Eine Sprachkorrektur darf keine Trainingskonfidenz des verworfenen Zeichens behalten.')
+  assert.equal(mixedEvidenceGerman[1].baseConfidence, 80, 'Auch die unabhängige Grunderkennung muss zum tatsächlich gewählten Zeichen gehören.')
 
   const english = applyTextReranking(ambiguousTest, BASE_CATALOG, 'en')
   assert.equal(recognizedSentence(english), 'Test', 'Der englische Wortkontext muss denselben mehrdeutigen Fall lösen.')
@@ -331,6 +392,62 @@ try {
     engine: 'trocr-bilingual',
     lines: [neuralLine(text, confidence)],
   })
+  const calibratedToken = (
+    selected,
+    selectedEvidence,
+    alternative,
+    alternativeEvidence,
+  ) => {
+    const base = token(
+      selected,
+      selectedEvidence.confidence,
+      [[selected, selectedEvidence.confidence], [alternative, alternativeEvidence.confidence]],
+      0,
+    )
+    return {
+      ...base,
+      baseConfidence: selectedEvidence.baseConfidence,
+      personalSupport: selectedEvidence.personalSupport,
+      personalConfidence: selectedEvidence.personalConfidence,
+      alternatives: base.alternatives.map((entry) => ({
+        ...entry,
+        ...(entry.char === selected ? selectedEvidence : alternativeEvidence),
+      })),
+    }
+  }
+  const baseTrainingConsensus = calibratedToken(
+    'e',
+    { confidence: 86, baseConfidence: 90, personalSupport: 1, personalConfidence: 30 },
+    'o',
+    { confidence: 78, baseConfidence: 70, personalSupport: 0, personalConfidence: 0 },
+  )
+  assert.equal(
+    fusePersonalizedTextRecognition([baseTrainingConsensus], neuralResult('o', 90), 'de', 1).text,
+    'e',
+    'Ein persönliches Beispiel und eine klar zustimmende Grunderkennung müssen gemeinsam ein abweichendes Sequenzmodell schlagen.',
+  )
+  const weakTrainingConflict = calibratedToken(
+    'a',
+    { confidence: 84, baseConfidence: 20, personalSupport: 1, personalConfidence: 70 },
+    'c',
+    { confidence: 82, baseConfidence: 95, personalSupport: 0, personalConfidence: 0 },
+  )
+  assert.equal(
+    fusePersonalizedTextRecognition([weakTrainingConflict], neuralResult('c', 96), 'de', 1).text,
+    'c',
+    'Ein einzelnes widersprüchliches Trainingsbeispiel darf eine sehr sichere Grund- und Sequenzentscheidung nicht überschreiben.',
+  )
+  const repeatedTrainingConflict = calibratedToken(
+    'a',
+    { confidence: 84, baseConfidence: 20, personalSupport: 8, personalConfidence: 75 },
+    'c',
+    { confidence: 82, baseConfidence: 95, personalSupport: 0, personalConfidence: 0 },
+  )
+  assert.equal(
+    fusePersonalizedTextRecognition([repeatedTrainingConflict], neuralResult('c', 96), 'de', 1).text,
+    'a',
+    'Wiederholte nahe persönliche Beispiele müssen einen echten vom Grundmodell abweichenden Schreibstil erlernen.',
+  )
   const cleanPersonalWordScore = personalizedTextFusionSelectionScore({
     text: 'mathe',
     confidence: 71,
