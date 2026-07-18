@@ -206,13 +206,15 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def checksum_asset(version: str, assets: list[Path], target_dir: Path) -> Path:
+def checksum_asset(version: str, assets: list[Path], target_dir: Path) -> tuple[Path, dict[str, str]]:
     target = target_dir / f"SHA256SUMS-{version}.txt"
+    digests = {path.name: sha256(path) for path in assets}
     target.write_text(
-        "".join(f"{sha256(path)}  {path.name}\n" for path in assets),
+        "".join(f"{digests[path.name]}  {path.name}\n" for path in assets),
         encoding="utf-8",
     )
-    return target
+    digests[target.name] = sha256(target)
+    return target, digests
 
 
 def main() -> int:
@@ -248,7 +250,7 @@ def main() -> int:
     existing = github.request("GET", f"/repos/{OWNER}/{REPOSITORY}/releases?per_page=100")
     by_tag = {release["tag_name"]: release for release in existing}
     releases_to_publish: set[str] = set()
-    expected_assets_by_tag: dict[str, dict[str, int]] = {}
+    expected_assets_by_tag: dict[str, dict[str, tuple[int, str]]] = {}
 
     for version, notes in changelog:
         tag = f"v{version}"
@@ -303,15 +305,24 @@ def main() -> int:
             assets = assets_for(version, include_all_files=requested_version is not None)
             if not assets:
                 continue
-            assets.append(checksum_asset(version, assets, temp_dir))
+            checksum_path, asset_digests = checksum_asset(version, assets, temp_dir)
+            assets.append(checksum_path)
             tag = f"v{version}"
-            expected_assets_by_tag[tag] = {path.name: path.stat().st_size for path in assets}
+            expected_assets_by_tag[tag] = {
+                path.name: (path.stat().st_size, asset_digests[path.name]) for path in assets
+            }
             release = by_tag[tag]
             current_assets = {asset["name"]: asset for asset in release.get("assets", [])}
             print(f"Assets for v{version}: {len(assets)} files.", flush=True)
             for path in assets:
                 current = current_assets.get(path.name)
-                if current and current.get("state") == "uploaded" and current.get("size") == path.stat().st_size:
+                expected_digest = f"sha256:{asset_digests[path.name]}"
+                if (
+                    current and
+                    current.get("state") == "uploaded" and
+                    current.get("size") == path.stat().st_size and
+                    current.get("digest") == expected_digest
+                ):
                     print(f"  Skip {path.name} (already uploaded).", flush=True)
                     continue
                 if current:
@@ -352,9 +363,14 @@ def main() -> int:
             if release.get("draft") or bool(release.get("prerelease")) != ("-beta." in version):
                 raise RuntimeError(f"GitHub returned an invalid publication state for {tag}.")
             remote_assets = {asset["name"]: asset for asset in release.get("assets", [])}
-            for name, size in expected_assets_by_tag.get(tag, {}).items():
+            for name, (size, digest) in expected_assets_by_tag.get(tag, {}).items():
                 asset = remote_assets.get(name)
-                if not asset or asset.get("state") != "uploaded" or asset.get("size") != size:
+                if (
+                    not asset or
+                    asset.get("state") != "uploaded" or
+                    asset.get("size") != size or
+                    asset.get("digest") != f"sha256:{digest}"
+                ):
                     raise RuntimeError(f"GitHub did not preserve the verified asset {name} for {tag}.")
     else:
         final_releases = github.request("GET", f"/repos/{OWNER}/{REPOSITORY}/releases?per_page=100")

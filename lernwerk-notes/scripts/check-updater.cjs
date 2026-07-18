@@ -52,6 +52,20 @@ async function main() {
       targetFileName: path.basename(targetPath),
     })
     assert.ok(delta.patchSizeBytes < targetBytes.length / 8, 'Das Delta-Paket muss deutlich kleiner als die Zieldatei sein.')
+    await assert.rejects(
+      createDeltaPatch({
+        platform: 'windows',
+        baseVersion,
+        targetVersion,
+        sourcePath,
+        targetPath,
+        outputPath: path.join(temporary, 'invalid-windows.fndelta'),
+        targetKind: 'app-asar',
+        targetFileName: `app-${targetVersion}-windows.asar`,
+      }),
+      /app\.asar/u,
+      'Windows-Deltas mit einem nicht installierbaren Zielnamen müssen vor dem Build scheitern.',
+    )
 
     const { privateKey, publicKey } = crypto.generateKeyPairSync('ed25519')
     const publicPem = publicKey.export({ type: 'spki', format: 'pem' })

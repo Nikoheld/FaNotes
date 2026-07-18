@@ -82,6 +82,9 @@ async function createDeltaPatch({ platform, baseVersion, targetVersion, sourcePa
   const expectedKind = platform === 'linux' ? 'appimage' : 'app-asar'
   if (targetKind !== expectedKind) throw new Error(`Für ${platform} wird der Zieldateityp ${expectedKind} erwartet.`)
   if (!/^[A-Za-z0-9._-]{1,160}$/u.test(targetFileName)) throw new Error('Der Delta-Zieldateiname ist ungültig.')
+  if (platform === 'windows' && targetFileName !== 'app.asar') {
+    throw new Error('Ein Windows-Delta muss die rekonstruierte Datei sicher als app.asar benennen.')
+  }
   const resolvedSource = path.resolve(sourcePath)
   const resolvedTarget = path.resolve(targetPath)
   const resolvedOutput = path.resolve(outputPath)

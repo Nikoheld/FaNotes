@@ -74,7 +74,19 @@ void (async () => {
   }
   for (const [platform, candidate] of Object.entries(requiredDeltaFiles)) {
     const { header } = await inspectDeltaPatch(candidate)
-    if (header.platform !== platform || header.baseVersion !== baseVersion || header.targetVersion !== version) {
+    const expectedTarget = platform === 'linux'
+      ? { kind: 'appimage', fileName: `FaNotes-${version}-x86_64.AppImage`, path: path.join(buildStage, `FaNotes-${version}-x86_64.AppImage`) }
+      : { kind: 'app-asar', fileName: 'app.asar', path: windowsAsar }
+    const [targetStats, targetSha256] = await Promise.all([regularFile(expectedTarget.path), sha256File(expectedTarget.path)])
+    if (
+      header.platform !== platform ||
+      header.baseVersion !== baseVersion ||
+      header.targetVersion !== version ||
+      header.target?.kind !== expectedTarget.kind ||
+      header.target?.fileName !== expectedTarget.fileName ||
+      header.target?.sizeBytes !== targetStats.size ||
+      header.target?.sha256 !== targetSha256
+    ) {
       throw new Error(`Das ${platform}-Delta gehört nicht zu ${baseVersion} → ${version}.`)
     }
   }
@@ -94,10 +106,18 @@ void (async () => {
     const candidate = path.join(buildStage, entry.name)
     await regularFile(candidate)
     const { header } = await inspectDeltaPatch(candidate)
+    const expectedTarget = platform === 'linux'
+      ? { kind: 'appimage', fileName: `FaNotes-${version}-x86_64.AppImage`, path: path.join(buildStage, `FaNotes-${version}-x86_64.AppImage`) }
+      : { kind: 'app-asar', fileName: 'app.asar', path: windowsAsar }
+    const [targetStats, targetSha256] = await Promise.all([regularFile(expectedTarget.path), sha256File(expectedTarget.path)])
     if (
       header.platform !== platform ||
       header.baseVersion !== candidateBaseVersion ||
-      header.targetVersion !== version
+      header.targetVersion !== version ||
+      header.target?.kind !== expectedTarget.kind ||
+      header.target?.fileName !== expectedTarget.fileName ||
+      header.target?.sizeBytes !== targetStats.size ||
+      header.target?.sha256 !== targetSha256
     ) throw new Error(`Das zusätzliche Delta ${entry.name} besitzt einen widersprüchlichen Kopf.`)
     validatedDeltaFiles.set(entry.name, candidate)
   }
