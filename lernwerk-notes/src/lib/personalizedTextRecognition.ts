@@ -98,6 +98,14 @@ const strongestPersonalCandidate = (token: RecognitionToken) => tokenCandidates(
     first.personalConfidence - Math.min(24, Math.log2(first.personalSupport + 1) * 7)
   ))[0] ?? null
 
+// A personal alternative somewhere in the candidate list is not evidence
+// that the selected character itself came from the user's training. This
+// distinction matters when the text branch is evaluated beside a real
+// integral: an `I` token may list a trained `t` as a distant alternative, but
+// must remain classical unless the selected `I` has its own personal sample.
+const selectedPersonalCandidate = (token: RecognitionToken) => tokenCandidates(token)
+  .find((candidate) => candidate.char === token.char && candidate.personalSupport > 0) ?? null
+
 const normalizedLineCharacters = (
   lineText: string,
   rawCharacters: NeuralTextCharacter[],
@@ -806,7 +814,7 @@ export const fusePersonalizedTextRecognition = (
 ): PersonalizedTextRecognitionResult => {
   const classicalText = recognizedSentence(tokens).trim()
   if (!neuralResult.text.trim()) {
-    const personalCharacters = tokens.filter((token) => Boolean(strongestPersonalCandidate(token))).length
+    const personalCharacters = tokens.filter((token) => Boolean(selectedPersonalCandidate(token))).length
     const visibleCharacters = Array.from(classicalText).filter((char) => !/\s/u.test(char)).length
     return {
       text: classicalText,

@@ -6,6 +6,12 @@ export type NeuralTextModeEvidence = {
   knownWordRatio?: number
 }
 
+export type PersonalizedTextModeEvidence = {
+  confidence: number
+  source?: 'personalized' | 'neural' | 'classical' | 'hybrid'
+  personalizedCharacters?: number
+}
+
 export const hasDecisiveMathLayout = (mathValue: string) => (
   /\\(?:frac|sqrt)\b|[=≤≥]/u.test(mathValue)
   || (/\d/u.test(mathValue) && /[+×÷]/u.test(mathValue))
@@ -34,6 +40,32 @@ export const hasStrongNeuralSentenceEvidence = (
   && letters >= 6
   && wordLike
 )
+
+/**
+ * A personal glyph decision is independent evidence, not another spelling
+ * guess from the line model. In particular, a line model that initially calls
+ * a trained `T` an integral must not be allowed to veto the corrected result
+ * merely by reporting zero known words. Requiring every short result (and at
+ * least half of a longer result) to be backed by personal glyphs keeps actual
+ * formulas out of text mode while making explicit user training visible.
+ */
+export const hasStrongPersonalizedTextEvidence = (
+  evidence: PersonalizedTextModeEvidence,
+  letters: number,
+  visibleCharacters: number,
+  explicitMath: boolean,
+) => {
+  const personalizedCharacters = Math.max(0, evidence.personalizedCharacters ?? 0)
+  const requiredCharacters = letters <= 2 ? letters : Math.ceil(letters * 0.5)
+  return (
+    !explicitMath
+    && letters >= 1
+    && letters === visibleCharacters
+    && evidence.confidence >= 24
+    && (evidence.source === 'personalized' || evidence.source === 'hybrid')
+    && personalizedCharacters >= requiredCharacters
+  )
+}
 
 /**
  * A normal sentence used to be trapped in math mode when isolated tall

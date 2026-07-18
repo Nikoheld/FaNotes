@@ -47,6 +47,12 @@ try {
   assert.equal(result.guidedTokenCount, 4, JSON.stringify(result))
   assert.equal(result.integratedText.toLocaleLowerCase('de'), 'test', JSON.stringify(result))
   assert.equal(result.integratedTokenCount, 4, JSON.stringify(result))
+  assert.equal(
+    result.misleadingMathIntegratedText.toLocaleLowerCase('de'),
+    'test',
+    `Eine falsche Integral-Vermutung darf persönliches Texttraining nicht blockieren: ${JSON.stringify(result)}`,
+  )
+  assert.equal(result.misleadingMathIntegratedTokenCount, 4, JSON.stringify(result))
   assert.equal(result.phraseIntegratedText.toLocaleLowerCase('de'), 'test test', JSON.stringify(result))
   assert.equal(result.phraseIntegratedTokenCount, 8, JSON.stringify(result))
   assert.equal(result.multiLineIntegratedText.toLocaleLowerCase('de'), 'test\ntest', JSON.stringify(result))

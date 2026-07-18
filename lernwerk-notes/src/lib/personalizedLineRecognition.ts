@@ -212,6 +212,8 @@ export const recognizePersonalizedTextLine = async (
   includeCandidateScores = false,
   sourceWidth = 900,
   sourceHeight = 1_273,
+  textCharacterCountHint?: number,
+  textCharacterHint?: string,
 ): Promise<PersonalizedLineRecognition> => {
   const recognition = await import('../../../src/lib/recognition')
   const physicalLines = recognition.groupRecognitionLines(strokes)
@@ -265,6 +267,50 @@ export const recognizePersonalizedTextLine = async (
   const candidates: RecognitionToken[][] = []
   const neuralCharacterCount = Array.from(neural.text)
     .filter((character) => !/\s/u.test(character)).length
+  const neuralVisibleCharacters = Array.from(neural.text).filter((character) => !/\s/u.test(character))
+  const neuralLetterCount = neuralVisibleCharacters.filter((character) => /^\p{L}$/u.test(character)).length
+  const neuralExplicitMath = /[=+×÷√∫∑Σ∏Π∞^_]/u.test(neural.text)
+  const neuralIsUsableAsText = (
+    !neuralExplicitMath
+    && neuralLetterCount >= 1
+    && neuralLetterCount / Math.max(1, neuralVisibleCharacters.length) >= 0.6
+  )
+  // This function computes the best *text* hypothesis. A raw OCR result such
+  // as `∫∫` belongs to the parallel math decision and must not overwrite a
+  // personally supported text sequence during character fusion.
+  const textFusionNeural: NeuralTextRecognitionResult = neuralIsUsableAsText
+    ? neural
+    : {
+        ...neural,
+        text: '',
+        confidence: 0,
+        lines: [],
+        wordCount: 0,
+        knownWordRatio: 0,
+      }
+
+  const safeTextCharacterCountHint = Number.isSafeInteger(textCharacterCountHint)
+    && textCharacterCountHint! >= 1
+    && textCharacterCountHint! <= 320
+    ? textCharacterCountHint
+    : undefined
+  const safeTextCharacterHint = typeof textCharacterHint === 'string'
+    && /^\p{L}{1,320}$/u.test(textCharacterHint)
+    ? textCharacterHint
+    : undefined
+  if (safeTextCharacterCountHint && physicalLines.length === 1) {
+    const hinted = recognition.recognizeExpression(
+      physicalLines[0].strokes,
+      resources.model,
+      resources.labels,
+      'text',
+      resources.layoutExamples,
+      language,
+      safeTextCharacterCountHint,
+      safeTextCharacterHint,
+    )
+    if (hinted.length) candidates.push(hinted)
+  }
 
   // The line model provides a useful length prior for connected cursive ink.
   // Verified physical word partitions avoid the much more expensive global
@@ -447,15 +493,21 @@ export const recognizePersonalizedTextLine = async (
     })
   }
 
-  const measuredCharacterCount = penLiftCounts.length > 0 && penLiftCounts.every(Boolean)
-    ? penLiftCounts.reduce<number>((sum, count) => sum + (count ?? 0), 0)
+  const completeTextHintCount = safeTextCharacterHint
+    && Array.from(safeTextCharacterHint).length === safeTextCharacterCountHint
+    ? safeTextCharacterCountHint
     : null
+  const measuredCharacterCount = completeTextHintCount ?? (
+    penLiftCounts.length > 0 && penLiftCounts.every(Boolean)
+      ? penLiftCounts.reduce<number>((sum, count) => sum + (count ?? 0), 0)
+      : null
+  )
 
   const ranked = candidates
     .map((tokens) => {
       const fusion = fusePersonalizedTextRecognition(
         tokens,
-        neural,
+        textFusionNeural,
         language,
         measuredCharacterCount ?? undefined,
       )
@@ -466,7 +518,7 @@ export const recognizePersonalizedTextLine = async (
       return {
         tokens,
         fusion,
-        score: personalizedTextFusionSelectionScore(fusion, neural, language) - penLiftMismatch * 0.22,
+        score: personalizedTextFusionSelectionScore(fusion, textFusionNeural, language) - penLiftMismatch * 0.22,
       }
     })
     .sort((first, second) => second.score - first.score)
@@ -484,9 +536,21 @@ export const recognizePersonalizedTextLine = async (
     : /^[A-Za-z]{2,24}[.,;:!?]?$/u
   const personalLetterSamples = resources.samples.filter((sample) => /^\p{L}$/u.test(sample.label))
   const personalLetterClasses = new Set(personalLetterSamples.map((sample) => sample.labelId)).size
+  // The line model may call an ordinary trained letter an integral or another
+  // formula symbol. In that exact failure mode its raw value is not a usable
+  // text prior, but the independent text-mode fusion often still provides a
+  // complete personal word. Previously the invalid neural value disabled the
+  // raster recognizer entirely, so the old mistake could veto the correction.
+  const rasterPriorWord = [
+    rawNeuralWord,
+    selected.fusion.text.trim(),
+    ...ranked.map((entry) => entry.fusion.text.trim()),
+  ].find((value, index, values) => (
+    rasterWordPattern.test(value) && values.indexOf(value) === index
+  )) ?? ''
   if (
     physicalLines.length === 1
-    && rasterWordPattern.test(rawNeuralWord)
+    && Boolean(rasterPriorWord)
     && personalLetterSamples.length >= 32
     && personalLetterClasses >= 12
     && Number.isFinite(sourceWidth) && sourceWidth >= 200 && sourceWidth <= 4_096
@@ -496,12 +560,12 @@ export const recognizePersonalizedTextLine = async (
       const { recognizePersonalRasterPixels, renderPersonalRasterLine } = await import('./personalizedRasterRecognition')
       const rendered = renderPersonalRasterLine(physicalLines[0].strokes, sourceWidth, sourceHeight)
       const raster = rendered
-        ? await recognizePersonalRasterPixels(rendered, resources.samples, rawNeuralWord, language)
+        ? await recognizePersonalRasterPixels(rendered, resources.samples, rasterPriorWord, language)
         : null
       const best = raster?.candidates[0]
       const rasterText = raster?.prediction ?? ''
       const rasterCharacters = Array.from(rasterText)
-      const neuralLetters = Array.from(rawNeuralWord).filter((character) => /^\p{L}$/u.test(character)).join('')
+      const priorLetters = Array.from(rasterPriorWord).filter((character) => /^\p{L}$/u.test(character)).join('')
       const topBeam = best?.sequenceBeams[0]
       const visuallySupportedCharacters = best?.segments.filter((segment, index) => {
         const selectedCharacter = rasterCharacters[index]
@@ -519,7 +583,7 @@ export const recognizePersonalizedTextLine = async (
         && best.cutInk <= 0.45
         && wordDistance(
           rasterText.toLocaleLowerCase(language),
-          neuralLetters.toLocaleLowerCase(language),
+          priorLetters.toLocaleLowerCase(language),
         ) <= 3
         && (topBeam?.known || visualSupportRatio >= 0.6)
       )
