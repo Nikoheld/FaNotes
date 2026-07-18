@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
+import crypto from 'node:crypto'
 import fs from 'node:fs'
 import http from 'node:http'
 import os from 'node:os'
@@ -37,6 +38,11 @@ const editDistance = (first, second) => {
 }
 
 const normalize = (value) => value.normalize('NFC').replace(/\s+/gu, '').trim()
+const sha256File = (filePath) => {
+  const digest = crypto.createHash('sha256')
+  digest.update(fs.readFileSync(filePath))
+  return digest.digest('hex')
+}
 const imageFiles = fs.readdirSync(holdoutRoot, { withFileTypes: true })
   .filter((entry) => entry.isFile() && entry.name.toLocaleLowerCase('en').endsWith('.png'))
   .map((entry) => entry.name)
@@ -91,9 +97,20 @@ try {
   })
   fs.mkdirSync(trainingRoot)
   await run('unzip', ['-q', glyphenwerkExport, '-d', trainingRoot])
+  const trainingImageHashes = new Set(
+    fs.readdirSync(path.join(trainingRoot, 'images'), { withFileTypes: true })
+      .filter((entry) => entry.isFile() && entry.name.endsWith('.png'))
+      .map((entry) => sha256File(path.join(trainingRoot, 'images', entry.name))),
+  )
+  const holdoutHashes = new Map(imageFiles.map((fileName) => [
+    fileName,
+    sha256File(path.join(holdoutRoot, fileName)),
+  ]))
+  const exactImageOverlap = [...holdoutHashes.values()].filter((hash) => trainingImageHashes.has(hash))
+  assert.deepEqual(exactImageOverlap, [], 'Ein NAS-Holdoutbild ist bytegleich in der Trainings-ZIP enthalten.')
   fs.writeFileSync(entryPath, [
     `import { runNasHandwritingHoldout } from ${JSON.stringify(pathToFileURL(path.join(appRoot, 'scripts/fixtures/nas-handwriting-holdout-harness.ts')).href)}`,
-    `runNasHandwritingHoldout(${JSON.stringify(cases)}, './training/manifest.jsonl').then((result) => {`,
+    `runNasHandwritingHoldout(${JSON.stringify(cases)}, './training/export.zip').then((result) => {`,
     ' document.body.innerHTML = `<pre id="result">${JSON.stringify(result)}</pre>`',
     '}).catch((error) => {',
     ' document.body.innerHTML = `<pre id="error">${String(error?.stack || error)}</pre>`',
@@ -113,14 +130,14 @@ try {
   server = http.createServer((request, response) => {
     const url = new URL(request.url ?? '/', 'http://localhost')
     const holdoutFile = fileByRoute.get(url.pathname)
+    const trainingArchive = url.pathname === '/training/export.zip' ? glyphenwerkExport : null
     const relative = decodeURIComponent(url.pathname).replace(/^\/+|\.\./gu, '') || 'index.html'
     const root = relative.startsWith('ocr/') || relative.startsWith('spell/')
       ? path.join(appRoot, 'public')
-      : relative.startsWith('training/') ? trainingRoot : output
-    const rootedRelative = relative.startsWith('training/') ? relative.slice('training/'.length) : relative
-    const target = holdoutFile ?? path.join(root, rootedRelative)
+      : output
+    const target = holdoutFile ?? trainingArchive ?? path.join(root, relative)
     if (
-      (!holdoutFile && !target.startsWith(root))
+      (!holdoutFile && !trainingArchive && !target.startsWith(root))
       || !fs.existsSync(target)
       || !fs.statSync(target).isFile()
     ) return response.writeHead(404).end()
@@ -188,19 +205,44 @@ try {
   assert.equal(state?.error, '', state?.error)
   assert.ok(state?.result, stderr.slice(-3_000))
   const predictions = JSON.parse(state.result)
-  const results = predictions.map((entry) => {
+  const results = predictions.cases.map((entry) => {
     const expected = expectedById.get(entry.id)
     assert.ok(expected, `Unbekannte Holdout-ID ${entry.id}.`)
     const neuralEdits = editDistance(normalize(expected), normalize(entry.prediction))
     const edits = editDistance(normalize(expected), normalize(entry.personalizedPrediction))
-    return { ...entry, expected, neuralEdits, edits }
+    const blindEdits = editDistance(normalize(expected), normalize(entry.blindPrediction))
+    return { ...entry, expected, neuralEdits, edits, blindEdits }
   })
   const edits = results.reduce((sum, entry) => sum + entry.edits, 0)
+  const blindEdits = results.reduce((sum, entry) => sum + entry.blindEdits, 0)
   const characters = results.reduce((sum, entry) => sum + Array.from(normalize(entry.expected)).length, 0)
-  const summary = { edits, characters, cer: edits / Math.max(1, characters), cases: results }
+  const summary = {
+    dataIsolation: {
+      trainingArchive: { sha256: sha256File(glyphenwerkExport), imageCount: trainingImageHashes.size },
+      holdouts: Object.fromEntries(holdoutHashes),
+      exactImageOverlap: exactImageOverlap.length,
+      expectedTextExposedToRecognizer: false,
+    },
+    importResult: predictions.importResult,
+    resources: predictions.resources,
+    edits,
+    blindEdits,
+    characters,
+    cer: edits / Math.max(1, characters),
+    blindCer: blindEdits / Math.max(1, characters),
+    cases: results,
+  }
   console.log(JSON.stringify(summary, null, 2))
   if (process.env.FANOTES_NAS_HOLDOUT_STRICT === '1') {
-    assert.ok(edits <= 3, `Der NAS-Holdout enthält noch ${edits} statt höchstens 3 Zeichenfehler.`)
+    assert.equal(edits, 0, `Der NAS-Holdout enthält noch ${edits} Zeichenfehler mit normalem Modellprior.`)
+  }
+  // This diagnostic deliberately replaces the independent text model with
+  // the impossible value "∫∫" for every multi-letter word. It measures a
+  // personal-template-only fallback, not the production recognition stack.
+  // Keep it observable and optionally gate it separately; the real strict
+  // holdout above must never be weakened by or confused with this ablation.
+  if (process.env.FANOTES_NAS_HOLDOUT_BLIND_STRICT === '1') {
+    assert.equal(blindEdits, 0, `Der NAS-Holdout enthält noch ${blindEdits} Zeichenfehler nach einer absichtlich falschen Mathematikvorhersage.`)
   }
 } finally {
   if (chromium && chromium.exitCode === null) {

@@ -1,7 +1,11 @@
 import { applyFinalNeuralWordContext } from '../../src/lib/neuralWordContext'
 import {
+  clearHandwritingTraining,
+  importGlyphenWerkZip,
+  loadRecognitionResources,
+} from '../../src/lib/handwritingDb'
+import {
   recognizePersonalRasterPixels,
-  type PersonalRasterSample,
 } from '../../src/lib/personalizedRasterRecognition'
 import { loadSpellingWordContext } from '../../src/lib/spelling'
 import {
@@ -23,12 +27,6 @@ type PreparedImage = {
   sourceHeight: number
   inkBox: [number, number, number, number]
   columnBands: Array<[number, number]>
-}
-
-type GlyphManifestRow = {
-  image: string
-  label_id: string
-  unicode: string
 }
 
 const MODEL_HEIGHT = 128
@@ -172,26 +170,17 @@ const prepareImage = async (source: string) => {
   return prepareImageData(context.getImageData(0, 0, canvas.width, canvas.height))
 }
 
-const loadPersonalSamples = async (manifestUrl: string) => {
-  const response = await fetch(manifestUrl)
-  if (!response.ok) throw new Error('Der persönliche GlyphenWerk-Export konnte nicht geladen werden.')
-  const rows = (await response.text()).trim().split(/\r?\n/u)
-    .map((line) => JSON.parse(line) as GlyphManifestRow)
-    .filter((row) => /^[A-Za-zÄÖÜäöü]$/u.test(row.unicode))
-  const root = new URL('.', new URL(manifestUrl, document.baseURI))
-  return rows.map((row) => ({
-    labelId: row.label_id,
-    label: row.unicode,
-    imageData: new URL(row.image, root).href,
-  } satisfies PersonalRasterSample))
-}
-
-export const runNasHandwritingHoldout = async (cases: HoldoutCase[], manifestUrl: string) => {
+export const runNasHandwritingHoldout = async (cases: HoldoutCase[], archiveUrl: string) => {
   const { recognizeTrocrLine } = await import('../../src/lib/trocrClient')
-  const [, samples] = await Promise.all([
+  const archiveResponse = await fetch(archiveUrl)
+  if (!archiveResponse.ok) throw new Error('Der persönliche GlyphenWerk-Export konnte nicht geladen werden.')
+  await clearHandwritingTraining()
+  const importResult = await importGlyphenWerkZip(await archiveResponse.blob())
+  const [, resources] = await Promise.all([
     loadSpellingWordContext('de'),
-    loadPersonalSamples(manifestUrl),
+    loadRecognitionResources(true),
   ])
+  const samples = resources.samples
   const results = []
   for (const item of cases) {
     const prepared = await prepareImage(item.image)
@@ -208,12 +197,27 @@ export const runNasHandwritingHoldout = async (cases: HoldoutCase[], manifestUrl
       width: prepared.sourceWidth,
       height: prepared.sourceHeight,
     }, samples, rawPrediction, 'de')
+    const blind = await recognizePersonalRasterPixels({
+      pixels: prepared.sourcePixels,
+      width: prepared.sourceWidth,
+      height: prepared.sourceHeight,
+    }, samples, '∫∫', 'de')
     results.push({
       id: item.id,
       rawPrediction,
       prediction,
       personalizedPrediction: personal?.prediction ?? prediction,
-      personalizedCandidates: personal?.candidates ?? [],
+      blindPrediction: blind?.prediction ?? '',
+      personalizedCandidates: personal?.candidates.slice(0, 3).map((candidate) => ({
+        targetCount: candidate.targetCount,
+        text: candidate.text,
+        score: candidate.score,
+      })) ?? [],
+      blindCandidates: blind?.candidates.slice(0, 3).map((candidate) => ({
+        targetCount: candidate.targetCount,
+        text: candidate.text,
+        score: candidate.score,
+      })) ?? [],
       width: prepared.width,
       height: prepared.height,
       inkBox: prepared.inkBox,
@@ -221,5 +225,14 @@ export const runNasHandwritingHoldout = async (cases: HoldoutCase[], manifestUrl
       durationMs: Math.round(performance.now() - startedAt),
     })
   }
-  return results
+  return {
+    importResult,
+    resources: {
+      sampleCount: resources.sampleCount,
+      classCount: resources.classCount,
+      baselineSampleCount: resources.baselineSampleCount,
+      modelClassCount: resources.modelClassCount,
+    },
+    cases: results,
+  }
 }

@@ -560,9 +560,14 @@ export const recognizePersonalizedTextLine = async (
   ].find((value, index, values) => (
     rasterWordPattern.test(value) && values.indexOf(value) === index
   )) ?? ''
+  const blindSingleWordInput = (
+    !rasterPriorWord
+    && !/\s/u.test(rawNeuralWord)
+    && (neural.wordCount ?? 0) <= 1
+  )
   if (
     physicalLines.length === 1
-    && Boolean(rasterPriorWord)
+    && (Boolean(rasterPriorWord) || blindSingleWordInput)
     && personalLetterSamples.length >= 32
     && personalLetterClasses >= 12
     && Number.isFinite(sourceWidth) && sourceWidth >= 200 && sourceWidth <= 4_096
@@ -571,8 +576,16 @@ export const recognizePersonalizedTextLine = async (
     try {
       const { recognizePersonalRasterPixels, renderPersonalRasterLine } = await import('./personalizedRasterRecognition')
       const rendered = renderPersonalRasterLine(physicalLines[0].strokes, sourceWidth, sourceHeight)
+      const selectedTokenCount = selected.tokens.filter((token) => !token.isLayout).length
       const raster = rendered
-        ? await recognizePersonalRasterPixels(rendered, resources.samples, rasterPriorWord, language)
+        ? await recognizePersonalRasterPixels(
+            rendered,
+            resources.samples,
+            rasterPriorWord,
+            language,
+            [safeTextCharacterCountHint, penLiftCounts[0], selectedTokenCount]
+              .filter((count): count is number => Number.isSafeInteger(count) && Number(count) >= 1),
+          )
         : null
       const best = raster?.candidates[0]
       const rasterText = raster?.prediction ?? ''
@@ -595,6 +608,13 @@ export const recognizePersonalizedTextLine = async (
         && visualSupportRatio >= 0.75
         && (best?.averageVisualCost ?? Number.POSITIVE_INFINITY) <= 0.15
       )
+      const blindPersonalDecision = (
+        !priorLetters
+        && Boolean(topBeam?.known)
+        && visualSupportRatio >= 0.75
+        && (best?.averageVisualCost ?? Number.POSITIVE_INFINITY) <= 0.14
+        && (best?.cutInk ?? Number.POSITIVE_INFINITY) <= 0.35
+      )
       const safeRasterDecision = Boolean(
         best
         && /^\p{L}{2,24}$/u.test(rasterText)
@@ -604,14 +624,15 @@ export const recognizePersonalizedTextLine = async (
         // word may use a slightly wider score bound only when at least three
         // independent checks agree: exact count, strong per-glyph visual
         // support and a low average personal-template cost.
-        && best.score <= (connectedKnownWordThreshold ? 0.18 : 0.13)
+        && best.score <= (connectedKnownWordThreshold ? 0.18 : blindPersonalDecision ? 0.12 : 0.13)
         && best.averageVisualCost <= 0.14
         && best.cutInk <= 0.45
-        && wordDistance(
+        && (!priorLetters || wordDistance(
           rasterText.toLocaleLowerCase(language),
           priorLetters.toLocaleLowerCase(language),
-        ) <= 3
+        ) <= 3)
         && (topBeam?.known || visualSupportRatio >= 0.6)
+        && (priorLetters || blindPersonalDecision)
       )
       rasterDecision = {
         attempted: true,
@@ -625,9 +646,31 @@ export const recognizePersonalizedTextLine = async (
         visualSupportRatio,
       }
       if (safeRasterDecision && rasterText !== selected.fusion.text) {
-        const matching = ranked.find((entry) => (
+        let matching = ranked.find((entry) => (
           entry.tokens.filter((token) => !token.isLayout).length === rasterCharacters.length
-        )) ?? selected
+        ))
+        if (!matching) {
+          const exactTokens = recognition.recognizeExpression(
+            physicalLines[0].strokes,
+            resources.model,
+            resources.labels,
+            'text',
+            resources.layoutExamples,
+            language,
+            rasterCharacters.length,
+            rasterText,
+          )
+          matching = {
+            tokens: exactTokens,
+            fusion: fusePersonalizedTextRecognition(
+              exactTokens,
+              textFusionNeural,
+              language,
+              rasterCharacters.length,
+            ),
+            score: 0,
+          }
+        }
         let visibleIndex = 0
         let mappedPersonalCharacters = 0
         const rewrittenTokens = matching.tokens.map((token) => {

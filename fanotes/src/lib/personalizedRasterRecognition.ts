@@ -7,6 +7,7 @@ import {
   isExtendedNeuralContextWord,
   nearestNeuralWordContextCandidates,
   preserveWordCase,
+  wordDistance,
 } from './neuralWordContext'
 import { loadSpellingWordContext } from './spelling'
 
@@ -459,10 +460,16 @@ const classifyRaster = (descriptor: RasterDescriptor, templates: PersonalTemplat
   return [...byLabel.entries()].map(([labelId, entry]) => {
     const weights = [0.72, 0.20, 0.08].slice(0, entry.costs.length)
     const weight = weights.reduce((sum, value) => sum + value, 0)
+    const rawCost = entry.costs.reduce((sum, value, index) => sum + value * weights[index], 0) / weight
+    // Repeated, internally consistent examples are stronger writer evidence
+    // than a single generic-looking form. Keep the bonus bounded below one
+    // ordinary close-shape margin: repetition may resolve a near tie, but can
+    // never make a visibly unrelated class win merely through sample count.
+    const repeatedEvidenceBonus = Math.min(0.075, Math.log2(Math.max(1, entry.support)) * 0.023)
     return {
       labelId,
       char: entry.char,
-      cost: entry.costs.reduce((sum, value, index) => sum + value * weights[index], 0) / weight,
+      cost: Math.max(0, rawCost - repeatedEvidenceBonus),
       support: entry.support,
     }
   }).sort((first, second) => first.cost - second.cost).slice(0, 10)
@@ -474,6 +481,13 @@ const personalCostForCharacter = (segment: RasterSegment, char: string, language
   const folded = segment.classes.find((entry) => (
     entry.char.toLocaleLowerCase(locale) === char.toLocaleLowerCase(locale)
   ))
+  if (exact && folded && exact !== folded) {
+    // Handwritten upper- and lowercase forms can legitimately share their
+    // geometry (notably V/v, C/c and S/s). Do not discard a much closer
+    // personal shape merely because the line model supplied the other case;
+    // retain a small explicit case cost so genuinely distinct forms still win.
+    return Math.min(exact.cost, folded.cost + 0.012)
+  }
   return (exact ?? folded)?.cost ?? (segment.classes[0]?.cost ?? 0.2) + 0.14
 }
 
@@ -542,6 +556,11 @@ const fuseRasterSequence = (
   const locale = language === 'de' ? 'de-CH' : 'en-US'
   const alignedNeural = alignNeuralCharacters(segments, neural, language)
   const alignedValue = alignedNeural.every(Boolean) ? alignedNeural.join('') : ''
+  const neuralLengthVariants = neural.length === segments.length + 1
+    ? neural.map((_character, removed) => neural.filter((_value, index) => index !== removed).join(''))
+    : neural.length === segments.length
+      ? [neural.join('')]
+      : []
   const dictionaryWord = (value: string) => {
     const lower = value.toLocaleLowerCase(locale)
     return COMMON_WORDS[language].has(lower) || isExtendedNeuralContextWord(lower, language)
@@ -562,6 +581,7 @@ const fuseRasterSequence = (
     return false
   }
   const exactKnown = (value: string) => dictionaryWord(value) || exactGermanCompound(value)
+  const lexicallyProjectedValues = new Set<string>()
   const scoreCharacter = (segment: RasterSegment, char: string, index: number) => {
     const bestCost = segment.classes[0].cost
     const visualCost = Math.max(0, personalCostForCharacter(segment, char, language) - bestCost)
@@ -590,17 +610,19 @@ const fuseRasterSequence = (
       return segment.classes[0].char !== aligned
         && personalCostForCharacter(segment, aligned, language) - segment.classes[0].cost >= 0.05
     }).length
-    const supportedInsertionRemoval = (
+    const reliableOneGlyphRemoval = (
       neural.length === segments.length + 1
-      && value === alignedValue
-      && decisiveDisagreements === 0
+      && neuralLengthVariants.includes(value)
+      && decisiveDisagreements <= Math.max(1, Math.floor(segments.length * 0.2))
     )
+    const knownWordBonus = known ? (neural.length === 0 ? 0.36 : 0.29) : 0
+    const lexicalProjectionBonus = lexicallyProjectedValues.has(value) ? 0.12 : 0
     return {
       value,
       visualCost: scored.reduce((sum, entry) => sum + entry.visualCost, 0),
       neuralMatches: scored.filter((entry) => entry.neuralMatch).length,
       known,
-      score: cost - (known ? 0.24 : 0) - (supportedInsertionRemoval ? 0.08 : 0),
+      score: cost - knownWordBonus - lexicalProjectionBonus - (reliableOneGlyphRemoval ? 0.22 : 0),
     }
   }
   type Beam = { value: string; cost: number; visualCost: number; neuralMatches: number }
@@ -624,9 +646,60 @@ const fuseRasterSequence = (
       }
     })).sort((first, second) => first.cost - second.cost).slice(0, 512)
   })
-  const contextualValues = alignedValue ? nearestNeuralWordContextCandidates(
-    alignedValue.toLocaleLowerCase(locale), language, 2, true,
-  ).map(({ candidate }) => preserveWordCase(alignedValue, candidate, language)) : []
+  // A dictionary entry may be one glyph longer than the physical word (for
+  // example the conventional spelling "Rendezvous" while the user literally
+  // wrote "Rendevous"). Use the known word only as a character-context guide:
+  // project it onto the measured segment count and rescore every retained
+  // letter against the personal glyphs. This never inserts an unwritten glyph
+  // and preserves the literal handwriting.
+  const lexicalSources = Math.abs(neural.length - segments.length) <= 1
+    ? [...new Set([alignedValue, beams[0]?.value].filter(Boolean))]
+    : neural.length === 0
+      ? [beams[0]?.value].filter(Boolean)
+      : []
+  lexicalSources.forEach((source) => {
+    const maximumDistance = source.length >= 11 ? 3 : 2
+    nearestNeuralWordContextCandidates(
+      source.toLocaleLowerCase(locale), language, maximumDistance, false, 32,
+    ).forEach(({ candidate }) => {
+      const contextual = preserveWordCase(source, candidate, language)
+      const characters = Array.from(contextual)
+      const addProjectedValue = (value: string) => {
+        // When a text model supplied a complete literal, dictionary context
+        // may clarify nearby ambiguous letters but must never replace an
+        // unknown name/technical term with a distant valid word.
+        if (
+          neuralLengthVariants.length
+          && Math.min(...neuralLengthVariants.map((variant) => wordDistance(
+            value.toLocaleLowerCase(locale), variant.toLocaleLowerCase(locale),
+          ))) > (segments.length >= 11 ? 3 : 2)
+        ) return
+        lexicallyProjectedValues.add(value)
+      }
+      if (characters.length === segments.length) {
+        addProjectedValue(contextual)
+        return
+      }
+      if (characters.length === segments.length + 1) {
+        characters.forEach((_character, removed) => {
+          addProjectedValue(characters.filter((_value, index) => index !== removed).join(''))
+        })
+      }
+    })
+  })
+  // Evaluate every one-character deletion when the line model inserted a
+  // glyph. Selecting one alignment before applying visual and lexical scores
+  // made a wrong early deletion irreversible (for example Glykosei).
+  const contextualSources = [...new Set([alignedValue, ...neuralLengthVariants].filter(Boolean))]
+  const contextualValues = contextualSources.flatMap((source) => (
+    nearestNeuralWordContextCandidates(
+      source.toLocaleLowerCase(locale), language, 2, true, 64,
+    )
+      // The exhaustive OCR lexicon may contain thousands of two-edit words
+      // of the same length. Only the closest bounded set can influence this
+      // visual beam; retaining the full array caused avoidable memory spikes.
+      .map(({ candidate }) => preserveWordCase(source, candidate, language))
+  ))
   const hybridValues: string[] = []
   if (alignedValue) {
     const source = Array.from(alignedValue)
@@ -650,7 +723,8 @@ const fuseRasterSequence = (
     }
   }
   const values = [...new Set([
-    ...beams.map((beam) => beam.value), alignedValue, ...contextualValues, ...hybridValues,
+    ...beams.map((beam) => beam.value), alignedValue, ...neuralLengthVariants,
+    ...contextualValues, ...lexicallyProjectedValues, ...hybridValues,
   ].filter(Boolean))]
   const ranked = values.flatMap((value) => {
     const scored = scoreValue(value)
@@ -669,6 +743,7 @@ const recognizePersonalRaster = (
   templates: PersonalTemplate[],
   neuralText: string,
   language: RecognitionLanguage,
+  characterCountHints: readonly number[],
 ): PersonalRasterRecognition => {
   const rangeCache = new Map<string, RasterSegment | null>()
   const classifyRange = (start: number, end: number) => {
@@ -707,8 +782,33 @@ const recognizePersonalRaster = (
   })
   type BandOption = { count: number; segments: RasterSegment[]; cost: number; cutInk: number }
   const rawLetters = Array.from(neuralText).filter((character) => /^\p{L}$/u.test(character))
+  const exactCountHints = [...new Set(characterCountHints.filter((hint) => (
+    Number.isSafeInteger(hint) && hint >= 1 && hint <= MAX_RASTER_CHARACTERS
+  )))]
+  // If the line model returned only mathematics, there is no linguistic
+  // length prior. The personal glyph aspect still supplies a bounded estimate;
+  // the exact projection-band count remains an independent candidate. This
+  // opens recovery without supplying the expected word or trying all 24
+  // possible lengths.
+  const templateAspects = templates
+    .map((template) => template.aspect)
+    .filter((aspect) => Number.isFinite(aspect) && aspect >= 0.08 && aspect <= 1.5)
+    .sort((first, second) => first - second)
+  const medianTemplateAspect = templateAspects[Math.floor(templateAspects.length / 2)] ?? 0.42
+  const lineAspect = image.inkBox[2] / Math.max(1, image.inkBox[3])
+  const aspectCount = Math.round(lineAspect / Math.max(0.32, Math.min(0.58, medianTemplateAspect)))
+  const countHintConflictsWithAspect = exactCountHints.length > 0
+    && exactCountHints.every((hint) => Math.abs(hint - aspectCount) >= 2)
+  const boundedCountHints = exactCountHints
+  const blindAspectCounts = rawLetters.length === 0 && (
+    exactCountHints.length === 0 || countHintConflictsWithAspect
+  )
+    ? [aspectCount - 2, aspectCount - 1, aspectCount, aspectCount + 1, aspectCount + 2]
+    : []
   const candidateCounts = [...new Set([
     image.columnBands.length,
+    ...boundedCountHints,
+    ...blindAspectCounts,
     rawLetters.length - 1,
     rawLetters.length,
     rawLetters.length + 1,
@@ -876,10 +976,29 @@ const recognizePersonalRaster = (
     if (!state) return []
     const visualText = state.segments.map((segment) => segment.classes[0].char).join('')
     const fusion = fuseRasterSequence(state.segments, rawLetters, language)
-    const text = fusion.text
+    const text = rawLetters.length
+      ? preserveWordCase(rawLetters.join(''), fusion.text, language)
+      : fusion.text
     const averageVisualCost = state.cost / Math.max(1, state.count)
-    const countPenalty = Math.abs(targetCount - rawLetters.length) * 0.018
-    const score = averageVisualCost + countPenalty + state.cutInk * 0.22 - (fusion.known ? 0.025 : 0)
+    const lengthPriors = rawLetters.length
+      ? [{ count: rawLetters.length, weight: 0.018 }]
+      : [
+          ...exactCountHints.map((count) => ({ count, weight: 0.06 })),
+          { count: image.columnBands.length, weight: 0.05 },
+          ...(blindAspectCounts.length ? [{ count: aspectCount, weight: 0.04 }] : []),
+        ]
+    const countPenalty = Math.min(...lengthPriors.map(({ count, weight }) => (
+      Math.abs(targetCount - count) * weight
+    )))
+    const foldedText = text.toLocaleLowerCase(language === 'de' ? 'de-CH' : 'en-US')
+    const supportedRawDeletion = rawLetters.length === targetCount + 1 && rawLetters.some((_character, removed) => (
+      (removed === 0 || removed === rawLetters.length - 1)
+      && rawLetters.filter((_value, index) => index !== removed).join('')
+        .toLocaleLowerCase(language === 'de' ? 'de-CH' : 'en-US') === foldedText
+    ))
+    const score = averageVisualCost + countPenalty + state.cutInk * 0.22
+      - (fusion.known ? 0.025 : 0)
+      - (supportedRawDeletion ? 0.045 : 0)
     return [{
       targetCount,
       visualText,
@@ -914,6 +1033,7 @@ export const recognizePersonalRasterPixels = async (
   samples: readonly PersonalRasterSample[],
   neuralText: string,
   language: RecognitionLanguage,
+  characterCountHints: readonly number[] = [],
 ): Promise<PersonalRasterRecognition | null> => {
   if (
     image.width < 8 || image.height < 8
@@ -927,12 +1047,17 @@ export const recognizePersonalRasterPixels = async (
   const letterPattern = language === 'de'
     ? /^[A-Za-zÄÖÜäöü]{2,24}[.,;:!?]?$/u
     : /^[A-Za-z]{2,24}[.,;:!?]?$/u
-  if (!letterPattern.test(neuralText.trim())) return null
+  // A mathematical raw guess such as `∫∫` must not veto personal text
+  // recognition. Invalid text priors are discarded completely; they are never
+  // converted into letters or used as a hidden expected value.
+  const safeNeuralText = letterPattern.test(neuralText.trim()) ? neuralText.trim() : ''
   await loadSpellingWordContext(language)
   const templates = await loadPersonalTemplates(samples)
   if (!templates.length) return null
   const prepared = prepareImageData(new ImageData(
     Uint8ClampedArray.from(image.pixels), image.width, image.height,
   ))
-  return prepared ? recognizePersonalRaster(prepared, templates, neuralText.trim(), language) : null
+  return prepared
+    ? recognizePersonalRaster(prepared, templates, safeNeuralText, language, characterCountHints)
+    : null
 }

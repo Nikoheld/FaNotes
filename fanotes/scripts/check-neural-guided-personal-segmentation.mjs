@@ -92,7 +92,7 @@ try {
   assert.equal(
     result.misleadingMathIntegratedText.toLocaleLowerCase('de'),
     'test',
-    `Eine falsche Integral-Vermutung darf persönliches Texttraining nicht blockieren: ${JSON.stringify(result)}`,
+    `Eine falsche Integral-Vermutung darf persönliches Texttraining auch ohne verratenen Wortinhalt nicht blockieren: ${JSON.stringify(result)}`,
   )
   assert.equal(result.misleadingMathIntegratedTokenCount, 4, JSON.stringify(result))
   assert.equal(result.phraseIntegratedText.toLocaleLowerCase('de'), 'test test', JSON.stringify(result))
@@ -112,6 +112,11 @@ try {
     result.connectedRasterPrediction.toLocaleLowerCase('de'),
     'test',
     `Eine falsche Zeilenmodellstelle muss durch vier verbundene persönliche Glyphen korrigiert werden: ${JSON.stringify(result)}`,
+  )
+  assert.equal(
+    result.blindMathRasterPrediction.toLocaleLowerCase('de'),
+    'test',
+    `Der persönliche Rasterpfad muss TEST aus Form und Länge erkennen, obwohl das Grundmodell nur Doppel-Integral liefert: ${JSON.stringify(result)}`,
   )
   assert.ok(result.preferredHypothesisSizes.includes(4), JSON.stringify(result))
   console.log(`Neuronengeführte persönliche Segmentierung: ${result.unguided} → ${result.guided} → ${result.integratedText} (${result.integratedSource}); verbundenes Raster → ${result.connectedRasterPrediction}.`)

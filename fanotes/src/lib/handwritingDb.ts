@@ -446,11 +446,16 @@ const mimeForPath = (path: string): string | null => {
 }
 
 type SizedZipObject = JSZip.JSZipObject & {
-  _data?: { compressedSize?: number; uncompressedSize?: number }
+  _data?: { compressedSize?: number; uncompressedSize?: number } | Promise<unknown>
 }
 
 const zipEntrySizes = (entry: JSZip.JSZipObject) => {
   const data = (entry as SizedZipObject)._data
+  // JSZip represents a genuinely empty archive member as a resolved Promise
+  // instead of a CompressedObject. This is how GlyphenWerk's optional empty
+  // layout_examples.jsonl is loaded. All non-empty members loaded from an
+  // archive retain their central-directory sizes in the CompressedObject.
+  if (data instanceof Promise) return { compressed: 0, uncompressed: 0 }
   return {
     compressed: finiteNumber(data?.compressedSize, -1),
     uncompressed: finiteNumber(data?.uncompressedSize, -1),

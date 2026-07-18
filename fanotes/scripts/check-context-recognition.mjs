@@ -1275,6 +1275,26 @@ try {
     false,
     'Ein geometrisch bestätigtes einzelnes Integral darf nicht durch eine feindliche persönliche T-Antwort überschrieben werden.',
   )
+  const trainedTConflict = {
+    ...standaloneIntegral,
+    textValue: 'T',
+    evidence: {
+      ...standaloneIntegral.evidence,
+      text: {
+        visibleCharacters: 1, letters: 1, digits: 0, letterRatio: 1, words: 0,
+        knownWords: 0, knownWordRatio: 0, baselineAlignment: 1, lines: 1, strongSentence: false,
+      },
+    },
+  }
+  assert.equal(
+    assessNeuralTextModeCandidate('T', 'de', {
+      ...neuralResult('T', 92), wordCount: 0, knownWordRatio: 0,
+    }, trainedTConflict, {
+      confidence: 91, source: 'personalized', personalizedCharacters: 1,
+    }).shouldUseText,
+    true,
+    'Wenn Textbeam und persönliche T-Form übereinstimmen, darf ein kontextloses falsches Integral nicht gewinnen.',
+  )
   assert.equal(
     assessNeuralTextModeCandidate('Fabio', 'de', {
       ...neuralResult('Fabio', 82), wordCount: 1, knownWordRatio: 0,

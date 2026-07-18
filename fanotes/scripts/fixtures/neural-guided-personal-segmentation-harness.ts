@@ -170,6 +170,15 @@ const run = async () => {
         'de',
       )
     : null
+  const blindMathRaster = connectedRasterImage
+    ? await recognizePersonalRasterPixels(
+        connectedRasterImage,
+        rasterSamples,
+        '∫∫',
+        'de',
+        [4],
+      )
+    : null
   const integrated = await recognizePersonalizedTextLine(
     strokes,
     {
@@ -204,7 +213,6 @@ const run = async () => {
     SOURCE_WIDTH,
     SOURCE_HEIGHT,
     4,
-    'test',
   )
   const misleadingMathIntegrated = await recognizePersonalizedTextLine(
     strokes,
@@ -242,7 +250,6 @@ const run = async () => {
     SOURCE_WIDTH,
     SOURCE_HEIGHT,
     4,
-    'test',
   )
   const phraseStrokes = [
     ...strokes,
@@ -344,6 +351,7 @@ const run = async () => {
     multiLineIntegratedText: multiLineIntegrated.fusion.text,
     multiLineIntegratedTokenCount: multiLineIntegrated.tokens.length,
     connectedRasterPrediction: connectedRaster?.prediction ?? '',
+    blindMathRasterPrediction: blindMathRaster?.prediction ?? '',
     connectedRasterBands: connectedRaster?.columnBandCount ?? 0,
     connectedRasterTargetCounts: connectedRaster?.candidates.map((candidate) => candidate.targetCount) ?? [],
     connectedRasterCandidate: connectedRaster?.candidates[0] ?? null,

@@ -158,10 +158,33 @@ export const assessNeuralTextModeCandidate = (
   const safeCandidate = !formulaSyntax || proseDominatesCandidateFormula
   const enoughTextEvidence = strongPersonalized || strongKnownWord || strongSentence || strongLetterSequence
   const decisiveAutomaticMath = Boolean(
-    automatic && (
-      automatic.evidence?.math.decisiveStructure === true ||
-      hasDecisiveMathLayout(automatic.mathValue)
-    ),
+    automatic && (() => {
+      const math = automatic.evidence?.math
+      // A bare integral-like glyph has no mathematical context of its own.
+      // When the independent text beam sees the same letter, or a complete
+      // multi-letter personal sequence contradicts the collapsed operator,
+      // explicit GlyphenWerk evidence wins. Limits, relations, fractions,
+      // scripts, operands and real formulas remain decisive.
+      const bareLargeOperatorConflict = Boolean(
+        strongPersonalized
+        && math
+        && math.visibleCharacters <= 2
+        && math.largeOperators >= 1
+        && math.digits === 0
+        && math.operators === 0
+        && math.relations === 0
+        && math.fractions === 0
+        && math.layoutAssignments === 0
+        && !/[_^]\{/u.test(automatic.mathValue)
+        && (
+          letters >= 2
+          || automatic.textValue.normalize('NFC').replace(/\s+/gu, '') === normalized.replace(/\s+/gu, '')
+        )
+      )
+      return !bareLargeOperatorConflict && (
+        math?.decisiveStructure === true || hasDecisiveMathLayout(automatic.mathValue)
+      )
+    })(),
   )
   const mayOverride = neuralTextMayOverrideAutomaticMode(neural, automatic, letters, wordLike)
   const shouldUseText = safeCandidate && enoughTextEvidence && !decisiveAutomaticMath && (

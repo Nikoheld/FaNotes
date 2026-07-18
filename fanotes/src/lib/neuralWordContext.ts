@@ -18,6 +18,7 @@ const LANGUAGE_WORD_RANKS = {
 
 type ExtendedWordIndex = Map<number, readonly string[]>
 const EXTENDED_WORDS: Partial<Record<RecognitionLanguage, ExtendedWordIndex>> = {}
+const NEAREST_CONTEXT_CACHE = new Map<string, readonly NeuralWordContextCandidate[]>()
 
 export type NeuralWordContextCandidate = {
   candidate: string
@@ -28,6 +29,9 @@ export const installNeuralWordContextCandidates = (
   language: RecognitionLanguage,
   words: readonly string[],
 ) => {
+  for (const key of NEAREST_CONTEXT_CACHE.keys()) {
+    if (key.startsWith(`${language}:`)) NEAREST_CONTEXT_CACHE.delete(key)
+  }
   const byLength: ExtendedWordIndex = new Map()
   words.forEach((word) => {
     const length = Array.from(word).length
@@ -70,28 +74,83 @@ export const isExtendedNeuralContextWord = (
   return Boolean(words && sortedIncludes(words, source))
 }
 
+const boundedWordDistance = (first: string, second: string, maximumDistance: number) => {
+  if (Math.abs(first.length - second.length) > maximumDistance) return maximumDistance + 1
+  const unreachable = maximumDistance + 1
+  let previous = Array.from({ length: second.length + 1 }, (_, index) => (
+    index <= maximumDistance ? index : unreachable
+  ))
+  let current = new Array<number>(second.length + 1).fill(unreachable)
+  for (let firstIndex = 1; firstIndex <= first.length; firstIndex += 1) {
+    current.fill(unreachable)
+    if (firstIndex <= maximumDistance) current[0] = firstIndex
+    const from = Math.max(1, firstIndex - maximumDistance)
+    const to = Math.min(second.length, firstIndex + maximumDistance)
+    let rowMinimum = unreachable
+    for (let secondIndex = from; secondIndex <= to; secondIndex += 1) {
+      current[secondIndex] = Math.min(
+        previous[secondIndex] + 1,
+        current[secondIndex - 1] + 1,
+        previous[secondIndex - 1] + Number(first[firstIndex - 1] !== second[secondIndex - 1]),
+      )
+      rowMinimum = Math.min(rowMinimum, current[secondIndex])
+    }
+    if (rowMinimum > maximumDistance) return unreachable
+    ;[previous, current] = [current, previous]
+  }
+  return previous[second.length]
+}
+
 export const nearestNeuralWordContextCandidates = (
   source: string,
   language: RecognitionLanguage,
   maximumDistance = 1,
   sameLengthOnly = false,
+  maximumCandidates = Number.POSITIVE_INFINITY,
 ): NeuralWordContextCandidate[] => {
   const index = EXTENDED_WORDS[language]
   if (!index) return []
+  const boundedLimit = Number.isFinite(maximumCandidates)
+    ? Math.max(0, Math.floor(maximumCandidates))
+    : Number.POSITIVE_INFINITY
+  const cacheKey = Number.isFinite(boundedLimit)
+    ? `${language}:${source}:${maximumDistance}:${Number(sameLengthOnly)}:${boundedLimit}`
+    : ''
+  const cached = cacheKey ? NEAREST_CONTEXT_CACHE.get(cacheKey) : undefined
+  if (cached) return [...cached]
   const sourceLength = Array.from(source).length
   const candidates: NeuralWordContextCandidate[] = []
+  const compareCandidates = (first: NeuralWordContextCandidate, second: NeuralWordContextCandidate) => (
+    first.distance - second.distance || first.candidate.localeCompare(second.candidate, language)
+  )
+  const trimCandidates = () => {
+    if (!Number.isFinite(maximumCandidates) || candidates.length <= maximumCandidates) return
+    candidates.sort(compareCandidates)
+    candidates.length = Math.max(0, Math.floor(maximumCandidates))
+  }
   const minimumLength = sameLengthOnly ? sourceLength : Math.max(3, sourceLength - maximumDistance)
   const maximumLength = sameLengthOnly ? sourceLength : sourceLength + maximumDistance
   for (let length = minimumLength; length <= maximumLength; length += 1) {
     const words = index.get(length) ?? []
-    words.forEach((candidate) => {
-      const distance = wordDistance(source, candidate)
+    for (const candidate of words) {
+      const distance = boundedWordDistance(source, candidate, maximumDistance)
       if (distance <= maximumDistance) candidates.push({ candidate, distance })
-    })
+      if (
+        Number.isFinite(maximumCandidates)
+        && candidates.length >= Math.max(2, Math.floor(maximumCandidates) * 2)
+      ) trimCandidates()
+    }
+    trimCandidates()
   }
-  return candidates.sort((first, second) => (
-    first.distance - second.distance || first.candidate.localeCompare(second.candidate, language)
-  ))
+  candidates.sort(compareCandidates)
+  if (cacheKey) {
+    if (NEAREST_CONTEXT_CACHE.size >= 512) {
+      const oldest = NEAREST_CONTEXT_CACHE.keys().next().value
+      if (oldest) NEAREST_CONTEXT_CACHE.delete(oldest)
+    }
+    NEAREST_CONTEXT_CACHE.set(cacheKey, candidates)
+  }
+  return [...candidates]
 }
 
 export const wordDistance = (first: string, second: string) => {
