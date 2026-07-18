@@ -1,5 +1,13 @@
 # Änderungsverlauf
 
+## 2026.7.4-beta.1
+
+- der persönliche Rasterpfad kann innerhalb einer einzigen vollständig verbundenen Tintenkomponente jetzt bis zu 16 Buchstaben bilden; zuvor waren unabhängig von Wortlänge höchstens zwei Teile möglich, wodurch eng verbundene Schreibschrift trotz passender Einzelbuchstaben nicht vollständig gelesen werden konnte
+- eine begrenzte Links-nach-rechts-Suche kombiniert niedrige Tintendichte, gleichmässige Ersatzgrenzen und die persönlichen GlyphenWerk-Prototypen; dadurch bleiben Anschlussstriche durchgängig sichtbar, ohne selbst als Buchstabe zu erscheinen oder Teile des Nachbarzeichens zu stehlen
+- der bereits geprüfte Pfad für genau zwei berührende Buchstaben bleibt unverändert und wird getrennt von der neuen Mehrfachsegmentierung bewertet; leicht berührende Paare erhalten dadurch weiterhin ihre flexiblen natürlichen Zeichenbreiten
+- die produktive Fusionsschranke akzeptiert die etwas höhere Rasterdistanz echter verbundener Schrift nur bei exakter Zeichenanzahl, bekanntem Wort, mindestens 75 Prozent visuell gestützten Zeichen, niedrigen persönlichen Durchschnittskosten und unverändert strenger Schnitt-Tintenbegrenzung
+- eine neue Browserregression erzeugt `test` als eine einzige lückenlose Rasterkomponente, gibt absichtlich `tesl` als Zeilenmodellhinweis vor und prüft sowohl `test` als sichtbares persönliches Ergebnis als auch den tatsächlich akzeptierten produktiven Sicherheitsentscheid; die acht unabhängigen NAS-Bilder bleiben bei 0 von 71 Zeichenfehlern
+
 ## 2026.7.3
 
 - der eingebettete GlyphenWerk-Test verwirft ein persönlich erkanntes Textzeichen oder Wort nicht länger, nur weil die allgemeine Zeilenerkennung dieselbe Tinte zuvor fälschlich als Integral, Doppelintegral oder anderes Mathematikzeichen eingeordnet hat

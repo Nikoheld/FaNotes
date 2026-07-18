@@ -9,7 +9,19 @@
     <meta name="application-name" content="FaNotes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-title" content="FaNotes" />
-    <link rel="manifest" href="./manifest.webmanifest" />
+    <script>
+      (() => {
+        let preference = 'system'
+        try { preference = localStorage.getItem('fanotes.uiLanguage') || 'system' } catch {}
+        const languages = navigator.languages?.length ? navigator.languages : [navigator.language]
+        const systemIsEnglish = !languages.some((language) => /^de(?:-|$)/i.test(language || ''))
+        const english = preference === 'en' || (preference !== 'de' && systemIsEnglish)
+        const manifest = document.createElement('link')
+        manifest.rel = 'manifest'
+        manifest.href = english ? './manifest.en.webmanifest' : './manifest.webmanifest'
+        document.currentScript.after(manifest)
+      })()
+    </script>
     <link rel="icon" href="./fanotes-app.svg" type="image/svg+xml" />
     <title>FaNotes</title>
     <style>

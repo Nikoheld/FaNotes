@@ -9,6 +9,22 @@ import {
 import { createStandardRecognitionSamples } from '../../../src/lib/standardRecognition'
 import type { Sample, Stroke, StrokePoint } from '../../../src/types'
 import { recognizePersonalizedTextLine } from '../../src/lib/personalizedLineRecognition'
+import {
+  recognizePersonalRasterPixels,
+  renderPersonalRasterLine,
+} from '../../src/lib/personalizedRasterRecognition'
+import {
+  loadBrowserSpellingResources,
+  loadBrowserSpellingWordCandidates,
+} from '../../src/lib/spellingResources'
+
+if (!window.lernwerk) Object.assign(window, {
+  lernwerk: {
+    platform: 'web',
+    loadSpellingResources: loadBrowserSpellingResources,
+    loadSpellingWordCandidates: loadBrowserSpellingWordCandidates,
+  },
+})
 
 type Path = [number, number][]
 const SOURCE_WIDTH = 900
@@ -126,6 +142,15 @@ const sample = (char: string, index: number): Sample => {
 const run = async () => {
   const standard = await createStandardRecognitionSamples(BASE_CATALOG)
   const personal = ['t', 'e', 's'].flatMap((char) => Array.from({ length: 16 }, (_, index) => sample(char, index)))
+  const rasterClassIds = new Set(personal.map((entry) => entry.labelId))
+  const rasterCoverage: Sample[] = []
+  for (const entry of standard) {
+    if (!/^\p{L}$/u.test(entry.label) || rasterClassIds.has(entry.labelId)) continue
+    rasterClassIds.add(entry.labelId)
+    rasterCoverage.push(entry)
+    if (rasterClassIds.size >= 12) break
+  }
+  const rasterSamples = [...personal, ...rasterCoverage]
   const model = await buildRecognitionModel([...personal, ...standard])
   const strokes = connected('test', .00023).map((stroke) => ({
     ...stroke,
@@ -133,15 +158,27 @@ const run = async () => {
   }))
   const unguided = recognizeExpression(strokes, model, BASE_CATALOG, 'text', [], 'de')
   const guided = recognizeExpression(strokes, model, BASE_CATALOG, 'text', [], 'de', 4, 'test')
+  const connectedRasterImage = renderPersonalRasterLine(strokes, SOURCE_WIDTH, SOURCE_HEIGHT)
+  const connectedRaster = connectedRasterImage
+    ? await recognizePersonalRasterPixels(
+        connectedRasterImage,
+        rasterSamples,
+        // Deliberately wrong at the final character: the personal raster
+        // sequence must use the four connected glyph bodies, not copy the
+        // line-model word wholesale.
+        'tesl',
+        'de',
+      )
+    : null
   const integrated = await recognizePersonalizedTextLine(
     strokes,
     {
       model,
-      samples: personal,
+      samples: rasterSamples,
       labels: BASE_CATALOG,
       layoutExamples: [],
-      sampleCount: personal.length,
-      classCount: 3,
+      sampleCount: rasterSamples.length,
+      classCount: rasterClassIds.size,
       baselineSampleCount: standard.length,
       modelClassCount: new Set(model.map((entry) => entry.labelId)).size,
     },
@@ -163,7 +200,7 @@ const run = async () => {
       }],
     },
     'de',
-    false,
+    true,
     SOURCE_WIDTH,
     SOURCE_HEIGHT,
     4,
@@ -173,11 +210,11 @@ const run = async () => {
     strokes,
     {
       model,
-      samples: personal,
+      samples: rasterSamples,
       labels: BASE_CATALOG,
       layoutExamples: [],
-      sampleCount: personal.length,
-      classCount: 3,
+      sampleCount: rasterSamples.length,
+      classCount: rasterClassIds.size,
       baselineSampleCount: standard.length,
       modelClassCount: new Set(model.map((entry) => entry.labelId)).size,
     },
@@ -218,11 +255,11 @@ const run = async () => {
     phraseStrokes,
     {
       model,
-      samples: personal,
+      samples: rasterSamples,
       labels: BASE_CATALOG,
       layoutExamples: [],
-      sampleCount: personal.length,
-      classCount: 3,
+      sampleCount: rasterSamples.length,
+      classCount: rasterClassIds.size,
       baselineSampleCount: standard.length,
       modelClassCount: new Set(model.map((entry) => entry.labelId)).size,
     },
@@ -256,11 +293,11 @@ const run = async () => {
     multiLineStrokes,
     {
       model,
-      samples: personal,
+      samples: rasterSamples,
       labels: BASE_CATALOG,
       layoutExamples: [],
-      sampleCount: personal.length,
-      classCount: 3,
+      sampleCount: rasterSamples.length,
+      classCount: rasterClassIds.size,
       baselineSampleCount: standard.length,
       modelClassCount: new Set(model.map((entry) => entry.labelId)).size,
     },
@@ -298,6 +335,7 @@ const run = async () => {
     integratedText: integrated.fusion.text,
     integratedSource: integrated.fusion.source,
     integratedTokenCount: integrated.tokens.length,
+    integratedRasterDecision: integrated.rasterDecision ?? null,
     misleadingMathIntegratedText: misleadingMathIntegrated.fusion.text,
     misleadingMathIntegratedSource: misleadingMathIntegrated.fusion.source,
     misleadingMathIntegratedTokenCount: misleadingMathIntegrated.tokens.length,
@@ -305,6 +343,10 @@ const run = async () => {
     phraseIntegratedTokenCount: phraseIntegrated.tokens.length,
     multiLineIntegratedText: multiLineIntegrated.fusion.text,
     multiLineIntegratedTokenCount: multiLineIntegrated.tokens.length,
+    connectedRasterPrediction: connectedRaster?.prediction ?? '',
+    connectedRasterBands: connectedRaster?.columnBandCount ?? 0,
+    connectedRasterTargetCounts: connectedRaster?.candidates.map((candidate) => candidate.targetCount) ?? [],
+    connectedRasterCandidate: connectedRaster?.candidates[0] ?? null,
     preferredHypothesisSizes: connectedTextSegmentationHypotheses(cluster, 4).map((entry) => entry.length),
   }
 }

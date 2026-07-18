@@ -15,6 +15,17 @@ import {
 export type PersonalizedLineRecognition = {
   tokens: RecognitionToken[]
   fusion: PersonalizedTextRecognitionResult
+  rasterDecision?: {
+    attempted: boolean
+    accepted: boolean
+    connected: boolean
+    text: string
+    prior: string
+    score: number | null
+    averageVisualCost: number | null
+    cutInk: number | null
+    visualSupportRatio: number
+  }
   /** Bounded local diagnostics used by deterministic recognition audits. */
   candidateScores?: Array<{
     text: string
@@ -523,6 +534,7 @@ export const recognizePersonalizedTextLine = async (
     })
     .sort((first, second) => second.score - first.score)
   let selected = ranked[0]
+  let rasterDecision: PersonalizedLineRecognition['rasterDecision']
 
   // Stroke-based segmentation is strongest when pen lifts and accessory
   // strokes remain available. A screenshot-style raster provides an
@@ -574,11 +586,25 @@ export const recognizePersonalizedTextLine = async (
         return selectedCost !== undefined && selectedCost - bestCost <= 0.14
       }).length ?? 0
       const visualSupportRatio = visuallySupportedCharacters / Math.max(1, rasterCharacters.length)
+      const connectedRasterSequence = Boolean(
+        best && raster && raster.columnBandCount < best.targetCount,
+      )
+      const connectedKnownWordThreshold = (
+        connectedRasterSequence
+        && Boolean(topBeam?.known)
+        && visualSupportRatio >= 0.75
+        && (best?.averageVisualCost ?? Number.POSITIVE_INFINITY) <= 0.15
+      )
       const safeRasterDecision = Boolean(
         best
         && /^\p{L}{2,24}$/u.test(rasterText)
         && rasterCharacters.length === best.targetCount
-        && best.score <= 0.13
+        // Connector ink raises every absolute glyph distance because it is
+        // absent from isolated training examples. A fully connected known
+        // word may use a slightly wider score bound only when at least three
+        // independent checks agree: exact count, strong per-glyph visual
+        // support and a low average personal-template cost.
+        && best.score <= (connectedKnownWordThreshold ? 0.18 : 0.13)
         && best.averageVisualCost <= 0.14
         && best.cutInk <= 0.45
         && wordDistance(
@@ -587,6 +613,17 @@ export const recognizePersonalizedTextLine = async (
         ) <= 3
         && (topBeam?.known || visualSupportRatio >= 0.6)
       )
+      rasterDecision = {
+        attempted: true,
+        accepted: safeRasterDecision,
+        connected: connectedRasterSequence,
+        text: rasterText,
+        prior: rasterPriorWord,
+        score: best?.score ?? null,
+        averageVisualCost: best?.averageVisualCost ?? null,
+        cutInk: best?.cutInk ?? null,
+        visualSupportRatio,
+      }
       if (safeRasterDecision && rasterText !== selected.fusion.text) {
         const matching = ranked.find((entry) => (
           entry.tokens.filter((token) => !token.isLayout).length === rasterCharacters.length
@@ -657,6 +694,7 @@ export const recognizePersonalizedTextLine = async (
     tokens: selected.tokens,
     fusion: selected.fusion,
     ...(includeCandidateScores ? {
+      ...(rasterDecision ? { rasterDecision } : {}),
       candidateScores: ranked.slice(0, 12).map((entry) => ({
         text: entry.fusion.text,
         score: Math.round(entry.score * 10_000) / 10_000,

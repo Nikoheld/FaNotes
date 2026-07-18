@@ -88,6 +88,10 @@ const MAX_IMAGE_PIXELS = MAX_IMAGE_WIDTH * MAX_IMAGE_HEIGHT
 const TEMPLATE_BATCH_SIZE = 24
 const MAX_TEMPLATES_PER_CLASS = 10
 const MAX_PERSONAL_TEMPLATES = 512
+const MAX_RASTER_CHARACTERS = 24
+const MAX_RASTER_PARTS_PER_BAND = 16
+const RASTER_SEGMENTATION_BEAM = 28
+const RASTER_BOUNDARIES_PER_CUT = 14
 const COMMON_WORDS = { de: GERMAN_COMMON_WORDS, en: ENGLISH_COMMON_WORDS }
 const CATALOG_BY_CHARACTER = new Map(BASE_CATALOG.map((entry) => [entry.char, entry]))
 
@@ -702,43 +706,152 @@ const recognizePersonalRaster = (
     return count
   })
   type BandOption = { count: number; segments: RasterSegment[]; cost: number; cutInk: number }
-  const options = image.columnBands.map(([start, end]) => {
-    const whole = classifyRange(start, end)
-    const result: BandOption[] = whole
-      ? [{ count: 1, segments: [whole], cost: whole.classes[0].cost, cutInk: 0 }]
-      : []
-    const width = end - start
-    const minimumPiece = Math.max(7, Math.floor(width * 0.2))
-    const cutCandidates = Array.from(
-      { length: Math.max(0, width - minimumPiece * 2) },
-      (_, index) => start + minimumPiece + index,
-    ).sort((first, second) => (
-      columnInk[first] - columnInk[second]
-      || Math.abs(first - (start + end) / 2) - Math.abs(second - (start + end) / 2)
-    )).slice(0, 48)
-    const split = cutCandidates.flatMap((cut) => {
-      const left = classifyRange(start, cut)
-      const right = classifyRange(cut, end)
-      if (!left || !right) return []
-      const cutInk = columnInk[cut] / Math.max(1, image.inkBox[3])
-      return [{
-        count: 2,
-        segments: [left, right],
-        cost: left.classes[0].cost + right.classes[0].cost + cutInk * 0.16 + 0.012,
-        cutInk,
-      } satisfies BandOption]
-    }).sort((first, second) => first.cost - second.cost)[0]
-    if (split) result.push(split)
-    return result
-  })
-
   const rawLetters = Array.from(neuralText).filter((character) => /^\p{L}$/u.test(character))
   const candidateCounts = [...new Set([
     image.columnBands.length,
     rawLetters.length - 1,
     rawLetters.length,
     rawLetters.length + 1,
-  ])].filter((count) => count >= image.columnBands.length && count <= image.columnBands.length * 2)
+  ])].filter((count) => count >= image.columnBands.length && count <= MAX_RASTER_CHARACTERS)
+  const maximumTargetCount = Math.max(image.columnBands.length, ...candidateCounts)
+
+  /**
+   * A projection band is not the same thing as a character. In cursive ink a
+   * complete word can occupy one uninterrupted band because every joining
+   * stroke fills the gap between two glyph bodies. The previous raster path
+   * could split each band only once, which made a four-letter connected word
+   * impossible even when the line model supplied the correct length.
+   *
+   * Build a bounded left-to-right beam around every expected boundary. Low
+   * ink valleys are preferred, but uniform positions remain available for a
+   * perfectly continuous connector. Every resulting piece is still scored
+   * against the writer's personal glyph templates, so the length prior does
+   * not get to invent unsupported characters by itself.
+   */
+  const segmentBand = (start: number, end: number, count: number): BandOption | null => {
+    const whole = classifyRange(start, end)
+    if (count === 1) {
+      return whole
+        ? { count: 1, segments: [whole], cost: whole.classes[0].cost, cutInk: 0 }
+        : null
+    }
+    const width = end - start
+    if (count === 2) {
+      // Preserve the mature exhaustive two-body split. A band containing two
+      // merely touching neighbours has a much wider natural letter-width
+      // distribution than a long cursive word, so the uniform-boundary beam
+      // below is unnecessarily restrictive for this common case.
+      const minimumPiece = Math.max(7, Math.floor(width * 0.2))
+      const cutCandidates = Array.from(
+        { length: Math.max(0, width - minimumPiece * 2) },
+        (_, index) => start + minimumPiece + index,
+      ).sort((first, second) => (
+        columnInk[first] - columnInk[second]
+        || Math.abs(first - (start + end) / 2) - Math.abs(second - (start + end) / 2)
+      )).slice(0, 48)
+      return cutCandidates.flatMap((cut) => {
+        const left = classifyRange(start, cut)
+        const right = classifyRange(cut, end)
+        if (!left?.classes.length || !right?.classes.length) return []
+        const cutInk = columnInk[cut] / Math.max(1, image.inkBox[3])
+        return [{
+          count: 2,
+          segments: [left, right],
+          cost: left.classes[0].cost + right.classes[0].cost + cutInk * 0.16 + 0.012,
+          cutInk,
+        } satisfies BandOption]
+      }).sort((first, second) => first.cost - second.cost)[0] ?? null
+    }
+    if (width < count * 4) return null
+    const expectedWidth = width / count
+    const minimumPiece = Math.max(
+      4,
+      Math.floor(Math.min(expectedWidth * 0.22, image.inkBox[3] * 0.045)),
+    )
+    if (width < count * minimumPiece) return null
+
+    type PartialBand = {
+      end: number
+      segments: RasterSegment[]
+      cost: number
+      cutInk: number
+    }
+    let beam: PartialBand[] = [{ end: start, segments: [], cost: 0, cutInk: 0 }]
+    for (let boundaryIndex = 1; boundaryIndex < count; boundaryIndex += 1) {
+      const target = start + expectedWidth * boundaryIndex
+      const searchRadius = Math.max(6, expectedWidth * 0.72)
+      const remainingPieces = count - boundaryIndex
+      const minimumCut = start + minimumPiece * boundaryIndex
+      const maximumCut = end - minimumPiece * remainingPieces
+      const candidates = Array.from(
+        { length: Math.max(0, Math.floor(maximumCut) - Math.ceil(minimumCut) + 1) },
+        (_, index) => Math.ceil(minimumCut) + index,
+      ).filter((cut) => Math.abs(cut - target) <= searchRadius)
+        .sort((first, second) => {
+          const firstInk = columnInk[first] / Math.max(1, image.inkBox[3])
+          const secondInk = columnInk[second] / Math.max(1, image.inkBox[3])
+          const firstScore = firstInk * 0.76 + Math.abs(first - target) / expectedWidth * 0.24
+          const secondScore = secondInk * 0.76 + Math.abs(second - target) / expectedWidth * 0.24
+          return firstScore - secondScore || Math.abs(first - target) - Math.abs(second - target)
+        })
+        .slice(0, RASTER_BOUNDARIES_PER_CUT)
+      const uniformCut = clamp(Math.round(target), Math.ceil(minimumCut), Math.floor(maximumCut))
+      if (!candidates.includes(uniformCut)) candidates.push(uniformCut)
+
+      const next = beam.flatMap((state) => candidates.flatMap((cut) => {
+        if (
+          cut - state.end < minimumPiece
+          || end - cut < minimumPiece * remainingPieces
+        ) return []
+        const segment = classifyRange(state.end, cut)
+        if (!segment?.classes.length) return []
+        const cutInk = columnInk[cut] / Math.max(1, image.inkBox[3])
+        const pieceWidth = cut - state.end
+        const widthDeviation = Math.abs(Math.log(Math.max(0.15, pieceWidth / expectedWidth)))
+        return [{
+          end: cut,
+          segments: [...state.segments, segment],
+          cost: state.cost + segment.classes[0].cost + cutInk * 0.16 + widthDeviation * 0.012 + 0.006,
+          cutInk: state.cutInk + cutInk,
+        } satisfies PartialBand]
+      })).sort((first, second) => first.cost - second.cost)
+        .slice(0, RASTER_SEGMENTATION_BEAM)
+      if (!next.length) return null
+      beam = next
+    }
+
+    return beam.flatMap((state) => {
+      if (end - state.end < minimumPiece) return []
+      const segment = classifyRange(state.end, end)
+      if (!segment?.classes.length) return []
+      const pieceWidth = end - state.end
+      const widthDeviation = Math.abs(Math.log(Math.max(0.15, pieceWidth / expectedWidth)))
+      return [{
+        count,
+        segments: [...state.segments, segment],
+        cost: state.cost + segment.classes[0].cost + widthDeviation * 0.012,
+        cutInk: state.cutInk,
+      } satisfies BandOption]
+    }).sort((first, second) => first.cost - second.cost)[0] ?? null
+  }
+
+  const options = image.columnBands.map(([start, end]) => {
+    const width = end - start
+    const aspectLimit = Math.max(
+      1,
+      Math.ceil(width / Math.max(5, image.inkBox[3] * 0.20)),
+    )
+    const maximumPieces = Math.min(
+      MAX_RASTER_PARTS_PER_BAND,
+      maximumTargetCount - image.columnBands.length + 1,
+      // Always let the line-model length open the exact connected-word path;
+      // the aspect estimate only adds a small guard against pathological
+      // screenshots with a one-pixel horizontal border.
+      Math.max(aspectLimit, rawLetters.length - image.columnBands.length + 1),
+    )
+    return Array.from({ length: maximumPieces }, (_, index) => segmentBand(start, end, index + 1))
+      .filter((entry): entry is BandOption => Boolean(entry))
+  })
 
   const candidates = candidateCounts.flatMap((targetCount) => {
     type State = { count: number; segments: RasterSegment[]; cost: number; cutInk: number }
