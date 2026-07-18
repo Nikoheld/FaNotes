@@ -30,6 +30,8 @@ type GlyphenWerkMessage = {
   requestId?: unknown
   strokes?: unknown
   language?: unknown
+  textCharacterCountHint?: unknown
+  textCharacterHint?: unknown
 }
 
 const MAX_RECOGNITION_STROKES = 2_048
@@ -154,6 +156,16 @@ export function GlyphenWerkWorkspace({ activeView, appearance, onClose, onViewCh
     ) return
     const strokes = recognitionStrokes(message.strokes)
     if (!strokes) return
+    const textCharacterCountHint = Number.isSafeInteger(message.textCharacterCountHint)
+      && Number(message.textCharacterCountHint) >= 1
+      && Number(message.textCharacterCountHint) <= 320
+      ? Number(message.textCharacterCountHint)
+      : undefined
+    const textCharacterHint = typeof message.textCharacterHint === 'string'
+      && message.textCharacterHint.length <= 320
+      && /^\p{L}{1,320}$/u.test(message.textCharacterHint)
+      ? message.textCharacterHint
+      : undefined
     const respond = (payload: Record<string, unknown>) => iframeRef.current?.contentWindow?.postMessage({
       type: 'glyphenwerk:neural-result',
       schemaVersion: 1,
@@ -175,6 +187,8 @@ export function GlyphenWerkWorkspace({ activeView, appearance, onClose, onViewCh
         false,
         900,
         560,
+        textCharacterCountHint,
+        textCharacterHint,
       )
       respond({
         text: personalized.fusion.text.slice(0, 4_000),
@@ -184,6 +198,8 @@ export function GlyphenWerkWorkspace({ activeView, appearance, onClose, onViewCh
         knownWordRatio: neural.knownWordRatio ?? 0,
         personalizedCharacters: personalized.fusion.personalizedCharacters,
         classicalCharacters: personalized.fusion.classicalCharacters,
+        personalizedSource: personalized.fusion.source,
+        personalizedConfidence: personalized.fusion.confidence,
       })
     } catch (reason) {
       respond({

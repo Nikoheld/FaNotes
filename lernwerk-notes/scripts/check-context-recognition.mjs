@@ -23,6 +23,7 @@ try {
   } = await server.ssrLoadModule('/src/lib/neuralWordContext.ts')
   const {
     hasDecisiveMathLayout,
+    hasStrongPersonalizedTextEvidence,
     hasStrongNeuralWordEvidence,
     neuralTextMayOverrideAutomaticMode,
   } = await server.ssrLoadModule('/src/lib/recognitionModeSelection.ts')
@@ -945,6 +946,36 @@ try {
     ),
     true,
     'Ein sicher erkanntes bekanntes Einzelwort muss im GlyphenWerk-Test als Text gelten.',
+  )
+  assert.equal(
+    hasStrongPersonalizedTextEvidence(
+      { confidence: 72, source: 'personalized', personalizedCharacters: 1 },
+      1,
+      1,
+      false,
+    ),
+    true,
+    'Ein persönlich trainiertes T darf nicht durch die alte Integral-Vermutung verworfen werden.',
+  )
+  assert.equal(
+    hasStrongPersonalizedTextEvidence(
+      { confidence: 72, source: 'personalized', personalizedCharacters: 1 },
+      1,
+      1,
+      true,
+    ),
+    false,
+    'Ein Resultat mit expliziter Mathematikstruktur darf nicht als persönlicher Text erzwungen werden.',
+  )
+  assert.equal(
+    hasStrongPersonalizedTextEvidence(
+      { confidence: 72, source: 'neural', personalizedCharacters: 4 },
+      4,
+      4,
+      false,
+    ),
+    false,
+    'Ein rein neuronales Resultat darf keine persönliche Trainingsentscheidung vortäuschen.',
   )
   assert.equal(
     neuralTextMayOverrideAutomaticMode(

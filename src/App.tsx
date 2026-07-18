@@ -23,7 +23,10 @@ import {
   type RecognitionToken,
 } from './lib/recognition'
 import { containsGermanSharpS, isSupportedRecognitionLabel, normalizeGermanSharpS } from './lib/orthography'
-import { hasStrongNeuralWordEvidence } from './lib/recognitionModeSelection'
+import {
+  hasStrongNeuralWordEvidence,
+  hasStrongPersonalizedTextEvidence,
+} from './lib/recognitionModeSelection'
 import { createStandardRecognitionSamples } from './lib/standardRecognition'
 import type { CanvasState, CategoryId, LabelDefinition, Sample, Stroke } from './types'
 import { getGlyphenWerkLanguage, getGlyphenWerkLocale } from './i18n'
@@ -65,6 +68,9 @@ type NeuralTestResult = {
   lineCount: number
   wordCount: number
   knownWordRatio: number
+  personalizedCharacters: number
+  personalizedSource: 'personalized' | 'neural' | 'classical' | 'hybrid' | ''
+  personalizedConfidence: number
 }
 type IconName =
   | 'pen'
@@ -317,7 +323,7 @@ const App = () => {
     if (!EMBEDDED_IN_FANOTES || window.parent === window) return
     const receiveNavigation = (event: MessageEvent<unknown>) => {
       if (event.source !== window.parent || !event.data || typeof event.data !== 'object') return
-      const message = event.data as { type?: unknown; schemaVersion?: unknown; view?: unknown; theme?: unknown; reduceMotion?: unknown; palette?: unknown; requestId?: unknown; text?: unknown; confidence?: unknown; lineCount?: unknown; wordCount?: unknown; knownWordRatio?: unknown }
+      const message = event.data as { type?: unknown; schemaVersion?: unknown; view?: unknown; theme?: unknown; reduceMotion?: unknown; palette?: unknown; requestId?: unknown; text?: unknown; confidence?: unknown; lineCount?: unknown; wordCount?: unknown; knownWordRatio?: unknown; personalizedCharacters?: unknown; personalizedSource?: unknown; personalizedConfidence?: unknown }
       if (message.schemaVersion !== 1) return
       if (message.type === 'glyphenwerk:navigate' && isViewId(message.view)) setView(message.view)
       if (message.type === 'glyphenwerk:appearance') applyFaNotesAppearance(message)
@@ -342,6 +348,18 @@ const App = () => {
             : 0,
           knownWordRatio: typeof message.knownWordRatio === 'number' && Number.isFinite(message.knownWordRatio)
             ? Math.max(0, Math.min(1, message.knownWordRatio))
+            : 0,
+          personalizedCharacters: typeof message.personalizedCharacters === 'number' && Number.isSafeInteger(message.personalizedCharacters)
+            ? Math.max(0, Math.min(4_000, message.personalizedCharacters))
+            : 0,
+          personalizedSource: message.personalizedSource === 'personalized'
+            || message.personalizedSource === 'neural'
+            || message.personalizedSource === 'classical'
+            || message.personalizedSource === 'hybrid'
+            ? message.personalizedSource
+            : '',
+          personalizedConfidence: typeof message.personalizedConfidence === 'number' && Number.isFinite(message.personalizedConfidence)
+            ? Math.max(0, Math.min(100, Math.round(message.personalizedConfidence)))
             : 0,
         })
       }
@@ -514,6 +532,10 @@ const App = () => {
             requestId,
             strokes: testStrokes,
             language: getGlyphenWerkLanguage(),
+            textCharacterCountHint: incrementalHint?.characterCount
+              ?? recognition.tokens.filter((token) => !token.isLayout).length,
+            textCharacterHint: textCharacterHint
+              ?? (/^\p{L}{1,24}$/u.test(compactText) ? compactText : undefined),
           })
         } else {
           setIsRecognizing(false)
@@ -550,14 +572,19 @@ const App = () => {
       letters,
       words.length >= 1,
     )
+    const strongPersonalizedText = hasStrongPersonalizedTextEvidence({
+      confidence: neuralTestResult.personalizedConfidence,
+      source: neuralTestResult.personalizedSource || undefined,
+      personalizedCharacters: neuralTestResult.personalizedCharacters,
+    }, letters, visible.length, explicitMath)
     const sentenceLike = (
       !explicitMath
-      && neuralTestResult.confidence >= 38
+      && (neuralTestResult.confidence >= 38 || strongPersonalizedText)
       && letterRatio >= 0.68
       && (
-        strongKnownWord
-        ||
-        (words.length >= 2 && letters >= 6)
+        strongPersonalizedText
+        || strongKnownWord
+        || (words.length >= 2 && letters >= 6)
         || (words.length >= 1 && letters >= 9 && /[aeiouyäöü]/iu.test(text))
       )
     )

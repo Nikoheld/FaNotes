@@ -1,5 +1,13 @@
 # Änderungsverlauf
 
+## 2026.7.3
+
+- der eingebettete GlyphenWerk-Test verwirft ein persönlich erkanntes Textzeichen oder Wort nicht länger, nur weil die allgemeine Zeilenerkennung dieselbe Tinte zuvor fälschlich als Integral, Doppelintegral oder anderes Mathematikzeichen eingeordnet hat
+- die echte Frame-Brücke überträgt die fortlaufend gemessene Zeichenanzahl und einen vorhandenen stabilen Buchstabenhinweis an die persönliche Erkennung; dadurch bleibt eine bereits bestätigte Folge wie `t → te → tes → test` erhalten, wenn ein neu angefügter Buchstabe die Basiserkennung vorübergehend in den Mathematikmodus kippen lässt
+- die persönliche Textfusion behandelt explizite Mathematikausgaben der OCR nicht länger als Text-Veto und kann für geeignete Einwortzeilen auf den bereits visuell gestützten Textkandidaten zurückfallen; reine neuronale oder untrainierte Vermutungen erhalten dieses zusätzliche Vertrauen ausdrücklich nicht
+- ein neuer sichtbarer Chromium-Test zeichnet im echten eingebetteten GlyphenWerk-Canvas ein zweistrichiges `T`, führt das Ergebnis durch die reale `postMessage`-Brücke und prüft die tatsächlich gerenderte Textansicht; eine zweite Regression reproduziert `∫∫ → test` mit persönlichen verbundenen `t/e/s`-Formen
+- die acht NAS-PNGs bleiben ein begrenzter direkter Raster-Modultest und gelten nicht mehr als End-to-End-Nachweis für den Live-Test; Stable 2026.7.3 wird stattdessen durch den produktiven Fusionspfad, die sichtbare Oberfläche, Typprüfung sowie Kontext- und Brückentests abgesichert
+
 ## 2026.7.2
 
 - Stable- und Beta-Versionen folgen jetzt einem strikt aufsteigenden Zyklus: nach Stable `2026.7.2` beginnen Vorabversionen bei `2026.7.3-beta.1`, sodass eine Stable-Installation beim Wechsel in den Beta-Kanal niemals an einer semantisch älteren Vorabversion hängen bleibt
