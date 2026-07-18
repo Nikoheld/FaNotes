@@ -2,7 +2,11 @@
 Description=FaNotes public download website
 After=network-online.target remote-fs.target clamav-daemon.service
 Wants=network-online.target clamav-daemon.service
-RequiresMountsFor=/mnt/truenas/Fabio/FaNotes-Arch-x86_64
+# The NAS is automounted and may become ready after the network-online target.
+# A hard mount dependency leaves the public site permanently stopped when that
+# first boot-time attempt races the NAS. Request and order the mount without
+# making a transient NAS failure fatal to the website process.
+WantsMountsFor=/mnt/truenas/Fabio/FaNotes-Arch-x86_64
 
 [Service]
 Type=simple
