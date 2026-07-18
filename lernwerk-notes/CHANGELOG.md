@@ -1,5 +1,15 @@
 # Änderungsverlauf
 
+## 2026.7.4-beta.4
+
+- die allgemeine Texterkennung trennt jetzt visuelle Sicherheit von Sprachkontext: eine unbekannte, aber sauber geschriebene Wortform gilt nicht länger als geometrisch fehlerhaft; dadurch bleiben insbesondere Eigennamen wie `Fabio` und bewusst gemischte Fach- oder Produktnamen wie `OpenCode` erhalten, während Satzkontext weiterhin echte Lesefehler korrigiert
+- das kompakte Zeichenmodell und das kontextuelle Zeilenmodell werden über Struktur, Konfidenz, Wörterbuchbeleg und tatsächlichen Zeichenabstand gemeinsam ausgewählt; der Webpfad behält seine starke Kontextpriorität für normale Sätze, schützt aber visuell sichere einzelne Namen und Fachbegriffe vor radikalen Ersetzungen
+- erfundene Abstände innerhalb eines Wortes werden mehrstufig und konservativ entfernt, wenn nur die verbundene Form ein bekanntes deutsches oder englisches Wort ergibt; echte Grenzen zwischen zwei gültigen Wörtern wie `in form` bleiben unangetastet
+- bekannte Wörter mit versehentlichen internen Grossbuchstaben werden anhand ihrer ursprünglichen Anfangsform normalisiert, ohne Grossschreibung, Abkürzungen oder unbekannte CamelCase-Namen zu zerstören; die abschliessende Korrektur verbindet diese Fallprüfung mit dem gemeinsamen persönlichen Wörterbuch
+- separat gesetzte Punkte sind nun eigenständige geometrische Evidenz: ein oberer Punkt unterscheidet `i`/`j` von `l`/`I`/`1`, zwei obere Punkte stützen deutsche Umlaute gegenüber ihrem Grundbuchstaben, auch wenn der Punkt oder Umlaut erst nach dem Wortkörper geschrieben wurde
+- bei einem unsicheren einzelnen Wort prüft das CTC-Modell genau eine zweite, leicht anders skalierte Darstellung und übernimmt sie nur bei klar besserer Struktur oder Bewertung; sichere Wörter und ganze Sätze erhalten keine zusätzliche Inferenzlast
+- die reale IAM-OnDB-Zeile bleibt mit 11,54 Prozent Zeichenfehlerrate deutlich unter der festgelegten 24-Prozent-Grenze; kontrollierte Wörter, zwei physische Zeilen, Namens-/CamelCase-Schutz, Kontextkorrektur, Text-/Mathematikkonflikte und die sichtbare GlyphenWerk-Erkennung werden zusätzlich als End-to-End-Regression geprüft
+
 ## 2026.7.4-beta.3
 
 - FaNotes und das eingebettete GlyphenWerk verwenden jetzt dieselbe Text-/Mathematikentscheidung für die geometrische Basiserkennung, die neuronale Zeile und persönliche Trainingsbelege; widersprüchliche Teilentscheidungen zwischen Test-Tab, Notizseite und unsichtbarem Suchtranskript sind damit entfernt

@@ -185,6 +185,15 @@ try {
     ['Test', 'ist', 'lernen'],
     `Nahe, nicht sinnvolle Wortformen müssen iterativ und konservativ repariert werden: ${JSON.stringify(result.repairedWords)}`,
   )
+  assert.deepEqual(
+    result.ensembleGuards,
+    {
+      preservesUnknownName: true,
+      preservesMixedCaseTerm: true,
+      acceptsClearFallback: true,
+    },
+    `Die visuelle und kontextuelle Texterkennung muss Namen/Fachbegriffe schützen und zugleich klaren Modell-Fallback zulassen: ${JSON.stringify(result.ensembleGuards)}`,
+  )
   const warmAverage = Math.round(result.words.slice(1).reduce((sum, entry) => sum + entry.durationMs, 0) / (result.words.length - 1))
   console.log(`IAM-Dekodierung: ${JSON.stringify(result.iamOnline)}`)
   console.log(`Neuronale Handschrifterkennung: echte IAM-OnDB-Zeile mit ${(iamCharacterErrorRate * 100).toFixed(2)} % CER · ${result.words.map((entry) => entry.recognized).join(' · ')} · zwei Zeilen mit ${result.multilineConfidence} % · kalt ${result.words[0].durationMs} ms, warm ${warmAverage} ms.`)

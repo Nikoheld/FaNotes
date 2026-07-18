@@ -20,6 +20,7 @@ try {
     applyNeuralWordContext,
     installNeuralWordContextCandidates,
     isExtendedNeuralContextWord,
+    repairNeuralWordSpacing,
   } = await server.ssrLoadModule('/src/lib/neuralWordContext.ts')
   const {
     assessNeuralTextModeCandidate,
@@ -167,6 +168,59 @@ try {
     'fenster',
     'Ein höhengleicher innerer Buchstabe muss bei einer nahen Kleinbuchstabenform klein bleiben.',
   )
+  assert.equal(
+    applyNeuralWordContext('leRnen und TEst', 'de'),
+    'lernen und Test',
+    'Interne Grossbuchstaben in bekannten Wörtern müssen normalisiert werden, ohne die Wortanfangsform zu verlieren.',
+  )
+  assert.equal(
+    applyNeuralWordContext('FaNotes OpenCode', 'de'),
+    'FaNotes OpenCode',
+    'Bewusst gemischte Gross-/Kleinschreibung in unbekannten Produkt- und Fachnamen muss erhalten bleiben.',
+  )
+
+  const penPoint = (x, y, t) => ({
+    x, y, t, pressure: 0.6, tiltX: 0, tiltY: 0, pointerType: 'pen',
+  })
+  const dottedBody = {
+    baseWidth: 3.6,
+    pressureEnabled: true,
+    points: [penPoint(0.075, 0.205, 0), penPoint(0.076, 0.305, 1)],
+  }
+  const firstDot = {
+    baseWidth: 3.6,
+    pressureEnabled: true,
+    points: [penPoint(0.076, 0.165, 2)],
+  }
+  const secondDot = {
+    baseWidth: 3.6,
+    pressureEnabled: true,
+    points: [penPoint(0.09, 0.164, 3)],
+  }
+  const dottedI = {
+    ...token('l', 76, [['l', 76], ['i', 74]], 0),
+    strokes: [dottedBody, firstDot],
+  }
+  assert.equal(
+    recognizedSentence(applyTextReranking([
+      dottedI,
+      token('x', 91, [['x', 91]], 1),
+    ], BASE_CATALOG, 'de')),
+    'ix',
+    'Ein real vorhandener oberer Punkt muss i gegenüber l/I/1 als unabhängigen Strichbeweis absichern.',
+  )
+  const dottedUmlaut = {
+    ...token('u', 76, [['u', 76], ['ü', 74]], 0),
+    strokes: [dottedBody, firstDot, secondDot],
+  }
+  assert.equal(
+    recognizedSentence(applyTextReranking([
+      dottedUmlaut,
+      token('x', 91, [['x', 91]], 1),
+    ], BASE_CATALOG, 'de')),
+    'üx',
+    'Zwei obere Punkte müssen einen Umlaut gegenüber dem undiakritisierten Grundbuchstaben absichern.',
+  )
 
   const lowLine = [
     token('a', 90, [['a', 90]], 0),
@@ -235,6 +289,16 @@ try {
     recognizedSentence(applyTextReranking(compactTwoWords, BASE_CATALOG, 'de')),
     'hallo test',
     'Ein lokaler Abstandssprung muss auch zwischen breiten Buchstaben als Wortgrenze erkannt werden.',
+  )
+  assert.equal(
+    repairNeuralWordSpacing('Te st ist gu t', 'de'),
+    'Test ist gut',
+    'Erfundene neuronale Abstände dürfen nur verschwinden, wenn die verbundene Form eindeutig ein echtes Wort ist.',
+  )
+  assert.equal(
+    repairNeuralWordSpacing('in form', 'en'),
+    'in form',
+    'Zwei bereits gültige Wörter dürfen nicht nur deshalb verbunden werden, weil auch ihre Verkettung ein Wort ist.',
   )
 
   const neuralLine = (text, confidence = 88) => {

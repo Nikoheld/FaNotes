@@ -120,6 +120,55 @@ export const preserveWordCase = (source: string, replacement: string, locale: Re
   return replacement
 }
 
+const normalizeKnownWordCase = (
+  source: string,
+  lower: string,
+  language: RecognitionLanguage,
+) => {
+  const locale = language === 'de' ? 'de-CH' : 'en-US'
+  const letters = Array.from(source).filter((character) => /^\p{L}$/u.test(character))
+  const allUppercase = letters.length > 1 && letters.every((character) => (
+    character === character.toLocaleUpperCase(locale)
+  ))
+  if (allUppercase) return source
+  const internalUppercase = letters.slice(1).some((character) => (
+    character === character.toLocaleUpperCase(locale) &&
+    character !== character.toLocaleLowerCase(locale)
+  ))
+  if (!internalUppercase) return source
+  const startsUppercase = source[0] === source[0]?.toLocaleUpperCase(locale)
+  return startsUppercase
+    ? lower[0]?.toLocaleUpperCase(locale) + lower.slice(1)
+    : lower
+}
+
+const knownContextWord = (word: string, language: RecognitionLanguage) => (
+  LANGUAGE_WORDS[language].has(word) || isExtendedNeuralContextWord(word, language)
+)
+
+/** Repairs only provably false spaces. A boundary is removed when the joined
+ * form is a known word and at least one separated fragment is not. Genuine
+ * phrases such as “in form” therefore remain unchanged. */
+export const repairNeuralWordSpacing = (text: string, language: RecognitionLanguage) => {
+  const locale = language === 'de' ? 'de-CH' : 'en-US'
+  const letters = language === 'de' ? 'A-Za-zÄÖÜäöü' : 'A-Za-z'
+  const pattern = new RegExp(`([${letters}]+)([ \\t]+)([${letters}]+)`, 'gu')
+  let value = normalizeGermanSharpS(text)
+  for (let pass = 0; pass < 3; pass += 1) {
+    let changed = false
+    value = value.replace(pattern, (complete, left: string, _space: string, right: string) => {
+      const joined = `${left}${right}`.toLocaleLowerCase(locale)
+      const leftKnown = knownContextWord(left.toLocaleLowerCase(locale), language)
+      const rightKnown = knownContextWord(right.toLocaleLowerCase(locale), language)
+      if (!knownContextWord(joined, language) || (leftKnown && rightKnown)) return complete
+      changed = true
+      return `${left}${right}`
+    })
+    if (!changed) break
+  }
+  return value
+}
+
 /** Corrects only close dictionary neighbours; unknown names and technical terms remain untouched. */
 export const applyNeuralWordContext = (text: string, language: RecognitionLanguage) => {
   const locale = language === 'de' ? 'de' : 'en'
@@ -132,11 +181,8 @@ export const applyNeuralWordContext = (text: string, language: RecognitionLangua
     let changed = false
     corrected = corrected.replace(pattern, (source, offset: number, complete: string) => {
       const lower = source.toLocaleLowerCase(locale)
-      if (
-        lexicon.has(lower) ||
-        lower.length < 3 ||
-        /\p{Ll}\p{Lu}/u.test(source)
-      ) return source
+      if (lexicon.has(lower)) return normalizeKnownWordCase(source, lower, language)
+      if (lower.length < 3 || /\p{Ll}\p{Lu}/u.test(source)) return source
       const prefix = complete.slice(0, offset)
       const beginsSentence = !/\p{L}/u.test(prefix) || /[.!?]\s*$/u.test(prefix)
       const titleCase = source[0] === source[0]?.toLocaleUpperCase(locale)
@@ -243,9 +289,10 @@ export const applyFinalNeuralWordContext = (text: string, language: RecognitionL
     if (titleCase && replacement.distance >= 2) return source
     return preserveWordCase(source, replacement.candidate, language)
   })
-  return corrected.replace(/\uE000(\d+)\uE001/gu, (_marker, rawIndex: string) => (
+  const restored = corrected.replace(/\uE000(\d+)\uE001/gu, (_marker, rawIndex: string) => (
     protectedWords[Number(rawIndex)] ?? ''
   ))
+  return repairNeuralWordSpacing(restored, language)
 }
 
 /** Uses the independently measured number of handwritten characters to
