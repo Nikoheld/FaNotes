@@ -1,5 +1,13 @@
 # Änderungsverlauf
 
+## 2026.7.4-beta.2
+
+- die Zwei-Buchstaben-Segmentierung behandelt den durchgehenden Hauptzug und später gesetzte Punkte, Querstriche, Diagonalen oder zweite Stämme getrennt: nur der echte Schreibkörper wird räumlich geteilt, während jeder abgesetzte Originalstrich vollständig einem der beiden Buchstaben gehört
+- eine begrenzte Besitzer-Suche kombiniert räumliche Nähe, Strichanteil, lokale Anheftung und die tatsächliche Stiftreihenfolge; dadurch bleiben unter anderem `fF`, `Jt`, `Ij`, `kK`, `kN` und `x1` trennbar, ohne Teile des Nachbarbuchstabens zu stehlen oder einen Punkt beziehungsweise Balken zu zerschneiden
+- Lücken zwischen später gesetzten Strichen und Übergänge im durchgehenden Schreibpfad werden vor allgemeinen Rastertälern geprüft; eine schmale interne Lücke in einem mehrstrichigen `k`, `K` oder `H` gilt nicht länger vorschnell als endgültige Buchstabengrenze, eindeutige normal breite Leerräume behalten jedoch den schnellen Pfad
+- ein geometrisch eindeutig an einen Stamm gebundener, außergewöhnlich breiter `T`-Querstrich kann keiner Folgebuchstaben-Hypothese mehr zugeordnet werden; kurze tatsächlich mehrdeutige `f`-/`F`-Balken bleiben weiterhin durch persönliche Trainingsdaten entscheidbar
+- die verpflichtende 60-Schreibenden-Regression erreicht für 3.720 Einzelzeichen, 33.480 getrennte Paare und 11.160 vollständig verbundene Paare jeweils 100 Prozent Pfad-, Vollständigkeits- und Besitzerkorrektheit; der produktive Browserpfad, 1.001 persönliche Textbeispiele und acht getrennte NAS-Holdouts mit 0 von 71 Zeichenfehlern bleiben grün
+
 ## 2026.7.4-beta.1
 
 - der persönliche Rasterpfad kann innerhalb einer einzigen vollständig verbundenen Tintenkomponente jetzt bis zu 16 Buchstaben bilden; zuvor waren unabhängig von Wortlänge höchstens zwei Teile möglich, wodurch eng verbundene Schreibschrift trotz passender Einzelbuchstaben nicht vollständig gelesen werden konnte
