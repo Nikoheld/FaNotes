@@ -102,6 +102,15 @@ exec "\${APPDIR}/fanotes" "$@"
       '-quiet',
       '-no-xattrs',
       '-no-fragments',
+      // mksquashfs otherwise creates one worker per host CPU. On build hosts
+      // with many cores this wastes hundreds of MiB and can force unrelated
+      // workloads into swap without making this gzip payload meaningfully
+      // faster.
+      '-processors', '2',
+      // Its default cache is derived from host RAM (almost 10 GiB on the
+      // release server), not from the cgroup limit. Keep the build bounded so
+      // it never drives the host into reclaim or swap.
+      '-mem', '256M',
       '-comp', 'gzip',
     ])
     const outputHandle = await fsp.open(outputPath, 'r+')
