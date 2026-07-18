@@ -96,9 +96,21 @@ try {
       availability: result.connected.availability,
       unfragmentedRate: result.connected.unfragmentedRate,
       ownerCorrectRate: result.connected.ownerCorrectRate,
-      failures: result.connected.failures.slice(0, 8),
-      fragmentationFailures: result.connected.fragmentationFailures.slice(0, 8),
-      ownershipFailures: result.connected.ownershipFailures.slice(0, 8),
+      failures: result.connected.failures.slice(0, 20).map(({ writer, expected }) => ({ writer, expected })),
+      fragmentationFailures: result.connected.fragmentationFailures
+        .slice(0, 20)
+        .map(({ writer, expected }) => ({ writer, expected })),
+      ownershipFailures: result.connected.ownershipFailures.slice(0, 80).map((entry) => ({
+        writer: entry.writer,
+        expected: entry.expected,
+        strokeCounts: entry.strokeCounts,
+        joinX: entry.joinX,
+        delayedOwners: entry.delayedStrokeBounds.map(({ owner }) => owner),
+        delayedStrokeBounds: entry.delayedStrokeBounds,
+        cutCandidates: entry.cutCandidates,
+        longestBodySegments: entry.longestBodySegments,
+        hypothesisAllocations: entry.hypothesisAllocations,
+      })),
     },
   } : result, null, 2))
   if (process.env.FANOTES_UJI_PAIR_STRICT === '1') {
@@ -106,7 +118,7 @@ try {
     assert.equal(result.availability, 100, `Echte Buchstabenpaare besitzen nicht immer einen Zwei-Zeichen-Pfad: ${JSON.stringify(result.failures.slice(0, 20))}`)
     assert.equal(result.connected.availability, 100, `Durchgehend verbundene Buchstabenpaare besitzen nicht immer einen Zwei-Zeichen-Pfad: ${JSON.stringify(result.connected.failures.slice(0, 20))}`)
     assert.equal(result.connected.unfragmentedRate, 100, `Verspätete Zubehörstriche werden in verbundenen Paaren zerschnitten: ${JSON.stringify(result.connected.fragmentationFailures.slice(0, 20))}`)
-    assert.ok(result.connected.ownerCorrectRate >= 98.5, `Zubehörstriche besitzen zu selten eine Segmentierung mit dem richtigen Buchstaben: ${JSON.stringify(result.connected.ownershipFailures.slice(0, 20))}`)
+    assert.equal(result.connected.ownerCorrectRate, 100, `Jeder vollständige Zubehörstrich muss eine Segmentierung mit dem richtigen Buchstaben besitzen: ${JSON.stringify(result.connected.ownershipFailures.slice(0, 20))}`)
   }
 } finally {
   fs.rmSync(temporary, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })

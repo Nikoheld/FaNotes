@@ -942,6 +942,36 @@ const clusterFromStrokes = (strokes: Stroke[]): StrokeCluster | null => {
   }
 }
 
+const textStrokePathLength = (stroke: Stroke) => stroke.points.slice(1).reduce((sum, point, index) => (
+  sum + Math.hypot(
+    (point.x - stroke.points[index].x) * SOURCE_WIDTH,
+    (point.y - stroke.points[index].y) * SOURCE_HEIGHT,
+  )
+), 0)
+
+const textStrokeStartTime = (stroke: Stroke) => Math.min(
+  ...stroke.points.map((point) => Number.isFinite(point.t) ? point.t : Number.MAX_SAFE_INTEGER),
+)
+
+/** The earliest full-height stroke is normally the uninterrupted cursive
+ * body. It is the only stroke that must always be cut spatially; later
+ * crossbars, dots and secondary bodies remain complete owner candidates. */
+const primaryContinuousTextStroke = (cluster: StrokeCluster) => [...cluster.strokes]
+  .filter((stroke) => stroke.points.length >= 2)
+  .filter((stroke) => {
+    if (!resemblesStraightHorizontalAccessoryStroke(stroke)) return true
+    const bounds = strokeBounds(stroke)
+    const strokeHeight = (bounds.maxY - bounds.minY) * SOURCE_HEIGHT
+    const clusterHeight = Math.max(1, (cluster.maxY - cluster.minY) * SOURCE_HEIGHT)
+    return strokeHeight >= Math.max(22, clusterHeight * 0.42)
+  })
+  .sort((first, second) => (
+    textStrokeStartTime(first) - textStrokeStartTime(second) ||
+    (strokeBounds(second).maxX - strokeBounds(second).minX) -
+      (strokeBounds(first).maxX - strokeBounds(first).minX) ||
+    textStrokePathLength(second) - textStrokePathLength(first)
+  ))[0]
+
 const splitTextCluster = (cluster: StrokeCluster, boundaries: number[]) => {
   const cuts = [...boundaries].sort((first, second) => first - second)
   const groups: Stroke[][] = Array.from({ length: cuts.length + 1 }, () => [])
@@ -950,33 +980,7 @@ const splitTextCluster = (cluster: StrokeCluster, boundaries: number[]) => {
     const index = bandFor(x)
     return index < 0 ? cuts.length : index
   }
-  const strokePathLength = (stroke: Stroke) => stroke.points.slice(1).reduce((sum, point, index) => (
-    sum + Math.hypot(
-      (point.x - stroke.points[index].x) * SOURCE_WIDTH,
-      (point.y - stroke.points[index].y) * SOURCE_HEIGHT,
-    )
-  ), 0)
-  const strokeStartTime = (stroke: Stroke) => Math.min(
-    ...stroke.points.map((point) => Number.isFinite(point.t) ? point.t : Number.MAX_SAFE_INTEGER),
-  )
-  const primaryContinuousStroke = [...cluster.strokes]
-    .filter((stroke) => stroke.points.length >= 2)
-    .filter((stroke) => {
-      if (!resemblesStraightHorizontalAccessoryStroke(stroke)) return true
-      const bounds = strokeBounds(stroke)
-      const strokeHeight = (bounds.maxY - bounds.minY) * SOURCE_HEIGHT
-      const clusterHeight = Math.max(1, (cluster.maxY - cluster.minY) * SOURCE_HEIGHT)
-      // A wide two-letter trajectory may have strong horizontal progress but
-      // still spans the full writing height. Only genuinely shallow bars are
-      // excluded from primary-body selection.
-      return strokeHeight >= Math.max(22, clusterHeight * 0.42)
-    })
-    .sort((first, second) => (
-      strokeStartTime(first) - strokeStartTime(second) ||
-      (strokeBounds(second).maxX - strokeBounds(second).minX) -
-        (strokeBounds(first).maxX - strokeBounds(first).minX) ||
-      strokePathLength(second) - strokePathLength(first)
-    ))[0]
+  const primaryContinuousStroke = primaryContinuousTextStroke(cluster)
 
   /**
    * A crossbar or dot can be drawn after an entire cursive word. In that
@@ -1203,6 +1207,151 @@ const splitTextCluster = (cluster: StrokeCluster, boundaries: number[]) => {
   return groups.flatMap((strokes) => {
     const result = clusterFromStrokes(strokes)
     return result ? [result] : []
+  })
+}
+
+const textStrokePointKey = (point: Stroke['points'][number]) => (
+  `${Math.round(point.x * 10_000_000)}:${Math.round(point.y * 10_000_000)}:${Math.round(point.t * 1_000)}`
+)
+
+/**
+ * A connected word can be written as one long body followed by several
+ * delayed pen lifts: the bar of the first `T`, the dot of an `i`, or the
+ * second diagonal of an `X`. A single nearest-box decision is insufficient
+ * when such a complete stroke lies on the boundary. Keep the spatial split,
+ * but enumerate a tiny beam of whole-stroke owner assignments. No original
+ * pen lift is cut or duplicated; the normal personal classifier chooses the
+ * visually coherent pair afterwards.
+ */
+const twoPartStrokeOwnershipVariants = (
+  cluster: StrokeCluster,
+  boundary: number,
+  base: StrokeCluster[],
+) => {
+  if (base.length !== 2) return [base]
+  const primary = primaryContinuousTextStroke(cluster)
+  const physicalHeight = Math.max(1, (cluster.maxY - cluster.minY) * SOURCE_HEIGHT)
+  const partCenters = base.map((part) => (part.minX + part.maxX) / 2)
+
+  const movable = cluster.strokes.flatMap((stroke) => {
+    if (stroke === primary || !stroke.points.length) return []
+    const bounds = strokeBounds(stroke)
+    const width = (bounds.maxX - bounds.minX) * SOURCE_WIDTH
+    const height = (bounds.maxY - bounds.minY) * SOURCE_HEIGHT
+    const centerX = (bounds.minX + bounds.maxX) / 2
+
+    const keys = new Set(stroke.points.map(textStrokePointKey))
+    const matchingParts = base.flatMap((part, partIndex) => (
+      part.strokes.some((candidate) => candidate.points.some((point) => keys.has(textStrokePointKey(point))))
+        ? [partIndex]
+        : []
+    ))
+    if (!matchingParts.length) return []
+
+    const weights = [0, 0]
+    stroke.points.slice(1).forEach((second, index) => {
+      const first = stroke.points[index]
+      const length = Math.hypot(
+        (second.x - first.x) * SOURCE_WIDTH,
+        (second.y - first.y) * SOURCE_HEIGHT,
+      )
+      const midpoint = (first.x + second.x) / 2
+      weights[midpoint < boundary ? 0 : 1] += length
+    })
+    if (weights[0] + weights[1] < 0.1) weights[centerX < boundary ? 0 : 1] = 1
+    const horizontal = resemblesStraightHorizontalAccessoryStroke(stroke, bounds)
+    const compact = Math.max(width, height) <= Math.max(66, physicalHeight * 0.58)
+    const optionScores = [0, 1].map((owner) => {
+      const share = weights[owner] / Math.max(0.1, weights[0] + weights[1])
+      const centerDistance = Math.abs(centerX - partCenters[owner]) * SOURCE_WIDTH / physicalHeight
+      const attachment = textAccessoryAttachmentScore(bounds, {
+        minX: base[owner].minX,
+        minY: base[owner].minY,
+        maxX: base[owner].maxX,
+        maxY: base[owner].maxY,
+      }) / physicalHeight
+      return share * (horizontal || compact ? 0.9 : 1.55) - centerDistance * 0.16 -
+        attachment * (horizontal || compact ? 0.34 : 0.08)
+    })
+    // An exceptionally wide, straight T bar with a proven local stem must
+    // never be offered to the following letter merely because it overhangs
+    // the candidate cut. Shorter f/F bars remain ambiguous and are handled
+    // by the bounded owner beam below.
+    const allowedOwners = horizontal &&
+      width >= Math.max(140, physicalHeight * 1.1) &&
+      matchingParts.length === 1
+      ? matchingParts
+      : [0, 1]
+    return [{ stroke, keys, optionScores, allowedOwners }]
+  }).slice(0, 5)
+  if (!movable.length) return [base]
+
+  type OwnershipBeam = { owners: number[]; score: number }
+  let beams: OwnershipBeam[] = [{ owners: [], score: 0 }]
+  movable.forEach(({ optionScores, allowedOwners }) => {
+    beams = beams.flatMap((beam) => allowedOwners.map((owner) => ({
+      owners: [...beam.owners, owner],
+      score: beam.score + optionScores[owner],
+    }))).sort((first, second) => second.score - first.score).slice(0, 8)
+  })
+
+  // Delayed accessories are normally completed from left to right: all
+  // remaining strokes of the first letter, then those of the second. Keep
+  // every possible transition in that real pen order. This guarantees that
+  // `I` top/bottom bars, both arms of `k`, or the second diagonal of `x`
+  // remain assignable even when an internal blank band proposed a poor cut.
+  // The scored geometric beam still covers non-monotonic writing orders.
+  const monotonicBeams: OwnershipBeam[] = Array.from(
+    { length: movable.length + 1 },
+    (_, cut) => {
+      const owners = movable.map((_, index) => index < cut ? 0 : 1)
+      return {
+        owners,
+        score: owners.reduce<number>(
+          (sum, owner, index) => sum + movable[index].optionScores[owner],
+          0,
+        ),
+      }
+    },
+  )
+  const ownerAssignments = [...monotonicBeams, ...beams]
+    .filter((beam) => beam.owners.every((owner, index) => (
+      movable[index].allowedOwners.includes(owner)
+    )))
+    .filter((beam, index, entries) => entries.findIndex((candidate) => (
+      candidate.owners.join('') === beam.owners.join('')
+    )) === index)
+    .slice(0, 8)
+
+  const signature = (parts: StrokeCluster[]) => parts.map((part) => part.strokes.map((stroke) => (
+    stroke.points.map(textStrokePointKey).join(',')
+  )).sort().join('|')).join('::')
+  const seen = new Set<string>()
+  return ownerAssignments.flatMap((beam) => {
+    const reassigned = base.map((part) => part.strokes.map((stroke) => ({
+      ...stroke,
+      points: stroke.points.map((point) => ({ ...point })),
+    })))
+    movable.forEach(({ stroke, keys }, index) => {
+      reassigned.forEach((strokes, partIndex) => {
+        reassigned[partIndex] = strokes.filter((candidate) => (
+          !candidate.points.some((point) => keys.has(textStrokePointKey(point)))
+        ))
+      })
+      reassigned[beam.owners[index]].push({
+        ...stroke,
+        points: stroke.points.map((point) => ({ ...point })),
+      })
+    })
+    const parts = reassigned.flatMap((strokes) => {
+      const part = clusterFromStrokes(strokes)
+      return part ? [part] : []
+    })
+    if (parts.length !== 2) return []
+    const key = signature(parts)
+    if (seen.has(key)) return []
+    seen.add(key)
+    return [parts]
   })
 }
 
@@ -1690,6 +1839,69 @@ const snappedTextBoundaries = (
 }
 
 /**
+ * A connected pair may share one uninterrupted body while its delayed
+ * crossbars/dots still expose the transition between the letters. This is
+ * especially important for `fF`: the raster valley lies inside both bars,
+ * but the right edge of the first f-bar and the separately drawn F stem form
+ * a precise ownership boundary. The candidates are only enabled by an
+ * explicit two-character prior and never split an isolated glyph on their
+ * own.
+ */
+const guidedTwoPartDelayedStrokeBoundaries = (cluster: StrokeCluster) => {
+  const primary = primaryContinuousTextStroke(cluster)
+  if (!primary) return []
+  const physicalHeight = Math.max(1, (cluster.maxY - cluster.minY) * SOURCE_HEIGHT)
+  const edgeGuard = Math.max(5, physicalHeight * 0.06) / SOURCE_WIDTH
+  const delayed = cluster.strokes
+    .filter((stroke) => stroke !== primary && stroke.points.length >= 2)
+    .map((stroke) => {
+      const bounds = strokeBounds(stroke)
+      return {
+        bounds,
+        centerX: (bounds.minX + bounds.maxX) / 2,
+      }
+    })
+    .sort((first, second) => first.centerX - second.centerX)
+  if (delayed.length < 2) return []
+
+  const candidates: Array<{ x: number; score: number }> = []
+  for (let index = 1; index < delayed.length; index += 1) {
+    const left = delayed[index - 1]
+    const right = delayed[index]
+    const centerDistance = (right.centerX - left.centerX) * SOURCE_WIDTH
+    if (centerDistance < Math.max(4, physicalHeight * 0.035)) continue
+    const gap = Math.max(0, (right.bounds.minX - left.bounds.maxX) * SOURCE_WIDTH)
+    const overlap = Math.max(0, (left.bounds.maxX - right.bounds.minX) * SOURCE_WIDTH)
+    const boundary = gap > 0
+      ? (left.bounds.maxX + right.bounds.minX) / 2
+      : (left.centerX + right.centerX) / 2
+    if (
+      boundary <= cluster.minX + edgeGuard ||
+      boundary >= cluster.maxX - edgeGuard
+    ) continue
+    candidates.push({
+      x: boundary,
+      // A real blank band between delayed strokes is substantially stronger
+      // evidence than their centre distance alone. Overlapping strokes still
+      // remain as low-priority alternatives for unusual writing order.
+      score: (
+        (gap > 0 ? 3 : 0) -
+        Math.abs(boundary - (cluster.minX + cluster.maxX) / 2) * SOURCE_WIDTH / physicalHeight * 0.9 -
+        overlap / physicalHeight * 0.75
+      ),
+    })
+  }
+
+  const minimumSpacing = Math.max(4, physicalHeight * 0.045) / SOURCE_WIDTH
+  const selected: Array<{ x: number; score: number }> = []
+  candidates.sort((first, second) => second.score - first.score).forEach((candidate) => {
+    if (selected.some((entry) => Math.abs(entry.x - candidate.x) < minimumSpacing)) return
+    selected.push(candidate)
+  })
+  return selected.slice(0, 2).map((entry) => entry.x)
+}
+
+/**
  * Tablet drivers can coalesce a narrow pair such as `Ei`, `jJ` or `x1` so
  * aggressively that the rendered raster contains no density valley at all.
  * The pen trajectory still exposes a transition: connector segments are
@@ -1837,11 +2049,22 @@ export const connectedTextSegmentationHypotheses = (
   const inkGapBoundaries = distinctInkGapBoundaries(cluster, candidates)
   if (usablePreferredParts !== null && inkGapBoundaries.length === usablePreferredParts - 1) {
     const split = splitTextCluster(cluster, inkGapBoundaries)
-    const minimumWidth = Math.max(5, physicalHeight * 0.07)
+    // A blank band inside a multi-stroke k/K/H can leave a very narrow stem
+    // on one side. That is not a reliable two-letter boundary and must keep
+    // competing trajectory/delayed-stroke cuts. Well-sized blank-separated
+    // glyphs retain the fast deterministic path used while writing.
+    const minimumWidth = usablePreferredParts === 2
+      ? Math.max(8, physicalHeight * 0.12)
+      : Math.max(5, physicalHeight * 0.07)
     if (
       split.length === usablePreferredParts &&
       split.every((entry) => (entry.maxX - entry.minX) * SOURCE_WIDTH >= minimumWidth)
-    ) return [[cluster], split]
+    ) return [
+      [cluster],
+      ...(usablePreferredParts === 2
+        ? twoPartStrokeOwnershipVariants(cluster, inkGapBoundaries[0], split)
+        : [split]),
+    ]
   }
 
   // Connected school handwriting including its entry/exit strokes averages
@@ -1867,9 +2090,12 @@ export const connectedTextSegmentationHypotheses = (
     ))
     return [snapped, uniform].filter((boundaries) => boundaries.length)
   })
-  if (usablePreferredParts === 2) {
-    boundarySets.unshift(...guidedTwoPartTrajectoryBoundaries(cluster).map((boundary) => [boundary]))
-  }
+  const guidedTwoPartBoundaries = usablePreferredParts === 2
+    ? [
+        ...guidedTwoPartDelayedStrokeBoundaries(cluster),
+        ...guidedTwoPartTrajectoryBoundaries(cluster),
+      ].map((boundary) => [boundary])
+    : []
 
   const minimumSpacing = Math.max(0.012, physicalHeight * 0.2 / SOURCE_WIDTH)
   const strong: TextCutCandidate[] = []
@@ -1925,6 +2151,10 @@ export const connectedTextSegmentationHypotheses = (
     [...strong].sort((first, second) => first.x - second.x).slice(0, 9).map((candidate) => candidate.x),
   )
   boundarySets.unshift(...prioritizedBoundarySets)
+  // A trajectory transition is the only evidence that survives a perfectly
+  // continuous connector. Evaluate it before generic raster valleys so the
+  // bounded hypothesis budget cannot be exhausted by inner loops first.
+  boundarySets.unshift(...guidedTwoPartBoundaries)
 
   const seen = new Set<string>()
   const hypotheses: StrokeCluster[][] = [
@@ -1945,9 +2175,15 @@ export const connectedTextSegmentationHypotheses = (
     seen.add(key)
     const split = splitTextCluster(cluster, boundaries)
     if (split.length !== boundaries.length + 1) return
-    const widths = split.map((entry) => (entry.maxX - entry.minX) * SOURCE_WIDTH)
-    if (widths.some((width) => width < Math.max(5, physicalHeight * 0.07))) return
-    hypotheses.push(split)
+    const variants = usablePreferredParts === 2 && boundaries.length === 1
+      ? twoPartStrokeOwnershipVariants(cluster, boundaries[0], split)
+      : [split]
+    variants.forEach((variant) => {
+      if (hypotheses.length >= MAX_TEXT_SEGMENTATION_HYPOTHESES) return
+      const widths = variant.map((entry) => (entry.maxX - entry.minX) * SOURCE_WIDTH)
+      if (widths.some((width) => width < Math.max(5, physicalHeight * 0.07))) return
+      hypotheses.push(variant)
+    })
   })
   return hypotheses
 }
