@@ -1,4 +1,4 @@
-import type { AutomaticRecognitionResult } from './recognition'
+import type { AutomaticRecognitionResult, RecognitionLanguage } from './recognition'
 
 export type NeuralTextModeEvidence = {
   confidence: number
@@ -12,9 +12,22 @@ export type PersonalizedTextModeEvidence = {
   personalizedCharacters?: number
 }
 
+export type NeuralTextModeAssessment = {
+  shouldUseText: boolean
+  letters: number
+  digits: number
+  visibleCharacters: number
+  words: number
+  letterRatio: number
+  wordLike: boolean
+  explicitFormulaSyntax: boolean
+  reason: 'personalized' | 'known-word' | 'sentence' | 'letter-sequence' | 'insufficient' | 'formula'
+}
+
 export const hasDecisiveMathLayout = (mathValue: string) => (
-  /\\(?:frac|sqrt)\b|[=≤≥]/u.test(mathValue)
-  || (/\d/u.test(mathValue) && /[+×÷]/u.test(mathValue))
+  /\\(?:frac|sqrt|begin|matrix|cases)\b|[_^]\{|[=≤≥≠≈]/u.test(mathValue)
+  || /\\(?:int|iint|iiint|oint|sum|prod|lim)\b[^\n]*[_^]\{/u.test(mathValue)
+  || /(?:[\p{L}\d}\)])\s*(?:[+×÷]|\\(?:times|div|cdot|pm)\b)\s*(?:[\p{L}\d\\({])/u.test(mathValue)
 )
 
 export const hasStrongNeuralWordEvidence = (
@@ -78,14 +91,102 @@ export const neuralTextMayOverrideAutomaticMode = (
   automatic: AutomaticRecognitionResult | null,
   letters: number,
   wordLike: boolean,
-) => (
-  !automatic
-  || automatic.mathScore - automatic.textScore < 2.2
-  || (
-    (
-      hasStrongNeuralSentenceEvidence(neural, letters, wordLike)
-      || hasStrongNeuralWordEvidence(neural, letters, wordLike)
-    )
-    && !hasDecisiveMathLayout(automatic.mathValue)
+) => {
+  if (!automatic) return true
+  if (automatic.evidence?.math.decisiveStructure === true || hasDecisiveMathLayout(automatic.mathValue)) {
+    return false
+  }
+  return (
+    automatic.mathScore - automatic.textScore < 2.2 ||
+    hasStrongNeuralSentenceEvidence(neural, letters, wordLike) ||
+    hasStrongNeuralWordEvidence(neural, letters, wordLike)
   )
+}
+
+const explicitFormulaSyntax = (value: string) => (
+  /[=+×÷√∫∑Σ∏Π∞^_≤≥≠≈]/u.test(value)
+  || /\d\s*[*/]\s*(?:\p{L}|\d)/u.test(value)
+  || /(?:^|\s)\p{L}\s*[*/]\s*\p{L}(?:\s|$)/u.test(value)
 )
+
+/**
+ * One shared arbitration gate is used by FaNotes and embedded GlyphenWerk.
+ * It evaluates the complete line result instead of treating every tall glyph
+ * as an independent mode vote.  Strong prose may overrule isolated false
+ * integral hypotheses; formulas with relations, radicals, fractions, scripts,
+ * limits, or balanced operators remain protected by the automatic evidence.
+ */
+export const assessNeuralTextModeCandidate = (
+  text: string,
+  language: RecognitionLanguage,
+  neural: NeuralTextModeEvidence,
+  automatic: AutomaticRecognitionResult | null,
+  personalized?: PersonalizedTextModeEvidence,
+): NeuralTextModeAssessment => {
+  const normalized = text.normalize('NFC').trim()
+  const visible = Array.from(normalized).filter((character) => !/\s/u.test(character))
+  const letters = visible.filter((character) => /^\p{L}$/u.test(character)).length
+  const digits = visible.filter((character) => /^\d$/u.test(character)).length
+  const words = normalized.match(language === 'de' ? /[A-Za-zÄÖÜäöü]{2,}/gu : /[A-Za-z]{2,}/gu) ?? []
+  const letterRatio = letters / Math.max(1, visible.length)
+  const wordLike = letters >= Math.max(2, Math.ceil(visible.length * 0.55))
+  const formulaSyntax = explicitFormulaSyntax(normalized)
+  const strongPersonalized = personalized
+    ? hasStrongPersonalizedTextEvidence(personalized, letters, visible.length, formulaSyntax)
+    : false
+  const strongKnownWord = hasStrongNeuralWordEvidence(neural, letters, wordLike)
+  const strongSentence = hasStrongNeuralSentenceEvidence(neural, letters, wordLike) || (
+    neural.confidence >= 38 &&
+    words.length >= 2 &&
+    letters >= 6 &&
+    letterRatio >= 0.68
+  )
+  const strongLetterSequence = (
+    neural.confidence >= 64 &&
+    letters >= 4 &&
+    letterRatio >= 0.8 &&
+    words.length >= 1
+  )
+  const proseDominatesCandidateFormula = (
+    formulaSyntax &&
+    strongSentence &&
+    words.length >= 3 &&
+    letters >= 9 &&
+    letters >= digits * 2 &&
+    !/[√∫∑Σ∏Π∞^_≤≥≠≈]/u.test(normalized)
+  )
+  const safeCandidate = !formulaSyntax || proseDominatesCandidateFormula
+  const enoughTextEvidence = strongPersonalized || strongKnownWord || strongSentence || strongLetterSequence
+  const decisiveAutomaticMath = Boolean(
+    automatic && (
+      automatic.evidence?.math.decisiveStructure === true ||
+      hasDecisiveMathLayout(automatic.mathValue)
+    ),
+  )
+  const mayOverride = neuralTextMayOverrideAutomaticMode(neural, automatic, letters, wordLike)
+  const shouldUseText = safeCandidate && enoughTextEvidence && !decisiveAutomaticMath && (
+    automatic?.mode === 'text' || mayOverride || strongPersonalized
+  )
+  const reason: NeuralTextModeAssessment['reason'] = !safeCandidate
+    ? 'formula'
+    : strongPersonalized
+      ? 'personalized'
+      : strongSentence
+        ? 'sentence'
+        : strongKnownWord
+          ? 'known-word'
+          : strongLetterSequence
+            ? 'letter-sequence'
+            : 'insufficient'
+  return {
+    shouldUseText,
+    letters,
+    digits,
+    visibleCharacters: visible.length,
+    words: words.length,
+    letterRatio,
+    wordLike,
+    explicitFormulaSyntax: formulaSyntax,
+    reason,
+  }
+}

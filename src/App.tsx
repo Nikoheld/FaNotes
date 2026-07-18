@@ -24,8 +24,7 @@ import {
 } from './lib/recognition'
 import { containsGermanSharpS, isSupportedRecognitionLabel, normalizeGermanSharpS } from './lib/orthography'
 import {
-  hasStrongNeuralWordEvidence,
-  hasStrongPersonalizedTextEvidence,
+  assessNeuralTextModeCandidate,
 } from './lib/recognitionModeSelection'
 import { createStandardRecognitionSamples } from './lib/standardRecognition'
 import type { CanvasState, CategoryId, LabelDefinition, Sample, Stroke } from './types'
@@ -267,6 +266,7 @@ const App = () => {
   const [testStrokes, setTestStrokes] = useState<Stroke[]>([])
   const [recognitionMode, setRecognitionMode] = useState<RecognitionMode>('text')
   const [automaticRecognition, setAutomaticRecognition] = useState<AutomaticRecognitionResult | null>(null)
+  const automaticRecognitionRef = useRef<AutomaticRecognitionResult | null>(null)
   const [neuralTestResult, setNeuralTestResult] = useState<NeuralTestResult | null>(null)
   const [neuralTestText, setNeuralTestText] = useState('')
   const neuralRequestIdRef = useRef('')
@@ -450,6 +450,7 @@ const App = () => {
       correctedRecognitionInputRef.current = null
       setRecognitionTokens([])
       setMathLayoutAssignments([])
+      automaticRecognitionRef.current = null
       setAutomaticRecognition(null)
       setNeuralTestResult(null)
       setNeuralTestText('')
@@ -504,6 +505,7 @@ const App = () => {
       if (active) {
         recognitionFallbackRef.current = recognition.mode
         setRecognitionMode(recognition.mode)
+        automaticRecognitionRef.current = recognition
         setAutomaticRecognition(recognition)
         setRecognitionTokens(recognition.tokens)
         setMathLayoutAssignments(
@@ -562,34 +564,19 @@ const App = () => {
       .replace(/\s+([,.;:!?])/gu, '$1')
       .trim()
     if (!text) return
-    const visible = Array.from(text).filter((char) => !/\s/u.test(char))
-    const letters = visible.filter((char) => /^\p{L}$/u.test(char)).length
-    const words = text.match(getGlyphenWerkLanguage() === 'de' ? /[A-Za-zÄÖÜäöü]{2,}/gu : /[A-Za-z]{2,}/gu) ?? []
-    const letterRatio = letters / Math.max(1, visible.length)
-    const explicitMath = /[=+×÷√∫∑Σ∏Π∞^_]/u.test(text)
-    const strongKnownWord = hasStrongNeuralWordEvidence(
-      neuralTestResult,
-      letters,
-      words.length >= 1,
-    )
-    const strongPersonalizedText = hasStrongPersonalizedTextEvidence({
-      confidence: neuralTestResult.personalizedConfidence,
-      source: neuralTestResult.personalizedSource || undefined,
-      personalizedCharacters: neuralTestResult.personalizedCharacters,
-    }, letters, visible.length, explicitMath)
-    const sentenceLike = (
-      !explicitMath
-      && (neuralTestResult.confidence >= 38 || strongPersonalizedText)
-      && letterRatio >= 0.68
-      && (
-        strongPersonalizedText
-        || strongKnownWord
-        || (words.length >= 2 && letters >= 6)
-        || (words.length >= 1 && letters >= 9 && /[aeiouyäöü]/iu.test(text))
-      )
-    )
-    if (!sentenceLike) return
     const language = getGlyphenWerkLanguage()
+    const modeAssessment = assessNeuralTextModeCandidate(
+      text,
+      language,
+      neuralTestResult,
+      automaticRecognitionRef.current,
+      {
+        confidence: neuralTestResult.personalizedConfidence,
+        source: neuralTestResult.personalizedSource || undefined,
+        personalizedCharacters: neuralTestResult.personalizedCharacters,
+      },
+    )
+    if (!modeAssessment.shouldUseText) return
     const textTokens = recognizeExpression(
       testStrokes,
       recognitionModel,
@@ -597,7 +584,7 @@ const App = () => {
       'text',
       mathLayoutExamples,
       language,
-      visible.length,
+      modeAssessment.visibleCharacters,
       text,
     )
     recognitionFallbackRef.current = 'text'
@@ -615,17 +602,22 @@ const App = () => {
     setRecognitionTokens(textTokens)
     setMathLayoutAssignments([])
     setNeuralTestText(text)
-    setAutomaticRecognition((current) => ({
-      mode: 'text',
-      tokens: textTokens,
-      value: text,
-      textValue: text,
-      mathValue: current?.mathValue ?? '',
-      confidence: Math.max(neuralTestResult.confidence, current?.confidence ?? 0),
-      reason: neuralTestResult.lineCount > 1 ? 'neuronale Textzeilen' : 'neuronale Satzanalyse',
-      textScore: Math.max(current?.textScore ?? 0, (current?.mathScore ?? 0) + 1.2),
-      mathScore: current?.mathScore ?? 0,
-    }))
+    setAutomaticRecognition((current) => {
+      const next = {
+        mode: 'text' as const,
+        tokens: textTokens,
+        value: text,
+        textValue: text,
+        mathValue: current?.mathValue ?? '',
+        confidence: Math.max(neuralTestResult.confidence, current?.confidence ?? 0),
+        reason: neuralTestResult.lineCount > 1 ? 'neuronale Textzeilen' : 'neuronale Satzanalyse',
+        textScore: Math.max(current?.textScore ?? 0, (current?.mathScore ?? 0) + 1.2),
+        mathScore: current?.mathScore ?? 0,
+        evidence: current?.evidence,
+      }
+      automaticRecognitionRef.current = next
+      return next
+    })
   }, [labels, mathLayoutExamples, neuralTestResult, recognitionModel, testStrokes])
 
   useEffect(() => {
@@ -836,15 +828,20 @@ const App = () => {
       recognitionFallbackRef.current = 'text'
       setRecognitionMode('text')
       setMathLayoutAssignments([])
-      setAutomaticRecognition((current) => current ? {
-        ...current,
-        mode: 'text',
-        tokens: correctedTokens,
-        value: recognizedSentence(correctedTokens),
-        confidence: 100,
-        reason: 'bestätigte manuelle Korrektur',
-        textScore: Math.max(current.textScore, current.mathScore + 1),
-      } : current)
+      setAutomaticRecognition((current) => {
+        if (!current) return current
+        const next = {
+          ...current,
+          mode: 'text' as const,
+          tokens: correctedTokens,
+          value: recognizedSentence(correctedTokens),
+          confidence: 100,
+          reason: 'bestätigte manuelle Korrektur',
+          textScore: Math.max(current.textScore, current.mathScore + 1),
+        }
+        automaticRecognitionRef.current = next
+        return next
+      })
     } else if (recognitionMode === 'math') {
       setMathLayoutAssignments(suggestMathLayoutAssignments(correctedTokens, mathLayoutExamples))
     }

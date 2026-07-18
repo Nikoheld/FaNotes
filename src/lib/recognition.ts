@@ -3684,16 +3684,24 @@ const applyContextualReranking = (
     groups.set(key, group)
   })
 
-  const useLabel = (token: RecognitionToken, labelId: string) => {
+  const useLabel = (token: RecognitionToken, labelId: string, exactGeometry = false) => {
     if (token.labelId === labelId) return
     const alternative = token.alternatives.find((entry) => entry.labelId === labelId)
     const label = labels.find((entry) => entry.id === labelId)
-    if (!alternative || !label) return
+    if ((!alternative && !exactGeometry) || !label) return
     token.labelId = label.id
     token.char = label.char
     token.name = label.name
     token.latex = label.latex
-    token.confidence = Math.max(token.confidence, alternative.confidence)
+    token.confidence = Math.max(token.confidence, alternative?.confidence ?? 74)
+    if (!alternative) {
+      token.alternatives = [{
+        labelId: label.id,
+        char: label.char,
+        name: label.name,
+        confidence: token.confidence,
+      }, ...token.alternatives]
+    }
   }
 
   const isDigit = (token?: RecognitionToken) => Boolean(token?.labelId.startsWith('digit_'))
@@ -3873,17 +3881,49 @@ const applyContextualReranking = (
         Math.min(horizontalStroke.bounds.maxY, verticalStroke.bounds.maxY) -
         Math.max(horizontalStroke.bounds.minY, verticalStroke.bounds.minY) >= -0.006
       ) && (
-        horizontalCenterY >= verticalStroke.bounds.minY + verticalHeight * 0.22 &&
-        horizontalCenterY <= verticalStroke.bounds.maxY - verticalHeight * 0.22
+        horizontalCenterY >= verticalStroke.bounds.minY + verticalHeight * 0.38 &&
+        horizontalCenterY <= verticalStroke.bounds.maxY - verticalHeight * 0.32 &&
+        (horizontalStroke.bounds.maxX - horizontalStroke.bounds.minX) * SOURCE_WIDTH >=
+          verticalHeight * SOURCE_HEIGHT * 0.45
       ))
-      const plusAlternative = token.alternatives.find((entry) => entry.labelId === 'operator_plus')
       if (
         crossGeometry &&
-        plusAlternative &&
         isOperand(previous) &&
         isOperand(next)
       ) {
-        useLabel(token, 'operator_plus')
+        // A centred horizontal/vertical crossing between two operands is a
+        // structural plus even when the visual classifier's short candidate
+        // list initially contains only l/I/1.  Geometry and two-sided context
+        // are independent evidence and therefore may restore the missing
+        // operator candidate.
+        useLabel(token, 'operator_plus', true)
+      }
+
+      const horizontalBars = strokeShapes.filter((entry) => entry.aspect >= 2.2)
+      const parallelBarGeometry = Boolean(
+        token.strokes.length === 2 &&
+        horizontalBars.length === 2 &&
+        horizontalBars.every((entry, barIndex) => (
+          resemblesStraightHorizontalAccessoryStroke(token.strokes[barIndex], entry.bounds)
+        )) &&
+        (() => {
+          const [firstBar, secondBar] = horizontalBars
+          const firstWidth = firstBar.bounds.maxX - firstBar.bounds.minX
+          const secondWidth = secondBar.bounds.maxX - secondBar.bounds.minX
+          const overlap = Math.min(firstBar.bounds.maxX, secondBar.bounds.maxX) -
+            Math.max(firstBar.bounds.minX, secondBar.bounds.minX)
+          const firstCenterY = (firstBar.bounds.minY + firstBar.bounds.maxY) / 2
+          const secondCenterY = (secondBar.bounds.minY + secondBar.bounds.maxY) / 2
+          return overlap >= Math.min(firstWidth, secondWidth) * 0.54 &&
+            Math.abs(firstCenterY - secondCenterY) * SOURCE_HEIGHT >= 6
+        })()
+      )
+      if (parallelBarGeometry && isOperand(previous) && isOperand(next)) {
+        // The same protection applies to '=': two separated, overlapping
+        // horizontal bars between operands cannot be allowed to collapse to
+        // an o/e merely because the handwriting model omitted '=' from its
+        // first visual shortlist.
+        useLabel(token, 'relation_equal', true)
       }
 
       if (
@@ -6249,6 +6289,36 @@ export type AutomaticRecognitionResult = {
   reason: string
   textScore: number
   mathScore: number
+  evidence?: AutomaticRecognitionEvidence
+}
+
+export type AutomaticRecognitionEvidence = {
+  text: {
+    visibleCharacters: number
+    letters: number
+    digits: number
+    letterRatio: number
+    words: number
+    knownWords: number
+    knownWordRatio: number
+    baselineAlignment: number
+    lines: number
+    strongSentence: boolean
+  }
+  math: {
+    visibleCharacters: number
+    digits: number
+    operators: number
+    balancedOperators: number
+    strongSymbols: number
+    largeOperators: number
+    relations: number
+    fractions: number
+    layoutAssignments: number
+    lines: number
+    latexStructure: boolean
+    decisiveStructure: boolean
+  }
 }
 
 const AUTOMATIC_STRONG_MATH_IDS = new Set([
@@ -6288,9 +6358,115 @@ const AUTOMATIC_MATH_OPERATOR_IDS = new Set([
   'operator_caret',
   'operator_factorial',
   'operator_percent',
+  'operator_slash',
+  'decimal_point',
+  'decimal_comma',
   'relation_less',
   'relation_greater',
 ])
+
+type CertainRawInfixOperator = {
+  labelId: 'operator_plus' | 'relation_equal'
+  bounds: ReturnType<typeof strokeBounds>
+}
+
+/**
+ * Finds only high-precision operator shapes in the original pen strokes.
+ * This evidence is deliberately independent from glyph classification: a
+ * plus may otherwise lose its horizontal bar during clustering and appear as
+ * `l`, while an equals sign may initially resemble `e`/`o`.  Requiring two
+ * distinct, substantive bodies on the left and right prevents a crossbar in
+ * one connected word from becoming an infix operator.
+ */
+const certainRawInfixOperators = (strokes: Stroke[]): CertainRawInfixOperator[] => {
+  const entries = strokes.flatMap((stroke) => {
+    if (stroke.points.length < 2) return []
+    const bounds = strokeBounds(stroke)
+    const width = (bounds.maxX - bounds.minX) * SOURCE_WIDTH
+    const height = (bounds.maxY - bounds.minY) * SOURCE_HEIGHT
+    let horizontalTravel = 0
+    let verticalTravel = 0
+    stroke.points.slice(1).forEach((point, index) => {
+      horizontalTravel += Math.abs(point.x - stroke.points[index].x) * SOURCE_WIDTH
+      verticalTravel += Math.abs(point.y - stroke.points[index].y) * SOURCE_HEIGHT
+    })
+    return [{
+      stroke,
+      bounds,
+      width,
+      height,
+      horizontal: resemblesStraightHorizontalAccessoryStroke(stroke, bounds),
+      vertical: height >= 18 && width <= height * 0.52 &&
+        verticalTravel >= Math.max(12, horizontalTravel * 1.65),
+    }]
+  })
+  const bodyOnEachSide = (
+    bounds: ReturnType<typeof strokeBounds>,
+    operatorStrokes: Set<Stroke>,
+  ) => {
+    const centerX = (bounds.minX + bounds.maxX) / 2
+    const centerY = (bounds.minY + bounds.maxY) / 2
+    const isBody = (entry: (typeof entries)[number]) => (
+      !operatorStrokes.has(entry.stroke) &&
+      (entry.width >= 9 || entry.height >= 18) &&
+      Math.abs((entry.bounds.minY + entry.bounds.maxY) / 2 - centerY) <= 0.16
+    )
+    const left = entries.some((entry) => isBody(entry) && entry.bounds.maxX <= centerX - 0.008)
+    const right = entries.some((entry) => isBody(entry) && entry.bounds.minX >= centerX + 0.008)
+    return left && right
+  }
+  const result: CertainRawInfixOperator[] = []
+  entries.forEach((horizontal, horizontalIndex) => {
+    if (!horizontal.horizontal) return
+    entries.forEach((vertical, verticalIndex) => {
+      if (verticalIndex === horizontalIndex || !vertical.vertical) return
+      const bounds = combinedBounds(horizontal.bounds, vertical.bounds)
+      const horizontalCenterY = (horizontal.bounds.minY + horizontal.bounds.maxY) / 2
+      const verticalHeight = vertical.bounds.maxY - vertical.bounds.minY
+      const overlapsX = Math.min(horizontal.bounds.maxX, vertical.bounds.maxX) -
+        Math.max(horizontal.bounds.minX, vertical.bounds.minX) >= -0.006
+      const overlapsY = Math.min(horizontal.bounds.maxY, vertical.bounds.maxY) -
+        Math.max(horizontal.bounds.minY, vertical.bounds.minY) >= -0.006
+      const centered = horizontalCenterY >= vertical.bounds.minY + verticalHeight * 0.38 &&
+        horizontalCenterY <= vertical.bounds.maxY - verticalHeight * 0.32
+      const balancedArms = horizontal.width >= vertical.height * 0.45
+      if (
+        overlapsX && overlapsY && centered && balancedArms &&
+        bodyOnEachSide(bounds, new Set([horizontal.stroke, vertical.stroke]))
+      ) {
+        result.push({ labelId: 'operator_plus', bounds })
+      }
+    })
+  })
+  entries.forEach((first, firstIndex) => {
+    if (!first.horizontal) return
+    entries.slice(firstIndex + 1).forEach((second) => {
+      if (!second.horizontal) return
+      const overlap = Math.min(first.bounds.maxX, second.bounds.maxX) -
+        Math.max(first.bounds.minX, second.bounds.minX)
+      const firstWidth = first.bounds.maxX - first.bounds.minX
+      const secondWidth = second.bounds.maxX - second.bounds.minX
+      const centerDistance = Math.abs(
+        (first.bounds.minY + first.bounds.maxY) / 2 -
+        (second.bounds.minY + second.bounds.maxY) / 2,
+      ) * SOURCE_HEIGHT
+      const similarWidths = Math.min(first.width, second.width) >= Math.max(first.width, second.width) * 0.56
+      const bounds = combinedBounds(first.bounds, second.bounds)
+      if (
+        overlap >= Math.min(firstWidth, secondWidth) * 0.54 &&
+        similarWidths && centerDistance >= 6 && centerDistance <= 54 &&
+        bodyOnEachSide(bounds, new Set([first.stroke, second.stroke]))
+      ) {
+        result.push({ labelId: 'relation_equal', bounds })
+      }
+    })
+  })
+  return result.filter((candidate, index, candidates) => candidates.findIndex((other) => (
+    other.labelId === candidate.labelId &&
+    Math.abs(other.bounds.minX - candidate.bounds.minX) < 0.004 &&
+    Math.abs(other.bounds.maxX - candidate.bounds.maxX) < 0.004
+  )) === index)
+}
 
 const averageTokenConfidence = (tokens: RecognitionToken[]) => {
   const visible = tokens.filter((token) => !token.isLayout)
@@ -6363,7 +6539,42 @@ export const recognizeAutomaticExpression = (
       }
     })
   }
+  const rawInfixOperators = certainRawInfixOperators(strokes)
   const mathTokens = recognizeMathDocument(strokes, model, labels, layoutExamples, language)
+  rawInfixOperators.forEach((operator) => {
+    const centerX = (operator.bounds.minX + operator.bounds.maxX) / 2
+    const centerY = (operator.bounds.minY + operator.bounds.maxY) / 2
+    const token = mathTokens
+      .filter((candidate) => !candidate.isLayout)
+      .map((candidate) => ({
+        candidate,
+        distance: Math.abs(candidate.bbox[0] + candidate.bbox[2] / 2 - centerX) * SOURCE_WIDTH +
+          Math.abs(candidate.bbox[1] + candidate.bbox[3] / 2 - centerY) * SOURCE_HEIGHT * 0.35,
+      }))
+      .filter(({ candidate }) => (
+        candidate.bbox[0] <= operator.bounds.maxX + 0.015 &&
+        candidate.bbox[0] + candidate.bbox[2] >= operator.bounds.minX - 0.015 &&
+        candidate.bbox[1] <= operator.bounds.maxY + 0.025 &&
+        candidate.bbox[1] + candidate.bbox[3] >= operator.bounds.minY - 0.025
+      ))
+      .sort((first, second) => first.distance - second.distance)[0]?.candidate
+    const label = labels.find((entry) => entry.id === operator.labelId)
+    if (!token || !label) return
+    const alternative = token.alternatives.find((entry) => entry.labelId === label.id)
+    token.labelId = label.id
+    token.char = label.char
+    token.name = label.name
+    token.latex = label.latex
+    token.confidence = Math.max(token.confidence, alternative?.confidence ?? 74)
+    if (!alternative) {
+      token.alternatives = [{
+        labelId: label.id,
+        char: label.char,
+        name: label.name,
+        confidence: token.confidence,
+      }, ...token.alternatives]
+    }
+  })
   const textValue = recognizedSentence(textTokens).trim()
   const mathValue = recognizedLatex(mathTokens, layoutExamples).trim()
   const visibleText = textTokens.filter((token) => !token.isLayout)
@@ -6384,6 +6595,13 @@ export const recognizeAutomaticExpression = (
     textValue.match(language === 'de' ? /[a-zäöü]{2,}/giu : /[a-z]{2,}/giu) ?? []
   )
   const knownTextWords = lexicalTextWords.filter((word) => lexicalWordEvidence(word, language).knownWord)
+  const knownTextWordRatio = knownTextWords.length / Math.max(1, lexicalTextWords.length)
+  const hasStrongSingleWord = (
+    lexicalTextWords.length === 1 &&
+    knownTextWords.length === 1 &&
+    textLetters >= 3 &&
+    textLetterRatio >= 0.8
+  )
   const longLetterSequence = (
     textLetters >= 8 &&
     textLetterRatio >= 0.78 &&
@@ -6393,7 +6611,8 @@ export const recognizeAutomaticExpression = (
     textLetters >= 5 &&
     textLetterRatio >= 0.68 &&
     (
-      knownTextWords.length >= 1 ||
+      knownTextWords.length >= 2 ||
+      (knownTextWords.length >= 1 && knownTextWordRatio >= 0.5) ||
       (wordParts.length >= 2 && textLetters >= 8 && /[aeiouyäöü]/iu.test(textValue)) ||
       longLetterSequence
     )
@@ -6416,6 +6635,97 @@ export const recognizeAutomaticExpression = (
   const fractionParts = mathTokens.filter((token) => token.isLayout || token.layout?.type === 'fraction').length
   const layoutAssignments = suggestMathLayoutAssignments(mathTokens, layoutExamples)
   const hasLatexStructure = /\\(?:frac|sqrt|int|iint|iiint|oint|sum|prod|partial|nabla|infty|bigcup|bigcap)\b|[_^]\{/u.test(mathValue)
+  const mathDigits = visibleMath.filter((token) => token.labelId.startsWith('digit_')).length
+  const largeMathOperators = visibleMath.filter((token) => LARGE_OPERATOR_IDS.has(token.labelId))
+  const relationTokens = visibleMath.filter((token) => (
+    token.labelId.startsWith('relation_') ||
+    token.labelId === 'arrow_implies' ||
+    token.labelId === 'arrow_iff'
+  ))
+  const mathLineCount = Math.max(1, visibleMath.filter((token) => token.lineBreakBefore).length + 1)
+  const textLineCount = Math.max(1, visibleText.filter((token) => token.lineBreakBefore).length + 1)
+  const substantialTextTokens = visibleText.filter((token) => (
+    /^(?:\p{L}|\d)$/u.test(token.char) && token.bbox[3] >= 0.012
+  ))
+  const textReferenceHeight = Math.max(0.02, median(substantialTextTokens.map((token) => token.bbox[3])))
+  const textBaseline = median(substantialTextTokens.map((token) => token.bbox[1] + token.bbox[3]))
+  const baselineAlignedTextTokens = substantialTextTokens.filter((token) => (
+    Math.abs(token.bbox[1] + token.bbox[3] - textBaseline) <= textReferenceHeight * 0.34
+  )).length
+  const textBaselineAlignment = baselineAlignedTextTokens / Math.max(1, substantialTextTokens.length)
+  const dominantProseText = (
+    textLetters >= 5 &&
+    textLetterRatio >= 0.68 &&
+    textBaselineAlignment >= 0.7 &&
+    visibleText.length >= visibleMath.length + 2 &&
+    lexicalTextWords.some((word) => Array.from(word).length >= 4)
+  )
+  const mathOperand = (token: RecognitionToken) => (
+    token.labelId.startsWith('digit_') ||
+    token.labelId.startsWith('latin_') ||
+    token.labelId.startsWith('german_') ||
+    token.labelId.startsWith('greek_') ||
+    token.labelId === 'symbol_infinity'
+  )
+  const verticallyCompatible = (first: RecognitionToken, second: RecognitionToken) => {
+    const overlap = Math.min(first.bbox[1] + first.bbox[3], second.bbox[1] + second.bbox[3]) -
+      Math.max(first.bbox[1], second.bbox[1])
+    return overlap >= Math.min(first.bbox[3], second.bbox[3]) * 0.2
+  }
+  const balancedMathOperators = visibleMath.filter((operator) => {
+    if (!AUTOMATIC_MATH_OPERATOR_IDS.has(operator.labelId) && !operator.labelId.startsWith('relation_')) return false
+    const center = operator.bbox[0] + operator.bbox[2] / 2
+    const numericSeparator = operator.labelId === 'decimal_point' || operator.labelId === 'decimal_comma'
+    const left = visibleMath.some((candidate) => (
+      candidate !== operator &&
+      mathOperand(candidate) &&
+      candidate.bbox[0] + candidate.bbox[2] <= center &&
+      (verticallyCompatible(operator, candidate) || (numericSeparator && candidate.labelId.startsWith('digit_')))
+    ))
+    const right = visibleMath.some((candidate) => (
+      candidate !== operator &&
+      mathOperand(candidate) &&
+      candidate.bbox[0] >= center &&
+      (verticallyCompatible(operator, candidate) || (numericSeparator && candidate.labelId.startsWith('digit_')))
+    ))
+    return left && right
+  })
+  const hasRadicalStructure = visibleMath.some((token) => token.labelId === 'operator_sqrt') && visibleMath.length >= 2
+  // Suggested assignments alone are intentionally not decisive: ascenders,
+  // i-dots, and uneven text baselines can create weak script suggestions.
+  // The formatted math path must actually accept a script relation before it
+  // is allowed to block a complete text-line result.
+  const hasScriptStructure = /[_^]\{/u.test(mathValue)
+  const hasLimitedLargeOperator = largeMathOperators.length > 0 && layoutAssignments.some((assignment) => (
+    assignment.role === 'upper_limit' || assignment.role === 'lower_limit'
+  ))
+  const hasStandaloneLargeOperator = (
+    largeMathOperators.length === 1 &&
+    visibleMath.length === 1 &&
+    visibleText.length <= 2 &&
+    !visibleMath.some((token) => {
+      const cluster = clusterFromStrokes(token.strokes)
+      return Boolean(cluster && resemblesUppercaseT(cluster))
+    })
+  )
+  const hasMultilineMathStructure = mathLineCount > 1 && (
+    relationTokens.length > 0 || mathOperators.length > 0 || strongMathTokens.length > 0
+  )
+  const hasHardMathStructure = (
+    fractionParts > 0 ||
+    hasRadicalStructure ||
+    hasDecisiveMathRelation ||
+    rawInfixOperators.length > 0 ||
+    hasScriptStructure ||
+    hasLimitedLargeOperator ||
+    hasStandaloneLargeOperator ||
+    hasMultilineMathStructure
+  )
+  const hasBalancedNumericOperator = (
+    balancedMathOperators.length > 0 && mathDigits > 0 && !dominantProseText
+  )
+  const hasDecisiveMathStructure = hasHardMathStructure || hasBalancedNumericOperator
+  const strongProseText = strongSentenceText || dominantProseText
   const unambiguousUppercaseT = (
     visibleMath.length === 1 &&
     visibleMath[0].strokes.length === 2 &&
@@ -6444,6 +6754,10 @@ export const recognizeAutomaticExpression = (
     textScore += 1.65
     textReasons.push('zusammenhängende Buchstaben')
   }
+  if (hasStrongSingleWord) {
+    textScore += 1.25
+    textReasons.unshift('bekanntes vollständiges Wort')
+  }
   if (exactIncrementalTextSequence) {
     // Live handwriting is evaluated after every pen lift.  When a new glyph
     // is appended to an already stable text sequence, the previous length is
@@ -6471,7 +6785,10 @@ export const recognizeAutomaticExpression = (
     mathScore -= 2.8
     textReasons.unshift('eindeutige T-Geometrie')
   }
-  if (wordParts.length >= 2 || /\s/u.test(textValue)) {
+  if (
+    wordParts.length >= 2 ||
+    (/\s/u.test(textValue) && textLetters >= 3 && textLetterRatio >= 0.5)
+  ) {
     textScore += 1.15
     textReasons.push('Wortabstände')
   } else if (wordParts.some((word) => word.length >= 4)) {
@@ -6491,44 +6808,58 @@ export const recognizeAutomaticExpression = (
         : longLetterSequence ? 'lange Buchstabenfolge' : 'mehrteiliger Textsatz',
     )
   }
+  if (textLetters >= 3 && textBaselineAlignment >= 0.78) {
+    textScore += 0.48
+    textReasons.push('gemeinsame Textgrundlinie')
+  }
 
   if (fractionParts) {
     mathScore += 3.15
     mathReasons.push('Bruchanordnung')
   }
+  if (rawInfixOperators.length) {
+    mathScore += Math.min(4.2, 3.15 + (rawInfixOperators.length - 1) * 0.35)
+    mathReasons.unshift('eindeutiger Operator zwischen getrennten Operanden')
+  }
   if (hasLatexStructure) {
-    mathScore += strongSentenceText && !fractionParts && !hasDecisiveMathRelation ? 0.45 : 2.65
+    mathScore += strongProseText && !hasHardMathStructure ? 0.45 : 2.65
     mathReasons.push('Formelstruktur')
   }
   if (layoutAssignments.length) {
-    mathScore += strongSentenceText && !fractionParts && !hasDecisiveMathRelation
+    mathScore += strongProseText && !hasHardMathStructure
       ? Math.min(0.42, layoutAssignments.length * 0.08)
       : Math.min(2.2, 0.9 + layoutAssignments.length * 0.42)
     mathReasons.push('Hoch-/Tiefstellung oder Grenzen')
   }
   if (strongMathTokens.length) {
-    mathScore += strongSentenceText && !fractionParts && !hasDecisiveMathRelation
+    mathScore += strongProseText && !hasHardMathStructure
       ? Math.min(0.58, strongMathTokens.length * 0.16)
       : Math.min(2.8, 1.35 + strongMathTokens.length * 0.48)
     mathReasons.push('mathematische Symbole')
   } else if (strongMathAlternatives.length) {
-    mathScore += strongSentenceText
+    mathScore += strongProseText
       ? Math.min(0.24, strongMathAlternatives.length * 0.05)
       : Math.min(1.45, strongMathAlternatives.length * 0.42)
     mathReasons.push('wahrscheinliche mathematische Symbole')
   }
   if (mathOperators.length && (visibleMath.some((token) => token.labelId.startsWith('digit_')) || visibleMath.length >= 3)) {
-    mathScore += strongSentenceText && !fractionParts && !hasDecisiveMathRelation
+    mathScore += strongProseText && !hasHardMathStructure
       ? Math.min(0.34, mathOperators.length * 0.08)
       : Math.min(1.65, 0.72 + mathOperators.length * 0.28)
     mathReasons.push('Operatorfolge')
+  }
+  if (balancedMathOperators.length) {
+    mathScore += strongProseText && !hasHardMathStructure
+      ? Math.min(0.28, balancedMathOperators.length * 0.08)
+      : Math.min(1.55, 0.82 + balancedMathOperators.length * 0.3)
+    mathReasons.unshift('Operator zwischen Operanden')
   }
   if (visibleMath.length > 0 && visibleMath.every((token) => token.labelId.startsWith('digit_'))) {
     mathScore += 0.72
     mathReasons.push('Zahlenfolge')
   }
   if (textDigits > textLetters && mathOperators.length) textScore -= 0.45
-  if (strongSentenceText && !fractionParts && !hasDecisiveMathRelation) mathScore -= 1.15
+  if (strongProseText && !hasDecisiveMathStructure) mathScore -= 1.15
   if (
     exactIncrementalTextSequence &&
     visibleMath.length < visibleText.length &&
@@ -6562,5 +6893,33 @@ export const recognizeAutomaticExpression = (
     reason,
     textScore: Math.round(textScore * 100) / 100,
     mathScore: Math.round(mathScore * 100) / 100,
+    evidence: {
+      text: {
+        visibleCharacters: visibleText.length,
+        letters: textLetters,
+        digits: textDigits,
+        letterRatio: Math.round(textLetterRatio * 1_000) / 1_000,
+        words: lexicalTextWords.length,
+        knownWords: knownTextWords.length,
+        knownWordRatio: Math.round(knownTextWordRatio * 1_000) / 1_000,
+        baselineAlignment: Math.round(textBaselineAlignment * 1_000) / 1_000,
+        lines: textLineCount,
+        strongSentence: strongSentenceText,
+      },
+      math: {
+        visibleCharacters: visibleMath.length,
+        digits: mathDigits,
+        operators: mathOperators.length,
+        balancedOperators: balancedMathOperators.length,
+        strongSymbols: strongMathTokens.length,
+        largeOperators: largeMathOperators.length,
+        relations: relationTokens.length,
+        fractions: fractionParts,
+        layoutAssignments: layoutAssignments.length,
+        lines: mathLineCount,
+        latexStructure: hasLatexStructure,
+        decisiveStructure: hasDecisiveMathStructure,
+      },
+    },
   }
 }

@@ -132,6 +132,14 @@ try {
     result.automaticTextCases.every((entry) => entry.mode === 'text'),
     `Deutsche und englische Textfolgen werden fälschlich als Mathematik erkannt: ${JSON.stringify(result.automaticTextCases)}`,
   )
+  assert.ok(
+    result.automaticTextInkCases.every((entry) => entry.mode === 'text'),
+    `Text mit Zahlen oder mehreren physischen Zeilen wird fälschlich als Mathematik erkannt: ${JSON.stringify(result.automaticTextInkCases)}`,
+  )
+  assert.ok(
+    result.automaticMathModeMatrix.every((entry) => entry.mode === 'math'),
+    `Echte mathematische Strukturen werden fälschlich als Text erkannt: ${JSON.stringify(result.automaticMathModeMatrix)}`,
+  )
   assert.deepEqual(
     result.incrementalTextCases.map((entry) => ({ mode: entry.mode, value: entry.value.toLocaleLowerCase('de') })),
     result.incrementalTextCases.map((entry) => ({ mode: 'text', value: entry.expected })),

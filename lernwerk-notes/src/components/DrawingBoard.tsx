@@ -49,8 +49,8 @@ import { groupMathInkLines, selectMathInkAtPoint } from '../lib/mathInkSelection
 import type { MathCheckResult } from '../lib/mathChecker'
 import { inspectMathInputSyntax } from '../lib/mathSolverInput'
 import {
+  assessNeuralTextModeCandidate,
   hasDecisiveMathLayout,
-  neuralTextMayOverrideAutomaticMode,
 } from '../lib/recognitionModeSelection'
 import type { MathSolverAction, MathSolverResult } from '../lib/mathSolver'
 import { detectScribbleErase } from '../lib/scribbleErase'
@@ -2167,24 +2167,18 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
           )
           if (runId !== recognitionRunRef.current) return
           const compact = neural.text.replace(/\s/gu, '')
-          const letters = [...compact].filter((character) => /^\p{L}$/u.test(character)).length
-          const wordLike = letters >= Math.max(2, Math.ceil(compact.length * 0.55))
+          const neuralModeAssessment = assessNeuralTextModeCandidate(
+            neural.text,
+            settings.recognitionLanguage,
+            neural,
+            automaticDetection,
+          )
+          const letters = neuralModeAssessment.letters
           const hasPersonalTextEvidence = recognized.some((token) => (
             (token.personalSupport ?? 0) > 0 ||
             token.alternatives.some((alternative) => (alternative.personalSupport ?? 0) > 0)
           ))
-          const strongAutomaticText = (
-            neural.confidence >= 54
-            && letters >= 3
-            && wordLike
-            && !/[=+×÷√∫Σ]/u.test(neural.text)
-            && neuralTextMayOverrideAutomaticMode(
-              neural,
-              automaticDetection,
-              letters,
-              wordLike,
-            )
-          )
+          const strongAutomaticText = neuralModeAssessment.shouldUseText
           const usableExplicitText = requestedMode === 'text'
             && (hasPersonalTextEvidence || neural.confidence >= 32)
             && (compact.length >= 2 || letters >= 1)
@@ -2363,17 +2357,22 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
               SOURCE_WIDTH,
               sourceHeight,
             )
-            const compact = neural.text.replace(/\s/gu, '')
-            const letters = [...compact].filter((character) => /^\p{L}$/u.test(character)).length
-            const wordLike = letters >= Math.max(2, Math.ceil(compact.length * 0.55))
+            const neuralModeAssessment = assessNeuralTextModeCandidate(
+              neural.text,
+              settings.recognitionLanguage,
+              neural,
+              automatic,
+            )
+            const letters = neuralModeAssessment.letters
             const minimumConfidence = backgroundMode === 'text'
               ? hasPersonalTextEvidence ? 0 : 32
               : 54
             if (
               neural.confidence >= minimumConfidence
               && letters >= (backgroundMode === 'text' ? 1 : 3)
-              && wordLike
-              && !/[=+×÷√∫Σ]/u.test(neural.text)
+              && neuralModeAssessment.wordLike
+              && !neuralModeAssessment.explicitFormulaSyntax
+              && (backgroundMode === 'text' || neuralModeAssessment.shouldUseText)
             ) {
               const { recognizePersonalizedTextLine } = await import('../lib/personalizedLineRecognition')
               const personalized = await recognizePersonalizedTextLine(
