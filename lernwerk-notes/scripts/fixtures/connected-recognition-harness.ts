@@ -317,6 +317,14 @@ const run = async () => {
     { expected: 'mathe ist toll', words: ['mathe', 'ist', 'toll'], language: 'de' as const },
     { expected: 'hello math', words: ['hello', 'math'], language: 'en' as const },
     { expected: 'hello computer', words: ['hello', 'computer'], language: 'en' as const },
+    { expected: 'this is a test', words: ['this', 'is', 'a', 'test'], language: 'en' as const },
+    { expected: 'one plus one', words: ['one', 'plus', 'one'], language: 'en' as const },
+    { expected: 'i am at home', words: ['i', 'am', 'at', 'home'], language: 'en' as const },
+    { expected: 'this is normal', words: ['this', 'is', 'normal'], language: 'en' as const },
+    { expected: 'sum is a term', words: ['sum', 'is', 'a', 'term'], language: 'en' as const },
+    { expected: 'no math here', words: ['no', 'math', 'here'], language: 'en' as const },
+    { expected: 'hello there', words: ['hello', 'there'], language: 'en' as const },
+    { expected: 'mathe ist normal', words: ['mathe', 'ist', 'normal'], language: 'de' as const },
   ].map((test, index) => {
     const recognition = recognizeAutomaticExpression(
       connectedSentence(test.words, .0018 + index * .00017),
@@ -334,6 +342,43 @@ const run = async () => {
       textScore: recognition.textScore,
       mathScore: recognition.mathScore,
       textValue: recognition.textValue,
+    }
+  })
+  const automaticTextInkCases = [
+    {
+      expected: 'sentence containing a number',
+      language: 'en' as const,
+      strokes: [
+        ...connectedSentence(['one', 'plus'], .0024),
+        ...mathAt('digit_2', .58, .3, .052, .16, .00011),
+      ],
+    },
+    {
+      expected: 'two physical text lines',
+      language: 'en' as const,
+      strokes: [
+        ...connectedSentence(['hello', 'there'], .0022),
+        ...translatedStrokes(connectedSentence(['this', 'is', 'normal'], .00245), 0, .27),
+      ],
+    },
+  ].map((test) => {
+    const recognition = recognizeAutomaticExpression(
+      test.strokes,
+      baselineModel,
+      BASE_CATALOG,
+      [],
+      test.language,
+      'math',
+    )
+    return {
+      expected: test.expected,
+      mode: recognition.mode,
+      value: recognition.value,
+      textValue: recognition.textValue,
+      mathValue: recognition.mathValue,
+      reason: recognition.reason,
+      textScore: recognition.textScore,
+      mathScore: recognition.mathScore,
     }
   })
   const incrementalTextCases = ['t', 'te', 'tes', 'test'].map((expected, index) => {
@@ -803,20 +848,22 @@ const run = async () => {
       'de',
     ).filter((token) => !token.isLayout).map((token) => token.labelId),
   }))
-  const radicalTokens = recognizeExpression([
+  const radicalStrokes = [
     ...mathAt('operator_sqrt', .18, .2, .22, .28, .00027),
     ...mathAt('digit_7', .29, .25, .045, .14, .00019),
-  ], baselineModel, BASE_CATALOG, 'math', [], 'de')
+  ]
+  const radicalTokens = recognizeExpression(radicalStrokes, baselineModel, BASE_CATALOG, 'math', [], 'de')
   const fractionBar: Stroke = {
     baseWidth: 3.9,
     pressureEnabled: true,
     points: [point(.405, .49, 0), point(.565, .489, 1)],
   }
-  const fractionTokens = recognizeExpression([
+  const fractionStrokes = [
     ...mathAt('digit_2', .455, .31, .045, .12, .00017),
     fractionBar,
     ...mathAt('digit_3', .455, .55, .045, .12, .00013),
-  ], baselineModel, BASE_CATALOG, 'math', [], 'de')
+  ]
+  const fractionTokens = recognizeExpression(fractionStrokes, baselineModel, BASE_CATALOG, 'math', [], 'de')
   const personalModel = await buildRecognitionModel([
     sampleFor('t', 0), sampleFor('e', 0), sampleFor('s', 0),
     ...standard,
@@ -1178,6 +1225,88 @@ const run = async () => {
     [],
     'de',
   )
+  const automaticMathModeMatrix = [
+    {
+      expected: 'single digit',
+      strokes: mathAt('digit_7', .38, .27, .075, .22, .00013),
+    },
+    {
+      expected: 'addition',
+      strokes: [
+        ...mathAt('digit_1', .22, .3, .06, .18),
+        ...mathAt('operator_plus', .34, .3, .06, .18),
+        ...mathAt('digit_2', .46, .3, .06, .18),
+      ],
+    },
+    {
+      expected: 'subtraction',
+      strokes: [
+        ...mathAt('digit_2', .22, .3, .06, .18),
+        ...mathAt('operator_minus', .34, .3, .06, .18),
+        ...mathAt('digit_3', .46, .3, .06, .18),
+      ],
+    },
+    {
+      expected: 'multiplication',
+      strokes: [
+        ...mathAt('digit_2', .22, .3, .06, .18),
+        ...mathAt('operator_multiply', .34, .3, .06, .18),
+        ...mathAt('digit_3', .46, .3, .06, .18),
+      ],
+    },
+    {
+      expected: 'letter variables with addition',
+      strokes: [
+        ...translatedStrokes(isolatedLetter('a', .00013), -.16, 0),
+        ...mathAt('operator_plus', .34, .3, .06, .18),
+        ...translatedStrokes(isolatedLetter('c', .00011), .08, 0),
+      ],
+    },
+    {
+      expected: 'letter variables with relation',
+      strokes: [
+        ...translatedStrokes(isolatedLetter('m', .00013), -.16, 0),
+        ...mathAt('relation_equal', .34, .3, .06, .18),
+        ...translatedStrokes(isolatedLetter('n', .00011), .08, 0),
+      ],
+    },
+    { expected: 'equation', strokes: [
+      ...mathAt('digit_2', .22, .3, .06, .18),
+      ...mathAt('relation_equal', .34, .3, .06, .18),
+      ...mathAt('digit_3', .46, .3, .06, .18),
+    ] },
+    { expected: 'radical', strokes: radicalStrokes },
+    { expected: 'fraction', strokes: fractionStrokes },
+    { expected: 'double integral', strokes: realDoubleIntegral },
+    { expected: 'single integral', strokes: mathAt('operator_integral', .38, .25, .065, .24, .00012) },
+    { expected: 'single sum', strokes: mathAt('operator_sum', .38, .25, .07, .24, .00012) },
+    { expected: 'single product', strokes: mathAt('operator_product', .38, .25, .07, .24, .00012) },
+    { expected: 'integral with limits', strokes: integralWithLimits },
+    { expected: 'sum with limits', strokes: sumWithLimits },
+    { expected: 'product with limits', strokes: productWithLimits },
+    { expected: 'triple integral', strokes: tripleIntegral },
+    { expected: 'superscript and subscript', strokes: ordinaryScripts },
+    { expected: 'multiple equation lines', strokes: multiLineMathStrokes },
+  ].map((test) => {
+    const recognition = recognizeAutomaticExpression(
+      test.strokes,
+      baselineModel,
+      BASE_CATALOG,
+      [],
+      'de',
+      'text',
+    )
+    return {
+      expected: test.expected,
+      mode: recognition.mode,
+      value: recognition.value,
+      textValue: recognition.textValue,
+      mathValue: recognition.mathValue,
+      reason: recognition.reason,
+      textScore: recognition.textScore,
+      mathScore: recognition.mathScore,
+    }
+  })
   return {
     baseClusterCount: baseClusters.length,
     hypothesisSizes: hypotheses.map((entry) => entry.length),
@@ -1256,6 +1385,8 @@ const run = async () => {
       textValue: baselineDottedSentenceAutomatic.textValue,
     },
     automaticTextCases,
+    automaticTextInkCases,
+    automaticMathModeMatrix,
     incrementalTextCases,
     rapidClosePairs,
     continuousGuidedPairs,

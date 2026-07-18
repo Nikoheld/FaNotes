@@ -1,5 +1,13 @@
 # Änderungsverlauf
 
+## 2026.7.4-beta.3
+
+- FaNotes und das eingebettete GlyphenWerk verwenden jetzt dieselbe Text-/Mathematikentscheidung für die geometrische Basiserkennung, die neuronale Zeile und persönliche Trainingsbelege; widersprüchliche Teilentscheidungen zwischen Test-Tab, Notizseite und unsichtbarem Suchtranskript sind damit entfernt
+- Text wird als vollständige Zeile statt als Folge isolierter Symbolstimmen bewertet: Buchstabenanteil, echte Wörter, Wortabstände, gemeinsame Grundlinie, mehrere physische Zeilen und eingemischte Zahlen stützen normale deutsche und englische Sätze, während bloss vorhandener Leerraum nicht mehr pauschal als Textbeleg zählt
+- Brüche, Wurzeln, Gleichheits- und Relationszeichen, Hoch-/Tiefstellungen, Integrale, Summen und Produkte mit Grenzen sowie mehrzeilige Gleichungen erhalten explizite harte Strukturevidenz; eine plausible OCR-Textzeile darf diese mathematischen Anordnungen auch bei knappem Scoreabstand nicht überschreiben
+- gekreuzte Plus-Striche und zwei parallele Gleichheitsstriche werden zwischen getrennten Operanden zusätzlich direkt aus der ursprünglichen Stiftgeometrie rekonstruiert; dadurch bleiben unter anderem `a + c` und `m = n` Mathematik, selbst wenn die erste Einzelglyphenliste den mittleren Operator nur als `l`, `e` oder `o` führt
+- die erweiterte End-to-End-Matrix prüft Text in Deutsch und Englisch, Text mit Zahlen, mehrere Textzeilen, einzelne Ziffern, vier Grundoperatoren, Variablenformeln, Wurzeln, Brüche, Einzel-/Doppel-/Dreifachintegrale, Summen, Produkte, Grenzen, Indizes und mehrere Gleichungszeilen; Typprüfung, gemeinsame Konfliktregression und der sichtbare GlyphenWerk-Browserpfad bestehen mit 0 Byte Swap
+
 ## 2026.7.4-beta.2
 
 - die Zwei-Buchstaben-Segmentierung behandelt den durchgehenden Hauptzug und später gesetzte Punkte, Querstriche, Diagonalen oder zweite Stämme getrennt: nur der echte Schreibkörper wird räumlich geteilt, während jeder abgesetzte Originalstrich vollständig einem der beiden Buchstaben gehört

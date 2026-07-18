@@ -22,6 +22,7 @@ try {
     isExtendedNeuralContextWord,
   } = await server.ssrLoadModule('/src/lib/neuralWordContext.ts')
   const {
+    assessNeuralTextModeCandidate,
     hasDecisiveMathLayout,
     hasStrongPersonalizedTextEvidence,
     hasStrongNeuralWordEvidence,
@@ -938,6 +939,10 @@ try {
   )
   assert.equal(hasDecisiveMathLayout('\\frac{2}{3}'), true)
   assert.equal(hasDecisiveMathLayout('2+2=4'), true)
+  assert.equal(hasDecisiveMathLayout('x + y'), true)
+  assert.equal(hasDecisiveMathLayout('\\int_{1}^{5} x'), true)
+  assert.equal(hasDecisiveMathLayout('2_{4}^{3}'), true)
+  assert.equal(hasDecisiveMathLayout('\\int \\int'), false)
   assert.equal(
     hasStrongNeuralWordEvidence(
       { ...neuralResult('Test', 72), wordCount: 1, knownWordRatio: 1 },
@@ -1015,6 +1020,86 @@ try {
     ),
     false,
     'Ein unsicheres Einzelwort reicht nicht aus, um eine deutliche Modusentscheidung umzuwerfen.',
+  )
+  assert.equal(
+    assessNeuralTextModeCandidate(
+      'Hallo das ist ein Test',
+      'de',
+      strongSentence,
+      falselyMathematicalSentence,
+    ).shouldUseText,
+    true,
+    'Die gemeinsame FaNotes-/GlyphenWerk-Entscheidung muss einen sicheren Satz vor falschen Integralhypothesen schützen.',
+  )
+  assert.equal(
+    assessNeuralTextModeCandidate(
+      '2 + 2 = 4',
+      'de',
+      { ...neuralResult('2 + 2 = 4', 98), wordCount: 0, knownWordRatio: 0 },
+      null,
+    ).shouldUseText,
+    false,
+    'Eine vom Zeilenmodell lesbare Formel darf nicht wegen hoher OCR-Sicherheit zu Text werden.',
+  )
+  const ambiguousFraction = {
+    ...falselyMathematicalSentence,
+    mathValue: '\\frac{2}{3}',
+    value: '\\frac{2}{3}',
+    textScore: 7.6,
+    mathScore: 7.8,
+    evidence: {
+      text: {
+        visibleCharacters: 5, letters: 5, digits: 0, letterRatio: 1, words: 1,
+        knownWords: 1, knownWordRatio: 1, baselineAlignment: 1, lines: 1, strongSentence: false,
+      },
+      math: {
+        visibleCharacters: 3, digits: 2, operators: 1, balancedOperators: 0,
+        strongSymbols: 0, largeOperators: 0, relations: 0, fractions: 3,
+        layoutAssignments: 0, lines: 1, latexStructure: true, decisiveStructure: true,
+      },
+    },
+  }
+  assert.equal(
+    assessNeuralTextModeCandidate('Hallo', 'de', {
+      ...neuralResult('Hallo', 96), wordCount: 1, knownWordRatio: 1,
+    }, ambiguousFraction).shouldUseText,
+    false,
+    'Bruch-, Wurzel-, Relations- und Indexevidenz muss auch bei knappem Scoreabstand vor Text-Halluzinationen geschützt bleiben.',
+  )
+  const standaloneIntegral = {
+    ...ambiguousFraction,
+    mathValue: '\\int',
+    value: '\\int',
+    evidence: {
+      ...ambiguousFraction.evidence,
+      math: {
+        ...ambiguousFraction.evidence.math,
+        visibleCharacters: 1,
+        digits: 0,
+        operators: 0,
+        strongSymbols: 1,
+        largeOperators: 1,
+        fractions: 0,
+        latexStructure: true,
+        decisiveStructure: true,
+      },
+    },
+  }
+  assert.equal(
+    assessNeuralTextModeCandidate('T', 'de', {
+      ...neuralResult('T', 98), wordCount: 0, knownWordRatio: 0,
+    }, standaloneIntegral, {
+      confidence: 95, source: 'personalized', personalizedCharacters: 1,
+    }).shouldUseText,
+    false,
+    'Ein geometrisch bestätigtes einzelnes Integral darf nicht durch eine feindliche persönliche T-Antwort überschrieben werden.',
+  )
+  assert.equal(
+    assessNeuralTextModeCandidate('Fabio', 'de', {
+      ...neuralResult('Fabio', 82), wordCount: 1, knownWordRatio: 0,
+    }, { ...falselyMathematicalSentence, textScore: 6.7, mathScore: 7.4 }).shouldUseText,
+    true,
+    'Ein visuell sicherer unbekannter Name soll bei einer mehrdeutigen geometrischen Entscheidung Text bleiben.',
   )
 
   console.log('Kontextprüfung erfolgreich: Wortkorrektur, Gross-/Kleinschreibung, adaptive Abstände, persönliche Sequenzfusion, Strichposition und sicheres Pseudo-Labeling.')
