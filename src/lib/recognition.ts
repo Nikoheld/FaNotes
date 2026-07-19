@@ -6140,7 +6140,6 @@ const ordinaryWordScriptConflict = (
   const base = atoms[baseIndex]
   const candidate = atoms[candidateIndex]
   if (!base || !candidate || !isLatinWordAtom(base) || !isLatinWordAtom(candidate)) return false
-  if (candidate.bbox[3] < base.bbox[3] * 0.56) return false
 
   let start = baseIndex
   while (start > 0 && wordAtomNeighbour(atoms[start - 1], atoms[start])) start -= 1
@@ -6155,19 +6154,32 @@ const ordinaryWordScriptConflict = (
     lexicalWordEvidence(word, 'en').score,
   )
   const titleCased = /^[A-ZÄÖÜ][a-zäöü]{2,}$/u.test(word)
-  if (lexicalScore < 0.5 && !titleCased) return false
+  const pureLetterLine = atoms.length >= 4 && atoms.every(isLatinWordAtom)
+  if (lexicalScore < 0.5 && !titleCased && !pureLetterLine) return false
 
   const bottoms = run.map((atom) => atom.bbox[1] + atom.bbox[3])
   const heights = run.map((atom) => atom.bbox[3])
   const baseline = median(bottoms)
   const referenceHeight = median(heights)
-  const tolerance = Math.max(0.012, referenceHeight * 0.45)
+  // Compare the candidate with the local x-height, not only with the first
+  // glyph. A capital or tall ascender may legitimately be more than twice as
+  // high as the following lowercase bodies. The old 56% base-height gate
+  // therefore rejected real words before their shared baseline could be
+  // considered. A true multi-letter index still forms a separate baseline,
+  // so its base falls outside this deliberately bounded tolerance.
+  if (candidate.bbox[3] < Math.max(base.bbox[3] * 0.36, referenceHeight * 0.52)) return false
+  const tolerance = Math.max(0.012, referenceHeight * 0.52)
   const baseBottom = base.bbox[1] + base.bbox[3]
   const candidateBottom = candidate.bbox[1] + candidate.bbox[3]
   if (
     Math.abs(baseBottom - baseline) > tolerance ||
     Math.abs(candidateBottom - baseline) > tolerance
   ) return false
+
+  const aligned = run.filter((atom) => (
+    Math.abs(atom.bbox[1] + atom.bbox[3] - baseline) <= tolerance
+  ))
+  if (aligned.length < Math.max(3, Math.ceil(run.length * 0.75))) return false
 
   return run.some((atom, index) => {
     const absoluteIndex = start + index

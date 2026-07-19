@@ -747,6 +747,40 @@ try {
     'Ein titelgeschriebener Name muss auch ohne Wörterbucheintrag der gemeinsamen Wortgrundlinie folgen.',
   )
 
+  // With a drawing tablet the x-height body can be less than half as tall as
+  // the initial capital. Pairwise geometry then sees every following letter
+  // as a subscript even though all bodies and the capital still share one
+  // local baseline. The local word baseline must be evaluated before the
+  // capital/body height ratio is allowed to decide.
+  const compactBodyWordTokens = [
+    token('T', 96, [['T', 96]], 10980, [0.05, 0.18, 0.06, 0.22]),
+    token('e', 94, [['e', 94]], 10981, [0.115, 0.353, 0.045, 0.085]),
+    token('s', 95, [['s', 95]], 10982, [0.165, 0.353, 0.044, 0.085]),
+    token('t', 95, [['t', 95]], 10983, [0.214, 0.328, 0.04, 0.11]),
+  ]
+  assert.doesNotMatch(
+    recognizedLatex(compactBodyWordTokens),
+    /[_^]\{/u,
+    'Kleine, aber gemeinsam ausgerichtete Wortkörper dürfen nicht als Indexkette formatiert werden.',
+  )
+  assert.equal(
+    suggestMathLayoutAssignments(compactBodyWordTokens).length,
+    0,
+    'Kompakte Kleinbuchstaben nach einem Großbuchstaben dürfen kein falsches Indextraining erzeugen.',
+  )
+
+  const compactUnknownWordTokens = [
+    token('t', 96, [['t', 96]], 10984, [0.05, 0.2, 0.045, 0.2]),
+    token('a', 94, [['a', 94]], 10985, [0.101, 0.348, 0.043, 0.09]),
+    token('v', 95, [['v', 95]], 10986, [0.15, 0.348, 0.043, 0.09]),
+    token('o', 95, [['o', 95]], 10987, [0.199, 0.348, 0.043, 0.09]),
+  ]
+  assert.doesNotMatch(
+    recognizedLatex(compactUnknownWordTokens),
+    /[_^]\{/u,
+    'Eine reine zusammenhängende Buchstabenzeile braucht keinen Wörterbucheintrag, um ihre Grundlinie zu behalten.',
+  )
+
   const trueMultiLetterSubscriptTokens = [
     token('x', 96, [['x', 96]], 1099, [0.05, 0.2, 0.06, 0.18]),
     token('m', 95, [['m', 95]], 1100, [0.115, 0.365, 0.04, 0.08]),
@@ -2267,6 +2301,35 @@ try {
     }, falseUnknownNameScripts).shouldUseText,
     true,
     'Eigennamen und Fachwörter müssen eine reine falsche Indexhypothese überstimmen können.',
+  )
+  const falseUnknownAlignedWordScripts = {
+    ...falseWordScripts,
+    value: 't_{a v o}',
+    textValue: 'tavo',
+    mathValue: 't_{a v o}',
+    evidence: {
+      ...falseWordScripts.evidence,
+      text: {
+        ...falseWordScripts.evidence.text,
+        visibleCharacters: 4,
+        letters: 4,
+        knownWords: 0,
+        knownWordRatio: 0,
+        baselineAlignment: 0.72,
+      },
+      math: {
+        ...falseWordScripts.evidence.math,
+        visibleCharacters: 4,
+        layoutAssignments: 3,
+      },
+    },
+  }
+  assert.equal(
+    assessNeuralTextModeCandidate('tavo', 'de', {
+      ...neuralResult('tavo', 84), wordCount: 1, knownWordRatio: 0,
+    }, falseUnknownAlignedWordScripts).shouldUseText,
+    true,
+    'Eine sichere reine Buchstabenlesung muss eine schwache Indexkette auch ohne Wörterbucheintrag überstimmen.',
   )
   const verticallyDisplacedUnknownScripts = {
     ...falseUnknownNameScripts,

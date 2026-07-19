@@ -245,7 +245,20 @@ export const assessNeuralTextModeCandidate = (
     letters >= 3 &&
     letterRatio >= 0.86 &&
     !formulaSyntax &&
-    (strongKnownWord || strongSentence || candidateProperName)
+    (
+      strongKnownWord ||
+      strongSentence ||
+      candidateProperName ||
+      (
+        // The neural line model can read a coherent, previously unseen word
+        // even when the compact offline dictionary does not contain it. If
+        // the competing math path consists solely of apparent scripts and
+        // the text glyphs still share a credible baseline, that independent
+        // line reading is stronger evidence than pairwise height alone.
+        strongLetterSequence &&
+        automatic.evidence.text.baselineAlignment >= 0.68
+      )
+    )
   )
   const decisiveAutomaticMath = Boolean(
     automatic && (() => {
@@ -276,7 +289,7 @@ export const assessNeuralTextModeCandidate = (
   )
   const mayOverride = neuralTextMayOverrideAutomaticMode(neural, automatic, letters, wordLike)
   const shouldUseText = safeCandidate && enoughTextEvidence && !decisiveAutomaticMath && (
-    automatic?.mode === 'text' || mayOverride || strongPersonalized
+    automatic?.mode === 'text' || mayOverride || strongPersonalized || scriptOnlyWordConflict
   )
   const reason: NeuralTextModeAssessment['reason'] = !safeCandidate
     ? 'formula'
