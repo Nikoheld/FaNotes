@@ -326,7 +326,9 @@ try {
     'das ist',
     'Vertauschte verbundene Nachbarbuchstaben müssen auch im deutschen Wortkontext korrigiert werden.',
   )
-  installNeuralWordContextCandidates('en', ['computed', 'computer', 'gave', 'movement'])
+  installNeuralWordContextCandidates('en', [
+    'break', 'breve', 'computed', 'computer', 'gave', 'movement', 'tests', 'twists',
+  ])
   installNeuralWordContextCandidates('de', ['das', 'des', 'hallo', 'malo'])
   assert.equal(
     applyNeuralWordContext('she gave movement', 'en'),
@@ -373,7 +375,7 @@ try {
     'Richard Harris und Helena',
     'Unbekannte Namen innerhalb eines Satzes dürfen nicht zu Wörterbuchnachbarn umgeschrieben werden.',
   )
-  installNeuralWordContextCandidates('de', ['geänderten', 'gesonderten'])
+  installNeuralWordContextCandidates('de', ['geänderten', 'gesonderten', 'graduell', 'graduelle'])
   assert.equal(
     applyFinalNeuralWordContext('die gesnderten Positionen', 'de'),
     'die gesnderten Positionen',
@@ -406,6 +408,7 @@ try {
     'soon', 'as', 'guy', 'had', 'dark', 'moustache', 'mustache', 'wearing',
     'frockcoat', 'specialised', 'specialized', 'enquiry', 'inquiry', 'royal',
     'commission', 'last', 'night', 'deputise', 'deprive',
+    'break', 'breve', 'tests', 'twists',
   ])
   const englishNbestMembership = (word) => englishNbestWords.has(word.toLocaleLowerCase('en-US'))
   assert.equal(
@@ -433,6 +436,24 @@ try {
     ], 'en', englishNbestMembership)[0]?.rawText,
     'Hardly likely, my sweet. Luke surgery goes on for',
     'Ein eng benachbarter zweiter Beam darf genau ein unbekanntes Kleinwort in ein klar bekanntes Wort reparieren.',
+  )
+  assert.equal(applyFinalNeuralWordContext('brege', 'en'), 'breve')
+  assert.equal(
+    rankTrocrCandidateTextsForTests([
+      'course - one brege will not do it',
+      'course - one break will not do it',
+    ], 'en', englishNbestMembership)[0]?.rawText,
+    'course - one brege will not do it',
+    'Besitzt der visuell erste Beam bereits eine andere eindeutige Wortkorrektur, darf der zweite bekannte Nachbar ihn nicht allein per Wörterbuchbonus verdrängen.',
+  )
+  assert.equal(applyFinalNeuralWordContext('tsists', 'en'), 'twists')
+  assert.equal(
+    rankTrocrCandidateTextsForTests([
+      'with the fringes ( the tsists )',
+      'with the fringes ( the tests )',
+    ], 'en', englishNbestMembership)[0]?.rawText,
+    'with the fringes ( the tsists )',
+    'Auch bei gleich langen Alternativen muss die eindeutige eigene Reparatur des visuell ersten Beams Vorrang vor einem anderen Wörterbuchwort behalten.',
   )
   assert.equal(
     rankTrocrCandidateTextsForTests([
@@ -475,6 +496,15 @@ try {
     ], 'de', (word) => ['troja', 'illinois', 'ilion', 'durch', 'das', 'heer', 'der', 'griechen'].includes(word))[0]?.rawText,
     'Troja (IIion) durch das Heer der Griechen',
     'Eine intern grossgeschriebene visuelle Form darf nicht allein wegen eines häufigeren Wörterbuchnamens ersetzt werden.',
+  )
+  assert.equal(applyFinalNeuralWordContext('gradwell', 'de'), 'graduell')
+  assert.equal(
+    rankTrocrCandidateTextsForTests([
+      'sind, sondern nur gradwell',
+      'sind, sondern nur graduelle',
+    ], 'de', (word) => ['sind', 'sondern', 'nur', 'graduell', 'graduelle'].includes(word))[0]?.rawText,
+    'sind, sondern nur gradwell',
+    'Eine deutsche Flexionsvariante darf die eindeutig reparierbare visuelle Grundform nicht während der N-Best-Wahl verdrängen.',
   )
 
   const orderedDictionaryProbe = ['abend', 'test', 'zebra', 'äpfel', 'über']

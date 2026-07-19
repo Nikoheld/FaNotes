@@ -1,5 +1,9 @@
 # Änderungsverlauf
 
+## 2026.7.4-beta.9
+
+- die N-Best-Wortwahl bewertet die spätere eindeutige Korrektur des visuell führenden Beams jetzt bereits dann, wenn ein niedrigerer Beam mit einem anderen Wörterbuchwort konkurriert: Dadurch bleiben beispielsweise `brege` → `breve`, `tsists` → `twists` und `gradwell` → `graduell` erhalten, statt vorzeitig zu `break`, `tests` oder `graduelle` zu wechseln. Die zusätzliche Prüfung ist auf genau eine unbekannte kleingeschriebene Wortstelle mit unveränderten Grenzen und Satzzeichen begrenzt; Namen, gültige Wörter, Bindestrich-/Apostrophteile und mehrdeutige Alternativen bleiben unangetastet. Auf fünf getrennten deutschen und englischen Prüfmengen mit insgesamt 2.040 Zeilen entfernt die Änderung drei zuvor verschlechterte Kandidatenwahlen und drei Zeichenfehler, macht eine weitere Zeile exakt und verschlechtert keine Prüfmenge
+
 ## 2026.7.4-beta.8
 
 - die englische Handschrifterkennung akzeptiert jetzt sowohl amerikanische als auch britische Schreibweisen vollständig; dadurch gelten unter anderem `moustache`, `specialised` und `deputise` als sichere Textwörter und können reine falsche Hoch-/Tiefindexhypothesen überstimmen. Für die OCR-Rangfolge werden zusätzliche britische Formen nur ab drei unabhängigen SUBTLEX-Belegen verwendet, während seltenere gültige Varianten weiterhin in der Tipp-Rechtschreibprüfung enthalten sind; so wächst die eigentliche OCR-Wortliste nur um rund 5,3 KiB. Auf denselben 1.800 getrennten englischen und deutschen Kandidatenpaaren sinken die sichtbaren Zeichenfehler um weitere sechs, drei Zeilen werden exakt repariert und keine Zeile verschlechtert sich

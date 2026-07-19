@@ -66,6 +66,12 @@ const TROCR_VISUAL_RANK_PENALTY = 3
 // lexical advantage immediately. Names, compounds, punctuation, word-boundary
 // changes and already-known visual words stay with the decoder's first beam.
 const TROCR_SAFE_WORD_REPAIR_BONUS = 2
+// If the top visual word has its own different, unique dictionary repair, the
+// two lexical readings are ambiguous. The lower beam must then beat another
+// full visual-rank step instead of receiving a dictionary bonus. This keeps
+// the decoder's independent ink order authoritative without disabling N-best
+// repairs whose first word truly has no viable reading.
+const TROCR_COMPETING_WORD_REPAIR_PENALTY = 3
 
 type RecognitionLanguage = 'de' | 'en'
 type WordMembership = (word: string) => boolean
@@ -1701,28 +1707,30 @@ const trocrWordSurfaces = (value: string, language: RecognitionLanguage): TrocrW
   }))
 }
 
-const safeTrocrLexicalRepair = (
+type TrocrLexicalRepairDisposition = 'none' | 'safe' | 'competing'
+
+const trocrLexicalRepairDisposition = (
   visualTop: string,
   candidate: string,
   language: RecognitionLanguage,
   wordMembership?: WordMembership,
-) => {
+): TrocrLexicalRepairDisposition => {
   if (
     Math.abs(Array.from(candidate).length - Array.from(visualTop).length) > 1
     || wordDistance(visualTop, candidate) > 2
     || visualTop.replace(/[\p{L}\p{N}\s]/gu, '') !== candidate.replace(/[\p{L}\p{N}\s]/gu, '')
-  ) return false
+  ) return 'none'
   const sourceWords = trocrWordSurfaces(visualTop, language)
   const candidateWords = trocrWordSurfaces(candidate, language)
-  if (sourceWords.length !== candidateWords.length) return false
+  if (sourceWords.length !== candidateWords.length) return 'none'
   const changed = sourceWords.flatMap((source, index) => (
     source.value === candidateWords[index]?.value
       ? []
       : [{ source, candidate: candidateWords[index] }]
   ))
-  if (changed.length !== 1) return false
+  if (changed.length !== 1) return 'none'
   const repair = changed[0]
-  if (!repair.candidate) return false
+  if (!repair.candidate) return 'none'
   const source = repair.source.value
   const target = repair.candidate.value
   const sourceLower = source.toLocaleLowerCase(language)
@@ -1731,7 +1739,7 @@ const safeTrocrLexicalRepair = (
     /[-'’]/u.test(text[word.start - 1] ?? '') || /[-'’]/u.test(text[word.end] ?? '')
   )
   const known = (word: string) => LANGUAGE_WORDS[language].has(word) || Boolean(wordMembership?.(word))
-  return (
+  const eligible = (
     source.length >= 4
     && target.length >= 4
     && source === sourceLower
@@ -1741,6 +1749,19 @@ const safeTrocrLexicalRepair = (
     && !known(sourceLower)
     && known(targetLower)
   )
+  if (!eligible) return 'none'
+  // This expensive exhaustive lookup is intentionally reached only for the
+  // single unknown word of an otherwise eligible lower beam, never once per
+  // sentence or per ordinary candidate. It mirrors the correction that the
+  // selected top beam would receive immediately after ranking.
+  const topCorrection = applyFinalNeuralWordContext(source, language)
+  const topCorrectionLower = topCorrection.toLocaleLowerCase(language)
+  if (
+    topCorrectionLower !== sourceLower
+    && topCorrectionLower !== targetLower
+    && known(topCorrectionLower)
+  ) return 'competing'
+  return 'safe'
 }
 
 /** Selects only among hypotheses emitted by the visual model. The small rank
@@ -1771,19 +1792,20 @@ const rankTrocrCandidates = (
       return penalty + TROCR_VISUAL_RANK_PENALTY
     }, 0)
     const baseScore = assessment.score - grammarPenalty - mixedCaseVisualPenalty
-    const safeRepairBonus = index > 0 && safeTrocrLexicalRepair(
-      candidates[0],
-      rawText,
-      language,
-      wordMembership,
-    ) ? TROCR_SAFE_WORD_REPAIR_BONUS : 0
+    const repairDisposition = index > 0
+      ? trocrLexicalRepairDisposition(candidates[0], rawText, language, wordMembership)
+      : 'none'
+    const safeRepairBonus = repairDisposition === 'safe' ? TROCR_SAFE_WORD_REPAIR_BONUS : 0
+    const competingRepairPenalty = repairDisposition === 'competing'
+      ? TROCR_COMPETING_WORD_REPAIR_PENALTY
+      : 0
     return {
       rawText,
       text,
       assessment,
       visualRank: index,
       baseScore,
-      score: baseScore - index * TROCR_VISUAL_RANK_PENALTY + safeRepairBonus,
+      score: baseScore - index * TROCR_VISUAL_RANK_PENALTY + safeRepairBonus - competingRepairPenalty,
     }
   })
   .sort((first, second) => second.score - first.score)

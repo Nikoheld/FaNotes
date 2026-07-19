@@ -1,7 +1,7 @@
 {
   "name": "fanotes",
   "productName": "FaNotes",
-  "version": "2026.7.4-beta.8",
+  "version": "2026.7.4-beta.9",
   "description": "Lokale Markdown-Notizen mit Handschrift für Schule, UNI, Privatleben und Arbeit",
   "author": "FaNotes",
   "license": "MIT",
@@ -64,8 +64,8 @@
     "start": "electron .",
     "dist:linux": "npm run build:web && electron-builder --linux AppImage --x64 && npm run dist:harden-appimage && npm run dist:portable",
     "dist:windows": "npm run build:web && electron-builder --win --x64",
-    "dist:harden-appimage": "node scripts/harden-appimage.cjs release/FaNotes-2026.7.4-beta.8-x86_64.AppImage",
-    "dist:portable": "tar -C release --sort=name --owner=0 --group=0 --numeric-owner --mtime='@0' --mode='u+rwX,go+rX,go-w' --transform='s#^linux-unpacked#FaNotes-2026.7.4-beta.8-x86_64#' -czf release/FaNotes-2026.7.4-beta.8-x86_64.tar.gz linux-unpacked",
+    "dist:harden-appimage": "node scripts/harden-appimage.cjs release/FaNotes-2026.7.4-beta.9-x86_64.AppImage",
+    "dist:portable": "tar -C release --sort=name --owner=0 --group=0 --numeric-owner --mtime='@0' --mode='u+rwX,go+rX,go-w' --transform='s#^linux-unpacked#FaNotes-2026.7.4-beta.9-x86_64#' -czf release/FaNotes-2026.7.4-beta.9-x86_64.tar.gz linux-unpacked",
     "dist:dir": "npm run build:web && electron-builder --linux dir --x64"
   },
   "devDependencies": {
