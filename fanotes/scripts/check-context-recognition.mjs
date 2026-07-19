@@ -39,6 +39,8 @@ try {
     rankTrocrCandidateTextsForTests,
     repairNeuralPhysicalWordSpacingForTests,
     shouldRequestIndependentTrocrViewForTests,
+    trocrGermanMultiwordRepairBonusForTests,
+    trocrRepeatedWordEvidenceBonusForTests,
     trocrStructuralRewritePenaltyForTests,
     trocrOrdinaryWordNamePenaltyForTests,
     trocrDenseGermanNamePenaltyForTests,
@@ -566,6 +568,89 @@ try {
     ], 'de', (word) => ['troja', 'illinois', 'ilion', 'durch', 'das', 'heer', 'der', 'griechen'].includes(word))[0]?.rawText,
     'Troja (IIion) durch das Heer der Griechen',
     'Eine intern grossgeschriebene visuelle Form darf nicht allein wegen eines häufigeren Wörterbuchnamens ersetzt werden.',
+  )
+  const germanBeamMembership = (word) => [
+    'bis', 'burg', 'java', 'jana', 'spielen',
+  ].includes(word.toLocaleLowerCase('de-CH'))
+  assert.equal(
+    trocrRepeatedWordEvidenceBonusForTests(
+      'Jun-Applets Anwendungsprogramme. Appletbezogene Klassen der Java',
+      'Java-Applets Anwendungsprogramme. Appletbezogene Klassen der Java',
+      'de',
+      germanBeamMembership,
+    ),
+    0.35,
+    'Eine zweite, fast gleich bewertete Bildlesung darf ein unabhängig wiederholtes Wort exakt angleichen.',
+  )
+  assert.equal(
+    trocrRepeatedWordEvidenceBonusForTests(
+      'Jun-Applets Anwendungsprogramme.',
+      'Java-Applets Anwendungsprogramme.',
+      'de',
+      germanBeamMembership,
+    ),
+    0,
+    'Wörterbuchhäufigkeit ohne eine zweite sichtbare Wiederholung ist keine Wiederholungsevidenz.',
+  )
+  assert.equal(
+    trocrRepeatedWordEvidenceBonusForTests(
+      'Jana-Applets Anwendungsprogramme. Appletbezogene Klassen der Java',
+      'Java-Applets Anwendungsprogramme. Appletbezogene Klassen der Java',
+      'de',
+      germanBeamMembership,
+    ),
+    0,
+    'Ein bereits bekanntes sichtbares Wort darf selbst bei einer späteren Wiederholung nicht ersetzt werden.',
+  )
+  assert.equal(
+    trocrGermanMultiwordRepairBonusForTests(
+      'Im Profifussleelt spischen allerdings oftmals keine Vereine mehn,',
+      'Im Profifussleell spielen allerdings oftmals keine Vereine mehn,',
+      'de',
+      germanBeamMembership,
+    ),
+    0.2,
+    'Mehrere beschädigte deutsche Oberflächen dürfen eine kleine Zusatzstütze erhalten, wenn mindestens ein Kleinwort eindeutig bekannt wird.',
+  )
+  assert.equal(
+    trocrGermanMultiwordRepairBonusForTests(
+      'von Kindern sind das his-',
+      'von Kindern sind das bis-',
+      'de',
+      germanBeamMembership,
+    ),
+    0,
+    'Ein Wort vor einem sichtbaren Fortsetzungsstrich darf nicht per Wörterbuchbonus umgeschrieben werden.',
+  )
+  assert.equal(
+    trocrGermanMultiwordRepairBonusForTests(
+      'Wettbewerbe, die ex aequo enden',
+      'Wettbewerbe, die er aequo enden',
+      'de',
+      (word) => word === 'er',
+    ),
+    0,
+    'Kurze Fremd-, Funktions- und Abkürzungswörter bleiben vollständig beim visuellen Top-Beam.',
+  )
+  assert.equal(
+    trocrGermanMultiwordRepairBonusForTests(
+      'der Burj Khalifa',
+      'der Burg Khalifa',
+      'de',
+      germanBeamMembership,
+    ),
+    0,
+    'Der Mehrwortbonus darf einen unbekannten Eigennamen nicht in ein bekanntes Substantiv umschreiben.',
+  )
+  assert.equal(
+    trocrGermanMultiwordRepairBonusForTests(
+      'wehn movement of blood',
+      'when movement of blood',
+      'en',
+      (word) => word === 'when',
+    ),
+    0,
+    'Der breitere Mehrwortbeweis ist wegen der getrennten englischen Validierung ausdrücklich deutsch-spezifisch.',
   )
   assert.equal(applyFinalNeuralWordContext('gradwell', 'de'), 'graduell')
   assert.equal(

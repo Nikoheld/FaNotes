@@ -77,6 +77,15 @@ export const trocrVisualRankPenaltyForTests = TROCR_VISUAL_RANK_PENALTY
 // eligible; names, valid words, punctuation and structural rewrites are not.
 const TROCR_SAFE_WORD_REPAIR_BONUS = 3.5
 export const trocrSafeWordRepairBonusForTests = TROCR_SAFE_WORD_REPAIR_BONUS
+// Two weaker bonuses cover independent structure that the single-word repair
+// above deliberately excludes. An exact repeated token elsewhere on the same
+// visual line is direct evidence for a near-tied reading (`Jun ... Java` ->
+// `Java ... Java`). German lines may additionally contain several damaged
+// words in the same second beam; a tiny bonus is safe when it adds a known
+// lower-case word without changing punctuation, boundaries, capitalization,
+// or any already-known word. Both remain far below one visual-rank step.
+const TROCR_REPEATED_WORD_EVIDENCE_BONUS = 0.35
+const TROCR_GERMAN_MULTIWORD_REPAIR_BONUS = 0.2
 // If the top visual word has its own different, unique dictionary repair, the
 // two lexical readings are ambiguous. The lower beam must then beat another
 // full visual-rank step instead of receiving a dictionary bonus. This keeps
@@ -1761,6 +1770,117 @@ const trocrWordSurfaces = (value: string, language: RecognitionLanguage): TrocrW
   }))
 }
 
+const trocrWordBoundarySignature = (value: string, language: RecognitionLanguage) => (
+  value.replace(language === 'de' ? /[A-Za-zÄÖÜäöü]+/gu : /[A-Za-z]+/gu, '#')
+)
+
+type TrocrWordCaseRole = 'lower' | 'title' | 'upper' | 'mixed'
+
+const trocrWordCaseRole = (value: string, language: RecognitionLanguage): TrocrWordCaseRole => {
+  const locale = language === 'de' ? 'de-CH' : 'en-US'
+  const characters = Array.from(value)
+  if (characters.every((character) => character === character.toLocaleLowerCase(locale))) return 'lower'
+  if (characters.every((character) => character === character.toLocaleUpperCase(locale))) return 'upper'
+  if (
+    characters[0] === characters[0]?.toLocaleUpperCase(locale) &&
+    characters.slice(1).every((character) => character === character.toLocaleLowerCase(locale))
+  ) return 'title'
+  return 'mixed'
+}
+
+const trocrKnownWord = (
+  word: string,
+  language: RecognitionLanguage,
+  wordMembership?: WordMembership,
+) => {
+  const locale = language === 'de' ? 'de-CH' : 'en-US'
+  const lower = word.toLocaleLowerCase(locale)
+  return LANGUAGE_WORDS[language].has(lower) || Boolean(wordMembership?.(lower))
+}
+
+/** A second visual beam may repeat an already visible, independently decoded
+ * token. This is stronger than mere word frequency: the target must occur
+ * unchanged elsewhere on this same line, the source must be unsupported, and
+ * every separator plus the capitalization role must remain identical. */
+const trocrRepeatedWordEvidenceBonus = (
+  visualTop: string,
+  candidate: string,
+  language: RecognitionLanguage,
+  wordMembership?: WordMembership,
+) => {
+  const sourceWords = trocrWordSurfaces(visualTop, language)
+  const candidateWords = trocrWordSurfaces(candidate, language)
+  if (
+    sourceWords.length !== candidateWords.length ||
+    trocrWordBoundarySignature(visualTop, language) !== trocrWordBoundarySignature(candidate, language)
+  ) return 0
+  const changed = sourceWords.flatMap((source, index) => (
+    source.value === candidateWords[index]?.value ? [] : [{ source, target: candidateWords[index], index }]
+  ))
+  if (changed.length !== 1 || !changed[0].target) return 0
+  const { source, target, index } = changed[0]
+  if (
+    Array.from(source.value).length < 3 ||
+    Array.from(target.value).length < 4 ||
+    trocrKnownWord(source.value, language, wordMembership) ||
+    !trocrKnownWord(target.value, language, wordMembership) ||
+    trocrWordCaseRole(source.value, language) !== trocrWordCaseRole(target.value, language) ||
+    !sourceWords.some((word, wordIndex) => wordIndex !== index && word.value === target.value)
+  ) return 0
+  return TROCR_REPEATED_WORD_EVIDENCE_BONUS
+}
+
+export const trocrRepeatedWordEvidenceBonusForTests = trocrRepeatedWordEvidenceBonus
+
+/** German compounds and inflections can leave more than one unknown surface
+ * in a lower beam, so the narrow single-repair disposition cannot score it.
+ * Grant only a tie-break-sized bonus when separators are byte-for-byte
+ * unchanged, no known source word is touched, casing roles remain stable, no
+ * changed token touches a joiner, and at least one lower-case token becomes a
+ * known word. English validation showed this broader signal is not safe there,
+ * therefore it is intentionally German-only. */
+const trocrGermanMultiwordRepairBonus = (
+  visualTop: string,
+  candidate: string,
+  language: RecognitionLanguage,
+  wordMembership?: WordMembership,
+) => {
+  if (language !== 'de') return 0
+  const sourceWords = trocrWordSurfaces(visualTop, language)
+  const candidateWords = trocrWordSurfaces(candidate, language)
+  if (
+    sourceWords.length !== candidateWords.length ||
+    trocrWordBoundarySignature(visualTop, language) !== trocrWordBoundarySignature(candidate, language)
+  ) return 0
+  const changed = sourceWords.flatMap((source, index) => (
+    source.value === candidateWords[index]?.value ? [] : [{ source, target: candidateWords[index] }]
+  ))
+  if (!changed.length) return 0
+  let addsKnownLowercaseWord = false
+  for (const { source, target } of changed) {
+    if (!target) return 0
+    const sourceRole = trocrWordCaseRole(source.value, language)
+    const targetRole = trocrWordCaseRole(target.value, language)
+    const touchesJoiner = (
+      /[-'’]/u.test(visualTop[source.start - 1] ?? '') ||
+      /[-'’]/u.test(visualTop[source.end] ?? '')
+    )
+    const targetKnown = trocrKnownWord(target.value, language, wordMembership)
+    if (
+      Array.from(source.value).length < 4 ||
+      Array.from(target.value).length < 4 ||
+      trocrKnownWord(source.value, language, wordMembership) ||
+      sourceRole !== targetRole ||
+      touchesJoiner ||
+      (sourceRole !== 'lower' && targetKnown)
+    ) return 0
+    if (sourceRole === 'lower' && targetKnown) addsKnownLowercaseWord = true
+  }
+  return addsKnownLowercaseWord ? TROCR_GERMAN_MULTIWORD_REPAIR_BONUS : 0
+}
+
+export const trocrGermanMultiwordRepairBonusForTests = trocrGermanMultiwordRepairBonus
+
 const trocrStructuralRewritePenalty = (
   visualTop: string,
   candidate: string,
@@ -2039,6 +2159,12 @@ const rankTrocrCandidates = (
     const denseGermanNamePenalty = index > 0
       ? trocrDenseGermanNamePenalty(candidates[0], rawText, language, wordMembership)
       : 0
+    const repeatedWordEvidenceBonus = index > 0
+      ? trocrRepeatedWordEvidenceBonus(candidates[0], rawText, language, wordMembership)
+      : 0
+    const germanMultiwordRepairBonus = index > 0
+      ? trocrGermanMultiwordRepairBonus(candidates[0], rawText, language, wordMembership)
+      : 0
     return {
       rawText,
       text,
@@ -2047,7 +2173,8 @@ const rankTrocrCandidates = (
       visualRank: index,
       baseScore,
       score: baseScore - index * TROCR_VISUAL_RANK_PENALTY
-        + safeRepairBonus - competingRepairPenalty - structuralRewritePenalty
+        + safeRepairBonus + repeatedWordEvidenceBonus + germanMultiwordRepairBonus
+        - competingRepairPenalty - structuralRewritePenalty
         - ordinaryWordNamePenalty - denseGermanNamePenalty,
     }
   })
