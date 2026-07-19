@@ -251,6 +251,8 @@ export type DrawingBoardProps = {
     | 'recognitionMode'
     | 'lastRecognitionMode'
     | 'recognitionLanguage'
+    | 'enhancedMathRecognition'
+    | 'enhancedMathLicenseAccepted'
     | 'autoOpenConversion'
     | 'keepDrawingAfterInsert'
   >
@@ -1001,6 +1003,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const [automaticResult, setAutomaticResult] = useState<Pick<AutomaticRecognitionResult, 'confidence' | 'reason' | 'textScore' | 'mathScore'> | null>(null)
   const [tokens, setTokens] = useState<RecognitionToken[]>([])
   const [correction, setCorrection] = useState('')
+  const [wholeFormulaResult, setWholeFormulaResult] = useState(false)
   const [conversionOpen, setConversionOpen] = useState(false)
   const [textToHandwritingOpen, setTextToHandwritingOpen] = useState(false)
   const [mathSolverEnabled, setMathSolverEnabled] = useState(false)
@@ -2101,6 +2104,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     const runId = ++recognitionRunRef.current
     setIsRecognizing(true)
     setNotice(null)
+    setWholeFormulaResult(false)
     try {
       const [loaded, recognitionEngine] = await Promise.all([
         loadRecognitionResources(),
@@ -2120,6 +2124,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       let automaticDetection: AutomaticRecognitionResult | null = null
       let neuralTextUsed = false
       let neuralTextFailure = ''
+      let enhancedMathFailure = ''
+      let enhancedMathUsed = false
       if (requestedMode === 'auto') {
         const detected = recognitionEngine.recognizeAutomaticExpression(
           engineStrokes,
@@ -2220,6 +2226,41 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         }
       }
 
+      if (
+        resolvedMode === 'math'
+        && settings.enhancedMathRecognition
+        && settings.enhancedMathLicenseAccepted
+        && window.fanotes.recognizeEnhancedMath
+      ) {
+        try {
+          const { renderEnhancedMathImage } = await import('../lib/enhancedMathRecognition')
+          const image = renderEnhancedMathImage(engineStrokes, SOURCE_WIDTH, sourceHeight)
+          if (image) {
+            const enhanced = await window.fanotes.recognizeEnhancedMath(image)
+            if (runId !== recognitionRunRef.current) return
+            // The independent MathWriting holdout shows a clear gain for
+            // fractions, roots, limits, integrals and scripts. Simple linear
+            // expressions remain on the existing recognizer: replacing those
+            // merely because the optional decoder returned valid LaTeX caused
+            // measurable regressions on out-of-domain handwriting.
+            if (enhanced.recommended) {
+              value = enhanced.latex
+              enhancedMathUsed = true
+              if (automaticDetection) automaticDetection = {
+                ...automaticDetection,
+                mode: 'math',
+                value,
+                reason: 'zweidimensionales lokales Formelmodell',
+              }
+            }
+          }
+        } catch (error) {
+          enhancedMathFailure = error instanceof Error
+            ? error.message
+            : 'Das erweiterte Formelmodell konnte nicht ausgeführt werden.'
+        }
+      }
+
       setAutomaticResult(automaticDetection ? {
         confidence: automaticDetection.confidence,
         reason: automaticDetection.reason,
@@ -2231,7 +2272,12 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         lastRecognitionMode: resolvedMode,
       })
       setRecognizedMode(resolvedMode)
-      setTokens(recognized)
+      // Whole-formula decoding has no trustworthy one-to-one mapping to the
+      // classic glyph tokens. Hiding those stale alternatives also prevents a
+      // later insertion from training the personal glyph model on a mismatched
+      // sequence.
+      setTokens(enhancedMathUsed ? [] : recognized)
+      setWholeFormulaResult(enhancedMathUsed)
       setCorrection(value)
       setConversionOpen(true)
       const contextChanges = recognized.filter((token) => token.context?.changed).length
@@ -2239,6 +2285,11 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         setNotice({
           kind: 'info',
           text: `${neuralTextFailure} FaNotes verwendet vorübergehend die klassische Erkennung.`,
+        })
+      } else if (resolvedMode === 'math' && enhancedMathFailure) {
+        setNotice({
+          kind: 'info',
+          text: `${enhancedMathFailure} FaNotes verwendet für diese Eingabe die klassische lokale Mathematikerkennung.`,
         })
       } else if (resolvedMode === 'text' && contextChanges > 0 && !neuralTextUsed) {
         setNotice({
@@ -2255,7 +2306,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     } finally {
       if (mountedRef.current && runId === recognitionRunRef.current) setIsRecognizing(false)
     }
-  }, [mode, onSettingsChange, settings.lastRecognitionMode, settings.recognitionLanguage, sourceHeight])
+  }, [mode, onSettingsChange, settings.enhancedMathLicenseAccepted, settings.enhancedMathRecognition, settings.lastRecognitionMode, settings.recognitionLanguage, sourceHeight])
 
   useEffect(() => {
     recognizeLatestRef.current = recognize
@@ -2608,7 +2659,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       const loaded = resourcesRef.current
       let learningResult: CorrectionLearningResult | null = null
       let learningFailed = false
-      if (loaded && tokens.length) {
+      if (loaded && tokens.length && !wholeFormulaResult) {
         try {
           learningResult = await learnFromRecognitionCorrection(
             tokens,
@@ -2650,7 +2701,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         setNotice({ kind: 'error', text: error instanceof Error ? error.message : 'Konvertierung konnte nicht eingefügt werden.' })
       }
     }
-  }, [activeMode, clear, correction, onInsertMarkdown, onTrainingChanged, saveDrawing, settings.keepDrawingAfterInsert, tokens])
+  }, [activeMode, clear, correction, onInsertMarkdown, onTrainingChanged, saveDrawing, settings.keepDrawingAfterInsert, tokens, wholeFormulaResult])
 
   const importTraining = useCallback(async (file: File) => {
     setIsImporting(true)
@@ -3531,15 +3582,16 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
             <span><strong>{automaticResult ? `Automatisch erkannt: ${activeMode === 'math' ? 'Mathematik' : 'Text'}` : 'Automatische Moduserkennung aktiv'}</strong><small>{automaticResult ? `${automaticResult.confidence}% sicher · erkannt durch ${automaticResult.reason}` : `Bei unklaren Eingaben wird der zuletzt erkannte ${settings.lastRecognitionMode === 'math' ? 'Mathematik-' : 'Text-'}Modus verwendet.`}</small></span>
           </div>}
 
-          {tokens.length > 0 ? <>
-            <div className="lw-confidence-row">
-              <span>Gesamtsicherheit</span>
-              <div><i style={{ width: `${averageConfidence}%` }} /></div>
-              <strong>{averageConfidence}%</strong>
-            </div>
+          {tokens.length > 0 || correction.trim() ? <>
+            {tokens.length > 0 && <>
+              <div className="lw-confidence-row">
+                <span>Gesamtsicherheit</span>
+                <div><i style={{ width: `${averageConfidence}%` }} /></div>
+                <strong>{averageConfidence}%</strong>
+              </div>
 
-            <div className="lw-token-strip" aria-label="Erkannte Zeichen und Alternativen">
-              {tokens.filter((token) => !token.isLayout).map((token) => (
+              <div className="lw-token-strip" aria-label="Erkannte Zeichen und Alternativen">
+                {tokens.filter((token) => !token.isLayout).map((token) => (
                 <div
                   className={`lw-token ${token.context?.changed ? 'is-context' : ''}`}
                   key={token.id}
@@ -3560,8 +3612,9 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
                     ))}
                   </div>}
                 </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            </>}
 
             <label className="lw-correction-field">
               <span>{activeMode === 'math' ? 'LaTeX prüfen oder korrigieren' : 'Text prüfen oder korrigieren'}</span>

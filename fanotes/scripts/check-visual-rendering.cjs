@@ -6,7 +6,10 @@ const path = require('node:path')
 const { spawn } = require('node:child_process')
 
 const executable = path.resolve(process.argv[2] || path.join(__dirname, '..', 'release', 'linux-unpacked', 'fanotes'))
-const timeoutMs = 20_000
+const timeoutMs = Math.max(
+  20_000,
+  Math.min(120_000, Number(process.env.FANOTES_VISUAL_TIMEOUT_MS) || 20_000),
+)
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'fanotes-visual-check-'))
 const output = path.join(temporary, 'screenshots')
 const home = path.join(temporary, 'home')

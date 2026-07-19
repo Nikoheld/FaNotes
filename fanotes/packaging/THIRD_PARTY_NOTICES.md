@@ -122,6 +122,23 @@ Sources: https://huggingface.co/Teklia/pylaia-iam,
 https://gitlab.teklia.com/atr/pylaia and
 https://github.com/microsoft/onnxruntime
 
+Optional handwritten formula sequence recognition
+=================================================
+Desktop packages include a CPU-only CrispEmbed runtime built from pinned
+CrispEmbed and ggml revisions. CrispEmbed is Copyright (c) 2026 CrispStrobe;
+ggml is Copyright (c) 2023-2026 The ggml authors. Both are licensed under the
+MIT License. Their complete licenses are shipped as
+`LICENSE-CRISPEMBED-MIT.txt` and `LICENSE-GGML-MIT.txt`.
+
+The PosFormer CROHME Q4_K model weights are not part of FaNotes or its
+installers. They are offered as an explicit, separately licensed optional
+download from their model card. FaNotes starts that download only after the
+user accepts CC BY-NC-SA 3.0, verifies the exact byte count and SHA-256 digest,
+and executes inference locally.
+
+Sources: https://github.com/CrispStrobe/CrispEmbed and
+https://huggingface.co/cstr/posformer-crohme-GGUF
+
 FaNotes local spelling filters
 ==============================
 The compact German and English Bloom filters shipped with FaNotes are derived

@@ -4,6 +4,7 @@ import {
   recognizeMathDocument,
   recognizedLatex,
 } from '../../../src/lib/recognition'
+import { renderEnhancedMathImage } from '../../src/lib/enhancedMathRecognition'
 import { createStandardRecognitionSamples } from '../../../src/lib/standardRecognition'
 import type { Stroke } from '../../../src/types'
 
@@ -21,11 +22,24 @@ type MathWritingAuditRow = {
   predictedLength: number
   edits: number
   exact: boolean
+  enhancedImage?: {
+    width: number
+    height: number
+    pixelsBase64: string
+  }
+}
+
+const pixelsToBase64 = (pixels: Uint8Array) => {
+  let binary = ''
+  for (let offset = 0; offset < pixels.length; offset += 8_192) {
+    binary += String.fromCharCode(...pixels.subarray(offset, offset + 8_192))
+  }
+  return btoa(binary)
 }
 
 const normalizedLatex = (value: string) => value
   .normalize('NFC')
-  .replace(/\\(?:left|right)\s*/gu, '')
+  .replace(/\\(?:left|right)\b\s*/gu, '')
   .replace(/\\tfrac\b/gu, '\\frac')
   .replace(/\\operatorname\{log\}/gu, 'log')
   .replace(/\s+/gu, '')
@@ -48,7 +62,10 @@ const editDistance = (left: string, right: string) => {
   return previous[target.length]
 }
 
-export async function runMathWritingExternalAudit(entries: MathWritingAuditEntry[]) {
+export async function runMathWritingExternalAudit(
+  entries: MathWritingAuditEntry[],
+  includeEnhancedImages = false,
+) {
   const model = await buildRecognitionModel(await createStandardRecognitionSamples(BASE_CATALOG))
   const rows: MathWritingAuditRow[] = []
   for (const entry of entries) {
@@ -56,7 +73,7 @@ export async function runMathWritingExternalAudit(entries: MathWritingAuditEntry
     const predicted = normalizedLatex(recognizedLatex(
       recognizeMathDocument(entry.strokes, model, BASE_CATALOG, [], 'de'),
     ))
-    rows.push({
+    const row: MathWritingAuditRow = {
       id: entry.id,
       expected,
       predicted,
@@ -64,7 +81,16 @@ export async function runMathWritingExternalAudit(entries: MathWritingAuditEntry
       predictedLength: Array.from(predicted).length,
       edits: editDistance(expected, predicted),
       exact: expected === predicted,
-    })
+    }
+    if (includeEnhancedImages) {
+      const image = renderEnhancedMathImage(entry.strokes, 900, 560)
+      if (image) row.enhancedImage = {
+        width: image.width,
+        height: image.height,
+        pixelsBase64: pixelsToBase64(image.pixels),
+      }
+    }
+    rows.push(row)
     // Keep the browser responsive and make the watchdog meaningful even for
     // unusually large formulae in a future full-dataset audit.
     await new Promise<void>((resolve) => globalThis.setTimeout(resolve, 0))

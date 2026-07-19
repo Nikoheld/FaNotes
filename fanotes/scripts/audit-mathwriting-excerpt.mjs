@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import fs from 'node:fs'
+import { createRequire } from 'node:module'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -12,9 +13,24 @@ const datasetRoot = path.resolve(process.env.FANOTES_MATHWRITING_ROOT?.trim() ||
 const split = process.env.FANOTES_MATHWRITING_SPLIT?.trim() || 'train'
 const reserved = split === 'valid' || split === 'test'
 const sampleLimit = Math.max(1, Math.min(100, Number(process.env.FANOTES_MATHWRITING_LIMIT) || 12))
+const sampleOffset = Math.max(0, Math.min(10_000, Number(process.env.FANOTES_MATHWRITING_OFFSET) || 0))
 const wallTimeoutMs = Math.max(30_000, Math.min(240_000, Number(process.env.FANOTES_MATHWRITING_TIMEOUT_MS) || 150_000))
 const renderedWidth = Math.max(240, Math.min(840, Number(process.env.FANOTES_MATHWRITING_WIDTH) || 760))
 const renderedHeight = Math.max(100, Math.min(500, Number(process.env.FANOTES_MATHWRITING_HEIGHT) || 260))
+const enhancedModelPath = process.env.FANOTES_ENHANCED_MATH_MODEL?.trim() || ''
+const enhancedRuntimePath = process.env.FANOTES_ENHANCED_MATH_RUNTIME?.trim() || ''
+const enhancedBaselineRuntimePath = process.env.FANOTES_ENHANCED_MATH_BASELINE_RUNTIME?.trim() || ''
+const enhancedImageDirectory = process.env.FANOTES_ENHANCED_MATH_IMAGE_DIR?.trim() || ''
+const enhancedAudit = Boolean(enhancedModelPath || enhancedRuntimePath)
+
+if (enhancedAudit) {
+  assert.ok(enhancedModelPath && enhancedRuntimePath, 'Erweiterter Audit benötigt Modell- und Laufzeitpfad.')
+  assert.equal(
+    process.env.FANOTES_ENHANCED_MATH_ACCEPT_LICENSE,
+    '1',
+    'FANOTES_ENHANCED_MATH_ACCEPT_LICENSE=1 muss die Modelllizenz ausdrücklich bestätigen.',
+  )
+}
 
 assert.ok(process.env.FANOTES_MATHWRITING_ROOT, 'FANOTES_MATHWRITING_ROOT muss auf den offiziellen MathWriting-Ausschnitt zeigen.')
 assert.ok(
@@ -36,6 +52,31 @@ const decodeXml = (value) => value
   .replaceAll('&quot;', '"')
   .replaceAll('&apos;', "'")
   .replaceAll('&amp;', '&')
+
+const normalizedLatex = (value) => value
+  .normalize('NFC')
+  .replace(/\\(?:left|right)\b\s*/gu, '')
+  .replace(/\\tfrac\b/gu, '\\frac')
+  .replace(/\\operatorname\{log\}/gu, 'log')
+  .replace(/\s+/gu, '')
+
+const editDistance = (left, right) => {
+  const source = Array.from(left)
+  const target = Array.from(right)
+  let previous = Array.from({ length: target.length + 1 }, (_entry, index) => index)
+  for (let sourceIndex = 0; sourceIndex < source.length; sourceIndex += 1) {
+    const current = [sourceIndex + 1]
+    for (let targetIndex = 0; targetIndex < target.length; targetIndex += 1) {
+      current.push(Math.min(
+        current[targetIndex] + 1,
+        previous[targetIndex + 1] + 1,
+        previous[targetIndex] + Number(source[sourceIndex] !== target[targetIndex]),
+      ))
+    }
+    previous = current
+  }
+  return previous[target.length]
+}
 
 const normalizeStrokes = (traces) => {
   const points = traces.flat()
@@ -90,7 +131,7 @@ const parseInkml = (filename) => {
 const files = fs.readdirSync(path.join(datasetRoot, split))
   .filter((filename) => filename.endsWith('.inkml'))
   .sort()
-  .slice(0, sampleLimit)
+  .slice(sampleOffset, sampleOffset + sampleLimit)
 assert.equal(files.length, sampleLimit, `Nur ${files.length} MathWriting-Beispiele in ${split} verfügbar.`)
 const entries = files.map((filename) => parseInkml(path.join(datasetRoot, split, filename)))
 
@@ -123,7 +164,7 @@ try {
     '  return btoa(binary)',
     '}',
     'try {',
-    '  const result = await runMathWritingExternalAudit(entries)',
+    `  const result = await runMathWritingExternalAudit(entries, ${enhancedAudit ? 'true' : 'false'})`,
     '  document.body.innerHTML = `<pre id="result">${encode(JSON.stringify(result))}</pre>`',
     '} catch (error) {',
     '  document.body.innerHTML = `<pre id="error">${encode(String(error?.stack || error))}</pre>`',
@@ -170,18 +211,104 @@ try {
   const encoded = /<pre id="result">([\s\S]*?)<\/pre>/u.exec(stdout)?.[1]
   assert.ok(encoded, `Kein MathWriting-Ergebnis: ${stdout.slice(-2_000)}`)
   const result = JSON.parse(Buffer.from(encoded, 'base64').toString('utf8'))
+  let enhanced
+  if (enhancedAudit) {
+    const require = createRequire(import.meta.url)
+    const { MODEL, createEnhancedMathService } = require('../electron/enhanced-math.cjs')
+    const enhancedUserData = path.join(temporary, 'enhanced-user-data')
+    const modelDirectory = path.join(enhancedUserData, 'models', 'enhanced-math')
+    fs.mkdirSync(modelDirectory, { recursive: true, mode: 0o700 })
+    fs.copyFileSync(
+      path.resolve(enhancedModelPath),
+      path.join(modelDirectory, MODEL.filename),
+      fs.constants.COPYFILE_FICLONE,
+    )
+    const runtimes = [enhancedRuntimePath, enhancedBaselineRuntimePath]
+      .filter(Boolean)
+      .map((filename) => path.resolve(filename))
+    const service = createEnhancedMathService({
+      userDataPath: enhancedUserData,
+      runtimePath: () => runtimes,
+    })
+    const threads = Math.max(1, Math.min(4, Number(process.env.FANOTES_ENHANCED_MATH_THREADS) || 2))
+    let attempted = 0
+    let accepted = 0
+    let failures = 0
+    let improved = 0
+    let worsened = 0
+    let fusedEdits = 0
+    let fusedExact = 0
+    for (const row of result.rows) {
+      const image = row.enhancedImage
+      delete row.enhancedImage
+      let predicted = row.predicted
+      if (image) {
+        attempted += 1
+        try {
+          const pixels = Buffer.from(image.pixelsBase64, 'base64')
+          assert.equal(pixels.length, image.width * image.height, `Ungültiges Formelbild für ${row.id}.`)
+          if (enhancedImageDirectory) {
+            const directory = path.resolve(enhancedImageDirectory)
+            fs.mkdirSync(directory, { recursive: true })
+            fs.writeFileSync(
+              path.join(directory, `${row.id}.pgm`),
+              Buffer.concat([Buffer.from(`P5\n${image.width} ${image.height}\n255\n`, 'ascii'), pixels]),
+            )
+          }
+          const candidate = await service.recognize({
+            pixels: new Uint8Array(pixels),
+            width: image.width,
+            height: image.height,
+            threads,
+          })
+          row.enhancedPredicted = normalizedLatex(candidate.latex)
+          row.enhancedStructured = candidate.structured
+          row.enhancedRecommended = candidate.recommended
+          row.enhancedMeanTokenMargin = candidate.meanTokenMargin
+          if (candidate.recommended) {
+            accepted += 1
+            predicted = row.enhancedPredicted
+          }
+        } catch (error) {
+          failures += 1
+          row.enhancedError = error instanceof Error ? error.message : String(error)
+        }
+      }
+      const edits = editDistance(row.expected, predicted)
+      if (edits < row.edits) improved += 1
+      if (edits > row.edits) worsened += 1
+      fusedEdits += edits
+      fusedExact += Number(row.expected === predicted)
+      row.fusedPredicted = predicted
+      row.fusedEdits = edits
+    }
+    enhanced = {
+      engine: MODEL.id,
+      attempted,
+      accepted,
+      failures,
+      improved,
+      worsened,
+      exact: fusedExact,
+      exactRate: result.rows.length ? fusedExact / result.rows.length : 0,
+      edits: fusedEdits,
+      characterErrorRate: result.characters ? fusedEdits / result.characters : 0,
+    }
+  }
   const summary = {
     source: 'Google MathWriting 2024 excerpt',
     split,
     reserved,
     renderedWidth,
     renderedHeight,
+    sampleOffset,
     samples: result.samples,
     exact: result.exact,
     exactRate: result.exactRate,
     characters: result.characters,
     edits: result.edits,
     characterErrorRate: result.characterErrorRate,
+    ...(enhanced ? { enhanced } : {}),
   }
   if (!reserved && process.env.FANOTES_MATHWRITING_DETAILS === '1') summary.rows = result.rows
   console.log(JSON.stringify(summary, null, 2))

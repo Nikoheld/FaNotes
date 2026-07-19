@@ -112,6 +112,10 @@ export type AppSettings = {
   ocrThreadLimit: number
   /** Desktop can add the larger contextual model to the native compact model. */
   desktopOcrModel: 'compact' | 'extended'
+  /** Optional native 2-D handwritten-formula sequence recognizer. */
+  enhancedMathRecognition: boolean
+  /** Records explicit acceptance of the separately downloaded model license. */
+  enhancedMathLicenseAccepted: boolean
   /** Seconds to retain the large TrOCR worker after the last conversion. */
   ocrModelKeepAliveSeconds: number
   /** 0 uses the normal desktop I/O scheduler; otherwise caps parallel work. */
@@ -155,6 +159,16 @@ export type UpdateState = {
   autoDownloadUpdates: boolean
   installUpdatesOnQuit: boolean
   updateChannel: 'stable' | 'beta'
+}
+
+export type EnhancedMathRecognitionState = {
+  supported: boolean
+  installed: boolean
+  downloading: boolean
+  modelId: 'posformer-crohme-q4-k'
+  size: number
+  license: 'CC-BY-NC-SA-3.0'
+  homepage: string
 }
 
 export type BootstrapData = {
@@ -325,6 +339,25 @@ export type FaNotesApi = {
     height: number
     threads: number
   }) => Promise<{ probabilities: Float32Array; dims: number[]; characters: string[]; engine: 'onnxruntime-node-cpu' }>
+  getEnhancedMathRecognitionState?: () => Promise<EnhancedMathRecognitionState>
+  installEnhancedMathRecognitionModel?: (request: { acceptLicense: true }) => Promise<EnhancedMathRecognitionState>
+  recognizeEnhancedMath?: (request: {
+    pixels: Uint8Array
+    width: number
+    height: number
+  }) => Promise<{
+    latex: string
+    engine: 'posformer-crohme-q4-k'
+    durationMs: number
+    /** True only when the sequence contains a genuine 2-D construct. */
+    structured: boolean
+    /** Conservative holdout-calibrated decision to prefer it over the fallback. */
+    recommended: boolean
+    /** Mean top-1/top-2 decoder-logit margin; deliberately not a probability. */
+    meanTokenMargin: number
+    weakTokenRatio: number
+    decodedTokens: number
+  }>
   writeFile: (relativePath: string, content: string) => Promise<{ modifiedAt: string }>
   createNote: (parentPath?: string, preferredName?: string) => Promise<CreateResult>
   createFolder: (parentPath?: string, preferredName?: string) => Promise<CreateResult>

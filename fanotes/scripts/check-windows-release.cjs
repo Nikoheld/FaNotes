@@ -102,9 +102,17 @@ assert.equal(packageConfig.build.portable.artifactName, 'FaNotes-Portable-${vers
 assert.ok(packageConfig.build.files.includes('resources/onenote/**/*'))
 assert.ok(packageConfig.build.files.includes('!dist/ocr/fanotes-trocr-web/**/*'))
 assert.ok(packageConfig.build.files.includes('!dist/ocr/pylaia-iam-q8.onnx'))
-assert.equal(packageConfig.build.win.extraResources.length, 2)
+assert.equal(packageConfig.build.win.extraResources.length, 3)
+const windowsNativeMathResource = packageConfig.build.win.extraResources.find((entry) => entry.to === 'native-math')
 const windowsNativeOcrResource = packageConfig.build.win.extraResources.find((entry) => entry.from === 'node_modules/onnxruntime-node')
 const windowsNativeCommonResource = packageConfig.build.win.extraResources.find((entry) => entry.to === 'native-ocr/node_modules/onnxruntime-common')
+assert.ok(windowsNativeMathResource)
+assert.equal(windowsNativeMathResource.from, 'native-math/win32-x64')
+assert.deepEqual(windowsNativeMathResource.filter, [
+  'crispembed.exe',
+  'crispembed-avx2.exe',
+  'runtime-manifest.json',
+])
 assert.ok(windowsNativeOcrResource)
 assert.ok(windowsNativeCommonResource)
 assert.equal(windowsNativeOcrResource.from, 'node_modules/onnxruntime-node')

@@ -764,6 +764,11 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .setting-control select, .setting-control input:not([type="range"]):not([type="color"]) { width: 100%; min-width: 170px; height: 31px; border-radius: 7px; border: 1px solid var(--border-strong); color: var(--text-soft); background: var(--bg-elevated); padding: 0 8px; font-size: 10px; }
 .settings-resource-note { min-height: 38px; display: flex; align-items: center; gap: 8px; padding: 8px 15px; color: var(--text-muted); background: color-mix(in srgb, var(--accent) 5%, transparent); font-size: 8.5px; line-height: 1.45; }
 .settings-resource-note svg { flex: none; color: var(--accent-readable); }
+.settings-inline-button { min-height: 31px; display: inline-flex; align-items: center; justify-content: center; gap: 7px; padding: 0 11px; border: 1px solid color-mix(in srgb, var(--accent) 34%, var(--border)); border-radius: 8px; color: var(--text); background: color-mix(in srgb, var(--accent) 10%, var(--bg-elevated)); font: 650 9px/1 var(--ui-font); cursor: pointer; }
+.settings-inline-button:hover:not(:disabled) { border-color: color-mix(in srgb, var(--accent) 58%, var(--border)); background: color-mix(in srgb, var(--accent) 16%, var(--bg-elevated)); }
+.settings-inline-button:disabled { opacity: .55; cursor: not-allowed; }
+.settings-link-button { display: inline; margin: 0; padding: 0; border: 0; color: var(--accent-readable); background: transparent; font: inherit; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+.settings-inline-error { padding: 8px 15px; border-top: 1px solid color-mix(in srgb, #f16d78 28%, var(--border)); color: color-mix(in srgb, #f16d78 78%, var(--text)); background: color-mix(in srgb, #f16d78 7%, transparent); font-size: 9px; line-height: 1.45; }
 .toggle { width: 36px; height: 20px; padding: 2px; border: 0; border-radius: 99px; background: color-mix(in srgb, var(--text-muted) 27%, transparent); cursor: pointer; transition: background .16s; }
 .toggle span { display: block; width: 16px; height: 16px; border-radius: 50%; background: #f8f8fb; box-shadow: 0 2px 5px rgba(0,0,0,.2); transition: transform .16s; }
 .toggle.is-on { background: var(--accent); }
