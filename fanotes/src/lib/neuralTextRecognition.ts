@@ -1335,6 +1335,39 @@ const rareContextCommonNeighbour = (
 
 export const rareContextCommonNeighbourForTests = rareContextCommonNeighbour
 
+const containsUnknownContextWord = (
+  text: string,
+  language: RecognitionLanguage,
+  wordMembership?: WordMembership,
+) => {
+  const words = text.toLocaleLowerCase(language)
+    .match(language === 'de' ? /[a-zäöü]{3,}/giu : /[a-z]{3,}/giu) ?? []
+  return words.some((word) => !LANGUAGE_WORDS[language].has(word) && !wordMembership?.(word))
+}
+
+/** Transformers.js 3.8's image pipeline currently exposes only one generated
+ * sequence even when its sampler is configured with multiple beams. Request a
+ * genuinely independent rendering only when the first context view remains
+ * unsupported, or when it disagrees with the compact visual path on an
+ * unknown word. Known, agreeing lines retain the single-inference fast path. */
+const shouldRequestIndependentTrocrView = (
+  candidateCount: number,
+  compactText: string,
+  contextText: string,
+  contextNeedsContext: boolean,
+  language: RecognitionLanguage,
+  wordMembership?: WordMembership,
+) => {
+  if (candidateCount > 1 || !contextText) return false
+  if (contextNeedsContext) return true
+  if (!containsUnknownContextWord(contextText, language, wordMembership)) return false
+  const compactSurface = compactText.toLocaleLowerCase(language).trim()
+  const contextSurface = contextText.toLocaleLowerCase(language).trim()
+  return !compactSurface || compactSurface !== contextSurface
+}
+
+export const shouldRequestIndependentTrocrViewForTests = shouldRequestIndependentTrocrView
+
 /** A complete-line decoder can prepend or append a short fluent phrase beyond
  * the ink. It is not safe to trim merely because two models disagree: this
  * guard activates only after every independently separated physical word was
@@ -2367,11 +2400,9 @@ export async function recognizeNeuralText(
       }
     }
 
-    const selectedWords = selected?.text.toLocaleLowerCase(language)
-      .match(language === 'de' ? /[a-zäöü]{3,}/giu : /[a-z]{3,}/giu) ?? []
-    const containsUnknownWord = selectedWords.some((word) => (
-      !LANGUAGE_WORDS[language].has(word) && !wordMembership?.(word)
-    ))
+    const containsUnknownWord = selected
+      ? containsUnknownContextWord(selected.text, language, wordMembership)
+      : false
     const isWebRuntime = window.fanotes.platform === 'web'
     if (useContextModel && (isWebRuntime || !selected || primaryAssessment?.needsContext || containsUnknownWord)) {
       try {
@@ -2385,6 +2416,52 @@ export async function recognizeNeuralText(
         let bestContext = rankedContext[0]
         let rawText = bestContext?.rawText ?? normalizeGermanSharpS(trocrRecognition.text).normalize('NFC').trim()
         let text = bestContext?.text ?? normalizedTrocrText(rawText, language, line)
+        let contextAssessment = trocrLineAssessment(text, line, language, wordMembership)
+        let alternateRanked: ReturnType<typeof rankTrocrCandidates> | null = null
+        const loadAlternateRanked = async () => {
+          if (alternateRanked) return alternateRanked
+          const alternateImage = renderLineImage(line, sourceWidth, sourceHeight, {
+            marginYRatio: 0.32,
+            inkScale: 0.92,
+          })
+          const alternateRecognition = await recognizeTrocrLineCandidates(
+            alternateImage.pixels,
+            alternateImage.width,
+            alternateImage.height,
+          )
+          alternateRanked = rankTrocrCandidates(
+            alternateRecognition.candidates.length
+              ? alternateRecognition.candidates
+              : [alternateRecognition.text],
+            line,
+            language,
+            wordMembership,
+          )
+          return alternateRanked
+        }
+        if (shouldRequestIndependentTrocrView(
+          trocrRecognition.candidates.length,
+          selected?.text ?? '',
+          text,
+          contextAssessment.needsContext,
+          language,
+          wordMembership,
+        )) {
+          try {
+            const independent = await loadAlternateRanked()
+            const combinedRawCandidates = [
+              ...rankedContext.map((candidate) => candidate.rawText),
+              ...independent.map((candidate) => candidate.rawText),
+            ]
+            rankedContext = rankTrocrCandidates(combinedRawCandidates, line, language, wordMembership)
+            bestContext = rankedContext[0]
+            rawText = bestContext?.rawText ?? rawText
+            text = bestContext?.text ?? text
+            contextAssessment = trocrLineAssessment(text, line, language, wordMembership)
+          } catch {
+            // The first context view and compact model remain available.
+          }
+        }
         const disputedCommonNeighbour = selected
           ? rareContextCommonNeighbour(selected.text, text, rawText, language)
           : ''
@@ -2396,24 +2473,7 @@ export async function recognizeNeuralText(
             // default crop chooses the valid but wrong past tense, while this
             // view reads the visible final `r`. Run it only after the strict
             // ambiguity gate above so ordinary lines keep one TrOCR inference.
-            const alternateImage = renderLineImage(line, sourceWidth, sourceHeight, {
-              marginYRatio: 0.32,
-              inkScale: 0.92,
-            })
-            const alternateRecognition = await recognizeTrocrLineCandidates(
-              alternateImage.pixels,
-              alternateImage.width,
-              alternateImage.height,
-            )
-            const alternateRanked = rankTrocrCandidates(
-              alternateRecognition.candidates.length
-                ? alternateRecognition.candidates
-                : [alternateRecognition.text],
-              line,
-              language,
-              wordMembership,
-            )
-            const alternateBest = alternateRanked[0]
+            const alternateBest = (await loadAlternateRanked())[0]
             const alternateWord = alternateBest
               ? fusionAlignmentSurface(alternateBest.text, language)
               : ''
@@ -2430,7 +2490,7 @@ export async function recognizeNeuralText(
             // The default context and compact visual paths remain available.
           }
         }
-        let contextAssessment = trocrLineAssessment(text, line, language, wordMembership)
+        contextAssessment = trocrLineAssessment(text, line, language, wordMembership)
         const surfaceText = normalizedTrocrSurface(rawText, line)
         const contextualEdits = wordDistance(
           surfaceText.toLocaleLowerCase(language),

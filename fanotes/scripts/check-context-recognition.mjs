@@ -38,6 +38,7 @@ try {
     rareContextCommonNeighbourForTests,
     rankTrocrCandidateTextsForTests,
     repairNeuralPhysicalWordSpacingForTests,
+    shouldRequestIndependentTrocrViewForTests,
     trocrStructuralRewritePenaltyForTests,
     trocrOrdinaryWordNamePenaltyForTests,
     trocrDenseGermanNamePenaltyForTests,
@@ -362,6 +363,27 @@ try {
     rareContextCommonNeighbourForTests('gavin', 'Gavin', 'Gavin', 'en'),
     '',
     'Ein grossgeschriebener Name darf keine häufigere Alternativansicht erzwingen.',
+  )
+  const independentViewWords = (word) => ['hallo', 'test'].includes(word.toLocaleLowerCase('de-CH'))
+  assert.equal(
+    shouldRequestIndependentTrocrViewForTests(1, 'mallo', 'mallo', true, 'de', independentViewWords),
+    true,
+    'Ein weiterhin kontextbedürftiger Einzelpfad muss eine echte unabhängige Bildansicht erhalten.',
+  )
+  assert.equal(
+    shouldRequestIndependentTrocrViewForTests(1, 'mallo', 'xyqaro', false, 'de', independentViewWords),
+    true,
+    'Ein unbekannter Kontextpfad, der dem kompakten Bildpfad widerspricht, braucht eine zweite Bildansicht.',
+  )
+  assert.equal(
+    shouldRequestIndependentTrocrViewForTests(1, 'test', 'hallo', false, 'de', independentViewWords),
+    false,
+    'Zwei bekannte, bereits plausible Wörter dürfen nicht pauschal eine zweite teure Inferenz auslösen.',
+  )
+  assert.equal(
+    shouldRequestIndependentTrocrViewForTests(2, 'mallo', 'xyqaro', true, 'de', independentViewWords),
+    false,
+    'Liegen tatsächlich mehrere Modellkandidaten vor, darf keine redundante Bildansicht gestartet werden.',
   )
   assert.equal(
     applyFinalNeuralWordContext('mallo', 'de'),
