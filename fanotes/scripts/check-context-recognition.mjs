@@ -567,7 +567,7 @@ try {
     'Rabbi Eleanor ben Assarja said',
     'en',
     englishNameMembership,
-  ), 0)
+  ), 3)
   assert.equal(trocrStructuralRewritePenaltyForTests('einen Stadtkreis.', 'einen Stadt kreis.', 'de'), 4)
   assert.equal(trocrStructuralRewritePenaltyForTests('der Genreder Brettspielt', 'der Genre der Brettspielt', 'de'), 0)
   assert.equal(trocrStructuralRewritePenaltyForTests('tax atreble the rate', 'tax a treble the rate', 'en'), 0)

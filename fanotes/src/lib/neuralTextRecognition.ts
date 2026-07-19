@@ -1793,13 +1793,26 @@ const trocrOrdinaryWordNamePenalty = (
   ))
   if (changed.length !== 1 || !changed[0].target) return 0
   const { source, target } = changed[0]
-  if (!/^\p{Lu}\p{Ll}{2,}$/u.test(source.value) || !/^\p{Lu}\p{Ll}{2,}$/u.test(target.value)) return 0
+  if (!/^\p{Lu}\p{Ll}{2,}$/u.test(source.value)) return 0
+  const targetIsTitleCase = /^\p{Lu}\p{Ll}{2,}$/u.test(target.value)
+  if (!targetIsTitleCase) return 0
   const prefix = visualTop.slice(0, source.start).trimEnd().replace(/["'’\])}]+$/gu, '').trimEnd()
   if (!prefix || /[.!?]$/u.test(prefix)) return 0
   const sourceLower = source.value.toLocaleLowerCase('en-US')
   const targetLower = target.value.toLocaleLowerCase('en-US')
   const known = (word: string) => LANGUAGE_WORDS.en.has(word) || Boolean(wordMembership?.(word))
-  if (known(sourceLower) || !known(targetLower) || ENGLISH_CANONICAL_PROPER_NAMES.has(targetLower)) return 0
+  if (known(sourceLower) || !known(targetLower)) return 0
+
+  if (ENGLISH_CANONICAL_PROPER_NAMES.has(targetLower)) {
+    // Replacing one plausible name with a more frequent canonical name is
+    // allowed by default (`Geleste` -> `Celeste`). An explicit title or name
+    // connector, however, independently proves that this exact visual token is
+    // part of a name sequence; frequency alone must not rewrite it.
+    const suffix = visualTop.slice(source.end)
+    const followsNameTitle = /(?:^|\s)(?:rabbi|dr|doctor|prof|professor|mr|mrs|ms|saint|st)\.?$/iu.test(prefix)
+    const precedesNameConnector = /^\s+(?:al|ben|bin|de|del|der|di|ibn|van|von)\b/iu.test(suffix)
+    if (!followsNameTitle && !precedesNameConnector) return 0
+  }
   return TROCR_ORDINARY_WORD_NAME_PENALTY
 }
 
