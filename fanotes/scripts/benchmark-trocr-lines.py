@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+from collections import deque
 import contextlib
 import csv
 import hashlib
@@ -30,6 +31,7 @@ class Row:
     image_bytes: bytes
     text: str
     group_id: str = ""
+    local_holdout: bool = False
 
 
 @dataclass(frozen=True)
@@ -129,6 +131,92 @@ def load_scads(root: Path, split: str) -> list[Row]:
     return rows
 
 
+def load_image_directory(root: Path) -> list[Row]:
+    """Load a local evaluation-only corpus whose filename stem is the truth.
+
+    This path deliberately returns bytes directly and never stages, copies or
+    augments the images. It is intended for user-provided holdouts which must
+    remain excluded from model training.
+    """
+    accepted_suffixes = {".bmp", ".jpeg", ".jpg", ".png", ".tif", ".tiff", ".webp"}
+    rows = [
+        Row(path.read_bytes(), normalize_text(path.stem), path.name, True)
+        for path in sorted(root.iterdir(), key=lambda value: value.name.casefold())
+        if path.is_file() and path.suffix.casefold() in accepted_suffixes and normalize_text(path.stem)
+    ]
+    if not rows:
+        raise ValueError(f"No labelled images found in holdout directory: {root}")
+    return rows
+
+
+def production_equivalent_holdout_line(source: Image.Image) -> Image.Image:
+    """Turn an app screenshot into the line raster produced from stored ink.
+
+    FaNotes recognition never sends the paper grid or the bottom-right canvas
+    resize affordance to TrOCR. The tablet strokes are rendered as black ink on
+    white with 0.40 vertical and 0.22 horizontal margins. Local PNG holdouts do
+    not carry the original vectors, so isolate only their dark ink and recreate
+    that same model input without consulting the expected filename text.
+    """
+    rgb = ImageOps.exif_transpose(source).convert("RGB")
+    pixels = np.asarray(rgb, dtype=np.uint8)
+    # The app ink is near-black; paper and grid dots are light. Keep a generous
+    # antialiasing range while rejecting both background layers.
+    ink = np.max(pixels, axis=2) < 170
+    height, width = ink.shape
+    # Screenshot chrome (scrollbars, crop handles and editor side rails) is
+    # connected to an outer edge. Real exported tablet ink has paper margin,
+    # so remove every edge-connected component without inspecting its shape or
+    # the expected transcription.
+    boundary: deque[tuple[int, int]] = deque()
+    for column in range(width):
+        if ink[0, column]:
+            boundary.append((0, column))
+        if height > 1 and ink[height - 1, column]:
+            boundary.append((height - 1, column))
+    for row in range(1, max(1, height - 1)):
+        if ink[row, 0]:
+            boundary.append((row, 0))
+        if width > 1 and ink[row, width - 1]:
+            boundary.append((row, width - 1))
+    while boundary:
+        row, column = boundary.popleft()
+        if not ink[row, column]:
+            continue
+        ink[row, column] = False
+        for row_offset in (-1, 0, 1):
+            for column_offset in (-1, 0, 1):
+                neighbour_row = row + row_offset
+                neighbour_column = column + column_offset
+                if (
+                    (row_offset or column_offset)
+                    and 0 <= neighbour_row < height
+                    and 0 <= neighbour_column < width
+                    and ink[neighbour_row, neighbour_column]
+                ):
+                    boundary.append((neighbour_row, neighbour_column))
+    # Screenshot exports contain a resize/cursor affordance in this corner.
+    # Stored stroke recognition has no corresponding ink.
+    corner = max(24, min(56, round(min(width, height) * 0.18)))
+    ink[max(0, height - corner):, max(0, width - corner):] = False
+    positions = np.argwhere(ink)
+    if not positions.size:
+        return Image.new("RGB", (32, 32), "white")
+    top, left = positions.min(axis=0)
+    bottom, right = positions.max(axis=0) + 1
+    content = ink[top:bottom, left:right]
+    content_height = max(1, content.shape[0])
+    margin_y = round(min(36, max(4, content_height * 0.40)))
+    margin_x = round(min(48, max(5, content_height * 0.22)))
+    output = np.full(
+        (content.shape[0] + margin_y * 2, content.shape[1] + margin_x * 2),
+        255,
+        dtype=np.uint8,
+    )
+    output[margin_y:margin_y + content.shape[0], margin_x:margin_x + content.shape[1]][content] = 0
+    return Image.fromarray(output, mode="L").convert("RGB")
+
+
 def selected(rows: list[Row], limit: int) -> list[Row]:
     if limit <= 0 or limit >= len(rows):
         return rows
@@ -142,6 +230,7 @@ def main() -> None:
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument("--dataset", type=Path)
     source.add_argument("--scads-root", type=Path)
+    source.add_argument("--image-directory", type=Path)
     parser.add_argument("--scads-split", choices=["train", "validation", "test"], default="test")
     parser.add_argument("--limit", type=int, default=0)
     parser.add_argument("--batch-size", type=int, default=16)
@@ -152,6 +241,7 @@ def main() -> None:
     parser.add_argument("--encoder-file-name")
     parser.add_argument("--decoder-file-name")
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
+    parser.add_argument("--threads", type=int, default=2)
     parser.add_argument("--worst", type=int, default=12)
     parser.add_argument("--json-output", type=Path)
     parser.add_argument("--include-predictions", action="store_true")
@@ -159,8 +249,20 @@ def main() -> None:
     args = parser.parse_args()
     if args.num_return_sequences < 1 or args.num_return_sequences > args.num_beams:
         parser.error("--num-return-sequences must be between 1 and --num-beams")
+    if args.image_directory and not args.image_directory.is_dir():
+        parser.error("--image-directory must point to an existing directory")
 
-    rows = load_parquet(args.dataset) if args.dataset else load_scads(args.scads_root, args.scads_split)
+    threads = max(1, min(8, args.threads))
+    torch.set_num_threads(threads)
+    torch.set_num_interop_threads(1)
+
+    rows = (
+        load_parquet(args.dataset)
+        if args.dataset
+        else load_scads(args.scads_root, args.scads_split)
+        if args.scads_root
+        else load_image_directory(args.image_directory)
+    )
     rows = selected(rows, args.limit)
     device = torch.device(args.device)
     processor = TrOCRProcessor.from_pretrained(args.model, use_fast=False)
@@ -203,7 +305,11 @@ def main() -> None:
         images = []
         for row in batch:
             with Image.open(io.BytesIO(row.image_bytes)) as source_image:
-                images.append(ImageOps.exif_transpose(source_image).convert("RGB"))
+                images.append(
+                    production_equivalent_holdout_line(source_image)
+                    if row.local_holdout
+                    else ImageOps.exif_transpose(source_image).convert("RGB")
+                )
         pixel_values = processor(images=images, return_tensors="pt").pixel_values.to(device)
         started = time.perf_counter()
         autocast = torch.autocast(
@@ -296,16 +402,25 @@ def main() -> None:
         "model": args.model,
         "runtime": args.runtime,
         "source": {
-            "kind": "parquet" if args.dataset else "scads",
+            "kind": "parquet" if args.dataset else "scads" if args.scads_root else "local-image-holdout",
             "role": (
                 "test" if args.dataset and "test" in args.dataset.stem.lower()
                 else "validation" if args.dataset and "validation" in args.dataset.stem.lower()
                 else "train" if args.dataset and "train" in args.dataset.stem.lower()
                 else args.scads_split if args.scads_root
-                else "unspecified"
+                else "test"
             ),
             "writerDisjoint": bool(args.scads_root),
-            "grouping": "scads-page-id" if args.scads_root else "not-provided",
+            "grouping": (
+                "scads-page-id" if args.scads_root
+                else "one-labelled-image-per-file" if args.image_directory
+                else "not-provided"
+            ),
+            "trainingExcluded": bool(args.image_directory),
+            "preprocessing": (
+                "production-equivalent-ink-render" if args.image_directory
+                else "checkpoint-processor"
+            ),
         },
         "numBeams": args.num_beams,
         "numReturnSequences": args.num_return_sequences,

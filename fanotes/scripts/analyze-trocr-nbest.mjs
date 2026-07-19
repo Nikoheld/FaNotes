@@ -32,7 +32,10 @@ const server = await createServer({
 })
 
 try {
-  const { rankTrocrCandidateTextsForTests } = await server.ssrLoadModule('/src/lib/neuralTextRecognition.ts')
+  const {
+    rankTrocrCandidateTextsForTests,
+    trocrVisualRankPenaltyForTests,
+  } = await server.ssrLoadModule('/src/lib/neuralTextRecognition.ts')
   const { installNeuralWordContextCandidates } = await server.ssrLoadModule('/src/lib/neuralWordContext.ts')
   const words = fs.readFileSync(path.resolve(`public/spell/${language}.words`), 'utf8').trimEnd().split('\n')
   const dictionary = new Set(words)
@@ -46,16 +49,26 @@ try {
   let rerankedExact = 0
   const changed = []
   const rankPenalties = [0.1, 0.2, 0.3, 0.4, 0.5, 0.65, 0.8, 1, 1.25, 1.5, 2, 3]
-  const penaltyMetrics = new Map(rankPenalties.map((penalty) => [penalty, { edits: 0, exact: 0, changed: 0 }]))
+  const penaltyMetrics = new Map(rankPenalties.map((penalty) => [penalty, {
+    edits: 0,
+    exact: 0,
+    changed: 0,
+    improved: 0,
+    worsened: 0,
+  }]))
   for (const record of benchmark.predictions) {
     const truth = String(record.truth ?? '')
     const candidates = Array.isArray(record.candidates) ? record.candidates.map(String) : []
     if (!truth || !candidates.length) continue
     const ranked = rankTrocrCandidateTextsForTests(candidates, language, wordMembership)
-    const baseScores = ranked.map((entry) => ({
+    const penaltySweepScores = ranked.map((entry) => ({
       ...entry,
       visualRank: entry.visualRank ?? candidates.indexOf(entry.rawText),
-      baseScore: entry.baseScore ?? entry.score,
+      // Remove only the currently configured visual-rank penalty. Structural,
+      // lexical, name and punctuation evidence must remain in the simulation;
+      // using baseScore here previously discarded all of those safeguards.
+      scoreWithoutVisualPenalty: entry.score + Math.max(0, entry.visualRank)
+        * trocrVisualRankPenaltyForTests,
     }))
     const top = candidates[0]
     const selected = ranked[0]?.rawText ?? top
@@ -69,14 +82,17 @@ try {
     topExact += Number(top === truth)
     rerankedExact += Number(selected === truth)
     rankPenalties.forEach((penalty) => {
-      const candidate = [...baseScores].sort((first, second) => (
-        (second.baseScore - Math.max(0, second.visualRank) * penalty) -
-        (first.baseScore - Math.max(0, first.visualRank) * penalty)
+      const candidate = [...penaltySweepScores].sort((first, second) => (
+        (second.scoreWithoutVisualPenalty - Math.max(0, second.visualRank) * penalty) -
+        (first.scoreWithoutVisualPenalty - Math.max(0, first.visualRank) * penalty)
       ))[0]?.rawText ?? top
       const metrics = penaltyMetrics.get(penalty)
-      metrics.edits += distance(truth, candidate)
+      const candidateDistance = distance(truth, candidate)
+      metrics.edits += candidateDistance
       metrics.exact += Number(candidate === truth)
       metrics.changed += Number(candidate !== top)
+      metrics.improved += Number(candidateDistance < topDistance)
+      metrics.worsened += Number(candidateDistance > topDistance)
     })
     if (selected !== top) changed.push({
       delta: topDistance - selectedDistance,
@@ -102,6 +118,8 @@ try {
       cer: penaltyMetrics.get(penalty).edits / Math.max(1, characters),
       exactRate: penaltyMetrics.get(penalty).exact / Math.max(1, lines),
       changed: penaltyMetrics.get(penalty).changed,
+      improved: penaltyMetrics.get(penalty).improved,
+      worsened: penaltyMetrics.get(penalty).worsened,
     })),
   }, null, 2))
   changed

@@ -18,6 +18,11 @@ type HoldoutCase = {
   image: string
 }
 
+type HoldoutOptions = {
+  /** Evaluate ZIP-only personalization without loading the large TrOCR model. */
+  skipTrocr?: boolean
+}
+
 type PreparedImage = {
   pixels: Uint8ClampedArray
   width: number
@@ -170,8 +175,14 @@ const prepareImage = async (source: string) => {
   return prepareImageData(context.getImageData(0, 0, canvas.width, canvas.height))
 }
 
-export const runNasHandwritingHoldout = async (cases: HoldoutCase[], archiveUrl: string) => {
-  const { recognizeTrocrLine } = await import('../../src/lib/trocrClient')
+export const runNasHandwritingHoldout = async (
+  cases: HoldoutCase[],
+  archiveUrl: string,
+  options: HoldoutOptions = {},
+) => {
+  const recognizeTrocrLine = options.skipTrocr
+    ? null
+    : (await import('../../src/lib/trocrClient')).recognizeTrocrLine
   const archiveResponse = await fetch(archiveUrl)
   if (!archiveResponse.ok) throw new Error('Der persönliche GlyphenWerk-Export konnte nicht geladen werden.')
   await clearHandwritingTraining()
@@ -185,23 +196,27 @@ export const runNasHandwritingHoldout = async (cases: HoldoutCase[], archiveUrl:
   for (const item of cases) {
     const prepared = await prepareImage(item.image)
     const startedAt = performance.now()
-    const rawPrediction = (await recognizeTrocrLine(
-      prepared.pixels,
-      prepared.width,
-      prepared.height,
-      120_000,
-    )).normalize('NFC').replace(/\s+/gu, ' ').trim()
+    const rawPrediction = recognizeTrocrLine
+      ? (await recognizeTrocrLine(
+          prepared.pixels,
+          prepared.width,
+          prepared.height,
+          120_000,
+        )).normalize('NFC').replace(/\s+/gu, ' ').trim()
+      : '∫∫'
     const prediction = applyFinalNeuralWordContext(rawPrediction, 'de')
     const personal = await recognizePersonalRasterPixels({
       pixels: prepared.sourcePixels,
       width: prepared.sourceWidth,
       height: prepared.sourceHeight,
     }, samples, rawPrediction, 'de')
-    const blind = await recognizePersonalRasterPixels({
-      pixels: prepared.sourcePixels,
-      width: prepared.sourceWidth,
-      height: prepared.sourceHeight,
-    }, samples, '∫∫', 'de')
+    const blind = options.skipTrocr
+      ? personal
+      : await recognizePersonalRasterPixels({
+          pixels: prepared.sourcePixels,
+          width: prepared.sourceWidth,
+          height: prepared.sourceHeight,
+        }, samples, '∫∫', 'de')
     results.push({
       id: item.id,
       rawPrediction,
@@ -237,6 +252,7 @@ export const runNasHandwritingHoldout = async (cases: HoldoutCase[], archiveUrl:
       classCount: resources.classCount,
       baselineSampleCount: resources.baselineSampleCount,
       modelClassCount: resources.modelClassCount,
+      trocrLoaded: Boolean(recognizeTrocrLine),
     },
     cases: results,
   }
