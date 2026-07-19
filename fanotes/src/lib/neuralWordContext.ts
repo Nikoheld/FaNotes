@@ -637,6 +637,41 @@ export const applyFinalNeuralWordContext = (text: string, language: RecognitionL
   return repairNeuralWordSpacing(restored, language)
 }
 
+/** Applies the exhaustive spelling stage to a complete recognized line.
+ * English validation showed that unconstrained mid-line dictionary rewrites
+ * lose more visible characters than they recover. A line-level English repair
+ * therefore needs independent positional evidence: exactly one same-length,
+ * one-edit replacement at the final lexical token. Seven-letter words are
+ * sufficiently constrained; a shorter word remains eligible only when ink
+ * segmentation independently measured one physical word. The generic word
+ * function above stays available for isolated candidate comparison. */
+export const applyFinalNeuralLineContext = (
+  text: string,
+  language: RecognitionLanguage,
+  physicalWordCount?: number,
+) => {
+  const corrected = applyFinalNeuralWordContext(text, language)
+  if (language !== 'en' || corrected === text) return corrected
+  const sourceWords = [...text.matchAll(/[A-Za-z]+/gu)].map((match) => match[0])
+  const targetWords = [...corrected.matchAll(/[A-Za-z]+/gu)].map((match) => match[0])
+  if (
+    !sourceWords.length ||
+    sourceWords.length !== targetWords.length ||
+    text.replace(/[A-Za-z]+/gu, '#') !== corrected.replace(/[A-Za-z]+/gu, '#') ||
+    sourceWords.slice(0, -1).some((word, index) => word !== targetWords[index])
+  ) return text
+  const source = sourceWords.at(-1) ?? ''
+  const target = targetWords.at(-1) ?? ''
+  const safeIsolatedWord = physicalWordCount === 1 && sourceWords.length === 1
+  if (
+    source === target ||
+    Array.from(source).length !== Array.from(target).length ||
+    (!safeIsolatedWord && Array.from(source).length < 7) ||
+    boundedWordDistance(source.toLocaleLowerCase('en-US'), target.toLocaleLowerCase('en-US'), 1) !== 1
+  ) return text
+  return corrected
+}
+
 /** Uses the independently measured number of handwritten characters to
  * remove a single line-decoder insertion. A three-edit repair is deliberately
  * limited to one long, common word of exactly the measured length; the full

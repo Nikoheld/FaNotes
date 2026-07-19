@@ -22,6 +22,7 @@ try {
     personalizedTextFusionSelectionScore,
   } = await server.ssrLoadModule('/src/lib/personalizedTextRecognition.ts')
   const {
+    applyFinalNeuralLineContext,
     applyFinalNeuralWordContext,
     applyMeasuredNeuralWordContext,
     applyNeuralWordContext,
@@ -333,7 +334,7 @@ try {
     'Vertauschte verbundene Nachbarbuchstaben müssen auch im deutschen Wortkontext korrigiert werden.',
   )
   installNeuralWordContextCandidates('en', [
-    'break', 'breve', 'computed', 'computer', 'gave', 'movement', 'tests', 'twists',
+    'break', 'breve', 'computed', 'computer', 'debauchery', 'gave', 'movement', 'tests', 'twists',
   ])
   installNeuralWordContextCandidates('de', ['das', 'des', 'hallo', 'malo'])
   assert.equal(
@@ -401,6 +402,26 @@ try {
     applyFinalNeuralWordContext("Something's up and John didn't answer", 'en'),
     "Something's up and John didn't answer",
     'Apostrophe dürfen weder Wortteile korrigieren noch die echte Grenze nach einer Kontraktion entfernen.',
+  )
+  assert.equal(
+    applyFinalNeuralLineContext('ment and Satanic debaucherg.', 'en'),
+    'ment and Satanic debauchery.',
+    'Ein langes unbekanntes englisches Schlusswort darf durch genau einen eindeutigen sichtbaren Edit repariert werden.',
+  )
+  assert.equal(
+    applyFinalNeuralLineContext('debaucherg appears here.', 'en'),
+    'debaucherg appears here.',
+    'Die exhaustive englische Wörterbuchstufe darf ein Wort mitten in einer Zeile nicht ohne unabhängige Positionsevidenz umschreiben.',
+  )
+  assert.equal(
+    applyFinalNeuralLineContext('brege', 'en'),
+    'brege',
+    'Ein kurzes Wort darf ohne gemessene physische Einzelwortstruktur nicht allein vom Vollwörterbuch ersetzt werden.',
+  )
+  assert.equal(
+    applyFinalNeuralLineContext('brege', 'en', 1),
+    'breve',
+    'Eine unabhängig gemessene einzelne Wortgruppe erhält weiterhin die sichere isolierte Wörterbuchkorrektur.',
   )
   assert.equal(
     applyFinalNeuralWordContext('Richard Harris und Helena', 'de'),

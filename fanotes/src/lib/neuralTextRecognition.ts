@@ -25,6 +25,7 @@ import {
   useExtendedDesktopOcrModel,
 } from './resourceLimits'
 import {
+  applyFinalNeuralLineContext,
   applyFinalNeuralWordContext,
   applyNeuralWordContext,
   isExtendedNeuralContextWord,
@@ -2746,7 +2747,11 @@ export async function recognizeNeuralText(
       }
     }
     if (selected?.text) {
-      const contextText = applyFinalNeuralWordContext(selected.text, language)
+      const contextText = applyFinalNeuralLineContext(
+        selected.text,
+        language,
+        separated?.physicalWordCount,
+      )
       const boundedText = applyNeuralPhysicalWordBoundaries(
         contextText,
         line,

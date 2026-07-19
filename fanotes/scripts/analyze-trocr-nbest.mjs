@@ -47,7 +47,7 @@ try {
     trocrVisualRankPenaltyForTests,
   } = await server.ssrLoadModule('/src/lib/neuralTextRecognition.ts')
   const {
-    applyFinalNeuralWordContext,
+    applyFinalNeuralLineContext,
     applyNeuralWordContext,
     installNeuralWordContextCandidates,
   } = await server.ssrLoadModule('/src/lib/neuralWordContext.ts')
@@ -104,13 +104,13 @@ try {
     }))
     const top = candidates[0]
     const selected = ranked[0]?.rawText ?? top
-    const rawFinalContext = applyFinalNeuralWordContext(selected, language)
+    const rawFinalContext = applyFinalNeuralLineContext(selected, language)
     // The ranked `.text` also applies ink-dependent terminal punctuation
     // cleanup. N-best benchmark JSON has no stroke geometry, so comparing it
     // here would count synthetic punctuation removal as a word-context error.
     // Measure the lexical stages directly on the selected decoder surface.
     const aggressiveContext = applyNeuralWordContext(selected, language)
-    const aggressiveFinalContext = applyFinalNeuralWordContext(aggressiveContext, language)
+    const aggressiveFinalContext = applyFinalNeuralLineContext(aggressiveContext, language)
     const topDistance = distance(truth, top)
     const selectedDistance = distance(truth, selected)
     const rawFinalContextDistance = distance(truth, rawFinalContext)
