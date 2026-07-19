@@ -29,6 +29,7 @@ GERMAN_SPECIALS = set("ÄÖÜäöü")
 class Row:
     image_bytes: bytes
     text: str
+    group_id: str = ""
 
 
 @dataclass(frozen=True)
@@ -124,7 +125,7 @@ def load_scads(root: Path, split: str) -> list[Row]:
             image_path = root / "images/lines" / value["line_file"]
             text = normalize_text(value["text"])
             if image_path.is_file() and text:
-                rows.append(Row(image_path.read_bytes(), text))
+                rows.append(Row(image_path.read_bytes(), text, value["page_id"]))
     return rows
 
 
@@ -281,6 +282,8 @@ def main() -> None:
                     "prediction": prediction,
                     "candidates": list(candidates),
                 }
+                if row.group_id:
+                    prediction_record["groupId"] = row.group_id
                 if args.include_sequence_scores:
                     prediction_record["candidateScores"] = list(candidate_scores)
                 prediction_records.append(prediction_record)
@@ -292,6 +295,18 @@ def main() -> None:
     result = {
         "model": args.model,
         "runtime": args.runtime,
+        "source": {
+            "kind": "parquet" if args.dataset else "scads",
+            "role": (
+                "test" if args.dataset and "test" in args.dataset.stem.lower()
+                else "validation" if args.dataset and "validation" in args.dataset.stem.lower()
+                else "train" if args.dataset and "train" in args.dataset.stem.lower()
+                else args.scads_split if args.scads_root
+                else "unspecified"
+            ),
+            "writerDisjoint": bool(args.scads_root),
+            "grouping": "scads-page-id" if args.scads_root else "not-provided",
+        },
         "numBeams": args.num_beams,
         "numReturnSequences": args.num_return_sequences,
         "sampleCount": len(rows),
