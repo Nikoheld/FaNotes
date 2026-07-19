@@ -293,7 +293,8 @@ const normalizeKnownWordCase = (
   const locale = language === 'de' ? 'de-CH' : 'en-US'
   const letters = Array.from(source).filter((character) => /^\p{L}$/u.test(character))
   const allUppercase = letters.length > 1 && letters.every((character) => (
-    character === character.toLocaleUpperCase(locale)
+    character === character.toLocaleUpperCase(locale) &&
+    character !== character.toLocaleLowerCase(locale)
   ))
   if (allUppercase) return source
   const internalUppercase = letters.slice(1).some((character) => (
@@ -306,6 +307,50 @@ const normalizeKnownWordCase = (
     ? lower[0]?.toLocaleUpperCase(locale) + lower.slice(1)
     : lower
 }
+
+const allUppercaseWord = (source: string, language: RecognitionLanguage) => {
+  const locale = language === 'de' ? 'de-CH' : 'en-US'
+  const letters = Array.from(source).filter((character) => /^\p{L}$/u.test(character))
+  return letters.length > 1 && letters.every((character) => (
+    character === character.toLocaleUpperCase(locale) &&
+    character !== character.toLocaleLowerCase(locale)
+  ))
+}
+
+const titleCaseWord = (source: string, language: RecognitionLanguage) => {
+  const locale = language === 'de' ? 'de-CH' : 'en-US'
+  const letters = Array.from(source)
+  return (
+    letters.length >= 3 &&
+    letters[0] === letters[0]?.toLocaleUpperCase(locale) &&
+    letters[0] !== letters[0]?.toLocaleLowerCase(locale) &&
+    letters.slice(1).every((character) => character === character.toLocaleLowerCase(locale))
+  )
+}
+
+/** A title-cased unknown at sentence start is ambiguous on its own. An
+ * adjacent title-cased token is independent structure for a personal name,
+ * so dictionary frequency must not translate `Edward Regan` to `Eduard
+ * Regan`. Ordinary sentence starts such as `Atteilung unterteilt` keep their
+ * correction path because the following word is lower-case. */
+const withinTitleNameSequence = (
+  complete: string,
+  offset: number,
+  source: string,
+  language: RecognitionLanguage,
+) => {
+  if (!titleCaseWord(source, language)) return false
+  const titleToken = /\p{Lu}\p{Ll}{2,}/u
+  const prefix = complete.slice(0, offset).replace(/["'’\])}]+\s*$/gu, '').trimEnd()
+  const suffix = complete.slice(offset + source.length).replace(/^\s*["'’([{]+/gu, '').trimStart()
+  const previous = prefix.match(/\p{L}+$/u)?.[0] ?? ''
+  const next = suffix.match(/^\p{L}+/u)?.[0] ?? ''
+  return (Boolean(previous) && titleToken.test(previous)) || (Boolean(next) && titleToken.test(next))
+}
+
+const followedByQuotedGloss = (complete: string, offset: number, source: string) => (
+  /^\s*\(\s*["'’]/u.test(complete.slice(offset + source.length))
+)
 
 const knownContextWord = (word: string, language: RecognitionLanguage) => (
   LANGUAGE_WORDS[language].has(word) || isExtendedNeuralContextWord(word, language)
@@ -332,6 +377,11 @@ export const repairNeuralWordSpacing = (text: string, language: RecognitionLangu
   for (let pass = 0; pass < 3; pass += 1) {
     let changed = false
     value = value.replace(pattern, (complete, left: string, _space: string, right: string) => {
+      // Capitalized tokens, acronyms and alphanumeric identifiers carry an
+      // explicit word boundary. Without this gate `die SES` became `dieSES`
+      // (`dieses`) and `Nummer N4` became `NummerN4` (`nummern` + `4`). The
+      // lower-case OCR fragments repaired below (`Te st`) remain eligible.
+      if (/^\p{Lu}/u.test(right)) return complete
       const joined = `${left}${right}`.toLocaleLowerCase(locale)
       const leftKnown = knownContextWord(left.toLocaleLowerCase(locale), language)
       const rightKnown = knownContextWord(right.toLocaleLowerCase(locale), language)
@@ -363,6 +413,13 @@ export const applyNeuralWordContext = (
     corrected = corrected.replace(pattern, (source, offset: number, complete: string) => {
       const lower = source.toLocaleLowerCase(locale)
       if (touchesWordJoiner(complete, offset, source)) return source
+      if (
+        allUppercaseWord(source, language) ||
+        withinTitleNameSequence(complete, offset, source, language) ||
+        followedByQuotedGloss(complete, offset, source)
+      ) {
+        return source
+      }
       if (
         Array.from(source).length <= 3 &&
         complete[offset + source.length] === '.'
@@ -437,6 +494,23 @@ export const applyNeuralWordContext = (
       )
       if (titleCase && best.distance >= 2) return source
       if (safeSingleEdit || safeLongRepair || safeShortUnambiguousRepair) {
+        // The compact frequency list must not hide a visually closer word in
+        // the complete OCR spelling index. For example, `englsch` used to be
+        // rewritten early to frequent `endlich` (two edits) even though
+        // `englisch` is a one-edit exhaustive candidate. Keep the raw surface
+        // here so the conservative final stage can resolve that strictly
+        // closer candidate without making frequency the visual authority.
+        const closerExtendedCandidate = nearestNeuralWordContextCandidates(
+          lower,
+          language,
+          maximumDistance,
+          false,
+          32,
+        ).some((candidate) => (
+          candidate.candidate !== best.candidate &&
+          visualWordDistance(lower, candidate.candidate) < best.distance
+        ))
+        if (closerExtendedCandidate) return source
         const sourceSequenceScore = neuralCharacterSequenceScore(lower, language)
         const replacementSequenceScore = neuralCharacterSequenceScore(best.candidate, language)
         const sourceSubwordScore = neuralCharacterSubwordScore(lower, language)
@@ -489,6 +563,9 @@ export const applyFinalNeuralWordContext = (text: string, language: RecognitionL
   const corrected = applyNeuralWordContext(protectedText, language).replace(pattern, (source, offset: number, complete: string) => {
     const lower = source.toLocaleLowerCase(locale)
     if (
+      allUppercaseWord(source, language) ||
+      withinTitleNameSequence(complete, offset, source, language) ||
+      followedByQuotedGloss(complete, offset, source) ||
       lexicon.has(lower) ||
       isExtendedNeuralContextWord(lower, language) ||
       /\p{Ll}\p{Lu}/u.test(source) ||
@@ -519,7 +596,8 @@ export const applyFinalNeuralWordContext = (text: string, language: RecognitionL
     const uniqueLengthHallucination = (
       lower.length >= 7 &&
       !candidates.some((entry) => entry.distance === 1) &&
-      lengthHallucinations.length === 1
+      lengthHallucinations.length === 1 &&
+      candidates.filter((entry) => entry.distance === 2).length === 1
     )
     if (!uniqueSingleEdit && !uniqueLengthHallucination) return source
     const replacement = uniqueSingleEdit ? singleEditSameLength[0] : lengthHallucinations[0]
@@ -557,6 +635,41 @@ export const applyFinalNeuralWordContext = (text: string, language: RecognitionL
     protectedWords[Number(rawIndex)] ?? ''
   ))
   return repairNeuralWordSpacing(restored, language)
+}
+
+/** Applies the exhaustive spelling stage to a complete recognized line.
+ * English validation showed that unconstrained mid-line dictionary rewrites
+ * lose more visible characters than they recover. A line-level English repair
+ * therefore needs independent positional evidence: exactly one same-length,
+ * one-edit replacement at the final lexical token. Seven-letter words are
+ * sufficiently constrained; a shorter word remains eligible only when ink
+ * segmentation independently measured one physical word. The generic word
+ * function above stays available for isolated candidate comparison. */
+export const applyFinalNeuralLineContext = (
+  text: string,
+  language: RecognitionLanguage,
+  physicalWordCount?: number,
+) => {
+  const corrected = applyFinalNeuralWordContext(text, language)
+  if (language !== 'en' || corrected === text) return corrected
+  const sourceWords = [...text.matchAll(/[A-Za-z]+/gu)].map((match) => match[0])
+  const targetWords = [...corrected.matchAll(/[A-Za-z]+/gu)].map((match) => match[0])
+  if (
+    !sourceWords.length ||
+    sourceWords.length !== targetWords.length ||
+    text.replace(/[A-Za-z]+/gu, '#') !== corrected.replace(/[A-Za-z]+/gu, '#') ||
+    sourceWords.slice(0, -1).some((word, index) => word !== targetWords[index])
+  ) return text
+  const source = sourceWords.at(-1) ?? ''
+  const target = targetWords.at(-1) ?? ''
+  const safeIsolatedWord = physicalWordCount === 1 && sourceWords.length === 1
+  if (
+    source === target ||
+    Array.from(source).length !== Array.from(target).length ||
+    (!safeIsolatedWord && Array.from(source).length < 7) ||
+    boundedWordDistance(source.toLocaleLowerCase('en-US'), target.toLocaleLowerCase('en-US'), 1) !== 1
+  ) return text
+  return corrected
 }
 
 /** Uses the independently measured number of handwritten characters to

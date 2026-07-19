@@ -35,7 +35,7 @@ import {
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { getUiLocale } from '../i18n'
 import { bestContrastText } from '../lib/colorContrast'
-import type { AppSettings, OneNoteImportResult, ServerBackupState, UpdateState } from '../types'
+import type { AppSettings, EnhancedMathRecognitionState, OneNoteImportResult, ServerBackupState, UpdateState } from '../types'
 
 type SettingsSection = 'appearance' | 'editor' | 'drawing' | 'files' | 'updates' | 'accessibility' | 'advanced'
 
@@ -64,7 +64,7 @@ const SECTIONS: { id: SettingsSection; label: string; description: string; icon:
   { id: 'files', label: 'Dateien & Vault', description: 'Import, Ordner und Speichern', icon: FolderOpen, count: 7 },
   { id: 'updates', label: 'Updates', description: 'Stable, Beta und Sicherheit', icon: RefreshCw, count: 4 },
   { id: 'accessibility', label: 'Bedienung', description: 'Bewegung und Lesbarkeit', icon: Accessibility, count: 3 },
-  { id: 'advanced', label: 'Erweitert', description: 'Ressourcen, Datenschutz und App-Daten', icon: Code2, count: 9 },
+  { id: 'advanced', label: 'Erweitert', description: 'Ressourcen, Datenschutz und App-Daten', icon: Code2, count: 10 },
 ]
 
 const SECTION_GROUPS: Array<{ label: string; sections: SettingsSection[] }> = [
@@ -93,6 +93,7 @@ const SETTINGS_SEARCH_ITEMS: SettingsSearchItem[] = [
   { label: 'Rechtschreibprüfung', detail: 'Editor', section: 'editor', target: 'settings-editor', keywords: 'rechtschreibung sprache deutsch englisch rot unterstreichen fehler spellcheck' },
   { label: 'Zeilennummern, Wortzahl & Gliederung', detail: 'Editor', section: 'editor', target: 'settings-editor', keywords: 'statusleiste outline struktur markdown' },
   { label: 'GlyphenWerk & Training', detail: 'Stift & Erkennung', section: 'drawing', target: 'settings-glyphenwerk', keywords: 'handschrift trainieren import zip symbole mathematik' },
+  { label: 'Präzises Formelmodell', detail: 'Erweitert', section: 'advanced', target: 'settings-enhanced-math', keywords: 'mathematik formel latex posformer q4 sequenzmodell lokal download' },
   { label: 'Papier & Stift', detail: 'Stift & Erkennung', section: 'drawing', target: 'settings-tablet', keywords: 'tablet karos linien punkte farbe breite druck glättung' },
   { label: 'Durchkritzel-Empfindlichkeit', detail: 'Stift & Erkennung', section: 'drawing', target: 'settings-tablet', keywords: 'löschen radierer scribble sensitivity' },
   { label: 'Handschrifterkennung', detail: 'Stift & Erkennung', section: 'drawing', target: 'settings-recognition', keywords: 'ocr text mathematik automatisch sprache konvertieren suchindex' },
@@ -276,6 +277,9 @@ export function SettingsModal({
   const [recoveryInput, setRecoveryInput] = useState('')
   const [restoreConfirmOpen, setRestoreConfirmOpen] = useState(false)
   const [deleteBackupConfirmOpen, setDeleteBackupConfirmOpen] = useState(false)
+  const [enhancedMathState, setEnhancedMathState] = useState<EnhancedMathRecognitionState | null>(null)
+  const [enhancedMathBusy, setEnhancedMathBusy] = useState(false)
+  const [enhancedMathError, setEnhancedMathError] = useState<string | null>(null)
   const trainingInputRef = useRef<HTMLInputElement>(null)
   const modalRef = useRef<HTMLElement>(null)
   const section = useMemo(() => SECTIONS.find((candidate) => candidate.id === active)!, [active])
@@ -303,8 +307,36 @@ export function SettingsModal({
     })
     return () => { activeRequest = false }
   }, [isWeb])
+  useEffect(() => {
+    if (isWeb || !window.fanotes.getEnhancedMathRecognitionState) return
+    let activeRequest = true
+    window.fanotes.getEnhancedMathRecognitionState().then((state) => {
+      if (activeRequest) setEnhancedMathState(state)
+    }).catch(() => {
+      if (activeRequest) setEnhancedMathState(null)
+    })
+    return () => { activeRequest = false }
+  }, [isWeb])
   const update = <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => {
     onChange({ ...settings, [key]: value })
+  }
+  const installEnhancedMathModel = async () => {
+    if (!window.fanotes.installEnhancedMathRecognitionModel) return
+    setEnhancedMathBusy(true)
+    setEnhancedMathError(null)
+    try {
+      const nextState = await window.fanotes.installEnhancedMathRecognitionModel({ acceptLicense: true })
+      setEnhancedMathState(nextState)
+      onChange({
+        ...settings,
+        enhancedMathLicenseAccepted: true,
+        enhancedMathRecognition: true,
+      })
+    } catch (error) {
+      setEnhancedMathError(error instanceof Error ? error.message : 'Das Formelmodell konnte nicht installiert werden.')
+    } finally {
+      setEnhancedMathBusy(false)
+    }
   }
   const handleTrainingFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const input = event.currentTarget
@@ -806,6 +838,39 @@ export function SettingsModal({
                       <option value="extended">Erweitert · beste Genauigkeit</option>
                     </select>
                   </SettingRow>}
+                  {!isWeb && <div id="settings-enhanced-math">
+                    <SettingRow
+                      title="Präzises Formelmodell"
+                      description="Liest eine komplette zweidimensionale Formel gemeinsam statt Zeichen einzeln zu erraten. Das etwa 10 MB grosse Q4-Modell wird nur nach deiner Bestätigung geladen und nie beim App-Start ausgeführt."
+                    >
+                      {enhancedMathState?.installed ? (
+                        <Toggle
+                          label="Präzises Formelmodell"
+                          checked={settings.enhancedMathRecognition}
+                          onChange={(value) => update('enhancedMathRecognition', value)}
+                        />
+                      ) : (
+                        <button
+                          type="button"
+                          className="settings-inline-button"
+                          disabled={enhancedMathBusy || enhancedMathState?.supported === false}
+                          onClick={() => void installEnhancedMathModel()}
+                        >
+                          {enhancedMathBusy ? <LoaderCircle className="spin" size={15} /> : <Download size={15} />}
+                          {enhancedMathBusy ? 'Wird geprüft und geladen …' : 'Lizenz akzeptieren & laden'}
+                        </button>
+                      )}
+                    </SettingRow>
+                    <div className="settings-resource-note">
+                      <ShieldCheck size={14} />
+                      <span>
+                        PosFormer · CC BY-NC-SA 3.0 · nur lokal · SHA-256-geprüft.{' '}
+                        <button type="button" className="settings-link-button" onClick={() => void window.fanotes.openExternal(enhancedMathState?.homepage ?? 'https://huggingface.co/cstr/posformer-crohme-GGUF')}>Modellkarte und Lizenz</button>
+                        {enhancedMathState?.supported === false && ' · Native Laufzeit ist in diesem Paket nicht enthalten.'}
+                      </span>
+                    </div>
+                    {enhancedMathError && <div className="settings-inline-error">{enhancedMathError}</div>}
+                  </div>}
                   <SettingRow title="OCR-Modell im RAM behalten" description="Kürzere Zeiten geben den grossen lokalen Erkennungsworker früher frei; die nächste Konvertierung muss das Modell dann neu laden.">
                     <select value={settings.ocrModelKeepAliveSeconds} onChange={(event) => update('ocrModelKeepAliveSeconds', Number(event.target.value))}>
                       <option value={0}>Nach der Konvertierung freigeben</option>

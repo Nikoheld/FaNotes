@@ -56,6 +56,23 @@ Sources: https://fontsource.org/fonts/caveat,
 https://fontsource.org/fonts/kalam and
 https://fontsource.org/fonts/dancing-script
 
+HASYv2 generic symbol prototypes
+================================
+FaNotes includes compact, quantized class prototypes derived from HASYv2 by
+Martin Thoma. The application does not contain the source PNG collection or
+individual contributor samples. Prototype construction excludes a
+deterministic contributor-disjoint holdout set, limits the influence of each
+remaining contributor per class, and stores the aggregate holdout report in
+the generated model metadata.
+
+HASYv2 is made available under the Open Data Commons Open Database License
+1.0 (ODbL-1.0). The derived prototype database remains subject to that
+license. A copy or the canonical license text is available at
+https://opendatacommons.org/licenses/odbl/1-0/. Attribution: Martin Thoma,
+“The HASYv2 dataset”, DOI 10.5281/zenodo.259444.
+
+Source: https://doi.org/10.5281/zenodo.259444
+
 Local neural handwriting recognition
 ====================================
 FaNotes includes `FaNotes_TrOCR_DE_EN`, a local German/English handwriting
@@ -104,6 +121,23 @@ instruction set supported by the installed Intel or AMD processor.
 Sources: https://huggingface.co/Teklia/pylaia-iam,
 https://gitlab.teklia.com/atr/pylaia and
 https://github.com/microsoft/onnxruntime
+
+Optional handwritten formula sequence recognition
+=================================================
+Desktop packages include a CPU-only CrispEmbed runtime built from pinned
+CrispEmbed and ggml revisions. CrispEmbed is Copyright (c) 2026 CrispStrobe;
+ggml is Copyright (c) 2023-2026 The ggml authors. Both are licensed under the
+MIT License. Their complete licenses are shipped as
+`LICENSE-CRISPEMBED-MIT.txt` and `LICENSE-GGML-MIT.txt`.
+
+The PosFormer CROHME Q4_K model weights are not part of FaNotes or its
+installers. They are offered as an explicit, separately licensed optional
+download from their model card. FaNotes starts that download only after the
+user accepts CC BY-NC-SA 3.0, verifies the exact byte count and SHA-256 digest,
+and executes inference locally.
+
+Sources: https://github.com/CrispStrobe/CrispEmbed and
+https://huggingface.co/cstr/posformer-crohme-GGUF
 
 FaNotes local spelling filters
 ==============================

@@ -45,6 +45,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   memoryBudgetMb: 0,
   ocrThreadLimit: 0,
   desktopOcrModel: 'extended',
+  enhancedMathRecognition: false,
+  enhancedMathLicenseAccepted: false,
   ocrModelKeepAliveSeconds: 120,
   backgroundTaskLimit: 0,
   lmStudioBaseUrl: 'http://127.0.0.1:1234',

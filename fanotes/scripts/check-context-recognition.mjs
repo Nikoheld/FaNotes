@@ -12,6 +12,7 @@ try {
   const {
     applyTextReranking,
     calibratePersonalBaseEvidence,
+    groupRecognitionLines,
     recognizedLatex,
     recognizedSentence,
     suggestMathLayoutAssignments,
@@ -22,6 +23,7 @@ try {
     personalizedTextFusionSelectionScore,
   } = await server.ssrLoadModule('/src/lib/personalizedTextRecognition.ts')
   const {
+    applyFinalNeuralLineContext,
     applyFinalNeuralWordContext,
     applyMeasuredNeuralWordContext,
     applyNeuralWordContext,
@@ -38,6 +40,9 @@ try {
     rareContextCommonNeighbourForTests,
     rankTrocrCandidateTextsForTests,
     repairNeuralPhysicalWordSpacingForTests,
+    shouldRequestIndependentTrocrViewForTests,
+    trocrGermanMultiwordRepairBonusForTests,
+    trocrRepeatedWordEvidenceBonusForTests,
     trocrStructuralRewritePenaltyForTests,
     trocrOrdinaryWordNamePenaltyForTests,
     trocrDenseGermanNamePenaltyForTests,
@@ -53,6 +58,32 @@ try {
   } = await server.ssrLoadModule('/src/lib/recognitionModeSelection.ts')
   const { BASE_CATALOG } = await server.ssrLoadModule('/../src/data/catalog.ts')
   const labelByChar = new Map(BASE_CATALOG.map((label) => [label.char, label]))
+
+  const horizontalStroke = (x1, x2, y) => ({
+    baseWidth: 3,
+    color: '#111827',
+    pressureEnabled: true,
+    points: [
+      { x: x1, y, t: 0, pressure: 0.5, pointerType: 'pen' },
+      { x: x2, y, t: 1, pressure: 0.5, pointerType: 'pen' },
+    ],
+  })
+  assert.equal(
+    groupRecognitionLines([
+      horizontalStroke(0.34, 0.48, 0.33),
+      horizontalStroke(0.35, 0.47, 0.40),
+    ]).length,
+    1,
+    'Vertikal getrennte Striche eines isolierten mathematischen Operators müssen in derselben Erkennungszeile bleiben.',
+  )
+  assert.equal(
+    groupRecognitionLines([
+      horizontalStroke(0.12, 0.37, 0.17),
+      horizontalStroke(0.12, 0.37, 0.58),
+    ]).length,
+    2,
+    'Weit getrennte normale Schreibzeilen dürfen trotz gleicher x-Position nicht zu einem Operator verschmelzen.',
+  )
 
   const uncertainNeuralWord = {
     text: 'münt',
@@ -330,7 +361,7 @@ try {
     'Vertauschte verbundene Nachbarbuchstaben müssen auch im deutschen Wortkontext korrigiert werden.',
   )
   installNeuralWordContextCandidates('en', [
-    'break', 'breve', 'computed', 'computer', 'gave', 'movement', 'tests', 'twists',
+    'break', 'breve', 'computed', 'computer', 'debauchery', 'gave', 'movement', 'tests', 'twists',
   ])
   installNeuralWordContextCandidates('de', ['das', 'des', 'hallo', 'malo'])
   assert.equal(
@@ -363,6 +394,32 @@ try {
     '',
     'Ein grossgeschriebener Name darf keine häufigere Alternativansicht erzwingen.',
   )
+  const independentViewWords = (word) => ['hallo', 'taboo', 'test'].includes(word.toLocaleLowerCase('de-CH'))
+  assert.equal(
+    shouldRequestIndependentTrocrViewForTests(1, 'mallo', 'mallo', true, 'de', independentViewWords),
+    true,
+    'Ein weiterhin kontextbedürftiger Einzelpfad muss eine echte unabhängige Bildansicht erhalten.',
+  )
+  assert.equal(
+    shouldRequestIndependentTrocrViewForTests(1, 'mallo', 'xyqaro', false, 'de', independentViewWords),
+    true,
+    'Ein unbekannter Kontextpfad, der dem kompakten Bildpfad widerspricht, braucht eine zweite Bildansicht.',
+  )
+  assert.equal(
+    shouldRequestIndependentTrocrViewForTests(1, 'test', 'hallo', false, 'de', independentViewWords),
+    false,
+    'Zwei bekannte, bereits plausible Wörter dürfen nicht pauschal eine zweite teure Inferenz auslösen.',
+  )
+  assert.equal(
+    shouldRequestIndependentTrocrViewForTests(1, 'Fabio', 'taboo', false, 'de', independentViewWords),
+    true,
+    'Ein unbekannter visueller Name gegen ein bekanntes Kontextwort braucht eine unabhängige zweite Ansicht.',
+  )
+  assert.equal(
+    shouldRequestIndependentTrocrViewForTests(2, 'mallo', 'xyqaro', true, 'de', independentViewWords),
+    false,
+    'Liegen tatsächlich mehrere Modellkandidaten vor, darf keine redundante Bildansicht gestartet werden.',
+  )
   assert.equal(
     applyFinalNeuralWordContext('mallo', 'de'),
     'hallo',
@@ -374,15 +431,67 @@ try {
     'Apostrophe dürfen weder Wortteile korrigieren noch die echte Grenze nach einer Kontraktion entfernen.',
   )
   assert.equal(
+    applyFinalNeuralLineContext('ment and Satanic debaucherg.', 'en'),
+    'ment and Satanic debauchery.',
+    'Ein langes unbekanntes englisches Schlusswort darf durch genau einen eindeutigen sichtbaren Edit repariert werden.',
+  )
+  assert.equal(
+    applyFinalNeuralLineContext('debaucherg appears here.', 'en'),
+    'debaucherg appears here.',
+    'Die exhaustive englische Wörterbuchstufe darf ein Wort mitten in einer Zeile nicht ohne unabhängige Positionsevidenz umschreiben.',
+  )
+  assert.equal(
+    applyFinalNeuralLineContext('brege', 'en'),
+    'brege',
+    'Ein kurzes Wort darf ohne gemessene physische Einzelwortstruktur nicht allein vom Vollwörterbuch ersetzt werden.',
+  )
+  assert.equal(
+    applyFinalNeuralLineContext('brege', 'en', 1),
+    'breve',
+    'Eine unabhängig gemessene einzelne Wortgruppe erhält weiterhin die sichere isolierte Wörterbuchkorrektur.',
+  )
+  assert.equal(
     applyFinalNeuralWordContext('Richard Harris und Helena', 'de'),
     'Richard Harris und Helena',
     'Unbekannte Namen innerhalb eines Satzes dürfen nicht zu Wörterbuchnachbarn umgeschrieben werden.',
   )
-  installNeuralWordContextCandidates('de', ['geänderten', 'gesonderten', 'graduell', 'graduelle'])
+  assert.equal(
+    applyFinalNeuralWordContext('Edward Regan "Eddie" Murphy', 'de'),
+    'Edward Regan "Eddie" Murphy',
+    'Eine Namensfolge am Satzanfang darf nicht in eine häufigere Sprachvariante übersetzt werden.',
+  )
+  assert.equal(
+    applyFinalNeuralWordContext('ÖPP TNG CBS SES', 'de'),
+    'ÖPP TNG CBS SES',
+    'Grossbuchstaben-Akronyme müssen unabhängig vom Wörterbuch exakt erhalten bleiben.',
+  )
+  installNeuralWordContextCandidates('de', [
+    'binomischer', 'englisch', 'geänderten', 'gesonderten', 'graduell', 'graduelle', 'ökonomischer',
+  ])
   assert.equal(
     applyFinalNeuralWordContext('die gesnderten Positionen', 'de'),
     'die gesnderten Positionen',
     'Gleich nahe Wörterbuchtreffer unterschiedlicher Länge sind mehrdeutig und dürfen keine visuelle Form ersetzen.',
+  )
+  assert.equal(
+    applyNeuralWordContext('englsch', 'de'),
+    'englsch',
+    'Eine häufige Zwei-Edit-Korrektur darf einen strikt näheren vollständigen Wörterbuchkandidaten nicht verdecken.',
+  )
+  assert.equal(
+    applyFinalNeuralWordContext('englsch', 'de'),
+    'englsch',
+    'Ohne physische Zeichenzählung darf auch der Endkontext kein fehlendes Zeichen ergänzen; die visuell nähere Rohform bleibt erhalten.',
+  )
+  assert.equal(
+    applyFinalNeuralWordContext('öbenomischer', 'de'),
+    'öbenomischer',
+    'Ein anders langer Wörterbuchtreffer ist nicht eindeutig, wenn eine gleich nahe positionsgetreue Alternative existiert.',
+  )
+  assert.equal(
+    applyFinalNeuralWordContext('oder gutans ("gegossen") abgeleitet', 'de'),
+    'oder gutans ("gegossen") abgeleitet',
+    'Ein unbekannter Fachbegriff vor einer zitierten Klammererklärung darf nicht in ein Alltagswort umgeschrieben werden.',
   )
   assert.equal(
     applyNeuralWordContext('jap. Sengoku', 'de'),
@@ -431,6 +540,14 @@ try {
     ], 'en', englishNbestMembership)[0]?.rawText,
     'fascinated by the way he looked when you',
     'Ein nur geringfügig flüssigerer Beam darf den visuell besten vollständigen Satz nicht ersetzen.',
+  )
+  assert.equal(
+    rankTrocrCandidateTextsForTests([
+      'wehn movement of blood through arteries is',
+      'when movement of blood through arteries is',
+    ], 'en', (word) => ['when', 'movement', 'of', 'blood', 'through', 'arteries', 'is'].includes(word))[0]?.rawText,
+    'when movement of blood through arteries is',
+    'Eine einzige lokale unbekannt-zu-bekannt-Reparatur darf einen klar besseren zweiten Bildbeam nutzen.',
   )
   assert.equal(
     rankTrocrCandidateTextsForTests([
@@ -500,6 +617,89 @@ try {
     'Troja (IIion) durch das Heer der Griechen',
     'Eine intern grossgeschriebene visuelle Form darf nicht allein wegen eines häufigeren Wörterbuchnamens ersetzt werden.',
   )
+  const germanBeamMembership = (word) => [
+    'bis', 'burg', 'java', 'jana', 'spielen',
+  ].includes(word.toLocaleLowerCase('de-CH'))
+  assert.equal(
+    trocrRepeatedWordEvidenceBonusForTests(
+      'Jun-Applets Anwendungsprogramme. Appletbezogene Klassen der Java',
+      'Java-Applets Anwendungsprogramme. Appletbezogene Klassen der Java',
+      'de',
+      germanBeamMembership,
+    ),
+    0.35,
+    'Eine zweite, fast gleich bewertete Bildlesung darf ein unabhängig wiederholtes Wort exakt angleichen.',
+  )
+  assert.equal(
+    trocrRepeatedWordEvidenceBonusForTests(
+      'Jun-Applets Anwendungsprogramme.',
+      'Java-Applets Anwendungsprogramme.',
+      'de',
+      germanBeamMembership,
+    ),
+    0,
+    'Wörterbuchhäufigkeit ohne eine zweite sichtbare Wiederholung ist keine Wiederholungsevidenz.',
+  )
+  assert.equal(
+    trocrRepeatedWordEvidenceBonusForTests(
+      'Jana-Applets Anwendungsprogramme. Appletbezogene Klassen der Java',
+      'Java-Applets Anwendungsprogramme. Appletbezogene Klassen der Java',
+      'de',
+      germanBeamMembership,
+    ),
+    0,
+    'Ein bereits bekanntes sichtbares Wort darf selbst bei einer späteren Wiederholung nicht ersetzt werden.',
+  )
+  assert.equal(
+    trocrGermanMultiwordRepairBonusForTests(
+      'Im Profifussleelt spischen allerdings oftmals keine Vereine mehn,',
+      'Im Profifussleell spielen allerdings oftmals keine Vereine mehn,',
+      'de',
+      germanBeamMembership,
+    ),
+    0.2,
+    'Mehrere beschädigte deutsche Oberflächen dürfen eine kleine Zusatzstütze erhalten, wenn mindestens ein Kleinwort eindeutig bekannt wird.',
+  )
+  assert.equal(
+    trocrGermanMultiwordRepairBonusForTests(
+      'von Kindern sind das his-',
+      'von Kindern sind das bis-',
+      'de',
+      germanBeamMembership,
+    ),
+    0,
+    'Ein Wort vor einem sichtbaren Fortsetzungsstrich darf nicht per Wörterbuchbonus umgeschrieben werden.',
+  )
+  assert.equal(
+    trocrGermanMultiwordRepairBonusForTests(
+      'Wettbewerbe, die ex aequo enden',
+      'Wettbewerbe, die er aequo enden',
+      'de',
+      (word) => word === 'er',
+    ),
+    0,
+    'Kurze Fremd-, Funktions- und Abkürzungswörter bleiben vollständig beim visuellen Top-Beam.',
+  )
+  assert.equal(
+    trocrGermanMultiwordRepairBonusForTests(
+      'der Burj Khalifa',
+      'der Burg Khalifa',
+      'de',
+      germanBeamMembership,
+    ),
+    0,
+    'Der Mehrwortbonus darf einen unbekannten Eigennamen nicht in ein bekanntes Substantiv umschreiben.',
+  )
+  assert.equal(
+    trocrGermanMultiwordRepairBonusForTests(
+      'wehn movement of blood',
+      'when movement of blood',
+      'en',
+      (word) => word === 'when',
+    ),
+    0,
+    'Der breitere Mehrwortbeweis ist wegen der getrennten englischen Validierung ausdrücklich deutsch-spezifisch.',
+  )
   assert.equal(applyFinalNeuralWordContext('gradwell', 'de'), 'graduell')
   assert.equal(
     rankTrocrCandidateTextsForTests([
@@ -511,6 +711,24 @@ try {
   )
   assert.equal(trocrStructuralRewritePenaltyForTests('der', 'der der', 'de'), 4)
   assert.equal(trocrStructuralRewritePenaltyForTests('zwischen einem Coach und', 'zwischen einem (oach und', 'de'), 4)
+  assert.equal(trocrStructuralRewritePenaltyForTests(
+    'zur Neuordnung des Hamburges Eisenbahnwesens',
+    'zur Neuordnung des Hamburg, Eisenbahnwesens',
+    'de',
+  ), 4)
+  assert.equal(trocrStructuralRewritePenaltyForTests(
+    'Weltskiverband. FIS ausgetragene',
+    'Weltskiverband FIS ausgetragene',
+    'de',
+  ), 0)
+  assert.equal(
+    rankTrocrCandidateTextsForTests([
+      'zur Neuordnung des Hamburges Eisenbahnwesens',
+      'zur Neuordnung des Hamburg, Eisenbahnwesens',
+    ], 'de', (word) => ['zur', 'neuordnung', 'des', 'hamburg', 'eisenbahnwesens'].includes(word))[0]?.rawText,
+    'zur Neuordnung des Hamburges Eisenbahnwesens',
+    'Ein Wörterbuchwort darf keine neue interne Interpunktion erfinden, um den visuell führenden Beam zu verdrängen.',
+  )
   assert.equal(trocrStructuralRewritePenaltyForTests(
     'that they use Dan as a specimen demonstra-',
     'that they use Dan as a specimen demonstrations -',
@@ -567,8 +785,13 @@ try {
     'Rabbi Eleanor ben Assarja said',
     'en',
     englishNameMembership,
-  ), 0)
+  ), 3)
   assert.equal(trocrStructuralRewritePenaltyForTests('einen Stadtkreis.', 'einen Stadt kreis.', 'de'), 4)
+  assert.equal(
+    trocrStructuralRewritePenaltyForTests('indem', 'in dem', 'de', (word) => word === 'indem'),
+    4,
+    'Ein vollständiges Wörterbuchwort darf nicht wegen kurzer Funktionswörter künstlich getrennt werden.',
+  )
   assert.equal(trocrStructuralRewritePenaltyForTests('der Genreder Brettspielt', 'der Genre der Brettspielt', 'de'), 0)
   assert.equal(trocrStructuralRewritePenaltyForTests('tax atreble the rate', 'tax a treble the rate', 'en'), 0)
   assert.equal(trocrStructuralRewritePenaltyForTests(
@@ -701,6 +924,131 @@ try {
     /[_^]\{/u,
     'Ein titelgeschriebener Name muss auch ohne Wörterbucheintrag der gemeinsamen Wortgrundlinie folgen.',
   )
+
+  // With a drawing tablet the x-height body can be less than half as tall as
+  // the initial capital. Pairwise geometry then sees every following letter
+  // as a subscript even though all bodies and the capital still share one
+  // local baseline. The local word baseline must be evaluated before the
+  // capital/body height ratio is allowed to decide.
+  const compactBodyWordTokens = [
+    token('T', 96, [['T', 96]], 10980, [0.05, 0.18, 0.06, 0.22]),
+    token('e', 94, [['e', 94]], 10981, [0.115, 0.353, 0.045, 0.085]),
+    token('s', 95, [['s', 95]], 10982, [0.165, 0.353, 0.044, 0.085]),
+    token('t', 95, [['t', 95]], 10983, [0.214, 0.328, 0.04, 0.11]),
+  ]
+  assert.doesNotMatch(
+    recognizedLatex(compactBodyWordTokens),
+    /[_^]\{/u,
+    'Kleine, aber gemeinsam ausgerichtete Wortkörper dürfen nicht als Indexkette formatiert werden.',
+  )
+  assert.equal(
+    suggestMathLayoutAssignments(compactBodyWordTokens).length,
+    0,
+    'Kompakte Kleinbuchstaben nach einem Großbuchstaben dürfen kein falsches Indextraining erzeugen.',
+  )
+
+  const compactUnknownWordTokens = [
+    token('t', 96, [['t', 96]], 10984, [0.05, 0.2, 0.045, 0.2]),
+    token('a', 94, [['a', 94]], 10985, [0.101, 0.348, 0.043, 0.09]),
+    token('v', 95, [['v', 95]], 10986, [0.15, 0.348, 0.043, 0.09]),
+    token('o', 95, [['o', 95]], 10987, [0.199, 0.348, 0.043, 0.09]),
+  ]
+  assert.doesNotMatch(
+    recognizedLatex(compactUnknownWordTokens),
+    /[_^]\{/u,
+    'Eine reine zusammenhängende Buchstabenzeile braucht keinen Wörterbucheintrag, um ihre Grundlinie zu behalten.',
+  )
+
+  const unknownThreeLetterWordTokens = [
+    token('z', 96, [['z', 96]], 109840, [0.05, 0.2, 0.05, 0.18]),
+    token('y', 94, [['y', 94]], 109841, [0.106, 0.314, 0.045, 0.1]),
+    token('v', 95, [['v', 95]], 109842, [0.157, 0.314, 0.045, 0.1]),
+  ]
+  assert.doesNotMatch(
+    recognizedLatex(unknownThreeLetterWordTokens),
+    /[_^]\{/u,
+    'Auch ein unbekanntes dreibuchstabiges Wort auf gemeinsamer Grundlinie darf kein Index werden.',
+  )
+  assert.equal(
+    suggestMathLayoutAssignments(unknownThreeLetterWordTokens).length,
+    0,
+    'Unbekannte dreibuchstabige Wörter dürfen keine persönlichen Indexbeziehungen erzeugen.',
+  )
+
+  const unknownWordBeforePunctuation = [
+    ...unknownThreeLetterWordTokens,
+    token('.', 95, [['.', 95]], 109843, [0.215, 0.385, 0.014, 0.014]),
+  ]
+  assert.doesNotMatch(
+    recognizedLatex(unknownWordBeforePunctuation),
+    /[_^]\{/u,
+    'Satzzeichen neben einem unbekannten Wort dürfen dessen Grundlinienschutz nicht deaktivieren.',
+  )
+
+  const compactShortWordTokens = [
+    token('i', 96, [['i', 96]], 10988, [0.05, 0.18, 0.045, 0.18]),
+    token('m', 95, [['m', 95]], 10989, [0.101, 0.284, 0.052, 0.11]),
+  ]
+  assert.doesNotMatch(
+    recognizedLatex(compactShortWordTokens),
+    /[_^]\{/u,
+    'Ein bekanntes kurzes Wort mit normal grossem zweiten Buchstaben darf nicht als Index erscheinen.',
+  )
+  assert.equal(
+    suggestMathLayoutAssignments(compactShortWordTokens).length,
+    0,
+    'Ein zweibuchstabiges Alltagswort darf kein falsches Indextraining erzeugen.',
+  )
+
+  const shortKnownButRealSubscriptTokens = [
+    token('i', 96, [['i', 96]], 10990, [0.05, 0.2, 0.06, 0.18]),
+    token('m', 95, [['m', 95]], 10991, [0.115, 0.3224, 0.04, 0.099]),
+  ]
+  assert.match(
+    recognizedLatex(shortKnownButRealSubscriptTokens),
+    /i_\{m\}/u,
+    'Ein sichtbar kleiner mathematischer Index muss trotz des zufälligen Wortbilds „im“ erhalten bleiben.',
+  )
+
+  const shortWordAcrossExplicitSpace = [
+    token('a', 96, [['a', 96]], 10992, [0.05, 0.2, 0.06, 0.18]),
+    { ...token('n', 95, [['n', 95]], 10993, [0.115, 0.3224, 0.04, 0.099]), spaceBefore: true },
+  ]
+  assert.match(
+    recognizedLatex(shortWordAcrossExplicitSpace),
+    /a_\{n\}/u,
+    'Ein expliziter Wortabstand darf zwei mathematische Variablen nicht zu einem Schutzwort verbinden.',
+  )
+
+  let shortWordBaselineSweepCases = 0
+  for (const word of ['im', 'in', 'an', 'am', 'es', 'du', 'er', 'zu', 'of', 'to', 'is', 'we', 'he']) {
+    for (const baseHeight of [0.14, 0.18, 0.22]) {
+      for (const bodyRatio of [0.58, 0.66, 0.74]) {
+        for (const displacementRatio of [0.17, 0.2, 0.23]) {
+          const baseY = 0.2
+          const bodyHeight = baseHeight * bodyRatio
+          const bodyBottom = baseY + baseHeight * (1 + displacementRatio)
+          const sweptTokens = [
+            token(word[0], 95, [[word[0], 95]], 12000 + shortWordBaselineSweepCases * 2, [0.05, baseY, 0.055, baseHeight]),
+            token(word[1], 94, [[word[1], 94]], 12001 + shortWordBaselineSweepCases * 2, [0.111, bodyBottom - bodyHeight, 0.045, bodyHeight]),
+          ]
+          const sweptLatex = recognizedLatex(sweptTokens)
+          assert.doesNotMatch(
+            sweptLatex,
+            /[_^]\{/u,
+            `Kurzes Alltagswort wurde im Geometrie-Sweep zum Index (${word}, H=${baseHeight}, h=${bodyRatio}, d=${displacementRatio}): ${sweptLatex}`,
+          )
+          assert.equal(
+            suggestMathLayoutAssignments(sweptTokens).length,
+            0,
+            `Kurzes Alltagswort erzeugte eine Indexzuweisung (${word}, H=${baseHeight}, h=${bodyRatio}, d=${displacementRatio}).`,
+          )
+          shortWordBaselineSweepCases += 1
+        }
+      }
+    }
+  }
+  assert.equal(shortWordBaselineSweepCases, 351, 'Der Sweep für kurze Grundlinienwörter ist unvollständig.')
 
   const trueMultiLetterSubscriptTokens = [
     token('x', 96, [['x', 96]], 1099, [0.05, 0.2, 0.06, 0.18]),
@@ -1216,6 +1564,11 @@ try {
     repairNeuralWordSpacing('in form', 'en'),
     'in form',
     'Zwei bereits gültige Wörter dürfen nicht nur deshalb verbunden werden, weil auch ihre Verkettung ein Wort ist.',
+  )
+  assert.equal(
+    repairNeuralWordSpacing('die SES S.A. und Nummer N4 in einer Big Band', 'de'),
+    'die SES S.A. und Nummer N4 in einer Big Band',
+    'Abstände vor Akronymen, Kennungen und grossgeschriebenen Namen dürfen nicht entfernt werden.',
   )
 
   const neuralLine = (text, confidence = 88) => {
@@ -2189,6 +2542,64 @@ try {
     true,
     'Dreistellige Alltagswörter auf gemeinsamer Grundlinie müssen eine reine Indexhypothese überstimmen.',
   )
+  const falseTwoLetterWordScripts = {
+    ...falseWordScripts,
+    value: 'i_{m}',
+    textValue: 'im',
+    mathValue: 'i_{m}',
+    evidence: {
+      ...falseWordScripts.evidence,
+      text: {
+        ...falseWordScripts.evidence.text,
+        visibleCharacters: 2,
+        letters: 2,
+        words: 1,
+        knownWords: 1,
+        knownWordRatio: 1,
+      },
+      math: {
+        ...falseWordScripts.evidence.math,
+        visibleCharacters: 2,
+        layoutAssignments: 1,
+        weakScriptAssignments: 1,
+      },
+    },
+  }
+  assert.equal(
+    isScriptOnlyBaselineTextConflict(falseTwoLetterWordScripts),
+    true,
+    'Ein sicher erkanntes zweibuchstabiges Wort muss eine schwache reine Indexhypothese widerlegen.',
+  )
+  assert.equal(
+    assessNeuralTextModeCandidate('im', 'de', {
+      ...neuralResult('im', 91), wordCount: 1, knownWordRatio: 1,
+    }, falseTwoLetterWordScripts).shouldUseText,
+    true,
+    'Die Zeilenerkennung muss ein bekanntes kurzes Wort gegen eine höhenbedingte Indexverwechslung durchsetzen.',
+  )
+  const realTwoLetterSubscript = {
+    ...falseTwoLetterWordScripts,
+    evidence: {
+      ...falseTwoLetterWordScripts.evidence,
+      math: {
+        ...falseTwoLetterWordScripts.evidence.math,
+        weakScriptAssignments: 0,
+        decisiveStructure: true,
+      },
+    },
+  }
+  assert.equal(
+    isScriptOnlyBaselineTextConflict(realTwoLetterSubscript),
+    false,
+    'Ein deutlich kleiner echter Buchstabenindex darf nicht als kurzes Wörterbuchwort umgedeutet werden.',
+  )
+  assert.equal(
+    assessNeuralTextModeCandidate('im', 'de', {
+      ...neuralResult('im', 91), wordCount: 1, knownWordRatio: 1,
+    }, realTwoLetterSubscript).shouldUseText,
+    false,
+    'Eine zufällige Wortlesung darf einen klar skalierten mathematischen Index nicht überschreiben.',
+  )
   const falseUnknownNameScripts = {
     ...falseWordScripts,
     value: 'F_{a b i o}',
@@ -2222,6 +2633,67 @@ try {
     }, falseUnknownNameScripts).shouldUseText,
     true,
     'Eigennamen und Fachwörter müssen eine reine falsche Indexhypothese überstimmen können.',
+  )
+  const falseUnknownAlignedWordScripts = {
+    ...falseWordScripts,
+    value: 't_{a v o}',
+    textValue: 'tavo',
+    mathValue: 't_{a v o}',
+    evidence: {
+      ...falseWordScripts.evidence,
+      text: {
+        ...falseWordScripts.evidence.text,
+        visibleCharacters: 4,
+        letters: 4,
+        knownWords: 0,
+        knownWordRatio: 0,
+        baselineAlignment: 0.72,
+      },
+      math: {
+        ...falseWordScripts.evidence.math,
+        visibleCharacters: 4,
+        layoutAssignments: 3,
+      },
+    },
+  }
+  assert.equal(
+    assessNeuralTextModeCandidate('tavo', 'de', {
+      ...neuralResult('tavo', 84), wordCount: 1, knownWordRatio: 0,
+    }, falseUnknownAlignedWordScripts).shouldUseText,
+    true,
+    'Eine sichere reine Buchstabenlesung muss eine schwache Indexkette auch ohne Wörterbucheintrag überstimmen.',
+  )
+  const falseUnknownThreeLetterScripts = {
+    ...falseUnknownAlignedWordScripts,
+    value: 'z_{y v}',
+    textValue: 'zyv',
+    mathValue: 'z_{y v}',
+    evidence: {
+      ...falseUnknownAlignedWordScripts.evidence,
+      text: {
+        ...falseUnknownAlignedWordScripts.evidence.text,
+        visibleCharacters: 3,
+        letters: 3,
+        baselineAlignment: 0.94,
+      },
+      math: {
+        ...falseUnknownAlignedWordScripts.evidence.math,
+        visibleCharacters: 3,
+        layoutAssignments: 2,
+      },
+    },
+  }
+  assert.equal(
+    isScriptOnlyBaselineTextConflict(falseUnknownThreeLetterScripts),
+    true,
+    'Eine streng ausgerichtete unbekannte Dreierfolge darf keine reine Indexhypothese bleiben.',
+  )
+  assert.equal(
+    assessNeuralTextModeCandidate('zyv', 'de', {
+      ...neuralResult('zyv', 84), wordCount: 1, knownWordRatio: 0,
+    }, falseUnknownThreeLetterScripts).shouldUseText,
+    true,
+    'Die Zeilenerkennung muss auch kurze Namen und Fachkürzel ohne Wörterbucheintrag gegen falsche Indexe durchsetzen.',
   )
   const verticallyDisplacedUnknownScripts = {
     ...falseUnknownNameScripts,

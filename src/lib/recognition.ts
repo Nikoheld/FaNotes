@@ -9,6 +9,7 @@ import {
   ENGLISH_COMMON_TRIGRAMS,
   ENGLISH_COMMON_WORDS,
 } from '../data/englishLanguage'
+import hasySymbolPrototypeData from '../data/hasySymbolPrototypes.json'
 import { isStandardRecognitionSample } from './standardRecognition'
 import { normalizeGermanSharpS } from './orthography'
 
@@ -124,6 +125,8 @@ type RecognitionAspectStats = {
 export type RecognitionModel = RecognitionModelEntry[] & {
   weights: FeatureWeights
   classifierEntries: RecognitionModelEntry[]
+  genericSymbolEntries: RecognitionModelEntry[]
+  genericSymbolReliability: Map<string, number>
   prototypes: Map<string, RecognitionModelEntry>
   prototypeSets: Map<string, RecognitionModelEntry[]>
   labelStats: Map<string, RecognitionLabelStats>
@@ -220,6 +223,8 @@ export const createEmptyRecognitionModel = (): RecognitionModel => {
   const model = [] as unknown as RecognitionModel
   model.weights = { ...DEFAULT_WEIGHTS }
   model.classifierEntries = []
+  model.genericSymbolEntries = []
+  model.genericSymbolReliability = new Map()
   model.prototypes = new Map()
   model.prototypeSets = new Map()
   model.labelStats = new Map()
@@ -459,6 +464,32 @@ const computeShape = (raster: Float32Array) => {
   ])
 }
 
+const featureFromRaster = (raster: Float32Array): FeatureVector => {
+  const projectionX = new Float32Array(FEATURE_SIZE)
+  const projectionY = new Float32Array(FEATURE_SIZE)
+  for (let y = 0; y < FEATURE_SIZE; y += 1) {
+    for (let x = 0; x < FEATURE_SIZE; x += 1) {
+      const value = raster[y * FEATURE_SIZE + x]
+      projectionX[x] += value
+      projectionY[y] += value
+    }
+  }
+  const maxX = Math.max(...projectionX, 0.0001)
+  const maxY = Math.max(...projectionY, 0.0001)
+  for (let index = 0; index < FEATURE_SIZE; index += 1) {
+    projectionX[index] /= maxX
+    projectionY[index] /= maxY
+  }
+  return {
+    raster,
+    projectionX,
+    projectionY,
+    hog: computeHog(raster),
+    shape: computeShape(raster),
+    holes: countHoles(raster),
+  }
+}
+
 const resampleTrajectory = (
   points: Stroke['points'],
   normalizePoint: (point: Stroke['points'][number]) => [number, number],
@@ -595,8 +626,6 @@ const featureFromCanvas = (source: HTMLCanvasElement): FeatureVector => {
   context.drawImage(source, 0, 0, ANALYSIS_SIZE, ANALYSIS_SIZE)
   const pixels = context.getImageData(0, 0, ANALYSIS_SIZE, ANALYSIS_SIZE).data
   const raster = new Float32Array(FEATURE_SIZE * FEATURE_SIZE)
-  const projectionX = new Float32Array(FEATURE_SIZE)
-  const projectionY = new Float32Array(FEATURE_SIZE)
   const poolSize = ANALYSIS_SIZE / FEATURE_SIZE
 
   for (let y = 0; y < FEATURE_SIZE; y += 1) {
@@ -618,26 +647,9 @@ const featureFromCanvas = (source: HTMLCanvasElement): FeatureVector => {
       const pooledInk = strongestInk * 0.72 + averageInk * 0.28
       const value = pooledInk < 0.025 ? 0 : pooledInk
       raster[y * FEATURE_SIZE + x] = value
-      projectionX[x] += value
-      projectionY[y] += value
     }
   }
-
-  const maxX = Math.max(...projectionX, 0.0001)
-  const maxY = Math.max(...projectionY, 0.0001)
-  for (let index = 0; index < FEATURE_SIZE; index += 1) {
-    projectionX[index] /= maxX
-    projectionY[index] /= maxY
-  }
-
-  return {
-    raster,
-    projectionX,
-    projectionY,
-    hog: computeHog(raster),
-    shape: computeShape(raster),
-    holes: countHoles(raster),
-  }
+  return featureFromRaster(raster)
 }
 
 const featureFromDataUrl = (dataUrl: string, augment = true): Promise<FeatureVector[]> =>
@@ -752,6 +764,63 @@ const evenlySpaced = <T,>(values: T[], maximum: number): T[] => {
   ))
 }
 
+type GenericSymbolPrototypePayload = {
+  version: number
+  featureSize: number
+  labels: string[]
+  physicalAspects: number[]
+  rasters: string
+  audit?: {
+    holdoutClasses?: Record<string, { correct: number; samples: number; accuracy: number }>
+  }
+}
+
+let genericSymbolPrototypeEntries: RecognitionModelEntry[] | null = null
+let genericSymbolReliability: Map<string, number> | null = null
+
+const loadGenericSymbolPrototypeEntries = () => {
+  if (genericSymbolPrototypeEntries) return genericSymbolPrototypeEntries
+  const payload = hasySymbolPrototypeData as GenericSymbolPrototypePayload
+  const expectedBytes = payload.labels.length * FEATURE_SIZE * FEATURE_SIZE
+  if (
+    payload.version !== 1 ||
+    payload.featureSize !== FEATURE_SIZE ||
+    payload.physicalAspects.length !== payload.labels.length
+  ) return []
+  let binary = ''
+  try {
+    binary = atob(payload.rasters)
+  } catch {
+    return []
+  }
+  if (binary.length !== expectedBytes) return []
+  const emptyGeometry = geometryFromStrokes([])
+  genericSymbolPrototypeEntries = payload.labels.map((labelId, prototypeIndex) => {
+    const raster = new Float32Array(FEATURE_SIZE * FEATURE_SIZE)
+    const offset = prototypeIndex * raster.length
+    for (let index = 0; index < raster.length; index += 1) {
+      raster[index] = binary.charCodeAt(offset + index) / 255
+    }
+    return {
+      ...featureFromRaster(raster),
+      sampleId: `hasyv2-prototype-${prototypeIndex}`,
+      sessionId: 'standard-hasyv2',
+      labelId,
+      strokeCount: 0,
+      physicalAspect: clamp(payload.physicalAspects[prototypeIndex], 0.035, 12),
+      geometry: emptyGeometry,
+      variants: [],
+      standard: true,
+      trust: 0,
+      createdAt: 0,
+    }
+  })
+  genericSymbolReliability = new Map(Object.entries(payload.audit?.holdoutClasses ?? {}).map(([labelId, audit]) => (
+    [labelId, audit.samples >= 5 ? audit.correct / audit.samples : 0]
+  )))
+  return genericSymbolPrototypeEntries
+}
+
 export const buildRecognitionModel = async (samples: Sample[]): Promise<RecognitionModel> => {
   const resolvedSamples = resolveConflictingPersonalLabels(samples)
   const labelTotals = new Map<string, number>()
@@ -788,7 +857,7 @@ export const buildRecognitionModel = async (samples: Sample[]): Promise<Recognit
     ]
   })
 
-  const entries = await Promise.all(
+  const sampleEntries = await Promise.all(
     selected.map(async (sample) => {
       const standard = isStandardRecognitionSample(sample)
       const cacheKey = `${sample.id}:${sample.labelId}:${inkFingerprint(sample)}:${sample.imageData.length}`
@@ -817,6 +886,7 @@ export const buildRecognitionModel = async (samples: Sample[]): Promise<Recognit
       }
     }),
   )
+  const entries = [...sampleEntries]
   suppressSupersededPersonalConflicts(entries)
   const personalEntries = entries.filter((entry) => !entry.standard)
   const classifierGroups = new Map<string, RecognitionModelEntry[]>()
@@ -856,6 +926,8 @@ export const buildRecognitionModel = async (samples: Sample[]): Promise<Recognit
   model.prototypes = buildClassPrototypes(entries)
   model.prototypeSets = buildClassPrototypeSets(entries, model.weights)
   model.classifierEntries = buildClassifierEntries(entries, model.prototypeSets)
+  model.genericSymbolEntries = loadGenericSymbolPrototypeEntries()
+  model.genericSymbolReliability = genericSymbolReliability ?? new Map()
   model.labelStats = buildLabelStats(personalEntries, model.prototypeSets, model.weights)
   model.aspectStats = buildAspectStats(entries)
   const evaluation = modelEvaluation ?? estimateModelAccuracy(personalEntries, model.weights)
@@ -2871,6 +2943,10 @@ export const groupRecognitionLines = (strokes: Stroke[]): RecognitionInkLine[] =
   const related = (first: (typeof entries)[number], second: (typeof entries)[number]) => {
     const horizontalGap = gap(first.minX, first.maxX, second.minX, second.maxX) * SOURCE_WIDTH
     const verticalGap = gap(first.minY, first.maxY, second.minY, second.maxY) * SOURCE_HEIGHT
+    const horizontalOverlap = Math.max(
+      0,
+      Math.min(first.maxX, second.maxX) - Math.max(first.minX, second.minX),
+    ) * SOURCE_WIDTH
     const typicalHeight = Math.max(8, Math.min(55, (first.height + second.height) / 2))
     const largestHeight = Math.max(first.height, second.height)
     const horizontalNeighbour = (
@@ -2887,6 +2963,28 @@ export const groupRecognitionLines = (strokes: Stroke[]): RecognitionInkLine[] =
       horizontalGap <= Math.max(18, typicalHeight * 0.62) &&
       verticalGap <= Math.max(39, largestHeight * 1.7)
     )
+    // Equals/equivalence/approximation/division marks, detached dots and
+    // accents consist of vertically separated strokes with nearly identical
+    // x support. Treating each stroke as a document row makes recognition
+    // structurally impossible before the glyph classifier even runs (for
+    // example one `≈` became a two-row aligned environment). Scale the join
+    // from the wider stroke, not from the tiny dot height, while keeping the
+    // bound far below ordinary page-line spacing. Fractions and operator
+    // limits also benefit because their shared x range is real layout
+    // evidence; unrelated rows do not overlap closely enough at this scale.
+    const sharedWidth = Math.max(1, Math.min(first.width, second.width))
+    const largestWidth = Math.max(first.width, second.width)
+    const stackedMathMark = (
+      horizontalOverlap >= Math.min(6, sharedWidth * 0.34) &&
+      verticalGap <= clamp(largestWidth * 0.42, 10, 46) &&
+      Math.abs(first.centerY - second.centerY) * SOURCE_HEIGHT <= clamp(largestWidth * 0.78, 18, 64)
+    )
+    const isolatedStackedOperator = (
+      entries.length <= 4 &&
+      horizontalGap <= 2 &&
+      [first, second].some((entry) => entry.width >= entry.height * 1.45) &&
+      Math.abs(first.centerY - second.centerY) * SOURCE_HEIGHT <= clamp(largestWidth * 1.35, 24, 180)
+    )
     const large = first.height >= second.height ? first : second
     const small = first.height >= second.height ? second : first
     const smallCenterX = small.centerX * SOURCE_WIDTH
@@ -2898,7 +2996,7 @@ export const groupRecognitionLines = (strokes: Stroke[]): RecognitionInkLine[] =
       smallCenterX <= largeRight + Math.max(36, large.width * 1.8) &&
       verticalGap <= Math.max(38, large.height * 0.58)
     )
-    return horizontalNeighbour || longMathMark || scriptOrLimit
+    return horizontalNeighbour || longMathMark || stackedMathMark || isolatedStackedOperator || scriptOrLimit
   }
 
   const remaining = new Set(entries.map((_, index) => index))
@@ -5448,10 +5546,84 @@ export const recognizeExpression = (
       })
       .sort((a, b) => a.distance - b.distance)
 
+    let fusedRanking = ranked
+    if (mode === 'math' && clusters.length === 1 && model.genericSymbolEntries.length) {
+      const genericByLabel = new Map<string, number[]>()
+      model.genericSymbolEntries.forEach((entry) => {
+        if (!labelMap.has(entry.labelId)) return
+        const distances = genericByLabel.get(entry.labelId) ?? []
+        distances.push(Math.min(...recognitionVariants.map((variant, index) => (
+          featureDistance(
+            variant.feature,
+            entry,
+            variant.strokeCount,
+            variant.geometry,
+            model.weights,
+          ) + (index === 0 ? 0 : 0.004)
+        ))))
+        genericByLabel.set(entry.labelId, distances)
+      })
+      const genericRanking = [...genericByLabel.entries()].map(([labelId, distances]) => {
+        const selected = distances.sort((first, second) => first - second).slice(0, 2)
+        const weights = selected.length > 1 ? [0.92, 0.08] : [1]
+        const distance = selected.reduce((sum, value, index) => sum + value * weights[index], 0) /
+          weights.slice(0, selected.length).reduce((sum, value) => sum + value, 0)
+        return {
+          labelId,
+          distance: Math.max(0, distance + mathGeometryAdjustment(labelId, cluster)),
+        }
+      }).sort((first, second) => first.distance - second.distance)
+      const genericBest = genericRanking[0]
+      const genericRunnerUp = genericRanking[1]
+      const baselineBest = ranked[0]
+      const baselineRunnerUp = ranked[1]
+      const genericMargin = genericBest && genericRunnerUp
+        ? genericRunnerUp.distance - genericBest.distance
+        : 0
+      const baselineMargin = baselineBest && baselineRunnerUp
+        ? baselineRunnerUp.distance - baselineBest.distance
+        : 0
+      const reliability = genericBest
+        ? model.genericSymbolReliability.get(genericBest.labelId) ?? 0
+        : 0
+      const hasStrongPersonalWinner = Boolean(
+        baselineBest &&
+        baselineBest.personalSupport >= 2 &&
+        baselineBest.personalConfidence >= 34,
+      )
+      const target = genericBest
+        ? ranked.find((entry) => entry.labelId === genericBest.labelId)
+        : undefined
+      if (
+        genericBest && baselineBest && target &&
+        genericBest.labelId !== baselineBest.labelId &&
+        !hasStrongPersonalWinner &&
+        reliability >= 0.4 &&
+        genericBest.distance <= 0.42 &&
+        genericMargin >= 0.025 &&
+        (baselineBest.distance >= 0.28 || baselineMargin <= 0.07)
+      ) {
+        // A disagreement is allowed to move the result only when the generic
+        // handwriting class generalized across excluded contributors, wins
+        // its own classifier by a visible margin, and the old printed-font
+        // path is uncertain. This prevents a broad language-free prototype
+        // set from overriding trusted GlyphenWerk examples or clear geometry.
+        const advantage = clamp(
+          0.012 + genericMargin * 0.42 + (reliability - 0.4) * 0.045,
+          0.012,
+          0.065,
+        )
+        fusedRanking = ranked.map((entry) => entry === target ? {
+          ...entry,
+          distance: Math.min(entry.distance, Math.max(0, baselineBest.distance - advantage)),
+        } : entry).sort((first, second) => first.distance - second.distance)
+      }
+    }
+
     const rankedForMode = mode === 'text'
-      ? ranked.filter((entry) => isTextLabel(labelMap.get(entry.labelId)))
-      : ranked
-    const activeRanking = rankedForMode.length ? rankedForMode : ranked
+      ? fusedRanking.filter((entry) => isTextLabel(labelMap.get(entry.labelId)))
+      : fusedRanking
+    const activeRanking = rankedForMode.length ? rankedForMode : fusedRanking
     const best = activeRanking[0]
     const runnerUp = activeRanking[1]
     const bestLabel = best ? labelMap.get(best.labelId) : undefined
@@ -6025,6 +6197,8 @@ type FormattedAtom = {
   sourceId?: string
   labelId?: string
   char?: string
+  spaceBefore?: boolean
+  lineBreakBefore?: boolean
 }
 
 type MathLayoutItem = {
@@ -6119,6 +6293,7 @@ const isLatinWordAtom = (atom: FormattedAtom) => Boolean(
 
 const wordAtomNeighbour = (first: FormattedAtom, second: FormattedAtom) => {
   if (!isLatinWordAtom(first) || !isLatinWordAtom(second)) return false
+  if (second.spaceBefore || second.lineBreakBefore) return false
   const gap = second.bbox[0] - (first.bbox[0] + first.bbox[2])
   const physicalXHeight = Math.min(first.bbox[3], second.bbox[3]) * SOURCE_HEIGHT / SOURCE_WIDTH
   return gap <= clamp(physicalXHeight * 0.46, 0.018, 0.05)
@@ -6127,10 +6302,11 @@ const wordAtomNeighbour = (first: FormattedAtom, second: FormattedAtom) => {
 /**
  * A tall capital or ascender and the x-height body of the next letter can
  * satisfy a pairwise subscript test even though both belong to one ordinary
- * word.  Verify such a relation against the complete local letter run: a
- * dictionary-backed/title-cased run whose candidate and base still share the
- * run's baseline is prose, not a script.  A real `x_{max}` keeps its separate
- * lower baseline and its substantially smaller glyphs, so it is not blocked.
+ * word. Verify such a relation against the complete local letter run. Three
+ * or more letters that share a baseline are prose even when the word is a
+ * name, abbreviation, or technical term absent from the compact dictionary.
+ * A real `x_{max}` keeps its separate lower baseline and its substantially
+ * smaller glyphs, so it is not blocked.
  */
 const ordinaryWordScriptConflict = (
   atoms: FormattedAtom[],
@@ -6140,34 +6316,62 @@ const ordinaryWordScriptConflict = (
   const base = atoms[baseIndex]
   const candidate = atoms[candidateIndex]
   if (!base || !candidate || !isLatinWordAtom(base) || !isLatinWordAtom(candidate)) return false
-  if (candidate.bbox[3] < base.bbox[3] * 0.56) return false
 
   let start = baseIndex
   while (start > 0 && wordAtomNeighbour(atoms[start - 1], atoms[start])) start -= 1
-  let end = candidateIndex
+  let end = baseIndex
   while (end + 1 < atoms.length && wordAtomNeighbour(atoms[end], atoms[end + 1])) end += 1
+  if (candidateIndex < start || candidateIndex > end) return false
   const run = atoms.slice(start, end + 1)
-  if (run.length < 3 || !run.every(isLatinWordAtom)) return false
+  if (run.length < 2 || !run.every(isLatinWordAtom)) return false
 
   const word = run.map((atom) => atom.char).join('')
   const lexicalScore = Math.max(
     lexicalWordEvidence(word, 'de').score,
     lexicalWordEvidence(word, 'en').score,
   )
-  const titleCased = /^[A-ZÄÖÜ][a-zäöü]{2,}$/u.test(word)
-  if (lexicalScore < 0.5 && !titleCased) return false
+  const exactShortWord = run.length === 2 && lexicalScore >= 0.5
+  if (run.length < 3 && !exactShortWord) return false
 
   const bottoms = run.map((atom) => atom.bbox[1] + atom.bbox[3])
   const heights = run.map((atom) => atom.bbox[3])
   const baseline = median(bottoms)
   const referenceHeight = median(heights)
-  const tolerance = Math.max(0.012, referenceHeight * 0.45)
+  // Compare the candidate with the local x-height, not only with the first
+  // glyph. A capital or tall ascender may legitimately be more than twice as
+  // high as the following lowercase bodies. The old 56% base-height gate
+  // therefore rejected real words before their shared baseline could be
+  // considered. A true multi-letter index still forms a separate baseline,
+  // so its base falls outside this deliberately bounded tolerance.
+  if (candidate.bbox[3] < Math.max(base.bbox[3] * 0.36, referenceHeight * 0.52)) return false
+  const tolerance = Math.max(0.012, referenceHeight * 0.52)
   const baseBottom = base.bbox[1] + base.bbox[3]
   const candidateBottom = candidate.bbox[1] + candidate.bbox[3]
   if (
     Math.abs(baseBottom - baseline) > tolerance ||
     Math.abs(candidateBottom - baseline) > tolerance
   ) return false
+
+  const aligned = run.filter((atom) => (
+    Math.abs(atom.bbox[1] + atom.bbox[3] - baseline) <= tolerance
+  ))
+  const requiredAligned = run.length === 2 ? 2 : Math.max(3, Math.ceil(run.length * 0.75))
+  if (aligned.length < requiredAligned) return false
+
+  // Two-letter words need a separate safety rule because the pair itself
+  // cannot provide a third baseline vote. Preserve a known short word only
+  // when the second glyph still has normal x-height proportions. A genuine
+  // `x_i`/`a_n` child is deliberately smaller (the real-script sweep tops out
+  // at 55% of the base), so it remains a mathematical script.
+  if (run.length === 2) {
+    const heightRatio = candidate.bbox[3] / Math.max(0.001, base.bbox[3])
+    const bottomDelta = Math.abs(candidateBottom - baseBottom)
+    return (
+      exactShortWord &&
+      heightRatio >= 0.58 &&
+      bottomDelta <= Math.max(0.018, base.bbox[3] * 0.24, candidate.bbox[3] * 0.32)
+    )
+  }
 
   return run.some((atom, index) => {
     const absoluteIndex = start + index
@@ -6348,6 +6552,8 @@ function formatLinearItems(
         sourceId: item.token?.id ?? item.key,
         labelId: item.token?.labelId ?? item.labelId,
         char: item.token?.char,
+        spaceBefore: item.token?.spaceBefore,
+        lineBreakBefore: item.token?.lineBreakBefore,
       })
       return
     }
@@ -6517,6 +6723,8 @@ export const suggestMathLayoutAssignments = (
       bbox: token.bbox,
       sourceId: token.id,
       labelId: token.labelId,
+      spaceBefore: token.spaceBefore,
+      lineBreakBefore: token.lineBreakBefore,
     }))
   const assignments: MathLayoutAssignment[] = []
   const assignedTokens = new Set<string>()
@@ -6657,6 +6865,8 @@ export type AutomaticRecognitionEvidence = {
     relations: number
     fractions: number
     layoutAssignments: number
+    /** Script assignments whose size/displacement still resembles prose. */
+    weakScriptAssignments?: number
     lines: number
     latexStructure: boolean
     decisiveStructure: boolean
@@ -6979,6 +7189,18 @@ export const recognizeAutomaticExpression = (
   )))
   const fractionParts = mathTokens.filter((token) => token.isLayout || token.layout?.type === 'fraction').length
   const layoutAssignments = suggestMathLayoutAssignments(mathTokens, layoutExamples)
+  const mathTokenById = new Map(visibleMath.map((token) => [token.id, token]))
+  const weakScriptAssignments = layoutAssignments.filter((assignment) => {
+    if (assignment.role !== 'subscript' && assignment.role !== 'superscript') return false
+    const base = mathTokenById.get(assignment.anchorId)
+    const child = mathTokenById.get(assignment.tokenId)
+    if (!base || !child) return false
+    const heightRatio = child.bbox[3] / Math.max(0.001, base.bbox[3])
+    const displacement = assignment.role === 'subscript'
+      ? child.bbox[1] + child.bbox[3] - (base.bbox[1] + base.bbox[3])
+      : base.bbox[1] - child.bbox[1]
+    return heightRatio >= 0.58 && displacement <= Math.max(0.018, base.bbox[3] * 0.24)
+  }).length
   const hasMathCommandStructure = /\\(?:frac|sqrt|int|iint|iiint|oint|sum|prod|partial|nabla|infty|bigcup|bigcap)\b/u.test(mathValue)
   const mathDigits = visibleMath.filter((token) => token.labelId.startsWith('digit_')).length
   const largeMathOperators = visibleMath.filter((token) => LARGE_OPERATOR_IDS.has(token.labelId))
@@ -7053,14 +7275,23 @@ export const recognizeAutomaticExpression = (
     textBaselineAlignment >= 0.72
   )
   const alignedUnknownTextSequence = (
-    textLetters >= 4 &&
-    textBaselineAlignment >= 0.82
+    textLetters >= 3 &&
+    visibleText.length === textLetters &&
+    textBaselineAlignment >= 0.9
   )
   const compactTextValue = textValue.normalize('NFC').replace(/\s+/gu, '')
   const completeKnownTextWords = (
     lexicalTextWords.length >= 1 &&
     knownTextWords.length === lexicalTextWords.length &&
     textLetters >= 3
+  )
+  const completeShortKnownTextWord = (
+    lexicalTextWords.length === 1 &&
+    knownTextWords.length === 1 &&
+    textLetters === 2 &&
+    visibleText.length === 2 &&
+    layoutAssignments.length >= 1 &&
+    weakScriptAssignments === layoutAssignments.length
   )
   const completePlausibleTextWords = (
     lexicalTextWords.length >= 1 &&
@@ -7083,6 +7314,7 @@ export const recognizeAutomaticExpression = (
     textLetterRatio >= 0.86 &&
     (
       completeKnownTextWords ||
+      completeShortKnownTextWord ||
       completePlausibleTextWords ||
       properNameTextSequence ||
       strongSentenceText ||
@@ -7320,6 +7552,7 @@ export const recognizeAutomaticExpression = (
         relations: relationTokens.length,
         fractions: fractionParts,
         layoutAssignments: layoutAssignments.length,
+        weakScriptAssignments,
         lines: mathLineCount,
         latexStructure: hasLatexStructure,
         decisiveStructure: hasDecisiveMathStructure,

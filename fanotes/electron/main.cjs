@@ -8,6 +8,7 @@ const os = require('node:os')
 const path = require('node:path')
 const { fileURLToPath, pathToFileURL } = require('node:url')
 const { Worker } = require('node:worker_threads')
+const { createEnhancedMathService } = require('./enhanced-math.cjs')
 const {
   cleanupStaleSingletonLocks,
   configureLeanChromiumStartup,
@@ -123,6 +124,9 @@ const IPC = Object.freeze({
   loadSpellingWordCandidates: 'fanotes:load-spelling-word-candidates',
   loadHandwritingRecognitionResources: 'fanotes:load-handwriting-recognition-resources',
   recognizeNativeHandwritingLine: 'fanotes:recognize-native-handwriting-line',
+  enhancedMathGetState: 'fanotes:enhanced-math-get-state',
+  enhancedMathInstall: 'fanotes:enhanced-math-install',
+  enhancedMathRecognize: 'fanotes:enhanced-math-recognize',
   lmStudioListModels: 'fanotes:lm-studio-list-models',
   lmStudioTransform: 'fanotes:lm-studio-transform',
   aiListModels: 'fanotes:ai-list-models',
@@ -187,6 +191,8 @@ const DEFAULT_SETTINGS = Object.freeze({
   memoryBudgetMb: 0,
   ocrThreadLimit: 0,
   desktopOcrModel: 'extended',
+  enhancedMathRecognition: false,
+  enhancedMathLicenseAccepted: false,
   ocrModelKeepAliveSeconds: 120,
   backgroundTaskLimit: 0,
   lmStudioBaseUrl: 'http://127.0.0.1:1234',
@@ -254,6 +260,8 @@ const SETTINGS_SCHEMA = Object.freeze({
   memoryBudgetMb: { type: 'enum', values: [0, 1536, 2048, 3072, 4096, 6144, 8192] },
   ocrThreadLimit: { type: 'enum', values: [0, 1, 2, 3, 4] },
   desktopOcrModel: { type: 'enum', values: ['compact', 'extended'] },
+  enhancedMathRecognition: { type: 'boolean' },
+  enhancedMathLicenseAccepted: { type: 'boolean' },
   ocrModelKeepAliveSeconds: { type: 'enum', values: [0, 30, 120, 300, 600] },
   backgroundTaskLimit: { type: 'enum', values: [0, 1, 2, 4, 8, 16, 24] },
   lmStudioBaseUrl: { type: 'string', max: 2048 },
@@ -484,6 +492,26 @@ let nativeOcrWorker = null
 let nativeOcrWorkerIdleTimer = null
 let nativeOcrModelPathPromise = null
 const nativeOcrPending = new Map()
+let enhancedMathService = null
+
+function enhancedMathRuntimePath() {
+  const developmentOverride = process.env.FANOTES_CRISPEMBED_PATH?.trim()
+  if (!app.isPackaged && developmentOverride) return path.resolve(developmentOverride)
+  const executable = process.platform === 'win32' ? 'crispembed.exe' : 'crispembed'
+  const optimized = process.platform === 'win32' ? 'crispembed-avx2.exe' : 'crispembed-avx2'
+  const directory = app.isPackaged
+    ? path.join(process.resourcesPath, 'native-math')
+    : path.join(app.getAppPath(), 'native-math', `${process.platform}-${process.arch}`)
+  return [path.join(directory, optimized), path.join(directory, executable)]
+}
+
+function getEnhancedMathService() {
+  enhancedMathService ??= createEnhancedMathService({
+    userDataPath: app.getPath('userData'),
+    runtimePath: enhancedMathRuntimePath,
+  })
+  return enhancedMathService
+}
 
 function nativeOcrRuntimeEntry() {
   return app.isPackaged
@@ -3276,6 +3304,21 @@ function registerIpcHandlers() {
   })
 
   handle(IPC.recognizeNativeHandwritingLine, async (_event, request) => recognizeNativeOcrLine(request))
+
+  handle(IPC.enhancedMathGetState, async () => getEnhancedMathService().state())
+  handle(IPC.enhancedMathInstall, async (_event, request) => getEnhancedMathService().install(request))
+  handle(IPC.enhancedMathRecognize, async (_event, request) => {
+    if (!currentSettings.enhancedMathRecognition || !currentSettings.enhancedMathLicenseAccepted) {
+      throw new Error('Das optionale Formelmodell ist in den Einstellungen nicht aktiviert.')
+    }
+    const logicalCores = Math.max(1, os.cpus().length)
+    const configured = Number(currentSettings.ocrThreadLimit)
+    const automatic = Math.max(1, Math.min(4, Math.floor(logicalCores / 2)))
+    const threads = Number.isSafeInteger(configured) && configured >= 1
+      ? Math.min(configured, logicalCores, 4)
+      : automatic
+    return getEnhancedMathService().recognize({ ...request, threads })
+  })
 
   handle(IPC.lmStudioListModels, async (_event, baseUrl, apiToken) => {
     await ensureBootstrap()

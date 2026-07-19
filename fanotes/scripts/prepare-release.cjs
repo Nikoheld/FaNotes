@@ -141,6 +141,8 @@ void (async () => {
     ['LICENSE', path.join(root, 'packaging', 'LICENSE')],
     ['THIRD_PARTY_NOTICES.md', path.join(root, 'packaging', 'THIRD_PARTY_NOTICES.md')],
     ['LICENSE-OFL-1.1.txt', path.join(root, 'packaging', 'LICENSE-OFL-1.1.txt')],
+    ['LICENSE-CRISPEMBED-MIT.txt', path.join(root, 'packaging', 'LICENSE-CRISPEMBED-MIT.txt')],
+    ['LICENSE-GGML-MIT.txt', path.join(root, 'packaging', 'LICENSE-GGML-MIT.txt')],
     ['LICENSE-ONNXRUNTIME-MIT.txt', path.join(root, 'packaging', 'LICENSE-ONNXRUNTIME-MIT.txt')],
     ['LICENSE-PYLAIA-MIT.txt', path.join(root, 'packaging', 'LICENSE-PYLAIA-MIT.txt')],
     ['LICENSE-TRANSFORMERS-APACHE-2.0.txt', path.join(root, 'packaging', 'LICENSE-TRANSFORMERS-APACHE-2.0.txt')],
