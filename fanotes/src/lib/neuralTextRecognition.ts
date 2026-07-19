@@ -9,6 +9,7 @@ import {
   ENGLISH_COMMON_TRIGRAMS,
   ENGLISH_COMMON_WORDS,
 } from '../../../src/data/englishLanguage'
+import { ENGLISH_CANONICAL_PROPER_NAMES } from '../../../src/data/englishProperNames'
 import type { Stroke } from '../../../src/types'
 import { normalizeGermanSharpS } from '../../../src/lib/orthography'
 import type { HandwritingRecognitionResources } from '../types'
@@ -72,6 +73,13 @@ const TROCR_SAFE_WORD_REPAIR_BONUS = 2
 // the decoder's independent ink order authoritative without disabling N-best
 // repairs whose first word truly has no viable reading.
 const TROCR_COMPETING_WORD_REPAIR_PENALTY = 3
+// A second beam must not manufacture lexical evidence by splitting one visual
+// word into several unrelated dictionary words, duplicating it, detaching a
+// continuation mark, or introducing an unsupported opening bracket. These
+// structural rewrites previously gained roughly one full known-word bonus even
+// when the first beam already preserved the measured ink sequence.
+const TROCR_UNSUPPORTED_STRUCTURE_PENALTY = 4
+const TROCR_ORDINARY_WORD_NAME_PENALTY = 3
 
 type RecognitionLanguage = 'de' | 'en'
 type WordMembership = (word: string) => boolean
@@ -1707,6 +1715,133 @@ const trocrWordSurfaces = (value: string, language: RecognitionLanguage): TrocrW
   }))
 }
 
+const trocrStructuralRewritePenalty = (
+  visualTop: string,
+  candidate: string,
+  language: RecognitionLanguage,
+) => {
+  let penalty = 0
+  const sourceWords = trocrWordSurfaces(visualTop, language)
+  const candidateWords = trocrWordSurfaces(candidate, language)
+  if (candidateWords.length > sourceWords.length) {
+    const locale = language === 'de' ? 'de-CH' : 'en-US'
+    const sourceLetters = sourceWords.map((word) => word.value).join('').toLocaleLowerCase(locale)
+    const candidateLetters = candidateWords.map((word) => word.value).join('').toLocaleLowerCase(locale)
+    if (sourceLetters !== candidateLetters) {
+      // A fused English conjunction is a recurring decoder boundary error;
+      // the second beam may still repair the neighbouring word by one letter
+      // while restoring that independently meaningful boundary (`andsuper` →
+      // `and supper`). Other rewritten splits remain unsupported here.
+      const separatesFusedAnd = language === 'en'
+        && /\band(?=\p{L})/iu.test(visualTop)
+        && /\band\s+\p{L}/iu.test(candidate)
+      if (!separatesFusedAnd) penalty += TROCR_UNSUPPORTED_STRUCTURE_PENALTY
+    } else {
+      const sourceBoundaries = new Set<number>()
+      let sourceOffset = 0
+      sourceWords.slice(0, -1).forEach((word) => {
+        sourceOffset += Array.from(word.value).length
+        sourceBoundaries.add(sourceOffset)
+      })
+      let candidateOffset = 0
+      for (let index = 0; index < candidateWords.length - 1; index += 1) {
+        candidateOffset += Array.from(candidateWords[index].value).length
+        if (sourceBoundaries.has(candidateOffset)) continue
+        const left = candidateWords[index].value.toLocaleLowerCase(locale)
+        const right = candidateWords[index + 1].value.toLocaleLowerCase(locale)
+        const shortFunctionWord = [left, right].some((word) => (
+          Array.from(word).length <= 3 && LANGUAGE_WORDS[language].has(word)
+        ))
+        if (!shortFunctionWord) {
+          penalty += TROCR_UNSUPPORTED_STRUCTURE_PENALTY
+          break
+        }
+      }
+    }
+  }
+  const sourceLetters = sourceWords.map((word) => word.value).join('').toLocaleLowerCase(language)
+  const candidateLetters = candidateWords.map((word) => word.value).join('').toLocaleLowerCase(language)
+  if (
+    sourceLetters !== candidateLetters
+    && /\p{L}-$/u.test(visualTop)
+    && /\p{L}+\s+-$/u.test(candidate)
+  ) {
+    penalty += TROCR_UNSUPPORTED_STRUCTURE_PENALTY
+  }
+  if ([...'([{'].some((bracket) => !visualTop.includes(bracket) && candidate.includes(bracket))) {
+    penalty += TROCR_UNSUPPORTED_STRUCTURE_PENALTY
+  }
+  return penalty
+}
+
+export const trocrStructuralRewritePenaltyForTests = trocrStructuralRewritePenalty
+
+const trocrOrdinaryWordNamePenalty = (
+  visualTop: string,
+  candidate: string,
+  language: RecognitionLanguage,
+  wordMembership?: WordMembership,
+) => {
+  if (language !== 'en') return 0
+  const sourceWords = trocrWordSurfaces(visualTop, language)
+  const candidateWords = trocrWordSurfaces(candidate, language)
+  if (sourceWords.length !== candidateWords.length) return 0
+  const changed = sourceWords.flatMap((source, index) => (
+    source.value === candidateWords[index]?.value
+      ? []
+      : [{ source, target: candidateWords[index] }]
+  ))
+  if (changed.length !== 1 || !changed[0].target) return 0
+  const { source, target } = changed[0]
+  if (!/^\p{Lu}\p{Ll}{2,}$/u.test(source.value) || !/^\p{Lu}\p{Ll}{2,}$/u.test(target.value)) return 0
+  const prefix = visualTop.slice(0, source.start).trimEnd().replace(/["'’\])}]+$/gu, '').trimEnd()
+  if (!prefix || /[.!?]$/u.test(prefix)) return 0
+  const sourceLower = source.value.toLocaleLowerCase('en-US')
+  const targetLower = target.value.toLocaleLowerCase('en-US')
+  const known = (word: string) => LANGUAGE_WORDS.en.has(word) || Boolean(wordMembership?.(word))
+  if (known(sourceLower) || !known(targetLower) || ENGLISH_CANONICAL_PROPER_NAMES.has(targetLower)) return 0
+  return TROCR_ORDINARY_WORD_NAME_PENALTY
+}
+
+export const trocrOrdinaryWordNamePenaltyForTests = trocrOrdinaryWordNamePenalty
+
+const trocrDenseGermanNamePenalty = (
+  visualTop: string,
+  candidate: string,
+  language: RecognitionLanguage,
+  wordMembership?: WordMembership,
+) => {
+  if (language !== 'de') return 0
+  const sourceWords = trocrWordSurfaces(visualTop, language)
+  const candidateWords = trocrWordSurfaces(candidate, language)
+  if (sourceWords.length !== candidateWords.length) return 0
+  const titleCase = (word?: TrocrWordSurface) => Boolean(word && /^\p{Lu}\p{Ll}{2,}$/u.test(word.value))
+  const known = (word: string) => LANGUAGE_WORDS.de.has(word) || Boolean(wordMembership?.(word))
+  const directlyAdjacent = (leftIndex: number, rightIndex: number) => (
+    titleCase(sourceWords[leftIndex])
+    && titleCase(sourceWords[rightIndex])
+    && /^\s+$/u.test(visualTop.slice(sourceWords[leftIndex].end, sourceWords[rightIndex].start))
+  )
+  for (let index = 0; index < sourceWords.length; index += 1) {
+    const source = sourceWords[index]
+    const target = candidateWords[index]
+    if (!target || source.value === target.value || !titleCase(source)) continue
+    let runStart = index
+    let runEnd = index
+    while (runStart > 0 && directlyAdjacent(runStart - 1, runStart)) runStart -= 1
+    while (runEnd + 1 < sourceWords.length && directlyAdjacent(runEnd, runEnd + 1)) runEnd += 1
+    const runLength = runEnd - runStart + 1
+    const withinNameRun = runLength >= 3 || (runLength === 2 && sourceWords.length === 2)
+    if (!withinNameRun) continue
+    const sourceLower = source.value.toLocaleLowerCase('de-CH')
+    const targetLower = target.value.toLocaleLowerCase('de-CH')
+    if (!known(sourceLower) && known(targetLower)) return TROCR_ORDINARY_WORD_NAME_PENALTY
+  }
+  return 0
+}
+
+export const trocrDenseGermanNamePenaltyForTests = trocrDenseGermanNamePenalty
+
 type TrocrLexicalRepairDisposition = 'none' | 'safe' | 'competing'
 
 const trocrLexicalRepairDisposition = (
@@ -1799,13 +1934,24 @@ const rankTrocrCandidates = (
     const competingRepairPenalty = repairDisposition === 'competing'
       ? TROCR_COMPETING_WORD_REPAIR_PENALTY
       : 0
+    const structuralRewritePenalty = index > 0
+      ? trocrStructuralRewritePenalty(candidates[0], rawText, language)
+      : 0
+    const ordinaryWordNamePenalty = index > 0
+      ? trocrOrdinaryWordNamePenalty(candidates[0], rawText, language, wordMembership)
+      : 0
+    const denseGermanNamePenalty = index > 0
+      ? trocrDenseGermanNamePenalty(candidates[0], rawText, language, wordMembership)
+      : 0
     return {
       rawText,
       text,
       assessment,
       visualRank: index,
       baseScore,
-      score: baseScore - index * TROCR_VISUAL_RANK_PENALTY + safeRepairBonus - competingRepairPenalty,
+      score: baseScore - index * TROCR_VISUAL_RANK_PENALTY
+        + safeRepairBonus - competingRepairPenalty - structuralRewritePenalty
+        - ordinaryWordNamePenalty - denseGermanNamePenalty,
     }
   })
   .sort((first, second) => second.score - first.score)

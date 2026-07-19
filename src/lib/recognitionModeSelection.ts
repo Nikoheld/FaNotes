@@ -48,13 +48,17 @@ export const isScriptOnlyBaselineTextConflict = (automatic: AutomaticRecognition
     text.knownWords === text.words &&
     text.letters >= 3
   )
+  const completePlausibleWords = (
+    text.words >= 1 &&
+    (text.plausibleWords ?? text.knownWords) === text.words &&
+    text.letters >= 4
+  )
   const properNameShape = (
     text.words === 1 &&
     text.letters >= 4 &&
     /^[A-ZÄÖÜ][a-zäöü]+$/u.test(compactText)
   )
   return (
-    math.decisiveStructure === false &&
     math.layoutAssignments >= 1 &&
     math.fractions === 0 &&
     math.relations === 0 &&
@@ -71,7 +75,9 @@ export const isScriptOnlyBaselineTextConflict = (automatic: AutomaticRecognition
       // compact offline dictionary. Digits/operators/relations are excluded
       // above and therefore keep real x_1-style formulae decisive.
       completeKnownWords ||
+      completePlausibleWords ||
       properNameShape ||
+      text.strongSentence ||
       (
         text.visibleCharacters >= 3 &&
         text.letters >= 3 &&
