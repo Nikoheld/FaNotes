@@ -6,12 +6,14 @@ const source = process.argv[2]
 if (!source) throw new Error('Aufruf: node scripts/analyze-trocr-nbest.mjs BENCHMARK.json [de|en] [--summary-only]')
 const language = process.argv.slice(3).find((argument) => argument === 'de' || argument === 'en') === 'de' ? 'de' : 'en'
 const summaryOnly = process.argv.includes('--summary-only')
+const detailContext = process.argv.includes('--detail-context')
 const detailPenaltyArgument = process.argv.find((argument) => argument.startsWith('--detail-penalty='))
 const detailPenalty = detailPenaltyArgument
   ? Number(detailPenaltyArgument.slice('--detail-penalty='.length))
   : null
 if (detailPenaltyArgument && !Number.isFinite(detailPenalty)) throw new Error('Ungültige Detail-Strafe.')
 if (summaryOnly && detailPenalty !== null) throw new Error('--summary-only und --detail-penalty sind nicht kombinierbar.')
+if (summaryOnly && detailContext) throw new Error('--summary-only und --detail-context sind nicht kombinierbar.')
 const benchmark = JSON.parse(fs.readFileSync(path.resolve(source), 'utf8'))
 if (!Array.isArray(benchmark.predictions)) throw new Error('Der Benchmark enthält keine N-Best-Vorhersagen.')
 
@@ -274,6 +276,9 @@ try {
       .sort((first, second) => first.delta - second.delta)
       .slice(0, 16)
       .forEach((entry) => console.log(`raw-context ${entry.delta} ${JSON.stringify(entry)}`))
+    if (detailContext) rawFinalContextChanges
+      .sort((first, second) => second.delta - first.delta)
+      .forEach((entry) => console.log(`raw-context-detail ${entry.delta >= 0 ? '+' : ''}${entry.delta} ${JSON.stringify(entry)}`))
     detailPenaltyChanges
       .sort((first, second) => second.delta - first.delta)
       .forEach((entry) => console.log(`penalty-${detailPenalty} ${entry.delta >= 0 ? '+' : ''}${entry.delta} ${JSON.stringify(entry)}`))

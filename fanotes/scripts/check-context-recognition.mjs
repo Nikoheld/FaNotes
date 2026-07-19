@@ -405,11 +405,43 @@ try {
     'Richard Harris und Helena',
     'Unbekannte Namen innerhalb eines Satzes dürfen nicht zu Wörterbuchnachbarn umgeschrieben werden.',
   )
-  installNeuralWordContextCandidates('de', ['geänderten', 'gesonderten', 'graduell', 'graduelle'])
+  assert.equal(
+    applyFinalNeuralWordContext('Edward Regan "Eddie" Murphy', 'de'),
+    'Edward Regan "Eddie" Murphy',
+    'Eine Namensfolge am Satzanfang darf nicht in eine häufigere Sprachvariante übersetzt werden.',
+  )
+  assert.equal(
+    applyFinalNeuralWordContext('ÖPP TNG CBS SES', 'de'),
+    'ÖPP TNG CBS SES',
+    'Grossbuchstaben-Akronyme müssen unabhängig vom Wörterbuch exakt erhalten bleiben.',
+  )
+  installNeuralWordContextCandidates('de', [
+    'binomischer', 'englisch', 'geänderten', 'gesonderten', 'graduell', 'graduelle', 'ökonomischer',
+  ])
   assert.equal(
     applyFinalNeuralWordContext('die gesnderten Positionen', 'de'),
     'die gesnderten Positionen',
     'Gleich nahe Wörterbuchtreffer unterschiedlicher Länge sind mehrdeutig und dürfen keine visuelle Form ersetzen.',
+  )
+  assert.equal(
+    applyNeuralWordContext('englsch', 'de'),
+    'englsch',
+    'Eine häufige Zwei-Edit-Korrektur darf einen strikt näheren vollständigen Wörterbuchkandidaten nicht verdecken.',
+  )
+  assert.equal(
+    applyFinalNeuralWordContext('englsch', 'de'),
+    'englsch',
+    'Ohne physische Zeichenzählung darf auch der Endkontext kein fehlendes Zeichen ergänzen; die visuell nähere Rohform bleibt erhalten.',
+  )
+  assert.equal(
+    applyFinalNeuralWordContext('öbenomischer', 'de'),
+    'öbenomischer',
+    'Ein anders langer Wörterbuchtreffer ist nicht eindeutig, wenn eine gleich nahe positionsgetreue Alternative existiert.',
+  )
+  assert.equal(
+    applyFinalNeuralWordContext('oder gutans ("gegossen") abgeleitet', 'de'),
+    'oder gutans ("gegossen") abgeleitet',
+    'Ein unbekannter Fachbegriff vor einer zitierten Klammererklärung darf nicht in ein Alltagswort umgeschrieben werden.',
   )
   assert.equal(
     applyNeuralWordContext('jap. Sengoku', 'de'),
@@ -1373,6 +1405,11 @@ try {
     repairNeuralWordSpacing('in form', 'en'),
     'in form',
     'Zwei bereits gültige Wörter dürfen nicht nur deshalb verbunden werden, weil auch ihre Verkettung ein Wort ist.',
+  )
+  assert.equal(
+    repairNeuralWordSpacing('die SES S.A. und Nummer N4 in einer Big Band', 'de'),
+    'die SES S.A. und Nummer N4 in einer Big Band',
+    'Abstände vor Akronymen, Kennungen und grossgeschriebenen Namen dürfen nicht entfernt werden.',
   )
 
   const neuralLine = (text, confidence = 88) => {
