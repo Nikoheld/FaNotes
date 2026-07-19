@@ -105,9 +105,11 @@ https://github.com/microsoft/onnxruntime
 FaNotes local spelling filters
 ==============================
 The compact German and English Bloom filters shipped with FaNotes are derived
-at build time from dictionary-de 3.0.0 and dictionary-en 4.0.0. nspell 2.1.5
-is used as a build tool to expand the Hunspell word forms; its program code is
-not loaded by FaNotes at runtime.
+at build time from dictionary-de 3.0.0, dictionary-en 4.0.0 and
+dictionary-en-gb 3.0.0. nspell 2.1.5 expands the Hunspell word forms.
+SUBTLEXus frequencies, distributed through subtlex-word-frequencies 2.0.0,
+keep corpus-unsupported supplementary forms out of the OCR replacement prior;
+none of these build tools is loaded by FaNotes at runtime.
 
 German word forms (dictionary-de / igerman98)
 ----------------------------------------------
@@ -128,6 +130,25 @@ upstream attribution and redistribution terms are installed verbatim as
 `spell/LICENSE-dictionary-en.txt`.
 
 Source: https://www.npmjs.com/package/dictionary-en
+
+British English word forms (dictionary-en-gb / SCOWL en_GB)
+------------------------------------------------------------
+The data is distributed under the same permissive and public-domain SCOWL
+family of terms. The complete upstream attribution and redistribution terms
+are installed verbatim as `spell/LICENSE-dictionary-en-gb.txt`.
+
+Source: https://www.npmjs.com/package/dictionary-en-gb
+
+SUBTLEX word frequencies
+------------------------
+The OCR candidate filter uses word counts derived from the 51-million-token
+SUBTLEXus subtitle corpus via subtlex-word-frequencies 2.0.0. The packaged
+frequency list is Copyright (c) Zeke Sikelianos and licensed under ISC. The
+complete license is installed as
+`spell/LICENSE-SUBTLEX-WORD-FREQUENCIES-ISC.txt`.
+
+Sources: https://www.ugent.be/pp/experimentele-psychologie/en/research/documents/subtlexus
+and https://www.npmjs.com/package/subtlex-word-frequencies
 
 nspell build tool
 -----------------

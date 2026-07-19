@@ -174,7 +174,7 @@ export const loadSpellingWordMembership = async (language: SpellingLanguage) => 
   }
 }
 
-const candidatePromises = new Map<SpellingLanguage, Promise<void>>()
+const candidatePromises = new Map<SpellingLanguage, Promise<Set<string>>>()
 
 const loadRecognitionCandidates = async (language: SpellingLanguage) => {
   let pending = candidatePromises.get(language)
@@ -201,6 +201,7 @@ const loadRecognitionCandidates = async (language: SpellingLanguage) => {
         previous = word
       })
       installNeuralWordContextCandidates(language, words)
+      return new Set(words)
     }).catch((error) => {
       candidatePromises.delete(language)
       throw error
@@ -214,11 +215,19 @@ const loadRecognitionCandidates = async (language: SpellingLanguage) => {
  * editor spellchecker keeps using the compact Bloom filter and therefore does
  * not pay the parsing or memory cost during normal application startup. */
 export const loadSpellingWordContext = async (language: SpellingLanguage) => {
-  const [membership] = await Promise.all([
+  const [membership, candidates] = await Promise.all([
     loadSpellingWordMembership(language),
     loadRecognitionCandidates(language),
   ])
-  return membership
+  return (word: string) => {
+    const normalized = normalizeWord(word, language)
+    // The sorted OCR list is intentionally stricter than the spelling Bloom
+    // filter: valid but corpus-unsupported supplementary entries remain
+    // accepted in typed notes without becoming a reason to override the visual
+    // handwriting winner. Short words and compounds keep the Bloom path.
+    if (/^\p{L}{3,32}$/u.test(normalized)) return candidates.has(normalized)
+    return membership(word)
+  }
 }
 
 const evidenceLanguage = (evidence: LanguageEvidence): SpellingLanguage | null => {

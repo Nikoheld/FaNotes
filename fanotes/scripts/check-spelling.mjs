@@ -16,6 +16,8 @@ assert.equal(createHash('sha256').update(de).digest('hex'), manifest.languages.d
 assert.equal(createHash('sha256').update(en).digest('hex'), manifest.languages.en.sha256)
 assert.equal(createHash('sha256').update(deWords).digest('hex'), manifest.languages.de.candidates.sha256)
 assert.equal(createHash('sha256').update(enWords).digest('hex'), manifest.languages.en.candidates.sha256)
+assert.deepEqual(manifest.generatedFrom.en, ['dictionary-en@4.0.0', 'dictionary-en-gb@3.0.0'])
+assert.equal(manifest.minimumSupplementalOcrFrequency, 3)
 
 globalThis.window = {
   fanotes: {
@@ -42,6 +44,9 @@ try {
   assert.deepEqual(english.errors.map(({ word }) => word), ['exampel'])
   assert.equal(english.detectedLanguage, 'en')
 
+  const british = await check('The specialised enquiry noted a moustache before they deputise the officer at Chequers.')
+  assert.deepEqual(british.errors, [], 'Gültige britische Schreibweisen dürfen weder im Editor noch bei Eigennamen rot markiert werden.')
+
   const mixed = await checkSpelling({ segments: [
     { from: 0, text: 'Das ist ein deutscher Satz.' },
     { from: 30, text: 'This is an English sentence.' },
@@ -59,9 +64,18 @@ try {
   assert.deepEqual(excluded.errors, [])
 
   await loadSpellingWordContext('de')
-  assert.equal(applyNeuralWordContext('kenster', 'de'), 'kenster', 'Das Vollwörterbuch darf die visuelle Modellwahl nicht vorwegnehmen.')
-  assert.equal(applyFinalNeuralWordContext('kenster', 'de'), 'fenster')
+  assert.equal(applyNeuralWordContext('fenxter', 'de'), 'fenxter', 'Das Vollwörterbuch darf die visuelle Modellwahl nicht vorwegnehmen.')
+  assert.equal(applyFinalNeuralWordContext('fenxter', 'de'), 'fenster')
   assert.equal(applyNeuralWordContext('sarten', 'de'), 'sarten', 'Mehrdeutige Vollwörterbuch-Nachbarn müssen ohne visuelle Evidenz unverändert bleiben.')
+  const englishOcrMembership = await loadSpellingWordContext('en')
+  for (const word of ['moustache', 'specialised', 'deputise']) {
+    assert.equal(englishOcrMembership(word), true, `${word} muss als corpusgestützte britische OCR-Form gelten.`)
+  }
+  assert.equal(
+    englishOcrMembership('chequers'),
+    false,
+    'Eine nur zweimal belegte Ergänzungsform darf Rechtschreibung sein, aber keine visuelle OCR-Hypothese verdrängen.',
+  )
 } finally {
   await server.close()
 }
