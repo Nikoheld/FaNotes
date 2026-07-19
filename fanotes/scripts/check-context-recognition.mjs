@@ -364,7 +364,7 @@ try {
     '',
     'Ein grossgeschriebener Name darf keine häufigere Alternativansicht erzwingen.',
   )
-  const independentViewWords = (word) => ['hallo', 'test'].includes(word.toLocaleLowerCase('de-CH'))
+  const independentViewWords = (word) => ['hallo', 'taboo', 'test'].includes(word.toLocaleLowerCase('de-CH'))
   assert.equal(
     shouldRequestIndependentTrocrViewForTests(1, 'mallo', 'mallo', true, 'de', independentViewWords),
     true,
@@ -379,6 +379,11 @@ try {
     shouldRequestIndependentTrocrViewForTests(1, 'test', 'hallo', false, 'de', independentViewWords),
     false,
     'Zwei bekannte, bereits plausible Wörter dürfen nicht pauschal eine zweite teure Inferenz auslösen.',
+  )
+  assert.equal(
+    shouldRequestIndependentTrocrViewForTests(1, 'Fabio', 'taboo', false, 'de', independentViewWords),
+    true,
+    'Ein unbekannter visueller Name gegen ein bekanntes Kontextwort braucht eine unabhängige zweite Ansicht.',
   )
   assert.equal(
     shouldRequestIndependentTrocrViewForTests(2, 'mallo', 'xyqaro', true, 'de', independentViewWords),
@@ -533,6 +538,24 @@ try {
   )
   assert.equal(trocrStructuralRewritePenaltyForTests('der', 'der der', 'de'), 4)
   assert.equal(trocrStructuralRewritePenaltyForTests('zwischen einem Coach und', 'zwischen einem (oach und', 'de'), 4)
+  assert.equal(trocrStructuralRewritePenaltyForTests(
+    'zur Neuordnung des Hamburges Eisenbahnwesens',
+    'zur Neuordnung des Hamburg, Eisenbahnwesens',
+    'de',
+  ), 4)
+  assert.equal(trocrStructuralRewritePenaltyForTests(
+    'Weltskiverband. FIS ausgetragene',
+    'Weltskiverband FIS ausgetragene',
+    'de',
+  ), 0)
+  assert.equal(
+    rankTrocrCandidateTextsForTests([
+      'zur Neuordnung des Hamburges Eisenbahnwesens',
+      'zur Neuordnung des Hamburg, Eisenbahnwesens',
+    ], 'de', (word) => ['zur', 'neuordnung', 'des', 'hamburg', 'eisenbahnwesens'].includes(word))[0]?.rawText,
+    'zur Neuordnung des Hamburges Eisenbahnwesens',
+    'Ein Wörterbuchwort darf keine neue interne Interpunktion erfinden, um den visuell führenden Beam zu verdrängen.',
+  )
   assert.equal(trocrStructuralRewritePenaltyForTests(
     'that they use Dan as a specimen demonstra-',
     'that they use Dan as a specimen demonstrations -',

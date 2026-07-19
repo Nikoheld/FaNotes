@@ -55,11 +55,13 @@ const LANGUAGE_WORD_RANKS = {
   de: new Map(LANGUAGE_WORD_LISTS.de.map((word, index) => [word, index])),
   en: new Map(LANGUAGE_WORD_LISTS.en.map((word, index) => [word, index])),
 }
-// Blind N-best validation on independent English IAM and German ScaDS lines
-// showed that the previous 0.10 penalty let weak language fluency override
-// the decoder's visual order too often. A candidate now needs roughly one
-// complete independently known-word advantage per displaced beam position.
+// N-best development analysis across English IAM and German ScaDS lines showed
+// that the previous 0.10 penalty let weak language fluency override the
+// decoder's visual order too often. A candidate now needs roughly one complete
+// independently known-word advantage per displaced beam position. The ScaDS
+// test fold is kept separate for final evaluation, not parameter selection.
 const TROCR_VISUAL_RANK_PENALTY = 3
+export const trocrVisualRankPenaltyForTests = TROCR_VISUAL_RANK_PENALTY
 // An independent 1,208-line IAM N-best audit found one deliberately narrow
 // exception to the full visual-rank penalty: when the next beam changes
 // exactly one ordinary lower-case word by at most two characters and turns an
@@ -1348,8 +1350,10 @@ const containsUnknownContextWord = (
 /** Transformers.js 3.8's image pipeline currently exposes only one generated
  * sequence even when its sampler is configured with multiple beams. Request a
  * genuinely independent rendering only when the first context view remains
- * unsupported, or when it disagrees with the compact visual path on an
- * unknown word. Known, agreeing lines retain the single-inference fast path. */
+ * unsupported, or when both visual paths disagree and either reading contains
+ * an unknown word. This includes a visually plausible uncommon name opposed
+ * by a frequent context hallucination. Fully known lines retain the
+ * single-inference fast path. */
 const shouldRequestIndependentTrocrView = (
   candidateCount: number,
   compactText: string,
@@ -1360,10 +1364,11 @@ const shouldRequestIndependentTrocrView = (
 ) => {
   if (candidateCount > 1 || !contextText) return false
   if (contextNeedsContext) return true
-  if (!containsUnknownContextWord(contextText, language, wordMembership)) return false
   const compactSurface = compactText.toLocaleLowerCase(language).trim()
   const contextSurface = contextText.toLocaleLowerCase(language).trim()
-  return !compactSurface || compactSurface !== contextSurface
+  if (!compactSurface || compactSurface === contextSurface) return false
+  return containsUnknownContextWord(contextText, language, wordMembership)
+    || containsUnknownContextWord(compactText, language, wordMembership)
 }
 
 export const shouldRequestIndependentTrocrViewForTests = shouldRequestIndependentTrocrView
@@ -1801,7 +1806,26 @@ const trocrStructuralRewritePenalty = (
   ) {
     penalty += TROCR_UNSUPPORTED_STRUCTURE_PENALTY
   }
-  if ([...'([{'].some((bracket) => !visualTop.includes(bracket) && candidate.includes(bracket))) {
+  const availablePunctuation = new Map<string, number>()
+  Array.from(visualTop).forEach((character) => {
+    if (!PUNCTUATION.has(character)) return
+    availablePunctuation.set(character, (availablePunctuation.get(character) ?? 0) + 1)
+  })
+  const candidateCharacters = Array.from(candidate.trimEnd())
+  const introducesUnsupportedPunctuation = candidateCharacters.some((character, index) => {
+    if (!PUNCTUATION.has(character)) return false
+    const remaining = availablePunctuation.get(character) ?? 0
+    if (remaining > 0) {
+      availablePunctuation.set(character, remaining - 1)
+      return false
+    }
+    // Terminal punctuation is independently checked against visible ink by
+    // normalizedTrocrText. Internal punctuation has no such support and must
+    // not let a lower visual hypothesis manufacture a dictionary word
+    // (`Hamburges` -> `Hamburg,`). Removing spurious punctuation stays free.
+    return index < candidateCharacters.length - 1 || !/[.,!?]/u.test(character)
+  })
+  if (introducesUnsupportedPunctuation) {
     penalty += TROCR_UNSUPPORTED_STRUCTURE_PENALTY
   }
   return penalty
