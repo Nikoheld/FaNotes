@@ -53,6 +53,14 @@ export const isScriptOnlyBaselineTextConflict = (automatic: AutomaticRecognition
     (text.plausibleWords ?? text.knownWords) === text.words &&
     text.letters >= 4
   )
+  const completeShortKnownWord = (
+    text.words === 1 &&
+    text.knownWords === 1 &&
+    text.letters === 2 &&
+    text.visibleCharacters === 2 &&
+    math.layoutAssignments >= 1 &&
+    math.weakScriptAssignments === math.layoutAssignments
+  )
   const properNameShape = (
     text.words === 1 &&
     text.letters >= 4 &&
@@ -75,6 +83,7 @@ export const isScriptOnlyBaselineTextConflict = (automatic: AutomaticRecognition
       // compact offline dictionary. Digits/operators/relations are excluded
       // above and therefore keep real x_1-style formulae decisive.
       completeKnownWords ||
+      completeShortKnownWord ||
       completePlausibleWords ||
       properNameShape ||
       text.strongSentence ||
@@ -204,6 +213,15 @@ export const assessNeuralTextModeCandidate = (
     ? hasStrongPersonalizedTextEvidence(personalized, letters, visible.length, formulaSyntax)
     : false
   const strongKnownWord = hasStrongNeuralWordEvidence(neural, letters, wordLike)
+  const strongShortKnownWord = Boolean(
+    neural.confidence >= 72 &&
+    (neural.wordCount ?? 0) === 1 &&
+    (neural.knownWordRatio ?? 0) >= 0.9 &&
+    letters === 2 &&
+    visible.length === 2 &&
+    automatic?.evidence?.math.layoutAssignments &&
+    automatic.evidence.math.weakScriptAssignments === automatic.evidence.math.layoutAssignments
+  )
   const strongSentence = hasStrongNeuralSentenceEvidence(neural, letters, wordLike) || (
     neural.confidence >= 38 &&
     words.length >= 2 &&
@@ -225,7 +243,7 @@ export const assessNeuralTextModeCandidate = (
     !/[√∫∑Σ∏Π∞^_≤≥≠≈]/u.test(normalized)
   )
   const safeCandidate = !formulaSyntax || proseDominatesCandidateFormula
-  const enoughTextEvidence = strongPersonalized || strongKnownWord || strongSentence || strongLetterSequence
+  const enoughTextEvidence = strongPersonalized || strongKnownWord || strongShortKnownWord || strongSentence || strongLetterSequence
   const candidateProperName = (
     neural.confidence >= 70 &&
     words.length === 1 &&
@@ -242,11 +260,12 @@ export const assessNeuralTextModeCandidate = (
     automatic.evidence.math.largeOperators === 0 &&
     automatic.evidence.math.strongSymbols === 0 &&
     automatic.evidence.math.digits === 0 &&
-    letters >= 3 &&
+    (letters >= 3 || strongShortKnownWord) &&
     letterRatio >= 0.86 &&
     !formulaSyntax &&
     (
       strongKnownWord ||
+      strongShortKnownWord ||
       strongSentence ||
       candidateProperName ||
       (
@@ -297,7 +316,7 @@ export const assessNeuralTextModeCandidate = (
       ? 'personalized'
       : strongSentence
         ? 'sentence'
-        : strongKnownWord
+        : strongKnownWord || strongShortKnownWord
           ? 'known-word'
           : strongLetterSequence
             ? 'letter-sequence'

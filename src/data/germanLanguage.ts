@@ -9,7 +9,7 @@ immer in ins ist ja jede jedem jeden jeder jedes jetzt kann keine keinem keinen 
 konnte kurz lassen leben leider lernen lesen leute machen macht man mehr mein meine mensch mich mir mit morgen muss
 müssen nach nächste nein neue neuen nicht nichts nie noch nun nur ob oder oft ohne paar problem richtig sagt schon
 schreiben sehen sehr sein seine seit selbst sich sie sind so soll sollen sonst später stehen steht tag text tun über
-um und uns unser unsere unter viel vielleicht vier vom von vor war waren warum was weg weil weiter welche welchem
+um und uns unser unsere unter viel vielleicht vier vom von vor war waren warum was weg weil weiter welche welchem zu
 welchen welcher welches welt wenn werde werden wer wie wieder will wir wird wo wohl worden würde würden zwei zwischen
 arbeit auto bild browser computer danke datei daten deutsch deutschland direkt dürfen erkennen erkennung familie frage frau
 freund freunde früh gehen geld geschichte hand haus herr hoch jahr jahren kind kinder klar klein land lang lange liebe

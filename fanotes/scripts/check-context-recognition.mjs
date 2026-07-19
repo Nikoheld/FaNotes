@@ -781,6 +781,71 @@ try {
     'Eine reine zusammenhängende Buchstabenzeile braucht keinen Wörterbucheintrag, um ihre Grundlinie zu behalten.',
   )
 
+  const compactShortWordTokens = [
+    token('i', 96, [['i', 96]], 10988, [0.05, 0.18, 0.045, 0.18]),
+    token('m', 95, [['m', 95]], 10989, [0.101, 0.284, 0.052, 0.11]),
+  ]
+  assert.doesNotMatch(
+    recognizedLatex(compactShortWordTokens),
+    /[_^]\{/u,
+    'Ein bekanntes kurzes Wort mit normal grossem zweiten Buchstaben darf nicht als Index erscheinen.',
+  )
+  assert.equal(
+    suggestMathLayoutAssignments(compactShortWordTokens).length,
+    0,
+    'Ein zweibuchstabiges Alltagswort darf kein falsches Indextraining erzeugen.',
+  )
+
+  const shortKnownButRealSubscriptTokens = [
+    token('i', 96, [['i', 96]], 10990, [0.05, 0.2, 0.06, 0.18]),
+    token('m', 95, [['m', 95]], 10991, [0.115, 0.3224, 0.04, 0.099]),
+  ]
+  assert.match(
+    recognizedLatex(shortKnownButRealSubscriptTokens),
+    /i_\{m\}/u,
+    'Ein sichtbar kleiner mathematischer Index muss trotz des zufälligen Wortbilds „im“ erhalten bleiben.',
+  )
+
+  const shortWordAcrossExplicitSpace = [
+    token('a', 96, [['a', 96]], 10992, [0.05, 0.2, 0.06, 0.18]),
+    { ...token('n', 95, [['n', 95]], 10993, [0.115, 0.3224, 0.04, 0.099]), spaceBefore: true },
+  ]
+  assert.match(
+    recognizedLatex(shortWordAcrossExplicitSpace),
+    /a_\{n\}/u,
+    'Ein expliziter Wortabstand darf zwei mathematische Variablen nicht zu einem Schutzwort verbinden.',
+  )
+
+  let shortWordBaselineSweepCases = 0
+  for (const word of ['im', 'in', 'an', 'am', 'es', 'du', 'er', 'zu', 'of', 'to', 'is', 'we', 'he']) {
+    for (const baseHeight of [0.14, 0.18, 0.22]) {
+      for (const bodyRatio of [0.58, 0.66, 0.74]) {
+        for (const displacementRatio of [0.17, 0.2, 0.23]) {
+          const baseY = 0.2
+          const bodyHeight = baseHeight * bodyRatio
+          const bodyBottom = baseY + baseHeight * (1 + displacementRatio)
+          const sweptTokens = [
+            token(word[0], 95, [[word[0], 95]], 12000 + shortWordBaselineSweepCases * 2, [0.05, baseY, 0.055, baseHeight]),
+            token(word[1], 94, [[word[1], 94]], 12001 + shortWordBaselineSweepCases * 2, [0.111, bodyBottom - bodyHeight, 0.045, bodyHeight]),
+          ]
+          const sweptLatex = recognizedLatex(sweptTokens)
+          assert.doesNotMatch(
+            sweptLatex,
+            /[_^]\{/u,
+            `Kurzes Alltagswort wurde im Geometrie-Sweep zum Index (${word}, H=${baseHeight}, h=${bodyRatio}, d=${displacementRatio}): ${sweptLatex}`,
+          )
+          assert.equal(
+            suggestMathLayoutAssignments(sweptTokens).length,
+            0,
+            `Kurzes Alltagswort erzeugte eine Indexzuweisung (${word}, H=${baseHeight}, h=${bodyRatio}, d=${displacementRatio}).`,
+          )
+          shortWordBaselineSweepCases += 1
+        }
+      }
+    }
+  }
+  assert.equal(shortWordBaselineSweepCases, 351, 'Der Sweep für kurze Grundlinienwörter ist unvollständig.')
+
   const trueMultiLetterSubscriptTokens = [
     token('x', 96, [['x', 96]], 1099, [0.05, 0.2, 0.06, 0.18]),
     token('m', 95, [['m', 95]], 1100, [0.115, 0.365, 0.04, 0.08]),
@@ -2267,6 +2332,64 @@ try {
     }, falseShortWordScripts).shouldUseText,
     true,
     'Dreistellige Alltagswörter auf gemeinsamer Grundlinie müssen eine reine Indexhypothese überstimmen.',
+  )
+  const falseTwoLetterWordScripts = {
+    ...falseWordScripts,
+    value: 'i_{m}',
+    textValue: 'im',
+    mathValue: 'i_{m}',
+    evidence: {
+      ...falseWordScripts.evidence,
+      text: {
+        ...falseWordScripts.evidence.text,
+        visibleCharacters: 2,
+        letters: 2,
+        words: 1,
+        knownWords: 1,
+        knownWordRatio: 1,
+      },
+      math: {
+        ...falseWordScripts.evidence.math,
+        visibleCharacters: 2,
+        layoutAssignments: 1,
+        weakScriptAssignments: 1,
+      },
+    },
+  }
+  assert.equal(
+    isScriptOnlyBaselineTextConflict(falseTwoLetterWordScripts),
+    true,
+    'Ein sicher erkanntes zweibuchstabiges Wort muss eine schwache reine Indexhypothese widerlegen.',
+  )
+  assert.equal(
+    assessNeuralTextModeCandidate('im', 'de', {
+      ...neuralResult('im', 91), wordCount: 1, knownWordRatio: 1,
+    }, falseTwoLetterWordScripts).shouldUseText,
+    true,
+    'Die Zeilenerkennung muss ein bekanntes kurzes Wort gegen eine höhenbedingte Indexverwechslung durchsetzen.',
+  )
+  const realTwoLetterSubscript = {
+    ...falseTwoLetterWordScripts,
+    evidence: {
+      ...falseTwoLetterWordScripts.evidence,
+      math: {
+        ...falseTwoLetterWordScripts.evidence.math,
+        weakScriptAssignments: 0,
+        decisiveStructure: true,
+      },
+    },
+  }
+  assert.equal(
+    isScriptOnlyBaselineTextConflict(realTwoLetterSubscript),
+    false,
+    'Ein deutlich kleiner echter Buchstabenindex darf nicht als kurzes Wörterbuchwort umgedeutet werden.',
+  )
+  assert.equal(
+    assessNeuralTextModeCandidate('im', 'de', {
+      ...neuralResult('im', 91), wordCount: 1, knownWordRatio: 1,
+    }, realTwoLetterSubscript).shouldUseText,
+    false,
+    'Eine zufällige Wortlesung darf einen klar skalierten mathematischen Index nicht überschreiben.',
   )
   const falseUnknownNameScripts = {
     ...falseWordScripts,

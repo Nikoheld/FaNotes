@@ -6025,6 +6025,8 @@ type FormattedAtom = {
   sourceId?: string
   labelId?: string
   char?: string
+  spaceBefore?: boolean
+  lineBreakBefore?: boolean
 }
 
 type MathLayoutItem = {
@@ -6119,6 +6121,7 @@ const isLatinWordAtom = (atom: FormattedAtom) => Boolean(
 
 const wordAtomNeighbour = (first: FormattedAtom, second: FormattedAtom) => {
   if (!isLatinWordAtom(first) || !isLatinWordAtom(second)) return false
+  if (second.spaceBefore || second.lineBreakBefore) return false
   const gap = second.bbox[0] - (first.bbox[0] + first.bbox[2])
   const physicalXHeight = Math.min(first.bbox[3], second.bbox[3]) * SOURCE_HEIGHT / SOURCE_WIDTH
   return gap <= clamp(physicalXHeight * 0.46, 0.018, 0.05)
@@ -6143,10 +6146,11 @@ const ordinaryWordScriptConflict = (
 
   let start = baseIndex
   while (start > 0 && wordAtomNeighbour(atoms[start - 1], atoms[start])) start -= 1
-  let end = candidateIndex
+  let end = baseIndex
   while (end + 1 < atoms.length && wordAtomNeighbour(atoms[end], atoms[end + 1])) end += 1
+  if (candidateIndex < start || candidateIndex > end) return false
   const run = atoms.slice(start, end + 1)
-  if (run.length < 3 || !run.every(isLatinWordAtom)) return false
+  if (run.length < 2 || !run.every(isLatinWordAtom)) return false
 
   const word = run.map((atom) => atom.char).join('')
   const lexicalScore = Math.max(
@@ -6155,6 +6159,8 @@ const ordinaryWordScriptConflict = (
   )
   const titleCased = /^[A-ZÄÖÜ][a-zäöü]{2,}$/u.test(word)
   const pureLetterLine = atoms.length >= 4 && atoms.every(isLatinWordAtom)
+  const exactShortWord = run.length === 2 && lexicalScore >= 0.5
+  if (run.length < 3 && !exactShortWord) return false
   if (lexicalScore < 0.5 && !titleCased && !pureLetterLine) return false
 
   const bottoms = run.map((atom) => atom.bbox[1] + atom.bbox[3])
@@ -6179,7 +6185,23 @@ const ordinaryWordScriptConflict = (
   const aligned = run.filter((atom) => (
     Math.abs(atom.bbox[1] + atom.bbox[3] - baseline) <= tolerance
   ))
-  if (aligned.length < Math.max(3, Math.ceil(run.length * 0.75))) return false
+  const requiredAligned = run.length === 2 ? 2 : Math.max(3, Math.ceil(run.length * 0.75))
+  if (aligned.length < requiredAligned) return false
+
+  // Two-letter words need a separate safety rule because the pair itself
+  // cannot provide a third baseline vote. Preserve a known short word only
+  // when the second glyph still has normal x-height proportions. A genuine
+  // `x_i`/`a_n` child is deliberately smaller (the real-script sweep tops out
+  // at 55% of the base), so it remains a mathematical script.
+  if (run.length === 2) {
+    const heightRatio = candidate.bbox[3] / Math.max(0.001, base.bbox[3])
+    const bottomDelta = Math.abs(candidateBottom - baseBottom)
+    return (
+      exactShortWord &&
+      heightRatio >= 0.58 &&
+      bottomDelta <= Math.max(0.018, base.bbox[3] * 0.24, candidate.bbox[3] * 0.32)
+    )
+  }
 
   return run.some((atom, index) => {
     const absoluteIndex = start + index
@@ -6360,6 +6382,8 @@ function formatLinearItems(
         sourceId: item.token?.id ?? item.key,
         labelId: item.token?.labelId ?? item.labelId,
         char: item.token?.char,
+        spaceBefore: item.token?.spaceBefore,
+        lineBreakBefore: item.token?.lineBreakBefore,
       })
       return
     }
@@ -6529,6 +6553,8 @@ export const suggestMathLayoutAssignments = (
       bbox: token.bbox,
       sourceId: token.id,
       labelId: token.labelId,
+      spaceBefore: token.spaceBefore,
+      lineBreakBefore: token.lineBreakBefore,
     }))
   const assignments: MathLayoutAssignment[] = []
   const assignedTokens = new Set<string>()
@@ -6669,6 +6695,8 @@ export type AutomaticRecognitionEvidence = {
     relations: number
     fractions: number
     layoutAssignments: number
+    /** Script assignments whose size/displacement still resembles prose. */
+    weakScriptAssignments?: number
     lines: number
     latexStructure: boolean
     decisiveStructure: boolean
@@ -6991,6 +7019,18 @@ export const recognizeAutomaticExpression = (
   )))
   const fractionParts = mathTokens.filter((token) => token.isLayout || token.layout?.type === 'fraction').length
   const layoutAssignments = suggestMathLayoutAssignments(mathTokens, layoutExamples)
+  const mathTokenById = new Map(visibleMath.map((token) => [token.id, token]))
+  const weakScriptAssignments = layoutAssignments.filter((assignment) => {
+    if (assignment.role !== 'subscript' && assignment.role !== 'superscript') return false
+    const base = mathTokenById.get(assignment.anchorId)
+    const child = mathTokenById.get(assignment.tokenId)
+    if (!base || !child) return false
+    const heightRatio = child.bbox[3] / Math.max(0.001, base.bbox[3])
+    const displacement = assignment.role === 'subscript'
+      ? child.bbox[1] + child.bbox[3] - (base.bbox[1] + base.bbox[3])
+      : base.bbox[1] - child.bbox[1]
+    return heightRatio >= 0.58 && displacement <= Math.max(0.018, base.bbox[3] * 0.24)
+  }).length
   const hasMathCommandStructure = /\\(?:frac|sqrt|int|iint|iiint|oint|sum|prod|partial|nabla|infty|bigcup|bigcap)\b/u.test(mathValue)
   const mathDigits = visibleMath.filter((token) => token.labelId.startsWith('digit_')).length
   const largeMathOperators = visibleMath.filter((token) => LARGE_OPERATOR_IDS.has(token.labelId))
@@ -7074,6 +7114,14 @@ export const recognizeAutomaticExpression = (
     knownTextWords.length === lexicalTextWords.length &&
     textLetters >= 3
   )
+  const completeShortKnownTextWord = (
+    lexicalTextWords.length === 1 &&
+    knownTextWords.length === 1 &&
+    textLetters === 2 &&
+    visibleText.length === 2 &&
+    layoutAssignments.length >= 1 &&
+    weakScriptAssignments === layoutAssignments.length
+  )
   const completePlausibleTextWords = (
     lexicalTextWords.length >= 1 &&
     plausibleTextWords.length === lexicalTextWords.length &&
@@ -7095,6 +7143,7 @@ export const recognizeAutomaticExpression = (
     textLetterRatio >= 0.86 &&
     (
       completeKnownTextWords ||
+      completeShortKnownTextWord ||
       completePlausibleTextWords ||
       properNameTextSequence ||
       strongSentenceText ||
@@ -7332,6 +7381,7 @@ export const recognizeAutomaticExpression = (
         relations: relationTokens.length,
         fractions: fractionParts,
         layoutAssignments: layoutAssignments.length,
+        weakScriptAssignments,
         lines: mathLineCount,
         latexStructure: hasLatexStructure,
         decisiveStructure: hasDecisiveMathStructure,
