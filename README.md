@@ -8,7 +8,7 @@
   [![Beta](https://img.shields.io/github/v/release/Nikoheld/FaNotes?include_prereleases&display_name=tag&label=beta&color=b878eb)](https://github.com/Nikoheld/FaNotes/releases)
   [![Linux](https://img.shields.io/badge/Linux-x86__64-45c9b7?logo=linux&logoColor=white)](https://fanotes.fasrv.ch/)
   [![Windows](https://img.shields.io/badge/Windows-10%20%2F%2011-45c9b7?logo=windows&logoColor=white)](https://fanotes.fasrv.ch/)
-  [![License](https://img.shields.io/badge/license-MIT-d4b54c)](lernwerk-notes/packaging/LICENSE)
+  [![License](https://img.shields.io/badge/license-MIT-d4b54c)](fanotes/packaging/LICENSE)
 
   [Website](https://fanotes.fasrv.ch/) · [Web app](https://fanotes.fasrv.ch/notes/) · [Downloads](https://github.com/Nikoheld/FaNotes/releases) · [English](#english)
 </div>
@@ -57,7 +57,7 @@ npm install
 npm run dev
 
 # FaNotes Desktop/Web
-cd lernwerk-notes
+cd fanotes
 npm install
 npm run dev          # Electron + Vite
 npm run dev:web      # Browser-Ausgabe
@@ -66,7 +66,7 @@ npm run dev:web      # Browser-Ausgabe
 Wichtige Prüfungen:
 
 ```bash
-cd lernwerk-notes
+cd fanotes
 npm run typecheck
 npm run check:updater
 npm run check:i18n
@@ -77,7 +77,7 @@ npm run check:connected-recognition
 
 ```text
 src/                  GlyphenWerk-Oberfläche und gemeinsame Erkennungsengine
-lernwerk-notes/       FaNotes React-/Electron-/Web-App, Tests und Packaging
+fanotes/       FaNotes React-/Electron-/Web-App, Tests und Packaging
 fanotes-site/         Produktwebsite, Update-API, AI-Proxy und Backup-Dienst
 deliverables/         kleine, veröffentlichbare Begleitdateien
 ```
@@ -120,4 +120,4 @@ Download the latest build from [GitHub Releases](https://github.com/Nikoheld/FaN
 
 ## License
 
-FaNotes source code is available under the [MIT License](lernwerk-notes/packaging/LICENSE). Bundled models, fonts, dictionaries and third-party components retain their respective licenses; see [THIRD_PARTY_NOTICES.md](lernwerk-notes/packaging/THIRD_PARTY_NOTICES.md).
+FaNotes source code is available under the [MIT License](fanotes/packaging/LICENSE). Bundled models, fonts, dictionaries and third-party components retain their respective licenses; see [THIRD_PARTY_NOTICES.md](fanotes/packaging/THIRD_PARTY_NOTICES.md).
