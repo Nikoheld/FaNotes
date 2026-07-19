@@ -3,8 +3,10 @@ import path from 'node:path'
 import { createServer } from 'vite'
 
 const source = process.argv[2]
-if (!source) throw new Error('Aufruf: node scripts/analyze-trocr-sequence-scores.mjs BENCHMARK.json [de|en]')
+if (!source) throw new Error('Aufruf: node scripts/analyze-trocr-sequence-scores.mjs BENCHMARK.json [de|en] [OUTPUT.json] [CHANGES.json]')
 const language = process.argv[3] === 'de' ? 'de' : 'en'
+const outputPath = process.argv[4]
+const changesPath = process.argv[5]
 const benchmark = JSON.parse(fs.readFileSync(path.resolve(source), 'utf8'))
 if (!Array.isArray(benchmark.predictions)) throw new Error('Der Benchmark enthält keine N-Best-Vorhersagen.')
 
@@ -29,6 +31,7 @@ const distance = (first, second) => {
 const scales = [0, 2, 4, 6, 8, 10, 12, 16, 20, 25, 30, 40, 50, 60, 80, 100, 120, 160, 200, 300]
 const emptyMetric = () => ({ characters: 0, edits: 0, exact: 0, changed: 0, improved: 0, worsened: 0 })
 const scoreMetrics = new Map(scales.map((scale) => [scale, [emptyMetric(), emptyMetric(), emptyMetric()]]))
+const productionScoreMetrics = new Map(scales.map((scale) => [scale, [emptyMetric(), emptyMetric(), emptyMetric()]]))
 const currentMetrics = [emptyMetric(), emptyMetric(), emptyMetric()]
 const visualMetrics = [emptyMetric(), emptyMetric(), emptyMetric()]
 const candidateLimitMetrics = new Map([1, 2, 3, 4].map((limit) => (
@@ -143,6 +146,20 @@ try {
         metric.improved += Number(selectedDistance < currentDistance)
         metric.worsened += Number(selectedDistance > currentDistance)
       }
+      const productionSelected = [...ranked].sort((first, second) => (
+        (second.score + (second.sequenceScore - topSequenceScore) * scale) -
+        (first.score + (first.sequenceScore - topSequenceScore) * scale)
+      ))[0]?.rawText ?? visual
+      const productionSelectedDistance = distance(truth, productionSelected)
+      for (const bucket of [0, fold + 1]) {
+        const metric = productionScoreMetrics.get(scale)[bucket]
+        metric.characters += characterCount
+        metric.edits += productionSelectedDistance
+        metric.exact += Number(productionSelected === truth)
+        metric.changed += Number(productionSelected !== current)
+        metric.improved += Number(productionSelectedDistance < currentDistance)
+        metric.worsened += Number(productionSelectedDistance > currentDistance)
+      }
     }
     records.push({ truth, visual, current, currentDistance, topSequenceScore, ranked, fold, characterCount })
   }
@@ -159,6 +176,12 @@ try {
     all: summarize(scoreMetrics.get(scale)[0]),
     even: summarize(scoreMetrics.get(scale)[1]),
     odd: summarize(scoreMetrics.get(scale)[2]),
+  }))
+  const productionScoreResults = scales.map((scale) => ({
+    scale,
+    all: summarize(productionScoreMetrics.get(scale)[0]),
+    even: summarize(productionScoreMetrics.get(scale)[1]),
+    odd: summarize(productionScoreMetrics.get(scale)[2]),
   }))
   const bestFor = (bucket) => [...results].sort((first, second) => (
     first[bucket].cer - second[bucket].cer ||
@@ -204,7 +227,7 @@ try {
       }
     })
   ))
-  console.log(JSON.stringify({
+  const report = {
     language,
     lines: records.length,
     visual: { all: summarize(visualMetrics[0]), even: summarize(visualMetrics[1]), odd: summarize(visualMetrics[2]) },
@@ -220,15 +243,19 @@ try {
       odd: summarize(metrics[2]),
     }])),
     scales: results,
+    productionScoreScales: productionScoreResults,
     bestAll: best,
     crossValidation: {
       tunedOnEven: { scale: tunedOnEven.scale, evaluationOnOdd: tunedOnEven.odd },
       tunedOnOdd: { scale: tunedOnOdd.scale, evaluationOnEven: tunedOnOdd.even },
     },
     calibrationGrid,
-  }, null, 2))
+  }
+  const serializedReport = `${JSON.stringify(report, null, 2)}\n`
+  if (outputPath) fs.writeFileSync(path.resolve(outputPath), serializedReport, { mode: 0o600 })
+  else process.stdout.write(serializedReport)
 
-  records.flatMap((record) => {
+  const changes = records.flatMap((record) => {
     const selected = [...record.ranked].sort((first, second) => (
       (second.baseScore + (second.sequenceScore - record.topSequenceScore) * best.scale) -
       (first.baseScore + (first.sequenceScore - record.topSequenceScore) * best.scale)
@@ -246,9 +273,9 @@ try {
         sequence: Math.round(entry.sequenceScore * 10_000) / 10_000,
       })),
     }]
-  })
-    .sort((first, second) => second.delta - first.delta)
-    .forEach((entry) => console.log(`${entry.delta >= 0 ? '+' : ''}${entry.delta} ${JSON.stringify(entry)}`))
+  }).sort((first, second) => second.delta - first.delta)
+  if (changesPath) fs.writeFileSync(path.resolve(changesPath), `${JSON.stringify(changes, null, 2)}\n`, { mode: 0o600 })
+  else if (!outputPath) changes.forEach((entry) => console.log(`${entry.delta >= 0 ? '+' : ''}${entry.delta} ${JSON.stringify(entry)}`))
 } finally {
   await server.close()
 }

@@ -189,8 +189,8 @@ export function createBrowserPreviewApi(): FaNotesApi {
   const updateState: UpdateState = {
     status: 'up-to-date',
     supported: false,
-    currentVersion: '2026.7.4-beta.7',
-    latestVersion: '2026.7.4-beta.7',
+    currentVersion: '2026.7.4-beta.8',
+    latestVersion: '2026.7.4-beta.8',
     publishedAt: new Date().toISOString(),
     releaseNotes: [],
     downloadedBytes: 0,

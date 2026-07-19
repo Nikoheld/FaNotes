@@ -403,7 +403,9 @@ try {
     'together', 'porter', 'brought', 'gavin', 'dawn', 'bag', 'out', 'to',
     'hardly', 'likely', 'my', 'sweet', 'luke', 'surgery', 'goes', 'on', 'for',
     'sucked', 'struck', 'in', 'his', 'baggy', 'black', 'meet', 'deanes', 'danes',
-    'soon', 'as', 'guy', 'had',
+    'soon', 'as', 'guy', 'had', 'dark', 'moustache', 'mustache', 'wearing',
+    'frockcoat', 'specialised', 'specialized', 'enquiry', 'inquiry', 'royal',
+    'commission', 'last', 'night', 'deputise', 'deprive',
   ])
   const englishNbestMembership = (word) => englishNbestWords.has(word.toLocaleLowerCase('en-US'))
   assert.equal(
@@ -439,6 +441,15 @@ try {
     ], 'en', englishNbestMembership)[0]?.rawText,
     'out and sucked in his baggy black',
     'Ein bereits bekanntes Wort darf nicht allein wegen eines ebenfalls plausiblen Wörterbuchnachbarn ersetzt werden.',
+  )
+  for (const [visual, alternative] of [
+    ['a dark moustache and wearing a frockcoat', 'a dark mustache and wearing a frockcoat'],
+    ['in the specialised enquiry for the Royal Commission', 'in the specialized inquiry for the Royal Commission'],
+    ['last night to deputise', 'last night to deprive'],
+  ]) assert.equal(
+    rankTrocrCandidateTextsForTests([visual, alternative], 'en', englishNbestMembership)[0]?.rawText,
+    visual,
+    `Eine gültige britische Bildlesung darf nicht von der US- oder Alltagsalternative ersetzt werden: ${visual}`,
   )
   assert.equal(
     rankTrocrCandidateTextsForTests([

@@ -1,5 +1,9 @@
 # Änderungsverlauf
 
+## 2026.7.4-beta.8
+
+- die englische Handschrifterkennung akzeptiert jetzt sowohl amerikanische als auch britische Schreibweisen vollständig; dadurch gelten unter anderem `moustache`, `specialised` und `deputise` als sichere Textwörter und können reine falsche Hoch-/Tiefindexhypothesen überstimmen. Für die OCR-Rangfolge werden zusätzliche britische Formen nur ab drei unabhängigen SUBTLEX-Belegen verwendet, während seltenere gültige Varianten weiterhin in der Tipp-Rechtschreibprüfung enthalten sind; so wächst die eigentliche OCR-Wortliste nur um rund 5,3 KiB. Auf denselben 1.800 getrennten englischen und deutschen Kandidatenpaaren sinken die sichtbaren Zeichenfehler um weitere sechs, drei Zeilen werden exakt repariert und keine Zeile verschlechtert sich
+
 ## 2026.7.4-beta.7
 
 - die N-Best-Auswahl kann einen eng benachbarten zweiten Bildmodell-Beam jetzt für genau eine sichere Kleinwort-Reparatur verwenden: Nur ein unbekanntes Wort mit mindestens vier Buchstaben darf bei höchstens zwei Zeichen Abstand zu einem bekannten Wort werden; Wortgrenzen, Satzzeichen, Grossschreibung, Namen, Bindestrich-/Apostrophteile und bereits gültige Wörter sperren den Wechsel. Über 1.800 unabhängige deutsche und englische Beam-Paare sinken die sichtbaren Zeichenfehler um zwei, ohne eine einzige Verschlechterung; breitere Zeichen- und Wörterbuch-Sprachmodelle wurden nach negativen Holdout-Ergebnissen bewusst nicht aktiviert
