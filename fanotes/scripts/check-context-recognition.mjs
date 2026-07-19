@@ -932,6 +932,32 @@ try {
     'Eine reine zusammenhängende Buchstabenzeile braucht keinen Wörterbucheintrag, um ihre Grundlinie zu behalten.',
   )
 
+  const unknownThreeLetterWordTokens = [
+    token('z', 96, [['z', 96]], 109840, [0.05, 0.2, 0.05, 0.18]),
+    token('y', 94, [['y', 94]], 109841, [0.106, 0.314, 0.045, 0.1]),
+    token('v', 95, [['v', 95]], 109842, [0.157, 0.314, 0.045, 0.1]),
+  ]
+  assert.doesNotMatch(
+    recognizedLatex(unknownThreeLetterWordTokens),
+    /[_^]\{/u,
+    'Auch ein unbekanntes dreibuchstabiges Wort auf gemeinsamer Grundlinie darf kein Index werden.',
+  )
+  assert.equal(
+    suggestMathLayoutAssignments(unknownThreeLetterWordTokens).length,
+    0,
+    'Unbekannte dreibuchstabige Wörter dürfen keine persönlichen Indexbeziehungen erzeugen.',
+  )
+
+  const unknownWordBeforePunctuation = [
+    ...unknownThreeLetterWordTokens,
+    token('.', 95, [['.', 95]], 109843, [0.215, 0.385, 0.014, 0.014]),
+  ]
+  assert.doesNotMatch(
+    recognizedLatex(unknownWordBeforePunctuation),
+    /[_^]\{/u,
+    'Satzzeichen neben einem unbekannten Wort dürfen dessen Grundlinienschutz nicht deaktivieren.',
+  )
+
   const compactShortWordTokens = [
     token('i', 96, [['i', 96]], 10988, [0.05, 0.18, 0.045, 0.18]),
     token('m', 95, [['m', 95]], 10989, [0.101, 0.284, 0.052, 0.11]),
@@ -2609,6 +2635,38 @@ try {
     }, falseUnknownAlignedWordScripts).shouldUseText,
     true,
     'Eine sichere reine Buchstabenlesung muss eine schwache Indexkette auch ohne Wörterbucheintrag überstimmen.',
+  )
+  const falseUnknownThreeLetterScripts = {
+    ...falseUnknownAlignedWordScripts,
+    value: 'z_{y v}',
+    textValue: 'zyv',
+    mathValue: 'z_{y v}',
+    evidence: {
+      ...falseUnknownAlignedWordScripts.evidence,
+      text: {
+        ...falseUnknownAlignedWordScripts.evidence.text,
+        visibleCharacters: 3,
+        letters: 3,
+        baselineAlignment: 0.94,
+      },
+      math: {
+        ...falseUnknownAlignedWordScripts.evidence.math,
+        visibleCharacters: 3,
+        layoutAssignments: 2,
+      },
+    },
+  }
+  assert.equal(
+    isScriptOnlyBaselineTextConflict(falseUnknownThreeLetterScripts),
+    true,
+    'Eine streng ausgerichtete unbekannte Dreierfolge darf keine reine Indexhypothese bleiben.',
+  )
+  assert.equal(
+    assessNeuralTextModeCandidate('zyv', 'de', {
+      ...neuralResult('zyv', 84), wordCount: 1, knownWordRatio: 0,
+    }, falseUnknownThreeLetterScripts).shouldUseText,
+    true,
+    'Die Zeilenerkennung muss auch kurze Namen und Fachkürzel ohne Wörterbucheintrag gegen falsche Indexe durchsetzen.',
   )
   const verticallyDisplacedUnknownScripts = {
     ...falseUnknownNameScripts,

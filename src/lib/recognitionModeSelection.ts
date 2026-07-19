@@ -94,9 +94,9 @@ export const isScriptOnlyBaselineTextConflict = (automatic: AutomaticRecognition
         text.baselineAlignment >= 0.72
       ) ||
       (
-        text.visibleCharacters >= 4 &&
-        text.letters >= 4 &&
-        text.baselineAlignment >= 0.82
+        text.visibleCharacters >= 3 &&
+        text.visibleCharacters === text.letters &&
+        text.baselineAlignment >= 0.9
       )
     )
   )
@@ -229,8 +229,8 @@ export const assessNeuralTextModeCandidate = (
     letterRatio >= 0.68
   )
   const strongLetterSequence = (
-    neural.confidence >= 64 &&
-    letters >= 4 &&
+    neural.confidence >= (letters === 3 ? 82 : 64) &&
+    letters >= 3 &&
     letterRatio >= 0.8 &&
     words.length >= 1
   )

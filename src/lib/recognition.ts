@@ -6130,10 +6130,11 @@ const wordAtomNeighbour = (first: FormattedAtom, second: FormattedAtom) => {
 /**
  * A tall capital or ascender and the x-height body of the next letter can
  * satisfy a pairwise subscript test even though both belong to one ordinary
- * word.  Verify such a relation against the complete local letter run: a
- * dictionary-backed/title-cased run whose candidate and base still share the
- * run's baseline is prose, not a script.  A real `x_{max}` keeps its separate
- * lower baseline and its substantially smaller glyphs, so it is not blocked.
+ * word. Verify such a relation against the complete local letter run. Three
+ * or more letters that share a baseline are prose even when the word is a
+ * name, abbreviation, or technical term absent from the compact dictionary.
+ * A real `x_{max}` keeps its separate lower baseline and its substantially
+ * smaller glyphs, so it is not blocked.
  */
 const ordinaryWordScriptConflict = (
   atoms: FormattedAtom[],
@@ -6157,11 +6158,8 @@ const ordinaryWordScriptConflict = (
     lexicalWordEvidence(word, 'de').score,
     lexicalWordEvidence(word, 'en').score,
   )
-  const titleCased = /^[A-ZÄÖÜ][a-zäöü]{2,}$/u.test(word)
-  const pureLetterLine = atoms.length >= 4 && atoms.every(isLatinWordAtom)
   const exactShortWord = run.length === 2 && lexicalScore >= 0.5
   if (run.length < 3 && !exactShortWord) return false
-  if (lexicalScore < 0.5 && !titleCased && !pureLetterLine) return false
 
   const bottoms = run.map((atom) => atom.bbox[1] + atom.bbox[3])
   const heights = run.map((atom) => atom.bbox[3])
@@ -7105,8 +7103,9 @@ export const recognizeAutomaticExpression = (
     textBaselineAlignment >= 0.72
   )
   const alignedUnknownTextSequence = (
-    textLetters >= 4 &&
-    textBaselineAlignment >= 0.82
+    textLetters >= 3 &&
+    visibleText.length === textLetters &&
+    textBaselineAlignment >= 0.9
   )
   const compactTextValue = textValue.normalize('NFC').replace(/\s+/gu, '')
   const completeKnownTextWords = (
