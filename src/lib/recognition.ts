@@ -4518,7 +4518,20 @@ const analyzeTextGaps = (
       const minimumSeparation = Math.max(0.006, xHeightAsWidth * 0.085, compactVariation * 2.8)
       const sufficientlyDistinct = (
         separation >= minimumSeparation &&
-        upperCenter >= lowerCenter * 1.62 + 0.0035
+        upperCenter >= lowerCenter * 1.62 + 0.0035 &&
+        // A single naturally wider join inside an unknown name used to form
+        // its own statistical cluster and could lower the threshold below a
+        // third of a normal glyph width. Require the larger cluster to also
+        // look like physical whitespace at the current writing scale. Compact
+        // genuine word gaps remain available; small intra-word variation no
+        // longer becomes a boundary merely because it is the largest gap.
+        // A lone detached join inside one handwritten word is often the
+        // largest gap on the line. It must not become whitespace merely by
+        // forming its own one-item cluster. Use a conservative absolute
+        // letter-width floor here; later lexical partitioning can still
+        // recover compact boundaries between two known words, and the neural
+        // line path supplies independent evidence for unknown phrases.
+        upperCenter >= Math.max(typicalWidth * 0.65, xHeightAsWidth * 0.24)
       )
       if (!sufficientlyDistinct) continue
       const strength = separation / Math.max(0.004, lowerCenter + compactVariation) * (0.72 + balanced * 0.28)
@@ -6026,6 +6039,45 @@ const scriptRole = (
   candidate: FormattedAtom,
   layoutExamples: MathLayoutExample[] = [],
 ) => {
+  const [baseX, baseY, baseWidth, baseHeight] = base.bbox
+  const [candidateX, candidateY, candidateWidth, candidateHeight] = candidate.bbox
+  if (candidateHeight > baseHeight * 0.76) return null
+
+  const candidateCenterX = candidateX + candidateWidth / 2
+  const candidateCenterY = candidateY + candidateHeight / 2
+  const candidateBottom = candidateY + candidateHeight
+  const baseBottom = baseY + baseHeight
+  const nearBase = (
+    candidateCenterX >= baseX + baseWidth * 0.34 &&
+    candidateX <= baseX + baseWidth + Math.max(0.12, baseWidth * 1.4)
+  )
+  if (!nearBase) return null
+
+  // A smaller following letter is not a subscript merely because a tall
+  // capital/ascender gives it a lower centre. Real handwriting has noticeably
+  // more baseline jitter than rendered type: six percent of the base height
+  // was small enough to turn an ordinary `Ha` into `H_{a}`. Require a clear
+  // displacement relative to both glyphs. Eleven percent still classified
+  // roughly one in six realistic height/jitter combinations as a script in a
+  // systematic baseline sweep. Sixteen percent covers ordinary pen drift but
+  // remains far below the displacement of genuine indices and limits.
+  // Learned layout examples may refine
+  // a genuinely displaced candidate below, but never relax this hard gate.
+  const verticalProtrusion = Math.max(
+    0.005,
+    baseHeight * 0.16,
+    candidateHeight * 0.2,
+  )
+  const supportsSuperscript = (
+    candidateY <= baseY - verticalProtrusion &&
+    candidateBottom <= baseY + baseHeight * 0.58
+  )
+  const supportsSubscript = (
+    candidateBottom >= baseBottom + verticalProtrusion &&
+    candidateY >= baseY + baseHeight * 0.42
+  )
+  if (!supportsSuperscript && !supportsSubscript) return null
+
   const learnedSuperscript = learnedRelationDistance(
     base.labelId,
     candidate.labelId,
@@ -6044,20 +6096,16 @@ const scriptRole = (
   )
   const learnedBest = Math.min(learnedSuperscript, learnedSubscript)
   if (learnedBest < 0.68) {
-    return learnedSuperscript <= learnedSubscript ? 'superscript' as const : 'subscript' as const
+    if (learnedSuperscript <= learnedSubscript && supportsSuperscript) return 'superscript' as const
+    if (learnedSubscript < learnedSuperscript && supportsSubscript) return 'subscript' as const
+    // A previously learned relation may rank the wrong side after a noisy
+    // sample. Geometry remains the hard safety boundary; training can refine
+    // a valid script position but can no longer turn baseline text into one.
+    if (supportsSuperscript && learnedSuperscript < 0.68) return 'superscript' as const
+    if (supportsSubscript && learnedSubscript < 0.68) return 'subscript' as const
   }
-  const [baseX, baseY, baseWidth, baseHeight] = base.bbox
-  const [candidateX, candidateY, candidateWidth, candidateHeight] = candidate.bbox
-  if (candidateHeight > baseHeight * 0.76) return null
-  const candidateCenterX = candidateX + candidateWidth / 2
-  const candidateCenterY = candidateY + candidateHeight / 2
-  const nearBase = (
-    candidateCenterX >= baseX + baseWidth * 0.34 &&
-    candidateX <= baseX + baseWidth + Math.max(0.12, baseWidth * 1.4)
-  )
-  if (!nearBase) return null
-  if (candidateCenterY <= baseY + baseHeight * 0.31) return 'superscript' as const
-  if (candidateCenterY >= baseY + baseHeight * 0.69) return 'subscript' as const
+  if (supportsSuperscript && candidateCenterY <= baseY + baseHeight * 0.31) return 'superscript' as const
+  if (supportsSubscript && candidateCenterY >= baseY + baseHeight * 0.69) return 'subscript' as const
   return null
 }
 
@@ -6846,7 +6894,7 @@ export const recognizeAutomaticExpression = (
   )))
   const fractionParts = mathTokens.filter((token) => token.isLayout || token.layout?.type === 'fraction').length
   const layoutAssignments = suggestMathLayoutAssignments(mathTokens, layoutExamples)
-  const hasLatexStructure = /\\(?:frac|sqrt|int|iint|iiint|oint|sum|prod|partial|nabla|infty|bigcup|bigcap)\b|[_^]\{/u.test(mathValue)
+  const hasMathCommandStructure = /\\(?:frac|sqrt|int|iint|iiint|oint|sum|prod|partial|nabla|infty|bigcup|bigcap)\b/u.test(mathValue)
   const mathDigits = visibleMath.filter((token) => token.labelId.startsWith('digit_')).length
   const largeMathOperators = visibleMath.filter((token) => LARGE_OPERATOR_IDS.has(token.labelId))
   const relationTokens = visibleMath.filter((token) => (
@@ -6907,7 +6955,51 @@ export const recognizeAutomaticExpression = (
   // i-dots, and uneven text baselines can create weak script suggestions.
   // The formatted math path must actually accept a script relation before it
   // is allowed to block a complete text-line result.
-  const hasScriptStructure = /[_^]\{/u.test(mathValue)
+  const rawHasScriptStructure = /[_^]\{/u.test(mathValue)
+  const mathContainsOnlyScriptOperands = visibleMath.every((token) => (
+    token.labelId.startsWith('digit_') ||
+    token.labelId.startsWith('latin_') ||
+    token.labelId.startsWith('german_') ||
+    token.labelId.startsWith('greek_')
+  ))
+  const alignedKnownTextWord = (
+    textLetters >= 3 &&
+    knownTextWords.length === lexicalTextWords.length &&
+    textBaselineAlignment >= 0.72
+  )
+  const alignedUnknownTextSequence = (
+    textLetters >= 4 &&
+    textBaselineAlignment >= 0.82
+  )
+  const compactTextValue = textValue.normalize('NFC').replace(/\s+/gu, '')
+  const completeKnownTextWords = (
+    lexicalTextWords.length >= 1 &&
+    knownTextWords.length === lexicalTextWords.length &&
+    textLetters >= 3
+  )
+  const properNameTextSequence = (
+    lexicalTextWords.length === 1 &&
+    textLetters >= 4 &&
+    /^[A-ZÄÖÜ][a-zäöü]+$/u.test(compactTextValue)
+  )
+  const baselineWordContradictsScript = (
+    rawHasScriptStructure &&
+    !hasMathCommandStructure &&
+    fractionParts === 0 &&
+    relationTokens.length === 0 &&
+    mathOperators.length === 0 &&
+    mathContainsOnlyScriptOperands &&
+    lexicalTextWords.length >= 1 &&
+    textLetterRatio >= 0.86 &&
+    (
+      completeKnownTextWords ||
+      properNameTextSequence ||
+      alignedKnownTextWord ||
+      alignedUnknownTextSequence
+    )
+  )
+  const hasScriptStructure = rawHasScriptStructure && !baselineWordContradictsScript
+  const hasLatexStructure = hasMathCommandStructure || hasScriptStructure
   const hasLimitedLargeOperator = largeMathOperators.length > 0 && layoutAssignments.some((assignment) => (
     assignment.role === 'upper_limit' || assignment.role === 'lower_limit'
   ))
@@ -6969,6 +7061,11 @@ export const recognizeAutomaticExpression = (
   if (hasStrongSingleWord) {
     textScore += 1.25
     textReasons.unshift('bekanntes vollständiges Wort')
+  }
+  if (baselineWordContradictsScript) {
+    textScore += 1.15
+    mathScore -= 0.8
+    textReasons.unshift('vollständiges Wort statt scheinbarer Indexe')
   }
   if (exactIncrementalTextSequence) {
     // Live handwriting is evaluated after every pen lift.  When a new glyph
@@ -7038,10 +7135,12 @@ export const recognizeAutomaticExpression = (
     mathReasons.push('Formelstruktur')
   }
   if (layoutAssignments.length) {
-    mathScore += strongProseText && !hasHardMathStructure
+    mathScore += baselineWordContradictsScript
+      ? Math.min(0.12, layoutAssignments.length * 0.03)
+      : strongProseText && !hasHardMathStructure
       ? Math.min(0.42, layoutAssignments.length * 0.08)
       : Math.min(2.2, 0.9 + layoutAssignments.length * 0.42)
-    mathReasons.push('Hoch-/Tiefstellung oder Grenzen')
+    if (!baselineWordContradictsScript) mathReasons.push('Hoch-/Tiefstellung oder Grenzen')
   }
   if (strongMathTokens.length) {
     mathScore += strongProseText && !hasHardMathStructure

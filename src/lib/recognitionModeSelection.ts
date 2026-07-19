@@ -30,6 +30,69 @@ export const hasDecisiveMathLayout = (mathValue: string) => (
   || /(?:[\p{L}\d}\)])\s*(?:[+×÷]|\\(?:times|div|cdot|pm)\b)\s*(?:[\p{L}\d\\({])/u.test(mathValue)
 )
 
+/**
+ * The generic LaTeX check deliberately treats scripts as mathematics.  The
+ * automatic recognizer, however, can provide stronger contradictory evidence:
+ * a complete word-like letter sequence. Complete dictionary words and clearly
+ * title-cased names can survive a naturally uneven baseline; unknown lowercase
+ * terms still need strict alignment. This prevents a rejected
+ * `T_{e s t}`-style hypothesis from becoming decisive again in the
+ * neural/personalized arbitration layer without weakening real scripts.
+ */
+export const isScriptOnlyBaselineTextConflict = (automatic: AutomaticRecognitionResult | null) => {
+  if (!automatic?.evidence || !/[_^]\{/u.test(automatic.mathValue)) return false
+  const { text, math } = automatic.evidence
+  const compactText = automatic.textValue.normalize('NFC').replace(/\s+/gu, '')
+  const completeKnownWords = (
+    text.words >= 1 &&
+    text.knownWords === text.words &&
+    text.letters >= 3
+  )
+  const properNameShape = (
+    text.words === 1 &&
+    text.letters >= 4 &&
+    /^[A-ZÄÖÜ][a-zäöü]+$/u.test(compactText)
+  )
+  return (
+    math.decisiveStructure === false &&
+    math.layoutAssignments >= 1 &&
+    math.fractions === 0 &&
+    math.relations === 0 &&
+    math.operators === 0 &&
+    math.largeOperators === 0 &&
+    text.letterRatio >= 0.86 &&
+    text.words >= 1 &&
+    (
+      // In a pure all-letter hypothesis, a complete dictionary word is
+      // stronger evidence than the relative height of its glyphs.  Capitals,
+      // ascenders and naturally drifting baselines can otherwise turn e.g.
+      // `Hallo` into `H_{allo}`.  A title-cased unknown word receives the same
+      // protection so names are not punished merely for missing from the
+      // compact offline dictionary. Digits/operators/relations are excluded
+      // above and therefore keep real x_1-style formulae decisive.
+      completeKnownWords ||
+      properNameShape ||
+      (
+        text.visibleCharacters >= 3 &&
+        text.letters >= 3 &&
+        text.knownWords === text.words &&
+        text.baselineAlignment >= 0.72
+      ) ||
+      (
+        text.visibleCharacters >= 4 &&
+        text.letters >= 4 &&
+        text.baselineAlignment >= 0.82
+      )
+    )
+  )
+}
+
+export const hasDecisiveAutomaticMathLayout = (automatic: AutomaticRecognitionResult | null) => Boolean(
+  automatic &&
+  !isScriptOnlyBaselineTextConflict(automatic) &&
+  (automatic.evidence?.math.decisiveStructure === true || hasDecisiveMathLayout(automatic.mathValue)),
+)
+
 export const hasStrongNeuralWordEvidence = (
   neural: NeuralTextModeEvidence,
   letters: number,
@@ -93,7 +156,7 @@ export const neuralTextMayOverrideAutomaticMode = (
   wordLike: boolean,
 ) => {
   if (!automatic) return true
-  if (automatic.evidence?.math.decisiveStructure === true || hasDecisiveMathLayout(automatic.mathValue)) {
+  if (hasDecisiveAutomaticMathLayout(automatic)) {
     return false
   }
   return (
@@ -157,11 +220,53 @@ export const assessNeuralTextModeCandidate = (
   )
   const safeCandidate = !formulaSyntax || proseDominatesCandidateFormula
   const enoughTextEvidence = strongPersonalized || strongKnownWord || strongSentence || strongLetterSequence
+  const candidateProperName = (
+    neural.confidence >= 70 &&
+    words.length === 1 &&
+    letters >= 4 &&
+    /^[A-ZÄÖÜ][a-zäöü]+$/u.test(normalized)
+  )
+  const scriptOnlyWordConflict = Boolean(
+    automatic?.evidence &&
+    /[_^]\{/u.test(automatic.mathValue) &&
+    automatic.evidence.math.layoutAssignments >= 1 &&
+    automatic.evidence.math.fractions === 0 &&
+    automatic.evidence.math.relations === 0 &&
+    automatic.evidence.math.operators === 0 &&
+    automatic.evidence.math.largeOperators === 0 &&
+    automatic.evidence.math.strongSymbols === 0 &&
+    automatic.evidence.math.digits === 0 &&
+    letters >= 3 &&
+    letterRatio >= 0.86 &&
+    !formulaSyntax &&
+    (strongKnownWord || strongSentence || candidateProperName)
+  )
   const decisiveAutomaticMath = Boolean(
-    automatic && (
-      automatic.evidence?.math.decisiveStructure === true ||
-      hasDecisiveMathLayout(automatic.mathValue)
-    ),
+    automatic && (() => {
+      const math = automatic.evidence?.math
+      // A bare integral-like glyph has no mathematical context of its own.
+      // When the independent text beam sees the same letter, or a complete
+      // multi-letter personal sequence contradicts the collapsed operator,
+      // explicit GlyphenWerk evidence wins. Limits, relations, fractions,
+      // scripts, operands and real formulas remain decisive.
+      const bareLargeOperatorConflict = Boolean(
+        strongPersonalized
+        && math
+        && math.visibleCharacters <= 2
+        && math.largeOperators >= 1
+        && math.digits === 0
+        && math.operators === 0
+        && math.relations === 0
+        && math.fractions === 0
+        && math.layoutAssignments === 0
+        && !/[_^]\{/u.test(automatic.mathValue)
+        && (
+          letters >= 2
+          || automatic.textValue.normalize('NFC').replace(/\s+/gu, '') === normalized.replace(/\s+/gu, '')
+        )
+      )
+      return !bareLargeOperatorConflict && !scriptOnlyWordConflict && hasDecisiveAutomaticMathLayout(automatic)
+    })(),
   )
   const mayOverride = neuralTextMayOverrideAutomaticMode(neural, automatic, letters, wordLike)
   const shouldUseText = safeCandidate && enoughTextEvidence && !decisiveAutomaticMath && (

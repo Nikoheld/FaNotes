@@ -1,0 +1,965 @@
+import type {
+  RecognitionLanguage,
+  RecognitionToken,
+} from '../../../src/lib/recognition'
+import type { Stroke } from '../../../src/types'
+import type { RecognitionResources } from './handwritingDb'
+import type { NeuralTextRecognitionResult } from './neuralTextRecognition'
+import { ENGLISH_COMMON_WORDS } from '../../../src/data/englishLanguage'
+import { GERMAN_COMMON_WORDS } from '../../../src/data/germanLanguage'
+import { isExtendedNeuralContextWord, wordDistance } from './neuralWordContext'
+import {
+  fusePersonalizedTextRecognition,
+  personalizedTextFusionSelectionScore,
+  type PersonalizedTextRecognitionResult,
+} from './personalizedTextRecognition'
+
+export type PersonalizedLineRecognition = {
+  tokens: RecognitionToken[]
+  fusion: PersonalizedTextRecognitionResult
+  rasterDecision?: {
+    attempted: boolean
+    accepted: boolean
+    connected: boolean
+    text: string
+    prior: string
+    score: number | null
+    averageVisualCost: number | null
+    cutInk: number | null
+    visualSupportRatio: number
+    targetCount: number | null
+    columnBandCount: number | null
+    lexicalVisualCostPerCharacter: number | null
+    knownWord: boolean
+    strokeRasterConsensus: boolean
+  }
+  /** Bounded local diagnostics used by deterministic recognition audits. */
+  candidateScores?: Array<{
+    text: string
+    score: number
+    tokenCount: number
+    personalizedCharacters: number
+    neuralCharacters: number
+    classicalCharacters: number
+  }>
+}
+
+type RecognitionModule = typeof import('../../../src/lib/recognition')
+
+/**
+ * Uses only conspicuously wide physical gaps to divide a line into the same
+ * number of words as the neural line model. Exact-count personalization can
+ * then align each word independently instead of moving a cut from the end of
+ * one word into the beginning of the next. Ambiguous gaps deliberately return
+ * null so connected cursive remains on the unrestricted full-line path.
+ */
+const recognizePhysicallySeparatedWords = (
+  physicalLines: ReturnType<RecognitionModule['groupRecognitionLines']>,
+  neural: NeuralTextRecognitionResult,
+  resources: RecognitionResources,
+  language: RecognitionLanguage,
+  recognition: RecognitionModule,
+): RecognitionToken[][] => {
+  if (physicalLines.length !== neural.lines.length) return []
+  let usedWordPartition = false
+  const linePlans: Array<{
+    neuralWords: string[]
+    wordStrokes: Stroke[][]
+    neuralCounts: number[]
+    measuredCounts: Array<number | null>
+  }> = []
+
+  for (let lineIndex = 0; lineIndex < physicalLines.length; lineIndex += 1) {
+    const line = physicalLines[lineIndex]
+    const neuralWords = neural.lines[lineIndex].text.trim().split(/\s+/u).filter(Boolean)
+    if (neuralWords.length === 0 || neuralWords.length > 12) return []
+
+    let wordStrokes: Stroke[][]
+    if (neuralWords.length === 1) wordStrokes = [line.strokes]
+    else {
+      const clusters = recognition.segmentStrokes(line.strokes, 'text')
+      if (clusters.length < neuralWords.length) return []
+      const lineMinY = Math.min(...clusters.map((cluster) => cluster.minY))
+      const lineMaxY = Math.max(...clusters.map((cluster) => cluster.maxY))
+      const lineHeight = Math.max(0.001, lineMaxY - lineMinY)
+      const gaps = clusters.slice(0, -1).map((cluster, index) => ({
+        index,
+        gap: clusters[index + 1].minX - cluster.maxX,
+      }))
+      const selected = [...gaps]
+        .sort((first, second) => second.gap - first.gap)
+        .slice(0, neuralWords.length - 1)
+      const smallestSelectedGap = Math.min(...selected.map(({ gap }) => gap))
+      const selectedIndexes = new Set(selected.map(({ index }) => index))
+      const largestInternalGap = Math.max(
+        0,
+        ...gaps.filter(({ index }) => !selectedIndexes.has(index)).map(({ gap }) => gap),
+      )
+      const minimumWordGap = Math.max(0.012, lineHeight * 0.22)
+      const isDistinctFromLetterGaps = largestInternalGap === 0
+        || smallestSelectedGap >= largestInternalGap * 1.45
+      if (smallestSelectedGap < minimumWordGap || !isDistinctFromLetterGaps) return []
+
+      const groupedClusters: typeof clusters[] = [[]]
+      clusters.forEach((cluster, index) => {
+        groupedClusters.at(-1)!.push(cluster)
+        if (selectedIndexes.has(index)) groupedClusters.push([])
+      })
+      if (
+        groupedClusters.length !== neuralWords.length
+        || groupedClusters.some((group) => group.length === 0)
+      ) return []
+      wordStrokes = groupedClusters.map((group) => group.flatMap((cluster) => cluster.strokes))
+      usedWordPartition = true
+    }
+
+    const neuralCounts = neuralWords.map((word) => (
+      Array.from(word).filter((character) => !/\s/u.test(character)).length
+    ))
+    if (neuralCounts.some((count) => count === 0)) return []
+    const measuredCounts = wordStrokes.map((ink, wordIndex) => {
+      const measured = recognition.estimatePenLiftTextCharacterCount(ink)
+      const neuralCount = neuralCounts[wordIndex]
+      // A connected word can legitimately have one ink island. Accept the
+      // physical count only when it remains close to the line-model length;
+      // otherwise it is a component count, not a character count.
+      return measured
+        && Math.abs(measured - neuralCount) <= 2
+        && measured >= Math.max(2, Math.ceil(neuralCount * 0.55))
+        ? measured
+        : null
+    })
+    linePlans.push({ neuralWords, wordStrokes, neuralCounts, measuredCounts })
+  }
+
+  if (!usedWordPartition) return []
+  const hasMeasuredAlternative = linePlans.some(({ neuralCounts, measuredCounts }) => (
+    measuredCounts.some((count, index) => count !== null && count !== neuralCounts[index])
+  ))
+  const recognizeWord = (ink: Stroke[], characterCount: number) => recognition.recognizeExpression(
+    ink,
+    resources.model,
+    resources.labels,
+    'text',
+    resources.layoutExamples,
+    language,
+    characterCount,
+    // The neural word supplies only its length here. Supplying its letters
+    // would let a fluent but wrong guess steer the personal segmentation
+    // away from the writer's actual glyph sequence.
+    undefined,
+    0,
+  )
+  const neuralWordTokens = linePlans.map(({ wordStrokes, neuralCounts }) => (
+    wordStrokes.map((ink, wordIndex) => recognizeWord(ink, neuralCounts[wordIndex]))
+  ))
+  const tokenMatrices: RecognitionToken[][][][] = [neuralWordTokens]
+  if (hasMeasuredAlternative) {
+    tokenMatrices.push(linePlans.map(({ wordStrokes, neuralCounts, measuredCounts }, lineIndex) => (
+      wordStrokes.map((ink, wordIndex) => {
+        const measured = measuredCounts[wordIndex]
+        return measured && measured !== neuralCounts[wordIndex]
+          ? recognizeWord(ink, measured)
+          : neuralWordTokens[lineIndex][wordIndex]
+      })
+    )))
+  }
+  const maximumSuspiciousWords = resources.sampleCount >= 240 ? 2 : 1
+  const suspiciousWords = neuralWordTokens.flatMap((lineTokens, lineIndex) => (
+    lineTokens.flatMap((tokens, wordIndex) => {
+      const neuralWord = linePlans[lineIndex].neuralWords[wordIndex]
+      if (!/^\p{L}{3,24}$/u.test(neuralWord)) return []
+      const visible = tokens.filter((token) => !token.isLayout)
+      const malformedPersonalWord = visible.some((token) => !/^\p{L}$/u.test(token.char))
+      const averageConfidence = visible.reduce((sum, token) => sum + token.confidence, 0)
+        / Math.max(1, visible.length)
+      return malformedPersonalWord || averageConfidence < 42
+        ? [{ lineIndex, wordIndex }]
+        : []
+    })
+  )).slice(0, maximumSuspiciousWords)
+  suspiciousWords.forEach(({ lineIndex, wordIndex }) => {
+    const plan = linePlans[lineIndex]
+    const neuralCount = plan.neuralCounts[wordIndex]
+    const addNeighbour = (delta: number) => {
+      const count = neuralCount + delta
+      if (count < 2 || count > 24) return []
+      const matrix = neuralWordTokens.map((line) => line.map((tokens) => tokens))
+      const tokens = recognizeWord(plan.wordStrokes[wordIndex], count)
+      matrix[lineIndex][wordIndex] = tokens
+      tokenMatrices.push(matrix)
+      return tokens
+    }
+    const reduced = addNeighbour(-1)
+    const reducedIsKnownWord = (
+      reduced.length > 0 &&
+      reduced.every((token) => /^\p{L}$/u.test(token.char)) &&
+      reduced.some((token) => token.context?.knownWord)
+    )
+    // An insertion is the common failure when exact-count segmentation leaves
+    // punctuation inside an otherwise textual word. Only pay for the opposite
+    // neighbour when the reduced candidate is still not a complete known word
+    // and the writer has enough repeated examples to judge the extra cut.
+    const samplesPerClass = resources.sampleCount / Math.max(1, resources.classCount)
+    if (!reducedIsKnownWord && samplesPerClass >= 2) addNeighbour(1)
+  })
+  return tokenMatrices.map((matrix) => {
+    const result: RecognitionToken[] = []
+    matrix.forEach((line, lineIndex) => {
+      line.forEach((tokens, wordIndex) => {
+        if (wordIndex > 0 && tokens[0]) tokens[0].spaceBefore = true
+        if (lineIndex > 0 && wordIndex === 0 && tokens[0]) tokens[0].lineBreakBefore = true
+        result.push(...tokens)
+      })
+    })
+    return result
+  }).filter((candidate) => candidate.length > 0)
+}
+
+/**
+ * Runs the generic line model and the user's GlyphenWerk model through one
+ * shared sequence decision. Keeping this in one module prevents the embedded
+ * GlyphenWerk test from displaying raw TrOCR text while the FaNotes canvas
+ * uses the trained personal shapes for the exact same ink.
+ */
+export const recognizePersonalizedTextLine = async (
+  strokes: Stroke[],
+  resources: RecognitionResources,
+  neural: NeuralTextRecognitionResult,
+  language: RecognitionLanguage,
+  includeCandidateScores = false,
+  sourceWidth = 900,
+  sourceHeight = 1_273,
+  textCharacterCountHint?: number,
+  textCharacterHint?: string,
+): Promise<PersonalizedLineRecognition> => {
+  const recognition = await import('../../../src/lib/recognition')
+  const physicalLines = recognition.groupRecognitionLines(strokes)
+  const neuralTextLines = neural.text.split(/\r?\n/u)
+  if (
+    physicalLines.length >= 2 &&
+    neural.lines.length !== physicalLines.length &&
+    neuralTextLines.length === physicalLines.length
+  ) {
+    // Compatibility models and external OCR providers may return correct
+    // newlines in `text` while flattening their structured `lines` array into
+    // one entry.  The old fusion then replaced the physical page break with a
+    // normal word space. Reconstruct only the missing line metadata from the
+    // two independent signals (ink rows + explicit newlines); never invent a
+    // break merely from whitespace.
+    neural = {
+      ...neural,
+      lines: neuralTextLines.map((text, lineIndex) => {
+        const visible = Array.from(text).filter((character) => !/\s/u.test(character))
+        const line = physicalLines[lineIndex]
+        const points = line.strokes.flatMap((stroke) => stroke.points)
+        const minX = Math.min(...points.map((point) => point.x))
+        const maxX = Math.max(...points.map((point) => point.x))
+        return {
+          text,
+          rawText: text,
+          confidence: neural.confidence,
+          bbox: [minX, line.minY, maxX - minX, line.maxY - line.minY],
+          characters: visible.map((char, index) => ({
+            char,
+            confidence: neural.confidence,
+            start: index / Math.max(1, visible.length),
+            end: (index + 1) / Math.max(1, visible.length),
+          })),
+        }
+      }),
+    }
+  }
+  let primary: RecognitionToken[] | null = null
+  const getPrimary = () => {
+    primary ??= recognition.recognizeExpression(
+      strokes,
+      resources.model,
+      resources.labels,
+      'text',
+      resources.layoutExamples,
+      language,
+    )
+    return primary
+  }
+  const candidates: RecognitionToken[][] = []
+  const neuralCharacterCount = Array.from(neural.text)
+    .filter((character) => !/\s/u.test(character)).length
+  const neuralVisibleCharacters = Array.from(neural.text).filter((character) => !/\s/u.test(character))
+  const neuralLetterCount = neuralVisibleCharacters.filter((character) => /^\p{L}$/u.test(character)).length
+  const neuralExplicitMath = /[=+×÷√∫∑Σ∏Π∞^_]/u.test(neural.text)
+  const neuralIsUsableAsText = (
+    !neuralExplicitMath
+    && neuralLetterCount >= 1
+    && neuralLetterCount / Math.max(1, neuralVisibleCharacters.length) >= 0.6
+  )
+  // This function computes the best *text* hypothesis. A raw OCR result such
+  // as `∫∫` belongs to the parallel math decision and must not overwrite a
+  // personally supported text sequence during character fusion.
+  const textFusionNeural: NeuralTextRecognitionResult = neuralIsUsableAsText
+    ? neural
+    : {
+        ...neural,
+        text: '',
+        confidence: 0,
+        lines: [],
+        wordCount: 0,
+        knownWordRatio: 0,
+      }
+
+  const safeTextCharacterCountHint = Number.isSafeInteger(textCharacterCountHint)
+    && textCharacterCountHint! >= 1
+    && textCharacterCountHint! <= 320
+    ? textCharacterCountHint
+    : undefined
+  const safeTextCharacterHint = typeof textCharacterHint === 'string'
+    && /^\p{L}{1,320}$/u.test(textCharacterHint)
+    ? textCharacterHint
+    : undefined
+  if (safeTextCharacterCountHint && physicalLines.length === 1) {
+    const hinted = recognition.recognizeExpression(
+      physicalLines[0].strokes,
+      resources.model,
+      resources.labels,
+      'text',
+      resources.layoutExamples,
+      language,
+      safeTextCharacterCountHint,
+      safeTextCharacterHint,
+    )
+    if (hinted.length) candidates.push(hinted)
+  }
+
+  // The line model provides a useful length prior for connected cursive ink.
+  // Verified physical word partitions avoid the much more expensive global
+  // beam; ambiguous/connected lines retain that unrestricted fallback so one
+  // missing neural character cannot erase a repeatedly trained personal glyph.
+  const penLiftCounts = physicalLines.map((line, lineIndex) => {
+    const measured = recognition.estimatePenLiftTextCharacterCount(line.strokes)
+    const neuralLine = neural.lines[lineIndex]
+    if (!measured || !neuralLine) return measured
+    const visibleCharacters = Array.from(neuralLine.text)
+      .filter((character) => !/\s/u.test(character)).length
+    const visibleWords = neuralLine.text.trim().split(/\s+/u).filter(Boolean).length
+    // On a multi-word line the wide blank bands can be the only distinct ink
+    // gaps. In that case the pen-lift estimator returns the number of words,
+    // not the number of letters (for example 3 for "morgen lernen wir").
+    // Treating that value as a character count heavily penalized the correct
+    // neural-length segmentation and made extensive personal training appear
+    // ineffective. Keep genuine letter counts, but reject this unambiguous
+    // word-count collapse.
+    const collapsedToWordCount = (
+      visibleWords >= 2 &&
+      measured <= visibleWords + 1 &&
+      visibleCharacters >= measured * 2
+    )
+    // On connected handwriting the estimator observes independent pen-lift
+    // bodies, not necessarily characters.  This also affects a single word:
+    // `garten` can legitimately contain only three bodies and `mathe` two.
+    // Passing that component count into sequence fusion rewarded a three-token
+    // path over the six-character line model and produced fluent but unrelated
+    // words.  A physical count remains independent evidence only while it is
+    // reasonably close to the visible line length; a severe collapse is kept
+    // out of both the final length prior and its mismatch penalty.
+    const collapsedToInkComponents = (
+      visibleCharacters >= 4 &&
+      visibleCharacters - measured >= 2 &&
+      measured <= Math.floor(visibleCharacters * 0.6)
+    )
+    return collapsedToWordCount || collapsedToInkComponents ? null : measured
+  })
+  if (
+    neural.lines.length > 0
+    && neural.lines.length === physicalLines.length
+    && neural.confidence >= 38
+    && neuralCharacterCount > 0
+    && neuralCharacterCount <= 320
+  ) {
+    const separatedWordCandidates = recognizePhysicallySeparatedWords(
+      physicalLines,
+      neural,
+      resources,
+      language,
+      recognition,
+    )
+    separatedWordCandidates.forEach((candidate) => {
+      const value = recognition.recognizedSentence(candidate)
+      if (!candidates.some((existing) => recognition.recognizedSentence(existing) === value)) {
+        candidates.push(candidate)
+      }
+    })
+
+    if (!separatedWordCandidates.length) {
+      const primaryCandidate = getPrimary()
+      candidates.push(primaryCandidate)
+      // Unknown/uncertain neural words commonly contain one insertion or
+      // deletion. Test the exact length and its immediate neighbours. The
+      // bounded alternatives only activate for suspicious lines; confident
+      // dictionary words keep the single fast path.
+      const primaryVisible = primaryCandidate.filter((token) => !token.isLayout)
+      const primaryPersonalRatio = primaryVisible.filter((token) => (
+        (token.personalSupport ?? 0) > 0 ||
+        token.alternatives.some((alternative) => (alternative.personalSupport ?? 0) > 0)
+      )).length / Math.max(1, primaryVisible.length)
+      const hasPersonalSequencePrior = resources.sampleCount > 0 && primaryPersonalRatio >= 0.45
+      const neuralLooksSuspicious = neural.confidence < 78 || (neural.knownWordRatio ?? 0) < 0.72
+      const primaryCountMismatch = Math.abs(primaryVisible.length - neuralCharacterCount)
+      const hasDistinctPenLiftPrior = hasPersonalSequencePrior && penLiftCounts.some((count, index) => {
+        if (!count) return false
+        const neuralCount = Array.from(neural.lines[index].text).filter((character) => !/\s/u.test(character)).length
+        return count !== neuralCount && Math.abs(count - neuralCount) <= 2
+      })
+      const penLiftIntermediateDeltas = [...new Set(penLiftCounts.flatMap((count, index) => {
+        if (!count) return []
+        const neuralCount = Array.from(neural.lines[index].text).filter((character) => !/\s/u.test(character)).length
+        const difference = count - neuralCount
+        return Math.abs(difference) === 2 ? [Math.sign(difference)] : []
+      }))]
+      // A directly measured blank band is a better count prior than blindly
+      // trying both neighbouring line-model lengths. Keep the neural length as
+      // a competing hypothesis, then add the measured pen-lift length below.
+      const countDeltas = hasDistinctPenLiftPrior
+        ? [0, ...penLiftIntermediateDeltas]
+        : !neuralLooksSuspicious
+          // A confident dictionary word still receives the unrestricted and
+          // exact-count personal paths. Trying ±1/±2 lengths as well cannot
+          // improve a same-length character correction, but multiplied CPU
+          // time for normal lines such as "computer" by five.
+          ? [0]
+        : hasPersonalSequencePrior && primaryCountMismatch >= 2
+          ? [0, -1, 1, -2, 2]
+          : [0, -1, 1]
+      const primaryLengthDelta = primaryVisible.length - neuralCharacterCount
+      const primaryLengthDeltas = hasPersonalSequencePrior && Math.abs(primaryLengthDelta) >= 2
+        ? [primaryLengthDelta, primaryLengthDelta - 1, primaryLengthDelta + 1]
+        : []
+      const strategies: Array<{ delta: number; penLift: boolean; segmentationIndex: number }> = [
+        ...new Set([...countDeltas, ...primaryLengthDeltas]),
+      ].filter((delta) => (
+        neuralCharacterCount + delta >= 1 && neuralCharacterCount + delta <= 320
+      )).map((delta) => ({ delta, penLift: false, segmentationIndex: 0 }))
+      const neuralBoundaryHallucination = (
+        physicalLines.length === 1
+        && neural.lines.some((line) => line.text.trim().split(/\s+/u).filter(Boolean).length >= 2)
+        && separatedWordCandidates.length === 0
+      )
+      if (hasPersonalSequencePrior && neuralBoundaryHallucination) {
+        // If the line model invented a space inside one uninterrupted ink
+        // word, its uniformly distributed character boxes are not a reliable
+        // cut prior either. The first connected segmentation is deliberately
+        // cheap and can miss a narrow initial glyph. Inspect the two already
+        // bounded alternative cut paths for the same total character count;
+        // every emitted letter must still be supported by the user's model.
+        strategies.push(
+          { delta: 0, penLift: false, segmentationIndex: 1 },
+          { delta: 0, penLift: false, segmentationIndex: 2 },
+        )
+      }
+      if (
+        penLiftCounts.some((count, index) => {
+          if (!count) return false
+          const neuralCount = Array.from(neural.lines[index].text).filter((character) => !/\s/u.test(character)).length
+          return count !== neuralCount
+        })
+      ) {
+        const hasLargePenLiftDisagreement = penLiftCounts.some((count, index) => {
+          if (!count) return false
+          const neuralCount = Array.from(neural.lines[index].text)
+            .filter((character) => !/\s/u.test(character)).length
+          return Math.abs(count - neuralCount) >= 2
+        })
+        // Deeper exact-count cuts are expensive and often identical. Run them
+        // only when the line model produced an unknown word and independently
+        // disagrees with the measured count by at least two characters. This
+        // recovers difficult connected words without taxing normal text lines.
+        const segmentationIndexes = hasLargePenLiftDisagreement && (neural.knownWordRatio ?? 0) < 0.5
+          ? [0, 1, 2]
+          : [0]
+        segmentationIndexes.forEach((segmentationIndex) => {
+          strategies.push({ delta: 0, penLift: true, segmentationIndex })
+        })
+      }
+
+      // Without a verified word partition, keep the unrestricted primary and
+      // bounded whole-line beams as fallbacks.
+      strategies.forEach((strategy) => {
+        const hinted = physicalLines.flatMap((line, lineIndex) => {
+          const neuralLine = neural.lines[lineIndex]
+          const neuralLineCharacterCount = Array.from(neuralLine.text)
+            .filter((character) => !/\s/u.test(character)).length
+          const characterCount = strategy.penLift
+            ? penLiftCounts[lineIndex] ?? neuralLineCharacterCount
+            : Math.max(1, neuralLineCharacterCount + strategy.delta)
+          const tokens = recognition.recognizeExpression(
+            line.strokes,
+            resources.model,
+            resources.labels,
+            'text',
+            resources.layoutExamples,
+            language,
+            characterCount,
+            !strategy.penLift && strategy.delta === 0 ? neuralLine.text : undefined,
+            strategy.segmentationIndex,
+          )
+          if (lineIndex > 0 && tokens[0]) tokens[0].lineBreakBefore = true
+          return tokens
+        })
+        const value = recognition.recognizedSentence(hinted)
+        if (!candidates.some((candidate) => recognition.recognizedSentence(candidate) === value)) {
+          candidates.push(hinted)
+        }
+      })
+    }
+  }
+
+  if (!candidates.length) candidates.push(getPrimary())
+
+  if (physicalLines.length >= 2) {
+    candidates.forEach((candidate) => {
+      const positioned = candidate.map((token, originalIndex) => {
+        const centerY = token.bbox[1] + token.bbox[3] / 2
+        const lineIndex = physicalLines
+          .map((line, index) => ({ index, distance: Math.abs(centerY - line.centerY) }))
+          .sort((first, second) => first.distance - second.distance)[0]?.index ?? 0
+        return { token, originalIndex, lineIndex }
+      }).sort((first, second) => (
+        first.lineIndex - second.lineIndex ||
+        first.token.bbox[0] - second.token.bbox[0] ||
+        first.originalIndex - second.originalIndex
+      ))
+      positioned.forEach(({ token, lineIndex }, index) => {
+        const previousLine = positioned[index - 1]?.lineIndex
+        token.lineBreakBefore = lineIndex > 0 && lineIndex !== previousLine
+      })
+      candidate.splice(0, candidate.length, ...positioned.map(({ token }) => token))
+    })
+  }
+
+  const completeTextHintCount = safeTextCharacterHint
+    && Array.from(safeTextCharacterHint).length === safeTextCharacterCountHint
+    ? safeTextCharacterCountHint
+    : null
+  const penLiftCharacterCount = (
+    penLiftCounts.length > 0 && penLiftCounts.every(Boolean)
+      ? penLiftCounts.reduce<number>((sum, count) => sum + (count ?? 0), 0)
+      : null
+  )
+  // Pen islands are an exact count only for mostly disconnected printing. In
+  // cursive, several letters deliberately share one island; treating that
+  // lower bound as an exact length made a visually strong five-letter word
+  // lose merely because it was written in two strokes. A complete text hint
+  // remains exact, while pen-lift evidence is exact only when the independent
+  // line decoder places it within one character.
+  const measuredCharacterCount = completeTextHintCount ?? (
+    penLiftCharacterCount !== null
+    && Math.abs(penLiftCharacterCount - neuralCharacterCount) <= 1
+      ? penLiftCharacterCount
+      : null
+  )
+
+  const ranked = candidates
+    .map((tokens) => {
+      const fusion = fusePersonalizedTextRecognition(
+        tokens,
+        textFusionNeural,
+        language,
+        measuredCharacterCount ?? undefined,
+      )
+      const visibleTokenCount = tokens.filter((token) => !token.isLayout).length
+      const penLiftMismatch = measuredCharacterCount === null
+        ? 0
+        : Math.abs(visibleTokenCount - measuredCharacterCount)
+      const literalText = recognition.recognizedSentence(tokens).replace(/\s+/gu, '')
+      const fusedText = fusion.text.replace(/\s+/gu, '')
+      const visibleEvidence = fusion.personalizedCharacters + fusion.neuralCharacters + fusion.classicalCharacters
+      const literalPersonalRatio = fusion.personalizedCharacters / Math.max(1, visibleEvidence)
+      const literalLocale = language === 'de' ? 'de-CH' : 'en-US'
+      const normalizedLiteralText = literalText.toLocaleLowerCase(literalLocale)
+      const literalKnownWord = (language === 'de' ? GERMAN_COMMON_WORDS : ENGLISH_COMMON_WORDS)
+        .has(normalizedLiteralText) || isExtendedNeuralContextWord(normalizedLiteralText, language)
+      const literalPersonalSequenceBonus = (
+        /^\p{L}{3,24}$/u.test(literalText)
+        && normalizedLiteralText === fusedText.toLocaleLowerCase(literalLocale)
+        && literalKnownWord
+        && literalPersonalRatio >= 0.55
+      ) ? literalPersonalRatio * 0.72 : 0
+      return {
+        tokens,
+        fusion,
+        // A dictionary projection can repair ambiguous glyphs, but it must
+        // not outrank a complete literal sequence that the personal segmenter
+        // actually emitted. This signal is unavailable to the text-only score
+        // above and is intentionally bounded to mostly trained letter paths.
+        score: personalizedTextFusionSelectionScore(fusion, textFusionNeural, language)
+          + literalPersonalSequenceBonus
+          - penLiftMismatch * 0.22,
+      }
+    })
+    .sort((first, second) => second.score - first.score)
+  let selected = ranked[0]
+  const exactNeuralCandidate = ranked.find((entry) => (
+    entry.fusion.text.toLocaleLowerCase(language === 'de' ? 'de-CH' : 'en-US')
+      === textFusionNeural.text.toLocaleLowerCase(language === 'de' ? 'de-CH' : 'en-US')
+  ))
+  const selectedVisibleCharacters = selected
+    ? selected.fusion.personalizedCharacters
+      + selected.fusion.neuralCharacters
+      + selected.fusion.classicalCharacters
+    : 0
+  const selectedPersonalRatio = selected
+    ? selected.fusion.personalizedCharacters / Math.max(1, selectedVisibleCharacters)
+    : 0
+  // A high-confidence known line-model word is already a strong complete-word
+  // observation. A competing segmentation may replace it only with a clear
+  // majority of independently reliable personal glyphs; two trained-looking
+  // pieces inside a four-letter alternative are not enough. Complete personal
+  // sequences (for example browser over grösser) remain free to win.
+  if (
+    exactNeuralCandidate
+    && selected !== exactNeuralCandidate
+    && textFusionNeural.confidence >= 80
+    && (textFusionNeural.knownWordRatio ?? 0) >= 0.72
+    && selectedPersonalRatio < 0.72
+  ) selected = exactNeuralCandidate
+  let rasterDecision: PersonalizedLineRecognition['rasterDecision']
+
+  // Stroke-based segmentation is strongest when pen lifts and accessory
+  // strokes remain available. A screenshot-style raster provides an
+  // independent second view for the remaining one-word failures: adjacent
+  // letters may share a connected component, but their complete pixel bodies
+  // still form separate low-cost cuts. Keep this path lazy and tightly scoped
+  // so normal sentences, formulas and startup never pay its cost.
+  const rawNeuralWord = neural.text.trim()
+  const rasterWordPattern = language === 'de'
+    ? /^[A-Za-zÄÖÜäöü]{2,24}[.,;:!?]?$/u
+    : /^[A-Za-z]{2,24}[.,;:!?]?$/u
+  const personalLetterSamples = resources.samples.filter((sample) => /^\p{L}$/u.test(sample.label))
+  const personalLetterClasses = new Set(personalLetterSamples.map((sample) => sample.labelId)).size
+  // The line model may call an ordinary trained letter an integral or another
+  // formula symbol. In that exact failure mode its raw value is not a usable
+  // text prior, but the independent text-mode fusion often still provides a
+  // complete personal word. Previously the invalid neural value disabled the
+  // raster recognizer entirely, so the old mistake could veto the correction.
+  const rasterLocale = language === 'de' ? 'de-CH' : 'en-US'
+  const rasterKnownWord = (value: string) => {
+    const normalized = value.toLocaleLowerCase(rasterLocale)
+    return (language === 'de' ? GERMAN_COMMON_WORDS : ENGLISH_COMMON_WORDS).has(normalized)
+      || isExtendedNeuralContextWord(normalized, language)
+  }
+  // Preserve a syntactically valid raw line-model word even when it is a
+  // name. A fallback fusion is a weaker prior: admit an unknown fallback only
+  // when most of its letters came from the writer's model. Otherwise a
+  // punctuation-stripped OCR hallucination (for example O-lNSKINMAN ->
+  // OlNSKINMAN) poisons the independent blind raster decode.
+  const rawRasterPrior = rasterWordPattern.test(rawNeuralWord) ? rawNeuralWord : ''
+  const fusedRasterPrior = [selected, ...ranked]
+    .map((entry) => {
+      const value = entry.fusion.text.trim()
+      const evidence = entry.fusion.personalizedCharacters
+        + entry.fusion.neuralCharacters + entry.fusion.classicalCharacters
+      const personalRatio = entry.fusion.personalizedCharacters / Math.max(1, evidence)
+      return { value, personalRatio }
+    })
+    .find(({ value, personalRatio }) => (
+      rasterWordPattern.test(value)
+      && (rasterKnownWord(value) || personalRatio >= 0.55)
+    ))?.value ?? ''
+  const rasterPriorWord = rawRasterPrior || fusedRasterPrior
+  const blindSingleWordInput = (
+    !rasterPriorWord
+    && !/\s/u.test(rawNeuralWord)
+  )
+  if (
+    physicalLines.length === 1
+    && (Boolean(rasterPriorWord) || blindSingleWordInput)
+    && personalLetterSamples.length >= 32
+    && personalLetterClasses >= 12
+    && Number.isFinite(sourceWidth) && sourceWidth >= 200 && sourceWidth <= 4_096
+    && Number.isFinite(sourceHeight) && sourceHeight >= 200 && sourceHeight <= 4_096
+  ) {
+    try {
+      const { recognizePersonalRasterPixels, renderPersonalRasterLine } = await import('./personalizedRasterRecognition')
+      const rendered = renderPersonalRasterLine(physicalLines[0].strokes, sourceWidth, sourceHeight)
+      const selectedTokenCount = selected.tokens.filter((token) => !token.isLayout).length
+      const raster = rendered
+        ? await recognizePersonalRasterPixels(
+            rendered,
+            resources.samples,
+            rasterPriorWord,
+            language,
+            [safeTextCharacterCountHint, penLiftCounts[0], selectedTokenCount]
+              .filter((count): count is number => Number.isSafeInteger(count) && Number(count) >= 1),
+          )
+        : null
+      const best = raster?.candidates[0]
+      const rasterText = raster?.prediction ?? ''
+      const rasterCharacters = Array.from(rasterText)
+      const priorLetters = Array.from(rasterPriorWord).filter((character) => /^\p{L}$/u.test(character)).join('')
+      const topBeam = best?.sequenceBeams[0]
+      const visuallySupportedCharacters = best?.segments.filter((segment, index) => {
+        const selectedCharacter = rasterCharacters[index]
+        const bestCost = segment.alternatives[0]?.cost ?? Number.POSITIVE_INFINITY
+        const selectedCost = segment.alternatives.find((alternative) => alternative.char === selectedCharacter)?.cost
+        return selectedCost !== undefined && selectedCost - bestCost <= 0.14
+      }).length ?? 0
+      const visualSupportRatio = visuallySupportedCharacters / Math.max(1, rasterCharacters.length)
+      const connectedRasterSequence = Boolean(
+        best && raster && raster.columnBandCount < best.targetCount,
+      )
+      const foldedRasterText = rasterText.toLocaleLowerCase(rasterLocale)
+      const nextDistinctKnownBeam = best?.sequenceBeams.find((beam) => (
+        beam.known && beam.value.toLocaleLowerCase(rasterLocale) !== foldedRasterText
+      ))
+      const distinctKnownMargin = topBeam && nextDistinctKnownBeam
+        ? nextDistinctKnownBeam.score - topBeam.score
+        : Number.POSITIVE_INFINITY
+      const lexicalVisualCostPerCharacter = topBeam
+        ? topBeam.visualCost / Math.max(1, rasterCharacters.length)
+        : Number.POSITIVE_INFINITY
+      const connectedKnownWordThreshold = (
+        connectedRasterSequence
+        && Boolean(topBeam?.known)
+        && visualSupportRatio >= 0.75
+        && (best?.averageVisualCost ?? Number.POSITIVE_INFINITY) <= 0.15
+      )
+      const blindPersonalDecision = (
+        !priorLetters
+        && Boolean(topBeam?.known)
+        && visualSupportRatio >= 0.75
+        && (best?.averageVisualCost ?? Number.POSITIVE_INFINITY) <= 0.14
+        && (best?.cutInk ?? Number.POSITIVE_INFINITY) <= 0.35
+      )
+      const blindExactBandKnownDecision = Boolean(
+        best
+        && raster
+        && !priorLetters
+        && raster.columnBandCount === best.targetCount
+        && topBeam?.known
+        && visualSupportRatio >= 0.88
+        && best.cutInk <= 0.04
+        && lexicalVisualCostPerCharacter <= 0.04
+        && distinctKnownMargin >= 0.04
+      )
+      const exactDisconnectedRasterCount = Boolean(
+        best
+        && raster
+        && !connectedRasterSequence
+        && raster.columnBandCount === best.targetCount
+        && best.cutInk <= 0.08
+      )
+      const strokeRasterKnownConsensus = Boolean(
+        best
+        && exactDisconnectedRasterCount
+        && topBeam?.known
+        && ranked.some((entry) => {
+          const value = entry.fusion.text.trim()
+          const visibleValue = Array.from(value).filter((character) => /^\p{L}$/u.test(character))
+          const evidence = entry.fusion.personalizedCharacters + entry.fusion.classicalCharacters
+          return value.toLocaleLowerCase(rasterLocale) === foldedRasterText
+            && visibleValue.length === best.targetCount
+            && entry.fusion.personalizedCharacters / Math.max(1, best.targetCount) >= 0.4
+            && evidence / Math.max(1, best.targetCount) >= 0.8
+        })
+        && visualSupportRatio >= 0.4
+        && best.averageVisualCost <= 0.18
+        && lexicalVisualCostPerCharacter <= 0.055
+      )
+      const selectedFoldedText = selected.fusion.text.trim().toLocaleLowerCase(rasterLocale)
+      const protectsCompletePersonalWord = Boolean(
+        selectedPersonalRatio >= 0.72
+        && rasterKnownWord(selected.fusion.text.trim())
+        && foldedRasterText !== selectedFoldedText
+      )
+      const safeRasterDecision = Boolean(
+        best
+        && /^\p{L}{2,24}$/u.test(rasterText)
+        && rasterCharacters.length === best.targetCount
+        // Connector ink raises every absolute glyph distance because it is
+        // absent from isolated training examples. A fully connected known
+        // word may use a slightly wider score bound only when at least three
+        // independent checks agree: exact count, strong per-glyph visual
+        // support and a low average personal-template cost.
+        && best.score <= (connectedKnownWordThreshold
+          ? 0.18
+          : blindExactBandKnownDecision ? 0.30
+            : strokeRasterKnownConsensus ? 0.24
+              : blindPersonalDecision ? 0.12 : 0.13)
+        && best.averageVisualCost <= (connectedKnownWordThreshold
+          ? 0.15
+          : blindExactBandKnownDecision ? 0.22
+            : strokeRasterKnownConsensus ? 0.18 : 0.14)
+        && best.cutInk <= 0.45
+        && (strokeRasterKnownConsensus || !priorLetters || wordDistance(
+          rasterText.toLocaleLowerCase(language),
+          priorLetters.toLocaleLowerCase(language),
+        ) <= 3)
+        // A dictionary hit is linguistic evidence, not visual evidence. It
+        // must never by itself authorize a raster rewrite (the old OR let a
+        // fluent word with only one supported glyph out of five overwrite a
+        // stronger stroke sequence).
+        && visualSupportRatio >= (strokeRasterKnownConsensus ? 0.4 : topBeam?.known ? 0.55 : 0.6)
+        && (priorLetters || blindPersonalDecision || blindExactBandKnownDecision)
+        // A complete known word emitted mostly by trained glyphs is stronger
+        // than a different dictionary projection of the same raster. This
+        // blocks fluent visual neighbours such as `Brunft` from replacing a
+        // five-of-five personal `punkt` sequence.
+        && !protectsCompletePersonalWord
+      )
+      rasterDecision = {
+        attempted: true,
+        accepted: safeRasterDecision,
+        connected: connectedRasterSequence,
+        text: rasterText,
+        prior: rasterPriorWord,
+        score: best?.score ?? null,
+        averageVisualCost: best?.averageVisualCost ?? null,
+        cutInk: best?.cutInk ?? null,
+        visualSupportRatio,
+        targetCount: best?.targetCount ?? null,
+        columnBandCount: raster?.columnBandCount ?? null,
+        lexicalVisualCostPerCharacter: Number.isFinite(lexicalVisualCostPerCharacter)
+          ? lexicalVisualCostPerCharacter : null,
+        knownWord: Boolean(topBeam?.known),
+        strokeRasterConsensus: strokeRasterKnownConsensus,
+      }
+      const selectedVisibleTokens = selected.tokens.filter((token) => !token.isLayout)
+      const selectedRawLetterRatio = selectedVisibleTokens.filter((token) => /^\p{L}$/u.test(token.char)).length /
+        Math.max(1, selectedVisibleTokens.length)
+      const countSupportedCandidate = exactDisconnectedRasterCount
+        ? ranked.find((entry) => {
+            const visible = entry.tokens.filter((token) => !token.isLayout)
+            const evidenceCharacters = entry.fusion.personalizedCharacters + entry.fusion.classicalCharacters
+            return visible.length === best!.targetCount
+              && visible.every((token) => /^\p{L}$/u.test(token.char))
+              && /^\p{L}{2,24}$/u.test(entry.fusion.text)
+              && evidenceCharacters / Math.max(1, visible.length) >= 0.8
+          })
+        : undefined
+      const rasterCountTextConsensus = Boolean(
+        countSupportedCandidate
+        && countSupportedCandidate.fusion.text.toLocaleLowerCase(language === 'de' ? 'de-CH' : 'en-US')
+          === rasterText.toLocaleLowerCase(language === 'de' ? 'de-CH' : 'en-US')
+        && wordDistance(
+          countSupportedCandidate.fusion.text.toLocaleLowerCase(language),
+          selected.fusion.text.toLocaleLowerCase(language),
+        ) <= 2,
+      )
+      if (
+        !safeRasterDecision
+        && countSupportedCandidate
+        && selectedVisibleTokens.length !== best!.targetCount
+        && (selectedRawLetterRatio < 0.85 || rasterCountTextConsensus)
+      ) {
+        // Projection bands do not identify the letters, but on disconnected
+        // ink they provide a strong count observation. Use only that count to
+        // reject an over-segmented path containing punctuation-like debris;
+        // the replacement text still comes wholly from the independent
+        // stroke/personal fusion, never from the raster vocabulary guess.
+        selected = countSupportedCandidate
+      }
+      if (safeRasterDecision && rasterText !== selected.fusion.text) {
+        let matching = ranked.find((entry) => (
+          entry.tokens.filter((token) => !token.isLayout).length === rasterCharacters.length
+        ))
+        if (!matching) {
+          const exactTokens = recognition.recognizeExpression(
+            physicalLines[0].strokes,
+            resources.model,
+            resources.labels,
+            'text',
+            resources.layoutExamples,
+            language,
+            rasterCharacters.length,
+            rasterText,
+          )
+          matching = {
+            tokens: exactTokens,
+            fusion: fusePersonalizedTextRecognition(
+              exactTokens,
+              textFusionNeural,
+              language,
+              rasterCharacters.length,
+            ),
+            score: 0,
+          }
+        }
+        let visibleIndex = 0
+        let mappedPersonalCharacters = 0
+        const rewrittenTokens = matching.tokens.map((token) => {
+          if (token.isLayout) return token
+          const char = rasterCharacters[visibleIndex++]
+          const alternative = token.alternatives.find((entry) => entry.char === char)
+          const label = resources.labels.find((entry) => entry.char === char)
+          if ((alternative?.personalSupport ?? 0) > 0) mappedPersonalCharacters += 1
+          const previousAlternative = {
+            labelId: token.labelId,
+            char: token.char,
+            name: token.name,
+            confidence: token.confidence,
+            baseConfidence: token.baseConfidence,
+            personalSupport: token.personalSupport,
+            personalConfidence: token.personalConfidence,
+          }
+          const alternatives = [previousAlternative, ...token.alternatives]
+            .filter((entry) => entry.char !== char)
+            .filter((entry, index, entries) => entries.findIndex((candidate) => candidate.labelId === entry.labelId) === index)
+            .slice(0, 8)
+          return {
+            ...token,
+            labelId: alternative?.labelId ?? label?.id ?? token.labelId,
+            char,
+            name: alternative?.name ?? label?.name ?? char,
+            latex: label?.latex ?? char,
+            confidence: Math.max(token.confidence, alternative?.confidence ?? 0),
+            baseConfidence: alternative?.baseConfidence ?? 0,
+            personalSupport: alternative?.personalSupport ?? 0,
+            personalConfidence: alternative?.personalConfidence ?? 0,
+            visualLabelId: alternative?.labelId ?? label?.id ?? token.visualLabelId,
+            alternatives,
+            context: {
+              word: rasterText,
+              knownWord: Boolean(topBeam?.known),
+              changed: char !== token.char,
+              scoreMargin: 0,
+              // A multi-model recognition decision is not explicit user
+              // feedback and must never silently become training data.
+              autoLearn: false,
+            },
+          }
+        })
+        selected = {
+          ...matching,
+          tokens: rewrittenTokens,
+          fusion: {
+            ...matching.fusion,
+            text: rasterText,
+            source: mappedPersonalCharacters >= rasterCharacters.length * 0.8 ? 'personalized' : 'hybrid',
+            personalizedCharacters: Math.max(mappedPersonalCharacters, visuallySupportedCharacters),
+            neuralCharacters: Math.max(0, rasterCharacters.length - Math.max(mappedPersonalCharacters, visuallySupportedCharacters)),
+            classicalCharacters: 0,
+            unsupportedChanges: 0,
+          },
+        }
+      }
+    } catch (error) {
+      // The existing stroke/line fusion remains fully usable if an imported
+      // image is corrupt or the browser cannot allocate a temporary canvas.
+      console.warn('Persönliche Raster-Sequenz wurde übersprungen.', error)
+    }
+  }
+  return {
+    tokens: selected.tokens,
+    fusion: selected.fusion,
+    ...(includeCandidateScores ? {
+      ...(rasterDecision ? { rasterDecision } : {}),
+      candidateScores: ranked.slice(0, 12).map((entry) => ({
+        text: entry.fusion.text,
+        score: Math.round(entry.score * 10_000) / 10_000,
+        tokenCount: entry.tokens.filter((token) => !token.isLayout).length,
+        personalizedCharacters: entry.fusion.personalizedCharacters,
+        neuralCharacters: entry.fusion.neuralCharacters,
+        classicalCharacters: entry.fusion.classicalCharacters,
+      })),
+    } : {}),
+  }
+}

@@ -73,7 +73,7 @@ export async function initializeGlyphenWerkLocalization() {
   document.documentElement.lang = activeLanguage === 'en' ? 'en' : 'de-CH'
   document.documentElement.dataset.uiLanguage = activeLanguage
   if (activeLanguage !== 'en') return
-  const module = await import('../lernwerk-notes/resources/i18n/en.json')
+  const module = await import('../fanotes/resources/i18n/en.json')
   catalog = module.default as EnglishCatalog
   replacements = Object.entries(catalog)
     .filter(([source, translated]) => source !== translated && source.length >= 4)

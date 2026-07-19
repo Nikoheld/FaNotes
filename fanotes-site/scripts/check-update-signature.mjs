@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url'
 
 const siteRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const root = path.resolve(siteRoot, '..')
-const publicKey = createPublicKey(fs.readFileSync(path.join(root, 'lernwerk-notes/electron/update-public-key.pem'), 'utf8'))
+const publicKey = createPublicKey(fs.readFileSync(path.join(root, 'fanotes/electron/update-public-key.pem'), 'utf8'))
 const expectedKeyId = createHash('sha256')
   .update(publicKey.export({ type: 'spki', format: 'der' }))
   .digest('hex')
