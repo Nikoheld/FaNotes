@@ -3,8 +3,9 @@ import path from 'node:path'
 import { createServer } from 'vite'
 
 const source = process.argv[2]
-if (!source) throw new Error('Aufruf: node scripts/analyze-trocr-nbest.mjs BENCHMARK.json [de|en]')
-const language = process.argv[3] === 'de' ? 'de' : 'en'
+if (!source) throw new Error('Aufruf: node scripts/analyze-trocr-nbest.mjs BENCHMARK.json [de|en] [--summary-only]')
+const language = process.argv.slice(3).find((argument) => argument === 'de' || argument === 'en') === 'de' ? 'de' : 'en'
+const summaryOnly = process.argv.includes('--summary-only')
 const benchmark = JSON.parse(fs.readFileSync(path.resolve(source), 'utf8'))
 if (!Array.isArray(benchmark.predictions)) throw new Error('Der Benchmark enthält keine N-Best-Vorhersagen.')
 
@@ -36,7 +37,11 @@ try {
     rankTrocrCandidateTextsForTests,
     trocrVisualRankPenaltyForTests,
   } = await server.ssrLoadModule('/src/lib/neuralTextRecognition.ts')
-  const { installNeuralWordContextCandidates } = await server.ssrLoadModule('/src/lib/neuralWordContext.ts')
+  const {
+    applyFinalNeuralWordContext,
+    applyNeuralWordContext,
+    installNeuralWordContextCandidates,
+  } = await server.ssrLoadModule('/src/lib/neuralWordContext.ts')
   const words = fs.readFileSync(path.resolve(`public/spell/${language}.words`), 'utf8').trimEnd().split('\n')
   const dictionary = new Set(words)
   installNeuralWordContextCandidates(language, words)
@@ -44,10 +49,19 @@ try {
   let characters = 0
   let topEdits = 0
   let rerankedEdits = 0
+  let rawFinalContextEdits = 0
+  let aggressiveContextEdits = 0
+  let aggressiveFinalContextEdits = 0
   let oracleEdits = 0
   let topExact = 0
   let rerankedExact = 0
+  let rawFinalContextExact = 0
+  let aggressiveContextExact = 0
+  let aggressiveFinalContextExact = 0
   const changed = []
+  const aggressiveContextChanges = []
+  const aggressiveFinalContextChanges = []
+  const rawFinalContextChanges = []
   const rankPenalties = [0.1, 0.2, 0.3, 0.4, 0.5, 0.65, 0.8, 1, 1.25, 1.5, 2, 3]
   const penaltyMetrics = new Map(rankPenalties.map((penalty) => [penalty, {
     edits: 0,
@@ -72,15 +86,31 @@ try {
     }))
     const top = candidates[0]
     const selected = ranked[0]?.rawText ?? top
+    const rawFinalContext = applyFinalNeuralWordContext(selected, language)
+    // The ranked `.text` also applies ink-dependent terminal punctuation
+    // cleanup. N-best benchmark JSON has no stroke geometry, so comparing it
+    // here would count synthetic punctuation removal as a word-context error.
+    // Measure the lexical stages directly on the selected decoder surface.
+    const aggressiveContext = applyNeuralWordContext(selected, language)
+    const aggressiveFinalContext = applyFinalNeuralWordContext(aggressiveContext, language)
     const topDistance = distance(truth, top)
     const selectedDistance = distance(truth, selected)
+    const rawFinalContextDistance = distance(truth, rawFinalContext)
+    const aggressiveContextDistance = distance(truth, aggressiveContext)
+    const aggressiveFinalContextDistance = distance(truth, aggressiveFinalContext)
     const oracleDistance = Math.min(...candidates.map((candidate) => distance(truth, candidate)))
     characters += truth.length
     topEdits += topDistance
     rerankedEdits += selectedDistance
+    rawFinalContextEdits += rawFinalContextDistance
+    aggressiveContextEdits += aggressiveContextDistance
+    aggressiveFinalContextEdits += aggressiveFinalContextDistance
     oracleEdits += oracleDistance
     topExact += Number(top === truth)
     rerankedExact += Number(selected === truth)
+    rawFinalContextExact += Number(rawFinalContext === truth)
+    aggressiveContextExact += Number(aggressiveContext === truth)
+    aggressiveFinalContextExact += Number(aggressiveFinalContext === truth)
     rankPenalties.forEach((penalty) => {
       const candidate = [...penaltySweepScores].sort((first, second) => (
         (second.scoreWithoutVisualPenalty - Math.max(0, second.visualRank) * penalty) -
@@ -101,18 +131,60 @@ try {
       selected,
       ranking: ranked.map((entry) => ({ text: entry.rawText, score: Math.round(entry.score * 100) / 100 })),
     })
+    if (aggressiveContext !== selected) aggressiveContextChanges.push({
+      delta: selectedDistance - aggressiveContextDistance,
+      truth,
+      selected,
+      aggressiveContext,
+    })
+    if (aggressiveFinalContext !== aggressiveContext) aggressiveFinalContextChanges.push({
+      delta: aggressiveContextDistance - aggressiveFinalContextDistance,
+      truth,
+      selected: aggressiveContext,
+      aggressiveFinalContext,
+    })
+    if (rawFinalContext !== selected) rawFinalContextChanges.push({
+      delta: selectedDistance - rawFinalContextDistance,
+      truth,
+      selected,
+      rawFinalContext,
+    })
   }
   const lines = benchmark.predictions.length
   console.log(JSON.stringify({
     lines,
     topCer: topEdits / Math.max(1, characters),
     rerankedCer: rerankedEdits / Math.max(1, characters),
+    rawFinalContextCer: rawFinalContextEdits / Math.max(1, characters),
+    aggressiveContextCer: aggressiveContextEdits / Math.max(1, characters),
+    aggressiveFinalContextCer: aggressiveFinalContextEdits / Math.max(1, characters),
     oracleCer: oracleEdits / Math.max(1, characters),
     topExactRate: topExact / Math.max(1, lines),
     rerankedExactRate: rerankedExact / Math.max(1, lines),
+    rawFinalContextExactRate: rawFinalContextExact / Math.max(1, lines),
+    aggressiveContextExactRate: aggressiveContextExact / Math.max(1, lines),
+    aggressiveFinalContextExactRate: aggressiveFinalContextExact / Math.max(1, lines),
     changed: changed.length,
     improved: changed.filter((entry) => entry.delta > 0).length,
     worsened: changed.filter((entry) => entry.delta < 0).length,
+    aggressiveContext: {
+      changed: aggressiveContextChanges.length,
+      improved: aggressiveContextChanges.filter((entry) => entry.delta > 0).length,
+      worsened: aggressiveContextChanges.filter((entry) => entry.delta < 0).length,
+      neutral: aggressiveContextChanges.filter((entry) => entry.delta === 0).length,
+    },
+    aggressiveFinalContext: {
+      changed: aggressiveFinalContextChanges.length,
+      improved: aggressiveFinalContextChanges.filter((entry) => entry.delta > 0).length,
+      worsened: aggressiveFinalContextChanges.filter((entry) => entry.delta < 0).length,
+      neutral: aggressiveFinalContextChanges.filter((entry) => entry.delta === 0).length,
+    },
+    rawFinalContext: {
+      changed: rawFinalContextChanges.length,
+      improved: rawFinalContextChanges.filter((entry) => entry.delta > 0).length,
+      worsened: rawFinalContextChanges.filter((entry) => entry.delta < 0).length,
+      neutral: rawFinalContextChanges.filter((entry) => entry.delta === 0).length,
+    },
     penaltySweep: rankPenalties.map((penalty) => ({
       penalty,
       cer: penaltyMetrics.get(penalty).edits / Math.max(1, characters),
@@ -122,15 +194,36 @@ try {
       worsened: penaltyMetrics.get(penalty).worsened,
     })),
   }, null, 2))
-  changed
-    .sort((first, second) => second.delta - first.delta)
-    .slice(0, 16)
-    .forEach((entry) => console.log(`+${entry.delta} ${JSON.stringify(entry)}`))
-  changed
-    .filter((entry) => entry.delta < 0)
-    .sort((first, second) => first.delta - second.delta)
-    .slice(0, 16)
-    .forEach((entry) => console.log(`${entry.delta} ${JSON.stringify(entry)}`))
+  if (!summaryOnly) {
+    changed
+      .sort((first, second) => second.delta - first.delta)
+      .slice(0, 16)
+      .forEach((entry) => console.log(`+${entry.delta} ${JSON.stringify(entry)}`))
+    changed
+      .filter((entry) => entry.delta < 0)
+      .sort((first, second) => first.delta - second.delta)
+      .slice(0, 16)
+      .forEach((entry) => console.log(`${entry.delta} ${JSON.stringify(entry)}`))
+    aggressiveContextChanges
+      .sort((first, second) => second.delta - first.delta)
+      .slice(0, 16)
+      .forEach((entry) => console.log(`context +${entry.delta} ${JSON.stringify(entry)}`))
+    aggressiveContextChanges
+      .filter((entry) => entry.delta < 0)
+      .sort((first, second) => first.delta - second.delta)
+      .slice(0, 16)
+      .forEach((entry) => console.log(`context ${entry.delta} ${JSON.stringify(entry)}`))
+    aggressiveFinalContextChanges
+      .filter((entry) => entry.delta < 0)
+      .sort((first, second) => first.delta - second.delta)
+      .slice(0, 16)
+      .forEach((entry) => console.log(`final-context ${entry.delta} ${JSON.stringify(entry)}`))
+    rawFinalContextChanges
+      .filter((entry) => entry.delta < 0)
+      .sort((first, second) => first.delta - second.delta)
+      .slice(0, 16)
+      .forEach((entry) => console.log(`raw-context ${entry.delta} ${JSON.stringify(entry)}`))
+  }
 } finally {
   await server.close()
 }
