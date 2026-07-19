@@ -3,10 +3,11 @@ import path from 'node:path'
 import { createServer } from 'vite'
 
 const source = process.argv[2]
-if (!source) throw new Error('Aufruf: node scripts/analyze-trocr-sequence-scores.mjs BENCHMARK.json [de|en] [OUTPUT.json] [CHANGES.json]')
+if (!source) throw new Error('Aufruf: node scripts/analyze-trocr-sequence-scores.mjs BENCHMARK.json [de|en] [OUTPUT.json] [CHANGES.json] [PRODUCTION_CHANGES.json]')
 const language = process.argv[3] === 'de' ? 'de' : 'en'
 const outputPath = process.argv[4]
 const changesPath = process.argv[5]
+const productionChangesPath = process.argv[6]
 const benchmark = JSON.parse(fs.readFileSync(path.resolve(source), 'utf8'))
 if (!Array.isArray(benchmark.predictions)) throw new Error('Der Benchmark enthält keine N-Best-Vorhersagen.')
 
@@ -276,6 +277,24 @@ try {
   }).sort((first, second) => second.delta - first.delta)
   if (changesPath) fs.writeFileSync(path.resolve(changesPath), `${JSON.stringify(changes, null, 2)}\n`, { mode: 0o600 })
   else if (!outputPath) changes.forEach((entry) => console.log(`${entry.delta >= 0 ? '+' : ''}${entry.delta} ${JSON.stringify(entry)}`))
+
+  const productionChanges = records.flatMap((record) => {
+    if (record.current === record.visual) return []
+    return [{
+      delta: distance(record.truth, record.visual) - record.currentDistance,
+      truth: record.truth,
+      visual: record.visual,
+      current: record.current,
+      ranking: record.ranked.map((entry) => ({
+        text: entry.rawText,
+        score: Math.round(entry.score * 100) / 100,
+        base: Math.round(entry.baseScore * 100) / 100,
+      })),
+    }]
+  }).sort((first, second) => first.delta - second.delta)
+  if (productionChangesPath) {
+    fs.writeFileSync(path.resolve(productionChangesPath), `${JSON.stringify(productionChanges, null, 2)}\n`, { mode: 0o600 })
+  }
 } finally {
   await server.close()
 }

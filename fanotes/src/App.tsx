@@ -113,7 +113,7 @@ const NoteTabButton = memo(function NoteTabButton({ active, dirty, path, title, 
 const INITIAL_UPDATE_STATE: UpdateState = {
   status: 'idle',
   supported: false,
-  currentVersion: '2026.7.4-beta.9',
+  currentVersion: '2026.7.4-beta.10',
   latestVersion: null,
   publishedAt: null,
   releaseNotes: [],

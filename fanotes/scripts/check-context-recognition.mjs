@@ -38,6 +38,9 @@ try {
     rareContextCommonNeighbourForTests,
     rankTrocrCandidateTextsForTests,
     repairNeuralPhysicalWordSpacingForTests,
+    trocrStructuralRewritePenaltyForTests,
+    trocrOrdinaryWordNamePenaltyForTests,
+    trocrDenseGermanNamePenaltyForTests,
   } = await server.ssrLoadModule('/src/lib/neuralTextRecognition.ts')
   const {
     assessNeuralTextModeCandidate,
@@ -506,6 +509,73 @@ try {
     'sind, sondern nur gradwell',
     'Eine deutsche Flexionsvariante darf die eindeutig reparierbare visuelle Grundform nicht während der N-Best-Wahl verdrängen.',
   )
+  assert.equal(trocrStructuralRewritePenaltyForTests('der', 'der der', 'de'), 4)
+  assert.equal(trocrStructuralRewritePenaltyForTests('zwischen einem Coach und', 'zwischen einem (oach und', 'de'), 4)
+  assert.equal(trocrStructuralRewritePenaltyForTests(
+    'that they use Dan as a specimen demonstra-',
+    'that they use Dan as a specimen demonstrations -',
+    'en',
+  ), 4)
+  const englishNameMembership = (word) => [
+    'blackhead', 'cassius', 'celeste', 'eleanor', 'graphing', 'passions', 'tremendous',
+  ].includes(word.toLocaleLowerCase('en-US'))
+  assert.equal(trocrOrdinaryWordNamePenaltyForTests(
+    'and it is the opinion of Bassius that',
+    'and it is the opinion of Passions that',
+    'en',
+    englishNameMembership,
+  ), 3)
+  assert.equal(trocrOrdinaryWordNamePenaltyForTests(
+    'You made some sort of a protest to Grafburg .',
+    'You made some sort of a protest to Graphing .',
+    'en',
+    englishNameMembership,
+  ), 3)
+  assert.equal(trocrOrdinaryWordNamePenaltyForTests(
+    'mysteries , like the Maria Geleste . Then things',
+    'mysteries , like the Maria Celeste . Then things',
+    'en',
+    englishNameMembership,
+  ), 0)
+  const germanNameMembership = (word) => ['busen', 'marken'].includes(word.toLocaleLowerCase('de-CH'))
+  assert.equal(trocrDenseGermanNamePenaltyForTests(
+    'Markin Heidesger',
+    'Marken Heidesger',
+    'de',
+    germanNameMembership,
+  ), 3)
+  assert.equal(trocrDenseGermanNamePenaltyForTests(
+    'Matswo Kasa Buson Kobayashi Issa',
+    'Matsue Kasa Busen Kobayashi Issa',
+    'de',
+    germanNameMembership,
+  ), 3)
+  assert.equal(trocrDenseGermanNamePenaltyForTests(
+    'auf der Insel Madagaskar und in Anstralein',
+    'auf der Insel Madagaskar und in Australien',
+    'de',
+    (word) => word === 'australien',
+  ), 0)
+  assert.equal(trocrOrdinaryWordNamePenaltyForTests(
+    'Even worse is to laugh . Transendous damage',
+    'Even worse is to laugh . tremendous damage',
+    'en',
+    englishNameMembership,
+  ), 0)
+  assert.equal(trocrOrdinaryWordNamePenaltyForTests(
+    'Rabbi Eleasar ben Assarja said',
+    'Rabbi Eleanor ben Assarja said',
+    'en',
+    englishNameMembership,
+  ), 0)
+  assert.equal(trocrStructuralRewritePenaltyForTests('einen Stadtkreis.', 'einen Stadt kreis.', 'de'), 4)
+  assert.equal(trocrStructuralRewritePenaltyForTests('der Genreder Brettspielt', 'der Genre der Brettspielt', 'de'), 0)
+  assert.equal(trocrStructuralRewritePenaltyForTests('tax atreble the rate', 'tax a treble the rate', 'en'), 0)
+  assert.equal(trocrStructuralRewritePenaltyForTests(
+    'I will leave you unnecessary pre-',
+    'I will leave you the necessary pre-',
+    'en',
+  ), 4)
 
   const orderedDictionaryProbe = ['abend', 'test', 'zebra', 'äpfel', 'über']
   installNeuralWordContextCandidates('de', orderedDictionaryProbe)
@@ -598,6 +668,52 @@ try {
     'Leicht tiefer geschriebene Kleinbuchstaben dürfen keine Layout-Zuweisung erhalten.',
   )
 
+  // Pairwise geometry alone still sees an index once the first tall letter is
+  // almost twenty percent above the following x-height letters.  The local
+  // word baseline must resolve that otherwise realistic handwriting case.
+  const locallyAlignedWordTokens = [
+    token('T', 96, [['T', 96]], 1090, [0.05, 0.18, 0.06, 0.18]),
+    token('e', 94, [['e', 94]], 1091, [0.115, 0.275, 0.045, 0.12]),
+    token('s', 95, [['s', 95]], 1092, [0.165, 0.276, 0.044, 0.119]),
+    token('t', 95, [['t', 95]], 1093, [0.214, 0.255, 0.04, 0.14]),
+  ]
+  const locallyAlignedWordLatex = recognizedLatex(locallyAlignedWordTokens)
+  assert.doesNotMatch(
+    locallyAlignedWordLatex,
+    /[_^]\{/u,
+    `Die gemeinsame Wortgrundlinie muss scheinbare Indexe nach einem hohen Anfangsbuchstaben verhindern: ${locallyAlignedWordLatex}`,
+  )
+  assert.equal(
+    suggestMathLayoutAssignments(locallyAlignedWordTokens).length,
+    0,
+    'Ein normal ausgerichtetes Wort darf auch bei starker lokaler Höhendifferenz keine Index-Trainingsdaten erzeugen.',
+  )
+
+  const locallyAlignedNameTokens = [
+    token('F', 96, [['F', 96]], 1094, [0.05, 0.18, 0.06, 0.18]),
+    token('a', 94, [['a', 94]], 1095, [0.115, 0.275, 0.045, 0.12]),
+    token('b', 95, [['b', 95]], 1096, [0.165, 0.225, 0.044, 0.17]),
+    token('i', 95, [['i', 95]], 1097, [0.214, 0.275, 0.027, 0.12]),
+    token('o', 95, [['o', 95]], 1098, [0.246, 0.275, 0.045, 0.12]),
+  ]
+  assert.doesNotMatch(
+    recognizedLatex(locallyAlignedNameTokens),
+    /[_^]\{/u,
+    'Ein titelgeschriebener Name muss auch ohne Wörterbucheintrag der gemeinsamen Wortgrundlinie folgen.',
+  )
+
+  const trueMultiLetterSubscriptTokens = [
+    token('x', 96, [['x', 96]], 1099, [0.05, 0.2, 0.06, 0.18]),
+    token('m', 95, [['m', 95]], 1100, [0.115, 0.365, 0.04, 0.08]),
+    token('a', 95, [['a', 95]], 1101, [0.16, 0.366, 0.04, 0.08]),
+    token('x', 95, [['x', 95]], 1102, [0.205, 0.365, 0.04, 0.08]),
+  ]
+  assert.match(
+    recognizedLatex(trueMultiLetterSubscriptTokens),
+    /x_\{m a x\}/u,
+    'Ein klar kleiner und auf eigener Grundlinie geschriebener Buchstabenindex muss erhalten bleiben.',
+  )
+
   let baselineSweepCases = 0
   for (const word of ['Test', 'Hallo', 'Fabio', 'Lernen']) {
     for (const baseHeight of [0.14, 0.18, 0.22]) {
@@ -632,6 +748,47 @@ try {
     }
   }
   assert.equal(baselineSweepCases, 336, 'Der systematische Grundlinien-Sweep ist unvollständig.')
+
+  let localWordBaselineSweepCases = 0
+  for (const word of ['Test', 'Hallo', 'Fabio', 'Lernen']) {
+    for (const baseHeight of [0.16, 0.2, 0.24]) {
+      for (const bodyRatio of [0.58, 0.66, 0.74]) {
+        for (const jitterRatio of [0.17, 0.2, 0.22]) {
+          const baseY = 0.2
+          const bodyHeight = baseHeight * bodyRatio
+          const baseline = baseY + baseHeight * (1 + jitterRatio)
+          let x = 0.05
+          const sweptTokens = [
+            token(word[0], 95, [[word[0], 95]], 4000 + localWordBaselineSweepCases * 10, [x, baseY, 0.055, baseHeight]),
+          ]
+          x += 0.06
+          Array.from(word).slice(1).forEach((char, index) => {
+            sweptTokens.push(token(
+              char,
+              94,
+              [[char, 94]],
+              4001 + localWordBaselineSweepCases * 10 + index,
+              [x, baseline - bodyHeight, 0.045, bodyHeight],
+            ))
+            x += 0.05
+          })
+          const sweptLatex = recognizedLatex(sweptTokens)
+          assert.doesNotMatch(
+            sweptLatex,
+            /[_^]\{/u,
+            `Die lokale Wortgrundlinie muss starke natürliche Abweichung ohne Index halten (${word}, H=${baseHeight}, h=${bodyRatio}, j=${jitterRatio}): ${sweptLatex}`,
+          )
+          assert.equal(
+            suggestMathLayoutAssignments(sweptTokens).length,
+            0,
+            `Die starke Wortabweichung darf keine trainierbare Indexbeziehung erzeugen (${word}, H=${baseHeight}, h=${bodyRatio}, j=${jitterRatio}).`,
+          )
+          localWordBaselineSweepCases += 1
+        }
+      }
+    }
+  }
+  assert.equal(localWordBaselineSweepCases, 108, 'Der lokale Wortgrundlinien-Sweep ist unvollständig.')
 
   const trueScriptTokens = [
     token('x', 96, [['x', 96]], 110, [0.3, 0.3, 0.065, 0.2]),
@@ -2105,6 +2262,54 @@ try {
     }, verticallyDisplacedKnownWordScripts).shouldUseText,
     true,
     'Starke Worterkennung muss falsche Hoch-/Tiefstellungen unabhängig von normaler Grundliniendrift auflösen.',
+  )
+  const plausibleCompoundScripts = {
+    ...verticallyDisplacedUnknownScripts,
+    textValue: 'Schulnotizen',
+    evidence: {
+      ...verticallyDisplacedUnknownScripts.evidence,
+      text: {
+        ...verticallyDisplacedUnknownScripts.evidence.text,
+        visibleCharacters: 12,
+        letters: 12,
+        plausibleWords: 1,
+        strongSentence: false,
+      },
+      math: {
+        ...verticallyDisplacedUnknownScripts.evidence.math,
+        visibleCharacters: 12,
+        layoutAssignments: 4,
+        latexStructure: true,
+        decisiveStructure: true,
+      },
+    },
+  }
+  assert.equal(
+    isScriptOnlyBaselineTextConflict(plausibleCompoundScripts),
+    true,
+    'Eine plausible Flexions- oder Kompositumsform darf nicht nur wegen unruhiger Grundlinie als Indexkette bleiben.',
+  )
+  const sentenceWithOneUnknownWordScripts = {
+    ...plausibleCompoundScripts,
+    textValue: 'Diese Xyqaro Notiz',
+    evidence: {
+      ...plausibleCompoundScripts.evidence,
+      text: {
+        ...plausibleCompoundScripts.evidence.text,
+        visibleCharacters: 16,
+        letters: 16,
+        words: 3,
+        knownWords: 2,
+        plausibleWords: 2,
+        knownWordRatio: 0.667,
+        strongSentence: true,
+      },
+    },
+  }
+  assert.equal(
+    isScriptOnlyBaselineTextConflict(sentenceWithOneUnknownWordScripts),
+    true,
+    'Ein einzelner unbekannter Name in einem sonst klaren Satz darf die falsche Indexhypothese nicht wieder aktivieren.',
   )
   const verticallyDisplacedProperNameScripts = {
     ...verticallyDisplacedUnknownScripts,

@@ -6022,7 +6022,9 @@ export const recognizeMathDocument = (
 type FormattedAtom = {
   value: string
   bbox: [number, number, number, number]
+  sourceId?: string
   labelId?: string
+  char?: string
 }
 
 type MathLayoutItem = {
@@ -6107,6 +6109,71 @@ const scriptRole = (
   if (supportsSuperscript && candidateCenterY <= baseY + baseHeight * 0.31) return 'superscript' as const
   if (supportsSubscript && candidateCenterY >= baseY + baseHeight * 0.69) return 'subscript' as const
   return null
+}
+
+const isLatinWordAtom = (atom: FormattedAtom) => Boolean(
+  atom.char && /^\p{L}$/u.test(atom.char) && (
+    atom.labelId?.startsWith('latin_') || atom.labelId?.startsWith('german_')
+  ),
+)
+
+const wordAtomNeighbour = (first: FormattedAtom, second: FormattedAtom) => {
+  if (!isLatinWordAtom(first) || !isLatinWordAtom(second)) return false
+  const gap = second.bbox[0] - (first.bbox[0] + first.bbox[2])
+  const physicalXHeight = Math.min(first.bbox[3], second.bbox[3]) * SOURCE_HEIGHT / SOURCE_WIDTH
+  return gap <= clamp(physicalXHeight * 0.46, 0.018, 0.05)
+}
+
+/**
+ * A tall capital or ascender and the x-height body of the next letter can
+ * satisfy a pairwise subscript test even though both belong to one ordinary
+ * word.  Verify such a relation against the complete local letter run: a
+ * dictionary-backed/title-cased run whose candidate and base still share the
+ * run's baseline is prose, not a script.  A real `x_{max}` keeps its separate
+ * lower baseline and its substantially smaller glyphs, so it is not blocked.
+ */
+const ordinaryWordScriptConflict = (
+  atoms: FormattedAtom[],
+  baseIndex: number,
+  candidateIndex: number,
+) => {
+  const base = atoms[baseIndex]
+  const candidate = atoms[candidateIndex]
+  if (!base || !candidate || !isLatinWordAtom(base) || !isLatinWordAtom(candidate)) return false
+  if (candidate.bbox[3] < base.bbox[3] * 0.56) return false
+
+  let start = baseIndex
+  while (start > 0 && wordAtomNeighbour(atoms[start - 1], atoms[start])) start -= 1
+  let end = candidateIndex
+  while (end + 1 < atoms.length && wordAtomNeighbour(atoms[end], atoms[end + 1])) end += 1
+  const run = atoms.slice(start, end + 1)
+  if (run.length < 3 || !run.every(isLatinWordAtom)) return false
+
+  const word = run.map((atom) => atom.char).join('')
+  const lexicalScore = Math.max(
+    lexicalWordEvidence(word, 'de').score,
+    lexicalWordEvidence(word, 'en').score,
+  )
+  const titleCased = /^[A-ZÄÖÜ][a-zäöü]{2,}$/u.test(word)
+  if (lexicalScore < 0.5 && !titleCased) return false
+
+  const bottoms = run.map((atom) => atom.bbox[1] + atom.bbox[3])
+  const heights = run.map((atom) => atom.bbox[3])
+  const baseline = median(bottoms)
+  const referenceHeight = median(heights)
+  const tolerance = Math.max(0.012, referenceHeight * 0.45)
+  const baseBottom = base.bbox[1] + base.bbox[3]
+  const candidateBottom = candidate.bbox[1] + candidate.bbox[3]
+  if (
+    Math.abs(baseBottom - baseline) > tolerance ||
+    Math.abs(candidateBottom - baseline) > tolerance
+  ) return false
+
+  return run.some((atom, index) => {
+    const absoluteIndex = start + index
+    return absoluteIndex !== baseIndex && absoluteIndex !== candidateIndex &&
+      Math.abs(atom.bbox[1] + atom.bbox[3] - candidateBottom) <= tolerance
+  })
 }
 
 const combinedItemBounds = (
@@ -6278,7 +6345,9 @@ function formatLinearItems(
       atoms.push({
         value,
         bbox: item.bbox,
+        sourceId: item.token?.id ?? item.key,
         labelId: item.token?.labelId ?? item.labelId,
+        char: item.token?.char,
       })
       return
     }
@@ -6309,11 +6378,12 @@ function formatLinearItems(
   })
 
   const groups: { base: FormattedAtom; superscript: FormattedAtom[]; subscript: FormattedAtom[] }[] = []
-  atoms.forEach((atom) => {
+  atoms.forEach((atom, atomIndex) => {
     const previous = groups.at(-1)
     if (previous) {
       const role = scriptRole(previous.base, atom, layoutExamples)
-      if (role) {
+      const baseIndex = atoms.indexOf(previous.base)
+      if (role && !ordinaryWordScriptConflict(atoms, baseIndex, atomIndex)) {
         previous[role].push(atom)
         return
       }
@@ -6439,6 +6509,15 @@ export const suggestMathLayoutAssignments = (
 ): MathLayoutAssignment[] => {
   const usable = tokens.filter((token) => !token.isLayout && token.labelId)
   const items = usable.map<MathLayoutItem>((token) => ({ key: token.id, bbox: token.bbox, token }))
+  const wordAtoms = [...usable]
+    .sort((first, second) => first.bbox[0] - second.bbox[0])
+    .map<FormattedAtom>((token) => ({
+      value: token.char,
+      char: token.char,
+      bbox: token.bbox,
+      sourceId: token.id,
+      labelId: token.labelId,
+    }))
   const assignments: MathLayoutAssignment[] = []
   const assignedTokens = new Set<string>()
 
@@ -6486,6 +6565,9 @@ export const suggestMathLayoutAssignments = (
       layoutExamples,
     )
     if (!role) return
+    const baseAtomIndex = wordAtoms.findIndex((atom) => atom.sourceId === base.id)
+    const candidateAtomIndex = wordAtoms.findIndex((atom) => atom.sourceId === candidate.id)
+    if (ordinaryWordScriptConflict(wordAtoms, baseAtomIndex, candidateAtomIndex)) return
     assignments.push({
       tokenId: candidate.id,
       anchorId: base.id,
@@ -6559,6 +6641,7 @@ export type AutomaticRecognitionEvidence = {
     letterRatio: number
     words: number
     knownWords: number
+    plausibleWords?: number
     knownWordRatio: number
     baselineAlignment: number
     lines: number
@@ -6854,7 +6937,9 @@ export const recognizeAutomaticExpression = (
   const lexicalTextWords = (
     textValue.match(language === 'de' ? /[a-zäöü]{2,}/giu : /[a-z]{2,}/giu) ?? []
   )
-  const knownTextWords = lexicalTextWords.filter((word) => lexicalWordEvidence(word, language).knownWord)
+  const lexicalTextEvidence = lexicalTextWords.map((word) => lexicalWordEvidence(word, language))
+  const knownTextWords = lexicalTextWords.filter((_, index) => lexicalTextEvidence[index].knownWord)
+  const plausibleTextWords = lexicalTextWords.filter((_, index) => lexicalTextEvidence[index].score >= 0.5)
   const knownTextWordRatio = knownTextWords.length / Math.max(1, lexicalTextWords.length)
   const hasStrongSingleWord = (
     lexicalTextWords.length === 1 &&
@@ -6977,6 +7062,11 @@ export const recognizeAutomaticExpression = (
     knownTextWords.length === lexicalTextWords.length &&
     textLetters >= 3
   )
+  const completePlausibleTextWords = (
+    lexicalTextWords.length >= 1 &&
+    plausibleTextWords.length === lexicalTextWords.length &&
+    textLetters >= 4
+  )
   const properNameTextSequence = (
     lexicalTextWords.length === 1 &&
     textLetters >= 4 &&
@@ -6993,7 +7083,9 @@ export const recognizeAutomaticExpression = (
     textLetterRatio >= 0.86 &&
     (
       completeKnownTextWords ||
+      completePlausibleTextWords ||
       properNameTextSequence ||
+      strongSentenceText ||
       alignedKnownTextWord ||
       alignedUnknownTextSequence
     )
@@ -7212,6 +7304,7 @@ export const recognizeAutomaticExpression = (
         letterRatio: Math.round(textLetterRatio * 1_000) / 1_000,
         words: lexicalTextWords.length,
         knownWords: knownTextWords.length,
+        plausibleWords: plausibleTextWords.length,
         knownWordRatio: Math.round(knownTextWordRatio * 1_000) / 1_000,
         baselineAlignment: Math.round(textBaselineAlignment * 1_000) / 1_000,
         lines: textLineCount,
