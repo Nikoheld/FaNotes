@@ -461,6 +461,14 @@ try {
   )
   assert.equal(
     rankTrocrCandidateTextsForTests([
+      'wehn movement of blood through arteries is',
+      'when movement of blood through arteries is',
+    ], 'en', (word) => ['when', 'movement', 'of', 'blood', 'through', 'arteries', 'is'].includes(word))[0]?.rawText,
+    'when movement of blood through arteries is',
+    'Eine einzige lokale unbekannt-zu-bekannt-Reparatur darf einen klar besseren zweiten Bildbeam nutzen.',
+  )
+  assert.equal(
+    rankTrocrCandidateTextsForTests([
       'Hardly likely, my sureet. Luke surgery goes on for',
       'Hardly likely, my sweet. Luke surgery goes on for',
     ], 'en', englishNbestMembership)[0]?.rawText,
@@ -614,6 +622,11 @@ try {
     englishNameMembership,
   ), 3)
   assert.equal(trocrStructuralRewritePenaltyForTests('einen Stadtkreis.', 'einen Stadt kreis.', 'de'), 4)
+  assert.equal(
+    trocrStructuralRewritePenaltyForTests('indem', 'in dem', 'de', (word) => word === 'indem'),
+    4,
+    'Ein vollständiges Wörterbuchwort darf nicht wegen kurzer Funktionswörter künstlich getrennt werden.',
+  )
   assert.equal(trocrStructuralRewritePenaltyForTests('der Genreder Brettspielt', 'der Genre der Brettspielt', 'de'), 0)
   assert.equal(trocrStructuralRewritePenaltyForTests('tax atreble the rate', 'tax a treble the rate', 'en'), 0)
   assert.equal(trocrStructuralRewritePenaltyForTests(

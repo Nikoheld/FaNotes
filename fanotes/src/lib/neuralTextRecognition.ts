@@ -68,7 +68,15 @@ export const trocrVisualRankPenaltyForTests = TROCR_VISUAL_RANK_PENALTY
 // unsupported token into a known word, it can safely receive part of the
 // lexical advantage immediately. Names, compounds, punctuation, word-boundary
 // changes and already-known visual words stay with the decoder's first beam.
-const TROCR_SAFE_WORD_REPAIR_BONUS = 2
+// A 3.5 bonus recovers one additional safe local repair on each IAM/ScaDS
+// development set and one on the untouched writer-disjoint ScaDS evaluation
+// fold without adding a worsened selection. ScaDS calibration and the
+// 600-line IAM validation aggregate remain unchanged. This is deliberately
+// narrower than lowering the visual-rank penalty: only one lower-case,
+// boundary-preserving unknown->known replacement with no competing repair is
+// eligible; names, valid words, punctuation and structural rewrites are not.
+const TROCR_SAFE_WORD_REPAIR_BONUS = 3.5
+export const trocrSafeWordRepairBonusForTests = TROCR_SAFE_WORD_REPAIR_BONUS
 // If the top visual word has its own different, unique dictionary repair, the
 // two lexical readings are ambiguous. The lower beam must then beat another
 // full visual-rank step instead of receiving a dictionary bonus. This keeps
@@ -1757,6 +1765,7 @@ const trocrStructuralRewritePenalty = (
   visualTop: string,
   candidate: string,
   language: RecognitionLanguage,
+  wordMembership?: WordMembership,
 ) => {
   let penalty = 0
   const sourceWords = trocrWordSurfaces(visualTop, language)
@@ -1781,6 +1790,12 @@ const trocrStructuralRewritePenalty = (
         sourceOffset += Array.from(word.value).length
         sourceBoundaries.add(sourceOffset)
       })
+      sourceOffset = 0
+      const sourceWordRanges = sourceWords.map((word) => {
+        const start = sourceOffset
+        sourceOffset += Array.from(word.value).length
+        return { word: word.value.toLocaleLowerCase(locale), start, end: sourceOffset }
+      })
       let candidateOffset = 0
       for (let index = 0; index < candidateWords.length - 1; index += 1) {
         candidateOffset += Array.from(candidateWords[index].value).length
@@ -1790,7 +1805,18 @@ const trocrStructuralRewritePenalty = (
         const shortFunctionWord = [left, right].some((word) => (
           Array.from(word).length <= 3 && LANGUAGE_WORDS[language].has(word)
         ))
-        if (!shortFunctionWord) {
+        const splitSourceWord = sourceWordRanges.find((range) => (
+          candidateOffset > range.start && candidateOffset < range.end
+        ))
+        const splitsKnownVisualWord = Boolean(splitSourceWord && (
+          LANGUAGE_WORDS[language].has(splitSourceWord.word) || wordMembership?.(splitSourceWord.word)
+        ))
+        // A short function word used to exempt `indem` -> `in dem`. When the
+        // complete first-beam word is already in the shipped spelling index,
+        // the new boundary has no lexical justification. Keep the visual word
+        // here; the later physical-gap stage can still insert a genuinely
+        // visible space in cases such as `inform`/`in form`.
+        if (splitsKnownVisualWord || !shortFunctionWord) {
           penalty += TROCR_UNSUPPORTED_STRUCTURE_PENALTY
           break
         }
@@ -2005,7 +2031,7 @@ const rankTrocrCandidates = (
       ? TROCR_COMPETING_WORD_REPAIR_PENALTY
       : 0
     const structuralRewritePenalty = index > 0
-      ? trocrStructuralRewritePenalty(candidates[0], rawText, language)
+      ? trocrStructuralRewritePenalty(candidates[0], rawText, language, wordMembership)
       : 0
     const ordinaryWordNamePenalty = index > 0
       ? trocrOrdinaryWordNamePenalty(candidates[0], rawText, language, wordMembership)
@@ -2017,6 +2043,7 @@ const rankTrocrCandidates = (
       rawText,
       text,
       assessment,
+      repairDisposition,
       visualRank: index,
       baseScore,
       score: baseScore - index * TROCR_VISUAL_RANK_PENALTY
@@ -2048,12 +2075,13 @@ export const rankTrocrCandidateTextsForTests = (
     width: visibleLength * 14,
     height: 60,
   }])
-  return rankTrocrCandidates(rawCandidates, line, language, wordMembership).map(({ rawText, text, score, visualRank, baseScore }) => ({
+  return rankTrocrCandidates(rawCandidates, line, language, wordMembership).map(({ rawText, text, score, visualRank, baseScore, repairDisposition }) => ({
     rawText,
     text,
     score,
     visualRank,
     baseScore,
+    repairDisposition,
   }))
 }
 

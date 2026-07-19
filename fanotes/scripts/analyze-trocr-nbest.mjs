@@ -6,6 +6,12 @@ const source = process.argv[2]
 if (!source) throw new Error('Aufruf: node scripts/analyze-trocr-nbest.mjs BENCHMARK.json [de|en] [--summary-only]')
 const language = process.argv.slice(3).find((argument) => argument === 'de' || argument === 'en') === 'de' ? 'de' : 'en'
 const summaryOnly = process.argv.includes('--summary-only')
+const detailPenaltyArgument = process.argv.find((argument) => argument.startsWith('--detail-penalty='))
+const detailPenalty = detailPenaltyArgument
+  ? Number(detailPenaltyArgument.slice('--detail-penalty='.length))
+  : null
+if (detailPenaltyArgument && !Number.isFinite(detailPenalty)) throw new Error('Ungültige Detail-Strafe.')
+if (summaryOnly && detailPenalty !== null) throw new Error('--summary-only und --detail-penalty sind nicht kombinierbar.')
 const benchmark = JSON.parse(fs.readFileSync(path.resolve(source), 'utf8'))
 if (!Array.isArray(benchmark.predictions)) throw new Error('Der Benchmark enthält keine N-Best-Vorhersagen.')
 
@@ -35,6 +41,7 @@ const server = await createServer({
 try {
   const {
     rankTrocrCandidateTextsForTests,
+    trocrSafeWordRepairBonusForTests,
     trocrVisualRankPenaltyForTests,
   } = await server.ssrLoadModule('/src/lib/neuralTextRecognition.ts')
   const {
@@ -62,8 +69,17 @@ try {
   const aggressiveContextChanges = []
   const aggressiveFinalContextChanges = []
   const rawFinalContextChanges = []
+  const detailPenaltyChanges = []
   const rankPenalties = [0.1, 0.2, 0.3, 0.4, 0.5, 0.65, 0.8, 1, 1.25, 1.5, 2, 3]
+  const safeRepairBonuses = [0, 1, 2, 2.5, 3, 3.5, 4]
   const penaltyMetrics = new Map(rankPenalties.map((penalty) => [penalty, {
+    edits: 0,
+    exact: 0,
+    changed: 0,
+    improved: 0,
+    worsened: 0,
+  }]))
+  const safeRepairMetrics = new Map(safeRepairBonuses.map((bonus) => [bonus, {
     edits: 0,
     exact: 0,
     changed: 0,
@@ -117,6 +133,33 @@ try {
         (first.scoreWithoutVisualPenalty - Math.max(0, first.visualRank) * penalty)
       ))[0]?.rawText ?? top
       const metrics = penaltyMetrics.get(penalty)
+      const candidateDistance = distance(truth, candidate)
+      metrics.edits += candidateDistance
+      metrics.exact += Number(candidate === truth)
+      metrics.changed += Number(candidate !== top)
+      metrics.improved += Number(candidateDistance < topDistance)
+      metrics.worsened += Number(candidateDistance > topDistance)
+      if (
+        detailPenalty !== null &&
+        Math.abs(penalty - detailPenalty) < 1e-9 &&
+        candidate !== top
+      ) detailPenaltyChanges.push({
+        delta: topDistance - candidateDistance,
+        truth,
+        top,
+        candidate,
+      })
+    })
+    safeRepairBonuses.forEach((bonus) => {
+      const candidate = [...ranked].sort((first, second) => {
+        const adjustedScore = (entry) => entry.score + (
+          entry.repairDisposition === 'safe'
+            ? bonus - trocrSafeWordRepairBonusForTests
+            : 0
+        )
+        return adjustedScore(second) - adjustedScore(first)
+      })[0]?.rawText ?? top
+      const metrics = safeRepairMetrics.get(bonus)
       const candidateDistance = distance(truth, candidate)
       metrics.edits += candidateDistance
       metrics.exact += Number(candidate === truth)
@@ -193,6 +236,14 @@ try {
       improved: penaltyMetrics.get(penalty).improved,
       worsened: penaltyMetrics.get(penalty).worsened,
     })),
+    safeRepairBonusSweep: safeRepairBonuses.map((bonus) => ({
+      bonus,
+      cer: safeRepairMetrics.get(bonus).edits / Math.max(1, characters),
+      exactRate: safeRepairMetrics.get(bonus).exact / Math.max(1, lines),
+      changed: safeRepairMetrics.get(bonus).changed,
+      improved: safeRepairMetrics.get(bonus).improved,
+      worsened: safeRepairMetrics.get(bonus).worsened,
+    })),
   }, null, 2))
   if (!summaryOnly) {
     changed
@@ -223,6 +274,9 @@ try {
       .sort((first, second) => first.delta - second.delta)
       .slice(0, 16)
       .forEach((entry) => console.log(`raw-context ${entry.delta} ${JSON.stringify(entry)}`))
+    detailPenaltyChanges
+      .sort((first, second) => second.delta - first.delta)
+      .forEach((entry) => console.log(`penalty-${detailPenalty} ${entry.delta >= 0 ? '+' : ''}${entry.delta} ${JSON.stringify(entry)}`))
   }
 } finally {
   await server.close()
