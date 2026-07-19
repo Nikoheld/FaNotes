@@ -12,6 +12,7 @@ try {
   const {
     applyTextReranking,
     calibratePersonalBaseEvidence,
+    groupRecognitionLines,
     recognizedLatex,
     recognizedSentence,
     suggestMathLayoutAssignments,
@@ -57,6 +58,32 @@ try {
   } = await server.ssrLoadModule('/src/lib/recognitionModeSelection.ts')
   const { BASE_CATALOG } = await server.ssrLoadModule('/../src/data/catalog.ts')
   const labelByChar = new Map(BASE_CATALOG.map((label) => [label.char, label]))
+
+  const horizontalStroke = (x1, x2, y) => ({
+    baseWidth: 3,
+    color: '#111827',
+    pressureEnabled: true,
+    points: [
+      { x: x1, y, t: 0, pressure: 0.5, pointerType: 'pen' },
+      { x: x2, y, t: 1, pressure: 0.5, pointerType: 'pen' },
+    ],
+  })
+  assert.equal(
+    groupRecognitionLines([
+      horizontalStroke(0.34, 0.48, 0.33),
+      horizontalStroke(0.35, 0.47, 0.40),
+    ]).length,
+    1,
+    'Vertikal getrennte Striche eines isolierten mathematischen Operators müssen in derselben Erkennungszeile bleiben.',
+  )
+  assert.equal(
+    groupRecognitionLines([
+      horizontalStroke(0.12, 0.37, 0.17),
+      horizontalStroke(0.12, 0.37, 0.58),
+    ]).length,
+    2,
+    'Weit getrennte normale Schreibzeilen dürfen trotz gleicher x-Position nicht zu einem Operator verschmelzen.',
+  )
 
   const uncertainNeuralWord = {
     text: 'münt',

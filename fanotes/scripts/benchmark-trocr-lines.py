@@ -224,6 +224,63 @@ def selected(rows: list[Row], limit: int) -> list[Row]:
     return [rows[index] for index in indexes.tolist()]
 
 
+def token_substitution_candidates(
+    processor: TrOCRProcessor,
+    sequence: torch.Tensor,
+    generation_scores: tuple[torch.Tensor, ...],
+    batch_index: int,
+    maximum_candidates: int,
+    special_token_ids: set[int],
+) -> tuple[tuple[str, ...], tuple[float, ...]]:
+    """Builds deterministic local alternatives from logits already computed
+    by greedy decoding. The suffix is deliberately not regenerated here: this
+    audit first measures whether one visible runner-up token contains useful
+    signal before the browser runtime pays for a real branched continuation.
+    Reference text is never accepted by this function."""
+    base = normalize_text(processor.batch_decode(
+        sequence.unsqueeze(0),
+        skip_special_tokens=True,
+    )[0])
+    if maximum_candidates <= 0 or not generation_scores:
+        return (base,), (0.0,)
+    generated_start = int(sequence.shape[-1]) - len(generation_scores)
+    proposals: dict[str, float] = {}
+    for step, step_scores in enumerate(generation_scores):
+        position = generated_start + step
+        if position < 0 or position >= int(sequence.shape[-1]):
+            continue
+        chosen_id = int(sequence[position].item())
+        if chosen_id in special_token_ids:
+            continue
+        logits = step_scores[batch_index]
+        chosen_score = float(logits[chosen_id].item())
+        top_values, top_ids = torch.topk(logits, k=min(4, int(logits.shape[-1])))
+        for raw_score, raw_id in zip(top_values.tolist(), top_ids.tolist()):
+            alternative_id = int(raw_id)
+            if alternative_id == chosen_id or alternative_id in special_token_ids:
+                continue
+            alternative = sequence.clone()
+            alternative[position] = alternative_id
+            decoded = normalize_text(processor.batch_decode(
+                alternative.unsqueeze(0),
+                skip_special_tokens=True,
+            )[0])
+            if not decoded or decoded == base:
+                continue
+            # One SentencePiece token may cover several letters, but it must
+            # remain a local reading rather than rewrite the complete line.
+            maximum_edits = max(4, min(12, round(max(1, len(base)) * 0.14)))
+            if (
+                edit_distance(base, decoded) > maximum_edits
+                or abs(len(base.split()) - len(decoded.split())) > 1
+            ):
+                continue
+            margin = max(0.0, chosen_score - float(raw_score))
+            proposals[decoded] = min(proposals.get(decoded, float("inf")), margin)
+    ordered = sorted(proposals.items(), key=lambda entry: (entry[1], entry[0]))[:maximum_candidates]
+    return (base, *(text for text, _ in ordered)), (0.0, *(-margin for _, margin in ordered))
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", required=True)
@@ -246,9 +303,14 @@ def main() -> None:
     parser.add_argument("--json-output", type=Path)
     parser.add_argument("--include-predictions", action="store_true")
     parser.add_argument("--include-sequence-scores", action="store_true")
+    parser.add_argument("--token-alternatives", type=int, default=0)
     args = parser.parse_args()
     if args.num_return_sequences < 1 or args.num_return_sequences > args.num_beams:
         parser.error("--num-return-sequences must be between 1 and --num-beams")
+    if args.token_alternatives < 0 or args.token_alternatives > 8:
+        parser.error("--token-alternatives must be between 0 and 8")
+    if args.token_alternatives and (args.num_beams != 1 or args.num_return_sequences != 1):
+        parser.error("--token-alternatives requires greedy --num-beams 1 --num-return-sequences 1")
     if args.image_directory and not args.image_directory.is_dir():
         parser.error("--image-directory must point to an existing directory")
 
@@ -300,6 +362,16 @@ def main() -> None:
     failures: list[Failure] = []
     prediction_records: list[dict[str, object]] = []
     wall_started = time.perf_counter()
+    special_token_ids = {
+        int(token_id)
+        for token_id in [
+            processor.tokenizer.bos_token_id,
+            processor.tokenizer.eos_token_id,
+            processor.tokenizer.pad_token_id,
+            processor.tokenizer.unk_token_id,
+        ]
+        if token_id is not None
+    }
     for start in range(0, len(rows), args.batch_size):
         batch = rows[start:start + args.batch_size]
         images = []
@@ -318,18 +390,20 @@ def main() -> None:
             enabled=device.type == "cuda" and args.runtime == "pytorch",
         ) if device.type == "cuda" else contextlib.nullcontext()
         with torch.inference_mode(), autocast:
+            needs_generation_scores = args.include_sequence_scores or args.token_alternatives > 0
             generation = model.generate(
                 pixel_values,
                 max_new_tokens=args.maximum_target_length,
                 num_beams=args.num_beams,
                 num_return_sequences=args.num_return_sequences,
-                return_dict_in_generate=args.include_sequence_scores,
-                output_scores=args.include_sequence_scores,
+                return_dict_in_generate=needs_generation_scores,
+                output_scores=needs_generation_scores,
             )
-        generated = generation.sequences if args.include_sequence_scores else generation
+        generated = generation.sequences if needs_generation_scores else generation
+        sequence_scores = getattr(generation, "sequences_scores", None) if needs_generation_scores else None
         raw_sequence_scores = (
-            generation.sequences_scores.detach().float().cpu().tolist()
-            if args.include_sequence_scores and generation.sequences_scores is not None
+            sequence_scores.detach().float().cpu().tolist()
+            if args.include_sequence_scores and sequence_scores is not None
             else [0.0] * len(generated)
         )
         if device.type == "cuda":
@@ -341,14 +415,26 @@ def main() -> None:
             for value in processor.batch_decode(generated, skip_special_tokens=True)
         ]
         candidate_groups: list[tuple[tuple[str, ...], tuple[float, ...]]] = []
-        for index in range(len(batch)):
-            start_index = index * args.num_return_sequences
-            end_index = (index + 1) * args.num_return_sequences
-            unique: dict[str, float] = {}
-            for candidate, score in zip(decoded[start_index:end_index], raw_sequence_scores[start_index:end_index]):
-                if candidate not in unique:
-                    unique[candidate] = float(score)
-            candidate_groups.append((tuple(unique), tuple(unique.values())))
+        if args.token_alternatives:
+            generation_scores = tuple(generation.scores)
+            for index in range(len(batch)):
+                candidate_groups.append(token_substitution_candidates(
+                    processor,
+                    generated[index],
+                    generation_scores,
+                    index,
+                    args.token_alternatives,
+                    special_token_ids,
+                ))
+        else:
+            for index in range(len(batch)):
+                start_index = index * args.num_return_sequences
+                end_index = (index + 1) * args.num_return_sequences
+                unique: dict[str, float] = {}
+                for candidate, score in zip(decoded[start_index:end_index], raw_sequence_scores[start_index:end_index]):
+                    if candidate not in unique:
+                        unique[candidate] = float(score)
+                candidate_groups.append((tuple(unique), tuple(unique.values())))
         for row, (candidates, candidate_scores) in zip(batch, candidate_groups):
             prediction = candidates[0] if candidates else ""
             character_edits = edit_distance(row.text, prediction)
@@ -390,7 +476,7 @@ def main() -> None:
                 }
                 if row.group_id:
                     prediction_record["groupId"] = row.group_id
-                if args.include_sequence_scores:
+                if args.include_sequence_scores or args.token_alternatives:
                     prediction_record["candidateScores"] = list(candidate_scores)
                 prediction_records.append(prediction_record)
         if start + len(batch) == len(rows) or (start + len(batch)) % 100 == 0:
@@ -408,7 +494,8 @@ def main() -> None:
                 else "validation" if args.dataset and "validation" in args.dataset.stem.lower()
                 else "train" if args.dataset and "train" in args.dataset.stem.lower()
                 else args.scads_split if args.scads_root
-                else "test"
+                else "test" if args.image_directory
+                else "unspecified"
             ),
             "writerDisjoint": bool(args.scads_root),
             "grouping": (
@@ -424,6 +511,7 @@ def main() -> None:
         },
         "numBeams": args.num_beams,
         "numReturnSequences": args.num_return_sequences,
+        "tokenAlternatives": args.token_alternatives,
         "sampleCount": len(rows),
         **metrics,
         "cer": metrics["characterEdits"] / max(1, metrics["characters"]),
@@ -445,7 +533,7 @@ def main() -> None:
     print(json.dumps({
             key: round(value * 100, 2) if key in {"cer", "foldedCer", "wer", "exactRate", "foldedExactRate", "germanSpecialCharacterErrorRate", "oracleCer", "oracleWer", "oracleExactRate"} else value
         for key, value in result.items()
-        if key not in {"latencyMilliseconds"}
+        if key not in {"latencyMilliseconds", "predictions"}
     }, indent=2))
     for failure in sorted(failures, key=lambda entry: entry.normalized_distance, reverse=True)[:args.worst]:
         print(f"{failure.normalized_distance * 100:6.1f}% | {failure.truth!r} -> {failure.prediction!r}")

@@ -688,11 +688,12 @@ const renderLineImage = (
 ): RenderedLineImage => {
   const contentWidth = Math.max(1, line.maxX - line.minX)
   const contentHeight = Math.max(1, line.maxY - line.minY)
-  // TrOCR was trained on complete line crops, which retain substantially more
-  // ascender/descender whitespace than a tight canvas bounding box. The 0.40
-  // default reduced independent recomposed-UJI CER from 22% to 15% across 12
-  // unseen writers while preserving the genuine IAM-OnDB line prediction.
-  const marginY = clamp(contentHeight * clamp(options.marginYRatio ?? 0.40, 0.04, 0.6), 4, 36)
+  // TrOCR was trained on complete line crops, which retain ascender/descender
+  // whitespace around the ink. A writer-disjoint UJI sweep found 0.34 to be
+  // the robust single-view crop: 26 rather than 34 character edits across 12
+  // unseen writers, with the genuine IAM-OnDB line unchanged. Wider crops
+  // shrink short words too much; tighter crops lose context for other writers.
+  const marginY = clamp(contentHeight * clamp(options.marginYRatio ?? 0.34, 0.04, 0.6), 4, 36)
   const marginX = clamp(contentHeight * clamp(options.marginXRatio ?? 0.22, 0.04, 0.8), 5, 48)
   const inkScale = clamp(options.inkScale ?? 1, 0.55, 1.8)
   const imageWidth = contentWidth + marginX * 2
