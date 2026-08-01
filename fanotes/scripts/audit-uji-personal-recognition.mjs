@@ -24,6 +24,10 @@ const requestedHoldoutWriterCount = Number(process.env.FANOTES_UJI_HOLDOUT_WRITE
 const holdoutWriterCount = Number.isFinite(requestedHoldoutWriterCount)
   ? Math.max(1, Math.min(12, Math.round(requestedHoldoutWriterCount)))
   : 1
+const requestedChromiumHeap = Number(process.env.FANOTES_UJI_CHROMIUM_HEAP_MB ?? 768)
+const chromiumHeap = Number.isFinite(requestedChromiumHeap)
+  ? Math.max(384, Math.min(1_536, Math.round(requestedChromiumHeap)))
+  : 768
 
 const downloadDataset = async () => {
   const local = process.env.FANOTES_UJI_DATASET?.trim()
@@ -97,7 +101,7 @@ try {
   fs.writeFileSync(path.join(output, 'index.html'), '<!doctype html><html><body><script type="module" src="./audit.js"></script></body></html>')
   const chromium = spawn('chromium', [
     '--headless=new', '--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage',
-    '--js-flags=--max-old-space-size=1536',
+    `--js-flags=--max-old-space-size=${chromiumHeap}`,
     '--allow-file-access-from-files', `--user-data-dir=${profile}`, '--virtual-time-budget=90000',
     '--dump-dom', pathToFileURL(path.join(output, 'index.html')).href,
   ], { stdio: ['ignore', 'pipe', 'pipe'] })
