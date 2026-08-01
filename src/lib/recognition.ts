@@ -7384,8 +7384,36 @@ export const recognizeAutomaticExpression = (
   const hasBalancedNumericOperator = (
     balancedMathOperators.length > 0 && mathDigits > 0 && !dominantProseText
   )
-  const hasDecisiveMathStructure = hasHardMathStructure || hasBalancedNumericOperator
   const strongProseText = strongSentenceText || dominantProseText
+  const symbolicVariableOperators = new Set([
+    'operator_plus',
+    'operator_minus',
+    'operator_multiply',
+    'operator_divide',
+  ])
+  // A short expression such as `a + c` has no digits or relation sign, so it
+  // used to lose the final tie-break to a noisy text path (`al c`) whenever
+  // the two visual scores were close. Require the operator to be balanced by
+  // two visible letter operands and suppress the rule for a strong prose
+  // sentence; this keeps words such as “one plus two” in text mode while
+  // treating an actual variable expression as mathematics.
+  const hasSymbolicVariableStructure = (
+    balancedMathOperators.some((token) => symbolicVariableOperators.has(token.labelId)) &&
+    visibleMath.length >= 3 &&
+    visibleMath.filter((token) => (
+      (token.labelId.startsWith('latin_') ||
+        token.labelId.startsWith('german_') ||
+        token.labelId.startsWith('greek_')) &&
+      !token.labelId.startsWith('digit_')
+    )).length >= 2 &&
+    !strongProseText &&
+    (textLetters <= 4 || knownTextWords.length === 0)
+  )
+  const hasDecisiveMathStructure = (
+    hasHardMathStructure ||
+    hasBalancedNumericOperator ||
+    hasSymbolicVariableStructure
+  )
   const unambiguousUppercaseT = (
     visibleMath.length === 1 &&
     visibleMath[0].strokes.length === 2 &&
@@ -7520,6 +7548,10 @@ export const recognizeAutomaticExpression = (
       ? Math.min(0.28, balancedMathOperators.length * 0.08)
       : Math.min(1.55, 0.82 + balancedMathOperators.length * 0.3)
     mathReasons.unshift('Operator zwischen Operanden')
+  }
+  if (hasSymbolicVariableStructure) {
+    mathScore += 1.25
+    mathReasons.unshift('symbolischer Operator zwischen Variablen')
   }
   if (visibleMath.length > 0 && visibleMath.every((token) => token.labelId.startsWith('digit_'))) {
     mathScore += 0.72
