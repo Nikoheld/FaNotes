@@ -7,12 +7,23 @@ import type { RecognitionResources } from './handwritingDb'
 import type { NeuralTextRecognitionResult } from './neuralTextRecognition'
 import { ENGLISH_COMMON_WORDS } from '../../../src/data/englishLanguage'
 import { GERMAN_COMMON_WORDS } from '../../../src/data/germanLanguage'
+import { normalizeGermanSharpS } from '../../../src/lib/orthography'
 import { isExtendedNeuralContextWord, wordDistance } from './neuralWordContext'
 import {
   fusePersonalizedTextRecognition,
   personalizedTextFusionSelectionScore,
   type PersonalizedTextRecognitionResult,
 } from './personalizedTextRecognition'
+
+const knownWordRatioForLine = (value: string, language: RecognitionLanguage) => {
+  const words = normalizeGermanSharpS(value)
+    .toLocaleLowerCase(language === 'de' ? 'de-CH' : 'en-US')
+    .match(language === 'de' ? /[a-zäöü]{2,}/giu : /[a-z]{2,}/giu) ?? []
+  if (!words.length) return 0
+  const lexicon = language === 'de' ? GERMAN_COMMON_WORDS : ENGLISH_COMMON_WORDS
+  return words.filter((word) => lexicon.has(word) || isExtendedNeuralContextWord(word, language)).length /
+    words.length
+}
 
 export type PersonalizedLineRecognition = {
   tokens: RecognitionToken[]
@@ -609,6 +620,22 @@ export const recognizePersonalizedTextLine = async (
   const selectedPersonalRatio = selected
     ? selected.fusion.personalizedCharacters / Math.max(1, selectedVisibleCharacters)
     : 0
+  // The fusion count intentionally includes conservative one-shot glyphs so
+  // that a newly trained writer can still influence uncertain text. For a
+  // fluent, high-confidence neural word that is a different safety question:
+  // five one-example substitutions must not look like a reliable personal
+  // sequence merely because every class has a weak historical match. Count
+  // only repeated or individually strong personal evidence for this guard.
+  const reliablePersonalRatioFor = (entry: typeof selected) => entry
+    ? entry.tokens.filter((token) => {
+        if (token.isLayout) return false
+        return (
+          (token.personalSupport ?? 0) >= 2 ||
+          (token.personalConfidence ?? 0) >= 60
+        )
+      }).length / Math.max(1, entry.tokens.filter((token) => !token.isLayout).length)
+    : 0
+  const selectedReliablePersonalRatio = reliablePersonalRatioFor(selected)
   // A high-confidence known line-model word is already a strong complete-word
   // observation. A competing segmentation may replace it only with a clear
   // majority of independently reliable personal glyphs; two trained-looking
@@ -619,7 +646,7 @@ export const recognizePersonalizedTextLine = async (
     && selected !== exactNeuralCandidate
     && textFusionNeural.confidence >= 80
     && (textFusionNeural.knownWordRatio ?? 0) >= 0.72
-    && selectedPersonalRatio < 0.72
+    && selectedReliablePersonalRatio < 0.72
   ) selected = exactNeuralCandidate
   let rasterDecision: PersonalizedLineRecognition['rasterDecision']
 
@@ -770,6 +797,15 @@ export const recognizePersonalizedTextLine = async (
         && rasterKnownWord(selected.fusion.text.trim())
         && foldedRasterText !== selectedFoldedText
       )
+      const trustedNeuralWordChange = Boolean(
+        rawRasterPrior &&
+        neural.confidence >= 80 &&
+        (neural.knownWordRatio ?? 0) >= 0.72 &&
+        rasterKnownWord(rawRasterPrior) &&
+        foldedRasterText !== rawRasterPrior
+          .toLocaleLowerCase(rasterLocale)
+          .replace(/[^\p{L}]/gu, ''),
+      )
       const safeRasterDecision = Boolean(
         best
         && /^\p{L}{2,24}$/u.test(rasterText)
@@ -799,6 +835,18 @@ export const recognizePersonalizedTextLine = async (
         // stronger stroke sequence).
         && visualSupportRatio >= (strokeRasterKnownConsensus ? 0.4 : topBeam?.known ? 0.55 : 0.6)
         && (priorLetters || blindPersonalDecision || blindExactBandKnownDecision)
+        // A fluent, high-confidence known line-model word is already an
+        // independent complete-word observation. A raster neighbour may
+        // replace it only when the stroke classifier and personal candidate
+        // independently agree; otherwise weak one-shot templates can turn
+        // `sicher` into another plausible-looking word such as `kicker`.
+        && (
+          !trustedNeuralWordChange ||
+          rasterText.toLocaleLowerCase(rasterLocale) === rawRasterPrior
+            .toLocaleLowerCase(rasterLocale)
+            .replace(/[^\p{L}]/gu, '') ||
+          strokeRasterKnownConsensus
+        )
         // A complete known word emitted mostly by trained glyphs is stronger
         // than a different dictionary projection of the same raster. This
         // blocks fluent visual neighbours such as `Brunft` from replacing a
@@ -945,6 +993,85 @@ export const recognizePersonalizedTextLine = async (
       // The existing stroke/line fusion remains fully usable if an imported
       // image is corrupt or the browser cannot allocate a temporary canvas.
       console.warn('Persönliche Raster-Sequenz wurde übersprungen.', error)
+    }
+  }
+  const neuralLineTexts = textFusionNeural.text.trim().split(/\r?\n/u)
+  const selectedLineTexts = selected.fusion.text.trim().split(/\r?\n/u)
+  const selectedLineTokens: RecognitionToken[][] = []
+  selected.tokens.filter((token) => !token.isLayout).forEach((token) => {
+    if (!selectedLineTokens.length || token.lineBreakBefore) selectedLineTokens.push([])
+    selectedLineTokens.at(-1)!.push(token)
+  })
+  const trustedNeuralLineIndexes = neuralLineTexts.length === selectedLineTexts.length
+    ? neuralLineTexts.flatMap((neuralLine, lineIndex) => {
+        const words = neuralLine.trim().split(/\s+/u).filter(Boolean)
+        const lineTokens = selectedLineTokens[lineIndex] ?? []
+        const reliableRatio = lineTokens.filter((token) => (
+          (token.personalSupport ?? 0) >= 2 ||
+          (token.personalConfidence ?? 0) >= 60
+        )).length / Math.max(1, lineTokens.length)
+        return (
+          words.length >= 2 &&
+          textFusionNeural.confidence >= 80 &&
+          knownWordRatioForLine(neuralLine, language) >= 0.72 &&
+          reliableRatio < 0.72
+        ) ? [lineIndex] : []
+      })
+    : []
+  if (trustedNeuralLineIndexes.length) {
+    const rebuiltLines = [...selectedLineTexts]
+    let replacedLine = false
+    trustedNeuralLineIndexes.forEach((lineIndex) => {
+      const neuralLine = neuralLineTexts[lineIndex]
+      const selectedLine = rebuiltLines[lineIndex]
+      const neuralCompact = neuralLine.replace(/\s+/gu, '')
+      const selectedCompact = selectedLine.replace(/\s+/gu, '')
+      const compactDistance = wordDistance(
+        selectedCompact.toLocaleLowerCase(rasterLocale),
+        neuralCompact.toLocaleLowerCase(rasterLocale),
+      )
+      if (selectedCompact === neuralCompact) {
+        // Keep any reliable personal letter choice, but restore the complete
+        // neural word boundaries when alignment attached a space to a deleted
+        // character. This fixes `das ergebnis passt` becoming one token while
+        // leaving a genuine personal spelling correction untouched.
+        let cursor = 0
+        const spaced = neuralLine.trim().split(/\s+/u).map((word) => {
+          const length = Array.from(word).length
+          const value = selectedCompact.slice(cursor, cursor + length)
+          cursor += length
+          return value
+        }).join(' ')
+        if (cursor === Array.from(selectedCompact).length) {
+          rebuiltLines[lineIndex] = spaced
+          replacedLine = true
+        }
+      } else if (compactDistance >= 1) {
+        // A high-confidence, fluent neural line should not be replaced by a
+        // weak personal projection that changes even one complete word. The
+        // strong repeated-personal branch above remains eligible because this
+        // guard measures repeated/individually strong evidence only.
+        rebuiltLines[lineIndex] = neuralLine
+        replacedLine = true
+      }
+    })
+    if (replacedLine) {
+      const rebuiltText = rebuiltLines.join('\n')
+      const visibleNeuralCharacters = Array.from(textFusionNeural.text)
+        .filter((character) => !/\s/u.test(character)).length
+      const visibleSelectedCharacters = Array.from(rebuiltText)
+        .filter((character) => !/\s/u.test(character)).length
+      selected = {
+        ...selected,
+        fusion: {
+          ...selected.fusion,
+          text: rebuiltText,
+          source: rebuiltText === textFusionNeural.text ? 'neural' : 'hybrid',
+          neuralCharacters: Math.max(selected.fusion.neuralCharacters, visibleNeuralCharacters),
+          personalizedCharacters: Math.min(selected.fusion.personalizedCharacters, visibleSelectedCharacters),
+          unsupportedChanges: 0,
+        },
+      }
     }
   }
   return {
