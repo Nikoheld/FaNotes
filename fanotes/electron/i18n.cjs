@@ -48,10 +48,16 @@ function resolveLanguage(preference = 'system', systemLocale = '') {
 
 function localizeText(value, language) {
   if (language !== 'en' || typeof value !== 'string' || !value.trim()) return value
-  const translations = catalog()
   const leading = value.match(/^\s*/u)?.[0] || ''
   const trailing = value.match(/\s*$/u)?.[0] || ''
   const source = value.trim()
+  // These names are used by the vault IPC handlers on the note/folder creation
+  // hot path. Resolve them before touching the optional catalog so a damaged
+  // package or an incomplete delta can never turn a basic file operation into
+  // a MODULE_NOT_FOUND error.
+  const coreTranslation = CORE_ENGLISH_CATALOG[source]
+  if (coreTranslation !== undefined) return `${leading}${coreTranslation}${trailing}`
+  const translations = catalog()
   if (translations[source] !== undefined) return `${leading}${translations[source]}${trailing}`
   let result = source
   for (const [german, english] of replacements) {
