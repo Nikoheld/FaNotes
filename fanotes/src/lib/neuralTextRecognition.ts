@@ -692,7 +692,8 @@ const renderLineImage = (
   // whitespace around the ink. A writer-disjoint UJI sweep found 0.34 to be
   // the robust single-view crop: 26 rather than 34 character edits across 12
   // unseen writers, with the genuine IAM-OnDB line unchanged. Wider crops
-  // shrink short words too much; tighter crops lose context for other writers.
+  // shrink short words too much; uncertain short words receive independent
+  // wider/tighter views below.
   const marginY = clamp(contentHeight * clamp(options.marginYRatio ?? 0.34, 0.04, 0.6), 4, 36)
   const marginX = clamp(contentHeight * clamp(options.marginXRatio ?? 0.22, 0.04, 0.8), 5, 48)
   const inkScale = clamp(options.inkScale ?? 1, 0.55, 1.8)
@@ -1201,8 +1202,14 @@ const decodeCtc = (
 const hasTerminalPunctuationInk = (line: StrokeLine) => {
   const height = Math.max(1, line.maxY - line.minY)
   const rightEdge = line.maxX - height * 0.62
+  // A detached crossbar or t-top can be tiny and touch the right edge, but it
+  // is not terminal punctuation. Dots/commas live in the lower baseline band;
+  // requiring that band removes the recurring `test.` false positive without
+  // discarding genuine sentence punctuation.
+  const baselineBand = line.minY + height * 0.58
   return line.entries.some((entry) => (
     entry.maxX >= rightEdge
+    && entry.centerY >= baselineBand
     && entry.width <= height * 0.42
     && entry.height <= height * 0.48
   ))
@@ -1760,6 +1767,27 @@ const trocrLineAssessment = (
     confidence,
   }
 }
+
+/** Chooses an alternative raster view only when it has independent structural
+ * or lexical evidence. A valid but visually different word is never replaced
+ * merely because a second crop exists. */
+const shouldPreferCtcView = (
+  current: Omit<NeuralTextLine, 'bbox'>,
+  currentAssessment: ReturnType<typeof trocrLineAssessment> | null,
+  alternate: Omit<NeuralTextLine, 'bbox'>,
+  alternateAssessment: ReturnType<typeof trocrLineAssessment> | null,
+) => Boolean(
+  alternateAssessment &&
+  currentAssessment &&
+  (
+    (currentAssessment.suspicious && !alternateAssessment.suspicious) ||
+    alternateAssessment.score > currentAssessment.score + 0.08 ||
+    (
+      alternateAssessment.score >= currentAssessment.score - 0.04 &&
+      alternate.confidence >= current.confidence + 2
+    )
+  ),
+)
 
 type TrocrWordSurface = { value: string; start: number; end: number }
 
@@ -2408,15 +2436,68 @@ const recognizeSeparatedWordLine = async (
     const image = renderLineImage(physicalWord, sourceWidth, sourceHeight)
     let selected: Omit<NeuralTextLine, 'bbox'> | null = null
     let selectedAssessment: ReturnType<typeof trocrLineAssessment> | null = null
+    let selectedByCtc = false
     try {
       const ctc = await recognizeCtcLine(image, language, wordMembership)
       if (ctc.text) {
         selected = ctc
         selectedAssessment = trocrLineAssessment(ctc.text, physicalWord, language, wordMembership)
+        selectedByCtc = true
         usedCtc = true
       }
     } catch {
       // TrOCR below can still recognize this physical word.
+    }
+    if (
+      selectedByCtc &&
+      selected &&
+      selectedAssessment &&
+      (
+        selected.confidence < 80 ||
+        (selected.confidence < 90 && Array.from(selected.text).length <= 3) ||
+        (selected.confidence < 90 && selectedAssessment.lexicallyUnsupported)
+      ) &&
+      /^[\p{L}]{3,14}$/u.test(selected.text)
+    ) {
+      const primaryText = selected.text
+      try {
+        // Physical word splitting bypasses the complete-line uncertainty
+        // path, so it needs the same independent crop ensemble explicitly.
+        // The wider view recovers compressed short words; a middle view is
+        // only evaluated when the first two views disagree.
+        const widerImage = renderLineImage(physicalWord, sourceWidth, sourceHeight, {
+          marginYRatio: 0.40,
+          inkScale: 0.92,
+        })
+        const wider = await recognizeCtcLine(widerImage, language, wordMembership)
+        const widerAssessment = wider.text
+          ? trocrLineAssessment(wider.text, physicalWord, language, wordMembership)
+          : null
+        if (wider.text && shouldPreferCtcView(selected, selectedAssessment, wider, widerAssessment)) {
+          selected = wider
+          selectedAssessment = widerAssessment
+        }
+        if (
+          wider.text &&
+          wider.text.toLocaleLowerCase(language) !== primaryText.toLocaleLowerCase(language) &&
+          selected.confidence < 78
+        ) {
+          const middleImage = renderLineImage(physicalWord, sourceWidth, sourceHeight, {
+            marginYRatio: 0.32,
+            inkScale: 0.96,
+          })
+          const middle = await recognizeCtcLine(middleImage, language, wordMembership)
+          const middleAssessment = middle.text
+            ? trocrLineAssessment(middle.text, physicalWord, language, wordMembership)
+            : null
+          if (middle.text && shouldPreferCtcView(selected, selectedAssessment, middle, middleAssessment)) {
+            selected = middle
+            selectedAssessment = middleAssessment
+          }
+        }
+      } catch {
+        // The original CTC word remains available if an alternate view fails.
+      }
     }
     // A confident dictionary-backed CTC word needs no second inference. This
     // keeps clear multi-word lines faster than recognizing the complete line
@@ -2532,40 +2613,58 @@ export async function recognizeNeuralText(
           ? trocrLineAssessment(compact.text, line, language, wordMembership)
           : null
         const compactVisible = Array.from(compact.text).filter((character) => !/\s/u.test(character))
-        const uncertainSingleWord = (
+        const uncertainCtcLine = (
           compact.confidence < 80 &&
-          compactVisible.length >= 4 &&
-          compactVisible.length <= 14 &&
-          /^\p{L}+$/u.test(compact.text)
+          // A missed glyph often shortens the visible path to three letters
+          // (`test` → `ort`); those outputs must still receive a second view.
+          compactVisible.length >= 3 &&
+          compactVisible.length <= 28 &&
+          /^\p{L}+(?:\s+\p{L}+)?$/u.test(compact.text)
         )
-        if (uncertainSingleWord) {
+        if (uncertainCtcLine) {
+          const primaryCompactText = compact.text
           try {
-            // A slightly tighter crop changes the relative x-height and ink
-            // thickness seen by CTC. Running it only for a low-confidence
-            // single word recovers valid-word confusions such as
-            // rennen/lernen without doubling normal sentence work.
+            // A wider crop changes the relative x-height and ink thickness
+            // seen by CTC. Running it only for a low-confidence line recovers
+            // valid-word confusions such as rennen/lernen without doubling
+            // normal sentence work.
             const alternateImage = renderLineImage(line, sourceWidth, sourceHeight, {
-              marginYRatio: 0.32,
+              marginYRatio: 0.40,
               inkScale: 0.92,
             })
             const alternate = await recognizeCtcLine(alternateImage, language, wordMembership)
             const alternateAssessment = alternate.text
               ? trocrLineAssessment(alternate.text, line, language, wordMembership)
               : null
-            if (
-              alternateAssessment &&
-              compactAssessment &&
-              (
-                (compactAssessment.suspicious && !alternateAssessment.suspicious) ||
-                alternateAssessment.score > compactAssessment.score + 0.08 ||
-                (
-                  alternateAssessment.score >= compactAssessment.score - 0.04 &&
-                  alternate.confidence >= compact.confidence + 2
-                )
-              )
-            ) {
+            if (alternate.text && shouldPreferCtcView(compact, compactAssessment, alternate, alternateAssessment)) {
               compact = alternate
               compactAssessment = alternateAssessment
+            }
+
+            // A middle crop is deliberately reserved for a genuine
+            // disagreement between the two cheap views. In writer-disjoint
+            // data, 0.34 can preserve a descender that the tighter 0.32 view
+            // clips, while the 0.40 view is better for short connected words.
+            // This third inference is therefore an uncertainty tie-breaker,
+            // never a normal-line cost multiplier.
+            if (
+              alternate.text &&
+              primaryCompactText &&
+              alternate.text.toLocaleLowerCase(language) !== primaryCompactText.toLocaleLowerCase(language) &&
+              compact.confidence < 78
+            ) {
+              const middleImage = renderLineImage(line, sourceWidth, sourceHeight, {
+                marginYRatio: 0.32,
+                inkScale: 0.96,
+              })
+              const middle = await recognizeCtcLine(middleImage, language, wordMembership)
+              const middleAssessment = middle.text
+                ? trocrLineAssessment(middle.text, line, language, wordMembership)
+                : null
+              if (middle.text && shouldPreferCtcView(compact, compactAssessment, middle, middleAssessment)) {
+                compact = middle
+                compactAssessment = middleAssessment
+              }
             }
           } catch {
             // The original compact result remains valid and already loaded.
@@ -2585,7 +2684,34 @@ export async function recognizeNeuralText(
       ? containsUnknownContextWord(selected.text, language, wordMembership)
       : false
     const isWebRuntime = window.fanotes.platform === 'web'
-    if (useContextModel && (isWebRuntime || !selected || primaryAssessment?.needsContext || containsUnknownWord)) {
+    const selectedVisualSurface = selected
+      ? fusionAlignmentSurface(selected.text, language)
+      : ''
+    const rawVisualSurface = selected
+      ? fusionAlignmentSurface(selected.rawText, language)
+      : ''
+    const hasRawVisualDisagreement = Boolean(
+      selectedVisualSurface &&
+      rawVisualSurface &&
+      selectedVisualSurface !== rawVisualSurface &&
+      wordDistance(selectedVisualSurface, rawVisualSurface) >= 1,
+    )
+    // A separated CTC line with known words and a strong visual score is
+    // already backed by the same crop ensemble used by the desktop path. Do
+    // not pay for a second full-line transformer pass in that case; reserve
+    // the context model for unknown/structurally suspicious text or genuinely
+    // low-confidence web output.
+    const needsContextModel = (
+      !selected ||
+      !primaryAssessment ||
+      primaryAssessment.needsContext ||
+      containsUnknownWord ||
+      hasRawVisualDisagreement ||
+      (!separated && Boolean(selected) && selected.confidence < 94) ||
+      Boolean(separated && separated.minimumWordConfidence < 92) ||
+      (isWebRuntime && selected.confidence < 78)
+    )
+    if (useContextModel && needsContextModel) {
       try {
         const trocrRecognition = await recognizeTrocrLineCandidates(image.pixels, image.width, image.height)
         let rankedContext = rankTrocrCandidates(
@@ -2602,7 +2728,7 @@ export async function recognizeNeuralText(
         const loadAlternateRanked = async () => {
           if (alternateRanked) return alternateRanked
           const alternateImage = renderLineImage(line, sourceWidth, sourceHeight, {
-            marginYRatio: 0.32,
+            marginYRatio: 0.40,
             inkScale: 0.92,
           })
           const alternateRecognition = await recognizeTrocrLineCandidates(
