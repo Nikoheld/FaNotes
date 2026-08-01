@@ -34,6 +34,7 @@ API_VERSION = "2022-11-28"
 CHUNK_SIZE = 8 * 1024 * 1024
 MAX_RETRIES = 5
 VERSION_PATTERN = re.compile(r"^(\d+)\.(\d+)\.(\d+)(?:-beta\.(\d+))?$")
+TARGET_COMMITISH_PATTERN = re.compile(r"^[A-Za-z0-9._/-]{1,200}$")
 COMMON_RELEASE_FILES = (
     "CHANGELOG.md",
     "README.md",
@@ -258,6 +259,9 @@ def main() -> int:
     permissions = repository.get("permissions") or {}
     if not permissions.get("push"):
         raise RuntimeError("The token does not have write access to Nikoheld/FaNotes.")
+    target_commitish = os.environ.get("FANOTES_RELEASE_TARGET_COMMITISH", "").strip() or repository["default_branch"]
+    if not TARGET_COMMITISH_PATTERN.fullmatch(target_commitish):
+        raise RuntimeError("FANOTES_RELEASE_TARGET_COMMITISH contains an unsafe ref name.")
     print(f"Authenticated as {user['login']}; repository write access confirmed.", flush=True)
 
     translations = json.loads(TRANSLATIONS.read_text(encoding="utf-8"))
@@ -306,7 +310,7 @@ def main() -> int:
                 f"/repos/{OWNER}/{REPOSITORY}/releases",
                 {
                     "tag_name": tag,
-                    "target_commitish": repository["default_branch"],
+                    "target_commitish": target_commitish,
                     "name": f"FaNotes {version}",
                     "body": body,
                     "draft": publish_atomically,
@@ -322,7 +326,7 @@ def main() -> int:
             keep_as_draft = publish_atomically and bool(release.get("draft"))
             patch: dict[str, Any] = {
                 "tag_name": tag,
-                "target_commitish": repository["default_branch"],
+                "target_commitish": target_commitish,
                 "name": f"FaNotes {version}",
                 "body": body,
                 "draft": keep_as_draft,
@@ -390,7 +394,7 @@ def main() -> int:
                 f"/repos/{OWNER}/{REPOSITORY}/releases/{release['id']}",
                 {
                     "tag_name": tag,
-                    "target_commitish": repository["default_branch"],
+                    "target_commitish": target_commitish,
                     "draft": False,
                     "prerelease": prerelease,
                     "make_latest": "false" if prerelease else ("true" if version == latest_stable_version else "false"),
