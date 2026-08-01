@@ -5483,8 +5483,12 @@ export const recognizeExpression = (
         // the same character. Personal samples use both the closest example
         // and a robust local consensus, so one mislabeled outlier cannot own
         // an entire class while a real recurring writing style remains strong.
-        const weights = personal.length ? [0.82, 0.13, 0.05] : [0.92, 0.08]
-        const selected = sorted.slice(0, weights.length)
+        // A nearest-neighbour-only vote overfits one writer's accidental stroke
+        // shape. A robust three-example consensus preserves real style variety
+        // while making a foreign writer less dependent on one misleading match.
+        const selectedCandidates = sortedCandidates.slice(0, personal.length ? 3 : 2)
+        const selected = selectedCandidates.map((candidate) => candidate.distance)
+        const weights = personal.length ? [0.42, 0.33, 0.25] : [0.92, 0.08]
         const weightTotal = weights.slice(0, selected.length).reduce((sum, weight) => sum + weight, 0)
         let aggregate = selected.reduce((sum, distance, index) => sum + distance * weights[index], 0) / weightTotal
         // Preserve an independent base-model measurement even after a class
