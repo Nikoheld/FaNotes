@@ -3788,7 +3788,11 @@ const estimateModelAccuracy = (entries: RecognitionModelEntry[], weights: Featur
     // Cross-session examples are preferred per class (not globally): a session
     // containing only some labels must never remove every valid candidate for
     // the other labels from the holdout evaluation.
-    const consensusWeights = [0.62, 0.25, 0.13]
+    // Keep the build-time holdout aligned with the production classifier's
+    // robust three-example consensus. Evaluating an older nearest-neighbour
+    // blend could publish adaptive channel weights that looked good during
+    // training but lost against the runtime aggregation on a new writer.
+    const consensusWeights = [0.42, 0.33, 0.25]
     const nearest = [...candidatesByLabel.entries()]
       .map(([labelId, labelCandidates]) => {
         const crossSession = labelCandidates.filter((candidate) => candidate.sessionId !== entry.sessionId)
