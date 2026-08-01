@@ -4571,6 +4571,16 @@ type TextGapAnalysis = {
   threshold: number
 }
 
+const textTokenInkBounds = (token: RecognitionToken) => {
+  const strokes = token.strokes.filter((stroke) => stroke.points.length > 0)
+  if (!strokes.length) return null
+  const bounds = strokes.map((stroke) => strokeBounds(stroke))
+  return {
+    minX: Math.min(...bounds.map((entry) => entry.minX)),
+    maxX: Math.max(...bounds.map((entry) => entry.maxX)),
+  }
+}
+
 const analyzeTextGaps = (
   lineTokens: RecognitionToken[],
   closingPunctuation: Set<string>,
@@ -4587,7 +4597,18 @@ const analyzeTextGaps = (
   const pairGaps = lineTokens.slice(1).map((token, index) => {
     const previous = lineTokens[index]
     if (closingPunctuation.has(token.char) || openingPunctuation.has(previous.char)) return 0
-    return Math.max(0, token.bbox[0] - (previous.bbox[0] + previous.bbox[2]))
+    const renderedGap = token.bbox[0] - (previous.bbox[0] + previous.bbox[2])
+    // Splitting a continuous stroke inserts an interpolated point at the
+    // boundary, so the two rendered boxes touch even when the original line
+    // contains a real gap between separately lifted words. Preserve that
+    // physical evidence when it is available; the max keeps the existing
+    // conservative rendered-box behaviour for accessories and punctuation.
+    const previousInk = textTokenInkBounds(previous)
+    const currentInk = textTokenInkBounds(token)
+    const physicalGap = previousInk && currentInk
+      ? currentInk.minX - previousInk.maxX
+      : 0
+    return Math.max(0, renderedGap, physicalGap)
   })
   const eligible = pairGaps.filter((gap) => gap > 0.0015).sort((first, second) => first - second)
   // With a mostly connected line there may be exactly one measurable gap:

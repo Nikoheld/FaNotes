@@ -1564,6 +1564,18 @@ try {
     'hallo mathe',
     'Wenn eine fast vollständig verbundene Zeile nur eine echte Wortlücke enthält, darf diese nicht als kompakter Buchstabenabstand die eigene Schwelle erhöhen.',
   )
+  const physicallySeparatedBodies = [...'hallomathe'].map((char, index) => {
+    const inkLeft = 0.1 + index * 0.025 + (index >= 5 ? 0.05 : 0)
+    return {
+      ...token(char, 97, [[char, 97]], index, [0.05 + index * 0.05, 0.22, 0.05, 0.1]),
+      strokes: [spacingStroke(inkLeft, inkLeft + 0.015, index * 2)],
+    }
+  })
+  assert.equal(
+    recognizedSentence(applyTextReranking(physicallySeparatedBodies, BASE_CATALOG, 'de')),
+    'hallo mathe',
+    'Eine echte Tintenlücke muss auch dann als Wortgrenze erhalten bleiben, wenn zwei künstlich geschnittene Tokenboxen direkt aneinanderliegen.',
+  )
   assert.equal(
     repairNeuralWordSpacing('Te st ist gu t', 'de'),
     'Test ist gut',
