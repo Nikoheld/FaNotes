@@ -1555,6 +1555,15 @@ try {
     'hallo test',
     'Ein lokaler Abstandssprung muss auch zwischen breiten Buchstaben als Wortgrenze erkannt werden.',
   )
+  const singleMeasuredWordGap = [...'hallomathe'].map((char, index) => {
+    const x = 0.05 + index * 0.05 + (index >= 5 ? 0.045 : 0)
+    return token(char, 97, [[char, 97]], index, [x, 0.22, 0.05, 0.1])
+  })
+  assert.equal(
+    recognizedSentence(applyTextReranking(singleMeasuredWordGap, BASE_CATALOG, 'de')),
+    'hallo mathe',
+    'Wenn eine fast vollständig verbundene Zeile nur eine echte Wortlücke enthält, darf diese nicht als kompakter Buchstabenabstand die eigene Schwelle erhöhen.',
+  )
   assert.equal(
     repairNeuralWordSpacing('Te st ist gu t', 'de'),
     'Test ist gut',

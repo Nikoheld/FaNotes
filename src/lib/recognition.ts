@@ -4590,13 +4590,24 @@ const analyzeTextGaps = (
     return Math.max(0, token.bbox[0] - (previous.bbox[0] + previous.bbox[2]))
   })
   const eligible = pairGaps.filter((gap) => gap > 0.0015).sort((first, second) => first - second)
-  const compactPopulation = eligible.slice(0, Math.max(1, Math.ceil(eligible.length * 0.58)))
+  // With a mostly connected line there may be exactly one measurable gap:
+  // the boundary between two words. Treating that lone gap as the compact
+  // intra-word baseline and then adding another margin made the threshold
+  // larger than the real word gap, so a sentence such as “hallo mathe” was
+  // returned as “hallomathe”. A compact baseline needs at least two samples;
+  // for one gap the scale-based width/x-height terms below are the safer
+  // reference and lexical refinement still removes marginal false spaces.
+  const compactPopulation = eligible.length >= 2
+    ? eligible.slice(0, Math.max(1, Math.ceil(eligible.length * 0.58)))
+    : []
   const compactGap = median(compactPopulation)
   let threshold = clamp(
     Math.max(
       typicalWidth * 0.62,
       xHeightAsWidth * 0.34,
-      compactGap + Math.max(0.0055, compactGap * 0.3),
+      compactPopulation.length
+        ? compactGap + Math.max(0.0055, compactGap * 0.3)
+        : 0,
     ),
     0.016,
     0.058,
