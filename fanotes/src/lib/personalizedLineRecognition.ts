@@ -1010,9 +1010,11 @@ export const recognizePersonalizedTextLine = async (
           (token.personalSupport ?? 0) >= 2 ||
           (token.personalConfidence ?? 0) >= 60
         )).length / Math.max(1, lineTokens.length)
+        const lineConfidence = textFusionNeural.lines[lineIndex]?.confidence
+          ?? textFusionNeural.confidence
         return (
           words.length >= 2 &&
-          textFusionNeural.confidence >= 80 &&
+          lineConfidence >= 80 &&
           knownWordRatioForLine(neuralLine, language) >= 0.72 &&
           reliableRatio < 0.72
         ) ? [lineIndex] : []
