@@ -31,8 +31,16 @@ const fallbackElectron = path.join(fallbackApplication, 'electron')
 fs.mkdirSync(fallbackElectron, { recursive: true, mode: 0o700 })
 fs.copyFileSync(path.join(root, 'electron', 'i18n.cjs'), path.join(fallbackElectron, 'i18n.cjs'))
 const fallbackI18n = require(path.join(fallbackElectron, 'i18n.cjs'))
-assert.equal(fallbackI18n.localizeText('Unbenannte Notiz', 'en'), 'Untitled note')
-assert.equal(fallbackI18n.localizeText('Neuer Ordner', 'en'), 'New folder')
+const fallbackWarnings = []
+const originalWarn = console.warn
+console.warn = (...args) => fallbackWarnings.push(args)
+try {
+  assert.equal(fallbackI18n.localizeText('Unbenannte Notiz', 'en'), 'Untitled note')
+  assert.equal(fallbackI18n.localizeText('Neuer Ordner', 'en'), 'New folder')
+} finally {
+  console.warn = originalWarn
+}
+assert.equal(fallbackWarnings.length, 0, 'Kernnamen dürfen den fehlenden Katalog nicht laden.')
 
 for (const directory of [home, configHome, runtime, vault, userData]) fs.mkdirSync(directory, { recursive: true, mode: 0o700 })
 const legacyInternalDirectory = path.join(vault, '.lernwerk')
