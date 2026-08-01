@@ -3215,6 +3215,23 @@ const meanVectorDistance = (first: Float32Array, second: Float32Array) => {
   return length ? distance / length : 0
 }
 
+// Endpoint signatures are always the fixed eight-value geometry vector above.
+// Keeping this comparison unrolled avoids a loop/length lookup for every
+// candidate in the personal nearest-neighbour model while retaining all
+// direction and span evidence used by the classifier.
+const endpointSignatureDistance = (first: Float32Array, second: Float32Array) => (
+  (
+    Math.abs(first[0] - second[0]) +
+    Math.abs(first[1] - second[1]) +
+    Math.abs(first[2] - second[2]) +
+    Math.abs(first[3] - second[3]) +
+    Math.abs(first[4] - second[4]) +
+    Math.abs(first[5] - second[5]) +
+    Math.abs(first[6] - second[6]) +
+    Math.abs(first[7] - second[7])
+  ) / 8
+)
+
 const projectionDistance = (first: FeatureVector, second: FeatureVector) => {
   let distance = 0
   for (let index = 0; index < FEATURE_SIZE; index += 1) {
@@ -3330,7 +3347,7 @@ const channelDistances = (
   projections: projectionDistance(first, second),
   shape: meanVectorDistance(first.shape, second.shape),
   directions: 1 - vectorCosineSimilarity(firstGeometry.directions, secondGeometry.directions),
-  endpoint: meanVectorDistance(firstGeometry.endpointSignature, secondGeometry.endpointSignature),
+  endpoint: endpointSignatureDistance(firstGeometry.endpointSignature, secondGeometry.endpointSignature),
   geometry: (
     Math.abs(firstGeometry.normalizedLength - secondGeometry.normalizedLength) * 0.35 +
     Math.abs(firstGeometry.closedness - secondGeometry.closedness) * 0.4 +
@@ -5497,19 +5514,37 @@ export const recognizeExpression = (
         })
       }
     }
+    // The prototype shortlist, classifier and generic fallback all compare
+    // the same rendered query against overlapping model entries. Cache that
+    // per-cluster distance once; this removes repeated raster/HOG/trajectory
+    // work while keeping the exact ranking and scores unchanged.
+    const featureDistanceCache = recognitionVariants.map(() => (
+      new WeakMap<RecognitionModelEntry, number>()
+    ))
+    const cachedFeatureDistance = (entry: RecognitionModelEntry, variantIndex: number) => {
+      const cache = featureDistanceCache[variantIndex]
+      const cached = cache?.get(entry)
+      if (cached !== undefined) return cached
+      const variant = recognitionVariants[variantIndex]
+      const distance = variant
+        ? featureDistance(
+            variant.feature,
+            entry,
+            variant.strokeCount,
+            variant.geometry,
+            model.weights,
+          )
+        : Number.POSITIVE_INFINITY
+      cache?.set(entry, distance)
+      return distance
+    }
     const personalPrototypeRanking = [...model.prototypeSets.entries()]
       .filter(([labelId]) => mode !== 'text' || isTextLabel(labelMap.get(labelId)))
       .map(([labelId, prototypes]) => ({
         labelId,
         distance: Math.min(...prototypes.flatMap((prototype) => (
-          recognitionVariants.map((variant, index) => (
-            featureDistance(
-              variant.feature,
-              prototype,
-              variant.strokeCount,
-              variant.geometry,
-              model.weights,
-            ) + (index === 0 ? 0 : 0.004)
+          recognitionVariants.map((_variant, index) => (
+            cachedFeatureDistance(prototype, index) + (index === 0 ? 0 : 0.004)
           ))
         ))),
       }))
@@ -5530,24 +5565,20 @@ export const recognizeExpression = (
       standard: boolean
       trust: number
       createdAt: number
+      sessionId: string
     }[]>()
     const classifierEntries = model.classifierEntries.length ? model.classifierEntries : model
     classifierEntries.forEach((entry) => {
       if (!entry.standard && !personalShortlist.has(entry.labelId)) return
       const distances = byLabel.get(entry.labelId) ?? []
       distances.push({
-        distance: Math.min(...recognitionVariants.map((variant, index) => (
-          featureDistance(
-            variant.feature,
-            entry,
-            variant.strokeCount,
-            variant.geometry,
-            model.weights,
-          ) + (index === 0 ? 0 : 0.004)
+        distance: Math.min(...recognitionVariants.map((_variant, index) => (
+          cachedFeatureDistance(entry, index) + (index === 0 ? 0 : 0.004)
         ))) + (entry.standard ? 0 : (1 - entry.trust) * 0.082),
         standard: entry.standard,
         trust: entry.trust,
         createdAt: entry.createdAt,
+        sessionId: entry.sessionId,
       })
       byLabel.set(entry.labelId, distances)
     })
@@ -5571,7 +5602,20 @@ export const recognizeExpression = (
         // A nearest-neighbour-only vote overfits one writer's accidental stroke
         // shape. A robust three-example consensus preserves real style variety
         // while making a foreign writer less dependent on one misleading match.
-        const selectedCandidates = sortedCandidates.slice(0, personal.length ? 3 : 2)
+        const selectedCandidates = personal.length
+          ? (() => {
+              const diverse: typeof sortedCandidates = []
+              sortedCandidates.forEach((candidate) => {
+                if (diverse.length >= 3 || diverse.some((selected) => selected.sessionId === candidate.sessionId)) return
+                diverse.push(candidate)
+              })
+              sortedCandidates.forEach((candidate) => {
+                if (diverse.length >= 3 || diverse.includes(candidate)) return
+                diverse.push(candidate)
+              })
+              return diverse.slice(0, 3)
+            })()
+          : sortedCandidates.slice(0, 2)
         const selected = selectedCandidates.map((candidate) => candidate.distance)
         const weights = personal.length ? [0.42, 0.33, 0.25] : [0.92, 0.08]
         const weightTotal = weights.slice(0, selected.length).reduce((sum, weight) => sum + weight, 0)
@@ -5620,14 +5664,8 @@ export const recognizeExpression = (
           // for every candidate segment in a connected word.
           const cachedPrototypeDistance = prototypeDistanceByLabel.get(labelId)
           const prototypeDistance = cachedPrototypeDistance ?? Math.min(...prototypes.flatMap((prototype) => (
-            recognitionVariants.map((variant, index) => (
-              featureDistance(
-                variant.feature,
-                prototype,
-                variant.strokeCount,
-                variant.geometry,
-                model.weights,
-              ) + (index === 0 ? 0 : 0.004)
+            recognitionVariants.map((_variant, index) => (
+              cachedFeatureDistance(prototype, index) + (index === 0 ? 0 : 0.004)
             ))
           )))
           aggregate = aggregate * 0.88 + prototypeDistance * 0.12
@@ -5680,14 +5718,8 @@ export const recognizeExpression = (
       model.genericSymbolEntries.forEach((entry) => {
         if (!labelMap.has(entry.labelId)) return
         const distances = genericByLabel.get(entry.labelId) ?? []
-        distances.push(Math.min(...recognitionVariants.map((variant, index) => (
-          featureDistance(
-            variant.feature,
-            entry,
-            variant.strokeCount,
-            variant.geometry,
-            model.weights,
-          ) + (index === 0 ? 0 : 0.004)
+        distances.push(Math.min(...recognitionVariants.map((_variant, index) => (
+          cachedFeatureDistance(entry, index) + (index === 0 ? 0 : 0.004)
         ))))
         genericByLabel.set(entry.labelId, distances)
       })
