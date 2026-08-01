@@ -3444,7 +3444,14 @@ const buildClassPrototypeSets = (
     if (!group.length) return
     const trusted = group.filter((entry) => entry.trust >= 0.3)
     const usable = trusted.length ? trusted : group
-    const maximum = Math.min(5, Math.max(1, Math.ceil(Math.sqrt(usable.length / 3))))
+    // A class with eight independently written examples previously exposed
+    // only two prototypes to the runtime shortlist. That is too narrow for
+    // cross-writer recognition: one prototype can describe a looped lowercase
+    // form while another writer's angular uppercase form is pushed out before
+    // the full classifier gets a chance to compare it. Keep the hard cap of
+    // five for predictable latency, but cover roughly one prototype per
+    // square-root style cluster so small imports retain more real variation.
+    const maximum = Math.min(5, Math.max(1, Math.ceil(Math.sqrt(usable.length))))
     const ordered = [...usable].sort((first, second) => (
       second.trust - first.trust ||
       second.createdAt - first.createdAt
@@ -5476,7 +5483,7 @@ export const recognizeExpression = (
         // the same character. Personal samples use both the closest example
         // and a robust local consensus, so one mislabeled outlier cannot own
         // an entire class while a real recurring writing style remains strong.
-        const weights = personal.length ? [0.62, 0.25, 0.13] : [0.92, 0.08]
+        const weights = personal.length ? [0.82, 0.13, 0.05] : [0.92, 0.08]
         const selected = sorted.slice(0, weights.length)
         const weightTotal = weights.slice(0, selected.length).reduce((sum, weight) => sum + weight, 0)
         let aggregate = selected.reduce((sum, distance, index) => sum + distance * weights[index], 0) / weightTotal
@@ -5534,7 +5541,7 @@ export const recognizeExpression = (
               ) + (index === 0 ? 0 : 0.004)
             ))
           )))
-          aggregate = aggregate * 0.78 + prototypeDistance * 0.22
+          aggregate = aggregate * 0.88 + prototypeDistance * 0.12
           aggregate -= Math.min(0.034, 0.009 + Math.log2(personal.length + 1) * 0.005) *
             (0.38 + reliability * 0.42 + personalFit * 0.2)
           aggregate += (1 - reliability) * 0.024 + (1 - personalFit) * 0.012
