@@ -16,6 +16,10 @@ export type UjiRecord = {
   strokes: RawStroke[]
 }
 
+type UjiAuditOptions = {
+  writerIndependentHoldoutCount?: number
+}
+
 type AuditCase = {
   expected: string
   recognized: string
@@ -208,6 +212,8 @@ const summarize = (cases: AuditCase[]) => {
     const key = `${entry.expected}→${entry.recognized || '∅'}`
     confusions.set(key, (confusions.get(key) ?? 0) + 1)
   })
+  const rankedConfusions = [...confusions.entries()]
+    .sort((first, second) => second[1] - first[1] || first[0].localeCompare(second[0]))
   return {
     samples: cases.length,
     accuracy: Math.round((cases.length - failures.length) / Math.max(1, cases.length) * 10_000) / 100,
@@ -219,9 +225,8 @@ const summarize = (cases: AuditCase[]) => {
     caseErrors: failures.length - caseNormalizedFailures.length,
     top3Errors: topThreeFailures.length,
     top8Errors: topEightFailures.length,
-    topConfusions: [...confusions.entries()]
-      .sort((first, second) => second[1] - first[1] || first[0].localeCompare(second[0]))
-      .slice(0, 20),
+    confusions: rankedConfusions,
+    topConfusions: rankedConfusions.slice(0, 20),
     failures: failures.slice(0, 30),
   }
 }
@@ -251,7 +256,10 @@ const runCases = (
 
 const supported = (record: UjiRecord) => /^[A-Za-z0-9]$/u.test(record.char) && labelByChar.has(record.char)
 
-export const runUjiPersonalRecognitionAudit = async (records: UjiRecord[]) => {
+export const runUjiPersonalRecognitionAudit = async (
+  records: UjiRecord[],
+  options: UjiAuditOptions = {},
+) => {
   const usable = records.filter(supported)
   const writers = [...new Set(usable.map((entry) => entry.writer))].sort()
   const standard = await createStandardRecognitionSamples(BASE_CATALOG)
@@ -267,10 +275,18 @@ export const runUjiPersonalRecognitionAudit = async (records: UjiRecord[]) => {
 
   const trainingWriters = writers.filter((writer) => writer.startsWith('trn_')).slice(0, 8)
   const writerIndependentCandidates = writers.filter((writer) => !trainingWriters.includes(writer))
-  const holdoutWriter = writerIndependentCandidates.find((writer) => writer.startsWith('tst_'))
-    ?? writerIndependentCandidates[0]
+  const requestedHoldoutWriters = writerIndependentCandidates
+    .filter((writer) => writer.startsWith('tst_'))
+    .slice(0, Math.max(1, Math.min(
+      writerIndependentCandidates.length,
+      Math.round(options.writerIndependentHoldoutCount ?? 1),
+    )))
+  const holdoutWriters = requestedHoldoutWriters.length
+    ? requestedHoldoutWriters
+    : writerIndependentCandidates.slice(0, 1)
+  const holdoutWriter = holdoutWriters[0] ?? writerIndependentCandidates[0]
   const largeTrainingRecords = usable.filter((entry) => trainingWriters.includes(entry.writer))
-  const largeHoldout = usable.filter((entry) => entry.writer === holdoutWriter)
+  const largeHoldout = usable.filter((entry) => holdoutWriters.includes(entry.writer))
   const largeSamples = largeTrainingRecords.map(ujiPersonalSample)
   const largeStartedAt = performance.now()
   const largeModel = await buildRecognitionModel([...largeSamples, ...standard])
@@ -293,6 +309,7 @@ export const runUjiPersonalRecognitionAudit = async (records: UjiRecord[]) => {
     writerIndependent: {
       trainingWriters,
       holdoutWriter,
+      holdoutWriters,
       trainingSamples: largeSamples.length,
       holdoutSamples: largeHoldout.length,
       retainedSamples: largeModel.filter((entry) => !entry.standard).length,
@@ -300,6 +317,10 @@ export const runUjiPersonalRecognitionAudit = async (records: UjiRecord[]) => {
       estimatedAccuracy: largeModel.estimatedAccuracy,
       evaluatedSamples: largeModel.evaluatedSamples,
       ...summarize(largeCases),
+      byWriter: holdoutWriters.map((writer) => ({
+        writer,
+        ...summarize(largeCases.filter((_entry, index) => largeHoldout[index]?.writer === writer)),
+      })),
     },
   }
 }

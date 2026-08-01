@@ -20,6 +20,10 @@ const archive = path.join(temporary, 'uji.zip')
 const dataset = path.join(temporary, 'ujipenchars2.txt')
 const output = path.join(temporary, 'dist')
 const profile = path.join(temporary, 'chromium')
+const requestedHoldoutWriterCount = Number(process.env.FANOTES_UJI_HOLDOUT_WRITERS ?? 1)
+const holdoutWriterCount = Number.isFinite(requestedHoldoutWriterCount)
+  ? Math.max(1, Math.min(12, Math.round(requestedHoldoutWriterCount)))
+  : 1
 
 const downloadDataset = async () => {
   const local = process.env.FANOTES_UJI_DATASET?.trim()
@@ -75,7 +79,7 @@ try {
   fs.writeFileSync(entryPath, [
     `import records from ${JSON.stringify(pathToFileURL(dataPath).href)}`,
     `import { runUjiPersonalRecognitionAudit } from ${JSON.stringify(pathToFileURL(path.join(appRoot, 'scripts/fixtures/uji-personal-recognition-harness.ts')).href)}`,
-    'runUjiPersonalRecognitionAudit(records).then((result) => {',
+    `runUjiPersonalRecognitionAudit(records, { writerIndependentHoldoutCount: ${holdoutWriterCount} }).then((result) => {`,
     '  document.body.innerHTML = `<pre id="result">${JSON.stringify(result)}</pre>`',
     '}).catch((error) => {',
     '  document.body.innerHTML = `<pre id="error">${String(error?.stack || error)}</pre>`',
@@ -126,6 +130,7 @@ try {
     writerIndependent: {
       trainingWriters: result.writerIndependent.trainingWriters,
       holdoutWriter: result.writerIndependent.holdoutWriter,
+      holdoutWriters: result.writerIndependent.holdoutWriters,
       trainingSamples: result.writerIndependent.trainingSamples,
       samples: result.writerIndependent.samples,
       buildMs: result.writerIndependent.buildMs,
@@ -135,6 +140,16 @@ try {
       top3Accuracy: result.writerIndependent.top3Accuracy,
       top8Accuracy: result.writerIndependent.top8Accuracy,
       topConfusions: result.writerIndependent.topConfusions,
+      confusions: result.writerIndependent.confusions,
+      byWriter: result.writerIndependent.byWriter.map((entry) => ({
+        writer: entry.writer,
+        samples: entry.samples,
+        accuracy: entry.accuracy,
+        unhintedAccuracy: entry.unhintedAccuracy,
+        caseNormalizedAccuracy: entry.caseNormalizedAccuracy,
+        top3Accuracy: entry.top3Accuracy,
+        top8Accuracy: entry.top8Accuracy,
+      })),
     },
   } : result, null, 2))
   if (process.env.FANOTES_UJI_AUDIT_STRICT === '1') {

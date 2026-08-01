@@ -4349,15 +4349,111 @@ const resemblesUppercaseT = (cluster: StrokeCluster) => {
 }
 
 const textGeometryAdjustment = (labelId: string, cluster: StrokeCluster) => {
-  if (!resemblesUppercaseT(cluster)) return 0
-  if (labelId === 'latin_upper_T') return -0.54
-  if (
-    labelId === 'latin_lower_l' ||
-    labelId === 'latin_lower_t' ||
-    labelId === 'latin_lower_f' ||
-    labelId === 'latin_upper_I'
-  ) return 0.34
-  return 0
+  let adjustment = 0
+  if (resemblesUppercaseT(cluster)) {
+    if (labelId === 'latin_upper_T') adjustment -= 0.54
+    if (
+      labelId === 'latin_lower_l' ||
+      labelId === 'latin_lower_t' ||
+      labelId === 'latin_lower_f' ||
+      labelId === 'latin_upper_I'
+    ) adjustment += 0.34
+  }
+
+  // Some characters share nearly identical normalized raster silhouettes.
+  // Their pen structure supplies a small, style-independent tie-breaker: i/j
+  // combine a detached point with different body height, F has a vertical
+  // stem plus separate bars, and 1/Z/6 retain distinctive path geometry. The
+  // offsets stay deliberately weak so a close personal prototype can win.
+  const width = Math.max(1, (cluster.maxX - cluster.minX) * SOURCE_WIDTH)
+  const height = Math.max(1, (cluster.maxY - cluster.minY) * SOURCE_HEIGHT)
+  const aspect = width / height
+  const diagonal = Math.max(1, Math.hypot(width, height))
+  const strokeMetrics = cluster.strokes.map((stroke) => {
+    const bounds = strokeBounds(stroke)
+    const strokeWidth = Math.max(0, (bounds.maxX - bounds.minX) * SOURCE_WIDTH)
+    const strokeHeight = Math.max(0, (bounds.maxY - bounds.minY) * SOURCE_HEIGHT)
+    const length = stroke.points.slice(1).reduce((sum, point, index) => (
+      sum + Math.hypot(
+        (point.x - stroke.points[index].x) * SOURCE_WIDTH,
+        (point.y - stroke.points[index].y) * SOURCE_HEIGHT,
+      )
+    ), 0)
+    return {
+      width: strokeWidth,
+      height: strokeHeight,
+      aspect: strokeWidth / Math.max(1, strokeHeight),
+      normalizedLength: length / diagonal,
+    }
+  })
+  const pathLength = strokeMetrics.reduce((total, stroke) => total + stroke.normalizedLength, 0)
+  const endpointGap = cluster.strokes.length === 1
+    ? Math.hypot(
+        (cluster.strokes[0].points.at(-1)!.x - cluster.strokes[0].points[0].x) * SOURCE_WIDTH,
+        (cluster.strokes[0].points.at(-1)!.y - cluster.strokes[0].points[0].y) * SOURCE_HEIGHT,
+      ) / diagonal
+    : 1
+  const hasDotAccessory = strokeMetrics.some((stroke) => (
+    stroke.normalizedLength <= 0.32 &&
+    stroke.height <= height * 0.22 &&
+    stroke.width <= width * 0.48
+  ))
+  const bodyHeightRatio = Math.max(...strokeMetrics.map((stroke) => stroke.height / height), 0)
+  if (hasDotAccessory && bodyHeightRatio <= 0.68) {
+    if (labelId === 'latin_lower_i') adjustment -= 0.035
+    if (labelId === 'latin_lower_j') adjustment += 0.025
+  } else if (hasDotAccessory && bodyHeightRatio >= 0.72) {
+    if (labelId === 'latin_lower_j') adjustment -= 0.035
+    if (labelId === 'latin_lower_i') adjustment += 0.025
+  }
+  const horizontalStrokeCount = strokeMetrics.filter((stroke) => stroke.aspect >= 2).length
+  const hasNarrowVerticalStem = strokeMetrics.some((stroke) => (
+    stroke.aspect <= 0.4 && stroke.height >= height * 0.45
+  ))
+  const multiStrokeUpperF = (
+    cluster.strokes.length >= 3 &&
+    aspect >= 0.72 &&
+    aspect <= 1.22 &&
+    horizontalStrokeCount >= 2 &&
+    (hasNarrowVerticalStem || cluster.strokes.length >= 4)
+  )
+  if (multiStrokeUpperF) {
+    if (labelId === 'latin_upper_F') adjustment -= 0.05
+    if (labelId === 'latin_upper_E') adjustment += 0.035
+  }
+  const straightDigitOne = (
+    cluster.strokes.length === 1 &&
+    aspect >= 0.51 &&
+    aspect <= 0.66 &&
+    endpointGap <= 0.22 &&
+    pathLength <= 2.25
+  )
+  if (straightDigitOne) {
+    if (labelId === 'digit_1') adjustment -= 0.035
+    if (labelId === 'latin_lower_l') adjustment += 0.025
+  }
+  const oneStrokeLowerZ = (
+    cluster.strokes.length === 1 &&
+    aspect >= 1.04 &&
+    endpointGap >= 0.62 &&
+    pathLength >= 1.8
+  )
+  if (oneStrokeLowerZ) {
+    if (labelId === 'latin_lower_z') adjustment -= 0.035
+    if (labelId === 'digit_2') adjustment += 0.025
+  }
+  const tailedDigitSix = (
+    cluster.strokes.length === 1 &&
+    aspect >= 1.12 &&
+    endpointGap >= 0.72 &&
+    pathLength >= 1.72 &&
+    pathLength <= 2.15
+  )
+  if (tailedDigitSix) {
+    if (labelId === 'digit_6') adjustment -= 0.04
+    if (labelId === 'latin_upper_C') adjustment += 0.025
+  }
+  return adjustment
 }
 
 const resemblesIntegralStroke = (stroke: Stroke) => {
