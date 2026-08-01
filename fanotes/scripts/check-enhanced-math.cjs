@@ -28,6 +28,13 @@ assert.match(fs.readFileSync(path.resolve(__dirname, '../packaging/LICENSE-CRISP
 assert.match(fs.readFileSync(path.resolve(__dirname, '../packaging/LICENSE-GGML-MIT.txt'), 'utf8'), /The ggml authors/u)
 assert.match(fs.readFileSync(path.resolve(__dirname, '../public/THIRD_PARTY_NOTICES.txt'), 'utf8'), /PosFormer CROHME Q4_K/u)
 assert.match(fs.readFileSync(path.resolve(__dirname, './prepare-release.cjs'), 'utf8'), /LICENSE-CRISPEMBED-MIT\.txt/u)
+const runtimeStageSource = fs.readFileSync(path.resolve(__dirname, './stage-enhanced-math-runtime.cjs'), 'utf8')
+assert.match(runtimeStageSource, /FANOTES_NATIVE_TARGET_PLATFORM/u)
+assert.match(runtimeStageSource, /FANOTES_LLVM_MINGW_ROOT/u)
+assert.match(runtimeStageSource, /FANOTES_NATIVE_BUILD_ROOT/u)
+assert.match(runtimeStageSource, /CMAKE_SYSTEM_NAME=Windows/u)
+assert.match(runtimeStageSource, /CMAKE_SYSTEM_PROCESSOR=x86_64/u)
+assert.match(runtimeStageSource, /CMAKE_EXE_LINKER_FLAGS=-static/u)
 assert.deepEqual(
   analyzeEnhancedMathDiagnostics("step 0: token=74 '\\sqrt' | top5: \\sqrt(8.50) 7(5.00) 1(2.00)\nstep 1: token=18 '7' | top5: 7(6.00) 1(5.75)"),
   { meanTokenMargin: 1.875, weakTokenRatio: 0.5, decodedTokens: 2 },

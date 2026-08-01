@@ -11,6 +11,8 @@ fanotes/delivery/
 fanotes/public/glyphenwerk/
 fanotes/public/spell/
 fanotes-site/public/notes/
+fanotes/native-math/linux-x64/
+fanotes/native-math/win32-x64/
 
 # Local caches and test output
 __pycache__/

@@ -1,5 +1,9 @@
 # Änderungsverlauf
 
+## 2026.8.1-beta.1
+
+- die gepackte Linux- und Windows-App enthält wieder den vollständigen englischen Main-Process-Übersetzungskatalog; zuvor konnte bei englischer System- oder App-Sprache das Erstellen einer Notiz oder eines Ordners mit `Cannot find module '../resources/i18n/en.json'` abbrechen. Ein eingebauter Kern-Fallback hält die Vault-Dateifunktionen jetzt selbst bei einem beschädigten Paket oder unvollständigen älteren Differenzialupdate funktionsfähig, während ein echter Test sowohl die absichtlich fehlende Ressource als auch englische Notiz- und Ordneraufrufe in der gepackten Linux-App prüft
+
 ## 2026.7.4-beta.10
 
 - ein optionales lokales PosFormer-Q4-Sequenzmodell liest auf Linux und Windows vollständige zweidimensionale Formeln gemeinsam und ergänzt die klassische Erkennung gezielt bei Brüchen, Wurzeln, Integralen, Summen, Grenzwerten sowie Hoch- und Tiefstellungen. Das rund 10 MB grosse, nicht kommerziell lizenzierte Modell wird erst nach ausdrücklicher Bestätigung geladen, per SHA-256 geprüft, nie beim Start ausgeführt und kann in den Einstellungen jederzeit deaktiviert werden; moderne x64-Prozessoren verwenden AVX2, ältere Systeme fallen nach einem isolierten SIGILL sicher auf eine generische Laufzeit zurück

@@ -3,11 +3,38 @@
 let englishCatalog = null
 let replacements = null
 
+// Core file operations must remain available even when a package is damaged or
+// an old delta update omitted the full localization catalog. The complete
+// catalog is still loaded lazily during normal operation; these few entries are
+// only the fail-safe needed by the main process before it can show/recover from
+// that packaging problem.
+const CORE_ENGLISH_CATALOG = Object.freeze({
+  'Unbenannte Notiz': 'Untitled note',
+  'Neuer Ordner': 'New folder',
+  'FaNotes konnte nicht gestartet werden': 'FaNotes failed to start',
+})
+
+function loadEnglishCatalog() {
+  try {
+    const loaded = require('../resources/i18n/en.json')
+    if (!loaded || typeof loaded !== 'object' || Array.isArray(loaded)) {
+      throw new TypeError('The English localization catalog is not an object.')
+    }
+    return Object.freeze(Object.assign(Object.create(null), CORE_ENGLISH_CATALOG, loaded))
+  } catch (error) {
+    // Do not turn a missing translation asset into a vault I/O failure. This is
+    // intentionally a narrow fallback rather than a silent replacement for the
+    // complete catalog, so packaging checks still catch the missing resource.
+    console.warn('FaNotes: Englischer Übersetzungskatalog fehlt; Kern-Fallback aktiv:', error?.message ?? error)
+    return CORE_ENGLISH_CATALOG
+  }
+}
+
 function catalog() {
   if (!englishCatalog) {
-    englishCatalog = require('../resources/i18n/en.json')
+    englishCatalog = loadEnglishCatalog()
     replacements = Object.entries(englishCatalog)
-      .filter(([source, translated]) => source !== translated && source.length >= 4)
+      .filter(([source, translated]) => typeof translated === 'string' && source !== translated && source.length >= 4)
       .sort(([left], [right]) => right.length - left.length)
   }
   return englishCatalog
@@ -50,4 +77,3 @@ function localizeDialogOptions(options, language) {
 }
 
 module.exports = { localizeDialogOptions, localizeText, resolveLanguage }
-

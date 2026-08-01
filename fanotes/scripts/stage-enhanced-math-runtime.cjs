@@ -10,11 +10,32 @@ const SOURCE_URL = 'https://github.com/CrispStrobe/CrispEmbed.git'
 const SOURCE_COMMIT = 'b9b7fb44bfa2fed866f0577e390b2a1b8ad75bac'
 const GGML_COMMIT = '0714117daca2471b00e09554c7eaa74a06b0b2c5'
 const appRoot = path.resolve(__dirname, '..')
-const platform = process.platform
+const hostPlatform = process.platform
+const requestedPlatform = process.env.FANOTES_NATIVE_TARGET_PLATFORM?.trim()
+const platform = requestedPlatform || hostPlatform
 const arch = process.arch
 
 if (!['linux', 'win32'].includes(platform) || arch !== 'x64') {
   throw new Error(`Die native Formelmodell-Laufzeit wird nur für linux-x64 und win32-x64 gebaut, nicht ${platform}-${arch}.`)
+}
+const crossCompilingWindows = hostPlatform === 'linux' && platform === 'win32'
+if (platform !== hostPlatform && !crossCompilingWindows) {
+  throw new Error(`Cross-Build von ${hostPlatform} nach ${platform} wird nicht unterstützt.`)
+}
+
+const llvmMingwRoot = crossCompilingWindows
+  ? path.resolve(process.env.FANOTES_LLVM_MINGW_ROOT?.trim() || '')
+  : null
+const llvmMingwBinary = (name) => path.join(llvmMingwRoot, 'bin', `x86_64-w64-mingw32-${name}`)
+if (crossCompilingWindows) {
+  if (!process.env.FANOTES_LLVM_MINGW_ROOT?.trim()) {
+    throw new Error('FANOTES_LLVM_MINGW_ROOT fehlt für den Windows-Cross-Build.')
+  }
+  for (const executable of [llvmMingwBinary('clang'), llvmMingwBinary('clang++'), llvmMingwBinary('windres')]) {
+    if (!fs.existsSync(executable) || !fs.statSync(executable).isFile()) {
+      throw new Error(`LLVM-MinGW-Werkzeug fehlt: ${executable}`)
+    }
+  }
 }
 
 const run = (command, args, cwd) => {
@@ -33,7 +54,10 @@ const readCommand = (command, args, cwd) => {
 const requestedSource = process.env.FANOTES_CRISPEMBED_SOURCE?.trim()
 const temporary = requestedSource ? null : fs.mkdtempSync(path.join(os.tmpdir(), 'fanotes-crispembed-source-'))
 const source = requestedSource ? path.resolve(requestedSource) : path.join(temporary, 'CrispEmbed')
-const build = fs.mkdtempSync(path.join(os.tmpdir(), 'fanotes-crispembed-build-'))
+const requestedBuildRoot = process.env.FANOTES_NATIVE_BUILD_ROOT?.trim()
+const buildRoot = requestedBuildRoot ? path.resolve(requestedBuildRoot) : os.tmpdir()
+fs.mkdirSync(buildRoot, { recursive: true, mode: 0o700 })
+const build = fs.mkdtempSync(path.join(buildRoot, 'fanotes-crispembed-build-'))
 const destination = path.join(appRoot, 'native-math', `${platform}-${arch}`)
 
 try {
@@ -51,6 +75,15 @@ try {
   const commonCmakeArguments = [
     '-S', source,
     '-B', build,
+    ...(crossCompilingWindows ? [
+      '-DCMAKE_SYSTEM_NAME=Windows',
+      '-DCMAKE_SYSTEM_PROCESSOR=x86_64',
+      `-DCMAKE_C_COMPILER=${llvmMingwBinary('clang')}`,
+      `-DCMAKE_CXX_COMPILER=${llvmMingwBinary('clang++')}`,
+      `-DCMAKE_RC_COMPILER=${llvmMingwBinary('windres')}`,
+      '-DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY',
+      '-DCMAKE_EXE_LINKER_FLAGS=-static',
+    ] : []),
     '-DCMAKE_BUILD_TYPE=Release',
     '-DBUILD_SHARED_LIBS=OFF',
     '-DGGML_BACKEND_DL=OFF',
@@ -62,7 +95,7 @@ try {
     '-DGGML_CUDA=OFF',
     '-DGGML_VULKAN=OFF',
     '-DGGML_OPENMP=OFF',
-    ...(platform === 'win32' ? ['-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded'] : []),
+    ...(platform === 'win32' && !crossCompilingWindows ? ['-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded'] : []),
   ]
   run('cmake', [
     ...commonCmakeArguments,
