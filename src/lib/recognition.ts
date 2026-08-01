@@ -22,6 +22,7 @@ const ANALYSIS_SIZE = 96
 const HOG_CELLS = 3
 const HOG_BINS = 6
 const DIRECTION_BINS = 8
+const ENDPOINT_FEATURE_SIZE = 8
 const TRAJECTORY_POINTS = 24
 const MAX_EXAMPLES_PER_LABEL = 96
 const MAX_FEATURE_EXAMPLES_PER_LABEL = 1_024
@@ -46,6 +47,7 @@ type FeatureVector = {
 
 type StrokeGeometry = {
   directions: Float32Array
+  endpointSignature: Float32Array
   normalizedLength: number
   closedness: number
   cornerness: number
@@ -58,6 +60,7 @@ type FeatureWeights = {
   projections: number
   shape: number
   directions: number
+  endpoint: number
   geometry: number
   trajectory: number
   holes: number
@@ -65,13 +68,14 @@ type FeatureWeights = {
 }
 
 const DEFAULT_WEIGHTS: FeatureWeights = {
-  raster: 0.34,
+  raster: 0.32,
   hog: 0.13,
   projections: 0.07,
   shape: 0.07,
   directions: 0.07,
+  endpoint: 0.06,
   geometry: 0.06,
-  trajectory: 0.18,
+  trajectory: 0.17,
   holes: 0.04,
   strokes: 0.04,
 }
@@ -86,6 +90,7 @@ const STANDARD_WEIGHTS: FeatureWeights = {
   projections: 0.11,
   shape: 0.1,
   directions: 0,
+  endpoint: 0,
   geometry: 0,
   trajectory: 0,
   holes: 0.07,
@@ -531,9 +536,10 @@ const resampleTrajectory = (
 
 const geometryFromStrokes = (strokes: Stroke[]): StrokeGeometry => {
   const directions = new Float32Array(DIRECTION_BINS)
+  const endpointSignature = new Float32Array(ENDPOINT_FEATURE_SIZE)
   const points = strokes.flatMap((stroke) => stroke.points)
   if (points.length === 0) {
-    return { directions, normalizedLength: 0, closedness: 0, cornerness: 0, trajectory: [] }
+    return { directions, endpointSignature, normalizedLength: 0, closedness: 0, cornerness: 0, trajectory: [] }
   }
   const pixelX = (x: number) => x * SOURCE_WIDTH
   const pixelY = (y: number) => y * SOURCE_HEIGHT
@@ -552,8 +558,22 @@ const geometryFromStrokes = (strokes: Stroke[]): StrokeGeometry => {
   let closedness = 0
   let cornerness = 0
   let cornerCount = 0
+  let endpointCount = 0
 
   strokes.forEach((stroke) => {
+    if (stroke.points.length) {
+      const first = normalizePoint(stroke.points[0])
+      const last = normalizePoint(stroke.points.at(-1)!)
+      endpointSignature[0] += first[0]
+      endpointSignature[1] += first[1]
+      endpointSignature[2] += last[0]
+      endpointSignature[3] += last[1]
+      endpointSignature[4] += Math.abs(last[0] - first[0])
+      endpointSignature[5] += Math.abs(last[1] - first[1])
+      endpointSignature[6] += Math.min(first[0], last[0])
+      endpointSignature[7] += Math.max(first[0], last[0])
+      endpointCount += 1
+    }
     for (let index = 1; index < stroke.points.length; index += 1) {
       const previous = stroke.points[index - 1]
       const point = stroke.points[index]
@@ -585,8 +605,14 @@ const geometryFromStrokes = (strokes: Stroke[]): StrokeGeometry => {
   })
 
   normalizeVector(directions)
+  if (endpointCount) {
+    for (let index = 0; index < endpointSignature.length; index += 1) {
+      endpointSignature[index] /= endpointCount
+    }
+  }
   return {
     directions,
+    endpointSignature,
     normalizedLength: clamp(totalLength / (diagonal * 4)),
     closedness: strokes.length ? closedness / strokes.length : 0,
     cornerness: cornerCount ? clamp(cornerness / cornerCount * 2) : 0,
@@ -3230,9 +3256,13 @@ const trajectorySetDistance = (first: Float32Array[], second: Float32Array[]) =>
   if (!first.length || !second.length) return 1
   const smaller = first.length <= second.length ? first : second
   const larger = first.length <= second.length ? second : first
+  // Writing direction is useful evidence for strokes such as f/t, b/d and
+  // q/9, but users may legitimately draw a glyph backwards. Keep reverse
+  // matching as a soft fallback instead of making it fully equivalent to the
+  // observed direction.
   const costs = smaller.map((path) => larger.map((candidate) => Math.min(
     trajectoryPathDistance(path, candidate),
-    trajectoryPathDistance(path, candidate, true),
+    trajectoryPathDistance(path, candidate, true) + 0.035,
   )))
 
   // Exact assignment for normal glyphs. Use a compact numeric DP instead of
@@ -3300,6 +3330,7 @@ const channelDistances = (
   projections: projectionDistance(first, second),
   shape: meanVectorDistance(first.shape, second.shape),
   directions: 1 - vectorCosineSimilarity(firstGeometry.directions, secondGeometry.directions),
+  endpoint: meanVectorDistance(firstGeometry.endpointSignature, secondGeometry.endpointSignature),
   geometry: (
     Math.abs(firstGeometry.normalizedLength - secondGeometry.normalizedLength) * 0.35 +
     Math.abs(firstGeometry.closedness - secondGeometry.closedness) * 0.4 +
@@ -3316,6 +3347,7 @@ const weightedDistance = (channels: FeatureWeights, weights: FeatureWeights) => 
   channels.projections * weights.projections +
   channels.shape * weights.shape +
   channels.directions * weights.directions +
+  channels.endpoint * weights.endpoint +
   channels.geometry * weights.geometry +
   channels.trajectory * weights.trajectory +
   channels.holes * weights.holes +
@@ -3415,6 +3447,7 @@ const buildClassPrototypes = (entries: RecognitionModelEntry[]) => {
       physicalAspect: Math.exp(mean(basis.map((entry) => Math.log(entry.physicalAspect)))),
       geometry: {
         directions: averageVector(basis.map((entry) => entry.geometry.directions), true),
+        endpointSignature: averageVector(basis.map((entry) => entry.geometry.endpointSignature)),
         normalizedLength: mean(basis.map((entry) => entry.geometry.normalizedLength)),
         closedness: mean(basis.map((entry) => entry.geometry.closedness)),
         cornerness: mean(basis.map((entry) => entry.geometry.cornerness)),
@@ -5103,8 +5136,45 @@ const textGeometryCandidateScore = (
     ? strokeBoundsWithExtent.slice(1).filter((entry) => (
         entry.extent <= Math.max(60, primaryBody.extent * 0.55) &&
         resemblesTextDotPair(primaryBody.bounds, entry.bounds)
-      )).length
+    )).length
     : 0
+
+  // Small topology cues survive raster normalization and help the text beam
+  // resolve common connected-handwriting confusions. They remain deliberately
+  // weak so the visual classifier stays authoritative when the cue is unclear.
+  const tokenWidth = Math.max(0.001, token.bbox[2])
+  const tokenHeight = Math.max(0.001, token.bbox[3])
+  let horizontalSegment = 0
+  let verticalSegment = 0
+  let diagonalSegment = 0
+  let closedStroke = false
+  token.strokes.forEach((stroke) => {
+    if (stroke.points.length < 2) return
+    const first = stroke.points[0]
+    const last = stroke.points.at(-1)!
+    const endpointSpan = Math.hypot(
+      (last.x - first.x) / tokenWidth,
+      (last.y - first.y) / tokenHeight,
+    )
+    closedStroke ||= endpointSpan <= 0.42
+    for (let index = 1; index < stroke.points.length; index += 1) {
+      const previous = stroke.points[index - 1]
+      const point = stroke.points[index]
+      const deltaX = Math.abs(point.x - previous.x) / tokenWidth
+      const deltaY = Math.abs(point.y - previous.y) / tokenHeight
+      if (deltaX >= deltaY * 2.2 && deltaX >= 0.025) horizontalSegment += deltaX
+      if (deltaY >= deltaX * 2.2 && deltaY >= 0.025) verticalSegment += deltaY
+      if (deltaX >= deltaY * 0.62 && deltaY >= deltaX * 0.62 && deltaX + deltaY >= 0.06) {
+        diagonalSegment += Math.min(1, deltaX + deltaY)
+      }
+    }
+  })
+  const hasCrossbar = horizontalSegment >= 0.18 && horizontalSegment >= verticalSegment * 0.16
+  const hasTallStem = verticalSegment >= 0.72
+  const hasDiagonalArm = diagonalSegment >= 0.3
+  const hasLoop = closedStroke && horizontalSegment + verticalSegment + diagonalSegment >= 0.7
+  const baselineOverflow = (y + height) - baseline
+  const hasDescender = baselineOverflow >= referenceHeight * 0.08
 
   if (/^\p{Lu}$/u.test(char)) {
     if (position === 0) score += relativeHeight >= 1.08 ? 0.16 : -0.04
@@ -5113,6 +5183,17 @@ const textGeometryCandidateScore = (
     if (position > 0 && relativeHeight <= 1.12) score += 0.12
     if (position === 0 && relativeHeight >= 1.2) score -= 0.08
   }
+
+  if (char === 'f') score += hasCrossbar && hasTallStem ? 0.16 : -0.045
+  if (char === 't') score += hasCrossbar ? 0.1 : -0.025
+  if (char === 'l') score += hasTallStem && !hasCrossbar ? 0.055 : 0
+  if (char === 'k') score += hasDiagonalArm ? 0.11 : -0.035
+  if (char === 'h') score += hasTallStem && !hasDiagonalArm ? 0.045 : 0
+  if (/^[gjpqy]$/u.test(char)) score += hasDescender ? 0.14 : -0.055
+  if (char === '9') score += hasDescender ? -0.08 : 0.025
+  if (/^[bdopq]$/u.test(char)) score += hasLoop ? 0.045 : 0
+  if (/^[ce]$/u.test(char)) score += !hasTallStem && hasLoop ? 0.035 : 0
+  if (char === '2' || char === 'z') score += hasLoop ? -0.035 : 0.02
 
   if (candidate.label.id === 'punctuation_underscore') {
     const distanceFromBaseline = centerY - baseline
