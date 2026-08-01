@@ -2006,6 +2006,16 @@ try {
     'korrektur',
     'Ein langes Wort mit einem kurzen erfundenen neuronalen Endfragment muss über die gemessene Gesamtlänge repariert werden.',
   )
+  assert.equal(
+    applyMeasuredNeuralWordContext('wirtschaft verstehen', 'de'),
+    'wirtschaft verstehen',
+    'Ohne unabhängige Längenmessung darf eine echte Mehrwort-Zeile nicht zu einem Kunstwort verklebt werden.',
+  )
+  assert.equal(
+    applyMeasuredNeuralWordContext('wirtschaft verstehen', 'de', 19),
+    'wirtschaft verstehen',
+    'Auch bei passender gemessener Gesamtlänge muss eine echte Phrase ihren Wortabstand behalten.',
+  )
 
   const sparseBuchstabe = [...'auchltaul'].map((char, index) => {
     const alternatives = index === 0 ? [[char, 56], ['b', 38]] : [[char, 58]]

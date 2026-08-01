@@ -690,8 +690,10 @@ export const applyMeasuredNeuralWordContext = (
   // such as "das ist" retain their spacing.
   const normalized = (
     !/\r?\n/u.test(rawNormalized) &&
+    measuredCharacterCount !== undefined &&
     wordParts.length === 2 &&
-    Array.from(wordParts[0]).length >= 4
+    Array.from(wordParts[0]).length >= 4 &&
+    Array.from(wordParts.join('')).length !== measuredCharacterCount
   )
     ? wordParts.join('')
     : rawNormalized
