@@ -1,5 +1,9 @@
 # Änderungsverlauf
 
+## 2026.8.1-beta.2
+
+- die englische Main-Process-Lokalisierung wird nun auch in einem neuen Paket zuverlässig ausgeliefert; Notizen und Ordner lassen sich selbst bei einer fehlenden oder unvollständigen `resources/i18n/en.json` dank des eingebauten Kern-Fallbacks weiter anlegen. Der Verpackungs- und Electron-Test prüft diesen beschädigten-Paket-Fall sowie echte englische IPC-Aufrufe.
+
 ## 2026.8.1-beta.1
 
 - die gepackte Linux- und Windows-App enthält wieder den vollständigen englischen Main-Process-Übersetzungskatalog; zuvor konnte bei englischer System- oder App-Sprache das Erstellen einer Notiz oder eines Ordners mit `Cannot find module '../resources/i18n/en.json'` abbrechen. Ein eingebauter Kern-Fallback hält die Vault-Dateifunktionen jetzt selbst bei einem beschädigten Paket oder unvollständigen älteren Differenzialupdate funktionsfähig, während ein echter Test sowohl die absichtlich fehlende Ressource als auch englische Notiz- und Ordneraufrufe in der gepackten Linux-App prüft
