@@ -1,5 +1,11 @@
 # Änderungsverlauf
 
+## 2026.8.2
+
+- Dieses Stable-Reparaturupdate wird Installationen von `2026.8.1` bewusst als vollständiges Paket statt als Differenzialupdate angeboten. Dadurch wird ein älterer oder unvollständig ersetzter `app.asar` sicher entfernt; der vollständige englische Übersetzungskatalog und der davon unabhängige Kern-Fallback sind im neuen Linux- und Windows-Paket enthalten. Der echte Pakettest startet die veröffentlichte AppImage und erstellt über dieselben IPC-Wege wie die Oberfläche eine deutsche Notiz, eine englische Notiz und einen Ordner.
+- GlyphenWerk ordnet nachträglich gesetzte Punkte und Querstriche zuverlässiger ihrem Buchstaben zu, unterscheidet sehr schmale gepunktete `i`-Formen sowie zweistrichige `z`-Formen und lernt klassenspezifische Strichanzahlen, ohne bisher ungesehene Schreibvarianten zu bestrafen. Die gleiche geometrische Logik schützt kompakte Wortabstände und verhindert, dass eine wachsende Buchstabenfolge zu einem einzelnen Mathematiksymbol kollabiert.
+- Die Textkorrektur verwendet den vollständigen deutschen und englischen Rechtschreibwortschatz sowie corpusgestützte Namen als begrenzte Zusatzbelege. Visuell gestützte, bereits gültige Wörter bleiben erhalten; eine nahe Modellalternative darf nur bei enger Form- und Kontextübereinstimmung gewinnen, damit normale Namen und Wörter nicht durch bloss häufigere, aber unpassende Kandidaten ersetzt werden.
+
 ## 2026.8.1
 
 - Notizen und Ordner lassen sich wieder zuverlässig mit deutscher und englischer System- oder App-Sprache erstellen. Der vollständige englische Katalog wird im Linux- und Windows-Paket mitgeliefert; die Kernnamen für neue Notizen und Ordner bleiben zusätzlich ohne externe Sprachdatei verfügbar, sodass auch ein beschädigtes oder unvollständiges älteres Differenzialupdate die Vault-Funktionen nicht mehr blockiert. Ein neuer Pakettest öffnet die tatsächlich erzeugten Linux- und Windows-`app.asar`-Archive, prüft den enthaltenen Katalog und führt exakt deren Fallback-Modul ohne Ressourcendatei aus.
