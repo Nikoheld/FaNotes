@@ -1034,6 +1034,62 @@ try {
     'J',
     'Ein grosses J mit eigenem oberen Balken und Zusatzmarke darf nicht kleingeschrieben werden.',
   )
+  const lowercaseJLabel = labelByChar.get('j')
+  assert.ok(lowercaseJLabel)
+  const extremelyNarrowDottedI = [
+    stroke([[0.242, 0.27], [0.244, 0.36], [0.243, 0.45]], 0),
+    stroke([[0.244, 0.2]], 4),
+  ]
+  const ambiguousNarrowDottedI = (lowercaseSupport = 16) => ({
+    id: 'isolated-extremely-narrow-dotted-i',
+    strokes: extremelyNarrowDottedI,
+    imageData: '',
+    bbox: [0.242, 0.2, 0.002, 0.25],
+    labelId: lowercaseJLabel.id,
+    char: lowercaseJLabel.char,
+    name: lowercaseJLabel.name,
+    latex: lowercaseJLabel.latex,
+    confidence: 78,
+    baseConfidence: 60,
+    personalSupport: 16,
+    personalConfidence: 57,
+    alternatives: [{
+      labelId: lowercaseJLabel.id,
+      char: lowercaseJLabel.char,
+      name: lowercaseJLabel.name,
+      confidence: 78,
+      baseConfidence: 60,
+      personalSupport: 16,
+      personalConfidence: 57,
+    }, {
+      labelId: lowercaseILabel.id,
+      char: lowercaseILabel.char,
+      name: lowercaseILabel.name,
+      confidence: 63,
+      baseConfidence: 56,
+      personalSupport: lowercaseSupport,
+      personalConfidence: 33,
+    }],
+    visualLabelId: lowercaseJLabel.id,
+    visualConfidence: 78,
+  })
+  assert.equal(
+    recognizedSentence(applyTextReranking([ambiguousNarrowDottedI()], BASE_CATALOG, 'de')),
+    'i',
+    'Ein extrem schmales gepunktetes i darf trotz eines stärkeren j-Prototyps nicht zu j werden.',
+  )
+  assert.equal(
+    recognizedSentence(applyTextReranking([ambiguousNarrowDottedI(0)], BASE_CATALOG, 'de')),
+    'j',
+    'Ein untrainiertes i darf ein ausdrücklich trainiertes j nicht allein über Geometrie überschreiben.',
+  )
+  assert.equal(
+    recognizedSentence(applyTextReranking([
+      ambiguousNarrowDottedI(),
+    ].map((token) => ({ ...token, strokes: dottedJShape })), BASE_CATALOG, 'de')),
+    'j',
+    'Ein normal breites, unten gekrümmtes j darf nicht von der extrem schmalen i-Regel verändert werden.',
+  )
 
   // A short lowercase body after a tall capital sits lower by construction.
   // Even a stale learned "subscript" relation must not turn ordinary baseline

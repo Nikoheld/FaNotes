@@ -4526,6 +4526,35 @@ const resemblesDetachedDotLowercaseJ = (strokes: Stroke[]) => {
   return resemblesTextDotPair(body.bounds, dot.bounds)
 }
 
+const resemblesExtremelyNarrowDottedLowercaseI = (strokes: Stroke[]) => {
+  const cluster = clusterFromStrokes(strokes)
+  if (!cluster || cluster.strokes.length !== 2) return false
+  const width = Math.max(1, (cluster.maxX - cluster.minX) * SOURCE_WIDTH)
+  const height = Math.max(1, (cluster.maxY - cluster.minY) * SOURCE_HEIGHT)
+  // Across all 7,440 alphanumeric UJI glyphs, an exact two-stroke dot/body
+  // pair below this physical aspect occurs only for lower-case i (5/5). The
+  // body-height guard rejects a tiny stray mark above another short symbol.
+  // This deliberately stays much narrower than an ordinary curved j.
+  if (width / height > 0.08) return false
+  const measured = cluster.strokes
+    .map((stroke) => {
+      const bounds = strokeBounds(stroke)
+      return {
+        bounds,
+        extent: Math.max(
+          (bounds.maxX - bounds.minX) * SOURCE_WIDTH,
+          (bounds.maxY - bounds.minY) * SOURCE_HEIGHT,
+        ),
+      }
+    })
+    .sort((first, second) => second.extent - first.extent)
+  const [body, dot] = measured
+  if (!body || !dot) return false
+  const bodyHeight = (body.bounds.maxY - body.bounds.minY) * SOURCE_HEIGHT
+  if (bodyHeight < height * 0.4) return false
+  return resemblesTextDotPair(body.bounds, dot.bounds)
+}
+
 const resemblesIntegralStroke = (stroke: Stroke) => {
   if (stroke.points.length < 4) return false
   const bounds = strokeBounds(stroke)
@@ -5456,6 +5485,31 @@ const rerankTextChunk = (
       token.baseConfidence = selected.baseConfidence
       token.personalSupport = selected.personalSupport
       token.personalConfidence = selected.personalConfidence
+    }
+    const extremelyNarrowDottedI = token.char !== 'i' &&
+      resemblesExtremelyNarrowDottedLowercaseI(token.strokes)
+      ? token.alternatives
+          .filter((candidate) => candidate.char === 'i')
+          .sort((first, second) => second.confidence - first.confidence)[0]
+      : undefined
+    if (
+      extremelyNarrowDottedI &&
+      extremelyNarrowDottedI.confidence >= token.confidence - 18 &&
+      (extremelyNarrowDottedI.baseConfidence ?? 0) >= (token.baseConfidence ?? 0) - 16 &&
+      (extremelyNarrowDottedI.personalConfidence ?? 0) >= (token.personalConfidence ?? 0) - 28 &&
+      (extremelyNarrowDottedI.personalSupport ?? 0) >= Math.min(2, token.personalSupport ?? 0)
+    ) {
+      const lowercaseLabel = labelMap.get(extremelyNarrowDottedI.labelId)
+      if (lowercaseLabel) {
+        token.labelId = lowercaseLabel.id
+        token.char = lowercaseLabel.char
+        token.name = lowercaseLabel.name
+        token.latex = lowercaseLabel.latex
+        token.confidence = Math.max(token.confidence, extremelyNarrowDottedI.confidence)
+        token.baseConfidence = extremelyNarrowDottedI.baseConfidence ?? 0
+        token.personalSupport = extremelyNarrowDottedI.personalSupport ?? 0
+        token.personalConfidence = extremelyNarrowDottedI.personalConfidence ?? 0
+      }
     }
     const dottedLowercaseJ = token.char !== 'i' && token.char !== 'j' &&
       resemblesDetachedDotLowercaseJ(token.strokes)
