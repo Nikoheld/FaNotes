@@ -1,7 +1,7 @@
 {
   "name": "fanotes",
   "productName": "FaNotes",
-  "version": "2026.8.1-beta.2",
+  "version": "2026.8.1",
   "description": "Lokale Markdown-Notizen mit Handschrift für Schule, UNI, Privatleben und Arbeit",
   "author": "FaNotes",
   "license": "MIT",
@@ -15,6 +15,7 @@
     "check:themes": "node scripts/check-theme-contrast.cjs",
     "check:visual": "node scripts/check-visual-rendering.cjs",
     "check:notes": "node scripts/check-note-creation.cjs",
+    "check:packaged-i18n": "node scripts/check-packaged-i18n.cjs",
     "check:markdown": "node scripts/check-markdown.mjs",
     "check:recognition": "node scripts/check-context-recognition.mjs",
     "audit:recognition": "node scripts/audit-personal-recognition.mjs",
@@ -65,10 +66,10 @@
     "build:web": "npm run build:glyphenwerk && npm run build:spelling && npm run build:proper-names && npm run stage:trocr-runtime && tsc -b && vite build && node scripts/build-web-pwa.mjs",
     "build": "npm run build:web",
     "start": "electron .",
-    "dist:linux": "npm run build:web && npm run stage:enhanced-math-runtime && electron-builder --linux AppImage --x64 && npm run dist:harden-appimage && npm run dist:portable",
-    "dist:windows": "npm run build:web && cross-env FANOTES_NATIVE_TARGET_PLATFORM=win32 node scripts/stage-enhanced-math-runtime.cjs && electron-builder --win --x64",
-    "dist:harden-appimage": "node scripts/harden-appimage.cjs release/FaNotes-2026.8.1-beta.2-x86_64.AppImage",
-    "dist:portable": "tar -C release --sort=name --owner=0 --group=0 --numeric-owner --mtime='@0' --mode='u+rwX,go+rX,go-w' --transform='s#^linux-unpacked#FaNotes-2026.8.1-beta.2-x86_64#' -czf release/FaNotes-2026.8.1-beta.2-x86_64.tar.gz linux-unpacked",
+    "dist:linux": "npm run build:web && npm run stage:enhanced-math-runtime && electron-builder --linux AppImage --x64 && npm run check:packaged-i18n -- release/linux-unpacked/resources/app.asar && npm run dist:harden-appimage && npm run dist:portable",
+    "dist:windows": "npm run build:web && cross-env FANOTES_NATIVE_TARGET_PLATFORM=win32 node scripts/stage-enhanced-math-runtime.cjs && electron-builder --win --x64 && npm run check:packaged-i18n -- release/win-unpacked/resources/app.asar",
+    "dist:harden-appimage": "node scripts/harden-appimage.cjs release/FaNotes-2026.8.1-x86_64.AppImage",
+    "dist:portable": "tar -C release --sort=name --owner=0 --group=0 --numeric-owner --mtime='@0' --mode='u+rwX,go+rX,go-w' --transform='s#^linux-unpacked#FaNotes-2026.8.1-x86_64#' -czf release/FaNotes-2026.8.1-x86_64.tar.gz linux-unpacked",
     "dist:dir": "npm run build:web && npm run stage:enhanced-math-runtime && electron-builder --linux dir --x64"
   },
   "devDependencies": {

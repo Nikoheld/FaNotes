@@ -1,5 +1,10 @@
 # Änderungsverlauf
 
+## 2026.8.1
+
+- Notizen und Ordner lassen sich wieder zuverlässig mit deutscher und englischer System- oder App-Sprache erstellen. Der vollständige englische Katalog wird im Linux- und Windows-Paket mitgeliefert; die Kernnamen für neue Notizen und Ordner bleiben zusätzlich ohne externe Sprachdatei verfügbar, sodass auch ein beschädigtes oder unvollständiges älteres Differenzialupdate die Vault-Funktionen nicht mehr blockiert. Ein neuer Pakettest öffnet die tatsächlich erzeugten Linux- und Windows-`app.asar`-Archive, prüft den enthaltenen Katalog und führt exakt deren Fallback-Modul ohne Ressourcendatei aus.
+- die personengerechte GlyphenWerk-Erkennung gewichtet unabhängige Formmerkmale und persönliche Trainingsbeispiele robuster, schützt explizit trainierte Zeichen vor allgemeinen Umschreibungen und unterscheidet kompakte `Y`-Formen sowie schmale, ungepunktete Grossbuchstaben `I` konservativ von ihren Kleinbuchstabenvarianten
+
 ## 2026.8.1-beta.2
 
 - die englische Main-Process-Lokalisierung wird nun auch in einem neuen Paket zuverlässig ausgeliefert; Notizen und Ordner lassen sich selbst bei einer fehlenden oder unvollständigen `resources/i18n/en.json` dank des eingebauten Kern-Fallbacks weiter anlegen. Der Verpackungs- und Electron-Test prüft diesen beschädigten-Paket-Fall sowie echte englische IPC-Aufrufe.
