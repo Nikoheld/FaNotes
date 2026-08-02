@@ -55,6 +55,20 @@ type PairSelectionCase = {
   boundedSearchCaseNormalizedOracle: boolean
   topNCandidates: string[]
   boundedSearchCandidates: string[]
+  ink: {
+    physicalWidth: number
+    physicalHeight: number
+    physicalAspect: number
+    strokeCount: number
+    pointCount: number
+  }
+  boundedPaths: Array<{
+    segmentationIndex: number
+    recognized: string
+    visibleTokenCount: number
+    averageConfidence: number
+    visualText: string
+  }>
   tokens: Array<{
     char: string
     visualChar: string
@@ -265,6 +279,23 @@ const roundRobinCandidates = (paths: RankedSequence[][], limit: number) => {
 
 const normalized = (value: string) => value.toLocaleLowerCase('en')
 
+const inkMetrics = (strokes: Stroke[]) => {
+  const points = pointsOf(strokes)
+  const minX = Math.min(...points.map((point) => point.x))
+  const maxX = Math.max(...points.map((point) => point.x))
+  const minY = Math.min(...points.map((point) => point.y))
+  const maxY = Math.max(...points.map((point) => point.y))
+  const physicalWidth = Math.max(0, (maxX - minX) * SOURCE_WIDTH)
+  const physicalHeight = Math.max(1, (maxY - minY) * SOURCE_HEIGHT)
+  return {
+    physicalWidth: Math.round(physicalWidth * 100) / 100,
+    physicalHeight: Math.round(physicalHeight * 100) / 100,
+    physicalAspect: Math.round(physicalWidth / physicalHeight * 10_000) / 10_000,
+    strokeCount: strokes.length,
+    pointCount: points.length,
+  }
+}
+
 const createPairSpecs = (characters: string[], limit: number, subset: PairSubset) => {
   const pairs = characters.flatMap((first) => characters.flatMap((second) => (
     first === second ? [] : [{ first, second, expected: `${first}${second}` }]
@@ -407,6 +438,7 @@ export const runUjiPairSelectionAudit = async (
       // Diagnostic upper bound only. The true count is supplied exclusively
       // after the unhinted Top-1 decision above and never enters training.
       const exactCountPaths: RankedSequence[][] = []
+      const boundedPaths: PairSelectionCase['boundedPaths'] = []
       let previousFingerprint = ''
       for (let segmentationIndex = 0; segmentationIndex < segmentationCandidates; segmentationIndex += 1) {
         const pathTokens = recognizeExpression(
@@ -424,6 +456,18 @@ export const runUjiPairSelectionAudit = async (
         const fingerprint = path.map((candidate) => candidate.text).join('\u0000')
         if (fingerprint === previousFingerprint) break
         previousFingerprint = fingerprint
+        const pathVisible = pathTokens.filter((token) => !token.isLayout)
+        boundedPaths.push({
+          segmentationIndex,
+          recognized: recognizedSentence(pathTokens),
+          visibleTokenCount: pathVisible.length,
+          averageConfidence: Math.round(pathVisible.reduce((sum, token) => (
+            sum + token.confidence
+          ), 0) / Math.max(1, pathVisible.length) * 100) / 100,
+          visualText: pathVisible.map((token) => BASE_CATALOG.find((label) => (
+            label.id === (token.visualLabelId ?? token.labelId)
+          ))?.char ?? token.char).join(''),
+        })
         if (path.length) exactCountPaths.push(path)
       }
       const boundedSearchCandidates = roundRobinCandidates(
@@ -453,6 +497,8 @@ export const runUjiPairSelectionAudit = async (
         )),
         topNCandidates,
         boundedSearchCandidates,
+        ink: inkMetrics(strokes),
+        boundedPaths,
         tokens: visible.map((token) => ({
           char: token.char,
           visualChar: BASE_CATALOG.find((label) => (

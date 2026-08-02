@@ -105,6 +105,16 @@ const compactSummary = (result) => ({
   connected: result.connected,
 })
 
+const compactMetrics = (summary) => ({
+  samples: summary.samples,
+  top1: summary.top1,
+  characterCount: summary.characterCount,
+  topNOracle: summary.topNOracle,
+  boundedSegmentationSearchOracle: summary.boundedSegmentationSearchOracle,
+})
+
+const explicitOutput = process.env.FANOTES_UJI_PAIR_SELECTION_OUTPUT?.trim()
+
 const optionalThreshold = (name) => {
   if (process.env[name] === undefined) return null
   const value = Number(process.env[name])
@@ -195,11 +205,23 @@ try {
   if (maximumCollapse !== null) {
     assert.ok(result.overall.characterCount.collapseRate <= maximumCollapse, `Collapse ${result.overall.characterCount.collapseRate}% > ${maximumCollapse}%.`)
   }
-  console.log(JSON.stringify(
-    process.env.FANOTES_UJI_PAIR_SELECTION_CASES === '1' ? result : compactSummary(result),
-    null,
-    2,
-  ))
+  const printedResult = process.env.FANOTES_UJI_PAIR_SELECTION_CASES === '1'
+    ? result
+    : compactSummary(result)
+  if (explicitOutput) {
+    const resolvedOutput = path.resolve(explicitOutput)
+    fs.mkdirSync(path.dirname(resolvedOutput), { recursive: true })
+    fs.writeFileSync(resolvedOutput, `${JSON.stringify(printedResult, null, 2)}\n`, {
+      encoding: 'utf8',
+      mode: 0o600,
+    })
+    console.log(JSON.stringify({
+      output: resolvedOutput,
+      writer: result.dataset.writer,
+      cases: result.cases?.length ?? 0,
+      overall: compactMetrics(result.overall),
+    }, null, 2))
+  } else console.log(JSON.stringify(printedResult, null, 2))
 } finally {
   fs.rmSync(temporary, { recursive: true, force: true, maxRetries: 12, retryDelay: 100 })
 }
