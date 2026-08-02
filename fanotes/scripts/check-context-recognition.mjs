@@ -1688,6 +1688,18 @@ try {
     'Eine reine S→s-Korrektur darf das Sicherheitsbudget für zwei visuell plausible echte Test-Korrekturen nicht verbrauchen.',
   )
 
+  const coherentLowercaseKnownWord = [...'zwischen'].map((char, index) => token(
+    char,
+    index === 0 ? 72 : 88,
+    index === 0 ? [['z', 72], ['Z', 75]] : [[char, 88]],
+    20 + index,
+  ))
+  assert.equal(
+    recognizedSentence(applyTextReranking(coherentLowercaseKnownWord, BASE_CATALOG, 'de')),
+    'zwischen',
+    'Ein bereits vollständig bekanntes Kleinwort darf nicht allein durch den Sprachprior zu Title Case wechseln.',
+  )
+
   const untrainedCalibration = calibratePersonalBaseEvidence({
     confidence: 82,
     baseConfidence: 82,

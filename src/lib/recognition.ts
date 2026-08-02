@@ -6189,6 +6189,18 @@ const rerankTextChunk = (
         beam.value.toLocaleLowerCase(LANGUAGE_PROFILES[language].locale) === rawVisualNormalized
       ))
     : undefined
+  const rawVisualBodyHeight = median(
+    chunk.slice(1).map((token) => token.bbox[3]).filter((height) => height > 0),
+  ) || chunk[0]?.bbox[3] || 0
+  const rawVisualHasTallLowercaseInitial = /^\p{Ll}{2,}$/u.test(rawVisualWord) &&
+    (chunk[0]?.bbox[3] ?? 0) >= rawVisualBodyHeight * 1.25
+  const consistentlyCasedKnownVisualBeam = rawVisualEvidence.knownWord && (
+    (/^\p{Ll}{2,}$/u.test(rawVisualWord) && !rawVisualHasTallLowercaseInitial) ||
+    /^\p{Lu}\p{Ll}+$/u.test(rawVisualWord) ||
+    /^\p{Lu}{2,}$/u.test(rawVisualWord)
+  )
+    ? ranked.find((beam) => beam.value === rawVisualWord)
+    : undefined
   const visualLooksLikeProperName = (
     /^\p{Lu}\p{Ll}{2,}$/u.test(visualWord) &&
     !lexicalWordEvidence(visualWord, language).knownWord
@@ -6287,6 +6299,18 @@ const rerankTextChunk = (
     literalKnownVisualBeam &&
     best.value.toLocaleLowerCase(LANGUAGE_PROFILES[language].locale) !== rawVisualNormalized
   ) best = literalKnownVisualBeam
+  if (
+    best &&
+    consistentlyCasedKnownVisualBeam &&
+    best.value !== rawVisualWord &&
+    best.value.toLocaleLowerCase(LANGUAGE_PROFILES[language].locale) === rawVisualNormalized
+  ) {
+    // Once every visible glyph already forms a known word with a coherent
+    // case pattern, language frequency is not evidence for changing case.
+    // Mixed patterns such as teSt deliberately miss this guard and can still
+    // be normalized by the word beam.
+    best = consistentlyCasedKnownVisualBeam
+  }
   if (!best) return
   const canonicalWordCharacters = [...(best.evidence?.word ?? '')]
   const visualCharacters = chunk.map((token) => (
