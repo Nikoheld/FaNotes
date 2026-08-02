@@ -1777,6 +1777,31 @@ try {
     'fenster',
     'Ein höhengleicher innerer Buchstabe muss bei einer nahen Kleinbuchstabenform klein bleiben.',
   )
+  const internallyUppercaseKnownWord = [...'zWischen'].map((char, index) => token(
+    char,
+    char === 'W' ? 79 : 84,
+    char === 'W' ? [['W', 79], ['w', 63]] : [[char, 84]],
+    170 + index,
+  ))
+  assert.equal(
+    recognizedSentence(applyTextReranking(internallyUppercaseKnownWord, BASE_CATALOG, 'de')),
+    'zwischen',
+    'Ein höhengleicher innerer Grossbuchstabe in einem exakt bekannten Wort muss trotz moderatem visuellen Vorsprung normalisiert werden.',
+  )
+  const deliberatelyTallInternalCapital = [...'syStem'].map((char, index) => token(
+    char,
+    char === 'S' ? 79 : 84,
+    char === 'S' ? [['S', 79], ['s', 63]] : [[char, 84]],
+    175 + index,
+    char === 'S'
+      ? [0.05 + index * 0.055, 0.17, 0.05, 0.13]
+      : [0.05 + index * 0.055, 0.2, 0.05, 0.1],
+  ))
+  assert.equal(
+    recognizedSentence(applyTextReranking(deliberatelyTallInternalCapital, BASE_CATALOG, 'de')),
+    'syStem',
+    'Ein geometrisch deutlich hoher innerer Grossbuchstabe muss als bewusst gesetzte Schreibweise erhalten bleiben.',
+  )
   const visualAcronym = [...'NASA'].map((char, index) => token(
     char,
     91,

@@ -193,6 +193,7 @@ try {
     recoverableUnresolved: {
       words: recoverableUnresolved.length,
       caseOnly: caseOnlyUnresolved.length,
+      caseExamples: caseOnlyUnresolved.slice(0, 80),
       differentCharacters: characterUnresolved.length,
       characterExamples: characterUnresolved.slice(0, 80),
     },

@@ -6196,6 +6196,38 @@ const rerankTextChunk = (
     languageChangedIndexes.length > 0 && !languageCorrectionHasVisualSupport
   ) ? visualBest : languageBest
   if (!best) return
+  const canonicalWordCharacters = [...(best.evidence?.word ?? '')]
+  const visualCharacters = chunk.map((token) => (
+    labelMap.get(token.visualLabelId ?? token.labelId)?.char ?? token.char
+  ))
+  const visualAllCaps = visualCharacters.length >= 2 && visualCharacters.every((character) => (
+    /^\p{Lu}$/u.test(character)
+  ))
+  const caseReferenceHeight = Math.max(0.025, median(
+    chunk.filter((token) => token.bbox[3] >= 0.025).map((token) => token.bbox[3]),
+  ))
+  if (
+    best.evidence?.knownWord &&
+    !best.evidence.properName &&
+    !visualAllCaps &&
+    canonicalWordCharacters.length === best.choices.length &&
+    best.value.toLocaleLowerCase(LANGUAGE_PROFILES[language].locale) === best.evidence.word
+  ) {
+    best.choices = best.choices.map((selected, index) => {
+      if (index === 0 || !/^\p{Lu}$/u.test(selected.label.char)) return selected
+      const canonicalCharacter = canonicalWordCharacters[index]
+      const lowercase = candidateLists[index].find((candidate) => (
+        candidate.label.char === canonicalCharacter
+      ))
+      const compactInternalGlyph = chunk[index].bbox[3] <= caseReferenceHeight * 1.12
+      return lowercase &&
+        compactInternalGlyph &&
+        lowercase.confidence >= selected.confidence - 24
+        ? lowercase
+        : selected
+    })
+    best.value = best.choices.map((candidate) => candidate.label.char).join('')
+  }
   const runnerUp = ranked.find((beam) => beam.value !== best.value)
   const scoreMargin = Math.max(0, best.score - (runnerUp?.score ?? best.score - 2))
   const visualLabels = chunk.map((token) => token.visualLabelId ?? token.labelId)
