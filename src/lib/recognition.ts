@@ -5333,6 +5333,25 @@ const LANGUAGE_PROFILES = {
   trigrams: Set<string>
 }>
 
+type RecognitionWordMembership = (word: string) => boolean
+const installedRecognitionWordMembership: Record<RecognitionLanguage, RecognitionWordMembership | null> = {
+  de: null,
+  en: null,
+}
+
+/**
+ * Connects the exhaustive, lazily loaded FaNotes spelling vocabulary to the
+ * classical handwriting beam without copying its 380k strings or delaying
+ * application startup. Embedded FaNotes installs this callback only when OCR
+ * is first used; standalone GlyphenWerk keeps the compact built-in lexicon.
+ */
+export const installRecognitionWordMembership = (
+  language: RecognitionLanguage,
+  membership: RecognitionWordMembership | null,
+) => {
+  installedRecognitionWordMembership[language] = membership
+}
+
 const normalizedWord = (value: string, language: RecognitionLanguage) => {
   const lower = normalizeGermanSharpS(value).toLocaleLowerCase(LANGUAGE_PROFILES[language].locale)
   return language === 'de'
@@ -5371,6 +5390,17 @@ const lexicalWordEvidence = (value: string, language: RecognitionLanguage) => {
       word,
       knownWord: true,
       score: 1.22 + rank * 0.42 + Math.min(0.34, word.length * 0.045),
+    }
+  }
+
+  if (installedRecognitionWordMembership[language]?.(word)) {
+    // The exhaustive spelling list is corpus-filtered but unranked. It gets a
+    // meaningful exact-word bonus below the hand-curated common vocabulary;
+    // visual plausibility and the maximum-change guard remain mandatory.
+    return {
+      word,
+      knownWord: true,
+      score: 1.08 + Math.min(0.3, word.length * 0.035),
     }
   }
 
@@ -5480,13 +5510,18 @@ const textGeometryCandidateScore = (
   const hasLoop = closedStroke && horizontalSegment + verticalSegment + diagonalSegment >= 0.7
   const baselineOverflow = (y + height) - baseline
   const hasDescender = baselineOverflow >= referenceHeight * 0.08
+  const visuallyAllCaps = chunk.length >= 2 && chunk.every((entry) => /^\p{Lu}$/u.test(entry.char))
 
   if (/^\p{Lu}$/u.test(char)) {
-    if (position === 0) score += relativeHeight >= 1.08 ? 0.16 : -0.04
+    if (visuallyAllCaps) score += 0.22
+    else if (position === 0) score += relativeHeight >= 1.08 ? 0.16 : -0.04
     else score += relativeHeight >= 1.16 ? -0.04 : -0.28
   } else if (/^\p{Ll}$/u.test(char)) {
-    if (position > 0 && relativeHeight <= 1.12) score += 0.12
-    if (position === 0 && relativeHeight >= 1.2) score -= 0.08
+    if (visuallyAllCaps) score -= 0.1
+    else {
+      if (position > 0 && relativeHeight <= 1.12) score += 0.12
+      if (position === 0 && relativeHeight >= 1.2) score -= 0.08
+    }
   }
 
   if (char === 'f') score += hasCrossbar && hasTallStem ? 0.16 : -0.045
@@ -5852,6 +5887,10 @@ const rerankTextChunk = (
     /^\p{Lu}\p{Ll}{2,}$/u.test(visualWord) &&
     !lexicalWordEvidence(visualWord, language).knownWord
   )
+  const visualLooksLikeAcronym = (
+    /^\p{Lu}{2,}$/u.test(visualWord) &&
+    !lexicalWordEvidence(visualWord, language).knownWord
+  )
   const visualNameCharacters = Array.from(visualWord.toLocaleLowerCase(LANGUAGE_PROFILES[language].locale))
   const languageNameCharacters = Array.from(
     (languageBest?.value ?? '').toLocaleLowerCase(LANGUAGE_PROFILES[language].locale),
@@ -5860,12 +5899,17 @@ const rerankTextChunk = (
     ? visualNameCharacters.filter((character, index) => character !== languageNameCharacters[index]).length
     : Number.POSITIVE_INFINITY
   const languageOverwritesVisualName = Boolean(
-    visualLooksLikeProperName &&
     languageBest &&
     languageBest.value !== visualWord &&
     (
-      !/^\p{Lu}\p{Ll}{2,}$/u.test(languageBest.value) ||
-      visualNameChanges >= 2
+      visualLooksLikeAcronym ||
+      (
+        visualLooksLikeProperName &&
+        (
+          !/^\p{Lu}\p{Ll}{2,}$/u.test(languageBest.value) ||
+          visualNameChanges >= 2
+        )
+      )
     )
   )
   // A dictionary/prefix prior may disambiguate letters inside an ordinary
@@ -5878,6 +5922,13 @@ const rerankTextChunk = (
   const languageChangedIndexes = languageVisualLabels.flatMap((labelId, index) => (
     labelId === (chunk[index].visualLabelId ?? chunk[index].labelId) ? [] : [index]
   ))
+  const languageSemanticChangedIndexes = languageChangedIndexes.filter((index) => {
+    const visualLabel = labelMap.get(chunk[index].visualLabelId ?? chunk[index].labelId)
+    const selectedLabel = languageBest?.choices[index]?.label
+    if (!visualLabel || !selectedLabel) return true
+    return visualLabel.char.toLocaleLowerCase(LANGUAGE_PROFILES[language].locale) !==
+      selectedLabel.char.toLocaleLowerCase(LANGUAGE_PROFILES[language].locale)
+  })
   const languageChangedVisualLosses = languageChangedIndexes.map((index) => {
     const visualLabelId = chunk[index].visualLabelId ?? chunk[index].labelId
     const visualConfidence = chunk[index].visualConfidence ??
@@ -5890,7 +5941,13 @@ const rerankTextChunk = (
   const maximumLossPerChangedGlyph = shortWord ? 3 : 24
   const languageCorrectionHasVisualSupport = Boolean(
     languageBest?.evidence?.knownWord &&
-    languageChangedIndexes.length <= maximumLanguageChanges &&
+    // Correcting S→s inside a word does not spend the same ambiguity budget
+    // as replacing one glyph with another. Otherwise `EeSE` could never
+    // become the well-supported word `test`: its two actual t corrections
+    // were rejected only because the harmless case cleanup counted as a
+    // third replacement. Every changed glyph still has to remain visually
+    // plausible, so an unrelated lowercase tail cannot enter the beam.
+    languageSemanticChangedIndexes.length <= maximumLanguageChanges &&
     languageChangedVisualLosses.every((loss) => loss <= maximumLossPerChangedGlyph) &&
     languageChangedIndexes.every((index) => languageBest!.choices[index].confidence >= 32)
   )

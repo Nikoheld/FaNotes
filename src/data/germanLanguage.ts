@@ -19,7 +19,7 @@ zeit zeichen ziel zuhause zusammen notiz notizen papier abstand tabelle rechnen 
 anfang antwort brauchen diesem dinge eigentlich einfach einmal einige ersten fragen geben gemacht genau gesehen heute
 immer jeder keine machen möglich müssen natürlich neuen sagen sollen unter viele vielleicht wollen
 binnen bitte hallo guten morgen mittag nachmittag nacht willkommen tschüss gruss grüsse
-mathe mathematik informatik physik chemie biologie wirtschaft formel gleichung aufgabe bruch wurzel summe zahl zahlen buchstabe buchstaben symbol symbole
+mathe mathematik informatik physik chemie biologie wirtschaft formel gleichung aufgabe bruch wurzel summe zahl zahlen buchstabe buchstaben symbol symbole handschrift handschriften handschriftlich
 läuft läufts funktioniert erkannt verbessert verbessern korrekt korrektur modell zeichnen falsch lokal automatisch direkt
 äusserst ausserdem ändern ähnlich öffnen öffentlich grösste grösser grünen führen zurück übermorgen übung
 heiss heissen weiss weisst gross grossartig strasse strassen fuss grüsse süss schön schöner schönes

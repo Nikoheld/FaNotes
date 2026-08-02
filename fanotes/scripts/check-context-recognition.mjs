@@ -13,6 +13,7 @@ try {
     applyTextReranking,
     calibratePersonalBaseEvidence,
     groupRecognitionLines,
+    installRecognitionWordMembership,
     learnedStrokeCountHypothesisScore,
     recognizedLatex,
     recognizedSentence,
@@ -1618,6 +1619,18 @@ try {
   assert.equal(german[1].context?.autoLearn, true, 'Eine visuell plausible, eindeutige Kontextkorrektur soll lernbar sein.')
   assert.ok(german[1].context.scoreMargin >= 0.5)
 
+  const caseHeavyTest = [
+    token('E', 75, [['E', 75], ['t', 60]], 10),
+    token('e', 88, [['e', 88]], 11),
+    token('S', 75, [['S', 75], ['s', 61]], 12),
+    token('E', 75, [['E', 75], ['t', 60]], 13),
+  ]
+  assert.equal(
+    recognizedSentence(applyTextReranking(caseHeavyTest, BASE_CATALOG, 'de')),
+    'test',
+    'Eine reine S→s-Korrektur darf das Sicherheitsbudget für zwei visuell plausible echte Test-Korrekturen nicht verbrauchen.',
+  )
+
   const untrainedCalibration = calibratePersonalBaseEvidence({
     confidence: 82,
     baseConfidence: 82,
@@ -1762,6 +1775,30 @@ try {
     'fenster',
     'Ein höhengleicher innerer Buchstabe muss bei einer nahen Kleinbuchstabenform klein bleiben.',
   )
+  const visualAcronym = [...'NASA'].map((char, index) => token(
+    char,
+    91,
+    [[char, 91], [char.toLocaleLowerCase('en'), 76]],
+    180 + index,
+  ))
+  assert.equal(
+    recognizedSentence(applyTextReranking(visualAcronym, BASE_CATALOG, 'en')),
+    'NASA',
+    'Eine sichtbare unbekannte Grossbuchstabenabkürzung darf nicht als normales Kleinwort umgeschrieben werden.',
+  )
+  const exhaustiveQuality = [...'qualit/'].map((char, index) => token(
+    char,
+    char === '/' ? 69 : 88,
+    char === '/' ? [['/', 69], ['y', 66]] : [[char, 88]],
+    190 + index,
+  ))
+  installRecognitionWordMembership('en', (word) => word === 'quality')
+  assert.equal(
+    recognizedSentence(applyTextReranking(exhaustiveQuality, BASE_CATALOG, 'en')),
+    'quality',
+    'Das bereits geladene vollständige Rechtschreiblexikon muss eine visuell nahe OCR-Endung im klassischen Wortstrahl nutzbar machen.',
+  )
+  installRecognitionWordMembership('en', null)
   assert.equal(
     applyNeuralWordContext('leRnen und TEst', 'de'),
     'lernen und Test',

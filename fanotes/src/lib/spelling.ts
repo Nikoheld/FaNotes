@@ -1,4 +1,5 @@
 import type { DetectedTextLanguage, SpellingLanguage, SpellingResources } from '../types'
+import { installRecognitionWordMembership } from '../../../src/lib/recognition'
 import { installNeuralWordContextCandidates } from './neuralWordContext'
 
 export type SpellingSegment = { from: number; text: string }
@@ -201,7 +202,13 @@ const loadRecognitionCandidates = async (language: SpellingLanguage) => {
         previous = word
       })
       installNeuralWordContextCandidates(language, words)
-      return new Set(words)
+      const candidates = new Set(words)
+      // Share the already allocated set with the classical glyph beam. The
+      // callback adds no second word-list copy and is installed only on the
+      // first handwriting-OCR request, so normal application startup stays
+      // unchanged.
+      installRecognitionWordMembership(language, (word) => candidates.has(word))
+      return candidates
     }).catch((error) => {
       candidatePromises.delete(language)
       throw error
