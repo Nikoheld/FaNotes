@@ -6050,6 +6050,22 @@ const rerankTextChunk = (
   const languageBest = ranked[0]
   const visualBest = [...beams].sort((first, second) => second.visualScore - first.visualScore)[0]
   const visualWord = visualBest?.value ?? ''
+  const rawVisualWord = chunk.map((token) => (
+    labelMap.get(token.visualLabelId ?? token.labelId)?.char ?? token.char
+  )).join('')
+  const rawVisualEvidence = lexicalWordEvidence(rawVisualWord, language)
+  const rawVisualNormalized = rawVisualWord.toLocaleLowerCase(LANGUAGE_PROFILES[language].locale)
+  const rawVisualHasInternalUppercase = [...rawVisualWord].slice(1).some((character) => (
+    /^\p{Lu}$/u.test(character)
+  ))
+  const literalKnownVisualBeam = rawVisualEvidence.knownWord &&
+    rawVisualHasInternalUppercase &&
+    /^\p{Ll}/u.test(rawVisualWord) &&
+    /^\p{L}{2,}$/u.test(rawVisualWord)
+    ? ranked.find((beam) => (
+        beam.value.toLocaleLowerCase(LANGUAGE_PROFILES[language].locale) === rawVisualNormalized
+      ))
+    : undefined
   const visualLooksLikeProperName = (
     /^\p{Lu}\p{Ll}{2,}$/u.test(visualWord) &&
     !lexicalWordEvidence(visualWord, language).knownWord
@@ -6205,9 +6221,14 @@ const rerankTextChunk = (
   // language prior may resolve genuinely close shapes, but it cannot replace
   // multiple visible glyphs or pay a large visual penalty. Longer words keep
   // the wider one-letter ambiguity needed for corrections such as Tost→Test.
-  const best = languageOverwritesVisualName || (
+  let best = languageOverwritesVisualName || (
     languageChangedIndexes.length > 0 && !languageCorrectionHasVisualSupport
   ) ? visualBest : languageBest
+  if (
+    best &&
+    literalKnownVisualBeam &&
+    best.value.toLocaleLowerCase(LANGUAGE_PROFILES[language].locale) !== rawVisualNormalized
+  ) best = literalKnownVisualBeam
   if (!best) return
   const canonicalWordCharacters = [...(best.evidence?.word ?? '')]
   const visualCharacters = chunk.map((token) => (

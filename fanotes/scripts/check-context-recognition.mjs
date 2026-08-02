@@ -1849,6 +1849,26 @@ try {
   )
   installRecognitionWordCandidateProvider('en', null)
   installRecognitionWordMembership('en', null)
+  const lowercaseLiteralWithInternalCapital = [
+    token('y', 70, [['y', 70], ['f', 71]], 196),
+    token('e', 70, [['e', 70], ['o', 71]], 197),
+    token('l', 82, [['l', 82]], 198),
+    token('l', 82, [['l', 82]], 199),
+    token('o', 82, [['o', 82]], 200),
+    token('W', 78, [['W', 78], ['w', 65]], 201),
+  ]
+  const literalCaseWords = new Set(['follow', 'yellow'])
+  installRecognitionWordMembership('en', (word) => literalCaseWords.has(word))
+  installRecognitionWordCandidateProvider('en', (length) => (
+    length === 'yellow'.length ? [...literalCaseWords] : []
+  ))
+  assert.equal(
+    recognizedSentence(applyTextReranking(lowercaseLiteralWithInternalCapital, BASE_CATALOG, 'en')),
+    'yellow',
+    'Ein bereits wörtlich bekanntes Kleinwort darf wegen eines internen Case-Fehlers nicht zu einem anderen Wort driften.',
+  )
+  installRecognitionWordCandidateProvider('en', null)
+  installRecognitionWordMembership('en', null)
   const uncertainTitleCaseDictionaryWord = [...'Jrivat'].map((char, index) => token(
     char,
     index === 0 ? 68 : 84,
@@ -1947,11 +1967,18 @@ try {
     token('S', 72, [['S', 72], ['s', 66]], 230),
     token('E', 75, [['E', 75], ['t', 71]], 231),
   ]
+  const titleCompetitors = new Set(['else', 'test'])
+  installRecognitionWordMembership('en', (word) => titleCompetitors.has(word))
+  installRecognitionWordCandidateProvider('en', (length) => (
+    length === 'test'.length ? [...titleCompetitors] : []
+  ))
   assert.equal(
-    recognizedSentence(applyTextReranking(repeatedTitleAmbiguityWord, BASE_CATALOG, 'de')),
+    recognizedSentence(applyTextReranking(repeatedTitleAmbiguityWord, BASE_CATALOG, 'en')),
     'test',
     'Der Schutz unbekannter Titelwörter muss wiederholte gleiche Verwechslungen ebenso begrenzt gemeinsam bewerten.',
   )
+  installRecognitionWordCandidateProvider('en', null)
+  installRecognitionWordMembership('en', null)
   const beamStressExpected = 'mathematik'
   const beamStressVisual = 'nqvrematik'
   const beamStressDistractors = ['x', 'z', 'q', 'j', 'f', 'p', 'v']
