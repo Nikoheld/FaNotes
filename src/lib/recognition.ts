@@ -5382,9 +5382,12 @@ export const installRecognitionProperNameMembership = (
 
 const normalizedWord = (value: string, language: RecognitionLanguage) => {
   const lower = normalizeGermanSharpS(value).toLocaleLowerCase(LANGUAGE_PROFILES[language].locale)
-  return language === 'de'
-    ? lower.replace(/^[^a-zäöü]+|[^a-zäöü]+$/giu, '')
-    : lower.replace(/^[^a-z]+|[^a-z]+$/giu, '')
+  // Word chunks include closing punctuation before they are flushed, so a
+  // trailing comma/period must not suppress otherwise valid lexical evidence.
+  // Digits and mathematical symbols are not punctuation: stripping a final
+  // 0 previously made `FaLl0` look like the common word `fall`, allowing a
+  // mixed alphanumeric path to outrank the visibly supported name `Fabio`.
+  return lower.replace(/^\p{P}+|\p{P}+$/gu, '')
 }
 
 const languageTransitionScore = (
@@ -5447,7 +5450,7 @@ const lexicalWordEvidence = (value: string, language: RecognitionLanguage) => {
       properName: true,
       preferredName: true,
       coreWord: false,
-      score: 1.28 + Math.min(0.3, word.length * 0.035),
+      score: 1.46 + Math.min(0.3, word.length * 0.035),
     }
   }
   if (canonicalNameShape && installedRecognitionProperNameMembership[language]?.(word)) {

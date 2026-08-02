@@ -1909,6 +1909,18 @@ try {
     'Fabio',
     'Ein priorisierter häufiger Name muss drei nahe visuelle Fehler korrigieren können, ohne zu einem häufigen Fremdwort zu driften.',
   )
+  const alphanumericFakeWordAgainstFabio = [
+    token('F', 84, [['F', 84]], 205),
+    token('a', 84, [['a', 84]], 206),
+    token('h', 75, [['h', 75], ['L', 70], ['b', 60]], 207),
+    token('i', 75, [['i', 75], ['l', 74]], 208),
+    token('0', 79, [['0', 79], ['o', 74]], 209),
+  ]
+  assert.equal(
+    recognizedSentence(applyTextReranking(alphanumericFakeWordAgainstFabio, BASE_CATALOG, 'de')),
+    'Fabio',
+    'Eine Endziffer darf nicht entfernt werden und dadurch einem gemischten Pfad wie FaLl0 den Lexikonbonus von fall geben.',
+  )
   const confidentUnknownMarlo = [...'Marlo'].map((char, index) => token(
     char,
     92,
