@@ -5338,6 +5338,10 @@ const installedRecognitionWordMembership: Record<RecognitionLanguage, Recognitio
   de: null,
   en: null,
 }
+const installedRecognitionProperNameMembership: Record<RecognitionLanguage, RecognitionWordMembership | null> = {
+  de: null,
+  en: null,
+}
 
 /**
  * Connects the exhaustive, lazily loaded FaNotes spelling vocabulary to the
@@ -5350,6 +5354,14 @@ export const installRecognitionWordMembership = (
   membership: RecognitionWordMembership | null,
 ) => {
   installedRecognitionWordMembership[language] = membership
+}
+
+/** Installs a local corpus of canonical title-case names for OCR only. */
+export const installRecognitionProperNameMembership = (
+  language: RecognitionLanguage,
+  membership: RecognitionWordMembership | null,
+) => {
+  installedRecognitionProperNameMembership[language] = membership
 }
 
 const normalizedWord = (value: string, language: RecognitionLanguage) => {
@@ -5389,6 +5401,7 @@ const lexicalWordEvidence = (value: string, language: RecognitionLanguage) => {
     return {
       word,
       knownWord: true,
+      properName: false,
       score: 1.22 + rank * 0.42 + Math.min(0.34, word.length * 0.045),
     }
   }
@@ -5400,7 +5413,22 @@ const lexicalWordEvidence = (value: string, language: RecognitionLanguage) => {
     return {
       word,
       knownWord: true,
+      properName: false,
       score: 1.08 + Math.min(0.3, word.length * 0.035),
+    }
+  }
+  const canonicalNameShape = language === 'de'
+    ? /^[A-ZÄÖÜ][a-zäöü]{2,}$/u.test(value)
+    : /^[A-Z][a-z]{2,}$/u.test(value)
+  if (canonicalNameShape && installedRecognitionProperNameMembership[language]?.(word)) {
+    // Names have no reliable frequency rank. Their title-case shape and a
+    // corpus hit may resolve close glyphs, but the lower bonus keeps an
+    // ordinary common word and the visually correct unknown name ahead.
+    return {
+      word,
+      knownWord: true,
+      properName: true,
+      score: 0.98 + Math.min(0.26, word.length * 0.03),
     }
   }
 
@@ -5413,16 +5441,16 @@ const lexicalWordEvidence = (value: string, language: RecognitionLanguage) => {
     if (!word.endsWith(suffix) || word.length - suffix.length < 3) return false
     return profile.words.has(word.slice(0, -suffix.length))
   })
-  if (hasKnownStem) return { word, knownWord: false, score: 0.54 }
+  if (hasKnownStem) return { word, knownWord: false, properName: false, score: 0.54 }
 
   if (language === 'de' && word.length >= 7) {
     for (let split = 3; split <= word.length - 3; split += 1) {
       if (profile.words.has(word.slice(0, split)) && profile.words.has(word.slice(split))) {
-        return { word, knownWord: false, score: 0.62 }
+        return { word, knownWord: false, properName: false, score: 0.62 }
       }
     }
   }
-  return { word, knownWord: false, score: 0 }
+  return { word, knownWord: false, properName: false, score: 0 }
 }
 
 type TextBeam = {
@@ -5898,6 +5926,27 @@ const rerankTextChunk = (
   const visualNameChanges = visualNameCharacters.length === languageNameCharacters.length
     ? visualNameCharacters.filter((character, index) => character !== languageNameCharacters[index]).length
     : Number.POSITIVE_INFINITY
+  const canonicalNameChangedIndexes = languageBest?.choices.flatMap((candidate, index) => {
+    const visualLabel = labelMap.get(chunk[index].visualLabelId ?? chunk[index].labelId)
+    return visualLabel?.char.toLocaleLowerCase(LANGUAGE_PROFILES[language].locale) ===
+      candidate.label.char.toLocaleLowerCase(LANGUAGE_PROFILES[language].locale) ? [] : [index]
+  }) ?? []
+  const visuallyUncertainCanonicalNameCorrection = Boolean(
+    languageBest?.evidence?.properName &&
+    /^\p{Lu}\p{Ll}{2,}$/u.test(languageBest.value) &&
+    canonicalNameChangedIndexes.length >= 1 &&
+    canonicalNameChangedIndexes.length <= 2 &&
+    canonicalNameChangedIndexes.some((index) => (
+      (chunk[index].visualConfidence ?? chunk[index].confidence) <= 84
+    ))
+  )
+  const visuallyConfidentUnknownTitleCase = Boolean(
+    visualLooksLikeProperName &&
+    canonicalNameChangedIndexes.length >= 1 &&
+    canonicalNameChangedIndexes.every((index) => (
+      (chunk[index].visualConfidence ?? chunk[index].confidence) >= 88
+    ))
+  )
   const languageOverwritesVisualName = Boolean(
     languageBest &&
     languageBest.value !== visualWord &&
@@ -5906,8 +5955,14 @@ const rerankTextChunk = (
       (
         visualLooksLikeProperName &&
         (
-          !/^\p{Lu}\p{Ll}{2,}$/u.test(languageBest.value) ||
-          visualNameChanges >= 2
+          visuallyConfidentUnknownTitleCase ||
+          (
+            !visuallyUncertainCanonicalNameCorrection &&
+            (
+              !/^\p{Lu}\p{Ll}{2,}$/u.test(languageBest.value) ||
+              visualNameChanges >= 2
+            )
+          )
         )
       )
     )

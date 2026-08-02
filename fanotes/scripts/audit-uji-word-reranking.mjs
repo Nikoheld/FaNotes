@@ -35,10 +35,18 @@ try {
   assert.ok(Array.isArray(cases) && cases.length >= 124, 'Der UJI-Bericht enthält keine vollständigen Einzelfälle.')
   const {
     applyTextReranking,
+    installRecognitionProperNameMembership,
     installRecognitionWordMembership,
     recognizedSentence,
   } = await server.ssrLoadModule('/../src/lib/recognition.ts')
   const { BASE_CATALOG } = await server.ssrLoadModule('/../src/data/catalog.ts')
+  const { ENGLISH_CANONICAL_PROPER_NAMES } = await server.ssrLoadModule('/../src/data/englishProperNames.ts')
+  const { SUPPLEMENTAL_CANONICAL_PROPER_NAMES } = await server.ssrLoadModule('/../src/data/supplementalProperNames.ts')
+  const properNameMembership = (word) => (
+    ENGLISH_CANONICAL_PROPER_NAMES.has(word) || SUPPLEMENTAL_CANONICAL_PROPER_NAMES.has(word)
+  )
+  installRecognitionProperNameMembership('de', properNameMembership)
+  installRecognitionProperNameMembership('en', properNameMembership)
   for (const language of ['de', 'en']) {
     const wordsPath = path.join(appRoot, 'public', 'spell', `${language}.words`)
     const words = new Set(fs.readFileSync(wordsPath, 'utf8').trimEnd().split('\n'))

@@ -1,5 +1,10 @@
 import type { DetectedTextLanguage, SpellingLanguage, SpellingResources } from '../types'
-import { installRecognitionWordMembership } from '../../../src/lib/recognition'
+import { ENGLISH_CANONICAL_PROPER_NAMES } from '../../../src/data/englishProperNames'
+import { SUPPLEMENTAL_CANONICAL_PROPER_NAMES } from '../../../src/data/supplementalProperNames'
+import {
+  installRecognitionProperNameMembership,
+  installRecognitionWordMembership,
+} from '../../../src/lib/recognition'
 import { installNeuralWordContextCandidates } from './neuralWordContext'
 
 export type SpellingSegment = { from: number; text: string }
@@ -41,6 +46,11 @@ const EN_STOPWORDS = new Set([
   'it', 'not', 'of', 'on', 'or', 'she', 'that', 'the', 'this', 'to', 'was', 'we', 'were',
   'will', 'with', 'you',
 ])
+const canonicalProperName = (word: string) => (
+  ENGLISH_CANONICAL_PROPER_NAMES.has(word) || SUPPLEMENTAL_CANONICAL_PROPER_NAMES.has(word)
+)
+installRecognitionProperNameMembership('de', canonicalProperName)
+installRecognitionProperNameMembership('en', canonicalProperName)
 
 const normalizeWord = (word: string, language: SpellingLanguage) => {
   const normalized = word

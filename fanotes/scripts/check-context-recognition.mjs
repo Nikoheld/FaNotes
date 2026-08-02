@@ -13,6 +13,7 @@ try {
     applyTextReranking,
     calibratePersonalBaseEvidence,
     groupRecognitionLines,
+    installRecognitionProperNameMembership,
     installRecognitionWordMembership,
     learnedStrokeCountHypothesisScore,
     recognizedLatex,
@@ -1799,6 +1800,32 @@ try {
     'Das bereits geladene vollständige Rechtschreiblexikon muss eine visuell nahe OCR-Endung im klassischen Wortstrahl nutzbar machen.',
   )
   installRecognitionWordMembership('en', null)
+  const corpusBackedFabio = [
+    token('E', 72, [['E', 72], ['F', 68]], 200),
+    token('c', 78, [['c', 78], ['a', 74]], 201),
+    token('b', 88, [['b', 88]], 202),
+    token('i', 86, [['i', 86]], 203),
+    token('o', 89, [['o', 89]], 204),
+  ]
+  installRecognitionProperNameMembership('de', (word) => word === 'fabio')
+  assert.equal(
+    recognizedSentence(applyTextReranking(corpusBackedFabio, BASE_CATALOG, 'de')),
+    'Fabio',
+    'Ein corpusgestützter Name muss zwei nahe visuelle Fehler korrigieren können, ohne zu einem häufigen Fremdwort zu driften.',
+  )
+  const confidentUnknownMarlo = [...'Marlo'].map((char, index) => token(
+    char,
+    92,
+    char === 'l' ? [['l', 92], ['c', 89]] : [[char, 92]],
+    210 + index,
+  ))
+  installRecognitionProperNameMembership('de', (word) => word === 'marco')
+  assert.equal(
+    recognizedSentence(applyTextReranking(confidentUnknownMarlo, BASE_CATALOG, 'de')),
+    'Marlo',
+    'Ein visuell bereits sicherer unbekannter Name darf nicht zu einem ähnlichen corpusgestützten Namen umgeschrieben werden.',
+  )
+  installRecognitionProperNameMembership('de', null)
   assert.equal(
     applyNeuralWordContext('leRnen und TEst', 'de'),
     'lernen und Test',
