@@ -24,6 +24,12 @@ const requestedHoldoutWriterCount = Number(process.env.FANOTES_UJI_HOLDOUT_WRITE
 const holdoutWriterCount = Number.isFinite(requestedHoldoutWriterCount)
   ? Math.max(1, Math.min(12, Math.round(requestedHoldoutWriterCount)))
   : 1
+const holdoutWriterNames = [...new Set((process.env.FANOTES_UJI_HOLDOUT_WRITER_NAMES ?? '')
+  .split(',')
+  .map((writer) => writer.trim())
+  .filter((writer) => /^tst_(?:UJI|UPV)_W\d+$/u.test(writer)))]
+  .slice(0, 12)
+const includeCases = process.env.FANOTES_UJI_INCLUDE_CASES === '1'
 const requestedChromiumHeap = Number(process.env.FANOTES_UJI_CHROMIUM_HEAP_MB ?? 768)
 const chromiumHeap = Number.isFinite(requestedChromiumHeap)
   ? Math.max(384, Math.min(1_536, Math.round(requestedChromiumHeap)))
@@ -83,7 +89,11 @@ try {
   fs.writeFileSync(entryPath, [
     `import records from ${JSON.stringify(pathToFileURL(dataPath).href)}`,
     `import { runUjiPersonalRecognitionAudit } from ${JSON.stringify(pathToFileURL(path.join(appRoot, 'scripts/fixtures/uji-personal-recognition-harness.ts')).href)}`,
-    `runUjiPersonalRecognitionAudit(records, { writerIndependentHoldoutCount: ${holdoutWriterCount} }).then((result) => {`,
+    `runUjiPersonalRecognitionAudit(records, ${JSON.stringify({
+      writerIndependentHoldoutCount: holdoutWriterCount,
+      writerIndependentHoldoutNames: holdoutWriterNames,
+      includeCases,
+    })}).then((result) => {`,
     '  document.body.innerHTML = `<pre id="result">${JSON.stringify(result)}</pre>`',
     '}).catch((error) => {',
     '  document.body.innerHTML = `<pre id="error">${String(error?.stack || error)}</pre>`',
@@ -124,12 +134,15 @@ try {
       trainingSamples: result.personal.trainingSamples,
       samples: result.personal.samples,
       buildMs: result.personal.buildMs,
+      weights: result.personal.weights,
       accuracy: result.personal.accuracy,
       unhintedAccuracy: result.personal.unhintedAccuracy,
       caseNormalizedAccuracy: result.personal.caseNormalizedAccuracy,
       top3Accuracy: result.personal.top3Accuracy,
       top8Accuracy: result.personal.top8Accuracy,
       topConfusions: result.personal.topConfusions,
+      failures: result.personal.failures,
+      cases: result.personal.cases,
     },
     writerIndependent: {
       trainingWriters: result.writerIndependent.trainingWriters,
@@ -138,6 +151,7 @@ try {
       trainingSamples: result.writerIndependent.trainingSamples,
       samples: result.writerIndependent.samples,
       buildMs: result.writerIndependent.buildMs,
+      weights: result.writerIndependent.weights,
       accuracy: result.writerIndependent.accuracy,
       unhintedAccuracy: result.writerIndependent.unhintedAccuracy,
       caseNormalizedAccuracy: result.writerIndependent.caseNormalizedAccuracy,
@@ -145,6 +159,8 @@ try {
       top8Accuracy: result.writerIndependent.top8Accuracy,
       topConfusions: result.writerIndependent.topConfusions,
       confusions: result.writerIndependent.confusions,
+      failures: result.writerIndependent.failures,
+      cases: result.writerIndependent.cases,
       byWriter: result.writerIndependent.byWriter.map((entry) => ({
         writer: entry.writer,
         samples: entry.samples,
@@ -153,6 +169,9 @@ try {
         caseNormalizedAccuracy: entry.caseNormalizedAccuracy,
         top3Accuracy: entry.top3Accuracy,
         top8Accuracy: entry.top8Accuracy,
+        topConfusions: entry.topConfusions,
+        failures: entry.failures,
+        cases: entry.cases,
       })),
     },
   } : result, null, 2))

@@ -836,6 +836,75 @@ try {
     }
   }
 
+  const uppercaseYLabel = labelByChar.get('Y')
+  const lowercaseYLabel = labelByChar.get('y')
+  assert.ok(uppercaseYLabel && lowercaseYLabel)
+  const point = (x, y, t) => ({
+    x, y, t, pressure: 0.62, tiltX: 0, tiltY: 0, pointerType: 'pen',
+  })
+  const stroke = (coordinates, timeOffset) => ({
+    baseWidth: 3.7,
+    pressureEnabled: false,
+    points: coordinates.map(([x, y], index) => point(x, y, timeOffset + index)),
+  })
+  const compactYFork = [
+    stroke([[0.2, 0.2], [0.24, 0.3]], 0),
+    stroke([[0.28, 0.2], [0.24, 0.3]], 2),
+    stroke([[0.24, 0.3], [0.24, 0.4]], 4),
+  ]
+  const longLowercaseY = [
+    stroke([[0.2, 0.2], [0.23, 0.3], [0.26, 0.2]], 0),
+    stroke([[0.26, 0.2], [0.23, 0.48], [0.2, 0.4]], 3),
+  ]
+  const ambiguousIsolatedY = (strokes, uppercaseSupport = 8) => ({
+    id: 'isolated-y-case',
+    strokes,
+    imageData: '',
+    bbox: [0.2, 0.2, 0.08, 0.2],
+    labelId: uppercaseYLabel.id,
+    char: uppercaseYLabel.char,
+    name: uppercaseYLabel.name,
+    latex: uppercaseYLabel.latex,
+    confidence: 72,
+    baseConfidence: 65,
+    personalSupport: uppercaseSupport,
+    personalConfidence: 56,
+    alternatives: [{
+      labelId: uppercaseYLabel.id,
+      char: uppercaseYLabel.char,
+      name: uppercaseYLabel.name,
+      confidence: 72,
+      baseConfidence: 65,
+      personalSupport: uppercaseSupport,
+      personalConfidence: 56,
+    }, {
+      labelId: lowercaseYLabel.id,
+      char: lowercaseYLabel.char,
+      name: lowercaseYLabel.name,
+      confidence: 70,
+      baseConfidence: 70,
+      personalSupport: 8,
+      personalConfidence: 60,
+    }],
+    visualLabelId: uppercaseYLabel.id,
+    visualConfidence: 72,
+  })
+  assert.equal(
+    recognizedSentence(applyTextReranking([ambiguousIsolatedY(compactYFork)], BASE_CATALOG, 'de')),
+    'Y',
+    'Eine kompakte Y-Gabel muss bei gleichauf liegender visueller Evidenz gross bleiben.',
+  )
+  assert.equal(
+    recognizedSentence(applyTextReranking([ambiguousIsolatedY(longLowercaseY)], BASE_CATALOG, 'de')),
+    'y',
+    'Ein lang zurücklaufendes kleines y darf nicht durch die isolierte Y-Regel grossgeschrieben werden.',
+  )
+  assert.equal(
+    recognizedSentence(applyTextReranking([ambiguousIsolatedY(compactYFork, 0)], BASE_CATALOG, 'de')),
+    'y',
+    'Explizit trainierte Kleinbuchstaben dürfen nicht von einer untrainierten Grossbuchstabenform überschrieben werden.',
+  )
+
   // A short lowercase body after a tall capital sits lower by construction.
   // Even a stale learned "subscript" relation must not turn ordinary baseline
   // text into T_{e}; only a child visibly outside the base box is a script.

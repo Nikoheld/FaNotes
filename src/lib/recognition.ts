@@ -4399,7 +4399,7 @@ const textGeometryAdjustment = (labelId: string, cluster: StrokeCluster) => {
     stroke.width <= width * 0.48
   ))
   const bodyHeightRatio = Math.max(...strokeMetrics.map((stroke) => stroke.height / height), 0)
-  if (hasDotAccessory && bodyHeightRatio <= 0.68) {
+  if (hasDotAccessory && bodyHeightRatio <= 0.68 && aspect <= 0.46) {
     if (labelId === 'latin_lower_i') adjustment -= 0.035
     if (labelId === 'latin_lower_j') adjustment += 0.025
   } else if (hasDotAccessory && bodyHeightRatio >= 0.72) {
@@ -4444,8 +4444,8 @@ const textGeometryAdjustment = (labelId: string, cluster: StrokeCluster) => {
   }
   const tailedDigitSix = (
     cluster.strokes.length === 1 &&
-    aspect >= 1.12 &&
-    endpointGap >= 0.72 &&
+    aspect >= 1.18 &&
+    endpointGap >= 0.82 &&
     pathLength >= 1.72 &&
     pathLength <= 2.15
   )
@@ -4454,6 +4454,29 @@ const textGeometryAdjustment = (labelId: string, cluster: StrokeCluster) => {
     if (labelId === 'latin_upper_C') adjustment += 0.025
   }
   return adjustment
+}
+
+const resemblesCompactUppercaseY = (strokes: Stroke[]) => {
+  const cluster = clusterFromStrokes(strokes)
+  if (!cluster || cluster.strokes.length > 3) return false
+  const width = Math.max(1, (cluster.maxX - cluster.minX) * SOURCE_WIDTH)
+  const height = Math.max(1, (cluster.maxY - cluster.minY) * SOURCE_HEIGHT)
+  const aspect = width / height
+  if (aspect < 0.5 || aspect > 0.9) return false
+  const diagonal = Math.max(1, Math.hypot(width, height))
+  const pathLength = cluster.strokes.reduce((total, stroke) => (
+    total + stroke.points.slice(1).reduce((length, point, index) => (
+      length + Math.hypot(
+        (point.x - stroke.points[index].x) * SOURCE_WIDTH,
+        (point.y - stroke.points[index].y) * SOURCE_HEIGHT,
+      )
+    ), 0)
+  ), 0) / diagonal
+  // Upper-case Y is normally a compact fork and stem. A cursive lower-case y
+  // has either a distinctly narrower body or a much longer returning tail.
+  // This is only used as a same-letter case tie-breaker below; it never turns
+  // an unrelated leading class into Y on geometry alone.
+  return pathLength <= 1.84
 }
 
 const resemblesIntegralStroke = (stroke: Stroke) => {
@@ -5386,6 +5409,30 @@ const rerankTextChunk = (
       token.baseConfidence = selected.baseConfidence
       token.personalSupport = selected.personalSupport
       token.personalConfidence = selected.personalConfidence
+    }
+    const uppercaseY = token.char === 'y' && resemblesCompactUppercaseY(token.strokes)
+      ? token.alternatives
+          .filter((candidate) => candidate.char === 'Y')
+          .sort((first, second) => second.confidence - first.confidence)[0]
+      : undefined
+    if (
+      uppercaseY &&
+      uppercaseY.confidence >= token.confidence - 1 &&
+      (uppercaseY.baseConfidence ?? 0) >= (token.baseConfidence ?? 0) - 8 &&
+      (uppercaseY.personalConfidence ?? 0) >= (token.personalConfidence ?? 0) - 8 &&
+      (uppercaseY.personalSupport ?? 0) >= Math.min(2, token.personalSupport ?? 0)
+    ) {
+      const uppercaseLabel = labelMap.get(uppercaseY.labelId)
+      if (uppercaseLabel) {
+        token.labelId = uppercaseLabel.id
+        token.char = uppercaseLabel.char
+        token.name = uppercaseLabel.name
+        token.latex = uppercaseLabel.latex
+        token.confidence = Math.max(token.confidence, uppercaseY.confidence)
+        token.baseConfidence = uppercaseY.baseConfidence ?? 0
+        token.personalSupport = uppercaseY.personalSupport ?? 0
+        token.personalConfidence = uppercaseY.personalConfidence ?? 0
+      }
     }
     // A single isolated glyph has no word context. Running it through the
     // language beam previously lowercased trained P/S forms or changed digits

@@ -18,18 +18,29 @@ export type UjiRecord = {
 
 type UjiAuditOptions = {
   writerIndependentHoldoutCount?: number
+  writerIndependentHoldoutNames?: string[]
+  includeCases?: boolean
 }
 
 type AuditCase = {
+  writer: string
+  session: 1 | 2
   expected: string
   recognized: string
   recognizedWithoutHint: string
+  strokeCount: number
+  physicalAspect: number
+  normalizedLength: number
+  closedness: number
+  cornerness: number
   confidence: number
+  baseConfidence: number
   personalConfidence: number
   personalSupport: number
   alternatives: {
     char: string
     confidence: number
+    baseConfidence: number
     personalConfidence: number
     personalSupport: number
   }[]
@@ -195,7 +206,7 @@ export const ujiPersonalSample = (record: UjiRecord, index: number): Sample => {
   }
 }
 
-const summarize = (cases: AuditCase[]) => {
+const summarize = (cases: AuditCase[], includeCases = false) => {
   const failures = cases.filter((entry) => entry.recognized !== entry.expected)
   const rawFailures = cases.filter((entry) => entry.recognizedWithoutHint !== entry.expected)
   const caseNormalizedFailures = cases.filter((entry) => (
@@ -227,7 +238,69 @@ const summarize = (cases: AuditCase[]) => {
     top8Errors: topEightFailures.length,
     confusions: rankedConfusions,
     topConfusions: rankedConfusions.slice(0, 20),
-    failures: failures.slice(0, 30),
+    failures,
+    cases: includeCases ? cases : undefined,
+  }
+}
+
+const physicalAspectForAudit = (strokes: Stroke[]) => {
+  const points = strokes.flatMap((stroke) => stroke.points)
+  if (!points.length) return 1
+  const width = (
+    Math.max(...points.map((point) => point.x)) -
+    Math.min(...points.map((point) => point.x))
+  ) * SOURCE_WIDTH
+  const height = (
+    Math.max(...points.map((point) => point.y)) -
+    Math.min(...points.map((point) => point.y))
+  ) * SOURCE_HEIGHT
+  return Math.max(0.035, Math.min(12, width / Math.max(1, height)))
+}
+
+const geometryFromStrokesForAudit = (strokes: Stroke[]) => {
+  const points = strokes.flatMap((stroke) => stroke.points)
+  if (!points.length) return { normalizedLength: 0, closedness: 0, cornerness: 0 }
+  const pixelX = (value: number) => value * SOURCE_WIDTH
+  const pixelY = (value: number) => value * SOURCE_HEIGHT
+  const minX = Math.min(...points.map((point) => pixelX(point.x)))
+  const maxX = Math.max(...points.map((point) => pixelX(point.x)))
+  const minY = Math.min(...points.map((point) => pixelY(point.y)))
+  const maxY = Math.max(...points.map((point) => pixelY(point.y)))
+  const diagonal = Math.max(1, Math.hypot(maxX - minX, maxY - minY))
+  let totalLength = 0
+  let closedness = 0
+  let cornerness = 0
+  let cornerCount = 0
+  strokes.forEach((stroke) => {
+    for (let index = 1; index < stroke.points.length; index += 1) {
+      const previous = stroke.points[index - 1]
+      const point = stroke.points[index]
+      totalLength += Math.hypot(pixelX(point.x - previous.x), pixelY(point.y - previous.y))
+    }
+    for (let index = 2; index < stroke.points.length; index += 1) {
+      const first = stroke.points[index - 2]
+      const middle = stroke.points[index - 1]
+      const last = stroke.points[index]
+      const firstAngle = Math.atan2(pixelY(middle.y - first.y), pixelX(middle.x - first.x))
+      const secondAngle = Math.atan2(pixelY(last.y - middle.y), pixelX(last.x - middle.x))
+      let turn = Math.abs(secondAngle - firstAngle)
+      if (turn > Math.PI) turn = Math.PI * 2 - turn
+      cornerness += turn / Math.PI
+      cornerCount += 1
+    }
+    if (stroke.points.length > 1) {
+      const first = stroke.points[0]
+      const last = stroke.points.at(-1)!
+      closedness += 1 - Math.min(1, Math.hypot(
+        pixelX(last.x - first.x),
+        pixelY(last.y - first.y),
+      ) / diagonal)
+    }
+  })
+  return {
+    normalizedLength: Math.min(1, totalLength / (diagonal * 4)),
+    closedness: strokes.length ? closedness / strokes.length : 0,
+    cornerness: cornerCount ? Math.min(1, cornerness / cornerCount * 2) : 0,
   }
 }
 
@@ -236,18 +309,26 @@ const runCases = (
   model: Awaited<ReturnType<typeof buildRecognitionModel>>,
 ): AuditCase[] => records.map((record) => {
   const strokes = normalizedUjiStrokes(record)
+  const geometry = geometryFromStrokesForAudit(strokes)
   const hinted = recognizeExpression(strokes, model, BASE_CATALOG, 'text', [], 'en', 1)
   const unhinted = recognizeExpression(strokes, model, BASE_CATALOG, 'text', [], 'en')
   return {
+    writer: record.writer,
+    session: record.session,
     expected: record.char,
     recognized: recognizedSentence(hinted),
     recognizedWithoutHint: recognizedSentence(unhinted),
+    strokeCount: strokes.length,
+    physicalAspect: physicalAspectForAudit(strokes),
+    ...geometry,
     confidence: hinted[0]?.confidence ?? 0,
+    baseConfidence: hinted[0]?.baseConfidence ?? 0,
     personalConfidence: hinted[0]?.personalConfidence ?? 0,
     personalSupport: hinted[0]?.personalSupport ?? 0,
     alternatives: hinted[0]?.alternatives.slice(0, 8).map((entry) => ({
       char: entry.char,
       confidence: entry.confidence,
+      baseConfidence: entry.baseConfidence ?? 0,
       personalConfidence: entry.personalConfidence ?? 0,
       personalSupport: entry.personalSupport ?? 0,
     })) ?? [],
@@ -275,12 +356,16 @@ export const runUjiPersonalRecognitionAudit = async (
 
   const trainingWriters = writers.filter((writer) => writer.startsWith('trn_')).slice(0, 8)
   const writerIndependentCandidates = writers.filter((writer) => !trainingWriters.includes(writer))
-  const requestedHoldoutWriters = writerIndependentCandidates
-    .filter((writer) => writer.startsWith('tst_'))
-    .slice(0, Math.max(1, Math.min(
-      writerIndependentCandidates.length,
-      Math.round(options.writerIndependentHoldoutCount ?? 1),
-    )))
+  const eligibleHoldoutWriters = writerIndependentCandidates.filter((writer) => writer.startsWith('tst_'))
+  const explicitHoldoutWriters = [...new Set(options.writerIndependentHoldoutNames ?? [])]
+    .filter((writer) => eligibleHoldoutWriters.includes(writer))
+    .slice(0, 12)
+  const requestedHoldoutWriters = explicitHoldoutWriters.length
+    ? explicitHoldoutWriters
+    : eligibleHoldoutWriters.slice(0, Math.max(1, Math.min(
+        writerIndependentCandidates.length,
+        Math.round(options.writerIndependentHoldoutCount ?? 1),
+      )))
   const holdoutWriters = requestedHoldoutWriters.length
     ? requestedHoldoutWriters
     : writerIndependentCandidates.slice(0, 1)
@@ -302,9 +387,10 @@ export const runUjiPersonalRecognitionAudit = async (
       holdoutSamples: personalHoldout.length,
       retainedSamples: personalModel.filter((entry) => !entry.standard).length,
       buildMs: personalBuildMs,
+      weights: personalModel.weights,
       estimatedAccuracy: personalModel.estimatedAccuracy,
       evaluatedSamples: personalModel.evaluatedSamples,
-      ...summarize(personalCases),
+      ...summarize(personalCases, options.includeCases),
     },
     writerIndependent: {
       trainingWriters,
@@ -314,12 +400,16 @@ export const runUjiPersonalRecognitionAudit = async (
       holdoutSamples: largeHoldout.length,
       retainedSamples: largeModel.filter((entry) => !entry.standard).length,
       buildMs: largeBuildMs,
+      weights: largeModel.weights,
       estimatedAccuracy: largeModel.estimatedAccuracy,
       evaluatedSamples: largeModel.evaluatedSamples,
-      ...summarize(largeCases),
+      ...summarize(largeCases, options.includeCases),
       byWriter: holdoutWriters.map((writer) => ({
         writer,
-        ...summarize(largeCases.filter((_entry, index) => largeHoldout[index]?.writer === writer)),
+        ...summarize(
+          largeCases.filter((_entry, index) => largeHoldout[index]?.writer === writer),
+          options.includeCases,
+        ),
       })),
     },
   }
