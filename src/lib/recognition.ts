@@ -4497,6 +4497,35 @@ const resemblesNarrowUndottedUppercaseI = (strokes: Stroke[]) => {
   return pathLength <= 1.22
 }
 
+const resemblesDetachedDotLowercaseJ = (strokes: Stroke[]) => {
+  const cluster = clusterFromStrokes(strokes)
+  if (!cluster || cluster.strokes.length !== 2) return false
+  const width = Math.max(1, (cluster.maxX - cluster.minX) * SOURCE_WIDTH)
+  const height = Math.max(1, (cluster.maxY - cluster.minY) * SOURCE_HEIGHT)
+  if (width / height > 0.65) return false
+  const measured = cluster.strokes
+    .map((stroke) => {
+      const bounds = strokeBounds(stroke)
+      return {
+        bounds,
+        extent: Math.max(
+          (bounds.maxX - bounds.minX) * SOURCE_WIDTH,
+          (bounds.maxY - bounds.minY) * SOURCE_HEIGHT,
+        ),
+      }
+    })
+    .sort((first, second) => second.extent - first.extent)
+  const [body, dot] = measured
+  if (!body || !dot) return false
+  const bodyHeight = (body.bounds.maxY - body.bounds.minY) * SOURCE_HEIGHT
+  if (bodyHeight < height * 0.62) return false
+  if (dot.extent > Math.max(60, body.extent * 0.55)) return false
+  // A real delayed point remains compact and above its own tall body. This
+  // rejects upper-case J bars and tiny stray marks near short v/n bodies while
+  // retaining dots drawn as a point, hook or small loop.
+  return resemblesTextDotPair(body.bounds, dot.bounds)
+}
+
 const resemblesIntegralStroke = (stroke: Stroke) => {
   if (stroke.points.length < 4) return false
   const bounds = strokeBounds(stroke)
@@ -5427,6 +5456,31 @@ const rerankTextChunk = (
       token.baseConfidence = selected.baseConfidence
       token.personalSupport = selected.personalSupport
       token.personalConfidence = selected.personalConfidence
+    }
+    const dottedLowercaseJ = token.char !== 'i' && token.char !== 'j' &&
+      resemblesDetachedDotLowercaseJ(token.strokes)
+      ? token.alternatives
+          .filter((candidate) => candidate.char === 'j')
+          .sort((first, second) => second.confidence - first.confidence)[0]
+      : undefined
+    if (
+      dottedLowercaseJ &&
+      dottedLowercaseJ.confidence >= token.confidence - 12 &&
+      (dottedLowercaseJ.baseConfidence ?? 0) >= (token.baseConfidence ?? 0) - 24 &&
+      (dottedLowercaseJ.personalConfidence ?? 0) >= (token.personalConfidence ?? 0) - 36 &&
+      (dottedLowercaseJ.personalSupport ?? 0) >= Math.min(2, token.personalSupport ?? 0)
+    ) {
+      const lowercaseLabel = labelMap.get(dottedLowercaseJ.labelId)
+      if (lowercaseLabel) {
+        token.labelId = lowercaseLabel.id
+        token.char = lowercaseLabel.char
+        token.name = lowercaseLabel.name
+        token.latex = lowercaseLabel.latex
+        token.confidence = Math.max(token.confidence, dottedLowercaseJ.confidence)
+        token.baseConfidence = dottedLowercaseJ.baseConfidence ?? 0
+        token.personalSupport = dottedLowercaseJ.personalSupport ?? 0
+        token.personalConfidence = dottedLowercaseJ.personalConfidence ?? 0
+      }
     }
     const uppercaseY = token.char === 'y' && resemblesCompactUppercaseY(token.strokes)
       ? token.alternatives

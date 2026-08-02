@@ -957,6 +957,83 @@ try {
     'i',
     'Ein untrainiertes grosses I darf ein ausdrücklich trainiertes kleines i nicht überschreiben.',
   )
+  const dottedJBody = stroke([[0.24, 0.27], [0.24, 0.41], [0.22, 0.46]], 0)
+  const compactJDot = stroke([[0.24, 0.2]], 4)
+  const dottedJShape = [dottedJBody, compactJDot]
+  const ambiguousDottedJ = (selectedChar, strokes, lowercaseSupport = 8) => {
+    const selectedLabel = labelByChar.get(selectedChar)
+    const lowercaseJLabel = labelByChar.get('j')
+    assert.ok(selectedLabel && lowercaseJLabel)
+    return {
+      id: `isolated-dotted-j-${selectedChar}`,
+      strokes,
+      imageData: '',
+      bbox: [0.2, 0.2, 0.06, 0.27],
+      labelId: selectedLabel.id,
+      char: selectedLabel.char,
+      name: selectedLabel.name,
+      latex: selectedLabel.latex,
+      confidence: 76,
+      baseConfidence: 44,
+      personalSupport: 8,
+      personalConfidence: 70,
+      alternatives: [{
+        labelId: selectedLabel.id,
+        char: selectedLabel.char,
+        name: selectedLabel.name,
+        confidence: 76,
+        baseConfidence: 44,
+        personalSupport: 8,
+        personalConfidence: 70,
+      }, {
+        labelId: lowercaseJLabel.id,
+        char: lowercaseJLabel.char,
+        name: lowercaseJLabel.name,
+        confidence: 72,
+        baseConfidence: 38,
+        personalSupport: lowercaseSupport,
+        personalConfidence: 50,
+      }],
+      visualLabelId: selectedLabel.id,
+      visualConfidence: 76,
+    }
+  }
+  assert.equal(
+    recognizedSentence(applyTextReranking([ambiguousDottedJ('J', dottedJShape)], BASE_CATALOG, 'de')),
+    'j',
+    'Ein unabhängiger kompakter Punkt über einem hohen j-Körper muss eine falsche Gross-J-Wahl korrigieren.',
+  )
+  assert.equal(
+    recognizedSentence(applyTextReranking([ambiguousDottedJ('5', dottedJShape)], BASE_CATALOG, 'de')),
+    'j',
+    'Ein klar gepunkteter j-Körper darf nicht als Ziffer 5 bestehen bleiben.',
+  )
+  assert.equal(
+    recognizedSentence(applyTextReranking([ambiguousDottedJ('5', dottedJShape, 0)], BASE_CATALOG, 'de')),
+    '5',
+    'Ein ausdrücklich trainiertes Nicht-j-Zeichen darf nicht von einem untrainierten j-Kandidaten überschrieben werden.',
+  )
+  const shortArtifactBody = stroke([[0.2, 0.41], [0.25, 0.45], [0.3, 0.41]], 0)
+  const distantArtifact = stroke([[0.29, 0.2]], 4)
+  assert.equal(
+    recognizedSentence(applyTextReranking([
+      ambiguousDottedJ('v', [shortArtifactBody, distantArtifact]),
+    ], BASE_CATALOG, 'de')),
+    'v',
+    'Ein kleiner Artefaktpunkt über einem kurzen Buchstabenkörper darf kein j erfinden.',
+  )
+  const uppercaseJWithBar = [
+    stroke([[0.25, 0.25], [0.25, 0.43], [0.22, 0.46]], 0),
+    stroke([[0.2, 0.25], [0.28, 0.25]], 4),
+    stroke([[0.21, 0.2]], 6),
+  ]
+  assert.equal(
+    recognizedSentence(applyTextReranking([
+      ambiguousDottedJ('J', uppercaseJWithBar),
+    ], BASE_CATALOG, 'de')),
+    'J',
+    'Ein grosses J mit eigenem oberen Balken und Zusatzmarke darf nicht kleingeschrieben werden.',
+  )
 
   // A short lowercase body after a tall capital sits lower by construction.
   // Even a stale learned "subscript" relation must not turn ordinary baseline
