@@ -1090,6 +1090,67 @@ try {
     'j',
     'Ein normal breites, unten gekrümmtes j darf nicht von der extrem schmalen i-Regel verändert werden.',
   )
+  const digitTwoLabel = labelByChar.get('2')
+  const lowercaseZLabel = labelByChar.get('z')
+  assert.ok(digitTwoLabel && lowercaseZLabel)
+  const twoStrokeZShape = [
+    stroke([[0.2, 0.2], [0.3, 0.2]], 0),
+    stroke([[0.3, 0.2], [0.2, 0.4], [0.3, 0.4]], 2),
+  ]
+  const ambiguousTwoStrokeZ = (strokes, lowercaseSupport = 16) => ({
+    id: 'isolated-two-stroke-z',
+    strokes,
+    imageData: '',
+    bbox: [0.2, 0.2, 0.1, 0.2],
+    labelId: digitTwoLabel.id,
+    char: digitTwoLabel.char,
+    name: digitTwoLabel.name,
+    latex: digitTwoLabel.latex,
+    confidence: 76,
+    baseConfidence: 34,
+    personalSupport: 16,
+    personalConfidence: 50,
+    alternatives: [{
+      labelId: digitTwoLabel.id,
+      char: digitTwoLabel.char,
+      name: digitTwoLabel.name,
+      confidence: 76,
+      baseConfidence: 34,
+      personalSupport: 16,
+      personalConfidence: 50,
+    }, {
+      labelId: lowercaseZLabel.id,
+      char: lowercaseZLabel.char,
+      name: lowercaseZLabel.name,
+      confidence: 67,
+      baseConfidence: 42,
+      personalSupport: lowercaseSupport,
+      personalConfidence: lowercaseSupport ? 49 : 0,
+    }],
+    visualLabelId: digitTwoLabel.id,
+    visualConfidence: 76,
+  })
+  assert.equal(
+    recognizedSentence(applyTextReranking([
+      ambiguousTwoStrokeZ(twoStrokeZShape),
+    ], BASE_CATALOG, 'de')),
+    'z',
+    'Ein visuell gestütztes zweistrichiges z darf nicht als einstrichige Ziffer 2 bestehen bleiben.',
+  )
+  assert.equal(
+    recognizedSentence(applyTextReranking([
+      ambiguousTwoStrokeZ(twoStrokeZShape, 0),
+    ], BASE_CATALOG, 'de')),
+    '2',
+    'Ein untrainiertes z darf eine ausdrücklich trainierte zweistrichige Ziffer 2 nicht überschreiben.',
+  )
+  assert.equal(
+    recognizedSentence(applyTextReranking([
+      ambiguousTwoStrokeZ([stroke([[0.2, 0.2], [0.3, 0.28], [0.2, 0.4], [0.3, 0.4]], 0)]),
+    ], BASE_CATALOG, 'de')),
+    '2',
+    'Eine normale einstrichige Ziffer 2 darf nicht durch den z-Strichzahlbeleg verändert werden.',
+  )
 
   // A short lowercase body after a tall capital sits lower by construction.
   // Even a stale learned "subscript" relation must not turn ordinary baseline

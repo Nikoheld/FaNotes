@@ -5536,6 +5536,38 @@ const rerankTextChunk = (
         token.personalConfidence = dottedLowercaseJ.personalConfidence ?? 0
       }
     }
+    const twoStrokeZ = token.char === '2' && token.strokes.length === 2
+      ? token.alternatives
+          .filter((candidate) => candidate.char === 'z' || candidate.char === 'Z')
+          .sort((first, second) => (
+            (second.personalConfidence ?? 0) - (first.personalConfidence ?? 0) ||
+            (second.baseConfidence ?? 0) - (first.baseConfidence ?? 0) ||
+            second.confidence - first.confidence
+          ))[0]
+      : undefined
+    if (
+      twoStrokeZ &&
+      twoStrokeZ.confidence >= token.confidence - 10 &&
+      (twoStrokeZ.baseConfidence ?? 0) >= (token.baseConfidence ?? 0) + 4 &&
+      (twoStrokeZ.personalConfidence ?? 0) >= (token.personalConfidence ?? 0) - 2 &&
+      (twoStrokeZ.personalSupport ?? 0) >= Math.min(2, token.personalSupport ?? 0)
+    ) {
+      // In the complete UJI corpus every digit 2 is a single trajectory,
+      // whereas 202/240 z/Z forms use two strokes. Requiring independent
+      // baseline and personal evidence keeps a deliberately trained
+      // two-stroke digit intact while recovering the characteristic z form.
+      const zLabel = labelMap.get(twoStrokeZ.labelId)
+      if (zLabel) {
+        token.labelId = zLabel.id
+        token.char = zLabel.char
+        token.name = zLabel.name
+        token.latex = zLabel.latex
+        token.confidence = Math.max(token.confidence, twoStrokeZ.confidence)
+        token.baseConfidence = twoStrokeZ.baseConfidence ?? 0
+        token.personalSupport = twoStrokeZ.personalSupport ?? 0
+        token.personalConfidence = twoStrokeZ.personalConfidence ?? 0
+      }
+    }
     const uppercaseY = token.char === 'y' && resemblesCompactUppercaseY(token.strokes)
       ? token.alternatives
           .filter((candidate) => candidate.char === 'Y')
