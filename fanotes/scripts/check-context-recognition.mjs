@@ -1197,8 +1197,13 @@ try {
       { strokeCountFit: 1, strokeCountSupport: 16 },
     ]) - learnedStrokeCountHypothesisScore([
       { strokeCountFit: 0, strokeCountSupport: 16 },
-    ]) >= 0.17,
-    'Zwei gut gelernte Buchstabenteile müssen bei sonst knapper Bewertung einen nie beobachteten Gesamtglyphenpfad überstimmen können.',
+    ]) >= 0.075,
+    'Zwei gut gelernte Buchstabenteile müssen bei sonst knapper Bewertung einen unbestätigten Gesamtglyphenpfad überstimmen können.',
+  )
+  assert.equal(
+    learnedStrokeCountHypothesisScore([{ strokeCountFit: 0, strokeCountSupport: 16 }]),
+    0,
+    'Eine echte neue Strichvariante muss bis zu ihrer ersten Bestätigung neutral bleiben.',
   )
   assert.equal(
     learnedStrokeCountHypothesisScore([{ strokeCountFit: 1, strokeCountSupport: 7 }]),

@@ -5473,7 +5473,9 @@ const learnedStrokeCountCandidateScore = (candidate: TextCandidate) => {
   if (candidate.strokeCountSupport < 8) return 0
   const strength = clamp((candidate.strokeCountSupport - 4) / 12, 0.25, 1)
   if (candidate.strokeCountFit >= 0.85) return 0.07 * strength
-  if (candidate.strokeCountFit === 0) return -0.08 * strength
+  // A never-observed count is not negative evidence: cross-writer UJI
+  // validation contains legitimate unseen variants. Confirmed common forms
+  // receive a bonus, while rare/new forms stay neutral and remain learnable.
   return 0
 }
 
@@ -5487,7 +5489,6 @@ export const learnedStrokeCountHypothesisScore = (
     const strength = clamp((support - 4) / 12, 0.25, 1)
     const fit = token.strokeCountFit ?? 0
     if (fit >= 0.85) return score + 0.08 * strength
-    if (fit === 0) return score - 0.1 * strength
     return score
   }, 0) / supported.length
 }
