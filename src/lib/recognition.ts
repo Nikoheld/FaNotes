@@ -6141,6 +6141,18 @@ const rerankTextChunk = (
     return visualLabel.char.toLocaleLowerCase(LANGUAGE_PROFILES[language].locale) !==
       selectedLabel.char.toLocaleLowerCase(LANGUAGE_PROFILES[language].locale)
   })
+  const languageSemanticChangeKinds = new Set(languageSemanticChangedIndexes.map((index) => {
+    const visualLabel = labelMap.get(chunk[index].visualLabelId ?? chunk[index].labelId)
+    const selectedLabel = languageBest?.choices[index]?.label
+    return `${visualLabel?.char.toLocaleLowerCase(LANGUAGE_PROFILES[language].locale) ?? '?'}>` +
+      (selectedLabel?.char.toLocaleLowerCase(LANGUAGE_PROFILES[language].locale) ?? '?')
+  }))
+  const repeatedSemanticChanges = Math.max(
+    0,
+    languageSemanticChangedIndexes.length - languageSemanticChangeKinds.size,
+  )
+  const languageEffectiveSemanticChanges = languageSemanticChangeKinds.size +
+    Math.floor(repeatedSemanticChanges * 0.5)
   const languageChangedVisualLosses = languageChangedIndexes.map((index) => {
     const visualLabelId = chunk[index].visualLabelId ?? chunk[index].labelId
     const visualConfidence = chunk[index].visualConfidence ??
@@ -6164,7 +6176,13 @@ const rerankTextChunk = (
     // were rejected only because the harmless case cleanup counted as a
     // third replacement. Every changed glyph still has to remain visually
     // plausible, so an unrelated lowercase tail cannot enter the beam.
-    languageSemanticChangedIndexes.length <= maximumLanguageChanges &&
+    // Repeated occurrences of the same visual confusion share one ambiguity
+    // decision. If this writer's m repeatedly resembles e in one word,
+    // charging the full budget for every occurrence rejects coherent words
+    // such as `lernen` even though every individual e remains a close visual
+    // candidate. Different substitutions still consume separate budget and
+    // every occurrence must independently pass the confidence/loss gates.
+    languageEffectiveSemanticChanges <= maximumLanguageChanges &&
     languageChangedVisualLosses.every((loss) => loss <= maximumLossPerChangedGlyph) &&
     languageChangedIndexes.every((index) => languageBest!.choices[index].confidence >= 32)
   )

@@ -1874,6 +1874,20 @@ try {
     'handschrift',
     'Ein langes Kernwort darf fünf einzeln visuell plausible Fehler gemeinsam korrigieren.',
   )
+  const repeatedAmbiguityWord = [...'lmrumu'].map((char, index) => {
+    const expected = [...'lernen'][index]
+    return token(
+      char,
+      char === expected ? 84 : 70,
+      char === expected ? [[char, 84]] : [[char, 70], [expected, 60]],
+      225 + index,
+    )
+  })
+  assert.equal(
+    recognizedSentence(applyTextReranking(repeatedAmbiguityWord, BASE_CATALOG, 'de')),
+    'lernen',
+    'Wiederholte gleiche visuelle Verwechslungen in einem Wort müssen eine gemeinsame Ambiguitätsentscheidung nutzen.',
+  )
   const beamStressExpected = 'mathematik'
   const beamStressVisual = 'nqvrematik'
   const beamStressDistractors = ['x', 'z', 'q', 'j', 'f', 'p', 'v']
@@ -1908,6 +1922,25 @@ try {
     exhaustiveOnlyVisual,
     'Ein beliebiger Treffer im grossen Rechtschreiblexikon darf nicht fünf sichtbare Buchstaben überschreiben.',
   )
+  installRecognitionWordMembership('en', null)
+  const repeatedOverreachTarget = 'ssssssss'
+  const repeatedOverreachVisual = 'aaaaaaaa'
+  const repeatedOverreachWord = [...repeatedOverreachVisual].map((char, index) => token(
+    char,
+    70,
+    [['a', 70], ['s', 64]],
+    255 + index,
+  ))
+  installRecognitionWordMembership('en', (word) => word === repeatedOverreachTarget)
+  installRecognitionWordCandidateProvider('en', (length) => (
+    length === repeatedOverreachTarget.length ? [repeatedOverreachTarget] : []
+  ))
+  assert.equal(
+    recognizedSentence(applyTextReranking(repeatedOverreachWord, BASE_CATALOG, 'en')),
+    repeatedOverreachVisual,
+    'Wiederholte gleiche Alternativen dürfen das Korrekturbudget nicht unbegrenzt umgehen.',
+  )
+  installRecognitionWordCandidateProvider('en', null)
   installRecognitionWordMembership('en', null)
   assert.equal(
     applyNeuralWordContext('leRnen und TEst', 'de'),
