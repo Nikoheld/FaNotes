@@ -4479,6 +4479,24 @@ const resemblesCompactUppercaseY = (strokes: Stroke[]) => {
   return pathLength <= 1.87
 }
 
+const resemblesNarrowUndottedUppercaseI = (strokes: Stroke[]) => {
+  const cluster = clusterFromStrokes(strokes)
+  if (!cluster || cluster.strokes.length !== 1) return false
+  const width = Math.max(1, (cluster.maxX - cluster.minX) * SOURCE_WIDTH)
+  const height = Math.max(1, (cluster.maxY - cluster.minY) * SOURCE_HEIGHT)
+  const aspect = width / height
+  if (aspect > 0.17) return false
+  const diagonal = Math.max(1, Math.hypot(width, height))
+  const stroke = cluster.strokes[0]
+  const pathLength = stroke.points.slice(1).reduce((length, point, index) => (
+    length + Math.hypot(
+      (point.x - stroke.points[index].x) * SOURCE_WIDTH,
+      (point.y - stroke.points[index].y) * SOURCE_HEIGHT,
+    )
+  ), 0) / diagonal
+  return pathLength <= 1.22
+}
+
 const resemblesIntegralStroke = (stroke: Stroke) => {
   if (stroke.points.length < 4) return false
   const bounds = strokeBounds(stroke)
@@ -5432,6 +5450,30 @@ const rerankTextChunk = (
         token.baseConfidence = uppercaseY.baseConfidence ?? 0
         token.personalSupport = uppercaseY.personalSupport ?? 0
         token.personalConfidence = uppercaseY.personalConfidence ?? 0
+      }
+    }
+    const uppercaseI = token.char === 'i' && resemblesNarrowUndottedUppercaseI(token.strokes)
+      ? token.alternatives
+          .filter((candidate) => candidate.char === 'I')
+          .sort((first, second) => second.confidence - first.confidence)[0]
+      : undefined
+    if (
+      uppercaseI &&
+      uppercaseI.confidence >= token.confidence - 4 &&
+      (uppercaseI.baseConfidence ?? 0) >= (token.baseConfidence ?? 0) + 4 &&
+      (uppercaseI.personalConfidence ?? 0) >= (token.personalConfidence ?? 0) - 16 &&
+      (uppercaseI.personalSupport ?? 0) >= Math.min(2, token.personalSupport ?? 0)
+    ) {
+      const uppercaseLabel = labelMap.get(uppercaseI.labelId)
+      if (uppercaseLabel) {
+        token.labelId = uppercaseLabel.id
+        token.char = uppercaseLabel.char
+        token.name = uppercaseLabel.name
+        token.latex = uppercaseLabel.latex
+        token.confidence = Math.max(token.confidence, uppercaseI.confidence)
+        token.baseConfidence = uppercaseI.baseConfidence ?? 0
+        token.personalSupport = uppercaseI.personalSupport ?? 0
+        token.personalConfidence = uppercaseI.personalConfidence ?? 0
       }
     }
     // A single isolated glyph has no word context. Running it through the

@@ -904,6 +904,59 @@ try {
     'y',
     'Explizit trainierte Kleinbuchstaben dürfen nicht von einer untrainierten Grossbuchstabenform überschrieben werden.',
   )
+  const uppercaseILabel = labelByChar.get('I')
+  const lowercaseILabel = labelByChar.get('i')
+  assert.ok(uppercaseILabel && lowercaseILabel)
+  const ambiguousIsolatedI = (strokes, uppercaseSupport = 1) => ({
+    id: 'isolated-i-case',
+    strokes,
+    imageData: '',
+    bbox: [0.239, 0.2, 0.002, 0.2],
+    labelId: lowercaseILabel.id,
+    char: lowercaseILabel.char,
+    name: lowercaseILabel.name,
+    latex: lowercaseILabel.latex,
+    confidence: 68,
+    baseConfidence: 57,
+    personalSupport: 1,
+    personalConfidence: 51,
+    alternatives: [{
+      labelId: lowercaseILabel.id,
+      char: lowercaseILabel.char,
+      name: lowercaseILabel.name,
+      confidence: 68,
+      baseConfidence: 57,
+      personalSupport: 1,
+      personalConfidence: 51,
+    }, {
+      labelId: uppercaseILabel.id,
+      char: uppercaseILabel.char,
+      name: uppercaseILabel.name,
+      confidence: 78,
+      baseConfidence: 63,
+      personalSupport: uppercaseSupport,
+      personalConfidence: 37,
+    }],
+    visualLabelId: lowercaseILabel.id,
+    visualConfidence: 68,
+  })
+  const narrowUndottedI = [stroke([[0.24, 0.2], [0.241, 0.4]], 0)]
+  const returningLowercaseI = [stroke([[0.23, 0.2], [0.24, 0.4], [0.255, 0.37]], 0)]
+  assert.equal(
+    recognizedSentence(applyTextReranking([ambiguousIsolatedI(narrowUndottedI)], BASE_CATALOG, 'de')),
+    'I',
+    'Ein einzelner schmaler Strich ohne Punkt muss bei stärkerer Basisevidenz als grosses I lesbar bleiben.',
+  )
+  assert.equal(
+    recognizedSentence(applyTextReranking([ambiguousIsolatedI(returningLowercaseI)], BASE_CATALOG, 'de')),
+    'i',
+    'Eine breitere zurücklaufende Kleinbuchstabenform darf nicht durch die isolierte I-Regel überschrieben werden.',
+  )
+  assert.equal(
+    recognizedSentence(applyTextReranking([ambiguousIsolatedI(narrowUndottedI, 0)], BASE_CATALOG, 'de')),
+    'i',
+    'Ein untrainiertes grosses I darf ein ausdrücklich trainiertes kleines i nicht überschreiben.',
+  )
 
   // A short lowercase body after a tall capital sits lower by construction.
   // Even a stale learned "subscript" relation must not turn ordinary baseline
