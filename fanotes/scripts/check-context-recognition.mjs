@@ -1869,6 +1869,23 @@ try {
   )
   installRecognitionWordCandidateProvider('en', null)
   installRecognitionWordMembership('en', null)
+  const supportedRunnerUpWord = [
+    token('9', 69, [['9', 69], ['q', 62], ['g', 60]], 202),
+    token('u', 80, [['u', 80]], 203),
+    token('i', 70, [['i', 70], ['t', 60]], 204),
+    token('2', 67, [['2', 67], ['z', 63], ['e', 60]], 205),
+  ]
+  installRecognitionWordMembership('de', (word) => word === 'quiz')
+  installRecognitionWordCandidateProvider('de', (length) => (
+    length === 'quiz'.length ? ['quiz'] : []
+  ))
+  assert.equal(
+    recognizedSentence(applyTextReranking(supportedRunnerUpWord, BASE_CATALOG, 'de')),
+    'quiz',
+    'Ein knapp zweitplatzierter vollständig gestützter Wortpfad muss einen unzulässigen Sprachsieger ersetzen.',
+  )
+  installRecognitionWordCandidateProvider('de', null)
+  installRecognitionWordMembership('de', null)
   const uncertainTitleCaseDictionaryWord = [...'Jrivat'].map((char, index) => token(
     char,
     index === 0 ? 68 : 84,

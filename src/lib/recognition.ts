@@ -6050,7 +6050,67 @@ const rerankTextChunk = (
   })
 
   const ranked = beams.sort((first, second) => second.score - first.score)
-  const languageBest = ranked[0]
+  const correctionEvidenceForBeam = (beam?: TextBeam) => {
+    const changedIndexes = beam?.choices.flatMap((candidate, index) => (
+      candidate.label.id === (chunk[index].visualLabelId ?? chunk[index].labelId) ? [] : [index]
+    )) ?? []
+    const semanticChangedIndexes = changedIndexes.filter((index) => {
+      const visualLabel = labelMap.get(chunk[index].visualLabelId ?? chunk[index].labelId)
+      const selectedLabel = beam?.choices[index]?.label
+      if (!visualLabel || !selectedLabel) return true
+      return visualLabel.char.toLocaleLowerCase(LANGUAGE_PROFILES[language].locale) !==
+        selectedLabel.char.toLocaleLowerCase(LANGUAGE_PROFILES[language].locale)
+    })
+    const changeKinds = new Set(semanticChangedIndexes.map((index) => {
+      const visualLabel = labelMap.get(chunk[index].visualLabelId ?? chunk[index].labelId)
+      const selectedLabel = beam?.choices[index]?.label
+      return `${visualLabel?.char.toLocaleLowerCase(LANGUAGE_PROFILES[language].locale) ?? '?'}>` +
+        (selectedLabel?.char.toLocaleLowerCase(LANGUAGE_PROFILES[language].locale) ?? '?')
+    }))
+    const repeatedChanges = Math.max(0, semanticChangedIndexes.length - changeKinds.size)
+    const effectiveSemanticChanges = changeKinds.size + Math.floor(repeatedChanges * 0.5)
+    const changedVisualLosses = changedIndexes.map((index) => {
+      const visualLabelId = chunk[index].visualLabelId ?? chunk[index].labelId
+      const visualConfidence = chunk[index].visualConfidence ??
+        chunk[index].alternatives.find((alternative) => alternative.labelId === visualLabelId)?.confidence ??
+        chunk[index].confidence
+      return Math.max(0, visualConfidence - (beam?.choices[index]?.confidence ?? 0))
+    })
+    const shortWord = chunk.length <= 2
+    const changeRatio = beam?.evidence?.preferredName
+      ? 0.6
+      : beam?.evidence?.coreWord && chunk.length >= 8 ? 0.45 : 0.34
+    const maximumChanges = shortWord
+      ? 1
+      : Math.max(1, Math.ceil(chunk.length * changeRatio))
+    const maximumLossPerChangedGlyph = shortWord ? 3 : 24
+    const supported = Boolean(
+      beam?.evidence?.knownWord &&
+      effectiveSemanticChanges <= maximumChanges &&
+      changedVisualLosses.every((loss) => loss <= maximumLossPerChangedGlyph) &&
+      changedIndexes.every((index) => beam!.choices[index].confidence >= 32)
+    )
+    return {
+      changedIndexes,
+      semanticChangedIndexes,
+      effectiveSemanticChanges,
+      changedVisualLosses,
+      maximumChanges,
+      supported,
+    }
+  }
+  const leadingLanguageBeam = ranked[0]
+  const leadingCorrectionEvidence = correctionEvidenceForBeam(leadingLanguageBeam)
+  const fallbackLanguageBeam = leadingLanguageBeam?.evidence?.knownWord &&
+    !leadingCorrectionEvidence.supported
+    ? ranked.find((beam) => (
+        beam !== leadingLanguageBeam &&
+        beam.score >= leadingLanguageBeam.score - 0.28 &&
+        correctionEvidenceForBeam(beam).supported
+      ))
+    : undefined
+  const languageBest = fallbackLanguageBeam ?? leadingLanguageBeam
+  const languageCorrectionEvidence = correctionEvidenceForBeam(languageBest)
   const visualBest = [...beams].sort((first, second) => second.visualScore - first.visualScore)[0]
   const visualWord = visualBest?.value ?? ''
   const rawVisualWord = chunk.map((token) => (
@@ -6084,23 +6144,8 @@ const rerankTextChunk = (
   const visualNameChanges = visualNameCharacters.length === languageNameCharacters.length
     ? visualNameCharacters.filter((character, index) => character !== languageNameCharacters[index]).length
     : Number.POSITIVE_INFINITY
-  const canonicalNameChangedIndexes = languageBest?.choices.flatMap((candidate, index) => {
-    const visualLabel = labelMap.get(chunk[index].visualLabelId ?? chunk[index].labelId)
-    return visualLabel?.char.toLocaleLowerCase(LANGUAGE_PROFILES[language].locale) ===
-      candidate.label.char.toLocaleLowerCase(LANGUAGE_PROFILES[language].locale) ? [] : [index]
-  }) ?? []
-  const canonicalNameChangeKinds = new Set(canonicalNameChangedIndexes.map((index) => {
-    const visualLabel = labelMap.get(chunk[index].visualLabelId ?? chunk[index].labelId)
-    const selectedLabel = languageBest?.choices[index]?.label
-    return `${visualLabel?.char.toLocaleLowerCase(LANGUAGE_PROFILES[language].locale) ?? '?'}>` +
-      (selectedLabel?.char.toLocaleLowerCase(LANGUAGE_PROFILES[language].locale) ?? '?')
-  }))
-  const canonicalRepeatedChanges = Math.max(
-    0,
-    canonicalNameChangedIndexes.length - canonicalNameChangeKinds.size,
-  )
-  const canonicalEffectiveChanges = canonicalNameChangeKinds.size +
-    Math.floor(canonicalRepeatedChanges * 0.5)
+  const canonicalNameChangedIndexes = languageCorrectionEvidence.semanticChangedIndexes
+  const canonicalEffectiveChanges = languageCorrectionEvidence.effectiveSemanticChanges
   const visuallyUncertainCanonicalNameCorrection = Boolean(
     languageBest?.evidence?.properName &&
     /^\p{Lu}\p{Ll}{2,}$/u.test(languageBest.value) &&
@@ -6162,62 +6207,11 @@ const rerankTextChunk = (
   // fragments (for example "taboo") even though every visible glyph was
   // individually correct. Keeping the purely visual beam here still allows
   // Tost -> Test because both hypotheses retain title case.
-  const languageVisualLabels = languageBest?.choices.map((candidate) => candidate.label.id) ?? []
-  const languageChangedIndexes = languageVisualLabels.flatMap((labelId, index) => (
-    labelId === (chunk[index].visualLabelId ?? chunk[index].labelId) ? [] : [index]
-  ))
-  const languageSemanticChangedIndexes = languageChangedIndexes.filter((index) => {
-    const visualLabel = labelMap.get(chunk[index].visualLabelId ?? chunk[index].labelId)
-    const selectedLabel = languageBest?.choices[index]?.label
-    if (!visualLabel || !selectedLabel) return true
-    return visualLabel.char.toLocaleLowerCase(LANGUAGE_PROFILES[language].locale) !==
-      selectedLabel.char.toLocaleLowerCase(LANGUAGE_PROFILES[language].locale)
-  })
-  const languageSemanticChangeKinds = new Set(languageSemanticChangedIndexes.map((index) => {
-    const visualLabel = labelMap.get(chunk[index].visualLabelId ?? chunk[index].labelId)
-    const selectedLabel = languageBest?.choices[index]?.label
-    return `${visualLabel?.char.toLocaleLowerCase(LANGUAGE_PROFILES[language].locale) ?? '?'}>` +
-      (selectedLabel?.char.toLocaleLowerCase(LANGUAGE_PROFILES[language].locale) ?? '?')
-  }))
-  const repeatedSemanticChanges = Math.max(
-    0,
-    languageSemanticChangedIndexes.length - languageSemanticChangeKinds.size,
-  )
-  const languageEffectiveSemanticChanges = languageSemanticChangeKinds.size +
-    Math.floor(repeatedSemanticChanges * 0.5)
-  const languageChangedVisualLosses = languageChangedIndexes.map((index) => {
-    const visualLabelId = chunk[index].visualLabelId ?? chunk[index].labelId
-    const visualConfidence = chunk[index].visualConfidence ??
-      chunk[index].alternatives.find((alternative) => alternative.labelId === visualLabelId)?.confidence ??
-      chunk[index].confidence
-    return Math.max(0, visualConfidence - (languageBest?.choices[index]?.confidence ?? 0))
-  })
-  const shortWord = chunk.length <= 2
-  const languageChangeRatio = languageBest?.evidence?.preferredName
-    ? 0.6
-    : languageBest?.evidence?.coreWord && chunk.length >= 8 ? 0.45 : 0.34
-  const maximumLanguageChanges = shortWord
-    ? 1
-    : Math.max(1, Math.ceil(chunk.length * languageChangeRatio))
-  const maximumLossPerChangedGlyph = shortWord ? 3 : 24
-  const languageCorrectionHasVisualSupport = Boolean(
-    languageBest?.evidence?.knownWord &&
-    // Correcting S→s inside a word does not spend the same ambiguity budget
-    // as replacing one glyph with another. Otherwise `EeSE` could never
-    // become the well-supported word `test`: its two actual t corrections
-    // were rejected only because the harmless case cleanup counted as a
-    // third replacement. Every changed glyph still has to remain visually
-    // plausible, so an unrelated lowercase tail cannot enter the beam.
-    // Repeated occurrences of the same visual confusion share one ambiguity
-    // decision. If this writer's m repeatedly resembles e in one word,
-    // charging the full budget for every occurrence rejects coherent words
-    // such as `lernen` even though every individual e remains a close visual
-    // candidate. Different substitutions still consume separate budget and
-    // every occurrence must independently pass the confidence/loss gates.
-    languageEffectiveSemanticChanges <= maximumLanguageChanges &&
-    languageChangedVisualLosses.every((loss) => loss <= maximumLossPerChangedGlyph) &&
-    languageChangedIndexes.every((index) => languageBest!.choices[index].confidence >= 32)
-  )
+  // Case-only replacements do not consume semantic ambiguity. Repeated
+  // occurrences of the same visual confusion share a bounded decision, while
+  // every occurrence still has to pass its own confidence and loss gates.
+  const languageChangedIndexes = languageCorrectionEvidence.changedIndexes
+  const languageCorrectionHasVisualSupport = languageCorrectionEvidence.supported
   // Very short dictionary entries carry a disproportionately large prior:
   // without this gate a clear `ac` became `an`, `os` became `an`, and two
   // lower-confidence letters could turn into an unrelated common word.  A
