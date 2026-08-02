@@ -6070,6 +6070,18 @@ const rerankTextChunk = (
     return visualLabel?.char.toLocaleLowerCase(LANGUAGE_PROFILES[language].locale) ===
       candidate.label.char.toLocaleLowerCase(LANGUAGE_PROFILES[language].locale) ? [] : [index]
   }) ?? []
+  const canonicalNameChangeKinds = new Set(canonicalNameChangedIndexes.map((index) => {
+    const visualLabel = labelMap.get(chunk[index].visualLabelId ?? chunk[index].labelId)
+    const selectedLabel = languageBest?.choices[index]?.label
+    return `${visualLabel?.char.toLocaleLowerCase(LANGUAGE_PROFILES[language].locale) ?? '?'}>` +
+      (selectedLabel?.char.toLocaleLowerCase(LANGUAGE_PROFILES[language].locale) ?? '?')
+  }))
+  const canonicalRepeatedChanges = Math.max(
+    0,
+    canonicalNameChangedIndexes.length - canonicalNameChangeKinds.size,
+  )
+  const canonicalEffectiveChanges = canonicalNameChangeKinds.size +
+    Math.floor(canonicalRepeatedChanges * 0.5)
   const visuallyUncertainCanonicalNameCorrection = Boolean(
     languageBest?.evidence?.properName &&
     /^\p{Lu}\p{Ll}{2,}$/u.test(languageBest.value) &&
@@ -6095,7 +6107,7 @@ const rerankTextChunk = (
     languageBest?.evidence?.knownWord &&
     !languageBest.evidence.properName &&
     canonicalNameChangedIndexes.length >= 1 &&
-    canonicalNameChangedIndexes.length <= Math.max(1, Math.ceil(chunk.length * 0.34)) &&
+    canonicalEffectiveChanges <= Math.max(1, Math.ceil(chunk.length * 0.34)) &&
     canonicalNameChangedIndexes.some((index) => (
       (chunk[index].visualConfidence ?? chunk[index].confidence) <= 84
     )) &&

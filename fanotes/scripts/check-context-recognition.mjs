@@ -1941,6 +1941,17 @@ try {
     'lernen',
     'Wiederholte gleiche visuelle Verwechslungen in einem Wort müssen eine gemeinsame Ambiguitätsentscheidung nutzen.',
   )
+  const repeatedTitleAmbiguityWord = [
+    token('E', 75, [['E', 75], ['t', 71]], 228),
+    token('l', 67, [['l', 67], ['e', 64]], 229),
+    token('S', 72, [['S', 72], ['s', 66]], 230),
+    token('E', 75, [['E', 75], ['t', 71]], 231),
+  ]
+  assert.equal(
+    recognizedSentence(applyTextReranking(repeatedTitleAmbiguityWord, BASE_CATALOG, 'de')),
+    'test',
+    'Der Schutz unbekannter Titelwörter muss wiederholte gleiche Verwechslungen ebenso begrenzt gemeinsam bewerten.',
+  )
   const beamStressExpected = 'mathematik'
   const beamStressVisual = 'nqvrematik'
   const beamStressDistractors = ['x', 'z', 'q', 'j', 'f', 'p', 'v']
