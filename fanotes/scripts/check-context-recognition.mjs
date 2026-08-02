@@ -62,6 +62,7 @@ try {
   } = await server.ssrLoadModule('/src/lib/recognitionModeSelection.ts')
   const { BASE_CATALOG } = await server.ssrLoadModule('/../src/data/catalog.ts')
   const {
+    embeddedTextRecognitionHints,
     incrementalTextCharacterHint,
     independentTextCharacterCount,
   } = await server.ssrLoadModule('/../src/lib/incrementalTextRecognition.ts')
@@ -161,6 +162,27 @@ try {
     independentTextCharacterCount('∬', { visibleCharacters: 1, letters: 0 }),
     undefined,
     'Mathematische Tokens dürfen niemals als Text-Zeichenanzahl zurückgekoppelt werden.',
+  )
+  assert.deepEqual(
+    embeddedTextRecognitionHints(
+      undefined,
+      'Te',
+      { visibleCharacters: 2, letters: 2 },
+      'math',
+    ),
+    { textCharacterCountHint: 2, textCharacterHint: undefined },
+    'Ein transient gewähltes Mathe-Ergebnis darf den reinen Textcount, aber nicht dessen geratenen Inhalt weitergeben.',
+  )
+  assert.deepEqual(
+    embeddedTextRecognitionHints(
+      { characterCount: 3 },
+      'Te',
+      { visibleCharacters: 2, letters: 2 },
+      'math',
+      'Tes',
+    ),
+    { textCharacterCountHint: 3, textCharacterHint: 'Tes' },
+    'Ein unabhängig fortgeschriebener Textpräfix muss den schwächeren aktuellen Textzweig überstimmen.',
   )
   assert.equal(
     groupRecognitionLines([

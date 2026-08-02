@@ -5,8 +5,8 @@ import { BASE_CATALOG, CATEGORIES, DEFAULT_LABEL_ID, categoryName } from './data
 import { getAllSamples, putSample, removeAllSamples, removeSample } from './lib/db'
 import { exportDataset } from './lib/exportDataset'
 import {
+  embeddedTextRecognitionHints,
   incrementalTextCharacterHint,
-  independentTextCharacterCount,
   type IncrementalTextRecognitionState,
 } from './lib/incrementalTextRecognition'
 import {
@@ -475,9 +475,12 @@ const App = () => {
           incrementalTextRecognitionRef.current = null
         }
         if (EMBEDDED_IN_FANOTES) {
-          const textBranchCharacterCount = independentTextCharacterCount(
+          const embeddedHints = embeddedTextRecognitionHints(
+            incrementalHint,
             compactText,
             recognition.evidence?.text,
+            recognition.mode,
+            textCharacterHint,
           )
           const requestId = `line-${createUuid()}`
           neuralRequestIdRef.current = requestId
@@ -489,14 +492,7 @@ const App = () => {
             // Never feed the selected automatic token count back into the
             // text pass: when automatic mode briefly chooses `∬`, that is one
             // *math* token and would force two letters into a single glyph.
-            textCharacterCountHint: incrementalHint?.characterCount
-              ?? textBranchCharacterCount,
-            textCharacterHint: textCharacterHint
-              ?? (
-                recognition.mode === 'text' && textBranchCharacterCount !== undefined
-                  ? compactText
-                  : undefined
-              ),
+            ...embeddedHints,
           })
         } else {
           setIsRecognizing(false)

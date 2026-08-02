@@ -73,7 +73,7 @@ assert.match(glyphenWerkApp, /recognizeAutomaticExpression\([\s\S]*?getGlyphenWe
 assert.match(glyphenWerkApp, /recognizeAutomaticExpression/u)
 assert.match(
   glyphenWerkApp,
-  /independentTextCharacterCount\([\s\S]*?recognition\.evidence\?\.text/u,
+  /embeddedTextRecognitionHints\([\s\S]*?recognition\.evidence\?\.text/u,
   'Die eingebettete Textlänge muss aus dem unabhängigen Textzweig stammen.',
 )
 assert.doesNotMatch(
@@ -82,8 +82,8 @@ assert.doesNotMatch(
   'Ausgewählte Mathe-Tokens dürfen nicht als Text-Zeichenanzahl zurückgekoppelt werden.',
 )
 assert.match(
-  glyphenWerkApp,
-  /recognition\.mode === 'text' && textBranchCharacterCount !== undefined/u,
+  readWorkspace('src/lib/incrementalTextRecognition.ts'),
+  /selectedMode === 'text' && textBranchCharacterCount !== undefined/u,
   'Eine klassische Textzeichenfolge darf nur im tatsächlich gewählten Textmodus als Inhalts-Hinweis dienen.',
 )
 assert.match(glyphenWerkApp, /correctedRecognitionInputRef/u)

@@ -184,3 +184,28 @@ export const independentTextCharacterCount = (
   ) return undefined
   return characters.length
 }
+
+export const embeddedTextRecognitionHints = (
+  incrementalHint: Pick<IncrementalTextCharacterHint, 'characterCount'> | undefined,
+  compactText: string,
+  textEvidence: {
+    visibleCharacters?: number
+    letters?: number
+  } | undefined,
+  selectedMode: 'text' | 'math',
+  incrementalTextHint?: string,
+) => {
+  const textBranchCharacterCount = independentTextCharacterCount(compactText, textEvidence)
+  return {
+    textCharacterCountHint: incrementalHint?.characterCount ?? textBranchCharacterCount,
+    // The parallel text branch may safely contribute its count while math is
+    // selected, but not its guessed letters. This lets the independent neural
+    // recognizer recover `Te` from a transient `∬` without circularly forcing
+    // the classical content itself.
+    textCharacterHint: incrementalTextHint ?? (
+      selectedMode === 'text' && textBranchCharacterCount !== undefined
+        ? compactText
+        : undefined
+    ),
+  }
+}
