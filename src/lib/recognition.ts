@@ -6177,7 +6177,8 @@ const rerankTextChunk = (
     )) &&
     canonicalNameChangedIndexes.every((index) => (
       (languageBest?.choices[index]?.confidence ?? 0) >=
-      (chunk[index].visualConfidence ?? chunk[index].confidence) - 12
+      (chunk[index].visualConfidence ?? chunk[index].confidence) -
+        (languageBest?.evidence?.coreWord ? 16 : 12)
     ))
   )
   const languageOverwritesVisualName = Boolean(

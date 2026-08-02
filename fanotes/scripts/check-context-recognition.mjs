@@ -1914,6 +1914,18 @@ try {
     'system',
     'Ein unsicherer gross wirkender Wortanfang darf eine nahe, häufige Kleinwort-Hypothese nicht als Eigennamen blockieren.',
   )
+  const uncertainTitleCoreTail = [...'SfStlm'].map((char, index) => {
+    const alternatives = index === 1
+      ? [['f', 66], ['y', 65]]
+      : index === 2 ? [['S', 82], ['s', 76]]
+        : index === 4 ? [['l', 74], ['e', 60]] : [[char, 82]]
+    return token(char, alternatives[0][1], alternatives, 204 + index)
+  })
+  assert.equal(
+    recognizedSentence(applyTextReranking(uncertainTitleCoreTail, BASE_CATALOG, 'de')),
+    'System',
+    'Ein unsicheres titelähnliches Kernwort darf einen einzeln um 14 Punkte schwächeren, aber voll gestützten Buchstaben nutzen.',
+  )
   const corpusBackedFabio = [
     token('E', 72, [['E', 72], ['F', 68]], 200),
     token('c', 78, [['c', 78], ['a', 74]], 201),
