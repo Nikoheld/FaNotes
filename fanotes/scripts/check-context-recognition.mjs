@@ -27,6 +27,9 @@ try {
     personalizedTextFusionSelectionScore,
   } = await server.ssrLoadModule('/src/lib/personalizedTextRecognition.ts')
   const {
+    shortConnectedSegmentationIndexesForTests,
+  } = await server.ssrLoadModule('/src/lib/personalizedLineRecognition.ts')
+  const {
     applyFinalNeuralLineContext,
     applyFinalNeuralWordContext,
     applyMeasuredNeuralWordContext,
@@ -162,6 +165,71 @@ try {
     independentTextCharacterCount('∬', { visibleCharacters: 1, letters: 0 }),
     undefined,
     'Mathematische Tokens dürfen niemals als Text-Zeichenanzahl zurückgekoppelt werden.',
+  )
+  assert.deepEqual(
+    shortConnectedSegmentationIndexesForTests({
+      neuralCharacterCount: 2,
+      neuralConfidence: 74,
+      neuralKnownWordRatio: 0,
+      physicalLineCount: 1,
+      primaryTokenCount: 1,
+      primaryAverageConfidence: 58,
+      penLiftCharacterCount: null,
+    }),
+    [1],
+    'Ein unsicheres verbundenes Zwei-Buchstaben-Präfix braucht genau einen zweiten begrenzten Schnittpfad.',
+  )
+  assert.deepEqual(
+    shortConnectedSegmentationIndexesForTests({
+      neuralCharacterCount: 2,
+      neuralConfidence: 91,
+      neuralKnownWordRatio: 1,
+      physicalLineCount: 1,
+      primaryTokenCount: 2,
+      primaryAverageConfidence: 76,
+      penLiftCharacterCount: null,
+    }),
+    [],
+    'Ein bereits sicher erkanntes kurzes Wörterbuchwort darf keine zusätzliche Inferenz bezahlen.',
+  )
+  assert.deepEqual(
+    shortConnectedSegmentationIndexesForTests({
+      neuralCharacterCount: 2,
+      neuralConfidence: 65,
+      neuralKnownWordRatio: 0,
+      physicalLineCount: 1,
+      primaryTokenCount: 1,
+      primaryAverageConfidence: 43,
+      penLiftCharacterCount: 2,
+    }),
+    [],
+    'Physisch getrennte Buchstabenkörper benötigen keinen verbundenen Alternativschnitt.',
+  )
+  assert.deepEqual(
+    shortConnectedSegmentationIndexesForTests({
+      neuralCharacterCount: 4,
+      neuralConfidence: 60,
+      neuralKnownWordRatio: 0,
+      physicalLineCount: 1,
+      primaryTokenCount: 2,
+      primaryAverageConfidence: 42,
+      penLiftCharacterCount: null,
+    }),
+    [],
+    'Längere Zeilen dürfen den kurzen Alternativpfad nicht als normalen CPU-Multiplikator verwenden.',
+  )
+  assert.deepEqual(
+    shortConnectedSegmentationIndexesForTests({
+      neuralCharacterCount: 2,
+      neuralConfidence: 58,
+      neuralKnownWordRatio: 0,
+      physicalLineCount: 2,
+      primaryTokenCount: 1,
+      primaryAverageConfidence: 39,
+      penLiftCharacterCount: null,
+    }),
+    [],
+    'Mehrzeiliger Text darf nie durch den kurzen Einzeilen-Fallback zusammengeschoben werden.',
   )
   assert.deepEqual(
     embeddedTextRecognitionHints(

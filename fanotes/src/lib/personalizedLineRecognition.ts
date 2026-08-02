@@ -57,6 +57,41 @@ export type PersonalizedLineRecognition = {
 
 type RecognitionModule = typeof import('../../../src/lib/recognition')
 
+const shortConnectedSegmentationIndexes = ({
+  neuralCharacterCount,
+  neuralConfidence,
+  neuralKnownWordRatio,
+  physicalLineCount,
+  primaryTokenCount,
+  primaryAverageConfidence,
+  penLiftCharacterCount,
+}: {
+  neuralCharacterCount: number
+  neuralConfidence: number
+  neuralKnownWordRatio: number
+  physicalLineCount: number
+  primaryTokenCount: number
+  primaryAverageConfidence: number
+  penLiftCharacterCount: number | null
+}) => {
+  if (
+    neuralCharacterCount < 2 ||
+    neuralCharacterCount > 3 ||
+    physicalLineCount !== 1 ||
+    penLiftCharacterCount !== null
+  ) return []
+  const firstPathIsAlreadyStrong = (
+    primaryTokenCount === neuralCharacterCount &&
+    primaryAverageConfidence >= 64 &&
+    neuralConfidence >= 82 &&
+    neuralKnownWordRatio >= 0.72
+  )
+  return firstPathIsAlreadyStrong ? [] : [1]
+}
+
+/** Pure regression hook for the bounded short-prefix cost gate. */
+export const shortConnectedSegmentationIndexesForTests = shortConnectedSegmentationIndexes
+
 /**
  * Uses only conspicuously wide physical gaps to divide a line into the same
  * number of words as the neural line model. Exact-count personalization can
@@ -408,6 +443,9 @@ export const recognizePersonalizedTextLine = async (
       // bounded alternatives only activate for suspicious lines; confident
       // dictionary words keep the single fast path.
       const primaryVisible = primaryCandidate.filter((token) => !token.isLayout)
+      const primaryAverageConfidence = primaryVisible.reduce((sum, token) => (
+        sum + token.confidence
+      ), 0) / Math.max(1, primaryVisible.length)
       const primaryPersonalRatio = primaryVisible.filter((token) => (
         (token.personalSupport ?? 0) > 0 ||
         token.alternatives.some((alternative) => (alternative.personalSupport ?? 0) > 0)
@@ -466,6 +504,29 @@ export const recognizePersonalizedTextLine = async (
           { delta: 0, penLift: false, segmentationIndex: 2 },
         )
       }
+      shortConnectedSegmentationIndexes({
+        neuralCharacterCount,
+        neuralConfidence: neural.confidence,
+        neuralKnownWordRatio: neural.knownWordRatio ?? 0,
+        physicalLineCount: physicalLines.length,
+        primaryTokenCount: primaryVisible.length,
+        primaryAverageConfidence,
+        penLiftCharacterCount: penLiftCounts.length === 1
+          ? penLiftCounts[0] ?? null
+          : null,
+      }).forEach((segmentationIndex) => {
+        if (strategies.some((strategy) => (
+          strategy.delta === 0 &&
+          !strategy.penLift &&
+          strategy.segmentationIndex === segmentationIndex
+        ))) return
+        // A connected two/three-letter prefix has no physical cut count, and
+        // its first exact-length partition can land inside the first loop.
+        // One additional already-bounded cut path is cheap at this length and
+        // recovered the visibly stronger personal path in writer-disjoint UJI
+        // pairs. Longer lines and confident known words keep the fast path.
+        strategies.push({ delta: 0, penLift: false, segmentationIndex })
+      })
       if (
         penLiftCounts.some((count, index) => {
           if (!count) return false
