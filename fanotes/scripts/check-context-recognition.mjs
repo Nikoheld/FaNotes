@@ -1621,6 +1621,61 @@ try {
   assert.equal(german[1].context?.autoLearn, true, 'Eine visuell plausible, eindeutige Kontextkorrektur soll lernbar sein.')
   assert.ok(german[1].context.scoreMargin >= 0.5)
 
+  const numericWithLetterTails = [
+    token('4', 82, [['4', 82], ['a', 76], ['A', 71]], 4),
+    token('7', 81, [['7', 81], ['n', 75], ['T', 70]], 5),
+  ]
+  assert.equal(
+    recognizedSentence(applyTextReranking(numericWithLetterTails, BASE_CATALOG, 'de')),
+    '47',
+    'Blosse Buchstaben in breiten N-best-Listen dürfen eine klar numerische Folge nicht zum Wort erklären.',
+  )
+  const alphabeticWithDigitTails = [
+    token('a', 82, [['a', 82], ['4', 76], ['A', 72]], 6),
+    token('n', 81, [['n', 81], ['7', 75], ['N', 72]], 7),
+  ]
+  assert.equal(
+    recognizedSentence(applyTextReranking(alphabeticWithDigitTails, BASE_CATALOG, 'de')),
+    'an',
+    'Ziffern in den Alternativen dürfen eine klar alphabetische Folge nicht als Zahl behandeln.',
+  )
+  const genuinelyMixedSequence = [
+    token('E', 84, [['E', 84], ['3', 76], ['F', 74]], 8),
+    token('0', 84, [['0', 84], ['O', 76], ['o', 73]], 9),
+  ]
+  assert.equal(
+    recognizedSentence(applyTextReranking(genuinelyMixedSequence, BASE_CATALOG, 'de')),
+    'E0',
+    'Eine belegte Buchstaben-Ziffern-Folge darf weder Wort- noch Zahlenprior erhalten.',
+  )
+  const ambiguousLetterThenDigit = [
+    token('s', 80, [['s', 80], ['5', 78], ['S', 76]], 10),
+    token('2', 90, [['2', 90], ['z', 72], ['Z', 69]], 11),
+  ]
+  assert.equal(
+    recognizedSentence(applyTextReranking(ambiguousLetterThenDigit, BASE_CATALOG, 'de')),
+    's2',
+    'Ein visuell als Buchstabe gestartetes knappes S/5 muss in einer gemischten Kennung Buchstabe bleiben.',
+  )
+  const ambiguousDigitSequence = [
+    token('5', 80, [['5', 80], ['s', 78], ['S', 76]], 12),
+    token('2', 95, [['2', 95], ['z', 55], ['Z', 52]], 13),
+  ]
+  assert.equal(
+    recognizedSentence(applyTextReranking(ambiguousDigitSequence, BASE_CATALOG, 'de')),
+    '52',
+    'Eine S/5-Nähe muss mit einer unabhängig sehr starken zweiten Ziffer numerisch bleiben.',
+  )
+  const weakDigitAgainstStrongLetter = [
+    token('5', 71, [['5', 71], ['s', 67], ['S', 67]], 14),
+    token('a', 72, [['a', 72], ['n', 51], ['o', 48]], 15),
+  ]
+  assert.equal(
+    recognizedSentence(applyTextReranking(weakDigitAgainstStrongLetter, BASE_CATALOG, 'de')),
+    'sa',
+    'Eine knappe 5/s-Position muss der deutlich stärkeren alphabetischen Nachbarposition folgen.',
+  )
+
   const caseHeavyTest = [
     token('E', 75, [['E', 75], ['t', 60]], 10),
     token('e', 88, [['e', 88]], 11),

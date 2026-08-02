@@ -29,6 +29,11 @@ const holdoutWriterNames = [...new Set((process.env.FANOTES_UJI_HOLDOUT_WRITER_N
   .map((writer) => writer.trim())
   .filter((writer) => /^tst_(?:UJI|UPV)_W\d+$/u.test(writer)))]
   .slice(0, 12)
+const requestedPersonalWriter = process.env.FANOTES_UJI_PERSONAL_WRITER?.trim()
+const personalWriterName = requestedPersonalWriter && /^(?:trn|tst)_(?:UJI|UPV)_W\d+$/u.test(requestedPersonalWriter)
+  ? requestedPersonalWriter
+  : undefined
+const personalOnly = process.env.FANOTES_UJI_PERSONAL_ONLY === '1'
 const includeCases = process.env.FANOTES_UJI_INCLUDE_CASES === '1'
 const requestedChromiumHeap = Number(process.env.FANOTES_UJI_CHROMIUM_HEAP_MB ?? 768)
 const chromiumHeap = Number.isFinite(requestedChromiumHeap)
@@ -90,6 +95,8 @@ try {
     `import records from ${JSON.stringify(pathToFileURL(dataPath).href)}`,
     `import { runUjiPersonalRecognitionAudit } from ${JSON.stringify(pathToFileURL(path.join(appRoot, 'scripts/fixtures/uji-personal-recognition-harness.ts')).href)}`,
     `runUjiPersonalRecognitionAudit(records, ${JSON.stringify({
+      personalWriterName,
+      personalOnly,
       writerIndependentHoldoutCount: holdoutWriterCount,
       writerIndependentHoldoutNames: holdoutWriterNames,
       includeCases,
@@ -144,7 +151,7 @@ try {
       failures: result.personal.failures,
       cases: result.personal.cases,
     },
-    writerIndependent: {
+    writerIndependent: result.writerIndependent ? {
       trainingWriters: result.writerIndependent.trainingWriters,
       holdoutWriter: result.writerIndependent.holdoutWriter,
       holdoutWriters: result.writerIndependent.holdoutWriters,
@@ -173,11 +180,13 @@ try {
         failures: entry.failures,
         cases: entry.cases,
       })),
-    },
+    } : null,
   } : result, null, 2))
   if (process.env.FANOTES_UJI_AUDIT_STRICT === '1') {
     assert.ok(result.personal.accuracy >= 90, `Sitzungsübergreifende Personalisierung ist zu schwach: ${JSON.stringify(result.personal)}`)
-    assert.ok(result.writerIndependent.accuracy >= 90, `Der 992-Beispiele-Holdout ist zu schwach: ${JSON.stringify(result.writerIndependent)}`)
+    if (result.writerIndependent) {
+      assert.ok(result.writerIndependent.accuracy >= 90, `Der 992-Beispiele-Holdout ist zu schwach: ${JSON.stringify(result.writerIndependent)}`)
+    }
     assert.ok(result.personal.unhintedAccuracy >= 88, `Die Segmentierung isolierter Zeichen ist zu schwach: ${JSON.stringify(result.personal)}`)
   }
 } finally {

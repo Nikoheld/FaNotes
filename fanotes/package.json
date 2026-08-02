@@ -20,6 +20,8 @@
     "check:recognition": "node scripts/check-context-recognition.mjs",
     "audit:recognition": "node scripts/audit-personal-recognition.mjs",
     "audit:recognition:uji": "node scripts/audit-uji-personal-recognition.mjs",
+    "audit:recognition:uji-calibration": "node scripts/analyze-uji-personal-base-calibration.mjs",
+    "audit:recognition:uji-selection": "node scripts/audit-uji-pair-selection.mjs",
     "audit:recognition:uji-pairs": "node scripts/audit-uji-pair-segmentation.mjs",
     "audit:recognition:uji-spacing": "node scripts/audit-uji-text-spacing.mjs",
     "audit:recognition:uji-words": "node scripts/audit-uji-word-reranking.mjs",

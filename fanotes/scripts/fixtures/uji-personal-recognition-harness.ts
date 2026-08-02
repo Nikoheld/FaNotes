@@ -17,6 +17,8 @@ export type UjiRecord = {
 }
 
 type UjiAuditOptions = {
+  personalWriterName?: string
+  personalOnly?: boolean
   writerIndependentHoldoutCount?: number
   writerIndependentHoldoutNames?: string[]
   includeCases?: boolean
@@ -345,7 +347,11 @@ export const runUjiPersonalRecognitionAudit = async (
   const writers = [...new Set(usable.map((entry) => entry.writer))].sort()
   const standard = await createStandardRecognitionSamples(BASE_CATALOG)
 
-  const personalWriter = writers.find((writer) => writer === 'trn_UJI_W01') ?? writers[0]
+  const personalWriter = (
+    options.personalWriterName && writers.includes(options.personalWriterName)
+      ? options.personalWriterName
+      : writers.find((writer) => writer === 'trn_UJI_W01') ?? writers[0]
+  )
   const personalTrainingRecords = usable.filter((entry) => entry.writer === personalWriter && entry.session === 1)
   const personalHoldout = usable.filter((entry) => entry.writer === personalWriter && entry.session === 2)
   const personalSamples = personalTrainingRecords.map(ujiPersonalSample)
@@ -353,6 +359,23 @@ export const runUjiPersonalRecognitionAudit = async (
   const personalModel = await buildRecognitionModel([...personalSamples, ...standard])
   const personalBuildMs = Math.round(performance.now() - personalStartedAt)
   const personalCases = runCases(personalHoldout, personalModel)
+  const personal = {
+    writer: personalWriter,
+    trainingSamples: personalSamples.length,
+    holdoutSamples: personalHoldout.length,
+    retainedSamples: personalModel.filter((entry) => !entry.standard).length,
+    buildMs: personalBuildMs,
+    weights: personalModel.weights,
+    estimatedAccuracy: personalModel.estimatedAccuracy,
+    evaluatedSamples: personalModel.evaluatedSamples,
+    ...summarize(personalCases, options.includeCases),
+  }
+  if (options.personalOnly) return {
+    datasetSamples: usable.length,
+    datasetWriters: writers.length,
+    personal,
+    writerIndependent: null,
+  }
 
   const trainingWriters = writers.filter((writer) => writer.startsWith('trn_')).slice(0, 8)
   const writerIndependentCandidates = writers.filter((writer) => !trainingWriters.includes(writer))
@@ -381,17 +404,7 @@ export const runUjiPersonalRecognitionAudit = async (
   return {
     datasetSamples: usable.length,
     datasetWriters: writers.length,
-    personal: {
-      writer: personalWriter,
-      trainingSamples: personalSamples.length,
-      holdoutSamples: personalHoldout.length,
-      retainedSamples: personalModel.filter((entry) => !entry.standard).length,
-      buildMs: personalBuildMs,
-      weights: personalModel.weights,
-      estimatedAccuracy: personalModel.estimatedAccuracy,
-      evaluatedSamples: personalModel.evaluatedSamples,
-      ...summarize(personalCases, options.includeCases),
-    },
+    personal,
     writerIndependent: {
       trainingWriters,
       holdoutWriter,

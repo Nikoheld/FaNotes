@@ -5906,11 +5906,52 @@ const rerankTextChunk = (
   }
   const candidateLists = chunk.map((token) => candidatesForTextToken(token, labelMap))
   if (candidateLists.some((candidates) => candidates.length === 0)) return
-  const likelyLetters = candidateLists.filter((candidates) => candidates.some((candidate) => isLetterLabel(candidate.label))).length
-  const likelyDigits = candidateLists.filter((candidates) => candidates.some((candidate) => isDigitLabel(candidate.label))).length
-  const kind = likelyLetters >= Math.ceil(chunk.length * 0.6)
-    ? 'word'
-    : likelyDigits >= Math.ceil(chunk.length * 0.6) ? 'number' : 'mixed'
+  // Broad N-best lists almost always contain both kinds, so mere presence
+  // cannot prove that a sequence is numeric. Use both the winning kind and
+  // its evidence margin. This makes a close 5/s follow a strongly alphabetic
+  // neighbour (`sa`), lets a close q/9 follow a strongly numeric neighbour
+  // (`94`), and leaves two independently strong kinds (`E0`) mixed.
+  const kindEvidence = candidateLists.map((candidates) => {
+    const strongestLetter = candidates
+      .filter((candidate) => isLetterLabel(candidate.label))
+      .reduce((peak, candidate) => Math.max(peak, candidate.confidence), Number.NEGATIVE_INFINITY)
+    const strongestDigit = candidates
+      .filter((candidate) => isDigitLabel(candidate.label))
+      .reduce((peak, candidate) => Math.max(peak, candidate.confidence), Number.NEGATIVE_INFINITY)
+    if (!Number.isFinite(strongestLetter)) return { vote: 'number' as const, margin: 40 }
+    if (!Number.isFinite(strongestDigit)) return { vote: 'word' as const, margin: 40 }
+    const margin = strongestLetter - strongestDigit
+    if (margin >= 6) return { vote: 'word' as const, margin }
+    if (margin <= -6) return { vote: 'number' as const, margin: -margin }
+    return { vote: 'mixed' as const, margin: Math.abs(margin) }
+  })
+  const likelyLetters = kindEvidence.filter((entry) => entry.vote === 'word').length
+  const likelyDigits = kindEvidence.filter((entry) => entry.vote === 'number').length
+  const ambiguousPositions = kindEvidence.filter((entry) => entry.vote === 'mixed').length
+  const digitStrength = kindEvidence
+    .filter((entry) => entry.vote === 'number')
+    .reduce((sum, entry) => sum + entry.margin, 0)
+  const decisiveKindVotes = Math.max(1, Math.ceil(chunk.length * 0.6))
+  let kind: 'word' | 'number' | 'mixed' = 'mixed'
+  if (chunk.length >= 3 && likelyLetters >= likelyDigits) {
+    // Longer words can contain two digit-shaped visual errors and still have
+    // a fully supported lexical path (9ui2 -> quiz).
+    kind = 'word'
+  } else if (likelyDigits >= decisiveKindVotes && likelyDigits > likelyLetters) {
+    kind = 'number'
+  } else if (likelyLetters > 0 && likelyDigits > 0) {
+    kind = 'mixed'
+  } else if (likelyDigits > 0 && ambiguousPositions > 0) {
+    // A weak numeric neighbour cannot decide s2/52. A very strong second
+    // digit can still resolve a close q/9 in 94.
+    kind = digitStrength >= 32 ? 'number' : 'word'
+  } else if (likelyLetters > 0 && ambiguousPositions > 0) {
+    kind = 'word'
+  } else if (likelyLetters > 0) {
+    kind = 'word'
+  } else if (likelyDigits > 0) {
+    kind = 'number'
+  }
 
   const emptyBeam = (): TextBeam => ({
     value: '', visualScore: 0, languageScore: 0, score: 0, choices: [],
