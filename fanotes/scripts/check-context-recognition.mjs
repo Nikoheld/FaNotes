@@ -1990,6 +1990,42 @@ try {
     'lernen',
     'Wiederholte gleiche visuelle Verwechslungen in einem Wort müssen eine gemeinsame Ambiguitätsentscheidung nutzen.',
   )
+  const compactCoreWord = [...'ucte1'].map((char, index) => {
+    const expected = [...'notes'][index]
+    return token(
+      char,
+      char === expected ? 84 : 70,
+      char === expected ? [[char, 84]] : [[char, 70], [expected, 62]],
+      226 + index,
+    )
+  })
+  assert.equal(
+    recognizedSentence(applyTextReranking(compactCoreWord, BASE_CATALOG, 'en')),
+    'notes',
+    'Ein kuratiertes fünfbuchstabiges Kernwort darf drei unabhängig plausible Glyphenfehler korrigieren.',
+  )
+  const compactExhaustiveTarget = 'motes'
+  const compactExhaustiveVisual = 'rakes'
+  const compactExhaustiveWord = [...compactExhaustiveVisual].map((char, index) => {
+    const expected = [...compactExhaustiveTarget][index]
+    return token(
+      char,
+      char === expected ? 84 : 70,
+      char === expected ? [[char, 84]] : [[char, 70], [expected, 62]],
+      232 + index,
+    )
+  })
+  installRecognitionWordMembership('en', (word) => word === compactExhaustiveTarget)
+  installRecognitionWordCandidateProvider('en', (length) => (
+    length === compactExhaustiveTarget.length ? [compactExhaustiveTarget] : []
+  ))
+  assert.equal(
+    recognizedSentence(applyTextReranking(compactExhaustiveWord, BASE_CATALOG, 'en')),
+    compactExhaustiveVisual,
+    'Das grosse ungewichtete Volllexikon darf bei fünf Zeichen nicht dieselben drei sichtbaren Buchstaben überschreiben.',
+  )
+  installRecognitionWordCandidateProvider('en', null)
+  installRecognitionWordMembership('en', null)
   const repeatedTitleAmbiguityWord = [
     token('E', 75, [['E', 75], ['t', 71]], 228),
     token('l', 67, [['l', 67], ['e', 64]], 229),

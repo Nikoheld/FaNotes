@@ -6079,7 +6079,7 @@ const rerankTextChunk = (
     const shortWord = chunk.length <= 2
     const changeRatio = beam?.evidence?.preferredName
       ? 0.6
-      : beam?.evidence?.coreWord && chunk.length >= 8 ? 0.45 : 0.34
+      : beam?.evidence?.coreWord && chunk.length >= 5 ? 0.5 : 0.34
     const maximumChanges = shortWord
       ? 1
       : Math.max(1, Math.ceil(chunk.length * changeRatio))
