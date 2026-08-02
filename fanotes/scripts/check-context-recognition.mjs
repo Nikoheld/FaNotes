@@ -1926,6 +1926,58 @@ try {
     'System',
     'Ein unsicheres titelähnliches Kernwort darf einen einzeln um 14 Punkte schwächeren, aber voll gestützten Buchstaben nutzen.',
   )
+  const uncertainTitleSharedBudget = [
+    token('L', 74, [['L', 74], ['h', 67]], 210),
+    token('m', 54, [['m', 54], ['e', 43]], 211),
+    token('l', 82, [['l', 82]], 212),
+    token('l', 82, [['l', 82]], 213),
+    token('c', 61, [['c', 61], ['o', 55]], 214),
+  ]
+  assert.equal(
+    recognizedSentence(applyTextReranking(uncertainTitleSharedBudget, BASE_CATALOG, 'en')),
+    'hello',
+    'Ein unsicherer Titelanfang muss dasselbe erweiterte Korrekturbudget wie das vollständig gestützte Kernwort verwenden.',
+  )
+  const queryAgainstCamry = [
+    token('q', 55, [['q', 55], ['z', 52], ['Z', 51], ['B', 48], ['7', 48], ['c', 47]], 215),
+    token('u', 58, [['u', 58], ['m', 57], ['R', 56], ['a', 55], ['r', 53], ['n', 51]], 216),
+    token('m', 54, [['m', 54], ['c', 49], ['w', 46], ['e', 43], ['n', 41], ['o', 39]], 217),
+    token('r', 77, [['r', 77], ['c', 60], ['T', 59], ['C', 57], ['v', 54], ['t', 50]], 218),
+    token('y', 66, [['Y', 71], ['/', 69], ['y', 66], ['2', 64], ['l', 61], ['g', 59]], 219),
+  ]
+  const queryCompetitors = new Set(['camry', 'query'])
+  installRecognitionWordMembership('en', (word) => queryCompetitors.has(word))
+  installRecognitionWordCandidateProvider('en', (length) => (
+    length === 'query'.length ? [...queryCompetitors] : []
+  ))
+  assert.equal(
+    recognizedSentence(applyTextReranking(queryAgainstCamry, BASE_CATALOG, 'en')),
+    'query',
+    'Bei zwei knapp gestützten Vollwörtern muss der Pfad mit weniger tatsächlichen Glyphenänderungen gewinnen.',
+  )
+  installRecognitionWordCandidateProvider('en', null)
+  installRecognitionWordMembership('en', null)
+  const qualityAgainstQualify = [
+    token('9', 71, [['9', 71], ['g', 64], ['y', 60], ['q', 58]], 220),
+    token('u', 64, [['u', 64], ['a', 64], ['U', 63], ['n', 56]], 221),
+    token('a', 66, [['a', 66], ['u', 64], ['n', 62], ['o', 61]], 222),
+    token('l', 84, [['l', 84], ['d', 71], ['A', 70], ['f', 66]], 223),
+    token('i', 77, [['i', 77], ['l', 60], ['7', 58], ['t', 55]], 224),
+    token('f', 65, [['f', 65], ['A', 64], ['[', 64], ['t', 62]], 225),
+    token('g', 73, [['g', 73], ['y', 65], ['A', 59], ['8', 57]], 226),
+  ]
+  const qualityCompetitors = new Set(['qualify', 'quality'])
+  installRecognitionWordMembership('en', (word) => qualityCompetitors.has(word))
+  installRecognitionWordCandidateProvider('en', (length) => (
+    length === 'quality'.length ? [...qualityCompetitors] : []
+  ))
+  assert.equal(
+    recognizedSentence(applyTextReranking(qualityAgainstQualify, BASE_CATALOG, 'en')),
+    'quality',
+    'Ein Ein-Buchstaben-Nachbar darf den sprachlich stärkeren voll gestützten Wortpfad nicht allein wegen einer Änderung weniger verdrängen.',
+  )
+  installRecognitionWordCandidateProvider('en', null)
+  installRecognitionWordMembership('en', null)
   const corpusBackedFabio = [
     token('E', 72, [['E', 72], ['F', 68]], 200),
     token('c', 78, [['c', 78], ['a', 74]], 201),

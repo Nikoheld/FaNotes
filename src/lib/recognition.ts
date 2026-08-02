@@ -6109,7 +6109,26 @@ const rerankTextChunk = (
         correctionEvidenceForBeam(beam).supported
       ))
     : undefined
-  const languageBest = fallbackLanguageBeam ?? leadingLanguageBeam
+  const provisionalLanguageBest = fallbackLanguageBeam ?? leadingLanguageBeam
+  const provisionalCorrectionEvidence = correctionEvidenceForBeam(provisionalLanguageBest)
+  const simplerSupportedBeam = provisionalLanguageBest && provisionalCorrectionEvidence.supported
+    ? ranked.find((beam) => {
+        const evidence = correctionEvidenceForBeam(beam)
+        const competingCharacters = [...beam.value.toLocaleLowerCase(LANGUAGE_PROFILES[language].locale)]
+        const provisionalCharacters = [
+          ...provisionalLanguageBest.value.toLocaleLowerCase(LANGUAGE_PROFILES[language].locale),
+        ]
+        const competingWordDifference = competingCharacters.length === provisionalCharacters.length
+          ? competingCharacters.filter((character, index) => character !== provisionalCharacters[index]).length
+          : Number.POSITIVE_INFINITY
+        return evidence.supported &&
+          evidence.effectiveSemanticChanges < provisionalCorrectionEvidence.effectiveSemanticChanges &&
+          (beam.evidence?.preferredName || competingWordDifference >= 2) &&
+          beam.score >= provisionalLanguageBest.score - 0.12 &&
+          beam.visualScore >= provisionalLanguageBest.visualScore - 0.12
+      })
+    : undefined
+  const languageBest = simplerSupportedBeam ?? provisionalLanguageBest
   const languageCorrectionEvidence = correctionEvidenceForBeam(languageBest)
   const visualBest = [...beams].sort((first, second) => second.visualScore - first.visualScore)[0]
   const visualWord = visualBest?.value ?? ''
@@ -6171,7 +6190,7 @@ const rerankTextChunk = (
     languageBest?.evidence?.knownWord &&
     !languageBest.evidence.properName &&
     canonicalNameChangedIndexes.length >= 1 &&
-    canonicalEffectiveChanges <= Math.max(1, Math.ceil(chunk.length * 0.34)) &&
+    canonicalEffectiveChanges <= languageCorrectionEvidence.maximumChanges &&
     canonicalNameChangedIndexes.some((index) => (
       (chunk[index].visualConfidence ?? chunk[index].confidence) <= 84
     )) &&
