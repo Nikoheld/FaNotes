@@ -71,6 +71,21 @@ assert.match(glyphenWerkApp, /neuralTestText \|\| recognizedSentence/u)
 assert.match(glyphenWerkApp, /neuronale Satzanalyse/u)
 assert.match(glyphenWerkApp, /recognizeAutomaticExpression\([\s\S]*?getGlyphenWerkLanguage\(\)/u, 'Der GlyphenWerk-Test muss die aktive deutsche oder englische Sprache verwenden.')
 assert.match(glyphenWerkApp, /recognizeAutomaticExpression/u)
+assert.match(
+  glyphenWerkApp,
+  /independentTextCharacterCount\([\s\S]*?recognition\.evidence\?\.text/u,
+  'Die eingebettete Textlänge muss aus dem unabhängigen Textzweig stammen.',
+)
+assert.doesNotMatch(
+  glyphenWerkApp,
+  /textCharacterCountHint:[\s\S]{0,180}recognition\.tokens\.filter/u,
+  'Ausgewählte Mathe-Tokens dürfen nicht als Text-Zeichenanzahl zurückgekoppelt werden.',
+)
+assert.match(
+  glyphenWerkApp,
+  /recognition\.mode === 'text' && textBranchCharacterCount !== undefined/u,
+  'Eine klassische Textzeichenfolge darf nur im tatsächlich gewählten Textmodus als Inhalts-Hinweis dienen.',
+)
 assert.match(glyphenWerkApp, /correctedRecognitionInputRef/u)
 assert.match(glyphenWerkApp, /bestätigte manuelle Korrektur/u)
 assert.match(glyphenWerkApp, /correctedRecognitionInputRef\.current === testStrokes/u)

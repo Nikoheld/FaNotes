@@ -5,6 +5,11 @@ import { BASE_CATALOG, CATEGORIES, DEFAULT_LABEL_ID, categoryName } from './data
 import { getAllSamples, putSample, removeAllSamples, removeSample } from './lib/db'
 import { exportDataset } from './lib/exportDataset'
 import {
+  incrementalTextCharacterHint,
+  independentTextCharacterCount,
+  type IncrementalTextRecognitionState,
+} from './lib/incrementalTextRecognition'
+import {
   buildRecognitionModel,
   createMathLayoutExamples,
   createEmptyRecognitionModel,
@@ -180,63 +185,6 @@ const layoutTrainingKey = (assignments: MathLayoutAssignment[]) => assignments
   .map((assignment) => `${assignment.tokenId}:${assignment.role}:${assignment.anchorId}`)
   .sort()
   .join('|')
-
-type IncrementalTextRecognitionState = {
-  strokes: Stroke[]
-  characterCount: number
-  text: string
-  pendingStrokeIndex: number
-  prefixText: string
-}
-
-const strokeExtent = (strokes: Stroke[]) => {
-  const points = strokes.flatMap((stroke) => stroke.points)
-  if (!points.length) return null
-  return {
-    minX: Math.min(...points.map((point) => point.x)),
-    maxX: Math.max(...points.map((point) => point.x)),
-    minY: Math.min(...points.map((point) => point.y)),
-    maxY: Math.max(...points.map((point) => point.y)),
-  }
-}
-
-/**
- * Derives a character-count hint only from append-only pen input.  A new
- * stroke whose body starts at the right edge of the previous word is a new
- * glyph; a dot, crossbar or second loop inside the current glyph keeps the
- * previous count.  New lines and undo/erase deliberately disable the hint.
- */
-const incrementalTextCharacterHint = (
-  previous: IncrementalTextRecognitionState | null,
-  current: Stroke[],
-) => {
-  if (
-    !previous ||
-    previous.characterCount < 1 ||
-    previous.characterCount >= 24 ||
-    current.length <= previous.strokes.length
-  ) return undefined
-  const before = strokeExtent(previous.strokes)
-  const added = strokeExtent(current.slice(previous.strokes.length))
-  if (!before || !added) return undefined
-  const lineHeight = Math.max(0.012, before.maxY - before.minY)
-  const overlapsLine = added.maxY >= before.minY - lineHeight * 0.35
-    && added.minY <= before.maxY + lineHeight * 0.35
-  if (!overlapsLine) return undefined
-  const beginsAtRightEdge = added.minX >= before.maxX - Math.max(0.018, lineHeight * 0.34)
-  const extendsWord = added.maxX >= before.maxX + Math.max(0.004, lineHeight * 0.035)
-  const beginsNewGlyph = beginsAtRightEdge && extendsWord
-  const pendingStrokeIndex = beginsNewGlyph
-    ? previous.strokes.length
-    : Math.max(0, Math.min(previous.pendingStrokeIndex, previous.strokes.length))
-  return {
-    characterCount: beginsNewGlyph ? previous.characterCount + 1 : previous.characterCount,
-    beginsNewGlyph,
-    addedStrokes: current.slice(pendingStrokeIndex),
-    previousText: beginsNewGlyph ? previous.text : previous.prefixText,
-    pendingStrokeIndex,
-  }
-}
 
 const App = () => {
   const canvasRef = useRef<DrawingCanvasHandle>(null)
@@ -527,6 +475,10 @@ const App = () => {
           incrementalTextRecognitionRef.current = null
         }
         if (EMBEDDED_IN_FANOTES) {
+          const textBranchCharacterCount = independentTextCharacterCount(
+            compactText,
+            recognition.evidence?.text,
+          )
           const requestId = `line-${createUuid()}`
           neuralRequestIdRef.current = requestId
           notifyFaNotes({
@@ -534,10 +486,17 @@ const App = () => {
             requestId,
             strokes: testStrokes,
             language: getGlyphenWerkLanguage(),
+            // Never feed the selected automatic token count back into the
+            // text pass: when automatic mode briefly chooses `∬`, that is one
+            // *math* token and would force two letters into a single glyph.
             textCharacterCountHint: incrementalHint?.characterCount
-              ?? recognition.tokens.filter((token) => !token.isLayout).length,
+              ?? textBranchCharacterCount,
             textCharacterHint: textCharacterHint
-              ?? (/^\p{L}{1,24}$/u.test(compactText) ? compactText : undefined),
+              ?? (
+                recognition.mode === 'text' && textBranchCharacterCount !== undefined
+                  ? compactText
+                  : undefined
+              ),
           })
         } else {
           setIsRecognizing(false)

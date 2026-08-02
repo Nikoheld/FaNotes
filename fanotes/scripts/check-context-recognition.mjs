@@ -61,6 +61,10 @@ try {
     neuralTextMayOverrideAutomaticMode,
   } = await server.ssrLoadModule('/src/lib/recognitionModeSelection.ts')
   const { BASE_CATALOG } = await server.ssrLoadModule('/../src/data/catalog.ts')
+  const {
+    incrementalTextCharacterHint,
+    independentTextCharacterCount,
+  } = await server.ssrLoadModule('/../src/lib/incrementalTextRecognition.ts')
   const labelByChar = new Map(BASE_CATALOG.map((label) => [label.char, label]))
 
   const horizontalStroke = (x1, x2, y) => ({
@@ -72,6 +76,92 @@ try {
       { x: x2, y, t: 1, pressure: 0.5, pointerType: 'pen' },
     ],
   })
+  const penStroke = (coordinates) => ({
+    baseWidth: 3,
+    color: '#111827',
+    pressureEnabled: true,
+    points: coordinates.map(([x, y], index) => ({
+      x,
+      y,
+      t: index,
+      pressure: 0.5,
+      pointerType: 'pen',
+    })),
+  })
+  const initialBody = penStroke([[0.1, 0.2], [0.18, 0.4]])
+  const incrementalState = {
+    strokes: [initialBody],
+    characterCount: 1,
+    text: 'T',
+    pendingStrokeIndex: 0,
+    prefixText: '',
+  }
+  const rapidTStem = penStroke([[0.27, 0.18], [0.27, 0.42]])
+  const rapidTBar = penStroke([[0.22, 0.19], [0.32, 0.19]])
+  const clonedInitialBody = {
+    ...initialBody,
+    points: initialBody.points.map((point) => ({ ...point })),
+  }
+  assert.equal(
+    incrementalTextCharacterHint(
+      incrementalState,
+      [clonedInitialBody, rapidTStem, rapidTBar],
+    )?.characterCount,
+    2,
+    'Ein Canvas-Klon und der links überhängende Querstrich eines neuen T müssen den sicheren Append-Count erhalten.',
+  )
+  const backwardsLoop = penStroke([
+    [0.18, 0.34], [0.3, 0.4], [0.31, 0.27], [0.2, 0.24], [0.28, 0.35],
+  ])
+  assert.equal(
+    incrementalTextCharacterHint(incrementalState, [initialBody, backwardsLoop])?.characterCount,
+    2,
+    'Eine rücklaufende Schleife rechts vom Wort muss als neuer Körper zählen können.',
+  )
+  const secondFastBody = penStroke([[0.37, 0.2], [0.39, 0.4]])
+  assert.equal(
+    incrementalTextCharacterHint(
+      incrementalState,
+      [initialBody, rapidTStem, secondFastBody],
+    ),
+    undefined,
+    'Zwei schnell angehängte Körper dürfen nicht als harter Plus-eins-Count ausgegeben werden.',
+  )
+  const delayedCrossbar = penStroke([[0.13, 0.25], [0.25, 0.25]])
+  assert.equal(
+    incrementalTextCharacterHint(incrementalState, [initialBody, delayedCrossbar])?.characterCount,
+    1,
+    'Ein nachträglicher Querstrich am aktuellen Buchstaben darf keinen zusätzlichen Buchstaben erzeugen.',
+  )
+  const insertedBody = penStroke([[0.13, 0.21], [0.15, 0.39]])
+  assert.equal(
+    incrementalTextCharacterHint(incrementalState, [initialBody, insertedBody]),
+    undefined,
+    'Ein nachträglich innerhalb der alten Breite gezeichneter Körper darf den alten Count nicht als exakt bestätigen.',
+  )
+  assert.equal(
+    incrementalTextCharacterHint(
+      incrementalState,
+      [{
+        ...initialBody,
+        points: initialBody.points.map((point, index) => (
+          index === 0 ? { ...point, x: point.x + 0.01 } : { ...point }
+        )),
+      }, rapidTStem],
+    ),
+    undefined,
+    'Veränderte oder neu geordnete frühere Tinte darf keinen Append-Hinweis erben.',
+  )
+  assert.equal(
+    independentTextCharacterCount('Te', { visibleCharacters: 2, letters: 2 }),
+    2,
+    'Der reine parallele Textzweig muss einen Zwei-Buchstaben-Count unabhängig vom gewählten Mathepfad liefern.',
+  )
+  assert.equal(
+    independentTextCharacterCount('∬', { visibleCharacters: 1, letters: 0 }),
+    undefined,
+    'Mathematische Tokens dürfen niemals als Text-Zeichenanzahl zurückgekoppelt werden.',
+  )
   assert.equal(
     groupRecognitionLines([
       horizontalStroke(0.34, 0.48, 0.33),
