@@ -6090,9 +6090,10 @@ const rerankTextChunk = (
       (chunk[index].visualConfidence ?? chunk[index].confidence) >= 88
     ))
   )
-  const uncertainTitleCaseCoreCorrection = Boolean(
+  const uncertainTitleCaseDictionaryCorrection = Boolean(
     visualLooksLikeProperName &&
-    languageBest?.evidence?.coreWord &&
+    languageBest?.evidence?.knownWord &&
+    !languageBest.evidence.properName &&
     canonicalNameChangedIndexes.length >= 1 &&
     canonicalNameChangedIndexes.length <= Math.max(1, Math.ceil(chunk.length * 0.34)) &&
     canonicalNameChangedIndexes.some((index) => (
@@ -6110,7 +6111,7 @@ const rerankTextChunk = (
       visualLooksLikeAcronym ||
       (
         visualLooksLikeProperName &&
-        !uncertainTitleCaseCoreCorrection &&
+        !uncertainTitleCaseDictionaryCorrection &&
         (
           visuallyConfidentUnknownTitleCase ||
           (

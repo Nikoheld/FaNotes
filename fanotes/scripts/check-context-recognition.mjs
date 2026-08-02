@@ -1849,6 +1849,23 @@ try {
   )
   installRecognitionWordCandidateProvider('en', null)
   installRecognitionWordMembership('en', null)
+  const uncertainTitleCaseDictionaryWord = [...'Jrivat'].map((char, index) => token(
+    char,
+    index === 0 ? 68 : 84,
+    index === 0 ? [['J', 68], ['p', 62]] : [[char, 84]],
+    198 + index,
+  ))
+  installRecognitionWordMembership('de', (word) => word === 'privat')
+  installRecognitionWordCandidateProvider('de', (length) => (
+    length === 'privat'.length ? ['privat'] : []
+  ))
+  assert.equal(
+    recognizedSentence(applyTextReranking(uncertainTitleCaseDictionaryWord, BASE_CATALOG, 'de')),
+    'privat',
+    'Ein unsicherer titelähnlicher Start darf ein eng visuell gestütztes Volllexikonwort nicht blockieren.',
+  )
+  installRecognitionWordCandidateProvider('de', null)
+  installRecognitionWordMembership('de', null)
   const uncertainInitialCommonWord = [...'Jystem'].map((char, index) => token(
     char,
     index === 0 ? 68 : 84,
@@ -1885,6 +1902,17 @@ try {
     'Ein visuell bereits sicherer unbekannter Name darf nicht zu einem ähnlichen corpusgestützten Namen umgeschrieben werden.',
   )
   installRecognitionProperNameMembership('de', null)
+  installRecognitionWordMembership('de', (word) => word === 'marco')
+  installRecognitionWordCandidateProvider('de', (length) => (
+    length === 'marco'.length ? ['marco'] : []
+  ))
+  assert.equal(
+    recognizedSentence(applyTextReranking(confidentUnknownMarlo, BASE_CATALOG, 'de')),
+    'Marlo',
+    'Ein sicher sichtbarer unbekannter Name muss auch gegen ein nahes gewöhnliches Volllexikonwort geschützt bleiben.',
+  )
+  installRecognitionWordCandidateProvider('de', null)
+  installRecognitionWordMembership('de', null)
   const longCoreWord = [...'bamdscbriye'].map((char, index) => {
     const expected = [...'handschrift'][index]
     return token(
