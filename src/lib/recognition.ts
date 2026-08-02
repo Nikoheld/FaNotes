@@ -119,6 +119,9 @@ export type RecognitionLabelStats = {
   /** Robust personal width/height prior in logarithmic space. */
   aspectMedian: number
   aspectSpread: number
+  /** Exact pen-stroke observations retained for this learned class. */
+  strokeCountHistogram: number[]
+  strokeCountTotal: number
 }
 
 type RecognitionAspectStats = {
@@ -149,6 +152,9 @@ export type RecognitionAlternative = {
   baseConfidence?: number
   personalSupport?: number
   personalConfidence?: number
+  /** Fraction of trusted examples written with this exact stroke count. */
+  strokeCountFit?: number
+  strokeCountSupport?: number
 }
 
 export type RecognitionMode = 'math' | 'text'
@@ -193,6 +199,8 @@ export type RecognitionToken = {
   /** Direct evidence from this writer's trusted GlyphenWerk examples. */
   personalSupport?: number
   personalConfidence?: number
+  strokeCountFit?: number
+  strokeCountSupport?: number
   /** Evidence left by the language model for safe, local self-training. */
   context?: {
     word: string
@@ -3726,6 +3734,12 @@ const buildLabelStats = (
       ? clamp(percentile(aspectDeviations, 0.86) * 1.7 + 0.08, 0.14, 0.48)
       : 0.3
     const trustedCount = group.filter((entry) => entry.trust >= 0.8).length
+    const trustedStrokeEntries = group.filter((entry) => entry.trust >= 0.3)
+    const strokeBasis = trustedStrokeEntries.length ? trustedStrokeEntries : group
+    const strokeCountHistogram: number[] = []
+    strokeBasis.forEach((entry) => {
+      strokeCountHistogram[entry.strokeCount] = (strokeCountHistogram[entry.strokeCount] ?? 0) + 1
+    })
     const trustedRatio = trustedCount / Math.max(1, group.length)
     const reliability = measuredReliability * (0.42 + trustedRatio * 0.58)
     stats.set(labelId, {
@@ -3734,6 +3748,8 @@ const buildLabelStats = (
       radius,
       aspectMedian: Math.exp(aspectMedianLog),
       aspectSpread,
+      strokeCountHistogram,
+      strokeCountTotal: strokeBasis.length,
       reliability: group.length === 1
         ? Math.max(0.58, reliability)
         : clamp(reliability, 0.22, 1),
@@ -5135,6 +5151,8 @@ type TextCandidate = {
   baseConfidence: number
   personalSupport: number
   personalConfidence: number
+  strokeCountFit: number
+  strokeCountSupport: number
 }
 
 const candidatesForTextToken = (
@@ -5148,6 +5166,8 @@ const candidatesForTextToken = (
     baseConfidence = 0,
     personalSupport = 0,
     personalConfidence = 0,
+    strokeCountFit = 0,
+    strokeCountSupport = 0,
   ) => {
     const previous = byId.get(labelId)
     byId.set(labelId, previous ? {
@@ -5155,7 +5175,16 @@ const candidatesForTextToken = (
       baseConfidence: Math.max(previous.baseConfidence, baseConfidence),
       personalSupport: Math.max(previous.personalSupport, personalSupport),
       personalConfidence: Math.max(previous.personalConfidence, personalConfidence),
-    } : { confidence, baseConfidence, personalSupport, personalConfidence })
+      strokeCountFit: Math.max(previous.strokeCountFit, strokeCountFit),
+      strokeCountSupport: Math.max(previous.strokeCountSupport, strokeCountSupport),
+    } : {
+      confidence,
+      baseConfidence,
+      personalSupport,
+      personalConfidence,
+      strokeCountFit,
+      strokeCountSupport,
+    })
   }
   add(
     token.labelId,
@@ -5163,6 +5192,8 @@ const candidatesForTextToken = (
     token.baseConfidence ?? 0,
     token.personalSupport ?? 0,
     token.personalConfidence ?? 0,
+    token.strokeCountFit ?? 0,
+    token.strokeCountSupport ?? 0,
   )
   token.alternatives.forEach((alternative) => add(
     alternative.labelId,
@@ -5170,6 +5201,8 @@ const candidatesForTextToken = (
     alternative.baseConfidence ?? 0,
     alternative.personalSupport ?? 0,
     alternative.personalConfidence ?? 0,
+    alternative.strokeCountFit ?? 0,
+    alternative.strokeCountSupport ?? 0,
   ))
   const candidates = [...byId.entries()]
     .flatMap(([labelId, evidence]) => {
@@ -5430,6 +5463,20 @@ const textGeometryCandidateScore = (
   return score
 }
 
+const learnedStrokeKind = (labelId: string) => (
+  labelId.startsWith('digit_')
+    ? 'digit'
+    : labelId.startsWith('latin_') ? 'letter' : null
+)
+
+const learnedStrokeCountCandidateScore = (candidate: TextCandidate) => {
+  if (candidate.strokeCountSupport < 8) return 0
+  const strength = clamp((candidate.strokeCountSupport - 4) / 12, 0.25, 1)
+  if (candidate.strokeCountFit >= 0.85) return 0.07 * strength
+  if (candidate.strokeCountFit === 0) return -0.08 * strength
+  return 0
+}
+
 const rerankTextChunk = (
   chunk: RecognitionToken[],
   labelMap: Map<string, LabelDefinition>,
@@ -5444,12 +5491,16 @@ const rerankTextChunk = (
       baseConfidence: token.baseConfidence ?? 0,
       personalSupport: token.personalSupport ?? 0,
       personalConfidence: token.personalConfidence ?? 0,
+      strokeCountFit: token.strokeCountFit ?? 0,
+      strokeCountSupport: token.strokeCountSupport ?? 0,
     }, ...token.alternatives.map((alternative) => ({
       labelId: alternative.labelId,
       confidence: alternative.confidence,
       baseConfidence: alternative.baseConfidence ?? 0,
       personalSupport: alternative.personalSupport ?? 0,
       personalConfidence: alternative.personalConfidence ?? 0,
+      strokeCountFit: alternative.strokeCountFit ?? 0,
+      strokeCountSupport: alternative.strokeCountSupport ?? 0,
     }))]
       .filter((candidate) => {
         if (candidate.labelId === token.labelId) return true
@@ -5485,6 +5536,8 @@ const rerankTextChunk = (
       token.baseConfidence = selected.baseConfidence
       token.personalSupport = selected.personalSupport
       token.personalConfidence = selected.personalConfidence
+      token.strokeCountFit = selected.strokeCountFit
+      token.strokeCountSupport = selected.strokeCountSupport
     }
     const extremelyNarrowDottedI = token.char !== 'i' &&
       resemblesExtremelyNarrowDottedLowercaseI(token.strokes)
@@ -5509,6 +5562,8 @@ const rerankTextChunk = (
         token.baseConfidence = extremelyNarrowDottedI.baseConfidence ?? 0
         token.personalSupport = extremelyNarrowDottedI.personalSupport ?? 0
         token.personalConfidence = extremelyNarrowDottedI.personalConfidence ?? 0
+        token.strokeCountFit = extremelyNarrowDottedI.strokeCountFit ?? 0
+        token.strokeCountSupport = extremelyNarrowDottedI.strokeCountSupport ?? 0
       }
     }
     const dottedLowercaseJ = token.char !== 'i' && token.char !== 'j' &&
@@ -5534,6 +5589,8 @@ const rerankTextChunk = (
         token.baseConfidence = dottedLowercaseJ.baseConfidence ?? 0
         token.personalSupport = dottedLowercaseJ.personalSupport ?? 0
         token.personalConfidence = dottedLowercaseJ.personalConfidence ?? 0
+        token.strokeCountFit = dottedLowercaseJ.strokeCountFit ?? 0
+        token.strokeCountSupport = dottedLowercaseJ.strokeCountSupport ?? 0
       }
     }
     const twoStrokeZ = token.char === '2' && token.strokes.length === 2
@@ -5566,6 +5623,50 @@ const rerankTextChunk = (
         token.baseConfidence = twoStrokeZ.baseConfidence ?? 0
         token.personalSupport = twoStrokeZ.personalSupport ?? 0
         token.personalConfidence = twoStrokeZ.personalConfidence ?? 0
+        token.strokeCountFit = twoStrokeZ.strokeCountFit ?? 0
+        token.strokeCountSupport = twoStrokeZ.strokeCountSupport ?? 0
+      }
+    }
+    const currentLearnedStrokeKind = learnedStrokeKind(token.labelId)
+    const currentAbsoluteConfidence = token.alternatives
+      .find((candidate) => candidate.labelId === token.labelId)?.confidence ?? token.confidence
+    const learnedStrokeCountAlternative = (
+      currentLearnedStrokeKind &&
+      (token.strokeCountSupport ?? 0) >= 8 &&
+      (token.strokeCountFit ?? 0) === 0
+    ) ? token.alternatives
+        .filter((candidate) => {
+          const candidateKind = learnedStrokeKind(candidate.labelId)
+          return candidateKind &&
+            candidateKind !== currentLearnedStrokeKind &&
+            (candidate.strokeCountSupport ?? 0) >= 8 &&
+            (candidate.strokeCountFit ?? 0) >= 0.85 &&
+            candidate.confidence >= currentAbsoluteConfidence - 5
+        })
+        .sort((first, second) => (
+          (second.personalConfidence ?? 0) - (first.personalConfidence ?? 0) ||
+          (second.baseConfidence ?? 0) - (first.baseConfidence ?? 0) ||
+          second.confidence - first.confidence
+        ))[0]
+      : undefined
+    if (learnedStrokeCountAlternative) {
+      // This is a tie-breaker, not a hard label rule: eight trusted examples,
+      // an unseen count for the current class, an >=85% exact-count match for
+      // the alternative, and a close visual candidate are all required. Once
+      // the user confirms the rare form, its exact count becomes observed and
+      // this preference switches itself off on the next model rebuild.
+      const learnedLabel = labelMap.get(learnedStrokeCountAlternative.labelId)
+      if (learnedLabel) {
+        token.labelId = learnedLabel.id
+        token.char = learnedLabel.char
+        token.name = learnedLabel.name
+        token.latex = learnedLabel.latex
+        token.confidence = Math.max(token.confidence, learnedStrokeCountAlternative.confidence)
+        token.baseConfidence = learnedStrokeCountAlternative.baseConfidence ?? 0
+        token.personalSupport = learnedStrokeCountAlternative.personalSupport ?? 0
+        token.personalConfidence = learnedStrokeCountAlternative.personalConfidence ?? 0
+        token.strokeCountFit = learnedStrokeCountAlternative.strokeCountFit ?? 0
+        token.strokeCountSupport = learnedStrokeCountAlternative.strokeCountSupport ?? 0
       }
     }
     const uppercaseY = token.char === 'y' && resemblesCompactUppercaseY(token.strokes)
@@ -5590,6 +5691,8 @@ const rerankTextChunk = (
         token.baseConfidence = uppercaseY.baseConfidence ?? 0
         token.personalSupport = uppercaseY.personalSupport ?? 0
         token.personalConfidence = uppercaseY.personalConfidence ?? 0
+        token.strokeCountFit = uppercaseY.strokeCountFit ?? 0
+        token.strokeCountSupport = uppercaseY.strokeCountSupport ?? 0
       }
     }
     const uppercaseI = token.char === 'i' && resemblesNarrowUndottedUppercaseI(token.strokes)
@@ -5614,6 +5717,8 @@ const rerankTextChunk = (
         token.baseConfidence = uppercaseI.baseConfidence ?? 0
         token.personalSupport = uppercaseI.personalSupport ?? 0
         token.personalConfidence = uppercaseI.personalConfidence ?? 0
+        token.strokeCountFit = uppercaseI.strokeCountFit ?? 0
+        token.strokeCountSupport = uppercaseI.strokeCountSupport ?? 0
       }
     }
     // A single isolated glyph has no word context. Running it through the
@@ -5635,6 +5740,7 @@ const rerankTextChunk = (
       let visualScore = beam.visualScore + Math.log(0.08 + clamp(candidate.confidence / 100)) * 2.25
       if (kind === 'word' && isDigitLabel(candidate.label)) visualScore -= 0.34
       if (kind === 'number' && isLetterLabel(candidate.label)) visualScore -= 0.34
+      visualScore += learnedStrokeCountCandidateScore(candidate)
       visualScore += textGeometryCandidateScore(chunk[position], candidate, chunk, position)
       const languageScore = beam.languageScore + languageTransitionScore(
         beam.value,
@@ -5967,6 +6073,11 @@ export const recognizeExpression = (
         )
         const stats = model.labelStats.get(labelId)
         const aspectStats = model.aspectStats.get(labelId)
+        const strokeCountFit = stats?.strokeCountTotal
+          ? Math.max(...recognitionVariants.map((variant) => (
+              (stats.strokeCountHistogram[variant.strokeCount] ?? 0) / stats.strokeCountTotal
+            )))
+          : 0
         // Accidental merges expand a crop horizontally. Deliberately narrow
         // or compressed handwriting must remain valid, so this is an upper
         // envelope rather than a symmetric distance from the median.
@@ -6033,6 +6144,8 @@ export const recognizeExpression = (
           personalSupport: personal.length ? (stats?.trustedCount ?? personal.length) : 0,
           personalConfidence,
           aspectFit,
+          strokeCountFit,
+          strokeCountSupport: stats?.strokeCountTotal ?? 0,
         }
       })
       .sort((a, b) => a.distance - b.distance)
@@ -6129,6 +6242,8 @@ export const recognizeExpression = (
         baseConfidence: entry.baseConfidence,
         personalSupport: entry.personalSupport,
         personalConfidence: entry.personalConfidence,
+        strokeCountFit: entry.strokeCountFit,
+        strokeCountSupport: entry.strokeCountSupport,
       }]
     })
 
@@ -6148,6 +6263,8 @@ export const recognizeExpression = (
       baseConfidence: best?.baseConfidence ?? 0,
       personalSupport: best?.personalSupport ?? 0,
       personalConfidence: best?.personalConfidence ?? 0,
+      strokeCountFit: best?.strokeCountFit ?? 0,
+      strokeCountSupport: best?.strokeCountSupport ?? 0,
       layout: cluster.fraction,
     }
     return { token, distance: best?.distance ?? 1, aspectFit: best?.aspectFit ?? 0 }

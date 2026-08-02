@@ -1151,6 +1151,45 @@ try {
     '2',
     'Eine normale einstrichige Ziffer 2 darf nicht durch den z-Strichzahlbeleg verändert werden.',
   )
+  const learnedStrokeCountQ = (currentFit = 0, qFit = 14 / 16) => {
+    const result = token('9', 77, [['9', 77], ['q', 72]], 109)
+    result.baseConfidence = 41
+    result.personalSupport = 16
+    result.personalConfidence = 64
+    result.strokeCountFit = currentFit
+    result.strokeCountSupport = 16
+    result.alternatives = result.alternatives.map((alternative) => alternative.char === 'q' ? {
+      ...alternative,
+      baseConfidence: 34,
+      personalSupport: 16,
+      personalConfidence: 47,
+      strokeCountFit: qFit,
+      strokeCountSupport: 16,
+    } : {
+      ...alternative,
+      baseConfidence: 41,
+      personalSupport: 16,
+      personalConfidence: 64,
+      strokeCountFit: currentFit,
+      strokeCountSupport: 16,
+    })
+    return result
+  }
+  assert.equal(
+    recognizedSentence(applyTextReranking([learnedStrokeCountQ()], BASE_CATALOG, 'de')),
+    'q',
+    'Ein zweistrichiges q mit 14/16 Trainingsbelegen muss eine knappe, nie zweistrichig gelernte 9 überstimmen.',
+  )
+  assert.equal(
+    recognizedSentence(applyTextReranking([learnedStrokeCountQ(1)], BASE_CATALOG, 'de')),
+    '9',
+    'Eine bereits mit derselben Strichzahl gelernte 9 darf nicht durch die Klassenstatistik ersetzt werden.',
+  )
+  assert.equal(
+    recognizedSentence(applyTextReranking([learnedStrokeCountQ(0, 0.8)], BASE_CATALOG, 'de')),
+    '9',
+    'Eine nur mässig häufige Gegenklasse darf ohne den 85-Prozent-Beleg keine knappe Ziffer ersetzen.',
+  )
 
   // A short lowercase body after a tall capital sits lower by construction.
   // Even a stale learned "subscript" relation must not turn ordinary baseline
