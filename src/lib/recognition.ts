@@ -4841,6 +4841,9 @@ type TextGapAnalysis = {
   gaps: number[]
   compactGap: number
   threshold: number
+  temporalGaps: number[]
+  compactTemporalGap: number
+  temporalThreshold: number
 }
 
 const textTokenInkBounds = (token: RecognitionToken) => {
@@ -4851,6 +4854,25 @@ const textTokenInkBounds = (token: RecognitionToken) => {
     minX: Math.min(...bounds.map((entry) => entry.minX)),
     maxX: Math.max(...bounds.map((entry) => entry.maxX)),
   }
+}
+
+const textTokenPrimaryTemporalRange = (token: RecognitionToken) => {
+  const primary = token.strokes
+    .filter((stroke) => stroke.points.length)
+    .map((stroke) => ({
+      stroke,
+      length: stroke.points.slice(1).reduce((sum, point, index) => (
+        sum + Math.hypot(
+          (point.x - stroke.points[index].x) * SOURCE_WIDTH,
+          (point.y - stroke.points[index].y) * SOURCE_HEIGHT,
+        )
+      ), 0),
+    }))
+    .sort((first, second) => second.length - first.length)[0]?.stroke
+  if (!primary) return null
+  const times = primary.points.map((point) => point.t).filter(Number.isFinite)
+  if (!times.length) return null
+  return { start: Math.min(...times), end: Math.max(...times) }
 }
 
 const analyzeTextGaps = (
@@ -4882,6 +4904,20 @@ const analyzeTextGaps = (
       : 0
     return Math.max(0, renderedGap, physicalGap)
   })
+  const temporalRanges = lineTokens.map(textTokenPrimaryTemporalRange)
+  const temporalGaps = lineTokens.slice(1).map((_token, index) => {
+    const previous = temporalRanges[index]
+    const current = temporalRanges[index + 1]
+    return previous && current ? Math.max(0, current.start - previous.end) : 0
+  })
+  const eligibleTemporal = temporalGaps.filter((gap) => gap > 0).sort((first, second) => first - second)
+  const compactTemporalPopulation = eligibleTemporal.length >= 2
+    ? eligibleTemporal.slice(0, Math.max(1, Math.ceil(eligibleTemporal.length * 0.58)))
+    : []
+  const compactTemporalGap = median(compactTemporalPopulation)
+  const temporalThreshold = compactTemporalPopulation.length
+    ? compactTemporalGap + Math.max(20, compactTemporalGap * 0.9)
+    : Number.POSITIVE_INFINITY
   const eligible = pairGaps.filter((gap) => gap > 0.0015).sort((first, second) => first - second)
   // With a mostly connected line there may be exactly one measurable gap:
   // the boundary between two words. Treating that lone gap as the compact
@@ -4946,8 +4982,23 @@ const analyzeTextGaps = (
     if (bestSplit) threshold = clamp(bestSplit.threshold, 0.0135, 0.058)
   }
 
-  return { gaps: pairGaps, compactGap, threshold }
+  return {
+    gaps: pairGaps,
+    compactGap,
+    threshold,
+    temporalGaps,
+    compactTemporalGap,
+    temporalThreshold,
+  }
 }
+
+const hasStrongTextPenPause = (
+  analysis: TextGapAnalysis,
+  boundaryIndex: number,
+) => (
+  analysis.temporalGaps[boundaryIndex] >= analysis.temporalThreshold &&
+  analysis.gaps[boundaryIndex] >= Math.max(0.012, analysis.compactGap * 1.35 + 0.003)
+)
 
 const arrangeTextTokens = (tokens: RecognitionToken[]) => {
   const clean = tokens
@@ -5004,7 +5055,7 @@ const arrangeTextTokens = (tokens: RecognitionToken[]) => {
           const previous = lineTokens[tokenIndex - 1]
           const gap = gapAnalysis.gaps[tokenIndex - 1]
           token.spaceBefore = (
-            gap >= gapAnalysis.threshold &&
+            (gap >= gapAnalysis.threshold || hasStrongTextPenPause(gapAnalysis, tokenIndex - 1)) &&
             !closingPunctuation.has(token.char) &&
             !openingPunctuation.has(previous.char)
           )
@@ -5068,12 +5119,13 @@ const refineTextSpacing = (
       const right = lexicalWordEvidence(value(index, rightEnd), language)
       const joined = lexicalWordEvidence(value(leftStart, rightEnd), language)
       const gap = gapAnalysis.gaps[index - 1]
+      const strongPenPause = hasStrongTextPenPause(gapAnalysis, index - 1)
       const bothFragmentsUnknown = !left.knownWord && !right.knownWord
       const marginalBoundary = gap <= Math.max(
         gapAnalysis.threshold * (bothFragmentsUnknown ? 1.9 : 1.42),
         gapAnalysis.compactGap + (bothFragmentsUnknown ? 0.024 : 0.014),
       )
-      if (joined.knownWord && (!left.knownWord || !right.knownWord) && marginalBoundary) {
+      if (joined.knownWord && (!left.knownWord || !right.knownWord) && marginalBoundary && !strongPenPause) {
         token.spaceBefore = false
         changed = true
       }
@@ -5113,9 +5165,17 @@ const refineTextSpacing = (
               if (start > 0) {
                 const boundaryIndex = segmentStart + start
                 const gap = gapAnalysis.gaps[boundaryIndex - 1]
-                const salientGap = gap >= Math.max(
-                  gapAnalysis.threshold * 0.72,
-                  gapAnalysis.compactGap * 1.55 + 0.0035,
+                const locallyDistinctCompactGap = (
+                  gap >= gapAnalysis.threshold * 0.48 &&
+                  gap >= gapAnalysis.compactGap * 2.2 + 0.0055
+                )
+                const salientGap = (
+                  gap >= Math.max(
+                    gapAnalysis.threshold * 0.72,
+                    gapAnalysis.compactGap * 1.55 + 0.0035,
+                  ) ||
+                  locallyDistinctCompactGap ||
+                  hasStrongTextPenPause(gapAnalysis, boundaryIndex - 1)
                 )
                 if (!salientGap) continue
               }

@@ -1470,6 +1470,53 @@ try {
       }
     }
   }
+  const spacedTextTokens = (value, boundaryAfter, innerGap, wordGap, withPenPause = false) => {
+    let left = 0.06
+    let time = 0
+    return [...value].map((char, index) => {
+      const result = token(char, 98, [[char, 98]], 400 + index, [left, 0.2, 0.04, 0.1])
+      result.strokes = [stroke([[left + 0.008, 0.22], [left + 0.032, 0.28]], time)]
+      left += 0.04 + (index === boundaryAfter ? wordGap : innerGap)
+      time += index === boundaryAfter && withPenPause ? 46 : 6
+      return result
+    })
+  }
+  assert.equal(
+    recognizedSentence(applyTextReranking(
+      spacedTextTokens('meinname', 3, 0.004, 0.025),
+      BASE_CATALOG,
+      'de',
+    )),
+    'mein name',
+    'Zwei bekannte Wörter müssen auch bei einem kompakten, aber lokal klar dominanten Abstand getrennt bleiben.',
+  )
+  assert.equal(
+    recognizedSentence(applyTextReranking(
+      spacedTextTokens('meintest', -1, 0.004, 0.004),
+      BASE_CATALOG,
+      'de',
+    )),
+    'meintest',
+    'Zwei bekannte Teilwörter dürfen ohne lokal herausragenden Abstand kein Leerzeichen in eine kompakte Kennung erfinden.',
+  )
+  assert.equal(
+    recognizedSentence(applyTextReranking(
+      spacedTextTokens('nikofabio', 3, 0.004, 0.025, true),
+      BASE_CATALOG,
+      'de',
+    )),
+    'niko fabio',
+    'Eine klare Stiftpause plus kompakter Tintenabstand muss auch zwei unbekannte Namen trennen.',
+  )
+  assert.equal(
+    recognizedSentence(applyTextReranking(
+      spacedTextTokens('meintest', 3, 0.004, 0.008, true),
+      BASE_CATALOG,
+      'de',
+    )),
+    'meintest',
+    'Eine Denkpause ohne ausreichend sichtbaren Abstand darf ein kompaktes Wort nicht zerlegen.',
+  )
   assert.equal(baselineSweepCases, 336, 'Der systematische Grundlinien-Sweep ist unvollständig.')
 
   let localWordBaselineSweepCases = 0
