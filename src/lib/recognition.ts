@@ -5876,31 +5876,69 @@ const rerankTextChunk = (
     ? 'word'
     : likelyDigits >= Math.ceil(chunk.length * 0.6) ? 'number' : 'mixed'
 
-  let beams: TextBeam[] = [{ value: '', visualScore: 0, languageScore: 0, score: 0, choices: [] }]
+  const emptyBeam = (): TextBeam => ({
+    value: '', visualScore: 0, languageScore: 0, score: 0, choices: [],
+  })
+  const extendBeam = (beam: TextBeam, candidate: TextCandidate, position: number): TextBeam => {
+    let visualScore = beam.visualScore + Math.log(0.08 + clamp(candidate.confidence / 100)) * 2.25
+    if (kind === 'word' && isDigitLabel(candidate.label)) visualScore -= 0.34
+    if (kind === 'number' && isLetterLabel(candidate.label)) visualScore -= 0.34
+    visualScore += learnedStrokeCountCandidateScore(candidate)
+    visualScore += textGeometryCandidateScore(chunk[position], candidate, chunk, position)
+    const languageScore = beam.languageScore + languageTransitionScore(
+      beam.value,
+      candidate.label.char,
+      position,
+      language,
+    )
+    return {
+      value: beam.value + candidate.label.char,
+      visualScore,
+      languageScore,
+      score: visualScore + languageScore,
+      choices: [...beam.choices, candidate],
+    }
+  }
+
+  let beams: TextBeam[] = [emptyBeam()]
   candidateLists.forEach((candidates, position) => {
-    beams = beams.flatMap((beam) => candidates.map((candidate) => {
-      let visualScore = beam.visualScore + Math.log(0.08 + clamp(candidate.confidence / 100)) * 2.25
-      if (kind === 'word' && isDigitLabel(candidate.label)) visualScore -= 0.34
-      if (kind === 'number' && isLetterLabel(candidate.label)) visualScore -= 0.34
-      visualScore += learnedStrokeCountCandidateScore(candidate)
-      visualScore += textGeometryCandidateScore(chunk[position], candidate, chunk, position)
-      const languageScore = beam.languageScore + languageTransitionScore(
-        beam.value,
-        candidate.label.char,
-        position,
-        language,
-      )
-      return {
-        value: beam.value + candidate.label.char,
-        visualScore,
-        languageScore,
-        score: visualScore + languageScore,
-        choices: [...beam.choices, candidate],
-      }
-    }))
+    beams = beams.flatMap((beam) => candidates.map((candidate) => extendBeam(beam, candidate, position)))
       .sort((first, second) => second.score - first.score)
       .slice(0, 256)
   })
+
+  // A fixed-width prefix beam can discard a complete common word before its
+  // exact-word evidence becomes available: four ambiguous early glyphs with
+  // eight plausible alternatives already produce 4096 prefixes. Preserve one
+  // visually strongest casing path for each small, hand-curated core word
+  // whose letters are all present in the recognizer candidates. The normal
+  // visual-loss and maximum-change gates below still decide whether that word
+  // may replace the visual result; this only prevents premature search loss.
+  if (kind === 'word' && chunk.length >= 3) {
+    const profile = LANGUAGE_PROFILES[language]
+    const coreWordBeams = [...profile.words].flatMap((word) => {
+      const characters = [...word]
+      if (characters.length !== chunk.length) return []
+      let paths: TextBeam[] = [emptyBeam()]
+      characters.forEach((character, position) => {
+        const matching = candidateLists[position].filter((candidate) => (
+          candidate.label.char.toLocaleLowerCase(profile.locale) === character
+        ))
+        paths = matching.length
+          ? paths.flatMap((beam) => matching.map((candidate) => extendBeam(beam, candidate, position)))
+              .sort((first, second) => second.score - first.score)
+              .slice(0, 2)
+          : []
+      })
+      return paths.slice(0, 1)
+    })
+    const byValue = new Map<string, TextBeam>()
+    ;[...beams, ...coreWordBeams].forEach((beam) => {
+      const previous = byValue.get(beam.value)
+      if (!previous || beam.score > previous.score) byValue.set(beam.value, beam)
+    })
+    beams = [...byValue.values()]
+  }
 
   beams.forEach((beam) => {
     const evidence = lexicalWordEvidence(beam.value, language)
@@ -5950,6 +5988,19 @@ const rerankTextChunk = (
       (chunk[index].visualConfidence ?? chunk[index].confidence) >= 88
     ))
   )
+  const uncertainTitleCaseCoreCorrection = Boolean(
+    visualLooksLikeProperName &&
+    languageBest?.evidence?.coreWord &&
+    canonicalNameChangedIndexes.length >= 1 &&
+    canonicalNameChangedIndexes.length <= Math.max(1, Math.ceil(chunk.length * 0.34)) &&
+    canonicalNameChangedIndexes.some((index) => (
+      (chunk[index].visualConfidence ?? chunk[index].confidence) <= 84
+    )) &&
+    canonicalNameChangedIndexes.every((index) => (
+      (languageBest?.choices[index]?.confidence ?? 0) >=
+      (chunk[index].visualConfidence ?? chunk[index].confidence) - 12
+    ))
+  )
   const languageOverwritesVisualName = Boolean(
     languageBest &&
     languageBest.value !== visualWord &&
@@ -5957,6 +6008,7 @@ const rerankTextChunk = (
       visualLooksLikeAcronym ||
       (
         visualLooksLikeProperName &&
+        !uncertainTitleCaseCoreCorrection &&
         (
           visuallyConfidentUnknownTitleCase ||
           (

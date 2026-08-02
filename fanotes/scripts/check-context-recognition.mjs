@@ -1800,6 +1800,17 @@ try {
     'Das bereits geladene vollständige Rechtschreiblexikon muss eine visuell nahe OCR-Endung im klassischen Wortstrahl nutzbar machen.',
   )
   installRecognitionWordMembership('en', null)
+  const uncertainInitialCommonWord = [...'Jystem'].map((char, index) => token(
+    char,
+    index === 0 ? 68 : 84,
+    index === 0 ? [['J', 68], ['s', 62]] : [[char, 84]],
+    195 + index,
+  ))
+  assert.equal(
+    recognizedSentence(applyTextReranking(uncertainInitialCommonWord, BASE_CATALOG, 'de')),
+    'system',
+    'Ein unsicherer gross wirkender Wortanfang darf eine nahe, häufige Kleinwort-Hypothese nicht als Eigennamen blockieren.',
+  )
   const corpusBackedFabio = [
     token('E', 72, [['E', 72], ['F', 68]], 200),
     token('c', 78, [['c', 78], ['a', 74]], 201),
@@ -1839,6 +1850,23 @@ try {
     recognizedSentence(applyTextReranking(longCoreWord, BASE_CATALOG, 'de')),
     'handschrift',
     'Ein langes Kernwort darf fünf einzeln visuell plausible Fehler gemeinsam korrigieren.',
+  )
+  const beamStressExpected = 'mathematik'
+  const beamStressVisual = 'nqvrematik'
+  const beamStressDistractors = ['x', 'z', 'q', 'j', 'f', 'p', 'v']
+  const beamStressWord = [...beamStressVisual].map((char, index) => {
+    const expected = [...beamStressExpected][index]
+    if (char === expected) return token(char, 84, [[char, 84]], 230 + index)
+    const alternatives = beamStressDistractors
+      .filter((candidate) => candidate !== char && candidate !== expected)
+      .slice(0, 6)
+      .map((candidate, candidateIndex) => [candidate, 71 - candidateIndex])
+    return token(char, 72, [[char, 72], ...alternatives, [expected, 60]], 230 + index)
+  })
+  assert.equal(
+    recognizedSentence(applyTextReranking(beamStressWord, BASE_CATALOG, 'de')),
+    beamStressExpected,
+    'Ein vollständig sichtbares Kernwort darf bei vielen frühen Alternativen nicht aus dem begrenzten Präfixstrahl fallen.',
   )
   const exhaustiveOnlyTarget = 'luminarium'
   const exhaustiveOnlyVisual = 'tunihorjum'
