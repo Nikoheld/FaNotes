@@ -5477,6 +5477,21 @@ const learnedStrokeCountCandidateScore = (candidate: TextCandidate) => {
   return 0
 }
 
+export const learnedStrokeCountHypothesisScore = (
+  tokens: Pick<RecognitionToken, 'strokeCountFit' | 'strokeCountSupport'>[],
+) => {
+  const supported = tokens.filter((token) => (token.strokeCountSupport ?? 0) >= 8)
+  if (!supported.length) return 0
+  return supported.reduce((score, token) => {
+    const support = token.strokeCountSupport ?? 0
+    const strength = clamp((support - 4) / 12, 0.25, 1)
+    const fit = token.strokeCountFit ?? 0
+    if (fit >= 0.85) return score + 0.08 * strength
+    if (fit === 0) return score - 0.1 * strength
+    return score
+  }, 0) / supported.length
+}
+
 const rerankTextChunk = (
   chunk: RecognitionToken[],
   labelMap: Map<string, LabelDefinition>,
@@ -6302,6 +6317,7 @@ export const recognizeExpression = (
     }, 0)
     let score = averageConfidence / 100 * 1.18 + (1 - clamp(averageDistance / 0.62)) * 0.42
       + independentSegmentationEvidence
+    score += learnedStrokeCountHypothesisScore(reranked)
     score -= widthPenalty
     const untouchedPersonalGlyph = classified.length === 1 ? classified[0].token : null
     if (

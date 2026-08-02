@@ -13,6 +13,7 @@ try {
     applyTextReranking,
     calibratePersonalBaseEvidence,
     groupRecognitionLines,
+    learnedStrokeCountHypothesisScore,
     recognizedLatex,
     recognizedSentence,
     suggestMathLayoutAssignments,
@@ -1189,6 +1190,20 @@ try {
     recognizedSentence(applyTextReranking([learnedStrokeCountQ(0, 0.8)], BASE_CATALOG, 'de')),
     '9',
     'Eine nur mässig häufige Gegenklasse darf ohne den 85-Prozent-Beleg keine knappe Ziffer ersetzen.',
+  )
+  assert.ok(
+    learnedStrokeCountHypothesisScore([
+      { strokeCountFit: 14 / 16, strokeCountSupport: 16 },
+      { strokeCountFit: 1, strokeCountSupport: 16 },
+    ]) - learnedStrokeCountHypothesisScore([
+      { strokeCountFit: 0, strokeCountSupport: 16 },
+    ]) >= 0.17,
+    'Zwei gut gelernte Buchstabenteile müssen bei sonst knapper Bewertung einen nie beobachteten Gesamtglyphenpfad überstimmen können.',
+  )
+  assert.equal(
+    learnedStrokeCountHypothesisScore([{ strokeCountFit: 1, strokeCountSupport: 7 }]),
+    0,
+    'Weniger als acht Trainingsbeispiele dürfen keine Segmentierung über die Strichstatistik bevorzugen.',
   )
 
   // A short lowercase body after a tall capital sits lower by construction.
