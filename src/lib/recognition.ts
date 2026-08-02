@@ -9,6 +9,7 @@ import {
   ENGLISH_COMMON_TRIGRAMS,
   ENGLISH_COMMON_WORDS,
 } from '../data/englishLanguage'
+import { SUPPLEMENTAL_CANONICAL_PROPER_NAMES } from '../data/supplementalProperNames'
 import hasySymbolPrototypeData from '../data/hasySymbolPrototypes.json'
 import { isStandardRecognitionSample } from './standardRecognition'
 import { normalizeGermanSharpS } from './orthography'
@@ -5402,6 +5403,7 @@ const lexicalWordEvidence = (value: string, language: RecognitionLanguage) => {
       word,
       knownWord: true,
       properName: false,
+      preferredName: false,
       coreWord: true,
       score: 1.22 + rank * 0.42 + Math.min(0.34, word.length * 0.045),
     }
@@ -5415,6 +5417,7 @@ const lexicalWordEvidence = (value: string, language: RecognitionLanguage) => {
       word,
       knownWord: true,
       properName: false,
+      preferredName: false,
       coreWord: false,
       score: 1.08 + Math.min(0.3, word.length * 0.035),
     }
@@ -5422,6 +5425,16 @@ const lexicalWordEvidence = (value: string, language: RecognitionLanguage) => {
   const canonicalNameShape = language === 'de'
     ? /^[A-ZÄÖÜ][a-zäöü]{2,}$/u.test(value)
     : /^[A-Z][a-z]{2,}$/u.test(value)
+  if (canonicalNameShape && SUPPLEMENTAL_CANONICAL_PROPER_NAMES.has(word)) {
+    return {
+      word,
+      knownWord: true,
+      properName: true,
+      preferredName: true,
+      coreWord: false,
+      score: 1.28 + Math.min(0.3, word.length * 0.035),
+    }
+  }
   if (canonicalNameShape && installedRecognitionProperNameMembership[language]?.(word)) {
     // Names have no reliable frequency rank. Their title-case shape and a
     // corpus hit may resolve close glyphs, but the lower bonus keeps an
@@ -5430,6 +5443,7 @@ const lexicalWordEvidence = (value: string, language: RecognitionLanguage) => {
       word,
       knownWord: true,
       properName: true,
+      preferredName: false,
       coreWord: false,
       score: 0.98 + Math.min(0.26, word.length * 0.03),
     }
@@ -5444,16 +5458,20 @@ const lexicalWordEvidence = (value: string, language: RecognitionLanguage) => {
     if (!word.endsWith(suffix) || word.length - suffix.length < 3) return false
     return profile.words.has(word.slice(0, -suffix.length))
   })
-  if (hasKnownStem) return { word, knownWord: false, properName: false, coreWord: false, score: 0.54 }
+  if (hasKnownStem) return {
+    word, knownWord: false, properName: false, preferredName: false, coreWord: false, score: 0.54,
+  }
 
   if (language === 'de' && word.length >= 7) {
     for (let split = 3; split <= word.length - 3; split += 1) {
       if (profile.words.has(word.slice(0, split)) && profile.words.has(word.slice(split))) {
-        return { word, knownWord: false, properName: false, coreWord: false, score: 0.62 }
+        return {
+          word, knownWord: false, properName: false, preferredName: false, coreWord: false, score: 0.62,
+        }
       }
     }
   }
-  return { word, knownWord: false, properName: false, coreWord: false, score: 0 }
+  return { word, knownWord: false, properName: false, preferredName: false, coreWord: false, score: 0 }
 }
 
 type TextBeam = {
@@ -5916,13 +5934,15 @@ const rerankTextChunk = (
   // may replace the visual result; this only prevents premature search loss.
   if (kind === 'word' && chunk.length >= 3) {
     const profile = LANGUAGE_PROFILES[language]
-    const coreWordBeams = [...profile.words].flatMap((word) => {
-      const characters = [...word]
+    const constrainedWordBeam = (value: string, exactCase: boolean) => {
+      const characters = [...value]
       if (characters.length !== chunk.length) return []
       let paths: TextBeam[] = [emptyBeam()]
       characters.forEach((character, position) => {
         const matching = candidateLists[position].filter((candidate) => (
-          candidate.label.char.toLocaleLowerCase(profile.locale) === character
+          exactCase
+            ? candidate.label.char === character
+            : candidate.label.char.toLocaleLowerCase(profile.locale) === character
         ))
         paths = matching.length
           ? paths.flatMap((beam) => matching.map((candidate) => extendBeam(beam, candidate, position)))
@@ -5931,9 +5951,14 @@ const rerankTextChunk = (
           : []
       })
       return paths.slice(0, 1)
+    }
+    const coreWordBeams = [...profile.words].flatMap((word) => constrainedWordBeam(word, false))
+    const preferredNameBeams = [...SUPPLEMENTAL_CANONICAL_PROPER_NAMES].flatMap((name) => {
+      const canonicalName = name.slice(0, 1).toLocaleUpperCase(profile.locale) + name.slice(1)
+      return constrainedWordBeam(canonicalName, true)
     })
     const byValue = new Map<string, TextBeam>()
-    ;[...beams, ...coreWordBeams].forEach((beam) => {
+    ;[...beams, ...coreWordBeams, ...preferredNameBeams].forEach((beam) => {
       const previous = byValue.get(beam.value)
       if (!previous || beam.score > previous.score) byValue.set(beam.value, beam)
     })
@@ -5976,7 +6001,11 @@ const rerankTextChunk = (
     languageBest?.evidence?.properName &&
     /^\p{Lu}\p{Ll}{2,}$/u.test(languageBest.value) &&
     canonicalNameChangedIndexes.length >= 1 &&
-    canonicalNameChangedIndexes.length <= 2 &&
+    canonicalNameChangedIndexes.length <= (
+      languageBest.evidence.preferredName
+        ? Math.max(2, Math.ceil(chunk.length * 0.6))
+        : 2
+    ) &&
     canonicalNameChangedIndexes.some((index) => (
       (chunk[index].visualConfidence ?? chunk[index].confidence) <= 84
     ))
@@ -6047,11 +6076,12 @@ const rerankTextChunk = (
     return Math.max(0, visualConfidence - (languageBest?.choices[index]?.confidence ?? 0))
   })
   const shortWord = chunk.length <= 2
+  const languageChangeRatio = languageBest?.evidence?.preferredName
+    ? 0.6
+    : languageBest?.evidence?.coreWord && chunk.length >= 8 ? 0.45 : 0.34
   const maximumLanguageChanges = shortWord
     ? 1
-    : Math.max(1, Math.ceil(chunk.length * (
-        languageBest?.evidence?.coreWord && chunk.length >= 8 ? 0.45 : 0.34
-      )))
+    : Math.max(1, Math.ceil(chunk.length * languageChangeRatio))
   const maximumLossPerChangedGlyph = shortWord ? 3 : 24
   const languageCorrectionHasVisualSupport = Boolean(
     languageBest?.evidence?.knownWord &&

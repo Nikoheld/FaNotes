@@ -1816,13 +1816,12 @@ try {
     token('c', 78, [['c', 78], ['a', 74]], 201),
     token('b', 88, [['b', 88]], 202),
     token('i', 86, [['i', 86]], 203),
-    token('o', 89, [['o', 89]], 204),
+    token('a', 67, [['a', 67], ['o', 65]], 204),
   ]
-  installRecognitionProperNameMembership('de', (word) => word === 'fabio')
   assert.equal(
     recognizedSentence(applyTextReranking(corpusBackedFabio, BASE_CATALOG, 'de')),
     'Fabio',
-    'Ein corpusgestützter Name muss zwei nahe visuelle Fehler korrigieren können, ohne zu einem häufigen Fremdwort zu driften.',
+    'Ein priorisierter häufiger Name muss drei nahe visuelle Fehler korrigieren können, ohne zu einem häufigen Fremdwort zu driften.',
   )
   const confidentUnknownMarlo = [...'Marlo'].map((char, index) => token(
     char,
