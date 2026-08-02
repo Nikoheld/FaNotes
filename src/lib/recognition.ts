@@ -7531,6 +7531,10 @@ export type AutomaticRecognitionEvidence = {
     plausibleWords?: number
     knownWordRatio: number
     baselineAlignment: number
+    /** Number of spatially independent full-height pen-lift bodies. */
+    independentBodies?: number
+    /** Physical ink width divided by height, with page anisotropy removed. */
+    inkAspectRatio?: number
     lines: number
     strongSentence: boolean
   }
@@ -8070,6 +8074,10 @@ export const recognizeAutomaticExpression = (
   const independentPenLiftBodyCount = combinedAutomaticCluster
     ? penLiftTextBodyClusters(combinedAutomaticCluster).length
     : 0
+  const physicalInkAspectRatio = combinedAutomaticCluster
+    ? (combinedAutomaticCluster.maxX - combinedAutomaticCluster.minX) * SOURCE_WIDTH /
+      Math.max(1, (combinedAutomaticCluster.maxY - combinedAutomaticCluster.minY) * SOURCE_HEIGHT)
+    : 0
   const mathIsPureNumber = visibleMath.length > 0 && visibleMath.every((token) => (
     token.labelId.startsWith('digit_')
   ))
@@ -8250,6 +8258,8 @@ export const recognizeAutomaticExpression = (
         plausibleWords: plausibleTextWords.length,
         knownWordRatio: Math.round(knownTextWordRatio * 1_000) / 1_000,
         baselineAlignment: Math.round(textBaselineAlignment * 1_000) / 1_000,
+        independentBodies: independentPenLiftBodyCount,
+        inkAspectRatio: Math.round(physicalInkAspectRatio * 1_000) / 1_000,
         lines: textLineCount,
         strongSentence: strongSentenceText,
       },

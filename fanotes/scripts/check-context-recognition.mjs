@@ -3337,6 +3337,121 @@ try {
     false,
     'Ein geometrisch bestätigtes einzelnes Integral darf nicht durch eine feindliche persönliche T-Antwort überschrieben werden.',
   )
+  const collapsedWideWordIntegral = {
+    ...standaloneIntegral,
+    textValue: 'Test',
+    evidence: {
+      ...standaloneIntegral.evidence,
+      text: {
+        ...standaloneIntegral.evidence.text,
+        visibleCharacters: 1,
+        letters: 1,
+        words: 0,
+        knownWords: 0,
+        knownWordRatio: 0,
+        independentBodies: 0,
+        inkAspectRatio: 1.82,
+      },
+    },
+  }
+  assert.equal(
+    assessNeuralTextModeCandidate('Test', 'de', {
+      ...neuralResult('Test', 93), wordCount: 1, knownWordRatio: 1,
+    }, collapsedWideWordIntegral).shouldUseText,
+    true,
+    'Ein breites vollständiges Wort darf nicht wegen einer kollabierten Einzel-Integralhypothese zu Mathematik werden.',
+  )
+  const narrowRealIntegralWithWordHallucination = {
+    ...collapsedWideWordIntegral,
+    evidence: {
+      ...collapsedWideWordIntegral.evidence,
+      text: {
+        ...collapsedWideWordIntegral.evidence.text,
+        inkAspectRatio: 0.44,
+      },
+    },
+  }
+  assert.equal(
+    assessNeuralTextModeCandidate('Test', 'de', {
+      ...neuralResult('Test', 98), wordCount: 1, knownWordRatio: 1,
+    }, narrowRealIntegralWithWordHallucination).shouldUseText,
+    false,
+    'Eine schmale echte Integralform muss auch gegen eine sehr sichere falsche Wortlesung geschützt bleiben.',
+  )
+  const wideRealSumWithWordHallucination = {
+    ...collapsedWideWordIntegral,
+    mathValue: '\\sum',
+    value: '\\sum',
+    evidence: {
+      ...collapsedWideWordIntegral.evidence,
+      text: {
+        ...collapsedWideWordIntegral.evidence.text,
+        inkAspectRatio: 0.86,
+      },
+    },
+  }
+  assert.equal(
+    assessNeuralTextModeCandidate('sum', 'en', {
+      ...neuralResult('sum', 98), wordCount: 1, knownWordRatio: 1,
+    }, wideRealSumWithWordHallucination).shouldUseText,
+    false,
+    'Ein einzelnes breites Summenzeichen darf nicht allein wegen eines passenden Wörterbuchworts zu Text werden.',
+  )
+  const protectedMathStructures = [
+    {
+      name: 'Integralgrenzen',
+      mathValue: '\\int_{0}^{1} x',
+      math: { largeOperators: 1, digits: 2, layoutAssignments: 2 },
+    },
+    {
+      name: 'Summengrenzen',
+      mathValue: '\\sum_{i=1}^{n} i',
+      math: { largeOperators: 1, relations: 1, layoutAssignments: 2 },
+    },
+    {
+      name: 'Bruch',
+      mathValue: '\\frac{7}{9}',
+      math: { fractions: 3, digits: 2 },
+    },
+    {
+      name: 'Wurzel',
+      mathValue: '\\sqrt{7}',
+      math: { strongSymbols: 1, digits: 1 },
+    },
+    {
+      name: 'Tiefindex',
+      mathValue: 'x_{1}',
+      math: { digits: 1, layoutAssignments: 1 },
+    },
+    {
+      name: 'Hochindex',
+      mathValue: 'x^{2}',
+      math: { digits: 1, layoutAssignments: 1 },
+    },
+  ]
+  protectedMathStructures.forEach(({ name, mathValue, math }) => {
+    const automatic = {
+      ...collapsedWideWordIntegral,
+      mathValue,
+      value: mathValue,
+      evidence: {
+        ...collapsedWideWordIntegral.evidence,
+        math: {
+          ...collapsedWideWordIntegral.evidence.math,
+          ...math,
+          latexStructure: true,
+          decisiveStructure: true,
+        },
+      },
+    }
+    assert.equal(
+      assessNeuralTextModeCandidate('Test', 'de', {
+        ...neuralResult('Test', 99), wordCount: 1, knownWordRatio: 1,
+      }, automatic).shouldUseText,
+      false,
+      `${name} muss selbst bei einer sehr sicheren gegenteiligen Wortlesung Mathematik bleiben.`,
+    )
+  })
   const trainedTConflict = {
     ...standaloneIntegral,
     textValue: 'T',

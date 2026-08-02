@@ -234,6 +234,12 @@ export const assessNeuralTextModeCandidate = (
     letterRatio >= 0.8 &&
     words.length >= 1
   )
+  const candidateProperName = (
+    neural.confidence >= 70 &&
+    words.length === 1 &&
+    letters >= 4 &&
+    /^[A-ZÄÖÜ][a-zäöü]+$/u.test(normalized)
+  )
   const proseDominatesCandidateFormula = (
     formulaSyntax &&
     strongSentence &&
@@ -244,12 +250,6 @@ export const assessNeuralTextModeCandidate = (
   )
   const safeCandidate = !formulaSyntax || proseDominatesCandidateFormula
   const enoughTextEvidence = strongPersonalized || strongKnownWord || strongShortKnownWord || strongSentence || strongLetterSequence
-  const candidateProperName = (
-    neural.confidence >= 70 &&
-    words.length === 1 &&
-    letters >= 4 &&
-    /^[A-ZÄÖÜ][a-zäöü]+$/u.test(normalized)
-  )
   const scriptOnlyWordConflict = Boolean(
     automatic?.evidence &&
     /[_^]\{/u.test(automatic.mathValue) &&
@@ -279,36 +279,58 @@ export const assessNeuralTextModeCandidate = (
       )
     )
   )
-  const decisiveAutomaticMath = Boolean(
-    automatic && (() => {
-      const math = automatic.evidence?.math
-      // A bare integral-like glyph has no mathematical context of its own.
-      // When the independent text beam sees the same letter, or a complete
-      // multi-letter personal sequence contradicts the collapsed operator,
-      // explicit GlyphenWerk evidence wins. Limits, relations, fractions,
-      // scripts, operands and real formulas remain decisive.
-      const bareLargeOperatorConflict = Boolean(
+  const automaticMath = automatic?.evidence?.math
+  // A bare integral-like glyph has no mathematical context of its own. When
+  // independent text evidence sees the same letter or a complete word,
+  // GlyphenWerk may reject the collapsed operator. Limits, relations,
+  // fractions, scripts, operands and real formulas remain decisive.
+  const bareLargeOperatorConflict = Boolean(
+    automatic && automaticMath
+    && automaticMath.visibleCharacters <= 2
+    && automaticMath.largeOperators >= 1
+    && automaticMath.digits === 0
+    && automaticMath.operators === 0
+    && automaticMath.relations === 0
+    && automaticMath.fractions === 0
+    && automaticMath.layoutAssignments === 0
+    && !/[_^]\{/u.test(automatic.mathValue)
+    && (
+      (
         strongPersonalized
-        && math
-        && math.visibleCharacters <= 2
-        && math.largeOperators >= 1
-        && math.digits === 0
-        && math.operators === 0
-        && math.relations === 0
-        && math.fractions === 0
-        && math.layoutAssignments === 0
-        && !/[_^]\{/u.test(automatic.mathValue)
         && (
           letters >= 2
           || automatic.textValue.normalize('NFC').replace(/\s+/gu, '') === normalized.replace(/\s+/gu, '')
         )
       )
-      return !bareLargeOperatorConflict && !scriptOnlyWordConflict && hasDecisiveAutomaticMathLayout(automatic)
-    })(),
+      || (
+        // A whole wide word can collapse to one integral/sum hypothesis
+        // when the generic math segmenter sees its joined outline.  The
+        // line recognizer is allowed to reject that contextless operator
+        // only when the raw ink independently spans several character
+        // widths (or contains several full-height pen-lift bodies). This
+        // geometric gate keeps a genuine narrow standalone integral,
+        // sum, product, and their limits protected.
+        letters >= 3
+        && letterRatio >= 0.8
+        && (
+          strongKnownWord
+          || strongSentence
+          || candidateProperName
+          || (strongLetterSequence && neural.confidence >= 84)
+        )
+        && (
+          (automatic.evidence?.text.independentBodies ?? 0) >= 3
+          || (automatic.evidence?.text.inkAspectRatio ?? 0) >= 1.05
+        )
+      )
+    )
+  )
+  const decisiveAutomaticMath = Boolean(
+    automatic && !bareLargeOperatorConflict && !scriptOnlyWordConflict && hasDecisiveAutomaticMathLayout(automatic),
   )
   const mayOverride = neuralTextMayOverrideAutomaticMode(neural, automatic, letters, wordLike)
   const shouldUseText = safeCandidate && enoughTextEvidence && !decisiveAutomaticMath && (
-    automatic?.mode === 'text' || mayOverride || strongPersonalized || scriptOnlyWordConflict
+    automatic?.mode === 'text' || mayOverride || strongPersonalized || scriptOnlyWordConflict || bareLargeOperatorConflict
   )
   const reason: NeuralTextModeAssessment['reason'] = !safeCandidate
     ? 'formula'
