@@ -1826,6 +1826,38 @@ try {
     'Ein visuell bereits sicherer unbekannter Name darf nicht zu einem ähnlichen corpusgestützten Namen umgeschrieben werden.',
   )
   installRecognitionProperNameMembership('de', null)
+  const longCoreWord = [...'bamdscbriye'].map((char, index) => {
+    const expected = [...'handschrift'][index]
+    return token(
+      char,
+      char === expected ? 82 : 70,
+      char === expected ? [[char, 82]] : [[char, 70], [expected, 61]],
+      220 + index,
+    )
+  })
+  assert.equal(
+    recognizedSentence(applyTextReranking(longCoreWord, BASE_CATALOG, 'de')),
+    'handschrift',
+    'Ein langes Kernwort darf fünf einzeln visuell plausible Fehler gemeinsam korrigieren.',
+  )
+  const exhaustiveOnlyTarget = 'luminarium'
+  const exhaustiveOnlyVisual = 'tunihorjum'
+  const exhaustiveOnlyWord = [...exhaustiveOnlyVisual].map((char, index) => {
+    const expected = [...exhaustiveOnlyTarget][index]
+    return token(
+      char,
+      char === expected ? 82 : 70,
+      char === expected ? [[char, 82]] : [[char, 70], [expected, 61]],
+      240 + index,
+    )
+  })
+  installRecognitionWordMembership('en', (word) => word === exhaustiveOnlyTarget)
+  assert.equal(
+    recognizedSentence(applyTextReranking(exhaustiveOnlyWord, BASE_CATALOG, 'en')),
+    exhaustiveOnlyVisual,
+    'Ein beliebiger Treffer im grossen Rechtschreiblexikon darf nicht fünf sichtbare Buchstaben überschreiben.',
+  )
+  installRecognitionWordMembership('en', null)
   assert.equal(
     applyNeuralWordContext('leRnen und TEst', 'de'),
     'lernen und Test',

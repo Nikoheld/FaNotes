@@ -153,10 +153,20 @@ try {
       cases: matching.length,
       beforeExact: matching.filter((entry) => entry.before === expected).length,
       afterExact: matching.filter((entry) => entry.after === expected).length,
+      afterCaseNormalized: matching.filter((entry) => (
+        entry.after.toLocaleLowerCase(language) === expected.toLocaleLowerCase(language)
+      )).length,
       recoverable: available.length,
       recoveredFromOracle: available.filter((entry) => entry.after === expected).length,
     }
   }))
+  const recoverableUnresolved = unresolved.filter((entry) => entry.recoverable)
+  const caseOnlyUnresolved = recoverableUnresolved.filter((entry) => (
+    entry.after.toLocaleLowerCase(entry.language) === entry.expected.toLocaleLowerCase(entry.language)
+  ))
+  const characterUnresolved = recoverableUnresolved.filter((entry) => (
+    entry.after.toLocaleLowerCase(entry.language) !== entry.expected.toLocaleLowerCase(entry.language)
+  ))
   console.log(JSON.stringify({
     writers: writers.length,
     cases: results.length,
@@ -170,6 +180,12 @@ try {
     },
     recoveries: recoveries.length,
     regressions: regressions.length,
+    recoverableUnresolved: {
+      words: recoverableUnresolved.length,
+      caseOnly: caseOnlyUnresolved.length,
+      differentCharacters: characterUnresolved.length,
+      characterExamples: characterUnresolved.slice(0, 80),
+    },
     byWord,
     recoveryExamples: recoveries.slice(0, 30),
     regressionExamples: regressions.slice(0, 30),
