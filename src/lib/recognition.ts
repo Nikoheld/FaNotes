@@ -4476,7 +4476,7 @@ const resemblesCompactUppercaseY = (strokes: Stroke[]) => {
   // has either a distinctly narrower body or a much longer returning tail.
   // This is only used as a same-letter case tie-breaker below; it never turns
   // an unrelated leading class into Y on geometry alone.
-  return pathLength <= 1.84
+  return pathLength <= 1.87
 }
 
 const resemblesIntegralStroke = (stroke: Stroke) => {
