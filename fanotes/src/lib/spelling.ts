@@ -3,9 +3,13 @@ import { ENGLISH_CANONICAL_PROPER_NAMES } from '../../../src/data/englishProperN
 import { SUPPLEMENTAL_CANONICAL_PROPER_NAMES } from '../../../src/data/supplementalProperNames'
 import {
   installRecognitionProperNameMembership,
+  installRecognitionWordCandidateProvider,
   installRecognitionWordMembership,
 } from '../../../src/lib/recognition'
-import { installNeuralWordContextCandidates } from './neuralWordContext'
+import {
+  installNeuralWordContextCandidates,
+  neuralWordContextWordsOfLength,
+} from './neuralWordContext'
 
 export type SpellingSegment = { from: number; text: string }
 export type SpellingIgnoredRange = { from: number; to: number }
@@ -212,6 +216,10 @@ const loadRecognitionCandidates = async (language: SpellingLanguage) => {
         previous = word
       })
       installNeuralWordContextCandidates(language, words)
+      installRecognitionWordCandidateProvider(
+        language,
+        (length) => neuralWordContextWordsOfLength(language, length),
+      )
       const candidates = new Set(words)
       // Share the already allocated set with the classical glyph beam. The
       // callback adds no second word-list copy and is installed only on the

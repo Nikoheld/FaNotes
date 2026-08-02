@@ -5335,7 +5335,12 @@ const LANGUAGE_PROFILES = {
 }>
 
 type RecognitionWordMembership = (word: string) => boolean
+type RecognitionWordCandidateProvider = (length: number) => readonly string[]
 const installedRecognitionWordMembership: Record<RecognitionLanguage, RecognitionWordMembership | null> = {
+  de: null,
+  en: null,
+}
+const installedRecognitionWordCandidateProvider: Record<RecognitionLanguage, RecognitionWordCandidateProvider | null> = {
   de: null,
   en: null,
 }
@@ -5355,6 +5360,16 @@ export const installRecognitionWordMembership = (
   membership: RecognitionWordMembership | null,
 ) => {
   installedRecognitionWordMembership[language] = membership
+}
+
+/** Shares the lazily loaded, length-indexed spelling vocabulary with the
+ * classical beam. The provider retains ownership of the arrays, so enabling
+ * this bridge does not allocate another 380k-word index. */
+export const installRecognitionWordCandidateProvider = (
+  language: RecognitionLanguage,
+  provider: RecognitionWordCandidateProvider | null,
+) => {
+  installedRecognitionWordCandidateProvider[language] = provider
 }
 
 /** Installs a local corpus of canonical title-case names for OCR only. */
@@ -5957,8 +5972,66 @@ const rerankTextChunk = (
       const canonicalName = name.slice(0, 1).toLocaleUpperCase(profile.locale) + name.slice(1)
       return constrainedWordBeam(canonicalName, true)
     })
+    const extendedProvider = installedRecognitionWordCandidateProvider[language]
+    const candidateByLowercaseCharacter = candidateLists.map((candidates) => {
+      const indexed = new Map<string, TextCandidate>()
+      candidates.forEach((candidate) => {
+        const character = candidate.label.char.toLocaleLowerCase(profile.locale)
+        const previous = indexed.get(character)
+        if (!previous || candidate.confidence > previous.confidence) indexed.set(character, candidate)
+      })
+      return indexed
+    })
+    const extendedMatches: { word: string; score: number }[] = []
+    const maximumExtendedChanges = Math.max(1, Math.ceil(chunk.length * 0.34))
+    for (const word of extendedProvider?.(chunk.length) ?? []) {
+      const characters = [...word]
+      if (characters.length !== chunk.length) continue
+      if (
+        !candidateByLowercaseCharacter[0].has(characters[0]) ||
+        !candidateByLowercaseCharacter[1].has(characters[1])
+      ) continue
+      let changes = 0
+      let score = 0
+      let supported = true
+      for (let position = 0; position < characters.length; position += 1) {
+        const character = characters[position]
+        const candidate = candidateByLowercaseCharacter[position].get(character)
+        if (!candidate) {
+          supported = false
+          break
+        }
+        const visualCharacter = (labelMap.get(
+          chunk[position].visualLabelId ?? chunk[position].labelId,
+        )?.char ?? chunk[position].char ?? '')
+          .toLocaleLowerCase(profile.locale)
+        if (visualCharacter !== character) changes += 1
+        const visualConfidence = chunk[position].visualConfidence ?? chunk[position].confidence
+        const loss = Math.max(0, visualConfidence - candidate.confidence)
+        if (changes > maximumExtendedChanges || candidate.confidence < 32 || loss > 24) {
+          supported = false
+          break
+        }
+        score += Math.log(0.08 + clamp(candidate.confidence / 100)) * 2.25
+      }
+      if (!supported) continue
+      extendedMatches.push({ word, score })
+      if (extendedMatches.length >= 512) {
+        extendedMatches.sort((first, second) => second.score - first.score)
+        extendedMatches.length = 192
+      }
+    }
+    extendedMatches.sort((first, second) => second.score - first.score)
+    const exhaustiveWordBeams = extendedMatches
+      .slice(0, 128)
+      .flatMap(({ word }) => constrainedWordBeam(word, false))
     const byValue = new Map<string, TextBeam>()
-    ;[...beams, ...coreWordBeams, ...preferredNameBeams].forEach((beam) => {
+    ;[
+      ...beams,
+      ...coreWordBeams,
+      ...preferredNameBeams,
+      ...exhaustiveWordBeams,
+    ].forEach((beam) => {
       const previous = byValue.get(beam.value)
       if (!previous || beam.score > previous.score) byValue.set(beam.value, beam)
     })

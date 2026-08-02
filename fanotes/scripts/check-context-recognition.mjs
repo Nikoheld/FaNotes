@@ -14,6 +14,7 @@ try {
     calibratePersonalBaseEvidence,
     groupRecognitionLines,
     installRecognitionProperNameMembership,
+    installRecognitionWordCandidateProvider,
     installRecognitionWordMembership,
     learnedStrokeCountHypothesisScore,
     recognizedLatex,
@@ -1799,6 +1800,29 @@ try {
     'quality',
     'Das bereits geladene vollständige Rechtschreiblexikon muss eine visuell nahe OCR-Endung im klassischen Wortstrahl nutzbar machen.',
   )
+  installRecognitionWordMembership('en', null)
+  const exhaustiveBeamTarget = 'private'
+  const exhaustiveBeamVisual = 'jtivute'
+  const exhaustiveBeamDistractors = ['x', 'z', 'q', 'j', 'f', 'v']
+  const exhaustiveBeamWord = [...exhaustiveBeamVisual].map((char, index) => {
+    const expected = [...exhaustiveBeamTarget][index]
+    if (char === expected) return token(char, 84, [[char, 84]], 192 + index)
+    const alternatives = exhaustiveBeamDistractors
+      .filter((candidate) => candidate !== char && candidate !== expected)
+      .slice(0, 5)
+      .map((candidate, candidateIndex) => [candidate, 70 - candidateIndex])
+    return token(char, 71, [[char, 71], ...alternatives, [expected, 62]], 192 + index)
+  })
+  installRecognitionWordMembership('en', (word) => word === exhaustiveBeamTarget)
+  installRecognitionWordCandidateProvider('en', (length) => (
+    length === exhaustiveBeamTarget.length ? [exhaustiveBeamTarget] : []
+  ))
+  assert.equal(
+    recognizedSentence(applyTextReranking(exhaustiveBeamWord, BASE_CATALOG, 'en')),
+    exhaustiveBeamTarget,
+    'Das lazy Längenlexikon muss ein vollständig visuell gestütztes Wort gegen frühes Beam-Pruning erhalten.',
+  )
+  installRecognitionWordCandidateProvider('en', null)
   installRecognitionWordMembership('en', null)
   const uncertainInitialCommonWord = [...'Jystem'].map((char, index) => token(
     char,

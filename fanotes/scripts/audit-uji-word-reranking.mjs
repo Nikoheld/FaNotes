@@ -36,6 +36,7 @@ try {
   const {
     applyTextReranking,
     installRecognitionProperNameMembership,
+    installRecognitionWordCandidateProvider,
     installRecognitionWordMembership,
     recognizedSentence,
   } = await server.ssrLoadModule('/../src/lib/recognition.ts')
@@ -49,8 +50,17 @@ try {
   installRecognitionProperNameMembership('en', properNameMembership)
   for (const language of ['de', 'en']) {
     const wordsPath = path.join(appRoot, 'public', 'spell', `${language}.words`)
-    const words = new Set(fs.readFileSync(wordsPath, 'utf8').trimEnd().split('\n'))
+    const wordList = fs.readFileSync(wordsPath, 'utf8').trimEnd().split('\n')
+    const words = new Set(wordList)
+    const byLength = new Map()
+    wordList.forEach((word) => {
+      const length = [...word].length
+      const bucket = byLength.get(length)
+      if (bucket) bucket.push(word)
+      else byLength.set(length, [word])
+    })
     installRecognitionWordMembership(language, (word) => words.has(word))
+    installRecognitionWordCandidateProvider(language, (length) => byLength.get(length) ?? [])
   }
   const labelByChar = new Map(BASE_CATALOG.map((label) => [label.char, label]))
   const casesByKey = new Map(cases.map((entry) => [
