@@ -17,6 +17,7 @@ import mimetypes
 import os
 from pathlib import Path
 import re
+import subprocess
 import sys
 import tempfile
 import time
@@ -242,7 +243,35 @@ def checksum_asset(version: str, assets: list[Path], target_dir: Path) -> tuple[
     return target, digests
 
 
+def release_target_commitish() -> str:
+    configured = os.environ.get("FANOTES_RELEASE_TARGET_COMMITISH", "").strip()
+    if configured:
+        if not TARGET_COMMITISH_PATTERN.fullmatch(configured):
+            raise RuntimeError("FANOTES_RELEASE_TARGET_COMMITISH contains an unsafe ref name.")
+        return configured
+
+    repository_root = Path(__file__).resolve().parents[1]
+    result = subprocess.run(
+        ["git", "rev-parse", "--verify", "HEAD^{commit}"],
+        cwd=repository_root,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    commit = result.stdout.strip()
+    if result.returncode != 0 or not re.fullmatch(r"[a-f0-9]{40,64}", commit):
+        detail = result.stderr.strip() or "the local Git commit could not be resolved"
+        raise RuntimeError(
+            "Refusing to attach a release tag to the repository default branch: "
+            f"{detail}. Set FANOTES_RELEASE_TARGET_COMMITISH explicitly."
+        )
+    return commit
+
+
 def main() -> int:
+    if sys.argv[1:] == ["--print-target-commitish"]:
+        print(release_target_commitish())
+        return 0
     requested_version = None
     if len(sys.argv) > 1:
         if len(sys.argv) != 3 or sys.argv[1] != "--version":
@@ -261,9 +290,7 @@ def main() -> int:
     permissions = repository.get("permissions") or {}
     if not permissions.get("push"):
         raise RuntimeError("The token does not have write access to Nikoheld/FaNotes.")
-    target_commitish = os.environ.get("FANOTES_RELEASE_TARGET_COMMITISH", "").strip() or repository["default_branch"]
-    if not TARGET_COMMITISH_PATTERN.fullmatch(target_commitish):
-        raise RuntimeError("FANOTES_RELEASE_TARGET_COMMITISH contains an unsafe ref name.")
+    target_commitish = release_target_commitish()
     print(f"Authenticated as {user['login']}; repository write access confirmed.", flush=True)
 
     translations = json.loads(TRANSLATIONS.read_text(encoding="utf-8"))
