@@ -1,9 +1,10 @@
 # Änderungsverlauf
 
-## Unveröffentlicht
+## 2026.8.4
 
 - Der Auto-Updater lädt Updates im Hintergrund herunter und speichert ein fertig geprüftes Paket über Neustarts hinweg. Ist die automatische Installation aktiv, wird es beim Beenden oder still beim nächsten Start installiert und die App startet nahtlos mit der neuen Version.
-- Die Handschrifterkennung schützt normale Wörter besser vor fälschlichen Hoch-/Tiefstellungen: lateinische Buchstabenpaare brauchen eine klarere vertikale Verschiebung, bekannte Kurzkerne wie `te`/`st` bleiben Prosa, und verbundene Glyphen mit etwas kompakterer Breite werden zuverlässiger in mehrere Buchstaben zerlegt.
+- Die Handschrifterkennung schützt normale Wörter besser vor fälschlichen Hoch-/Tiefstellungen: lateinische Buchstabenpaare brauchen bei ähnlicher Größe eine klarere vertikale Verschiebung, und echte Indizes bleiben mathematisch.
+- Die Einzelzeichenerkennung nutzt stärkere stilunabhängige Stiftgeometrie (i/j-Punkt, T, F, 1/l/I, o/0 vs. offene Formen, e-Querbalken, s/5, b/h/p) und cached die teuren Cluster-Messungen pro Glyphe, damit Ranking und Live-Schreiben schnell bleiben.
 
 ## 2026.8.3
 

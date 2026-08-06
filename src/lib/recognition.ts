@@ -2211,7 +2211,7 @@ export const connectedTextSegmentationHypotheses = (
   // is no connected multi-letter body to segment in the first place.
   if (
     firstDetachedConnector !== undefined &&
-    bodyAspectBeforeConnector < 1.48 &&
+    bodyAspectBeforeConnector < 1.62 &&
     usablePreferredParts === null
   ) {
     return [[cluster], ...temporalPartitions]
@@ -2230,12 +2230,12 @@ export const connectedTextSegmentationHypotheses = (
   // thin internal passages. Those are not word connectors. Actual connected
   // pairs normally exceed this physical aspect threshold; their competing
   // splits are now decided using the complete surrounding word below.
-  // Connected pairs such as `te` / `st` in free handwriting often sit just
-  // under the classic 1.62 aspect band when the writer is compact. Prefer a
-  // slightly lower gate so the multi-letter hypotheses remain available while
-  // still refusing to split square single glyphs without other evidence.
+  // A single round or broad handwritten glyph (a, m, w, …) often contains
+  // thin internal passages. Those are not word connectors. Actual connected
+  // pairs normally exceed this physical aspect threshold; their competing
+  // splits are now decided using the complete surrounding word below.
   if (
-    aspect < 1.48 &&
+    aspect < 1.62 &&
     usablePreferredParts === null &&
     !penLiftBodyBoundaries.length &&
     !temporalPartitions.length &&
@@ -4369,27 +4369,41 @@ const resemblesUppercaseT = (cluster: StrokeCluster) => {
   return crossbarContainsStem && crossbarAtTop && stemExtendsBelow
 }
 
-const textGeometryAdjustment = (labelId: string, cluster: StrokeCluster) => {
-  let adjustment = 0
-  if (resemblesUppercaseT(cluster)) {
-    if (labelId === 'latin_upper_T') adjustment -= 0.54
-    if (
-      labelId === 'latin_lower_l' ||
-      labelId === 'latin_lower_t' ||
-      labelId === 'latin_lower_f' ||
-      labelId === 'latin_upper_I'
-    ) adjustment += 0.34
-  }
+type TextGeometryClusterFeatures = {
+  width: number
+  height: number
+  aspect: number
+  diagonal: number
+  geometry: StrokeGeometry
+  strokeMetrics: Array<{
+    width: number
+    height: number
+    aspect: number
+    normalizedLength: number
+    minX: number
+    maxX: number
+    minY: number
+    maxY: number
+  }>
+  pathLength: number
+  endpointGap: number
+  hasDotAccessory: boolean
+  bodyHeightRatio: number
+  horizontalStrokeCount: number
+  hasNarrowVerticalStem: boolean
+  midHeightCross: boolean
+}
 
-  // Some characters share nearly identical normalized raster silhouettes.
-  // Their pen structure supplies a small, style-independent tie-breaker: i/j
-  // combine a detached point with different body height, F has a vertical
-  // stem plus separate bars, and 1/Z/6 retain distinctive path geometry. The
-  // offsets stay deliberately weak so a close personal prototype can win.
+const textGeometryClusterFeatures = new WeakMap<StrokeCluster, TextGeometryClusterFeatures>()
+
+const getTextGeometryClusterFeatures = (cluster: StrokeCluster): TextGeometryClusterFeatures => {
+  const cached = textGeometryClusterFeatures.get(cluster)
+  if (cached) return cached
   const width = Math.max(1, (cluster.maxX - cluster.minX) * SOURCE_WIDTH)
   const height = Math.max(1, (cluster.maxY - cluster.minY) * SOURCE_HEIGHT)
   const aspect = width / height
   const diagonal = Math.max(1, Math.hypot(width, height))
+  const geometry = geometryFromStrokes(cluster.strokes)
   const strokeMetrics = cluster.strokes.map((stroke) => {
     const bounds = strokeBounds(stroke)
     const strokeWidth = Math.max(0, (bounds.maxX - bounds.minX) * SOURCE_WIDTH)
@@ -4405,6 +4419,10 @@ const textGeometryAdjustment = (labelId: string, cluster: StrokeCluster) => {
       height: strokeHeight,
       aspect: strokeWidth / Math.max(1, strokeHeight),
       normalizedLength: length / diagonal,
+      minX: bounds.minX,
+      maxX: bounds.maxX,
+      minY: bounds.minY,
+      maxY: bounds.maxY,
     }
   })
   const pathLength = strokeMetrics.reduce((total, stroke) => total + stroke.normalizedLength, 0)
@@ -4420,17 +4438,78 @@ const textGeometryAdjustment = (labelId: string, cluster: StrokeCluster) => {
     stroke.width <= width * 0.48
   ))
   const bodyHeightRatio = Math.max(...strokeMetrics.map((stroke) => stroke.height / height), 0)
-  if (hasDotAccessory && bodyHeightRatio <= 0.68 && aspect <= 0.46) {
-    if (labelId === 'latin_lower_i') adjustment -= 0.035
-    if (labelId === 'latin_lower_j') adjustment += 0.025
-  } else if (hasDotAccessory && bodyHeightRatio >= 0.72) {
-    if (labelId === 'latin_lower_j') adjustment -= 0.035
-    if (labelId === 'latin_lower_i') adjustment += 0.025
-  }
   const horizontalStrokeCount = strokeMetrics.filter((stroke) => stroke.aspect >= 2).length
   const hasNarrowVerticalStem = strokeMetrics.some((stroke) => (
     stroke.aspect <= 0.4 && stroke.height >= height * 0.45
   ))
+  const midHeightCross = strokeMetrics.some((stroke) => {
+    const centerY = (stroke.minY + stroke.maxY) / 2
+    const glyphCenterY = (cluster.minY + cluster.maxY) / 2
+    return (
+      stroke.aspect >= 1.6 &&
+      stroke.width >= width * 0.28 &&
+      Math.abs(centerY - glyphCenterY) <= height * 0.18 / SOURCE_HEIGHT
+    )
+  })
+  const features: TextGeometryClusterFeatures = {
+    width,
+    height,
+    aspect,
+    diagonal,
+    geometry,
+    strokeMetrics,
+    pathLength,
+    endpointGap,
+    hasDotAccessory,
+    bodyHeightRatio,
+    horizontalStrokeCount,
+    hasNarrowVerticalStem,
+    midHeightCross,
+  }
+  textGeometryClusterFeatures.set(cluster, features)
+  return features
+}
+
+const textGeometryAdjustment = (labelId: string, cluster: StrokeCluster) => {
+  let adjustment = 0
+  if (resemblesUppercaseT(cluster)) {
+    if (labelId === 'latin_upper_T') adjustment -= 0.54
+    if (
+      labelId === 'latin_lower_l' ||
+      labelId === 'latin_lower_t' ||
+      labelId === 'latin_lower_f' ||
+      labelId === 'latin_upper_I'
+    ) adjustment += 0.34
+  }
+
+  // Some characters share nearly identical normalized raster silhouettes.
+  // Their pen structure supplies a style-independent tie-breaker for isolated
+  // glyphs. Shared geometry is cached per cluster because this function runs
+  // once for every class during ranking.
+  const {
+    width,
+    height,
+    aspect,
+    geometry,
+    strokeMetrics,
+    pathLength,
+    endpointGap,
+    hasDotAccessory,
+    bodyHeightRatio,
+    horizontalStrokeCount,
+    hasNarrowVerticalStem,
+    midHeightCross,
+  } = getTextGeometryClusterFeatures(cluster)
+  if (hasDotAccessory && bodyHeightRatio <= 0.68 && aspect <= 0.46) {
+    if (labelId === 'latin_lower_i') adjustment -= 0.05
+    if (labelId === 'latin_lower_j') adjustment += 0.035
+    if (labelId === 'latin_lower_l' || labelId === 'latin_upper_I' || labelId === 'digit_1') {
+      adjustment += 0.06
+    }
+  } else if (hasDotAccessory && bodyHeightRatio >= 0.72) {
+    if (labelId === 'latin_lower_j') adjustment -= 0.05
+    if (labelId === 'latin_lower_i') adjustment += 0.035
+  }
   const multiStrokeUpperF = (
     cluster.strokes.length >= 3 &&
     aspect >= 0.72 &&
@@ -4450,8 +4529,22 @@ const textGeometryAdjustment = (labelId: string, cluster: StrokeCluster) => {
     pathLength <= 2.25
   )
   if (straightDigitOne) {
-    if (labelId === 'digit_1') adjustment -= 0.035
-    if (labelId === 'latin_lower_l') adjustment += 0.025
+    if (labelId === 'digit_1') adjustment -= 0.045
+    if (labelId === 'latin_lower_l') adjustment += 0.03
+    if (labelId === 'latin_upper_I') adjustment += 0.02
+  }
+  // A pure vertical stick without a serif or head is usually l/I, not 1.
+  const plainVerticalStick = (
+    cluster.strokes.length === 1 &&
+    aspect <= 0.28 &&
+    endpointGap <= 0.28 &&
+    pathLength <= 1.35 &&
+    geometry.cornerness <= 0.22
+  )
+  if (plainVerticalStick) {
+    if (labelId === 'latin_lower_l' || labelId === 'latin_upper_I') adjustment -= 0.055
+    if (labelId === 'digit_1') adjustment += 0.04
+    if (labelId === 'latin_lower_i') adjustment += 0.05
   }
   const oneStrokeLowerZ = (
     cluster.strokes.length === 1 &&
@@ -4460,8 +4553,8 @@ const textGeometryAdjustment = (labelId: string, cluster: StrokeCluster) => {
     pathLength >= 1.8
   )
   if (oneStrokeLowerZ) {
-    if (labelId === 'latin_lower_z') adjustment -= 0.035
-    if (labelId === 'digit_2') adjustment += 0.025
+    if (labelId === 'latin_lower_z') adjustment -= 0.045
+    if (labelId === 'digit_2') adjustment += 0.03
   }
   const tailedDigitSix = (
     cluster.strokes.length === 1 &&
@@ -4474,6 +4567,91 @@ const textGeometryAdjustment = (labelId: string, cluster: StrokeCluster) => {
     if (labelId === 'digit_6') adjustment -= 0.04
     if (labelId === 'latin_upper_C') adjustment += 0.025
   }
+
+  // Round closed o/O/0 vs open c/C vs a with a stem.
+  const roundClosed = (
+    cluster.strokes.length === 1 &&
+    aspect >= 0.7 &&
+    aspect <= 1.35 &&
+    geometry.closedness >= 0.7 &&
+    endpointGap <= 0.32 &&
+    pathLength >= 1.55 &&
+    pathLength <= 3.4
+  )
+  if (roundClosed) {
+    if (
+      labelId === 'latin_lower_o' ||
+      labelId === 'latin_upper_O' ||
+      labelId === 'digit_0'
+    ) adjustment -= 0.055
+    if (labelId === 'latin_lower_c' || labelId === 'latin_upper_C') adjustment += 0.045
+    if (labelId === 'latin_lower_a' || labelId === 'latin_lower_e') adjustment += 0.03
+  }
+  const openCShape = (
+    cluster.strokes.length === 1 &&
+    aspect >= 0.65 &&
+    aspect <= 1.4 &&
+    geometry.closedness <= 0.55 &&
+    endpointGap >= 0.34 &&
+    pathLength >= 1.35 &&
+    pathLength <= 2.9
+  )
+  // Prefer o/0 only when a closed loop is present. Do not boost plain open
+  // `c` against `e`: many freehand e shapes are also open and would otherwise
+  // turn connected `te` into `tc`.
+  if (openCShape) {
+    if (labelId === 'latin_lower_o' || labelId === 'latin_upper_O' || labelId === 'digit_0') {
+      adjustment += 0.04
+    }
+  }
+  // Freehand `e` usually keeps a short interior bar that plain `c` lacks.
+  if (midHeightCross) {
+    if (labelId === 'latin_lower_e') adjustment -= 0.05
+    if (labelId === 'latin_lower_c') adjustment += 0.04
+  }
+
+  // s vs 5 only: a clear middle horizontal favors 5.
+  if (cluster.strokes.length === 1 && aspect >= 0.45 && aspect <= 1.1) {
+    if (horizontalStrokeCount >= 1 || midHeightCross) {
+      if (labelId === 'digit_5') adjustment -= 0.04
+      if (labelId === 'latin_lower_s' || labelId === 'latin_upper_S') adjustment += 0.03
+    } else if (geometry.cornerness >= 0.34 && pathLength >= 1.7) {
+      if (labelId === 'digit_5') adjustment += 0.03
+    }
+  }
+
+  // b/h/6 and p/P: loop position relative to a tall stem.
+  if (hasNarrowVerticalStem && cluster.strokes.length >= 1) {
+    const stem = strokeMetrics
+      .filter((stroke) => stroke.aspect <= 0.45 && stroke.height >= height * 0.45)
+      .sort((first, second) => second.height - first.height)[0]
+    const loop = strokeMetrics
+      .filter((stroke) => stroke !== stem && stroke.width >= width * 0.28)
+      .sort((first, second) => second.width * second.height - first.width * first.height)[0]
+    if (stem && loop) {
+      const stemCenterY = (stem.minY + stem.maxY) / 2
+      const loopCenterY = (loop.minY + loop.maxY) / 2
+      const loopLow = loopCenterY > stemCenterY + height * 0.08 / SOURCE_HEIGHT
+      const loopHigh = loopCenterY < stemCenterY - height * 0.08 / SOURCE_HEIGHT
+      if (loopLow) {
+        if (labelId === 'latin_lower_b' || labelId === 'digit_6') adjustment -= 0.035
+        if (labelId === 'latin_lower_h' || labelId === 'latin_lower_p') adjustment += 0.025
+      }
+      if (loopHigh) {
+        if (labelId === 'latin_lower_p' || labelId === 'latin_upper_P' || labelId === 'digit_9') {
+          adjustment -= 0.035
+        }
+        if (labelId === 'latin_lower_b' || labelId === 'latin_lower_d') adjustment += 0.025
+      }
+    }
+  }
+
+  // t/f with a crossbar and tall stem.
+  if (hasNarrowVerticalStem && horizontalStrokeCount >= 1 && aspect <= 0.95) {
+    if (labelId === 'latin_lower_t' || labelId === 'latin_lower_f') adjustment -= 0.04
+    if (labelId === 'latin_lower_l' || labelId === 'latin_upper_I') adjustment += 0.03
+  }
+
   return adjustment
 }
 
@@ -7739,18 +7917,19 @@ const scriptRole = (
   // was small enough to turn an ordinary `Ha` into `H_{a}`. Require a clear
   // displacement relative to both glyphs. Eleven percent still classified
   // roughly one in six realistic height/jitter combinations as a script in a
-  // systematic baseline sweep. Sixteen percent covers ordinary pen drift; for
-  // pure latin prose pairs we allow a little more (18 %) so normal words like
-  // `Test` or `Hallo` stay index-free under tablet jitter. Genuine indices
-  // and limits still sit far outside that band. Learned layout examples may
-  // refine a genuinely displaced candidate below, but never relax this gate.
-  const latinLetterPair = Boolean(
-    base.labelId?.startsWith('latin_') && candidate.labelId?.startsWith('latin_'),
+  // systematic baseline sweep. Sixteen percent covers ordinary pen drift. For
+  // latin pairs of similar size (clearly not a tiny index) allow 18 % so
+  // words like `Test` stay index-free; a genuinely smaller child keeps the
+  // stricter 16 % gate so `i_{m}` remains mathematical.
+  const similarSizedLatinPair = Boolean(
+    base.labelId?.startsWith('latin_') &&
+    candidate.labelId?.startsWith('latin_') &&
+    candidateHeight >= baseHeight * 0.62,
   )
   const verticalProtrusion = Math.max(
     0.005,
-    baseHeight * (latinLetterPair ? 0.18 : 0.16),
-    candidateHeight * (latinLetterPair ? 0.22 : 0.2),
+    baseHeight * (similarSizedLatinPair ? 0.18 : 0.16),
+    candidateHeight * (similarSizedLatinPair ? 0.22 : 0.2),
   )
   const supportsSuperscript = (
     candidateY <= baseY - verticalProtrusion &&
@@ -7804,9 +7983,7 @@ const wordAtomNeighbour = (first: FormattedAtom, second: FormattedAtom) => {
   if (second.spaceBefore || second.lineBreakBefore) return false
   const gap = second.bbox[0] - (first.bbox[0] + first.bbox[2])
   const physicalXHeight = Math.min(first.bbox[3], second.bbox[3]) * SOURCE_HEIGHT / SOURCE_WIDTH
-  // Slightly wider neighbour tolerance keeps cursive `Test` / `Hallo` runs as
-  // one word so baseline-aligned letters are not reinterpreted as indices.
-  return gap <= clamp(physicalXHeight * 0.58, 0.018, 0.062)
+  return gap <= clamp(physicalXHeight * 0.46, 0.018, 0.05)
 }
 
 /**
@@ -7840,11 +8017,13 @@ const ordinaryWordScriptConflict = (
     lexicalWordEvidence(word, 'de').score,
     lexicalWordEvidence(word, 'en').score,
   )
-  // Dictionary hits plus everyday two-letter cores (`te`, `st`, `in`, …) that
+  // Dictionary hits plus everyday two-letter prose cores (`te`, `st`, …) that
   // appear inside longer handwriting such as `Test` when only a pair is
-  // currently visible during incremental recognition.
-  const commonTwoLetterCore = /^(?:te|st|es|er|en|an|in|im|am|to|of|or|on|is|it|as|at|al|el|la|le|un|um|us|ha|he|hi|ho|me|my|we|be|do|go|no|so|up)$/iu
-  const exactShortWord = run.length === 2 && (lexicalScore >= 0.42 || commonTwoLetterCore.test(word))
+  // currently visible during incremental recognition. Avoid cores that are
+  // also common as variable+index (`im`, `in`, `x_i`), so real math scripts
+  // stay mathematical.
+  const commonTwoLetterCore = /^(?:te|st|es|er|en|to|of|or|on|as|al|el|la|le|un|um|us|ha|he|hi|ho|me|my|we|be|do|go|no|so|up)$/iu
+  const exactShortWord = run.length === 2 && (lexicalScore >= 0.5 || commonTwoLetterCore.test(word))
   if (run.length < 3 && !exactShortWord) return false
 
   const bottoms = run.map((atom) => atom.bbox[1] + atom.bbox[3])
@@ -7857,8 +8036,8 @@ const ordinaryWordScriptConflict = (
   // therefore rejected real words before their shared baseline could be
   // considered. A true multi-letter index still forms a separate baseline,
   // so its base falls outside this deliberately bounded tolerance.
-  if (candidate.bbox[3] < Math.max(base.bbox[3] * 0.34, referenceHeight * 0.48)) return false
-  const tolerance = Math.max(0.012, referenceHeight * 0.56)
+  if (candidate.bbox[3] < Math.max(base.bbox[3] * 0.36, referenceHeight * 0.52)) return false
+  const tolerance = Math.max(0.012, referenceHeight * 0.52)
   const baseBottom = base.bbox[1] + base.bbox[3]
   const candidateBottom = candidate.bbox[1] + candidate.bbox[3]
   if (
@@ -7869,7 +8048,7 @@ const ordinaryWordScriptConflict = (
   const aligned = run.filter((atom) => (
     Math.abs(atom.bbox[1] + atom.bbox[3] - baseline) <= tolerance
   ))
-  const requiredAligned = run.length === 2 ? 2 : Math.max(2, Math.ceil(run.length * 0.7))
+  const requiredAligned = run.length === 2 ? 2 : Math.max(3, Math.ceil(run.length * 0.75))
   if (aligned.length < requiredAligned) return false
 
   // Two-letter words need a separate safety rule because the pair itself
@@ -7882,8 +8061,8 @@ const ordinaryWordScriptConflict = (
     const bottomDelta = Math.abs(candidateBottom - baseBottom)
     return (
       exactShortWord &&
-      heightRatio >= 0.55 &&
-      bottomDelta <= Math.max(0.018, base.bbox[3] * 0.28, candidate.bbox[3] * 0.36)
+      heightRatio >= 0.58 &&
+      bottomDelta <= Math.max(0.018, base.bbox[3] * 0.24, candidate.bbox[3] * 0.32)
     )
   }
 
