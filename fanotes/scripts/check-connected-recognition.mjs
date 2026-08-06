@@ -69,7 +69,10 @@ try {
       },
     },
   })
-  fs.writeFileSync(path.join(output, 'index.html'), '<!doctype html><html><body><script type="module" src="./harness.js"></script></body></html>')
+  const prefixOnlyBootstrap = process.env.FANOTES_PREFIX_ONLY === '1'
+    ? '<script>globalThis.__FANOTES_PREFIX_ONLY__=true</script>'
+    : ''
+  fs.writeFileSync(path.join(output, 'index.html'), `<!doctype html><html><body>${prefixOnlyBootstrap}<script type="module" src="./harness.js"></script></body></html>`)
   chromium = spawn('chromium', [
     '--headless=new', '--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage',
     `--js-flags=--max-old-space-size=${process.env.FANOTES_TEST_HEAP_MB || '768'}`,
@@ -93,11 +96,71 @@ try {
   const encoded = /<pre id="result">([\s\S]*?)<\/pre>/u.exec(stdout)?.[1]
   assert.ok(encoded, `Kein Ergebnis der verbundenen Erkennung: ${stdout.slice(-1000)}`)
   const result = JSON.parse(encoded.replaceAll('&quot;', '"').replaceAll('&amp;', '&'))
-  if (process.env.FANOTES_SEGMENTATION_DEBUG === '1') console.log(JSON.stringify({
+  if (process.env.FANOTES_SEGMENTATION_DEBUG === '1' && result.prefixOnly) {
+    console.log(JSON.stringify({
+      incrementalConnectedTextCases: result.incrementalConnectedTextCases,
+      realDoubleIntegralAutomatic: result.realDoubleIntegralAutomatic,
+      protectedMathCases: result.protectedMathCases.map((entry) => ({
+        name: entry.name,
+        mode: entry.mode,
+        value: entry.value,
+        textValue: entry.textValue,
+        textScore: entry.textScore,
+        mathScore: entry.mathScore,
+        textVisibleCharacters: entry.evidence.text.visibleCharacters,
+        textLetters: entry.evidence.text.letters,
+        mathDecisive: entry.evidence.math.decisiveStructure,
+        selectedTokens: entry.selectedTokens,
+      })),
+    }, null, 2))
+  }
+  if (result.prefixOnly) {
+    assert.deepEqual(
+      result.incrementalTextCases.map((entry) => ({
+        mode: entry.mode,
+        value: entry.value.toLocaleLowerCase('de'),
+      })),
+      result.incrementalTextCases.map((entry) => ({ mode: 'text', value: entry.expected })),
+      `Ein weicher Präfix muss t/te/tes/test vollständig im Textmodus halten: ${JSON.stringify(result.incrementalTextCases)}`,
+    )
+    assert.equal(result.incrementalTextRecovery.mode, 'text', JSON.stringify(result.incrementalTextRecovery))
+    assert.equal(result.incrementalTextRecovery.value.toLocaleLowerCase('de'), 'te')
+    assert.ok(
+      result.incrementalConnectedTextCases.every((entry) => entry.mode === 'text'),
+      `Eine kontinuierlich verbundene Buchstabenfolge darf zwischen Pen-Lifts nicht in Mathematik kippen: ${JSON.stringify(result.incrementalConnectedTextCases)}`,
+    )
+    const provisionalConnectedPair = result.incrementalConnectedTextCases[0]
+    assert.ok(
+      provisionalConnectedPair.evidence.text.visibleCharacters >= 2 &&
+      provisionalConnectedPair.evidence.text.letters === provisionalConnectedPair.evidence.text.visibleCharacters &&
+      provisionalConnectedPair.textCandidates.some((candidate) => candidate.value.toLocaleLowerCase('de') === 'te'),
+      `Vor dem ersten stabilen Präfix muss te als reine Buchstabenalternative erhalten bleiben: ${JSON.stringify(provisionalConnectedPair)}`,
+    )
+    assert.deepEqual(
+      result.incrementalConnectedTextCases.slice(1).map((entry) => entry.value.toLocaleLowerCase('de')),
+      ['tes', 'test'],
+      `Sobald ein echter stabiler Präfix existiert, müssen die verbundenen Fortsetzungen exakt lesbar sein: ${JSON.stringify(result.incrementalConnectedTextCases)}`,
+    )
+    assert.equal(
+      result.realDoubleIntegralAutomatic.mode,
+      'math',
+      `Der weiche Präfixpfad darf ein echtes Doppelintegral nicht in Text umwandeln: ${JSON.stringify(result.realDoubleIntegralAutomatic)}`,
+    )
+    assert.ok(
+      result.protectedMathCases.every((entry) => (
+        entry.mode === 'math' &&
+        entry.value === entry.expectedValue &&
+        entry.selectedTokens.some((token) => token.labelId === entry.expectedLabelId)
+      )),
+      `Echte breite Mathezeichen müssen mit altem T/t-Präfix semantisch unverändert bleiben: ${JSON.stringify(result.protectedMathCases)}`,
+    )
+    console.log('Fokussierte Präfixprüfung: gedruckte und verbundene t/te/tes/test bleiben Text; echte Integrale, Wurzeln und große Operatoren bleiben trotz altem T/t-Präfix semantisch korrekt.')
+  } else {
+    if (process.env.FANOTES_SEGMENTATION_DEBUG === '1') console.log(JSON.stringify({
     continuousGuidedPairs: result.continuousGuidedPairs,
     delayedAccessoryPair: result.delayedAccessoryPair,
     delayedOverhangingT: result.delayedOverhangingT,
-  }, null, 2))
+    }, null, 2))
   assert.equal(result.baseClusterCount, 1, 'Der verbundene Teststrich muss zunächst als eine physische Komponente vorliegen.')
   assert.ok(result.hypothesisSizes.includes(4), `Die Vier-Buchstaben-Hypothese fehlt: ${JSON.stringify({ sizes: result.hypothesisSizes, bounds: result.baseStrokeBounds, cuts: result.baseCutCandidates })}`)
   assert.ok(result.baselineTokenCount >= 3, `Das Standardmodell muss verbundene Tinte ohne Training auftrennen: ${JSON.stringify(result)}`)
@@ -361,6 +424,7 @@ try {
   assert.ok(result.standardCount > 300, 'Das erweiterte sofort nutzbare Standardmodell ist unvollständig.')
   console.log(`Erkennung geprüft: zero-shot ${result.zeroShotIsolated.length} Einzelbuchstaben, ${result.zeroShotWords.map((entry) => entry.recognized).join('/')}, ${result.zeroShotMath.length} Ziffern/Mathematiksymbole, ${result.zeroShotStructures.radical}, ${result.zeroShotStructures.fraction}; personalisiert ${result.largePersonalBenchmark.suppliedSamples} Text- und ${result.personalMathBenchmark.suppliedSamples} Mathematikbeispiele mit Holdouts, Rauschunterdrückung und Sequenzfusion.`)
   if (process.env.FANOTES_RECOGNITION_DEBUG === '1') console.log(JSON.stringify(result.baselineTokens, null, 2))
+  }
 } finally {
   terminateChromiumTree('SIGKILL')
   fs.rmSync(temporary, {

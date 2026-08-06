@@ -92,6 +92,28 @@ const shortConnectedSegmentationIndexes = ({
 /** Pure regression hook for the bounded short-prefix cost gate. */
 export const shortConnectedSegmentationIndexesForTests = shortConnectedSegmentationIndexes
 
+const textPrefixContinuityScore = (text: string, prefix: string | undefined) => {
+  if (
+    typeof prefix !== 'string' ||
+    prefix.length < 1 ||
+    prefix.length > 320 ||
+    /[ßẞ]/u.test(prefix)
+  ) return 0
+  const visible = Array.from(text.normalize('NFC')).filter((character) => !/\s/u.test(character))
+  const stable = Array.from(prefix.normalize('NFC'))
+  if (
+    stable.length < 1 ||
+    visible.length <= stable.length ||
+    !visible.every((character) => /^\p{L}$/u.test(character)) ||
+    !stable.every((character) => /^\p{L}$/u.test(character)) ||
+    stable.some((character, index) => visible[index] !== character)
+  ) return 0
+  return 1
+}
+
+/** Pure regression hook for final-fusion prefix continuity. */
+export const textPrefixContinuityScoreForTests = textPrefixContinuityScore
+
 /**
  * Uses only conspicuously wide physical gaps to divide a line into the same
  * number of words as the neural line model. Exact-count personalization can
@@ -278,6 +300,7 @@ export const recognizePersonalizedTextLine = async (
   sourceHeight = 1_273,
   textCharacterCountHint?: number,
   textCharacterHint?: string,
+  textPrefixHint?: string,
 ): Promise<PersonalizedLineRecognition> => {
   const recognition = await import('../../../src/lib/recognition')
   const physicalLines = recognition.groupRecognitionLines(strokes)
@@ -316,6 +339,15 @@ export const recognizePersonalizedTextLine = async (
       }),
     }
   }
+  const normalizedTextPrefixHint = typeof textPrefixHint === 'string'
+    ? textPrefixHint.normalize('NFC')
+    : ''
+  const safeTextPrefixHint = (
+    physicalLines.length === 1 &&
+    normalizedTextPrefixHint.length <= 320 &&
+    !/[ßẞ]/u.test(normalizedTextPrefixHint) &&
+    /^\p{L}{1,320}$/u.test(normalizedTextPrefixHint)
+  ) ? normalizedTextPrefixHint : undefined
   let primary: RecognitionToken[] | null = null
   const getPrimary = () => {
     primary ??= recognition.recognizeExpression(
@@ -655,6 +687,7 @@ export const recognizePersonalizedTextLine = async (
         && literalKnownWord
         && literalPersonalRatio >= 0.55
       ) ? literalPersonalRatio * 0.72 : 0
+      const fusedPrefixContinuity = textPrefixContinuityScore(fusion.text, safeTextPrefixHint)
       return {
         tokens,
         fusion,
@@ -664,6 +697,7 @@ export const recognizePersonalizedTextLine = async (
         // above and is intentionally bounded to mostly trained letter paths.
         score: personalizedTextFusionSelectionScore(fusion, textFusionNeural, language)
           + literalPersonalSequenceBonus
+          + fusedPrefixContinuity * 0.26
           - penLiftMismatch * 0.22,
       }
     })

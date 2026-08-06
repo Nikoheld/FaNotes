@@ -6,6 +6,10 @@ export type IncrementalTextRecognitionState = {
   text: string
   pendingStrokeIndex: number
   prefixText: string
+  /** Number of leading prefix characters explicitly confirmed by the user. */
+  confirmedPrefixLength?: number
+  /** At most one non-text preview may be bridged before the prefix expires. */
+  uncertainCarryCount?: number
 }
 
 export type IncrementalTextCharacterHint = {
@@ -52,15 +56,173 @@ const sameStrokeTrajectory = (first: Stroke, second: Stroke) => (
   })
 )
 
+export const isAppendOnlyTextInk = (
+  previous: IncrementalTextRecognitionState | null,
+  current: Stroke[],
+) => Boolean(
+  previous &&
+  current.length >= previous.strokes.length &&
+  previous.strokes.every((stroke, index) => sameStrokeTrajectory(stroke, current[index])),
+)
+
 /**
- * Derives a high-precision count hint only from append-only pen input.
+ * A prefix belongs only to a loose continuation of the same physical line.
+ * This is deliberately broader than the one-new-body heuristic (multi-stroke
+ * letters are allowed) but rejects a new line, left-side rewrite, or unrelated
+ * canvas region.
+ */
+export const hasLooseTextContinuation = (
+  previous: IncrementalTextRecognitionState | null,
+  current: Stroke[],
+) => {
+  if (!isAppendOnlyTextInk(previous, current) || !previous) return false
+  if (current.length === previous.strokes.length) return true
+  const before = strokeExtent(previous.strokes)
+  const added = strokeExtent(current.slice(previous.strokes.length))
+  if (!before || !added) return false
+  const lineHeight = Math.max(0.012, heightOf(before))
+  const overlapsLine = added.maxY >= before.minY - lineHeight * 0.65 &&
+    added.minY <= before.maxY + lineHeight * 0.65
+  const addedCenterX = (added.minX + added.maxX) / 2
+  const remainsAtWritingEdge = (
+    added.maxX >= before.maxX - lineHeight * 0.72 &&
+    addedCenterX >= before.maxX - lineHeight
+  )
+  return overlapsLine && remainsAtWritingEdge
+}
+
+export const canCarryUncertainTextState = (
+  previous: IncrementalTextRecognitionState | null,
+  current: Stroke[],
+) => Boolean(
+  previous &&
+  (previous.uncertainCarryCount ?? 0) < 1 &&
+  hasLooseTextContinuation(previous, current),
+)
+
+const commonTextPrefixLength = (first: string[], second: string[]) => {
+  const limit = Math.min(first.length, second.length)
+  let length = 0
+  while (length < limit && first[length] === second[length]) length += 1
+  return length
+}
+
+/**
+ * Advances a stable prefix only after append geometry and two consecutive
+ * recognition snapshots agree. Merely removing the newest character from a
+ * first preview is unsafe: one connected stroke may already have been guessed
+ * as several letters. Explicit user corrections may still store the complete
+ * corrected text directly in the state.
+ */
+export const advanceStableTextPrefix = (
+  previous: IncrementalTextRecognitionState | null,
+  currentText: string,
+  beginsNewGlyph: boolean,
+) => {
+  const current = Array.from(currentText.normalize('NFC'))
+  if (
+    !previous ||
+    !current.length ||
+    current.length > 24 ||
+    !/^\p{L}{1,24}$/u.test(current.join(''))
+  ) return ''
+
+  const previousText = Array.from(previous.text.normalize('NFC'))
+  const previousStable = Array.from(previous.prefixText.normalize('NFC'))
+  const confirmedLength = Math.max(
+    0,
+    Math.min(previous.confirmedPrefixLength ?? 0, previousStable.length),
+  )
+  const confirmed = previousStable.slice(0, confirmedLength)
+  const currentPreservesConfirmation = confirmed.every((character, index) => current[index] === character)
+  // Automatic recognition may be temporarily wrong, but it may never erase
+  // a user-confirmed correction. A rewritten/non-append canvas is filtered by
+  // isAppendOnlyTextInk before this function is called.
+  if (!currentPreservesConfirmation) return confirmed.join('')
+
+  const retainedLength = commonTextPrefixLength(previousStable, current)
+  if (!beginsNewGlyph) {
+    return current.slice(0, Math.max(confirmedLength, retainedLength)).join('')
+  }
+
+  // Promotion may consume only characters that existed in the preceding
+  // preview and still agree now. The newest current character stays
+  // provisional unless it came from an explicit correction.
+  const observedTwice = commonTextPrefixLength(previousText, current)
+  const promotableLength = Math.min(observedTwice, Math.max(0, current.length - 1))
+  return current.slice(0, Math.max(confirmedLength, retainedLength, promotableLength)).join('')
+}
+
+/**
+ * Records only the contiguous leading range that was genuinely corrected.
+ * Correcting character three cannot implicitly confirm characters one and
+ * two; correcting the next unconfirmed character extends the range by one.
+ */
+export const textPrefixAfterTokenCorrection = (
+  previous: IncrementalTextRecognitionState | null,
+  currentText: string,
+  correctedCharacterIndex: number,
+) => {
+  const characters = Array.from(currentText.normalize('NFC'))
+  const previousStable = previous
+    ? Array.from(previous.prefixText.normalize('NFC'))
+    : []
+  const previousStableLength = previousStable.length
+  const previousConfirmedLength = previous
+    ? Math.max(0, Math.min(previous.confirmedPrefixLength ?? 0, previousStableLength))
+    : 0
+  const confirmed = previousStable.slice(0, previousConfirmedLength)
+  if (
+    correctedCharacterIndex >= 0 &&
+    correctedCharacterIndex < previousConfirmedLength &&
+    characters[correctedCharacterIndex]
+  ) {
+    // The user deliberately corrected an already confirmed position.
+    confirmed[correctedCharacterIndex] = characters[correctedCharacterIndex]
+  } else if (
+    correctedCharacterIndex === previousConfirmedLength &&
+    characters[correctedCharacterIndex]
+  ) {
+    confirmed.push(characters[correctedCharacterIndex])
+  }
+  const confirmedPrefixLength = confirmed.length
+  const stableLength = Math.max(previousStableLength, confirmedPrefixLength)
+  const automaticSuffix = characters.slice(confirmedPrefixLength, stableLength)
+  return {
+    prefixText: [...confirmed, ...automaticSuffix].join(''),
+    confirmedPrefixLength,
+  }
+}
+
+/** A projected sentence is safe to display/train only when its actual local
+ * token sequence spells the same NFC text, including case and line breaks. */
+export const textProjectionMatchesTokens = (projectedText: string, tokenText: string) => (
+  projectedText.normalize('NFC') === tokenText.normalize('NFC')
+)
+
+/**
+ * Advances only the ink snapshot after an uncertain automatic result. The
+ * previously stable letters remain unchanged, so another appended body can
+ * still use them without promoting the intervening math/unknown guess.
+ */
+export const carryStableTextPrefixAcrossUncertainInk = (
+  previous: IncrementalTextRecognitionState,
+  current: Stroke[],
+): IncrementalTextRecognitionState => ({
+  ...previous,
+  strokes: current.slice(),
+  pendingStrokeIndex: current.length,
+  uncertainCarryCount: (previous.uncertainCarryCount ?? 0) + 1,
+})
+
+/**
+ * Derives a conservative append hypothesis from append-only pen input.
  *
- * A count hint is treated as an exact segmentation constraint downstream, so
- * ambiguity is more damaging than missing a hint.  In particular, a rapid
- * multi-stroke T may contain a bar reaching back over the previous letter,
- * while two quickly appended body strokes may already be two new letters.
- * The former is recognized from its single substantial body; the latter
- * returns no hint and is left to the independent text/line recognizers.
+ * The diagnostic count is intentionally never sent as an exact segmentation
+ * constraint: a continuous cursive stroke may contain several letters and a
+ * slowly written glyph may contain several bodies. The structural result is
+ * used only to carry an older, already stable prefix into a bounded soft
+ * comparison; ambiguous geometry remains free to be resegmented.
  */
 export const incrementalTextCharacterHint = (
   previous: IncrementalTextRecognitionState | null,
@@ -157,55 +319,32 @@ export const incrementalTextCharacterHint = (
     characterCount: previous.characterCount + 1,
     beginsNewGlyph: true,
     addedStrokes: appendedStrokes,
-    previousText: previous.text,
+    // The last automatic character can still be an unfinished multi-stroke
+    // glyph. Only the older, already conservative prefix is safe to reuse.
+    previousText: previous.prefixText,
     pendingStrokeIndex: previous.strokes.length,
   }
 }
 
-/**
- * Extracts a count only from the recognizer's parallel text branch.  Selected
- * math tokens are deliberately not accepted: otherwise a mistaken `∬` (one
- * math token) becomes a hard one-character prior for the neural text pass.
- */
-export const independentTextCharacterCount = (
-  compactText: string,
-  evidence: {
-    visibleCharacters?: number
-    letters?: number
-  } | undefined,
-) => {
-  const characters = Array.from(compactText)
-  if (
-    characters.length < 1 ||
-    characters.length > 320 ||
-    !characters.every((character) => /^\p{L}$/u.test(character)) ||
-    evidence?.visibleCharacters !== characters.length ||
-    evidence.letters !== characters.length
-  ) return undefined
-  return characters.length
-}
-
 export const embeddedTextRecognitionHints = (
-  incrementalHint: Pick<IncrementalTextCharacterHint, 'characterCount'> | undefined,
-  compactText: string,
-  textEvidence: {
-    visibleCharacters?: number
-    letters?: number
-  } | undefined,
-  selectedMode: 'text' | 'math',
-  incrementalTextHint?: string,
+  incrementalHint: Pick<IncrementalTextCharacterHint, 'previousText'> | undefined,
 ) => {
-  const textBranchCharacterCount = independentTextCharacterCount(compactText, textEvidence)
+  const rawPrefix = incrementalHint?.previousText
+  const prefix = rawPrefix && rawPrefix.length <= 320
+    ? rawPrefix.normalize('NFC')
+    : undefined
   return {
-    textCharacterCountHint: incrementalHint?.characterCount ?? textBranchCharacterCount,
-    // The parallel text branch may safely contribute its count while math is
-    // selected, but not its guessed letters. This lets the independent neural
-    // recognizer recover `Te` from a transient `∬` without circularly forcing
-    // the classical content itself.
-    textCharacterHint: incrementalTextHint ?? (
-      selectedMode === 'text' && textBranchCharacterCount !== undefined
-        ? compactText
-        : undefined
-    ),
+    // Counts from both the incremental geometry and the classical text branch
+    // are hypotheses, not independent measurements. A connected pair can be
+    // one continuous stroke and a slowly written glyph can contain two body
+    // strokes, so neither may constrain downstream segmentation exactly.
+    // Only the already stable prefix survives, with explicit prefix semantics
+    // in the recognizer; newly guessed ink is never fed back into itself.
+    textPrefixHint: prefix
+      && prefix.length <= 320
+      && !/[ßẞ]/u.test(prefix)
+      && /^\p{L}{1,320}$/u.test(prefix)
+      ? prefix
+      : undefined,
   }
 }

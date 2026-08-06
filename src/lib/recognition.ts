@@ -4605,6 +4605,77 @@ const resemblesIntegralStroke = (stroke: Stroke) => {
   return spansHeight && oppositeEndpoints && pathLength >= heightPixels * 1.03
 }
 
+const resemblesSummationStroke = (stroke: Stroke) => {
+  if (stroke.points.length < 5) return false
+  const bounds = strokeBounds(stroke)
+  const widthPixels = Math.max(1, (bounds.maxX - bounds.minX) * SOURCE_WIDTH)
+  const heightPixels = Math.max(1, (bounds.maxY - bounds.minY) * SOURCE_HEIGHT)
+  if (widthPixels < 28 || heightPixels < 42 || widthPixels / heightPixels > 1.65) return false
+  const width = Math.max(0.0001, bounds.maxX - bounds.minX)
+  const height = Math.max(0.0001, bounds.maxY - bounds.minY)
+  const normalized = stroke.points.map((point, index) => ({
+    x: (point.x - bounds.minX) / width,
+    y: (point.y - bounds.minY) / height,
+    index,
+  }))
+  const topRight = normalized.find((point) => point.x >= 0.62 && point.y <= 0.24)
+  const topLeft = normalized.find((point) => point.x <= 0.3 && point.y <= 0.28)
+  const middle = normalized.find((point) => point.x >= 0.38 && point.x <= 0.75 && point.y >= 0.32 && point.y <= 0.68)
+  const bottomLeft = normalized.find((point) => point.x <= 0.3 && point.y >= 0.72)
+  const bottomRight = normalized.find((point) => point.x >= 0.62 && point.y >= 0.76)
+  if (!topRight || !topLeft || !middle || !bottomLeft || !bottomRight) return false
+  const forward = topRight.index < topLeft.index && topLeft.index < middle.index &&
+    middle.index < bottomLeft.index && bottomLeft.index < bottomRight.index
+  const reverse = bottomRight.index < bottomLeft.index && bottomLeft.index < middle.index &&
+    middle.index < topLeft.index && topLeft.index < topRight.index
+  return forward || reverse
+}
+
+const standaloneLargeOperatorGeometryEvidence = (
+  labelId: string,
+  strokes: Stroke[],
+) => {
+  if (!LARGE_OPERATOR_IDS.has(labelId) || !strokes.length) return false
+  const cluster = clusterFromStrokes(strokes)
+  if (!cluster || resemblesUppercaseT(cluster)) return false
+  if (labelId === 'operator_integral') {
+    return strokes.length === 1 && resemblesIntegralStroke(strokes[0])
+  }
+  if (labelId === 'operator_double_integral') {
+    return strokes.length === 2 && strokes.every(resemblesIntegralStroke)
+  }
+  if (labelId === 'operator_triple_integral') {
+    return strokes.length === 3 && strokes.every(resemblesIntegralStroke)
+  }
+  if (labelId === 'operator_contour_integral') {
+    return strokes.some(resemblesIntegralStroke)
+  }
+  if (labelId === 'operator_product') return resemblesProductOperatorStrokes(strokes)
+  if (labelId === 'operator_sum') return strokes.length === 1 && resemblesSummationStroke(strokes[0])
+  return false
+}
+
+export const standaloneLargeOperatorGeometryEvidenceForTests = standaloneLargeOperatorGeometryEvidence
+
+export const standaloneLargeOperatorIsDecisiveForTests = (evidence: {
+  labelId: string
+  strokes: Stroke[]
+  competingTextCharacters: number
+  personalSupport?: number
+  personalConfidence?: number
+}) => {
+  const cluster = clusterFromStrokes(evidence.strokes)
+  if (!cluster || !LARGE_OPERATOR_IDS.has(evidence.labelId) || resemblesUppercaseT(cluster)) return false
+  const independentEvidence = standaloneLargeOperatorGeometryEvidence(
+    evidence.labelId,
+    evidence.strokes,
+  ) || (
+    (evidence.personalSupport ?? 0) >= 2 &&
+    (evidence.personalConfidence ?? 0) >= 76
+  )
+  return evidence.competingTextCharacters <= 2 || independentEvidence
+}
+
 const mathGeometryAdjustment = (labelId: string, cluster: StrokeCluster) => {
   const width = Math.max(0.0001, cluster.maxX - cluster.minX)
   const height = Math.max(0.0001, cluster.maxY - cluster.minY)
@@ -5659,6 +5730,7 @@ const rerankTextChunk = (
   chunk: RecognitionToken[],
   labelMap: Map<string, LabelDefinition>,
   language: RecognitionLanguage,
+  textPrefixHint?: string,
 ) => {
   if (chunk.length === 0) return
   if (chunk.length === 1) {
@@ -6172,6 +6244,46 @@ const rerankTextChunk = (
   const languageBest = simplerSupportedBeam ?? provisionalLanguageBest
   const languageCorrectionEvidence = correctionEvidenceForBeam(languageBest)
   const visualBest = [...beams].sort((first, second) => second.visualScore - first.visualScore)[0]
+  const visualBestCharacters = Array.from(visualBest?.value ?? '')
+  const normalizedTextPrefix = typeof textPrefixHint === 'string' && textPrefixHint.length <= 320
+    ? textPrefixHint.normalize('NFC')
+    : ''
+  const stablePrefixCharacters = Array.from(normalizedTextPrefix)
+  const visualContainsStablePrefix = (
+    stablePrefixCharacters.length >= 1 &&
+    /^\p{L}{1,320}$/u.test(normalizedTextPrefix) &&
+    !/[ßẞ]/u.test(normalizedTextPrefix) &&
+    visualBestCharacters.length > stablePrefixCharacters.length &&
+    stablePrefixCharacters.every((character, index) => visualBestCharacters[index] === character)
+  )
+  const visuallyCloseIncompletePrefix = visualBest &&
+    visualContainsStablePrefix &&
+    /^\p{L}+$/u.test(visualBest.value)
+    ? ranked.find((beam) => {
+        const normalized = beam.value.toLocaleLowerCase(LANGUAGE_PROFILES[language].locale)
+        const changedIndexes = beam.choices.flatMap((candidate, index) => (
+          candidate.label.id === visualBest.choices[index]?.label.id ? [] : [index]
+        ))
+        const sameCasePattern = [...beam.value].every((character, index) => {
+          const visualCharacter = visualBestCharacters[index]
+          if (!visualCharacter) return false
+          return /^\p{Lu}$/u.test(character) === /^\p{Lu}$/u.test(visualCharacter)
+        })
+        return (
+          !beam.evidence?.knownWord &&
+          normalized.length >= 2 &&
+          /^\p{L}+$/u.test(beam.value) &&
+          LANGUAGE_PROFILES[language].prefixes.has(normalized) &&
+          sameCasePattern &&
+          changedIndexes.length <= 1 &&
+          changedIndexes.every((index) => index >= stablePrefixCharacters.length) &&
+          changedIndexes.every((index) => (
+            beam.choices[index].confidence >= visualBest.choices[index].confidence - 6
+          )) &&
+          beam.visualScore >= visualBest.visualScore - 0.26
+        )
+      })
+    : undefined
   const visualWord = visualBest?.value ?? ''
   const rawVisualWord = chunk.map((token) => (
     labelMap.get(token.visualLabelId ?? token.labelId)?.char ?? token.char
@@ -6295,6 +6407,17 @@ const rerankTextChunk = (
     languageChangedIndexes.length > 0 && !languageCorrectionHasVisualSupport
   ) ? visualBest : languageBest
   if (
+    !languageOverwritesVisualName &&
+    visuallyCloseIncompletePrefix &&
+    !best?.evidence?.knownWord
+  ) {
+    // During live writing the last one or two letters are intentionally not
+    // fed back as a hard hint. A core dictionary prefix may resolve one close
+    // visual ambiguity (tes/tec), but it must preserve case, remain within six
+    // confidence points and never override a complete word or protected name.
+    best = visuallyCloseIncompletePrefix
+  }
+  if (
     best &&
     literalKnownVisualBeam &&
     best.value.toLocaleLowerCase(LANGUAGE_PROFILES[language].locale) !== rawVisualNormalized
@@ -6389,14 +6512,28 @@ export const applyTextReranking = (
   tokens: RecognitionToken[],
   labels: LabelDefinition[],
   language: RecognitionLanguage,
+  textPrefixHint?: string,
 ) => {
   const result = arrangeTextTokens(tokens)
   const labelMap = new Map(labels.map((label) => [label.id, label]))
+  const normalizedLinePrefix = typeof textPrefixHint === 'string' && textPrefixHint.length <= 320
+    ? textPrefixHint.normalize('NFC')
+    : ''
+  const linePrefixCharacters = /^\p{L}{1,320}$/u.test(normalizedLinePrefix) && !/[ßẞ]/u.test(normalizedLinePrefix)
+    ? Array.from(normalizedLinePrefix)
+    : []
   refineTextSpacing(result, language)
   const rerankWords = () => {
     let chunk: RecognitionToken[] = []
+    let consumedCharacters = 0
     const flush = () => {
-      rerankTextChunk(chunk, labelMap, language)
+      const chunkCharacters = chunk.filter((token) => !token.isLayout).length
+      const prefixInsideChunk = (
+        linePrefixCharacters.length > consumedCharacters &&
+        linePrefixCharacters.length < consumedCharacters + chunkCharacters
+      ) ? linePrefixCharacters.slice(consumedCharacters).join('') : undefined
+      rerankTextChunk(chunk, labelMap, language, prefixInsideChunk)
+      consumedCharacters += chunkCharacters
       chunk = []
     }
 
@@ -6413,6 +6550,204 @@ export const applyTextReranking = (
   return result
 }
 
+/**
+ * Scores only positions that were already stable before new ink arrived.
+ *
+ * A prefix never implies the final character count. It is deliberately
+ * ignored unless the candidate contains at least one new visible position;
+ * therefore a collapsed candidate whose total length merely equals the old
+ * prefix receives neither a bonus nor a direct token replacement.
+ */
+export const textPrefixCompatibilityScore = (
+  tokens: RecognitionToken[],
+  textPrefixHint?: string,
+) => {
+  if (
+    typeof textPrefixHint !== 'string' ||
+    textPrefixHint.length < 1 ||
+    textPrefixHint.length > 320 ||
+    /[ßẞ]/u.test(textPrefixHint)
+  ) return 0
+  const visible = tokens.filter((token) => !token.isLayout)
+  const prefixCharacters = Array.from(textPrefixHint.normalize('NFC'))
+  if (
+    prefixCharacters.length < 1 ||
+    visible.length <= prefixCharacters.length ||
+    !prefixCharacters.every((character) => /^\p{L}$/u.test(character))
+  ) return 0
+
+  let total = 0
+  for (let index = 0; index < prefixCharacters.length; index += 1) {
+    const expected = prefixCharacters[index]
+    const token = visible[index]
+    if (!token) return 0
+    const candidates = [{
+      char: token.char,
+      confidence: token.confidence,
+      personalSupport: token.personalSupport ?? 0,
+      personalConfidence: token.personalConfidence ?? 0,
+      selected: true,
+    }, ...token.alternatives.map((alternative) => ({
+      char: alternative.char,
+      confidence: alternative.confidence,
+      personalSupport: alternative.personalSupport ?? 0,
+      personalConfidence: alternative.personalConfidence ?? 0,
+      selected: false,
+    }))]
+    let matching: (typeof candidates)[number] | undefined
+    let matchingScore = Number.NEGATIVE_INFINITY
+    for (const candidate of candidates) {
+      if (!(
+        candidate.char === expected &&
+        (
+          candidate.personalSupport > 0 ||
+          candidate.confidence >= Math.max(18, candidate.selected ? 18 : token.confidence - 30)
+        )
+      )) continue
+      const score = candidate.confidence + candidate.personalConfidence * 0.18 +
+        Math.min(12, candidate.personalSupport * 1.5)
+      if (score > matchingScore) {
+        matching = candidate
+        matchingScore = score
+      }
+    }
+    // Every supposedly stable position must remain visually supportable.
+    // Averaging one missing position into a long prefix could otherwise turn
+    // an already corrected word into a self-reinforcing near-match.
+    if (!matching) return 0
+    total += matching.confidence / 100 + Math.min(0.18, matching.personalConfidence / 500)
+  }
+  return total / prefixCharacters.length
+}
+
+/**
+ * Stronger than the beam compatibility score: mode selection may only use a
+ * prefix that is already present in the selected text tokens. An alternative
+ * hidden in an N-best list is useful for ranking, but is not independent
+ * enough to overrule a mathematical interpretation.
+ */
+export const selectedTextPrefixMatches = (
+  tokens: RecognitionToken[],
+  textPrefixHint?: string,
+) => {
+  if (
+    typeof textPrefixHint !== 'string' ||
+    textPrefixHint.length < 1 ||
+    textPrefixHint.length > 320 ||
+    /[ßẞ]/u.test(textPrefixHint)
+  ) return false
+  const prefix = Array.from(textPrefixHint.normalize('NFC'))
+  const visible = tokens.filter((token) => !token.isLayout)
+  return (
+    prefix.length >= 1 &&
+    visible.length > prefix.length &&
+    prefix.every((character) => /^\p{L}$/u.test(character)) &&
+    prefix.every((character, index) => visible[index]?.char === character)
+  )
+}
+
+type TextPrefixModeEvidence = {
+  compatibility: number
+  selectedPrefixMatches: boolean
+  visibleCharacters: number
+  letters: number
+}
+
+/** A hidden N-best alternative may rank a text beam, but may not change the
+ * selected text/math mode. Mode evidence requires the selected old positions
+ * themselves to match and the complete candidate to remain alphabetic. */
+export const textPrefixModeBonus = (evidence: TextPrefixModeEvidence) => (
+  Number.isFinite(evidence.compatibility) &&
+  evidence.compatibility >= 0.58 &&
+  evidence.selectedPrefixMatches &&
+  evidence.visibleCharacters >= 2 &&
+  evidence.letters === evidence.visibleCharacters
+    ? 0.38 + Math.min(0.42, evidence.compatibility * 0.4)
+    : 0
+)
+
+export const confirmedTextPrefixModeBonus = (
+  compatibility: number,
+  selectedPrefixMatches: boolean,
+  hasDecisiveMathStructure: boolean,
+) => (
+  Number.isFinite(compatibility) &&
+  compatibility >= 0.58 &&
+  selectedPrefixMatches &&
+  !hasDecisiveMathStructure
+    ? 1.85
+    : 0
+)
+
+type CollapsedMathPrefixEvidence = {
+  prefixCompatibility: number
+  selectedPrefixMatches: boolean
+  prefixLength: number
+  textVisibleCharacters: number
+  textLetters: number
+  textLines: number
+  textBaselineAlignment: number
+  inkAspectRatio: number
+  mathVisibleCharacters: number
+  mathDigits: number
+  mathOperators: number
+  mathRelations: number
+  mathFractions: number
+  mathLayoutAssignments: number
+  mathLines: number
+  mathStrongSymbols: number
+  mathHasCommandStructure: boolean
+  mathHasDecisiveStructure: boolean
+}
+
+/**
+ * Removes a bounded amount of duplicated evidence when several prefix-backed
+ * text letters collapse into one bare mathematical command. The command and
+ * strong-symbol scorers otherwise count the same singleton twice. Fractions,
+ * relations, operators, layouts, multiple lines and decisive large-operator
+ * geometry never enter this path.
+ */
+export const collapsedMathPrefixPenalty = (evidence: CollapsedMathPrefixEvidence) => (
+  evidence.prefixCompatibility >= 0.58 &&
+  evidence.selectedPrefixMatches &&
+  evidence.prefixLength >= 1 &&
+  evidence.textVisibleCharacters >= Math.max(3, evidence.prefixLength + 2) &&
+  evidence.textLetters === evidence.textVisibleCharacters &&
+  evidence.textLines === 1 &&
+  evidence.textBaselineAlignment >= 0.72 &&
+  evidence.inkAspectRatio >= 1.05 &&
+  evidence.mathVisibleCharacters === 1 &&
+  evidence.mathDigits === 0 &&
+  evidence.mathOperators === 0 &&
+  evidence.mathRelations === 0 &&
+  evidence.mathFractions === 0 &&
+  evidence.mathLayoutAssignments === 0 &&
+  evidence.mathLines === 1 &&
+  evidence.mathStrongSymbols === 1 &&
+  evidence.mathHasCommandStructure &&
+  !evidence.mathHasDecisiveStructure
+    ? 0.62
+    : 0
+)
+
+/** Penalizes only apostrophe-shaped fragments that occupy the writing body.
+ * A standalone or genuinely small/high apostrophe has no letter baseline to
+ * contradict and therefore receives no penalty. */
+export const bodySizedApostropheFragmentPenalty = (
+  tokens: Pick<RecognitionToken, 'char' | 'bbox'>[],
+) => {
+  const letters = tokens.filter((token) => /^\p{L}$/u.test(token.char))
+  if (!letters.length) return 0
+  const referenceHeight = Math.max(0.01, median(letters.map((token) => token.bbox[3])))
+  const referenceBaseline = median(letters.map((token) => token.bbox[1] + token.bbox[3]))
+  const fragments = tokens.filter((token) => (
+    /^[’']$/u.test(token.char) &&
+    token.bbox[3] >= referenceHeight * 0.58 &&
+    token.bbox[1] + token.bbox[3] >= referenceBaseline - referenceHeight * 0.35
+  )).length
+  return fragments * 0.46
+}
+
 export const recognizeExpression = (
   strokes: Stroke[],
   model: RecognitionModel,
@@ -6423,6 +6758,7 @@ export const recognizeExpression = (
   textCharacterCountHint?: number,
   textCharacterHint?: string,
   textSegmentationCandidateIndex = 0,
+  textPrefixHint?: string,
 ): RecognitionToken[] => {
   const clusters = segmentStrokes(strokes, mode)
   const labelMap = new Map(labels.map((label) => [label.id, label]))
@@ -6791,7 +7127,12 @@ export const recognizeExpression = (
     classified: { token: RecognitionToken; distance: number; aspectFit: number }[],
     independentSegmentationEvidence = 0,
   ) => {
-    const reranked = applyTextReranking(classified.map((entry) => entry.token), labels, language)
+    const reranked = applyTextReranking(
+      classified.map((entry) => entry.token),
+      labels,
+      language,
+      textPrefixHint,
+    )
     const value = recognizedSentence(reranked).replace(/\s+/gu, '')
     const evidence = lexicalWordEvidence(value, language)
     const averageConfidence = reranked.reduce((sum, token) => sum + token.confidence, 0) / Math.max(1, reranked.length)
@@ -6801,11 +7142,11 @@ export const recognizeExpression = (
     const aspect = physicalWidth / physicalHeight
     const strongBoundaries = strongInternalTextBoundaries(source)
     const expectedParts = Math.max(1, Math.min(10, Math.round(aspect / 0.78)))
+    const referenceLetterTokens = reranked.filter((token) => /^\p{L}$/u.test(token.char))
     const referenceTokenHeight = Math.max(0.01, median(
-      reranked
-        .filter((token) => /^\p{L}$/u.test(token.char))
-        .map((token) => token.bbox[3]),
+      referenceLetterTokens.map((token) => token.bbox[3]),
     ))
+    const apostropheFragmentPenalty = bodySizedApostropheFragmentPenalty(reranked)
     const widthPenalty = reranked.reduce((penalty, token) => {
       const ratio = token.bbox[2] * SOURCE_WIDTH / Math.max(1, token.bbox[3] * SOURCE_HEIGHT)
       const relativeHeight = token.bbox[3] / referenceTokenHeight
@@ -6820,6 +7161,11 @@ export const recognizeExpression = (
       + independentSegmentationEvidence
     score += learnedStrokeCountHypothesisScore(reranked)
     score -= widthPenalty
+    // A real apostrophe sits above the writing body and is much smaller than
+    // the x-height. A baseline-sized apostrophe is normally a fragment made
+    // by over-segmenting the last connected letter; it must not turn `te`
+    // into the dictionary-backed but geometrically impossible `Ja'`.
+    score -= apostropheFragmentPenalty
     const untouchedPersonalGlyph = classified.length === 1 ? classified[0].token : null
     if (
       untouchedPersonalGlyph &&
@@ -6884,7 +7230,11 @@ export const recognizeExpression = (
       // plausible extra letter. The physical word aspect is therefore a real
       // segmentation prior, not merely a tiny tie breaker.
       score -= Math.abs(reranked.length - expectedParts) * 0.16
-      if (evidence.knownWord && evidence.word.length >= 2) {
+      if (
+        evidence.knownWord &&
+        evidence.word.length >= 2 &&
+        apostropheFragmentPenalty === 0
+      ) {
         score += 0.62 + Math.min(0.2, evidence.word.length * 0.025)
       } else {
         score += evidence.score * 0.16
@@ -6993,12 +7343,27 @@ export const recognizeExpression = (
             .sort((first, second) => second.score - first.score)
           const competitive = scored
             .filter((entry, index, entries) => index < 3 && (index === 0 || entry.score >= entries[0].score - 0.48))
+          const prefixBacked = clusters.length === 1 && textPrefixHint
+            ? scored
+                .map((entry) => ({
+                  entry,
+                  compatibility: textPrefixCompatibilityScore(entry.tokens, textPrefixHint),
+                }))
+                .filter(({ compatibility }) => compatibility >= 0.58)
+                .sort((first, second) => (
+                  second.entry.score + second.compatibility * 0.32 -
+                  first.entry.score - first.compatibility * 0.32
+                ))[0]?.entry
+            : undefined
+          const prefixPreserving = prefixBacked && !competitive.includes(prefixBacked)
+            ? [...competitive, prefixBacked]
+            : competitive
           const exactGuided = Number.isInteger(clusterCharacterCountHint)
             ? scored.find((entry) => entry.tokens.length === clusterCharacterCountHint)
             : undefined
-          return exactGuided && !competitive.includes(exactGuided)
-            ? [...competitive, exactGuided]
-            : competitive
+          return exactGuided && !prefixPreserving.includes(exactGuided)
+            ? [...prefixPreserving, exactGuided]
+            : prefixPreserving
         })
 
         // A line can contain several geometric clusters even though it is one
@@ -7022,7 +7387,14 @@ export const recognizeExpression = (
                   )),
                   textSegmentationEvidence(combined, hypothesis),
                 ))
-                .sort((first, second) => second.score - first.score)
+                .map((entry) => ({
+                  ...entry,
+                  prefixCompatibility: textPrefixCompatibilityScore(entry.tokens, textPrefixHint),
+                }))
+                .sort((first, second) => (
+                  second.score + second.prefixCompatibility * 0.32 -
+                  first.score - first.prefixCompatibility * 0.32
+                ))
               const exact = scored.filter((entry) => entry.tokens.length === textCharacterCountHint)
               return (exact.length ? exact : scored).slice(0, 3)
             })()
@@ -7060,7 +7432,7 @@ export const recognizeExpression = (
             ...token,
             alternatives: token.alternatives.map((alternative) => ({ ...alternative })),
             context: token.context ? { ...token.context } : undefined,
-          })), labels, language)
+          })), labels, language, textPrefixHint)
           const sentence = recognizedSentence(reranked)
           const words = sentence
             .split(/[\s.,;:!?()[\]{}]+/u)
@@ -7103,6 +7475,7 @@ export const recognizeExpression = (
                   : -0.34)
               }, 0) / hintCharacters.length
             : 0
+          const prefixCompatibility = textPrefixCompatibilityScore(reranked, textPrefixHint)
           return {
             tokens: reranked,
             score: (
@@ -7112,7 +7485,8 @@ export const recognizeExpression = (
               unknownLongWords * 0.08 -
               excessivePieces * 0.025 -
               hintedLengthPenalty +
-              hintCompatibility * 0.58
+              hintCompatibility * 0.58 +
+              prefixCompatibility * 0.32
             ),
           }
         })
@@ -7144,7 +7518,7 @@ export const recognizeExpression = (
     : clusters.map((cluster, index) => classifyCluster(cluster, String(index)).token)
 
   if (mode === 'text') {
-    const reranked = applyTextReranking(tokens, labels, language)
+    const reranked = applyTextReranking(tokens, labels, language, textPrefixHint)
     const visibleCount = reranked.filter((token) => !token.isLayout).length
     // The assessment is assigned inside the segmentation callback. Preserve
     // its explicit nullable type because TypeScript's closure flow analysis
@@ -7155,7 +7529,7 @@ export const recognizeExpression = (
         ...token,
         alternatives: token.alternatives.map((alternative) => ({ ...alternative })),
         context: token.context ? { ...token.context } : undefined,
-      })), labels, language)
+      })), labels, language, textPrefixHint)
       const whole = rerankedWhole.find((token) => !token.isLayout)
       if (
         whole &&
@@ -7192,7 +7566,14 @@ export const recognizeExpression = (
             )),
             textSegmentationEvidence(combined, hypothesis),
           ))
-          .sort((first, second) => second.score - first.score)
+          .map((entry) => ({
+            ...entry,
+            prefixCompatibility: textPrefixCompatibilityScore(entry.tokens, textPrefixHint),
+          }))
+          .sort((first, second) => (
+            second.score + second.prefixCompatibility * 0.32 -
+            first.score - first.prefixCompatibility * 0.32
+          ))
         : []
       const exact = exactCandidates[Math.min(
         Math.max(0, textSegmentationCandidateIndex),
@@ -8159,7 +8540,30 @@ export const recognizeAutomaticExpression = (
   fallbackMode: RecognitionMode = 'text',
   textCharacterCountHint?: number,
   textCharacterHint?: string,
+  textPrefixHint?: string,
+  confirmedTextPrefixHint?: string,
 ): AutomaticRecognitionResult => {
+  const normalizedTextPrefix = typeof textPrefixHint === 'string'
+    ? textPrefixHint.normalize('NFC')
+    : ''
+  const safeTextPrefix = (
+    normalizedTextPrefix.length <= 320 &&
+    /^\p{L}{1,320}$/u.test(normalizedTextPrefix) &&
+    !/[ßẞ]/u.test(normalizedTextPrefix)
+  ) ? normalizedTextPrefix : undefined
+  const normalizedConfirmedTextPrefix = typeof confirmedTextPrefixHint === 'string'
+    ? confirmedTextPrefixHint.normalize('NFC')
+    : ''
+  const safeConfirmedTextPrefix = (
+    normalizedConfirmedTextPrefix.length <= 320 &&
+    /^\p{L}{1,320}$/u.test(normalizedConfirmedTextPrefix) &&
+    !/[ßẞ]/u.test(normalizedConfirmedTextPrefix) &&
+    (!safeTextPrefix || safeTextPrefix.startsWith(normalizedConfirmedTextPrefix))
+  ) ? normalizedConfirmedTextPrefix : undefined
+  // A user-confirmed prefix remains valid on append-only ink even when the
+  // geometric one-body heuristic refuses a normal automatic prefix (for
+  // example, a rapidly written multi-stroke next letter).
+  const effectiveTextPrefix = safeTextPrefix ?? safeConfirmedTextPrefix
   let textTokens = recognizeExpression(
     strokes,
     model,
@@ -8169,6 +8573,8 @@ export const recognizeAutomaticExpression = (
     language,
     textCharacterCountHint,
     textCharacterHint,
+    0,
+    effectiveTextPrefix,
   )
   const hintedCharacters = Array.from(normalizeGermanSharpS(textCharacterHint ?? ''))
     .filter((character) => !/\s/u.test(character))
@@ -8265,6 +8671,19 @@ export const recognizeAutomaticExpression = (
     textCharacterCountHint! >= 2 &&
     visibleText.length === textCharacterCountHint &&
     textLetters === visibleText.length
+  )
+  const stableTextPrefixCompatibility = textPrefixCompatibilityScore(textTokens, effectiveTextPrefix)
+  const stableSelectedTextPrefix = selectedTextPrefixMatches(textTokens, effectiveTextPrefix)
+  const stableTextPrefixLength = typeof effectiveTextPrefix === 'string'
+    ? Array.from(effectiveTextPrefix).length
+    : 0
+  const confirmedTextPrefixCompatibility = textPrefixCompatibilityScore(
+    textTokens,
+    safeConfirmedTextPrefix,
+  )
+  const confirmedSelectedTextPrefix = selectedTextPrefixMatches(
+    textTokens,
+    safeConfirmedTextPrefix,
   )
   const wordParts = textValue.split(/\s+/u).filter((part) => /\p{L}{2,}/u.test(part))
   const lexicalTextWords = (
@@ -8450,15 +8869,18 @@ export const recognizeAutomaticExpression = (
   const hasLimitedLargeOperator = largeMathOperators.length > 0 && layoutAssignments.some((assignment) => (
     assignment.role === 'upper_limit' || assignment.role === 'lower_limit'
   ))
-  const hasStandaloneLargeOperator = (
-    largeMathOperators.length === 1 &&
-    visibleMath.length === 1 &&
-    visibleText.length <= 2 &&
-    !visibleMath.some((token) => {
-      const cluster = clusterFromStrokes(token.strokes)
-      return Boolean(cluster && resemblesUppercaseT(cluster))
+  const standaloneLargeOperator = largeMathOperators.length === 1 && visibleMath.length === 1
+    ? largeMathOperators[0]
+    : undefined
+  const hasStandaloneLargeOperator = Boolean(standaloneLargeOperator && (
+    standaloneLargeOperatorIsDecisiveForTests({
+      labelId: standaloneLargeOperator.labelId,
+      strokes: standaloneLargeOperator.strokes,
+      competingTextCharacters: visibleText.length,
+      personalSupport: standaloneLargeOperator.personalSupport,
+      personalConfidence: standaloneLargeOperator.personalConfidence,
     })
-  )
+  ))
   const hasMultilineMathStructure = mathLineCount > 1 && (
     relationTokens.length > 0 || mathOperators.length > 0 || strongMathTokens.length > 0
   )
@@ -8527,6 +8949,32 @@ export const recognizeAutomaticExpression = (
     textLetters === visibleText.length &&
     !mathIsPureNumber
   )
+  const duplicatedCollapsedMathEvidencePenalty = collapsedMathPrefixPenalty({
+    prefixCompatibility: stableTextPrefixCompatibility,
+    selectedPrefixMatches: stableSelectedTextPrefix,
+    prefixLength: stableTextPrefixLength,
+    textVisibleCharacters: visibleText.length,
+    textLetters,
+    textLines: textLineCount,
+    textBaselineAlignment,
+    inkAspectRatio: physicalInkAspectRatio,
+    mathVisibleCharacters: visibleMath.length,
+    mathDigits,
+    mathOperators: mathOperators.length,
+    mathRelations: relationTokens.length,
+    mathFractions: fractionParts,
+    mathLayoutAssignments: layoutAssignments.length,
+    mathLines: mathLineCount,
+    mathStrongSymbols: strongMathTokens.length,
+    mathHasCommandStructure: hasMathCommandStructure,
+    mathHasDecisiveStructure: hasDecisiveMathStructure,
+  })
+  const stablePrefixModeBonus = textPrefixModeBonus({
+    compatibility: stableTextPrefixCompatibility,
+    selectedPrefixMatches: stableSelectedTextPrefix,
+    visibleCharacters: visibleText.length,
+    letters: textLetters,
+  })
 
   let textScore = textConfidence / 100 * 1.65
   let mathScore = mathConfidence / 100 * 1.65
@@ -8557,6 +9005,29 @@ export const recognizeAutomaticExpression = (
     // not receive this protection.
     textScore += 2.35 + Math.min(0.72, Math.max(0, textLetters - 2) * 0.24)
     textReasons.unshift('stabile wachsende Buchstabenfolge')
+  }
+  if (stablePrefixModeBonus > 0) {
+    // Unlike the former incremental count, this contributes no target length
+    // and cannot rewrite a token. It only says that independently retained
+    // older positions are still visually present after at least one new text
+    // token. Real fractions, relations and operators keep their complete math
+    // score; the bounded continuity evidence merely prevents a joined `Te`
+    // preview from flipping to ∫/∬ between pen lifts.
+    textScore += stablePrefixModeBonus
+    textReasons.unshift('stabiler Textpräfix')
+  }
+  const confirmedPrefixModeBonus = confirmedTextPrefixModeBonus(
+    confirmedTextPrefixCompatibility,
+    confirmedSelectedTextPrefix,
+    hasDecisiveMathStructure,
+  )
+  if (confirmedPrefixModeBonus > 0) {
+    // This prefix was explicitly corrected by the user on unchanged ink. It
+    // may strongly break an ambiguous text/math tie, but never overrides a
+    // real fraction, relation, radical, limit, or structurally clear operator.
+    textScore += confirmedPrefixModeBonus
+    mathScore -= 0.95
+    textReasons.unshift('bestätigter Textpräfix')
   }
   if (exactIndependentTextSequence) {
     textScore += 2.25 + Math.min(0.5, Math.max(0, independentPenLiftBodyCount - 2) * 0.16)
@@ -8654,6 +9125,7 @@ export const recognizeAutomaticExpression = (
   }
   if (textDigits > textLetters && mathOperators.length) textScore -= 0.45
   if (strongProseText && !hasDecisiveMathStructure) mathScore -= 1.15
+  mathScore -= duplicatedCollapsedMathEvidencePenalty
   if (
     exactIncrementalTextSequence &&
     visibleMath.length < visibleText.length &&

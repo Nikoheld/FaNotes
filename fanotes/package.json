@@ -33,6 +33,7 @@
     "audit:recognition:uji-personalized": "FANOTES_TROCR_AUDIT_MODE=personalized node scripts/sweep-trocr-preprocessing.mjs",
     "check:recognition:guided": "node scripts/check-neural-guided-personal-segmentation.mjs",
     "check:connected-recognition": "node scripts/check-connected-recognition.mjs",
+    "check:incremental-prefix": "cross-env FANOTES_PREFIX_ONLY=1 node scripts/check-connected-recognition.mjs",
     "check:neural-text-recognition": "node scripts/check-neural-text-recognition.mjs",
     "check:trocr": "node scripts/check-trocr-integration.cjs",
     "check:native-ocr": "node scripts/check-native-ocr.cjs",

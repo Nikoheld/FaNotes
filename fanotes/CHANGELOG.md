@@ -1,5 +1,10 @@
 # Änderungsverlauf
 
+## Unveröffentlicht
+
+- Die inkrementelle GlyphenWerk-Erkennung koppelt weder die Anzahl neu gezeichneter Strichkörper noch den aktuellen klassischen Textvorschlag als harte Segmentierungsvorgabe zurück. Ein über zwei UJI-Writer getrennt ausgewerteter Audit zeigte, dass ein einzelner verbundener Stiftzug in 280 von 372 kontrollierten Doppelglyphen fälschlich wie genau ein neues Zeichen wirkte. FaNotes verwendet deshalb nur noch einen konservativen, case-sensitiven Präfix bereits stabiler Positionen als begrenzten Score; der neueste automatische Buchstabe bleibt provisorisch, ein kollabierter Kandidat erhält keinen Längenbonus und Tokens werden nie durch den Präfix überschrieben.
+- Verbundene Wortanfänge verwerfen körpergroße Pseudo-Apostroph-Fragmente und dürfen genau eine nahezu gleichwertige Buchstabenform über einen plausiblen Wortpräfix auflösen. Ein einzelnes fehlgedeutetes Unendlichzeichen erhält nicht länger denselben Mathebeleg doppelt; echte Integrale und Unendlichzeichen bleiben auch mit veraltetem Textpräfix mathematisch geschützt.
+
 ## 2026.8.2
 
 - Dieses Stable-Reparaturupdate wird Installationen von `2026.8.1` bewusst als vollständiges Paket statt als Differenzialupdate angeboten. Dadurch wird ein älterer oder unvollständig ersetzter `app.asar` sicher entfernt; der vollständige englische Übersetzungskatalog und der davon unabhängige Kern-Fallback sind im neuen Linux- und Windows-Paket enthalten. Der echte Pakettest startet die veröffentlichte AppImage und erstellt über dieselben IPC-Wege wie die Oberfläche eine deutsche Notiz, eine englische Notiz und einen Ordner.

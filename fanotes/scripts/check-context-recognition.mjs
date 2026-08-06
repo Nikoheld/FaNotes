@@ -11,7 +11,10 @@ const server = await createServer({
 try {
   const {
     applyTextReranking,
+    bodySizedApostropheFragmentPenalty,
     calibratePersonalBaseEvidence,
+    collapsedMathPrefixPenalty,
+    confirmedTextPrefixModeBonus,
     groupRecognitionLines,
     installRecognitionProperNameMembership,
     installRecognitionWordCandidateProvider,
@@ -19,7 +22,12 @@ try {
     learnedStrokeCountHypothesisScore,
     recognizedLatex,
     recognizedSentence,
+    selectedTextPrefixMatches,
+    standaloneLargeOperatorGeometryEvidenceForTests,
+    standaloneLargeOperatorIsDecisiveForTests,
     suggestMathLayoutAssignments,
+    textPrefixCompatibilityScore,
+    textPrefixModeBonus,
   } = await server.ssrLoadModule('/../src/lib/recognition.ts')
   const {
     cleanUnsupportedTerminalWordForTests,
@@ -28,7 +36,12 @@ try {
   } = await server.ssrLoadModule('/src/lib/personalizedTextRecognition.ts')
   const {
     shortConnectedSegmentationIndexesForTests,
+    textPrefixContinuityScoreForTests,
   } = await server.ssrLoadModule('/src/lib/personalizedLineRecognition.ts')
+  const {
+    glyphenWerkExactProjectionIsIndependent,
+    validatedGlyphenWerkTextPrefixHint,
+  } = await server.ssrLoadModule('/src/lib/glyphenWerkRecognitionBridge.ts')
   const {
     applyFinalNeuralLineContext,
     applyFinalNeuralWordContext,
@@ -65,9 +78,15 @@ try {
   } = await server.ssrLoadModule('/src/lib/recognitionModeSelection.ts')
   const { BASE_CATALOG } = await server.ssrLoadModule('/../src/data/catalog.ts')
   const {
+    advanceStableTextPrefix,
+    canCarryUncertainTextState,
+    carryStableTextPrefixAcrossUncertainInk,
     embeddedTextRecognitionHints,
+    hasLooseTextContinuation,
     incrementalTextCharacterHint,
-    independentTextCharacterCount,
+    isAppendOnlyTextInk,
+    textPrefixAfterTokenCorrection,
+    textProjectionMatchesTokens,
   } = await server.ssrLoadModule('/../src/lib/incrementalTextRecognition.ts')
   const labelByChar = new Map(BASE_CATALOG.map((label) => [label.char, label]))
 
@@ -100,12 +119,190 @@ try {
     pendingStrokeIndex: 0,
     prefixText: '',
   }
+  assert.equal(
+    advanceStableTextPrefix(null, 'Tes', false),
+    '',
+    'Ein erster verbundener Stroke darf nicht sofort mehrere geratene Buchstaben stabilisieren.',
+  )
+  assert.equal(
+    advanceStableTextPrefix(incrementalState, 'Te', true),
+    'T',
+    'Nur ein bereits zuvor beobachteter Buchstabe darf nach einem neuen Körper stabil werden.',
+  )
+  assert.equal(
+    advanceStableTextPrefix(
+      { ...incrementalState, text: 'Te', prefixText: 'T' },
+      'Tes',
+      true,
+    ),
+    'Te',
+    'Übereinstimmende Append-Snapshots müssen den Präfix genau einen sicheren Schritt weiterführen.',
+  )
+  assert.equal(
+    advanceStableTextPrefix(
+      { ...incrementalState, text: 'Tes', prefixText: '' },
+      'Tes',
+      false,
+    ),
+    '',
+    'Ein Zubehörstrich am selben Snapshot darf keinen Teil eines verbunden geratenen Wortes fördern.',
+  )
+  assert.equal(
+    advanceStableTextPrefix(
+      { ...incrementalState, text: 'Tes', prefixText: 'Te' },
+      'Tos',
+      true,
+    ),
+    'T',
+    'Widersprochene automatische Präfixzeichen dürfen nicht weiter zurückgespeist werden.',
+  )
+  assert.equal(
+    advanceStableTextPrefix(
+      { ...incrementalState, text: 'T', prefixText: 'T', confirmedPrefixLength: 1 },
+      'F',
+      true,
+    ),
+    'T',
+    'Eine explizite T-Korrektur darf durch die nächste automatische F/Integral-Vermutung nicht verschwinden.',
+  )
+  assert.deepEqual(
+    textPrefixAfterTokenCorrection(null, 'Test', 0),
+    { prefixText: 'T', confirmedPrefixLength: 1 },
+    'Eine Einzelkorrektur am ersten Token darf nur diesen einen Präfixbuchstaben bestätigen.',
+  )
+  assert.deepEqual(
+    textPrefixAfterTokenCorrection(null, 'Test', 2),
+    { prefixText: '', confirmedPrefixLength: 0 },
+    'Eine Korrektur hinter einer unbestätigten Lücke darf frühere Tokens nicht implizit bestätigen.',
+  )
+  assert.deepEqual(
+    textPrefixAfterTokenCorrection(
+      { ...incrementalState, text: 'Te', prefixText: 'T', confirmedPrefixLength: 1 },
+      'Test',
+      1,
+    ),
+    { prefixText: 'Te', confirmedPrefixLength: 2 },
+    'Die Korrektur des direkt nächsten Tokens muss den bestätigten Präfix genau um eins erweitern.',
+  )
+  assert.deepEqual(
+    textPrefixAfterTokenCorrection(
+      { ...incrementalState, text: 'T', prefixText: 'T', confirmedPrefixLength: 1 },
+      'Fe',
+      1,
+    ),
+    { prefixText: 'Te', confirmedPrefixLength: 2 },
+    'Die Korrektur des zweiten Tokens darf ein früher bestätigtes T nicht durch die aktuelle F-Vermutung ersetzen.',
+  )
+  assert.equal(
+    textProjectionMatchesTokens('Test', 'Tost'),
+    false,
+    'Ein unabhängiger Hosttext darf bei abweichenden lokalen Tokens nicht als exakte Projektion erscheinen.',
+  )
+  assert.equal(
+    textProjectionMatchesTokens('A\u0308', 'Ä'),
+    true,
+    'Kanonisch äquivalente Zeichenfolgen dürfen als dieselbe Tokenprojektion gelten.',
+  )
   const rapidTStem = penStroke([[0.27, 0.18], [0.27, 0.42]])
   const rapidTBar = penStroke([[0.22, 0.19], [0.32, 0.19]])
   const clonedInitialBody = {
     ...initialBody,
     points: initialBody.points.map((point) => ({ ...point })),
   }
+  const integralStroke = penStroke([
+    [0.48, 0.12], [0.46, 0.11], [0.44, 0.16], [0.43, 0.25],
+    [0.44, 0.34], [0.42, 0.43], [0.39, 0.49], [0.37, 0.47],
+  ])
+  const summationStroke = penStroke([
+    [0.5, 0.13], [0.4, 0.13], [0.46, 0.26], [0.46, 0.31],
+    [0.4, 0.39], [0.5, 0.39],
+  ])
+  assert.equal(
+    standaloneLargeOperatorGeometryEvidenceForTests('operator_integral', [integralStroke]),
+    true,
+    'Eine echte Integraltrajektorie muss unabhängig von der konkurrierenden Text-Tokenzahl geschützt sein.',
+  )
+  assert.equal(
+    standaloneLargeOperatorGeometryEvidenceForTests('operator_sum', [summationStroke]),
+    true,
+    'Eine echte Sigma-Zickzacktrajektorie muss unabhängig von Textübersegmentierung geschützt sein.',
+  )
+  assert.equal(
+    standaloneLargeOperatorGeometryEvidenceForTests('operator_integral', [rapidTStem, rapidTBar]),
+    false,
+    'Die obere T-Geometrie darf niemals als unabhängiger Integralbeleg gelten.',
+  )
+  assert.equal(
+    standaloneLargeOperatorIsDecisiveForTests({
+      labelId: 'operator_integral',
+      strokes: [integralStroke],
+      competingTextCharacters: 3,
+    }),
+    true,
+    'Ein geometrisch echtes Integral muss auch gegen drei übersegmentierte Texttokens entscheidend bleiben.',
+  )
+  assert.equal(
+    standaloneLargeOperatorIsDecisiveForTests({
+      labelId: 'operator_sum',
+      strokes: [summationStroke],
+      competingTextCharacters: 4,
+    }),
+    true,
+    'Ein geometrisch echtes Sigma muss auch gegen vier übersegmentierte Texttokens entscheidend bleiben.',
+  )
+  assert.equal(
+    standaloneLargeOperatorIsDecisiveForTests({
+      labelId: 'operator_integral',
+      strokes: [rapidTStem, rapidTBar],
+      competingTextCharacters: 3,
+      personalSupport: 8,
+      personalConfidence: 98,
+    }),
+    false,
+    'Selbst starke Trainingsdaten dürfen eine klare T-Geometrie nicht zum Integral machen.',
+  )
+  assert.equal(
+    isAppendOnlyTextInk(incrementalState, [clonedInitialBody, rapidTStem]),
+    true,
+    'Ein geklonter unveränderter Stroke mit neuer Tinte muss als append-only gelten.',
+  )
+  assert.equal(
+    isAppendOnlyTextInk(incrementalState, [rapidTStem]),
+    false,
+    'Ersetzte frühere Tinte darf keinen bestätigten Präfix erben.',
+  )
+  const carriedUncertainState = carryStableTextPrefixAcrossUncertainInk(
+    { ...incrementalState, text: 'Tes', prefixText: 'Te' },
+    [initialBody, rapidTStem],
+  )
+  assert.equal(carriedUncertainState.text, 'Tes', 'Unsichere Tinte darf den letzten Textvorschlag nicht verändern.')
+  assert.equal(carriedUncertainState.prefixText, 'Te', 'Unsichere Tinte darf keinen geratenen Buchstaben stabilisieren.')
+  assert.equal(carriedUncertainState.characterCount, 1, 'Der diagnostische Zeichenzähler darf durch unsichere Tinte nicht wachsen.')
+  assert.equal(carriedUncertainState.strokes.length, 2, 'Der Tinten-Snapshot muss trotzdem bis zur aktuellen Eingabe vorrücken.')
+  assert.equal(carriedUncertainState.pendingStrokeIndex, 2, 'Die nächste Ergänzung muss erst hinter der unsicheren Tinte beginnen.')
+  assert.equal(carriedUncertainState.uncertainCarryCount, 1, 'Genau eine unsichere Vorschau darf überbrückt werden.')
+  assert.equal(
+    canCarryUncertainTextState(carriedUncertainState, [initialBody, rapidTStem, rapidTBar]),
+    false,
+    'Ein Präfix darf nach einer zweiten aufeinanderfolgenden unsicheren Vorschau nicht weitergetragen werden.',
+  )
+  assert.equal(
+    hasLooseTextContinuation(incrementalState, [initialBody, rapidTStem]),
+    true,
+    'Eine mehrstrichige Fortsetzung am rechten Schreibrand muss den bestätigten Präfix erreichen können.',
+  )
+  const nextLineBody = penStroke([[0.12, 0.72], [0.19, 0.84]])
+  assert.equal(
+    hasLooseTextContinuation(incrementalState, [initialBody, nextLineBody]),
+    false,
+    'Ein neuer Zeilenbereich darf keinen Präfix der vorherigen Zeile erben.',
+  )
+  const leftRewriteBody = penStroke([[0.01, 0.22], [0.03, 0.4]])
+  assert.equal(
+    hasLooseTextContinuation(incrementalState, [initialBody, leftRewriteBody]),
+    false,
+    'Eine nachträgliche Tinte links vom Schreibrand darf keinen alten Präfix fortsetzen.',
+  )
   assert.equal(
     incrementalTextCharacterHint(
       incrementalState,
@@ -113,6 +310,14 @@ try {
     )?.characterCount,
     2,
     'Ein Canvas-Klon und der links überhängende Querstrich eines neuen T müssen den sicheren Append-Count erhalten.',
+  )
+  assert.equal(
+    incrementalTextCharacterHint(
+      incrementalState,
+      [clonedInitialBody, rapidTStem, rapidTBar],
+    )?.previousText,
+    '',
+    'Ein neuer Körper darf den letzten automatischen Vorschau-Buchstaben nicht als stabil festschreiben.',
   )
   const backwardsLoop = penStroke([
     [0.18, 0.34], [0.3, 0.4], [0.31, 0.27], [0.2, 0.24], [0.28, 0.35],
@@ -156,15 +361,238 @@ try {
     undefined,
     'Veränderte oder neu geordnete frühere Tinte darf keinen Append-Hinweis erben.',
   )
+  const prefixToken = (char, confidence = 84, alternatives = []) => ({
+    char,
+    confidence,
+    alternatives,
+    isLayout: false,
+  })
   assert.equal(
-    independentTextCharacterCount('Te', { visibleCharacters: 2, letters: 2 }),
-    2,
-    'Der reine parallele Textzweig muss einen Zwei-Buchstaben-Count unabhängig vom gewählten Mathepfad liefern.',
+    bodySizedApostropheFragmentPenalty([{ char: "'", bbox: [0.1, 0.12, 0.01, 0.02] }]),
+    0,
+    'Ein alleinstehendes echtes Apostroph hat keine widersprechende Buchstabengrundlinie und darf nicht bestraft werden.',
   )
   assert.equal(
-    independentTextCharacterCount('∬', { visibleCharacters: 1, letters: 0 }),
-    undefined,
-    'Mathematische Tokens dürfen niemals als Text-Zeichenanzahl zurückgekoppelt werden.',
+    bodySizedApostropheFragmentPenalty([
+      { char: 'e', bbox: [0.1, 0.2, 0.05, 0.1] },
+      { char: "'", bbox: [0.16, 0.16, 0.01, 0.02] },
+    ]),
+    0,
+    'Ein kleines, hoch sitzendes Apostroph muss als echte Interpunktion erhalten bleiben.',
+  )
+  assert.equal(
+    bodySizedApostropheFragmentPenalty([
+      { char: 'e', bbox: [0.1, 0.2, 0.05, 0.1] },
+      { char: "'", bbox: [0.16, 0.21, 0.03, 0.08] },
+    ]),
+    0.46,
+    'Ein grundliniennahes Apostroph in Buchstabenkörpergröße muss als Überssegmentierungsfragment kosten.',
+  )
+  const twoTokenPrefixScore = textPrefixCompatibilityScore([
+    prefixToken('T'),
+    prefixToken('e'),
+  ], 'T')
+  const threeTokenPrefixScore = textPrefixCompatibilityScore([
+    prefixToken('T'),
+    prefixToken('e'),
+    prefixToken('s'),
+  ], 'T')
+  assert.ok(twoTokenPrefixScore > 0, 'Ein stabiler Präfix soll einen passenden vorhandenen Buchstaben weich stützen.')
+  assert.equal(
+    twoTokenPrefixScore,
+    threeTokenPrefixScore,
+    'Der Präfixscore darf weder einen Zwei- noch einen Drei-Token-Kandidaten wegen seiner Gesamtlänge bevorzugen.',
+  )
+  assert.equal(
+    textPrefixCompatibilityScore([prefixToken('T')], 'T'),
+    0,
+    'Ein auf die alte Präfixlänge kollabierter Kandidat darf keinen Kontinuitätsbonus erhalten.',
+  )
+  assert.equal(
+    textPrefixCompatibilityScore([prefixToken('T')], 'Te'),
+    0,
+    'Auch ein kürzerer Kandidat darf aus einem längeren Präfix keinen Bonus ableiten.',
+  )
+  assert.ok(
+    twoTokenPrefixScore > textPrefixCompatibilityScore([prefixToken('t'), prefixToken('e')], 'T'),
+    'Der stabile Präfix muss Gross- und Kleinbuchstaben positionsgetreu unterscheiden.',
+  )
+  assert.equal(
+    textPrefixCompatibilityScore([
+      { ...prefixToken('layout'), isLayout: true },
+      prefixToken('T'),
+      prefixToken('e'),
+    ], 'T'),
+    twoTokenPrefixScore,
+    'Layouttokens dürfen die Präfixpositionen nicht verschieben.',
+  )
+  assert.equal(
+    textPrefixCompatibilityScore([prefixToken('T'), prefixToken('e')], 'T'.repeat(321)),
+    0,
+    'Ein überlanger direkter JavaScript-Präfix muss vor jeder Verarbeitung abgewiesen werden.',
+  )
+  assert.equal(
+    textPrefixCompatibilityScore([prefixToken('T'), prefixToken('e')], ' T'),
+    0,
+    'Whitespace darf nicht stillschweigend aus einem direkten Präfix entfernt werden.',
+  )
+  assert.equal(
+    textPrefixCompatibilityScore([prefixToken('ß'), prefixToken('e')], 'ß'),
+    0,
+    'Das nicht unterstützte deutsche Eszett darf nicht in die Präfixlogik gelangen.',
+  )
+  assert.ok(
+    textPrefixCompatibilityScore([prefixToken('Ä'), prefixToken('r')], 'A\u0308') > 0,
+    'Kanonisch äquivalente Unicode-Buchstaben müssen vor dem positionsgetreuen Vergleich normalisiert werden.',
+  )
+  const alternativePrefixTokens = [
+    prefixToken('F', 86, [{ char: 'T', confidence: 73 }]),
+    prefixToken('e'),
+  ]
+  const alternativePrefixSnapshot = structuredClone(alternativePrefixTokens)
+  assert.ok(
+    textPrefixCompatibilityScore(alternativePrefixTokens, 'T') > 0,
+    'Eine visuell vorhandene Präfixalternative soll weich berücksichtigt werden.',
+  )
+  assert.deepEqual(
+    alternativePrefixTokens,
+    alternativePrefixSnapshot,
+    'Präfixe dürfen erkannte Tokens oder Alternativen niemals direkt überschreiben.',
+  )
+  assert.ok(
+    textPrefixCompatibilityScore([
+      prefixToken('F', 90, [{ char: 'T', confidence: 1 }]),
+      prefixToken('e'),
+    ], 'T') <= 0,
+    'Eine praktisch unbelegte N-Best-Alternative darf keine künstliche Präfixkontinuität erzeugen.',
+  )
+  assert.equal(
+    selectedTextPrefixMatches([prefixToken('T'), prefixToken('e')], 'T'),
+    true,
+    'Die Modusentscheidung darf einen exakt ausgewählten, fortgesetzten Präfix bestätigen.',
+  )
+  assert.equal(
+    selectedTextPrefixMatches(alternativePrefixTokens, 'T'),
+    false,
+    'Eine passende N-Best-Alternative ist kein unabhängiger Beleg für einen Moduswechsel.',
+  )
+  const prefixModeEvidence = {
+    compatibility: 0.58,
+    selectedPrefixMatches: true,
+    visibleCharacters: 3,
+    letters: 3,
+  }
+  assert.ok(
+    textPrefixModeBonus(prefixModeEvidence) > 0,
+    'Der dokumentierte inklusive Mindestscore muss einen exakt ausgewählten Textpräfix stützen.',
+  )
+  assert.equal(
+    textPrefixModeBonus({ ...prefixModeEvidence, compatibility: 0.579 }),
+    0,
+    'Ein Präfixscore knapp unter der Grenze darf den Text-/Mathemodus nicht beeinflussen.',
+  )
+  assert.equal(
+    textPrefixModeBonus({ ...prefixModeEvidence, selectedPrefixMatches: false }),
+    0,
+    'Eine nur in den Alternativen vorhandene Präfixform darf keinen Modusbonus erhalten.',
+  )
+  assert.equal(
+    textPrefixModeBonus({ ...prefixModeEvidence, letters: 2 }),
+    0,
+    'Ein gemischter Text-/Mathekandidat darf keinen Textpräfix-Modusbonus erhalten.',
+  )
+  assert.equal(
+    confirmedTextPrefixModeBonus(0.8, true, false),
+    1.85,
+    'Ein sichtbar erhaltener Benutzerpräfix muss einen ambigen Modusentscheid deutlich stabilisieren.',
+  )
+  assert.equal(
+    confirmedTextPrefixModeBonus(0.8, true, true),
+    0,
+    'Ein Benutzerpräfix darf echte Brüche, Relationen, Wurzeln oder Operatorstrukturen nicht überstimmen.',
+  )
+  const collapsedMathPrefixEvidence = {
+    prefixCompatibility: 0.78,
+    selectedPrefixMatches: true,
+    prefixLength: 1,
+    textVisibleCharacters: 3,
+    textLetters: 3,
+    textLines: 1,
+    textBaselineAlignment: 1,
+    inkAspectRatio: 2.06,
+    mathVisibleCharacters: 1,
+    mathDigits: 0,
+    mathOperators: 0,
+    mathRelations: 0,
+    mathFractions: 0,
+    mathLayoutAssignments: 0,
+    mathLines: 1,
+    mathStrongSymbols: 1,
+    mathHasCommandStructure: true,
+    mathHasDecisiveStructure: false,
+  }
+  assert.equal(
+    collapsedMathPrefixPenalty(collapsedMathPrefixEvidence),
+    0.62,
+    'Eine breite präfixbestätigte Buchstabenfolge soll die doppelte Wertung eines kollabierten Mathe-Singletons begrenzen.',
+  )
+  assert.equal(
+    collapsedMathPrefixPenalty({ ...collapsedMathPrefixEvidence, prefixCompatibility: 0.58 }),
+    0.62,
+    'Der dokumentierte Mindestscore von 0.58 muss inklusive gelten.',
+  )
+  ;[
+    { prefixCompatibility: 0.579 },
+    { selectedPrefixMatches: false },
+    { prefixLength: 0 },
+    { textVisibleCharacters: 2, textLetters: 2 },
+    { textLetters: 2 },
+    { textLines: 2 },
+    { textBaselineAlignment: 0.719 },
+    { inkAspectRatio: 1.049 },
+    { mathVisibleCharacters: 2 },
+    { mathFractions: 1 },
+    { mathRelations: 1 },
+    { mathOperators: 1 },
+    { mathLayoutAssignments: 1 },
+    { mathLines: 2 },
+    { mathStrongSymbols: 0 },
+    { mathStrongSymbols: 2 },
+    { mathHasCommandStructure: false },
+    { mathHasDecisiveStructure: true },
+  ].forEach((override) => assert.equal(
+    collapsedMathPrefixPenalty({ ...collapsedMathPrefixEvidence, ...override }),
+    0,
+    `Strukturelle Gegenbelege müssen die Präfixkorrektur sperren: ${JSON.stringify(override)}`,
+  ))
+  assert.equal(
+    textPrefixContinuityScoreForTests('Te', 'Te'),
+    0,
+    'Auch die finale Fusion darf einen auf die alte Präfixlänge kollabierten Text nicht belohnen.',
+  )
+  assert.equal(
+    textPrefixContinuityScoreForTests('Tes', 'Te'),
+    textPrefixContinuityScoreForTests('Test', 'Te'),
+    'Die finale Fusion darf aus einem stabilen Präfix keine bevorzugte Gesamtlänge ableiten.',
+  )
+  assert.ok(
+    textPrefixContinuityScoreForTests('Tes', 'Te') > textPrefixContinuityScoreForTests('Tos', 'Te'),
+    'Die finale Fusion soll passende Präfixpositionen weich vor veränderten alten Buchstaben bevorzugen.',
+  )
+  assert.equal(
+    textPrefixContinuityScoreForTests('Tosta', 'Test'),
+    0,
+    'Eine abweichende stabile Position darf auch bei langem Präfix keinen positiven Host-Bonus erhalten.',
+  )
+  assert.equal(
+    textPrefixContinuityScoreForTests('ßa', 'ß'),
+    0,
+    'Auch die finale Fusion darf das deaktivierte Eszett nicht als Kontinuitätsbeleg verwenden.',
+  )
+  assert.equal(
+    textPrefixContinuityScoreForTests('T∞', 'T'),
+    0,
+    'Die Host-Fusion darf gemischten Text/Mathe-Inhalt nicht als fortgesetztes Wort belohnen.',
   )
   assert.deepEqual(
     shortConnectedSegmentationIndexesForTests({
@@ -231,26 +659,71 @@ try {
     [],
     'Mehrzeiliger Text darf nie durch den kurzen Einzeilen-Fallback zusammengeschoben werden.',
   )
+  const noEmbeddedHint = embeddedTextRecognitionHints(undefined)
   assert.deepEqual(
-    embeddedTextRecognitionHints(
-      undefined,
-      'Te',
-      { visibleCharacters: 2, letters: 2 },
-      'math',
-    ),
-    { textCharacterCountHint: 2, textCharacterHint: undefined },
-    'Ein transient gewähltes Mathe-Ergebnis darf den reinen Textcount, aber nicht dessen geratenen Inhalt weitergeben.',
+    noEmbeddedHint,
+    { textPrefixHint: undefined },
+    'Ohne stabilen Präfix darf die eingebettete Erkennung keinerlei Textvorgabe erhalten.',
+  )
+  assert.equal(
+    'textCharacterCountHint' in noEmbeddedHint,
+    false,
+    'Weder der Mathe- noch der klassische Textzweig darf einen harten Count posten.',
   )
   assert.deepEqual(
-    embeddedTextRecognitionHints(
-      { characterCount: 3 },
-      'Te',
-      { visibleCharacters: 2, letters: 2 },
-      'math',
-      'Tes',
-    ),
-    { textCharacterCountHint: 3, textCharacterHint: 'Tes' },
-    'Ein unabhängig fortgeschriebener Textpräfix muss den schwächeren aktuellen Textzweig überstimmen.',
+    embeddedTextRecognitionHints({ previousText: 'Te' }),
+    { textPrefixHint: 'Te' },
+    'Nur die vor der neuen Tinte stabile Buchstabenfolge darf als weicher Präfix weitergegeben werden.',
+  )
+  assert.deepEqual(
+    embeddedTextRecognitionHints({ previousText: 'T∫' }),
+    { textPrefixHint: undefined },
+    'Ein gemischter oder mathematischer Inhalt darf niemals als Textpräfix weitergegeben werden.',
+  )
+  assert.deepEqual(
+    embeddedTextRecognitionHints({ previousText: 'ß' }),
+    { textPrefixHint: undefined },
+    'Das deaktivierte Eszett darf auch die iframe-Brücke nicht passieren.',
+  )
+  assert.equal(validatedGlyphenWerkTextPrefixHint('T'), 'T', 'Die Host-Brücke muss Grossbuchstaben exakt erhalten.')
+  assert.equal(validatedGlyphenWerkTextPrefixHint('t'), 't', 'Die Host-Brücke muss Kleinbuchstaben exakt erhalten.')
+  assert.equal(
+    validatedGlyphenWerkTextPrefixHint('A\u0308'),
+    'Ä',
+    'Die Host-Brücke muss kanonisch äquivalente Buchstaben vor dem Vergleich normalisieren.',
+  )
+  assert.equal(validatedGlyphenWerkTextPrefixHint('ß'), undefined, 'Die Host-Brücke darf das deaktivierte Eszett nicht annehmen.')
+  assert.equal(validatedGlyphenWerkTextPrefixHint('T'.repeat(321)), undefined, 'Die Host-Brücke muss überlange Präfixe vor NFC ablehnen.')
+  assert.equal(validatedGlyphenWerkTextPrefixHint('T2'), undefined, 'Die Textpräfix-Brücke darf keine Ziffern oder Formelsymbole annehmen.')
+  assert.equal(
+    glyphenWerkExactProjectionIsIndependent(undefined, 'Test', 'Toast'),
+    false,
+    'Auch ohne Präfix darf eine abweichende klassische Host-Fusion nicht hart projiziert werden.',
+  )
+  assert.equal(
+    glyphenWerkExactProjectionIsIndependent(undefined, 'Test', 'Test'),
+    true,
+    'Nur die Übereinstimmung mit der unabhängigen neuronalen Zeile erlaubt eine exakte Projektion.',
+  )
+  assert.equal(
+    glyphenWerkExactProjectionIsIndependent('Te', 'Test', 'Test'),
+    true,
+    'Neuronale und präfixbeeinflusste Fusion dürfen bei exakter unabhängiger Übereinstimmung projiziert werden.',
+  )
+  assert.equal(
+    glyphenWerkExactProjectionIsIndependent('Te', 'Toast', 'Test'),
+    false,
+    'Ein nur durch den Präfix verändertes Host-Ergebnis darf nicht erneut als harter Count/Volltext dienen.',
+  )
+  assert.equal(
+    glyphenWerkExactProjectionIsIndependent('T', 'test', 'Test'),
+    false,
+    'Die Unabhängigkeitsprüfung muss Gross-/Kleinschreibung erhalten.',
+  )
+  assert.equal(
+    glyphenWerkExactProjectionIsIndependent('T', 'Eine\nZeile', 'Eine Zeile'),
+    false,
+    'Unterschiedliche Zeilenstruktur darf nicht als whitespace-normalisierte Übereinstimmung gelten.',
   )
   assert.equal(
     groupRecognitionLines([
@@ -1019,6 +1492,45 @@ try {
       visualConfidence: confidence,
     }
   }
+
+  const incompleteTec = () => [
+    token('t', 78, [['t', 78]], 0),
+    token('e', 65, [['e', 65]], 1),
+    token('c', 61, [['c', 61], ['s', 57]], 2),
+  ]
+  assert.equal(
+    recognizedSentence(applyTextReranking(incompleteTec(), BASE_CATALOG, 'de')),
+    'tec',
+    'Ohne echten inkrementellen Präfix darf ein unbekannter visueller Text nicht in einen Wörterbuchanfang umgeschrieben werden.',
+  )
+  assert.equal(
+    recognizedSentence(applyTextReranking(incompleteTec(), BASE_CATALOG, 'de', 't')),
+    'tes',
+    'Innerhalb eines echten stabilen Präfixes darf genau eine visuell nahe neue Buchstabenform einen plausiblen Wortanfang bilden.',
+  )
+  const multiwordPrefixTokens = [
+    token('e', 82, [['e', 82]], 0),
+    token('i', 82, [['i', 82]], 1),
+    token('n', 82, [['n', 82]], 2),
+    ...incompleteTec().map((entry, index) => ({
+      ...entry,
+      id: `second-word-${index}`,
+      bbox: [0.27 + index * 0.055, 0.2, 0.05, 0.1],
+      spaceBefore: index === 0,
+    })),
+  ]
+  assert.equal(
+    recognizedSentence(applyTextReranking(multiwordPrefixTokens, BASE_CATALOG, 'de', 'eint')),
+    'ein tes',
+    'Ein kompakter Zeilenpräfix muss bis zum teilweise fortgesetzten zweiten Wort weitergezählt werden.',
+  )
+  const contradictedStablePrefix = incompleteTec()
+  contradictedStablePrefix[0] = token('f', 78, [['f', 78], ['t', 76]], 0)
+  assert.equal(
+    recognizedSentence(applyTextReranking(contradictedStablePrefix, BASE_CATALOG, 'de', 't'))[0],
+    'f',
+    'Ein Präfix darf niemals eine bereits ausgewählte stabile Position über eine Alternative umschreiben.',
+  )
 
   const uppercaseYLabel = labelByChar.get('Y')
   const lowercaseYLabel = labelByChar.get('y')
