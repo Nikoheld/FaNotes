@@ -412,17 +412,55 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .editor-pane .cm-scroller { scrollbar-gutter: stable; overscroll-behavior: contain; }
 .editor-module-loading { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; gap: 9px; color: var(--text-muted); font-size: 11px; }
 .unified-note-view { width: 100%; min-width: 0; min-height: 0; overflow: auto; background: color-mix(in srgb, var(--bg) 93%, var(--panel)); scrollbar-gutter: stable; overscroll-behavior: contain; }
-.unified-paper { --text: #252630; --text-primary: #252630; --text-soft: #555866; --text-muted: #6d7180; --text-faint: #6d7180; --bg: #fff; --bg-elevated: #f3f4f7; --panel: #fafafd; --panel-strong: #f1f2f6; --panel-hover: #e8eaf0; --background: #fff; --background-secondary: #f3f4f7; --surface-elevated: #f1f2f6; --surface-input: #f7f7f9; --border: rgba(35,38,51,.14); --border-strong: rgba(35,38,51,.25); --accent-readable: var(--paper-accent-readable); --accent-secondary-readable: var(--paper-accent-secondary-readable); position: relative; width: min(900px, var(--content-width), calc(100% - 64px)); min-width: 540px; min-height: calc(100% - 64px); aspect-ratio: 210 / 297; margin: 32px auto 76px; overflow: visible; color: var(--text); background-color: #fff; border: 1px solid rgba(31,34,47,.13); border-radius: 3px; box-shadow: 0 18px 52px rgba(0,0,0,.22), 0 2px 8px rgba(0,0,0,.09); isolation: isolate; }
-.paper-dots .unified-paper { background-image: radial-gradient(rgba(82,91,116,.19) .8px, transparent .8px); background-size: 28px 28px; }
-.paper-grid .unified-paper { background-image: linear-gradient(rgba(82,91,116,.105) 1px, transparent 1px), linear-gradient(90deg, rgba(82,91,116,.105) 1px, transparent 1px); background-size: 28px 28px; }
-.paper-lines .unified-paper { background-image: repeating-linear-gradient(180deg, transparent 0, transparent 27px, rgba(82,91,116,.13) 28px); }
+/* Paper grows with content. A fixed A4 aspect-ratio left long notes (e.g. the
+   welcome page) painting outside the white sheet onto the dark workspace —
+   a black strip at the bottom. Keep A4 only as a minimum height for short notes. */
+.unified-paper {
+  --text: #252630;
+  --text-primary: #252630;
+  --text-soft: #555866;
+  --text-muted: #6d7180;
+  --text-faint: #6d7180;
+  --bg: #fff;
+  --bg-elevated: #f3f4f7;
+  --panel: #fafafd;
+  --panel-strong: #f1f2f6;
+  --panel-hover: #e8eaf0;
+  --background: #fff;
+  --background-secondary: #f3f4f7;
+  --surface-elevated: #f1f2f6;
+  --surface-input: #f7f7f9;
+  --border: rgba(35,38,51,.14);
+  --border-strong: rgba(35,38,51,.25);
+  --accent-readable: var(--paper-accent-readable);
+  --accent-secondary-readable: var(--paper-accent-secondary-readable);
+  --paper-width: min(900px, var(--content-width), calc(100% - 64px));
+  --paper-a4-height: calc(var(--paper-width) * 297 / 210);
+  position: relative;
+  width: var(--paper-width);
+  min-width: 540px;
+  height: fit-content;
+  min-height: max(calc(100% - 64px), var(--paper-a4-height));
+  margin: 32px auto 76px;
+  overflow: visible;
+  color: var(--text);
+  background-color: #fff;
+  background-repeat: repeat;
+  border: 1px solid rgba(31,34,47,.13);
+  border-radius: 3px;
+  box-shadow: 0 18px 52px rgba(0,0,0,.22), 0 2px 8px rgba(0,0,0,.09);
+  isolation: isolate;
+}
+.paper-dots .unified-paper { background-color: #fff; background-image: radial-gradient(rgba(82,91,116,.19) .8px, transparent .8px); background-size: 28px 28px; }
+.paper-grid .unified-paper { background-color: #fff; background-image: linear-gradient(rgba(82,91,116,.105) 1px, transparent 1px), linear-gradient(90deg, rgba(82,91,116,.105) 1px, transparent 1px); background-size: 28px 28px; }
+.paper-lines .unified-paper { background-color: #fff; background-image: repeating-linear-gradient(180deg, transparent 0, transparent 27px, rgba(82,91,116,.13) 28px); }
 .unified-note-view.is-inking .unified-paper { box-shadow: 0 0 0 2px color-mix(in srgb, var(--paper-accent-readable) 35%, transparent), 0 20px 58px rgba(0,0,0,.24); }
-.unified-paper > .editor-pane { z-index: 2; width: 100%; min-height: 100%; overflow: visible; }
+.unified-paper > .editor-pane { z-index: 2; width: 100%; min-height: 100%; overflow: visible; background: transparent; }
 .unified-paper .markdown-editor, .unified-paper .markdown-editor .cm-editor { height: auto !important; min-height: 100%; overflow: visible; background: transparent; }
-.unified-paper .markdown-editor .cm-scroller { min-height: 100%; overflow: visible !important; padding: 0; scrollbar-gutter: auto; }
-.unified-paper .markdown-editor .cm-content { min-height: max(1120px, calc(100vh - 170px)); padding: 78px clamp(52px, 8vw, 86px) 150px; font-family: var(--editor-font); }
+.unified-paper .markdown-editor .cm-scroller { min-height: 100%; overflow: visible !important; padding: 0; scrollbar-gutter: auto; background: transparent; }
+.unified-paper .markdown-editor .cm-content { min-height: max(var(--paper-a4-height), calc(100vh - 170px)); padding: 78px clamp(52px, 8vw, 86px) 150px; font-family: var(--editor-font); background: transparent; }
 .unified-paper .markdown-editor .cm-gutters { padding-top: 78px; background: color-mix(in srgb, #fff 82%, transparent); }
-.unified-paper.has-worksheet { aspect-ratio: auto; min-height: calc(100% - 64px); padding-bottom: 24px; }
+.unified-paper.has-worksheet { min-height: calc(100% - 64px); padding-bottom: 24px; }
 .unified-paper.has-worksheet > .editor-pane { min-height: 0; }
 .unified-paper.has-worksheet .markdown-editor, .unified-paper.has-worksheet .markdown-editor .cm-editor, .unified-paper.has-worksheet .markdown-editor .cm-scroller { min-height: 0; }
 .unified-paper.has-worksheet .markdown-editor .cm-content { min-height: 0; padding-bottom: 34px; }
@@ -459,7 +497,17 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .worksheet-error strong { color: #30323d; font-size: 12px; }
 .worksheet-error span { max-width: 420px; line-height: 1.5; }
 .inline-ink-loading { position: sticky; z-index: 20; top: 16px; width: max-content; max-width: calc(100% - 28px); display: flex; align-items: center; gap: 8px; margin: 16px auto -48px; padding: 8px 11px; border: 1px solid var(--border-strong); border-radius: 10px; color: var(--text-soft); background: rgba(255,255,255,.92); box-shadow: 0 9px 28px rgba(0,0,0,.16); font-size: 10px; }
-@media (max-width: 760px) { .unified-paper { width: calc(100% - 24px); min-width: 0; margin: 12px auto 42px; } .unified-paper .markdown-editor .cm-content { padding: 58px 34px 120px; } .worksheet-layer { width: calc(100% - 16px); } .worksheet-toolbar strong { max-width: 150px; } }
+@media (max-width: 760px) {
+  .unified-paper {
+    --paper-width: calc(100% - 24px);
+    width: var(--paper-width);
+    min-width: 0;
+    margin: 12px auto 42px;
+  }
+  .unified-paper .markdown-editor .cm-content { padding: 58px 34px 120px; }
+  .worksheet-layer { width: calc(100% - 16px); }
+  .worksheet-toolbar strong { max-width: 150px; }
+}
 .editor-pane { min-width: 0; min-height: 0; flex: 1; position: relative; overflow: hidden; }
 .editor-placeholder { margin: auto; text-align: center; color: var(--text-muted); max-width: 390px; padding: 30px; }
 .editor-placeholder .placeholder-glyph { width: 66px; height: 66px; border-radius: 21px; margin: 0 auto 20px; display: grid; place-items: center; color: var(--on-accent); background: var(--accent); box-shadow: 0 18px 45px rgba(var(--accent-rgb), .24); }

@@ -1,5 +1,9 @@
 # Änderungsverlauf
 
+## Unveröffentlicht
+
+- Das Notizpapier wächst mit dem Inhalt statt einer festen A4-Höhe: lange Seiten wie Willkommen.md übermalen den dunklen Workspace nicht mehr unten schwarz. Kurze Notizen behalten die A4-Mindestgröße.
+
 ## 2026.8.4
 
 - Der Auto-Updater lädt Updates im Hintergrund herunter und speichert ein fertig geprüftes Paket über Neustarts hinweg. Ist die automatische Installation aktiv, wird es beim Beenden oder still beim nächsten Start installiert und die App startet nahtlos mit der neuen Version.
