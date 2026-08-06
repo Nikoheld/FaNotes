@@ -1,5 +1,10 @@
 # Änderungsverlauf
 
+## Unveröffentlicht
+
+- Der Auto-Updater lädt Updates im Hintergrund herunter und speichert ein fertig geprüftes Paket über Neustarts hinweg. Ist die automatische Installation aktiv, wird es beim Beenden oder still beim nächsten Start installiert und die App startet nahtlos mit der neuen Version.
+- Die Handschrifterkennung schützt normale Wörter besser vor fälschlichen Hoch-/Tiefstellungen: lateinische Buchstabenpaare brauchen eine klarere vertikale Verschiebung, bekannte Kurzkerne wie `te`/`st` bleiben Prosa, und verbundene Glyphen mit etwas kompakterer Breite werden zuverlässiger in mehrere Buchstaben zerlegt.
+
 ## 2026.8.3
 
 - Die inkrementelle GlyphenWerk-Erkennung koppelt weder die Anzahl neu gezeichneter Strichkörper noch den aktuellen klassischen Textvorschlag als harte Segmentierungsvorgabe zurück. Ein über zwei UJI-Writer getrennt ausgewerteter Audit zeigte, dass ein einzelner verbundener Stiftzug in 280 von 372 kontrollierten Doppelglyphen fälschlich wie genau ein neues Zeichen wirkte. FaNotes verwendet deshalb nur noch einen konservativen, case-sensitiven Präfix bereits stabiler Positionen als begrenzten Score; der neueste automatische Buchstabe bleibt provisorisch, ein kollabierter Kandidat erhält keinen Längenbonus und Tokens werden nie durch den Präfix überschrieben.

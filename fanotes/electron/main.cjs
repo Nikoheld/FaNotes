@@ -2499,13 +2499,31 @@ function schedulePostStartupWork() {
   const analyticsTimer = setTimeout(() => { void reportAnonymousDesktopAppOpen() }, 45_000)
   analyticsTimer.unref?.()
 
+  // Start the updater soon after the first frame so a finished background
+  // download from the previous session can install before the user settles in.
+  // Still deferred enough to stay outside the critical Linux cold-start path.
   const updaterTimer = setTimeout(() => {
     void startupPreparationPromise
       .then(() => readConfig())
       .then(() => ensureUpdateManager())
-      .then((manager) => manager.start())
+      .then(async (manager) => {
+        await manager.start()
+        if (!currentSettings.installUpdatesOnQuit || !currentSettings.autoCheckUpdates) return
+        const launch = await manager.applyPendingInstallOnLaunch()
+        if (!launch?.installStarted) return
+        // The install helper waits for this process to exit, then swaps the
+        // binary and relaunches. Close without another save prompt.
+        allowWindowClose = true
+        invalidateCloseWarningState()
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          try { mainWindow.close() } catch { /* ignore */ }
+        }
+        setTimeout(() => {
+          try { app.quit() } catch { /* ignore */ }
+        }, 180).unref?.()
+      })
       .catch((error) => console.warn('FaNotes-Auto-Updater konnte nicht gestartet werden:', error?.message ?? error))
-  }, 24_000)
+  }, 5_000)
   updaterTimer.unref?.()
 
   // Updating the untouched legacy welcome note is maintenance, not a

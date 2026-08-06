@@ -768,8 +768,8 @@ export function SettingsModal({
                       </select>
                     </SettingRow>
                     <SettingRow title="Automatisch nach Updates suchen" description={settings.updateChannel === 'beta' ? 'Prüft kurz nach dem Start und danach alle sechs Stunden den signierten Beta-Kanal.' : 'Prüft kurz nach dem Start und danach alle sechs Stunden den signierten Stable-Kanal.'}><Toggle label="Automatisch nach Updates suchen" checked={settings.autoCheckUpdates} onChange={(value) => update('autoCheckUpdates', value)} /></SettingRow>
-                    <SettingRow title="Updates automatisch herunterladen" description="Lädt nur geänderte, signierte Binärblöcke im Hintergrund und setzt abgebrochene Übertragungen fort."><Toggle label="Updates automatisch herunterladen" checked={settings.autoDownloadUpdates} onChange={(value) => update('autoDownloadUpdates', value)} /></SettingRow>
-                    <SettingRow title="Beim Beenden installieren" description="Installiert ein fertig geprüftes Update nach dem sicheren Speichern aller Notizen."><Toggle label="Update beim Beenden installieren" checked={settings.installUpdatesOnQuit} onChange={(value) => update('installUpdatesOnQuit', value)} /></SettingRow>
+                    <SettingRow title="Updates automatisch herunterladen" description="Lädt geprüfte Updates sofort im Hintergrund (bevorzugt nur geänderte Blöcke) und setzt abgebrochene Übertragungen fort – ohne Popup und ohne Unterbrechung."><Toggle label="Updates automatisch herunterladen" checked={settings.autoDownloadUpdates} onChange={(value) => update('autoDownloadUpdates', value)} /></SettingRow>
+                    <SettingRow title="Automatisch installieren" description="Installiert ein fertig geprüftes Update nahtlos: beim Beenden nach dem Speichern aller Notizen, oder still beim nächsten Start, wenn der Download schon abgeschlossen war."><Toggle label="Update automatisch installieren" checked={settings.installUpdatesOnQuit} onChange={(value) => update('installUpdatesOnQuit', value)} /></SettingRow>
                   </>}
                 </div>
 

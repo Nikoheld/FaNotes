@@ -2211,7 +2211,7 @@ export const connectedTextSegmentationHypotheses = (
   // is no connected multi-letter body to segment in the first place.
   if (
     firstDetachedConnector !== undefined &&
-    bodyAspectBeforeConnector < 1.62 &&
+    bodyAspectBeforeConnector < 1.48 &&
     usablePreferredParts === null
   ) {
     return [[cluster], ...temporalPartitions]
@@ -2230,8 +2230,12 @@ export const connectedTextSegmentationHypotheses = (
   // thin internal passages. Those are not word connectors. Actual connected
   // pairs normally exceed this physical aspect threshold; their competing
   // splits are now decided using the complete surrounding word below.
+  // Connected pairs such as `te` / `st` in free handwriting often sit just
+  // under the classic 1.62 aspect band when the writer is compact. Prefer a
+  // slightly lower gate so the multi-letter hypotheses remain available while
+  // still refusing to split square single glyphs without other evidence.
   if (
-    aspect < 1.62 &&
+    aspect < 1.48 &&
     usablePreferredParts === null &&
     !penLiftBodyBoundaries.length &&
     !temporalPartitions.length &&
@@ -7735,14 +7739,18 @@ const scriptRole = (
   // was small enough to turn an ordinary `Ha` into `H_{a}`. Require a clear
   // displacement relative to both glyphs. Eleven percent still classified
   // roughly one in six realistic height/jitter combinations as a script in a
-  // systematic baseline sweep. Sixteen percent covers ordinary pen drift but
-  // remains far below the displacement of genuine indices and limits.
-  // Learned layout examples may refine
-  // a genuinely displaced candidate below, but never relax this hard gate.
+  // systematic baseline sweep. Sixteen percent covers ordinary pen drift; for
+  // pure latin prose pairs we allow a little more (18 %) so normal words like
+  // `Test` or `Hallo` stay index-free under tablet jitter. Genuine indices
+  // and limits still sit far outside that band. Learned layout examples may
+  // refine a genuinely displaced candidate below, but never relax this gate.
+  const latinLetterPair = Boolean(
+    base.labelId?.startsWith('latin_') && candidate.labelId?.startsWith('latin_'),
+  )
   const verticalProtrusion = Math.max(
     0.005,
-    baseHeight * 0.16,
-    candidateHeight * 0.2,
+    baseHeight * (latinLetterPair ? 0.18 : 0.16),
+    candidateHeight * (latinLetterPair ? 0.22 : 0.2),
   )
   const supportsSuperscript = (
     candidateY <= baseY - verticalProtrusion &&
@@ -7796,7 +7804,9 @@ const wordAtomNeighbour = (first: FormattedAtom, second: FormattedAtom) => {
   if (second.spaceBefore || second.lineBreakBefore) return false
   const gap = second.bbox[0] - (first.bbox[0] + first.bbox[2])
   const physicalXHeight = Math.min(first.bbox[3], second.bbox[3]) * SOURCE_HEIGHT / SOURCE_WIDTH
-  return gap <= clamp(physicalXHeight * 0.46, 0.018, 0.05)
+  // Slightly wider neighbour tolerance keeps cursive `Test` / `Hallo` runs as
+  // one word so baseline-aligned letters are not reinterpreted as indices.
+  return gap <= clamp(physicalXHeight * 0.58, 0.018, 0.062)
 }
 
 /**
@@ -7830,7 +7840,11 @@ const ordinaryWordScriptConflict = (
     lexicalWordEvidence(word, 'de').score,
     lexicalWordEvidence(word, 'en').score,
   )
-  const exactShortWord = run.length === 2 && lexicalScore >= 0.5
+  // Dictionary hits plus everyday two-letter cores (`te`, `st`, `in`, …) that
+  // appear inside longer handwriting such as `Test` when only a pair is
+  // currently visible during incremental recognition.
+  const commonTwoLetterCore = /^(?:te|st|es|er|en|an|in|im|am|to|of|or|on|is|it|as|at|al|el|la|le|un|um|us|ha|he|hi|ho|me|my|we|be|do|go|no|so|up)$/iu
+  const exactShortWord = run.length === 2 && (lexicalScore >= 0.42 || commonTwoLetterCore.test(word))
   if (run.length < 3 && !exactShortWord) return false
 
   const bottoms = run.map((atom) => atom.bbox[1] + atom.bbox[3])
@@ -7843,8 +7857,8 @@ const ordinaryWordScriptConflict = (
   // therefore rejected real words before their shared baseline could be
   // considered. A true multi-letter index still forms a separate baseline,
   // so its base falls outside this deliberately bounded tolerance.
-  if (candidate.bbox[3] < Math.max(base.bbox[3] * 0.36, referenceHeight * 0.52)) return false
-  const tolerance = Math.max(0.012, referenceHeight * 0.52)
+  if (candidate.bbox[3] < Math.max(base.bbox[3] * 0.34, referenceHeight * 0.48)) return false
+  const tolerance = Math.max(0.012, referenceHeight * 0.56)
   const baseBottom = base.bbox[1] + base.bbox[3]
   const candidateBottom = candidate.bbox[1] + candidate.bbox[3]
   if (
@@ -7855,7 +7869,7 @@ const ordinaryWordScriptConflict = (
   const aligned = run.filter((atom) => (
     Math.abs(atom.bbox[1] + atom.bbox[3] - baseline) <= tolerance
   ))
-  const requiredAligned = run.length === 2 ? 2 : Math.max(3, Math.ceil(run.length * 0.75))
+  const requiredAligned = run.length === 2 ? 2 : Math.max(2, Math.ceil(run.length * 0.7))
   if (aligned.length < requiredAligned) return false
 
   // Two-letter words need a separate safety rule because the pair itself
@@ -7868,8 +7882,8 @@ const ordinaryWordScriptConflict = (
     const bottomDelta = Math.abs(candidateBottom - baseBottom)
     return (
       exactShortWord &&
-      heightRatio >= 0.58 &&
-      bottomDelta <= Math.max(0.018, base.bbox[3] * 0.24, candidate.bbox[3] * 0.32)
+      heightRatio >= 0.55 &&
+      bottomDelta <= Math.max(0.018, base.bbox[3] * 0.28, candidate.bbox[3] * 0.36)
     )
   }
 

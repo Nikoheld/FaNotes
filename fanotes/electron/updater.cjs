@@ -47,7 +47,8 @@ const MAX_MANIFEST_BYTES = 512 * 1024
 const MIN_PACKAGE_BYTES = 10 * 1024 * 1024
 const MAX_PACKAGE_BYTES = 1024 * 1024 * 1024
 const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000
-const INITIAL_CHECK_DELAY_MS = 12_000
+/** Short first poll so a staged update can be adopted before the user settles in. */
+const INITIAL_CHECK_DELAY_MS = 2_500
 const DOWNLOAD_TIMEOUT_MS = 45 * 60 * 1000
 const WINDOWS_INSTALLER_ARGS = Object.freeze(['/S', '--updated', '--force-run'])
 
@@ -449,9 +450,12 @@ function createUpdateManager({
   let initialTimer = null
   let activeDownloadController = null
   const highestSeenVersions = { stable: null, beta: null }
+  /** Survives restarts so a finished background download can install on next launch. */
+  let pendingInstall = null
   let activeChannel = 'stable'
   let installPrepared = false
   let started = false
+  let applyingLaunchInstall = false
   let state = {
     status: 'idle',
     supported,
@@ -470,6 +474,7 @@ function createUpdateManager({
   const settings = () => ({
     autoCheckUpdates: getSettings()?.autoCheckUpdates !== false,
     autoDownloadUpdates: getSettings()?.autoDownloadUpdates !== false,
+    // One switch: install a fully verified package when quitting or on the next launch.
     installUpdatesOnQuit: getSettings()?.installUpdatesOnQuit !== false,
     updateChannel: getSettings()?.updateChannel === 'beta' ? 'beta' : 'stable',
   })
@@ -483,6 +488,21 @@ function createUpdateManager({
       window.webContents.send(UPDATE_EVENT, snapshot())
     }
     return snapshot()
+  }
+
+  const persistState = async () => {
+    await atomicJsonWrite(persistentStatePath, {
+      schemaVersion: 3,
+      highestSeenVersions,
+      pendingInstall,
+      updatedAt: new Date().toISOString(),
+    })
+  }
+
+  const clearPendingInstall = async () => {
+    if (!pendingInstall) return
+    pendingInstall = null
+    await persistState().catch(() => {})
   }
 
   const activateConfiguredChannel = () => {
@@ -522,6 +542,32 @@ function createUpdateManager({
       if (!highestSeenVersions.stable && VERSION_PATTERN.test(parsed?.highestSeenVersion || '')) {
         highestSeenVersions.stable = parsed.highestSeenVersion
       }
+      const pending = parsed?.pendingInstall
+      if (
+        pending &&
+        typeof pending === 'object' &&
+        VERSION_PATTERN.test(pending.version || '') &&
+        (pending.channel === 'stable' || pending.channel === 'beta') &&
+        typeof pending.fileName === 'string' &&
+        pending.fileName.length > 0 &&
+        pending.fileName.length < 240 &&
+        !pending.fileName.includes('/') &&
+        !pending.fileName.includes('\\') &&
+        SHA256_PATTERN.test(pending.sha256 || '') &&
+        Number.isSafeInteger(pending.sizeBytes) &&
+        pending.sizeBytes >= MIN_PACKAGE_BYTES &&
+        pending.sizeBytes <= MAX_PACKAGE_BYTES
+      ) {
+        pendingInstall = {
+          channel: pending.channel,
+          version: pending.version,
+          fileName: pending.fileName,
+          sha256: pending.sha256,
+          sizeBytes: pending.sizeBytes,
+          usedDelta: Boolean(pending.usedDelta),
+          preparedAt: typeof pending.preparedAt === 'string' ? pending.preparedAt : null,
+        }
+      }
     } catch (error) {
       if (error?.code !== 'ENOENT') logger.warn('FaNotes-Updaterstatus konnte nicht gelesen werden:', error?.message ?? error)
     }
@@ -531,11 +577,62 @@ function createUpdateManager({
     const previous = highestSeenVersions[channel]
     if (previous && compareVersions(version, previous) <= 0) return
     highestSeenVersions[channel] = version
-    await atomicJsonWrite(persistentStatePath, {
-      schemaVersion: 2,
-      highestSeenVersions,
-      updatedAt: new Date().toISOString(),
+    await persistState()
+  }
+
+  const rememberPendingInstall = async ({ version, fileName, sha256, sizeBytes, usedDelta }) => {
+    pendingInstall = {
+      channel: activeChannel,
+      version,
+      fileName,
+      sha256,
+      sizeBytes,
+      usedDelta: Boolean(usedDelta),
+      preparedAt: new Date().toISOString(),
+    }
+    await persistState()
+  }
+
+  /**
+   * Reuses a previously verified package under userData/updates so the next
+   * launch can install without re-downloading and without user interaction.
+   */
+  const tryAdoptStagedUpdate = async (verified) => {
+    if (!platformConfig || !verified?.updateAvailable) return null
+    const packageInfo = verified.packages[platformConfig.primaryPackage]
+    const candidates = []
+    if (verified.delta?.target?.fileName) {
+      candidates.push({
+        info: verified.delta.target,
+        usedDelta: true,
+        installationKind: platform === 'win32' ? 'differential-windows' : 'differential-appimage',
+      })
+    }
+    candidates.push({
+      info: packageInfo,
+      usedDelta: false,
+      installationKind: fullInstallationKind,
     })
+    const releaseDirectory = path.join(updaterRoot, verified.latestVersion)
+    for (const candidate of candidates) {
+      const targetPath = path.join(releaseDirectory, candidate.info.fileName)
+      const existing = await fsp.lstat(targetPath).catch(() => null)
+      if (!existing?.isFile() || existing.isSymbolicLink() || existing.size !== candidate.info.sizeBytes) continue
+      if (await sha256File(targetPath) !== candidate.info.sha256) continue
+      if (platform === 'linux') await fsp.chmod(targetPath, 0o700).catch(() => {})
+      return {
+        targetPath,
+        usedDelta: candidate.usedDelta,
+        transferBytes: pendingInstall?.version === verified.latestVersion && pendingInstall.usedDelta === candidate.usedDelta
+          ? candidate.info.sizeBytes
+          : candidate.info.sizeBytes,
+        installationKind: candidate.installationKind,
+        fileName: candidate.info.fileName,
+        sha256: candidate.info.sha256,
+        sizeBytes: candidate.info.sizeBytes,
+      }
+    }
+    return null
   }
 
   const resolveDeltaSource = async (delta) => {
@@ -609,6 +706,7 @@ function createUpdateManager({
         if (!verified.updateAvailable) {
           downloadedPath = null
           downloadedDelta = null
+          await clearPendingInstall()
           return emit({
             status: 'up-to-date',
             latestVersion: verified.latestVersion,
@@ -620,6 +718,38 @@ function createUpdateManager({
             error: null,
             checkedAt,
           })
+        }
+        const staged = await tryAdoptStagedUpdate(verified)
+        if (staged) {
+          downloadedPath = staged.targetPath
+          downloadedDelta = staged.usedDelta ? verified.delta : null
+          await rememberPendingInstall({
+            version: verified.latestVersion,
+            fileName: staged.fileName,
+            sha256: staged.sha256,
+            sizeBytes: staged.sizeBytes,
+            usedDelta: staged.usedDelta,
+          })
+          return emit({
+            status: 'downloaded',
+            latestVersion: verified.latestVersion,
+            publishedAt: verified.publishedAt,
+            releaseNotes: verified.releaseNotes,
+            downloadedBytes: staged.transferBytes,
+            totalBytes: staged.transferBytes,
+            progress: 1,
+            installationKind: staged.installationKind,
+            error: null,
+            checkedAt,
+          })
+        }
+        if (
+          pendingInstall &&
+          pendingInstall.channel === requestedChannel &&
+          pendingInstall.version === verified.latestVersion
+        ) {
+          // Staged file vanished or failed verification — drop the stale marker.
+          await clearPendingInstall()
         }
         const next = emit({
           status: 'available',
@@ -807,6 +937,14 @@ function createUpdateManager({
         }
         downloadedPath = staged.targetPath
         downloadedDelta = delta
+        const installInfo = delta?.target ?? packageInfo
+        await rememberPendingInstall({
+          version: manifest.latestVersion,
+          fileName: installInfo.fileName,
+          sha256: installInfo.sha256,
+          sizeBytes: installInfo.sizeBytes,
+          usedDelta: Boolean(delta),
+        })
         return emit({
           status: 'downloaded',
           downloadedBytes: staged.transferInfo.sizeBytes,
@@ -965,7 +1103,45 @@ function createUpdateManager({
     return emit({ status: 'installing', installationKind: destination.kind, error: null })
   }
 
-  const shouldInstallOnQuit = () => Boolean(settings().installUpdatesOnQuit && state.status === 'downloaded' && downloadedPath)
+  const shouldInstallAutomatically = () => Boolean(
+    settings().installUpdatesOnQuit &&
+    state.status === 'downloaded' &&
+    downloadedPath &&
+    !installPrepared,
+  )
+
+  const shouldInstallOnQuit = () => shouldInstallAutomatically()
+
+  /**
+   * Seamless path for the next cold start: adopt a previously downloaded
+   * package (or finish a quiet check/download), then hand off to the install
+   * helper before the user keeps working on the old binary.
+   */
+  const applyPendingInstallOnLaunch = async () => {
+    if (!supported || !settings().installUpdatesOnQuit || applyingLaunchInstall || installPrepared) {
+      return { installStarted: false, state: snapshot() }
+    }
+    applyingLaunchInstall = true
+    try {
+      let next = snapshot()
+      if (next.status !== 'downloaded') {
+        next = await check({ manual: false })
+      }
+      if (next.status === 'available' && settings().autoDownloadUpdates) {
+        next = await download()
+      }
+      if (next.status !== 'downloaded' || !downloadedPath) {
+        return { installStarted: false, state: snapshot() }
+      }
+      next = await prepareInstall()
+      return { installStarted: next.status === 'installing', state: next }
+    } catch (error) {
+      logger.warn('Automatische Installation beim Start fehlgeschlagen:', error?.message ?? error)
+      return { installStarted: false, state: emit({ status: 'error', error: safeErrorMessage(error) }) }
+    } finally {
+      applyingLaunchInstall = false
+    }
+  }
 
   const schedule = () => {
     if (!started || !supported || !settings().autoCheckUpdates) return
@@ -999,13 +1175,17 @@ function createUpdateManager({
   }
 
   const start = async () => {
-    if (started) return
+    if (started) return snapshot()
     started = true
     await loadPersistentState()
     await fsp.mkdir(updaterRoot, { recursive: true, mode: 0o700 })
     activateConfiguredChannel()
+    // Periodic quiet checks/downloads. Seamless install-on-launch is invoked
+    // explicitly by the main process after start so tests and packaging do not
+    // accidentally spawn the install helper.
     schedule()
     emit({})
+    return snapshot()
   }
 
   const stop = ({ abortDownload = true } = {}) => {
@@ -1024,7 +1204,9 @@ function createUpdateManager({
     check,
     download,
     prepareInstall,
+    applyPendingInstallOnLaunch,
     shouldInstallOnQuit,
+    shouldInstallAutomatically,
     getState: snapshot,
   }
 }
