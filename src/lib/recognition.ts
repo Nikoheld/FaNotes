@@ -5525,10 +5525,16 @@ const candidatesForTextToken = (
     })
     .sort((first, second) => second.confidence - first.confidence)
   const peak = candidates[0]?.confidence ?? 0
+  // Uncertain freehand glyphs need a slightly wider N-best window so word
+  // context can still choose among real confusions (e/c, a/o, s/5, …).
+  // Confident peaks keep the tighter gate to avoid inventing distant classes.
+  const confidenceWindow = peak < 52 ? 40 : peak < 68 ? 34 : 30
   const plausible = candidates
     // A word may decide between visually similar glyphs, but it must not pull
     // an implausible class from the tail of the recognizer into the result.
-    .filter((candidate, index) => index === 0 || candidate.confidence >= Math.max(22, peak - 30))
+    .filter((candidate, index) => (
+      index === 0 || candidate.confidence >= Math.max(20, peak - confidenceWindow)
+    ))
   const lowercase = plausible.filter((candidate) => (
     isLetterLabel(candidate.label) &&
     candidate.label.char === candidate.label.char.toLocaleLowerCase('de') &&
@@ -5541,12 +5547,12 @@ const candidatesForTextToken = (
   ))
   const digits = plausible.filter((candidate) => isDigitLabel(candidate.label))
   const diverse = [
-    ...plausible.slice(0, 6),
+    ...plausible.slice(0, peak < 62 ? 10 : 7),
     ...lowercase.slice(0, 12),
     ...uppercase.slice(0, 6),
     ...digits.slice(0, 5),
   ]
-  return [...new Map(diverse.map((candidate) => [candidate.label.id, candidate])).values()].slice(0, 24)
+  return [...new Map(diverse.map((candidate) => [candidate.label.id, candidate])).values()].slice(0, 28)
 }
 
 const wordRanks = (words: Set<string>) => new Map(
@@ -5917,9 +5923,13 @@ const rerankTextChunk = (
   if (chunk.length === 0) return
   if (chunk.length === 1) {
     const token = chunk[0]
+    const visualPeak = token.visualConfidence ?? token.confidence
+    // For an isolated freehand glyph with no word context, personal case
+    // votes and geometry-backed near-misses are the only safe corrections.
+    // Full dictionary rewriting of a single letter is deliberately skipped.
     const personalCandidates = [{
       labelId: token.labelId,
-      confidence: token.visualConfidence ?? token.confidence,
+      confidence: visualPeak,
       baseConfidence: token.baseConfidence ?? 0,
       personalSupport: token.personalSupport ?? 0,
       personalConfidence: token.personalConfidence ?? 0,
@@ -5944,7 +5954,7 @@ const rerankTextChunk = (
         )
       })
       .filter((candidate) => candidate.personalSupport >= 2 && candidate.personalConfidence > 0)
-      .filter((candidate) => candidate.confidence >= (token.visualConfidence ?? token.confidence) - 8)
+      .filter((candidate) => candidate.confidence >= visualPeak - 8)
     const strongestBaseConfidence = personalCandidates.reduce((peak, candidate) => (
       Math.max(peak, candidate.baseConfidence)
     ), 0)
@@ -5970,6 +5980,67 @@ const rerankTextChunk = (
       token.personalConfidence = selected.personalConfidence
       token.strokeCountFit = selected.strokeCountFit
       token.strokeCountSupport = selected.strokeCountSupport
+    }
+    // Uncertain isolated letters without personal training: if a near
+    // alternative is clearly better on style-independent geometry, prefer it.
+    // Never override a trained class or switch digit↔letter kinds.
+    if (
+      visualPeak < 72 &&
+      (token.personalSupport ?? 0) < 2 &&
+      (token.personalConfidence ?? 0) < 28 &&
+      token.strokes.length > 0
+    ) {
+      const cluster = clusterFromStrokes(token.strokes)
+      if (cluster) {
+        const currentKind = token.labelId.startsWith('digit_')
+          ? 'digit'
+          : token.labelId.startsWith('latin_') || token.labelId.startsWith('german_')
+            ? 'letter'
+            : 'other'
+        const geometryLeader = [{
+          labelId: token.labelId,
+          confidence: visualPeak,
+          baseConfidence: token.baseConfidence ?? 0,
+        }, ...token.alternatives.map((alternative) => ({
+          labelId: alternative.labelId,
+          confidence: alternative.confidence,
+          baseConfidence: alternative.baseConfidence ?? 0,
+        }))]
+          .filter((candidate) => {
+            if (candidate.confidence < visualPeak - 12) return false
+            if (currentKind === 'digit') return candidate.labelId.startsWith('digit_')
+            if (currentKind === 'letter') {
+              return candidate.labelId.startsWith('latin_') || candidate.labelId.startsWith('german_')
+            }
+            return false
+          })
+          .map((candidate) => ({
+            ...candidate,
+            geometry: textGeometryAdjustment(candidate.labelId, cluster),
+          }))
+          .sort((first, second) => (
+            (first.geometry - second.geometry) ||
+            (second.baseConfidence - first.baseConfidence) ||
+            (second.confidence - first.confidence)
+          ))[0]
+        if (
+          geometryLeader &&
+          geometryLeader.labelId !== token.labelId &&
+          geometryLeader.geometry <= textGeometryAdjustment(token.labelId, cluster) - 0.035 &&
+          geometryLeader.confidence >= visualPeak - 10 &&
+          (geometryLeader.baseConfidence ?? 0) >= (token.baseConfidence ?? 0) - 4
+        ) {
+          const geometryLabel = labelMap.get(geometryLeader.labelId)
+          if (geometryLabel && isTextLabel(geometryLabel)) {
+            token.labelId = geometryLabel.id
+            token.char = geometryLabel.char
+            token.name = geometryLabel.name
+            token.latex = geometryLabel.latex
+            token.confidence = Math.max(token.confidence, geometryLeader.confidence)
+            token.baseConfidence = geometryLeader.baseConfidence
+          }
+        }
+      }
     }
     const extremelyNarrowDottedI = token.char !== 'i' &&
       resemblesExtremelyNarrowDottedLowercaseI(token.strokes)
@@ -7255,7 +7326,46 @@ export const recognizeExpression = (
     const rankedForMode = mode === 'text'
       ? fusedRanking.filter((entry) => isTextLabel(labelMap.get(entry.labelId)))
       : fusedRanking
-    const activeRanking = rankedForMode.length ? rankedForMode : fusedRanking
+    let activeRanking = rankedForMode.length ? rankedForMode : fusedRanking
+    // Isolated freehand glyphs often land in a tight band after square crop
+    // normalization. Prefer a near alternative with clearly better geometry
+    // only when personal evidence is weak, the visual margin is small, and
+    // both classes stay in the same family (letter vs digit).
+    if (mode === 'text' && clusters.length === 1 && activeRanking.length >= 2) {
+      const leading = activeRanking[0]
+      const leadingGeometry = textGeometryAdjustment(leading.labelId, cluster)
+      const leadingKind = leading.labelId.startsWith('digit_')
+        ? 'digit'
+        : leading.labelId.startsWith('latin_') || leading.labelId.startsWith('german_')
+          ? 'letter'
+          : 'other'
+      const challenger = activeRanking.slice(1, 8).find((entry) => {
+        if (entry.distance - leading.distance > 0.055) return false
+        if ((leading.personalSupport ?? 0) >= 1) return false
+        if ((leading.personalConfidence ?? 0) >= 20) return false
+        const entryKind = entry.labelId.startsWith('digit_')
+          ? 'digit'
+          : entry.labelId.startsWith('latin_') || entry.labelId.startsWith('german_')
+            ? 'letter'
+            : 'other'
+        if (leadingKind !== entryKind || leadingKind === 'other') return false
+        const geometry = textGeometryAdjustment(entry.labelId, cluster)
+        return (
+          geometry <= leadingGeometry - 0.038 &&
+          (entry.baseConfidence ?? 0) >= (leading.baseConfidence ?? 0) - 2 &&
+          entry.distance <= leading.distance + 0.03
+        )
+      })
+      if (challenger) {
+        activeRanking = [
+          {
+            ...challenger,
+            distance: Math.min(challenger.distance, Math.max(0, leading.distance - 0.008)),
+          },
+          ...activeRanking.filter((entry) => entry !== challenger),
+        ].sort((first, second) => first.distance - second.distance)
+      }
+    }
     const best = activeRanking[0]
     const runnerUp = activeRanking[1]
     const bestLabel = best ? labelMap.get(best.labelId) : undefined
@@ -7265,7 +7375,7 @@ export const recognizeExpression = (
       : absoluteCertainty
     const confidence = Math.round(clamp(absoluteCertainty * 0.72 + marginCertainty * 0.28) * 100)
 
-    const alternatives = activeRanking.slice(0, 32).flatMap((entry) => {
+    const alternatives = activeRanking.slice(0, 40).flatMap((entry) => {
       const label = labelMap.get(entry.labelId)
       if (!label) return []
       return [{
@@ -7323,7 +7433,10 @@ export const recognizeExpression = (
     const physicalHeight = Math.max(1, (source.maxY - source.minY) * SOURCE_HEIGHT)
     const aspect = physicalWidth / physicalHeight
     const strongBoundaries = strongInternalTextBoundaries(source)
-    const expectedParts = Math.max(1, Math.min(10, Math.round(aspect / 0.78)))
+    // Freehand letters are often slightly wider than printed forms. A softer
+    // aspect prior reduces over-splitting of compact connected pairs while
+    // still guiding long cursive words toward the right character count.
+    const expectedParts = Math.max(1, Math.min(10, Math.round(aspect / 0.82)))
     const referenceLetterTokens = reranked.filter((token) => /^\p{L}$/u.test(token.char))
     const referenceTokenHeight = Math.max(0.01, median(
       referenceLetterTokens.map((token) => token.bbox[3]),
@@ -7411,25 +7524,48 @@ export const recognizeExpression = (
       // A cut through a cursive connector can look like a surprisingly
       // plausible extra letter. The physical word aspect is therefore a real
       // segmentation prior, not merely a tiny tie breaker.
-      score -= Math.abs(reranked.length - expectedParts) * 0.16
+      score -= Math.abs(reranked.length - expectedParts) * 0.15
       if (
         evidence.knownWord &&
         evidence.word.length >= 2 &&
         apostropheFragmentPenalty === 0
       ) {
-        score += 0.62 + Math.min(0.2, evidence.word.length * 0.025)
+        // Known multi-letter words are the strongest freehand recovery signal
+        // when each glyph still has independent visual support. Prefer them
+        // over near-matches that invent a rare fragment of the same length.
+        const minimumSupportedConfidence = Math.min(
+          ...reranked.map((token) => token.confidence),
+        )
+        const supportBonus = minimumSupportedConfidence >= 48
+          ? 0.14
+          : minimumSupportedConfidence >= 36
+            ? 0.06
+            : 0
+        score += 0.68 + Math.min(0.24, evidence.word.length * 0.03) + supportBonus
+        if (reranked.length === evidence.word.length) score += 0.08
       } else {
-        score += evidence.score * 0.16
+        score += evidence.score * 0.18
       }
       const letterRatio = reranked.filter((token) => /^\p{L}$/u.test(token.char)).length / reranked.length
-      if (letterRatio >= 0.8) score += 0.08
+      if (letterRatio >= 0.8) score += 0.1
       const penLiftBodyCount = penLiftTextBodyClusters(source).length
       if (penLiftBodyCount >= 2 && reranked.length === penLiftBodyCount) {
         // Complete pen-lift bodies are independent segmentation evidence.
         // This prevents two quickly written, slightly touching letters from
         // collapsing into one broad glyph while leaving one-stroke cursive
         // words and tightly parallel integral signs unchanged.
-        score += 0.52
+        score += 0.56
+      }
+      // When the visual peak is weak overall, a coherent known word with
+      // shared baseline beats a higher-scoring but incoherent letter soup.
+      if (
+        averageConfidence < 62 &&
+        evidence.knownWord &&
+        evidence.word.length >= 3 &&
+        apostropheFragmentPenalty === 0 &&
+        letterRatio >= 0.9
+      ) {
+        score += 0.22
       }
     }
     return { tokens: reranked, score }

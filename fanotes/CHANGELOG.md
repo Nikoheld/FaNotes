@@ -2,6 +2,7 @@
 
 ## Unveröffentlicht
 
+- Die freie Einzel- und Mehrzeichenerkennung ist robuster: unsichere Glyphen behalten ein breiteres N-Best-Fenster für Wortkontext, stilunabhängige Stiftgeometrie löst enge Verwechslungen (z. B. e/c, o/0, l/1) ohne trainierte Klassen zu überschreiben, und bekannte Mehrbuchstabenwörter mit solider visueller Stütze gewinnen gegenüber inkohärenten Fragmenten.
 - Das Notizpapier wächst mit dem Inhalt statt einer festen A4-Höhe: lange Seiten wie Willkommen.md übermalen den dunklen Workspace nicht mehr unten schwarz. Kurze Notizen behalten die A4-Mindestgröße.
 
 ## 2026.8.4
