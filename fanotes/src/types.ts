@@ -179,6 +179,12 @@ export type QwenVisionState = {
   supported: boolean
   installed: boolean
   downloading: boolean
+  /** True while FaNotes auto-installs OpenVINO packages into its isolated venv. */
+  runtimeInstalling?: boolean
+  /** True when the isolated OpenVINO venv imports cleanly. */
+  runtimeReady?: boolean
+  runtimePhase?: 'idle' | 'preparing' | 'installing' | 'ready' | 'error' | string
+  runtimeMessage?: string | null
   npu: boolean
   genai: boolean
   devices: string[]
@@ -191,7 +197,7 @@ export type QwenVisionState = {
   homepage: string
   repo: string
   error: string | null
-  /** Optional pip/install command shown when OpenVINO runtime packages are missing. */
+  /** Optional pip/install command (legacy fallback; runtime auto-install is preferred). */
   installHint?: string | null
 }
 

@@ -1,5 +1,11 @@
 # Änderungsverlauf
 
+## 2026.8.8
+
+- **Zoom/Pan/Drehung im Stiftmodus:** Das gesamte Notizblatt (Hintergrundraster, Text und Handschrift) bewegt sich wieder als **eine Einheit**. Die obere Werkzeugleiste bleibt schmal und fix am Bildschirm (Portal außerhalb der Transform).
+- **Qwen3-VL OpenVINO-Laufzeit:** Beim „Lizenz akzeptieren & alles laden“ installiert FaNotes automatisch eine isolierte Python-Umgebung mit `openvino`, `openvino-genai` und `Pillow` (einmaliger Download), prüft danach die Intel-NPU und lädt erst dann das ~1,8&nbsp;GB INT4-Modell. Kein manuelles `pip install` mehr nötig.
+- Klarere Statusmeldungen und Fortschritt für Laufzeit- vs. Modell-Download in den Einstellungen.
+
 ## 2026.8.7
 
 - Neue **Hausaufgaben- & Termine**-Ansicht (Ribbon, Befehlspalette): To-dos und Termine mit Fach, Fälligkeit, Priorität und Erledigt-Status. Speicherung lokal im Vault als `Hausaufgaben.md` (Markdown mit strukturiertem JSON-Block).

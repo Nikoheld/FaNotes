@@ -355,6 +355,11 @@ export function SettingsModal({
     if (!window.fanotes.installQwenVisionModel) return
     setQwenVisionBusy(true)
     setQwenVisionError(null)
+    const poll = window.setInterval(() => {
+      void window.fanotes.getQwenVisionState?.()
+        .then((state) => setQwenVisionState(state))
+        .catch(() => {})
+    }, 1_200)
     try {
       const nextState = await window.fanotes.installQwenVisionModel({ acceptLicense: true })
       setQwenVisionState(nextState)
@@ -365,7 +370,14 @@ export function SettingsModal({
       })
     } catch (error) {
       setQwenVisionError(error instanceof Error ? error.message : 'Qwen3-VL konnte nicht installiert werden.')
+      try {
+        const latest = await window.fanotes.getQwenVisionState?.()
+        if (latest) setQwenVisionState(latest)
+      } catch {
+        // ignore refresh errors after failed install
+      }
     } finally {
+      window.clearInterval(poll)
       setQwenVisionBusy(false)
     }
   }
@@ -927,9 +939,9 @@ export function SettingsModal({
                   {!isWeb && <div id="settings-qwen-vision">
                     <SettingRow
                       title="Qwen3-VL Vision (Intel NPU)"
-                      description="Optionales lokales Vision-Modell für Handschrift. OpenVINO INT4, erzwungen auf der Intel-NPU (Core Ultra 9) für geringen Strom und hohe Effizienz. Nie beim Start geladen; jederzeit deaktivierbar."
+                      description="Optionales lokales Vision-Modell für Handschrift. OpenVINO INT4, erzwungen auf der Intel-NPU (Core Ultra). OpenVINO-Python-Pakete und das ~1,8 GB-Modell werden nach Lizenzbestätigung automatisch heruntergeladen; jederzeit deaktivierbar."
                     >
-                      {qwenVisionState?.installed ? (
+                      {qwenVisionState?.installed && qwenVisionState?.supported ? (
                         <Toggle
                           label="Qwen3-VL Vision"
                           checked={settings.qwenVisionRecognition}
@@ -939,18 +951,24 @@ export function SettingsModal({
                         <button
                           type="button"
                           className="settings-inline-button"
-                          disabled={qwenVisionBusy || qwenVisionState?.supported === false}
+                          disabled={qwenVisionBusy}
                           onClick={() => void installQwenVisionModel()}
                         >
                           {qwenVisionBusy ? <LoaderCircle className="spin" size={15} /> : <Download size={15} />}
-                          {qwenVisionBusy ? 'NPU-Modell wird geladen …' : 'Lizenz akzeptieren & NPU-Modell laden'}
+                          {qwenVisionBusy
+                            ? (qwenVisionState?.runtimeInstalling
+                              ? 'OpenVINO-Laufzeit wird geladen …'
+                              : 'NPU-Modell wird geladen …')
+                            : qwenVisionState?.installed
+                              ? 'OpenVINO-Laufzeit reparieren'
+                              : 'Lizenz akzeptieren & alles laden'}
                         </button>
                       )}
                     </SettingRow>
                     <div className="settings-resource-note">
                       <ShieldCheck size={14} />
                       <span>
-                        Qwen3-VL 2B · OpenVINO INT4 · nur Intel-NPU · Apache-2.0 · ~1,8&nbsp;GB optionaler Download · SHA-256-geprüft.
+                        Qwen3-VL 2B · OpenVINO INT4 · nur Intel-NPU · Apache-2.0 · OpenVINO-Pakete auto · Modell ~1,8&nbsp;GB · SHA-256-geprüft.
                         {' '}
                         <button type="button" className="settings-link-button" onClick={() => void window.fanotes.openExternal(qwenVisionState?.homepage ?? 'https://huggingface.co/Qwen/Qwen3-VL-2B-Instruct')}>Modellkarte</button>
                         {qwenVisionState?.supported && qwenVisionState?.npu && (
@@ -958,15 +976,19 @@ export function SettingsModal({
                             ? ` · NPU bereit · OpenVINO ${qwenVisionState.openvinoVersion}.`
                             : ' · NPU bereit.'
                         )}
+                        {qwenVisionState?.runtimeReady && !qwenVisionState?.supported && ' · OpenVINO installiert, NPU prüfen.'}
                       </span>
                     </div>
-                    {qwenVisionState?.supported === false && qwenVisionState?.error && (
+                    {(qwenVisionBusy || qwenVisionState?.runtimeInstalling) && qwenVisionState?.runtimeMessage && (
+                      <div className="settings-resource-note" role="status">
+                        <LoaderCircle className="spin" size={14} />
+                        <span>{qwenVisionState.runtimeMessage}</span>
+                      </div>
+                    )}
+                    {qwenVisionState?.supported === false && qwenVisionState?.error && !qwenVisionBusy && (
                       <div className="settings-inline-error" role="status">
-                        <strong>Laufzeit nicht bereit</strong>
+                        <strong>Laufzeit / Hardware</strong>
                         <span>{qwenVisionState.error}</span>
-                        {qwenVisionState.installHint && (
-                          <code className="settings-inline-code">{qwenVisionState.installHint}</code>
-                        )}
                       </div>
                     )}
                     {qwenVisionError && <div className="settings-inline-error">{qwenVisionError}</div>}

@@ -56,7 +56,14 @@ const MAX_IMAGE_BYTES = 6 * 1024 * 1024
 const MAX_OUTPUT_CHARS = 4_000
 const DOWNLOAD_TIMEOUT_MS = 30 * 60_000
 const WORKER_TIMEOUT_MS = 90_000
+const RUNTIME_INSTALL_TIMEOUT_MS = 45 * 60_000
 const HF_BASE = 'https://huggingface.co'
+/** Packages installed into an isolated FaNotes venv for Qwen3-VL. */
+const RUNTIME_PIP_PACKAGES = Object.freeze([
+  'openvino>=2024.4,<2026',
+  'openvino-genai>=2024.4,<2026',
+  'pillow>=10.0.0,<12',
+])
 
 const hashFile = (filename) => new Promise((resolve, reject) => {
   const hash = crypto.createHash('sha256')
@@ -141,16 +148,73 @@ function createQwenVisionService({
   const descriptor = Object.freeze({ ...model, files: [...model.files] })
   const modelDirectory = path.join(userDataPath, 'models', 'qwen-vision', descriptor.id)
   const runtimeDirectory = path.join(userDataPath, 'models', 'qwen-vision', 'runtime')
+  const venvDirectory = path.join(runtimeDirectory, 'python-env')
+  const venvPythonPath = process.platform === 'win32'
+    ? path.join(venvDirectory, 'Scripts', 'python.exe')
+    : path.join(venvDirectory, 'bin', 'python')
   const materializedWorkerPath = path.join(runtimeDirectory, 'qwen-vision-worker.py')
   const integrityPath = path.join(modelDirectory, '.fanotes-integrity.json')
+  const runtimeMarkerPath = path.join(venvDirectory, '.fanotes-openvino-runtime.json')
   let downloadPromise = null
   let recognitionActive = false
   let cachedProbe = null
   let cachedProbeAt = 0
   let resolvedPython = null
+  let runtimeInstallPromise = null
+  let runtimePhase = 'idle' // idle | preparing | installing | ready | error
+  let runtimeMessage = null
 
   const fileUrl = (relativePath) => (
     `${HF_BASE}/${descriptor.repo}/resolve/${encodeURIComponent(descriptor.revision)}/${relativePath.split('/').map(encodeURIComponent).join('/')}`
+  )
+
+  const runProcess = (command, args, { timeoutMs = RUNTIME_INSTALL_TIMEOUT_MS, cwd = runtimeDirectory } = {}) => (
+    new Promise((resolve, reject) => {
+      const child = spawnImpl(command, args, {
+        cwd,
+        env: {
+          ...process.env,
+          PATH: process.env.PATH || (process.platform === 'win32'
+            ? 'C:\\Windows\\System32;C:\\Windows'
+            : '/usr/local/bin:/usr/bin:/bin'),
+          PYTHONUTF8: '1',
+          PYTHONUNBUFFERED: '1',
+          PIP_DISABLE_PIP_VERSION_CHECK: '1',
+        },
+        stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true,
+      })
+      let stdout = ''
+      let stderr = ''
+      const timer = setTimeout(() => {
+        child.kill('SIGKILL')
+        reject(new Error(`Zeitlimit überschritten: ${path.basename(command)} ${args.slice(0, 3).join(' ')}`))
+      }, timeoutMs)
+      timer.unref?.()
+      child.stdout.setEncoding('utf8')
+      child.stderr.setEncoding('utf8')
+      child.stdout.on('data', (chunk) => {
+        stdout += chunk
+        if (stdout.length > 500_000) stdout = stdout.slice(-250_000)
+      })
+      child.stderr.on('data', (chunk) => {
+        stderr += chunk
+        if (stderr.length > 500_000) stderr = stderr.slice(-250_000)
+      })
+      child.once('error', (error) => {
+        clearTimeout(timer)
+        reject(error)
+      })
+      child.once('close', (code) => {
+        clearTimeout(timer)
+        if (code === 0) {
+          resolve({ stdout, stderr })
+          return
+        }
+        const detail = (stderr || stdout).trim().split(/\r?\n/u).filter(Boolean).slice(-8).join(' · ')
+        reject(new Error(detail || `${path.basename(command)} beendete mit Code ${code ?? '?'}.`))
+      })
+    })
   )
 
   /**
@@ -189,32 +253,24 @@ function createQwenVisionService({
     return materializedWorkerPath
   }
 
-  const resolvePythonExecutable = async () => {
-    if (resolvedPython && fs.existsSync(resolvedPython)) return resolvedPython
+  const resolveBootstrapPython = async () => {
     const errors = []
     for (const candidate of pythonSearchPaths()) {
       try {
         if (path.isAbsolute(candidate)) {
-          // Follow symlinks (python3 -> python3.12). Reject only directories.
           const info = await fsp.stat(candidate)
           if (!info.isFile()) {
             errors.push(`${candidate}: keine ausführbare Datei`)
             continue
           }
-          // Basic execute-bit check on POSIX; Windows has no useful mode bits here.
           if (process.platform !== 'win32' && (info.mode & 0o111) === 0) {
             errors.push(`${candidate}: nicht ausführbar`)
             continue
           }
-          resolvedPython = candidate
           return candidate
         }
         const lookedUp = await lookUpCommand(candidate, spawnImpl)
-        if (lookedUp && fs.existsSync(lookedUp)) {
-          // On Windows, `where` may return a Store stub; still try it.
-          resolvedPython = lookedUp
-          return lookedUp
-        }
+        if (lookedUp && fs.existsSync(lookedUp)) return lookedUp
         errors.push(`${candidate}: nicht gefunden`)
       } catch (error) {
         errors.push(`${candidate}: ${error instanceof Error ? error.message : String(error)}`)
@@ -222,8 +278,110 @@ function createQwenVisionService({
     }
     throw new Error(
       `Kein Python gefunden (${errors.slice(0, 4).join(' · ')}). `
-      + 'Installiere Python 3 und setze optional FANOTES_PYTHON auf den absoluten Interpreter-Pfad.',
+      + 'Installiere Python 3.10–3.12 (empfohlen) und setze optional FANOTES_PYTHON.',
     )
+  }
+
+  const venvHasRuntimePackages = async () => {
+    if (!fs.existsSync(venvPythonPath)) return false
+    try {
+      const marker = JSON.parse(await fsp.readFile(runtimeMarkerPath, 'utf8'))
+      if (marker?.version !== 1 || !Array.isArray(marker.packages)) return false
+      // Cheap import check in the venv.
+      await runProcess(venvPythonPath, [
+        '-c',
+        'import openvino, openvino_genai, PIL; print(openvino.__version__)',
+      ], { timeoutMs: 60_000 })
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  const ensureOpenVinoRuntime = async () => {
+    if (runtimeInstallPromise) return runtimeInstallPromise
+    runtimeInstallPromise = (async () => {
+      runtimePhase = 'preparing'
+      runtimeMessage = 'Python-Umgebung für OpenVINO wird vorbereitet …'
+      await fsp.mkdir(runtimeDirectory, { recursive: true, mode: 0o700 })
+      if (await venvHasRuntimePackages()) {
+        resolvedPython = venvPythonPath
+        runtimePhase = 'ready'
+        runtimeMessage = null
+        cachedProbe = null
+        return
+      }
+
+      const bootstrap = await resolveBootstrapPython()
+      runtimePhase = 'preparing'
+      runtimeMessage = 'Isolierte Python-Umgebung wird angelegt …'
+      // Recreate venv if python binary missing or broken.
+      if (!fs.existsSync(venvPythonPath)) {
+        await fsp.rm(venvDirectory, { recursive: true, force: true }).catch(() => {})
+        await runProcess(bootstrap, ['-m', 'venv', venvDirectory], { timeoutMs: 120_000 })
+      }
+      if (!fs.existsSync(venvPythonPath)) {
+        throw new Error('Die FaNotes-Python-Umgebung für OpenVINO konnte nicht erzeugt werden.')
+      }
+
+      runtimePhase = 'installing'
+      runtimeMessage = 'OpenVINO, OpenVINO GenAI und Pillow werden heruntergeladen (einmalig, mehrere 100 MB) …'
+      // Ensure pip exists inside the venv.
+      await runProcess(venvPythonPath, ['-m', 'ensurepip', '--upgrade'], { timeoutMs: 120_000 }).catch(() => {})
+      await runProcess(venvPythonPath, ['-m', 'pip', 'install', '--upgrade', 'pip', 'setuptools', 'wheel'], {
+        timeoutMs: 300_000,
+      })
+      await runProcess(venvPythonPath, [
+        '-m', 'pip', 'install',
+        '--upgrade',
+        '--prefer-binary',
+        ...RUNTIME_PIP_PACKAGES,
+      ], { timeoutMs: RUNTIME_INSTALL_TIMEOUT_MS })
+
+      // Verify imports after install.
+      const check = await runProcess(venvPythonPath, [
+        '-c',
+        'import openvino, openvino_genai, PIL; print(openvino.__version__)',
+      ], { timeoutMs: 90_000 })
+      const openvinoVersion = (check.stdout || '').trim().split(/\r?\n/u).filter(Boolean).at(-1) || 'unknown'
+      const marker = {
+        version: 1,
+        installedAt: new Date().toISOString(),
+        openvinoVersion,
+        packages: [...RUNTIME_PIP_PACKAGES],
+      }
+      const temporary = `${runtimeMarkerPath}.${process.pid}.tmp`
+      await fsp.writeFile(temporary, `${JSON.stringify(marker, null, 2)}\n`, { mode: 0o600 })
+      await fsp.rename(temporary, runtimeMarkerPath)
+
+      resolvedPython = venvPythonPath
+      runtimePhase = 'ready'
+      runtimeMessage = null
+      cachedProbe = null
+      cachedProbeAt = 0
+    })().catch((error) => {
+      runtimePhase = 'error'
+      runtimeMessage = error instanceof Error ? error.message : String(error)
+      throw new Error(
+        `OpenVINO-Laufzeit konnte nicht installiert werden: ${runtimeMessage}. `
+        + 'Benötigt Python 3.10–3.12 und Internetzugang für den einmaligen Paket-Download.',
+      )
+    }).finally(() => {
+      runtimeInstallPromise = null
+    })
+    return runtimeInstallPromise
+  }
+
+  const resolvePythonExecutable = async () => {
+    // Prefer the isolated FaNotes venv once OpenVINO packages are present.
+    if (fs.existsSync(venvPythonPath) && await venvHasRuntimePackages()) {
+      resolvedPython = venvPythonPath
+      return venvPythonPath
+    }
+    if (resolvedPython && fs.existsSync(resolvedPython)) return resolvedPython
+    const bootstrap = await resolveBootstrapPython()
+    resolvedPython = bootstrap
+    return bootstrap
   }
 
   const runWorker = async (payload, timeoutMs = WORKER_TIMEOUT_MS) => {
@@ -392,12 +550,32 @@ function createQwenVisionService({
   const state = async () => {
     const runtime = await probe()
     const installed = await verifyInstalled()
+    const runtimeReady = await venvHasRuntimePackages()
     const supported = Boolean(runtime.ok && runtime.npu && runtime.genai)
-    const error = supported ? null : explainRuntimeError(runtime)
+    const installingRuntime = runtimePhase === 'preparing' || runtimePhase === 'installing' || Boolean(runtimeInstallPromise)
+    let error = null
+    if (installingRuntime) {
+      error = runtimeMessage || 'OpenVINO-Laufzeit wird installiert …'
+    } else if (!supported) {
+      error = explainRuntimeError(runtime)
+      if (!runtimeReady && runtimePhase !== 'error') {
+        error = (
+          'OpenVINO-Laufzeit noch nicht installiert. '
+          + 'FaNotes lädt openvino, openvino-genai und Pillow automatisch, sobald du die Lizenz bestätigst und herunterlädst.'
+        )
+      }
+      if (runtimePhase === 'error' && runtimeMessage) {
+        error = `OpenVINO-Laufzeitfehler: ${runtimeMessage}`
+      }
+    }
     return {
       supported,
       installed,
-      downloading: Boolean(downloadPromise),
+      downloading: Boolean(downloadPromise) && !installingRuntime,
+      runtimeInstalling: installingRuntime,
+      runtimeReady,
+      runtimePhase,
+      runtimeMessage,
       npu: Boolean(runtime.npu),
       genai: Boolean(runtime.genai),
       devices: runtime.devices,
@@ -410,9 +588,7 @@ function createQwenVisionService({
       homepage: descriptor.homepage,
       repo: descriptor.repo,
       error,
-      installHint: process.platform === 'win32'
-        ? 'py -3 -m pip install --user "openvino>=2024.4" "openvino-genai>=2024.4" pillow'
-        : 'python3 -m pip install --user "openvino>=2024.4" "openvino-genai>=2024.4" pillow',
+      installHint: null,
     }
   }
 
@@ -464,17 +640,29 @@ function createQwenVisionService({
     if (request?.acceptLicense !== true) {
       throw new Error('Die Modelllizenz muss vor dem Download ausdrücklich bestätigt werden.')
     }
-    const runtime = await probe(true)
-    if (!runtime.ok || !runtime.npu) {
-      throw new Error(runtime.error || 'Intel-NPU erforderlich. Qwen3-VL ist NPU-only für geringen Stromverbrauch.')
-    }
-    if (!runtime.genai) {
-      throw new Error('OpenVINO GenAI fehlt. Installiere openvino-genai (Python) für die NPU-Inferenz.')
-    }
-    if (await verifyInstalled()) return state()
     if (downloadPromise) return downloadPromise
 
     downloadPromise = (async () => {
+      // 1) Auto-download OpenVINO Python runtime into an isolated FaNotes venv.
+      await ensureOpenVinoRuntime()
+      // 2) Probe NPU with the freshly prepared environment.
+      const runtime = await probe(true)
+      if (!runtime.ok || !runtime.npu) {
+        throw new Error(
+          runtime.error
+          || 'Intel-NPU erforderlich. Qwen3-VL ist NPU-only für geringen Stromverbrauch (Core Ultra + NPU-Treiber).',
+        )
+      }
+      if (!runtime.genai) {
+        throw new Error(
+          runtime.error
+          || 'OpenVINO GenAI ist nach der Laufzeit-Installation nicht nutzbar. Bitte erneut versuchen.',
+        )
+      }
+      // 3) Download model weights if needed.
+      if (await verifyInstalled()) return state()
+      runtimePhase = 'ready'
+      runtimeMessage = 'Qwen3-VL-Modell wird heruntergeladen …'
       await fsp.mkdir(modelDirectory, { recursive: true, mode: 0o700 })
       const files = {}
       for (const relativePath of descriptor.files) {
@@ -497,6 +685,7 @@ function createQwenVisionService({
       if (!(await verifyInstalled())) {
         throw new Error('Qwen3-VL-Installation unvollständig nach Download.')
       }
+      runtimeMessage = null
       return state()
     })().finally(() => { downloadPromise = null })
 
