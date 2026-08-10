@@ -828,7 +828,9 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .settings-inline-button:hover:not(:disabled) { border-color: color-mix(in srgb, var(--accent) 58%, var(--border)); background: color-mix(in srgb, var(--accent) 16%, var(--bg-elevated)); }
 .settings-inline-button:disabled { opacity: .55; cursor: not-allowed; }
 .settings-link-button { display: inline; margin: 0; padding: 0; border: 0; color: var(--accent-readable); background: transparent; font: inherit; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
-.settings-inline-error { padding: 8px 15px; border-top: 1px solid color-mix(in srgb, #f16d78 28%, var(--border)); color: color-mix(in srgb, #f16d78 78%, var(--text)); background: color-mix(in srgb, #f16d78 7%, transparent); font-size: 9px; line-height: 1.45; }
+.settings-inline-error { display: grid; gap: 5px; padding: 8px 15px; border-top: 1px solid color-mix(in srgb, #f16d78 28%, var(--border)); color: color-mix(in srgb, #f16d78 78%, var(--text)); background: color-mix(in srgb, #f16d78 7%, transparent); font-size: 9px; line-height: 1.45; }
+.settings-inline-error strong { color: color-mix(in srgb, #f16d78 92%, var(--text)); font-size: 10px; font-weight: 700; }
+.settings-inline-code { display: block; overflow-x: auto; padding: 6px 8px; border: 1px solid color-mix(in srgb, #f16d78 22%, var(--border)); border-radius: 7px; color: var(--text-soft); background: color-mix(in srgb, var(--bg) 70%, transparent); font: 500 9px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre; user-select: all; }
 .toggle { width: 36px; height: 20px; padding: 2px; border: 0; border-radius: 99px; background: color-mix(in srgb, var(--text-muted) 27%, transparent); cursor: pointer; transition: background .16s; }
 .toggle span { display: block; width: 16px; height: 16px; border-radius: 50%; background: #f8f8fb; box-shadow: 0 2px 5px rgba(0,0,0,.2); transition: transform .16s; }
 .toggle.is-on { background: var(--accent); }

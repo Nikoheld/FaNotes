@@ -240,7 +240,8 @@ function createQwenVisionService({
             PATH: process.env.PATH || (process.platform === 'win32'
               ? 'C:\\Windows\\System32;C:\\Windows'
               : '/usr/local/bin:/usr/bin:/bin'),
-            PYTHONNOUSERSITE: '1',
+            // Allow user-site OpenVINO installs (`pip install --user openvino …`).
+            // Do not force PYTHONNOUSERSITE=1 — that hid intentionally installed packages.
             PYTHONUTF8: '1',
             PYTHONUNBUFFERED: '1',
             // Keep OpenVINO plugins from silently preferring CPU.
@@ -361,21 +362,38 @@ function createQwenVisionService({
     return true
   }
 
+  const explainRuntimeError = (runtime) => {
+    const raw = typeof runtime?.error === 'string' ? runtime.error : ''
+    const missingOpenvino = /No module named ['"]openvino['"]|OpenVINO ist nicht verfügbar/iu.test(raw)
+    const missingGenai = /No module named ['"]openvino_genai['"]|openvino-genai fehlt|GenAI/iu.test(raw)
+    const installHint = process.platform === 'win32'
+      ? 'Im Terminal: py -3 -m pip install --user "openvino>=2024.4" "openvino-genai>=2024.4" pillow'
+      : 'Im Terminal: python3 -m pip install --user "openvino>=2024.4" "openvino-genai>=2024.4" pillow'
+    if (missingOpenvino || (raw && !runtime.ok && !runtime.genai && !runtime.npu && /openvino/iu.test(raw))) {
+      return (
+        'OpenVINO fehlt in deinem Python. Qwen3-VL braucht die Pakete openvino und openvino-genai '
+        + `(plus Pillow) für denselben Interpreter, den FaNotes nutzt. ${installHint}. `
+        + 'Optional: FANOTES_PYTHON auf diesen Interpreter setzen. Danach Einstellungen neu öffnen.'
+      )
+    }
+    if (missingGenai || (runtime.ok && runtime.npu && !runtime.genai)) {
+      return (
+        'OpenVINO GenAI fehlt. Installiere openvino-genai für Python 3 '
+        + `(${installHint}). Danach Einstellungen neu öffnen.`
+      )
+    }
+    if (raw) return raw
+    if (!runtime.npu) {
+      return 'Keine Intel-NPU erkannt. Qwen3-VL läuft in FaNotes nur auf der NPU (Core Ultra) – mit aktuellem NPU-Treiber.'
+    }
+    return 'Qwen3-VL-Laufzeit nicht bereit.'
+  }
+
   const state = async () => {
     const runtime = await probe()
     const installed = await verifyInstalled()
     const supported = Boolean(runtime.ok && runtime.npu && runtime.genai)
-    let error = null
-    if (!supported) {
-      if (runtime.error) error = runtime.error
-      else if (!runtime.npu) {
-        error = 'Keine Intel-NPU erkannt. Qwen3-VL läuft in FaNotes nur auf der NPU (Core Ultra).'
-      } else if (!runtime.genai) {
-        error = 'OpenVINO GenAI fehlt. Installiere openvino und openvino-genai für Python 3.'
-      } else {
-        error = 'Qwen3-VL-Laufzeit nicht bereit.'
-      }
-    }
+    const error = supported ? null : explainRuntimeError(runtime)
     return {
       supported,
       installed,
@@ -392,6 +410,9 @@ function createQwenVisionService({
       homepage: descriptor.homepage,
       repo: descriptor.repo,
       error,
+      installHint: process.platform === 'win32'
+        ? 'py -3 -m pip install --user "openvino>=2024.4" "openvino-genai>=2024.4" pillow'
+        : 'python3 -m pip install --user "openvino>=2024.4" "openvino-genai>=2024.4" pillow',
     }
   }
 

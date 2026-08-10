@@ -191,6 +191,8 @@ export type QwenVisionState = {
   homepage: string
   repo: string
   error: string | null
+  /** Optional pip/install command shown when OpenVINO runtime packages are missing. */
+  installHint?: string | null
 }
 
 export type BootstrapData = {

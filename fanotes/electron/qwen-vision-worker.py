@@ -23,11 +23,22 @@ def probe() -> dict:
     try:
         from openvino import Core  # type: ignore
     except Exception as error:  # noqa: BLE001
+        detail = str(error).strip() or error.__class__.__name__
+        hint = (
+            "Installiere OpenVINO für denselben Python-Interpreter: "
+            'python3 -m pip install --user "openvino>=2024.4" "openvino-genai>=2024.4" pillow'
+        )
+        if sys.platform.startswith("win"):
+            hint = (
+                "Installiere OpenVINO für denselben Python-Interpreter: "
+                'py -3 -m pip install --user "openvino>=2024.4" "openvino-genai>=2024.4" pillow'
+            )
         return {
             "ok": False,
-            "error": f"OpenVINO ist nicht verfügbar: {error}",
+            "error": f"OpenVINO ist nicht verfügbar ({detail}). {hint}",
             "devices": [],
             "npu": False,
+            "genai": False,
         }
     try:
         core = Core()
@@ -38,13 +49,29 @@ def probe() -> dict:
             "error": f"OpenVINO-Geräte konnten nicht gelesen werden: {error}",
             "devices": [],
             "npu": False,
+            "genai": False,
         }
     has_npu = any(device.upper().startswith("NPU") for device in devices)
     try:
         import openvino_genai  # type: ignore  # noqa: F401
         genai = True
-    except Exception:
-        genai = False
+    except Exception as genai_error:  # noqa: BLE001
+        return {
+            "ok": True,
+            "devices": devices,
+            "npu": has_npu,
+            "genai": False,
+            "openvinoVersion": getattr(__import__("openvino"), "__version__", "unknown"),
+            "error": (
+                "openvino-genai fehlt "
+                f"({genai_error}). Installiere: "
+                + (
+                    'py -3 -m pip install --user "openvino-genai>=2024.4"'
+                    if sys.platform.startswith("win")
+                    else 'python3 -m pip install --user "openvino-genai>=2024.4"'
+                )
+            ),
+        }
     return {
         "ok": True,
         "devices": devices,
