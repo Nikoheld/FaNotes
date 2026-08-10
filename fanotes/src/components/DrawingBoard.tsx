@@ -122,7 +122,16 @@ const loadRecognitionModule = async () => {
 const SOURCE_WIDTH = 900
 const SOURCE_HEIGHT = 1273
 const EXPORT_SCALE = 2
-const MAX_DPR = 3
+/** Cap for window.devicePixelRatio contribution. */
+const MAX_DPR = 4
+/**
+ * When the paper is CSS-zoomed, the bitmap is stretched. Supersample up to this
+ * view-zoom factor so ink stays sharp when zooming in (without unbounded RAM).
+ */
+const MAX_VIEW_QUALITY_ZOOM = 2.6
+const MIN_INLINE_QUALITY = 1.35
+const MAX_CANVAS_EDGE = 6_144
+const MAX_CANVAS_PIXELS = 18_000_000
 const VIEW_ZOOM_MIN = 0.45
 const VIEW_ZOOM_MAX = 3.25
 const VIEW_ZOOM_STEP = 0.12
@@ -132,6 +141,31 @@ const clampViewZoom = (value: number) => Math.min(VIEW_ZOOM_MAX, Math.max(VIEW_Z
 const normalizeRotation = (value: number) => {
   const wrapped = ((value % 360) + 360) % 360
   return wrapped > 180 ? wrapped - 360 : wrapped
+}
+
+/** Backing-store size for the ink canvases. Higher when zoomed in so CSS scale stays sharp. */
+const computeInkPixelSize = (layoutWidth: number, layoutHeight: number, viewZoom: number, inlineMode: boolean) => {
+  const screenDpr = Math.min(Math.max(window.devicePixelRatio || 1, 1), MAX_DPR)
+  const zoomBoost = Math.max(1, Math.min(MAX_VIEW_QUALITY_ZOOM, viewZoom > 1.02 ? viewZoom : 1))
+  const baseBoost = inlineMode ? MIN_INLINE_QUALITY : 1
+  let scale = screenDpr * baseBoost * zoomBoost
+  let width = Math.max(1, Math.round(layoutWidth * scale))
+  let height = Math.max(1, Math.round(layoutHeight * scale))
+  const edge = Math.max(width, height)
+  if (edge > MAX_CANVAS_EDGE) {
+    const factor = MAX_CANVAS_EDGE / edge
+    width = Math.max(1, Math.round(width * factor))
+    height = Math.max(1, Math.round(height * factor))
+    scale *= factor
+  }
+  const pixels = width * height
+  if (pixels > MAX_CANVAS_PIXELS) {
+    const factor = Math.sqrt(MAX_CANVAS_PIXELS / pixels)
+    width = Math.max(1, Math.round(width * factor))
+    height = Math.max(1, Math.round(height * factor))
+    scale *= factor
+  }
+  return { width, height, scale }
 }
 
 const releasePointerCaptureSafe = (target: EventTarget | null, pointerId: number) => {
@@ -969,6 +1003,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const committedCanvasKeyRef = useRef('')
   const committedCanvasDirtyRef = useRef(true)
   const canvasPixelSizeRef = useRef({ width: 0, height: 0 })
+  const canvasQualityKeyRef = useRef('')
   const pointerBoundsRef = useRef<{ left: number; top: number; width: number; height: number } | null>(null)
   const viewZoomRef = useRef(1)
   const viewRotationRef = useRef(0)
@@ -1237,17 +1272,31 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       if (surface.style.width !== cssWidth) surface.style.width = cssWidth
       if (surface.style.height !== cssHeight) surface.style.height = cssHeight
     }
-    if (measureLayout || !canvasPixelSizeRef.current.width) {
-      // Use layout size (offset*), not getBoundingClientRect, so CSS zoom/rotation
-      // of the sheet does not resize the backing bitmap mid-stroke.
-      const layoutWidth = surface.offsetWidth || surface.clientWidth
-      const layoutHeight = surface.offsetHeight || surface.clientHeight
-      if (layoutWidth <= 0 || layoutHeight <= 0) return
-      const dpr = Math.min(window.devicePixelRatio || 1, MAX_DPR)
-      canvasPixelSizeRef.current = {
-        width: Math.max(1, Math.round(layoutWidth * dpr)),
-        height: Math.max(1, Math.round(layoutHeight * dpr)),
-      }
+    // Use layout size (offset*), not getBoundingClientRect: CSS zoom/rotation of the
+    // sheet must not change coordinate space mid-stroke. Quality is increased by a
+    // denser backing store that tracks view zoom instead.
+    const layoutWidth = surface.offsetWidth || surface.clientWidth
+    const layoutHeight = surface.offsetHeight || surface.clientHeight
+    if (layoutWidth <= 0 || layoutHeight <= 0) return
+    const qualityKey = [
+      Math.round(layoutWidth),
+      Math.round(layoutHeight),
+      viewZoomRef.current.toFixed(2),
+      (window.devicePixelRatio || 1).toFixed(2),
+      inline ? 'i' : 'f',
+    ].join(':')
+    const shouldRemeasure = measureLayout
+      || !canvasPixelSizeRef.current.width
+      || canvasQualityKeyRef.current !== qualityKey
+    if (shouldRemeasure && !activeStrokeRef.current) {
+      const nextSize = computeInkPixelSize(layoutWidth, layoutHeight, viewZoomRef.current, inline)
+      canvasPixelSizeRef.current = { width: nextSize.width, height: nextSize.height }
+      canvasQualityKeyRef.current = qualityKey
+      committedCanvasDirtyRef.current = true
+    } else if (!canvasPixelSizeRef.current.width) {
+      const nextSize = computeInkPixelSize(layoutWidth, layoutHeight, viewZoomRef.current, inline)
+      canvasPixelSizeRef.current = { width: nextSize.width, height: nextSize.height }
+      canvasQualityKeyRef.current = qualityKey
     }
     const { width: pixelWidth, height: pixelHeight } = canvasPixelSizeRef.current
     if (!pixelWidth || !pixelHeight) return
@@ -1268,8 +1317,10 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       committedCanvasDirtyRef.current = false
     }
 
-    const context = canvas.getContext('2d')
+    const context = canvas.getContext('2d', { alpha: true })
     if (!context) return
+    context.imageSmoothingEnabled = true
+    context.imageSmoothingQuality = 'high'
     context.setTransform(1, 0, 0, 1, 0, 0)
     const activeStroke = activeStrokeRef.current
     if (!activeStroke) {
@@ -1562,6 +1613,18 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       clearViewTransformTargets()
     }
   }, [applyViewTransform, clearViewTransformTargets, viewPan, viewRotation, viewZoom])
+
+  // Re-rasterize ink at higher backing-store resolution after zoom settles so
+  // zoomed handwriting stays sharp instead of a stretched low-res bitmap.
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      if (activeStrokeRef.current) return
+      canvasQualityKeyRef.current = ''
+      committedCanvasDirtyRef.current = true
+      redraw(true)
+    }, 90)
+    return () => window.clearTimeout(timer)
+  }, [redraw, viewZoom])
 
   useEffect(() => {
     if (inline && !inputActive) {
@@ -2102,6 +2165,13 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     }
     activeStrokeRef.current = null
     endInteraction()
+    // If zoom changed during the stroke, upgrade the backing store once the pen lifts.
+    queueMicrotask(() => {
+      if (activeStrokeRef.current) return
+      canvasQualityKeyRef.current = ''
+      committedCanvasDirtyRef.current = true
+      redraw(true)
+    })
     if (gestureChangedRef.current) {
       undoRef.current.push(beforeGestureRef.current)
       if (undoRef.current.length > 80) undoRef.current.shift()
@@ -2125,7 +2195,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       }
     }
     scheduleRedraw()
-  }, [analyzeMathCorrectionSelection, appendPointerEvent, bumpInkRevision, commitPendingSolverTap, commitStrokeToCanvas, inkMode, mathSolverEnabled, mode, openMathSolverAtPoint, pointFromEvent, scheduleRedraw, selectionPurpose, setDirty, settings.scribbleEraseSensitivity, sourceHeight, updateHistoryState])
+  }, [analyzeMathCorrectionSelection, appendPointerEvent, bumpInkRevision, commitPendingSolverTap, commitStrokeToCanvas, inkMode, mathSolverEnabled, mode, openMathSolverAtPoint, pointFromEvent, redraw, scheduleRedraw, selectionPurpose, setDirty, settings.scribbleEraseSensitivity, sourceHeight, updateHistoryState])
 
   // Global safety net: if pointerup/cancel never reaches the canvas (common with
   // tablets under Hyprland/Wayland), still release capture and restore input.
@@ -4167,7 +4237,7 @@ const drawingBoardStyles = `
 .lw-art-studio{position:relative;z-index:13;flex:0 0 auto;margin:10px 14px 0;padding:11px;border:1px solid color-mix(in srgb,var(--draw-accent) 36%,var(--draw-border));border-radius:16px;background:linear-gradient(145deg,color-mix(in srgb,var(--background-secondary,#19191f) 96%,var(--draw-accent) 4%),color-mix(in srgb,var(--background,#111116) 94%,transparent));box-shadow:0 22px 65px rgba(0,0,0,.24),inset 0 1px rgba(255,255,255,.035);animation:lw-art-studio-in .24s cubic-bezier(.2,.8,.2,1)}.lw-art-studio>header{display:flex;align-items:center;gap:8px;margin-bottom:9px}.lw-art-studio>header>span{width:29px;height:29px;display:grid;place-items:center;border-radius:9px;color:var(--on-accent,#111);background:var(--draw-accent)}.lw-art-studio>header>div{display:flex;min-width:0;flex:1;flex-direction:column}.lw-art-studio>header strong{font-size:11px}.lw-art-studio>header small{color:var(--text-muted,#999);font-size:8px}.lw-art-studio-body{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr) minmax(160px,.64fr);gap:10px}.lw-art-studio-body>section{min-width:0;padding:9px;border:1px solid var(--draw-border);border-radius:12px;background:color-mix(in srgb,var(--background,#111116) 43%,transparent)}.lw-art-section-head{height:23px;display:flex;align-items:flex-start;justify-content:space-between;gap:8px}.lw-art-section-head strong{font-size:9px}.lw-art-section-head span{overflow:hidden;color:var(--text-muted,#999);font-size:7px;text-overflow:ellipsis;white-space:nowrap}.lw-art-brushes{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px}.lw-art-brushes>button{min-width:0;height:49px;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:3px;padding:3px;border:1px solid transparent;border-radius:8px;color:var(--text-muted,#999);background:transparent;cursor:pointer}.lw-art-brushes>button:hover{background:color-mix(in srgb,var(--text,#fff) 6%,transparent)}.lw-art-brushes>button.is-active{border-color:color-mix(in srgb,var(--draw-accent) 48%,var(--draw-border));color:var(--text,#fff);background:color-mix(in srgb,var(--draw-accent) 12%,transparent)}.lw-art-brushes small{max-width:100%;overflow:hidden;font-size:7px;text-overflow:ellipsis;white-space:nowrap}.lw-art-brush-preview{position:relative;width:42px;height:16px;display:grid;place-items:center;overflow:hidden}.lw-art-brush-preview i{display:block;width:37px;height:3px;border-radius:99px;background:currentColor;transform:rotate(-5deg)}.lw-art-brush-preview.is-fineliner i{height:2px}.lw-art-brush-preview.is-pencil i{height:2px;opacity:.65;background:repeating-linear-gradient(90deg,currentColor 0 3px,transparent 3px 4px)}.lw-art-brush-preview.is-marker i{height:6px;border-radius:2px;opacity:.88}.lw-art-brush-preview.is-paintbrush i{height:7px;border-radius:90% 15% 80% 20%;transform:rotate(-5deg) scaleX(1.02)}.lw-art-brush-preview.is-calligraphy i{height:7px;border-radius:1px;transform:rotate(-5deg) skewX(-28deg)}.lw-art-brush-preview.is-highlighter i{height:9px;border-radius:2px;opacity:.35}.lw-art-brush-preview.is-watercolor i{height:10px;opacity:.28;filter:blur(.45px);box-shadow:0 -2px currentColor,0 2px currentColor}.lw-art-brush-preview.is-spray i{height:13px;opacity:.75;background:radial-gradient(circle,currentColor 0 1px,transparent 1.3px) 0 0/5px 5px;transform:rotate(-5deg)}
 .lw-art-solid-colors{display:flex;flex-wrap:wrap;gap:5px}.lw-art-solid-colors>button,.lw-art-custom-color{position:relative;width:20px;height:20px;flex:0 0 auto;border:2px solid color-mix(in srgb,var(--text,#fff) 8%,transparent);border-radius:7px;background:var(--art-ink);cursor:pointer}.lw-art-solid-colors>button.is-active{border-color:var(--text,#fff);box-shadow:0 0 0 2px color-mix(in srgb,var(--art-ink) 40%,transparent)}.lw-art-custom-color{display:block;overflow:hidden;background:conic-gradient(#e45,#fb3,#5d7,#4ce,#65f,#d5e,#e45)}.lw-art-custom-color input{position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer}.lw-art-custom-color span{position:absolute;inset:5px;border-radius:3px}.lw-art-special-inks{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px;margin-top:7px}.lw-art-special-inks>button{height:34px;display:flex;min-width:0;align-items:stretch;justify-content:center;flex-direction:column;gap:2px;padding:3px 4px;border:1px solid var(--draw-border);border-radius:7px;color:var(--text-muted,#999);background:transparent;cursor:pointer}.lw-art-special-inks>button:hover{background:color-mix(in srgb,var(--text,#fff) 5%,transparent)}.lw-art-special-inks>button.is-active{border-color:color-mix(in srgb,var(--draw-accent) 60%,var(--draw-border));color:var(--text,#fff);background:color-mix(in srgb,var(--draw-accent) 9%,transparent)}.lw-art-special-inks i{width:100%;height:12px;flex:0 0 auto;border-radius:4px;background:var(--art-ink);box-shadow:inset 0 1px rgba(255,255,255,.25)}.lw-art-special-inks span{overflow:hidden;font-size:7px;line-height:1;text-align:center;text-overflow:ellipsis;white-space:nowrap}.lw-art-control-section{display:flex;flex-direction:column;gap:7px}.lw-art-control-section>label{display:grid;grid-template-columns:minmax(65px,1fr) minmax(60px,1fr) 30px;align-items:center;gap:5px}.lw-art-control-section label>span{display:flex;min-width:0;flex-direction:column}.lw-art-control-section label strong{font-size:8px}.lw-art-control-section label small{overflow:hidden;color:var(--text-muted,#999);font-size:6px;text-overflow:ellipsis;white-space:nowrap}.lw-art-control-section input{width:100%;accent-color:var(--draw-accent)}.lw-art-control-section output{color:var(--text-muted,#999);font-size:7px;text-align:right;font-variant-numeric:tabular-nums}.lw-art-current-stroke{min-height:35px;display:flex;align-items:center;gap:7px;margin-top:auto;padding:4px 6px;border-radius:8px;background:color-mix(in srgb,var(--text,#fff) 4%,transparent)}.lw-art-current-stroke>span{height:var(--art-width);max-height:20px;min-height:2px;flex:1;border-radius:99px;background:var(--art-ink);opacity:var(--art-opacity)}.lw-art-current-stroke small{color:var(--text-muted,#999);font-size:7px;white-space:nowrap}.lw-art-footer-note{display:inline-flex;align-items:center;gap:6px;padding:0 7px;color:var(--text-muted,#999);font-size:8px}.lw-tablet-canvas.tool-art{cursor:crosshair}@keyframes lw-art-studio-in{from{opacity:0;transform:translateY(-7px) scale(.99)}}
 .lw-draw-icon,.lw-draw-subtle,.lw-primary-action,.lw-convert-action,.lw-model-card button{border:0;cursor:pointer;transition:transform .16s ease,background .16s ease,opacity .16s ease}.lw-draw-icon{display:grid;place-items:center;width:32px;height:32px;border-radius:8px;background:transparent}.lw-draw-icon:hover:not(:disabled){background:color-mix(in srgb,var(--text,#fff) 8%,transparent)}.lw-draw-icon.lw-danger:hover:not(:disabled){color:var(--danger,#d94b63);background:color-mix(in srgb,var(--danger,#d94b63) 10%,transparent)}.lw-drawing-board button:disabled{opacity:.5;cursor:not-allowed}.lw-draw-subtle{display:flex;align-items:center;justify-content:center;gap:7px;height:32px;padding:0 10px;border-radius:8px;background:color-mix(in srgb,var(--text,#fff) 6%,transparent)}.lw-draw-subtle:hover:not(:disabled){background:color-mix(in srgb,var(--text,#fff) 10%,transparent)}.lw-draw-subtle.is-active{color:var(--text,#fff);background:color-mix(in srgb,var(--draw-accent) 22%,var(--background-secondary,#17171d));box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--draw-accent) 38%,transparent)}
-.lw-draw-workspace{position:relative;display:grid;grid-template-columns:minmax(0,1fr);flex:1;min-height:0;padding:18px;gap:14px}.lw-draw-workspace.has-conversion{grid-template-columns:minmax(0,1fr) minmax(300px,370px)}.lw-canvas-shell{position:relative;display:flex;min-width:0;min-height:0;flex-direction:column;padding:10px 10px 7px;border:1px solid var(--draw-border);border-radius:17px;background:color-mix(in srgb,var(--background-secondary,#17171d) 84%,transparent);box-shadow:0 20px 55px rgba(0,0,0,.16)}.lw-canvas-glow{position:absolute;inset:-1px;border-radius:inherit;pointer-events:none;background:radial-gradient(circle at 15% 0,color-mix(in srgb,var(--draw-accent) 10%,transparent),transparent 36%)}.lw-canvas-surface{position:relative;z-index:1;flex:0 0 auto;min-width:220px;min-height:300px;aspect-ratio:210/297;margin:auto;overflow:hidden;border-radius:8px;background:#fbfcff;box-shadow:0 8px 32px rgba(0,0,0,.2),inset 0 0 0 1px rgba(30,42,65,.08);will-change:transform;touch-action:none}.lw-tablet-canvas{position:absolute;inset:0;display:block;width:100%;height:100%;outline:none;touch-action:none;user-select:none;-webkit-user-select:none}.lw-tablet-canvas-committed{z-index:1;pointer-events:none}.lw-tablet-canvas-live{z-index:2;pointer-events:auto}.lw-tablet-canvas.tool-pen,.lw-tablet-canvas.tool-select{cursor:crosshair}.lw-tablet-canvas.tool-eraser{cursor:cell}.lw-tablet-canvas:focus-visible{box-shadow:inset 0 0 0 2px var(--draw-accent)}.lw-selection-hint{position:absolute;z-index:3;top:18px;left:50%;display:flex;align-items:center;gap:7px;padding:8px 11px;transform:translateX(-50%);border:1px solid rgba(86,71,183,.32);border-radius:9px;color:#28233d;background:rgba(255,255,255,.92);box-shadow:0 8px 24px rgba(39,31,85,.18);font:700 11px/1.2 var(--ui-font,system-ui);pointer-events:none;white-space:nowrap}.lw-selection-rect{position:absolute;z-index:3;min-width:2px;min-height:2px;border:2px dashed #6855d9;background:rgba(104,85,217,.1);box-shadow:0 0 0 9999px rgba(38,35,55,.08);pointer-events:none}.lw-selection-rect.is-selected{border-style:solid;background:rgba(104,85,217,.07);box-shadow:0 0 0 9999px rgba(38,35,55,.04),0 0 0 3px rgba(104,85,217,.14)}.lw-selection-rect span{position:absolute;bottom:calc(100% + 5px);left:-2px;padding:3px 7px;border-radius:6px;color:#fff;background:#5f4bcf;font:700 9px/1.3 var(--ui-font,system-ui);white-space:nowrap}.lw-canvas-meta{display:flex;align-items:center;justify-content:space-between;padding:7px 3px 0;color:var(--text-muted,#9292a0);font-size:10px}.lw-canvas-meta span{display:flex;align-items:center;gap:6px}.lw-pressure-dot{width:6px;height:6px;border-radius:50%;background:#4bd7a4;box-shadow:0 0 7px #4bd7a4}
+.lw-draw-workspace{position:relative;display:grid;grid-template-columns:minmax(0,1fr);flex:1;min-height:0;padding:18px;gap:14px}.lw-draw-workspace.has-conversion{grid-template-columns:minmax(0,1fr) minmax(300px,370px)}.lw-canvas-shell{position:relative;display:flex;min-width:0;min-height:0;flex-direction:column;padding:10px 10px 7px;border:1px solid var(--draw-border);border-radius:17px;background:color-mix(in srgb,var(--background-secondary,#17171d) 84%,transparent);box-shadow:0 20px 55px rgba(0,0,0,.16)}.lw-canvas-glow{position:absolute;inset:-1px;border-radius:inherit;pointer-events:none;background:radial-gradient(circle at 15% 0,color-mix(in srgb,var(--draw-accent) 10%,transparent),transparent 36%)}.lw-canvas-surface{position:relative;z-index:1;flex:0 0 auto;min-width:220px;min-height:300px;aspect-ratio:210/297;margin:auto;overflow:hidden;border-radius:8px;background:#fbfcff;box-shadow:0 8px 32px rgba(0,0,0,.2),inset 0 0 0 1px rgba(30,42,65,.08);will-change:transform;touch-action:none}.lw-tablet-canvas{position:absolute;inset:0;display:block;width:100%;height:100%;outline:none;touch-action:none;user-select:none;-webkit-user-select:none;image-rendering:auto}.lw-tablet-canvas-committed{z-index:1;pointer-events:none}.lw-tablet-canvas-live{z-index:2;pointer-events:auto}.lw-tablet-canvas.tool-pen,.lw-tablet-canvas.tool-select{cursor:crosshair}.lw-tablet-canvas.tool-eraser{cursor:cell}.lw-tablet-canvas:focus-visible{box-shadow:inset 0 0 0 2px var(--draw-accent)}.lw-selection-hint{position:absolute;z-index:3;top:18px;left:50%;display:flex;align-items:center;gap:7px;padding:8px 11px;transform:translateX(-50%);border:1px solid rgba(86,71,183,.32);border-radius:9px;color:#28233d;background:rgba(255,255,255,.92);box-shadow:0 8px 24px rgba(39,31,85,.18);font:700 11px/1.2 var(--ui-font,system-ui);pointer-events:none;white-space:nowrap}.lw-selection-rect{position:absolute;z-index:3;min-width:2px;min-height:2px;border:2px dashed #6855d9;background:rgba(104,85,217,.1);box-shadow:0 0 0 9999px rgba(38,35,55,.08);pointer-events:none}.lw-selection-rect.is-selected{border-style:solid;background:rgba(104,85,217,.07);box-shadow:0 0 0 9999px rgba(38,35,55,.04),0 0 0 3px rgba(104,85,217,.14)}.lw-selection-rect span{position:absolute;bottom:calc(100% + 5px);left:-2px;padding:3px 7px;border-radius:6px;color:#fff;background:#5f4bcf;font:700 9px/1.3 var(--ui-font,system-ui);white-space:nowrap}.lw-canvas-meta{display:flex;align-items:center;justify-content:space-between;padding:7px 3px 0;color:var(--text-muted,#9292a0);font-size:10px}.lw-canvas-meta span{display:flex;align-items:center;gap:6px}.lw-pressure-dot{width:6px;height:6px;border-radius:50%;background:#4bd7a4;box-shadow:0 0 7px #4bd7a4}
 .lw-selection-hint.is-correction{border-color:rgba(30,142,115,.42);color:#153b32;background:rgba(242,255,250,.95)}.lw-math-correction-scope{position:absolute;z-index:3;border:1px dashed rgba(60,95,178,.5);border-radius:7px;background:rgba(67,102,190,.025);pointer-events:none}.lw-math-step-mark{position:absolute;z-index:4;min-width:5px;min-height:5px;border:2px solid rgba(91,106,151,.5);border-radius:6px;background:rgba(91,106,151,.04);pointer-events:none;transition:border-color .22s,background .22s,box-shadow .22s}.lw-math-step-mark>span{position:absolute;top:-8px;left:-8px;display:grid;width:17px;height:17px;place-items:center;border-radius:50%;color:#fff;background:#667091;font:800 8px/1 var(--ui-font,system-ui);box-shadow:0 3px 8px rgba(0,0,0,.2)}.lw-math-step-mark.is-start{border-color:#6855d9;background:rgba(104,85,217,.06)}.lw-math-step-mark.is-start>span{background:#6855d9}.lw-math-step-mark.is-correct{border-color:#249671;background:rgba(36,150,113,.07);box-shadow:0 0 0 3px rgba(36,150,113,.09)}.lw-math-step-mark.is-correct>span{background:#208963}.lw-math-step-mark.is-incorrect,.lw-math-step-mark.is-unreadable{border-color:#dc3f59;background:rgba(220,63,89,.09);box-shadow:0 0 0 3px rgba(220,63,89,.12)}.lw-math-step-mark.is-incorrect>span,.lw-math-step-mark.is-unreadable>span{background:#c9354e}.lw-math-step-mark.is-uncertain{border-color:#d18b25;background:rgba(209,139,37,.09)}.lw-math-step-mark.is-uncertain>span{background:#b87518}.lw-math-error-spot{position:absolute;z-index:7;min-width:12px;min-height:12px;border:3px solid #df304d;border-radius:7px;background:rgba(238,45,75,.14);box-shadow:0 0 0 4px rgba(238,45,75,.12),0 0 25px rgba(222,39,69,.3);pointer-events:none;animation:lw-error-pulse 1.35s ease-in-out infinite}.lw-math-error-spot.is-uncertain,.lw-math-error-spot.is-unreadable{border-color:#d38b20;background:rgba(230,151,33,.12);box-shadow:0 0 0 4px rgba(230,151,33,.12)}.lw-math-error-spot>span{position:absolute;bottom:calc(100% + 5px);left:-3px;padding:3px 7px;border-radius:6px;color:#fff;background:#d9304b;font:800 8px/1.2 var(--ui-font,system-ui);white-space:nowrap}.lw-math-error-spot.is-uncertain>span,.lw-math-error-spot.is-unreadable>span{background:#b87518}@keyframes lw-error-pulse{50%{box-shadow:0 0 0 7px rgba(238,45,75,.05),0 0 30px rgba(222,39,69,.34)}}
 .lw-math-correction-popover{position:absolute;z-index:9;display:flex;width:min(390px,calc(100% - 22px));max-height:min(560px,86%);flex-direction:column;gap:9px;overflow:auto;padding:11px;border:1px solid color-mix(in srgb,#2b9c79 42%,var(--draw-border));border-radius:14px;color:var(--text,#f4f2fa);background:linear-gradient(150deg,color-mix(in srgb,var(--background-secondary,#18171f) 95%,#2b9c79 5%),var(--background,#111116));box-shadow:0 24px 70px rgba(15,25,23,.42),0 0 0 1px rgba(255,255,255,.03);backdrop-filter:blur(18px);pointer-events:auto}.lw-math-correction-head{display:flex;align-items:center;gap:8px}.lw-math-correction-head>span{display:grid;width:28px;height:28px;flex:0 0 auto;place-items:center;border-radius:9px;color:#071b15;background:#48c39c}.lw-math-correction-head>div{display:flex;min-width:0;flex:1;flex-direction:column}.lw-math-correction-head strong{font-size:11px}.lw-math-correction-head small,.lw-math-correction-footnote{color:var(--text-muted,#aaa);font-size:8px;line-height:1.45}.lw-math-correction-loading,.lw-math-correction-error{display:flex;min-height:82px;align-items:center;justify-content:center;gap:8px;color:var(--text-muted,#aaa);text-align:center;font-size:10px}.lw-math-correction-error{flex-direction:column;color:var(--danger,#e16778)}.lw-math-correction-result{display:flex;align-items:flex-start;gap:8px;padding:8px 9px;border:1px solid var(--draw-border);border-radius:9px}.lw-math-correction-result>svg{flex:0 0 auto;margin-top:1px}.lw-math-correction-result>span,.lw-math-correction-result strong,.lw-math-correction-result small{display:block}.lw-math-correction-result strong{font-size:10px}.lw-math-correction-result small{margin-top:2px;color:var(--text-muted,#aaa);font-size:8px;line-height:1.45}.lw-math-correction-result.is-correct{color:var(--success,#4bc69d);border-color:color-mix(in srgb,var(--success,#4bc69d) 32%,var(--draw-border));background:color-mix(in srgb,var(--success,#4bc69d) 8%,transparent)}.lw-math-correction-result.is-incorrect,.lw-math-correction-result.is-unreadable{color:var(--danger,#e16778);border-color:color-mix(in srgb,var(--danger,#e16778) 34%,var(--draw-border));background:color-mix(in srgb,var(--danger,#e16778) 8%,transparent)}.lw-math-correction-result.is-uncertain,.lw-math-correction-result.is-editing{color:var(--warning,#d49a48);border-color:color-mix(in srgb,var(--warning,#d49a48) 34%,var(--draw-border));background:color-mix(in srgb,var(--warning,#d49a48) 8%,transparent)}
 .lw-math-step-list{display:flex;flex-direction:column;gap:5px}.lw-math-step-row{display:grid;grid-template-columns:22px minmax(0,1fr) 39px;align-items:center;gap:6px;padding:6px;border:1px solid var(--draw-border);border-radius:9px;background:color-mix(in srgb,var(--background,#111116) 46%,transparent)}.lw-math-step-row.is-incorrect,.lw-math-step-row.is-unreadable{border-color:color-mix(in srgb,var(--danger,#e16778) 48%,var(--draw-border));background:color-mix(in srgb,var(--danger,#e16778) 7%,transparent)}.lw-math-step-row.is-correct{border-color:color-mix(in srgb,var(--success,#4bc69d) 28%,var(--draw-border))}.lw-math-step-number{display:grid;width:20px;height:20px;place-items:center;border-radius:6px;color:var(--text-muted,#aaa);background:color-mix(in srgb,var(--background-modifier-border,#555) 42%,transparent);font:800 8px/1 var(--ui-font,system-ui)}.lw-math-step-input{display:flex;min-width:0;flex-direction:column;gap:2px}.lw-math-step-input input{width:100%;min-width:0;padding:5px 7px;border:1px solid transparent;border-radius:6px;outline:none;color:inherit;background:transparent;font:600 11px/1.2 var(--mono-font,monospace)}.lw-math-step-input input:hover,.lw-math-step-input input:focus{border-color:var(--draw-border);background:color-mix(in srgb,var(--background,#111116) 82%,transparent)}.lw-math-step-input small{overflow:hidden;color:var(--text-muted,#aaa);font-size:7px;line-height:1.25;text-overflow:ellipsis;white-space:nowrap}.lw-math-step-status{overflow:hidden;color:var(--text-muted,#aaa);font-size:7px;text-align:right;text-overflow:ellipsis;white-space:nowrap}.lw-math-step-row.is-incorrect .lw-math-step-status,.lw-math-step-row.is-unreadable .lw-math-step-status{color:var(--danger,#e16778)}.lw-math-step-row.is-correct .lw-math-step-status{color:var(--success,#4bc69d)}.lw-math-step-row.is-uncertain .lw-math-step-status{color:var(--warning,#d49a48)}.lw-math-correction-suggestion{display:flex;align-items:center;gap:7px;padding:7px 9px;border-radius:8px;color:var(--text-normal,#ddd);background:color-mix(in srgb,#6855d9 11%,transparent);font-size:9px}.lw-math-correction-suggestion code{overflow:hidden;color:#b9acf9;text-overflow:ellipsis;white-space:nowrap}.lw-math-correction-actions{display:grid;grid-template-columns:1fr 1fr;gap:6px}.lw-math-correction-actions button{display:flex;min-height:30px;align-items:center;justify-content:center;gap:5px;border:1px solid var(--draw-border);border-radius:8px;color:inherit;background:color-mix(in srgb,var(--background-secondary,#18171f) 78%,transparent);font:700 9px/1 var(--ui-font,system-ui);cursor:pointer}.lw-math-correction-actions button:first-child{border-color:color-mix(in srgb,#35b68e 40%,var(--draw-border));background:color-mix(in srgb,#35b68e 11%,transparent)}.lw-math-correction-actions button:hover{filter:brightness(1.12)}.lw-math-correction-actions button:disabled{opacity:.55;cursor:wait}.lw-math-correction-footnote{margin:0}
