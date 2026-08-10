@@ -1,5 +1,10 @@
 # Änderungsverlauf
 
+## 2026.8.6
+
+- Beim Klick auf Herunterladen erscheint sofort ein sichtbarer Download-Fortschritt (Prozent und übertragene Daten) in den Einstellungen; der Status springt nicht mehr stumm, bis der Download fertig ist.
+- Zoom, Drehung und Verschieben der Handschriftseite bewegen nur noch den Blattinhalt. Die obere Werkzeugleiste bleibt fixiert oben und zoomt nicht mit.
+
 ## 2026.8.5
 
 - Während dem Handschriftszeichnen lässt sich das Blatt zoomen und drehen: Toolbar-Buttons, `Strg`+Mausrad (Zoom), `Alt`+Mausrad (Drehung), `[` / `]` sowie `Strg`+`0` / `Esc` zum Zurücksetzen. Im Inline-Stiftmodus folgt das gesamte Notizpapier der Ansicht, damit Text und Tinte ausgerichtet bleiben; die Zeichen-Bitmap skaliert nicht mit und bleibt scharf.
