@@ -953,9 +953,14 @@ export function SettingsModal({
                         Qwen3-VL 2B · OpenVINO INT4 · nur Intel-NPU · Apache-2.0 · ~1,8&nbsp;GB optionaler Download · SHA-256-geprüft.
                         {' '}
                         <button type="button" className="settings-link-button" onClick={() => void window.fanotes.openExternal(qwenVisionState?.homepage ?? 'https://huggingface.co/Qwen/Qwen3-VL-2B-Instruct')}>Modellkarte</button>
-                        {qwenVisionState?.npu === false && ' · Keine NPU erkannt.'}
-                        {qwenVisionState?.npu && qwenVisionState?.genai === false && ' · OpenVINO GenAI fehlt.'}
-                        {qwenVisionState?.supported === false && qwenVisionState?.error ? ` · ${qwenVisionState.error}` : ''}
+                        {qwenVisionState?.supported && qwenVisionState?.npu && ' · NPU bereit.'}
+                        {qwenVisionState?.supported === false && qwenVisionState?.error
+                          ? ` · ${qwenVisionState.error}`
+                          : qwenVisionState?.npu === false
+                            ? ' · Keine NPU erkannt.'
+                            : qwenVisionState?.npu && qwenVisionState?.genai === false
+                              ? ' · OpenVINO GenAI fehlt.'
+                              : ''}
                       </span>
                     </div>
                     {qwenVisionError && <div className="settings-inline-error">{qwenVisionError}</div>}

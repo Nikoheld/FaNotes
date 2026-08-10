@@ -66,21 +66,73 @@ const hashFile = (filename) => new Promise((resolve, reject) => {
   stream.once('end', () => resolve(hash.digest('hex')))
 })
 
-const resolveWorkerPath = () => {
-  const packaged = path.join(__dirname, 'qwen-vision-worker.py')
-  return packaged
+const isAsarPath = (candidate) => String(candidate).includes(`${path.sep}app.asar${path.sep}`) || String(candidate).includes('/app.asar/')
+
+const resolvePackagedWorkerSource = () => path.join(__dirname, 'qwen-vision-worker.py')
+
+const lookUpCommand = async (command, spawnImpl) => {
+  if (path.isAbsolute(command) && fs.existsSync(command)) return command
+  const locator = process.platform === 'win32' ? 'where' : 'command'
+  const locatorArgs = process.platform === 'win32' ? [command] : ['-v', command]
+  try {
+    const found = await new Promise((resolve, reject) => {
+      const child = spawnImpl(locator, locatorArgs, {
+        env: process.env,
+        stdio: ['ignore', 'pipe', 'ignore'],
+        windowsHide: true,
+      })
+      let stdout = ''
+      child.stdout.setEncoding('utf8')
+      child.stdout.on('data', (chunk) => { stdout += chunk })
+      child.once('error', reject)
+      child.once('close', (code) => {
+        if (code !== 0) {
+          reject(new Error(`not found: ${command}`))
+          return
+        }
+        const line = stdout.split(/\r?\n/u).map((entry) => entry.trim()).find(Boolean)
+        if (!line) reject(new Error(`not found: ${command}`))
+        else resolve(line)
+      })
+    })
+    return found
+  } catch {
+    return null
+  }
 }
 
-const pythonCandidates = () => {
+const pythonSearchPaths = () => {
   if (process.platform === 'win32') {
-    return ['python.exe', 'python', 'py']
+    const local = process.env.LOCALAPPDATA
+    const home = os.homedir()
+    return [
+      process.env.FANOTES_PYTHON,
+      local ? path.join(local, 'Programs', 'Python', 'Python312', 'python.exe') : null,
+      local ? path.join(local, 'Programs', 'Python', 'Python311', 'python.exe') : null,
+      home ? path.join(home, 'AppData', 'Local', 'Microsoft', 'WindowsApps', 'python3.exe') : null,
+      'C:\\Python312\\python.exe',
+      'C:\\Python311\\python.exe',
+      'py',
+      'python',
+      'python3',
+    ].filter(Boolean)
   }
-  return ['python3', 'python']
+  return [
+    process.env.FANOTES_PYTHON,
+    '/usr/bin/python3',
+    '/usr/local/bin/python3',
+    '/bin/python3',
+    path.join(os.homedir(), '.local', 'bin', 'python3'),
+    '/usr/bin/python',
+    '/usr/local/bin/python',
+    'python3',
+    'python',
+  ].filter(Boolean)
 }
 
 function createQwenVisionService({
   userDataPath,
-  workerPath = resolveWorkerPath(),
+  workerSourcePath = resolvePackagedWorkerSource(),
   fetchImpl = globalThis.fetch,
   spawnImpl = spawn,
   model = MODEL,
@@ -88,73 +140,155 @@ function createQwenVisionService({
   if (!path.isAbsolute(userDataPath)) throw new Error('Ungültiger Qwen-Vision-Datenpfad.')
   const descriptor = Object.freeze({ ...model, files: [...model.files] })
   const modelDirectory = path.join(userDataPath, 'models', 'qwen-vision', descriptor.id)
+  const runtimeDirectory = path.join(userDataPath, 'models', 'qwen-vision', 'runtime')
+  const materializedWorkerPath = path.join(runtimeDirectory, 'qwen-vision-worker.py')
   const integrityPath = path.join(modelDirectory, '.fanotes-integrity.json')
   let downloadPromise = null
   let recognitionActive = false
   let cachedProbe = null
   let cachedProbeAt = 0
+  let resolvedPython = null
 
   const fileUrl = (relativePath) => (
     `${HF_BASE}/${descriptor.repo}/resolve/${encodeURIComponent(descriptor.revision)}/${relativePath.split('/').map(encodeURIComponent).join('/')}`
   )
 
-  const runWorker = async (payload, timeoutMs = WORKER_TIMEOUT_MS) => {
-    const worker = path.resolve(workerPath)
-    const info = await fsp.lstat(worker)
-    if (!info.isFile() || info.isSymbolicLink() || info.size <= 0 || info.size > 256 * 1024) {
+  /**
+   * Electron packs worker sources into app.asar. Python cannot execute scripts
+   * from asar, and using an asar directory as cwd yields spawn ENOTDIR. Copy the
+   * worker to a real userData path before every probe/inference run.
+   */
+  const ensureMaterializedWorker = async () => {
+    await fsp.mkdir(runtimeDirectory, { recursive: true, mode: 0o700 })
+    const source = path.resolve(workerSourcePath)
+    let sourceBytes
+    try {
+      // Electron's fs reads asar paths transparently.
+      sourceBytes = await fsp.readFile(source)
+    } catch (error) {
+      throw new Error(`Qwen-Vision-Worker nicht lesbar: ${error instanceof Error ? error.message : String(error)}`)
+    }
+    if (!sourceBytes.length || sourceBytes.length > 256 * 1024) {
       throw new Error('Der Qwen-Vision-Worker ist ungültig.')
     }
+    let needsWrite = true
+    try {
+      const existing = await fsp.readFile(materializedWorkerPath)
+      needsWrite = existing.length !== sourceBytes.length || !existing.equals(sourceBytes)
+    } catch {
+      needsWrite = true
+    }
+    if (needsWrite) {
+      const temporary = `${materializedWorkerPath}.${process.pid}.tmp`
+      await fsp.writeFile(temporary, sourceBytes, { mode: 0o600 })
+      await fsp.rename(temporary, materializedWorkerPath)
+    }
+    if (isAsarPath(materializedWorkerPath)) {
+      throw new Error('Qwen-Vision-Worker konnte nicht aus dem App-Paket materialisiert werden.')
+    }
+    return materializedWorkerPath
+  }
+
+  const resolvePythonExecutable = async () => {
+    if (resolvedPython && fs.existsSync(resolvedPython)) return resolvedPython
     const errors = []
-    for (const python of pythonCandidates()) {
+    for (const candidate of pythonSearchPaths()) {
       try {
-        const result = await new Promise((resolve, reject) => {
-          const child = spawnImpl(python, [worker], {
-            cwd: path.dirname(worker),
-            env: {
-              ...process.env,
-              PYTHONNOUSERSITE: '1',
-              PYTHONUTF8: '1',
-              // Keep OpenVINO plugins from silently preferring CPU.
-              OPENVINO_DEVICE: 'NPU',
-            },
-            stdio: ['pipe', 'pipe', 'pipe'],
-          })
-          let stdout = ''
-          let stderr = ''
-          const timer = setTimeout(() => {
-            child.kill('SIGKILL')
-            reject(new Error('Qwen-Vision-Worker Zeitlimit überschritten.'))
-          }, timeoutMs)
-          timer.unref?.()
-          child.stdout.setEncoding('utf8')
-          child.stderr.setEncoding('utf8')
-          child.stdout.on('data', (chunk) => { stdout += chunk })
-          child.stderr.on('data', (chunk) => { stderr += chunk })
-          child.once('error', (error) => {
-            clearTimeout(timer)
-            reject(error)
-          })
-          child.once('close', (code) => {
-            clearTimeout(timer)
-            const line = stdout.trim().split(/\r?\n/u).filter(Boolean).at(-1) || ''
-            if (!line) {
-              reject(new Error(stderr.trim() || `Qwen-Vision-Worker beendete mit Code ${code ?? '?'}.`))
-              return
-            }
-            try {
-              resolve(JSON.parse(line))
-            } catch {
-              reject(new Error(`Ungültige Worker-Antwort: ${line.slice(0, 200)}`))
-            }
-          })
-          child.stdin.end(`${JSON.stringify(payload)}\n`)
-        })
-        return result
+        if (path.isAbsolute(candidate)) {
+          // Follow symlinks (python3 -> python3.12). Reject only directories.
+          const info = await fsp.stat(candidate)
+          if (!info.isFile()) {
+            errors.push(`${candidate}: keine ausführbare Datei`)
+            continue
+          }
+          // Basic execute-bit check on POSIX; Windows has no useful mode bits here.
+          if (process.platform !== 'win32' && (info.mode & 0o111) === 0) {
+            errors.push(`${candidate}: nicht ausführbar`)
+            continue
+          }
+          resolvedPython = candidate
+          return candidate
+        }
+        const lookedUp = await lookUpCommand(candidate, spawnImpl)
+        if (lookedUp && fs.existsSync(lookedUp)) {
+          // On Windows, `where` may return a Store stub; still try it.
+          resolvedPython = lookedUp
+          return lookedUp
+        }
+        errors.push(`${candidate}: nicht gefunden`)
       } catch (error) {
-        errors.push(`${python}: ${error instanceof Error ? error.message : String(error)}`)
+        errors.push(`${candidate}: ${error instanceof Error ? error.message : String(error)}`)
       }
     }
-    throw new Error(`Python/OpenVINO-Worker nicht startbar (${errors.join(' · ')}).`)
+    throw new Error(
+      `Kein Python gefunden (${errors.slice(0, 4).join(' · ')}). `
+      + 'Installiere Python 3 und setze optional FANOTES_PYTHON auf den absoluten Interpreter-Pfad.',
+    )
+  }
+
+  const runWorker = async (payload, timeoutMs = WORKER_TIMEOUT_MS) => {
+    const worker = await ensureMaterializedWorker()
+    const python = await resolvePythonExecutable()
+    // Always use a real filesystem directory as cwd (never app.asar).
+    const cwd = runtimeDirectory
+    try {
+      const result = await new Promise((resolve, reject) => {
+        const child = spawnImpl(python, [worker], {
+          cwd,
+          env: {
+            ...process.env,
+            PATH: process.env.PATH || (process.platform === 'win32'
+              ? 'C:\\Windows\\System32;C:\\Windows'
+              : '/usr/local/bin:/usr/bin:/bin'),
+            PYTHONNOUSERSITE: '1',
+            PYTHONUTF8: '1',
+            PYTHONUNBUFFERED: '1',
+            // Keep OpenVINO plugins from silently preferring CPU.
+            OPENVINO_DEVICE: 'NPU',
+          },
+          stdio: ['pipe', 'pipe', 'pipe'],
+          windowsHide: true,
+        })
+        let stdout = ''
+        let stderr = ''
+        const timer = setTimeout(() => {
+          child.kill('SIGKILL')
+          reject(new Error('Qwen-Vision-Worker Zeitlimit überschritten.'))
+        }, timeoutMs)
+        timer.unref?.()
+        child.stdout.setEncoding('utf8')
+        child.stderr.setEncoding('utf8')
+        child.stdout.on('data', (chunk) => { stdout += chunk })
+        child.stderr.on('data', (chunk) => { stderr += chunk })
+        child.once('error', (error) => {
+          clearTimeout(timer)
+          reject(error)
+        })
+        child.once('close', (code) => {
+          clearTimeout(timer)
+          const line = stdout.trim().split(/\r?\n/u).filter(Boolean).at(-1) || ''
+          if (!line) {
+            reject(new Error(stderr.trim() || `Qwen-Vision-Worker beendete mit Code ${code ?? '?'}.`))
+            return
+          }
+          try {
+            resolve(JSON.parse(line))
+          } catch {
+            reject(new Error(`Ungültige Worker-Antwort: ${line.slice(0, 200)}`))
+          }
+        })
+        child.stdin.end(`${JSON.stringify(payload)}\n`)
+      })
+      return result
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error)
+      // Reset cached interpreter if it disappeared or is invalid.
+      if (/ENOENT|ENOTDIR|EACCES/u.test(detail)) resolvedPython = null
+      throw new Error(
+        `Python/OpenVINO-Worker nicht startbar (${python}: ${detail}). `
+        + 'Prüfe Python 3, OpenVINO GenAI und dass FANOTES_PYTHON auf eine echte python-Binary zeigt.',
+      )
+    }
   }
 
   const probe = async (force = false) => {
@@ -231,6 +365,17 @@ function createQwenVisionService({
     const runtime = await probe()
     const installed = await verifyInstalled()
     const supported = Boolean(runtime.ok && runtime.npu && runtime.genai)
+    let error = null
+    if (!supported) {
+      if (runtime.error) error = runtime.error
+      else if (!runtime.npu) {
+        error = 'Keine Intel-NPU erkannt. Qwen3-VL läuft in FaNotes nur auf der NPU (Core Ultra).'
+      } else if (!runtime.genai) {
+        error = 'OpenVINO GenAI fehlt. Installiere openvino und openvino-genai für Python 3.'
+      } else {
+        error = 'Qwen3-VL-Laufzeit nicht bereit.'
+      }
+    }
     return {
       supported,
       installed,
@@ -246,11 +391,7 @@ function createQwenVisionService({
       license: descriptor.license,
       homepage: descriptor.homepage,
       repo: descriptor.repo,
-      error: supported ? null : (runtime.error || (!runtime.npu
-        ? 'Keine Intel-NPU erkannt. Qwen3-VL läuft in FaNotes nur auf der NPU (Core Ultra).'
-        : !runtime.genai
-          ? 'OpenVINO GenAI fehlt für die NPU-Laufzeit.'
-          : 'Qwen3-VL-Laufzeit nicht bereit.')),
+      error,
     }
   }
 
