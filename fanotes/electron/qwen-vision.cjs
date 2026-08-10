@@ -58,14 +58,20 @@ const DOWNLOAD_TIMEOUT_MS = 30 * 60_000
 const WORKER_TIMEOUT_MS = 90_000
 const RUNTIME_INSTALL_TIMEOUT_MS = 45 * 60_000
 const HF_BASE = 'https://huggingface.co'
-/** Packages installed into an isolated FaNotes venv for Qwen3-VL. */
-// Prefer recent OpenVINO for Core Ultra Series 2 / X9 (NPU4000-class). Older
-// 2024.4 stacks often only list CPU/GPU on new silicon.
+/**
+ * Packages installed into an isolated FaNotes venv for Qwen3-VL.
+ * Qwen3-VL (`model_type: qwen3_vl`) needs OpenVINO GenAI ≥2026.1 — older 2025.x
+ * builds raise: Unsupported 'qwen3_vl' VLM model type.
+ */
 const RUNTIME_PIP_PACKAGES = Object.freeze([
-  'openvino>=2025.0,<2026',
-  'openvino-genai>=2025.0,<2026',
+  'openvino>=2026.1',
+  'openvino-genai>=2026.1',
+  'openvino-tokenizers>=2026.1',
   'pillow>=10.0.0,<12',
 ])
+const RUNTIME_MARKER_VERSION = 2
+const MIN_OPENVINO_MAJOR = 2026
+const MIN_OPENVINO_MINOR = 1
 
 const hashFile = (filename) => new Promise((resolve, reject) => {
   const hash = crypto.createHash('sha256')
@@ -284,20 +290,29 @@ function createQwenVisionService({
     )
   }
 
+  const openvinoVersionOk = (version) => {
+    const match = /^(\d+)\.(\d+)/u.exec(String(version || ''))
+    if (!match) return false
+    const major = Number(match[1])
+    const minor = Number(match[2])
+    return major > MIN_OPENVINO_MAJOR
+      || (major === MIN_OPENVINO_MAJOR && minor >= MIN_OPENVINO_MINOR)
+  }
+
   const venvHasRuntimePackages = async () => {
     if (!fs.existsSync(venvPythonPath)) return false
     try {
       const marker = JSON.parse(await fsp.readFile(runtimeMarkerPath, 'utf8'))
-      if (marker?.version !== 1 || !Array.isArray(marker.packages)) return false
-      // Require OpenVINO 2025+ so newer Core Ultra NPUs (X9 388H etc.) are visible.
+      // Bump RUNTIME_MARKER_VERSION whenever required wheels change (e.g. Qwen3-VL).
+      if (marker?.version !== RUNTIME_MARKER_VERSION || !Array.isArray(marker.packages)) return false
       const check = await runProcess(venvPythonPath, [
         '-c',
-        'import openvino, openvino_genai, PIL; print(openvino.__version__)',
+        'import openvino, openvino_genai, openvino_tokenizers, PIL; print(openvino.__version__); print(getattr(openvino_genai, "__version__", "0"))',
       ], { timeoutMs: 60_000 })
-      const version = (check.stdout || '').trim().split(/\r?\n/u).filter(Boolean).at(-1) || ''
-      if (!/^202[5-9]\./u.test(version) && !/^2024\.(?:[6-9]|1\d)\./u.test(version)) {
-        return false
-      }
+      const lines = (check.stdout || '').trim().split(/\r?\n/u).map((line) => line.trim()).filter(Boolean)
+      const ovVersion = lines[0] || ''
+      const genaiVersion = lines[1] || ovVersion
+      if (!openvinoVersionOk(ovVersion) || !openvinoVersionOk(genaiVersion)) return false
       return true
     } catch {
       return false
@@ -347,13 +362,22 @@ function createQwenVisionService({
       // Verify imports after install.
       const check = await runProcess(venvPythonPath, [
         '-c',
-        'import openvino, openvino_genai, PIL; print(openvino.__version__)',
+        'import openvino, openvino_genai, openvino_tokenizers, PIL; print(openvino.__version__); print(getattr(openvino_genai, "__version__", openvino.__version__))',
       ], { timeoutMs: 90_000 })
-      const openvinoVersion = (check.stdout || '').trim().split(/\r?\n/u).filter(Boolean).at(-1) || 'unknown'
+      const lines = (check.stdout || '').trim().split(/\r?\n/u).map((line) => line.trim()).filter(Boolean)
+      const openvinoVersion = lines[0] || 'unknown'
+      const genaiVersion = lines[1] || openvinoVersion
+      if (!openvinoVersionOk(openvinoVersion) || !openvinoVersionOk(genaiVersion)) {
+        throw new Error(
+          `OpenVINO ${openvinoVersion} / GenAI ${genaiVersion} ist zu alt für Qwen3-VL. `
+          + 'Es wird OpenVINO GenAI ≥2026.1 benötigt.',
+        )
+      }
       const marker = {
-        version: 1,
+        version: RUNTIME_MARKER_VERSION,
         installedAt: new Date().toISOString(),
         openvinoVersion,
+        genaiVersion,
         packages: [...RUNTIME_PIP_PACKAGES],
       }
       const temporary = `${runtimeMarkerPath}.${process.pid}.tmp`
@@ -753,6 +777,11 @@ function createQwenVisionService({
       throw new Error('Qwen3-VL ist nicht installiert. Lade das NPU-Modell in den Einstellungen.')
     }
 
+    // Ensure GenAI is new enough for model_type qwen3_vl before the first call.
+    if (!(await venvHasRuntimePackages())) {
+      await ensureOpenVinoRuntime()
+    }
+
     recognitionActive = true
     const temporary = await fsp.mkdtemp(path.join(os.tmpdir(), 'fanotes-qwen-vision-'))
     const imagePath = path.join(temporary, 'input.ppm')
@@ -767,7 +796,7 @@ function createQwenVisionService({
       const prompt = language === 'en'
         ? 'Transcribe the handwritten text in this image exactly. Return only the plain text, no markdown or commentary.'
         : 'Transkribiere den handgeschriebenen Text in diesem Bild exakt. Gib nur den reinen Text zurück, ohne Markdown oder Erklärungen.'
-      const result = await runWorker({
+      const workerRequest = {
         command: 'recognize',
         modelDir: modelDirectory,
         imagePath,
@@ -775,11 +804,26 @@ function createQwenVisionService({
         maxNewTokens: Number.isSafeInteger(request.maxNewTokens)
           ? Math.max(16, Math.min(256, request.maxNewTokens))
           : 96,
-      })
+      }
+      let result = await runWorker(workerRequest)
+      // One automatic runtime upgrade if GenAI rejects qwen3_vl.
+      if (
+        !result?.ok
+        && (
+          result?.needsRuntimeUpgrade
+          || /unsupported ['"]qwen3_vl['"]/iu.test(String(result?.error || ''))
+        )
+      ) {
+        await fsp.rm(runtimeMarkerPath, { force: true }).catch(() => {})
+        resolvedPython = null
+        cachedProbe = null
+        await ensureOpenVinoRuntime()
+        result = await runWorker(workerRequest)
+      }
       if (!result?.ok) {
         throw new Error(result?.error || 'Qwen3-VL-Inferenz fehlgeschlagen.')
       }
-      if (String(result.device || '').toUpperCase() !== 'NPU') {
+      if (!String(result.device || '').toUpperCase().includes('NPU')) {
         throw new Error('Qwen3-VL lief nicht auf der NPU und wurde abgelehnt.')
       }
       const text = sanitizeText(result.text)

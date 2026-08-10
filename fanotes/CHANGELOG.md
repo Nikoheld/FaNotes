@@ -1,5 +1,9 @@
 # Änderungsverlauf
 
+## 2026.8.12
+
+- **Qwen3-VL / OpenVINO GenAI:** Die Auto-Laufzeit installiert jetzt **OpenVINO + GenAI ≥2026.1** (inkl. `openvino-tokenizers`). Ältere 2025.x-Stacks meldeten `Unsupported 'qwen3_vl' VLM model type`. Beim Erkennen wird bei diesem Fehler einmalig die Runtime aktualisiert und der Lauf wiederholt.
+
 ## 2026.8.11
 
 - **Unendlich langes Notizblatt beim Schreiben:** Scrollt man im Stiftmodus nach unten oder schreibt nah am unteren Rand, wächst die Seite in großen Schritten nach. Bestehende Handschrift bleibt positionstreu; Layout- und Canvas-Updates sind per `requestAnimationFrame` gebündelt, damit langes Scrollen nicht ruckelt (Soft-Limit ~40 A4-Seiten).

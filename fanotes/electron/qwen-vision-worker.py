@@ -225,12 +225,26 @@ def recognize(model_dir: Path, image_path: Path, prompt: str, max_new_tokens: in
     try:
         pipeline = VLMPipeline(str(model_dir), npu_device)
     except Exception as error:  # noqa: BLE001
+        detail = str(error)
+        if "qwen3_vl" in detail.lower() and "unsupported" in detail.lower():
+            return {
+                "ok": False,
+                "error": (
+                    "OpenVINO GenAI ist zu alt für Qwen3-VL (Unsupported 'qwen3_vl'). "
+                    "FaNotes braucht openvino-genai ≥2026.1. "
+                    "In den Einstellungen erneut „Lizenz akzeptieren & alles laden“ wählen "
+                    "— die Laufzeit wird dann automatisch auf 2026.1+ aktualisiert. "
+                    f"Gerät={npu_device}."
+                ),
+                "device": npu_device,
+                "needsRuntimeUpgrade": True,
+            }
         return {
             "ok": False,
             "error": (
-                "Qwen3-VL konnte nicht auf der NPU geladen werden. "
-                "Nutze aktuelle OpenVINO/GenAI-Wheels und den aktuellen Intel-NPU-Treiber "
-                f"für Core Ultra. Gerät={npu_device}. Details: {error}"
+                "Qwen3-VL konnte auf der NPU nicht geladen werden. "
+                "Aktuelle OpenVINO/GenAI-Wheels (≥2026.1) und den aktuellen Intel-NPU-Treiber "
+                f"für Core Ultra nutzen. Gerät={npu_device}. Details: {detail}"
             ),
             "device": npu_device,
         }
