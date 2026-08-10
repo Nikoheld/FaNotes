@@ -749,11 +749,26 @@ function createQwenVisionService({
       .replace(/\r\n/gu, '\n')
       .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/gu, '')
       .trim()
-    // Drop common chatty prefixes from VLMs.
+    // Drop common chatty prefixes / wrappers from VLMs.
     text = text
-      .replace(/^(?:the (?:handwritten )?text (?:is|reads|says)\s*[:\-]?\s*)/iu, '')
-      .replace(/^(?:transcri(?:ption|bed text)\s*[:\-]?\s*)/iu, '')
+      .replace(/^```(?:text|plain|markdown)?\s*/iu, '')
+      .replace(/\s*```$/u, '')
+      .replace(/^(?:the (?:handwritten )?(?:text|content) (?:is|reads|says)\s*[:\-]?\s*)/iu, '')
+      .replace(/^(?:transcri(?:ption|bed text|be)\s*[:\-]?\s*)/iu, '')
+      .replace(/^(?:erkannte[rs]? text\s*[:\-]?\s*)/iu, '')
+      .replace(/^(?:der text lautet\s*[:\-]?\s*)/iu, '')
+      .replace(/^(?:hier ist der text\s*[:\-]?\s*)/iu, '')
+      .replace(/^["'„“”«»]+|["'„“”«»]+$/gu, '')
       .trim()
+    if (
+      (text.startsWith('"') && text.endsWith('"'))
+      || (text.startsWith('“') && text.endsWith('”'))
+      || (text.startsWith('„') && text.endsWith('“'))
+    ) {
+      text = text.slice(1, -1).trim()
+    }
+    // Collapse accidental triple blank lines from the model.
+    text = text.replace(/\n{3,}/gu, '\n\n')
     if (text.length > MAX_OUTPUT_CHARS) text = text.slice(0, MAX_OUTPUT_CHARS).trim()
     return text
   }
@@ -793,17 +808,32 @@ function createQwenVisionService({
         flag: 'wx',
       })
       const language = request.language === 'en' ? 'en' : 'de'
+      // OCR-style prompts: preserve line breaks, discourage chatty rewriting.
       const prompt = language === 'en'
-        ? 'Transcribe the handwritten text in this image exactly. Return only the plain text, no markdown or commentary.'
-        : 'Transkribiere den handgeschriebenen Text in diesem Bild exakt. Gib nur den reinen Text zurück, ohne Markdown oder Erklärungen.'
+        ? [
+            'You are a handwriting OCR engine for notes.',
+            'Read every handwritten line in the image carefully.',
+            'Output only the transcribed text.',
+            'Keep original line breaks.',
+            'Do not translate. Do not invent missing words. Do not correct spelling.',
+            'No markdown, no quotes, no labels, no commentary.',
+          ].join(' ')
+        : [
+            'Du bist ein OCR-System für Handschrift in Notizen.',
+            'Lies jede handgeschriebene Zeile im Bild sorgfältig.',
+            'Gib ausschließlich den erkannten Text aus.',
+            'Behalte Zeilenumbrüche bei.',
+            'Nicht übersetzen, nichts erfinden, Rechtschreibung nicht „verbessern“.',
+            'Kein Markdown, keine Anführungszeichen, keine Labels, keine Erklärungen.',
+          ].join(' ')
       const workerRequest = {
         command: 'recognize',
         modelDir: modelDirectory,
         imagePath,
         prompt,
         maxNewTokens: Number.isSafeInteger(request.maxNewTokens)
-          ? Math.max(16, Math.min(256, request.maxNewTokens))
-          : 96,
+          ? Math.max(32, Math.min(384, request.maxNewTokens))
+          : 192,
       }
       let result = await runWorker(workerRequest)
       // One automatic runtime upgrade if GenAI rejects qwen3_vl.

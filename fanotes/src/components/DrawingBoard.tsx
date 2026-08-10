@@ -2769,30 +2769,51 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       // Optional Qwen3-VL (Intel NPU only): improves freehand text when enabled.
       let qwenVisionFailure = ''
       let qwenVisionUsed = false
+      const textModeLikely = resolvedMode === 'text'
+        || (
+          Boolean(automaticDetection)
+          && automaticDetection!.textScore >= automaticDetection!.mathScore * 0.9
+          && !enhancedMathUsed
+        )
       if (
-        resolvedMode === 'text'
+        textModeLikely
         && !enhancedMathUsed
         && settings.qwenVisionRecognition
         && settings.qwenVisionLicenseAccepted
         && window.fanotes.recognizeQwenVision
       ) {
         try {
-          const { renderQwenVisionImage, shouldPreferQwenVisionText } = await import('../lib/qwenVisionRecognition')
+          const {
+            cleanQwenVisionText,
+            renderQwenVisionImage,
+            shouldPreferQwenVisionText,
+          } = await import('../lib/qwenVisionRecognition')
           const visionImage = renderQwenVisionImage(engineStrokes, SOURCE_WIDTH, sourceHeight)
           if (visionImage) {
-            const vision = await window.fanotes.recognizeQwenVision(visionImage)
+            const vision = await window.fanotes.recognizeQwenVision({
+              ...visionImage,
+              language: settings.recognitionLanguage === 'en' ? 'en' : 'de',
+              maxNewTokens: Math.min(384, Math.max(96, Math.round(engineStrokes.length * 8 + 80))),
+            })
             if (runId !== recognitionRunRef.current) return
-            if (vision.device === 'NPU' && vision.text && shouldPreferQwenVisionText(value, vision.text)) {
-              value = vision.text
+            const visionText = cleanQwenVisionText(vision.text || '')
+            if (
+              vision.device === 'NPU'
+              && visionText
+              && shouldPreferQwenVisionText(value, visionText)
+            ) {
+              value = visionText
               qwenVisionUsed = true
+              resolvedMode = 'text'
               recognized = []
               if (automaticDetection) {
                 automaticDetection = {
                   ...automaticDetection,
                   mode: 'text',
                   value,
-                  confidence: Math.max(automaticDetection.confidence, vision.confidence),
-                  reason: 'Qwen3-VL auf Intel-NPU',
+                  confidence: Math.max(automaticDetection.confidence, vision.confidence ?? 78),
+                  reason: 'Qwen3-VL Vision auf Intel-NPU',
+                  textScore: Math.max(automaticDetection.textScore, 1.35 + (vision.confidence ?? 78) / 50),
                 }
               }
             }

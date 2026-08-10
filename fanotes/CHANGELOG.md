@@ -1,5 +1,9 @@
 # Änderungsverlauf
 
+## 2026.8.13
+
+- **Bessere Qwen3-VL-Handschrifterkennung:** Hochauflösendere, geglättete Strichbilder mit stärkerem Kontrast; OCR-Prompts (DE/EN) mit Zeilenerhalt; deterministische Decodierung; längere Token-Budgets; strengere Textbereinigung und intelligentere Übernahme gegenüber der klassischen Erkennung. Qwen wird auch genutzt, wenn der Auto-Modus Text stark vermutet.
+
 ## 2026.8.12
 
 - **Qwen3-VL / OpenVINO GenAI:** Die Auto-Laufzeit installiert jetzt **OpenVINO + GenAI ≥2026.1** (inkl. `openvino-tokenizers`). Ältere 2025.x-Stacks meldeten `Unsupported 'qwen3_vl' VLM model type`. Beim Erkennen wird bei diesem Fehler einmalig die Runtime aktualisiert und der Lauf wiederholt.

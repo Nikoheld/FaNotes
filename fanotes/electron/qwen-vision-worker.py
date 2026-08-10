@@ -178,11 +178,63 @@ def probe() -> dict:
 
 def load_rgb_image(image_path: Path):
     try:
-        from PIL import Image  # type: ignore
+        from PIL import Image, ImageOps  # type: ignore
     except Exception as error:  # noqa: BLE001
         raise RuntimeError(f"Pillow fehlt für Bildvorbereitung: {error}") from error
     with Image.open(image_path) as image:
-        return image.convert("RGB")
+        rgb = image.convert("RGB")
+    # Mild contrast boost helps thin pen strokes without inventing ink.
+    try:
+        rgb = ImageOps.autocontrast(rgb, cutoff=0.8)
+    except Exception:  # noqa: BLE001
+        pass
+    width, height = rgb.size
+    # Upscale tiny crops so the VLM has enough visual detail.
+    longest = max(width, height)
+    if longest < 320:
+        factor = 320 / max(1, longest)
+        rgb = rgb.resize(
+            (max(64, int(round(width * factor))), max(64, int(round(height * factor)))),
+            Image.Resampling.LANCZOS,
+        )
+        width, height = rgb.size
+    # Pad to multiples of 16 — many vision towers prefer aligned tensors.
+    pad_w = (16 - width % 16) % 16
+    pad_h = (16 - height % 16) % 16
+    if pad_w or pad_h:
+        padded = Image.new("RGB", (width + pad_w, height + pad_h), (255, 255, 255))
+        padded.paste(rgb, (pad_w // 2, pad_h // 2))
+        rgb = padded
+    return rgb
+
+
+def clean_output_text(value: object) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    # Some GenAI builds return GenerationOutput-like objects.
+    if hasattr(value, "texts") and value.texts:  # type: ignore[attr-defined]
+        text = str(value.texts[0]).strip()  # type: ignore[index]
+    elif hasattr(value, "text"):
+        text = str(getattr(value, "text") or text).strip()
+    text = text.replace("\r\n", "\n")
+    text = text.strip().strip("`").strip()
+    for prefix in (
+        "the handwritten text is:",
+        "the handwritten text reads:",
+        "the text is:",
+        "transcription:",
+        "transcribed text:",
+        "erkannte text:",
+        "der text lautet:",
+        "hier ist der text:",
+    ):
+        lower = text.lower()
+        if lower.startswith(prefix):
+            text = text[len(prefix):].strip()
+    if (text.startswith('"') and text.endswith('"')) or (text.startswith("'") and text.endswith("'")):
+        text = text[1:-1].strip()
+    return text
 
 
 def recognize(model_dir: Path, image_path: Path, prompt: str, max_new_tokens: int) -> dict:
@@ -251,15 +303,28 @@ def recognize(model_dir: Path, image_path: Path, prompt: str, max_new_tokens: in
 
     try:
         image = load_rgb_image(image_path)
+        generation_kwargs = {"max_new_tokens": max_new_tokens}
+        # Prefer deterministic decoding for OCR-style transcription when supported.
         try:
-            result = pipeline.generate(
-                prompt,
-                image=image,
-                max_new_tokens=max_new_tokens,
-            )
+            from openvino_genai import GenerationConfig  # type: ignore
+            config = GenerationConfig()
+            config.max_new_tokens = max_new_tokens
+            if hasattr(config, "do_sample"):
+                config.do_sample = False
+            if hasattr(config, "temperature"):
+                config.temperature = 0.0
+            generation_kwargs = {"generation_config": config}
+        except Exception:  # noqa: BLE001
+            generation_kwargs = {"max_new_tokens": max_new_tokens}
+
+        try:
+            result = pipeline.generate(prompt, image=image, **generation_kwargs)
         except TypeError:
-            result = pipeline.generate(prompt, images=[image], max_new_tokens=max_new_tokens)
-        text = str(result).strip()
+            try:
+                result = pipeline.generate(prompt, images=[image], **generation_kwargs)
+            except TypeError:
+                result = pipeline.generate(prompt, images=[image], max_new_tokens=max_new_tokens)
+        text = clean_output_text(result)
     except Exception as error:  # noqa: BLE001
         return {"ok": False, "error": f"NPU-Inferenz fehlgeschlagen: {error}", "device": npu_device}
 
@@ -300,12 +365,13 @@ def main() -> int:
     model_dir = Path(str(request.get("modelDir") or ""))
     image_path = Path(str(request.get("imagePath") or ""))
     prompt = str(request.get("prompt") or "").strip()
-    max_new_tokens = int(request.get("maxNewTokens") or 96)
-    max_new_tokens = max(16, min(256, max_new_tokens))
+    max_new_tokens = int(request.get("maxNewTokens") or 160)
+    max_new_tokens = max(32, min(384, max_new_tokens))
     if not prompt:
         prompt = (
-            "Transcribe the handwritten text in this image exactly. "
-            "Return only the plain text, no markdown, no explanations."
+            "You are a handwriting OCR engine. Read the handwritten text in the image "
+            "line by line. Output only the transcribed text. Keep line breaks. "
+            "Do not translate, do not correct spelling, no markdown, no quotes, no commentary."
         )
     emit(recognize(model_dir, image_path, prompt, max_new_tokens))
     return 0

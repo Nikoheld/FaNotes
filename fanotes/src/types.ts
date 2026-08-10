@@ -397,6 +397,7 @@ export type FaNotesApi = {
     width: number
     height: number
     maxNewTokens?: number
+    language?: 'de' | 'en'
   }) => Promise<{
     text: string
     device: 'NPU'
