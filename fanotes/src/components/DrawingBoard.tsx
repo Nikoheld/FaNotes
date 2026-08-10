@@ -294,6 +294,8 @@ export type DrawingBoardProps = {
     | 'recognitionLanguage'
     | 'enhancedMathRecognition'
     | 'enhancedMathLicenseAccepted'
+    | 'qwenVisionRecognition'
+    | 'qwenVisionLicenseAccepted'
     | 'autoOpenConversion'
     | 'keepDrawingAfterInsert'
   >
@@ -2554,6 +2556,44 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         }
       }
 
+      // Optional Qwen3-VL (Intel NPU only): improves freehand text when enabled.
+      let qwenVisionFailure = ''
+      let qwenVisionUsed = false
+      if (
+        resolvedMode === 'text'
+        && !enhancedMathUsed
+        && settings.qwenVisionRecognition
+        && settings.qwenVisionLicenseAccepted
+        && window.fanotes.recognizeQwenVision
+      ) {
+        try {
+          const { renderQwenVisionImage, shouldPreferQwenVisionText } = await import('../lib/qwenVisionRecognition')
+          const visionImage = renderQwenVisionImage(engineStrokes, SOURCE_WIDTH, sourceHeight)
+          if (visionImage) {
+            const vision = await window.fanotes.recognizeQwenVision(visionImage)
+            if (runId !== recognitionRunRef.current) return
+            if (vision.device === 'NPU' && vision.text && shouldPreferQwenVisionText(value, vision.text)) {
+              value = vision.text
+              qwenVisionUsed = true
+              recognized = []
+              if (automaticDetection) {
+                automaticDetection = {
+                  ...automaticDetection,
+                  mode: 'text',
+                  value,
+                  confidence: Math.max(automaticDetection.confidence, vision.confidence),
+                  reason: 'Qwen3-VL auf Intel-NPU',
+                }
+              }
+            }
+          }
+        } catch (error) {
+          qwenVisionFailure = error instanceof Error
+            ? error.message
+            : 'Qwen3-VL konnte nicht auf der NPU ausgeführt werden.'
+        }
+      }
+
       setAutomaticResult(automaticDetection ? {
         confidence: automaticDetection.confidence,
         reason: automaticDetection.reason,
@@ -2569,12 +2609,12 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       // classic glyph tokens. Hiding those stale alternatives also prevents a
       // later insertion from training the personal glyph model on a mismatched
       // sequence.
-      setTokens(enhancedMathUsed ? [] : recognized)
+      setTokens(enhancedMathUsed || qwenVisionUsed ? [] : recognized)
       setWholeFormulaResult(enhancedMathUsed)
       setCorrection(value)
       setConversionOpen(true)
       const contextChanges = recognized.filter((token) => token.context?.changed).length
-      if (resolvedMode === 'text' && neuralTextFailure && !neuralTextUsed) {
+      if (resolvedMode === 'text' && neuralTextFailure && !neuralTextUsed && !qwenVisionUsed) {
         setNotice({
           kind: 'info',
           text: `${neuralTextFailure} FaNotes verwendet vorübergehend die klassische Erkennung.`,
@@ -2583,6 +2623,16 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         setNotice({
           kind: 'info',
           text: `${enhancedMathFailure} FaNotes verwendet für diese Eingabe die klassische lokale Mathematikerkennung.`,
+        })
+      } else if (resolvedMode === 'text' && qwenVisionFailure && !qwenVisionUsed) {
+        setNotice({
+          kind: 'info',
+          text: `${qwenVisionFailure} FaNotes bleibt bei der klassischen lokalen Texterkennung.`,
+        })
+      } else if (resolvedMode === 'text' && qwenVisionUsed) {
+        setNotice({
+          kind: 'success',
+          text: 'Qwen3-VL hat den Text auf der Intel-NPU gelesen (INT4, sparsam). Du kannst das Ergebnis weiter korrigieren.',
         })
       } else if (resolvedMode === 'text' && contextChanges > 0 && !neuralTextUsed) {
         setNotice({

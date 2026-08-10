@@ -139,6 +139,22 @@ and executes inference locally.
 Sources: https://github.com/CrispStrobe/CrispEmbed and
 https://huggingface.co/cstr/posformer-crohme-GGUF
 
+Optional Qwen3-VL vision recognition (Intel NPU)
+================================================
+Desktop builds can optionally download a local OpenVINO INT4 export of
+Qwen3-VL-2B-Instruct for handwriting vision. The weights are **not** part of
+the FaNotes installer: they are fetched only after explicit license acceptance
+and remain in the user profile. Inference is forced onto the Intel NPU for low
+power on Core Ultra processors; there is no CPU fallback path for this model.
+
+Qwen3-VL is Copyright (c) Qwen / Alibaba and released under the Apache License
+2.0. OpenVINO and OpenVINO GenAI are used as the optional local runtime when
+installed on the system.
+
+Sources: https://huggingface.co/Qwen/Qwen3-VL-2B-Instruct ,
+https://huggingface.co/shawnxhong/Qwen3-VL-2B-Instruct-ov-int4 and
+https://docs.openvino.ai/
+
 FaNotes local spelling filters
 ==============================
 The compact German and English Bloom filters shipped with FaNotes are derived

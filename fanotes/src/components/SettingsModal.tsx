@@ -35,7 +35,7 @@ import {
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { getUiLocale } from '../i18n'
 import { bestContrastText } from '../lib/colorContrast'
-import type { AppSettings, EnhancedMathRecognitionState, OneNoteImportResult, ServerBackupState, UpdateState } from '../types'
+import type { AppSettings, EnhancedMathRecognitionState, OneNoteImportResult, QwenVisionState, ServerBackupState, UpdateState } from '../types'
 
 type SettingsSection = 'appearance' | 'editor' | 'drawing' | 'files' | 'updates' | 'accessibility' | 'advanced'
 
@@ -280,6 +280,9 @@ export function SettingsModal({
   const [enhancedMathState, setEnhancedMathState] = useState<EnhancedMathRecognitionState | null>(null)
   const [enhancedMathBusy, setEnhancedMathBusy] = useState(false)
   const [enhancedMathError, setEnhancedMathError] = useState<string | null>(null)
+  const [qwenVisionState, setQwenVisionState] = useState<QwenVisionState | null>(null)
+  const [qwenVisionBusy, setQwenVisionBusy] = useState(false)
+  const [qwenVisionError, setQwenVisionError] = useState<string | null>(null)
   const trainingInputRef = useRef<HTMLInputElement>(null)
   const modalRef = useRef<HTMLElement>(null)
   const section = useMemo(() => SECTIONS.find((candidate) => candidate.id === active)!, [active])
@@ -317,6 +320,16 @@ export function SettingsModal({
     })
     return () => { activeRequest = false }
   }, [isWeb])
+  useEffect(() => {
+    if (isWeb || !window.fanotes.getQwenVisionState) return
+    let activeRequest = true
+    window.fanotes.getQwenVisionState().then((state) => {
+      if (activeRequest) setQwenVisionState(state)
+    }).catch(() => {
+      if (activeRequest) setQwenVisionState(null)
+    })
+    return () => { activeRequest = false }
+  }, [isWeb])
   const update = <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => {
     onChange({ ...settings, [key]: value })
   }
@@ -336,6 +349,24 @@ export function SettingsModal({
       setEnhancedMathError(error instanceof Error ? error.message : 'Das Formelmodell konnte nicht installiert werden.')
     } finally {
       setEnhancedMathBusy(false)
+    }
+  }
+  const installQwenVisionModel = async () => {
+    if (!window.fanotes.installQwenVisionModel) return
+    setQwenVisionBusy(true)
+    setQwenVisionError(null)
+    try {
+      const nextState = await window.fanotes.installQwenVisionModel({ acceptLicense: true })
+      setQwenVisionState(nextState)
+      onChange({
+        ...settings,
+        qwenVisionLicenseAccepted: true,
+        qwenVisionRecognition: true,
+      })
+    } catch (error) {
+      setQwenVisionError(error instanceof Error ? error.message : 'Qwen3-VL konnte nicht installiert werden.')
+    } finally {
+      setQwenVisionBusy(false)
     }
   }
   const handleTrainingFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -892,6 +923,42 @@ export function SettingsModal({
                       </span>
                     </div>
                     {enhancedMathError && <div className="settings-inline-error">{enhancedMathError}</div>}
+                  </div>}
+                  {!isWeb && <div id="settings-qwen-vision">
+                    <SettingRow
+                      title="Qwen3-VL Vision (Intel NPU)"
+                      description="Optionales lokales Vision-Modell für Handschrift. OpenVINO INT4, erzwungen auf der Intel-NPU (Core Ultra 9) für geringen Strom und hohe Effizienz. Nie beim Start geladen; jederzeit deaktivierbar."
+                    >
+                      {qwenVisionState?.installed ? (
+                        <Toggle
+                          label="Qwen3-VL Vision"
+                          checked={settings.qwenVisionRecognition}
+                          onChange={(value) => update('qwenVisionRecognition', value)}
+                        />
+                      ) : (
+                        <button
+                          type="button"
+                          className="settings-inline-button"
+                          disabled={qwenVisionBusy || qwenVisionState?.supported === false}
+                          onClick={() => void installQwenVisionModel()}
+                        >
+                          {qwenVisionBusy ? <LoaderCircle className="spin" size={15} /> : <Download size={15} />}
+                          {qwenVisionBusy ? 'NPU-Modell wird geladen …' : 'Lizenz akzeptieren & NPU-Modell laden'}
+                        </button>
+                      )}
+                    </SettingRow>
+                    <div className="settings-resource-note">
+                      <ShieldCheck size={14} />
+                      <span>
+                        Qwen3-VL 2B · OpenVINO INT4 · nur Intel-NPU · Apache-2.0 · ~1,8&nbsp;GB optionaler Download · SHA-256-geprüft.
+                        {' '}
+                        <button type="button" className="settings-link-button" onClick={() => void window.fanotes.openExternal(qwenVisionState?.homepage ?? 'https://huggingface.co/Qwen/Qwen3-VL-2B-Instruct')}>Modellkarte</button>
+                        {qwenVisionState?.npu === false && ' · Keine NPU erkannt.'}
+                        {qwenVisionState?.npu && qwenVisionState?.genai === false && ' · OpenVINO GenAI fehlt.'}
+                        {qwenVisionState?.supported === false && qwenVisionState?.error ? ` · ${qwenVisionState.error}` : ''}
+                      </span>
+                    </div>
+                    {qwenVisionError && <div className="settings-inline-error">{qwenVisionError}</div>}
                   </div>}
                   <SettingRow title="OCR-Modell im RAM behalten" description="Kürzere Zeiten geben den grossen lokalen Erkennungsworker früher frei; die nächste Konvertierung muss das Modell dann neu laden.">
                     <select value={settings.ocrModelKeepAliveSeconds} onChange={(event) => update('ocrModelKeepAliveSeconds', Number(event.target.value))}>

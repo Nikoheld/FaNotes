@@ -47,6 +47,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   desktopOcrModel: 'extended',
   enhancedMathRecognition: false,
   enhancedMathLicenseAccepted: false,
+  qwenVisionRecognition: false,
+  qwenVisionLicenseAccepted: false,
   ocrModelKeepAliveSeconds: 120,
   backgroundTaskLimit: 0,
   lmStudioBaseUrl: 'http://127.0.0.1:1234',

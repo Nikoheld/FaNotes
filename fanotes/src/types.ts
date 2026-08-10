@@ -116,6 +116,10 @@ export type AppSettings = {
   enhancedMathRecognition: boolean
   /** Records explicit acceptance of the separately downloaded model license. */
   enhancedMathLicenseAccepted: boolean
+  /** Optional Qwen3-VL vision recognizer (Intel NPU only, OpenVINO INT4). */
+  qwenVisionRecognition: boolean
+  /** Records explicit acceptance of the Qwen3-VL / OpenVINO model license. */
+  qwenVisionLicenseAccepted: boolean
   /** Seconds to retain the large TrOCR worker after the last conversion. */
   ocrModelKeepAliveSeconds: number
   /** 0 uses the normal desktop I/O scheduler; otherwise caps parallel work. */
@@ -169,6 +173,24 @@ export type EnhancedMathRecognitionState = {
   size: number
   license: 'CC-BY-NC-SA-3.0'
   homepage: string
+}
+
+export type QwenVisionState = {
+  supported: boolean
+  installed: boolean
+  downloading: boolean
+  npu: boolean
+  genai: boolean
+  devices: string[]
+  openvinoVersion: string | null
+  modelId: 'qwen3-vl-2b-int4-npu'
+  label: string
+  precision: 'int4'
+  device: 'NPU'
+  license: 'Apache-2.0'
+  homepage: string
+  repo: string
+  error: string | null
 }
 
 export type BootstrapData = {
@@ -357,6 +379,20 @@ export type FaNotesApi = {
     meanTokenMargin: number
     weakTokenRatio: number
     decodedTokens: number
+  }>
+  getQwenVisionState?: () => Promise<QwenVisionState>
+  installQwenVisionModel?: (request: { acceptLicense: true }) => Promise<QwenVisionState>
+  recognizeQwenVision?: (request: {
+    pixels: Uint8Array
+    width: number
+    height: number
+    maxNewTokens?: number
+  }) => Promise<{
+    text: string
+    device: 'NPU'
+    precision: 'int4'
+    modelId: 'qwen3-vl-2b-int4-npu'
+    confidence: number
   }>
   writeFile: (relativePath: string, content: string) => Promise<{ modifiedAt: string }>
   createNote: (parentPath?: string, preferredName?: string) => Promise<CreateResult>

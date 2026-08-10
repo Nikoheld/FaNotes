@@ -4,6 +4,7 @@
 
 - Beim Klick auf Herunterladen erscheint sofort ein sichtbarer Download-Fortschritt (Prozent und übertragene Daten) in den Einstellungen; der Status springt nicht mehr stumm, bis der Download fertig ist.
 - Zoom, Drehung und Verschieben der Handschriftseite bewegen nur noch den Blattinhalt. Die obere Werkzeugleiste bleibt fixiert oben und zoomt nicht mit.
+- Optionales **Qwen3-VL 2B**-Vision-Modell (OpenVINO **INT4**, ~1,8&nbsp;GB) für Handschrift: erst nach Lizenzbestätigung geladen, jederzeit abschaltbar, **nur Intel-NPU** (Core Ultra, z. B. Ultra&nbsp;9) – kein CPU-Fallback, damit Strom sparsam und Performance hoch bleiben. Voraussetzung: OpenVINO GenAI + NPU-Treiber.
 
 ## 2026.8.5
 

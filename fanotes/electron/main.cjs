@@ -9,6 +9,7 @@ const path = require('node:path')
 const { fileURLToPath, pathToFileURL } = require('node:url')
 const { Worker } = require('node:worker_threads')
 const { createEnhancedMathService } = require('./enhanced-math.cjs')
+const { createQwenVisionService } = require('./qwen-vision.cjs')
 const {
   cleanupStaleSingletonLocks,
   configureLeanChromiumStartup,
@@ -127,6 +128,9 @@ const IPC = Object.freeze({
   enhancedMathGetState: 'fanotes:enhanced-math-get-state',
   enhancedMathInstall: 'fanotes:enhanced-math-install',
   enhancedMathRecognize: 'fanotes:enhanced-math-recognize',
+  qwenVisionGetState: 'fanotes:qwen-vision-get-state',
+  qwenVisionInstall: 'fanotes:qwen-vision-install',
+  qwenVisionRecognize: 'fanotes:qwen-vision-recognize',
   lmStudioListModels: 'fanotes:lm-studio-list-models',
   lmStudioTransform: 'fanotes:lm-studio-transform',
   aiListModels: 'fanotes:ai-list-models',
@@ -193,6 +197,8 @@ const DEFAULT_SETTINGS = Object.freeze({
   desktopOcrModel: 'extended',
   enhancedMathRecognition: false,
   enhancedMathLicenseAccepted: false,
+  qwenVisionRecognition: false,
+  qwenVisionLicenseAccepted: false,
   ocrModelKeepAliveSeconds: 120,
   backgroundTaskLimit: 0,
   lmStudioBaseUrl: 'http://127.0.0.1:1234',
@@ -262,6 +268,8 @@ const SETTINGS_SCHEMA = Object.freeze({
   desktopOcrModel: { type: 'enum', values: ['compact', 'extended'] },
   enhancedMathRecognition: { type: 'boolean' },
   enhancedMathLicenseAccepted: { type: 'boolean' },
+  qwenVisionRecognition: { type: 'boolean' },
+  qwenVisionLicenseAccepted: { type: 'boolean' },
   ocrModelKeepAliveSeconds: { type: 'enum', values: [0, 30, 120, 300, 600] },
   backgroundTaskLimit: { type: 'enum', values: [0, 1, 2, 4, 8, 16, 24] },
   lmStudioBaseUrl: { type: 'string', max: 2048 },
@@ -493,6 +501,7 @@ let nativeOcrWorkerIdleTimer = null
 let nativeOcrModelPathPromise = null
 const nativeOcrPending = new Map()
 let enhancedMathService = null
+let qwenVisionService = null
 
 function enhancedMathRuntimePath() {
   const developmentOverride = process.env.FANOTES_CRISPEMBED_PATH?.trim()
@@ -511,6 +520,14 @@ function getEnhancedMathService() {
     runtimePath: enhancedMathRuntimePath,
   })
   return enhancedMathService
+}
+
+function getQwenVisionService() {
+  qwenVisionService ??= createQwenVisionService({
+    userDataPath: app.getPath('userData'),
+    workerPath: path.join(__dirname, 'qwen-vision-worker.py'),
+  })
+  return qwenVisionService
 }
 
 function nativeOcrRuntimeEntry() {
@@ -3336,6 +3353,18 @@ function registerIpcHandlers() {
       ? Math.min(configured, logicalCores, 4)
       : automatic
     return getEnhancedMathService().recognize({ ...request, threads })
+  })
+
+  handle(IPC.qwenVisionGetState, async () => getQwenVisionService().state())
+  handle(IPC.qwenVisionInstall, async (_event, request) => getQwenVisionService().install(request))
+  handle(IPC.qwenVisionRecognize, async (_event, request) => {
+    if (!currentSettings.qwenVisionRecognition || !currentSettings.qwenVisionLicenseAccepted) {
+      throw new Error('Qwen3-VL ist in den Einstellungen nicht aktiviert.')
+    }
+    return getQwenVisionService().recognize({
+      ...request,
+      language: currentSettings.recognitionLanguage === 'en' ? 'en' : 'de',
+    })
   })
 
   handle(IPC.lmStudioListModels, async (_event, baseUrl, apiToken) => {
