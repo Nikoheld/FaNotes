@@ -188,6 +188,8 @@ export type QwenVisionState = {
   npu: boolean
   genai: boolean
   devices: string[]
+  npuDevice?: string | null
+  host?: { driverPaths?: string[]; hints?: string[] } | null
   openvinoVersion: string | null
   modelId: 'qwen3-vl-2b-int4-npu'
   label: string

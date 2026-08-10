@@ -989,6 +989,12 @@ export function SettingsModal({
                       <div className="settings-inline-error" role="status">
                         <strong>Laufzeit / Hardware</strong>
                         <span>{qwenVisionState.error}</span>
+                        {Array.isArray(qwenVisionState.devices) && qwenVisionState.devices.length > 0 && (
+                          <span>OpenVINO-Geräte: {qwenVisionState.devices.join(', ')}</span>
+                        )}
+                        {Array.isArray(qwenVisionState.host?.hints) && qwenVisionState.host.hints.length > 0 && (
+                          <span>{qwenVisionState.host.hints.join(' ')}</span>
+                        )}
                       </div>
                     )}
                     {qwenVisionError && <div className="settings-inline-error">{qwenVisionError}</div>}

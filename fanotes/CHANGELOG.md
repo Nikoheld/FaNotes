@@ -1,5 +1,10 @@
 # Änderungsverlauf
 
+## 2026.8.9
+
+- **Qwen3-VL / Core Ultra X9:** Die NPU-Erkennung erzwingt nicht mehr die veraltete Meteor-Lake-Plattform `OV_NPU_PLATFORM=3720` (das konnte NPUs neuerer Core-Ultra-Chips wie **Ultra X9 388H** unsichtbar machen). OpenVINO wählt die NPU automatisch (inkl. `NPU` / `NPU.0`).
+- Die OpenVINO-Laufzeit verlangt **≥2025** (bzw. 2024.6+) und installiert sie bei Bedarf neu; Probe- und Fehlermeldungen listen sichtbare Geräte und Linux-Hinweise (`/dev/accel`, NPU-Treiber).
+
 ## 2026.8.8
 
 - **Zoom/Pan/Drehung im Stiftmodus:** Das gesamte Notizblatt (Hintergrundraster, Text und Handschrift) bewegt sich wieder als **eine Einheit**. Die obere Werkzeugleiste bleibt schmal und fix am Bildschirm (Portal außerhalb der Transform).

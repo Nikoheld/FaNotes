@@ -59,9 +59,11 @@ const WORKER_TIMEOUT_MS = 90_000
 const RUNTIME_INSTALL_TIMEOUT_MS = 45 * 60_000
 const HF_BASE = 'https://huggingface.co'
 /** Packages installed into an isolated FaNotes venv for Qwen3-VL. */
+// Prefer recent OpenVINO for Core Ultra Series 2 / X9 (NPU4000-class). Older
+// 2024.4 stacks often only list CPU/GPU on new silicon.
 const RUNTIME_PIP_PACKAGES = Object.freeze([
-  'openvino>=2024.4,<2026',
-  'openvino-genai>=2024.4,<2026',
+  'openvino>=2025.0,<2026',
+  'openvino-genai>=2025.0,<2026',
   'pillow>=10.0.0,<12',
 ])
 
@@ -287,11 +289,15 @@ function createQwenVisionService({
     try {
       const marker = JSON.parse(await fsp.readFile(runtimeMarkerPath, 'utf8'))
       if (marker?.version !== 1 || !Array.isArray(marker.packages)) return false
-      // Cheap import check in the venv.
-      await runProcess(venvPythonPath, [
+      // Require OpenVINO 2025+ so newer Core Ultra NPUs (X9 388H etc.) are visible.
+      const check = await runProcess(venvPythonPath, [
         '-c',
         'import openvino, openvino_genai, PIL; print(openvino.__version__)',
       ], { timeoutMs: 60_000 })
+      const version = (check.stdout || '').trim().split(/\r?\n/u).filter(Boolean).at(-1) || ''
+      if (!/^202[5-9]\./u.test(version) && !/^2024\.(?:[6-9]|1\d)\./u.test(version)) {
+        return false
+      }
       return true
     } catch {
       return false
@@ -402,8 +408,8 @@ function createQwenVisionService({
             // Do not force PYTHONNOUSERSITE=1 — that hid intentionally installed packages.
             PYTHONUTF8: '1',
             PYTHONUNBUFFERED: '1',
-            // Keep OpenVINO plugins from silently preferring CPU.
-            OPENVINO_DEVICE: 'NPU',
+            // Do not force OPENVINO_DEVICE / OV_NPU_PLATFORM here: probe must see
+            // all devices, and newer NPUs break when pinned to MTL platform 3720.
           },
           stdio: ['pipe', 'pipe', 'pipe'],
           windowsHide: true,
@@ -459,6 +465,8 @@ function createQwenVisionService({
         npu: Boolean(result?.npu),
         genai: Boolean(result?.genai),
         devices: Array.isArray(result?.devices) ? result.devices.map(String) : [],
+        npuDevice: typeof result?.npuDevice === 'string' ? result.npuDevice : null,
+        host: result?.host && typeof result.host === 'object' ? result.host : null,
         openvinoVersion: typeof result?.openvinoVersion === 'string' ? result.openvinoVersion : null,
         error: typeof result?.error === 'string' ? result.error : null,
       }
@@ -468,6 +476,8 @@ function createQwenVisionService({
         npu: false,
         genai: false,
         devices: [],
+        npuDevice: null,
+        host: null,
         openvinoVersion: null,
         error: error instanceof Error ? error.message : String(error),
       }
@@ -542,7 +552,17 @@ function createQwenVisionService({
     }
     if (raw) return raw
     if (!runtime.npu) {
-      return 'Keine Intel-NPU erkannt. Qwen3-VL läuft in FaNotes nur auf der NPU (Core Ultra) – mit aktuellem NPU-Treiber.'
+      const devices = Array.isArray(runtime.devices) && runtime.devices.length
+        ? runtime.devices.join(', ')
+        : 'keine'
+      const hostHints = Array.isArray(runtime.host?.hints) ? runtime.host.hints.join(' ') : ''
+      return (
+        'Keine Intel-NPU von OpenVINO erkannt '
+        + `(sichtbare Geräte: ${devices}). `
+        + 'Dein Core Ultra (z. B. Ultra X9 388H) hat eine NPU – sie muss vom Intel-NPU-Treiber und OpenVINO ≥2025 sichtbar sein. '
+        + (hostHints ? `${hostHints} ` : '')
+        + 'Qwen3-VL bleibt bewusst NPU-only (kein CPU-Fallback).'
+      )
     }
     return 'Qwen3-VL-Laufzeit nicht bereit.'
   }
@@ -579,6 +599,8 @@ function createQwenVisionService({
       npu: Boolean(runtime.npu),
       genai: Boolean(runtime.genai),
       devices: runtime.devices,
+      npuDevice: runtime.npuDevice ?? null,
+      host: runtime.host ?? null,
       openvinoVersion: runtime.openvinoVersion,
       modelId: descriptor.id,
       label: descriptor.label,
@@ -648,9 +670,13 @@ function createQwenVisionService({
       // 2) Probe NPU with the freshly prepared environment.
       const runtime = await probe(true)
       if (!runtime.ok || !runtime.npu) {
+        const devices = Array.isArray(runtime.devices) && runtime.devices.length
+          ? ` OpenVINO sieht: ${runtime.devices.join(', ')}.`
+          : ''
         throw new Error(
-          runtime.error
-          || 'Intel-NPU erforderlich. Qwen3-VL ist NPU-only für geringen Stromverbrauch (Core Ultra + NPU-Treiber).',
+          (runtime.error
+            || 'Intel-NPU erforderlich. Qwen3-VL ist NPU-only für geringen Stromverbrauch (Core Ultra + NPU-Treiber).')
+          + devices,
         )
       }
       if (!runtime.genai) {
