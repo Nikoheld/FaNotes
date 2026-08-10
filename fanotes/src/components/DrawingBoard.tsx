@@ -35,6 +35,7 @@ import {
   useState,
   type PointerEvent as ReactPointerEvent,
 } from 'react'
+import { createPortal } from 'react-dom'
 import { BASE_CATALOG } from '../../../src/data/catalog'
 import type {
   AutomaticRecognitionResult,
@@ -1416,21 +1417,30 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     }
 
     // Map client coordinates through the inverse of the active view transform
-    // (translate → rotate → scale around the canvas center). Using the
-    // transformed bounding box alone would mis-map points when the sheet is rotated.
+    // (translate → rotate → scale around the paper/canvas center). Prefer the
+    // paper box in inline mode so ink stays aligned with the transformed sheet.
     const width = Math.max(1, canvas.offsetWidth)
     const height = Math.max(1, canvas.offsetHeight)
-    const rect = canvas.getBoundingClientRect()
-    const centerX = rect.left + rect.width / 2
-    const centerY = rect.top + rect.height / 2
+    const originEl = (inline
+      ? (canvas.closest('.unified-paper') as HTMLElement | null)
+      : null) ?? canvas
+    const originRect = originEl.getBoundingClientRect()
+    const centerX = originRect.left + originRect.width / 2
+    const centerY = originRect.top + originRect.height / 2
     const dx = event.clientX - centerX
     const dy = event.clientY - centerY
     const zoom = Math.max(0.01, viewZoomRef.current)
     const rad = (-viewRotationRef.current * Math.PI) / 180
     const cos = Math.cos(rad)
     const sin = Math.sin(rad)
-    const localX = (dx * cos - dy * sin) / zoom + width / 2
-    const localY = (dx * sin + dy * cos) / zoom + height / 2
+    // Recover local paper-space coords relative to the canvas layout box.
+    // Canvas fills the paper in inline mode, so paper-local == canvas-local.
+    const paperW = Math.max(1, originEl === canvas ? width : originEl.offsetWidth)
+    const paperH = Math.max(1, originEl === canvas ? height : originEl.offsetHeight)
+    const paperLocalX = (dx * cos - dy * sin) / zoom + paperW / 2
+    const paperLocalY = (dx * sin + dy * cos) / zoom + paperH / 2
+    const localX = originEl === canvas ? paperLocalX : paperLocalX * (width / paperW)
+    const localY = originEl === canvas ? paperLocalY : paperLocalY * (height / paperH)
 
     return {
       x: clamp(localX / width),
@@ -1441,21 +1451,25 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       tiltY: event.tiltY ?? 0,
       pointerType: event.pointerType || 'mouse',
     }
+  }, [inline])
+
+  const resolvePaperElement = useCallback((): HTMLElement | null => {
+    const surface = surfaceRef.current
+    return (surface?.closest('.unified-paper') ?? boardRef.current?.closest('.unified-paper')) as HTMLElement | null
   }, [])
 
   const clearViewTransformTargets = useCallback(() => {
     const surface = surfaceRef.current
-    const paper = (surface?.closest('.unified-paper') ?? boardRef.current?.closest('.unified-paper')) as HTMLElement | null
+    const paper = resolvePaperElement()
     const noteView = paper?.closest('.unified-note-view') as HTMLElement | null
-    // Never leave a transform on the paper shell: that would zoom/pan the sticky
-    // handwriting toolbar with the sheet. Only content layers are transformed.
     if (paper) {
       paper.style.transform = ''
       paper.style.transformOrigin = ''
       paper.classList.remove('is-view-transformed')
     }
     if (noteView) noteView.classList.remove('is-view-transformed')
-    paper?.querySelectorAll<HTMLElement>('.editor-pane, .worksheet-layer, .lw-canvas-surface').forEach((element) => {
+    // Clear any legacy per-layer transforms from earlier builds so text/ink/paper stay locked.
+    paper?.querySelectorAll<HTMLElement>('.editor-pane, .worksheet-layer, .lw-canvas-surface, .lw-drawing-board').forEach((element) => {
       element.style.transform = ''
       element.style.transformOrigin = ''
     })
@@ -1463,7 +1477,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       surface.style.transform = ''
       surface.style.transformOrigin = ''
     }
-  }, [])
+  }, [resolvePaperElement])
 
   const applyViewTransform = useCallback((zoom: number, rotation: number, pan: { x: number; y: number }) => {
     const transform = `translate(${pan.x}px, ${pan.y}px) rotate(${rotation}deg) scale(${zoom})`
@@ -1476,27 +1490,25 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       }
       return
     }
-    // Inline: zoom/rotate/pan only the sheet content (editor + ink + worksheets).
-    // The DrawingBoard toolbar/footer stay untransformed and remain at the top.
-    const paper = (surface?.closest('.unified-paper') ?? boardRef.current?.closest('.unified-paper')) as HTMLElement | null
+    // Inline: transform the whole paper shell (background pattern + text + ink + worksheets)
+    // as one unit so nothing drifts. Floating toolbar/footer are portaled outside this tree.
+    const paper = resolvePaperElement()
     const noteView = paper?.closest('.unified-note-view') as HTMLElement | null
+    paper?.querySelectorAll<HTMLElement>('.editor-pane, .worksheet-layer, .lw-canvas-surface').forEach((element) => {
+      element.style.transform = ''
+      element.style.transformOrigin = ''
+    })
+    if (surface) {
+      surface.style.transform = ''
+      surface.style.transformOrigin = ''
+    }
     if (paper) {
-      paper.style.transform = ''
-      paper.style.transformOrigin = ''
+      paper.style.transform = active ? transform : ''
+      paper.style.transformOrigin = 'center center'
       paper.classList.toggle('is-view-transformed', active)
     }
     if (noteView) noteView.classList.toggle('is-view-transformed', active)
-    const contentLayers = [
-      paper?.querySelector<HTMLElement>('.editor-pane') ?? null,
-      paper?.querySelector<HTMLElement>('.worksheet-layer') ?? null,
-      surface,
-    ]
-    for (const element of contentLayers) {
-      if (!element) continue
-      element.style.transform = active ? transform : ''
-      element.style.transformOrigin = 'center center'
-    }
-  }, [inline])
+  }, [inline, resolvePaperElement])
 
   const setView = useCallback((next: { zoom?: number; rotation?: number; pan?: { x: number; y: number } }) => {
     const zoom = clampViewZoom(next.zoom ?? viewZoomRef.current)
@@ -1516,9 +1528,9 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     const next = clampViewZoom(previous + delta)
     if (next === previous) return
     // Keep the pointer position stable when zooming around a point.
-    if (originClient && canvasRef.current) {
-      const canvas = canvasRef.current
-      const rect = canvas.getBoundingClientRect()
+    const originTarget = (inline ? resolvePaperElement() : null) ?? canvasRef.current
+    if (originClient && originTarget) {
+      const rect = originTarget.getBoundingClientRect()
       const centerX = rect.left + rect.width / 2
       const centerY = rect.top + rect.height / 2
       const dx = originClient.x - centerX
@@ -1534,7 +1546,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       return
     }
     setView({ zoom: next })
-  }, [setView])
+  }, [inline, resolvePaperElement, setView])
 
   const rotateBy = useCallback((delta: number) => {
     setView({ rotation: viewRotationRef.current + delta })
@@ -3466,16 +3478,22 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         </div>
       </header>
 
-      <div className="lw-draw-toolbar" aria-label="Zeichenwerkzeuge">
+      {(() => {
+        const toolbar = (
+      <div
+        className={`lw-draw-toolbar ${inline ? 'is-floating-chrome' : ''} ${inline && inputActive ? 'is-visible' : ''}`}
+        aria-label="Zeichenwerkzeuge"
+        data-fanotes-drawing-chrome={inline ? 'toolbar' : undefined}
+      >
         <div className="lw-draw-toolgroup lw-segmented">
           <button type="button" className={tool === 'pen' && inkMode === 'writing' ? 'is-active' : ''} aria-pressed={tool === 'pen' && inkMode === 'writing'} title="Handschrift schreiben oder vorhandene Wörter mehrfach durchkritzeln" onClick={activateWriting}>
-            <PenLine size={16} /> Schreiben
+            <PenLine size={16} /> <span className="lw-tool-label">Schreiben</span>
           </button>
           <button type="button" className={tool === 'pen' && inkMode === 'drawing' ? 'is-active' : ''} aria-pressed={tool === 'pen' && inkMode === 'drawing'} title="Zeichenstudio mit Pinseln und Spezialfarben öffnen" onClick={activateDrawing}>
-            <Paintbrush size={16} /> Zeichnen
+            <Paintbrush size={16} /> <span className="lw-tool-label">Zeichnen</span>
           </button>
           <button type="button" className={tool === 'eraser' ? 'is-active' : ''} aria-pressed={tool === 'eraser'} onClick={activateEraser}>
-            <Eraser size={16} /> Radierer
+            <Eraser size={16} /> <span className="lw-tool-label">Radierer</span>
           </button>
         </div>
 
@@ -3584,6 +3602,9 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
           <button type="button" className="lw-draw-icon lw-danger" aria-label="Alles löschen" title="Alles löschen" onClick={clear} disabled={!inkCount}><Trash2 size={17} /></button>
         </div>
       </div>
+        )
+        return inline && typeof document !== 'undefined' ? createPortal(toolbar, document.body) : toolbar
+      })()}
 
       {inkMode === 'drawing' && tool === 'pen' && artPanelOpen && <aside className="lw-art-studio" aria-label="Zeichenstudio">
         <header>
@@ -4080,7 +4101,12 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         <button type="button" aria-label="Hinweis schließen" onClick={() => setNotice(null)}><X size={14} /></button>
       </div>}
 
-      <footer className="lw-draw-footer">
+      {(() => {
+        const footer = (
+      <footer
+        className={`lw-draw-footer ${inline ? 'is-floating-chrome' : ''} ${inline && inputActive ? 'is-visible' : ''}`}
+        data-fanotes-drawing-chrome={inline ? 'footer' : undefined}
+      >
         {inkMode === 'writing' && knownTrainingSampleCount === 0 && <div>
           <button type="button" className="lw-draw-subtle" onClick={requestTraining} disabled={isImporting || isResettingTraining}>
             {isImporting ? <LoaderCircle className="lw-spin" size={15} /> : <Sparkles size={15} />}
@@ -4108,6 +4134,9 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
           {inkMode === 'drawing' && <span className="lw-art-footer-note"><Paintbrush size={14} /> Zeichenstriche und Piktogramme werden nicht als Text interpretiert</span>}
         </div>
       </footer>
+        )
+        return inline && typeof document !== 'undefined' ? createPortal(footer, document.body) : footer
+      })()}
 
       <TextToHandwritingDialog
         open={textToHandwritingOpen}
@@ -4151,7 +4180,61 @@ const drawingBoardStyles = `
 .lw-correction-field{display:flex;flex-direction:column;gap:6px;color:var(--text-muted,#aaa);font-size:11px}.lw-correction-field textarea{width:100%;resize:vertical;min-height:53px;padding:9px 10px;border:1px solid var(--draw-border);border-radius:10px;outline:none;color:var(--text,#fff);background:color-mix(in srgb,var(--background,#111116) 72%,transparent);font:500 13px/1.45 var(--editor-font,ui-monospace,monospace)}.lw-correction-field textarea:focus{border-color:color-mix(in srgb,var(--draw-accent) 65%,transparent);box-shadow:0 0 0 3px color-mix(in srgb,var(--draw-accent) 12%,transparent)}.lw-beautiful-preview{position:relative;display:grid;min-height:100px;place-items:center;overflow:auto;padding:27px 16px 14px;border:1px solid rgba(74,82,110,.12);border-radius:13px;color:#20222c;background:radial-gradient(circle at 20% 10%,rgba(118,84,214,.08),transparent 38%),linear-gradient(145deg,#fff,#f5f6fb);box-shadow:inset 0 1px rgba(255,255,255,.9),0 8px 25px rgba(0,0,0,.12)}.lw-preview-label{position:absolute;top:8px;left:10px;padding:2px 6px;border-radius:5px;color:#737788;background:rgba(100,105,130,.08);font:700 8px/1.4 var(--ui-font,system-ui);letter-spacing:.08em;text-transform:uppercase}.lw-beautiful-preview p{width:100%;margin:0;white-space:pre-wrap;font:500 16px/1.65 var(--editor-font,Georgia,serif)}.lw-math-render{max-width:100%;font-size:18px}.lw-math-render .katex-display{margin:.3em 0}.lw-preview-empty{color:#767988;font-style:italic}.lw-primary-action,.lw-convert-action{display:flex;align-items:center;justify-content:center;gap:8px;min-height:38px;padding:0 14px;border-radius:10px;color:var(--on-accent,#11131a);background:var(--draw-accent);box-shadow:0 8px 22px color-mix(in srgb,var(--draw-accent) 24%,transparent)}.lw-primary-action:hover:not(:disabled),.lw-convert-action:hover:not(:disabled){transform:translateY(-1px);filter:brightness(1.07)}
 .lw-empty-conversion{display:flex;flex:1;min-height:230px;align-items:center;justify-content:center;flex-direction:column;text-align:center;color:var(--text-muted,#999)}.lw-empty-conversion>svg{margin-bottom:10px;color:var(--accent-readable,var(--draw-accent))}.lw-empty-conversion strong{color:var(--text,#fff)}.lw-empty-conversion p{max-width:290px;margin:7px 0 15px;font-size:12px;line-height:1.6}.lw-model-card{gap:9px;margin-top:auto;padding:9px;border:1px solid var(--draw-border);border-radius:11px;background:color-mix(in srgb,var(--background,#111116) 42%,transparent)}.lw-model-card>span{width:7px;height:7px;flex:0 0 auto;border-radius:50%;background:var(--warning,#b36b2d)}.lw-model-card>span.is-ready{background:var(--success,#3a8f6d);box-shadow:0 0 7px color-mix(in srgb,var(--success,#3a8f6d) 65%,transparent)}.lw-model-copy{display:flex;min-width:0;flex:1;flex-direction:column}.lw-model-card strong{font-size:10px}.lw-model-card small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:9px}.lw-model-actions{display:flex;align-items:center;gap:4px}.lw-model-card button{display:flex;align-items:center;gap:4px;padding:5px 7px;border:0;border-radius:7px;background:color-mix(in srgb,var(--text,#fff) 7%,transparent)}.lw-model-card button.is-danger{color:var(--danger,#d94b63);background:color-mix(in srgb,var(--danger,#d94b63) 9%,transparent)}
 .lw-draw-notice{display:flex;align-items:center;gap:7px;margin:0 14px 10px;padding:8px 10px;border:1px solid var(--draw-border);border-radius:9px;background:var(--background-secondary,#1b1b22);font-size:11px}.lw-draw-notice.is-success{color:var(--success,#3a8f6d);border-color:color-mix(in srgb,var(--success,#3a8f6d) 28%,transparent)}.lw-draw-notice.is-error{color:var(--danger,#d94b63);border-color:color-mix(in srgb,var(--danger,#d94b63) 28%,transparent)}.lw-draw-notice.is-info{color:var(--accent-readable,var(--draw-accent));border-color:color-mix(in srgb,var(--draw-accent) 32%,transparent)}.lw-draw-notice span{flex:1}.lw-draw-notice button{display:grid;place-items:center;border:0;background:transparent;color:inherit;cursor:pointer}.lw-draw-footer{min-height:55px;flex:0 0 auto;justify-content:space-between;gap:10px;padding:9px 14px;border-top:1px solid var(--draw-border);background:color-mix(in srgb,var(--background-secondary,#17171d) 92%,transparent)}.lw-footer-actions{gap:8px}.lw-convert-action{min-height:34px}.lw-spin{animation:lw-spin .8s linear infinite}.sr-only{position:absolute!important;width:1px!important;height:1px!important;padding:0!important;margin:-1px!important;overflow:hidden!important;clip:rect(0,0,0,0)!important;white-space:nowrap!important;border:0!important}@keyframes lw-spin{to{transform:rotate(360deg)}}
-.lw-drawing-board.is-inline{position:absolute;z-index:4;inset:0;height:auto;min-height:100%;overflow:visible;background:transparent;pointer-events:none}.lw-drawing-board.is-inline .lw-draw-header{display:none}.lw-drawing-board.is-inline .lw-draw-toolbar{position:fixed;z-index:48;top:max(12px,env(safe-area-inset-top,0px));left:50%;width:max-content;max-width:calc(100vw - 28px);min-height:48px;margin:0;padding:6px 8px;border:1px solid var(--draw-border);border-radius:13px;background:color-mix(in srgb,var(--background-secondary,#17171d) 94%,transparent);box-shadow:0 14px 38px rgba(0,0,0,.22);backdrop-filter:blur(14px);pointer-events:auto;transform:translateX(-50%);transition:opacity .14s,transform .14s}.lw-drawing-board.is-inline:not(.is-input-active) .lw-draw-toolbar{opacity:0;transform:translateX(-50%) translateY(-8px);pointer-events:none}.lw-drawing-board.is-inline .lw-draw-workspace{position:absolute;inset:0;display:block;min-height:100%;padding:0;pointer-events:none}.lw-drawing-board.is-inline .lw-canvas-shell{position:absolute;inset:0;display:block;padding:0;border:0;border-radius:0;background:transparent;box-shadow:none;pointer-events:none}.lw-drawing-board.is-inline .lw-canvas-glow,.lw-drawing-board.is-inline .lw-canvas-meta{display:none}.lw-drawing-board.is-inline .lw-canvas-surface{position:absolute;inset:0;width:100%!important;height:100%!important;min-width:0;min-height:0;aspect-ratio:auto;margin:0;border-radius:0;background:transparent;box-shadow:none}.lw-drawing-board.is-inline .lw-tablet-canvas{width:100%;height:100%;pointer-events:none}.lw-drawing-board.is-inline .lw-tablet-canvas.is-input-active{pointer-events:auto}.lw-drawing-board.is-inline .lw-conversion-panel{position:sticky;z-index:14;top:72px;float:right;width:min(370px,calc(100% - 28px));max-height:calc(100vh - 175px);margin:72px 14px 0 0;overflow:auto;pointer-events:auto;box-shadow:0 22px 70px rgba(0,0,0,.34)}.lw-drawing-board.is-inline .lw-draw-notice{position:sticky;z-index:15;top:72px;width:min(420px,calc(100% - 28px));margin:72px auto 0;pointer-events:auto;box-shadow:0 13px 34px rgba(0,0,0,.24)}.lw-drawing-board.is-inline .lw-draw-footer{position:fixed;z-index:45;bottom:38px;left:50%;width:max-content;max-width:calc(100vw - 84px);min-height:44px;margin:0;padding:5px;border:1px solid var(--draw-border);border-radius:12px;background:color-mix(in srgb,var(--background-secondary,#17171d) 94%,transparent);box-shadow:0 14px 38px rgba(0,0,0,.22);backdrop-filter:blur(14px);pointer-events:auto;transform:translateX(-50%)}.lw-drawing-board.is-inline:not(.is-input-active) .lw-draw-footer{display:none}.lw-drawing-board.is-inline .lw-footer-actions>button:first-child{display:none}
+
+.lw-drawing-board.is-inline{position:absolute;z-index:4;inset:0;height:auto;min-height:100%;overflow:visible;background:transparent;pointer-events:none}
+.lw-drawing-board.is-inline .lw-draw-header{display:none}
+.lw-draw-toolbar.is-floating-chrome,.lw-draw-footer.is-floating-chrome{
+  position:fixed;z-index:48;left:50%;margin:0;border:1px solid var(--draw-border);
+  background:color-mix(in srgb,var(--background-secondary,#17171d) 96%,transparent);
+  box-shadow:0 14px 38px rgba(0,0,0,.24);backdrop-filter:blur(14px);pointer-events:none;
+  opacity:0;transform:translateX(-50%) translateY(-8px);transition:opacity .14s ease,transform .14s ease
+}
+.lw-draw-toolbar.is-floating-chrome{
+  top:max(10px,env(safe-area-inset-top,0px));
+  width:min(640px,calc(100vw - 56px));
+  max-width:min(640px,calc(100vw - 56px));
+  min-height:0;padding:5px 6px;border-radius:12px;
+  display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:5px;
+  overflow:hidden
+}
+.lw-draw-toolbar.is-floating-chrome.is-visible,.lw-draw-footer.is-floating-chrome.is-visible{
+  opacity:1;transform:translateX(-50%);pointer-events:auto
+}
+.lw-draw-toolbar.is-floating-chrome .lw-segmented{padding:2px;gap:2px}
+.lw-draw-toolbar.is-floating-chrome .lw-segmented button{height:28px;padding:0 8px;font-size:10px}
+.lw-draw-toolbar.is-floating-chrome .lw-writing-actions{gap:2px}
+.lw-draw-toolbar.is-floating-chrome .lw-writing-actions button{height:28px;min-width:28px;padding:0 6px;font-size:0;gap:0}
+.lw-draw-toolbar.is-floating-chrome .lw-writing-actions button>svg{width:15px;height:15px}
+.lw-draw-toolbar.is-floating-chrome .lw-draw-range{grid-template-columns:34px minmax(56px,72px) 34px;gap:3px;font-size:9px}
+.lw-draw-toolbar.is-floating-chrome .lw-draw-range span{display:none}
+.lw-draw-toolbar.is-floating-chrome .lw-paper-select{height:28px}
+.lw-draw-toolbar.is-floating-chrome .lw-draw-icon{width:28px;height:28px}
+.lw-draw-toolbar.is-floating-chrome .lw-view-reset{height:28px;padding:0 7px;font-size:9px}
+.lw-draw-toolbar.is-floating-chrome .lw-colors>button{width:16px;height:16px}
+.lw-draw-toolbar.is-floating-chrome .lw-tool-label{display:inline}
+@media(max-width:760px){
+  .lw-draw-toolbar.is-floating-chrome{width:min(100vw - 20px,calc(100vw - 20px));max-width:calc(100vw - 20px);padding:4px}
+  .lw-draw-toolbar.is-floating-chrome .lw-tool-label{display:none}
+  .lw-draw-toolbar.is-floating-chrome .lw-writing-actions .lw-tool-label,
+  .lw-draw-toolbar.is-floating-chrome .lw-writing-actions{font-size:0}
+  .lw-draw-toolbar.is-floating-chrome .lw-writing-actions button{width:28px;padding:0}
+  .lw-draw-toolbar.is-floating-chrome .lw-writing-actions button>svg{margin:0}
+}
+.lw-drawing-board.is-inline .lw-draw-workspace{position:absolute;inset:0;display:block;min-height:100%;padding:0;pointer-events:none}
+.lw-drawing-board.is-inline .lw-canvas-shell{position:absolute;inset:0;display:block;padding:0;border:0;border-radius:0;background:transparent;box-shadow:none;pointer-events:none}
+.lw-drawing-board.is-inline .lw-canvas-glow,.lw-drawing-board.is-inline .lw-canvas-meta{display:none}
+.lw-drawing-board.is-inline .lw-canvas-surface{position:absolute;inset:0;width:100%!important;height:100%!important;min-width:0;min-height:0;aspect-ratio:auto;margin:0;border-radius:0;background:transparent;box-shadow:none;will-change:auto}
+.lw-drawing-board.is-inline .lw-tablet-canvas{width:100%;height:100%;pointer-events:none}
+.lw-drawing-board.is-inline .lw-tablet-canvas.is-input-active{pointer-events:auto}
+.lw-drawing-board.is-inline .lw-conversion-panel{position:sticky;z-index:14;top:72px;float:right;width:min(370px,calc(100% - 28px));max-height:calc(100vh - 175px);margin:72px 14px 0 0;overflow:auto;pointer-events:auto;box-shadow:0 22px 70px rgba(0,0,0,.34)}
+.lw-drawing-board.is-inline .lw-draw-notice{position:sticky;z-index:15;top:72px;width:min(420px,calc(100% - 28px));margin:72px auto 0;pointer-events:auto;box-shadow:0 13px 34px rgba(0,0,0,.24)}
+.lw-draw-footer.is-floating-chrome{
+  bottom:max(34px,env(safe-area-inset-bottom,0px));z-index:45;
+  width:min(520px,calc(100vw - 72px));max-width:calc(100vw - 72px);
+  min-height:40px;padding:4px 5px;border-radius:11px;justify-content:center
+}
+.lw-draw-footer.is-floating-chrome:not(.is-visible){display:none}
+.lw-draw-footer.is-floating-chrome .lw-footer-actions>button:first-child{display:none}
 .lw-drawing-board.is-inline .lw-art-studio{position:sticky;z-index:13;top:72px;width:min(900px,calc(100% - 28px));max-height:calc(100vh - 170px);margin:72px auto 0;overflow:auto;background:color-mix(in srgb,var(--background-secondary,#17171d) 95%,transparent);backdrop-filter:blur(18px);pointer-events:auto}.lw-drawing-board.is-inline:not(.is-input-active) .lw-art-studio{display:none}
 @media(max-width:900px){.lw-draw-workspace.has-conversion{grid-template-columns:1fr}.lw-conversion-panel{position:absolute;z-index:5;inset:10px;box-shadow:0 24px 80px rgba(0,0,0,.45)}.lw-draw-range span{display:none}.lw-draw-toolbar{gap:7px}.lw-canvas-surface{width:100%;height:auto}.lw-draw-workspace{padding:10px}}@media(max-width:640px){.lw-math-correction-popover{left:8px!important;width:calc(100% - 16px);max-height:82%;}.lw-math-correction-actions{grid-template-columns:1fr}}
 @media(max-width:900px){.lw-art-studio-body{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}.lw-art-control-section{grid-column:1/-1;display:grid;grid-template-columns:1fr 1fr minmax(140px,.7fr)}}
