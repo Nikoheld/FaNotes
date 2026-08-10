@@ -121,6 +121,10 @@ const loadRecognitionModule = async () => {
 
 const SOURCE_WIDTH = 900
 const SOURCE_HEIGHT = 1273
+/** Grow the writable page by ~¾ A4 each time the pen or scroll approaches the end. */
+const PAGE_GROW_STEP = Math.round(SOURCE_HEIGHT * 0.75)
+/** Soft cap (~40 A4 pages) so a runaway scroll cannot exhaust memory. */
+const MAX_SOURCE_HEIGHT = SOURCE_HEIGHT * 40
 const EXPORT_SCALE = 2
 /** Cap for window.devicePixelRatio contribution. */
 const MAX_DPR = 4
@@ -136,6 +140,8 @@ const VIEW_ZOOM_MIN = 0.45
 const VIEW_ZOOM_MAX = 3.25
 const VIEW_ZOOM_STEP = 0.12
 const VIEW_ROTATE_STEP = 15
+/** Start extending when the pen is in the last 18% of the current page. */
+const WRITE_GROW_EDGE = 0.82
 
 const clampViewZoom = (value: number) => Math.min(VIEW_ZOOM_MAX, Math.max(VIEW_ZOOM_MIN, Math.round(value * 100) / 100))
 const normalizeRotation = (value: number) => {
@@ -1008,6 +1014,9 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const viewZoomRef = useRef(1)
   const viewRotationRef = useRef(0)
   const viewPanRef = useRef({ x: 0, y: 0 })
+  const sourceHeightRef = useRef(SOURCE_HEIGHT)
+  const pageLayoutFrameRef = useRef<number | null>(null)
+  const pageGrowCoalesceRef = useRef<number | null>(null)
   const activePointerTargetRef = useRef<Element | null>(null)
   const lastPointerTypeRef = useRef<string>('mouse')
   const exportCacheRef = useRef<{ key: string; imageData: string } | null>(null)
@@ -1078,6 +1087,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   viewZoomRef.current = viewZoom
   viewRotationRef.current = viewRotation
   viewPanRef.current = viewPan
+  sourceHeightRef.current = sourceHeight
   const [revision, setRevision] = useState(0)
   const [transcriptRevision, setTranscriptRevision] = useState(0)
   const [canUndo, setCanUndo] = useState(false)
@@ -1288,11 +1298,17 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     const shouldRemeasure = measureLayout
       || !canvasPixelSizeRef.current.width
       || canvasQualityKeyRef.current !== qualityKey
-    if (shouldRemeasure && !activeStrokeRef.current) {
+    // Page growth forces measureLayout=true and must resize even mid-stroke so new
+    // paper area maps correctly; pure zoom waits for the pen to lift.
+    if (shouldRemeasure && (measureLayout || !activeStrokeRef.current)) {
       const nextSize = computeInkPixelSize(layoutWidth, layoutHeight, viewZoomRef.current, inline)
       canvasPixelSizeRef.current = { width: nextSize.width, height: nextSize.height }
       canvasQualityKeyRef.current = qualityKey
       committedCanvasDirtyRef.current = true
+      if (activeStrokeRef.current) {
+        activeRenderedPointCountRef.current = 0
+        liveCanvasHasInkRef.current = false
+      }
     } else if (!canvasPixelSizeRef.current.width) {
       const nextSize = computeInkPixelSize(layoutWidth, layoutHeight, viewZoomRef.current, inline)
       canvasPixelSizeRef.current = { width: nextSize.width, height: nextSize.height }
@@ -1415,7 +1431,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       const raw = document as Partial<DrawingDocument>
       strokesRef.current = safeInkStrokes(raw.strokes, initialColorRef.current)
       if (raw.paperStyle && raw.paperStyle in paperLabel) setPaperStyle(raw.paperStyle)
-      if (typeof raw.sourceHeight === 'number' && raw.sourceHeight >= 400 && raw.sourceHeight <= 2_000) {
+      if (typeof raw.sourceHeight === 'number' && raw.sourceHeight >= 400 && raw.sourceHeight <= MAX_SOURCE_HEIGHT) {
+        sourceHeightRef.current = raw.sourceHeight
         setSourceHeight(raw.sourceHeight)
       }
       if (typeof raw.createdAt === 'string') createdAtRef.current = raw.createdAt
@@ -1508,6 +1525,84 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     const surface = surfaceRef.current
     return (surface?.closest('.unified-paper') ?? boardRef.current?.closest('.unified-paper')) as HTMLElement | null
   }, [])
+
+  const applyInkExtentStyles = useCallback((height: number) => {
+    const paper = resolvePaperElement()
+    if (!paper) return
+    paper.style.setProperty('--ink-extent-ratio', String(Math.max(SOURCE_HEIGHT, height) / SOURCE_WIDTH))
+    paper.classList.add('has-ink-extent')
+  }, [resolvePaperElement])
+
+  const schedulePageLayoutRefresh = useCallback(() => {
+    if (pageLayoutFrameRef.current !== null) return
+    pageLayoutFrameRef.current = requestAnimationFrame(() => {
+      pageLayoutFrameRef.current = null
+      canvasQualityKeyRef.current = ''
+      committedCanvasDirtyRef.current = true
+      redraw(true)
+    })
+  }, [redraw])
+
+  /**
+   * Grow the writable page downward without shifting existing ink in absolute space.
+   * Stroke coordinates stay normalized 0–1 relative to sourceHeight, so we scale y
+   * by old/new when extending. Layout/CSS updates are coalesced to one rAF.
+   */
+  const growPageTo = useCallback((targetHeight: number) => {
+    const prev = sourceHeightRef.current
+    const next = Math.min(MAX_SOURCE_HEIGHT, Math.max(prev, Math.round(targetHeight)))
+    if (next <= prev) return false
+    const scale = prev / next
+    for (const stroke of strokesRef.current) {
+      for (const point of stroke.points) point.y *= scale
+    }
+    const active = activeStrokeRef.current
+    if (active) {
+      for (const point of active.points) point.y *= scale
+    }
+    sourceHeightRef.current = next
+    setSourceHeight(next)
+    applyInkExtentStyles(next)
+    exportCacheRef.current = null
+    setDirty(true)
+    schedulePageLayoutRefresh()
+    return true
+  }, [applyInkExtentStyles, schedulePageLayoutRefresh, setDirty])
+
+  /** Ensure headroom below a normalized y (0–1) or when the viewport nears the paper end. */
+  const ensureInfinitePageRoom = useCallback((normalizedY?: number) => {
+    const prev = sourceHeightRef.current
+    if (prev >= MAX_SOURCE_HEIGHT) return
+    let target = prev
+    if (typeof normalizedY === 'number' && Number.isFinite(normalizedY)) {
+      if (normalizedY >= WRITE_GROW_EDGE) {
+        const absoluteY = clamp(normalizedY) * prev
+        target = Math.max(target, absoluteY + PAGE_GROW_STEP * 0.65)
+      }
+    }
+    // Snap up in whole grow-steps so rapid scroll/write does not re-layout every pixel.
+    if (target > prev) {
+      const stepped = Math.min(
+        MAX_SOURCE_HEIGHT,
+        Math.ceil(target / PAGE_GROW_STEP) * PAGE_GROW_STEP,
+      )
+      growPageTo(Math.max(prev + PAGE_GROW_STEP, stepped))
+    }
+  }, [growPageTo])
+
+  const ensureRoomFromScroll = useCallback(() => {
+    if (!inline) return
+    const paper = resolvePaperElement()
+    const scroller = paper?.closest('.unified-note-view') as HTMLElement | null
+    if (!paper || !scroller) return
+    const paperRect = paper.getBoundingClientRect()
+    const scrollerRect = scroller.getBoundingClientRect()
+    const distanceToPaperBottom = paperRect.bottom - scrollerRect.bottom
+    // Extend while the bottom of the paper is within ~half a viewport of the fold.
+    if (distanceToPaperBottom < Math.max(220, scroller.clientHeight * 0.45)) {
+      growPageTo(sourceHeightRef.current + PAGE_GROW_STEP)
+    }
+  }, [growPageTo, inline, resolvePaperElement])
 
   const clearViewTransformTargets = useCallback(() => {
     const surface = surfaceRef.current
@@ -1625,6 +1720,36 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     }, 90)
     return () => window.clearTimeout(timer)
   }, [redraw, viewZoom])
+
+  useEffect(() => {
+    applyInkExtentStyles(sourceHeight)
+  }, [applyInkExtentStyles, sourceHeight])
+
+  // Infinite paper: when the user scrolls near the bottom of the note page,
+  // grow the sheet in large chunks (rAF-coalesced) so writing never runs out of room.
+  useEffect(() => {
+    if (!inline) return
+    const paper = resolvePaperElement()
+    const scroller = paper?.closest('.unified-note-view') as HTMLElement | null
+    if (!scroller) return
+    const onScroll = () => {
+      if (pageGrowCoalesceRef.current !== null) return
+      pageGrowCoalesceRef.current = requestAnimationFrame(() => {
+        pageGrowCoalesceRef.current = null
+        ensureRoomFromScroll()
+      })
+    }
+    scroller.addEventListener('scroll', onScroll, { passive: true })
+    // Seed one page of headroom when entering pen mode.
+    if (inputActive) ensureRoomFromScroll()
+    return () => {
+      scroller.removeEventListener('scroll', onScroll)
+      if (pageGrowCoalesceRef.current !== null) {
+        cancelAnimationFrame(pageGrowCoalesceRef.current)
+        pageGrowCoalesceRef.current = null
+      }
+    }
+  }, [ensureRoomFromScroll, inline, inputActive, resolvePaperElement])
 
   useEffect(() => {
     if (inline && !inputActive) {
@@ -2039,8 +2164,11 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       eraseAt(events.map(pointFromEvent))
     } else {
       events.forEach(appendPointerEvent)
+      // Grow the page ahead of the pen so writing never hits a hard bottom edge.
+      const latest = activeStrokeRef.current?.points.at(-1)
+      if (latest) ensureInfinitePageRoom(latest.y)
     }
-  }, [appendPointerEvent, eraseAt, pointFromEvent])
+  }, [appendPointerEvent, ensureInfinitePageRoom, eraseAt, pointFromEvent])
 
   const finishPointer = useCallback((event: ReactPointerEvent<HTMLCanvasElement> | PointerEvent) => {
     const pointerId = event.pointerId
