@@ -45,9 +45,6 @@ if (betaNumber === null) {
   if (stable.length >= 6) throw new Error('Six stable releases already exist this month; wait for the next calendar month.')
   const expected = stable.length + 1
   if (stableNumber !== expected) throw new Error(`The next stable release this month must be number ${expected}.`)
-  if (stableNumber >= 5) {
-    console.warn(`Warning: stable slot ${stableNumber} is reserved for urgent correctness/security/input fixes.`)
-  }
 } else {
   const targetedStableNumber = Math.min(6, stable.length + 1)
   if (stableNumber !== targetedStableNumber) {
