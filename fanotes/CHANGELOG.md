@@ -1,5 +1,9 @@
 # Änderungsverlauf
 
+## 2026.8.11
+
+- **Unendlich langes Notizblatt beim Schreiben:** Scrollt man im Stiftmodus nach unten oder schreibt nah am unteren Rand, wächst die Seite in großen Schritten nach. Bestehende Handschrift bleibt positionstreu; Layout- und Canvas-Updates sind per `requestAnimationFrame` gebündelt, damit langes Scrollen nicht ruckelt (Soft-Limit ~40 A4-Seiten).
+
 ## 2026.8.10
 
 - **Schärfere Handschrift beim Zoomen:** Die Tinten-Bitmap wird mit dem Zoom supersampled (bis ca. 2,6× View-Zoom, mit Speicherdeckel). Hereingezoomte Schrift bleibt klar statt pixelig; nach Zoom-Ende und Stift absetzen wird neu gerastert.
