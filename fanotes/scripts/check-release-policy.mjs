@@ -11,8 +11,8 @@ for (let index = 2; index < process.argv.length; index += 2) {
 const version = args.get('version')
 if (!version) throw new Error('Use --version <YYYY.M.N[-beta.B]>')
 
-const match = /^(\d{4})\.(\d{1,2})\.([1-4])(?:-beta\.([1-9]\d*))?$/u.exec(version)
-if (!match) throw new Error('Calendar versions must use YYYY.M.N or YYYY.M.N-beta.B; stable N is limited to 1–4.')
+const match = /^(\d{4})\.(\d{1,2})\.([1-6])(?:-beta\.([1-9]\d*))?$/u.exec(version)
+if (!match) throw new Error('Calendar versions must use YYYY.M.N or YYYY.M.N-beta.B; stable N is limited to 1–6.')
 
 const year = Number(match[1])
 const month = Number(match[2])
@@ -40,13 +40,16 @@ const prefix = `v${year}.${month}.`
 const monthly = releases.filter((release) => typeof release.tag_name === 'string' && release.tag_name.startsWith(prefix))
 if (monthly.some((release) => release.tag_name === `v${version}`)) throw new Error(`Release v${version} already exists.`)
 
-const stable = monthly.filter((release) => /^v\d{4}\.\d{1,2}\.[1-4]$/u.test(release.tag_name))
+const stable = monthly.filter((release) => /^v\d{4}\.\d{1,2}\.[1-6]$/u.test(release.tag_name))
 if (betaNumber === null) {
-  if (stable.length >= 4) throw new Error('Four stable releases already exist this month; publish a beta for the next month instead.')
+  if (stable.length >= 6) throw new Error('Six stable releases already exist this month; wait for the next calendar month.')
   const expected = stable.length + 1
   if (stableNumber !== expected) throw new Error(`The next stable release this month must be number ${expected}.`)
+  if (stableNumber >= 5) {
+    console.warn(`Warning: stable slot ${stableNumber} is reserved for urgent correctness/security/input fixes.`)
+  }
 } else {
-  const targetedStableNumber = stable.length + 1
+  const targetedStableNumber = Math.min(6, stable.length + 1)
   if (stableNumber !== targetedStableNumber) {
     throw new Error(
       `The next beta must target Stable ${year}.${month}.${targetedStableNumber}; ` +

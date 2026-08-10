@@ -1,9 +1,12 @@
 # Änderungsverlauf
 
-## Unveröffentlicht
+## 2026.8.5
 
+- Während dem Handschriftszeichnen lässt sich das Blatt zoomen und drehen: Toolbar-Buttons, `Strg`+Mausrad (Zoom), `Alt`+Mausrad (Drehung), `[` / `]` sowie `Strg`+`0` / `Esc` zum Zurücksetzen. Im Inline-Stiftmodus folgt das gesamte Notizpapier der Ansicht, damit Text und Tinte ausgerichtet bleiben; die Zeichen-Bitmap skaliert nicht mit und bleibt scharf.
+- Nach Stiftnutzung unter Hyprland/Wayland bleiben Tastatur und Touchpad-Scroll wieder sofort nutzbar: Pointer-Capture wird robust freigegeben (inkl. globaler Sicherheitsnetz-Listener), der Canvas behält keinen hängenden Fokus mehr, und beim Verlassen des Stiftmodus wird die Eingabe freigegeben, ohne den virtuellen Desktop wechseln zu müssen.
 - Die freie Einzel- und Mehrzeichenerkennung ist robuster: unsichere Glyphen behalten ein breiteres N-Best-Fenster für Wortkontext, stilunabhängige Stiftgeometrie löst enge Verwechslungen (z. B. e/c, o/0, l/1) ohne trainierte Klassen zu überschreiben, und bekannte Mehrbuchstabenwörter mit solider visueller Stütze gewinnen gegenüber inkohärenten Fragmenten.
 - Das Notizpapier wächst mit dem Inhalt statt einer festen A4-Höhe: lange Seiten wie Willkommen.md übermalen den dunklen Workspace nicht mehr unten schwarz. Kurze Notizen behalten die A4-Mindestgröße.
+- Die Release-Policy erlaubt in dringenden Korrekturfällen ein fünftes und sechstes Stable im Monat, damit Eingabe- und Korrektheitsfixes nicht bis zum nächsten Kalendermonat warten müssen.
 
 ## 2026.8.4
 

@@ -35,6 +35,14 @@ const safeguards = [
   ["updateTranscript: gestureToolRef.current !== 'pen' || activeStroke?.purpose !== 'art'", 'kein unnötiger Erkennungsdurchlauf für Zeichnungen'],
   ['@media(max-width:640px){.lw-art-studio-body{grid-template-columns:1fr}', 'mobile Zeichenpalette'],
   ['@media(prefers-reduced-motion:reduce)', 'reduzierte Bewegung'],
+  ['const releasePointerCaptureSafe', 'sichere Pointer-Capture-Freigabe nach Stift (Hyprland/Wayland)'],
+  ['const releaseStuckInputFocus', 'Fokusfreigabe nach Stiftnutzung'],
+  ["window.addEventListener('pointerup', onWindowPointerEnd, true)", 'globale Pointer-Ende-Absicherung'],
+  ['const applyViewTransform', 'Blatt-Zoom und -Rotation während Handschrift'],
+  ['const handleWheel = useCallback', 'Strg/Alt-Mausrad für Zoom und Rotation'],
+  ["aria-label=\"Blattansicht\"", 'Toolbar-Steuerung für Zoom und Drehung'],
+  ['// Use layout size (offset*), not getBoundingClientRect, so CSS zoom/rotation', 'Bitmap-Größe unabhängig vom Ansichtszoom'],
+  ["paper.classList.toggle('is-view-transformed'", 'Inline-Papier folgt Zoom und Drehung'],
 ]
 
 for (const [needle, label] of safeguards) {
@@ -53,4 +61,4 @@ if (symbolDefinitions.length !== requiredSymbols.length) {
   throw new Error(`Unerwartete Piktogrammbibliothek: ${symbolDefinitions.length} statt ${requiredSymbols.length} Symbole.`)
 }
 
-console.log(`Zeichenmodus-Prüfung erfolgreich: ${brushDefinitions.length} Pinsel, 14 Vollfarben, ${effectDefinitions.length} Spezialfarben, ${symbolDefinitions.length} Icons/Piktogramme, sichere Speicherung und Erkennungstrennung.`)
+console.log(`Zeichenmodus-Prüfung erfolgreich: ${brushDefinitions.length} Pinsel, 14 Vollfarben, ${effectDefinitions.length} Spezialfarben, ${symbolDefinitions.length} Icons/Piktogramme, sichere Speicherung und Erkennungstrennung, Zoom/Rotation + Hyprland-Pointer-Freigabe.`)
