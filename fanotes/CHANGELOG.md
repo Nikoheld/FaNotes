@@ -1,5 +1,9 @@
 # Änderungsverlauf
 
+## 2026.8.10
+
+- **Schärfere Handschrift beim Zoomen:** Die Tinten-Bitmap wird mit dem Zoom supersampled (bis ca. 2,6× View-Zoom, mit Speicherdeckel). Hereingezoomte Schrift bleibt klar statt pixelig; nach Zoom-Ende und Stift absetzen wird neu gerastert.
+
 ## 2026.8.9
 
 - **Qwen3-VL / Core Ultra X9:** Die NPU-Erkennung erzwingt nicht mehr die veraltete Meteor-Lake-Plattform `OV_NPU_PLATFORM=3720` (das konnte NPUs neuerer Core-Ultra-Chips wie **Ultra X9 388H** unsichtbar machen). OpenVINO wählt die NPU automatisch (inkl. `NPU` / `NPU.0`).
