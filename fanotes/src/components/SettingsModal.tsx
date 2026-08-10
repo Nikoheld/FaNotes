@@ -745,11 +745,33 @@ export function SettingsModal({
                   </div>
                 </div>
 
-                {(updateState.status === 'downloading' || updateState.status === 'downloaded') && (
-                  <div className="update-progress" role="status" aria-live="polite">
-                    <div><span>{updateState.status === 'downloaded' ? 'Download geprüft' : 'Update wird automatisch heruntergeladen'}</span><b>{formatBytes(updateState.downloadedBytes)} / {formatBytes(updateState.totalBytes)}</b></div>
-                    <progress value={updateState.progress} max={1}>{Math.round(updateState.progress * 100)} %</progress>
-                    <small>{updateState.installationKind.startsWith('differential-') ? 'Nur geänderte Binärblöcke werden übertragen; unveränderte Daten kommen aus der installierten Version.' : 'Der Download kann nach einem Verbindungsabbruch fortgesetzt werden.'}</small>
+                {(updateState.status === 'downloading' || updateState.status === 'downloaded' || updateState.status === 'installing') && (
+                  <div className={`update-progress ${updateState.status === 'downloading' ? 'is-active' : ''}`} role="status" aria-live="polite" aria-busy={updateState.status === 'downloading'}>
+                    <div>
+                      <span>
+                        {updateState.status === 'downloaded'
+                          ? 'Download geprüft und bereit'
+                          : updateState.status === 'installing'
+                            ? 'Update wird installiert …'
+                            : 'Download läuft …'}
+                      </span>
+                      <b>
+                        {Math.round(Math.max(0, Math.min(1, updateState.progress || 0)) * 100)} %
+                        {updateState.totalBytes > 0 ? ` · ${formatBytes(updateState.downloadedBytes)} / ${formatBytes(updateState.totalBytes)}` : ''}
+                      </b>
+                    </div>
+                    <progress value={Math.max(0, Math.min(1, updateState.progress || 0))} max={1}>
+                      {Math.round(Math.max(0, Math.min(1, updateState.progress || 0)) * 100)} %
+                    </progress>
+                    <small>
+                      {updateState.status === 'downloading'
+                        ? (updateState.installationKind.startsWith('differential-')
+                          ? 'Nur geänderte Binärblöcke werden übertragen; der Fortschritt aktualisiert sich während des Downloads.'
+                          : 'Der Fortschritt aktualisiert sich während des Downloads. Bei Abbruch wird fortgesetzt.')
+                        : updateState.installationKind.startsWith('differential-')
+                          ? 'Nur geänderte Binärblöcke wurden übertragen; unveränderte Daten kamen aus der installierten Version.'
+                          : 'Der Download kann nach einem Verbindungsabbruch fortgesetzt werden.'}
+                    </small>
                   </div>
                 )}
 

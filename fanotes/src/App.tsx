@@ -1177,9 +1177,24 @@ export default function App({ startupBootstrap }: AppProps) {
 
   const downloadUpdate = useCallback(async () => {
     try {
+      // Show progress immediately — the IPC download only resolves when finished,
+      // while fine-grained updates arrive via onUpdateState.
+      setUpdateState((current) => ({
+        ...current,
+        status: 'downloading',
+        progress: current.status === 'downloading' ? Math.max(current.progress, 0.01) : 0.01,
+        downloadedBytes: current.status === 'downloading' ? current.downloadedBytes : 0,
+        error: null,
+      }))
+      toast('Update-Download gestartet …', 'info')
       setUpdateState(await window.fanotes.downloadUpdate())
     } catch (error) {
       toast(error instanceof Error ? error.message : 'Das Update konnte nicht heruntergeladen werden.', 'error')
+      try {
+        setUpdateState(await window.fanotes.getUpdateState())
+      } catch {
+        // Keep the optimistic downloading state only if recovery fails.
+      }
     }
   }, [toast])
 

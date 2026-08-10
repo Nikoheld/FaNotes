@@ -42,7 +42,9 @@ const safeguards = [
   ['const handleWheel = useCallback', 'Strg/Alt-Mausrad für Zoom und Rotation'],
   ["aria-label=\"Blattansicht\"", 'Toolbar-Steuerung für Zoom und Drehung'],
   ['// Use layout size (offset*), not getBoundingClientRect, so CSS zoom/rotation', 'Bitmap-Größe unabhängig vom Ansichtszoom'],
-  ["paper.classList.toggle('is-view-transformed'", 'Inline-Papier folgt Zoom und Drehung'],
+  ["paper.classList.toggle('is-view-transformed'", 'Inline-Papier markiert Zoom/Drehung'],
+  ['.editor-pane, .worksheet-layer, .lw-canvas-surface', 'Zoom transformiert nur Blattinhalt, nicht die Toolbar'],
+  ['position:fixed;z-index:48;top:max(12px,env(safe-area-inset-top,0px))', 'Handschrift-Toolbar bleibt oben fixiert'],
 ]
 
 for (const [needle, label] of safeguards) {
