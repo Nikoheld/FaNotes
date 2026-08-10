@@ -6,6 +6,7 @@ import {
   CheckCircle2,
   ChevronDown,
   CircleAlert,
+  ClipboardList,
   Command,
   Database,
   Download,
@@ -65,6 +66,7 @@ const RightInspector = lazy(() => import('./components/RightInspector').then((mo
 const SearchPanel = lazy(() => import('./components/SearchPanel').then((module) => ({ default: module.SearchPanel })))
 const SettingsModal = lazy(() => import('./components/SettingsModal').then((module) => ({ default: module.SettingsModal })))
 const VaultOverview = lazy(() => import('./components/VaultOverview').then((module) => ({ default: module.VaultOverview })))
+const HomeworkBoard = lazy(() => import('./components/HomeworkBoard').then((module) => ({ default: module.HomeworkBoard })))
 const WorksheetLayer = lazy(() => import('./components/WorksheetLayer').then((module) => ({ default: module.WorksheetLayer })))
 const StableWorksheetLayer = memo(WorksheetLayer)
 const STARTUP_TREE_REFRESH_DELAY_MS = 18_000
@@ -286,6 +288,7 @@ export default function App({ startupBootstrap }: AppProps) {
   const [oneNoteImportBusy, setOneNoteImportBusy] = useState(false)
   const [mutatingEntryPaths, setMutatingEntryPaths] = useState<string[]>([])
   const [overviewOpen, setOverviewOpen] = useState(false)
+  const [homeworkOpen, setHomeworkOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [editorMenuOpen, setEditorMenuOpen] = useState(false)
@@ -553,6 +556,7 @@ export default function App({ startupBootstrap }: AppProps) {
     const session = vaultSessionGenerationRef.current
     const structureRevision = vaultStructureRevisionRef.current
     setOverviewOpen(false)
+    setHomeworkOpen(false)
     setGlyphenWerkOpen(false)
     const existing = tabsRef.current.find((tab) => tab.path === path)
     if (existing) {
@@ -1090,6 +1094,8 @@ export default function App({ startupBootstrap }: AppProps) {
     setPaletteOpen(false)
     setSearchOpen(false)
     setGlyphenWerkOpen(false)
+    setOverviewOpen(false)
+    setHomeworkOpen(false)
     void loadSecureSettings()
       .then(() => setLmStudioOpen(true))
       .catch((error) => toast(error instanceof Error ? error.message : 'Geschützte AI-Einstellungen konnten nicht geladen werden.', 'error'))
@@ -1250,7 +1256,7 @@ export default function App({ startupBootstrap }: AppProps) {
   }, [focusMode, inspectorVisible, sidebarVisible])
 
   const formatMarkdown = useCallback((action: MarkdownFormatAction) => {
-    if (!activePathRef.current || drawingOpen || overviewOpen) {
+    if (!activePathRef.current || drawingOpen || overviewOpen || homeworkOpen) {
       toast('Öffne eine Notiz im Editor, um sie zu formatieren.', 'info')
       return
     }
@@ -1259,7 +1265,7 @@ export default function App({ startupBootstrap }: AppProps) {
       return
     }
     if (!editorRef.current?.format(action)) toast('Die Formatierung konnte nicht angewandt werden.', 'error')
-  }, [activeEntryMutating, drawingOpen, overviewOpen, toast])
+  }, [activeEntryMutating, drawingOpen, homeworkOpen, overviewOpen, toast])
 
   const handleDrawingDirtyChange = useCallback((dirty: boolean) => {
     drawingDirtyRef.current = dirty
@@ -1306,6 +1312,7 @@ export default function App({ startupBootstrap }: AppProps) {
     }
     drawingOpenRef.current = true
     setOverviewOpen(false)
+    setHomeworkOpen(false)
     setSearchOpen(false)
     setDrawingOpen(true)
     if (drawingSession.key > 0) return
@@ -1363,6 +1370,7 @@ export default function App({ startupBootstrap }: AppProps) {
     if (!closeDrawing()) return
     setSearchOpen(false)
     setOverviewOpen(false)
+    setHomeworkOpen(false)
     setGlyphenWerkOpen(false)
     setSidebarVisible(true)
   }, [closeDrawing])
@@ -1370,7 +1378,16 @@ export default function App({ startupBootstrap }: AppProps) {
   const openOverview = useCallback(() => {
     if (!closeDrawing()) return
     setGlyphenWerkOpen(false)
+    setHomeworkOpen(false)
     setOverviewOpen(true)
+  }, [closeDrawing])
+
+  const openHomework = useCallback(() => {
+    if (!closeDrawing()) return
+    setGlyphenWerkOpen(false)
+    setOverviewOpen(false)
+    setSearchOpen(false)
+    setHomeworkOpen(true)
   }, [closeDrawing])
 
   const openGlyphenWerk = useCallback(() => {
@@ -1378,6 +1395,7 @@ export default function App({ startupBootstrap }: AppProps) {
     setPaletteOpen(false)
     setSearchOpen(false)
     setOverviewOpen(false)
+    setHomeworkOpen(false)
     setLmStudioOpen(false)
     setSidebarVisible(true)
     setGlyphenWerkOpen(true)
@@ -1513,6 +1531,7 @@ export default function App({ startupBootstrap }: AppProps) {
   const openWorksheetImport = useCallback(() => {
     setSearchOpen(false)
     setOverviewOpen(false)
+    setHomeworkOpen(false)
     setWorksheetImportOpen(true)
   }, [])
 
@@ -1590,13 +1609,14 @@ export default function App({ startupBootstrap }: AppProps) {
     { id: 'ai-assistant', label: 'AI-Assistent', detail: 'LM Studio, Ollama, OpenAI, Gemini, Anthropic oder OpenCode nutzen', shortcut: 'Ctrl ⇧ A', group: 'Werkzeuge', keywords: 'ki ai lm studio ollama openai gemini anthropic opencode rechtschreibung fakten', icon: <Bot size={15} />, run: openLmStudio },
     { id: 'glyphenwerk', label: 'GlyphenWerk öffnen', detail: 'Handschrift trainieren, live testen, korrigieren und verwalten', shortcut: 'Ctrl ⇧ G', group: 'Werkzeuge', keywords: 'training erkennung symbole test datensatz', icon: <Database size={15} />, run: openGlyphenWerk },
     { id: 'overview', label: 'Vault-Übersicht & Wissensgraph', detail: 'Fächer und offene Notizen überblicken', group: 'Navigation', icon: <Network size={15} />, run: openOverview },
+    { id: 'homework', label: 'Hausaufgaben & Termine', detail: 'To-dos, Hausaufgaben und Termine mit Fälligkeit', group: 'Navigation', keywords: 'todo hausaufgaben schule termin fällig aufgabe checklist', icon: <ClipboardList size={15} />, run: openHomework },
     { id: 'daily', label: 'Heutige Tagesnotiz', detail: settings.dailyNotesFolder, group: 'Dateien', icon: <CalendarDays size={15} />, run: () => void createDailyNote() },
     { id: 'focus', label: focusMode ? 'Fokusmodus verlassen' : 'Fokusmodus starten', detail: 'Blendet Seitenleisten für ungestörtes Schreiben aus', shortcut: 'Ctrl ⇧ E', group: 'Ansicht', icon: <Maximize2 size={15} />, run: toggleFocusMode },
     { id: 'sidebar', label: 'Dateileiste umschalten', group: 'Ansicht', icon: <PanelLeftClose size={15} />, run: () => setSidebarVisible((value) => !value) },
     { id: 'inspector', label: 'Gliederung umschalten', group: 'Ansicht', icon: <PanelRightClose size={15} />, run: () => setInspectorVisible((value) => !value) },
     { id: 'settings', label: 'Einstellungen öffnen', shortcut: 'Ctrl ,', group: 'FaNotes', icon: <Settings size={15} />, run: () => setSettingsOpen(true) },
     { id: 'quit', label: isWeb ? 'Zur FaNotes-Website' : 'FaNotes beenden', shortcut: 'Ctrl Q', group: 'FaNotes', icon: <X size={15} />, run: () => window.fanotes.requestClose() },
-  ], [createDailyNote, createFolder, createNote, drawingOpen, focusMode, importOneNote, isWeb, openGlyphenWerk, openLmStudio, openOverview, openWorksheetImport, saveCurrentWork, settings.dailyNotesFolder, toast, toggleDrawing, toggleFocusMode])
+  ], [createDailyNote, createFolder, createNote, drawingOpen, focusMode, importOneNote, isWeb, openGlyphenWerk, openHomework, openLmStudio, openOverview, openWorksheetImport, saveCurrentWork, settings.dailyNotesFolder, toast, toggleDrawing, toggleFocusMode])
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
@@ -1628,6 +1648,7 @@ export default function App({ startupBootstrap }: AppProps) {
         else if (searchOpen) setSearchOpen(false)
         else if (settingsOpen) setSettingsOpen(false)
         else if (lmStudioOpen) setLmStudioOpen(false)
+        else if (homeworkOpen) setHomeworkOpen(false)
         else if (overviewOpen) setOverviewOpen(false)
         else if (glyphenWerkOpen) setGlyphenWerkOpen(false)
         else if (drawingOpenRef.current) closeDrawing()
@@ -1636,7 +1657,7 @@ export default function App({ startupBootstrap }: AppProps) {
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [closeDrawing, closeTab, createNote, cycleTabs, focusMode, glyphenWerkOpen, lmStudioOpen, openGlyphenWerk, openLmStudio, openWorksheetImport, overviewOpen, paletteOpen, saveCurrentWork, searchOpen, settingsOpen, toggleDrawing, toggleFocusMode, worksheetImportOpen])
+  }, [closeDrawing, closeTab, createNote, cycleTabs, focusMode, glyphenWerkOpen, homeworkOpen, lmStudioOpen, openGlyphenWerk, openLmStudio, openWorksheetImport, overviewOpen, paletteOpen, saveCurrentWork, searchOpen, settingsOpen, toggleDrawing, toggleFocusMode, worksheetImportOpen])
 
   const theme = effectiveTheme(settings, systemDark)
   const cssVars = useMemo(() => {
@@ -1676,7 +1697,7 @@ export default function App({ startupBootstrap }: AppProps) {
     <div className={`app-shell theme-${theme} background-${settings.workspaceBackground} ${focusMode ? 'focus-mode' : ''} ${settings.compactMode ? 'compact' : ''} ${settings.reduceMotion ? 'no-motion' : ''} ${settings.glassEffects ? 'with-glass' : 'no-glass'}`} style={cssVars}>
       {settings.customCss && <style>{settings.customCss}</style>}
       <nav className="ribbon" aria-label="Hauptnavigation">
-        <button type="button" className={!searchOpen && !overviewOpen && !lmStudioOpen && !glyphenWerkOpen ? 'active' : ''} title="Dateien" data-tooltip="Dateien" aria-label="Dateien" onClick={showFiles}><Files size={19} /></button>
+        <button type="button" className={!searchOpen && !overviewOpen && !homeworkOpen && !lmStudioOpen && !glyphenWerkOpen ? 'active' : ''} title="Dateien" data-tooltip="Dateien" aria-label="Dateien" onClick={showFiles}><Files size={19} /></button>
         <button type="button" className={searchOpen ? 'active' : ''} title="Im Vault suchen (Strg+Umschalt+F)" data-tooltip="Suchen · Strg ⇧ F" aria-label="Im gesamten Vault suchen" onClick={() => { setSearchOpen(true); setSidebarVisible(true) }}><Search size={19} /></button>
         <button type="button" className={drawingOpen ? 'active' : ''} title={drawingOpen ? 'Zur Tastatureingabe wechseln' : 'Auf derselben Seite mit Stift schreiben'} data-tooltip={drawingOpen ? 'Zur Tastatur · Strg D' : 'Mit Stift schreiben · Strg D'} aria-pressed={drawingOpen} onClick={toggleDrawing}><PenLine size={19} /></button>
         <button type="button" className={worksheetImportOpen ? 'active' : ''} title="Bild oder PDF als Arbeitsblatt importieren" data-tooltip="Arbeitsblatt importieren" aria-label="Bild oder PDF als Arbeitsblatt importieren" onClick={openWorksheetImport}><FileUp size={19} /></button>
@@ -1684,6 +1705,7 @@ export default function App({ startupBootstrap }: AppProps) {
         <button type="button" className={glyphenWerkOpen ? 'active' : ''} title="GlyphenWerk" data-tooltip="GlyphenWerk · Strg ⇧ G" aria-label="GlyphenWerk öffnen" onClick={openGlyphenWerk}><Database size={19} /></button>
         <button type="button" title="Heutige Tagesnotiz" data-tooltip="Tagesnotiz" aria-label="Heutige Tagesnotiz öffnen" onClick={() => void createDailyNote()}><CalendarDays size={18} /></button>
         <div className="ribbon-divider" />
+        <button type="button" className={homeworkOpen ? 'active' : ''} title="Hausaufgaben & Termine" data-tooltip="Hausaufgaben & Termine" aria-label="Hausaufgaben und Termine öffnen" onClick={openHomework}><ClipboardList size={18} /></button>
         <button type="button" className={overviewOpen ? 'active' : ''} title="Vault-Übersicht" data-tooltip="Übersicht & Wissensgraph" aria-label="Vault-Übersicht und Wissensgraph öffnen" onClick={openOverview}><Network size={18} /></button>
         <button type="button" title="Befehlspalette (Strg+P)" data-tooltip="Befehle · Strg P" aria-label="Befehlspalette öffnen" onClick={() => setPaletteOpen(true)}><Command size={18} /></button>
         <div className="ribbon-spacer" />
@@ -1739,8 +1761,8 @@ export default function App({ startupBootstrap }: AppProps) {
             <button type="button" className="tabs-menu" title="Neue Notiz (Strg+N)" aria-label="Neue Notiz" onClick={() => void createNote()}><Plus size={15} /></button>
           </div>
           <div className="editor-toolbar">
-            <div className="breadcrumb" title={activeTab?.path ?? bootstrap.vaultPath}><span>{glyphenWerkOpen ? `GlyphenWerk · ${GLYPHENWERK_VIEW_LABELS[glyphenWerkView]}` : activeTab?.path ?? bootstrap.vaultName}</span></div>
-            <FormattingToolbar disabled={!activeTab || drawingOpen || overviewOpen || glyphenWerkOpen || activeEntryMutating} onFormat={formatMarkdown} />
+            <div className="breadcrumb" title={activeTab?.path ?? bootstrap.vaultPath}><span>{glyphenWerkOpen ? `GlyphenWerk · ${GLYPHENWERK_VIEW_LABELS[glyphenWerkView]}` : homeworkOpen ? 'Hausaufgaben & Termine' : overviewOpen ? 'Vault-Übersicht' : activeTab?.path ?? bootstrap.vaultName}</span></div>
+            <FormattingToolbar disabled={!activeTab || drawingOpen || overviewOpen || homeworkOpen || glyphenWerkOpen || activeEntryMutating} onFormat={formatMarkdown} />
             <div className="toolbar-group">
               <button type="button" className="toolbar-button ai" title="Mit einem AI-Anbieter bearbeiten" aria-label="AI-Assistent öffnen" onClick={openLmStudio}><Bot size={14} /> AI</button>
               <button type="button" className="toolbar-button" title="Bild oder PDF als Arbeitsblatt importieren" aria-label="Arbeitsblatt importieren" onClick={openWorksheetImport}><FileUp size={14} /> Arbeitsblatt</button>
@@ -1763,6 +1785,12 @@ export default function App({ startupBootstrap }: AppProps) {
             <Suspense fallback={<div className="editor-module-loading"><LoaderCircle className="spin" size={20} /><span>Ansicht wird geladen …</span></div>}>
               {glyphenWerkOpen ? (
               <GlyphenWerkWorkspace appearance={{ theme, reduceMotion: settings.reduceMotion }} activeView={glyphenWerkView} onViewChange={setGlyphenWerkView} onClose={() => setGlyphenWerkOpen(false)} onTrainingChanged={handleGlyphenWerkTrainingChanged} onImportTraining={importTrainingFromSettings} />
+            ) : homeworkOpen ? (
+              <HomeworkBoard
+                subjects={tree.filter((entry) => entry.kind === 'folder').map((entry) => entry.name)}
+                onClose={() => setHomeworkOpen(false)}
+                onOpenNote={(path) => { setHomeworkOpen(false); return openNote(path) }}
+              />
             ) : overviewOpen ? (
               <VaultOverview entries={tree} openTabs={tabs} onOpen={(path) => { setOverviewOpen(false); return openNote(path) }} onCreateNote={() => createNote()} onClose={() => setOverviewOpen(false)} />
             ) : activeTab ? (
@@ -1807,12 +1835,12 @@ export default function App({ startupBootstrap }: AppProps) {
           </div>
         </main>
 
-        {inspectorVisible && settings.showOutline && !overviewOpen && !glyphenWerkOpen && <Suspense fallback={null}><RightInspector content={activeTab?.content ?? ''} path={activeTab?.path} /></Suspense>}
+        {inspectorVisible && settings.showOutline && !overviewOpen && !homeworkOpen && !glyphenWerkOpen && <Suspense fallback={null}><RightInspector content={activeTab?.content ?? ''} path={activeTab?.path} /></Suspense>}
         {searchOpen && <Suspense fallback={null}><SearchPanel query={searchQuery} hits={searchHits} loading={searchLoading} onQueryChange={setSearchQuery} onOpen={(hit) => { void openSearchHit(hit) }} onClose={() => setSearchOpen(false)} /></Suspense>}
       </div>
 
       <footer className="statusbar">
-        <div className="statusbar-left"><button type="button" title={sidebarVisible ? 'Seitenleiste einklappen' : 'Seitenleiste einblenden'} aria-label={sidebarVisible ? 'Seitenleiste einklappen' : 'Seitenleiste einblenden'} onClick={() => setSidebarVisible((value) => !value)}>{sidebarVisible ? <PanelLeftClose size={12} /> : <PanelLeftOpen size={12} />}</button><span>{glyphenWerkOpen ? `GlyphenWerk · ${GLYPHENWERK_VIEW_LABELS[glyphenWerkView]}` : activeTab ? drawingOpen ? 'Stiftmodus' : worksheetSession.documents.length ? 'Notiz mit Arbeitsblatt' : 'Schreibmodus' : 'Bereit'}</span>{worksheetSession.documents.length > 0 && <span>{worksheetSession.documents.length} {worksheetSession.documents.length === 1 ? 'Arbeitsblatt' : 'Arbeitsblätter'}</span>}</div>
+        <div className="statusbar-left"><button type="button" title={sidebarVisible ? 'Seitenleiste einklappen' : 'Seitenleiste einblenden'} aria-label={sidebarVisible ? 'Seitenleiste einklappen' : 'Seitenleiste einblenden'} onClick={() => setSidebarVisible((value) => !value)}>{sidebarVisible ? <PanelLeftClose size={12} /> : <PanelLeftOpen size={12} />}</button><span>{glyphenWerkOpen ? `GlyphenWerk · ${GLYPHENWERK_VIEW_LABELS[glyphenWerkView]}` : homeworkOpen ? 'Hausaufgaben & Termine' : overviewOpen ? 'Vault-Übersicht' : activeTab ? drawingOpen ? 'Stiftmodus' : worksheetSession.documents.length ? 'Notiz mit Arbeitsblatt' : 'Schreibmodus' : 'Bereit'}</span>{worksheetSession.documents.length > 0 && <span>{worksheetSession.documents.length} {worksheetSession.documents.length === 1 ? 'Arbeitsblatt' : 'Arbeitsblätter'}</span>}</div>
         <div className="statusbar-right">{updateState.status === 'downloaded' && <button type="button" className="update-ready-button" title={`FaNotes ${updateState.latestVersion} installieren und neu starten`} onClick={() => void installUpdate()}><ShieldCheck size={11} /> Update bereit</button>}{updateState.status === 'downloading' && <span><LoaderCircle className="spin" size={11} /> Update {Math.round(updateState.progress * 100)} %</span>}{settings.spellcheck && activeTab && !drawingOpen && detectedTextLanguage !== 'unknown' && <span className="detected-text-language" title="Automatisch erkannte Sprache für die lokale Rechtschreibprüfung"><b>Aa</b> {detectedTextLanguage === 'de' ? 'Deutsch' : detectedTextLanguage === 'en' ? 'English' : 'DE / EN'}</span>}{settings.showWordCount && activeTab && <span>{activeWordCount} Wörter</span>}<button type="button" className={`save-status ${saveState === 'saved' ? 'save-ok' : 'save-pending'}`} title="Jetzt speichern (Strg+S)" aria-live="polite" onClick={() => void saveCurrentWork()}>{saveState === 'saved' ? <CheckCircle2 size={11} /> : saveState === 'saving' ? <LoaderCircle className="spin" size={11} /> : <CircleAlert size={11} />}{saveState === 'saved' ? 'Gespeichert' : saveState === 'saving' ? 'Speichert …' : 'Speicherfehler'}</button><span title={isWeb ? 'Die Daten bleiben in diesem Browser' : 'Dein Vault bleibt auf deinem Gerät'}><ShieldCheck size={11} /> {isWeb ? 'Im Browser gespeichert' : 'Lokal & privat'}</span></div>
       </footer>
 

@@ -1,5 +1,10 @@
 # Änderungsverlauf
 
+## 2026.8.7
+
+- Neue **Hausaufgaben- & Termine**-Ansicht (Ribbon, Befehlspalette): To-dos und Termine mit Fach, Fälligkeit, Priorität und Erledigt-Status. Speicherung lokal im Vault als `Hausaufgaben.md` (Markdown mit strukturiertem JSON-Block).
+- Der optionale Qwen3-VL-Worker startet zuverlässig aus dem AppImage/`app.asar`: Skript wird nach `userData` materialisiert, Python folgt Symlinks, `cwd` liegt nie im Asar – der frühere `spawn ENOTDIR`-Fehler entfällt.
+
 ## 2026.8.6
 
 - Beim Klick auf Herunterladen erscheint sofort ein sichtbarer Download-Fortschritt (Prozent und übertragene Daten) in den Einstellungen; der Status springt nicht mehr stumm, bis der Download fertig ist.

@@ -6,7 +6,7 @@ FaNotes uses calendar versions from July 2026 onward.
 
 - Stable: `YYYY.M.N`, for example `2026.7.1`
 - Beta: `YYYY.M.N-beta.B`, for example `2026.7.2-beta.3`
-- `N` is the stable release number within the month (`1`–`6`).
+- `N` is the stable release number within the month (`1`–`9`).
 - `B` is the consecutive beta build for the targeted stable release.
 
 The month is written without a leading zero inside `package.json` so the value remains valid SemVer for npm and Electron. The UI may render the month padded (`2026.07.1`) when a calendar-style display is useful.
@@ -20,7 +20,7 @@ Switching from Beta to Stable never installs an older build. A user who is ahead
 ## Stable cadence
 
 - Target: two meaningful stable releases per calendar month.
-- Maximum: six stable releases per calendar month.
+- Maximum: nine stable releases per calendar month (hard gate for exceptional hotfix/feature months).
 - A stable release normally follows a tested beta cohort and bundles multiple user-visible improvements or an important security/reliability correction.
 - If a month has too few large features, the second stable release bundles accumulated quality, compatibility, translation, efficiency and recognition improvements instead of publishing one-change stable builds.
 - Later stables in the same month are normal releases when they ship a coherent, useful package.
