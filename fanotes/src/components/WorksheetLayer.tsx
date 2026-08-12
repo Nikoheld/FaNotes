@@ -35,6 +35,13 @@ const loadPdfBytes = async (source: string): Promise<Uint8Array> => {
   return new Uint8Array(await response.arrayBuffer())
 }
 
+/** Backing-store caps: sharp on HiDPI without multi-page GPU thrash. */
+const MAX_PDF_DPR = 2.25
+const MAX_PDF_EDGE = 2_880
+const MAX_PDF_PIXELS = 6_500_000
+const RESIZE_DEBOUNCE_MS = 140
+const VIEWPORT_ROOT_MARGIN = '240px 0px'
+
 type WorksheetLayerProps = {
   document: WorksheetDocument
   inputDisabled?: boolean
@@ -43,12 +50,26 @@ type WorksheetLayerProps = {
   onPageLayoutChange?: () => void
 }
 
-function PdfPage({ pdf, number, onReady }: { pdf: PDFDocumentProxy; number: number; onReady: () => void }) {
+function PdfPage({
+  pdf,
+  number,
+  onReady,
+}: {
+  pdf: PDFDocumentProxy
+  number: number
+  onReady: () => void
+}) {
   const hostRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const pageRef = useRef<PDFPageProxy | null>(null)
   const renderRef = useRef<RenderTask | null>(null)
+  const renderTokenRef = useRef(0)
+  const lastRenderKeyRef = useRef('')
+  const readySentRef = useRef(false)
+  const resizeTimerRef = useRef<number | null>(null)
+  const visibleRef = useRef(false)
   const [ratio, setRatio] = useState(297 / 210)
+  const [visible, setVisible] = useState(false)
 
   useEffect(() => {
     let alive = true
@@ -56,8 +77,9 @@ function PdfPage({ pdf, number, onReady }: { pdf: PDFDocumentProxy; number: numb
       if (!alive) return
       pageRef.current = page
       const viewport = page.getViewport({ scale: 1 })
-      setRatio(viewport.height / viewport.width)
-      onReady()
+      setRatio(viewport.height / Math.max(1, viewport.width))
+    }).catch((error: unknown) => {
+      console.error(`PDF-Seite ${number} konnte nicht geladen werden.`, error)
     })
     return () => {
       alive = false
@@ -65,36 +87,139 @@ function PdfPage({ pdf, number, onReady }: { pdf: PDFDocumentProxy; number: numb
       pageRef.current?.cleanup()
       pageRef.current = null
     }
-  }, [number, onReady, pdf])
+  }, [number, pdf])
 
-  const render = useCallback(() => {
+  const clearCanvas = useCallback(() => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const context = canvas.getContext('2d')
+    context?.setTransform(1, 0, 0, 1, 0, 0)
+    context?.clearRect(0, 0, canvas.width, canvas.height)
+    canvas.width = 1
+    canvas.height = 1
+    lastRenderKeyRef.current = ''
+  }, [])
+
+  const render = useCallback(async () => {
     const host = hostRef.current
     const canvas = canvasRef.current
     const page = pageRef.current
-    if (!host || !canvas || !page || host.clientWidth <= 0) return
+    if (!host || !canvas || !page || !visibleRef.current) return
+    const cssWidth = Math.max(1, Math.round(host.clientWidth))
+    if (cssWidth < 8) return
     const base = page.getViewport({ scale: 1 })
-    const dpr = Math.min(window.devicePixelRatio || 1, 2)
-    const viewport = page.getViewport({ scale: host.clientWidth / base.width * dpr })
-    canvas.width = Math.max(1, Math.round(viewport.width))
-    canvas.height = Math.max(1, Math.round(viewport.height))
+    const cssHeight = Math.max(1, Math.round(cssWidth * (base.height / Math.max(1, base.width))))
+
+    // Device pixel ratio for true screen resolution, with hard caps for multi-page stability.
+    let dpr = Math.min(Math.max(window.devicePixelRatio || 1, 1), MAX_PDF_DPR)
+    let pixelWidth = Math.round(cssWidth * dpr)
+    let pixelHeight = Math.round(cssHeight * dpr)
+    const edge = Math.max(pixelWidth, pixelHeight)
+    if (edge > MAX_PDF_EDGE) {
+      const factor = MAX_PDF_EDGE / edge
+      pixelWidth = Math.max(1, Math.round(pixelWidth * factor))
+      pixelHeight = Math.max(1, Math.round(pixelHeight * factor))
+      dpr *= factor
+    }
+    const pixels = pixelWidth * pixelHeight
+    if (pixels > MAX_PDF_PIXELS) {
+      const factor = Math.sqrt(MAX_PDF_PIXELS / pixels)
+      pixelWidth = Math.max(1, Math.round(pixelWidth * factor))
+      pixelHeight = Math.max(1, Math.round(pixelHeight * factor))
+      dpr *= factor
+    }
+
+    const renderKey = `${cssWidth}x${cssHeight}@${pixelWidth}x${pixelHeight}`
+    if (renderKey === lastRenderKeyRef.current && canvas.width === pixelWidth && canvas.height === pixelHeight) {
+      return
+    }
+
+    const token = ++renderTokenRef.current
     renderRef.current?.cancel()
-    renderRef.current = page.render({ canvas, canvasContext: canvas.getContext('2d')!, viewport })
-    void renderRef.current.promise.catch((error: unknown) => {
-      if (!(error instanceof Error) || error.name !== 'RenderingCancelledException') console.error('PDF-Seite konnte nicht gerendert werden.', error)
+    const scale = pixelWidth / Math.max(1, base.width)
+    const viewport = page.getViewport({ scale })
+    canvas.width = pixelWidth
+    canvas.height = pixelHeight
+    // Keep CSS display size at layout pixels so backing store maps 1:1 with dpr.
+    canvas.style.width = `${cssWidth}px`
+    canvas.style.height = `${cssHeight}px`
+    const context = canvas.getContext('2d', { alpha: false })
+    if (!context) return
+    context.setTransform(1, 0, 0, 1, 0, 0)
+    context.fillStyle = '#ffffff'
+    context.fillRect(0, 0, pixelWidth, pixelHeight)
+    const task = page.render({
+      canvas,
+      canvasContext: context,
+      viewport,
+      intent: 'display',
     })
-  }, [])
+    renderRef.current = task
+    try {
+      await task.promise
+      if (token !== renderTokenRef.current) return
+      lastRenderKeyRef.current = renderKey
+      if (!readySentRef.current) {
+        readySentRef.current = true
+        onReady()
+      }
+    } catch (error: unknown) {
+      if (!(error instanceof Error) || error.name !== 'RenderingCancelledException') {
+        console.error(`PDF-Seite ${number} konnte nicht gerendert werden.`, error)
+      }
+    }
+  }, [number, onReady])
+
+  // Only paint pages near the viewport — multi-page PDFs otherwise thrash GPU/CPU.
+  useEffect(() => {
+    const host = hostRef.current
+    if (!host) return
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const entry = entries[0]
+        const next = Boolean(entry?.isIntersecting)
+        visibleRef.current = next
+        setVisible(next)
+        if (!next) {
+          renderRef.current?.cancel()
+          // Free VRAM for pages far away; keep the aspect-ratio box.
+          clearCanvas()
+        } else {
+          void render()
+        }
+      },
+      { root: host.closest('.unified-note-view') as Element | null, rootMargin: VIEWPORT_ROOT_MARGIN, threshold: 0.01 },
+    )
+    observer.observe(host)
+    return () => observer.disconnect()
+  }, [clearCanvas, render])
 
   useEffect(() => {
     const host = hostRef.current
     if (!host) return
-    const observer = new ResizeObserver(render)
+    const schedule = () => {
+      if (!visibleRef.current) return
+      if (resizeTimerRef.current !== null) window.clearTimeout(resizeTimerRef.current)
+      resizeTimerRef.current = window.setTimeout(() => {
+        resizeTimerRef.current = null
+        void render()
+      }, RESIZE_DEBOUNCE_MS)
+    }
+    const observer = new ResizeObserver(schedule)
     observer.observe(host)
-    render()
-    return () => observer.disconnect()
-  }, [ratio, render])
+    if (visible) void render()
+    return () => {
+      observer.disconnect()
+      if (resizeTimerRef.current !== null) window.clearTimeout(resizeTimerRef.current)
+    }
+  }, [render, visible])
 
   return (
-    <div className="worksheet-pdf-page" ref={hostRef} style={{ aspectRatio: `1 / ${ratio}` }}>
+    <div
+      className={`worksheet-pdf-page ${visible ? 'is-visible' : 'is-virtualized'}`}
+      ref={hostRef}
+      style={{ aspectRatio: `1 / ${ratio}` }}
+    >
       <canvas ref={canvasRef} aria-label={`PDF-Seite ${number}`} />
     </div>
   )
@@ -122,11 +247,22 @@ export const WorksheetLayer = forwardRef<WorksheetLayerHandle, WorksheetLayerPro
   const saveQueueRef = useRef<Promise<void>>(Promise.resolve())
   const pdfTaskRef = useRef<PDFDocumentLoadingTask | null>(null)
   const oneNotePageRef = useRef<HTMLDivElement>(null)
+  const layoutNotifyTimerRef = useRef<number | null>(null)
 
   const setDirty = useCallback((dirty: boolean) => {
     dirtyRef.current = dirty
     onDirtyChange?.(dirty)
   }, [onDirtyChange])
+
+  const notifyLayout = useCallback(() => {
+    // Coalesce per-page ready events so the note layout is measured once, not N times.
+    if (!onPageLayoutChange) return
+    if (layoutNotifyTimerRef.current !== null) window.clearTimeout(layoutNotifyTimerRef.current)
+    layoutNotifyTimerRef.current = window.setTimeout(() => {
+      layoutNotifyTimerRef.current = null
+      onPageLayoutChange()
+    }, 80)
+  }, [onPageLayoutChange])
 
   const saveNow = useCallback(async () => {
     if (!dirtyRef.current) {
@@ -190,8 +326,13 @@ export const WorksheetLayer = forwardRef<WorksheetLayerHandle, WorksheetLayerPro
         if (!alive) return
         if (!bytes.length) throw new Error('Die PDF-Datei ist leer.')
         GlobalWorkerOptions.workerSrc = pdfWorkerUrl
-        // Own a dense copy — large Electron data: URLs are decoded off-main-thread-friendly as Uint8Array.
-        const task = getDocument({ data: bytes.slice(), useSystemFonts: true })
+        const task = getDocument({
+          data: bytes.slice(),
+          useSystemFonts: true,
+          // Prefer speed; pages still render at device resolution when visible.
+          disableAutoFetch: false,
+          disableStream: false,
+        })
         pdfTaskRef.current = task
         const loaded = await task.promise
         if (!alive) {
@@ -204,12 +345,11 @@ export const WorksheetLayer = forwardRef<WorksheetLayerHandle, WorksheetLayerPro
         }
         setPdf(loaded)
         setLoading(false)
-        onPageLayoutChange?.()
+        notifyLayout()
       })
       .catch((reason: unknown) => {
         if (!alive) return
         const message = reason instanceof Error ? reason.message : 'Das Arbeitsblatt konnte nicht geöffnet werden.'
-        // Translate the generic Chromium network error into something actionable.
         const friendly = /failed to fetch/iu.test(message)
           ? 'PDF konnte nicht gelesen werden. Bitte erneut importieren oder eine kleinere Datei wählen.'
           : message
@@ -219,10 +359,11 @@ export const WorksheetLayer = forwardRef<WorksheetLayerHandle, WorksheetLayerPro
     return () => {
       alive = false
       if (saveTimerRef.current !== null) window.clearTimeout(saveTimerRef.current)
+      if (layoutNotifyTimerRef.current !== null) window.clearTimeout(layoutNotifyTimerRef.current)
       void pdfTaskRef.current?.destroy()
       pdfTaskRef.current = null
     }
-  }, [initialDocument.kind, initialDocument.sourceRelativePath, onPageLayoutChange])
+  }, [initialDocument.kind, initialDocument.sourceRelativePath, notifyLayout])
 
   useEffect(() => {
     if (initialDocument.kind !== 'html') return
@@ -288,7 +429,7 @@ export const WorksheetLayer = forwardRef<WorksheetLayerHandle, WorksheetLayerPro
       {error && <div className="worksheet-error"><FileText size={22} /><strong>Arbeitsblatt nicht verfügbar</strong><span>{error}</span></div>}
       {!error && initialDocument.kind === 'image' && source && (
         <div className="worksheet-page" onPointerDown={(event) => addTextBox(1, event)}>
-          <img src={source} alt={document.title} draggable={false} onLoad={onPageLayoutChange} />
+          <img src={source} alt={document.title} draggable={false} onLoad={notifyLayout} decoding="async" />
           {renderTextBoxes(1)}
         </div>
       )}
@@ -310,14 +451,19 @@ export const WorksheetLayer = forwardRef<WorksheetLayerHandle, WorksheetLayerPro
               height: `${document.pageHeight ?? 1200}px`,
               transform: `scale(${oneNoteScale})`,
             }}
-            onLoad={onPageLayoutChange}
+            onLoad={notifyLayout}
           />
           {renderTextBoxes(1)}
         </div>
       )}
       {!error && pdf && Array.from({ length: pdf.numPages }, (_, index) => {
         const page = index + 1
-        return <div className="worksheet-page" key={page} onPointerDown={(event) => addTextBox(page, event)}><PdfPage pdf={pdf} number={page} onReady={onPageLayoutChange ?? (() => undefined)} />{renderTextBoxes(page)}</div>
+        return (
+          <div className="worksheet-page" key={page} onPointerDown={(event) => addTextBox(page, event)}>
+            <PdfPage pdf={pdf} number={page} onReady={notifyLayout} />
+            {renderTextBoxes(page)}
+          </div>
+        )
       })}
     </section>
   )

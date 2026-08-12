@@ -1,5 +1,10 @@
 # Änderungsverlauf
 
+## 2026.8.16
+
+- **PDF-Arbeitsblätter flüssig & scharf:** Nur sichtbare Seiten werden gerendert (Virtualisierung), Resize ist entprellt, Auflösung folgt dem Display-DPR mit sinnvollen Deckeln. Off-Screen-Seiten geben VRAM frei.
+- **Formen begradigen:** Hält man den Stift nach einer Linie oder einem Kreis kurz still, snapt die Form (gerade Linie / runder Kreis).
+
 ## 2026.8.15
 
 - **Papier wächst nach rechts:** Beim Schreiben oder Scrollen am rechten Rand erweitert sich die Notizseite horizontal (Soft-Limit ~20 A4-Breiten); bestehende Handschrift bleibt positions­treu.

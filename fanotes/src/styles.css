@@ -509,11 +509,31 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .worksheet-toolbar button:disabled { cursor: default; opacity: .45; }
 .worksheet-toolbar-actions button:last-child:not(:first-child) { width: 31px; padding: 0; }
 .worksheet-hint { width: max-content; max-width: calc(100% - 20px); display: flex; align-items: center; gap: 6px; margin: 0 auto 10px; padding: 7px 10px; border-radius: 9px; color: color-mix(in srgb, var(--paper-accent-readable) 76%, #252630); background: color-mix(in srgb, var(--paper-accent-readable) 9%, #fff); font-size: 9px; }
-.worksheet-page { position: relative; width: 100%; margin-bottom: 24px; overflow: hidden; border: 1px solid rgba(35,38,51,.18); border-radius: 3px; background: #fff; box-shadow: 0 12px 34px rgba(29,31,42,.18); }
+.worksheet-page {
+  position: relative;
+  width: 100%;
+  margin-bottom: 24px;
+  overflow: hidden;
+  border: 1px solid rgba(35,38,51,.18);
+  border-radius: 3px;
+  background: #fff;
+  box-shadow: 0 12px 34px rgba(29,31,42,.18);
+  /* Skip layout/paint for off-screen pages when the browser supports it. */
+  content-visibility: auto;
+  contain-intrinsic-size: 800px 1100px;
+  contain: layout paint style;
+}
 .worksheet-page:last-child { margin-bottom: 0; }
-.worksheet-page > img, .worksheet-pdf-page, .worksheet-pdf-page canvas { width: 100%; display: block; }
-.worksheet-page > img { height: auto; min-height: 240px; object-fit: contain; background: #fff; }
-.worksheet-pdf-page canvas { height: 100%; }
+.worksheet-page > img, .worksheet-pdf-page { width: 100%; display: block; background: #fff; }
+.worksheet-page > img { height: auto; min-height: 240px; object-fit: contain; }
+.worksheet-pdf-page { position: relative; min-height: 120px; }
+.worksheet-pdf-page canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+  image-rendering: auto;
+}
+.worksheet-pdf-page.is-virtualized canvas { visibility: hidden; }
 .worksheet-onenote-page { min-height: 420px; background: #fff; }
 .worksheet-onenote-frame { position: absolute; inset: 0 auto auto 0; border: 0; pointer-events: none; transform-origin: left top; background: #fff; }
 .worksheet-layer.is-placing-text .worksheet-page { cursor: text; box-shadow: 0 0 0 2px color-mix(in srgb, var(--paper-accent-readable) 40%, transparent), 0 12px 34px rgba(29,31,42,.18); }

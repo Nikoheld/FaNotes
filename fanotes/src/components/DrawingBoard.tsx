@@ -48,6 +48,7 @@ import type {
   CorrectionLearningResult,
   RecognitionResources,
 } from '../lib/handwritingDb'
+import { isStrokeDwelling, snapStrokeToShape } from '../lib/shapeSnap'
 import { getHandwritingTrainingSampleCount } from '../lib/handwritingDbSummary'
 import { changedMathTokenRect } from '../lib/mathCorrectionLayout'
 import { groupMathInkLines, selectMathInkAtPoint } from '../lib/mathInkSelection'
@@ -140,6 +141,11 @@ const MAX_VIEW_QUALITY_ZOOM = 2.6
 const MIN_INLINE_QUALITY = 1.35
 const MAX_CANVAS_EDGE = 6_144
 const MAX_CANVAS_PIXELS = 18_000_000
+/** Tall multi-page notes (PDF worksheets) keep a lower ink bitmap budget to avoid lag. */
+const MAX_CANVAS_PIXELS_TALL = 8_000_000
+const TALL_LAYOUT_HEIGHT = 2_400
+/** Hold still this long after drawing a shape to snap it (line/circle). */
+const SHAPE_DWELL_MS = 520
 const VIEW_ZOOM_MIN = 0.45
 const VIEW_ZOOM_MAX = 3.25
 const VIEW_ZOOM_STEP = 0.12
@@ -158,7 +164,11 @@ const computeInkPixelSize = (layoutWidth: number, layoutHeight: number, viewZoom
   const screenDpr = Math.min(Math.max(window.devicePixelRatio || 1, 1), MAX_DPR)
   const zoomBoost = Math.max(1, Math.min(MAX_VIEW_QUALITY_ZOOM, viewZoom > 1.02 ? viewZoom : 1))
   const baseBoost = inlineMode ? MIN_INLINE_QUALITY : 1
-  let scale = screenDpr * baseBoost * zoomBoost
+  // Multi-page worksheets make the paper very tall; keep ink supersampling moderate.
+  const tallFactor = layoutHeight > TALL_LAYOUT_HEIGHT
+    ? Math.max(0.55, Math.min(1, TALL_LAYOUT_HEIGHT / layoutHeight))
+    : 1
+  let scale = screenDpr * baseBoost * zoomBoost * tallFactor
   let width = Math.max(1, Math.round(layoutWidth * scale))
   let height = Math.max(1, Math.round(layoutHeight * scale))
   const edge = Math.max(width, height)
@@ -168,9 +178,10 @@ const computeInkPixelSize = (layoutWidth: number, layoutHeight: number, viewZoom
     height = Math.max(1, Math.round(height * factor))
     scale *= factor
   }
+  const pixelBudget = layoutHeight > TALL_LAYOUT_HEIGHT ? MAX_CANVAS_PIXELS_TALL : MAX_CANVAS_PIXELS
   const pixels = width * height
-  if (pixels > MAX_CANVAS_PIXELS) {
-    const factor = Math.sqrt(MAX_CANVAS_PIXELS / pixels)
+  if (pixels > pixelBudget) {
+    const factor = Math.sqrt(pixelBudget / pixels)
     width = Math.max(1, Math.round(width * factor))
     height = Math.max(1, Math.round(height * factor))
     scale *= factor
@@ -1047,6 +1058,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const activeRenderedPointCountRef = useRef(0)
   const liveCanvasHasInkRef = useRef(false)
   const lastPenContactRef = useRef(0)
+  const shapeDwellTimerRef = useRef<number | null>(null)
+  const shapeSnappedRef = useRef(false)
   const mountedRef = useRef(true)
   const resourcesRef = useRef<RecognitionResources | null>(null)
   const recognitionRunRef = useRef(0)
@@ -1849,6 +1862,42 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     }
   }, [eraserSize, scheduleRedraw, sourceHeight, sourceWidth])
 
+  const clearShapeDwellTimer = useCallback(() => {
+    if (shapeDwellTimerRef.current !== null) {
+      window.clearTimeout(shapeDwellTimerRef.current)
+      shapeDwellTimerRef.current = null
+    }
+  }, [])
+
+  /** Snap freehand stroke to a perfect line/circle when the tip dwells in place. */
+  const trySnapActiveShape = useCallback((options?: { silent?: boolean }) => {
+    if (gestureToolRef.current !== 'pen' || selectionStartRef.current) return false
+    const stroke = activeStrokeRef.current
+    if (!stroke || stroke.symbolId || stroke.points.length < 10) return false
+    if (!isStrokeDwelling(stroke, sourceWidth, sourceHeight) && !options?.silent) return false
+    const snapped = snapStrokeToShape(stroke, sourceWidth, sourceHeight)
+    if (!snapped || snapped.confidence < 0.62) return false
+    activeStrokeRef.current = {
+      ...stroke,
+      ...snapped.stroke,
+      points: snapped.stroke.points,
+    } as InkStroke
+    activeRenderedPointCountRef.current = 0
+    liveCanvasHasInkRef.current = false
+    shapeSnappedRef.current = true
+    gestureChangedRef.current = true
+    scheduleRedraw()
+    if (!options?.silent) {
+      setNotice({
+        kind: 'success',
+        text: snapped.kind === 'line'
+          ? 'Linie begradigt · hebe den Stift, um sie zu übernehmen.'
+          : 'Kreis gerundet · hebe den Stift, um ihn zu übernehmen.',
+      })
+    }
+    return true
+  }, [scheduleRedraw, sourceHeight, sourceWidth])
+
   const appendPointerEvent = useCallback((event: PointerEvent) => {
     const point = pointFromEvent(event)
     if (gestureToolRef.current === 'eraser') {
@@ -1864,11 +1913,32 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         (point.y - previous.y) * sourceHeight,
       )
       if (distance < 0.35) return
+      // Moving again cancels a pending shape snap and allows re-drawing freehand.
+      if (distance > 1.8) {
+        clearShapeDwellTimer()
+        if (shapeSnappedRef.current) shapeSnappedRef.current = false
+      }
     }
     stroke.points.push(point)
     gestureChangedRef.current = true
     scheduleRedraw()
-  }, [eraseAt, pointFromEvent, scheduleRedraw, sourceHeight, sourceWidth])
+    // After a deliberate pause on the same spot, perfect common geometry.
+    if (
+      gestureToolRef.current === 'pen'
+      && !selectionStartRef.current
+      && !stroke.symbolId
+      && stroke.points.length >= 10
+      && isStrokeDwelling(stroke, sourceWidth, sourceHeight)
+    ) {
+      clearShapeDwellTimer()
+      shapeDwellTimerRef.current = window.setTimeout(() => {
+        shapeDwellTimerRef.current = null
+        trySnapActiveShape()
+      }, SHAPE_DWELL_MS)
+    } else {
+      clearShapeDwellTimer()
+    }
+  }, [clearShapeDwellTimer, eraseAt, pointFromEvent, scheduleRedraw, sourceHeight, sourceWidth, trySnapActiveShape])
 
   const commitPendingSolverTap = useCallback(() => {
     const pending = pendingSolverTapRef.current
@@ -2197,6 +2267,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     clearRecognitionScope()
     closeMathSolverSelection()
     closeMathCorrectionSession()
+    clearShapeDwellTimer()
+    shapeSnappedRef.current = false
     beforeGestureRef.current = snapshotStrokes(strokesRef.current)
     gestureChangedRef.current = false
     gestureToolRef.current = pointerEraser ? 'eraser' : tool
@@ -2224,7 +2296,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         }
     }
     appendPointerEvent(event.nativeEvent)
-  }, [activeArtBrush.pressure, activeArtSymbol, appendPointerEvent, artBrush, artColor, artEffect, artOpacity, artSymbolRotation, artSymbolSize, artWidth, bumpInkRevision, clearRecognitionScope, closeMathCorrectionSession, closeMathSolverSelection, commitPendingSolverTap, commitStrokeToCanvas, inkMode, mathSolverEnabled, penColor, penWidth, pointFromEvent, scheduleRedraw, selectionMode, setDirty, settings.pressureEnabled, sourceHeight, sourceWidth, tool, updateHistoryState])
+  }, [activeArtBrush.pressure, activeArtSymbol, appendPointerEvent, artBrush, artColor, artEffect, artOpacity, artSymbolRotation, artSymbolSize, artWidth, bumpInkRevision, clearRecognitionScope, clearShapeDwellTimer, closeMathCorrectionSession, closeMathSolverSelection, commitPendingSolverTap, commitStrokeToCanvas, inkMode, mathSolverEnabled, penColor, penWidth, pointFromEvent, scheduleRedraw, selectionMode, setDirty, settings.pressureEnabled, sourceHeight, sourceWidth, tool, updateHistoryState])
 
   const handlePointerMove = useCallback((event: ReactPointerEvent<HTMLCanvasElement>) => {
     if (activePointerRef.current !== event.pointerId) return
@@ -2328,6 +2400,19 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       return
     }
     appendPointerEvent(native)
+    clearShapeDwellTimer()
+    // Final opportunity to snap if the tip stayed still on lift (or already snapped live).
+    if (
+      event.type !== 'pointercancel'
+      && gestureToolRef.current === 'pen'
+      && activeStrokeRef.current
+      && (
+        shapeSnappedRef.current
+        || isStrokeDwelling(activeStrokeRef.current, sourceWidth, sourceHeight)
+      )
+    ) {
+      trySnapActiveShape({ silent: true })
+    }
     const activeStroke = activeStrokeRef.current
     if (
       mathSolverEnabled
@@ -2335,6 +2420,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       && gestureToolRef.current === 'pen'
       && event.type !== 'pointercancel'
       && activeStroke?.points.length
+      && !shapeSnappedRef.current
       && isShortTapStroke(activeStroke, sourceWidth, sourceHeight)
     ) {
       const tapPoint = activeStroke.points.at(-1)!
@@ -2376,6 +2462,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       }
     }
     activeStrokeRef.current = null
+    const didShapeSnap = shapeSnappedRef.current
+    shapeSnappedRef.current = false
     endInteraction()
     // If zoom changed during the stroke, upgrade the backing store once the pen lifts.
     queueMicrotask(() => {
@@ -2404,10 +2492,12 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
           kind: 'success',
           text: 'Durchkritzeln erkannt: Handschrift gelöscht. Mit Strg+Z kannst du sie sofort zurückholen.',
         })
+      } else if (didShapeSnap) {
+        setNotice({ kind: 'success', text: 'Form übernommen (gerade Linie / runder Kreis).' })
       }
     }
     scheduleRedraw()
-  }, [analyzeMathCorrectionSelection, appendPointerEvent, bumpInkRevision, commitPendingSolverTap, commitStrokeToCanvas, inkMode, mathSolverEnabled, mode, openMathSolverAtPoint, pointFromEvent, redraw, scheduleRedraw, selectionPurpose, setDirty, settings.scribbleEraseSensitivity, sourceHeight, sourceWidth, updateHistoryState])
+  }, [analyzeMathCorrectionSelection, appendPointerEvent, bumpInkRevision, clearShapeDwellTimer, commitPendingSolverTap, commitStrokeToCanvas, inkMode, mathSolverEnabled, mode, openMathSolverAtPoint, pointFromEvent, redraw, scheduleRedraw, selectionPurpose, setDirty, settings.scribbleEraseSensitivity, sourceHeight, sourceWidth, trySnapActiveShape, updateHistoryState])
 
   /**
    * Hard-stop any in-progress pen/mouse stroke and scrub leftover pointer capture.
