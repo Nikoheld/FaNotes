@@ -1018,6 +1018,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const pageLayoutFrameRef = useRef<number | null>(null)
   const pageGrowCoalesceRef = useRef<number | null>(null)
   const activePointerTargetRef = useRef<Element | null>(null)
+  /** Last pointer id we successfully called setPointerCapture for (may outlive activePointerRef on Wayland glitches). */
+  const lastCapturedPointerIdRef = useRef<number | null>(null)
   const lastPointerTypeRef = useRef<string>('mouse')
   const exportCacheRef = useRef<{ key: string; imageData: string } | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -1669,7 +1671,11 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     applyViewTransform(zoom, rotation, pan)
   }, [applyViewTransform])
 
+  // Populated after finishPointer is defined — zoom/rotate must free tablet capture first.
+  const forceEndActivePointerRef = useRef<(reason?: 'view-gesture' | 'cross-device' | 'watchdog' | 'blur' | 'escape') => void>(() => {})
+
   const zoomBy = useCallback((delta: number, originClient?: { x: number; y: number }) => {
+    forceEndActivePointerRef.current('view-gesture')
     const previous = viewZoomRef.current
     const next = clampViewZoom(previous + delta)
     if (next === previous) return
@@ -1695,10 +1701,12 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   }, [inline, resolvePaperElement, setView])
 
   const rotateBy = useCallback((delta: number) => {
+    forceEndActivePointerRef.current('view-gesture')
     setView({ rotation: viewRotationRef.current + delta })
   }, [setView])
 
   const resetView = useCallback(() => {
+    forceEndActivePointerRef.current('view-gesture')
     setView({ zoom: 1, rotation: 0, pan: { x: 0, y: 0 } })
   }, [setView])
 
@@ -1758,14 +1766,16 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       releaseStuckInputFocus()
       const canvas = canvasRef.current
       if (canvas) {
-        const pointerId = activePointerRef.current
+        const pointerId = activePointerRef.current ?? lastCapturedPointerIdRef.current
         if (pointerId !== null) {
           releasePointerCaptureSafe(activePointerTargetRef.current ?? canvas, pointerId)
-          activePointerRef.current = null
-          activePointerTargetRef.current = null
-          pointerBoundsRef.current = null
-          activeStrokeRef.current = null
+          releasePointerCaptureSafe(canvas, pointerId)
         }
+        activePointerRef.current = null
+        activePointerTargetRef.current = null
+        lastCapturedPointerIdRef.current = null
+        pointerBoundsRef.current = null
+        activeStrokeRef.current = null
       }
     }
   }, [inline, inputActive, resetView])
@@ -2037,11 +2047,20 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     // Prefer board focus over canvas focus so keyboard shortcuts still work
     // without trapping Wayland/Hyprland keyboard grab on the canvas element.
     boardRef.current?.focus({ preventScroll: true })
-    try {
-      event.currentTarget.setPointerCapture(event.pointerId)
-      activePointerTargetRef.current = event.currentTarget
-    } catch {
-      activePointerTargetRef.current = event.currentTarget
+    activePointerTargetRef.current = event.currentTarget
+    // Only capture mouse. Pen/touch capture under Hyprland/Wayland often never
+    // releases when a trackpad pinch-zoom interleaves — the crosshair (+) cursor
+    // then sticks and chrome buttons stop receiving clicks. Mouse still needs
+    // capture so drag-draw continues outside the canvas hit box.
+    if (event.pointerType === 'mouse') {
+      try {
+        event.currentTarget.setPointerCapture(event.pointerId)
+        lastCapturedPointerIdRef.current = event.pointerId
+      } catch {
+        lastCapturedPointerIdRef.current = null
+      }
+    } else {
+      lastCapturedPointerIdRef.current = null
     }
     activePointerRef.current = event.pointerId
     const pointerRect = event.currentTarget.getBoundingClientRect()
@@ -2111,6 +2130,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       activePointerRef.current = null
       pointerBoundsRef.current = null
       releasePointerCaptureSafe(event.currentTarget, event.pointerId)
+      if (lastCapturedPointerIdRef.current === event.pointerId) lastCapturedPointerIdRef.current = null
       activePointerTargetRef.current = null
       if (event.pointerType === 'pen' || event.pointerType === 'touch') {
         queueMicrotask(() => releaseStuckInputFocus(boardRef.current))
@@ -2188,8 +2208,17 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       activePointerRef.current = null
       activePointerTargetRef.current = null
       releasePointerCaptureSafe(captureTarget, pointerId)
+      releasePointerCaptureSafe(canvasRef.current, pointerId)
+      if (lastCapturedPointerIdRef.current === pointerId) lastCapturedPointerIdRef.current = null
       // Hyprland/Wayland: after pen/touch, free keyboard + scroll without requiring a workspace switch.
-      if (pointerType === 'pen' || pointerType === 'touch' || event.type === 'pointercancel' || event.type === 'lostpointercapture') {
+      // Also free on any cancel/lost-capture so trackpad zoom mid-stroke cannot leave input trapped.
+      if (
+        pointerType === 'pen'
+        || pointerType === 'touch'
+        || event.type === 'pointercancel'
+        || event.type === 'lostpointercapture'
+        || pointerType === 'mouse'
+      ) {
         queueMicrotask(() => releaseStuckInputFocus(boardRef.current))
         window.setTimeout(() => releaseStuckInputFocus(boardRef.current), 0)
       }
@@ -2325,39 +2354,139 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     scheduleRedraw()
   }, [analyzeMathCorrectionSelection, appendPointerEvent, bumpInkRevision, commitPendingSolverTap, commitStrokeToCanvas, inkMode, mathSolverEnabled, mode, openMathSolverAtPoint, pointFromEvent, redraw, scheduleRedraw, selectionPurpose, setDirty, settings.scribbleEraseSensitivity, sourceHeight, updateHistoryState])
 
+  /**
+   * Hard-stop any in-progress pen/mouse stroke and scrub leftover pointer capture.
+   * Used when trackpad zoom/pan interleaves with tablet input (Hyprland freezes the
+   * crosshair cursor and blocks chrome clicks until capture is released).
+   */
+  const forceEndActivePointer = useCallback((reason: 'view-gesture' | 'cross-device' | 'watchdog' | 'blur' | 'escape' = 'watchdog') => {
+    void reason
+    const pointerId = activePointerRef.current
+    const scrubId = pointerId ?? lastCapturedPointerIdRef.current
+    if (pointerId !== null) {
+      const target = activePointerTargetRef.current ?? canvasRef.current
+      const rect = target instanceof Element ? target.getBoundingClientRect() : null
+      const synthetic = {
+        pointerId,
+        type: 'pointercancel',
+        pointerType: lastPointerTypeRef.current,
+        clientX: rect ? rect.left + rect.width / 2 : 0,
+        clientY: rect ? rect.top + rect.height / 2 : 0,
+        pressure: 0,
+        tiltX: 0,
+        tiltY: 0,
+        buttons: 0,
+        button: -1,
+        timeStamp: performance.now(),
+        preventDefault() {},
+        cancelable: false,
+      } as unknown as PointerEvent
+      finishPointer(synthetic)
+    } else if (activeStrokeRef.current) {
+      activeStrokeRef.current = null
+      pointerBoundsRef.current = null
+      scheduleRedraw()
+    }
+    if (scrubId !== null) {
+      releasePointerCaptureSafe(activePointerTargetRef.current, scrubId)
+      releasePointerCaptureSafe(canvasRef.current, scrubId)
+      lastCapturedPointerIdRef.current = null
+    }
+    activePointerRef.current = null
+    activePointerTargetRef.current = null
+    pointerBoundsRef.current = null
+    releaseStuckInputFocus(boardRef.current)
+    queueMicrotask(() => releaseStuckInputFocus(boardRef.current))
+    window.setTimeout(() => releaseStuckInputFocus(boardRef.current), 0)
+  }, [finishPointer, scheduleRedraw])
+  forceEndActivePointerRef.current = forceEndActivePointer
+
   // Global safety net: if pointerup/cancel never reaches the canvas (common with
   // tablets under Hyprland/Wayland), still release capture and restore input.
+  // Also continue pen strokes when the tip leaves the canvas (no setPointerCapture for pen).
   useEffect(() => {
+    if (!inputActive) return
+    const onWindowPointerMove = (event: PointerEvent) => {
+      if (activePointerRef.current !== event.pointerId) return
+      const canvas = canvasRef.current
+      // Canvas React handler already processes moves while the pointer is over it.
+      // Only continue the stroke here when the tip left the live canvas (pen without capture).
+      if (canvas && (event.target === canvas || (event.target instanceof Node && canvas.contains(event.target)))) {
+        return
+      }
+      if (selectionStartRef.current) {
+        setSelectionRect(selectionBetween(selectionStartRef.current, pointFromEvent(event)))
+        return
+      }
+      if (event.pointerType === 'pen') lastPenContactRef.current = performance.now()
+      const events = event.getCoalescedEvents?.() ?? [event]
+      if (gestureToolRef.current === 'eraser') {
+        eraseAt(events.map(pointFromEvent))
+      } else {
+        events.forEach(appendPointerEvent)
+        const latest = activeStrokeRef.current?.points.at(-1)
+        if (latest) ensureInfinitePageRoom(latest.y)
+      }
+    }
     const onWindowPointerEnd = (event: PointerEvent) => {
       if (activePointerRef.current !== event.pointerId) return
       finishPointer(event)
     }
-    const onWindowBlur = () => {
-      const pointerId = activePointerRef.current
-      if (pointerId === null) {
-        releaseStuckInputFocus(boardRef.current)
-        return
-      }
-      releasePointerCaptureSafe(activePointerTargetRef.current ?? canvasRef.current, pointerId)
-      activePointerRef.current = null
-      activePointerTargetRef.current = null
-      pointerBoundsRef.current = null
-      activeStrokeRef.current = null
-      releaseStuckInputFocus(boardRef.current)
-      scheduleRedraw()
+    const onWindowPointerDown = (event: PointerEvent) => {
+      // Trackpad/mouse click while a pen stroke is still "active" (lost up): free UI first.
+      if (activePointerRef.current === null) return
+      if (event.pointerId === activePointerRef.current) return
+      forceEndActivePointer('cross-device')
     }
+    const onWindowBlur = () => {
+      forceEndActivePointer('blur')
+    }
+    const onVisibility = () => {
+      if (document.visibilityState === 'hidden') forceEndActivePointer('blur')
+    }
+    // Scrub orphaned mouse capture left behind after a dropped pointerup (no active stroke).
+    // Never auto-kill a live stroke — a still pen tip can pause moves for a long time.
+    const onWatchdog = () => {
+      if (activePointerRef.current !== null || activeStrokeRef.current) return
+      const capturedId = lastCapturedPointerIdRef.current
+      if (capturedId === null) return
+      const target = activePointerTargetRef.current ?? canvasRef.current
+      if (target instanceof Element && target.hasPointerCapture?.(capturedId)) {
+        releasePointerCaptureSafe(target, capturedId)
+        releaseStuckInputFocus(boardRef.current)
+      }
+      lastCapturedPointerIdRef.current = null
+    }
+    window.addEventListener('pointermove', onWindowPointerMove, true)
     window.addEventListener('pointerup', onWindowPointerEnd, true)
     window.addEventListener('pointercancel', onWindowPointerEnd, true)
+    window.addEventListener('pointerdown', onWindowPointerDown, true)
     window.addEventListener('blur', onWindowBlur)
+    document.addEventListener('visibilitychange', onVisibility)
+    const watchdog = window.setInterval(onWatchdog, 500)
     return () => {
+      window.removeEventListener('pointermove', onWindowPointerMove, true)
       window.removeEventListener('pointerup', onWindowPointerEnd, true)
       window.removeEventListener('pointercancel', onWindowPointerEnd, true)
+      window.removeEventListener('pointerdown', onWindowPointerDown, true)
       window.removeEventListener('blur', onWindowBlur)
+      document.removeEventListener('visibilitychange', onVisibility)
+      window.clearInterval(watchdog)
     }
-  }, [finishPointer, scheduleRedraw])
+  }, [appendPointerEvent, eraseAt, ensureInfinitePageRoom, finishPointer, forceEndActivePointer, inputActive, pointFromEvent])
 
   const handleWheel = useCallback((event: React.WheelEvent) => {
     if (!inputActive) return
+    // Any view gesture from trackpad/mouse must release tablet capture first —
+    // otherwise Hyprland leaves the pen cursor (+) stuck over the whole UI.
+    const isViewGesture = event.ctrlKey || event.metaKey || event.altKey
+      || viewZoomRef.current !== 1
+      || viewRotationRef.current !== 0
+      || viewPanRef.current.x !== 0
+      || viewPanRef.current.y !== 0
+    if (isViewGesture && (activePointerRef.current !== null || lastCapturedPointerIdRef.current !== null || activeStrokeRef.current)) {
+      forceEndActivePointer('view-gesture')
+    }
     // Zoom while writing: Ctrl/Meta+wheel (or pinch-equivalent ctrl-wheel on trackpads).
     if (event.ctrlKey || event.metaKey) {
       event.preventDefault()
@@ -2386,7 +2515,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         },
       })
     }
-  }, [inputActive, rotateBy, setView, zoomBy])
+  }, [forceEndActivePointer, inputActive, rotateBy, setView, zoomBy])
 
   const undo = useCallback(() => {
     if (pendingSolverTapRef.current) {
@@ -3609,33 +3738,45 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       setNotice({ kind: 'info', text: 'Bereichsauswahl abgebrochen.' })
       return
     }
-    if (event.key === 'Escape' && (viewZoom !== 1 || viewRotation !== 0 || viewPan.x !== 0 || viewPan.y !== 0)) {
-      event.preventDefault()
-      resetView()
-      return
+    if (event.key === 'Escape') {
+      if (activePointerRef.current !== null || activeStrokeRef.current || lastCapturedPointerIdRef.current !== null) {
+        event.preventDefault()
+        forceEndActivePointer('escape')
+        return
+      }
+      if (viewZoom !== 1 || viewRotation !== 0 || viewPan.x !== 0 || viewPan.y !== 0) {
+        event.preventDefault()
+        resetView()
+        return
+      }
     }
     if (!(event.ctrlKey || event.metaKey)) {
       if (event.key === '[') {
         event.preventDefault()
+        forceEndActivePointer('view-gesture')
         rotateBy(-VIEW_ROTATE_STEP)
       } else if (event.key === ']') {
         event.preventDefault()
+        forceEndActivePointer('view-gesture')
         rotateBy(VIEW_ROTATE_STEP)
       }
       return
     }
     if (event.key === '=' || event.key === '+') {
       event.preventDefault()
+      forceEndActivePointer('view-gesture')
       zoomBy(VIEW_ZOOM_STEP)
       return
     }
     if (event.key === '-' || event.key === '_') {
       event.preventDefault()
+      forceEndActivePointer('view-gesture')
       zoomBy(-VIEW_ZOOM_STEP)
       return
     }
     if (event.key === '0') {
       event.preventDefault()
+      forceEndActivePointer('view-gesture')
       resetView()
       return
     }
@@ -4403,7 +4544,7 @@ const drawingBoardStyles = `
 .lw-drawing-board.is-inline{position:absolute;z-index:4;inset:0;height:auto;min-height:100%;overflow:visible;background:transparent;pointer-events:none}
 .lw-drawing-board.is-inline .lw-draw-header{display:none}
 .lw-draw-toolbar.is-floating-chrome,.lw-draw-footer.is-floating-chrome{
-  position:fixed;z-index:48;left:50%;margin:0;border:1px solid var(--draw-border);
+  position:fixed;z-index:90;left:50%;margin:0;border:1px solid var(--draw-border);
   background:color-mix(in srgb,var(--background-secondary,#17171d) 96%,transparent);
   box-shadow:0 14px 38px rgba(0,0,0,.24);backdrop-filter:blur(14px);pointer-events:none;
   opacity:0;transform:translateX(-50%) translateY(-8px);transition:opacity .14s ease,transform .14s ease
@@ -4448,7 +4589,7 @@ const drawingBoardStyles = `
 .lw-drawing-board.is-inline .lw-conversion-panel{position:sticky;z-index:14;top:72px;float:right;width:min(370px,calc(100% - 28px));max-height:calc(100vh - 175px);margin:72px 14px 0 0;overflow:auto;pointer-events:auto;box-shadow:0 22px 70px rgba(0,0,0,.34)}
 .lw-drawing-board.is-inline .lw-draw-notice{position:sticky;z-index:15;top:72px;width:min(420px,calc(100% - 28px));margin:72px auto 0;pointer-events:auto;box-shadow:0 13px 34px rgba(0,0,0,.24)}
 .lw-draw-footer.is-floating-chrome{
-  bottom:max(34px,env(safe-area-inset-bottom,0px));z-index:45;
+  bottom:max(34px,env(safe-area-inset-bottom,0px));z-index:90;
   width:min(520px,calc(100vw - 72px));max-width:calc(100vw - 72px);
   min-height:40px;padding:4px 5px;border-radius:11px;justify-content:center
 }

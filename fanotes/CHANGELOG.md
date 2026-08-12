@@ -1,5 +1,9 @@
 # Änderungsverlauf
 
+## 2026.8.14
+
+- **Stift + Trackpad-Zoom friert nicht mehr ein:** Während des Zeichnens mit dem Grafiktablett und gleichzeitigem Hereinzoomen (Trackpad/Strg+Mausrad) bleibt der +-Cursor nicht mehr hängen. Pointer-Capture gilt nur noch für die Maus; Stift/Touch enden sauber bei Zoom/Pan/Drehung, Gerätewechsel und Escape. Die schwebende Werkzeugleiste bleibt klickbar.
+
 ## 2026.8.13
 
 - **Bessere Qwen3-VL-Handschrifterkennung:** Hochauflösendere, geglättete Strichbilder mit stärkerem Kontrast; OCR-Prompts (DE/EN) mit Zeilenerhalt; deterministische Decodierung; längere Token-Budgets; strengere Textbereinigung und intelligentere Übernahme gegenüber der klassischen Erkennung. Qwen wird auch genutzt, wenn der Auto-Modus Text stark vermutet.

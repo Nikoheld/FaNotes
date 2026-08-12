@@ -38,13 +38,16 @@ const safeguards = [
   ['const releasePointerCaptureSafe', 'sichere Pointer-Capture-Freigabe nach Stift (Hyprland/Wayland)'],
   ['const releaseStuckInputFocus', 'Fokusfreigabe nach Stiftnutzung'],
   ["window.addEventListener('pointerup', onWindowPointerEnd, true)", 'globale Pointer-Ende-Absicherung'],
+  ["window.addEventListener('pointerdown', onWindowPointerDown, true)", 'Cross-Device-Freigabe bei Trackpad/Maus'],
+  ['const forceEndActivePointer', 'harte Beendigung hängender Stift-Capture'],
+  ["event.pointerType === 'mouse'", 'kein setPointerCapture für Stift (Hyprland-Freeze)'],
   ['const applyViewTransform', 'Blatt-Zoom und -Rotation während Handschrift'],
   ['const handleWheel = useCallback', 'Strg/Alt-Mausrad für Zoom und Rotation'],
   ["aria-label=\"Blattansicht\"", 'Toolbar-Steuerung für Zoom und Drehung'],
-  ['// Use layout size (offset*), not getBoundingClientRect, so CSS zoom/rotation', 'Bitmap-Größe unabhängig vom Ansichtszoom'],
+  ['// Use layout size (offset*), not getBoundingClientRect: CSS zoom/rotation of the', 'Bitmap-Größe unabhängig vom Ansichtszoom'],
   ["paper.classList.toggle('is-view-transformed'", 'Inline-Papier markiert Zoom/Drehung'],
   ['.editor-pane, .worksheet-layer, .lw-canvas-surface', 'Zoom transformiert nur Blattinhalt, nicht die Toolbar'],
-  ['position:fixed;z-index:48;top:max(12px,env(safe-area-inset-top,0px))', 'Handschrift-Toolbar bleibt oben fixiert'],
+  ['position:fixed;z-index:90;left:50%', 'Handschrift-Toolbar bleibt oben fixiert und klickbar'],
 ]
 
 for (const [needle, label] of safeguards) {
