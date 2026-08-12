@@ -8,6 +8,33 @@ export type WorksheetLayerHandle = {
   flush: () => Promise<void>
 }
 
+/**
+ * Load PDF bytes from a vault asset source.
+ * Electron returns large `data:…;base64,…` URLs — Chromium often rejects `fetch(dataUrl)`
+ * with "Failed to fetch". Decode those locally; only use fetch for blob:/http(s): URLs.
+ */
+const loadPdfBytes = async (source: string): Promise<Uint8Array> => {
+  if (!source) throw new Error('Die PDF-Datei ist leer oder fehlt im Vault.')
+  if (source.startsWith('data:')) {
+    const comma = source.indexOf(',')
+    if (comma < 0) throw new Error('Ungültige PDF-Daten (Data-URL).')
+    const header = source.slice(0, comma)
+    const body = source.slice(comma + 1)
+    if (/;base64/iu.test(header)) {
+      const binary = atob(body)
+      const bytes = new Uint8Array(binary.length)
+      for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index)
+      return bytes
+    }
+    return new TextEncoder().encode(decodeURIComponent(body))
+  }
+  const response = await fetch(source)
+  if (!response.ok) {
+    throw new Error(`PDF konnte nicht geladen werden (HTTP ${response.status}).`)
+  }
+  return new Uint8Array(await response.arrayBuffer())
+}
+
 type WorksheetLayerProps = {
   document: WorksheetDocument
   inputDisabled?: boolean
@@ -156,13 +183,15 @@ export const WorksheetLayer = forwardRef<WorksheetLayerHandle, WorksheetLayerPro
           setLoading(false)
           return
         }
-        const [{ getDocument, GlobalWorkerOptions }, response] = await Promise.all([
+        const [{ getDocument, GlobalWorkerOptions }, bytes] = await Promise.all([
           import('pdfjs-dist'),
-          fetch(dataUrl),
+          loadPdfBytes(dataUrl),
         ])
+        if (!alive) return
+        if (!bytes.length) throw new Error('Die PDF-Datei ist leer.')
         GlobalWorkerOptions.workerSrc = pdfWorkerUrl
-        const bytes = new Uint8Array(await response.arrayBuffer())
-        const task = getDocument({ data: bytes })
+        // Own a dense copy — large Electron data: URLs are decoded off-main-thread-friendly as Uint8Array.
+        const task = getDocument({ data: bytes.slice(), useSystemFonts: true })
         pdfTaskRef.current = task
         const loaded = await task.promise
         if (!alive) {
@@ -179,7 +208,12 @@ export const WorksheetLayer = forwardRef<WorksheetLayerHandle, WorksheetLayerPro
       })
       .catch((reason: unknown) => {
         if (!alive) return
-        setError(reason instanceof Error ? reason.message : 'Das Arbeitsblatt konnte nicht geöffnet werden.')
+        const message = reason instanceof Error ? reason.message : 'Das Arbeitsblatt konnte nicht geöffnet werden.'
+        // Translate the generic Chromium network error into something actionable.
+        const friendly = /failed to fetch/iu.test(message)
+          ? 'PDF konnte nicht gelesen werden. Bitte erneut importieren oder eine kleinere Datei wählen.'
+          : message
+        setError(friendly)
         setLoading(false)
       })
     return () => {

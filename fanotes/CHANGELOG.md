@@ -1,5 +1,10 @@
 # Änderungsverlauf
 
+## 2026.8.15
+
+- **Papier wächst nach rechts:** Beim Schreiben oder Scrollen am rechten Rand erweitert sich die Notizseite horizontal (Soft-Limit ~20 A4-Breiten); bestehende Handschrift bleibt positions­treu.
+- **PDF-Arbeitsblatt-Import:** Grosse Data-URL-PDFs werden lokal dekodiert statt per `fetch` geladen – der Fehler „Arbeitsblatt nicht verfügbar / Failed to fetch“ entfällt.
+
 ## 2026.8.14
 
 - **Stift + Trackpad-Zoom friert nicht mehr ein:** Während des Zeichnens mit dem Grafiktablett und gleichzeitigem Hereinzoomen (Trackpad/Strg+Mausrad) bleibt der +-Cursor nicht mehr hängen. Pointer-Capture gilt nur noch für die Maus; Stift/Touch enden sauber bei Zoom/Pan/Drehung, Gerätewechsel und Escape. Die schwebende Werkzeugleiste bleibt klickbar.

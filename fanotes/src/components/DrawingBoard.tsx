@@ -123,8 +123,12 @@ const SOURCE_WIDTH = 900
 const SOURCE_HEIGHT = 1273
 /** Grow the writable page by ~¾ A4 each time the pen or scroll approaches the end. */
 const PAGE_GROW_STEP = Math.round(SOURCE_HEIGHT * 0.75)
+/** Horizontal grow step (~½ A4 width) when writing/scrolling toward the right edge. */
+const PAGE_GROW_STEP_WIDTH = Math.round(SOURCE_WIDTH * 0.55)
 /** Soft cap (~40 A4 pages) so a runaway scroll cannot exhaust memory. */
 const MAX_SOURCE_HEIGHT = SOURCE_HEIGHT * 40
+/** Soft cap for horizontal growth (~20 A4 widths). */
+const MAX_SOURCE_WIDTH = SOURCE_WIDTH * 20
 const EXPORT_SCALE = 2
 /** Cap for window.devicePixelRatio contribution. */
 const MAX_DPR = 4
@@ -625,10 +629,12 @@ const drawInkStroke = (
   height: number,
   smoothing: number,
   startSegment = 1,
+  sourceWidth = SOURCE_WIDTH,
 ) => {
   if (stroke.points.length === 0) return
   const first = stroke.points[0]
-  const scale = width / SOURCE_WIDTH
+  // baseWidth is in original page units; map through the current logical page width.
+  const scale = width / Math.max(1, sourceWidth)
   const brush = stroke.purpose === 'art' ? stroke.brush ?? 'fineliner' : 'fineliner'
   const opacity = stroke.purpose === 'art' ? clamp(stroke.opacity ?? 1, .08, 1) : 1
   const paint = strokePaint(context, stroke, width, height)
@@ -788,13 +794,14 @@ const renderDocument = (
   width: number,
   height: number,
   includePaper = true,
+  sourceWidth = SOURCE_WIDTH,
 ) => {
   const context = canvas.getContext('2d')
   if (!context) return
   context.setTransform(1, 0, 0, 1, 0, 0)
   context.clearRect(0, 0, canvas.width, canvas.height)
   if (includePaper) drawPaper(context, width, height, paperStyle)
-  strokes.forEach((stroke) => drawInkStroke(context, stroke, width, height, smoothing))
+  strokes.forEach((stroke) => drawInkStroke(context, stroke, width, height, smoothing, 1, sourceWidth))
 }
 
 const safeInkStrokes = (value: unknown, fallbackColor: string): InkStroke[] => {
@@ -877,9 +884,9 @@ const median = (values: number[]) => {
   return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2
 }
 
-const isShortTapStroke = (stroke: InkStroke, sourceHeight: number) => {
+const isShortTapStroke = (stroke: InkStroke, sourceWidth: number, sourceHeight: number) => {
   if (!stroke.points.length) return false
-  const width = (Math.max(...stroke.points.map((point) => point.x)) - Math.min(...stroke.points.map((point) => point.x))) * SOURCE_WIDTH
+  const width = (Math.max(...stroke.points.map((point) => point.x)) - Math.min(...stroke.points.map((point) => point.x))) * sourceWidth
   const height = (Math.max(...stroke.points.map((point) => point.y)) - Math.min(...stroke.points.map((point) => point.y))) * sourceHeight
   const duration = (stroke.points.at(-1)?.t ?? 0) - (stroke.points[0]?.t ?? 0)
   return width <= 9 && height <= 9 && duration <= 320
@@ -927,39 +934,35 @@ const distanceToSegment = (
 }
 
 type StrokeBounds = { left: number; right: number; top: number; bottom: number }
-const strokeBoundsCache = new WeakMap<InkStroke, StrokeBounds>()
 
-const strokeBounds = (stroke: InkStroke, sourceHeight: number): StrokeBounds => {
-  const cached = strokeBoundsCache.get(stroke)
-  if (cached) return cached
+const strokeBounds = (stroke: InkStroke, sourceWidth: number, sourceHeight: number): StrokeBounds => {
+  // No long-lived cache: growPage* mutates points in place when the sheet expands.
   const padding = stroke.baseWidth / 2
   let left = Number.POSITIVE_INFINITY
   let right = Number.NEGATIVE_INFINITY
   let top = Number.POSITIVE_INFINITY
   let bottom = Number.NEGATIVE_INFINITY
   stroke.points.forEach((point) => {
-    const px = point.x * SOURCE_WIDTH
+    const px = point.x * sourceWidth
     const py = point.y * sourceHeight
     left = Math.min(left, px - padding)
     right = Math.max(right, px + padding)
     top = Math.min(top, py - padding)
     bottom = Math.max(bottom, py + padding)
   })
-  const bounds = { left, right, top, bottom }
-  strokeBoundsCache.set(stroke, bounds)
-  return bounds
+  return { left, right, top, bottom }
 }
 
-const strokeTouchesEraser = (stroke: InkStroke, x: number, y: number, radius: number, sourceHeight: number) => {
+const strokeTouchesEraser = (stroke: InkStroke, x: number, y: number, radius: number, sourceWidth: number, sourceHeight: number) => {
   const points = stroke.points
   if (!points.length) return false
-  const bounds = strokeBounds(stroke, sourceHeight)
+  const bounds = strokeBounds(stroke, sourceWidth, sourceHeight)
   if (
     x + radius < bounds.left || x - radius > bounds.right ||
     y + radius < bounds.top || y - radius > bounds.bottom
   ) return false
   if (points.length === 1) {
-    return Math.hypot(points[0].x * SOURCE_WIDTH - x, points[0].y * sourceHeight - y) <= radius + stroke.baseWidth / 2
+    return Math.hypot(points[0].x * sourceWidth - x, points[0].y * sourceHeight - y) <= radius + stroke.baseWidth / 2
   }
   for (let index = 1; index < points.length; index += 1) {
     const previous = points[index - 1]
@@ -967,9 +970,9 @@ const strokeTouchesEraser = (stroke: InkStroke, x: number, y: number, radius: nu
     if (distanceToSegment(
       x,
       y,
-      previous.x * SOURCE_WIDTH,
+      previous.x * sourceWidth,
       previous.y * sourceHeight,
-      point.x * SOURCE_WIDTH,
+      point.x * sourceWidth,
       point.y * sourceHeight,
     ) <= radius + stroke.baseWidth / 2) return true
   }
@@ -1015,6 +1018,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const viewRotationRef = useRef(0)
   const viewPanRef = useRef({ x: 0, y: 0 })
   const sourceHeightRef = useRef(SOURCE_HEIGHT)
+  const sourceWidthRef = useRef(SOURCE_WIDTH)
   const pageLayoutFrameRef = useRef<number | null>(null)
   const pageGrowCoalesceRef = useRef<number | null>(null)
   const activePointerTargetRef = useRef<Element | null>(null)
@@ -1081,6 +1085,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const [penWidth, setPenWidth] = useState(settings.penWidth)
   const [paperStyle, setPaperStyle] = useState(settings.paperStyle)
   const [sourceHeight, setSourceHeight] = useState(SOURCE_HEIGHT)
+  const [sourceWidth, setSourceWidth] = useState(SOURCE_WIDTH)
   const [viewZoom, setViewZoom] = useState(1)
   const [viewRotation, setViewRotation] = useState(0)
   const [viewPan, setViewPan] = useState({ x: 0, y: 0 })
@@ -1090,6 +1095,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   viewRotationRef.current = viewRotation
   viewPanRef.current = viewPan
   sourceHeightRef.current = sourceHeight
+  sourceWidthRef.current = sourceWidth
   const [revision, setRevision] = useState(0)
   const [transcriptRevision, setTranscriptRevision] = useState(0)
   const [canUndo, setCanUndo] = useState(false)
@@ -1276,7 +1282,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     if ((measureLayout || !canvasPixelSizeRef.current.width) && shell) {
       const availableWidth = Math.max(240, shell.clientWidth - 20)
       const availableHeight = Math.max(150, shell.clientHeight - 48)
-      const sourceRatio = SOURCE_WIDTH / sourceHeight
+      const sourceRatio = sourceWidth / sourceHeight
       const width = Math.min(availableWidth, availableHeight * sourceRatio)
       const height = width / sourceRatio
       const cssWidth = `${Math.round(width)}px`
@@ -1328,9 +1334,9 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     if (committedCanvas.width !== pixelWidth) committedCanvas.width = pixelWidth
     if (committedCanvas.height !== pixelHeight) committedCanvas.height = pixelHeight
 
-    const cacheKey = [pixelWidth, pixelHeight, paperStyle, settings.smoothing, sourceHeight, inline].join(':')
+    const cacheKey = [pixelWidth, pixelHeight, paperStyle, settings.smoothing, sourceWidth, sourceHeight, inline].join(':')
     if (committedCanvasDirtyRef.current || committedCanvasKeyRef.current !== cacheKey) {
-      renderDocument(committedCanvas, strokesRef.current, paperStyle, settings.smoothing, pixelWidth, pixelHeight, !inline)
+      renderDocument(committedCanvas, strokesRef.current, paperStyle, settings.smoothing, pixelWidth, pixelHeight, !inline, sourceWidth)
       committedCanvasKeyRef.current = cacheKey
       committedCanvasDirtyRef.current = false
     }
@@ -1359,11 +1365,12 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         pixelHeight,
         settings.smoothing,
         Math.max(1, activeRenderedPointCountRef.current),
+        sourceWidth,
       )
       activeRenderedPointCountRef.current = activeStroke.points.length
       liveCanvasHasInkRef.current = true
     }
-  }, [inline, paperStyle, settings.smoothing, sourceHeight])
+  }, [inline, paperStyle, settings.smoothing, sourceHeight, sourceWidth])
 
   const commitStrokeToCanvas = useCallback((stroke: InkStroke) => {
     const canvas = committedCanvasRef.current
@@ -1371,8 +1378,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     if (!canvas || !width || !height || committedCanvasDirtyRef.current) return
     const context = canvas.getContext('2d')
     if (!context) return
-    drawInkStroke(context, stroke, width, height, settings.smoothing)
-  }, [settings.smoothing])
+    drawInkStroke(context, stroke, width, height, settings.smoothing, 1, sourceWidth)
+  }, [settings.smoothing, sourceWidth])
 
   useEffect(() => {
     if (inline && !inputActive) {
@@ -1436,6 +1443,10 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       if (typeof raw.sourceHeight === 'number' && raw.sourceHeight >= 400 && raw.sourceHeight <= MAX_SOURCE_HEIGHT) {
         sourceHeightRef.current = raw.sourceHeight
         setSourceHeight(raw.sourceHeight)
+      }
+      if (typeof raw.sourceWidth === 'number' && raw.sourceWidth >= 400 && raw.sourceWidth <= MAX_SOURCE_WIDTH) {
+        sourceWidthRef.current = raw.sourceWidth
+        setSourceWidth(raw.sourceWidth)
       }
       if (typeof raw.createdAt === 'string') createdAtRef.current = raw.createdAt
       searchTranscriptRef.current = typeof raw.searchTranscript === 'string' ? raw.searchTranscript : ''
@@ -1528,10 +1539,13 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     return (surface?.closest('.unified-paper') ?? boardRef.current?.closest('.unified-paper')) as HTMLElement | null
   }, [])
 
-  const applyInkExtentStyles = useCallback((height: number) => {
+  const applyInkExtentStyles = useCallback((height: number, width: number = sourceWidthRef.current) => {
     const paper = resolvePaperElement()
     if (!paper) return
+    // Height extent is relative to the original A4 width so vertical growth stays stable
+    // when the sheet also expands horizontally.
     paper.style.setProperty('--ink-extent-ratio', String(Math.max(SOURCE_HEIGHT, height) / SOURCE_WIDTH))
+    paper.style.setProperty('--ink-width-extent', String(Math.max(SOURCE_WIDTH, width) / SOURCE_WIDTH))
     paper.classList.add('has-ink-extent')
   }, [resolvePaperElement])
 
@@ -1564,33 +1578,69 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     }
     sourceHeightRef.current = next
     setSourceHeight(next)
-    applyInkExtentStyles(next)
+    applyInkExtentStyles(next, sourceWidthRef.current)
     exportCacheRef.current = null
     setDirty(true)
     schedulePageLayoutRefresh()
     return true
   }, [applyInkExtentStyles, schedulePageLayoutRefresh, setDirty])
 
-  /** Ensure headroom below a normalized y (0–1) or when the viewport nears the paper end. */
-  const ensureInfinitePageRoom = useCallback((normalizedY?: number) => {
-    const prev = sourceHeightRef.current
-    if (prev >= MAX_SOURCE_HEIGHT) return
-    let target = prev
-    if (typeof normalizedY === 'number' && Number.isFinite(normalizedY)) {
+  /**
+   * Grow the writable page to the right (one-sided infinite sheet). Existing ink keeps
+   * absolute position by scaling normalized x when sourceWidth increases.
+   */
+  const growPageWidthTo = useCallback((targetWidth: number) => {
+    const prev = sourceWidthRef.current
+    const next = Math.min(MAX_SOURCE_WIDTH, Math.max(prev, Math.round(targetWidth)))
+    if (next <= prev) return false
+    const scale = prev / next
+    for (const stroke of strokesRef.current) {
+      for (const point of stroke.points) point.x *= scale
+    }
+    const active = activeStrokeRef.current
+    if (active) {
+      for (const point of active.points) point.x *= scale
+    }
+    sourceWidthRef.current = next
+    setSourceWidth(next)
+    applyInkExtentStyles(sourceHeightRef.current, next)
+    exportCacheRef.current = null
+    setDirty(true)
+    schedulePageLayoutRefresh()
+    return true
+  }, [applyInkExtentStyles, schedulePageLayoutRefresh, setDirty])
+
+  /** Ensure headroom below/right of a normalized point or when the viewport nears a paper edge. */
+  const ensureInfinitePageRoom = useCallback((normalizedY?: number, normalizedX?: number) => {
+    const prevH = sourceHeightRef.current
+    if (prevH < MAX_SOURCE_HEIGHT && typeof normalizedY === 'number' && Number.isFinite(normalizedY)) {
       if (normalizedY >= WRITE_GROW_EDGE) {
-        const absoluteY = clamp(normalizedY) * prev
-        target = Math.max(target, absoluteY + PAGE_GROW_STEP * 0.65)
+        const absoluteY = clamp(normalizedY) * prevH
+        const target = absoluteY + PAGE_GROW_STEP * 0.65
+        if (target > prevH) {
+          const stepped = Math.min(
+            MAX_SOURCE_HEIGHT,
+            Math.ceil(target / PAGE_GROW_STEP) * PAGE_GROW_STEP,
+          )
+          growPageTo(Math.max(prevH + PAGE_GROW_STEP, stepped))
+        }
       }
     }
-    // Snap up in whole grow-steps so rapid scroll/write does not re-layout every pixel.
-    if (target > prev) {
-      const stepped = Math.min(
-        MAX_SOURCE_HEIGHT,
-        Math.ceil(target / PAGE_GROW_STEP) * PAGE_GROW_STEP,
-      )
-      growPageTo(Math.max(prev + PAGE_GROW_STEP, stepped))
+    const prevW = sourceWidthRef.current
+    if (prevW < MAX_SOURCE_WIDTH && typeof normalizedX === 'number' && Number.isFinite(normalizedX)) {
+      if (normalizedX >= WRITE_GROW_EDGE) {
+        const absoluteX = clamp(normalizedX) * prevW
+        const target = absoluteX + PAGE_GROW_STEP_WIDTH * 0.65
+        if (target > prevW) {
+          const stepped = Math.min(
+            MAX_SOURCE_WIDTH,
+            Math.ceil(target / PAGE_GROW_STEP_WIDTH) * PAGE_GROW_STEP_WIDTH,
+          )
+          growPageWidthTo(Math.max(prevW + PAGE_GROW_STEP_WIDTH, stepped))
+        }
+      }
     }
-  }, [growPageTo])
+  }, [growPageTo, growPageWidthTo])
 
   const ensureRoomFromScroll = useCallback(() => {
     if (!inline) return
@@ -1604,7 +1654,12 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     if (distanceToPaperBottom < Math.max(220, scroller.clientHeight * 0.45)) {
       growPageTo(sourceHeightRef.current + PAGE_GROW_STEP)
     }
-  }, [growPageTo, inline, resolvePaperElement])
+    const distanceToPaperRight = paperRect.right - scrollerRect.right
+    // Extend to the right when the user pans/scrolls near the right edge.
+    if (distanceToPaperRight < Math.max(180, scroller.clientWidth * 0.35)) {
+      growPageWidthTo(sourceWidthRef.current + PAGE_GROW_STEP_WIDTH)
+    }
+  }, [growPageTo, growPageWidthTo, inline, resolvePaperElement])
 
   const clearViewTransformTargets = useCallback(() => {
     const surface = surfaceRef.current
@@ -1730,8 +1785,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   }, [redraw, viewZoom])
 
   useEffect(() => {
-    applyInkExtentStyles(sourceHeight)
-  }, [applyInkExtentStyles, sourceHeight])
+    applyInkExtentStyles(sourceHeight, sourceWidth)
+  }, [applyInkExtentStyles, sourceHeight, sourceWidth])
 
   // Infinite paper: when the user scrolls near the bottom of the note page,
   // grow the sheet in large chunks (rAF-coalesced) so writing never runs out of room.
@@ -1783,16 +1838,16 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const eraseAt = useCallback((value: StrokePoint | StrokePoint[]) => {
     const before = strokesRef.current.length
     const points = Array.isArray(value) ? value : [value]
-    const eraserPoints = points.map((point) => ({ x: point.x * SOURCE_WIDTH, y: point.y * sourceHeight }))
+    const eraserPoints = points.map((point) => ({ x: point.x * sourceWidth, y: point.y * sourceHeight }))
     strokesRef.current = strokesRef.current.filter((stroke) => !eraserPoints.some((point) => (
-      strokeTouchesEraser(stroke, point.x, point.y, eraserSize, sourceHeight)
+      strokeTouchesEraser(stroke, point.x, point.y, eraserSize, sourceWidth, sourceHeight)
     )))
     if (strokesRef.current.length !== before) {
       gestureChangedRef.current = true
       committedCanvasDirtyRef.current = true
       scheduleRedraw()
     }
-  }, [eraserSize, scheduleRedraw, sourceHeight])
+  }, [eraserSize, scheduleRedraw, sourceHeight, sourceWidth])
 
   const appendPointerEvent = useCallback((event: PointerEvent) => {
     const point = pointFromEvent(event)
@@ -1805,7 +1860,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     const previous = stroke.points.at(-1)
     if (previous) {
       const distance = Math.hypot(
-        (point.x - previous.x) * SOURCE_WIDTH,
+        (point.x - previous.x) * sourceWidth,
         (point.y - previous.y) * sourceHeight,
       )
       if (distance < 0.35) return
@@ -1813,7 +1868,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     stroke.points.push(point)
     gestureChangedRef.current = true
     scheduleRedraw()
-  }, [eraseAt, pointFromEvent, scheduleRedraw, sourceHeight])
+  }, [eraseAt, pointFromEvent, scheduleRedraw, sourceHeight, sourceWidth])
 
   const commitPendingSolverTap = useCallback(() => {
     const pending = pendingSolverTapRef.current
@@ -1891,7 +1946,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     selectedStrokes: InkStroke[],
   ) => {
     const runId = ++mathCorrectionRunRef.current
-    const groups = groupMathInkLines(selectedStrokes, { width: SOURCE_WIDTH, height: sourceHeight })
+    const groups = groupMathInkLines(selectedStrokes, { width: sourceWidth, height: sourceHeight })
     setMathCorrectionSession({ rect, lines: [], status: 'recognizing' })
     setConversionOpen(false)
     setNotice(null)
@@ -1957,7 +2012,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
 
   const openMathSolverAtPoint = useCallback(async (point: Pick<StrokePoint, 'x' | 'y'>) => {
     const selection = selectMathInkAtPoint(handwritingStrokes(strokesRef.current), point, {
-      width: SOURCE_WIDTH,
+      width: sourceWidth,
       height: sourceHeight,
     })
     if (!selection) {
@@ -2076,7 +2131,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     if (pendingTap) {
       const elapsed = performance.now() - pendingTap.at
       const distance = Math.hypot(
-        (firstPoint.x - pendingTap.point.x) * SOURCE_WIDTH,
+        (firstPoint.x - pendingTap.point.x) * sourceWidth,
         (firstPoint.y - pendingTap.point.y) * sourceHeight,
       )
       if (mathSolverEnabled && inkMode === 'writing' && !pointerEraser && tool === 'pen' && elapsed <= 430 && distance <= 34) {
@@ -2169,7 +2224,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         }
     }
     appendPointerEvent(event.nativeEvent)
-  }, [activeArtBrush.pressure, activeArtSymbol, appendPointerEvent, artBrush, artColor, artEffect, artOpacity, artSymbolRotation, artSymbolSize, artWidth, bumpInkRevision, clearRecognitionScope, closeMathCorrectionSession, closeMathSolverSelection, commitPendingSolverTap, commitStrokeToCanvas, inkMode, mathSolverEnabled, penColor, penWidth, pointFromEvent, scheduleRedraw, selectionMode, setDirty, settings.pressureEnabled, sourceHeight, tool, updateHistoryState])
+  }, [activeArtBrush.pressure, activeArtSymbol, appendPointerEvent, artBrush, artColor, artEffect, artOpacity, artSymbolRotation, artSymbolSize, artWidth, bumpInkRevision, clearRecognitionScope, closeMathCorrectionSession, closeMathSolverSelection, commitPendingSolverTap, commitStrokeToCanvas, inkMode, mathSolverEnabled, penColor, penWidth, pointFromEvent, scheduleRedraw, selectionMode, setDirty, settings.pressureEnabled, sourceHeight, sourceWidth, tool, updateHistoryState])
 
   const handlePointerMove = useCallback((event: ReactPointerEvent<HTMLCanvasElement>) => {
     if (activePointerRef.current !== event.pointerId) return
@@ -2186,7 +2241,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       events.forEach(appendPointerEvent)
       // Grow the page ahead of the pen so writing never hits a hard bottom edge.
       const latest = activeStrokeRef.current?.points.at(-1)
-      if (latest) ensureInfinitePageRoom(latest.y)
+      if (latest) ensureInfinitePageRoom(latest.y, latest.x)
     }
   }, [appendPointerEvent, ensureInfinitePageRoom, eraseAt, pointFromEvent])
 
@@ -2280,7 +2335,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       && gestureToolRef.current === 'pen'
       && event.type !== 'pointercancel'
       && activeStroke?.points.length
-      && isShortTapStroke(activeStroke, sourceHeight)
+      && isShortTapStroke(activeStroke, sourceWidth, sourceHeight)
     ) {
       const tapPoint = activeStroke.points.at(-1)!
       const pending: PendingSolverTap = {
@@ -2306,7 +2361,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       const scribble = inkMode === 'writing' && event.type !== 'pointercancel' ? detectScribbleErase(
         activeStroke,
         handwritingEntries.map(({ stroke }) => stroke),
-        { width: SOURCE_WIDTH, height: sourceHeight },
+        { width: sourceWidth, height: sourceHeight },
         settings.scribbleEraseSensitivity,
       ) : null
       if (scribble) {
@@ -2352,7 +2407,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       }
     }
     scheduleRedraw()
-  }, [analyzeMathCorrectionSelection, appendPointerEvent, bumpInkRevision, commitPendingSolverTap, commitStrokeToCanvas, inkMode, mathSolverEnabled, mode, openMathSolverAtPoint, pointFromEvent, redraw, scheduleRedraw, selectionPurpose, setDirty, settings.scribbleEraseSensitivity, sourceHeight, updateHistoryState])
+  }, [analyzeMathCorrectionSelection, appendPointerEvent, bumpInkRevision, commitPendingSolverTap, commitStrokeToCanvas, inkMode, mathSolverEnabled, mode, openMathSolverAtPoint, pointFromEvent, redraw, scheduleRedraw, selectionPurpose, setDirty, settings.scribbleEraseSensitivity, sourceHeight, sourceWidth, updateHistoryState])
 
   /**
    * Hard-stop any in-progress pen/mouse stroke and scrub leftover pointer capture.
@@ -2425,7 +2480,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       } else {
         events.forEach(appendPointerEvent)
         const latest = activeStrokeRef.current?.points.at(-1)
-        if (latest) ensureInfinitePageRoom(latest.y)
+        if (latest) ensureInfinitePageRoom(latest.y, latest.x)
       }
     }
     const onWindowPointerEnd = (event: PointerEvent) => {
@@ -2610,11 +2665,11 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const drawingPayload = useCallback((includeImage = false): DrawingSavePayload => {
     let imageData: string | undefined
     if (includeImage) {
-      const exportKey = [inkRevisionRef.current, paperStyle, settings.smoothing, sourceHeight].join(':')
+      const exportKey = [inkRevisionRef.current, paperStyle, settings.smoothing, sourceWidth, sourceHeight].join(':')
       imageData = exportCacheRef.current?.key === exportKey ? exportCacheRef.current.imageData : undefined
       if (!imageData) {
       const exportCanvas = document.createElement('canvas')
-      exportCanvas.width = SOURCE_WIDTH * EXPORT_SCALE
+      exportCanvas.width = sourceWidth * EXPORT_SCALE
       exportCanvas.height = sourceHeight * EXPORT_SCALE
       renderDocument(
         exportCanvas,
@@ -2623,6 +2678,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         settings.smoothing,
         exportCanvas.width,
         exportCanvas.height,
+        true,
+        sourceWidth,
       )
       imageData = exportCanvas.toDataURL('image/png')
       exportCacheRef.current = { key: exportKey, imageData }
@@ -2633,7 +2690,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       schemaVersion: 1,
       title,
       paperStyle,
-      sourceWidth: SOURCE_WIDTH,
+      sourceWidth,
       sourceHeight,
       createdAt: createdAtRef.current,
       updatedAt: now,
@@ -2652,7 +2709,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       imageData,
       drawingJson: JSON.stringify(drawing),
     }
-  }, [activeMode, mathSolverEnabled, mode, paperStyle, settings.smoothing, sourceHeight, title])
+  }, [activeMode, mathSolverEnabled, mode, paperStyle, settings.smoothing, sourceHeight, sourceWidth, title])
 
   const saveDrawing = useCallback((insertAfterSave: boolean, silent = false) => {
     if (!strokesRef.current.length) return Promise.resolve()
@@ -2802,7 +2859,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
           const neural = await recognizeNeuralText(
             engineStrokes,
             settings.recognitionLanguage,
-            SOURCE_WIDTH,
+            sourceWidth,
             sourceHeight,
           )
           if (runId !== recognitionRunRef.current) return
@@ -2830,7 +2887,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
               neural,
               settings.recognitionLanguage,
               false,
-              SOURCE_WIDTH,
+              sourceWidth,
               sourceHeight,
             )
             const fused = personalized.fusion
@@ -2868,7 +2925,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       ) {
         try {
           const { renderEnhancedMathImage } = await import('../lib/enhancedMathRecognition')
-          const image = renderEnhancedMathImage(engineStrokes, SOURCE_WIDTH, sourceHeight)
+          const image = renderEnhancedMathImage(engineStrokes, sourceWidth, sourceHeight)
           if (image) {
             const enhanced = await window.fanotes.recognizeEnhancedMath(image)
             if (runId !== recognitionRunRef.current) return
@@ -2917,7 +2974,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
             renderQwenVisionImage,
             shouldPreferQwenVisionText,
           } = await import('../lib/qwenVisionRecognition')
-          const visionImage = renderQwenVisionImage(engineStrokes, SOURCE_WIDTH, sourceHeight)
+          const visionImage = renderQwenVisionImage(engineStrokes, sourceWidth, sourceHeight)
           if (visionImage) {
             const vision = await window.fanotes.recognizeQwenVision({
               ...visionImage,
@@ -3108,7 +3165,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
             const neural = await recognizeNeuralText(
               chunk,
               settings.recognitionLanguage,
-              SOURCE_WIDTH,
+              sourceWidth,
               sourceHeight,
             )
             const neuralModeAssessment = assessNeuralTextModeCandidate(
@@ -3135,7 +3192,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
                 neural,
                 settings.recognitionLanguage,
                 false,
-                SOURCE_WIDTH,
+                sourceWidth,
                 sourceHeight,
               )
               chunkTextTokens = personalized.tokens
@@ -3501,14 +3558,14 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         ? clamp(inferredFontSize * 0.7 + previousFormat.fontSize * 0.3, 20, 60)
         : inferredFontSize
       const lineSpacing = previousFormat?.lineSpacing ?? 1.42
-      const selectionLeft = selection.rect.x * SOURCE_WIDTH
-      const selectionRight = (selection.rect.x + selection.rect.width) * SOURCE_WIDTH
+      const selectionLeft = selection.rect.x * sourceWidth
+      const selectionRight = (selection.rect.x + selection.rect.width) * sourceWidth
       const selectionTop = selection.rect.y * sourceHeight
       const selectionBottom = (selection.rect.y + selection.rect.height) * sourceHeight
       const estimatedResultWidth = continuationText(result, 'same-line').length * fontSize * 0.48
       let placement: Exclude<MathSolverPlacement, 'auto'> = mathSolverPlacement === 'auto'
         ? previousFormat?.placement
-          ?? (action === 'solve' || result.normalizedInput.includes('=') || selectionRight + estimatedResultWidth + 52 > SOURCE_WIDTH
+          ?? (action === 'solve' || result.normalizedInput.includes('=') || selectionRight + estimatedResultWidth + 52 > sourceWidth
             ? 'next-line'
             : 'same-line')
         : mathSolverPlacement
@@ -3538,8 +3595,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         return {
           text,
           generated: sameLine
-            ? synthesizeHandwriting(text, loaded.samples, options, { width: SOURCE_WIDTH, height: sourceHeight })
-            : synthesizeHandwritingToFit(text, loaded.samples, options, { width: SOURCE_WIDTH, height: sourceHeight }, 18),
+            ? synthesizeHandwriting(text, loaded.samples, options, { width: sourceWidth, height: sourceHeight })
+            : synthesizeHandwritingToFit(text, loaded.samples, options, { width: sourceWidth, height: sourceHeight }, 18),
         }
       }
 
@@ -4329,7 +4386,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
           </div>
           <div className="lw-canvas-meta">
             <span><i className="lw-pressure-dot" />{settings.pressureEnabled ? 'Druckdynamik aktiv' : 'Konstante Strichbreite'}</span>
-            <span>{handwritingCount ? `${handwritingCount} Handschrift` : ''}{handwritingCount && artCount ? ' · ' : ''}{artCount ? `${artCount} Zeichnung` : ''}{!inkCount ? 'Noch leer' : ''} · {sourceHeight === SOURCE_HEIGHT ? 'A4-Seite' : 'Zeichenfläche'}</span>
+            <span>{handwritingCount ? `${handwritingCount} Handschrift` : ''}{handwritingCount && artCount ? ' · ' : ''}{artCount ? `${artCount} Zeichnung` : ''}{!inkCount ? 'Noch leer' : ''} · {sourceHeight === SOURCE_HEIGHT && sourceWidth === SOURCE_WIDTH ? 'A4-Seite' : 'Zeichenfläche'}</span>
           </div>
         </div>
 
@@ -4501,7 +4558,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       <TextToHandwritingDialog
         open={textToHandwritingOpen}
         samples={resources?.samples ?? []}
-        pageWidth={SOURCE_WIDTH}
+        pageWidth={sourceWidth}
         pageHeight={sourceHeight}
         suggestedStartY={Math.max(96, bottomOfStrokes(strokesRef.current, sourceHeight) + 58)}
         color={penColor}

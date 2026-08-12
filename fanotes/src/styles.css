@@ -466,6 +466,10 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   isolation: isolate;
 }
 .unified-paper.has-ink-extent {
+  /* Grow rightward with handwriting while keeping the original A4 width as a floor. */
+  --ink-width-extent: 1;
+  width: max(var(--paper-width), calc(var(--paper-width) * var(--ink-width-extent)));
+  max-width: none;
   min-height: max(
     calc(100% - 64px),
     var(--paper-a4-height),
