@@ -49,6 +49,15 @@ import type {
   RecognitionResources,
 } from '../lib/handwritingDb'
 import { isStrokeDwelling, snapStrokeToShape } from '../lib/shapeSnap'
+import {
+  VIEW_ROTATE_STEP,
+  VIEW_ZOOM_MAX,
+  VIEW_ZOOM_MIN,
+  VIEW_ZOOM_STEP,
+  clampViewZoom,
+  normalizeRotation,
+} from '../lib/paperView'
+import { usePaperView } from './PaperView'
 import { getHandwritingTrainingSampleCount } from '../lib/handwritingDbSummary'
 import { changedMathTokenRect } from '../lib/mathCorrectionLayout'
 import { groupMathInkLines, selectMathInkAtPoint } from '../lib/mathInkSelection'
@@ -146,18 +155,8 @@ const MAX_CANVAS_PIXELS_TALL = 8_000_000
 const TALL_LAYOUT_HEIGHT = 2_400
 /** Hold still this long after drawing a shape to snap it (line/circle). */
 const SHAPE_DWELL_MS = 520
-const VIEW_ZOOM_MIN = 0.45
-const VIEW_ZOOM_MAX = 3.25
-const VIEW_ZOOM_STEP = 0.12
-const VIEW_ROTATE_STEP = 15
 /** Start extending when the pen is in the last 18% of the current page. */
 const WRITE_GROW_EDGE = 0.82
-
-const clampViewZoom = (value: number) => Math.min(VIEW_ZOOM_MAX, Math.max(VIEW_ZOOM_MIN, Math.round(value * 100) / 100))
-const normalizeRotation = (value: number) => {
-  const wrapped = ((value % 360) + 360) % 360
-  return wrapped > 180 ? wrapped - 360 : wrapped
-}
 
 /** Backing-store size for the ink canvases. Higher when zoomed in so CSS scale stays sharp. */
 const computeInkPixelSize = (layoutWidth: number, layoutHeight: number, viewZoom: number, inlineMode: boolean) => {
@@ -1016,6 +1015,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   onOpenGlyphenWerk,
   onClose,
 }: DrawingBoardProps, forwardedRef) {
+  const paperView = usePaperView()
   const boardRef = useRef<HTMLElement | null>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const surfaceRef = useRef<HTMLDivElement>(null)
@@ -1696,6 +1696,9 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   }, [resolvePaperElement])
 
   const applyViewTransform = useCallback((zoom: number, rotation: number, pan: { x: number; y: number }) => {
+    // Shared PaperView owns the note-sheet transform in inline mode so zoom
+    // survives switching between keyboard and pen.
+    if (inline && paperView) return
     const transform = `translate(${pan.x}px, ${pan.y}px) rotate(${rotation}deg) scale(${zoom})`
     const surface = surfaceRef.current
     const active = zoom !== 1 || rotation !== 0 || pan.x !== 0 || pan.y !== 0
@@ -1724,9 +1727,13 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       paper.classList.toggle('is-view-transformed', active)
     }
     if (noteView) noteView.classList.toggle('is-view-transformed', active)
-  }, [inline, resolvePaperElement])
+  }, [inline, paperView, resolvePaperElement])
 
   const setView = useCallback((next: { zoom?: number; rotation?: number; pan?: { x: number; y: number } }) => {
+    if (paperView) {
+      paperView.setView(next)
+      return
+    }
     const zoom = clampViewZoom(next.zoom ?? viewZoomRef.current)
     const rotation = normalizeRotation(next.rotation ?? viewRotationRef.current)
     const pan = next.pan ?? viewPanRef.current
@@ -1737,7 +1744,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     viewRotationRef.current = rotation
     viewPanRef.current = pan
     applyViewTransform(zoom, rotation, pan)
-  }, [applyViewTransform])
+  }, [applyViewTransform, paperView])
 
   // Populated after finishPointer is defined — zoom/rotate must free tablet capture first.
   const forceEndActivePointerRef = useRef<(reason?: 'view-gesture' | 'cross-device' | 'watchdog' | 'blur' | 'escape') => void>(() => {})
@@ -1779,11 +1786,20 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   }, [setView])
 
   useEffect(() => {
+    if (paperView) {
+      setViewZoom(paperView.zoom)
+      setViewRotation(paperView.rotation)
+      setViewPan(paperView.pan)
+      viewZoomRef.current = paperView.zoom
+      viewRotationRef.current = paperView.rotation
+      viewPanRef.current = paperView.pan
+      return
+    }
     applyViewTransform(viewZoom, viewRotation, viewPan)
     return () => {
       clearViewTransformTargets()
     }
-  }, [applyViewTransform, clearViewTransformTargets, viewPan, viewRotation, viewZoom])
+  }, [applyViewTransform, clearViewTransformTargets, paperView, viewPan, viewRotation, viewZoom])
 
   // Re-rasterize ink at higher backing-store resolution after zoom settles so
   // zoomed handwriting stays sharp instead of a stretched low-res bitmap.
@@ -1829,8 +1845,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
 
   useEffect(() => {
     if (inline && !inputActive) {
-      // Leaving pen mode: restore paper view and free Wayland input focus.
-      resetView()
+      // Leaving pen mode: keep shared paper zoom (text mode uses it too).
+      if (!paperView) resetView()
       releaseStuckInputFocus()
       const canvas = canvasRef.current
       if (canvas) {
@@ -1846,7 +1862,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         activeStrokeRef.current = null
       }
     }
-  }, [inline, inputActive, resetView])
+  }, [inline, inputActive, paperView, resetView])
 
   const eraseAt = useCallback((value: StrokePoint | StrokePoint[]) => {
     const before = strokesRef.current.length
@@ -2621,17 +2637,19 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   }, [appendPointerEvent, eraseAt, ensureInfinitePageRoom, finishPointer, forceEndActivePointer, inputActive, pointFromEvent])
 
   const handleWheel = useCallback((event: React.WheelEvent) => {
-    if (!inputActive) return
-    // Any view gesture from trackpad/mouse must release tablet capture first —
-    // otherwise Hyprland leaves the pen cursor (+) stuck over the whole UI.
     const isViewGesture = event.ctrlKey || event.metaKey || event.altKey
       || viewZoomRef.current !== 1
       || viewRotationRef.current !== 0
       || viewPanRef.current.x !== 0
       || viewPanRef.current.y !== 0
-    if (isViewGesture && (activePointerRef.current !== null || lastCapturedPointerIdRef.current !== null || activeStrokeRef.current)) {
+    if (inputActive && isViewGesture && (activePointerRef.current !== null || lastCapturedPointerIdRef.current !== null || activeStrokeRef.current)) {
       forceEndActivePointer('view-gesture')
     }
+    // Shared PaperView already handles sheet zoom in inline notes (text + pen).
+    if (paperView) return
+    if (!inputActive) return
+    // Any view gesture from trackpad/mouse must release tablet capture first —
+    // otherwise Hyprland leaves the pen cursor (+) stuck over the whole UI.
     // Zoom while writing: Ctrl/Meta+wheel (or pinch-equivalent ctrl-wheel on trackpads).
     if (event.ctrlKey || event.metaKey) {
       event.preventDefault()
@@ -2660,7 +2678,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         },
       })
     }
-  }, [forceEndActivePointer, inputActive, rotateBy, setView, zoomBy])
+  }, [forceEndActivePointer, inputActive, paperView, rotateBy, setView, zoomBy])
 
   const undo = useCallback(() => {
     if (pendingSolverTapRef.current) {

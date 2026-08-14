@@ -44,6 +44,7 @@ import type { GlyphenWerkView } from './components/GlyphenWerkWorkspace'
 import type { MarkdownEditorHandle, MarkdownFormatAction } from './components/MarkdownEditor'
 import type { WorksheetLayerHandle } from './components/WorksheetLayer'
 import { DEFAULT_SETTINGS } from './defaults'
+import { PaperView } from './components/PaperView'
 import { applyRendererResourceLimits } from './lib/resourceLimits'
 import { setUiLanguage, translateUiText } from './i18n'
 import { bestContrastText, ensureReadableColor } from './lib/colorContrast'
@@ -1794,7 +1795,11 @@ export default function App({ startupBootstrap }: AppProps) {
             ) : overviewOpen ? (
               <VaultOverview entries={tree} openTabs={tabs} onOpen={(path) => { setOverviewOpen(false); return openNote(path) }} onCreateNote={() => createNote()} onClose={() => setOverviewOpen(false)} />
             ) : activeTab ? (
-              <div className={`unified-note-view paper-${settings.paperStyle} ${drawingOpen ? 'is-inking' : ''}`}>
+              <PaperView
+                className={`unified-note-view paper-${settings.paperStyle} ${drawingOpen ? 'is-inking' : ''}`}
+                viewKey={activeTab.path}
+                showHud={!drawingOpen}
+              >
                 <article className={`unified-paper ${worksheetSession.documents.length ? 'has-worksheet' : ''}`} aria-label={`${activeTab.title} · gemeinsame Tastatur- und Handschriftseite`}>
                   <div className="editor-pane"><MarkdownEditor ref={editorRef} key={activeTab.path} content={activeTab.content} onChange={updateContent} onSave={async (content) => { await saveContent(activeTab.path, content) }} settings={settings} focusToken={focusToken} readOnly={activeEntryMutating || drawingOpen} paperMode onLanguageDetected={setDetectedTextLanguage} /></div>
                   {worksheetSession.documents.map((document) => <Suspense key={document.id} fallback={<div className="worksheet-loading"><LoaderCircle className="spin" size={20} /> Arbeitsblatt wird geladen …</div>}>
@@ -1827,7 +1832,7 @@ export default function App({ startupBootstrap }: AppProps) {
                   </Suspense>}
                   {drawingOpen && drawingSession.key === 0 && <div className="inline-ink-loading"><LoaderCircle className="spin" size={18} /> Gespeicherte Stiftebene wird geladen …</div>}
                 </article>
-              </div>
+              </PaperView>
             ) : (
               <div className="editor-placeholder"><div className="placeholder-glyph"><BookOpen size={28} /></div><span className="eyebrow">Bereit für deine nächste Idee</span><h2>Dein Wissen, in deiner Hand</h2><p>Schreibe mit Tastatur und Stift auf derselben Seite oder starte direkt mit einem Arbeitsblatt.</p><div className="placeholder-actions"><button className="primary-button" type="button" onClick={() => void createNote()}><FilePlus2 size={14} /> Neue Notiz</button><button className="secondary-button" type="button" onClick={openWorksheetImport}><FileUp size={14} /> Arbeitsblatt</button></div><button className="placeholder-command" type="button" onClick={() => setPaletteOpen(true)}><Command size={13} /> Alle Aktionen mit <kbd>Strg P</kbd></button></div>
               )}

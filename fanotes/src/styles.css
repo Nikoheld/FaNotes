@@ -412,6 +412,43 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .editor-pane .cm-scroller { scrollbar-gutter: stable; overscroll-behavior: contain; }
 .editor-module-loading { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; gap: 9px; color: var(--text-muted); font-size: 11px; }
 .unified-note-view { width: 100%; min-width: 0; min-height: 0; overflow: auto; background: color-mix(in srgb, var(--bg) 93%, var(--panel)); scrollbar-gutter: stable; overscroll-behavior: contain; }
+.paper-view { position: relative; }
+.paper-view-hud {
+  position: fixed;
+  z-index: 46;
+  right: 16px;
+  bottom: max(46px, env(safe-area-inset-bottom, 0px));
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 4px;
+  border: 1px solid var(--border-strong);
+  border-radius: 11px;
+  color: var(--text-soft);
+  background: color-mix(in srgb, var(--panel-strong) 94%, transparent);
+  box-shadow: 0 10px 28px rgba(0,0,0,.2);
+  backdrop-filter: blur(12px);
+  pointer-events: auto;
+}
+.paper-view-hud button {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 7px;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+}
+.paper-view-hud button:hover:not(:disabled) { color: var(--text); background: var(--panel-hover); }
+.paper-view-hud button:disabled { opacity: .38; cursor: default; }
+.paper-view-hud-reset {
+  width: auto !important;
+  min-width: 52px;
+  padding: 0 8px;
+  font: 650 10px/1 var(--ui-font);
+}
 .unified-note-view.is-view-transformed {
   overflow: auto;
   /* Room for scaled/rotated paper edges without clipping the sheet. */
