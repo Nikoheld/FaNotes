@@ -554,6 +554,18 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .worksheet-toolbar button:hover:not(:disabled), .worksheet-toolbar button.active { color: #242631; border-color: color-mix(in srgb, var(--paper-accent-readable) 40%, rgba(40,43,56,.15)); background: color-mix(in srgb, var(--paper-accent-readable) 10%, #fff); }
 .worksheet-toolbar button:disabled { cursor: default; opacity: .45; }
 .worksheet-toolbar-actions button:last-child:not(:first-child) { width: 31px; padding: 0; }
+.worksheet-toolbar-actions .worksheet-remove {
+  width: auto;
+  padding: 0 9px;
+  color: #8b3b4a;
+  border-color: rgba(139, 59, 74, .22);
+  background: #fff6f7;
+}
+.worksheet-toolbar-actions .worksheet-remove:hover:not(:disabled) {
+  color: #6f2433;
+  border-color: rgba(139, 59, 74, .4);
+  background: #ffecee;
+}
 .worksheet-hint { width: max-content; max-width: calc(100% - 20px); display: flex; align-items: center; gap: 6px; margin: 0 auto 10px; padding: 7px 10px; border-radius: 9px; color: color-mix(in srgb, var(--paper-accent-readable) 76%, #252630); background: color-mix(in srgb, var(--paper-accent-readable) 9%, #fff); font-size: 9px; }
 .worksheet-page {
   position: relative;

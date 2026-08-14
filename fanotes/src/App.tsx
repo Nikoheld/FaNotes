@@ -164,6 +164,14 @@ const attachWorksheet = (content: string, id: string) => {
   return `${content}${separator}<!-- fanotes-worksheet:${id} -->\n`
 }
 
+const detachWorksheet = (content: string, id: string) => {
+  if (!/^[a-zA-Z0-9_-]{1,96}$/u.test(id)) return content
+  return content
+    .replace(new RegExp(`(?:\\r?\\n)*<!--\\s*fanotes-worksheet:${id}\\s*-->\\s*`, 'gu'), '\n')
+    .replace(/\n{3,}/gu, '\n\n')
+    .replace(/^\n+/u, '')
+}
+
 const stripNoteMetadata = (content: string) => content.replace(NOTE_INK_MARKER, '').replace(NOTE_WORKSHEET_MARKER, '')
 const visibleNoteContent = (content: string) => stripNoteMetadata(content).trim()
 
@@ -1581,6 +1589,32 @@ export default function App({ startupBootstrap }: AppProps) {
     }
   }, [activeTab, openNote, refreshTree, settings.defaultFolder, toast, updateContent, worksheetImportBusy])
 
+  const removeWorksheetFromNote = useCallback(async (id: string) => {
+    const document = worksheetSession.documents.find((item) => item.id === id)
+    const label = document?.title ?? 'Arbeitsblatt'
+    if (!window.confirm(`„${label}“ wirklich aus dieser Notiz entfernen? Die PDF-/Bilddatei wird aus dem Vault gelöscht.`)) {
+      return
+    }
+    const notePath = activePathRef.current
+    if (!notePath) return
+    try {
+      const tab = tabsRef.current.find((item) => item.path === notePath)
+      const currentContent = pendingWrites.current.get(notePath) ?? tab?.content ?? ''
+      const nextContent = detachWorksheet(currentContent, id)
+      if (nextContent !== currentContent) updateContent(nextContent)
+      worksheetDirtyIdsRef.current.delete(id)
+      worksheetLayerRefs.current.delete(id)
+      setWorksheetSession((current) => ({
+        key: current.key + 1,
+        documents: current.documents.filter((item) => item.id !== id),
+      }))
+      await window.fanotes.deleteWorksheet(id)
+      toast(`„${label}“ wurde aus der Notiz entfernt.`, 'success')
+    } catch (error) {
+      toast(error instanceof Error ? error.message : 'Das Arbeitsblatt konnte nicht entfernt werden.', 'error')
+    }
+  }, [toast, updateContent, worksheetSession.documents])
+
   const importOneNote = useCallback(async (): Promise<OneNoteImportResult | null> => {
     if (oneNoteImportBusy) return null
     if (isWeb) throw new Error('Binäre OneNote-Notizbücher werden sicher in der Linux- oder Windows-App importiert.')
@@ -1809,6 +1843,7 @@ export default function App({ startupBootstrap }: AppProps) {
                       inputDisabled={drawingOpen || activeEntryMutating}
                       onSave={saveWorksheetDocument}
                       onDirtyChange={worksheetDirtyCallbackFor(document.id)}
+                      onRemove={() => void removeWorksheetFromNote(document.id)}
                     />
                   </Suspense>)}
                   {drawingSession.key > 0 && <Suspense fallback={drawingOpen ? <div className="inline-ink-loading"><LoaderCircle className="spin" size={18} /> Stiftebene wird geladen …</div> : null}>

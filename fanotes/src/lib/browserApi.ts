@@ -837,6 +837,24 @@ export function createBrowserApi(): FaNotesApi {
       worksheets.set(saved.id, saved)
       return clone(saved)
     },
+    deleteWorksheet: async (id) => {
+      await ready
+      const document = worksheets.get(id)
+      if (document) {
+        worksheets.delete(id)
+        assets.delete(document.sourceRelativePath)
+        const previous = assetUrls.get(document.sourceRelativePath)
+        if (previous) {
+          URL.revokeObjectURL(previous)
+          assetUrls.delete(document.sourceRelativePath)
+        }
+        await writeMany(['worksheets', 'assets'], (stores) => {
+          stores.get('worksheets')!.delete(id)
+          stores.get('assets')!.delete(document.sourceRelativePath)
+        })
+      }
+      return { id }
+    },
     lmStudioListModels: listBrowserLmStudioModels,
     lmStudioTransform: transformWithBrowserLmStudio,
     aiListModels: listBrowserAiModels,

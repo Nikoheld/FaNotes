@@ -421,6 +421,7 @@ export type FaNotesApi = {
   importOneNote: () => Promise<OneNoteImportResult | null>
   readWorksheet: (id: string) => Promise<WorksheetDocument>
   saveWorksheet: (document: WorksheetDocument) => Promise<WorksheetDocument>
+  deleteWorksheet: (id: string) => Promise<{ id: string }>
   lmStudioListModels: (baseUrl: string, apiToken?: string) => Promise<LmStudioModel[]>
   lmStudioTransform: (payload: {
     baseUrl: string

@@ -48,6 +48,7 @@ type WorksheetLayerProps = {
   onSave: (document: WorksheetDocument) => Promise<WorksheetDocument>
   onDirtyChange?: (dirty: boolean) => void
   onPageLayoutChange?: () => void
+  onRemove?: () => void | Promise<void>
 }
 
 function PdfPage({
@@ -231,6 +232,7 @@ export const WorksheetLayer = forwardRef<WorksheetLayerHandle, WorksheetLayerPro
   onSave,
   onDirtyChange,
   onPageLayoutChange,
+  onRemove,
 }, forwardedRef) {
   const [document, setDocument] = useState(initialDocument)
   const [source, setSource] = useState('')
@@ -239,6 +241,7 @@ export const WorksheetLayer = forwardRef<WorksheetLayerHandle, WorksheetLayerPro
   const [error, setError] = useState<string | null>(null)
   const [textTool, setTextTool] = useState(false)
   const [savedPulse, setSavedPulse] = useState(false)
+  const [removing, setRemoving] = useState(false)
   const [oneNoteScale, setOneNoteScale] = useState(1)
   const documentRef = useRef(document)
   const dirtyRef = useRef(false)
@@ -422,6 +425,22 @@ export const WorksheetLayer = forwardRef<WorksheetLayerHandle, WorksheetLayerPro
           {savedPulse && <i><Check size={12} /> gespeichert</i>}
           <button type="button" className={textTool ? 'active' : ''} disabled={inputDisabled || loading || Boolean(error)} onClick={() => setTextTool((value) => !value)}><Type size={14} /> {textTool ? 'Auf Seite platzieren' : 'Textfeld'}</button>
           {textTool && <button type="button" aria-label="Textfeldmodus abbrechen" onClick={() => setTextTool(false)}><X size={14} /></button>}
+          {onRemove && (
+            <button
+              type="button"
+              className="worksheet-remove"
+              disabled={removing}
+              title="PDF oder Bild aus dieser Notiz entfernen"
+              aria-label={`${document.kind === 'pdf' ? 'PDF' : 'Arbeitsblatt'} aus der Notiz entfernen`}
+              onClick={() => {
+                if (removing) return
+                setRemoving(true)
+                void Promise.resolve(onRemove()).finally(() => setRemoving(false))
+              }}
+            >
+              <Trash2 size={14} /> {removing ? 'Entfernt …' : 'Entfernen'}
+            </button>
+          )}
         </span>
       </header>
       {textTool && <div className="worksheet-hint"><Plus size={14} /> Klicke an die Stelle des Arbeitsblatts, an der du tippen möchtest.</div>}

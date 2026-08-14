@@ -375,6 +375,14 @@ export function createBrowserPreviewApi(): FaNotesApi {
       worksheets.set(document.id, saved)
       return structuredClone(saved)
     },
+    deleteWorksheet: async (id) => {
+      const document = worksheets.get(id)
+      if (document) {
+        worksheets.delete(id)
+        assets.delete(document.sourceRelativePath)
+      }
+      return { id }
+    },
     lmStudioListModels: async () => [{
       key: 'fanotes/demo-local-8b',
       displayName: 'FaNotes Demo Local 8B',

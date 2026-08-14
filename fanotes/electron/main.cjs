@@ -120,6 +120,7 @@ const IPC = Object.freeze({
   importOneNote: 'fanotes:import-onenote',
   readWorksheet: 'fanotes:read-worksheet',
   saveWorksheet: 'fanotes:save-worksheet',
+  deleteWorksheet: 'fanotes:delete-worksheet',
   readAssetDataUrl: 'fanotes:read-asset-data-url',
   loadSpellingResources: 'fanotes:load-spelling-resources',
   loadSpellingWordCandidates: 'fanotes:load-spelling-word-candidates',
@@ -3207,6 +3208,37 @@ function registerIpcHandlers() {
     const dataPath = path.join(worksheetsDirectory, `${id}.json`)
     await queueFileWrite(dataPath, async () => atomicWrite(dataPath, serialized, { encoding: 'utf8', mode: 0o600 }))
     return document
+  })
+
+  handle(IPC.deleteWorksheet, async (_event, rawId) => {
+    await ensureBootstrap()
+    const id = assertWorksheetId(rawId)
+    const { worksheetsDirectory } = await ensureInternalWorksheetsDirectory()
+    const dataPath = path.join(worksheetsDirectory, `${id}.json`)
+    let sourceName = ''
+    try {
+      const raw = (await readRegularFileNoFollow(dataPath, MAX_WORKSHEET_JSON_BYTES)).toString('utf8')
+      const document = validateWorksheetDocument(JSON.parse(raw), id)
+      sourceName = path.basename(document.sourceRelativePath)
+    } catch (error) {
+      if (error?.code !== 'ENOENT') {
+        throw new Error(error instanceof SyntaxError ? 'Die Arbeitsblattdaten sind beschädigt.' : error?.message ?? 'Das Arbeitsblatt konnte nicht gelesen werden.')
+      }
+    }
+    const unlinkRegular = async (target) => {
+      try {
+        const info = await fsp.lstat(target)
+        if (!info.isFile() || info.isSymbolicLink()) throw new Error('Die Arbeitsblattdatei ist unsicher.')
+        await fsp.unlink(target)
+      } catch (error) {
+        if (error?.code !== 'ENOENT') throw error
+      }
+    }
+    if (sourceName && sourceName.startsWith(`${id}.`)) {
+      await unlinkRegular(path.join(worksheetsDirectory, sourceName))
+    }
+    await unlinkRegular(dataPath)
+    return { id }
   })
 
   handle(IPC.readAssetDataUrl, async (_event, relativePath) => {
