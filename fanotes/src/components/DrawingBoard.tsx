@@ -342,6 +342,7 @@ export type DrawingBoardProps = {
     | 'penColor'
     | 'penWidth'
     | 'pressureEnabled'
+    | 'penOnly'
     | 'smoothing'
     | 'scribbleEraseSensitivity'
     | 'recognitionMode'
@@ -2179,6 +2180,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
 
   const handlePointerDown = useCallback((event: ReactPointerEvent<HTMLCanvasElement>) => {
     if (activePointerRef.current !== null || (event.button !== 0 && event.pointerType !== 'pen')) return
+    // Pen-only (Windows palm / resting hand): ignore finger, mouse and trackpad ink.
+    if (settings.penOnly && event.pointerType !== 'pen') return
     if (event.pointerType === 'touch' && performance.now() - lastPenContactRef.current < 850) return
     if (event.pointerType === 'pen') lastPenContactRef.current = performance.now()
     event.preventDefault()
@@ -2312,9 +2315,10 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         }
     }
     appendPointerEvent(event.nativeEvent)
-  }, [activeArtBrush.pressure, activeArtSymbol, appendPointerEvent, artBrush, artColor, artEffect, artOpacity, artSymbolRotation, artSymbolSize, artWidth, bumpInkRevision, clearRecognitionScope, clearShapeDwellTimer, closeMathCorrectionSession, closeMathSolverSelection, commitPendingSolverTap, commitStrokeToCanvas, inkMode, mathSolverEnabled, penColor, penWidth, pointFromEvent, scheduleRedraw, selectionMode, setDirty, settings.pressureEnabled, sourceHeight, sourceWidth, tool, updateHistoryState])
+  }, [activeArtBrush.pressure, activeArtSymbol, appendPointerEvent, artBrush, artColor, artEffect, artOpacity, artSymbolRotation, artSymbolSize, artWidth, bumpInkRevision, clearRecognitionScope, clearShapeDwellTimer, closeMathCorrectionSession, closeMathSolverSelection, commitPendingSolverTap, commitStrokeToCanvas, inkMode, mathSolverEnabled, penColor, penWidth, pointFromEvent, scheduleRedraw, selectionMode, setDirty, settings.penOnly, settings.pressureEnabled, sourceHeight, sourceWidth, tool, updateHistoryState])
 
   const handlePointerMove = useCallback((event: ReactPointerEvent<HTMLCanvasElement>) => {
+    if (settings.penOnly && event.pointerType !== 'pen') return
     if (activePointerRef.current !== event.pointerId) return
     event.preventDefault()
     if (selectionStartRef.current) {
@@ -2331,7 +2335,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       const latest = activeStrokeRef.current?.points.at(-1)
       if (latest) ensureInfinitePageRoom(latest.y, latest.x)
     }
-  }, [appendPointerEvent, ensureInfinitePageRoom, eraseAt, pointFromEvent])
+  }, [appendPointerEvent, ensureInfinitePageRoom, eraseAt, pointFromEvent, settings.penOnly])
 
   const finishPointer = useCallback((event: ReactPointerEvent<HTMLCanvasElement> | PointerEvent) => {
     const pointerId = event.pointerId
@@ -4019,6 +4023,17 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
           </button>
           <button type="button" className={tool === 'eraser' ? 'is-active' : ''} aria-pressed={tool === 'eraser'} onClick={activateEraser}>
             <Eraser size={16} /> <span className="lw-tool-label">Radierer</span>
+          </button>
+          <button
+            type="button"
+            className={settings.penOnly ? 'is-active' : ''}
+            aria-pressed={settings.penOnly}
+            title={settings.penOnly
+              ? 'Nur Stift: Finger und Hand werden ignoriert. Klicken zum Ausschalten.'
+              : 'Nur Stift: nur der Grafikstift schreibt, nicht Finger oder Hand (empfohlen unter Windows).'}
+            onClick={() => onSettingsChange?.({ penOnly: !settings.penOnly })}
+          >
+            <PenLine size={16} /> <span className="lw-tool-label">{settings.penOnly ? 'Nur Stift' : 'Stift+Hand'}</span>
           </button>
         </div>
 

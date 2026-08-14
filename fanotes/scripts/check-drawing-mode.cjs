@@ -40,6 +40,7 @@ const safeguards = [
   ["window.addEventListener('pointerup', onWindowPointerEnd, true)", 'globale Pointer-Ende-Absicherung'],
   ["window.addEventListener('pointerdown', onWindowPointerDown, true)", 'Cross-Device-Freigabe bei Trackpad/Maus'],
   ['const forceEndActivePointer', 'harte Beendigung hängender Stift-Capture'],
+  ["settings.penOnly && event.pointerType !== 'pen'", 'Nur-Stift-Modus ignoriert Finger und Maus'],
   ["event.pointerType === 'mouse'", 'kein setPointerCapture für Stift (Hyprland-Freeze)'],
   ['const applyViewTransform', 'Blatt-Zoom und -Rotation während Handschrift'],
   ['const handleWheel = useCallback', 'Strg/Alt-Mausrad für Zoom und Rotation'],

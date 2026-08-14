@@ -3,6 +3,7 @@
 ## 2026.8.16
 
 - **Zoom auch im Textmodus:** Das Notizblatt lässt sich mit Tastatur (Strg++/−/0), Trackpad (Strg+Mausrad / Pinch) und der kleinen Zoom-Leiste unten rechts zoomen und drehen — unabhängig vom Stiftmodus. Die Ansicht bleibt beim Wechsel Tastatur ↔ Stift erhalten.
+- **Nur Stift:** Im Handschriftmodus lässt sich „Nur Stift“ wählen — Finger/Hand zeichnen dann nicht mehr, nur der echte Stift. Unter Windows ist das die Voreinstellung.
 - **PDF-Arbeitsblätter flüssig & scharf:** Nur sichtbare Seiten werden gerendert (Virtualisierung), Resize ist entprellt, Auflösung folgt dem Display-DPR mit sinnvollen Deckeln. Off-Screen-Seiten geben VRAM frei.
 - **Formen begradigen:** Hält man den Stift nach einer Linie oder einem Kreis kurz still, snapt die Form (gerade Linie / runder Kreis).
 

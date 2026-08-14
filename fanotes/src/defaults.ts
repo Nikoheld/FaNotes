@@ -31,6 +31,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   penColor: '#202333',
   penWidth: 3.5,
   pressureEnabled: true,
+  penOnly: false,
   smoothing: 0.68,
   scribbleEraseSensitivity: 50,
   recognitionMode: 'auto',

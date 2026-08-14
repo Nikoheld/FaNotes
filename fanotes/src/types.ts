@@ -95,6 +95,8 @@ export type AppSettings = {
   penColor: string
   penWidth: number
   pressureEnabled: boolean
+  /** When true, only pointerType "pen" can ink; touch/mouse (hand/palm) are ignored. */
+  penOnly: boolean
   smoothing: number
   scribbleEraseSensitivity: number
   recognitionMode: 'auto' | 'math' | 'text'
