@@ -7,7 +7,7 @@
 - **Arbeitsblatt entfernen:** PDFs und Bilder lassen sich wieder über „Entfernen“ aus der Notiz lösen; Datei und Marker werden aus dem Vault gelöscht.
 - **Nur Stift:** Im Handschriftmodus lässt sich „Nur Stift“ wählen — Finger/Hand zeichnen dann nicht mehr, nur der echte Stift. Unter Windows ist das die Voreinstellung.
 - **PDF-Arbeitsblätter flüssig & scharf:** Nur sichtbare Seiten werden gerendert (Virtualisierung), Resize ist entprellt, Auflösung folgt dem Display-DPR mit sinnvollen Deckeln. Off-Screen-Seiten geben VRAM frei.
-- **Formen begradigen:** Hält man den Stift nach einer Linie oder einem Kreis kurz still, snapt die Form (gerade Linie / runder Kreis).
+- **Formen sauberziehen:** Nach Kreis, Ellipse, Dreieck, Quadrat, Rechteck oder Linie den Stift etwa zwei Sekunden stillhalten — nur klar erkannte Figuren werden begradigt, Handschrift bleibt unverändert.
 
 ## 2026.8.15
 

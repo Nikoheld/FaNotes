@@ -48,7 +48,7 @@ import type {
   CorrectionLearningResult,
   RecognitionResources,
 } from '../lib/handwritingDb'
-import { isStrokeDwelling, snapStrokeToShape } from '../lib/shapeSnap'
+import { SHAPE_SNAP_LABEL, SHAPE_SNAP_MIN_CONFIDENCE, isStrokeDwelling, snapStrokeToShape, strokeLooksLikeShape } from '../lib/shapeSnap'
 import {
   VIEW_ROTATE_STEP,
   VIEW_ZOOM_MAX,
@@ -155,8 +155,8 @@ const MAX_CANVAS_PIXELS = 18_000_000
 /** Tall multi-page notes (PDF worksheets) keep a lower ink bitmap budget to avoid lag. */
 const MAX_CANVAS_PIXELS_TALL = 8_000_000
 const TALL_LAYOUT_HEIGHT = 2_400
-/** Hold still this long after drawing a shape to snap it (line/circle). */
-const SHAPE_DWELL_MS = 520
+/** Hold still this long after drawing a recognized figure to beautify it. */
+const SHAPE_DWELL_MS = 2_000
 /** Start extending when the pen is in the last 18% of the current page. */
 const WRITE_GROW_EDGE = 0.82
 
@@ -1860,14 +1860,14 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     }
   }, [])
 
-  /** Snap freehand stroke to a perfect line/circle when the tip dwells in place. */
-  const trySnapActiveShape = useCallback((options?: { silent?: boolean }) => {
+  /** Snap only a confidently recognized figure after a deliberate still hold. */
+  const trySnapActiveShape = useCallback(() => {
     if (gestureToolRef.current !== 'pen' || selectionStartRef.current) return false
     const stroke = activeStrokeRef.current
-    if (!stroke || stroke.symbolId || stroke.points.length < 10) return false
-    if (!isStrokeDwelling(stroke, sourceWidth, sourceHeight) && !options?.silent) return false
+    if (!stroke || stroke.symbolId || stroke.points.length < 14) return false
+    if (!isStrokeDwelling(stroke, sourceWidth, sourceHeight)) return false
     const snapped = snapStrokeToShape(stroke, sourceWidth, sourceHeight)
-    if (!snapped || snapped.confidence < 0.62) return false
+    if (!snapped || snapped.confidence < SHAPE_SNAP_MIN_CONFIDENCE) return false
     activeStrokeRef.current = {
       ...stroke,
       ...snapped.stroke,
@@ -1878,14 +1878,10 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     shapeSnappedRef.current = true
     gestureChangedRef.current = true
     scheduleRedraw()
-    if (!options?.silent) {
-      setNotice({
-        kind: 'success',
-        text: snapped.kind === 'line'
-          ? 'Linie begradigt · hebe den Stift, um sie zu übernehmen.'
-          : 'Kreis gerundet · hebe den Stift, um ihn zu übernehmen.',
-      })
-    }
+    setNotice({
+      kind: 'success',
+      text: `${SHAPE_SNAP_LABEL[snapped.kind]} erkannt · hebe den Stift, um die saubere Form zu übernehmen.`,
+    })
     return true
   }, [scheduleRedraw, sourceHeight, sourceWidth])
 
@@ -1913,20 +1909,23 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     stroke.points.push(point)
     gestureChangedRef.current = true
     scheduleRedraw()
-    // After a deliberate pause on the same spot, perfect common geometry.
+    // Start the hold timer only if this stroke already looks like a figure.
     if (
       gestureToolRef.current === 'pen'
       && !selectionStartRef.current
       && !stroke.symbolId
-      && stroke.points.length >= 10
+      && !shapeSnappedRef.current
+      && stroke.points.length >= 14
       && isStrokeDwelling(stroke, sourceWidth, sourceHeight)
+      && strokeLooksLikeShape(stroke, sourceWidth, sourceHeight)
     ) {
-      clearShapeDwellTimer()
-      shapeDwellTimerRef.current = window.setTimeout(() => {
-        shapeDwellTimerRef.current = null
-        trySnapActiveShape()
-      }, SHAPE_DWELL_MS)
-    } else {
+      if (shapeDwellTimerRef.current === null) {
+        shapeDwellTimerRef.current = window.setTimeout(() => {
+          shapeDwellTimerRef.current = null
+          trySnapActiveShape()
+        }, SHAPE_DWELL_MS)
+      }
+    } else if (!isStrokeDwelling(stroke, sourceWidth, sourceHeight)) {
       clearShapeDwellTimer()
     }
   }, [clearShapeDwellTimer, eraseAt, pointFromEvent, scheduleRedraw, sourceHeight, sourceWidth, trySnapActiveShape])
@@ -2395,18 +2394,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     }
     appendPointerEvent(native)
     clearShapeDwellTimer()
-    // Final opportunity to snap if the tip stayed still on lift (or already snapped live).
-    if (
-      event.type !== 'pointercancel'
-      && gestureToolRef.current === 'pen'
-      && activeStrokeRef.current
-      && (
-        shapeSnappedRef.current
-        || isStrokeDwelling(activeStrokeRef.current, sourceWidth, sourceHeight)
-      )
-    ) {
-      trySnapActiveShape({ silent: true })
-    }
+    // Never snap on lift. Only a completed still-hold may beautify a recognized figure.
     const activeStroke = activeStrokeRef.current
     if (
       mathSolverEnabled
@@ -2487,11 +2475,11 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
           text: 'Durchkritzeln erkannt: Handschrift gelöscht. Mit Strg+Z kannst du sie sofort zurückholen.',
         })
       } else if (didShapeSnap) {
-        setNotice({ kind: 'success', text: 'Form übernommen (gerade Linie / runder Kreis).' })
+        setNotice({ kind: 'success', text: 'Form übernommen.' })
       }
     }
     scheduleRedraw()
-  }, [analyzeMathCorrectionSelection, appendPointerEvent, bumpInkRevision, clearShapeDwellTimer, commitPendingSolverTap, commitStrokeToCanvas, inkMode, mathSolverEnabled, mode, openMathSolverAtPoint, pointFromEvent, redraw, scheduleRedraw, selectionPurpose, setDirty, settings.scribbleEraseSensitivity, sourceHeight, sourceWidth, trySnapActiveShape, updateHistoryState])
+  }, [analyzeMathCorrectionSelection, appendPointerEvent, bumpInkRevision, clearShapeDwellTimer, commitPendingSolverTap, commitStrokeToCanvas, inkMode, mathSolverEnabled, mode, openMathSolverAtPoint, pointFromEvent, redraw, scheduleRedraw, selectionPurpose, setDirty, settings.scribbleEraseSensitivity, sourceHeight, sourceWidth, updateHistoryState])
 
   /**
    * Hard-stop any in-progress pen/mouse stroke and scrub leftover pointer capture.
