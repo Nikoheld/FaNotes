@@ -546,8 +546,38 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .unified-paper.has-worksheet > .editor-pane { min-height: 0; }
 .unified-paper.has-worksheet .markdown-editor, .unified-paper.has-worksheet .markdown-editor .cm-editor, .unified-paper.has-worksheet .markdown-editor .cm-scroller { min-height: 0; }
 .unified-paper.has-worksheet .markdown-editor .cm-content { min-height: 0; padding-bottom: 34px; }
-.worksheet-layer { position: relative; z-index: 3; width: calc(100% - 36px); margin: 0 auto 26px; color: #282a34; font-family: var(--ui-font); }
-.worksheet-toolbar { position: sticky; z-index: 8; top: 10px; min-height: 44px; display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 5px 10px; padding: 5px 7px 5px 11px; border: 1px solid rgba(40,43,56,.17); border-radius: 12px; background: rgba(249,249,252,.94); box-shadow: 0 9px 28px rgba(25,28,39,.16); backdrop-filter: blur(13px); }
+.worksheet-layer {
+  position: relative;
+  z-index: 3;
+  /* Stay on the original A4 column. A 100% width follows ink-grown paper
+     and parks the Entfernen-button past the right edge of the viewport. */
+  box-sizing: border-box;
+  width: min(calc(100% - 36px), 900px);
+  max-width: 900px;
+  margin: 0 18px 26px;
+  color: #282a34;
+  font-family: var(--ui-font);
+}
+.worksheet-toolbar {
+  position: sticky;
+  z-index: 8;
+  top: 10px;
+  left: 18px;
+  box-sizing: border-box;
+  width: min(100%, 900px);
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 0 10px;
+  padding: 5px 7px 5px 11px;
+  border: 1px solid rgba(40,43,56,.17);
+  border-radius: 12px;
+  background: rgba(249,249,252,.94);
+  box-shadow: 0 9px 28px rgba(25,28,39,.16);
+  backdrop-filter: blur(13px);
+}
 .worksheet-toolbar > span { min-width: 0; display: flex; align-items: center; gap: 7px; }
 .worksheet-toolbar > span:first-child > svg { flex: none; color: var(--paper-accent-readable); }
 .worksheet-toolbar strong { overflow: hidden; max-width: 280px; color: #282a34; font-size: 10.5px; text-overflow: ellipsis; white-space: nowrap; }
@@ -620,7 +650,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
     margin: 12px auto 42px;
   }
   .unified-paper .markdown-editor .cm-content { padding: 58px 34px 120px; }
-  .worksheet-layer { width: calc(100% - 16px); }
+  .worksheet-layer { width: min(calc(100% - 16px), 900px); max-width: 900px; margin: 0 8px 26px; }
   .worksheet-toolbar strong { max-width: 150px; }
 }
 .editor-pane { min-width: 0; min-height: 0; flex: 1; position: relative; overflow: hidden; }

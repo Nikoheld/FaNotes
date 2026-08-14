@@ -64,6 +64,7 @@ const safeguards = [
 ]
 
 const worksheetLayer = fs.readFileSync(path.join(root, 'src', 'components', 'WorksheetLayer.tsx'), 'utf8')
+const styles = fs.readFileSync(path.join(root, 'src', 'styles.css'), 'utf8')
 const worksheetSafeguards = [
   ['const enqueuePdfRender', 'PDF-Seiten werden nacheinander gerendert, nicht parallel'],
   ['const loadVaultPdfBytes', 'PDF-Bytes ohne riesige Data-URL'],
@@ -71,6 +72,10 @@ const worksheetSafeguards = [
   ['MAX_PDF_PIXELS = 2_400_000', 'enges Pixelbudget pro PDF-Seite'],
   ['disableAutoFetch: true', 'PDF.js lädt keine Extra-Requests'],
   ['{mounted && <PdfPageCanvas', 'getPage nur für sichtbare Seiten'],
+]
+const worksheetStyleSafeguards = [
+  ['width: min(calc(100% - 36px), 900px)', 'PDF-Leiste bleibt auf der A4-Spalte, nicht am rechten Infinite-Rand'],
+  ['left: 18px', 'Entfernen-Button klebt im sichtbaren Viewport'],
 ]
 
 const paperViewSafeguards = [
@@ -88,6 +93,9 @@ for (const [needle, label] of paperViewSafeguards) {
 }
 for (const [needle, label] of worksheetSafeguards) {
   if (!worksheetLayer.includes(needle)) throw new Error(`Zeichenmodus-Prüfung fehlgeschlagen: ${label}.`)
+}
+for (const [needle, label] of worksheetStyleSafeguards) {
+  if (!styles.includes(needle)) throw new Error(`Zeichenmodus-Prüfung fehlgeschlagen: ${label}.`)
 }
 
 const brushCatalog = source.slice(source.indexOf('const ART_BRUSHES'), source.indexOf('type ArtSymbolDefinition'))
