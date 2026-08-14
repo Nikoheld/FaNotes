@@ -1,5 +1,9 @@
 # Änderungsverlauf
 
+## 2026.8.17
+
+- **PDF-Entfernen bleibt sichtbar:** Die Schaltfläche „Entfernen“ sitzt auf der normalen Papier-Spalte und wandert nicht mehr mit dem unendlich nach rechts wachsenden Blatt aus dem Bild.
+
 ## 2026.8.16
 
 - **Zoom auch im Textmodus:** Das Notizblatt lässt sich mit Tastatur (Strg++/−/0), Trackpad (Strg+Mausrad / Pinch) und der kleinen Zoom-Leiste unten rechts zoomen und drehen — unabhängig vom Stiftmodus. Die Ansicht bleibt beim Wechsel Tastatur ↔ Stift erhalten.
