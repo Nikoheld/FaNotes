@@ -5,6 +5,7 @@ const path = require('node:path')
 
 const root = path.resolve(__dirname, '..')
 const source = fs.readFileSync(path.join(root, 'src', 'components', 'DrawingBoard.tsx'), 'utf8')
+const paperView = fs.readFileSync(path.join(root, 'src', 'lib', 'paperView.ts'), 'utf8')
 
 const requiredBrushes = ['fineliner', 'pencil', 'marker', 'paintbrush', 'calligraphy', 'highlighter', 'watercolor', 'spray']
 const requiredEffects = ['solid', 'rainbow', 'aurora', 'sunset', 'ocean', 'gold', 'silver', 'neon']
@@ -46,13 +47,21 @@ const safeguards = [
   ['const handleWheel = useCallback', 'Strg/Alt-Mausrad für Zoom und Rotation'],
   ["aria-label=\"Blattansicht\"", 'Toolbar-Steuerung für Zoom und Drehung'],
   ['// Use layout size (offset*), not getBoundingClientRect: CSS zoom/rotation of the', 'Bitmap-Größe unabhängig vom Ansichtszoom'],
-  ["paper.classList.toggle('is-view-transformed'", 'Inline-Papier markiert Zoom/Drehung'],
-  ['.editor-pane, .worksheet-layer, .lw-canvas-surface', 'Zoom transformiert nur Blattinhalt, nicht die Toolbar'],
   ['position:fixed;z-index:90;left:50%', 'Handschrift-Toolbar bleibt oben fixiert und klickbar'],
+]
+
+const paperViewSafeguards = [
+  ['paper.style.zoom', 'Zoom über CSS zoom statt transform:scale (scharfer Text)'],
+  ["classList.toggle('is-view-transformed', active)", 'Inline-Papier markiert Zoom/Drehung'],
+  ['.editor-pane, .worksheet-layer, .lw-canvas-surface', 'Zoom trifft das ganze Blatt, nicht die Toolbar'],
+  ['willChange = \'auto\'', 'kein 1×-Compositor-Layer für Text'],
 ]
 
 for (const [needle, label] of safeguards) {
   if (!source.includes(needle)) throw new Error(`Zeichenmodus-Prüfung fehlgeschlagen: ${label}.`)
+}
+for (const [needle, label] of paperViewSafeguards) {
+  if (!paperView.includes(needle)) throw new Error(`Zeichenmodus-Prüfung fehlgeschlagen: ${label}.`)
 }
 
 const brushCatalog = source.slice(source.indexOf('const ART_BRUSHES'), source.indexOf('type ArtSymbolDefinition'))

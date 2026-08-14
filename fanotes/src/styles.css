@@ -454,10 +454,19 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   /* Room for scaled/rotated paper edges without clipping the sheet. */
   padding: 48px 24px 96px;
 }
-.unified-paper.is-view-transformed {
+.unified-paper.is-view-transformed,
+.unified-paper.is-view-zoomed {
   transition: none;
-  will-change: transform;
+  /* Do not use will-change:transform — Chromium then rasterizes text at 1× and
+     stretches it when zoomed, which makes markdown unreadable. */
+  will-change: auto;
   transform-origin: center center;
+}
+.unified-paper .markdown-editor,
+.unified-paper .markdown-editor .cm-editor,
+.unified-paper .markdown-editor .cm-content {
+  text-rendering: geometricPrecision;
+  -webkit-font-smoothing: antialiased;
 }
 /* Toolbar/footer are portaled outside the paper; keep a high stacking context for ink chrome. */
 .unified-note-view.is-inking { position: relative; }

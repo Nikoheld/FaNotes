@@ -54,7 +54,9 @@ import {
   VIEW_ZOOM_MAX,
   VIEW_ZOOM_MIN,
   VIEW_ZOOM_STEP,
+  applyPaperViewToElements,
   clampViewZoom,
+  clearPaperViewFromElements,
   normalizeRotation,
 } from '../lib/paperView'
 import { usePaperView } from './PaperView'
@@ -1679,55 +1681,27 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     const surface = surfaceRef.current
     const paper = resolvePaperElement()
     const noteView = paper?.closest('.unified-note-view') as HTMLElement | null
-    if (paper) {
-      paper.style.transform = ''
-      paper.style.transformOrigin = ''
-      paper.classList.remove('is-view-transformed')
-    }
-    if (noteView) noteView.classList.remove('is-view-transformed')
-    // Clear any legacy per-layer transforms from earlier builds so text/ink/paper stay locked.
-    paper?.querySelectorAll<HTMLElement>('.editor-pane, .worksheet-layer, .lw-canvas-surface, .lw-drawing-board').forEach((element) => {
-      element.style.transform = ''
-      element.style.transformOrigin = ''
-    })
-    if (surface) {
-      surface.style.transform = ''
-      surface.style.transformOrigin = ''
-    }
+    clearPaperViewFromElements(paper, noteView, surface)
   }, [resolvePaperElement])
 
   const applyViewTransform = useCallback((zoom: number, rotation: number, pan: { x: number; y: number }) => {
     // Shared PaperView owns the note-sheet transform in inline mode so zoom
     // survives switching between keyboard and pen.
     if (inline && paperView) return
-    const transform = `translate(${pan.x}px, ${pan.y}px) rotate(${rotation}deg) scale(${zoom})`
     const surface = surfaceRef.current
-    const active = zoom !== 1 || rotation !== 0 || pan.x !== 0 || pan.y !== 0
     if (!inline) {
-      if (surface) {
-        surface.style.transform = active ? transform : ''
-        surface.style.transformOrigin = 'center center'
-      }
+      applyPaperViewToElements(surface, null, { zoom, rotation, pan })
       return
     }
-    // Inline: transform the whole paper shell (background pattern + text + ink + worksheets)
-    // as one unit so nothing drifts. Floating toolbar/footer are portaled outside this tree.
+    // Inline fallback (no shared PaperView): same CSS-zoom path so text stays sharp.
     const paper = resolvePaperElement()
     const noteView = paper?.closest('.unified-note-view') as HTMLElement | null
-    paper?.querySelectorAll<HTMLElement>('.editor-pane, .worksheet-layer, .lw-canvas-surface').forEach((element) => {
-      element.style.transform = ''
-      element.style.transformOrigin = ''
-    })
+    applyPaperViewToElements(paper, noteView, { zoom, rotation, pan })
     if (surface) {
       surface.style.transform = ''
       surface.style.transformOrigin = ''
+      surface.style.zoom = ''
     }
-    if (paper) {
-      paper.style.transform = active ? transform : ''
-      paper.style.transformOrigin = 'center center'
-      paper.classList.toggle('is-view-transformed', active)
-    }
-    if (noteView) noteView.classList.toggle('is-view-transformed', active)
   }, [inline, paperView, resolvePaperElement])
 
   const setView = useCallback((next: { zoom?: number; rotation?: number; pan?: { x: number; y: number } }) => {
