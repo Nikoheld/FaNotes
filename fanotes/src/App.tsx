@@ -313,6 +313,7 @@ export default function App({ startupBootstrap }: AppProps) {
   const [fatalError, setFatalError] = useState<string | null>(null)
   const [toasts, setToasts] = useState<Toast[]>([])
   const [updateState, setUpdateState] = useState<UpdateState>(INITIAL_UPDATE_STATE)
+  const [revealPath, setRevealPath] = useState<string | null>(null)
   const tabsRef = useRef(tabs)
   const activePathRef = useRef(activePath)
   const editorRef = useRef<MarkdownEditorHandle>(null)
@@ -908,11 +909,12 @@ export default function App({ startupBootstrap }: AppProps) {
     const session = vaultSessionGenerationRef.current
     vaultStructureRevisionRef.current += 1
     try {
-      await window.fanotes.createFolder(parent)
+      const created = await window.fanotes.createFolder(parent)
       if (session !== vaultSessionGenerationRef.current) return
       vaultStructureRevisionRef.current += 1
+      setRevealPath(created.relativePath)
       await refreshTree()
-      toast('Neuer Ordner erstellt.', 'success')
+      toast(parent ? `Unterordner in „${parent.split('/').pop()}“ erstellt.` : 'Neuer Ordner erstellt.', 'success')
     } catch (error) {
       if (session === vaultSessionGenerationRef.current) toast(error instanceof Error ? error.message : 'Ordner konnte nicht erstellt werden.', 'error')
     }
@@ -1635,7 +1637,8 @@ export default function App({ startupBootstrap }: AppProps) {
 
   const paletteActions = useMemo<PaletteAction[]>(() => [
     { id: 'new-note', label: 'Neue Notiz', detail: 'Markdown-Datei im Standardordner', shortcut: 'Ctrl N', group: 'Dateien', icon: <FilePlus2 size={15} />, run: () => void createNote() },
-    { id: 'new-folder', label: 'Neuer Ordner', detail: 'Fach oder Unterordner anlegen', group: 'Dateien', icon: <FolderPlus size={15} />, run: () => void createFolder() },
+    { id: 'new-folder', label: 'Neuer Ordner', detail: 'Fach auf oberster Ebene anlegen', group: 'Dateien', icon: <FolderPlus size={15} />, run: () => void createFolder() },
+    { id: 'new-subfolder', label: 'Unterordner anlegen', detail: activeTab ? `In ${parentPath(activeTab.path) || 'Vault-Wurzel'}` : 'Rechtsklick auf einen Ordner oder hier nach dem Öffnen einer Notiz', group: 'Dateien', keywords: 'unterordner ordner verschachteln fach', icon: <FolderPlus size={15} />, run: () => void createFolder(activeTab ? parentPath(activeTab.path) || undefined : undefined) },
     { id: 'save', label: 'Aktuelle Notiz speichern', detail: 'Text, Handschrift und Arbeitsblätter sichern', shortcut: 'Ctrl S', group: 'Dateien', icon: <Save size={15} />, run: () => { void saveCurrentWork(true) } },
     { id: 'search', label: 'Im Vault suchen', shortcut: 'Ctrl ⇧ F', group: 'Navigation', icon: <Search size={15} />, run: () => setSearchOpen(true) },
     { id: 'drawing', label: drawingOpen ? 'Zur Tastatur wechseln' : 'Mit Stift schreiben', detail: 'Eingabeart auf derselben Notizseite wechseln', shortcut: 'Ctrl D', group: 'Werkzeuge', keywords: 'tablet stift erkennen mathe', icon: <PenLine size={15} />, run: toggleDrawing },
@@ -1651,7 +1654,7 @@ export default function App({ startupBootstrap }: AppProps) {
     { id: 'inspector', label: 'Gliederung umschalten', group: 'Ansicht', icon: <PanelRightClose size={15} />, run: () => setInspectorVisible((value) => !value) },
     { id: 'settings', label: 'Einstellungen öffnen', shortcut: 'Ctrl ,', group: 'FaNotes', icon: <Settings size={15} />, run: () => setSettingsOpen(true) },
     { id: 'quit', label: isWeb ? 'Zur FaNotes-Website' : 'FaNotes beenden', shortcut: 'Ctrl Q', group: 'FaNotes', icon: <X size={15} />, run: () => window.fanotes.requestClose() },
-  ], [createDailyNote, createFolder, createNote, drawingOpen, focusMode, importOneNote, isWeb, openGlyphenWerk, openHomework, openLmStudio, openOverview, openWorksheetImport, saveCurrentWork, settings.dailyNotesFolder, toast, toggleDrawing, toggleFocusMode])
+  ], [activeTab, createDailyNote, createFolder, createNote, drawingOpen, focusMode, importOneNote, isWeb, openGlyphenWerk, openHomework, openLmStudio, openOverview, openWorksheetImport, saveCurrentWork, settings.dailyNotesFolder, toast, toggleDrawing, toggleFocusMode])
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
@@ -1785,7 +1788,7 @@ export default function App({ startupBootstrap }: AppProps) {
               <div className="sidebar-actions"><button className="icon-button" type="button" title="Neue Notiz" onClick={() => void createNote()}><FilePlus2 size={16} /></button><button className="icon-button" type="button" title="Neuer Ordner" onClick={() => void createFolder()}><FolderPlus size={16} /></button><button className="icon-button sidebar-collapse-button" type="button" title="Ordner-Seitenleiste einklappen" aria-label="Ordner-Seitenleiste einklappen" onClick={() => setSidebarVisible(false)}><PanelLeftClose size={16} /></button></div>
             </div>
             <div className="sidebar-search" role="search" title="Text, Dateinamen und unsichtbare Handschrift durchsuchen"><Search aria-hidden="true" size={14} /><input value={searchQuery} placeholder="Notizen & Handschrift suchen …" aria-label="Im gesamten Vault suchen" onChange={(event) => { setSearchQuery(event.target.value); setSearchOpen(true) }} onFocus={() => setSearchOpen(true)} />{searchQuery ? <button className="search-clear" type="button" aria-label="Suchbegriff löschen" title="Suche leeren" onMouseDown={(event) => event.preventDefault()} onClick={() => { setSearchQuery(''); setSearchHits([]) }}><X size={13} /></button> : <kbd aria-label="Strg Umschalt F">⌃⇧F</kbd>}</div>
-            <div className="file-tree-wrap"><FileTree entries={tree} activePath={activePath} rootLabel="Fächer & Notizen" onOpen={openNote} onCreateNote={createNote} onCreateFolder={createFolder} onSetFolderColor={setFolderColor} onRename={renameEntry} onTrash={trashEntry} /></div>
+            <div className="file-tree-wrap"><FileTree entries={tree} activePath={activePath} revealPath={revealPath} rootLabel="Fächer & Notizen" onOpen={openNote} onCreateNote={createNote} onCreateFolder={createFolder} onSetFolderColor={setFolderColor} onRename={renameEntry} onTrash={trashEntry} /></div>
             <div className="sidebar-footer"><span>{counts.files} Notizen · {counts.folders} Ordner</span><button type="button" title="Vault jetzt aktualisieren" onClick={() => void refreshTree()}><ShieldCheck size={12} /> {isWeb ? 'Browser' : 'Lokal'}</button></div>
           </>}
         </aside>

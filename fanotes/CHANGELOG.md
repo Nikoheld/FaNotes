@@ -5,6 +5,7 @@
 - **Zoom auch im Textmodus:** Das Notizblatt lässt sich mit Tastatur (Strg++/−/0), Trackpad (Strg+Mausrad / Pinch) und der kleinen Zoom-Leiste unten rechts zoomen und drehen — unabhängig vom Stiftmodus. Die Ansicht bleibt beim Wechsel Tastatur ↔ Stift erhalten.
 - **Kein pixeliger Text mehr beim Zoomen:** Blatt-Zoom nutzt CSS `zoom` statt `transform: scale()`. Chromium rastert die Schrift in der Anzeigeauflösung; `will-change: transform` (1×-Bitmap) ist entfernt.
 - **Arbeitsblatt entfernen:** PDFs und Bilder lassen sich wieder über „Entfernen“ aus der Notiz lösen; Datei und Marker werden aus dem Vault gelöscht.
+- **Unterordner in Unterordnern:** In jedem Ordner lässt sich ein weiterer Unterordner anlegen (Symbol, Rechtsklick oder leerer Ordner). Die Verschachtelung ist beliebig tief.
 - **Nur Stift:** Im Handschriftmodus lässt sich „Nur Stift“ wählen — Finger/Hand zeichnen dann nicht mehr, nur der echte Stift. Unter Windows ist das die Voreinstellung.
 - **PDF-Arbeitsblätter flüssig & scharf:** Nur sichtbare Seiten werden gerendert (Virtualisierung), Resize ist entprellt, Auflösung folgt dem Display-DPR mit sinnvollen Deckeln. Off-Screen-Seiten geben VRAM frei.
 - **Formen sauberziehen:** Nach Kreis, Ellipse, Dreieck, Quadrat, Rechteck oder Linie den Stift etwa zwei Sekunden stillhalten — nur klar erkannte Figuren werden begradigt, Handschrift bleibt unverändert.

@@ -41,6 +41,8 @@ export type FileTreeProps = {
   rootLabel?: string
   showRootActions?: boolean
   emptyLabel?: string
+  /** Expand this folder and its parents after creating a nested folder. */
+  revealPath?: string | null
 }
 
 type ContextMenuState = {
@@ -101,6 +103,7 @@ export const FileTree = memo(function FileTree({
   rootLabel = 'Dateien',
   showRootActions = true,
   emptyLabel = 'Noch keine Notizen vorhanden',
+  revealPath = null,
 }: FileTreeProps) {
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set())
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
@@ -117,6 +120,16 @@ export const FileTree = memo(function FileTree({
       return next
     })
   }, [activePath])
+
+  useEffect(() => {
+    if (!revealPath) return
+    setExpanded((current) => {
+      const next = new Set(current)
+      parentFolders(revealPath).forEach((path) => next.add(path))
+      next.add(revealPath)
+      return next
+    })
+  }, [revealPath])
 
   useEffect(() => {
     if (!contextMenu) return
@@ -335,15 +348,26 @@ export const FileTree = memo(function FileTree({
 
               <span className="file-tree__inline-actions">
                 {isFolder && (
-                  <button
-                    aria-label={`Neue Notiz in ${displayName(entry)}`}
-                    className="file-tree__mini-action"
-                    onClick={(event) => createInFolder(entry, 'note', event)}
-                    title="Neue Notiz"
-                    type="button"
-                  >
-                    <Plus aria-hidden="true" size={14} />
-                  </button>
+                  <>
+                    <button
+                      aria-label={`Neue Notiz in ${displayName(entry)}`}
+                      className="file-tree__mini-action"
+                      onClick={(event) => createInFolder(entry, 'note', event)}
+                      title="Neue Notiz in diesem Ordner"
+                      type="button"
+                    >
+                      <Plus aria-hidden="true" size={14} />
+                    </button>
+                    <button
+                      aria-label={`Neuer Unterordner in ${displayName(entry)}`}
+                      className="file-tree__mini-action"
+                      onClick={(event) => createInFolder(entry, 'folder', event)}
+                      title="Unterordner anlegen"
+                      type="button"
+                    >
+                      <FolderPlus aria-hidden="true" size={14} />
+                    </button>
+                  </>
                 )}
                 <button
                   aria-label={`Aktionen für ${displayName(entry)}`}
@@ -370,7 +394,14 @@ export const FileTree = memo(function FileTree({
               children.map((child) => renderEntry(child, depth + 1))
             ) : (
               <li className="file-tree__folder-empty" style={depthStyle}>
-                Leer
+                <span>Leer</span>
+                <button
+                  type="button"
+                  className="file-tree__empty-subfolder"
+                  onClick={(event) => createInFolder(entry, 'folder', event)}
+                >
+                  Unterordner anlegen
+                </button>
               </li>
             )}
           </ul>
