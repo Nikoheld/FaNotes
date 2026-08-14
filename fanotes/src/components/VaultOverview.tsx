@@ -59,12 +59,13 @@ const GRAPH_HEIGHT = 270
 function isMarkdown(entry: VaultEntry) {
   return (
     entry.kind === 'file' &&
-    (entry.extension?.toLowerCase() === '.md' || entry.name.toLowerCase().endsWith('.md'))
+    (['md', '.md', 'famd', '.famd', 'markdown'].includes(entry.extension?.toLowerCase() || '')
+      || /\.(md|markdown|famd)$/i.test(entry.name))
   )
 }
 
 function noteTitle(entry: VaultEntry) {
-  return entry.name.replace(/\.md$/i, '') || 'Unbenannte Notiz'
+  return entry.name.replace(/\.(md|markdown|famd)$/i, '') || 'Unbenannte Notiz'
 }
 
 function collectNotes(entries: VaultEntry[]): VaultEntry[] {

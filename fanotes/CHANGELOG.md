@@ -7,7 +7,12 @@
 - **Arbeitsblatt entfernen:** PDFs und Bilder lassen sich wieder über „Entfernen“ aus der Notiz lösen; Datei und Marker werden aus dem Vault gelöscht.
 - **Unterordner in Unterordnern:** In jedem Ordner lässt sich ein weiterer Unterordner anlegen (Symbol, Rechtsklick oder leerer Ordner). Die Verschachtelung ist beliebig tief.
 - **Nur Stift:** Im Handschriftmodus lässt sich „Nur Stift“ wählen — Finger/Hand zeichnen dann nicht mehr, nur der echte Stift. Unter Windows ist das die Voreinstellung.
-- **PDF-Arbeitsblätter flüssig & scharf:** Nur sichtbare Seiten werden gerendert (Virtualisierung), Resize ist entprellt, Auflösung folgt dem Display-DPR mit sinnvollen Deckeln. Off-Screen-Seiten geben VRAM frei.
+- **PDF-Arbeitsblätter flüssig & scharf:** PDFs kommen als Rohbytes ins Fenster (kein riesiges Data-URL/`atob` auf dem UI-Thread). Nur sichtbare Seiten rufen `getPage` auf und werden hintereinander gerendert; beim Wegscrollen bleibt die Bitmap kurz liegen, danach ist die Seite wieder nur eine leere Box. Pixel- und Tintenbudget sind enger, damit lange Arbeitsblätter FaNotes nicht ausbremsen.
+- **Desktop deutlich flüssiger (Linux & Windows):** Die Tinte rastert nur den sichtbaren Blattausschnitt in voller Schärfe statt einer riesigen Vollseiten-Bitmap. Resize wird entprellt, Chromium nutzt GPU-Rasterisierung (Windows zusätzlich ohne GPU-Blocklist), das Fenster erscheint erst wenn der Renderer bereit ist, und schwere Module (PDF.js, Editor, Formeln, Qwen) bleiben hinter dem ersten Frame.
+- **Stabiler Desktop:** Abstürze in Editor, Stift, PDF, Hausaufgaben oder Einstellungen bleiben isoliert. Ein abgestürztes Notizfenster lädt sich selbst neu. Löschen/Umbenennen speichert Tinte und Arbeitsblatt zuerst. Beschädigte Handschrift oder fehlende PDF-Seiten blockieren die Notiz nicht mehr.
+- **Kein eingefrorener Stift mehr:** Pointer-Capture gilt nicht auf dem Notizblatt. Trackpad-Zoom, Klicks auf Leiste/Tabs und ein verpasstes Stift-Ende geben die Eingabe sofort frei — Buttons bleiben klickbar, der +-Cursor bleibt nicht hängen.
+- **`.famd` neben jeder `.md`:** Beim Speichern legt FaNotes zusätzlich eine `.famd`-Datei an (gleicher Name). Darin steckt der Markdown-Text plus die Handschrift. Die `.md` bleibt wie gewohnt lesbar; in der Dateiliste erscheint nur eine Notiz.
+- **Stift schreibt unmittelbarer:** Die Tinte wird beim Bewegen gemalt, nicht erst im nächsten Bild. Chromium-Vorhersagepunkte füllen die Lücke zur Stiftspitze; Formprüfung läuft nicht mehr bei jedem Sample.
 - **Formen sauberziehen:** Nach Kreis, Ellipse, Dreieck, Quadrat, Rechteck oder Linie den Stift etwa zwei Sekunden stillhalten — nur klar erkannte Figuren werden begradigt, Handschrift bleibt unverändert.
 
 ## 2026.8.15

@@ -153,8 +153,8 @@ const MIN_INLINE_QUALITY = 1.35
 const MAX_CANVAS_EDGE = 6_144
 const MAX_CANVAS_PIXELS = 18_000_000
 /** Tall multi-page notes (PDF worksheets) keep a lower ink bitmap budget to avoid lag. */
-const MAX_CANVAS_PIXELS_TALL = 8_000_000
-const TALL_LAYOUT_HEIGHT = 2_400
+const MAX_CANVAS_PIXELS_TALL = 4_200_000
+const TALL_LAYOUT_HEIGHT = 1_800
 /** Hold still this long after drawing a recognized figure to beautify it. */
 const SHAPE_DWELL_MS = 2_000
 /** Start extending when the pen is in the last 18% of the current page. */
@@ -165,9 +165,10 @@ const computeInkPixelSize = (layoutWidth: number, layoutHeight: number, viewZoom
   const screenDpr = Math.min(Math.max(window.devicePixelRatio || 1, 1), MAX_DPR)
   const zoomBoost = Math.max(1, Math.min(MAX_VIEW_QUALITY_ZOOM, viewZoom > 1.02 ? viewZoom : 1))
   const baseBoost = inlineMode ? MIN_INLINE_QUALITY : 1
-  // Multi-page worksheets make the paper very tall; keep ink supersampling moderate.
+  // Multi-page worksheets make the paper very tall; keep ink supersampling moderate
+  // so the overlay canvas does not compete with PDF page bitmaps for GPU memory.
   const tallFactor = layoutHeight > TALL_LAYOUT_HEIGHT
-    ? Math.max(0.55, Math.min(1, TALL_LAYOUT_HEIGHT / layoutHeight))
+    ? Math.max(0.38, Math.min(1, TALL_LAYOUT_HEIGHT / layoutHeight))
     : 1
   let scale = screenDpr * baseBoost * zoomBoost * tallFactor
   let width = Math.max(1, Math.round(layoutWidth * scale))
@@ -190,6 +191,47 @@ const computeInkPixelSize = (layoutWidth: number, layoutHeight: number, viewZoom
   return { width, height, scale }
 }
 
+type InkWindow = { y0: number; y1: number }
+const FULL_INK_WINDOW: InkWindow = { y0: 0, y1: 1 }
+const inkWindowSpan = (window: InkWindow) => Math.max(0.06, Math.min(1, window.y1 - window.y0))
+const isFullInkWindow = (window: InkWindow) => window.y0 <= 0.002 && window.y1 >= 0.998
+
+const measureInkWindow = (paper: HTMLElement, scroller: HTMLElement): InkWindow => {
+  const view = scroller.getBoundingClientRect()
+  const sheet = paper.getBoundingClientRect()
+  if (sheet.height < 1_600 || sheet.height <= view.height * 1.35) return FULL_INK_WINDOW
+  const pad = (view.height * 0.95) / Math.max(1, sheet.height)
+  const y0 = clamp((view.top - sheet.top) / sheet.height - pad)
+  const y1 = clamp((view.bottom - sheet.top) / sheet.height + pad)
+  if (y1 - y0 >= 0.94) return FULL_INK_WINDOW
+  return { y0, y1 }
+}
+
+const inkWindowsDiffer = (left: InkWindow, right: InkWindow) => (
+  Math.abs(left.y0 - right.y0) > 0.014 || Math.abs(left.y1 - right.y1) > 0.014
+)
+
+const strokeIntersectsWindow = (stroke: { points: Array<{ y: number }> }, window: InkWindow) => {
+  let minY = 1
+  let maxY = 0
+  for (const point of stroke.points) {
+    if (point.y < minY) minY = point.y
+    if (point.y > maxY) maxY = point.y
+  }
+  const pad = 0.03
+  return maxY >= window.y0 - pad && minY <= window.y1 + pad
+}
+
+const applyInkWindowToCanvases = (canvases: Array<HTMLCanvasElement | null>, window: InkWindow) => {
+  const top = isFullInkWindow(window) ? '0' : `${window.y0 * 100}%`
+  const height = isFullInkWindow(window) ? '100%' : `${inkWindowSpan(window) * 100}%`
+  for (const canvas of canvases) {
+    if (!canvas) continue
+    if (canvas.style.top !== top) canvas.style.top = top
+    if (canvas.style.height !== height) canvas.style.height = height
+  }
+}
+
 const releasePointerCaptureSafe = (target: EventTarget | null, pointerId: number) => {
   if (!(target instanceof Element)) return
   try {
@@ -198,6 +240,24 @@ const releasePointerCaptureSafe = (target: EventTarget | null, pointerId: number
     // Chromium on Wayland can throw if capture was already cleared by the compositor.
   }
 }
+
+const releaseInkPointerCaptures = (targets: Array<EventTarget | null | undefined>, pointerId: number | null) => {
+  if (pointerId === null) return
+  for (const target of targets) releasePointerCaptureSafe(target ?? null, pointerId)
+}
+
+const clearInkCursor = () => {
+  try {
+    document.documentElement.style.removeProperty('cursor')
+    document.body.style.removeProperty('cursor')
+  } catch {
+    // ignore
+  }
+}
+
+const isInkSurfaceTarget = (target: EventTarget | null) => (
+  target instanceof Element && Boolean(target.closest('.lw-canvas-surface, .lw-tablet-canvas, .lw-drawing-board.is-inline.is-input-active'))
+)
 
 const releaseStuckInputFocus = (preferred?: HTMLElement | null) => {
   const active = document.activeElement
@@ -808,13 +868,23 @@ const renderDocument = (
   height: number,
   includePaper = true,
   sourceWidth = SOURCE_WIDTH,
+  inkWindow: InkWindow = FULL_INK_WINDOW,
 ) => {
   const context = canvas.getContext('2d')
   if (!context) return
   context.setTransform(1, 0, 0, 1, 0, 0)
   context.clearRect(0, 0, canvas.width, canvas.height)
   if (includePaper) drawPaper(context, width, height, paperStyle)
-  strokes.forEach((stroke) => drawInkStroke(context, stroke, width, height, smoothing, 1, sourceWidth))
+  const span = inkWindowSpan(inkWindow)
+  const virtualHeight = height / span
+  context.save()
+  context.beginPath()
+  context.rect(0, 0, width, height)
+  context.clip()
+  context.setTransform(1, 0, 0, 1, 0, -inkWindow.y0 * virtualHeight)
+  const visible = isFullInkWindow(inkWindow) ? strokes : strokes.filter((stroke) => strokeIntersectsWindow(stroke, inkWindow))
+  visible.forEach((stroke) => drawInkStroke(context, stroke, width, virtualHeight, smoothing, 1, sourceWidth))
+  context.restore()
 }
 
 const safeInkStrokes = (value: unknown, fallbackColor: string): InkStroke[] => {
@@ -1025,7 +1095,11 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const committedCanvasRef = useRef<HTMLCanvasElement | null>(null)
   const committedCanvasKeyRef = useRef('')
   const committedCanvasDirtyRef = useRef(true)
-  const canvasPixelSizeRef = useRef({ width: 0, height: 0 })
+  const canvasPixelSizeRef = useRef({ width: 0, height: 0, virtualHeight: 0 })
+  const inkWindowRef = useRef<InkWindow>(FULL_INK_WINDOW)
+  const inkWindowFrameRef = useRef<number | null>(null)
+  const resizeDebounceRef = useRef<number | null>(null)
+  const resizeDirtyRef = useRef(false)
   const canvasQualityKeyRef = useRef('')
   const pointerBoundsRef = useRef<{ left: number; top: number; width: number; height: number } | null>(null)
   const viewZoomRef = useRef(1)
@@ -1312,9 +1386,14 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     const layoutWidth = surface.offsetWidth || surface.clientWidth
     const layoutHeight = surface.offsetHeight || surface.clientHeight
     if (layoutWidth <= 0 || layoutHeight <= 0) return
+    const inkWindow = inkWindowRef.current
+    const windowSpan = inkWindowSpan(inkWindow)
+    const windowLayoutHeight = Math.max(1, layoutHeight * windowSpan)
     const qualityKey = [
       Math.round(layoutWidth),
       Math.round(layoutHeight),
+      inkWindow.y0.toFixed(3),
+      inkWindow.y1.toFixed(3),
       viewZoomRef.current.toFixed(2),
       (window.devicePixelRatio || 1).toFixed(2),
       inline ? 'i' : 'f',
@@ -1325,21 +1404,28 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     // Page growth forces measureLayout=true and must resize even mid-stroke so new
     // paper area maps correctly; pure zoom waits for the pen to lift.
     if (shouldRemeasure && (measureLayout || !activeStrokeRef.current)) {
-      const nextSize = computeInkPixelSize(layoutWidth, layoutHeight, viewZoomRef.current, inline)
-      canvasPixelSizeRef.current = { width: nextSize.width, height: nextSize.height }
+      const nextSize = computeInkPixelSize(layoutWidth, windowLayoutHeight, viewZoomRef.current, inline)
+      const virtualHeight = nextSize.height / windowSpan
+      canvasPixelSizeRef.current = { width: nextSize.width, height: nextSize.height, virtualHeight }
       canvasQualityKeyRef.current = qualityKey
       committedCanvasDirtyRef.current = true
+      applyInkWindowToCanvases([canvas, committedCanvas], inkWindow)
       if (activeStrokeRef.current) {
         activeRenderedPointCountRef.current = 0
         liveCanvasHasInkRef.current = false
       }
     } else if (!canvasPixelSizeRef.current.width) {
-      const nextSize = computeInkPixelSize(layoutWidth, layoutHeight, viewZoomRef.current, inline)
-      canvasPixelSizeRef.current = { width: nextSize.width, height: nextSize.height }
+      const nextSize = computeInkPixelSize(layoutWidth, windowLayoutHeight, viewZoomRef.current, inline)
+      canvasPixelSizeRef.current = {
+        width: nextSize.width,
+        height: nextSize.height,
+        virtualHeight: nextSize.height / windowSpan,
+      }
       canvasQualityKeyRef.current = qualityKey
+      applyInkWindowToCanvases([canvas, committedCanvas], inkWindow)
     }
-    const { width: pixelWidth, height: pixelHeight } = canvasPixelSizeRef.current
-    if (!pixelWidth || !pixelHeight) return
+    const { width: pixelWidth, height: pixelHeight, virtualHeight } = canvasPixelSizeRef.current
+    if (!pixelWidth || !pixelHeight || !virtualHeight) return
     const liveCanvasResized = canvas.width !== pixelWidth || canvas.height !== pixelHeight
     if (canvas.width !== pixelWidth) canvas.width = pixelWidth
     if (canvas.height !== pixelHeight) canvas.height = pixelHeight
@@ -1350,35 +1436,57 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     if (committedCanvas.width !== pixelWidth) committedCanvas.width = pixelWidth
     if (committedCanvas.height !== pixelHeight) committedCanvas.height = pixelHeight
 
-    const cacheKey = [pixelWidth, pixelHeight, paperStyle, settings.smoothing, sourceWidth, sourceHeight, inline].join(':')
+    const cacheKey = [
+      pixelWidth,
+      pixelHeight,
+      inkWindow.y0.toFixed(3),
+      inkWindow.y1.toFixed(3),
+      paperStyle,
+      settings.smoothing,
+      sourceWidth,
+      sourceHeight,
+      inline,
+    ].join(':')
     if (committedCanvasDirtyRef.current || committedCanvasKeyRef.current !== cacheKey) {
-      renderDocument(committedCanvas, strokesRef.current, paperStyle, settings.smoothing, pixelWidth, pixelHeight, !inline, sourceWidth)
+      renderDocument(
+        committedCanvas,
+        strokesRef.current,
+        paperStyle,
+        settings.smoothing,
+        pixelWidth,
+        pixelHeight,
+        !inline,
+        sourceWidth,
+        inkWindow,
+      )
       committedCanvasKeyRef.current = cacheKey
       committedCanvasDirtyRef.current = false
     }
 
-    const context = canvas.getContext('2d', { alpha: true })
+    const context = canvas.getContext('2d', { alpha: true, desynchronized: true })
     if (!context) return
-    context.imageSmoothingEnabled = true
-    context.imageSmoothingQuality = 'high'
-    context.setTransform(1, 0, 0, 1, 0, 0)
+    context.imageSmoothingEnabled = !activeStrokeRef.current
+    context.imageSmoothingQuality = 'low'
     const activeStroke = activeStrokeRef.current
     if (!activeStroke) {
+      context.setTransform(1, 0, 0, 1, 0, 0)
       if (liveCanvasHasInkRef.current) context.clearRect(0, 0, pixelWidth, pixelHeight)
       activeRenderedPointCountRef.current = 0
       liveCanvasHasInkRef.current = false
       return
     }
     if (activeRenderedPointCountRef.current === 0 && liveCanvasHasInkRef.current) {
+      context.setTransform(1, 0, 0, 1, 0, 0)
       context.clearRect(0, 0, pixelWidth, pixelHeight)
       liveCanvasHasInkRef.current = false
     }
     if (activeStroke.points.length > activeRenderedPointCountRef.current) {
+      context.setTransform(1, 0, 0, 1, 0, -inkWindow.y0 * virtualHeight)
       drawInkStroke(
         context,
         activeStroke,
         pixelWidth,
-        pixelHeight,
+        virtualHeight,
         settings.smoothing,
         Math.max(1, activeRenderedPointCountRef.current),
         sourceWidth,
@@ -1390,11 +1498,19 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
 
   const commitStrokeToCanvas = useCallback((stroke: InkStroke) => {
     const canvas = committedCanvasRef.current
-    const { width, height } = canvasPixelSizeRef.current
-    if (!canvas || !width || !height || committedCanvasDirtyRef.current) return
+    const { width, height, virtualHeight } = canvasPixelSizeRef.current
+    if (!canvas || !width || !height || !virtualHeight || committedCanvasDirtyRef.current) return
+    const inkWindow = inkWindowRef.current
+    if (!strokeIntersectsWindow(stroke, inkWindow)) return
     const context = canvas.getContext('2d')
     if (!context) return
-    drawInkStroke(context, stroke, width, height, settings.smoothing, 1, sourceWidth)
+    context.save()
+    context.beginPath()
+    context.rect(0, 0, width, height)
+    context.clip()
+    context.setTransform(1, 0, 0, 1, 0, -inkWindow.y0 * virtualHeight)
+    drawInkStroke(context, stroke, width, virtualHeight, settings.smoothing, 1, sourceWidth)
+    context.restore()
   }, [settings.smoothing, sourceWidth])
 
   useEffect(() => {
@@ -1414,20 +1530,6 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       drawFrameRef.current = null
       redraw()
     })
-  }, [redraw])
-
-  useEffect(() => {
-    mountedRef.current = true
-    const observer = new ResizeObserver(() => redraw(true))
-    if (surfaceRef.current) observer.observe(surfaceRef.current)
-    if (surfaceRef.current?.parentElement) observer.observe(surfaceRef.current.parentElement)
-    redraw(true)
-    return () => {
-      mountedRef.current = false
-      observer.disconnect()
-      if (drawFrameRef.current !== null) cancelAnimationFrame(drawFrameRef.current)
-      if (pendingSolverTapRef.current) window.clearTimeout(pendingSolverTapRef.current.timer)
-    }
   }, [redraw])
 
   useEffect(() => {
@@ -1488,6 +1590,9 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       updateHistoryState()
       loadedDrawingIdRef.current = sourceId
     } catch {
+      loadedDrawingIdRef.current = sourceId
+      strokesRef.current = []
+      committedCanvasDirtyRef.current = true
       setNotice({ kind: 'error', text: 'Die gespeicherte Zeichnung konnte nicht gelesen werden.' })
     }
   }, [bumpInkRevision, clearRecognitionScope, drawingId, initialDrawingJson, setDirty, updateHistoryState])
@@ -1531,7 +1636,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     const cos = Math.cos(rad)
     const sin = Math.sin(rad)
     // Recover local paper-space coords relative to the canvas layout box.
-    // Canvas fills the paper in inline mode, so paper-local == canvas-local.
+    // Paper-local coordinates stay 0–1 over the full sheet even when the ink
+    // bitmap only covers the visible window.
     const paperW = Math.max(1, originEl === canvas ? width : originEl.offsetWidth)
     const paperH = Math.max(1, originEl === canvas ? height : originEl.offsetHeight)
     const paperLocalX = (dx * cos - dy * sin) / zoom + paperW / 2
@@ -1554,6 +1660,76 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     const surface = surfaceRef.current
     return (surface?.closest('.unified-paper') ?? boardRef.current?.closest('.unified-paper')) as HTMLElement | null
   }, [])
+
+  const syncInkWindow = useCallback((force = false) => {
+    if (!inline) {
+      if (!isFullInkWindow(inkWindowRef.current)) {
+        inkWindowRef.current = FULL_INK_WINDOW
+        committedCanvasDirtyRef.current = true
+        canvasQualityKeyRef.current = ''
+        scheduleRedraw()
+      }
+      return
+    }
+    const paper = resolvePaperElement()
+    const scroller = paper?.closest('.unified-note-view') as HTMLElement | null
+    if (!paper || !scroller) {
+      if (!isFullInkWindow(inkWindowRef.current)) {
+        inkWindowRef.current = FULL_INK_WINDOW
+        committedCanvasDirtyRef.current = true
+        canvasQualityKeyRef.current = ''
+        applyInkWindowToCanvases([canvasRef.current, committedCanvasRef.current], FULL_INK_WINDOW)
+        scheduleRedraw()
+      }
+      return
+    }
+    const next = measureInkWindow(paper, scroller)
+    if (!force && !inkWindowsDiffer(inkWindowRef.current, next)) return
+    inkWindowRef.current = next
+    committedCanvasDirtyRef.current = true
+    canvasQualityKeyRef.current = ''
+    applyInkWindowToCanvases([canvasRef.current, committedCanvasRef.current], next)
+    scheduleRedraw()
+  }, [inline, resolvePaperElement, scheduleRedraw])
+
+  useEffect(() => {
+    mountedRef.current = true
+    const scheduleMeasure = () => {
+      if (activeStrokeRef.current) {
+        resizeDirtyRef.current = true
+        return
+      }
+      if (resizeDebounceRef.current !== null) window.clearTimeout(resizeDebounceRef.current)
+      resizeDebounceRef.current = window.setTimeout(() => {
+        resizeDebounceRef.current = null
+        syncInkWindow()
+        redraw(true)
+      }, 90)
+    }
+    const observer = new ResizeObserver(scheduleMeasure)
+    if (surfaceRef.current) observer.observe(surfaceRef.current)
+    if (surfaceRef.current?.parentElement) observer.observe(surfaceRef.current.parentElement)
+    const scroller = resolvePaperElement()?.closest('.unified-note-view')
+    const onScroll = () => {
+      if (inkWindowFrameRef.current !== null) return
+      inkWindowFrameRef.current = requestAnimationFrame(() => {
+        inkWindowFrameRef.current = null
+        syncInkWindow()
+      })
+    }
+    scroller?.addEventListener('scroll', onScroll, { passive: true })
+    syncInkWindow(true)
+    redraw(true)
+    return () => {
+      mountedRef.current = false
+      observer.disconnect()
+      scroller?.removeEventListener('scroll', onScroll)
+      if (inkWindowFrameRef.current !== null) cancelAnimationFrame(inkWindowFrameRef.current)
+      if (resizeDebounceRef.current !== null) window.clearTimeout(resizeDebounceRef.current)
+      if (drawFrameRef.current !== null) cancelAnimationFrame(drawFrameRef.current)
+      if (pendingSolverTapRef.current) window.clearTimeout(pendingSolverTapRef.current.timer)
+    }
+  }, [redraw, resolvePaperElement, syncInkWindow])
 
   const applyInkExtentStyles = useCallback((height: number, width: number = sourceWidthRef.current) => {
     const paper = resolvePaperElement()
@@ -1885,6 +2061,48 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     return true
   }, [scheduleRedraw, sourceHeight, sourceWidth])
 
+  const paintActiveStrokeNow = useCallback((predicted: PointerEvent[] = []) => {
+    const canvas = canvasRef.current
+    const stroke = activeStrokeRef.current
+    if (!canvas || !stroke) return false
+    const { width: pixelWidth, height: pixelHeight, virtualHeight } = canvasPixelSizeRef.current
+    if (!pixelWidth || !pixelHeight || !virtualHeight) return false
+    const context = canvas.getContext('2d', { alpha: true, desynchronized: true })
+    if (!context) return false
+    const inkWindow = inkWindowRef.current
+    context.imageSmoothingEnabled = false
+    context.setTransform(1, 0, 0, 1, 0, -inkWindow.y0 * virtualHeight)
+    if (stroke.points.length > activeRenderedPointCountRef.current) {
+      drawInkStroke(
+        context,
+        stroke,
+        pixelWidth,
+        virtualHeight,
+        0,
+        Math.max(1, activeRenderedPointCountRef.current),
+        sourceWidthRef.current,
+      )
+      activeRenderedPointCountRef.current = stroke.points.length
+      liveCanvasHasInkRef.current = true
+    }
+    if (predicted.length) {
+      const preview: InkStroke = {
+        ...stroke,
+        points: [...stroke.points, ...predicted.map(pointFromEvent)],
+      }
+      drawInkStroke(
+        context,
+        preview,
+        pixelWidth,
+        virtualHeight,
+        0,
+        Math.max(1, stroke.points.length),
+        sourceWidthRef.current,
+      )
+    }
+    return true
+  }, [pointFromEvent])
+
   const appendPointerEvent = useCallback((event: PointerEvent) => {
     const point = pointFromEvent(event)
     if (gestureToolRef.current === 'eraser') {
@@ -1908,14 +2126,15 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     }
     stroke.points.push(point)
     gestureChangedRef.current = true
-    scheduleRedraw()
-    // Start the hold timer only if this stroke already looks like a figure.
+    if (!paintActiveStrokeNow()) scheduleRedraw()
+    // Shape checks are only for the 2s hold — not on every tablet sample.
     if (
       gestureToolRef.current === 'pen'
       && !selectionStartRef.current
       && !stroke.symbolId
       && !shapeSnappedRef.current
       && stroke.points.length >= 14
+      && stroke.points.length % 8 === 0
       && isStrokeDwelling(stroke, sourceWidth, sourceHeight)
       && strokeLooksLikeShape(stroke, sourceWidth, sourceHeight)
     ) {
@@ -1928,7 +2147,12 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     } else if (!isStrokeDwelling(stroke, sourceWidth, sourceHeight)) {
       clearShapeDwellTimer()
     }
-  }, [clearShapeDwellTimer, eraseAt, pointFromEvent, scheduleRedraw, sourceHeight, sourceWidth, trySnapActiveShape])
+    const visibleInk = inkWindowRef.current
+    if (!isFullInkWindow(visibleInk) && (point.y < visibleInk.y0 + 0.08 || point.y > visibleInk.y1 - 0.08)) {
+      // Remeasuring mid-stroke freezes the UI and can drop pointerup.
+      resizeDirtyRef.current = true
+    }
+  }, [clearShapeDwellTimer, eraseAt, paintActiveStrokeNow, pointFromEvent, scheduleRedraw, sourceHeight, sourceWidth, trySnapActiveShape])
 
   const commitPendingSolverTap = useCallback(() => {
     const pending = pendingSolverTapRef.current
@@ -2151,7 +2375,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     }
   }, [clearRecognitionScope, settings.recognitionLanguage, sourceHeight])
 
-  const handlePointerDown = useCallback((event: ReactPointerEvent<HTMLCanvasElement>) => {
+  const handlePointerDown = useCallback((event: ReactPointerEvent<HTMLElement>) => {
     if (activePointerRef.current !== null || (event.button !== 0 && event.pointerType !== 'pen')) return
     // Pen-only (Windows palm / resting hand): ignore finger, mouse and trackpad ink.
     if (settings.penOnly && event.pointerType !== 'pen') return
@@ -2165,11 +2389,11 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     // without trapping Wayland/Hyprland keyboard grab on the canvas element.
     boardRef.current?.focus({ preventScroll: true })
     activePointerTargetRef.current = event.currentTarget
-    // Only capture mouse. Pen/touch capture under Hyprland/Wayland often never
-    // releases when a trackpad pinch-zoom interleaves — the crosshair (+) cursor
-    // then sticks and chrome buttons stop receiving clicks. Mouse still needs
-    // capture so drag-draw continues outside the canvas hit box.
-    if (event.pointerType === 'mouse') {
+    // Never capture in the inline note: the surface already covers the sheet,
+    // and leftover capture retargets ribbon/tab clicks back onto the paper.
+    // Standalone mouse drawing still captures so a drag can leave the canvas.
+    // Pen/touch must never capture — Hyprland/Wayland often never releases it.
+    if (!inline && event.pointerType === 'mouse') {
       try {
         event.currentTarget.setPointerCapture(event.pointerId)
         lastCapturedPointerIdRef.current = event.pointerId
@@ -2288,9 +2512,9 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         }
     }
     appendPointerEvent(event.nativeEvent)
-  }, [activeArtBrush.pressure, activeArtSymbol, appendPointerEvent, artBrush, artColor, artEffect, artOpacity, artSymbolRotation, artSymbolSize, artWidth, bumpInkRevision, clearRecognitionScope, clearShapeDwellTimer, closeMathCorrectionSession, closeMathSolverSelection, commitPendingSolverTap, commitStrokeToCanvas, inkMode, mathSolverEnabled, penColor, penWidth, pointFromEvent, scheduleRedraw, selectionMode, setDirty, settings.penOnly, settings.pressureEnabled, sourceHeight, sourceWidth, tool, updateHistoryState])
+  }, [activeArtBrush.pressure, activeArtSymbol, appendPointerEvent, artBrush, artColor, artEffect, artOpacity, artSymbolRotation, artSymbolSize, artWidth, bumpInkRevision, clearRecognitionScope, clearShapeDwellTimer, closeMathCorrectionSession, closeMathSolverSelection, commitPendingSolverTap, commitStrokeToCanvas, inkMode, inline, mathSolverEnabled, penColor, penWidth, pointFromEvent, scheduleRedraw, selectionMode, setDirty, settings.penOnly, settings.pressureEnabled, sourceHeight, sourceWidth, tool, updateHistoryState])
 
-  const handlePointerMove = useCallback((event: ReactPointerEvent<HTMLCanvasElement>) => {
+  const handlePointerMove = useCallback((event: ReactPointerEvent<HTMLElement>) => {
     if (settings.penOnly && event.pointerType !== 'pen') return
     if (activePointerRef.current !== event.pointerId) return
     event.preventDefault()
@@ -2304,13 +2528,15 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       eraseAt(events.map(pointFromEvent))
     } else {
       events.forEach(appendPointerEvent)
+      const predicted = event.nativeEvent.getPredictedEvents?.() ?? []
+      if (predicted.length) paintActiveStrokeNow(predicted)
       // Grow the page ahead of the pen so writing never hits a hard bottom edge.
       const latest = activeStrokeRef.current?.points.at(-1)
       if (latest) ensureInfinitePageRoom(latest.y, latest.x)
     }
-  }, [appendPointerEvent, ensureInfinitePageRoom, eraseAt, pointFromEvent, settings.penOnly])
+  }, [appendPointerEvent, ensureInfinitePageRoom, eraseAt, paintActiveStrokeNow, pointFromEvent, settings.penOnly])
 
-  const finishPointer = useCallback((event: ReactPointerEvent<HTMLCanvasElement> | PointerEvent) => {
+  const finishPointer = useCallback((event: ReactPointerEvent<HTMLElement> | PointerEvent) => {
     const pointerId = event.pointerId
     if (activePointerRef.current !== pointerId) return
     if ('preventDefault' in event && typeof event.preventDefault === 'function' && event.cancelable) {
@@ -2327,9 +2553,14 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       pointerBoundsRef.current = null
       activePointerRef.current = null
       activePointerTargetRef.current = null
-      releasePointerCaptureSafe(captureTarget, pointerId)
-      releasePointerCaptureSafe(canvasRef.current, pointerId)
+      if (resizeDirtyRef.current) {
+        resizeDirtyRef.current = false
+        syncInkWindow()
+        redraw(true)
+      }
+      releaseInkPointerCaptures([captureTarget, canvasRef.current, surfaceRef.current, boardRef.current], pointerId)
       if (lastCapturedPointerIdRef.current === pointerId) lastCapturedPointerIdRef.current = null
+      clearInkCursor()
       // Hyprland/Wayland: after pen/touch, free keyboard + scroll without requiring a workspace switch.
       // Also free on any cancel/lost-capture so trackpad zoom mid-stroke cannot leave input trapped.
       if (
@@ -2479,7 +2710,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       }
     }
     scheduleRedraw()
-  }, [analyzeMathCorrectionSelection, appendPointerEvent, bumpInkRevision, clearShapeDwellTimer, commitPendingSolverTap, commitStrokeToCanvas, inkMode, mathSolverEnabled, mode, openMathSolverAtPoint, pointFromEvent, redraw, scheduleRedraw, selectionPurpose, setDirty, settings.scribbleEraseSensitivity, sourceHeight, sourceWidth, updateHistoryState])
+  }, [analyzeMathCorrectionSelection, appendPointerEvent, bumpInkRevision, clearShapeDwellTimer, commitPendingSolverTap, commitStrokeToCanvas, inkMode, mathSolverEnabled, mode, openMathSolverAtPoint, pointFromEvent, redraw, scheduleRedraw, selectionPurpose, setDirty, settings.scribbleEraseSensitivity, sourceHeight, sourceWidth, syncInkWindow, updateHistoryState])
 
   /**
    * Hard-stop any in-progress pen/mouse stroke and scrub leftover pointer capture.
@@ -2514,31 +2745,58 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       pointerBoundsRef.current = null
       scheduleRedraw()
     }
-    if (scrubId !== null) {
-      releasePointerCaptureSafe(activePointerTargetRef.current, scrubId)
-      releasePointerCaptureSafe(canvasRef.current, scrubId)
-      lastCapturedPointerIdRef.current = null
-    }
+    releaseInkPointerCaptures(
+      [activePointerTargetRef.current, canvasRef.current, surfaceRef.current, boardRef.current],
+      scrubId,
+    )
+    lastCapturedPointerIdRef.current = null
     activePointerRef.current = null
     activePointerTargetRef.current = null
     pointerBoundsRef.current = null
+    clearInkCursor()
     releaseStuckInputFocus(boardRef.current)
-    queueMicrotask(() => releaseStuckInputFocus(boardRef.current))
-    window.setTimeout(() => releaseStuckInputFocus(boardRef.current), 0)
+    queueMicrotask(() => {
+      releaseStuckInputFocus(boardRef.current)
+      clearInkCursor()
+    })
+    window.setTimeout(() => {
+      releaseStuckInputFocus(boardRef.current)
+      clearInkCursor()
+    }, 0)
   }, [finishPointer, scheduleRedraw])
   forceEndActivePointerRef.current = forceEndActivePointer
 
-  // Global safety net: if pointerup/cancel never reaches the canvas (common with
-  // tablets under Hyprland/Wayland), still release capture and restore input.
-  // Also continue pen strokes when the tip leaves the canvas (no setPointerCapture for pen).
   useEffect(() => {
-    if (!inputActive) return
+    if (inputActive) return
+    forceEndActivePointer('watchdog')
+  }, [forceEndActivePointer, inputActive])
+
+  // Global safety net: leftover capture retargets every click onto the sheet, so
+  // ribbon/tab buttons look dead. These listeners stay up even after leaving
+  // Stiftmodus so a missed pointerup cannot keep the UI frozen.
+  useEffect(() => {
+    const captureTargets = () => [
+      activePointerTargetRef.current,
+      canvasRef.current,
+      surfaceRef.current,
+      boardRef.current,
+    ]
+    const scrub = (pointerId: number | null) => {
+      releaseInkPointerCaptures(captureTargets(), pointerId)
+      if (pointerId !== null && lastCapturedPointerIdRef.current === pointerId) {
+        lastCapturedPointerIdRef.current = null
+      }
+    }
     const onWindowPointerMove = (event: PointerEvent) => {
-      if (activePointerRef.current !== event.pointerId) return
+      if (!inputActive || activePointerRef.current !== event.pointerId) return
+      // Missed pointerup (trackpad zoom, pen hover): buttons===0 means the tip is up.
+      if (event.buttons === 0) {
+        forceEndActivePointer('watchdog')
+        return
+      }
       const canvas = canvasRef.current
-      // Canvas React handler already processes moves while the pointer is over it.
-      // Only continue the stroke here when the tip left the live canvas (pen without capture).
-      if (canvas && (event.target === canvas || (event.target instanceof Node && canvas.contains(event.target)))) {
+      const hitTarget = inline ? surfaceRef.current : canvas
+      if (hitTarget && (event.target === hitTarget || (event.target instanceof Node && hitTarget.contains(event.target)))) {
         return
       }
       if (selectionStartRef.current) {
@@ -2551,19 +2809,34 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         eraseAt(events.map(pointFromEvent))
       } else {
         events.forEach(appendPointerEvent)
+        const predicted = event.getPredictedEvents?.() ?? []
+        if (predicted.length) paintActiveStrokeNow(predicted)
         const latest = activeStrokeRef.current?.points.at(-1)
         if (latest) ensureInfinitePageRoom(latest.y, latest.x)
       }
     }
     const onWindowPointerEnd = (event: PointerEvent) => {
-      if (activePointerRef.current !== event.pointerId) return
-      finishPointer(event)
+      if (activePointerRef.current === event.pointerId) finishPointer(event)
+      else scrub(event.pointerId)
     }
     const onWindowPointerDown = (event: PointerEvent) => {
-      // Trackpad/mouse click while a pen stroke is still "active" (lost up): free UI first.
-      if (activePointerRef.current === null) return
-      if (event.pointerId === activePointerRef.current) return
-      forceEndActivePointer('cross-device')
+      if (isInkSurfaceTarget(event.target)) {
+        if (activePointerRef.current !== null && event.pointerId !== activePointerRef.current) {
+          forceEndActivePointer('cross-device')
+        }
+        return
+      }
+      // Clicking any chrome (ribbon, tabs, menus, HUD) must free a stuck pen first,
+      // including the same pointer id — otherwise capture swallows the click.
+      if (activePointerRef.current !== null || lastCapturedPointerIdRef.current !== null || activeStrokeRef.current) {
+        forceEndActivePointer('cross-device')
+      } else {
+        scrub(event.pointerId)
+      }
+    }
+    const onWheel = (event: WheelEvent) => {
+      if (!inputActive) return
+      if (event.ctrlKey || event.metaKey || event.altKey) forceEndActivePointer('view-gesture')
     }
     const onWindowBlur = () => {
       forceEndActivePointer('blur')
@@ -2571,36 +2844,38 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     const onVisibility = () => {
       if (document.visibilityState === 'hidden') forceEndActivePointer('blur')
     }
-    // Scrub orphaned mouse capture left behind after a dropped pointerup (no active stroke).
-    // Never auto-kill a live stroke — a still pen tip can pause moves for a long time.
     const onWatchdog = () => {
-      if (activePointerRef.current !== null || activeStrokeRef.current) return
       const capturedId = lastCapturedPointerIdRef.current
+      if (activePointerRef.current !== null || activeStrokeRef.current) return
       if (capturedId === null) return
-      const target = activePointerTargetRef.current ?? canvasRef.current
-      if (target instanceof Element && target.hasPointerCapture?.(capturedId)) {
-        releasePointerCaptureSafe(target, capturedId)
-        releaseStuckInputFocus(boardRef.current)
-      }
-      lastCapturedPointerIdRef.current = null
+      scrub(capturedId)
+      clearInkCursor()
+      releaseStuckInputFocus(boardRef.current)
     }
     window.addEventListener('pointermove', onWindowPointerMove, true)
     window.addEventListener('pointerup', onWindowPointerEnd, true)
     window.addEventListener('pointercancel', onWindowPointerEnd, true)
+    window.addEventListener('lostpointercapture', onWindowPointerEnd, true)
     window.addEventListener('pointerdown', onWindowPointerDown, true)
+    window.addEventListener('wheel', onWheel, { capture: true, passive: true })
     window.addEventListener('blur', onWindowBlur)
     document.addEventListener('visibilitychange', onVisibility)
-    const watchdog = window.setInterval(onWatchdog, 500)
+    const watchdog = window.setInterval(onWatchdog, 280)
     return () => {
       window.removeEventListener('pointermove', onWindowPointerMove, true)
       window.removeEventListener('pointerup', onWindowPointerEnd, true)
       window.removeEventListener('pointercancel', onWindowPointerEnd, true)
+      window.removeEventListener('lostpointercapture', onWindowPointerEnd, true)
       window.removeEventListener('pointerdown', onWindowPointerDown, true)
+      window.removeEventListener('wheel', onWheel, true)
       window.removeEventListener('blur', onWindowBlur)
       document.removeEventListener('visibilitychange', onVisibility)
       window.clearInterval(watchdog)
+      releaseInkPointerCaptures(captureTargets(), lastCapturedPointerIdRef.current)
+      releaseInkPointerCaptures(captureTargets(), activePointerRef.current)
+      clearInkCursor()
     }
-  }, [appendPointerEvent, eraseAt, ensureInfinitePageRoom, finishPointer, forceEndActivePointer, inputActive, pointFromEvent])
+  }, [appendPointerEvent, eraseAt, ensureInfinitePageRoom, finishPointer, forceEndActivePointer, inline, inputActive, paintActiveStrokeNow, pointFromEvent])
 
   const handleWheel = useCallback((event: React.WheelEvent) => {
     const isViewGesture = event.ctrlKey || event.metaKey || event.altKey
@@ -4206,7 +4481,16 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       <div className={`lw-draw-workspace ${conversionOpen ? 'has-conversion' : ''}`}>
         <div className="lw-canvas-shell">
           <div className="lw-canvas-glow" />
-          <div ref={surfaceRef} className="lw-canvas-surface">
+          <div
+            ref={surfaceRef}
+            className="lw-canvas-surface"
+            onPointerDown={inline ? handlePointerDown : undefined}
+            onPointerMove={inline ? handlePointerMove : undefined}
+            onPointerUp={inline ? finishPointer : undefined}
+            onPointerCancel={inline ? finishPointer : undefined}
+            onLostPointerCapture={inline ? finishPointer : undefined}
+            onContextMenu={inline ? (event) => event.preventDefault() : undefined}
+          >
             <canvas ref={committedCanvasRef} className="lw-tablet-canvas lw-tablet-canvas-committed" aria-hidden="true" />
             <canvas
               ref={canvasRef}
@@ -4215,11 +4499,11 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
               aria-label={selectionMode
                 ? selectionPurpose === 'math-correction' ? 'Rechenweg zur mathematischen Korrektur auswählen' : 'Bereich für Handschrifterkennung auswählen'
                 : inkMode === 'drawing' ? activeArtSymbol ? `Piktogramm ${activeArtSymbol.label} auf Seite platzieren` : `Zeichenfläche mit ${activeArtBrush.label}` : 'Druckempfindliche Handschriftfläche'}
-              onPointerDown={handlePointerDown}
-              onPointerMove={handlePointerMove}
-              onPointerUp={finishPointer}
-              onPointerCancel={finishPointer}
-              onLostPointerCapture={finishPointer}
+              onPointerDown={inline ? undefined : handlePointerDown}
+              onPointerMove={inline ? undefined : handlePointerMove}
+              onPointerUp={inline ? undefined : finishPointer}
+              onPointerCancel={inline ? undefined : finishPointer}
+              onLostPointerCapture={inline ? undefined : finishPointer}
               onContextMenu={(event) => event.preventDefault()}
             />
             {selectionMode && !selectionRect && <div className={`lw-selection-hint ${selectionPurpose === 'math-correction' ? 'is-correction' : ''}`}>
@@ -4700,8 +4984,9 @@ const drawingBoardStyles = `
   overflow:hidden
 }
 .lw-draw-toolbar.is-floating-chrome.is-visible,.lw-draw-footer.is-floating-chrome.is-visible{
-  opacity:1;transform:translateX(-50%);pointer-events:auto
+  opacity:1;transform:translateX(-50%);pointer-events:none
 }
+.lw-draw-toolbar.is-floating-chrome.is-visible > *,.lw-draw-footer.is-floating-chrome.is-visible > *{pointer-events:auto}
 .lw-draw-toolbar.is-floating-chrome .lw-segmented{padding:2px;gap:2px}
 .lw-draw-toolbar.is-floating-chrome .lw-segmented button{height:28px;padding:0 8px;font-size:10px}
 .lw-draw-toolbar.is-floating-chrome .lw-writing-actions{gap:2px}
@@ -4725,9 +5010,10 @@ const drawingBoardStyles = `
 .lw-drawing-board.is-inline .lw-draw-workspace{position:absolute;inset:0;display:block;min-height:100%;padding:0;pointer-events:none}
 .lw-drawing-board.is-inline .lw-canvas-shell{position:absolute;inset:0;display:block;padding:0;border:0;border-radius:0;background:transparent;box-shadow:none;pointer-events:none}
 .lw-drawing-board.is-inline .lw-canvas-glow,.lw-drawing-board.is-inline .lw-canvas-meta{display:none}
-.lw-drawing-board.is-inline .lw-canvas-surface{position:absolute;inset:0;width:100%!important;height:100%!important;min-width:0;min-height:0;aspect-ratio:auto;margin:0;border-radius:0;background:transparent;box-shadow:none;will-change:auto}
-.lw-drawing-board.is-inline .lw-tablet-canvas{width:100%;height:100%;pointer-events:none}
-.lw-drawing-board.is-inline .lw-tablet-canvas.is-input-active{pointer-events:auto}
+.lw-drawing-board.is-inline .lw-canvas-surface{position:absolute;inset:0;width:100%!important;height:100%!important;min-width:0;min-height:0;aspect-ratio:auto;margin:0;border-radius:0;background:transparent;box-shadow:none;will-change:auto;pointer-events:none}
+.lw-drawing-board.is-inline.is-input-active .lw-canvas-surface{pointer-events:auto}
+.lw-drawing-board.is-inline .lw-tablet-canvas{position:absolute;left:0;width:100%;height:100%;pointer-events:none}
+.lw-drawing-board.is-inline .lw-tablet-canvas.is-input-active{pointer-events:none}
 .lw-drawing-board.is-inline .lw-conversion-panel{position:sticky;z-index:14;top:72px;float:right;width:min(370px,calc(100% - 28px));max-height:calc(100vh - 175px);margin:72px 14px 0 0;overflow:auto;pointer-events:auto;box-shadow:0 22px 70px rgba(0,0,0,.34)}
 .lw-drawing-board.is-inline .lw-draw-notice{position:sticky;z-index:15;top:72px;width:min(420px,calc(100% - 28px));margin:72px auto 0;pointer-events:auto;box-shadow:0 13px 34px rgba(0,0,0,.24)}
 .lw-draw-footer.is-floating-chrome{

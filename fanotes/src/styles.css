@@ -284,6 +284,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .file-tree__action:hover, .file-tree__mini-action:hover { color: var(--text); background: var(--panel-hover); }
 .file-tree ul { list-style: none; margin: 0; padding: 0; }
 .file-tree__item { position: relative; }
+.file-tree__item:not(:has(.file-tree__group)) { content-visibility: auto; contain-intrinsic-size: auto 32px; }
 .file-tree__row { min-width: 0; height: var(--row-height, 31px); display: flex; align-items: center; border-radius: 7px; padding-left: calc(var(--tree-depth, 0) * 13px); position: relative; }
 .file-tree__row:hover { background: color-mix(in srgb, var(--panel-hover) 74%, transparent); }
 .file-tree__item.is-active > .file-tree__row { color: var(--text); background: var(--panel-active); }
@@ -430,7 +431,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   background: color-mix(in srgb, var(--panel-strong) 94%, transparent);
   box-shadow: 0 10px 28px rgba(0,0,0,.2);
   backdrop-filter: blur(12px);
-  pointer-events: auto;
+  pointer-events: none;
 }
 .paper-view-hud button {
   width: 28px;
@@ -442,6 +443,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   color: inherit;
   background: transparent;
   cursor: pointer;
+  pointer-events: auto;
 }
 .paper-view-hud button:hover:not(:disabled) { color: var(--text); background: var(--panel-hover); }
 .paper-view-hud button:disabled { opacity: .38; cursor: default; }
@@ -587,13 +589,14 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .worksheet-page > img, .worksheet-pdf-page { width: 100%; display: block; background: #fff; }
 .worksheet-page > img { height: auto; min-height: 240px; object-fit: contain; }
 .worksheet-pdf-page { position: relative; min-height: 120px; }
+.worksheet-pdf-canvas-host { position: absolute; inset: 0; }
 .worksheet-pdf-page canvas {
   display: block;
   width: 100%;
-  height: auto;
+  height: 100%;
   image-rendering: auto;
 }
-.worksheet-pdf-page.is-virtualized canvas { visibility: hidden; }
+.worksheet-pdf-page.is-virtualized { background: #f4f5f8; }
 .worksheet-onenote-page { min-height: 420px; background: #fff; }
 .worksheet-onenote-frame { position: absolute; inset: 0 auto auto 0; border: 0; pointer-events: none; transform-origin: left top; background: #fff; }
 .worksheet-layer.is-placing-text .worksheet-page { cursor: text; box-shadow: 0 0 0 2px color-mix(in srgb, var(--paper-accent-readable) 40%, transparent), 0 12px 34px rgba(29,31,42,.18); }
@@ -1128,6 +1131,10 @@ kbd { padding: 3px 6px; border: 1px solid var(--border-strong); border-bottom-wi
 .toast > button { width: 25px; height: 25px; flex: none; display: grid; place-items: center; padding: 0; border: 0; border-radius: 7px; color: var(--text-muted); background: transparent; cursor: pointer; opacity: .7; }
 .toast > button:hover { color: var(--text); background: var(--panel-hover); opacity: 1; }
 .toast.success svg { color: var(--success); }.toast.error svg { color: var(--danger); }.toast.info svg { color: var(--accent-readable); }
+.safe-boundary { min-height: 160px; margin: 16px; padding: 22px 18px; display: grid; justify-items: start; align-content: center; gap: 8px; border: 1px solid color-mix(in srgb, var(--danger, #d94b63) 28%, var(--border)); border-radius: 14px; color: var(--text-soft); background: color-mix(in srgb, var(--panel) 92%, transparent); }
+.safe-boundary strong { color: var(--text); font-size: 13px; }
+.safe-boundary span { color: var(--text-muted); font-size: 10px; line-height: 1.45; max-width: 52ch; }
+.safe-boundary button { min-height: 32px; padding: 0 12px; border: 1px solid var(--border-strong); border-radius: 8px; color: var(--text); background: var(--panel-hover); cursor: pointer; font-size: 11px; }
 
 .app-shell.first-run-shell { display: block; overflow: auto; color: var(--text); isolation: isolate; }
 .first-run-shell::before, .first-run-shell::after { content: ''; position: fixed; z-index: -1; pointer-events: none; border-radius: 999px; will-change: transform; }

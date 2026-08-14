@@ -10,9 +10,13 @@ const UNUSED_CHROMIUM_FEATURES = Object.freeze([
   'AutofillServerCommunication',
   'CertificateTransparencyComponentUpdater',
   'GlobalMediaControls',
+  'InterestFeedContentSuggestions',
   'MediaRouter',
   'OptimizationHints',
   'Translate',
+])
+const DESKTOP_GPU_FEATURES = Object.freeze([
+  'CanvasOopRasterization',
 ])
 const ALLOWED_MEMORY_BUDGETS_MB = Object.freeze([1536, 2048, 3072, 4096, 6144, 8192])
 
@@ -85,6 +89,16 @@ function readStartupResourceLimits(userDataPath) {
   }
 }
 
+function configureDesktopGpu(electronApp) {
+  const commandLine = electronApp.commandLine
+  commandLine.appendSwitch('enable-gpu-rasterization')
+  mergeSwitchValues(commandLine, 'enable-features', DESKTOP_GPU_FEATURES)
+  // Older school laptops often sit on Chromium's GPU blocklist even though
+  // their Intel/AMD chips still composite a notes app correctly.
+  if (process.platform === 'win32') commandLine.appendSwitch('ignore-gpu-blocklist')
+  return { gpuRasterization: true, ignoreGpuBlocklist: process.platform === 'win32' }
+}
+
 function configureLeanChromiumStartup(electronApp, resourceLimits = {}) {
   const commandLine = electronApp.commandLine
   for (const name of [
@@ -94,6 +108,7 @@ function configureLeanChromiumStartup(electronApp, resourceLimits = {}) {
     'disable-component-update',
     'disable-default-apps',
     'disable-domain-reliability',
+    'disable-hang-monitor',
     'disable-sync',
     'metrics-recording-only',
     'no-first-run',
@@ -179,8 +194,10 @@ function cleanupStaleSingletonLocks(userDataPath) {
 module.exports = {
   SINGLETON_NAMES,
   VULKAN_FEATURES,
+  DESKTOP_GPU_FEATURES,
   ALLOWED_MEMORY_BUDGETS_MB,
   cleanupStaleSingletonLocks,
+  configureDesktopGpu,
   configureLeanChromiumStartup,
   configureLinuxGraphics,
   readStartupResourceLimits,

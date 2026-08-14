@@ -116,6 +116,11 @@ void (async () => {
   assert.match(settings, /\.one · \.onetoc2 · \.onepkg · OneDrive-ZIP/u)
   assert.match(worksheetLayer, /sandbox=""/u)
   assert.match(worksheetLayer, /page\.clientWidth \/ \(initialDocument\.pageWidth/u)
+  assert.match(worksheetLayer, /enqueuePdfRender/u)
+  assert.match(worksheetLayer, /loadVaultPdfBytes/u)
+  assert.match(worksheetLayer, /HIDE_DEBOUNCE_MS/u)
+  assert.match(preload, /readAssetBytes:\s*\(relativePath\)/u)
+  assert.match(main, /fanotes:read-asset-bytes/u)
   const packageConfig = JSON.parse(await fsp.readFile(path.join(root, 'package.json'), 'utf8'))
   assert.ok(packageConfig.build.files.includes('resources/onenote/**/*'))
   for (const platform of ['linux', 'win']) {

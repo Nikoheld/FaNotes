@@ -580,6 +580,7 @@ const buildLivePreviewDecorations = (view: EditorView) => {
         }
         const active = activeLines.has(line.number)
         const metadata = /^\s*<!--\s*fanotes-(?:ink|worksheet):[a-zA-Z0-9_-]{1,96}\s*-->\s*$/u.exec(line.text)
+          || /^\s*<!--\s*fanotes-famd:v1\b/u.test(line.text)
         const heading = /^(\s*)(#{1,6})\s+/u.exec(line.text)
         const quote = /^(\s*)>\s?/u.exec(line.text)
         const rule = /^\s*(?:-{3,}|\*{3,}|_{3,})\s*$/u.test(line.text)
@@ -652,7 +653,7 @@ function spellingExtensions(onLanguageDetected: (language: DetectedTextLanguage)
 
     update(update: ViewUpdate) {
       if (update.docChanged) this.schedule(update.view, 360)
-      else if (update.viewportChanged || update.selectionSet) this.schedule(update.view, 90)
+      else if (update.viewportChanged || update.selectionSet) this.schedule(update.view, 220)
     }
 
     private cancelScheduled() {

@@ -45,6 +45,7 @@ import type { MarkdownEditorHandle, MarkdownFormatAction } from './components/Ma
 import type { WorksheetLayerHandle } from './components/WorksheetLayer'
 import { DEFAULT_SETTINGS } from './defaults'
 import { PaperView } from './components/PaperView'
+import { SafeBoundary } from './components/SafeBoundary'
 import { applyRendererResourceLimits } from './lib/resourceLimits'
 import { setUiLanguage, translateUiText } from './i18n'
 import { bestContrastText, ensureReadableColor } from './lib/colorContrast'
@@ -71,7 +72,7 @@ const HomeworkBoard = lazy(() => import('./components/HomeworkBoard').then((modu
 const WorksheetLayer = lazy(() => import('./components/WorksheetLayer').then((module) => ({ default: module.WorksheetLayer })))
 const StableWorksheetLayer = memo(WorksheetLayer)
 const STARTUP_TREE_REFRESH_DELAY_MS = 18_000
-const STARTUP_DOCUMENT_LAYER_DELAY_MS = 900
+const STARTUP_DOCUMENT_LAYER_DELAY_MS = 160
 type AppProps = { startupBootstrap?: Promise<BootstrapData> }
 
 type SaveState = 'saved' | 'saving' | 'error'
@@ -132,7 +133,7 @@ const INITIAL_UPDATE_STATE: UpdateState = {
   updateChannel: 'stable',
 }
 
-const stripExtension = (name: string) => name.replace(/\.md$/i, '')
+const stripExtension = (name: string) => name.replace(/\.(md|markdown|famd)$/i, '')
 const fileName = (path: string) => path.split('/').pop() ?? path
 const parentPath = (path: string) => path.split('/').slice(0, -1).join('/')
 const NOTE_INK_MARKER = /<!--\s*fanotes-ink:([a-zA-Z0-9_-]{1,96})\s*-->/u
@@ -172,7 +173,10 @@ const detachWorksheet = (content: string, id: string) => {
     .replace(/^\n+/u, '')
 }
 
-const stripNoteMetadata = (content: string) => content.replace(NOTE_INK_MARKER, '').replace(NOTE_WORKSHEET_MARKER, '')
+const stripNoteMetadata = (content: string) => content
+  .replace(NOTE_INK_MARKER, '')
+  .replace(NOTE_WORKSHEET_MARKER, '')
+  .replace(/(?:^|\n)<!--\s*fanotes-famd:v1[\s\S]*$/u, '')
 const visibleNoteContent = (content: string) => stripNoteMetadata(content).trim()
 
 const normalizePath = (value: string) => {
@@ -208,7 +212,7 @@ const firstMarkdown = (entries: VaultEntry[]): string | undefined => {
   const welcome = entries.find((entry) => entry.kind === 'file' && entry.name.toLocaleLowerCase('de') === 'willkommen.md')
   if (welcome) return welcome.relativePath
   for (const entry of entries) {
-    if (entry.kind === 'file' && (entry.extension === 'md' || entry.extension === '.md')) return entry.relativePath
+    if (entry.kind === 'file' && ['md', '.md', 'famd', '.famd', 'markdown'].includes(entry.extension || '')) return entry.relativePath
     if (entry.kind === 'folder') {
       const nested = firstMarkdown(entry.children ?? [])
       if (nested) return nested
@@ -417,19 +421,36 @@ export default function App({ startupBootstrap }: AppProps) {
     const id = activeTab ? noteInkId(activeTab.content) : null
     const initialNoteLoad = Boolean(path && initialDrawingLoadRef.current)
     if (path) initialDrawingLoadRef.current = false
-    if (!path || !id) return
+    if (!path) return
 
     let idleId: number | null = null
     let startTimer: number | null = null
     const load = () => {
-      void window.fanotes.readDrawing(id)
-        .then((document) => {
-          if (requestId !== drawingLoadRequestRef.current || activePathRef.current !== path) return
-          setDrawingSession({ key: requestId, document })
-        })
-        .catch(() => {
-          // A stale or manually removed ink sidecar must never block the note.
-        })
+      const apply = (document: DrawingLibraryDocument | null) => {
+        if (requestId !== drawingLoadRequestRef.current || activePathRef.current !== path) return
+        setDrawingSession({ key: document ? requestId : 0, document })
+      }
+      const fromSidecar = () => {
+        if (!id) {
+          apply(null)
+          return
+        }
+        void window.fanotes.readDrawing(id).then(apply).catch(() => apply(null))
+      }
+      if (typeof window.fanotes.readFamdInk === 'function') {
+        void window.fanotes.readFamdInk(path)
+          .then((embedded) => {
+            if (requestId !== drawingLoadRequestRef.current || activePathRef.current !== path) return
+            if (embedded) {
+              setDrawingSession({ key: requestId, document: embedded })
+              return
+            }
+            fromSidecar()
+          })
+          .catch(fromSidecar)
+        return
+      }
+      fromSidecar()
     }
     const schedule = () => {
       startTimer = null
@@ -621,7 +642,10 @@ export default function App({ startupBootstrap }: AppProps) {
         // Let the shell paint first, then parse the editor chunk in parallel
         // with local tree-cache/NAS work. The shared promise also prevents the
         // later React.lazy render from scheduling a duplicate module request.
-        editorWarmupFrame = window.requestAnimationFrame(() => { void loadMarkdownEditor() })
+        editorWarmupFrame = window.requestAnimationFrame(() => {
+          void loadMarkdownEditor()
+          window.requestIdleCallback(() => { void import('./components/DrawingBoard') }, { timeout: 4_000 })
+        })
         try {
           const loadFreshTree = async () => {
             let nextTree = await window.fanotes.getTree()
@@ -974,6 +998,11 @@ export default function App({ startupBootstrap }: AppProps) {
 
   const renameEntry = useCallback(async (path: string, nextName: string) => {
     const session = vaultSessionGenerationRef.current
+    const active = activePathRef.current
+    if (active && (active === path || active.startsWith(`${path}/`)) && !await flushDocumentLayers()) {
+      toast('Umbenennen abgebrochen: Handschrift oder Arbeitsblatt konnte nicht sicher gespeichert werden.', 'error')
+      return
+    }
     vaultStructureRevisionRef.current += 1
     const nextPath = await window.fanotes.renameEntry(path, nextName)
     if (session !== vaultSessionGenerationRef.current) return
@@ -1003,13 +1032,18 @@ export default function App({ startupBootstrap }: AppProps) {
       : current)
     await refreshTree()
     await Promise.all(renamedPending.map(([renamedPath, content]) => saveContent(renamedPath, content)))
-  }, [refreshTree, saveContent])
+  }, [flushDocumentLayers, refreshTree, saveContent, toast])
 
   const trashEntry = useCallback(async (path: string) => {
     const session = vaultSessionGenerationRef.current
     vaultStructureRevisionRef.current += 1
     let mutationMarked = false
     try {
+      const active = activePathRef.current
+      if (active && (active === path || active.startsWith(`${path}/`)) && !await flushDocumentLayers()) {
+        toast('Verschieben abgebrochen: Handschrift oder Arbeitsblatt konnte nicht sicher gespeichert werden.', 'error')
+        return
+      }
       const saved = await flushPendingEntry(path)
       if (session !== vaultSessionGenerationRef.current) return
       if (!saved) {
@@ -1045,7 +1079,7 @@ export default function App({ startupBootstrap }: AppProps) {
         setMutatingEntryPaths((current) => current.filter((entryPath) => entryPath !== path))
       }
     }
-  }, [flushPendingEntry, refreshTree, toast])
+  }, [flushDocumentLayers, flushPendingEntry, refreshTree, toast])
 
   const applySettings = useCallback((next: AppSettings) => {
     const revision = settingsRevisionRef.current + 1
@@ -1466,7 +1500,10 @@ export default function App({ startupBootstrap }: AppProps) {
   const saveDrawingAsset = useCallback(async (payload: DrawingSavePayload) => {
     const session = vaultSessionGenerationRef.current
     const notePath = activePath
-    const asset = await window.fanotes.saveDrawing(payload)
+    const asset = await window.fanotes.saveDrawing({
+      ...payload,
+      noteRelativePath: notePath ?? undefined,
+    })
     let updatedAt = asset.updatedAt ?? new Date().toISOString()
     try {
       const drawingData = JSON.parse(payload.drawingJson) as { updatedAt?: unknown }
@@ -1822,13 +1859,17 @@ export default function App({ startupBootstrap }: AppProps) {
           <div className="editor-stage">
             <Suspense fallback={<div className="editor-module-loading"><LoaderCircle className="spin" size={20} /><span>Ansicht wird geladen …</span></div>}>
               {glyphenWerkOpen ? (
-              <GlyphenWerkWorkspace appearance={{ theme, reduceMotion: settings.reduceMotion }} activeView={glyphenWerkView} onViewChange={setGlyphenWerkView} onClose={() => setGlyphenWerkOpen(false)} onTrainingChanged={handleGlyphenWerkTrainingChanged} onImportTraining={importTrainingFromSettings} />
+              <SafeBoundary name="GlyphenWerk" fallbackTitle="GlyphenWerk ist abgestürzt">
+                <GlyphenWerkWorkspace appearance={{ theme, reduceMotion: settings.reduceMotion }} activeView={glyphenWerkView} onViewChange={setGlyphenWerkView} onClose={() => setGlyphenWerkOpen(false)} onTrainingChanged={handleGlyphenWerkTrainingChanged} onImportTraining={importTrainingFromSettings} />
+              </SafeBoundary>
             ) : homeworkOpen ? (
-              <HomeworkBoard
-                subjects={tree.filter((entry) => entry.kind === 'folder').map((entry) => entry.name)}
-                onClose={() => setHomeworkOpen(false)}
-                onOpenNote={(path) => { setHomeworkOpen(false); return openNote(path) }}
-              />
+              <SafeBoundary name="Hausaufgaben" fallbackTitle="Hausaufgaben sind abgestürzt">
+                <HomeworkBoard
+                  subjects={tree.filter((entry) => entry.kind === 'folder').map((entry) => entry.name)}
+                  onClose={() => setHomeworkOpen(false)}
+                  onOpenNote={(path) => { setHomeworkOpen(false); return openNote(path) }}
+                />
+              </SafeBoundary>
             ) : overviewOpen ? (
               <VaultOverview entries={tree} openTabs={tabs} onOpen={(path) => { setOverviewOpen(false); return openNote(path) }} onCreateNote={() => createNote()} onClose={() => setOverviewOpen(false)} />
             ) : activeTab ? (
@@ -1838,35 +1879,43 @@ export default function App({ startupBootstrap }: AppProps) {
                 showHud={!drawingOpen}
               >
                 <article className={`unified-paper ${worksheetSession.documents.length ? 'has-worksheet' : ''}`} aria-label={`${activeTab.title} · gemeinsame Tastatur- und Handschriftseite`}>
-                  <div className="editor-pane"><MarkdownEditor ref={editorRef} key={activeTab.path} content={activeTab.content} onChange={updateContent} onSave={async (content) => { await saveContent(activeTab.path, content) }} settings={settings} focusToken={focusToken} readOnly={activeEntryMutating || drawingOpen} paperMode onLanguageDetected={setDetectedTextLanguage} /></div>
+                  <div className="editor-pane">
+                    <SafeBoundary name="Editor" fallbackTitle="Der Editor ist abgestürzt">
+                      <MarkdownEditor ref={editorRef} key={activeTab.path} content={activeTab.content} onChange={updateContent} onSave={async (content) => { await saveContent(activeTab.path, content) }} settings={settings} focusToken={focusToken} readOnly={activeEntryMutating || drawingOpen} paperMode onLanguageDetected={setDetectedTextLanguage} />
+                    </SafeBoundary>
+                  </div>
                   {worksheetSession.documents.map((document) => <Suspense key={document.id} fallback={<div className="worksheet-loading"><LoaderCircle className="spin" size={20} /> Arbeitsblatt wird geladen …</div>}>
-                    <StableWorksheetLayer
-                      ref={worksheetLayerRefFor(document.id)}
-                      document={document}
-                      inputDisabled={drawingOpen || activeEntryMutating}
-                      onSave={saveWorksheetDocument}
-                      onDirtyChange={worksheetDirtyCallbackFor(document.id)}
-                      onRemove={() => void removeWorksheetFromNote(document.id)}
-                    />
+                    <SafeBoundary name={`Arbeitsblatt ${document.title}`} fallbackTitle="Das Arbeitsblatt ist abgestürzt">
+                      <StableWorksheetLayer
+                        ref={worksheetLayerRefFor(document.id)}
+                        document={document}
+                        inputDisabled={drawingOpen || activeEntryMutating}
+                        onSave={saveWorksheetDocument}
+                        onDirtyChange={worksheetDirtyCallbackFor(document.id)}
+                        onRemove={() => void removeWorksheetFromNote(document.id)}
+                      />
+                    </SafeBoundary>
                   </Suspense>)}
                   {drawingSession.key > 0 && <Suspense fallback={drawingOpen ? <div className="inline-ink-loading"><LoaderCircle className="spin" size={18} /> Stiftebene wird geladen …</div> : null}>
-                    <DrawingBoard
-                      ref={drawingBoardRef}
-                      key={drawingSession.key}
-                      settings={settings}
-                      drawingId={drawingSession.document?.id}
-                      initialDrawingJson={drawingSession.document?.drawingJson}
-                      title={`Handschrift · ${activeTab.title}`}
-                      inline
-                      inputActive={drawingOpen}
-                      onClose={closeDrawing}
-                      onSaveDrawing={saveDrawingAsset}
-                      onInsertMarkdown={insertIntoNote}
-                      onSettingsChange={handleDrawingSettingsChange}
-                      onDirtyChange={handleDrawingDirtyChange}
-                      onTrainingChanged={handleTrainingChanged}
-                      onOpenGlyphenWerk={openGlyphenWerk}
-                    />
+                    <SafeBoundary name="Handschrift" fallbackTitle="Die Stiftebene ist abgestürzt">
+                      <DrawingBoard
+                        ref={drawingBoardRef}
+                        key={drawingSession.key}
+                        settings={settings}
+                        drawingId={drawingSession.document?.id}
+                        initialDrawingJson={drawingSession.document?.drawingJson}
+                        title={`Handschrift · ${activeTab.title}`}
+                        inline
+                        inputActive={drawingOpen}
+                        onClose={closeDrawing}
+                        onSaveDrawing={saveDrawingAsset}
+                        onInsertMarkdown={insertIntoNote}
+                        onSettingsChange={handleDrawingSettingsChange}
+                        onDirtyChange={handleDrawingDirtyChange}
+                        onTrainingChanged={handleTrainingChanged}
+                        onOpenGlyphenWerk={openGlyphenWerk}
+                      />
+                    </SafeBoundary>
                   </Suspense>}
                   {drawingOpen && drawingSession.key === 0 && <div className="inline-ink-loading"><LoaderCircle className="spin" size={18} /> Gespeicherte Stiftebene wird geladen …</div>}
                 </article>
@@ -1887,8 +1936,8 @@ export default function App({ startupBootstrap }: AppProps) {
         <div className="statusbar-right">{updateState.status === 'downloaded' && <button type="button" className="update-ready-button" title={`FaNotes ${updateState.latestVersion} installieren und neu starten`} onClick={() => void installUpdate()}><ShieldCheck size={11} /> Update bereit</button>}{updateState.status === 'downloading' && <span><LoaderCircle className="spin" size={11} /> Update {Math.round(updateState.progress * 100)} %</span>}{settings.spellcheck && activeTab && !drawingOpen && detectedTextLanguage !== 'unknown' && <span className="detected-text-language" title="Automatisch erkannte Sprache für die lokale Rechtschreibprüfung"><b>Aa</b> {detectedTextLanguage === 'de' ? 'Deutsch' : detectedTextLanguage === 'en' ? 'English' : 'DE / EN'}</span>}{settings.showWordCount && activeTab && <span>{activeWordCount} Wörter</span>}<button type="button" className={`save-status ${saveState === 'saved' ? 'save-ok' : 'save-pending'}`} title="Jetzt speichern (Strg+S)" aria-live="polite" onClick={() => void saveCurrentWork()}>{saveState === 'saved' ? <CheckCircle2 size={11} /> : saveState === 'saving' ? <LoaderCircle className="spin" size={11} /> : <CircleAlert size={11} />}{saveState === 'saved' ? 'Gespeichert' : saveState === 'saving' ? 'Speichert …' : 'Speicherfehler'}</button><span title={isWeb ? 'Die Daten bleiben in diesem Browser' : 'Dein Vault bleibt auf deinem Gerät'}><ShieldCheck size={11} /> {isWeb ? 'Im Browser gespeichert' : 'Lokal & privat'}</span></div>
       </footer>
 
-      {paletteOpen && <Suspense fallback={null}><CommandPalette actions={paletteActions} onClose={() => setPaletteOpen(false)} /></Suspense>}
-      {settingsOpen && <Suspense fallback={null}><SettingsModal platform={window.fanotes.platform} settings={settings} vaultPath={bootstrap.vaultPath} updateState={updateState} onChange={applySettings} onClose={() => setSettingsOpen(false)} onSelectVault={() => void selectVault()} onOpenGlyphenWerk={() => { setSettingsOpen(false); openGlyphenWerk() }} onImportTraining={importTrainingFromSettings} onImportOneNote={importOneNote} onCheckUpdate={checkForUpdates} onDownloadUpdate={downloadUpdate} onInstallUpdate={installUpdate} onResetSettings={resetSettings} onResetAppData={resetAppData} /></Suspense>}
+      {paletteOpen && <Suspense fallback={null}><SafeBoundary name="Befehlspalette"><CommandPalette actions={paletteActions} onClose={() => setPaletteOpen(false)} /></SafeBoundary></Suspense>}
+      {settingsOpen && <Suspense fallback={null}><SafeBoundary name="Einstellungen" fallbackTitle="Die Einstellungen sind abgestürzt"><SettingsModal platform={window.fanotes.platform} settings={settings} vaultPath={bootstrap.vaultPath} updateState={updateState} onChange={applySettings} onClose={() => setSettingsOpen(false)} onSelectVault={() => void selectVault()} onOpenGlyphenWerk={() => { setSettingsOpen(false); openGlyphenWerk() }} onImportTraining={importTrainingFromSettings} onImportOneNote={importOneNote} onCheckUpdate={checkForUpdates} onDownloadUpdate={downloadUpdate} onInstallUpdate={installUpdate} onResetSettings={resetSettings} onResetAppData={resetAppData} /></SafeBoundary></Suspense>}
       {lmStudioOpen && <Suspense fallback={null}><AiPanel settings={settings} note={lmStudioNote} vaultNotes={vaultNoteReferences} onSettingsChange={(changes) => applySettings({ ...settingsRef.current, ...changes })} onApply={applyLmStudioResult} onClose={() => setLmStudioOpen(false)} /></Suspense>}
       {worksheetImportOpen && <div className="modal-backdrop worksheet-import-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setWorksheetImportOpen(false) }}>
         <section className="worksheet-import-dialog" role="dialog" aria-modal="true" aria-labelledby="worksheet-import-title">

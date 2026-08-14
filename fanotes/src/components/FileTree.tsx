@@ -81,8 +81,8 @@ function parentFolders(relativePath: string) {
 }
 
 function displayName(entry: VaultEntry) {
-  return entry.kind === 'file' && entry.name.toLowerCase().endsWith('.md')
-    ? entry.name.slice(0, -3)
+  return entry.kind === 'file' && /\.(md|markdown|famd)$/i.test(entry.name)
+    ? entry.name.replace(/\.(md|markdown|famd)$/i, '')
     : entry.name
 }
 

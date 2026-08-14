@@ -12,7 +12,9 @@ const parseHeadings = (content: string) => content.split('\n').flatMap<Heading>(
 export function RightInspector({ content, path }: { content: string; path?: string }) {
   const headings = useMemo(() => parseHeadings(content), [content])
   const stats = useMemo(() => {
-    const visibleContent = content.replace(/<!--\s*fanotes-(?:ink|worksheet):[a-zA-Z0-9_-]{1,96}\s*-->/gu, '')
+    const visibleContent = content
+      .replace(/<!--\s*fanotes-(?:ink|worksheet):[a-zA-Z0-9_-]{1,96}\s*-->/gu, '')
+      .replace(/(?:^|\n)<!--\s*fanotes-famd:v1[\s\S]*$/u, '')
     const plain = visibleContent.replace(/[`#>*_~[\]()-]/g, ' ')
     const words = plain.trim() ? plain.trim().split(/\s+/).length : 0
     const characters = visibleContent.length

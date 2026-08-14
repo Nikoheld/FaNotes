@@ -8,10 +8,9 @@ const os = require('node:os')
 const path = require('node:path')
 const { fileURLToPath, pathToFileURL } = require('node:url')
 const { Worker } = require('node:worker_threads')
-const { createEnhancedMathService } = require('./enhanced-math.cjs')
-const { createQwenVisionService } = require('./qwen-vision.cjs')
 const {
   cleanupStaleSingletonLocks,
+  configureDesktopGpu,
   configureLeanChromiumStartup,
   configureLinuxGraphics,
   readStartupResourceLimits,
@@ -25,6 +24,15 @@ const {
   starterSubjectsForLanguage,
   validateStarterSubjectSelection,
 } = require('./onboarding.cjs')
+const {
+  companionNotePath,
+  emptyFamdPayload,
+  isNoteExtension,
+  parseFamd,
+  serializeFamd,
+  stripFamdPayload,
+  worksheetIdsFromMarkdown,
+} = require('./famd.cjs')
 
 protocol.registerSchemesAsPrivileged([{
   scheme: 'fanotes-model',
@@ -88,6 +96,7 @@ function completePendingAppDataReset() {
 completePendingAppDataReset()
 const startupResourceLimits = readStartupResourceLimits(app.getPath('userData'))
 configureLeanChromiumStartup(app, startupResourceLimits)
+configureDesktopGpu(app)
 const graphicsStartup = configureLinuxGraphics(app)
 const singletonCleanup = cleanupStaleSingletonLocks(app.getPath('userData'))
 if (graphicsStartup.mode === 'wayland-vulkan-disabled') {
@@ -96,6 +105,17 @@ if (graphicsStartup.mode === 'wayland-vulkan-disabled') {
 if (singletonCleanup.removed.length) {
   console.info(`FaNotes: verwaiste Start-Locks entfernt (${singletonCleanup.removed.join(', ')}).`)
 }
+
+process.on('unhandledRejection', (reason) => {
+  console.error('FaNotes: unbehandelte Promise:', reason instanceof Error ? reason.stack ?? reason.message : reason)
+})
+process.on('uncaughtException', (error) => {
+  console.error('FaNotes: unbehandelte Ausnahme:', error?.stack ?? error)
+})
+app.on('child-process-gone', (_event, details) => {
+  if (!details || details.type === 'Utility') return
+  console.warn(`FaNotes: Hilfsprozess beendet (${details.type}, ${details.reason}).`)
+})
 
 const IPC = Object.freeze({
   bootstrap: 'fanotes:bootstrap',
@@ -116,12 +136,14 @@ const IPC = Object.freeze({
   saveDrawing: 'fanotes:save-drawing',
   listDrawings: 'fanotes:list-drawings',
   readDrawing: 'fanotes:read-drawing',
+  readFamdInk: 'fanotes:read-famd-ink',
   importWorksheet: 'fanotes:import-worksheet',
   importOneNote: 'fanotes:import-onenote',
   readWorksheet: 'fanotes:read-worksheet',
   saveWorksheet: 'fanotes:save-worksheet',
   deleteWorksheet: 'fanotes:delete-worksheet',
   readAssetDataUrl: 'fanotes:read-asset-data-url',
+  readAssetBytes: 'fanotes:read-asset-bytes',
   loadSpellingResources: 'fanotes:load-spelling-resources',
   loadSpellingWordCandidates: 'fanotes:load-spelling-word-candidates',
   loadHandwritingRecognitionResources: 'fanotes:load-handwriting-recognition-resources',
@@ -305,7 +327,8 @@ const SECRET_SETTING_KEYS = Object.freeze([
 ])
 const ENCRYPTED_SETTING_PREFIX = 'fanotes-secret-v1:'
 
-const MARKDOWN_EXTENSIONS = new Set(['.md', '.markdown'])
+const MARKDOWN_EXTENSIONS = new Set(['.md', '.markdown', '.famd'])
+const MAX_FAMD_BYTES = 40 * 1024 * 1024
 const IMAGE_MIME_TYPES = new Map([
   ['.png', 'image/png'],
   ['.jpg', 'image/jpeg'],
@@ -518,18 +541,24 @@ function enhancedMathRuntimePath() {
 }
 
 function getEnhancedMathService() {
-  enhancedMathService ??= createEnhancedMathService({
-    userDataPath: app.getPath('userData'),
-    runtimePath: enhancedMathRuntimePath,
-  })
+  if (!enhancedMathService) {
+    const { createEnhancedMathService } = require('./enhanced-math.cjs')
+    enhancedMathService = createEnhancedMathService({
+      userDataPath: app.getPath('userData'),
+      runtimePath: enhancedMathRuntimePath,
+    })
+  }
   return enhancedMathService
 }
 
 function getQwenVisionService() {
-  qwenVisionService ??= createQwenVisionService({
-    userDataPath: app.getPath('userData'),
-    workerPath: path.join(__dirname, 'qwen-vision-worker.py'),
-  })
+  if (!qwenVisionService) {
+    const { createQwenVisionService } = require('./qwen-vision.cjs')
+    qwenVisionService = createQwenVisionService({
+      userDataPath: app.getPath('userData'),
+      workerPath: path.join(__dirname, 'qwen-vision-worker.py'),
+    })
+  }
   return qwenVisionService
 }
 
@@ -1399,7 +1428,58 @@ async function resolveVaultPath(
 function assertMarkdownPath(relativePath) {
   if (typeof relativePath !== 'string') throw new Error('Ungültiger Markdown-Pfad.')
   const extension = path.extname(relativePath).toLocaleLowerCase('en-US')
-  if (!MARKDOWN_EXTENSIONS.has(extension)) throw new Error('Es dürfen nur Markdown-Dateien bearbeitet werden.')
+  if (!MARKDOWN_EXTENSIONS.has(extension)) throw new Error('Es dürfen nur Markdown-Dateien und FaNotes-Handschriftdateien (.famd) bearbeitet werden.')
+}
+
+function noteByteLimit(relativePath) {
+  return path.extname(relativePath).toLocaleLowerCase('en-US') === '.famd' ? MAX_FAMD_BYTES : MAX_TEXT_BYTES
+}
+
+function omitFamdCompanions(entries) {
+  const mdStems = new Set()
+  for (const entry of entries) {
+    if (entry?.kind === 'file' && entry.extension === 'md') {
+      mdStems.add(path.basename(entry.name, path.extname(entry.name)).normalize('NFC').toLocaleLowerCase('de-DE'))
+    }
+  }
+  return entries.filter((entry) => {
+    if (!entry || entry.kind !== 'file' || entry.extension !== 'famd') return true
+    const stem = path.basename(entry.name, path.extname(entry.name)).normalize('NFC').toLocaleLowerCase('de-DE')
+    return !mdStems.has(stem)
+  })
+}
+
+async function readOptionalNoteFile(relativePath, maxBytes = MAX_FAMD_BYTES) {
+  try {
+    const { target } = await resolveVaultPath(relativePath, { allowMissing: true, expected: 'file' })
+    return (await readRegularFileNoFollow(target, maxBytes)).toString('utf8')
+  } catch (error) {
+    if (error?.code === 'ENOENT') return null
+    return null
+  }
+}
+
+async function writeFamdCompanion(markdownRelativePath, markdown, ink = undefined) {
+  const extension = path.extname(markdownRelativePath).toLocaleLowerCase('en-US')
+  if (!isNoteExtension(extension)) return
+  const famdRelativePath = companionNotePath(markdownRelativePath, '.famd')
+  const mdRelativePath = companionNotePath(markdownRelativePath, '.md')
+  const existingSource = await readOptionalNoteFile(famdRelativePath)
+  const existing = existingSource ? parseFamd(existingSource) : { markdown: '', payload: emptyFamdPayload() }
+  const body = stripFamdPayload(markdown)
+  const payload = {
+    ...(existing.payload || emptyFamdPayload()),
+    updatedAt: new Date().toISOString(),
+    worksheets: worksheetIdsFromMarkdown(body),
+    ink: ink === undefined ? (existing.payload?.ink ?? null) : ink,
+  }
+  const { target } = await resolveVaultPath(famdRelativePath, { allowMissing: true, expected: 'file' })
+  await atomicWrite(target, serializeFamd(body, payload), { encoding: 'utf8', mode: 0o600 })
+  if (extension === '.famd') {
+    const mdTarget = (await resolveVaultPath(mdRelativePath, { allowMissing: true, expected: 'file' })).target
+    const mdExists = await fsp.lstat(mdTarget).then((info) => info.isFile() && !info.isSymbolicLink()).catch(() => false)
+    if (mdExists) await atomicWrite(mdTarget, body.endsWith('\n') ? body : `${body}\n`, { encoding: 'utf8', mode: 0o600 })
+  }
 }
 
 async function readRegularFileNoFollow(target, maxBytes) {
@@ -1650,7 +1730,7 @@ async function readTreeDirectory(root, directory, depth = 0, folderColors = new 
     return null
   }))
 
-  return result.filter(Boolean).sort(compareEntries)
+  return omitFamdCompanions(result.filter(Boolean)).sort(compareEntries)
 }
 
 async function readFastTreeDirectory(root, directory, depth = 0, folderColors = new Map()) {
@@ -1703,7 +1783,7 @@ async function readFastTreeDirectory(root, directory, depth = 0, folderColors = 
     }
     return null
   }))
-  return result.filter(Boolean).sort(compareEntries)
+  return omitFamdCompanions(result.filter(Boolean)).sort(compareEntries)
 }
 
 function treeCacheIdentity(root) {
@@ -2085,7 +2165,11 @@ function isTrustedIpcSender(event) {
 function handle(channel, listener) {
   ipcMain.handle(channel, async (event, ...args) => {
     if (!isTrustedIpcSender(event)) throw new Error('Nicht vertrauenswürdiger IPC-Aufruf wurde blockiert.')
-    return listener(event, ...args)
+    try {
+      return await listener(event, ...args)
+    } catch (error) {
+      throw error instanceof Error ? error : new Error(String(error ?? 'Unbekannter interner Fehler.'))
+    }
   })
 }
 
@@ -2685,8 +2769,8 @@ function registerIpcHandlers() {
     await ensureBootstrap()
     assertMarkdownPath(relativePath)
     const { target } = await resolveVaultPath(relativePath, { expected: 'file' })
-    const buffer = await readRegularFileNoFollow(target, MAX_TEXT_BYTES)
-    return buffer.toString('utf8')
+    const buffer = await readRegularFileNoFollow(target, noteByteLimit(relativePath))
+    return stripFamdPayload(buffer.toString('utf8'))
   })
 
   handle(IPC.writeFile, (_event, relativePath, content) => {
@@ -2695,7 +2779,7 @@ function registerIpcHandlers() {
     // with different latency.
     const normalizedRelativePath = normalizeRelativePath(relativePath).split(path.sep).join('/')
     assertMarkdownPath(normalizedRelativePath)
-    if (typeof content !== 'string' || Buffer.byteLength(content, 'utf8') > MAX_TEXT_BYTES) {
+    if (typeof content !== 'string' || Buffer.byteLength(content, 'utf8') > noteByteLimit(normalizedRelativePath)) {
       throw new Error('Der Notizinhalt ist ungültig oder zu groß.')
     }
 
@@ -2733,7 +2817,20 @@ function registerIpcHandlers() {
             throw new Error('Die Notiz ist keine sichere reguläre Datei.')
           }
           assertVaultWriteContext(requestedVaultPath, requestedVaultGeneration)
-          await atomicWrite(target, content, { encoding: 'utf8', mode: 0o600 })
+          const markdownBody = stripFamdPayload(content)
+          const written = path.extname(normalizedRelativePath).toLocaleLowerCase('en-US') === '.famd'
+            ? serializeFamd(markdownBody, {
+              ...(parseFamd((await readOptionalNoteFile(normalizedRelativePath)) ?? '')).payload || emptyFamdPayload(),
+              updatedAt: new Date().toISOString(),
+              worksheets: worksheetIdsFromMarkdown(markdownBody),
+            })
+            : (markdownBody.endsWith('\n') ? markdownBody : `${markdownBody}\n`)
+          await atomicWrite(target, written, { encoding: 'utf8', mode: 0o600 })
+          try {
+            await writeFamdCompanion(normalizedRelativePath, markdownBody)
+          } catch (error) {
+            console.warn('FaNotes: .famd-Begleiter konnte nicht geschrieben werden:', error?.message ?? error)
+          }
           assertVaultWriteContext(requestedVaultPath, requestedVaultGeneration)
           const info = await fsp.stat(target)
           return { modifiedAt: info.mtime.toISOString() }
@@ -2776,6 +2873,11 @@ function registerIpcHandlers() {
         fileHandle = null
         const info = await fsp.lstat(absolutePath)
         const entry = entryFromStat(root, absolutePath, info)
+        try {
+          await writeFamdCompanion(entry.relativePath, `# ${title}\n\n`)
+        } catch (error) {
+          console.warn('FaNotes: .famd-Begleiter zur neuen Notiz fehlte:', error?.message ?? error)
+        }
         return { relativePath: entry.relativePath, entry }
       } catch (error) {
         if (fileHandle) await fileHandle.close().catch(() => {})
@@ -2863,6 +2965,21 @@ function registerIpcHandlers() {
       mutationBarrier.invalidateQueuedWrites()
       const oldRelativePath = toRelativePosix(root, target)
       const nextRelativePath = toRelativePosix(root, destination)
+      if (info.isFile() && isNoteExtension(path.extname(oldRelativePath).toLocaleLowerCase('en-US'))) {
+        const oldCompanionExt = path.extname(oldRelativePath).toLocaleLowerCase('en-US') === '.famd' ? '.md' : '.famd'
+        const newCompanionExt = path.extname(nextRelativePath).toLocaleLowerCase('en-US') === '.famd' ? '.md' : '.famd'
+        const oldCompanion = companionNotePath(oldRelativePath, oldCompanionExt)
+        const nextCompanion = companionNotePath(nextRelativePath, newCompanionExt)
+        try {
+          const companion = await resolveVaultPath(oldCompanion, { expected: 'file' })
+          const companionDest = path.join(path.dirname(destination), path.basename(nextCompanion))
+          if (isInsideRoot(root, companionDest)) await fsp.rename(companion.target, companionDest)
+        } catch (error) {
+          if (error?.code !== 'ENOENT') {
+            console.warn('FaNotes: Notizbegleiter konnte nicht mit umbenannt werden:', error?.message ?? error)
+          }
+        }
+      }
       try {
         await mutateFolderColors(root, requestedVaultGeneration, (colors) => {
           let changed = false
@@ -2896,8 +3013,20 @@ function registerIpcHandlers() {
         throw new Error('Der Vault wurde während des Löschens verändert.')
       }
       const trashedRelativePath = toRelativePosix(root, target)
+      const trashedInfo = await fsp.lstat(target)
       await shell.trashItem(target)
       mutationBarrier.invalidateQueuedWrites()
+      if (trashedInfo.isFile() && isNoteExtension(path.extname(trashedRelativePath).toLocaleLowerCase('en-US'))) {
+        const companionExt = path.extname(trashedRelativePath).toLocaleLowerCase('en-US') === '.famd' ? '.md' : '.famd'
+        try {
+          const companion = await resolveVaultPath(companionNotePath(trashedRelativePath, companionExt), { expected: 'file' })
+          await shell.trashItem(companion.target)
+        } catch (error) {
+          if (error?.code !== 'ENOENT') {
+            console.warn('FaNotes: Notizbegleiter konnte nicht mit gelöscht werden:', error?.message ?? error)
+          }
+        }
+      }
       try {
         await mutateFolderColors(root, requestedVaultGeneration, (colors) => {
           let changed = false
@@ -2928,16 +3057,38 @@ function registerIpcHandlers() {
     const hits = []
 
     for (const file of markdownFiles) {
+      const relativePath = toRelativePosix(root, file.absolutePath)
+      const extension = path.extname(relativePath).toLocaleLowerCase('en-US')
+      if (extension === '.famd') {
+        const siblingMd = companionNotePath(relativePath, '.md')
+        if (markdownFiles.some((candidate) => toRelativePosix(root, candidate.absolutePath) === siblingMd)) continue
+      }
       let content
+      let inkTranscript = ''
       try {
-        content = (await readRegularFileNoFollow(file.absolutePath, MAX_TEXT_BYTES)).toString('utf8')
+        const raw = (await readRegularFileNoFollow(file.absolutePath, noteByteLimit(relativePath))).toString('utf8')
+        const parsed = parseFamd(raw)
+        content = parsed.markdown || stripFamdPayload(raw)
+        if (typeof parsed.payload?.ink?.searchTranscript === 'string') {
+          inkTranscript = parsed.payload.ink.searchTranscript.slice(0, 500_000)
+        }
       } catch {
         continue
       }
-      const relativePath = toRelativePosix(root, file.absolutePath)
+      if (extension !== '.famd') {
+        try {
+          const companion = await readOptionalNoteFile(companionNotePath(relativePath, '.famd'))
+          const ink = companion ? parseFamd(companion).payload?.ink : null
+          if (ink && typeof ink.searchTranscript === 'string') {
+            inkTranscript = ink.searchTranscript.slice(0, 500_000)
+          }
+        } catch {
+          // Companion search is optional.
+        }
+      }
       const contentHaystack = content.toLocaleLowerCase('de-DE')
       const firstContentIndex = contentHaystack.indexOf(needle)
-      const haystack = `${relativePath}\n${content}`.toLocaleLowerCase('de-DE')
+      const haystack = `${relativePath}\n${content}\n${inkTranscript}`.toLocaleLowerCase('de-DE')
       const firstIndex = haystack.indexOf(needle)
       if (firstIndex < 0) continue
       let matches = 0
@@ -3029,6 +3180,17 @@ function registerIpcHandlers() {
     const dataPath = path.join(assetsDirectory, `${id}.json`)
     if (png) await queueFileWrite(imagePath, async () => atomicWrite(imagePath, png, { mode: 0o600 }))
     await queueFileWrite(dataPath, async () => atomicWrite(dataPath, payload.drawingJson, { encoding: 'utf8', mode: 0o600 }))
+    if (typeof payload.noteRelativePath === 'string' && payload.noteRelativePath.trim()) {
+      try {
+        const notePath = normalizeRelativePath(payload.noteRelativePath).split(path.sep).join('/')
+        assertMarkdownPath(notePath)
+        const noteMarkdown = (await readOptionalNoteFile(notePath, noteByteLimit(notePath))) ?? ''
+        const ink = validateDrawingJson(payload.drawingJson)
+        await writeFamdCompanion(notePath, stripFamdPayload(noteMarkdown), ink)
+      } catch (error) {
+        console.warn('FaNotes: Handschrift konnte nicht in die .famd-Datei geschrieben werden:', error?.message ?? error)
+      }
+    }
     return {
       ...metadata,
       imageRelativePath: toRelativePosix(root, imagePath),
@@ -3092,6 +3254,39 @@ function registerIpcHandlers() {
     } catch (error) {
       if (error?.code === 'ENOENT') throw new Error('Die gespeicherte Zeichnung wurde nicht gefunden.')
       throw new Error('Die gespeicherte Zeichnung ist beschädigt oder kann nicht sicher gelesen werden.')
+    }
+  })
+
+  handle(IPC.readFamdInk, async (_event, relativePath) => {
+    await ensureBootstrap()
+    if (typeof relativePath !== 'string') throw new Error('Ungültiger Notizpfad.')
+    const notePath = normalizeRelativePath(relativePath).split(path.sep).join('/')
+    assertMarkdownPath(notePath)
+    const famdRelative = companionNotePath(notePath, '.famd')
+    const source = await readOptionalNoteFile(famdRelative)
+    if (!source) return null
+    const parsed = parseFamd(source)
+    if (!parsed.payload?.ink) return null
+    const drawingJson = JSON.stringify(parsed.payload.ink)
+    const document = validateDrawingJson(drawingJson)
+    let metadata
+    try {
+      const id = typeof document.id === 'string' ? assertDrawingId(document.id) : 'famd-ink'
+      metadata = drawingLibraryMetadata(document, id, parsed.payload.updatedAt)
+    } catch {
+      return {
+        id: typeof document.id === 'string' ? document.id : 'famd-ink',
+        title: typeof document.title === 'string' ? document.title : 'Handschrift',
+        updatedAt: parsed.payload.updatedAt,
+        imageRelativePath: '',
+        dataRelativePath: famdRelative,
+        drawingJson,
+      }
+    }
+    return {
+      ...metadata,
+      drawingJson,
+      dataRelativePath: famdRelative,
     }
   })
 
@@ -3251,6 +3446,17 @@ function registerIpcHandlers() {
     const { target } = await resolveVaultPath(relativePath, { allowInternal: true, expected: 'file' })
     const image = await readRegularFileNoFollow(target, worksheetFormat?.maxBytes ?? MAX_IMAGE_BYTES)
     return `data:${mimeType};base64,${image.toString('base64')}`
+  })
+
+  handle(IPC.readAssetBytes, async (_event, relativePath) => {
+    await ensureBootstrap()
+    if (typeof relativePath !== 'string') throw new Error('Ungültiger Dateipfad.')
+    const extension = path.extname(relativePath).toLocaleLowerCase('en-US')
+    const worksheetFormat = WORKSHEET_FORMATS.get(extension)
+    const mimeType = IMAGE_MIME_TYPES.get(extension) ?? worksheetFormat?.mimeType
+    if (!mimeType) throw new Error('Dieser Dateityp ist für die Vorschau nicht erlaubt.')
+    const { target } = await resolveVaultPath(relativePath, { allowInternal: true, expected: 'file' })
+    return readRegularFileNoFollow(target, worksheetFormat?.maxBytes ?? MAX_IMAGE_BYTES)
   })
 
   let spellingResourcesPromise = null
@@ -3650,7 +3856,7 @@ async function createWindow() {
     height: 940,
     minWidth: 940,
     minHeight: 640,
-    show: true,
+    show: false,
     backgroundColor: '#0b0c12',
     title: 'FaNotes',
     frame: true,
@@ -3677,6 +3883,12 @@ async function createWindow() {
     },
   })
   mainWindow.setMenuBarVisibility(false)
+  const revealWindow = () => {
+    if (!mainWindow || mainWindow.isDestroyed() || mainWindow.isVisible()) return
+    mainWindow.show()
+  }
+  mainWindow.once('ready-to-show', revealWindow)
+  mainWindow.webContents.on('did-fail-load', revealWindow)
 
   mainWindow.webContents.on('will-attach-webview', (event) => event.preventDefault())
   mainWindow.webContents.on('will-navigate', (event, navigationUrl) => {
@@ -3692,6 +3904,35 @@ async function createWindow() {
     // startup reports readiness much earlier and makes this a no-op.
     const timer = setTimeout(schedulePostStartupWork, 5000)
     timer.unref?.()
+  })
+  let rendererCrashReloads = 0
+  let lastRendererCrashAt = 0
+  mainWindow.webContents.on('render-process-gone', (_event, details) => {
+    if (!details || details.reason === 'clean-exit') return
+    console.error(`FaNotes: Renderer beendet (${details.reason}, exit=${details.exitCode ?? '?'}).`)
+    if (!mainWindow || mainWindow.isDestroyed()) return
+    const now = Date.now()
+    if (now - lastRendererCrashAt > 60_000) rendererCrashReloads = 0
+    lastRendererCrashAt = now
+    rendererCrashReloads += 1
+    if (rendererCrashReloads > 2) {
+      dialog.showErrorBox(
+        localizeText('FaNotes ist abgestürzt', currentUiLanguage()),
+        localizeText('Das Notizfenster konnte nach mehreren Abstürzen nicht sicher neu geladen werden. Bitte starte FaNotes neu.', currentUiLanguage()),
+      )
+      return
+    }
+    try {
+      mainWindow.webContents.reload()
+    } catch (error) {
+      console.error('FaNotes: Renderer konnte nicht neu geladen werden:', error)
+    }
+  })
+  mainWindow.webContents.on('unresponsive', () => {
+    console.warn('FaNotes: Renderer antwortet nicht.')
+  })
+  mainWindow.webContents.on('responsive', () => {
+    console.info('FaNotes: Renderer antwortet wieder.')
   })
   mainWindow.on('close', (event) => {
     if (allowWindowClose || !mainWindow || mainWindow.webContents.isDestroyed()) return

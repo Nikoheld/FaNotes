@@ -244,6 +244,27 @@ export function createBrowserPreviewApi(): FaNotesApi {
       return content
     },
     readAssetDataUrl: async (path) => assets.get(path) ?? '',
+    readFamdInk: async () => null,
+    readAssetBytes: async (path) => {
+      const source = assets.get(path) ?? ''
+      if (!source) throw new Error('Die lokale Bild- oder PDF-Datei wurde nicht gefunden.')
+      if (source.startsWith('data:')) {
+        const comma = source.indexOf(',')
+        if (comma < 0) throw new Error('Ungültige Data-URL.')
+        const header = source.slice(0, comma)
+        const body = source.slice(comma + 1)
+        if (/;base64/iu.test(header)) {
+          const binary = atob(body)
+          const bytes = new Uint8Array(binary.length)
+          for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index)
+          return bytes
+        }
+        return new TextEncoder().encode(decodeURIComponent(body))
+      }
+      const response = await fetch(source)
+      if (!response.ok) throw new Error(`Datei konnte nicht geladen werden (HTTP ${response.status}).`)
+      return new Uint8Array(await response.arrayBuffer())
+    },
     loadSpellingResources: loadBrowserSpellingResources,
     loadSpellingWordCandidates: loadBrowserSpellingWordCandidates,
     loadHandwritingRecognitionResources: loadBrowserHandwritingRecognitionResources,

@@ -7,6 +7,7 @@ const path = require('node:path')
 const {
   ALLOWED_MEMORY_BUDGETS_MB,
   cleanupStaleSingletonLocks,
+  configureDesktopGpu,
   configureLeanChromiumStartup,
   configureLinuxGraphics,
   readStartupResourceLimits,
@@ -117,6 +118,10 @@ try {
   assert.equal(leanChromium.hasSwitch('disable-background-networking'), true)
   assert.equal(leanChromium.hasSwitch('disable-component-update'), true)
   assert.ok(leanChromium.getSwitchValue('disable-features').includes('OptimizationHints'))
+  const gpuChromium = mockCommandLine()
+  assert.equal(configureDesktopGpu({ commandLine: gpuChromium }).gpuRasterization, true)
+  assert.equal(gpuChromium.hasSwitch('enable-gpu-rasterization'), true)
+  assert.ok(gpuChromium.getSwitchValue('enable-features').includes('CanvasOopRasterization'))
 
   const resourceProfile = fs.mkdtempSync(path.join(os.tmpdir(), 'fanotes-resource-test-'))
   temporaryProfiles.push(resourceProfile)
@@ -146,9 +151,17 @@ try {
   assert.doesNotMatch(mainSource.slice(0, 4000), /require\('\.\/updater\.cjs'\)/u, 'Der Updater darf den Main-Prozess nicht vor dem Fenster blockieren.')
   assert.doesNotMatch(mainSource.slice(0, 4000), /onnxruntime-node/u, 'Die native OCR-Laufzeit darf nicht während des Starts geladen werden.')
   assert.match(mainSource, /function ensureUpdateManager\(\)[\s\S]*require\('\.\/updater\.cjs'\)/u)
+  assert.match(mainSource, /show:\s*false/u, 'Das Fenster darf nicht vor dem ersten gerenderten Frame aufblitzen.')
+  assert.match(mainSource, /ready-to-show/u, 'Das Fenster erscheint erst wenn der Renderer bereit ist.')
+  assert.match(mainSource, /configureDesktopGpu\(app\)/u, 'GPU-Rasterisierung muss vor dem Fenster aktiv sein.')
+  assert.match(mainSource, /render-process-gone/u, 'Ein abgestürztes Notizfenster muss sich selbst neu laden.')
+  assert.match(mainSource, /unhandledRejection/u, 'Unbehandelte Main-Promises dürfen den Prozess nicht still beenden.')
+  assert.match(mainSource, /const \{ createEnhancedMathService \} = require\('\.\/enhanced-math\.cjs'\)/u, 'Formel-OCR darf den Main-Prozess nicht vor der ersten Nutzung laden.')
+  assert.match(mainSource, /const \{ createQwenVisionService \} = require\('\.\/qwen-vision\.cjs'\)/u, 'Qwen darf den Main-Prozess nicht vor der ersten Nutzung laden.')
+  assert.doesNotMatch(mainSource.slice(0, 2500), /require\('\.\/enhanced-math\.cjs'\)/u, 'enhanced-math.cjs darf nicht oben in main.cjs stehen.')
   assert.match(mainSource, /spellcheck:\s*false/u, 'Die lokale FaNotes-Prüfung darf Chromiums native Wörterbuchprozesse beim Start nicht laden.')
   assert.doesNotMatch(mainSource, /setSpellCheckerLanguages|configureSpellChecker/u, 'Native Chromium-Wörterbücher würden CPU und I/O doppelt zur lokalen Prüfung verbrauchen.')
-  assert.match(mainSource, /\},\s*24_000\)/u, 'Der Auto-Updater muss weit außerhalb des interaktiven Startfensters bleiben.')
+  assert.match(mainSource, /const updaterTimer = setTimeout\(\(\) => \{[\s\S]*?\}, 5_000\)/u, 'Der Auto-Updater muss weit außerhalb des interaktiven Startfensters bleiben.')
   assert.match(mainSource, /protectedSettingsOnDisk/u, 'Geschützte AI-Schlüssel dürfen den Linux-Keyring nicht während des normalen Starts wecken.')
   assert.match(mainSource, /handle\(IPC\.loadSecureSettings/u, 'Geschützte AI-Schlüssel werden erst beim Öffnen des AI-Menüs geladen.')
   assert.match(mainSource, /async function readFastTreeDirectory/u)
@@ -165,7 +178,7 @@ try {
   assert.match(appSource, /const FirstRunOnboarding = lazy/u, 'Die einmalige Fächerauswahl darf normale Starts nicht vergrößern.')
   assert.match(appSource, /requestIdleCallback[\s\S]*loadFreshTree/u)
   assert.match(appSource, /STARTUP_TREE_REFRESH_DELAY_MS\s*=\s*18_000/u, 'Der vollständige Vault-Abgleich darf nicht in die Startphase fallen.')
-  assert.match(appSource, /STARTUP_DOCUMENT_LAYER_DELAY_MS\s*=\s*900/u, 'Tinte und Arbeitsblätter der ersten Notiz dürfen nicht mit dem Editor konkurrieren.')
+  assert.match(appSource, /STARTUP_DOCUMENT_LAYER_DELAY_MS\s*=\s*160/u, 'Tinte der ersten Notiz lädt schnell, ohne den Editor zu blockieren.')
   assert.match(mainSource, /require\('\.\/onenote-importer\.cjs'\)/u, 'Der OneNote-Importer muss explizit und verzögert geladen werden.')
   assert.match(mainSource, /new Worker\(path\.join\(__dirname, 'native-ocr-worker\.cjs'\)/u, 'Native ONNX-Inferenz muss ausserhalb des Electron-Hauptthreads laufen.')
   assert.match(mainSource, /currentSettings\.ocrModelKeepAliveSeconds/u, 'Der native Modellworker muss das konfigurierbare RAM-Freigabeintervall verwenden.')

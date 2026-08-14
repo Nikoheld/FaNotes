@@ -11,7 +11,7 @@ import {
   Trash2,
   X,
 } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   classifyHomeworkTask,
   createHomeworkTask,
@@ -67,25 +67,40 @@ export function HomeworkBoard({ subjects, onClose, onOpenNote }: HomeworkBoardPr
   const [priority, setPriority] = useState<'normal' | 'high'>('normal')
   const [notes, setNotes] = useState('')
   const [showDone, setShowDone] = useState(false)
+  const persistQueueRef = useRef(Promise.resolve())
+  const persistGenerationRef = useRef(0)
 
   const persist = useCallback(async (next: HomeworkDocument) => {
-    setSaving(true)
-    setError(null)
-    try {
-      const markdown = serializeHomeworkMarkdown(next)
+    const generation = ++persistGenerationRef.current
+    const run = async () => {
+      if (generation !== persistGenerationRef.current) return
+      setSaving(true)
+      setError(null)
       try {
-        await window.fanotes.writeFile(HOMEWORK_NOTE_PATH, markdown)
-      } catch {
-        const created = await window.fanotes.createNote('', HOMEWORK_NOTE_TITLE)
-        await window.fanotes.writeFile(created.relativePath, markdown)
+        const markdown = serializeHomeworkMarkdown(next)
+        try {
+          await window.fanotes.writeFile(HOMEWORK_NOTE_PATH, markdown)
+        } catch (writeError) {
+          const message = writeError instanceof Error ? writeError.message : ''
+          if (!/nicht gefunden|ENOENT|no such file/iu.test(message)) throw writeError
+          const created = await window.fanotes.createNote('', HOMEWORK_NOTE_TITLE)
+          if (created.relativePath !== HOMEWORK_NOTE_PATH) {
+            await window.fanotes.writeFile(created.relativePath, markdown)
+          } else {
+            await window.fanotes.writeFile(HOMEWORK_NOTE_PATH, markdown)
+          }
+        }
+        if (generation === persistGenerationRef.current) setDocument(next)
+      } catch (persistError) {
+        if (generation === persistGenerationRef.current) {
+          setError(persistError instanceof Error ? persistError.message : 'Hausaufgaben konnten nicht gespeichert werden.')
+        }
+      } finally {
+        if (generation === persistGenerationRef.current) setSaving(false)
       }
-      setDocument(next)
-    } catch (persistError) {
-      setError(persistError instanceof Error ? persistError.message : 'Hausaufgaben konnten nicht gespeichert werden.')
-      throw persistError
-    } finally {
-      setSaving(false)
     }
+    persistQueueRef.current = persistQueueRef.current.then(run, run)
+    await persistQueueRef.current
   }, [])
 
   useEffect(() => {

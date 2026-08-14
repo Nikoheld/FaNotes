@@ -45,11 +45,32 @@ const safeguards = [
   ['const SHAPE_DWELL_MS = 2_000', 'Form-Snap erst nach etwa zwei Sekunden Stillhalten'],
   ['strokeLooksLikeShape', 'Form-Timer nur bei erkannter Figur'],
   ["event.pointerType === 'mouse'", 'kein setPointerCapture für Stift (Hyprland-Freeze)'],
+  ['!inline && event.pointerType === \'mouse\'', 'kein Pointer-Capture auf dem Notizblatt'],
+  ['const releaseInkPointerCaptures', 'Capture wird auf Fläche, Canvas und Board gelöst'],
+  ['const isInkSurfaceTarget', 'Klick auf Leiste/Tabs beendet hängenden Stift'],
+  ["addEventListener('wheel', onWheel", 'Trackpad-Zoom löst Stift-Capture sofort'],
+  ['event.buttons === 0', 'verpasstes Pointer-Ende wird als Stift-ab erkannt'],
+  ['const paintActiveStrokeNow', 'Tinte erscheint sofort, nicht erst im nächsten Frame'],
+  ['getPredictedEvents', 'Stift-Vorhersage verkürzt die sichtbare Verzögerung'],
   ['const applyViewTransform', 'Blatt-Zoom und -Rotation während Handschrift'],
+  ['MAX_CANVAS_PIXELS_TALL = 4_200_000', 'enges Tintenbudget auf langen PDF-Seiten'],
+  ['const measureInkWindow', 'Tinten-Bitmap nur für den sichtbaren Blattausschnitt'],
+  ['const applyInkWindowToCanvases', 'sichtbares Tintenfenster auf den Canvases'],
+  ['syncInkWindow(true)', 'Tintenfenster folgt Scroll und Stiftkante'],
   ['const handleWheel = useCallback', 'Strg/Alt-Mausrad für Zoom und Rotation'],
   ["aria-label=\"Blattansicht\"", 'Toolbar-Steuerung für Zoom und Drehung'],
   ['// Use layout size (offset*), not getBoundingClientRect: CSS zoom/rotation of the', 'Bitmap-Größe unabhängig vom Ansichtszoom'],
   ['position:fixed;z-index:90;left:50%', 'Handschrift-Toolbar bleibt oben fixiert und klickbar'],
+]
+
+const worksheetLayer = fs.readFileSync(path.join(root, 'src', 'components', 'WorksheetLayer.tsx'), 'utf8')
+const worksheetSafeguards = [
+  ['const enqueuePdfRender', 'PDF-Seiten werden nacheinander gerendert, nicht parallel'],
+  ['const loadVaultPdfBytes', 'PDF-Bytes ohne riesige Data-URL'],
+  ['const HIDE_DEBOUNCE_MS', 'Off-Screen-Seiten werden nicht sofort zerstört'],
+  ['MAX_PDF_PIXELS = 2_400_000', 'enges Pixelbudget pro PDF-Seite'],
+  ['disableAutoFetch: true', 'PDF.js lädt keine Extra-Requests'],
+  ['{mounted && <PdfPageCanvas', 'getPage nur für sichtbare Seiten'],
 ]
 
 const paperViewSafeguards = [
@@ -64,6 +85,9 @@ for (const [needle, label] of safeguards) {
 }
 for (const [needle, label] of paperViewSafeguards) {
   if (!paperView.includes(needle)) throw new Error(`Zeichenmodus-Prüfung fehlgeschlagen: ${label}.`)
+}
+for (const [needle, label] of worksheetSafeguards) {
+  if (!worksheetLayer.includes(needle)) throw new Error(`Zeichenmodus-Prüfung fehlgeschlagen: ${label}.`)
 }
 
 const brushCatalog = source.slice(source.indexOf('const ART_BRUSHES'), source.indexOf('type ArtSymbolDefinition'))

@@ -26,5 +26,16 @@ export default defineConfig({
   },
   build: {
     target: 'es2022',
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes('node_modules/pdfjs-dist')) return 'pdfjs'
+          if (id.includes('node_modules/@codemirror') || id.includes('node_modules/@lezer')) return 'codemirror'
+          if (id.includes('node_modules/katex')) return 'katex'
+          if (id.includes('node_modules/react-dom') || id.includes('/node_modules/react/')) return 'react'
+          return undefined
+        },
+      },
+    },
   },
 })

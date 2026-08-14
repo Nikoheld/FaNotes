@@ -646,6 +646,13 @@ export function createBrowserApi(): FaNotesApi {
       assetUrls.set(path, url)
       return url
     },
+    readAssetBytes: async (rawPath) => {
+      await ready
+      const path = normalizePath(rawPath)
+      const blob = assets.get(path)
+      if (!blob) throw new Error('Die lokale Bild- oder PDF-Datei wurde nicht gefunden.')
+      return new Uint8Array(await blob.arrayBuffer())
+    },
     writeFile: async (rawPath, content) => {
       await ready
       const path = normalizePath(rawPath)
@@ -795,6 +802,10 @@ export function createBrowserApi(): FaNotesApi {
       const document = drawings.get(id)
       if (!document) throw new Error('Die gespeicherte Handschriftseite wurde nicht gefunden.')
       return clone(document)
+    },
+    readFamdInk: async () => {
+      await ready
+      return null
     },
     importWorksheet: async () => {
       const file = await pickWorksheet()

@@ -8,10 +8,33 @@ export type WorksheetLayerHandle = {
   flush: () => Promise<void>
 }
 
+const asUint8Array = (value: ArrayBuffer | Uint8Array | ArrayBufferView): Uint8Array => {
+  if (value instanceof Uint8Array) return value
+  if (value instanceof ArrayBuffer) return new Uint8Array(value)
+  return new Uint8Array(value.buffer, value.byteOffset, value.byteLength)
+}
+
+/** Yield so a large fallback decode does not freeze the UI for hundreds of ms. */
+const yieldToUi = () => new Promise<void>((resolve) => {
+  window.setTimeout(resolve, 0)
+})
+
+const decodeBase64ToBytes = async (body: string): Promise<Uint8Array> => {
+  const chunkChars = 256 * 1024
+  const bytes = new Uint8Array(Math.floor(body.length * 0.75) + 4)
+  let offset = 0
+  for (let index = 0; index < body.length; index += chunkChars) {
+    const binary = atob(body.slice(index, index + chunkChars))
+    for (let char = 0; char < binary.length; char += 1) bytes[offset++] = binary.charCodeAt(char)
+    if (index + chunkChars < body.length) await yieldToUi()
+  }
+  return bytes.subarray(0, offset)
+}
+
 /**
  * Load PDF bytes from a vault asset source.
- * Electron returns large `data:…;base64,…` URLs — Chromium often rejects `fetch(dataUrl)`
- * with "Failed to fetch". Decode those locally; only use fetch for blob:/http(s): URLs.
+ * Prefer the binary IPC (`readAssetBytes`) so the renderer never builds a huge
+ * base64 data-URL or runs `atob` on the UI thread. Data-URL / fetch remain fallbacks.
  */
 const loadPdfBytes = async (source: string): Promise<Uint8Array> => {
   if (!source) throw new Error('Die PDF-Datei ist leer oder fehlt im Vault.')
@@ -20,12 +43,7 @@ const loadPdfBytes = async (source: string): Promise<Uint8Array> => {
     if (comma < 0) throw new Error('Ungültige PDF-Daten (Data-URL).')
     const header = source.slice(0, comma)
     const body = source.slice(comma + 1)
-    if (/;base64/iu.test(header)) {
-      const binary = atob(body)
-      const bytes = new Uint8Array(binary.length)
-      for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index)
-      return bytes
-    }
+    if (/;base64/iu.test(header)) return decodeBase64ToBytes(body)
     return new TextEncoder().encode(decodeURIComponent(body))
   }
   const response = await fetch(source)
@@ -35,12 +53,34 @@ const loadPdfBytes = async (source: string): Promise<Uint8Array> => {
   return new Uint8Array(await response.arrayBuffer())
 }
 
-/** Backing-store caps: sharp on HiDPI without multi-page GPU thrash. */
-const MAX_PDF_DPR = 2.25
-const MAX_PDF_EDGE = 2_880
-const MAX_PDF_PIXELS = 6_500_000
-const RESIZE_DEBOUNCE_MS = 140
-const VIEWPORT_ROOT_MARGIN = '240px 0px'
+const loadVaultPdfBytes = async (relativePath: string): Promise<Uint8Array> => {
+  const api = window.fanotes
+  if (typeof api.readAssetBytes === 'function') {
+    const bytes = asUint8Array(await api.readAssetBytes(relativePath))
+    if (!bytes.byteLength) throw new Error('Die PDF-Datei ist leer oder fehlt im Vault.')
+    return bytes.byteOffset === 0 && bytes.byteLength === bytes.buffer.byteLength
+      ? bytes
+      : bytes.slice()
+  }
+  return loadPdfBytes(await api.readAssetDataUrl(relativePath))
+}
+
+/** One PDF.js paint at a time — parallel page renders stall the main thread and GPU. */
+let pdfRenderTail: Promise<void> = Promise.resolve()
+const enqueuePdfRender = <T,>(job: () => Promise<T>): Promise<T> => {
+  const run = pdfRenderTail.then(job, job)
+  pdfRenderTail = run.then(() => undefined, () => undefined)
+  return run
+}
+
+/** Backing-store caps: readable on HiDPI, cheap enough for live scrolling. */
+const MAX_PDF_DPR = 1.75
+const MAX_PDF_EDGE = 2_048
+const MAX_PDF_PIXELS = 2_400_000
+const RESIZE_DEBOUNCE_MS = 180
+const VIEWPORT_ROOT_MARGIN = '96px 0px'
+const HIDE_DEBOUNCE_MS = 360
+const DEFAULT_PAGE_RATIO = 297 / 210
 
 type WorksheetLayerProps = {
   document: WorksheetDocument
@@ -51,13 +91,15 @@ type WorksheetLayerProps = {
   onRemove?: () => void | Promise<void>
 }
 
-function PdfPage({
+function PdfPageCanvas({
   pdf,
   number,
+  onRatio,
   onReady,
 }: {
   pdf: PDFDocumentProxy
   number: number
+  onRatio: (ratio: number) => void
   onReady: () => void
 }) {
   const hostRef = useRef<HTMLDivElement>(null)
@@ -68,50 +110,17 @@ function PdfPage({
   const lastRenderKeyRef = useRef('')
   const readySentRef = useRef(false)
   const resizeTimerRef = useRef<number | null>(null)
-  const visibleRef = useRef(false)
-  const [ratio, setRatio] = useState(297 / 210)
-  const [visible, setVisible] = useState(false)
-
-  useEffect(() => {
-    let alive = true
-    void pdf.getPage(number).then((page) => {
-      if (!alive) return
-      pageRef.current = page
-      const viewport = page.getViewport({ scale: 1 })
-      setRatio(viewport.height / Math.max(1, viewport.width))
-    }).catch((error: unknown) => {
-      console.error(`PDF-Seite ${number} konnte nicht geladen werden.`, error)
-    })
-    return () => {
-      alive = false
-      renderRef.current?.cancel()
-      pageRef.current?.cleanup()
-      pageRef.current = null
-    }
-  }, [number, pdf])
-
-  const clearCanvas = useCallback(() => {
-    const canvas = canvasRef.current
-    if (!canvas) return
-    const context = canvas.getContext('2d')
-    context?.setTransform(1, 0, 0, 1, 0, 0)
-    context?.clearRect(0, 0, canvas.width, canvas.height)
-    canvas.width = 1
-    canvas.height = 1
-    lastRenderKeyRef.current = ''
-  }, [])
 
   const render = useCallback(async () => {
     const host = hostRef.current
     const canvas = canvasRef.current
     const page = pageRef.current
-    if (!host || !canvas || !page || !visibleRef.current) return
+    if (!host || !canvas || !page) return
     const cssWidth = Math.max(1, Math.round(host.clientWidth))
     if (cssWidth < 8) return
     const base = page.getViewport({ scale: 1 })
     const cssHeight = Math.max(1, Math.round(cssWidth * (base.height / Math.max(1, base.width))))
 
-    // Device pixel ratio for true screen resolution, with hard caps for multi-page stability.
     let dpr = Math.min(Math.max(window.devicePixelRatio || 1, 1), MAX_PDF_DPR)
     let pixelWidth = Math.round(cssWidth * dpr)
     let pixelHeight = Math.round(cssHeight * dpr)
@@ -120,14 +129,12 @@ function PdfPage({
       const factor = MAX_PDF_EDGE / edge
       pixelWidth = Math.max(1, Math.round(pixelWidth * factor))
       pixelHeight = Math.max(1, Math.round(pixelHeight * factor))
-      dpr *= factor
     }
     const pixels = pixelWidth * pixelHeight
     if (pixels > MAX_PDF_PIXELS) {
       const factor = Math.sqrt(MAX_PDF_PIXELS / pixels)
       pixelWidth = Math.max(1, Math.round(pixelWidth * factor))
       pixelHeight = Math.max(1, Math.round(pixelHeight * factor))
-      dpr *= factor
     }
 
     const renderKey = `${cssWidth}x${cssHeight}@${pixelWidth}x${pixelHeight}`
@@ -137,69 +144,75 @@ function PdfPage({
 
     const token = ++renderTokenRef.current
     renderRef.current?.cancel()
-    const scale = pixelWidth / Math.max(1, base.width)
-    const viewport = page.getViewport({ scale })
-    canvas.width = pixelWidth
-    canvas.height = pixelHeight
-    // Keep CSS display size at layout pixels so backing store maps 1:1 with dpr.
-    canvas.style.width = `${cssWidth}px`
-    canvas.style.height = `${cssHeight}px`
-    const context = canvas.getContext('2d', { alpha: false })
-    if (!context) return
-    context.setTransform(1, 0, 0, 1, 0, 0)
-    context.fillStyle = '#ffffff'
-    context.fillRect(0, 0, pixelWidth, pixelHeight)
-    const task = page.render({
-      canvas,
-      canvasContext: context,
-      viewport,
-      intent: 'display',
+    await enqueuePdfRender(async () => {
+      if (token !== renderTokenRef.current || !pageRef.current || !canvasRef.current || !hostRef.current) return
+      const livePage = pageRef.current
+      const liveCanvas = canvasRef.current
+      const scale = pixelWidth / Math.max(1, base.width)
+      const viewport = livePage.getViewport({ scale })
+      liveCanvas.width = pixelWidth
+      liveCanvas.height = pixelHeight
+      liveCanvas.style.width = `${cssWidth}px`
+      liveCanvas.style.height = `${cssHeight}px`
+      const context = liveCanvas.getContext('2d', { alpha: false })
+      if (!context) return
+      context.setTransform(1, 0, 0, 1, 0, 0)
+      context.imageSmoothingEnabled = true
+      context.imageSmoothingQuality = 'low'
+      context.fillStyle = '#ffffff'
+      context.fillRect(0, 0, pixelWidth, pixelHeight)
+      const task = livePage.render({
+        canvas: liveCanvas,
+        canvasContext: context,
+        viewport,
+        intent: 'display',
+      })
+      renderRef.current = task
+      try {
+        await task.promise
+        if (token !== renderTokenRef.current) return
+        lastRenderKeyRef.current = renderKey
+        if (!readySentRef.current) {
+          readySentRef.current = true
+          onReady()
+        }
+      } catch (error: unknown) {
+        if (!(error instanceof Error) || error.name !== 'RenderingCancelledException') {
+          console.error(`PDF-Seite ${number} konnte nicht gerendert werden.`, error)
+        }
+      }
     })
-    renderRef.current = task
-    try {
-      await task.promise
-      if (token !== renderTokenRef.current) return
-      lastRenderKeyRef.current = renderKey
-      if (!readySentRef.current) {
-        readySentRef.current = true
-        onReady()
-      }
-    } catch (error: unknown) {
-      if (!(error instanceof Error) || error.name !== 'RenderingCancelledException') {
-        console.error(`PDF-Seite ${number} konnte nicht gerendert werden.`, error)
-      }
-    }
   }, [number, onReady])
 
-  // Only paint pages near the viewport — multi-page PDFs otherwise thrash GPU/CPU.
   useEffect(() => {
-    const host = hostRef.current
-    if (!host) return
-    const observer = new IntersectionObserver(
-      (entries) => {
-        const entry = entries[0]
-        const next = Boolean(entry?.isIntersecting)
-        visibleRef.current = next
-        setVisible(next)
-        if (!next) {
-          renderRef.current?.cancel()
-          // Free VRAM for pages far away; keep the aspect-ratio box.
-          clearCanvas()
-        } else {
-          void render()
-        }
-      },
-      { root: host.closest('.unified-note-view') as Element | null, rootMargin: VIEWPORT_ROOT_MARGIN, threshold: 0.01 },
-    )
-    observer.observe(host)
-    return () => observer.disconnect()
-  }, [clearCanvas, render])
+    let alive = true
+    void pdf.getPage(number).then((page) => {
+      if (!alive) {
+        page.cleanup()
+        return
+      }
+      pageRef.current = page
+      const viewport = page.getViewport({ scale: 1 })
+      onRatio(viewport.height / Math.max(1, viewport.width))
+      void render()
+    }).catch((error: unknown) => {
+      if (alive) console.error(`PDF-Seite ${number} konnte nicht geladen werden.`, error)
+    })
+    return () => {
+      alive = false
+      renderTokenRef.current += 1
+      const page = pageRef.current
+      pageRef.current = null
+      try { renderRef.current?.cancel() } catch { /* ignore */ }
+      renderRef.current = null
+      try { page?.cleanup() } catch { /* ignore */ }
+    }
+  }, [number, onRatio, pdf, render])
 
   useEffect(() => {
     const host = hostRef.current
     if (!host) return
     const schedule = () => {
-      if (!visibleRef.current) return
       if (resizeTimerRef.current !== null) window.clearTimeout(resizeTimerRef.current)
       resizeTimerRef.current = window.setTimeout(() => {
         resizeTimerRef.current = null
@@ -208,20 +221,76 @@ function PdfPage({
     }
     const observer = new ResizeObserver(schedule)
     observer.observe(host)
-    if (visible) void render()
     return () => {
       observer.disconnect()
       if (resizeTimerRef.current !== null) window.clearTimeout(resizeTimerRef.current)
     }
-  }, [render, visible])
+  }, [render])
+
+  return (
+    <div className="worksheet-pdf-canvas-host" ref={hostRef}>
+      <canvas ref={canvasRef} aria-label={`PDF-Seite ${number}`} />
+    </div>
+  )
+}
+
+function PdfPage({
+  pdf,
+  number,
+  defaultRatio,
+  onReady,
+}: {
+  pdf: PDFDocumentProxy
+  number: number
+  defaultRatio: number
+  onReady: () => void
+}) {
+  const hostRef = useRef<HTMLDivElement>(null)
+  const hideTimerRef = useRef<number | null>(null)
+  const [mounted, setMounted] = useState(false)
+  const [ratio, setRatio] = useState(defaultRatio)
+
+  const handleRatio = useCallback((next: number) => {
+    if (!Number.isFinite(next) || next <= 0) return
+    setRatio((current) => (Math.abs(current - next) < 0.002 ? current : next))
+  }, [])
+
+  useEffect(() => {
+    const host = hostRef.current
+    if (!host) return
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const next = Boolean(entries[0]?.isIntersecting)
+        if (next) {
+          if (hideTimerRef.current !== null) {
+            window.clearTimeout(hideTimerRef.current)
+            hideTimerRef.current = null
+          }
+          setMounted(true)
+          return
+        }
+        if (hideTimerRef.current !== null) window.clearTimeout(hideTimerRef.current)
+        hideTimerRef.current = window.setTimeout(() => {
+          hideTimerRef.current = null
+          setMounted(false)
+        }, HIDE_DEBOUNCE_MS)
+      },
+      { root: host.closest('.unified-note-view') as Element | null, rootMargin: VIEWPORT_ROOT_MARGIN, threshold: 0.01 },
+    )
+    observer.observe(host)
+    return () => {
+      observer.disconnect()
+      if (hideTimerRef.current !== null) window.clearTimeout(hideTimerRef.current)
+    }
+  }, [])
 
   return (
     <div
-      className={`worksheet-pdf-page ${visible ? 'is-visible' : 'is-virtualized'}`}
+      className={`worksheet-pdf-page ${mounted ? 'is-visible' : 'is-virtualized'}`}
       ref={hostRef}
       style={{ aspectRatio: `1 / ${ratio}` }}
     >
-      <canvas ref={canvasRef} aria-label={`PDF-Seite ${number}`} />
+      {mounted && <PdfPageCanvas pdf={pdf} number={number} onRatio={handleRatio} onReady={onReady} />}
     </div>
   )
 }
@@ -243,6 +312,7 @@ export const WorksheetLayer = forwardRef<WorksheetLayerHandle, WorksheetLayerPro
   const [savedPulse, setSavedPulse] = useState(false)
   const [removing, setRemoving] = useState(false)
   const [oneNoteScale, setOneNoteScale] = useState(1)
+  const [pageRatio, setPageRatio] = useState(DEFAULT_PAGE_RATIO)
   const documentRef = useRef(document)
   const dirtyRef = useRef(false)
   const revisionRef = useRef(0)
@@ -314,27 +384,30 @@ export const WorksheetLayer = forwardRef<WorksheetLayerHandle, WorksheetLayerPro
     setLoading(true)
     setError(null)
     setPdf(null)
-    void window.fanotes.readAssetDataUrl(initialDocument.sourceRelativePath)
-      .then(async (dataUrl) => {
+    const load = initialDocument.kind === 'pdf'
+      ? loadVaultPdfBytes(initialDocument.sourceRelativePath).then((bytes) => ({ kind: 'pdf' as const, bytes }))
+      : window.fanotes.readAssetDataUrl(initialDocument.sourceRelativePath).then((dataUrl) => ({ kind: 'asset' as const, dataUrl }))
+    void load
+      .then(async (payload) => {
         if (!alive) return
-        setSource(dataUrl)
-        if (initialDocument.kind === 'image' || initialDocument.kind === 'html') {
+        if (payload.kind === 'asset') {
+          setSource(payload.dataUrl)
           setLoading(false)
           return
         }
-        const [{ getDocument, GlobalWorkerOptions }, bytes] = await Promise.all([
-          import('pdfjs-dist'),
-          loadPdfBytes(dataUrl),
-        ])
+        if (!payload.bytes.length) throw new Error('Die PDF-Datei ist leer.')
+        const { getDocument, GlobalWorkerOptions } = await import('pdfjs-dist')
         if (!alive) return
-        if (!bytes.length) throw new Error('Die PDF-Datei ist leer.')
         GlobalWorkerOptions.workerSrc = pdfWorkerUrl
+        const copy = payload.bytes.buffer.byteLength === payload.bytes.byteLength
+          ? payload.bytes
+          : payload.bytes.slice()
         const task = getDocument({
-          data: bytes.slice(),
+          data: copy,
           useSystemFonts: true,
-          // Prefer speed; pages still render at device resolution when visible.
-          disableAutoFetch: false,
-          disableStream: false,
+          disableAutoFetch: true,
+          disableStream: true,
+          disableRange: true,
         })
         pdfTaskRef.current = task
         const loaded = await task.promise
@@ -345,6 +418,15 @@ export const WorksheetLayer = forwardRef<WorksheetLayerHandle, WorksheetLayerPro
         if (loaded.numPages > 250) {
           await task.destroy()
           throw new Error('PDFs mit mehr als 250 Seiten werden nicht als Arbeitsblatt geöffnet.')
+        }
+        try {
+          const first = await loaded.getPage(1)
+          if (alive) {
+            const viewport = first.getViewport({ scale: 1 })
+            setPageRatio(viewport.height / Math.max(1, viewport.width))
+          }
+        } catch {
+          // Keep the A4 fallback; visible pages measure themselves.
         }
         setPdf(loaded)
         setLoading(false)
@@ -363,8 +445,9 @@ export const WorksheetLayer = forwardRef<WorksheetLayerHandle, WorksheetLayerPro
       alive = false
       if (saveTimerRef.current !== null) window.clearTimeout(saveTimerRef.current)
       if (layoutNotifyTimerRef.current !== null) window.clearTimeout(layoutNotifyTimerRef.current)
-      void pdfTaskRef.current?.destroy()
+      const task = pdfTaskRef.current
       pdfTaskRef.current = null
+      void task?.destroy().catch(() => undefined)
     }
   }, [initialDocument.kind, initialDocument.sourceRelativePath, notifyLayout])
 
@@ -478,8 +561,13 @@ export const WorksheetLayer = forwardRef<WorksheetLayerHandle, WorksheetLayerPro
       {!error && pdf && Array.from({ length: pdf.numPages }, (_, index) => {
         const page = index + 1
         return (
-          <div className="worksheet-page" key={page} onPointerDown={(event) => addTextBox(page, event)}>
-            <PdfPage pdf={pdf} number={page} onReady={notifyLayout} />
+          <div
+            className="worksheet-page"
+            key={page}
+            style={{ containIntrinsicSize: `800px ${Math.round(800 * pageRatio)}px` }}
+            onPointerDown={(event) => addTextBox(page, event)}
+          >
+            <PdfPage pdf={pdf} number={page} defaultRatio={pageRatio} onReady={notifyLayout} />
             {renderTextBoxes(page)}
           </div>
         )
