@@ -74,16 +74,17 @@ export const applyPaperViewToElements = (
   const active = isPaperViewActive(view)
   const zoom = Math.max(0.01, view.zoom)
   if (paper) {
-    // One zoom for the whole sheet (text, ink, worksheets). CSS zoom keeps
-    // markdown sharp; the viewport scrolls instead of a second pan-transform.
+    // One zoom for the whole sheet (ruling, text, ink, worksheets). CSS zoom
+    // keeps markdown sharp; the viewport scrolls instead of a second pan.
     paper.style.zoom = zoom === 1 ? '' : String(zoom)
+    paper.style.setProperty('--view-zoom', String(zoom))
     paper.style.transform = view.rotation ? `rotate(${view.rotation}deg)` : ''
     paper.style.transformOrigin = 'center center'
     // Never promote the sheet to a low-res compositor bitmap.
     paper.style.willChange = 'auto'
     paper.classList.toggle('is-view-transformed', active)
     paper.classList.toggle('is-view-zoomed', zoom !== 1)
-    paper.querySelectorAll<HTMLElement>('.editor-pane, .worksheet-layer, .lw-canvas-surface, .lw-drawing-board').forEach((element) => {
+    paper.querySelectorAll<HTMLElement>('.editor-pane, .worksheet-layer, .lw-canvas-surface, .lw-drawing-board, .paper-ruling').forEach((element) => {
       element.style.transform = ''
       element.style.transformOrigin = ''
       element.style.zoom = ''
@@ -107,11 +108,12 @@ export const clearPaperViewFromElements = (
     element.style.transformOrigin = ''
     element.style.zoom = ''
     element.style.willChange = ''
+    element.style.removeProperty('--view-zoom')
     element.classList.remove('is-view-transformed', 'is-view-zoomed')
   }
   clear(paper)
   if (paper) {
-    paper.querySelectorAll<HTMLElement>('.editor-pane, .worksheet-layer, .lw-canvas-surface, .lw-drawing-board').forEach((element) => {
+    paper.querySelectorAll<HTMLElement>('.editor-pane, .worksheet-layer, .lw-canvas-surface, .lw-drawing-board, .paper-ruling').forEach((element) => {
       element.style.transform = ''
       element.style.transformOrigin = ''
       element.style.zoom = ''

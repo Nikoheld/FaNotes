@@ -101,6 +101,8 @@ export type AppSettings = {
   penOnly: boolean
   smoothing: number
   scribbleEraseSensitivity: number
+  /** 0 = nur sehr klare Figuren, 50 = normal, 100 = früher und großzügiger glätten. */
+  shapeSnapSensitivity: number
   recognitionMode: 'auto' | 'math' | 'text'
   lastRecognitionMode: 'math' | 'text'
   recognitionLanguage: 'de' | 'en'

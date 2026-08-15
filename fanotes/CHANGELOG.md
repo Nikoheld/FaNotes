@@ -1,5 +1,12 @@
 # Änderungsverlauf
 
+## 2026.8.21
+
+- **Zoom als ein Blatt:** Kästchen, Schrift und Tinte wachsen gemeinsam. Hinweise, Zeichenstudio und Konvertieren bleiben in der normalen UI-Größe.
+- **Formen zuverlässig glätten:** Stift kurz stillhalten. Fast waagerechte Linien werden horizontal, fast senkrechte vertikal. Die Empfindlichkeit liegt in den Einstellungen (Stift & Erkennung).
+- **Tinte schon beim Schreiben rund:** Die Glättung greift unter dem Stift, nicht erst nach dem Abheben.
+- **Ruhiges neues Blatt:** Zeichnet man weiter nach unten, springen die Kästchen nicht mehr hin und her.
+
 ## 2026.8.20
 
 - **Qwen3-VL empfohlen:** Die Intel-NPU-Texterkennung ist die empfohlene Engine. Crops, Prompts und Zeilenlage sind schärfer; das kleine neuronale Modell bleibt als Rückfall.

@@ -35,6 +35,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   penOnly: false,
   smoothing: 0.68,
   scribbleEraseSensitivity: 50,
+  shapeSnapSensitivity: 50,
   recognitionMode: 'auto',
   lastRecognitionMode: 'text',
   recognitionLanguage: 'de',

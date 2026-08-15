@@ -73,9 +73,10 @@ export function PaperView({ children, className = '', viewKey, showHud = true }:
   }, [paint])
 
   useEffect(() => {
-    if (!showHud) return
+    // Reset only when the note identity changes. Toggling the HUD (pen vs
+    // keyboard) must keep the same sheet zoom so ruling, ink and text stay one.
     writeSharedPaperView(defaultPaperView())
-  }, [showHud, viewKey])
+  }, [viewKey])
 
   const setView = useCallback((next: Partial<PaperViewSnapshot>) => {
     const current = viewRef.current
@@ -94,7 +95,10 @@ export function PaperView({ children, className = '', viewKey, showHud = true }:
     const paper = scroller?.querySelector<HTMLElement>('.unified-paper') ?? null
     const anchor = scroller ? capturePaperAnchor(scroller, paper, originClient) : null
     apply(zoomAroundPoint(current, zoom))
-    if (scroller && anchor) restorePaperAnchor(scroller, paper, anchor)
+    if (scroller && paper && anchor) {
+      paper.offsetWidth
+      restorePaperAnchor(scroller, paper, anchor)
+    }
   }, [apply])
 
   const zoomBy = useCallback((delta: number, originClient?: { x: number; y: number }) => {

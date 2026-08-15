@@ -272,6 +272,8 @@ const overrides = {
   'Druckempfindlichkeit': 'Pressure sensitivity',
   'Dunkles Farbschema verwenden': 'Use dark color scheme',
   'Durchkritzel-Empfindlichkeit': 'Scribble-to-erase sensitivity',
+  'Form-Erkennung': 'Shape recognition',
+  'Wie bereitwillig Stillhalten eine Linie, einen Kreis oder ein Vieleck glättet. Niedrig nur bei sehr klaren Figuren; hoch früher und auch bei unsaubereren Strichen.': 'How readily holding still tidies a line, circle or polygon. Low only snaps very clear figures; high snaps sooner and from messier strokes.',
   'Eigene Akzentfarbe': 'Custom accent color',
   'Eingang': 'Inbox',
   'Eigene': 'Custom',

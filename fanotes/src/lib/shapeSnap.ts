@@ -31,8 +31,32 @@ export const SHAPE_SNAP_LABEL: Record<ShapeSnapKind, string> = {
   rectangle: 'Rechteck',
 }
 
-/** Only snap when we are this sure — letters and scribbles stay freehand. */
-export const SHAPE_SNAP_MIN_CONFIDENCE = 0.72
+export const SHAPE_SNAP_SENSITIVITY_DEFAULT = 50
+
+export const clampShapeSnapSensitivity = (value: number) => {
+  const numeric = Number(value)
+  if (!Number.isFinite(numeric)) return SHAPE_SNAP_SENSITIVITY_DEFAULT
+  return Math.min(100, Math.max(0, Math.round(numeric)))
+}
+
+const lerp = (from: number, to: number, amount: number) => from + (to - from) * amount
+
+/** 0 = nur sehr klare Figuren, 50 = bisheriges Verhalten, 100 = früher und großzügiger. */
+export const shapeSnapProfile = (sensitivity = SHAPE_SNAP_SENSITIVITY_DEFAULT) => {
+  const t = clampShapeSnapSensitivity(sensitivity) / 100
+  return {
+    minConfidence: lerp(0.88, 0.56, t),
+    dwellMs: Math.round(lerp(1_100, 300, t)),
+    hintMs: Math.round(lerp(400, 120, t)),
+    axisSnapRad: lerp(6, 18, t) * Math.PI / 180,
+    loosen: lerp(0.76, 1.24, t),
+    minPoints: Math.round(lerp(12, 8, t)),
+    ambiguity: lerp(0.08, 0.02, t),
+  }
+}
+
+/** Default confidence at sensitivity 50 — letters and scribbles stay freehand. */
+export const SHAPE_SNAP_MIN_CONFIDENCE = shapeSnapProfile(SHAPE_SNAP_SENSITIVITY_DEFAULT).minConfidence
 
 type Phys = {
   x: number
@@ -299,16 +323,20 @@ const templateFrom = (pts: Phys[]): Phys => {
   }
 }
 
-const pickBest = (candidates: Array<ShapeSnapResult | null>): ShapeSnapResult | null => {
+const pickBest = (
+  candidates: Array<ShapeSnapResult | null>,
+  minConfidence: number,
+  ambiguity: number,
+): ShapeSnapResult | null => {
   const valid = candidates.filter((candidate): candidate is ShapeSnapResult => (
-    Boolean(candidate && candidate.confidence >= SHAPE_SNAP_MIN_CONFIDENCE)
+    Boolean(candidate && candidate.confidence >= minConfidence)
   ))
   if (!valid.length) return null
   valid.sort((a, b) => b.confidence - a.confidence)
   const best = valid[0]
   const second = valid[1]
   // Ambiguous geometry (letter-like) stays freehand.
-  if (second && best.confidence - second.confidence < 0.05 && second.kind !== best.kind) return null
+  if (second && best.confidence - second.confidence < ambiguity && second.kind !== best.kind) return null
   return best
 }
 
@@ -321,25 +349,28 @@ export const snapStrokeToShape = (
   stroke: SnappableStroke,
   sourceWidth: number,
   sourceHeight: number,
+  sensitivity = SHAPE_SNAP_SENSITIVITY_DEFAULT,
 ): ShapeSnapResult | null => {
+  const profile = shapeSnapProfile(sensitivity)
+  const loose = profile.loosen
   if (stroke.symbolId) return null
-  if (stroke.points.length < 10) return null
+  if (stroke.points.length < profile.minPoints) return null
   const pts = physical(stroke.points, sourceWidth, sourceHeight)
   const length = pathLength(pts)
-  if (length < 40) return null
+  if (length < 40 / loose) return null
   const box = bboxOf(pts)
   const diagonal = hypot(box.width, box.height)
-  if (diagonal < 32) return null
+  if (diagonal < 32 / loose) return null
 
   const start = pts[0]
   const end = pts[pts.length - 1]
   const chord = hypot(end.x - start.x, end.y - start.y)
-  const closed = chord <= Math.max(18, diagonal * 0.2)
+  const closed = chord <= Math.max(18 * loose, diagonal * 0.2 * loose)
   const template = templateFrom(pts)
 
   // --- Line (open, almost straight, not a tiny glyph) ---
   let lineScore = 0
-  if (!closed && chord >= 56) {
+  if (!closed && chord >= 56 / loose) {
     let maxDev = 0
     let sumDev = 0
     const nx = (end.x - start.x) / chord
@@ -354,8 +385,9 @@ export const snapStrokeToShape = (
     }
     const meanDev = sumDev / pts.length
     const straight = chord / Math.max(1, length)
-    if (straight >= 0.9 && maxDev <= Math.max(6, chord * 0.055) && meanDev <= Math.max(3.5, chord * 0.03)) {
-      lineScore = clamp01((straight - 0.88) / 0.12) * clamp01(1 - meanDev / Math.max(4, chord * 0.045))
+    const minStraight = 0.9 - (loose - 1) * 0.08
+    if (straight >= minStraight && maxDev <= Math.max(6 * loose, chord * 0.055 * loose) && meanDev <= Math.max(3.5 * loose, chord * 0.03 * loose)) {
+      lineScore = clamp01((straight - (minStraight - 0.02)) / 0.12) * clamp01(1 - meanDev / Math.max(4 * loose, chord * 0.045 * loose))
     }
   }
 
@@ -370,15 +402,15 @@ export const snapStrokeToShape = (
   let ellipseScore = 0
   if (
     closed
-    && coverage >= 0.68
-    && radiusMean >= 18
-    && length >= radiusMean * Math.PI * 1.05
-    && length <= radiusMean * Math.PI * 3.6
+    && coverage >= 0.68 / loose
+    && radiusMean >= 18 / loose
+    && length >= radiusMean * Math.PI * (1.05 / loose)
+    && length <= radiusMean * Math.PI * 3.6 * loose
   ) {
-    if (circular && ellipse.residual <= 0.18) {
-      circleScore = clamp01(1 - ellipse.residual / 0.18) * clamp01(0.55 + coverage * 0.45)
-    } else if (elliptical && ellipse.residual <= 0.2 && (aspect <= 0.86 || aspect >= 1.16)) {
-      ellipseScore = clamp01(1 - ellipse.residual / 0.2) * clamp01(0.5 + coverage * 0.5)
+    if (circular && ellipse.residual <= 0.18 * loose) {
+      circleScore = clamp01(1 - ellipse.residual / (0.18 * loose)) * clamp01(0.55 + coverage * 0.45)
+    } else if (elliptical && ellipse.residual <= 0.2 * loose && (aspect <= 0.86 || aspect >= 1.16)) {
+      ellipseScore = clamp01(1 - ellipse.residual / (0.2 * loose)) * clamp01(0.5 + coverage * 0.5)
     }
   }
 
@@ -416,7 +448,7 @@ export const snapStrokeToShape = (
     const residual = meanResidualToPolygon(pts, unique, true)
     const minSide = Math.min(...sides)
     const sharp = angles.every((angle) => angle > 28 && angle < 142)
-    if (minSide >= 22 && sharp && residual <= Math.max(5, diagonal * 0.055)) {
+    if (minSide >= 22 / loose && sharp && residual <= Math.max(5 * loose, diagonal * 0.055 * loose)) {
       triangleScore = clamp01(1 - residual / Math.max(6, diagonal * 0.07))
       triangleVertices = unique
       const similar = Math.max(...sides) / Math.max(1, Math.min(...sides))
@@ -436,7 +468,7 @@ export const snapStrokeToShape = (
       Math.abs(sides[0] - sides[2]) / Math.max(1, (sides[0] + sides[2]) / 2) <= 0.22
       && Math.abs(sides[1] - sides[3]) / Math.max(1, (sides[1] + sides[3]) / 2) <= 0.22
     )
-    if (minSide >= 20 && right && oppositeSimilar && residual <= Math.max(5.5, diagonal * 0.055)) {
+    if (minSide >= 20 / loose && right && oppositeSimilar && residual <= Math.max(5.5 * loose, diagonal * 0.055 * loose)) {
       const sideRatio = Math.max(sides[0], sides[1]) / Math.max(1, Math.min(sides[0], sides[1]))
       const score = clamp01(1 - residual / Math.max(6, diagonal * 0.07))
         * clamp01(1 - Math.max(...angles.map((angle) => Math.abs(angle - 90))) / 22)
@@ -454,18 +486,19 @@ export const snapStrokeToShape = (
     rectangleScore = 0
   }
 
-  const line = lineScore >= SHAPE_SNAP_MIN_CONFIDENCE
+  const minConfidence = profile.minConfidence
+  const line = lineScore >= minConfidence
     ? {
         kind: 'line' as const,
         confidence: lineScore,
         stroke: {
           ...stroke,
-          points: samplePolyline([start, end], false, template, sourceWidth, sourceHeight),
+          points: samplePolyline(snapLineToAxis(start, end, pts, profile.axisSnapRad), false, template, sourceWidth, sourceHeight),
         },
       }
     : null
 
-  const circle = circleScore >= SHAPE_SNAP_MIN_CONFIDENCE
+  const circle = circleScore >= minConfidence
     ? {
         kind: 'circle' as const,
         confidence: circleScore,
@@ -476,7 +509,7 @@ export const snapStrokeToShape = (
       }
     : null
 
-  const oval = ellipseScore >= SHAPE_SNAP_MIN_CONFIDENCE
+  const oval = ellipseScore >= minConfidence
     ? {
         kind: 'ellipse' as const,
         confidence: ellipseScore,
@@ -487,7 +520,7 @@ export const snapStrokeToShape = (
       }
     : null
 
-  const triangle = triangleScore >= SHAPE_SNAP_MIN_CONFIDENCE && triangleVertices
+  const triangle = triangleScore >= minConfidence && triangleVertices
     ? {
         kind: 'triangle' as const,
         confidence: triangleScore,
@@ -498,7 +531,7 @@ export const snapStrokeToShape = (
       }
     : null
 
-  const square = squareScore >= SHAPE_SNAP_MIN_CONFIDENCE && quadVertices
+  const square = squareScore >= minConfidence && quadVertices
     ? {
         kind: 'square' as const,
         confidence: squareScore,
@@ -509,7 +542,7 @@ export const snapStrokeToShape = (
       }
     : null
 
-  const rectangle = rectangleScore >= SHAPE_SNAP_MIN_CONFIDENCE && quadVertices
+  const rectangle = rectangleScore >= minConfidence && quadVertices
     ? {
         kind: 'rectangle' as const,
         confidence: rectangleScore,
@@ -520,7 +553,28 @@ export const snapStrokeToShape = (
       }
     : null
 
-  return pickBest([line, circle, oval, triangle, square, rectangle])
+  return pickBest([line, circle, oval, triangle, square, rectangle], minConfidence, profile.ambiguity)
+}
+
+/** If a straightened stroke is nearly axis-aligned, lock it to horizontal or vertical. */
+const snapLineToAxis = (
+  start: { x: number; y: number },
+  end: { x: number; y: number },
+  pts: Array<{ x: number; y: number }>,
+  axisSnapRad: number,
+) => {
+  const dx = end.x - start.x
+  const dy = end.y - start.y
+  const tilt = Math.atan2(Math.abs(dy), Math.abs(dx))
+  if (tilt <= axisSnapRad) {
+    const y = pts.reduce((sum, point) => sum + point.y, 0) / Math.max(1, pts.length)
+    return [{ x: start.x, y }, { x: end.x, y }]
+  }
+  if (tilt >= Math.PI / 2 - axisSnapRad) {
+    const x = pts.reduce((sum, point) => sum + point.x, 0) / Math.max(1, pts.length)
+    return [{ x, y: start.y }, { x, y: end.y }]
+  }
+  return [start, end]
 }
 
 const regularizeRectangle = (vertices: Array<{ x: number; y: number }>, forceSquare: boolean) => {
@@ -596,7 +650,8 @@ export const strokeLooksLikeShape = (
   stroke: SnappableStroke,
   sourceWidth: number,
   sourceHeight: number,
+  sensitivity = SHAPE_SNAP_SENSITIVITY_DEFAULT,
 ) => {
-  const result = snapStrokeToShape(stroke, sourceWidth, sourceHeight)
-  return result !== null && result.confidence >= SHAPE_SNAP_MIN_CONFIDENCE
+  const result = snapStrokeToShape(stroke, sourceWidth, sourceHeight, sensitivity)
+  return result !== null && result.confidence >= shapeSnapProfile(sensitivity).minConfidence
 }

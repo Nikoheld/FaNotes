@@ -69,8 +69,10 @@ const safeguards = [
   ["aria-label=\"Blattansicht\"", 'Toolbar-Steuerung für Zoom und Drehung'],
   ['// Use layout size (offset*), not getBoundingClientRect: CSS zoom/rotation of the', 'Bitmap-Größe unabhängig vom Ansichtszoom'],
   ['WRITE_SLACK_HEIGHT', 'Papier wächst nur mit Tinte plus Absatz-Puffer, nicht durch Scrollen'],
+  ['PAGE_GROW_STEP_HEIGHT', 'Neues Blatt wächst in festen Schritten, nicht bei jedem Sample'],
   ['fanotes-ink-toolbar-slot', 'Handschrift-Werkzeuge sitzen in der oberen Leiste'],
   ['is-docked-chrome', 'Stiftleiste dockt in das normale Menü, statt zu schweben'],
+  ['is-viewport-chrome', 'Hinweise und Studio liegen außerhalb des Blatt-Zooms'],
 ]
 
 const worksheetLayer = fs.readFileSync(path.join(root, 'src', 'components', 'WorksheetLayer.tsx'), 'utf8')
@@ -96,6 +98,11 @@ const paperViewSafeguards = [
   ["classList.toggle('is-view-transformed', active)", 'Inline-Papier markiert Zoom/Drehung'],
   ['.editor-pane, .worksheet-layer, .lw-canvas-surface', 'Zoom trifft das ganze Blatt, nicht die Toolbar'],
   ['willChange = \'auto\'', 'kein 1×-Compositor-Layer für Text'],
+  ["setProperty('--view-zoom', String(zoom))", 'Zoom-Faktor als CSS-Variable auf dem Blatt'],
+]
+const paperStyleSafeguards = [
+  ['.unified-paper > .paper-ruling', 'Lineatur liegt auf einer Kind-Schicht und zoomt mit Tinte'],
+  ['background-repeat: repeat;', 'Kästchen nicht per round neu kacheln'],
 ]
 
 for (const [needle, label] of safeguards) {
@@ -108,6 +115,9 @@ for (const [needle, label] of worksheetSafeguards) {
   if (!worksheetLayer.includes(needle)) throw new Error(`Zeichenmodus-Prüfung fehlgeschlagen: ${label}.`)
 }
 for (const [needle, label] of worksheetStyleSafeguards) {
+  if (!styles.includes(needle)) throw new Error(`Zeichenmodus-Prüfung fehlgeschlagen: ${label}.`)
+}
+for (const [needle, label] of paperStyleSafeguards) {
   if (!styles.includes(needle)) throw new Error(`Zeichenmodus-Prüfung fehlgeschlagen: ${label}.`)
 }
 

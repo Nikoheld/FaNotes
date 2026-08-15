@@ -2221,6 +2221,7 @@ export default function App({ startupBootstrap }: AppProps) {
                 showHud={!drawingOpen}
               >
                 <article className={`unified-paper ${worksheetSession.documents.length ? 'has-worksheet' : ''}`} aria-label={`${activeTab.title} · gemeinsame Tastatur- und Handschriftseite`}>
+                  <div className="paper-ruling" aria-hidden="true" />
                   <div className="editor-pane">
                     <SafeBoundary name="Editor" fallbackTitle="Der Editor ist abgestürzt">
                       <MarkdownEditor ref={editorRef} key={activeTab.path} content={activeTab.content} onChange={updateContent} onSave={async (content) => { await saveContent(activeTab.path, content) }} settings={settings} focusToken={focusToken} readOnly={activeEntryMutating || drawingOpen} paperMode onLanguageDetected={setDetectedTextLanguage} />
@@ -2267,6 +2268,7 @@ export default function App({ startupBootstrap }: AppProps) {
               {splitTab && (
                 <PaperView className="unified-note-view is-split-pane" viewKey={`split:${splitTab.path}`} showHud={false}>
                   <article className="unified-paper" aria-label={`${splitTab.title} · zweite Spalte`}>
+                    <div className="paper-ruling" aria-hidden="true" />
                     <header className="split-pane-head">
                       <strong>{splitTab.title}</strong>
                       <button type="button" onClick={() => void openNote(splitTab.path)}>Fokus</button>
