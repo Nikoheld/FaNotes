@@ -1,3 +1,6 @@
+import { isPaperStyle } from './paperStyles'
+import type { PaperStyle } from '../types'
+
 export const FAMD_EXTENSION = '.famd'
 export const FAMD_SCHEMA = 'fanotes-famd-v1'
 export const NOTE_FILE_EXTENSIONS = ['.md', '.markdown', '.famd'] as const
@@ -10,6 +13,7 @@ export type FamdPayload = {
   updatedAt: string
   ink: Record<string, unknown> | null
   worksheets: string[]
+  paperStyle?: PaperStyle
 }
 
 export const isNoteFileName = (name: string) => (
@@ -66,7 +70,8 @@ export const parseFamd = (source: string): { markdown: string; payload: FamdPayl
     const updatedAt = typeof parsed.updatedAt === 'string' && Number.isFinite(Date.parse(parsed.updatedAt))
       ? new Date(parsed.updatedAt).toISOString()
       : new Date().toISOString()
-    return { markdown, payload: { schema: FAMD_SCHEMA, updatedAt, ink, worksheets } }
+    const paperStyle = isPaperStyle(parsed.paperStyle) ? parsed.paperStyle : undefined
+    return { markdown, payload: { schema: FAMD_SCHEMA, updatedAt, ink, worksheets, ...(paperStyle ? { paperStyle } : {}) } }
   } catch {
     return { markdown, payload: null }
   }
@@ -79,6 +84,7 @@ export const serializeFamd = (markdown: string, payload: FamdPayload) => {
     updatedAt: payload.updatedAt || new Date().toISOString(),
     ink: payload.ink && typeof payload.ink === 'object' ? payload.ink : null,
     worksheets: payload.worksheets.length ? payload.worksheets : worksheetIdsFromMarkdown(body),
+    ...(isPaperStyle(payload.paperStyle) ? { paperStyle: payload.paperStyle } : {}),
   }
   const json = JSON.stringify(next)
   return `${body ? `${body}\n\n` : ''}<!-- fanotes-famd:v1 chars=${json.length} -->\n${json}\n`

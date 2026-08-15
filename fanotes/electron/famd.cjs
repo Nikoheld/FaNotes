@@ -4,7 +4,12 @@ const FAMD_SCHEMA = 'fanotes-famd-v1'
 const FAMD_HEADER = /(?:^|\n)<!--\s*fanotes-famd:v1\s+chars=(\d+)\s*-->\n/u
 const WORKSHEET_MARKER = /<!--\s*fanotes-worksheet:([a-zA-Z0-9_-]{1,96})\s*-->/gu
 const NOTE_FILE_EXTENSIONS = Object.freeze(['.md', '.markdown', '.famd'])
+const PAPER_STYLES = Object.freeze(['blank', 'dots', 'squares', 'grid', 'lines', 'millimeter'])
 const MAX_FAMD_JSON_CHARS = 32 * 1024 * 1024
+
+function isPaperStyle(value) {
+  return typeof value === 'string' && PAPER_STYLES.includes(value)
+}
 
 function isNoteExtension(extension) {
   return NOTE_FILE_EXTENSIONS.includes(String(extension || '').toLocaleLowerCase('en-US'))
@@ -57,7 +62,8 @@ function parseFamd(source) {
     const updatedAt = typeof parsed.updatedAt === 'string' && Number.isFinite(Date.parse(parsed.updatedAt))
       ? new Date(parsed.updatedAt).toISOString()
       : new Date().toISOString()
-    return { markdown, payload: { schema: FAMD_SCHEMA, updatedAt, ink, worksheets } }
+    const paperStyle = isPaperStyle(parsed.paperStyle) ? parsed.paperStyle : undefined
+    return { markdown, payload: { schema: FAMD_SCHEMA, updatedAt, ink, worksheets, ...(paperStyle ? { paperStyle } : {}) } }
   } catch {
     return { markdown, payload: null }
   }
@@ -72,6 +78,7 @@ function serializeFamd(markdown, payload) {
     worksheets: Array.isArray(payload?.worksheets) && payload.worksheets.length
       ? payload.worksheets
       : worksheetIdsFromMarkdown(body),
+    ...(isPaperStyle(payload?.paperStyle) ? { paperStyle: payload.paperStyle } : {}),
   }
   const json = JSON.stringify(next)
   return `${body ? `${body}\n\n` : ''}<!-- fanotes-famd:v1 chars=${json.length} -->\n${json}\n`
@@ -81,7 +88,9 @@ module.exports = {
   FAMD_SCHEMA,
   MAX_FAMD_JSON_CHARS,
   NOTE_FILE_EXTENSIONS,
+  PAPER_STYLES,
   companionNotePath,
+  isPaperStyle,
   emptyFamdPayload,
   isNoteExtension,
   noteStem,

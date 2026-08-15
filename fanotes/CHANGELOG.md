@@ -1,5 +1,18 @@
 # Änderungsverlauf
 
+## 2026.8.19
+
+- **Notizen in Ordner ziehen:** Dateien lassen sich per Drag-and-drop in einen Ordner legen oder wieder herausziehen; die zugehörige `.famd` wandert mit.
+- **Papier pro Notiz:** Leer, gepunktet, Häuschen, kariert, liniert oder Millimeter — der Hintergrund gehört zur Notiz, nicht zu den globalen Einstellungen.
+- **Weitere Werkzeuge unter •••:** Tagesnotiz, Übersicht, GlyphenWerk und Befehle klappen unter dem unteren Punkte-Button auf und wieder ein.
+- **Hausaufgaben-Kalender:** Die Woche beginnt am Montag. Deutsche und englische Texte bleiben getrennt.
+- **Zoom wie in OneNote:** Ein Zoom für das ganze Blatt; Strg+Mausrad zoomt um den Cursor. Geteilte Ansicht teilt denselben Zoom.
+- **Zirkel, Lineal, Geodreieck:** Beschriftung bleibt oben, Kreise sitzen auf der Vorschau, die Werkzeuge liegen flach auf dem Blatt. In Lineal und Geodreieck gezeichnete Striche rasten an der nächsten Kante ein.
+- **Ruhiges Scrollen:** Der Text verzieht sich beim Scrollen nicht mehr; das Blatt läuft weicher.
+- **Französisch:** Festes Schulfach in der Einrichtung (Englisch: French).
+- **Saubere Animationen:** Einrichtung, Buttons, Toasts und Kalender bewegen sich einheitlich, ohne Sprünge.
+- **`.famd`-Betrachter:** Unter https://fanotes.fasrv.ch/viewer lässt sich eine lokale `.famd` nur anschauen — ohne Upload und ohne Änderung.
+
 ## 2026.8.18
 
 - **Obsidian-Look:** Dunkles und helles Farbschema wie in Obsidian — flache Grautöne, Violett-Akzent, ohne Leuchten.

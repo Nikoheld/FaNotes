@@ -24,6 +24,10 @@ const USER_CONTENT_SELECTOR = [
   '.vault-overview__graph-label',
   '.vault-overview__graph-note-label',
   '.vault-overview__graph svg title',
+  '.homework-card-body',
+  '.homework-day li',
+  '.homework-field input',
+  '.homework-field textarea',
 ].join(',')
 
 let preference: UiLanguagePreference = readStoredPreference()

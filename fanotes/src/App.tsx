@@ -4,7 +4,6 @@ import {
   BookOpen,
   CalendarDays,
   CheckCircle2,
-  ChevronDown,
   CircleAlert,
   ClipboardList,
   Columns2,
@@ -24,6 +23,7 @@ import {
   LayoutGrid,
   Maximize2,
   MoreHorizontal,
+  MoreVertical,
   Network,
   NotebookTabs,
   PanelLeftClose,
@@ -48,13 +48,15 @@ import type { GlyphenWerkView } from './components/GlyphenWerkWorkspace'
 import type { MarkdownEditorHandle, MarkdownFormatAction } from './components/MarkdownEditor'
 import type { WorksheetLayerHandle } from './components/WorksheetLayer'
 import { DEFAULT_SETTINGS } from './defaults'
+import { PaperStylePicker } from './components/PaperStylePicker'
 import { PaperView } from './components/PaperView'
+import { normalizePaperStyle } from './lib/paperStyles'
 import { SafeBoundary } from './components/SafeBoundary'
 import { applyNoteTags, collectVaultTags, filterTreeByTag, parseNoteTags } from './lib/noteTags'
 import { applyRendererResourceLimits } from './lib/resourceLimits'
 import { setUiLanguage, translateUiText } from './i18n'
 import { bestContrastText, ensureReadableColor } from './lib/colorContrast'
-import type { AppSettings, BootstrapData, CreateResult, DetectedTextLanguage, DrawingLibraryDocument, NoteHistorySnapshot, NoteTab, OneNoteImportResult, SearchHit, UpdateState, VaultEntry, WorksheetDocument } from './types'
+import type { AppSettings, BootstrapData, CreateResult, DetectedTextLanguage, DrawingLibraryDocument, NoteHistorySnapshot, NoteTab, OneNoteImportResult, PaperStyle, SearchHit, UpdateState, VaultEntry, WorksheetDocument } from './types'
 
 const DrawingBoard = lazy(() => import('./components/DrawingBoard').then((module) => ({ default: module.DrawingBoard })))
 const FirstRunOnboarding = lazy(() => import('./components/FirstRunOnboarding').then((module) => ({ default: module.FirstRunOnboarding })))
@@ -327,6 +329,7 @@ export default function App({ startupBootstrap }: AppProps) {
   const [revealPath, setRevealPath] = useState<string | null>(null)
   const [tagFilter, setTagFilter] = useState<string | null>(null)
   const [tagIndex, setTagIndex] = useState<Record<string, string[]>>({})
+  const [notePaperByPath, setNotePaperByPath] = useState<Record<string, PaperStyle>>({})
   const [tagDraft, setTagDraft] = useState('')
   const [splitPath, setSplitPath] = useState<string | null>(null)
   const [historyOpen, setHistoryOpen] = useState(false)
@@ -407,6 +410,10 @@ export default function App({ startupBootstrap }: AppProps) {
     }
   }, [editorMenuOpen])
   const activeTab = useMemo(() => tabs.find((tab) => tab.path === activePath) ?? null, [activePath, tabs])
+  const activePaper = useMemo(
+    () => normalizePaperStyle(activePath ? notePaperByPath[activePath] : undefined, settings.paperStyle),
+    [activePath, notePaperByPath, settings.paperStyle],
+  )
   const activeEntryMutating = useMemo(() => Boolean(activePath && mutatingEntryPaths.some(
     (path) => activePath === path || activePath.startsWith(`${path}/`),
   )), [activePath, mutatingEntryPaths])
@@ -481,6 +488,19 @@ export default function App({ startupBootstrap }: AppProps) {
       if (idleId !== null) window.cancelIdleCallback(idleId)
     }
   }, [activeTab?.path])
+
+  useEffect(() => {
+    const path = activePath
+    if (!path || !window.fanotes.readNotePaperStyle) return
+    let alive = true
+    void window.fanotes.readNotePaperStyle(path)
+      .then((style) => {
+        if (!alive || !style) return
+        setNotePaperByPath((current) => current[path] === style ? current : { ...current, [path]: style })
+      })
+      .catch(() => undefined)
+    return () => { alive = false }
+  }, [activePath])
 
   useEffect(() => {
     const requestId = ++worksheetLoadRequestRef.current
@@ -1018,6 +1038,18 @@ export default function App({ startupBootstrap }: AppProps) {
     }
   }, [openNote, refreshTree, settings.dailyNotesFolder, settings.dateFormat, toast, tree])
 
+  const remapNotePaperPaths = useCallback((from: string, to: string | null) => {
+    setNotePaperByPath((current) => {
+      const next = { ...current }
+      Object.entries(current).forEach(([candidate, style]) => {
+        if (candidate !== from && !candidate.startsWith(`${from}/`)) return
+        delete next[candidate]
+        if (to !== null) next[candidate === from ? to : `${to}${candidate.slice(from.length)}`] = style
+      })
+      return next
+    })
+  }, [])
+
   const renameEntry = useCallback(async (path: string, nextName: string) => {
     const session = vaultSessionGenerationRef.current
     const active = activePathRef.current
@@ -1028,6 +1060,7 @@ export default function App({ startupBootstrap }: AppProps) {
     vaultStructureRevisionRef.current += 1
     const nextPath = await window.fanotes.renameEntry(path, nextName)
     if (session !== vaultSessionGenerationRef.current) return
+    remapNotePaperPaths(path, nextPath)
     vaultStructureRevisionRef.current += 1
     ;[...saveTimers.current.entries()].forEach(([timerPath, timer]) => {
       if (timerPath === path || timerPath.startsWith(`${path}/`)) {
@@ -1054,7 +1087,61 @@ export default function App({ startupBootstrap }: AppProps) {
       : current)
     await refreshTree()
     await Promise.all(renamedPending.map(([renamedPath, content]) => saveContent(renamedPath, content)))
-  }, [flushDocumentLayers, refreshTree, saveContent, toast])
+  }, [flushDocumentLayers, refreshTree, remapNotePaperPaths, saveContent, toast])
+
+  const moveEntry = useCallback(async (path: string, destFolder = '') => {
+    const session = vaultSessionGenerationRef.current
+    const active = activePathRef.current
+    if (active && (active === path || active.startsWith(`${path}/`)) && !await flushDocumentLayers()) {
+      toast('Verschieben abgebrochen: Handschrift oder Arbeitsblatt konnte nicht sicher gespeichert werden.', 'error')
+      return
+    }
+    vaultStructureRevisionRef.current += 1
+    try {
+      const nextPath = await window.fanotes.moveEntry(path, destFolder)
+      if (session !== vaultSessionGenerationRef.current) return
+      if (nextPath === path) return
+      remapNotePaperPaths(path, nextPath)
+      vaultStructureRevisionRef.current += 1
+      ;[...saveTimers.current.entries()].forEach(([timerPath, timer]) => {
+        if (timerPath === path || timerPath.startsWith(`${path}/`)) {
+          window.clearTimeout(timer)
+          saveTimers.current.delete(timerPath)
+        }
+      })
+      setTabs((current) => current.map((tab) => {
+        if (tab.path !== path && !tab.path.startsWith(`${path}/`)) return tab
+        const movedPath = tab.path === path ? nextPath : `${nextPath}${tab.path.slice(path.length)}`
+        return { ...tab, path: movedPath, title: stripExtension(fileName(movedPath)) }
+      }))
+      const pending = [...pendingWrites.current.entries()]
+      const movedPending: [string, string][] = []
+      pending.forEach(([pendingPath, content]) => {
+        if (pendingPath !== path && !pendingPath.startsWith(`${path}/`)) return
+        pendingWrites.current.delete(pendingPath)
+        const movedPath = pendingPath === path ? nextPath : `${nextPath}${pendingPath.slice(path.length)}`
+        pendingWrites.current.set(movedPath, content)
+        movedPending.push([movedPath, content])
+      })
+      setActivePath((current) => current && (current === path || current.startsWith(`${path}/`))
+        ? `${nextPath}${current.slice(path.length)}`
+        : current)
+      if (destFolder) setRevealPath(destFolder)
+      await refreshTree()
+      await Promise.all(movedPending.map(([movedPath, content]) => saveContent(movedPath, content)))
+      const label = stripExtension(fileName(nextPath))
+      toast(
+        destFolder
+          ? `„${label}“ nach „${destFolder.split('/').pop()}“ verschoben.`
+          : `„${label}“ in die oberste Ebene verschoben.`,
+        'success',
+      )
+    } catch (error) {
+      if (session === vaultSessionGenerationRef.current) {
+        toast(error instanceof Error ? error.message : 'Verschieben fehlgeschlagen.', 'error')
+      }
+    }
+  }, [flushDocumentLayers, refreshTree, remapNotePaperPaths, saveContent, toast])
 
   const trashEntry = useCallback(async (path: string) => {
     const session = vaultSessionGenerationRef.current
@@ -1077,6 +1164,7 @@ export default function App({ startupBootstrap }: AppProps) {
       mutationMarked = true
       await window.fanotes.trashEntry(path)
       if (session !== vaultSessionGenerationRef.current) return
+      remapNotePaperPaths(path, null)
       vaultStructureRevisionRef.current += 1
       ;[...saveTimers.current.entries()].forEach(([timerPath, timer]) => {
         if (timerPath === path || timerPath.startsWith(`${path}/`)) {
@@ -1101,7 +1189,7 @@ export default function App({ startupBootstrap }: AppProps) {
         setMutatingEntryPaths((current) => current.filter((entryPath) => entryPath !== path))
       }
     }
-  }, [flushDocumentLayers, flushPendingEntry, refreshTree, toast])
+  }, [flushDocumentLayers, flushPendingEntry, refreshTree, remapNotePaperPaths, toast])
 
   const applySettings = useCallback((next: AppSettings) => {
     const revision = settingsRevisionRef.current + 1
@@ -1140,8 +1228,19 @@ export default function App({ startupBootstrap }: AppProps) {
   }, [toast])
 
   const handleDrawingSettingsChange = useCallback((changes: Partial<AppSettings>) => {
-    applySettings({ ...settingsRef.current, ...changes })
+    const { paperStyle: _ignoredPaper, ...rest } = changes
+    if (Object.keys(rest).length) applySettings({ ...settingsRef.current, ...rest })
   }, [applySettings])
+
+  const applyNotePaper = useCallback(async (path: string, paperStyle: PaperStyle) => {
+    setNotePaperByPath((current) => current[path] === paperStyle ? current : { ...current, [path]: paperStyle })
+    if (!window.fanotes.setNotePaperStyle) return
+    try {
+      await window.fanotes.setNotePaperStyle(path, paperStyle)
+    } catch (error) {
+      toast(error instanceof Error ? error.message : 'Der Notizhintergrund konnte nicht gespeichert werden.', 'error')
+    }
+  }, [toast])
 
   const loadSecureSettings = useCallback(() => {
     if (!window.fanotes.loadSecureSettings) return Promise.resolve()
@@ -1408,6 +1507,10 @@ export default function App({ startupBootstrap }: AppProps) {
       openDrawing()
     }
   }, [closeDrawing, openDrawing])
+
+  useEffect(() => {
+    if (overviewOpen || glyphenWerkOpen) setSidebarToolsOpen(true)
+  }, [overviewOpen, glyphenWerkOpen])
 
   const openSearchHit = useCallback(async (hit: SearchHit) => {
     setSearchOpen(false)
@@ -1921,6 +2024,25 @@ export default function App({ startupBootstrap }: AppProps) {
         <button type="button" className={drawingOpen ? 'active' : ''} title={drawingOpen ? 'Zur Tastatureingabe wechseln' : 'Auf derselben Seite mit Stift schreiben'} data-tooltip={drawingOpen ? 'Zur Tastatur · Strg D' : 'Mit Stift schreiben · Strg D'} aria-pressed={drawingOpen} onClick={toggleDrawing}><PenLine size={19} /></button>
         <button type="button" className={homeworkOpen ? 'active' : ''} title="Hausaufgaben & Termine" data-tooltip="Hausaufgaben" aria-label="Hausaufgaben und Termine öffnen" onClick={openHomework}><ClipboardList size={18} /></button>
         <div className="ribbon-spacer" />
+        <button
+          type="button"
+          className={sidebarToolsOpen ? 'active' : ''}
+          title={sidebarToolsOpen ? 'Zusätzliche Werkzeuge einklappen' : 'Zusätzliche Werkzeuge ausklappen'}
+          data-tooltip={sidebarToolsOpen ? 'Weniger' : 'Weitere Werkzeuge'}
+          aria-label={sidebarToolsOpen ? 'Zusätzliche Werkzeuge einklappen' : 'Zusätzliche Werkzeuge ausklappen'}
+          aria-expanded={sidebarToolsOpen}
+          onClick={() => setSidebarToolsOpen((open) => !open)}
+        >
+          <MoreVertical size={18} />
+        </button>
+        {sidebarToolsOpen && (
+          <div className="ribbon-extras" role="group" aria-label="Weitere Werkzeuge">
+            <button type="button" title="Heutige Tagesnotiz" data-tooltip="Tagesnotiz" aria-label="Heutige Tagesnotiz öffnen" onClick={() => void createDailyNote()}><CalendarDays size={18} /></button>
+            <button type="button" className={overviewOpen ? 'active' : ''} title="Vault-Übersicht" data-tooltip="Übersicht" aria-label="Vault-Übersicht öffnen" onClick={openOverview}><Network size={18} /></button>
+            <button type="button" className={glyphenWerkOpen ? 'active' : ''} title="GlyphenWerk" data-tooltip="GlyphenWerk" aria-label="GlyphenWerk öffnen" onClick={openGlyphenWerk}><Database size={18} /></button>
+            <button type="button" title="Befehlspalette (Strg+P)" data-tooltip="Befehle · Strg P" aria-label="Befehlspalette öffnen" onClick={() => setPaletteOpen(true)}><Command size={18} /></button>
+          </div>
+        )}
         <button type="button" title="Einstellungen (Strg+,)" data-tooltip="Einstellungen · Strg ," aria-label="Einstellungen öffnen" onClick={() => setSettingsOpen(true)}><Settings size={19} /></button>
       </nav>
 
@@ -1992,25 +2114,9 @@ export default function App({ startupBootstrap }: AppProps) {
                 onCreateFolder={createFolder}
                 onSetFolderColor={setFolderColor}
                 onRename={renameEntry}
+                onMove={moveEntry}
                 onTrash={trashEntry}
               />
-            </div>
-            <div className="sidebar-tools">
-              <button
-                type="button"
-                className={`sidebar-tools-toggle ${sidebarToolsOpen ? 'is-open' : ''}`}
-                aria-expanded={sidebarToolsOpen}
-                onClick={() => setSidebarToolsOpen((open) => !open)}
-              >
-                <ChevronDown size={14} />
-                Weitere Werkzeuge
-              </button>
-              <div className="sidebar-tools-list" hidden={!sidebarToolsOpen}>
-                <button type="button" title="Heutige Tagesnotiz" onClick={() => void createDailyNote()}><CalendarDays size={15} /><span>Tagesnotiz</span></button>
-                <button type="button" className={overviewOpen ? 'is-active' : ''} title="Vault-Übersicht" onClick={openOverview}><Network size={15} /><span>Übersicht</span></button>
-                <button type="button" className={glyphenWerkOpen ? 'is-active' : ''} title="GlyphenWerk" onClick={openGlyphenWerk}><Database size={15} /><span>GlyphenWerk</span></button>
-                <button type="button" title="Befehlspalette (Strg+P)" onClick={() => setPaletteOpen(true)}><Command size={15} /><span>Befehle</span></button>
-              </div>
             </div>
             <div className="sidebar-footer"><span>{counts.files} {counts.files === 1 ? 'Notiz' : 'Notizen'}</span></div>
           </>}
@@ -2096,11 +2202,16 @@ export default function App({ startupBootstrap }: AppProps) {
                       <input value={tagDraft} onChange={(event) => setTagDraft(event.target.value)} placeholder="Tag hinzufügen" maxLength={40} aria-label="Neues Schlagwort" />
                     </form>
                   </div>
+                  <PaperStylePicker
+                    value={activePaper}
+                    disabled={activeEntryMutating}
+                    onChange={(style) => { if (activeTab) void applyNotePaper(activeTab.path, style) }}
+                  />
                 </div>
               )}
               <div className={`editor-split ${splitTab ? 'is-split' : ''}`}>
               <PaperView
-                className={`unified-note-view paper-${settings.paperStyle} ${drawingOpen ? 'is-inking' : ''}`}
+                className={`unified-note-view paper-${activePaper} ${drawingOpen ? 'is-inking' : ''}`}
                 viewKey={activeTab.path}
                 showHud={!drawingOpen}
               >
@@ -2136,6 +2247,8 @@ export default function App({ startupBootstrap }: AppProps) {
                         onClose={closeDrawing}
                         onSaveDrawing={saveDrawingAsset}
                         onInsertMarkdown={insertIntoNote}
+                        pagePaperStyle={activePaper}
+                        onPagePaperChange={(style) => { if (activeTab) void applyNotePaper(activeTab.path, style) }}
                         onSettingsChange={handleDrawingSettingsChange}
                         onDirtyChange={handleDrawingDirtyChange}
                         onTrainingChanged={handleTrainingChanged}

@@ -25,7 +25,7 @@ import {
   type HomeworkKind,
   type HomeworkTask,
 } from '../lib/homeworkStore'
-import { getUiLocale } from '../i18n'
+import { getUiLanguage } from '../i18n'
 
 export type HomeworkBoardProps = {
   subjects: string[]
@@ -33,22 +33,165 @@ export type HomeworkBoardProps = {
   onOpenNote?: (path: string) => void | Promise<void>
 }
 
-const BUCKET_LABELS: Record<HomeworkBucket, string> = {
-  overdue: 'Überfällig',
-  today: 'Heute',
-  upcoming: 'Demnächst',
-  undated: 'Ohne Termin',
-  done: 'Erledigt',
+const HOMEWORK_COPY = {
+  de: {
+    aria: 'Hausaufgaben und Termine',
+    eyebrow: 'Schule & Organisation',
+    title: 'Hausaufgaben & Termine',
+    intro: 'Trage Hausaufgaben und Termine mit Fälligkeit ein. Alles bleibt lokal in deinem Vault unter',
+    openNote: 'Als Notiz öffnen',
+    close: 'Schließen',
+    openStat: 'offen',
+    overdueStat: 'überfällig',
+    todayStat: 'heute',
+    appointmentsStat: 'Termine',
+    doneStat: 'erledigt',
+    saving: 'Speichert …',
+    taskLabel: 'Aufgabe / Termin',
+    taskPlaceholder: 'z. B. Mathe S. 42, Nr. 3–5 oder Elternabend',
+    kind: 'Art',
+    homework: 'Hausaufgabe',
+    appointment: 'Termin',
+    subject: 'Fach',
+    subjectPlaceholder: 'Mathematik',
+    date: 'Datum',
+    time: 'Uhrzeit',
+    priority: 'Priorität',
+    normal: 'Normal',
+    high: 'Wichtig',
+    notes: 'Notizen',
+    notesPlaceholder: 'Optional: Seite, Heft, Mitbringsel …',
+    add: 'Eintrag hinzufügen',
+    views: 'Darstellung',
+    list: 'Liste',
+    week: 'Woche',
+    month: 'Monat',
+    filters: 'Filter',
+    filterOpen: 'Offen',
+    filterHomework: 'Hausaufgaben',
+    filterAppointments: 'Termine',
+    filterDone: 'Erledigt',
+    filterAll: 'Alle',
+    previous: 'Vorheriger Zeitraum',
+    next: 'Nächster Zeitraum',
+    today: 'Heute',
+    weekPrefix: 'Woche',
+    loading: 'Hausaufgaben werden geladen …',
+    emptyTitle: 'Noch keine Einträge',
+    emptyBody: 'Lege deine erste Hausaufgabe oder den nächsten Termin oben an.',
+    overdue: 'Überfällig',
+    upcoming: 'Demnächst',
+    undated: 'Ohne Termin',
+    done: 'Erledigt',
+    noDate: 'Kein Termin',
+    markOpen: 'Als offen markieren',
+    markDone: 'Als erledigt markieren',
+    deleteEntry: 'Eintrag löschen',
+    collapse: 'einklappen',
+    expand: 'anzeigen',
+    saveError: 'Hausaufgaben konnten nicht gespeichert werden.',
+    loadError: 'Hausaufgaben konnten nicht geladen werden.',
+  },
+  en: {
+    aria: 'Homework and appointments',
+    eyebrow: 'School & organisation',
+    title: 'Homework & appointments',
+    intro: 'Add homework and appointments with due dates. Everything stays local in your vault under',
+    openNote: 'Open as note',
+    close: 'Close',
+    openStat: 'open',
+    overdueStat: 'overdue',
+    todayStat: 'today',
+    appointmentsStat: 'appointments',
+    doneStat: 'done',
+    saving: 'Saving…',
+    taskLabel: 'Task / appointment',
+    taskPlaceholder: 'e.g. Maths p. 42, nos. 3–5 or parents’ evening',
+    kind: 'Type',
+    homework: 'Homework',
+    appointment: 'Appointment',
+    subject: 'Subject',
+    subjectPlaceholder: 'Mathematics',
+    date: 'Date',
+    time: 'Time',
+    priority: 'Priority',
+    normal: 'Normal',
+    high: 'Important',
+    notes: 'Notes',
+    notesPlaceholder: 'Optional: page, notebook, things to bring…',
+    add: 'Add entry',
+    views: 'View',
+    list: 'List',
+    week: 'Week',
+    month: 'Month',
+    filters: 'Filter',
+    filterOpen: 'Open',
+    filterHomework: 'Homework',
+    filterAppointments: 'Appointments',
+    filterDone: 'Done',
+    filterAll: 'All',
+    previous: 'Previous period',
+    next: 'Next period',
+    today: 'Today',
+    weekPrefix: 'Week',
+    loading: 'Loading homework…',
+    emptyTitle: 'No entries yet',
+    emptyBody: 'Add your first homework or next appointment above.',
+    overdue: 'Overdue',
+    upcoming: 'Upcoming',
+    undated: 'No date',
+    done: 'Done',
+    noDate: 'No date',
+    markOpen: 'Mark as open',
+    markDone: 'Mark as done',
+    deleteEntry: 'Delete entry',
+    collapse: 'collapse',
+    expand: 'show',
+    saveError: 'Homework could not be saved.',
+    loadError: 'Homework could not be loaded.',
+  },
+} as const
+
+const homeworkText = () => HOMEWORK_COPY[getUiLanguage()]
+
+const bucketLabel = (bucket: HomeworkBucket) => {
+  const copy = homeworkText()
+  return {
+    overdue: copy.overdue,
+    today: copy.today,
+    upcoming: copy.upcoming,
+    undated: copy.undated,
+    done: copy.done,
+  }[bucket]
 }
 
-const dateFormatter = () => new Intl.DateTimeFormat(getUiLocale(), {
+const homeworkLocale = () => (getUiLanguage() === 'en' ? 'en-GB' : 'de-CH')
+
+const startOfMondayWeek = (date: Date) => {
+  const start = new Date(date.getFullYear(), date.getMonth(), date.getDate())
+  start.setDate(start.getDate() - ((start.getDay() + 6) % 7))
+  return start
+}
+
+const mondayWeekdayLabels = () => {
+  const monday = startOfMondayWeek(new Date())
+  return Array.from({ length: 7 }, (_, index) => {
+    const day = new Date(monday)
+    day.setDate(monday.getDate() + index)
+    return new Intl.DateTimeFormat(homeworkLocale(), { weekday: 'short' })
+      .format(day)
+      .replace(/\.$/u, '')
+  })
+}
+
+const dateFormatter = () => new Intl.DateTimeFormat(homeworkLocale(), {
   weekday: 'short',
   day: '2-digit',
   month: 'short',
 })
 
 const formatDue = (task: HomeworkTask) => {
-  if (!task.dueDate) return 'Kein Termin'
+  if (!task.dueDate) return homeworkText().noDate
   const label = dateFormatter().format(new Date(`${task.dueDate}T12:00:00`))
   return task.dueTime ? `${label} · ${task.dueTime}` : label
 }
@@ -98,7 +241,7 @@ export function HomeworkBoard({ subjects, onClose, onOpenNote }: HomeworkBoardPr
         if (generation === persistGenerationRef.current) setDocument(next)
       } catch (persistError) {
         if (generation === persistGenerationRef.current) {
-          setError(persistError instanceof Error ? persistError.message : 'Hausaufgaben konnten nicht gespeichert werden.')
+          setError(persistError instanceof Error ? persistError.message : homeworkText().saveError)
         }
       } finally {
         if (generation === persistGenerationRef.current) setSaving(false)
@@ -120,7 +263,7 @@ export function HomeworkBoard({ subjects, onClose, onOpenNote }: HomeworkBoardPr
           if (!cancelled) setDocument({ version: 1, tasks: [] })
         }
       } catch (loadError) {
-        if (!cancelled) setError(loadError instanceof Error ? loadError.message : 'Hausaufgaben konnten nicht geladen werden.')
+        if (!cancelled) setError(loadError instanceof Error ? loadError.message : homeworkText().loadError)
       } finally {
         if (!cancelled) setLoading(false)
       }
@@ -163,7 +306,7 @@ export function HomeworkBoard({ subjects, onClose, onOpenNote }: HomeworkBoardPr
   const subjectOptions = useMemo(() => {
     const set = new Set<string>(subjects.filter(Boolean))
     for (const task of tasks) if (task.subject) set.add(task.subject)
-    return [...set].sort((left, right) => left.localeCompare(right, 'de'))
+    return [...set].sort((left, right) => left.localeCompare(right, homeworkLocale()))
   }, [subjects, tasks])
 
   const addTask = async () => {
@@ -213,7 +356,7 @@ export function HomeworkBoard({ subjects, onClose, onOpenNote }: HomeworkBoardPr
         <button
           type="button"
           className="homework-check"
-          aria-label={task.done ? 'Als offen markieren' : 'Als erledigt markieren'}
+          aria-label={task.done ? homeworkText().markOpen : homeworkText().markDone}
           aria-pressed={task.done}
           onClick={() => void updateTask(task.id, { done: !task.done })}
         >
@@ -222,7 +365,7 @@ export function HomeworkBoard({ subjects, onClose, onOpenNote }: HomeworkBoardPr
         <div className="homework-card-body">
           <header>
             <strong>{task.title}</strong>
-            <span className="homework-kind">{task.kind === 'appointment' ? 'Termin' : 'Hausaufgabe'}</span>
+            <span className="homework-kind">{task.kind === 'appointment' ? homeworkText().appointment : homeworkText().homework}</span>
           </header>
           <div className="homework-meta">
             {task.subject && <span><BookOpen size={12} />{task.subject}</span>}
@@ -230,14 +373,14 @@ export function HomeworkBoard({ subjects, onClose, onOpenNote }: HomeworkBoardPr
               {task.kind === 'appointment' ? <AlarmClock size={12} /> : <CalendarDays size={12} />}
               {formatDue(task)}
             </span>
-            {task.priority === 'high' && <span className="homework-priority">Wichtig</span>}
+            {task.priority === 'high' && <span className="homework-priority">{homeworkText().high}</span>}
           </div>
           {task.notes && <p>{task.notes}</p>}
         </div>
         <button
           type="button"
           className="homework-delete"
-          aria-label="Eintrag löschen"
+          aria-label={homeworkText().deleteEntry}
           onClick={() => void removeTask(task.id)}
         >
           <Trash2 size={15} />
@@ -258,19 +401,15 @@ export function HomeworkBoard({ subjects, onClose, onOpenNote }: HomeworkBoardPr
   }
 
   const calendarDays = useMemo(() => {
-    const start = new Date(calendarCursor)
     if (plannerView === 'week') {
-      const weekday = (start.getDay() + 6) % 7
-      start.setDate(start.getDate() - weekday)
+      const start = startOfMondayWeek(calendarCursor)
       return Array.from({ length: 7 }, (_, index) => {
         const day = new Date(start)
         day.setDate(start.getDate() + index)
         return day
       })
     }
-    const first = new Date(calendarCursor.getFullYear(), calendarCursor.getMonth(), 1)
-    const weekday = (first.getDay() + 6) % 7
-    first.setDate(first.getDate() - weekday)
+    const first = startOfMondayWeek(new Date(calendarCursor.getFullYear(), calendarCursor.getMonth(), 1))
     return Array.from({ length: 42 }, (_, index) => {
       const day = new Date(first)
       day.setDate(first.getDate() + index)
@@ -297,36 +436,37 @@ export function HomeworkBoard({ subjects, onClose, onOpenNote }: HomeworkBoardPr
 
   const todayIso = isoDay(new Date())
   const calendarLabel = plannerView === 'week'
-    ? `Woche ${calendarDays[0] ? dateFormatter().format(calendarDays[0]) : ''} – ${calendarDays[6] ? dateFormatter().format(calendarDays[6]) : ''}`
-    : new Intl.DateTimeFormat(getUiLocale(), { month: 'long', year: 'numeric' }).format(calendarCursor)
+    ? `${homeworkText().weekPrefix} ${calendarDays[0] ? dateFormatter().format(calendarDays[0]) : ''} – ${calendarDays[6] ? dateFormatter().format(calendarDays[6]) : ''}`
+    : new Intl.DateTimeFormat(homeworkLocale(), { month: 'long', year: 'numeric' }).format(calendarCursor)
+  const copy = homeworkText()
 
   return (
-    <section className="homework-board" aria-label="Hausaufgaben und Termine">
+    <section className="homework-board" aria-label={copy.aria} lang={homeworkLocale()} data-i18n-ignore>
       <style>{homeworkStyles}</style>
       <div className="homework-shell">
         <header className="homework-header">
           <div className="homework-heading">
-            <span className="homework-eyebrow"><ClipboardList size={14} /> Schule & Organisation</span>
-            <h1>Hausaufgaben &amp; Termine</h1>
-            <p>Trage Hausaufgaben und Termine mit Fälligkeit ein. Alles bleibt lokal in deinem Vault unter <code>{HOMEWORK_NOTE_PATH}</code>.</p>
+            <span className="homework-eyebrow"><ClipboardList size={14} /> {copy.eyebrow}</span>
+            <h1>{copy.title}</h1>
+            <p>{copy.intro} <code>{HOMEWORK_NOTE_PATH}</code>.</p>
           </div>
           <div className="homework-header-actions">
             {onOpenNote && (
               <button type="button" className="homework-secondary" onClick={() => void onOpenNote(HOMEWORK_NOTE_PATH)}>
-                Als Notiz öffnen
+                {copy.openNote}
               </button>
             )}
-            <button type="button" className="homework-close" aria-label="Schließen" onClick={onClose}><X size={17} /></button>
+            <button type="button" className="homework-close" aria-label={copy.close} onClick={onClose}><X size={17} /></button>
           </div>
         </header>
 
         <div className="homework-stats" aria-live="polite">
-          <span className="homework-stat"><strong>{stats.open}</strong> offen</span>
-          <span className="homework-stat is-warn"><strong>{stats.overdue}</strong> überfällig</span>
-          <span className="homework-stat"><strong>{stats.today}</strong> heute</span>
-          <span className="homework-stat"><strong>{stats.appointments}</strong> Termine</span>
-          <span className="homework-stat"><strong>{stats.done}</strong> erledigt</span>
-          {saving && <span className="homework-stat is-saving"><LoaderCircle className="spin" size={12} /> Speichert …</span>}
+          <span className="homework-stat"><strong>{stats.open}</strong> {copy.openStat}</span>
+          <span className="homework-stat is-warn"><strong>{stats.overdue}</strong> {copy.overdueStat}</span>
+          <span className="homework-stat"><strong>{stats.today}</strong> {copy.todayStat}</span>
+          <span className="homework-stat"><strong>{stats.appointments}</strong> {copy.appointmentsStat}</span>
+          <span className="homework-stat"><strong>{stats.done}</strong> {copy.doneStat}</span>
+          {saving && <span className="homework-stat is-saving"><LoaderCircle className="spin" size={12} /> {copy.saving}</span>}
         </div>
 
         <form
@@ -338,31 +478,31 @@ export function HomeworkBoard({ subjects, onClose, onOpenNote }: HomeworkBoardPr
         >
           <div className="homework-composer-row">
             <label className="homework-field is-grow">
-              <span>Aufgabe / Termin</span>
+              <span>{copy.taskLabel}</span>
               <input
                 value={title}
                 onChange={(event) => setTitle(event.target.value)}
-                placeholder="z. B. Mathe S. 42, Nr. 3–5 oder Elternabend"
+                placeholder={copy.taskPlaceholder}
                 maxLength={240}
                 required
               />
             </label>
             <label className="homework-field">
-              <span>Art</span>
+              <span>{copy.kind}</span>
               <select value={kind} onChange={(event) => setKind(event.target.value as HomeworkKind)}>
-                <option value="homework">Hausaufgabe</option>
-                <option value="appointment">Termin</option>
+                <option value="homework">{copy.homework}</option>
+                <option value="appointment">{copy.appointment}</option>
               </select>
             </label>
           </div>
           <div className="homework-composer-row">
             <label className="homework-field">
-              <span>Fach</span>
+              <span>{copy.subject}</span>
               <input
                 list="homework-subjects"
                 value={subject}
                 onChange={(event) => setSubject(event.target.value)}
-                placeholder="Mathematik"
+                placeholder={copy.subjectPlaceholder}
                 maxLength={80}
               />
               <datalist id="homework-subjects">
@@ -370,43 +510,43 @@ export function HomeworkBoard({ subjects, onClose, onOpenNote }: HomeworkBoardPr
               </datalist>
             </label>
             <label className="homework-field">
-              <span>Datum</span>
-              <input type="date" value={dueDate} onChange={(event) => setDueDate(event.target.value)} />
+              <span>{copy.date}</span>
+              <input type="date" lang={homeworkLocale()} value={dueDate} onChange={(event) => setDueDate(event.target.value)} />
             </label>
             <label className="homework-field">
-              <span>Uhrzeit</span>
-              <input type="time" value={dueTime} onChange={(event) => setDueTime(event.target.value)} />
+              <span>{copy.time}</span>
+              <input type="time" lang={homeworkLocale()} value={dueTime} onChange={(event) => setDueTime(event.target.value)} />
             </label>
             <label className="homework-field">
-              <span>Priorität</span>
+              <span>{copy.priority}</span>
               <select value={priority} onChange={(event) => setPriority(event.target.value as 'normal' | 'high')}>
-                <option value="normal">Normal</option>
-                <option value="high">Wichtig</option>
+                <option value="normal">{copy.normal}</option>
+                <option value="high">{copy.high}</option>
               </select>
             </label>
           </div>
           <label className="homework-field">
-            <span>Notizen</span>
+            <span>{copy.notes}</span>
             <textarea
               value={notes}
               onChange={(event) => setNotes(event.target.value)}
-              placeholder="Optional: Seite, Heft, Mitbringsel …"
+              placeholder={copy.notesPlaceholder}
               rows={2}
               maxLength={4000}
             />
           </label>
           <div className="homework-composer-actions">
             <button type="submit" className="homework-primary" disabled={!title.trim() || saving}>
-              <Plus size={15} /> Eintrag hinzufügen
+              <Plus size={15} /> {copy.add}
             </button>
           </div>
         </form>
 
-        <div className="homework-views" role="tablist" aria-label="Darstellung">
+        <div className="homework-views" role="tablist" aria-label={copy.views}>
           {([
-            ['list', 'Liste'],
-            ['week', 'Woche'],
-            ['month', 'Monat'],
+            ['list', copy.list],
+            ['week', copy.week],
+            ['month', copy.month],
           ] as const).map(([id, label]) => (
             <button
               key={id}
@@ -421,13 +561,13 @@ export function HomeworkBoard({ subjects, onClose, onOpenNote }: HomeworkBoardPr
           ))}
         </div>
 
-        <div className="homework-filters" role="tablist" aria-label="Filter">
+        <div className="homework-filters" role="tablist" aria-label={copy.filters}>
           {([
-            ['open', 'Offen'],
-            ['homework', 'Hausaufgaben'],
-            ['appointment', 'Termine'],
-            ['done', 'Erledigt'],
-            ['all', 'Alle'],
+            ['open', copy.filterOpen],
+            ['homework', copy.filterHomework],
+            ['appointment', copy.filterAppointments],
+            ['done', copy.filterDone],
+            ['all', copy.filterAll],
           ] as const).map(([id, label]) => (
             <button
               key={id}
@@ -447,13 +587,13 @@ export function HomeworkBoard({ subjects, onClose, onOpenNote }: HomeworkBoardPr
         {plannerView !== 'list' && (
           <div className={`homework-calendar is-${plannerView}`}>
             <div className="homework-calendar-nav">
-              <button type="button" onClick={() => shiftCalendar(-1)} aria-label="Vorheriger Zeitraum">‹</button>
+              <button type="button" onClick={() => shiftCalendar(-1)} aria-label={copy.previous}>‹</button>
               <strong>{calendarLabel}</strong>
-              <button type="button" onClick={() => shiftCalendar(1)} aria-label="Nächster Zeitraum">›</button>
-              <button type="button" className="homework-linkish" onClick={() => setCalendarCursor(new Date())}>Heute</button>
+              <button type="button" onClick={() => shiftCalendar(1)} aria-label={copy.next}>›</button>
+              <button type="button" className="homework-linkish" onClick={() => setCalendarCursor(new Date())}>{copy.today}</button>
             </div>
             <div className="homework-calendar-weekdays">
-              {['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'].map((label) => <span key={label}>{label}</span>)}
+              {mondayWeekdayLabels().map((label) => <span key={label}>{label}</span>)}
             </div>
             <div className={`homework-calendar-grid is-${plannerView}`}>
               {calendarDays.map((day) => {
@@ -484,12 +624,12 @@ export function HomeworkBoard({ subjects, onClose, onOpenNote }: HomeworkBoardPr
         )}
 
         {loading ? (
-          <div className="homework-empty"><LoaderCircle className="spin" size={22} /> Hausaufgaben werden geladen …</div>
+          <div className="homework-empty"><LoaderCircle className="spin" size={22} /> {copy.loading}</div>
         ) : visibleTasks.length === 0 ? (
           <div className="homework-empty">
             <ClipboardList size={28} />
-            <strong>Noch keine Einträge</strong>
-            <p>Lege deine erste Hausaufgabe oder den nächsten Termin oben an.</p>
+            <strong>{copy.emptyTitle}</strong>
+            <p>{copy.emptyBody}</p>
           </div>
         ) : (
           <div className="homework-lists">
@@ -498,19 +638,19 @@ export function HomeworkBoard({ subjects, onClose, onOpenNote }: HomeworkBoardPr
               const items = buckets[bucket]
               if (!items.length) return null
               return (
-                <section key={bucket} className="homework-bucket" aria-label={BUCKET_LABELS[bucket]}>
-                  <h2>{BUCKET_LABELS[bucket]} <em>{items.length}</em></h2>
+                <section key={bucket} className="homework-bucket" aria-label={bucketLabel(bucket)}>
+                  <h2>{bucketLabel(bucket)} <em>{items.length}</em></h2>
                   <div className="homework-cards">{items.map(renderTask)}</div>
                 </section>
               )
             })}
             {(filter === 'done' || filter === 'all' || showDone) && buckets.done.length > 0 && (
-              <section className="homework-bucket is-done" aria-label="Erledigt">
+              <section className="homework-bucket is-done" aria-label={copy.done}>
                 <h2>
-                  Erledigt <em>{buckets.done.length}</em>
+                  {copy.done} <em>{buckets.done.length}</em>
                   {filter !== 'done' && (
                     <button type="button" className="homework-linkish" onClick={() => setShowDone((value) => !value)}>
-                      {showDone || filter === 'all' ? 'einklappen' : 'anzeigen'}
+                      {showDone || filter === 'all' ? copy.collapse : copy.expand}
                     </button>
                   )}
                 </h2>
@@ -528,7 +668,8 @@ export function HomeworkBoard({ subjects, onClose, onOpenNote }: HomeworkBoardPr
 
 const homeworkStyles = `
 .homework-board{position:absolute;inset:0;overflow:auto;background:radial-gradient(circle at 12% -10%,rgba(var(--accent-rgb),.12),transparent 34%),radial-gradient(circle at 88% 0,rgba(69,201,183,.08),transparent 28%),var(--bg)}
-.homework-shell{width:min(1080px,calc(100% - 48px));margin:0 auto;padding:30px 0 56px}
+.homework-shell{width:min(1080px,calc(100% - 48px));margin:0 auto;padding:30px 0 56px;animation:homework-enter .34s cubic-bezier(.22,1,.36,1) both}
+@keyframes homework-enter{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
 .homework-header{display:flex;align-items:flex-start;gap:18px;margin-bottom:16px}
 .homework-heading{min-width:0;flex:1}
 .homework-eyebrow{display:inline-flex;align-items:center;gap:7px;margin-bottom:8px;color:var(--accent-readable);font-size:10px;font-weight:720;letter-spacing:.08em;text-transform:uppercase}
@@ -566,7 +707,8 @@ const homeworkStyles = `
 .homework-calendar-nav>button{width:32px;height:32px;border-radius:9px;border:1px solid var(--border);background:var(--panel);color:var(--text);cursor:pointer}
 .homework-calendar-weekdays{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:6px;margin-bottom:6px;color:var(--text-muted);font-size:9px;font-weight:720;text-transform:uppercase;letter-spacing:.06em;text-align:center}
 .homework-calendar-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:6px}
-.homework-day{min-height:86px;display:flex;flex-direction:column;align-items:stretch;gap:4px;padding:7px;border:1px solid var(--border);border-radius:10px;background:color-mix(in srgb,var(--bg) 80%,transparent);color:inherit;text-align:left;cursor:pointer}
+.homework-day{min-height:86px;display:flex;flex-direction:column;align-items:stretch;gap:4px;padding:7px;border:1px solid var(--border);border-radius:10px;background:color-mix(in srgb,var(--bg) 80%,transparent);color:inherit;text-align:left;cursor:pointer;transition:transform .16s cubic-bezier(.22,1,.36,1),border-color .16s ease,background .16s ease,box-shadow .16s ease}
+.homework-day:hover{transform:translateY(-1px);border-color:var(--border-strong);box-shadow:0 8px 18px rgba(0,0,0,.12)}
 .homework-calendar.is-week .homework-day{min-height:150px}
 .homework-day.is-today{border-color:color-mix(in srgb,var(--accent) 55%,var(--border))}
 .homework-day.is-outside{opacity:.45}
@@ -609,6 +751,10 @@ const homeworkStyles = `
   .homework-shell{width:calc(100% - 24px);padding-top:18px}
   .homework-header{flex-direction:column}
   .homework-composer-row{grid-template-columns:1fr 1fr}
+}
+@media(prefers-reduced-motion:reduce){
+  .homework-shell{animation:none}
+  .homework-day{transition:none}
 }
 `
 

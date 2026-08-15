@@ -1,6 +1,7 @@
 import { DEFAULT_SETTINGS } from '../defaults'
 import { getUiLanguage } from '../i18n'
-import type { AppSettings, BootstrapData, DrawingLibraryDocument, FaNotesApi, ServerBackupState, UpdateState, VaultEntry, WorksheetDocument } from '../types'
+import type { AppSettings, BootstrapData, DrawingLibraryDocument, FaNotesApi, PaperStyle, ServerBackupState, UpdateState, VaultEntry, WorksheetDocument } from '../types'
+import { isPaperStyle } from './paperStyles'
 import { browserInitialFiles, browserStarterFolders, browserStarterSubjects } from './browserPreview'
 import { listBrowserLmStudioModels, transformWithBrowserLmStudio } from './lmStudioBrowser'
 import { listBrowserAiModels, transformWithBrowserAi } from './aiProviderBrowser'
@@ -211,6 +212,7 @@ export function createBrowserApi(): FaNotesApi {
   const assetUrls = new Map<string, string>()
   const drawings = new Map<string, DrawingLibraryDocument>()
   const worksheets = new Map<string, WorksheetDocument>()
+  const notePaper = new Map<string, PaperStyle>()
   const noteHistory = new Map<string, Array<{ id: string; createdAt: string; content: string; bytes: number }>>()
   let cachedTree: VaultEntry[] | null = null
   let updateState: UpdateState = {
@@ -307,6 +309,12 @@ export function createBrowserApi(): FaNotesApi {
     serverBackup = storedServerBackup(meta.get('serverBackup'))
     serverBackupRuntimeStatus = serverBackup ? serverBackup.error ? 'error' : 'ready' : 'disabled'
     onboardingComplete = meta.get('onboardingComplete') === true
+    const storedPaper = meta.get('notePaper')
+    if (isRecord(storedPaper)) {
+      Object.entries(storedPaper).forEach(([path, style]) => {
+        if (isPaperStyle(style)) notePaper.set(path, style)
+      })
+    }
     fileRows.forEach((row) => files.set(row.path, row))
     folderRows.forEach((row) => folders.set(row.path, row))
     assetRows.forEach((row) => assets.set(row.path, row.value))
@@ -343,6 +351,25 @@ export function createBrowserApi(): FaNotesApi {
     sort(root)
     cachedTree = root
     return clone(root)
+  }
+
+  const persistNotePaper = () => setMeta('notePaper', Object.fromEntries(notePaper))
+
+  const remapNotePaper = async (from: string, to: string | null) => {
+    const next = new Map<string, PaperStyle>()
+    let changed = false
+    notePaper.forEach((style, path) => {
+      if (path === from || path.startsWith(`${from}/`)) {
+        changed = true
+        if (to !== null) next.set(path === from ? to : `${to}${path.slice(from.length)}`, style)
+        return
+      }
+      next.set(path, style)
+    })
+    if (!changed) return
+    notePaper.clear()
+    next.forEach((style, path) => notePaper.set(path, style))
+    await persistNotePaper()
   }
 
   const uniquePath = (preferred: string, kind: 'file' | 'folder') => {
@@ -741,6 +768,7 @@ export function createBrowserApi(): FaNotesApi {
         const record = { ...files.get(path)!, path: next, modifiedAt: new Date().toISOString() }
         await write('files', (store) => { store.delete(path); store.put(record) })
         files.delete(path); files.set(next, record); cachedTree = null
+        await remapNotePaper(path, next)
         return next
       }
       if (!folders.has(path)) throw new Error('Der Eintrag wurde nicht gefunden.')
@@ -757,6 +785,80 @@ export function createBrowserApi(): FaNotesApi {
       ;[...folders.keys()].filter((candidate) => candidate === path || candidate.startsWith(`${path}/`)).forEach((candidate) => folders.delete(candidate))
       ;[...files.keys()].filter((candidate) => candidate.startsWith(`${path}/`)).forEach((candidate) => files.delete(candidate))
       movedFolders.forEach((row) => folders.set(row.path, row)); movedFiles.forEach((row) => files.set(row.path, row)); cachedTree = null
+      await remapNotePaper(path, next)
+      return next
+    },
+    moveEntry: async (rawPath, rawDestFolder) => {
+      await ready
+      const path = normalizePath(rawPath)
+      const dest = typeof rawDestFolder === 'string' && rawDestFolder.trim() ? normalizePath(rawDestFolder) : ''
+      if (dest && !folders.has(dest)) throw new Error('Der Zielordner wurde nicht gefunden.')
+      if (dest === path || dest.startsWith(`${path}/`)) throw new Error('Ein Ordner kann nicht in sich selbst verschoben werden.')
+      const currentParent = parentPath(path)
+      if (currentParent === dest) return path
+      const name = fileName(path)
+      const extensionMatch = /\.[^.]+$/u.exec(name)
+      const extension = extensionMatch ? extensionMatch[0] : ''
+      const base = extension ? name.slice(0, -extension.length) : name
+      const companionExt = /\.(md|markdown)$/iu.test(name) ? '.famd' : /\.famd$/iu.test(name) ? '.md' : ''
+      const occupied = (candidate: string) => files.has(candidate) || folders.has(candidate)
+      const companionOf = (candidate: string) => companionExt ? `${candidate.replace(/\.[^.]+$/u, '')}${companionExt}` : ''
+      let nextName = name
+      for (let index = 1; index <= 10000; index += 1) {
+        const candidateName = index === 1 ? name : `${base} ${index}${extension}`
+        const candidate = [dest, candidateName].filter(Boolean).join('/')
+        const companion = companionOf(candidate)
+        if (!occupied(candidate) && (!companion || !occupied(companion))) {
+          nextName = candidateName
+          break
+        }
+        if (index === 10000) throw new Error('Es konnte kein eindeutiger Name erzeugt werden.')
+      }
+      const next = [dest, nextName].filter(Boolean).join('/')
+      if (files.has(path)) {
+        const record = { ...files.get(path)!, path: next, modifiedAt: new Date().toISOString() }
+        const oldCompanion = companionOf(path)
+        const nextCompanion = companionOf(next)
+        const companionRecord = oldCompanion && files.has(oldCompanion)
+          ? { ...files.get(oldCompanion)!, path: nextCompanion, modifiedAt: new Date().toISOString() }
+          : null
+        await write('files', (store) => {
+          store.delete(path)
+          store.put(record)
+          if (companionRecord && oldCompanion !== path) {
+            store.delete(oldCompanion)
+            store.put(companionRecord)
+          }
+        })
+        files.delete(path)
+        files.set(next, record)
+        if (companionRecord && oldCompanion !== path) {
+          files.delete(oldCompanion)
+          files.set(companionRecord.path, companionRecord)
+        }
+        cachedTree = null
+        await remapNotePaper(path, next)
+        return next
+      }
+      if (!folders.has(path)) throw new Error('Der Eintrag wurde nicht gefunden.')
+      const movedFolders = [...folders.values()]
+        .filter((row) => row.path === path || row.path.startsWith(`${path}/`))
+        .map((row) => ({ ...row, path: `${next}${row.path.slice(path.length)}` }))
+      const movedFiles = [...files.values()]
+        .filter((row) => row.path.startsWith(`${path}/`))
+        .map((row) => ({ ...row, path: `${next}${row.path.slice(path.length)}` }))
+      await writeMany(['folders', 'files'], (stores) => {
+        ;[...folders.keys()].filter((candidate) => candidate === path || candidate.startsWith(`${path}/`)).forEach((candidate) => stores.get('folders')!.delete(candidate))
+        ;[...files.keys()].filter((candidate) => candidate.startsWith(`${path}/`)).forEach((candidate) => stores.get('files')!.delete(candidate))
+        movedFolders.forEach((row) => stores.get('folders')!.put(row))
+        movedFiles.forEach((row) => stores.get('files')!.put(row))
+      })
+      ;[...folders.keys()].filter((candidate) => candidate === path || candidate.startsWith(`${path}/`)).forEach((candidate) => folders.delete(candidate))
+      ;[...files.keys()].filter((candidate) => candidate.startsWith(`${path}/`)).forEach((candidate) => files.delete(candidate))
+      movedFolders.forEach((row) => folders.set(row.path, row))
+      movedFiles.forEach((row) => files.set(row.path, row))
+      cachedTree = null
+      await remapNotePaper(path, next)
       return next
     },
     trashEntry: async (rawPath) => {
@@ -769,6 +871,7 @@ export function createBrowserApi(): FaNotesApi {
         deletedFolders.forEach((candidate) => stores.get('folders')!.delete(candidate))
       })
       deletedFiles.forEach((candidate) => files.delete(candidate)); deletedFolders.forEach((candidate) => folders.delete(candidate)); cachedTree = null
+      await remapNotePaper(path, null)
     },
     search: async (query) => {
       await ready
@@ -834,6 +937,18 @@ export function createBrowserApi(): FaNotesApi {
     readFamdInk: async () => {
       await ready
       return null
+    },
+    readNotePaperStyle: async (rawPath) => {
+      await ready
+      return notePaper.get(normalizePath(rawPath)) ?? null
+    },
+    setNotePaperStyle: async (rawPath, paperStyle) => {
+      await ready
+      if (!isPaperStyle(paperStyle)) throw new Error('Diese Papierart wird nicht unterstützt.')
+      const path = normalizePath(rawPath)
+      notePaper.set(path, paperStyle)
+      await setMeta('notePaper', Object.fromEntries(notePaper))
+      return paperStyle
     },
     importWorksheet: async () => {
       const file = await pickWorksheet()

@@ -48,6 +48,7 @@ import type {
 } from '../../../src/lib/recognition'
 import type { Stroke, StrokePoint } from '../../../src/types'
 import type { AppSettings, DrawingAsset, PaperStyle } from '../types'
+import { PAPER_STYLES, drawPaperBackground } from '../lib/paperStyles'
 import { TextToHandwritingDialog } from './TextToHandwritingDialog'
 import type {
   CorrectionLearningResult,
@@ -216,11 +217,21 @@ const FULL_INK_WINDOW: InkWindow = { y0: 0, y1: 1 }
 const inkWindowSpan = (window: InkWindow) => Math.max(0.06, Math.min(1, window.y1 - window.y0))
 const isFullInkWindow = (window: InkWindow) => window.y0 <= 0.002 && window.y1 >= 0.998
 
+const measureVisibleInkRange = (paper: HTMLElement, scroller: HTMLElement): InkWindow => {
+  const view = scroller.getBoundingClientRect()
+  const sheet = paper.getBoundingClientRect()
+  if (sheet.height < 1_600 || sheet.height <= view.height * 1.35) return FULL_INK_WINDOW
+  return {
+    y0: clamp((view.top - sheet.top) / sheet.height),
+    y1: clamp((view.bottom - sheet.top) / sheet.height),
+  }
+}
+
 const measureInkWindow = (paper: HTMLElement, scroller: HTMLElement): InkWindow => {
   const view = scroller.getBoundingClientRect()
   const sheet = paper.getBoundingClientRect()
   if (sheet.height < 1_600 || sheet.height <= view.height * 1.35) return FULL_INK_WINDOW
-  const pad = (view.height * 0.95) / Math.max(1, sheet.height)
+  const pad = (view.height * 1.15) / Math.max(1, sheet.height)
   const y0 = clamp((view.top - sheet.top) / sheet.height - pad)
   const y1 = clamp((view.bottom - sheet.top) / sheet.height + pad)
   if (y1 - y0 >= 0.94) return FULL_INK_WINDOW
@@ -228,8 +239,15 @@ const measureInkWindow = (paper: HTMLElement, scroller: HTMLElement): InkWindow 
 }
 
 const inkWindowsDiffer = (left: InkWindow, right: InkWindow) => (
-  Math.abs(left.y0 - right.y0) > 0.014 || Math.abs(left.y1 - right.y1) > 0.014
+  Math.abs(left.y0 - right.y0) > 0.04 || Math.abs(left.y1 - right.y1) > 0.04
 )
+
+const visibleFitsInkWindow = (window: InkWindow, visible: InkWindow) => {
+  if (isFullInkWindow(visible)) return isFullInkWindow(window)
+  if (isFullInkWindow(window)) return true
+  const margin = 0.05
+  return visible.y0 >= window.y0 + margin && visible.y1 <= window.y1 - margin
+}
 
 const strokeIntersectsWindow = (stroke: { points: Array<{ y: number }> }, window: InkWindow) => {
   let minY = 1
@@ -453,6 +471,8 @@ export type DrawingBoardProps = {
   onTrainingChanged?: (sampleCount: number) => void
   onOpenGlyphenWerk?: () => void
   onClose?: () => void
+  pagePaperStyle?: PaperStyle
+  onPagePaperChange?: (style: PaperStyle) => void
 }
 
 type Notice = { kind: 'success' | 'error' | 'info'; text: string }
@@ -563,12 +583,9 @@ const strokePaint = (
   return gradient
 }
 
-const paperLabel: Record<PaperStyle, string> = {
-  blank: 'Blanko',
-  dots: 'Punkte',
-  grid: 'Kariert',
-  lines: 'Liniert',
-}
+const paperLabel: Record<PaperStyle, string> = Object.fromEntries(
+  PAPER_STYLES.map((item) => [item.id, item.label]),
+) as Record<PaperStyle, string>
 
 const colorChoices = ['#191c24', '#3d52d5', '#7654d6', '#d74769', '#df7627', '#138d75']
 const artColorChoices = [
@@ -685,48 +702,7 @@ const drawPaper = (
   height: number,
   style: PaperStyle,
 ) => {
-  context.save()
-  context.fillStyle = '#fbfcff'
-  context.fillRect(0, 0, width, height)
-  context.strokeStyle = 'rgba(103, 116, 147, .145)'
-  context.fillStyle = 'rgba(92, 107, 142, .28)'
-  context.lineWidth = Math.max(1, width / SOURCE_WIDTH * 0.7)
-  const step = width / SOURCE_WIDTH * 32
-
-  if (style === 'dots') {
-    const radius = Math.max(0.8, width / SOURCE_WIDTH * 1.05)
-    for (let y = step; y < height; y += step) {
-      for (let x = step; x < width; x += step) {
-        context.beginPath()
-        context.arc(x, y, radius, 0, Math.PI * 2)
-        context.fill()
-      }
-    }
-  } else if (style === 'grid') {
-    context.beginPath()
-    for (let x = step; x < width; x += step) {
-      context.moveTo(x, 0)
-      context.lineTo(x, height)
-    }
-    for (let y = step; y < height; y += step) {
-      context.moveTo(0, y)
-      context.lineTo(width, y)
-    }
-    context.stroke()
-  } else if (style === 'lines') {
-    context.beginPath()
-    for (let y = step; y < height; y += step) {
-      context.moveTo(0, y)
-      context.lineTo(width, y)
-    }
-    context.stroke()
-    context.strokeStyle = 'rgba(210, 82, 105, .16)'
-    context.beginPath()
-    context.moveTo(step * 1.65, 0)
-    context.lineTo(step * 1.65, height)
-    context.stroke()
-  }
-  context.restore()
+  drawPaperBackground(context, width, height, style)
 }
 
 const drawInkStroke = (
@@ -1121,6 +1097,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   onTrainingChanged,
   onOpenGlyphenWerk,
   onClose,
+  pagePaperStyle,
+  onPagePaperChange,
 }: DrawingBoardProps, forwardedRef) {
   const paperView = usePaperView()
   const boardRef = useRef<HTMLElement | null>(null)
@@ -1131,7 +1109,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const committedCanvasDirtyRef = useRef(true)
   const canvasPixelSizeRef = useRef({ width: 0, height: 0, virtualHeight: 0 })
   const inkWindowRef = useRef<InkWindow>(FULL_INK_WINDOW)
-  const inkWindowFrameRef = useRef<number | null>(null)
+  const inkWindowIdleRef = useRef<number | null>(null)
   const resizeDebounceRef = useRef<number | null>(null)
   const resizeDirtyRef = useRef(false)
   const canvasQualityKeyRef = useRef('')
@@ -1207,7 +1185,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const [artSymbolRotation, setArtSymbolRotation] = useState(initialArtPreferences.symbolRotation)
   const [penColor, setPenColor] = useState(settings.penColor)
   const [penWidth, setPenWidth] = useState(settings.penWidth)
-  const [paperStyle, setPaperStyle] = useState(settings.paperStyle)
+  const [paperStyle, setPaperStyle] = useState(pagePaperStyle ?? settings.paperStyle)
   const [sourceHeight, setSourceHeight] = useState(SOURCE_HEIGHT)
   const [sourceWidth, setSourceWidth] = useState(SOURCE_WIDTH)
   const [viewZoom, setViewZoom] = useState(1)
@@ -1356,7 +1334,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   useEffect(() => {
     setPenColor(settings.penColor)
     setPenWidth(settings.penWidth)
-    setPaperStyle(settings.paperStyle)
+    if (!pagePaperStyle) setPaperStyle(settings.paperStyle)
     setMode(settings.recognitionMode)
     if (settings.recognitionMode === 'auto') {
       if (!tokens.length) setRecognizedMode(settings.lastRecognitionMode)
@@ -1364,7 +1342,11 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       setRecognizedMode(settings.recognitionMode)
       setAutomaticResult(null)
     }
-  }, [settings.lastRecognitionMode, settings.paperStyle, settings.penColor, settings.penWidth, settings.recognitionMode, tokens.length])
+  }, [pagePaperStyle, settings.lastRecognitionMode, settings.paperStyle, settings.penColor, settings.penWidth, settings.recognitionMode, tokens.length])
+
+  useEffect(() => {
+    if (pagePaperStyle) setPaperStyle(pagePaperStyle)
+  }, [pagePaperStyle])
 
   useEffect(() => {
     try {
@@ -1614,7 +1596,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       if (!document || typeof document !== 'object') throw new Error('Kein Zeichnungsobjekt')
       const raw = document as Partial<DrawingDocument>
       strokesRef.current = safeInkStrokes(raw.strokes, initialColorRef.current)
-      if (raw.paperStyle && raw.paperStyle in paperLabel) setPaperStyle(raw.paperStyle)
+      if (!pagePaperStyle && raw.paperStyle && raw.paperStyle in paperLabel) setPaperStyle(raw.paperStyle)
       if (typeof raw.sourceHeight === 'number' && raw.sourceHeight >= 400 && raw.sourceHeight <= MAX_SOURCE_HEIGHT) {
         sourceHeightRef.current = raw.sourceHeight
         setSourceHeight(raw.sourceHeight)
@@ -1684,21 +1666,23 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       ? (canvas.closest('.unified-paper') as HTMLElement | null)
       : null) ?? canvas
     const originRect = originEl.getBoundingClientRect()
-    const centerX = originRect.left + originRect.width / 2
-    const centerY = originRect.top + originRect.height / 2
-    const dx = event.clientX - centerX
-    const dy = event.clientY - centerY
-    const zoom = Math.max(0.01, viewZoomRef.current)
-    const rad = (-viewRotationRef.current * Math.PI) / 180
-    const cos = Math.cos(rad)
-    const sin = Math.sin(rad)
-    // Recover local paper-space coords relative to the canvas layout box.
-    // Paper-local coordinates stay 0–1 over the full sheet even when the ink
-    // bitmap only covers the visible window.
     const paperW = Math.max(1, originEl === canvas ? width : originEl.offsetWidth)
     const paperH = Math.max(1, originEl === canvas ? height : originEl.offsetHeight)
-    const paperLocalX = (dx * cos - dy * sin) / zoom + paperW / 2
-    const paperLocalY = (dx * sin + dy * cos) / zoom + paperH / 2
+    // getBoundingClientRect already includes CSS zoom. Do not divide by zoom again.
+    const visualX = (event.clientX - originRect.left) / Math.max(1, originRect.width)
+    const visualY = (event.clientY - originRect.top) / Math.max(1, originRect.height)
+    const rotation = viewRotationRef.current
+    let paperLocalX = visualX * paperW
+    let paperLocalY = visualY * paperH
+    if (Math.abs(rotation) > 0.01) {
+      const rad = (-rotation * Math.PI) / 180
+      const cos = Math.cos(rad)
+      const sin = Math.sin(rad)
+      const dx = (visualX - 0.5) * paperW
+      const dy = (visualY - 0.5) * paperH
+      paperLocalX = dx * cos - dy * sin + paperW / 2
+      paperLocalY = dx * sin + dy * cos + paperH / 2
+    }
     const localX = originEl === canvas ? paperLocalX : paperLocalX * (width / paperW)
     const localY = originEl === canvas ? paperLocalY : paperLocalY * (height / paperH)
 
@@ -1766,6 +1750,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       }
       return
     }
+    const visible = measureVisibleInkRange(paper, scroller)
+    if (!force && visibleFitsInkWindow(inkWindowRef.current, visible)) return
     const next = measureInkWindow(paper, scroller)
     if (!force && !inkWindowsDiffer(inkWindowRef.current, next)) return
     inkWindowRef.current = next
@@ -1794,11 +1780,17 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     if (surfaceRef.current?.parentElement) observer.observe(surfaceRef.current.parentElement)
     const scroller = resolvePaperElement()?.closest('.unified-note-view')
     const onScroll = () => {
-      if (inkWindowFrameRef.current !== null) return
-      inkWindowFrameRef.current = requestAnimationFrame(() => {
-        inkWindowFrameRef.current = null
+      // Rebuild the ink window only after scrolling settles. Resizing canvases
+      // mid-scroll forces a full paper/text repaint and looks like warping.
+      if (inkWindowIdleRef.current !== null) window.clearTimeout(inkWindowIdleRef.current)
+      inkWindowIdleRef.current = window.setTimeout(() => {
+        inkWindowIdleRef.current = null
+        if (activeStrokeRef.current) {
+          resizeDirtyRef.current = true
+          return
+        }
         syncInkWindow()
-      })
+      }, 160)
     }
     scroller?.addEventListener('scroll', onScroll, { passive: true })
     syncInkWindow(true)
@@ -1807,7 +1799,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       mountedRef.current = false
       observer.disconnect()
       scroller?.removeEventListener('scroll', onScroll)
-      if (inkWindowFrameRef.current !== null) cancelAnimationFrame(inkWindowFrameRef.current)
+      if (inkWindowIdleRef.current !== null) window.clearTimeout(inkWindowIdleRef.current)
       if (resizeDebounceRef.current !== null) window.clearTimeout(resizeDebounceRef.current)
       if (drawFrameRef.current !== null) cancelAnimationFrame(drawFrameRef.current)
       if (pendingSolverTapRef.current) window.clearTimeout(pendingSolverTapRef.current.timer)
@@ -1972,29 +1964,15 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
 
   const zoomBy = useCallback((delta: number, originClient?: { x: number; y: number }) => {
     forceEndActivePointerRef.current('view-gesture')
+    if (paperView) {
+      paperView.zoomBy(delta, originClient)
+      return
+    }
     const previous = viewZoomRef.current
     const next = clampViewZoom(previous + delta)
     if (next === previous) return
-    // Keep the pointer position stable when zooming around a point.
-    const originTarget = (inline ? resolvePaperElement() : null) ?? canvasRef.current
-    if (originClient && originTarget) {
-      const rect = originTarget.getBoundingClientRect()
-      const centerX = rect.left + rect.width / 2
-      const centerY = rect.top + rect.height / 2
-      const dx = originClient.x - centerX
-      const dy = originClient.y - centerY
-      const factor = next / previous
-      setView({
-        zoom: next,
-        pan: {
-          x: viewPanRef.current.x + dx - dx * factor,
-          y: viewPanRef.current.y + dy - dy * factor,
-        },
-      })
-      return
-    }
-    setView({ zoom: next })
-  }, [inline, resolvePaperElement, setView])
+    setView({ zoom: next, pan: { x: 0, y: 0 } })
+  }, [paperView, setView])
 
   const rotateBy = useCallback((delta: number) => {
     forceEndActivePointerRef.current('view-gesture')
@@ -2840,19 +2818,26 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       gestureChangedRef.current = true
       gestureToolRef.current = 'pen'
       activeRenderedPointCountRef.current = 0
-      const first = sampleCompassArc(event.pose, event.pose.rotation, event.pose.rotation, sw, sh)[0]
+      growForPose(event.pose)
+      const pose = compassPoseRef.current ?? event.pose
+      const first = sampleCompassArc(pose, pose.rotation, pose.rotation, sourceWidthRef.current, sourceHeightRef.current)[0]
       if (!first) return
       activeStrokeRef.current = makeStroke([toPoint(first.x, first.y)])
-      growForPose(event.pose)
       paintActiveStrokeNow()
       return
     }
     if (event.type === 'append') {
       const stroke = activeStrokeRef.current
       if (!stroke) return
-      const extra = sampleCompassArc(event.pose, event.fromAngle, event.toAngle, sw, sh)
-      for (const point of extra) stroke.points.push(toPoint(point.x, point.y))
       growForPose(event.pose)
+      const extra = sampleCompassArc(
+        compassPoseRef.current ?? event.pose,
+        event.fromAngle,
+        event.toAngle,
+        sourceWidthRef.current,
+        sourceHeightRef.current,
+      )
+      for (const point of extra) stroke.points.push(toPoint(point.x, point.y))
       if (!paintActiveStrokeNow()) scheduleRedraw()
       return
     }
@@ -2866,10 +2851,11 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       commitReadyStroke(activeStrokeRef.current, label)
       return
     }
-    const points = sampleCompassCircle(event.pose, sw, sh).map((point) => toPoint(point.x, point.y))
     growForPose(event.pose)
+    const pose = compassPoseRef.current ?? event.pose
+    const points = sampleCompassCircle(pose, sourceWidthRef.current, sourceHeightRef.current).map((point) => toPoint(point.x, point.y))
     beforeGestureRef.current = snapshotStrokes(strokesRef.current)
-    commitReadyStroke(makeStroke(points), `Kreis ${formatMillimetres(event.pose.radiusMm)} gezeichnet.`)
+    commitReadyStroke(makeStroke(points), `Kreis ${formatMillimetres(pose.radiusMm)} gezeichnet.`)
   }, [artBrush, artColor, artEffect, artOpacity, artWidth, bumpInkRevision, commitStrokeToCanvas, ensureWriteRoom, fitPageToInk, inkMode, paintActiveStrokeNow, penColor, penWidth, scheduleRedraw, setDirty, updateHistoryState])
 
   /**
@@ -4300,7 +4286,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
 
   const changePaper = (next: PaperStyle) => {
     setPaperStyle(next)
-    onSettingsChange?.({ paperStyle: next })
+    onPagePaperChange?.(next)
+    if (!onPagePaperChange) onSettingsChange?.({ paperStyle: next })
     bumpRevision()
     setDirty(true)
   }
@@ -5321,8 +5308,9 @@ const drawingBoardStyles = `
 .lw-draw-icon,.lw-draw-subtle,.lw-primary-action,.lw-convert-action,.lw-model-card button{border:0;cursor:pointer;transition:transform .16s ease,background .16s ease,opacity .16s ease}.lw-draw-icon{display:grid;place-items:center;width:32px;height:32px;border-radius:8px;background:transparent}.lw-draw-icon:hover:not(:disabled){background:color-mix(in srgb,var(--text,#fff) 8%,transparent)}.lw-draw-icon.lw-danger:hover:not(:disabled){color:var(--danger,#d94b63);background:color-mix(in srgb,var(--danger,#d94b63) 10%,transparent)}.lw-drawing-board button:disabled{opacity:.5;cursor:not-allowed}.lw-draw-subtle{display:flex;align-items:center;justify-content:center;gap:7px;height:32px;padding:0 10px;border-radius:8px;background:color-mix(in srgb,var(--text,#fff) 6%,transparent)}.lw-draw-subtle:hover:not(:disabled){background:color-mix(in srgb,var(--text,#fff) 10%,transparent)}.lw-draw-subtle.is-active{color:var(--text,#fff);background:color-mix(in srgb,var(--draw-accent) 22%,var(--background-secondary,#17171d));box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--draw-accent) 38%,transparent)}
 .lw-draw-workspace{position:relative;display:grid;grid-template-columns:minmax(0,1fr);flex:1;min-height:0;padding:18px;gap:14px}.lw-draw-workspace.has-conversion{grid-template-columns:minmax(0,1fr) minmax(300px,370px)}.lw-canvas-shell{position:relative;display:flex;min-width:0;min-height:0;flex-direction:column;padding:10px 10px 7px;border:1px solid var(--draw-border);border-radius:17px;background:color-mix(in srgb,var(--background-secondary,#17171d) 84%,transparent);box-shadow:0 20px 55px rgba(0,0,0,.16)}.lw-canvas-glow{position:absolute;inset:-1px;border-radius:inherit;pointer-events:none;background:radial-gradient(circle at 15% 0,color-mix(in srgb,var(--draw-accent) 10%,transparent),transparent 36%)}.lw-canvas-surface{position:relative;z-index:1;flex:0 0 auto;min-width:220px;min-height:300px;aspect-ratio:210/297;margin:auto;overflow:hidden;border-radius:8px;background:#fbfcff;box-shadow:0 8px 32px rgba(0,0,0,.2),inset 0 0 0 1px rgba(30,42,65,.08);will-change:transform;touch-action:none}.lw-tablet-canvas{position:absolute;inset:0;display:block;width:100%;height:100%;outline:none;touch-action:none;user-select:none;-webkit-user-select:none;image-rendering:auto}
 .lw-drafting-layer{position:absolute;inset:0;z-index:6;width:100%;height:100%;overflow:visible;pointer-events:none;touch-action:none}
-.lw-drafting-body{fill:rgba(248,250,255,.78);stroke:#3a4460;stroke-width:1.2;cursor:grab;pointer-events:auto}
-.lw-drafting-window{fill:rgba(255,255,255,.35);stroke:#5b6578;stroke-width:.8;pointer-events:none}
+.lw-drafting-body{fill:#e8edf4;stroke:#2a3348;stroke-width:1.2;cursor:grab;pointer-events:auto}
+.lw-drafting-window{fill:#f7f9fc;stroke:#5b6578;stroke-width:.8;pointer-events:none}
+.lw-drafting-arm{fill:#cfd6e2;stroke:#2a3348;stroke-width:1.1;cursor:grab;pointer-events:auto}
 .lw-drafting-edge{stroke:#1e6fd6;stroke-width:2.2;stroke-linecap:round;pointer-events:none}
 .lw-drafting-tick{stroke:#2a3348;stroke-width:.8}
 .lw-drafting-tick.is-major{stroke:#151a24;stroke-width:1.2}
@@ -5335,7 +5323,7 @@ const drawingBoardStyles = `
 .lw-drafting-leg{fill:none;stroke:#9aa3b5;stroke-width:8;stroke-linecap:round;cursor:grab;pointer-events:stroke}
 .lw-drafting-leg.is-pencil{stroke:#c4a57a}
 .lw-drafting-hinge{fill:#8a93a5;stroke:#3a4460;stroke-width:1.2;cursor:grab;pointer-events:auto}
-.lw-drafting-needle{fill:#2a3142;stroke:#111;stroke-width:.8;cursor:grab;pointer-events:auto}
+.lw-drafting-needle{fill:none;stroke:#1a1f2a;stroke-width:1.6;cursor:grab;pointer-events:auto}
 .lw-drafting-needle-dot{fill:#111;pointer-events:none}
 .lw-drafting-lead{fill:#2b2f38;stroke:#111;stroke-width:.6;pointer-events:none}
 .lw-drafting-radius{fill:#f3c14e;stroke:#fff;stroke-width:1.5;cursor:ew-resize;pointer-events:auto}

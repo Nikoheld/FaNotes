@@ -19,6 +19,10 @@ import {
   defaultPaperView,
   isPaperViewActive,
   normalizeRotation,
+  readSharedPaperView,
+  scrollViewportToZoomPoint,
+  subscribeSharedPaperView,
+  writeSharedPaperView,
   zoomAroundPoint,
   type PaperViewSnapshot,
 } from '../lib/paperView'
@@ -44,10 +48,10 @@ type PaperViewProps = {
 
 export function PaperView({ children, className = '', viewKey, showHud = true }: PaperViewProps) {
   const noteViewRef = useRef<HTMLDivElement>(null)
-  const viewRef = useRef(defaultPaperView())
-  const [view, setViewState] = useState(defaultPaperView)
+  const viewRef = useRef(readSharedPaperView())
+  const [view, setViewState] = useState(readSharedPaperView)
 
-  const apply = useCallback((next: PaperViewSnapshot) => {
+  const paint = useCallback((next: PaperViewSnapshot) => {
     viewRef.current = next
     setViewState(next)
     const noteView = noteViewRef.current
@@ -55,20 +59,27 @@ export function PaperView({ children, className = '', viewKey, showHud = true }:
     applyPaperViewToElements(paper, noteView, next)
   }, [])
 
-  useEffect(() => {
-    apply(defaultPaperView())
-  }, [apply, viewKey])
+  const apply = useCallback((next: PaperViewSnapshot) => {
+    writeSharedPaperView(next)
+  }, [])
+
+  useEffect(() => subscribeSharedPaperView(paint), [paint])
 
   useEffect(() => {
-    apply(viewRef.current)
-  }, [apply])
+    paint(readSharedPaperView())
+  }, [paint])
+
+  useEffect(() => {
+    if (!showHud) return
+    writeSharedPaperView(defaultPaperView())
+  }, [showHud, viewKey])
 
   const setView = useCallback((next: Partial<PaperViewSnapshot>) => {
     const current = viewRef.current
     apply({
       zoom: clampViewZoom(next.zoom ?? current.zoom),
       rotation: normalizeRotation(next.rotation ?? current.rotation),
-      pan: next.pan ?? current.pan,
+      pan: { x: 0, y: 0 },
     })
   }, [apply])
 
@@ -76,16 +87,17 @@ export function PaperView({ children, className = '', viewKey, showHud = true }:
     const current = viewRef.current
     const nextZoom = clampViewZoom(current.zoom + delta)
     if (nextZoom === current.zoom) return
-    const paper = noteViewRef.current?.querySelector<HTMLElement>('.unified-paper')
-    if (originClient && paper) {
-      apply(zoomAroundPoint(current, nextZoom, originClient, paper.getBoundingClientRect()))
-      return
+    const scroller = noteViewRef.current
+    apply(zoomAroundPoint(current, nextZoom))
+    if (scroller) {
+      window.requestAnimationFrame(() => {
+        scrollViewportToZoomPoint(scroller, current.zoom, nextZoom, originClient)
+      })
     }
-    apply({ ...current, zoom: nextZoom })
   }, [apply])
 
   const rotateBy = useCallback((delta: number) => {
-    apply({ ...viewRef.current, rotation: normalizeRotation(viewRef.current.rotation + delta) })
+    apply({ ...viewRef.current, rotation: normalizeRotation(viewRef.current.rotation + delta), pan: { x: 0, y: 0 } })
   }, [apply])
 
   const resetView = useCallback(() => {
@@ -103,8 +115,12 @@ export function PaperView({ children, className = '', viewKey, showHud = true }:
   useEffect(() => {
     const root = noteViewRef.current
     if (!root) return
-    const onWheel = (event: WheelEvent) => {
-      const current = viewRef.current
+
+    // A permanent {passive:false} wheel listener on the note scroller forces
+    // main-thread scrolling. Chromium then re-rasterizes markdown on every
+    // subpixel frame — the text looks stretched/warped. Keep the scroller
+    // compositor-owned and only intercept Ctrl/Alt (zoom/rotate).
+    const onInterceptWheel = (event: WheelEvent) => {
       if (event.ctrlKey || event.metaKey) {
         event.preventDefault()
         event.stopPropagation()
@@ -115,32 +131,71 @@ export function PaperView({ children, className = '', viewKey, showHud = true }:
         event.preventDefault()
         event.stopPropagation()
         rotateBy(event.deltaY > 0 ? VIEW_ROTATE_STEP : -VIEW_ROTATE_STEP)
+      }
+    }
+
+    let intercepting = false
+    let releaseTimer = 0
+    const attachIntercept = () => {
+      if (releaseTimer) {
+        window.clearTimeout(releaseTimer)
+        releaseTimer = 0
+      }
+      if (intercepting) return
+      intercepting = true
+      root.addEventListener('wheel', onInterceptWheel, { capture: true, passive: false })
+    }
+    const releaseIntercept = () => {
+      if (releaseTimer) {
+        window.clearTimeout(releaseTimer)
+        releaseTimer = 0
+      }
+      if (!intercepting) return
+      intercepting = false
+      root.removeEventListener('wheel', onInterceptWheel, { capture: true })
+    }
+    const scheduleRelease = () => {
+      if (releaseTimer) window.clearTimeout(releaseTimer)
+      releaseTimer = window.setTimeout(releaseIntercept, 200)
+    }
+
+    const onProbe = (event: WheelEvent) => {
+      if (event.ctrlKey || event.metaKey || event.altKey) {
+        const firstTick = !intercepting
+        attachIntercept()
+        // Newly added listeners skip this event. Apply zoom on the first
+        // pinch tick here; later ticks are handled by the intercept listener.
+        if (firstTick && !event.defaultPrevented) onInterceptWheel(event)
         return
       }
-      if (!isPaperViewActive(current)) return
-      if (Math.abs(event.deltaX) < 0.5 && Math.abs(event.deltaY) < 0.5) return
-      event.preventDefault()
-      event.stopPropagation()
-      apply({
-        ...current,
-        pan: {
-          x: current.pan.x - event.deltaX,
-          y: current.pan.y - event.deltaY,
-        },
-      })
+      scheduleRelease()
     }
-    root.addEventListener('wheel', onWheel, { capture: true, passive: false })
-    return () => root.removeEventListener('wheel', onWheel, { capture: true })
-  }, [apply, rotateBy, zoomBy])
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.ctrlKey || event.metaKey || event.altKey) attachIntercept()
+    }
+    const onKeyUp = (event: KeyboardEvent) => {
+      if (!event.ctrlKey && !event.metaKey && !event.altKey) scheduleRelease()
+    }
+
+    root.addEventListener('wheel', onProbe, { capture: true, passive: true })
+    window.addEventListener('keydown', onKeyDown)
+    window.addEventListener('keyup', onKeyUp)
+    window.addEventListener('blur', releaseIntercept)
+    return () => {
+      root.removeEventListener('wheel', onProbe, { capture: true })
+      window.removeEventListener('keydown', onKeyDown)
+      window.removeEventListener('keyup', onKeyUp)
+      window.removeEventListener('blur', releaseIntercept)
+      releaseIntercept()
+    }
+  }, [rotateBy, zoomBy])
 
   useEffect(() => {
-    const root = noteViewRef.current
-    if (!root) return
+    if (!showHud) return
     const onKeyDown = (event: KeyboardEvent) => {
       const target = event.target
       if (target instanceof HTMLElement) {
         const tag = target.tagName
-        // Allow typing in fields; still honor zoom shortcuts with Ctrl/Meta.
         if (!(event.ctrlKey || event.metaKey) && (tag === 'INPUT' || tag === 'TEXTAREA' || target.isContentEditable)) {
           return
         }
@@ -166,10 +221,9 @@ export function PaperView({ children, className = '', viewKey, showHud = true }:
         resetView()
       }
     }
-    // Window so shortcuts work while the CodeMirror editor has focus.
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [resetView, zoomBy])
+  }, [resetView, showHud, zoomBy])
 
   const active = isPaperViewActive(view)
 

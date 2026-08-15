@@ -357,6 +357,8 @@ const overrides = {
   'Linux-Installationsvarianten': 'Linux installation options',
   'Willkommen bei FaNotes': 'Welcome to FaNotes',
   'Wirtschaft': 'Economics',
+  'Französisch': 'French',
+  'Grammatik, Texte & Vokabeln': 'Grammar, texts & vocabulary',
   'wird angelegt.': 'will be created.',
   'diese Sitzung': 'This session',
   'Wortzahl in Statusleiste': 'Word count in status bar',

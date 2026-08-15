@@ -192,6 +192,9 @@ export function DraftingGuides({
   }
   const legPx = mmToSourcePx(SET_SQUARE_LEG_MM)
   const compassGeometry = compass ? describeCompass(compass) : null
+  const upright = (x: number, y: number, rotation: number) => (
+    `rotate(${-rotation * 180 / Math.PI} ${x} ${y})`
+  )
 
   return (
     <svg
@@ -212,7 +215,7 @@ export function DraftingGuides({
             y={-rulerPx.height / 2 + 6}
             width={rulerPx.length}
             height={rulerPx.height - 6}
-            rx="4"
+            rx="2"
             onPointerDown={(event) => beginDrag('ruler', 'move', ruler, event)}
           />
           <line className="lw-drafting-edge" x1={-rulerPx.length / 2} y1={-rulerPx.height / 2} x2={rulerPx.length / 2} y2={-rulerPx.height / 2} />
@@ -221,21 +224,33 @@ export function DraftingGuides({
             const major = mm % 10 === 0
             const mid = mm % 5 === 0
             const tick = major ? 14 : mid ? 9 : 5
+            const labelY = -rulerPx.height / 2 + 22
             return (
               <g key={mm}>
                 <line className={`lw-drafting-tick ${major ? 'is-major' : ''}`} x1={x} y1={-rulerPx.height / 2} x2={x} y2={-rulerPx.height / 2 + tick} />
-                {major && <text className="lw-drafting-label" x={x} y={-rulerPx.height / 2 + 22}>{mm / 10}</text>}
+                {major && (
+                  <text className="lw-drafting-label" x={x} y={labelY} transform={upright(x, labelY, ruler.rotation)}>
+                    {mm / 10}
+                  </text>
+                )}
               </g>
             )
           })}
           <circle
             className="lw-drafting-rotate"
             cx={rulerPx.length / 2}
-            cy={0}
+            cy="0"
             r="9"
             onPointerDown={(event) => beginDrag('ruler', 'rotate', ruler, event)}
           />
-          <text className="lw-drafting-caption" x="0" y={rulerPx.height / 2 - 6}>Lineal · {formatDegrees(ruler.rotation)}</text>
+          <text
+            className="lw-drafting-caption"
+            x="0"
+            y={rulerPx.height / 2 - 6}
+            transform={upright(0, rulerPx.height / 2 - 6, ruler.rotation)}
+          >
+            Lineal · {formatDegrees(ruler.rotation)}
+          </text>
         </g>
       )}
       {setSquare && (
@@ -254,7 +269,7 @@ export function DraftingGuides({
             return (
               <g key={`h${cm}`}>
                 <line className="lw-drafting-tick is-major" x1={x} y1="0" x2={x} y2="10" />
-                <text className="lw-drafting-label" x={x} y="20">{cm}</text>
+                <text className="lw-drafting-label" x={x} y="20" transform={upright(x, 20, setSquare.rotation)}>{cm}</text>
               </g>
             )
           })}
@@ -263,7 +278,9 @@ export function DraftingGuides({
             return (
               <g key={`v${cm}`}>
                 <line className="lw-drafting-tick is-major" x1="0" y1={y} x2="10" y2={y} />
-                {cm > 0 && <text className="lw-drafting-label" x="18" y={y + 3}>{cm}</text>}
+                {cm > 0 && (
+                  <text className="lw-drafting-label" x="18" y={y + 3} transform={upright(18, y + 3, setSquare.rotation)}>{cm}</text>
+                )}
               </g>
             )
           })}
@@ -272,6 +289,8 @@ export function DraftingGuides({
             const angle = degrees * Math.PI / 180
             const inner = legPx * 0.62
             const outer = legPx * 0.78
+            const tx = Math.cos(angle) * (outer + 10)
+            const ty = -Math.sin(angle) * (outer + 10) + 3
             return (
               <g key={`deg${degrees}`}>
                 <line
@@ -281,11 +300,7 @@ export function DraftingGuides({
                   x2={Math.cos(angle) * outer}
                   y2={-Math.sin(angle) * outer}
                 />
-                <text
-                  className="lw-drafting-label"
-                  x={Math.cos(angle) * (outer + 10)}
-                  y={-Math.sin(angle) * (outer + 10) + 3}
-                >
+                <text className="lw-drafting-label" x={tx} y={ty} transform={upright(tx, ty, setSquare.rotation)}>
                   {degrees}°
                 </text>
               </g>
@@ -298,7 +313,14 @@ export function DraftingGuides({
             r="9"
             onPointerDown={(event) => beginDrag('setSquare', 'rotate', setSquare, event)}
           />
-          <text className="lw-drafting-caption" x={legPx * 0.28} y={-6}>Geodreieck · {formatDegrees(setSquare.rotation)}</text>
+          <text
+            className="lw-drafting-caption"
+            x={legPx * 0.28}
+            y={-6}
+            transform={upright(legPx * 0.28, -6, setSquare.rotation)}
+          >
+            Geodreieck · {formatDegrees(setSquare.rotation)}
+          </text>
         </g>
       )}
       {compass && compassGeometry && (
@@ -324,83 +346,67 @@ export function DraftingGuides({
           )}
           <g
             className="lw-drafting-tool is-compass"
-            transform={`translate(${compass.x * sourceWidth} ${compass.y * sourceHeight}) rotate(${compass.rotation * 180 / Math.PI})`}
+            transform={`translate(${compass.x * sourceWidth} ${compass.y * sourceHeight})`}
           >
-            <line
-              className="lw-drafting-span"
-              x1="0"
-              y1="0"
-              x2={compassGeometry.radiusPx}
-              y2="0"
-            />
-            {Array.from({ length: Math.floor(compass.radiusMm / 10) + 1 }, (_, cm) => {
-              const x = mmToSourcePx(cm * 10)
-              if (x > compassGeometry.radiusPx) return null
-              return (
-                <g key={`c${cm}`}>
-                  <line className="lw-drafting-tick is-major" x1={x} y1="0" x2={x} y2="8" />
-                  {cm > 0 && <text className="lw-drafting-label" x={x} y="18">{cm}</text>}
-                </g>
-              )
-            })}
-            <line
-              className="lw-drafting-leg"
-              x1="0"
-              y1="0"
-              x2={compassGeometry.half}
-              y2={compassGeometry.hingeY}
-              onPointerDown={(event) => beginDrag('compass', 'move', compass, event)}
-            />
-            <line
-              className="lw-drafting-leg is-pencil"
-              x1={compassGeometry.radiusPx}
-              y1="0"
-              x2={compassGeometry.half}
-              y2={compassGeometry.hingeY}
-              onPointerDown={(event) => beginDrag('compass', 'move', compass, event)}
-            />
-            <circle
-              className="lw-drafting-hinge"
-              cx={compassGeometry.half}
-              cy={compassGeometry.hingeY}
-              r="11"
-              onPointerDown={(event) => beginDrag('compass', 'move', compass, event)}
-            />
-            <polygon
-              className="lw-drafting-needle"
-              points="-5,-2 5,-2 0,14"
-              onPointerDown={(event) => beginDrag('compass', 'move', compass, event)}
-            >
-              <title>Nadel: Zirkel verschieben</title>
-            </polygon>
-            <circle className="lw-drafting-needle-dot" cx="0" cy="0" r="2.4" />
-            <g transform={`translate(${compassGeometry.radiusPx} 0)`}>
-              <rect className="lw-drafting-lead" x="-4" y="-16" width="8" height="14" rx="1.5" />
-              <polygon className="lw-drafting-lead" points="-4,-2 4,-2 0,13" />
+            <g transform={`rotate(${compass.rotation * 180 / Math.PI})`}>
+              <line className="lw-drafting-span" x1="0" y1="0" x2={compassGeometry.radiusPx} y2="0" />
+              <rect
+                className="lw-drafting-arm"
+                x="0"
+                y={-5}
+                width={compassGeometry.radiusPx}
+                height="10"
+                rx="1"
+                onPointerDown={(event) => beginDrag('compass', 'move', compass, event)}
+              />
+              {Array.from({ length: Math.floor(compass.radiusMm / 10) + 1 }, (_, cm) => {
+                const x = mmToSourcePx(cm * 10)
+                if (x > compassGeometry.radiusPx) return null
+                return (
+                  <g key={`c${cm}`}>
+                    <line className="lw-drafting-tick is-major" x1={x} y1="-8" x2={x} y2="8" />
+                    {cm > 0 && (
+                      <text className="lw-drafting-label" x={x} y="20" transform={upright(x, 20, compass.rotation)}>{cm}</text>
+                    )}
+                  </g>
+                )
+              })}
+              <circle
+                className="lw-drafting-needle-dot"
+                cx="0"
+                cy="0"
+                r="4"
+                onPointerDown={(event) => beginDrag('compass', 'move', compass, event)}
+              />
+              <circle
+                className="lw-drafting-needle"
+                cx="0"
+                cy="0"
+                r="7"
+                onPointerDown={(event) => beginDrag('compass', 'move', compass, event)}
+              >
+                <title>Nadel: Zirkel verschieben</title>
+              </circle>
+              <circle
+                className="lw-drafting-draw"
+                cx={compassGeometry.radiusPx}
+                cy="0"
+                r="10"
+                onPointerDown={(event) => beginDrag('compass', 'draw', compass, event)}
+              >
+                <title>Mine drehen: Bogen oder Kreis zeichnen</title>
+              </circle>
+              <circle
+                className="lw-drafting-radius"
+                cx={compassGeometry.radiusPx * 0.55}
+                cy="0"
+                r="8"
+                onPointerDown={(event) => beginDrag('compass', 'radius', compass, event)}
+              >
+                <title>{compass.locked ? 'Radius gesperrt · drehen zum Übertragen' : 'Radius einstellen / abmessen'}</title>
+              </circle>
             </g>
-            <circle
-              className="lw-drafting-radius"
-              cx={compassGeometry.radiusHandleX}
-              cy={compassGeometry.radiusHandleY}
-              r="8"
-              onPointerDown={(event) => beginDrag('compass', 'radius', compass, event)}
-            >
-              <title>{compass.locked ? 'Radius gesperrt · drehen zum Übertragen' : 'Radius einstellen / abmessen'}</title>
-            </circle>
-            <circle
-              className="lw-drafting-draw"
-              cx={compassGeometry.radiusPx}
-              cy="0"
-              r="10"
-              onPointerDown={(event) => beginDrag('compass', 'draw', compass, event)}
-            >
-              <title>Mine drehen: Bogen oder Kreis zeichnen</title>
-            </circle>
-            <g
-              className={`lw-drafting-action ${compass.locked ? 'is-locked' : ''}`}
-              transform={`translate(${compassGeometry.half - 16} ${compassGeometry.hingeY - 22})`}
-              onPointerDown={(event) => toggleCompassLock(event, compass)}
-            >
+            <g className={`lw-drafting-action ${compass.locked ? 'is-locked' : ''}`} transform="translate(-18 -28)" onPointerDown={(event) => toggleCompassLock(event, compass)}>
               <circle className="lw-drafting-action-bg" r="9" />
               <path
                 className="lw-drafting-action-icon"
@@ -410,20 +416,15 @@ export function DraftingGuides({
               />
               <title>{compass.locked ? 'Radius entsperren' : 'Radius sperren (Maß übertragen)'}</title>
             </g>
-            <g
-              className="lw-drafting-action is-circle"
-              transform={`translate(${compassGeometry.half + 16} ${compassGeometry.hingeY - 22})`}
-              onPointerDown={(event) => drawFullCircle(event, compass)}
-            >
+            <g className="lw-drafting-action is-circle" transform="translate(18 -28)" onPointerDown={(event) => drawFullCircle(event, compass)}>
               <circle className="lw-drafting-action-bg" r="9" />
               <circle className="lw-drafting-action-icon-ring" r="4.2" />
               <title>Ganzen Kreis zeichnen</title>
             </g>
-            <text className="lw-drafting-caption" x={compassGeometry.half} y={compassGeometry.hingeY - 36}>
+            <text className="lw-drafting-caption" x="0" y="-44">
               Zirkel · {formatMillimetres(compass.radiusMm)}
               {drawPreview ? ` · ${formatArcDegrees(drawPreview.to - drawPreview.from)}` : compass.locked ? ' · gesperrt' : ''}
             </text>
-            <text className="lw-drafting-hint" x={compassGeometry.half} y={18}>Nadel · gelb Radius · grün zeichnen</text>
           </g>
         </>
       )}
@@ -434,19 +435,9 @@ export function DraftingGuides({
   )
 }
 
-const describeCompass = (pose: CompassPose) => {
-  const radiusPx = mmToSourcePx(pose.radiusMm)
-  const legPx = Math.max(mmToSourcePx(78), radiusPx * 0.58 + mmToSourcePx(24))
-  const half = radiusPx / 2
-  const hingeY = -Math.sqrt(Math.max(mmToSourcePx(16) ** 2, legPx * legPx - half * half))
-  return {
-    radiusPx,
-    half,
-    hingeY,
-    radiusHandleX: half + (radiusPx - half) * 0.42,
-    radiusHandleY: hingeY * 0.52,
-  }
-}
+const describeCompass = (pose: CompassPose) => ({
+  radiusPx: mmToSourcePx(pose.radiusMm),
+})
 
 const describePaperArc = (cx: number, cy: number, radius: number, from: number, to: number) => {
   const delta = to - from

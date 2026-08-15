@@ -94,7 +94,7 @@ const SETTINGS_SEARCH_ITEMS: SettingsSearchItem[] = [
   { label: 'Zeilennummern, Wortzahl & Gliederung', detail: 'Editor', section: 'editor', target: 'settings-editor', keywords: 'statusleiste outline struktur markdown' },
   { label: 'GlyphenWerk & Training', detail: 'Stift & Erkennung', section: 'drawing', target: 'settings-glyphenwerk', keywords: 'handschrift trainieren import zip symbole mathematik' },
   { label: 'Präzises Formelmodell', detail: 'Erweitert', section: 'advanced', target: 'settings-enhanced-math', keywords: 'mathematik formel latex posformer q4 sequenzmodell lokal download' },
-  { label: 'Papier & Stift', detail: 'Stift & Erkennung', section: 'drawing', target: 'settings-tablet', keywords: 'tablet karos linien punkte farbe breite druck glättung' },
+  { label: 'Papier & Stift', detail: 'Stift & Erkennung', section: 'drawing', target: 'settings-tablet', keywords: 'tablet karos linien punkte gepunktet häuschen kästchen millimeter farbe breite druck glättung hintergrund' },
   { label: 'Durchkritzel-Empfindlichkeit', detail: 'Stift & Erkennung', section: 'drawing', target: 'settings-tablet', keywords: 'löschen radierer scribble sensitivity' },
   { label: 'Handschrifterkennung', detail: 'Stift & Erkennung', section: 'drawing', target: 'settings-recognition', keywords: 'ocr text mathematik automatisch sprache konvertieren suchindex' },
   { label: 'Vault & Speicherort', detail: 'Dateien & Vault', section: 'files', target: 'settings-vault', keywords: 'ordner wechseln pfad notizen markdown nas browser' },
@@ -664,9 +664,14 @@ export function SettingsModal({
                 </div>}
                 <div id="settings-tablet" className="setting-card">
                   <div className="setting-card-title"><Brush size={16} /><span>Grafiktablett</span></div>
-                  <SettingRow title="Papier">
+                  <SettingRow title="Papier" description="Standard für neue Notizen. Jede Notiz kann ihren Hintergrund selbst wählen.">
                     <select value={settings.paperStyle} onChange={(event) => update('paperStyle', event.target.value as AppSettings['paperStyle'])}>
-                      <option value="blank">Leer</option><option value="dots">Punktraster</option><option value="grid">Karos</option><option value="lines">Liniert</option>
+                      <option value="blank">Leer</option>
+                      <option value="dots">Gepunktet</option>
+                      <option value="squares">Häuschen</option>
+                      <option value="grid">Kariert</option>
+                      <option value="lines">Liniert</option>
+                      <option value="millimeter">Millimeterpapier</option>
                     </select>
                   </SettingRow>
                   <SettingRow title="Stiftfarbe"><input className="color-input" type="color" value={settings.penColor} onChange={(event) => update('penColor', event.target.value)} /></SettingRow>

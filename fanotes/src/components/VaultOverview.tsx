@@ -210,7 +210,7 @@ const styles = `
   width: min(1120px, calc(100% - 48px));
   margin: 0 auto;
   padding: 34px 0 52px;
-  animation: vault-overview-enter .28s ease-out both;
+  animation: vault-overview-enter .34s cubic-bezier(.22, 1, .36, 1) both;
 }
 .vault-overview__header {
   display: flex;

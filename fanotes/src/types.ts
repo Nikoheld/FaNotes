@@ -11,7 +11,7 @@ export type VaultEntry = {
 
 export type ThemeMode = 'dark' | 'light' | 'system' | 'midnight' | 'forest' | 'aurora' | 'sepia'
 export type WorkspaceBackground = 'clean' | 'gradient' | 'mesh' | 'paper'
-export type PaperStyle = 'blank' | 'dots' | 'grid' | 'lines'
+export type PaperStyle = 'blank' | 'dots' | 'squares' | 'grid' | 'lines' | 'millimeter'
 export type UiLanguagePreference = 'system' | 'de' | 'en'
 
 export type SpellingLanguage = 'de' | 'en'
@@ -430,12 +430,15 @@ export type FaNotesApi = {
   createFolder: (parentPath?: string, preferredName?: string) => Promise<CreateResult>
   setFolderColor: (relativePath: string, color: string | null) => Promise<{ color: string | null }>
   renameEntry: (relativePath: string, nextName: string) => Promise<string>
+  moveEntry: (relativePath: string, destFolder?: string | null) => Promise<string>
   trashEntry: (relativePath: string) => Promise<void>
   search: (query: string) => Promise<SearchHit[]>
   saveDrawing: (payload: { id?: string; title: string; imageData?: string; drawingJson: string; noteRelativePath?: string }) => Promise<DrawingAsset>
   listDrawings: () => Promise<DrawingLibraryItem[]>
   readDrawing: (id: string) => Promise<DrawingLibraryDocument>
   readFamdInk: (relativePath: string) => Promise<DrawingLibraryDocument | null>
+  readNotePaperStyle?: (relativePath: string) => Promise<PaperStyle | null>
+  setNotePaperStyle?: (relativePath: string, paperStyle: PaperStyle) => Promise<PaperStyle>
   importWorksheet: () => Promise<WorksheetDocument | null>
   importWorksheetFromData?: (payload: { name: string; mimeType: string; bytes: Uint8Array }) => Promise<WorksheetDocument>
   importOneNote: () => Promise<OneNoteImportResult | null>

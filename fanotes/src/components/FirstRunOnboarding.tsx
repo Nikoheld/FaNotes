@@ -91,6 +91,7 @@ const SUBJECT_DETAILS: Record<string, { mark: string; description: string }> = {
   AMAT: { mark: 'f(x)', description: 'Anwendungen der Mathematik' },
   Deutsch: { mark: 'Aa', description: 'Sprache, Literatur & Aufsätze' },
   Englisch: { mark: 'Ab', description: 'Vocabulary, texts & grammar' },
+  Französisch: { mark: 'Fr', description: 'Grammatik, Texte & Vokabeln' },
   Physik: { mark: 'λ', description: 'Mechanik, Elektrizität & Wellen' },
   Chemie: { mark: 'H₂', description: 'Stoffe, Reaktionen & Formeln' },
   Biologie: { mark: 'DNA', description: 'Leben, Umwelt & Genetik' },
@@ -100,6 +101,7 @@ const SUBJECT_DETAILS: Record<string, { mark: string; description: string }> = {
   Mathematics: { mark: '∑', description: 'Algebra, geometry & analysis' },
   German: { mark: 'Aa', description: 'Language, literature & essays' },
   English: { mark: 'Ab', description: 'Vocabulary, texts & grammar' },
+  French: { mark: 'Fr', description: 'Grammar, texts & vocabulary' },
   Physics: { mark: 'λ', description: 'Mechanics, electricity & waves' },
   Chemistry: { mark: 'H₂', description: 'Materials, reactions & formulas' },
   Biology: { mark: 'DNA', description: 'Life, environment & genetics' },
@@ -317,7 +319,11 @@ export function FirstRunOnboarding({ subjects, onComplete }: FirstRunOnboardingP
                       aria-pressed={active}
                       disabled={busy}
                       onClick={() => toggle(subject.name)}
-                      style={{ '--subject-color': subject.color, '--subject-index': index } as React.CSSProperties}
+                      style={{
+                        '--subject-color': subject.color,
+                        '--subject-index': index,
+                        '--subject-delay': `${Math.floor(index / 2) * 42 + (index % 2) * 16}ms`,
+                      } as React.CSSProperties}
                     >
                       <span className="first-run-subject-mark" aria-hidden="true">{details.mark}</span>
                       <span className="first-run-subject-copy"><strong>{subject.name}</strong><small>{details.description}</small></span>
@@ -342,29 +348,35 @@ export function FirstRunOnboarding({ subjects, onComplete }: FirstRunOnboardingP
   )
 }
 
+const WELCOME_TYPED = 'Die Änderungsrate beschreibt die Steigung.'
+const WRITING_TYPED = 'Der Flächeninhalt lässt sich mit dem bestimmten Integral berechnen.'
+
 function WelcomePreview() {
   return (
     <section className="first-run-app-preview" aria-label="Vorschau von FaNotes">
       <div className="first-run-preview-glow" />
-      <div className="first-run-preview-window">
-        <header><span /><span /><span /><b>FaNotes</b></header>
-        <div className="first-run-preview-body">
-          <aside>
-            <strong><BookOpen size={12} /> Meine Fächer</strong>
-            <span className="is-active"><i /> Mathematik</span>
-            <span><i /> Deutsch</span>
-            <span><i /> Physik</span>
-            <span><i /> Wirtschaft</span>
-          </aside>
-          <div className="first-run-preview-paper">
-            <small>MATHEMATIK · ANALYSIS</small>
-            <h2>Ableitungen</h2>
-            <p className="first-run-preview-typed">Die Änderungsrate beschreibt die Steigung.</p>
-            <div className="first-run-preview-rule" />
-            <svg className="first-run-preview-ink" viewBox="0 0 330 98" role="img" aria-label="Handschriftliche Formel">
-              <path d="M15 58 C29 50 33 32 39 26 C47 18 41 67 51 70 C62 72 69 50 76 40 M61 55 C75 58 90 55 103 49 M119 62 C130 49 134 31 140 27 C148 22 143 64 153 66 C166 68 173 43 182 40 C192 37 191 63 202 62 M220 48 L247 48 M234 35 L234 63 M267 28 C290 20 308 30 308 48 C308 66 286 72 268 62" />
-            </svg>
-            <div className="first-run-preview-search"><Search size={11} /><span>„Änderungsrate“</span><b>1 Treffer</b></div>
+      <div className="first-run-preview-stage">
+        <div className="first-run-preview-window">
+          <header><span /><span /><span /><b>FaNotes</b></header>
+          <div className="first-run-preview-body">
+            <aside>
+              <strong><BookOpen size={12} /> Meine Fächer</strong>
+              <span className="is-active"><i /> Mathematik</span>
+              <span><i /> Deutsch</span>
+              <span><i /> Französisch</span>
+              <span><i /> Physik</span>
+              <span><i /> Wirtschaft</span>
+            </aside>
+            <div className="first-run-preview-paper">
+              <small>MATHEMATIK · ANALYSIS</small>
+              <h2>Ableitungen</h2>
+              <p className="first-run-preview-typed" style={{ animationTimingFunction: `steps(${WELCOME_TYPED.length}, end)` }}>{WELCOME_TYPED}</p>
+              <div className="first-run-preview-rule" />
+              <svg className="first-run-preview-ink" viewBox="0 0 330 98" role="img" aria-label="Handschriftliche Formel">
+                <path pathLength="1" d="M15 58 C29 50 33 32 39 26 C47 18 41 67 51 70 C62 72 69 50 76 40 M61 55 C75 58 90 55 103 49 M119 62 C130 49 134 31 140 27 C148 22 143 64 153 66 C166 68 173 43 182 40 C192 37 191 63 202 62 M220 48 L247 48 M234 35 L234 63 M267 28 C290 20 308 30 308 48 C308 66 286 72 268 62" />
+              </svg>
+              <div className="first-run-preview-search"><Search size={11} /><span>„Änderungsrate“</span><b>1 Treffer</b></div>
+            </div>
           </div>
         </div>
       </div>
@@ -381,10 +393,10 @@ function WritingPreview() {
       <div className="first-run-paper-sheet">
         <small>12. August · Mathematik</small>
         <h2>Integralrechnung</h2>
-        <p className="first-run-paper-type">Der Flächeninhalt lässt sich mit dem bestimmten Integral berechnen.</p>
+        <p className="first-run-paper-type" style={{ animationTimingFunction: `steps(${WRITING_TYPED.length}, end)` }}>{WRITING_TYPED}</p>
         <svg className="first-run-paper-ink" viewBox="0 0 420 150" role="img" aria-label="Handschriftliche Integralrechnung">
-          <path className="ink-one" d="M36 96 C51 77 46 38 65 28 C77 22 79 36 68 43 C52 54 51 98 35 112 C28 118 19 113 23 107" />
-          <path className="ink-two" d="M81 42 L92 42 M79 107 L91 107 M111 78 C126 66 137 67 145 77 C152 88 140 99 124 98 C110 98 102 87 111 78 M155 72 L183 72 M169 58 L169 89 M202 48 C218 38 239 48 236 67 C232 88 213 96 201 88 M258 70 L294 70 M314 47 C331 36 348 47 345 65 C342 83 326 93 312 86 M365 82 C374 68 385 62 398 64" />
+          <path className="ink-one" pathLength="1" d="M36 96 C51 77 46 38 65 28 C77 22 79 36 68 43 C52 54 51 98 35 112 C28 118 19 113 23 107" />
+          <path className="ink-two" pathLength="1" d="M81 42 L92 42 M79 107 L91 107 M111 78 C126 66 137 67 145 77 C152 88 140 99 124 98 C110 98 102 87 111 78 M155 72 L183 72 M169 58 L169 89 M202 48 C218 38 239 48 236 67 C232 88 213 96 201 88 M258 70 L294 70 M314 47 C331 36 348 47 345 65 C342 83 326 93 312 86 M365 82 C374 68 385 62 398 64" />
         </svg>
         <div className="first-run-paper-transcript"><Sparkles size={12} /><span><b>Im Hintergrund erkannt</b><small>∫₀¹ (x + 2) dx = 2,5</small></span><Check size={13} /></div>
         <div className="first-run-paper-selection"><span>Optional umwandeln</span></div>

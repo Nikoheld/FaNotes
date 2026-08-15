@@ -28,6 +28,7 @@ const {
   companionNotePath,
   emptyFamdPayload,
   isNoteExtension,
+  isPaperStyle,
   parseFamd,
   serializeFamd,
   stripFamdPayload,
@@ -131,12 +132,15 @@ const IPC = Object.freeze({
   createFolder: 'fanotes:create-folder',
   setFolderColor: 'fanotes:set-folder-color',
   renameEntry: 'fanotes:rename-entry',
+  moveEntry: 'fanotes:move-entry',
   trashEntry: 'fanotes:trash-entry',
   search: 'fanotes:search',
   saveDrawing: 'fanotes:save-drawing',
   listDrawings: 'fanotes:list-drawings',
   readDrawing: 'fanotes:read-drawing',
   readFamdInk: 'fanotes:read-famd-ink',
+  readNotePaperStyle: 'fanotes:read-note-paper-style',
+  setNotePaperStyle: 'fanotes:set-note-paper-style',
   importWorksheet: 'fanotes:import-worksheet',
   importWorksheetFromData: 'fanotes:import-worksheet-from-data',
   importOneNote: 'fanotes:import-onenote',
@@ -276,7 +280,7 @@ const SETTINGS_SCHEMA = Object.freeze({
   defaultFolder: { type: 'relative', max: 480 },
   dailyNotesFolder: { type: 'relative', max: 480 },
   dateFormat: { type: 'string', max: 80 },
-  paperStyle: { type: 'enum', values: ['blank', 'dots', 'grid', 'lines'] },
+  paperStyle: { type: 'enum', values: ['blank', 'dots', 'squares', 'grid', 'lines', 'millimeter'] },
   penColor: { type: 'color' },
   penWidth: { type: 'number', min: 0.5, max: 40 },
   pressureEnabled: { type: 'boolean' },
@@ -1471,11 +1475,17 @@ async function writeFamdCompanion(markdownRelativePath, markdown, ink = undefine
   const existingSource = await readOptionalNoteFile(famdRelativePath)
   const existing = existingSource ? parseFamd(existingSource) : { markdown: '', payload: emptyFamdPayload() }
   const body = stripFamdPayload(markdown)
+  const existingPayload = existing.payload || emptyFamdPayload()
+  const inkDocument = ink === undefined ? existingPayload.ink : ink
+  const paperFromInk = inkDocument && typeof inkDocument === 'object' && isPaperStyle(inkDocument.paperStyle)
+    ? inkDocument.paperStyle
+    : undefined
   const payload = {
-    ...(existing.payload || emptyFamdPayload()),
+    ...existingPayload,
     updatedAt: new Date().toISOString(),
     worksheets: worksheetIdsFromMarkdown(body),
-    ink: ink === undefined ? (existing.payload?.ink ?? null) : ink,
+    ink: inkDocument ?? null,
+    paperStyle: existingPayload.paperStyle || paperFromInk || (isPaperStyle(currentSettings.paperStyle) ? currentSettings.paperStyle : undefined),
   }
   const { target } = await resolveVaultPath(famdRelativePath, { allowMissing: true, expected: 'file' })
   await atomicWrite(target, serializeFamd(body, payload), { encoding: 'utf8', mode: 0o600 })
@@ -3030,6 +3040,99 @@ function registerIpcHandlers() {
     }
   })
 
+  handle(IPC.moveEntry, async (_event, relativePath, destFolder) => {
+    await ensureBootstrap()
+    const requestedVaultGeneration = currentVaultGeneration
+    const initial = await resolveVaultPath(relativePath)
+    const mutationBarrier = beginFileMutationBarrier(initial.target, { recursive: true })
+
+    try {
+      await mutationBarrier.waitForPrecedingOperations()
+      const { root, target } = await resolveVaultPath(relativePath)
+      if (root !== initial.root || target !== initial.target) {
+        throw new Error('Der Vault wurde während des Verschiebens verändert.')
+      }
+
+      const info = await fsp.lstat(target)
+      if (!info.isFile() && !info.isDirectory()) throw new Error('Dieser Eintrag kann nicht verschoben werden.')
+
+      const destRelative = typeof destFolder === 'string' && destFolder.trim()
+        ? normalizeRelativePath(destFolder).split(path.sep).join('/')
+        : ''
+      const destResolved = destRelative
+        ? await resolveVaultPath(destRelative, { expected: 'directory' })
+        : await resolveVaultPath('', { allowRoot: true, expected: 'directory' })
+      if (destResolved.root !== root) throw new Error('Das Ziel liegt außerhalb des Vaults.')
+
+      const destDir = destResolved.target
+      const oldRelativePath = toRelativePosix(root, target)
+      if (info.isDirectory() && (destRelative === oldRelativePath || destRelative.startsWith(`${oldRelativePath}/`))) {
+        throw new Error('Ein Ordner kann nicht in sich selbst verschoben werden.')
+      }
+      if (path.resolve(path.dirname(target)) === path.resolve(destDir)) return oldRelativePath
+
+      const currentName = path.basename(target)
+      const occupied = await siblingNames(destDir)
+      const noteExtension = info.isFile() ? path.extname(currentName).toLocaleLowerCase('en-US') : ''
+      const companionExtension = isNoteExtension(noteExtension)
+        ? (noteExtension === '.famd' ? '.md' : '.famd')
+        : ''
+      let uniqueName = currentName
+      for (let number = 1; number <= 10000; number += 1) {
+        const candidate = numberedName(currentName, number)
+        const candidateLower = candidate.normalize('NFC').toLocaleLowerCase('de-DE')
+        if (occupied.has(candidateLower)) continue
+        if (companionExtension) {
+          const companionName = `${splitName(candidate).stem}${companionExtension}`
+          if (occupied.has(companionName.normalize('NFC').toLocaleLowerCase('de-DE'))) continue
+        }
+        uniqueName = candidate
+        break
+      }
+      if (occupied.has(uniqueName.normalize('NFC').toLocaleLowerCase('de-DE'))) {
+        throw new Error('Es konnte kein eindeutiger Name erzeugt werden.')
+      }
+
+      const destination = path.join(destDir, uniqueName)
+      if (!isInsideRoot(root, destination)) throw new Error('Das Verschiebeziel liegt außerhalb des Vaults.')
+      await fsp.rename(target, destination)
+      mutationBarrier.invalidateQueuedWrites()
+      const nextRelativePath = toRelativePosix(root, destination)
+
+      if (info.isFile() && isNoteExtension(noteExtension)) {
+        const oldCompanion = companionNotePath(oldRelativePath, companionExtension)
+        const nextCompanion = companionNotePath(nextRelativePath, companionExtension)
+        try {
+          const companion = await resolveVaultPath(oldCompanion, { expected: 'file' })
+          const companionDest = path.join(destDir, path.basename(nextCompanion))
+          if (isInsideRoot(root, companionDest)) await fsp.rename(companion.target, companionDest)
+        } catch (error) {
+          if (error?.code !== 'ENOENT') {
+            console.warn('FaNotes: Notizbegleiter konnte nicht mit verschoben werden:', error?.message ?? error)
+          }
+        }
+      }
+
+      try {
+        await mutateFolderColors(root, requestedVaultGeneration, (colors) => {
+          let changed = false
+          for (const [candidate, candidateColor] of [...colors.entries()]) {
+            if (candidate !== oldRelativePath && !candidate.startsWith(`${oldRelativePath}/`)) continue
+            colors.delete(candidate)
+            colors.set(candidate === oldRelativePath ? nextRelativePath : `${nextRelativePath}${candidate.slice(oldRelativePath.length)}`, candidateColor)
+            changed = true
+          }
+          return changed
+        })
+      } catch (error) {
+        console.warn('Ordnerfarben konnten nach dem Verschieben nicht mitgezogen werden:', error?.message ?? error)
+      }
+      return nextRelativePath
+    } finally {
+      mutationBarrier.release()
+    }
+  })
+
   handle(IPC.trashEntry, async (_event, relativePath) => {
     await ensureBootstrap()
     const requestedVaultGeneration = currentVaultGeneration
@@ -3318,6 +3421,45 @@ function registerIpcHandlers() {
       drawingJson,
       dataRelativePath: famdRelative,
     }
+  })
+
+  handle(IPC.readNotePaperStyle, async (_event, relativePath) => {
+    await ensureBootstrap()
+    if (typeof relativePath !== 'string') throw new Error('Ungültiger Notizpfad.')
+    const notePath = normalizeRelativePath(relativePath).split(path.sep).join('/')
+    assertMarkdownPath(notePath)
+    const source = await readOptionalNoteFile(companionNotePath(notePath, '.famd'))
+    if (!source) return null
+    const parsed = parseFamd(source)
+    if (isPaperStyle(parsed.payload?.paperStyle)) return parsed.payload.paperStyle
+    const inkStyle = parsed.payload?.ink && typeof parsed.payload.ink === 'object' ? parsed.payload.ink.paperStyle : null
+    return isPaperStyle(inkStyle) ? inkStyle : null
+  })
+
+  handle(IPC.setNotePaperStyle, async (_event, relativePath, paperStyle) => {
+    await ensureBootstrap()
+    if (!isPaperStyle(paperStyle)) throw new Error('Diese Papierart wird nicht unterstützt.')
+    if (typeof relativePath !== 'string') throw new Error('Ungültiger Notizpfad.')
+    const notePath = normalizeRelativePath(relativePath).split(path.sep).join('/')
+    assertMarkdownPath(notePath)
+    const markdown = (await readOptionalNoteFile(notePath, noteByteLimit(notePath))) ?? ''
+    const famdRelative = companionNotePath(notePath, '.famd')
+    const existingSource = await readOptionalNoteFile(famdRelative)
+    const existing = existingSource ? parseFamd(existingSource) : { markdown: stripFamdPayload(markdown), payload: emptyFamdPayload() }
+    const ink = existing.payload?.ink && typeof existing.payload.ink === 'object'
+      ? { ...existing.payload.ink, paperStyle }
+      : existing.payload?.ink ?? null
+    const body = stripFamdPayload(markdown || existing.markdown)
+    const payload = {
+      ...(existing.payload || emptyFamdPayload()),
+      updatedAt: new Date().toISOString(),
+      ink,
+      worksheets: worksheetIdsFromMarkdown(body),
+      paperStyle,
+    }
+    const { target } = await resolveVaultPath(famdRelative, { allowMissing: true, expected: 'file' })
+    await atomicWrite(target, serializeFamd(body, payload), { encoding: 'utf8', mode: 0o600 })
+    return paperStyle
   })
 
   handle(IPC.importWorksheet, async () => {
@@ -4007,6 +4149,9 @@ async function createWindow() {
     },
   })
   mainWindow.setMenuBarVisibility(false)
+  // Page pinch-zoom would fight the note scroller and smear text. Sheet zoom
+  // is handled in the renderer; lock Chromium's visual zoom to 100%.
+  void mainWindow.webContents.setVisualZoomLevelLimits(1, 1)
   const revealWindow = () => {
     if (!mainWindow || mainWindow.isDestroyed() || mainWindow.isVisible()) return
     mainWindow.show()

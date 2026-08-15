@@ -493,6 +493,11 @@ const server = createServer(async (request, response) => {
       response.end()
       return
     }
+    if (url.pathname === '/viewer') {
+      response.writeHead(308, { Location: '/viewer/', 'Cache-Control': 'no-store' })
+      response.end()
+      return
+    }
     if (url.pathname === '/api/health') {
       const releases = await discoverReleases()
       json(response, 200, { status: 'ok', version: releases.linux.version, windowsVersion: releases.windows?.version ?? null })

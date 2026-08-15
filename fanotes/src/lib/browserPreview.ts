@@ -117,6 +117,7 @@ export const BROWSER_STARTER_SUBJECTS = [
   { name: 'AMAT', color: '#9a7cff' },
   { name: 'Deutsch', color: '#ef7aa8' },
   { name: 'Englisch', color: '#45c9b7' },
+  { name: 'Französisch', color: '#3d8be0' },
   { name: 'Physik', color: '#b878eb' },
   { name: 'Chemie', color: '#f09a5d' },
   { name: 'Biologie', color: '#55cfa8' },
@@ -129,6 +130,7 @@ export const BROWSER_STARTER_SUBJECTS_EN = [
   { name: 'AMAT', color: '#9a7cff' },
   { name: 'German', color: '#ef7aa8' },
   { name: 'English', color: '#45c9b7' },
+  { name: 'French', color: '#3d8be0' },
   { name: 'Physics', color: '#b878eb' },
   { name: 'Chemistry', color: '#f09a5d' },
   { name: 'Biology', color: '#55cfa8' },
@@ -245,6 +247,8 @@ export function createBrowserPreviewApi(): FaNotesApi {
     },
     readAssetDataUrl: async (path) => assets.get(path) ?? '',
     readFamdInk: async () => null,
+    readNotePaperStyle: async () => null,
+    setNotePaperStyle: async (_path, paperStyle) => paperStyle,
     readAssetBytes: async (path) => {
       const source = assets.get(path) ?? ''
       if (!source) throw new Error('Die lokale Bild- oder PDF-Datei wurde nicht gefunden.')
@@ -290,6 +294,46 @@ export function createBrowserPreviewApi(): FaNotesApi {
       const parent = path.split('/').slice(0, -1).join('/')
       const next = [parent, nextName].filter(Boolean).join('/')
       if (files.has(path)) { const content = files.get(path)!; files.delete(path); files.set(next.toLowerCase().endsWith('.md') ? next : `${next}.md`, content); return next.toLowerCase().endsWith('.md') ? next : `${next}.md` }
+      const movedFolders = [...folders].filter((candidate) => candidate === path || candidate.startsWith(`${path}/`))
+      movedFolders.forEach((candidate) => {
+        folders.delete(candidate)
+        folders.add(candidate === path ? next : `${next}${candidate.slice(path.length)}`)
+      })
+      const movedFiles = [...files.entries()].filter(([candidate]) => candidate.startsWith(`${path}/`))
+      movedFiles.forEach(([candidate, content]) => {
+        files.delete(candidate)
+        files.set(`${next}${candidate.slice(path.length)}`, content)
+      })
+      const movedColors = [...folderColors.entries()].filter(([candidate]) => candidate === path || candidate.startsWith(`${path}/`))
+      movedColors.forEach(([candidate, color]) => {
+        folderColors.delete(candidate)
+        folderColors.set(candidate === path ? next : `${next}${candidate.slice(path.length)}`, color)
+      })
+      return next
+    },
+    moveEntry: async (path, rawDestFolder) => {
+      const dest = typeof rawDestFolder === 'string' ? rawDestFolder.replace(/^\/+|\/+$/gu, '') : ''
+      if (dest && !folders.has(dest)) throw new Error('Der Zielordner wurde nicht gefunden.')
+      if (dest === path || dest.startsWith(`${path}/`)) throw new Error('Ein Ordner kann nicht in sich selbst verschoben werden.')
+      const parent = path.split('/').slice(0, -1).join('/')
+      if (parent === dest) return path
+      const name = path.split('/').pop() || path
+      const nextPreferred = [dest, name].filter(Boolean).join('/')
+      const exists = (candidate: string) => files.has(candidate) || folders.has(candidate)
+      let next = nextPreferred
+      if (exists(next)) {
+        const extension = name.includes('.') ? name.slice(name.lastIndexOf('.')) : ''
+        const base = extension ? name.slice(0, -extension.length) : name
+        let index = 2
+        while (exists([dest, `${base} ${index}${extension}`].filter(Boolean).join('/'))) index += 1
+        next = [dest, `${base} ${index}${extension}`].filter(Boolean).join('/')
+      }
+      if (files.has(path)) {
+        const content = files.get(path)!
+        files.delete(path)
+        files.set(next, content)
+        return next
+      }
       const movedFolders = [...folders].filter((candidate) => candidate === path || candidate.startsWith(`${path}/`))
       movedFolders.forEach((candidate) => {
         folders.delete(candidate)

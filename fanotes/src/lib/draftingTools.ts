@@ -182,6 +182,46 @@ const localToNorm = (
   pose.rotation,
 )
 
+const normToLocalMm = (
+  x: number,
+  y: number,
+  pose: DraftingPose,
+  sourceWidth: number,
+  sourceHeight: number,
+) => {
+  const unrotated = rotateAround(x, y, pose.x, pose.y, -pose.rotation)
+  return {
+    x: (unrotated.x - pose.x) * sourceWidth * A4_WIDTH_MM / SOURCE_A4_PX,
+    y: (unrotated.y - pose.y) * sourceHeight * A4_WIDTH_MM / SOURCE_A4_PX,
+  }
+}
+
+const pointInsideRuler = (
+  x: number,
+  y: number,
+  pose: DraftingPose,
+  sourceWidth: number,
+  sourceHeight: number,
+) => {
+  const local = normToLocalMm(x, y, pose, sourceWidth, sourceHeight)
+  const half = RULER_LENGTH_MM / 2
+  const top = -RULER_HEIGHT_MM / 2
+  const bottom = RULER_HEIGHT_MM / 2
+  return local.x >= -half && local.x <= half && local.y >= top - 0.6 && local.y <= bottom
+}
+
+const pointInsideSetSquare = (
+  x: number,
+  y: number,
+  pose: DraftingPose,
+  sourceWidth: number,
+  sourceHeight: number,
+) => {
+  const local = normToLocalMm(x, y, pose, sourceWidth, sourceHeight)
+  const pad = 0.8
+  return local.x >= -pad && local.y <= pad && (local.x - local.y) <= SET_SQUARE_LEG_MM + pad
+}
+
 export const rulerDrawingEdges = (pose: DraftingPose, sourceWidth: number, sourceHeight: number): DraftingEdge[] => {
   const half = RULER_LENGTH_MM / 2
   const top = -RULER_HEIGHT_MM / 2
@@ -259,8 +299,8 @@ const nearestOnEdges = (
   kind: DraftingKind,
   edges: DraftingEdge[],
   sourceWidth: number,
+  threshold: number,
 ): SnapResult | null => {
-  const threshold = mmToNorm(SNAP_MM, sourceWidth)
   let best: SnapResult | null = null
   edges.forEach((edge, edgeIndex) => {
     const projected = projectOnEdge(x, y, edge)
@@ -296,10 +336,19 @@ export const snapToDraftingTools = (
     }
   }
   let best: SnapResult | null = null
+  const edgeThreshold = mmToNorm(SNAP_MM, sourceWidth)
   for (const tool of tools) {
-    const candidate = tool.kind === 'compass'
-      ? projectOnCompass(x, y, asCompassPose(tool.pose), sourceWidth, sourceHeight, false)
-      : nearestOnEdges(x, y, tool.kind, draftingEdges(tool.kind, tool.pose, sourceWidth, sourceHeight), sourceWidth)
+    if (tool.kind === 'compass') {
+      const candidate = projectOnCompass(x, y, asCompassPose(tool.pose), sourceWidth, sourceHeight, false)
+      if (!candidate) continue
+      if (!best || Math.hypot(x - candidate.x, y - candidate.y) < Math.hypot(x - best.x, y - best.y)) best = candidate
+      continue
+    }
+    const edges = draftingEdges(tool.kind, tool.pose, sourceWidth, sourceHeight)
+    const inside = tool.kind === 'ruler'
+      ? pointInsideRuler(x, y, tool.pose, sourceWidth, sourceHeight)
+      : pointInsideSetSquare(x, y, tool.pose, sourceWidth, sourceHeight)
+    const candidate = nearestOnEdges(x, y, tool.kind, edges, sourceWidth, inside ? Number.POSITIVE_INFINITY : edgeThreshold)
     if (!candidate) continue
     if (!best || Math.hypot(x - candidate.x, y - candidate.y) < Math.hypot(x - best.x, y - best.y)) best = candidate
   }

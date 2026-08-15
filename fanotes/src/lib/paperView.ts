@@ -43,13 +43,10 @@ export const applyPaperViewToElements = (
   const active = isPaperViewActive(view)
   const zoom = Math.max(0.01, view.zoom)
   if (paper) {
+    // One zoom for the whole sheet (text, ink, worksheets). CSS zoom keeps
+    // markdown sharp; the viewport scrolls instead of a second pan-transform.
     paper.style.zoom = zoom === 1 ? '' : String(zoom)
-    const translateX = view.pan.x / zoom
-    const translateY = view.pan.y / zoom
-    const needsTransform = view.rotation !== 0 || translateX !== 0 || translateY !== 0
-    paper.style.transform = needsTransform
-      ? `translate(${translateX}px, ${translateY}px) rotate(${view.rotation}deg)`
-      : ''
+    paper.style.transform = view.rotation ? `rotate(${view.rotation}deg)` : ''
     paper.style.transformOrigin = 'center center'
     // Never promote the sheet to a low-res compositor bitmap.
     paper.style.willChange = 'auto'
@@ -97,22 +94,39 @@ export const clearPaperViewFromElements = (
 export const zoomAroundPoint = (
   view: PaperViewSnapshot,
   nextZoom: number,
-  origin: { x: number; y: number },
-  originRect: DOMRect,
-): PaperViewSnapshot => {
-  const previous = view.zoom
-  if (nextZoom === previous) return view
-  const centerX = originRect.left + originRect.width / 2
-  const centerY = originRect.top + originRect.height / 2
-  const dx = origin.x - centerX
-  const dy = origin.y - centerY
-  const factor = nextZoom / previous
-  return {
-    zoom: nextZoom,
-    rotation: view.rotation,
-    pan: {
-      x: view.pan.x + dx - dx * factor,
-      y: view.pan.y + dy - dy * factor,
-    },
-  }
+): PaperViewSnapshot => (
+  nextZoom === view.zoom ? view : { zoom: nextZoom, rotation: view.rotation, pan: { x: 0, y: 0 } }
+)
+
+/** Keep the cursor (or viewport centre) on the same paper point after CSS zoom. */
+export const scrollViewportToZoomPoint = (
+  scroller: HTMLElement,
+  previousZoom: number,
+  nextZoom: number,
+  origin?: { x: number; y: number },
+) => {
+  if (previousZoom <= 0 || nextZoom <= 0 || previousZoom === nextZoom) return
+  const rect = scroller.getBoundingClientRect()
+  const pointX = origin?.x ?? rect.left + rect.width / 2
+  const pointY = origin?.y ?? rect.top + rect.height / 2
+  const contentX = (pointX - rect.left + scroller.scrollLeft) / previousZoom
+  const contentY = (pointY - rect.top + scroller.scrollTop) / previousZoom
+  scroller.scrollLeft = contentX * nextZoom - (pointX - rect.left)
+  scroller.scrollTop = contentY * nextZoom - (pointY - rect.top)
+}
+
+type SharedViewListener = (view: PaperViewSnapshot) => void
+let sharedPaperView = defaultPaperView()
+const sharedPaperViewListeners = new Set<SharedViewListener>()
+
+export const readSharedPaperView = () => sharedPaperView
+
+export const writeSharedPaperView = (view: PaperViewSnapshot) => {
+  sharedPaperView = view
+  sharedPaperViewListeners.forEach((listener) => listener(view))
+}
+
+export const subscribeSharedPaperView = (listener: SharedViewListener) => {
+  sharedPaperViewListeners.add(listener)
+  return () => { sharedPaperViewListeners.delete(listener) }
 }
