@@ -54,7 +54,7 @@ import type {
   CorrectionLearningResult,
   RecognitionResources,
 } from '../lib/handwritingDb'
-import { SHAPE_SNAP_LABEL, SHAPE_SNAP_MIN_CONFIDENCE, isStrokeDwelling, snapStrokeToShape, strokeLooksLikeShape } from '../lib/shapeSnap'
+import { SHAPE_SNAP_LABEL, SHAPE_SNAP_MIN_CONFIDENCE, snapStrokeToShape, strokeLooksLikeShape } from '../lib/shapeSnap'
 import {
   VIEW_ROTATE_STEP,
   VIEW_ZOOM_MAX,
@@ -64,6 +64,7 @@ import {
   clampViewZoom,
   clearPaperViewFromElements,
   normalizeRotation,
+  zoomFactorFromWheel,
 } from '../lib/paperView'
 import { usePaperView } from './PaperView'
 import { getHandwritingTrainingSampleCount } from '../lib/handwritingDbSummary'
@@ -91,6 +92,7 @@ import {
   snapToDraftingTools,
   type CompassDrawEvent,
   type CompassPose,
+  type DraftingDisplay,
   type DraftingKind,
   type DraftingPose,
 } from '../lib/draftingTools'
@@ -178,8 +180,10 @@ const MAX_CANVAS_PIXELS = 18_000_000
 /** Tall multi-page notes (PDF worksheets) keep a lower ink bitmap budget to avoid lag. */
 const MAX_CANVAS_PIXELS_TALL = 4_200_000
 const TALL_LAYOUT_HEIGHT = 1_800
-/** Hold still this long after drawing a recognized figure to beautify it. */
-const SHAPE_DWELL_MS = 2_000
+/** Hold still this long after the last real movement to beautify a figure. */
+const SHAPE_DWELL_MS = 700
+const SHAPE_DWELL_HINT_MS = 260
+const SHAPE_MOVE_RESET_PX = 1.8
 
 /** Backing-store size for the ink canvases. Higher when zoomed in so CSS scale stays sharp. */
 const computeInkPixelSize = (layoutWidth: number, layoutHeight: number, viewZoom: number, inlineMode: boolean) => {
@@ -452,6 +456,7 @@ export type DrawingBoardProps = {
     | 'enhancedMathLicenseAccepted'
     | 'qwenVisionRecognition'
     | 'qwenVisionLicenseAccepted'
+    | 'viewZoomSpeed'
     | 'autoOpenConversion'
     | 'keepDrawingAfterInsert'
   >
@@ -1148,6 +1153,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const liveCanvasHasInkRef = useRef(false)
   const lastPenContactRef = useRef(0)
   const shapeDwellTimerRef = useRef<number | null>(null)
+  const shapeHintTimerRef = useRef<number | null>(null)
+  const shapeLastMoveAtRef = useRef(0)
   const shapeSnappedRef = useRef(false)
   const mountedRef = useRef(true)
   const resourcesRef = useRef<RecognitionResources | null>(null)
@@ -1700,6 +1707,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         sourceWidthRef.current,
         sourceHeightRef.current,
         draftingLockRef.current,
+        { width: paperW, height: paperH },
       )
       if (snapped) {
         x = snapped.x
@@ -2060,14 +2068,17 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       window.clearTimeout(shapeDwellTimerRef.current)
       shapeDwellTimerRef.current = null
     }
+    if (shapeHintTimerRef.current !== null) {
+      window.clearTimeout(shapeHintTimerRef.current)
+      shapeHintTimerRef.current = null
+    }
   }, [])
 
   /** Snap only a confidently recognized figure after a deliberate still hold. */
   const trySnapActiveShape = useCallback(() => {
     if (gestureToolRef.current !== 'pen' || selectionStartRef.current) return false
     const stroke = activeStrokeRef.current
-    if (!stroke || stroke.symbolId || stroke.points.length < 14) return false
-    if (!isStrokeDwelling(stroke, sourceWidth, sourceHeight)) return false
+    if (!stroke || stroke.symbolId || stroke.points.length < 10) return false
     const snapped = snapStrokeToShape(stroke, sourceWidth, sourceHeight)
     if (!snapped || snapped.confidence < SHAPE_SNAP_MIN_CONFIDENCE) return false
     activeStrokeRef.current = {
@@ -2075,17 +2086,50 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       ...snapped.stroke,
       points: snapped.stroke.points,
     } as InkStroke
+    // Force a full live-canvas redraw so the freehand stroke is replaced, not overdrawn.
     activeRenderedPointCountRef.current = 0
-    liveCanvasHasInkRef.current = false
+    liveCanvasHasInkRef.current = true
     shapeSnappedRef.current = true
     gestureChangedRef.current = true
     scheduleRedraw()
     setNotice({
       kind: 'success',
-      text: `${SHAPE_SNAP_LABEL[snapped.kind]} erkannt · hebe den Stift, um die saubere Form zu übernehmen.`,
+      text: `${SHAPE_SNAP_LABEL[snapped.kind]} erkannt · Stift heben übernimmt die saubere Form.`,
     })
     return true
   }, [scheduleRedraw, sourceHeight, sourceWidth])
+
+  const onShapeDwellElapsed = useCallback(() => {
+    shapeDwellTimerRef.current = null
+    if (shapeSnappedRef.current || !activeStrokeRef.current || activePointerRef.current === null) return
+    const remaining = SHAPE_DWELL_MS - (performance.now() - shapeLastMoveAtRef.current)
+    if (remaining > 16) {
+      shapeDwellTimerRef.current = window.setTimeout(onShapeDwellElapsed, remaining)
+      return
+    }
+    if (trySnapActiveShape()) return
+    // Almost a shape (e.g. circle not fully closed): keep watching while the tip stays down.
+    shapeDwellTimerRef.current = window.setTimeout(onShapeDwellElapsed, 180)
+  }, [trySnapActiveShape])
+
+  const armShapeDwell = useCallback(() => {
+    if (gestureToolRef.current !== 'pen' || selectionStartRef.current || shapeSnappedRef.current) return
+    const stroke = activeStrokeRef.current
+    if (!stroke || stroke.symbolId || stroke.points.length < 10) return
+    if (shapeDwellTimerRef.current === null) {
+      shapeDwellTimerRef.current = window.setTimeout(onShapeDwellElapsed, SHAPE_DWELL_MS)
+    }
+    if (shapeHintTimerRef.current === null) {
+      shapeHintTimerRef.current = window.setTimeout(() => {
+        shapeHintTimerRef.current = null
+        if (shapeSnappedRef.current || !activeStrokeRef.current) return
+        if (performance.now() - shapeLastMoveAtRef.current < SHAPE_DWELL_HINT_MS) return
+        if (strokeLooksLikeShape(activeStrokeRef.current, sourceWidthRef.current, sourceHeightRef.current)) {
+          setNotice({ kind: 'info', text: 'Form erkannt — halte still, um sie zu glätten.' })
+        }
+      }, SHAPE_DWELL_HINT_MS)
+    }
+  }, [onShapeDwellElapsed])
 
   const paintActiveStrokeNow = useCallback((predicted: PointerEvent[] = []) => {
     const canvas = canvasRef.current
@@ -2143,42 +2187,29 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         (point.x - previous.x) * sourceWidth,
         (point.y - previous.y) * sourceHeight,
       )
-      if (distance < 0.35) return
-      // Moving again cancels a pending shape snap and allows re-drawing freehand.
-      if (distance > 1.8) {
-        clearShapeDwellTimer()
-        if (shapeSnappedRef.current) shapeSnappedRef.current = false
+      if (distance < 0.35) {
+        // Holding still must still arm the dwell clock. Tablets/mice often send
+        // no further moves, so the timeout from the last real point is what snaps.
+        armShapeDwell()
+        return
       }
+      shapeLastMoveAtRef.current = performance.now()
+      clearShapeDwellTimer()
+      // A larger correction after a snap lets the user keep drawing freehand.
+      if (distance > SHAPE_MOVE_RESET_PX && shapeSnappedRef.current) shapeSnappedRef.current = false
+    } else {
+      shapeLastMoveAtRef.current = performance.now()
     }
     stroke.points.push(point)
     gestureChangedRef.current = true
     if (!paintActiveStrokeNow()) scheduleRedraw()
-    // Shape checks are only for the 2s hold — not on every tablet sample.
-    if (
-      gestureToolRef.current === 'pen'
-      && !selectionStartRef.current
-      && !stroke.symbolId
-      && !shapeSnappedRef.current
-      && stroke.points.length >= 14
-      && stroke.points.length % 8 === 0
-      && isStrokeDwelling(stroke, sourceWidth, sourceHeight)
-      && strokeLooksLikeShape(stroke, sourceWidth, sourceHeight)
-    ) {
-      if (shapeDwellTimerRef.current === null) {
-        shapeDwellTimerRef.current = window.setTimeout(() => {
-          shapeDwellTimerRef.current = null
-          trySnapActiveShape()
-        }, SHAPE_DWELL_MS)
-      }
-    } else if (!isStrokeDwelling(stroke, sourceWidth, sourceHeight)) {
-      clearShapeDwellTimer()
-    }
+    armShapeDwell()
     const visibleInk = inkWindowRef.current
     if (!isFullInkWindow(visibleInk) && (point.y < visibleInk.y0 + 0.08 || point.y > visibleInk.y1 - 0.08)) {
       // Remeasuring mid-stroke freezes the UI and can drop pointerup.
       resizeDirtyRef.current = true
     }
-  }, [clearShapeDwellTimer, eraseAt, paintActiveStrokeNow, pointFromEvent, scheduleRedraw, sourceHeight, sourceWidth, trySnapActiveShape])
+  }, [armShapeDwell, clearShapeDwellTimer, eraseAt, paintActiveStrokeNow, pointFromEvent, scheduleRedraw, sourceHeight, sourceWidth])
 
   const commitPendingSolverTap = useCallback(() => {
     const pending = pendingSolverTapRef.current
@@ -2511,6 +2542,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     closeMathCorrectionSession()
     clearShapeDwellTimer()
     shapeSnappedRef.current = false
+    shapeLastMoveAtRef.current = performance.now()
     beforeGestureRef.current = snapshotStrokes(strokesRef.current)
     gestureChangedRef.current = false
     gestureToolRef.current = pointerEraser ? 'eraser' : tool
@@ -2664,9 +2696,10 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       return
     }
     appendPointerEvent(native)
+    const heldLongEnough = performance.now() - shapeLastMoveAtRef.current >= SHAPE_DWELL_MS
     clearShapeDwellTimer()
-    // Never snap on lift. Only a completed still-hold may beautify a recognized figure.
     const activeStroke = activeStrokeRef.current
+    if (heldLongEnough && !shapeSnappedRef.current) trySnapActiveShape()
     if (
       mathSolverEnabled
       && inkMode === 'writing'
@@ -2751,11 +2784,26 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     }
     if (gestureChangedRef.current) fitPageToInk()
     scheduleRedraw()
-  }, [analyzeMathCorrectionSelection, appendPointerEvent, bumpInkRevision, clearShapeDwellTimer, commitPendingSolverTap, commitStrokeToCanvas, fitPageToInk, inkMode, mathSolverEnabled, mode, openMathSolverAtPoint, pointFromEvent, redraw, scheduleRedraw, selectionPurpose, setDirty, settings.scribbleEraseSensitivity, sourceHeight, sourceWidth, syncInkWindow, updateHistoryState])
+  }, [analyzeMathCorrectionSelection, appendPointerEvent, bumpInkRevision, clearShapeDwellTimer, commitPendingSolverTap, commitStrokeToCanvas, fitPageToInk, inkMode, mathSolverEnabled, mode, openMathSolverAtPoint, pointFromEvent, redraw, scheduleRedraw, selectionPurpose, setDirty, settings.scribbleEraseSensitivity, sourceHeight, sourceWidth, syncInkWindow, trySnapActiveShape, updateHistoryState])
+
+  const readDraftingDisplay = useCallback((): DraftingDisplay => {
+    const surface = surfaceRef.current
+    const canvas = canvasRef.current
+    const paper = inline
+      ? (surface?.closest('.unified-paper') as HTMLElement | null)
+        ?? (canvas?.closest('.unified-paper') as HTMLElement | null)
+      : null
+    const node = paper ?? surface ?? canvas
+    return {
+      width: Math.max(1, node?.offsetWidth ?? sourceWidthRef.current),
+      height: Math.max(1, node?.offsetHeight ?? sourceHeightRef.current),
+    }
+  }, [inline])
 
   const handleCompassDraw = useCallback((event: CompassDrawEvent) => {
     const sw = sourceWidthRef.current
     const sh = sourceHeightRef.current
+    const display = readDraftingDisplay()
     const toPoint = (x: number, y: number): StrokePoint => ({
       x,
       y,
@@ -2790,7 +2838,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
           }
     )
     const growForPose = (pose: CompassPose) => {
-      const { rx, ry } = compassRadiiNorm(pose.radiusMm, sw, sh)
+      const { rx, ry } = compassRadiiNorm(pose.radiusMm, sw, sh, display)
       ensureWriteRoom(pose.y + ry + 0.02, pose.x + rx + 0.02)
     }
     const commitReadyStroke = (stroke: InkStroke | null, label: string) => {
@@ -2820,7 +2868,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       activeRenderedPointCountRef.current = 0
       growForPose(event.pose)
       const pose = compassPoseRef.current ?? event.pose
-      const first = sampleCompassArc(pose, pose.rotation, pose.rotation, sourceWidthRef.current, sourceHeightRef.current)[0]
+      const first = sampleCompassArc(pose, pose.rotation, pose.rotation, sourceWidthRef.current, sourceHeightRef.current, 0.035, display)[0]
       if (!first) return
       activeStrokeRef.current = makeStroke([toPoint(first.x, first.y)])
       paintActiveStrokeNow()
@@ -2836,6 +2884,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         event.toAngle,
         sourceWidthRef.current,
         sourceHeightRef.current,
+        0.035,
+        display,
       )
       for (const point of extra) stroke.points.push(toPoint(point.x, point.y))
       if (!paintActiveStrokeNow()) scheduleRedraw()
@@ -2853,10 +2903,10 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     }
     growForPose(event.pose)
     const pose = compassPoseRef.current ?? event.pose
-    const points = sampleCompassCircle(pose, sourceWidthRef.current, sourceHeightRef.current).map((point) => toPoint(point.x, point.y))
+    const points = sampleCompassCircle(pose, sourceWidthRef.current, sourceHeightRef.current, display).map((point) => toPoint(point.x, point.y))
     beforeGestureRef.current = snapshotStrokes(strokesRef.current)
     commitReadyStroke(makeStroke(points), `Kreis ${formatMillimetres(pose.radiusMm)} gezeichnet.`)
-  }, [artBrush, artColor, artEffect, artOpacity, artWidth, bumpInkRevision, commitStrokeToCanvas, ensureWriteRoom, fitPageToInk, inkMode, paintActiveStrokeNow, penColor, penWidth, scheduleRedraw, setDirty, updateHistoryState])
+  }, [artBrush, artColor, artEffect, artOpacity, artWidth, bumpInkRevision, commitStrokeToCanvas, ensureWriteRoom, fitPageToInk, inkMode, paintActiveStrokeNow, penColor, penWidth, readDraftingDisplay, scheduleRedraw, setDirty, updateHistoryState])
 
   /**
    * Hard-stop any in-progress pen/mouse stroke and scrub leftover pointer capture.
@@ -3041,8 +3091,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     if (event.ctrlKey || event.metaKey) {
       event.preventDefault()
       event.stopPropagation()
-      const direction = event.deltaY > 0 ? -VIEW_ZOOM_STEP : VIEW_ZOOM_STEP
-      zoomBy(direction, { x: event.clientX, y: event.clientY })
+      const factor = zoomFactorFromWheel(event.deltaY, event.deltaMode, settings.viewZoomSpeed ?? 5)
+      zoomBy(viewZoomRef.current * factor - viewZoomRef.current, { x: event.clientX, y: event.clientY })
       return
     }
     // Rotate the sheet while writing: Alt+wheel.
@@ -3065,7 +3115,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         },
       })
     }
-  }, [forceEndActivePointer, inputActive, paperView, rotateBy, setView, zoomBy])
+  }, [forceEndActivePointer, inputActive, paperView, rotateBy, setView, settings.viewZoomSpeed, zoomBy])
 
   const undo = useCallback(() => {
     if (pendingSolverTapRef.current) {
@@ -3352,7 +3402,70 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
           : recognitionEngine.recognizedSentence(recognized)
       }
 
-      if (requestedMode !== 'math') {
+      // Optional Qwen3-VL (Intel NPU): recommended text engine. Run it before
+      // the slower neural line model so the conversion uses the VLM first.
+      let qwenVisionFailure = ''
+      let qwenVisionUsed = false
+      const recognizeQwenVision = window.fanotes.recognizeQwenVision
+      const qwenVisionReady = Boolean(
+        settings.qwenVisionRecognition
+        && settings.qwenVisionLicenseAccepted
+        && recognizeQwenVision,
+      )
+      const textModeLikely = resolvedMode === 'text'
+        || (
+          requestedMode !== 'math'
+          && Boolean(automaticDetection)
+          && automaticDetection!.textScore > automaticDetection!.mathScore
+        )
+      if (textModeLikely && qwenVisionReady) {
+        try {
+          const {
+            cleanQwenVisionText,
+            renderQwenVisionImage,
+            shouldPreferQwenVisionText,
+          } = await import('../lib/qwenVisionRecognition')
+          const visionImage = renderQwenVisionImage(engineStrokes, sourceWidth, sourceHeight)
+          if (visionImage) {
+            const vision = await recognizeQwenVision!({
+              pixels: visionImage.pixels,
+              width: visionImage.width,
+              height: visionImage.height,
+              lineCount: visionImage.lineCount,
+              language: settings.recognitionLanguage === 'en' ? 'en' : 'de',
+              maxNewTokens: Math.min(512, Math.max(128, visionImage.lineCount * 48 + engineStrokes.length * 6 + 96)),
+            })
+            if (runId !== recognitionRunRef.current) return
+            const visionText = cleanQwenVisionText(vision.text || '')
+            if (
+              vision.device === 'NPU'
+              && visionText
+              && shouldPreferQwenVisionText(value, visionText, engineStrokes.length)
+            ) {
+              value = visionText
+              qwenVisionUsed = true
+              resolvedMode = 'text'
+              recognized = []
+              if (automaticDetection) {
+                automaticDetection = {
+                  ...automaticDetection,
+                  mode: 'text',
+                  value,
+                  confidence: Math.max(automaticDetection.confidence, vision.confidence ?? 86),
+                  reason: 'Qwen3-VL, empfohlene Texterkennung auf der Intel-NPU',
+                  textScore: Math.max(automaticDetection.textScore, 1.55 + (vision.confidence ?? 86) / 45),
+                }
+              }
+            }
+          }
+        } catch (error) {
+          qwenVisionFailure = error instanceof Error
+            ? error.message
+            : 'Qwen3-VL konnte nicht auf der NPU ausgeführt werden.'
+        }
+      }
+
+      if (requestedMode !== 'math' && !qwenVisionUsed) {
         try {
           const { recognizeNeuralText } = await import('../lib/neuralTextRecognition')
           const neural = await recognizeNeuralText(
@@ -3451,65 +3564,6 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         }
       }
 
-      // Optional Qwen3-VL (Intel NPU only): improves freehand text when enabled.
-      let qwenVisionFailure = ''
-      let qwenVisionUsed = false
-      const textModeLikely = resolvedMode === 'text'
-        || (
-          Boolean(automaticDetection)
-          && automaticDetection!.textScore >= automaticDetection!.mathScore * 0.9
-          && !enhancedMathUsed
-        )
-      if (
-        textModeLikely
-        && !enhancedMathUsed
-        && settings.qwenVisionRecognition
-        && settings.qwenVisionLicenseAccepted
-        && window.fanotes.recognizeQwenVision
-      ) {
-        try {
-          const {
-            cleanQwenVisionText,
-            renderQwenVisionImage,
-            shouldPreferQwenVisionText,
-          } = await import('../lib/qwenVisionRecognition')
-          const visionImage = renderQwenVisionImage(engineStrokes, sourceWidth, sourceHeight)
-          if (visionImage) {
-            const vision = await window.fanotes.recognizeQwenVision({
-              ...visionImage,
-              language: settings.recognitionLanguage === 'en' ? 'en' : 'de',
-              maxNewTokens: Math.min(384, Math.max(96, Math.round(engineStrokes.length * 8 + 80))),
-            })
-            if (runId !== recognitionRunRef.current) return
-            const visionText = cleanQwenVisionText(vision.text || '')
-            if (
-              vision.device === 'NPU'
-              && visionText
-              && shouldPreferQwenVisionText(value, visionText)
-            ) {
-              value = visionText
-              qwenVisionUsed = true
-              resolvedMode = 'text'
-              recognized = []
-              if (automaticDetection) {
-                automaticDetection = {
-                  ...automaticDetection,
-                  mode: 'text',
-                  value,
-                  confidence: Math.max(automaticDetection.confidence, vision.confidence ?? 78),
-                  reason: 'Qwen3-VL Vision auf Intel-NPU',
-                  textScore: Math.max(automaticDetection.textScore, 1.35 + (vision.confidence ?? 78) / 50),
-                }
-              }
-            }
-          }
-        } catch (error) {
-          qwenVisionFailure = error instanceof Error
-            ? error.message
-            : 'Qwen3-VL konnte nicht auf der NPU ausgeführt werden.'
-        }
-      }
-
       setAutomaticResult(automaticDetection ? {
         confidence: automaticDetection.confidence,
         reason: automaticDetection.reason,
@@ -3548,7 +3602,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       } else if (resolvedMode === 'text' && qwenVisionUsed) {
         setNotice({
           kind: 'success',
-          text: 'Qwen3-VL hat den Text auf der Intel-NPU gelesen (INT4, sparsam). Du kannst das Ergebnis weiter korrigieren.',
+          text: 'Qwen3-VL hat den Text gelesen — empfohlene Texterkennung auf der Intel-NPU. Du kannst das Ergebnis weiter korrigieren.',
         })
       } else if (resolvedMode === 'text' && contextChanges > 0 && !neuralTextUsed) {
         setNotice({
@@ -3565,7 +3619,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     } finally {
       if (mountedRef.current && runId === recognitionRunRef.current) setIsRecognizing(false)
     }
-  }, [mode, onSettingsChange, settings.enhancedMathLicenseAccepted, settings.enhancedMathRecognition, settings.lastRecognitionMode, settings.recognitionLanguage, sourceHeight])
+  }, [mode, onSettingsChange, settings.enhancedMathLicenseAccepted, settings.enhancedMathRecognition, settings.lastRecognitionMode, settings.qwenVisionLicenseAccepted, settings.qwenVisionRecognition, settings.recognitionLanguage, sourceHeight, sourceWidth])
 
   useEffect(() => {
     recognizeLatestRef.current = recognize

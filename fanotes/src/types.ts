@@ -86,6 +86,8 @@ export type AppSettings = {
   compactMode: boolean
   glassEffects: boolean
   reduceMotion: boolean
+  /** 1 = langsam, 5 = normal, 10 = schnell. Steuert Mausrad- und Trackpad-Zoom. */
+  viewZoomSpeed: number
   showWordCount: boolean
   showOutline: boolean
   defaultFolder: string
@@ -195,6 +197,7 @@ export type QwenVisionState = {
   openvinoVersion: string | null
   modelId: 'qwen3-vl-2b-int4-npu'
   label: string
+  recommended?: boolean
   precision: 'int4'
   device: 'NPU'
   license: 'Apache-2.0'
@@ -418,6 +421,7 @@ export type FaNotesApi = {
     height: number
     maxNewTokens?: number
     language?: 'de' | 'en'
+    lineCount?: number
   }) => Promise<{
     text: string
     device: 'NPU'

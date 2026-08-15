@@ -1,5 +1,13 @@
 # Änderungsverlauf
 
+## 2026.8.20
+
+- **Qwen3-VL empfohlen:** Die Intel-NPU-Texterkennung ist die empfohlene Engine. Crops, Prompts und Zeilenlage sind schärfer; das kleine neuronale Modell bleibt als Rückfall.
+- **Zoom ohne Hin und Her:** Die Zoom-Geschwindigkeit (1–10) liegt in den Einstellungen. Das Blatt bleibt unter dem Cursor, ohne zu springen.
+- **Häuschen-Papier:** Die Kästchen oben links sind jetzt gleich groß wie der Rest.
+- **Runder Zirkel:** Kreis und Bogen sind in jede Richtung gleich weit — kein Oval mehr, wenn das Blatt breiter oder höher als A4 ist.
+- **Formen stillhalten:** Kreis, Linie, Rechteck, Quadrat, Dreieck oder Ellipse zeichnen und den Stift kurz stillhalten. Die Form wird geglättet; Buchstaben bleiben freihand.
+
 ## 2026.8.19
 
 - **Notizen in Ordner ziehen:** Dateien lassen sich per Drag-and-drop in einen Ordner legen oder wieder herausziehen; die zugehörige `.famd` wandert mit.

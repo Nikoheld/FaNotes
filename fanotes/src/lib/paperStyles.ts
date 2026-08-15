@@ -30,7 +30,9 @@ export const paperStyleLabel = (style: PaperStyle) => (
   PAPER_STYLES.find((item) => item.id === style)?.label ?? 'Papier'
 )
 
-const stepForMm = (width: number, millimeters: number) => Math.max(2, width * millimeters / A4_WIDTH_MM)
+const stepForMm = (width: number, millimeters: number) => (
+  Math.max(2, Math.round(width * millimeters / A4_WIDTH_MM))
+)
 
 export const drawPaperBackground = (
   context: CanvasRenderingContext2D,
@@ -64,13 +66,13 @@ export const drawPaperBackground = (
     const step = stepForMm(width, 5)
     context.strokeStyle = 'rgba(92, 118, 168, .22)'
     context.beginPath()
-    for (let x = step; x < width; x += step) {
-      context.moveTo(x, 0)
-      context.lineTo(x, height)
+    for (let x = 0; x <= width; x += step) {
+      context.moveTo(x + 0.5, 0)
+      context.lineTo(x + 0.5, height)
     }
-    for (let y = step; y < height; y += step) {
-      context.moveTo(0, y)
-      context.lineTo(width, y)
+    for (let y = 0; y <= height; y += step) {
+      context.moveTo(0, y + 0.5)
+      context.lineTo(width, y + 0.5)
     }
     context.stroke()
   } else if (style === 'grid') {

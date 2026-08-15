@@ -32,7 +32,7 @@ export const SHAPE_SNAP_LABEL: Record<ShapeSnapKind, string> = {
 }
 
 /** Only snap when we are this sure — letters and scribbles stay freehand. */
-export const SHAPE_SNAP_MIN_CONFIDENCE = 0.78
+export const SHAPE_SNAP_MIN_CONFIDENCE = 0.72
 
 type Phys = {
   x: number
@@ -323,18 +323,18 @@ export const snapStrokeToShape = (
   sourceHeight: number,
 ): ShapeSnapResult | null => {
   if (stroke.symbolId) return null
-  if (stroke.points.length < 14) return null
+  if (stroke.points.length < 10) return null
   const pts = physical(stroke.points, sourceWidth, sourceHeight)
   const length = pathLength(pts)
-  if (length < 48) return null
+  if (length < 40) return null
   const box = bboxOf(pts)
   const diagonal = hypot(box.width, box.height)
-  if (diagonal < 36) return null
+  if (diagonal < 32) return null
 
   const start = pts[0]
   const end = pts[pts.length - 1]
   const chord = hypot(end.x - start.x, end.y - start.y)
-  const closed = chord <= Math.max(16, diagonal * 0.14)
+  const closed = chord <= Math.max(18, diagonal * 0.2)
   const template = templateFrom(pts)
 
   // --- Line (open, almost straight, not a tiny glyph) ---
@@ -370,15 +370,15 @@ export const snapStrokeToShape = (
   let ellipseScore = 0
   if (
     closed
-    && coverage >= 0.78
-    && radiusMean >= 20
-    && length >= radiusMean * Math.PI * 1.15
-    && length <= radiusMean * Math.PI * 3.4
+    && coverage >= 0.68
+    && radiusMean >= 18
+    && length >= radiusMean * Math.PI * 1.05
+    && length <= radiusMean * Math.PI * 3.6
   ) {
-    if (circular && ellipse.residual <= 0.14) {
-      circleScore = clamp01(1 - ellipse.residual / 0.14) * clamp01(0.55 + coverage * 0.45)
-    } else if (elliptical && ellipse.residual <= 0.16 && (aspect <= 0.86 || aspect >= 1.16)) {
-      ellipseScore = clamp01(1 - ellipse.residual / 0.16) * clamp01(0.5 + coverage * 0.5)
+    if (circular && ellipse.residual <= 0.18) {
+      circleScore = clamp01(1 - ellipse.residual / 0.18) * clamp01(0.55 + coverage * 0.45)
+    } else if (elliptical && ellipse.residual <= 0.2 && (aspect <= 0.86 || aspect >= 1.16)) {
+      ellipseScore = clamp01(1 - ellipse.residual / 0.2) * clamp01(0.5 + coverage * 0.5)
     }
   }
 

@@ -17,7 +17,7 @@ const { spawn } = require('node:child_process')
 
 const MODEL = Object.freeze({
   id: 'qwen3-vl-2b-int4-npu',
-  label: 'Qwen3-VL 2B · OpenVINO INT4 · NPU',
+  label: 'Empfohlen · Qwen3-VL 2B · OpenVINO INT4 · NPU',
   // Community OpenVINO export of Qwen/Qwen3-VL-2B-Instruct (Apache-2.0).
   repo: 'shawnxhong/Qwen3-VL-2B-Instruct-ov-int4',
   revision: 'main',
@@ -52,7 +52,7 @@ const MODEL = Object.freeze({
   ]),
 })
 
-const MAX_IMAGE_BYTES = 6 * 1024 * 1024
+const MAX_IMAGE_BYTES = 12 * 1024 * 1024
 const MAX_OUTPUT_CHARS = 4_000
 const DOWNLOAD_TIMEOUT_MS = 30 * 60_000
 const WORKER_TIMEOUT_MS = 90_000
@@ -628,6 +628,7 @@ function createQwenVisionService({
       openvinoVersion: runtime.openvinoVersion,
       modelId: descriptor.id,
       label: descriptor.label,
+      recommended: true,
       precision: descriptor.precision,
       device: descriptor.device,
       license: descriptor.license,
@@ -808,21 +809,31 @@ function createQwenVisionService({
         flag: 'wx',
       })
       const language = request.language === 'en' ? 'en' : 'de'
+      const lineCount = Number.isSafeInteger(request.lineCount) ? Math.max(1, Math.min(24, request.lineCount)) : 0
+      const lineHint = lineCount > 1
+        ? (language === 'en'
+          ? `The image contains ${lineCount} handwritten lines stacked from top to bottom.`
+          : `Das Bild enthält ${lineCount} handgeschriebene Zeilen von oben nach unten.`)
+        : (language === 'en'
+          ? 'The image is a single handwritten line or a short note.'
+          : 'Das Bild ist eine einzelne handgeschriebene Zeile oder eine kurze Notiz.')
       // OCR-style prompts: preserve line breaks, discourage chatty rewriting.
       const prompt = language === 'en'
         ? [
-            'You are a handwriting OCR engine for notes.',
-            'Read every handwritten line in the image carefully.',
+            'Transcribe the handwriting in this school-note image exactly.',
+            lineHint,
+            'Read left to right, top to bottom. Keep original line breaks.',
+            'Keep punctuation, numbers, umlauts and ß if present.',
             'Output only the transcribed text.',
-            'Keep original line breaks.',
             'Do not translate. Do not invent missing words. Do not correct spelling.',
             'No markdown, no quotes, no labels, no commentary.',
           ].join(' ')
         : [
-            'Du bist ein OCR-System für Handschrift in Notizen.',
-            'Lies jede handgeschriebene Zeile im Bild sorgfältig.',
+            'Transkribiere die Handschrift in diesem Notizbild genau.',
+            lineHint,
+            'Lies von links nach rechts, oben nach unten. Behalte Zeilenumbrüche.',
+            'Behalte Satzzeichen, Zahlen, Umlaute (ä ö ü) und ß.',
             'Gib ausschließlich den erkannten Text aus.',
-            'Behalte Zeilenumbrüche bei.',
             'Nicht übersetzen, nichts erfinden, Rechtschreibung nicht „verbessern“.',
             'Kein Markdown, keine Anführungszeichen, keine Labels, keine Erklärungen.',
           ].join(' ')
@@ -832,8 +843,8 @@ function createQwenVisionService({
         imagePath,
         prompt,
         maxNewTokens: Number.isSafeInteger(request.maxNewTokens)
-          ? Math.max(32, Math.min(384, request.maxNewTokens))
-          : 192,
+          ? Math.max(48, Math.min(512, request.maxNewTokens))
+          : 256,
       }
       let result = await runWorker(workerRequest)
       // One automatic runtime upgrade if GenAI rejects qwen3_vl.

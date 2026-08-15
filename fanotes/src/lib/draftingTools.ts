@@ -30,9 +30,29 @@ export type DraftingEdge = {
   by: number
 }
 
+export type DraftingDisplay = {
+  width: number
+  height: number
+}
+
 export const mmToSourcePx = (mm: number) => mm * SOURCE_A4_PX / A4_WIDTH_MM
 
 export const mmToNorm = (mm: number, sourceSize: number) => mmToSourcePx(mm) / Math.max(1, sourceSize)
+
+const displaySize = (
+  sourceWidth: number,
+  sourceHeight: number,
+  display?: DraftingDisplay,
+) => ({
+  width: Math.max(1, display?.width ?? sourceWidth),
+  height: Math.max(1, display?.height ?? sourceHeight),
+})
+
+/** Screen pixels per millimetre, using the sheet width as the 210 mm A4 column. */
+export const pxPerMmOnDisplay = (
+  sourceWidth: number,
+  display?: DraftingDisplay,
+) => displaySize(sourceWidth, sourceWidth, display).width / Math.max(1, sourceWidth) * SOURCE_A4_PX / A4_WIDTH_MM
 
 export const defaultRulerPose = (): DraftingPose => ({ x: 0.5, y: 0.22, rotation: 0 })
 
@@ -58,13 +78,27 @@ export const asCompassPose = (pose: DraftingPose): CompassPose => ({
   locked: Boolean(pose.locked),
 })
 
-export const compassRadiiNorm = (radiusMm: number, sourceWidth: number, sourceHeight: number) => ({
-  rx: mmToNorm(radiusMm, sourceWidth),
-  ry: mmToNorm(radiusMm, sourceHeight),
-})
+export const compassRadiiNorm = (
+  radiusMm: number,
+  sourceWidth: number,
+  sourceHeight: number,
+  display?: DraftingDisplay,
+) => {
+  const rx = mmToNorm(radiusMm, sourceWidth)
+  const { width, height } = displaySize(sourceWidth, sourceHeight, display)
+  // Screen circle: rx * displayWidth === ry * displayHeight. Without this
+  // correction a square millimetre becomes an ellipse as soon as the sheet
+  // is wider or taller than the 900×1273 source page.
+  return { rx, ry: rx * (width / height) }
+}
 
-export const compassPencilPoint = (pose: CompassPose, sourceWidth: number, sourceHeight: number) => {
-  const { rx, ry } = compassRadiiNorm(pose.radiusMm, sourceWidth, sourceHeight)
+export const compassPencilPoint = (
+  pose: CompassPose,
+  sourceWidth: number,
+  sourceHeight: number,
+  display?: DraftingDisplay,
+) => {
+  const { rx, ry } = compassRadiiNorm(pose.radiusMm, sourceWidth, sourceHeight, display)
   return {
     x: pose.x + Math.cos(pose.rotation) * rx,
     y: pose.y + Math.sin(pose.rotation) * ry,
@@ -78,10 +112,11 @@ export const radiusMmBetween = (
   by: number,
   sourceWidth: number,
   sourceHeight: number,
+  display?: DraftingDisplay,
 ) => {
-  const dxMm = (bx - ax) * sourceWidth * A4_WIDTH_MM / SOURCE_A4_PX
-  const dyMm = (by - ay) * sourceHeight * A4_WIDTH_MM / SOURCE_A4_PX
-  return Math.hypot(dxMm, dyMm)
+  const { width, height } = displaySize(sourceWidth, sourceHeight, display)
+  const pixels = Math.hypot((bx - ax) * width, (by - ay) * height)
+  return pixels / Math.max(1e-6, pxPerMmOnDisplay(sourceWidth, { width, height }))
 }
 
 export const angleToPoint = (
@@ -91,7 +126,11 @@ export const angleToPoint = (
   y: number,
   sourceWidth: number,
   sourceHeight: number,
-) => Math.atan2((y - originY) * sourceHeight, (x - originX) * sourceWidth)
+  display?: DraftingDisplay,
+) => {
+  const { width, height } = displaySize(sourceWidth, sourceHeight, display)
+  return Math.atan2((y - originY) * height, (x - originX) * width)
+}
 
 export const snapRadiusMm = (mm: number) => {
   const rounded = Math.round(mm)
@@ -114,8 +153,9 @@ export const sampleCompassArc = (
   sourceWidth: number,
   sourceHeight: number,
   stepRad = 0.035,
+  display?: DraftingDisplay,
 ): CompassSample[] => {
-  const { rx, ry } = compassRadiiNorm(pose.radiusMm, sourceWidth, sourceHeight)
+  const { rx, ry } = compassRadiiNorm(pose.radiusMm, sourceWidth, sourceHeight, display)
   const delta = toAngle - fromAngle
   if (Math.abs(delta) < 1e-8) {
     return [{
@@ -139,6 +179,7 @@ export const sampleCompassCircle = (
   pose: CompassPose,
   sourceWidth: number,
   sourceHeight: number,
+  display?: DraftingDisplay,
 ): CompassSample[] => {
   const points = sampleCompassArc(
     pose,
@@ -147,6 +188,7 @@ export const sampleCompassCircle = (
     sourceWidth,
     sourceHeight,
     0.028,
+    display,
   )
   const first = points[0]
   if (first) points.push({ x: first.x, y: first.y })
@@ -259,12 +301,13 @@ const projectOnCompass = (
   sourceWidth: number,
   sourceHeight: number,
   force: boolean,
+  display?: DraftingDisplay,
 ): SnapResult | null => {
-  const { rx, ry } = compassRadiiNorm(pose.radiusMm, sourceWidth, sourceHeight)
+  const { rx, ry } = compassRadiiNorm(pose.radiusMm, sourceWidth, sourceHeight, display)
   if (rx < 1e-6 || ry < 1e-6) return null
-  const distMm = radiusMmBetween(pose.x, pose.y, x, y, sourceWidth, sourceHeight)
+  const distMm = radiusMmBetween(pose.x, pose.y, x, y, sourceWidth, sourceHeight, display)
   if (!force && Math.abs(distMm - pose.radiusMm) > SNAP_MM) return null
-  const angle = angleToPoint(pose.x, pose.y, x, y, sourceWidth, sourceHeight)
+  const angle = angleToPoint(pose.x, pose.y, x, y, sourceWidth, sourceHeight, display)
   return {
     x: pose.x + Math.cos(angle) * rx,
     y: pose.y + Math.sin(angle) * ry,
@@ -319,12 +362,13 @@ export const snapToDraftingTools = (
   sourceWidth: number,
   sourceHeight: number,
   locked?: { kind: DraftingKind; edgeIndex: number } | null,
+  display?: DraftingDisplay,
 ): SnapResult | null => {
   if (locked) {
     const tool = tools.find((item) => item.kind === locked.kind)
     if (tool) {
       if (tool.kind === 'compass') {
-        return projectOnCompass(x, y, asCompassPose(tool.pose), sourceWidth, sourceHeight, true)
+        return projectOnCompass(x, y, asCompassPose(tool.pose), sourceWidth, sourceHeight, true, display)
       }
       const edges = draftingEdges(tool.kind, tool.pose, sourceWidth, sourceHeight)
       const edge = edges[locked.edgeIndex]
@@ -339,7 +383,7 @@ export const snapToDraftingTools = (
   const edgeThreshold = mmToNorm(SNAP_MM, sourceWidth)
   for (const tool of tools) {
     if (tool.kind === 'compass') {
-      const candidate = projectOnCompass(x, y, asCompassPose(tool.pose), sourceWidth, sourceHeight, false)
+      const candidate = projectOnCompass(x, y, asCompassPose(tool.pose), sourceWidth, sourceHeight, false, display)
       if (!candidate) continue
       if (!best || Math.hypot(x - candidate.x, y - candidate.y) < Math.hypot(x - best.x, y - best.y)) best = candidate
       continue

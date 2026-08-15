@@ -615,7 +615,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   background-color: #fff; background-clip: padding-box; flex: none;
 }
 .paper-picker__swatch.paper-dots { background-image: radial-gradient(rgba(82,91,116,.45) .7px, transparent .7px); background-size: 5px 5px; }
-.paper-picker__swatch.paper-squares { background-image: linear-gradient(rgba(82,91,116,.28) 1px, transparent 1px), linear-gradient(90deg, rgba(82,91,116,.28) 1px, transparent 1px); background-size: 5px 5px; }
+.paper-picker__swatch.paper-squares { background-image: repeating-linear-gradient(to bottom, rgba(82,91,116,.28) 0 1px, transparent 1px 5px), repeating-linear-gradient(to right, rgba(82,91,116,.28) 0 1px, transparent 1px 5px); background-size: 5px 5px; }
 .paper-picker__swatch.paper-grid { background-image: linear-gradient(rgba(82,91,116,.22) 1px, transparent 1px), linear-gradient(90deg, rgba(82,91,116,.22) 1px, transparent 1px); background-size: 7px 7px; }
 .paper-picker__swatch.paper-lines { background-image: repeating-linear-gradient(180deg, transparent 0, transparent 4px, rgba(82,91,116,.35) 5px); }
 .paper-picker__swatch.paper-millimeter { background-image: linear-gradient(rgba(82,91,116,.18) 1px, transparent 1px), linear-gradient(90deg, rgba(82,91,116,.18) 1px, transparent 1px); background-size: 3px 3px; }
@@ -695,6 +695,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   /* Native compositor scrolling — never `smooth` (lags and smears glyphs). */
   scroll-behavior: auto;
   will-change: scroll-position;
+  /* Zoom grows the sheet; anchoring would fight our cursor-lock scroll. */
+  overflow-anchor: none;
 }
 .paper-view { position: relative; }
 .paper-view-hud {
@@ -821,18 +823,39 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
     calc(var(--paper-width) * var(--ink-extent-ratio))
   );
 }
-.paper-dots .unified-paper { background-color: #fff; background-image: radial-gradient(rgba(82,91,116,.19) .8px, transparent .8px); background-size: 28px 28px; }
-.paper-squares .unified-paper { background-color: #fff; background-image: linear-gradient(rgba(82,118,168,.16) 1px, transparent 1px), linear-gradient(90deg, rgba(82,118,168,.16) 1px, transparent 1px); background-size: 21px 21px; }
-.paper-grid .unified-paper { background-color: #fff; background-image: linear-gradient(rgba(82,91,116,.105) 1px, transparent 1px), linear-gradient(90deg, rgba(82,91,116,.105) 1px, transparent 1px); background-size: 28px 28px; }
+.paper-dots .unified-paper { background-color: #fff; background-image: radial-gradient(rgba(82,91,116,.19) .8px, transparent .8px); background-size: 28px 28px; background-position: 14px 14px; }
+.paper-squares .unified-paper {
+  background-color: #fff;
+  background-image:
+    repeating-linear-gradient(to bottom, rgba(82,118,168,.16) 0 1px, transparent 1px 20px),
+    repeating-linear-gradient(to right, rgba(82,118,168,.16) 0 1px, transparent 1px 20px);
+  background-size: 20px 20px;
+  background-position: 0 0;
+  background-repeat: round;
+  background-origin: padding-box;
+}
+.paper-grid .unified-paper {
+  background-color: #fff;
+  background-image:
+    repeating-linear-gradient(to bottom, rgba(82,91,116,.105) 0 1px, transparent 1px 28px),
+    repeating-linear-gradient(to right, rgba(82,91,116,.105) 0 1px, transparent 1px 28px);
+  background-size: 28px 28px;
+  background-position: 0 0;
+  background-repeat: round;
+  background-origin: padding-box;
+}
 .paper-lines .unified-paper { background-color: #fff; background-image: repeating-linear-gradient(180deg, transparent 0, transparent 27px, rgba(82,91,116,.13) 28px); }
 .paper-millimeter .unified-paper {
   background-color: #fff;
   background-image:
-    linear-gradient(rgba(72,98,148,.18) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(72,98,148,.18) 1px, transparent 1px),
-    linear-gradient(rgba(92,118,168,.08) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(92,118,168,.08) 1px, transparent 1px);
-  background-size: 21px 21px, 21px 21px, 4.2px 4.2px, 4.2px 4.2px;
+    repeating-linear-gradient(to bottom, rgba(72,98,148,.18) 0 1px, transparent 1px 20px),
+    repeating-linear-gradient(to right, rgba(72,98,148,.18) 0 1px, transparent 1px 20px),
+    repeating-linear-gradient(to bottom, rgba(92,118,168,.08) 0 1px, transparent 1px 4px),
+    repeating-linear-gradient(to right, rgba(92,118,168,.08) 0 1px, transparent 1px 4px);
+  background-size: 20px 20px, 20px 20px, 4px 4px, 4px 4px;
+  background-position: 0 0;
+  background-repeat: round;
+  background-origin: padding-box;
 }
 .unified-note-view.is-inking .unified-paper { box-shadow: 0 0 0 1px color-mix(in srgb, var(--paper-accent-readable) 40%, transparent), 0 8px 28px rgba(0,0,0,.22); }
 .unified-paper > .editor-pane {

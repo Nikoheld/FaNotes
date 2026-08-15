@@ -51,6 +51,7 @@ import { DEFAULT_SETTINGS } from './defaults'
 import { PaperStylePicker } from './components/PaperStylePicker'
 import { PaperView } from './components/PaperView'
 import { normalizePaperStyle } from './lib/paperStyles'
+import { writeSharedZoomSpeed } from './lib/paperView'
 import { SafeBoundary } from './components/SafeBoundary'
 import { applyNoteTags, collectVaultTags, filterTreeByTag, parseNoteTags } from './lib/noteTags'
 import { applyRendererResourceLimits } from './lib/resourceLimits'
@@ -296,6 +297,9 @@ export default function App({ startupBootstrap }: AppProps) {
   const [tabs, setTabs] = useState<NoteTab[]>([])
   const [activePath, setActivePath] = useState<string | null>(null)
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS)
+  useEffect(() => {
+    writeSharedZoomSpeed(settings.viewZoomSpeed)
+  }, [settings.viewZoomSpeed])
   const [saveState, setSaveState] = useState<SaveState>('saved')
   const [detectedTextLanguage, setDetectedTextLanguage] = useState<DetectedTextLanguage>('unknown')
   const [sidebarVisible, setSidebarVisible] = useState(true)
@@ -1195,6 +1199,7 @@ export default function App({ startupBootstrap }: AppProps) {
     const revision = settingsRevisionRef.current + 1
     settingsRevisionRef.current = revision
     settingsRef.current = next
+    writeSharedZoomSpeed(next.viewZoomSpeed)
     setSettings(next)
     if (settingsTimer.current) window.clearTimeout(settingsTimer.current)
     const timer = window.setTimeout(() => {

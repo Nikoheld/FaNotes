@@ -632,6 +632,9 @@ export function SettingsModal({
                     <Toggle label="Lesbare Zeilenlänge" checked={settings.readableLineLength} onChange={(value) => update('readableLineLength', value)} />
                   </SettingRow>
                   <SettingRow title="Maximale Inhaltsbreite"><Range value={settings.contentWidth} min={560} max={1200} step={20} suffix=" px" onChange={(value) => update('contentWidth', value)} /></SettingRow>
+                  <SettingRow title="Zoom-Geschwindigkeit" description="Wie weit Strg+Mausrad oder Trackpad-Pinch das Blatt verändert. 1 ist langsam, 5 normal, 10 schnell.">
+                    <Range value={settings.viewZoomSpeed ?? 5} min={1} max={10} onChange={(value) => update('viewZoomSpeed', value)} />
+                  </SettingRow>
                   <SettingRow title="Zeilennummern"><Toggle label="Zeilennummern" checked={settings.showLineNumbers} onChange={(value) => update('showLineNumbers', value)} /></SettingRow>
                   <SettingRow title="Rechtschreibprüfung" description="Unterstreicht Tippfehler lokal rot und erkennt Deutsch oder Englisch automatisch. Mathematik und Code bleiben unberührt."><Toggle label="Rechtschreibprüfung" checked={settings.spellcheck} onChange={(value) => update('spellcheck', value)} /></SettingRow>
                   <SettingRow title="Wortzahl in Statusleiste"><Toggle label="Wortzahl" checked={settings.showWordCount} onChange={(value) => update('showWordCount', value)} /></SettingRow>
@@ -903,10 +906,10 @@ export function SettingsModal({
                       <option value={4}>4 Kerne · schnell</option>
                     </select>
                   </SettingRow>
-                  {!isWeb && <SettingRow title="Desktop-Erkennungsmodell" description="Kompakt verwendet nur das schnelle native 21-MB-Zeilenmodell. Erweitert ergänzt es bei schwierigen Zeilen mit dem grösseren Kontextmodell; Training, Segmentierung und Korrekturen bleiben identisch.">
+                  {!isWeb && <SettingRow title="Desktop-Erkennungsmodell" description="Rückfallebene ohne NPU. Kompakt ist das schnelle 21-MB-Zeilenmodell. Erweitert ergänzt schwierige Zeilen mit dem Kontextmodell. Für Handschrift auf Intel-NPU ist Qwen3-VL unten die empfohlene Texterkennung.">
                     <select value={settings.desktopOcrModel} onChange={(event) => update('desktopOcrModel', event.target.value as AppSettings['desktopOcrModel'])}>
                       <option value="compact">Kompakt · weniger RAM</option>
-                      <option value="extended">Erweitert · beste Genauigkeit</option>
+                      <option value="extended">Erweitert · ohne NPU</option>
                     </select>
                   </SettingRow>}
                   {!isWeb && <div id="settings-enhanced-math">
@@ -944,12 +947,12 @@ export function SettingsModal({
                   </div>}
                   {!isWeb && <div id="settings-qwen-vision">
                     <SettingRow
-                      title="Qwen3-VL Vision (Intel NPU)"
-                      description="Optionales lokales Vision-Modell für Handschrift. OpenVINO INT4, erzwungen auf der Intel-NPU (Core Ultra). OpenVINO-Python-Pakete und das ~1,8 GB-Modell werden nach Lizenzbestätigung automatisch heruntergeladen; jederzeit deaktivierbar."
+                      title="Empfohlen: Qwen3-VL Texterkennung (Intel NPU)"
+                      description="Empfohlene lokale Texterkennung für Handschrift. Qwen3-VL 2B liest die Notiz als Bild auf der Intel-NPU (OpenVINO INT4). Nach der Lizenzbestätigung werden Laufzeit und das ~1,8 GB-Modell automatisch geladen; jederzeit deaktivierbar."
                     >
                       {qwenVisionState?.installed && qwenVisionState?.supported ? (
                         <Toggle
-                          label="Qwen3-VL Vision"
+                          label="Qwen3-VL · empfohlen"
                           checked={settings.qwenVisionRecognition}
                           onChange={(value) => update('qwenVisionRecognition', value)}
                         />
@@ -974,7 +977,7 @@ export function SettingsModal({
                     <div className="settings-resource-note">
                       <ShieldCheck size={14} />
                       <span>
-                        Qwen3-VL 2B · OpenVINO INT4 · nur Intel-NPU · Apache-2.0 · OpenVINO-Pakete auto · Modell ~1,8&nbsp;GB · SHA-256-geprüft.
+                        Empfohlen für Text · Qwen3-VL 2B · OpenVINO INT4 · nur Intel-NPU · Apache-2.0 · OpenVINO-Pakete auto · Modell ~1,8&nbsp;GB · SHA-256-geprüft.
                         {' '}
                         <button type="button" className="settings-link-button" onClick={() => void window.fanotes.openExternal(qwenVisionState?.homepage ?? 'https://huggingface.co/Qwen/Qwen3-VL-2B-Instruct')}>Modellkarte</button>
                         {qwenVisionState?.supported && qwenVisionState?.npu && (

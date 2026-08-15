@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import {
   RULER_HEIGHT_MM,
   RULER_LENGTH_MM,
@@ -9,7 +9,7 @@ import {
   formatArcDegrees,
   formatDegrees,
   formatMillimetres,
-  mmToSourcePx,
+  pxPerMmOnDisplay,
   radiusMmBetween,
   shortestAngleDelta,
   snapRadiusMm,
@@ -54,8 +54,27 @@ export function DraftingGuides({
   const svgRef = useRef<SVGSVGElement | null>(null)
   const dragRef = useRef<DragState | null>(null)
   const [drawPreview, setDrawPreview] = useState<{ from: number; to: number } | null>(null)
-  const latestRef = useRef({ sourceWidth, sourceHeight, onMove, onCompassDraw })
-  latestRef.current = { sourceWidth, sourceHeight, onMove, onCompassDraw }
+  const [viewport, setViewport] = useState({ width: sourceWidth, height: sourceHeight })
+  const latestRef = useRef({ sourceWidth, sourceHeight, viewport, onMove, onCompassDraw })
+  latestRef.current = { sourceWidth, sourceHeight, viewport, onMove, onCompassDraw }
+
+  useLayoutEffect(() => {
+    const node = svgRef.current
+    if (!node) return
+    const measure = () => {
+      const width = Math.max(1, node.clientWidth)
+      const height = Math.max(1, node.clientHeight)
+      setViewport((current) => (
+        Math.abs(current.width - width) < 0.5 && Math.abs(current.height - height) < 0.5
+          ? current
+          : { width, height }
+      ))
+    }
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(node)
+    return () => observer.disconnect()
+  }, [sourceWidth, sourceHeight])
 
   const toNormFromClient = (clientX: number, clientY: number) => {
     const rect = svgRef.current?.getBoundingClientRect()
@@ -69,7 +88,7 @@ export function DraftingGuides({
   const applyDrag = (clientX: number, clientY: number) => {
     const drag = dragRef.current
     if (!drag) return
-    const { sourceWidth: width, sourceHeight: height, onMove: move, onCompassDraw: draw } = latestRef.current
+    const { sourceWidth: width, sourceHeight: height, viewport: box, onMove: move, onCompassDraw: draw } = latestRef.current
     const point = toNormFromClient(clientX, clientY)
     if (drag.mode === 'move') {
       move(drag.kind, {
@@ -81,9 +100,9 @@ export function DraftingGuides({
     }
     if (drag.kind === 'compass' && (drag.mode === 'radius' || drag.mode === 'draw' || drag.mode === 'rotate')) {
       const origin = asCompassPose(drag.origin)
-      const angle = angleToPoint(origin.x, origin.y, point.x, point.y, width, height)
+      const angle = angleToPoint(origin.x, origin.y, point.x, point.y, width, height, box)
       if (drag.mode === 'radius') {
-        const measured = radiusMmBetween(origin.x, origin.y, point.x, point.y, width, height)
+        const measured = radiusMmBetween(origin.x, origin.y, point.x, point.y, width, height, box)
         const radiusMm = origin.locked ? origin.radiusMm : snapRadiusMm(clampCompassRadius(measured))
         move('compass', { ...origin, rotation: angle, radiusMm })
         return
@@ -154,7 +173,7 @@ export function DraftingGuides({
     }
     const point = toNormFromClient(event.clientX, event.clientY)
     const angle = kind === 'compass'
-      ? angleToPoint(pose.x, pose.y, point.x, point.y, latestRef.current.sourceWidth, latestRef.current.sourceHeight)
+      ? angleToPoint(pose.x, pose.y, point.x, point.y, latestRef.current.sourceWidth, latestRef.current.sourceHeight, latestRef.current.viewport)
       : undefined
     dragRef.current = {
       kind,
@@ -186,12 +205,16 @@ export function DraftingGuides({
     onCompassDraw?.({ type: 'circle', pose })
   }
 
+  const pxPerMm = pxPerMmOnDisplay(sourceWidth, viewport)
+  const mm = (value: number) => value * pxPerMm
   const rulerPx = {
-    length: mmToSourcePx(RULER_LENGTH_MM),
-    height: mmToSourcePx(RULER_HEIGHT_MM),
+    length: mm(RULER_LENGTH_MM),
+    height: mm(RULER_HEIGHT_MM),
   }
-  const legPx = mmToSourcePx(SET_SQUARE_LEG_MM)
-  const compassGeometry = compass ? describeCompass(compass) : null
+  const legPx = mm(SET_SQUARE_LEG_MM)
+  const compassGeometry = compass ? { radiusPx: mm(compass.radiusMm) } : null
+  const nx = (value: number) => value * viewport.width
+  const ny = (value: number) => value * viewport.height
   const upright = (x: number, y: number, rotation: number) => (
     `rotate(${-rotation * 180 / Math.PI} ${x} ${y})`
   )
@@ -200,14 +223,16 @@ export function DraftingGuides({
     <svg
       ref={svgRef}
       className="lw-drafting-layer"
-      viewBox={`0 0 ${sourceWidth} ${sourceHeight}`}
+      width={viewport.width}
+      height={viewport.height}
+      viewBox={`0 0 ${viewport.width} ${viewport.height}`}
       preserveAspectRatio="none"
       aria-hidden="true"
     >
       {ruler && (
         <g
           className="lw-drafting-tool is-ruler"
-          transform={`translate(${ruler.x * sourceWidth} ${ruler.y * sourceHeight}) rotate(${ruler.rotation * 180 / Math.PI})`}
+          transform={`translate(${nx(ruler.x)} ${ny(ruler.y)}) rotate(${ruler.rotation * 180 / Math.PI})`}
         >
           <rect
             className="lw-drafting-body"
@@ -219,18 +244,18 @@ export function DraftingGuides({
             onPointerDown={(event) => beginDrag('ruler', 'move', ruler, event)}
           />
           <line className="lw-drafting-edge" x1={-rulerPx.length / 2} y1={-rulerPx.height / 2} x2={rulerPx.length / 2} y2={-rulerPx.height / 2} />
-          {Array.from({ length: RULER_LENGTH_MM + 1 }, (_, mm) => {
-            const x = -rulerPx.length / 2 + mmToSourcePx(mm)
-            const major = mm % 10 === 0
-            const mid = mm % 5 === 0
+          {Array.from({ length: RULER_LENGTH_MM + 1 }, (_, mark) => {
+            const x = -rulerPx.length / 2 + mm(mark)
+            const major = mark % 10 === 0
+            const mid = mark % 5 === 0
             const tick = major ? 14 : mid ? 9 : 5
             const labelY = -rulerPx.height / 2 + 22
             return (
-              <g key={mm}>
+              <g key={mark}>
                 <line className={`lw-drafting-tick ${major ? 'is-major' : ''}`} x1={x} y1={-rulerPx.height / 2} x2={x} y2={-rulerPx.height / 2 + tick} />
                 {major && (
                   <text className="lw-drafting-label" x={x} y={labelY} transform={upright(x, labelY, ruler.rotation)}>
-                    {mm / 10}
+                    {mark / 10}
                   </text>
                 )}
               </g>
@@ -256,7 +281,7 @@ export function DraftingGuides({
       {setSquare && (
         <g
           className="lw-drafting-tool is-setsquare"
-          transform={`translate(${setSquare.x * sourceWidth} ${setSquare.y * sourceHeight}) rotate(${setSquare.rotation * 180 / Math.PI})`}
+          transform={`translate(${nx(setSquare.x)} ${ny(setSquare.y)}) rotate(${setSquare.rotation * 180 / Math.PI})`}
         >
           <path
             className="lw-drafting-body"
@@ -265,7 +290,7 @@ export function DraftingGuides({
           />
           <path className="lw-drafting-window" d={`M ${legPx * 0.22} ${-legPx * 0.18} L ${legPx * 0.58} ${-legPx * 0.18} L ${legPx * 0.22} ${-legPx * 0.54} Z`} />
           {Array.from({ length: 15 }, (_, cm) => {
-            const x = mmToSourcePx(cm * 10)
+            const x = mm(cm * 10)
             return (
               <g key={`h${cm}`}>
                 <line className="lw-drafting-tick is-major" x1={x} y1="0" x2={x} y2="10" />
@@ -274,7 +299,7 @@ export function DraftingGuides({
             )
           })}
           {Array.from({ length: 15 }, (_, cm) => {
-            const y = -mmToSourcePx(cm * 10)
+            const y = -mm(cm * 10)
             return (
               <g key={`v${cm}`}>
                 <line className="lw-drafting-tick is-major" x1="0" y1={y} x2="10" y2={y} />
@@ -325,19 +350,18 @@ export function DraftingGuides({
       )}
       {compass && compassGeometry && (
         <>
-          <ellipse
+          <circle
             className="lw-drafting-compass-ghost"
-            cx={compass.x * sourceWidth}
-            cy={compass.y * sourceHeight}
-            rx={compassGeometry.radiusPx}
-            ry={compassGeometry.radiusPx}
+            cx={nx(compass.x)}
+            cy={ny(compass.y)}
+            r={compassGeometry.radiusPx}
           />
           {drawPreview && Math.abs(drawPreview.to - drawPreview.from) > 0.02 && (
             <path
               className="lw-drafting-compass-arc"
               d={describePaperArc(
-                compass.x * sourceWidth,
-                compass.y * sourceHeight,
+                nx(compass.x),
+                ny(compass.y),
                 compassGeometry.radiusPx,
                 drawPreview.from,
                 drawPreview.to,
@@ -346,7 +370,7 @@ export function DraftingGuides({
           )}
           <g
             className="lw-drafting-tool is-compass"
-            transform={`translate(${compass.x * sourceWidth} ${compass.y * sourceHeight})`}
+            transform={`translate(${nx(compass.x)} ${ny(compass.y)})`}
           >
             <g transform={`rotate(${compass.rotation * 180 / Math.PI})`}>
               <line className="lw-drafting-span" x1="0" y1="0" x2={compassGeometry.radiusPx} y2="0" />
@@ -360,7 +384,7 @@ export function DraftingGuides({
                 onPointerDown={(event) => beginDrag('compass', 'move', compass, event)}
               />
               {Array.from({ length: Math.floor(compass.radiusMm / 10) + 1 }, (_, cm) => {
-                const x = mmToSourcePx(cm * 10)
+                const x = mm(cm * 10)
                 if (x > compassGeometry.radiusPx) return null
                 return (
                   <g key={`c${cm}`}>
@@ -429,15 +453,11 @@ export function DraftingGuides({
         </>
       )}
       {readout && (
-        <text className="lw-drafting-readout" x={sourceWidth * 0.5} y="28">{readout}</text>
+        <text className="lw-drafting-readout" x={viewport.width * 0.5} y="28">{readout}</text>
       )}
     </svg>
   )
 }
-
-const describeCompass = (pose: CompassPose) => ({
-  radiusPx: mmToSourcePx(pose.radiusMm),
-})
 
 const describePaperArc = (cx: number, cy: number, radius: number, from: number, to: number) => {
   const delta = to - from

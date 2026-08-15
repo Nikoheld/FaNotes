@@ -183,24 +183,29 @@ def load_rgb_image(image_path: Path):
         raise RuntimeError(f"Pillow fehlt für Bildvorbereitung: {error}") from error
     with Image.open(image_path) as image:
         rgb = image.convert("RGB")
-    # Mild contrast boost helps thin pen strokes without inventing ink.
     try:
-        rgb = ImageOps.autocontrast(rgb, cutoff=0.8)
+        from PIL import ImageEnhance, ImageFilter  # type: ignore
+        # Gentle local contrast — aggressive autocontrast erases thin pen joins.
+        rgb = ImageEnhance.Contrast(rgb).enhance(1.16)
+        rgb = rgb.filter(ImageFilter.UnsharpMask(radius=1.1, percent=115, threshold=2))
     except Exception:  # noqa: BLE001
-        pass
+        try:
+            rgb = ImageOps.autocontrast(rgb, cutoff=0.4)
+        except Exception:  # noqa: BLE001
+            pass
     width, height = rgb.size
-    # Upscale tiny crops so the VLM has enough visual detail.
+    # Qwen3-VL needs enough pixels per glyph; upscale small line crops.
     longest = max(width, height)
-    if longest < 320:
-        factor = 320 / max(1, longest)
+    if longest < 480:
+        factor = 480 / max(1, longest)
         rgb = rgb.resize(
-            (max(64, int(round(width * factor))), max(64, int(round(height * factor)))),
+            (max(96, int(round(width * factor))), max(80, int(round(height * factor)))),
             Image.Resampling.LANCZOS,
         )
         width, height = rgb.size
-    # Pad to multiples of 16 — many vision towers prefer aligned tensors.
-    pad_w = (16 - width % 16) % 16
-    pad_h = (16 - height % 16) % 16
+    # Qwen3-VL vision tokens align to 28px patches.
+    pad_w = (28 - width % 28) % 28
+    pad_h = (28 - height % 28) % 28
     if pad_w or pad_h:
         padded = Image.new("RGB", (width + pad_w, height + pad_h), (255, 255, 255))
         padded.paste(rgb, (pad_w // 2, pad_h // 2))
@@ -313,6 +318,10 @@ def recognize(model_dir: Path, image_path: Path, prompt: str, max_new_tokens: in
                 config.do_sample = False
             if hasattr(config, "temperature"):
                 config.temperature = 0.0
+            if hasattr(config, "top_p"):
+                config.top_p = 1.0
+            if hasattr(config, "repetition_penalty"):
+                config.repetition_penalty = 1.08
             generation_kwargs = {"generation_config": config}
         except Exception:  # noqa: BLE001
             generation_kwargs = {"max_new_tokens": max_new_tokens}
@@ -365,13 +374,13 @@ def main() -> int:
     model_dir = Path(str(request.get("modelDir") or ""))
     image_path = Path(str(request.get("imagePath") or ""))
     prompt = str(request.get("prompt") or "").strip()
-    max_new_tokens = int(request.get("maxNewTokens") or 160)
-    max_new_tokens = max(32, min(384, max_new_tokens))
+    max_new_tokens = int(request.get("maxNewTokens") or 220)
+    max_new_tokens = max(48, min(512, max_new_tokens))
     if not prompt:
         prompt = (
-            "You are a handwriting OCR engine. Read the handwritten text in the image "
-            "line by line. Output only the transcribed text. Keep line breaks. "
-            "Do not translate, do not correct spelling, no markdown, no quotes, no commentary."
+            "Transcribe the handwriting in the image exactly, top to bottom. "
+            "Keep line breaks and diacritics. Output only the text. "
+            "Do not translate, invent words, or fix spelling."
         )
     emit(recognize(model_dir, image_path, prompt, max_new_tokens))
     return 0

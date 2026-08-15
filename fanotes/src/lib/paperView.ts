@@ -1,6 +1,9 @@
 export const VIEW_ZOOM_MIN = 0.45
 export const VIEW_ZOOM_MAX = 3.25
 export const VIEW_ZOOM_STEP = 0.12
+export const VIEW_ZOOM_SPEED_MIN = 1
+export const VIEW_ZOOM_SPEED_MAX = 10
+export const VIEW_ZOOM_SPEED_DEFAULT = 5
 export const VIEW_ROTATE_STEP = 15
 
 export type PaperViewSnapshot = {
@@ -16,8 +19,36 @@ export const defaultPaperView = (): PaperViewSnapshot => ({
 })
 
 export const clampViewZoom = (value: number) => (
-  Math.min(VIEW_ZOOM_MAX, Math.max(VIEW_ZOOM_MIN, Math.round(value * 100) / 100))
+  Math.min(VIEW_ZOOM_MAX, Math.max(VIEW_ZOOM_MIN, Math.round(value * 1000) / 1000))
 )
+
+export const clampViewZoomSpeed = (value: number) => (
+  Math.min(VIEW_ZOOM_SPEED_MAX, Math.max(VIEW_ZOOM_SPEED_MIN, Math.round(Number(value) || VIEW_ZOOM_SPEED_DEFAULT)))
+)
+
+/** Map the 1–10 setting onto wheel sensitivity. 5 is the previous default. */
+export const zoomSensitivityFromSpeed = (speed: number) => {
+  const level = clampViewZoomSpeed(speed)
+  return 0.28 + (level - 1) * (1.72 / 9)
+}
+
+export const zoomFactorFromWheel = (deltaY: number, deltaMode: number, speed: number) => {
+  let dy = deltaY
+  if (deltaMode === 1) dy *= 16
+  if (deltaMode === 2) dy *= 800
+  const clamped = Math.max(-420, Math.min(420, dy))
+  return Math.exp(-clamped * 0.00095 * zoomSensitivityFromSpeed(speed))
+}
+
+export const zoomStepFromSpeed = (speed: number) => (
+  Math.round(VIEW_ZOOM_STEP * zoomSensitivityFromSpeed(speed) * 1000) / 1000
+)
+
+let sharedZoomSpeed = VIEW_ZOOM_SPEED_DEFAULT
+export const readSharedZoomSpeed = () => sharedZoomSpeed
+export const writeSharedZoomSpeed = (value: number) => {
+  sharedZoomSpeed = clampViewZoomSpeed(value)
+}
 
 export const normalizeRotation = (value: number) => {
   const wrapped = ((value % 360) + 360) % 360
@@ -98,6 +129,50 @@ export const zoomAroundPoint = (
   nextZoom === view.zoom ? view : { zoom: nextZoom, rotation: view.rotation, pan: { x: 0, y: 0 } }
 )
 
+type PaperAnchor = {
+  clientX: number
+  clientY: number
+  relX: number
+  relY: number
+}
+
+/** Remember the paper point under the cursor before CSS zoom changes layout. */
+export const capturePaperAnchor = (
+  scroller: HTMLElement,
+  paper: HTMLElement | null,
+  origin?: { x: number; y: number },
+): PaperAnchor => {
+  const scrollerRect = scroller.getBoundingClientRect()
+  const clientX = origin?.x ?? scrollerRect.left + scrollerRect.width / 2
+  const clientY = origin?.y ?? scrollerRect.top + scrollerRect.height / 2
+  const paperRect = paper?.getBoundingClientRect()
+  if (!paperRect || paperRect.width < 1 || paperRect.height < 1) {
+    return {
+      clientX,
+      clientY,
+      relX: scrollerRect.width > 0 ? (clientX - scrollerRect.left + scroller.scrollLeft) / Math.max(1, scroller.scrollWidth) : 0.5,
+      relY: scrollerRect.height > 0 ? (clientY - scrollerRect.top + scroller.scrollTop) / Math.max(1, scroller.scrollHeight) : 0.5,
+    }
+  }
+  return {
+    clientX,
+    clientY,
+    relX: (clientX - paperRect.left) / paperRect.width,
+    relY: (clientY - paperRect.top) / paperRect.height,
+  }
+}
+
+/** After zoom, scroll so the captured paper point is still under the cursor. */
+export const restorePaperAnchor = (scroller: HTMLElement, paper: HTMLElement | null, anchor: PaperAnchor) => {
+  if (!paper) return
+  const next = paper.getBoundingClientRect()
+  if (next.width < 1 || next.height < 1) return
+  const pointX = next.left + anchor.relX * next.width
+  const pointY = next.top + anchor.relY * next.height
+  scroller.scrollLeft += pointX - anchor.clientX
+  scroller.scrollTop += pointY - anchor.clientY
+}
+
 /** Keep the cursor (or viewport centre) on the same paper point after CSS zoom. */
 export const scrollViewportToZoomPoint = (
   scroller: HTMLElement,
@@ -106,13 +181,9 @@ export const scrollViewportToZoomPoint = (
   origin?: { x: number; y: number },
 ) => {
   if (previousZoom <= 0 || nextZoom <= 0 || previousZoom === nextZoom) return
-  const rect = scroller.getBoundingClientRect()
-  const pointX = origin?.x ?? rect.left + rect.width / 2
-  const pointY = origin?.y ?? rect.top + rect.height / 2
-  const contentX = (pointX - rect.left + scroller.scrollLeft) / previousZoom
-  const contentY = (pointY - rect.top + scroller.scrollTop) / previousZoom
-  scroller.scrollLeft = contentX * nextZoom - (pointX - rect.left)
-  scroller.scrollTop = contentY * nextZoom - (pointY - rect.top)
+  const paper = scroller.querySelector<HTMLElement>('.unified-paper')
+  const anchor = capturePaperAnchor(scroller, paper, origin)
+  restorePaperAnchor(scroller, paper, anchor)
 }
 
 type SharedViewListener = (view: PaperViewSnapshot) => void

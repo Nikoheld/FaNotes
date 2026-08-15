@@ -22,6 +22,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   compactMode: false,
   glassEffects: false,
   reduceMotion: false,
+  viewZoomSpeed: 5,
   showWordCount: true,
   showOutline: true,
   defaultFolder: 'Eingang',
