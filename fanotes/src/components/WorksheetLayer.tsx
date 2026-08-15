@@ -1,8 +1,8 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
-import { Check, FileText, Image as ImageIcon, LoaderCircle, Plus, Trash2, Type, X } from 'lucide-react'
+import { Check, FileText, Highlighter, Image as ImageIcon, LoaderCircle, Plus, Trash2, Type, X } from 'lucide-react'
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import type { PDFDocumentLoadingTask, PDFDocumentProxy, PDFPageProxy, RenderTask } from 'pdfjs-dist'
-import type { WorksheetDocument, WorksheetTextBox } from '../types'
+import type { WorksheetDocument, WorksheetHighlight, WorksheetTextBox } from '../types'
 
 export type WorksheetLayerHandle = {
   flush: () => Promise<void>
@@ -309,6 +309,9 @@ export const WorksheetLayer = forwardRef<WorksheetLayerHandle, WorksheetLayerPro
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [textTool, setTextTool] = useState(false)
+  const [highlightTool, setHighlightTool] = useState(false)
+  const [draftHighlight, setDraftHighlight] = useState<{ page: number; x: number; y: number; width: number; height: number } | null>(null)
+  const highlightOriginRef = useRef<{ page: number; x: number; y: number } | null>(null)
   const [savedPulse, setSavedPulse] = useState(false)
   const [removing, setRemoving] = useState(false)
   const [oneNoteScale, setOneNoteScale] = useState(1)
@@ -464,7 +467,7 @@ export const WorksheetLayer = forwardRef<WorksheetLayerHandle, WorksheetLayerPro
 
   const addTextBox = useCallback((page: number, event: ReactPointerEvent<HTMLDivElement>) => {
     if (inputDisabled || !textTool || event.button !== 0) return
-    if ((event.target as HTMLElement).closest('.worksheet-textbox')) return
+    if ((event.target as HTMLElement).closest('.worksheet-textbox, .worksheet-highlight')) return
     const rect = event.currentTarget.getBoundingClientRect()
     const x = Math.max(0, Math.min(.78, (event.clientX - rect.left) / rect.width))
     const y = Math.max(0, Math.min(.94, (event.clientY - rect.top) / rect.height))
@@ -473,6 +476,83 @@ export const WorksheetLayer = forwardRef<WorksheetLayerHandle, WorksheetLayerPro
     setTextTool(false)
     window.setTimeout(() => globalThis.document.querySelector<HTMLTextAreaElement>(`[data-worksheet-textbox="${box.id}"]`)?.focus(), 0)
   }, [inputDisabled, textTool, updateDocument])
+
+  const highlightRectFromEvent = (origin: { x: number; y: number }, event: ReactPointerEvent<HTMLDivElement>) => {
+    const box = event.currentTarget.getBoundingClientRect()
+    const endX = Math.max(0, Math.min(1, (event.clientX - box.left) / box.width))
+    const endY = Math.max(0, Math.min(1, (event.clientY - box.top) / box.height))
+    return {
+      x: Math.min(origin.x, endX),
+      y: Math.min(origin.y, endY),
+      width: Math.max(0.008, Math.abs(endX - origin.x)),
+      height: Math.max(0.008, Math.abs(endY - origin.y)),
+    }
+  }
+
+  const beginHighlight = useCallback((page: number, event: ReactPointerEvent<HTMLDivElement>) => {
+    if (inputDisabled || !highlightTool || event.button !== 0) return
+    if ((event.target as HTMLElement).closest('.worksheet-textbox')) return
+    const box = event.currentTarget.getBoundingClientRect()
+    const origin = {
+      page,
+      x: Math.max(0, Math.min(1, (event.clientX - box.left) / box.width)),
+      y: Math.max(0, Math.min(1, (event.clientY - box.top) / box.height)),
+    }
+    highlightOriginRef.current = origin
+    event.preventDefault()
+    event.currentTarget.setPointerCapture(event.pointerId)
+    setDraftHighlight({ ...origin, width: 0.01, height: 0.01 })
+  }, [highlightTool, inputDisabled])
+
+  const moveHighlight = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    const origin = highlightOriginRef.current
+    if (!origin) return
+    setDraftHighlight({ page: origin.page, ...highlightRectFromEvent(origin, event) })
+  }, [])
+
+  const endHighlight = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    const origin = highlightOriginRef.current
+    highlightOriginRef.current = null
+    if (!origin) return
+    const next = highlightRectFromEvent(origin, event)
+    setDraftHighlight(null)
+    if (next.width < 0.012 || next.height < 0.008) return
+    const mark: WorksheetHighlight = { id: crypto.randomUUID(), page: origin.page, ...next, color: '#ffe566' }
+    updateDocument((current) => ({ ...current, highlights: [...(current.highlights ?? []), mark] }))
+  }, [updateDocument])
+
+  const removeHighlight = useCallback((id: string) => {
+    updateDocument((current) => ({ ...current, highlights: (current.highlights ?? []).filter((mark) => mark.id !== id) }))
+  }, [updateDocument])
+
+  const handlePagePointerDown = useCallback((page: number, event: ReactPointerEvent<HTMLDivElement>) => {
+    if (highlightTool) beginHighlight(page, event)
+    else addTextBox(page, event)
+  }, [addTextBox, beginHighlight, highlightTool])
+
+  const renderHighlights = (page: number) => (
+    <>
+      {(document.highlights ?? []).filter((mark) => mark.page === page).map((mark) => (
+        <div
+          className="worksheet-highlight"
+          key={mark.id}
+          style={{ left: `${mark.x * 100}%`, top: `${mark.y * 100}%`, width: `${mark.width * 100}%`, height: `${mark.height * 100}%`, background: mark.color }}
+        >
+          {!inputDisabled && (
+            <button type="button" aria-label="Markierung entfernen" onPointerDown={(event) => event.stopPropagation()} onClick={() => removeHighlight(mark.id)}>
+              <X size={11} />
+            </button>
+          )}
+        </div>
+      ))}
+      {draftHighlight?.page === page && (
+        <div
+          className="worksheet-highlight is-draft"
+          style={{ left: `${draftHighlight.x * 100}%`, top: `${draftHighlight.y * 100}%`, width: `${draftHighlight.width * 100}%`, height: `${draftHighlight.height * 100}%` }}
+        />
+      )}
+    </>
+  )
 
   const updateTextBox = useCallback((id: string, changes: Partial<WorksheetTextBox>) => {
     updateDocument((current) => ({ ...current, textBoxes: current.textBoxes.map((box) => box.id === id ? { ...box, ...changes } : box) }))
@@ -501,12 +581,13 @@ export const WorksheetLayer = forwardRef<WorksheetLayerHandle, WorksheetLayerPro
   const pageCount = initialDocument.kind === 'pdf' ? pdf?.numPages ?? 0 : 1
 
   return (
-    <section className={`worksheet-layer ${textTool ? 'is-placing-text' : ''} ${inputDisabled ? 'is-disabled' : ''}`} aria-label={`Arbeitsblatt ${document.title}`}>
+    <section className={`worksheet-layer ${textTool ? 'is-placing-text' : ''} ${highlightTool ? 'is-highlighting' : ''} ${inputDisabled ? 'is-disabled' : ''}`} aria-label={`Arbeitsblatt ${document.title}`}>
       <header className="worksheet-toolbar">
         <span>{document.kind === 'image' ? <ImageIcon size={15} /> : <FileText size={15} />}<strong>{document.title}</strong><small>{document.kind === 'html' ? 'OneNote · originalgetreu' : `${pageCount || '…'} ${pageCount === 1 ? 'Seite' : 'Seiten'}`}</small></span>
         <span className="worksheet-toolbar-actions">
           {savedPulse && <i><Check size={12} /> gespeichert</i>}
-          <button type="button" className={textTool ? 'active' : ''} disabled={inputDisabled || loading || Boolean(error)} onClick={() => setTextTool((value) => !value)}><Type size={14} /> {textTool ? 'Auf Seite platzieren' : 'Textfeld'}</button>
+          <button type="button" className={textTool ? 'active' : ''} disabled={inputDisabled || loading || Boolean(error)} onClick={() => { setHighlightTool(false); setTextTool((value) => !value) }}><Type size={14} /> {textTool ? 'Auf Seite platzieren' : 'Textfeld'}</button>
+          <button type="button" className={highlightTool ? 'active' : ''} disabled={inputDisabled || loading || Boolean(error)} onClick={() => { setTextTool(false); setHighlightTool((value) => !value) }} title="Text oder Stellen auf dem Arbeitsblatt markieren"><Highlighter size={14} /> Markieren</button>
           {textTool && <button type="button" aria-label="Textfeldmodus abbrechen" onClick={() => setTextTool(false)}><X size={14} /></button>}
           {onRemove && (
             <button
@@ -527,11 +608,13 @@ export const WorksheetLayer = forwardRef<WorksheetLayerHandle, WorksheetLayerPro
         </span>
       </header>
       {textTool && <div className="worksheet-hint"><Plus size={14} /> Klicke an die Stelle des Arbeitsblatts, an der du tippen möchtest.</div>}
+      {highlightTool && <div className="worksheet-hint"><Highlighter size={14} /> Ziehe einen Rahmen über den Text, den du markieren möchtest.</div>}
       {loading && <div className="worksheet-loading"><LoaderCircle className="spin" size={22} /> Arbeitsblatt wird vorbereitet …</div>}
       {error && <div className="worksheet-error"><FileText size={22} /><strong>Arbeitsblatt nicht verfügbar</strong><span>{error}</span></div>}
       {!error && initialDocument.kind === 'image' && source && (
-        <div className="worksheet-page" onPointerDown={(event) => addTextBox(1, event)}>
+        <div className="worksheet-page" onPointerDown={(event) => handlePagePointerDown(1, event)} onPointerMove={moveHighlight} onPointerUp={endHighlight} onPointerCancel={() => { highlightOriginRef.current = null; setDraftHighlight(null) }}>
           <img src={source} alt={document.title} draggable={false} onLoad={notifyLayout} decoding="async" />
+          {renderHighlights(1)}
           {renderTextBoxes(1)}
         </div>
       )}
@@ -540,7 +623,10 @@ export const WorksheetLayer = forwardRef<WorksheetLayerHandle, WorksheetLayerPro
           ref={oneNotePageRef}
           className="worksheet-page worksheet-onenote-page"
           style={{ aspectRatio: `${document.pageWidth ?? 900} / ${document.pageHeight ?? 1200}` }}
-          onPointerDown={(event) => addTextBox(1, event)}
+          onPointerDown={(event) => handlePagePointerDown(1, event)}
+          onPointerMove={moveHighlight}
+          onPointerUp={endHighlight}
+          onPointerCancel={() => { highlightOriginRef.current = null; setDraftHighlight(null) }}
         >
           <iframe
             className="worksheet-onenote-frame"
@@ -555,6 +641,7 @@ export const WorksheetLayer = forwardRef<WorksheetLayerHandle, WorksheetLayerPro
             }}
             onLoad={notifyLayout}
           />
+          {renderHighlights(1)}
           {renderTextBoxes(1)}
         </div>
       )}
@@ -565,9 +652,13 @@ export const WorksheetLayer = forwardRef<WorksheetLayerHandle, WorksheetLayerPro
             className="worksheet-page"
             key={page}
             style={{ containIntrinsicSize: `800px ${Math.round(800 * pageRatio)}px` }}
-            onPointerDown={(event) => addTextBox(page, event)}
+            onPointerDown={(event) => handlePagePointerDown(page, event)}
+            onPointerMove={moveHighlight}
+            onPointerUp={endHighlight}
+            onPointerCancel={() => { highlightOriginRef.current = null; setDraftHighlight(null) }}
           >
             <PdfPage pdf={pdf} number={page} defaultRatio={pageRatio} onReady={notifyLayout} />
+            {renderHighlights(page)}
             {renderTextBoxes(page)}
           </div>
         )

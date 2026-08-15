@@ -67,6 +67,11 @@ export function HomeworkBoard({ subjects, onClose, onOpenNote }: HomeworkBoardPr
   const [priority, setPriority] = useState<'normal' | 'high'>('normal')
   const [notes, setNotes] = useState('')
   const [showDone, setShowDone] = useState(false)
+  const [plannerView, setPlannerView] = useState<'list' | 'week' | 'month'>('list')
+  const [calendarCursor, setCalendarCursor] = useState(() => {
+    const now = new Date()
+    return new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  })
   const persistQueueRef = useRef(Promise.resolve())
   const persistGenerationRef = useRef(0)
 
@@ -243,6 +248,58 @@ export function HomeworkBoard({ subjects, onClose, onOpenNote }: HomeworkBoardPr
 
   const openBuckets: HomeworkBucket[] = ['overdue', 'today', 'upcoming', 'undated']
 
+  const shiftCalendar = (delta: number) => {
+    setCalendarCursor((current) => {
+      const next = new Date(current)
+      if (plannerView === 'week') next.setDate(next.getDate() + delta * 7)
+      else next.setMonth(next.getMonth() + delta)
+      return next
+    })
+  }
+
+  const calendarDays = useMemo(() => {
+    const start = new Date(calendarCursor)
+    if (plannerView === 'week') {
+      const weekday = (start.getDay() + 6) % 7
+      start.setDate(start.getDate() - weekday)
+      return Array.from({ length: 7 }, (_, index) => {
+        const day = new Date(start)
+        day.setDate(start.getDate() + index)
+        return day
+      })
+    }
+    const first = new Date(calendarCursor.getFullYear(), calendarCursor.getMonth(), 1)
+    const weekday = (first.getDay() + 6) % 7
+    first.setDate(first.getDate() - weekday)
+    return Array.from({ length: 42 }, (_, index) => {
+      const day = new Date(first)
+      day.setDate(first.getDate() + index)
+      return day
+    })
+  }, [calendarCursor, plannerView])
+
+  const tasksByDate = useMemo(() => {
+    const map = new Map<string, HomeworkTask[]>()
+    for (const task of visibleTasks) {
+      if (!task.dueDate) continue
+      const list = map.get(task.dueDate) ?? []
+      list.push(task)
+      map.set(task.dueDate, list)
+    }
+    return map
+  }, [visibleTasks])
+
+  const isoDay = (day: Date) => {
+    const month = `${day.getMonth() + 1}`.padStart(2, '0')
+    const date = `${day.getDate()}`.padStart(2, '0')
+    return `${day.getFullYear()}-${month}-${date}`
+  }
+
+  const todayIso = isoDay(new Date())
+  const calendarLabel = plannerView === 'week'
+    ? `Woche ${calendarDays[0] ? dateFormatter().format(calendarDays[0]) : ''} – ${calendarDays[6] ? dateFormatter().format(calendarDays[6]) : ''}`
+    : new Intl.DateTimeFormat(getUiLocale(), { month: 'long', year: 'numeric' }).format(calendarCursor)
+
   return (
     <section className="homework-board" aria-label="Hausaufgaben und Termine">
       <style>{homeworkStyles}</style>
@@ -345,6 +402,25 @@ export function HomeworkBoard({ subjects, onClose, onOpenNote }: HomeworkBoardPr
           </div>
         </form>
 
+        <div className="homework-views" role="tablist" aria-label="Darstellung">
+          {([
+            ['list', 'Liste'],
+            ['week', 'Woche'],
+            ['month', 'Monat'],
+          ] as const).map(([id, label]) => (
+            <button
+              key={id}
+              type="button"
+              role="tab"
+              aria-selected={plannerView === id}
+              className={plannerView === id ? 'is-active' : ''}
+              onClick={() => setPlannerView(id)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
         <div className="homework-filters" role="tablist" aria-label="Filter">
           {([
             ['open', 'Offen'],
@@ -367,6 +443,45 @@ export function HomeworkBoard({ subjects, onClose, onOpenNote }: HomeworkBoardPr
         </div>
 
         {error && <div className="homework-error" role="alert">{error}</div>}
+
+        {plannerView !== 'list' && (
+          <div className={`homework-calendar is-${plannerView}`}>
+            <div className="homework-calendar-nav">
+              <button type="button" onClick={() => shiftCalendar(-1)} aria-label="Vorheriger Zeitraum">‹</button>
+              <strong>{calendarLabel}</strong>
+              <button type="button" onClick={() => shiftCalendar(1)} aria-label="Nächster Zeitraum">›</button>
+              <button type="button" className="homework-linkish" onClick={() => setCalendarCursor(new Date())}>Heute</button>
+            </div>
+            <div className="homework-calendar-weekdays">
+              {['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'].map((label) => <span key={label}>{label}</span>)}
+            </div>
+            <div className={`homework-calendar-grid is-${plannerView}`}>
+              {calendarDays.map((day) => {
+                const key = isoDay(day)
+                const items = tasksByDate.get(key) ?? []
+                const outside = plannerView === 'month' && day.getMonth() !== calendarCursor.getMonth()
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    className={`homework-day ${key === todayIso ? 'is-today' : ''} ${outside ? 'is-outside' : ''}`}
+                    onClick={() => setDueDate(key)}
+                  >
+                    <span>{day.getDate()}</span>
+                    <ul>
+                      {items.slice(0, plannerView === 'week' ? 8 : 3).map((task) => (
+                        <li key={task.id} className={`${task.kind === 'appointment' ? 'is-appointment' : ''} ${task.priority === 'high' ? 'is-high' : ''} ${task.done ? 'is-done' : ''}`}>
+                          {task.dueTime ? `${task.dueTime} · ` : ''}{task.title}
+                        </li>
+                      ))}
+                    </ul>
+                    {items.length > (plannerView === 'week' ? 8 : 3) && <em>+{items.length - (plannerView === 'week' ? 8 : 3)}</em>}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+        )}
 
         {loading ? (
           <div className="homework-empty"><LoaderCircle className="spin" size={22} /> Hausaufgaben werden geladen …</div>
@@ -413,7 +528,7 @@ export function HomeworkBoard({ subjects, onClose, onOpenNote }: HomeworkBoardPr
 
 const homeworkStyles = `
 .homework-board{position:absolute;inset:0;overflow:auto;background:radial-gradient(circle at 12% -10%,rgba(var(--accent-rgb),.12),transparent 34%),radial-gradient(circle at 88% 0,rgba(69,201,183,.08),transparent 28%),var(--bg)}
-.homework-shell{width:min(920px,calc(100% - 48px));margin:0 auto;padding:30px 0 56px}
+.homework-shell{width:min(1080px,calc(100% - 48px));margin:0 auto;padding:30px 0 56px}
 .homework-header{display:flex;align-items:flex-start;gap:18px;margin-bottom:16px}
 .homework-heading{min-width:0;flex:1}
 .homework-eyebrow{display:inline-flex;align-items:center;gap:7px;margin-bottom:8px;color:var(--accent-readable);font-size:10px;font-weight:720;letter-spacing:.08em;text-transform:uppercase}
@@ -421,7 +536,7 @@ const homeworkStyles = `
 .homework-heading p{max-width:560px;margin:8px 0 0;color:var(--text-muted);font-size:12px;line-height:1.6}
 .homework-heading code{padding:1px 5px;border-radius:5px;background:color-mix(in srgb,var(--panel-strong) 80%,transparent);font-size:10px}
 .homework-header-actions{display:flex;align-items:center;gap:8px}
-.homework-secondary,.homework-close,.homework-primary,.homework-check,.homework-delete,.homework-filters>button,.homework-linkish{border:1px solid var(--border);background:color-mix(in srgb,var(--panel-strong) 88%,transparent);color:var(--text-soft);cursor:pointer}
+.homework-secondary,.homework-close,.homework-primary,.homework-check,.homework-delete,.homework-filters>button,.homework-views>button,.homework-linkish{border:1px solid var(--border);background:color-mix(in srgb,var(--panel-strong) 88%,transparent);color:var(--text-soft);cursor:pointer}
 .homework-secondary{height:34px;padding:0 12px;border-radius:9px;font-size:10px;font-weight:650}
 .homework-close{width:34px;height:34px;display:grid;place-items:center;border-radius:9px}
 .homework-secondary:hover,.homework-close:hover{color:var(--text);border-color:var(--border-strong);background:var(--panel-hover)}
@@ -442,9 +557,26 @@ const homeworkStyles = `
 .homework-primary{display:inline-flex;align-items:center;gap:7px;min-height:34px;padding:0 13px;border-radius:9px;border-color:color-mix(in srgb,var(--accent) 55%,var(--border));color:var(--on-accent);background:var(--accent);font-size:11px;font-weight:700}
 .homework-primary:hover:not(:disabled){filter:brightness(1.06)}
 .homework-primary:disabled{opacity:.55;cursor:not-allowed}
-.homework-filters{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px}
-.homework-filters>button{min-height:28px;padding:0 11px;border-radius:999px;font-size:10px;font-weight:700}
-.homework-filters>button.is-active{color:var(--text);border-color:color-mix(in srgb,var(--accent) 45%,var(--border));background:color-mix(in srgb,var(--accent) 16%,transparent)}
+.homework-views,.homework-filters{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
+.homework-views>button,.homework-filters>button{min-height:28px;padding:0 11px;border-radius:999px;font-size:10px;font-weight:700}
+.homework-views>button.is-active,.homework-filters>button.is-active{color:var(--text);border-color:color-mix(in srgb,var(--accent) 45%,var(--border));background:color-mix(in srgb,var(--accent) 16%,transparent)}
+.homework-calendar{margin:4px 0 18px;padding:12px;border:1px solid var(--border);border-radius:16px;background:color-mix(in srgb,var(--panel-strong) 82%,transparent)}
+.homework-calendar-nav{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+.homework-calendar-nav strong{flex:1;text-align:center;font-size:13px}
+.homework-calendar-nav>button{width:32px;height:32px;border-radius:9px;border:1px solid var(--border);background:var(--panel);color:var(--text);cursor:pointer}
+.homework-calendar-weekdays{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:6px;margin-bottom:6px;color:var(--text-muted);font-size:9px;font-weight:720;text-transform:uppercase;letter-spacing:.06em;text-align:center}
+.homework-calendar-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:6px}
+.homework-day{min-height:86px;display:flex;flex-direction:column;align-items:stretch;gap:4px;padding:7px;border:1px solid var(--border);border-radius:10px;background:color-mix(in srgb,var(--bg) 80%,transparent);color:inherit;text-align:left;cursor:pointer}
+.homework-calendar.is-week .homework-day{min-height:150px}
+.homework-day.is-today{border-color:color-mix(in srgb,var(--accent) 55%,var(--border))}
+.homework-day.is-outside{opacity:.45}
+.homework-day>span{font-size:11px;font-weight:720}
+.homework-day ul{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:3px}
+.homework-day li{overflow:hidden;padding:2px 5px;border-radius:5px;background:color-mix(in srgb,var(--accent) 14%,transparent);font-size:8px;text-overflow:ellipsis;white-space:nowrap}
+.homework-day li.is-appointment{background:color-mix(in srgb,#45c9b7 18%,transparent)}
+.homework-day li.is-high{background:color-mix(in srgb,#e0677a 18%,transparent)}
+.homework-day li.is-done{opacity:.55;text-decoration:line-through}
+.homework-day em{color:var(--text-muted);font-size:8px}
 .homework-error{margin-bottom:12px;padding:9px 11px;border:1px solid color-mix(in srgb,var(--danger) 35%,var(--border));border-radius:10px;color:var(--danger);background:color-mix(in srgb,var(--danger) 8%,transparent);font-size:11px}
 .homework-empty{display:grid;place-items:center;gap:8px;min-height:180px;padding:28px;border:1px dashed var(--border);border-radius:16px;color:var(--text-muted);text-align:center}
 .homework-empty strong{color:var(--text);font-size:14px}

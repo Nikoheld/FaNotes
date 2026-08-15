@@ -1,5 +1,21 @@
 # Änderungsverlauf
 
+## 2026.8.18
+
+- **Obsidian-Look:** Dunkles und helles Farbschema wie in Obsidian — flache Grautöne, Violett-Akzent, ohne Leuchten.
+- **Eine obere Leiste:** Im Stiftmodus poppt kein zweites Menü mehr. Dieselbe Leiste wechselt zu Stift, Lineal, Farben und Konvertieren.
+- **Ruhigere Seitenleiste:** Nur Notizen, Suche, Stift, Hausaufgaben und Einstellungen sind sofort da. GlyphenWerk, Übersicht, Tagesnotiz und Befehle liegen unter „Weitere Werkzeuge“.
+- **Papier wächst nur mit Inhalt:** Scrollen erzeugt kein endloses Leere mehr. Hinter der letzten Schrift bleibt Platz für einen Absatz, dann stoppt das Blatt.
+- **Zirkel, Lineal und Geodreieck:** Im Stiftmodus messen, nachzeichnen, Kreise und Bögen setzen; Tinte rastet an der Kante bzw. am Kreis ein.
+- **Tinte verschieben:** Mit der Lasso-Auswahl Handschrift verschieben, skalieren, kopieren oder löschen.
+- **PDF-Markierungen:** Im Arbeitsblatt lassen sich Flächen hervorheben.
+- **Geteilte Ansicht:** Zwei Notizen nebeneinander (Umschalt+Klick auf einen Tab).
+- **Schlagwörter:** Tags in der Notiz und als Filter in der Seitenleiste.
+- **Versionsverlauf:** Frühere Stände einer Notiz wiederherstellen.
+- **PDF exportieren:** Die aktuelle Notiz inklusive Handschrift und Arbeitsblatt als PDF speichern oder drucken.
+- **Bilder einfügen:** Einfügen und Ablegen von Bildern als Arbeitsblatt.
+- **Hausaufgaben-Kalender:** Woche oder Monat statt nur der Liste.
+
 ## 2026.8.17
 
 - **PDF-Entfernen bleibt sichtbar:** Die Schaltfläche „Entfernen“ sitzt auf der normalen Papier-Spalte und wandert nicht mehr mit dem unendlich nach rechts wachsenden Blatt aus dem Bild.

@@ -211,6 +211,7 @@ export function createBrowserApi(): FaNotesApi {
   const assetUrls = new Map<string, string>()
   const drawings = new Map<string, DrawingLibraryDocument>()
   const worksheets = new Map<string, WorksheetDocument>()
+  const noteHistory = new Map<string, Array<{ id: string; createdAt: string; content: string; bytes: number }>>()
   let cachedTree: VaultEntry[] | null = null
   let updateState: UpdateState = {
     status: 'up-to-date', supported: false, currentVersion: WEB_VERSION, latestVersion: WEB_VERSION,
@@ -656,13 +657,40 @@ export function createBrowserApi(): FaNotesApi {
     writeFile: async (rawPath, content) => {
       await ready
       const path = normalizePath(rawPath)
-      if (!files.has(path)) throw new Error('Die Notiz wurde im Browser-Vault nicht gefunden.')
+      const previous = files.get(path)
+      if (!previous) throw new Error('Die Notiz wurde im Browser-Vault nicht gefunden.')
       if (typeof content !== 'string' || textBytes(content) > MAX_NOTE_BYTES) throw new Error('Die Notiz ist zu groß.')
+      if (previous.content !== content) {
+        const createdAt = new Date().toISOString()
+        const entry = { id: `${createdAt}-${Math.random().toString(36).slice(2, 8)}`, createdAt, content: previous.content, bytes: textBytes(previous.content) }
+        const list = noteHistory.get(path) ?? []
+        list.push(entry)
+        noteHistory.set(path, list.slice(-30))
+      }
       const record = { path, content, modifiedAt: new Date().toISOString() }
       await write('files', (store) => { store.put(record) })
       files.set(path, record)
       cachedTree = null
       return { modifiedAt: record.modifiedAt }
+    },
+    listNoteHistory: async (rawPath) => {
+      await ready
+      return [...(noteHistory.get(normalizePath(rawPath)) ?? [])].reverse().map(({ id, createdAt, bytes }) => ({ id, createdAt, bytes }))
+    },
+    readNoteHistory: async (rawPath, snapshotId) => {
+      await ready
+      const entry = (noteHistory.get(normalizePath(rawPath)) ?? []).find((item) => item.id === snapshotId)
+      if (!entry) throw new Error('Dieser Verlaufseintrag existiert nicht mehr.')
+      return { id: entry.id, createdAt: entry.createdAt, content: entry.content }
+    },
+    exportNotePdf: async () => {
+      document.documentElement.classList.add('is-printing')
+      try {
+        window.print()
+      } finally {
+        window.setTimeout(() => document.documentElement.classList.remove('is-printing'), 800)
+      }
+      return { filePath: 'print' }
     },
     createNote: async (rawParent, rawPreferredName) => {
       await ready
@@ -826,6 +854,39 @@ export function createBrowserApi(): FaNotesApi {
         stores.get('assets')!.put({ path: sourceRelativePath, value: source } satisfies AssetRecord)
       })
       worksheets.set(id, document); assets.set(sourceRelativePath, source)
+      return clone(document)
+    },
+    importWorksheetFromData: async (payload) => {
+      await ready
+      const name = payload?.name || 'Bild.png'
+      const extension = (name.split('.').pop()?.toLocaleLowerCase('en-US') ?? 'png').replace(/^\./u, '')
+      const format = worksheetFormats.get(extension === 'jpeg' ? 'jpg' : extension)
+      if (!format) throw new Error('Dieses Bildformat kann nicht auf das Blatt gelegt werden.')
+      const bytes = payload?.bytes
+      if (!bytes?.byteLength || bytes.byteLength > format.maxBytes) throw new Error('Das Bild ist leer oder zu groß.')
+      const id = crypto.randomUUID()
+      const now = new Date().toISOString()
+      const sourceRelativePath = `.fanotes/worksheets/${id}.${extension === 'jpeg' ? 'jpg' : extension}`
+      const document: WorksheetDocument = {
+        schemaVersion: 1,
+        id,
+        title: safeSegment(stem(name), 'Bild'),
+        kind: format.kind,
+        mimeType: format.mimeType,
+        sourceRelativePath,
+        dataRelativePath: `.fanotes/worksheets/${id}.json`,
+        createdAt: now,
+        updatedAt: now,
+        textBoxes: [],
+        highlights: [],
+      }
+      const source = new Blob([bytes.slice()], { type: format.mimeType })
+      await writeMany(['worksheets', 'assets'], (stores) => {
+        stores.get('worksheets')!.put(document)
+        stores.get('assets')!.put({ path: sourceRelativePath, value: source } satisfies AssetRecord)
+      })
+      worksheets.set(id, document)
+      assets.set(sourceRelativePath, source)
       return clone(document)
     },
     importOneNote: async () => {

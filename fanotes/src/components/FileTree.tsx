@@ -39,6 +39,7 @@ export type FileTreeProps = {
   onTrash: (relativePath: string) => MaybePromise
   className?: string
   rootLabel?: string
+  showHeader?: boolean
   showRootActions?: boolean
   emptyLabel?: string
   /** Expand this folder and its parents after creating a nested folder. */
@@ -101,6 +102,7 @@ export const FileTree = memo(function FileTree({
   onTrash,
   className = '',
   rootLabel = 'Dateien',
+  showHeader = true,
   showRootActions = true,
   emptyLabel = 'Noch keine Notizen vorhanden',
   revealPath = null,
@@ -412,31 +414,33 @@ export const FileTree = memo(function FileTree({
 
   return (
     <section className={`file-tree ${className}`.trim()} aria-label={rootLabel}>
-      <div className="file-tree__header">
-        <span className="file-tree__title">{rootLabel}</span>
-        {showRootActions && (
-          <span className="file-tree__root-actions">
-            <button
-              aria-label="Neue Notiz"
-              className="file-tree__action"
-              onClick={() => void Promise.resolve(onCreateNote())}
-              title="Neue Notiz"
-              type="button"
-            >
-              <Plus aria-hidden="true" size={16} />
-            </button>
-            <button
-              aria-label="Neuer Ordner"
-              className="file-tree__action"
-              onClick={() => void Promise.resolve(onCreateFolder())}
-              title="Neuer Ordner"
-              type="button"
-            >
-              <FolderPlus aria-hidden="true" size={16} />
-            </button>
-          </span>
-        )}
-      </div>
+      {showHeader && (
+        <div className="file-tree__header">
+          <span className="file-tree__title">{rootLabel}</span>
+          {showRootActions && (
+            <span className="file-tree__root-actions">
+              <button
+                aria-label="Neue Notiz"
+                className="file-tree__action"
+                onClick={() => void Promise.resolve(onCreateNote())}
+                title="Neue Notiz"
+                type="button"
+              >
+                <Plus aria-hidden="true" size={16} />
+              </button>
+              <button
+                aria-label="Neuer Ordner"
+                className="file-tree__action"
+                onClick={() => void Promise.resolve(onCreateFolder())}
+                title="Neuer Ordner"
+                type="button"
+              >
+                <FolderPlus aria-hidden="true" size={16} />
+              </button>
+            </span>
+          )}
+        </div>
+      )}
 
       {orderedEntries.length > 0 ? (
         <ul className="file-tree__root" role="tree">

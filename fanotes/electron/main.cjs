@@ -138,10 +138,14 @@ const IPC = Object.freeze({
   readDrawing: 'fanotes:read-drawing',
   readFamdInk: 'fanotes:read-famd-ink',
   importWorksheet: 'fanotes:import-worksheet',
+  importWorksheetFromData: 'fanotes:import-worksheet-from-data',
   importOneNote: 'fanotes:import-onenote',
   readWorksheet: 'fanotes:read-worksheet',
   saveWorksheet: 'fanotes:save-worksheet',
   deleteWorksheet: 'fanotes:delete-worksheet',
+  listNoteHistory: 'fanotes:list-note-history',
+  readNoteHistory: 'fanotes:read-note-history',
+  exportNotePdf: 'fanotes:export-note-pdf',
   readAssetDataUrl: 'fanotes:read-asset-data-url',
   readAssetBytes: 'fanotes:read-asset-bytes',
   loadSpellingResources: 'fanotes:load-spelling-resources',
@@ -2038,6 +2042,22 @@ function validateWorksheetDocument(candidate, expectedId) {
     if (typeof box.text !== 'string' || box.text.length > 20_000 || box.text.includes('\0')) throw new Error('Ein Arbeitsblatt-Text ist ungültig.')
     return { id: box.id, page: box.page, x: box.x, y: box.y, width: box.width, text: box.text, fontSize: box.fontSize }
   })
+  const rawHighlights = Array.isArray(candidate.highlights) ? candidate.highlights : []
+  if (rawHighlights.length > 4000) throw new Error('Das Arbeitsblatt enthält zu viele Markierungen.')
+  const highlights = rawHighlights.map((mark) => {
+    if (!isPlainObject(mark) || typeof mark.id !== 'string' || !/^[a-zA-Z0-9_-]{1,96}$/.test(mark.id)) {
+      throw new Error('Eine PDF-Markierung ist ungültig.')
+    }
+    if (!Number.isInteger(mark.page) || mark.page < 1 || mark.page > 2000) throw new Error('Eine Markierungsseite ist ungültig.')
+    for (const value of [mark.x, mark.y, mark.width, mark.height]) {
+      if (typeof value !== 'number' || !Number.isFinite(value)) throw new Error('Eine Markierungsposition ist ungültig.')
+    }
+    if (mark.x < 0 || mark.x > 1 || mark.y < 0 || mark.y > 1 || mark.width < 0.004 || mark.width > 1 || mark.height < 0.004 || mark.height > 1) {
+      throw new Error('Eine Markierung liegt außerhalb des Arbeitsblatts.')
+    }
+    const color = typeof mark.color === 'string' && /^#[0-9a-f]{6}$/iu.test(mark.color) ? mark.color.toLowerCase() : '#ffe566'
+    return { id: mark.id, page: mark.page, x: mark.x, y: mark.y, width: mark.width, height: mark.height, color }
+  })
   return {
     schemaVersion: 1,
     id,
@@ -2050,6 +2070,7 @@ function validateWorksheetDocument(candidate, expectedId) {
     updatedAt: new Date(updated).toISOString(),
     ...(candidate.kind === 'html' ? { pageWidth: Math.round(pageWidth), pageHeight: Math.round(pageHeight) } : {}),
     textBoxes,
+    highlights,
   }
 }
 
@@ -2818,6 +2839,15 @@ function registerIpcHandlers() {
           }
           assertVaultWriteContext(requestedVaultPath, requestedVaultGeneration)
           const markdownBody = stripFamdPayload(content)
+          try {
+            const previous = await readRegularFileNoFollow(target, noteByteLimit(normalizedRelativePath))
+            const { recordNoteHistorySnapshot } = require('./note-history.cjs')
+            await recordNoteHistorySnapshot(requestedVaultPath, normalizedRelativePath, previous.toString('utf8'))
+          } catch (error) {
+            if (error?.code !== 'ENOENT') {
+              console.warn('FaNotes: Verlauf konnte nicht gesichert werden:', error?.message ?? error)
+            }
+          }
           const written = path.extname(normalizedRelativePath).toLocaleLowerCase('en-US') === '.famd'
             ? serializeFamd(markdownBody, {
               ...(parseFamd((await readOptionalNoteFile(normalizedRelativePath)) ?? '')).payload || emptyFamdPayload(),
@@ -3338,6 +3368,100 @@ function registerIpcHandlers() {
       throw error
     }
     return document
+  })
+
+  const createWorksheetFromBuffer = async (source, extension, titleHint) => {
+    const format = WORKSHEET_FORMATS.get(extension)
+    if (!format) throw new Error('Es werden PDF-, PNG-, JPEG-, WebP- und GIF-Arbeitsblätter unterstützt.')
+    if (!source.length) throw new Error('Das ausgewählte Arbeitsblatt ist leer.')
+    validateWorksheetBytes(source, extension)
+    const id = crypto.randomUUID()
+    const title = safeEntryName(splitName(titleHint || `Bild-${id.slice(0, 8)}`).stem, 'Arbeitsblatt')
+    const { root, worksheetsDirectory } = await ensureInternalWorksheetsDirectory()
+    const sourcePath = path.join(worksheetsDirectory, `${id}${extension}`)
+    const dataPath = path.join(worksheetsDirectory, `${id}.json`)
+    const now = new Date().toISOString()
+    const document = validateWorksheetDocument({
+      schemaVersion: 1,
+      id,
+      title,
+      kind: format.kind,
+      mimeType: format.mimeType,
+      sourceRelativePath: toRelativePosix(root, sourcePath),
+      dataRelativePath: toRelativePosix(root, dataPath),
+      createdAt: now,
+      updatedAt: now,
+      textBoxes: [],
+      highlights: [],
+    }, id)
+    const serialized = `${JSON.stringify(document, null, 2)}\n`
+    try {
+      await queueFileWrite(sourcePath, async () => atomicWrite(sourcePath, source, { mode: 0o600 }))
+      await queueFileWrite(dataPath, async () => atomicWrite(dataPath, serialized, { encoding: 'utf8', mode: 0o600 }))
+    } catch (error) {
+      await fsp.rm(sourcePath, { force: true }).catch(() => {})
+      await fsp.rm(dataPath, { force: true }).catch(() => {})
+      throw error
+    }
+    return document
+  }
+
+  handle(IPC.importWorksheetFromData, async (_event, payload) => {
+    await ensureBootstrap()
+    const name = typeof payload?.name === 'string' ? payload.name : 'Bild.png'
+    const extension = path.extname(name).toLocaleLowerCase('en-US') || (
+      payload?.mimeType === 'application/pdf' ? '.pdf'
+        : payload?.mimeType === 'image/jpeg' ? '.jpg'
+          : payload?.mimeType === 'image/webp' ? '.webp'
+            : payload?.mimeType === 'image/gif' ? '.gif'
+              : '.png'
+    )
+    const format = WORKSHEET_FORMATS.get(extension)
+    if (!format) throw new Error('Dieses Bildformat kann nicht auf das Blatt gelegt werden.')
+    const bytes = payload?.bytes
+    const source = Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes?.buffer ? bytes : bytes ?? [])
+    if (!source.length || source.length > format.maxBytes) throw new Error('Das Bild ist leer oder zu groß.')
+    return createWorksheetFromBuffer(source, extension, name)
+  })
+
+  handle(IPC.listNoteHistory, async (_event, relativePath) => {
+    await ensureBootstrap()
+    const normalized = normalizeRelativePath(relativePath).split(path.sep).join('/')
+    assertMarkdownPath(normalized)
+    const { listNoteHistory } = require('./note-history.cjs')
+    return listNoteHistory(await assertCurrentVaultRoot(), normalized)
+  })
+
+  handle(IPC.readNoteHistory, async (_event, relativePath, snapshotId) => {
+    await ensureBootstrap()
+    const normalized = normalizeRelativePath(relativePath).split(path.sep).join('/')
+    assertMarkdownPath(normalized)
+    const { readNoteHistory } = require('./note-history.cjs')
+    return readNoteHistory(await assertCurrentVaultRoot(), normalized, snapshotId)
+  })
+
+  handle(IPC.exportNotePdf, async () => {
+    await ensureBootstrap()
+    if (!mainWindow || mainWindow.isDestroyed()) throw new Error('Das Fenster ist nicht bereit für den PDF-Export.')
+    const result = await dialog.showSaveDialog(mainWindow, localizedDialog({
+      title: 'Notiz als PDF speichern',
+      buttonLabel: 'PDF speichern',
+      defaultPath: 'FaNotes-Notiz.pdf',
+      filters: [{ name: 'PDF', extensions: ['pdf'] }],
+    }))
+    if (result.canceled || !result.filePath) return null
+    await mainWindow.webContents.executeJavaScript('document.documentElement.classList.add("is-printing")')
+    try {
+      const pdf = await mainWindow.webContents.printToPDF({
+        printBackground: true,
+        pageSize: 'A4',
+        margins: { marginType: 'printableArea' },
+      })
+      await fsp.writeFile(result.filePath, pdf)
+    } finally {
+      await mainWindow.webContents.executeJavaScript('document.documentElement.classList.remove("is-printing")').catch(() => {})
+    }
+    return { filePath: result.filePath }
   })
 
   handle(IPC.importOneNote, async () => {

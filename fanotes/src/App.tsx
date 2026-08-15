@@ -7,15 +7,19 @@ import {
   ChevronDown,
   CircleAlert,
   ClipboardList,
+  Columns2,
   Command,
   Database,
   Download,
+  FileDown,
   FilePlus2,
   Files,
   FileUp,
+  History,
   FolderOpen,
   FolderPlus,
   Info,
+  Keyboard,
   LoaderCircle,
   LayoutGrid,
   Maximize2,
@@ -46,10 +50,11 @@ import type { WorksheetLayerHandle } from './components/WorksheetLayer'
 import { DEFAULT_SETTINGS } from './defaults'
 import { PaperView } from './components/PaperView'
 import { SafeBoundary } from './components/SafeBoundary'
+import { applyNoteTags, collectVaultTags, filterTreeByTag, parseNoteTags } from './lib/noteTags'
 import { applyRendererResourceLimits } from './lib/resourceLimits'
 import { setUiLanguage, translateUiText } from './i18n'
 import { bestContrastText, ensureReadableColor } from './lib/colorContrast'
-import type { AppSettings, BootstrapData, CreateResult, DetectedTextLanguage, DrawingLibraryDocument, NoteTab, OneNoteImportResult, SearchHit, UpdateState, VaultEntry, WorksheetDocument } from './types'
+import type { AppSettings, BootstrapData, CreateResult, DetectedTextLanguage, DrawingLibraryDocument, NoteHistorySnapshot, NoteTab, OneNoteImportResult, SearchHit, UpdateState, VaultEntry, WorksheetDocument } from './types'
 
 const DrawingBoard = lazy(() => import('./components/DrawingBoard').then((module) => ({ default: module.DrawingBoard })))
 const FirstRunOnboarding = lazy(() => import('./components/FirstRunOnboarding').then((module) => ({ default: module.FirstRunOnboarding })))
@@ -85,10 +90,11 @@ type NoteTabButtonProps = {
   path: string
   title: string
   onOpen: (path: string) => void | Promise<void>
+  onSplit: (path: string) => void | Promise<void>
   onClose: (path: string) => void | Promise<void>
 }
 
-const NoteTabButton = memo(function NoteTabButton({ active, dirty, path, title, onOpen, onClose }: NoteTabButtonProps) {
+const NoteTabButton = memo(function NoteTabButton({ active, dirty, path, title, onOpen, onSplit, onClose }: NoteTabButtonProps) {
   const tabRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
     if (active) tabRef.current?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
@@ -102,7 +108,7 @@ const NoteTabButton = memo(function NoteTabButton({ active, dirty, path, title, 
         role="tab"
         aria-selected={active}
         aria-label={`${title}${dirty ? ', nicht gespeicherte Änderungen' : ''}`}
-        onClick={() => { void onOpen(path) }}
+        onClick={(event) => { event.shiftKey ? void onSplit(path) : void onOpen(path) }}
         onAuxClick={(event) => { if (event.button === 1) void onClose(path) }}
       >
         <Files aria-hidden="true" size={13} />
@@ -262,8 +268,8 @@ const effectiveTheme = (settings: AppSettings, systemDark: boolean) => settings.
   : settings.theme
 
 const THEME_CONTRAST_SURFACES: Record<string, string[]> = {
-  dark: ['#0e0f14', '#14151d', '#171821', '#1d1e28'],
-  light: ['#f4f3f7', '#eeedf2', '#faf9fc', '#ffffff'],
+  dark: ['#1e1e1e', '#1a1a1a', '#262626', '#2a2a2a'],
+  light: ['#ffffff', '#f6f6f6', '#f2f2f2', '#ffffff'],
   midnight: ['#080d1b', '#0d1424', '#10182a', '#162139'],
   forest: ['#0c1411', '#111c17', '#15211b', '#1a2a22'],
   aurora: ['#100d1b', '#171226', '#1b152c', '#241b38'],
@@ -305,6 +311,7 @@ export default function App({ startupBootstrap }: AppProps) {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [editorMenuOpen, setEditorMenuOpen] = useState(false)
+  const [sidebarToolsOpen, setSidebarToolsOpen] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
   const [lmStudioOpen, setLmStudioOpen] = useState(false)
   const [glyphenWerkOpen, setGlyphenWerkOpen] = useState(false)
@@ -318,6 +325,13 @@ export default function App({ startupBootstrap }: AppProps) {
   const [toasts, setToasts] = useState<Toast[]>([])
   const [updateState, setUpdateState] = useState<UpdateState>(INITIAL_UPDATE_STATE)
   const [revealPath, setRevealPath] = useState<string | null>(null)
+  const [tagFilter, setTagFilter] = useState<string | null>(null)
+  const [tagIndex, setTagIndex] = useState<Record<string, string[]>>({})
+  const [tagDraft, setTagDraft] = useState('')
+  const [splitPath, setSplitPath] = useState<string | null>(null)
+  const [historyOpen, setHistoryOpen] = useState(false)
+  const [historySnapshots, setHistorySnapshots] = useState<NoteHistorySnapshot[]>([])
+  const [historyBusy, setHistoryBusy] = useState(false)
   const tabsRef = useRef(tabs)
   const activePathRef = useRef(activePath)
   const editorRef = useRef<MarkdownEditorHandle>(null)
@@ -397,6 +411,10 @@ export default function App({ startupBootstrap }: AppProps) {
     (path) => activePath === path || activePath.startsWith(`${path}/`),
   )), [activePath, mutatingEntryPaths])
   const counts = useMemo(() => countEntries(tree), [tree])
+  const visibleTree = useMemo(() => filterTreeByTag(tree, tagFilter, new Map(Object.entries(tagIndex))), [tagFilter, tagIndex, tree])
+  const knownTags = useMemo(() => collectVaultTags(Object.values(tagIndex).map((tags) => ({ content: tags.map((tag) => `#${tag}`).join(' ') }))), [tagIndex])
+  const activeTags = activeTab ? parseNoteTags(activeTab.content) : []
+  const splitTab = splitPath ? tabs.find((tab) => tab.path === splitPath) ?? null : null
   const vaultNoteReferences = useMemo(() => lmStudioOpen ? [...filePaths(tree)]
     .filter((path) => path !== activePath)
     .map((path) => ({ title: stripExtension(fileName(path)), relativePath: path })) : [], [activePath, lmStudioOpen, tree])
@@ -605,6 +623,7 @@ export default function App({ startupBootstrap }: AppProps) {
         structureRevision !== vaultStructureRevisionRef.current
       ) return
       const tab: NoteTab = { path, title: stripExtension(fileName(path)), content, savedContent: content }
+      setTagIndex((current) => ({ ...current, [path]: parseNoteTags(content) }))
       setTabs((current) => current.some((item) => item.path === path) ? current : [...current, tab])
       setActivePath(path)
       setFocusToken((value) => value + 1)
@@ -739,6 +758,7 @@ export default function App({ startupBootstrap }: AppProps) {
     setSaveState('saving')
     try {
       await window.fanotes.writeFile(path, content)
+      setTagIndex((current) => ({ ...current, [path]: parseNoteTags(content) }))
       if (pendingWrites.current.get(path) === content) pendingWrites.current.delete(path)
       setTabs((current) => current.map((tab) => tab.path === path ? { ...tab, savedContent: content } : tab))
       setSaveState(pendingWrites.current.size ? 'saving' : 'saved')
@@ -835,6 +855,7 @@ export default function App({ startupBootstrap }: AppProps) {
     if (!activePath) return
     if ([...mutatingEntryPathsRef.current].some((path) => activePath === path || activePath.startsWith(`${path}/`))) return
     setTabs((current) => current.map((tab) => tab.path === activePath ? { ...tab, content } : tab))
+    setTagIndex((current) => ({ ...current, [activePath]: parseNoteTags(content) }))
     pendingWrites.current.set(activePath, content)
     setSaveState('saving')
     const existing = saveTimers.current.get(activePath)
@@ -860,6 +881,7 @@ export default function App({ startupBootstrap }: AppProps) {
       if (!saved || pendingWrites.current.has(closing.path)) return
     }
     setTabs((current) => current.filter((tab) => tab.path !== path))
+    setSplitPath((current) => current === path ? null : current)
     setActivePath((currentActive) => {
       if (currentActive !== path) return currentActive
       const latestTabs = tabsRef.current
@@ -1628,6 +1650,89 @@ export default function App({ startupBootstrap }: AppProps) {
     }
   }, [activeTab, openNote, refreshTree, settings.defaultFolder, toast, updateContent, worksheetImportBusy])
 
+  const attachImportedWorksheet = useCallback(async (document: WorksheetDocument) => {
+    const targetPath = activePathRef.current
+    if (!targetPath) {
+      toast('Öffne zuerst eine Notiz, dann Bild einfügen.', 'info')
+      return
+    }
+    const tab = tabsRef.current.find((item) => item.path === targetPath)
+    const currentContent = pendingWrites.current.get(targetPath) ?? tab?.content ?? ''
+    const nextContent = attachWorksheet(currentContent, document.id)
+    updateContent(nextContent)
+    setWorksheetSession((current) => current.documents.some((item) => item.id === document.id)
+      ? current
+      : { key: current.key + 1, documents: [...current.documents, document] })
+    toast(`„${document.title}“ liegt auf dem Blatt.`, 'success')
+  }, [toast, updateContent])
+
+  const importImageBytes = useCallback(async (file: File) => {
+    if (!window.fanotes.importWorksheetFromData) {
+      toast('Bilder auf das Blatt legen geht in dieser Version noch nicht.', 'error')
+      return
+    }
+    const bytes = new Uint8Array(await file.arrayBuffer())
+    const document = await window.fanotes.importWorksheetFromData({ name: file.name || 'Bild.png', mimeType: file.type || 'image/png', bytes })
+    await attachImportedWorksheet(document)
+  }, [attachImportedWorksheet, toast])
+
+  const openInSplit = useCallback(async (path: string) => {
+    if (activePathRef.current === path) {
+      toast('Wähle eine zweite Notiz für die geteilte Ansicht.', 'info')
+      return
+    }
+    if (!tabsRef.current.some((tab) => tab.path === path)) await openNote(path)
+    setSplitPath(path)
+  }, [openNote, toast])
+
+  const applyTagsToNote = useCallback((tags: string[]) => {
+    if (!activeTab) return
+    updateContent(applyNoteTags(activeTab.content, tags))
+  }, [activeTab, updateContent])
+
+  const openHistory = useCallback(async () => {
+    if (!activePath || !window.fanotes.listNoteHistory) return
+    setHistoryOpen(true)
+    setHistoryBusy(true)
+    try {
+      setHistorySnapshots(await window.fanotes.listNoteHistory(activePath))
+    } catch (error) {
+      toast(error instanceof Error ? error.message : 'Verlauf konnte nicht geladen werden.', 'error')
+    } finally {
+      setHistoryBusy(false)
+    }
+  }, [activePath, toast])
+
+  const restoreHistory = useCallback(async (snapshotId: string) => {
+    if (!activePath || !window.fanotes.readNoteHistory) return
+    setHistoryBusy(true)
+    try {
+      const snapshot = await window.fanotes.readNoteHistory(activePath, snapshotId)
+      updateContent(snapshot.content)
+      setHistoryOpen(false)
+      toast('Ältere Version wiederhergestellt. Speichern sichert sie.', 'success')
+    } catch (error) {
+      toast(error instanceof Error ? error.message : 'Version konnte nicht geladen werden.', 'error')
+    } finally {
+      setHistoryBusy(false)
+    }
+  }, [activePath, toast, updateContent])
+
+  const exportCurrentPdf = useCallback(async () => {
+    if (!window.fanotes.exportNotePdf) {
+      document.documentElement.classList.add('is-printing')
+      window.print()
+      window.setTimeout(() => document.documentElement.classList.remove('is-printing'), 800)
+      return
+    }
+    try {
+      const result = await window.fanotes.exportNotePdf()
+      if (result?.filePath && result.filePath !== 'print') toast('PDF gespeichert.', 'success')
+    } catch (error) {
+      toast(error instanceof Error ? error.message : 'PDF-Export fehlgeschlagen.', 'error')
+    }
+  }, [toast])
+
   const removeWorksheetFromNote = useCallback(async (id: string) => {
     const document = worksheetSession.documents.find((item) => item.id === id)
     const label = document?.title ?? 'Arbeitsblatt'
@@ -1637,6 +1742,7 @@ export default function App({ startupBootstrap }: AppProps) {
     const notePath = activePathRef.current
     if (!notePath) return
     try {
+      await window.fanotes.deleteWorksheet(id)
       const tab = tabsRef.current.find((item) => item.path === notePath)
       const currentContent = pendingWrites.current.get(notePath) ?? tab?.content ?? ''
       const nextContent = detachWorksheet(currentContent, id)
@@ -1647,7 +1753,6 @@ export default function App({ startupBootstrap }: AppProps) {
         key: current.key + 1,
         documents: current.documents.filter((item) => item.id !== id),
       }))
-      await window.fanotes.deleteWorksheet(id)
       toast(`„${label}“ wurde aus der Notiz entfernt.`, 'success')
     } catch (error) {
       toast(error instanceof Error ? error.message : 'Das Arbeitsblatt konnte nicht entfernt werden.', 'error')
@@ -1686,12 +1791,22 @@ export default function App({ startupBootstrap }: AppProps) {
     { id: 'overview', label: 'Vault-Übersicht & Wissensgraph', detail: 'Fächer und offene Notizen überblicken', group: 'Navigation', icon: <Network size={15} />, run: openOverview },
     { id: 'homework', label: 'Hausaufgaben & Termine', detail: 'To-dos, Hausaufgaben und Termine mit Fälligkeit', group: 'Navigation', keywords: 'todo hausaufgaben schule termin fällig aufgabe checklist', icon: <ClipboardList size={15} />, run: openHomework },
     { id: 'daily', label: 'Heutige Tagesnotiz', detail: settings.dailyNotesFolder, group: 'Dateien', icon: <CalendarDays size={15} />, run: () => void createDailyNote() },
+    { id: 'export-pdf', label: 'Notiz als PDF exportieren', detail: 'Text, Handschrift und Arbeitsblatt drucken oder speichern', group: 'Dateien', keywords: 'pdf export drucken print', icon: <FileDown size={15} />, run: () => void exportCurrentPdf() },
+    { id: 'history', label: 'Versionsverlauf', detail: 'Frühere Stände dieser Notiz ansehen und wiederherstellen', group: 'Dateien', keywords: 'history version wiederherstellen', icon: <History size={15} />, run: () => void openHistory() },
+    { id: 'split', label: splitPath ? 'Geteilte Ansicht schließen' : 'Notiz rechts öffnen', detail: 'Zwei Notizen nebeneinander', group: 'Ansicht', keywords: 'split teilen nebeneinander', icon: <Columns2 size={15} />, run: () => {
+      if (splitPath) setSplitPath(null)
+      else {
+        const other = tabs.find((tab) => tab.path !== activePath)
+        if (other) void openInSplit(other.path)
+        else toast('Öffne zuerst eine zweite Notiz.', 'info')
+      }
+    } },
     { id: 'focus', label: focusMode ? 'Fokusmodus verlassen' : 'Fokusmodus starten', detail: 'Blendet Seitenleisten für ungestörtes Schreiben aus', shortcut: 'Ctrl ⇧ E', group: 'Ansicht', icon: <Maximize2 size={15} />, run: toggleFocusMode },
     { id: 'sidebar', label: 'Dateileiste umschalten', group: 'Ansicht', icon: <PanelLeftClose size={15} />, run: () => setSidebarVisible((value) => !value) },
     { id: 'inspector', label: 'Gliederung umschalten', group: 'Ansicht', icon: <PanelRightClose size={15} />, run: () => setInspectorVisible((value) => !value) },
     { id: 'settings', label: 'Einstellungen öffnen', shortcut: 'Ctrl ,', group: 'FaNotes', icon: <Settings size={15} />, run: () => setSettingsOpen(true) },
     { id: 'quit', label: isWeb ? 'Zur FaNotes-Website' : 'FaNotes beenden', shortcut: 'Ctrl Q', group: 'FaNotes', icon: <X size={15} />, run: () => window.fanotes.requestClose() },
-  ], [activeTab, createDailyNote, createFolder, createNote, drawingOpen, focusMode, importOneNote, isWeb, openGlyphenWerk, openHomework, openLmStudio, openOverview, openWorksheetImport, saveCurrentWork, settings.dailyNotesFolder, toast, toggleDrawing, toggleFocusMode])
+  ], [activePath, activeTab, createDailyNote, createFolder, createNote, drawingOpen, exportCurrentPdf, focusMode, importOneNote, isWeb, openGlyphenWerk, openHistory, openHomework, openInSplit, openLmStudio, openOverview, openWorksheetImport, saveCurrentWork, settings.dailyNotesFolder, splitPath, tabs, toast, toggleDrawing, toggleFocusMode])
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
@@ -1734,6 +1849,35 @@ export default function App({ startupBootstrap }: AppProps) {
     return () => window.removeEventListener('keydown', handler)
   }, [closeDrawing, closeTab, createNote, cycleTabs, focusMode, glyphenWerkOpen, homeworkOpen, lmStudioOpen, openGlyphenWerk, openLmStudio, openWorksheetImport, overviewOpen, paletteOpen, saveCurrentWork, searchOpen, settingsOpen, toggleDrawing, toggleFocusMode, worksheetImportOpen])
 
+  useEffect(() => {
+    const imageFile = (file: File | undefined) => file && file.type.startsWith('image/')
+    const onPaste = (event: ClipboardEvent) => {
+      const target = event.target as HTMLElement | null
+      if (target?.closest('textarea, input, [contenteditable="true"]')) return
+      const file = [...(event.clipboardData?.files ?? [])].find(imageFile)
+      if (!file) return
+      event.preventDefault()
+      void importImageBytes(file).catch((error) => toast(error instanceof Error ? error.message : 'Bild konnte nicht eingefügt werden.', 'error'))
+    }
+    const onDrop = (event: DragEvent) => {
+      const file = [...(event.dataTransfer?.files ?? [])].find(imageFile)
+      if (!file) return
+      event.preventDefault()
+      void importImageBytes(file).catch((error) => toast(error instanceof Error ? error.message : 'Bild konnte nicht abgelegt werden.', 'error'))
+    }
+    const onDragOver = (event: DragEvent) => {
+      if ([...(event.dataTransfer?.types ?? [])].includes('Files')) event.preventDefault()
+    }
+    window.addEventListener('paste', onPaste)
+    window.addEventListener('drop', onDrop)
+    window.addEventListener('dragover', onDragOver)
+    return () => {
+      window.removeEventListener('paste', onPaste)
+      window.removeEventListener('drop', onDrop)
+      window.removeEventListener('dragover', onDragOver)
+    }
+  }, [importImageBytes, toast])
+
   const theme = effectiveTheme(settings, systemDark)
   const cssVars = useMemo(() => {
     const contrastSurface = THEME_CONTRAST_SURFACES[theme] ?? THEME_CONTRAST_SURFACES.dark
@@ -1772,17 +1916,10 @@ export default function App({ startupBootstrap }: AppProps) {
     <div className={`app-shell theme-${theme} background-${settings.workspaceBackground} ${focusMode ? 'focus-mode' : ''} ${settings.compactMode ? 'compact' : ''} ${settings.reduceMotion ? 'no-motion' : ''} ${settings.glassEffects ? 'with-glass' : 'no-glass'}`} style={cssVars}>
       {settings.customCss && <style>{settings.customCss}</style>}
       <nav className="ribbon" aria-label="Hauptnavigation">
-        <button type="button" className={!searchOpen && !overviewOpen && !homeworkOpen && !lmStudioOpen && !glyphenWerkOpen ? 'active' : ''} title="Dateien" data-tooltip="Dateien" aria-label="Dateien" onClick={showFiles}><Files size={19} /></button>
+        <button type="button" className={!searchOpen && !overviewOpen && !homeworkOpen && !lmStudioOpen && !glyphenWerkOpen ? 'active' : ''} title="Dateien" data-tooltip="Notizen" aria-label="Notizen" onClick={showFiles}><Files size={19} /></button>
         <button type="button" className={searchOpen ? 'active' : ''} title="Im Vault suchen (Strg+Umschalt+F)" data-tooltip="Suchen · Strg ⇧ F" aria-label="Im gesamten Vault suchen" onClick={() => { setSearchOpen(true); setSidebarVisible(true) }}><Search size={19} /></button>
         <button type="button" className={drawingOpen ? 'active' : ''} title={drawingOpen ? 'Zur Tastatureingabe wechseln' : 'Auf derselben Seite mit Stift schreiben'} data-tooltip={drawingOpen ? 'Zur Tastatur · Strg D' : 'Mit Stift schreiben · Strg D'} aria-pressed={drawingOpen} onClick={toggleDrawing}><PenLine size={19} /></button>
-        <button type="button" className={worksheetImportOpen ? 'active' : ''} title="Bild oder PDF als Arbeitsblatt importieren" data-tooltip="Arbeitsblatt importieren" aria-label="Bild oder PDF als Arbeitsblatt importieren" onClick={openWorksheetImport}><FileUp size={19} /></button>
-        <button type="button" className={lmStudioOpen ? 'active' : ''} title="AI" data-tooltip="AI · Strg ⇧ A" aria-label="AI-Assistent öffnen" onClick={openLmStudio}><Bot size={19} /></button>
-        <button type="button" className={glyphenWerkOpen ? 'active' : ''} title="GlyphenWerk" data-tooltip="GlyphenWerk · Strg ⇧ G" aria-label="GlyphenWerk öffnen" onClick={openGlyphenWerk}><Database size={19} /></button>
-        <button type="button" title="Heutige Tagesnotiz" data-tooltip="Tagesnotiz" aria-label="Heutige Tagesnotiz öffnen" onClick={() => void createDailyNote()}><CalendarDays size={18} /></button>
-        <div className="ribbon-divider" />
-        <button type="button" className={homeworkOpen ? 'active' : ''} title="Hausaufgaben & Termine" data-tooltip="Hausaufgaben & Termine" aria-label="Hausaufgaben und Termine öffnen" onClick={openHomework}><ClipboardList size={18} /></button>
-        <button type="button" className={overviewOpen ? 'active' : ''} title="Vault-Übersicht" data-tooltip="Übersicht & Wissensgraph" aria-label="Vault-Übersicht und Wissensgraph öffnen" onClick={openOverview}><Network size={18} /></button>
-        <button type="button" title="Befehlspalette (Strg+P)" data-tooltip="Befehle · Strg P" aria-label="Befehlspalette öffnen" onClick={() => setPaletteOpen(true)}><Command size={18} /></button>
+        <button type="button" className={homeworkOpen ? 'active' : ''} title="Hausaufgaben & Termine" data-tooltip="Hausaufgaben" aria-label="Hausaufgaben und Termine öffnen" onClick={openHomework}><ClipboardList size={18} /></button>
         <div className="ribbon-spacer" />
         <button type="button" title="Einstellungen (Strg+,)" data-tooltip="Einstellungen · Strg ," aria-label="Einstellungen öffnen" onClick={() => setSettingsOpen(true)}><Settings size={19} /></button>
       </nav>
@@ -1821,36 +1958,111 @@ export default function App({ startupBootstrap }: AppProps) {
             <div className="sidebar-footer glyphenwerk-sidebar-footer"><span><ShieldCheck size={11} /> Nur lokal gespeichert</span><button type="button" onClick={() => openGlyphenWerkView('test')}><ScanLine size={12} /> Test</button></div>
           </> : <>
             <div className="sidebar-header">
-              <button type="button" className="sidebar-vault" onClick={() => setSettingsOpen(true)} title={bootstrap.vaultPath}><small>Lokaler Vault</small><strong>{bootstrap.vaultName} <ChevronDown size={11} /></strong></button>
-              <div className="sidebar-actions"><button className="icon-button" type="button" title="Neue Notiz" onClick={() => void createNote()}><FilePlus2 size={16} /></button><button className="icon-button" type="button" title="Neuer Ordner" onClick={() => void createFolder()}><FolderPlus size={16} /></button><button className="icon-button sidebar-collapse-button" type="button" title="Ordner-Seitenleiste einklappen" aria-label="Ordner-Seitenleiste einklappen" onClick={() => setSidebarVisible(false)}><PanelLeftClose size={16} /></button></div>
+              <div className="sidebar-vault" title={bootstrap.vaultPath}>
+                <strong>{bootstrap.vaultName}</strong>
+              </div>
+              <div className="sidebar-actions">
+                <button className="icon-button" type="button" title="Neue Notiz" aria-label="Neue Notiz" onClick={() => void createNote()}><FilePlus2 size={16} /></button>
+                <button className="icon-button" type="button" title="Neuer Ordner" aria-label="Neuer Ordner" onClick={() => void createFolder()}><FolderPlus size={16} /></button>
+                <button className="icon-button sidebar-collapse-button" type="button" title="Seitenleiste einklappen" aria-label="Seitenleiste einklappen" onClick={() => setSidebarVisible(false)}><PanelLeftClose size={16} /></button>
+              </div>
             </div>
-            <div className="sidebar-search" role="search" title="Text, Dateinamen und unsichtbare Handschrift durchsuchen"><Search aria-hidden="true" size={14} /><input value={searchQuery} placeholder="Notizen & Handschrift suchen …" aria-label="Im gesamten Vault suchen" onChange={(event) => { setSearchQuery(event.target.value); setSearchOpen(true) }} onFocus={() => setSearchOpen(true)} />{searchQuery ? <button className="search-clear" type="button" aria-label="Suchbegriff löschen" title="Suche leeren" onMouseDown={(event) => event.preventDefault()} onClick={() => { setSearchQuery(''); setSearchHits([]) }}><X size={13} /></button> : <kbd aria-label="Strg Umschalt F">⌃⇧F</kbd>}</div>
-            <div className="file-tree-wrap"><FileTree entries={tree} activePath={activePath} revealPath={revealPath} rootLabel="Fächer & Notizen" onOpen={openNote} onCreateNote={createNote} onCreateFolder={createFolder} onSetFolderColor={setFolderColor} onRename={renameEntry} onTrash={trashEntry} /></div>
-            <div className="sidebar-footer"><span>{counts.files} Notizen · {counts.folders} Ordner</span><button type="button" title="Vault jetzt aktualisieren" onClick={() => void refreshTree()}><ShieldCheck size={12} /> {isWeb ? 'Browser' : 'Lokal'}</button></div>
+            <div className="sidebar-search" role="search" title="Notizen und Handschrift durchsuchen">
+              <Search aria-hidden="true" size={14} />
+              <input value={searchQuery} placeholder="Suchen …" aria-label="Notizen suchen" onChange={(event) => { setSearchQuery(event.target.value); setSearchOpen(true) }} onFocus={() => setSearchOpen(true)} />
+              {searchQuery ? <button className="search-clear" type="button" aria-label="Suche leeren" title="Suche leeren" onMouseDown={(event) => event.preventDefault()} onClick={() => { setSearchQuery(''); setSearchHits([]) }}><X size={13} /></button> : null}
+            </div>
+            {knownTags.length > 0 && (
+              <div className="tag-filter" aria-label="Nach Schlagwort filtern">
+                {knownTags.map((tag) => (
+                  <button key={tag} type="button" className={tagFilter === tag ? 'is-active' : ''} onClick={() => setTagFilter((current) => current === tag ? null : tag)}>#{tag}</button>
+                ))}
+                {tagFilter && <button type="button" className="tag-filter-clear" onClick={() => setTagFilter(null)}>Filter aus</button>}
+              </div>
+            )}
+            <div className="file-tree-wrap">
+              <FileTree
+                entries={visibleTree}
+                activePath={activePath}
+                revealPath={revealPath}
+                rootLabel="Notizen"
+                showHeader={false}
+                onOpen={openNote}
+                onCreateNote={createNote}
+                onCreateFolder={createFolder}
+                onSetFolderColor={setFolderColor}
+                onRename={renameEntry}
+                onTrash={trashEntry}
+              />
+            </div>
+            <div className="sidebar-tools">
+              <button
+                type="button"
+                className={`sidebar-tools-toggle ${sidebarToolsOpen ? 'is-open' : ''}`}
+                aria-expanded={sidebarToolsOpen}
+                onClick={() => setSidebarToolsOpen((open) => !open)}
+              >
+                <ChevronDown size={14} />
+                Weitere Werkzeuge
+              </button>
+              <div className="sidebar-tools-list" hidden={!sidebarToolsOpen}>
+                <button type="button" title="Heutige Tagesnotiz" onClick={() => void createDailyNote()}><CalendarDays size={15} /><span>Tagesnotiz</span></button>
+                <button type="button" className={overviewOpen ? 'is-active' : ''} title="Vault-Übersicht" onClick={openOverview}><Network size={15} /><span>Übersicht</span></button>
+                <button type="button" className={glyphenWerkOpen ? 'is-active' : ''} title="GlyphenWerk" onClick={openGlyphenWerk}><Database size={15} /><span>GlyphenWerk</span></button>
+                <button type="button" title="Befehlspalette (Strg+P)" onClick={() => setPaletteOpen(true)}><Command size={15} /><span>Befehle</span></button>
+              </div>
+            </div>
+            <div className="sidebar-footer"><span>{counts.files} {counts.files === 1 ? 'Notiz' : 'Notizen'}</span></div>
           </>}
         </aside>
 
         <main className="workspace">
           <div className="tabs-bar">
-            <div className="tabs-scroll" role="tablist" aria-label="Offene Notizen">{tabs.map((tab) => <NoteTabButton key={tab.path} active={tab.path === activePath} dirty={tab.content !== tab.savedContent} path={tab.path} title={tab.title} onOpen={openNote} onClose={closeTab} />)}</div>
+            <div className="tabs-scroll" role="tablist" aria-label="Offene Notizen">{tabs.map((tab) => <NoteTabButton key={tab.path} active={tab.path === activePath} dirty={tab.content !== tab.savedContent} path={tab.path} title={tab.title} onOpen={openNote} onSplit={openInSplit} onClose={closeTab} />)}</div>
             <button type="button" className="tabs-menu" title="Neue Notiz (Strg+N)" aria-label="Neue Notiz" onClick={() => void createNote()}><Plus size={15} /></button>
           </div>
-          <div className="editor-toolbar">
-            <div className="breadcrumb" title={activeTab?.path ?? bootstrap.vaultPath}><span>{glyphenWerkOpen ? `GlyphenWerk · ${GLYPHENWERK_VIEW_LABELS[glyphenWerkView]}` : homeworkOpen ? 'Hausaufgaben & Termine' : overviewOpen ? 'Vault-Übersicht' : activeTab?.path ?? bootstrap.vaultName}</span></div>
-            <FormattingToolbar disabled={!activeTab || drawingOpen || overviewOpen || homeworkOpen || glyphenWerkOpen || activeEntryMutating} onFormat={formatMarkdown} />
-            <div className="toolbar-group">
-              <button type="button" className="toolbar-button ai" title="Mit einem AI-Anbieter bearbeiten" aria-label="AI-Assistent öffnen" onClick={openLmStudio}><Bot size={14} /> AI</button>
-              <button type="button" className="toolbar-button" title="Bild oder PDF als Arbeitsblatt importieren" aria-label="Arbeitsblatt importieren" onClick={openWorksheetImport}><FileUp size={14} /> Arbeitsblatt</button>
-              <button type="button" className={`toolbar-button convert ${drawingOpen ? 'active' : ''}`} title={drawingOpen ? 'Zur Tastatureingabe wechseln (Strg+D)' : 'Mit Stift schreiben (Strg+D)'} aria-pressed={drawingOpen} onClick={toggleDrawing}><PenLine size={14} /> {drawingOpen ? 'Tastatur' : 'Stift'}</button>
+          <div className={`editor-toolbar ${drawingOpen ? 'is-ink' : 'is-type'}`}>
+            <div className="mode-switch" role="group" aria-label="Eingabemodus">
+              <button
+                type="button"
+                className={!drawingOpen ? 'is-active' : ''}
+                aria-pressed={!drawingOpen}
+                title="Mit der Tastatur schreiben (Strg+D)"
+                onClick={() => { if (drawingOpen) toggleDrawing() }}
+              >
+                <Keyboard size={14} />
+                <span>Tastatur</span>
+              </button>
+              <button
+                type="button"
+                className={drawingOpen ? 'is-active' : ''}
+                aria-pressed={drawingOpen}
+                title="Mit dem Stift schreiben (Strg+D)"
+                onClick={() => { if (!drawingOpen) toggleDrawing() }}
+              >
+                <PenLine size={14} />
+                <span>Stift</span>
+              </button>
+            </div>
+            <div className="toolbar-context">
+              {drawingOpen
+                ? <div id="fanotes-ink-toolbar-slot" className="ink-toolbar-slot" />
+                : <FormattingToolbar disabled={!activeTab || overviewOpen || homeworkOpen || glyphenWerkOpen || activeEntryMutating} onFormat={formatMarkdown} />}
+            </div>
+            <div className="toolbar-group toolbar-end">
+              <button type="button" className="toolbar-button" title="Bild oder PDF als Arbeitsblatt importieren" aria-label="Arbeitsblatt importieren" onClick={openWorksheetImport}><FileUp size={14} /><span>Blatt</span></button>
+              <button type="button" className={`toolbar-button ai ${lmStudioOpen ? 'active' : ''}`} title="Mit einem AI-Anbieter bearbeiten" aria-label="AI-Assistent öffnen" onClick={openLmStudio}><Bot size={14} /><span>AI</span></button>
               <div className="editor-more">
                 <button type="button" className={`toolbar-button menu-trigger ${editorMenuOpen ? 'active' : ''}`} title="Weitere Notizaktionen" aria-label="Weitere Notizaktionen" aria-haspopup="menu" aria-expanded={editorMenuOpen} onClick={(event) => { event.stopPropagation(); setEditorMenuOpen((open) => !open) }}><MoreHorizontal size={16} /></button>
                 {editorMenuOpen && <div className="editor-more-menu" role="menu" aria-label="Weitere Notizaktionen" onPointerDown={(event) => event.stopPropagation()}>
-                  <header><span><MoreHorizontal size={15} /></span><div><strong>Notizmenü</strong><small>Ansicht und Datei</small></div></header>
                   <span className="editor-menu-label">Ansicht</span>
                   <button type="button" role="menuitemcheckbox" aria-checked={focusMode} onClick={() => { setEditorMenuOpen(false); toggleFocusMode() }}><span><Maximize2 size={15} /></span><span><strong>{focusMode ? 'Fokusmodus verlassen' : 'Fokusmodus'}</strong><small>Seitenleisten ausblenden</small></span><kbd>⌃⇧E</kbd></button>
                   <button type="button" role="menuitemcheckbox" aria-checked={inspectorVisible} onClick={() => { setEditorMenuOpen(false); setInspectorVisible((value) => !value) }}><span>{inspectorVisible ? <PanelRightClose size={15} /> : <PanelRightOpen size={15} />}</span><span><strong>{inspectorVisible ? 'Gliederung ausblenden' : 'Gliederung anzeigen'}</strong><small>Überschriften und Dokumentinfo</small></span><i className={inspectorVisible ? 'is-on' : ''} /></button>
                   <span className="editor-menu-separator" role="separator" />
                   <span className="editor-menu-label">Datei</span>
+                  <button type="button" role="menuitem" disabled={!activeTab} onClick={() => { setEditorMenuOpen(false); void exportCurrentPdf() }}><span><FileDown size={15} /></span><span><strong>Als PDF exportieren</strong><small>Text, Handschrift und Arbeitsblatt</small></span></button>
+                  <button type="button" role="menuitem" disabled={!activePath} onClick={() => { setEditorMenuOpen(false); void openHistory() }}><span><History size={15} /></span><span><strong>Versionsverlauf</strong><small>Frühere Stände wiederherstellen</small></span></button>
+                  <button type="button" role="menuitem" onClick={() => { setEditorMenuOpen(false); if (splitPath) setSplitPath(null); else { const other = tabs.find((tab) => tab.path !== activePath); if (other) void openInSplit(other.path); else toast('Öffne zuerst eine zweite Notiz (Umschalt+Klick auf einen Tab).', 'info') } }}><span><Columns2 size={15} /></span><span><strong>{splitPath ? 'Teilung schließen' : 'Geteilte Ansicht'}</strong><small>Zwei Notizen nebeneinander</small></span></button>
                   <button type="button" role="menuitem" disabled={!activePath} onClick={() => { setEditorMenuOpen(false); if (activePath) void window.fanotes.revealInFolder(activePath) }}><span>{isWeb ? <Download size={15} /> : <FolderOpen size={15} />}</span><span><strong>{isWeb ? 'Markdown herunterladen' : 'Im Dateimanager zeigen'}</strong><small>{isWeb ? 'Aktuelle Notiz exportieren' : 'Speicherort der Notiz öffnen'}</small></span></button>
                 </div>}
               </div>
@@ -1873,6 +2085,20 @@ export default function App({ startupBootstrap }: AppProps) {
             ) : overviewOpen ? (
               <VaultOverview entries={tree} openTabs={tabs} onOpen={(path) => { setOverviewOpen(false); return openNote(path) }} onCreateNote={() => createNote()} onClose={() => setOverviewOpen(false)} />
             ) : activeTab ? (
+              <>
+              {activeTab && (
+                <div className="note-meta-bar">
+                  <div className="note-tags" aria-label="Schlagwörter">
+                    {activeTags.map((tag) => (
+                      <button key={tag} type="button" className="note-tag" onClick={() => applyTagsToNote(activeTags.filter((item) => item !== tag))} title="Tag entfernen">#{tag}<X size={10} /></button>
+                    ))}
+                    <form onSubmit={(event) => { event.preventDefault(); const next = tagDraft.trim(); if (!next) return; applyTagsToNote([...activeTags, next]); setTagDraft('') }}>
+                      <input value={tagDraft} onChange={(event) => setTagDraft(event.target.value)} placeholder="Tag hinzufügen" maxLength={40} aria-label="Neues Schlagwort" />
+                    </form>
+                  </div>
+                </div>
+              )}
+              <div className={`editor-split ${splitTab ? 'is-split' : ''}`}>
               <PaperView
                 className={`unified-note-view paper-${settings.paperStyle} ${drawingOpen ? 'is-inking' : ''}`}
                 viewKey={activeTab.path}
@@ -1920,6 +2146,38 @@ export default function App({ startupBootstrap }: AppProps) {
                   {drawingOpen && drawingSession.key === 0 && <div className="inline-ink-loading"><LoaderCircle className="spin" size={18} /> Gespeicherte Stiftebene wird geladen …</div>}
                 </article>
               </PaperView>
+              {splitTab && (
+                <PaperView className="unified-note-view is-split-pane" viewKey={`split:${splitTab.path}`} showHud={false}>
+                  <article className="unified-paper" aria-label={`${splitTab.title} · zweite Spalte`}>
+                    <header className="split-pane-head">
+                      <strong>{splitTab.title}</strong>
+                      <button type="button" onClick={() => void openNote(splitTab.path)}>Fokus</button>
+                      <button type="button" aria-label="Teilung schließen" onClick={() => setSplitPath(null)}><X size={14} /></button>
+                    </header>
+                    <div className="editor-pane">
+                      <SafeBoundary name="Zweite Notiz" fallbackTitle="Die zweite Notiz ist abgestürzt">
+                        <MarkdownEditor
+                          key={`split-${splitTab.path}`}
+                          content={splitTab.content}
+                          onChange={(content) => {
+                            setTabs((current) => current.map((tab) => tab.path === splitTab.path ? { ...tab, content } : tab))
+                            pendingWrites.current.set(splitTab.path, content)
+                            const existing = saveTimers.current.get(splitTab.path)
+                            if (existing) window.clearTimeout(existing)
+                            const timer = window.setTimeout(() => { void saveContent(splitTab.path, content) }, settings.autosaveDelay)
+                            saveTimers.current.set(splitTab.path, timer)
+                          }}
+                          onSave={async (content) => { await saveContent(splitTab.path, content) }}
+                          settings={settings}
+                          paperMode
+                        />
+                      </SafeBoundary>
+                    </div>
+                  </article>
+                </PaperView>
+              )}
+              </div>
+              </>
             ) : (
               <div className="editor-placeholder"><div className="placeholder-glyph"><BookOpen size={28} /></div><span className="eyebrow">Bereit für deine nächste Idee</span><h2>Dein Wissen, in deiner Hand</h2><p>Schreibe mit Tastatur und Stift auf derselben Seite oder starte direkt mit einem Arbeitsblatt.</p><div className="placeholder-actions"><button className="primary-button" type="button" onClick={() => void createNote()}><FilePlus2 size={14} /> Neue Notiz</button><button className="secondary-button" type="button" onClick={openWorksheetImport}><FileUp size={14} /> Arbeitsblatt</button></div><button className="placeholder-command" type="button" onClick={() => setPaletteOpen(true)}><Command size={13} /> Alle Aktionen mit <kbd>Strg P</kbd></button></div>
               )}
@@ -1936,6 +2194,29 @@ export default function App({ startupBootstrap }: AppProps) {
         <div className="statusbar-right">{updateState.status === 'downloaded' && <button type="button" className="update-ready-button" title={`FaNotes ${updateState.latestVersion} installieren und neu starten`} onClick={() => void installUpdate()}><ShieldCheck size={11} /> Update bereit</button>}{updateState.status === 'downloading' && <span><LoaderCircle className="spin" size={11} /> Update {Math.round(updateState.progress * 100)} %</span>}{settings.spellcheck && activeTab && !drawingOpen && detectedTextLanguage !== 'unknown' && <span className="detected-text-language" title="Automatisch erkannte Sprache für die lokale Rechtschreibprüfung"><b>Aa</b> {detectedTextLanguage === 'de' ? 'Deutsch' : detectedTextLanguage === 'en' ? 'English' : 'DE / EN'}</span>}{settings.showWordCount && activeTab && <span>{activeWordCount} Wörter</span>}<button type="button" className={`save-status ${saveState === 'saved' ? 'save-ok' : 'save-pending'}`} title="Jetzt speichern (Strg+S)" aria-live="polite" onClick={() => void saveCurrentWork()}>{saveState === 'saved' ? <CheckCircle2 size={11} /> : saveState === 'saving' ? <LoaderCircle className="spin" size={11} /> : <CircleAlert size={11} />}{saveState === 'saved' ? 'Gespeichert' : saveState === 'saving' ? 'Speichert …' : 'Speicherfehler'}</button><span title={isWeb ? 'Die Daten bleiben in diesem Browser' : 'Dein Vault bleibt auf deinem Gerät'}><ShieldCheck size={11} /> {isWeb ? 'Im Browser gespeichert' : 'Lokal & privat'}</span></div>
       </footer>
 
+      {historyOpen && (
+        <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setHistoryOpen(false) }}>
+          <section className="history-dialog" role="dialog" aria-modal="true" aria-labelledby="history-title">
+            <header>
+              <div><History size={18} /><div><small>Lokaler Verlauf</small><h2 id="history-title">Frühere Versionen</h2></div></div>
+              <button type="button" aria-label="Schließen" onClick={() => setHistoryOpen(false)}><X size={17} /></button>
+            </header>
+            {historyBusy && <p className="history-empty"><LoaderCircle className="spin" size={16} /> Verlauf wird geladen …</p>}
+            {!historyBusy && historySnapshots.length === 0 && <p className="history-empty">Noch keine älteren Stände. Nach dem nächsten Speichern erscheint hier die vorherige Version.</p>}
+            <ul>
+              {historySnapshots.map((snapshot) => (
+                <li key={snapshot.id}>
+                  <div>
+                    <strong>{new Date(snapshot.createdAt).toLocaleString()}</strong>
+                    <small>{Math.max(1, Math.round(snapshot.bytes / 1024))} KB</small>
+                  </div>
+                  <button type="button" className="secondary-button" onClick={() => void restoreHistory(snapshot.id)}>Wiederherstellen</button>
+                </li>
+              ))}
+            </ul>
+          </section>
+        </div>
+      )}
       {paletteOpen && <Suspense fallback={null}><SafeBoundary name="Befehlspalette"><CommandPalette actions={paletteActions} onClose={() => setPaletteOpen(false)} /></SafeBoundary></Suspense>}
       {settingsOpen && <Suspense fallback={null}><SafeBoundary name="Einstellungen" fallbackTitle="Die Einstellungen sind abgestürzt"><SettingsModal platform={window.fanotes.platform} settings={settings} vaultPath={bootstrap.vaultPath} updateState={updateState} onChange={applySettings} onClose={() => setSettingsOpen(false)} onSelectVault={() => void selectVault()} onOpenGlyphenWerk={() => { setSettingsOpen(false); openGlyphenWerk() }} onImportTraining={importTrainingFromSettings} onImportOneNote={importOneNote} onCheckUpdate={checkForUpdates} onDownloadUpdate={downloadUpdate} onInstallUpdate={installUpdate} onResetSettings={resetSettings} onResetAppData={resetAppData} /></SafeBoundary></Suspense>}
       {lmStudioOpen && <Suspense fallback={null}><AiPanel settings={settings} note={lmStudioNote} vaultNotes={vaultNoteReferences} onSettingsChange={(changes) => applySettings({ ...settingsRef.current, ...changes })} onApply={applyLmStudioResult} onClose={() => setLmStudioOpen(false)} /></Suspense>}

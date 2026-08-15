@@ -378,23 +378,21 @@ void (async () => {
 
     await cdp.evaluate(`document.querySelector('button[title^="Auf derselben Seite"]').click()`)
     await waitFor(cdp, `Boolean(document.querySelector('.lw-drawing-board.is-inline.is-input-active .lw-tablet-canvas'))`, 'Die Stiftebene')
-    await waitFor(cdp, `Boolean(document.querySelector('.lw-drawing-board.is-inline.is-input-active .lw-draw-footer'))`, 'Die untere Handschriftleiste')
-    await waitFor(cdp, `Boolean(document.querySelector('.lw-drawing-board.is-inline .lw-draw-footer > div:first-child button'))`, 'Der optionale GlyphenWerk-Knopf ohne persönliches Training')
+    await waitFor(cdp, `Boolean(document.querySelector('.editor-toolbar.is-ink #fanotes-ink-toolbar-slot .lw-draw-toolbar.is-docked-chrome'))`, 'Die Stiftwerkzeuge in der oberen Leiste')
+    await waitFor(cdp, `Boolean(document.querySelector('#fanotes-ink-toolbar-slot button[title="GlyphenWerk öffnen"]'))`, 'Der optionale GlyphenWerk-Knopf ohne persönliches Training')
     const inkLayout = await cdp.evaluate(`(() => {
-      const footer = document.querySelector('.lw-drawing-board.is-inline .lw-draw-footer').getBoundingClientRect()
-      const status = document.querySelector('.statusbar').getBoundingClientRect()
-      const toolbar = document.querySelector('.lw-drawing-board.is-inline .lw-draw-toolbar').getBoundingClientRect()
+      const chrome = document.querySelector('.editor-toolbar').getBoundingClientRect()
+      const toolbar = document.querySelector('#fanotes-ink-toolbar-slot .lw-draw-toolbar').getBoundingClientRect()
       return {
-        footer: { left: footer.left, top: footer.top, right: footer.right, bottom: footer.bottom },
-        status: { top: status.top, bottom: status.bottom },
+        chrome: { left: chrome.left, top: chrome.top, right: chrome.right, bottom: chrome.bottom },
         toolbar: { left: toolbar.left, top: toolbar.top, right: toolbar.right, bottom: toolbar.bottom },
       }
     })()`)
-    if (inkLayout.footer.bottom > inkLayout.status.top || inkLayout.footer.left < 0 || inkLayout.footer.right > 1480) {
-      throw new Error(`Die untere Handschriftleiste überlappt oder verlässt das Fenster: ${JSON.stringify(inkLayout)}`)
-    }
     if (inkLayout.toolbar.left < 0 || inkLayout.toolbar.right > 1480 || inkLayout.toolbar.top < 0) {
       throw new Error(`Die Stiftwerkzeuge verlassen den sichtbaren Bereich: ${JSON.stringify(inkLayout)}`)
+    }
+    if (inkLayout.toolbar.top + 1 < inkLayout.chrome.top || inkLayout.toolbar.bottom - 1 > inkLayout.chrome.bottom) {
+      throw new Error(`Die Stiftwerkzeuge sitzen nicht in der oberen Leiste: ${JSON.stringify(inkLayout)}`)
     }
     await capture(cdp, 'pen-layer')
 
@@ -522,7 +520,7 @@ void (async () => {
       })
     }
     await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: handX, y: handBottom, button: 'left', buttons: 0, clickCount: 1 })
-    await cdp.evaluate(`[...document.querySelectorAll('.lw-draw-footer button')].find((button) => button.textContent.includes('Seite konvertieren'))?.click()`)
+    await cdp.evaluate(`document.querySelector('#fanotes-ink-toolbar-slot .lw-convert-action')?.click()`)
     await waitFor(cdp, `Boolean(document.querySelector('.lw-conversion-panel .lw-model-card > span.is-ready'))`, 'Das erst bei Bedarf geladene Handschriftmodell')
     await waitFor(cdp, `Boolean(document.querySelector('.lw-conversion-panel textarea'))`, 'Die Handschriftkonvertierung nach dem Lazy-Load')
     await cdp.evaluate(`document.querySelector('.lw-conversion-head button[aria-label="Konvertierung schließen"]')?.click()`)

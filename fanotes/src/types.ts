@@ -270,6 +270,16 @@ export type WorksheetTextBox = {
   fontSize: number
 }
 
+export type WorksheetHighlight = {
+  id: string
+  page: number
+  x: number
+  y: number
+  width: number
+  height: number
+  color: string
+}
+
 export type WorksheetDocument = {
   schemaVersion: 1
   id: string
@@ -283,6 +293,13 @@ export type WorksheetDocument = {
   pageWidth?: number
   pageHeight?: number
   textBoxes: WorksheetTextBox[]
+  highlights?: WorksheetHighlight[]
+}
+
+export type NoteHistorySnapshot = {
+  id: string
+  createdAt: string
+  bytes: number
 }
 
 export type OneNoteImportResult = {
@@ -420,10 +437,14 @@ export type FaNotesApi = {
   readDrawing: (id: string) => Promise<DrawingLibraryDocument>
   readFamdInk: (relativePath: string) => Promise<DrawingLibraryDocument | null>
   importWorksheet: () => Promise<WorksheetDocument | null>
+  importWorksheetFromData?: (payload: { name: string; mimeType: string; bytes: Uint8Array }) => Promise<WorksheetDocument>
   importOneNote: () => Promise<OneNoteImportResult | null>
   readWorksheet: (id: string) => Promise<WorksheetDocument>
   saveWorksheet: (document: WorksheetDocument) => Promise<WorksheetDocument>
   deleteWorksheet: (id: string) => Promise<{ id: string }>
+  listNoteHistory?: (relativePath: string) => Promise<NoteHistorySnapshot[]>
+  readNoteHistory?: (relativePath: string, snapshotId: string) => Promise<{ id: string; createdAt: string; content: string }>
+  exportNotePdf?: () => Promise<{ filePath: string } | null>
   lmStudioListModels: (baseUrl: string, apiToken?: string) => Promise<LmStudioModel[]>
   lmStudioTransform: (payload: {
     baseUrl: string

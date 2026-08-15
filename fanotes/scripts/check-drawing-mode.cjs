@@ -48,11 +48,18 @@ const safeguards = [
   ['!inline && event.pointerType === \'mouse\'', 'kein Pointer-Capture auf dem Notizblatt'],
   ['const releaseInkPointerCaptures', 'Capture wird auf Fläche, Canvas und Board gelöst'],
   ['const isInkSurfaceTarget', 'Klick auf Leiste/Tabs beendet hängenden Stift'],
+  [".closest('.lw-canvas-surface, .lw-tablet-canvas')", 'nur die Tintenfläche zählt als Stiftziel, nicht die ganze Tafel'],
+  ['position:fixed;z-index:80;top:78px;right:16px', 'Konvertierungs-Panel bleibt im Viewport'],
   ["addEventListener('wheel', onWheel", 'Trackpad-Zoom löst Stift-Capture sofort'],
   ['event.buttons === 0', 'verpasstes Pointer-Ende wird als Stift-ab erkannt'],
   ['const paintActiveStrokeNow', 'Tinte erscheint sofort, nicht erst im nächsten Frame'],
   ['getPredictedEvents', 'Stift-Vorhersage verkürzt die sichtbare Verzögerung'],
   ['const applyViewTransform', 'Blatt-Zoom und -Rotation während Handschrift'],
+  ['snapToDraftingTools', 'Lineal und Geodreieck fangen die Tinte an der Kante'],
+  ['<Ruler size={16} />', 'Lineal in der Stiftleiste'],
+  ['defaultCompassPose', 'Zirkel mit Nadel, Radius und Drehpunkt'],
+  ['<Compass size={16} />', 'Zirkel in der Stiftleiste'],
+  ['sampleCompassCircle', 'Zirkel zeichnet Kreis und Bogen als Tinte'],
   ['MAX_CANVAS_PIXELS_TALL = 4_200_000', 'enges Tintenbudget auf langen PDF-Seiten'],
   ['const measureInkWindow', 'Tinten-Bitmap nur für den sichtbaren Blattausschnitt'],
   ['const applyInkWindowToCanvases', 'sichtbares Tintenfenster auf den Canvases'],
@@ -60,7 +67,9 @@ const safeguards = [
   ['const handleWheel = useCallback', 'Strg/Alt-Mausrad für Zoom und Rotation'],
   ["aria-label=\"Blattansicht\"", 'Toolbar-Steuerung für Zoom und Drehung'],
   ['// Use layout size (offset*), not getBoundingClientRect: CSS zoom/rotation of the', 'Bitmap-Größe unabhängig vom Ansichtszoom'],
-  ['position:fixed;z-index:90;left:50%', 'Handschrift-Toolbar bleibt oben fixiert und klickbar'],
+  ['WRITE_SLACK_HEIGHT', 'Papier wächst nur mit Tinte plus Absatz-Puffer, nicht durch Scrollen'],
+  ['fanotes-ink-toolbar-slot', 'Handschrift-Werkzeuge sitzen in der oberen Leiste'],
+  ['is-docked-chrome', 'Stiftleiste dockt in das normale Menü, statt zu schweben'],
 ]
 
 const worksheetLayer = fs.readFileSync(path.join(root, 'src', 'components', 'WorksheetLayer.tsx'), 'utf8')
@@ -76,6 +85,9 @@ const worksheetSafeguards = [
 const worksheetStyleSafeguards = [
   ['width: min(calc(100% - 36px), 900px)', 'PDF-Leiste bleibt auf der A4-Spalte, nicht am rechten Infinite-Rand'],
   ['left: 18px', 'Entfernen-Button klebt im sichtbaren Viewport'],
+  ['margin-left: max(32px, calc((100% - var(--paper-width)) / 2))', 'gewachsenes Blatt bleibt links verankert'],
+  ['width: min(100%, var(--paper-width, 900px))', 'Text umbricht auf der A4-Spalte'],
+  ['Sit above the full-sheet ink canvas so Entfernen stays clickable in pen mode.', 'PDF-Entfernen bleibt im Stiftmodus klickbar'],
 ]
 
 const paperViewSafeguards = [

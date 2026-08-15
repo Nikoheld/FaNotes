@@ -121,7 +121,7 @@ const normalizeSearch = (value: string) => value
   .toLocaleLowerCase('de-CH')
   .trim()
 
-const ACCENTS = ['#8b7cff', '#6f8cff', '#45c9b7', '#ef7aa8', '#f09a5d', '#b878eb', '#d4b54c']
+const ACCENTS = ['#7f6df2', '#8a5cf5', '#6f8cff', '#45c9b7', '#ef7aa8', '#f09a5d', '#d4b54c']
 const THEMES: Array<{
   id: AppSettings['theme']
   label: string
@@ -131,9 +131,9 @@ const THEMES: Array<{
   accent: string
   secondary: string
 }> = [
-  { id: 'system', label: 'System', detail: 'Automatisch', background: 'linear-gradient(135deg,#171821 50%,#f4f3f7 50%)', surface: '#8b7cff', accent: '#8b7cff', secondary: '#45c9b7' },
-  { id: 'dark', label: 'Graphit', detail: 'Ruhig & dunkel', background: '#0e0f14', surface: '#1d1e28', accent: '#8b7cff', secondary: '#45c9b7' },
-  { id: 'light', label: 'Klar', detail: 'Hell & neutral', background: '#f4f3f7', surface: '#ffffff', accent: '#566ad7', secondary: '#2c8177' },
+  { id: 'system', label: 'System', detail: 'Automatisch', background: 'linear-gradient(135deg,#1e1e1e 50%,#ffffff 50%)', surface: '#7f6df2', accent: '#7f6df2', secondary: '#8a5cf5' },
+  { id: 'dark', label: 'Dunkel', detail: 'Obsidian-Nacht', background: '#1e1e1e', surface: '#262626', accent: '#7f6df2', secondary: '#8a5cf5' },
+  { id: 'light', label: 'Hell', detail: 'Obsidian-Tag', background: '#ffffff', surface: '#f2f2f2', accent: '#705dcf', secondary: '#8a5cf5' },
   { id: 'midnight', label: 'Mitternacht', detail: 'Tiefblau', background: '#080d1b', surface: '#121a2d', accent: '#6d8dff', secondary: '#44d6c6' },
   { id: 'forest', label: 'Wald', detail: 'Moos & Tinte', background: '#0d1512', surface: '#17231d', accent: '#52c98a', secondary: '#c9b85a' },
   { id: 'aurora', label: 'Aurora', detail: 'Violett & Cyan', background: '#100d1b', surface: '#211a31', accent: '#b078ff', secondary: '#4fd6d2' },

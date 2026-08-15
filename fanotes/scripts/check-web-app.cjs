@@ -291,7 +291,7 @@ void (async () => {
     }))()`)
     if (spelling.words !== 'Tset|exampel' || spelling.detected !== 'mixed' || !spelling.status.includes('DE / EN')) throw new Error(`Die Web-Rechtschreibprüfung ist unvollständig: ${JSON.stringify(spelling)}`)
 
-    await cdp.evaluate(`document.querySelector('.ribbon button[aria-label="AI-Assistent öffnen"]').click()`)
+    await cdp.evaluate(`document.querySelector('button[aria-label="AI-Assistent öffnen"]').click()`)
     await waitFor(cdp, `document.querySelectorAll('.ai-provider-grid > button').length === 6`, 'Die sechs AI-Anbieter im Web')
     const aiProviders = await cdp.evaluate(`[...document.querySelectorAll('.ai-provider-grid > button strong')].map((node) => node.textContent).join('|')`)
     if (aiProviders !== 'LM Studio|Ollama|OpenAI|Gemini|Anthropic|OpenCode') throw new Error(`Die Web-AI-Anbieter sind unvollständig: ${aiProviders}`)
@@ -301,7 +301,7 @@ void (async () => {
     await waitFor(cdp, `document.querySelector('.ai-secret-field input')?.value === 'web-secret-test'`, 'Die flüchtige AI-Schlüsseleingabe')
     await cdp.evaluate(`document.querySelector('.ai-panel button[aria-label="AI-Menü schließen"]').click()`)
     await waitFor(cdp, `!document.querySelector('.ai-panel')`, 'Das Schliessen des Web-AI-Bereichs')
-    await cdp.evaluate(`document.querySelector('.ribbon button[aria-label="AI-Assistent öffnen"]').click()`)
+    await cdp.evaluate(`document.querySelector('button[aria-label="AI-Assistent öffnen"]').click()`)
     await waitFor(cdp, `Boolean(document.querySelector('.ai-panel'))`, 'Das erneute Öffnen des Web-AI-Bereichs')
     const forgottenCloudKey = await cdp.evaluate(`document.querySelector('.ai-secret-field input')?.value === ''`)
     if (!forgottenCloudKey) throw new Error('Der Cloud-Schlüssel blieb unerwartet im Browser gespeichert.')

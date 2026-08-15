@@ -1,5 +1,7 @@
 import {
   Calculator,
+  Compass,
+  Copy,
   Check,
   ChevronDown,
   CircleAlert,
@@ -11,6 +13,7 @@ import {
   Palette,
   PenLine,
   Redo2,
+  Ruler,
   RotateCcw,
   RotateCw,
   Save,
@@ -18,6 +21,7 @@ import {
   Shapes,
   Sparkles,
   Trash2,
+  Triangle,
   Type,
   Undo2,
   X,
@@ -27,6 +31,7 @@ import {
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   forwardRef,
   memo,
   useImperativeHandle,
@@ -71,6 +76,23 @@ import {
 } from '../lib/recognitionModeSelection'
 import type { MathSolverAction, MathSolverResult } from '../lib/mathSolver'
 import { detectScribbleErase } from '../lib/scribbleErase'
+import { DraftingGuides } from './DraftingGuides'
+import {
+  asCompassPose,
+  compassRadiiNorm,
+  defaultCompassPose,
+  defaultRulerPose,
+  defaultSetSquarePose,
+  draftingToolLabel,
+  formatMillimetres,
+  sampleCompassArc,
+  sampleCompassCircle,
+  snapToDraftingTools,
+  type CompassDrawEvent,
+  type CompassPose,
+  type DraftingKind,
+  type DraftingPose,
+} from '../lib/draftingTools'
 import {
   createHandwritingSeed,
   synthesizeHandwriting,
@@ -133,11 +155,11 @@ const loadRecognitionModule = async () => {
 
 const SOURCE_WIDTH = 900
 const SOURCE_HEIGHT = 1273
-/** Grow the writable page by ~¾ A4 each time the pen or scroll approaches the end. */
-const PAGE_GROW_STEP = Math.round(SOURCE_HEIGHT * 0.75)
-/** Horizontal grow step (~½ A4 width) when writing/scrolling toward the right edge. */
-const PAGE_GROW_STEP_WIDTH = Math.round(SOURCE_WIDTH * 0.55)
-/** Soft cap (~40 A4 pages) so a runaway scroll cannot exhaust memory. */
+/** Extra paper after the last ink so a larger handwriting paragraph still fits. */
+const WRITE_SLACK_HEIGHT = Math.round(SOURCE_HEIGHT * 0.34)
+/** Extra paper to the right of the last ink — a bit of line, not a new page. */
+const WRITE_SLACK_WIDTH = Math.round(SOURCE_WIDTH * 0.28)
+/** Soft cap (~40 A4 pages) so a runaway write cannot exhaust memory. */
 const MAX_SOURCE_HEIGHT = SOURCE_HEIGHT * 40
 /** Soft cap for horizontal growth (~20 A4 widths). */
 const MAX_SOURCE_WIDTH = SOURCE_WIDTH * 20
@@ -157,8 +179,6 @@ const MAX_CANVAS_PIXELS_TALL = 4_200_000
 const TALL_LAYOUT_HEIGHT = 1_800
 /** Hold still this long after drawing a recognized figure to beautify it. */
 const SHAPE_DWELL_MS = 2_000
-/** Start extending when the pen is in the last 18% of the current page. */
-const WRITE_GROW_EDGE = 0.82
 
 /** Backing-store size for the ink canvases. Higher when zoomed in so CSS scale stays sharp. */
 const computeInkPixelSize = (layoutWidth: number, layoutHeight: number, viewZoom: number, inlineMode: boolean) => {
@@ -256,7 +276,7 @@ const clearInkCursor = () => {
 }
 
 const isInkSurfaceTarget = (target: EventTarget | null) => (
-  target instanceof Element && Boolean(target.closest('.lw-canvas-surface, .lw-tablet-canvas, .lw-drawing-board.is-inline.is-input-active'))
+  target instanceof Element && Boolean(target.closest('.lw-canvas-surface, .lw-tablet-canvas'))
 )
 
 const releaseStuckInputFocus = (preferred?: HTMLElement | null) => {
@@ -290,7 +310,7 @@ type ArtSymbolId =
 type RecognitionMode = 'math' | 'text'
 type RecognitionPreference = 'auto' | RecognitionMode
 type RecognitionScope = 'page' | 'selection'
-type SelectionPurpose = 'conversion' | 'math-correction'
+type SelectionPurpose = 'conversion' | 'math-correction' | 'edit'
 type MathSolverPlacement = 'auto' | 'same-line' | 'next-line'
 
 type SelectionRect = {
@@ -437,6 +457,8 @@ export type DrawingBoardProps = {
 
 type Notice = { kind: 'success' | 'error' | 'info'; text: string }
 
+const INK_TOOLBAR_SLOT_ID = 'fanotes-ink-toolbar-slot'
+
 const cloneStrokes = (strokes: InkStroke[]): InkStroke[] => strokes.map((stroke) => ({
   ...stroke,
   points: stroke.points.map((point) => ({ ...point })),
@@ -481,6 +503,18 @@ const waitForBackgroundIdle = () => new Promise<void>((resolve) => {
 const bottomOfStrokes = (strokes: InkStroke[], sourceHeight: number) => strokes.reduce((bottom, stroke) => (
   stroke.points.reduce((strokeBottom, point) => Math.max(strokeBottom, point.y * sourceHeight), bottom)
 ), 0)
+
+const inkAbsoluteBounds = (strokes: InkStroke[], sourceWidth: number, sourceHeight: number) => {
+  let maxX = 0
+  let maxY = 0
+  for (const stroke of strokes) {
+    for (const point of stroke.points) {
+      maxX = Math.max(maxX, point.x * sourceWidth)
+      maxY = Math.max(maxY, point.y * sourceHeight)
+    }
+  }
+  return { maxX, maxY }
+}
 
 const clamp = (value: number, min = 0, max = 1) => Math.max(min, Math.min(max, value))
 
@@ -1108,7 +1142,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const sourceHeightRef = useRef(SOURCE_HEIGHT)
   const sourceWidthRef = useRef(SOURCE_WIDTH)
   const pageLayoutFrameRef = useRef<number | null>(null)
-  const pageGrowCoalesceRef = useRef<number | null>(null)
+
   const activePointerTargetRef = useRef<Element | null>(null)
   /** Last pointer id we successfully called setPointerCapture for (may outlive activePointerRef on Wayland glitches). */
   const lastCapturedPointerIdRef = useRef<number | null>(null)
@@ -1217,6 +1251,29 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const [selectionMode, setSelectionMode] = useState(false)
   const [selectionPurpose, setSelectionPurpose] = useState<SelectionPurpose>('conversion')
   const [selectionRect, setSelectionRect] = useState<SelectionRect | null>(null)
+  const [rulerPose, setRulerPose] = useState<DraftingPose | null>(null)
+  const [setSquarePose, setSetSquarePose] = useState<DraftingPose | null>(null)
+  const [compassPose, setCompassPose] = useState<CompassPose | null>(null)
+  const [inkToolbarHost, setInkToolbarHost] = useState<HTMLElement | null>(null)
+  const [draftingReadout, setDraftingReadout] = useState<string | null>(null)
+  const rulerPoseRef = useRef<DraftingPose | null>(null)
+  const setSquarePoseRef = useRef<DraftingPose | null>(null)
+  const compassPoseRef = useRef<CompassPose | null>(null)
+  const draftingLockRef = useRef<{ kind: DraftingKind; edgeIndex: number } | null>(null)
+  const draftingReadoutRef = useRef<string | null>(null)
+  rulerPoseRef.current = rulerPose
+  setSquarePoseRef.current = setSquarePose
+  compassPoseRef.current = compassPose
+
+  useLayoutEffect(() => {
+    if (!inline || !inputActive) {
+      setInkToolbarHost(null)
+      return
+    }
+    setInkToolbarHost(document.getElementById(INK_TOOLBAR_SLOT_ID))
+  }, [inline, inputActive])
+  const selectedStrokeIndexesRef = useRef<number[]>([])
+  const inkDragRef = useRef<{ kind: 'move' | 'scale'; startX: number; startY: number; origin: SelectionRect } | null>(null)
   const [recognitionScope, setRecognitionScope] = useState<RecognitionScope>('page')
   const [resources, setResources] = useState<RecognitionResources | null>(null)
   const [trainingSampleCount, setTrainingSampleCount] = useState<number | null>(null)
@@ -1645,9 +1702,35 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     const localX = originEl === canvas ? paperLocalX : paperLocalX * (width / paperW)
     const localY = originEl === canvas ? paperLocalY : paperLocalY * (height / paperH)
 
+    let x = clamp(localX / width)
+    let y = clamp(localY / height)
+    const guides: Array<{ kind: DraftingKind; pose: DraftingPose }> = []
+    if (rulerPoseRef.current) guides.push({ kind: 'ruler', pose: rulerPoseRef.current })
+    if (setSquarePoseRef.current) guides.push({ kind: 'setSquare', pose: setSquarePoseRef.current })
+    if (compassPoseRef.current) guides.push({ kind: 'compass', pose: compassPoseRef.current })
+    if (guides.length && !selectionStartRef.current && gestureToolRef.current !== 'eraser') {
+      const snapped = snapToDraftingTools(
+        x,
+        y,
+        guides,
+        sourceWidthRef.current,
+        sourceHeightRef.current,
+        draftingLockRef.current,
+      )
+      if (snapped) {
+        x = snapped.x
+        y = snapped.y
+        draftingLockRef.current = { kind: snapped.kind, edgeIndex: snapped.edgeIndex }
+        const nextReadout = `${draftingToolLabel(snapped.kind)} · ${formatMillimetres(snapped.millimetres)}`
+        if (draftingReadoutRef.current !== nextReadout) {
+          draftingReadoutRef.current = nextReadout
+          setDraftingReadout(nextReadout)
+        }
+      }
+    }
     return {
-      x: clamp(localX / width),
-      y: clamp(localY / height),
+      x,
+      y,
       t: Math.round(event.timeStamp * 100) / 100,
       pressure: Math.round(clamp(rawPressure) * 1_000) / 1_000,
       tiltX: event.tiltX ?? 0,
@@ -1751,107 +1834,94 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     })
   }, [redraw])
 
-  /**
-   * Grow the writable page downward without shifting existing ink in absolute space.
-   * Stroke coordinates stay normalized 0–1 relative to sourceHeight, so we scale y
-   * by old/new when extending. Layout/CSS updates are coalesced to one rAF.
-   */
-  const growPageTo = useCallback((targetHeight: number) => {
-    const prev = sourceHeightRef.current
-    const next = Math.min(MAX_SOURCE_HEIGHT, Math.max(prev, Math.round(targetHeight)))
-    if (next <= prev) return false
-    const scale = prev / next
+  const scaleNormalizedSpace = useCallback((scaleX: number, scaleY: number) => {
+    if (scaleX === 1 && scaleY === 1) return
     for (const stroke of strokesRef.current) {
-      for (const point of stroke.points) point.y *= scale
+      for (const point of stroke.points) {
+        point.x *= scaleX
+        point.y *= scaleY
+      }
     }
     const active = activeStrokeRef.current
     if (active) {
-      for (const point of active.points) point.y *= scale
+      for (const point of active.points) {
+        point.x *= scaleX
+        point.y *= scaleY
+      }
     }
-    sourceHeightRef.current = next
-    setSourceHeight(next)
-    applyInkExtentStyles(next, sourceWidthRef.current)
-    exportCacheRef.current = null
-    setDirty(true)
-    schedulePageLayoutRefresh()
-    return true
-  }, [applyInkExtentStyles, schedulePageLayoutRefresh, setDirty])
+    const scalePose = <T extends DraftingPose>(pose: T | null): T | null => (
+      pose ? { ...pose, x: pose.x * scaleX, y: pose.y * scaleY } : pose
+    )
+    if (rulerPoseRef.current) {
+      const next = scalePose(rulerPoseRef.current)
+      rulerPoseRef.current = next
+      setRulerPose(next)
+    }
+    if (setSquarePoseRef.current) {
+      const next = scalePose(setSquarePoseRef.current)
+      setSquarePoseRef.current = next
+      setSetSquarePose(next)
+    }
+    if (compassPoseRef.current) {
+      const next = scalePose(compassPoseRef.current)
+      compassPoseRef.current = next
+      setCompassPose(next)
+    }
+    setSelectionRect((current) => current ? {
+      x: current.x * scaleX,
+      y: current.y * scaleY,
+      width: current.width * scaleX,
+      height: current.height * scaleY,
+    } : current)
+  }, [])
 
   /**
-   * Grow the writable page to the right (one-sided infinite sheet). Existing ink keeps
-   * absolute position by scaling normalized x when sourceWidth increases.
+   * Resize the writable page without shifting existing ink in absolute space.
+   * Coordinates stay normalized 0–1, so we scale by old/new when the sheet changes.
    */
-  const growPageWidthTo = useCallback((targetWidth: number) => {
-    const prev = sourceWidthRef.current
-    const next = Math.min(MAX_SOURCE_WIDTH, Math.max(prev, Math.round(targetWidth)))
-    if (next <= prev) return false
-    const scale = prev / next
-    for (const stroke of strokesRef.current) {
-      for (const point of stroke.points) point.x *= scale
-    }
-    const active = activeStrokeRef.current
-    if (active) {
-      for (const point of active.points) point.x *= scale
-    }
-    sourceWidthRef.current = next
-    setSourceWidth(next)
-    applyInkExtentStyles(sourceHeightRef.current, next)
-    exportCacheRef.current = null
-    setDirty(true)
-    schedulePageLayoutRefresh()
-    return true
-  }, [applyInkExtentStyles, schedulePageLayoutRefresh, setDirty])
-
-  /** Ensure headroom below/right of a normalized point or when the viewport nears a paper edge. */
-  const ensureInfinitePageRoom = useCallback((normalizedY?: number, normalizedX?: number) => {
+  const setPageExtent = useCallback((targetHeight: number, targetWidth: number) => {
     const prevH = sourceHeightRef.current
-    if (prevH < MAX_SOURCE_HEIGHT && typeof normalizedY === 'number' && Number.isFinite(normalizedY)) {
-      if (normalizedY >= WRITE_GROW_EDGE) {
-        const absoluteY = clamp(normalizedY) * prevH
-        const target = absoluteY + PAGE_GROW_STEP * 0.65
-        if (target > prevH) {
-          const stepped = Math.min(
-            MAX_SOURCE_HEIGHT,
-            Math.ceil(target / PAGE_GROW_STEP) * PAGE_GROW_STEP,
-          )
-          growPageTo(Math.max(prevH + PAGE_GROW_STEP, stepped))
-        }
-      }
-    }
     const prevW = sourceWidthRef.current
-    if (prevW < MAX_SOURCE_WIDTH && typeof normalizedX === 'number' && Number.isFinite(normalizedX)) {
-      if (normalizedX >= WRITE_GROW_EDGE) {
-        const absoluteX = clamp(normalizedX) * prevW
-        const target = absoluteX + PAGE_GROW_STEP_WIDTH * 0.65
-        if (target > prevW) {
-          const stepped = Math.min(
-            MAX_SOURCE_WIDTH,
-            Math.ceil(target / PAGE_GROW_STEP_WIDTH) * PAGE_GROW_STEP_WIDTH,
-          )
-          growPageWidthTo(Math.max(prevW + PAGE_GROW_STEP_WIDTH, stepped))
-        }
-      }
-    }
-  }, [growPageTo, growPageWidthTo])
+    const nextH = Math.min(MAX_SOURCE_HEIGHT, Math.max(SOURCE_HEIGHT, Math.round(targetHeight)))
+    const nextW = Math.min(MAX_SOURCE_WIDTH, Math.max(SOURCE_WIDTH, Math.round(targetWidth)))
+    if (nextH === prevH && nextW === prevW) return false
+    scaleNormalizedSpace(prevW / nextW, prevH / nextH)
+    sourceHeightRef.current = nextH
+    sourceWidthRef.current = nextW
+    setSourceHeight(nextH)
+    setSourceWidth(nextW)
+    applyInkExtentStyles(nextH, nextW)
+    exportCacheRef.current = null
+    setDirty(true)
+    schedulePageLayoutRefresh()
+    return true
+  }, [applyInkExtentStyles, scaleNormalizedSpace, schedulePageLayoutRefresh, setDirty])
 
-  const ensureRoomFromScroll = useCallback(() => {
-    if (!inline) return
-    const paper = resolvePaperElement()
-    const scroller = paper?.closest('.unified-note-view') as HTMLElement | null
-    if (!paper || !scroller) return
-    const paperRect = paper.getBoundingClientRect()
-    const scrollerRect = scroller.getBoundingClientRect()
-    const distanceToPaperBottom = paperRect.bottom - scrollerRect.bottom
-    // Extend while the bottom of the paper is within ~half a viewport of the fold.
-    if (distanceToPaperBottom < Math.max(220, scroller.clientHeight * 0.45)) {
-      growPageTo(sourceHeightRef.current + PAGE_GROW_STEP)
+  /** Keep a paragraph of empty paper beyond the pen so writing can continue, then stop. */
+  const ensureWriteRoom = useCallback((normalizedY?: number, normalizedX?: number) => {
+    const prevH = sourceHeightRef.current
+    const prevW = sourceWidthRef.current
+    let nextH = prevH
+    let nextW = prevW
+    if (typeof normalizedY === 'number' && Number.isFinite(normalizedY)) {
+      nextH = Math.max(nextH, normalizedY * prevH + WRITE_SLACK_HEIGHT)
     }
-    const distanceToPaperRight = paperRect.right - scrollerRect.right
-    // Extend to the right when the user pans/scrolls near the right edge.
-    if (distanceToPaperRight < Math.max(180, scroller.clientWidth * 0.35)) {
-      growPageWidthTo(sourceWidthRef.current + PAGE_GROW_STEP_WIDTH)
+    if (typeof normalizedX === 'number' && Number.isFinite(normalizedX)) {
+      nextW = Math.max(nextW, normalizedX * prevW + WRITE_SLACK_WIDTH)
     }
-  }, [growPageTo, growPageWidthTo, inline, resolvePaperElement])
+    if (nextH > prevH || nextW > prevW) setPageExtent(nextH, nextW)
+  }, [setPageExtent])
+
+  const fitPageToInk = useCallback(() => {
+    if (activeStrokeRef.current) return false
+    const prevH = sourceHeightRef.current
+    const prevW = sourceWidthRef.current
+    const bounds = inkAbsoluteBounds(strokesRef.current, prevW, prevH)
+    return setPageExtent(
+      Math.max(SOURCE_HEIGHT, bounds.maxY + WRITE_SLACK_HEIGHT),
+      Math.max(SOURCE_WIDTH, bounds.maxX + WRITE_SLACK_WIDTH),
+    )
+  }, [setPageExtent])
 
   const clearViewTransformTargets = useCallback(() => {
     const surface = surfaceRef.current
@@ -1968,31 +2038,9 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     applyInkExtentStyles(sourceHeight, sourceWidth)
   }, [applyInkExtentStyles, sourceHeight, sourceWidth])
 
-  // Infinite paper: when the user scrolls near the bottom of the note page,
-  // grow the sheet in large chunks (rAF-coalesced) so writing never runs out of room.
   useEffect(() => {
-    if (!inline) return
-    const paper = resolvePaperElement()
-    const scroller = paper?.closest('.unified-note-view') as HTMLElement | null
-    if (!scroller) return
-    const onScroll = () => {
-      if (pageGrowCoalesceRef.current !== null) return
-      pageGrowCoalesceRef.current = requestAnimationFrame(() => {
-        pageGrowCoalesceRef.current = null
-        ensureRoomFromScroll()
-      })
-    }
-    scroller.addEventListener('scroll', onScroll, { passive: true })
-    // Seed one page of headroom when entering pen mode.
-    if (inputActive) ensureRoomFromScroll()
-    return () => {
-      scroller.removeEventListener('scroll', onScroll)
-      if (pageGrowCoalesceRef.current !== null) {
-        cancelAnimationFrame(pageGrowCoalesceRef.current)
-        pageGrowCoalesceRef.current = null
-      }
-    }
-  }, [ensureRoomFromScroll, inline, inputActive, resolvePaperElement])
+    fitPageToInk()
+  }, [drawingId, fitPageToInk, initialDrawingJson])
 
   useEffect(() => {
     if (inline && !inputActive) {
@@ -2532,9 +2580,9 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       if (predicted.length) paintActiveStrokeNow(predicted)
       // Grow the page ahead of the pen so writing never hits a hard bottom edge.
       const latest = activeStrokeRef.current?.points.at(-1)
-      if (latest) ensureInfinitePageRoom(latest.y, latest.x)
+      if (latest) ensureWriteRoom(latest.y, latest.x)
     }
-  }, [appendPointerEvent, ensureInfinitePageRoom, eraseAt, paintActiveStrokeNow, pointFromEvent, settings.penOnly])
+  }, [appendPointerEvent, ensureWriteRoom, eraseAt, paintActiveStrokeNow, pointFromEvent, settings.penOnly])
 
   const finishPointer = useCallback((event: ReactPointerEvent<HTMLElement> | PointerEvent) => {
     const pointerId = event.pointerId
@@ -2553,6 +2601,11 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       pointerBoundsRef.current = null
       activePointerRef.current = null
       activePointerTargetRef.current = null
+      draftingLockRef.current = null
+      if (draftingReadoutRef.current) {
+        draftingReadoutRef.current = null
+        setDraftingReadout(null)
+      }
       if (resizeDirtyRef.current) {
         resizeDirtyRef.current = false
         syncInkWindow()
@@ -2600,6 +2653,15 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         setSelectionRect(null)
         setRecognitionScope('page')
         void analyzeMathCorrectionSelection(selection, selectedStrokes)
+        return
+      }
+      if (selectionPurpose === 'edit') {
+        selectedStrokeIndexesRef.current = strokesRef.current.flatMap((stroke, index) => (
+          selectedStrokes.includes(stroke) ? [index] : []
+        ))
+        setSelectionMode(false)
+        setSelectionRect(selection)
+        setNotice({ kind: 'info', text: 'Ziehen zum Verschieben, Ecke zum Skalieren. Kopieren oder Löschen unten.' })
         return
       }
       recognitionStrokesRef.current = selectedStrokes
@@ -2709,8 +2771,106 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         setNotice({ kind: 'success', text: 'Form übernommen.' })
       }
     }
+    if (gestureChangedRef.current) fitPageToInk()
     scheduleRedraw()
-  }, [analyzeMathCorrectionSelection, appendPointerEvent, bumpInkRevision, clearShapeDwellTimer, commitPendingSolverTap, commitStrokeToCanvas, inkMode, mathSolverEnabled, mode, openMathSolverAtPoint, pointFromEvent, redraw, scheduleRedraw, selectionPurpose, setDirty, settings.scribbleEraseSensitivity, sourceHeight, sourceWidth, syncInkWindow, updateHistoryState])
+  }, [analyzeMathCorrectionSelection, appendPointerEvent, bumpInkRevision, clearShapeDwellTimer, commitPendingSolverTap, commitStrokeToCanvas, fitPageToInk, inkMode, mathSolverEnabled, mode, openMathSolverAtPoint, pointFromEvent, redraw, scheduleRedraw, selectionPurpose, setDirty, settings.scribbleEraseSensitivity, sourceHeight, sourceWidth, syncInkWindow, updateHistoryState])
+
+  const handleCompassDraw = useCallback((event: CompassDrawEvent) => {
+    const sw = sourceWidthRef.current
+    const sh = sourceHeightRef.current
+    const toPoint = (x: number, y: number): StrokePoint => ({
+      x,
+      y,
+      t: Math.round(performance.now() * 100) / 100,
+      pressure: 0.62,
+      tiltX: 0,
+      tiltY: 0,
+      pointerType: 'compass',
+    })
+    const makeStroke = (points: StrokePoint[]): InkStroke => (
+      inkMode === 'drawing'
+        ? {
+            points,
+            baseWidth: artWidth,
+            pressureEnabled: false,
+            color: artColor,
+            purpose: 'art',
+            brush: artBrush,
+            colorEffect: artEffect,
+            opacity: artOpacity,
+            textureSeed: Math.max(1, Math.round((performance.now() * 1_000) % 2_147_483_647)),
+          }
+        : {
+            points,
+            baseWidth: penWidth,
+            pressureEnabled: false,
+            color: penColor,
+            purpose: 'handwriting',
+            brush: 'fineliner',
+            colorEffect: 'solid',
+            opacity: 1,
+          }
+    )
+    const growForPose = (pose: CompassPose) => {
+      const { rx, ry } = compassRadiiNorm(pose.radiusMm, sw, sh)
+      ensureWriteRoom(pose.y + ry + 0.02, pose.x + rx + 0.02)
+    }
+    const commitReadyStroke = (stroke: InkStroke | null, label: string) => {
+      activeStrokeRef.current = null
+      if (!stroke || stroke.points.length < 2) {
+        scheduleRedraw()
+        return
+      }
+      undoRef.current.push(beforeGestureRef.current)
+      if (undoRef.current.length > 80) undoRef.current.shift()
+      redoRef.current = []
+      strokesRef.current.push(stroke)
+      commitStrokeToCanvas(stroke)
+      bumpInkRevision({ redrawCommitted: false, appendOnly: true, updateTranscript: stroke.purpose !== 'art' })
+      setDirty(true)
+      updateHistoryState()
+      setNotice({ kind: 'success', text: label })
+      fitPageToInk()
+      scheduleRedraw()
+    }
+
+    if (event.type === 'begin') {
+      if (activePointerRef.current !== null) return
+      beforeGestureRef.current = snapshotStrokes(strokesRef.current)
+      gestureChangedRef.current = true
+      gestureToolRef.current = 'pen'
+      activeRenderedPointCountRef.current = 0
+      const first = sampleCompassArc(event.pose, event.pose.rotation, event.pose.rotation, sw, sh)[0]
+      if (!first) return
+      activeStrokeRef.current = makeStroke([toPoint(first.x, first.y)])
+      growForPose(event.pose)
+      paintActiveStrokeNow()
+      return
+    }
+    if (event.type === 'append') {
+      const stroke = activeStrokeRef.current
+      if (!stroke) return
+      const extra = sampleCompassArc(event.pose, event.fromAngle, event.toAngle, sw, sh)
+      for (const point of extra) stroke.points.push(toPoint(point.x, point.y))
+      growForPose(event.pose)
+      if (!paintActiveStrokeNow()) scheduleRedraw()
+      return
+    }
+    if (event.type === 'cancel') {
+      activeStrokeRef.current = null
+      scheduleRedraw()
+      return
+    }
+    if (event.type === 'commit') {
+      const label = `Bogen ${formatMillimetres(event.pose.radiusMm)} gezeichnet.`
+      commitReadyStroke(activeStrokeRef.current, label)
+      return
+    }
+    const points = sampleCompassCircle(event.pose, sw, sh).map((point) => toPoint(point.x, point.y))
+    growForPose(event.pose)
+    beforeGestureRef.current = snapshotStrokes(strokesRef.current)
+    commitReadyStroke(makeStroke(points), `Kreis ${formatMillimetres(event.pose.radiusMm)} gezeichnet.`)
+  }, [artBrush, artColor, artEffect, artOpacity, artWidth, bumpInkRevision, commitStrokeToCanvas, ensureWriteRoom, fitPageToInk, inkMode, paintActiveStrokeNow, penColor, penWidth, scheduleRedraw, setDirty, updateHistoryState])
 
   /**
    * Hard-stop any in-progress pen/mouse stroke and scrub leftover pointer capture.
@@ -2812,7 +2972,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         const predicted = event.getPredictedEvents?.() ?? []
         if (predicted.length) paintActiveStrokeNow(predicted)
         const latest = activeStrokeRef.current?.points.at(-1)
-        if (latest) ensureInfinitePageRoom(latest.y, latest.x)
+        if (latest) ensureWriteRoom(latest.y, latest.x)
       }
     }
     const onWindowPointerEnd = (event: PointerEvent) => {
@@ -2875,7 +3035,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       releaseInkPointerCaptures(captureTargets(), activePointerRef.current)
       clearInkCursor()
     }
-  }, [appendPointerEvent, eraseAt, ensureInfinitePageRoom, finishPointer, forceEndActivePointer, inline, inputActive, paintActiveStrokeNow, pointFromEvent])
+  }, [appendPointerEvent, eraseAt, ensureWriteRoom, finishPointer, forceEndActivePointer, inline, inputActive, paintActiveStrokeNow, pointFromEvent])
 
   const handleWheel = useCallback((event: React.WheelEvent) => {
     const isViewGesture = event.ctrlKey || event.metaKey || event.altKey
@@ -2942,7 +3102,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     bumpInkRevision()
     setDirty(true)
     updateHistoryState()
-  }, [bumpInkRevision, clearRecognitionScope, closeMathCorrectionSession, closeMathSolverSelection, scheduleRedraw, setDirty, updateHistoryState])
+    fitPageToInk()
+  }, [bumpInkRevision, clearRecognitionScope, closeMathCorrectionSession, closeMathSolverSelection, fitPageToInk, scheduleRedraw, setDirty, updateHistoryState])
 
   const redo = useCallback(() => {
     const next = redoRef.current.pop()
@@ -2958,7 +3119,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     bumpInkRevision()
     setDirty(true)
     updateHistoryState()
-  }, [bumpInkRevision, clearRecognitionScope, closeMathCorrectionSession, closeMathSolverSelection, setDirty, updateHistoryState])
+    fitPageToInk()
+  }, [bumpInkRevision, clearRecognitionScope, closeMathCorrectionSession, closeMathSolverSelection, fitPageToInk, setDirty, updateHistoryState])
 
   const clear = useCallback(() => {
     if (!strokesRef.current.length) return
@@ -2976,7 +3138,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     bumpInkRevision()
     setDirty(true)
     updateHistoryState()
-  }, [bumpInkRevision, clearRecognitionScope, closeMathCorrectionSession, closeMathSolverSelection, setDirty, updateHistoryState])
+    fitPageToInk()
+  }, [bumpInkRevision, clearRecognitionScope, closeMathCorrectionSession, closeMathSolverSelection, fitPageToInk, setDirty, updateHistoryState])
 
   const insertSynthesizedHandwriting = useCallback((
     generatedStrokes: SynthesizedInkStroke[],
@@ -3009,7 +3172,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       kind: 'success',
       text: `${result.glyphCount} Zeichen als persönliche Handschrift eingefügt${result.connectionCount ? ` · ${result.connectionCount} natürliche Verbindungen` : ''}.`,
     })
-  }, [bumpInkRevision, clearRecognitionScope, scheduleRedraw, setDirty, updateHistoryState])
+    fitPageToInk()
+  }, [bumpInkRevision, clearRecognitionScope, fitPageToInk, scheduleRedraw, setDirty, updateHistoryState])
 
   const drawingPayload = useCallback((includeImage = false): DrawingSavePayload => {
     let imageData: string | undefined
@@ -3432,6 +3596,69 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     setConversionOpen(true)
     void recognize(mode, handwritingStrokes(strokesRef.current))
   }, [closeMathCorrectionSession, closeMathSolverSelection, mode, recognize])
+
+  const applyInkTransform = useCallback((mutatePoint: (x: number, y: number) => { x: number; y: number }) => {
+    const indexes = new Set(selectedStrokeIndexesRef.current)
+    if (!indexes.size) return
+    strokesRef.current = strokesRef.current.map((stroke, index) => {
+      if (!indexes.has(index)) return stroke
+      return {
+        ...stroke,
+        points: stroke.points.map((point) => {
+          const next = mutatePoint(point.x, point.y)
+          return { ...point, x: clamp(next.x), y: clamp(next.y, 0, 8) }
+        }),
+      }
+    })
+    scheduleRedraw()
+    setDirty(true)
+    updateHistoryState()
+  }, [scheduleRedraw, setDirty, updateHistoryState])
+
+  const beginInkEdit = useCallback(() => {
+    closeMathSolverSelection()
+    closeMathCorrectionSession()
+    setMathCorrectorEnabled(false)
+    setConversionOpen(false)
+    selectedStrokeIndexesRef.current = []
+    setSelectionMode(true)
+    setSelectionPurpose('edit')
+    setSelectionRect(null)
+    setNotice({ kind: 'info', text: 'Rahmen um die Tinte ziehen, dann verschieben, kopieren oder skalieren.' })
+  }, [closeMathCorrectionSession, closeMathSolverSelection])
+
+  const copySelectedInk = useCallback(() => {
+    const indexes = selectedStrokeIndexesRef.current
+    if (!indexes.length) return
+    const copies: InkStroke[] = []
+    for (const index of indexes) {
+      const stroke = strokesRef.current[index]
+      if (!stroke) continue
+      copies.push({
+        ...stroke,
+        points: stroke.points.map((point) => ({ ...point, x: clamp(point.x + 0.03), y: clamp(point.y + 0.03, 0, 8) })),
+      })
+    }
+    const start = strokesRef.current.length
+    strokesRef.current = [...strokesRef.current, ...copies]
+    selectedStrokeIndexesRef.current = copies.map((_, offset) => start + offset)
+    setSelectionRect((current) => current && { ...current, x: clamp(current.x + 0.03), y: clamp(current.y + 0.03, 0, 8) })
+    scheduleRedraw()
+    setDirty(true)
+    updateHistoryState()
+  }, [scheduleRedraw, setDirty, updateHistoryState])
+
+  const deleteSelectedInk = useCallback(() => {
+    const indexes = new Set(selectedStrokeIndexesRef.current)
+    if (!indexes.size) return
+    strokesRef.current = strokesRef.current.filter((_, index) => !indexes.has(index))
+    selectedStrokeIndexesRef.current = []
+    setSelectionRect(null)
+    scheduleRedraw()
+    setDirty(true)
+    updateHistoryState()
+    fitPageToInk()
+  }, [fitPageToInk, scheduleRedraw, setDirty, updateHistoryState])
 
   const beginSelectionRecognition = useCallback(() => {
     closeMathSolverSelection()
@@ -4247,7 +4474,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       {(() => {
         const toolbar = (
       <div
-        className={`lw-draw-toolbar ${inline ? 'is-floating-chrome' : ''} ${inline && inputActive ? 'is-visible' : ''}`}
+        className={`lw-draw-toolbar ${inline ? 'is-docked-chrome' : ''} ${inline && inputActive ? 'is-visible' : ''}`}
         aria-label="Zeichenwerkzeuge"
         data-fanotes-drawing-chrome={inline ? 'toolbar' : undefined}
       >
@@ -4260,6 +4487,40 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
           </button>
           <button type="button" className={tool === 'eraser' ? 'is-active' : ''} aria-pressed={tool === 'eraser'} onClick={activateEraser}>
             <Eraser size={16} /> <span className="lw-tool-label">Radierer</span>
+          </button>
+          <button
+            type="button"
+            className={rulerPose ? 'is-active' : ''}
+            aria-pressed={Boolean(rulerPose)}
+            title="Lineal einblenden: verschieben, drehen, Zentimeter ablesen und an der Kante nachzeichnen"
+            onClick={() => setRulerPose((current) => current ? null : defaultRulerPose())}
+          >
+            <Ruler size={16} /> <span className="lw-tool-label">Lineal</span>
+          </button>
+          <button
+            type="button"
+            className={setSquarePose ? 'is-active' : ''}
+            aria-pressed={Boolean(setSquarePose)}
+            title="Geodreieck einblenden: Winkel messen, verschieben und an den Kanten nachzeichnen"
+            onClick={() => setSetSquarePose((current) => current ? null : defaultSetSquarePose())}
+          >
+            <Triangle size={16} /> <span className="lw-tool-label">Geodreieck</span>
+          </button>
+          <button
+            type="button"
+            className={compassPose ? 'is-active' : ''}
+            aria-pressed={Boolean(compassPose)}
+            title="Zirkel: Nadel setzen, gelb Radius messen/übertragen, grün Bogen zeichnen, Kreis-Taste für einen ganzen Kreis"
+            onClick={() => setCompassPose((current) => {
+              if (current) return null
+              setNotice({
+                kind: 'info',
+                text: 'Nadel ziehen zum Setzen, gelber Punkt für den Radius, grüner Punkt drehen zum Zeichnen. Schloss sperrt das Maß, Kreis-Taste zeichnet sofort.',
+              })
+              return defaultCompassPose()
+            })}
+          >
+            <Compass size={16} /> <span className="lw-tool-label">Zirkel</span>
           </button>
           <button
             type="button"
@@ -4378,9 +4639,33 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
           <button type="button" className="lw-draw-icon" aria-label="Wiederholen" title="Wiederholen (Strg+Umschalt+Z)" onClick={redo} disabled={!canRedo}><Redo2 size={17} /></button>
           <button type="button" className="lw-draw-icon lw-danger" aria-label="Alles löschen" title="Alles löschen" onClick={clear} disabled={!inkCount}><Trash2 size={17} /></button>
         </div>
+
+        {inline && <div className="lw-draw-toolgroup lw-ink-actions">
+          {inkMode === 'writing' && knownTrainingSampleCount === 0 && (
+            <button type="button" className="lw-draw-subtle" onClick={requestTraining} disabled={isImporting || isResettingTraining} title="GlyphenWerk öffnen">
+              {isImporting ? <LoaderCircle className="lw-spin" size={14} /> : <Sparkles size={14} />}
+              <span className="lw-tool-label">GlyphenWerk</span>
+            </button>
+          )}
+          {inkMode === 'writing' && <button type="button" className={`lw-draw-subtle ${selectionMode && selectionPurpose === 'edit' ? 'is-active' : ''}`} onClick={beginInkEdit} disabled={!handwritingCount} title="Tinte auswählen, verschieben, kopieren oder skalieren">
+            <Shapes size={14} /> <span className="lw-tool-label">Tinte</span>
+          </button>}
+          {selectionPurpose === 'edit' && selectionRect && !selectionMode && <>
+            <button type="button" className="lw-draw-subtle" onClick={copySelectedInk} title="Auswahl duplizieren"><Copy size={14} /> <span className="lw-tool-label">Kopieren</span></button>
+            <button type="button" className="lw-draw-subtle lw-danger" onClick={deleteSelectedInk} title="Auswahl löschen"><Trash2 size={14} /> <span className="lw-tool-label">Löschen</span></button>
+          </>}
+          {inkMode === 'writing' && <button type="button" className={`lw-draw-subtle ${selectionMode && selectionPurpose === 'conversion' ? 'is-active' : ''}`} onClick={beginSelectionRecognition} disabled={!handwritingCount || isRecognizing} title="Einen frei gewählten Bereich von Handschrift in Text oder Mathematik konvertieren">
+            <ScanSearch size={15} /> <span className="lw-tool-label">Bereich</span>
+          </button>}
+          {inkMode === 'writing' && <button type="button" className="lw-convert-action" onClick={recognizePage} disabled={!handwritingCount || isRecognizing} title="Die gesamte Handschrift-Seite konvertieren">
+            {isRecognizing ? <LoaderCircle className="lw-spin" size={15} /> : <Sparkles size={15} />}
+            <span className="lw-tool-label">Konvertieren</span>
+          </button>}
+        </div>}
       </div>
         )
-        return inline && typeof document !== 'undefined' ? createPortal(toolbar, document.body) : toolbar
+        if (inline) return inkToolbarHost && inputActive ? createPortal(toolbar, inkToolbarHost) : null
+        return toolbar
       })()}
 
       {inkMode === 'drawing' && tool === 'pen' && artPanelOpen && <aside className="lw-art-studio" aria-label="Zeichenstudio">
@@ -4506,21 +4791,91 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
               onLostPointerCapture={inline ? undefined : finishPointer}
               onContextMenu={(event) => event.preventDefault()}
             />
+            {(rulerPose || setSquarePose || compassPose) && (
+              <DraftingGuides
+                sourceWidth={sourceWidth}
+                sourceHeight={sourceHeight}
+                ruler={rulerPose}
+                setSquare={setSquarePose}
+                compass={compassPose}
+                readout={draftingReadout}
+                onMove={(kind, pose) => {
+                  if (kind === 'ruler') setRulerPose(pose)
+                  else if (kind === 'setSquare') setSetSquarePose(pose)
+                  else setCompassPose(asCompassPose(pose))
+                }}
+                onCompassDraw={handleCompassDraw}
+              />
+            )}
             {selectionMode && !selectionRect && <div className={`lw-selection-hint ${selectionPurpose === 'math-correction' ? 'is-correction' : ''}`}>
               {selectionPurpose === 'math-correction' ? <ListChecks size={18} /> : <ScanSearch size={18} />}
               {selectionPurpose === 'math-correction' ? 'Rechenweg mit mehreren Zeilen auswählen' : 'Bereich auf der Seite aufziehen'}
             </div>}
             {selectionRect && <div
-              className={`lw-selection-rect ${selectionMode ? 'is-selecting' : 'is-selected'}`}
+              className={`lw-selection-rect ${selectionMode ? 'is-selecting' : 'is-selected'} ${selectionPurpose === 'edit' && !selectionMode ? 'is-editable' : ''}`}
               style={{
                 left: `${selectionRect.x * 100}%`,
                 top: `${selectionRect.y * 100}%`,
                 width: `${selectionRect.width * 100}%`,
                 height: `${selectionRect.height * 100}%`,
               }}
-            ><span>{selectionMode
-                ? selectionPurpose === 'math-correction' ? 'Rechenweg auswählen' : 'Auswählen'
-                : 'Wird konvertiert'}</span></div>}
+              onPointerDown={(event) => {
+                if (selectionPurpose !== 'edit' || selectionMode) return
+                event.stopPropagation()
+                event.currentTarget.setPointerCapture(event.pointerId)
+                const surface = surfaceRef.current?.getBoundingClientRect()
+                if (!surface) return
+                inkDragRef.current = {
+                  kind: (event.target as HTMLElement).dataset.handle === 'scale' ? 'scale' : 'move',
+                  startX: (event.clientX - surface.left) / surface.width,
+                  startY: (event.clientY - surface.top) / surface.height,
+                  origin: selectionRect,
+                }
+              }}
+              onPointerMove={(event) => {
+                const drag = inkDragRef.current
+                const surface = surfaceRef.current?.getBoundingClientRect()
+                if (!drag || !surface) return
+                const x = (event.clientX - surface.left) / surface.width
+                const y = (event.clientY - surface.top) / surface.height
+                const dx = x - drag.startX
+                const dy = y - drag.startY
+                if (drag.kind === 'move') {
+                  applyInkTransform((px, py) => ({ x: px + dx, y: py + dy }))
+                  setSelectionRect({ ...drag.origin, x: clamp(drag.origin.x + dx), y: clamp(drag.origin.y + dy, 0, 8) })
+                  inkDragRef.current = { ...drag, startX: x, startY: y, origin: { ...drag.origin, x: drag.origin.x + dx, y: drag.origin.y + dy } }
+                  return
+                }
+                const originX = drag.origin.x
+                const originY = drag.origin.y
+                const scaleX = drag.origin.width > 0.001 ? Math.max(0.2, (drag.origin.width + dx) / drag.origin.width) : 1
+                const scaleY = drag.origin.height > 0.001 ? Math.max(0.2, (drag.origin.height + dy) / drag.origin.height) : 1
+                const scale = (scaleX + scaleY) / 2
+                applyInkTransform((px, py) => ({
+                  x: originX + (px - originX) * scale,
+                  y: originY + (py - originY) * scale,
+                }))
+                setSelectionRect({
+                  x: originX,
+                  y: originY,
+                  width: Math.max(0.02, drag.origin.width * scale),
+                  height: Math.max(0.02, drag.origin.height * scale),
+                })
+                inkDragRef.current = { ...drag, startX: x, startY: y, origin: {
+                  x: originX,
+                  y: originY,
+                  width: Math.max(0.02, drag.origin.width * scale),
+                  height: Math.max(0.02, drag.origin.height * scale),
+                } }
+              }}
+              onPointerUp={() => { inkDragRef.current = null; fitPageToInk() }}
+              onPointerCancel={() => { inkDragRef.current = null; fitPageToInk() }}
+            >
+              <span>{selectionMode
+                ? selectionPurpose === 'math-correction' ? 'Rechenweg auswählen' : selectionPurpose === 'edit' ? 'Tinte auswählen' : 'Auswählen'
+                : selectionPurpose === 'edit' ? 'Ziehen · Ecke skalieren' : 'Wird konvertiert'}</span>
+              {selectionPurpose === 'edit' && !selectionMode && <i data-handle="scale" className="lw-selection-scale" />}
+            </div>}
             {mathCorrectionSession && <>
               <div
                 className="lw-math-correction-scope"
@@ -4888,17 +5243,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       </div>}
 
       {(() => {
-        const footer = (
-      <footer
-        className={`lw-draw-footer ${inline ? 'is-floating-chrome' : ''} ${inline && inputActive ? 'is-visible' : ''}`}
-        data-fanotes-drawing-chrome={inline ? 'footer' : undefined}
-      >
-        {inkMode === 'writing' && knownTrainingSampleCount === 0 && <div>
-          <button type="button" className="lw-draw-subtle" onClick={requestTraining} disabled={isImporting || isResettingTraining}>
-            {isImporting ? <LoaderCircle className="lw-spin" size={15} /> : <Sparkles size={15} />}
-            GlyphenWerk öffnen
-          </button>
-        </div>}
+        const fileInput = (
         <input
           ref={fileInputRef}
           type="file"
@@ -4906,11 +5251,32 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
           hidden
           onChange={(event) => { const file = event.target.files?.[0]; if (file) void importTraining(file) }}
         />
+        )
+        if (inline) return fileInput
+        const footer = (
+      <footer
+        className="lw-draw-footer"
+        data-fanotes-drawing-chrome={undefined}
+      >
+        {inkMode === 'writing' && knownTrainingSampleCount === 0 && <div>
+          <button type="button" className="lw-draw-subtle" onClick={requestTraining} disabled={isImporting || isResettingTraining}>
+            {isImporting ? <LoaderCircle className="lw-spin" size={15} /> : <Sparkles size={15} />}
+            GlyphenWerk öffnen
+          </button>
+        </div>}
+        {fileInput}
         <div className="lw-footer-actions">
           <button type="button" className="lw-draw-subtle" onClick={() => void saveDrawing(true)} disabled={!inkCount || isSaving}>
             <Save size={15} /> Seite als Bild einfügen
           </button>
-          {inkMode === 'writing' && <button type="button" className={`lw-draw-subtle ${selectionMode ? 'is-active' : ''}`} onClick={beginSelectionRecognition} disabled={!handwritingCount || isRecognizing} title="Einen frei gewählten Bereich von Handschrift in Text oder Mathematik konvertieren">
+          {inkMode === 'writing' && <button type="button" className={`lw-draw-subtle ${selectionMode && selectionPurpose === 'edit' ? 'is-active' : ''}`} onClick={beginInkEdit} disabled={!handwritingCount} title="Tinte auswählen, verschieben, kopieren oder skalieren">
+            <Shapes size={14} /> Tinte
+          </button>}
+          {selectionPurpose === 'edit' && selectionRect && !selectionMode && <>
+            <button type="button" className="lw-draw-subtle" onClick={copySelectedInk} title="Auswahl duplizieren"><Copy size={14} /> Kopieren</button>
+            <button type="button" className="lw-draw-subtle lw-danger" onClick={deleteSelectedInk} title="Auswahl löschen"><Trash2 size={14} /> Löschen</button>
+          </>}
+          {inkMode === 'writing' && <button type="button" className={`lw-draw-subtle ${selectionMode && selectionPurpose === 'conversion' ? 'is-active' : ''}`} onClick={beginSelectionRecognition} disabled={!handwritingCount || isRecognizing} title="Einen frei gewählten Bereich von Handschrift in Text oder Mathematik konvertieren">
             <ScanSearch size={16} /> Bereich konvertieren
           </button>}
           {inkMode === 'writing' && <button type="button" className="lw-convert-action" onClick={recognizePage} disabled={!handwritingCount || isRecognizing} title="Die gesamte Handschrift-Seite konvertieren">
@@ -4921,7 +5287,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         </div>
       </footer>
         )
-        return inline && typeof document !== 'undefined' ? createPortal(footer, document.body) : footer
+        return footer
       })()}
 
       <TextToHandwritingDialog
@@ -4953,7 +5319,35 @@ const drawingBoardStyles = `
 .lw-art-studio{position:relative;z-index:13;flex:0 0 auto;margin:10px 14px 0;padding:11px;border:1px solid color-mix(in srgb,var(--draw-accent) 36%,var(--draw-border));border-radius:16px;background:linear-gradient(145deg,color-mix(in srgb,var(--background-secondary,#19191f) 96%,var(--draw-accent) 4%),color-mix(in srgb,var(--background,#111116) 94%,transparent));box-shadow:0 22px 65px rgba(0,0,0,.24),inset 0 1px rgba(255,255,255,.035);animation:lw-art-studio-in .24s cubic-bezier(.2,.8,.2,1)}.lw-art-studio>header{display:flex;align-items:center;gap:8px;margin-bottom:9px}.lw-art-studio>header>span{width:29px;height:29px;display:grid;place-items:center;border-radius:9px;color:var(--on-accent,#111);background:var(--draw-accent)}.lw-art-studio>header>div{display:flex;min-width:0;flex:1;flex-direction:column}.lw-art-studio>header strong{font-size:11px}.lw-art-studio>header small{color:var(--text-muted,#999);font-size:8px}.lw-art-studio-body{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr) minmax(160px,.64fr);gap:10px}.lw-art-studio-body>section{min-width:0;padding:9px;border:1px solid var(--draw-border);border-radius:12px;background:color-mix(in srgb,var(--background,#111116) 43%,transparent)}.lw-art-section-head{height:23px;display:flex;align-items:flex-start;justify-content:space-between;gap:8px}.lw-art-section-head strong{font-size:9px}.lw-art-section-head span{overflow:hidden;color:var(--text-muted,#999);font-size:7px;text-overflow:ellipsis;white-space:nowrap}.lw-art-brushes{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px}.lw-art-brushes>button{min-width:0;height:49px;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:3px;padding:3px;border:1px solid transparent;border-radius:8px;color:var(--text-muted,#999);background:transparent;cursor:pointer}.lw-art-brushes>button:hover{background:color-mix(in srgb,var(--text,#fff) 6%,transparent)}.lw-art-brushes>button.is-active{border-color:color-mix(in srgb,var(--draw-accent) 48%,var(--draw-border));color:var(--text,#fff);background:color-mix(in srgb,var(--draw-accent) 12%,transparent)}.lw-art-brushes small{max-width:100%;overflow:hidden;font-size:7px;text-overflow:ellipsis;white-space:nowrap}.lw-art-brush-preview{position:relative;width:42px;height:16px;display:grid;place-items:center;overflow:hidden}.lw-art-brush-preview i{display:block;width:37px;height:3px;border-radius:99px;background:currentColor;transform:rotate(-5deg)}.lw-art-brush-preview.is-fineliner i{height:2px}.lw-art-brush-preview.is-pencil i{height:2px;opacity:.65;background:repeating-linear-gradient(90deg,currentColor 0 3px,transparent 3px 4px)}.lw-art-brush-preview.is-marker i{height:6px;border-radius:2px;opacity:.88}.lw-art-brush-preview.is-paintbrush i{height:7px;border-radius:90% 15% 80% 20%;transform:rotate(-5deg) scaleX(1.02)}.lw-art-brush-preview.is-calligraphy i{height:7px;border-radius:1px;transform:rotate(-5deg) skewX(-28deg)}.lw-art-brush-preview.is-highlighter i{height:9px;border-radius:2px;opacity:.35}.lw-art-brush-preview.is-watercolor i{height:10px;opacity:.28;filter:blur(.45px);box-shadow:0 -2px currentColor,0 2px currentColor}.lw-art-brush-preview.is-spray i{height:13px;opacity:.75;background:radial-gradient(circle,currentColor 0 1px,transparent 1.3px) 0 0/5px 5px;transform:rotate(-5deg)}
 .lw-art-solid-colors{display:flex;flex-wrap:wrap;gap:5px}.lw-art-solid-colors>button,.lw-art-custom-color{position:relative;width:20px;height:20px;flex:0 0 auto;border:2px solid color-mix(in srgb,var(--text,#fff) 8%,transparent);border-radius:7px;background:var(--art-ink);cursor:pointer}.lw-art-solid-colors>button.is-active{border-color:var(--text,#fff);box-shadow:0 0 0 2px color-mix(in srgb,var(--art-ink) 40%,transparent)}.lw-art-custom-color{display:block;overflow:hidden;background:conic-gradient(#e45,#fb3,#5d7,#4ce,#65f,#d5e,#e45)}.lw-art-custom-color input{position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer}.lw-art-custom-color span{position:absolute;inset:5px;border-radius:3px}.lw-art-special-inks{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px;margin-top:7px}.lw-art-special-inks>button{height:34px;display:flex;min-width:0;align-items:stretch;justify-content:center;flex-direction:column;gap:2px;padding:3px 4px;border:1px solid var(--draw-border);border-radius:7px;color:var(--text-muted,#999);background:transparent;cursor:pointer}.lw-art-special-inks>button:hover{background:color-mix(in srgb,var(--text,#fff) 5%,transparent)}.lw-art-special-inks>button.is-active{border-color:color-mix(in srgb,var(--draw-accent) 60%,var(--draw-border));color:var(--text,#fff);background:color-mix(in srgb,var(--draw-accent) 9%,transparent)}.lw-art-special-inks i{width:100%;height:12px;flex:0 0 auto;border-radius:4px;background:var(--art-ink);box-shadow:inset 0 1px rgba(255,255,255,.25)}.lw-art-special-inks span{overflow:hidden;font-size:7px;line-height:1;text-align:center;text-overflow:ellipsis;white-space:nowrap}.lw-art-control-section{display:flex;flex-direction:column;gap:7px}.lw-art-control-section>label{display:grid;grid-template-columns:minmax(65px,1fr) minmax(60px,1fr) 30px;align-items:center;gap:5px}.lw-art-control-section label>span{display:flex;min-width:0;flex-direction:column}.lw-art-control-section label strong{font-size:8px}.lw-art-control-section label small{overflow:hidden;color:var(--text-muted,#999);font-size:6px;text-overflow:ellipsis;white-space:nowrap}.lw-art-control-section input{width:100%;accent-color:var(--draw-accent)}.lw-art-control-section output{color:var(--text-muted,#999);font-size:7px;text-align:right;font-variant-numeric:tabular-nums}.lw-art-current-stroke{min-height:35px;display:flex;align-items:center;gap:7px;margin-top:auto;padding:4px 6px;border-radius:8px;background:color-mix(in srgb,var(--text,#fff) 4%,transparent)}.lw-art-current-stroke>span{height:var(--art-width);max-height:20px;min-height:2px;flex:1;border-radius:99px;background:var(--art-ink);opacity:var(--art-opacity)}.lw-art-current-stroke small{color:var(--text-muted,#999);font-size:7px;white-space:nowrap}.lw-art-footer-note{display:inline-flex;align-items:center;gap:6px;padding:0 7px;color:var(--text-muted,#999);font-size:8px}.lw-tablet-canvas.tool-art{cursor:crosshair}@keyframes lw-art-studio-in{from{opacity:0;transform:translateY(-7px) scale(.99)}}
 .lw-draw-icon,.lw-draw-subtle,.lw-primary-action,.lw-convert-action,.lw-model-card button{border:0;cursor:pointer;transition:transform .16s ease,background .16s ease,opacity .16s ease}.lw-draw-icon{display:grid;place-items:center;width:32px;height:32px;border-radius:8px;background:transparent}.lw-draw-icon:hover:not(:disabled){background:color-mix(in srgb,var(--text,#fff) 8%,transparent)}.lw-draw-icon.lw-danger:hover:not(:disabled){color:var(--danger,#d94b63);background:color-mix(in srgb,var(--danger,#d94b63) 10%,transparent)}.lw-drawing-board button:disabled{opacity:.5;cursor:not-allowed}.lw-draw-subtle{display:flex;align-items:center;justify-content:center;gap:7px;height:32px;padding:0 10px;border-radius:8px;background:color-mix(in srgb,var(--text,#fff) 6%,transparent)}.lw-draw-subtle:hover:not(:disabled){background:color-mix(in srgb,var(--text,#fff) 10%,transparent)}.lw-draw-subtle.is-active{color:var(--text,#fff);background:color-mix(in srgb,var(--draw-accent) 22%,var(--background-secondary,#17171d));box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--draw-accent) 38%,transparent)}
-.lw-draw-workspace{position:relative;display:grid;grid-template-columns:minmax(0,1fr);flex:1;min-height:0;padding:18px;gap:14px}.lw-draw-workspace.has-conversion{grid-template-columns:minmax(0,1fr) minmax(300px,370px)}.lw-canvas-shell{position:relative;display:flex;min-width:0;min-height:0;flex-direction:column;padding:10px 10px 7px;border:1px solid var(--draw-border);border-radius:17px;background:color-mix(in srgb,var(--background-secondary,#17171d) 84%,transparent);box-shadow:0 20px 55px rgba(0,0,0,.16)}.lw-canvas-glow{position:absolute;inset:-1px;border-radius:inherit;pointer-events:none;background:radial-gradient(circle at 15% 0,color-mix(in srgb,var(--draw-accent) 10%,transparent),transparent 36%)}.lw-canvas-surface{position:relative;z-index:1;flex:0 0 auto;min-width:220px;min-height:300px;aspect-ratio:210/297;margin:auto;overflow:hidden;border-radius:8px;background:#fbfcff;box-shadow:0 8px 32px rgba(0,0,0,.2),inset 0 0 0 1px rgba(30,42,65,.08);will-change:transform;touch-action:none}.lw-tablet-canvas{position:absolute;inset:0;display:block;width:100%;height:100%;outline:none;touch-action:none;user-select:none;-webkit-user-select:none;image-rendering:auto}.lw-tablet-canvas-committed{z-index:1;pointer-events:none}.lw-tablet-canvas-live{z-index:2;pointer-events:auto}.lw-tablet-canvas.tool-pen,.lw-tablet-canvas.tool-select{cursor:crosshair}.lw-tablet-canvas.tool-eraser{cursor:cell}.lw-tablet-canvas:focus-visible{box-shadow:inset 0 0 0 2px var(--draw-accent)}.lw-selection-hint{position:absolute;z-index:3;top:18px;left:50%;display:flex;align-items:center;gap:7px;padding:8px 11px;transform:translateX(-50%);border:1px solid rgba(86,71,183,.32);border-radius:9px;color:#28233d;background:rgba(255,255,255,.92);box-shadow:0 8px 24px rgba(39,31,85,.18);font:700 11px/1.2 var(--ui-font,system-ui);pointer-events:none;white-space:nowrap}.lw-selection-rect{position:absolute;z-index:3;min-width:2px;min-height:2px;border:2px dashed #6855d9;background:rgba(104,85,217,.1);box-shadow:0 0 0 9999px rgba(38,35,55,.08);pointer-events:none}.lw-selection-rect.is-selected{border-style:solid;background:rgba(104,85,217,.07);box-shadow:0 0 0 9999px rgba(38,35,55,.04),0 0 0 3px rgba(104,85,217,.14)}.lw-selection-rect span{position:absolute;bottom:calc(100% + 5px);left:-2px;padding:3px 7px;border-radius:6px;color:#fff;background:#5f4bcf;font:700 9px/1.3 var(--ui-font,system-ui);white-space:nowrap}.lw-canvas-meta{display:flex;align-items:center;justify-content:space-between;padding:7px 3px 0;color:var(--text-muted,#9292a0);font-size:10px}.lw-canvas-meta span{display:flex;align-items:center;gap:6px}.lw-pressure-dot{width:6px;height:6px;border-radius:50%;background:#4bd7a4;box-shadow:0 0 7px #4bd7a4}
+.lw-draw-workspace{position:relative;display:grid;grid-template-columns:minmax(0,1fr);flex:1;min-height:0;padding:18px;gap:14px}.lw-draw-workspace.has-conversion{grid-template-columns:minmax(0,1fr) minmax(300px,370px)}.lw-canvas-shell{position:relative;display:flex;min-width:0;min-height:0;flex-direction:column;padding:10px 10px 7px;border:1px solid var(--draw-border);border-radius:17px;background:color-mix(in srgb,var(--background-secondary,#17171d) 84%,transparent);box-shadow:0 20px 55px rgba(0,0,0,.16)}.lw-canvas-glow{position:absolute;inset:-1px;border-radius:inherit;pointer-events:none;background:radial-gradient(circle at 15% 0,color-mix(in srgb,var(--draw-accent) 10%,transparent),transparent 36%)}.lw-canvas-surface{position:relative;z-index:1;flex:0 0 auto;min-width:220px;min-height:300px;aspect-ratio:210/297;margin:auto;overflow:hidden;border-radius:8px;background:#fbfcff;box-shadow:0 8px 32px rgba(0,0,0,.2),inset 0 0 0 1px rgba(30,42,65,.08);will-change:transform;touch-action:none}.lw-tablet-canvas{position:absolute;inset:0;display:block;width:100%;height:100%;outline:none;touch-action:none;user-select:none;-webkit-user-select:none;image-rendering:auto}
+.lw-drafting-layer{position:absolute;inset:0;z-index:6;width:100%;height:100%;overflow:visible;pointer-events:none;touch-action:none}
+.lw-drafting-body{fill:rgba(248,250,255,.78);stroke:#3a4460;stroke-width:1.2;cursor:grab;pointer-events:auto}
+.lw-drafting-window{fill:rgba(255,255,255,.35);stroke:#5b6578;stroke-width:.8;pointer-events:none}
+.lw-drafting-edge{stroke:#1e6fd6;stroke-width:2.2;stroke-linecap:round;pointer-events:none}
+.lw-drafting-tick{stroke:#2a3348;stroke-width:.8}
+.lw-drafting-tick.is-major{stroke:#151a24;stroke-width:1.2}
+.lw-drafting-label{fill:#1d2433;font:600 9px/1 var(--ui-font,system-ui);text-anchor:middle;pointer-events:none}
+.lw-drafting-caption{fill:#31405c;font:700 10px/1 var(--ui-font,system-ui);text-anchor:middle;pointer-events:none}
+.lw-drafting-rotate{fill:#3a6ee8;stroke:#fff;stroke-width:1.5;cursor:alias;pointer-events:auto}
+.lw-drafting-compass-ghost{fill:none;stroke:#1e6fd6;stroke-width:1.35;stroke-dasharray:5 4;opacity:.5;pointer-events:none}
+.lw-drafting-compass-arc{fill:none;stroke:#1ea86a;stroke-width:2.6;stroke-linecap:round;pointer-events:none}
+.lw-drafting-span{stroke:rgba(30,111,214,.35);stroke-width:1.1;stroke-dasharray:3 3;pointer-events:none}
+.lw-drafting-leg{fill:none;stroke:#9aa3b5;stroke-width:8;stroke-linecap:round;cursor:grab;pointer-events:stroke}
+.lw-drafting-leg.is-pencil{stroke:#c4a57a}
+.lw-drafting-hinge{fill:#8a93a5;stroke:#3a4460;stroke-width:1.2;cursor:grab;pointer-events:auto}
+.lw-drafting-needle{fill:#2a3142;stroke:#111;stroke-width:.8;cursor:grab;pointer-events:auto}
+.lw-drafting-needle-dot{fill:#111;pointer-events:none}
+.lw-drafting-lead{fill:#2b2f38;stroke:#111;stroke-width:.6;pointer-events:none}
+.lw-drafting-radius{fill:#f3c14e;stroke:#fff;stroke-width:1.5;cursor:ew-resize;pointer-events:auto}
+.lw-drafting-draw{fill:#1ea86a;stroke:#fff;stroke-width:1.6;cursor:alias;pointer-events:auto}
+.lw-drafting-action{cursor:pointer;pointer-events:auto}
+.lw-drafting-action-bg{fill:#3a6ee8;stroke:#fff;stroke-width:1.2}
+.lw-drafting-action.is-locked .lw-drafting-action-bg{fill:#c45b2d}
+.lw-drafting-action.is-circle .lw-drafting-action-bg{fill:#1e6fd6}
+.lw-drafting-action-icon{fill:#fff;pointer-events:none}
+.lw-drafting-action-icon-ring{fill:none;stroke:#fff;stroke-width:1.6;pointer-events:none}
+.lw-drafting-hint{fill:#4a5870;font:600 8px/1 var(--ui-font,system-ui);text-anchor:middle;pointer-events:none}
+.lw-drafting-readout{fill:#15305a;font:800 13px/1 var(--ui-font,system-ui);text-anchor:middle}.lw-tablet-canvas-committed{z-index:1;pointer-events:none}.lw-tablet-canvas-live{z-index:2;pointer-events:auto}.lw-tablet-canvas.tool-pen,.lw-tablet-canvas.tool-select{cursor:crosshair}.lw-tablet-canvas.tool-eraser{cursor:cell}.lw-tablet-canvas:focus-visible{box-shadow:inset 0 0 0 2px var(--draw-accent)}.lw-selection-hint{position:absolute;z-index:3;top:18px;left:50%;display:flex;align-items:center;gap:7px;padding:8px 11px;transform:translateX(-50%);border:1px solid rgba(86,71,183,.32);border-radius:9px;color:#28233d;background:rgba(255,255,255,.92);box-shadow:0 8px 24px rgba(39,31,85,.18);font:700 11px/1.2 var(--ui-font,system-ui);pointer-events:none;white-space:nowrap}.lw-selection-rect{position:absolute;z-index:3;min-width:2px;min-height:2px;border:2px dashed #6855d9;background:rgba(104,85,217,.1);box-shadow:0 0 0 9999px rgba(38,35,55,.08);pointer-events:none}.lw-selection-rect.is-editable{pointer-events:auto;cursor:move;box-shadow:0 0 0 2px rgba(104,85,217,.2)}.lw-selection-scale{position:absolute;right:-6px;bottom:-6px;width:13px;height:13px;border-radius:3px;background:#5f4bcf;cursor:nwse-resize}.lw-selection-rect.is-selected{border-style:solid;background:rgba(104,85,217,.07);box-shadow:0 0 0 9999px rgba(38,35,55,.04),0 0 0 3px rgba(104,85,217,.14)}.lw-selection-rect span{position:absolute;bottom:calc(100% + 5px);left:-2px;padding:3px 7px;border-radius:6px;color:#fff;background:#5f4bcf;font:700 9px/1.3 var(--ui-font,system-ui);white-space:nowrap}.lw-canvas-meta{display:flex;align-items:center;justify-content:space-between;padding:7px 3px 0;color:var(--text-muted,#9292a0);font-size:10px}.lw-canvas-meta span{display:flex;align-items:center;gap:6px}.lw-pressure-dot{width:6px;height:6px;border-radius:50%;background:#4bd7a4;box-shadow:0 0 7px #4bd7a4}
 .lw-selection-hint.is-correction{border-color:rgba(30,142,115,.42);color:#153b32;background:rgba(242,255,250,.95)}.lw-math-correction-scope{position:absolute;z-index:3;border:1px dashed rgba(60,95,178,.5);border-radius:7px;background:rgba(67,102,190,.025);pointer-events:none}.lw-math-step-mark{position:absolute;z-index:4;min-width:5px;min-height:5px;border:2px solid rgba(91,106,151,.5);border-radius:6px;background:rgba(91,106,151,.04);pointer-events:none;transition:border-color .22s,background .22s,box-shadow .22s}.lw-math-step-mark>span{position:absolute;top:-8px;left:-8px;display:grid;width:17px;height:17px;place-items:center;border-radius:50%;color:#fff;background:#667091;font:800 8px/1 var(--ui-font,system-ui);box-shadow:0 3px 8px rgba(0,0,0,.2)}.lw-math-step-mark.is-start{border-color:#6855d9;background:rgba(104,85,217,.06)}.lw-math-step-mark.is-start>span{background:#6855d9}.lw-math-step-mark.is-correct{border-color:#249671;background:rgba(36,150,113,.07);box-shadow:0 0 0 3px rgba(36,150,113,.09)}.lw-math-step-mark.is-correct>span{background:#208963}.lw-math-step-mark.is-incorrect,.lw-math-step-mark.is-unreadable{border-color:#dc3f59;background:rgba(220,63,89,.09);box-shadow:0 0 0 3px rgba(220,63,89,.12)}.lw-math-step-mark.is-incorrect>span,.lw-math-step-mark.is-unreadable>span{background:#c9354e}.lw-math-step-mark.is-uncertain{border-color:#d18b25;background:rgba(209,139,37,.09)}.lw-math-step-mark.is-uncertain>span{background:#b87518}.lw-math-error-spot{position:absolute;z-index:7;min-width:12px;min-height:12px;border:3px solid #df304d;border-radius:7px;background:rgba(238,45,75,.14);box-shadow:0 0 0 4px rgba(238,45,75,.12),0 0 25px rgba(222,39,69,.3);pointer-events:none;animation:lw-error-pulse 1.35s ease-in-out infinite}.lw-math-error-spot.is-uncertain,.lw-math-error-spot.is-unreadable{border-color:#d38b20;background:rgba(230,151,33,.12);box-shadow:0 0 0 4px rgba(230,151,33,.12)}.lw-math-error-spot>span{position:absolute;bottom:calc(100% + 5px);left:-3px;padding:3px 7px;border-radius:6px;color:#fff;background:#d9304b;font:800 8px/1.2 var(--ui-font,system-ui);white-space:nowrap}.lw-math-error-spot.is-uncertain>span,.lw-math-error-spot.is-unreadable>span{background:#b87518}@keyframes lw-error-pulse{50%{box-shadow:0 0 0 7px rgba(238,45,75,.05),0 0 30px rgba(222,39,69,.34)}}
 .lw-math-correction-popover{position:absolute;z-index:9;display:flex;width:min(390px,calc(100% - 22px));max-height:min(560px,86%);flex-direction:column;gap:9px;overflow:auto;padding:11px;border:1px solid color-mix(in srgb,#2b9c79 42%,var(--draw-border));border-radius:14px;color:var(--text,#f4f2fa);background:linear-gradient(150deg,color-mix(in srgb,var(--background-secondary,#18171f) 95%,#2b9c79 5%),var(--background,#111116));box-shadow:0 24px 70px rgba(15,25,23,.42),0 0 0 1px rgba(255,255,255,.03);backdrop-filter:blur(18px);pointer-events:auto}.lw-math-correction-head{display:flex;align-items:center;gap:8px}.lw-math-correction-head>span{display:grid;width:28px;height:28px;flex:0 0 auto;place-items:center;border-radius:9px;color:#071b15;background:#48c39c}.lw-math-correction-head>div{display:flex;min-width:0;flex:1;flex-direction:column}.lw-math-correction-head strong{font-size:11px}.lw-math-correction-head small,.lw-math-correction-footnote{color:var(--text-muted,#aaa);font-size:8px;line-height:1.45}.lw-math-correction-loading,.lw-math-correction-error{display:flex;min-height:82px;align-items:center;justify-content:center;gap:8px;color:var(--text-muted,#aaa);text-align:center;font-size:10px}.lw-math-correction-error{flex-direction:column;color:var(--danger,#e16778)}.lw-math-correction-result{display:flex;align-items:flex-start;gap:8px;padding:8px 9px;border:1px solid var(--draw-border);border-radius:9px}.lw-math-correction-result>svg{flex:0 0 auto;margin-top:1px}.lw-math-correction-result>span,.lw-math-correction-result strong,.lw-math-correction-result small{display:block}.lw-math-correction-result strong{font-size:10px}.lw-math-correction-result small{margin-top:2px;color:var(--text-muted,#aaa);font-size:8px;line-height:1.45}.lw-math-correction-result.is-correct{color:var(--success,#4bc69d);border-color:color-mix(in srgb,var(--success,#4bc69d) 32%,var(--draw-border));background:color-mix(in srgb,var(--success,#4bc69d) 8%,transparent)}.lw-math-correction-result.is-incorrect,.lw-math-correction-result.is-unreadable{color:var(--danger,#e16778);border-color:color-mix(in srgb,var(--danger,#e16778) 34%,var(--draw-border));background:color-mix(in srgb,var(--danger,#e16778) 8%,transparent)}.lw-math-correction-result.is-uncertain,.lw-math-correction-result.is-editing{color:var(--warning,#d49a48);border-color:color-mix(in srgb,var(--warning,#d49a48) 34%,var(--draw-border));background:color-mix(in srgb,var(--warning,#d49a48) 8%,transparent)}
 .lw-math-step-list{display:flex;flex-direction:column;gap:5px}.lw-math-step-row{display:grid;grid-template-columns:22px minmax(0,1fr) 39px;align-items:center;gap:6px;padding:6px;border:1px solid var(--draw-border);border-radius:9px;background:color-mix(in srgb,var(--background,#111116) 46%,transparent)}.lw-math-step-row.is-incorrect,.lw-math-step-row.is-unreadable{border-color:color-mix(in srgb,var(--danger,#e16778) 48%,var(--draw-border));background:color-mix(in srgb,var(--danger,#e16778) 7%,transparent)}.lw-math-step-row.is-correct{border-color:color-mix(in srgb,var(--success,#4bc69d) 28%,var(--draw-border))}.lw-math-step-number{display:grid;width:20px;height:20px;place-items:center;border-radius:6px;color:var(--text-muted,#aaa);background:color-mix(in srgb,var(--background-modifier-border,#555) 42%,transparent);font:800 8px/1 var(--ui-font,system-ui)}.lw-math-step-input{display:flex;min-width:0;flex-direction:column;gap:2px}.lw-math-step-input input{width:100%;min-width:0;padding:5px 7px;border:1px solid transparent;border-radius:6px;outline:none;color:inherit;background:transparent;font:600 11px/1.2 var(--mono-font,monospace)}.lw-math-step-input input:hover,.lw-math-step-input input:focus{border-color:var(--draw-border);background:color-mix(in srgb,var(--background,#111116) 82%,transparent)}.lw-math-step-input small{overflow:hidden;color:var(--text-muted,#aaa);font-size:7px;line-height:1.25;text-overflow:ellipsis;white-space:nowrap}.lw-math-step-status{overflow:hidden;color:var(--text-muted,#aaa);font-size:7px;text-align:right;text-overflow:ellipsis;white-space:nowrap}.lw-math-step-row.is-incorrect .lw-math-step-status,.lw-math-step-row.is-unreadable .lw-math-step-status{color:var(--danger,#e16778)}.lw-math-step-row.is-correct .lw-math-step-status{color:var(--success,#4bc69d)}.lw-math-step-row.is-uncertain .lw-math-step-status{color:var(--warning,#d49a48)}.lw-math-correction-suggestion{display:flex;align-items:center;gap:7px;padding:7px 9px;border-radius:8px;color:var(--text-normal,#ddd);background:color-mix(in srgb,#6855d9 11%,transparent);font-size:9px}.lw-math-correction-suggestion code{overflow:hidden;color:#b9acf9;text-overflow:ellipsis;white-space:nowrap}.lw-math-correction-actions{display:grid;grid-template-columns:1fr 1fr;gap:6px}.lw-math-correction-actions button{display:flex;min-height:30px;align-items:center;justify-content:center;gap:5px;border:1px solid var(--draw-border);border-radius:8px;color:inherit;background:color-mix(in srgb,var(--background-secondary,#18171f) 78%,transparent);font:700 9px/1 var(--ui-font,system-ui);cursor:pointer}.lw-math-correction-actions button:first-child{border-color:color-mix(in srgb,#35b68e 40%,var(--draw-border));background:color-mix(in srgb,#35b68e 11%,transparent)}.lw-math-correction-actions button:hover{filter:brightness(1.12)}.lw-math-correction-actions button:disabled{opacity:.55;cursor:wait}.lw-math-correction-footnote{margin:0}
@@ -4969,44 +5363,7 @@ const drawingBoardStyles = `
 
 .lw-drawing-board.is-inline{position:absolute;z-index:4;inset:0;height:auto;min-height:100%;overflow:visible;background:transparent;pointer-events:none}
 .lw-drawing-board.is-inline .lw-draw-header{display:none}
-.lw-draw-toolbar.is-floating-chrome,.lw-draw-footer.is-floating-chrome{
-  position:fixed;z-index:90;left:50%;margin:0;border:1px solid var(--draw-border);
-  background:color-mix(in srgb,var(--background-secondary,#17171d) 96%,transparent);
-  box-shadow:0 14px 38px rgba(0,0,0,.24);backdrop-filter:blur(14px);pointer-events:none;
-  opacity:0;transform:translateX(-50%) translateY(-8px);transition:opacity .14s ease,transform .14s ease
-}
-.lw-draw-toolbar.is-floating-chrome{
-  top:max(10px,env(safe-area-inset-top,0px));
-  width:min(640px,calc(100vw - 56px));
-  max-width:min(640px,calc(100vw - 56px));
-  min-height:0;padding:5px 6px;border-radius:12px;
-  display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:5px;
-  overflow:hidden
-}
-.lw-draw-toolbar.is-floating-chrome.is-visible,.lw-draw-footer.is-floating-chrome.is-visible{
-  opacity:1;transform:translateX(-50%);pointer-events:none
-}
-.lw-draw-toolbar.is-floating-chrome.is-visible > *,.lw-draw-footer.is-floating-chrome.is-visible > *{pointer-events:auto}
-.lw-draw-toolbar.is-floating-chrome .lw-segmented{padding:2px;gap:2px}
-.lw-draw-toolbar.is-floating-chrome .lw-segmented button{height:28px;padding:0 8px;font-size:10px}
-.lw-draw-toolbar.is-floating-chrome .lw-writing-actions{gap:2px}
-.lw-draw-toolbar.is-floating-chrome .lw-writing-actions button{height:28px;min-width:28px;padding:0 6px;font-size:0;gap:0}
-.lw-draw-toolbar.is-floating-chrome .lw-writing-actions button>svg{width:15px;height:15px}
-.lw-draw-toolbar.is-floating-chrome .lw-draw-range{grid-template-columns:34px minmax(56px,72px) 34px;gap:3px;font-size:9px}
-.lw-draw-toolbar.is-floating-chrome .lw-draw-range span{display:none}
-.lw-draw-toolbar.is-floating-chrome .lw-paper-select{height:28px}
-.lw-draw-toolbar.is-floating-chrome .lw-draw-icon{width:28px;height:28px}
-.lw-draw-toolbar.is-floating-chrome .lw-view-reset{height:28px;padding:0 7px;font-size:9px}
-.lw-draw-toolbar.is-floating-chrome .lw-colors>button{width:16px;height:16px}
-.lw-draw-toolbar.is-floating-chrome .lw-tool-label{display:inline}
-@media(max-width:760px){
-  .lw-draw-toolbar.is-floating-chrome{width:min(100vw - 20px,calc(100vw - 20px));max-width:calc(100vw - 20px);padding:4px}
-  .lw-draw-toolbar.is-floating-chrome .lw-tool-label{display:none}
-  .lw-draw-toolbar.is-floating-chrome .lw-writing-actions .lw-tool-label,
-  .lw-draw-toolbar.is-floating-chrome .lw-writing-actions{font-size:0}
-  .lw-draw-toolbar.is-floating-chrome .lw-writing-actions button{width:28px;padding:0}
-  .lw-draw-toolbar.is-floating-chrome .lw-writing-actions button>svg{margin:0}
-}
+.lw-drawing-board.is-inline .lw-draw-footer{display:none}
 .lw-drawing-board.is-inline .lw-draw-workspace{position:absolute;inset:0;display:block;min-height:100%;padding:0;pointer-events:none}
 .lw-drawing-board.is-inline .lw-canvas-shell{position:absolute;inset:0;display:block;padding:0;border:0;border-radius:0;background:transparent;box-shadow:none;pointer-events:none}
 .lw-drawing-board.is-inline .lw-canvas-glow,.lw-drawing-board.is-inline .lw-canvas-meta{display:none}
@@ -5014,20 +5371,13 @@ const drawingBoardStyles = `
 .lw-drawing-board.is-inline.is-input-active .lw-canvas-surface{pointer-events:auto}
 .lw-drawing-board.is-inline .lw-tablet-canvas{position:absolute;left:0;width:100%;height:100%;pointer-events:none}
 .lw-drawing-board.is-inline .lw-tablet-canvas.is-input-active{pointer-events:none}
-.lw-drawing-board.is-inline .lw-conversion-panel{position:sticky;z-index:14;top:72px;float:right;width:min(370px,calc(100% - 28px));max-height:calc(100vh - 175px);margin:72px 14px 0 0;overflow:auto;pointer-events:auto;box-shadow:0 22px 70px rgba(0,0,0,.34)}
-.lw-drawing-board.is-inline .lw-draw-notice{position:sticky;z-index:15;top:72px;width:min(420px,calc(100% - 28px));margin:72px auto 0;pointer-events:auto;box-shadow:0 13px 34px rgba(0,0,0,.24)}
-.lw-draw-footer.is-floating-chrome{
-  bottom:max(34px,env(safe-area-inset-bottom,0px));z-index:90;
-  width:min(520px,calc(100vw - 72px));max-width:calc(100vw - 72px);
-  min-height:40px;padding:4px 5px;border-radius:11px;justify-content:center
-}
-.lw-draw-footer.is-floating-chrome:not(.is-visible){display:none}
-.lw-draw-footer.is-floating-chrome .lw-footer-actions>button:first-child{display:none}
-.lw-drawing-board.is-inline .lw-art-studio{position:sticky;z-index:13;top:72px;width:min(900px,calc(100% - 28px));max-height:calc(100vh - 170px);margin:72px auto 0;overflow:auto;background:color-mix(in srgb,var(--background-secondary,#17171d) 95%,transparent);backdrop-filter:blur(18px);pointer-events:auto}.lw-drawing-board.is-inline:not(.is-input-active) .lw-art-studio{display:none}
-@media(max-width:900px){.lw-draw-workspace.has-conversion{grid-template-columns:1fr}.lw-conversion-panel{position:absolute;z-index:5;inset:10px;box-shadow:0 24px 80px rgba(0,0,0,.45)}.lw-draw-range span{display:none}.lw-draw-toolbar{gap:7px}.lw-canvas-surface{width:100%;height:auto}.lw-draw-workspace{padding:10px}}@media(max-width:640px){.lw-math-correction-popover{left:8px!important;width:calc(100% - 16px);max-height:82%;}.lw-math-correction-actions{grid-template-columns:1fr}}
+.lw-drawing-board.is-inline .lw-conversion-panel{position:fixed;z-index:80;top:78px;right:16px;left:auto;float:none;width:min(370px,calc(100vw - 32px));max-height:calc(100vh - 175px);margin:0;overflow:auto;pointer-events:auto;box-shadow:0 22px 70px rgba(0,0,0,.34)}
+.lw-drawing-board.is-inline .lw-draw-notice{position:fixed;z-index:81;top:78px;left:50%;width:min(420px,calc(100vw - 28px));margin:0;transform:translateX(-50%);pointer-events:auto;box-shadow:0 13px 34px rgba(0,0,0,.24)}
+.lw-drawing-board.is-inline .lw-art-studio{position:fixed;z-index:79;top:78px;left:50%;width:min(900px,calc(100vw - 28px));max-height:calc(100vh - 170px);margin:0;transform:translateX(-50%);overflow:auto;background:color-mix(in srgb,var(--background-secondary,#17171d) 95%,transparent);backdrop-filter:blur(18px);pointer-events:auto}.lw-drawing-board.is-inline:not(.is-input-active) .lw-art-studio{display:none}
+@media(max-width:900px){.lw-draw-workspace.has-conversion{grid-template-columns:1fr}.lw-conversion-panel{position:absolute;z-index:5;inset:10px;box-shadow:0 24px 80px rgba(0,0,0,.45)}.lw-draw-range span{display:none}.lw-draw-toolbar{gap:7px}.lw-canvas-surface{width:100%;height:auto}.lw-draw-workspace{padding:10px}}@media(max-width:640px){.lw-math-correction-popover{left:8px!important;width:min(390px,calc(100vw - 16px));max-height:82%;}.lw-math-correction-actions{grid-template-columns:1fr}}
 @media(max-width:900px){.lw-art-studio-body{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}.lw-art-control-section{grid-column:1/-1;display:grid;grid-template-columns:1fr 1fr minmax(140px,.7fr)}}
-@media(max-width:640px){.lw-draw-header{padding:0 10px}.lw-draw-header-actions .lw-draw-subtle{font-size:0}.lw-draw-toolbar{min-height:54px;padding:7px 9px}.lw-segmented button{font-size:0;padding:0 9px}.lw-draw-range{grid-template-columns:70px 38px}.lw-colors>button:nth-of-type(n+5){display:none}.lw-drawing-board:not(.is-inline) .lw-draw-footer{align-items:stretch;flex-direction:column}.lw-drawing-board:not(.is-inline) .lw-draw-footer>div:first-child{display:none}.lw-drawing-board.is-inline .lw-draw-footer{width:calc(100vw - 72px);overflow-x:auto}.lw-footer-actions{display:grid;grid-template-columns:1fr 1fr}.lw-footer-actions button{width:100%}.lw-footer-actions>button:first-child{grid-column:1/-1}}
-@media(max-width:640px){.lw-art-studio-body{grid-template-columns:1fr}.lw-art-control-section{grid-column:auto;display:flex}.lw-art-brushes{grid-template-columns:repeat(4,minmax(0,1fr))}.lw-art-special-inks{grid-template-columns:repeat(2,minmax(0,1fr))}.lw-art-quick-width{display:none}.lw-drawing-board.is-inline .lw-art-studio{width:calc(100% - 16px);margin-top:68px}}
+@media(max-width:640px){.lw-draw-header{padding:0 10px}.lw-draw-header-actions .lw-draw-subtle{font-size:0}.lw-draw-toolbar{min-height:54px;padding:7px 9px}.lw-segmented button{font-size:0;padding:0 9px}.lw-draw-range{grid-template-columns:70px 38px}.lw-colors>button:nth-of-type(n+5){display:none}.lw-drawing-board:not(.is-inline) .lw-draw-footer{align-items:stretch;flex-direction:column}.lw-drawing-board:not(.is-inline) .lw-draw-footer>div:first-child{display:none}.lw-footer-actions{display:grid;grid-template-columns:1fr 1fr}.lw-footer-actions button{width:100%}.lw-footer-actions>button:first-child{grid-column:1/-1}}
+@media(max-width:640px){.lw-art-studio-body{grid-template-columns:1fr}.lw-art-control-section{grid-column:auto;display:flex}.lw-art-brushes{grid-template-columns:repeat(4,minmax(0,1fr))}.lw-art-special-inks{grid-template-columns:repeat(2,minmax(0,1fr))}.lw-art-quick-width{display:none}.lw-drawing-board.is-inline .lw-art-studio{width:min(900px,calc(100vw - 16px));margin-top:0}}
 .lw-tablet-canvas.tool-stamp{cursor:copy}.lw-art-studio-trigger>i.is-symbol{display:grid;place-items:center;color:var(--art-ink);background:color-mix(in srgb,var(--art-ink) 10%,var(--background,#111116))}.lw-art-studio-trigger>i.is-symbol svg{filter:drop-shadow(0 1px 2px rgba(0,0,0,.18))}.lw-art-symbol-section{grid-column:1/-1}.lw-art-symbol-heading{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:7px}.lw-art-symbol-heading>.lw-art-section-head{height:auto;min-width:160px;flex:1}.lw-art-symbol-categories{display:flex;align-items:center;gap:3px;padding:3px;border-radius:9px;background:color-mix(in srgb,var(--text,#fff) 4%,transparent)}.lw-art-symbol-categories button{height:24px;padding:0 8px;border:1px solid transparent;border-radius:6px;color:var(--text-muted,#999);background:transparent;font:700 7px/1 var(--ui-font,system-ui);cursor:pointer}.lw-art-symbol-categories button:hover{color:var(--text,#fff)}.lw-art-symbol-categories button.is-active{border-color:color-mix(in srgb,var(--draw-accent) 35%,transparent);color:var(--text,#fff);background:color-mix(in srgb,var(--draw-accent) 15%,transparent)}.lw-art-symbols{display:grid;grid-template-columns:repeat(auto-fit,minmax(58px,1fr));gap:4px}.lw-art-symbols>button{height:48px;display:flex;min-width:0;align-items:center;justify-content:center;flex-direction:column;gap:2px;padding:3px;border:1px solid transparent;border-radius:8px;color:var(--text-muted,#999);background:transparent;cursor:pointer}.lw-art-symbols>button:hover{color:var(--text,#fff);background:color-mix(in srgb,var(--text,#fff) 6%,transparent);transform:translateY(-1px)}.lw-art-symbols>button.is-active{border-color:color-mix(in srgb,var(--draw-accent) 52%,var(--draw-border));color:var(--accent-readable,var(--draw-accent));background:color-mix(in srgb,var(--draw-accent) 13%,transparent);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--draw-accent) 10%,transparent)}.lw-art-symbols small{max-width:100%;overflow:hidden;font-size:6.5px;text-overflow:ellipsis;white-space:nowrap}.lw-art-current-stroke>span.is-symbol{height:30px;max-height:none;display:grid;flex:1;place-items:center;border-radius:6px;color:var(--art-ink);background:transparent}
 @media(max-width:640px){.lw-art-symbol-heading{align-items:stretch;flex-direction:column;gap:5px}.lw-art-symbol-categories{overflow-x:auto}.lw-art-symbol-categories button{flex:1}.lw-art-symbols{grid-template-columns:repeat(4,minmax(0,1fr))}}
 .lw-art-studio-tabs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:5px;margin:0 0 9px;padding:4px;border:1px solid var(--draw-border);border-radius:12px;background:color-mix(in srgb,var(--background,#111116) 54%,transparent)}.lw-art-studio-tabs>button{min-width:0;height:42px;display:flex;align-items:center;gap:8px;padding:0 10px;border:1px solid transparent;border-radius:9px;color:var(--text-muted,#999);background:transparent;cursor:pointer;text-align:left}.lw-art-studio-tabs>button:hover{color:var(--text,#fff);background:color-mix(in srgb,var(--text,#fff) 5%,transparent)}.lw-art-studio-tabs>button.is-active{border-color:color-mix(in srgb,var(--draw-accent) 42%,var(--draw-border));color:var(--text,#fff);background:linear-gradient(135deg,color-mix(in srgb,var(--draw-accent) 17%,transparent),color-mix(in srgb,var(--background-secondary,#18181f) 78%,transparent));box-shadow:0 5px 16px color-mix(in srgb,var(--draw-accent) 8%,transparent),inset 0 1px rgba(255,255,255,.04)}.lw-art-studio-tabs>button>svg{flex:0 0 auto;color:var(--accent-readable,var(--draw-accent))}.lw-art-studio-tabs>button>span{display:flex;min-width:0;flex-direction:column}.lw-art-studio-tabs strong{font-size:9px}.lw-art-studio-tabs small{overflow:hidden;color:var(--text-muted,#999);font-size:6.5px;text-overflow:ellipsis;white-space:nowrap}.lw-art-studio-body{grid-template-columns:minmax(0,1fr) minmax(190px,220px);align-items:stretch}.lw-art-studio-body>.lw-art-brush-section,.lw-art-studio-body>.lw-art-color-section,.lw-art-studio-body>.lw-art-symbol-section{grid-column:1;grid-row:1}.lw-art-studio-body>.lw-art-control-section{grid-column:2;grid-row:1}.lw-art-studio-body>.lw-art-symbol-section{grid-column:1}.lw-art-symbols{grid-template-columns:repeat(auto-fit,minmax(56px,1fr))}.lw-art-studio-body>section[role="tabpanel"]{animation:lw-art-tab-in .16s ease-out}@keyframes lw-art-tab-in{from{opacity:0;transform:translateY(3px)}}
