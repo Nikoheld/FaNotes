@@ -2,6 +2,11 @@
 
 ## Unveröffentlicht
 
+## 2026.8.31
+
+- **Blatt wächst früher:** Beim Schreiben bleibt mehr leeres Papier vor dem Rand. Du musst nicht mehr fast anstoßen, bevor die nächste halbe Seite dazukommt.
+- **Keine Geisterlinie nach Zoom:** Eine ungültige 0,0-Stiftkoordinate auf einem verschobenen oder gezoomten Blatt zieht keine Linie mehr in die Seitenmitte. Pfeiltasten verschieben den Text weiter nicht vom Lineal.
+
 ## 2026.8.30
 
 - **Text bleibt auf dem Lineal:** Geschriebener Text springt nicht mehr hin und her. Pfeiltasten ziehen die Schrift nicht vom Karopapier weg — nur das Blatt scrollt, die Schrift bleibt eins mit dem Hintergrund.
