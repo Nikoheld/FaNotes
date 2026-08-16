@@ -49,13 +49,13 @@ export const mapClientToPaperPoint = (
 ): MappedInkPoint | null => {
   if (!surface || surface.width < 1 || surface.height < 1) return null
   if (!Number.isFinite(event.clientX) || !Number.isFinite(event.clientY)) return null
-  // (0,0) is a common missing-coord default. Only accept it when the paper
-  // actually sits on that viewport corner.
+  // (0,0) is a common missing-coord default. A panned/zoomed sheet can
+  // overlap the viewport origin while its corner sits far off-screen —
+  // accepting that sample draws a ghost mid-page. Only treat 0,0 as a
+  // real contact when the paper corner actually sits at the origin.
   if (event.clientX === 0 && event.clientY === 0) {
-    const coversOrigin = surface.left <= 8 && surface.top <= 8
-      && surface.left + surface.width >= 0
-      && surface.top + surface.height >= 0
-    if (!coversOrigin) return null
+    const paperCornerAtOrigin = Math.abs(surface.left) <= 8 && Math.abs(surface.top) <= 8
+    if (!paperCornerAtOrigin) return null
   }
   const pad = Math.max(48, Math.max(surface.width, surface.height) * 0.2)
   if (

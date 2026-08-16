@@ -46,6 +46,56 @@ try {
   appendAcceptedInkPoint(points, { type: 'pointermove', clientX: 0, clientY: 0, pressure: 0.4, pointerType: 'pen' }, surface, SOURCE_WIDTH, SOURCE_HEIGHT)
   assert.equal(points.length, 4, '0,0 far from the surface must not commit a corner jump')
 
+  const pannedSurface = {
+    left: -80,
+    top: -220,
+    width: 600,
+    height: 800,
+    offsetWidth: 900,
+    offsetHeight: 1273,
+  }
+  const pannedClientAt = (nx, ny, extras = {}) => ({
+    type: 'pointermove',
+    clientX: pannedSurface.left + nx * pannedSurface.width,
+    clientY: pannedSurface.top + ny * pannedSurface.height,
+    timeStamp: extras.timeStamp ?? 80,
+    pressure: 0.5,
+    pointerType: 'pen',
+    ...extras,
+  })
+  const pannedPoints = []
+  appendAcceptedInkPoint(pannedPoints, pannedClientAt(0.18, 0.22, { timeStamp: 80 }), pannedSurface, SOURCE_WIDTH, SOURCE_HEIGHT)
+  appendAcceptedInkPoint(pannedPoints, pannedClientAt(0.20, 0.24, { timeStamp: 96 }), pannedSurface, SOURCE_WIDTH, SOURCE_HEIGHT)
+  assert.equal(pannedPoints.length, 2, 'valid samples on a panned sheet must still commit')
+  const beforePannedGhost = pannedPoints.length
+  appendAcceptedInkPoint(
+    pannedPoints,
+    { type: 'pointermove', clientX: 0, clientY: 0, pressure: 0.4, pointerType: 'pen', timeStamp: 112 },
+    pannedSurface,
+    SOURCE_WIDTH,
+    SOURCE_HEIGHT,
+  )
+  assert.equal(pannedPoints.length, beforePannedGhost, '0,0 on a panned sheet that only overlaps the origin must not commit a mid-page ghost')
+  assert.equal(
+    acceptCommittedInkSample(
+      { type: 'pointermove', clientX: 0, clientY: 0, pressure: 0.4, pointerType: 'pen' },
+      pannedSurface,
+      pannedPoints.at(-1),
+      SOURCE_WIDTH,
+      SOURCE_HEIGHT,
+    ),
+    null,
+  )
+  const originSurface = { left: 0, top: 0, width: 600, height: 800, offsetWidth: 900, offsetHeight: 1273 }
+  const originContact = acceptCommittedInkSample(
+    { type: 'pointerdown', clientX: 0, clientY: 0, pressure: 0.4, pointerType: 'pen' },
+    originSurface,
+    null,
+    SOURCE_WIDTH,
+    SOURCE_HEIGHT,
+  )
+  assert.ok(originContact && originContact.x <= 0.02 && originContact.y <= 0.02, 'real 0,0 contact at the paper corner must still map')
+
   appendAcceptedInkPoint(points, { type: 'pointermove', clientX: Number.NaN, clientY: 200, pressure: 0.4, pointerType: 'pen' }, surface, SOURCE_WIDTH, SOURCE_HEIGHT)
   assert.equal(points.length, 4, 'NaN client coords must not commit')
 

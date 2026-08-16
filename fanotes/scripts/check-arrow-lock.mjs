@@ -10,6 +10,7 @@ const server = await createServer({
 
 const {
   applyPaperArrowNavigation,
+  handlePaperEditorScroll,
   isIndependentEditorLayer,
   resolvePaperCaretScroller,
 } = await server.ssrLoadModule('/src/lib/paperCaretScroll.ts')
@@ -114,7 +115,34 @@ try {
     paper.scrollTop = 0
   }
 
-  console.log(JSON.stringify({ before, paperScrollAfterDown: true, editorLocked: true }))
+  cmScroller.scrollTop = 64
+  editor.scrollTop = 18
+  const mockView = {
+    dom: editor,
+    coordsAtPos() {
+      return { top: 340, bottom: 358, left: 80, right: 82 }
+    },
+  }
+  const intercepted = handlePaperEditorScroll(mockView, { head: 12 })
+  assert.equal(intercepted, true, 'scrollHandler must swallow CodeMirror scrollIntoView on paper')
+  assert.equal(cmScroller.scrollTop, 0, 'scrollHandler must zero the cm-scroller after measure()')
+  assert.equal(editor.scrollTop, 0, 'scrollHandler must zero the markdown editor after measure()')
+  assert.ok(paper.scrollTop > 0, 'scrollHandler may move the paper scroller')
+  const afterHandler = sheetLayerOriginOffset(editor, ruling)
+  assert.equal(afterHandler.x, before.x, 'scrollHandler must not shift text off the ruling')
+  assert.equal(afterHandler.y, before.y, 'scrollHandler must not shift text off the ruling')
+
+  const looseEditor = makeNode('markdown-editor')
+  assert.equal(
+    handlePaperEditorScroll({
+      dom: looseEditor,
+      coordsAtPos() { return { top: 10, bottom: 20, left: 10, right: 12 } },
+    }, { head: 0 }),
+    false,
+    'non-paper editors keep the default CodeMirror scroller',
+  )
+
+  console.log(JSON.stringify({ before, paperScrollAfterDown: true, editorLocked: true, scrollHandler: true }))
   console.log('arrow-lock ok')
 } finally {
   await server.close()

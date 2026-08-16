@@ -65,3 +65,21 @@ export const applyPaperArrowNavigation = (
     editorScrollLeft: editorRoot.scrollLeft,
   }
 }
+
+/**
+ * CodeMirror `measure()` calls `scrollIntoView` on `.cm-scroller` after
+ * plugins update. `overflow: hidden` does not block that programmatic
+ * scrollTop. Returning true here swallows the default so glyphs stay
+ * glued to the ruling; only the paper viewport may move.
+ */
+export const handlePaperEditorScroll = (
+  view: {
+    dom: HTMLElement
+    coordsAtPos: (pos: number) => { top: number; bottom: number; left: number; right: number } | null
+  },
+  range: { head: number },
+): boolean => {
+  if (!view.dom.closest('.unified-paper, .paper-view')) return false
+  applyPaperArrowNavigation(view.dom, view.coordsAtPos(range.head))
+  return true
+}

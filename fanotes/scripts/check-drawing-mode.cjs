@@ -125,6 +125,8 @@ const lockSafeguards = [
   ['mapClientToPaperPoint', 'fehlende Fläche fällt nicht auf die Blattmitte'],
   ['applyPaperArrowNavigation', 'Pfeiltasten scrollen das Blatt, nicht den Text'],
   ['lockPaperEditorLayerScroll', 'Editor-Layer bleibt am Lineal fest'],
+  ['handlePaperEditorScroll', 'scrollIntoView wird vor dem cm-scroller abgefangen'],
+  ['EditorView.scrollHandler', 'CodeMirror scrollHandler sitzt auf dem ausgelieferten Pfad'],
 ]
 
 for (const [needle, label] of safeguards) {

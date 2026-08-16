@@ -55,6 +55,7 @@ import type { AppSettings, DetectedTextLanguage } from '../types'
 import { createTrailingValueScheduler, type TrailingValueScheduler } from '../lib/trailingValueScheduler'
 import {
   applyPaperArrowNavigation,
+  handlePaperEditorScroll,
   resolvePaperCaretScroller,
 } from '../lib/paperCaretScroll'
 
@@ -977,6 +978,10 @@ const paperCaretLock = ViewPlugin.fromClass(class {
   }
 })
 
+const paperScrollHandler = EditorView.scrollHandler.of((view, range) => (
+  handlePaperEditorScroll(view, range)
+))
+
 export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(function MarkdownEditor({
   content,
   onChange,
@@ -1060,6 +1065,7 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
         drawSelection(),
         selectionDragAutoScroll,
         paperCaretLock,
+        paperScrollHandler,
         dropCursor(),
         EditorState.allowMultipleSelections.of(true),
         indentOnInput(),
