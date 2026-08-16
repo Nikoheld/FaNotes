@@ -12,6 +12,7 @@ const {
   applyPaperArrowNavigation,
   handlePaperEditorScroll,
   isIndependentEditorLayer,
+  lockPaperEditorScrollIfNeeded,
   resolvePaperCaretScroller,
 } = await server.ssrLoadModule('/src/lib/paperCaretScroll.ts')
 const { sheetLayerOriginOffset } = await server.ssrLoadModule('/src/lib/paperView.ts')
@@ -131,6 +132,16 @@ try {
   const afterHandler = sheetLayerOriginOffset(editor, ruling)
   assert.equal(afterHandler.x, before.x, 'scrollHandler must not shift text off the ruling')
   assert.equal(afterHandler.y, before.y, 'scrollHandler must not shift text off the ruling')
+
+  cmScroller.scrollTop = 80
+  editor.scrollTop = 12
+  const snapshotCaught = lockPaperEditorScrollIfNeeded(editor, { top: 340, bottom: 358, left: 80, right: 82 })
+  assert.equal(snapshotCaught, true, 'snapshot/programmatic cm-scroller scroll must be caught')
+  assert.equal(cmScroller.scrollTop, 0, 'post-measure snapshot must not leave the editor layer scrolled')
+  assert.equal(editor.scrollTop, 0, 'post-measure snapshot must not leave the markdown editor scrolled')
+  const afterSnapshot = sheetLayerOriginOffset(editor, ruling)
+  assert.equal(afterSnapshot.x, before.x, 'snapshot scroll must not shift text off the ruling')
+  assert.equal(afterSnapshot.y, before.y, 'snapshot scroll must not shift text off the ruling')
 
   const looseEditor = makeNode('markdown-editor')
   assert.equal(

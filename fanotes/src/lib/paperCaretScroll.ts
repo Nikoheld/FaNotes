@@ -72,14 +72,19 @@ export const applyPaperArrowNavigation = (
  * scrollTop. Returning true here swallows the default so glyphs stay
  * glued to the ruling; only the paper viewport may move.
  */
+export const lockPaperEditorScrollIfNeeded = (
+  editorRoot: HTMLElement | null,
+  caret: { top: number; bottom: number; left: number; right: number } | null,
+) => {
+  if (!editorRoot?.closest('.unified-paper, .paper-view')) return false
+  applyPaperArrowNavigation(editorRoot, caret)
+  return true
+}
+
 export const handlePaperEditorScroll = (
   view: {
     dom: HTMLElement
     coordsAtPos: (pos: number) => { top: number; bottom: number; left: number; right: number } | null
   },
   range: { head: number },
-): boolean => {
-  if (!view.dom.closest('.unified-paper, .paper-view')) return false
-  applyPaperArrowNavigation(view.dom, view.coordsAtPos(range.head))
-  return true
-}
+): boolean => lockPaperEditorScrollIfNeeded(view.dom, view.coordsAtPos(range.head))

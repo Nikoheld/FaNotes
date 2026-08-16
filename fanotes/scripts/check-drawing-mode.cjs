@@ -127,6 +127,7 @@ const lockSafeguards = [
   ['applyPaperArrowNavigation', 'Pfeiltasten scrollen das Blatt, nicht den Text'],
   ['lockPaperEditorLayerScroll', 'Editor-Layer bleibt am Lineal fest'],
   ['handlePaperEditorScroll', 'scrollIntoView wird vor dem cm-scroller abgefangen'],
+  ['lockPaperEditorScrollIfNeeded', 'Snapshot-Scroll auf dem Editor-Layer wird zurückgesetzt'],
   ['EditorView.scrollHandler', 'CodeMirror scrollHandler sitzt auf dem ausgelieferten Pfad'],
 ]
 

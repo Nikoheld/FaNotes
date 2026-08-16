@@ -54,8 +54,8 @@ import { highlightSelectionMatches, search, searchKeymap } from '@codemirror/sea
 import type { AppSettings, DetectedTextLanguage } from '../types'
 import { createTrailingValueScheduler, type TrailingValueScheduler } from '../lib/trailingValueScheduler'
 import {
-  applyPaperArrowNavigation,
   handlePaperEditorScroll,
+  lockPaperEditorScrollIfNeeded,
   resolvePaperCaretScroller,
 } from '../lib/paperCaretScroll'
 
@@ -965,16 +965,26 @@ const selectionDragAutoScroll = ViewPlugin.fromClass(class {
 })
 
 const paperCaretLock = ViewPlugin.fromClass(class {
-  constructor(readonly view: EditorView) {}
+  constructor(readonly view: EditorView) {
+    this.view.scrollDOM.addEventListener('scroll', this.onEditorLayerScroll)
+  }
+
+  private onEditorLayerScroll = () => {
+    lockPaperEditorScrollIfNeeded(
+      this.view.dom,
+      this.view.coordsAtPos(this.view.state.selection.main.head),
+    )
+  }
 
   update(update: ViewUpdate) {
-    if (!update.view.dom.closest('.unified-paper, .paper-view')) return
-    if (
-      !update.selectionSet
-      && !update.transactions.some((transaction) => transaction.scrollIntoView)
-    ) return
-    const caret = update.view.coordsAtPos(update.state.selection.main.head)
-    applyPaperArrowNavigation(update.view.dom, caret)
+    lockPaperEditorScrollIfNeeded(
+      update.view.dom,
+      update.view.coordsAtPos(update.state.selection.main.head),
+    )
+  }
+
+  destroy() {
+    this.view.scrollDOM.removeEventListener('scroll', this.onEditorLayerScroll)
   }
 })
 
