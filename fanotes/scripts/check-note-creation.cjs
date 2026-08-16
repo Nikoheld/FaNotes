@@ -161,7 +161,7 @@ void (async () => {
     await Promise.all([cdp.send('Runtime.enable'), cdp.send('Log.enable'), cdp.send('Page.enable')])
     await waitFor(cdp, `Boolean(window.fanotes && document.querySelector('.app-shell'))`, 'Die FaNotes-Oberfläche')
 
-    await cdp.evaluate(`document.querySelector('.file-tree__root-actions button[aria-label="Neue Notiz"]').click()`)
+    await cdp.evaluate(`document.querySelector('.sidebar-header button[aria-label="Neue Notiz"]').click()`)
     await waitFor(cdp, `document.querySelector('.note-tab.active')?.title?.endsWith('Unbenannte Notiz.md')`, 'Die sichtbare Notizerstellung')
     const uiPath = await cdp.evaluate(`document.querySelector('.note-tab.active').title`)
     const originalSettings = await cdp.evaluate(`window.fanotes.bootstrap().then((value) => value.settings)`)
@@ -225,6 +225,8 @@ void (async () => {
       return true
     })()`)
     await waitFor(cdp, `window.__legacyTrainingSeed === 'ready'`, 'Die bisherige Trainingsdaten-Testbasis')
+    await cdp.evaluate(`document.querySelector('button[aria-label="Zusätzliche Werkzeuge ausklappen"]').click()`)
+    await waitFor(cdp, `Boolean(document.querySelector('button[title="GlyphenWerk"]'))`, 'GlyphenWerk unter Weitere Werkzeuge')
     await cdp.evaluate(`document.querySelector('button[title="GlyphenWerk"]').click()`)
     await waitFor(cdp, `Boolean(document.querySelector('.glyphenwerk-workspace'))`, 'GlyphenWerk für die Trainingsmigration')
     await waitFor(cdp, `/Beispiele direkt in FaNotes aktiv|Synchronisierung fehlgeschlagen/u.test(document.querySelector('.glyphenwerk-sync-state')?.textContent || '')`, 'Die GlyphenWerk-Synchronisierung')

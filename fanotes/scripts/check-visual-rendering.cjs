@@ -6,9 +6,10 @@ const path = require('node:path')
 const { spawn } = require('node:child_process')
 
 const executable = path.resolve(process.argv[2] || path.join(__dirname, '..', 'release', 'linux-unpacked', 'fanotes'))
+const packageMetadata = require(path.join(__dirname, '..', 'package.json'))
 const timeoutMs = Math.max(
   20_000,
-  Math.min(120_000, Number(process.env.FANOTES_VISUAL_TIMEOUT_MS) || 20_000),
+  Math.min(120_000, Number(process.env.FANOTES_VISUAL_TIMEOUT_MS) || 45_000),
 )
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'fanotes-visual-check-'))
 const output = path.join(temporary, 'screenshots')
@@ -55,6 +56,7 @@ fs.writeFileSync(path.join(userData, 'config.json'), `${JSON.stringify({
     spellcheck: true,
     reduceMotion: true,
     experimentalHandwritingToText: true,
+    experimentalHandwritingToTextSeenVersion: packageMetadata.version,
   },
   onboarding: { version: 1, completed: true },
 }, null, 2)}\n`, { mode: 0o600 })
@@ -275,7 +277,7 @@ void (async () => {
       sections: document.querySelectorAll('.settings-nav-group > button').length,
       searchPlaceholder: document.querySelector('.settings-search input')?.placeholder,
     }))()`)
-    if (settingsNavigation.groups.join('|') !== 'Aussehen & Schreiben|Stift & Arbeitsbereich|FaNotes & System' || settingsNavigation.sections !== 7 || settingsNavigation.searchPlaceholder !== 'Einstellungen suchen') {
+    if (settingsNavigation.groups.join('|') !== 'Aussehen & Schreiben|Stift & Arbeitsbereich|FaNotes & System' || settingsNavigation.sections !== 8 || settingsNavigation.searchPlaceholder !== 'Einstellungen suchen') {
       throw new Error(`Die neue Einstellungsnavigation ist unvollständig: ${JSON.stringify(settingsNavigation)}`)
     }
     await capture(cdp, 'settings')
@@ -328,11 +330,11 @@ void (async () => {
       return {
         buttons: menu.querySelectorAll(':scope > button').length,
         labels: [...menu.querySelectorAll('.editor-menu-label')].map((node) => node.textContent.trim()),
-        title: menu.querySelector('header strong')?.textContent,
+        title: menu.getAttribute('aria-label'),
         bounds: { left: bounds.left, top: bounds.top, right: bounds.right, bottom: bounds.bottom },
       }
     })()`)
-    if (noteMenu.buttons !== 3 || noteMenu.title !== 'Notizmenü' || noteMenu.labels.join('|') !== 'Ansicht|Datei' || noteMenu.bounds.left < 0 || noteMenu.bounds.top < 0 || noteMenu.bounds.right > 1480 || noteMenu.bounds.bottom > 940) {
+    if (noteMenu.buttons !== 6 || noteMenu.title !== 'Weitere Notizaktionen' || noteMenu.labels.join('|') !== 'Ansicht|Datei' || noteMenu.bounds.left < 0 || noteMenu.bounds.top < 0 || noteMenu.bounds.right > 1480 || noteMenu.bounds.bottom > 940) {
       throw new Error(`Das neue Notizmenü ist unvollständig oder verlässt das Fenster: ${JSON.stringify(noteMenu)}`)
     }
     await capture(cdp, 'note-menu')
@@ -398,7 +400,7 @@ void (async () => {
     await capture(cdp, 'pen-layer')
 
     await cdp.evaluate(`[...document.querySelectorAll('.lw-draw-toolbar button')].find((button) => button.title?.startsWith('Zeichenstudio mit Pinseln'))?.click()`)
-    await waitFor(cdp, `Boolean(document.querySelector('.lw-drawing-board.is-art-mode .lw-art-studio'))`, 'Das Zeichenstudio')
+    await waitFor(cdp, `Boolean(document.querySelector('.lw-drawing-board.is-art-mode') && document.querySelector('.lw-art-studio'))`, 'Das Zeichenstudio')
     const artStudio = await cdp.evaluate(`(() => {
       const panel = document.querySelector('.lw-art-studio').getBoundingClientRect()
       return {
@@ -409,24 +411,45 @@ void (async () => {
         symbols: document.querySelectorAll('.lw-art-symbols > button').length,
         symbolCategories: document.querySelectorAll('.lw-art-symbol-categories > button').length,
         bounds: { left: panel.left, top: panel.top, right: panel.right, bottom: panel.bottom },
+        viewport: { width: window.innerWidth, height: window.innerHeight },
         conversionActionsVisible: [...document.querySelectorAll('.lw-draw-footer button')].some((button) => button.textContent.includes('konvertieren')),
       }
     })()`)
     if (artStudio.tabs !== 3 || artStudio.brushes !== 8 || artStudio.colors !== 0 || artStudio.specialInks !== 0 || artStudio.symbols !== 0 || artStudio.symbolCategories !== 0 || artStudio.conversionActionsVisible) {
       throw new Error(`Das Zeichenstudio ist unvollständig oder mit Handschriftaktionen vermischt: ${JSON.stringify(artStudio)}`)
     }
-    if (artStudio.bounds.left < 0 || artStudio.bounds.top < 0 || artStudio.bounds.right > 1480 || artStudio.bounds.bottom > 940) {
-      throw new Error(`Das Zeichenstudio verlässt das Fenster: ${JSON.stringify(artStudio.bounds)}`)
+    if (artStudio.bounds.left < 0 || artStudio.bounds.top < 0 || artStudio.bounds.right > artStudio.viewport.width + 1 || artStudio.bounds.bottom > artStudio.viewport.height + 1) {
+      throw new Error(`Das Zeichenstudio verlässt das Fenster: ${JSON.stringify(artStudio)}`)
     }
     await cdp.evaluate(`[...document.querySelectorAll('.lw-art-brushes > button')].find((button) => button.title?.startsWith('Spray:'))?.click()`)
     await cdp.evaluate(`document.querySelector('.lw-art-studio-tabs > button[aria-controls="lw-art-colors-panel"]')?.click()`)
     await waitFor(cdp, `document.querySelectorAll('.lw-art-solid-colors > button').length >= 14 && document.querySelectorAll('.lw-art-special-inks > button').length === 7 && document.querySelectorAll('.lw-art-studio-body > [role="tabpanel"]').length === 1`, 'Den übersichtlichen Farbbereich')
     await cdp.evaluate(`[...document.querySelectorAll('.lw-art-special-inks > button')].find((button) => button.textContent.includes('Aurora'))?.click()`)
     await waitFor(cdp, `Boolean([...document.querySelectorAll('.lw-art-special-inks > button[aria-pressed="true"]')].some((button) => button.textContent.includes('Aurora')))`, 'Aurora-Spezialtinte')
+    await cdp.evaluate(`document.querySelector('.lw-art-studio button[aria-label="Zeichenstudio einklappen"]')?.click()`)
+    await waitFor(cdp, `!document.querySelector('.lw-art-studio')`, 'Das Einklappen des Zeichenstudios vor dem Zeichnen')
     const artCanvas = await cdp.evaluate(`(() => {
-      const bounds = document.querySelector('.lw-tablet-canvas-live.tool-art').getBoundingClientRect()
-      return { left: bounds.left, top: bounds.top, width: bounds.width, height: bounds.height }
+      const canvas = document.querySelector('.lw-tablet-canvas-live.tool-art')
+      const bounds = canvas.getBoundingClientRect()
+      const left = Math.max(bounds.left, 8)
+      const top = Math.max(bounds.top, 8)
+      const right = Math.min(bounds.right, window.innerWidth - 8)
+      const bottom = Math.min(bounds.bottom, window.innerHeight - 8)
+      const width = right - left
+      const height = bottom - top
+      const start = { x: left + width * .22, y: top + height * .57 }
+      const hit = document.elementFromPoint(start.x, start.y)
+      return {
+        left, top, width, height,
+        hit: hit ? (hit.tagName + '.' + String(hit.className)).slice(0, 160) : null,
+      }
     })()`)
+    if (artCanvas.width < 40 || artCanvas.height < 40) {
+      throw new Error(`Die Zeichenfläche ist nicht sichtbar: ${JSON.stringify(artCanvas)}`)
+    }
+    if (!/lw-tablet-canvas|lw-canvas-surface/u.test(artCanvas.hit || '')) {
+      throw new Error(`Der Kunststrich würde nicht die Zeichenfläche treffen: ${JSON.stringify(artCanvas)}`)
+    }
     const artStart = { x: artCanvas.left + artCanvas.width * .22, y: artCanvas.top + artCanvas.height * .57 }
     const artEnd = { x: artCanvas.left + artCanvas.width * .66, y: artCanvas.top + artCanvas.height * .66 }
     await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: artStart.x, y: artStart.y, button: 'left', buttons: 1, clickCount: 1 })
@@ -460,6 +483,8 @@ void (async () => {
     if (savedArt.purpose !== 'art' || savedArt.brush !== 'spray' || savedArt.colorEffect !== 'aurora' || savedArt.opacity !== 1 || !Number.isSafeInteger(savedArt.textureSeed) || savedArt.transcript) {
       throw new Error(`Der Kunststrich wurde nicht stabil und getrennt von der Handschrifterkennung gespeichert: ${JSON.stringify(savedArt)}`)
     }
+    await cdp.evaluate(`document.querySelector('.lw-art-studio-trigger')?.click()`)
+    await waitFor(cdp, `Boolean(document.querySelector('.lw-art-studio'))`, 'Das erneute Öffnen des Zeichenstudios')
     await cdp.evaluate(`document.querySelector('.lw-art-studio-tabs > button[aria-controls="lw-art-symbols-panel"]')?.click()`)
     await waitFor(cdp, `document.querySelectorAll('.lw-art-symbols > button').length === 25 && document.querySelectorAll('.lw-art-symbol-categories > button').length === 4 && document.querySelectorAll('.lw-art-studio-body > [role="tabpanel"]').length === 1`, 'Den übersichtlichen Piktogrammbereich')
     await cdp.evaluate(`document.querySelector('button[title="Stern einfügen"]')?.click()`)
@@ -505,7 +530,11 @@ void (async () => {
     await waitFor(cdp, `Boolean(document.querySelector('.lw-drawing-board.is-writing-mode')) && !document.querySelector('.lw-art-studio')`, 'Die Rückkehr zum Handschriftmodus')
     const handwritingCanvas = await cdp.evaluate(`(() => {
       const bounds = document.querySelector('.lw-tablet-canvas-live.tool-pen').getBoundingClientRect()
-      return { left: bounds.left, top: bounds.top, width: bounds.width, height: bounds.height }
+      const left = Math.max(bounds.left, 8)
+      const top = Math.max(bounds.top, 8)
+      const right = Math.min(bounds.right, window.innerWidth - 8)
+      const bottom = Math.min(bounds.bottom, window.innerHeight - 8)
+      return { left, top, width: right - left, height: bottom - top }
     })()`)
     const handX = handwritingCanvas.left + handwritingCanvas.width * .46
     const handTop = handwritingCanvas.top + handwritingCanvas.height * .28
@@ -531,9 +560,11 @@ void (async () => {
       const shell = document.querySelector('.app-shell')
       for (const name of ${JSON.stringify(['dark', 'light', 'midnight', 'forest', 'aurora', 'sepia'])}) shell.classList.remove('theme-' + name)
       shell.classList.add('theme-dark')
-      document.querySelector('button[title="GlyphenWerk"]').click()
       return true
     })()`)
+    await cdp.evaluate(`document.querySelector('button[aria-label="Zusätzliche Werkzeuge ausklappen"]')?.click()`)
+    await waitFor(cdp, `Boolean(document.querySelector('button[title="GlyphenWerk"]'))`, 'GlyphenWerk unter Weitere Werkzeuge')
+    await cdp.evaluate(`document.querySelector('button[title="GlyphenWerk"]').click()`)
     await waitFor(cdp, `Boolean(document.querySelector('.glyphenwerk-frame'))`, 'Der GlyphenWerk-Arbeitsbereich')
     await waitFor(cdp, `Boolean(document.querySelector('.glyphenwerk-frame').contentDocument?.querySelector('#root'))`, 'Der eingebettete GlyphenWerk-Renderer')
     await waitFor(cdp, `document.querySelector('.glyphenwerk-frame').contentDocument?.documentElement?.dataset.fanotesTheme === 'dark'`, 'Die GlyphenWerk-Theme-Brücke')

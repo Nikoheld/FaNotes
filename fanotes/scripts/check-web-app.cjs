@@ -205,7 +205,7 @@ void (async () => {
     await cdp.evaluate(`document.querySelector('.first-run-continue').click()`)
     await waitFor(cdp, `document.querySelector('.first-run')?.dataset.step === 'writing' && Boolean(document.querySelector('.first-run-writing-preview'))`, 'Der Schreib-Schritt')
     await cdp.evaluate(`document.querySelector('.first-run-continue').click()`)
-    await waitFor(cdp, `document.querySelector('.first-run')?.dataset.step === 'folders' && document.querySelectorAll('.first-run-subjects > button').length === 10`, 'Die Ordnerauswahl')
+    await waitFor(cdp, `document.querySelector('.first-run')?.dataset.step === 'folders' && document.querySelectorAll('.first-run-subjects > button').length === 11`, 'Die Ordnerauswahl')
     await cdp.evaluate(`document.querySelector('.first-run-continue').click()`)
     await waitFor(cdp, `Boolean(document.querySelector('.app-shell') && document.querySelector('.markdown-editor .cm-content'))`, 'Der Web-Markdown-Editor')
     await waitFor(cdp, `navigator.serviceWorker.getRegistration('./').then((registration) => Boolean(registration?.active))`, 'Der Offline-Service-Worker')
@@ -218,7 +218,7 @@ void (async () => {
       const count = (items) => items.reduce((total, entry) => total + (entry.kind === 'file' ? 1 : count(entry.children || [])), 0)
       return count(entries)
     })`)
-    await cdp.evaluate(`document.querySelector('.file-tree__root-actions button[aria-label="Neue Notiz"]').click()`)
+    await cdp.evaluate(`document.querySelector('.sidebar-header button[aria-label="Neue Notiz"]').click()`)
     await waitFor(cdp, `document.querySelector('.note-tab.active')?.title?.endsWith('Unbenannte Notiz.md')`, 'Die über den sichtbaren Button erstellte Notiz')
     const visibleNoteCreation = await cdp.evaluate(`(async () => {
       const activePath = document.querySelector('.note-tab.active')?.title || ''

@@ -91,7 +91,8 @@ const payload = (connection) => ({ connection, title: 'Test', relativePath: 'Tes
     fs.readFile(path.resolve(root, '..', 'fanotes-site/ai-proxy.mjs'), 'utf8'),
   ])
   for (const name of ['LM Studio', 'Ollama', 'OpenAI', 'Gemini', 'Anthropic', 'OpenCode']) assert.match(panel, new RegExp(name, 'u'))
-  assert.match(app, /> AI<\/button>/u)
+  assert.match(app, /aria-label="AI-Assistent öffnen"/u)
+  assert.match(app, /<span>AI<\/span><\/button>/u)
   for (const key of ['ollamaApiToken', 'openAiApiKey', 'geminiApiKey', 'anthropicApiKey', 'openCodePassword']) assert.match(browserApi, new RegExp(`delete safeSettings\\.${key}`, 'u'))
   assert.match(main, /safeStorage\.encryptString/u)
   assert.match(proxy, /new Set\(\['openai', 'gemini', 'anthropic'\]\)/u)

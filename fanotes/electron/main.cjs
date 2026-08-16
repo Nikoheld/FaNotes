@@ -837,16 +837,6 @@ function applyExperimentalHandwritingGate(settings) {
   }
 }
 
-function applyExperimentalHandwritingGate(settings) {
-  const version = app.getVersion()
-  if (settings.experimentalHandwritingToTextSeenVersion === version) return settings
-  return {
-    ...settings,
-    experimentalHandwritingToText: false,
-    experimentalHandwritingToTextSeenVersion: version,
-  }
-}
-
 function settingsForDisk(settings, { preserveProtectedSecrets = true } = {}) {
   const encoded = { ...settings }
   for (const key of SECRET_SETTING_KEYS) {
