@@ -2,6 +2,11 @@
 
 ## Unveröffentlicht
 
+## 2026.8.26
+
+- **Zeichenstudio im Fenster:** Das Zeichenstudio bleibt nach dem Öffnen auf dem Bildschirm. Die Einblend-Animation schiebt es nicht mehr nach rechts aus dem Fenster.
+- **Englisch vollständig:** Suche, Hausaufgaben, Ordner-Ziehen, Stift-Einstellungen, Notizmenü und Befehlspalette erscheinen auf Englisch, wenn die App-Sprache Englisch ist.
+
 ## 2026.8.25
 
 - **Langer Stiftstrich:** Du kannst weiterzeichnen, ohne den Stift nach ein paar Sekunden anzuheben. Wacom unter Linux beendet den Strich nicht mehr, nur weil der Druck kurz auf 0 geht. Abheben und ein verpasster `pointerup` funktionieren weiter wie zuvor.
