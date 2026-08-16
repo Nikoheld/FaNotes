@@ -11,8 +11,8 @@ for (let index = 2; index < process.argv.length; index += 2) {
 const version = args.get('version')
 if (!version) throw new Error('Use --version <YYYY.M.N[-beta.B]>')
 
-const match = /^(\d{4})\.(\d{1,2})\.([1-9]|1\d|2[0-4])(?:-beta\.([1-9]\d*))?$/u.exec(version)
-if (!match) throw new Error('Calendar versions must use YYYY.M.N or YYYY.M.N-beta.B; stable N is limited to 1–24.')
+const match = /^(\d{4})\.(\d{1,2})\.([1-9]\d*)(?:-beta\.([1-9]\d*))?$/u.exec(version)
+if (!match) throw new Error('Calendar versions must use YYYY.M.N or YYYY.M.N-beta.B.')
 
 const year = Number(match[1])
 const month = Number(match[2])
@@ -40,13 +40,12 @@ const prefix = `v${year}.${month}.`
 const monthly = releases.filter((release) => typeof release.tag_name === 'string' && release.tag_name.startsWith(prefix))
 if (monthly.some((release) => release.tag_name === `v${version}`)) throw new Error(`Release v${version} already exists.`)
 
-const stable = monthly.filter((release) => /^v\d{4}\.\d{1,2}\.(?:[1-9]|1\d|2[0-4])$/u.test(release.tag_name))
+const stable = monthly.filter((release) => /^v\d{4}\.\d{1,2}\.[1-9]\d*$/u.test(release.tag_name))
 if (betaNumber === null) {
-  if (stable.length >= 24) throw new Error('Twenty-four stable releases already exist this month; wait for the next calendar month.')
   const expected = stable.length + 1
   if (stableNumber !== expected) throw new Error(`The next stable release this month must be number ${expected}.`)
 } else {
-  const targetedStableNumber = Math.min(24, stable.length + 1)
+  const targetedStableNumber = stable.length + 1
   if (stableNumber !== targetedStableNumber) {
     throw new Error(
       `The next beta must target Stable ${year}.${month}.${targetedStableNumber}; ` +
@@ -61,4 +60,4 @@ if (betaNumber === null) {
   if (betaNumber !== expected) throw new Error(`The next beta for ${year}.${month}.${stableNumber} must be beta.${expected}.`)
 }
 
-console.log(`${version} satisfies the FaNotes ${betaNumber === null ? 'Stable' : 'Beta'} calendar-version and monthly cadence gate.`)
+console.log(`${version} satisfies the FaNotes ${betaNumber === null ? 'Stable' : 'Beta'} calendar-version check.`)

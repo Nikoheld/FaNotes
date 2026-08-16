@@ -2,6 +2,10 @@
 
 ## Unveröffentlicht
 
+## 2026.8.25
+
+- **Langer Stiftstrich:** Du kannst weiterzeichnen, ohne den Stift nach ein paar Sekunden anzuheben. Wacom unter Linux beendet den Strich nicht mehr, nur weil der Druck kurz auf 0 geht. Abheben und ein verpasster `pointerup` funktionieren weiter wie zuvor.
+
 ## 2026.8.24
 
 - **Wacom-Lift auf Linux:** Nach dem Abheben bleibt der Stift nicht mehr „halb unten“. Scrollen, Zoomen, Klicks und Trackpad-Tinte funktionieren wieder, auch wenn Wayland kein `pointerup` schickt.
