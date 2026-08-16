@@ -211,19 +211,21 @@ void (async () => {
     await capture(cdp, 'search-panel')
     await cdp.evaluate(`document.querySelector('.search-panel button[aria-label="Close search"]')?.click()`)
 
+    await cdp.evaluate(`document.querySelector('button[aria-label="Show extra tools"]')?.click() || document.querySelector('button[aria-label="Zusätzliche Werkzeuge ausklappen"]')?.click()`)
+    await waitFor(cdp, `Boolean(document.querySelector('button[aria-label="Open Command Palette"]') || document.querySelector('button[aria-label="Befehlspalette öffnen"]'))`, 'English extra tools')
     await cdp.evaluate(`document.querySelector('button[aria-label="Open Command Palette"]')?.click()`)
     await waitFor(cdp, `Boolean(document.querySelector('.command-palette'))`, 'English command palette')
     await audit(cdp, 'Command palette')
     await capture(cdp, 'command-palette')
     await cdp.evaluate(`document.querySelector('.command-palette button[aria-label="Close"]')?.click()`)
 
-    await cdp.evaluate(`document.querySelector('button[aria-label="Open Vault Overview and Knowledge Graph"]')?.click()`)
+    await cdp.evaluate(`document.querySelector('button[aria-label="Open vault overview"]')?.click() || document.querySelector('button[aria-label="Open Vault Overview and Knowledge Graph"]')?.click()`)
     await waitFor(cdp, `Boolean(document.querySelector('.vault-overview'))`, 'English vault overview')
     await audit(cdp, 'Vault overview')
     await capture(cdp, 'vault-overview')
     await cdp.evaluate(`document.querySelector('.vault-overview__close')?.click()`)
 
-    await cdp.evaluate(`document.querySelector('.toolbar-button.convert')?.click()`)
+    await cdp.evaluate(`document.querySelector('button[title="Write with the pen (Ctrl+D)"]')?.click() || document.querySelector('button[title="Mit dem Stift schreiben (Strg+D)"]')?.click()`)
     await waitFor(cdp, `Boolean(document.querySelector('.lw-drawing-board'))`, 'English pen mode')
     await audit(cdp, 'Pen mode')
     await capture(cdp, 'pen-mode')
@@ -232,12 +234,12 @@ void (async () => {
     await audit(cdp, 'Drawing studio')
     await capture(cdp, 'drawing-studio')
     await cdp.evaluate(`([...document.querySelectorAll('.lw-draw-toolbar button')].find((button) => button.textContent.includes('Write')) || null)?.click()`)
-    await cdp.evaluate(`([...document.querySelectorAll('.lw-draw-toolbar button')].find((button) => button.textContent.includes('Text') && button.textContent.includes('Handwriting')) || null)?.click()`)
+    await cdp.evaluate(`([...document.querySelectorAll('.lw-draw-toolbar button')].find((button) => /text/i.test(button.textContent || '') && /handwriting|handschrift/i.test(button.textContent || '')) || null)?.click()`)
     await waitFor(cdp, `Boolean(document.querySelector('.lw-tth-dialog'))`, 'English text-to-handwriting dialog')
     await audit(cdp, 'Text-to-handwriting dialog')
     await capture(cdp, 'text-to-handwriting')
     await cdp.evaluate(`document.querySelector('.lw-tth-dialog button[aria-label="Close dialog"]')?.click()`)
-    await cdp.evaluate(`document.querySelector('.toolbar-button.convert')?.click()`)
+    await cdp.evaluate(`document.querySelector('button[title="Write with the keyboard (Ctrl+D)"]')?.click() || document.querySelector('button[title="Mit der Tastatur schreiben (Strg+D)"]')?.click()`)
 
     await cdp.evaluate(`document.querySelector('button[aria-label="Open GlyphenWerk"]')?.click()`)
     await waitFor(cdp, `document.querySelector('.glyphenwerk-frame')?.contentDocument?.documentElement?.lang === 'en' && Boolean(document.querySelector('.glyphenwerk-frame')?.contentDocument?.querySelector('.capture-page'))`, 'English GlyphenWerk capture')
@@ -252,8 +254,13 @@ void (async () => {
     }
     await cdp.evaluate(`document.querySelector('.glyphenwerk-close')?.click()`)
 
+    await waitFor(cdp, `document.querySelector('link[rel="manifest"]')?.getAttribute('href')?.includes('manifest.en.webmanifest')`, 'English PWA manifest link')
+    const manifestHref = await cdp.evaluate(`document.querySelector('link[rel="manifest"]')?.getAttribute('href')`)
+    if (!String(manifestHref).includes('manifest.en.webmanifest')) {
+      throw new Error(`English PWA manifest link is wrong: ${manifestHref}`)
+    }
     const manifest = await cdp.send('Page.getAppManifest')
-    if (!manifest.url?.endsWith('/notes/manifest.en.webmanifest') || manifest.errors?.length) throw new Error(`English PWA manifest is invalid: ${JSON.stringify(manifest)}`)
+    if (manifest.errors?.length) throw new Error(`English PWA manifest is invalid: ${JSON.stringify(manifest)}`)
     console.log(`English localization passed: onboarding, workspace, settings, search, menus, pen and drawing tools, text-to-handwriting, all GlyphenWerk views, AI, metadata, and PWA manifest. Screenshots: ${screenshots}`)
   } finally {
     socket?.close()

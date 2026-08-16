@@ -152,8 +152,13 @@ function translateCore(source: string): string {
   if (source === 'Kalligrafie: schräge Breitfeder') return 'Calligraphy: angled broad nib'
   if (source === 'Zeichen & Varianten erfassen') return 'Capture symbols & variants'
   if (source === 'Zurück zu Fächern & Notizen') return 'Back to folders & notes'
+  if (source === 'Neue Notiz in diesem Ordner') return 'New note in this folder'
   const newNoteIn = /^Neue Notiz in (.+)$/u.exec(source)
   if (newNoteIn) return `New note in ${newNoteIn[1]}`
+  const newSubfolderIn = /^Neuer Unterordner in (.+)$/u.exec(source)
+  if (newSubfolderIn) return `New subfolder in ${newSubfolderIn[1]}`
+  const dragIntoFolder = /^(.+) · Ziehen, um in einen Ordner oder auf die oberste Ebene zu legen$/u.exec(source)
+  if (dragIntoFolder) return `${dragIntoFolder[1]} · Drag to move into a folder or back to the top level`
   const actionsFor = /^Aktionen für (.+)$/u.exec(source)
   if (actionsFor) return `Actions for ${actionsFor[1]}`
   const firstNoteIn = /^(.+): erste Notiz erstellen$/u.exec(source)
@@ -217,7 +222,7 @@ function translateAttributes(element: Element) {
   if (ignored(element)) return
   const snapshots = attributeSnapshots.get(element) ?? new Map<string, AttributeSnapshot>()
   for (const attribute of TRANSLATED_ATTRIBUTES) {
-    if (attribute === 'title' && element.matches('.note-tab, .file-tree__entry-button, .vault-overview__recent-item')) continue
+    if (attribute === 'title' && element.matches('.note-tab, .vault-overview__recent-item')) continue
     const current = element.getAttribute(attribute)
     if (current === null) continue
     const previous = snapshots.get(attribute)
