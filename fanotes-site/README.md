@@ -34,6 +34,10 @@ Die Daten liegen außerhalb des Webroots unter `/var/lib/fanotes-backups`, gehö
 
 ClamAV benötigt für die erlaubte PDF-Größe `StreamMaxLength 100M` in `/etc/clamav/clamd.conf`. Nach einer Änderung wird `clamav-daemon.service` neu gestartet. Der systemd-Dienst darf nur `/var/lib/fanotes-backups` beschreiben; `/etc/fanotes` und das Release-Verzeichnis bleiben schreibgeschützt.
 
+## Hausaufgaben-API
+
+Unter **Einstellungen → Experimentell** kann die lokale Hausaufgabenliste optional auf `https://fanotes.fasrv.ch/api/v1/homework/<channelId>` veröffentlicht werden. Die Abfrage liefert nur diese Liste (`GET` mit `Authorization: Bearer <Passwort>`). Ohne Schalter, ohne Passwort oder mit falschem Passwort gibt der Server keine Titel zurück. Auf dem Server liegt nur die Scrypt-Ableitung des Passworts unter `/var/lib/fanotes-homework`.
+
 ## Update-API
 
 Die Apps fragen Stable oder Beta plattformspezifisch über folgende APIs ab:

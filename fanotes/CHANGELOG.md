@@ -2,6 +2,10 @@
 
 ## Unveröffentlicht
 
+## 2026.8.27
+
+- **Hausaufgaben-API:** Unter Einstellungen → Experimentell kannst du die lokale Hausaufgabenliste über fanotes.fasrv.ch abfragen. Ein eigenes Passwort schützt die Liste; ohne Schalter und ohne Passwort bleiben die Einträge unsichtbar.
+
 ## 2026.8.26
 
 - **Zeichenstudio im Fenster:** Das Zeichenstudio bleibt nach dem Öffnen auf dem Bildschirm. Die Einblend-Animation schiebt es nicht mehr nach rechts aus dem Fenster.

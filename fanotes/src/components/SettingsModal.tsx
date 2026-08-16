@@ -35,6 +35,13 @@ import {
 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { getUiLocale } from '../i18n'
+import {
+  generateHomeworkApiChannelId,
+  generateHomeworkApiSecret,
+  HOMEWORK_API_HOST,
+  homeworkApiQueryUrl,
+  homeworkApiSecretReady,
+} from '../lib/homeworkApi'
 import { bestContrastText } from '../lib/colorContrast'
 import type { AppSettings, EnhancedMathRecognitionState, OneNoteImportResult, QwenVisionState, ServerBackupState, UpdateState } from '../types'
 
@@ -65,7 +72,7 @@ const SECTIONS: { id: SettingsSection; label: string; description: string; icon:
   { id: 'files', label: 'Dateien & Vault', description: 'Import, Ordner und Speichern', icon: FolderOpen, count: 7 },
   { id: 'updates', label: 'Updates', description: 'Stable, Beta und Sicherheit', icon: RefreshCw, count: 4 },
   { id: 'accessibility', label: 'Bedienung', description: 'Bewegung und Lesbarkeit', icon: Accessibility, count: 3 },
-  { id: 'experimental', label: 'Experimentell', description: 'Unfertige Funktionen, standardmässig aus', icon: FlaskConical, count: 1 },
+  { id: 'experimental', label: 'Experimentell', description: 'Unfertige Funktionen, standardmässig aus', icon: FlaskConical, count: 2 },
   { id: 'advanced', label: 'Erweitert', description: 'Ressourcen, Datenschutz und App-Daten', icon: Code2, count: 10 },
 ]
 
@@ -103,6 +110,7 @@ const SETTINGS_SEARCH_ITEMS: SettingsSearchItem[] = [
   { label: 'Form-Erkennung', detail: 'Stift & Erkennung', section: 'drawing', target: 'settings-tablet', keywords: 'form zirkel kreis linie rechteck dreieck glätten snap stillhalten empfindlichkeit' },
   { label: 'Handschrifterkennung', detail: 'Stift & Erkennung', section: 'drawing', target: 'settings-recognition', keywords: 'ocr text mathematik automatisch sprache konvertieren suchindex' },
   { label: 'Handschrift zu Text', detail: 'Experimentell', section: 'experimental', target: 'settings-experimental', keywords: 'experimentell ocr konvertieren mathe korrigierer löser suchindex qwen vision handschrift text' },
+  { label: 'Hausaufgaben API', detail: 'Experimentell', section: 'experimental', target: 'settings-homework-api', keywords: 'hausaufgaben api fasrv passwort auth termine liste' },
   { label: 'Vault & Speicherort', detail: 'Dateien & Vault', section: 'files', target: 'settings-vault', keywords: 'ordner wechseln pfad notizen markdown nas browser' },
   { label: 'Microsoft OneNote importieren', detail: 'Dateien & Vault', section: 'files', target: 'settings-onenote', keywords: 'one onetoc2 onepkg onedrive zip notizbuch migration' },
   { label: 'Server-Backup', detail: 'Dateien & Vault', section: 'files', target: 'settings-backup', keywords: 'sicherung cloud wiederherstellen recovery kopie' },
@@ -912,6 +920,55 @@ export function SettingsModal({
                     {settings.experimentalHandwritingToText ? ' Qwen3-VL nutzt deine GlyphenWerk-Buchstaben als Legende, wenn das NPU-Modell geladen ist.' : ''}
                   </span>
                 </div>
+                <SettingRow
+                  title="Hausaufgaben API"
+                  description="Veröffentlicht deine lokale Hausaufgabenliste als Abfrage-API auf fanotes.fasrv.ch. Standard aus. Ohne Passwort und ohne diesen Schalter gibt die API keine Einträge zurück."
+                >
+                  <Toggle
+                    label="Hausaufgaben API"
+                    checked={settings.experimentalHomeworkApi}
+                    onChange={(value) => onChange({
+                      ...settings,
+                      experimentalHomeworkApi: value,
+                      homeworkApiChannelId: settings.homeworkApiChannelId || generateHomeworkApiChannelId(),
+                    })}
+                  />
+                </SettingRow>
+                {settings.experimentalHomeworkApi && (
+                  <div id="settings-homework-api" className="settings-resource-note" style={{ display: 'grid', gap: 10 }}>
+                    <label>
+                      <span>API-Passwort</span>
+                      <input
+                        type="password"
+                        autoComplete="new-password"
+                        value={settings.homeworkApiSecret}
+                        minLength={12}
+                        placeholder="Mindestens 12 Zeichen"
+                        onChange={(event) => update('homeworkApiSecret', event.target.value)}
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      className="secondary-button"
+                      onClick={() => onChange({
+                        ...settings,
+                        homeworkApiChannelId: settings.homeworkApiChannelId || generateHomeworkApiChannelId(),
+                        homeworkApiSecret: generateHomeworkApiSecret(),
+                      })}
+                    >
+                      <KeyRound size={14} /> Passwort erzeugen
+                    </button>
+                    {homeworkApiSecretReady(settings.homeworkApiSecret) && settings.homeworkApiChannelId && (
+                      <div>
+                        <strong>API-Infos</strong>
+                        <p>Abfrage nur mit diesem Passwort. Die API liefert die komplette Hausaufgabenliste, sonst nichts aus dem Vault.</p>
+                        <code>{homeworkApiQueryUrl(settings.homeworkApiChannelId)}</code>
+                        <p>Authorization: Bearer &lt;Passwort&gt;</p>
+                        <small>Host: {HOMEWORK_API_HOST}</small>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             )}
 

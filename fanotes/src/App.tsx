@@ -55,6 +55,8 @@ import { PaperStylePicker } from './components/PaperStylePicker'
 import { PaperView } from './components/PaperView'
 import { normalizePaperStyle } from './lib/paperStyles'
 import { clampViewZoom, readSharedPaperView, writeSharedPaperView, writeSharedZoomMaxPercent, writeSharedZoomSpeed } from './lib/paperView'
+import { HOMEWORK_CHANNEL_ID_PATTERN, homeworkApiOriginFromLocation, homeworkApiSecretReady, publishHomeworkList } from './lib/homeworkApi'
+import { HOMEWORK_NOTE_PATH, parseHomeworkMarkdown, type HomeworkDocument } from './lib/homeworkStore'
 import { SafeBoundary } from './components/SafeBoundary'
 import { applyNoteTags, collectVaultTags, filterTreeByTag, parseNoteTags } from './lib/noteTags'
 import { applyRendererResourceLimits } from './lib/resourceLimits'
@@ -381,6 +383,7 @@ export default function App({ startupBootstrap }: AppProps) {
   const settingsRef = useRef(settings)
   const settingsRevisionRef = useRef(0)
   const settingsPersistedRevisionRef = useRef(0)
+  const lastHomeworkSecretRef = useRef('')
   const drawingOpenRef = useRef(drawingOpen)
   const drawingDirtyRef = useRef(false)
   const drawingLoadRequestRef = useRef(0)
@@ -1266,7 +1269,60 @@ export default function App({ startupBootstrap }: AppProps) {
     }
   }, [flushDocumentLayers, flushPendingEntry, refreshTree, remapNotePaperPaths, toast])
 
+  const syncPublishedHomework = useCallback(async (current: AppSettings, document?: HomeworkDocument) => {
+    const channelId = current.homeworkApiChannelId
+    if (!HOMEWORK_CHANNEL_ID_PATTERN.test(channelId)) return
+    const origin = homeworkApiOriginFromLocation(window.fanotes?.platform)
+    const previousSecret = lastHomeworkSecretRef.current
+    const publishSecret = homeworkApiSecretReady(current.homeworkApiSecret) ? current.homeworkApiSecret : previousSecret
+    const enabled = Boolean(current.experimentalHomeworkApi && homeworkApiSecretReady(current.homeworkApiSecret))
+    if (!enabled) {
+      if (!homeworkApiSecretReady(publishSecret)) return
+      const result = await publishHomeworkList({
+        enabled: false,
+        channelId,
+        secret: publishSecret,
+        previousSecret,
+        document: document ?? { version: 1, tasks: [] },
+        origin,
+      }).catch(() => undefined)
+      if (result?.ok) lastHomeworkSecretRef.current = ''
+      return
+    }
+    let nextDocument = document
+    if (!nextDocument) {
+      try {
+        nextDocument = parseHomeworkMarkdown(await window.fanotes.readFile(HOMEWORK_NOTE_PATH))
+      } catch {
+        nextDocument = { version: 1, tasks: [] }
+      }
+    }
+    const result = await publishHomeworkList({
+      enabled: true,
+      channelId,
+      secret: current.homeworkApiSecret,
+      previousSecret,
+      document: nextDocument,
+      origin,
+    }).catch(() => undefined)
+    if (result?.ok) lastHomeworkSecretRef.current = current.homeworkApiSecret
+  }, [])
+
+  useEffect(() => {
+    if (!bootstrap?.vaultPath) return
+    const current = settingsRef.current
+    if (
+      current.experimentalHomeworkApi
+      && homeworkApiSecretReady(current.homeworkApiSecret)
+      && HOMEWORK_CHANNEL_ID_PATTERN.test(current.homeworkApiChannelId)
+    ) {
+      lastHomeworkSecretRef.current = current.homeworkApiSecret
+      void syncPublishedHomework(current)
+    }
+  }, [bootstrap?.vaultPath, syncPublishedHomework])
+
   const applySettings = useCallback((next: AppSettings) => {
+    const previous = settingsRef.current
     const revision = settingsRevisionRef.current + 1
     settingsRevisionRef.current = revision
     settingsRef.current = next
@@ -1281,19 +1337,25 @@ export default function App({ startupBootstrap }: AppProps) {
           settingsPersistedRevisionRef.current = Math.max(settingsPersistedRevisionRef.current, revision)
         })
         .catch(() => toast('Einstellungen konnten nicht gespeichert werden.', 'error'))
+      const homeworkChanged = previous.experimentalHomeworkApi !== next.experimentalHomeworkApi
+        || previous.homeworkApiChannelId !== next.homeworkApiChannelId
+        || previous.homeworkApiSecret !== next.homeworkApiSecret
+      if (homeworkChanged) void syncPublishedHomework(next)
     }, 180)
     settingsTimer.current = timer
-  }, [toast])
+  }, [syncPublishedHomework, toast])
 
   const resetSettings = useCallback(() => {
     if (settingsTimer.current) window.clearTimeout(settingsTimer.current)
     settingsTimer.current = null
+    const previous = settingsRef.current
     const revision = settingsRevisionRef.current + 1
     settingsRevisionRef.current = revision
     settingsRef.current = { ...DEFAULT_SETTINGS }
     writeSharedZoomSpeed(DEFAULT_SETTINGS.viewZoomSpeed)
     writeSharedZoomMaxPercent(DEFAULT_SETTINGS.viewZoomMax)
     setSettings({ ...DEFAULT_SETTINGS })
+    void syncPublishedHomework({ ...previous, experimentalHomeworkApi: false })
     void window.fanotes.saveSettings(DEFAULT_SETTINGS, { clearProtectedSecrets: true })
       .then((persisted) => {
         settingsPersistedRevisionRef.current = Math.max(settingsPersistedRevisionRef.current, revision)
@@ -1304,7 +1366,7 @@ export default function App({ startupBootstrap }: AppProps) {
         toast('Standardeinstellungen wiederhergestellt.', 'success')
       })
       .catch(() => toast('Die Standardeinstellungen konnten nicht gespeichert werden.', 'error'))
-  }, [toast])
+  }, [syncPublishedHomework, toast])
 
   const handleDrawingSettingsChange = useCallback((changes: Partial<AppSettings>) => {
     const { paperStyle: _ignoredPaper, ...rest } = changes
@@ -2280,6 +2342,7 @@ export default function App({ startupBootstrap }: AppProps) {
                   subjects={tree.filter((entry) => entry.kind === 'folder').map((entry) => entry.name)}
                   onClose={() => setHomeworkOpen(false)}
                   onOpenNote={(path) => { setHomeworkOpen(false); return openNote(path) }}
+                  onDocumentPersisted={(document) => { void syncPublishedHomework(settingsRef.current, document) }}
                 />
               </SafeBoundary>
             ) : overviewOpen ? (

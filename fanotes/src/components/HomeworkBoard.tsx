@@ -31,6 +31,7 @@ export type HomeworkBoardProps = {
   subjects: string[]
   onClose: () => void
   onOpenNote?: (path: string) => void | Promise<void>
+  onDocumentPersisted?: (document: HomeworkDocument) => void
 }
 
 const HOMEWORK_COPY = {
@@ -196,7 +197,7 @@ const formatDue = (task: HomeworkTask) => {
   return task.dueTime ? `${label} · ${task.dueTime}` : label
 }
 
-export function HomeworkBoard({ subjects, onClose, onOpenNote }: HomeworkBoardProps) {
+export function HomeworkBoard({ subjects, onClose, onOpenNote, onDocumentPersisted }: HomeworkBoardProps) {
   const [document, setDocument] = useState<HomeworkDocument>({ version: 1, tasks: [] })
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -238,7 +239,10 @@ export function HomeworkBoard({ subjects, onClose, onOpenNote }: HomeworkBoardPr
             await window.fanotes.writeFile(HOMEWORK_NOTE_PATH, markdown)
           }
         }
-        if (generation === persistGenerationRef.current) setDocument(next)
+        if (generation === persistGenerationRef.current) {
+          setDocument(next)
+          onDocumentPersisted?.(next)
+        }
       } catch (persistError) {
         if (generation === persistGenerationRef.current) {
           setError(persistError instanceof Error ? persistError.message : homeworkText().saveError)
@@ -249,7 +253,7 @@ export function HomeworkBoard({ subjects, onClose, onOpenNote }: HomeworkBoardPr
     }
     persistQueueRef.current = persistQueueRef.current.then(run, run)
     await persistQueueRef.current
-  }, [])
+  }, [onDocumentPersisted])
 
   useEffect(() => {
     let cancelled = false

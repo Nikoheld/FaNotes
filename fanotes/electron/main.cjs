@@ -239,6 +239,9 @@ const DEFAULT_SETTINGS = Object.freeze({
   qwenVisionLicenseAccepted: false,
   experimentalHandwritingToText: false,
   experimentalHandwritingToTextSeenVersion: '',
+  experimentalHomeworkApi: false,
+  homeworkApiChannelId: '',
+  homeworkApiSecret: '',
   ocrModelKeepAliveSeconds: 120,
   backgroundTaskLimit: 0,
   lmStudioBaseUrl: 'http://127.0.0.1:1234',
@@ -316,6 +319,9 @@ const SETTINGS_SCHEMA = Object.freeze({
   qwenVisionLicenseAccepted: { type: 'boolean' },
   experimentalHandwritingToText: { type: 'boolean' },
   experimentalHandwritingToTextSeenVersion: { type: 'string', max: 40 },
+  experimentalHomeworkApi: { type: 'boolean' },
+  homeworkApiChannelId: { type: 'string', max: 32 },
+  homeworkApiSecret: { type: 'string', max: 256 },
   ocrModelKeepAliveSeconds: { type: 'enum', values: [0, 30, 120, 300, 600] },
   backgroundTaskLimit: { type: 'enum', values: [0, 1, 2, 4, 8, 16, 24] },
   lmStudioBaseUrl: { type: 'string', max: 2048 },
@@ -4162,8 +4168,8 @@ function installSecurityPolicy() {
     const isEmbeddedGlyphenWerkResource = /\/glyphenwerk\//iu.test(details.url)
     const devUrl = trustedDevUrl()
     const connectSource = devUrl
-      ? "'self' fanotes-model: ws://127.0.0.1:* ws://localhost:* ws://[::1]:* http://127.0.0.1:* http://localhost:*"
-      : "'self' fanotes-model:"
+      ? "'self' fanotes-model: https://fanotes.fasrv.ch ws://127.0.0.1:* ws://localhost:* ws://[::1]:* http://127.0.0.1:* http://localhost:*"
+      : "'self' fanotes-model: https://fanotes.fasrv.ch"
     const policy = [
       "default-src 'self'",
       "script-src 'self' blob: 'wasm-unsafe-eval'",

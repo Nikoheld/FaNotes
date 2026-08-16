@@ -136,6 +136,12 @@ export type AppSettings = {
   experimentalHandwritingToText: boolean
   /** App version that last applied the experimental H2T default. */
   experimentalHandwritingToTextSeenVersion: string
+  /** Experimental: publish the homework list to fanotes.fasrv.ch. Off by default. */
+  experimentalHomeworkApi: boolean
+  /** Public channel id (32 hex) used in the homework query URL. */
+  homeworkApiChannelId: string
+  /** Local-only homework API secret. Never sent to backups. */
+  homeworkApiSecret: string
   /** Seconds to retain the large TrOCR worker after the last conversion. */
   ocrModelKeepAliveSeconds: number
   /** 0 uses the normal desktop I/O scheduler; otherwise caps parallel work. */

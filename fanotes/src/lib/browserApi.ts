@@ -497,6 +497,7 @@ export function createBrowserApi(): FaNotesApi {
       delete safeSettings.geminiApiKey
       delete safeSettings.anthropicApiKey
       delete safeSettings.openCodePassword
+      delete safeSettings.homeworkApiSecret
       const response = await backupFetch('/api/v1/backups/snapshot', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
