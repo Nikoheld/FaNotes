@@ -126,6 +126,14 @@ export type AppSettings = {
   qwenVisionRecognition: boolean
   /** Records explicit acceptance of the Qwen3-VL / OpenVINO model license. */
   qwenVisionLicenseAccepted: boolean
+  /**
+   * Experimental: convert handwriting to text (page/region convert, search
+   * transcript, math solver/corrector). Off by default — missing saved values
+   * stay off so existing vaults remain off after an update.
+   */
+  experimentalHandwritingToText: boolean
+  /** App version that last applied the experimental H2T default. */
+  experimentalHandwritingToTextSeenVersion: string
   /** Seconds to retain the large TrOCR worker after the last conversion. */
   ocrModelKeepAliveSeconds: number
   /** 0 uses the normal desktop I/O scheduler; otherwise caps parallel work. */
@@ -424,6 +432,7 @@ export type FaNotesApi = {
     maxNewTokens?: number
     language?: 'de' | 'en'
     lineCount?: number
+    hasGlyphLegend?: boolean
   }) => Promise<{
     text: string
     device: 'NPU'

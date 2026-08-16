@@ -60,11 +60,44 @@ export const isPaperViewActive = (view: PaperViewSnapshot) => (
 )
 
 /**
+ * Layers that must inherit the sheet zoom. Never assign `zoom: 1` / `zoom: ''`
+ * here — Chromium's inherited `zoom` then stays at 1× and only the paper
+ * background grows, leaving markdown at the original size.
+ */
+const SHEET_LAYER_SELECTOR = '.editor-pane, .worksheet-layer, .lw-canvas-surface, .lw-drawing-board, .paper-ruling'
+const TEXT_ZOOM_SELECTOR = '.editor-pane'
+
+const clearInlineViewStyle = (element: HTMLElement | null) => {
+  if (!element) return
+  element.style.removeProperty('zoom')
+  element.style.removeProperty('transform')
+  element.style.removeProperty('transform-origin')
+  element.style.removeProperty('will-change')
+  element.style.removeProperty('--view-zoom')
+  element.classList.remove('is-view-transformed', 'is-view-zoomed')
+}
+
+/** Prefer the dedicated plane so ruling, text and ink share one zoom node. */
+export const resolvePaperViewTarget = (
+  paper: HTMLElement | null,
+  noteView: HTMLElement | null = null,
+) => (
+  (paper?.closest('.paper-sheet-plane') as HTMLElement | null)
+  ?? noteView?.querySelector<HTMLElement>('.paper-sheet-plane')
+  ?? paper
+)
+
+/**
  * Apply sheet zoom/pan/rotate without GPU-stretching a 1× bitmap.
  *
  * Chromium rasterizes `transform: scale()` layers at layout size, then stretches
  * them — markdown text becomes unreadable. CSS `zoom` raises the raster scale
  * so fonts stay sharp. Pan/rotate stay on `transform` in pre-zoom units.
+ *
+ * Zoom is applied to the sheet plane so ruling, ink and type stay one sheet.
+ * The text column gets the same specified zoom (CodeMirror often ignores
+ * inheritance). Never assign `style.zoom = ''` — that specifies zoom:1 and
+ * freezes markdown while the ruling still grows.
  */
 export const applyPaperViewToElements = (
   paper: HTMLElement | null,
@@ -73,24 +106,39 @@ export const applyPaperViewToElements = (
 ) => {
   const active = isPaperViewActive(view)
   const zoom = Math.max(0.01, view.zoom)
-  if (paper) {
-    // One zoom for the whole sheet (ruling, text, ink, worksheets). CSS zoom
-    // keeps markdown sharp; the viewport scrolls instead of a second pan.
-    paper.style.zoom = zoom === 1 ? '' : String(zoom)
-    paper.style.setProperty('--view-zoom', String(zoom))
-    paper.style.transform = view.rotation ? `rotate(${view.rotation}deg)` : ''
-    paper.style.transformOrigin = 'center center'
+  const target = resolvePaperViewTarget(paper, noteView)
+  if (target) {
+    if (zoom === 1) target.style.removeProperty('zoom')
+    else target.style.zoom = String(zoom)
+    target.style.setProperty('--view-zoom', String(zoom))
+    target.style.transform = view.rotation ? `rotate(${view.rotation}deg)` : ''
+    target.style.transformOrigin = 'center center'
     // Never promote the sheet to a low-res compositor bitmap.
-    paper.style.willChange = 'auto'
+    target.style.willChange = 'auto'
+    target.classList.toggle('is-view-transformed', active)
+    target.classList.toggle('is-view-zoomed', zoom !== 1)
+  }
+  if (paper && paper !== target) {
+    clearInlineViewStyle(paper)
+    paper.style.setProperty('--view-zoom', String(zoom))
     paper.classList.toggle('is-view-transformed', active)
     paper.classList.toggle('is-view-zoomed', zoom !== 1)
-    paper.querySelectorAll<HTMLElement>('.editor-pane, .worksheet-layer, .lw-canvas-surface, .lw-drawing-board, .paper-ruling').forEach((element) => {
-      element.style.transform = ''
-      element.style.transformOrigin = ''
-      element.style.zoom = ''
-      element.style.willChange = ''
-    })
   }
+  const sheet = paper ?? target
+  sheet?.querySelectorAll<HTMLElement>(SHEET_LAYER_SELECTOR).forEach((element) => {
+    element.style.removeProperty('transform')
+    element.style.removeProperty('transform-origin')
+    element.style.removeProperty('will-change')
+    element.style.removeProperty('--view-zoom')
+    // CodeMirror can ignore inherited zoom. Pin the same specified value on
+    // the text column only — never zoom:'' / 1, that freezes markdown at 1×.
+    if (element.matches(TEXT_ZOOM_SELECTOR)) {
+      if (zoom === 1) element.style.removeProperty('zoom')
+      else element.style.zoom = String(zoom)
+    } else {
+      element.style.removeProperty('zoom')
+    }
+  })
   if (noteView) {
     noteView.classList.toggle('is-view-transformed', active)
     noteView.classList.toggle('is-view-zoomed', zoom !== 1)
@@ -102,26 +150,16 @@ export const clearPaperViewFromElements = (
   noteView: HTMLElement | null,
   extra?: HTMLElement | null,
 ) => {
-  const clear = (element: HTMLElement | null) => {
-    if (!element) return
-    element.style.transform = ''
-    element.style.transformOrigin = ''
-    element.style.zoom = ''
-    element.style.willChange = ''
-    element.style.removeProperty('--view-zoom')
-    element.classList.remove('is-view-transformed', 'is-view-zoomed')
+  const plane = resolvePaperViewTarget(paper, noteView)
+  if (plane && plane !== paper) clearInlineViewStyle(plane)
+  clearInlineViewStyle(paper)
+  paper?.querySelectorAll<HTMLElement>(SHEET_LAYER_SELECTOR).forEach((element) => {
+    clearInlineViewStyle(element)
+  })
+  if (noteView && noteView !== paper && noteView !== plane) {
+    noteView.classList.remove('is-view-transformed', 'is-view-zoomed')
   }
-  clear(paper)
-  if (paper) {
-    paper.querySelectorAll<HTMLElement>('.editor-pane, .worksheet-layer, .lw-canvas-surface, .lw-drawing-board, .paper-ruling').forEach((element) => {
-      element.style.transform = ''
-      element.style.transformOrigin = ''
-      element.style.zoom = ''
-      element.style.willChange = ''
-    })
-  }
-  clear(noteView)
-  clear(extra ?? null)
+  clearInlineViewStyle(extra ?? null)
 }
 
 export const zoomAroundPoint = (
@@ -183,7 +221,7 @@ export const scrollViewportToZoomPoint = (
   origin?: { x: number; y: number },
 ) => {
   if (previousZoom <= 0 || nextZoom <= 0 || previousZoom === nextZoom) return
-  const paper = scroller.querySelector<HTMLElement>('.unified-paper')
+  const paper = scroller.querySelector<HTMLElement>('.paper-sheet-plane, .unified-paper')
   const anchor = capturePaperAnchor(scroller, paper, origin)
   restorePaperAnchor(scroller, paper, anchor)
 }

@@ -306,6 +306,14 @@ export function createBrowserApi(): FaNotesApi {
     const meta = new Map(metaRows.map((row) => [row.key, row.value]))
     const savedSettings = meta.get('settings')
     settings = { ...localizedDefaults, ...(isRecord(savedSettings) ? savedSettings : {}) }
+    if (settings.experimentalHandwritingToTextSeenVersion !== WEB_VERSION) {
+      settings = {
+        ...settings,
+        experimentalHandwritingToText: false,
+        experimentalHandwritingToTextSeenVersion: WEB_VERSION,
+      }
+      await setMeta('settings', settings)
+    }
     serverBackup = storedServerBackup(meta.get('serverBackup'))
     serverBackupRuntimeStatus = serverBackup ? serverBackup.error ? 'error' : 'ready' : 'disabled'
     onboardingComplete = meta.get('onboardingComplete') === true

@@ -54,6 +54,7 @@ fs.writeFileSync(path.join(userData, 'config.json'), `${JSON.stringify({
     autoDownloadUpdates: false,
     spellcheck: true,
     reduceMotion: true,
+    experimentalHandwritingToText: true,
   },
   onboarding: { version: 1, completed: true },
 }, null, 2)}\n`, { mode: 0o600 })

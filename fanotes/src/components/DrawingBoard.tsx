@@ -281,6 +281,14 @@ const applyInkWindowToCanvases = (canvases: Array<HTMLCanvasElement | null>, win
   }
 }
 
+const wipeLiveInkCanvas = (canvas: HTMLCanvasElement | null) => {
+  if (!canvas || !canvas.width || !canvas.height) return
+  const context = canvas.getContext('2d', { alpha: true })
+  if (!context) return
+  context.setTransform(1, 0, 0, 1, 0, 0)
+  context.clearRect(0, 0, canvas.width, canvas.height)
+}
+
 const releasePointerCaptureSafe = (target: EventTarget | null, pointerId: number) => {
   if (!(target instanceof Element)) return
   try {
@@ -306,6 +314,54 @@ const clearInkCursor = () => {
 
 const isInkSurfaceTarget = (target: EventTarget | null) => (
   target instanceof Element && Boolean(target.closest('.lw-canvas-surface, .lw-tablet-canvas'))
+)
+
+/** Toolbar, ribbon and menus — never treat these as the ink surface. */
+const CHROME_HIT_SELECTOR = [
+  '.editor-toolbar',
+  '.toolbar-button',
+  '.ink-toolbar-slot',
+  '.lw-draw-toolbar',
+  '.lw-draw-notice',
+  '.lw-conversion-panel',
+  '.lw-art-studio',
+  '.lw-draw-footer',
+  '.editor-more-menu',
+  '.ribbon',
+  '.tabs-bar',
+  '.tabs-menu',
+  '.note-tab',
+  '.paper-view-hud',
+  '.sidebar',
+  '.statusbar',
+  '[data-fanotes-drawing-chrome]',
+  'button',
+  'select',
+  'input',
+  'textarea',
+  'a',
+  '[role="button"]',
+  '[role="menuitem"]',
+].join(', ')
+
+const elementFromPointSafe = (x: number, y: number) => {
+  try {
+    return document.elementFromPoint(x, y)
+  } catch {
+    return null
+  }
+}
+
+/** Real hit under the cursor — ignores leftover pointer-capture retargeting. */
+const hitTestChrome = (clientX: number, clientY: number) => {
+  const hit = elementFromPointSafe(clientX, clientY)
+  if (!(hit instanceof Element)) return null
+  if (hit.closest('.lw-canvas-surface, .lw-tablet-canvas')) return null
+  return hit.closest(CHROME_HIT_SELECTOR)
+}
+
+const clickableChromeControl = (chrome: Element) => (
+  chrome.closest('button, [role="button"], [role="menuitem"], select, a, input, textarea, label')
 )
 
 const releaseStuckInputFocus = (preferred?: HTMLElement | null) => {
@@ -464,6 +520,7 @@ export type DrawingBoardProps = {
     | 'enhancedMathLicenseAccepted'
     | 'qwenVisionRecognition'
     | 'qwenVisionLicenseAccepted'
+    | 'experimentalHandwritingToText'
     | 'viewZoomSpeed'
     | 'autoOpenConversion'
     | 'keepDrawingAfterInsert'
@@ -1474,8 +1531,10 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       committedCanvasDirtyRef.current = true
       applyInkWindowToCanvases([canvas, committedCanvas], inkWindow)
       if (activeStrokeRef.current) {
+        // Force a full live-canvas replace so a remesure cannot overdraw the
+        // previous bitmap (that leftover is the "ghost copy" of the writing).
         activeRenderedPointCountRef.current = 0
-        liveCanvasHasInkRef.current = false
+        liveCanvasHasInkRef.current = true
       }
     } else if (!canvasPixelSizeRef.current.width) {
       const nextSize = computeInkPixelSize(layoutWidth, windowLayoutHeight, viewZoomRef.current, inline)
@@ -1526,19 +1585,19 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       committedCanvasDirtyRef.current = false
     }
 
-    const context = canvas.getContext('2d', { alpha: true, desynchronized: true })
+    const context = canvas.getContext('2d', { alpha: true })
     if (!context) return
     context.imageSmoothingEnabled = !activeStrokeRef.current
     context.imageSmoothingQuality = 'low'
     const activeStroke = activeStrokeRef.current
     if (!activeStroke) {
       context.setTransform(1, 0, 0, 1, 0, 0)
-      if (liveCanvasHasInkRef.current) context.clearRect(0, 0, pixelWidth, pixelHeight)
+      context.clearRect(0, 0, pixelWidth, pixelHeight)
       activeRenderedPointCountRef.current = 0
       liveCanvasHasInkRef.current = false
       return
     }
-    if (activeRenderedPointCountRef.current === 0 && liveCanvasHasInkRef.current) {
+    if (activeRenderedPointCountRef.current === 0) {
       context.setTransform(1, 0, 0, 1, 0, 0)
       context.clearRect(0, 0, pixelWidth, pixelHeight)
       liveCanvasHasInkRef.current = false
@@ -1981,9 +2040,9 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     const noteView = paper?.closest('.unified-note-view') as HTMLElement | null
     applyPaperViewToElements(paper, noteView, { zoom, rotation, pan })
     if (surface) {
-      surface.style.transform = ''
-      surface.style.transformOrigin = ''
-      surface.style.zoom = ''
+      surface.style.removeProperty('transform')
+      surface.style.removeProperty('transform-origin')
+      surface.style.removeProperty('zoom')
     }
   }, [inline, paperView, resolvePaperElement])
 
@@ -2086,6 +2145,9 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         lastCapturedPointerIdRef.current = null
         pointerBoundsRef.current = null
         activeStrokeRef.current = null
+        wipeLiveInkCanvas(canvas)
+        activeRenderedPointCountRef.current = 0
+        liveCanvasHasInkRef.current = false
       }
     }
   }, [inline, inputActive, paperView, resetView])
@@ -2182,7 +2244,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     if (!canvas || !stroke) return false
     const { width: pixelWidth, height: pixelHeight, virtualHeight } = canvasPixelSizeRef.current
     if (!pixelWidth || !pixelHeight || !virtualHeight) return false
-    const context = canvas.getContext('2d', { alpha: true, desynchronized: true })
+    const context = canvas.getContext('2d', { alpha: true })
     if (!context) return false
     const inkWindow = inkWindowRef.current
     const liveSmoothing = settings.smoothing
@@ -2191,11 +2253,18 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     const resmooth = liveSmoothing > 0.04
       && liveCanvasHasInkRef.current
       && stroke.points.length - liveSmoothAtRef.current >= 5
-    if (resmooth) {
+    // Predictions and remesures must replace the live bitmap. Incremental
+    // overdraw of predicted events leaves a ghost copy of the writing that
+    // only disappears after the canvases remount.
+    const replaceLive = resmooth || predicted.length > 0 || activeRenderedPointCountRef.current === 0
+    if (replaceLive) {
       context.setTransform(1, 0, 0, 1, 0, 0)
       context.clearRect(0, 0, pixelWidth, pixelHeight)
       context.setTransform(1, 0, 0, 1, 0, -inkWindow.y0 * virtualHeight)
-      drawInkStroke(context, stroke, pixelWidth, virtualHeight, liveSmoothing, 1, sourceWidthRef.current)
+      const preview: InkStroke = predicted.length
+        ? { ...stroke, points: [...stroke.points, ...predicted.map(pointFromEvent)] }
+        : stroke
+      drawInkStroke(context, preview, pixelWidth, virtualHeight, liveSmoothing, 1, sourceWidthRef.current)
       activeRenderedPointCountRef.current = stroke.points.length
       liveSmoothAtRef.current = stroke.points.length
       liveCanvasHasInkRef.current = true
@@ -2212,22 +2281,6 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       )
       activeRenderedPointCountRef.current = stroke.points.length
       liveCanvasHasInkRef.current = true
-    }
-    if (predicted.length) {
-      const preview: InkStroke = {
-        ...stroke,
-        points: [...stroke.points, ...predicted.map(pointFromEvent)],
-      }
-      context.setTransform(1, 0, 0, 1, 0, -inkWindow.y0 * virtualHeight)
-      drawInkStroke(
-        context,
-        preview,
-        pixelWidth,
-        virtualHeight,
-        liveSmoothing,
-        Math.max(1, stroke.points.length),
-        sourceWidthRef.current,
-      )
     }
     return true
   }, [pointFromEvent, settings.smoothing])
@@ -2492,6 +2545,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   }, [clearRecognitionScope, settings.recognitionLanguage, sourceHeight])
 
   const handlePointerDown = useCallback((event: ReactPointerEvent<HTMLElement>) => {
+    if (hitTestChrome(event.clientX, event.clientY)) return
     if (activePointerRef.current !== null || (event.button !== 0 && event.pointerType !== 'pen')) return
     // Pen-only (Windows palm / resting hand): ignore finger, mouse and trackpad ink.
     if (settings.penOnly && event.pointerType !== 'pen') return
@@ -2750,6 +2804,9 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       const point = solverDoubleTapPointRef.current
       solverDoubleTapPointRef.current = null
       activeStrokeRef.current = null
+      wipeLiveInkCanvas(canvasRef.current)
+      activeRenderedPointCountRef.current = 0
+      liveCanvasHasInkRef.current = false
       endInteraction()
       if (event.type !== 'pointercancel') void openMathSolverAtPoint(point)
       scheduleRedraw()
@@ -2808,6 +2865,9 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       }
     }
     activeStrokeRef.current = null
+    wipeLiveInkCanvas(canvasRef.current)
+    activeRenderedPointCountRef.current = 0
+    liveCanvasHasInkRef.current = false
     const didShapeSnap = shapeSnappedRef.current
     shapeSnappedRef.current = false
     endInteraction()
@@ -2903,6 +2963,9 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     }
     const commitReadyStroke = (stroke: InkStroke | null, label: string) => {
       activeStrokeRef.current = null
+      wipeLiveInkCanvas(canvasRef.current)
+      activeRenderedPointCountRef.current = 0
+      liveCanvasHasInkRef.current = false
       if (!stroke || stroke.points.length < 2) {
         scheduleRedraw()
         return
@@ -2953,6 +3016,9 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     }
     if (event.type === 'cancel') {
       activeStrokeRef.current = null
+      wipeLiveInkCanvas(canvasRef.current)
+      activeRenderedPointCountRef.current = 0
+      liveCanvasHasInkRef.current = false
       scheduleRedraw()
       return
     }
@@ -2999,6 +3065,9 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     } else if (activeStrokeRef.current) {
       activeStrokeRef.current = null
       pointerBoundsRef.current = null
+      wipeLiveInkCanvas(canvasRef.current)
+      activeRenderedPointCountRef.current = 0
+      liveCanvasHasInkRef.current = false
       scheduleRedraw()
     }
     releaseInkPointerCaptures(
@@ -3076,6 +3145,25 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       else scrub(event.pointerId)
     }
     const onWindowPointerDown = (event: PointerEvent) => {
+      const chrome = hitTestChrome(event.clientX, event.clientY)
+      if (chrome) {
+        const stuck = activePointerRef.current !== null
+          || lastCapturedPointerIdRef.current !== null
+          || activeStrokeRef.current
+        if (stuck) forceEndActivePointer('cross-device')
+        else scrub(event.pointerId)
+        // Capture retargets the event onto the canvas. Replay the click on the
+        // real button so the first tap after writing still works.
+        const control = clickableChromeControl(chrome)
+        if (control instanceof HTMLElement && isInkSurfaceTarget(event.target) && event.target !== control) {
+          event.preventDefault()
+          event.stopPropagation()
+          queueMicrotask(() => {
+            if (typeof control.click === 'function') control.click()
+          })
+        }
+        return
+      }
       if (isInkSurfaceTarget(event.target)) {
         if (activePointerRef.current !== null && event.pointerId !== activePointerRef.current) {
           forceEndActivePointer('cross-device')
@@ -3399,6 +3487,10 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     requestedMode: RecognitionPreference = mode,
     scopedStrokes?: InkStroke[],
   ) => {
+    if (!settings.experimentalHandwritingToText) {
+      setNotice({ kind: 'info', text: 'Handschrift zu Text ist experimentell und in den Einstellungen ausgeschaltet.' })
+      return
+    }
     const engineStrokes: Stroke[] = snapshotStrokes(handwritingStrokes(scopedStrokes ?? strokesRef.current))
     if (!engineStrokes.length) return
     const runId = ++recognitionRunRef.current
@@ -3481,19 +3573,25 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       if (textModeLikely && qwenVisionReady) {
         try {
           const {
+            applyGlyphenWerkLegend,
             cleanQwenVisionText,
             renderQwenVisionImage,
             shouldPreferQwenVisionText,
           } = await import('../lib/qwenVisionRecognition')
           const visionImage = renderQwenVisionImage(engineStrokes, sourceWidth, sourceHeight)
           if (visionImage) {
+            const visionPage = await applyGlyphenWerkLegend(
+              visionImage,
+              (resourcesRef.current ?? loaded).samples,
+            )
             const vision = await recognizeQwenVision!({
-              pixels: visionImage.pixels,
-              width: visionImage.width,
-              height: visionImage.height,
-              lineCount: visionImage.lineCount,
+              pixels: visionPage.pixels,
+              width: visionPage.width,
+              height: visionPage.height,
+              lineCount: visionPage.lineCount,
               language: settings.recognitionLanguage === 'en' ? 'en' : 'de',
-              maxNewTokens: Math.min(512, Math.max(128, visionImage.lineCount * 48 + engineStrokes.length * 6 + 96)),
+              hasGlyphLegend: Boolean(visionPage.hasGlyphLegend),
+              maxNewTokens: Math.min(512, Math.max(128, visionPage.lineCount * 48 + engineStrokes.length * 6 + 96)),
             })
             if (runId !== recognitionRunRef.current) return
             const visionText = cleanQwenVisionText(vision.text || '')
@@ -3679,13 +3777,17 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     } finally {
       if (mountedRef.current && runId === recognitionRunRef.current) setIsRecognizing(false)
     }
-  }, [mode, onSettingsChange, settings.enhancedMathLicenseAccepted, settings.enhancedMathRecognition, settings.lastRecognitionMode, settings.qwenVisionLicenseAccepted, settings.qwenVisionRecognition, settings.recognitionLanguage, sourceHeight, sourceWidth])
+  }, [mode, onSettingsChange, settings.enhancedMathLicenseAccepted, settings.enhancedMathRecognition, settings.experimentalHandwritingToText, settings.lastRecognitionMode, settings.qwenVisionLicenseAccepted, settings.qwenVisionRecognition, settings.recognitionLanguage, sourceHeight, sourceWidth])
 
   useEffect(() => {
     recognizeLatestRef.current = recognize
   }, [recognize])
 
   const recognizePage = useCallback(() => {
+    if (!settings.experimentalHandwritingToText) {
+      setNotice({ kind: 'info', text: 'Handschrift zu Text ist experimentell und in den Einstellungen ausgeschaltet.' })
+      return
+    }
     closeMathSolverSelection()
     closeMathCorrectionSession()
     setMathCorrectorEnabled(false)
@@ -3695,7 +3797,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     setSelectionRect(null)
     setConversionOpen(true)
     void recognize(mode, handwritingStrokes(strokesRef.current))
-  }, [closeMathCorrectionSession, closeMathSolverSelection, mode, recognize])
+  }, [closeMathCorrectionSession, closeMathSolverSelection, mode, recognize, settings.experimentalHandwritingToText])
 
   const applyInkTransform = useCallback((mutatePoint: (x: number, y: number) => { x: number; y: number }) => {
     const indexes = new Set(selectedStrokeIndexesRef.current)
@@ -3761,6 +3863,10 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   }, [fitPageToInk, scheduleRedraw, setDirty, updateHistoryState])
 
   const beginSelectionRecognition = useCallback(() => {
+    if (!settings.experimentalHandwritingToText) {
+      setNotice({ kind: 'info', text: 'Handschrift zu Text ist experimentell und in den Einstellungen ausgeschaltet.' })
+      return
+    }
     closeMathSolverSelection()
     closeMathCorrectionSession()
     setMathCorrectorEnabled(false)
@@ -3776,9 +3882,10 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     setAutomaticResult(null)
     setNotice({ kind: 'info', text: 'Ziehe auf der Seite einen Rahmen um die Handschrift, die du konvertieren möchtest. Esc bricht ab.' })
     requestAnimationFrame(() => boardRef.current?.focus({ preventScroll: true }))
-  }, [closeMathCorrectionSession, closeMathSolverSelection])
+  }, [closeMathCorrectionSession, closeMathSolverSelection, settings.experimentalHandwritingToText])
 
   const updateHiddenTranscript = useCallback(async () => {
+    if (!settings.experimentalHandwritingToText) return
     const currentHandwriting = handwritingStrokes(strokesRef.current)
     if (!currentHandwriting.length) return
     const learningRun = ++contextualLearningRunRef.current
@@ -3931,7 +4038,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       // Background indexing must never interrupt freehand writing.
       console.error('Unsichtbares Handschrift-Transkript konnte nicht aktualisiert werden.', error)
     }
-  }, [activeMode, mode, settings.lastRecognitionMode, settings.recognitionLanguage, sourceHeight])
+  }, [activeMode, mode, settings.experimentalHandwritingToText, settings.lastRecognitionMode, settings.recognitionLanguage, sourceHeight])
 
   useEffect(() => {
     if (revision === 0 || !strokesRef.current.length) return
@@ -4328,6 +4435,10 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   }, [bumpInkRevision, closeMathSolverSelection, mathSolverInput, mathSolverInspection.inspection, mathSolverPlacement, mathSolverSelection, mathSolverVariable, penColor, penWidth, scheduleRedraw, setDirty, settings.pressureEnabled, sourceHeight, updateHistoryState])
 
   const toggleMathSolver = useCallback(() => {
+    if (!settings.experimentalHandwritingToText) {
+      setNotice({ kind: 'info', text: 'Handschrift zu Text ist experimentell und in den Einstellungen ausgeschaltet.' })
+      return
+    }
     if (mathSolverEnabled) commitPendingSolverTap()
     const enabled = !mathSolverEnabled
     setMathSolverEnabled(enabled)
@@ -4346,7 +4457,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     })
     bumpRevision()
     setDirty(true)
-  }, [bumpRevision, clearRecognitionScope, closeMathCorrectionSession, closeMathSolverSelection, commitPendingSolverTap, mathSolverEnabled, selectionPurpose, setDirty])
+  }, [bumpRevision, clearRecognitionScope, closeMathCorrectionSession, closeMathSolverSelection, commitPendingSolverTap, mathSolverEnabled, selectionPurpose, setDirty, settings.experimentalHandwritingToText])
 
   const beginMathCorrectionSelection = useCallback(() => {
     commitPendingSolverTap()
@@ -4373,6 +4484,10 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   }, [bumpRevision, closeMathCorrectionSession, closeMathSolverSelection, commitPendingSolverTap, mathSolverEnabled, setDirty])
 
   const toggleMathCorrector = useCallback(() => {
+    if (!settings.experimentalHandwritingToText) {
+      setNotice({ kind: 'info', text: 'Handschrift zu Text ist experimentell und in den Einstellungen ausgeschaltet.' })
+      return
+    }
     if (!mathCorrectorEnabled) {
       beginMathCorrectionSelection()
       return
@@ -4381,7 +4496,17 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     closeMathCorrectionSession()
     if (selectionPurpose === 'math-correction') clearRecognitionScope()
     setNotice({ kind: 'info', text: 'Mathematik-Korrigierer ausgeschaltet.' })
-  }, [beginMathCorrectionSelection, clearRecognitionScope, closeMathCorrectionSession, mathCorrectorEnabled, selectionPurpose])
+  }, [beginMathCorrectionSelection, clearRecognitionScope, closeMathCorrectionSession, mathCorrectorEnabled, selectionPurpose, settings.experimentalHandwritingToText])
+
+  useEffect(() => {
+    if (settings.experimentalHandwritingToText) return
+    setConversionOpen(false)
+    setMathSolverEnabled(false)
+    setMathCorrectorEnabled(false)
+    setSelectionMode((current) => current && selectionPurpose === 'edit' ? current : false)
+    closeMathSolverSelection()
+    closeMathCorrectionSession()
+  }, [closeMathCorrectionSession, closeMathSolverSelection, selectionPurpose, settings.experimentalHandwritingToText])
 
   const updateMathCorrectionLine = useCallback((lineId: string, input: string) => {
     setMathCorrectionSession((current) => current ? {
@@ -4644,26 +4769,26 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
             title="Getippten Text mit deinen trainierten Buchstaben als Handschrift einfügen"
             onClick={openTextToHandwriting}
           >
-            <Type size={16} /> Text → Handschrift
+            <Type size={16} /> <span className="lw-tool-label">Text → Handschrift</span>
           </button>
-          <button
+          {settings.experimentalHandwritingToText && <button
             type="button"
             className={mathSolverEnabled ? 'is-active' : ''}
             aria-pressed={mathSolverEnabled}
             title="Mathematik-Löser ein- oder ausschalten; danach einen Ausdruck doppeltippen"
             onClick={toggleMathSolver}
           >
-            <Calculator size={16} /> Mathe-Löser
-          </button>
-          <button
+            <Calculator size={16} /> <span className="lw-tool-label">Mathe-Löser</span>
+          </button>}
+          {settings.experimentalHandwritingToText && <button
             type="button"
             className={mathCorrectorEnabled ? 'is-active' : ''}
             aria-pressed={mathCorrectorEnabled}
             title="Rechenweg auswählen und den ersten falschen Schritt markieren"
             onClick={toggleMathCorrector}
           >
-            <ListChecks size={16} /> Mathe-Korrigierer
-          </button>
+            <ListChecks size={16} /> <span className="lw-tool-label">Mathe-Korrigierer</span>
+          </button>}
         </div>}
 
         {tool === 'pen' && inkMode === 'writing' ? <>
@@ -4755,10 +4880,10 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
             <button type="button" className="lw-draw-subtle" onClick={copySelectedInk} title="Auswahl duplizieren"><Copy size={14} /> <span className="lw-tool-label">Kopieren</span></button>
             <button type="button" className="lw-draw-subtle lw-danger" onClick={deleteSelectedInk} title="Auswahl löschen"><Trash2 size={14} /> <span className="lw-tool-label">Löschen</span></button>
           </>}
-          {inkMode === 'writing' && <button type="button" className={`lw-draw-subtle ${selectionMode && selectionPurpose === 'conversion' ? 'is-active' : ''}`} onClick={beginSelectionRecognition} disabled={!handwritingCount || isRecognizing} title="Einen frei gewählten Bereich von Handschrift in Text oder Mathematik konvertieren">
+          {settings.experimentalHandwritingToText && inkMode === 'writing' && <button type="button" className={`lw-draw-subtle ${selectionMode && selectionPurpose === 'conversion' ? 'is-active' : ''}`} onClick={beginSelectionRecognition} disabled={!handwritingCount || isRecognizing} title="Einen frei gewählten Bereich von Handschrift in Text oder Mathematik konvertieren">
             <ScanSearch size={15} /> <span className="lw-tool-label">Bereich</span>
           </button>}
-          {inkMode === 'writing' && <button type="button" className="lw-convert-action" onClick={recognizePage} disabled={!handwritingCount || isRecognizing} title="Die gesamte Handschrift-Seite konvertieren">
+          {settings.experimentalHandwritingToText && inkMode === 'writing' && <button type="button" className="lw-convert-action" onClick={recognizePage} disabled={!handwritingCount || isRecognizing} title="Die gesamte Handschrift-Seite konvertieren">
             {isRecognizing ? <LoaderCircle className="lw-spin" size={15} /> : <Sparkles size={15} />}
             <span className="lw-tool-label">Konvertieren</span>
           </button>}
@@ -5216,7 +5341,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
           </div>
         </div>
 
-        {conversionOpen && (inline ? (node: ReactNode) => createPortal(node, document.body) : (node: ReactNode) => node)(
+        {settings.experimentalHandwritingToText && conversionOpen && (inline ? (node: ReactNode) => createPortal(node, document.body) : (node: ReactNode) => node)(
         <aside className={`lw-conversion-panel ${inline ? 'is-viewport-chrome' : ''}`} aria-label="Handschrift konvertieren">
           <div className="lw-conversion-head">
             <span className="lw-spark"><Sparkles size={17} /></span>
@@ -5381,10 +5506,10 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
             <button type="button" className="lw-draw-subtle" onClick={copySelectedInk} title="Auswahl duplizieren"><Copy size={14} /> Kopieren</button>
             <button type="button" className="lw-draw-subtle lw-danger" onClick={deleteSelectedInk} title="Auswahl löschen"><Trash2 size={14} /> Löschen</button>
           </>}
-          {inkMode === 'writing' && <button type="button" className={`lw-draw-subtle ${selectionMode && selectionPurpose === 'conversion' ? 'is-active' : ''}`} onClick={beginSelectionRecognition} disabled={!handwritingCount || isRecognizing} title="Einen frei gewählten Bereich von Handschrift in Text oder Mathematik konvertieren">
+          {settings.experimentalHandwritingToText && inkMode === 'writing' && <button type="button" className={`lw-draw-subtle ${selectionMode && selectionPurpose === 'conversion' ? 'is-active' : ''}`} onClick={beginSelectionRecognition} disabled={!handwritingCount || isRecognizing} title="Einen frei gewählten Bereich von Handschrift in Text oder Mathematik konvertieren">
             <ScanSearch size={16} /> Bereich konvertieren
           </button>}
-          {inkMode === 'writing' && <button type="button" className="lw-convert-action" onClick={recognizePage} disabled={!handwritingCount || isRecognizing} title="Die gesamte Handschrift-Seite konvertieren">
+          {settings.experimentalHandwritingToText && inkMode === 'writing' && <button type="button" className="lw-convert-action" onClick={recognizePage} disabled={!handwritingCount || isRecognizing} title="Die gesamte Handschrift-Seite konvertieren">
             {isRecognizing ? <LoaderCircle className="lw-spin" size={16} /> : <Sparkles size={16} />}
             Seite konvertieren
           </button>}

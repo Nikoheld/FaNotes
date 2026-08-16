@@ -21,9 +21,7 @@ const USER_CONTENT_SELECTOR = [
   '.lm-result-source',
   '.lm-preview-empty b',
   '.vault-overview__recent-copy',
-  '.vault-overview__graph-label',
-  '.vault-overview__graph-note-label',
-  '.vault-overview__graph svg title',
+  '.vault-overview__name',
   '.homework-card-body',
   '.homework-day li',
   '.homework-field input',
@@ -131,6 +129,12 @@ function translateCore(source: string): string {
   }
   if (/^1 (?:Fach|Fächer)(.*)$/u.test(source)) return source.replace(/^1 (?:Fach|Fächer)/u, '1 subject')
   if (/^\d+ (?:Fach|Fächer)(.*)$/u.test(source)) return source.replace(/^([\d]+) (?:Fach|Fächer)/u, '$1 subjects')
+  if (/^1 Ordner$/u.test(source)) return '1 folder'
+  if (/^\d+ Ordner$/u.test(source)) return source.replace('Ordner', 'folders')
+  if (/^1 Unterordner$/u.test(source)) return '1 subfolder'
+  if (/^\d+ Unterordner$/u.test(source)) return source.replace('Unterordner', 'subfolders')
+  if (/^\d+ Einträge$/u.test(source)) return source.replace('Einträge', 'entries')
+  if (/^1 Eintrag$/u.test(source)) return '1 entry'
   if (/^1 Zeichen$/u.test(source)) return '1 character'
   if (/^\d+ Zeichen$/u.test(source)) return source.replace('Zeichen', 'characters')
   if (/^1 Wort$/u.test(source)) return '1 word'

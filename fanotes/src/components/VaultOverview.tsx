@@ -1,13 +1,10 @@
 import { type CSSProperties, useMemo } from 'react'
 import {
   ArrowUpRight,
-  BookOpen,
   Clock3,
   FilePlus2,
   FileText,
   Folder,
-  Network,
-  Sparkles,
   X,
 } from 'lucide-react'
 import type { NoteTab, VaultEntry } from '../types'
@@ -23,22 +20,15 @@ export type VaultOverviewProps = {
   onClose: () => void
 }
 
-type SubjectSummary = {
+type FolderRow = {
   id: string
   name: string
+  depth: number
   notes: VaultEntry[]
   latest?: VaultEntry
+  subfolders: number
+  color?: string
   hue: number
-}
-
-type GraphNode = {
-  id: string
-  label: string
-  kind: 'root' | 'folder' | 'note'
-  x: number
-  y: number
-  parentId?: string
-  hue?: number
 }
 
 const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' })
@@ -47,14 +37,13 @@ const dateFormatter = () => {
   const locale = getUiLocale()
   let formatter = dateFormatters.get(locale)
   if (!formatter) {
-    formatter = new Intl.DateTimeFormat(locale, { day: '2-digit', month: 'short', year: 'numeric' })
+    formatter = new Intl.DateTimeFormat(locale, { day: '2-digit', month: 'short' })
     dateFormatters.set(locale, formatter)
   }
   return formatter
 }
 
-const GRAPH_WIDTH = 760
-const GRAPH_HEIGHT = 270
+const MAX_FOLDER_DEPTH = 2
 
 function isMarkdown(entry: VaultEntry) {
   return (
@@ -87,7 +76,7 @@ function byNewest(left: VaultEntry, right: VaultEntry) {
 
 function formatModified(entry?: VaultEntry) {
   const time = entry ? modifiedTime(entry) : 0
-  return time ? dateFormatter().format(new Date(time)) : 'Noch nicht bearbeitet'
+  return time ? dateFormatter().format(new Date(time)) : '—'
 }
 
 function pathParent(path: string) {
@@ -95,97 +84,54 @@ function pathParent(path: string) {
   return parts.length > 1 ? parts.slice(0, -1).join(' / ') : 'Vault'
 }
 
-function shorten(value: string, limit: number) {
-  return value.length <= limit ? value : `${value.slice(0, Math.max(1, limit - 1))}…`
-}
-
 function subjectHue(index: number) {
   const palette = [257, 174, 211, 33, 296, 145, 12, 228, 92, 326]
   return palette[index % palette.length]
 }
 
-function summarizeSubjects(entries: VaultEntry[]): SubjectSummary[] {
-  const folders: SubjectSummary[] = entries
+function collectFolderRows(entries: VaultEntry[], depth = 0, hueOffset = 0): FolderRow[] {
+  const folders = entries
     .filter((entry) => entry.kind === 'folder')
     .sort((left, right) => collator.compare(left.name, right.name))
-    .map((folder, index) => {
-      const notes = collectNotes(folder.children ?? []).sort(byNewest)
-      return {
-        id: folder.relativePath,
-        name: folder.name,
-        notes,
-        latest: notes[0],
-        hue: subjectHue(index),
-      }
-    })
 
-  const looseNotes = entries.filter(isMarkdown).sort(byNewest)
-  if (looseNotes.length) {
-    folders.push({
-      id: '__root-notes__',
-      name: 'Allgemein',
-      notes: looseNotes,
-      latest: looseNotes[0],
-      hue: subjectHue(folders.length),
-    })
-  }
-
-  return folders
+  return folders.flatMap((folder, index) => {
+    const children = folder.children ?? []
+    const notes = collectNotes(children).sort(byNewest)
+    const row: FolderRow = {
+      id: folder.relativePath,
+      name: folder.name,
+      depth,
+      notes,
+      latest: notes[0],
+      subfolders: children.filter((child) => child.kind === 'folder').length,
+      color: folder.color,
+      hue: subjectHue(hueOffset + index),
+    }
+    if (depth >= MAX_FOLDER_DEPTH) return [row]
+    return [row, ...collectFolderRows(children, depth + 1, hueOffset + index * 5 + 1)]
+  })
 }
 
-function buildGraph(subjects: SubjectSummary[]): { nodes: GraphNode[]; hiddenSubjects: number } {
-  const visibleSubjects = subjects.slice(0, 9)
-  const nodes: GraphNode[] = [
-    { id: '__vault__', label: 'Mein Vault', kind: 'root', x: GRAPH_WIDTH / 2, y: GRAPH_HEIGHT / 2 },
-  ]
-
-  visibleSubjects.forEach((subject, index) => {
-    const count = visibleSubjects.length
-    const angle = -Math.PI / 2 + (Math.PI * 2 * index) / Math.max(count, 1)
-    const radiusX = count === 1 ? 0 : count === 2 ? 160 : 245
-    const radiusY = count <= 2 ? 64 : 82
-    const folderX = GRAPH_WIDTH / 2 + Math.cos(angle) * radiusX
-    const folderY = GRAPH_HEIGHT / 2 + Math.sin(angle) * radiusY
-    const folderId = `folder:${subject.id}`
-
-    nodes.push({
-      id: folderId,
-      label: subject.name,
-      kind: 'folder',
-      x: folderX,
-      y: folderY,
-      parentId: '__vault__',
-      hue: subject.hue,
+function summarizeFolders(entries: VaultEntry[]): FolderRow[] {
+  const rows = collectFolderRows(entries)
+  const looseNotes = entries.filter(isMarkdown).sort(byNewest)
+  if (looseNotes.length) {
+    rows.push({
+      id: '__root-notes__',
+      name: 'Allgemein',
+      depth: 0,
+      notes: looseNotes,
+      latest: looseNotes[0],
+      subfolders: 0,
+      hue: subjectHue(rows.length),
     })
-
-    const visibleNotes = subject.notes
-      .slice()
-      .sort((left, right) => collator.compare(left.relativePath, right.relativePath))
-      .slice(0, count > 6 ? 1 : 2)
-
-    visibleNotes.forEach((note, noteIndex) => {
-      const spread = visibleNotes.length === 1 ? 0 : (noteIndex - 0.5) * 0.62
-      const outwardAngle = angle + spread
-      const distanceX = count === 1 ? 75 : 49
-      const distanceY = count === 1 ? 38 : 34
-      nodes.push({
-        id: `note:${note.relativePath}`,
-        label: noteTitle(note),
-        kind: 'note',
-        x: Math.min(720, Math.max(40, folderX + Math.cos(outwardAngle) * distanceX)),
-        y: Math.min(247, Math.max(23, folderY + Math.sin(outwardAngle) * distanceY)),
-        parentId: folderId,
-        hue: subject.hue,
-      })
-    })
-  })
-
-  return { nodes, hiddenSubjects: Math.max(0, subjects.length - visibleSubjects.length) }
+  }
+  return rows
 }
 
 const styles = `
 .vault-overview {
-  --vault-overview-card-radius: 15px;
+  --vault-overview-card-radius: 12px;
   width: 100%;
   height: 100%;
   min-width: 0;
@@ -193,237 +139,202 @@ const styles = `
   position: relative;
   overflow: auto;
   color: var(--text);
-  background:
-    radial-gradient(circle at 12% 0%, rgba(var(--accent-rgb), .105), transparent 31%),
-    radial-gradient(circle at 92% 20%, color-mix(in srgb, var(--accent-secondary) 8%, transparent), transparent 28%),
-    var(--bg);
-}
-.vault-overview::before {
-  content: '';
-  position: absolute;
-  inset: 0 0 auto;
-  height: 1px;
-  pointer-events: none;
-  background: linear-gradient(90deg, transparent 10%, rgba(var(--accent-rgb), .32), transparent 90%);
+  background: var(--bg);
 }
 .vault-overview__shell {
-  width: min(1120px, calc(100% - 48px));
+  width: min(980px, calc(100% - 40px));
   margin: 0 auto;
-  padding: 34px 0 52px;
-  animation: vault-overview-enter .34s cubic-bezier(.22, 1, .36, 1) both;
+  padding: 26px 0 44px;
+  animation: vault-overview-enter .28s cubic-bezier(.22, 1, .36, 1) both;
 }
 .vault-overview__header {
   display: flex;
   align-items: flex-start;
-  gap: 24px;
-  margin-bottom: 27px;
+  gap: 18px;
+  margin-bottom: 18px;
 }
 .vault-overview__heading { min-width: 0; flex: 1; }
-.vault-overview__eyebrow {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  margin-bottom: 8px;
-  color: var(--accent-readable);
-  font-size: 10px;
-  font-weight: 720;
-  letter-spacing: .1em;
-  text-transform: uppercase;
-}
 .vault-overview__heading h1 {
   margin: 0;
   color: var(--text);
-  font-size: clamp(25px, 3vw, 36px);
-  font-weight: 720;
-  letter-spacing: -.045em;
-  line-height: 1.08;
+  font-size: 22px;
+  font-weight: 680;
+  letter-spacing: -.03em;
+  line-height: 1.15;
 }
 .vault-overview__heading p {
-  max-width: 570px;
-  margin: 9px 0 0;
+  margin: 6px 0 0;
   color: var(--text-muted);
-  font-size: 12px;
-  line-height: 1.65;
+  font-size: 11px;
+  line-height: 1.5;
 }
 .vault-overview__header-actions {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding-top: 3px;
+  padding-top: 1px;
 }
 .vault-overview__new-note,
 .vault-overview__close {
-  height: 34px;
-  border-radius: 9px;
+  height: 32px;
+  border-radius: 8px;
   cursor: pointer;
 }
 .vault-overview__new-note {
   display: flex;
   align-items: center;
-  gap: 7px;
-  padding: 0 12px;
+  gap: 6px;
+  padding: 0 11px;
   border: 1px solid color-mix(in srgb, var(--accent) 55%, var(--border-strong));
   color: var(--on-accent);
   background: var(--accent);
-  box-shadow: 0 8px 24px rgba(var(--accent-rgb), .2);
   font-size: 10px;
   font-weight: 650;
 }
-.vault-overview__new-note:hover { filter: brightness(1.07); transform: translateY(-1px); }
+.vault-overview__new-note:hover { filter: brightness(1.07); }
 .vault-overview__close {
-  width: 34px;
+  width: 32px;
   display: grid;
   place-items: center;
   padding: 0;
   border: 1px solid var(--border);
   color: var(--text-muted);
-  background: color-mix(in srgb, var(--panel-strong) 82%, transparent);
+  background: var(--panel);
 }
 .vault-overview__close:hover { color: var(--text); border-color: var(--border-strong); background: var(--panel-hover); }
 .vault-overview__stats {
   display: flex;
   align-items: center;
-  gap: 7px;
-  margin-bottom: 17px;
-}
-.vault-overview__stat {
-  min-height: 25px;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 0 9px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
+  gap: 8px;
+  margin-bottom: 14px;
   color: var(--text-muted);
-  background: color-mix(in srgb, var(--panel) 66%, transparent);
-  font-size: 9px;
+  font-size: 10px;
 }
-.vault-overview__stat strong { color: var(--text-soft); font-size: 10px; }
+.vault-overview__stats strong { color: var(--text-soft); font-weight: 680; }
+.vault-overview__stat-dot {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--border-strong);
+}
 .vault-overview__top-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1.55fr) minmax(250px, .75fr);
-  gap: 14px;
-  align-items: stretch;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 260px);
+  gap: 12px;
+  align-items: start;
 }
 .vault-overview__panel {
   min-width: 0;
   border: 1px solid var(--border);
   border-radius: var(--vault-overview-card-radius);
-  background: color-mix(in srgb, var(--panel) 84%, transparent);
-  box-shadow: 0 18px 55px rgba(0, 0, 0, .09);
+  background: color-mix(in srgb, var(--panel) 88%, transparent);
   overflow: hidden;
 }
 .vault-overview__section-head {
-  min-height: 48px;
+  min-height: 40px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding: 0 16px;
+  gap: 10px;
+  padding: 0 12px;
   border-bottom: 1px solid var(--border);
 }
-.vault-overview__section-title { min-width: 0; display: flex; align-items: center; gap: 8px; }
-.vault-overview__section-title > svg { color: var(--accent-readable); }
+.vault-overview__section-title { min-width: 0; display: flex; align-items: center; gap: 7px; }
+.vault-overview__section-title > svg { color: var(--text-muted); }
 .vault-overview__section-title h2 {
   margin: 0;
   color: var(--text-soft);
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 680;
-  letter-spacing: .015em;
+  letter-spacing: .04em;
+  text-transform: uppercase;
 }
 .vault-overview__section-head small { color: var(--text-muted); font-size: 9px; }
-.vault-overview__subjects {
+.vault-overview__list-head,
+.vault-overview__folder-row {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 8px;
-  padding: 11px;
+  grid-template-columns: minmax(0, 1.35fr) 64px minmax(0, 1.15fr) 72px;
+  align-items: center;
+  gap: 10px;
 }
-.vault-overview__subject-card {
-  min-width: 0;
-  min-height: 126px;
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  padding: 12px;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  color: var(--text);
-  background:
-    radial-gradient(circle at 100% 0%, hsla(var(--vault-overview-hue), 78%, 62%, .09), transparent 52%),
-    color-mix(in srgb, var(--panel-strong) 76%, transparent);
+.vault-overview__list-head {
+  padding: 7px 12px 6px;
+  color: var(--text-faint);
+  font-size: 8px;
+  font-weight: 720;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+.vault-overview__folders { display: flex; flex-direction: column; padding: 0 6px 6px; }
+.vault-overview__folder-row {
+  width: 100%;
+  min-height: 38px;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: 8px;
+  color: inherit;
+  background: transparent;
   cursor: pointer;
   text-align: left;
-  overflow: hidden;
-  transition: transform .16s ease, border-color .16s ease, background .16s ease;
 }
-.vault-overview__subject-card:hover {
-  transform: translateY(-2px);
-  border-color: hsla(var(--vault-overview-hue), 78%, 65%, .35);
-  background:
-    radial-gradient(circle at 100% 0%, hsla(var(--vault-overview-hue), 78%, 62%, .15), transparent 58%),
-    var(--panel-strong);
+.vault-overview__folder-row:hover { background: var(--panel-hover); }
+.vault-overview__folder-row.is-nested { color: var(--text-soft); }
+.vault-overview__folder-main {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-left: calc(var(--vault-overview-depth, 0) * 16px);
 }
-.vault-overview__subject-top { display: flex; align-items: flex-start; gap: 9px; }
-.vault-overview__subject-icon {
-  width: 31px;
-  height: 31px;
+.vault-overview__folder-icon {
+  width: 22px;
+  height: 22px;
   flex: none;
   display: grid;
   place-items: center;
-  border: 1px solid hsla(var(--vault-overview-hue), 75%, 65%, .18);
-  border-radius: 9px;
-  color: hsl(var(--vault-overview-hue), 72%, 69%);
-  background: hsla(var(--vault-overview-hue), 72%, 58%, .1);
+  border-radius: 6px;
+  color: hsl(var(--vault-overview-hue), 62%, 62%);
+  background: hsla(var(--vault-overview-hue), 62%, 56%, .12);
 }
-.vault-overview__subject-name { min-width: 0; flex: 1; padding-top: 1px; }
-.vault-overview__subject-name strong {
+.vault-overview__folder-icon.has-color {
+  color: var(--vault-overview-color);
+  background: color-mix(in srgb, var(--vault-overview-color) 16%, transparent);
+}
+.vault-overview__folder-copy { min-width: 0; }
+.vault-overview__folder-copy strong,
+.vault-overview__folder-copy span {
   display: block;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--text);
-  font-size: 12px;
-  font-weight: 670;
 }
-.vault-overview__subject-name span { display: block; margin-top: 3px; color: var(--text-muted); font-size: 9px; }
-.vault-overview__subject-arrow { color: var(--text-muted); opacity: .5; transition: transform .16s ease, opacity .16s ease; }
-.vault-overview__subject-card:hover .vault-overview__subject-arrow { opacity: 1; transform: translate(1px, -1px); color: hsl(var(--vault-overview-hue), 72%, 69%); }
-.vault-overview__subject-latest {
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-top: auto;
-  padding-top: 12px;
+.vault-overview__folder-copy strong { color: var(--text); font-size: 12px; font-weight: 620; }
+.vault-overview__folder-copy span { margin-top: 1px; color: var(--text-muted); font-size: 8px; }
+.vault-overview__count {
   color: var(--text-muted);
-  font-size: 8px;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
 }
-.vault-overview__subject-latest > span { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.vault-overview__subject-latest time { flex: none; color: color-mix(in srgb, var(--text-muted) 82%, transparent); }
+.vault-overview__latest,
+.vault-overview__date {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-muted);
+  font-size: 10px;
+}
+.vault-overview__date { text-align: right; font-variant-numeric: tabular-nums; }
 .vault-overview__empty {
-  min-height: 245px;
+  min-height: 180px;
   display: grid;
   place-items: center;
-  padding: 28px;
+  padding: 24px;
   text-align: center;
 }
-.vault-overview__empty-symbol {
-  width: 55px;
-  height: 55px;
-  display: grid;
-  place-items: center;
-  margin: 0 auto 13px;
-  border: 1px solid rgba(var(--accent-rgb), .18);
-  border-radius: 17px;
-  color: var(--accent-readable);
-  background: var(--panel-active);
-  box-shadow: 0 12px 35px rgba(var(--accent-rgb), .09);
-}
 .vault-overview__empty strong { display: block; color: var(--text); font-size: 13px; }
-.vault-overview__empty p { max-width: 300px; margin: 6px auto 14px; color: var(--text-muted); font-size: 10px; line-height: 1.55; }
+.vault-overview__empty p { max-width: 320px; margin: 6px auto 14px; color: var(--text-muted); font-size: 10px; line-height: 1.55; }
 .vault-overview__empty button {
-  height: 31px;
+  height: 30px;
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -439,14 +350,14 @@ const styles = `
 .vault-overview__recent-item {
   width: 100%;
   min-width: 0;
-  min-height: 49px;
+  min-height: 42px;
   display: grid;
-  grid-template-columns: 29px minmax(0, 1fr) auto;
+  grid-template-columns: 26px minmax(0, 1fr) auto;
   align-items: center;
   gap: 8px;
-  padding: 6px 7px;
+  padding: 5px 6px;
   border: 0;
-  border-radius: 9px;
+  border-radius: 8px;
   color: var(--text-soft);
   background: transparent;
   cursor: pointer;
@@ -454,91 +365,45 @@ const styles = `
 }
 .vault-overview__recent-item:hover { color: var(--text); background: var(--panel-hover); }
 .vault-overview__recent-icon {
-  width: 29px;
-  height: 29px;
+  width: 26px;
+  height: 26px;
   display: grid;
   place-items: center;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  color: var(--accent-readable);
-  background: color-mix(in srgb, var(--bg-elevated) 72%, transparent);
+  border-radius: 7px;
+  color: var(--text-muted);
+  background: var(--bg-elevated);
 }
 .vault-overview__recent-copy { min-width: 0; }
 .vault-overview__recent-copy strong,
 .vault-overview__recent-copy span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.vault-overview__recent-copy strong { font-size: 10px; font-weight: 610; }
-.vault-overview__recent-copy span { margin-top: 3px; color: var(--text-muted); font-size: 8px; }
+.vault-overview__recent-copy strong { font-size: 11px; font-weight: 610; }
+.vault-overview__recent-copy span { margin-top: 2px; color: var(--text-muted); font-size: 8px; }
 .vault-overview__recent-status { display: flex; align-items: center; gap: 5px; color: var(--text-muted); }
-.vault-overview__dirty { width: 5px; height: 5px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 8px rgba(var(--accent-rgb), .6); }
-.vault-overview__recent-empty { min-height: 245px; display: grid; place-items: center; padding: 24px; color: var(--text-muted); text-align: center; }
-.vault-overview__recent-empty > div { max-width: 230px; }
-.vault-overview__recent-empty svg { margin-bottom: 10px; color: var(--accent-readable); }
+.vault-overview__dirty { width: 5px; height: 5px; border-radius: 50%; background: var(--accent); }
+.vault-overview__recent-empty { min-height: 140px; display: grid; place-items: center; padding: 18px; color: var(--text-muted); text-align: center; }
+.vault-overview__recent-empty > div { max-width: 200px; }
+.vault-overview__recent-empty svg { margin-bottom: 8px; color: var(--text-muted); }
 .vault-overview__recent-empty strong { display: block; color: var(--text-soft); font-size: 11px; }
-.vault-overview__recent-empty p { margin: 5px 0 0; font-size: 9px; line-height: 1.55; }
-.vault-overview__graph-panel { margin-top: 14px; }
-.vault-overview__graph-wrap {
-  position: relative;
-  min-height: 245px;
-  padding: 4px 10px 11px;
-  overflow: hidden;
-  background:
-    radial-gradient(circle at 50% 50%, rgba(var(--accent-rgb), .045), transparent 34%),
-    linear-gradient(color-mix(in srgb, var(--text) 3%, transparent) 1px, transparent 1px),
-    linear-gradient(90deg, color-mix(in srgb, var(--text) 3%, transparent) 1px, transparent 1px);
-  background-size: auto, 24px 24px, 24px 24px;
-}
-.vault-overview__graph {
-  width: 100%;
-  height: clamp(230px, 28vw, 280px);
-  display: block;
-  overflow: visible;
-}
-.vault-overview__graph-line { stroke: color-mix(in srgb, var(--text-muted) 22%, transparent); stroke-width: 1; }
-.vault-overview__graph-line--primary { stroke: rgba(var(--accent-rgb), .28); stroke-width: 1.2; }
-.vault-overview__graph-orbit { fill: none; stroke: rgba(var(--accent-rgb), .08); stroke-width: 1; stroke-dasharray: 3 8; }
-.vault-overview__graph-root-halo { fill: rgba(var(--accent-rgb), .08); }
-.vault-overview__graph-root { fill: var(--accent); stroke: color-mix(in srgb, var(--on-accent) 38%, transparent); stroke-width: 1; filter: url(#vault-overview-glow); }
-.vault-overview__graph-folder-halo { fill: hsla(var(--vault-overview-node-hue), 72%, 58%, .09); }
-.vault-overview__graph-folder { fill: color-mix(in srgb, var(--panel-strong) 88%, hsl(var(--vault-overview-node-hue), 65%, 58%)); stroke: hsla(var(--vault-overview-node-hue), 78%, 70%, .72); stroke-width: 1.2; }
-.vault-overview__graph-note { fill: hsl(var(--vault-overview-node-hue), 72%, 68%); stroke: color-mix(in srgb, var(--bg) 70%, transparent); stroke-width: 2.5; }
-.vault-overview__graph-root-text { fill: var(--on-accent); font-size: 9px; font-weight: 760; letter-spacing: .04em; text-anchor: middle; }
-.vault-overview__graph-label { fill: var(--text-soft); font-size: 8px; font-weight: 620; text-anchor: middle; }
-.vault-overview__graph-note-label { fill: var(--text-muted); font-size: 6.8px; }
-.vault-overview__graph-legend { display: flex; align-items: center; gap: 13px; color: var(--text-muted); font-size: 8px; }
-.vault-overview__legend-item { display: inline-flex; align-items: center; gap: 5px; }
-.vault-overview__legend-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 8px rgba(var(--accent-rgb), .28); }
-.vault-overview__legend-dot--note { width: 5px; height: 5px; background: var(--accent-secondary); }
-.vault-overview__graph-empty-copy {
-  position: absolute;
-  left: 50%;
-  bottom: 21px;
-  transform: translateX(-50%);
-  width: max-content;
-  max-width: calc(100% - 32px);
-  color: var(--text-muted);
-  font-size: 9px;
-  text-align: center;
-}
+.vault-overview__recent-empty p { margin: 5px 0 0; font-size: 9px; line-height: 1.5; }
 @keyframes vault-overview-enter {
-  from { opacity: 0; transform: translateY(7px); }
+  from { opacity: 0; transform: translateY(6px); }
   to { opacity: 1; transform: translateY(0); }
 }
-@media (max-width: 1040px) {
-  .vault-overview__shell { width: min(100% - 30px, 940px); padding-top: 25px; }
-  .vault-overview__top-grid { grid-template-columns: minmax(0, 1fr) 245px; }
-  .vault-overview__subjects { grid-template-columns: repeat(auto-fit, minmax(155px, 1fr)); }
-  .vault-overview__subject-card { min-height: 116px; }
-}
-@media (max-width: 760px) {
-  .vault-overview__header { gap: 12px; }
-  .vault-overview__new-note span { display: none; }
-  .vault-overview__new-note { width: 34px; justify-content: center; padding: 0; }
+@media (max-width: 860px) {
+  .vault-overview__shell { width: min(100% - 28px, 860px); padding-top: 20px; }
   .vault-overview__top-grid { grid-template-columns: 1fr; }
-  .vault-overview__subjects { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .vault-overview__list-head, .vault-overview__folder-row { grid-template-columns: minmax(0, 1.4fr) 52px minmax(0, 1fr); }
+  .vault-overview__date { display: none; }
+}
+@media (max-width: 640px) {
+  .vault-overview__header { gap: 10px; }
+  .vault-overview__new-note span { display: none; }
+  .vault-overview__new-note { width: 32px; justify-content: center; padding: 0; }
+  .vault-overview__list-head, .vault-overview__folder-row { grid-template-columns: minmax(0, 1fr) 48px; }
+  .vault-overview__latest { display: none; }
 }
 @media (prefers-reduced-motion: reduce) {
   .vault-overview__shell { animation: none; }
-  .vault-overview__subject-card, .vault-overview__new-note { transition: none; }
 }
 `
 
@@ -549,12 +414,13 @@ export function VaultOverview({
   onCreateNote,
   onClose,
 }: VaultOverviewProps) {
-  const subjects = useMemo(() => summarizeSubjects(entries), [entries])
+  const folders = useMemo(() => summarizeFolders(entries), [entries])
   const allNotes = useMemo(() => collectNotes(entries), [entries])
   const noteDetails = useMemo(
     () => new Map(allNotes.map((entry) => [entry.relativePath, entry])),
     [allNotes],
   )
+  const topFolders = useMemo(() => folders.filter((row) => row.depth === 0).length, [folders])
   const recentTabs = useMemo(() => {
     const seen = new Set<string>()
     return openTabs
@@ -565,13 +431,8 @@ export function VaultOverview({
         seen.add(tab.path)
         return true
       })
-      .slice(0, 6)
+      .slice(0, 8)
   }, [openTabs])
-  const graph = useMemo(() => buildGraph(subjects), [subjects])
-  const graphNodes = useMemo(
-    () => new Map(graph.nodes.map((node) => [node.id, node])),
-    [graph.nodes],
-  )
 
   const openAndClose = (path: string) => {
     void onOpen(path)
@@ -589,12 +450,8 @@ export function VaultOverview({
       <div className="vault-overview__shell">
         <header className="vault-overview__header">
           <div className="vault-overview__heading">
-            <div className="vault-overview__eyebrow">
-              <Sparkles aria-hidden="true" size={12} />
-              Wissensraum
-            </div>
-            <h1 id="vault-overview-title">Dein Vault auf einen Blick</h1>
-            <p>Fächer, Notizen und die Verbindungen dazwischen – vollständig lokal und als offene Markdown-Dateien gespeichert.</p>
+            <h1 id="vault-overview-title">Ordnerübersicht</h1>
+            <p>Alle Ordner auf einen Blick. Tippe eine Zeile an, um die letzte Notiz zu öffnen.</p>
           </div>
           <div className="vault-overview__header-actions">
             <button className="vault-overview__new-note" type="button" onClick={createAndClose}>
@@ -614,88 +471,85 @@ export function VaultOverview({
         </header>
 
         <div className="vault-overview__stats" aria-label="Vault-Statistik">
-          <span className="vault-overview__stat">
-            <Folder aria-hidden="true" size={11} />
-            <strong>{subjects.length}</strong> {subjects.length === 1 ? 'Fach' : 'Fächer'}
-          </span>
-          <span className="vault-overview__stat">
-            <FileText aria-hidden="true" size={11} />
-            <strong>{allNotes.length}</strong> {allNotes.length === 1 ? 'Notiz' : 'Notizen'}
-          </span>
-          <span className="vault-overview__stat">
-            <Network aria-hidden="true" size={11} /> lokal verbunden
-          </span>
+          <span><strong>{topFolders}</strong> {topFolders === 1 ? 'Ordner' : 'Ordner'}</span>
+          <i className="vault-overview__stat-dot" aria-hidden="true" />
+          <span><strong>{allNotes.length}</strong> {allNotes.length === 1 ? 'Notiz' : 'Notizen'}</span>
         </div>
 
         <div className="vault-overview__top-grid">
           <section className="vault-overview__panel" aria-labelledby="vault-overview-subjects-title">
             <header className="vault-overview__section-head">
               <div className="vault-overview__section-title">
-                <BookOpen aria-hidden="true" size={14} />
-                <h2 id="vault-overview-subjects-title">Deine Fächer</h2>
+                <Folder aria-hidden="true" size={13} />
+                <h2 id="vault-overview-subjects-title">Deine Ordner</h2>
               </div>
-              <small>{subjects.length ? 'Zuletzt bearbeitete Notiz öffnen' : 'Bereit für dein erstes Fach'}</small>
+              <small>{folders.length ? `${folders.length} Einträge` : 'Bereit für dein erstes Fach'}</small>
             </header>
 
-            {subjects.length ? (
-              <div className="vault-overview__subjects">
-                {subjects.map((subject) => {
-                  const cardStyle = {
-                    '--vault-overview-hue': String(subject.hue),
-                  } as CSSProperties
-                  const canOpen = Boolean(subject.latest)
-                  const actionLabel = canOpen
-                    ? `${subject.name}: ${noteTitle(subject.latest!)} öffnen`
-                    : `${subject.name}: erste Notiz erstellen`
+            {folders.length ? (
+              <>
+                <div className="vault-overview__list-head" aria-hidden="true">
+                  <span>Ordner</span>
+                  <span>Notizen</span>
+                  <span>Zuletzt</span>
+                  <span>Datum</span>
+                </div>
+                <div className="vault-overview__folders">
+                  {folders.map((folder) => {
+                    const style = {
+                      '--vault-overview-hue': String(folder.hue),
+                      '--vault-overview-depth': String(folder.depth),
+                      ...(folder.color ? { '--vault-overview-color': folder.color } : {}),
+                    } as CSSProperties
+                    const canOpen = Boolean(folder.latest)
+                    const actionLabel = canOpen
+                      ? `${folder.name}: ${noteTitle(folder.latest!)} öffnen`
+                      : `${folder.name}: erste Notiz erstellen`
 
-                  return (
-                    <button
-                      aria-label={actionLabel}
-                      className="vault-overview__subject-card"
-                      key={subject.id}
-                      style={cardStyle}
-                      type="button"
-                      onClick={() =>
-                        subject.latest
-                          ? openAndClose(subject.latest.relativePath)
-                          : createAndClose()
-                      }
-                    >
-                      <span className="vault-overview__subject-top">
-                        <span className="vault-overview__subject-icon">
-                          <Folder aria-hidden="true" size={15} />
-                        </span>
-                        <span className="vault-overview__subject-name">
-                          <strong>{subject.name}</strong>
-                          <span>
-                            {subject.notes.length} {subject.notes.length === 1 ? 'Notiz' : 'Notizen'}
+                    return (
+                      <button
+                        aria-label={actionLabel}
+                        className={`vault-overview__folder-row ${folder.depth ? 'is-nested' : ''}`}
+                        key={folder.id}
+                        style={style}
+                        type="button"
+                        onClick={() =>
+                          folder.latest
+                            ? openAndClose(folder.latest.relativePath)
+                            : createAndClose()
+                        }
+                      >
+                        <span className="vault-overview__folder-main">
+                          <span className={`vault-overview__folder-icon ${folder.color ? 'has-color' : ''}`}>
+                            <Folder aria-hidden="true" size={13} />
+                          </span>
+                          <span className="vault-overview__folder-copy">
+                            <strong className="vault-overview__name">{folder.name}</strong>
+                            {folder.subfolders > 0 && (
+                              <span>
+                                {folder.subfolders} {folder.subfolders === 1 ? 'Unterordner' : 'Unterordner'}
+                              </span>
+                            )}
                           </span>
                         </span>
-                        <ArrowUpRight
-                          aria-hidden="true"
-                          className="vault-overview__subject-arrow"
-                          size={14}
-                        />
-                      </span>
-                      <span className="vault-overview__subject-latest">
-                        <Clock3 aria-hidden="true" size={10} />
-                        <span>{subject.latest ? noteTitle(subject.latest) : 'Erste Notiz anlegen'}</span>
-                        {subject.latest && <time>{formatModified(subject.latest)}</time>}
-                      </span>
-                    </button>
-                  )
-                })}
-              </div>
+                        <span className="vault-overview__count">{folder.notes.length}</span>
+                        <span className="vault-overview__latest">
+                          {folder.latest
+                            ? <span className="vault-overview__name">{noteTitle(folder.latest)}</span>
+                            : 'Erste Notiz anlegen'}
+                        </span>
+                        <time className="vault-overview__date">{formatModified(folder.latest)}</time>
+                      </button>
+                    )
+                  })}
+                </div>
+              </>
             ) : (
               <div className="vault-overview__empty">
                 <div>
-                  <span className="vault-overview__empty-symbol">
-                    <BookOpen aria-hidden="true" size={23} />
-                  </span>
-                  <strong>Dein Wissensraum wartet</strong>
+                  <strong>Noch keine Ordner</strong>
                   <p>
-                    Beginne mit einer Markdown-Notiz. Sobald du Fachordner anlegst, erscheinen
-                    sie hier als eigene Bereiche.
+                    Lege einen Fachordner an oder schreibe eine Notiz. Die Übersicht füllt sich automatisch.
                   </p>
                   <button type="button" onClick={createAndClose}>
                     <FilePlus2 aria-hidden="true" size={12} /> Erste Notiz erstellen
@@ -708,7 +562,7 @@ export function VaultOverview({
           <aside className="vault-overview__panel" aria-labelledby="vault-overview-recent-title">
             <header className="vault-overview__section-head">
               <div className="vault-overview__section-title">
-                <Clock3 aria-hidden="true" size={14} />
+                <Clock3 aria-hidden="true" size={13} />
                 <h2 id="vault-overview-recent-title">Zuletzt geöffnet</h2>
               </div>
               <small>{recentTabs.length ? `${recentTabs.length} im Verlauf` : 'Noch leer'}</small>
@@ -744,122 +598,14 @@ export function VaultOverview({
             ) : (
               <div className="vault-overview__recent-empty">
                 <div>
-                  <Clock3 aria-hidden="true" size={22} />
+                  <Clock3 aria-hidden="true" size={18} />
                   <strong>Noch keine offenen Notizen</strong>
-                  <p>Geöffnete Dokumente bleiben hier griffbereit, solange du an ihnen arbeitest.</p>
+                  <p>Geöffnete Dokumente bleiben hier griffbereit.</p>
                 </div>
               </div>
             )}
           </aside>
         </div>
-
-        <section className="vault-overview__panel vault-overview__graph-panel" aria-labelledby="vault-overview-graph-title">
-          <header className="vault-overview__section-head">
-            <div className="vault-overview__section-title">
-              <Network aria-hidden="true" size={14} />
-              <h2 id="vault-overview-graph-title">Wissensgraph</h2>
-            </div>
-            <div className="vault-overview__graph-legend" aria-hidden="true">
-              <span className="vault-overview__legend-item">
-                <i className="vault-overview__legend-dot" /> Fach
-              </span>
-              <span className="vault-overview__legend-item">
-                <i className="vault-overview__legend-dot vault-overview__legend-dot--note" /> Notiz
-              </span>
-              {graph.hiddenSubjects > 0 && <span>+ {graph.hiddenSubjects} weitere</span>}
-            </div>
-          </header>
-          <div className="vault-overview__graph-wrap">
-            <svg
-              aria-label={`Visueller Wissensgraph mit ${subjects.length} Fächern und ${allNotes.length} Notizen`}
-              className="vault-overview__graph"
-              preserveAspectRatio="xMidYMid meet"
-              role="img"
-              viewBox={`0 0 ${GRAPH_WIDTH} ${GRAPH_HEIGHT}`}
-            >
-              <defs>
-                <linearGradient id="vault-overview-root-gradient" x1="0" x2="1" y1="0" y2="1">
-                  <stop offset="0" stopColor="var(--accent)" />
-                  <stop offset="1" stopColor="var(--accent-secondary)" />
-                </linearGradient>
-                <filter id="vault-overview-glow" height="220%" width="220%" x="-60%" y="-60%">
-                  <feGaussianBlur result="blur" stdDeviation="4" />
-                  <feMerge>
-                    <feMergeNode in="blur" />
-                    <feMergeNode in="SourceGraphic" />
-                  </feMerge>
-                </filter>
-              </defs>
-              <ellipse
-                className="vault-overview__graph-orbit"
-                cx={GRAPH_WIDTH / 2}
-                cy={GRAPH_HEIGHT / 2}
-                rx="245"
-                ry="82"
-              />
-              {graph.nodes.map((node) => {
-                if (!node.parentId) return null
-                const parent = graphNodes.get(node.parentId)
-                if (!parent) return null
-                return (
-                  <line
-                    className={`vault-overview__graph-line ${
-                      node.kind === 'folder' ? 'vault-overview__graph-line--primary' : ''
-                    }`}
-                    key={`line:${node.id}`}
-                    x1={parent.x}
-                    x2={node.x}
-                    y1={parent.y}
-                    y2={node.y}
-                  />
-                )
-              })}
-              {graph.nodes.map((node) => {
-                if (node.kind === 'root') {
-                  return (
-                    <g key={node.id}>
-                      <circle className="vault-overview__graph-root-halo" cx={node.x} cy={node.y} r="28" />
-                      <circle className="vault-overview__graph-root" cx={node.x} cy={node.y} r="18" />
-                      <text className="vault-overview__graph-root-text" x={node.x} y={node.y + 3}>LW</text>
-                    </g>
-                  )
-                }
-
-                const nodeStyle = {
-                  '--vault-overview-node-hue': String(node.hue ?? 257),
-                } as CSSProperties
-
-                if (node.kind === 'folder') {
-                  return (
-                    <g key={node.id} style={nodeStyle}>
-                      <title>{node.label}</title>
-                      <circle className="vault-overview__graph-folder-halo" cx={node.x} cy={node.y} r="20" />
-                      <circle className="vault-overview__graph-folder" cx={node.x} cy={node.y} r="11" />
-                      <text className="vault-overview__graph-label" x={node.x} y={node.y + 25}>
-                        {shorten(node.label, 18)}
-                      </text>
-                    </g>
-                  )
-                }
-
-                return (
-                  <g key={node.id} style={nodeStyle}>
-                    <title>{node.label}</title>
-                    <circle className="vault-overview__graph-note" cx={node.x} cy={node.y} r="5" />
-                    <text className="vault-overview__graph-note-label" x={node.x + 9} y={node.y + 2.5}>
-                      {shorten(node.label, 13)}
-                    </text>
-                  </g>
-                )
-              })}
-            </svg>
-            {!subjects.length && (
-              <div className="vault-overview__graph-empty-copy">
-                Lege Fächer und Notizen an – dein Graph wächst automatisch mit.
-              </div>
-            )}
-          </div>
-        </section>
       </div>
     </section>
   )

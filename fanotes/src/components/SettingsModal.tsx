@@ -11,6 +11,7 @@ import {
   Download,
   FileInput,
   FileText,
+  FlaskConical,
   FolderOpen,
   Keyboard,
   KeyRound,
@@ -37,7 +38,7 @@ import { getUiLocale } from '../i18n'
 import { bestContrastText } from '../lib/colorContrast'
 import type { AppSettings, EnhancedMathRecognitionState, OneNoteImportResult, QwenVisionState, ServerBackupState, UpdateState } from '../types'
 
-type SettingsSection = 'appearance' | 'editor' | 'drawing' | 'files' | 'updates' | 'accessibility' | 'advanced'
+type SettingsSection = 'appearance' | 'editor' | 'drawing' | 'files' | 'updates' | 'accessibility' | 'experimental' | 'advanced'
 
 export type SettingsModalProps = {
   platform?: string
@@ -64,13 +65,14 @@ const SECTIONS: { id: SettingsSection; label: string; description: string; icon:
   { id: 'files', label: 'Dateien & Vault', description: 'Import, Ordner und Speichern', icon: FolderOpen, count: 7 },
   { id: 'updates', label: 'Updates', description: 'Stable, Beta und Sicherheit', icon: RefreshCw, count: 4 },
   { id: 'accessibility', label: 'Bedienung', description: 'Bewegung und Lesbarkeit', icon: Accessibility, count: 3 },
+  { id: 'experimental', label: 'Experimentell', description: 'Unfertige Funktionen, standardmässig aus', icon: FlaskConical, count: 1 },
   { id: 'advanced', label: 'Erweitert', description: 'Ressourcen, Datenschutz und App-Daten', icon: Code2, count: 10 },
 ]
 
 const SECTION_GROUPS: Array<{ label: string; sections: SettingsSection[] }> = [
   { label: 'Aussehen & Schreiben', sections: ['appearance', 'editor'] },
   { label: 'Stift & Arbeitsbereich', sections: ['drawing', 'files'] },
-  { label: 'FaNotes & System', sections: ['updates', 'accessibility', 'advanced'] },
+  { label: 'FaNotes & System', sections: ['updates', 'accessibility', 'experimental', 'advanced'] },
 ]
 
 type SettingsSearchItem = {
@@ -98,6 +100,7 @@ const SETTINGS_SEARCH_ITEMS: SettingsSearchItem[] = [
   { label: 'Durchkritzel-Empfindlichkeit', detail: 'Stift & Erkennung', section: 'drawing', target: 'settings-tablet', keywords: 'löschen radierer scribble sensitivity' },
   { label: 'Form-Erkennung', detail: 'Stift & Erkennung', section: 'drawing', target: 'settings-tablet', keywords: 'form zirkel kreis linie rechteck dreieck glätten snap stillhalten empfindlichkeit' },
   { label: 'Handschrifterkennung', detail: 'Stift & Erkennung', section: 'drawing', target: 'settings-recognition', keywords: 'ocr text mathematik automatisch sprache konvertieren suchindex' },
+  { label: 'Handschrift zu Text', detail: 'Experimentell', section: 'experimental', target: 'settings-experimental', keywords: 'experimentell ocr konvertieren mathe korrigierer löser suchindex qwen vision handschrift text' },
   { label: 'Vault & Speicherort', detail: 'Dateien & Vault', section: 'files', target: 'settings-vault', keywords: 'ordner wechseln pfad notizen markdown nas browser' },
   { label: 'Microsoft OneNote importieren', detail: 'Dateien & Vault', section: 'files', target: 'settings-onenote', keywords: 'one onetoc2 onepkg onedrive zip notizbuch migration' },
   { label: 'Server-Backup', detail: 'Dateien & Vault', section: 'files', target: 'settings-backup', keywords: 'sicherung cloud wiederherstellen recovery kopie' },
@@ -698,7 +701,7 @@ export function SettingsModal({
                     </div>
                   </SettingRow>
                   <SettingRow title="Lokales Kontextlernen" description="Löst unsichere Buchstaben anhand plausibler Wörter auf und übernimmt ausschließlich sichere Entscheidungen als begrenzte persönliche Trainingsbeispiele."><span>Automatisch aktiv</span></SettingRow>
-                  <SettingRow title="Unsichtbarer Suchindex" description="Die Seite bleibt Handschrift. Nur die Vault-Suche nutzt im Hintergrund eine lokale Transkription."><span>Immer lokal aktiv</span></SettingRow>
+                  <SettingRow title="Unsichtbarer Suchindex" description="Nur aktiv, wenn „Handschrift zu Text“ unter Experimentell eingeschaltet ist. Die Seite bleibt Handschrift; die Vault-Suche nutzt dann im Hintergrund eine lokale Transkription."><span>{settings.experimentalHandwritingToText ? 'Lokal aktiv' : 'Experimentell aus'}</span></SettingRow>
                   <SettingRow title="Zeichnung nach Einfügen behalten"><Toggle label="Zeichnung behalten" checked={settings.keepDrawingAfterInsert} onChange={(value) => update('keepDrawingAfterInsert', value)} /></SettingRow>
                 </div>
               </>
@@ -877,6 +880,33 @@ export function SettingsModal({
                 <SettingRow title="Bewegung reduzieren" description="Deaktiviert dekorative Übergänge und Animationen."><Toggle label="Bewegung reduzieren" checked={settings.reduceMotion} onChange={(value) => update('reduceMotion', value)} /></SettingRow>
                 <SettingRow title="Seitenleiste"><Range value={settings.sidebarWidth} min={210} max={430} step={10} suffix=" px" onChange={(value) => update('sidebarWidth', value)} /></SettingRow>
                 <SettingRow title="Informationsleiste"><Range value={settings.rightPanelWidth} min={220} max={430} step={10} suffix=" px" onChange={(value) => update('rightPanelWidth', value)} /></SettingRow>
+              </div>
+            )}
+
+            {active === 'experimental' && (
+              <div id="settings-experimental" className="setting-card">
+                <div className="setting-card-title">
+                  <FlaskConical size={16} />
+                  <span>Experimentelle Funktionen</span>
+                  <small className="settings-feature-badge">Standard aus</small>
+                </div>
+                <SettingRow
+                  title="Handschrift zu Text"
+                  description="Schaltet Konvertieren, Bereichserkennung, den unsichtbaren Suchindex sowie Mathe-Löser und Mathe-Korrigierer ein. Nach jedem Update bleibt der Schalter aus, bis du ihn hier wieder aktivierst. Die Erkennung bleibt lokal auf diesem Gerät."
+                >
+                  <Toggle
+                    label="Handschrift zu Text"
+                    checked={settings.experimentalHandwritingToText}
+                    onChange={(value) => update('experimentalHandwritingToText', value)}
+                  />
+                </SettingRow>
+                <div className="settings-resource-note">
+                  <TriangleAlert size={14} />
+                  <span>
+                    Unfertige Erkennung: Ergebnisse können falsch sein. GlyphenWerk-Training und Text → Handschrift bleiben unabhängig von diesem Schalter nutzbar.
+                    {settings.experimentalHandwritingToText ? ' Qwen3-VL nutzt deine GlyphenWerk-Buchstaben als Legende, wenn das NPU-Modell geladen ist.' : ''}
+                  </span>
+                </div>
               </div>
             )}
 

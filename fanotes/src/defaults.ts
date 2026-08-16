@@ -52,6 +52,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   enhancedMathLicenseAccepted: false,
   qwenVisionRecognition: false,
   qwenVisionLicenseAccepted: false,
+  experimentalHandwritingToText: false,
+  experimentalHandwritingToTextSeenVersion: '',
   ocrModelKeepAliveSeconds: 120,
   backgroundTaskLimit: 0,
   lmStudioBaseUrl: 'http://127.0.0.1:1234',

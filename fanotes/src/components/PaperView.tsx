@@ -92,12 +92,14 @@ export function PaperView({ children, className = '', viewKey, showHud = true }:
     const zoom = clampViewZoom(nextZoom)
     if (zoom === current.zoom) return
     const scroller = noteViewRef.current
-    const paper = scroller?.querySelector<HTMLElement>('.unified-paper') ?? null
-    const anchor = scroller ? capturePaperAnchor(scroller, paper, originClient) : null
+    const sheet = scroller?.querySelector<HTMLElement>('.paper-sheet-plane')
+      ?? scroller?.querySelector<HTMLElement>('.unified-paper')
+      ?? null
+    const anchor = scroller ? capturePaperAnchor(scroller, sheet, originClient) : null
     apply(zoomAroundPoint(current, zoom))
-    if (scroller && paper && anchor) {
-      paper.offsetWidth
-      restorePaperAnchor(scroller, paper, anchor)
+    if (scroller && sheet && anchor) {
+      sheet.offsetWidth
+      restorePaperAnchor(scroller, sheet, anchor)
     }
   }, [apply])
 
@@ -258,7 +260,9 @@ export function PaperView({ children, className = '', viewKey, showHud = true }:
         className={`paper-view ${className}`}
         data-paper-zoom={view.zoom}
       >
-        {children}
+        <div className="paper-sheet-plane">
+          {children}
+        </div>
         {showHud && (
           <div className={`paper-view-hud ${active ? 'is-active' : ''}`} aria-label="Blattansicht">
             <button type="button" aria-label="Herauszoomen" title="Herauszoomen (Strg+- · Strg+Mausrad)" onClick={() => zoomBy(-zoomStepFromSpeed(readSharedZoomSpeed()))} disabled={view.zoom <= VIEW_ZOOM_MIN}>

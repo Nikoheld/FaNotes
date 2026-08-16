@@ -233,6 +233,8 @@ const DEFAULT_SETTINGS = Object.freeze({
   enhancedMathLicenseAccepted: false,
   qwenVisionRecognition: false,
   qwenVisionLicenseAccepted: false,
+  experimentalHandwritingToText: false,
+  experimentalHandwritingToTextSeenVersion: '',
   ocrModelKeepAliveSeconds: 120,
   backgroundTaskLimit: 0,
   lmStudioBaseUrl: 'http://127.0.0.1:1234',
@@ -307,6 +309,8 @@ const SETTINGS_SCHEMA = Object.freeze({
   enhancedMathLicenseAccepted: { type: 'boolean' },
   qwenVisionRecognition: { type: 'boolean' },
   qwenVisionLicenseAccepted: { type: 'boolean' },
+  experimentalHandwritingToText: { type: 'boolean' },
+  experimentalHandwritingToTextSeenVersion: { type: 'string', max: 40 },
   ocrModelKeepAliveSeconds: { type: 'enum', values: [0, 30, 120, 300, 600] },
   backgroundTaskLimit: { type: 'enum', values: [0, 1, 2, 4, 8, 16, 24] },
   lmStudioBaseUrl: { type: 'string', max: 2048 },
@@ -818,6 +822,26 @@ function sanitizeSettings(candidate, base = DEFAULT_SETTINGS) {
   return result
 }
 
+function applyExperimentalHandwritingGate(settings) {
+  const version = app.getVersion()
+  if (settings.experimentalHandwritingToTextSeenVersion === version) return settings
+  return {
+    ...settings,
+    experimentalHandwritingToText: false,
+    experimentalHandwritingToTextSeenVersion: version,
+  }
+}
+
+function applyExperimentalHandwritingGate(settings) {
+  const version = app.getVersion()
+  if (settings.experimentalHandwritingToTextSeenVersion === version) return settings
+  return {
+    ...settings,
+    experimentalHandwritingToText: false,
+    experimentalHandwritingToTextSeenVersion: version,
+  }
+}
+
 function settingsForDisk(settings, { preserveProtectedSecrets = true } = {}) {
   const encoded = { ...settings }
   for (const key of SECRET_SETTING_KEYS) {
@@ -1173,7 +1197,14 @@ function readConfig() {
           const settingsCandidate = Number(parsed.version) >= 2
             ? decodedSettings
             : { ...decodedSettings, recognitionMode: 'auto', lastRecognitionMode: previousMode }
-          currentSettings = sanitizeSettings(settingsCandidate)
+          const sanitized = sanitizeSettings(settingsCandidate)
+          currentSettings = applyExperimentalHandwritingGate(sanitized)
+          if (
+            currentSettings.experimentalHandwritingToTextSeenVersion
+            !== sanitized.experimentalHandwritingToTextSeenVersion
+          ) {
+            void persistConfig()
+          }
           if (
             typeof parsed.vaultPath === 'string' &&
             parsed.vaultPath.length <= 4096 &&
@@ -3868,6 +3899,9 @@ function registerIpcHandlers() {
   handle(IPC.qwenVisionGetState, async () => getQwenVisionService().state())
   handle(IPC.qwenVisionInstall, async (_event, request) => getQwenVisionService().install(request))
   handle(IPC.qwenVisionRecognize, async (_event, request) => {
+    if (!currentSettings.experimentalHandwritingToText) {
+      throw new Error('Handschrift zu Text ist experimentell und ausgeschaltet.')
+    }
     if (!currentSettings.qwenVisionRecognition || !currentSettings.qwenVisionLicenseAccepted) {
       throw new Error('Qwen3-VL ist in den Einstellungen nicht aktiviert.')
     }

@@ -1,10 +1,11 @@
-import type { Stroke } from '../../../src/types'
+import type { Sample, Stroke } from '../../../src/types'
 
 export type QwenVisionImage = {
   pixels: Uint8Array
   width: number
   height: number
   lineCount: number
+  hasGlyphLegend?: boolean
 }
 
 const MAX_IMAGE_WIDTH = 1_600
@@ -246,7 +247,120 @@ export const renderQwenVisionImage = (
     pixels[out + 1] = value
     pixels[out + 2] = value
   }
-  return { pixels, width, height, lineCount: lines.length }
+  return { pixels, width, height, lineCount: lines.length, hasGlyphLegend: false }
+}
+
+const GLYPH_TILE = 40
+const GLYPH_GAP = 6
+const GLYPH_LABEL = 12
+const GLYPH_MAX_TILES = 28
+const GLYPH_CATEGORY_ORDER = ['uppercase', 'lowercase', 'german', 'digits'] as const
+
+const loadSampleImage = (dataUrl: string) => new Promise<HTMLImageElement | null>((resolve) => {
+  if (!dataUrl || !/^data:image\//iu.test(dataUrl)) {
+    resolve(null)
+    return
+  }
+  const image = new Image()
+  image.decoding = 'async'
+  image.onload = () => resolve(image)
+  image.onerror = () => resolve(null)
+  image.src = dataUrl
+})
+
+const pickGlyphenWerkReferences = (samples: Sample[]) => {
+  const best = new Map<string, Sample>()
+  for (const sample of samples) {
+    if (!sample?.imageData || !sample.label) continue
+    if (!GLYPH_CATEGORY_ORDER.includes(sample.category as typeof GLYPH_CATEGORY_ORDER[number])) continue
+    const existing = best.get(sample.labelId)
+    if (!existing || sample.createdAt > existing.createdAt) best.set(sample.labelId, sample)
+  }
+  return [...best.values()]
+    .sort((left, right) => {
+      const leftRank = GLYPH_CATEGORY_ORDER.indexOf(left.category as typeof GLYPH_CATEGORY_ORDER[number])
+      const rightRank = GLYPH_CATEGORY_ORDER.indexOf(right.category as typeof GLYPH_CATEGORY_ORDER[number])
+      return leftRank - rightRank || left.label.localeCompare(right.label, 'de')
+    })
+    .slice(0, GLYPH_MAX_TILES)
+}
+
+/**
+ * Paint the writer's GlyphenWerk letters as a labelled key above the page crop
+ * so Qwen3-VL can match this person's shapes. Single-image VLMs cannot take a
+ * separate sample album, so the key travels in the same bitmap.
+ */
+export const applyGlyphenWerkLegend = async (
+  image: QwenVisionImage,
+  samples: Sample[] | undefined,
+): Promise<QwenVisionImage> => {
+  const references = pickGlyphenWerkReferences(samples ?? [])
+  if (!references.length || image.width < 80) return image
+  const loaded = (await Promise.all(references.map(async (sample) => {
+    const bitmap = await loadSampleImage(sample.imageData)
+    return bitmap ? { sample, bitmap } : null
+  }))).flatMap((entry) => entry ? [entry] : [])
+  if (!loaded.length) return image
+
+  const columns = Math.max(1, Math.floor((image.width - GLYPH_GAP) / (GLYPH_TILE + GLYPH_GAP)))
+  const rows = Math.ceil(loaded.length / columns)
+  const legendHeight = rows * (GLYPH_TILE + GLYPH_LABEL + GLYPH_GAP) + GLYPH_GAP + 10
+  const height = image.height + legendHeight
+  if (height > MAX_IMAGE_HEIGHT) return image
+
+  const canvas = document.createElement('canvas')
+  canvas.width = image.width
+  canvas.height = height
+  const context = canvas.getContext('2d', { willReadFrequently: true, alpha: false })
+  if (!context) return image
+  context.fillStyle = '#ffffff'
+  context.fillRect(0, 0, image.width, height)
+  context.fillStyle = '#f3f4f7'
+  context.fillRect(0, 0, image.width, legendHeight - 6)
+  context.fillStyle = '#111111'
+  context.font = '700 10px ui-sans-serif, system-ui, sans-serif'
+  context.textAlign = 'center'
+  context.textBaseline = 'middle'
+
+  loaded.forEach((entry, index) => {
+    const column = index % columns
+    const row = Math.floor(index / columns)
+    const x = GLYPH_GAP + column * (GLYPH_TILE + GLYPH_GAP)
+    const y = GLYPH_GAP + row * (GLYPH_TILE + GLYPH_LABEL + GLYPH_GAP)
+    context.fillStyle = '#ffffff'
+    context.strokeStyle = '#d4d7de'
+    context.lineWidth = 1
+    context.beginPath()
+    context.roundRect?.(x, y, GLYPH_TILE, GLYPH_TILE, 5)
+    if (!context.roundRect) context.rect(x, y, GLYPH_TILE, GLYPH_TILE)
+    context.fill()
+    context.stroke()
+    const inset = 3
+    context.drawImage(entry.bitmap, x + inset, y + inset, GLYPH_TILE - inset * 2, GLYPH_TILE - inset * 2)
+    context.fillStyle = '#111111'
+    context.fillText(entry.sample.label.slice(0, 3), x + GLYPH_TILE / 2, y + GLYPH_TILE + GLYPH_LABEL / 2 + 1)
+  })
+
+  const source = image.pixels
+  const dest = context.getImageData(0, legendHeight, image.width, image.height)
+  for (let index = 0, pixel = 0; index < source.length; index += 3, pixel += 4) {
+    dest.data[pixel] = source[index]
+    dest.data[pixel + 1] = source[index + 1]
+    dest.data[pixel + 2] = source[index + 2]
+    dest.data[pixel + 3] = 255
+  }
+  context.putImageData(dest, 0, legendHeight)
+  context.fillStyle = '#c5c9d2'
+  context.fillRect(8, legendHeight - 5, image.width - 16, 1)
+
+  const rgba = context.getImageData(0, 0, image.width, height).data
+  const pixels = new Uint8Array(image.width * height * 3)
+  for (let index = 0, out = 0; index < rgba.length; index += 4, out += 3) {
+    pixels[out] = rgba[index]
+    pixels[out + 1] = rgba[index + 1]
+    pixels[out + 2] = rgba[index + 2]
+  }
+  return { pixels, width: image.width, height, lineCount: image.lineCount, hasGlyphLegend: true }
 }
 
 /**

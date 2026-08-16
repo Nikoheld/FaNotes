@@ -1,5 +1,14 @@
 # Änderungsverlauf
 
+## 2026.8.22
+
+- **Zoom als ein Blatt:** Text, Kästchen und Tinte zoomen und verschieben sich gemeinsam. Die Schrift bleibt nicht mehr in der alten Größe stehen.
+- **Keine Geisterschrift:** Schnelle Stiftbewegungen hinterlassen keine zweite Kopie mehr, die erst nach dem erneuten Öffnen verschwindet.
+- **Ordnerübersicht:** Eine klare Liste statt Karten und Wissensgraph — Ordner, Unterordner, Notizen und letzte Änderung auf einen Blick.
+- **Stiftleiste klickbar:** Blatt, AI und ••• reagieren auch nach dem Schreiben zuverlässig; die Werkzeuge überdecken die rechten Tasten nicht mehr.
+- **Qwen kennt deine Buchstaben:** Die Texterkennung nutzt die trainierten GlyphenWerk-Buchstaben als Legende.
+- **Experimentell:** Handschrift zu Text (Konvertieren, Suchindex, Mathe-Löser und -Korrigierer) liegt unter Einstellungen → Experimentell, standardmäßig aus. Nach jedem Update bleibt der Schalter aus, bis du ihn wieder einschaltest.
+
 ## 2026.8.21
 
 - **Zoom als ein Blatt:** Kästchen, Schrift und Tinte wachsen gemeinsam. Hinweise, Zeichenstudio und Konvertieren bleiben in der normalen UI-Größe.

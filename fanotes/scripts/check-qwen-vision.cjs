@@ -63,6 +63,11 @@ const checks = [
   [types, "device: 'NPU'", 'Typen NPU'],
   [render, 'renderQwenVisionImage', 'Renderer-Export'],
   [render, 'shouldPreferQwenVisionText', 'Konservative Übernahme'],
+  [render, 'applyGlyphenWerkLegend', 'GlyphenWerk-Buchstaben als Vision-Legende'],
+  [service, 'GlyphenWerk-Buchstabenlegende', 'Prompt kennt die persönliche Legende'],
+  [board, 'applyGlyphenWerkLegend', 'DrawingBoard übergibt GlyphenWerk-Proben'],
+  [defaults, 'experimentalHandwritingToText: false', 'Handschrift-zu-Text standardmässig aus'],
+  [settings, 'id: \'experimental\'', 'Experimentell-Tab in den Einstellungen'],
 ]
 
 for (const [source, needle, label] of checks) {

@@ -49,12 +49,16 @@ const safeguards = [
   ['!inline && event.pointerType === \'mouse\'', 'kein Pointer-Capture auf dem Notizblatt'],
   ['const releaseInkPointerCaptures', 'Capture wird auf Fläche, Canvas und Board gelöst'],
   ['const isInkSurfaceTarget', 'Klick auf Leiste/Tabs beendet hängenden Stift'],
+  ['const hitTestChrome', 'Klicks treffen die echte Schaltfläche, nicht eine hängende Stift-Capture'],
+  ['document.elementFromPoint', 'Treffer unter dem Cursor unabhängig von Pointer-Capture'],
   [".closest('.lw-canvas-surface, .lw-tablet-canvas')", 'nur die Tintenfläche zählt als Stiftziel, nicht die ganze Tafel'],
   ['position:fixed;z-index:80;top:78px;right:16px', 'Konvertierungs-Panel bleibt im Viewport'],
   ["addEventListener('wheel', onWheel", 'Trackpad-Zoom löst Stift-Capture sofort'],
   ['event.buttons === 0', 'verpasstes Pointer-Ende wird als Stift-ab erkannt'],
   ['const paintActiveStrokeNow', 'Tinte erscheint sofort, nicht erst im nächsten Frame'],
   ['getPredictedEvents', 'Stift-Vorhersage verkürzt die sichtbare Verzögerung'],
+  ['const wipeLiveInkCanvas', 'Live-Tinte wird nach dem Abheben vollständig geleert'],
+  ['replaceLive', 'Vorhersagepunkte ersetzen die Live-Tinte statt sie zu übermalen'],
   ['const applyViewTransform', 'Blatt-Zoom und -Rotation während Handschrift'],
   ['snapToDraftingTools', 'Lineal und Geodreieck fangen die Tinte an der Kante'],
   ['<Ruler size={16} />', 'Lineal in der Stiftleiste'],
@@ -94,15 +98,18 @@ const worksheetStyleSafeguards = [
 ]
 
 const paperViewSafeguards = [
-  ['paper.style.zoom', 'Zoom über CSS zoom statt transform:scale (scharfer Text)'],
+  ['target.style.zoom = String(zoom)', 'Zoom über CSS zoom statt transform:scale (scharfer Text)'],
   ["classList.toggle('is-view-transformed', active)", 'Inline-Papier markiert Zoom/Drehung'],
   ['.editor-pane, .worksheet-layer, .lw-canvas-surface', 'Zoom trifft das ganze Blatt, nicht die Toolbar'],
   ['willChange = \'auto\'', 'kein 1×-Compositor-Layer für Text'],
   ["setProperty('--view-zoom', String(zoom))", 'Zoom-Faktor als CSS-Variable auf dem Blatt'],
+  ["closest('.paper-sheet-plane')", 'eine Zoom-Ebene für Text, Tinte und Lineatur'],
+  ["removeProperty('zoom')", 'kein Zoom-1 auf Kindschichten (Text bleibt sonst 1×)'],
 ]
 const paperStyleSafeguards = [
   ['.unified-paper > .paper-ruling', 'Lineatur liegt auf einer Kind-Schicht und zoomt mit Tinte'],
   ['background-repeat: repeat;', 'Kästchen nicht per round neu kacheln'],
+  ['.paper-sheet-plane', 'Text, Tinte und Lineatur liegen in einer Zoom-Hülle'],
 ]
 
 for (const [needle, label] of safeguards) {

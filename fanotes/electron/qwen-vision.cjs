@@ -817,26 +817,33 @@ function createQwenVisionService({
         : (language === 'en'
           ? 'The image is a single handwritten line or a short note.'
           : 'Das Bild ist eine einzelne handgeschriebene Zeile oder eine kurze Notiz.')
+      const glyphHint = request.hasGlyphLegend
+        ? (language === 'en'
+          ? 'The top strip is this writer\'s GlyphenWerk letter key: each tile is one of their letters with a printed label. Use that key. Transcribe only the handwriting below the key.'
+          : 'Der Streifen oben ist die GlyphenWerk-Buchstabenlegende dieses Schreibers: Jede Kachel ist einer seiner Buchstaben mit gedruckter Beschriftung. Nutze sie als Schlüssel. Transkribiere nur die Schrift unter der Legende.')
+        : ''
       // OCR-style prompts: preserve line breaks, discourage chatty rewriting.
       const prompt = language === 'en'
         ? [
             'Transcribe the handwriting in this school-note image exactly.',
             lineHint,
+            glyphHint,
             'Read left to right, top to bottom. Keep original line breaks.',
             'Keep punctuation, numbers, umlauts and ß if present.',
             'Output only the transcribed text.',
             'Do not translate. Do not invent missing words. Do not correct spelling.',
             'No markdown, no quotes, no labels, no commentary.',
-          ].join(' ')
+          ].filter(Boolean).join(' ')
         : [
             'Transkribiere die Handschrift in diesem Notizbild genau.',
             lineHint,
+            glyphHint,
             'Lies von links nach rechts, oben nach unten. Behalte Zeilenumbrüche.',
             'Behalte Satzzeichen, Zahlen, Umlaute (ä ö ü) und ß.',
             'Gib ausschließlich den erkannten Text aus.',
             'Nicht übersetzen, nichts erfinden, Rechtschreibung nicht „verbessern“.',
             'Kein Markdown, keine Anführungszeichen, keine Labels, keine Erklärungen.',
-          ].join(' ')
+          ].filter(Boolean).join(' ')
       const workerRequest = {
         command: 'recognize',
         modelDir: modelDirectory,
