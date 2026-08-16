@@ -6,6 +6,10 @@ const path = require('node:path')
 const root = path.resolve(__dirname, '..')
 const source = fs.readFileSync(path.join(root, 'src', 'components', 'DrawingBoard.tsx'), 'utf8')
 const paperView = fs.readFileSync(path.join(root, 'src', 'lib', 'paperView.ts'), 'utf8')
+const markdownEditor = fs.readFileSync(path.join(root, 'src', 'components', 'MarkdownEditor.tsx'), 'utf8')
+const paperCaret = fs.readFileSync(path.join(root, 'src', 'lib', 'paperCaretScroll.ts'), 'utf8')
+const inkMap = fs.readFileSync(path.join(root, 'src', 'lib', 'inkSampleMap.ts'), 'utf8')
+const lockSource = [source, markdownEditor, paperCaret, inkMap].join('\n')
 
 const requiredBrushes = ['fineliner', 'pencil', 'marker', 'paintbrush', 'calligraphy', 'highlighter', 'watercolor', 'spray']
 const requiredEffects = ['solid', 'rainbow', 'aurora', 'sunset', 'ocean', 'gold', 'silver', 'neon']
@@ -116,6 +120,12 @@ const paperStyleSafeguards = [
   ['background-repeat: repeat;', 'Kästchen nicht per round neu kacheln'],
   ['.paper-sheet-plane', 'Text, Tinte und Lineatur liegen in einer Zoom-Hülle'],
 ]
+const lockSafeguards = [
+  ['acceptCommittedInkSample', 'Ghost-Samples werden vor dem Commit verworfen'],
+  ['mapClientToPaperPoint', 'fehlende Fläche fällt nicht auf die Blattmitte'],
+  ['applyPaperArrowNavigation', 'Pfeiltasten scrollen das Blatt, nicht den Text'],
+  ['lockPaperEditorLayerScroll', 'Editor-Layer bleibt am Lineal fest'],
+]
 
 for (const [needle, label] of safeguards) {
   if (!source.includes(needle)) throw new Error(`Zeichenmodus-Prüfung fehlgeschlagen: ${label}.`)
@@ -131,6 +141,9 @@ for (const [needle, label] of worksheetStyleSafeguards) {
 }
 for (const [needle, label] of paperStyleSafeguards) {
   if (!styles.includes(needle)) throw new Error(`Zeichenmodus-Prüfung fehlgeschlagen: ${label}.`)
+}
+for (const [needle, label] of lockSafeguards) {
+  if (!lockSource.includes(needle)) throw new Error(`Zeichenmodus-Prüfung fehlgeschlagen: ${label}.`)
 }
 
 const brushCatalog = source.slice(source.indexOf('const ART_BRUSHES'), source.indexOf('type ArtSymbolDefinition'))

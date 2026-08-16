@@ -90,6 +90,11 @@ import {
   touchInkPointerSession,
   type InkPointerSessionSnapshot,
 } from '../lib/inkPointerSession'
+import {
+  acceptCommittedInkSample,
+  isInkCorridorLeap,
+  mapClientToPaperPoint,
+} from '../lib/inkSampleMap'
 import { DraftingGuides } from './DraftingGuides'
 import {
   asCompassPose,
@@ -1735,50 +1740,29 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     }
   }, [initialDrawingJson])
 
-  const pointFromEvent = useCallback((event: PointerEvent): StrokePoint => {
+  const pointFromEvent = useCallback((event: PointerEvent): StrokePoint | null => {
     const canvas = canvasRef.current
-    const rawPressure = event.pressure > 0 ? event.pressure : event.pointerType === 'mouse' ? 0.55 : 0.35
-    if (!canvas) {
-      return {
-        x: 0.5,
-        y: 0.5,
-        t: Math.round(event.timeStamp * 100) / 100,
-        pressure: Math.round(clamp(rawPressure) * 1_000) / 1_000,
-        tiltX: event.tiltX ?? 0,
-        tiltY: event.tiltY ?? 0,
-        pointerType: event.pointerType || 'mouse',
-      }
-    }
-
-    // Map client coordinates through the inverse of the active view transform
-    // (translate → rotate → scale around the paper/canvas center). Prefer the
-    // paper box in inline mode so ink stays aligned with the transformed sheet.
-    const width = Math.max(1, canvas.offsetWidth)
-    const height = Math.max(1, canvas.offsetHeight)
     const originEl = (inline
-      ? (canvas.closest('.unified-paper') as HTMLElement | null)
+      ? (canvas?.closest('.unified-paper') as HTMLElement | null)
       : null) ?? canvas
+    if (!originEl) return null
     const originRect = originEl.getBoundingClientRect()
+    const mapped = mapClientToPaperPoint(event, {
+      left: originRect.left,
+      top: originRect.top,
+      width: originRect.width,
+      height: originRect.height,
+      offsetWidth: originEl.offsetWidth,
+      offsetHeight: originEl.offsetHeight,
+    }, viewRotationRef.current)
+    if (!mapped) return null
+
+    const width = Math.max(1, canvas?.offsetWidth ?? originEl.offsetWidth)
+    const height = Math.max(1, canvas?.offsetHeight ?? originEl.offsetHeight)
     const paperW = Math.max(1, originEl === canvas ? width : originEl.offsetWidth)
     const paperH = Math.max(1, originEl === canvas ? height : originEl.offsetHeight)
-    // getBoundingClientRect already includes CSS zoom. Do not divide by zoom again.
-    const visualX = (event.clientX - originRect.left) / Math.max(1, originRect.width)
-    const visualY = (event.clientY - originRect.top) / Math.max(1, originRect.height)
-    const rotation = viewRotationRef.current
-    let paperLocalX = visualX * paperW
-    let paperLocalY = visualY * paperH
-    if (Math.abs(rotation) > 0.01) {
-      const rad = (-rotation * Math.PI) / 180
-      const cos = Math.cos(rad)
-      const sin = Math.sin(rad)
-      const dx = (visualX - 0.5) * paperW
-      const dy = (visualY - 0.5) * paperH
-      paperLocalX = dx * cos - dy * sin + paperW / 2
-      paperLocalY = dx * sin + dy * cos + paperH / 2
-    }
-    const localX = originEl === canvas ? paperLocalX : paperLocalX * (width / paperW)
-    const localY = originEl === canvas ? paperLocalY : paperLocalY * (height / paperH)
-
+    const localX = originEl === canvas ? mapped.x * paperW : mapped.x * paperW * (width / paperW)
+    const localY = originEl === canvas ? mapped.y * paperH : mapped.y * paperH * (height / paperH)
     let x = clamp(localX / width)
     let y = clamp(localY / height)
     const guides: Array<{ kind: DraftingKind; pose: DraftingPose }> = []
@@ -1807,13 +1791,9 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       }
     }
     return {
+      ...mapped,
       x,
       y,
-      t: Math.round(event.timeStamp * 100) / 100,
-      pressure: Math.round(clamp(rawPressure) * 1_000) / 1_000,
-      tiltX: event.tiltX ?? 0,
-      tiltY: event.tiltY ?? 0,
-      pointerType: event.pointerType || 'mouse',
     }
   }, [inline])
 
@@ -2274,8 +2254,9 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       context.setTransform(1, 0, 0, 1, 0, 0)
       context.clearRect(0, 0, pixelWidth, pixelHeight)
       context.setTransform(1, 0, 0, 1, 0, -inkWindow.y0 * virtualHeight)
-      const preview: InkStroke = predicted.length
-        ? { ...stroke, points: [...stroke.points, ...predicted.map(pointFromEvent)] }
+      const previewPoints = predicted.map(pointFromEvent).filter((point): point is StrokePoint => Boolean(point))
+      const preview: InkStroke = previewPoints.length
+        ? { ...stroke, points: [...stroke.points, ...previewPoints] }
         : stroke
       drawInkStroke(context, preview, pixelWidth, virtualHeight, liveSmoothing, 1, sourceWidthRef.current)
       activeRenderedPointCountRef.current = stroke.points.length
@@ -2299,7 +2280,26 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   }, [pointFromEvent, settings.smoothing])
 
   const appendPointerEvent = useCallback((event: PointerEvent) => {
+    const canvas = canvasRef.current
+    const originEl = (inline
+      ? (canvas?.closest('.unified-paper') as HTMLElement | null)
+      : null) ?? canvas
+    const originRect = originEl?.getBoundingClientRect() ?? null
+    const surface = originRect && originEl
+      ? {
+        left: originRect.left,
+        top: originRect.top,
+        width: originRect.width,
+        height: originRect.height,
+        offsetWidth: originEl.offsetWidth,
+        offsetHeight: originEl.offsetHeight,
+      }
+      : null
+    const lastPoint = activeStrokeRef.current?.points.at(-1) ?? null
+    if (!acceptCommittedInkSample(event, surface, lastPoint, sourceWidth, sourceHeight, viewRotationRef.current)) return
     const point = pointFromEvent(event)
+    if (!point) return
+    if (lastPoint && isInkCorridorLeap(lastPoint, point, sourceWidth, sourceHeight)) return
     if (gestureToolRef.current === 'eraser') {
       eraseAt(point)
       return
@@ -2334,7 +2334,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       // Remeasuring mid-stroke freezes the UI and can drop pointerup.
       resizeDirtyRef.current = true
     }
-  }, [armShapeDwell, clearShapeDwellTimer, eraseAt, paintActiveStrokeNow, pointFromEvent, scheduleRedraw, sourceHeight, sourceWidth])
+  }, [armShapeDwell, clearShapeDwellTimer, eraseAt, inline, paintActiveStrokeNow, pointFromEvent, scheduleRedraw, sourceHeight, sourceWidth])
 
   const commitPendingSolverTap = useCallback(() => {
     const pending = pendingSolverTapRef.current
@@ -2603,6 +2603,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       height: pointerRect.height,
     }
     const firstPoint = pointFromEvent(event.nativeEvent)
+    if (!firstPoint) return
     const pointerEraser = event.pointerType === 'pen' && (event.button === 5 || (event.buttons & 32) !== 0)
     const pendingTap = pendingSolverTapRef.current
     if (pendingTap) {
@@ -2721,13 +2722,14 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     if (inkSessionRef.current) inkSessionRef.current = touchInkPointerSession(inkSessionRef.current, event.nativeEvent, now)
     event.preventDefault()
     if (selectionStartRef.current) {
-      setSelectionRect(selectionBetween(selectionStartRef.current, pointFromEvent(event.nativeEvent)))
+      const next = pointFromEvent(event.nativeEvent)
+      if (next) setSelectionRect(selectionBetween(selectionStartRef.current, next))
       return
     }
     if (event.pointerType === 'pen') lastPenContactRef.current = performance.now()
     const events = event.nativeEvent.getCoalescedEvents?.() ?? [event.nativeEvent]
     if (gestureToolRef.current === 'eraser') {
-      eraseAt(events.map(pointFromEvent))
+      eraseAt(events.map(pointFromEvent).filter((point): point is StrokePoint => Boolean(point)))
     } else {
       events.forEach(appendPointerEvent)
       const predicted = event.nativeEvent.getPredictedEvents?.() ?? []
@@ -2784,7 +2786,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     }
     if (selectionStartRef.current) {
       const start = selectionStartRef.current
-      const selection = selectionBetween(start, finalPoint)
+      const selection = selectionBetween(start, finalPoint ?? start)
       selectionStartRef.current = null
       endInteraction()
       if (event.type === 'pointercancel' || selection.width < 0.012 || selection.height < 0.012) {
@@ -3167,13 +3169,14 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         return
       }
       if (selectionStartRef.current) {
-        setSelectionRect(selectionBetween(selectionStartRef.current, pointFromEvent(event)))
+        const next = pointFromEvent(event)
+        if (next) setSelectionRect(selectionBetween(selectionStartRef.current, next))
         return
       }
       if (event.pointerType === 'pen') lastPenContactRef.current = performance.now()
       const events = event.getCoalescedEvents?.() ?? [event]
       if (gestureToolRef.current === 'eraser') {
-        eraseAt(events.map(pointFromEvent))
+        eraseAt(events.map(pointFromEvent).filter((point): point is StrokePoint => Boolean(point)))
       } else {
         events.forEach(appendPointerEvent)
         const predicted = event.getPredictedEvents?.() ?? []

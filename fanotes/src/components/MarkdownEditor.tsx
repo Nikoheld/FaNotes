@@ -53,6 +53,10 @@ import {
 import { highlightSelectionMatches, search, searchKeymap } from '@codemirror/search'
 import type { AppSettings, DetectedTextLanguage } from '../types'
 import { createTrailingValueScheduler, type TrailingValueScheduler } from '../lib/trailingValueScheduler'
+import {
+  applyPaperArrowNavigation,
+  resolvePaperCaretScroller,
+} from '../lib/paperCaretScroll'
 
 const LazyMarkdownPreview = lazy(() => import('./MarkdownPreview').then((module) => ({
   default: module.MarkdownPreview,
@@ -755,6 +759,7 @@ function spellingExtensions(onLanguageDetected: (language: DetectedTextLanguage)
 function editorAppearance(
   settings: MarkdownEditorSettings,
   dark: boolean,
+  paperMode = false,
 ): Extension {
   const surface = EditorView.theme(
     {
@@ -766,7 +771,7 @@ function editorAppearance(
       },
       '&.cm-focused': { outline: 'none' },
       '.cm-scroller': {
-        overflow: 'auto',
+        overflow: paperMode ? 'hidden' : 'auto',
         fontFamily: settings.editorFont,
         lineHeight: String(settings.lineHeight),
       },
@@ -899,6 +904,8 @@ const selectionDragAutoScroll = ViewPlugin.fromClass(class {
   }
 
   private scrollContainer = () => {
+    const paper = resolvePaperCaretScroller(this.view.dom)
+    if (paper) return paper
     let candidate: HTMLElement | null = this.view.scrollDOM
     while (candidate) {
       const overflowY = window.getComputedStyle(candidate).overflowY
@@ -953,6 +960,20 @@ const selectionDragAutoScroll = ViewPlugin.fromClass(class {
   destroy() {
     this.stop()
     this.pointerSurface.removeEventListener('pointerdown', this.pointerDown)
+  }
+})
+
+const paperCaretLock = ViewPlugin.fromClass(class {
+  constructor(readonly view: EditorView) {}
+
+  update(update: ViewUpdate) {
+    if (!update.view.dom.closest('.unified-paper, .paper-view')) return
+    if (
+      !update.selectionSet
+      && !update.transactions.some((transaction) => transaction.scrollIntoView)
+    ) return
+    const caret = update.view.coordsAtPos(update.state.selection.main.head)
+    applyPaperArrowNavigation(update.view.dom, caret)
   }
 })
 
@@ -1038,6 +1059,7 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
         foldGutter(),
         drawSelection(),
         selectionDragAutoScroll,
+        paperCaretLock,
         dropCursor(),
         EditorState.allowMultipleSelections.of(true),
         indentOnInput(),
@@ -1064,7 +1086,7 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
           ...foldKeymap,
           ...completionKeymap,
         ]),
-        compartments.appearance.of(editorAppearance(settings, dark)),
+        compartments.appearance.of(editorAppearance(settings, dark, paperMode)),
         compartments.lineNumbers.of(lineNumberExtensions(settings.showLineNumbers)),
         compartments.contentAttributes.of(
           EditorView.contentAttributes.of({
@@ -1117,7 +1139,7 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
     }
     view.dispatch({
       effects: [
-        compartments.appearance.reconfigure(editorAppearance(settings, dark)),
+        compartments.appearance.reconfigure(editorAppearance(settings, dark, paperMode)),
         compartments.lineNumbers.reconfigure(
           lineNumberExtensions(settings.showLineNumbers),
         ),

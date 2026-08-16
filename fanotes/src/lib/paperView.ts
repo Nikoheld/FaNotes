@@ -158,6 +158,12 @@ export const readUsedSheetZoom = (element: HTMLElement | null): number => {
  * Never pin `zoom` on children. A second specified zoom multiplies the camera
  * (text 4×, dots 2×). `zoom: ''` specifies 1 and freezes that layer.
  */
+export const sheetLayerOriginOffset = (first: HTMLElement, second: HTMLElement) => {
+  const a = first.getBoundingClientRect()
+  const b = second.getBoundingClientRect()
+  return { x: a.left - b.left, y: a.top - b.top }
+}
+
 export const applyPaperViewToElements = (
   paper: HTMLElement | null,
   noteView: HTMLElement | null,
