@@ -2,6 +2,10 @@
 
 ## Unveröffentlicht
 
+## 2026.8.32
+
+- **Schrift bleibt am Ort:** Nach dem Tippen oder den Pfeiltasten rutscht der Text nicht mehr vom Lineal. Auch ein späteres Editor-Scrollen verschiebt die Schrift nicht.
+
 ## 2026.8.31
 
 - **Blatt wächst früher:** Beim Schreiben bleibt mehr leeres Papier vor dem Rand. Du musst nicht mehr fast anstoßen, bevor die nächste halbe Seite dazukommt.
