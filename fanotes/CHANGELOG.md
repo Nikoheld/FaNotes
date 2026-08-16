@@ -2,6 +2,10 @@
 
 ## Unveröffentlicht
 
+## 2026.8.28
+
+- **Hausaufgaben-API:** Die experimentelle Abfrage auf fanotes.fasrv.ch bleibt hinter Schalter und Passwort. Ohne beides oder mit falschem Passwort kommen keine Titel zurück.
+
 ## 2026.8.27
 
 - **Hausaufgaben-API:** Unter Einstellungen → Experimentell kannst du die lokale Hausaufgabenliste über fanotes.fasrv.ch abfragen. Ein eigenes Passwort schützt die Liste; ohne Schalter und ohne Passwort bleiben die Einträge unsichtbar.
