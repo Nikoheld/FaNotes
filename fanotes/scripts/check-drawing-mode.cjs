@@ -56,6 +56,7 @@ const safeguards = [
   ["addEventListener('wheel', onWheel", 'Trackpad-Zoom löst Stift-Capture sofort'],
   ["from '../lib/inkPointerSession'", 'Wacom-Lift-Regeln liegen im gelieferten Session-Helper'],
   ['shouldHardEndInkPointerSession', 'hängende Stift-Session endet bei Tipp-oben oder Idle'],
+  ['Linux Wacom sent pressure 0 while the tip button is still down', 'Druck-Flicker beendet den Strich nicht lokal'],
   ['resolveInkFinishSample(native)', 'Hard-End hängt keinen Punkt in die Blattmitte'],
   ['shouldAllowNewInkPointer', 'Trackpad/Maus darf nach Stift-Lift wieder Tint'],
   ['inkSessionRef.current', 'letzte Stift-Kontaktzeit steuert den Watchdog'],

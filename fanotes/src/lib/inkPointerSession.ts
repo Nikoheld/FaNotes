@@ -60,11 +60,21 @@ export const touchInkPointerSession = (
     }
 )
 
+/** True lift: no tip or eraser button. Hover with a stuck button bit is not a tip-up. */
+export const isInkTipUp = (sample: { buttons: number }) => {
+  const buttons = Number(sample.buttons) || 0
+  if ((buttons & 32) !== 0) return false
+  return (buttons & 1) === 0
+}
+
 /**
  * Whether a live ink session must be hard-ended.
- * Tip-up (`buttons === 0` / pen pressure 0) ends immediately.
- * Silence longer than the idle limit ends a missed Linux `pointerup`.
- * A sample that still shows a real tip-down never ends (no mid-stroke false end).
+ * True tip-up (`buttons === 0`) ends immediately.
+ * Silence after last real contact ends a missed Linux `pointerup`.
+ * A same-pointer sample that is still writing — including Linux Wacom
+ * `buttons === 1` with a transient `pressure === 0` — does not end.
+ * Hover with a stuck button bit ends only after the idle window since
+ * last real contact, so scroll/clicks recover without cutting a live stroke.
  */
 export const shouldHardEndInkPointerSession = (
   session: InkPointerSessionSnapshot | null,
@@ -73,11 +83,13 @@ export const shouldHardEndInkPointerSession = (
 ): boolean => {
   if (!session) return false
   if (incoming && incoming.pointerId === session.pointerId) {
-    return !isInkTipDown({
+    if (isInkTipUp(incoming)) return true
+    if (isInkTipDown({
       pointerType: incoming.pointerType ?? session.pointerType,
       buttons: incoming.buttons,
       pressure: incoming.pressure,
-    })
+    })) return false
+    return now - session.lastContactAt >= INK_POINTER_IDLE_MS
   }
   return now - session.lastContactAt >= INK_POINTER_IDLE_MS
 }

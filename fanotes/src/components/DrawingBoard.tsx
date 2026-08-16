@@ -2711,6 +2711,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     if (settings.penOnly && event.pointerType !== 'pen') return
     if (activePointerRef.current !== event.pointerId) return
     const now = performance.now()
+    // End only when the helper says so — not because a few seconds elapsed
+    // or Linux Wacom sent pressure 0 while the tip button is still down.
     if (shouldHardEndInkPointerSession(inkSessionRef.current, now, event.nativeEvent)) {
       forceEndActivePointerRef.current('watchdog', event.nativeEvent)
       return
@@ -3152,6 +3154,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     const onWindowPointerMove = (event: PointerEvent) => {
       if (!inputActive || activePointerRef.current !== event.pointerId) return
       const now = performance.now()
+      // Same helper as canvas move: pressure flicker must not cut a live stroke.
       if (shouldHardEndInkPointerSession(inkSessionRef.current, now, event)) {
         forceEndActivePointer('watchdog', event)
         return

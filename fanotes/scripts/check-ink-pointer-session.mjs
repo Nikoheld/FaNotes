@@ -12,6 +12,7 @@ const {
   INK_POINTER_IDLE_MS,
   inkPointerSessionFromSample,
   isInkTipDown,
+  isInkTipUp,
   resolveInkFinishSample,
   shouldAllowNewInkPointer,
   shouldHardEndInkPointerSession,
@@ -31,6 +32,9 @@ try {
   assert.equal(isInkTipDown({ pointerType: 'pen', buttons: 0, pressure: 0 }), false)
   assert.equal(isInkTipDown({ pointerType: 'pen', buttons: 1, pressure: 0 }), false, 'Linux Wacom hover with a stuck button bit is not tip-down')
   assert.equal(isInkTipDown({ pointerType: 'mouse', buttons: 1 }), true)
+  assert.equal(isInkTipUp({ buttons: 0 }), true)
+  assert.equal(isInkTipUp({ buttons: 1 }), false, 'stuck button bit is not a tip-up')
+  assert.equal(isInkTipUp({ buttons: 32 }), false)
 
   assert.equal(
     shouldHardEndInkPointerSession(penDown, now + 16, { pointerId: 7, pointerType: 'pen', buttons: 0, pressure: 0 }),
@@ -49,6 +53,25 @@ try {
     false,
     'a live tip-down sample must not hard-end mid-stroke',
   )
+
+  assert.equal(
+    shouldHardEndInkPointerSession(penDown, now + 80, { pointerId: 7, pointerType: 'pen', buttons: 1, pressure: 0 }),
+    false,
+    'Linux Wacom mid-stroke pressure flicker (buttons still 1) must not cut the stroke',
+  )
+
+  let writing = penDown
+  for (let elapsed = 16; elapsed <= 4_800; elapsed += 16) {
+    const pressure = elapsed % 96 === 0 ? 0 : 0.42
+    const sample = { pointerId: 7, pointerType: 'pen', buttons: 1, pressure }
+    writing = touchInkPointerSession(writing, sample, now + elapsed)
+    assert.equal(
+      shouldHardEndInkPointerSession(writing, now + elapsed, sample),
+      false,
+      `same-pointer writing at +${elapsed}ms (pressure=${pressure}) must stay live past the idle window`,
+    )
+  }
+  assert.ok(writing.lastContactAt > now, 'real contact during a long stroke must keep lastContactAt moving')
 
   const afterTipUp = shouldHardEndInkPointerSession(penDown, now + 20, { pointerId: 7, buttons: 0, pressure: 0 })
   assert.equal(afterTipUp, true)
@@ -75,7 +98,16 @@ try {
 
   const hovered = touchInkPointerSession(penDown, { pointerId: 7, pointerType: 'pen', buttons: 1, pressure: 0 }, now + 12)
   assert.equal(hovered.lastContactAt, now, 'hover must not refresh contact time')
-  assert.equal(shouldHardEndInkPointerSession(hovered, now + 12, { pointerId: 7, pointerType: 'pen', buttons: 1, pressure: 0 }), true)
+  assert.equal(
+    shouldHardEndInkPointerSession(hovered, now + 12, { pointerId: 7, pointerType: 'pen', buttons: 1, pressure: 0 }),
+    false,
+    'a brief pressure-0 sample right after contact is flicker, not a lift',
+  )
+  assert.equal(
+    shouldHardEndInkPointerSession(hovered, now + INK_POINTER_IDLE_MS + 20, { pointerId: 7, pointerType: 'pen', buttons: 1, pressure: 0 }),
+    true,
+    'stuck-button hover after last real contact must still hard-end',
+  )
 
   const tipUpFinish = resolveInkFinishSample({ type: 'pointermove', clientX: 142, clientY: 388 })
   assert.deepEqual(tipUpFinish, { clientX: 142, clientY: 388 }, 'tip-up uses the real last sample, not the canvas center')
@@ -88,8 +120,10 @@ try {
     tipUpEnds: true,
     idleEnds: true,
     midStrokeStays: true,
+    pressureFlickerStays: true,
+    longStrokeStays: true,
     otherPointerAfterEnd: true,
-    hoverStuckButtonEnds: true,
+    hoverStuckButtonEndsAfterIdle: true,
     tipUpKeepsRealSample: tipUpFinish,
     cancelSkipsAppend: resolveInkFinishSample({ type: 'pointercancel', clientX: 450, clientY: 636 }) === null,
     idleMs: INK_POINTER_IDLE_MS,
