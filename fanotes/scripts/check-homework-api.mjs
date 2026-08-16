@@ -114,10 +114,19 @@ try {
     assertSameTasks(allowed.body.tasks, document.tasks, 'authenticated query')
 
     const secret = generateHomeworkApiSecret()
-    const record = await createHomeworkSecretRecord(secret)
+    const record = await createHomeworkSecretRecord(`  ${secret}  `)
     assert.equal(JSON.stringify(record).includes(secret), false)
-    assert.equal(await verifyHomeworkSecret(secret, record), true)
+    assert.equal(await verifyHomeworkSecret(secret, record), true, 'stored hash must match the trimmed secret')
+    assert.equal(await verifyHomeworkSecret(`  ${secret}  `, record), true, 'verify must trim incoming secret')
     assert.equal(await verifyHomeworkSecret(`${secret}x`, record), false)
+
+    const mainSource = await fs.readFile(join(appRoot, 'electron/main.cjs'), 'utf8')
+    const secretBlock = /const SECRET_SETTING_KEYS = Object\.freeze\(\[([\s\S]*?)\]\)/u.exec(mainSource)
+    assert.ok(secretBlock, 'desktop SECRET_SETTING_KEYS must exist')
+    assert.match(secretBlock[1], /'homeworkApiSecret'/u, 'homework API password must be encrypted like other secrets')
+    const appSource = await fs.readFile(join(appRoot, 'src/App.tsx'), 'utf8')
+    assert.match(appSource, /openSettings/u, 'settings open must load protected secrets first')
+    assert.match(appSource, /lastHomeworkSecretRef\.current = next\.homeworkApiSecret/u, 'decrypt then republish')
     console.log('UNIT deny/allow fields:', JSON.stringify({
       off: off.body,
       noSecret: noSecret.body,

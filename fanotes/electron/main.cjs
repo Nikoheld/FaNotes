@@ -351,6 +351,7 @@ const SECRET_SETTING_KEYS = Object.freeze([
   'geminiApiKey',
   'anthropicApiKey',
   'openCodePassword',
+  'homeworkApiSecret',
 ])
 const ENCRYPTED_SETTING_PREFIX = 'fanotes-secret-v1:'
 

@@ -1308,19 +1308,6 @@ export default function App({ startupBootstrap }: AppProps) {
     if (result?.ok) lastHomeworkSecretRef.current = current.homeworkApiSecret
   }, [])
 
-  useEffect(() => {
-    if (!bootstrap?.vaultPath) return
-    const current = settingsRef.current
-    if (
-      current.experimentalHomeworkApi
-      && homeworkApiSecretReady(current.homeworkApiSecret)
-      && HOMEWORK_CHANNEL_ID_PATTERN.test(current.homeworkApiChannelId)
-    ) {
-      lastHomeworkSecretRef.current = current.homeworkApiSecret
-      void syncPublishedHomework(current)
-    }
-  }, [bootstrap?.vaultPath, syncPublishedHomework])
-
   const applySettings = useCallback((next: AppSettings) => {
     const previous = settingsRef.current
     const revision = settingsRevisionRef.current + 1
@@ -1387,15 +1374,35 @@ export default function App({ startupBootstrap }: AppProps) {
     if (!window.fanotes.loadSecureSettings) return Promise.resolve()
     secureSettingsLoadRef.current ??= window.fanotes.loadSecureSettings()
       .then((secrets) => {
-        settingsRef.current = { ...settingsRef.current, ...secrets }
+        const next = { ...settingsRef.current, ...secrets }
+        settingsRef.current = next
         setSettings((current) => ({ ...current, ...secrets }))
+        if (
+          next.experimentalHomeworkApi
+          && homeworkApiSecretReady(next.homeworkApiSecret)
+          && HOMEWORK_CHANNEL_ID_PATTERN.test(next.homeworkApiChannelId)
+        ) {
+          lastHomeworkSecretRef.current = next.homeworkApiSecret
+          void syncPublishedHomework(next)
+        }
       })
       .catch((error) => {
         secureSettingsLoadRef.current = null
         throw error
       })
     return secureSettingsLoadRef.current
-  }, [])
+  }, [syncPublishedHomework])
+
+  useEffect(() => {
+    if (!bootstrap?.vaultPath) return
+    if (settingsRef.current.experimentalHomeworkApi) void loadSecureSettings()
+  }, [bootstrap?.vaultPath, loadSecureSettings])
+
+  const openSettings = useCallback(() => {
+    void loadSecureSettings()
+      .catch(() => undefined)
+      .finally(() => setSettingsOpen(true))
+  }, [loadSecureSettings])
 
   const openLmStudio = useCallback(() => {
     setPaletteOpen(false)
@@ -2059,9 +2066,9 @@ export default function App({ startupBootstrap }: AppProps) {
     { id: 'focus', label: focusMode ? 'Fokusmodus verlassen' : 'Fokusmodus starten', detail: 'Blendet Seitenleisten für ungestörtes Schreiben aus', shortcut: 'Ctrl ⇧ E', group: 'Ansicht', icon: <Maximize2 size={15} />, run: toggleFocusMode },
     { id: 'sidebar', label: 'Dateileiste umschalten', group: 'Ansicht', icon: <PanelLeftClose size={15} />, run: () => setSidebarVisible((value) => !value) },
     { id: 'inspector', label: 'Gliederung umschalten', group: 'Ansicht', icon: <PanelRightClose size={15} />, run: () => setInspectorVisible((value) => !value) },
-    { id: 'settings', label: 'Einstellungen öffnen', shortcut: 'Ctrl ,', group: 'FaNotes', icon: <Settings size={15} />, run: () => setSettingsOpen(true) },
+    { id: 'settings', label: 'Einstellungen öffnen', shortcut: 'Ctrl ,', group: 'FaNotes', icon: <Settings size={15} />, run: () => openSettings() },
     { id: 'quit', label: isWeb ? 'Zur FaNotes-Website' : 'FaNotes beenden', shortcut: 'Ctrl Q', group: 'FaNotes', icon: <X size={15} />, run: () => window.fanotes.requestClose() },
-  ], [activePath, activeTab, createDailyNote, createFolder, createNote, drawingOpen, exportCurrentPdf, focusMode, importOneNote, importPdfNote, isWeb, openGlyphenWerk, openHistory, openHomework, openInSplit, openLmStudio, openOverview, openWorksheetImport, saveCurrentWork, settings.dailyNotesFolder, splitPath, tabs, toast, toggleDrawing, toggleFocusMode])
+  ], [activePath, activeTab, createDailyNote, createFolder, createNote, drawingOpen, exportCurrentPdf, focusMode, importOneNote, importPdfNote, isWeb, openGlyphenWerk, openHistory, openHomework, openInSplit, openLmStudio, openOverview, openSettings, openWorksheetImport, saveCurrentWork, settings.dailyNotesFolder, splitPath, tabs, toast, toggleDrawing, toggleFocusMode])
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
@@ -2083,7 +2090,7 @@ export default function App({ startupBootstrap }: AppProps) {
       if (mod && event.shiftKey && event.key.toLowerCase() === 'g') { event.preventDefault(); openGlyphenWerk() }
       if (mod && event.shiftKey && event.key.toLowerCase() === 'i') { event.preventDefault(); openWorksheetImport() }
       if (mod && !event.shiftKey && event.key.toLowerCase() === 'n') { event.preventDefault(); void createNote() }
-      if (mod && event.key === ',') { event.preventDefault(); setSettingsOpen(true) }
+      if (mod && event.key === ',') { event.preventDefault(); openSettings() }
       if (mod && event.shiftKey && event.key.toLowerCase() === 'e') { event.preventDefault(); toggleFocusMode() }
       if (mod && event.key.toLowerCase() === 'd') { event.preventDefault(); toggleDrawing() }
       if (mod && event.key.toLowerCase() === 'q') { event.preventDefault(); window.fanotes.requestClose() }
@@ -2102,7 +2109,7 @@ export default function App({ startupBootstrap }: AppProps) {
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [closeDrawing, closeTab, createNote, cycleTabs, focusMode, glyphenWerkOpen, homeworkOpen, lmStudioOpen, openGlyphenWerk, openLmStudio, openWorksheetImport, overviewOpen, paletteOpen, saveCurrentWork, searchOpen, settingsOpen, toggleDrawing, toggleFocusMode, worksheetImportOpen])
+  }, [closeDrawing, closeTab, createNote, cycleTabs, focusMode, glyphenWerkOpen, homeworkOpen, lmStudioOpen, openGlyphenWerk, openLmStudio, openSettings, openWorksheetImport, overviewOpen, paletteOpen, saveCurrentWork, searchOpen, settingsOpen, toggleDrawing, toggleFocusMode, worksheetImportOpen])
 
   useEffect(() => {
     const imageFile = (file: File | undefined) => file && file.type.startsWith('image/')
@@ -2195,7 +2202,7 @@ export default function App({ startupBootstrap }: AppProps) {
             <button type="button" title="Befehlspalette (Strg+P)" data-tooltip="Befehle · Strg P" aria-label="Befehlspalette öffnen" onClick={() => setPaletteOpen(true)}><Command size={18} /></button>
           </div>
         )}
-        <button type="button" title="Einstellungen (Strg+,)" data-tooltip="Einstellungen · Strg ," aria-label="Einstellungen öffnen" onClick={() => setSettingsOpen(true)}><Settings size={19} /></button>
+        <button type="button" title="Einstellungen (Strg+,)" data-tooltip="Einstellungen · Strg ," aria-label="Einstellungen öffnen" onClick={() => openSettings()}><Settings size={19} /></button>
       </nav>
 
       <div className="app-body" style={{ gridTemplateColumns: `${sidebarVisible ? 'var(--sidebar-width)' : '0px'} minmax(420px, 1fr) auto` }}>

@@ -52,7 +52,7 @@ const scryptHash = (secret, salt) => new Promise((resolveHash, rejectHash) => {
 })
 
 export const createHomeworkSecretRecord = async (secret) => {
-  const trimmed = String(secret || '')
+  const trimmed = String(secret || '').trim()
   if (trimmed.length < MIN_SECRET_LENGTH) fail(400, 'Das API-Passwort ist zu kurz.')
   const salt = randomBytes(16)
   const hash = await scryptHash(trimmed, salt)
@@ -61,7 +61,7 @@ export const createHomeworkSecretRecord = async (secret) => {
 
 export const verifyHomeworkSecret = async (secret, record) => {
   if (!record?.salt || !record?.hash) return false
-  const trimmed = String(secret || '')
+  const trimmed = String(secret || '').trim()
   if (trimmed.length < MIN_SECRET_LENGTH) return false
   try {
     const expected = Buffer.from(record.hash, 'base64')
@@ -91,8 +91,8 @@ export const sanitizeHomeworkApiTask = (raw) => {
     done: Boolean(raw.done),
     kind: raw.kind === 'appointment' ? 'appointment' : 'homework',
     priority: raw.priority === 'high' ? 'high' : 'normal',
-    createdAt: typeof raw.createdAt === 'string' && Date.parse(raw.createdAt) ? raw.createdAt : now,
-    updatedAt: typeof raw.updatedAt === 'string' && Date.parse(raw.updatedAt) ? raw.updatedAt : now,
+    createdAt: typeof raw.createdAt === 'string' && Number.isFinite(Date.parse(raw.createdAt)) ? raw.createdAt : now,
+    updatedAt: typeof raw.updatedAt === 'string' && Number.isFinite(Date.parse(raw.updatedAt)) ? raw.updatedAt : now,
   }
 }
 

@@ -89,7 +89,9 @@ export const publishHomeworkList = async (input: {
   origin?: string
 }): Promise<{ ok: boolean; status: number }> => {
   if (!HOMEWORK_CHANNEL_ID_PATTERN.test(input.channelId)) return { ok: false, status: 400 }
-  const authorizationSecret = input.previousSecret || input.secret
+  const secret = input.secret.trim()
+  const previousSecret = input.previousSecret?.trim()
+  const authorizationSecret = previousSecret || secret
   const response = await fetch(homeworkApiQueryUrl(input.channelId, input.origin), {
     method: 'PUT',
     headers: {
@@ -100,8 +102,8 @@ export const publishHomeworkList = async (input: {
     },
     body: JSON.stringify({
       enabled: input.enabled,
-      secret: input.secret,
-      previousSecret: input.previousSecret || undefined,
+      secret,
+      previousSecret: previousSecret || undefined,
       tasks: input.enabled ? homeworkDocumentToApiPayload(input.document).tasks : [],
     }),
     cache: 'no-store',
