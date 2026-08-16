@@ -88,6 +88,8 @@ export type AppSettings = {
   reduceMotion: boolean
   /** 1 = langsam, 5 = normal, 10 = schnell. Steuert Mausrad- und Trackpad-Zoom. */
   viewZoomSpeed: number
+  /** Oberes Zoom-Limit in Prozent (50–600). Standard 325. */
+  viewZoomMax: number
   showWordCount: boolean
   showOutline: boolean
   defaultFolder: string

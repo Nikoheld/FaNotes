@@ -12,7 +12,9 @@ const {
   applyPaperViewToElements,
   capturePaperAnchor,
   clampViewZoom,
+  clampViewZoomMaxPercent,
   defaultPaperView,
+  writeSharedZoomMaxPercent,
   readUsedSheetZoom,
   restorePaperAnchor,
   zoomAroundPoint,
@@ -160,6 +162,16 @@ const math = () => {
   assert.equal(around.zoom, first)
   assert.deepEqual(around, aroundAgain)
   assert.ok(around.zoom > 1)
+
+  assert.equal(clampViewZoomMaxPercent(49), 50)
+  assert.equal(clampViewZoomMaxPercent(601), 600)
+  assert.equal(clampViewZoomMaxPercent(327.4), 327)
+  writeSharedZoomMaxPercent(50)
+  assert.equal(clampViewZoom(3.25), 0.5)
+  writeSharedZoomMaxPercent(600)
+  assert.equal(clampViewZoom(6), 6)
+  writeSharedZoomMaxPercent(325)
+  assert.equal(clampViewZoom(4), 3.25)
 
   const scroller = makeNode('paper-view', { layoutWidth: 400, layoutHeight: 400, clientWidth: 400, clientHeight: 400 })
   const plane = append(scroller, makeNode('paper-sheet-plane', {

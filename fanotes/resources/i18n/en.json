@@ -2404,6 +2404,8 @@
   "ZIP importieren": "Import ZIP",
   "ZIP-Datensatz wurde erstellt.": "ZIP dataset was created.",
   "Zoom-Geschwindigkeit": "Zoom speed",
+  "Zoom-Limit": "Zoom limit",
+  "Wie weit du das Blatt hereinzoomen kannst. 50 % ist kaum näher, 325 % ist der bisherige Höchstwert, 600 % ist sehr nah.": "How far you can zoom into the sheet. 50% is barely closer, 325% is the previous maximum, 600% is very close.",
   "Wie weit Strg+Mausrad oder Trackpad-Pinch das Blatt verändert. 1 ist langsam, 5 normal, 10 schnell.": "How far Ctrl+wheel or a trackpad pinch changes the sheet. 1 is slow, 5 is normal, 10 is fast.",
   "Zu viele AI-Anfragen. Warte kurz und versuche es erneut.": "Too many AI requests. Wait a moment and try again.",
   "Zu viele Backup-Anfragen. Bitte versuche es später erneut.": "Too many backup requests. Please try again later.",

@@ -58,13 +58,13 @@ import type {
 import { SHAPE_SNAP_LABEL, shapeSnapProfile, snapStrokeToShape, strokeLooksLikeShape } from '../lib/shapeSnap'
 import {
   VIEW_ROTATE_STEP,
-  VIEW_ZOOM_MAX,
   VIEW_ZOOM_MIN,
   applyPaperViewToElements,
   capturePaperAnchor,
   clampViewZoom,
   clearPaperViewFromElements,
   normalizeRotation,
+  readSharedZoomMax,
   readSharedZoomSpeed,
   restorePaperAnchor,
   zoomFactorFromWheel,
@@ -82,6 +82,14 @@ import {
 } from '../lib/recognitionModeSelection'
 import type { MathSolverAction, MathSolverResult } from '../lib/mathSolver'
 import { detectScribbleErase } from '../lib/scribbleErase'
+import {
+  inkPointerSessionFromSample,
+  resolveInkFinishSample,
+  shouldAllowNewInkPointer,
+  shouldHardEndInkPointerSession,
+  touchInkPointerSession,
+  type InkPointerSessionSnapshot,
+} from '../lib/inkPointerSession'
 import { DraftingGuides } from './DraftingGuides'
 import {
   asCompassPose,
@@ -522,6 +530,7 @@ export type DrawingBoardProps = {
     | 'qwenVisionLicenseAccepted'
     | 'experimentalHandwritingToText'
     | 'viewZoomSpeed'
+    | 'viewZoomMax'
     | 'autoOpenConversion'
     | 'keepDrawingAfterInsert'
   >
@@ -1208,6 +1217,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const strokesRef = useRef<InkStroke[]>([])
   const activeStrokeRef = useRef<InkStroke | null>(null)
   const activePointerRef = useRef<number | null>(null)
+  const inkSessionRef = useRef<InkPointerSessionSnapshot | null>(null)
   const pendingSolverTapRef = useRef<PendingSolverTap | null>(null)
   const solverDoubleTapPointRef = useRef<Pick<StrokePoint, 'x' | 'y'> | null>(null)
   const mathSolverRunRef = useRef(0)
@@ -2064,7 +2074,10 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   }, [applyViewTransform, paperView])
 
   // Populated after finishPointer is defined — zoom/rotate must free tablet capture first.
-  const forceEndActivePointerRef = useRef<(reason?: 'view-gesture' | 'cross-device' | 'watchdog' | 'blur' | 'escape') => void>(() => {})
+  const forceEndActivePointerRef = useRef<(
+    reason?: 'view-gesture' | 'cross-device' | 'watchdog' | 'blur' | 'escape',
+    sample?: PointerEvent | ReactPointerEvent<HTMLElement>,
+  ) => void>(() => {})
 
   const zoomBy = useCallback((delta: number, originClient?: { x: number; y: number }) => {
     forceEndActivePointerRef.current('view-gesture')
@@ -2546,11 +2559,18 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
 
   const handlePointerDown = useCallback((event: ReactPointerEvent<HTMLElement>) => {
     if (hitTestChrome(event.clientX, event.clientY)) return
-    if (activePointerRef.current !== null || (event.button !== 0 && event.pointerType !== 'pen')) return
+    if (event.button !== 0 && event.pointerType !== 'pen') return
     // Pen-only (Windows palm / resting hand): ignore finger, mouse and trackpad ink.
     if (settings.penOnly && event.pointerType !== 'pen') return
-    if (event.pointerType === 'touch' && performance.now() - lastPenContactRef.current < 850) return
-    if (event.pointerType === 'pen') lastPenContactRef.current = performance.now()
+    const now = performance.now()
+    if (activePointerRef.current !== null) {
+      if (activePointerRef.current === event.pointerId) return
+      if (!shouldAllowNewInkPointer(inkSessionRef.current, event, now)) return
+      forceEndActivePointerRef.current('cross-device')
+    }
+    if (event.pointerType === 'touch' && now - lastPenContactRef.current < 850) return
+    if (event.pointerType === 'pen') lastPenContactRef.current = now
+    inkSessionRef.current = inkPointerSessionFromSample(event.nativeEvent, now)
     event.preventDefault()
     // User input always wins over cooperative background transcription.
     contextualLearningRunRef.current += 1
@@ -2639,6 +2659,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       updateHistoryState()
       gestureChangedRef.current = false
       activePointerRef.current = null
+      inkSessionRef.current = null
       pointerBoundsRef.current = null
       releasePointerCaptureSafe(event.currentTarget, event.pointerId)
       if (lastCapturedPointerIdRef.current === event.pointerId) lastCapturedPointerIdRef.current = null
@@ -2689,6 +2710,12 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const handlePointerMove = useCallback((event: ReactPointerEvent<HTMLElement>) => {
     if (settings.penOnly && event.pointerType !== 'pen') return
     if (activePointerRef.current !== event.pointerId) return
+    const now = performance.now()
+    if (shouldHardEndInkPointerSession(inkSessionRef.current, now, event.nativeEvent)) {
+      forceEndActivePointerRef.current('watchdog', event.nativeEvent)
+      return
+    }
+    if (inkSessionRef.current) inkSessionRef.current = touchInkPointerSession(inkSessionRef.current, event.nativeEvent, now)
     event.preventDefault()
     if (selectionStartRef.current) {
       setSelectionRect(selectionBetween(selectionStartRef.current, pointFromEvent(event.nativeEvent)))
@@ -2724,6 +2751,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     const endInteraction = () => {
       pointerBoundsRef.current = null
       activePointerRef.current = null
+      inkSessionRef.current = null
       activePointerTargetRef.current = null
       draftingLockRef.current = null
       if (draftingReadoutRef.current) {
@@ -2812,7 +2840,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       scheduleRedraw()
       return
     }
-    appendPointerEvent(native)
+    if (resolveInkFinishSample(native)) appendPointerEvent(native)
     const heldLongEnough = performance.now() - shapeLastMoveAtRef.current >= readShapeSnapProfile().dwellMs
     clearShapeDwellTimer()
     const activeStroke = activeStrokeRef.current
@@ -3039,29 +3067,37 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
    * Used when trackpad zoom/pan interleaves with tablet input (Hyprland freezes the
    * crosshair cursor and blocks chrome clicks until capture is released).
    */
-  const forceEndActivePointer = useCallback((reason: 'view-gesture' | 'cross-device' | 'watchdog' | 'blur' | 'escape' = 'watchdog') => {
+  const forceEndActivePointer = useCallback((
+    reason: 'view-gesture' | 'cross-device' | 'watchdog' | 'blur' | 'escape' = 'watchdog',
+    sample?: PointerEvent | ReactPointerEvent<HTMLElement>,
+  ) => {
     void reason
     const pointerId = activePointerRef.current
     const scrubId = pointerId ?? lastCapturedPointerIdRef.current
     if (pointerId !== null) {
-      const target = activePointerTargetRef.current ?? canvasRef.current
-      const rect = target instanceof Element ? target.getBoundingClientRect() : null
-      const synthetic = {
-        pointerId,
-        type: 'pointercancel',
-        pointerType: lastPointerTypeRef.current,
-        clientX: rect ? rect.left + rect.width / 2 : 0,
-        clientY: rect ? rect.top + rect.height / 2 : 0,
-        pressure: 0,
-        tiltX: 0,
-        tiltY: 0,
-        buttons: 0,
-        button: -1,
-        timeStamp: performance.now(),
-        preventDefault() {},
-        cancelable: false,
-      } as unknown as PointerEvent
-      finishPointer(synthetic)
+      const native = sample && 'nativeEvent' in sample && sample.nativeEvent instanceof PointerEvent
+        ? sample.nativeEvent
+        : sample instanceof PointerEvent ? sample : null
+      if (native && native.pointerId === pointerId) {
+        finishPointer(native)
+      } else {
+        const synthetic = {
+          pointerId,
+          type: 'pointercancel',
+          pointerType: lastPointerTypeRef.current,
+          clientX: Number.NaN,
+          clientY: Number.NaN,
+          pressure: 0,
+          tiltX: 0,
+          tiltY: 0,
+          buttons: 0,
+          button: -1,
+          timeStamp: performance.now(),
+          preventDefault() {},
+          cancelable: false,
+        } as unknown as PointerEvent
+        finishPointer(synthetic)
+      }
     } else if (activeStrokeRef.current) {
       activeStrokeRef.current = null
       pointerBoundsRef.current = null
@@ -3076,6 +3112,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     )
     lastCapturedPointerIdRef.current = null
     activePointerRef.current = null
+    inkSessionRef.current = null
     activePointerTargetRef.current = null
     pointerBoundsRef.current = null
     clearInkCursor()
@@ -3114,11 +3151,12 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     }
     const onWindowPointerMove = (event: PointerEvent) => {
       if (!inputActive || activePointerRef.current !== event.pointerId) return
-      // Missed pointerup (trackpad zoom, pen hover): buttons===0 means the tip is up.
-      if (event.buttons === 0) {
-        forceEndActivePointer('watchdog')
+      const now = performance.now()
+      if (shouldHardEndInkPointerSession(inkSessionRef.current, now, event)) {
+        forceEndActivePointer('watchdog', event)
         return
       }
+      if (inkSessionRef.current) inkSessionRef.current = touchInkPointerSession(inkSessionRef.current, event, now)
       const canvas = canvasRef.current
       const hitTarget = inline ? surfaceRef.current : canvas
       if (hitTarget && (event.target === hitTarget || (event.target instanceof Node && hitTarget.contains(event.target)))) {
@@ -3178,9 +3216,15 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         scrub(event.pointerId)
       }
     }
-    const onWheel = (event: WheelEvent) => {
-      if (!inputActive) return
-      if (event.ctrlKey || event.metaKey || event.altKey) forceEndActivePointer('view-gesture')
+    const onWheel = () => {
+      if (activePointerRef.current !== null || lastCapturedPointerIdRef.current !== null || inkSessionRef.current) {
+        forceEndActivePointer('view-gesture')
+      }
+    }
+    const onGotCapture = (event: PointerEvent) => {
+      if (activePointerRef.current === event.pointerId || lastPointerTypeRef.current === 'pen') {
+        lastCapturedPointerIdRef.current = event.pointerId
+      }
     }
     const onWindowBlur = () => {
       forceEndActivePointer('blur')
@@ -3189,6 +3233,11 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       if (document.visibilityState === 'hidden') forceEndActivePointer('blur')
     }
     const onWatchdog = () => {
+      const now = performance.now()
+      if (shouldHardEndInkPointerSession(inkSessionRef.current, now)) {
+        forceEndActivePointer('watchdog')
+        return
+      }
       const capturedId = lastCapturedPointerIdRef.current
       if (activePointerRef.current !== null || activeStrokeRef.current) return
       if (capturedId === null) return
@@ -3200,6 +3249,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     window.addEventListener('pointerup', onWindowPointerEnd, true)
     window.addEventListener('pointercancel', onWindowPointerEnd, true)
     window.addEventListener('lostpointercapture', onWindowPointerEnd, true)
+    window.addEventListener('gotpointercapture', onGotCapture, true)
     window.addEventListener('pointerdown', onWindowPointerDown, true)
     window.addEventListener('wheel', onWheel, { capture: true, passive: true })
     window.addEventListener('blur', onWindowBlur)
@@ -3210,6 +3260,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       window.removeEventListener('pointerup', onWindowPointerEnd, true)
       window.removeEventListener('pointercancel', onWindowPointerEnd, true)
       window.removeEventListener('lostpointercapture', onWindowPointerEnd, true)
+      window.removeEventListener('gotpointercapture', onGotCapture, true)
       window.removeEventListener('pointerdown', onWindowPointerDown, true)
       window.removeEventListener('wheel', onWheel, true)
       window.removeEventListener('blur', onWindowBlur)
@@ -3222,12 +3273,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   }, [appendPointerEvent, eraseAt, ensureWriteRoom, finishPointer, forceEndActivePointer, inline, inputActive, paintActiveStrokeNow, pointFromEvent])
 
   const handleWheel = useCallback((event: React.WheelEvent) => {
-    const isViewGesture = event.ctrlKey || event.metaKey || event.altKey
-      || viewZoomRef.current !== 1
-      || viewRotationRef.current !== 0
-      || viewPanRef.current.x !== 0
-      || viewPanRef.current.y !== 0
-    if (inputActive && isViewGesture && (activePointerRef.current !== null || lastCapturedPointerIdRef.current !== null || activeStrokeRef.current)) {
+    if (inputActive && (activePointerRef.current !== null || lastCapturedPointerIdRef.current !== null || activeStrokeRef.current || inkSessionRef.current)) {
       forceEndActivePointer('view-gesture')
     }
     // Shared PaperView already handles sheet zoom in inline notes (text + pen).
@@ -4852,7 +4898,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
 
         <div className="lw-draw-toolgroup lw-view-controls" aria-label="Blattansicht">
           <button type="button" className="lw-draw-icon" aria-label="Herauszoomen" title="Herauszoomen (Strg+- · Strg+Mausrad)" onClick={() => zoomBy(-zoomStepFromSpeed(readSharedZoomSpeed()))} disabled={viewZoom <= VIEW_ZOOM_MIN}><ZoomOut size={17} /></button>
-          <button type="button" className="lw-draw-icon" aria-label="Hineinzoomen" title="Hineinzoomen (Strg++ · Strg+Mausrad)" onClick={() => zoomBy(zoomStepFromSpeed(readSharedZoomSpeed()))} disabled={viewZoom >= VIEW_ZOOM_MAX}><ZoomIn size={17} /></button>
+          <button type="button" className="lw-draw-icon" aria-label="Hineinzoomen" title="Hineinzoomen (Strg++ · Strg+Mausrad)" onClick={() => zoomBy(zoomStepFromSpeed(readSharedZoomSpeed()))} disabled={viewZoom >= readSharedZoomMax()}><ZoomIn size={17} /></button>
           <button type="button" className="lw-draw-icon" aria-label="Blatt gegen den Uhrzeigersinn drehen" title="Blatt drehen ( [  · Alt+Mausrad )" onClick={() => rotateBy(-90)}><RotateCcw size={17} /></button>
           <button type="button" className="lw-draw-icon" aria-label="Blatt im Uhrzeigersinn drehen" title="Blatt drehen ( ]  · Alt+Mausrad )" onClick={() => rotateBy(90)}><RotateCw size={17} /></button>
           <button type="button" className="lw-draw-subtle lw-view-reset" aria-label="Ansicht zurücksetzen" title="Zoom und Drehung zurücksetzen (Strg+0 · Esc)" onClick={resetView} disabled={viewZoom === 1 && viewRotation === 0 && viewPan.x === 0 && viewPan.y === 0}>

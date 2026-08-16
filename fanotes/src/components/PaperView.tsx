@@ -11,7 +11,6 @@ import {
 } from 'react'
 import {
   VIEW_ROTATE_STEP,
-  VIEW_ZOOM_MAX,
   VIEW_ZOOM_MIN,
   applyPaperViewToElements,
   capturePaperAnchor,
@@ -20,6 +19,7 @@ import {
   isPaperViewActive,
   normalizeRotation,
   readSharedPaperView,
+  readSharedZoomMax,
   readSharedZoomSpeed,
   restorePaperAnchor,
   subscribeSharedPaperView,
@@ -270,7 +270,7 @@ export function PaperView({ children, className = '', viewKey, showHud = true }:
             <button type="button" aria-label="Herauszoomen" title="Herauszoomen (Strg+- · Strg+Mausrad)" onClick={() => zoomBy(-zoomStepFromSpeed(readSharedZoomSpeed()))} disabled={view.zoom <= VIEW_ZOOM_MIN}>
               <ZoomOut size={15} />
             </button>
-            <button type="button" aria-label="Hineinzoomen" title="Hineinzoomen (Strg++ · Strg+Mausrad)" onClick={() => zoomBy(zoomStepFromSpeed(readSharedZoomSpeed()))} disabled={view.zoom >= VIEW_ZOOM_MAX}>
+            <button type="button" aria-label="Hineinzoomen" title="Hineinzoomen (Strg++ · Strg+Mausrad)" onClick={() => zoomBy(zoomStepFromSpeed(readSharedZoomSpeed()))} disabled={view.zoom >= readSharedZoomMax()}>
               <ZoomIn size={15} />
             </button>
             <button type="button" aria-label="Blatt gegen den Uhrzeigersinn drehen" title="Drehen (Alt+Mausrad)" onClick={() => rotateBy(-VIEW_ROTATE_STEP)}>

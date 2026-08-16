@@ -1,5 +1,12 @@
 # Änderungsverlauf
 
+## Unveröffentlicht
+
+## 2026.8.24
+
+- **Wacom-Lift auf Linux:** Nach dem Abheben bleibt der Stift nicht mehr „halb unten“. Scrollen, Zoomen, Klicks und Trackpad-Tinte funktionieren wieder, auch wenn Wayland kein `pointerup` schickt.
+- **Zoom-Limit:** Unter Einstellungen kannst du den Höchstzoom von 50 % bis 600 % setzen. Standard bleibt 325 %.
+
 ## 2026.8.23
 
 - **Eine Zoom-Kamera:** Text, Kästchen und Tinte wachsen mit demselben Faktor. Zoom sitzt nur noch auf dem Blatt, nicht noch einmal auf dem Editor — kein verzerrter Text und keine Punkte, die fast stehen bleiben. Strg+Mausrad bleibt am Cursor; danach scrollt man normal.

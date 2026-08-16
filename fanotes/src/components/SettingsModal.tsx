@@ -60,7 +60,7 @@ export type SettingsModalProps = {
 
 const SECTIONS: { id: SettingsSection; label: string; description: string; icon: typeof Palette; count: number }[] = [
   { id: 'appearance', label: 'Darstellung', description: 'Farben, Schriften und Dichte', icon: Palette, count: 12 },
-  { id: 'editor', label: 'Editor', description: 'Markdown und Schreiben', icon: FileText, count: 7 },
+  { id: 'editor', label: 'Editor', description: 'Markdown und Schreiben', icon: FileText, count: 8 },
   { id: 'drawing', label: 'Stift & Erkennung', description: 'Tablet, Papier und Handschrift', icon: Brush, count: 15 },
   { id: 'files', label: 'Dateien & Vault', description: 'Import, Ordner und Speichern', icon: FolderOpen, count: 7 },
   { id: 'updates', label: 'Updates', description: 'Stable, Beta und Sicherheit', icon: RefreshCw, count: 4 },
@@ -92,6 +92,8 @@ const SETTINGS_SEARCH_ITEMS: SettingsSearchItem[] = [
   { label: 'Glas-Effekte', detail: 'Darstellung', section: 'appearance', target: 'settings-surface', keywords: 'transparenz blur unschärfe glass' },
   { label: 'Schriften & Textgrößen', detail: 'Darstellung', section: 'appearance', target: 'settings-typography', keywords: 'typografie font editor schrift zeilenhöhe vorschau' },
   { label: 'Inhaltsbreite & Zeilenlänge', detail: 'Editor', section: 'editor', target: 'settings-editor', keywords: 'breite lesen zeile word seite' },
+  { label: 'Zoom-Geschwindigkeit', detail: 'Editor', section: 'editor', target: 'settings-editor', keywords: 'zoom geschwindigkeit mausrad pinch trackpad' },
+  { label: 'Zoom-Limit', detail: 'Editor', section: 'editor', target: 'settings-editor', keywords: 'zoom limit maximum hinein 50 325 600 prozent' },
   { label: 'Rechtschreibprüfung', detail: 'Editor', section: 'editor', target: 'settings-editor', keywords: 'rechtschreibung sprache deutsch englisch rot unterstreichen fehler spellcheck' },
   { label: 'Zeilennummern, Wortzahl & Gliederung', detail: 'Editor', section: 'editor', target: 'settings-editor', keywords: 'statusleiste outline struktur markdown' },
   { label: 'GlyphenWerk & Training', detail: 'Stift & Erkennung', section: 'drawing', target: 'settings-glyphenwerk', keywords: 'handschrift trainieren import zip symbole mathematik' },
@@ -638,6 +640,9 @@ export function SettingsModal({
                   <SettingRow title="Maximale Inhaltsbreite"><Range value={settings.contentWidth} min={560} max={1200} step={20} suffix=" px" onChange={(value) => update('contentWidth', value)} /></SettingRow>
                   <SettingRow title="Zoom-Geschwindigkeit" description="Wie weit Strg+Mausrad oder Trackpad-Pinch das Blatt verändert. 1 ist langsam, 5 normal, 10 schnell.">
                     <Range value={settings.viewZoomSpeed ?? 5} min={1} max={10} onChange={(value) => update('viewZoomSpeed', value)} />
+                  </SettingRow>
+                  <SettingRow title="Zoom-Limit" description="Wie weit du das Blatt hereinzoomen kannst. 50 % ist kaum näher, 325 % ist der bisherige Höchstwert, 600 % ist sehr nah.">
+                    <Range value={settings.viewZoomMax ?? 325} min={50} max={600} step={5} suffix=" %" onChange={(value) => update('viewZoomMax', value)} />
                   </SettingRow>
                   <SettingRow title="Zeilennummern"><Toggle label="Zeilennummern" checked={settings.showLineNumbers} onChange={(value) => update('showLineNumbers', value)} /></SettingRow>
                   <SettingRow title="Rechtschreibprüfung" description="Unterstreicht Tippfehler lokal rot und erkennt Deutsch oder Englisch automatisch. Mathematik und Code bleiben unberührt."><Toggle label="Rechtschreibprüfung" checked={settings.spellcheck} onChange={(value) => update('spellcheck', value)} /></SettingRow>

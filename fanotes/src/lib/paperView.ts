@@ -1,5 +1,8 @@
 export const VIEW_ZOOM_MIN = 0.45
 export const VIEW_ZOOM_MAX = 3.25
+export const VIEW_ZOOM_MAX_PERCENT_MIN = 50
+export const VIEW_ZOOM_MAX_PERCENT_MAX = 600
+export const VIEW_ZOOM_MAX_PERCENT_DEFAULT = 325
 export const VIEW_ZOOM_STEP = 0.12
 export const VIEW_ZOOM_SPEED_MIN = 1
 export const VIEW_ZOOM_SPEED_MAX = 10
@@ -18,8 +21,17 @@ export const defaultPaperView = (): PaperViewSnapshot => ({
   pan: { x: 0, y: 0 },
 })
 
+export const clampViewZoomMaxPercent = (value: number) => (
+  Math.min(
+    VIEW_ZOOM_MAX_PERCENT_MAX,
+    Math.max(VIEW_ZOOM_MAX_PERCENT_MIN, Math.round(Number(value) || VIEW_ZOOM_MAX_PERCENT_DEFAULT)),
+  )
+)
+
+export const viewZoomMaxFromPercent = (percent: number) => clampViewZoomMaxPercent(percent) / 100
+
 export const clampViewZoom = (value: number) => (
-  Math.min(VIEW_ZOOM_MAX, Math.max(VIEW_ZOOM_MIN, Math.round(value * 1000) / 1000))
+  Math.min(readSharedZoomMax(), Math.max(VIEW_ZOOM_MIN, Math.round(value * 1000) / 1000))
 )
 
 export const clampViewZoomSpeed = (value: number) => (
@@ -48,6 +60,12 @@ let sharedZoomSpeed = VIEW_ZOOM_SPEED_DEFAULT
 export const readSharedZoomSpeed = () => sharedZoomSpeed
 export const writeSharedZoomSpeed = (value: number) => {
   sharedZoomSpeed = clampViewZoomSpeed(value)
+}
+
+let sharedZoomMax = VIEW_ZOOM_MAX
+export const readSharedZoomMax = () => sharedZoomMax
+export const writeSharedZoomMaxPercent = (percent: number) => {
+  sharedZoomMax = viewZoomMaxFromPercent(percent)
 }
 
 export const normalizeRotation = (value: number) => {
