@@ -462,6 +462,14 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   background: var(--accent);
   box-shadow: 0 4px 12px color-mix(in srgb, var(--accent) 28%, transparent);
 }
+.pdf-toolbar-hint {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .toolbar-context { min-width: 0; flex: 1 1 auto; display: flex; align-items: center; overflow: hidden; }
 .ink-toolbar-slot {
   min-width: 0;
@@ -733,7 +741,11 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .paper-view { position: relative; }
 .paper-sheet-plane {
   display: block;
-  width: 100%;
+  /* Camera wraps the sheet, not the empty viewport — CSS zoom then scales
+     only the page, like OneNote, instead of stretching a 100% wide plane. */
+  width: max-content;
+  max-width: none;
+  margin: 0 auto;
   overflow: visible;
   --view-zoom: 1;
   will-change: auto;
@@ -841,7 +853,9 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   border: 1px solid rgba(31,34,47,.13);
   border-radius: 3px;
   box-shadow: 0 8px 28px rgba(0,0,0,.22), 0 1px 0 rgba(255,255,255,.04);
-  isolation: isolate;
+  /* Do not `isolation: isolate` — Chromium then rasterizes the sheet at 1×
+     and stretches the bitmap when the plane is CSS-zoomed (sheared text,
+     ruling that barely grows). z-index on ruling / editor / ink is enough. */
   --view-zoom: 1;
 }
 .unified-paper.has-ink-extent {
@@ -879,6 +893,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   background-origin: padding-box;
   background-attachment: local;
   background-position: 0 0;
+  /* Tile size is CSS px on the sheet. The plane camera zooms this with
+     type and ink — do not pin a local zoom or a 1× background-size. */
 }
 .paper-dots .unified-paper > .paper-ruling {
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28'%3E%3Ccircle cx='14' cy='14' r='0.8' fill='rgba(82,91,116,0.19)'/%3E%3C/svg%3E");
@@ -918,6 +934,12 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .unified-paper.has-worksheet > .editor-pane { min-height: 0; }
 .unified-paper.has-worksheet .markdown-editor, .unified-paper.has-worksheet .markdown-editor .cm-editor, .unified-paper.has-worksheet .markdown-editor .cm-scroller { min-height: 0; }
 .unified-paper.has-worksheet .markdown-editor .cm-content { min-height: 0; padding-bottom: 34px; }
+.unified-paper.is-pdf-note {
+  min-height: calc(100% - 48px);
+  padding: 18px 0 36px;
+  background: #edeff3;
+}
+.unified-paper.is-pdf-note > .paper-ruling { display: none; }
 .worksheet-layer {
   position: relative;
   z-index: 3;
@@ -1068,6 +1090,228 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   box-shadow: 0 9px 28px rgba(0,0,0,.16);
   font-size: 10px;
 }
+.pdf-note-view {
+  position: relative;
+  z-index: 3;
+  box-sizing: border-box;
+  width: 100%;
+  color: #282a34;
+  font-family: var(--ui-font);
+  outline: none;
+}
+.pdf-note-toolbar {
+  position: sticky;
+  z-index: 8;
+  top: 10px;
+  box-sizing: border-box;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  width: min(calc(100% - 28px), 900px);
+  margin: 0 auto 12px;
+  padding: 6px 8px 6px 12px;
+  border: 1px solid rgba(40,43,56,.17);
+  border-radius: 12px;
+  background: rgba(249,249,252,.96);
+  box-shadow: 0 9px 28px rgba(25,28,39,.16);
+  backdrop-filter: blur(13px);
+}
+.pdf-note-identity,
+.pdf-note-pager,
+.pdf-note-zoom,
+.pdf-note-tools {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.pdf-note-identity { flex: 1 1 160px; }
+.pdf-note-identity svg { flex: none; color: var(--paper-accent-readable); }
+.pdf-note-identity strong { overflow: hidden; max-width: 220px; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.pdf-note-identity small,
+.pdf-note-pager span { color: #696d7a; font-size: 10px; white-space: nowrap; }
+.pdf-note-toolbar button {
+  height: 29px;
+  min-width: 29px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 0 8px;
+  border: 1px solid rgba(40,43,56,.15);
+  border-radius: 8px;
+  color: #565a68;
+  background: #f1f2f6;
+  cursor: pointer;
+  font-size: 10px;
+}
+.pdf-note-toolbar button:hover:not(:disabled),
+.pdf-note-toolbar button.is-active { color: #242631; border-color: color-mix(in srgb, var(--paper-accent-readable) 40%, rgba(40,43,56,.15)); background: color-mix(in srgb, var(--paper-accent-readable) 10%, #fff); }
+.pdf-note-toolbar button:disabled { cursor: default; opacity: .4; }
+.pdf-note-pager form { display: flex; }
+.pdf-note-pager input,
+.pdf-note-search input,
+.pdf-note-password input {
+  width: 46px;
+  height: 29px;
+  padding: 0 6px;
+  border: 1px solid rgba(40,43,56,.16);
+  border-radius: 8px;
+  color: #242631;
+  background: #fff;
+  text-align: center;
+  font-size: 11px;
+}
+.pdf-note-search {
+  width: min(calc(100% - 28px), 900px);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 auto 12px;
+  padding: 6px 8px;
+  border: 1px solid rgba(40,43,56,.14);
+  border-radius: 10px;
+  background: #fff;
+}
+.pdf-note-search input { flex: 1; width: auto; text-align: left; }
+.pdf-note-search small { color: #696d7a; font-size: 10px; white-space: nowrap; }
+.pdf-note-search button {
+  height: 26px;
+  min-width: 26px;
+  border: 0;
+  border-radius: 7px;
+  color: #565a68;
+  background: #f1f2f6;
+  cursor: pointer;
+}
+.pdf-note-body { display: flex; align-items: flex-start; gap: 12px; width: min(calc(100% - 20px), 980px); margin: 0 auto; }
+.pdf-note-pages { margin: 0 auto; min-width: 240px; }
+.pdf-note-page {
+  position: relative;
+  width: 100%;
+  margin: 0 auto 16px;
+  overflow: hidden;
+  border: 1px solid rgba(35,38,51,.16);
+  border-radius: 2px;
+  background: #fff;
+  box-shadow: 0 12px 34px rgba(29,31,42,.16);
+  content-visibility: auto;
+  contain-intrinsic-size: 800px 1100px;
+  contain: layout paint style;
+}
+.pdf-note-page:last-child { margin-bottom: 0; }
+.pdf-note-page-label {
+  position: absolute;
+  z-index: 2;
+  right: 8px;
+  bottom: 8px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  color: #5c6070;
+  background: rgba(255,255,255,.84);
+  font-size: 9px;
+  pointer-events: none;
+}
+.pdf-note-canvas-host { position: absolute; inset: 0; }
+.pdf-note-page canvas { display: block; width: 100%; height: 100%; }
+.pdf-note-page.is-virtualized { background: #f4f5f8; }
+.pdf-note-text-layer {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  line-height: 1;
+  opacity: 1;
+  pointer-events: auto;
+  --scale-factor: 1;
+}
+.pdf-note-view.is-inking .pdf-note-text-layer,
+.pdf-note-view.is-inking .pdf-note-toolbar,
+.pdf-note-view.is-inking .pdf-note-search,
+.pdf-note-view.is-inking .pdf-note-sidebar { pointer-events: none; }
+.pdf-note-text-layer :is(span, br) {
+  position: absolute;
+  color: transparent;
+  white-space: pre;
+  transform-origin: 0 0;
+  cursor: text;
+}
+.pdf-note-text-layer ::selection { background: color-mix(in srgb, var(--paper-accent-readable) 32%, transparent); }
+.pdf-note-sidebar {
+  position: sticky;
+  top: 62px;
+  flex: none;
+  width: 96px;
+  max-height: calc(100vh - 180px);
+  overflow: auto;
+  padding: 6px 4px;
+  border: 1px solid rgba(40,43,56,.12);
+  border-radius: 10px;
+  background: rgba(255,255,255,.88);
+}
+.pdf-note-outline { width: 168px; }
+.pdf-note-outline ul { margin: 0; padding: 0 0 0 8px; list-style: none; }
+.pdf-note-outline button {
+  width: 100%;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 0 2px;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: 6px;
+  color: #2c2f3a;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  font-size: 10px;
+}
+.pdf-note-outline button:hover { background: #eef0f5; }
+.pdf-note-outline small { color: #7a7e8b; }
+.pdf-note-thumb {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  margin: 0 0 8px;
+  padding: 4px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+}
+.pdf-note-thumb canvas { width: 76px; height: auto; border: 1px solid rgba(40,43,56,.14); background: #fff; }
+.pdf-note-thumb small { color: #6a6e7a; font-size: 9px; }
+.pdf-note-thumb.is-active { border-color: color-mix(in srgb, var(--paper-accent-readable) 55%, transparent); background: color-mix(in srgb, var(--paper-accent-readable) 10%, #fff); }
+.pdf-note-status,
+.pdf-note-error,
+.pdf-note-password {
+  min-height: 220px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin: 0 18px;
+  padding: 28px;
+  color: #676b78;
+  background: #f7f7fa;
+  text-align: center;
+  font-size: 11px;
+}
+.pdf-note-error strong,
+.pdf-note-password strong { color: #30323d; font-size: 13px; }
+.pdf-note-password input { width: min(240px, 100%); text-align: left; }
+.sidebar-actions .pdf-import-button {
+  width: auto;
+  min-width: 34px;
+  padding: 0 7px;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: .04em;
+}
 @media (max-width: 760px) {
   .unified-paper {
     --paper-width: calc(100% - 24px);
@@ -1083,6 +1327,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   }
   .unified-paper .markdown-editor .cm-content { padding: 58px 34px 120px; }
   .worksheet-layer { width: min(calc(100% - 16px), 900px); max-width: 900px; margin: 0 8px 26px; }
+  .pdf-note-toolbar, .pdf-note-search, .pdf-note-body { width: min(calc(100% - 12px), 900px); }
+  .pdf-note-sidebar { display: none; }
   .worksheet-toolbar strong { max-width: 150px; }
 }
 .editor-pane { min-width: 0; min-height: 0; flex: 1; position: relative; overflow: hidden; }

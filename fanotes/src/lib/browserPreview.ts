@@ -407,6 +407,7 @@ export function createBrowserPreviewApi(): FaNotesApi {
       if (!drawing) throw new Error('Zeichnung nicht gefunden.')
       return { ...drawing }
     },
+    importPdfNote: async () => null,
     importWorksheet: async () => {
       const id = crypto.randomUUID()
       const now = new Date().toISOString()

@@ -98,6 +98,8 @@ export function PaperView({ children, className = '', viewKey, showHud = true }:
     const anchor = scroller ? capturePaperAnchor(scroller, sheet, originClient) : null
     apply(zoomAroundPoint(current, zoom))
     if (scroller && sheet && anchor) {
+      // Flush CSS zoom layout so the camera rect matches the new scale
+      // before we restore the paper point under the cursor.
       sheet.offsetWidth
       restorePaperAnchor(scroller, sheet, anchor)
     }

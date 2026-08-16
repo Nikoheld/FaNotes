@@ -13,6 +13,7 @@ import {
 import {
   Check,
   ChevronRight,
+  File,
   FileText,
   Folder,
   FolderOpen,
@@ -35,6 +36,7 @@ export type FileTreeProps = {
   onOpen: (relativePath: string) => MaybePromise
   onCreateNote: (parentPath?: string) => MaybePromise
   onCreateFolder: (parentPath?: string) => MaybePromise
+  onImportPdf?: (parentPath?: string) => MaybePromise
   onSetFolderColor?: (relativePath: string, color: string | null) => MaybePromise
   onRename: (relativePath: string, nextName: string) => MaybePromise
   onMove: (relativePath: string, destFolder: string) => MaybePromise
@@ -84,9 +86,13 @@ function parentFolders(relativePath: string) {
 }
 
 function displayName(entry: VaultEntry) {
-  return entry.kind === 'file' && /\.(md|markdown|famd)$/i.test(entry.name)
-    ? entry.name.replace(/\.(md|markdown|famd)$/i, '')
+  return entry.kind === 'file' && /\.(md|markdown|famd|pdf)$/i.test(entry.name)
+    ? entry.name.replace(/\.(md|markdown|famd|pdf)$/i, '')
     : entry.name
+}
+
+function isPdfEntry(entry: VaultEntry) {
+  return entry.kind === 'file' && /\.pdf$/i.test(entry.name)
 }
 
 function errorMessage(error: unknown) {
@@ -137,6 +143,7 @@ export const FileTree = memo(function FileTree({
   onOpen,
   onCreateNote,
   onCreateFolder,
+  onImportPdf,
   onSetFolderColor,
   onRename,
   onMove,
@@ -329,13 +336,14 @@ export const FileTree = memo(function FileTree({
 
   const createInFolder = (
     entry: VaultEntry,
-    kind: 'note' | 'folder',
+    kind: 'note' | 'folder' | 'pdf',
     event?: MouseEvent,
   ) => {
     event?.stopPropagation()
     setContextMenu(null)
     toggleFolder(entry.relativePath, true)
-    const action = kind === 'note' ? onCreateNote : onCreateFolder
+    const action = kind === 'note' ? onCreateNote : kind === 'pdf' ? onImportPdf : onCreateFolder
+    if (!action) return
     void Promise.resolve(action(entry.relativePath))
   }
 
@@ -466,6 +474,8 @@ export const FileTree = memo(function FileTree({
                     ) : (
                       <Folder size={16} />
                     )
+                  ) : isPdfEntry(entry) ? (
+                    <File size={16} />
                   ) : (
                     <FileText size={16} />
                   )}
@@ -574,6 +584,17 @@ export const FileTree = memo(function FileTree({
               >
                 <FolderPlus aria-hidden="true" size={16} />
               </button>
+              {onImportPdf && (
+                <button
+                  aria-label="PDF importieren"
+                  className="file-tree__action"
+                  onClick={() => void Promise.resolve(onImportPdf())}
+                  title="PDF importieren"
+                  type="button"
+                >
+                  <File aria-hidden="true" size={16} />
+                </button>
+              )}
             </span>
           )}
         </div>
@@ -605,13 +626,13 @@ export const FileTree = memo(function FileTree({
             left: Math.min(Math.max(8, contextMenu.x), window.innerWidth - 232),
             top: Math.min(
               Math.max(8, contextMenu.y),
-              window.innerHeight - (contextMenu.entry.kind === 'folder' ? 390 : 172),
+              window.innerHeight - (contextMenu.entry.kind === 'folder' ? 430 : 172),
             ),
           }}
         >
           <div className="file-tree__menu-head">
-            <span>{contextMenu.entry.kind === 'folder' ? <FolderOpen size={16} /> : <FileText size={16} />}</span>
-            <div><small>{contextMenu.entry.kind === 'folder' ? 'Ordner' : 'Notiz'}</small><strong>{displayName(contextMenu.entry)}</strong></div>
+            <span>{contextMenu.entry.kind === 'folder' ? <FolderOpen size={16} /> : isPdfEntry(contextMenu.entry) ? <File size={16} /> : <FileText size={16} />}</span>
+            <div><small>{contextMenu.entry.kind === 'folder' ? 'Ordner' : isPdfEntry(contextMenu.entry) ? 'PDF-Notiz' : 'Notiz'}</small><strong>{displayName(contextMenu.entry)}</strong></div>
           </div>
           {contextMenu.entry.kind === 'folder' && (
             <>
@@ -624,6 +645,16 @@ export const FileTree = memo(function FileTree({
                 <Plus aria-hidden="true" size={15} />
                 Neue Notiz
               </button>
+              {onImportPdf && (
+              <button
+                onClick={() => createInFolder(contextMenu.entry, 'pdf')}
+                role="menuitem"
+                type="button"
+              >
+                <File aria-hidden="true" size={15} />
+                PDF importieren
+              </button>
+              )}
               <button
                 onClick={() => createInFolder(contextMenu.entry, 'folder')}
                 role="menuitem"

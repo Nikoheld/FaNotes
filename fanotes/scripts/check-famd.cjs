@@ -34,6 +34,7 @@ assert.deepEqual(parsed.payload?.worksheets, ['ws-1'])
 assert.equal(parsed.markdown.includes('$$\\int x$$'), true)
 assert.equal(companionNotePath('Mathe/Analysis.md', '.famd'), 'Mathe/Analysis.famd')
 assert.equal(companionNotePath('Mathe/Analysis.famd', '.md'), 'Mathe/Analysis.md')
+assert.equal(companionNotePath('Mathe/Skript.pdf', '.famd'), 'Mathe/Skript.famd')
 
 const poisoned = `${encoded}\n<!-- fanotes-famd:v1 chars=2 -->\n{}`
 const last = parseFamd(poisoned)
@@ -45,6 +46,7 @@ const main = fs.readFileSync(path.join(__dirname, '..', 'electron', 'main.cjs'),
 const preload = fs.readFileSync(path.join(__dirname, '..', 'electron', 'preload.cjs'), 'utf8')
 const app = fs.readFileSync(path.join(__dirname, '..', 'src', 'App.tsx'), 'utf8')
 assert.match(main, /fanotes:read-famd-ink/u)
+assert.match(main, /fanotes:import-pdf-note/u)
 assert.match(main, /writeFamdCompanion/u)
 assert.match(main, /omitFamdCompanions/u)
 assert.match(preload, /readFamdInk:\s*\(relativePath\)/u)

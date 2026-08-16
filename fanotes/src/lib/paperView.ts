@@ -60,12 +60,22 @@ export const isPaperViewActive = (view: PaperViewSnapshot) => (
 )
 
 /**
- * Layers that must inherit the sheet zoom. Never assign `zoom: 1` / `zoom: ''`
- * here — Chromium's inherited `zoom` then stays at 1× and only the paper
- * background grows, leaving markdown at the original size.
+ * Layers that must inherit the single camera zoom. Never assign `zoom` here —
+ * a specified child zoom multiplies the plane (text shears) or `zoom: ''` / `1`
+ * freezes that layer at 1× (ruling stays put while type grows).
  */
-const SHEET_LAYER_SELECTOR = '.editor-pane, .worksheet-layer, .lw-canvas-surface, .lw-drawing-board, .paper-ruling'
-const TEXT_ZOOM_SELECTOR = '.editor-pane'
+const SHEET_LAYER_SELECTOR = [
+  '.editor-pane',
+  '.worksheet-layer',
+  '.pdf-note-view',
+  '.lw-canvas-surface',
+  '.lw-drawing-board',
+  '.paper-ruling',
+  '.markdown-editor',
+  '.cm-editor',
+  '.cm-scroller',
+  '.cm-content',
+].join(', ')
 
 const clearInlineViewStyle = (element: HTMLElement | null) => {
   if (!element) return
@@ -75,6 +85,14 @@ const clearInlineViewStyle = (element: HTMLElement | null) => {
   element.style.removeProperty('will-change')
   element.style.removeProperty('--view-zoom')
   element.classList.remove('is-view-transformed', 'is-view-zoomed')
+}
+
+const stripLocalSheetZoom = (element: HTMLElement | null) => {
+  if (!element) return
+  element.style.removeProperty('zoom')
+  element.style.removeProperty('transform')
+  element.style.removeProperty('transform-origin')
+  element.style.removeProperty('will-change')
 }
 
 /** Prefer the dedicated plane so ruling, text and ink share one zoom node. */
@@ -88,16 +106,39 @@ export const resolvePaperViewTarget = (
 )
 
 /**
- * Apply sheet zoom/pan/rotate without GPU-stretching a 1× bitmap.
+ * Used camera zoom for an element on the sheet.
+ * Walks to the plane and reads the single specified zoom — children must not
+ * carry their own zoom, so every layer reports the same factor.
+ */
+export const readUsedSheetZoom = (element: HTMLElement | null): number => {
+  let node: HTMLElement | null = element
+  while (node) {
+    const inline = node.style.zoom
+    if (inline) {
+      const value = Number.parseFloat(inline)
+      if (Number.isFinite(value) && value > 0) return value
+    }
+    if (node.classList.contains('paper-sheet-plane')) {
+      const token = node.style.getPropertyValue('--view-zoom')
+      const value = Number.parseFloat(token)
+      if (Number.isFinite(value) && value > 0) return value
+      return 1
+    }
+    node = node.parentElement
+  }
+  return 1
+}
+
+/**
+ * Apply sheet zoom as one camera on the sheet plane.
  *
- * Chromium rasterizes `transform: scale()` layers at layout size, then stretches
- * them — markdown text becomes unreadable. CSS `zoom` raises the raster scale
- * so fonts stay sharp. Pan/rotate stay on `transform` in pre-zoom units.
+ * Chromium rasterizes `transform: scale()` at layout size and stretches the
+ * bitmap — markdown shears. CSS `zoom` on a *single* node raises the raster
+ * scale so type, ruling and ink stay sharp and the same size. Pan is native
+ * scroll. Rotate stays on `transform` (unused at 0°).
  *
- * Zoom is applied to the sheet plane so ruling, ink and type stay one sheet.
- * The text column gets the same specified zoom (CodeMirror often ignores
- * inheritance). Never assign `style.zoom = ''` — that specifies zoom:1 and
- * freezes markdown while the ruling still grows.
+ * Never pin `zoom` on children. A second specified zoom multiplies the camera
+ * (text 4×, dots 2×). `zoom: ''` specifies 1 and freezes that layer.
  */
 export const applyPaperViewToElements = (
   paper: HTMLElement | null,
@@ -111,33 +152,27 @@ export const applyPaperViewToElements = (
     if (zoom === 1) target.style.removeProperty('zoom')
     else target.style.zoom = String(zoom)
     target.style.setProperty('--view-zoom', String(zoom))
-    target.style.transform = view.rotation ? `rotate(${view.rotation}deg)` : ''
-    target.style.transformOrigin = 'center center'
-    // Never promote the sheet to a low-res compositor bitmap.
+    if (view.rotation) {
+      target.style.transform = `rotate(${view.rotation}deg)`
+      target.style.transformOrigin = 'center center'
+    } else {
+      target.style.removeProperty('transform')
+      target.style.removeProperty('transform-origin')
+    }
     target.style.willChange = 'auto'
     target.classList.toggle('is-view-transformed', active)
     target.classList.toggle('is-view-zoomed', zoom !== 1)
   }
   if (paper && paper !== target) {
-    clearInlineViewStyle(paper)
+    stripLocalSheetZoom(paper)
     paper.style.setProperty('--view-zoom', String(zoom))
     paper.classList.toggle('is-view-transformed', active)
     paper.classList.toggle('is-view-zoomed', zoom !== 1)
   }
   const sheet = paper ?? target
   sheet?.querySelectorAll<HTMLElement>(SHEET_LAYER_SELECTOR).forEach((element) => {
-    element.style.removeProperty('transform')
-    element.style.removeProperty('transform-origin')
-    element.style.removeProperty('will-change')
-    element.style.removeProperty('--view-zoom')
-    // CodeMirror can ignore inherited zoom. Pin the same specified value on
-    // the text column only — never zoom:'' / 1, that freezes markdown at 1×.
-    if (element.matches(TEXT_ZOOM_SELECTOR)) {
-      if (zoom === 1) element.style.removeProperty('zoom')
-      else element.style.zoom = String(zoom)
-    } else {
-      element.style.removeProperty('zoom')
-    }
+    if (element === target) return
+    stripLocalSheetZoom(element)
   })
   if (noteView) {
     noteView.classList.toggle('is-view-transformed', active)
@@ -153,7 +188,8 @@ export const clearPaperViewFromElements = (
   const plane = resolvePaperViewTarget(paper, noteView)
   if (plane && plane !== paper) clearInlineViewStyle(plane)
   clearInlineViewStyle(paper)
-  paper?.querySelectorAll<HTMLElement>(SHEET_LAYER_SELECTOR).forEach((element) => {
+  const root = paper ?? plane
+  root?.querySelectorAll<HTMLElement>(SHEET_LAYER_SELECTOR).forEach((element) => {
     clearInlineViewStyle(element)
   })
   if (noteView && noteView !== paper && noteView !== plane) {

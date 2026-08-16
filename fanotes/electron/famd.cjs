@@ -3,7 +3,8 @@
 const FAMD_SCHEMA = 'fanotes-famd-v1'
 const FAMD_HEADER = /(?:^|\n)<!--\s*fanotes-famd:v1\s+chars=(\d+)\s*-->\n/u
 const WORKSHEET_MARKER = /<!--\s*fanotes-worksheet:([a-zA-Z0-9_-]{1,96})\s*-->/gu
-const NOTE_FILE_EXTENSIONS = Object.freeze(['.md', '.markdown', '.famd'])
+const MARKDOWN_NOTE_EXTENSIONS = Object.freeze(['.md', '.markdown', '.famd'])
+const NOTE_FILE_EXTENSIONS = Object.freeze(['.md', '.markdown', '.famd', '.pdf'])
 const PAPER_STYLES = Object.freeze(['blank', 'dots', 'squares', 'grid', 'lines', 'millimeter'])
 const MAX_FAMD_JSON_CHARS = 32 * 1024 * 1024
 
@@ -11,12 +12,20 @@ function isPaperStyle(value) {
   return typeof value === 'string' && PAPER_STYLES.includes(value)
 }
 
+function isMarkdownExtension(extension) {
+  return MARKDOWN_NOTE_EXTENSIONS.includes(String(extension || '').toLocaleLowerCase('en-US'))
+}
+
+function isPdfNoteExtension(extension) {
+  return String(extension || '').toLocaleLowerCase('en-US') === '.pdf'
+}
+
 function isNoteExtension(extension) {
   return NOTE_FILE_EXTENSIONS.includes(String(extension || '').toLocaleLowerCase('en-US'))
 }
 
 function noteStem(relativePath) {
-  return String(relativePath || '').replace(/\.(md|markdown|famd)$/iu, '')
+  return String(relativePath || '').replace(/\.(md|markdown|famd|pdf)$/iu, '')
 }
 
 function companionNotePath(relativePath, extension) {
@@ -87,12 +96,15 @@ function serializeFamd(markdown, payload) {
 module.exports = {
   FAMD_SCHEMA,
   MAX_FAMD_JSON_CHARS,
+  MARKDOWN_NOTE_EXTENSIONS,
   NOTE_FILE_EXTENSIONS,
   PAPER_STYLES,
   companionNotePath,
   isPaperStyle,
   emptyFamdPayload,
+  isMarkdownExtension,
   isNoteExtension,
+  isPdfNoteExtension,
   noteStem,
   parseFamd,
   serializeFamd,

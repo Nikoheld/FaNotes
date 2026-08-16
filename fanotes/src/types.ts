@@ -231,11 +231,14 @@ export type StarterSubject = {
   color: string
 }
 
+export type NoteKind = 'markdown' | 'pdf'
+
 export type NoteTab = {
   path: string
   title: string
   content: string
   savedContent: string
+  kind?: NoteKind
   pinned?: boolean
 }
 
@@ -456,6 +459,7 @@ export type FaNotesApi = {
   setNotePaperStyle?: (relativePath: string, paperStyle: PaperStyle) => Promise<PaperStyle>
   importWorksheet: () => Promise<WorksheetDocument | null>
   importWorksheetFromData?: (payload: { name: string; mimeType: string; bytes: Uint8Array }) => Promise<WorksheetDocument>
+  importPdfNote: (parentPath?: string) => Promise<CreateResult | null>
   importOneNote: () => Promise<OneNoteImportResult | null>
   readWorksheet: (id: string) => Promise<WorksheetDocument>
   saveWorksheet: (document: WorksheetDocument) => Promise<WorksheetDocument>

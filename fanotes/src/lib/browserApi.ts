@@ -156,10 +156,10 @@ const storedServerBackup = (value: unknown): StoredServerBackup | null => {
   }
 }
 
-const pickWorksheet = () => new Promise<File | null>((resolve) => {
+const pickFile = (accept: string) => new Promise<File | null>((resolve) => {
   const input = document.createElement('input')
   input.type = 'file'
-  input.accept = '.pdf,.png,.jpg,.jpeg,.webp,.gif,application/pdf,image/png,image/jpeg,image/webp,image/gif'
+  input.accept = accept
   input.style.display = 'none'
   document.body.append(input)
   let settled = false
@@ -175,6 +175,9 @@ const pickWorksheet = () => new Promise<File | null>((resolve) => {
   window.addEventListener('focus', afterFocus, { once: true })
   input.click()
 })
+
+const pickWorksheet = () => pickFile('.pdf,.png,.jpg,.jpeg,.webp,.gif,application/pdf,image/png,image/jpeg,image/webp,image/gif')
+const pickPdf = () => pickFile('.pdf,application/pdf')
 
 const blobFromDataUrl = async (dataUrl: string) => {
   const response = await fetch(dataUrl)
@@ -351,9 +354,29 @@ export function createBrowserApi(): FaNotesApi {
       const entry: VaultEntry = { name: fileName(folder.path), relativePath: folder.path, kind: 'folder', color: folder.color, children }
       ;(directories.get(parentPath(folder.path)) ?? root).push(entry)
     })
+    const hiddenFamd = new Set<string>()
+    const noteStems = new Set<string>()
     files.forEach((record) => {
-      const entry: VaultEntry = { name: fileName(record.path), relativePath: record.path, kind: 'file', extension: 'md', modifiedAt: record.modifiedAt, size: textBytes(record.content) }
+      if (/\.(md|markdown)$/iu.test(record.path)) noteStems.add(stem(fileName(record.path)).normalize('NFC').toLocaleLowerCase('de-DE'))
+    })
+    assets.forEach((_blob, path) => {
+      if (!path.startsWith('.') && /\.pdf$/iu.test(path)) noteStems.add(stem(fileName(path)).normalize('NFC').toLocaleLowerCase('de-DE'))
+    })
+    files.forEach((record) => {
+      if (!/\.famd$/iu.test(record.path)) return
+      const key = stem(fileName(record.path)).normalize('NFC').toLocaleLowerCase('de-DE')
+      if (noteStems.has(key)) hiddenFamd.add(record.path)
+    })
+    files.forEach((record) => {
+      if (hiddenFamd.has(record.path)) return
+      const extension = fileName(record.path).split('.').pop()?.toLocaleLowerCase('en-US') || 'md'
+      const entry: VaultEntry = { name: fileName(record.path), relativePath: record.path, kind: 'file', extension, modifiedAt: record.modifiedAt, size: textBytes(record.content) }
       ;(directories.get(parentPath(record.path)) ?? root).push(entry)
+    })
+    assets.forEach((blob, path) => {
+      if (path.startsWith('.') || !/\.pdf$/iu.test(path)) return
+      const entry: VaultEntry = { name: fileName(path), relativePath: path, kind: 'file', extension: 'pdf', size: blob.size }
+      ;(directories.get(parentPath(path)) ?? root).push(entry)
     })
     const sort = (entries: VaultEntry[]) => entries.sort((a, b) => a.kind === b.kind ? a.name.localeCompare(b.name, getUiLanguage()) : a.kind === 'folder' ? -1 : 1).forEach((entry) => { if (entry.children) sort(entry.children) })
     sort(root)
@@ -380,11 +403,11 @@ export function createBrowserApi(): FaNotesApi {
     await persistNotePaper()
   }
 
-  const uniquePath = (preferred: string, kind: 'file' | 'folder') => {
-    const exists = (candidate: string) => files.has(candidate) || folders.has(candidate)
+  const uniquePath = (preferred: string, kind: 'file' | 'folder' | 'pdf') => {
+    const exists = (candidate: string) => files.has(candidate) || folders.has(candidate) || (assets.has(candidate) && !candidate.startsWith('.fanotes/'))
     if (!exists(preferred)) return preferred
-    const extension = kind === 'file' ? '.md' : ''
-    const base = extension ? preferred.replace(/\.md$/iu, '') : preferred
+    const extension = kind === 'folder' ? '' : kind === 'pdf' ? '.pdf' : '.md'
+    const base = extension ? preferred.replace(new RegExp(`${extension.replace('.', '\\.')}$`, 'iu'), '') : preferred
     let index = 2
     while (exists(`${base} ${index}${extension}`)) index += 1
     return `${base} ${index}${extension}`
@@ -693,9 +716,9 @@ export function createBrowserApi(): FaNotesApi {
       await ready
       const path = normalizePath(rawPath)
       const previous = files.get(path)
-      if (!previous) throw new Error('Die Notiz wurde im Browser-Vault nicht gefunden.')
+      if (!previous && !/\.famd$/iu.test(path)) throw new Error('Die Notiz wurde im Browser-Vault nicht gefunden.')
       if (typeof content !== 'string' || textBytes(content) > MAX_NOTE_BYTES) throw new Error('Die Notiz ist zu groß.')
-      if (previous.content !== content) {
+      if (previous && previous.content !== content) {
         const createdAt = new Date().toISOString()
         const entry = { id: `${createdAt}-${Math.random().toString(36).slice(2, 8)}`, createdAt, content: previous.content, bytes: textBytes(previous.content) }
         const list = noteHistory.get(path) ?? []
@@ -769,6 +792,37 @@ export function createBrowserApi(): FaNotesApi {
       await ready
       const path = normalizePath(rawPath)
       const parent = parentPath(path)
+      if (assets.has(path) && /\.pdf$/iu.test(path)) {
+        const name = `${safeSegment(nextName.replace(/\.pdf$/iu, ''), stem(fileName(path)))}.pdf`
+        const next = [parent, name].filter(Boolean).join('/')
+        if (next !== path && (files.has(next) || folders.has(next) || assets.has(next))) throw new Error('An diesem Ort existiert bereits ein Eintrag mit diesem Namen.')
+        const blob = assets.get(path)!
+        const oldCompanion = `${stem(path)}.famd`
+        const nextCompanion = `${stem(next)}.famd`
+        const companion = files.get(oldCompanion)
+        await writeMany(['assets', 'files'], (stores) => {
+          stores.get('assets')!.delete(path)
+          stores.get('assets')!.put({ path: next, value: blob })
+          if (companion) {
+            stores.get('files')!.delete(oldCompanion)
+            stores.get('files')!.put({ ...companion, path: nextCompanion, modifiedAt: new Date().toISOString() })
+          }
+        })
+        assets.delete(path)
+        assets.set(next, blob)
+        const previousUrl = assetUrls.get(path)
+        if (previousUrl) {
+          URL.revokeObjectURL(previousUrl)
+          assetUrls.delete(path)
+        }
+        if (companion) {
+          files.delete(oldCompanion)
+          files.set(nextCompanion, { ...companion, path: nextCompanion, modifiedAt: new Date().toISOString() })
+        }
+        cachedTree = null
+        await remapNotePaper(path, next)
+        return next
+      }
       if (files.has(path)) {
         const name = `${safeSegment(nextName.replace(/\.md$/iu, ''), stem(fileName(path)))}.md`
         const next = [parent, name].filter(Boolean).join('/')
@@ -809,8 +863,9 @@ export function createBrowserApi(): FaNotesApi {
       const extension = extensionMatch ? extensionMatch[0] : ''
       const base = extension ? name.slice(0, -extension.length) : name
       const companionExt = /\.(md|markdown)$/iu.test(name) ? '.famd' : /\.famd$/iu.test(name) ? '.md' : ''
-      const occupied = (candidate: string) => files.has(candidate) || folders.has(candidate)
-      const companionOf = (candidate: string) => companionExt ? `${candidate.replace(/\.[^.]+$/u, '')}${companionExt}` : ''
+      const occupied = (candidate: string) => files.has(candidate) || folders.has(candidate) || (assets.has(candidate) && !candidate.startsWith('.fanotes/'))
+      const companionExtForPdf = /\.pdf$/iu.test(name) ? '.famd' : companionExt
+      const companionOf = (candidate: string) => companionExtForPdf ? `${candidate.replace(/\.[^.]+$/u, '')}${companionExtForPdf}` : ''
       let nextName = name
       for (let index = 1; index <= 10000; index += 1) {
         const candidateName = index === 1 ? name : `${base} ${index}${extension}`
@@ -823,6 +878,36 @@ export function createBrowserApi(): FaNotesApi {
         if (index === 10000) throw new Error('Es konnte kein eindeutiger Name erzeugt werden.')
       }
       const next = [dest, nextName].filter(Boolean).join('/')
+      if (assets.has(path) && /\.pdf$/iu.test(path)) {
+        const blob = assets.get(path)!
+        const oldCompanion = companionOf(path)
+        const nextCompanion = companionOf(next)
+        const companionRecord = oldCompanion && files.has(oldCompanion)
+          ? { ...files.get(oldCompanion)!, path: nextCompanion, modifiedAt: new Date().toISOString() }
+          : null
+        await writeMany(['assets', 'files'], (stores) => {
+          stores.get('assets')!.delete(path)
+          stores.get('assets')!.put({ path: next, value: blob })
+          if (companionRecord && oldCompanion !== path) {
+            stores.get('files')!.delete(oldCompanion)
+            stores.get('files')!.put(companionRecord)
+          }
+        })
+        assets.delete(path)
+        assets.set(next, blob)
+        const previousUrl = assetUrls.get(path)
+        if (previousUrl) {
+          URL.revokeObjectURL(previousUrl)
+          assetUrls.delete(path)
+        }
+        if (companionRecord && oldCompanion !== path) {
+          files.delete(oldCompanion)
+          files.set(companionRecord.path, companionRecord)
+        }
+        cachedTree = null
+        await remapNotePaper(path, next)
+        return next
+      }
       if (files.has(path)) {
         const record = { ...files.get(path)!, path: next, modifiedAt: new Date().toISOString() }
         const oldCompanion = companionOf(path)
@@ -874,11 +959,24 @@ export function createBrowserApi(): FaNotesApi {
       const path = normalizePath(rawPath)
       const deletedFiles = [...files.keys()].filter((candidate) => candidate === path || candidate.startsWith(`${path}/`))
       const deletedFolders = [...folders.keys()].filter((candidate) => candidate === path || candidate.startsWith(`${path}/`))
-      await writeMany(['files', 'folders'], (stores) => {
+      const deletedAssets = [...assets.keys()].filter((candidate) => candidate === path || candidate.startsWith(`${path}/`))
+      const pdfCompanion = /\.pdf$/iu.test(path) ? `${stem(path)}.famd` : ''
+      if (pdfCompanion && files.has(pdfCompanion) && !deletedFiles.includes(pdfCompanion)) deletedFiles.push(pdfCompanion)
+      await writeMany(['files', 'folders', 'assets'], (stores) => {
         deletedFiles.forEach((candidate) => stores.get('files')!.delete(candidate))
         deletedFolders.forEach((candidate) => stores.get('folders')!.delete(candidate))
+        deletedAssets.forEach((candidate) => stores.get('assets')!.delete(candidate))
       })
-      deletedFiles.forEach((candidate) => files.delete(candidate)); deletedFolders.forEach((candidate) => folders.delete(candidate)); cachedTree = null
+      deletedFiles.forEach((candidate) => files.delete(candidate)); deletedFolders.forEach((candidate) => folders.delete(candidate))
+      deletedAssets.forEach((candidate) => {
+        assets.delete(candidate)
+        const previous = assetUrls.get(candidate)
+        if (previous) {
+          URL.revokeObjectURL(previous)
+          assetUrls.delete(candidate)
+        }
+      })
+      cachedTree = null
       await remapNotePaper(path, null)
     },
     search: async (query) => {
@@ -905,7 +1003,13 @@ export function createBrowserApi(): FaNotesApi {
           return [{ relativePath: drawing.dataRelativePath, title: drawing.title, excerpt: haystack.slice(0, 180), matches: 1, kind: 'drawing' as const, drawingId: drawing.id }]
         } catch { return [] }
       })
-      return [...noteHits, ...drawingHits].slice(0, 250)
+      const pdfHits = [...assets.keys()].flatMap((path) => {
+        if (path.startsWith('.') || !/\.pdf$/iu.test(path)) return []
+        const haystack = path.toLocaleLowerCase('de')
+        if (!haystack.includes(needle)) return []
+        return [{ relativePath: path, title: stem(fileName(path)), excerpt: `PDF · ${path}`, matches: haystack.split(needle).length - 1, kind: 'note' as const }]
+      })
+      return [...noteHits, ...pdfHits, ...drawingHits].slice(0, 250)
     },
     saveDrawing: async ({ id = crypto.randomUUID(), title, imageData, drawingJson }) => {
       await ready
@@ -957,6 +1061,29 @@ export function createBrowserApi(): FaNotesApi {
       notePaper.set(path, paperStyle)
       await setMeta('notePaper', Object.fromEntries(notePaper))
       return paperStyle
+    },
+    importPdfNote: async (rawParent) => {
+      const file = await pickPdf()
+      if (!file) return null
+      await ready
+      if (!/\.pdf$/iu.test(file.name) && file.type !== 'application/pdf') throw new Error('Es können nur PDF-Dateien als PDF-Notiz importiert werden.')
+      if (!file.size || file.size > MAX_PDF_BYTES) throw new Error(`Das PDF ist leer oder größer als ${Math.round(MAX_PDF_BYTES / 1024 / 1024)} MB.`)
+      if (!await validWorksheetSignature(file, 'pdf')) throw new Error('Die ausgewählte Datei ist kein gültiges PDF.')
+      const parent = typeof rawParent === 'string' && rawParent.trim() ? normalizePath(rawParent) : ''
+      if (parent && !folders.has(parent)) throw new Error('Der Zielordner wurde nicht gefunden.')
+      const title = safeSegment(stem(file.name), english ? 'PDF note' : 'PDF-Notiz')
+      const path = uniquePath([parent, `${title}.pdf`].filter(Boolean).join('/'), 'pdf')
+      const source = file.slice(0, file.size, 'application/pdf')
+      const famdPath = `${stem(path)}.famd`
+      const famdRecord = { path: famdPath, content: '', modifiedAt: new Date().toISOString() }
+      await writeMany(['assets', 'files'], (stores) => {
+        stores.get('assets')!.put({ path, value: source } satisfies AssetRecord)
+        stores.get('files')!.put(famdRecord)
+      })
+      assets.set(path, source)
+      files.set(famdPath, famdRecord)
+      cachedTree = null
+      return { relativePath: path, entry: { name: fileName(path), relativePath: path, kind: 'file', extension: 'pdf', size: file.size } }
     },
     importWorksheet: async () => {
       const file = await pickWorksheet()
@@ -1135,8 +1262,13 @@ export function createBrowserApi(): FaNotesApi {
     revealInFolder: async (rawPath) => {
       await ready
       const path = normalizePath(rawPath)
+      const pdf = assets.get(path)
+      if (pdf && /\.pdf$/iu.test(path)) {
+        downloadBlob(pdf, fileName(path))
+        return
+      }
       const record = files.get(path)
-      if (!record) throw new Error('Nur Markdown-Notizen können direkt heruntergeladen werden.')
+      if (!record) throw new Error('Nur Markdown-Notizen und PDF-Notizen können direkt heruntergeladen werden.')
       downloadBlob(new Blob([record.content], { type: 'text/markdown;charset=utf-8' }), fileName(path))
     },
     openExternal: async (rawUrl) => {

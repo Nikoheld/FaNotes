@@ -1,5 +1,10 @@
 # Änderungsverlauf
 
+## 2026.8.23
+
+- **Eine Zoom-Kamera:** Text, Kästchen und Tinte wachsen mit demselben Faktor. Zoom sitzt nur noch auf dem Blatt, nicht noch einmal auf dem Editor — kein verzerrter Text und keine Punkte, die fast stehen bleiben. Strg+Mausrad bleibt am Cursor; danach scrollt man normal.
+- **PDF als Notiz:** Neben Neue Notiz und Neuer Ordner importiert der PDF-Button ein Dokument als eigene Notiz — nicht als Arbeitsblatt auf einer Markdown-Seite. Handschrift liegt wie gewohnt in der `.famd`. Der Viewer blättert, zoomt, sucht, wählt Text, zeigt Miniaturen und die Gliederung.
+
 ## 2026.8.22
 
 - **Zoom als ein Blatt:** Text, Kästchen und Tinte zoomen und verschieben sich gemeinsam. Die Schrift bleibt nicht mehr in der alten Größe stehen.

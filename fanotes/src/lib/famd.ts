@@ -3,7 +3,8 @@ import type { PaperStyle } from '../types'
 
 export const FAMD_EXTENSION = '.famd'
 export const FAMD_SCHEMA = 'fanotes-famd-v1'
-export const NOTE_FILE_EXTENSIONS = ['.md', '.markdown', '.famd'] as const
+export const MARKDOWN_NOTE_EXTENSIONS = ['.md', '.markdown', '.famd'] as const
+export const NOTE_FILE_EXTENSIONS = ['.md', '.markdown', '.famd', '.pdf'] as const
 
 const FAMD_HEADER = /(?:^|\n)<!--\s*fanotes-famd:v1\s+chars=(\d+)\s*-->\n/u
 const WORKSHEET_MARKER = /<!--\s*fanotes-worksheet:([a-zA-Z0-9_-]{1,96})\s*-->/gu
@@ -20,7 +21,11 @@ export const isNoteFileName = (name: string) => (
   NOTE_FILE_EXTENSIONS.some((extension) => name.toLocaleLowerCase('en-US').endsWith(extension))
 )
 
-export const noteStem = (relativePath: string) => relativePath.replace(/\.(md|markdown|famd)$/iu, '')
+export const isPdfNotePath = (relativePath: string) => (
+  relativePath.toLocaleLowerCase('en-US').endsWith('.pdf')
+)
+
+export const noteStem = (relativePath: string) => relativePath.replace(/\.(md|markdown|famd|pdf)$/iu, '')
 
 export const companionNotePath = (relativePath: string, extension: '.md' | '.famd') => (
   `${noteStem(relativePath)}${extension}`

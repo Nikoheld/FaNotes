@@ -10,9 +10,11 @@ import {
   Command,
   Database,
   Download,
+  File,
   FileDown,
   FilePlus2,
   Files,
+  FileText,
   FileUp,
   History,
   FolderOpen,
@@ -47,6 +49,7 @@ import { FormattingToolbar } from './components/FormattingToolbar'
 import type { GlyphenWerkView } from './components/GlyphenWerkWorkspace'
 import type { MarkdownEditorHandle, MarkdownFormatAction } from './components/MarkdownEditor'
 import type { WorksheetLayerHandle } from './components/WorksheetLayer'
+import { companionNotePath, isPdfNotePath } from './lib/famd'
 import { DEFAULT_SETTINGS } from './defaults'
 import { PaperStylePicker } from './components/PaperStylePicker'
 import { PaperView } from './components/PaperView'
@@ -78,6 +81,7 @@ const SettingsModal = lazy(() => import('./components/SettingsModal').then((modu
 const VaultOverview = lazy(() => import('./components/VaultOverview').then((module) => ({ default: module.VaultOverview })))
 const HomeworkBoard = lazy(() => import('./components/HomeworkBoard').then((module) => ({ default: module.HomeworkBoard })))
 const WorksheetLayer = lazy(() => import('./components/WorksheetLayer').then((module) => ({ default: module.WorksheetLayer })))
+const PdfNoteView = lazy(() => import('./components/PdfNoteView').then((module) => ({ default: module.PdfNoteView })))
 const StableWorksheetLayer = memo(WorksheetLayer)
 const STARTUP_TREE_REFRESH_DELAY_MS = 18_000
 const STARTUP_DOCUMENT_LAYER_DELAY_MS = 160
@@ -114,7 +118,7 @@ const NoteTabButton = memo(function NoteTabButton({ active, dirty, path, title, 
         onClick={(event) => { event.shiftKey ? void onSplit(path) : void onOpen(path) }}
         onAuxClick={(event) => { if (event.button === 1) void onClose(path) }}
       >
-        <Files aria-hidden="true" size={13} />
+        {isPdfNotePath(path) ? <File aria-hidden="true" size={13} /> : <Files aria-hidden="true" size={13} />}
         <span>{title}</span>
         {dirty && <i className="dirty-dot" title="Noch nicht gespeichert" />}
       </button>
@@ -142,7 +146,7 @@ const INITIAL_UPDATE_STATE: UpdateState = {
   updateChannel: 'stable',
 }
 
-const stripExtension = (name: string) => name.replace(/\.(md|markdown|famd)$/i, '')
+const stripExtension = (name: string) => name.replace(/\.(md|markdown|famd|pdf)$/i, '')
 const fileName = (path: string) => path.split('/').pop() ?? path
 const parentPath = (path: string) => path.split('/').slice(0, -1).join('/')
 const NOTE_INK_MARKER = /<!--\s*fanotes-ink:([a-zA-Z0-9_-]{1,96})\s*-->/u
@@ -217,11 +221,15 @@ const countEntries = (entries: VaultEntry[]): { files: number; folders: number }
   return total
 }, { files: 0, folders: 0 })
 
+const isMarkdownTreeFile = (entry: VaultEntry) => (
+  entry.kind === 'file' && ['md', '.md', 'famd', '.famd', 'markdown'].includes(entry.extension || '')
+)
+
 const firstMarkdown = (entries: VaultEntry[]): string | undefined => {
   const welcome = entries.find((entry) => entry.kind === 'file' && entry.name.toLocaleLowerCase('de') === 'willkommen.md')
   if (welcome) return welcome.relativePath
   for (const entry of entries) {
-    if (entry.kind === 'file' && ['md', '.md', 'famd', '.famd', 'markdown'].includes(entry.extension || '')) return entry.relativePath
+    if (isMarkdownTreeFile(entry)) return entry.relativePath
     if (entry.kind === 'folder') {
       const nested = firstMarkdown(entry.children ?? [])
       if (nested) return nested
@@ -229,6 +237,19 @@ const firstMarkdown = (entries: VaultEntry[]): string | undefined => {
   }
   return undefined
 }
+
+const firstPdfNote = (entries: VaultEntry[]): string | undefined => {
+  for (const entry of entries) {
+    if (entry.kind === 'file' && isPdfNotePath(entry.relativePath)) return entry.relativePath
+    if (entry.kind === 'folder') {
+      const nested = firstPdfNote(entry.children ?? [])
+      if (nested) return nested
+    }
+  }
+  return undefined
+}
+
+const firstNote = (entries: VaultEntry[]): string | undefined => firstMarkdown(entries) ?? firstPdfNote(entries)
 
 const folderPaths = (entries: VaultEntry[]): Set<string> => {
   const paths = new Set<string>()
@@ -414,6 +435,7 @@ export default function App({ startupBootstrap }: AppProps) {
     }
   }, [editorMenuOpen])
   const activeTab = useMemo(() => tabs.find((tab) => tab.path === activePath) ?? null, [activePath, tabs])
+  const isPdfActive = Boolean(activeTab && (activeTab.kind === 'pdf' || isPdfNotePath(activeTab.path)))
   const activePaper = useMemo(
     () => normalizePaperStyle(activePath ? notePaperByPath[activePath] : undefined, settings.paperStyle),
     [activePath, notePaperByPath, settings.paperStyle],
@@ -641,12 +663,28 @@ export default function App({ startupBootstrap }: AppProps) {
     if (openingNotesRef.current.has(requestKey)) return
     openingNotesRef.current.add(requestKey)
     try {
-      const content = await window.fanotes.readFile(path)
+      const pdfNote = isPdfNotePath(path)
+      let content = ''
+      if (pdfNote) {
+        try {
+          content = await window.fanotes.readFile(companionNotePath(path, '.famd'))
+        } catch {
+          content = ''
+        }
+      } else {
+        content = await window.fanotes.readFile(path)
+      }
       if (
         session !== vaultSessionGenerationRef.current ||
         structureRevision !== vaultStructureRevisionRef.current
       ) return
-      const tab: NoteTab = { path, title: stripExtension(fileName(path)), content, savedContent: content }
+      const tab: NoteTab = {
+        path,
+        title: stripExtension(fileName(path)),
+        content,
+        savedContent: content,
+        kind: pdfNote ? 'pdf' : 'markdown',
+      }
       setTagIndex((current) => ({ ...current, [path]: parseNoteTags(content) }))
       setTabs((current) => current.some((item) => item.path === path) ? current : [...current, tab])
       setActivePath(path)
@@ -693,7 +731,7 @@ export default function App({ startupBootstrap }: AppProps) {
           const loadFreshTree = async () => {
             let nextTree = await window.fanotes.getTree()
             if (!alive) return
-            let nextNote = firstMarkdown(nextTree)
+            let nextNote = firstNote(nextTree)
             if (!nextNote) {
               // Only a verified live scan may decide that the vault is empty.
               // A stale empty cache must never create a surprise note.
@@ -714,7 +752,7 @@ export default function App({ startupBootstrap }: AppProps) {
           if (startupTree.length) {
             treeRef.current = startupTree
             setTree(startupTree)
-            const startupNote = firstMarkdown(startupTree)
+            const startupNote = firstNote(startupTree)
             if (startupNote) await openNote(startupNote)
 
             // Cached starts and the first optimized Dirent scan both receive
@@ -764,7 +802,7 @@ export default function App({ startupBootstrap }: AppProps) {
     setBootstrap(data)
     setSettings({ ...DEFAULT_SETTINGS, ...data.settings })
     let initialTree = await window.fanotes.getTree()
-    let initialNote = firstMarkdown(initialTree)
+    let initialNote = firstNote(initialTree)
     if (!initialNote) {
       const created = await window.fanotes.createNote(undefined, translateUiText('Erste Notiz'))
       initialTree = await window.fanotes.getTree()
@@ -781,7 +819,7 @@ export default function App({ startupBootstrap }: AppProps) {
     saveTimers.current.delete(path)
     setSaveState('saving')
     try {
-      await window.fanotes.writeFile(path, content)
+      await window.fanotes.writeFile(isPdfNotePath(path) ? companionNotePath(path, '.famd') : path, content)
       setTagIndex((current) => ({ ...current, [path]: parseNoteTags(content) }))
       if (pendingWrites.current.get(path) === content) pendingWrites.current.delete(path)
       setTabs((current) => current.map((tab) => tab.path === path ? { ...tab, savedContent: content } : tab))
@@ -972,6 +1010,33 @@ export default function App({ startupBootstrap }: AppProps) {
         `Die Notiz wurde erstellt, konnte aber nicht geöffnet werden: ${error instanceof Error ? error.message : 'Unbekannter Fehler'}`,
         'error',
       )
+    }
+  }, [openNote, refreshTree, settings.defaultFolder, toast, tree])
+
+  const importPdfNote = useCallback(async (parent?: string) => {
+    const session = vaultSessionGenerationRef.current
+    vaultStructureRevisionRef.current += 1
+    const requestedParent = normalizePath(parent ?? settings.defaultFolder ?? '')
+    const targetParent = requestedParent && folderPaths(tree).has(requestedParent)
+      ? requestedParent
+      : undefined
+    try {
+      const result = await window.fanotes.importPdfNote(targetParent)
+      if (!result) return
+      if (session !== vaultSessionGenerationRef.current) return
+      vaultStructureRevisionRef.current += 1
+      try {
+        await refreshTree()
+      } catch (error) {
+        console.warn('FaNotes-Dateibaum konnte nach dem PDF-Import nicht aktualisiert werden:', error)
+      }
+      if (session !== vaultSessionGenerationRef.current) return
+      await openNote(result.relativePath)
+      toast(`PDF „${stripExtension(fileName(result.relativePath))}“ ist jetzt eine Notiz.`, 'success')
+    } catch (error) {
+      if (session === vaultSessionGenerationRef.current) {
+        toast(error instanceof Error ? error.message : 'Das PDF konnte nicht als Notiz importiert werden.', 'error')
+      }
     }
   }, [openNote, refreshTree, settings.defaultFolder, toast, tree])
 
@@ -1330,7 +1395,7 @@ export default function App({ startupBootstrap }: AppProps) {
       setSearchQuery('')
       setSearchHits([])
       const nextTree = await refreshTree()
-      const first = firstMarkdown(nextTree)
+      const first = firstNote(nextTree)
       if (first) await openNote(first)
       toast(`Vault „${selected.vaultName}“ geöffnet.`, 'success')
     } catch (error) {
@@ -1619,6 +1684,10 @@ export default function App({ startupBootstrap }: AppProps) {
       toast('Diese Notiz wird gerade in den Papierkorb verschoben.', 'error')
       return false
     }
+    if (tab.kind === 'pdf' || isPdfNotePath(notePath)) {
+      toast('In einer PDF-Notiz bleibt erkannter Text in der Handschrift. Wechsle für Markdown in eine normale Notiz.', 'info')
+      return false
+    }
     const currentContent = pendingWrites.current.get(notePath) ?? tab.content
     const separator = currentContent && !currentContent.endsWith('\n') ? '\n\n' : ''
     updateContent(`${currentContent}${separator}${value}\n`)
@@ -1719,6 +1788,10 @@ export default function App({ startupBootstrap }: AppProps) {
       toast('Öffne zuerst eine Notiz oder wähle „Neue Notiz“.', 'info')
       return
     }
+    if (target === 'current' && activeTab && (activeTab.kind === 'pdf' || isPdfNotePath(activeTab.path))) {
+      toast('Arbeitsblätter gehören in Markdown-Notizen. Eine PDF-Notiz ist bereits das Dokument selbst.', 'info')
+      return
+    }
     const targetPath = target === 'current' ? activeTab!.path : null
     setWorksheetImportBusy(true)
     setWorksheetImportOpen(false)
@@ -1798,12 +1871,14 @@ export default function App({ startupBootstrap }: AppProps) {
     updateContent(applyNoteTags(activeTab.content, tags))
   }, [activeTab, updateContent])
 
+  const historyPathFor = (path: string) => isPdfNotePath(path) ? companionNotePath(path, '.famd') : path
+
   const openHistory = useCallback(async () => {
     if (!activePath || !window.fanotes.listNoteHistory) return
     setHistoryOpen(true)
     setHistoryBusy(true)
     try {
-      setHistorySnapshots(await window.fanotes.listNoteHistory(activePath))
+      setHistorySnapshots(await window.fanotes.listNoteHistory(historyPathFor(activePath)))
     } catch (error) {
       toast(error instanceof Error ? error.message : 'Verlauf konnte nicht geladen werden.', 'error')
     } finally {
@@ -1815,7 +1890,7 @@ export default function App({ startupBootstrap }: AppProps) {
     if (!activePath || !window.fanotes.readNoteHistory) return
     setHistoryBusy(true)
     try {
-      const snapshot = await window.fanotes.readNoteHistory(activePath, snapshotId)
+      const snapshot = await window.fanotes.readNoteHistory(historyPathFor(activePath), snapshotId)
       updateContent(snapshot.content)
       setHistoryOpen(false)
       toast('Ältere Version wiederhergestellt. Speichern sichert sie.', 'success')
@@ -1887,6 +1962,7 @@ export default function App({ startupBootstrap }: AppProps) {
 
   const paletteActions = useMemo<PaletteAction[]>(() => [
     { id: 'new-note', label: 'Neue Notiz', detail: 'Markdown-Datei im Standardordner', shortcut: 'Ctrl N', group: 'Dateien', icon: <FilePlus2 size={15} />, run: () => void createNote() },
+    { id: 'import-pdf-note', label: 'PDF importieren', detail: 'PDF wird selbst zur Notiz — mit Handschrift und Viewer', group: 'Dateien', keywords: 'pdf import notiz viewer', icon: <FileText size={15} />, run: () => void importPdfNote() },
     { id: 'new-folder', label: 'Neuer Ordner', detail: 'Fach auf oberster Ebene anlegen', group: 'Dateien', icon: <FolderPlus size={15} />, run: () => void createFolder() },
     { id: 'new-subfolder', label: 'Unterordner anlegen', detail: activeTab ? `In ${parentPath(activeTab.path) || 'Vault-Wurzel'}` : 'Rechtsklick auf einen Ordner oder hier nach dem Öffnen einer Notiz', group: 'Dateien', keywords: 'unterordner ordner verschachteln fach', icon: <FolderPlus size={15} />, run: () => void createFolder(activeTab ? parentPath(activeTab.path) || undefined : undefined) },
     { id: 'save', label: 'Aktuelle Notiz speichern', detail: 'Text, Handschrift und Arbeitsblätter sichern', shortcut: 'Ctrl S', group: 'Dateien', icon: <Save size={15} />, run: () => { void saveCurrentWork(true) } },
@@ -1914,7 +1990,7 @@ export default function App({ startupBootstrap }: AppProps) {
     { id: 'inspector', label: 'Gliederung umschalten', group: 'Ansicht', icon: <PanelRightClose size={15} />, run: () => setInspectorVisible((value) => !value) },
     { id: 'settings', label: 'Einstellungen öffnen', shortcut: 'Ctrl ,', group: 'FaNotes', icon: <Settings size={15} />, run: () => setSettingsOpen(true) },
     { id: 'quit', label: isWeb ? 'Zur FaNotes-Website' : 'FaNotes beenden', shortcut: 'Ctrl Q', group: 'FaNotes', icon: <X size={15} />, run: () => window.fanotes.requestClose() },
-  ], [activePath, activeTab, createDailyNote, createFolder, createNote, drawingOpen, exportCurrentPdf, focusMode, importOneNote, isWeb, openGlyphenWerk, openHistory, openHomework, openInSplit, openLmStudio, openOverview, openWorksheetImport, saveCurrentWork, settings.dailyNotesFolder, splitPath, tabs, toast, toggleDrawing, toggleFocusMode])
+  ], [activePath, activeTab, createDailyNote, createFolder, createNote, drawingOpen, exportCurrentPdf, focusMode, importOneNote, importPdfNote, isWeb, openGlyphenWerk, openHistory, openHomework, openInSplit, openLmStudio, openOverview, openWorksheetImport, saveCurrentWork, settings.dailyNotesFolder, splitPath, tabs, toast, toggleDrawing, toggleFocusMode])
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
@@ -2091,6 +2167,7 @@ export default function App({ startupBootstrap }: AppProps) {
               <div className="sidebar-actions">
                 <button className="icon-button" type="button" title="Neue Notiz" aria-label="Neue Notiz" onClick={() => void createNote()}><FilePlus2 size={16} /></button>
                 <button className="icon-button" type="button" title="Neuer Ordner" aria-label="Neuer Ordner" onClick={() => void createFolder()}><FolderPlus size={16} /></button>
+                <button className="icon-button pdf-import-button" type="button" title="PDF importieren" aria-label="PDF importieren" onClick={() => void importPdfNote()}>PDF</button>
                 <button className="icon-button sidebar-collapse-button" type="button" title="Seitenleiste einklappen" aria-label="Seitenleiste einklappen" onClick={() => setSidebarVisible(false)}><PanelLeftClose size={16} /></button>
               </div>
             </div>
@@ -2117,6 +2194,7 @@ export default function App({ startupBootstrap }: AppProps) {
                 onOpen={openNote}
                 onCreateNote={createNote}
                 onCreateFolder={createFolder}
+                onImportPdf={importPdfNote}
                 onSetFolderColor={setFolderColor}
                 onRename={renameEntry}
                 onMove={moveEntry}
@@ -2158,10 +2236,12 @@ export default function App({ startupBootstrap }: AppProps) {
             <div className="toolbar-context">
               {drawingOpen
                 ? <div id="fanotes-ink-toolbar-slot" className="ink-toolbar-slot" />
-                : <FormattingToolbar disabled={!activeTab || overviewOpen || homeworkOpen || glyphenWerkOpen || activeEntryMutating} onFormat={formatMarkdown} />}
+                : isPdfActive
+                  ? <div className="pdf-toolbar-hint">PDF-Notiz · suchen, zoomen und blättern oder mit dem Stift schreiben</div>
+                  : <FormattingToolbar disabled={!activeTab || overviewOpen || homeworkOpen || glyphenWerkOpen || activeEntryMutating} onFormat={formatMarkdown} />}
             </div>
             <div className="toolbar-group toolbar-end">
-              <button type="button" className="toolbar-button" title="Bild oder PDF als Arbeitsblatt importieren" aria-label="Arbeitsblatt importieren" onClick={openWorksheetImport}><FileUp size={14} /><span>Blatt</span></button>
+              {!isPdfActive && <button type="button" className="toolbar-button" title="Bild oder PDF als Arbeitsblatt importieren" aria-label="Arbeitsblatt importieren" onClick={openWorksheetImport}><FileUp size={14} /><span>Blatt</span></button>}
               <button type="button" className={`toolbar-button ai ${lmStudioOpen ? 'active' : ''}`} title="Mit einem AI-Anbieter bearbeiten" aria-label="AI-Assistent öffnen" onClick={openLmStudio}><Bot size={14} /><span>AI</span></button>
               <div className="editor-more">
                 <button type="button" className={`toolbar-button menu-trigger ${editorMenuOpen ? 'active' : ''}`} title="Weitere Notizaktionen" aria-label="Weitere Notizaktionen" aria-haspopup="menu" aria-expanded={editorMenuOpen} onClick={(event) => { event.stopPropagation(); setEditorMenuOpen((open) => !open) }}><MoreHorizontal size={16} /></button>
@@ -2174,7 +2254,7 @@ export default function App({ startupBootstrap }: AppProps) {
                   <button type="button" role="menuitem" disabled={!activeTab} onClick={() => { setEditorMenuOpen(false); void exportCurrentPdf() }}><span><FileDown size={15} /></span><span><strong>Als PDF exportieren</strong><small>Text, Handschrift und Arbeitsblatt</small></span></button>
                   <button type="button" role="menuitem" disabled={!activePath} onClick={() => { setEditorMenuOpen(false); void openHistory() }}><span><History size={15} /></span><span><strong>Versionsverlauf</strong><small>Frühere Stände wiederherstellen</small></span></button>
                   <button type="button" role="menuitem" onClick={() => { setEditorMenuOpen(false); if (splitPath) setSplitPath(null); else { const other = tabs.find((tab) => tab.path !== activePath); if (other) void openInSplit(other.path); else toast('Öffne zuerst eine zweite Notiz (Umschalt+Klick auf einen Tab).', 'info') } }}><span><Columns2 size={15} /></span><span><strong>{splitPath ? 'Teilung schließen' : 'Geteilte Ansicht'}</strong><small>Zwei Notizen nebeneinander</small></span></button>
-                  <button type="button" role="menuitem" disabled={!activePath} onClick={() => { setEditorMenuOpen(false); if (activePath) void window.fanotes.revealInFolder(activePath) }}><span>{isWeb ? <Download size={15} /> : <FolderOpen size={15} />}</span><span><strong>{isWeb ? 'Markdown herunterladen' : 'Im Dateimanager zeigen'}</strong><small>{isWeb ? 'Aktuelle Notiz exportieren' : 'Speicherort der Notiz öffnen'}</small></span></button>
+                  <button type="button" role="menuitem" disabled={!activePath} onClick={() => { setEditorMenuOpen(false); if (activePath) void window.fanotes.revealInFolder(activePath) }}><span>{isWeb ? <Download size={15} /> : <FolderOpen size={15} />}</span><span><strong>{isWeb ? (isPdfActive ? 'PDF herunterladen' : 'Markdown herunterladen') : 'Im Dateimanager zeigen'}</strong><small>{isWeb ? 'Aktuelle Notiz exportieren' : 'Speicherort der Notiz öffnen'}</small></span></button>
                 </div>}
               </div>
             </div>
@@ -2207,27 +2287,41 @@ export default function App({ startupBootstrap }: AppProps) {
                       <input value={tagDraft} onChange={(event) => setTagDraft(event.target.value)} placeholder="Tag hinzufügen" maxLength={40} aria-label="Neues Schlagwort" />
                     </form>
                   </div>
+                  {!isPdfActive && (
                   <PaperStylePicker
                     value={activePaper}
                     disabled={activeEntryMutating}
                     onChange={(style) => { if (activeTab) void applyNotePaper(activeTab.path, style) }}
                   />
+                  )}
                 </div>
               )}
               <div className={`editor-split ${splitTab ? 'is-split' : ''}`}>
               <PaperView
-                className={`unified-note-view paper-${activePaper} ${drawingOpen ? 'is-inking' : ''}`}
+                className={`unified-note-view paper-${isPdfActive ? 'blank' : activePaper} ${drawingOpen ? 'is-inking' : ''} ${isPdfActive ? 'is-pdf-note' : ''}`}
                 viewKey={activeTab.path}
                 showHud={!drawingOpen}
               >
-                <article className={`unified-paper ${worksheetSession.documents.length ? 'has-worksheet' : ''}`} aria-label={`${activeTab.title} · gemeinsame Tastatur- und Handschriftseite`}>
-                  <div className="paper-ruling" aria-hidden="true" />
+                <article className={`unified-paper ${worksheetSession.documents.length ? 'has-worksheet' : ''} ${isPdfActive ? 'is-pdf-note' : ''}`} aria-label={`${activeTab.title} · ${isPdfActive ? 'PDF-Notiz mit Handschrift' : 'gemeinsame Tastatur- und Handschriftseite'}`}>
+                  {!isPdfActive && <div className="paper-ruling" aria-hidden="true" />}
+                  {isPdfActive ? (
+                    <Suspense fallback={<div className="pdf-note-status"><LoaderCircle className="spin" size={20} /> PDF wird geladen …</div>}>
+                      <SafeBoundary name="PDF-Notiz" fallbackTitle="Der PDF-Viewer ist abgestürzt">
+                        <PdfNoteView
+                          path={activeTab.path}
+                          title={activeTab.title}
+                          inputDisabled={drawingOpen || activeEntryMutating}
+                        />
+                      </SafeBoundary>
+                    </Suspense>
+                  ) : (
                   <div className="editor-pane">
                     <SafeBoundary name="Editor" fallbackTitle="Der Editor ist abgestürzt">
                       <MarkdownEditor ref={editorRef} key={activeTab.path} content={activeTab.content} onChange={updateContent} onSave={async (content) => { await saveContent(activeTab.path, content) }} settings={settings} focusToken={focusToken} readOnly={activeEntryMutating || drawingOpen} paperMode onLanguageDetected={setDetectedTextLanguage} />
                     </SafeBoundary>
                   </div>
-                  {worksheetSession.documents.map((document) => <Suspense key={document.id} fallback={<div className="worksheet-loading"><LoaderCircle className="spin" size={20} /> Arbeitsblatt wird geladen …</div>}>
+                  )}
+                  {!isPdfActive && worksheetSession.documents.map((document) => <Suspense key={document.id} fallback={<div className="worksheet-loading"><LoaderCircle className="spin" size={20} /> Arbeitsblatt wird geladen …</div>}>
                     <SafeBoundary name={`Arbeitsblatt ${document.title}`} fallbackTitle="Das Arbeitsblatt ist abgestürzt">
                       <StableWorksheetLayer
                         ref={worksheetLayerRefFor(document.id)}
@@ -2274,6 +2368,13 @@ export default function App({ startupBootstrap }: AppProps) {
                       <button type="button" onClick={() => void openNote(splitTab.path)}>Fokus</button>
                       <button type="button" aria-label="Teilung schließen" onClick={() => setSplitPath(null)}><X size={14} /></button>
                     </header>
+                    {splitTab.kind === 'pdf' || isPdfNotePath(splitTab.path) ? (
+                      <Suspense fallback={<div className="pdf-note-status"><LoaderCircle className="spin" size={18} /> PDF wird geladen …</div>}>
+                        <SafeBoundary name="Zweite PDF-Notiz" fallbackTitle="Der PDF-Viewer ist abgestürzt">
+                          <PdfNoteView path={splitTab.path} title={splitTab.title} inputDisabled />
+                        </SafeBoundary>
+                      </Suspense>
+                    ) : (
                     <div className="editor-pane">
                       <SafeBoundary name="Zweite Notiz" fallbackTitle="Die zweite Notiz ist abgestürzt">
                         <MarkdownEditor
@@ -2293,24 +2394,25 @@ export default function App({ startupBootstrap }: AppProps) {
                         />
                       </SafeBoundary>
                     </div>
+                    )}
                   </article>
                 </PaperView>
               )}
               </div>
               </>
             ) : (
-              <div className="editor-placeholder"><div className="placeholder-glyph"><BookOpen size={28} /></div><span className="eyebrow">Bereit für deine nächste Idee</span><h2>Dein Wissen, in deiner Hand</h2><p>Schreibe mit Tastatur und Stift auf derselben Seite oder starte direkt mit einem Arbeitsblatt.</p><div className="placeholder-actions"><button className="primary-button" type="button" onClick={() => void createNote()}><FilePlus2 size={14} /> Neue Notiz</button><button className="secondary-button" type="button" onClick={openWorksheetImport}><FileUp size={14} /> Arbeitsblatt</button></div><button className="placeholder-command" type="button" onClick={() => setPaletteOpen(true)}><Command size={13} /> Alle Aktionen mit <kbd>Strg P</kbd></button></div>
+              <div className="editor-placeholder"><div className="placeholder-glyph"><BookOpen size={28} /></div><span className="eyebrow">Bereit für deine nächste Idee</span><h2>Dein Wissen, in deiner Hand</h2><p>Schreibe mit Tastatur und Stift auf derselben Seite, importiere ein PDF als eigene Notiz oder starte mit einem Arbeitsblatt.</p><div className="placeholder-actions"><button className="primary-button" type="button" onClick={() => void createNote()}><FilePlus2 size={14} /> Neue Notiz</button><button className="secondary-button" type="button" onClick={() => void importPdfNote()}><FileText size={14} /> PDF</button><button className="secondary-button" type="button" onClick={openWorksheetImport}><FileUp size={14} /> Arbeitsblatt</button></div><button className="placeholder-command" type="button" onClick={() => setPaletteOpen(true)}><Command size={13} /> Alle Aktionen mit <kbd>Strg P</kbd></button></div>
               )}
             </Suspense>
           </div>
         </main>
 
-        {inspectorVisible && settings.showOutline && !overviewOpen && !homeworkOpen && !glyphenWerkOpen && <Suspense fallback={null}><RightInspector content={activeTab?.content ?? ''} path={activeTab?.path} /></Suspense>}
+        {inspectorVisible && settings.showOutline && !overviewOpen && !homeworkOpen && !glyphenWerkOpen && !isPdfActive && <Suspense fallback={null}><RightInspector content={activeTab?.content ?? ''} path={activeTab?.path} /></Suspense>}
         {searchOpen && <Suspense fallback={null}><SearchPanel query={searchQuery} hits={searchHits} loading={searchLoading} onQueryChange={setSearchQuery} onOpen={(hit) => { void openSearchHit(hit) }} onClose={() => setSearchOpen(false)} /></Suspense>}
       </div>
 
       <footer className="statusbar">
-        <div className="statusbar-left"><button type="button" title={sidebarVisible ? 'Seitenleiste einklappen' : 'Seitenleiste einblenden'} aria-label={sidebarVisible ? 'Seitenleiste einklappen' : 'Seitenleiste einblenden'} onClick={() => setSidebarVisible((value) => !value)}>{sidebarVisible ? <PanelLeftClose size={12} /> : <PanelLeftOpen size={12} />}</button><span>{glyphenWerkOpen ? `GlyphenWerk · ${GLYPHENWERK_VIEW_LABELS[glyphenWerkView]}` : homeworkOpen ? 'Hausaufgaben & Termine' : overviewOpen ? 'Vault-Übersicht' : activeTab ? drawingOpen ? 'Stiftmodus' : worksheetSession.documents.length ? 'Notiz mit Arbeitsblatt' : 'Schreibmodus' : 'Bereit'}</span>{worksheetSession.documents.length > 0 && <span>{worksheetSession.documents.length} {worksheetSession.documents.length === 1 ? 'Arbeitsblatt' : 'Arbeitsblätter'}</span>}</div>
+        <div className="statusbar-left"><button type="button" title={sidebarVisible ? 'Seitenleiste einklappen' : 'Seitenleiste einblenden'} aria-label={sidebarVisible ? 'Seitenleiste einklappen' : 'Seitenleiste einblenden'} onClick={() => setSidebarVisible((value) => !value)}>{sidebarVisible ? <PanelLeftClose size={12} /> : <PanelLeftOpen size={12} />}</button><span>{glyphenWerkOpen ? `GlyphenWerk · ${GLYPHENWERK_VIEW_LABELS[glyphenWerkView]}` : homeworkOpen ? 'Hausaufgaben & Termine' : overviewOpen ? 'Vault-Übersicht' : activeTab ? drawingOpen ? 'Stiftmodus' : isPdfActive ? 'PDF-Notiz' : worksheetSession.documents.length ? 'Notiz mit Arbeitsblatt' : 'Schreibmodus' : 'Bereit'}</span>{worksheetSession.documents.length > 0 && <span>{worksheetSession.documents.length} {worksheetSession.documents.length === 1 ? 'Arbeitsblatt' : 'Arbeitsblätter'}</span>}</div>
         <div className="statusbar-right">{updateState.status === 'downloaded' && <button type="button" className="update-ready-button" title={`FaNotes ${updateState.latestVersion} installieren und neu starten`} onClick={() => void installUpdate()}><ShieldCheck size={11} /> Update bereit</button>}{updateState.status === 'downloading' && <span><LoaderCircle className="spin" size={11} /> Update {Math.round(updateState.progress * 100)} %</span>}{settings.spellcheck && activeTab && !drawingOpen && detectedTextLanguage !== 'unknown' && <span className="detected-text-language" title="Automatisch erkannte Sprache für die lokale Rechtschreibprüfung"><b>Aa</b> {detectedTextLanguage === 'de' ? 'Deutsch' : detectedTextLanguage === 'en' ? 'English' : 'DE / EN'}</span>}{settings.showWordCount && activeTab && <span>{activeWordCount} Wörter</span>}<button type="button" className={`save-status ${saveState === 'saved' ? 'save-ok' : 'save-pending'}`} title="Jetzt speichern (Strg+S)" aria-live="polite" onClick={() => void saveCurrentWork()}>{saveState === 'saved' ? <CheckCircle2 size={11} /> : saveState === 'saving' ? <LoaderCircle className="spin" size={11} /> : <CircleAlert size={11} />}{saveState === 'saved' ? 'Gespeichert' : saveState === 'saving' ? 'Speichert …' : 'Speicherfehler'}</button><span title={isWeb ? 'Die Daten bleiben in diesem Browser' : 'Dein Vault bleibt auf deinem Gerät'}><ShieldCheck size={11} /> {isWeb ? 'Im Browser gespeichert' : 'Lokal & privat'}</span></div>
       </footer>
 

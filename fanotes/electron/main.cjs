@@ -29,6 +29,8 @@ const {
   emptyFamdPayload,
   isNoteExtension,
   isPaperStyle,
+  isPdfNoteExtension,
+  noteStem,
   parseFamd,
   serializeFamd,
   stripFamdPayload,
@@ -143,6 +145,7 @@ const IPC = Object.freeze({
   setNotePaperStyle: 'fanotes:set-note-paper-style',
   importWorksheet: 'fanotes:import-worksheet',
   importWorksheetFromData: 'fanotes:import-worksheet-from-data',
+  importPdfNote: 'fanotes:import-pdf-note',
   importOneNote: 'fanotes:import-onenote',
   readWorksheet: 'fanotes:read-worksheet',
   saveWorksheet: 'fanotes:save-worksheet',
@@ -1474,21 +1477,35 @@ function assertMarkdownPath(relativePath) {
   if (!MARKDOWN_EXTENSIONS.has(extension)) throw new Error('Es dürfen nur Markdown-Dateien und FaNotes-Handschriftdateien (.famd) bearbeitet werden.')
 }
 
+function assertNotePath(relativePath) {
+  if (typeof relativePath !== 'string') throw new Error('Ungültiger Notizpfad.')
+  const extension = path.extname(relativePath).toLocaleLowerCase('en-US')
+  if (!isNoteExtension(extension)) {
+    throw new Error('Es dürfen nur Markdown-Dateien, PDF-Notizen und FaNotes-Handschriftdateien (.famd) bearbeitet werden.')
+  }
+}
+
+function noteMarkdownSourcePath(relativePath) {
+  return isPdfNoteExtension(path.extname(relativePath).toLocaleLowerCase('en-US'))
+    ? companionNotePath(relativePath, '.famd')
+    : relativePath
+}
+
 function noteByteLimit(relativePath) {
   return path.extname(relativePath).toLocaleLowerCase('en-US') === '.famd' ? MAX_FAMD_BYTES : MAX_TEXT_BYTES
 }
 
 function omitFamdCompanions(entries) {
-  const mdStems = new Set()
+  const noteStems = new Set()
   for (const entry of entries) {
-    if (entry?.kind === 'file' && entry.extension === 'md') {
-      mdStems.add(path.basename(entry.name, path.extname(entry.name)).normalize('NFC').toLocaleLowerCase('de-DE'))
+    if (entry?.kind === 'file' && (entry.extension === 'md' || entry.extension === 'markdown' || entry.extension === 'pdf')) {
+      noteStems.add(path.basename(entry.name, path.extname(entry.name)).normalize('NFC').toLocaleLowerCase('de-DE'))
     }
   }
   return entries.filter((entry) => {
     if (!entry || entry.kind !== 'file' || entry.extension !== 'famd') return true
     const stem = path.basename(entry.name, path.extname(entry.name)).normalize('NFC').toLocaleLowerCase('de-DE')
-    return !mdStems.has(stem)
+    return !noteStems.has(stem)
   })
 }
 
@@ -1941,12 +1958,13 @@ async function collectMarkdownFiles(root, directory, output, depth = 0) {
       if (realDirectory && isInsideRoot(root, realDirectory)) {
         await collectMarkdownFiles(root, absolutePath, output, depth + 1)
       }
-    } else if (
-      info.isFile() &&
-      info.size <= MAX_TEXT_BYTES &&
-      MARKDOWN_EXTENSIONS.has(path.extname(entry.name).toLocaleLowerCase('en-US'))
-    ) {
-      output.push({ absolutePath, info })
+    } else if (info.isFile()) {
+      const extension = path.extname(entry.name).toLocaleLowerCase('en-US')
+      if (MARKDOWN_EXTENSIONS.has(extension) && info.size <= MAX_TEXT_BYTES) {
+        output.push({ absolutePath, info, kind: 'markdown' })
+      } else if (isPdfNoteExtension(extension) && info.size <= (WORKSHEET_FORMATS.get('.pdf')?.maxBytes ?? 96 * 1024 * 1024)) {
+        output.push({ absolutePath, info, kind: 'pdf' })
+      }
     }
   }
 }
@@ -2860,8 +2878,9 @@ function registerIpcHandlers() {
       async () => {
         await ensureBootstrap()
         assertVaultWriteContext(requestedVaultPath, requestedVaultGeneration)
+        const allowCreateFamd = path.extname(normalizedRelativePath).toLocaleLowerCase('en-US') === '.famd'
         const { root: resolvedRoot, target } = await resolveVaultPath(normalizedRelativePath, {
-          allowMissing: false,
+          allowMissing: allowCreateFamd,
           expected: 'file',
         })
         if (resolvedRoot !== requestedVaultPath) {
@@ -2878,8 +2897,11 @@ function registerIpcHandlers() {
           if (root !== requestedVaultPath || !isInsideRoot(root, realParent)) {
             throw new Error('Der Zielordner liegt außerhalb des ursprünglichen Vaults.')
           }
-          const existing = await fsp.lstat(target)
-          if (!existing.isFile() || existing.isSymbolicLink()) {
+          const existing = await fsp.lstat(target).catch((error) => {
+            if (allowCreateFamd && error?.code === 'ENOENT') return null
+            throw error
+          })
+          if (existing && (!existing.isFile() || existing.isSymbolicLink())) {
             throw new Error('Die Notiz ist keine sichere reguläre Datei.')
           }
           assertVaultWriteContext(requestedVaultPath, requestedVaultGeneration)
@@ -3229,24 +3251,32 @@ function registerIpcHandlers() {
       const extension = path.extname(relativePath).toLocaleLowerCase('en-US')
       if (extension === '.famd') {
         const siblingMd = companionNotePath(relativePath, '.md')
-        if (markdownFiles.some((candidate) => toRelativePosix(root, candidate.absolutePath) === siblingMd)) continue
+        const siblingPdf = `${noteStem(relativePath)}.pdf`
+        if (markdownFiles.some((candidate) => {
+          const candidatePath = toRelativePosix(root, candidate.absolutePath)
+          return candidatePath === siblingMd || candidatePath === siblingPdf
+        })) continue
       }
-      let content
+      let content = ''
       let inkTranscript = ''
-      try {
-        const raw = (await readRegularFileNoFollow(file.absolutePath, noteByteLimit(relativePath))).toString('utf8')
-        const parsed = parseFamd(raw)
-        content = parsed.markdown || stripFamdPayload(raw)
-        if (typeof parsed.payload?.ink?.searchTranscript === 'string') {
-          inkTranscript = parsed.payload.ink.searchTranscript.slice(0, 500_000)
+      if (file.kind !== 'pdf') {
+        try {
+          const raw = (await readRegularFileNoFollow(file.absolutePath, noteByteLimit(relativePath))).toString('utf8')
+          const parsed = parseFamd(raw)
+          content = parsed.markdown || stripFamdPayload(raw)
+          if (typeof parsed.payload?.ink?.searchTranscript === 'string') {
+            inkTranscript = parsed.payload.ink.searchTranscript.slice(0, 500_000)
+          }
+        } catch {
+          continue
         }
-      } catch {
-        continue
       }
       if (extension !== '.famd') {
         try {
           const companion = await readOptionalNoteFile(companionNotePath(relativePath, '.famd'))
-          const ink = companion ? parseFamd(companion).payload?.ink : null
+          const parsedCompanion = companion ? parseFamd(companion) : null
+          if (file.kind === 'pdf' && parsedCompanion?.markdown) content = parsedCompanion.markdown
+          const ink = parsedCompanion?.payload?.ink
           if (ink && typeof ink.searchTranscript === 'string') {
             inkTranscript = ink.searchTranscript.slice(0, 500_000)
           }
@@ -3351,8 +3381,9 @@ function registerIpcHandlers() {
     if (typeof payload.noteRelativePath === 'string' && payload.noteRelativePath.trim()) {
       try {
         const notePath = normalizeRelativePath(payload.noteRelativePath).split(path.sep).join('/')
-        assertMarkdownPath(notePath)
-        const noteMarkdown = (await readOptionalNoteFile(notePath, noteByteLimit(notePath))) ?? ''
+        assertNotePath(notePath)
+        const markdownPath = noteMarkdownSourcePath(notePath)
+        const noteMarkdown = (await readOptionalNoteFile(markdownPath, noteByteLimit(markdownPath))) ?? ''
         const ink = validateDrawingJson(payload.drawingJson)
         await writeFamdCompanion(notePath, stripFamdPayload(noteMarkdown), ink)
       } catch (error) {
@@ -3429,7 +3460,7 @@ function registerIpcHandlers() {
     await ensureBootstrap()
     if (typeof relativePath !== 'string') throw new Error('Ungültiger Notizpfad.')
     const notePath = normalizeRelativePath(relativePath).split(path.sep).join('/')
-    assertMarkdownPath(notePath)
+    assertNotePath(notePath)
     const famdRelative = companionNotePath(notePath, '.famd')
     const source = await readOptionalNoteFile(famdRelative)
     if (!source) return null
@@ -3462,7 +3493,7 @@ function registerIpcHandlers() {
     await ensureBootstrap()
     if (typeof relativePath !== 'string') throw new Error('Ungültiger Notizpfad.')
     const notePath = normalizeRelativePath(relativePath).split(path.sep).join('/')
-    assertMarkdownPath(notePath)
+    assertNotePath(notePath)
     const source = await readOptionalNoteFile(companionNotePath(notePath, '.famd'))
     if (!source) return null
     const parsed = parseFamd(source)
@@ -3476,8 +3507,9 @@ function registerIpcHandlers() {
     if (!isPaperStyle(paperStyle)) throw new Error('Diese Papierart wird nicht unterstützt.')
     if (typeof relativePath !== 'string') throw new Error('Ungültiger Notizpfad.')
     const notePath = normalizeRelativePath(relativePath).split(path.sep).join('/')
-    assertMarkdownPath(notePath)
-    const markdown = (await readOptionalNoteFile(notePath, noteByteLimit(notePath))) ?? ''
+    assertNotePath(notePath)
+    const markdownPath = noteMarkdownSourcePath(notePath)
+    const markdown = (await readOptionalNoteFile(markdownPath, noteByteLimit(markdownPath))) ?? ''
     const famdRelative = companionNotePath(notePath, '.famd')
     const existingSource = await readOptionalNoteFile(famdRelative)
     const existing = existingSource ? parseFamd(existingSource) : { markdown: stripFamdPayload(markdown), payload: emptyFamdPayload() }
@@ -3582,6 +3614,59 @@ function registerIpcHandlers() {
     }
     return document
   }
+
+  handle(IPC.importPdfNote, async (_event, rawParentPath) => {
+    await ensureBootstrap()
+    const result = await dialog.showOpenDialog(mainWindow, localizedDialog({
+      title: 'PDF als Notiz importieren',
+      buttonLabel: 'PDF importieren',
+      properties: ['openFile'],
+      filters: [{ name: 'PDF-Dokumente', extensions: ['pdf'] }],
+    }))
+    if (result.canceled || result.filePaths.length !== 1) return null
+    const selectedPath = result.filePaths[0]
+    const extension = path.extname(selectedPath).toLocaleLowerCase('en-US')
+    if (extension !== '.pdf') throw new Error('Es können nur PDF-Dateien als PDF-Notiz importiert werden.')
+    const format = WORKSHEET_FORMATS.get('.pdf')
+    if (!format) throw new Error('PDF-Notizen sind in dieser Version nicht verfügbar.')
+    const source = await readRegularFileNoFollow(selectedPath, format.maxBytes)
+    if (!source.length) throw new Error('Die ausgewählte PDF-Datei ist leer.')
+    validateWorksheetBytes(source, '.pdf')
+
+    const parentPath = typeof rawParentPath === 'string' ? rawParentPath : ''
+    const { root, target: parentTarget } = await resolveVaultPath(parentPath, {
+      allowRoot: true,
+      expected: 'directory',
+    })
+    const title = safeEntryName(splitName(path.basename(selectedPath)).stem, localizeText('PDF-Notiz', currentUiLanguage()))
+    const desiredName = `${title}.pdf`
+    const occupied = await siblingNames(parentTarget)
+    let candidate = desiredName
+    for (let number = 1; number <= 10000; number += 1) {
+      candidate = numberedName(desiredName, number)
+      const famdName = `${splitName(candidate).stem}.famd`
+      const candidateKey = candidate.normalize('NFC').toLocaleLowerCase('de-DE')
+      const famdKey = famdName.normalize('NFC').toLocaleLowerCase('de-DE')
+      if (occupied.has(candidateKey) || occupied.has(famdKey)) continue
+      const absolutePath = path.join(parentTarget, candidate)
+      try {
+        await queueFileWrite(absolutePath, async () => atomicWrite(absolutePath, source, { mode: 0o600 }))
+        occupied.add(candidateKey)
+        occupied.add(famdKey)
+        const info = await fsp.lstat(absolutePath)
+        const entry = entryFromStat(root, absolutePath, info)
+        try {
+          await writeFamdCompanion(entry.relativePath, '')
+        } catch (error) {
+          console.warn('FaNotes: .famd-Begleiter zur PDF-Notiz fehlte:', error?.message ?? error)
+        }
+        return { relativePath: entry.relativePath, entry }
+      } catch (error) {
+        if (error?.code !== 'EEXIST') throw error
+      }
+    }
+    throw new Error('Es konnte kein eindeutiger PDF-Name erzeugt werden.')
+  })
 
   handle(IPC.importWorksheetFromData, async (_event, payload) => {
     await ensureBootstrap()
