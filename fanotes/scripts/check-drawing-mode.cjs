@@ -83,6 +83,7 @@ const safeguards = [
   ['// Use layout size (offset*), not getBoundingClientRect: CSS zoom/rotation of the', 'Bitmap-Größe unabhängig vom Ansichtszoom'],
   ['WRITE_SLACK_HEIGHT', 'Papier wächst nur mit Tinte plus Absatz-Puffer, nicht durch Scrollen'],
   ['PAGE_GROW_STEP_HEIGHT', 'Neues Blatt wächst in festen Schritten, nicht bei jedem Sample'],
+  ['neededWriteExtent', 'Wachstumsschwelle kommt aus dem gelieferten Grow-Helper'],
   ['fanotes-ink-toolbar-slot', 'Handschrift-Werkzeuge sitzen in der oberen Leiste'],
   ['is-docked-chrome', 'Stiftleiste dockt in das normale Menü, statt zu schweben'],
   ['is-viewport-chrome', 'Hinweise und Studio liegen außerhalb des Blatt-Zooms'],

@@ -95,6 +95,13 @@ import {
   isInkCorridorLeap,
   mapClientToPaperPoint,
 } from '../lib/inkSampleMap'
+import {
+  PAGE_GROW_STEP_HEIGHT,
+  PAGE_GROW_STEP_WIDTH,
+  WRITE_SLACK_HEIGHT,
+  WRITE_SLACK_WIDTH,
+  neededWriteExtent,
+} from '../lib/paperGrow'
 import { DraftingGuides } from './DraftingGuides'
 import {
   asCompassPose,
@@ -175,13 +182,6 @@ const loadRecognitionModule = async () => {
 
 const SOURCE_WIDTH = 900
 const SOURCE_HEIGHT = 1273
-/** Extra paper after the last ink so a larger handwriting paragraph still fits. */
-const WRITE_SLACK_HEIGHT = Math.round(SOURCE_HEIGHT * 0.34)
-/** Extra paper to the right of the last ink — a bit of line, not a new page. */
-const WRITE_SLACK_WIDTH = Math.round(SOURCE_WIDTH * 0.28)
-/** Grow the sheet in half-page chunks so the ruling is not resized every sample. */
-const PAGE_GROW_STEP_HEIGHT = Math.round(SOURCE_HEIGHT * 0.5)
-const PAGE_GROW_STEP_WIDTH = Math.round(SOURCE_WIDTH * 0.5)
 /** Soft cap (~40 A4 pages) so a runaway write cannot exhaust memory. */
 const MAX_SOURCE_HEIGHT = SOURCE_HEIGHT * 40
 /** Soft cap for horizontal growth (~20 A4 widths). */
@@ -1977,24 +1977,12 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     return true
   }, [applyInkExtentStyles, resolvePaperElement, scaleNormalizedSpace, schedulePageLayoutRefresh, setDirty, redraw])
 
-  /** Keep a paragraph of empty paper beyond the pen so writing can continue, then stop. */
+  /** Keep about half a page of empty paper beyond the pen so the edge does not arrive first. */
   const ensureWriteRoom = useCallback((normalizedY?: number, normalizedX?: number) => {
     const prevH = sourceHeightRef.current
     const prevW = sourceWidthRef.current
-    let nextH = prevH
-    let nextW = prevW
-    if (typeof normalizedY === 'number' && Number.isFinite(normalizedY)) {
-      const needed = normalizedY * prevH + WRITE_SLACK_HEIGHT
-      if (needed > prevH) {
-        nextH = Math.max(prevH, Math.ceil(needed / PAGE_GROW_STEP_HEIGHT) * PAGE_GROW_STEP_HEIGHT)
-      }
-    }
-    if (typeof normalizedX === 'number' && Number.isFinite(normalizedX)) {
-      const needed = normalizedX * prevW + WRITE_SLACK_WIDTH
-      if (needed > prevW) {
-        nextW = Math.max(prevW, Math.ceil(needed / PAGE_GROW_STEP_WIDTH) * PAGE_GROW_STEP_WIDTH)
-      }
-    }
+    const nextH = neededWriteExtent(normalizedY, prevH, WRITE_SLACK_HEIGHT, PAGE_GROW_STEP_HEIGHT)
+    const nextW = neededWriteExtent(normalizedX, prevW, WRITE_SLACK_WIDTH, PAGE_GROW_STEP_WIDTH)
     if (nextH > prevH || nextW > prevW) setPageExtent(nextH, nextW)
   }, [setPageExtent])
 
