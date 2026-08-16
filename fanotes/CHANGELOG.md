@@ -2,6 +2,10 @@
 
 ## Unveröffentlicht
 
+## 2026.8.29
+
+- **Hausaufgaben-API-Passwort:** Das API-Passwort liegt verschlüsselt im Desktop-Profil, nicht mehr als Klartext in der Konfiguration. Leerzeichen am Rand gehören nicht zum Passwort.
+
 ## 2026.8.28
 
 - **Hausaufgaben-API:** Die experimentelle Abfrage auf fanotes.fasrv.ch bleibt hinter Schalter und Passwort. Ohne beides oder mit falschem Passwort kommen keine Titel zurück.
