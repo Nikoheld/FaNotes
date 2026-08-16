@@ -2,6 +2,12 @@
 
 ## Unveröffentlicht
 
+## 2026.8.30
+
+- **Text bleibt auf dem Lineal:** Geschriebener Text springt nicht mehr hin und her. Pfeiltasten ziehen die Schrift nicht vom Karopapier weg — nur das Blatt scrollt, die Schrift bleibt eins mit dem Hintergrund.
+- **Keine Geisterlinien:** Vorhersagepunkte, 0,0-Koordinaten und eine fehlende Fläche ziehen keine Linie mehr in eine Ecke oder die Blattmitte.
+- **GlyphenWerk-Korrektur bleibt:** Eine einmalige Korrektur gleicher Länge (zum Beispiel *meute* statt *heute*) setzt sich beim nächsten Erkennen durch.
+
 ## 2026.8.29
 
 - **Hausaufgaben-API-Passwort:** Das API-Passwort liegt verschlüsselt im Desktop-Profil, nicht mehr als Klartext in der Konfiguration. Leerzeichen am Rand gehören nicht zum Passwort.
