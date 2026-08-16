@@ -36,6 +36,7 @@
     "check:connected-recognition": "node scripts/check-connected-recognition.mjs",
     "check:incremental-prefix": "cross-env FANOTES_PREFIX_ONLY=1 node scripts/check-connected-recognition.mjs",
     "check:neural-text-recognition": "node scripts/check-neural-text-recognition.mjs",
+    "check:correction-learn": "node scripts/check-correction-learn.mjs",
     "check:trocr": "node scripts/check-trocr-integration.cjs",
     "check:native-ocr": "node scripts/check-native-ocr.cjs",
     "check:packaged-native-ocr": "node scripts/check-packaged-native-ocr.cjs",
