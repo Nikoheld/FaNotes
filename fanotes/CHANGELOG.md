@@ -2,6 +2,12 @@
 
 ## Unveröffentlicht
 
+## 2026.8.35
+
+- **Handschrift bleibt stehen:** Beim Schreiben rutscht vorhandene Schrift nicht nach oben und wird nicht kleiner — auch wenn das Blatt schon höher war als die Seite.
+- **Kein toter Stift:** Eine ungültige 0,0-Ersteingabe verschluckt den Strich nicht. Der nächste echte Punkt schreibt weiter.
+- **Windows:** Nur Stift bleibt nach dem Zurücksetzen an. Handfläche, Finger und Maus zeichnen nicht.
+
 ## 2026.8.34
 
 - **Handschrift bleibt stehen:** Beim Schreiben rutscht vorhandene Schrift nicht nach oben und wird nicht kleiner. Das Blatt wächst, die Zeichen bleiben auf ihrer Zeile.
