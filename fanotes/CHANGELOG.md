@@ -2,6 +2,11 @@
 
 ## Unveröffentlicht
 
+## 2026.8.36
+
+- **Fehler melden:** Unter Einstellungen oder in der Befehlspalette kannst du kurz beschreiben, was schiefging. Die letzten fünf Minuten (Stift, Notiz, Werkzeug, Version) werden automatisch angehängt und nur an fanotes.fasrv.ch geschickt.
+- **Lineal und Geodreieck:** Das Lineal hat zwei Zeichenkanten. Das Geodreieck fängt an allen drei Seiten und zeigt 0–180° am rechten Winkel.
+
 ## 2026.8.35
 
 - **Handschrift bleibt stehen:** Beim Schreiben rutscht vorhandene Schrift nicht nach oben und wird nicht kleiner — auch wenn das Blatt schon höher war als die Seite.
