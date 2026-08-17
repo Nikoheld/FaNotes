@@ -10,7 +10,8 @@ const markdownEditor = fs.readFileSync(path.join(root, 'src', 'components', 'Mar
 const paperCaret = fs.readFileSync(path.join(root, 'src', 'lib', 'paperCaretScroll.ts'), 'utf8')
 const inkMap = fs.readFileSync(path.join(root, 'src', 'lib', 'inkSampleMap.ts'), 'utf8')
 const toolErase = fs.readFileSync(path.join(root, 'src', 'lib', 'toolErase.ts'), 'utf8')
-const lockSource = [source, markdownEditor, paperCaret, inkMap, toolErase].join('\n')
+const inkPolicy = fs.readFileSync(path.join(root, 'src', 'lib', 'inkPointerPolicy.ts'), 'utf8')
+const lockSource = [source, markdownEditor, paperCaret, inkMap, toolErase, inkPolicy].join('\n')
 
 const requiredBrushes = ['fineliner', 'pencil', 'marker', 'paintbrush', 'calligraphy', 'highlighter', 'watercolor', 'spray']
 const requiredEffects = ['solid', 'rainbow', 'aurora', 'sunset', 'ocean', 'gold', 'silver', 'neon']
@@ -132,6 +133,9 @@ const lockSafeguards = [
   ['applyToolErase', 'Werkzeug-Radierer trifft nur schneidende Tinte'],
   ['strokeTouchesEraser', 'Ein-Punkt-Piktogramm und Pfad nutzen dieselbe Hit-Fläche'],
   ['radius + visibleHalfWidth(stroke)', 'Radierer berücksichtigt die sichtbare Piktogrammgröße'],
+  ['applyWheelInkPolicy', 'Trackpad-Wheel beendet den Stift-Status'],
+  ['classifyInkJumpAppend', 'Sprungfilter unabhängig von der Seitenhöhe'],
+  ['shouldIgnorePointerAfterPen', 'Maus nach Stift wird kurz ignoriert'],
 ]
 
 for (const [needle, label] of safeguards) {

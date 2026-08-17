@@ -10,6 +10,7 @@ const {
   configureDesktopGpu,
   configureLeanChromiumStartup,
   configureLinuxGraphics,
+  configureLinuxInputPlatform,
   readStartupResourceLimits,
   VULKAN_FEATURES,
 } = require('../electron/startup-preflight.cjs')
@@ -113,6 +114,34 @@ try {
   )
   assert.equal(x11.getSwitchValue('use-angle'), '')
 
+  const ozone = mockCommandLine()
+  const ozoneResult = configureLinuxInputPlatform({ commandLine: ozone }, { HOME: '' })
+  assert.equal(ozoneResult.ozone, 'x11')
+  assert.equal(ozone.getSwitchValue('ozone-platform'), 'x11')
+  assert.equal(ozone.hasSwitch('force-device-scale-factor'), false, 'must not blindly force scale 2')
+
+  const hyprConfig = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'fanotes-hypr-')), 'hyprland.conf')
+  temporaryProfiles.push(path.dirname(hyprConfig))
+  fs.writeFileSync(hyprConfig, 'xwayland {\n  force_zero_scaling = true\n}\n')
+  const scaled = mockCommandLine()
+  const scaledResult = configureLinuxInputPlatform(
+    { commandLine: scaled },
+    { FANOTES_HYPRLAND_CONFIG: hyprConfig, HOME: '' },
+  )
+  assert.equal(scaledResult.hyprlandZeroScaling, true)
+  assert.equal(scaled.getSwitchValue('force-device-scale-factor'), '2')
+
+  const plainHypr = mockCommandLine()
+  const plainFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'fanotes-hypr-')), 'hyprland.conf')
+  temporaryProfiles.push(path.dirname(plainFile))
+  fs.writeFileSync(plainFile, 'xwayland {\n  force_zero_scaling = false\n}\n')
+  const plainResult = configureLinuxInputPlatform(
+    { commandLine: plainHypr },
+    { FANOTES_HYPRLAND_CONFIG: plainFile, HOME: '' },
+  )
+  assert.equal(plainResult.hyprlandZeroScaling, false)
+  assert.equal(plainHypr.hasSwitch('force-device-scale-factor'), false)
+
   const leanChromium = mockCommandLine({ 'disable-features': 'ExistingFeature' })
   configureLeanChromiumStartup({ commandLine: leanChromium })
   assert.equal(leanChromium.hasSwitch('disable-background-networking'), true)
@@ -143,6 +172,8 @@ try {
 
   const root = path.resolve(__dirname, '..')
   const mainSource = fs.readFileSync(path.join(root, 'electron', 'main.cjs'), 'utf8')
+  assert.match(mainSource, /configureLinuxInputPlatform\(app\)/)
+  assert.doesNotMatch(mainSource, /evdev|uinput|virtual tablet/i)
   const preloadSource = fs.readFileSync(path.join(root, 'electron', 'preload.cjs'), 'utf8')
   const appSource = fs.readFileSync(path.join(root, 'src', 'App.tsx'), 'utf8')
   const packageMetadata = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'))

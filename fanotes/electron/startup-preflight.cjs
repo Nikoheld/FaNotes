@@ -38,6 +38,41 @@ function removeSwitchValues(commandLine, name, removals) {
   if (values.length) commandLine.appendSwitch(name, values.join(','))
 }
 
+function readHyprlandForceZeroScaling(environment = process.env, readFile = fs.readFileSync) {
+  const configured = typeof environment.FANOTES_HYPRLAND_CONFIG === 'string'
+    ? environment.FANOTES_HYPRLAND_CONFIG.trim()
+    : ''
+  const home = typeof environment.HOME === 'string' ? environment.HOME : ''
+  const candidates = [
+    configured,
+    home ? path.join(home, '.config', 'hypr', 'hyprland.conf') : '',
+  ].filter(Boolean)
+  for (const file of candidates) {
+    try {
+      const text = readFile(file, 'utf8')
+      if (/force_zero_scaling\s*=\s*true/iu.test(String(text))) return true
+    } catch {
+      // missing or unreadable config is not zero-scaling
+    }
+  }
+  return false
+}
+
+function configureLinuxInputPlatform(electronApp, environment = process.env) {
+  if (process.platform !== 'linux') {
+    return { ozone: null, scaleFactor: null, hyprlandZeroScaling: false }
+  }
+  const commandLine = electronApp.commandLine
+  commandLine.appendSwitch('ozone-platform', 'x11')
+  const hyprlandZeroScaling = readHyprlandForceZeroScaling(environment)
+  if (hyprlandZeroScaling) commandLine.appendSwitch('force-device-scale-factor', '2')
+  return {
+    ozone: 'x11',
+    scaleFactor: hyprlandZeroScaling ? 2 : null,
+    hyprlandZeroScaling,
+  }
+}
+
 function configureLinuxGraphics(electronApp, environment = process.env) {
   if (process.platform !== 'linux') return { mode: 'platform-default' }
   const commandLine = electronApp.commandLine
@@ -200,5 +235,7 @@ module.exports = {
   configureDesktopGpu,
   configureLeanChromiumStartup,
   configureLinuxGraphics,
+  configureLinuxInputPlatform,
+  readHyprlandForceZeroScaling,
   readStartupResourceLimits,
 }

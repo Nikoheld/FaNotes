@@ -13,6 +13,7 @@ const {
   configureDesktopGpu,
   configureLeanChromiumStartup,
   configureLinuxGraphics,
+  configureLinuxInputPlatform,
   readStartupResourceLimits,
 } = require('./startup-preflight.cjs')
 const { localizeDialogOptions, localizeText, resolveLanguage } = require('./i18n.cjs')
@@ -100,7 +101,15 @@ completePendingAppDataReset()
 const startupResourceLimits = readStartupResourceLimits(app.getPath('userData'))
 configureLeanChromiumStartup(app, startupResourceLimits)
 configureDesktopGpu(app)
+const linuxInputStartup = configureLinuxInputPlatform(app)
 const graphicsStartup = configureLinuxGraphics(app)
+if (linuxInputStartup.ozone === 'x11') {
+  console.info(
+    linuxInputStartup.hyprlandZeroScaling
+      ? 'FaNotes: Linux Ozone X11 plus HiDPI-Skalierung 2 (Hyprland force_zero_scaling).'
+      : 'FaNotes: Linux Ozone X11, damit Trackpad und Stift denselben Seat teilen.',
+  )
+}
 const singletonCleanup = cleanupStaleSingletonLocks(app.getPath('userData'))
 if (graphicsStartup.mode === 'wayland-vulkan-disabled') {
   console.info('FaNotes: Wayland-Vulkan-Schutz aktiv; Chromium wählt den kompatiblen GL/EGL-Pfad.')

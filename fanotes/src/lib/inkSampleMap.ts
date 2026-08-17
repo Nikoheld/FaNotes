@@ -1,4 +1,8 @@
+/** Legacy name kept for drawing-mode needles. Jump is now 0–1 page space. */
 export const INK_LEAP_PAGE_RATIO = 0.42
+export const INK_JUMP_DY = 0.08
+export const INK_JUMP_HYPOT = 0.12
+export const INK_FIRST_POINT_RESTART_Y = 0.05
 
 export type PaperSurfaceBox = {
   left: number
@@ -110,15 +114,33 @@ export const mapClientToPaperPoint = (
 export const isInkCorridorLeap = (
   previous: { x: number; y: number } | null | undefined,
   next: { x: number; y: number },
-  sourceWidth: number,
-  sourceHeight: number,
+  _sourceWidth = 1,
+  _sourceHeight = 1,
 ) => {
   if (!previous) return false
-  const distance = Math.hypot(
-    (next.x - previous.x) * sourceWidth,
-    (next.y - previous.y) * sourceHeight,
-  )
-  return distance > Math.max(sourceWidth, sourceHeight) * INK_LEAP_PAGE_RATIO
+  const dy = Math.abs(next.y - previous.y)
+  return dy > INK_JUMP_DY || Math.hypot(next.x - previous.x, next.y - previous.y) > INK_JUMP_HYPOT
+}
+
+export const classifyInkJumpAppend = (
+  previous: { x: number; y: number } | null | undefined,
+  next: { x: number; y: number },
+  existingCount: number,
+) => {
+  if (!previous || existingCount <= 0) return 'start' as const
+  if (!isInkCorridorLeap(previous, next)) return 'append' as const
+  if (existingCount === 1 && previous.y < INK_FIRST_POINT_RESTART_Y) return 'restart' as const
+  return 'skip' as const
+}
+
+export const resolveInkJumpAppend = (
+  points: MappedInkPoint[],
+  next: MappedInkPoint,
+) => {
+  const action = classifyInkJumpAppend(points.at(-1) ?? null, next, points.length)
+  if (action === 'start' || action === 'append') points.push(next)
+  else if (action === 'restart') points.splice(0, 1, next)
+  return { action, points }
 }
 
 export const acceptCommittedInkSample = (
@@ -145,14 +167,9 @@ export const appendAcceptedInkPoint = (
   sourceHeight: number,
   rotation = 0,
 ) => {
-  const accepted = acceptCommittedInkSample(
-    event,
-    surface,
-    points.at(-1) ?? null,
-    sourceWidth,
-    sourceHeight,
-    rotation,
-  )
-  if (accepted) points.push(accepted)
+  if (isPreviewOnlyPointerEvent(event) || !isUsablePointerClient(event)) return points
+  const mapped = mapClientToPaperPoint(event, surface, rotation)
+  if (!mapped) return points
+  resolveInkJumpAppend(points, mapped)
   return points
 }

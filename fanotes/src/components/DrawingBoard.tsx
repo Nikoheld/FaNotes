@@ -93,9 +93,15 @@ import {
 } from '../lib/inkPointerSession'
 import {
   acceptCommittedInkSample,
-  isInkCorridorLeap,
+  classifyInkJumpAppend,
   mapClientToPaperPoint,
 } from '../lib/inkSampleMap'
+import {
+  applyPenUpInkCleanup,
+  applyWheelInkPolicy,
+  keepGotPointerCaptureId,
+  shouldIgnorePointerAfterPen,
+} from '../lib/inkPointerPolicy'
 import {
   PAGE_GROW_STEP_HEIGHT,
   PAGE_GROW_STEP_WIDTH,
@@ -1897,16 +1903,15 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     const nextH = Math.min(MAX_SOURCE_HEIGHT, Math.max(SOURCE_HEIGHT, Math.round(targetHeight)))
     const nextW = Math.min(MAX_SOURCE_WIDTH, Math.max(SOURCE_WIDTH, Math.round(targetWidth)))
     if (nextH === prevH && nextW === prevW) return false
-    scaleNormalizedSpace(prevW / nextW, prevH / nextH)
     sourceHeightRef.current = nextH
     sourceWidthRef.current = nextW
     setSourceHeight(nextH)
     setSourceWidth(nextW)
     applyInkExtentStyles(nextH, nextW)
-    // Flush layout so the next pointer sample sees the new paper box. Otherwise
-    // y is still computed against the old height and we grow again — the
-    // Kästchen then jump every frame.
+    // Flush the new CSS box first. Scaling 0–1 against a stale
+    // getBoundingClientRect draws a line to the top of the sheet.
     resolvePaperElement()?.offsetHeight
+    scaleNormalizedSpace(prevW / nextW, prevH / nextH)
     exportCacheRef.current = null
     setDirty(true)
     if (activeStrokeRef.current) {
@@ -2223,10 +2228,22 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       }
       : null
     const lastPoint = activeStrokeRef.current?.points.at(-1) ?? null
-    if (!acceptCommittedInkSample(event, surface, lastPoint, sourceWidth, sourceHeight, viewRotationRef.current)) return
+    if (!acceptCommittedInkSample(event, surface, null, sourceWidth, sourceHeight, viewRotationRef.current)) return
     const point = pointFromEvent(event)
     if (!point) return
-    if (lastPoint && isInkCorridorLeap(lastPoint, point, sourceWidth, sourceHeight)) return
+    const live = activeStrokeRef.current
+    const jump = classifyInkJumpAppend(lastPoint, point, live?.points.length ?? 0)
+    if (jump === 'skip') return
+    if (jump === 'restart' && live) {
+      live.points.splice(0, 1, point)
+      if (gestureToolRef.current === 'eraser') {
+        eraseAt(point)
+        return
+      }
+      gestureChangedRef.current = true
+      if (!paintActiveStrokeNow()) scheduleRedraw()
+      return
+    }
     if (gestureToolRef.current === 'eraser') {
       eraseAt(point)
       return
@@ -2496,7 +2513,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       if (!shouldAllowNewInkPointer(inkSessionRef.current, event, now)) return
       forceEndActivePointerRef.current('cross-device')
     }
-    if (event.pointerType === 'touch' && now - lastPenContactRef.current < 850) return
+    if (shouldIgnorePointerAfterPen(event.pointerType, lastPenContactRef.current, now)) return
     if (event.pointerType === 'pen') lastPenContactRef.current = now
     inkSessionRef.current = inkPointerSessionFromSample(event.nativeEvent, now)
     event.preventDefault()
@@ -2681,8 +2698,13 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       ?? ('currentTarget' in event && event.currentTarget instanceof Element ? event.currentTarget : canvasRef.current)
     const pointerType = native.pointerType || lastPointerTypeRef.current
     const endInteraction = () => {
+      const cleanup = applyPenUpInkCleanup({
+        activePointerId: activePointerRef.current,
+        captureId: lastCapturedPointerIdRef.current,
+        lastContactAt: lastPenContactRef.current,
+      })
       pointerBoundsRef.current = null
-      activePointerRef.current = null
+      activePointerRef.current = cleanup.session.activePointerId
       inkSessionRef.current = null
       activePointerTargetRef.current = null
       draftingLockRef.current = null
@@ -3156,7 +3178,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       }
     }
     const onGotCapture = (event: PointerEvent) => {
-      if (activePointerRef.current === event.pointerId || lastPointerTypeRef.current === 'pen') {
+      if (keepGotPointerCaptureId(event.pointerId, activePointerRef.current)) {
         lastCapturedPointerIdRef.current = event.pointerId
       }
     }
@@ -3207,43 +3229,25 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   }, [appendPointerEvent, eraseAt, ensureWriteRoom, finishPointer, forceEndActivePointer, inline, inputActive, paintActiveStrokeNow, pointFromEvent])
 
   const handleWheel = useCallback((event: React.WheelEvent) => {
+    const policy = applyWheelInkPolicy({
+      activePointerId: activePointerRef.current,
+      captureId: lastCapturedPointerIdRef.current,
+      lastContactAt: lastPenContactRef.current,
+    }, event)
     if (inputActive && (activePointerRef.current !== null || lastCapturedPointerIdRef.current !== null || activeStrokeRef.current || inkSessionRef.current)) {
       forceEndActivePointer('view-gesture')
     }
     // Shared PaperView already handles sheet zoom in inline notes (text + pen).
+    // Two-finger pan must reach the paper scroller even at zoom 1.
     if (paperView) return
     if (!inputActive) return
-    // Any view gesture from trackpad/mouse must release tablet capture first —
-    // otherwise Hyprland leaves the pen cursor (+) stuck over the whole UI.
-    // Zoom while writing: Ctrl/Meta+wheel (or pinch-equivalent ctrl-wheel on trackpads).
-    if (event.ctrlKey || event.metaKey) {
+    if (policy.preventDefault) {
       event.preventDefault()
       event.stopPropagation()
       const factor = zoomFactorFromWheel(event.deltaY, event.deltaMode, settings.viewZoomSpeed ?? 5)
       zoomBy(viewZoomRef.current * factor - viewZoomRef.current, { x: event.clientX, y: event.clientY })
-      return
     }
-    // Rotate the sheet while writing: Alt+wheel.
-    if (event.altKey) {
-      event.preventDefault()
-      event.stopPropagation()
-      const direction = event.deltaY > 0 ? VIEW_ROTATE_STEP : -VIEW_ROTATE_STEP
-      rotateBy(direction)
-      return
-    }
-    // Pan when already zoomed or rotated so the user can re-center the sheet.
-    if (viewZoomRef.current !== 1 || viewRotationRef.current !== 0 || viewPanRef.current.x !== 0 || viewPanRef.current.y !== 0) {
-      if (Math.abs(event.deltaX) < 0.5 && Math.abs(event.deltaY) < 0.5) return
-      event.preventDefault()
-      event.stopPropagation()
-      setView({
-        pan: {
-          x: viewPanRef.current.x - event.deltaX,
-          y: viewPanRef.current.y - event.deltaY,
-        },
-      })
-    }
-  }, [forceEndActivePointer, inputActive, paperView, rotateBy, setView, settings.viewZoomSpeed, zoomBy])
+  }, [forceEndActivePointer, inputActive, paperView, settings.viewZoomSpeed, zoomBy])
 
   const undo = useCallback(() => {
     if (pendingSolverTapRef.current) {
