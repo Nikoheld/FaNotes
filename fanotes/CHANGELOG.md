@@ -2,6 +2,10 @@
 
 ## Unveröffentlicht
 
+## 2026.8.34
+
+- **Handschrift bleibt stehen:** Beim Schreiben rutscht vorhandene Schrift nicht nach oben und wird nicht kleiner. Das Blatt wächst, die Zeichen bleiben auf ihrer Zeile.
+
 ## 2026.8.33
 
 - **Trackpad nach dem Stift:** Nach dem Schreiben kannst du sofort mit zwei Fingern scrollen. Das Blatt fängt die Geste nicht mehr.

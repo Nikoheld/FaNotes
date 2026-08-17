@@ -2409,5 +2409,6 @@
   "**Schrift bleibt am Ort:** Nach dem Tippen oder den Pfeiltasten rutscht der Text nicht mehr vom Lineal. Auch ein späteres Editor-Scrollen verschiebt die Schrift nicht.": "**Writing stays in place:** After typing or using the arrow keys the text no longer slips off the ruling. Later editor scrolling does not move the writing either.",
   "**Trackpad nach dem Stift:** Nach dem Schreiben kannst du sofort mit zwei Fingern scrollen. Das Blatt fängt die Geste nicht mehr.": "**Trackpad after the pen:** After writing you can scroll with two fingers immediately. The sheet no longer swallows the gesture.",
   "**Keine Linie nach oben:** Ein Sprung zur Blattoberkante wird nicht mehr als Strich übernommen, auch wenn die Seite schon lang ist.": "**No line to the top:** A jump to the top of the sheet is no longer kept as a stroke, even on a long page.",
-  "**Linux:** FaNotes startet über X11, damit Stift und Trackpad sich nicht gegenseitig blockieren.": "**Linux:** FaNotes starts through X11 so the pen and trackpad do not block each other."
+  "**Linux:** FaNotes startet über X11, damit Stift und Trackpad sich nicht gegenseitig blockieren.": "**Linux:** FaNotes starts through X11 so the pen and trackpad do not block each other.",
+  "**Handschrift bleibt stehen:** Beim Schreiben rutscht vorhandene Schrift nicht nach oben und wird nicht kleiner. Das Blatt wächst, die Zeichen bleiben auf ihrer Zeile.": "**Handwriting stays put:** While you write, existing writing no longer jumps up or shrinks. The sheet grows; the letters stay on their line."
 }
