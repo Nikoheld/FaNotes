@@ -82,6 +82,7 @@ import {
 } from '../lib/recognitionModeSelection'
 import type { MathSolverAction, MathSolverResult } from '../lib/mathSolver'
 import { detectScribbleErase } from '../lib/scribbleErase'
+import { diagnosticLog } from '../lib/bugReport'
 import { applyToolErase } from '../lib/toolErase'
 import {
   inkPointerSessionFromSample,
@@ -1294,6 +1295,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const compassPoseRef = useRef<CompassPose | null>(null)
   const draftingLockRef = useRef<{ kind: DraftingKind; edgeIndex: number } | null>(null)
   const draftingReadoutRef = useRef<string | null>(null)
+  const lastDiagnosticAtRef = useRef(0)
   rulerPoseRef.current = rulerPose
   setSquarePoseRef.current = setSquarePose
   compassPoseRef.current = compassPose
@@ -2307,6 +2309,19 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       shapeLastMoveAtRef.current = performance.now()
     }
     stroke.points.push(point)
+    const now = performance.now()
+    if (now - lastDiagnosticAtRef.current > 80) {
+      lastDiagnosticAtRef.current = now
+      diagnosticLog.record({
+        at: Date.now(),
+        kind: 'pen',
+        noteId: drawingIdRef.current,
+        x: point.x,
+        y: point.y,
+        pointerType: point.pointerType,
+        tool: gestureToolRef.current || tool,
+      })
+    }
     gestureChangedRef.current = true
     if (!paintActiveStrokeNow()) scheduleRedraw()
     armShapeDwell()

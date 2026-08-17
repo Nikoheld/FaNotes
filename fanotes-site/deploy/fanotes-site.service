@@ -22,6 +22,7 @@ Environment=FANOTES_BACKUP_DIR=/var/lib/fanotes-backups
 Environment=FANOTES_BACKUP_ENROLLMENT_TOKEN_PATH=/etc/fanotes/backup-enrollment-token
 Environment=FANOTES_ANALYTICS_DIR=/var/lib/fanotes-analytics
 Environment=FANOTES_HOMEWORK_DIR=/var/lib/fanotes-homework
+Environment=FANOTES_BUG_REPORT_DIR=/var/lib/fanotes-bug-reports
 ExecStart=/usr/bin/node /opt/fanotes-site/server.mjs
 Restart=on-failure
 RestartSec=3s
@@ -49,6 +50,7 @@ ReadOnlyPaths=/etc/fanotes
 ReadWritePaths=/var/lib/fanotes-backups
 ReadWritePaths=/var/lib/fanotes-analytics
 ReadWritePaths=/var/lib/fanotes-homework
+ReadWritePaths=/var/lib/fanotes-bug-reports
 
 [Install]
 WantedBy=multi-user.target

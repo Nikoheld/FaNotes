@@ -15,7 +15,9 @@ const paperGrow = fs.readFileSync(path.join(root, 'src', 'lib', 'paperGrow.ts'),
 const defaults = fs.readFileSync(path.join(root, 'src', 'defaults.ts'), 'utf8')
 const appSource = fs.readFileSync(path.join(root, 'src', 'App.tsx'), 'utf8')
 const drafting = fs.readFileSync(path.join(root, 'src', 'lib', 'draftingTools.ts'), 'utf8')
-const lockSource = [source, markdownEditor, paperCaret, inkMap, toolErase, inkPolicy, paperGrow, defaults, appSource, drafting].join('\n')
+const bugReport = fs.readFileSync(path.join(root, 'src', 'lib', 'bugReport.ts'), 'utf8')
+const settingsModal = fs.readFileSync(path.join(root, 'src', 'components', 'SettingsModal.tsx'), 'utf8')
+const lockSource = [source, markdownEditor, paperCaret, inkMap, toolErase, inkPolicy, paperGrow, defaults, appSource, drafting, bugReport, settingsModal].join('\n')
 
 const requiredBrushes = ['fineliner', 'pencil', 'marker', 'paintbrush', 'calligraphy', 'highlighter', 'watercolor', 'spray']
 const requiredEffects = ['solid', 'rainbow', 'aurora', 'sunset', 'ocean', 'gold', 'silver', 'neon']
@@ -150,6 +152,9 @@ const lockSafeguards = [
   ['millimetresAlongEdge', 'Kantenmaß in echten A4-Millimetern'],
   ['SET_SQUARE_PROTRACTOR_DEGREES', 'Geodreieck-Winkelmesser 0–180°'],
   ['rulerDrawingEdges', 'Lineal hat zwei lange Zeichenkanten'],
+  ['createBugReportLog', '5-Minuten-Diagnosefenster für Fehlerberichte'],
+  ['bugReportSubmitTarget', 'Fehlerberichte gehen nur an fanotes.fasrv.ch'],
+  ['Fehler melden', 'Bug-Report-Schalter in den Einstellungen'],
 ]
 
 for (const [needle, label] of safeguards) {

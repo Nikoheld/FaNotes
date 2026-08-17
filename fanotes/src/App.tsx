@@ -1,6 +1,7 @@
 import {
   ArrowLeft,
   Bot,
+  Bug,
   BookOpen,
   CalendarDays,
   CheckCircle2,
@@ -55,6 +56,7 @@ import { PaperStylePicker } from './components/PaperStylePicker'
 import { PaperView } from './components/PaperView'
 import { normalizePaperStyle } from './lib/paperStyles'
 import { clampViewZoom, readSharedPaperView, writeSharedPaperView, writeSharedZoomMaxPercent, writeSharedZoomSpeed } from './lib/paperView'
+import { diagnosticLog } from './lib/bugReport'
 import { HOMEWORK_CHANNEL_ID_PATTERN, homeworkApiOriginFromLocation, homeworkApiSecretReady, publishHomeworkList } from './lib/homeworkApi'
 import { HOMEWORK_NOTE_PATH, parseHomeworkMarkdown, type HomeworkDocument } from './lib/homeworkStore'
 import { SafeBoundary } from './components/SafeBoundary'
@@ -80,6 +82,7 @@ const MarkdownEditor = lazy(loadMarkdownEditor)
 const RightInspector = lazy(() => import('./components/RightInspector').then((module) => ({ default: module.RightInspector })))
 const SearchPanel = lazy(() => import('./components/SearchPanel').then((module) => ({ default: module.SearchPanel })))
 const SettingsModal = lazy(() => import('./components/SettingsModal').then((module) => ({ default: module.SettingsModal })))
+const BugReportModal = lazy(() => import('./components/BugReportModal').then((module) => ({ default: module.BugReportModal })))
 const VaultOverview = lazy(() => import('./components/VaultOverview').then((module) => ({ default: module.VaultOverview })))
 const HomeworkBoard = lazy(() => import('./components/HomeworkBoard').then((module) => ({ default: module.HomeworkBoard })))
 const WorksheetLayer = lazy(() => import('./components/WorksheetLayer').then((module) => ({ default: module.WorksheetLayer })))
@@ -359,6 +362,7 @@ export default function App({ startupBootstrap }: AppProps) {
   const [fatalError, setFatalError] = useState<string | null>(null)
   const [toasts, setToasts] = useState<Toast[]>([])
   const [updateState, setUpdateState] = useState<UpdateState>(INITIAL_UPDATE_STATE)
+  const [bugReportOpen, setBugReportOpen] = useState(false)
   const [revealPath, setRevealPath] = useState<string | null>(null)
   const [tagFilter, setTagFilter] = useState<string | null>(null)
   const [tagIndex, setTagIndex] = useState<Record<string, string[]>>({})
@@ -420,6 +424,36 @@ export default function App({ startupBootstrap }: AppProps) {
 
   useEffect(() => { tabsRef.current = tabs }, [tabs])
   useEffect(() => { activePathRef.current = activePath }, [activePath])
+  useEffect(() => {
+    diagnosticLog.record({
+      at: Date.now(),
+      kind: 'note',
+      noteId: activePath || undefined,
+      version: updateState.currentVersion,
+      platform: window.fanotes?.platform,
+    })
+  }, [activePath, updateState.currentVersion])
+  useEffect(() => {
+    diagnosticLog.record({
+      at: Date.now(),
+      kind: 'app',
+      version: updateState.currentVersion,
+      platform: window.fanotes?.platform,
+      message: 'session-start',
+    })
+    const onError = (event: ErrorEvent) => {
+      diagnosticLog.record({
+        at: Date.now(),
+        kind: 'error',
+        noteId: activePathRef.current || undefined,
+        version: updateState.currentVersion,
+        platform: window.fanotes?.platform,
+        message: event.message,
+      })
+    }
+    window.addEventListener('error', onError)
+    return () => window.removeEventListener('error', onError)
+  }, [updateState.currentVersion])
   useEffect(() => { setDetectedTextLanguage('unknown') }, [activePath])
   useEffect(() => { treeRef.current = tree }, [tree])
   useEffect(() => { settingsRef.current = settings }, [settings])
@@ -2068,6 +2102,7 @@ export default function App({ startupBootstrap }: AppProps) {
     { id: 'sidebar', label: 'Dateileiste umschalten', group: 'Ansicht', icon: <PanelLeftClose size={15} />, run: () => setSidebarVisible((value) => !value) },
     { id: 'inspector', label: 'Gliederung umschalten', group: 'Ansicht', icon: <PanelRightClose size={15} />, run: () => setInspectorVisible((value) => !value) },
     { id: 'settings', label: 'Einstellungen öffnen', shortcut: 'Ctrl ,', group: 'FaNotes', icon: <Settings size={15} />, run: () => openSettings() },
+    { id: 'bug-report', label: 'Fehler melden', detail: 'Kurz beschreiben; die letzten fünf Minuten werden angehängt', group: 'FaNotes', keywords: 'bug report fehler logs support', icon: <Bug size={15} />, run: () => setBugReportOpen(true) },
     { id: 'quit', label: isWeb ? 'Zur FaNotes-Website' : 'FaNotes beenden', shortcut: 'Ctrl Q', group: 'FaNotes', icon: <X size={15} />, run: () => window.fanotes.requestClose() },
   ], [activePath, activeTab, createDailyNote, createFolder, createNote, drawingOpen, exportCurrentPdf, focusMode, importOneNote, importPdfNote, isWeb, openGlyphenWerk, openHistory, openHomework, openInSplit, openLmStudio, openOverview, openSettings, openWorksheetImport, saveCurrentWork, settings.dailyNotesFolder, splitPath, tabs, toast, toggleDrawing, toggleFocusMode])
 
@@ -2520,7 +2555,8 @@ export default function App({ startupBootstrap }: AppProps) {
         </div>
       )}
       {paletteOpen && <Suspense fallback={null}><SafeBoundary name="Befehlspalette"><CommandPalette actions={paletteActions} onClose={() => setPaletteOpen(false)} /></SafeBoundary></Suspense>}
-      {settingsOpen && <Suspense fallback={null}><SafeBoundary name="Einstellungen" fallbackTitle="Die Einstellungen sind abgestürzt"><SettingsModal platform={window.fanotes.platform} settings={settings} vaultPath={bootstrap.vaultPath} updateState={updateState} onChange={applySettings} onClose={() => setSettingsOpen(false)} onSelectVault={() => void selectVault()} onOpenGlyphenWerk={() => { setSettingsOpen(false); openGlyphenWerk() }} onImportTraining={importTrainingFromSettings} onImportOneNote={importOneNote} onCheckUpdate={checkForUpdates} onDownloadUpdate={downloadUpdate} onInstallUpdate={installUpdate} onResetSettings={resetSettings} onResetAppData={resetAppData} /></SafeBoundary></Suspense>}
+      {settingsOpen && <Suspense fallback={null}><SafeBoundary name="Einstellungen" fallbackTitle="Die Einstellungen sind abgestürzt"><SettingsModal platform={window.fanotes.platform} settings={settings} vaultPath={bootstrap.vaultPath} updateState={updateState} onChange={applySettings} onClose={() => setSettingsOpen(false)} onSelectVault={() => void selectVault()} onOpenGlyphenWerk={() => { setSettingsOpen(false); openGlyphenWerk() }} onImportTraining={importTrainingFromSettings} onImportOneNote={importOneNote} onCheckUpdate={checkForUpdates} onDownloadUpdate={downloadUpdate} onInstallUpdate={installUpdate} onResetSettings={resetSettings} onResetAppData={resetAppData} onOpenBugReport={() => { setSettingsOpen(false); setBugReportOpen(true) }} /></SafeBoundary></Suspense>}
+      {bugReportOpen && <Suspense fallback={null}><SafeBoundary name="Fehlerbericht"><BugReportModal version={updateState.currentVersion} platform={window.fanotes.platform} onClose={() => setBugReportOpen(false)} onSent={() => toast('Fehlerbericht wurde an fanotes.fasrv.ch gesendet.', 'success')} /></SafeBoundary></Suspense>}
       {lmStudioOpen && <Suspense fallback={null}><AiPanel settings={settings} note={lmStudioNote} vaultNotes={vaultNoteReferences} onSettingsChange={(changes) => applySettings({ ...settingsRef.current, ...changes })} onApply={applyLmStudioResult} onClose={() => setLmStudioOpen(false)} /></Suspense>}
       {worksheetImportOpen && <div className="modal-backdrop worksheet-import-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setWorksheetImportOpen(false) }}>
         <section className="worksheet-import-dialog" role="dialog" aria-modal="true" aria-labelledby="worksheet-import-title">

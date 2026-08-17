@@ -5,6 +5,7 @@ import { extname, join, normalize, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { handleBackupRequest, initializeBackupService } from './backup-service.mjs'
 import { handleHomeworkRequest } from './homework-api.mjs'
+import { handleBugReportRequest } from './bug-report-api.mjs'
 import { handleAiProxyRequest } from './ai-proxy.mjs'
 import { languageForRequest, localizeExactText, localizeResponse } from './i18n.mjs'
 import { createAnalyticsService } from './analytics.mjs'
@@ -471,6 +472,7 @@ const server = createServer(async (request, response) => {
     const url = new URL(request.url, 'http://localhost')
     if (await handleBackupRequest(request, response, url)) return
     if (await handleHomeworkRequest(request, response, url)) return
+    if (await handleBugReportRequest(request, response, url)) return
     if (await handleAiProxyRequest(request, response, url)) return
     if (url.pathname === '/api/v1/analytics/event') {
       if (request.method !== 'POST') {

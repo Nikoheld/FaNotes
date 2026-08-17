@@ -1,5 +1,6 @@
 import {
   Accessibility,
+  Bug,
   Brush,
   Check,
   ChevronRight,
@@ -63,6 +64,7 @@ export type SettingsModalProps = {
   onInstallUpdate: () => Promise<void>
   onResetSettings: () => void
   onResetAppData: () => Promise<void>
+  onOpenBugReport?: () => void
 }
 
 const SECTIONS: { id: SettingsSection; label: string; description: string; icon: typeof Palette; count: number }[] = [
@@ -273,6 +275,7 @@ export function SettingsModal({
   onInstallUpdate,
   onResetSettings,
   onResetAppData,
+  onOpenBugReport,
 }: SettingsModalProps) {
   const isWeb = platform === 'web'
   const [active, setActive] = useState<SettingsSection>('appearance')
@@ -846,6 +849,15 @@ export function SettingsModal({
                 )}
 
                 {updateState.error && <div className="setting-import-status is-error" role="alert"><X size={15} /><span>{updateState.error}</span></div>}
+
+                <div id="settings-bug-report" className="setting-card">
+                  <div className="setting-card-title"><Bug size={16} /><span>Fehler melden</span></div>
+                  <SettingRow title="Bug Report" description="Schreib kurz, was schiefging. Die letzten fünf Minuten (Stiftposition, Notiz, Werkzeug, Version) werden automatisch angehängt und nur an fanotes.fasrv.ch geschickt.">
+                    <button type="button" className="secondary-button" onClick={() => onOpenBugReport?.()}>
+                      <Bug size={15} /> Fehler melden
+                    </button>
+                  </SettingRow>
+                </div>
 
                 <div id="settings-update-automation" className="setting-card">
                   <div className="setting-card-title"><RefreshCw size={16} /><span>Automatisierung</span></div>
