@@ -2,6 +2,12 @@
 
 ## Unveröffentlicht
 
+## 2026.8.33
+
+- **Trackpad nach dem Stift:** Nach dem Schreiben kannst du sofort mit zwei Fingern scrollen. Das Blatt fängt die Geste nicht mehr.
+- **Keine Linie nach oben:** Ein Sprung zur Blattoberkante wird nicht mehr als Strich übernommen, auch wenn die Seite schon lang ist.
+- **Linux:** FaNotes startet über X11, damit Stift und Trackpad sich nicht gegenseitig blockieren.
+
 ## 2026.8.32
 
 - **Schrift bleibt am Ort:** Nach dem Tippen oder den Pfeiltasten rutscht der Text nicht mehr vom Lineal. Auch ein späteres Editor-Scrollen verschiebt die Schrift nicht.
