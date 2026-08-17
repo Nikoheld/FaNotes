@@ -12,7 +12,9 @@ const inkMap = fs.readFileSync(path.join(root, 'src', 'lib', 'inkSampleMap.ts'),
 const toolErase = fs.readFileSync(path.join(root, 'src', 'lib', 'toolErase.ts'), 'utf8')
 const inkPolicy = fs.readFileSync(path.join(root, 'src', 'lib', 'inkPointerPolicy.ts'), 'utf8')
 const paperGrow = fs.readFileSync(path.join(root, 'src', 'lib', 'paperGrow.ts'), 'utf8')
-const lockSource = [source, markdownEditor, paperCaret, inkMap, toolErase, inkPolicy, paperGrow].join('\n')
+const defaults = fs.readFileSync(path.join(root, 'src', 'defaults.ts'), 'utf8')
+const appSource = fs.readFileSync(path.join(root, 'src', 'App.tsx'), 'utf8')
+const lockSource = [source, markdownEditor, paperCaret, inkMap, toolErase, inkPolicy, paperGrow, defaults, appSource].join('\n')
 
 const requiredBrushes = ['fineliner', 'pencil', 'marker', 'paintbrush', 'calligraphy', 'highlighter', 'watercolor', 'spray']
 const requiredEffects = ['solid', 'rainbow', 'aurora', 'sunset', 'ocean', 'gold', 'silver', 'neon']
@@ -139,6 +141,8 @@ const lockSafeguards = [
   ['shouldIgnorePointerAfterPen', 'Maus nach Stift wird kurz ignoriert'],
   ['shouldRejectNonPenInk', 'Windows-Handfläche startet keine Tinte'],
   ['defaultPenOnlyForPlatform', 'Windows-Standard ist Nur-Stift'],
+  ['defaultSettingsForPlatform', 'Windows-Reset kommt aus dem Plattform-Default'],
+  ['defaultSettingsForPlatform(window.fanotes.platform)', 'Reset speichert den Windows-Pen-only-Default'],
   ['liveGrowScale', 'Wachstum remappt nur wenn das Blatt wirklich höher wird'],
   ['applyLiveHandwritingGrow', 'Papierpixel bleiben beim Wachsen'],
   ['resolveInkPointerDown', '0,0-Down öffnet den Strich ohne Geisterpunkt'],

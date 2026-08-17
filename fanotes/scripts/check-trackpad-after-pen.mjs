@@ -20,6 +20,7 @@ const {
   shouldIgnorePointerAfterPen,
   shouldRejectNonPenInk,
 } = await server.ssrLoadModule('/src/lib/inkPointerPolicy.ts')
+const { defaultSettingsForPlatform } = await server.ssrLoadModule('/src/defaults.ts')
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const drawing = readFileSync(join(root, 'src/components/DrawingBoard.tsx'), 'utf8')
@@ -53,11 +54,13 @@ try {
   assert.equal(defaultPenOnlyForPlatform('win32'), true, 'Windows default is pen-only')
   assert.equal(defaultPenOnlyForPlatform('linux'), false)
   assert.equal(defaultPenOnlyForPlatform('darwin'), false)
+  assert.equal(defaultSettingsForPlatform('win32').penOnly, true, 'Windows factory settings keep pen-only')
+  assert.equal(defaultSettingsForPlatform('linux').penOnly, false)
   assert.equal(packagedDefaults.defaultPenOnlyForPlatform('win32'), defaultPenOnlyForPlatform('win32'))
   assert.equal(packagedDefaults.shouldRejectNonPenInk('touch', true), shouldRejectNonPenInk('touch', true))
-  assert.equal(shouldRejectNonPenInk('touch', true), true, 'Windows palm/touch must not start ink')
-  assert.equal(shouldRejectNonPenInk('mouse', true), true, 'Windows mouse must not start ink')
-  assert.equal(shouldRejectNonPenInk('pen', true), false)
+  assert.equal(shouldRejectNonPenInk('touch', defaultSettingsForPlatform('win32').penOnly), true, 'Windows palm/touch must not start ink')
+  assert.equal(shouldRejectNonPenInk('mouse', defaultSettingsForPlatform('win32').penOnly), true, 'Windows mouse must not start ink')
+  assert.equal(shouldRejectNonPenInk('pen', defaultSettingsForPlatform('win32').penOnly), false)
   assert.equal(shouldRejectNonPenInk('mouse', false), false)
   assert.equal(shouldIgnorePointerAfterPen('mouse', leftover.lastContactAt, leftover.lastContactAt + 100), true)
   assert.equal(shouldIgnorePointerAfterPen('touch', leftover.lastContactAt, leftover.lastContactAt + 100), true)

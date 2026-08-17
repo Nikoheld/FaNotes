@@ -22,9 +22,11 @@ const {
   shouldIgnorePointerAfterPen,
   shouldRejectNonPenInk,
 } = await server.ssrLoadModule('/src/lib/inkPointerPolicy.ts')
+const { defaultSettingsForPlatform } = await server.ssrLoadModule('/src/defaults.ts')
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const defaults = readFileSync(join(root, 'src/defaults.ts'), 'utf8')
+const appSource = readFileSync(join(root, 'src/App.tsx'), 'utf8')
 const main = readFileSync(join(root, 'electron/main.cjs'), 'utf8')
 
 const A4 = 1273
@@ -83,11 +85,14 @@ try {
 
   assert.equal(defaultPenOnlyForPlatform('win32'), true)
   assert.equal(defaultPenOnlyForPlatform('linux'), false)
-  assert.equal(shouldRejectNonPenInk('touch', defaultPenOnlyForPlatform('win32')), true)
-  assert.equal(shouldRejectNonPenInk('pen', defaultPenOnlyForPlatform('win32')), false)
-  assert.match(defaults, /defaultPenOnlyForPlatform/)
+  assert.equal(defaultSettingsForPlatform('win32').penOnly, true, 'Windows factory settings keep pen-only')
+  assert.equal(defaultSettingsForPlatform('linux').penOnly, false)
+  assert.equal(shouldRejectNonPenInk('touch', defaultSettingsForPlatform('win32').penOnly), true)
+  assert.equal(shouldRejectNonPenInk('pen', defaultSettingsForPlatform('win32').penOnly), false)
+  assert.match(defaults, /defaultSettingsForPlatform/)
+  assert.match(appSource, /defaultSettingsForPlatform\(window\.fanotes\.platform\)/)
   assert.match(main, /defaultPenOnlyForPlatform\(process\.platform\)/)
-  assert.doesNotMatch(defaults, /penOnly:\s*process\.platform !== 'win32'/)
+  assert.doesNotMatch(defaults, /penOnly:\s*process\.platform/)
 
   console.log(JSON.stringify({ corridor: 2, jumpRejected: true, restartY: restart[0].y, ignoreMs: POST_PEN_IGNORE_MS }))
   console.log('jump-filter ok')

@@ -50,7 +50,7 @@ import type { GlyphenWerkView } from './components/GlyphenWerkWorkspace'
 import type { MarkdownEditorHandle, MarkdownFormatAction } from './components/MarkdownEditor'
 import type { WorksheetLayerHandle } from './components/WorksheetLayer'
 import { companionNotePath, isPdfNotePath } from './lib/famd'
-import { DEFAULT_SETTINGS } from './defaults'
+import { defaultSettingsForPlatform } from './defaults'
 import { PaperStylePicker } from './components/PaperStylePicker'
 import { PaperView } from './components/PaperView'
 import { normalizePaperStyle } from './lib/paperStyles'
@@ -319,7 +319,7 @@ export default function App({ startupBootstrap }: AppProps) {
   const [tree, setTree] = useState<VaultEntry[]>([])
   const [tabs, setTabs] = useState<NoteTab[]>([])
   const [activePath, setActivePath] = useState<string | null>(null)
-  const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS)
+  const [settings, setSettings] = useState<AppSettings>(() => defaultSettingsForPlatform(window.fanotes?.platform))
   useEffect(() => {
     writeSharedZoomSpeed(settings.viewZoomSpeed)
   }, [settings.viewZoomSpeed])
@@ -727,7 +727,7 @@ export default function App({ startupBootstrap }: AppProps) {
         const data = await (startupBootstrap ?? window.fanotes.bootstrap())
         if (!alive) return
         setBootstrap(data)
-        setSettings({ ...DEFAULT_SETTINGS, ...data.settings })
+        setSettings({ ...defaultSettingsForPlatform(window.fanotes.platform), ...data.settings })
         if (data.onboardingRequired) return
         // Let the shell paint first, then parse the editor chunk in parallel
         // with local tree-cache/NAS work. The shared promise also prevents the
@@ -809,7 +809,7 @@ export default function App({ startupBootstrap }: AppProps) {
   const completeOnboarding = useCallback(async (subjects: string[]) => {
     const data = await window.fanotes.completeOnboarding(subjects)
     setBootstrap(data)
-    setSettings({ ...DEFAULT_SETTINGS, ...data.settings })
+    setSettings({ ...defaultSettingsForPlatform(window.fanotes.platform), ...data.settings })
     let initialTree = await window.fanotes.getTree()
     let initialNote = firstNote(initialTree)
     if (!initialNote) {
@@ -1338,12 +1338,13 @@ export default function App({ startupBootstrap }: AppProps) {
     const previous = settingsRef.current
     const revision = settingsRevisionRef.current + 1
     settingsRevisionRef.current = revision
-    settingsRef.current = { ...DEFAULT_SETTINGS }
-    writeSharedZoomSpeed(DEFAULT_SETTINGS.viewZoomSpeed)
-    writeSharedZoomMaxPercent(DEFAULT_SETTINGS.viewZoomMax)
-    setSettings({ ...DEFAULT_SETTINGS })
+    const defaults = defaultSettingsForPlatform(window.fanotes.platform)
+    settingsRef.current = { ...defaults }
+    writeSharedZoomSpeed(defaults.viewZoomSpeed)
+    writeSharedZoomMaxPercent(defaults.viewZoomMax)
+    setSettings({ ...defaults })
     void syncPublishedHomework({ ...previous, experimentalHomeworkApi: false })
-    void window.fanotes.saveSettings(DEFAULT_SETTINGS, { clearProtectedSecrets: true })
+    void window.fanotes.saveSettings(defaults, { clearProtectedSecrets: true })
       .then((persisted) => {
         settingsPersistedRevisionRef.current = Math.max(settingsPersistedRevisionRef.current, revision)
         if (settingsRevisionRef.current !== revision) return
@@ -1462,7 +1463,7 @@ export default function App({ startupBootstrap }: AppProps) {
       setDrawingSession((current) => ({ key: current.key + 1, document: null }))
       setWorksheetSession((current) => ({ key: current.key + 1, documents: [] }))
       setBootstrap(selected)
-      const selectedSettings = { ...DEFAULT_SETTINGS, ...selected.settings }
+      const selectedSettings = { ...defaultSettingsForPlatform(window.fanotes.platform), ...selected.settings }
       const selectedSettingsRevision = settingsRevisionRef.current + 1
       settingsRevisionRef.current = selectedSettingsRevision
       settingsPersistedRevisionRef.current = selectedSettingsRevision

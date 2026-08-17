@@ -1,7 +1,8 @@
 import type { AppSettings } from './types'
 import { defaultPenOnlyForPlatform } from './lib/inkPointerPolicy'
 
-export const DEFAULT_SETTINGS: AppSettings = {
+/** Factory defaults for a desktop/web platform. Pass `window.fanotes.platform`. */
+export const defaultSettingsForPlatform = (platform: string | undefined): AppSettings => ({
   uiLanguage: 'system',
   theme: 'dark',
   workspaceBackground: 'clean',
@@ -34,7 +35,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   penColor: '#202333',
   penWidth: 3.5,
   pressureEnabled: true,
-  penOnly: defaultPenOnlyForPlatform(typeof process !== 'undefined' ? process.platform : ''),
+  penOnly: defaultPenOnlyForPlatform(platform),
   smoothing: 0.68,
   scribbleEraseSensitivity: 50,
   shapeSnapSensitivity: 50,
@@ -79,4 +80,6 @@ export const DEFAULT_SETTINGS: AppSettings = {
   openCodeUsername: 'opencode',
   openCodePassword: '',
   customCss: '',
-}
+})
+
+export const DEFAULT_SETTINGS: AppSettings = defaultSettingsForPlatform('')
