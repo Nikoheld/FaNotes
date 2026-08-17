@@ -9,7 +9,8 @@ const paperView = fs.readFileSync(path.join(root, 'src', 'lib', 'paperView.ts'),
 const markdownEditor = fs.readFileSync(path.join(root, 'src', 'components', 'MarkdownEditor.tsx'), 'utf8')
 const paperCaret = fs.readFileSync(path.join(root, 'src', 'lib', 'paperCaretScroll.ts'), 'utf8')
 const inkMap = fs.readFileSync(path.join(root, 'src', 'lib', 'inkSampleMap.ts'), 'utf8')
-const lockSource = [source, markdownEditor, paperCaret, inkMap].join('\n')
+const toolErase = fs.readFileSync(path.join(root, 'src', 'lib', 'toolErase.ts'), 'utf8')
+const lockSource = [source, markdownEditor, paperCaret, inkMap, toolErase].join('\n')
 
 const requiredBrushes = ['fineliner', 'pencil', 'marker', 'paintbrush', 'calligraphy', 'highlighter', 'watercolor', 'spray']
 const requiredEffects = ['solid', 'rainbow', 'aurora', 'sunset', 'ocean', 'gold', 'silver', 'neon']
@@ -36,7 +37,6 @@ const safeguards = [
   ['raw.symbolId && artSymbolIds.has(raw.symbolId)', 'Piktogramm-Validierung beim Laden'],
   ['context.stroke(new Path2D(path))', 'auflösungsunabhängige Vektordarstellung'],
   ["purpose: 'art',\n        brush: 'fineliner'", 'direkte Piktogramm-Platzierung'],
-  ['radius + stroke.baseWidth / 2', 'Radierer berücksichtigt die sichtbare Piktogrammgröße'],
   ["updateTranscript: gestureToolRef.current !== 'pen' || activeStroke?.purpose !== 'art'", 'kein unnötiger Erkennungsdurchlauf für Zeichnungen'],
   ['@media(max-width:640px){.lw-art-studio-body{grid-template-columns:1fr}', 'mobile Zeichenpalette'],
   ['@media(prefers-reduced-motion:reduce)', 'reduzierte Bewegung'],
@@ -129,6 +129,9 @@ const lockSafeguards = [
   ['handlePaperEditorScroll', 'scrollIntoView wird vor dem cm-scroller abgefangen'],
   ['lockPaperEditorScrollIfNeeded', 'Snapshot-Scroll auf dem Editor-Layer wird zurückgesetzt'],
   ['EditorView.scrollHandler', 'CodeMirror scrollHandler sitzt auf dem ausgelieferten Pfad'],
+  ['applyToolErase', 'Werkzeug-Radierer trifft nur schneidende Tinte'],
+  ['strokeTouchesEraser', 'Ein-Punkt-Piktogramm und Pfad nutzen dieselbe Hit-Fläche'],
+  ['radius + visibleHalfWidth(stroke)', 'Radierer berücksichtigt die sichtbare Piktogrammgröße'],
 ]
 
 for (const [needle, label] of safeguards) {

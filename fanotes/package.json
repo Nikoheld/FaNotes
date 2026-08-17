@@ -43,6 +43,7 @@
     "check:standard-recognition": "node scripts/check-standard-recognition.cjs",
     "check:text-to-handwriting": "node scripts/check-text-to-handwriting.mjs",
     "check:scribble-erase": "node scripts/check-scribble-erase.mjs",
+    "check:tool-erase": "node scripts/check-tool-erase.mjs",
     "check:drawing": "node scripts/check-drawing-mode.cjs && node scripts/check-ink-pointer-session.mjs",
     "check:menus": "node scripts/check-menu-ux.cjs",
     "check:ai": "node scripts/check-ai-providers.cjs",

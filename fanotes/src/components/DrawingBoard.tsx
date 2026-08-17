@@ -82,6 +82,7 @@ import {
 } from '../lib/recognitionModeSelection'
 import type { MathSolverAction, MathSolverResult } from '../lib/mathSolver'
 import { detectScribbleErase } from '../lib/scribbleErase'
+import { applyToolErase } from '../lib/toolErase'
 import {
   inkPointerSessionFromSample,
   resolveInkFinishSample,
@@ -1103,66 +1104,7 @@ const adaptMathTextToSamples = (value: string, samples: RecognitionResources['sa
   return adapted
 }
 
-const distanceToSegment = (
-  px: number,
-  py: number,
-  ax: number,
-  ay: number,
-  bx: number,
-  by: number,
-) => {
-  const dx = bx - ax
-  const dy = by - ay
-  if (dx === 0 && dy === 0) return Math.hypot(px - ax, py - ay)
-  const t = clamp(((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy))
-  return Math.hypot(px - (ax + t * dx), py - (ay + t * dy))
-}
 
-type StrokeBounds = { left: number; right: number; top: number; bottom: number }
-
-const strokeBounds = (stroke: InkStroke, sourceWidth: number, sourceHeight: number): StrokeBounds => {
-  // No long-lived cache: growPage* mutates points in place when the sheet expands.
-  const padding = stroke.baseWidth / 2
-  let left = Number.POSITIVE_INFINITY
-  let right = Number.NEGATIVE_INFINITY
-  let top = Number.POSITIVE_INFINITY
-  let bottom = Number.NEGATIVE_INFINITY
-  stroke.points.forEach((point) => {
-    const px = point.x * sourceWidth
-    const py = point.y * sourceHeight
-    left = Math.min(left, px - padding)
-    right = Math.max(right, px + padding)
-    top = Math.min(top, py - padding)
-    bottom = Math.max(bottom, py + padding)
-  })
-  return { left, right, top, bottom }
-}
-
-const strokeTouchesEraser = (stroke: InkStroke, x: number, y: number, radius: number, sourceWidth: number, sourceHeight: number) => {
-  const points = stroke.points
-  if (!points.length) return false
-  const bounds = strokeBounds(stroke, sourceWidth, sourceHeight)
-  if (
-    x + radius < bounds.left || x - radius > bounds.right ||
-    y + radius < bounds.top || y - radius > bounds.bottom
-  ) return false
-  if (points.length === 1) {
-    return Math.hypot(points[0].x * sourceWidth - x, points[0].y * sourceHeight - y) <= radius + stroke.baseWidth / 2
-  }
-  for (let index = 1; index < points.length; index += 1) {
-    const previous = points[index - 1]
-    const point = points[index]
-    if (distanceToSegment(
-      x,
-      y,
-      previous.x * sourceWidth,
-      previous.y * sourceHeight,
-      point.x * sourceWidth,
-      point.y * sourceHeight,
-    ) <= radius + stroke.baseWidth / 2) return true
-  }
-  return false
-}
 
 const markdownFromSaveResult = (result: DrawingSaveResult, title: string) => {
   if (typeof result === 'string') {
@@ -2136,10 +2078,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const eraseAt = useCallback((value: StrokePoint | StrokePoint[]) => {
     const before = strokesRef.current.length
     const points = Array.isArray(value) ? value : [value]
-    const eraserPoints = points.map((point) => ({ x: point.x * sourceWidth, y: point.y * sourceHeight }))
-    strokesRef.current = strokesRef.current.filter((stroke) => !eraserPoints.some((point) => (
-      strokeTouchesEraser(stroke, point.x, point.y, eraserSize, sourceWidth, sourceHeight)
-    )))
+    strokesRef.current = applyToolErase(strokesRef.current, points, eraserSize, sourceWidth, sourceHeight)
     if (strokesRef.current.length !== before) {
       gestureChangedRef.current = true
       committedCanvasDirtyRef.current = true
