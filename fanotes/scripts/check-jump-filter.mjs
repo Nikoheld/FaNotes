@@ -16,7 +16,12 @@ const {
   isInkCorridorLeap,
   resolveInkJumpAppend,
 } = await server.ssrLoadModule('/src/lib/inkSampleMap.ts')
-const { POST_PEN_IGNORE_MS, shouldIgnorePointerAfterPen } = await server.ssrLoadModule('/src/lib/inkPointerPolicy.ts')
+const {
+  POST_PEN_IGNORE_MS,
+  defaultPenOnlyForPlatform,
+  shouldIgnorePointerAfterPen,
+  shouldRejectNonPenInk,
+} = await server.ssrLoadModule('/src/lib/inkPointerPolicy.ts')
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const defaults = readFileSync(join(root, 'src/defaults.ts'), 'utf8')
@@ -76,8 +81,12 @@ try {
   assert.equal(shouldIgnorePointerAfterPen('pen', penAt, penAt + 100), false)
   assert.ok(POST_PEN_IGNORE_MS >= 850)
 
-  assert.match(defaults, /penOnly:\s*false/)
-  assert.match(main, /penOnly:\s*process\.platform === 'win32'/)
+  assert.equal(defaultPenOnlyForPlatform('win32'), true)
+  assert.equal(defaultPenOnlyForPlatform('linux'), false)
+  assert.equal(shouldRejectNonPenInk('touch', defaultPenOnlyForPlatform('win32')), true)
+  assert.equal(shouldRejectNonPenInk('pen', defaultPenOnlyForPlatform('win32')), false)
+  assert.match(defaults, /defaultPenOnlyForPlatform/)
+  assert.match(main, /defaultPenOnlyForPlatform\(process\.platform\)/)
   assert.doesNotMatch(defaults, /penOnly:\s*process\.platform !== 'win32'/)
 
   console.log(JSON.stringify({ corridor: 2, jumpRejected: true, restartY: restart[0].y, ignoreMs: POST_PEN_IGNORE_MS }))

@@ -1,5 +1,12 @@
 export const POST_PEN_IGNORE_MS = 850
 
+/** Windows tablets treat a resting palm as touch/mouse. Pen-only is the factory default there. */
+export const defaultPenOnlyForPlatform = (platform: string | undefined) => String(platform ?? '') === 'win32'
+
+export const shouldRejectNonPenInk = (pointerType: string | undefined, penOnly: boolean) => (
+  Boolean(penOnly) && pointerType !== 'pen'
+)
+
 export type InkInputSession = {
   activePointerId: number | null
   captureId: number | null

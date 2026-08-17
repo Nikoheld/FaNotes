@@ -16,6 +16,7 @@ const {
   configureLinuxInputPlatform,
   readStartupResourceLimits,
 } = require('./startup-preflight.cjs')
+const { defaultPenOnlyForPlatform } = require('./ink-defaults.cjs')
 const { localizeDialogOptions, localizeText, resolveLanguage } = require('./i18n.cjs')
 const {
   onboardingRequiredFromConfig,
@@ -226,7 +227,7 @@ const DEFAULT_SETTINGS = Object.freeze({
   penColor: '#202333',
   penWidth: 3.5,
   pressureEnabled: true,
-  penOnly: process.platform === 'win32',
+  penOnly: defaultPenOnlyForPlatform(process.platform),
   smoothing: 0.68,
   scribbleEraseSensitivity: 50,
   shapeSnapSensitivity: 50,

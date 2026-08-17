@@ -102,6 +102,7 @@ import {
   applyWheelInkPolicy,
   keepGotPointerCaptureId,
   shouldIgnorePointerAfterPen,
+  shouldRejectNonPenInk,
 } from '../lib/inkPointerPolicy'
 import {
   PAGE_GROW_STEP_HEIGHT,
@@ -2542,7 +2543,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     setArtPanelOpen(false)
     if (event.button !== 0 && event.pointerType !== 'pen') return
     // Pen-only (Windows palm / resting hand): ignore finger, mouse and trackpad ink.
-    if (settings.penOnly && event.pointerType !== 'pen') return
+    if (shouldRejectNonPenInk(event.pointerType, settings.penOnly)) return
     const now = performance.now()
     if (activePointerRef.current !== null) {
       if (activePointerRef.current === event.pointerId) return
@@ -2710,7 +2711,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   }, [activeArtBrush.pressure, activeArtSymbol, appendPointerEvent, artBrush, artColor, artEffect, artOpacity, artSymbolRotation, artSymbolSize, artWidth, bumpInkRevision, clearRecognitionScope, clearShapeDwellTimer, closeMathCorrectionSession, closeMathSolverSelection, commitPendingSolverTap, commitStrokeToCanvas, inkMode, inline, mathSolverEnabled, penColor, penWidth, pointFromEvent, scheduleRedraw, selectionMode, setDirty, settings.penOnly, settings.pressureEnabled, sourceHeight, sourceWidth, tool, updateHistoryState])
 
   const handlePointerMove = useCallback((event: ReactPointerEvent<HTMLElement>) => {
-    if (settings.penOnly && event.pointerType !== 'pen') return
+    if (shouldRejectNonPenInk(event.pointerType, settings.penOnly)) return
     if (activePointerRef.current !== event.pointerId) return
     const now = performance.now()
     // End only when the helper says so — not because a few seconds elapsed

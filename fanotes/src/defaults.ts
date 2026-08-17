@@ -1,4 +1,5 @@
 import type { AppSettings } from './types'
+import { defaultPenOnlyForPlatform } from './lib/inkPointerPolicy'
 
 export const DEFAULT_SETTINGS: AppSettings = {
   uiLanguage: 'system',
@@ -33,7 +34,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   penColor: '#202333',
   penWidth: 3.5,
   pressureEnabled: true,
-  penOnly: false,
+  penOnly: defaultPenOnlyForPlatform(typeof process !== 'undefined' ? process.platform : ''),
   smoothing: 0.68,
   scribbleEraseSensitivity: 50,
   shapeSnapSensitivity: 50,
