@@ -2,6 +2,10 @@
 
 ## Unveröffentlicht
 
+## 2026.8.37
+
+- **Fehlerbericht kommt an:** Auch nach fünf Minuten Schreiben bleibt der Bericht unter dem Limit und wird an fanotes.fasrv.ch geschickt.
+
 ## 2026.8.36
 
 - **Fehler melden:** Unter Einstellungen oder in der Befehlspalette kannst du kurz beschreiben, was schiefging. Die letzten fünf Minuten (Stift, Notiz, Werkzeug, Version) werden automatisch angehängt und nur an fanotes.fasrv.ch geschickt.
