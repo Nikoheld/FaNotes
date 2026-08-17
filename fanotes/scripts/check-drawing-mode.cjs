@@ -14,7 +14,8 @@ const inkPolicy = fs.readFileSync(path.join(root, 'src', 'lib', 'inkPointerPolic
 const paperGrow = fs.readFileSync(path.join(root, 'src', 'lib', 'paperGrow.ts'), 'utf8')
 const defaults = fs.readFileSync(path.join(root, 'src', 'defaults.ts'), 'utf8')
 const appSource = fs.readFileSync(path.join(root, 'src', 'App.tsx'), 'utf8')
-const lockSource = [source, markdownEditor, paperCaret, inkMap, toolErase, inkPolicy, paperGrow, defaults, appSource].join('\n')
+const drafting = fs.readFileSync(path.join(root, 'src', 'lib', 'draftingTools.ts'), 'utf8')
+const lockSource = [source, markdownEditor, paperCaret, inkMap, toolErase, inkPolicy, paperGrow, defaults, appSource, drafting].join('\n')
 
 const requiredBrushes = ['fineliner', 'pencil', 'marker', 'paintbrush', 'calligraphy', 'highlighter', 'watercolor', 'spray']
 const requiredEffects = ['solid', 'rainbow', 'aurora', 'sunset', 'ocean', 'gold', 'silver', 'neon']
@@ -146,6 +147,9 @@ const lockSafeguards = [
   ['liveGrowScale', 'Wachstum remappt nur wenn das Blatt wirklich höher wird'],
   ['applyLiveHandwritingGrow', 'Papierpixel bleiben beim Wachsen'],
   ['resolveInkPointerDown', '0,0-Down öffnet den Strich ohne Geisterpunkt'],
+  ['millimetresAlongEdge', 'Kantenmaß in echten A4-Millimetern'],
+  ['SET_SQUARE_PROTRACTOR_DEGREES', 'Geodreieck-Winkelmesser 0–180°'],
+  ['rulerDrawingEdges', 'Lineal hat zwei lange Zeichenkanten'],
 ]
 
 for (const [needle, label] of safeguards) {

@@ -4,6 +4,8 @@ export const SOURCE_A4_PX = 900
 export const RULER_LENGTH_MM = 160
 export const RULER_HEIGHT_MM = 26
 export const SET_SQUARE_LEG_MM = 140
+/** Degree marks at the set-square right-angle vertex: a full 0–180° protractor. */
+export const SET_SQUARE_PROTRACTOR_DEGREES = Array.from({ length: 13 }, (_, index) => index * 15)
 export const SNAP_MM = 3.2
 export const COMPASS_MIN_RADIUS_MM = 6
 export const COMPASS_MAX_RADIUS_MM = 140
@@ -210,7 +212,7 @@ const rotateAround = (x: number, y: number, cx: number, cy: number, rotation: nu
   return { x: cx + dx * cos - dy * sin, y: cy + dx * sin + dy * cos }
 }
 
-const localToNorm = (
+export const draftingLocalToNorm = (
   localX: number,
   localY: number,
   pose: DraftingPose,
@@ -249,7 +251,7 @@ const pointInsideRuler = (
   const half = RULER_LENGTH_MM / 2
   const top = -RULER_HEIGHT_MM / 2
   const bottom = RULER_HEIGHT_MM / 2
-  return local.x >= -half && local.x <= half && local.y >= top - 0.6 && local.y <= bottom
+  return local.x >= -half && local.x <= half && local.y >= top - 0.6 && local.y <= bottom + 0.6
 }
 
 const pointInsideSetSquare = (
@@ -264,19 +266,36 @@ const pointInsideSetSquare = (
   return local.x >= -pad && local.y <= pad && (local.x - local.y) <= SET_SQUARE_LEG_MM + pad
 }
 
+export const millimetresAlongEdge = (
+  edge: DraftingEdge,
+  t: number,
+  sourceWidth: number,
+  sourceHeight: number,
+) => {
+  const dxPx = (edge.bx - edge.ax) * sourceWidth
+  const dyPx = (edge.by - edge.ay) * sourceHeight
+  return t * Math.hypot(dxPx, dyPx) * A4_WIDTH_MM / SOURCE_A4_PX
+}
+
 export const rulerDrawingEdges = (pose: DraftingPose, sourceWidth: number, sourceHeight: number): DraftingEdge[] => {
   const half = RULER_LENGTH_MM / 2
   const top = -RULER_HEIGHT_MM / 2
-  const a = localToNorm(-half, top, pose, sourceWidth, sourceHeight)
-  const b = localToNorm(half, top, pose, sourceWidth, sourceHeight)
-  return [{ ax: a.x, ay: a.y, bx: b.x, by: b.y }]
+  const bottom = RULER_HEIGHT_MM / 2
+  const topA = draftingLocalToNorm(-half, top, pose, sourceWidth, sourceHeight)
+  const topB = draftingLocalToNorm(half, top, pose, sourceWidth, sourceHeight)
+  const bottomA = draftingLocalToNorm(-half, bottom, pose, sourceWidth, sourceHeight)
+  const bottomB = draftingLocalToNorm(half, bottom, pose, sourceWidth, sourceHeight)
+  return [
+    { ax: topA.x, ay: topA.y, bx: topB.x, by: topB.y },
+    { ax: bottomA.x, ay: bottomA.y, bx: bottomB.x, by: bottomB.y },
+  ]
 }
 
 export const setSquareDrawingEdges = (pose: DraftingPose, sourceWidth: number, sourceHeight: number): DraftingEdge[] => {
   const leg = SET_SQUARE_LEG_MM
-  const right = localToNorm(0, 0, pose, sourceWidth, sourceHeight)
-  const bottom = localToNorm(leg, 0, pose, sourceWidth, sourceHeight)
-  const top = localToNorm(0, -leg, pose, sourceWidth, sourceHeight)
+  const right = draftingLocalToNorm(0, 0, pose, sourceWidth, sourceHeight)
+  const bottom = draftingLocalToNorm(leg, 0, pose, sourceWidth, sourceHeight)
+  const top = draftingLocalToNorm(0, -leg, pose, sourceWidth, sourceHeight)
   return [
     { ax: right.x, ay: right.y, bx: bottom.x, by: bottom.y },
     { ax: right.x, ay: right.y, bx: top.x, by: top.y },
@@ -342,13 +361,14 @@ const nearestOnEdges = (
   kind: DraftingKind,
   edges: DraftingEdge[],
   sourceWidth: number,
+  sourceHeight: number,
   threshold: number,
 ): SnapResult | null => {
   let best: SnapResult | null = null
   edges.forEach((edge, edgeIndex) => {
     const projected = projectOnEdge(x, y, edge)
     if (projected.distance > threshold) return
-    const millimetres = projected.t * Math.hypot(edge.bx - edge.ax, edge.by - edge.ay) * sourceWidth * A4_WIDTH_MM / SOURCE_A4_PX
+    const millimetres = millimetresAlongEdge(edge, projected.t, sourceWidth, sourceHeight)
     const candidate = { x: projected.x, y: projected.y, kind, edgeIndex, millimetres }
     if (!best || projected.distance < Math.hypot(x - best.x, y - best.y)) best = candidate
   })
@@ -374,7 +394,7 @@ export const snapToDraftingTools = (
       const edge = edges[locked.edgeIndex]
       if (edge) {
         const projected = projectOnEdge(x, y, edge)
-        const millimetres = projected.t * Math.hypot(edge.bx - edge.ax, edge.by - edge.ay) * sourceWidth * A4_WIDTH_MM / SOURCE_A4_PX
+        const millimetres = millimetresAlongEdge(edge, projected.t, sourceWidth, sourceHeight)
         return { x: projected.x, y: projected.y, kind: tool.kind, edgeIndex: locked.edgeIndex, millimetres }
       }
     }
@@ -392,7 +412,7 @@ export const snapToDraftingTools = (
     const inside = tool.kind === 'ruler'
       ? pointInsideRuler(x, y, tool.pose, sourceWidth, sourceHeight)
       : pointInsideSetSquare(x, y, tool.pose, sourceWidth, sourceHeight)
-    const candidate = nearestOnEdges(x, y, tool.kind, edges, sourceWidth, inside ? Number.POSITIVE_INFINITY : edgeThreshold)
+    const candidate = nearestOnEdges(x, y, tool.kind, edges, sourceWidth, sourceHeight, inside ? Number.POSITIVE_INFINITY : edgeThreshold)
     if (!candidate) continue
     if (!best || Math.hypot(x - candidate.x, y - candidate.y) < Math.hypot(x - best.x, y - best.y)) best = candidate
   }

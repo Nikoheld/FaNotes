@@ -3,6 +3,7 @@ import {
   RULER_HEIGHT_MM,
   RULER_LENGTH_MM,
   SET_SQUARE_LEG_MM,
+  SET_SQUARE_PROTRACTOR_DEGREES,
   asCompassPose,
   angleToPoint,
   clampCompassRadius,
@@ -244,6 +245,7 @@ export function DraftingGuides({
             onPointerDown={(event) => beginDrag('ruler', 'move', ruler, event)}
           />
           <line className="lw-drafting-edge" x1={-rulerPx.length / 2} y1={-rulerPx.height / 2} x2={rulerPx.length / 2} y2={-rulerPx.height / 2} />
+          <line className="lw-drafting-edge" x1={-rulerPx.length / 2} y1={rulerPx.height / 2} x2={rulerPx.length / 2} y2={rulerPx.height / 2} />
           {Array.from({ length: RULER_LENGTH_MM + 1 }, (_, mark) => {
             const x = -rulerPx.length / 2 + mm(mark)
             const major = mark % 10 === 0
@@ -253,6 +255,7 @@ export function DraftingGuides({
             return (
               <g key={mark}>
                 <line className={`lw-drafting-tick ${major ? 'is-major' : ''}`} x1={x} y1={-rulerPx.height / 2} x2={x} y2={-rulerPx.height / 2 + tick} />
+                <line className={`lw-drafting-tick ${major ? 'is-major' : ''}`} x1={x} y1={rulerPx.height / 2} x2={x} y2={rulerPx.height / 2 - tick} />
                 {major && (
                   <text className="lw-drafting-label" x={x} y={labelY} transform={upright(x, labelY, ruler.rotation)}>
                     {mark / 10}
@@ -288,6 +291,9 @@ export function DraftingGuides({
             d={`M 0 0 L ${legPx} 0 L 0 ${-legPx} Z`}
             onPointerDown={(event) => beginDrag('setSquare', 'move', setSquare, event)}
           />
+          <line className="lw-drafting-edge" x1="0" y1="0" x2={legPx} y2="0" />
+          <line className="lw-drafting-edge" x1="0" y1="0" x2="0" y2={-legPx} />
+          <line className="lw-drafting-edge" x1={legPx} y1="0" x2="0" y2={-legPx} />
           <path className="lw-drafting-window" d={`M ${legPx * 0.22} ${-legPx * 0.18} L ${legPx * 0.58} ${-legPx * 0.18} L ${legPx * 0.22} ${-legPx * 0.54} Z`} />
           {Array.from({ length: 15 }, (_, cm) => {
             const x = mm(cm * 10)
@@ -309,17 +315,16 @@ export function DraftingGuides({
               </g>
             )
           })}
-          {Array.from({ length: 7 }, (_, index) => {
-            const degrees = index * 15
+          {SET_SQUARE_PROTRACTOR_DEGREES.map((degrees) => {
             const angle = degrees * Math.PI / 180
-            const inner = legPx * 0.62
-            const outer = legPx * 0.78
-            const tx = Math.cos(angle) * (outer + 10)
-            const ty = -Math.sin(angle) * (outer + 10) + 3
+            const inner = legPx * 0.56
+            const outer = degrees % 90 === 0 ? legPx * 0.82 : legPx * 0.74
+            const tx = Math.cos(angle) * (outer + 12)
+            const ty = -Math.sin(angle) * (outer + 12) + 3
             return (
               <g key={`deg${degrees}`}>
                 <line
-                  className="lw-drafting-tick"
+                  className={`lw-drafting-tick ${degrees % 90 === 0 ? 'is-major' : ''}`}
                   x1={Math.cos(angle) * inner}
                   y1={-Math.sin(angle) * inner}
                   x2={Math.cos(angle) * outer}
