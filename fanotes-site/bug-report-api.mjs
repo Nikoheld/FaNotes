@@ -3,9 +3,12 @@ import { promises as fs } from 'node:fs'
 import { resolve, sep } from 'node:path'
 
 const BUG_REPORT_ROOT = resolve(process.env.FANOTES_BUG_REPORT_DIR || '/var/lib/fanotes-bug-reports')
-const MAX_DESCRIPTION = 2_000
-const MAX_EVENTS = 2_500
-const MAX_BODY_BYTES = 256 * 1024
+export const BUG_REPORT_MAX_DESCRIPTION = 2_000
+export const BUG_REPORT_MAX_EVENTS = 900
+export const BUG_REPORT_MAX_BODY_BYTES = 256 * 1024
+const MAX_DESCRIPTION = BUG_REPORT_MAX_DESCRIPTION
+const MAX_EVENTS = BUG_REPORT_MAX_EVENTS
+const MAX_BODY_BYTES = BUG_REPORT_MAX_BODY_BYTES
 const rateWindows = new Map()
 
 export const acceptBugReportPayload = (body) => {

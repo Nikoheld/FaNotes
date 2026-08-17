@@ -1,5 +1,8 @@
 export const BUG_REPORT_WINDOW_MS = 5 * 60 * 1000
-export const BUG_REPORT_MAX_EVENTS = 2_500
+/** Keeps a full 5-minute pen stream under the fasrv/nginx 256 KiB POST cap. */
+export const BUG_REPORT_MAX_EVENTS = 900
+export const BUG_REPORT_MAX_BODY_BYTES = 256 * 1024
+export const BUG_REPORT_PEN_SAMPLE_MS = 400
 export const BUG_REPORT_HOST = 'fanotes.fasrv.ch'
 export const BUG_REPORT_ORIGIN = `https://${BUG_REPORT_HOST}`
 export const BUG_REPORT_PATH = '/api/v1/bug-report'

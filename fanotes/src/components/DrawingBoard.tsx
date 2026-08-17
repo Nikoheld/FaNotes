@@ -82,7 +82,7 @@ import {
 } from '../lib/recognitionModeSelection'
 import type { MathSolverAction, MathSolverResult } from '../lib/mathSolver'
 import { detectScribbleErase } from '../lib/scribbleErase'
-import { diagnosticLog } from '../lib/bugReport'
+import { BUG_REPORT_PEN_SAMPLE_MS, diagnosticLog } from '../lib/bugReport'
 import { applyToolErase } from '../lib/toolErase'
 import {
   inkPointerSessionFromSample,
@@ -2310,7 +2310,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     }
     stroke.points.push(point)
     const now = performance.now()
-    if (now - lastDiagnosticAtRef.current > 80) {
+    if (now - lastDiagnosticAtRef.current > BUG_REPORT_PEN_SAMPLE_MS) {
       lastDiagnosticAtRef.current = now
       diagnosticLog.record({
         at: Date.now(),

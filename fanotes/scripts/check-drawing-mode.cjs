@@ -153,6 +153,8 @@ const lockSafeguards = [
   ['SET_SQUARE_PROTRACTOR_DEGREES', 'Geodreieck-Winkelmesser 0–180°'],
   ['rulerDrawingEdges', 'Lineal hat zwei lange Zeichenkanten'],
   ['createBugReportLog', '5-Minuten-Diagnosefenster für Fehlerberichte'],
+  ['BUG_REPORT_MAX_BODY_BYTES', 'Fehlerbericht bleibt unter dem fasrv-256k-Limit'],
+  ['BUG_REPORT_PEN_SAMPLE_MS', 'Stift-Samples passen in das 5-Minuten-Fenster'],
   ['bugReportSubmitTarget', 'Fehlerberichte gehen nur an fanotes.fasrv.ch'],
   ['Fehler melden', 'Bug-Report-Schalter in den Einstellungen'],
 ]
