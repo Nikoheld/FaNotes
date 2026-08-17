@@ -24,19 +24,28 @@ try {
   assert.ok(nextSourceH > prevSourceH, 'grow starts from a live mid-page point, not after remap')
 
   const start = { x: 0.42, y: 0.55 }
-  const pixelY = paperPixelY(start.y, prevSourceH)
-  assert.ok(pixelY > 600, 'the live point is mid-page in paper pixels')
+  assert.ok(paperPixelY(start.y, prevSourceH) > 600, 'the live point is mid-page in paper pixels')
 
-  const grownLayout = applyLiveHandwritingGrow(
-    start,
-    { sourceW: PAPER_SOURCE_WIDTH, sourceH: prevSourceH, layoutW: 700, layoutH: 990 },
-    { sourceW: PAPER_SOURCE_WIDTH, sourceH: nextSourceH, layoutW: 700, layoutH: 1486 },
-  )
-  assert.equal(grownLayout.remapped, true)
-  assert.ok(Math.abs(grownLayout.nextPixelY - pixelY) <= 1, `pixel Y ${grownLayout.nextPixelY} must stay ${pixelY}`)
-  assert.ok(grownLayout.y < start.y, 'normalized Y may shrink only after the box grew')
-  assert.ok(grownLayout.y * nextSourceH > pixelY - 1)
+  const stayPut = (label, prevLayoutH, nextLayoutH) => {
+    const visualY = paperPixelY(start.y, prevLayoutH)
+    const grown = applyLiveHandwritingGrow(
+      start,
+      { sourceW: PAPER_SOURCE_WIDTH, sourceH: prevSourceH, layoutW: 700, layoutH: prevLayoutH },
+      { sourceW: PAPER_SOURCE_WIDTH, sourceH: nextSourceH, layoutW: 700, layoutH: nextLayoutH },
+    )
+    const paintedY = grown.y * nextLayoutH
+    assert.equal(grown.remapped, true, `${label}: remaps after the painted box grew`)
+    assert.ok(Math.abs(paintedY - visualY) <= 1, `${label}: visual Y ${paintedY} must stay ${visualY}`)
+    assert.ok(Math.abs(grown.nextPixelY - visualY) <= 1, `${label}: helper visual Y stays`)
+    assert.ok(grown.y < start.y, `${label}: normalized Y may shrink only after the box grew`)
+    return { visualY, y: grown.y, paintedY }
+  }
 
+  const proportional = stayPut('proportional', 990, 1486)
+  // Source 1273→1911 vs a taller already-painted sheet: the user bug.
+  const mismatched = stayPut('mismatched', 1500, nextSourceH)
+
+  const staleVisualY = paperPixelY(start.y, 990)
   const staleLayout = applyLiveHandwritingGrow(
     start,
     { sourceW: PAPER_SOURCE_WIDTH, sourceH: prevSourceH, layoutW: 700, layoutH: 990 },
@@ -44,12 +53,13 @@ try {
   )
   assert.equal(staleLayout.remapped, false, 'must not shrink 0–1 while the painted sheet is still short')
   assert.equal(staleLayout.y, start.y)
-  assert.ok(Math.abs(staleLayout.nextPixelY - pixelY) <= 1, 'stale box keeps the same paper-pixel Y')
+  assert.ok(Math.abs(staleLayout.y * 990 - staleVisualY) <= 1, 'stale box keeps the same visual Y')
+  assert.ok(Math.abs(staleLayout.nextPixelY - staleVisualY) <= 1, 'stale helper keeps the same visual Y')
 
   console.log(JSON.stringify({
-    pixelY,
-    grownY: grownLayout.y,
-    grownPixel: grownLayout.nextPixelY,
+    nextSourceH,
+    proportional,
+    mismatched,
     staleY: staleLayout.y,
   }))
   console.log('ink-stay-put ok')

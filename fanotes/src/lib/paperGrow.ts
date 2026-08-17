@@ -15,11 +15,11 @@ export const paperPixelY = (normalizedY: number, sourceHeight: number) => normal
 
 export const layoutGrewEnough = (prevLayout: number, nextLayout: number) => nextLayout > prevLayout + 1
 
-/** Only shrink 0–1 space when the painted sheet actually got taller. */
-export const liveGrowScale = (prevLayout: number, nextLayout: number, prevSource: number, nextSource: number) => {
-  if (!layoutGrewEnough(prevLayout, nextLayout)) return 1
-  if (!(nextSource > 0) || prevSource === nextSource) return prevLayout / nextLayout
-  return prevSource / nextSource
+/** Only shrink 0–1 space when the painted sheet actually got taller.
+ *  Map and paint use layout pixels, so scale by that box — not source extent. */
+export const liveGrowScale = (prevLayout: number, nextLayout: number, _prevSource = 0, _nextSource = 0) => {
+  if (!layoutGrewEnough(prevLayout, nextLayout) || !(nextLayout > 0)) return 1
+  return prevLayout / nextLayout
 }
 
 export const applyLiveHandwritingGrow = (
@@ -27,8 +27,8 @@ export const applyLiveHandwritingGrow = (
   prev: { sourceW: number; sourceH: number; layoutW: number; layoutH: number },
   next: { sourceW: number; sourceH: number; layoutW: number; layoutH: number },
 ) => {
-  const pixelX = point.x * prev.sourceW
-  const pixelY = paperPixelY(point.y, prev.sourceH)
+  const pixelX = paperPixelY(point.x, prev.layoutW)
+  const pixelY = paperPixelY(point.y, prev.layoutH)
   const scaleX = liveGrowScale(prev.layoutW, next.layoutW, prev.sourceW, next.sourceW)
   const scaleY = liveGrowScale(prev.layoutH, next.layoutH, prev.sourceH, next.sourceH)
   const x = point.x * scaleX
@@ -38,8 +38,8 @@ export const applyLiveHandwritingGrow = (
     y,
     pixelX,
     pixelY,
-    nextPixelX: x * (scaleX === 1 ? prev.sourceW : next.sourceW),
-    nextPixelY: y * (scaleY === 1 ? prev.sourceH : next.sourceH),
+    nextPixelX: x * (scaleX === 1 ? prev.layoutW : next.layoutW),
+    nextPixelY: y * (scaleY === 1 ? prev.layoutH : next.layoutH),
     remapped: scaleX !== 1 || scaleY !== 1,
   }
 }
