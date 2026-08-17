@@ -11,16 +11,53 @@ export const WRITE_SLACK_WIDTH = Math.round(PAPER_SOURCE_WIDTH * 0.4)
 export const PAGE_GROW_STEP_HEIGHT = Math.round(PAPER_SOURCE_HEIGHT * 0.5)
 export const PAGE_GROW_STEP_WIDTH = Math.round(PAPER_SOURCE_WIDTH * 0.5)
 
+export const paperPixelY = (normalizedY: number, sourceHeight: number) => normalizedY * sourceHeight
+
+export const layoutGrewEnough = (prevLayout: number, nextLayout: number) => nextLayout > prevLayout + 1
+
+/** Only shrink 0–1 space when the painted sheet actually got taller. */
+export const liveGrowScale = (prevLayout: number, nextLayout: number, prevSource: number, nextSource: number) => {
+  if (!layoutGrewEnough(prevLayout, nextLayout)) return 1
+  if (!(nextSource > 0) || prevSource === nextSource) return prevLayout / nextLayout
+  return prevSource / nextSource
+}
+
+export const applyLiveHandwritingGrow = (
+  point: { x: number; y: number },
+  prev: { sourceW: number; sourceH: number; layoutW: number; layoutH: number },
+  next: { sourceW: number; sourceH: number; layoutW: number; layoutH: number },
+) => {
+  const pixelX = point.x * prev.sourceW
+  const pixelY = paperPixelY(point.y, prev.sourceH)
+  const scaleX = liveGrowScale(prev.layoutW, next.layoutW, prev.sourceW, next.sourceW)
+  const scaleY = liveGrowScale(prev.layoutH, next.layoutH, prev.sourceH, next.sourceH)
+  const x = point.x * scaleX
+  const y = point.y * scaleY
+  return {
+    x,
+    y,
+    pixelX,
+    pixelY,
+    nextPixelX: x * (scaleX === 1 ? prev.sourceW : next.sourceW),
+    nextPixelY: y * (scaleY === 1 ? prev.sourceH : next.sourceH),
+    remapped: scaleX !== 1 || scaleY !== 1,
+  }
+}
+
 export const remapNormalizedAfterGrow = (
   point: { x: number; y: number },
   prevWidth: number,
   nextWidth: number,
   prevHeight: number,
   nextHeight: number,
-) => ({
-  x: nextWidth === prevWidth ? point.x : point.x * prevWidth / nextWidth,
-  y: nextHeight === prevHeight ? point.y : point.y * prevHeight / nextHeight,
-})
+) => {
+  const grown = applyLiveHandwritingGrow(
+    point,
+    { sourceW: prevWidth, sourceH: prevHeight, layoutW: prevWidth, layoutH: prevHeight },
+    { sourceW: nextWidth, sourceH: nextHeight, layoutW: nextWidth, layoutH: nextHeight },
+  )
+  return { x: grown.x, y: grown.y }
+}
 
 export const growLiveInkAndMapNext = (
   lastPoint: MappedInkPoint,

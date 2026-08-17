@@ -11,7 +11,8 @@ const paperCaret = fs.readFileSync(path.join(root, 'src', 'lib', 'paperCaretScro
 const inkMap = fs.readFileSync(path.join(root, 'src', 'lib', 'inkSampleMap.ts'), 'utf8')
 const toolErase = fs.readFileSync(path.join(root, 'src', 'lib', 'toolErase.ts'), 'utf8')
 const inkPolicy = fs.readFileSync(path.join(root, 'src', 'lib', 'inkPointerPolicy.ts'), 'utf8')
-const lockSource = [source, markdownEditor, paperCaret, inkMap, toolErase, inkPolicy].join('\n')
+const paperGrow = fs.readFileSync(path.join(root, 'src', 'lib', 'paperGrow.ts'), 'utf8')
+const lockSource = [source, markdownEditor, paperCaret, inkMap, toolErase, inkPolicy, paperGrow].join('\n')
 
 const requiredBrushes = ['fineliner', 'pencil', 'marker', 'paintbrush', 'calligraphy', 'highlighter', 'watercolor', 'spray']
 const requiredEffects = ['solid', 'rainbow', 'aurora', 'sunset', 'ocean', 'gold', 'silver', 'neon']
@@ -136,6 +137,8 @@ const lockSafeguards = [
   ['applyWheelInkPolicy', 'Trackpad-Wheel beendet den Stift-Status'],
   ['classifyInkJumpAppend', 'Sprungfilter unabhängig von der Seitenhöhe'],
   ['shouldIgnorePointerAfterPen', 'Maus nach Stift wird kurz ignoriert'],
+  ['liveGrowScale', 'Wachstum remappt nur wenn das Blatt wirklich höher wird'],
+  ['applyLiveHandwritingGrow', 'Papierpixel bleiben beim Wachsen'],
 ]
 
 for (const [needle, label] of safeguards) {

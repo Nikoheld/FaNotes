@@ -107,6 +107,7 @@ import {
   PAGE_GROW_STEP_WIDTH,
   WRITE_SLACK_HEIGHT,
   WRITE_SLACK_WIDTH,
+  liveGrowScale,
   neededWriteExtent,
 } from '../lib/paperGrow'
 import { DraftingGuides } from './DraftingGuides'
@@ -1160,6 +1161,14 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const sourceHeightRef = useRef(SOURCE_HEIGHT)
   const sourceWidthRef = useRef(SOURCE_WIDTH)
   const pageLayoutFrameRef = useRef<number | null>(null)
+  const pendingGrowRemapRef = useRef<{
+    prevH: number
+    nextH: number
+    prevW: number
+    nextW: number
+    prevLayoutH: number
+    prevLayoutW: number
+  } | null>(null)
 
   const activePointerTargetRef = useRef<Element | null>(null)
   /** Last pointer id we successfully called setPointerCapture for (may outlive activePointerRef on Wayland glitches). */
@@ -1903,15 +1912,24 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     const nextH = Math.min(MAX_SOURCE_HEIGHT, Math.max(SOURCE_HEIGHT, Math.round(targetHeight)))
     const nextW = Math.min(MAX_SOURCE_WIDTH, Math.max(SOURCE_WIDTH, Math.round(targetWidth)))
     if (nextH === prevH && nextW === prevW) return false
+    const paper = resolvePaperElement()
+    const prevLayoutH = paper?.offsetHeight ?? 0
+    const prevLayoutW = paper?.offsetWidth ?? 0
     sourceHeightRef.current = nextH
     sourceWidthRef.current = nextW
     setSourceHeight(nextH)
     setSourceWidth(nextW)
     applyInkExtentStyles(nextH, nextW)
-    // Flush the new CSS box first. Scaling 0–1 against a stale
-    // getBoundingClientRect draws a line to the top of the sheet.
-    resolvePaperElement()?.offsetHeight
-    scaleNormalizedSpace(prevW / nextW, prevH / nextH)
+    const nextLayoutH = paper?.offsetHeight ?? 0
+    const nextLayoutW = paper?.offsetWidth ?? 0
+    // Shrinking 0–1 before the painted sheet gets taller lifts every stroke
+    // toward the top and makes the writing look smaller than the ruling.
+    const scaleX = liveGrowScale(prevLayoutW, nextLayoutW, prevW, nextW)
+    const scaleY = liveGrowScale(prevLayoutH, nextLayoutH, prevH, nextH)
+    scaleNormalizedSpace(scaleX, scaleY)
+    pendingGrowRemapRef.current = (scaleY === 1 && nextH !== prevH) || (scaleX === 1 && nextW !== prevW)
+      ? { prevH, nextH, prevW, nextW, prevLayoutH, prevLayoutW }
+      : null
     exportCacheRef.current = null
     setDirty(true)
     if (activeStrokeRef.current) {
@@ -2051,6 +2069,23 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   useEffect(() => {
     applyInkExtentStyles(sourceHeight, sourceWidth)
   }, [applyInkExtentStyles, sourceHeight, sourceWidth])
+
+  useLayoutEffect(() => {
+    const pending = pendingGrowRemapRef.current
+    if (!pending) return
+    const paper = resolvePaperElement()
+    if (!paper) return
+    const layoutH = paper.offsetHeight
+    const layoutW = paper.offsetWidth
+    const scaleX = liveGrowScale(pending.prevLayoutW, layoutW, pending.prevW, pending.nextW)
+    const scaleY = liveGrowScale(pending.prevLayoutH, layoutH, pending.prevH, pending.nextH)
+    if (scaleX === 1 && scaleY === 1) return
+    pendingGrowRemapRef.current = null
+    scaleNormalizedSpace(scaleX, scaleY)
+    canvasQualityKeyRef.current = ''
+    committedCanvasDirtyRef.current = true
+    redraw(true)
+  }, [redraw, resolvePaperElement, scaleNormalizedSpace, sourceHeight, sourceWidth])
 
   useEffect(() => {
     fitPageToInk()

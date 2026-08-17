@@ -47,6 +47,8 @@
     "check:trackpad-after-pen": "node scripts/check-trackpad-after-pen.mjs",
     "check:jump-filter": "node scripts/check-jump-filter.mjs",
     "check:midstroke-grow": "node scripts/check-midstroke-grow.mjs",
+    "check:ink-stay-put": "node scripts/check-ink-stay-put.mjs",
+    "check:text-stay-put": "node scripts/check-text-stay-put.mjs",
     "check:drawing": "node scripts/check-drawing-mode.cjs && node scripts/check-ink-pointer-session.mjs",
     "check:menus": "node scripts/check-menu-ux.cjs",
     "check:ai": "node scripts/check-ai-providers.cjs",
