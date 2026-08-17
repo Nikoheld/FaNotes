@@ -52,6 +52,15 @@ try {
   appendAcceptedInkPoint(points, clientAt(0.22, 0.31 + 0.15), surface, 900, A4)
   assert.equal(points.length, before, 'a jump is not appended')
 
+  const tallSurface = { left: 0, top: 0, width: 600, height: 800, offsetWidth: 900, offsetHeight: TALL }
+  const midPage = []
+  appendAcceptedInkPoint(midPage, clientAt(0.4, 0.55, { timeStamp: 80 }), tallSurface, 900, TALL)
+  assert.equal(midPage.length, 1, 'grow/jump check starts from a live mid-page point')
+  assert.ok(midPage[0].y > 0.5)
+  appendAcceptedInkPoint(midPage, clientAt(0.41, 0.01, { timeStamp: 96 }), tallSurface, 900, TALL)
+  assert.equal(midPage.length, 1, 'a jump to the top of a tall page is not kept')
+  assert.ok(midPage[0].y > 0.5, 'the mid-page start must stay; the top sample must not replace it')
+
   const restart = []
   resolveInkJumpAppend(restart, { x: 0.2, y: 0.02, t: 1, pressure: 0.5, tiltX: 0, tiltY: 0, pointerType: 'pen' })
   const afterRestart = resolveInkJumpAppend(restart, { x: 0.4, y: 0.4, t: 2, pressure: 0.5, tiltX: 0, tiltY: 0, pointerType: 'pen' })

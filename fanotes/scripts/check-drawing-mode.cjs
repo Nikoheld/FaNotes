@@ -139,6 +139,7 @@ const lockSafeguards = [
   ['shouldIgnorePointerAfterPen', 'Maus nach Stift wird kurz ignoriert'],
   ['liveGrowScale', 'Wachstum remappt nur wenn das Blatt wirklich höher wird'],
   ['applyLiveHandwritingGrow', 'Papierpixel bleiben beim Wachsen'],
+  ['resolveInkPointerDown', '0,0-Down öffnet den Strich ohne Geisterpunkt'],
 ]
 
 for (const [needle, label] of safeguards) {

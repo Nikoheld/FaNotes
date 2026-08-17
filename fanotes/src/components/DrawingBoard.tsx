@@ -95,6 +95,7 @@ import {
   acceptCommittedInkSample,
   classifyInkJumpAppend,
   mapClientToPaperPoint,
+  resolveInkPointerDown,
 } from '../lib/inkSampleMap'
 import {
   applyPenUpInkCleanup,
@@ -2581,17 +2582,36 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       width: pointerRect.width,
       height: pointerRect.height,
     }
-    const firstPoint = pointFromEvent(event.nativeEvent)
-    if (!firstPoint) return
+    const canvas = canvasRef.current
+    const originEl = (inline
+      ? (canvas?.closest('.unified-paper') as HTMLElement | null)
+      : null) ?? canvas
+    const originRect = originEl?.getBoundingClientRect() ?? null
+    const surface = originRect && originEl
+      ? {
+        left: originRect.left,
+        top: originRect.top,
+        width: originRect.width,
+        height: originRect.height,
+        offsetWidth: originEl.offsetWidth,
+        offsetHeight: originEl.offsetHeight,
+      }
+      : null
+    const start = resolveInkPointerDown(event.nativeEvent, surface, viewRotationRef.current)
+    if (!start.openStroke) return
+    // Ghost 0,0 downs stay session-open so the next real sample can start the stroke.
+    const firstPoint = start.commitFirst ? pointFromEvent(event.nativeEvent) : null
     const pointerEraser = event.pointerType === 'pen' && (event.button === 5 || (event.buttons & 32) !== 0)
     const pendingTap = pendingSolverTapRef.current
     if (pendingTap) {
       const elapsed = performance.now() - pendingTap.at
-      const distance = Math.hypot(
-        (firstPoint.x - pendingTap.point.x) * sourceWidth,
-        (firstPoint.y - pendingTap.point.y) * sourceHeight,
-      )
-      if (mathSolverEnabled && inkMode === 'writing' && !pointerEraser && tool === 'pen' && elapsed <= 430 && distance <= 34) {
+      const distance = firstPoint
+        ? Math.hypot(
+          (firstPoint.x - pendingTap.point.x) * sourceWidth,
+          (firstPoint.y - pendingTap.point.y) * sourceHeight,
+        )
+        : Number.POSITIVE_INFINITY
+      if (firstPoint && mathSolverEnabled && inkMode === 'writing' && !pointerEraser && tool === 'pen' && elapsed <= 430 && distance <= 34) {
         window.clearTimeout(pendingTap.timer)
         pendingSolverTapRef.current = null
         solverDoubleTapPointRef.current = firstPoint
@@ -2604,12 +2624,13 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       commitPendingSolverTap()
     }
     if (selectionMode) {
+      if (!firstPoint) return
       selectionStartRef.current = firstPoint
       recognitionStrokesRef.current = null
       setSelectionRect({ x: firstPoint.x, y: firstPoint.y, width: 0, height: 0 })
       return
     }
-    if (inkMode === 'drawing' && tool === 'pen' && !pointerEraser && activeArtSymbol) {
+    if (firstPoint && inkMode === 'drawing' && tool === 'pen' && !pointerEraser && activeArtSymbol) {
       const snapshot = snapshotStrokes(strokesRef.current)
       const symbolStroke: InkStroke = {
         points: [firstPoint],

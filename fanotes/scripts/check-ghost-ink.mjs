@@ -12,6 +12,7 @@ const {
   acceptCommittedInkSample,
   appendAcceptedInkPoint,
   mapClientToPaperPoint,
+  resolveInkPointerDown,
 } = await server.ssrLoadModule('/src/lib/inkSampleMap.ts')
 const { resolveInkFinishSample } = await server.ssrLoadModule('/src/lib/inkPointerSession.ts')
 
@@ -95,6 +96,22 @@ try {
     SOURCE_HEIGHT,
   )
   assert.ok(originContact && originContact.x <= 0.02 && originContact.y <= 0.02, 'real 0,0 contact at the paper corner must still map')
+
+  const ghostDown = resolveInkPointerDown(
+    { type: 'pointerdown', clientX: 0, clientY: 0, pressure: 0.4, pointerType: 'pen' },
+    pannedSurface,
+  )
+  assert.equal(ghostDown.firstPoint, null, '0,0 down is not a first ink point')
+  assert.equal(ghostDown.commitFirst, false)
+  assert.equal(ghostDown.openStroke, true, 'ghost down must stay open so later real samples can start the stroke')
+  const afterGhostDown = []
+  appendAcceptedInkPoint(afterGhostDown, pannedClientAt(0.22, 0.28, { timeStamp: 130 }), pannedSurface, SOURCE_WIDTH, SOURCE_HEIGHT)
+  assert.equal(afterGhostDown.length, 1, 'a real sample after a rejected 0,0 down must still start the stroke')
+  assert.ok(afterGhostDown[0].y > 0.2)
+  assert.equal(
+    resolveInkPointerDown({ type: 'pointercancel', clientX: 200, clientY: 200 }, surface).openStroke,
+    false,
+  )
 
   appendAcceptedInkPoint(points, { type: 'pointermove', clientX: Number.NaN, clientY: 200, pressure: 0.4, pointerType: 'pen' }, surface, SOURCE_WIDTH, SOURCE_HEIGHT)
   assert.equal(points.length, 4, 'NaN client coords must not commit')

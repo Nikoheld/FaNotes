@@ -143,6 +143,23 @@ export const resolveInkJumpAppend = (
   return { action, points }
 }
 
+/** A ghost 0,0 / unusable down must not become a point, but later samples may still start the stroke. */
+export const resolveInkPointerDown = (
+  event: InkPointerLike,
+  surface: PaperSurfaceBox | null,
+  rotation = 0,
+) => {
+  if (event.type === 'pointercancel' || event.type === 'lostpointercapture') {
+    return { firstPoint: null, openStroke: false, commitFirst: false }
+  }
+  const firstPoint = acceptCommittedInkSample(event, surface, null, 1, 1, rotation)
+  return {
+    firstPoint,
+    openStroke: true,
+    commitFirst: firstPoint !== null,
+  }
+}
+
 export const acceptCommittedInkSample = (
   event: InkPointerLike,
   surface: PaperSurfaceBox | null,
