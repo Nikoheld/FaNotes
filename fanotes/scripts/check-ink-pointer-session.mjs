@@ -18,6 +18,8 @@ const {
   shouldHardEndInkPointerSession,
   touchInkPointerSession,
 } = await server.ssrLoadModule('/src/lib/inkPointerSession.ts')
+const { applyWheelInkPolicy } = await server.ssrLoadModule('/src/lib/inkPointerPolicy.ts')
+const { appendAcceptedInkPoint, resolveInkPointerDown } = await server.ssrLoadModule('/src/lib/inkSampleMap.ts')
 
 const now = 10_000
 const penDown = inkPointerSessionFromSample({
@@ -108,6 +110,36 @@ try {
     true,
     'stuck-button hover after last real contact must still hard-end',
   )
+
+  const leftover = { activePointerId: penDown.pointerId, captureId: penDown.pointerId, lastContactAt: now }
+  const pan = applyWheelInkPolicy(leftover, { ctrlKey: false })
+  assert.equal(pan.session.activePointerId, null, 'wheel must clear a live leftover pen')
+  assert.equal(pan.allowPan, true, 'two-finger pan must not be swallowed')
+
+  const panned = { left: -80, top: -220, width: 600, height: 800, offsetWidth: 900, offsetHeight: 1273 }
+  const ghostDown = resolveInkPointerDown(
+    { type: 'pointerdown', clientX: 0, clientY: 0, pressure: 0.45, pointerType: 'pen' },
+    panned,
+  )
+  assert.equal(ghostDown.firstPoint, null)
+  assert.equal(ghostDown.openStroke, true, 'ghost 0,0 down stays open for a later real sample')
+  const afterGhost = []
+  appendAcceptedInkPoint(
+    afterGhost,
+    {
+      type: 'pointermove',
+      clientX: panned.left + 0.22 * panned.width,
+      clientY: panned.top + 0.28 * panned.height,
+      timeStamp: 130,
+      pressure: 0.5,
+      pointerType: 'pen',
+    },
+    panned,
+    900,
+    1273,
+  )
+  assert.equal(afterGhost.length, 1, 'a real sample after a rejected 0,0 down must start writing')
+  assert.ok(afterGhost[0].y > 0.2)
 
   const tipUpFinish = resolveInkFinishSample({ type: 'pointermove', clientX: 142, clientY: 388 })
   assert.deepEqual(tipUpFinish, { clientX: 142, clientY: 388 }, 'tip-up uses the real last sample, not the canvas center')

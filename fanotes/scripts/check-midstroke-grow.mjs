@@ -54,7 +54,40 @@ try {
     assert.ok(stale.next.y > 0.2)
   }
 
-  console.log(JSON.stringify({ prevH, nextH, remapped: result.last.y, next: result.next.y, jumped: result.jumped }))
+  const prevLayoutH = 1500
+  const nextLayoutH = nextH
+  const visualY = last.y * prevLayoutH
+  const layoutGrown = {
+    left: 40,
+    top: 20,
+    width: 600,
+    height: oldHeight * (nextLayoutH / prevLayoutH),
+    offsetWidth: 900,
+    offsetHeight: nextLayoutH,
+  }
+  const mismatched = growLiveInkAndMapNext(
+    last,
+    prevH,
+    nextH,
+    { type: 'pointermove', clientX: 40 + 0.5 * 600, clientY: 20 + last.y * oldHeight, pressure: 0.5, pointerType: 'pen' },
+    layoutGrown,
+    0,
+    prevLayoutH,
+    nextLayoutH,
+  )
+  assert.ok(Math.abs(mismatched.last.y * nextLayoutH - visualY) <= 1, 'mismatched layout keeps the same visual Y')
+  assert.ok(mismatched.last.y < last.y)
+  assert.equal(mismatched.jumped, false)
+
+  console.log(JSON.stringify({
+    prevH,
+    nextH,
+    remapped: result.last.y,
+    next: result.next.y,
+    jumped: result.jumped,
+    mismatchedY: mismatched.last.y,
+    mismatchedPixel: mismatched.last.y * nextLayoutH,
+  }))
   console.log('midstroke-grow ok')
 } finally {
   await server.close()

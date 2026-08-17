@@ -66,10 +66,16 @@ export const growLiveInkAndMapNext = (
   event: InkPointerLike,
   surfaceAfterLayout: PaperSurfaceBox | null,
   rotation = 0,
+  prevLayoutH = prevHeight,
+  nextLayoutH = nextHeight,
 ) => {
   const last = {
     ...lastPoint,
-    ...remapNormalizedAfterGrow(lastPoint, 1, 1, prevHeight, nextHeight),
+    ...applyLiveHandwritingGrow(
+      lastPoint,
+      { sourceW: 1, sourceH: prevHeight, layoutW: 1, layoutH: prevLayoutH },
+      { sourceW: 1, sourceH: nextHeight, layoutW: 1, layoutH: nextLayoutH },
+    ),
   }
   const mapped = mapClientToPaperPoint(event, surfaceAfterLayout, rotation)
   if (!mapped) return { last, next: null, jumped: false }
