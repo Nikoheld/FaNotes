@@ -110,8 +110,10 @@ import {
   PAGE_GROW_STEP_WIDTH,
   WRITE_SLACK_HEIGHT,
   WRITE_SLACK_WIDTH,
+  growLiveInkAndMapNext,
   liveGrowScale,
   neededWriteExtent,
+  pendingGrowScale,
 } from '../lib/paperGrow'
 import { DraftingGuides } from './DraftingGuides'
 import {
@@ -1707,15 +1709,49 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       ? (canvas?.closest('.unified-paper') as HTMLElement | null)
       : null) ?? canvas
     if (!originEl) return null
+    const pending = pendingGrowRemapRef.current
+    if (pending) {
+      const flushed = pendingGrowScale(pending, originEl.offsetWidth, originEl.offsetHeight)
+      if (flushed.ready) {
+        scaleNormalizedSpace(flushed.scaleX, flushed.scaleY)
+        pendingGrowRemapRef.current = null
+      }
+    }
     const originRect = originEl.getBoundingClientRect()
-    const mapped = mapClientToPaperPoint(event, {
+    const surface = {
       left: originRect.left,
       top: originRect.top,
       width: originRect.width,
       height: originRect.height,
       offsetWidth: originEl.offsetWidth,
       offsetHeight: originEl.offsetHeight,
-    }, viewRotationRef.current)
+    }
+    const leftover = pendingGrowRemapRef.current
+    const lastLive = activeStrokeRef.current?.points.at(-1)
+    let mapped = leftover && lastLive
+      ? (() => {
+        const continued = growLiveInkAndMapNext(
+          lastLive,
+          leftover.prevH,
+          leftover.nextH,
+          event,
+          surface,
+          viewRotationRef.current,
+          leftover.prevLayoutH,
+          originEl.offsetHeight,
+          leftover.prevW,
+          leftover.nextW,
+          leftover.prevLayoutW,
+          originEl.offsetWidth,
+        )
+        if (continued.last.remapped) {
+          lastLive.x = continued.last.x
+          lastLive.y = continued.last.y
+        }
+        if (continued.jumped) return null
+        return continued.next
+      })()
+      : mapClientToPaperPoint(event, surface, viewRotationRef.current)
     if (!mapped) return null
 
     const width = Math.max(1, canvas?.offsetWidth ?? originEl.offsetWidth)
@@ -1756,7 +1792,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       x,
       y,
     }
-  }, [inline])
+  }, [inline, scaleNormalizedSpace])
 
   const resolvePaperElement = useCallback((): HTMLElement | null => {
     const surface = surfaceRef.current

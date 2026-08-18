@@ -39,6 +39,9 @@ try {
   )
   assert.equal(neededWriteExtent(undefined, a4H, WRITE_SLACK_HEIGHT, PAGE_GROW_STEP_HEIGHT), a4H)
   assert.equal(neededWriteExtent(Number.NaN, a4H, WRITE_SLACK_HEIGHT, PAGE_GROW_STEP_HEIGHT), a4H)
+  assert.equal(neededWriteExtent(Number.POSITIVE_INFINITY, a4H, WRITE_SLACK_HEIGHT, PAGE_GROW_STEP_HEIGHT), a4H)
+  assert.equal(neededWriteExtent(0.9, 0, WRITE_SLACK_HEIGHT, PAGE_GROW_STEP_HEIGHT), 0)
+  assert.equal(neededWriteExtent(0.9, a4H, WRITE_SLACK_HEIGHT, 0), a4H)
 
   console.log(JSON.stringify({
     slackHeight: WRITE_SLACK_HEIGHT,

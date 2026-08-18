@@ -59,6 +59,27 @@ export const remapNormalizedAfterGrow = (
   return { x: grown.x, y: grown.y }
 }
 
+export type PendingGrowRemap = {
+  prevH: number
+  nextH: number
+  prevW: number
+  nextW: number
+  prevLayoutH: number
+  prevLayoutW: number
+}
+
+/** Scale to apply once the painted box has actually grown. */
+export const pendingGrowScale = (
+  pending: PendingGrowRemap | null,
+  layoutW: number,
+  layoutH: number,
+) => {
+  if (!pending) return { scaleX: 1, scaleY: 1, ready: false }
+  const scaleX = liveGrowScale(pending.prevLayoutW, layoutW, pending.prevW, pending.nextW)
+  const scaleY = liveGrowScale(pending.prevLayoutH, layoutH, pending.prevH, pending.nextH)
+  return { scaleX, scaleY, ready: scaleX !== 1 || scaleY !== 1 }
+}
+
 export const growLiveInkAndMapNext = (
   lastPoint: MappedInkPoint,
   prevHeight: number,
@@ -68,13 +89,17 @@ export const growLiveInkAndMapNext = (
   rotation = 0,
   prevLayoutH = prevHeight,
   nextLayoutH = nextHeight,
+  prevWidth = 1,
+  nextWidth = 1,
+  prevLayoutW = prevWidth,
+  nextLayoutW = nextWidth,
 ) => {
   const last = {
     ...lastPoint,
     ...applyLiveHandwritingGrow(
       lastPoint,
-      { sourceW: 1, sourceH: prevHeight, layoutW: 1, layoutH: prevLayoutH },
-      { sourceW: 1, sourceH: nextHeight, layoutW: 1, layoutH: nextLayoutH },
+      { sourceW: prevWidth, sourceH: prevHeight, layoutW: prevLayoutW, layoutH: prevLayoutH },
+      { sourceW: nextWidth, sourceH: nextHeight, layoutW: nextLayoutW, layoutH: nextLayoutH },
     ),
   }
   const mapped = mapClientToPaperPoint(event, surfaceAfterLayout, rotation)
@@ -94,7 +119,9 @@ export const neededWriteExtent = (
   step: number,
 ) => {
   if (typeof normalized !== 'number' || !Number.isFinite(normalized)) return current
+  if (!Number.isFinite(current) || current < 1) return current
+  if (!Number.isFinite(slack) || !Number.isFinite(step) || step < 1) return current
   const needed = normalized * current + slack
-  if (needed <= current) return current
+  if (!(needed > current)) return current
   return Math.max(current, Math.ceil(needed / step) * step)
 }

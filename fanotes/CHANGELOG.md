@@ -2,6 +2,7 @@
 
 ## Unveröffentlicht
 
+- **Blatt wächst ohne Sprung:** Beim Schreiben am unteren oder rechten Rand wächst die Seite in halben Schritten. Vorhandene Schrift bleibt auf der Lineatur, und der laufende Strich macht danach keinen Satz nach oben.
 - **Gliederung springt zur Überschrift:** Ein Klick in der Seitenleiste setzt den Cursor auf die Zeile. Tags in der Übersicht zählen auch gesetzte Schlagwörter, nicht nur `#hashtags`.
 - **Richtige Versionsnummer:** Einstellungen, Fehlerbericht und die Web-App zeigen die echte Paketversion, nicht mehr eine alte 2026.8.2.
 - **Im Dateimanager zeigen:** Die Befehlspalette öffnet den Speicherort der Notiz — im Browser lädt sie die Datei herunter.

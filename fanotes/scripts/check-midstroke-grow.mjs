@@ -8,7 +8,17 @@ const server = await createServer({
   server: { middlewareMode: true },
 })
 
-const { growLiveInkAndMapNext, neededWriteExtent, PAPER_SOURCE_HEIGHT, PAGE_GROW_STEP_HEIGHT, WRITE_SLACK_HEIGHT } = await server.ssrLoadModule('/src/lib/paperGrow.ts')
+const {
+  growLiveInkAndMapNext,
+  neededWriteExtent,
+  pendingGrowScale,
+  PAPER_SOURCE_HEIGHT,
+  PAPER_SOURCE_WIDTH,
+  PAGE_GROW_STEP_HEIGHT,
+  PAGE_GROW_STEP_WIDTH,
+  WRITE_SLACK_HEIGHT,
+  WRITE_SLACK_WIDTH,
+} = await server.ssrLoadModule('/src/lib/paperGrow.ts')
 
 try {
   const prevH = PAPER_SOURCE_HEIGHT
@@ -78,6 +88,39 @@ try {
   assert.ok(Math.abs(mismatched.last.y * nextLayoutH - visualY) <= 1, 'mismatched layout keeps the same visual Y')
   assert.ok(mismatched.last.y < last.y)
   assert.equal(mismatched.jumped, false)
+
+  const nextW = neededWriteExtent(0.65, PAPER_SOURCE_WIDTH, WRITE_SLACK_WIDTH, PAGE_GROW_STEP_WIDTH)
+  assert.ok(nextW > PAPER_SOURCE_WIDTH)
+  const wideLast = { ...last, x: 0.65 }
+  const wide = growLiveInkAndMapNext(
+    wideLast,
+    prevH,
+    prevH,
+    { type: 'pointermove', clientX: 40 + 0.65 * 600 * (PAPER_SOURCE_WIDTH / nextW), clientY: 20 + 0.55 * oldHeight, pressure: 0.5, pointerType: 'pen' },
+    { left: 40, top: 20, width: 600, height: oldHeight, offsetWidth: nextW, offsetHeight: prevH },
+    0,
+    oldHeight,
+    oldHeight,
+    PAPER_SOURCE_WIDTH,
+    nextW,
+    600,
+    600 * (nextW / PAPER_SOURCE_WIDTH),
+  )
+  assert.ok(wide.last.x < wideLast.x, 'last X remaps on a width grow')
+  assert.equal(wide.jumped, false)
+
+  const pending = {
+    prevH,
+    nextH,
+    prevW: PAPER_SOURCE_WIDTH,
+    nextW: PAPER_SOURCE_WIDTH,
+    prevLayoutH: 990,
+    prevLayoutW: 700,
+  }
+  assert.equal(pendingGrowScale(pending, 700, 990).ready, false, 'stale box is not ready to remap')
+  const ready = pendingGrowScale(pending, 700, 1486)
+  assert.equal(ready.ready, true)
+  assert.ok(ready.scaleY < 1)
 
   console.log(JSON.stringify({
     prevH,
