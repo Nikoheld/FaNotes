@@ -1,3 +1,4 @@
+import { APP_VERSION } from './appVersion'
 import { DEFAULT_SETTINGS } from '../defaults'
 import { getUiLanguage } from '../i18n'
 import type { AppSettings, DrawingLibraryDocument, FaNotesApi, UpdateState, VaultEntry, WorksheetDocument } from '../types'
@@ -191,8 +192,8 @@ export function createBrowserPreviewApi(): FaNotesApi {
   const updateState: UpdateState = {
     status: 'up-to-date',
     supported: false,
-    currentVersion: '2026.8.2',
-    latestVersion: '2026.8.2',
+    currentVersion: APP_VERSION,
+    latestVersion: APP_VERSION,
     publishedAt: new Date().toISOString(),
     releaseNotes: [],
     downloadedBytes: 0,

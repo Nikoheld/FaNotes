@@ -58,6 +58,7 @@ import {
   lockPaperEditorScrollIfNeeded,
   resolvePaperCaretScroller,
 } from '../lib/paperCaretScroll'
+import { revealDocumentLine } from '../lib/noteOutline'
 
 const LazyMarkdownPreview = lazy(() => import('./MarkdownPreview').then((module) => ({
   default: module.MarkdownPreview,
@@ -122,6 +123,7 @@ export type MarkdownEditorHandle = {
   format: (action: MarkdownFormatAction) => boolean
   focus: () => void
   flushChanges: () => void
+  revealLine: (line: number) => boolean
 }
 
 function commitEditorChange(
@@ -1040,6 +1042,18 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
     },
     focus: () => viewRef.current?.focus(),
     flushChanges: () => changeSchedulerRef.current?.flush(),
+    revealLine: (line) => {
+      const view = viewRef.current
+      if (!view) return false
+      const target = revealDocumentLine(view.state.doc, line)
+      if (!target) return false
+      view.dispatch({
+        selection: EditorSelection.cursor(target.from),
+        effects: EditorView.scrollIntoView(target.from, { y: 'start', yMargin: 48 }),
+      })
+      view.focus()
+      return true
+    },
   }), [readOnly])
 
   useEffect(() => {

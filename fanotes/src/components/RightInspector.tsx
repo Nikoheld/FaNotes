@@ -1,16 +1,18 @@
 import { ChevronRight, FileText, Hash, ListTree, Sparkles, Tags } from 'lucide-react'
 import { useMemo } from 'react'
 import { getUiLocale } from '../i18n'
+import { outlineTagsFromNote, parseNoteOutline } from '../lib/noteOutline'
 
-type Heading = { level: number; title: string; line: number }
-
-const parseHeadings = (content: string) => content.split('\n').flatMap<Heading>((line, index) => {
-  const match = /^(#{1,6})\s+(.+?)\s*#*$/.exec(line)
-  return match ? [{ level: match[1].length, title: match[2], line: index + 1 }] : []
-})
-
-export function RightInspector({ content, path }: { content: string; path?: string }) {
-  const headings = useMemo(() => parseHeadings(content), [content])
+export function RightInspector({
+  content,
+  path,
+  onJumpToLine,
+}: {
+  content: string
+  path?: string
+  onJumpToLine?: (line: number) => void
+}) {
+  const headings = useMemo(() => parseNoteOutline(content), [content])
   const stats = useMemo(() => {
     const visibleContent = content
       .replace(/<!--\s*fanotes-(?:ink|worksheet):[a-zA-Z0-9_-]{1,96}\s*-->/gu, '')
@@ -19,7 +21,7 @@ export function RightInspector({ content, path }: { content: string; path?: stri
     const words = plain.trim() ? plain.trim().split(/\s+/).length : 0
     const characters = visibleContent.length
     const reading = Math.max(1, Math.ceil(words / 210))
-    const tags = [...new Set(Array.from(visibleContent.matchAll(/(?:^|\s)#([\p{L}\d_/-]+)/gu), (match) => match[1]))]
+    const tags = outlineTagsFromNote(content)
     return { words, characters, reading, tags }
   }, [content])
 
@@ -32,7 +34,7 @@ export function RightInspector({ content, path }: { content: string; path?: stri
           {!headings.length && <p className="inspector-empty">Überschriften erscheinen hier automatisch.</p>}
           <nav className="outline-list">
             {headings.map((heading, index) => (
-              <button type="button" key={`${heading.line}-${index}`} style={{ paddingLeft: `${10 + (heading.level - 1) * 12}px` }} title={`Zeile ${heading.line}`}>
+              <button type="button" key={`${heading.line}-${index}`} style={{ paddingLeft: `${10 + (heading.level - 1) * 12}px` }} title={`Zeile ${heading.line}`} onClick={() => onJumpToLine?.(heading.line)}>
                 <ChevronRight size={12} /><span>{heading.title}</span>
               </button>
             ))}

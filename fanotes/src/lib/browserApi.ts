@@ -1,3 +1,4 @@
+import { APP_VERSION } from './appVersion'
 import { DEFAULT_SETTINGS } from '../defaults'
 import { getUiLanguage } from '../i18n'
 import type { AppSettings, BootstrapData, DrawingLibraryDocument, FaNotesApi, PaperStyle, ServerBackupState, UpdateState, VaultEntry, WorksheetDocument } from '../types'
@@ -10,7 +11,7 @@ import { loadBrowserHandwritingRecognitionResources } from './handwritingRecogni
 
 const DATABASE_NAME = 'fanotes-web-vault'
 const DATABASE_VERSION = 1
-const WEB_VERSION = '2026.8.2'
+const WEB_VERSION = APP_VERSION
 const MAX_NOTE_BYTES = 16 * 1024 * 1024
 const MAX_DRAWING_BYTES = 24 * 1024 * 1024
 const MAX_IMAGE_BYTES = 32 * 1024 * 1024

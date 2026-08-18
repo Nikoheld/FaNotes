@@ -2,6 +2,9 @@
 
 ## Unveröffentlicht
 
+- **Gliederung springt zur Überschrift:** Ein Klick in der Seitenleiste setzt den Cursor auf die Zeile. Tags in der Übersicht zählen auch gesetzte Schlagwörter, nicht nur `#hashtags`.
+- **Richtige Versionsnummer:** Einstellungen, Fehlerbericht und die Web-App zeigen die echte Paketversion, nicht mehr eine alte 2026.8.2.
+- **Im Dateimanager zeigen:** Die Befehlspalette öffnet den Speicherort der Notiz — im Browser lädt sie die Datei herunter.
 - **Hyprland:** `force_zero_scaling` gilt auch aus per `source =` eingebundenen Dateien. Linux startet weiter mit Ozone X11, damit Stift und Trackpad denselben Seat teilen.
 
 ## 2026.8.37
