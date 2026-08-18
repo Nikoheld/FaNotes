@@ -9,8 +9,12 @@ const {
   cleanupStaleSingletonLocks,
   configureDesktopGpu,
   configureLeanChromiumStartup,
+  applyLinuxOzoneLaunchEnvironment,
   configureLinuxGraphics,
   configureLinuxInputPlatform,
+  linuxOzoneAppRunExecLine,
+  linuxOzoneDesktopExec,
+  linuxOzoneLaunchPlan,
   linuxWindowFrameOptions,
   readStartupResourceLimits,
   VULKAN_FEATURES,
@@ -199,6 +203,22 @@ try {
   assert.notEqual(chrome.titleBarStyle, 'hidden')
   assert.equal(chrome.autoHideMenuBar, true)
 
+  const ozonePlan = linuxOzoneLaunchPlan()
+  assert.equal(ozonePlan.platform, 'x11')
+  assert.equal(ozonePlan.env.ELECTRON_OZONE_PLATFORM_HINT, 'x11')
+  assert.deepEqual(ozonePlan.argv, ['--ozone-platform=x11', '--ozone-platform-hint=x11'])
+  const launchEnv = {}
+  const launchArgv = ['fanotes']
+  const injected = applyLinuxOzoneLaunchEnvironment(launchEnv, launchArgv)
+  assert.equal(injected.ozone, 'x11')
+  assert.equal(launchEnv.ELECTRON_OZONE_PLATFORM_HINT, 'x11')
+  assert.deepEqual(launchArgv, ['fanotes', '--ozone-platform=x11', '--ozone-platform-hint=x11'])
+  assert.equal(
+    linuxOzoneAppRunExecLine('"${APPDIR}/fanotes"'),
+    'export ELECTRON_OZONE_PLATFORM_HINT=x11\nexec "${APPDIR}/fanotes" --ozone-platform=x11 --ozone-platform-hint=x11 "$@"',
+  )
+  assert.equal(linuxOzoneDesktopExec(), 'fanotes --ozone-platform=x11 --ozone-platform-hint=x11')
+
   const leanChromium = mockCommandLine({ 'disable-features': 'ExistingFeature' })
   configureLeanChromiumStartup({ commandLine: leanChromium })
   assert.equal(leanChromium.hasSwitch('disable-background-networking'), true)
@@ -230,6 +250,14 @@ try {
   const root = path.resolve(__dirname, '..')
   const mainSource = fs.readFileSync(path.join(root, 'electron', 'main.cjs'), 'utf8')
   const installArch = fs.readFileSync(path.join(root, 'packaging', 'INSTALL_ARCH.md'), 'utf8')
+  const desktopSource = fs.readFileSync(path.join(root, 'packaging', 'fanotes.desktop'), 'utf8')
+  const pkgbuildSource = fs.readFileSync(path.join(root, 'packaging', 'PKGBUILD'), 'utf8')
+  const applyAt = mainSource.indexOf('applyLinuxOzoneLaunchEnvironment()')
+  const electronAt = mainSource.indexOf("require('electron')")
+  assert.ok(applyAt !== -1 && electronAt !== -1 && applyAt < electronAt, 'Ozone argv/env must be injected before require(electron)')
+  assert.match(desktopSource, new RegExp(`^Exec=${linuxOzoneDesktopExec().replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')}$`, 'mu'))
+  assert.match(pkgbuildSource, /ELECTRON_OZONE_PLATFORM_HINT=x11/u)
+  assert.match(pkgbuildSource, /--ozone-platform=x11 --ozone-platform-hint=x11/u)
   assert.match(installArch, /Ozone X11/u, 'Arch notes must describe Ozone X11 as the Linux seat-sharing path')
   assert.match(installArch, /source =/u, 'Arch notes must mention Hyprland source includes for force_zero_scaling')
   assert.doesNotMatch(installArch, /Electron erkennt eine Wayland-Sitzung/u)
@@ -243,6 +271,8 @@ try {
   const packageMetadata = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'))
   assert.deepEqual(packageMetadata.build.asarUnpack, ['dist/ocr/pylaia-iam.onnx'])
   const hardeningSource = fs.readFileSync(path.join(root, 'scripts', 'harden-appimage.cjs'), 'utf8')
+  assert.match(hardeningSource, /linuxOzoneAppRunExecLine\(/u, 'AppRun must be generated from the shipped Ozone helper, not a copy')
+  assert.deepEqual(packageMetadata.build?.appImage?.executableArgs, [...ozonePlan.argv])
   assert.doesNotMatch(mainSource.slice(0, 4000), /require\('\.\/updater\.cjs'\)/u, 'Der Updater darf den Main-Prozess nicht vor dem Fenster blockieren.')
   assert.doesNotMatch(mainSource.slice(0, 4000), /onnxruntime-node/u, 'Die native OCR-Laufzeit darf nicht während des Starts geladen werden.')
   assert.match(mainSource, /function ensureUpdateManager\(\)[\s\S]*require\('\.\/updater\.cjs'\)/u)

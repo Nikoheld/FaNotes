@@ -1,14 +1,7 @@
 'use strict'
 
-const { app, BrowserWindow, dialog, ipcMain, net, protocol, safeStorage, session, shell } = require('electron')
-const crypto = require('node:crypto')
-const fs = require('node:fs')
-const fsp = require('node:fs/promises')
-const os = require('node:os')
-const path = require('node:path')
-const { fileURLToPath, pathToFileURL } = require('node:url')
-const { Worker } = require('node:worker_threads')
 const {
+  applyLinuxOzoneLaunchEnvironment,
   cleanupStaleSingletonLocks,
   configureDesktopGpu,
   configureLeanChromiumStartup,
@@ -17,6 +10,17 @@ const {
   linuxWindowFrameOptions,
   readStartupResourceLimits,
 } = require('./startup-preflight.cjs')
+// Ozone is chosen in Chromium C++ before most JS runs. Mutate argv/env first.
+applyLinuxOzoneLaunchEnvironment()
+
+const { app, BrowserWindow, dialog, ipcMain, net, protocol, safeStorage, session, shell } = require('electron')
+const crypto = require('node:crypto')
+const fs = require('node:fs')
+const fsp = require('node:fs/promises')
+const os = require('node:os')
+const path = require('node:path')
+const { fileURLToPath, pathToFileURL } = require('node:url')
+const { Worker } = require('node:worker_threads')
 const { defaultPenOnlyForPlatform } = require('./ink-defaults.cjs')
 const { localizeDialogOptions, localizeText, resolveLanguage } = require('./i18n.cjs')
 const {

@@ -133,6 +133,42 @@ function linuxWindowFrameOptions() {
   })
 }
 
+function linuxOzoneLaunchPlan() {
+  return {
+    platform: 'x11',
+    env: Object.freeze({ ELECTRON_OZONE_PLATFORM_HINT: 'x11' }),
+    argv: Object.freeze(['--ozone-platform=x11', '--ozone-platform-hint=x11']),
+  }
+}
+
+function linuxOzoneDesktopExec(binary = 'fanotes') {
+  return `${binary} ${linuxOzoneLaunchPlan().argv.join(' ')}`
+}
+
+function linuxOzoneAppRunExecLine(binaryExpression) {
+  const plan = linuxOzoneLaunchPlan()
+  const exports = Object.entries(plan.env).map(([name, value]) => `export ${name}=${value}`).join('\n')
+  return `${exports}\nexec ${binaryExpression} ${plan.argv.join(' ')} "$@"`
+}
+
+function applyLinuxOzoneLaunchEnvironment(environment = process.env, argv = process.argv) {
+  if (process.platform !== 'linux') {
+    return { ozone: null, environment, argv }
+  }
+  const plan = linuxOzoneLaunchPlan()
+  for (const [name, value] of Object.entries(plan.env)) environment[name] = value
+  for (const flag of plan.argv) {
+    const separator = flag.indexOf('=')
+    const name = separator === -1 ? flag : flag.slice(0, separator)
+    const prefix = `${name}=`
+    const present = argv.some((item) => (
+      item === flag || item === name || (typeof item === 'string' && item.startsWith(prefix))
+    ))
+    if (!present) argv.push(flag)
+  }
+  return { ozone: plan.platform, environment, argv }
+}
+
 function configureLinuxInputPlatform(electronApp, environment = process.env) {
   if (process.platform !== 'linux') {
     return { ozone: null, scaleFactor: null, hyprlandZeroScaling: false }
@@ -310,8 +346,12 @@ module.exports = {
   cleanupStaleSingletonLocks,
   configureDesktopGpu,
   configureLeanChromiumStartup,
+  applyLinuxOzoneLaunchEnvironment,
   configureLinuxGraphics,
   configureLinuxInputPlatform,
+  linuxOzoneAppRunExecLine,
+  linuxOzoneDesktopExec,
+  linuxOzoneLaunchPlan,
   linuxWindowFrameOptions,
   readHyprlandForceZeroScaling,
   readStartupResourceLimits,

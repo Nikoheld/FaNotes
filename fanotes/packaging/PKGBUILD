@@ -92,8 +92,13 @@ package() {
   fi
 
   install -d -m755 "${pkgdir}/usr/bin"
-  ln -s "/opt/${_install_root}/fanotes" \
-    "${pkgdir}/usr/bin/fanotes"
+  cat > "${pkgdir}/usr/bin/fanotes" <<EOF
+#!/bin/bash
+set -euo pipefail
+export ELECTRON_OZONE_PLATFORM_HINT=x11
+exec /opt/${_install_root}/fanotes --ozone-platform=x11 --ozone-platform-hint=x11 "\$@"
+EOF
+  chmod 755 "${pkgdir}/usr/bin/fanotes"
   install -Dm644 "${srcdir}/fanotes.desktop" \
     "${pkgdir}/usr/share/applications/fanotes.desktop"
   install -Dm644 "${srcdir}/fanotes.svg" \

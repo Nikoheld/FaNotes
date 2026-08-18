@@ -275,7 +275,10 @@
       "requestExecutionLevel": "user"
     },
     "appImage": {
-      "executableArgs": []
+      "executableArgs": [
+        "--ozone-platform=x11",
+        "--ozone-platform-hint=x11"
+      ]
     }
   }
 }
