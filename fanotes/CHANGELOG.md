@@ -2,6 +2,8 @@
 
 ## Unveröffentlicht
 
+## 2026.8.38
+
 - **Trackpad hineinzoomen:** Pinch und Strg+Scroll vergrößern das Blatt wieder. Der erste Pinch-Tick und das von Chromium geschluckte Zoom-in gehen nicht mehr verloren.
 - **Blatt wächst ohne Sprung:** Beim Schreiben am unteren oder rechten Rand wächst die Seite in halben Schritten. Vorhandene Schrift bleibt auf der Lineatur, und der laufende Strich macht danach keinen Satz nach oben.
 - **Gliederung springt zur Überschrift:** Ein Klick in der Seitenleiste setzt den Cursor auf die Zeile. Tags in der Übersicht zählen auch gesetzte Schlagwörter, nicht nur `#hashtags`.
