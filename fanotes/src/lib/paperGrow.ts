@@ -13,33 +13,45 @@ export const PAGE_GROW_STEP_WIDTH = Math.round(PAPER_SOURCE_WIDTH * 0.5)
 
 export const paperPixelY = (normalizedY: number, sourceHeight: number) => normalizedY * sourceHeight
 
-export const layoutGrewEnough = (prevLayout: number, nextLayout: number) => nextLayout > prevLayout + 1
+/** A missing or 0×0 first layout must not count as “the sheet grew”. */
+export const paintedBoxIsUsable = (size: number) => Number.isFinite(size) && size > 1
+
+export const layoutGrewEnough = (prevLayout: number, nextLayout: number) => (
+  paintedBoxIsUsable(prevLayout)
+  && Number.isFinite(nextLayout)
+  && nextLayout > prevLayout + 1
+)
 
 /** Only shrink 0–1 space when the painted sheet actually got taller.
- *  Map and paint use layout pixels, so scale by that box — not source extent. */
+ *  Map and paint use layout pixels, so scale by that box — not source extent.
+ *  prev=0/NaN would yield scale 0 and slam every point to the top. */
 export const liveGrowScale = (prevLayout: number, nextLayout: number, _prevSource = 0, _nextSource = 0) => {
-  if (!layoutGrewEnough(prevLayout, nextLayout) || !(nextLayout > 0)) return 1
+  if (!layoutGrewEnough(prevLayout, nextLayout) || !paintedBoxIsUsable(nextLayout)) return 1
   return prevLayout / nextLayout
 }
+
+const paintedAxis = (prevSize: number, nextSize: number, scale: number) => (
+  scale === 1 && paintedBoxIsUsable(prevSize) ? prevSize : nextSize
+)
 
 export const applyLiveHandwritingGrow = (
   point: { x: number; y: number },
   prev: { sourceW: number; sourceH: number; layoutW: number; layoutH: number },
   next: { sourceW: number; sourceH: number; layoutW: number; layoutH: number },
 ) => {
-  const pixelX = paperPixelY(point.x, prev.layoutW)
-  const pixelY = paperPixelY(point.y, prev.layoutH)
   const scaleX = liveGrowScale(prev.layoutW, next.layoutW, prev.sourceW, next.sourceW)
   const scaleY = liveGrowScale(prev.layoutH, next.layoutH, prev.sourceH, next.sourceH)
   const x = point.x * scaleX
   const y = point.y * scaleY
+  const paintW = paintedAxis(prev.layoutW, next.layoutW, scaleX)
+  const paintH = paintedAxis(prev.layoutH, next.layoutH, scaleY)
   return {
     x,
     y,
-    pixelX,
-    pixelY,
-    nextPixelX: x * (scaleX === 1 ? prev.layoutW : next.layoutW),
-    nextPixelY: y * (scaleY === 1 ? prev.layoutH : next.layoutH),
+    pixelX: paperPixelY(point.x, paintedBoxIsUsable(prev.layoutW) ? prev.layoutW : paintW),
+    pixelY: paperPixelY(point.y, paintedBoxIsUsable(prev.layoutH) ? prev.layoutH : paintH),
+    nextPixelX: x * paintW,
+    nextPixelY: y * paintH,
     remapped: scaleX !== 1 || scaleY !== 1,
   }
 }
@@ -74,10 +86,12 @@ export const pendingGrowScale = (
   layoutW: number,
   layoutH: number,
 ) => {
-  if (!pending) return { scaleX: 1, scaleY: 1, ready: false }
+  if (!pending) return { scaleX: 1, scaleY: 1, ready: false, discard: false }
+  const prevUsable = paintedBoxIsUsable(pending.prevLayoutW) || paintedBoxIsUsable(pending.prevLayoutH)
+  if (!prevUsable) return { scaleX: 1, scaleY: 1, ready: false, discard: true }
   const scaleX = liveGrowScale(pending.prevLayoutW, layoutW, pending.prevW, pending.nextW)
   const scaleY = liveGrowScale(pending.prevLayoutH, layoutH, pending.prevH, pending.nextH)
-  return { scaleX, scaleY, ready: scaleX !== 1 || scaleY !== 1 }
+  return { scaleX, scaleY, ready: scaleX !== 1 || scaleY !== 1, discard: false }
 }
 
 export const growLiveInkAndMapNext = (

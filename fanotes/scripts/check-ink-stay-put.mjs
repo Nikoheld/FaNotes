@@ -56,6 +56,18 @@ try {
   assert.ok(Math.abs(staleLayout.y * 990 - staleVisualY) <= 1, 'stale box keeps the same visual Y')
   assert.ok(Math.abs(staleLayout.nextPixelY - staleVisualY) <= 1, 'stale helper keeps the same visual Y')
 
+  const reportY = 0.31
+  const reportVisual = paperPixelY(reportY, prevSourceH)
+  assert.equal(neededWriteExtent(reportY, prevSourceH, WRITE_SLACK_HEIGHT, PAGE_GROW_STEP_HEIGHT), prevSourceH)
+  const zeroPrev = applyLiveHandwritingGrow(
+    { x: 0.42, y: reportY },
+    { sourceW: PAPER_SOURCE_WIDTH, sourceH: prevSourceH, layoutW: 0, layoutH: 0 },
+    { sourceW: PAPER_SOURCE_WIDTH, sourceH: prevSourceH, layoutW: 700, layoutH: prevSourceH },
+  )
+  assert.equal(zeroPrev.remapped, false, 'zero painted box must not remap a report-shaped y≈0.30')
+  assert.equal(zeroPrev.y, reportY)
+  assert.ok(Math.abs(zeroPrev.nextPixelY - reportVisual) <= 1)
+
   console.log(JSON.stringify({
     nextSourceH,
     proportional,

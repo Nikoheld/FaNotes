@@ -93,6 +93,7 @@
     "check:qwen-vision": "node scripts/check-qwen-vision.cjs",
     "check:paper-zoom": "node scripts/check-paper-zoom.mjs",
     "check:paper-grow": "node scripts/check-paper-grow.mjs",
+    "check:bug-upper-third": "node scripts/check-bug-upper-third.mjs",
     "check:paper-lock": "node scripts/check-paper-lock.mjs",
     "check:ghost-ink": "node scripts/check-ghost-ink.mjs",
     "check:arrow-lock": "node scripts/check-arrow-lock.mjs",

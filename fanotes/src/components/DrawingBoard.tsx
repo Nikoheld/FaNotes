@@ -1938,6 +1938,10 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
 
   const commitPendingGrowRemap = useCallback((layoutW: number, layoutH: number) => {
     const flushed = pendingGrowScale(pendingGrowRemapRef.current, layoutW, layoutH)
+    if (flushed.discard) {
+      pendingGrowRemapRef.current = null
+      return false
+    }
     if (!flushed.ready) return false
     pendingGrowRemapRef.current = null
     scaleNormalizedSpace(flushed.scaleX, flushed.scaleY)

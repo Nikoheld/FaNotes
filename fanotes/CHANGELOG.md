@@ -2,6 +2,8 @@
 
 ## Unveröffentlicht
 
+- **Schrift bleibt oben stehen:** Schreiben im oberen Drittel der Seite verschiebt den Text nicht mehr nach oben — auch wenn die gemalte Box noch 0 war.
+
 ## 2026.8.38
 
 - **Trackpad hineinzoomen:** Pinch und Strg+Scroll vergrößern das Blatt wieder. Der erste Pinch-Tick und das von Chromium geschluckte Zoom-in gehen nicht mehr verloren.
