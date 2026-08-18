@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { createServer } from 'vite'
 
 const server = await createServer({
@@ -19,6 +22,8 @@ const {
   restorePaperAnchor,
   zoomAroundPoint,
   zoomFactorFromWheel,
+  isSheetZoomWheel,
+  sheetZoomStepFromDirection,
 } = await server.ssrLoadModule('/src/lib/paperView.ts')
 
 const makeClassList = (initial = '') => {
@@ -153,6 +158,15 @@ const math = () => {
   const zoomOut = zoomFactorFromWheel(120, 0, 5)
   assert.ok(zoomIn > 1, `Ctrl+wheel up must zoom in, got ${zoomIn}`)
   assert.ok(zoomOut < 1, `Ctrl+wheel down must zoom out, got ${zoomOut}`)
+  assert.equal(isSheetZoomWheel({ ctrlKey: true }), true)
+  assert.equal(isSheetZoomWheel({ metaKey: true }), true)
+  assert.equal(isSheetZoomWheel({ ctrlKey: false }), false)
+  assert.ok(sheetZoomStepFromDirection('in') > 0, 'Electron pinch-in must enlarge the sheet')
+  assert.ok(sheetZoomStepFromDirection('out') < 0)
+  const paperView = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'src/components/PaperView.tsx'), 'utf8')
+  assert.match(paperView, /if \(firstTick\) onInterceptWheel\(event\)/)
+  assert.match(paperView, /onSheetZoom/)
+  assert.match(paperView, /sheetZoomStepFromDirection/)
   const first = clampViewZoom(1 * zoomIn)
   const second = clampViewZoom(1 * zoomIn)
   assert.equal(first, second, 'the same wheel input must yield the same next zoom')

@@ -1282,6 +1282,7 @@ export function createBrowserApi(): FaNotesApi {
     confirmClose: () => undefined,
     cancelClose: () => undefined,
     requestClose: () => { location.href = '../' },
+    onSheetZoom: () => () => {},
   }
 }
 

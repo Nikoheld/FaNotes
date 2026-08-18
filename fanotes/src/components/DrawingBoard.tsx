@@ -3344,7 +3344,13 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     }
     // Shared PaperView already handles sheet zoom in inline notes (text + pen).
     // Two-finger pan must reach the paper scroller even at zoom 1.
-    if (paperView) return
+    if (paperView) {
+      if (policy.pinch && event.cancelable) {
+        event.preventDefault()
+        event.stopPropagation()
+      }
+      return
+    }
     if (!inputActive) return
     if (policy.preventDefault) {
       event.preventDefault()

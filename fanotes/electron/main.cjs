@@ -4287,6 +4287,12 @@ async function createWindow() {
   // Page pinch-zoom would fight the note scroller and smear text. Sheet zoom
   // is handled in the renderer; lock Chromium's visual zoom to 100%.
   void mainWindow.webContents.setVisualZoomLevelLimits(1, 1)
+  // Locked visual zoom swallows trackpad pinch unless we forward it.
+  mainWindow.webContents.on('zoom-changed', (_event, direction) => {
+    if (!mainWindow || mainWindow.isDestroyed()) return
+    if (direction !== 'in' && direction !== 'out') return
+    mainWindow.webContents.send('fanotes:sheet-zoom', direction)
+  })
   const revealWindow = () => {
     if (!mainWindow || mainWindow.isDestroyed() || mainWindow.isVisible()) return
     mainWindow.show()

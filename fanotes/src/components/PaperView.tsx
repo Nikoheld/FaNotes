@@ -27,6 +27,8 @@ import {
   zoomAroundPoint,
   zoomFactorFromWheel,
   zoomStepFromSpeed,
+  isSheetZoomWheel,
+  sheetZoomStepFromDirection,
   type PaperViewSnapshot,
 } from '../lib/paperView'
 
@@ -52,6 +54,7 @@ type PaperViewProps = {
 export function PaperView({ children, className = '', viewKey, showHud = true }: PaperViewProps) {
   const noteViewRef = useRef<HTMLDivElement>(null)
   const viewRef = useRef(readSharedPaperView())
+  const lastWheelZoomAtRef = useRef(0)
   const [view, setViewState] = useState(readSharedPaperView)
 
   const paint = useCallback((next: PaperViewSnapshot) => {
@@ -146,16 +149,17 @@ export function PaperView({ children, className = '', viewKey, showHud = true }:
       zoomTo(viewRef.current.zoom * factor, origin ?? undefined)
     }
     const onInterceptWheel = (event: WheelEvent) => {
-      if (event.ctrlKey || event.metaKey) {
-        event.preventDefault()
+      if (isSheetZoomWheel(event)) {
+        if (event.cancelable) event.preventDefault()
         event.stopPropagation()
         pendingFactor *= zoomFactorFromWheel(event.deltaY, event.deltaMode, readSharedZoomSpeed())
         pendingOrigin = { x: event.clientX, y: event.clientY }
+        lastWheelZoomAtRef.current = performance.now()
         if (!zoomFrame) zoomFrame = window.requestAnimationFrame(flushZoom)
         return
       }
       if (event.altKey) {
-        event.preventDefault()
+        if (event.cancelable) event.preventDefault()
         event.stopPropagation()
         rotateBy(event.deltaY > 0 ? VIEW_ROTATE_STEP : -VIEW_ROTATE_STEP)
       }
@@ -187,12 +191,13 @@ export function PaperView({ children, className = '', viewKey, showHud = true }:
     }
 
     const onProbe = (event: WheelEvent) => {
-      if (event.ctrlKey || event.metaKey || event.altKey) {
+      if (isSheetZoomWheel(event) || event.altKey) {
         const firstTick = !intercepting
         attachIntercept()
-        // Newly added listeners skip this event. Apply zoom on the first
-        // pinch tick here; later ticks are handled by the intercept listener.
-        if (firstTick && !event.defaultPrevented) onInterceptWheel(event)
+        // Newly added listeners skip this event. Always apply the first
+        // pinch tick — Chromium may already have defaultPrevented a visual
+        // zoom it cannot perform (limits 1–1), which used to drop zoom-in.
+        if (firstTick) onInterceptWheel(event)
         return
       }
       scheduleRelease()
@@ -217,6 +222,15 @@ export function PaperView({ children, className = '', viewKey, showHud = true }:
       releaseIntercept()
     }
   }, [rotateBy, zoomTo])
+
+  useEffect(() => {
+    const subscribe = window.fanotes?.onSheetZoom
+    if (typeof subscribe !== 'function') return undefined
+    return subscribe((direction) => {
+      if (performance.now() - lastWheelZoomAtRef.current < 80) return
+      zoomBy(sheetZoomStepFromDirection(direction))
+    })
+  }, [zoomBy])
 
   useEffect(() => {
     if (!showHud) return

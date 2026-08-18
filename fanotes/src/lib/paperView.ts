@@ -52,6 +52,17 @@ export const zoomFactorFromWheel = (deltaY: number, deltaMode: number, speed: nu
   return Math.exp(-clamped * 0.00095 * zoomSensitivityFromSpeed(speed))
 }
 
+/** Ctrl/Meta+wheel and Chromium's trackpad pinch (also reported as ctrl+wheel). */
+export const isSheetZoomWheel = (event: { ctrlKey?: boolean; metaKey?: boolean }) => (
+  Boolean(event.ctrlKey || event.metaKey)
+)
+
+/** Electron `zoom-changed` is signed: "in" must enlarge the sheet. */
+export const sheetZoomStepFromDirection = (direction: string, speed = readSharedZoomSpeed()) => {
+  const step = zoomStepFromSpeed(speed)
+  return direction === 'in' ? step : -step
+}
+
 export const zoomStepFromSpeed = (speed: number) => (
   Math.round(VIEW_ZOOM_STEP * zoomSensitivityFromSpeed(speed) * 1000) / 1000
 )

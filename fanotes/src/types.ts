@@ -517,6 +517,7 @@ export type FaNotesApi = {
   confirmClose: () => void
   cancelClose: () => void
   requestClose: () => void
+  onSheetZoom?: (callback: (direction: 'in' | 'out') => void) => () => void
   platform: string
 }
 

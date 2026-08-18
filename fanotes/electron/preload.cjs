@@ -65,6 +65,7 @@ const CHANNELS = Object.freeze({
   confirmClose: 'fanotes:confirm-close',
   cancelClose: 'fanotes:cancel-close',
   requestClose: 'fanotes:request-close',
+  sheetZoom: 'fanotes:sheet-zoom',
 })
 
 const invoke = (channel, ...args) => ipcRenderer.invoke(channel, ...args)
@@ -142,6 +143,12 @@ const api = Object.freeze({
   confirmClose: () => ipcRenderer.send(CHANNELS.confirmClose),
   cancelClose: () => ipcRenderer.send(CHANNELS.cancelClose),
   requestClose: () => ipcRenderer.send(CHANNELS.requestClose),
+  onSheetZoom: (callback) => {
+    if (typeof callback !== 'function') return () => {}
+    const listener = (_event, direction) => callback(direction)
+    ipcRenderer.on(CHANNELS.sheetZoom, listener)
+    return () => ipcRenderer.removeListener(CHANNELS.sheetZoom, listener)
+  },
   platform: process.platform,
 })
 
