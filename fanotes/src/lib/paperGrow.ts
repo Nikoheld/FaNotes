@@ -22,12 +22,46 @@ export const layoutGrewEnough = (prevLayout: number, nextLayout: number) => (
   && nextLayout > prevLayout + 1
 )
 
-/** Only shrink 0–1 space when the painted sheet actually got taller.
- *  Map and paint use layout pixels, so scale by that box — not source extent.
- *  prev=0/NaN would yield scale 0 and slam every point to the top. */
-export const liveGrowScale = (prevLayout: number, nextLayout: number, _prevSource = 0, _nextSource = 0) => {
+/** Only shrink 0–1 on an axis after that axis’s source *and* painted box grew.
+ *  A width-only grow must not rescale Y (and the reverse). prev=0 would be scale 0. */
+export const liveGrowScale = (prevLayout: number, nextLayout: number, prevSource = 0, nextSource = 0) => {
+  if (Number.isFinite(prevSource) && prevSource > 0 && Number.isFinite(nextSource) && !(nextSource > prevSource)) {
+    return 1
+  }
   if (!layoutGrewEnough(prevLayout, nextLayout) || !paintedBoxIsUsable(nextLayout)) return 1
   return prevLayout / nextLayout
+}
+
+/** CSS width factor: 1 = A4 column, >1 grows to the right. */
+export const inkWidthExtentFactor = (sourceWidth: number) => (
+  Math.max(PAPER_SOURCE_WIDTH, sourceWidth) / PAPER_SOURCE_WIDTH
+)
+
+/** Painted height uses the A4 column, not the grown client width. */
+export const inkColumnWidthPx = (clientWidthPx: number, sourceWidth: number) => {
+  const extent = inkWidthExtentFactor(sourceWidth)
+  return Math.max(1, clientWidthPx) / extent
+}
+
+export const inkPaintedHeightPx = (columnWidthPx: number, sourceHeight: number) => {
+  const raw = Math.max(1, columnWidthPx) * (Math.max(PAPER_SOURCE_HEIGHT, sourceHeight) / PAPER_SOURCE_WIDTH)
+  return Math.ceil(raw / 4) * 4
+}
+
+export const inkExtentStyleValues = (
+  sourceHeight: number,
+  sourceWidth: number,
+  clientWidthPx = PAPER_SOURCE_WIDTH,
+) => {
+  const widthExtent = inkWidthExtentFactor(sourceWidth)
+  const columnPx = inkColumnWidthPx(clientWidthPx, sourceWidth)
+  const paintedHeightPx = inkPaintedHeightPx(columnPx, sourceHeight)
+  return {
+    widthExtent,
+    columnPx,
+    paintedHeightPx,
+    extentRatio: paintedHeightPx / columnPx,
+  }
 }
 
 const paintedAxis = (prevSize: number, nextSize: number, scale: number) => (
@@ -80,18 +114,50 @@ export type PendingGrowRemap = {
   prevLayoutW: number
 }
 
-/** Scale to apply once the painted box has actually grown. */
+const axisPending = (prev: number, next: number) => (
+  Number.isFinite(prev) && Number.isFinite(next) && next !== prev
+)
+
+/** Keep an unflushed axis when the other axis grows. Settled axes store prev=next. */
+export const mergePendingGrow = (
+  existing: PendingGrowRemap | null,
+  grow: PendingGrowRemap,
+  applied: { scaleX: number; scaleY: number },
+): PendingGrowRemap | null => {
+  const keepX = Boolean(existing && axisPending(existing.prevW, existing.nextW) && applied.scaleX === 1)
+  const keepY = Boolean(existing && axisPending(existing.prevH, existing.nextH) && applied.scaleY === 1)
+  const pendingX = applied.scaleX === 1 && (keepX || axisPending(grow.prevW, grow.nextW))
+  const pendingY = applied.scaleY === 1 && (keepY || axisPending(grow.prevH, grow.nextH))
+  const next: PendingGrowRemap = {
+    prevW: pendingX ? (keepX && existing ? existing.prevW : grow.prevW) : grow.nextW,
+    nextW: pendingX ? (keepX && existing ? Math.max(existing.nextW, grow.nextW) : grow.nextW) : grow.nextW,
+    prevLayoutW: pendingX
+      ? (keepX && existing && paintedBoxIsUsable(existing.prevLayoutW) ? existing.prevLayoutW : grow.prevLayoutW)
+      : grow.prevLayoutW,
+    prevH: pendingY ? (keepY && existing ? existing.prevH : grow.prevH) : grow.nextH,
+    nextH: pendingY ? (keepY && existing ? Math.max(existing.nextH, grow.nextH) : grow.nextH) : grow.nextH,
+    prevLayoutH: pendingY
+      ? (keepY && existing && paintedBoxIsUsable(existing.prevLayoutH) ? existing.prevLayoutH : grow.prevLayoutH)
+      : grow.prevLayoutH,
+  }
+  if (!axisPending(next.prevW, next.nextW) && !axisPending(next.prevH, next.nextH)) return null
+  return next
+}
+
+/** Scale to apply once the painted box has actually grown. Unready axes stay pending. */
 export const pendingGrowScale = (
   pending: PendingGrowRemap | null,
   layoutW: number,
   layoutH: number,
 ) => {
-  if (!pending) return { scaleX: 1, scaleY: 1, ready: false, discard: false }
+  const idle = { scaleX: 1, scaleY: 1, ready: false, discard: false, remaining: pending }
+  if (!pending) return { ...idle, remaining: null }
   const prevUsable = paintedBoxIsUsable(pending.prevLayoutW) || paintedBoxIsUsable(pending.prevLayoutH)
-  if (!prevUsable) return { scaleX: 1, scaleY: 1, ready: false, discard: true }
+  if (!prevUsable) return { scaleX: 1, scaleY: 1, ready: false, discard: true, remaining: null }
   const scaleX = liveGrowScale(pending.prevLayoutW, layoutW, pending.prevW, pending.nextW)
   const scaleY = liveGrowScale(pending.prevLayoutH, layoutH, pending.prevH, pending.nextH)
-  return { scaleX, scaleY, ready: scaleX !== 1 || scaleY !== 1, discard: false }
+  const remaining = mergePendingGrow(pending, pending, { scaleX, scaleY })
+  return { scaleX, scaleY, ready: scaleX !== 1 || scaleY !== 1, discard: false, remaining }
 }
 
 export const growLiveInkAndMapNext = (

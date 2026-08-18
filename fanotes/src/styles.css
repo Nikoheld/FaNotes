@@ -872,6 +872,12 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
     var(--paper-a4-height),
     calc(var(--paper-width) * var(--ink-extent-ratio))
   );
+  /* Fit-content ignores the absolute ink canvas. Pin height to the source
+     extent so writing at the bottom actually lengthens the painted sheet. */
+  height: max(
+    var(--paper-a4-height),
+    calc(var(--paper-width) * var(--ink-extent-ratio))
+  );
 }
 .unified-paper.has-ink-extent .markdown-editor .cm-content {
   min-height: max(

@@ -2,7 +2,11 @@
 
 ## Unveröffentlicht
 
+## 2026.8.39
+
 - **Schrift bleibt oben stehen:** Schreiben im oberen Drittel der Seite verschiebt den Text nicht mehr nach oben — auch wenn die gemalte Box noch 0 war.
+- **Nach rechts ohne Schrumpfen:** Schreiben über den rechten Rand macht das Blatt breiter, staucht vorhandene Notizen aber nicht mehr zusammen.
+- **Blatt wächst wieder nach unten:** Am unteren Rand kommt wieder eine halbe Seite dazu. Die gemalte Fläche wird mit höher, nicht nur die interne Höhe.
 
 ## 2026.8.38
 

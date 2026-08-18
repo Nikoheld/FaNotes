@@ -111,7 +111,9 @@ import {
   WRITE_SLACK_HEIGHT,
   WRITE_SLACK_WIDTH,
   growLiveInkAndMapNext,
+  inkExtentStyleValues,
   liveGrowScale,
+  mergePendingGrow,
   neededWriteExtent,
   pendingGrowScale,
 } from '../lib/paperGrow'
@@ -1874,14 +1876,9 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const applyInkExtentStyles = useCallback((height: number, width: number = sourceWidthRef.current) => {
     const paper = resolvePaperElement()
     if (!paper) return
-    // Height extent is relative to the original A4 width so vertical growth stays stable
-    // when the sheet also expands horizontally. Snap the CSS box to 4px so every
-    // paper ruling (4 / 20 / 28) keeps the same origin while the sheet grows.
-    const widthPx = Math.max(1, paper.clientWidth)
-    const rawHeightPx = widthPx * (Math.max(SOURCE_HEIGHT, height) / SOURCE_WIDTH)
-    const snappedHeightPx = Math.ceil(rawHeightPx / 4) * 4
-    paper.style.setProperty('--ink-extent-ratio', String(snappedHeightPx / widthPx))
-    paper.style.setProperty('--ink-width-extent', String(Math.max(SOURCE_WIDTH, width) / SOURCE_WIDTH))
+    const styles = inkExtentStyleValues(height, width, Math.max(1, paper.clientWidth))
+    paper.style.setProperty('--ink-extent-ratio', String(styles.extentRatio))
+    paper.style.setProperty('--ink-width-extent', String(styles.widthExtent))
     paper.classList.add('has-ink-extent')
   }, [resolvePaperElement])
 
@@ -1943,7 +1940,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       return false
     }
     if (!flushed.ready) return false
-    pendingGrowRemapRef.current = null
+    pendingGrowRemapRef.current = flushed.remaining
     scaleNormalizedSpace(flushed.scaleX, flushed.scaleY)
     canvasQualityKeyRef.current = ''
     committedCanvasDirtyRef.current = true
@@ -1979,9 +1976,11 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     const scaleX = liveGrowScale(prevLayoutW, nextLayoutW, prevW, nextW)
     const scaleY = liveGrowScale(prevLayoutH, nextLayoutH, prevH, nextH)
     scaleNormalizedSpace(scaleX, scaleY)
-    pendingGrowRemapRef.current = (scaleY === 1 && nextH !== prevH) || (scaleX === 1 && nextW !== prevW)
-      ? { prevH, nextH, prevW, nextW, prevLayoutH, prevLayoutW }
-      : null
+    pendingGrowRemapRef.current = mergePendingGrow(
+      pendingGrowRemapRef.current,
+      { prevH, nextH, prevW, nextW, prevLayoutH, prevLayoutW },
+      { scaleX, scaleY },
+    )
     exportCacheRef.current = null
     setDirty(true)
     if (activeStrokeRef.current) {
