@@ -14,6 +14,7 @@ const {
   configureLeanChromiumStartup,
   configureLinuxGraphics,
   configureLinuxInputPlatform,
+  linuxWindowFrameOptions,
   readStartupResourceLimits,
 } = require('./startup-preflight.cjs')
 const { defaultPenOnlyForPlatform } = require('./ink-defaults.cjs')
@@ -4257,9 +4258,7 @@ async function createWindow() {
     show: false,
     backgroundColor: '#0b0c12',
     title: 'FaNotes',
-    frame: true,
-    titleBarStyle: 'default',
-    autoHideMenuBar: true,
+    ...linuxWindowFrameOptions(),
     ...(process.platform === 'win32' ? {} : {
       icon: app.isPackaged
         ? path.resolve(process.resourcesPath, '..', 'fanotes.png')

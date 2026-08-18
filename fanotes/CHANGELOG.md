@@ -2,6 +2,8 @@
 
 ## Unveröffentlicht
 
+- **Hyprland:** `force_zero_scaling` gilt auch aus per `source =` eingebundenen Dateien. Linux startet weiter mit Ozone X11, damit Stift und Trackpad denselben Seat teilen.
+
 ## 2026.8.37
 
 - **Fehlerbericht kommt an:** Auch nach fünf Minuten Schreiben bleibt der Bericht unter dem Limit und wird an fanotes.fasrv.ch geschickt.

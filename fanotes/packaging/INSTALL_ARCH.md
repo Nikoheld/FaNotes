@@ -127,23 +127,21 @@ libinput list-devices
 echo "$XDG_SESSION_TYPE"
 ```
 
-### Wayland
+### Hyprland und andere Wayland-Desktops
 
-Unter GNOME und KDE Plasma werden Monitorzuordnung, aktive Tablet-Fläche und Stifttasten in den jeweiligen Systemeinstellungen konfiguriert. Electron erkennt eine Wayland-Sitzung ab FaNotes 2.3.1 automatisch über `XDG_SESSION_TYPE`. FaNotes deaktiviert dort standardmäßig Vulkan und lässt Chromium den kompatiblen GL-/EGL-Pfad wählen, um Treiber- und ANGLE-Konflikte beim Start zu vermeiden:
+Unter Linux startet FaNotes immer mit Ozone X11. Stift und Trackpad teilen denselben Seat — nach dem Schreiben kannst du sofort mit zwei Fingern scrollen. Ein extra `--ozone-platform=x11` ist nicht nötig:
 
 ```bash
 fanotes
 ```
 
-Wenn der Compositor noch Probleme mit Stift-Events hat, lässt sich zum Vergleich XWayland erzwingen:
+Unter Hyprland verwendet FaNotes die normale Linux-Fensterleiste und keine zusätzliche Titelleiste in der App. Dadurch greifen Hyprland-Rahmen, Rundungen, Schatten und Fensterregeln.
 
-```bash
-fanotes --ozone-platform=x11
-```
+Wenn in `~/.config/hypr/hyprland.conf` oder einer dort per `source =` eingebundenen Datei `force_zero_scaling = true` steht, setzt FaNotes die Geräteskalierung auf 2, damit die Schrift unter XWayland nicht winzig wirkt.
 
-Unter Hyprland verwendet FaNotes die normale Linux-Fensterleiste und keine zusätzliche, fest gestaltete Titelleiste innerhalb der App. Dadurch greifen Hyprland-Rahmen, Rundungen, Schatten und andere Fensterregeln auf das Programmfenster.
+Unter GNOME und KDE Plasma werden Monitorzuordnung, aktive Tablet-Fläche und Stifttasten in den Systemeinstellungen konfiguriert.
 
-Für einen bewussten Vulkan-Test kann der automatische Schutz einmalig ausgeschaltet werden. Diese Variante ist nicht die Standardempfehlung:
+Vulkan bleibt im nativen Wayland-Pfad aus; Chromium nutzt GL/EGL. Nur zum Test:
 
 ```bash
 FANOTES_ENABLE_VULKAN=1 fanotes --use-angle=vulkan

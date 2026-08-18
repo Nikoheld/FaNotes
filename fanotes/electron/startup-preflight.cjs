@@ -38,24 +38,99 @@ function removeSwitchValues(commandLine, name, removals) {
   if (values.length) commandLine.appendSwitch(name, values.join(','))
 }
 
+const HYPRLAND_MAX_FILES = 24
+const HYPRLAND_MAX_BYTES = 256 * 1024
+
+function stripHyprlandComment(line) {
+  const hash = String(line).indexOf('#')
+  return hash === -1 ? String(line) : String(line).slice(0, hash)
+}
+
+function expandHyprlandPath(raw, environment, fromDir) {
+  let value = String(raw ?? '').trim().replace(/^['"]|['"]$/gu, '')
+  if (!value) return ''
+  const home = typeof environment.HOME === 'string' ? environment.HOME : ''
+  const xdg = typeof environment.XDG_CONFIG_HOME === 'string' && environment.XDG_CONFIG_HOME
+    ? environment.XDG_CONFIG_HOME
+    : (home ? path.join(home, '.config') : '')
+  if (value === '~') {
+    value = home
+  } else if (value.startsWith('~/')) {
+    value = home ? path.join(home, value.slice(2)) : ''
+  }
+  value = value.replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)/gu, (_match, braced, bare) => {
+    const name = braced || bare
+    if (name === 'HOME') return home
+    if (name === 'XDG_CONFIG_HOME') return xdg
+    const found = environment[name]
+    return typeof found === 'string' ? found : ''
+  })
+  if (!value) return ''
+  return path.isAbsolute(value) ? path.normalize(value) : path.resolve(fromDir, value)
+}
+
+function resolveHyprlandSourceTargets(pattern, environment, fromDir) {
+  const expanded = expandHyprlandPath(pattern, environment, fromDir)
+  if (!expanded) return []
+  if (!/[*?\[]/u.test(expanded)) return [expanded]
+  try {
+    return fs.globSync(expanded).filter(Boolean).sort()
+  } catch {
+    return []
+  }
+}
+
+function scanHyprlandForceZeroScaling(filePath, environment, readFile, visited) {
+  const resolved = path.resolve(filePath)
+  if (visited.has(resolved) || visited.size >= HYPRLAND_MAX_FILES) return null
+  visited.add(resolved)
+  let text
+  try {
+    const info = fs.statSync(resolved)
+    if (!info.isFile() || info.size <= 0 || info.size > HYPRLAND_MAX_BYTES) return null
+    text = readFile(resolved, 'utf8')
+  } catch {
+    return null
+  }
+  let last = null
+  const fromDir = path.dirname(resolved)
+  for (const rawLine of String(text).split(/\r?\n/u)) {
+    const line = stripHyprlandComment(rawLine).trim()
+    if (!line) continue
+    const source = /^source\s*=\s*(.+)$/iu.exec(line)
+    if (source) {
+      for (const target of resolveHyprlandSourceTargets(source[1], environment, fromDir)) {
+        const nested = scanHyprlandForceZeroScaling(target, environment, readFile, visited)
+        if (nested !== null) last = nested
+      }
+      continue
+    }
+    const scaling = /^force_zero_scaling\s*=\s*(true|false)\b/iu.exec(line)
+    if (scaling) last = scaling[1].toLocaleLowerCase('en-US') === 'true'
+  }
+  return last
+}
+
 function readHyprlandForceZeroScaling(environment = process.env, readFile = fs.readFileSync) {
   const configured = typeof environment.FANOTES_HYPRLAND_CONFIG === 'string'
     ? environment.FANOTES_HYPRLAND_CONFIG.trim()
     : ''
   const home = typeof environment.HOME === 'string' ? environment.HOME : ''
-  const candidates = [
-    configured,
-    home ? path.join(home, '.config', 'hypr', 'hyprland.conf') : '',
-  ].filter(Boolean)
-  for (const file of candidates) {
-    try {
-      const text = readFile(file, 'utf8')
-      if (/force_zero_scaling\s*=\s*true/iu.test(String(text))) return true
-    } catch {
-      // missing or unreadable config is not zero-scaling
-    }
+  const roots = configured
+    ? [configured]
+    : (home ? [path.join(home, '.config', 'hypr', 'hyprland.conf')] : [])
+  for (const file of roots) {
+    if (scanHyprlandForceZeroScaling(file, environment, readFile, new Set())) return true
   }
   return false
+}
+
+function linuxWindowFrameOptions() {
+  return Object.freeze({
+    frame: true,
+    titleBarStyle: 'default',
+    autoHideMenuBar: true,
+  })
 }
 
 function configureLinuxInputPlatform(electronApp, environment = process.env) {
@@ -64,6 +139,7 @@ function configureLinuxInputPlatform(electronApp, environment = process.env) {
   }
   const commandLine = electronApp.commandLine
   commandLine.appendSwitch('ozone-platform', 'x11')
+  commandLine.appendSwitch('ozone-platform-hint', 'x11')
   const hyprlandZeroScaling = readHyprlandForceZeroScaling(environment)
   if (hyprlandZeroScaling) commandLine.appendSwitch('force-device-scale-factor', '2')
   return {
@@ -236,6 +312,7 @@ module.exports = {
   configureLeanChromiumStartup,
   configureLinuxGraphics,
   configureLinuxInputPlatform,
+  linuxWindowFrameOptions,
   readHyprlandForceZeroScaling,
   readStartupResourceLimits,
 }

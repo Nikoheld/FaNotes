@@ -11,6 +11,7 @@ const {
   configureLeanChromiumStartup,
   configureLinuxGraphics,
   configureLinuxInputPlatform,
+  linuxWindowFrameOptions,
   readStartupResourceLimits,
   VULKAN_FEATURES,
 } = require('../electron/startup-preflight.cjs')
@@ -114,10 +115,11 @@ try {
   )
   assert.equal(x11.getSwitchValue('use-angle'), '')
 
-  const ozone = mockCommandLine()
+  const ozone = mockCommandLine({ 'ozone-platform-hint': 'wayland', 'disable-features': 'ExistingFeature' })
   const ozoneResult = configureLinuxInputPlatform({ commandLine: ozone }, { HOME: '' })
   assert.equal(ozoneResult.ozone, 'x11')
   assert.equal(ozone.getSwitchValue('ozone-platform'), 'x11')
+  assert.equal(ozone.getSwitchValue('ozone-platform-hint'), 'x11', 'a leftover Wayland hint must not keep Ozone on Wayland')
   assert.equal(ozone.hasSwitch('force-device-scale-factor'), false, 'must not blindly force scale 2')
 
   const hyprConfig = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'fanotes-hypr-')), 'hyprland.conf')
@@ -129,7 +131,47 @@ try {
     { FANOTES_HYPRLAND_CONFIG: hyprConfig, HOME: '' },
   )
   assert.equal(scaledResult.hyprlandZeroScaling, true)
+  assert.equal(scaledResult.scaleFactor, 2)
   assert.equal(scaled.getSwitchValue('force-device-scale-factor'), '2')
+
+  const sourcedDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fanotes-hypr-'))
+  temporaryProfiles.push(sourcedDir)
+  const sourcedMain = path.join(sourcedDir, 'hyprland.conf')
+  const sourcedExtra = path.join(sourcedDir, 'looks.conf')
+  fs.writeFileSync(sourcedMain, 'source = ./looks.conf\nmonitor = ,preferred,auto,2\n')
+  fs.writeFileSync(sourcedExtra, 'xwayland {\n  force_zero_scaling = true\n}\n')
+  const sourced = mockCommandLine()
+  const sourcedResult = configureLinuxInputPlatform(
+    { commandLine: sourced },
+    { FANOTES_HYPRLAND_CONFIG: sourcedMain, HOME: '' },
+  )
+  assert.equal(sourcedResult.hyprlandZeroScaling, true, 'force_zero_scaling in a sourced Hyprland file must apply')
+  assert.equal(sourced.getSwitchValue('force-device-scale-factor'), '2')
+
+  const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fanotes-hypr-home-'))
+  temporaryProfiles.push(homeDir)
+  const defaultHypr = path.join(homeDir, '.config', 'hypr')
+  fs.mkdirSync(defaultHypr, { recursive: true })
+  fs.writeFileSync(path.join(defaultHypr, 'hyprland.conf'), 'source = ~/.config/hypr/monitors.conf\n')
+  fs.writeFileSync(path.join(defaultHypr, 'monitors.conf'), 'force_zero_scaling = true\n')
+  const homeScaled = mockCommandLine()
+  const homeResult = configureLinuxInputPlatform(
+    { commandLine: homeScaled },
+    { HOME: homeDir },
+  )
+  assert.equal(homeResult.hyprlandZeroScaling, true, 'the usual ~/.config/hypr source = include must apply')
+  assert.equal(homeScaled.getSwitchValue('force-device-scale-factor'), '2')
+
+  const commentedFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'fanotes-hypr-')), 'hyprland.conf')
+  temporaryProfiles.push(path.dirname(commentedFile))
+  fs.writeFileSync(commentedFile, '# force_zero_scaling = true\nsource = ./missing.conf\n')
+  const commented = mockCommandLine()
+  const commentedResult = configureLinuxInputPlatform(
+    { commandLine: commented },
+    { FANOTES_HYPRLAND_CONFIG: commentedFile, HOME: '' },
+  )
+  assert.equal(commentedResult.hyprlandZeroScaling, false, 'a commented force_zero_scaling line must not force scale 2')
+  assert.equal(commented.hasSwitch('force-device-scale-factor'), false)
 
   const plainHypr = mockCommandLine()
   const plainFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'fanotes-hypr-')), 'hyprland.conf')
@@ -140,7 +182,22 @@ try {
     { FANOTES_HYPRLAND_CONFIG: plainFile, HOME: '' },
   )
   assert.equal(plainResult.hyprlandZeroScaling, false)
+  assert.equal(plainResult.scaleFactor, null)
   assert.equal(plainHypr.hasSwitch('force-device-scale-factor'), false)
+
+  const missingHypr = mockCommandLine()
+  const missingResult = configureLinuxInputPlatform(
+    { commandLine: missingHypr },
+    { HOME: path.join(os.tmpdir(), 'fanotes-no-hypr-home') },
+  )
+  assert.equal(missingResult.hyprlandZeroScaling, false)
+  assert.equal(missingHypr.hasSwitch('force-device-scale-factor'), false)
+
+  const chrome = linuxWindowFrameOptions()
+  assert.equal(chrome.frame, true, 'Hyprland must own the real window frame')
+  assert.equal(chrome.titleBarStyle, 'default', 'no custom in-app title bar')
+  assert.notEqual(chrome.titleBarStyle, 'hidden')
+  assert.equal(chrome.autoHideMenuBar, true)
 
   const leanChromium = mockCommandLine({ 'disable-features': 'ExistingFeature' })
   configureLeanChromiumStartup({ commandLine: leanChromium })
@@ -172,7 +229,14 @@ try {
 
   const root = path.resolve(__dirname, '..')
   const mainSource = fs.readFileSync(path.join(root, 'electron', 'main.cjs'), 'utf8')
+  const installArch = fs.readFileSync(path.join(root, 'packaging', 'INSTALL_ARCH.md'), 'utf8')
+  assert.match(installArch, /Ozone X11/u, 'Arch notes must describe Ozone X11 as the Linux seat-sharing path')
+  assert.match(installArch, /source =/u, 'Arch notes must mention Hyprland source includes for force_zero_scaling')
+  assert.doesNotMatch(installArch, /Electron erkennt eine Wayland-Sitzung/u)
+  assert.doesNotMatch(installArch, /fanotes --ozone-platform=x11/u, 'X11 is the built-in default, not an optional fallback')
   assert.match(mainSource, /configureLinuxInputPlatform\(app\)/)
+  assert.match(mainSource, /linuxWindowFrameOptions\(\)/, 'the shipped window chrome helper must create the Linux window')
+  assert.doesNotMatch(mainSource, /titleBarStyle:\s*'hidden'|titleBarOverlay/u, 'Hyprland decorations need the compositor-owned frame')
   assert.doesNotMatch(mainSource, /evdev|uinput|virtual tablet/i)
   const preloadSource = fs.readFileSync(path.join(root, 'electron', 'preload.cjs'), 'utf8')
   const appSource = fs.readFileSync(path.join(root, 'src', 'App.tsx'), 'utf8')

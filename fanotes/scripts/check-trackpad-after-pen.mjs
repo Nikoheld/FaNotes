@@ -40,6 +40,13 @@ try {
   assert.equal(pinch.preventDefault, true, 'pinch ctrlKey wheel must preventDefault')
   assert.equal(pinch.session.activePointerId, null)
 
+  const midSession = applyPenUpInkCleanup(pan.session.activePointerId === null ? leftover : pan.session)
+  assert.equal(midSession.session.activePointerId, null)
+  assert.equal(midSession.session.captureId, null)
+  assert.equal(midSession.session.lastContactAt, 0)
+  assert.equal(midSession.releaseCapture, true, 'pen-up after a leftover capture must release it')
+  assert.equal(midSession.blurCanvas, true)
+
   const up = applyPenUpInkCleanup(leftover)
   assert.equal(up.session.activePointerId, null)
   assert.equal(up.session.captureId, null)

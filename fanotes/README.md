@@ -46,7 +46,7 @@ FaNotes ist eine lokale Desktop-App für Schule, UNI, Privatleben und Arbeit. Si
 - bestätigte Korrekturen als neue persönliche Trainingsbeispiele verwenden
 - Farben, Schriften, Größen, Layout, Papier, Stift und Animationen umfangreich anpassen
 - sieben Designwelten, vier Arbeitsflächen-Hintergründe und einen ablenkungsfreien Fokusmodus verwenden
-- unter Linux die native Fensterleiste nutzen, damit Hyprland Rahmen und Fensterdekoration beeinflussen kann
+- unter Linux mit Ozone X11 starten, damit Stift und Trackpad denselben Seat teilen, und die native Fensterleiste nutzen, damit Hyprland Rahmen und Fensterdekoration beeinflussen kann
 - denselben vollständigen Funktionsumfang unter Windows 10/11 x64 und Linux x86_64 verwenden, einschließlich Grafiktablett, Erkennung, Mathematik, Arbeitsblättern und AI-Anbietern
 - LM Studio, Ollama, OpenAI, Gemini, Anthropic oder OpenCode direkt in einer geöffneten Markdown-Notiz verwenden
 - mehrere KI-Aktionen gleichzeitig kombinieren: freier Auftrag, Rechtschreibung, Wikilinks, Faktenprüfung, Stil, Struktur, Wissensergänzung, Zusammenfassung und Lernfragen
@@ -69,7 +69,7 @@ Der Auto-Updater verbindet sich ausschließlich per HTTPS mit `fanotes.fasrv.ch`
 
 Das ausgelieferte AppImage startet ohne unsicheren Sandbox-Schalter. Auf ungewöhnlich gehärteten Systemen ohne unprivilegierte User-Namespaces sollte deshalb das Pacman-Paket verwendet werden, anstatt die Chromium-Sandbox abzuschalten.
 
-Unter einer nativen Wayland-Sitzung deaktiviert FaNotes standardmäßig Chromiums Vulkan-/ANGLE-Vulkan-Experimente und überlässt Chromium die Wahl des kompatiblen GL-/EGL-Pfads. Eine ausdrücklich gesetzte Grafikoption bleibt davon unberührt. Vor dem Einzelinstanz-Lock entfernt die App außerdem ausschließlich nachweislich verwaiste Chromium-Start-Symlinks; ein aktiver oder nicht sicher zuordenbarer Prozess wird niemals beendet oder entsperrt.
+Unter Linux startet FaNotes mit Ozone X11, damit Stift und Trackpad denselben Seat teilen. Steht in der Hyprland-Config oder einer per `source =` eingebundenen Datei `force_zero_scaling = true`, setzt die App die Geräteskalierung auf 2. Vulkan-/ANGLE-Vulkan-Experimente bleiben im nativen Wayland-Pfad aus; Chromium wählt den kompatiblen GL-/EGL-Pfad. Eine ausdrücklich gesetzte Grafikoption bleibt davon unberührt. Vor dem Einzelinstanz-Lock entfernt die App außerdem ausschließlich nachweislich verwaiste Chromium-Start-Symlinks; ein aktiver oder nicht sicher zuordenbarer Prozess wird niemals beendet oder entsperrt.
 
 Einstellungen und das persönliche Erkennungsmodell gehören zum lokalen Electron-Profil und liegen deshalb nicht im Vault. Unter Linux befindet sich das Profil typischerweise unter `~/.config/FaNotes/`, unter Windows unter `%APPDATA%\FaNotes\`. Beim ersten Start übernimmt FaNotes automatisch eine vorhandene frühere Konfiguration und Handschrift-Datenbank, ohne bereits vorhandene FaNotes-Daten zu überschreiben. Für ein vollständiges Backup sollte die App beendet und sowohl der Vault als auch der Profilordner gesichert werden.
 
