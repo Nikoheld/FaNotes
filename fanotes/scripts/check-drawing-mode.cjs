@@ -93,6 +93,8 @@ const safeguards = [
   ['neededWriteExtent', 'Wachstumsschwelle kommt aus dem gelieferten Grow-Helper'],
   ['growLiveInkAndMapNext', 'nächster Stiftpunkt nach Grow kommt aus dem gelieferten Helper'],
   ['pendingGrowScale', 'Remap wartet auf die gemalte Box, nicht auf die Source-Höhe'],
+  ['const commitPendingGrowRemap = useCallback', 'Grow-Flush ist ein gemeinsamer Helper'],
+  ['activeRenderedPointCountRef.current = 0\n    wipeLiveInkCanvas(canvasRef.current)\n    redraw(true)', 'Flush nach Grow zeichnet die Live-Tinte vollständig neu'],
   ['fanotes-ink-toolbar-slot', 'Handschrift-Werkzeuge sitzen in der oberen Leiste'],
   ['is-docked-chrome', 'Stiftleiste dockt in das normale Menü, statt zu schweben'],
   ['is-viewport-chrome', 'Hinweise und Studio liegen außerhalb des Blatt-Zooms'],

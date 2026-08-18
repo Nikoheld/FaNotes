@@ -1174,6 +1174,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     prevLayoutH: number
     prevLayoutW: number
   } | null>(null)
+  const commitPendingGrowRemapRef = useRef<(layoutW: number, layoutH: number) => boolean>(() => false)
 
   const activePointerTargetRef = useRef<Element | null>(null)
   /** Last pointer id we successfully called setPointerCapture for (may outlive activePointerRef on Wayland glitches). */
@@ -1709,14 +1710,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       ? (canvas?.closest('.unified-paper') as HTMLElement | null)
       : null) ?? canvas
     if (!originEl) return null
-    const pending = pendingGrowRemapRef.current
-    if (pending) {
-      const flushed = pendingGrowScale(pending, originEl.offsetWidth, originEl.offsetHeight)
-      if (flushed.ready) {
-        scaleNormalizedSpace(flushed.scaleX, flushed.scaleY)
-        pendingGrowRemapRef.current = null
-      }
-    }
+    commitPendingGrowRemapRef.current(originEl.offsetWidth, originEl.offsetHeight)
     const originRect = originEl.getBoundingClientRect()
     const surface = {
       left: originRect.left,
@@ -1792,7 +1786,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       x,
       y,
     }
-  }, [inline, scaleNormalizedSpace])
+  }, [inline])
 
   const resolvePaperElement = useCallback((): HTMLElement | null => {
     const surface = surfaceRef.current
@@ -1941,6 +1935,20 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       height: current.height * scaleY,
     } : current)
   }, [])
+
+  const commitPendingGrowRemap = useCallback((layoutW: number, layoutH: number) => {
+    const flushed = pendingGrowScale(pendingGrowRemapRef.current, layoutW, layoutH)
+    if (!flushed.ready) return false
+    pendingGrowRemapRef.current = null
+    scaleNormalizedSpace(flushed.scaleX, flushed.scaleY)
+    canvasQualityKeyRef.current = ''
+    committedCanvasDirtyRef.current = true
+    activeRenderedPointCountRef.current = 0
+    wipeLiveInkCanvas(canvasRef.current)
+    redraw(true)
+    return true
+  }, [redraw, scaleNormalizedSpace])
+  commitPendingGrowRemapRef.current = commitPendingGrowRemap
 
   /**
    * Resize the writable page without shifting existing ink in absolute space.
@@ -2111,21 +2119,10 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   }, [applyInkExtentStyles, sourceHeight, sourceWidth])
 
   useLayoutEffect(() => {
-    const pending = pendingGrowRemapRef.current
-    if (!pending) return
     const paper = resolvePaperElement()
     if (!paper) return
-    const layoutH = paper.offsetHeight
-    const layoutW = paper.offsetWidth
-    const scaleX = liveGrowScale(pending.prevLayoutW, layoutW, pending.prevW, pending.nextW)
-    const scaleY = liveGrowScale(pending.prevLayoutH, layoutH, pending.prevH, pending.nextH)
-    if (scaleX === 1 && scaleY === 1) return
-    pendingGrowRemapRef.current = null
-    scaleNormalizedSpace(scaleX, scaleY)
-    canvasQualityKeyRef.current = ''
-    committedCanvasDirtyRef.current = true
-    redraw(true)
-  }, [redraw, resolvePaperElement, scaleNormalizedSpace, sourceHeight, sourceWidth])
+    commitPendingGrowRemap(paper.offsetWidth, paper.offsetHeight)
+  }, [commitPendingGrowRemap, resolvePaperElement, sourceHeight, sourceWidth])
 
   useEffect(() => {
     fitPageToInk()
