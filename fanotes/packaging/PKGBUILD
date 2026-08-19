@@ -1,8 +1,8 @@
 # Maintainer: FaNotes contributors
 
 pkgname=fanotes-bin
-pkgver=2026.8.40
-_release_version=2026.8.40
+pkgver=2026.8.41
+_release_version=2026.8.41
 pkgrel=1
 pkgdesc='Lokale Markdown-Notizen mit Grafiktablett und Handschrifterkennung'
 arch=('x86_64')

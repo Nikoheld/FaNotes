@@ -2,6 +2,10 @@
 
 ## Unveröffentlicht
 
+## 2026.8.41
+
+- **Stift auf PDF:** Im Stiftmodus schreibt der Stift wieder auf dem PDF. Die PDF-Seite fängt den Stift nicht mehr, und die Tintenfläche deckt alle Seiten.
+
 ## 2026.8.40
 
 - **Keine Linie nach oben:** Sobald du den Stift aufsetzt, entsteht keine gerade Linie zur Blattoberkante. Ein 0,0-Geist oder eine Vorhersage wird nicht als Strich übernommen.
