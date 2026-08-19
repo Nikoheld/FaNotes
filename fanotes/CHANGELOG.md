@@ -2,6 +2,12 @@
 
 ## Unveröffentlicht
 
+## 2026.8.48
+
+- **Verlinkung auf der Seite:** Irgendwo auf einer Notiz oder einem PDF setzt du eine Verlinkung. Ein Tippen öffnet die neue Notiz — praktisch, wenn ein PDF keinen Schreibplatz hat.
+- **Zurück oben:** Nach einer Verlinkung bringt Zurück in der Tab-Leiste zur vorherigen Notiz; zwei Sprünge gehen in umgekehrter Reihenfolge zurück.
+- **Stil wählen:** Symbol und Text sehen verschieden aus, auch nach dem Speichern. Symbol und Text zusammen geht ebenfalls.
+
 ## 2026.8.47
 
 - **Blatt wächst mit:** Schreiben am unteren oder rechten Rand macht das Blatt weiter — nicht an einer A4-Wand.
