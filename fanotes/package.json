@@ -100,6 +100,7 @@
     "check:ghost-ink": "node scripts/check-ghost-ink.mjs",
     "check:bug-pen-line-up": "node scripts/check-bug-pen-line-up.mjs",
     "check:bug-pen-line-up-stay": "node scripts/check-bug-pen-line-up-stay.mjs",
+    "check:bug-pdf-pen": "node scripts/check-bug-pdf-pen.mjs",
     "check:arrow-lock": "node scripts/check-arrow-lock.mjs",
     "check:ink-pointer": "node scripts/check-ink-pointer-session.mjs",
     "check:homework-api": "node scripts/check-homework-api.mjs"

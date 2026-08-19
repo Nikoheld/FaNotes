@@ -879,6 +879,17 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
     calc(var(--paper-width) * var(--ink-extent-ratio))
   );
 }
+.unified-paper.is-pdf-note.has-ink-extent,
+.unified-paper.has-worksheet.has-ink-extent {
+  /* In-flow PDF pages are taller than A4. A pinned A4 box leaves the ink
+     overlay short; the PDF canvas then steals the pen. */
+  height: auto;
+  min-height: max(
+    calc(100% - 64px),
+    var(--paper-a4-height),
+    calc(var(--paper-width) * var(--ink-extent-ratio))
+  );
+}
 .unified-paper.has-ink-extent .markdown-editor .cm-content {
   min-height: max(
     var(--paper-a4-height),
@@ -1232,10 +1243,20 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   pointer-events: auto;
   --scale-factor: 1;
 }
+.pdf-note-view.is-inking,
+.pdf-note-view.is-inking .pdf-note-body,
+.pdf-note-view.is-inking .pdf-note-pages,
+.pdf-note-view.is-inking .pdf-note-page,
+.pdf-note-view.is-inking .pdf-note-canvas-host,
+.pdf-note-view.is-inking .pdf-note-page canvas,
 .pdf-note-view.is-inking .pdf-note-text-layer,
 .pdf-note-view.is-inking .pdf-note-toolbar,
 .pdf-note-view.is-inking .pdf-note-search,
 .pdf-note-view.is-inking .pdf-note-sidebar { pointer-events: none; }
+.worksheet-layer.is-disabled .worksheet-page,
+.worksheet-layer.is-disabled .worksheet-pdf-page,
+.worksheet-layer.is-disabled .worksheet-pdf-canvas-host,
+.worksheet-layer.is-disabled .worksheet-pdf-page canvas { pointer-events: none; }
 .pdf-note-text-layer :is(span, br) {
   position: absolute;
   color: transparent;

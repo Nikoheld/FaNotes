@@ -99,6 +99,7 @@ import {
   mapClientToPaperPoint,
   resolveInkPointerDown,
 } from '../lib/inkSampleMap'
+import { INLINE_INK_ACTIVE_CLASS } from '../lib/pdfInkHit'
 import {
   applyPenUpInkCleanup,
   applyWheelInkPolicy,
@@ -4780,7 +4781,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   return (
     <section
       ref={boardRef as React.RefObject<HTMLElement>}
-      className={`lw-drawing-board ${inline ? 'is-inline' : ''} ${inputActive ? 'is-input-active' : ''} ${inkMode === 'drawing' ? 'is-art-mode' : 'is-writing-mode'} ${className}`}
+      className={`lw-drawing-board ${inline ? 'is-inline' : ''} ${inputActive ? INLINE_INK_ACTIVE_CLASS : ''} ${inkMode === 'drawing' ? 'is-art-mode' : 'is-writing-mode'} ${className}`}
       tabIndex={inputActive ? 0 : -1}
       onKeyDown={handleKeyboard}
       onWheel={handleWheel}
@@ -5112,7 +5113,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
             <canvas ref={committedCanvasRef} className="lw-tablet-canvas lw-tablet-canvas-committed" aria-hidden="true" />
             <canvas
               ref={canvasRef}
-              className={`lw-tablet-canvas lw-tablet-canvas-live ${selectionMode ? 'tool-select' : tool === 'pen' && inkMode === 'drawing' ? activeArtSymbol ? 'tool-stamp' : 'tool-art' : `tool-${tool}`} ${inputActive ? 'is-input-active' : ''}`}
+              className={`lw-tablet-canvas lw-tablet-canvas-live ${selectionMode ? 'tool-select' : tool === 'pen' && inkMode === 'drawing' ? activeArtSymbol ? 'tool-stamp' : 'tool-art' : `tool-${tool}`} ${inputActive ? INLINE_INK_ACTIVE_CLASS : ''}`}
               tabIndex={-1}
               aria-label={selectionMode
                 ? selectionPurpose === 'math-correction' ? 'Rechenweg zur mathematischen Korrektur auswählen' : 'Bereich für Handschrifterkennung auswählen'

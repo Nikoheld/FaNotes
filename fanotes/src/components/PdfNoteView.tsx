@@ -31,6 +31,7 @@ import {
   openPdfDocument,
   paintSizeForPage,
 } from '../lib/pdfDocument'
+import { PDF_INKING_CLASS } from '../lib/pdfInkHit'
 
 type PdfNoteViewProps = {
   path: string
@@ -661,7 +662,7 @@ export function PdfNoteView({
 
   return (
     <section
-      className={`pdf-note-view ${inputDisabled ? 'is-inking' : ''} ${sidebar !== 'none' ? 'has-sidebar' : ''}`}
+      className={`pdf-note-view ${inputDisabled ? PDF_INKING_CLASS : ''} ${sidebar !== 'none' ? 'has-sidebar' : ''}`}
       aria-label={`PDF ${title}`}
       tabIndex={inputDisabled ? -1 : 0}
       onKeyDown={handleChromeKey}

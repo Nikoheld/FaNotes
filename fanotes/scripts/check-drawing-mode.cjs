@@ -118,6 +118,8 @@ const worksheetStyleSafeguards = [
   ['margin-left: max(32px, calc((100% - var(--paper-width)) / 2))', 'gewachsenes Blatt bleibt links verankert'],
   ['width: min(100%, var(--paper-width, 900px))', 'Text umbricht auf der A4-Spalte'],
   ['Sit above the full-sheet ink canvas so Entfernen stays clickable in pen mode.', 'PDF-Entfernen bleibt im Stiftmodus klickbar'],
+  ['.pdf-note-view.is-inking .pdf-note-page canvas', 'PDF-Canvas nimmt den Stift nicht, wenn Tinte an ist'],
+  ['.unified-paper.is-pdf-note.has-ink-extent', 'PDF-Notiz wächst mit den Seiten, Overlay deckt das Blatt'],
 ]
 
 const paperViewSafeguards = [

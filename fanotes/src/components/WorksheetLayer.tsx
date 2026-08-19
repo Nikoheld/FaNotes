@@ -3,6 +3,7 @@ import { Check, FileText, Highlighter, Image as ImageIcon, LoaderCircle, Plus, T
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import type { PDFDocumentLoadingTask, PDFDocumentProxy, PDFPageProxy, RenderTask } from 'pdfjs-dist'
 import type { WorksheetDocument, WorksheetHighlight, WorksheetTextBox } from '../types'
+import { WORKSHEET_INKING_CLASS } from '../lib/pdfInkHit'
 
 export type WorksheetLayerHandle = {
   flush: () => Promise<void>
@@ -581,7 +582,7 @@ export const WorksheetLayer = forwardRef<WorksheetLayerHandle, WorksheetLayerPro
   const pageCount = initialDocument.kind === 'pdf' ? pdf?.numPages ?? 0 : 1
 
   return (
-    <section className={`worksheet-layer ${textTool ? 'is-placing-text' : ''} ${highlightTool ? 'is-highlighting' : ''} ${inputDisabled ? 'is-disabled' : ''}`} aria-label={`Arbeitsblatt ${document.title}`}>
+    <section className={`worksheet-layer ${textTool ? 'is-placing-text' : ''} ${highlightTool ? 'is-highlighting' : ''} ${inputDisabled ? WORKSHEET_INKING_CLASS : ''}`} aria-label={`Arbeitsblatt ${document.title}`}>
       <header className="worksheet-toolbar">
         <span>{document.kind === 'image' ? <ImageIcon size={15} /> : <FileText size={15} />}<strong>{document.title}</strong><small>{document.kind === 'html' ? 'OneNote · originalgetreu' : `${pageCount || '…'} ${pageCount === 1 ? 'Seite' : 'Seiten'}`}</small></span>
         <span className="worksheet-toolbar-actions">
