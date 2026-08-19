@@ -2,6 +2,11 @@
 
 ## Unveröffentlicht
 
+## 2026.8.40
+
+- **Keine Linie nach oben:** Sobald du den Stift aufsetzt, entsteht keine gerade Linie zur Blattoberkante. Ein 0,0-Geist oder eine Vorhersage wird nicht als Strich übernommen.
+- **Strich geht nach dem Wachsen weiter:** Wird die Seite mitten im Schreiben höher, bleibt der nächste Punkt auf der Linie — der Rest des Worts fällt nicht weg.
+
 ## 2026.8.39
 
 - **Schrift bleibt oben stehen:** Schreiben im oberen Drittel der Seite verschiebt den Text nicht mehr nach oben — auch wenn die gemalte Box noch 0 war.
