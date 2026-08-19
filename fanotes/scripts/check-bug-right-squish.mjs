@@ -23,7 +23,7 @@ try {
   const a4H = PAPER_SOURCE_HEIGHT
   const a4W = PAPER_SOURCE_WIDTH
   const left = { x: 0.2, y: 0.35 }
-  const nextW = neededWriteExtent(0.75, a4W, WRITE_SLACK_WIDTH, PAGE_GROW_STEP_WIDTH)
+  const nextW = neededWriteExtent(0.92, a4W, WRITE_SLACK_WIDTH, PAGE_GROW_STEP_WIDTH)
   assert.ok(nextW > a4W, 'writing past the right slack must grow write-width')
   const grownPaintedW = a4W * (nextW / a4W)
   const visualX = paperPixelY(left.x, a4W)

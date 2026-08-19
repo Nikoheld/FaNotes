@@ -121,6 +121,8 @@ import {
   nextWriteExtent,
   pendingGrowScale,
   resolvePaintedLayoutGrow,
+  WRITE_MEMORY_CAP_HEIGHT,
+  WRITE_MEMORY_CAP_WIDTH,
 } from '../lib/paperGrow'
 import { DraftingGuides } from './DraftingGuides'
 import {
@@ -202,10 +204,8 @@ const loadRecognitionModule = async () => {
 
 const SOURCE_WIDTH = 900
 const SOURCE_HEIGHT = 1273
-/** Soft cap (~40 A4 pages) so a runaway write cannot exhaust memory. */
-const MAX_SOURCE_HEIGHT = SOURCE_HEIGHT * 40
-/** Soft cap for horizontal growth (~20 A4 widths). */
-const MAX_SOURCE_WIDTH = SOURCE_WIDTH * 20
+const MAX_SOURCE_HEIGHT = WRITE_MEMORY_CAP_HEIGHT
+const MAX_SOURCE_WIDTH = WRITE_MEMORY_CAP_WIDTH
 const EXPORT_SCALE = 2
 /** Cap for window.devicePixelRatio contribution. */
 const MAX_DPR = 4
@@ -2033,7 +2033,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     return true
   }, [applyInkExtentStyles, resolvePaperElement, scaleNormalizedSpace, schedulePageLayoutRefresh, setDirty, redraw])
 
-  /** Keep about half a page of empty paper beyond the pen so the edge does not arrive first. */
+  /** Keep a modest writing margin beyond the pen so the edge does not arrive first. */
   const ensureWriteRoom = useCallback((normalizedY?: number, normalizedX?: number) => {
     const prevH = sourceHeightRef.current
     const prevW = sourceWidthRef.current

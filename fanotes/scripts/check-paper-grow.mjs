@@ -21,21 +21,19 @@ const {
 try {
   const a4H = PAPER_SOURCE_HEIGHT
   const a4W = PAPER_SOURCE_WIDTH
-  const oldHeightSlack = Math.round(a4H * 0.34)
 
-  assert.ok(WRITE_SLACK_HEIGHT > oldHeightSlack, 'height slack must be larger than the previous 0.34 A4 buffer')
+  assert.ok(WRITE_SLACK_HEIGHT < a4H * 0.25, 'slack is a writing margin, not half a page')
+  assert.ok(WRITE_SLACK_WIDTH < a4W * 0.25)
   assert.equal(neededWriteExtent(0.4, a4H, WRITE_SLACK_HEIGHT, PAGE_GROW_STEP_HEIGHT), a4H, 'upper page must not grow yet')
-  const mid = neededWriteExtent(0.55, a4H, WRITE_SLACK_HEIGHT, PAGE_GROW_STEP_HEIGHT)
-  assert.ok(mid > a4H, 'pen at mid-page must already grow the sheet')
-  assert.equal(
-    neededWriteExtent(0.55, a4H, oldHeightSlack, PAGE_GROW_STEP_HEIGHT),
-    a4H,
-    'the old slack would still wait until closer to the edge',
-  )
+  assert.equal(neededWriteExtent(0.55, a4H, WRITE_SLACK_HEIGHT, PAGE_GROW_STEP_HEIGHT), a4H, 'mid-page must not grow with modest slack')
+  const bottom = neededWriteExtent(0.94, a4H, WRITE_SLACK_HEIGHT, PAGE_GROW_STEP_HEIGHT)
+  assert.ok(bottom > a4H, 'pen at the bottom must grow the sheet')
+  const again = neededWriteExtent(0.94, bottom, WRITE_SLACK_HEIGHT, PAGE_GROW_STEP_HEIGHT)
+  assert.ok(again > bottom, 'the new bottom must grow again')
   assert.equal(neededWriteExtent(0.5, a4W, WRITE_SLACK_WIDTH, PAGE_GROW_STEP_WIDTH), a4W, 'left half must not grow sideways')
   assert.ok(
-    neededWriteExtent(0.65, a4W, WRITE_SLACK_WIDTH, PAGE_GROW_STEP_WIDTH) > a4W,
-    'pen nearer the right edge must grow sideways earlier',
+    neededWriteExtent(0.94, a4W, WRITE_SLACK_WIDTH, PAGE_GROW_STEP_WIDTH) > a4W,
+    'pen at the right edge must grow sideways',
   )
   assert.equal(neededWriteExtent(undefined, a4H, WRITE_SLACK_HEIGHT, PAGE_GROW_STEP_HEIGHT), a4H)
   assert.equal(neededWriteExtent(Number.NaN, a4H, WRITE_SLACK_HEIGHT, PAGE_GROW_STEP_HEIGHT), a4H)
@@ -46,8 +44,8 @@ try {
   console.log(JSON.stringify({
     slackHeight: WRITE_SLACK_HEIGHT,
     slackWidth: WRITE_SLACK_WIDTH,
-    growAtMid: mid,
-    oldSlackStillHoldsMid: a4H,
+    growAtBottom: bottom,
+    growAgain: again,
   }))
   console.log('paper-grow ok')
 } finally {

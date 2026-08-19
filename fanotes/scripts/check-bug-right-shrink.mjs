@@ -27,7 +27,7 @@ const {
 try {
   const a4H = PAPER_SOURCE_HEIGHT
   const a4W = PAPER_SOURCE_WIDTH
-  const reportX = 0.75
+  const reportX = 0.92
   const reportY = 0.9
   const start = { x: reportX, y: reportY }
   const nextW = neededWriteExtent(reportX, a4W, WRITE_SLACK_WIDTH, PAGE_GROW_STEP_WIDTH)

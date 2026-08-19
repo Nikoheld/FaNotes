@@ -31,6 +31,7 @@ import {
   sheetZoomStepFromDirection,
   type PaperViewSnapshot,
 } from '../lib/paperView'
+import { clampPaperScrollOffset } from '../lib/paperGrow'
 
 export type PaperViewApi = PaperViewSnapshot & {
   zoomBy: (delta: number, originClient?: { x: number; y: number }) => void
@@ -79,6 +80,30 @@ export function PaperView({ children, className = '', viewKey, showHud = true }:
     // Reset only when the note identity changes. Toggling the HUD (pen vs
     // keyboard) must keep the same sheet zoom so ruling, ink and text stay one.
     writeSharedPaperView(defaultPaperView())
+  }, [viewKey])
+
+  useEffect(() => {
+    const scroller = noteViewRef.current
+    if (!scroller) return
+    const clampScroll = () => {
+      const paper = scroller.querySelector<HTMLElement>('.unified-paper')
+      if (!paper) return
+      const next = clampPaperScrollOffset(
+        { x: scroller.scrollLeft, y: scroller.scrollTop },
+        {
+          minX: 0,
+          minY: 0,
+          maxX: paper.offsetLeft + paper.offsetWidth,
+          maxY: paper.offsetTop + paper.offsetHeight,
+        },
+        { width: scroller.clientWidth, height: scroller.clientHeight },
+      )
+      if (next.x !== scroller.scrollLeft) scroller.scrollLeft = next.x
+      if (next.y !== scroller.scrollTop) scroller.scrollTop = next.y
+    }
+    scroller.addEventListener('scroll', clampScroll, { passive: true })
+    clampScroll()
+    return () => scroller.removeEventListener('scroll', clampScroll)
   }, [viewKey])
 
   const setView = useCallback((next: Partial<PaperViewSnapshot>) => {

@@ -839,9 +839,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 }
 /* Toolbar/footer are portaled outside the paper; keep a high stacking context for ink chrome. */
 .unified-note-view.is-inking { position: relative; }
-/* Paper grows with content. A fixed A4 aspect-ratio left long notes (e.g. the
-   welcome page) painting outside the white sheet onto the dark workspace —
-   a black strip at the bottom. Keep A4 only as a minimum height for short notes. */
+/* Paper grows with content plus a modest writing slack. Do not floor to A4
+   height — that left a blank page to scroll under short notes. */
 .unified-paper {
   --text: #252630;
   --text-primary: #252630;
@@ -863,13 +862,15 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   --accent-secondary-readable: var(--paper-accent-secondary-readable);
   --paper-width: min(900px, var(--content-width), calc(100% - 64px));
   --paper-a4-height: calc(var(--paper-width) * 297 / 210);
-  /* ink-extent-ratio = sourceHeight / SOURCE_WIDTH; grows with ink plus a short writing slack. */
+  /* Modest writing margin past the last line — not an extra empty A4. */
+  --paper-write-slack: 144px;
+  /* ink-extent-ratio = sourceHeight / SOURCE_WIDTH; grows with ink plus slack. */
   --ink-extent-ratio: 1.414285714;
   position: relative;
   width: var(--paper-width);
   min-width: 540px;
   height: fit-content;
-  min-height: max(calc(100% - 64px), var(--paper-a4-height));
+  min-height: 0;
   margin: 32px auto 76px;
   overflow: visible;
   color: var(--text);
@@ -888,14 +889,9 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   --ink-width-extent: 1;
   width: max(var(--paper-width), calc(var(--paper-width) * var(--ink-width-extent)));
   max-width: none;
-  /* Do not pin `height` here: markdown notes are taller than A4, and a
-     pinned A4 box shifts the text the moment ink turns on. min-height
-     still grows the sheet when writing near the bottom. */
-  min-height: max(
-    calc(100% - 64px),
-    var(--paper-a4-height),
-    calc(var(--paper-width) * var(--ink-extent-ratio))
-  );
+  /* Size to the ink extent. Do not add a viewport/A4 floor — that recreates
+     empty-page scroll below short notes. */
+  min-height: calc(var(--paper-width) * var(--ink-extent-ratio));
 }
 .unified-paper.has-ink-width {
   /* Only after the sheet grew sideways: keep the original A4 column.
@@ -915,11 +911,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   );
 }
 .unified-paper.has-ink-extent .markdown-editor .cm-content {
-  min-height: max(
-    var(--paper-a4-height),
-    calc(100vh - 170px),
-    calc(var(--paper-width) * var(--ink-extent-ratio))
-  );
+  min-height: calc(var(--paper-width) * var(--ink-extent-ratio));
 }
 /* Ruling is a real child so CSS zoom scales it with ink and type as one sheet.
    Fixed SVG tiles (not repeating-linear-gradient) keep the same origin when
@@ -970,7 +962,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .unified-paper .markdown-editor, .unified-paper .markdown-editor .cm-editor { height: auto !important; min-height: 100%; overflow: visible; background: transparent; }
 .unified-paper .markdown-editor .cm-scroller { min-height: 100%; overflow: hidden !important; padding: 0; scrollbar-gutter: auto; background: transparent; }
 .markdown-editor.paper-mode .cm-scroller { overflow: hidden !important; }
-.unified-paper .markdown-editor .cm-content { min-height: max(var(--paper-a4-height), calc(100vh - 170px)); padding: 78px clamp(52px, 8vw, 86px) 150px; font-family: var(--editor-font); background: transparent; }
+.unified-paper .markdown-editor .cm-content { min-height: 0; padding: 78px clamp(52px, 8vw, 86px) var(--paper-write-slack); font-family: var(--editor-font); background: transparent; }
 .unified-paper .markdown-editor .cm-gutters { padding-top: 78px; background: color-mix(in srgb, #fff 82%, transparent); }
 .unified-paper.has-worksheet { min-height: calc(100% - 64px); padding-bottom: 24px; }
 .unified-paper.has-worksheet > .editor-pane { min-height: 0; }
@@ -1379,7 +1371,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
     margin-left: max(12px, calc((100% - var(--paper-width)) / 2));
     margin-right: 12px;
   }
-  .unified-paper .markdown-editor .cm-content { padding: 58px 34px 120px; }
+  .unified-paper .markdown-editor .cm-content { padding: 58px 34px var(--paper-write-slack); }
   .worksheet-layer { width: min(calc(100% - 16px), 900px); max-width: 900px; margin: 0 8px 26px; }
   .pdf-note-toolbar, .pdf-note-search, .pdf-note-body { width: min(calc(100% - 12px), 900px); }
   .pdf-note-sidebar { display: none; }

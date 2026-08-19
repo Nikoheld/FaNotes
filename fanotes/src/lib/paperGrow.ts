@@ -3,13 +3,17 @@ import { isInkCorridorLeap, mapClientToPaperPoint, type InkPointerLike, type Map
 export const PAPER_SOURCE_WIDTH = 900
 export const PAPER_SOURCE_HEIGHT = 1273
 
-/** Empty paper kept below the pen — about half an A4, so growth starts earlier. */
-export const WRITE_SLACK_HEIGHT = Math.round(PAPER_SOURCE_HEIGHT * 0.52)
-/** Empty paper kept to the right of the pen. */
-export const WRITE_SLACK_WIDTH = Math.round(PAPER_SOURCE_WIDTH * 0.4)
-/** Grow in half-page chunks so the ruling is not resized every sample. */
-export const PAGE_GROW_STEP_HEIGHT = Math.round(PAPER_SOURCE_HEIGHT * 0.5)
-export const PAGE_GROW_STEP_WIDTH = Math.round(PAPER_SOURCE_WIDTH * 0.5)
+/** Modest empty paper past the last glyph or stroke — not half an A4. */
+export const WRITE_SLACK_HEIGHT = 144
+/** Modest empty paper to the right of the last stroke. */
+export const WRITE_SLACK_WIDTH = 108
+/** Grow in the same modest chunks so the sheet follows the pen, not a blank page. */
+export const PAGE_GROW_STEP_HEIGHT = WRITE_SLACK_HEIGHT
+export const PAGE_GROW_STEP_WIDTH = WRITE_SLACK_WIDTH
+/** Runaway bitmap cap (~40 A4 pages). Ordinary notes never hit this. */
+export const WRITE_MEMORY_CAP_HEIGHT = PAPER_SOURCE_HEIGHT * 40
+/** Runaway bitmap cap (~20 A4 widths). */
+export const WRITE_MEMORY_CAP_WIDTH = PAPER_SOURCE_WIDTH * 20
 
 export const paperPixelY = (normalizedY: number, sourceHeight: number) => normalizedY * sourceHeight
 
@@ -297,3 +301,45 @@ export const nextWriteExtent = (
     painted,
   )
 )
+
+export type PaperContentBox = {
+  minX: number
+  minY: number
+  maxX: number
+  maxY: number
+}
+
+export type PaperViewportSize = {
+  width: number
+  height: number
+}
+
+/** Paper/scroll size is the content box plus modest slack. Unused sides stay closed. */
+export const paperScrollBounds = (
+  content: PaperContentBox,
+  slackX = WRITE_SLACK_WIDTH,
+  slackY = WRITE_SLACK_HEIGHT,
+): PaperContentBox => {
+  const minX = Math.min(0, Number.isFinite(content.minX) ? content.minX : 0)
+  const minY = Math.min(0, Number.isFinite(content.minY) ? content.minY : 0)
+  const maxX = Math.max(0, Number.isFinite(content.maxX) ? content.maxX : 0) + Math.max(0, slackX)
+  const maxY = Math.max(0, Number.isFinite(content.maxY) ? content.maxY : 0) + Math.max(0, slackY)
+  return { minX, minY, maxX, maxY }
+}
+
+export const clampPaperScrollOffset = (
+  offset: { x: number; y: number },
+  bounds: PaperContentBox,
+  viewport: PaperViewportSize,
+) => {
+  const viewW = Math.max(0, viewport.width)
+  const viewH = Math.max(0, viewport.height)
+  const maxScrollX = Math.max(0, bounds.maxX - bounds.minX - viewW)
+  const maxScrollY = Math.max(0, bounds.maxY - bounds.minY - viewH)
+  const x = Number.isFinite(offset.x) ? offset.x : 0
+  const y = Number.isFinite(offset.y) ? offset.y : 0
+  return {
+    x: Math.min(maxScrollX, Math.max(0, x)),
+    y: Math.min(maxScrollY, Math.max(0, y)),
+  }
+}
