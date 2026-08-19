@@ -52,7 +52,7 @@ try {
     { sourceW: nextW, sourceH: a4H, layoutW: grownPaintedW, layoutH: a4H * 1.4 },
   )
   assert.equal(accidentalTall.y, reportY, 'painted-height change from a width-only grow must not shrink Y')
-  assert.equal(liveGrowScale(a4H, a4H * 1.4, a4H, a4H), 1)
+  assert.equal(liveGrowScale(a4H, a4H * 1.4, a4H, a4H, true), 1)
 
   const zeroWidth = applyLiveHandwritingGrow(
     start,

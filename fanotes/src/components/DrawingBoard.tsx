@@ -117,6 +117,7 @@ import {
   inkExtentStyleValues,
   inkWidthNeedsAnchor,
   liveGrowScale,
+  paintedBoxIsUsable,
   mergePendingGrow,
   nextWriteExtent,
   pendingGrowScale,
@@ -1172,6 +1173,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const sourceHeightRef = useRef(SOURCE_HEIGHT)
   const sourceWidthRef = useRef(SOURCE_WIDTH)
   const pageLayoutFrameRef = useRef<number | null>(null)
+  const paintedLayoutRef = useRef({ w: 0, h: 0 })
   const pendingGrowRemapRef = useRef<{
     prevH: number
     nextH: number
@@ -1842,6 +1844,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       if (resizeDebounceRef.current !== null) window.clearTimeout(resizeDebounceRef.current)
       resizeDebounceRef.current = window.setTimeout(() => {
         resizeDebounceRef.current = null
+        flushPaintedLayoutGrow()
         syncInkWindow()
         redraw(true)
       }, 90)
@@ -1875,7 +1878,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       if (drawFrameRef.current !== null) cancelAnimationFrame(drawFrameRef.current)
       if (pendingSolverTapRef.current) window.clearTimeout(pendingSolverTapRef.current.timer)
     }
-  }, [redraw, resolvePaperElement, syncInkWindow])
+  }, [flushPaintedLayoutGrow, redraw, resolvePaperElement, syncInkWindow])
 
   const applyInkExtentStyles = useCallback((height: number, width: number = sourceWidthRef.current) => {
     const paper = resolvePaperElement()
@@ -1956,6 +1959,30 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   }, [redraw, scaleNormalizedSpace])
   commitPendingGrowRemapRef.current = commitPendingGrowRemap
 
+  const flushPaintedLayoutGrow = useCallback(() => {
+    const paper = resolvePaperElement()
+    if (!paper) return false
+    const nextW = paper.offsetWidth
+    const nextH = paper.offsetHeight
+    const prevW = paintedLayoutRef.current.w
+    const prevH = paintedLayoutRef.current.h
+    if (!paintedBoxIsUsable(prevW) || !paintedBoxIsUsable(prevH)) {
+      paintedLayoutRef.current = { w: nextW, h: nextH }
+      return false
+    }
+    const scaleX = liveGrowScale(prevW, nextW, sourceWidthRef.current, sourceWidthRef.current, false)
+    const scaleY = liveGrowScale(prevH, nextH, sourceHeightRef.current, sourceHeightRef.current, false)
+    paintedLayoutRef.current = { w: nextW, h: nextH }
+    if (scaleX === 1 && scaleY === 1) return false
+    scaleNormalizedSpace(scaleX, scaleY)
+    canvasQualityKeyRef.current = ''
+    committedCanvasDirtyRef.current = true
+    activeRenderedPointCountRef.current = 0
+    wipeLiveInkCanvas(canvasRef.current)
+    redraw(true)
+    return true
+  }, [redraw, resolvePaperElement, scaleNormalizedSpace])
+
   /**
    * Resize the writable page without shifting existing ink in absolute space.
    * Coordinates stay normalized 0–1, so we scale by old/new when the sheet changes.
@@ -1978,14 +2005,15 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     const nextLayoutW = paper?.offsetWidth ?? 0
     // Shrinking 0–1 before the painted sheet gets taller lifts every stroke
     // toward the top and makes the writing look smaller than the ruling.
-    const scaleX = liveGrowScale(prevLayoutW, nextLayoutW, prevW, nextW)
-    const scaleY = liveGrowScale(prevLayoutH, nextLayoutH, prevH, nextH)
+    const scaleX = liveGrowScale(prevLayoutW, nextLayoutW, prevW, nextW, nextH > prevH)
+    const scaleY = liveGrowScale(prevLayoutH, nextLayoutH, prevH, nextH, nextW > prevW)
     scaleNormalizedSpace(scaleX, scaleY)
     pendingGrowRemapRef.current = mergePendingGrow(
       pendingGrowRemapRef.current,
       { prevH, nextH, prevW, nextW, prevLayoutH, prevLayoutW },
       { scaleX, scaleY },
     )
+    paintedLayoutRef.current = { w: nextLayoutW, h: nextLayoutH }
     exportCacheRef.current = null
     setDirty(true)
     if (activeStrokeRef.current) {
@@ -2837,6 +2865,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       }
       if (resizeDirtyRef.current) {
         resizeDirtyRef.current = false
+        flushPaintedLayoutGrow()
         syncInkWindow()
         redraw(true)
       }
@@ -3009,7 +3038,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     }
     if (gestureChangedRef.current) fitPageToInk()
     scheduleRedraw()
-  }, [analyzeMathCorrectionSelection, appendPointerEvent, bumpInkRevision, clearShapeDwellTimer, commitPendingSolverTap, commitStrokeToCanvas, fitPageToInk, inkMode, mathSolverEnabled, mode, openMathSolverAtPoint, pointFromEvent, readShapeSnapProfile, redraw, scheduleRedraw, selectionPurpose, setDirty, settings.scribbleEraseSensitivity, sourceHeight, sourceWidth, syncInkWindow, trySnapActiveShape, updateHistoryState])
+  }, [analyzeMathCorrectionSelection, appendPointerEvent, bumpInkRevision, clearShapeDwellTimer, commitPendingSolverTap, commitStrokeToCanvas, fitPageToInk, flushPaintedLayoutGrow, inkMode, mathSolverEnabled, mode, openMathSolverAtPoint, pointFromEvent, readShapeSnapProfile, redraw, scheduleRedraw, selectionPurpose, setDirty, settings.scribbleEraseSensitivity, sourceHeight, sourceWidth, syncInkWindow, trySnapActiveShape, updateHistoryState])
 
   const readDraftingDisplay = useCallback((): DraftingDisplay => {
     const surface = surfaceRef.current

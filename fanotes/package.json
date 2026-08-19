@@ -104,6 +104,7 @@
     "check:bug-text-shift": "node scripts/check-bug-text-shift.mjs",
     "check:bug-ink-up": "node scripts/check-bug-ink-up.mjs",
     "check:bug-ink-up-stay": "node scripts/check-bug-ink-up-stay.mjs",
+    "check:bug-ink-shift": "node scripts/check-bug-ink-shift.mjs",
     "check:arrow-lock": "node scripts/check-arrow-lock.mjs",
     "check:ink-pointer": "node scripts/check-ink-pointer-session.mjs",
     "check:homework-api": "node scripts/check-homework-api.mjs"

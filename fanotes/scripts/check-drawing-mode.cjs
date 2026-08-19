@@ -97,6 +97,7 @@ const safeguards = [
   ['mergePendingGrow', 'ein Rechts-Grow verwirft kein offenes Höhen-Remap'],
   ['INK_WIDTH_ANCHOR_CLASS', 'A4-Tinte ändert den linken Rand nicht'],
   ['nextWriteExtent', 'Source wächst nicht, wenn die gemalte PDF-Fläche schon Platz hat'],
+  ['flushPaintedLayoutGrow', 'PDF-Seitenwachstum remappt Tinte, damit sie nicht rutscht'],
   ['const commitPendingGrowRemap = useCallback', 'Grow-Flush ist ein gemeinsamer Helper'],
   ['activeRenderedPointCountRef.current = 0\n    wipeLiveInkCanvas(canvasRef.current)\n    redraw(true)', 'Flush nach Grow zeichnet die Live-Tinte vollständig neu'],
   ['fanotes-ink-toolbar-slot', 'Handschrift-Werkzeuge sitzen in der oberen Leiste'],

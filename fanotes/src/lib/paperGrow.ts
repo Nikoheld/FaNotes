@@ -22,13 +22,19 @@ export const layoutGrewEnough = (prevLayout: number, nextLayout: number) => (
   && nextLayout > prevLayout + 1
 )
 
-/** Only shrink 0–1 on an axis after that axis’s source *and* painted box grew.
- *  A width-only grow must not rescale Y (and the reverse). prev=0 would be scale 0. */
-export const liveGrowScale = (prevLayout: number, nextLayout: number, prevSource = 0, nextSource = 0) => {
-  if (Number.isFinite(prevSource) && prevSource > 0 && Number.isFinite(nextSource) && !(nextSource > prevSource)) {
-    return 1
-  }
+/** Remap 0–1 after the painted box grew. A width-only source grow that
+ *  accidentally changed painted height must not rescale Y (`siblingSourceGrew`).
+ *  A layout-only grow (PDF pages finishing) *must* remap so ink stays put. */
+export const liveGrowScale = (
+  prevLayout: number,
+  nextLayout: number,
+  prevSource = 0,
+  nextSource = 0,
+  siblingSourceGrew = false,
+) => {
   if (!layoutGrewEnough(prevLayout, nextLayout) || !paintedBoxIsUsable(nextLayout)) return 1
+  const sourceGrew = Number.isFinite(prevSource) && prevSource > 0 && Number.isFinite(nextSource) && nextSource > prevSource
+  if (!sourceGrew && siblingSourceGrew) return 1
   return prevLayout / nextLayout
 }
 
@@ -95,8 +101,8 @@ export const applyLiveHandwritingGrow = (
   prev: { sourceW: number; sourceH: number; layoutW: number; layoutH: number },
   next: { sourceW: number; sourceH: number; layoutW: number; layoutH: number },
 ) => {
-  const scaleX = liveGrowScale(prev.layoutW, next.layoutW, prev.sourceW, next.sourceW)
-  const scaleY = liveGrowScale(prev.layoutH, next.layoutH, prev.sourceH, next.sourceH)
+  const scaleX = liveGrowScale(prev.layoutW, next.layoutW, prev.sourceW, next.sourceW, next.sourceH > prev.sourceH)
+  const scaleY = liveGrowScale(prev.layoutH, next.layoutH, prev.sourceH, next.sourceH, next.sourceW > prev.sourceW)
   const x = point.x * scaleX
   const y = point.y * scaleY
   const paintW = paintedAxis(prev.layoutW, next.layoutW, scaleX)
@@ -176,8 +182,12 @@ export const pendingGrowScale = (
   if (!pending) return { ...idle, remaining: null }
   const prevUsable = paintedBoxIsUsable(pending.prevLayoutW) || paintedBoxIsUsable(pending.prevLayoutH)
   if (!prevUsable) return { scaleX: 1, scaleY: 1, ready: false, discard: true, remaining: null }
-  const scaleX = liveGrowScale(pending.prevLayoutW, layoutW, pending.prevW, pending.nextW)
-  const scaleY = liveGrowScale(pending.prevLayoutH, layoutH, pending.prevH, pending.nextH)
+  const scaleX = axisPending(pending.prevW, pending.nextW)
+    ? liveGrowScale(pending.prevLayoutW, layoutW, pending.prevW, pending.nextW)
+    : 1
+  const scaleY = axisPending(pending.prevH, pending.nextH)
+    ? liveGrowScale(pending.prevLayoutH, layoutH, pending.prevH, pending.nextH)
+    : 1
   const remaining = mergePendingGrow(pending, pending, { scaleX, scaleY })
   return { scaleX, scaleY, ready: scaleX !== 1 || scaleY !== 1, discard: false, remaining }
 }
