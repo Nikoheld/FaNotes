@@ -81,6 +81,7 @@ import {
   recordSubjectBookPage,
   SUBJECT_BOOK_PLACEMENT_OPTIONS,
   subjectBookForNote,
+  subjectBookForPopout,
   subjectBookViewPolicy,
   toggleSubjectBookView,
   type SubjectBookPlacement,
@@ -432,6 +433,7 @@ export default function App({ startupBootstrap }: AppProps) {
   const [noteBackups, setNoteBackups] = useState<NoteBackupSnapshot[]>([])
   const [backupMenuOpen, setBackupMenuOpen] = useState(false)
   const [subjectBooks, setSubjectBooks] = useState<SubjectBookRecord[]>([])
+  const [subjectBooksReady, setSubjectBooksReady] = useState(false)
   const [bookOpen, setBookOpen] = useState(false)
   const [bookPlacement, setBookPlacement] = useState<SubjectBookPlacement>('rechts')
   const popoutBookPath = typeof window === 'undefined' ? '' : (() => {
@@ -561,14 +563,10 @@ export default function App({ startupBootstrap }: AppProps) {
     [noteBackups.length, settings.experimentalNoteBackup],
   )
   const currentBook = useMemo(
-    () => subjectBookForNote(subjectBooks, activePath) ?? (popoutBookPath
-      ? subjectBooks.find((book) => book.bookPath === popoutBookPath) ?? {
-        subjectPath: parentPath(popoutBookPath),
-        bookPath: popoutBookPath,
-        lastPage: 1,
-      }
-      : null),
-    [activePath, popoutBookPath, subjectBooks],
+    () => popoutBookPath
+      ? subjectBookForPopout(subjectBooks, popoutBookPath, subjectBooksReady)
+      : subjectBookForNote(subjectBooks, activePath),
+    [activePath, popoutBookPath, subjectBooks, subjectBooksReady],
   )
   const bookPolicy = useMemo(
     () => subjectBookViewPolicy({
@@ -735,8 +733,12 @@ export default function App({ startupBootstrap }: AppProps) {
   }, [activePath])
 
   useEffect(() => {
-    if (!window.fanotes.readSubjectBooks) return
+    if (!window.fanotes.readSubjectBooks) {
+      setSubjectBooksReady(true)
+      return
+    }
     let alive = true
+    setSubjectBooksReady(false)
     void window.fanotes.readSubjectBooks()
       .then((list) => {
         if (!alive) return
@@ -745,6 +747,9 @@ export default function App({ startupBootstrap }: AppProps) {
       .catch(() => {
         if (!alive) return
         setSubjectBooks([])
+      })
+      .finally(() => {
+        if (alive) setSubjectBooksReady(true)
       })
     return () => { alive = false }
   }, [bootstrap?.vaultPath])
@@ -2724,7 +2729,14 @@ export default function App({ startupBootstrap }: AppProps) {
 
   if (fatalError) return <div className="fatal-screen"><section className="fatal-card" role="alert"><div className="startup-mark is-error"><CircleAlert size={22} /></div><h1>FaNotes konnte nicht starten</h1><p>Deine Daten wurden nicht verändert. Prüfe den Vault und versuche es erneut.</p><code>{fatalError}</code><button className="primary-button" type="button" onClick={() => window.location.reload()}>Erneut versuchen</button></section></div>
   if (!bootstrap) return <div className="fatal-screen startup-screen"><section className="fatal-card startup-card" aria-live="polite"><div className="startup-mark"><PenLine size={22} /></div><h1>FaNotes öffnet deinen Schreibtisch</h1><p>Deine letzte Notiz erscheint gleich. Handschrift und weitere Werkzeuge werden danach im Hintergrund bereitgestellt.</p><div className="startup-progress" aria-hidden="true"><span /></div><small><LoaderCircle className="spin" size={12} /> Lokal und privat</small></section></div>
-  if (popoutBookPath && currentBook) {
+  if (popoutBookPath) {
+    if (!currentBook) {
+      return (
+        <div className="subject-book-popout-root">
+          <div className="subject-book-loading"><LoaderCircle className="spin" size={18} /> Buchseite wird geladen …</div>
+        </div>
+      )
+    }
     return (
       <div className="subject-book-popout-root">
         <Suspense fallback={<div className="subject-book-loading"><LoaderCircle className="spin" size={18} /> Buch wird geladen …</div>}>

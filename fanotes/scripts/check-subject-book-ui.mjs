@@ -26,6 +26,8 @@ const runOnce = () => {
   assert.match(appSource, /className=\{`editor-toolbar/)
   assert.ok(appSource.indexOf('editor-toolbar') < appSource.indexOf('subject-book-control'))
   assert.match(appSource, /subjectBookViewPolicy/)
+  assert.match(appSource, /subjectBookForPopout/)
+  assert.doesNotMatch(appSource, /popoutBookPath[\s\S]{0,280}lastPage:\s*1/)
   assert.match(appSource, /SUBJECT_BOOK_PLACEMENT_OPTIONS/)
   assert.match(bookSource, /label: 'Links'/)
   assert.match(bookSource, /label: 'Rechts'/)

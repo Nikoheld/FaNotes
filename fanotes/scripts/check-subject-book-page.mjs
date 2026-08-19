@@ -16,6 +16,7 @@ const {
   recordSubjectBookPage,
   restoreSubjectBookPage,
   subjectBookDocumentKey,
+  subjectBookForPopout,
   subjectBookOpenPageOnLoad,
 } = await server.ssrLoadModule('/src/lib/subjectBook.ts')
 const { pdfStartPageForLoad } = await server.ssrLoadModule('/src/lib/pdfDocument.ts')
@@ -52,6 +53,16 @@ const runOnce = () => {
   assert.equal(pdfStartPageForLoad(path, path, 8), null)
   assert.notEqual(pdfStartPageForLoad(path, path, 8), 7)
 
+  const pending = subjectBookForPopout([], path, false)
+  assert.equal(pending, null)
+  const tooEarly = subjectBookOpenPageOnLoad(path, '', pending?.lastPage ?? 1)
+  assert.notEqual(tooEarly, 7)
+  const stored = subjectBookForPopout([{ ...book, lastPage: 7 }], path, false)
+  assert.equal(stored?.lastPage, 7)
+  assert.equal(subjectBookOpenPageOnLoad(path, '', stored.lastPage), 7)
+  const missing = subjectBookForPopout([], path, true)
+  assert.equal(missing?.lastPage, 1)
+
   return {
     start: restoreSubjectBookPage(attachSubjectBook(emptySubjectBooks(), {
       subjectPath: 'Faecher/Mechanik',
@@ -61,6 +72,8 @@ const runOnce = () => {
     pageOne: restoreSubjectBookPage(stayed, 10),
     outOfRange: restoreSubjectBookPage(outOfRange, 10),
     sameDocument: pdfStartPageForLoad(path, path, 8),
+    popoutWaits: pending,
+    popoutPage: stored.lastPage,
   }
 }
 

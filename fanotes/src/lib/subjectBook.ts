@@ -116,6 +116,21 @@ export const subjectBookForNote = (list: unknown, notePath: unknown) => {
   return null
 }
 
+/** Popout must not invent lastPage 1 before vault records are loaded. */
+export const subjectBookForPopout = (list: unknown, bookPath: unknown, recordsLoaded: unknown) => {
+  const path = sanitizePdfPath(bookPath)
+  if (!path) return null
+  const stored = parseSubjectBooks(list).find((book) => book.bookPath === path)
+  if (stored) return stored
+  if (recordsLoaded !== true) return null
+  const folder = path.replace(/\/[^/]+$/u, '')
+  return {
+    subjectPath: sanitizeFolderPath(folder) || folder,
+    bookPath: path,
+    lastPage: 1,
+  }
+}
+
 export const attachSubjectBook = (
   list: unknown,
   input: { subjectPath: string; bookPath: string; lastPage?: number },
