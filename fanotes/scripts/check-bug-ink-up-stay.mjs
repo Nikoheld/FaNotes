@@ -20,9 +20,9 @@ const { classifyInkJumpAppend } = await server.ssrLoadModule('/src/lib/inkSample
 
 try {
   const prevH = PAPER_SOURCE_HEIGHT
-  const nextH = neededWriteExtent(0.52, prevH, WRITE_SLACK_HEIGHT, PAGE_GROW_STEP_HEIGHT)
+  const nextH = neededWriteExtent(0.94, prevH, WRITE_SLACK_HEIGHT, PAGE_GROW_STEP_HEIGHT)
   assert.ok(nextH > prevH)
-  const last = { x: 0.5, y: 0.52, t: 40, pressure: 0.5, tiltX: 0, tiltY: 0, pointerType: 'pen' }
+  const last = { x: 0.5, y: 0.94, t: 40, pressure: 0.5, tiltX: 0, tiltY: 0, pointerType: 'pen' }
   const oldHeight = 1276
   const newHeight = oldHeight * (nextH / prevH)
   const result = growLiveInkAndMapNext(

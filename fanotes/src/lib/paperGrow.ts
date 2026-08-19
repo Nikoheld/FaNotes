@@ -54,7 +54,8 @@ export const inkColumnWidthPx = (clientWidthPx: number, sourceWidth: number) => 
 }
 
 export const inkPaintedHeightPx = (columnWidthPx: number, sourceHeight: number) => {
-  const raw = Math.max(1, columnWidthPx) * (Math.max(PAPER_SOURCE_HEIGHT, sourceHeight) / PAPER_SOURCE_WIDTH)
+  const height = Number.isFinite(sourceHeight) && sourceHeight > 0 ? sourceHeight : WRITE_SLACK_HEIGHT
+  const raw = Math.max(1, columnWidthPx) * (height / PAPER_SOURCE_WIDTH)
   return Math.ceil(raw / 4) * 4
 }
 
@@ -325,6 +326,15 @@ export const paperScrollBounds = (
   const maxX = Math.max(0, Number.isFinite(content.maxX) ? content.maxX : 0) + Math.max(0, slackX)
   const maxY = Math.max(0, Number.isFinite(content.maxY) ? content.maxY : 0) + Math.max(0, slackY)
   return { minX, minY, maxX, maxY }
+}
+
+/** Ink source size from content pixels + slack. Height is not floored to A4. */
+export const paperSourceExtentFromContent = (content: PaperContentBox) => {
+  const bounds = paperScrollBounds(content)
+  return {
+    width: Math.min(WRITE_MEMORY_CAP_WIDTH, Math.max(PAPER_SOURCE_WIDTH, bounds.maxX)),
+    height: Math.min(WRITE_MEMORY_CAP_HEIGHT, Math.max(WRITE_SLACK_HEIGHT, bounds.maxY)),
+  }
 }
 
 export const clampPaperScrollOffset = (

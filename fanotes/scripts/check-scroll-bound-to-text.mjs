@@ -13,10 +13,13 @@ const server = await createServer({
 
 const {
   PAPER_SOURCE_HEIGHT,
+  PAPER_SOURCE_WIDTH,
   WRITE_SLACK_HEIGHT,
   WRITE_SLACK_WIDTH,
   clampPaperScrollOffset,
+  inkExtentStyleValues,
   paperScrollBounds,
+  paperSourceExtentFromContent,
 } = await server.ssrLoadModule('/src/lib/paperGrow.ts')
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
@@ -61,6 +64,24 @@ try {
   assert.match(css, /padding: 78px clamp\(52px, 8vw, 86px\) var\(--paper-write-slack\)/)
   assert.doesNotMatch(css, /\.unified-paper \.markdown-editor \.cm-content \{ min-height: max\(var\(--paper-a4-height\)/)
   assert.doesNotMatch(css, /\.cm-content \{ min-height: max\(var\(--paper-a4-height\), calc\(100vh/)
+  const inkExtentBlock = css.slice(css.indexOf('.unified-paper.has-ink-extent {'), css.indexOf('.unified-paper.has-ink-width {'))
+  assert.match(inkExtentBlock, /min-height:\s*calc\(var\(--paper-width\) \* var\(--ink-extent-ratio\)\)/)
+  assert.doesNotMatch(inkExtentBlock, /paper-a4-height/)
+
+  const shortInk = inkExtentStyleValues(WRITE_SLACK_HEIGHT, PAPER_SOURCE_WIDTH, PAPER_SOURCE_WIDTH)
+  assert.ok(
+    shortInk.paintedHeightPx < PAPER_SOURCE_HEIGHT * 0.4,
+    `has-ink-extent for a short source (${shortInk.paintedHeightPx}) must not open an empty A4 (${PAPER_SOURCE_HEIGHT})`,
+  )
+  const shortExtent = paperSourceExtentFromContent({ minX: 0, minY: 0, maxX: 200, maxY: 80 })
+  assert.equal(shortExtent.height, 80 + WRITE_SLACK_HEIGHT)
+  assert.ok(shortExtent.height < PAPER_SOURCE_HEIGHT * 0.4, 'content bbox + slack must not floor to A4')
+
+  const board = readFileSync(join(root, 'src/components/DrawingBoard.tsx'), 'utf8')
+  const paperView = readFileSync(join(root, 'src/components/PaperView.tsx'), 'utf8')
+  assert.match(board, /paperSourceExtentFromContent/)
+  assert.match(board, /paperScrollBounds/)
+  assert.match(paperView, /paperScrollBounds/)
 
   console.log(JSON.stringify({
     slackH: WRITE_SLACK_HEIGHT,

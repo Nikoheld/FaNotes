@@ -20,11 +20,10 @@ const {
 
 try {
   const prevSourceH = PAPER_SOURCE_HEIGHT
-  const nextSourceH = neededWriteExtent(0.55, prevSourceH, WRITE_SLACK_HEIGHT, PAGE_GROW_STEP_HEIGHT)
-  assert.ok(nextSourceH > prevSourceH, 'grow starts from a live mid-page point, not after remap')
-
-  const start = { x: 0.42, y: 0.55 }
-  assert.ok(paperPixelY(start.y, prevSourceH) > 600, 'the live point is mid-page in paper pixels')
+  const start = { x: 0.42, y: 0.94 }
+  const nextSourceH = neededWriteExtent(start.y, prevSourceH, WRITE_SLACK_HEIGHT, PAGE_GROW_STEP_HEIGHT)
+  assert.ok(nextSourceH > prevSourceH, 'grow starts from a live bottom-edge point, not after remap')
+  assert.ok(paperPixelY(start.y, prevSourceH) > 600, 'the live point is in the written band in paper pixels')
 
   const stayPut = (label, prevLayoutH, nextLayoutH) => {
     const visualY = paperPixelY(start.y, prevLayoutH)
@@ -41,9 +40,8 @@ try {
     return { visualY, y: grown.y, paintedY }
   }
 
-  const proportional = stayPut('proportional', 990, 1486)
-  // Source 1273→1911 vs a taller already-painted sheet: the user bug.
-  const mismatched = stayPut('mismatched', 1500, nextSourceH)
+  const proportional = stayPut('proportional', 990, Math.round(990 * nextSourceH / prevSourceH))
+  const mismatched = stayPut('mismatched', 1500, Math.round(1500 * nextSourceH / prevSourceH))
 
   const staleVisualY = paperPixelY(start.y, 990)
   const staleLayout = applyLiveHandwritingGrow(

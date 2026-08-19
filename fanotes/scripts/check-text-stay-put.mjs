@@ -136,12 +136,18 @@ try {
     }
   }
 
-  const nextH = neededWriteExtent(0.55, PAPER_SOURCE_HEIGHT, WRITE_SLACK_HEIGHT, PAGE_GROW_STEP_HEIGHT)
-  applyLiveHandwritingGrow(
-    { x: 0.2, y: 0.55 },
+  const nextH = neededWriteExtent(0.94, PAPER_SOURCE_HEIGHT, WRITE_SLACK_HEIGHT, PAGE_GROW_STEP_HEIGHT)
+  assert.ok(nextH > PAPER_SOURCE_HEIGHT, 'bottom-edge writing must grow the sheet')
+  const mark = { x: 0.2, y: 0.94 }
+  const visualY = mark.y * 1273
+  const grown = applyLiveHandwritingGrow(
+    mark,
     { sourceW: 900, sourceH: PAPER_SOURCE_HEIGHT, layoutW: 900, layoutH: 1273 },
-    { sourceW: 900, sourceH: nextH, layoutW: 900, layoutH: 1911 },
+    { sourceW: 900, sourceH: nextH, layoutW: 900, layoutH: nextH },
   )
+  assert.equal(grown.remapped, true)
+  assert.ok(Math.abs(grown.nextPixelY - visualY) <= 1, `painted Y ${grown.nextPixelY} must stay ${visualY}`)
+  assert.ok(Math.abs(grown.y * nextH - visualY) <= 1)
 
   for (const zoom of [1, 2]) {
     const before = measure(zoom)

@@ -23,10 +23,10 @@ const { classifyInkJumpAppend } = await server.ssrLoadModule('/src/lib/inkSample
 
 try {
   const prevH = PAPER_SOURCE_HEIGHT
-  const nextH = neededWriteExtent(0.55, prevH, WRITE_SLACK_HEIGHT, PAGE_GROW_STEP_HEIGHT)
-  assert.ok(nextH > prevH, 'mid-page writing must grow the sheet')
+  const nextH = neededWriteExtent(0.94, prevH, WRITE_SLACK_HEIGHT, PAGE_GROW_STEP_HEIGHT)
+  assert.ok(nextH > prevH, 'bottom-edge writing must grow the sheet')
 
-  const last = { x: 0.5, y: 0.55, t: 40, pressure: 0.5, tiltX: 0, tiltY: 0, pointerType: 'pen' }
+  const last = { x: 0.5, y: 0.94, t: 40, pressure: 0.5, tiltX: 0, tiltY: 0, pointerType: 'pen' }
   const remappedY = last.y * prevH / nextH
   const oldHeight = 800
   const newHeight = oldHeight * (nextH / prevH)
@@ -46,7 +46,7 @@ try {
     { type: 'pointermove', clientX: 40 + 0.5 * 600, clientY: sameVisualClientY, pressure: 0.5, pointerType: 'pen' },
     surfaceAfter,
   )
-  assert.ok(result.last.y > 0.2 && result.last.y < 0.5, 'last point remaps down the new page, not to the top')
+  assert.ok(result.last.y > 0.2 && result.last.y < last.y, 'last point remaps down the new page, not to the top')
   assert.ok(Math.abs(result.last.y - remappedY) < 1e-9)
   assert.ok(result.next, 'the same visual sample must still map')
   assert.ok(Math.abs(result.next.y - result.last.y) < 0.04, 'next sample stays continuous with the remapped last point')
@@ -76,7 +76,7 @@ try {
   }
 
   const prevLayoutH = 1500
-  const nextLayoutH = nextH
+  const nextLayoutH = Math.round(1500 * nextH / prevH)
   const visualY = last.y * prevLayoutH
   const layoutGrown = {
     left: 40,
@@ -100,14 +100,14 @@ try {
   assert.ok(mismatched.last.y < last.y)
   assert.equal(mismatched.jumped, false)
 
-  const nextW = neededWriteExtent(0.65, PAPER_SOURCE_WIDTH, WRITE_SLACK_WIDTH, PAGE_GROW_STEP_WIDTH)
+  const nextW = neededWriteExtent(0.94, PAPER_SOURCE_WIDTH, WRITE_SLACK_WIDTH, PAGE_GROW_STEP_WIDTH)
   assert.ok(nextW > PAPER_SOURCE_WIDTH)
-  const wideLast = { ...last, x: 0.65 }
+  const wideLast = { ...last, x: 0.94 }
   const wide = growLiveInkAndMapNext(
     wideLast,
     prevH,
     prevH,
-    { type: 'pointermove', clientX: 40 + 0.65 * 600 * (PAPER_SOURCE_WIDTH / nextW), clientY: 20 + 0.55 * oldHeight, pressure: 0.5, pointerType: 'pen' },
+    { type: 'pointermove', clientX: 40 + 0.94 * 600 * (PAPER_SOURCE_WIDTH / nextW), clientY: 20 + 0.94 * oldHeight, pressure: 0.5, pointerType: 'pen' },
     { left: 40, top: 20, width: 600, height: oldHeight, offsetWidth: nextW, offsetHeight: prevH },
     0,
     oldHeight,

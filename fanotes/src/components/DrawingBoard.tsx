@@ -119,6 +119,8 @@ import {
   liveGrowScale,
   mergePendingGrow,
   nextWriteExtent,
+  paperScrollBounds,
+  paperSourceExtentFromContent,
   pendingGrowScale,
   resolvePaintedLayoutGrow,
   WRITE_MEMORY_CAP_HEIGHT,
@@ -1172,7 +1174,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const viewZoomRef = useRef(1)
   const viewRotationRef = useRef(0)
   const viewPanRef = useRef({ x: 0, y: 0 })
-  const sourceHeightRef = useRef(SOURCE_HEIGHT)
+  const sourceHeightRef = useRef(WRITE_SLACK_HEIGHT)
   const sourceWidthRef = useRef(SOURCE_WIDTH)
   const pageLayoutFrameRef = useRef<number | null>(null)
   const paintedLayoutRef = useRef({ w: 0, h: 0 })
@@ -1255,7 +1257,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const [penColor, setPenColor] = useState(settings.penColor)
   const [penWidth, setPenWidth] = useState(settings.penWidth)
   const [paperStyle, setPaperStyle] = useState(pagePaperStyle ?? settings.paperStyle)
-  const [sourceHeight, setSourceHeight] = useState(SOURCE_HEIGHT)
+  const [sourceHeight, setSourceHeight] = useState(WRITE_SLACK_HEIGHT)
   const [sourceWidth, setSourceWidth] = useState(SOURCE_WIDTH)
   const [viewZoom, setViewZoom] = useState(1)
   const [viewRotation, setViewRotation] = useState(0)
@@ -1669,11 +1671,11 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       const raw = document as Partial<DrawingDocument>
       strokesRef.current = safeInkStrokes(raw.strokes, initialColorRef.current)
       if (!pagePaperStyle && raw.paperStyle && raw.paperStyle in paperLabel) setPaperStyle(raw.paperStyle)
-      if (typeof raw.sourceHeight === 'number' && raw.sourceHeight >= 400 && raw.sourceHeight <= MAX_SOURCE_HEIGHT) {
+      if (typeof raw.sourceHeight === 'number' && raw.sourceHeight >= WRITE_SLACK_HEIGHT && raw.sourceHeight <= MAX_SOURCE_HEIGHT) {
         sourceHeightRef.current = raw.sourceHeight
         setSourceHeight(raw.sourceHeight)
       }
-      if (typeof raw.sourceWidth === 'number' && raw.sourceWidth >= 400 && raw.sourceWidth <= MAX_SOURCE_WIDTH) {
+      if (typeof raw.sourceWidth === 'number' && raw.sourceWidth >= WRITE_SLACK_WIDTH && raw.sourceWidth <= MAX_SOURCE_WIDTH) {
         sourceWidthRef.current = raw.sourceWidth
         setSourceWidth(raw.sourceWidth)
       }
@@ -1955,7 +1957,13 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const applyInkExtentStyles = useCallback((height: number, width: number = sourceWidthRef.current) => {
     const paper = resolvePaperElement()
     if (!paper) return
-    const styles = inkExtentStyleValues(height, width, Math.max(1, paper.clientWidth))
+    const bounds = paperScrollBounds({
+      minX: 0,
+      minY: 0,
+      maxX: Math.max(0, width - WRITE_SLACK_WIDTH),
+      maxY: Math.max(0, height - WRITE_SLACK_HEIGHT),
+    })
+    const styles = inkExtentStyleValues(bounds.maxY, Math.max(SOURCE_WIDTH, bounds.maxX), Math.max(1, paper.clientWidth))
     paper.style.setProperty('--ink-extent-ratio', String(styles.extentRatio))
     paper.style.setProperty('--ink-width-extent', String(styles.widthExtent))
     paper.classList.add('has-ink-extent')
@@ -1997,7 +2005,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const setPageExtent = useCallback((targetHeight: number, targetWidth: number) => {
     const prevH = sourceHeightRef.current
     const prevW = sourceWidthRef.current
-    const nextH = Math.min(MAX_SOURCE_HEIGHT, Math.max(SOURCE_HEIGHT, Math.round(targetHeight)))
+    const nextH = Math.min(MAX_SOURCE_HEIGHT, Math.max(WRITE_SLACK_HEIGHT, Math.round(targetHeight)))
     const nextW = Math.min(MAX_SOURCE_WIDTH, Math.max(SOURCE_WIDTH, Math.round(targetWidth)))
     if (nextH === prevH && nextW === prevW) return false
     const paper = resolvePaperElement()
@@ -2049,11 +2057,9 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     if (activeStrokeRef.current) return false
     const prevH = sourceHeightRef.current
     const prevW = sourceWidthRef.current
-    const bounds = inkAbsoluteBounds(strokesRef.current, prevW, prevH)
-    return setPageExtent(
-      Math.max(SOURCE_HEIGHT, bounds.maxY + WRITE_SLACK_HEIGHT),
-      Math.max(SOURCE_WIDTH, bounds.maxX + WRITE_SLACK_WIDTH),
-    )
+    const box = inkAbsoluteBounds(strokesRef.current, prevW, prevH)
+    const extent = paperSourceExtentFromContent({ minX: 0, minY: 0, maxX: box.maxX, maxY: box.maxY })
+    return setPageExtent(Math.max(prevH, extent.height), Math.max(prevW, extent.width))
   }, [setPageExtent])
 
   const clearViewTransformTargets = useCallback(() => {
