@@ -2,6 +2,11 @@
 
 ## Unveröffentlicht
 
+## 2026.8.49
+
+- **Blatt in alle Richtungen:** Die Schreibfläche wächst links, oben, rechts und unten mit — das weisse Blatt füllt die Ansicht.
+- **Scroll getrennt vom Text:** Du kannst ein gutes Stück in jede Richtung schwenken, aber nicht ins Unendliche. Die Textspalte bleibt stehen, auch wenn du an den Rändern schreibst.
+
 ## 2026.8.48
 
 - **Verlinkung auf der Seite:** Irgendwo auf einer Notiz oder einem PDF setzt du eine Verlinkung. Ein Tippen öffnet die neue Notiz — praktisch, wenn ein PDF keinen Schreibplatz hat.
