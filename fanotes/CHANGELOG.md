@@ -2,6 +2,11 @@
 
 ## Unveröffentlicht
 
+## 2026.8.50
+
+- **Notiz-Backup:** Unter Experimentell schaltest du Backup in der oberen Leiste ein. Der erste Druck sichert die Notiz so wie sie ist; danach kannst du weitere Backups machen oder alte wiederherstellen.
+- **PDF-Verlinkung trifft die Seite:** Ein Klick auf einem mehrseitigen PDF merkt sich die echte Seite, nicht immer Seite 1.
+
 ## 2026.8.49
 
 - **Blatt in alle Richtungen:** Die Schreibfläche wächst links, oben, rechts und unten mit — das weisse Blatt füllt die Ansicht.

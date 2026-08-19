@@ -2451,6 +2451,8 @@
   "Backup der aktuellen Notiz": "Backup of the current note",
   "Backup: weiteres Backup oder wiederherstellen": "Backup: take another snapshot or restore",
   "Zeigt oben in der Notizleiste Backup. Die aktuelle Notiz lässt sich so sichern, wie sie gerade ist, und später wiederherstellen. Standard aus. Der automatische Versionsverlauf bleibt unabhängig davon.": "Shows Backup in the top note bar. You can save the current note as it is and restore it later. Off by default. Automatic version history stays independent of this.",
+  "**Notiz-Backup:** Unter Experimentell schaltest du Backup in der oberen Leiste ein. Der erste Druck sichert die Notiz so wie sie ist; danach kannst du weitere Backups machen oder alte wiederherstellen.": "**Note backup:** Under Experimental you can add Backup to the top bar. The first press saves the note as it is; after that you can take more backups or restore older ones.",
+  "**PDF-Verlinkung trifft die Seite:** Ein Klick auf einem mehrseitigen PDF merkt sich die echte Seite, nicht immer Seite 1.": "**PDF links hit the page:** A click on a multi-page PDF remembers the real page, not always page 1.",
   "Zurück zu Fächern &amp; Notizen": "Back to Subjects & Notes",
   "Zusammenfassen": "Summarize",
   "Zusammenfassung ergänzen": "Add a summary",
