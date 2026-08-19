@@ -64,6 +64,28 @@ export const inkExtentStyleValues = (
   }
 }
 
+/** Class that pins the A4 left edge — only after the sheet actually grew right. */
+export const INK_WIDTH_ANCHOR_CLASS = 'has-ink-width'
+
+export const inkWidthNeedsAnchor = (widthExtent: number) => (
+  Number.isFinite(widthExtent) && widthExtent > 1 + 1e-6
+)
+
+/** Same left inset as `margin-left: auto` on an A4-width sheet. */
+export const a4ColumnOriginLeftPx = (containerWidthPx: number, paperWidthPx: number) => (
+  (Math.max(0, containerWidthPx) - Math.max(0, paperWidthPx)) / 2
+)
+
+/** Left inset after ink-extent styles. Ungrown width must match A4 auto. */
+export const inkExtentOriginLeftPx = (
+  containerWidthPx: number,
+  paperWidthPx: number,
+  widthExtent: number,
+) => {
+  if (!inkWidthNeedsAnchor(widthExtent)) return a4ColumnOriginLeftPx(containerWidthPx, paperWidthPx)
+  return Math.max(32, (containerWidthPx - paperWidthPx) / 2)
+}
+
 const paintedAxis = (prevSize: number, nextSize: number, scale: number) => (
   scale === 1 && paintedBoxIsUsable(prevSize) ? prevSize : nextSize
 )

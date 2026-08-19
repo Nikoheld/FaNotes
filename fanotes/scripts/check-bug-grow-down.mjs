@@ -60,7 +60,12 @@ try {
   assert.equal(upper, a4H, 'upper-third y≈0.30 still must not grow')
 
   const css = readFileSync(join(root, 'src/styles.css'), 'utf8')
-  assert.match(css, /height:\s*max\(\s*var\(--paper-a4-height\),\s*calc\(var\(--paper-width\) \* var\(--ink-extent-ratio\)\)/)
+  assert.match(css, /min-height:\s*max\([\s\S]*?calc\(var\(--paper-width\) \* var\(--ink-extent-ratio\)\)/)
+  assert.match(css, /\.unified-paper\.has-ink-extent \{[\s\S]*?min-height:/)
+  assert.doesNotMatch(
+    css.slice(css.indexOf('.unified-paper.has-ink-extent {'), css.indexOf('.unified-paper.has-ink-width {')),
+    /^\s*height:\s*max\(/m,
+  )
   const board = readFileSync(join(root, 'src/components/DrawingBoard.tsx'), 'utf8')
   assert.match(board, /inkExtentStyleValues/)
 

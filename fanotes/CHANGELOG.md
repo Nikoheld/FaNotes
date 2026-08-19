@@ -2,6 +2,10 @@
 
 ## Unveröffentlicht
 
+## 2026.8.42
+
+- **Text bleibt stehen:** Schreiben auf der Seite verschiebt den Markdown-Text nicht mehr. Tinte auf A4 ändert weder den linken Rand noch kürzt sie die Seite.
+
 ## 2026.8.41
 
 - **Stift auf PDF:** Im Stiftmodus schreibt der Stift wieder auf dem PDF. Die PDF-Seite fängt den Stift nicht mehr, und die Tintenfläche deckt alle Seiten.

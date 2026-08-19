@@ -863,21 +863,20 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   --ink-width-extent: 1;
   width: max(var(--paper-width), calc(var(--paper-width) * var(--ink-width-extent)));
   max-width: none;
-  /* Keep the original column where `margin: auto` placed a narrow sheet.
-     Auto-centering a 20-page-wide sheet would yank text, PDF and buttons left. */
-  margin-left: max(32px, calc((100% - var(--paper-width)) / 2));
-  margin-right: 32px;
+  /* Do not pin `height` here: markdown notes are taller than A4, and a
+     pinned A4 box shifts the text the moment ink turns on. min-height
+     still grows the sheet when writing near the bottom. */
   min-height: max(
     calc(100% - 64px),
     var(--paper-a4-height),
     calc(var(--paper-width) * var(--ink-extent-ratio))
   );
-  /* Fit-content ignores the absolute ink canvas. Pin height to the source
-     extent so writing at the bottom actually lengthens the painted sheet. */
-  height: max(
-    var(--paper-a4-height),
-    calc(var(--paper-width) * var(--ink-extent-ratio))
-  );
+}
+.unified-paper.has-ink-width {
+  /* Only after the sheet grew sideways: keep the original A4 column.
+     Auto-centering a 20-page-wide sheet would yank text, PDF and buttons left. */
+  margin-left: max(32px, calc((100% - var(--paper-width)) / 2));
+  margin-right: 32px;
 }
 .unified-paper.is-pdf-note.has-ink-extent,
 .unified-paper.has-worksheet.has-ink-extent {
@@ -1350,6 +1349,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   .unified-paper.has-ink-extent {
     margin-top: 12px;
     margin-bottom: 42px;
+  }
+  .unified-paper.has-ink-width {
     margin-left: max(12px, calc((100% - var(--paper-width)) / 2));
     margin-right: 12px;
   }

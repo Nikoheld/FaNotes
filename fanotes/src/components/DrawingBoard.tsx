@@ -113,7 +113,9 @@ import {
   WRITE_SLACK_HEIGHT,
   WRITE_SLACK_WIDTH,
   growLiveInkAndMapNext,
+  INK_WIDTH_ANCHOR_CLASS,
   inkExtentStyleValues,
+  inkWidthNeedsAnchor,
   liveGrowScale,
   mergePendingGrow,
   neededWriteExtent,
@@ -1882,6 +1884,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     paper.style.setProperty('--ink-extent-ratio', String(styles.extentRatio))
     paper.style.setProperty('--ink-width-extent', String(styles.widthExtent))
     paper.classList.add('has-ink-extent')
+    paper.classList.toggle(INK_WIDTH_ANCHOR_CLASS, inkWidthNeedsAnchor(styles.widthExtent))
   }, [resolvePaperElement])
 
   const schedulePageLayoutRefresh = useCallback(() => {
