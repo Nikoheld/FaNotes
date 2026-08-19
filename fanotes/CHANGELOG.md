@@ -2,6 +2,13 @@
 
 ## Unveröffentlicht
 
+## 2026.8.46
+
+- **Keine Linie nach oben rechts:** Schreiben auf der rechten Blatthälfte zieht keine gerade Linie zur Oberkante.
+- **Kein Zusammendrücken nach rechts:** Wird das Blatt breiter, bleibt vorhandene Schrift links stehen.
+- **PDF in der oberen Leiste:** Seite, Zoom und Suche sitzen in der Editorleiste, nicht mehr als Balken über dem PDF.
+- **Letzte Notiz bleibt:** Nach dem Schließen öffnet FaNotes wieder die zuletzt geöffnete Notiz, wenn die Datei noch da ist.
+
 ## 2026.8.45
 
 - **Remote Support trifft den Stift:** Werkzeug und Modus warten, bis die Stiftebene geladen ist. Der erste Stiftbefehl geht nicht verloren.
