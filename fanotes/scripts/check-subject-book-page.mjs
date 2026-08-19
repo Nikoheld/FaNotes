@@ -13,10 +13,13 @@ const server = await createServer({
 const {
   attachSubjectBook,
   emptySubjectBooks,
+  mergeSubjectBooksPreferDisk,
+  patchSubjectBookPage,
   recordSubjectBookPage,
   restoreSubjectBookPage,
   subjectBookDocumentKey,
   subjectBookForPopout,
+  subjectBookMountRecord,
   subjectBookOpenPageOnLoad,
 } = await server.ssrLoadModule('/src/lib/subjectBook.ts')
 const { pdfStartPageForLoad } = await server.ssrLoadModule('/src/lib/pdfDocument.ts')
@@ -63,6 +66,30 @@ const runOnce = () => {
   const missing = subjectBookForPopout([], path, true)
   assert.equal(missing?.lastPage, 1)
 
+  const subject = 'Faecher/Mechanik'
+  const notePath = 'Faecher/Mechanik/Kinematik.md'
+  const memory = attachSubjectBook(emptySubjectBooks(), { subjectPath: subject, bookPath: path, lastPage: 7 }).list
+  const disk = attachSubjectBook(emptySubjectBooks(), { subjectPath: subject, bookPath: path, lastPage: 20 }).list
+  assert.equal(subjectBookMountRecord({
+    memory, disk, ready: true, hydrating: true, notePath,
+  }), null)
+  assert.equal(subjectBookMountRecord({
+    memory, disk, ready: false, hydrating: false, notePath,
+  }), null)
+  const docked = subjectBookMountRecord({
+    memory, disk, ready: true, hydrating: false, notePath,
+  })
+  assert.equal(docked?.lastPage, 20)
+  assert.notEqual(docked?.lastPage, 7)
+  const popped = subjectBookMountRecord({
+    memory, disk, ready: true, hydrating: false, bookPath: path,
+  })
+  assert.equal(popped?.lastPage, 20)
+  assert.equal(mergeSubjectBooksPreferDisk(memory, disk)[0]?.lastPage, 20)
+  const patched = patchSubjectBookPage(disk, memory[0], 7, 10)
+  assert.equal(patched.find((item) => item.subjectPath === subject)?.lastPage, 20)
+  assert.notEqual(patched.find((item) => item.subjectPath === subject)?.lastPage, 7)
+
   return {
     start: restoreSubjectBookPage(attachSubjectBook(emptySubjectBooks(), {
       subjectPath: 'Faecher/Mechanik',
@@ -74,6 +101,9 @@ const runOnce = () => {
     sameDocument: pdfStartPageForLoad(path, path, 8),
     popoutWaits: pending,
     popoutPage: stored.lastPage,
+    hydrateBlocks: true,
+    diskWins: docked.lastPage,
+    patchKeepsDisk: patched.find((item) => item.subjectPath === subject)?.lastPage,
   }
 }
 

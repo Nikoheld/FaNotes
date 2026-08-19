@@ -78,10 +78,12 @@ import {
   applySubjectBookPlacement,
   attachSubjectBook,
   detachSubjectBook,
-  recordSubjectBookPage,
+  mergeSubjectBooksPreferDisk,
+  parseSubjectBooks,
+  patchSubjectBookPage,
   SUBJECT_BOOK_PLACEMENT_OPTIONS,
   subjectBookForNote,
-  subjectBookForPopout,
+  subjectBookMountRecord,
   subjectBookViewPolicy,
   toggleSubjectBookView,
   type SubjectBookPlacement,
@@ -433,7 +435,9 @@ export default function App({ startupBootstrap }: AppProps) {
   const [noteBackups, setNoteBackups] = useState<NoteBackupSnapshot[]>([])
   const [backupMenuOpen, setBackupMenuOpen] = useState(false)
   const [subjectBooks, setSubjectBooks] = useState<SubjectBookRecord[]>([])
+  const [subjectBooksDisk, setSubjectBooksDisk] = useState<SubjectBookRecord[]>([])
   const [subjectBooksReady, setSubjectBooksReady] = useState(false)
+  const [subjectBooksHydrating, setSubjectBooksHydrating] = useState(false)
   const [bookOpen, setBookOpen] = useState(false)
   const [bookPlacement, setBookPlacement] = useState<SubjectBookPlacement>('rechts')
   const popoutBookPath = typeof window === 'undefined' ? '' : (() => {
@@ -451,6 +455,9 @@ export default function App({ startupBootstrap }: AppProps) {
   const noteNavStackRef = useRef<string[]>([])
   const noteLinksRef = useRef<NoteLinkRecord[]>([])
   const noteBackupsRef = useRef<NoteBackupSnapshot[]>([])
+  const subjectBooksRef = useRef<SubjectBookRecord[]>([])
+  const subjectBooksDiskRef = useRef<SubjectBookRecord[]>([])
+  const bookPlacementRef = useRef<SubjectBookPlacement>('rechts')
   const editorRef = useRef<MarkdownEditorHandle>(null)
   const drawingBoardRef = useRef<DrawingBoardHandle>(null)
   const worksheetLayerRefs = useRef(new Map<string, WorksheetLayerHandle>())
@@ -562,34 +569,64 @@ export default function App({ startupBootstrap }: AppProps) {
     () => noteBackupControlPolicy(settings.experimentalNoteBackup, noteBackups.length),
     [noteBackups.length, settings.experimentalNoteBackup],
   )
+  const attachedBook = useMemo(
+    () => subjectBookForNote(mergeSubjectBooksPreferDisk(subjectBooks, subjectBooksDisk), activePath),
+    [activePath, subjectBooks, subjectBooksDisk],
+  )
   const currentBook = useMemo(
-    () => popoutBookPath
-      ? subjectBookForPopout(subjectBooks, popoutBookPath, subjectBooksReady)
-      : subjectBookForNote(subjectBooks, activePath),
-    [activePath, popoutBookPath, subjectBooks, subjectBooksReady],
+    () => subjectBookMountRecord({
+      memory: subjectBooks,
+      disk: subjectBooksDisk,
+      ready: subjectBooksReady,
+      hydrating: subjectBooksHydrating,
+      notePath: popoutBookPath ? undefined : activePath,
+      bookPath: popoutBookPath || undefined,
+    }),
+    [activePath, popoutBookPath, subjectBooks, subjectBooksDisk, subjectBooksHydrating, subjectBooksReady],
   )
   const bookPolicy = useMemo(
     () => subjectBookViewPolicy({
-      hasBook: Boolean(currentBook) && !popoutBookPath,
+      hasBook: Boolean(attachedBook) && !popoutBookPath,
       open: bookOpen,
       placement: bookPlacement,
     }),
-    [bookOpen, bookPlacement, currentBook, popoutBookPath],
+    [attachedBook, bookOpen, bookPlacement, popoutBookPath],
   )
+  useEffect(() => {
+    subjectBooksRef.current = subjectBooks
+  }, [subjectBooks])
+  useEffect(() => {
+    subjectBooksDiskRef.current = subjectBooksDisk
+  }, [subjectBooksDisk])
   useEffect(() => {
     if (popoutBookPath) return
     if (bookOpen && bookPlacement === 'popout' && currentBook) {
       void window.fanotes.openSubjectBookPopout?.(currentBook.bookPath)
       return
     }
-    void window.fanotes.closeSubjectBookPopout?.()
+    if (bookPlacement !== 'popout') void window.fanotes.closeSubjectBookPopout?.()
   }, [bookOpen, bookPlacement, currentBook, popoutBookPath])
   useEffect(() => {
-    if (!window.fanotes.onSubjectBookPopoutClosed) return
-    return window.fanotes.onSubjectBookPopoutClosed(() => {
-      setBookOpen((open) => bookPlacement === 'popout' ? false : open)
-    })
+    bookPlacementRef.current = bookPlacement
   }, [bookPlacement])
+  useEffect(() => {
+    if (popoutBookPath || !window.fanotes.onSubjectBookPopoutClosed) return
+    return window.fanotes.onSubjectBookPopoutClosed(() => {
+      setBookOpen((open) => bookPlacementRef.current === 'popout' ? false : open)
+      setSubjectBooksHydrating(true)
+      void (async () => {
+        try {
+          const disk = window.fanotes.readSubjectBooks ? await window.fanotes.readSubjectBooks() : []
+          const parsed = parseSubjectBooks(disk)
+          subjectBooksDiskRef.current = parsed
+          setSubjectBooksDisk(parsed)
+          setSubjectBooks((memory) => mergeSubjectBooksPreferDisk(memory, parsed))
+        } finally {
+          setSubjectBooksHydrating(false)
+        }
+      })()
+    })
+  }, [popoutBookPath])
   const isPdfActive = Boolean(activeTab && (activeTab.kind === 'pdf' || isPdfNotePath(activeTab.path)))
   const activePaper = useMemo(
     () => normalizePaperStyle(activePath ? notePaperByPath[activePath] : undefined, settings.paperStyle),
@@ -742,10 +779,15 @@ export default function App({ startupBootstrap }: AppProps) {
     void window.fanotes.readSubjectBooks()
       .then((list) => {
         if (!alive) return
-        setSubjectBooks(Array.isArray(list) ? list : [])
+        const parsed = parseSubjectBooks(list)
+        subjectBooksDiskRef.current = parsed
+        setSubjectBooksDisk(parsed)
+        setSubjectBooks(parsed)
       })
       .catch(() => {
         if (!alive) return
+        subjectBooksDiskRef.current = []
+        setSubjectBooksDisk([])
         setSubjectBooks([])
       })
       .finally(() => {
@@ -1274,8 +1316,25 @@ export default function App({ startupBootstrap }: AppProps) {
   }, [])
 
   const persistSubjectBooks = useCallback(async (list: SubjectBookRecord[]) => {
-    setSubjectBooks(list)
-    if (window.fanotes.writeSubjectBooks) await window.fanotes.writeSubjectBooks(list)
+    const next = parseSubjectBooks(list)
+    subjectBooksRef.current = next
+    subjectBooksDiskRef.current = next
+    setSubjectBooks(next)
+    setSubjectBooksDisk(next)
+    if (window.fanotes.writeSubjectBooks) await window.fanotes.writeSubjectBooks(next)
+  }, [])
+
+  const refreshSubjectBooksFromDisk = useCallback(async () => {
+    setSubjectBooksHydrating(true)
+    try {
+      const disk = window.fanotes.readSubjectBooks ? await window.fanotes.readSubjectBooks() : []
+      const parsed = parseSubjectBooks(disk)
+      subjectBooksDiskRef.current = parsed
+      setSubjectBooksDisk(parsed)
+      setSubjectBooks((memory) => mergeSubjectBooksPreferDisk(memory, parsed))
+    } finally {
+      setSubjectBooksHydrating(false)
+    }
   }, [])
 
   const attachBookToSubject = useCallback(async (subjectPath: string) => {
@@ -1307,25 +1366,36 @@ export default function App({ startupBootstrap }: AppProps) {
 
   const toggleBookView = useCallback(() => {
     const next = toggleSubjectBookView(bookOpen, bookPlacement)
+    const leavingPopout = bookPlacement === 'popout' && !next.open
+    if (leavingPopout) setSubjectBooksHydrating(true)
     setBookOpen(next.open)
     setBookPlacement(next.placement)
-  }, [bookOpen, bookPlacement])
+    if (leavingPopout) void refreshSubjectBooksFromDisk()
+  }, [bookOpen, bookPlacement, refreshSubjectBooksFromDisk])
 
   const placeBookView = useCallback((placement: SubjectBookPlacement) => {
     const next = applySubjectBookPlacement(placement)
+    const leavingPopout = bookPlacement === 'popout' && next.placement !== 'popout'
+    if (leavingPopout) setSubjectBooksHydrating(true)
     setBookOpen(next.open)
     if (next.placement) setBookPlacement(next.placement)
-  }, [])
+    if (leavingPopout) {
+      void window.fanotes.closeSubjectBookPopout?.()
+      void refreshSubjectBooksFromDisk()
+    }
+  }, [bookPlacement, refreshSubjectBooksFromDisk])
 
   const handleBookPage = useCallback((page: number, pageCount: number) => {
     if (!currentBook) return
-    const updated = recordSubjectBookPage(currentBook, page, pageCount)
-    if (!updated || updated.lastPage === currentBook.lastPage) return
-    const list = subjectBooks.some((book) => book.subjectPath === updated.subjectPath)
-      ? subjectBooks.map((book) => book.subjectPath === updated.subjectPath ? updated : book)
-      : [...subjectBooks, updated]
-    void persistSubjectBooks(list)
-  }, [currentBook, persistSubjectBooks, subjectBooks])
+    const patched = patchSubjectBookPage(subjectBooksDiskRef.current, currentBook, page, pageCount)
+    const current = subjectBooksDiskRef.current.find((book) => book.subjectPath === currentBook.subjectPath)
+    const next = patched.find((book) => book.subjectPath === currentBook.subjectPath)
+    if (!next || next.lastPage === current?.lastPage) return
+    subjectBooksDiskRef.current = patched
+    setSubjectBooksDisk(patched)
+    setSubjectBooks((memory) => mergeSubjectBooksPreferDisk(memory, patched))
+    if (window.fanotes.writeSubjectBooks) void window.fanotes.writeSubjectBooks(patched)
+  }, [currentBook])
 
   const snapshotCurrentNote = useCallback(async () => {
     const path = activePathRef.current
@@ -3031,7 +3101,8 @@ export default function App({ startupBootstrap }: AppProps) {
             </div>
           </div>
           <div className={`editor-stage ${bookPolicy.paneVisible && bookPolicy.placement && bookPolicy.placement !== 'popout' ? `has-subject-book is-${bookPolicy.placement}` : ''}`}>
-            {bookPolicy.paneVisible && bookPolicy.placement && bookPolicy.placement !== 'popout' && currentBook && (
+            {bookPolicy.paneVisible && bookPolicy.placement && bookPolicy.placement !== 'popout' && (
+              currentBook ? (
               <Suspense fallback={<div className="subject-book-loading"><LoaderCircle className="spin" size={18} /> Buch wird geladen …</div>}>
                 <SubjectBookPane
                   book={currentBook}
@@ -3040,6 +3111,9 @@ export default function App({ startupBootstrap }: AppProps) {
                   onClose={() => setBookOpen(false)}
                 />
               </Suspense>
+              ) : (
+                <div className="subject-book-loading"><LoaderCircle className="spin" size={18} /> Buchseite wird geladen …</div>
+              )
             )}
             <div className="editor-stage-main">
             <Suspense fallback={<div className="editor-module-loading"><LoaderCircle className="spin" size={20} /><span>Ansicht wird geladen …</span></div>}>

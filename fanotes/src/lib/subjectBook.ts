@@ -131,6 +131,49 @@ export const subjectBookForPopout = (list: unknown, bookPath: unknown, recordsLo
   }
 }
 
+export const mergeSubjectBooksPreferDisk = (memory: unknown, disk: unknown) => {
+  const mem = parseSubjectBooks(memory)
+  const onDisk = parseSubjectBooks(disk)
+  const bySubject = new Map(mem.map((book) => [book.subjectPath, book]))
+  for (const book of onDisk) {
+    bySubject.set(book.subjectPath, book)
+  }
+  return [...bySubject.values()].slice(0, MAX_BOOKS)
+}
+
+export const patchSubjectBookPage = (
+  diskList: unknown,
+  record: SubjectBookRecord | null | undefined,
+  page: unknown,
+  pageCount?: unknown,
+) => {
+  const disk = parseSubjectBooks(diskList)
+  const identity = sanitizeSubjectBook(record)
+  if (!identity) return disk
+  const onDisk = disk.find((book) => book.subjectPath === identity.subjectPath) ?? identity
+  const nextPage = sanitizePage(page, pageCount)
+  if (onDisk.lastPage !== identity.lastPage && nextPage === identity.lastPage) return disk
+  const updated = recordSubjectBookPage(onDisk, page, pageCount)
+  if (!updated) return disk
+  return [...disk.filter((book) => book.subjectPath !== updated.subjectPath), updated]
+}
+
+export const subjectBookMountRecord = (input: {
+  memory: unknown
+  disk: unknown
+  ready: unknown
+  hydrating: unknown
+  notePath?: unknown
+  bookPath?: unknown
+}) => {
+  if (input.ready !== true || input.hydrating === true) return null
+  const merged = mergeSubjectBooksPreferDisk(input.memory, input.disk)
+  if (typeof input.bookPath === 'string' && input.bookPath) {
+    return subjectBookForPopout(merged, input.bookPath, true)
+  }
+  return subjectBookForNote(merged, input.notePath)
+}
+
 export const attachSubjectBook = (
   list: unknown,
   input: { subjectPath: string; bookPath: string; lastPage?: number },
