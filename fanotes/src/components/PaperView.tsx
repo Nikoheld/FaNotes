@@ -31,7 +31,7 @@ import {
   sheetZoomStepFromDirection,
   type PaperViewSnapshot,
 } from '../lib/paperView'
-import { clampPaperScrollOffset, paperScrollBounds } from '../lib/paperGrow'
+import { clampPaperScrollOffset, paperScrollBoundsFromVisualRect } from '../lib/paperGrow'
 
 export type PaperViewApi = PaperViewSnapshot & {
   zoomBy: (delta: number, originClient?: { x: number; y: number }) => void
@@ -88,11 +88,13 @@ export function PaperView({ children, className = '', viewKey, showHud = true }:
     const clampScroll = () => {
       const paper = scroller.querySelector<HTMLElement>('.unified-paper')
       if (!paper) return
-      const bounds = paperScrollBounds({
-        minX: 0,
-        minY: 0,
-        maxX: paper.offsetLeft + paper.offsetWidth,
-        maxY: paper.offsetTop + paper.offsetHeight,
+      const scrollerRect = scroller.getBoundingClientRect()
+      const paperRect = paper.getBoundingClientRect()
+      const bounds = paperScrollBoundsFromVisualRect(paperRect, {
+        left: scrollerRect.left,
+        top: scrollerRect.top,
+        scrollLeft: scroller.scrollLeft,
+        scrollTop: scroller.scrollTop,
       })
       const next = clampPaperScrollOffset(
         { x: scroller.scrollLeft, y: scroller.scrollTop },

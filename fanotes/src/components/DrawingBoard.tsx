@@ -113,7 +113,9 @@ import {
   WRITE_SLACK_HEIGHT,
   WRITE_SLACK_WIDTH,
   growLiveInkAndMapNext,
+  HAS_INK_EXTENT_CLASS,
   INK_WIDTH_ANCHOR_CLASS,
+  clearInkExtentStyles,
   inkExtentStyleValues,
   inkWidthNeedsAnchor,
   liveGrowScale,
@@ -1178,6 +1180,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const sourceWidthRef = useRef(SOURCE_WIDTH)
   const pageLayoutFrameRef = useRef<number | null>(null)
   const paintedLayoutRef = useRef({ w: 0, h: 0 })
+  const inkExtentPaperRef = useRef<HTMLElement | null>(null)
   const pendingGrowRemapRef = useRef<{
     prevH: number
     nextH: number
@@ -1966,9 +1969,15 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     const styles = inkExtentStyleValues(bounds.maxY, Math.max(SOURCE_WIDTH, bounds.maxX), Math.max(1, paper.clientWidth))
     paper.style.setProperty('--ink-extent-ratio', String(styles.extentRatio))
     paper.style.setProperty('--ink-width-extent', String(styles.widthExtent))
-    paper.classList.add('has-ink-extent')
+    paper.classList.add(HAS_INK_EXTENT_CLASS)
     paper.classList.toggle(INK_WIDTH_ANCHOR_CLASS, inkWidthNeedsAnchor(styles.widthExtent))
+    inkExtentPaperRef.current = paper
   }, [resolvePaperElement])
+
+  useEffect(() => () => {
+    clearInkExtentStyles(inkExtentPaperRef.current)
+    inkExtentPaperRef.current = null
+  }, [])
 
   const schedulePageLayoutRefresh = useCallback(() => {
     if (pageLayoutFrameRef.current !== null) return

@@ -77,6 +77,7 @@ export const inkExtentStyleValues = (
 
 /** Class that pins the A4 left edge — only after the sheet actually grew right. */
 export const INK_WIDTH_ANCHOR_CLASS = 'has-ink-width'
+export const HAS_INK_EXTENT_CLASS = 'has-ink-extent'
 
 export const inkWidthNeedsAnchor = (widthExtent: number) => (
   Number.isFinite(widthExtent) && widthExtent > 1 + 1e-6
@@ -352,4 +353,31 @@ export const clampPaperScrollOffset = (
     x: Math.min(maxScrollX, Math.max(0, x)),
     y: Math.min(maxScrollY, Math.max(0, y)),
   }
+}
+
+/** Visual (zoomed) paper rect in scroller scroll coordinates. Does not add writing slack. */
+export const paperScrollBoundsFromVisualRect = (
+  paper: { left: number; top: number; right: number; bottom: number },
+  scroller: { left: number; top: number; scrollLeft: number; scrollTop: number },
+): PaperContentBox => {
+  const minX = paper.left - scroller.left + scroller.scrollLeft
+  const minY = paper.top - scroller.top + scroller.scrollTop
+  const maxX = paper.right - scroller.left + scroller.scrollLeft
+  const maxY = paper.bottom - scroller.top + scroller.scrollTop
+  return {
+    minX: Number.isFinite(minX) ? minX : 0,
+    minY: Number.isFinite(minY) ? minY : 0,
+    maxX: Number.isFinite(maxX) ? maxX : 0,
+    maxY: Number.isFinite(maxY) ? maxY : 0,
+  }
+}
+
+export const clearInkExtentStyles = (paper: {
+  classList?: { remove: (...names: string[]) => void }
+  style?: { removeProperty: (name: string) => void }
+} | null) => {
+  if (!paper) return
+  paper.classList?.remove(HAS_INK_EXTENT_CLASS, INK_WIDTH_ANCHOR_CLASS)
+  paper.style?.removeProperty('--ink-extent-ratio')
+  paper.style?.removeProperty('--ink-width-extent')
 }

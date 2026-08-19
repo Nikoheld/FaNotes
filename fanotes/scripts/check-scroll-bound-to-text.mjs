@@ -16,9 +16,13 @@ const {
   PAPER_SOURCE_WIDTH,
   WRITE_SLACK_HEIGHT,
   WRITE_SLACK_WIDTH,
+  HAS_INK_EXTENT_CLASS,
+  INK_WIDTH_ANCHOR_CLASS,
   clampPaperScrollOffset,
+  clearInkExtentStyles,
   inkExtentStyleValues,
   paperScrollBounds,
+  paperScrollBoundsFromVisualRect,
   paperSourceExtentFromContent,
 } = await server.ssrLoadModule('/src/lib/paperGrow.ts')
 
@@ -81,7 +85,38 @@ try {
   const paperView = readFileSync(join(root, 'src/components/PaperView.tsx'), 'utf8')
   assert.match(board, /paperSourceExtentFromContent/)
   assert.match(board, /paperScrollBounds/)
-  assert.match(paperView, /paperScrollBounds/)
+  assert.match(board, /clearInkExtentStyles/)
+  assert.match(paperView, /paperScrollBoundsFromVisualRect/)
+  assert.doesNotMatch(paperView, /paperScrollBounds\(/)
+
+  const layoutH = 800
+  const zoom = 2
+  const visualH = layoutH * zoom
+  const zoomedViewport = { width: 800, height: 369 }
+  const zoomedBounds = paperScrollBoundsFromVisualRect(
+    { left: 40, top: 20, right: 40 + 900 * zoom, bottom: 20 + visualH },
+    { left: 40, top: 20, scrollLeft: 0, scrollTop: 0 },
+  )
+  assert.equal(zoomedBounds.maxY, visualH, 'zoom-2 bounds use visual height, not layout height')
+  assert.ok(zoomedBounds.maxY !== layoutH + WRITE_SLACK_HEIGHT, 'must not add slack on top of a sheet that already includes it')
+  const nativeMaxY = visualH - zoomedViewport.height
+  assert.equal(nativeMaxY, 1231)
+  const keepNative = clampPaperScrollOffset({ x: 0, y: nativeMaxY }, zoomedBounds, zoomedViewport)
+  assert.equal(keepNative.y, nativeMaxY, 'clamp must not yank a legal zoomed scroll')
+  const layoutBounds = paperScrollBounds({ minX: 0, minY: 0, maxX: 900, maxY: layoutH })
+  const yanked = clampPaperScrollOffset({ x: 0, y: nativeMaxY }, layoutBounds, zoomedViewport)
+  assert.ok(yanked.y < nativeMaxY, 'layout-space + slack bounds would yank the zoomed camera')
+
+  const removed = []
+  const props = new Set(['--ink-extent-ratio', '--ink-width-extent'])
+  clearInkExtentStyles({
+    classList: { remove: (...names) => { removed.push(...names) } },
+    style: { removeProperty: (name) => { props.delete(name) } },
+  })
+  assert.ok(removed.includes(HAS_INK_EXTENT_CLASS))
+  assert.ok(removed.includes(INK_WIDTH_ANCHOR_CLASS))
+  assert.equal(props.size, 0)
+  clearInkExtentStyles(null)
 
   console.log(JSON.stringify({
     slackH: WRITE_SLACK_HEIGHT,
@@ -89,6 +124,8 @@ try {
     shortMaxY: short.maxY,
     tallMaxX: tall.maxX,
     clampedFar,
+    zoomedMaxY: zoomedBounds.maxY,
+    keepNativeY: keepNative.y,
   }))
   console.log('scroll-bound-to-text ok')
 } finally {
