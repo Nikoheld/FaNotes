@@ -2,6 +2,11 @@
 
 ## Unveröffentlicht
 
+## 2026.8.43
+
+- **Keine Linie nach oben auf PDF:** Der erste Stiftkontakt auf einem PDF zieht keine gerade Linie zur Blattoberkante. Punkte über dem Blatt und Sprünge ins obere Band werden verworfen.
+- **Tinte bleibt auf dem PDF:** Wird das Blatt unter dem Stift höher, bleibt die Schrift stehen — auch nach einer langen Linie.
+
 ## 2026.8.42
 
 - **Text bleibt stehen:** Schreiben auf der Seite verschiebt den Markdown-Text nicht mehr. Tinte auf A4 ändert weder den linken Rand noch kürzt sie die Seite.

@@ -1834,6 +1834,71 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     scheduleRedraw()
   }, [inline, resolvePaperElement, scheduleRedraw])
 
+  const scaleNormalizedSpace = useCallback((scaleX: number, scaleY: number) => {
+    if (scaleX === 1 && scaleY === 1) return
+    for (const stroke of strokesRef.current) {
+      for (const point of stroke.points) {
+        point.x *= scaleX
+        point.y *= scaleY
+      }
+    }
+    const active = activeStrokeRef.current
+    if (active) {
+      for (const point of active.points) {
+        point.x *= scaleX
+        point.y *= scaleY
+      }
+    }
+    const scalePose = <T extends DraftingPose>(pose: T | null): T | null => (
+      pose ? { ...pose, x: pose.x * scaleX, y: pose.y * scaleY } : pose
+    )
+    if (rulerPoseRef.current) {
+      const next = scalePose(rulerPoseRef.current)
+      rulerPoseRef.current = next
+      setRulerPose(next)
+    }
+    if (setSquarePoseRef.current) {
+      const next = scalePose(setSquarePoseRef.current)
+      setSquarePoseRef.current = next
+      setSetSquarePose(next)
+    }
+    if (compassPoseRef.current) {
+      const next = scalePose(compassPoseRef.current)
+      compassPoseRef.current = next
+      setCompassPose(next)
+    }
+    setSelectionRect((current) => current ? {
+      x: current.x * scaleX,
+      y: current.y * scaleY,
+      width: current.width * scaleX,
+      height: current.height * scaleY,
+    } : current)
+  }, [])
+
+  const flushPaintedLayoutGrow = useCallback(() => {
+    const paper = resolvePaperElement()
+    if (!paper) return false
+    const nextW = paper.offsetWidth
+    const nextH = paper.offsetHeight
+    const prevW = paintedLayoutRef.current.w
+    const prevH = paintedLayoutRef.current.h
+    if (!paintedBoxIsUsable(prevW) || !paintedBoxIsUsable(prevH)) {
+      paintedLayoutRef.current = { w: nextW, h: nextH }
+      return false
+    }
+    const scaleX = liveGrowScale(prevW, nextW, sourceWidthRef.current, sourceWidthRef.current, false)
+    const scaleY = liveGrowScale(prevH, nextH, sourceHeightRef.current, sourceHeightRef.current, false)
+    paintedLayoutRef.current = { w: nextW, h: nextH }
+    if (scaleX === 1 && scaleY === 1) return false
+    scaleNormalizedSpace(scaleX, scaleY)
+    canvasQualityKeyRef.current = ''
+    committedCanvasDirtyRef.current = true
+    activeRenderedPointCountRef.current = 0
+    wipeLiveInkCanvas(canvasRef.current)
+    redraw(true)
+    return true
+  }, [redraw, resolvePaperElement, scaleNormalizedSpace])
+
   useEffect(() => {
     mountedRef.current = true
     const scheduleMeasure = () => {
@@ -1900,47 +1965,6 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     })
   }, [redraw])
 
-  const scaleNormalizedSpace = useCallback((scaleX: number, scaleY: number) => {
-    if (scaleX === 1 && scaleY === 1) return
-    for (const stroke of strokesRef.current) {
-      for (const point of stroke.points) {
-        point.x *= scaleX
-        point.y *= scaleY
-      }
-    }
-    const active = activeStrokeRef.current
-    if (active) {
-      for (const point of active.points) {
-        point.x *= scaleX
-        point.y *= scaleY
-      }
-    }
-    const scalePose = <T extends DraftingPose>(pose: T | null): T | null => (
-      pose ? { ...pose, x: pose.x * scaleX, y: pose.y * scaleY } : pose
-    )
-    if (rulerPoseRef.current) {
-      const next = scalePose(rulerPoseRef.current)
-      rulerPoseRef.current = next
-      setRulerPose(next)
-    }
-    if (setSquarePoseRef.current) {
-      const next = scalePose(setSquarePoseRef.current)
-      setSquarePoseRef.current = next
-      setSetSquarePose(next)
-    }
-    if (compassPoseRef.current) {
-      const next = scalePose(compassPoseRef.current)
-      compassPoseRef.current = next
-      setCompassPose(next)
-    }
-    setSelectionRect((current) => current ? {
-      x: current.x * scaleX,
-      y: current.y * scaleY,
-      width: current.width * scaleX,
-      height: current.height * scaleY,
-    } : current)
-  }, [])
-
   const commitPendingGrowRemap = useCallback((layoutW: number, layoutH: number) => {
     const flushed = pendingGrowScale(pendingGrowRemapRef.current, layoutW, layoutH)
     if (flushed.discard) {
@@ -1958,30 +1982,6 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     return true
   }, [redraw, scaleNormalizedSpace])
   commitPendingGrowRemapRef.current = commitPendingGrowRemap
-
-  const flushPaintedLayoutGrow = useCallback(() => {
-    const paper = resolvePaperElement()
-    if (!paper) return false
-    const nextW = paper.offsetWidth
-    const nextH = paper.offsetHeight
-    const prevW = paintedLayoutRef.current.w
-    const prevH = paintedLayoutRef.current.h
-    if (!paintedBoxIsUsable(prevW) || !paintedBoxIsUsable(prevH)) {
-      paintedLayoutRef.current = { w: nextW, h: nextH }
-      return false
-    }
-    const scaleX = liveGrowScale(prevW, nextW, sourceWidthRef.current, sourceWidthRef.current, false)
-    const scaleY = liveGrowScale(prevH, nextH, sourceHeightRef.current, sourceHeightRef.current, false)
-    paintedLayoutRef.current = { w: nextW, h: nextH }
-    if (scaleX === 1 && scaleY === 1) return false
-    scaleNormalizedSpace(scaleX, scaleY)
-    canvasQualityKeyRef.current = ''
-    committedCanvasDirtyRef.current = true
-    activeRenderedPointCountRef.current = 0
-    wipeLiveInkCanvas(canvasRef.current)
-    redraw(true)
-    return true
-  }, [redraw, resolvePaperElement, scaleNormalizedSpace])
 
   /**
    * Resize the writable page without shifting existing ink in absolute space.
