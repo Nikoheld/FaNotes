@@ -37,6 +37,9 @@ export type FileTreeProps = {
   onCreateNote: (parentPath?: string) => MaybePromise
   onCreateFolder: (parentPath?: string) => MaybePromise
   onImportPdf?: (parentPath?: string) => MaybePromise
+  onAttachBook?: (parentPath: string) => MaybePromise
+  onDetachBook?: (parentPath: string) => MaybePromise
+  bookFolderPaths?: string[]
   onSetFolderColor?: (relativePath: string, color: string | null) => MaybePromise
   onRename: (relativePath: string, nextName: string) => MaybePromise
   onMove: (relativePath: string, destFolder: string) => MaybePromise
@@ -144,6 +147,9 @@ export const FileTree = memo(function FileTree({
   onCreateNote,
   onCreateFolder,
   onImportPdf,
+  onAttachBook,
+  onDetachBook,
+  bookFolderPaths = [],
   onSetFolderColor,
   onRename,
   onMove,
@@ -336,13 +342,16 @@ export const FileTree = memo(function FileTree({
 
   const createInFolder = (
     entry: VaultEntry,
-    kind: 'note' | 'folder' | 'pdf',
+    kind: 'note' | 'folder' | 'pdf' | 'book',
     event?: MouseEvent,
   ) => {
     event?.stopPropagation()
     setContextMenu(null)
     toggleFolder(entry.relativePath, true)
-    const action = kind === 'note' ? onCreateNote : kind === 'pdf' ? onImportPdf : onCreateFolder
+    const action = kind === 'note' ? onCreateNote
+      : kind === 'pdf' ? onImportPdf
+        : kind === 'book' ? onAttachBook
+          : onCreateFolder
     if (!action) return
     void Promise.resolve(action(entry.relativePath))
   }
@@ -626,7 +635,7 @@ export const FileTree = memo(function FileTree({
             left: Math.min(Math.max(8, contextMenu.x), window.innerWidth - 232),
             top: Math.min(
               Math.max(8, contextMenu.y),
-              window.innerHeight - (contextMenu.entry.kind === 'folder' ? 430 : 172),
+              window.innerHeight - (contextMenu.entry.kind === 'folder' ? 510 : 172),
             ),
           }}
         >
@@ -653,6 +662,30 @@ export const FileTree = memo(function FileTree({
               >
                 <File aria-hidden="true" size={15} />
                 PDF importieren
+              </button>
+              )}
+              {onAttachBook && (
+              <button
+                onClick={() => createInFolder(contextMenu.entry, 'book')}
+                role="menuitem"
+                type="button"
+              >
+                <FileText aria-hidden="true" size={15} />
+                Buch hinzufügen
+              </button>
+              )}
+              {onDetachBook && bookFolderPaths.includes(contextMenu.entry.relativePath) && (
+              <button
+                onClick={() => {
+                  const path = contextMenu.entry.relativePath
+                  setContextMenu(null)
+                  void Promise.resolve(onDetachBook(path))
+                }}
+                role="menuitem"
+                type="button"
+              >
+                <X aria-hidden="true" size={15} />
+                Buch entfernen
               </button>
               )}
               <button

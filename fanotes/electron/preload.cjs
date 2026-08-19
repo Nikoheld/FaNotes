@@ -29,6 +29,12 @@ const CHANNELS = Object.freeze({
   writeNoteLinks: 'fanotes:write-note-links',
   readNoteBackups: 'fanotes:read-note-backups',
   writeNoteBackups: 'fanotes:write-note-backups',
+  readSubjectBooks: 'fanotes:read-subject-books',
+  writeSubjectBooks: 'fanotes:write-subject-books',
+  importSubjectBook: 'fanotes:import-subject-book',
+  openSubjectBookPopout: 'fanotes:open-subject-book-popout',
+  closeSubjectBookPopout: 'fanotes:close-subject-book-popout',
+  subjectBookPopoutClosed: 'fanotes:subject-book-popout-closed',
   importWorksheet: 'fanotes:import-worksheet',
   importWorksheetFromData: 'fanotes:import-worksheet-from-data',
   importPdfNote: 'fanotes:import-pdf-note',
@@ -102,6 +108,17 @@ const api = Object.freeze({
   writeNoteLinks: (relativePath, links) => invoke(CHANNELS.writeNoteLinks, relativePath, links),
   readNoteBackups: (relativePath) => invoke(CHANNELS.readNoteBackups, relativePath),
   writeNoteBackups: (relativePath, backups) => invoke(CHANNELS.writeNoteBackups, relativePath, backups),
+  readSubjectBooks: () => invoke(CHANNELS.readSubjectBooks),
+  writeSubjectBooks: (books) => invoke(CHANNELS.writeSubjectBooks, books),
+  importSubjectBook: (subjectPath) => invoke(CHANNELS.importSubjectBook, subjectPath),
+  openSubjectBookPopout: (relativePath) => invoke(CHANNELS.openSubjectBookPopout, relativePath),
+  closeSubjectBookPopout: () => invoke(CHANNELS.closeSubjectBookPopout),
+  onSubjectBookPopoutClosed: (callback) => {
+    if (typeof callback !== 'function') return () => {}
+    const listener = () => callback()
+    ipcRenderer.on(CHANNELS.subjectBookPopoutClosed, listener)
+    return () => ipcRenderer.removeListener(CHANNELS.subjectBookPopoutClosed, listener)
+  },
   importWorksheet: () => invoke(CHANNELS.importWorksheet),
   importWorksheetFromData: (payload) => invoke(CHANNELS.importWorksheetFromData, payload),
   importPdfNote: (parentPath) => invoke(CHANNELS.importPdfNote, parentPath),

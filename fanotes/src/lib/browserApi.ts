@@ -5,6 +5,7 @@ import type { AppSettings, BootstrapData, DrawingLibraryDocument, FaNotesApi, Pa
 import { companionNotePath, emptyFamdPayload, parseFamd, serializeFamd } from './famd'
 import { parseNoteBackups, type NoteBackupSnapshot } from './noteBackup'
 import { parseNoteLinks, type NoteLinkRecord } from './noteLink'
+import { parseSubjectBooks, type SubjectBookRecord } from './subjectBook'
 import { isPaperStyle } from './paperStyles'
 import { browserInitialFiles, browserStarterFolders, browserStarterSubjects } from './browserPreview'
 import { listBrowserLmStudioModels, transformWithBrowserLmStudio } from './lmStudioBrowser'
@@ -220,6 +221,7 @@ export function createBrowserApi(): FaNotesApi {
   const drawings = new Map<string, DrawingLibraryDocument>()
   const worksheets = new Map<string, WorksheetDocument>()
   const notePaper = new Map<string, PaperStyle>()
+  let subjectBooks: SubjectBookRecord[] = []
   const noteHistory = new Map<string, Array<{ id: string; createdAt: string; content: string; bytes: number }>>()
   let cachedTree: VaultEntry[] | null = null
   let updateState: UpdateState = {
@@ -330,6 +332,7 @@ export function createBrowserApi(): FaNotesApi {
         if (isPaperStyle(style)) notePaper.set(path, style)
       })
     }
+    subjectBooks = parseSubjectBooks(meta.get('subjectBooks'))
     fileRows.forEach((row) => files.set(row.path, row))
     folderRows.forEach((row) => folders.set(row.path, row))
     assetRows.forEach((row) => assets.set(row.path, row.value))
@@ -1127,6 +1130,47 @@ export function createBrowserApi(): FaNotesApi {
       cachedTree = null
       return backups
     },
+    readSubjectBooks: async () => {
+      await ready
+      return parseSubjectBooks(subjectBooks)
+    },
+    writeSubjectBooks: async (rawBooks) => {
+      await ready
+      subjectBooks = parseSubjectBooks(rawBooks)
+      await setMeta('subjectBooks', subjectBooks)
+      return subjectBooks
+    },
+    importSubjectBook: async (rawSubject) => {
+      const file = await pickPdf()
+      if (!file) return null
+      await ready
+      if (!/\.pdf$/iu.test(file.name) && file.type !== 'application/pdf') throw new Error('Es können nur PDF-Dateien als Buch hinzugefügt werden.')
+      if (!file.size || file.size > MAX_PDF_BYTES) throw new Error(`Das PDF ist leer oder größer als ${Math.round(MAX_PDF_BYTES / 1024 / 1024)} MB.`)
+      if (!await validWorksheetSignature(file, 'pdf')) throw new Error('Die ausgewählte Datei ist kein gültiges PDF.')
+      const parent = normalizePath(rawSubject)
+      if (!folders.has(parent)) throw new Error('Das Fach wurde nicht gefunden.')
+      const title = safeSegment(stem(file.name), english ? 'Book' : 'Buch')
+      const path = uniquePath([parent, `${title}.pdf`].filter(Boolean).join('/'), 'pdf')
+      const source = file.slice(0, file.size, 'application/pdf')
+      const famdPath = `${stem(path)}.famd`
+      const famdRecord = { path: famdPath, content: '', modifiedAt: new Date().toISOString() }
+      await writeMany(['assets', 'files'], (stores) => {
+        stores.get('assets')!.put({ path, value: source } satisfies AssetRecord)
+        stores.get('files')!.put(famdRecord)
+      })
+      assets.set(path, source)
+      files.set(famdPath, famdRecord)
+      cachedTree = null
+      return { relativePath: path, entry: { name: fileName(path), relativePath: path, kind: 'file', extension: 'pdf', size: file.size } }
+    },
+    openSubjectBookPopout: async (rawPath) => {
+      const bookPath = normalizePath(rawPath)
+      const url = `${window.location.pathname}${window.location.search}#subject-book=${encodeURIComponent(bookPath)}`
+      window.open(url, 'fanotes-subject-book', 'width=980,height=1080,noopener')
+      return { open: true, bookPath }
+    },
+    closeSubjectBookPopout: async () => ({ open: false }),
+    onSubjectBookPopoutClosed: () => () => {},
     importPdfNote: async (rawParent) => {
       const file = await pickPdf()
       if (!file) return null

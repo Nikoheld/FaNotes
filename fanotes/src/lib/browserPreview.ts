@@ -254,6 +254,12 @@ export function createBrowserPreviewApi(): FaNotesApi {
     writeNoteLinks: async (_path, links) => links,
     readNoteBackups: async () => [],
     writeNoteBackups: async (_path, backups) => backups,
+    readSubjectBooks: async () => [],
+    writeSubjectBooks: async (books) => books,
+    importSubjectBook: async () => null,
+    openSubjectBookPopout: async (path) => ({ open: true, bookPath: path }),
+    closeSubjectBookPopout: async () => ({ open: false }),
+    onSubjectBookPopoutClosed: () => () => {},
     readAssetBytes: async (path) => {
       const source = assets.get(path) ?? ''
       if (!source) throw new Error('Die lokale Bild- oder PDF-Datei wurde nicht gefunden.')

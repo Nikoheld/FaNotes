@@ -40,6 +40,9 @@ type PdfNoteViewProps = {
   title: string
   inputDisabled?: boolean
   onLayoutChange?: () => void
+  toolbarSlotId?: string
+  initialPage?: number
+  onPageChange?: (page: number, pageCount: number) => void
 }
 
 type OutlineItem = {
@@ -411,6 +414,9 @@ export function PdfNoteView({
   title,
   inputDisabled = false,
   onLayoutChange,
+  toolbarSlotId = PDF_TOOLBAR_SLOT_ID,
+  initialPage,
+  onPageChange,
 }: PdfNoteViewProps) {
   const [pdf, setPdf] = useState<PDFDocumentProxy | null>(null)
   const [loading, setLoading] = useState(true)
@@ -422,8 +428,8 @@ export function PdfNoteView({
   const [currentPage, setCurrentPage] = useState(1)
   const [toolbarHost, setToolbarHost] = useState<HTMLElement | null>(null)
   useLayoutEffect(() => {
-    setToolbarHost(document.getElementById(PDF_TOOLBAR_SLOT_ID))
-  })
+    setToolbarHost(document.getElementById(toolbarSlotId))
+  }, [toolbarSlotId])
   const [pageDraft, setPageDraft] = useState('1')
   const [rotation, setRotation] = useState(0)
   const [zoomMode, setZoomMode] = useState<ZoomMode>('fit-width')
@@ -480,8 +486,9 @@ export function PdfNoteView({
           pdfTaskRef.current = task
           setPdf(loaded)
           setPageCount(loaded.numPages)
-          setCurrentPage(1)
-          setPageDraft('1')
+          const start = Math.max(1, Math.min(loaded.numPages, Math.round(Number(initialPage) || 1)))
+          setCurrentPage(start)
+          setPageDraft(String(start))
           try {
             const first = await loaded.getPage(1)
             if (alive) {
@@ -520,7 +527,12 @@ export function PdfNoteView({
       pdfTaskRef.current = null
       void task?.destroy().catch(() => undefined)
     }
-  }, [notifyLayout, password, path])
+  }, [initialPage, notifyLayout, password, path])
+
+  useEffect(() => {
+    if (!onPageChange || pageCount < 1) return
+    onPageChange(currentPage, pageCount)
+  }, [currentPage, onPageChange, pageCount])
 
   useEffect(() => {
     const stage = pagesRef.current?.closest('.unified-note-view') as HTMLElement | null

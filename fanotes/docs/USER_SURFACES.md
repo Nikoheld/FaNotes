@@ -2,7 +2,7 @@
 
 Inventory walked from the shipped UI entry points. Each row names a user-visible surface and the source that implements it. The check `scripts/check-user-surfaces.cjs` re-reads those files and fails if a listed needle disappears.
 
-Command-palette action ids walked from `src/App.tsx`: `new-note`, `import-pdf-note`, `new-folder`, `new-subfolder`, `save`, `search`, `drawing`, `note-link`, `worksheet`, `onenote-import`, `ai-assistant`, `glyphenwerk`, `overview`, `homework`, `daily`, `export-pdf`, `history`, `split`, `focus`, `sidebar`, `inspector`, `settings`, `reveal`, `bug-report`, `quit`.
+Command-palette action ids walked from `src/App.tsx`: `new-note`, `import-pdf-note`, `new-folder`, `new-subfolder`, `save`, `search`, `drawing`, `note-link`, `subject-book`, `worksheet`, `onenote-import`, `ai-assistant`, `glyphenwerk`, `overview`, `homework`, `daily`, `export-pdf`, `history`, `split`, `focus`, `sidebar`, `inspector`, `settings`, `reveal`, `bug-report`, `quit`.
 
 ## Notes / vault
 
@@ -23,6 +23,14 @@ Command-palette action ids walked from `src/App.tsx`: `new-note`, `import-pdf-no
 | Backup control policy | `src/lib/noteBackup.ts` | `export const noteBackupControlPolicy` |
 | Backup top chrome | `src/App.tsx` | `note-backup-control` |
 | Notiz-Backup Experimentell | `src/components/SettingsModal.tsx` | `title="Notiz-Backup"` |
+| Subject PDF book attach | `src/lib/subjectBook.ts` | `export const attachSubjectBook` |
+| Subject book view policy | `src/lib/subjectBook.ts` | `export const subjectBookViewPolicy` |
+| Subject book last page | `src/lib/subjectBook.ts` | `export const recordSubjectBookPage` |
+| Subject book notes | `src/lib/subjectBook.ts` | `export const persistSubjectBookNotes` |
+| Book top chrome | `src/App.tsx` | `subject-book-control` |
+| Book pane | `src/components/SubjectBookPane.tsx` | `export function SubjectBookPane` |
+| Book pop-out window | `electron/main.cjs` | `openSubjectBookPopout` |
+| Attach book in folder menu | `src/components/FileTree.tsx` | `Buch hinzufügen` |
 | Desktop vault IPC | `electron/preload.cjs` | `createNote: 'fanotes:create-note'` |
 
 ## Paper / ink
@@ -114,6 +122,7 @@ Command-palette action ids walked from `src/App.tsx`: `new-note`, `import-pdf-no
 | Reveal in folder | `src/App.tsx` | `id: 'reveal'` |
 | Palette ids | `src/App.tsx` | `id: 'new-folder'` |
 | Place Verlinkung palette | `src/App.tsx` | `id: 'note-link'` |
+| Subject book palette | `src/App.tsx` | `id: 'subject-book'` |
 | Editor more menu | `src/App.tsx` | `editor-menu-label">Datei` |
 
 ## Bug report

@@ -1,5 +1,6 @@
 import type { NoteBackupSnapshot } from './lib/noteBackup'
 import type { NoteLinkRecord } from './lib/noteLink'
+import type { SubjectBookRecord } from './lib/subjectBook'
 
 export type VaultEntry = {
   name: string
@@ -478,6 +479,12 @@ export type FaNotesApi = {
   writeNoteLinks?: (relativePath: string, links: NoteLinkRecord[]) => Promise<NoteLinkRecord[]>
   readNoteBackups?: (relativePath: string) => Promise<NoteBackupSnapshot[]>
   writeNoteBackups?: (relativePath: string, backups: NoteBackupSnapshot[]) => Promise<NoteBackupSnapshot[]>
+  readSubjectBooks?: () => Promise<SubjectBookRecord[]>
+  writeSubjectBooks?: (books: SubjectBookRecord[]) => Promise<SubjectBookRecord[]>
+  importSubjectBook?: (subjectPath: string) => Promise<CreateResult | null>
+  openSubjectBookPopout?: (relativePath: string) => Promise<{ open: boolean; bookPath?: string }>
+  closeSubjectBookPopout?: () => Promise<{ open: boolean }>
+  onSubjectBookPopoutClosed?: (callback: () => void) => () => void
   importWorksheet: () => Promise<WorksheetDocument | null>
   importWorksheetFromData?: (payload: { name: string; mimeType: string; bytes: Uint8Array }) => Promise<WorksheetDocument>
   importPdfNote: (parentPath?: string) => Promise<CreateResult | null>

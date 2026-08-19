@@ -45,6 +45,7 @@ const {
   stripFamdPayload,
   worksheetIdsFromMarkdown,
 } = require('./famd.cjs')
+const { parseSubjectBooks } = require('./subject-book.cjs')
 
 protocol.registerSchemesAsPrivileged([{
   scheme: 'fanotes-model',
@@ -164,6 +165,11 @@ const IPC = Object.freeze({
   writeNoteLinks: 'fanotes:write-note-links',
   readNoteBackups: 'fanotes:read-note-backups',
   writeNoteBackups: 'fanotes:write-note-backups',
+  readSubjectBooks: 'fanotes:read-subject-books',
+  writeSubjectBooks: 'fanotes:write-subject-books',
+  importSubjectBook: 'fanotes:import-subject-book',
+  openSubjectBookPopout: 'fanotes:open-subject-book-popout',
+  closeSubjectBookPopout: 'fanotes:close-subject-book-popout',
   importWorksheet: 'fanotes:import-worksheet',
   importWorksheetFromData: 'fanotes:import-worksheet-from-data',
   importPdfNote: 'fanotes:import-pdf-note',
@@ -421,6 +427,7 @@ const MAX_SEARCH_RESULTS = 250
 const MAX_TREE_DEPTH = 80
 const MAX_FOLDER_COLOR_BYTES = 512 * 1024
 const MAX_FOLDER_COLOR_ENTRIES = 5000
+const MAX_SUBJECT_BOOK_BYTES = 512 * 1024
 const MAX_ONBOARDING_STATE_BYTES = 4096
 const MAX_TREE_CACHE_BYTES = 24 * 1024 * 1024
 const MAX_TREE_CACHE_ENTRIES = 100_000
@@ -542,6 +549,7 @@ Enjoy capturing your thoughts!
 `
 
 let mainWindow = null
+let subjectBookWindow = null
 let allowWindowClose = false
 let closeFallbackTimer = null
 let closeWarningDialogOpen = false
@@ -1163,6 +1171,43 @@ async function writeFolderColors(root, colors) {
     throw new Error('Zu viele Ordnerfarben für diesen Vault.')
   }
   await atomicWrite(path.join(internalDirectory, 'folder-colors.json'), snapshot, { encoding: 'utf8', mode: 0o600 })
+}
+
+async function readSubjectBooksFromVault(root) {
+  const internalDirectory = await ensureInternalVaultDirectory(root)
+  const metadataPath = path.join(internalDirectory, 'subject-books.json')
+  try {
+    const info = await fsp.lstat(metadataPath)
+    if (!info.isFile() || info.isSymbolicLink() || info.size > MAX_SUBJECT_BOOK_BYTES) return []
+    const raw = (await readRegularFileNoFollow(metadataPath, MAX_SUBJECT_BOOK_BYTES)).toString('utf8')
+    const parsed = JSON.parse(raw)
+    return parseSubjectBooks(parsed?.books ?? parsed)
+  } catch (error) {
+    if (error?.code !== 'ENOENT') {
+      console.warn('Fachbücher konnten nicht gelesen werden:', error?.message ?? error)
+    }
+    return []
+  }
+}
+
+async function writeSubjectBooksToVault(root, books) {
+  const internalDirectory = await ensureInternalVaultDirectory(root)
+  const list = parseSubjectBooks(books)
+  const snapshot = `${JSON.stringify({ version: 1, books: list }, null, 2)}\n`
+  if (Buffer.byteLength(snapshot, 'utf8') > MAX_SUBJECT_BOOK_BYTES) {
+    throw new Error('Zu viele Fachbücher für diesen Vault.')
+  }
+  await atomicWrite(path.join(internalDirectory, 'subject-books.json'), snapshot, { encoding: 'utf8', mode: 0o600 })
+  return list
+}
+
+function closeSubjectBookPopoutWindow() {
+  if (!subjectBookWindow || subjectBookWindow.isDestroyed()) {
+    subjectBookWindow = null
+    return
+  }
+  subjectBookWindow.close()
+  subjectBookWindow = null
 }
 
 function queueFolderColorMutation(root, vaultGeneration, operation) {
@@ -3622,6 +3667,127 @@ function registerIpcHandlers() {
     return backups
   })
 
+  handle(IPC.readSubjectBooks, async () => {
+    await ensureBootstrap()
+    const root = await assertCurrentVaultRoot()
+    return readSubjectBooksFromVault(root)
+  })
+
+  handle(IPC.writeSubjectBooks, async (_event, rawBooks) => {
+    await ensureBootstrap()
+    const root = await assertCurrentVaultRoot()
+    return writeSubjectBooksToVault(root, rawBooks)
+  })
+
+  handle(IPC.importSubjectBook, async (_event, rawSubjectPath) => {
+    await ensureBootstrap()
+    if (typeof rawSubjectPath !== 'string' || !rawSubjectPath.trim()) {
+      throw new Error('Wähle zuerst ein Fach für das Buch.')
+    }
+    const subjectPath = normalizeRelativePath(rawSubjectPath).split(path.sep).join('/')
+    const result = await dialog.showOpenDialog(mainWindow, localizedDialog({
+      title: 'PDF-Buch zum Fach hinzufügen',
+      buttonLabel: 'Buch hinzufügen',
+      properties: ['openFile'],
+      filters: [{ name: 'PDF-Dokumente', extensions: ['pdf'] }],
+    }))
+    if (result.canceled || result.filePaths.length !== 1) return null
+    const selectedPath = result.filePaths[0]
+    if (path.extname(selectedPath).toLocaleLowerCase('en-US') !== '.pdf') {
+      throw new Error('Es können nur PDF-Dateien als Buch hinzugefügt werden.')
+    }
+    const format = WORKSHEET_FORMATS.get('.pdf')
+    if (!format) throw new Error('PDF-Bücher sind in dieser Version nicht verfügbar.')
+    const source = await readRegularFileNoFollow(selectedPath, format.maxBytes)
+    if (!source.length) throw new Error('Die ausgewählte PDF-Datei ist leer.')
+    validateWorksheetBytes(source, '.pdf')
+    const { root, target: parentTarget } = await resolveVaultPath(subjectPath, { expected: 'directory' })
+    const title = safeEntryName(splitName(path.basename(selectedPath)).stem, localizeText('Buch', currentUiLanguage()))
+    const desiredName = `${title}.pdf`
+    const occupied = await siblingNames(parentTarget)
+    let candidate = desiredName
+    for (let number = 1; number <= 10000; number += 1) {
+      candidate = numberedName(desiredName, number)
+      const famdName = `${splitName(candidate).stem}.famd`
+      const candidateKey = candidate.normalize('NFC').toLocaleLowerCase('de-DE')
+      const famdKey = famdName.normalize('NFC').toLocaleLowerCase('de-DE')
+      if (occupied.has(candidateKey) || occupied.has(famdKey)) continue
+      const absolutePath = path.join(parentTarget, candidate)
+      try {
+        await queueFileWrite(absolutePath, async () => atomicWrite(absolutePath, source, { mode: 0o600 }))
+        const info = await fsp.lstat(absolutePath)
+        const entry = entryFromStat(root, absolutePath, info)
+        try {
+          await writeFamdCompanion(entry.relativePath, '')
+        } catch (error) {
+          console.warn('FaNotes: .famd-Begleiter zum Fachbuch fehlte:', error?.message ?? error)
+        }
+        return { relativePath: entry.relativePath, entry }
+      } catch (error) {
+        if (error?.code !== 'EEXIST') throw error
+      }
+    }
+    throw new Error('Es konnte kein eindeutiger Buchname erzeugt werden.')
+  })
+
+  handle(IPC.openSubjectBookPopout, async (_event, relativePath) => {
+    await ensureBootstrap()
+    if (typeof relativePath !== 'string') throw new Error('Ungültiger Buchpfad.')
+    const bookPath = normalizeRelativePath(relativePath).split(path.sep).join('/')
+    assertNotePath(bookPath)
+    if (path.extname(bookPath).toLocaleLowerCase('en-US') !== '.pdf') {
+      throw new Error('Nur ein PDF-Buch kann auspoppen.')
+    }
+    if (subjectBookWindow && !subjectBookWindow.isDestroyed()) {
+      subjectBookWindow.focus()
+      const current = subjectBookWindow.webContents.getURL()
+      const nextHash = `#subject-book=${encodeURIComponent(bookPath)}`
+      if (!current.includes(nextHash)) await subjectBookWindow.loadURL(`${current.split('#')[0]}${nextHash}`)
+      return { open: true, bookPath }
+    }
+    subjectBookWindow = new BrowserWindow({
+      width: 980,
+      height: 1080,
+      minWidth: 420,
+      minHeight: 360,
+      show: true,
+      backgroundColor: '#0b0c12',
+      title: 'Buch',
+      ...linuxWindowFrameOptions(),
+      webPreferences: {
+        preload: path.join(__dirname, 'preload.cjs'),
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: true,
+        webSecurity: true,
+        backgroundThrottling: false,
+        spellcheck: false,
+      },
+    })
+    subjectBookWindow.setMenuBarVisibility(false)
+    void subjectBookWindow.webContents.setVisualZoomLevelLimits(1, 1)
+    subjectBookWindow.webContents.setWindowOpenHandler(({ url }) => {
+      void openExternalSafely(url).catch(() => {})
+      return { action: 'deny' }
+    })
+    subjectBookWindow.on('closed', () => {
+      subjectBookWindow = null
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('fanotes:subject-book-popout-closed')
+      }
+    })
+    const hash = `#subject-book=${encodeURIComponent(bookPath)}`
+    const devUrl = trustedDevUrl()
+    if (devUrl) await subjectBookWindow.loadURL(`${devUrl}${hash}`)
+    else await subjectBookWindow.loadURL(`${pathToFileURL(rendererFilePath()).href}${hash}`)
+    return { open: true, bookPath }
+  })
+
+  handle(IPC.closeSubjectBookPopout, async () => {
+    closeSubjectBookPopoutWindow()
+    return { open: false }
+  })
+
   handle(IPC.importWorksheet, async () => {
     await ensureBootstrap()
     const result = await dialog.showOpenDialog(mainWindow, localizedDialog({
@@ -4436,6 +4602,7 @@ async function createWindow() {
   })
   mainWindow.on('closed', () => {
     invalidateCloseWarningState()
+    closeSubjectBookPopoutWindow()
     mainWindow = null
   })
 

@@ -172,6 +172,16 @@ function translateCore(source: string): string {
   if (source === 'Aktuelle Notiz so sichern, wie sie ist') return 'Save the current note as it is'
   if (source === 'Backup der aktuellen Notiz') return 'Backup of the current note'
   if (source === 'Backup: weiteres Backup oder wiederherstellen') return 'Backup: take another snapshot or restore'
+  if (source === 'Buch') return 'Book'
+  if (source === 'Buchansicht') return 'Book view'
+  if (source === 'Buch hinzufügen') return 'Add book'
+  if (source === 'Buch entfernen') return 'Remove book'
+  if (source === 'Buchplatzierung') return 'Book placement'
+  if (source === 'Auspoppen') return 'Pop out'
+  if (source === 'Notizen im Buch') return 'Notes in the book'
+  if (source === 'Buch zum Fach hinzugefügt. Oben blendest du die Ansicht ein.') return 'Book added to the subject. Use the top bar to show it.'
+  if (source === 'Buch vom Fach entfernt. Die PDF-Datei bleibt im Ordner.') return 'Book removed from the subject. The PDF file stays in the folder.'
+  if (source === 'Öffne eine Notiz in einem Fach, um ein Buch hinzuzufügen.') return 'Open a note in a subject to add a book.'
   if (source === 'Neue Notiz in diesem Ordner') return 'New note in this folder'
   const newNoteIn = /^Neue Notiz in (.+)$/u.exec(source)
   if (newNoteIn) return `New note in ${newNoteIn[1]}`

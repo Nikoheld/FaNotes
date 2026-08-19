@@ -17,6 +17,7 @@ FaNotes ist eine lokale Desktop-App für Schule, UNI, Privatleben und Arbeit. Si
 - Markdown-Dateien in einer einzigen FaNotes-Live-Ansicht schreiben und automatisch speichern
 - auf einer Notiz oder einem PDF eine Verlinkung setzen (Symbol oder Text); ein Tippen öffnet die neue Notiz, oben führt Zurück zurück
 - unter Experimentell einen Backup-Knopf in der oberen Leiste einschalten: die aktuelle Notiz so sichern, wie sie ist, und später weitere Backups machen oder alte wiederherstellen
+- einem Fach ein PDF-Buch zuordnen und die Ansicht oben einblenden (Links, Rechts, Oben, Unten oder auspoppen); die Seite bleibt gemerkt, Notizen liegen auf dem Buch-PDF
 - mögliche Tippfehler wie in Word rot gewellt markieren und Deutsch oder Englisch pro Textabschnitt automatisch erkennen – vollständig lokal und auch in gemischten Notizen
 - Überschriften, Hervorhebungen, Links, Listen, Aufgaben, Tabellen, Code und Mathematik über eine Formatierungsleiste einfügen
 - ganze Abschnitte unter einem Titel direkt im Live-Editor ein- und ausklappen

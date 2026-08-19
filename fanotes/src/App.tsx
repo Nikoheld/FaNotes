@@ -74,6 +74,18 @@ import {
   restoreNoteBackup,
   type NoteBackupSnapshot,
 } from './lib/noteBackup'
+import {
+  applySubjectBookPlacement,
+  attachSubjectBook,
+  detachSubjectBook,
+  recordSubjectBookPage,
+  SUBJECT_BOOK_PLACEMENT_OPTIONS,
+  subjectBookForNote,
+  subjectBookViewPolicy,
+  toggleSubjectBookView,
+  type SubjectBookPlacement,
+  type SubjectBookRecord,
+} from './lib/subjectBook'
 import { PDF_TOOLBAR_SLOT_ID } from './lib/pdfInkHit'
 import { APP_VERSION } from './lib/appVersion'
 import { defaultSettingsForPlatform } from './defaults'
@@ -126,6 +138,7 @@ const RightInspector = lazy(() => import('./components/RightInspector').then((mo
 const SearchPanel = lazy(() => import('./components/SearchPanel').then((module) => ({ default: module.SearchPanel })))
 const SettingsModal = lazy(() => import('./components/SettingsModal').then((module) => ({ default: module.SettingsModal })))
 const BugReportModal = lazy(() => import('./components/BugReportModal').then((module) => ({ default: module.BugReportModal })))
+const SubjectBookPane = lazy(() => import('./components/SubjectBookPane').then((module) => ({ default: module.SubjectBookPane })))
 const VaultOverview = lazy(() => import('./components/VaultOverview').then((module) => ({ default: module.VaultOverview })))
 const HomeworkBoard = lazy(() => import('./components/HomeworkBoard').then((module) => ({ default: module.HomeworkBoard })))
 const WorksheetLayer = lazy(() => import('./components/WorksheetLayer').then((module) => ({ default: module.WorksheetLayer })))
@@ -418,6 +431,14 @@ export default function App({ startupBootstrap }: AppProps) {
   const [noteNavStack, setNoteNavStack] = useState<string[]>([])
   const [noteBackups, setNoteBackups] = useState<NoteBackupSnapshot[]>([])
   const [backupMenuOpen, setBackupMenuOpen] = useState(false)
+  const [subjectBooks, setSubjectBooks] = useState<SubjectBookRecord[]>([])
+  const [bookOpen, setBookOpen] = useState(false)
+  const [bookPlacement, setBookPlacement] = useState<SubjectBookPlacement>('rechts')
+  const popoutBookPath = typeof window === 'undefined' ? '' : (() => {
+    const match = /^#subject-book=(.+)$/u.exec(window.location.hash)
+    if (!match) return ''
+    try { return decodeURIComponent(match[1]) } catch { return '' }
+  })()
   const [tagDraft, setTagDraft] = useState('')
   const [splitPath, setSplitPath] = useState<string | null>(null)
   const [historyOpen, setHistoryOpen] = useState(false)
@@ -539,6 +560,38 @@ export default function App({ startupBootstrap }: AppProps) {
     () => noteBackupControlPolicy(settings.experimentalNoteBackup, noteBackups.length),
     [noteBackups.length, settings.experimentalNoteBackup],
   )
+  const currentBook = useMemo(
+    () => subjectBookForNote(subjectBooks, activePath) ?? (popoutBookPath
+      ? subjectBooks.find((book) => book.bookPath === popoutBookPath) ?? {
+        subjectPath: parentPath(popoutBookPath),
+        bookPath: popoutBookPath,
+        lastPage: 1,
+      }
+      : null),
+    [activePath, popoutBookPath, subjectBooks],
+  )
+  const bookPolicy = useMemo(
+    () => subjectBookViewPolicy({
+      hasBook: Boolean(currentBook) && !popoutBookPath,
+      open: bookOpen,
+      placement: bookPlacement,
+    }),
+    [bookOpen, bookPlacement, currentBook, popoutBookPath],
+  )
+  useEffect(() => {
+    if (popoutBookPath) return
+    if (bookOpen && bookPlacement === 'popout' && currentBook) {
+      void window.fanotes.openSubjectBookPopout?.(currentBook.bookPath)
+      return
+    }
+    void window.fanotes.closeSubjectBookPopout?.()
+  }, [bookOpen, bookPlacement, currentBook, popoutBookPath])
+  useEffect(() => {
+    if (!window.fanotes.onSubjectBookPopoutClosed) return
+    return window.fanotes.onSubjectBookPopoutClosed(() => {
+      setBookOpen((open) => bookPlacement === 'popout' ? false : open)
+    })
+  }, [bookPlacement])
   const isPdfActive = Boolean(activeTab && (activeTab.kind === 'pdf' || isPdfNotePath(activeTab.path)))
   const activePaper = useMemo(
     () => normalizePaperStyle(activePath ? notePaperByPath[activePath] : undefined, settings.paperStyle),
@@ -680,6 +733,21 @@ export default function App({ startupBootstrap }: AppProps) {
       })
     return () => { alive = false }
   }, [activePath])
+
+  useEffect(() => {
+    if (!window.fanotes.readSubjectBooks) return
+    let alive = true
+    void window.fanotes.readSubjectBooks()
+      .then((list) => {
+        if (!alive) return
+        setSubjectBooks(Array.isArray(list) ? list : [])
+      })
+      .catch(() => {
+        if (!alive) return
+        setSubjectBooks([])
+      })
+    return () => { alive = false }
+  }, [bootstrap?.vaultPath])
 
   useEffect(() => {
     const requestId = ++worksheetLoadRequestRef.current
@@ -1199,6 +1267,60 @@ export default function App({ startupBootstrap }: AppProps) {
     if (!window.fanotes.writeNoteBackups) return
     await window.fanotes.writeNoteBackups(path, next)
   }, [])
+
+  const persistSubjectBooks = useCallback(async (list: SubjectBookRecord[]) => {
+    setSubjectBooks(list)
+    if (window.fanotes.writeSubjectBooks) await window.fanotes.writeSubjectBooks(list)
+  }, [])
+
+  const attachBookToSubject = useCallback(async (subjectPath: string) => {
+    if (!window.fanotes.importSubjectBook) {
+      toast('Bücher können in dieser Umgebung nicht hinzugefügt werden.', 'info')
+      return
+    }
+    try {
+      const created = await window.fanotes.importSubjectBook(subjectPath)
+      if (!created) return
+      const next = attachSubjectBook(subjectBooks, { subjectPath, bookPath: created.relativePath })
+      await persistSubjectBooks(next.list)
+      await refreshTree()
+      toast('Buch zum Fach hinzugefügt. Oben blendest du die Ansicht ein.', 'success')
+    } catch (error) {
+      toast(error instanceof Error ? error.message : 'Das Buch konnte nicht hinzugefügt werden.', 'error')
+    }
+  }, [persistSubjectBooks, refreshTree, subjectBooks, toast])
+
+  const detachBookFromSubject = useCallback(async (subjectPath: string) => {
+    try {
+      await persistSubjectBooks(detachSubjectBook(subjectBooks, subjectPath))
+      if (currentBook?.subjectPath === subjectPath) setBookOpen(false)
+      toast('Buch vom Fach entfernt. Die PDF-Datei bleibt im Ordner.', 'success')
+    } catch (error) {
+      toast(error instanceof Error ? error.message : 'Das Buch konnte nicht entfernt werden.', 'error')
+    }
+  }, [currentBook?.subjectPath, persistSubjectBooks, subjectBooks, toast])
+
+  const toggleBookView = useCallback(() => {
+    const next = toggleSubjectBookView(bookOpen, bookPlacement)
+    setBookOpen(next.open)
+    setBookPlacement(next.placement)
+  }, [bookOpen, bookPlacement])
+
+  const placeBookView = useCallback((placement: SubjectBookPlacement) => {
+    const next = applySubjectBookPlacement(placement)
+    setBookOpen(next.open)
+    if (next.placement) setBookPlacement(next.placement)
+  }, [])
+
+  const handleBookPage = useCallback((page: number, pageCount: number) => {
+    if (!currentBook) return
+    const updated = recordSubjectBookPage(currentBook, page, pageCount)
+    if (!updated || updated.lastPage === currentBook.lastPage) return
+    const list = subjectBooks.some((book) => book.subjectPath === updated.subjectPath)
+      ? subjectBooks.map((book) => book.subjectPath === updated.subjectPath ? updated : book)
+      : [...subjectBooks, updated]
+    void persistSubjectBooks(list)
+  }, [currentBook, persistSubjectBooks, subjectBooks])
 
   const snapshotCurrentNote = useCallback(async () => {
     const path = activePathRef.current
@@ -2471,6 +2593,15 @@ export default function App({ startupBootstrap }: AppProps) {
     { id: 'search', label: 'Im Vault suchen', shortcut: 'Ctrl ⇧ F', group: 'Navigation', icon: <Search size={15} />, run: () => setSearchOpen(true) },
     { id: 'drawing', label: drawingOpen ? 'Zur Tastatur wechseln' : 'Mit Stift schreiben', detail: 'Eingabeart auf derselben Notizseite wechseln', shortcut: 'Ctrl D', group: 'Werkzeuge', keywords: 'tablet stift erkennen mathe', icon: <PenLine size={15} />, run: toggleDrawing },
     { id: 'note-link', label: 'Verlinkung setzen', detail: 'Irgendwo auf der Seite eine neue Notiz verlinken', group: 'Werkzeuge', keywords: 'verlinkung link notiz pdf symbol text', icon: <Link2 size={15} />, run: startNoteLinkPlacement },
+    { id: 'subject-book', label: bookOpen ? 'Buch ausblenden' : 'Buch einblenden', detail: currentBook ? 'PDF-Buch des Fachs neben der Notiz' : 'Zuerst über das Fachmenü ein Buch hinzufügen', group: 'Werkzeuge', keywords: 'buch pdf fach links rechts oben unten auspoppen', icon: <BookOpen size={15} />, run: () => {
+      if (!currentBook) {
+        const subject = activePath ? parentPath(activePath) : ''
+        if (subject) void attachBookToSubject(subject)
+        else toast('Öffne eine Notiz in einem Fach, um ein Buch hinzuzufügen.', 'info')
+        return
+      }
+      toggleBookView()
+    } },
     { id: 'worksheet', label: 'Bild oder PDF als Arbeitsblatt', detail: 'In die aktuelle oder eine neue Notiz importieren und ausfüllen', shortcut: 'Ctrl ⇧ I', group: 'Werkzeuge', keywords: 'pdf bild import arbeitsblatt ausfüllen', icon: <FileUp size={15} />, run: openWorksheetImport },
     { id: 'onenote-import', label: 'Microsoft OneNote importieren', detail: 'Notizbuch, Abschnitte, Layout, Ink und Anlagen sicher übernehmen', group: 'Dateien', keywords: 'one onetoc2 onepkg onedrive migration', icon: <NotebookTabs size={15} />, run: () => { void importOneNote().catch((error) => toast(error instanceof Error ? error.message : 'OneNote-Import fehlgeschlagen.', 'error')) } },
     { id: 'ai-assistant', label: 'AI-Assistent', detail: 'LM Studio, Ollama, OpenAI, Gemini, Anthropic oder OpenCode nutzen', shortcut: 'Ctrl ⇧ A', group: 'Werkzeuge', keywords: 'ki ai lm studio ollama openai gemini anthropic opencode rechtschreibung fakten', icon: <Bot size={15} />, run: openLmStudio },
@@ -2495,7 +2626,7 @@ export default function App({ startupBootstrap }: AppProps) {
     { id: 'reveal', label: isWeb ? 'Notiz herunterladen' : 'Im Dateimanager zeigen', detail: isWeb ? 'Aktuelle Notiz exportieren' : 'Speicherort der geöffneten Notiz öffnen', group: 'Dateien', keywords: 'ordner explorer finder dateimanager download export', icon: isWeb ? <Download size={15} /> : <FolderOpen size={15} />, run: () => { if (activePath) void window.fanotes.revealInFolder(activePath) } },
     { id: 'bug-report', label: 'Fehler melden', detail: 'Kurz beschreiben; die letzten fünf Minuten werden angehängt', group: 'FaNotes', keywords: 'bug report fehler logs support', icon: <Bug size={15} />, run: () => setBugReportOpen(true) },
     { id: 'quit', label: isWeb ? 'Zur FaNotes-Website' : 'FaNotes beenden', shortcut: 'Ctrl Q', group: 'FaNotes', icon: <X size={15} />, run: () => window.fanotes.requestClose() },
-  ], [activePath, activeTab, createDailyNote, createFolder, createNote, drawingOpen, exportCurrentPdf, focusMode, importOneNote, importPdfNote, isWeb, openGlyphenWerk, openHistory, openHomework, openInSplit, openLmStudio, openOverview, openSettings, openWorksheetImport, saveCurrentWork, settings.dailyNotesFolder, splitPath, startNoteLinkPlacement, tabs, toast, toggleDrawing, toggleFocusMode])
+  ], [activePath, activeTab, attachBookToSubject, bookOpen, createDailyNote, createFolder, createNote, currentBook, drawingOpen, exportCurrentPdf, focusMode, importOneNote, importPdfNote, isWeb, openGlyphenWerk, openHistory, openHomework, openInSplit, openLmStudio, openOverview, openSettings, openWorksheetImport, saveCurrentWork, settings.dailyNotesFolder, splitPath, startNoteLinkPlacement, tabs, toast, toggleBookView, toggleDrawing, toggleFocusMode])
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
@@ -2593,6 +2724,15 @@ export default function App({ startupBootstrap }: AppProps) {
 
   if (fatalError) return <div className="fatal-screen"><section className="fatal-card" role="alert"><div className="startup-mark is-error"><CircleAlert size={22} /></div><h1>FaNotes konnte nicht starten</h1><p>Deine Daten wurden nicht verändert. Prüfe den Vault und versuche es erneut.</p><code>{fatalError}</code><button className="primary-button" type="button" onClick={() => window.location.reload()}>Erneut versuchen</button></section></div>
   if (!bootstrap) return <div className="fatal-screen startup-screen"><section className="fatal-card startup-card" aria-live="polite"><div className="startup-mark"><PenLine size={22} /></div><h1>FaNotes öffnet deinen Schreibtisch</h1><p>Deine letzte Notiz erscheint gleich. Handschrift und weitere Werkzeuge werden danach im Hintergrund bereitgestellt.</p><div className="startup-progress" aria-hidden="true"><span /></div><small><LoaderCircle className="spin" size={12} /> Lokal und privat</small></section></div>
+  if (popoutBookPath && currentBook) {
+    return (
+      <div className="subject-book-popout-root">
+        <Suspense fallback={<div className="subject-book-loading"><LoaderCircle className="spin" size={18} /> Buch wird geladen …</div>}>
+          <SubjectBookPane book={currentBook} settings={settings} popout onPageChange={handleBookPage} />
+        </Suspense>
+      </div>
+    )
+  }
   if (bootstrap.onboardingRequired) return (
     <div className={`app-shell first-run-shell theme-${theme} background-${settings.workspaceBackground} ${settings.reduceMotion ? 'no-motion' : ''}`} style={cssVars}>
       {settings.customCss && <style>{settings.customCss}</style>}
@@ -2701,6 +2841,9 @@ export default function App({ startupBootstrap }: AppProps) {
                 onCreateNote={createNote}
                 onCreateFolder={createFolder}
                 onImportPdf={importPdfNote}
+                onAttachBook={attachBookToSubject}
+                onDetachBook={detachBookFromSubject}
+                bookFolderPaths={subjectBooks.map((book) => book.subjectPath)}
                 onSetFolderColor={setFolderColor}
                 onRename={renameEntry}
                 onMove={moveEntry}
@@ -2757,6 +2900,36 @@ export default function App({ startupBootstrap }: AppProps) {
                   : <FormattingToolbar disabled={!activeTab || overviewOpen || homeworkOpen || glyphenWerkOpen || activeEntryMutating} onFormat={formatMarkdown} />}
             </div>
             <div className="toolbar-group toolbar-end">
+              {bookPolicy.controlVisible && (
+                <div className="subject-book-control">
+                  <button
+                    type="button"
+                    className={`toolbar-button ${bookOpen ? 'active' : ''}`}
+                    title="Buchansicht"
+                    aria-label="Buch"
+                    aria-pressed={bookOpen}
+                    onClick={toggleBookView}
+                  >
+                    <BookOpen size={14} /><span>Buch</span>
+                  </button>
+                  {bookOpen && (
+                    <div className="subject-book-placements" role="group" aria-label="Buchplatzierung">
+                      {SUBJECT_BOOK_PLACEMENT_OPTIONS.map((option) => (
+                        <button
+                          key={option.id}
+                          type="button"
+                          className={bookPlacement === option.id ? 'is-active' : ''}
+                          aria-pressed={bookPlacement === option.id}
+                          title={option.label}
+                          onClick={() => placeBookView(option.id)}
+                        >
+                          {option.label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
               {backupPolicy.visible && (
                 <div className="note-backup-control">
                   <button
@@ -2845,7 +3018,17 @@ export default function App({ startupBootstrap }: AppProps) {
               </div>
             </div>
           </div>
-          <div className="editor-stage">
+          <div className={`editor-stage ${bookPolicy.paneVisible && bookPolicy.placement && bookPolicy.placement !== 'popout' ? `has-subject-book is-${bookPolicy.placement}` : ''}`}>
+            {bookPolicy.paneVisible && bookPolicy.placement && bookPolicy.placement !== 'popout' && currentBook && (
+              <Suspense fallback={<div className="subject-book-loading"><LoaderCircle className="spin" size={18} /> Buch wird geladen …</div>}>
+                <SubjectBookPane
+                  book={currentBook}
+                  settings={settings}
+                  onPageChange={handleBookPage}
+                  onClose={() => setBookOpen(false)}
+                />
+              </Suspense>
+            )}
             <Suspense fallback={<div className="editor-module-loading"><LoaderCircle className="spin" size={20} /><span>Ansicht wird geladen …</span></div>}>
               {glyphenWerkOpen ? (
               <SafeBoundary name="GlyphenWerk" fallbackTitle="GlyphenWerk ist abgestürzt">

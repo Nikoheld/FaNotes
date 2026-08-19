@@ -415,6 +415,72 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 }
 .note-nav-back:hover:not(:disabled) { color: var(--text); background: color-mix(in srgb, var(--text) 5%, transparent); }
 .note-nav-back:disabled { cursor: default; opacity: .38; }
+.subject-book-control { display: inline-flex; align-items: center; gap: 4px; }
+.subject-book-placements {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  margin-right: 4px;
+  padding: 1px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--panel) 70%, transparent);
+}
+.subject-book-placements button {
+  height: 23px;
+  padding: 0 7px;
+  border: 0;
+  border-radius: 6px;
+  color: var(--text-muted);
+  background: transparent;
+  cursor: pointer;
+  font-size: 9px;
+  font-weight: 650;
+}
+.subject-book-placements button:hover { color: var(--text); background: var(--panel-hover); }
+.subject-book-placements button.is-active { color: var(--text); background: var(--panel-active); }
+.subject-book-pane {
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: 36px minmax(0, 1fr);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+}
+.subject-book-pane.is-popout { height: 100%; border: 0; }
+.subject-book-pane-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 0 8px;
+  border-bottom: 1px solid var(--border);
+}
+.subject-book-pane-bar strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+.subject-book-pdf-toolbar { flex: 1; min-width: 0; overflow: auto hidden; }
+.subject-book-pane-body { position: relative; min-width: 0; min-height: 0; overflow: hidden; }
+.subject-book-pane-body .pdf-note-view { height: 100%; }
+.subject-book-pane-body .lw-drawing-board.is-inline { position: absolute; inset: 0; pointer-events: none; }
+.subject-book-pane.is-inking .lw-drawing-board.is-inline { pointer-events: auto; }
+.subject-book-loading { display: grid; place-items: center; gap: 8px; color: var(--text-muted); font-size: 12px; }
+.subject-book-popout-root { height: 100%; min-height: 100vh; background: var(--bg); }
+.editor-stage.has-subject-book { display: grid; }
+.editor-stage.has-subject-book.is-links { grid-template-columns: minmax(240px, 42%) minmax(0, 1fr); }
+.editor-stage.has-subject-book.is-rechts { grid-template-columns: minmax(0, 1fr) minmax(240px, 42%); }
+.editor-stage.has-subject-book.is-rechts > .subject-book-pane { order: 2; }
+.editor-stage.has-subject-book.is-oben { grid-template-rows: minmax(160px, 38%) minmax(0, 1fr); }
+.editor-stage.has-subject-book.is-unten { grid-template-rows: minmax(0, 1fr) minmax(160px, 38%); }
+.editor-stage.has-subject-book.is-unten > .subject-book-pane { order: 2; }
+.editor-stage.has-subject-book > :not(.subject-book-pane) { min-width: 0; min-height: 0; overflow: hidden; }
 .note-backup-control { position: relative; }
 .note-backup-menu {
   position: absolute;
