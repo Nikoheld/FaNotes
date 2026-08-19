@@ -46,6 +46,16 @@ export const isUsablePointerClient = (event: InkPointerLike | null | undefined) 
   return true
 }
 
+/** First gate only: 0,0 / missing surface / unusable. Does not leap-filter. */
+export const acceptUsableInkClient = (
+  event: InkPointerLike,
+  surface: PaperSurfaceBox | null,
+  rotation = 0,
+) => {
+  if (isPreviewOnlyPointerEvent(event) || !isUsablePointerClient(event)) return null
+  return mapClientToPaperPoint(event, surface, rotation)
+}
+
 export const mapClientToPaperPoint = (
   event: InkPointerLike,
   surface: PaperSurfaceBox | null,

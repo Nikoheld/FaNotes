@@ -93,7 +93,7 @@ import {
   type InkPointerSessionSnapshot,
 } from '../lib/inkPointerSession'
 import {
-  acceptNextCommittedInkSample,
+  acceptUsableInkClient,
   classifyInkJumpAppend,
   collectPreviewInkPoints,
   mapClientToPaperPoint,
@@ -2306,23 +2306,14 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         offsetHeight: originEl.offsetHeight,
       }
       : null
-    const lastPoint = activeStrokeRef.current?.points.at(-1) ?? null
-    const live = activeStrokeRef.current
-    const accepted = acceptNextCommittedInkSample(
-      event,
-      surface,
-      lastPoint,
-      live?.points.length ?? 0,
-      sourceWidth,
-      sourceHeight,
-      viewRotationRef.current,
-    )
-    if (!accepted.point) return
+    // Unusable/0,0 first — then remap live ink — then leap-filter. Leap
+    // against the pre-grow last point would drop the next same-visual sample.
+    if (!acceptUsableInkClient(event, surface, viewRotationRef.current)) return
     const point = pointFromEvent(event)
     if (!point) return
-    const jump = accepted.action === 'restart'
-      ? 'restart'
-      : classifyInkJumpAppend(lastPoint, point, live?.points.length ?? 0)
+    const live = activeStrokeRef.current
+    const lastPoint = live?.points.at(-1) ?? null
+    const jump = classifyInkJumpAppend(lastPoint, point, live?.points.length ?? 0)
     if (jump === 'skip') return
     if (jump === 'restart' && live) {
       live.points.splice(0, 1, point)

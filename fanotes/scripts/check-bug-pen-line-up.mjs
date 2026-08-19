@@ -9,6 +9,7 @@ const server = await createServer({
 })
 
 const {
+  acceptUsableInkClient,
   appendAcceptedInkPoint,
   collectPreviewInkPoints,
   commitInkPointerSequence,
@@ -92,6 +93,9 @@ try {
   assert.equal(originGhostThenReal.some((point) => point.y < 0.05), false, 'restart must drop the top ghost')
   assert.equal(hasLineToTop(originGhostThenReal), false)
   assert.ok(originGhostThenReal.length >= 1 && originGhostThenReal[0].y > 0.2)
+
+  assert.equal(acceptUsableInkClient(ghostZero, surface), null, 'first gate rejects 0,0 without leap-filter')
+  assert.ok(acceptUsableInkClient(first, surface), 'first gate keeps an in-band sample')
 
   const downGhost = resolveInkPointerDown(ghostZero, surface)
   assert.equal(downGhost.commitFirst, false)

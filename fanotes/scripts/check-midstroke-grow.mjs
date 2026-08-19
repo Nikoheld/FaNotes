@@ -19,6 +19,7 @@ const {
   WRITE_SLACK_HEIGHT,
   WRITE_SLACK_WIDTH,
 } = await server.ssrLoadModule('/src/lib/paperGrow.ts')
+const { classifyInkJumpAppend } = await server.ssrLoadModule('/src/lib/inkSampleMap.ts')
 
 try {
   const prevH = PAPER_SOURCE_HEIGHT
@@ -51,6 +52,16 @@ try {
   assert.ok(Math.abs(result.next.y - result.last.y) < 0.04, 'next sample stays continuous with the remapped last point')
   assert.ok(result.next.y > 0.2, 'must not teleport toward y≈0')
   assert.equal(result.jumped, false)
+  assert.equal(
+    classifyInkJumpAppend(last, result.next, 3),
+    'skip',
+    'leap-filter before remap would drop the same-visual sample',
+  )
+  assert.equal(
+    classifyInkJumpAppend(result.last, result.next, 3),
+    'append',
+    'after remap the same-visual sample must stay on the stroke',
+  )
 
   const stale = growLiveInkAndMapNext(
     last,
@@ -121,6 +132,18 @@ try {
   const ready = pendingGrowScale(pending, 700, 1486)
   assert.equal(ready.ready, true)
   assert.ok(ready.scaleY < 1)
+
+  const { readFileSync } = await import('node:fs')
+  const { dirname, join } = await import('node:path')
+  const { fileURLToPath } = await import('node:url')
+  const board = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'src/components/DrawingBoard.tsx'), 'utf8')
+  const appendAt = board.indexOf('const appendPointerEvent = useCallback')
+  assert.ok(appendAt >= 0)
+  const usableAt = board.indexOf('acceptUsableInkClient', appendAt)
+  const remapAt = board.indexOf('const point = pointFromEvent(event)', appendAt)
+  const jumpAt = board.indexOf('classifyInkJumpAppend(lastPoint, point', appendAt)
+  assert.ok(usableAt >= 0 && remapAt > usableAt && jumpAt > remapAt, 'board must gate, remap, then leap-filter')
+  assert.equal(board.includes('acceptNextCommittedInkSample'), false)
 
   console.log(JSON.stringify({
     prevH,
