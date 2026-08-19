@@ -51,6 +51,8 @@ import type { GlyphenWerkView } from './components/GlyphenWerkWorkspace'
 import type { MarkdownEditorHandle, MarkdownFormatAction } from './components/MarkdownEditor'
 import type { WorksheetLayerHandle } from './components/WorksheetLayer'
 import { companionNotePath, isPdfNotePath } from './lib/famd'
+import { chooseRestoredNote, collectNotePaths } from './lib/lastOpenNote'
+import { PDF_TOOLBAR_SLOT_ID } from './lib/pdfInkHit'
 import { APP_VERSION } from './lib/appVersion'
 import { defaultSettingsForPlatform } from './defaults'
 import { PaperStylePicker } from './components/PaperStylePicker'
@@ -709,6 +711,13 @@ export default function App({ startupBootstrap }: AppProps) {
     return nextTree
   }, [])
 
+  const rememberLastOpenNote = useCallback((path: string) => {
+    if (!path || settingsRef.current.lastOpenNotePath === path) return
+    const nextSettings = { ...settingsRef.current, lastOpenNotePath: path }
+    settingsRef.current = nextSettings
+    void window.fanotes.saveSettings(nextSettings).catch(() => undefined)
+  }, [])
+
   const openNote = useCallback(async (path: string) => {
     if (activePathRef.current && activePathRef.current !== path && !await flushDocumentLayers()) return
     const session = vaultSessionGenerationRef.current
@@ -720,6 +729,7 @@ export default function App({ startupBootstrap }: AppProps) {
     if (existing) {
       setActivePath(path)
       setFocusToken((value) => value + 1)
+      rememberLastOpenNote(path)
       return
     }
     const requestKey = `${session}:${structureRevision}:${path}`
@@ -752,6 +762,7 @@ export default function App({ startupBootstrap }: AppProps) {
       setTabs((current) => current.some((item) => item.path === path) ? current : [...current, tab])
       setActivePath(path)
       setFocusToken((value) => value + 1)
+      rememberLastOpenNote(path)
     } catch (error) {
       if (
         session === vaultSessionGenerationRef.current &&
@@ -762,7 +773,7 @@ export default function App({ startupBootstrap }: AppProps) {
     } finally {
       openingNotesRef.current.delete(requestKey)
     }
-  }, [flushDocumentLayers, toast])
+  }, [flushDocumentLayers, rememberLastOpenNote, toast])
 
   useEffect(() => {
     if (!window.fanotes) {
@@ -781,7 +792,9 @@ export default function App({ startupBootstrap }: AppProps) {
         const data = await (startupBootstrap ?? window.fanotes.bootstrap())
         if (!alive) return
         setBootstrap(data)
-        setSettings({ ...defaultSettingsForPlatform(window.fanotes.platform), ...data.settings })
+        const launchedSettings = { ...defaultSettingsForPlatform(window.fanotes.platform), ...data.settings }
+        settingsRef.current = launchedSettings
+        setSettings(launchedSettings)
         if (data.onboardingRequired) return
         // Let the shell paint first, then parse the editor chunk in parallel
         // with local tree-cache/NAS work. The shared promise also prevents the
@@ -794,7 +807,11 @@ export default function App({ startupBootstrap }: AppProps) {
           const loadFreshTree = async () => {
             let nextTree = await window.fanotes.getTree()
             if (!alive) return
-            let nextNote = firstNote(nextTree)
+            let nextNote = chooseRestoredNote(
+              launchedSettings.lastOpenNotePath,
+              collectNotePaths(nextTree),
+              firstNote(nextTree),
+            )
             if (!nextNote) {
               // Only a verified live scan may decide that the vault is empty.
               // A stale empty cache must never create a surprise note.
@@ -815,7 +832,11 @@ export default function App({ startupBootstrap }: AppProps) {
           if (startupTree.length) {
             treeRef.current = startupTree
             setTree(startupTree)
-            const startupNote = firstNote(startupTree)
+            const startupNote = chooseRestoredNote(
+              launchedSettings.lastOpenNotePath,
+              collectNotePaths(startupTree),
+              firstNote(startupTree),
+            )
             if (startupNote) await openNote(startupNote)
 
             // Cached starts and the first optimized Dirent scan both receive
@@ -2512,7 +2533,7 @@ export default function App({ startupBootstrap }: AppProps) {
               {drawingOpen
                 ? <div id="fanotes-ink-toolbar-slot" className="ink-toolbar-slot" />
                 : isPdfActive
-                  ? <div className="pdf-toolbar-hint">PDF-Notiz · suchen, zoomen und blättern oder mit dem Stift schreiben</div>
+                  ? <div id={PDF_TOOLBAR_SLOT_ID} className="pdf-toolbar-slot" />
                   : <FormattingToolbar disabled={!activeTab || overviewOpen || homeworkOpen || glyphenWerkOpen || activeEntryMutating} onFormat={formatMarkdown} />}
             </div>
             <div className="toolbar-group toolbar-end">

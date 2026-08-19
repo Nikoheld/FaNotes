@@ -140,6 +140,8 @@ export type AppSettings = {
   experimentalHomeworkApi: boolean
   /** Experimental: opt-in Remote Support session. Off by default; no session until Start. */
   experimentalRemoteSupport: boolean
+  /** Last opened note path. Restored on launch when the file still exists. */
+  lastOpenNotePath: string
   /** Public channel id (32 hex) used in the homework query URL. */
   homeworkApiChannelId: string
   /** Local-only homework API secret. Never sent to backups. */

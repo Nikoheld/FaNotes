@@ -1,5 +1,7 @@
 /** Class on PdfNoteView while the pen overlay is active. */
 export const PDF_INKING_CLASS = 'is-inking'
+/** Top editor-bar slot for PDF page/zoom/search chrome (not an overlay on the page). */
+export const PDF_TOOLBAR_SLOT_ID = 'fanotes-pdf-toolbar-slot'
 /** Class on WorksheetLayer while the pen overlay is active. */
 export const WORKSHEET_INKING_CLASS = 'is-disabled'
 /** Class on the inline drawing board when it is the hit target. */

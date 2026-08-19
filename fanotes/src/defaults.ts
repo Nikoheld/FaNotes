@@ -59,6 +59,7 @@ export const defaultSettingsForPlatform = (platform: string | undefined): AppSet
   experimentalHandwritingToTextSeenVersion: '',
   experimentalHomeworkApi: false,
   experimentalRemoteSupport: false,
+  lastOpenNotePath: '',
   homeworkApiChannelId: '',
   homeworkApiSecret: '',
   ocrModelKeepAliveSeconds: 120,

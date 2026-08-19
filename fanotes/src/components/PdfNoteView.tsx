@@ -1,11 +1,13 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
 } from 'react'
+import { createPortal } from 'react-dom'
 import {
   ChevronDown,
   ChevronLeft,
@@ -31,7 +33,7 @@ import {
   openPdfDocument,
   paintSizeForPage,
 } from '../lib/pdfDocument'
-import { PDF_INKING_CLASS } from '../lib/pdfInkHit'
+import { PDF_INKING_CLASS, PDF_TOOLBAR_SLOT_ID } from '../lib/pdfInkHit'
 
 type PdfNoteViewProps = {
   path: string
@@ -418,6 +420,10 @@ export function PdfNoteView({
   const [needsPassword, setNeedsPassword] = useState(false)
   const [pageCount, setPageCount] = useState(0)
   const [currentPage, setCurrentPage] = useState(1)
+  const [toolbarHost, setToolbarHost] = useState<HTMLElement | null>(null)
+  useLayoutEffect(() => {
+    setToolbarHost(document.getElementById(PDF_TOOLBAR_SLOT_ID))
+  })
   const [pageDraft, setPageDraft] = useState('1')
   const [rotation, setRotation] = useState(0)
   const [zoomMode, setZoomMode] = useState<ZoomMode>('fit-width')
@@ -660,13 +666,8 @@ export function PdfNoteView({
   const zoomLabel = zoomMode === 'fit-width' ? 'Breite' : zoomMode === 'fit-page' ? 'Seite' : `${Math.round(appliedScale * 100)} %`
   const thumbs = useMemo(() => (pdf ? Array.from({ length: Math.min(pdf.numPages, 80) }, (_, index) => index + 1) : []), [pdf])
 
-  return (
-    <section
-      className={`pdf-note-view ${inputDisabled ? PDF_INKING_CLASS : ''} ${sidebar !== 'none' ? 'has-sidebar' : ''}`}
-      aria-label={`PDF ${title}`}
-      tabIndex={inputDisabled ? -1 : 0}
-      onKeyDown={handleChromeKey}
-    >
+  const chrome = (
+    <>
       <header className="pdf-note-toolbar">
         <span className="pdf-note-identity">
           <FileText size={15} />
@@ -725,7 +726,17 @@ export function PdfNoteView({
           <button type="button" aria-label="Suche schließen" onClick={() => setSearchOpen(false)}><X size={13} /></button>
         </div>
       )}
+    </>
+  )
 
+  return (
+    <section
+      className={`pdf-note-view ${inputDisabled ? PDF_INKING_CLASS : ''} ${sidebar !== 'none' ? 'has-sidebar' : ''}`}
+      aria-label={`PDF ${title}`}
+      tabIndex={inputDisabled ? -1 : 0}
+      onKeyDown={handleChromeKey}
+    >
+      {toolbarHost && !inputDisabled ? createPortal(chrome, toolbarHost) : null}
       {loading && <div className="pdf-note-status"><LoaderCircle className="spin" size={20} /> PDF wird vorbereitet …</div>}
       {needsPassword && !pdf && (
         <form className="pdf-note-password" onSubmit={(event) => { event.preventDefault(); setPassword(passwordDraft) }}>

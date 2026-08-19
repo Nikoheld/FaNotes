@@ -117,10 +117,10 @@ import {
   inkExtentStyleValues,
   inkWidthNeedsAnchor,
   liveGrowScale,
-  paintedBoxIsUsable,
   mergePendingGrow,
   nextWriteExtent,
   pendingGrowScale,
+  resolvePaintedLayoutGrow,
 } from '../lib/paperGrow'
 import { DraftingGuides } from './DraftingGuides'
 import {
@@ -1884,15 +1884,20 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     const nextH = paper.offsetHeight
     const prevW = paintedLayoutRef.current.w
     const prevH = paintedLayoutRef.current.h
-    if (!paintedBoxIsUsable(prevW) || !paintedBoxIsUsable(prevH)) {
-      paintedLayoutRef.current = { w: nextW, h: nextH }
-      return false
-    }
-    const scaleX = liveGrowScale(prevW, nextW, sourceWidthRef.current, sourceWidthRef.current, false)
-    const scaleY = liveGrowScale(prevH, nextH, sourceHeightRef.current, sourceHeightRef.current, false)
+    const resolved = resolvePaintedLayoutGrow({
+      pending: pendingGrowRemapRef.current,
+      prevLayoutW: prevW,
+      prevLayoutH: prevH,
+      nextLayoutW: nextW,
+      nextLayoutH: nextH,
+      sourceW: sourceWidthRef.current,
+      sourceH: sourceHeightRef.current,
+    })
+    if (resolved.discard) pendingGrowRemapRef.current = null
+    else pendingGrowRemapRef.current = resolved.pending
     paintedLayoutRef.current = { w: nextW, h: nextH }
-    if (scaleX === 1 && scaleY === 1) return false
-    scaleNormalizedSpace(scaleX, scaleY)
+    if (!resolved.apply) return false
+    scaleNormalizedSpace(resolved.scaleX, resolved.scaleY)
     canvasQualityKeyRef.current = ''
     committedCanvasDirtyRef.current = true
     activeRenderedPointCountRef.current = 0

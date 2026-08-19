@@ -192,6 +192,41 @@ export const pendingGrowScale = (
   return { scaleX, scaleY, ready: scaleX !== 1 || scaleY !== 1, discard: false, remaining }
 }
 
+/** One remap when the painted box catches up. Pending width grow and a
+ *  layout-only flush must not both scale X — that squishes left-side ink. */
+export const resolvePaintedLayoutGrow = (input: {
+  pending: PendingGrowRemap | null
+  prevLayoutW: number
+  prevLayoutH: number
+  nextLayoutW: number
+  nextLayoutH: number
+  sourceW: number
+  sourceH: number
+}) => {
+  if (input.pending) {
+    const flushed = pendingGrowScale(input.pending, input.nextLayoutW, input.nextLayoutH)
+    return {
+      scaleX: flushed.scaleX,
+      scaleY: flushed.scaleY,
+      pending: flushed.remaining,
+      apply: flushed.ready,
+      discard: flushed.discard,
+    }
+  }
+  if (!paintedBoxIsUsable(input.prevLayoutW) || !paintedBoxIsUsable(input.prevLayoutH)) {
+    return { scaleX: 1, scaleY: 1, pending: null, apply: false, discard: false }
+  }
+  const scaleX = liveGrowScale(input.prevLayoutW, input.nextLayoutW, input.sourceW, input.sourceW, false)
+  const scaleY = liveGrowScale(input.prevLayoutH, input.nextLayoutH, input.sourceH, input.sourceH, false)
+  return {
+    scaleX,
+    scaleY,
+    pending: null,
+    apply: scaleX !== 1 || scaleY !== 1,
+    discard: false,
+  }
+}
+
 export const growLiveInkAndMapNext = (
   lastPoint: MappedInkPoint,
   prevHeight: number,

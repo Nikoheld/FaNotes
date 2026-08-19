@@ -134,6 +134,9 @@ export const isInkCorridorLeap = (
 ) => {
   if (!previous) return false
   if (previous.y >= INK_FIRST_POINT_RESTART_Y && next.y < INK_FIRST_POINT_RESTART_Y) return true
+  // Right-half writing: a sample slammed into the top band is a leap even
+  // when dy is just under INK_JUMP_DY (short strokes near y≈0.08).
+  if (previous.x >= 0.5 && next.x >= 0.45 && next.y < INK_FIRST_POINT_RESTART_Y && previous.y >= 0.08) return true
   const dy = Math.abs(next.y - previous.y)
   return dy > INK_JUMP_DY || Math.hypot(next.x - previous.x, next.y - previous.y) > INK_JUMP_HYPOT
 }

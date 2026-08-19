@@ -90,6 +90,8 @@ Command-palette action ids walked from `src/App.tsx`: `new-note`, `import-pdf-no
 | Surface | Source | Needle |
 | --- | --- | --- |
 | PDF as note | `src/components/PdfNoteView.tsx` | `PdfNoteView` |
+| PDF chrome in top bar | `src/lib/pdfInkHit.ts` | `PDF_TOOLBAR_SLOT_ID` |
+| Last opened note | `src/lib/lastOpenNote.ts` | `chooseRestoredNote` |
 | PDF document loader | `src/lib/pdfDocument.ts` | `openPdfDocument` |
 | Worksheet layer | `src/components/WorksheetLayer.tsx` | `WorksheetLayer` |
 | Import worksheet / PDF IPC | `electron/preload.cjs` | `importPdfNote: 'fanotes:import-pdf-note'` |
