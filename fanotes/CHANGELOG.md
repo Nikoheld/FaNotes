@@ -2,6 +2,11 @@
 
 ## Unveröffentlicht
 
+## 2026.8.47
+
+- **Blatt wächst mit:** Schreiben am unteren oder rechten Rand macht das Blatt weiter — nicht an einer A4-Wand.
+- **Scroll nur über den Text:** Du scrollst Inhalt plus einen kleinen Schreibrand, nicht ins Leere nach oben, links oder weit darunter.
+
 ## 2026.8.46
 
 - **Keine Linie nach oben rechts:** Schreiben auf der rechten Blatthälfte zieht keine gerade Linie zur Oberkante.
