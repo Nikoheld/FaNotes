@@ -136,6 +136,8 @@ const paperStyleSafeguards = [
 ]
 const lockSafeguards = [
   ['acceptCommittedInkSample', 'Ghost-Samples werden vor dem Commit verworfen'],
+  ['collectPreviewInkPoints', 'Vorhersage-Samples dürfen keine Linie nach oben ziehen'],
+  ['acceptNextCommittedInkSample', 'Sprung nach y≈0 wird nicht committet, Restart bleibt möglich'],
   ['mapClientToPaperPoint', 'fehlende Fläche fällt nicht auf die Blattmitte'],
   ['applyPaperArrowNavigation', 'Pfeiltasten scrollen das Blatt, nicht den Text'],
   ['lockPaperEditorLayerScroll', 'Editor-Layer bleibt am Lineal fest'],

@@ -59,7 +59,9 @@ export const mapClientToPaperPoint = (
   // real contact when the paper corner actually sits at the origin.
   if (event.clientX === 0 && event.clientY === 0) {
     const paperCornerAtOrigin = Math.abs(surface.left) <= 8 && Math.abs(surface.top) <= 8
-    if (!paperCornerAtOrigin) return null
+    // A 0,0 down with no pressure is the usual missing-coord ghost, even when
+    // the sheet happens to sit in the viewport corner.
+    if (!paperCornerAtOrigin || !((event.pressure ?? 0) > 0)) return null
   }
   const pad = Math.max(48, Math.max(surface.width, surface.height) * 0.2)
   if (
@@ -168,12 +170,28 @@ export const acceptCommittedInkSample = (
   sourceHeight: number,
   rotation = 0,
 ): MappedInkPoint | null => {
-  if (isPreviewOnlyPointerEvent(event)) return null
-  if (!isUsablePointerClient(event)) return null
+  const next = acceptNextCommittedInkSample(event, surface, previous, previous ? 2 : 0, sourceWidth, sourceHeight, rotation)
+  return next.point
+}
+
+/** Like accept, but a lone ghost at y≈0 may be replaced by the next in-band sample. */
+export const acceptNextCommittedInkSample = (
+  event: InkPointerLike,
+  surface: PaperSurfaceBox | null,
+  previous: { x: number; y: number } | null,
+  existingCount: number,
+  sourceWidth: number,
+  sourceHeight: number,
+  rotation = 0,
+) => {
+  if (isPreviewOnlyPointerEvent(event) || !isUsablePointerClient(event)) {
+    return { point: null, action: 'skip' as const }
+  }
   const mapped = mapClientToPaperPoint(event, surface, rotation)
-  if (!mapped) return null
-  if (isInkCorridorLeap(previous, mapped, sourceWidth, sourceHeight)) return null
-  return mapped
+  if (!mapped) return { point: null, action: 'skip' as const }
+  const action = classifyInkJumpAppend(previous, mapped, existingCount)
+  if (action === 'skip') return { point: null, action }
+  return { point: mapped, action }
 }
 
 export const appendAcceptedInkPoint = (
@@ -188,5 +206,41 @@ export const appendAcceptedInkPoint = (
   const mapped = mapClientToPaperPoint(event, surface, rotation)
   if (!mapped) return points
   resolveInkJumpAppend(points, mapped)
+  return points
+}
+
+/** Predicted extras must use the same leap/0,0 rules as committed samples. */
+export const collectPreviewInkPoints = (
+  committed: Array<{ x: number; y: number }>,
+  predicted: Array<{ x: number; y: number } | null | undefined>,
+) => {
+  const extra: Array<{ x: number; y: number }> = []
+  let previous = committed.at(-1) ?? null
+  for (const next of predicted) {
+    if (!next || !Number.isFinite(next.x) || !Number.isFinite(next.y)) continue
+    if (isInkCorridorLeap(previous, next)) continue
+    extra.push(next)
+    previous = next
+  }
+  return extra
+}
+
+/** Drive a down + move sequence through the shipped accept/leap path. */
+export const commitInkPointerSequence = (
+  events: InkPointerLike[],
+  surface: PaperSurfaceBox | null,
+  sourceWidth: number,
+  sourceHeight: number,
+  rotation = 0,
+) => {
+  const points: MappedInkPoint[] = []
+  for (const event of events) {
+    if (points.length === 0) {
+      const start = resolveInkPointerDown(event, surface, rotation)
+      if (start.commitFirst && start.firstPoint) resolveInkJumpAppend(points, start.firstPoint)
+      continue
+    }
+    appendAcceptedInkPoint(points, event, surface, sourceWidth, sourceHeight, rotation)
+  }
   return points
 }

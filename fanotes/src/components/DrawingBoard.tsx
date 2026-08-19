@@ -93,8 +93,9 @@ import {
   type InkPointerSessionSnapshot,
 } from '../lib/inkPointerSession'
 import {
-  acceptCommittedInkSample,
+  acceptNextCommittedInkSample,
   classifyInkJumpAppend,
+  collectPreviewInkPoints,
   mapClientToPaperPoint,
   resolveInkPointerDown,
 } from '../lib/inkSampleMap'
@@ -2261,7 +2262,10 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       context.setTransform(1, 0, 0, 1, 0, 0)
       context.clearRect(0, 0, pixelWidth, pixelHeight)
       context.setTransform(1, 0, 0, 1, 0, -inkWindow.y0 * virtualHeight)
-      const previewPoints = predicted.map(pointFromEvent).filter((point): point is StrokePoint => Boolean(point))
+      const previewPoints = collectPreviewInkPoints(
+        stroke.points,
+        predicted.map(pointFromEvent),
+      ) as StrokePoint[]
       const preview: InkStroke = previewPoints.length
         ? { ...stroke, points: [...stroke.points, ...previewPoints] }
         : stroke
@@ -2303,14 +2307,27 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       }
       : null
     const lastPoint = activeStrokeRef.current?.points.at(-1) ?? null
-    if (!acceptCommittedInkSample(event, surface, null, sourceWidth, sourceHeight, viewRotationRef.current)) return
+    const live = activeStrokeRef.current
+    const accepted = acceptNextCommittedInkSample(
+      event,
+      surface,
+      lastPoint,
+      live?.points.length ?? 0,
+      sourceWidth,
+      sourceHeight,
+      viewRotationRef.current,
+    )
+    if (!accepted.point) return
     const point = pointFromEvent(event)
     if (!point) return
-    const live = activeStrokeRef.current
-    const jump = classifyInkJumpAppend(lastPoint, point, live?.points.length ?? 0)
+    const jump = accepted.action === 'restart'
+      ? 'restart'
+      : classifyInkJumpAppend(lastPoint, point, live?.points.length ?? 0)
     if (jump === 'skip') return
     if (jump === 'restart' && live) {
       live.points.splice(0, 1, point)
+      activeRenderedPointCountRef.current = 0
+      wipeLiveInkCanvas(canvas)
       if (gestureToolRef.current === 'eraser') {
         eraseAt(point)
         return
