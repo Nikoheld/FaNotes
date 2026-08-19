@@ -87,25 +87,55 @@ try {
   assert.match(board, /paperScrollBounds/)
   assert.match(board, /clearInkExtentStyles/)
   assert.match(paperView, /paperScrollBoundsFromVisualRect/)
+  assert.match(paperView, /paper-sheet-plane/)
+  assert.match(paperView, /scrollHeight/)
   assert.doesNotMatch(paperView, /paperScrollBounds\(/)
+  assert.match(css, /margin:\s*32px auto 76px/)
 
-  const layoutH = 800
-  const zoom = 2
-  const visualH = layoutH * zoom
-  const zoomedViewport = { width: 800, height: 369 }
-  const zoomedBounds = paperScrollBoundsFromVisualRect(
-    { left: 40, top: 20, right: 40 + 900 * zoom, bottom: 20 + visualH },
+  const topMargin = 32
+  const bottomMargin = 76
+  const sheetH = 800
+  const sheetW = 900
+  const view = { width: 800, height: 600 }
+  const marginBounds = paperScrollBoundsFromVisualRect(
+    {
+      left: 40 + 50,
+      top: 20 + topMargin,
+      right: 40 + 50 + sheetW,
+      bottom: 20 + topMargin + sheetH + bottomMargin,
+    },
     { left: 40, top: 20, scrollLeft: 0, scrollTop: 0 },
   )
-  assert.equal(zoomedBounds.maxY, visualH, 'zoom-2 bounds use visual height, not layout height')
-  assert.ok(zoomedBounds.maxY !== layoutH + WRITE_SLACK_HEIGHT, 'must not add slack on top of a sheet that already includes it')
-  const nativeMaxY = visualH - zoomedViewport.height
-  assert.equal(nativeMaxY, 1231)
-  const keepNative = clampPaperScrollOffset({ x: 0, y: nativeMaxY }, zoomedBounds, zoomedViewport)
-  assert.equal(keepNative.y, nativeMaxY, 'clamp must not yank a legal zoomed scroll')
-  const layoutBounds = paperScrollBounds({ minX: 0, minY: 0, maxX: 900, maxY: layoutH })
-  const yanked = clampPaperScrollOffset({ x: 0, y: nativeMaxY }, layoutBounds, zoomedViewport)
-  assert.ok(yanked.y < nativeMaxY, 'layout-space + slack bounds would yank the zoomed camera')
+  assert.equal(marginBounds.minY, topMargin)
+  assert.equal(marginBounds.maxY, topMargin + sheetH + bottomMargin)
+  assert.ok(marginBounds.minX !== 0, 'centered sheet must not assume minX=0')
+  const legalBottom = marginBounds.maxY - view.height
+  const sizeBased = (marginBounds.maxY - marginBounds.minY) - view.height
+  const keptBottom = clampPaperScrollOffset({ x: 0, y: legalBottom }, marginBounds, view)
+  assert.equal(keptBottom.y, legalBottom, 'clamp must keep maxY-viewH (paper bottom including 76px margin)')
+  assert.notEqual(legalBottom, sizeBased, 'maxY-minY-viewH would yank the last 32px')
+  assert.ok(keptBottom.y > sizeBased)
+
+  const zoom = 2
+  const zoomedTop = topMargin * zoom
+  const zoomedBounds = paperScrollBoundsFromVisualRect(
+    {
+      left: 40 + 50 * zoom,
+      top: 20 + zoomedTop,
+      right: 40 + (50 + sheetW) * zoom,
+      bottom: 20 + (topMargin + sheetH + bottomMargin) * zoom,
+    },
+    { left: 40, top: 20, scrollLeft: 0, scrollTop: 0 },
+  )
+  assert.equal(zoomedBounds.minY, 64)
+  const zoomedView = { width: 800, height: 369 }
+  const zoomedLegal = zoomedBounds.maxY - zoomedView.height
+  const zoomedSizeBased = (zoomedBounds.maxY - zoomedBounds.minY) - zoomedView.height
+  const keepZoomed = clampPaperScrollOffset({ x: 0, y: zoomedLegal }, zoomedBounds, zoomedView)
+  assert.equal(keepZoomed.y, zoomedLegal, 'zoom-2 clamp must keep maxY-viewH')
+  assert.notEqual(zoomedLegal, zoomedSizeBased)
+  assert.ok(keepZoomed.y > zoomedSizeBased)
+  assert.ok(zoomedBounds.maxY !== sheetH + WRITE_SLACK_HEIGHT, 'must not add slack on top of a sheet that already includes it')
 
   const removed = []
   const props = new Set(['--ink-extent-ratio', '--ink-width-extent'])
@@ -124,8 +154,10 @@ try {
     shortMaxY: short.maxY,
     tallMaxX: tall.maxX,
     clampedFar,
-    zoomedMaxY: zoomedBounds.maxY,
-    keepNativeY: keepNative.y,
+    marginMinY: marginBounds.minY,
+    legalBottom: keptBottom.y,
+    zoomedMinY: zoomedBounds.minY,
+    zoomedLegal: keepZoomed.y,
   }))
   console.log('scroll-bound-to-text ok')
 } finally {

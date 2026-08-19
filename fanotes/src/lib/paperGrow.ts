@@ -338,6 +338,7 @@ export const paperSourceExtentFromContent = (content: PaperContentBox) => {
   }
 }
 
+/** Clamp to absolute scroller-content edges (maxX/maxY), not 0-origin size. */
 export const clampPaperScrollOffset = (
   offset: { x: number; y: number },
   bounds: PaperContentBox,
@@ -345,8 +346,8 @@ export const clampPaperScrollOffset = (
 ) => {
   const viewW = Math.max(0, viewport.width)
   const viewH = Math.max(0, viewport.height)
-  const maxScrollX = Math.max(0, bounds.maxX - bounds.minX - viewW)
-  const maxScrollY = Math.max(0, bounds.maxY - bounds.minY - viewH)
+  const maxScrollX = Math.max(0, bounds.maxX - viewW)
+  const maxScrollY = Math.max(0, bounds.maxY - viewH)
   const x = Number.isFinite(offset.x) ? offset.x : 0
   const y = Number.isFinite(offset.y) ? offset.y : 0
   return {

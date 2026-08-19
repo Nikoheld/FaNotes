@@ -86,11 +86,11 @@ export function PaperView({ children, className = '', viewKey, showHud = true }:
     const scroller = noteViewRef.current
     if (!scroller) return
     const clampScroll = () => {
-      const paper = scroller.querySelector<HTMLElement>('.unified-paper')
-      if (!paper) return
+      const plane = scroller.querySelector<HTMLElement>('.paper-sheet-plane')
+        ?? scroller.querySelector<HTMLElement>('.unified-paper')
+      if (!plane) return
       const scrollerRect = scroller.getBoundingClientRect()
-      const paperRect = paper.getBoundingClientRect()
-      const bounds = paperScrollBoundsFromVisualRect(paperRect, {
+      const visual = paperScrollBoundsFromVisualRect(plane.getBoundingClientRect(), {
         left: scrollerRect.left,
         top: scrollerRect.top,
         scrollLeft: scroller.scrollLeft,
@@ -98,7 +98,12 @@ export function PaperView({ children, className = '', viewKey, showHud = true }:
       })
       const next = clampPaperScrollOffset(
         { x: scroller.scrollLeft, y: scroller.scrollTop },
-        bounds,
+        {
+          minX: 0,
+          minY: 0,
+          maxX: Math.max(scroller.scrollWidth, visual.maxX),
+          maxY: Math.max(scroller.scrollHeight, visual.maxY),
+        },
         { width: scroller.clientWidth, height: scroller.clientHeight },
       )
       if (next.x !== scroller.scrollLeft) scroller.scrollLeft = next.x
