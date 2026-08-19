@@ -44,6 +44,8 @@ const runOnce = () => {
   assert.match(typesSource, /experimentalRemoteSupport: boolean/)
   assert.match(appSource, /startRemoteSupportSession/)
   assert.match(appSource, /dispatchRemoteSupportCommand/)
+  assert.match(appSource, /applyRemoteSupportBoardDrive/)
+  assert.match(appSource, /flushRemoteSupportBoardDrive/)
   assert.match(settingsSource, /experimentalHandwritingToText/)
   assert.match(settingsSource, /experimentalHomeworkApi/)
   assert.equal(settingsSource.includes('experimentalRemoteSupport') && settingsSource.includes('experimentalHomeworkApi'), true)

@@ -217,6 +217,54 @@ export const dispatchRemoteSupportCommand = (
   return driveRemoteSupport(session, enabled, token, command, live)
 }
 
+export type RemoteSupportBoardHandle = {
+  applySupportTool?: (tool: string) => void
+  supportSnapshot?: () => { tool: string; inkMode: string }
+}
+
+export type RemoteSupportBoardQueue = {
+  tool?: string
+  inkMode?: string
+}
+
+export const remoteSupportBoardIsReady = (board: RemoteSupportBoardHandle | null | undefined) => (
+  Boolean(board && typeof board.applySupportTool === 'function')
+)
+
+export const enqueueRemoteSupportBoardDrive = (
+  pending: RemoteSupportBoardQueue | null,
+  command: RemoteSupportCommand | null | undefined,
+): RemoteSupportBoardQueue | null => {
+  if (!command) return pending
+  if (command.kind === 'set-mode' && command.mode === 'keyboard') return null
+  if (command.kind === 'set-tool') {
+    return { ...(pending || {}), tool: String(command.tool || '') }
+  }
+  if (command.kind === 'set-mode' && (command.mode === 'writing' || command.mode === 'drawing')) {
+    return { ...(pending || {}), inkMode: command.mode }
+  }
+  return pending
+}
+
+export const flushRemoteSupportBoardDrive = (
+  board: RemoteSupportBoardHandle | null | undefined,
+  pending: RemoteSupportBoardQueue | null,
+): RemoteSupportBoardQueue | null => {
+  if (!pending) return null
+  if (!remoteSupportBoardIsReady(board)) return pending
+  if (pending.inkMode) board!.applySupportTool!(pending.inkMode)
+  if (pending.tool) board!.applySupportTool!(pending.tool)
+  return null
+}
+
+export const applyRemoteSupportBoardDrive = (
+  board: RemoteSupportBoardHandle | null | undefined,
+  pending: RemoteSupportBoardQueue | null,
+  command: RemoteSupportCommand | null | undefined,
+): RemoteSupportBoardQueue | null => (
+  flushRemoteSupportBoardDrive(board, enqueueRemoteSupportBoardDrive(pending, command))
+)
+
 export const remoteSupportApiUrl = (path: string, origin = REMOTE_SUPPORT_ORIGIN) => (
   `${origin.replace(/\/$/u, '')}${REMOTE_SUPPORT_API_ROOT}${path}`
 )

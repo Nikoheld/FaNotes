@@ -64,13 +64,16 @@ import {
   buildRemoteSupportRegisterRequest,
   buildRemoteSupportResultRequest,
   buildRemoteSupportStopRequest,
+  applyRemoteSupportBoardDrive,
   collectVaultTreeNames,
   createRemoteSupportLiveState,
   dispatchRemoteSupportCommand,
+  flushRemoteSupportBoardDrive,
   injectRemoteSupportKey,
   injectRemoteSupportPointer,
   noteTitleFromPath,
   startRemoteSupportSession,
+  type RemoteSupportBoardQueue,
   type RemoteSupportCommand,
   type RemoteSupportSession,
 } from './lib/remoteSupport'
@@ -1741,9 +1744,24 @@ export default function App({ startupBootstrap }: AppProps) {
   const openNoteRef = useRef(openNote)
   const openDrawingRef = useRef(openDrawing)
   const closeDrawingRef = useRef(closeDrawing)
+  const pendingBoardDriveRef = useRef<RemoteSupportBoardQueue | null>(null)
   useEffect(() => { openNoteRef.current = openNote }, [openNote])
   useEffect(() => { openDrawingRef.current = openDrawing }, [openDrawing])
   useEffect(() => { closeDrawingRef.current = closeDrawing }, [closeDrawing])
+  useEffect(() => {
+    if (!drawingOpen) {
+      pendingBoardDriveRef.current = null
+      return
+    }
+    let cancelled = false
+    const pump = () => {
+      if (cancelled) return
+      pendingBoardDriveRef.current = flushRemoteSupportBoardDrive(drawingBoardRef.current, pendingBoardDriveRef.current)
+      if (pendingBoardDriveRef.current) window.requestAnimationFrame(pump)
+    }
+    pump()
+    return () => { cancelled = true }
+  }, [drawingOpen, drawingSession.key])
 
   useEffect(() => {
     if (!settings.experimentalRemoteSupport || !remoteSupportSession) return
@@ -1774,15 +1792,27 @@ export default function App({ startupBootstrap }: AppProps) {
       if (command.kind === 'open-note') await openNoteRef.current(command.path)
       if (command.kind === 'set-tool') {
         if (!drawingOpenRef.current) openDrawingRef.current()
-        drawingBoardRef.current?.applySupportTool?.(command.tool)
+        pendingBoardDriveRef.current = applyRemoteSupportBoardDrive(
+          drawingBoardRef.current,
+          pendingBoardDriveRef.current,
+          command,
+        )
       }
       if (command.kind === 'set-mode') {
-        if (command.mode === 'keyboard') closeDrawingRef.current()
-        else {
+        if (command.mode === 'keyboard') {
+          pendingBoardDriveRef.current = applyRemoteSupportBoardDrive(
+            drawingBoardRef.current,
+            pendingBoardDriveRef.current,
+            command,
+          )
+          closeDrawingRef.current()
+        } else {
           if (!drawingOpenRef.current) openDrawingRef.current()
-          if (command.mode === 'writing' || command.mode === 'drawing') {
-            drawingBoardRef.current?.applySupportTool?.(command.mode)
-          }
+          pendingBoardDriveRef.current = applyRemoteSupportBoardDrive(
+            drawingBoardRef.current,
+            pendingBoardDriveRef.current,
+            command,
+          )
         }
       }
       if (command.kind === 'pointer') injectRemoteSupportPointer(command)

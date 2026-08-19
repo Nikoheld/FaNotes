@@ -20,6 +20,7 @@ const {
   REMOTE_SUPPORT_HOST,
   REMOTE_SUPPORT_TOKEN_LENGTH,
   applyAuthorizedRemoteSupportDrive,
+  applyRemoteSupportBoardDrive,
   authorizeRemoteSupport,
   buildRemoteSupportCommandRequest,
   buildRemoteSupportPollRequest,
@@ -28,6 +29,7 @@ const {
   denyRemoteSupport,
   dispatchRemoteSupportCommand,
   driveRemoteSupport,
+  flushRemoteSupportBoardDrive,
   formatRemoteSupportCode,
   inspectRemoteSupport,
   noteTitleFromPath,
@@ -142,6 +144,33 @@ const runOnce = () => {
   assert.deepEqual(names, ['Eingang', secretNote])
   applyAuthorizedRemoteSupportDrive(live, { kind: 'set-tool', tool: 'pen' })
   assert.equal(denyRemoteSupport().error, 'unauthorized')
+
+  const applied = []
+  const lateBoard = {
+    tool: 'pen',
+    inkMode: 'writing',
+    applySupportTool(next) {
+      applied.push(next)
+      if (next === 'writing' || next === 'drawing') this.inkMode = next
+      else this.tool = next
+    },
+    supportSnapshot() {
+      return { tool: this.tool, inkMode: this.inkMode }
+    },
+  }
+  let queued = applyRemoteSupportBoardDrive(null, null, { kind: 'set-tool', tool: 'eraser' })
+  queued = applyRemoteSupportBoardDrive(null, queued, { kind: 'set-mode', mode: 'drawing' })
+  assert.deepEqual(queued, { tool: 'eraser', inkMode: 'drawing' })
+  assert.equal(applied.length, 0)
+  assert.equal(lateBoard.supportSnapshot().tool, 'pen')
+  queued = flushRemoteSupportBoardDrive(lateBoard, queued)
+  assert.equal(queued, null)
+  assert.deepEqual(applied, ['drawing', 'eraser'])
+  assert.equal(lateBoard.supportSnapshot().tool, 'eraser')
+  assert.equal(lateBoard.supportSnapshot().inkMode, 'drawing')
+  assert.equal(applyRemoteSupportBoardDrive(lateBoard, null, { kind: 'set-tool', tool: 'pen' }), null)
+  assert.equal(lateBoard.supportSnapshot().tool, 'pen')
+  assert.equal(applyRemoteSupportBoardDrive(lateBoard, { tool: 'eraser' }, { kind: 'set-mode', mode: 'keyboard' }), null)
 }
 
 try {
