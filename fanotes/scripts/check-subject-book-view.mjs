@@ -14,6 +14,7 @@ const {
   SUBJECT_BOOK_PLACEMENTS,
   applySubjectBookPlacement,
   parseSubjectBookPlacement,
+  subjectBookStageSlots,
   subjectBookViewPolicy,
   toggleSubjectBookView,
 } = await server.ssrLoadModule('/src/lib/subjectBook.ts')
@@ -35,6 +36,10 @@ const runOnce = () => {
     const policy = subjectBookViewPolicy({ hasBook: true, open: applied.open, placement: applied.placement })
     assert.equal(policy.paneVisible, true)
     assert.equal(policy.placement, placement)
+    const slots = subjectBookStageSlots(policy)
+    if (placement === 'popout') assert.deepEqual(slots, ['main'])
+    else if (placement === 'rechts' || placement === 'unten') assert.deepEqual(slots, ['main', 'book'])
+    else assert.deepEqual(slots, ['book', 'main'])
     placements[placement] = policy.placement
   }
 

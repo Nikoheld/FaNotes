@@ -8,6 +8,8 @@ const appSource = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8
 const treeSource = readFileSync(new URL('../src/components/FileTree.tsx', import.meta.url), 'utf8')
 const mainSource = readFileSync(new URL('../electron/main.cjs', import.meta.url), 'utf8')
 const bookSource = readFileSync(new URL('../src/lib/subjectBook.ts', import.meta.url), 'utf8')
+const cssSource = readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8')
+const pdfSource = readFileSync(new URL('../src/components/PdfNoteView.tsx', import.meta.url), 'utf8')
 
 const server = await createServer({
   root: appRoot,
@@ -35,8 +37,15 @@ const runOnce = () => {
   assert.match(treeSource, /Buch hinzufügen/)
   assert.match(mainSource, /openSubjectBookPopout/)
   assert.match(mainSource, /new BrowserWindow/)
+  assert.match(appSource, /className="editor-stage-main"/)
+  assert.ok(appSource.indexOf('has-subject-book') < appSource.indexOf('editor-stage-main'))
+  assert.match(cssSource, /\.editor-stage\.has-subject-book\.is-links \{ grid-template-columns:/)
+  assert.match(cssSource, /\.editor-stage\.has-subject-book > \.editor-stage-main/)
+  assert.doesNotMatch(cssSource, /\.editor-stage\.has-subject-book > :not\(/)
+  assert.match(pdfSource, /pdfStartPageForLoad/)
+  assert.doesNotMatch(pdfSource, /\[initialPage, notifyLayout, password, path\]/)
   assert.equal(SUBJECT_BOOK_PLACEMENT_OPTIONS.map((item) => item.id).join(','), 'links,rechts,oben,unten,popout')
-  return { toolbar: true, placements: SUBJECT_BOOK_PLACEMENT_OPTIONS.map((item) => item.label) }
+  return { toolbar: true, placements: SUBJECT_BOOK_PLACEMENT_OPTIONS.map((item) => item.label), twoCellStage: true }
 }
 
 try {

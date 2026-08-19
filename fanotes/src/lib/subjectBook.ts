@@ -182,6 +182,27 @@ export const restoreSubjectBookPage = (
   return page || 1
 }
 
+export const subjectBookDocumentKey = (book: SubjectBookRecord | null | undefined) => book?.bookPath ?? ''
+
+export const subjectBookStageSlots = (policy: SubjectBookViewPolicy): Array<'book' | 'main'> => {
+  if (!policy.paneVisible || !policy.placement || policy.placement === 'popout') return ['main']
+  if (policy.placement === 'rechts' || policy.placement === 'unten') return ['main', 'book']
+  return ['book', 'main']
+}
+
+/** Apply recorded lastPage only when the PDF identity changes. Same path → do not reopen. */
+export const subjectBookOpenPageOnLoad = (
+  nextPath: unknown,
+  previousPath: unknown,
+  recordedPage: unknown,
+) => {
+  const next = sanitizePdfPath(nextPath)
+  if (!next) return null
+  if (typeof previousPath === 'string' && previousPath === next) return null
+  const page = sanitizePage(recordedPage)
+  return page || 1
+}
+
 export const subjectBookCompanionPath = (bookPath: string) => companionNotePath(bookPath, '.famd')
 
 export const persistSubjectBookNotes = (

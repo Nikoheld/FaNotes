@@ -88,6 +88,7 @@ export function SubjectBookPane({
       <div className="subject-book-pane-body">
         <SafeBoundary name="Fachbuch" fallbackTitle="Das Buch konnte nicht angezeigt werden">
           <PdfNoteView
+            key={book.bookPath}
             path={book.bookPath}
             title={title}
             toolbarSlotId={SUBJECT_BOOK_TOOLBAR_SLOT_ID}

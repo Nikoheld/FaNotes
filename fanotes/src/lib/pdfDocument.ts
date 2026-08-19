@@ -2,6 +2,15 @@ import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import type { PDFDocumentLoadingTask, PDFDocumentProxy } from 'pdfjs-dist'
 
 export const MAX_PDF_NOTE_PAGES = 2_000
+
+/** Page to open after a document identity change. Same path returns null — do not reload from lastPage. */
+export const pdfStartPageForLoad = (path: unknown, previousPath: unknown, requestedPage: unknown) => {
+  const next = typeof path === 'string' ? path : ''
+  const previous = typeof previousPath === 'string' ? previousPath : ''
+  if (!next || next === previous) return null
+  const page = Math.round(Number(requestedPage) || 1)
+  return Number.isSafeInteger(page) && page >= 1 ? page : 1
+}
 export const DEFAULT_PDF_PAGE_RATIO = 297 / 210
 export const MAX_PDF_DPR = 1.75
 export const MAX_PDF_EDGE = 2_048

@@ -480,7 +480,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .editor-stage.has-subject-book.is-oben { grid-template-rows: minmax(160px, 38%) minmax(0, 1fr); }
 .editor-stage.has-subject-book.is-unten { grid-template-rows: minmax(0, 1fr) minmax(160px, 38%); }
 .editor-stage.has-subject-book.is-unten > .subject-book-pane { order: 2; }
-.editor-stage.has-subject-book > :not(.subject-book-pane) { min-width: 0; min-height: 0; overflow: hidden; }
+.editor-stage.has-subject-book > .editor-stage-main { min-width: 0; min-height: 0; overflow: hidden; }
 .note-backup-control { position: relative; }
 .note-backup-menu {
   position: absolute;
@@ -843,6 +843,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .lw-draw-toolbar.is-docked-chrome .lw-art-studio-trigger > i { width: 16px; height: 16px; border-radius: 5px; }
 
 .editor-stage { min-width: 0; min-height: 0; position: relative; display: flex; flex-direction: column; overflow: hidden; }
+.editor-stage-main { min-width: 0; min-height: 0; flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 .editor-split { min-width: 0; min-height: 0; flex: 1; display: grid; grid-template-columns: minmax(0, 1fr); }
 .editor-split.is-split { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 1px; background: var(--border); }
 .editor-split.is-split > * { min-width: 0; min-height: 0; background: color-mix(in srgb, var(--bg) 93%, var(--panel)); }

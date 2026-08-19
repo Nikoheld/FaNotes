@@ -15,7 +15,10 @@ const {
   emptySubjectBooks,
   recordSubjectBookPage,
   restoreSubjectBookPage,
+  subjectBookDocumentKey,
+  subjectBookOpenPageOnLoad,
 } = await server.ssrLoadModule('/src/lib/subjectBook.ts')
+const { pdfStartPageForLoad } = await server.ssrLoadModule('/src/lib/pdfDocument.ts')
 
 const runOnce = () => {
   let book = attachSubjectBook(emptySubjectBooks(), {
@@ -40,6 +43,15 @@ const runOnce = () => {
   assert.equal(restoreSubjectBookPage(unknown, 10), 7)
   assert.notEqual(restoreSubjectBookPage({ ...book, lastPage: 0 }, 10), 7)
 
+  const path = book.bookPath
+  assert.equal(subjectBookDocumentKey(book), path)
+  assert.equal(subjectBookDocumentKey(stayed), subjectBookDocumentKey(book))
+  assert.equal(subjectBookOpenPageOnLoad(path, null, 7), 7)
+  assert.equal(subjectBookOpenPageOnLoad(path, path, 8), null)
+  assert.equal(pdfStartPageForLoad(path, '', 7), 7)
+  assert.equal(pdfStartPageForLoad(path, path, 8), null)
+  assert.notEqual(pdfStartPageForLoad(path, path, 8), 7)
+
   return {
     start: restoreSubjectBookPage(attachSubjectBook(emptySubjectBooks(), {
       subjectPath: 'Faecher/Mechanik',
@@ -48,6 +60,7 @@ const runOnce = () => {
     restored: restoreSubjectBookPage(book, 10),
     pageOne: restoreSubjectBookPage(stayed, 10),
     outOfRange: restoreSubjectBookPage(outOfRange, 10),
+    sameDocument: pdfStartPageForLoad(path, path, 8),
   }
 }
 

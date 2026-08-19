@@ -32,6 +32,7 @@ import {
   loadVaultPdfBytes,
   openPdfDocument,
   paintSizeForPage,
+  pdfStartPageForLoad,
 } from '../lib/pdfDocument'
 import { PDF_INKING_CLASS, PDF_TOOLBAR_SLOT_ID } from '../lib/pdfInkHit'
 
@@ -448,6 +449,7 @@ export function PdfNoteView({
   const layoutTimerRef = useRef<number | null>(null)
   const searchTokenRef = useRef(0)
   const pdfTaskRef = useRef<PDFDocumentLoadingTask | null>(null)
+  const loadedPathRef = useRef('')
 
   const notifyLayout = useCallback(() => {
     if (!onLayoutChange) return
@@ -486,7 +488,9 @@ export function PdfNoteView({
           pdfTaskRef.current = task
           setPdf(loaded)
           setPageCount(loaded.numPages)
-          const start = Math.max(1, Math.min(loaded.numPages, Math.round(Number(initialPage) || 1)))
+          const restored = pdfStartPageForLoad(path, loadedPathRef.current, initialPage)
+          loadedPathRef.current = path
+          const start = Math.max(1, Math.min(loaded.numPages, restored ?? 1))
           setCurrentPage(start)
           setPageDraft(String(start))
           try {
@@ -527,7 +531,7 @@ export function PdfNoteView({
       pdfTaskRef.current = null
       void task?.destroy().catch(() => undefined)
     }
-  }, [initialPage, notifyLayout, password, path])
+  }, [notifyLayout, password, path])
 
   useEffect(() => {
     if (!onPageChange || pageCount < 1) return
