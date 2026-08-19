@@ -224,3 +224,58 @@ export const noteLinkPointFromRect = (
     y: sanitizeCoord((clientY - rect.top) / height),
   }
 }
+
+type NoteLinkHitBox = {
+  left: number
+  top: number
+  right: number
+  bottom: number
+  width: number
+  height: number
+}
+
+type NoteLinkHitPage = {
+  getBoundingClientRect: () => NoteLinkHitBox
+  dataset?: { pdfPage?: string }
+  getAttribute?: (name: string) => string | null
+}
+
+type NoteLinkHitHost = {
+  querySelectorAll?: (selector: string) => ArrayLike<NoteLinkHitPage>
+  getBoundingClientRect?: () => { left: number; top: number; width: number; height: number }
+  closest?: (selector: string) => NoteLinkHitHost | null
+}
+
+const pageIndexFromNode = (page: NoteLinkHitPage) => {
+  const raw = page.dataset?.pdfPage ?? page.getAttribute?.('data-pdf-page') ?? ''
+  const pageIndex = Number(raw)
+  return Number.isSafeInteger(pageIndex) && pageIndex >= 1 ? pageIndex : 1
+}
+
+/** Pages live on `.unified-paper`, not on the overlay node (it has no descendants). */
+export const noteLinkPageHost = (overlay: NoteLinkHitHost) => (
+  overlay.closest?.('.unified-paper') ?? null
+)
+
+/** Resolve a click on the overlay to a PDF page (or page 1 on markdown paper). */
+export const noteLinkPageAtPoint = (
+  clientX: number,
+  clientY: number,
+  overlay: NoteLinkHitHost,
+): { page: number; x: number; y: number } => {
+  const paper = noteLinkPageHost(overlay)
+  const pages = paper?.querySelectorAll?.('[data-pdf-page]') ?? []
+  for (let index = 0; index < pages.length; index += 1) {
+    const page = pages[index]
+    const rect = page.getBoundingClientRect()
+    if (clientX < rect.left || clientX > rect.right || clientY < rect.top || clientY > rect.bottom) continue
+    return { page: pageIndexFromNode(page), ...noteLinkPointFromRect(clientX, clientY, rect) }
+  }
+  const fallback = paper?.getBoundingClientRect?.() ?? overlay.getBoundingClientRect?.() ?? {
+    left: 0,
+    top: 0,
+    width: 1,
+    height: 1,
+  }
+  return { page: 1, ...noteLinkPointFromRect(clientX, clientY, fallback) }
+}

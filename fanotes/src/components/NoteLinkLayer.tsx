@@ -2,7 +2,7 @@ import { useCallback, useLayoutEffect, useRef, useState, type PointerEvent as Re
 import { Link2 } from 'lucide-react'
 import {
   noteLinkAppearanceToken,
-  noteLinkPointFromRect,
+  noteLinkPageAtPoint,
   type NoteLinkRecord,
 } from '../lib/noteLink'
 
@@ -20,19 +20,6 @@ type NoteLinkLayerProps = {
   onPlace: (point: { page: number; x: number; y: number }) => void
   onActivate: (link: NoteLinkRecord) => void
   onSelect: (link: NoteLinkRecord) => void
-}
-
-const pageAtPoint = (clientX: number, clientY: number, root: HTMLElement) => {
-  const pages = root.querySelectorAll<HTMLElement>('[data-pdf-page]')
-  for (const page of pages) {
-    const rect = page.getBoundingClientRect()
-    if (clientX < rect.left || clientX > rect.right || clientY < rect.top || clientY > rect.bottom) continue
-    const point = noteLinkPointFromRect(clientX, clientY, rect)
-    return { page: Number(page.dataset.pdfPage) || 1, ...point }
-  }
-  const paper = root.closest('.unified-paper') as HTMLElement | null
-  const rect = (paper ?? root).getBoundingClientRect()
-  return { page: 1, ...noteLinkPointFromRect(clientX, clientY, rect) }
 }
 
 export function NoteLinkLayer({
@@ -98,7 +85,7 @@ export function NoteLinkLayer({
     event.stopPropagation()
     const layer = layerRef.current
     if (!layer) return
-    onPlace(pageAtPoint(event.clientX, event.clientY, layer))
+    onPlace(noteLinkPageAtPoint(event.clientX, event.clientY, layer))
   }
 
   return (
