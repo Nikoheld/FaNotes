@@ -64,6 +64,8 @@ Command-palette action ids walked from `src/App.tsx`: `new-note`, `import-pdf-no
 | --- | --- | --- |
 | Settings modal sections | `src/components/SettingsModal.tsx` | `id: 'appearance'` |
 | Theme / zoom / updates / experimental | `src/components/SettingsModal.tsx` | `id: 'experimental'` |
+| Remote Support session | `src/lib/remoteSupport.ts` | `startRemoteSupportSession` |
+| Remote Support Experimentell row | `src/components/SettingsModal.tsx` | `title="Remote Support"` |
 | Accessibility / advanced settings | `src/components/SettingsModal.tsx` | `id: 'accessibility'` |
 | AI panel | `src/components/AiPanel.tsx` | `AiPanel` |
 | LM Studio panel | `src/components/LmStudioPanel.tsx` | `LmStudioPanel` |

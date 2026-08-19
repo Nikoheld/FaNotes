@@ -68,9 +68,11 @@ const checks = [
   [board, 'applyGlyphenWerkLegend', 'DrawingBoard übergibt GlyphenWerk-Proben'],
   [defaults, 'experimentalHandwritingToText: false', 'Handschrift-zu-Text standardmässig aus'],
   [defaults, 'experimentalHomeworkApi: false', 'Hausaufgaben-API standardmässig aus'],
+  [defaults, 'experimentalRemoteSupport: false', 'Remote Support standardmässig aus'],
   [settings, 'id: \'experimental\'', 'Experimentell-Tab in den Einstellungen'],
-  [settings, 'count: 2', 'zwei experimentelle Funktionen'],
+  [settings, 'count: 3', 'drei experimentelle Funktionen'],
   [settings, 'title="Hausaufgaben API"', 'Hausaufgaben-API im Experimentell-Tab'],
+  [settings, 'title="Remote Support"', 'Remote Support im Experimentell-Tab'],
 ]
 
 for (const [source, needle, label] of checks) {

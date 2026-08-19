@@ -533,6 +533,8 @@ export type DrawingSaveResult =
 export type DrawingBoardHandle = {
   flush: () => Promise<void>
   refreshTraining: () => Promise<void>
+  supportSnapshot?: () => { tool: string; inkMode: string }
+  applySupportTool?: (tool: string) => void
 }
 
 export type DrawingBoardProps = {
@@ -3619,7 +3621,27 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       resourcesRef.current = loaded
       if (mountedRef.current) setResources(loaded)
     },
-  }), [drawingPayload, onSaveDrawing, setDirty])
+    supportSnapshot: () => ({ tool, inkMode }),
+    applySupportTool: (next) => {
+      if (next === 'eraser') {
+        setTool('eraser')
+        setArtPanelOpen(false)
+        return
+      }
+      if (next === 'drawing') {
+        setInkMode('drawing')
+        setTool('pen')
+        return
+      }
+      if (next === 'writing') {
+        setInkMode('writing')
+        setTool('pen')
+        setArtPanelOpen(false)
+        return
+      }
+      setTool('pen')
+    },
+  }), [drawingPayload, inkMode, onSaveDrawing, setDirty, tool])
 
   useEffect(() => () => {
     if (dirtyRef.current && strokesRef.current.length) void saveLatestRef.current()

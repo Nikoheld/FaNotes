@@ -197,6 +197,7 @@ const IPC = Object.freeze({
   confirmClose: 'fanotes:confirm-close',
   cancelClose: 'fanotes:cancel-close',
   requestClose: 'fanotes:request-close',
+  captureWindow: 'fanotes:capture-window',
 })
 
 const DEFAULT_SETTINGS = Object.freeze({
@@ -255,6 +256,7 @@ const DEFAULT_SETTINGS = Object.freeze({
   experimentalHandwritingToText: false,
   experimentalHandwritingToTextSeenVersion: '',
   experimentalHomeworkApi: false,
+  experimentalRemoteSupport: false,
   homeworkApiChannelId: '',
   homeworkApiSecret: '',
   ocrModelKeepAliveSeconds: 120,
@@ -335,6 +337,7 @@ const SETTINGS_SCHEMA = Object.freeze({
   experimentalHandwritingToText: { type: 'boolean' },
   experimentalHandwritingToTextSeenVersion: { type: 'string', max: 40 },
   experimentalHomeworkApi: { type: 'boolean' },
+  experimentalRemoteSupport: { type: 'boolean' },
   homeworkApiChannelId: { type: 'string', max: 32 },
   homeworkApiSecret: { type: 'string', max: 256 },
   ocrModelKeepAliveSeconds: { type: 'enum', values: [0, 30, 120, 300, 600] },
@@ -4147,6 +4150,11 @@ function registerIpcHandlers() {
   })
 
   handle(IPC.openExternal, async (_event, url) => openExternalSafely(url))
+  handle(IPC.captureWindow, async (event) => {
+    const image = await event.sender.capturePage()
+    const jpeg = image.toJPEG(55)
+    return `data:image/jpeg;base64,${Buffer.from(jpeg).toString('base64')}`
+  })
 
   ipcMain.on(IPC.confirmClose, (event) => {
     if (!isTrustedIpcSender(event) || !mainWindow || mainWindow.isDestroyed()) return

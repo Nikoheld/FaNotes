@@ -44,6 +44,7 @@ import {
   homeworkApiSecretReady,
 } from '../lib/homeworkApi'
 import { bestContrastText } from '../lib/colorContrast'
+import type { RemoteSupportSession } from '../lib/remoteSupport'
 import type { AppSettings, EnhancedMathRecognitionState, OneNoteImportResult, QwenVisionState, ServerBackupState, UpdateState } from '../types'
 
 type SettingsSection = 'appearance' | 'editor' | 'drawing' | 'files' | 'updates' | 'accessibility' | 'experimental' | 'advanced'
@@ -65,6 +66,9 @@ export type SettingsModalProps = {
   onResetSettings: () => void
   onResetAppData: () => Promise<void>
   onOpenBugReport?: () => void
+  remoteSupportSession?: RemoteSupportSession | null
+  onRemoteSupportStart?: () => void
+  onRemoteSupportStop?: () => void
 }
 
 const SECTIONS: { id: SettingsSection; label: string; description: string; icon: typeof Palette; count: number }[] = [
@@ -74,7 +78,7 @@ const SECTIONS: { id: SettingsSection; label: string; description: string; icon:
   { id: 'files', label: 'Dateien & Vault', description: 'Import, Ordner und Speichern', icon: FolderOpen, count: 7 },
   { id: 'updates', label: 'Updates', description: 'Stable, Beta und Sicherheit', icon: RefreshCw, count: 4 },
   { id: 'accessibility', label: 'Bedienung', description: 'Bewegung und Lesbarkeit', icon: Accessibility, count: 3 },
-  { id: 'experimental', label: 'Experimentell', description: 'Unfertige Funktionen, standardmässig aus', icon: FlaskConical, count: 2 },
+  { id: 'experimental', label: 'Experimentell', description: 'Unfertige Funktionen, standardmässig aus', icon: FlaskConical, count: 3 },
   { id: 'advanced', label: 'Erweitert', description: 'Ressourcen, Datenschutz und App-Daten', icon: Code2, count: 10 },
 ]
 
@@ -113,6 +117,7 @@ const SETTINGS_SEARCH_ITEMS: SettingsSearchItem[] = [
   { label: 'Handschrifterkennung', detail: 'Stift & Erkennung', section: 'drawing', target: 'settings-recognition', keywords: 'ocr text mathematik automatisch sprache konvertieren suchindex' },
   { label: 'Handschrift zu Text', detail: 'Experimentell', section: 'experimental', target: 'settings-experimental', keywords: 'experimentell ocr konvertieren mathe korrigierer löser suchindex qwen vision handschrift text' },
   { label: 'Hausaufgaben API', detail: 'Experimentell', section: 'experimental', target: 'settings-homework-api', keywords: 'hausaufgaben api fasrv passwort auth termine liste' },
+  { label: 'Remote Support', detail: 'Experimentell', section: 'experimental', target: 'settings-remote-support', keywords: 'remote support sitzung debug test code token fernwartung' },
   { label: 'Vault & Speicherort', detail: 'Dateien & Vault', section: 'files', target: 'settings-vault', keywords: 'ordner wechseln pfad notizen markdown nas browser' },
   { label: 'Microsoft OneNote importieren', detail: 'Dateien & Vault', section: 'files', target: 'settings-onenote', keywords: 'one onetoc2 onepkg onedrive zip notizbuch migration' },
   { label: 'Server-Backup', detail: 'Dateien & Vault', section: 'files', target: 'settings-backup', keywords: 'sicherung cloud wiederherstellen recovery kopie' },
@@ -276,6 +281,9 @@ export function SettingsModal({
   onResetSettings,
   onResetAppData,
   onOpenBugReport,
+  remoteSupportSession = null,
+  onRemoteSupportStart,
+  onRemoteSupportStop,
 }: SettingsModalProps) {
   const isWeb = platform === 'web'
   const [active, setActive] = useState<SettingsSection>('appearance')
@@ -978,6 +986,47 @@ export function SettingsModal({
                         <p>Authorization: Bearer &lt;Passwort&gt;</p>
                         <small>Host: {HOMEWORK_API_HOST}</small>
                       </div>
+                    )}
+                  </div>
+                )}
+                <SettingRow
+                  title="Remote Support"
+                  description="Erlaubt einer Support-Sitzung, FaNotes auf diesem Gerät zu prüfen und zu steuern: Version, Einstellungen, geöffnete Notiz, Vault-Namen, Werkzeug, Bild und Testeingaben. Standard aus. Ohne Start gibt es keine Sitzung."
+                >
+                  <Toggle
+                    label="Remote Support"
+                    checked={settings.experimentalRemoteSupport}
+                    onChange={(value) => {
+                      onChange({ ...settings, experimentalRemoteSupport: value })
+                      if (!value) onRemoteSupportStop?.()
+                    }}
+                  />
+                </SettingRow>
+                {settings.experimentalRemoteSupport && (
+                  <div id="settings-remote-support" className="settings-resource-note" style={{ display: 'grid', gap: 10 }}>
+                    <p>Die Sitzung läuft nur, solange du sie hier startest. Nach dem Beenden oder mit ausgeschaltetem Schalter sind Prüfen und Steuern gesperrt.</p>
+                    {remoteSupportSession ? (
+                      <>
+                        <div>
+                          <strong>Sitzungscode</strong>
+                          <p>Diesen Code nur an den Support weitergeben, der gerade mit dir arbeitet.</p>
+                          <code>{remoteSupportSession.code}</code>
+                        </div>
+                        <button
+                          type="button"
+                          className="secondary-button"
+                          onClick={() => void navigator.clipboard?.writeText(remoteSupportSession.code)}
+                        >
+                          <Copy size={14} /> Code kopieren
+                        </button>
+                        <button type="button" className="secondary-button" onClick={() => onRemoteSupportStop?.()}>
+                          Sitzung beenden
+                        </button>
+                      </>
+                    ) : (
+                      <button type="button" className="secondary-button" onClick={() => onRemoteSupportStart?.()}>
+                        Sitzung starten
+                      </button>
                     )}
                   </div>
                 )}

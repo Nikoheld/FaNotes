@@ -2,6 +2,10 @@
 
 ## Unveröffentlicht
 
+## 2026.8.44
+
+- **Remote Support:** Unter Experimentell startest du eine Sitzung mit Code. Der Support kann dann FaNotes prüfen und testen — Version, Einstellungen, geöffnete Notiz, Vault-Namen, Werkzeug und Bild. Ohne Start oder nach dem Beenden bleibt der Zugriff zu.
+
 ## 2026.8.43
 
 - **Keine Linie nach oben auf PDF:** Der erste Stiftkontakt auf einem PDF zieht keine gerade Linie zur Blattoberkante. Punkte über dem Blatt und Sprünge ins obere Band werden verworfen.

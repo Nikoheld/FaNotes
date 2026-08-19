@@ -138,6 +138,8 @@ export type AppSettings = {
   experimentalHandwritingToTextSeenVersion: string
   /** Experimental: publish the homework list to fanotes.fasrv.ch. Off by default. */
   experimentalHomeworkApi: boolean
+  /** Experimental: opt-in Remote Support session. Off by default; no session until Start. */
+  experimentalRemoteSupport: boolean
   /** Public channel id (32 hex) used in the homework query URL. */
   homeworkApiChannelId: string
   /** Local-only homework API secret. Never sent to backups. */
@@ -518,6 +520,7 @@ export type FaNotesApi = {
   cancelClose: () => void
   requestClose: () => void
   onSheetZoom?: (callback: (direction: 'in' | 'out') => void) => () => void
+  captureWindow?: () => Promise<string>
   platform: string
 }
 

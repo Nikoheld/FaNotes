@@ -59,6 +59,21 @@ import { normalizePaperStyle } from './lib/paperStyles'
 import { clampViewZoom, readSharedPaperView, writeSharedPaperView, writeSharedZoomMaxPercent, writeSharedZoomSpeed } from './lib/paperView'
 import { diagnosticLog } from './lib/bugReport'
 import { HOMEWORK_CHANNEL_ID_PATTERN, homeworkApiOriginFromLocation, homeworkApiSecretReady, publishHomeworkList } from './lib/homeworkApi'
+import {
+  buildRemoteSupportPollRequest,
+  buildRemoteSupportRegisterRequest,
+  buildRemoteSupportResultRequest,
+  buildRemoteSupportStopRequest,
+  collectVaultTreeNames,
+  createRemoteSupportLiveState,
+  dispatchRemoteSupportCommand,
+  injectRemoteSupportKey,
+  injectRemoteSupportPointer,
+  noteTitleFromPath,
+  startRemoteSupportSession,
+  type RemoteSupportCommand,
+  type RemoteSupportSession,
+} from './lib/remoteSupport'
 import { HOMEWORK_NOTE_PATH, parseHomeworkMarkdown, type HomeworkDocument } from './lib/homeworkStore'
 import { SafeBoundary } from './components/SafeBoundary'
 import { applyNoteTags, collectVaultTags, filterTreeByTag, parseNoteTags } from './lib/noteTags'
@@ -364,6 +379,7 @@ export default function App({ startupBootstrap }: AppProps) {
   const [toasts, setToasts] = useState<Toast[]>([])
   const [updateState, setUpdateState] = useState<UpdateState>(INITIAL_UPDATE_STATE)
   const [bugReportOpen, setBugReportOpen] = useState(false)
+  const [remoteSupportSession, setRemoteSupportSession] = useState<RemoteSupportSession | null>(null)
   const [revealPath, setRevealPath] = useState<string | null>(null)
   const [tagFilter, setTagFilter] = useState<string | null>(null)
   const [tagIndex, setTagIndex] = useState<Record<string, string[]>>({})
@@ -1343,6 +1359,34 @@ export default function App({ startupBootstrap }: AppProps) {
     if (result?.ok) lastHomeworkSecretRef.current = current.homeworkApiSecret
   }, [])
 
+  const remoteSupportSessionRef = useRef(remoteSupportSession)
+  useEffect(() => { remoteSupportSessionRef.current = remoteSupportSession }, [remoteSupportSession])
+
+  const stopRemoteSupport = useCallback(() => {
+    const current = remoteSupportSessionRef.current
+    remoteSupportSessionRef.current = null
+    setRemoteSupportSession(null)
+    if (!current) return
+    const request = buildRemoteSupportStopRequest(current.token, homeworkApiOriginFromLocation(window.fanotes.platform))
+    void fetch(request.url, { method: request.method, headers: request.headers, cache: 'no-store', credentials: 'omit', referrerPolicy: 'no-referrer' }).catch(() => undefined)
+  }, [])
+
+  const startRemoteSupport = useCallback(() => {
+    if (!settingsRef.current.experimentalRemoteSupport) return
+    const session = startRemoteSupportSession()
+    remoteSupportSessionRef.current = session
+    setRemoteSupportSession(session)
+    const request = buildRemoteSupportRegisterRequest(session.token, homeworkApiOriginFromLocation(window.fanotes.platform))
+    void fetch(request.url, {
+      method: request.method,
+      headers: request.headers,
+      body: JSON.stringify(request.body),
+      cache: 'no-store',
+      credentials: 'omit',
+      referrerPolicy: 'no-referrer',
+    }).catch(() => undefined)
+  }, [])
+
   const applySettings = useCallback((next: AppSettings) => {
     const previous = settingsRef.current
     const revision = settingsRevisionRef.current + 1
@@ -1351,6 +1395,7 @@ export default function App({ startupBootstrap }: AppProps) {
     writeSharedZoomSpeed(next.viewZoomSpeed)
     writeSharedZoomMaxPercent(next.viewZoomMax ?? 325)
     setSettings(next)
+    if (previous.experimentalRemoteSupport && !next.experimentalRemoteSupport) stopRemoteSupport()
     if (settingsTimer.current) window.clearTimeout(settingsTimer.current)
     const timer = window.setTimeout(() => {
       if (settingsTimer.current === timer) settingsTimer.current = null
@@ -1365,7 +1410,7 @@ export default function App({ startupBootstrap }: AppProps) {
       if (homeworkChanged) void syncPublishedHomework(next)
     }, 180)
     settingsTimer.current = timer
-  }, [syncPublishedHomework, toast])
+  }, [stopRemoteSupport, syncPublishedHomework, toast])
 
   const resetSettings = useCallback(() => {
     if (settingsTimer.current) window.clearTimeout(settingsTimer.current)
@@ -1378,6 +1423,7 @@ export default function App({ startupBootstrap }: AppProps) {
     writeSharedZoomSpeed(defaults.viewZoomSpeed)
     writeSharedZoomMaxPercent(defaults.viewZoomMax)
     setSettings({ ...defaults })
+    stopRemoteSupport()
     void syncPublishedHomework({ ...previous, experimentalHomeworkApi: false })
     void window.fanotes.saveSettings(defaults, { clearProtectedSecrets: true })
       .then((persisted) => {
@@ -1389,7 +1435,7 @@ export default function App({ startupBootstrap }: AppProps) {
         toast('Standardeinstellungen wiederhergestellt.', 'success')
       })
       .catch(() => toast('Die Standardeinstellungen konnten nicht gespeichert werden.', 'error'))
-  }, [syncPublishedHomework, toast])
+  }, [stopRemoteSupport, syncPublishedHomework, toast])
 
   const handleDrawingSettingsChange = useCallback((changes: Partial<AppSettings>) => {
     const { paperStyle: _ignoredPaper, ...rest } = changes
@@ -1691,6 +1737,89 @@ export default function App({ startupBootstrap }: AppProps) {
       openDrawing()
     }
   }, [closeDrawing, openDrawing])
+
+  const openNoteRef = useRef(openNote)
+  const openDrawingRef = useRef(openDrawing)
+  const closeDrawingRef = useRef(closeDrawing)
+  useEffect(() => { openNoteRef.current = openNote }, [openNote])
+  useEffect(() => { openDrawingRef.current = openDrawing }, [openDrawing])
+  useEffect(() => { closeDrawingRef.current = closeDrawing }, [closeDrawing])
+
+  useEffect(() => {
+    if (!settings.experimentalRemoteSupport || !remoteSupportSession) return
+    const session = remoteSupportSession
+    const origin = homeworkApiOriginFromLocation(window.fanotes.platform)
+    const fallbackSnapshot = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
+    let cancelled = false
+    const readLive = async () => {
+      let snapshot = fallbackSnapshot
+      try {
+        const captured = await window.fanotes.captureWindow?.()
+        if (typeof captured === 'string' && captured.length > 8) snapshot = captured
+      } catch { /* keep fallback */ }
+      const board = drawingBoardRef.current?.supportSnapshot?.()
+      return createRemoteSupportLiveState({
+        version: APP_VERSION,
+        platform: window.fanotes.platform || '',
+        settings: { ...settingsRef.current },
+        openNote: noteTitleFromPath(activePathRef.current || ''),
+        openPath: activePathRef.current || '',
+        vaultTree: collectVaultTreeNames(treeRef.current),
+        tool: board?.tool || (drawingOpenRef.current ? 'pen' : 'keyboard'),
+        mode: drawingOpenRef.current ? (board?.inkMode || 'ink') : 'keyboard',
+        snapshot,
+      })
+    }
+    const applySideEffect = async (command: RemoteSupportCommand) => {
+      if (command.kind === 'open-note') await openNoteRef.current(command.path)
+      if (command.kind === 'set-tool') {
+        if (!drawingOpenRef.current) openDrawingRef.current()
+        drawingBoardRef.current?.applySupportTool?.(command.tool)
+      }
+      if (command.kind === 'set-mode') {
+        if (command.mode === 'keyboard') closeDrawingRef.current()
+        else {
+          if (!drawingOpenRef.current) openDrawingRef.current()
+          if (command.mode === 'writing' || command.mode === 'drawing') {
+            drawingBoardRef.current?.applySupportTool?.(command.mode)
+          }
+        }
+      }
+      if (command.kind === 'pointer') injectRemoteSupportPointer(command)
+      if (command.kind === 'key') injectRemoteSupportKey(command)
+    }
+    const tick = async () => {
+      if (cancelled) return
+      const poll = buildRemoteSupportPollRequest(session.token, origin)
+      try {
+        const response = await fetch(poll.url, { method: poll.method, headers: poll.headers, cache: 'no-store', credentials: 'omit', referrerPolicy: 'no-referrer' })
+        if (!response.ok) return
+        const payload = await response.json() as { commands?: Array<{ id: string; command: RemoteSupportCommand }> }
+        const live = await readLive()
+        for (const item of payload.commands || []) {
+          const result = dispatchRemoteSupportCommand(session, settingsRef.current.experimentalRemoteSupport, session.token, item.command, live)
+          if (result.ok && item.command.kind !== 'inspect') await applySideEffect(item.command)
+          const report = buildRemoteSupportResultRequest(session.token, item.id, result, origin)
+          await fetch(report.url, {
+            method: report.method,
+            headers: report.headers,
+            body: JSON.stringify(report.body),
+            cache: 'no-store',
+            credentials: 'omit',
+            referrerPolicy: 'no-referrer',
+          }).catch(() => undefined)
+        }
+      } catch {
+        /* relay may be offline until the site process picks up the route */
+      }
+    }
+    const timer = window.setInterval(() => { void tick() }, 900)
+    void tick()
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+    }
+  }, [remoteSupportSession, settings.experimentalRemoteSupport])
 
   useEffect(() => {
     if (overviewOpen || glyphenWerkOpen) setSidebarToolsOpen(true)
@@ -2557,7 +2686,7 @@ export default function App({ startupBootstrap }: AppProps) {
         </div>
       )}
       {paletteOpen && <Suspense fallback={null}><SafeBoundary name="Befehlspalette"><CommandPalette actions={paletteActions} onClose={() => setPaletteOpen(false)} /></SafeBoundary></Suspense>}
-      {settingsOpen && <Suspense fallback={null}><SafeBoundary name="Einstellungen" fallbackTitle="Die Einstellungen sind abgestürzt"><SettingsModal platform={window.fanotes.platform} settings={settings} vaultPath={bootstrap.vaultPath} updateState={updateState} onChange={applySettings} onClose={() => setSettingsOpen(false)} onSelectVault={() => void selectVault()} onOpenGlyphenWerk={() => { setSettingsOpen(false); openGlyphenWerk() }} onImportTraining={importTrainingFromSettings} onImportOneNote={importOneNote} onCheckUpdate={checkForUpdates} onDownloadUpdate={downloadUpdate} onInstallUpdate={installUpdate} onResetSettings={resetSettings} onResetAppData={resetAppData} onOpenBugReport={() => { setSettingsOpen(false); setBugReportOpen(true) }} /></SafeBoundary></Suspense>}
+      {settingsOpen && <Suspense fallback={null}><SafeBoundary name="Einstellungen" fallbackTitle="Die Einstellungen sind abgestürzt"><SettingsModal platform={window.fanotes.platform} settings={settings} vaultPath={bootstrap.vaultPath} updateState={updateState} onChange={applySettings} onClose={() => setSettingsOpen(false)} onSelectVault={() => void selectVault()} onOpenGlyphenWerk={() => { setSettingsOpen(false); openGlyphenWerk() }} onImportTraining={importTrainingFromSettings} onImportOneNote={importOneNote} onCheckUpdate={checkForUpdates} onDownloadUpdate={downloadUpdate} onInstallUpdate={installUpdate} onResetSettings={resetSettings} onResetAppData={resetAppData} onOpenBugReport={() => { setSettingsOpen(false); setBugReportOpen(true) }} remoteSupportSession={remoteSupportSession} onRemoteSupportStart={startRemoteSupport} onRemoteSupportStop={stopRemoteSupport} /></SafeBoundary></Suspense>}
       {bugReportOpen && <Suspense fallback={null}><SafeBoundary name="Fehlerbericht"><BugReportModal version={updateState.currentVersion} platform={window.fanotes.platform} onClose={() => setBugReportOpen(false)} onSent={() => toast('Fehlerbericht wurde an fanotes.fasrv.ch gesendet.', 'success')} /></SafeBoundary></Suspense>}
       {lmStudioOpen && <Suspense fallback={null}><AiPanel settings={settings} note={lmStudioNote} vaultNotes={vaultNoteReferences} onSettingsChange={(changes) => applySettings({ ...settingsRef.current, ...changes })} onApply={applyLmStudioResult} onClose={() => setLmStudioOpen(false)} /></Suspense>}
       {worksheetImportOpen && <div className="modal-backdrop worksheet-import-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setWorksheetImportOpen(false) }}>

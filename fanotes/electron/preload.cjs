@@ -66,6 +66,7 @@ const CHANNELS = Object.freeze({
   cancelClose: 'fanotes:cancel-close',
   requestClose: 'fanotes:request-close',
   sheetZoom: 'fanotes:sheet-zoom',
+  captureWindow: 'fanotes:capture-window',
 })
 
 const invoke = (channel, ...args) => ipcRenderer.invoke(channel, ...args)
@@ -149,6 +150,7 @@ const api = Object.freeze({
     ipcRenderer.on(CHANNELS.sheetZoom, listener)
     return () => ipcRenderer.removeListener(CHANNELS.sheetZoom, listener)
   },
+  captureWindow: () => invoke(CHANNELS.captureWindow),
   platform: process.platform,
 })
 
