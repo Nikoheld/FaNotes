@@ -118,7 +118,7 @@ import {
   inkWidthNeedsAnchor,
   liveGrowScale,
   mergePendingGrow,
-  neededWriteExtent,
+  nextWriteExtent,
   pendingGrowScale,
 } from '../lib/paperGrow'
 import { DraftingGuides } from './DraftingGuides'
@@ -2002,10 +2002,13 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const ensureWriteRoom = useCallback((normalizedY?: number, normalizedX?: number) => {
     const prevH = sourceHeightRef.current
     const prevW = sourceWidthRef.current
-    const nextH = neededWriteExtent(normalizedY, prevH, WRITE_SLACK_HEIGHT, PAGE_GROW_STEP_HEIGHT)
-    const nextW = neededWriteExtent(normalizedX, prevW, WRITE_SLACK_WIDTH, PAGE_GROW_STEP_WIDTH)
+    const paper = resolvePaperElement()
+    const paintedH = paper?.offsetHeight ?? 0
+    const paintedW = paper?.offsetWidth ?? 0
+    const nextH = nextWriteExtent(normalizedY, prevH, WRITE_SLACK_HEIGHT, PAGE_GROW_STEP_HEIGHT, paintedH)
+    const nextW = nextWriteExtent(normalizedX, prevW, WRITE_SLACK_WIDTH, PAGE_GROW_STEP_WIDTH, paintedW)
     if (nextH > prevH || nextW > prevW) setPageExtent(nextH, nextW)
-  }, [setPageExtent])
+  }, [resolvePaperElement, setPageExtent])
 
   const fitPageToInk = useCallback(() => {
     if (activeStrokeRef.current) return false

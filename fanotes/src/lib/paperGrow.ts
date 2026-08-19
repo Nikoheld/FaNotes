@@ -227,3 +227,28 @@ export const neededWriteExtent = (
   if (!(needed > current)) return current
   return Math.max(current, Math.ceil(needed / step) * step)
 }
+
+/** Skip source grow when the painted sheet is already taller/wider than the wanted extent. */
+export const neededSourceExtentAgainstPainted = (
+  wantedExtent: number,
+  currentSource: number,
+  painted: number,
+) => {
+  if (!paintedBoxIsUsable(painted)) return wantedExtent
+  if (Number.isFinite(wantedExtent) && wantedExtent <= painted) return currentSource
+  return wantedExtent
+}
+
+export const nextWriteExtent = (
+  normalized: number | undefined,
+  source: number,
+  slack: number,
+  step: number,
+  painted = 0,
+) => (
+  neededSourceExtentAgainstPainted(
+    neededWriteExtent(normalized, source, slack, step),
+    source,
+    painted,
+  )
+)
