@@ -1,4 +1,5 @@
 import {
+  Archive,
   ArrowLeft,
   Bot,
   Bug,
@@ -66,6 +67,13 @@ import {
   type NoteLinkRecord,
   type NoteLinkStyleId,
 } from './lib/noteLink'
+import {
+  createNoteBackup,
+  listNoteBackups,
+  noteBackupControlPolicy,
+  restoreNoteBackup,
+  type NoteBackupSnapshot,
+} from './lib/noteBackup'
 import { PDF_TOOLBAR_SLOT_ID } from './lib/pdfInkHit'
 import { APP_VERSION } from './lib/appVersion'
 import { defaultSettingsForPlatform } from './defaults'
@@ -97,7 +105,7 @@ import { HOMEWORK_NOTE_PATH, parseHomeworkMarkdown, type HomeworkDocument } from
 import { SafeBoundary } from './components/SafeBoundary'
 import { applyNoteTags, collectVaultTags, filterTreeByTag, parseNoteTags } from './lib/noteTags'
 import { applyRendererResourceLimits } from './lib/resourceLimits'
-import { setUiLanguage, translateUiText } from './i18n'
+import { getUiLocale, setUiLanguage, translateUiText } from './i18n'
 import { bestContrastText, ensureReadableColor } from './lib/colorContrast'
 import type { AppSettings, BootstrapData, CreateResult, DetectedTextLanguage, DrawingLibraryDocument, NoteHistorySnapshot, NoteTab, OneNoteImportResult, PaperStyle, SearchHit, UpdateState, VaultEntry, WorksheetDocument } from './types'
 
@@ -408,6 +416,8 @@ export default function App({ startupBootstrap }: AppProps) {
   const [noteLinkStyle, setNoteLinkStyle] = useState<NoteLinkStyleId>('symbol')
   const [selectedNoteLinkId, setSelectedNoteLinkId] = useState<string | null>(null)
   const [noteNavStack, setNoteNavStack] = useState<string[]>([])
+  const [noteBackups, setNoteBackups] = useState<NoteBackupSnapshot[]>([])
+  const [backupMenuOpen, setBackupMenuOpen] = useState(false)
   const [tagDraft, setTagDraft] = useState('')
   const [splitPath, setSplitPath] = useState<string | null>(null)
   const [historyOpen, setHistoryOpen] = useState(false)
@@ -417,6 +427,7 @@ export default function App({ startupBootstrap }: AppProps) {
   const activePathRef = useRef(activePath)
   const noteNavStackRef = useRef<string[]>([])
   const noteLinksRef = useRef<NoteLinkRecord[]>([])
+  const noteBackupsRef = useRef<NoteBackupSnapshot[]>([])
   const editorRef = useRef<MarkdownEditorHandle>(null)
   const drawingBoardRef = useRef<DrawingBoardHandle>(null)
   const worksheetLayerRefs = useRef(new Map<string, WorksheetLayerHandle>())
@@ -508,8 +519,11 @@ export default function App({ startupBootstrap }: AppProps) {
   }, [bootstrap, settings.uiLanguage])
   useEffect(() => { drawingOpenRef.current = drawingOpen }, [drawingOpen])
   useEffect(() => {
-    if (!editorMenuOpen) return
-    const close = () => setEditorMenuOpen(false)
+    if (!editorMenuOpen && !backupMenuOpen) return
+    const close = () => {
+      setEditorMenuOpen(false)
+      setBackupMenuOpen(false)
+    }
     const closeOnEscape = (event: globalThis.KeyboardEvent) => {
       if (event.key === 'Escape') close()
     }
@@ -519,8 +533,12 @@ export default function App({ startupBootstrap }: AppProps) {
       document.removeEventListener('pointerdown', close)
       document.removeEventListener('keydown', closeOnEscape)
     }
-  }, [editorMenuOpen])
+  }, [backupMenuOpen, editorMenuOpen])
   const activeTab = useMemo(() => tabs.find((tab) => tab.path === activePath) ?? null, [activePath, tabs])
+  const backupPolicy = useMemo(
+    () => noteBackupControlPolicy(settings.experimentalNoteBackup, noteBackups.length),
+    [noteBackups.length, settings.experimentalNoteBackup],
+  )
   const isPdfActive = Boolean(activeTab && (activeTab.kind === 'pdf' || isPdfNotePath(activeTab.path)))
   const activePaper = useMemo(
     () => normalizePaperStyle(activePath ? notePaperByPath[activePath] : undefined, settings.paperStyle),
@@ -635,6 +653,30 @@ export default function App({ startupBootstrap }: AppProps) {
         if (!alive) return
         noteLinksRef.current = []
         setNoteLinks([])
+      })
+    return () => { alive = false }
+  }, [activePath])
+
+  useEffect(() => {
+    const path = activePath
+    setBackupMenuOpen(false)
+    if (!path || !window.fanotes.readNoteBackups) {
+      noteBackupsRef.current = []
+      setNoteBackups([])
+      return
+    }
+    let alive = true
+    void window.fanotes.readNoteBackups(path)
+      .then((list) => {
+        if (!alive) return
+        const next = listNoteBackups(list, path)
+        noteBackupsRef.current = next
+        setNoteBackups(next)
+      })
+      .catch(() => {
+        if (!alive) return
+        noteBackupsRef.current = []
+        setNoteBackups([])
       })
     return () => { alive = false }
   }, [activePath])
@@ -1149,6 +1191,44 @@ export default function App({ startupBootstrap }: AppProps) {
     if (!window.fanotes.writeNoteLinks) return
     await window.fanotes.writeNoteLinks(path, links)
   }, [])
+
+  const persistNoteBackups = useCallback(async (path: string, backups: NoteBackupSnapshot[]) => {
+    const next = listNoteBackups(backups, path)
+    noteBackupsRef.current = next
+    setNoteBackups(next)
+    if (!window.fanotes.writeNoteBackups) return
+    await window.fanotes.writeNoteBackups(path, next)
+  }, [])
+
+  const snapshotCurrentNote = useCallback(async () => {
+    const path = activePathRef.current
+    if (!path) {
+      toast('Öffne zuerst eine Notiz, die gesichert werden kann.', 'info')
+      return
+    }
+    editorRef.current?.flushChanges()
+    const live = pendingWrites.current.get(path) ?? tabsRef.current.find((tab) => tab.path === path)?.content ?? ''
+    try {
+      const { list } = createNoteBackup(noteBackupsRef.current, { notePath: path, content: live })
+      await persistNoteBackups(path, list)
+      toast('Backup gespeichert.', 'success')
+    } catch (error) {
+      toast(error instanceof Error ? error.message : 'Das Backup konnte nicht erstellt werden.', 'error')
+    }
+  }, [persistNoteBackups, toast])
+
+  const restoreCurrentNoteBackup = useCallback(async (id: string) => {
+    const path = activePathRef.current
+    if (!path) return
+    const content = restoreNoteBackup(noteBackupsRef.current, id, path)
+    if (content === null) {
+      toast('Dieses Backup gibt es nicht.', 'error')
+      return
+    }
+    updateContent(content)
+    await saveContent(path, content)
+    toast('Backup wiederhergestellt.', 'success')
+  }, [saveContent, toast, updateContent])
 
   const startNoteLinkPlacement = useCallback(() => {
     if (!activePathRef.current) {
@@ -2677,6 +2757,49 @@ export default function App({ startupBootstrap }: AppProps) {
                   : <FormattingToolbar disabled={!activeTab || overviewOpen || homeworkOpen || glyphenWerkOpen || activeEntryMutating} onFormat={formatMarkdown} />}
             </div>
             <div className="toolbar-group toolbar-end">
+              {backupPolicy.visible && (
+                <div className="note-backup-control">
+                  <button
+                    type="button"
+                    className={`toolbar-button ${backupMenuOpen ? 'active' : ''}`}
+                    title={backupPolicy.restore ? 'Backup: weiteres Backup oder wiederherstellen' : 'Backup der aktuellen Notiz'}
+                    aria-label="Backup"
+                    aria-haspopup={backupPolicy.restore ? 'menu' : undefined}
+                    aria-expanded={backupPolicy.restore ? backupMenuOpen : undefined}
+                    disabled={!activeTab}
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      if (!backupPolicy.restore) {
+                        void snapshotCurrentNote()
+                        return
+                      }
+                      setEditorMenuOpen(false)
+                      setBackupMenuOpen((open) => !open)
+                    }}
+                  >
+                    <Archive size={14} /><span>Backup</span>
+                  </button>
+                  {backupPolicy.restore && backupMenuOpen && (
+                    <div className="note-backup-menu" role="menu" aria-label="Backup" onPointerDown={(event) => event.stopPropagation()}>
+                      <button type="button" role="menuitem" onClick={() => { setBackupMenuOpen(false); void snapshotCurrentNote() }}>
+                        <strong>Weiteres Backup</strong>
+                        <small>Aktuelle Notiz so sichern, wie sie ist</small>
+                      </button>
+                      {[...noteBackups].reverse().map((snapshot) => (
+                        <button
+                          key={snapshot.id}
+                          type="button"
+                          role="menuitem"
+                          onClick={() => { setBackupMenuOpen(false); void restoreCurrentNoteBackup(snapshot.id) }}
+                        >
+                          <strong>Wiederherstellen</strong>
+                          <small>{Number.isFinite(Date.parse(snapshot.createdAt)) ? new Date(snapshot.createdAt).toLocaleString(getUiLocale(), { dateStyle: 'short', timeStyle: 'short' }) : snapshot.createdAt}</small>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
               {activeTab && (
                 <div className="note-link-styles" role="group" aria-label="Verlinkungsstil">
                   {NOTE_LINK_STYLES.map((style) => (

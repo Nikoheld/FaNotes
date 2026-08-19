@@ -3,6 +3,7 @@ import { DEFAULT_SETTINGS } from '../defaults'
 import { getUiLanguage } from '../i18n'
 import type { AppSettings, BootstrapData, DrawingLibraryDocument, FaNotesApi, PaperStyle, ServerBackupState, UpdateState, VaultEntry, WorksheetDocument } from '../types'
 import { companionNotePath, emptyFamdPayload, parseFamd, serializeFamd } from './famd'
+import { parseNoteBackups, type NoteBackupSnapshot } from './noteBackup'
 import { parseNoteLinks, type NoteLinkRecord } from './noteLink'
 import { isPaperStyle } from './paperStyles'
 import { browserInitialFiles, browserStarterFolders, browserStarterSubjects } from './browserPreview'
@@ -1095,6 +1096,36 @@ export function createBrowserApi(): FaNotesApi {
       files.set(famdPath, record)
       cachedTree = null
       return links
+    },
+    readNoteBackups: async (rawPath) => {
+      await ready
+      const path = normalizePath(rawPath)
+      const famdPath = companionNotePath(path, '.famd')
+      const record = files.get(famdPath)
+      if (!record) return []
+      return parseNoteBackups(parseFamd(record.content).payload?.noteBackups)
+    },
+    writeNoteBackups: async (rawPath, rawBackups) => {
+      await ready
+      const path = normalizePath(rawPath)
+      const backups = parseNoteBackups(rawBackups).map((snapshot: NoteBackupSnapshot) => ({ ...snapshot, notePath: path }))
+      const famdPath = companionNotePath(path, '.famd')
+      const existing = files.get(famdPath)
+      const parsed = parseFamd(existing?.content ?? '')
+      const payload = {
+        ...(parsed.payload || emptyFamdPayload()),
+        updatedAt: new Date().toISOString(),
+        noteBackups: backups,
+      }
+      const record = {
+        path: famdPath,
+        content: serializeFamd(parsed.markdown, payload),
+        modifiedAt: new Date().toISOString(),
+      }
+      await write('files', (store) => { store.put(record) })
+      files.set(famdPath, record)
+      cachedTree = null
+      return backups
     },
     importPdfNote: async (rawParent) => {
       const file = await pickPdf()

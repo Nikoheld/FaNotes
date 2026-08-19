@@ -82,6 +82,39 @@ function parseNoteLinks(value) {
   return links
 }
 
+const NOTE_BACKUP_ID = /^[a-zA-Z0-9._-]{1,96}$/u
+const NOTE_BACKUP_LIMIT = 40
+const NOTE_BACKUP_MAX_CHARS = 2 * 1024 * 1024
+
+function sanitizeNoteBackup(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const notePath = sanitizeNoteLinkPath(value.notePath)
+  if (!notePath) return null
+  const createdAt = typeof value.createdAt === 'string' && Number.isFinite(Date.parse(value.createdAt))
+    ? new Date(value.createdAt).toISOString()
+    : new Date().toISOString()
+  const content = typeof value.content === 'string' ? value.content.slice(0, NOTE_BACKUP_MAX_CHARS) : ''
+  return {
+    id: typeof value.id === 'string' && NOTE_BACKUP_ID.test(value.id) ? value.id : `nb-${Date.now().toString(36)}`,
+    notePath,
+    createdAt,
+    content,
+  }
+}
+
+function parseNoteBackups(value) {
+  if (!Array.isArray(value)) return []
+  const seen = new Set()
+  const snapshots = []
+  for (const entry of value) {
+    const snapshot = sanitizeNoteBackup(entry)
+    if (!snapshot || seen.has(snapshot.id)) continue
+    seen.add(snapshot.id)
+    snapshots.push(snapshot)
+  }
+  return snapshots.slice(-NOTE_BACKUP_LIMIT)
+}
+
 function emptyFamdPayload(updatedAt = new Date().toISOString()) {
   return { schema: FAMD_SCHEMA, updatedAt, ink: null, worksheets: [] }
 }
@@ -123,6 +156,7 @@ function parseFamd(source) {
       : new Date().toISOString()
     const paperStyle = isPaperStyle(parsed.paperStyle) ? parsed.paperStyle : undefined
     const noteLinks = parseNoteLinks(parsed.noteLinks)
+    const noteBackups = parseNoteBackups(parsed.noteBackups)
     return {
       markdown,
       payload: {
@@ -132,6 +166,7 @@ function parseFamd(source) {
         worksheets,
         ...(paperStyle ? { paperStyle } : {}),
         ...(noteLinks.length ? { noteLinks } : {}),
+        ...(noteBackups.length ? { noteBackups } : {}),
       },
     }
   } catch {
@@ -152,6 +187,8 @@ function serializeFamd(markdown, payload) {
   }
   const noteLinks = parseNoteLinks(payload?.noteLinks)
   if (noteLinks.length) next.noteLinks = noteLinks
+  const noteBackups = parseNoteBackups(payload?.noteBackups)
+  if (noteBackups.length) next.noteBackups = noteBackups
   const json = JSON.stringify(next)
   return `${body ? `${body}\n\n` : ''}<!-- fanotes-famd:v1 chars=${json.length} -->\n${json}\n`
 }
@@ -170,6 +207,7 @@ module.exports = {
   isPdfNoteExtension,
   noteStem,
   parseFamd,
+  parseNoteBackups,
   parseNoteLinks,
   serializeFamd,
   stripFamdPayload,

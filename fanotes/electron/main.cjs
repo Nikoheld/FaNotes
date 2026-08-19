@@ -39,6 +39,7 @@ const {
   isPdfNoteExtension,
   noteStem,
   parseFamd,
+  parseNoteBackups,
   parseNoteLinks,
   serializeFamd,
   stripFamdPayload,
@@ -161,6 +162,8 @@ const IPC = Object.freeze({
   setNotePaperStyle: 'fanotes:set-note-paper-style',
   readNoteLinks: 'fanotes:read-note-links',
   writeNoteLinks: 'fanotes:write-note-links',
+  readNoteBackups: 'fanotes:read-note-backups',
+  writeNoteBackups: 'fanotes:write-note-backups',
   importWorksheet: 'fanotes:import-worksheet',
   importWorksheetFromData: 'fanotes:import-worksheet-from-data',
   importPdfNote: 'fanotes:import-pdf-note',
@@ -260,6 +263,7 @@ const DEFAULT_SETTINGS = Object.freeze({
   experimentalHandwritingToTextSeenVersion: '',
   experimentalHomeworkApi: false,
   experimentalRemoteSupport: false,
+  experimentalNoteBackup: false,
   lastOpenNotePath: '',
   homeworkApiChannelId: '',
   homeworkApiSecret: '',
@@ -342,6 +346,7 @@ const SETTINGS_SCHEMA = Object.freeze({
   experimentalHandwritingToTextSeenVersion: { type: 'string', max: 40 },
   experimentalHomeworkApi: { type: 'boolean' },
   experimentalRemoteSupport: { type: 'boolean' },
+  experimentalNoteBackup: { type: 'boolean' },
   lastOpenNotePath: { type: 'string', max: 1024 },
   homeworkApiChannelId: { type: 'string', max: 32 },
   homeworkApiSecret: { type: 'string', max: 256 },
@@ -3582,6 +3587,39 @@ function registerIpcHandlers() {
     const { target } = await resolveVaultPath(famdRelative, { allowMissing: true, expected: 'file' })
     await atomicWrite(target, serializeFamd(body, payload), { encoding: 'utf8', mode: 0o600 })
     return links
+  })
+
+  handle(IPC.readNoteBackups, async (_event, relativePath) => {
+    await ensureBootstrap()
+    if (typeof relativePath !== 'string') throw new Error('Ungültiger Notizpfad.')
+    const notePath = normalizeRelativePath(relativePath).split(path.sep).join('/')
+    assertNotePath(notePath)
+    const source = await readOptionalNoteFile(companionNotePath(notePath, '.famd'))
+    if (!source) return []
+    return parseNoteBackups(parseFamd(source).payload?.noteBackups)
+  })
+
+  handle(IPC.writeNoteBackups, async (_event, relativePath, rawBackups) => {
+    await ensureBootstrap()
+    if (typeof relativePath !== 'string') throw new Error('Ungültiger Notizpfad.')
+    const notePath = normalizeRelativePath(relativePath).split(path.sep).join('/')
+    assertNotePath(notePath)
+    const backups = parseNoteBackups(rawBackups).map((snapshot) => ({ ...snapshot, notePath }))
+    const markdownPath = noteMarkdownSourcePath(notePath)
+    const markdown = (await readOptionalNoteFile(markdownPath, noteByteLimit(markdownPath))) ?? ''
+    const famdRelative = companionNotePath(notePath, '.famd')
+    const existingSource = await readOptionalNoteFile(famdRelative)
+    const existing = existingSource ? parseFamd(existingSource) : { markdown: stripFamdPayload(markdown), payload: emptyFamdPayload() }
+    const body = stripFamdPayload(markdown || existing.markdown)
+    const payload = {
+      ...(existing.payload || emptyFamdPayload()),
+      updatedAt: new Date().toISOString(),
+      worksheets: worksheetIdsFromMarkdown(body),
+      noteBackups: backups,
+    }
+    const { target } = await resolveVaultPath(famdRelative, { allowMissing: true, expected: 'file' })
+    await atomicWrite(target, serializeFamd(body, payload), { encoding: 'utf8', mode: 0o600 })
+    return backups
   })
 
   handle(IPC.importWorksheet, async () => {

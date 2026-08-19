@@ -19,6 +19,10 @@ Command-palette action ids walked from `src/App.tsx`: `new-note`, `import-pdf-no
 | Placed note Verlinkung | `src/lib/noteLink.ts` | `export const placeNewNoteLink` |
 | Verlinkung overlay | `src/components/NoteLinkLayer.tsx` | `export function NoteLinkLayer` |
 | Zurück after a Verlinkung | `src/App.tsx` | `note-nav-back` |
+| Note backup snapshots | `src/lib/noteBackup.ts` | `export const createNoteBackup` |
+| Backup control policy | `src/lib/noteBackup.ts` | `export const noteBackupControlPolicy` |
+| Backup top chrome | `src/App.tsx` | `note-backup-control` |
+| Notiz-Backup Experimentell | `src/components/SettingsModal.tsx` | `title="Notiz-Backup"` |
 | Desktop vault IPC | `electron/preload.cjs` | `createNote: 'fanotes:create-note'` |
 
 ## Paper / ink

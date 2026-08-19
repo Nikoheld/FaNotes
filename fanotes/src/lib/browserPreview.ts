@@ -252,6 +252,8 @@ export function createBrowserPreviewApi(): FaNotesApi {
     setNotePaperStyle: async (_path, paperStyle) => paperStyle,
     readNoteLinks: async () => [],
     writeNoteLinks: async (_path, links) => links,
+    readNoteBackups: async () => [],
+    writeNoteBackups: async (_path, backups) => backups,
     readAssetBytes: async (path) => {
       const source = assets.get(path) ?? ''
       if (!source) throw new Error('Die lokale Bild- oder PDF-Datei wurde nicht gefunden.')

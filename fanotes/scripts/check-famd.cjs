@@ -27,11 +27,18 @@ const noteLinks = [{
   style: 'text',
   label: 'Skript-Notiz',
 }]
+const noteBackups = [{
+  id: 'nb-famd-check',
+  notePath: 'Mathe/Analysis.md',
+  createdAt: '2026-08-19T12:00:00.000Z',
+  content: 'Stand A',
+}]
 const encoded = serializeFamd(markdown, {
   ...emptyFamdPayload('2026-08-14T12:00:00.000Z'),
   ink,
   worksheets: worksheetIdsFromMarkdown(markdown),
   noteLinks,
+  noteBackups,
 })
 
 assert.match(encoded, /<!-- fanotes-famd:v1 chars=\d+ -->/u)
@@ -45,6 +52,7 @@ assert.deepEqual(parsed.payload?.worksheets, ['ws-1'])
 assert.equal(parsed.payload?.noteLinks?.[0]?.targetPath, 'Mathe/Skript-Notiz.md')
 assert.equal(parsed.payload?.noteLinks?.[0]?.page, 3)
 assert.equal(parsed.payload?.noteLinks?.[0]?.style, 'text')
+assert.equal(parsed.payload?.noteBackups?.[0]?.content, 'Stand A')
 assert.equal(parsed.markdown.includes('$$\\int x$$'), true)
 assert.equal(companionNotePath('Mathe/Analysis.md', '.famd'), 'Mathe/Analysis.famd')
 assert.equal(companionNotePath('Mathe/Analysis.famd', '.md'), 'Mathe/Analysis.md')

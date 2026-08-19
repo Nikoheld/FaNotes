@@ -161,6 +161,17 @@ function translateCore(source: string): string {
   if (source === 'Die Verlinkung konnte nicht erstellt werden.') return 'The link could not be created.'
   if (source === 'Der Verlinkungsstil konnte nicht gespeichert werden.') return 'The link style could not be saved.'
   if (source === 'Irgendwo auf der Seite eine neue Notiz verlinken') return 'Link a new note anywhere on the page'
+  if (source === 'Backup') return 'Backup'
+  if (source === 'Weiteres Backup') return 'Another backup'
+  if (source === 'Notiz-Backup') return 'Note backup'
+  if (source === 'Backup gespeichert.') return 'Backup saved.'
+  if (source === 'Backup wiederhergestellt.') return 'Backup restored.'
+  if (source === 'Das Backup konnte nicht erstellt werden.') return 'The backup could not be created.'
+  if (source === 'Dieses Backup gibt es nicht.') return 'That backup does not exist.'
+  if (source === 'Öffne zuerst eine Notiz, die gesichert werden kann.') return 'Open a note first that can be backed up.'
+  if (source === 'Aktuelle Notiz so sichern, wie sie ist') return 'Save the current note as it is'
+  if (source === 'Backup der aktuellen Notiz') return 'Backup of the current note'
+  if (source === 'Backup: weiteres Backup oder wiederherstellen') return 'Backup: take another snapshot or restore'
   if (source === 'Neue Notiz in diesem Ordner') return 'New note in this folder'
   const newNoteIn = /^Neue Notiz in (.+)$/u.exec(source)
   if (newNoteIn) return `New note in ${newNoteIn[1]}`

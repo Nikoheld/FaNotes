@@ -78,7 +78,7 @@ const SECTIONS: { id: SettingsSection; label: string; description: string; icon:
   { id: 'files', label: 'Dateien & Vault', description: 'Import, Ordner und Speichern', icon: FolderOpen, count: 7 },
   { id: 'updates', label: 'Updates', description: 'Stable, Beta und Sicherheit', icon: RefreshCw, count: 4 },
   { id: 'accessibility', label: 'Bedienung', description: 'Bewegung und Lesbarkeit', icon: Accessibility, count: 3 },
-  { id: 'experimental', label: 'Experimentell', description: 'Unfertige Funktionen, standardmässig aus', icon: FlaskConical, count: 3 },
+  { id: 'experimental', label: 'Experimentell', description: 'Unfertige Funktionen, standardmässig aus', icon: FlaskConical, count: 4 },
   { id: 'advanced', label: 'Erweitert', description: 'Ressourcen, Datenschutz und App-Daten', icon: Code2, count: 10 },
 ]
 
@@ -118,6 +118,7 @@ const SETTINGS_SEARCH_ITEMS: SettingsSearchItem[] = [
   { label: 'Handschrift zu Text', detail: 'Experimentell', section: 'experimental', target: 'settings-experimental', keywords: 'experimentell ocr konvertieren mathe korrigierer löser suchindex qwen vision handschrift text' },
   { label: 'Hausaufgaben API', detail: 'Experimentell', section: 'experimental', target: 'settings-homework-api', keywords: 'hausaufgaben api fasrv passwort auth termine liste' },
   { label: 'Remote Support', detail: 'Experimentell', section: 'experimental', target: 'settings-remote-support', keywords: 'remote support sitzung debug test code token fernwartung' },
+  { label: 'Notiz-Backup', detail: 'Experimentell', section: 'experimental', target: 'settings-note-backup', keywords: 'backup sichern wiederherstellen snapshot notiz' },
   { label: 'Vault & Speicherort', detail: 'Dateien & Vault', section: 'files', target: 'settings-vault', keywords: 'ordner wechseln pfad notizen markdown nas browser' },
   { label: 'Microsoft OneNote importieren', detail: 'Dateien & Vault', section: 'files', target: 'settings-onenote', keywords: 'one onetoc2 onepkg onedrive zip notizbuch migration' },
   { label: 'Server-Backup', detail: 'Dateien & Vault', section: 'files', target: 'settings-backup', keywords: 'sicherung cloud wiederherstellen recovery kopie' },
@@ -989,6 +990,18 @@ export function SettingsModal({
                     )}
                   </div>
                 )}
+                <div id="settings-note-backup">
+                <SettingRow
+                  title="Notiz-Backup"
+                  description="Zeigt oben in der Notizleiste Backup. Die aktuelle Notiz lässt sich so sichern, wie sie gerade ist, und später wiederherstellen. Standard aus. Der automatische Versionsverlauf bleibt unabhängig davon."
+                >
+                  <Toggle
+                    label="Notiz-Backup"
+                    checked={settings.experimentalNoteBackup}
+                    onChange={(value) => update('experimentalNoteBackup', value)}
+                  />
+                </SettingRow>
+                </div>
                 <SettingRow
                   title="Remote Support"
                   description="Erlaubt einer Support-Sitzung, FaNotes auf diesem Gerät zu prüfen und zu steuern: Version, Einstellungen, geöffnete Notiz, Vault-Namen, Werkzeug, Bild und Testeingaben. Standard aus. Ohne Start gibt es keine Sitzung."

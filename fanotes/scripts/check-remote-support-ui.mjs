@@ -21,7 +21,7 @@ const { defaultSettingsForPlatform } = await server.ssrLoadModule('/src/defaults
 
 const runOnce = () => {
   assert.match(settingsSource, /id: 'experimental'/)
-  assert.match(settingsSource, /count: 3/)
+  assert.match(settingsSource, /count: 4/)
   assert.match(settingsSource, /title="Handschrift zu Text"/)
   assert.match(settingsSource, /title="Hausaufgaben API"/)
   assert.match(settingsSource, /title="Remote Support"/)
@@ -37,8 +37,10 @@ const runOnce = () => {
   assert.equal(windows.experimentalRemoteSupport, false)
   assert.equal(linux.experimentalHandwritingToText, false)
   assert.equal(linux.experimentalHomeworkApi, false)
+  assert.equal(linux.experimentalNoteBackup, false)
   assert.equal(windows.experimentalHandwritingToText, false)
   assert.equal(windows.experimentalHomeworkApi, false)
+  assert.equal(windows.experimentalNoteBackup, false)
 
   assert.match(defaultsSource, /experimentalRemoteSupport: false/)
   assert.match(typesSource, /experimentalRemoteSupport: boolean/)
@@ -55,7 +57,7 @@ try {
   runOnce()
   runOnce()
   console.log(JSON.stringify({
-    experimentalCount: 3,
+    experimentalCount: 4,
     defaultOff: true,
     rows: ['Handschrift zu Text', 'Hausaufgaben API', 'Remote Support'],
   }))

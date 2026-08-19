@@ -1,3 +1,4 @@
+import type { NoteBackupSnapshot } from './lib/noteBackup'
 import type { NoteLinkRecord } from './lib/noteLink'
 
 export type VaultEntry = {
@@ -142,6 +143,8 @@ export type AppSettings = {
   experimentalHomeworkApi: boolean
   /** Experimental: opt-in Remote Support session. Off by default; no session until Start. */
   experimentalRemoteSupport: boolean
+  /** Experimental: explicit Backup of the current note in the top bar. Off by default. */
+  experimentalNoteBackup: boolean
   /** Last opened note path. Restored on launch when the file still exists. */
   lastOpenNotePath: string
   /** Public channel id (32 hex) used in the homework query URL. */
@@ -473,6 +476,8 @@ export type FaNotesApi = {
   setNotePaperStyle?: (relativePath: string, paperStyle: PaperStyle) => Promise<PaperStyle>
   readNoteLinks?: (relativePath: string) => Promise<NoteLinkRecord[]>
   writeNoteLinks?: (relativePath: string, links: NoteLinkRecord[]) => Promise<NoteLinkRecord[]>
+  readNoteBackups?: (relativePath: string) => Promise<NoteBackupSnapshot[]>
+  writeNoteBackups?: (relativePath: string, backups: NoteBackupSnapshot[]) => Promise<NoteBackupSnapshot[]>
   importWorksheet: () => Promise<WorksheetDocument | null>
   importWorksheetFromData?: (payload: { name: string; mimeType: string; bytes: Uint8Array }) => Promise<WorksheetDocument>
   importPdfNote: (parentPath?: string) => Promise<CreateResult | null>
