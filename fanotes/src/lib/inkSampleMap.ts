@@ -107,6 +107,9 @@ export const mapClientToPaperPoint = (
     paperLocalY = dx * sin + dy * cos + paperH / 2
   }
 
+  // A sample from above the sheet used to clamp onto y=0 and draw a
+  // straight line to the top from the first real contact.
+  if (visualY < 0 || paperLocalY < 0) return null
   const x = Math.max(0, Math.min(1, paperLocalX / paperW))
   const y = Math.max(0, Math.min(1, paperLocalY / paperH))
   const rawPressure = (event.pressure ?? 0) > 0
@@ -130,6 +133,7 @@ export const isInkCorridorLeap = (
   _sourceHeight = 1,
 ) => {
   if (!previous) return false
+  if (previous.y >= INK_FIRST_POINT_RESTART_Y && next.y < INK_FIRST_POINT_RESTART_Y) return true
   const dy = Math.abs(next.y - previous.y)
   return dy > INK_JUMP_DY || Math.hypot(next.x - previous.x, next.y - previous.y) > INK_JUMP_HYPOT
 }

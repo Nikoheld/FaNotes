@@ -13,6 +13,7 @@ const {
   appendAcceptedInkPoint,
   collectPreviewInkPoints,
   commitInkPointerSequence,
+  isInkCorridorLeap,
   mapClientToPaperPoint,
   resolveInkPointerDown,
 } = await server.ssrLoadModule('/src/lib/inkSampleMap.ts')
@@ -112,6 +113,41 @@ try {
   assert.equal(preview.some((point) => point.y < 0.05), false, 'predicted leap to y≈0 must not paint a line')
   assert.ok(preview.length >= 1, 'in-band predicted samples may still preview')
   assert.ok(preview.every((point) => point.y > 0.2))
+
+  assert.equal(isInkCorridorLeap({ x: 0.51, y: 0.12 }, { x: 0.51, y: 0.02 }), true, 'y≈0.12 → top band is a leap')
+  assert.equal(isInkCorridorLeap({ x: 0.51, y: 0.02 }, { x: 0.53, y: 0.03 }), false, 'writing along the top edge may continue')
+
+  const pdfSurface = { left: 48, top: 90, width: 800, height: 1132, offsetWidth: 800, offsetHeight: 1132 }
+  const pdfAt = (nx, ny, extras = {}) => ({
+    type: extras.type ?? 'pointermove',
+    clientX: pdfSurface.left + nx * pdfSurface.width,
+    clientY: pdfSurface.top + ny * pdfSurface.height,
+    pressure: extras.pressure ?? 0.5,
+    pointerType: extras.pointerType ?? 'mouse',
+    timeStamp: extras.timeStamp ?? 16,
+    ...extras,
+  })
+  const aboveSheet = mapClientToPaperPoint(pdfAt(0.51, -0.02), pdfSurface)
+  assert.equal(aboveSheet, null, 'a sample from above the PDF must not clamp to y=0')
+
+  const pdfStroke = commitInkPointerSequence(
+    [
+      pdfAt(0.51, 0.12, { type: 'pointerdown', timeStamp: 1 }),
+      pdfAt(0.52, 0.02, { timeStamp: 8 }),
+      pdfAt(0.54, 0.11, { timeStamp: 16 }),
+    ],
+    pdfSurface,
+    SOURCE_WIDTH,
+    SOURCE_HEIGHT,
+  )
+  assert.equal(pdfStroke.some((point) => point.y < 0.05), false, '8.42 first-touch must not keep a top-band point')
+  assert.ok(pdfStroke.length >= 1 && pdfStroke.every((point) => point.y > 0.05))
+
+  const pdfPreview = collectPreviewInkPoints(
+    [{ x: 0.51, y: 0.12 }],
+    [mapClientToPaperPoint(pdfAt(0.51, 0.02), pdfSurface), mapClientToPaperPoint(pdfAt(0.54, 0.11), pdfSurface)],
+  )
+  assert.equal(pdfPreview.some((point) => point.y < 0.05), false)
 
   const zeroPressure = mapClientToPaperPoint(
     { type: 'pointerdown', clientX: 0, clientY: 0, pressure: 0, pointerType: 'pen' },
