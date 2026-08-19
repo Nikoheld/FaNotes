@@ -32,6 +32,56 @@ function companionNotePath(relativePath, extension) {
   return `${noteStem(relativePath)}${extension}`
 }
 
+const NOTE_LINK_ID = /^[a-zA-Z0-9._-]{1,96}$/u
+const NOTE_LINK_STYLES = Object.freeze(['symbol', 'text', 'symbol-text'])
+
+function isNoteLinkStyleId(value) {
+  return NOTE_LINK_STYLES.includes(value)
+}
+
+function sanitizeNoteLinkPath(value) {
+  if (typeof value !== 'string') return ''
+  const path = value.replace(/\\/gu, '/').replace(/^\/+/u, '').trim()
+  if (!path || path.length > 500 || path.includes('..') || path.includes('\0')) return ''
+  return path
+}
+
+function sanitizeNoteLink(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const sourcePath = sanitizeNoteLinkPath(value.sourcePath)
+  const targetPath = sanitizeNoteLinkPath(value.targetPath)
+  if (!sourcePath || !targetPath || sourcePath === targetPath || !/\.md$/iu.test(targetPath)) return null
+  const page = Number(value.page)
+  const x = Number(value.x)
+  const y = Number(value.y)
+  const label = typeof value.label === 'string' ? value.label.replace(/\s+/gu, ' ').trim().slice(0, 80) : ''
+  const stem = targetPath.replace(/^.*\//u, '').replace(/\.(md|markdown)$/iu, '') || 'Notiz'
+  return {
+    id: typeof value.id === 'string' && NOTE_LINK_ID.test(value.id) ? value.id : `nl-${Date.now().toString(36)}`,
+    sourcePath,
+    targetPath,
+    page: Number.isSafeInteger(page) && page >= 1 && page <= 10000 ? page : 1,
+    x: Number.isFinite(x) ? Math.min(1, Math.max(0, x)) : 0.5,
+    y: Number.isFinite(y) ? Math.min(1, Math.max(0, y)) : 0.5,
+    style: isNoteLinkStyleId(value.style) ? value.style : 'symbol',
+    label: label || stem,
+    appearance: value.style === 'text' ? 'text' : value.style === 'symbol-text' ? 'symbol-text' : 'symbol',
+  }
+}
+
+function parseNoteLinks(value) {
+  if (!Array.isArray(value)) return []
+  const seen = new Set()
+  const links = []
+  for (const entry of value) {
+    const link = sanitizeNoteLink(entry)
+    if (!link || seen.has(link.id)) continue
+    seen.add(link.id)
+    links.push(link)
+  }
+  return links
+}
+
 function emptyFamdPayload(updatedAt = new Date().toISOString()) {
   return { schema: FAMD_SCHEMA, updatedAt, ink: null, worksheets: [] }
 }
@@ -72,7 +122,18 @@ function parseFamd(source) {
       ? new Date(parsed.updatedAt).toISOString()
       : new Date().toISOString()
     const paperStyle = isPaperStyle(parsed.paperStyle) ? parsed.paperStyle : undefined
-    return { markdown, payload: { schema: FAMD_SCHEMA, updatedAt, ink, worksheets, ...(paperStyle ? { paperStyle } : {}) } }
+    const noteLinks = parseNoteLinks(parsed.noteLinks)
+    return {
+      markdown,
+      payload: {
+        schema: FAMD_SCHEMA,
+        updatedAt,
+        ink,
+        worksheets,
+        ...(paperStyle ? { paperStyle } : {}),
+        ...(noteLinks.length ? { noteLinks } : {}),
+      },
+    }
   } catch {
     return { markdown, payload: null }
   }
@@ -89,6 +150,8 @@ function serializeFamd(markdown, payload) {
       : worksheetIdsFromMarkdown(body),
     ...(isPaperStyle(payload?.paperStyle) ? { paperStyle: payload.paperStyle } : {}),
   }
+  const noteLinks = parseNoteLinks(payload?.noteLinks)
+  if (noteLinks.length) next.noteLinks = noteLinks
   const json = JSON.stringify(next)
   return `${body ? `${body}\n\n` : ''}<!-- fanotes-famd:v1 chars=${json.length} -->\n${json}\n`
 }
@@ -107,6 +170,7 @@ module.exports = {
   isPdfNoteExtension,
   noteStem,
   parseFamd,
+  parseNoteLinks,
   serializeFamd,
   stripFamdPayload,
   worksheetIdsFromMarkdown,

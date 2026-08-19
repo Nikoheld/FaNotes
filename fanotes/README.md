@@ -15,6 +15,7 @@ FaNotes ist eine lokale Desktop-App für Schule, UNI, Privatleben und Arbeit. Si
 - Fächer und Unterordner als echte Verzeichnisse verwalten
 - Fächer mit individuellen, direkt im Vault gespeicherten Ordnerfarben organisieren
 - Markdown-Dateien in einer einzigen FaNotes-Live-Ansicht schreiben und automatisch speichern
+- auf einer Notiz oder einem PDF eine Verlinkung setzen (Symbol oder Text); ein Tippen öffnet die neue Notiz, oben führt Zurück zurück
 - mögliche Tippfehler wie in Word rot gewellt markieren und Deutsch oder Englisch pro Textabschnitt automatisch erkennen – vollständig lokal und auch in gemischten Notizen
 - Überschriften, Hervorhebungen, Links, Listen, Aufgaben, Tabellen, Code und Mathematik über eine Formatierungsleiste einfügen
 - ganze Abschnitte unter einem Titel direkt im Live-Editor ein- und ausklappen

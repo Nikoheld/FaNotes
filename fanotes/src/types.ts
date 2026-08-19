@@ -1,3 +1,5 @@
+import type { NoteLinkRecord } from './lib/noteLink'
+
 export type VaultEntry = {
   name: string
   relativePath: string
@@ -469,6 +471,8 @@ export type FaNotesApi = {
   readFamdInk: (relativePath: string) => Promise<DrawingLibraryDocument | null>
   readNotePaperStyle?: (relativePath: string) => Promise<PaperStyle | null>
   setNotePaperStyle?: (relativePath: string, paperStyle: PaperStyle) => Promise<PaperStyle>
+  readNoteLinks?: (relativePath: string) => Promise<NoteLinkRecord[]>
+  writeNoteLinks?: (relativePath: string, links: NoteLinkRecord[]) => Promise<NoteLinkRecord[]>
   importWorksheet: () => Promise<WorksheetDocument | null>
   importWorksheetFromData?: (payload: { name: string; mimeType: string; bytes: Uint8Array }) => Promise<WorksheetDocument>
   importPdfNote: (parentPath?: string) => Promise<CreateResult | null>

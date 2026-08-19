@@ -22,6 +22,7 @@ import {
   FolderPlus,
   Info,
   Keyboard,
+  Link2,
   LoaderCircle,
   LayoutGrid,
   Maximize2,
@@ -47,11 +48,24 @@ import type { PaletteAction } from './components/CommandPalette'
 import type { DrawingBoardHandle, DrawingSavePayload } from './components/DrawingBoard'
 import { FileTree } from './components/FileTree'
 import { FormattingToolbar } from './components/FormattingToolbar'
+import { NoteLinkLayer } from './components/NoteLinkLayer'
 import type { GlyphenWerkView } from './components/GlyphenWerkWorkspace'
 import type { MarkdownEditorHandle, MarkdownFormatAction } from './components/MarkdownEditor'
 import type { WorksheetLayerHandle } from './components/WorksheetLayer'
 import { companionNotePath, isPdfNotePath } from './lib/famd'
 import { chooseRestoredNote, collectNotePaths } from './lib/lastOpenNote'
+import {
+  activateNoteLink,
+  followNoteNav,
+  goBackNoteNav,
+  linkedNoteParent,
+  linkedNotePreferredName,
+  NOTE_LINK_STYLES,
+  placeNewNoteLink,
+  restyleNoteLink,
+  type NoteLinkRecord,
+  type NoteLinkStyleId,
+} from './lib/noteLink'
 import { PDF_TOOLBAR_SLOT_ID } from './lib/pdfInkHit'
 import { APP_VERSION } from './lib/appVersion'
 import { defaultSettingsForPlatform } from './defaults'
@@ -389,6 +403,11 @@ export default function App({ startupBootstrap }: AppProps) {
   const [tagFilter, setTagFilter] = useState<string | null>(null)
   const [tagIndex, setTagIndex] = useState<Record<string, string[]>>({})
   const [notePaperByPath, setNotePaperByPath] = useState<Record<string, PaperStyle>>({})
+  const [noteLinks, setNoteLinks] = useState<NoteLinkRecord[]>([])
+  const [noteLinkPlacing, setNoteLinkPlacing] = useState(false)
+  const [noteLinkStyle, setNoteLinkStyle] = useState<NoteLinkStyleId>('symbol')
+  const [selectedNoteLinkId, setSelectedNoteLinkId] = useState<string | null>(null)
+  const [noteNavStack, setNoteNavStack] = useState<string[]>([])
   const [tagDraft, setTagDraft] = useState('')
   const [splitPath, setSplitPath] = useState<string | null>(null)
   const [historyOpen, setHistoryOpen] = useState(false)
@@ -396,6 +415,8 @@ export default function App({ startupBootstrap }: AppProps) {
   const [historyBusy, setHistoryBusy] = useState(false)
   const tabsRef = useRef(tabs)
   const activePathRef = useRef(activePath)
+  const noteNavStackRef = useRef<string[]>([])
+  const noteLinksRef = useRef<NoteLinkRecord[]>([])
   const editorRef = useRef<MarkdownEditorHandle>(null)
   const drawingBoardRef = useRef<DrawingBoardHandle>(null)
   const worksheetLayerRefs = useRef(new Map<string, WorksheetLayerHandle>())
@@ -590,6 +611,31 @@ export default function App({ startupBootstrap }: AppProps) {
         setNotePaperByPath((current) => current[path] === style ? current : { ...current, [path]: style })
       })
       .catch(() => undefined)
+    return () => { alive = false }
+  }, [activePath])
+
+  useEffect(() => {
+    const path = activePath
+    setNoteLinkPlacing(false)
+    setSelectedNoteLinkId(null)
+    if (!path || !window.fanotes.readNoteLinks) {
+      noteLinksRef.current = []
+      setNoteLinks([])
+      return
+    }
+    let alive = true
+    void window.fanotes.readNoteLinks(path)
+      .then((links) => {
+        if (!alive) return
+        const next = Array.isArray(links) ? links : []
+        noteLinksRef.current = next
+        setNoteLinks(next)
+      })
+      .catch(() => {
+        if (!alive) return
+        noteLinksRef.current = []
+        setNoteLinks([])
+      })
     return () => { alive = false }
   }, [activePath])
 
@@ -1096,6 +1142,88 @@ export default function App({ startupBootstrap }: AppProps) {
       )
     }
   }, [openNote, refreshTree, settings.defaultFolder, toast, tree])
+
+  const persistNoteLinks = useCallback(async (path: string, links: NoteLinkRecord[]) => {
+    noteLinksRef.current = links
+    setNoteLinks(links)
+    if (!window.fanotes.writeNoteLinks) return
+    await window.fanotes.writeNoteLinks(path, links)
+  }, [])
+
+  const startNoteLinkPlacement = useCallback(() => {
+    if (!activePathRef.current) {
+      toast('Öffne zuerst eine Notiz, um eine Verlinkung zu setzen.', 'info')
+      return
+    }
+    setNoteLinkPlacing((current) => !current)
+  }, [toast])
+
+  const applyNoteLinkStyle = useCallback(async (style: NoteLinkStyleId) => {
+    setNoteLinkStyle(style)
+    const selected = noteLinksRef.current.find((link) => link.id === selectedNoteLinkId)
+    const path = activePathRef.current
+    if (!selected || !path) return
+    const next = restyleNoteLink(selected, style)
+    const links = noteLinksRef.current.map((link) => link.id === next.id ? next : link)
+    try {
+      await persistNoteLinks(path, links)
+    } catch (error) {
+      toast(error instanceof Error ? error.message : 'Der Verlinkungsstil konnte nicht gespeichert werden.', 'error')
+    }
+  }, [persistNoteLinks, selectedNoteLinkId, toast])
+
+  const placeNoteLinkAt = useCallback(async (point: { page: number; x: number; y: number }) => {
+    const sourcePath = activePathRef.current
+    if (!sourcePath) return
+    const session = vaultSessionGenerationRef.current
+    const requestedParent = linkedNoteParent(sourcePath)
+    const targetParent = requestedParent && folderPaths(treeRef.current).has(requestedParent)
+      ? requestedParent
+      : undefined
+    try {
+      const created = await window.fanotes.createNote(targetParent, linkedNotePreferredName(sourcePath))
+      if (session !== vaultSessionGenerationRef.current) return
+      vaultStructureRevisionRef.current += 1
+      try {
+        await refreshTree()
+      } catch (error) {
+        console.warn('FaNotes-Dateibaum konnte nach der Verlinkung nicht aktualisiert werden:', error)
+      }
+      if (session !== vaultSessionGenerationRef.current) return
+      const link = placeNewNoteLink({
+        sourcePath,
+        page: point.page,
+        x: point.x,
+        y: point.y,
+        style: noteLinkStyle,
+      }, { targetPath: created.relativePath })
+      await persistNoteLinks(sourcePath, [...noteLinksRef.current, link])
+      setSelectedNoteLinkId(link.id)
+      setNoteLinkPlacing(false)
+      toast('Verlinkung gesetzt. Tippen öffnet die neue Notiz.', 'success')
+    } catch (error) {
+      toast(error instanceof Error ? error.message : 'Die Verlinkung konnte nicht erstellt werden.', 'error')
+    }
+  }, [noteLinkStyle, persistNoteLinks, refreshTree, toast])
+
+  const followPlacedNoteLink = useCallback(async (link: NoteLinkRecord) => {
+    const target = activateNoteLink(link)
+    const source = activePathRef.current
+    if (!target || !source) return
+    const next = followNoteNav(noteNavStackRef.current, source, target)
+    await openNote(next.current)
+    noteNavStackRef.current = next.stack
+    setNoteNavStack(next.stack)
+  }, [openNote])
+
+  const goBackNoteLink = useCallback(async () => {
+    const current = activePathRef.current || ''
+    const next = goBackNoteNav(noteNavStackRef.current, current)
+    if (!next.current || next.current === current) return
+    await openNote(next.current)
+    noteNavStackRef.current = next.stack
+    setNoteNavStack(next.stack)
+  }, [openNote])
 
   const importPdfNote = useCallback(async (parent?: string) => {
     const session = vaultSessionGenerationRef.current
@@ -2262,6 +2390,7 @@ export default function App({ startupBootstrap }: AppProps) {
     { id: 'save', label: 'Aktuelle Notiz speichern', detail: 'Text, Handschrift und Arbeitsblätter sichern', shortcut: 'Ctrl S', group: 'Dateien', icon: <Save size={15} />, run: () => { void saveCurrentWork(true) } },
     { id: 'search', label: 'Im Vault suchen', shortcut: 'Ctrl ⇧ F', group: 'Navigation', icon: <Search size={15} />, run: () => setSearchOpen(true) },
     { id: 'drawing', label: drawingOpen ? 'Zur Tastatur wechseln' : 'Mit Stift schreiben', detail: 'Eingabeart auf derselben Notizseite wechseln', shortcut: 'Ctrl D', group: 'Werkzeuge', keywords: 'tablet stift erkennen mathe', icon: <PenLine size={15} />, run: toggleDrawing },
+    { id: 'note-link', label: 'Verlinkung setzen', detail: 'Irgendwo auf der Seite eine neue Notiz verlinken', group: 'Werkzeuge', keywords: 'verlinkung link notiz pdf symbol text', icon: <Link2 size={15} />, run: startNoteLinkPlacement },
     { id: 'worksheet', label: 'Bild oder PDF als Arbeitsblatt', detail: 'In die aktuelle oder eine neue Notiz importieren und ausfüllen', shortcut: 'Ctrl ⇧ I', group: 'Werkzeuge', keywords: 'pdf bild import arbeitsblatt ausfüllen', icon: <FileUp size={15} />, run: openWorksheetImport },
     { id: 'onenote-import', label: 'Microsoft OneNote importieren', detail: 'Notizbuch, Abschnitte, Layout, Ink und Anlagen sicher übernehmen', group: 'Dateien', keywords: 'one onetoc2 onepkg onedrive migration', icon: <NotebookTabs size={15} />, run: () => { void importOneNote().catch((error) => toast(error instanceof Error ? error.message : 'OneNote-Import fehlgeschlagen.', 'error')) } },
     { id: 'ai-assistant', label: 'AI-Assistent', detail: 'LM Studio, Ollama, OpenAI, Gemini, Anthropic oder OpenCode nutzen', shortcut: 'Ctrl ⇧ A', group: 'Werkzeuge', keywords: 'ki ai lm studio ollama openai gemini anthropic opencode rechtschreibung fakten', icon: <Bot size={15} />, run: openLmStudio },
@@ -2286,7 +2415,7 @@ export default function App({ startupBootstrap }: AppProps) {
     { id: 'reveal', label: isWeb ? 'Notiz herunterladen' : 'Im Dateimanager zeigen', detail: isWeb ? 'Aktuelle Notiz exportieren' : 'Speicherort der geöffneten Notiz öffnen', group: 'Dateien', keywords: 'ordner explorer finder dateimanager download export', icon: isWeb ? <Download size={15} /> : <FolderOpen size={15} />, run: () => { if (activePath) void window.fanotes.revealInFolder(activePath) } },
     { id: 'bug-report', label: 'Fehler melden', detail: 'Kurz beschreiben; die letzten fünf Minuten werden angehängt', group: 'FaNotes', keywords: 'bug report fehler logs support', icon: <Bug size={15} />, run: () => setBugReportOpen(true) },
     { id: 'quit', label: isWeb ? 'Zur FaNotes-Website' : 'FaNotes beenden', shortcut: 'Ctrl Q', group: 'FaNotes', icon: <X size={15} />, run: () => window.fanotes.requestClose() },
-  ], [activePath, activeTab, createDailyNote, createFolder, createNote, drawingOpen, exportCurrentPdf, focusMode, importOneNote, importPdfNote, isWeb, openGlyphenWerk, openHistory, openHomework, openInSplit, openLmStudio, openOverview, openSettings, openWorksheetImport, saveCurrentWork, settings.dailyNotesFolder, splitPath, tabs, toast, toggleDrawing, toggleFocusMode])
+  ], [activePath, activeTab, createDailyNote, createFolder, createNote, drawingOpen, exportCurrentPdf, focusMode, importOneNote, importPdfNote, isWeb, openGlyphenWerk, openHistory, openHomework, openInSplit, openLmStudio, openOverview, openSettings, openWorksheetImport, saveCurrentWork, settings.dailyNotesFolder, splitPath, startNoteLinkPlacement, tabs, toast, toggleDrawing, toggleFocusMode])
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
@@ -2313,7 +2442,8 @@ export default function App({ startupBootstrap }: AppProps) {
       if (mod && event.key.toLowerCase() === 'd') { event.preventDefault(); toggleDrawing() }
       if (mod && event.key.toLowerCase() === 'q') { event.preventDefault(); window.fanotes.requestClose() }
       if (event.key === 'Escape') {
-        if (worksheetImportOpen) setWorksheetImportOpen(false)
+        if (noteLinkPlacing) setNoteLinkPlacing(false)
+        else if (worksheetImportOpen) setWorksheetImportOpen(false)
         else if (paletteOpen) setPaletteOpen(false)
         else if (searchOpen) setSearchOpen(false)
         else if (settingsOpen) setSettingsOpen(false)
@@ -2327,7 +2457,7 @@ export default function App({ startupBootstrap }: AppProps) {
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [closeDrawing, closeTab, createNote, cycleTabs, focusMode, glyphenWerkOpen, homeworkOpen, lmStudioOpen, openGlyphenWerk, openLmStudio, openSettings, openWorksheetImport, overviewOpen, paletteOpen, saveCurrentWork, searchOpen, settingsOpen, toggleDrawing, toggleFocusMode, worksheetImportOpen])
+  }, [closeDrawing, closeTab, createNote, cycleTabs, focusMode, glyphenWerkOpen, homeworkOpen, lmStudioOpen, noteLinkPlacing, openGlyphenWerk, openLmStudio, openSettings, openWorksheetImport, overviewOpen, paletteOpen, saveCurrentWork, searchOpen, settingsOpen, toggleDrawing, toggleFocusMode, worksheetImportOpen])
 
   useEffect(() => {
     const imageFile = (file: File | undefined) => file && file.type.startsWith('image/')
@@ -2503,6 +2633,16 @@ export default function App({ startupBootstrap }: AppProps) {
 
         <main className="workspace">
           <div className="tabs-bar">
+            <button
+              type="button"
+              className="note-nav-back"
+              title="Zurück"
+              aria-label="Zurück"
+              disabled={!noteNavStack.length}
+              onClick={() => void goBackNoteLink()}
+            >
+              <ArrowLeft size={14} /> Zurück
+            </button>
             <div className="tabs-scroll" role="tablist" aria-label="Offene Notizen">{tabs.map((tab) => <NoteTabButton key={tab.path} active={tab.path === activePath} dirty={tab.content !== tab.savedContent} path={tab.path} title={tab.title} onOpen={openNote} onSplit={openInSplit} onClose={closeTab} />)}</div>
             <button type="button" className="tabs-menu" title="Neue Notiz (Strg+N)" aria-label="Neue Notiz" onClick={() => void createNote()}><Plus size={15} /></button>
           </div>
@@ -2537,6 +2677,33 @@ export default function App({ startupBootstrap }: AppProps) {
                   : <FormattingToolbar disabled={!activeTab || overviewOpen || homeworkOpen || glyphenWerkOpen || activeEntryMutating} onFormat={formatMarkdown} />}
             </div>
             <div className="toolbar-group toolbar-end">
+              {activeTab && (
+                <div className="note-link-styles" role="group" aria-label="Verlinkungsstil">
+                  {NOTE_LINK_STYLES.map((style) => (
+                    <button
+                      key={style.id}
+                      type="button"
+                      className={noteLinkStyle === style.id ? 'is-active' : ''}
+                      aria-pressed={noteLinkStyle === style.id}
+                      title={style.label}
+                      onClick={() => void applyNoteLinkStyle(style.id)}
+                    >
+                      {style.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+              <button
+                type="button"
+                className={`toolbar-button ${noteLinkPlacing ? 'active' : ''}`}
+                title="Verlinkung setzen"
+                aria-label="Verlinkung setzen"
+                aria-pressed={noteLinkPlacing}
+                disabled={!activeTab}
+                onClick={startNoteLinkPlacement}
+              >
+                <Link2 size={14} /><span>Verlinkung</span>
+              </button>
               {!isPdfActive && <button type="button" className="toolbar-button" title="Bild oder PDF als Arbeitsblatt importieren" aria-label="Arbeitsblatt importieren" onClick={openWorksheetImport}><FileUp size={14} /><span>Blatt</span></button>}
               <button type="button" className={`toolbar-button ai ${lmStudioOpen ? 'active' : ''}`} title="Mit einem AI-Anbieter bearbeiten" aria-label="AI-Assistent öffnen" onClick={openLmStudio}><Bot size={14} /><span>AI</span></button>
               <div className="editor-more">
@@ -2599,7 +2766,7 @@ export default function App({ startupBootstrap }: AppProps) {
                 viewKey={activeTab.path}
                 showHud={!drawingOpen}
               >
-                <article className={`unified-paper ${worksheetSession.documents.length ? 'has-worksheet' : ''} ${isPdfActive ? 'is-pdf-note' : ''}`} aria-label={`${activeTab.title} · ${isPdfActive ? 'PDF-Notiz mit Handschrift' : 'gemeinsame Tastatur- und Handschriftseite'}`}>
+                <article className={`unified-paper ${worksheetSession.documents.length ? 'has-worksheet' : ''} ${isPdfActive ? 'is-pdf-note' : ''} ${noteLinkPlacing ? 'is-placing-note-link' : ''}`} aria-label={`${activeTab.title} · ${isPdfActive ? 'PDF-Notiz mit Handschrift' : 'gemeinsame Tastatur- und Handschriftseite'}`}>
                   {!isPdfActive && <div className="paper-ruling" aria-hidden="true" />}
                   {isPdfActive ? (
                     <Suspense fallback={<div className="pdf-note-status"><LoaderCircle className="spin" size={20} /> PDF wird geladen …</div>}>
@@ -2654,6 +2821,18 @@ export default function App({ startupBootstrap }: AppProps) {
                     </SafeBoundary>
                   </Suspense>}
                   {drawingOpen && drawingSession.key === 0 && <div className="inline-ink-loading"><LoaderCircle className="spin" size={18} /> Gespeicherte Stiftebene wird geladen …</div>}
+                  <NoteLinkLayer
+                    links={noteLinks}
+                    placing={noteLinkPlacing}
+                    selectedId={selectedNoteLinkId}
+                    pdf={isPdfActive}
+                    onPlace={(point) => void placeNoteLinkAt(point)}
+                    onActivate={(link) => void followPlacedNoteLink(link)}
+                    onSelect={(link) => {
+                      setSelectedNoteLinkId(link.id)
+                      setNoteLinkStyle(link.style)
+                    }}
+                  />
                 </article>
               </PaperView>
               {splitTab && (

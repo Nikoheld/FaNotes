@@ -2,6 +2,8 @@ import { APP_VERSION } from './appVersion'
 import { DEFAULT_SETTINGS } from '../defaults'
 import { getUiLanguage } from '../i18n'
 import type { AppSettings, BootstrapData, DrawingLibraryDocument, FaNotesApi, PaperStyle, ServerBackupState, UpdateState, VaultEntry, WorksheetDocument } from '../types'
+import { companionNotePath, emptyFamdPayload, parseFamd, serializeFamd } from './famd'
+import { parseNoteLinks, type NoteLinkRecord } from './noteLink'
 import { isPaperStyle } from './paperStyles'
 import { browserInitialFiles, browserStarterFolders, browserStarterSubjects } from './browserPreview'
 import { listBrowserLmStudioModels, transformWithBrowserLmStudio } from './lmStudioBrowser'
@@ -1063,6 +1065,36 @@ export function createBrowserApi(): FaNotesApi {
       notePaper.set(path, paperStyle)
       await setMeta('notePaper', Object.fromEntries(notePaper))
       return paperStyle
+    },
+    readNoteLinks: async (rawPath) => {
+      await ready
+      const path = normalizePath(rawPath)
+      const famdPath = companionNotePath(path, '.famd')
+      const record = files.get(famdPath)
+      if (!record) return []
+      return parseNoteLinks(parseFamd(record.content).payload?.noteLinks)
+    },
+    writeNoteLinks: async (rawPath, rawLinks) => {
+      await ready
+      const path = normalizePath(rawPath)
+      const links = parseNoteLinks(rawLinks).map((link: NoteLinkRecord) => ({ ...link, sourcePath: path }))
+      const famdPath = companionNotePath(path, '.famd')
+      const existing = files.get(famdPath)
+      const parsed = parseFamd(existing?.content ?? '')
+      const payload = {
+        ...(parsed.payload || emptyFamdPayload()),
+        updatedAt: new Date().toISOString(),
+        noteLinks: links,
+      }
+      const record = {
+        path: famdPath,
+        content: serializeFamd(parsed.markdown, payload),
+        modifiedAt: new Date().toISOString(),
+      }
+      await write('files', (store) => { store.put(record) })
+      files.set(famdPath, record)
+      cachedTree = null
+      return links
     },
     importPdfNote: async (rawParent) => {
       const file = await pickPdf()

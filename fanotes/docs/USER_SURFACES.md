@@ -2,7 +2,7 @@
 
 Inventory walked from the shipped UI entry points. Each row names a user-visible surface and the source that implements it. The check `scripts/check-user-surfaces.cjs` re-reads those files and fails if a listed needle disappears.
 
-Command-palette action ids walked from `src/App.tsx`: `new-note`, `import-pdf-note`, `new-folder`, `new-subfolder`, `save`, `search`, `drawing`, `worksheet`, `onenote-import`, `ai-assistant`, `glyphenwerk`, `overview`, `homework`, `daily`, `export-pdf`, `history`, `split`, `focus`, `sidebar`, `inspector`, `settings`, `reveal`, `bug-report`, `quit`.
+Command-palette action ids walked from `src/App.tsx`: `new-note`, `import-pdf-note`, `new-folder`, `new-subfolder`, `save`, `search`, `drawing`, `note-link`, `worksheet`, `onenote-import`, `ai-assistant`, `glyphenwerk`, `overview`, `homework`, `daily`, `export-pdf`, `history`, `split`, `focus`, `sidebar`, `inspector`, `settings`, `reveal`, `bug-report`, `quit`.
 
 ## Notes / vault
 
@@ -16,6 +16,9 @@ Command-palette action ids walked from `src/App.tsx`: `new-note`, `import-pdf-no
 | First-run subject folders | `src/components/FirstRunOnboarding.tsx` | `FirstRunOnboarding` |
 | Vault overview | `src/components/VaultOverview.tsx` | `VaultOverview` |
 | FAMD companion files | `src/lib/famd.ts` | `export const parseFamd` |
+| Placed note Verlinkung | `src/lib/noteLink.ts` | `export const placeNewNoteLink` |
+| Verlinkung overlay | `src/components/NoteLinkLayer.tsx` | `export function NoteLinkLayer` |
+| Zurück after a Verlinkung | `src/App.tsx` | `note-nav-back` |
 | Desktop vault IPC | `electron/preload.cjs` | `createNote: 'fanotes:create-note'` |
 
 ## Paper / ink
@@ -105,6 +108,7 @@ Command-palette action ids walked from `src/App.tsx`: `new-note`, `import-pdf-no
 | Palette actions | `src/App.tsx` | `id: 'bug-report'` |
 | Reveal in folder | `src/App.tsx` | `id: 'reveal'` |
 | Palette ids | `src/App.tsx` | `id: 'new-folder'` |
+| Place Verlinkung palette | `src/App.tsx` | `id: 'note-link'` |
 | Editor more menu | `src/App.tsx` | `editor-menu-label">Datei` |
 
 ## Bug report

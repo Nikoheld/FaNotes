@@ -17,10 +17,21 @@ const ink = {
   strokes: [{ points: [{ x: 0.2, y: 0.3, t: 1, pressure: 0.5 }] }],
   searchTranscript: 'integral',
 }
+const noteLinks = [{
+  id: 'nl-famd-check',
+  sourcePath: 'Mathe/Skript.pdf',
+  targetPath: 'Mathe/Skript-Notiz.md',
+  page: 3,
+  x: 0.72,
+  y: 0.18,
+  style: 'text',
+  label: 'Skript-Notiz',
+}]
 const encoded = serializeFamd(markdown, {
   ...emptyFamdPayload('2026-08-14T12:00:00.000Z'),
   ink,
   worksheets: worksheetIdsFromMarkdown(markdown),
+  noteLinks,
 })
 
 assert.match(encoded, /<!-- fanotes-famd:v1 chars=\d+ -->/u)
@@ -31,6 +42,9 @@ const parsed = parseFamd(encoded)
 assert.equal(parsed.payload?.schema, 'fanotes-famd-v1')
 assert.equal(parsed.payload?.ink?.title, 'Handschrift')
 assert.deepEqual(parsed.payload?.worksheets, ['ws-1'])
+assert.equal(parsed.payload?.noteLinks?.[0]?.targetPath, 'Mathe/Skript-Notiz.md')
+assert.equal(parsed.payload?.noteLinks?.[0]?.page, 3)
+assert.equal(parsed.payload?.noteLinks?.[0]?.style, 'text')
 assert.equal(parsed.markdown.includes('$$\\int x$$'), true)
 assert.equal(companionNotePath('Mathe/Analysis.md', '.famd'), 'Mathe/Analysis.famd')
 assert.equal(companionNotePath('Mathe/Analysis.famd', '.md'), 'Mathe/Analysis.md')

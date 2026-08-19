@@ -1,3 +1,4 @@
+import { parseNoteLinks, serializeNoteLinks, type NoteLinkRecord } from './noteLink'
 import { isPaperStyle } from './paperStyles'
 import type { PaperStyle } from '../types'
 
@@ -15,6 +16,7 @@ export type FamdPayload = {
   ink: Record<string, unknown> | null
   worksheets: string[]
   paperStyle?: PaperStyle
+  noteLinks?: NoteLinkRecord[]
 }
 
 export const isNoteFileName = (name: string) => (
@@ -76,7 +78,18 @@ export const parseFamd = (source: string): { markdown: string; payload: FamdPayl
       ? new Date(parsed.updatedAt).toISOString()
       : new Date().toISOString()
     const paperStyle = isPaperStyle(parsed.paperStyle) ? parsed.paperStyle : undefined
-    return { markdown, payload: { schema: FAMD_SCHEMA, updatedAt, ink, worksheets, ...(paperStyle ? { paperStyle } : {}) } }
+    const noteLinks = parseNoteLinks(parsed.noteLinks)
+    return {
+      markdown,
+      payload: {
+        schema: FAMD_SCHEMA,
+        updatedAt,
+        ink,
+        worksheets,
+        ...(paperStyle ? { paperStyle } : {}),
+        ...(noteLinks.length ? { noteLinks } : {}),
+      },
+    }
   } catch {
     return { markdown, payload: null }
   }
@@ -91,6 +104,8 @@ export const serializeFamd = (markdown: string, payload: FamdPayload) => {
     worksheets: payload.worksheets.length ? payload.worksheets : worksheetIdsFromMarkdown(body),
     ...(isPaperStyle(payload.paperStyle) ? { paperStyle: payload.paperStyle } : {}),
   }
+  const noteLinks = serializeNoteLinks(payload.noteLinks)
+  if (noteLinks.length) next.noteLinks = noteLinks as NoteLinkRecord[]
   const json = JSON.stringify(next)
   return `${body ? `${body}\n\n` : ''}<!-- fanotes-famd:v1 chars=${json.length} -->\n${json}\n`
 }

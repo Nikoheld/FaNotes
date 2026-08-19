@@ -39,6 +39,7 @@ const {
   isPdfNoteExtension,
   noteStem,
   parseFamd,
+  parseNoteLinks,
   serializeFamd,
   stripFamdPayload,
   worksheetIdsFromMarkdown,
@@ -158,6 +159,8 @@ const IPC = Object.freeze({
   readFamdInk: 'fanotes:read-famd-ink',
   readNotePaperStyle: 'fanotes:read-note-paper-style',
   setNotePaperStyle: 'fanotes:set-note-paper-style',
+  readNoteLinks: 'fanotes:read-note-links',
+  writeNoteLinks: 'fanotes:write-note-links',
   importWorksheet: 'fanotes:import-worksheet',
   importWorksheetFromData: 'fanotes:import-worksheet-from-data',
   importPdfNote: 'fanotes:import-pdf-note',
@@ -3546,6 +3549,39 @@ function registerIpcHandlers() {
     const { target } = await resolveVaultPath(famdRelative, { allowMissing: true, expected: 'file' })
     await atomicWrite(target, serializeFamd(body, payload), { encoding: 'utf8', mode: 0o600 })
     return paperStyle
+  })
+
+  handle(IPC.readNoteLinks, async (_event, relativePath) => {
+    await ensureBootstrap()
+    if (typeof relativePath !== 'string') throw new Error('Ungültiger Notizpfad.')
+    const notePath = normalizeRelativePath(relativePath).split(path.sep).join('/')
+    assertNotePath(notePath)
+    const source = await readOptionalNoteFile(companionNotePath(notePath, '.famd'))
+    if (!source) return []
+    return parseNoteLinks(parseFamd(source).payload?.noteLinks)
+  })
+
+  handle(IPC.writeNoteLinks, async (_event, relativePath, rawLinks) => {
+    await ensureBootstrap()
+    if (typeof relativePath !== 'string') throw new Error('Ungültiger Notizpfad.')
+    const notePath = normalizeRelativePath(relativePath).split(path.sep).join('/')
+    assertNotePath(notePath)
+    const links = parseNoteLinks(rawLinks).map((link) => ({ ...link, sourcePath: notePath }))
+    const markdownPath = noteMarkdownSourcePath(notePath)
+    const markdown = (await readOptionalNoteFile(markdownPath, noteByteLimit(markdownPath))) ?? ''
+    const famdRelative = companionNotePath(notePath, '.famd')
+    const existingSource = await readOptionalNoteFile(famdRelative)
+    const existing = existingSource ? parseFamd(existingSource) : { markdown: stripFamdPayload(markdown), payload: emptyFamdPayload() }
+    const body = stripFamdPayload(markdown || existing.markdown)
+    const payload = {
+      ...(existing.payload || emptyFamdPayload()),
+      updatedAt: new Date().toISOString(),
+      worksheets: worksheetIdsFromMarkdown(body),
+      noteLinks: links,
+    }
+    const { target } = await resolveVaultPath(famdRelative, { allowMissing: true, expected: 'file' })
+    await atomicWrite(target, serializeFamd(body, payload), { encoding: 'utf8', mode: 0o600 })
+    return links
   })
 
   handle(IPC.importWorksheet, async () => {

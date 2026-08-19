@@ -398,6 +398,92 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 
 .workspace { min-width: 0; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: 34px 36px minmax(0, 1fr); background: var(--bg); }
 .tabs-bar { min-width: 0; display: flex; align-items: stretch; border-bottom: 1px solid var(--border); background: var(--bg-elevated); overflow: hidden; }
+.note-nav-back {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 33px;
+  padding: 0 10px;
+  border: 0;
+  border-right: 1px solid var(--border);
+  color: var(--text-soft);
+  background: transparent;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 650;
+}
+.note-nav-back:hover:not(:disabled) { color: var(--text); background: color-mix(in srgb, var(--text) 5%, transparent); }
+.note-nav-back:disabled { cursor: default; opacity: .38; }
+.note-link-styles {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  margin-right: 4px;
+  padding: 1px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--panel) 70%, transparent);
+}
+.note-link-styles button {
+  height: 23px;
+  padding: 0 7px;
+  border: 0;
+  border-radius: 6px;
+  color: var(--text-muted);
+  background: transparent;
+  cursor: pointer;
+  font-size: 9px;
+  font-weight: 650;
+}
+.note-link-styles button:hover { color: var(--text); background: var(--panel-hover); }
+.note-link-styles button.is-active { color: var(--text); background: var(--panel-active); }
+.note-link-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  pointer-events: none;
+}
+.note-link-layer.is-placing { pointer-events: auto; cursor: crosshair; }
+.unified-paper.is-placing-note-link .lw-drawing-board.is-inline.is-input-active .lw-canvas-surface {
+  pointer-events: none;
+}
+.note-link-marker {
+  position: absolute;
+  z-index: 7;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: min(220px, 70%);
+  min-height: 26px;
+  padding: 3px 8px;
+  border: 1px solid color-mix(in srgb, var(--paper-accent-readable, var(--accent)) 55%, rgba(40,43,56,.18));
+  border-radius: 999px;
+  color: #1d2030;
+  background: color-mix(in srgb, #fff 88%, var(--paper-accent-readable, var(--accent)));
+  box-shadow: 0 8px 22px rgba(20, 24, 38, .18);
+  pointer-events: auto;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 700;
+  transform: translate(-50%, -50%);
+}
+.note-link-marker.is-symbol {
+  width: 28px;
+  height: 28px;
+  min-height: 28px;
+  padding: 0;
+  justify-content: center;
+  border-radius: 50%;
+}
+.note-link-marker.is-text {
+  background: #1e2436;
+  color: #f4f6ff;
+  border-color: #1e2436;
+}
+.note-link-marker.is-symbol-text { padding: 3px 10px 3px 7px; }
+.note-link-marker.is-selected { outline: 2px solid var(--accent); outline-offset: 2px; }
+.note-link-marker span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tabs-scroll { flex: 1; min-width: 0; display: flex; overflow: auto hidden; scrollbar-width: none; }
 .tabs-scroll::-webkit-scrollbar { display: none; }
 .note-tab { min-width: 118px; max-width: 196px; height: 33px; flex: 0 1 168px; border-right: 1px solid var(--border); background: transparent; color: var(--text-muted); display: flex; align-items: center; padding: 0 5px 0 8px; font-size: 11px; position: relative; transition: background var(--motion-fast) ease, color var(--motion-fast) ease; }

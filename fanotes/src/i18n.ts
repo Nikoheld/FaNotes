@@ -152,6 +152,15 @@ function translateCore(source: string): string {
   if (source === 'Kalligrafie: schräge Breitfeder') return 'Calligraphy: angled broad nib'
   if (source === 'Zeichen & Varianten erfassen') return 'Capture symbols & variants'
   if (source === 'Zurück zu Fächern & Notizen') return 'Back to folders & notes'
+  if (source === 'Verlinkung') return 'Link'
+  if (source === 'Verlinkung setzen') return 'Place a link'
+  if (source === 'Verlinkungsstil') return 'Link style'
+  if (source === 'Symbol und Text') return 'Symbol and text'
+  if (source === 'Verlinkung gesetzt. Tippen öffnet die neue Notiz.') return 'Link placed. Tap it to open the new note.'
+  if (source === 'Öffne zuerst eine Notiz, um eine Verlinkung zu setzen.') return 'Open a note first to place a link.'
+  if (source === 'Die Verlinkung konnte nicht erstellt werden.') return 'The link could not be created.'
+  if (source === 'Der Verlinkungsstil konnte nicht gespeichert werden.') return 'The link style could not be saved.'
+  if (source === 'Irgendwo auf der Seite eine neue Notiz verlinken') return 'Link a new note anywhere on the page'
   if (source === 'Neue Notiz in diesem Ordner') return 'New note in this folder'
   const newNoteIn = /^Neue Notiz in (.+)$/u.exec(source)
   if (newNoteIn) return `New note in ${newNoteIn[1]}`
