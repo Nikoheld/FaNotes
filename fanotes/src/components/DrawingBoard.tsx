@@ -110,9 +110,12 @@ import {
 import {
   PAGE_GROW_STEP_HEIGHT,
   PAGE_GROW_STEP_WIDTH,
+  SCROLL_ROOM,
   WRITE_SLACK_HEIGHT,
   WRITE_SLACK_WIDTH,
   growLiveInkAndMapNext,
+  neededWriteMinPad,
+  remapNormalizedAfterExtent,
   HAS_INK_EXTENT_CLASS,
   INK_WIDTH_ANCHOR_CLASS,
   clearInkExtentStyles,
@@ -121,7 +124,6 @@ import {
   liveGrowScale,
   mergePendingGrow,
   nextWriteExtent,
-  paperScrollBounds,
   paperSourceExtentFromContent,
   pendingGrowScale,
   resolvePaintedLayoutGrow,
@@ -508,6 +510,8 @@ type DrawingDocument = {
   paperStyle: PaperStyle
   sourceWidth: number
   sourceHeight: number
+  sourceOriginX?: number
+  sourceOriginY?: number
   createdAt: string
   updatedAt: string
   strokes: InkStroke[]
@@ -1178,6 +1182,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const viewPanRef = useRef({ x: 0, y: 0 })
   const sourceHeightRef = useRef(WRITE_SLACK_HEIGHT)
   const sourceWidthRef = useRef(SOURCE_WIDTH)
+  const sourceOriginXRef = useRef(0)
+  const sourceOriginYRef = useRef(0)
   const pageLayoutFrameRef = useRef<number | null>(null)
   const paintedLayoutRef = useRef({ w: 0, h: 0 })
   const inkExtentPaperRef = useRef<HTMLElement | null>(null)
@@ -1682,6 +1688,12 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         sourceWidthRef.current = raw.sourceWidth
         setSourceWidth(raw.sourceWidth)
       }
+      if (typeof raw.sourceOriginX === 'number' && Number.isFinite(raw.sourceOriginX) && raw.sourceOriginX >= 0) {
+        sourceOriginXRef.current = raw.sourceOriginX
+      }
+      if (typeof raw.sourceOriginY === 'number' && Number.isFinite(raw.sourceOriginY) && raw.sourceOriginY >= 0) {
+        sourceOriginYRef.current = raw.sourceOriginY
+      }
       if (typeof raw.createdAt === 'string') createdAtRef.current = raw.createdAt
       searchTranscriptRef.current = typeof raw.searchTranscript === 'string' ? raw.searchTranscript : ''
       transcriptUpdatedAtRef.current = typeof raw.transcriptUpdatedAt === 'string' ? raw.transcriptUpdatedAt : null
@@ -1960,17 +1972,17 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const applyInkExtentStyles = useCallback((height: number, width: number = sourceWidthRef.current) => {
     const paper = resolvePaperElement()
     if (!paper) return
-    const bounds = paperScrollBounds({
-      minX: 0,
-      minY: 0,
-      maxX: Math.max(0, width - WRITE_SLACK_WIDTH),
-      maxY: Math.max(0, height - WRITE_SLACK_HEIGHT),
-    })
-    const styles = inkExtentStyleValues(bounds.maxY, Math.max(SOURCE_WIDTH, bounds.maxX), Math.max(1, paper.clientWidth))
+    const styles = inkExtentStyleValues(height, Math.max(SOURCE_WIDTH, width), Math.max(1, paper.clientWidth))
     paper.style.setProperty('--ink-extent-ratio', String(styles.extentRatio))
     paper.style.setProperty('--ink-width-extent', String(styles.widthExtent))
+    const originX = Math.max(0, sourceOriginXRef.current)
+    const originY = Math.max(0, sourceOriginYRef.current)
+    paper.style.setProperty('--text-origin-x', `${width > 0 ? (originX / width) * 100 : 0}%`)
+    paper.style.setProperty('--text-origin-y', `${height > 0 ? (originY / height) * 100 : 0}%`)
     paper.classList.add(HAS_INK_EXTENT_CLASS)
     paper.classList.toggle(INK_WIDTH_ANCHOR_CLASS, inkWidthNeedsAnchor(styles.widthExtent))
+    const plane = paper.closest('.paper-sheet-plane') as HTMLElement | null
+    plane?.style.setProperty('--paper-scroll-room', `${SCROLL_ROOM}px`)
     inkExtentPaperRef.current = paper
   }, [resolvePaperElement])
 
@@ -2009,17 +2021,53 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
 
   /**
    * Resize the writable page without shifting existing ink in absolute space.
-   * Coordinates stay normalized 0–1, so we scale by old/new when the sheet changes.
+   * Min-edge pad shifts origin; max-edge grow only scales. Text CSS is untouched.
    */
-  const setPageExtent = useCallback((targetHeight: number, targetWidth: number) => {
+  const setPageExtent = useCallback((targetHeight: number, targetWidth: number, padX = 0, padY = 0) => {
     const prevH = sourceHeightRef.current
     const prevW = sourceWidthRef.current
+    const addX = Math.max(0, Math.round(padX))
+    const addY = Math.max(0, Math.round(padY))
     const nextH = Math.min(MAX_SOURCE_HEIGHT, Math.max(WRITE_SLACK_HEIGHT, Math.round(targetHeight)))
     const nextW = Math.min(MAX_SOURCE_WIDTH, Math.max(SOURCE_WIDTH, Math.round(targetWidth)))
-    if (nextH === prevH && nextW === prevW) return false
+    if (nextH === prevH && nextW === prevW && addX === 0 && addY === 0) return false
     const paper = resolvePaperElement()
-    const prevLayoutH = paper?.offsetHeight ?? 0
-    const prevLayoutW = paper?.offsetWidth ?? 0
+    const remapPoint = (point: { x: number; y: number }) => {
+      point.x = remapNormalizedAfterExtent(point.x, prevW, nextW, addX)
+      point.y = remapNormalizedAfterExtent(point.y, prevH, nextH, addY)
+    }
+    for (const stroke of strokesRef.current) {
+      for (const point of stroke.points) remapPoint(point)
+    }
+    const active = activeStrokeRef.current
+    if (active) {
+      for (const point of active.points) remapPoint(point)
+    }
+    const remapPose = <T extends { x: number; y: number }>(pose: T | null): T | null => {
+      if (!pose) return pose
+      return {
+        ...pose,
+        x: remapNormalizedAfterExtent(pose.x, prevW, nextW, addX),
+        y: remapNormalizedAfterExtent(pose.y, prevH, nextH, addY),
+      }
+    }
+    if (rulerPoseRef.current) {
+      const next = remapPose(rulerPoseRef.current)
+      rulerPoseRef.current = next
+      setRulerPose(next)
+    }
+    if (setSquarePoseRef.current) {
+      const next = remapPose(setSquarePoseRef.current)
+      setSquarePoseRef.current = next
+      setSetSquarePose(next)
+    }
+    if (compassPoseRef.current) {
+      const next = remapPose(compassPoseRef.current)
+      compassPoseRef.current = next
+      setCompassPose(next)
+    }
+    sourceOriginXRef.current += addX
+    sourceOriginYRef.current += addY
     sourceHeightRef.current = nextH
     sourceWidthRef.current = nextW
     setSourceHeight(nextH)
@@ -2027,16 +2075,11 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     applyInkExtentStyles(nextH, nextW)
     const nextLayoutH = paper?.offsetHeight ?? 0
     const nextLayoutW = paper?.offsetWidth ?? 0
-    // Shrinking 0–1 before the painted sheet gets taller lifts every stroke
-    // toward the top and makes the writing look smaller than the ruling.
-    const scaleX = liveGrowScale(prevLayoutW, nextLayoutW, prevW, nextW, nextH > prevH)
-    const scaleY = liveGrowScale(prevLayoutH, nextLayoutH, prevH, nextH, nextW > prevW)
-    scaleNormalizedSpace(scaleX, scaleY)
-    pendingGrowRemapRef.current = mergePendingGrow(
-      pendingGrowRemapRef.current,
-      { prevH, nextH, prevW, nextW, prevLayoutH, prevLayoutW },
-      { scaleX, scaleY },
-    )
+    const scroller = paper?.closest('.unified-note-view') as HTMLElement | null
+    if (scroller && (addX > 0 || addY > 0) && prevW > 0 && prevH > 0) {
+      if (addX > 0 && nextLayoutW > 0) scroller.scrollLeft += (addX / nextW) * nextLayoutW
+      if (addY > 0 && nextLayoutH > 0) scroller.scrollTop += (addY / nextH) * nextLayoutH
+    }
     paintedLayoutRef.current = { w: nextLayoutW, h: nextLayoutH }
     exportCacheRef.current = null
     setDirty(true)
@@ -2048,18 +2091,26 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       schedulePageLayoutRefresh()
     }
     return true
-  }, [applyInkExtentStyles, resolvePaperElement, scaleNormalizedSpace, schedulePageLayoutRefresh, setDirty, redraw])
+  }, [applyInkExtentStyles, resolvePaperElement, schedulePageLayoutRefresh, setDirty, redraw])
 
-  /** Keep a modest writing margin beyond the pen so the edge does not arrive first. */
+  /** Grow the write surface in any direction. Camera slack stays on the plane. */
   const ensureWriteRoom = useCallback((normalizedY?: number, normalizedX?: number) => {
     const prevH = sourceHeightRef.current
     const prevW = sourceWidthRef.current
     const paper = resolvePaperElement()
     const paintedH = paper?.offsetHeight ?? 0
     const paintedW = paper?.offsetWidth ?? 0
-    const nextH = nextWriteExtent(normalizedY, prevH, WRITE_SLACK_HEIGHT, PAGE_GROW_STEP_HEIGHT, paintedH)
-    const nextW = nextWriteExtent(normalizedX, prevW, WRITE_SLACK_WIDTH, PAGE_GROW_STEP_WIDTH, paintedW)
-    if (nextH > prevH || nextW > prevW) setPageExtent(nextH, nextW)
+    const padY = neededWriteMinPad(normalizedY, prevH, WRITE_SLACK_HEIGHT, PAGE_GROW_STEP_HEIGHT)
+    const padX = neededWriteMinPad(normalizedX, prevW, WRITE_SLACK_WIDTH, PAGE_GROW_STEP_WIDTH)
+    const nextH = Math.max(
+      nextWriteExtent(normalizedY, prevH, WRITE_SLACK_HEIGHT, PAGE_GROW_STEP_HEIGHT, paintedH),
+      prevH + padY,
+    )
+    const nextW = Math.max(
+      nextWriteExtent(normalizedX, prevW, WRITE_SLACK_WIDTH, PAGE_GROW_STEP_WIDTH, paintedW),
+      prevW + padX,
+    )
+    if (nextH > prevH || nextW > prevW || padX > 0 || padY > 0) setPageExtent(nextH, nextW, padX, padY)
   }, [resolvePaperElement, setPageExtent])
 
   const fitPageToInk = useCallback(() => {
@@ -3553,6 +3604,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       paperStyle,
       sourceWidth,
       sourceHeight,
+      sourceOriginX: sourceOriginXRef.current,
+      sourceOriginY: sourceOriginYRef.current,
       createdAt: createdAtRef.current,
       updatedAt: now,
       strokes: strokesRef.current,
@@ -5776,7 +5829,7 @@ const drawingBoardStyles = `
 .lw-empty-conversion{display:flex;flex:1;min-height:230px;align-items:center;justify-content:center;flex-direction:column;text-align:center;color:var(--text-muted,#999)}.lw-empty-conversion>svg{margin-bottom:10px;color:var(--accent-readable,var(--draw-accent))}.lw-empty-conversion strong{color:var(--text,#fff)}.lw-empty-conversion p{max-width:290px;margin:7px 0 15px;font-size:12px;line-height:1.6}.lw-model-card{gap:9px;margin-top:auto;padding:9px;border:1px solid var(--draw-border);border-radius:11px;background:color-mix(in srgb,var(--background,#111116) 42%,transparent)}.lw-model-card>span{width:7px;height:7px;flex:0 0 auto;border-radius:50%;background:var(--warning,#b36b2d)}.lw-model-card>span.is-ready{background:var(--success,#3a8f6d);box-shadow:0 0 7px color-mix(in srgb,var(--success,#3a8f6d) 65%,transparent)}.lw-model-copy{display:flex;min-width:0;flex:1;flex-direction:column}.lw-model-card strong{font-size:10px}.lw-model-card small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:9px}.lw-model-actions{display:flex;align-items:center;gap:4px}.lw-model-card button{display:flex;align-items:center;gap:4px;padding:5px 7px;border:0;border-radius:7px;background:color-mix(in srgb,var(--text,#fff) 7%,transparent)}.lw-model-card button.is-danger{color:var(--danger,#d94b63);background:color-mix(in srgb,var(--danger,#d94b63) 9%,transparent)}
 .lw-draw-notice{display:flex;align-items:center;gap:7px;margin:0 14px 10px;padding:8px 10px;border:1px solid var(--draw-border);border-radius:9px;background:var(--background-secondary,#1b1b22);font-size:11px}.lw-draw-notice.is-success{color:var(--success,#3a8f6d);border-color:color-mix(in srgb,var(--success,#3a8f6d) 28%,transparent)}.lw-draw-notice.is-error{color:var(--danger,#d94b63);border-color:color-mix(in srgb,var(--danger,#d94b63) 28%,transparent)}.lw-draw-notice.is-info{color:var(--accent-readable,var(--draw-accent));border-color:color-mix(in srgb,var(--draw-accent) 32%,transparent)}.lw-draw-notice span{flex:1}.lw-draw-notice button{display:grid;place-items:center;border:0;background:transparent;color:inherit;cursor:pointer}.lw-draw-footer{min-height:55px;flex:0 0 auto;justify-content:space-between;gap:10px;padding:9px 14px;border-top:1px solid var(--draw-border);background:color-mix(in srgb,var(--background-secondary,#17171d) 92%,transparent)}.lw-footer-actions{gap:8px}.lw-convert-action{min-height:34px}.lw-spin{animation:lw-spin .8s linear infinite}.sr-only{position:absolute!important;width:1px!important;height:1px!important;padding:0!important;margin:-1px!important;overflow:hidden!important;clip:rect(0,0,0,0)!important;white-space:nowrap!important;border:0!important}@keyframes lw-spin{to{transform:rotate(360deg)}}
 
-.lw-drawing-board.is-inline{position:absolute;z-index:4;inset:0;height:auto;min-height:100%;overflow:visible;background:transparent;pointer-events:none}
+.lw-drawing-board.is-inline{position:absolute;z-index:4;inset:calc(-1 * var(--paper-scroll-room, 560px));height:auto;min-height:100%;overflow:visible;background:transparent;pointer-events:none}
 .lw-drawing-board.is-inline .lw-draw-header{display:none}
 .lw-drawing-board.is-inline .lw-draw-footer{display:none}
 .lw-drawing-board.is-inline .lw-draw-workspace{position:absolute;inset:0;display:block;min-height:100%;padding:0;pointer-events:none}

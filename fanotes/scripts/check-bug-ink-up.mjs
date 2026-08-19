@@ -24,9 +24,9 @@ const {
 try {
   const a4H = PAPER_SOURCE_HEIGHT
   const a4W = PAPER_SOURCE_WIDTH
-  const reportY = 0.52
+  const reportY = 0.94
   const nextH = neededWriteExtent(reportY, a4H, WRITE_SLACK_HEIGHT, PAGE_GROW_STEP_HEIGHT)
-  assert.ok(nextH >= a4H + PAGE_GROW_STEP_HEIGHT, 'y≈0.52 on A4 must grow at least one half-page step')
+  assert.ok(nextH >= a4H + PAGE_GROW_STEP_HEIGHT, 'y≈0.94 on A4 must grow at least one writing-margin step')
 
   const a4Painted = inkExtentStyleValues(a4H, a4W, a4W)
   const tallPainted = inkExtentStyleValues(nextH, a4W, a4W)

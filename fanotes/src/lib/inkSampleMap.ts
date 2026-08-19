@@ -73,7 +73,11 @@ export const mapClientToPaperPoint = (
     // the sheet happens to sit in the viewport corner.
     if (!paperCornerAtOrigin || !((event.pressure ?? 0) > 0)) return null
   }
-  const pad = Math.max(48, Math.max(surface.width, surface.height) * 0.2)
+  const paperW = Math.max(1, surface.offsetWidth ?? surface.width)
+  const paperH = Math.max(1, surface.offsetHeight ?? surface.height)
+  // Camera slack around the write surface (matches paperGrow.SCROLL_ROOM).
+  const hitRoomPx = 560 * (surface.width / paperW)
+  const pad = Math.max(48, hitRoomPx)
   if (
     event.clientX! < surface.left - pad
     || event.clientX! > surface.left + surface.width + pad
@@ -81,13 +85,10 @@ export const mapClientToPaperPoint = (
     || event.clientY! > surface.top + surface.height + pad
   ) return null
 
-  const paperW = Math.max(1, surface.offsetWidth ?? surface.width)
-  const paperH = Math.max(1, surface.offsetHeight ?? surface.height)
   const visualX = (event.clientX! - surface.left) / surface.width
   const visualY = (event.clientY! - surface.top) / surface.height
   if (!Number.isFinite(visualX) || !Number.isFinite(visualY)) return null
-  // Far outside the sheet would clamp to a corner and draw a ghost line.
-  const edgeSlop = 0.04
+  const edgeSlop = Math.max(0.04, hitRoomPx / Math.max(1, surface.width))
   if (
     visualX < -edgeSlop
     || visualX > 1 + edgeSlop
@@ -107,11 +108,11 @@ export const mapClientToPaperPoint = (
     paperLocalY = dx * sin + dy * cos + paperH / 2
   }
 
-  // A sample from above the sheet used to clamp onto y=0 and draw a
-  // straight line to the top from the first real contact.
-  if (visualY < 0 || paperLocalY < 0) return null
-  const x = Math.max(0, Math.min(1, paperLocalX / paperW))
-  const y = Math.max(0, Math.min(1, paperLocalY / paperH))
+  // Keep out-of-range samples so the write surface can grow left/up.
+  // Clamping to 0 here drew a ghost line to the top of the sheet.
+  const x = paperLocalX / paperW
+  const y = paperLocalY / paperH
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return null
   const rawPressure = (event.pressure ?? 0) > 0
     ? event.pressure!
     : event.pointerType === 'mouse' ? 0.55 : 0.35

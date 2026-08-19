@@ -31,7 +31,7 @@ import {
   sheetZoomStepFromDirection,
   type PaperViewSnapshot,
 } from '../lib/paperView'
-import { clampPaperScrollOffset, paperScrollBoundsFromVisualRect } from '../lib/paperGrow'
+import { SCROLL_ROOM, clampPaperScrollOffset, paperScrollBoundsFromVisualRect } from '../lib/paperGrow'
 
 export type PaperViewApi = PaperViewSnapshot & {
   zoomBy: (delta: number, originClient?: { x: number; y: number }) => void
@@ -110,6 +110,12 @@ export function PaperView({ children, className = '', viewKey, showHud = true }:
       if (next.y !== scroller.scrollTop) scroller.scrollTop = next.y
     }
     scroller.addEventListener('scroll', clampScroll, { passive: true })
+    const plane = scroller.querySelector<HTMLElement>('.paper-sheet-plane')
+    const room = Number.parseFloat(plane?.style.getPropertyValue('--paper-scroll-room') || '') || SCROLL_ROOM
+    if (scroller.scrollLeft === 0 && scroller.scrollTop === 0 && scroller.scrollWidth > scroller.clientWidth) {
+      scroller.scrollLeft = room
+      scroller.scrollTop = room
+    }
     clampScroll()
     return () => scroller.removeEventListener('scroll', clampScroll)
   }, [viewKey])

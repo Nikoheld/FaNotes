@@ -7,6 +7,8 @@ export const PAPER_SOURCE_HEIGHT = 1273
 export const WRITE_SLACK_HEIGHT = 144
 /** Modest empty paper to the right of the last stroke. */
 export const WRITE_SLACK_WIDTH = 108
+/** Camera slack around the write surface. Far enough to pan, never infinite. */
+export const SCROLL_ROOM = 560
 /** Grow in the same modest chunks so the sheet follows the pen, not a blank page. */
 export const PAGE_GROW_STEP_HEIGHT = WRITE_SLACK_HEIGHT
 export const PAGE_GROW_STEP_WIDTH = WRITE_SLACK_WIDTH
@@ -304,6 +306,37 @@ export const nextWriteExtent = (
   )
 )
 
+/** Extra source pixels on the min edge (left/up) so writing is not stuck at 0. */
+export const neededWriteMinPad = (
+  normalized: number | undefined,
+  current: number,
+  slack: number,
+  step: number,
+) => {
+  if (typeof normalized !== 'number' || !Number.isFinite(normalized)) return 0
+  if (!Number.isFinite(current) || current < 1) return 0
+  if (!Number.isFinite(slack) || !Number.isFinite(step) || step < 1) return 0
+  const pixel = normalized * current
+  if (pixel >= slack) return 0
+  return Math.max(step, Math.ceil((slack - pixel) / step) * step)
+}
+
+/**
+ * Keep painted pixels put when the write surface grows.
+ * Max-edge grow: `value * old/new`. Min-edge pad: `(value * old + pad) / new`.
+ */
+export const remapNormalizedAfterExtent = (
+  value: number,
+  prevExtent: number,
+  nextExtent: number,
+  minPad = 0,
+) => {
+  if (!Number.isFinite(value) || !(prevExtent > 0) || !(nextExtent > 0)) return value
+  const pad = Math.max(0, Number.isFinite(minPad) ? minPad : 0)
+  if (Math.abs(nextExtent - prevExtent) < 1e-6 && pad === 0) return value
+  return (value * prevExtent + pad) / nextExtent
+}
+
 export type PaperContentBox = {
   minX: number
   minY: number
@@ -316,25 +349,34 @@ export type PaperViewportSize = {
   height: number
 }
 
-/** Paper/scroll size is the content box plus modest slack. Unused sides stay closed. */
+/** Camera box around the write surface. All four sides get the same finite room. */
 export const paperScrollBounds = (
   content: PaperContentBox,
-  slackX = WRITE_SLACK_WIDTH,
-  slackY = WRITE_SLACK_HEIGHT,
+  slackX = SCROLL_ROOM,
+  slackY = SCROLL_ROOM,
 ): PaperContentBox => {
-  const minX = Math.min(0, Number.isFinite(content.minX) ? content.minX : 0)
-  const minY = Math.min(0, Number.isFinite(content.minY) ? content.minY : 0)
-  const maxX = Math.max(0, Number.isFinite(content.maxX) ? content.maxX : 0) + Math.max(0, slackX)
-  const maxY = Math.max(0, Number.isFinite(content.maxY) ? content.maxY : 0) + Math.max(0, slackY)
+  const minX = (Number.isFinite(content.minX) ? content.minX : 0) - Math.max(0, slackX)
+  const minY = (Number.isFinite(content.minY) ? content.minY : 0) - Math.max(0, slackY)
+  const maxX = (Number.isFinite(content.maxX) ? content.maxX : 0) + Math.max(0, slackX)
+  const maxY = (Number.isFinite(content.maxY) ? content.maxY : 0) + Math.max(0, slackY)
   return { minX, minY, maxX, maxY }
 }
 
-/** Ink source size from content pixels + slack. Height is not floored to A4. */
+/** CSS padding that turns negative camera min into a DOM-scrollable pad. */
+export const paperScrollPad = (bounds: PaperContentBox) => ({
+  left: Math.max(0, -(Number.isFinite(bounds.minX) ? bounds.minX : 0)),
+  top: Math.max(0, -(Number.isFinite(bounds.minY) ? bounds.minY : 0)),
+})
+
+/** Ink source size from content pixels + write slack. Camera room stays off this box. */
 export const paperSourceExtentFromContent = (content: PaperContentBox) => {
-  const bounds = paperScrollBounds(content)
+  const minX = Math.min(0, Number.isFinite(content.minX) ? content.minX : 0)
+  const minY = Math.min(0, Number.isFinite(content.minY) ? content.minY : 0)
+  const maxX = Math.max(0, Number.isFinite(content.maxX) ? content.maxX : 0) + WRITE_SLACK_WIDTH
+  const maxY = Math.max(0, Number.isFinite(content.maxY) ? content.maxY : 0) + WRITE_SLACK_HEIGHT
   return {
-    width: Math.min(WRITE_MEMORY_CAP_WIDTH, Math.max(PAPER_SOURCE_WIDTH, bounds.maxX)),
-    height: Math.min(WRITE_MEMORY_CAP_HEIGHT, Math.max(WRITE_SLACK_HEIGHT, bounds.maxY)),
+    width: Math.min(WRITE_MEMORY_CAP_WIDTH, Math.max(PAPER_SOURCE_WIDTH, maxX - minX)),
+    height: Math.min(WRITE_MEMORY_CAP_HEIGHT, Math.max(WRITE_SLACK_HEIGHT, maxY - minY)),
   }
 }
 
@@ -376,9 +418,13 @@ export const paperScrollBoundsFromVisualRect = (
 export const clearInkExtentStyles = (paper: {
   classList?: { remove: (...names: string[]) => void }
   style?: { removeProperty: (name: string) => void }
+  closest?: (selector: string) => { style?: { removeProperty: (name: string) => void } } | null
 } | null) => {
   if (!paper) return
   paper.classList?.remove(HAS_INK_EXTENT_CLASS, INK_WIDTH_ANCHOR_CLASS)
   paper.style?.removeProperty('--ink-extent-ratio')
   paper.style?.removeProperty('--ink-width-extent')
+  paper.style?.removeProperty('--text-origin-x')
+  paper.style?.removeProperty('--text-origin-y')
+  paper.closest?.('.paper-sheet-plane')?.style?.removeProperty('--paper-scroll-room')
 }

@@ -118,7 +118,8 @@ const worksheetSafeguards = [
 const worksheetStyleSafeguards = [
   ['width: min(calc(100% - 36px), 900px)', 'PDF-Leiste bleibt auf der A4-Spalte, nicht am rechten Infinite-Rand'],
   ['left: 18px', 'Entfernen-Button klebt im sichtbaren Viewport'],
-  ['margin-left: max(32px, calc((100% - var(--paper-width)) / 2))', 'gewachsenes Blatt bleibt links verankert'],
+  ['margin-left: 0', 'gewachsenes Blatt zentriert den Text nicht neu'],
+  ['--text-origin-x', 'Textspalte bleibt unabhängig vom Schreibrand'],
   ['.unified-paper.has-ink-width', 'A4-Tinte ändert den linken Rand nicht'],
   ['width: min(100%, var(--paper-width, 900px))', 'Text umbricht auf der A4-Spalte'],
   ['Sit above the full-sheet ink canvas so Entfernen stays clickable in pen mode.', 'PDF-Entfernen bleibt im Stiftmodus klickbar'],

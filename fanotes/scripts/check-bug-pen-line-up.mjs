@@ -128,7 +128,8 @@ try {
     ...extras,
   })
   const aboveSheet = mapClientToPaperPoint(pdfAt(0.51, -0.02), pdfSurface)
-  assert.equal(aboveSheet, null, 'a sample from above the PDF must not clamp to y=0')
+  assert.ok(aboveSheet, 'writing above the sheet must remain a sample so the canvas can grow up')
+  assert.ok(aboveSheet.y < 0, 'a sample from above the PDF must not clamp to y=0')
 
   const pdfStroke = commitInkPointerSequence(
     [

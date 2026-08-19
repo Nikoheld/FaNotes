@@ -14,6 +14,7 @@ const server = await createServer({
 const {
   PAPER_SOURCE_HEIGHT,
   PAPER_SOURCE_WIDTH,
+  SCROLL_ROOM,
   WRITE_SLACK_HEIGHT,
   WRITE_SLACK_WIDTH,
   HAS_INK_EXTENT_CLASS,
@@ -29,31 +30,32 @@ const {
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 
 try {
-  assert.ok(WRITE_SLACK_HEIGHT < PAPER_SOURCE_HEIGHT * 0.25, 'height slack must be modest, not half an A4')
-  assert.ok(WRITE_SLACK_WIDTH < PAPER_SOURCE_HEIGHT * 0.25, 'width slack must be modest')
+  assert.ok(WRITE_SLACK_HEIGHT < PAPER_SOURCE_HEIGHT * 0.25, 'write slack must stay a margin, not half an A4')
+  assert.ok(SCROLL_ROOM > WRITE_SLACK_HEIGHT * 2, 'camera room must be reasonably far')
+  assert.ok(SCROLL_ROOM < PAPER_SOURCE_HEIGHT * 2, 'camera room must not be infinite')
 
   const short = paperScrollBounds({ minX: 0, minY: 0, maxX: 420, maxY: 80 })
-  assert.equal(short.minX, 0)
-  assert.equal(short.minY, 0)
-  assert.equal(short.maxX, 420 + WRITE_SLACK_WIDTH)
-  assert.equal(short.maxY, 80 + WRITE_SLACK_HEIGHT)
-  assert.ok(short.maxY - 80 < PAPER_SOURCE_HEIGHT * 0.25, 'short text must not open an empty A4 below')
-  assert.ok(short.maxX - 420 < PAPER_SOURCE_HEIGHT * 0.25, 'short text must not open a large empty pan right')
+  assert.equal(short.minX, -SCROLL_ROOM)
+  assert.equal(short.minY, -SCROLL_ROOM)
+  assert.equal(short.maxX, 420 + SCROLL_ROOM)
+  assert.equal(short.maxY, 80 + SCROLL_ROOM)
+  assert.ok(short.maxY - 80 === SCROLL_ROOM)
+  assert.ok(short.maxX - short.minX < 20_000, 'short notes must not unlock an infinite pan')
 
   const tall = paperScrollBounds({ minX: 12, minY: 0, maxX: 380, maxY: 4200 })
-  assert.equal(tall.minX, 0, 'unused left side must stay closed')
-  assert.equal(tall.maxY, 4200 + WRITE_SLACK_HEIGHT)
-  assert.ok(tall.maxX - 380 === WRITE_SLACK_WIDTH, 'a tall-only note must not open a wide empty axis')
+  assert.equal(tall.minX, 12 - SCROLL_ROOM, 'left camera room stays open')
+  assert.equal(tall.maxY, 4200 + SCROLL_ROOM)
+  assert.equal(tall.maxX, 380 + SCROLL_ROOM)
 
   const wide = paperScrollBounds({ minX: 0, minY: 8, maxX: 2400, maxY: 90 })
-  assert.equal(wide.minY, 0, 'unused top side must stay closed')
-  assert.ok(wide.maxY - 90 === WRITE_SLACK_HEIGHT, 'a wide-only note must not open a tall empty axis')
+  assert.equal(wide.minY, 8 - SCROLL_ROOM, 'top camera room stays open')
+  assert.equal(wide.maxY, 90 + SCROLL_ROOM)
 
   const viewport = { width: 800, height: 600 }
   const clampedFar = clampPaperScrollOffset({ x: 8000, y: 9000 }, short, viewport)
   assert.equal(clampedFar.y, Math.max(0, short.maxY - viewport.height))
   assert.equal(clampedFar.x, Math.max(0, short.maxX - viewport.width))
-  assert.equal(clampedFar.y, 0, 'short text shorter than the viewport must not scroll down into empty space')
+  assert.ok(clampedFar.y < 10_000, 'camera clamp must stop well short of infinite scroll')
 
   const clampedNeg = clampPaperScrollOffset({ x: -40, y: -90 }, tall, viewport)
   assert.equal(clampedNeg.x, 0)
@@ -61,6 +63,7 @@ try {
 
   const css = readFileSync(join(root, 'src/styles.css'), 'utf8')
   assert.match(css, /--paper-write-slack:\s*144px/)
+  assert.match(css, /--paper-scroll-room:\s*560px/)
   const paperBlock = css.slice(css.indexOf('.unified-paper {'), css.indexOf('.unified-paper.has-ink-extent {'))
   assert.match(paperBlock, /min-height:\s*0/)
   assert.doesNotMatch(paperBlock, /min-height:\s*max\(calc\(100%/)
@@ -71,6 +74,14 @@ try {
   const inkExtentBlock = css.slice(css.indexOf('.unified-paper.has-ink-extent {'), css.indexOf('.unified-paper.has-ink-width {'))
   assert.match(inkExtentBlock, /min-height:\s*calc\(var\(--paper-width\) \* var\(--ink-extent-ratio\)\)/)
   assert.doesNotMatch(inkExtentBlock, /paper-a4-height/)
+  const textOnInk = css.slice(
+    css.indexOf('.unified-paper.has-ink-extent .markdown-editor .cm-content {'),
+    css.indexOf('.unified-paper.has-ink-extent .markdown-editor .cm-content {') + 280,
+  )
+  assert.match(textOnInk, /min-height:\s*0/)
+  assert.doesNotMatch(textOnInk, /ink-extent-ratio/)
+  assert.match(css, /\.unified-paper > \.editor-pane \{[\s\S]*?max-width:\s*900px/)
+  assert.match(css, /--text-origin-x/)
 
   const shortInk = inkExtentStyleValues(WRITE_SLACK_HEIGHT, PAPER_SOURCE_WIDTH, PAPER_SOURCE_WIDTH)
   assert.ok(
@@ -84,13 +95,13 @@ try {
   const board = readFileSync(join(root, 'src/components/DrawingBoard.tsx'), 'utf8')
   const paperView = readFileSync(join(root, 'src/components/PaperView.tsx'), 'utf8')
   assert.match(board, /paperSourceExtentFromContent/)
-  assert.match(board, /paperScrollBounds/)
+  assert.match(board, /neededWriteMinPad/)
   assert.match(board, /clearInkExtentStyles/)
   assert.match(paperView, /paperScrollBoundsFromVisualRect/)
   assert.match(paperView, /paper-sheet-plane/)
   assert.match(paperView, /scrollHeight/)
   assert.doesNotMatch(paperView, /paperScrollBounds\(/)
-  assert.match(css, /margin:\s*32px auto 76px/)
+  assert.match(css, /\.paper-sheet-plane \{[\s\S]*?min-height:\s*100%/)
 
   const topMargin = 32
   const bottomMargin = 76
@@ -138,7 +149,7 @@ try {
   assert.ok(zoomedBounds.maxY !== sheetH + WRITE_SLACK_HEIGHT, 'must not add slack on top of a sheet that already includes it')
 
   const removed = []
-  const props = new Set(['--ink-extent-ratio', '--ink-width-extent'])
+  const props = new Set(['--ink-extent-ratio', '--ink-width-extent', '--text-origin-x', '--text-origin-y'])
   clearInkExtentStyles({
     classList: { remove: (...names) => { removed.push(...names) } },
     style: { removeProperty: (name) => { props.delete(name) } },
@@ -151,6 +162,7 @@ try {
   console.log(JSON.stringify({
     slackH: WRITE_SLACK_HEIGHT,
     slackW: WRITE_SLACK_WIDTH,
+    scrollRoom: SCROLL_ROOM,
     shortMaxY: short.maxY,
     tallMaxX: tall.maxX,
     clampedFar,
