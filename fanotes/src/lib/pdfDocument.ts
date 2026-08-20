@@ -72,6 +72,20 @@ export const enqueuePdfRender = <T,>(job: () => Promise<T>): Promise<T> => {
   return run
 }
 
+/** CSS max width of a PDF page column — the write-column, not the grown plane. */
+export const PDF_PAGE_COLUMN_MAX = 900
+
+/**
+ * Painted CSS width of the PDF page stack. Ink-extent / one-canvas can make
+ * the paper wider than A4; glyphs must still use this column so they do not
+ * rescale when the overlay source grows.
+ */
+export const pdfPageColumnCssWidth = (paperClientWidth: number, columnMax = PDF_PAGE_COLUMN_MAX) => {
+  const paper = Number.isFinite(paperClientWidth) && paperClientWidth > 0 ? paperClientWidth : columnMax
+  const max = Number.isFinite(columnMax) && columnMax > 0 ? columnMax : PDF_PAGE_COLUMN_MAX
+  return Math.min(paper, max)
+}
+
 /**
  * Overlay scale pdf.js TextLayer expects: CSS-pixel page width / unscaled
  * page width. Canvas bitmap may be DPR-capped; the selectable layer must
@@ -81,6 +95,13 @@ export const pdfTextOverlayScale = (cssWidth: number, pageWidth: number) => {
   if (!(cssWidth > 0) || !(pageWidth > 0)) return 1
   return cssWidth / pageWidth
 }
+
+/** Overlay scale from the paper’s client box, always via the stable page column. */
+export const pdfTextOverlayScaleForPaper = (
+  paperClientWidth: number,
+  pageWidth: number,
+  columnMax = PDF_PAGE_COLUMN_MAX,
+) => pdfTextOverlayScale(pdfPageColumnCssWidth(paperClientWidth, columnMax), pageWidth)
 
 export const PDF_TEXT_OVERLAY_USER_UNIT = 1
 

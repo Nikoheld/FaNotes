@@ -106,7 +106,7 @@ function PdfPageCanvas({
     const base = page.getViewport({ scale: 1, rotation })
     const cssHeight = Math.max(1, Math.round(cssWidth * (base.height / Math.max(1, base.width))))
     const { pixelWidth, pixelHeight } = paintSizeForPage(cssWidth, cssHeight)
-    const renderKey = `${cssWidth}x${cssHeight}@${pixelWidth}x${pixelHeight}:${rotation}:${textEnabled ? 1 : 0}`
+    const renderKey = `${cssWidth}x${cssHeight}@${pixelWidth}x${pixelHeight}:${rotation}`
     if (renderKey === lastRenderKeyRef.current && canvas.width === pixelWidth && canvas.height === pixelHeight) {
       return
     }
@@ -122,8 +122,8 @@ function PdfPageCanvas({
       const viewport = livePage.getViewport({ scale, rotation })
       liveCanvas.width = pixelWidth
       liveCanvas.height = pixelHeight
-      liveCanvas.style.width = `${cssWidth}px`
-      liveCanvas.style.height = `${cssHeight}px`
+      liveCanvas.style.removeProperty('width')
+      liveCanvas.style.removeProperty('height')
       const context = liveCanvas.getContext('2d', { alpha: false })
       if (!context) return
       context.setTransform(1, 0, 0, 1, 0, 0)
@@ -143,12 +143,10 @@ function PdfPageCanvas({
         if (token !== renderTokenRef.current) return
         lastRenderKeyRef.current = renderKey
         const textHost = textRef.current
-        if (textEnabled && textHost) {
+        if (textHost && (textEnabled || textHost.childElementCount > 0)) {
           textHost.replaceChildren()
           const overlayScale = applyPdfTextOverlayScale(textHost, cssWidth, base.width)
           const cssViewport = livePage.getViewport({ scale: overlayScale, rotation })
-          textHost.style.width = `${cssWidth}px`
-          textHost.style.height = `${cssHeight}px`
           const layer = new TextLayer({
             textContentSource: livePage.streamTextContent(),
             container: textHost,
@@ -156,8 +154,6 @@ function PdfPageCanvas({
           })
           textLayerRef.current = layer
           await layer.render()
-        } else if (textHost) {
-          textHost.replaceChildren()
         }
         if (!readySentRef.current) {
           readySentRef.current = true
@@ -799,7 +795,7 @@ export function PdfNoteView({
                   pdf={pdf}
                   number={page}
                   rotation={rotation}
-                  textEnabled={!inputDisabled}
+                  textEnabled
                   highlight={searchHits.some((hit) => hit.page === page) ? searchQuery.trim() : activeHighlight}
                   defaultRatio={pageRatio}
                   active={page === currentPage}
