@@ -102,6 +102,7 @@
     "check:one-canvas": "node scripts/check-one-canvas.mjs",
     "check:sheet-write": "node scripts/check-sheet-write.mjs",
     "check:pdf-write": "node scripts/check-pdf-write.mjs",
+    "check:pdf-text-select": "node scripts/check-pdf-text-select.mjs",
     "check:bug-upper-third": "node scripts/check-bug-upper-third.mjs",
     "check:bug-right-shrink": "node scripts/check-bug-right-shrink.mjs",
     "check:bug-right-line-up": "node scripts/check-bug-right-line-up.mjs",

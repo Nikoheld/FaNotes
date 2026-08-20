@@ -28,6 +28,7 @@ import type { PDFDocumentLoadingTask, PDFDocumentProxy, PDFPageProxy, RenderTask
 import { TextLayer } from 'pdfjs-dist'
 import {
   DEFAULT_PDF_PAGE_RATIO,
+  applyPdfTextOverlayScale,
   enqueuePdfRender,
   loadVaultPdfBytes,
   openPdfDocument,
@@ -144,10 +145,10 @@ function PdfPageCanvas({
         const textHost = textRef.current
         if (textEnabled && textHost) {
           textHost.replaceChildren()
+          const overlayScale = applyPdfTextOverlayScale(textHost, cssWidth, base.width)
+          const cssViewport = livePage.getViewport({ scale: overlayScale, rotation })
           textHost.style.width = `${cssWidth}px`
           textHost.style.height = `${cssHeight}px`
-          const cssViewport = livePage.getViewport({ scale: cssWidth / Math.max(1, base.width), rotation })
-          textHost.style.setProperty('--scale-factor', String(cssViewport.scale))
           const layer = new TextLayer({
             textContentSource: livePage.streamTextContent(),
             container: textHost,

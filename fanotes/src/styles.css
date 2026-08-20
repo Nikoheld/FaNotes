@@ -1440,10 +1440,11 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   border-radius: 2px;
   background: #fff;
   box-shadow: 0 12px 34px rgba(29,31,42,.16);
-  content-visibility: auto;
   contain-intrinsic-size: 800px 1100px;
-  contain: layout paint style;
+  /* No `contain: paint` — that isolates native ::selection from the glyphs. */
 }
+.pdf-note-page.is-visible { content-visibility: visible; contain: none; }
+.pdf-note-page.is-virtualized { content-visibility: auto; contain: strict; }
 .pdf-note-page:last-child { margin-bottom: 0; }
 .pdf-note-page-label {
   position: absolute;
@@ -1461,14 +1462,33 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .pdf-note-page canvas { display: block; width: 100%; height: 100%; }
 .pdf-note-page.is-virtualized { background: #f4f5f8; }
 .pdf-note-text-layer {
+  /* pdf.js TextLayer contract: scale from the painted CSS box, not the canvas bitmap. */
+  --scale-factor: 1;
+  --user-unit: 1;
+  --total-scale-factor: calc(var(--scale-factor) * var(--user-unit));
+  --scale-round-x: 1px;
+  --scale-round-y: 1px;
+  --min-font-size: 1;
+  --text-scale-factor: calc(var(--total-scale-factor) * var(--min-font-size));
+  --min-font-size-inv: calc(1 / var(--min-font-size));
   position: absolute;
+  z-index: 1;
+  text-align: initial;
   inset: 0;
-  overflow: hidden;
+  overflow: clip;
   line-height: 1;
+  letter-spacing: normal;
+  word-spacing: normal;
   opacity: 1;
   pointer-events: auto;
-  --scale-factor: 1;
+  transform-origin: 0 0;
+  -webkit-text-size-adjust: none;
+  text-size-adjust: none;
+  caret-color: #20222c;
 }
+.pdf-note-text-layer[data-main-rotation="90"] { transform: rotate(90deg) translateY(-100%); }
+.pdf-note-text-layer[data-main-rotation="180"] { transform: rotate(180deg) translate(-100%, -100%); }
+.pdf-note-text-layer[data-main-rotation="270"] { transform: rotate(270deg) translateX(-100%); }
 .pdf-note-view.is-inking,
 .pdf-note-view.is-inking .pdf-note-body,
 .pdf-note-view.is-inking .pdf-note-pages,
@@ -1487,10 +1507,21 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   position: absolute;
   color: transparent;
   white-space: pre;
-  transform-origin: 0 0;
   cursor: text;
+  transform-origin: 0% 0%;
+  -webkit-user-select: text;
+  user-select: text;
 }
-.pdf-note-text-layer ::selection { background: color-mix(in srgb, var(--paper-accent-readable) 32%, transparent); }
+.pdf-note-text-layer > :not(.markedContent),
+.pdf-note-text-layer .markedContent span:not(.markedContent) {
+  --font-height: 0;
+  --scale-x: 1;
+  --rotate: 0deg;
+  font-size: calc(var(--text-scale-factor) * var(--font-height));
+  transform: rotate(var(--rotate)) scaleX(var(--scale-x)) scale(var(--min-font-size-inv));
+}
+.pdf-note-text-layer .markedContent { display: contents; }
+.pdf-note-text-layer ::selection { background: color-mix(in srgb, var(--paper-accent-readable) 38%, #7aa2ff 28%); }
 .pdf-note-sidebar {
   position: sticky;
   top: 62px;

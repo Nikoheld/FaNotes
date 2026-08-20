@@ -72,6 +72,42 @@ export const enqueuePdfRender = <T,>(job: () => Promise<T>): Promise<T> => {
   return run
 }
 
+/**
+ * Overlay scale pdf.js TextLayer expects: CSS-pixel page width / unscaled
+ * page width. Canvas bitmap may be DPR-capped; the selectable layer must
+ * still match the painted CSS box, not the backing-store size.
+ */
+export const pdfTextOverlayScale = (cssWidth: number, pageWidth: number) => {
+  if (!(cssWidth > 0) || !(pageWidth > 0)) return 1
+  return cssWidth / pageWidth
+}
+
+export const PDF_TEXT_OVERLAY_USER_UNIT = 1
+
+/** CSS variables pdf.js TextLayer reads when it sizes spans and the layer box. */
+export const pdfTextOverlayCssVars = (scale: number) => {
+  const safe = Number.isFinite(scale) && scale > 0 ? scale : 1
+  return {
+    '--scale-factor': String(safe),
+    '--user-unit': String(PDF_TEXT_OVERLAY_USER_UNIT),
+    '--total-scale-factor': String(safe * PDF_TEXT_OVERLAY_USER_UNIT),
+    '--scale-round-x': '1px',
+    '--scale-round-y': '1px',
+  } as const
+}
+
+export const applyPdfTextOverlayScale = (
+  layer: { style: { setProperty: (name: string, value: string) => void } },
+  cssWidth: number,
+  pageWidth: number,
+) => {
+  const scale = pdfTextOverlayScale(cssWidth, pageWidth)
+  for (const [name, value] of Object.entries(pdfTextOverlayCssVars(scale))) {
+    layer.style.setProperty(name, value)
+  }
+  return scale
+}
+
 export const paintSizeForPage = (cssWidth: number, cssHeight: number) => {
   let dpr = Math.min(Math.max(window.devicePixelRatio || 1, 1), MAX_PDF_DPR)
   let pixelWidth = Math.round(cssWidth * dpr)
