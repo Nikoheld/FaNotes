@@ -2,6 +2,8 @@
 
 ## Unveröffentlicht
 
+## 2026.8.52
+
 - **Ein Canvas:** Die gepunktete Fläche ist die Schreibfläche. Kein zweites Blatt drumherum. Du schreibst überall, wo die Punkte sind.
 
 ## 2026.8.51
