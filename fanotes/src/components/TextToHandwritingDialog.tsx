@@ -259,7 +259,7 @@ export function TextToHandwritingDialog({
 
         <aside className="lw-tth-preview">
           <div className="lw-tth-preview-head">
-            <div><strong>Live-Vorschau</strong><small>{result.glyphCount} Zeichen · {result.lineCount} Zeilen · {result.connectionCount} Verbindungen</small></div>
+            <div><strong>Live-Vorschau</strong><small>{`${result.glyphCount} Zeichen · ${result.lineCount} Zeilen · ${result.connectionCount} Verbindungen`}</small></div>
             <button type="button" onClick={() => setSeed(createHandwritingSeed())} disabled={!text.trim()} title="Alle Zeichen mit neuen natürlichen Abweichungen erzeugen">
               <RefreshCw size={15} /> Neu variieren
             </button>

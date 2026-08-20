@@ -36,7 +36,8 @@ let observer: MutationObserver | null = null
 let replacements: Array<[string, string]> = []
 let replacementExpression: RegExp | null = null
 let replacementPreparationScheduled = false
-const GERMAN_HINT = /[ÄÖÜäöüß]|\b(?:der|die|das|den|dem|des|ein|eine|einen|einem|und|oder|für|mit|ohne|von|bei|auf|aus|zu|zum|zur|dein|deine|wird|werden|ist|sind|nicht|noch|nur|alle|keine|bitte|schritt|willkommen|zurück|weiter|fertig|anpassung|optionen|blatt|schreibmodus|stiftmodus|werkzeuge|experimentell|verlinkung|sitzung|auspoppen)\b|Vault-Wurzel|(?:ung|keit|heit|lich|isch|ieren|zeichen|schrift|farbe|ordner|notiz|seite|speicher|erkenn|einstell)/iu
+const GERMAN_HINT = /[ÄÖÜäöüß]|\b(?:der|die|das|den|dem|des|ein|eine|einen|einem|und|oder|für|mit|ohne|von|bei|auf|aus|zu|zum|zur|dein|deine|wird|werden|ist|sind|nicht|noch|nur|alle|keine|bitte|schritt|willkommen|zurück|weiter|fertig|anpassung|optionen|blatt|schreibmodus|stiftmodus|werkzeuge|experimentell|verlinkung|sitzung|auspoppen|finde|pinsel|farben|piktogramme|bleistift|kalligrafie|textmarker|aquarell|deckkraft|verlauf|sammlung|ausgewogen|zeilenabstand|datenerfassung|muster|paket|modell|integriert|verbindungen|trainingspaket|aktueller|strich|frei|breite|erfassen)\b|Vault-Wurzel|(?:ung|keit|heit|lich|isch|ieren|zeichen|schrift|farbe|ordner|notiz|seite|speicher|erkenn|einstell)/iu
+const EXACT_ONLY_REPLACEMENTS = new Set(['Frei', 'Breite', 'Pinsel', 'Farben', 'Strich'])
 
 const textSnapshots = new WeakMap<Text, { source: string; translated: string }>()
 const attributeSnapshots = new WeakMap<Element, Map<string, AttributeSnapshot>>()
@@ -83,7 +84,7 @@ async function loadEnglishCatalog(): Promise<EnglishCatalog> {
 function prepareReplacementIndex() {
   if (!catalog || replacementExpression) return
   replacements = Object.entries(catalog)
-    .filter(([source, translated]) => source !== translated && source.length >= 4)
+    .filter(([source, translated]) => source !== translated && source.length >= 4 && !EXACT_ONLY_REPLACEMENTS.has(source))
     .sort(([left], [right]) => right.length - left.length)
   replacementExpression = new RegExp(replacements.map(([source]) => source.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')).join('|'), 'gu')
   if (activeLanguage === 'en') translateTree(document)
@@ -148,8 +149,13 @@ function translateCore(source: string): string {
   if (source === 'GlyphenWerk-Seitenleiste einklappen') return 'Collapse GlyphenWerk sidebar'
   if (source === 'Gliederung umschalten') return 'Toggle outline'
   if (source === 'Fineliner: klar & präzise') return 'Fineliner: clear & precise'
+  if (source === 'Bleistift: weich texturiert') return 'Pencil: softly textured'
   if (source === 'Marker: satt & gleichmässig') return 'Marker: bold & even'
+  if (source === 'Pinsel: dynamischer Druck') return 'Brush: dynamic pressure'
   if (source === 'Kalligrafie: schräge Breitfeder') return 'Calligraphy: angled broad nib'
+  if (source === 'Textmarker: transparent') return 'Highlighter: transparent'
+  if (source === 'Aquarell: lasierende Kanten') return 'Watercolor: glazing edges'
+  if (source === 'Spray: feine Partikel') return 'Spray: fine particles'
   if (source === 'Zeichen & Varianten erfassen') return 'Capture symbols & variants'
   if (source === 'Zurück zu Fächern & Notizen') return 'Back to folders & notes'
   if (source === 'Verlinkung') return 'Link'
@@ -196,6 +202,33 @@ function translateCore(source: string): string {
   if (source === 'Sitzungscode') return 'Session code'
   if (source === 'Fehler melden') return 'Report a bug'
   if (source === 'Blatt') return 'Sheet'
+  if (source === 'Finde alles wieder') return 'Find everything again'
+  if (source === 'Pinsel') return 'Brush'
+  if (source === 'Farben') return 'Colors'
+  if (source === 'Piktogramme') return 'Pictograms'
+  if (source === 'Bleistift') return 'Pencil'
+  if (source === 'Kalligrafie') return 'Calligraphy'
+  if (source === 'Textmarker') return 'Highlighter'
+  if (source === 'Aquarell') return 'Watercolor'
+  if (source === 'Breite') return 'Width'
+  if (source === 'Deckkraft') return 'Opacity'
+  if (source === 'Aktueller Strich') return 'Current stroke'
+  if (source === 'Strich') return 'Stroke'
+  if (source === '1 Strich') return '1 stroke'
+  if (/^\d+ Striche$/u.test(source)) return source.replace('Striche', 'strokes')
+  if (source === 'Zeilenabstand') return 'Line spacing'
+  if (source === 'Datenerfassung') return 'Data capture'
+  if (source === 'Frei') return 'Free'
+  if (source === 'Ausgewogen') return 'Balanced'
+  if (source === 'Sammlung') return 'Collection'
+  if (source === 'Erkennung testen') return 'Test recognition'
+  if (source === 'Exportieren') return 'Export'
+  if (source === 'In FaNotes integriert') return 'Built into FaNotes'
+  if (source === 'Training & Modell' || source === 'Training &amp; Modell') return 'Training & model'
+  if (source === 'Trainingspaket') return 'Training package'
+  if (source === 'Icons & Piktogramme' || source === 'Icons &amp; Piktogramme') return 'Icons & pictograms'
+  if (source === 'Was steckt im Paket?') return 'What is in the package?'
+  if (source === 'Zeichenstudio') return 'Art studio'
   if (source === 'Blatt im Uhrzeigersinn drehen') return 'Rotate the sheet clockwise'
   if (source === 'Blatt gegen den Uhrzeigersinn drehen') return 'Rotate the sheet counterclockwise'
   if (source === 'Schreibmodus') return 'Writing mode'
@@ -239,6 +272,50 @@ function translateCore(source: string): string {
   if (bookNamed) return `Book ${bookNamed[1]}`
   const pdfPageNamed = /^PDF-Seite (\d+)$/u.exec(source)
   if (pdfPageNamed) return `PDF page ${pdfPageNamed[1]}`
+  const inHistory = /^(\d+) im Verlauf$/u.exec(source)
+  if (inHistory) {
+    const count = Number(inHistory[1])
+    return `${count} in history`
+  }
+  const glyphenwerkStatus = /^GlyphenWerk · (.+)$/u.exec(source)
+  if (glyphenwerkStatus) {
+    const view = catalog[glyphenwerkStatus[1]] ?? (
+      glyphenwerkStatus[1] === 'Erkennung testen' ? 'Test recognition'
+        : glyphenwerkStatus[1] === 'Sammlung' ? 'Collection'
+          : glyphenwerkStatus[1] === 'Exportieren' ? 'Export'
+            : glyphenwerkStatus[1] === 'Training' ? 'Training'
+              : glyphenwerkStatus[1]
+    )
+    return `GlyphenWerk · ${view}`
+  }
+  if (source === 'Schreibe „') return 'Write “'
+  const writeGlyph = /^Schreibe „(.+)“$/u.exec(source)
+  if (writeGlyph) return `Write “${writeGlyph[1]}”`
+  const namedColor = /^Farbe (.+)$/u.exec(source)
+  if (namedColor) return `Color ${namedColor[1]}`
+  const artColor = /^Zeichenfarbe (.+)$/u.exec(source)
+  if (artColor) return `Drawing color ${artColor[1]}`
+  const specialInk = /^(.+) Spezialtinte$/u.exec(source)
+  if (specialInk) return `${catalog[specialInk[1]] ?? specialInk[1]} special ink`
+  const insertNamed = /^(.+) einfügen$/u.exec(source)
+  if (insertNamed) return `Insert ${catalog[insertNamed[1]] ?? insertNamed[1]}`
+  const tthPreview = /^(\d+) Zeichen · (\d+) Zeilen · (\d+) Verbindungen$/u.exec(source)
+  if (tthPreview) {
+    const glyphs = Number(tthPreview[1])
+    const lines = Number(tthPreview[2])
+    const joins = Number(tthPreview[3])
+    return `${glyphs} ${glyphs === 1 ? 'character' : 'characters'} · ${lines} ${lines === 1 ? 'line' : 'lines'} · ${joins} ${joins === 1 ? 'connection' : 'connections'}`
+  }
+  const patternCount = /^(\d+) Muster$/u.exec(source)
+  if (patternCount) {
+    const count = Number(patternCount[1])
+    return `${count} ${count === 1 ? 'pattern' : 'patterns'}`
+  }
+  const activeSamples = /^(\d+) Beispiele direkt in FaNotes aktiv$/u.exec(source)
+  if (activeSamples) {
+    const count = Number(activeSamples[1])
+    return `${count} ${count === 1 ? 'sample' : 'samples'} active directly in FaNotes`
+  }
   const canvasWith = /^Zeichenfläche mit (.+)$/u.exec(source)
   if (canvasWith) return `Canvas with ${canvasWith[1]}`
   const currentVersion = /^(FaNotes(?: Web)? \d+(?:\.\d+){2}(?:-beta\.\d+)?) ist aktuell$/u.exec(source)

@@ -8,8 +8,8 @@ const appRoot = fileURLToPath(new URL('..', import.meta.url))
 const require = createRequire(import.meta.url)
 const { localizeText } = require('../electron/i18n.cjs')
 
-const GERMAN_HINT = /[ÄÖÜäöüß]|(?:ung|keit|heit|lich|ieren)|\b(?:der|die|das|und|oder|für|mit|ohne|von|bei|auf|aus|zu|bitte|zurück|weiter|fertig|sitzung|buch|fach|notiz|ordner|seite|stift|handschrift|einstell|erkenn|speicher|öffnen|schließen|hinzufügen|entfernen|standard|experimentell|verlinkung|auspoppen|anpassung|optionen|blatt|schreibmodus|stiftmodus|werkzeuge)\b|Vault-Wurzel/iu
-const GERMAN_LEFTOVER = /[ÄÖÜäöüß]|\b(?:der|die|das|und|oder|für|ohne|bitte|zurück|weiter|fertig|sitzung|experimentell|verlinkung|auspoppen|anpassung|optionen|blatt|schreibmodus|stiftmodus|werkzeuge)\b|Vault-Wurzel/iu
+const GERMAN_HINT = /[ÄÖÜäöüß]|(?:ung|keit|heit|lich|ieren)|\b(?:der|die|das|und|oder|für|mit|ohne|von|bei|auf|aus|zu|bitte|zurück|weiter|fertig|sitzung|buch|fach|notiz|ordner|seite|stift|handschrift|einstell|erkenn|speicher|öffnen|schließen|hinzufügen|entfernen|standard|experimentell|verlinkung|auspoppen|anpassung|optionen|blatt|schreibmodus|stiftmodus|werkzeuge|finde|pinsel|farben|piktogramme|bleistift|kalligrafie|textmarker|aquarell|deckkraft|verlauf|sammlung|ausgewogen|zeilenabstand|datenerfassung|muster|paket|modell|integriert|verbindungen|trainingspaket|aktueller|strich|frei|breite|erfassen)\b|Vault-Wurzel/iu
+const GERMAN_LEFTOVER = /[ÄÖÜäöüß]|\b(?:der|die|das|und|oder|für|ohne|bitte|zurück|weiter|fertig|sitzung|experimentell|verlinkung|auspoppen|anpassung|optionen|blatt|schreibmodus|stiftmodus|werkzeuge|finde|pinsel|farben|piktogramme|bleistift|kalligrafie|textmarker|aquarell|deckkraft|verlauf|sammlung|ausgewogen|zeilenabstand|datenerfassung|muster|paket|modell|integriert|verbindungen|trainingspaket|aktueller|strich|frei|breite|erfassen)\b|Vault-Wurzel/iu
 
 const CHROME_FILES = [
   'src/App.tsx',
@@ -21,6 +21,11 @@ const CHROME_FILES = [
   'src/components/BugReportModal.tsx',
   'src/components/SearchPanel.tsx',
   'src/components/PaperView.tsx',
+  'src/components/DrawingBoard.tsx',
+  'src/components/VaultOverview.tsx',
+  'src/components/TextToHandwritingDialog.tsx',
+  'src/components/GlyphenWerkWorkspace.tsx',
+  '../src/App.tsx',
   'src/lib/subjectBook.ts',
   'electron/main.cjs',
 ]
@@ -41,8 +46,8 @@ const harvest = () => {
       pattern.lastIndex = 0
       for (const match of text.matchAll(pattern)) found.add(match[1].trim())
     }
-    for (const required of ['Blatt', 'Schreibmodus', 'Stiftmodus', 'Werkzeuge', 'Vault-Wurzel', 'In Vault-Wurzel']) {
-      if (text.includes(`'${required}'`) || text.includes(`>${required}<`) || text.includes(`>${required}</`)) found.add(required)
+    for (const required of ['Blatt', 'Schreibmodus', 'Stiftmodus', 'Werkzeuge', 'Vault-Wurzel', 'In Vault-Wurzel', 'Finde alles wieder', 'Pinsel', 'Zeilenabstand', 'Datenerfassung', 'In FaNotes integriert', 'Aktueller Strich', 'Trainingspaket', 'Frei', 'Breite']) {
+      if (text.includes(`'${required}'`) || text.includes(`>${required}<`) || text.includes(`>${required}</`) || text.includes(`>${required}</strong>`) || text.includes(required)) found.add(required)
     }
   }
   return [...found].filter((value) => (
@@ -135,6 +140,16 @@ const runOnce = async () => {
   assert.ok(harvested.includes('Stiftmodus'), 'harvest missed Stiftmodus status chrome')
   assert.ok(harvested.includes('Werkzeuge'), 'harvest missed Werkzeuge palette group')
   assert.ok(harvested.includes('Vault-Wurzel'), 'harvest missed Vault-Wurzel palette detail')
+  assert.ok(harvested.includes('Finde alles wieder'), 'harvest missed search empty-state')
+  assert.ok(harvested.includes('Pinsel'), 'harvest missed art-studio Pinsel')
+  assert.ok(harvested.includes('Zeilenabstand'), 'harvest missed handwriting dialog Zeilenabstand')
+  assert.ok(harvested.includes('Datenerfassung'), 'harvest missed GlyphenWerk Datenerfassung')
+  assert.match(readFileSync(new URL('../../src/App.tsx', import.meta.url), 'utf8'), /\{`Schreibe „\$\{selectedLabel\.char\}“`\}/)
+  assert.ok(harvested.includes('In FaNotes integriert'), 'harvest missed GlyphenWerk shell integriert')
+  assert.ok(harvested.includes('Aktueller Strich'), 'harvest missed art-studio current stroke')
+  assert.ok(harvested.includes('Trainingspaket'), 'harvest missed GlyphenWerk Trainingspaket')
+  assert.ok(harvested.includes('Frei'), 'harvest missed GlyphenWerk Frei capture mode')
+  assert.ok(harvested.includes('Breite'), 'harvest missed drawing Breite control')
   assert.ok(harvested.includes('Send Data') || harvested.includes('Notiz-Backup'), 'harvest missed experimental chrome')
   assert.ok(harvested.some((value) => value.includes('Buch')), 'harvest missed book chrome')
   assert.ok(harvested.some((value) => /Verlinkung|Backup|Remote Support/u.test(value)), 'harvest missed recent chrome')

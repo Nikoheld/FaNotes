@@ -1207,7 +1207,7 @@ const App = () => {
                   {!canvasState.hasInk && (
                     <div className="canvas-placeholder" aria-hidden="true">
                       <span><Icon name="pen" size={24} /></span>
-                      <strong>Schreibe „{selectedLabel.char}“</strong>
+                      <strong>{`Schreibe „${selectedLabel.char}“`}</strong>
                       <small>Mit Stift oder Maus · Trackpad scrollt</small>
                     </div>
                   )}
@@ -1615,7 +1615,7 @@ const App = () => {
                     <div><span className="file-icon image">PNG</span><div><strong>images/</strong><p>Zentrierte Einzelzeichen, schwarz auf weiß</p></div><em>{samples.length} Dateien</em></div>
                     <div><span className="file-icon json">{'{ }'}</span><div><strong>manifest.jsonl</strong><p>Druck, Neigung, Zeit und normalisierte Strichpunkte</p></div><Icon name="check" size={18} /></div>
                     <div><span className="file-icon csv">CSV</span><div><strong>labels.csv</strong><p>Direkte Zuordnung von Bild zu Trainingsklasse</p></div><Icon name="check" size={18} /></div>
-                    <div><span className="file-icon json">XY</span><div><strong>layout_examples.jsonl</strong><p>Trainierte Ober-/Untergrenzen und Hoch-/Tiefindizes</p></div><em>{mathLayoutExamples.length} Muster</em></div>
+                    <div><span className="file-icon json">XY</span><div><strong>layout_examples.jsonl</strong><p>Trainierte Ober-/Untergrenzen und Hoch-/Tiefindizes</p></div><em>{`${mathLayoutExamples.length} Muster`}</em></div>
                     <div><span className="file-icon txt">TXT</span><div><strong>README.txt</strong><p>Hinweise für Split und Weiterverarbeitung</p></div><Icon name="check" size={18} /></div>
                   </div>
                 </article>
