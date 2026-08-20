@@ -1,3 +1,4 @@
+import { APP_VERSION } from './appVersion'
 import { DEFAULT_SETTINGS } from '../defaults'
 import { getUiLanguage } from '../i18n'
 import type { AppSettings, DrawingLibraryDocument, FaNotesApi, UpdateState, VaultEntry, WorksheetDocument } from '../types'
@@ -117,6 +118,7 @@ export const BROWSER_STARTER_SUBJECTS = [
   { name: 'AMAT', color: '#9a7cff' },
   { name: 'Deutsch', color: '#ef7aa8' },
   { name: 'Englisch', color: '#45c9b7' },
+  { name: 'Französisch', color: '#3d8be0' },
   { name: 'Physik', color: '#b878eb' },
   { name: 'Chemie', color: '#f09a5d' },
   { name: 'Biologie', color: '#55cfa8' },
@@ -129,6 +131,7 @@ export const BROWSER_STARTER_SUBJECTS_EN = [
   { name: 'AMAT', color: '#9a7cff' },
   { name: 'German', color: '#ef7aa8' },
   { name: 'English', color: '#45c9b7' },
+  { name: 'French', color: '#3d8be0' },
   { name: 'Physics', color: '#b878eb' },
   { name: 'Chemistry', color: '#f09a5d' },
   { name: 'Biology', color: '#55cfa8' },
@@ -189,8 +192,8 @@ export function createBrowserPreviewApi(): FaNotesApi {
   const updateState: UpdateState = {
     status: 'up-to-date',
     supported: false,
-    currentVersion: '2026.7.4-beta.10',
-    latestVersion: '2026.7.4-beta.10',
+    currentVersion: APP_VERSION,
+    latestVersion: APP_VERSION,
     publishedAt: new Date().toISOString(),
     releaseNotes: [],
     downloadedBytes: 0,
@@ -244,6 +247,39 @@ export function createBrowserPreviewApi(): FaNotesApi {
       return content
     },
     readAssetDataUrl: async (path) => assets.get(path) ?? '',
+    readFamdInk: async () => null,
+    readNotePaperStyle: async () => null,
+    setNotePaperStyle: async (_path, paperStyle) => paperStyle,
+    readNoteLinks: async () => [],
+    writeNoteLinks: async (_path, links) => links,
+    readNoteBackups: async () => [],
+    writeNoteBackups: async (_path, backups) => backups,
+    readSubjectBooks: async () => [],
+    writeSubjectBooks: async (books) => books,
+    importSubjectBook: async () => null,
+    openSubjectBookPopout: async (path) => ({ open: true, bookPath: path }),
+    closeSubjectBookPopout: async () => ({ open: false }),
+    onSubjectBookPopoutClosed: () => () => {},
+    readAssetBytes: async (path) => {
+      const source = assets.get(path) ?? ''
+      if (!source) throw new Error('Die lokale Bild- oder PDF-Datei wurde nicht gefunden.')
+      if (source.startsWith('data:')) {
+        const comma = source.indexOf(',')
+        if (comma < 0) throw new Error('Ungültige Data-URL.')
+        const header = source.slice(0, comma)
+        const body = source.slice(comma + 1)
+        if (/;base64/iu.test(header)) {
+          const binary = atob(body)
+          const bytes = new Uint8Array(binary.length)
+          for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index)
+          return bytes
+        }
+        return new TextEncoder().encode(decodeURIComponent(body))
+      }
+      const response = await fetch(source)
+      if (!response.ok) throw new Error(`Datei konnte nicht geladen werden (HTTP ${response.status}).`)
+      return new Uint8Array(await response.arrayBuffer())
+    },
     loadSpellingResources: loadBrowserSpellingResources,
     loadSpellingWordCandidates: loadBrowserSpellingWordCandidates,
     loadHandwritingRecognitionResources: loadBrowserHandwritingRecognitionResources,
@@ -269,6 +305,46 @@ export function createBrowserPreviewApi(): FaNotesApi {
       const parent = path.split('/').slice(0, -1).join('/')
       const next = [parent, nextName].filter(Boolean).join('/')
       if (files.has(path)) { const content = files.get(path)!; files.delete(path); files.set(next.toLowerCase().endsWith('.md') ? next : `${next}.md`, content); return next.toLowerCase().endsWith('.md') ? next : `${next}.md` }
+      const movedFolders = [...folders].filter((candidate) => candidate === path || candidate.startsWith(`${path}/`))
+      movedFolders.forEach((candidate) => {
+        folders.delete(candidate)
+        folders.add(candidate === path ? next : `${next}${candidate.slice(path.length)}`)
+      })
+      const movedFiles = [...files.entries()].filter(([candidate]) => candidate.startsWith(`${path}/`))
+      movedFiles.forEach(([candidate, content]) => {
+        files.delete(candidate)
+        files.set(`${next}${candidate.slice(path.length)}`, content)
+      })
+      const movedColors = [...folderColors.entries()].filter(([candidate]) => candidate === path || candidate.startsWith(`${path}/`))
+      movedColors.forEach(([candidate, color]) => {
+        folderColors.delete(candidate)
+        folderColors.set(candidate === path ? next : `${next}${candidate.slice(path.length)}`, color)
+      })
+      return next
+    },
+    moveEntry: async (path, rawDestFolder) => {
+      const dest = typeof rawDestFolder === 'string' ? rawDestFolder.replace(/^\/+|\/+$/gu, '') : ''
+      if (dest && !folders.has(dest)) throw new Error('Der Zielordner wurde nicht gefunden.')
+      if (dest === path || dest.startsWith(`${path}/`)) throw new Error('Ein Ordner kann nicht in sich selbst verschoben werden.')
+      const parent = path.split('/').slice(0, -1).join('/')
+      if (parent === dest) return path
+      const name = path.split('/').pop() || path
+      const nextPreferred = [dest, name].filter(Boolean).join('/')
+      const exists = (candidate: string) => files.has(candidate) || folders.has(candidate)
+      let next = nextPreferred
+      if (exists(next)) {
+        const extension = name.includes('.') ? name.slice(name.lastIndexOf('.')) : ''
+        const base = extension ? name.slice(0, -extension.length) : name
+        let index = 2
+        while (exists([dest, `${base} ${index}${extension}`].filter(Boolean).join('/'))) index += 1
+        next = [dest, `${base} ${index}${extension}`].filter(Boolean).join('/')
+      }
+      if (files.has(path)) {
+        const content = files.get(path)!
+        files.delete(path)
+        files.set(next, content)
+        return next
+      }
       const movedFolders = [...folders].filter((candidate) => candidate === path || candidate.startsWith(`${path}/`))
       movedFolders.forEach((candidate) => {
         folders.delete(candidate)
@@ -342,6 +418,7 @@ export function createBrowserPreviewApi(): FaNotesApi {
       if (!drawing) throw new Error('Zeichnung nicht gefunden.')
       return { ...drawing }
     },
+    importPdfNote: async () => null,
     importWorksheet: async () => {
       const id = crypto.randomUUID()
       const now = new Date().toISOString()
@@ -374,6 +451,14 @@ export function createBrowserPreviewApi(): FaNotesApi {
       const saved = { ...structuredClone(document), updatedAt: new Date().toISOString() }
       worksheets.set(document.id, saved)
       return structuredClone(saved)
+    },
+    deleteWorksheet: async (id) => {
+      const document = worksheets.get(id)
+      if (document) {
+        worksheets.delete(id)
+        assets.delete(document.sourceRelativePath)
+      }
+      return { id }
     },
     lmStudioListModels: async () => [{
       key: 'fanotes/demo-local-8b',

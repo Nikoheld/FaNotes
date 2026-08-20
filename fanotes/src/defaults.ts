@@ -1,11 +1,13 @@
 import type { AppSettings } from './types'
+import { defaultPenOnlyForPlatform } from './lib/inkPointerPolicy'
 
-export const DEFAULT_SETTINGS: AppSettings = {
+/** Factory defaults for a desktop/web platform. Pass `window.fanotes.platform`. */
+export const defaultSettingsForPlatform = (platform: string | undefined): AppSettings => ({
   uiLanguage: 'system',
   theme: 'dark',
-  workspaceBackground: 'gradient',
-  accent: '#8b7cff',
-  accentSecondary: '#45c9b7',
+  workspaceBackground: 'clean',
+  accent: '#7f6df2',
+  accentSecondary: '#8a5cf5',
   uiFont: "'DM Sans', ui-sans-serif, system-ui",
   editorFont: "'JetBrains Mono', ui-monospace, monospace",
   editorFontSize: 16,
@@ -20,8 +22,10 @@ export const DEFAULT_SETTINGS: AppSettings = {
   sidebarWidth: 286,
   rightPanelWidth: 286,
   compactMode: false,
-  glassEffects: true,
+  glassEffects: false,
   reduceMotion: false,
+  viewZoomSpeed: 5,
+  viewZoomMax: 325,
   showWordCount: true,
   showOutline: true,
   defaultFolder: 'Eingang',
@@ -31,8 +35,10 @@ export const DEFAULT_SETTINGS: AppSettings = {
   penColor: '#202333',
   penWidth: 3.5,
   pressureEnabled: true,
+  penOnly: defaultPenOnlyForPlatform(platform),
   smoothing: 0.68,
   scribbleEraseSensitivity: 50,
+  shapeSnapSensitivity: 50,
   recognitionMode: 'auto',
   lastRecognitionMode: 'text',
   recognitionLanguage: 'de',
@@ -45,6 +51,19 @@ export const DEFAULT_SETTINGS: AppSettings = {
   memoryBudgetMb: 0,
   ocrThreadLimit: 0,
   desktopOcrModel: 'extended',
+  enhancedMathRecognition: false,
+  enhancedMathLicenseAccepted: false,
+  qwenVisionRecognition: false,
+  qwenVisionLicenseAccepted: false,
+  experimentalHandwritingToText: false,
+  experimentalHandwritingToTextSeenVersion: '',
+  experimentalHomeworkApi: false,
+  experimentalRemoteSupport: false,
+  experimentalNoteBackup: false,
+  experimentalSendData: false,
+  lastOpenNotePath: '',
+  homeworkApiChannelId: '',
+  homeworkApiSecret: '',
   ocrModelKeepAliveSeconds: 120,
   backgroundTaskLimit: 0,
   lmStudioBaseUrl: 'http://127.0.0.1:1234',
@@ -65,4 +84,6 @@ export const DEFAULT_SETTINGS: AppSettings = {
   openCodeUsername: 'opencode',
   openCodePassword: '',
   customCss: '',
-}
+})
+
+export const DEFAULT_SETTINGS: AppSettings = defaultSettingsForPlatform('')

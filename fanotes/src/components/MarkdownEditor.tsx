@@ -53,6 +53,12 @@ import {
 import { highlightSelectionMatches, search, searchKeymap } from '@codemirror/search'
 import type { AppSettings, DetectedTextLanguage } from '../types'
 import { createTrailingValueScheduler, type TrailingValueScheduler } from '../lib/trailingValueScheduler'
+import {
+  handlePaperEditorScroll,
+  lockPaperEditorScrollIfNeeded,
+  resolvePaperCaretScroller,
+} from '../lib/paperCaretScroll'
+import { revealDocumentLine } from '../lib/noteOutline'
 
 const LazyMarkdownPreview = lazy(() => import('./MarkdownPreview').then((module) => ({
   default: module.MarkdownPreview,
@@ -117,6 +123,7 @@ export type MarkdownEditorHandle = {
   format: (action: MarkdownFormatAction) => boolean
   focus: () => void
   flushChanges: () => void
+  revealLine: (line: number) => boolean
 }
 
 function commitEditorChange(
@@ -580,6 +587,7 @@ const buildLivePreviewDecorations = (view: EditorView) => {
         }
         const active = activeLines.has(line.number)
         const metadata = /^\s*<!--\s*fanotes-(?:ink|worksheet):[a-zA-Z0-9_-]{1,96}\s*-->\s*$/u.exec(line.text)
+          || /^\s*<!--\s*fanotes-famd:v1\b/u.test(line.text)
         const heading = /^(\s*)(#{1,6})\s+/u.exec(line.text)
         const quote = /^(\s*)>\s?/u.exec(line.text)
         const rule = /^\s*(?:-{3,}|\*{3,}|_{3,})\s*$/u.test(line.text)
@@ -652,7 +660,7 @@ function spellingExtensions(onLanguageDetected: (language: DetectedTextLanguage)
 
     update(update: ViewUpdate) {
       if (update.docChanged) this.schedule(update.view, 360)
-      else if (update.viewportChanged || update.selectionSet) this.schedule(update.view, 90)
+      else if (update.viewportChanged || update.selectionSet) this.schedule(update.view, 220)
     }
 
     private cancelScheduled() {
@@ -754,6 +762,7 @@ function spellingExtensions(onLanguageDetected: (language: DetectedTextLanguage)
 function editorAppearance(
   settings: MarkdownEditorSettings,
   dark: boolean,
+  paperMode = false,
 ): Extension {
   const surface = EditorView.theme(
     {
@@ -765,7 +774,7 @@ function editorAppearance(
       },
       '&.cm-focused': { outline: 'none' },
       '.cm-scroller': {
-        overflow: 'auto',
+        overflow: paperMode ? 'hidden' : 'auto',
         fontFamily: settings.editorFont,
         lineHeight: String(settings.lineHeight),
       },
@@ -898,6 +907,8 @@ const selectionDragAutoScroll = ViewPlugin.fromClass(class {
   }
 
   private scrollContainer = () => {
+    const paper = resolvePaperCaretScroller(this.view.dom)
+    if (paper) return paper
     let candidate: HTMLElement | null = this.view.scrollDOM
     while (candidate) {
       const overflowY = window.getComputedStyle(candidate).overflowY
@@ -955,6 +966,34 @@ const selectionDragAutoScroll = ViewPlugin.fromClass(class {
   }
 })
 
+const paperCaretLock = ViewPlugin.fromClass(class {
+  constructor(readonly view: EditorView) {
+    this.view.scrollDOM.addEventListener('scroll', this.onEditorLayerScroll)
+  }
+
+  private onEditorLayerScroll = () => {
+    lockPaperEditorScrollIfNeeded(
+      this.view.dom,
+      this.view.coordsAtPos(this.view.state.selection.main.head),
+    )
+  }
+
+  update(update: ViewUpdate) {
+    lockPaperEditorScrollIfNeeded(
+      update.view.dom,
+      update.view.coordsAtPos(update.state.selection.main.head),
+    )
+  }
+
+  destroy() {
+    this.view.scrollDOM.removeEventListener('scroll', this.onEditorLayerScroll)
+  }
+})
+
+const paperScrollHandler = EditorView.scrollHandler.of((view, range) => (
+  handlePaperEditorScroll(view, range)
+))
+
 export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(function MarkdownEditor({
   content,
   onChange,
@@ -1003,6 +1042,18 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
     },
     focus: () => viewRef.current?.focus(),
     flushChanges: () => changeSchedulerRef.current?.flush(),
+    revealLine: (line) => {
+      const view = viewRef.current
+      if (!view) return false
+      const target = revealDocumentLine(view.state.doc, line)
+      if (!target) return false
+      view.dispatch({
+        selection: EditorSelection.cursor(target.from),
+        effects: EditorView.scrollIntoView(target.from, { y: 'start', yMargin: 48 }),
+      })
+      view.focus()
+      return true
+    },
   }), [readOnly])
 
   useEffect(() => {
@@ -1037,6 +1088,8 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
         foldGutter(),
         drawSelection(),
         selectionDragAutoScroll,
+        paperCaretLock,
+        paperScrollHandler,
         dropCursor(),
         EditorState.allowMultipleSelections.of(true),
         indentOnInput(),
@@ -1063,7 +1116,7 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
           ...foldKeymap,
           ...completionKeymap,
         ]),
-        compartments.appearance.of(editorAppearance(settings, dark)),
+        compartments.appearance.of(editorAppearance(settings, dark, paperMode)),
         compartments.lineNumbers.of(lineNumberExtensions(settings.showLineNumbers)),
         compartments.contentAttributes.of(
           EditorView.contentAttributes.of({
@@ -1116,7 +1169,7 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
     }
     view.dispatch({
       effects: [
-        compartments.appearance.reconfigure(editorAppearance(settings, dark)),
+        compartments.appearance.reconfigure(editorAppearance(settings, dark, paperMode)),
         compartments.lineNumbers.reconfigure(
           lineNumberExtensions(settings.showLineNumbers),
         ),

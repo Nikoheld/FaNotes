@@ -11,6 +11,49 @@ const workspaceRoot = path.resolve(appRoot, '..')
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'fanotes-connected-recognition-'))
 const output = path.join(temporary, 'dist')
 const profile = path.join(temporary, 'chromium')
+const parsedWallTimeout = Number.parseInt(process.env.FANOTES_TEST_WALL_TIMEOUT_MS ?? '90000', 10)
+const chromiumWallTimeout = Number.isFinite(parsedWallTimeout)
+  ? Math.min(180_000, Math.max(15_000, parsedWallTimeout))
+  : 90_000
+let chromium
+
+const terminateChromiumTree = (signal) => {
+  if (!chromium?.pid || chromium.exitCode !== null || chromium.signalCode !== null) return
+  try {
+    if (process.platform === 'win32') chromium.kill(signal)
+    else process.kill(-chromium.pid, signal)
+  } catch (error) {
+    if (error?.code !== 'ESRCH') throw error
+  }
+}
+
+const waitForChromium = () => new Promise((resolve, reject) => {
+  let timedOut = false
+  let forceKillTimer
+  const wallTimer = setTimeout(() => {
+    timedOut = true
+    terminateChromiumTree('SIGTERM')
+    forceKillTimer = setTimeout(() => {
+      terminateChromiumTree('SIGKILL')
+      chromium.stdout.destroy()
+      chromium.stderr.destroy()
+      chromium.unref()
+      reject(new Error(`Chromium-Erkennungstest überschritt das Wall-Clock-Limit von ${chromiumWallTimeout} ms.`))
+    }, 2_000)
+  }, chromiumWallTimeout)
+  chromium.once('error', (error) => {
+    clearTimeout(wallTimer)
+    clearTimeout(forceKillTimer)
+    reject(error)
+  })
+  chromium.once('close', (code) => {
+    clearTimeout(wallTimer)
+    clearTimeout(forceKillTimer)
+    if (timedOut) {
+      reject(new Error(`Chromium-Erkennungstest überschritt das Wall-Clock-Limit von ${chromiumWallTimeout} ms.`))
+    } else resolve(code)
+  })
+})
 
 try {
   await build({
@@ -26,29 +69,98 @@ try {
       },
     },
   })
-  fs.writeFileSync(path.join(output, 'index.html'), '<!doctype html><html><body><script type="module" src="./harness.js"></script></body></html>')
-  const chromium = spawn('chromium', [
+  const prefixOnlyBootstrap = process.env.FANOTES_PREFIX_ONLY === '1'
+    ? '<script>globalThis.__FANOTES_PREFIX_ONLY__=true</script>'
+    : ''
+  fs.writeFileSync(path.join(output, 'index.html'), `<!doctype html><html><body>${prefixOnlyBootstrap}<script type="module" src="./harness.js"></script></body></html>`)
+  chromium = spawn('chromium', [
     '--headless=new', '--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage',
     `--js-flags=--max-old-space-size=${process.env.FANOTES_TEST_HEAP_MB || '768'}`,
     '--allow-file-access-from-files', `--user-data-dir=${profile}`, '--virtual-time-budget=30000',
     '--dump-dom', pathToFileURL(path.join(output, 'index.html')).href,
-  ], { stdio: ['ignore', 'pipe', 'pipe'] })
+  ], {
+    stdio: ['ignore', 'pipe', 'pipe'],
+    // Chromium creates renderer children. A dedicated process group lets the
+    // wall-clock watchdog terminate the complete tree instead of leaving a
+    // renderer behind to fill RAM and swap after a failed test.
+    detached: process.platform !== 'win32',
+  })
   let stdout = ''
   let stderr = ''
   chromium.stdout.on('data', (chunk) => { stdout += chunk })
   chromium.stderr.on('data', (chunk) => { stderr += chunk })
-  const exitCode = await new Promise((resolve) => chromium.on('close', resolve))
+  const exitCode = await waitForChromium()
   assert.equal(exitCode, 0, `Chromium konnte die Erkennungsprüfung nicht ausführen: ${stderr}`)
   const error = /<pre id="error">([\s\S]*?)<\/pre>/u.exec(stdout)?.[1]
   assert.equal(error, undefined, error)
   const encoded = /<pre id="result">([\s\S]*?)<\/pre>/u.exec(stdout)?.[1]
   assert.ok(encoded, `Kein Ergebnis der verbundenen Erkennung: ${stdout.slice(-1000)}`)
   const result = JSON.parse(encoded.replaceAll('&quot;', '"').replaceAll('&amp;', '&'))
-  if (process.env.FANOTES_SEGMENTATION_DEBUG === '1') console.log(JSON.stringify({
+  if (process.env.FANOTES_SEGMENTATION_DEBUG === '1' && result.prefixOnly) {
+    console.log(JSON.stringify({
+      incrementalConnectedTextCases: result.incrementalConnectedTextCases,
+      realDoubleIntegralAutomatic: result.realDoubleIntegralAutomatic,
+      protectedMathCases: result.protectedMathCases.map((entry) => ({
+        name: entry.name,
+        mode: entry.mode,
+        value: entry.value,
+        textValue: entry.textValue,
+        textScore: entry.textScore,
+        mathScore: entry.mathScore,
+        textVisibleCharacters: entry.evidence.text.visibleCharacters,
+        textLetters: entry.evidence.text.letters,
+        mathDecisive: entry.evidence.math.decisiveStructure,
+        selectedTokens: entry.selectedTokens,
+      })),
+    }, null, 2))
+  }
+  if (result.prefixOnly) {
+    assert.deepEqual(
+      result.incrementalTextCases.map((entry) => ({
+        mode: entry.mode,
+        value: entry.value.toLocaleLowerCase('de'),
+      })),
+      result.incrementalTextCases.map((entry) => ({ mode: 'text', value: entry.expected })),
+      `Ein weicher Präfix muss t/te/tes/test vollständig im Textmodus halten: ${JSON.stringify(result.incrementalTextCases)}`,
+    )
+    assert.equal(result.incrementalTextRecovery.mode, 'text', JSON.stringify(result.incrementalTextRecovery))
+    assert.equal(result.incrementalTextRecovery.value.toLocaleLowerCase('de'), 'te')
+    assert.ok(
+      result.incrementalConnectedTextCases.every((entry) => entry.mode === 'text'),
+      `Eine kontinuierlich verbundene Buchstabenfolge darf zwischen Pen-Lifts nicht in Mathematik kippen: ${JSON.stringify(result.incrementalConnectedTextCases)}`,
+    )
+    const provisionalConnectedPair = result.incrementalConnectedTextCases[0]
+    assert.ok(
+      provisionalConnectedPair.evidence.text.visibleCharacters >= 2 &&
+      provisionalConnectedPair.evidence.text.letters === provisionalConnectedPair.evidence.text.visibleCharacters &&
+      provisionalConnectedPair.textCandidates.some((candidate) => candidate.value.toLocaleLowerCase('de') === 'te'),
+      `Vor dem ersten stabilen Präfix muss te als reine Buchstabenalternative erhalten bleiben: ${JSON.stringify(provisionalConnectedPair)}`,
+    )
+    assert.deepEqual(
+      result.incrementalConnectedTextCases.slice(1).map((entry) => entry.value.toLocaleLowerCase('de')),
+      ['tes', 'test'],
+      `Sobald ein echter stabiler Präfix existiert, müssen die verbundenen Fortsetzungen exakt lesbar sein: ${JSON.stringify(result.incrementalConnectedTextCases)}`,
+    )
+    assert.equal(
+      result.realDoubleIntegralAutomatic.mode,
+      'math',
+      `Der weiche Präfixpfad darf ein echtes Doppelintegral nicht in Text umwandeln: ${JSON.stringify(result.realDoubleIntegralAutomatic)}`,
+    )
+    assert.ok(
+      result.protectedMathCases.every((entry) => (
+        entry.mode === 'math' &&
+        entry.value === entry.expectedValue &&
+        entry.selectedTokens.some((token) => token.labelId === entry.expectedLabelId)
+      )),
+      `Echte breite Mathezeichen müssen mit altem T/t-Präfix semantisch unverändert bleiben: ${JSON.stringify(result.protectedMathCases)}`,
+    )
+    console.log('Fokussierte Präfixprüfung: gedruckte und verbundene t/te/tes/test bleiben Text; echte Integrale, Wurzeln und große Operatoren bleiben trotz altem T/t-Präfix semantisch korrekt.')
+  } else {
+    if (process.env.FANOTES_SEGMENTATION_DEBUG === '1') console.log(JSON.stringify({
     continuousGuidedPairs: result.continuousGuidedPairs,
     delayedAccessoryPair: result.delayedAccessoryPair,
     delayedOverhangingT: result.delayedOverhangingT,
-  }, null, 2))
+    }, null, 2))
   assert.equal(result.baseClusterCount, 1, 'Der verbundene Teststrich muss zunächst als eine physische Komponente vorliegen.')
   assert.ok(result.hypothesisSizes.includes(4), `Die Vier-Buchstaben-Hypothese fehlt: ${JSON.stringify({ sizes: result.hypothesisSizes, bounds: result.baseStrokeBounds, cuts: result.baseCutCandidates })}`)
   assert.ok(result.baselineTokenCount >= 3, `Das Standardmodell muss verbundene Tinte ohne Training auftrennen: ${JSON.stringify(result)}`)
@@ -312,7 +424,9 @@ try {
   assert.ok(result.standardCount > 300, 'Das erweiterte sofort nutzbare Standardmodell ist unvollständig.')
   console.log(`Erkennung geprüft: zero-shot ${result.zeroShotIsolated.length} Einzelbuchstaben, ${result.zeroShotWords.map((entry) => entry.recognized).join('/')}, ${result.zeroShotMath.length} Ziffern/Mathematiksymbole, ${result.zeroShotStructures.radical}, ${result.zeroShotStructures.fraction}; personalisiert ${result.largePersonalBenchmark.suppliedSamples} Text- und ${result.personalMathBenchmark.suppliedSamples} Mathematikbeispiele mit Holdouts, Rauschunterdrückung und Sequenzfusion.`)
   if (process.env.FANOTES_RECOGNITION_DEBUG === '1') console.log(JSON.stringify(result.baselineTokens, null, 2))
+  }
 } finally {
+  terminateChromiumTree('SIGKILL')
   fs.rmSync(temporary, {
     recursive: true,
     force: true,

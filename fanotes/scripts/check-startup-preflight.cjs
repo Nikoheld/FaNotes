@@ -7,8 +7,15 @@ const path = require('node:path')
 const {
   ALLOWED_MEMORY_BUDGETS_MB,
   cleanupStaleSingletonLocks,
+  configureDesktopGpu,
   configureLeanChromiumStartup,
+  applyLinuxOzoneLaunchEnvironment,
   configureLinuxGraphics,
+  configureLinuxInputPlatform,
+  linuxOzoneAppRunExecLine,
+  linuxOzoneDesktopExec,
+  linuxOzoneLaunchPlan,
+  linuxWindowFrameOptions,
   readStartupResourceLimits,
   VULKAN_FEATURES,
 } = require('../electron/startup-preflight.cjs')
@@ -112,11 +119,115 @@ try {
   )
   assert.equal(x11.getSwitchValue('use-angle'), '')
 
+  const ozone = mockCommandLine({ 'ozone-platform-hint': 'wayland', 'disable-features': 'ExistingFeature' })
+  const ozoneResult = configureLinuxInputPlatform({ commandLine: ozone }, { HOME: '' })
+  assert.equal(ozoneResult.ozone, 'x11')
+  assert.equal(ozone.getSwitchValue('ozone-platform'), 'x11')
+  assert.equal(ozone.getSwitchValue('ozone-platform-hint'), 'x11', 'a leftover Wayland hint must not keep Ozone on Wayland')
+  assert.equal(ozone.hasSwitch('force-device-scale-factor'), false, 'must not blindly force scale 2')
+
+  const hyprConfig = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'fanotes-hypr-')), 'hyprland.conf')
+  temporaryProfiles.push(path.dirname(hyprConfig))
+  fs.writeFileSync(hyprConfig, 'xwayland {\n  force_zero_scaling = true\n}\n')
+  const scaled = mockCommandLine()
+  const scaledResult = configureLinuxInputPlatform(
+    { commandLine: scaled },
+    { FANOTES_HYPRLAND_CONFIG: hyprConfig, HOME: '' },
+  )
+  assert.equal(scaledResult.hyprlandZeroScaling, true)
+  assert.equal(scaledResult.scaleFactor, 2)
+  assert.equal(scaled.getSwitchValue('force-device-scale-factor'), '2')
+
+  const sourcedDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fanotes-hypr-'))
+  temporaryProfiles.push(sourcedDir)
+  const sourcedMain = path.join(sourcedDir, 'hyprland.conf')
+  const sourcedExtra = path.join(sourcedDir, 'looks.conf')
+  fs.writeFileSync(sourcedMain, 'source = ./looks.conf\nmonitor = ,preferred,auto,2\n')
+  fs.writeFileSync(sourcedExtra, 'xwayland {\n  force_zero_scaling = true\n}\n')
+  const sourced = mockCommandLine()
+  const sourcedResult = configureLinuxInputPlatform(
+    { commandLine: sourced },
+    { FANOTES_HYPRLAND_CONFIG: sourcedMain, HOME: '' },
+  )
+  assert.equal(sourcedResult.hyprlandZeroScaling, true, 'force_zero_scaling in a sourced Hyprland file must apply')
+  assert.equal(sourced.getSwitchValue('force-device-scale-factor'), '2')
+
+  const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fanotes-hypr-home-'))
+  temporaryProfiles.push(homeDir)
+  const defaultHypr = path.join(homeDir, '.config', 'hypr')
+  fs.mkdirSync(defaultHypr, { recursive: true })
+  fs.writeFileSync(path.join(defaultHypr, 'hyprland.conf'), 'source = ~/.config/hypr/monitors.conf\n')
+  fs.writeFileSync(path.join(defaultHypr, 'monitors.conf'), 'force_zero_scaling = true\n')
+  const homeScaled = mockCommandLine()
+  const homeResult = configureLinuxInputPlatform(
+    { commandLine: homeScaled },
+    { HOME: homeDir },
+  )
+  assert.equal(homeResult.hyprlandZeroScaling, true, 'the usual ~/.config/hypr source = include must apply')
+  assert.equal(homeScaled.getSwitchValue('force-device-scale-factor'), '2')
+
+  const commentedFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'fanotes-hypr-')), 'hyprland.conf')
+  temporaryProfiles.push(path.dirname(commentedFile))
+  fs.writeFileSync(commentedFile, '# force_zero_scaling = true\nsource = ./missing.conf\n')
+  const commented = mockCommandLine()
+  const commentedResult = configureLinuxInputPlatform(
+    { commandLine: commented },
+    { FANOTES_HYPRLAND_CONFIG: commentedFile, HOME: '' },
+  )
+  assert.equal(commentedResult.hyprlandZeroScaling, false, 'a commented force_zero_scaling line must not force scale 2')
+  assert.equal(commented.hasSwitch('force-device-scale-factor'), false)
+
+  const plainHypr = mockCommandLine()
+  const plainFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'fanotes-hypr-')), 'hyprland.conf')
+  temporaryProfiles.push(path.dirname(plainFile))
+  fs.writeFileSync(plainFile, 'xwayland {\n  force_zero_scaling = false\n}\n')
+  const plainResult = configureLinuxInputPlatform(
+    { commandLine: plainHypr },
+    { FANOTES_HYPRLAND_CONFIG: plainFile, HOME: '' },
+  )
+  assert.equal(plainResult.hyprlandZeroScaling, false)
+  assert.equal(plainResult.scaleFactor, null)
+  assert.equal(plainHypr.hasSwitch('force-device-scale-factor'), false)
+
+  const missingHypr = mockCommandLine()
+  const missingResult = configureLinuxInputPlatform(
+    { commandLine: missingHypr },
+    { HOME: path.join(os.tmpdir(), 'fanotes-no-hypr-home') },
+  )
+  assert.equal(missingResult.hyprlandZeroScaling, false)
+  assert.equal(missingHypr.hasSwitch('force-device-scale-factor'), false)
+
+  const chrome = linuxWindowFrameOptions()
+  assert.equal(chrome.frame, true, 'Hyprland must own the real window frame')
+  assert.equal(chrome.titleBarStyle, 'default', 'no custom in-app title bar')
+  assert.notEqual(chrome.titleBarStyle, 'hidden')
+  assert.equal(chrome.autoHideMenuBar, true)
+
+  const ozonePlan = linuxOzoneLaunchPlan()
+  assert.equal(ozonePlan.platform, 'x11')
+  assert.equal(ozonePlan.env.ELECTRON_OZONE_PLATFORM_HINT, 'x11')
+  assert.deepEqual(ozonePlan.argv, ['--ozone-platform=x11', '--ozone-platform-hint=x11'])
+  const launchEnv = {}
+  const launchArgv = ['fanotes']
+  const injected = applyLinuxOzoneLaunchEnvironment(launchEnv, launchArgv)
+  assert.equal(injected.ozone, 'x11')
+  assert.equal(launchEnv.ELECTRON_OZONE_PLATFORM_HINT, 'x11')
+  assert.deepEqual(launchArgv, ['fanotes', '--ozone-platform=x11', '--ozone-platform-hint=x11'])
+  assert.equal(
+    linuxOzoneAppRunExecLine('"${APPDIR}/fanotes"'),
+    'export ELECTRON_OZONE_PLATFORM_HINT=x11\nexec "${APPDIR}/fanotes" --ozone-platform=x11 --ozone-platform-hint=x11 "$@"',
+  )
+  assert.equal(linuxOzoneDesktopExec(), 'fanotes --ozone-platform=x11 --ozone-platform-hint=x11')
+
   const leanChromium = mockCommandLine({ 'disable-features': 'ExistingFeature' })
   configureLeanChromiumStartup({ commandLine: leanChromium })
   assert.equal(leanChromium.hasSwitch('disable-background-networking'), true)
   assert.equal(leanChromium.hasSwitch('disable-component-update'), true)
   assert.ok(leanChromium.getSwitchValue('disable-features').includes('OptimizationHints'))
+  const gpuChromium = mockCommandLine()
+  assert.equal(configureDesktopGpu({ commandLine: gpuChromium }).gpuRasterization, true)
+  assert.equal(gpuChromium.hasSwitch('enable-gpu-rasterization'), true)
+  assert.ok(gpuChromium.getSwitchValue('enable-features').includes('CanvasOopRasterization'))
 
   const resourceProfile = fs.mkdtempSync(path.join(os.tmpdir(), 'fanotes-resource-test-'))
   temporaryProfiles.push(resourceProfile)
@@ -138,17 +249,44 @@ try {
 
   const root = path.resolve(__dirname, '..')
   const mainSource = fs.readFileSync(path.join(root, 'electron', 'main.cjs'), 'utf8')
+  const installArch = fs.readFileSync(path.join(root, 'packaging', 'INSTALL_ARCH.md'), 'utf8')
+  const desktopSource = fs.readFileSync(path.join(root, 'packaging', 'fanotes.desktop'), 'utf8')
+  const pkgbuildSource = fs.readFileSync(path.join(root, 'packaging', 'PKGBUILD'), 'utf8')
+  const applyAt = mainSource.indexOf('applyLinuxOzoneLaunchEnvironment()')
+  const electronAt = mainSource.indexOf("require('electron')")
+  assert.ok(applyAt !== -1 && electronAt !== -1 && applyAt < electronAt, 'Ozone argv/env must be injected before require(electron)')
+  assert.match(desktopSource, new RegExp(`^Exec=${linuxOzoneDesktopExec().replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')}$`, 'mu'))
+  assert.match(pkgbuildSource, /ELECTRON_OZONE_PLATFORM_HINT=x11/u)
+  assert.match(pkgbuildSource, /--ozone-platform=x11 --ozone-platform-hint=x11/u)
+  assert.match(installArch, /Ozone X11/u, 'Arch notes must describe Ozone X11 as the Linux seat-sharing path')
+  assert.match(installArch, /source =/u, 'Arch notes must mention Hyprland source includes for force_zero_scaling')
+  assert.doesNotMatch(installArch, /Electron erkennt eine Wayland-Sitzung/u)
+  assert.doesNotMatch(installArch, /fanotes --ozone-platform=x11/u, 'X11 is the built-in default, not an optional fallback')
+  assert.match(mainSource, /configureLinuxInputPlatform\(app\)/)
+  assert.match(mainSource, /linuxWindowFrameOptions\(\)/, 'the shipped window chrome helper must create the Linux window')
+  assert.doesNotMatch(mainSource, /titleBarStyle:\s*'hidden'|titleBarOverlay/u, 'Hyprland decorations need the compositor-owned frame')
+  assert.doesNotMatch(mainSource, /evdev|uinput|virtual tablet/i)
   const preloadSource = fs.readFileSync(path.join(root, 'electron', 'preload.cjs'), 'utf8')
   const appSource = fs.readFileSync(path.join(root, 'src', 'App.tsx'), 'utf8')
   const packageMetadata = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'))
   assert.deepEqual(packageMetadata.build.asarUnpack, ['dist/ocr/pylaia-iam.onnx'])
   const hardeningSource = fs.readFileSync(path.join(root, 'scripts', 'harden-appimage.cjs'), 'utf8')
+  assert.match(hardeningSource, /linuxOzoneAppRunExecLine\(/u, 'AppRun must be generated from the shipped Ozone helper, not a copy')
+  assert.deepEqual(packageMetadata.build?.appImage?.executableArgs, [...ozonePlan.argv])
   assert.doesNotMatch(mainSource.slice(0, 4000), /require\('\.\/updater\.cjs'\)/u, 'Der Updater darf den Main-Prozess nicht vor dem Fenster blockieren.')
   assert.doesNotMatch(mainSource.slice(0, 4000), /onnxruntime-node/u, 'Die native OCR-Laufzeit darf nicht während des Starts geladen werden.')
   assert.match(mainSource, /function ensureUpdateManager\(\)[\s\S]*require\('\.\/updater\.cjs'\)/u)
+  assert.match(mainSource, /show:\s*false/u, 'Das Fenster darf nicht vor dem ersten gerenderten Frame aufblitzen.')
+  assert.match(mainSource, /ready-to-show/u, 'Das Fenster erscheint erst wenn der Renderer bereit ist.')
+  assert.match(mainSource, /configureDesktopGpu\(app\)/u, 'GPU-Rasterisierung muss vor dem Fenster aktiv sein.')
+  assert.match(mainSource, /render-process-gone/u, 'Ein abgestürztes Notizfenster muss sich selbst neu laden.')
+  assert.match(mainSource, /unhandledRejection/u, 'Unbehandelte Main-Promises dürfen den Prozess nicht still beenden.')
+  assert.match(mainSource, /const \{ createEnhancedMathService \} = require\('\.\/enhanced-math\.cjs'\)/u, 'Formel-OCR darf den Main-Prozess nicht vor der ersten Nutzung laden.')
+  assert.match(mainSource, /const \{ createQwenVisionService \} = require\('\.\/qwen-vision\.cjs'\)/u, 'Qwen darf den Main-Prozess nicht vor der ersten Nutzung laden.')
+  assert.doesNotMatch(mainSource.slice(0, 2500), /require\('\.\/enhanced-math\.cjs'\)/u, 'enhanced-math.cjs darf nicht oben in main.cjs stehen.')
   assert.match(mainSource, /spellcheck:\s*false/u, 'Die lokale FaNotes-Prüfung darf Chromiums native Wörterbuchprozesse beim Start nicht laden.')
   assert.doesNotMatch(mainSource, /setSpellCheckerLanguages|configureSpellChecker/u, 'Native Chromium-Wörterbücher würden CPU und I/O doppelt zur lokalen Prüfung verbrauchen.')
-  assert.match(mainSource, /\},\s*24_000\)/u, 'Der Auto-Updater muss weit außerhalb des interaktiven Startfensters bleiben.')
+  assert.match(mainSource, /const updaterTimer = setTimeout\(\(\) => \{[\s\S]*?\}, 5_000\)/u, 'Der Auto-Updater muss weit außerhalb des interaktiven Startfensters bleiben.')
   assert.match(mainSource, /protectedSettingsOnDisk/u, 'Geschützte AI-Schlüssel dürfen den Linux-Keyring nicht während des normalen Starts wecken.')
   assert.match(mainSource, /handle\(IPC\.loadSecureSettings/u, 'Geschützte AI-Schlüssel werden erst beim Öffnen des AI-Menüs geladen.')
   assert.match(mainSource, /async function readFastTreeDirectory/u)
@@ -165,7 +303,7 @@ try {
   assert.match(appSource, /const FirstRunOnboarding = lazy/u, 'Die einmalige Fächerauswahl darf normale Starts nicht vergrößern.')
   assert.match(appSource, /requestIdleCallback[\s\S]*loadFreshTree/u)
   assert.match(appSource, /STARTUP_TREE_REFRESH_DELAY_MS\s*=\s*18_000/u, 'Der vollständige Vault-Abgleich darf nicht in die Startphase fallen.')
-  assert.match(appSource, /STARTUP_DOCUMENT_LAYER_DELAY_MS\s*=\s*900/u, 'Tinte und Arbeitsblätter der ersten Notiz dürfen nicht mit dem Editor konkurrieren.')
+  assert.match(appSource, /STARTUP_DOCUMENT_LAYER_DELAY_MS\s*=\s*160/u, 'Tinte der ersten Notiz lädt schnell, ohne den Editor zu blockieren.')
   assert.match(mainSource, /require\('\.\/onenote-importer\.cjs'\)/u, 'Der OneNote-Importer muss explizit und verzögert geladen werden.')
   assert.match(mainSource, /new Worker\(path\.join\(__dirname, 'native-ocr-worker\.cjs'\)/u, 'Native ONNX-Inferenz muss ausserhalb des Electron-Hauptthreads laufen.')
   assert.match(mainSource, /currentSettings\.ocrModelKeepAliveSeconds/u, 'Der native Modellworker muss das konfigurierbare RAM-Freigabeintervall verwenden.')

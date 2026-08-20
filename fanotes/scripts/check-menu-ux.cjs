@@ -51,7 +51,7 @@ const preservedSettings = [
   'Lokales Kontextlernen', 'Unsichtbarer Suchindex', 'Zeichnung nach Einfügen behalten',
   'Automatisch speichern', 'Standardordner', 'Tagesnotizen', 'Datumsformat',
   'Automatisch nach Updates suchen', 'Updates automatisch herunterladen',
-  'Beim Beenden installieren', 'Bewegung reduzieren', 'Seitenleiste',
+  'Automatisch installieren', 'Bewegung reduzieren', 'Seitenleiste',
   'Informationsleiste', 'Vim-Modus',
 ]
 for (const title of preservedSettings) {

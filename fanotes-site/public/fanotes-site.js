@@ -81,12 +81,139 @@ systemTheme.addEventListener('change', (event) => {
   if (!safelyReadTheme()) applyTheme(event.matches ? 'light' : 'dark')
 })
 
-const showToast = (message) => {
+const showToast = (message, durationMs = 2400) => {
   if (!toast) return
   toast.textContent = message
   toast.classList.add('is-visible')
   window.clearTimeout(toastTimer)
-  toastTimer = window.setTimeout(() => toast.classList.remove('is-visible'), 2400)
+  if (durationMs > 0) toastTimer = window.setTimeout(() => toast.classList.remove('is-visible'), durationMs)
+}
+
+const downloadProgress = document.querySelector('[data-download-progress]')
+const downloadProgressFill = document.querySelector('[data-download-progress-fill]')
+const downloadProgressLabel = document.querySelector('[data-download-progress-label]')
+const downloadProgressDetail = document.querySelector('[data-download-progress-detail]')
+let activePackageDownload = null
+
+const setDownloadProgress = ({ visible = true, percent = 0, label = '', detail = '', indeterminate = false } = {}) => {
+  if (!downloadProgress) return
+  downloadProgress.hidden = !visible
+  downloadProgress.classList.toggle('is-visible', visible)
+  downloadProgress.classList.toggle('is-indeterminate', indeterminate)
+  downloadProgress.setAttribute('aria-busy', visible && percent < 100 ? 'true' : 'false')
+  if (downloadProgressFill) downloadProgressFill.style.width = `${Math.max(0, Math.min(100, percent))}%`
+  if (downloadProgressLabel && label) downloadProgressLabel.textContent = label
+  if (downloadProgressDetail) downloadProgressDetail.textContent = detail
+}
+
+const fileNameFromUrl = (url, fallback = 'FaNotes-download') => {
+  try {
+    const name = new URL(url, window.location.origin).pathname.split('/').filter(Boolean).at(-1)
+    return name || fallback
+  } catch {
+    return fallback
+  }
+}
+
+const triggerBlobDownload = (blob, fileName) => {
+  const objectUrl = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = objectUrl
+  anchor.download = fileName
+  anchor.rel = 'noopener'
+  document.body.append(anchor)
+  anchor.click()
+  anchor.remove()
+  window.setTimeout(() => URL.revokeObjectURL(objectUrl), 30_000)
+}
+
+const downloadPackageWithProgress = async (url, label) => {
+  if (!url || url.startsWith('#')) return
+  if (activePackageDownload) {
+    showToast('Ein Download läuft bereits …', 2200)
+    return
+  }
+  const controller = new AbortController()
+  activePackageDownload = controller
+  const fileName = fileNameFromUrl(url, `FaNotes-${latestRelease?.version || 'download'}`)
+  setDownloadProgress({
+    visible: true,
+    percent: 0,
+    indeterminate: true,
+    label: label || 'Download wird vorbereitet …',
+    detail: fileName,
+  })
+  showToast(`${label || 'Download'} gestartet …`, 2800)
+  try {
+    const response = await fetch(url, {
+      signal: controller.signal,
+      credentials: 'omit',
+      cache: 'no-store',
+      headers: { Accept: 'application/octet-stream,*/*' },
+    })
+    if (!response.ok) throw new Error(`HTTP ${response.status}`)
+    const total = Number(response.headers.get('content-length')) || 0
+    if (!response.body || !total) {
+      // Fallback when streaming or size is unavailable: still use the response body.
+      setDownloadProgress({
+        visible: true,
+        percent: 15,
+        indeterminate: true,
+        label: 'Download läuft …',
+        detail: total ? `${formatBytes(total)} · ${fileName}` : fileName,
+      })
+      const blob = await response.blob()
+      setDownloadProgress({ visible: true, percent: 100, indeterminate: false, label: 'Download fertig', detail: fileName })
+      triggerBlobDownload(blob, fileName)
+      showToast('Download abgeschlossen.', 3200)
+      window.setTimeout(() => setDownloadProgress({ visible: false }), 1800)
+      return
+    }
+    const reader = response.body.getReader()
+    const chunks = []
+    let received = 0
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      chunks.push(value)
+      received += value.byteLength
+      const percent = Math.max(1, Math.min(99, Math.round((received / total) * 100)))
+      setDownloadProgress({
+        visible: true,
+        percent,
+        indeterminate: false,
+        label: `Download ${percent} %`,
+        detail: `${formatBytes(received)} / ${formatBytes(total)} · ${fileName}`,
+      })
+    }
+    const blob = new Blob(chunks, { type: response.headers.get('content-type') || 'application/octet-stream' })
+    setDownloadProgress({ visible: true, percent: 100, indeterminate: false, label: 'Download fertig', detail: `${formatBytes(received)} · ${fileName}` })
+    triggerBlobDownload(blob, fileName)
+    showToast('Download abgeschlossen.', 3200)
+    window.setTimeout(() => setDownloadProgress({ visible: false }), 1800)
+  } catch (error) {
+    if (controller.signal.aborted) return
+    console.error(error)
+    setDownloadProgress({
+      visible: true,
+      percent: 0,
+      indeterminate: true,
+      label: 'Weiterleitung an den Browser-Download …',
+      detail: fileName,
+    })
+    // Native browser download as fallback when fetch streaming fails.
+    const fallback = document.createElement('a')
+    fallback.href = url
+    fallback.rel = 'noopener'
+    fallback.download = fileName
+    document.body.append(fallback)
+    fallback.click()
+    fallback.remove()
+    showToast('Browser-Download gestartet.', 3200)
+    window.setTimeout(() => setDownloadProgress({ visible: false }), 2400)
+  } finally {
+    if (activePackageDownload === controller) activePackageDownload = null
+  }
 }
 
 const formatBytes = (bytes) => {
@@ -468,9 +595,27 @@ const setupPointerEffects = () => {
 
 setupPointerEffects()
 
-document.querySelectorAll('[data-download-appimage], [data-download-portable], [data-download-windows-installer], [data-download-windows-portable], [data-primary-download]').forEach((link) => link.addEventListener('click', () => {
-  if (latestRelease) showToast(`FaNotes ${latestRelease.version} wird vorbereitet …`)
-}))
+document.querySelectorAll('[data-download-appimage], [data-download-portable], [data-download-windows-installer], [data-download-windows-portable], [data-primary-download]').forEach((link) => {
+  link.addEventListener('click', (event) => {
+    const href = link.getAttribute('href') || ''
+    // Keep in-page anchors (e.g. #download before release data is loaded).
+    if (!href || href.startsWith('#')) {
+      if (latestRelease) showToast(`Wähle unten ein Paket für FaNotes ${latestRelease.version}.`, 2800)
+      return
+    }
+    event.preventDefault()
+    const label = link.matches('[data-download-appimage]')
+      ? 'AppImage'
+      : link.matches('[data-download-portable]')
+        ? 'Linux Portable'
+        : link.matches('[data-download-windows-installer]')
+          ? 'Windows-Installer'
+          : link.matches('[data-download-windows-portable]')
+            ? 'Windows Portable'
+            : 'FaNotes-Download'
+    void downloadPackageWithProgress(href, label)
+  })
+})
 
 setText('[data-year]', new Date().getFullYear())
 window.requestAnimationFrame(() => root.classList.add('is-ready'))

@@ -17,6 +17,7 @@ import mimetypes
 import os
 from pathlib import Path
 import re
+import subprocess
 import sys
 import tempfile
 import time
@@ -34,6 +35,7 @@ API_VERSION = "2022-11-28"
 CHUNK_SIZE = 8 * 1024 * 1024
 MAX_RETRIES = 5
 VERSION_PATTERN = re.compile(r"^(\d+)\.(\d+)\.(\d+)(?:-beta\.(\d+))?$")
+TARGET_COMMITISH_PATTERN = re.compile(r"^[A-Za-z0-9._/-]{1,200}$")
 COMMON_RELEASE_FILES = (
     "CHANGELOG.md",
     "README.md",
@@ -42,6 +44,8 @@ COMMON_RELEASE_FILES = (
     "PKGBUILD",
     "LICENSE",
     "THIRD_PARTY_NOTICES.md",
+    "LICENSE-CRISPEMBED-MIT.txt",
+    "LICENSE-GGML-MIT.txt",
     "LICENSE-OFL-1.1.txt",
     "LICENSE-ONNXRUNTIME-MIT.txt",
     "LICENSE-PYLAIA-MIT.txt",
@@ -239,7 +243,35 @@ def checksum_asset(version: str, assets: list[Path], target_dir: Path) -> tuple[
     return target, digests
 
 
+def release_target_commitish() -> str:
+    configured = os.environ.get("FANOTES_RELEASE_TARGET_COMMITISH", "").strip()
+    if configured:
+        if not TARGET_COMMITISH_PATTERN.fullmatch(configured):
+            raise RuntimeError("FANOTES_RELEASE_TARGET_COMMITISH contains an unsafe ref name.")
+        return configured
+
+    repository_root = Path(__file__).resolve().parents[1]
+    result = subprocess.run(
+        ["git", "rev-parse", "--verify", "HEAD^{commit}"],
+        cwd=repository_root,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    commit = result.stdout.strip()
+    if result.returncode != 0 or not re.fullmatch(r"[a-f0-9]{40,64}", commit):
+        detail = result.stderr.strip() or "the local Git commit could not be resolved"
+        raise RuntimeError(
+            "Refusing to attach a release tag to the repository default branch: "
+            f"{detail}. Set FANOTES_RELEASE_TARGET_COMMITISH explicitly."
+        )
+    return commit
+
+
 def main() -> int:
+    if sys.argv[1:] == ["--print-target-commitish"]:
+        print(release_target_commitish())
+        return 0
     requested_version = None
     if len(sys.argv) > 1:
         if len(sys.argv) != 3 or sys.argv[1] != "--version":
@@ -258,6 +290,7 @@ def main() -> int:
     permissions = repository.get("permissions") or {}
     if not permissions.get("push"):
         raise RuntimeError("The token does not have write access to Nikoheld/FaNotes.")
+    target_commitish = release_target_commitish()
     print(f"Authenticated as {user['login']}; repository write access confirmed.", flush=True)
 
     translations = json.loads(TRANSLATIONS.read_text(encoding="utf-8"))
@@ -306,7 +339,7 @@ def main() -> int:
                 f"/repos/{OWNER}/{REPOSITORY}/releases",
                 {
                     "tag_name": tag,
-                    "target_commitish": repository["default_branch"],
+                    "target_commitish": target_commitish,
                     "name": f"FaNotes {version}",
                     "body": body,
                     "draft": publish_atomically,
@@ -322,7 +355,7 @@ def main() -> int:
             keep_as_draft = publish_atomically and bool(release.get("draft"))
             patch: dict[str, Any] = {
                 "tag_name": tag,
-                "target_commitish": repository["default_branch"],
+                "target_commitish": target_commitish,
                 "name": f"FaNotes {version}",
                 "body": body,
                 "draft": keep_as_draft,
@@ -390,7 +423,7 @@ def main() -> int:
                 f"/repos/{OWNER}/{REPOSITORY}/releases/{release['id']}",
                 {
                     "tag_name": tag,
-                    "target_commitish": repository["default_branch"],
+                    "target_commitish": target_commitish,
                     "draft": False,
                     "prerelease": prerelease,
                     "make_latest": "false" if prerelease else ("true" if version == latest_stable_version else "false"),

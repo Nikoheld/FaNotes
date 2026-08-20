@@ -53,6 +53,14 @@ export const isScriptOnlyBaselineTextConflict = (automatic: AutomaticRecognition
     (text.plausibleWords ?? text.knownWords) === text.words &&
     text.letters >= 4
   )
+  const completeShortKnownWord = (
+    text.words === 1 &&
+    text.knownWords === 1 &&
+    text.letters === 2 &&
+    text.visibleCharacters === 2 &&
+    math.layoutAssignments >= 1 &&
+    math.weakScriptAssignments === math.layoutAssignments
+  )
   const properNameShape = (
     text.words === 1 &&
     text.letters >= 4 &&
@@ -75,6 +83,7 @@ export const isScriptOnlyBaselineTextConflict = (automatic: AutomaticRecognition
       // compact offline dictionary. Digits/operators/relations are excluded
       // above and therefore keep real x_1-style formulae decisive.
       completeKnownWords ||
+      completeShortKnownWord ||
       completePlausibleWords ||
       properNameShape ||
       text.strongSentence ||
@@ -85,9 +94,9 @@ export const isScriptOnlyBaselineTextConflict = (automatic: AutomaticRecognition
         text.baselineAlignment >= 0.72
       ) ||
       (
-        text.visibleCharacters >= 4 &&
-        text.letters >= 4 &&
-        text.baselineAlignment >= 0.82
+        text.visibleCharacters >= 3 &&
+        text.visibleCharacters === text.letters &&
+        text.baselineAlignment >= 0.9
       )
     )
   )
@@ -204,6 +213,15 @@ export const assessNeuralTextModeCandidate = (
     ? hasStrongPersonalizedTextEvidence(personalized, letters, visible.length, formulaSyntax)
     : false
   const strongKnownWord = hasStrongNeuralWordEvidence(neural, letters, wordLike)
+  const strongShortKnownWord = Boolean(
+    neural.confidence >= 72 &&
+    (neural.wordCount ?? 0) === 1 &&
+    (neural.knownWordRatio ?? 0) >= 0.9 &&
+    letters === 2 &&
+    visible.length === 2 &&
+    automatic?.evidence?.math.layoutAssignments &&
+    automatic.evidence.math.weakScriptAssignments === automatic.evidence.math.layoutAssignments
+  )
   const strongSentence = hasStrongNeuralSentenceEvidence(neural, letters, wordLike) || (
     neural.confidence >= 38 &&
     words.length >= 2 &&
@@ -211,10 +229,16 @@ export const assessNeuralTextModeCandidate = (
     letterRatio >= 0.68
   )
   const strongLetterSequence = (
-    neural.confidence >= 64 &&
-    letters >= 4 &&
+    neural.confidence >= (letters === 3 ? 82 : 64) &&
+    letters >= 3 &&
     letterRatio >= 0.8 &&
     words.length >= 1
+  )
+  const candidateProperName = (
+    neural.confidence >= 70 &&
+    words.length === 1 &&
+    letters >= 4 &&
+    /^[A-ZÄÖÜ][a-zäöü]+$/u.test(normalized)
   )
   const proseDominatesCandidateFormula = (
     formulaSyntax &&
@@ -225,13 +249,7 @@ export const assessNeuralTextModeCandidate = (
     !/[√∫∑Σ∏Π∞^_≤≥≠≈]/u.test(normalized)
   )
   const safeCandidate = !formulaSyntax || proseDominatesCandidateFormula
-  const enoughTextEvidence = strongPersonalized || strongKnownWord || strongSentence || strongLetterSequence
-  const candidateProperName = (
-    neural.confidence >= 70 &&
-    words.length === 1 &&
-    letters >= 4 &&
-    /^[A-ZÄÖÜ][a-zäöü]+$/u.test(normalized)
-  )
+  const enoughTextEvidence = strongPersonalized || strongKnownWord || strongShortKnownWord || strongSentence || strongLetterSequence
   const scriptOnlyWordConflict = Boolean(
     automatic?.evidence &&
     /[_^]\{/u.test(automatic.mathValue) &&
@@ -242,41 +260,77 @@ export const assessNeuralTextModeCandidate = (
     automatic.evidence.math.largeOperators === 0 &&
     automatic.evidence.math.strongSymbols === 0 &&
     automatic.evidence.math.digits === 0 &&
-    letters >= 3 &&
+    (letters >= 3 || strongShortKnownWord) &&
     letterRatio >= 0.86 &&
     !formulaSyntax &&
-    (strongKnownWord || strongSentence || candidateProperName)
+    (
+      strongKnownWord ||
+      strongShortKnownWord ||
+      strongSentence ||
+      candidateProperName ||
+      (
+        // The neural line model can read a coherent, previously unseen word
+        // even when the compact offline dictionary does not contain it. If
+        // the competing math path consists solely of apparent scripts and
+        // the text glyphs still share a credible baseline, that independent
+        // line reading is stronger evidence than pairwise height alone.
+        strongLetterSequence &&
+        automatic.evidence.text.baselineAlignment >= 0.68
+      )
+    )
   )
-  const decisiveAutomaticMath = Boolean(
-    automatic && (() => {
-      const math = automatic.evidence?.math
-      // A bare integral-like glyph has no mathematical context of its own.
-      // When the independent text beam sees the same letter, or a complete
-      // multi-letter personal sequence contradicts the collapsed operator,
-      // explicit GlyphenWerk evidence wins. Limits, relations, fractions,
-      // scripts, operands and real formulas remain decisive.
-      const bareLargeOperatorConflict = Boolean(
+  const automaticMath = automatic?.evidence?.math
+  // A bare integral-like glyph has no mathematical context of its own. When
+  // independent text evidence sees the same letter or a complete word,
+  // GlyphenWerk may reject the collapsed operator. Limits, relations,
+  // fractions, scripts, operands and real formulas remain decisive.
+  const bareLargeOperatorConflict = Boolean(
+    automatic && automaticMath
+    && automaticMath.visibleCharacters <= 2
+    && automaticMath.largeOperators >= 1
+    && automaticMath.digits === 0
+    && automaticMath.operators === 0
+    && automaticMath.relations === 0
+    && automaticMath.fractions === 0
+    && automaticMath.layoutAssignments === 0
+    && !/[_^]\{/u.test(automatic.mathValue)
+    && (
+      (
         strongPersonalized
-        && math
-        && math.visibleCharacters <= 2
-        && math.largeOperators >= 1
-        && math.digits === 0
-        && math.operators === 0
-        && math.relations === 0
-        && math.fractions === 0
-        && math.layoutAssignments === 0
-        && !/[_^]\{/u.test(automatic.mathValue)
         && (
           letters >= 2
           || automatic.textValue.normalize('NFC').replace(/\s+/gu, '') === normalized.replace(/\s+/gu, '')
         )
       )
-      return !bareLargeOperatorConflict && !scriptOnlyWordConflict && hasDecisiveAutomaticMathLayout(automatic)
-    })(),
+      || (
+        // A whole wide word can collapse to one integral/sum hypothesis
+        // when the generic math segmenter sees its joined outline.  The
+        // line recognizer is allowed to reject that contextless operator
+        // only when the raw ink independently spans several character
+        // widths (or contains several full-height pen-lift bodies). This
+        // geometric gate keeps a genuine narrow standalone integral,
+        // sum, product, and their limits protected.
+        letters >= 3
+        && letterRatio >= 0.8
+        && (
+          strongKnownWord
+          || strongSentence
+          || candidateProperName
+          || (strongLetterSequence && neural.confidence >= 84)
+        )
+        && (
+          (automatic.evidence?.text.independentBodies ?? 0) >= 3
+          || (automatic.evidence?.text.inkAspectRatio ?? 0) >= 1.05
+        )
+      )
+    )
+  )
+  const decisiveAutomaticMath = Boolean(
+    automatic && !bareLargeOperatorConflict && !scriptOnlyWordConflict && hasDecisiveAutomaticMathLayout(automatic),
   )
   const mayOverride = neuralTextMayOverrideAutomaticMode(neural, automatic, letters, wordLike)
   const shouldUseText = safeCandidate && enoughTextEvidence && !decisiveAutomaticMath && (
-    automatic?.mode === 'text' || mayOverride || strongPersonalized
+    automatic?.mode === 'text' || mayOverride || strongPersonalized || scriptOnlyWordConflict || bareLargeOperatorConflict
   )
   const reason: NeuralTextModeAssessment['reason'] = !safeCandidate
     ? 'formula'
@@ -284,7 +338,7 @@ export const assessNeuralTextModeCandidate = (
       ? 'personalized'
       : strongSentence
         ? 'sentence'
-        : strongKnownWord
+        : strongKnownWord || strongShortKnownWord
           ? 'known-word'
           : strongLetterSequence
             ? 'letter-sequence'

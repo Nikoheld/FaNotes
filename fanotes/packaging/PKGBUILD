@@ -1,8 +1,8 @@
 # Maintainer: FaNotes contributors
 
 pkgname=fanotes-bin
-pkgver=2026.7.4.beta.3
-_release_version=2026.7.4-beta.10
+pkgver=2026.8.55
+_release_version=2026.8.55
 pkgrel=1
 pkgdesc='Lokale Markdown-Notizen mit Grafiktablett und Handschrifterkennung'
 arch=('x86_64')
@@ -92,8 +92,13 @@ package() {
   fi
 
   install -d -m755 "${pkgdir}/usr/bin"
-  ln -s "/opt/${_install_root}/fanotes" \
-    "${pkgdir}/usr/bin/fanotes"
+  cat > "${pkgdir}/usr/bin/fanotes" <<EOF
+#!/bin/bash
+set -euo pipefail
+export ELECTRON_OZONE_PLATFORM_HINT=x11
+exec /opt/${_install_root}/fanotes --ozone-platform=x11 --ozone-platform-hint=x11 "\$@"
+EOF
+  chmod 755 "${pkgdir}/usr/bin/fanotes"
   install -Dm644 "${srcdir}/fanotes.desktop" \
     "${pkgdir}/usr/share/applications/fanotes.desktop"
   install -Dm644 "${srcdir}/fanotes.svg" \

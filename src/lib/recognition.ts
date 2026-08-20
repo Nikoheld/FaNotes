@@ -9,6 +9,8 @@ import {
   ENGLISH_COMMON_TRIGRAMS,
   ENGLISH_COMMON_WORDS,
 } from '../data/englishLanguage'
+import { SUPPLEMENTAL_CANONICAL_PROPER_NAMES } from '../data/supplementalProperNames'
+import hasySymbolPrototypeData from '../data/hasySymbolPrototypes.json'
 import { isStandardRecognitionSample } from './standardRecognition'
 import { normalizeGermanSharpS } from './orthography'
 
@@ -21,6 +23,7 @@ const ANALYSIS_SIZE = 96
 const HOG_CELLS = 3
 const HOG_BINS = 6
 const DIRECTION_BINS = 8
+const ENDPOINT_FEATURE_SIZE = 8
 const TRAJECTORY_POINTS = 24
 const MAX_EXAMPLES_PER_LABEL = 96
 const MAX_FEATURE_EXAMPLES_PER_LABEL = 1_024
@@ -45,6 +48,7 @@ type FeatureVector = {
 
 type StrokeGeometry = {
   directions: Float32Array
+  endpointSignature: Float32Array
   normalizedLength: number
   closedness: number
   cornerness: number
@@ -57,6 +61,7 @@ type FeatureWeights = {
   projections: number
   shape: number
   directions: number
+  endpoint: number
   geometry: number
   trajectory: number
   holes: number
@@ -64,13 +69,14 @@ type FeatureWeights = {
 }
 
 const DEFAULT_WEIGHTS: FeatureWeights = {
-  raster: 0.34,
+  raster: 0.32,
   hog: 0.13,
   projections: 0.07,
   shape: 0.07,
   directions: 0.07,
+  endpoint: 0.06,
   geometry: 0.06,
-  trajectory: 0.18,
+  trajectory: 0.17,
   holes: 0.04,
   strokes: 0.04,
 }
@@ -85,6 +91,7 @@ const STANDARD_WEIGHTS: FeatureWeights = {
   projections: 0.11,
   shape: 0.1,
   directions: 0,
+  endpoint: 0,
   geometry: 0,
   trajectory: 0,
   holes: 0.07,
@@ -113,6 +120,9 @@ export type RecognitionLabelStats = {
   /** Robust personal width/height prior in logarithmic space. */
   aspectMedian: number
   aspectSpread: number
+  /** Exact pen-stroke observations retained for this learned class. */
+  strokeCountHistogram: number[]
+  strokeCountTotal: number
 }
 
 type RecognitionAspectStats = {
@@ -124,6 +134,8 @@ type RecognitionAspectStats = {
 export type RecognitionModel = RecognitionModelEntry[] & {
   weights: FeatureWeights
   classifierEntries: RecognitionModelEntry[]
+  genericSymbolEntries: RecognitionModelEntry[]
+  genericSymbolReliability: Map<string, number>
   prototypes: Map<string, RecognitionModelEntry>
   prototypeSets: Map<string, RecognitionModelEntry[]>
   labelStats: Map<string, RecognitionLabelStats>
@@ -141,6 +153,9 @@ export type RecognitionAlternative = {
   baseConfidence?: number
   personalSupport?: number
   personalConfidence?: number
+  /** Fraction of trusted examples written with this exact stroke count. */
+  strokeCountFit?: number
+  strokeCountSupport?: number
 }
 
 export type RecognitionMode = 'math' | 'text'
@@ -185,6 +200,8 @@ export type RecognitionToken = {
   /** Direct evidence from this writer's trusted GlyphenWerk examples. */
   personalSupport?: number
   personalConfidence?: number
+  strokeCountFit?: number
+  strokeCountSupport?: number
   /** Evidence left by the language model for safe, local self-training. */
   context?: {
     word: string
@@ -220,6 +237,8 @@ export const createEmptyRecognitionModel = (): RecognitionModel => {
   const model = [] as unknown as RecognitionModel
   model.weights = { ...DEFAULT_WEIGHTS }
   model.classifierEntries = []
+  model.genericSymbolEntries = []
+  model.genericSymbolReliability = new Map()
   model.prototypes = new Map()
   model.prototypeSets = new Map()
   model.labelStats = new Map()
@@ -459,6 +478,32 @@ const computeShape = (raster: Float32Array) => {
   ])
 }
 
+const featureFromRaster = (raster: Float32Array): FeatureVector => {
+  const projectionX = new Float32Array(FEATURE_SIZE)
+  const projectionY = new Float32Array(FEATURE_SIZE)
+  for (let y = 0; y < FEATURE_SIZE; y += 1) {
+    for (let x = 0; x < FEATURE_SIZE; x += 1) {
+      const value = raster[y * FEATURE_SIZE + x]
+      projectionX[x] += value
+      projectionY[y] += value
+    }
+  }
+  const maxX = Math.max(...projectionX, 0.0001)
+  const maxY = Math.max(...projectionY, 0.0001)
+  for (let index = 0; index < FEATURE_SIZE; index += 1) {
+    projectionX[index] /= maxX
+    projectionY[index] /= maxY
+  }
+  return {
+    raster,
+    projectionX,
+    projectionY,
+    hog: computeHog(raster),
+    shape: computeShape(raster),
+    holes: countHoles(raster),
+  }
+}
+
 const resampleTrajectory = (
   points: Stroke['points'],
   normalizePoint: (point: Stroke['points'][number]) => [number, number],
@@ -500,9 +545,10 @@ const resampleTrajectory = (
 
 const geometryFromStrokes = (strokes: Stroke[]): StrokeGeometry => {
   const directions = new Float32Array(DIRECTION_BINS)
+  const endpointSignature = new Float32Array(ENDPOINT_FEATURE_SIZE)
   const points = strokes.flatMap((stroke) => stroke.points)
   if (points.length === 0) {
-    return { directions, normalizedLength: 0, closedness: 0, cornerness: 0, trajectory: [] }
+    return { directions, endpointSignature, normalizedLength: 0, closedness: 0, cornerness: 0, trajectory: [] }
   }
   const pixelX = (x: number) => x * SOURCE_WIDTH
   const pixelY = (y: number) => y * SOURCE_HEIGHT
@@ -521,8 +567,22 @@ const geometryFromStrokes = (strokes: Stroke[]): StrokeGeometry => {
   let closedness = 0
   let cornerness = 0
   let cornerCount = 0
+  let endpointCount = 0
 
   strokes.forEach((stroke) => {
+    if (stroke.points.length) {
+      const first = normalizePoint(stroke.points[0])
+      const last = normalizePoint(stroke.points.at(-1)!)
+      endpointSignature[0] += first[0]
+      endpointSignature[1] += first[1]
+      endpointSignature[2] += last[0]
+      endpointSignature[3] += last[1]
+      endpointSignature[4] += Math.abs(last[0] - first[0])
+      endpointSignature[5] += Math.abs(last[1] - first[1])
+      endpointSignature[6] += Math.min(first[0], last[0])
+      endpointSignature[7] += Math.max(first[0], last[0])
+      endpointCount += 1
+    }
     for (let index = 1; index < stroke.points.length; index += 1) {
       const previous = stroke.points[index - 1]
       const point = stroke.points[index]
@@ -554,8 +614,14 @@ const geometryFromStrokes = (strokes: Stroke[]): StrokeGeometry => {
   })
 
   normalizeVector(directions)
+  if (endpointCount) {
+    for (let index = 0; index < endpointSignature.length; index += 1) {
+      endpointSignature[index] /= endpointCount
+    }
+  }
   return {
     directions,
+    endpointSignature,
     normalizedLength: clamp(totalLength / (diagonal * 4)),
     closedness: strokes.length ? closedness / strokes.length : 0,
     cornerness: cornerCount ? clamp(cornerness / cornerCount * 2) : 0,
@@ -595,8 +661,6 @@ const featureFromCanvas = (source: HTMLCanvasElement): FeatureVector => {
   context.drawImage(source, 0, 0, ANALYSIS_SIZE, ANALYSIS_SIZE)
   const pixels = context.getImageData(0, 0, ANALYSIS_SIZE, ANALYSIS_SIZE).data
   const raster = new Float32Array(FEATURE_SIZE * FEATURE_SIZE)
-  const projectionX = new Float32Array(FEATURE_SIZE)
-  const projectionY = new Float32Array(FEATURE_SIZE)
   const poolSize = ANALYSIS_SIZE / FEATURE_SIZE
 
   for (let y = 0; y < FEATURE_SIZE; y += 1) {
@@ -618,26 +682,9 @@ const featureFromCanvas = (source: HTMLCanvasElement): FeatureVector => {
       const pooledInk = strongestInk * 0.72 + averageInk * 0.28
       const value = pooledInk < 0.025 ? 0 : pooledInk
       raster[y * FEATURE_SIZE + x] = value
-      projectionX[x] += value
-      projectionY[y] += value
     }
   }
-
-  const maxX = Math.max(...projectionX, 0.0001)
-  const maxY = Math.max(...projectionY, 0.0001)
-  for (let index = 0; index < FEATURE_SIZE; index += 1) {
-    projectionX[index] /= maxX
-    projectionY[index] /= maxY
-  }
-
-  return {
-    raster,
-    projectionX,
-    projectionY,
-    hog: computeHog(raster),
-    shape: computeShape(raster),
-    holes: countHoles(raster),
-  }
+  return featureFromRaster(raster)
 }
 
 const featureFromDataUrl = (dataUrl: string, augment = true): Promise<FeatureVector[]> =>
@@ -752,6 +799,63 @@ const evenlySpaced = <T,>(values: T[], maximum: number): T[] => {
   ))
 }
 
+type GenericSymbolPrototypePayload = {
+  version: number
+  featureSize: number
+  labels: string[]
+  physicalAspects: number[]
+  rasters: string
+  audit?: {
+    holdoutClasses?: Record<string, { correct: number; samples: number; accuracy: number }>
+  }
+}
+
+let genericSymbolPrototypeEntries: RecognitionModelEntry[] | null = null
+let genericSymbolReliability: Map<string, number> | null = null
+
+const loadGenericSymbolPrototypeEntries = () => {
+  if (genericSymbolPrototypeEntries) return genericSymbolPrototypeEntries
+  const payload = hasySymbolPrototypeData as GenericSymbolPrototypePayload
+  const expectedBytes = payload.labels.length * FEATURE_SIZE * FEATURE_SIZE
+  if (
+    payload.version !== 1 ||
+    payload.featureSize !== FEATURE_SIZE ||
+    payload.physicalAspects.length !== payload.labels.length
+  ) return []
+  let binary = ''
+  try {
+    binary = atob(payload.rasters)
+  } catch {
+    return []
+  }
+  if (binary.length !== expectedBytes) return []
+  const emptyGeometry = geometryFromStrokes([])
+  genericSymbolPrototypeEntries = payload.labels.map((labelId, prototypeIndex) => {
+    const raster = new Float32Array(FEATURE_SIZE * FEATURE_SIZE)
+    const offset = prototypeIndex * raster.length
+    for (let index = 0; index < raster.length; index += 1) {
+      raster[index] = binary.charCodeAt(offset + index) / 255
+    }
+    return {
+      ...featureFromRaster(raster),
+      sampleId: `hasyv2-prototype-${prototypeIndex}`,
+      sessionId: 'standard-hasyv2',
+      labelId,
+      strokeCount: 0,
+      physicalAspect: clamp(payload.physicalAspects[prototypeIndex], 0.035, 12),
+      geometry: emptyGeometry,
+      variants: [],
+      standard: true,
+      trust: 0,
+      createdAt: 0,
+    }
+  })
+  genericSymbolReliability = new Map(Object.entries(payload.audit?.holdoutClasses ?? {}).map(([labelId, audit]) => (
+    [labelId, audit.samples >= 5 ? audit.correct / audit.samples : 0]
+  )))
+  return genericSymbolPrototypeEntries
+}
+
 export const buildRecognitionModel = async (samples: Sample[]): Promise<RecognitionModel> => {
   const resolvedSamples = resolveConflictingPersonalLabels(samples)
   const labelTotals = new Map<string, number>()
@@ -788,7 +892,7 @@ export const buildRecognitionModel = async (samples: Sample[]): Promise<Recognit
     ]
   })
 
-  const entries = await Promise.all(
+  const sampleEntries = await Promise.all(
     selected.map(async (sample) => {
       const standard = isStandardRecognitionSample(sample)
       const cacheKey = `${sample.id}:${sample.labelId}:${inkFingerprint(sample)}:${sample.imageData.length}`
@@ -817,6 +921,7 @@ export const buildRecognitionModel = async (samples: Sample[]): Promise<Recognit
       }
     }),
   )
+  const entries = [...sampleEntries]
   suppressSupersededPersonalConflicts(entries)
   const personalEntries = entries.filter((entry) => !entry.standard)
   const classifierGroups = new Map<string, RecognitionModelEntry[]>()
@@ -856,6 +961,8 @@ export const buildRecognitionModel = async (samples: Sample[]): Promise<Recognit
   model.prototypes = buildClassPrototypes(entries)
   model.prototypeSets = buildClassPrototypeSets(entries, model.weights)
   model.classifierEntries = buildClassifierEntries(entries, model.prototypeSets)
+  model.genericSymbolEntries = loadGenericSymbolPrototypeEntries()
+  model.genericSymbolReliability = genericSymbolReliability ?? new Map()
   model.labelStats = buildLabelStats(personalEntries, model.prototypeSets, model.weights)
   model.aspectStats = buildAspectStats(entries)
   const evaluation = modelEvaluation ?? estimateModelAccuracy(personalEntries, model.weights)
@@ -2123,6 +2230,10 @@ export const connectedTextSegmentationHypotheses = (
   // thin internal passages. Those are not word connectors. Actual connected
   // pairs normally exceed this physical aspect threshold; their competing
   // splits are now decided using the complete surrounding word below.
+  // A single round or broad handwritten glyph (a, m, w, …) often contains
+  // thin internal passages. Those are not word connectors. Actual connected
+  // pairs normally exceed this physical aspect threshold; their competing
+  // splits are now decided using the complete surrounding word below.
   if (
     aspect < 1.62 &&
     usablePreferredParts === null &&
@@ -2871,6 +2982,10 @@ export const groupRecognitionLines = (strokes: Stroke[]): RecognitionInkLine[] =
   const related = (first: (typeof entries)[number], second: (typeof entries)[number]) => {
     const horizontalGap = gap(first.minX, first.maxX, second.minX, second.maxX) * SOURCE_WIDTH
     const verticalGap = gap(first.minY, first.maxY, second.minY, second.maxY) * SOURCE_HEIGHT
+    const horizontalOverlap = Math.max(
+      0,
+      Math.min(first.maxX, second.maxX) - Math.max(first.minX, second.minX),
+    ) * SOURCE_WIDTH
     const typicalHeight = Math.max(8, Math.min(55, (first.height + second.height) / 2))
     const largestHeight = Math.max(first.height, second.height)
     const horizontalNeighbour = (
@@ -2887,6 +3002,28 @@ export const groupRecognitionLines = (strokes: Stroke[]): RecognitionInkLine[] =
       horizontalGap <= Math.max(18, typicalHeight * 0.62) &&
       verticalGap <= Math.max(39, largestHeight * 1.7)
     )
+    // Equals/equivalence/approximation/division marks, detached dots and
+    // accents consist of vertically separated strokes with nearly identical
+    // x support. Treating each stroke as a document row makes recognition
+    // structurally impossible before the glyph classifier even runs (for
+    // example one `≈` became a two-row aligned environment). Scale the join
+    // from the wider stroke, not from the tiny dot height, while keeping the
+    // bound far below ordinary page-line spacing. Fractions and operator
+    // limits also benefit because their shared x range is real layout
+    // evidence; unrelated rows do not overlap closely enough at this scale.
+    const sharedWidth = Math.max(1, Math.min(first.width, second.width))
+    const largestWidth = Math.max(first.width, second.width)
+    const stackedMathMark = (
+      horizontalOverlap >= Math.min(6, sharedWidth * 0.34) &&
+      verticalGap <= clamp(largestWidth * 0.42, 10, 46) &&
+      Math.abs(first.centerY - second.centerY) * SOURCE_HEIGHT <= clamp(largestWidth * 0.78, 18, 64)
+    )
+    const isolatedStackedOperator = (
+      entries.length <= 4 &&
+      horizontalGap <= 2 &&
+      [first, second].some((entry) => entry.width >= entry.height * 1.45) &&
+      Math.abs(first.centerY - second.centerY) * SOURCE_HEIGHT <= clamp(largestWidth * 1.35, 24, 180)
+    )
     const large = first.height >= second.height ? first : second
     const small = first.height >= second.height ? second : first
     const smallCenterX = small.centerX * SOURCE_WIDTH
@@ -2898,7 +3035,7 @@ export const groupRecognitionLines = (strokes: Stroke[]): RecognitionInkLine[] =
       smallCenterX <= largeRight + Math.max(36, large.width * 1.8) &&
       verticalGap <= Math.max(38, large.height * 0.58)
     )
-    return horizontalNeighbour || longMathMark || scriptOrLimit
+    return horizontalNeighbour || longMathMark || stackedMathMark || isolatedStackedOperator || scriptOrLimit
   }
 
   const remaining = new Set(entries.map((_, index) => index))
@@ -3091,6 +3228,23 @@ const meanVectorDistance = (first: Float32Array, second: Float32Array) => {
   return length ? distance / length : 0
 }
 
+// Endpoint signatures are always the fixed eight-value geometry vector above.
+// Keeping this comparison unrolled avoids a loop/length lookup for every
+// candidate in the personal nearest-neighbour model while retaining all
+// direction and span evidence used by the classifier.
+const endpointSignatureDistance = (first: Float32Array, second: Float32Array) => (
+  (
+    Math.abs(first[0] - second[0]) +
+    Math.abs(first[1] - second[1]) +
+    Math.abs(first[2] - second[2]) +
+    Math.abs(first[3] - second[3]) +
+    Math.abs(first[4] - second[4]) +
+    Math.abs(first[5] - second[5]) +
+    Math.abs(first[6] - second[6]) +
+    Math.abs(first[7] - second[7])
+  ) / 8
+)
+
 const projectionDistance = (first: FeatureVector, second: FeatureVector) => {
   let distance = 0
   for (let index = 0; index < FEATURE_SIZE; index += 1) {
@@ -3132,9 +3286,13 @@ const trajectorySetDistance = (first: Float32Array[], second: Float32Array[]) =>
   if (!first.length || !second.length) return 1
   const smaller = first.length <= second.length ? first : second
   const larger = first.length <= second.length ? second : first
+  // Writing direction is useful evidence for strokes such as f/t, b/d and
+  // q/9, but users may legitimately draw a glyph backwards. Keep reverse
+  // matching as a soft fallback instead of making it fully equivalent to the
+  // observed direction.
   const costs = smaller.map((path) => larger.map((candidate) => Math.min(
     trajectoryPathDistance(path, candidate),
-    trajectoryPathDistance(path, candidate, true),
+    trajectoryPathDistance(path, candidate, true) + 0.035,
   )))
 
   // Exact assignment for normal glyphs. Use a compact numeric DP instead of
@@ -3202,6 +3360,7 @@ const channelDistances = (
   projections: projectionDistance(first, second),
   shape: meanVectorDistance(first.shape, second.shape),
   directions: 1 - vectorCosineSimilarity(firstGeometry.directions, secondGeometry.directions),
+  endpoint: endpointSignatureDistance(firstGeometry.endpointSignature, secondGeometry.endpointSignature),
   geometry: (
     Math.abs(firstGeometry.normalizedLength - secondGeometry.normalizedLength) * 0.35 +
     Math.abs(firstGeometry.closedness - secondGeometry.closedness) * 0.4 +
@@ -3218,6 +3377,7 @@ const weightedDistance = (channels: FeatureWeights, weights: FeatureWeights) => 
   channels.projections * weights.projections +
   channels.shape * weights.shape +
   channels.directions * weights.directions +
+  channels.endpoint * weights.endpoint +
   channels.geometry * weights.geometry +
   channels.trajectory * weights.trajectory +
   channels.holes * weights.holes +
@@ -3317,6 +3477,7 @@ const buildClassPrototypes = (entries: RecognitionModelEntry[]) => {
       physicalAspect: Math.exp(mean(basis.map((entry) => Math.log(entry.physicalAspect)))),
       geometry: {
         directions: averageVector(basis.map((entry) => entry.geometry.directions), true),
+        endpointSignature: averageVector(basis.map((entry) => entry.geometry.endpointSignature)),
         normalizedLength: mean(basis.map((entry) => entry.geometry.normalizedLength)),
         closedness: mean(basis.map((entry) => entry.geometry.closedness)),
         cornerness: mean(basis.map((entry) => entry.geometry.cornerness)),
@@ -3346,7 +3507,14 @@ const buildClassPrototypeSets = (
     if (!group.length) return
     const trusted = group.filter((entry) => entry.trust >= 0.3)
     const usable = trusted.length ? trusted : group
-    const maximum = Math.min(5, Math.max(1, Math.ceil(Math.sqrt(usable.length / 3))))
+    // A class with eight independently written examples previously exposed
+    // only two prototypes to the runtime shortlist. That is too narrow for
+    // cross-writer recognition: one prototype can describe a looped lowercase
+    // form while another writer's angular uppercase form is pushed out before
+    // the full classifier gets a chance to compare it. Keep the hard cap of
+    // five for predictable latency, but cover roughly one prototype per
+    // square-root style cluster so small imports retain more real variation.
+    const maximum = Math.min(5, Math.max(1, Math.ceil(Math.sqrt(usable.length))))
     const ordered = [...usable].sort((first, second) => (
       second.trust - first.trust ||
       second.createdAt - first.createdAt
@@ -3571,6 +3739,12 @@ const buildLabelStats = (
       ? clamp(percentile(aspectDeviations, 0.86) * 1.7 + 0.08, 0.14, 0.48)
       : 0.3
     const trustedCount = group.filter((entry) => entry.trust >= 0.8).length
+    const trustedStrokeEntries = group.filter((entry) => entry.trust >= 0.3)
+    const strokeBasis = trustedStrokeEntries.length ? trustedStrokeEntries : group
+    const strokeCountHistogram: number[] = []
+    strokeBasis.forEach((entry) => {
+      strokeCountHistogram[entry.strokeCount] = (strokeCountHistogram[entry.strokeCount] ?? 0) + 1
+    })
     const trustedRatio = trustedCount / Math.max(1, group.length)
     const reliability = measuredReliability * (0.42 + trustedRatio * 0.58)
     stats.set(labelId, {
@@ -3579,6 +3753,8 @@ const buildLabelStats = (
       radius,
       aspectMedian: Math.exp(aspectMedianLog),
       aspectSpread,
+      strokeCountHistogram,
+      strokeCountTotal: strokeBasis.length,
       reliability: group.length === 1
         ? Math.max(0.58, reliability)
         : clamp(reliability, 0.22, 1),
@@ -3683,7 +3859,11 @@ const estimateModelAccuracy = (entries: RecognitionModelEntry[], weights: Featur
     // Cross-session examples are preferred per class (not globally): a session
     // containing only some labels must never remove every valid candidate for
     // the other labels from the holdout evaluation.
-    const consensusWeights = [0.62, 0.25, 0.13]
+    // Keep the build-time holdout aligned with the production classifier's
+    // robust three-example consensus. Evaluating an older nearest-neighbour
+    // blend could publish adaptive channel weights that looked good during
+    // training but lost against the runtime aggregation on a new writer.
+    const consensusWeights = [0.42, 0.33, 0.25]
     const nearest = [...candidatesByLabel.entries()]
       .map(([labelId, labelCandidates]) => {
         const crossSession = labelCandidates.filter((candidate) => candidate.sessionId !== entry.sessionId)
@@ -4189,16 +4369,389 @@ const resemblesUppercaseT = (cluster: StrokeCluster) => {
   return crossbarContainsStem && crossbarAtTop && stemExtendsBelow
 }
 
+type TextGeometryClusterFeatures = {
+  width: number
+  height: number
+  aspect: number
+  diagonal: number
+  geometry: StrokeGeometry
+  strokeMetrics: Array<{
+    width: number
+    height: number
+    aspect: number
+    normalizedLength: number
+    minX: number
+    maxX: number
+    minY: number
+    maxY: number
+  }>
+  pathLength: number
+  endpointGap: number
+  hasDotAccessory: boolean
+  bodyHeightRatio: number
+  horizontalStrokeCount: number
+  hasNarrowVerticalStem: boolean
+  midHeightCross: boolean
+}
+
+const textGeometryClusterFeatures = new WeakMap<StrokeCluster, TextGeometryClusterFeatures>()
+
+const getTextGeometryClusterFeatures = (cluster: StrokeCluster): TextGeometryClusterFeatures => {
+  const cached = textGeometryClusterFeatures.get(cluster)
+  if (cached) return cached
+  const width = Math.max(1, (cluster.maxX - cluster.minX) * SOURCE_WIDTH)
+  const height = Math.max(1, (cluster.maxY - cluster.minY) * SOURCE_HEIGHT)
+  const aspect = width / height
+  const diagonal = Math.max(1, Math.hypot(width, height))
+  const geometry = geometryFromStrokes(cluster.strokes)
+  const strokeMetrics = cluster.strokes.map((stroke) => {
+    const bounds = strokeBounds(stroke)
+    const strokeWidth = Math.max(0, (bounds.maxX - bounds.minX) * SOURCE_WIDTH)
+    const strokeHeight = Math.max(0, (bounds.maxY - bounds.minY) * SOURCE_HEIGHT)
+    const length = stroke.points.slice(1).reduce((sum, point, index) => (
+      sum + Math.hypot(
+        (point.x - stroke.points[index].x) * SOURCE_WIDTH,
+        (point.y - stroke.points[index].y) * SOURCE_HEIGHT,
+      )
+    ), 0)
+    return {
+      width: strokeWidth,
+      height: strokeHeight,
+      aspect: strokeWidth / Math.max(1, strokeHeight),
+      normalizedLength: length / diagonal,
+      minX: bounds.minX,
+      maxX: bounds.maxX,
+      minY: bounds.minY,
+      maxY: bounds.maxY,
+    }
+  })
+  const pathLength = strokeMetrics.reduce((total, stroke) => total + stroke.normalizedLength, 0)
+  const endpointGap = cluster.strokes.length === 1
+    ? Math.hypot(
+        (cluster.strokes[0].points.at(-1)!.x - cluster.strokes[0].points[0].x) * SOURCE_WIDTH,
+        (cluster.strokes[0].points.at(-1)!.y - cluster.strokes[0].points[0].y) * SOURCE_HEIGHT,
+      ) / diagonal
+    : 1
+  const hasDotAccessory = strokeMetrics.some((stroke) => (
+    stroke.normalizedLength <= 0.32 &&
+    stroke.height <= height * 0.22 &&
+    stroke.width <= width * 0.48
+  ))
+  const bodyHeightRatio = Math.max(...strokeMetrics.map((stroke) => stroke.height / height), 0)
+  const horizontalStrokeCount = strokeMetrics.filter((stroke) => stroke.aspect >= 2).length
+  const hasNarrowVerticalStem = strokeMetrics.some((stroke) => (
+    stroke.aspect <= 0.4 && stroke.height >= height * 0.45
+  ))
+  const midHeightCross = strokeMetrics.some((stroke) => {
+    const centerY = (stroke.minY + stroke.maxY) / 2
+    const glyphCenterY = (cluster.minY + cluster.maxY) / 2
+    return (
+      stroke.aspect >= 1.6 &&
+      stroke.width >= width * 0.28 &&
+      Math.abs(centerY - glyphCenterY) <= height * 0.18 / SOURCE_HEIGHT
+    )
+  })
+  const features: TextGeometryClusterFeatures = {
+    width,
+    height,
+    aspect,
+    diagonal,
+    geometry,
+    strokeMetrics,
+    pathLength,
+    endpointGap,
+    hasDotAccessory,
+    bodyHeightRatio,
+    horizontalStrokeCount,
+    hasNarrowVerticalStem,
+    midHeightCross,
+  }
+  textGeometryClusterFeatures.set(cluster, features)
+  return features
+}
+
 const textGeometryAdjustment = (labelId: string, cluster: StrokeCluster) => {
-  if (!resemblesUppercaseT(cluster)) return 0
-  if (labelId === 'latin_upper_T') return -0.54
-  if (
-    labelId === 'latin_lower_l' ||
-    labelId === 'latin_lower_t' ||
-    labelId === 'latin_lower_f' ||
-    labelId === 'latin_upper_I'
-  ) return 0.34
-  return 0
+  let adjustment = 0
+  if (resemblesUppercaseT(cluster)) {
+    if (labelId === 'latin_upper_T') adjustment -= 0.54
+    if (
+      labelId === 'latin_lower_l' ||
+      labelId === 'latin_lower_t' ||
+      labelId === 'latin_lower_f' ||
+      labelId === 'latin_upper_I'
+    ) adjustment += 0.34
+  }
+
+  // Some characters share nearly identical normalized raster silhouettes.
+  // Their pen structure supplies a style-independent tie-breaker for isolated
+  // glyphs. Shared geometry is cached per cluster because this function runs
+  // once for every class during ranking.
+  const {
+    width,
+    height,
+    aspect,
+    geometry,
+    strokeMetrics,
+    pathLength,
+    endpointGap,
+    hasDotAccessory,
+    bodyHeightRatio,
+    horizontalStrokeCount,
+    hasNarrowVerticalStem,
+    midHeightCross,
+  } = getTextGeometryClusterFeatures(cluster)
+  if (hasDotAccessory && bodyHeightRatio <= 0.68 && aspect <= 0.46) {
+    if (labelId === 'latin_lower_i') adjustment -= 0.05
+    if (labelId === 'latin_lower_j') adjustment += 0.035
+    if (labelId === 'latin_lower_l' || labelId === 'latin_upper_I' || labelId === 'digit_1') {
+      adjustment += 0.06
+    }
+  } else if (hasDotAccessory && bodyHeightRatio >= 0.72) {
+    if (labelId === 'latin_lower_j') adjustment -= 0.05
+    if (labelId === 'latin_lower_i') adjustment += 0.035
+  }
+  const multiStrokeUpperF = (
+    cluster.strokes.length >= 3 &&
+    aspect >= 0.72 &&
+    aspect <= 1.22 &&
+    horizontalStrokeCount >= 2 &&
+    (hasNarrowVerticalStem || cluster.strokes.length >= 4)
+  )
+  if (multiStrokeUpperF) {
+    if (labelId === 'latin_upper_F') adjustment -= 0.05
+    if (labelId === 'latin_upper_E') adjustment += 0.035
+  }
+  const straightDigitOne = (
+    cluster.strokes.length === 1 &&
+    aspect >= 0.51 &&
+    aspect <= 0.66 &&
+    endpointGap <= 0.22 &&
+    pathLength <= 2.25
+  )
+  if (straightDigitOne) {
+    if (labelId === 'digit_1') adjustment -= 0.045
+    if (labelId === 'latin_lower_l') adjustment += 0.03
+    if (labelId === 'latin_upper_I') adjustment += 0.02
+  }
+  // A pure vertical stick without a serif or head is usually l/I, not 1.
+  const plainVerticalStick = (
+    cluster.strokes.length === 1 &&
+    aspect <= 0.28 &&
+    endpointGap <= 0.28 &&
+    pathLength <= 1.35 &&
+    geometry.cornerness <= 0.22
+  )
+  if (plainVerticalStick) {
+    if (labelId === 'latin_lower_l' || labelId === 'latin_upper_I') adjustment -= 0.055
+    if (labelId === 'digit_1') adjustment += 0.04
+    if (labelId === 'latin_lower_i') adjustment += 0.05
+  }
+  const oneStrokeLowerZ = (
+    cluster.strokes.length === 1 &&
+    aspect >= 1.04 &&
+    endpointGap >= 0.62 &&
+    pathLength >= 1.8
+  )
+  if (oneStrokeLowerZ) {
+    if (labelId === 'latin_lower_z') adjustment -= 0.045
+    if (labelId === 'digit_2') adjustment += 0.03
+  }
+  const tailedDigitSix = (
+    cluster.strokes.length === 1 &&
+    aspect >= 1.18 &&
+    endpointGap >= 0.82 &&
+    pathLength >= 1.72 &&
+    pathLength <= 2.15
+  )
+  if (tailedDigitSix) {
+    if (labelId === 'digit_6') adjustment -= 0.04
+    if (labelId === 'latin_upper_C') adjustment += 0.025
+  }
+
+  // Round closed o/O/0 vs open c/C vs a with a stem.
+  const roundClosed = (
+    cluster.strokes.length === 1 &&
+    aspect >= 0.7 &&
+    aspect <= 1.35 &&
+    geometry.closedness >= 0.7 &&
+    endpointGap <= 0.32 &&
+    pathLength >= 1.55 &&
+    pathLength <= 3.4
+  )
+  if (roundClosed) {
+    if (
+      labelId === 'latin_lower_o' ||
+      labelId === 'latin_upper_O' ||
+      labelId === 'digit_0'
+    ) adjustment -= 0.055
+    if (labelId === 'latin_lower_c' || labelId === 'latin_upper_C') adjustment += 0.045
+    if (labelId === 'latin_lower_a' || labelId === 'latin_lower_e') adjustment += 0.03
+  }
+  const openCShape = (
+    cluster.strokes.length === 1 &&
+    aspect >= 0.65 &&
+    aspect <= 1.4 &&
+    geometry.closedness <= 0.55 &&
+    endpointGap >= 0.34 &&
+    pathLength >= 1.35 &&
+    pathLength <= 2.9
+  )
+  // Prefer o/0 only when a closed loop is present. Do not boost plain open
+  // `c` against `e`: many freehand e shapes are also open and would otherwise
+  // turn connected `te` into `tc`.
+  if (openCShape) {
+    if (labelId === 'latin_lower_o' || labelId === 'latin_upper_O' || labelId === 'digit_0') {
+      adjustment += 0.04
+    }
+  }
+  // Freehand `e` usually keeps a short interior bar that plain `c` lacks.
+  if (midHeightCross) {
+    if (labelId === 'latin_lower_e') adjustment -= 0.05
+    if (labelId === 'latin_lower_c') adjustment += 0.04
+  }
+
+  // s vs 5 only: a clear middle horizontal favors 5.
+  if (cluster.strokes.length === 1 && aspect >= 0.45 && aspect <= 1.1) {
+    if (horizontalStrokeCount >= 1 || midHeightCross) {
+      if (labelId === 'digit_5') adjustment -= 0.04
+      if (labelId === 'latin_lower_s' || labelId === 'latin_upper_S') adjustment += 0.03
+    } else if (geometry.cornerness >= 0.34 && pathLength >= 1.7) {
+      if (labelId === 'digit_5') adjustment += 0.03
+    }
+  }
+
+  // b/h/6 and p/P: loop position relative to a tall stem.
+  if (hasNarrowVerticalStem && cluster.strokes.length >= 1) {
+    const stem = strokeMetrics
+      .filter((stroke) => stroke.aspect <= 0.45 && stroke.height >= height * 0.45)
+      .sort((first, second) => second.height - first.height)[0]
+    const loop = strokeMetrics
+      .filter((stroke) => stroke !== stem && stroke.width >= width * 0.28)
+      .sort((first, second) => second.width * second.height - first.width * first.height)[0]
+    if (stem && loop) {
+      const stemCenterY = (stem.minY + stem.maxY) / 2
+      const loopCenterY = (loop.minY + loop.maxY) / 2
+      const loopLow = loopCenterY > stemCenterY + height * 0.08 / SOURCE_HEIGHT
+      const loopHigh = loopCenterY < stemCenterY - height * 0.08 / SOURCE_HEIGHT
+      if (loopLow) {
+        if (labelId === 'latin_lower_b' || labelId === 'digit_6') adjustment -= 0.035
+        if (labelId === 'latin_lower_h' || labelId === 'latin_lower_p') adjustment += 0.025
+      }
+      if (loopHigh) {
+        if (labelId === 'latin_lower_p' || labelId === 'latin_upper_P' || labelId === 'digit_9') {
+          adjustment -= 0.035
+        }
+        if (labelId === 'latin_lower_b' || labelId === 'latin_lower_d') adjustment += 0.025
+      }
+    }
+  }
+
+  // t/f with a crossbar and tall stem.
+  if (hasNarrowVerticalStem && horizontalStrokeCount >= 1 && aspect <= 0.95) {
+    if (labelId === 'latin_lower_t' || labelId === 'latin_lower_f') adjustment -= 0.04
+    if (labelId === 'latin_lower_l' || labelId === 'latin_upper_I') adjustment += 0.03
+  }
+
+  return adjustment
+}
+
+const resemblesCompactUppercaseY = (strokes: Stroke[]) => {
+  const cluster = clusterFromStrokes(strokes)
+  if (!cluster || cluster.strokes.length > 3) return false
+  const width = Math.max(1, (cluster.maxX - cluster.minX) * SOURCE_WIDTH)
+  const height = Math.max(1, (cluster.maxY - cluster.minY) * SOURCE_HEIGHT)
+  const aspect = width / height
+  if (aspect < 0.5 || aspect > 0.9) return false
+  const diagonal = Math.max(1, Math.hypot(width, height))
+  const pathLength = cluster.strokes.reduce((total, stroke) => (
+    total + stroke.points.slice(1).reduce((length, point, index) => (
+      length + Math.hypot(
+        (point.x - stroke.points[index].x) * SOURCE_WIDTH,
+        (point.y - stroke.points[index].y) * SOURCE_HEIGHT,
+      )
+    ), 0)
+  ), 0) / diagonal
+  // Upper-case Y is normally a compact fork and stem. A cursive lower-case y
+  // has either a distinctly narrower body or a much longer returning tail.
+  // This is only used as a same-letter case tie-breaker below; it never turns
+  // an unrelated leading class into Y on geometry alone.
+  return pathLength <= 1.87
+}
+
+const resemblesNarrowUndottedUppercaseI = (strokes: Stroke[]) => {
+  const cluster = clusterFromStrokes(strokes)
+  if (!cluster || cluster.strokes.length !== 1) return false
+  const width = Math.max(1, (cluster.maxX - cluster.minX) * SOURCE_WIDTH)
+  const height = Math.max(1, (cluster.maxY - cluster.minY) * SOURCE_HEIGHT)
+  const aspect = width / height
+  if (aspect > 0.17) return false
+  const diagonal = Math.max(1, Math.hypot(width, height))
+  const stroke = cluster.strokes[0]
+  const pathLength = stroke.points.slice(1).reduce((length, point, index) => (
+    length + Math.hypot(
+      (point.x - stroke.points[index].x) * SOURCE_WIDTH,
+      (point.y - stroke.points[index].y) * SOURCE_HEIGHT,
+    )
+  ), 0) / diagonal
+  return pathLength <= 1.22
+}
+
+const resemblesDetachedDotLowercaseJ = (strokes: Stroke[]) => {
+  const cluster = clusterFromStrokes(strokes)
+  if (!cluster || cluster.strokes.length !== 2) return false
+  const width = Math.max(1, (cluster.maxX - cluster.minX) * SOURCE_WIDTH)
+  const height = Math.max(1, (cluster.maxY - cluster.minY) * SOURCE_HEIGHT)
+  if (width / height > 0.65) return false
+  const measured = cluster.strokes
+    .map((stroke) => {
+      const bounds = strokeBounds(stroke)
+      return {
+        bounds,
+        extent: Math.max(
+          (bounds.maxX - bounds.minX) * SOURCE_WIDTH,
+          (bounds.maxY - bounds.minY) * SOURCE_HEIGHT,
+        ),
+      }
+    })
+    .sort((first, second) => second.extent - first.extent)
+  const [body, dot] = measured
+  if (!body || !dot) return false
+  const bodyHeight = (body.bounds.maxY - body.bounds.minY) * SOURCE_HEIGHT
+  if (bodyHeight < height * 0.62) return false
+  if (dot.extent > Math.max(60, body.extent * 0.55)) return false
+  // A real delayed point remains compact and above its own tall body. This
+  // rejects upper-case J bars and tiny stray marks near short v/n bodies while
+  // retaining dots drawn as a point, hook or small loop.
+  return resemblesTextDotPair(body.bounds, dot.bounds)
+}
+
+const resemblesExtremelyNarrowDottedLowercaseI = (strokes: Stroke[]) => {
+  const cluster = clusterFromStrokes(strokes)
+  if (!cluster || cluster.strokes.length !== 2) return false
+  const width = Math.max(1, (cluster.maxX - cluster.minX) * SOURCE_WIDTH)
+  const height = Math.max(1, (cluster.maxY - cluster.minY) * SOURCE_HEIGHT)
+  // Across all 7,440 alphanumeric UJI glyphs, an exact two-stroke dot/body
+  // pair below this physical aspect occurs only for lower-case i (5/5). The
+  // body-height guard rejects a tiny stray mark above another short symbol.
+  // This deliberately stays much narrower than an ordinary curved j.
+  if (width / height > 0.08) return false
+  const measured = cluster.strokes
+    .map((stroke) => {
+      const bounds = strokeBounds(stroke)
+      return {
+        bounds,
+        extent: Math.max(
+          (bounds.maxX - bounds.minX) * SOURCE_WIDTH,
+          (bounds.maxY - bounds.minY) * SOURCE_HEIGHT,
+        ),
+      }
+    })
+    .sort((first, second) => second.extent - first.extent)
+  const [body, dot] = measured
+  if (!body || !dot) return false
+  const bodyHeight = (body.bounds.maxY - body.bounds.minY) * SOURCE_HEIGHT
+  if (bodyHeight < height * 0.4) return false
+  return resemblesTextDotPair(body.bounds, dot.bounds)
 }
 
 const resemblesIntegralStroke = (stroke: Stroke) => {
@@ -4232,6 +4785,77 @@ const resemblesIntegralStroke = (stroke: Stroke) => {
     ((first.y <= last.y && first.x > last.x) || (last.y <= first.y && last.x > first.x))
   )
   return spansHeight && oppositeEndpoints && pathLength >= heightPixels * 1.03
+}
+
+const resemblesSummationStroke = (stroke: Stroke) => {
+  if (stroke.points.length < 5) return false
+  const bounds = strokeBounds(stroke)
+  const widthPixels = Math.max(1, (bounds.maxX - bounds.minX) * SOURCE_WIDTH)
+  const heightPixels = Math.max(1, (bounds.maxY - bounds.minY) * SOURCE_HEIGHT)
+  if (widthPixels < 28 || heightPixels < 42 || widthPixels / heightPixels > 1.65) return false
+  const width = Math.max(0.0001, bounds.maxX - bounds.minX)
+  const height = Math.max(0.0001, bounds.maxY - bounds.minY)
+  const normalized = stroke.points.map((point, index) => ({
+    x: (point.x - bounds.minX) / width,
+    y: (point.y - bounds.minY) / height,
+    index,
+  }))
+  const topRight = normalized.find((point) => point.x >= 0.62 && point.y <= 0.24)
+  const topLeft = normalized.find((point) => point.x <= 0.3 && point.y <= 0.28)
+  const middle = normalized.find((point) => point.x >= 0.38 && point.x <= 0.75 && point.y >= 0.32 && point.y <= 0.68)
+  const bottomLeft = normalized.find((point) => point.x <= 0.3 && point.y >= 0.72)
+  const bottomRight = normalized.find((point) => point.x >= 0.62 && point.y >= 0.76)
+  if (!topRight || !topLeft || !middle || !bottomLeft || !bottomRight) return false
+  const forward = topRight.index < topLeft.index && topLeft.index < middle.index &&
+    middle.index < bottomLeft.index && bottomLeft.index < bottomRight.index
+  const reverse = bottomRight.index < bottomLeft.index && bottomLeft.index < middle.index &&
+    middle.index < topLeft.index && topLeft.index < topRight.index
+  return forward || reverse
+}
+
+const standaloneLargeOperatorGeometryEvidence = (
+  labelId: string,
+  strokes: Stroke[],
+) => {
+  if (!LARGE_OPERATOR_IDS.has(labelId) || !strokes.length) return false
+  const cluster = clusterFromStrokes(strokes)
+  if (!cluster || resemblesUppercaseT(cluster)) return false
+  if (labelId === 'operator_integral') {
+    return strokes.length === 1 && resemblesIntegralStroke(strokes[0])
+  }
+  if (labelId === 'operator_double_integral') {
+    return strokes.length === 2 && strokes.every(resemblesIntegralStroke)
+  }
+  if (labelId === 'operator_triple_integral') {
+    return strokes.length === 3 && strokes.every(resemblesIntegralStroke)
+  }
+  if (labelId === 'operator_contour_integral') {
+    return strokes.some(resemblesIntegralStroke)
+  }
+  if (labelId === 'operator_product') return resemblesProductOperatorStrokes(strokes)
+  if (labelId === 'operator_sum') return strokes.length === 1 && resemblesSummationStroke(strokes[0])
+  return false
+}
+
+export const standaloneLargeOperatorGeometryEvidenceForTests = standaloneLargeOperatorGeometryEvidence
+
+export const standaloneLargeOperatorIsDecisiveForTests = (evidence: {
+  labelId: string
+  strokes: Stroke[]
+  competingTextCharacters: number
+  personalSupport?: number
+  personalConfidence?: number
+}) => {
+  const cluster = clusterFromStrokes(evidence.strokes)
+  if (!cluster || !LARGE_OPERATOR_IDS.has(evidence.labelId) || resemblesUppercaseT(cluster)) return false
+  const independentEvidence = standaloneLargeOperatorGeometryEvidence(
+    evidence.labelId,
+    evidence.strokes,
+  ) || (
+    (evidence.personalSupport ?? 0) >= 2 &&
+    (evidence.personalConfidence ?? 0) >= 76
+  )
+  return evidence.competingTextCharacters <= 2 || independentEvidence
 }
 
 const mathGeometryAdjustment = (labelId: string, cluster: StrokeCluster) => {
@@ -4471,6 +5095,38 @@ type TextGapAnalysis = {
   gaps: number[]
   compactGap: number
   threshold: number
+  temporalGaps: number[]
+  compactTemporalGap: number
+  temporalThreshold: number
+}
+
+const textTokenInkBounds = (token: RecognitionToken) => {
+  const strokes = token.strokes.filter((stroke) => stroke.points.length > 0)
+  if (!strokes.length) return null
+  const bounds = strokes.map((stroke) => strokeBounds(stroke))
+  return {
+    minX: Math.min(...bounds.map((entry) => entry.minX)),
+    maxX: Math.max(...bounds.map((entry) => entry.maxX)),
+  }
+}
+
+const textTokenPrimaryTemporalRange = (token: RecognitionToken) => {
+  const primary = token.strokes
+    .filter((stroke) => stroke.points.length)
+    .map((stroke) => ({
+      stroke,
+      length: stroke.points.slice(1).reduce((sum, point, index) => (
+        sum + Math.hypot(
+          (point.x - stroke.points[index].x) * SOURCE_WIDTH,
+          (point.y - stroke.points[index].y) * SOURCE_HEIGHT,
+        )
+      ), 0),
+    }))
+    .sort((first, second) => second.length - first.length)[0]?.stroke
+  if (!primary) return null
+  const times = primary.points.map((point) => point.t).filter(Number.isFinite)
+  if (!times.length) return null
+  return { start: Math.min(...times), end: Math.max(...times) }
 }
 
 const analyzeTextGaps = (
@@ -4489,16 +5145,52 @@ const analyzeTextGaps = (
   const pairGaps = lineTokens.slice(1).map((token, index) => {
     const previous = lineTokens[index]
     if (closingPunctuation.has(token.char) || openingPunctuation.has(previous.char)) return 0
-    return Math.max(0, token.bbox[0] - (previous.bbox[0] + previous.bbox[2]))
+    const renderedGap = token.bbox[0] - (previous.bbox[0] + previous.bbox[2])
+    // Splitting a continuous stroke inserts an interpolated point at the
+    // boundary, so the two rendered boxes touch even when the original line
+    // contains a real gap between separately lifted words. Preserve that
+    // physical evidence when it is available; the max keeps the existing
+    // conservative rendered-box behaviour for accessories and punctuation.
+    const previousInk = textTokenInkBounds(previous)
+    const currentInk = textTokenInkBounds(token)
+    const physicalGap = previousInk && currentInk
+      ? currentInk.minX - previousInk.maxX
+      : 0
+    return Math.max(0, renderedGap, physicalGap)
   })
+  const temporalRanges = lineTokens.map(textTokenPrimaryTemporalRange)
+  const temporalGaps = lineTokens.slice(1).map((_token, index) => {
+    const previous = temporalRanges[index]
+    const current = temporalRanges[index + 1]
+    return previous && current ? Math.max(0, current.start - previous.end) : 0
+  })
+  const eligibleTemporal = temporalGaps.filter((gap) => gap > 0).sort((first, second) => first - second)
+  const compactTemporalPopulation = eligibleTemporal.length >= 2
+    ? eligibleTemporal.slice(0, Math.max(1, Math.ceil(eligibleTemporal.length * 0.58)))
+    : []
+  const compactTemporalGap = median(compactTemporalPopulation)
+  const temporalThreshold = compactTemporalPopulation.length
+    ? compactTemporalGap + Math.max(20, compactTemporalGap * 0.9)
+    : Number.POSITIVE_INFINITY
   const eligible = pairGaps.filter((gap) => gap > 0.0015).sort((first, second) => first - second)
-  const compactPopulation = eligible.slice(0, Math.max(1, Math.ceil(eligible.length * 0.58)))
+  // With a mostly connected line there may be exactly one measurable gap:
+  // the boundary between two words. Treating that lone gap as the compact
+  // intra-word baseline and then adding another margin made the threshold
+  // larger than the real word gap, so a sentence such as “hallo mathe” was
+  // returned as “hallomathe”. A compact baseline needs at least two samples;
+  // for one gap the scale-based width/x-height terms below are the safer
+  // reference and lexical refinement still removes marginal false spaces.
+  const compactPopulation = eligible.length >= 2
+    ? eligible.slice(0, Math.max(1, Math.ceil(eligible.length * 0.58)))
+    : []
   const compactGap = median(compactPopulation)
   let threshold = clamp(
     Math.max(
       typicalWidth * 0.62,
       xHeightAsWidth * 0.34,
-      compactGap + Math.max(0.0055, compactGap * 0.3),
+      compactPopulation.length
+        ? compactGap + Math.max(0.0055, compactGap * 0.3)
+        : 0,
     ),
     0.016,
     0.058,
@@ -4544,8 +5236,23 @@ const analyzeTextGaps = (
     if (bestSplit) threshold = clamp(bestSplit.threshold, 0.0135, 0.058)
   }
 
-  return { gaps: pairGaps, compactGap, threshold }
+  return {
+    gaps: pairGaps,
+    compactGap,
+    threshold,
+    temporalGaps,
+    compactTemporalGap,
+    temporalThreshold,
+  }
 }
+
+const hasStrongTextPenPause = (
+  analysis: TextGapAnalysis,
+  boundaryIndex: number,
+) => (
+  analysis.temporalGaps[boundaryIndex] >= analysis.temporalThreshold &&
+  analysis.gaps[boundaryIndex] >= Math.max(0.012, analysis.compactGap * 1.35 + 0.003)
+)
 
 const arrangeTextTokens = (tokens: RecognitionToken[]) => {
   const clean = tokens
@@ -4602,7 +5309,7 @@ const arrangeTextTokens = (tokens: RecognitionToken[]) => {
           const previous = lineTokens[tokenIndex - 1]
           const gap = gapAnalysis.gaps[tokenIndex - 1]
           token.spaceBefore = (
-            gap >= gapAnalysis.threshold &&
+            (gap >= gapAnalysis.threshold || hasStrongTextPenPause(gapAnalysis, tokenIndex - 1)) &&
             !closingPunctuation.has(token.char) &&
             !openingPunctuation.has(previous.char)
           )
@@ -4666,12 +5373,13 @@ const refineTextSpacing = (
       const right = lexicalWordEvidence(value(index, rightEnd), language)
       const joined = lexicalWordEvidence(value(leftStart, rightEnd), language)
       const gap = gapAnalysis.gaps[index - 1]
+      const strongPenPause = hasStrongTextPenPause(gapAnalysis, index - 1)
       const bothFragmentsUnknown = !left.knownWord && !right.knownWord
       const marginalBoundary = gap <= Math.max(
         gapAnalysis.threshold * (bothFragmentsUnknown ? 1.9 : 1.42),
         gapAnalysis.compactGap + (bothFragmentsUnknown ? 0.024 : 0.014),
       )
-      if (joined.knownWord && (!left.knownWord || !right.knownWord) && marginalBoundary) {
+      if (joined.knownWord && (!left.knownWord || !right.knownWord) && marginalBoundary && !strongPenPause) {
         token.spaceBefore = false
         changed = true
       }
@@ -4711,9 +5419,17 @@ const refineTextSpacing = (
               if (start > 0) {
                 const boundaryIndex = segmentStart + start
                 const gap = gapAnalysis.gaps[boundaryIndex - 1]
-                const salientGap = gap >= Math.max(
-                  gapAnalysis.threshold * 0.72,
-                  gapAnalysis.compactGap * 1.55 + 0.0035,
+                const locallyDistinctCompactGap = (
+                  gap >= gapAnalysis.threshold * 0.48 &&
+                  gap >= gapAnalysis.compactGap * 2.2 + 0.0055
+                )
+                const salientGap = (
+                  gap >= Math.max(
+                    gapAnalysis.threshold * 0.72,
+                    gapAnalysis.compactGap * 1.55 + 0.0035,
+                  ) ||
+                  locallyDistinctCompactGap ||
+                  hasStrongTextPenPause(gapAnalysis, boundaryIndex - 1)
                 )
                 if (!salientGap) continue
               }
@@ -4749,6 +5465,8 @@ type TextCandidate = {
   baseConfidence: number
   personalSupport: number
   personalConfidence: number
+  strokeCountFit: number
+  strokeCountSupport: number
 }
 
 const candidatesForTextToken = (
@@ -4762,6 +5480,8 @@ const candidatesForTextToken = (
     baseConfidence = 0,
     personalSupport = 0,
     personalConfidence = 0,
+    strokeCountFit = 0,
+    strokeCountSupport = 0,
   ) => {
     const previous = byId.get(labelId)
     byId.set(labelId, previous ? {
@@ -4769,7 +5489,16 @@ const candidatesForTextToken = (
       baseConfidence: Math.max(previous.baseConfidence, baseConfidence),
       personalSupport: Math.max(previous.personalSupport, personalSupport),
       personalConfidence: Math.max(previous.personalConfidence, personalConfidence),
-    } : { confidence, baseConfidence, personalSupport, personalConfidence })
+      strokeCountFit: Math.max(previous.strokeCountFit, strokeCountFit),
+      strokeCountSupport: Math.max(previous.strokeCountSupport, strokeCountSupport),
+    } : {
+      confidence,
+      baseConfidence,
+      personalSupport,
+      personalConfidence,
+      strokeCountFit,
+      strokeCountSupport,
+    })
   }
   add(
     token.labelId,
@@ -4777,6 +5506,8 @@ const candidatesForTextToken = (
     token.baseConfidence ?? 0,
     token.personalSupport ?? 0,
     token.personalConfidence ?? 0,
+    token.strokeCountFit ?? 0,
+    token.strokeCountSupport ?? 0,
   )
   token.alternatives.forEach((alternative) => add(
     alternative.labelId,
@@ -4784,6 +5515,8 @@ const candidatesForTextToken = (
     alternative.baseConfidence ?? 0,
     alternative.personalSupport ?? 0,
     alternative.personalConfidence ?? 0,
+    alternative.strokeCountFit ?? 0,
+    alternative.strokeCountSupport ?? 0,
   ))
   const candidates = [...byId.entries()]
     .flatMap(([labelId, evidence]) => {
@@ -4792,10 +5525,16 @@ const candidatesForTextToken = (
     })
     .sort((first, second) => second.confidence - first.confidence)
   const peak = candidates[0]?.confidence ?? 0
+  // Uncertain freehand glyphs need a slightly wider N-best window so word
+  // context can still choose among real confusions (e/c, a/o, s/5, …).
+  // Confident peaks keep the tighter gate to avoid inventing distant classes.
+  const confidenceWindow = peak < 52 ? 40 : peak < 68 ? 34 : 30
   const plausible = candidates
     // A word may decide between visually similar glyphs, but it must not pull
     // an implausible class from the tail of the recognizer into the result.
-    .filter((candidate, index) => index === 0 || candidate.confidence >= Math.max(22, peak - 30))
+    .filter((candidate, index) => (
+      index === 0 || candidate.confidence >= Math.max(20, peak - confidenceWindow)
+    ))
   const lowercase = plausible.filter((candidate) => (
     isLetterLabel(candidate.label) &&
     candidate.label.char === candidate.label.char.toLocaleLowerCase('de') &&
@@ -4808,12 +5547,12 @@ const candidatesForTextToken = (
   ))
   const digits = plausible.filter((candidate) => isDigitLabel(candidate.label))
   const diverse = [
-    ...plausible.slice(0, 6),
+    ...plausible.slice(0, peak < 62 ? 10 : 7),
     ...lowercase.slice(0, 12),
     ...uppercase.slice(0, 6),
     ...digits.slice(0, 5),
   ]
-  return [...new Map(diverse.map((candidate) => [candidate.label.id, candidate])).values()].slice(0, 24)
+  return [...new Map(diverse.map((candidate) => [candidate.label.id, candidate])).values()].slice(0, 28)
 }
 
 const wordRanks = (words: Set<string>) => new Map(
@@ -4854,11 +5593,60 @@ const LANGUAGE_PROFILES = {
   trigrams: Set<string>
 }>
 
+type RecognitionWordMembership = (word: string) => boolean
+type RecognitionWordCandidateProvider = (length: number) => readonly string[]
+const installedRecognitionWordMembership: Record<RecognitionLanguage, RecognitionWordMembership | null> = {
+  de: null,
+  en: null,
+}
+const installedRecognitionWordCandidateProvider: Record<RecognitionLanguage, RecognitionWordCandidateProvider | null> = {
+  de: null,
+  en: null,
+}
+const installedRecognitionProperNameMembership: Record<RecognitionLanguage, RecognitionWordMembership | null> = {
+  de: null,
+  en: null,
+}
+
+/**
+ * Connects the exhaustive, lazily loaded FaNotes spelling vocabulary to the
+ * classical handwriting beam without copying its 380k strings or delaying
+ * application startup. Embedded FaNotes installs this callback only when OCR
+ * is first used; standalone GlyphenWerk keeps the compact built-in lexicon.
+ */
+export const installRecognitionWordMembership = (
+  language: RecognitionLanguage,
+  membership: RecognitionWordMembership | null,
+) => {
+  installedRecognitionWordMembership[language] = membership
+}
+
+/** Shares the lazily loaded, length-indexed spelling vocabulary with the
+ * classical beam. The provider retains ownership of the arrays, so enabling
+ * this bridge does not allocate another 380k-word index. */
+export const installRecognitionWordCandidateProvider = (
+  language: RecognitionLanguage,
+  provider: RecognitionWordCandidateProvider | null,
+) => {
+  installedRecognitionWordCandidateProvider[language] = provider
+}
+
+/** Installs a local corpus of canonical title-case names for OCR only. */
+export const installRecognitionProperNameMembership = (
+  language: RecognitionLanguage,
+  membership: RecognitionWordMembership | null,
+) => {
+  installedRecognitionProperNameMembership[language] = membership
+}
+
 const normalizedWord = (value: string, language: RecognitionLanguage) => {
   const lower = normalizeGermanSharpS(value).toLocaleLowerCase(LANGUAGE_PROFILES[language].locale)
-  return language === 'de'
-    ? lower.replace(/^[^a-zäöü]+|[^a-zäöü]+$/giu, '')
-    : lower.replace(/^[^a-z]+|[^a-z]+$/giu, '')
+  // Word chunks include closing punctuation before they are flushed, so a
+  // trailing comma/period must not suppress otherwise valid lexical evidence.
+  // Digits and mathematical symbols are not punctuation: stripping a final
+  // 0 previously made `FaLl0` look like the common word `fall`, allowing a
+  // mixed alphanumeric path to outrank the visibly supported name `Fabio`.
+  return lower.replace(/^\p{P}+|\p{P}+$/gu, '')
 }
 
 const languageTransitionScore = (
@@ -4891,7 +5679,50 @@ const lexicalWordEvidence = (value: string, language: RecognitionLanguage) => {
     return {
       word,
       knownWord: true,
+      properName: false,
+      preferredName: false,
+      coreWord: true,
       score: 1.22 + rank * 0.42 + Math.min(0.34, word.length * 0.045),
+    }
+  }
+
+  if (installedRecognitionWordMembership[language]?.(word)) {
+    // The exhaustive spelling list is corpus-filtered but unranked. It gets a
+    // meaningful exact-word bonus below the hand-curated common vocabulary;
+    // visual plausibility and the maximum-change guard remain mandatory.
+    return {
+      word,
+      knownWord: true,
+      properName: false,
+      preferredName: false,
+      coreWord: false,
+      score: 1.08 + Math.min(0.3, word.length * 0.035),
+    }
+  }
+  const canonicalNameShape = language === 'de'
+    ? /^[A-ZÄÖÜ][a-zäöü]{2,}$/u.test(value)
+    : /^[A-Z][a-z]{2,}$/u.test(value)
+  if (canonicalNameShape && SUPPLEMENTAL_CANONICAL_PROPER_NAMES.has(word)) {
+    return {
+      word,
+      knownWord: true,
+      properName: true,
+      preferredName: true,
+      coreWord: false,
+      score: 1.46 + Math.min(0.3, word.length * 0.035),
+    }
+  }
+  if (canonicalNameShape && installedRecognitionProperNameMembership[language]?.(word)) {
+    // Names have no reliable frequency rank. Their title-case shape and a
+    // corpus hit may resolve close glyphs, but the lower bonus keeps an
+    // ordinary common word and the visually correct unknown name ahead.
+    return {
+      word,
+      knownWord: true,
+      properName: true,
+      preferredName: false,
+      coreWord: false,
+      score: 0.98 + Math.min(0.26, word.length * 0.03),
     }
   }
 
@@ -4904,16 +5735,20 @@ const lexicalWordEvidence = (value: string, language: RecognitionLanguage) => {
     if (!word.endsWith(suffix) || word.length - suffix.length < 3) return false
     return profile.words.has(word.slice(0, -suffix.length))
   })
-  if (hasKnownStem) return { word, knownWord: false, score: 0.54 }
+  if (hasKnownStem) return {
+    word, knownWord: false, properName: false, preferredName: false, coreWord: false, score: 0.54,
+  }
 
   if (language === 'de' && word.length >= 7) {
     for (let split = 3; split <= word.length - 3; split += 1) {
       if (profile.words.has(word.slice(0, split)) && profile.words.has(word.slice(split))) {
-        return { word, knownWord: false, score: 0.62 }
+        return {
+          word, knownWord: false, properName: false, preferredName: false, coreWord: false, score: 0.62,
+        }
       }
     }
   }
-  return { word, knownWord: false, score: 0 }
+  return { word, knownWord: false, properName: false, preferredName: false, coreWord: false, score: 0 }
 }
 
 type TextBeam = {
@@ -4962,16 +5797,69 @@ const textGeometryCandidateScore = (
     ? strokeBoundsWithExtent.slice(1).filter((entry) => (
         entry.extent <= Math.max(60, primaryBody.extent * 0.55) &&
         resemblesTextDotPair(primaryBody.bounds, entry.bounds)
-      )).length
+    )).length
     : 0
 
+  // Small topology cues survive raster normalization and help the text beam
+  // resolve common connected-handwriting confusions. They remain deliberately
+  // weak so the visual classifier stays authoritative when the cue is unclear.
+  const tokenWidth = Math.max(0.001, token.bbox[2])
+  const tokenHeight = Math.max(0.001, token.bbox[3])
+  let horizontalSegment = 0
+  let verticalSegment = 0
+  let diagonalSegment = 0
+  let closedStroke = false
+  token.strokes.forEach((stroke) => {
+    if (stroke.points.length < 2) return
+    const first = stroke.points[0]
+    const last = stroke.points.at(-1)!
+    const endpointSpan = Math.hypot(
+      (last.x - first.x) / tokenWidth,
+      (last.y - first.y) / tokenHeight,
+    )
+    closedStroke ||= endpointSpan <= 0.42
+    for (let index = 1; index < stroke.points.length; index += 1) {
+      const previous = stroke.points[index - 1]
+      const point = stroke.points[index]
+      const deltaX = Math.abs(point.x - previous.x) / tokenWidth
+      const deltaY = Math.abs(point.y - previous.y) / tokenHeight
+      if (deltaX >= deltaY * 2.2 && deltaX >= 0.025) horizontalSegment += deltaX
+      if (deltaY >= deltaX * 2.2 && deltaY >= 0.025) verticalSegment += deltaY
+      if (deltaX >= deltaY * 0.62 && deltaY >= deltaX * 0.62 && deltaX + deltaY >= 0.06) {
+        diagonalSegment += Math.min(1, deltaX + deltaY)
+      }
+    }
+  })
+  const hasCrossbar = horizontalSegment >= 0.18 && horizontalSegment >= verticalSegment * 0.16
+  const hasTallStem = verticalSegment >= 0.72
+  const hasDiagonalArm = diagonalSegment >= 0.3
+  const hasLoop = closedStroke && horizontalSegment + verticalSegment + diagonalSegment >= 0.7
+  const baselineOverflow = (y + height) - baseline
+  const hasDescender = baselineOverflow >= referenceHeight * 0.08
+  const visuallyAllCaps = chunk.length >= 2 && chunk.every((entry) => /^\p{Lu}$/u.test(entry.char))
+
   if (/^\p{Lu}$/u.test(char)) {
-    if (position === 0) score += relativeHeight >= 1.08 ? 0.16 : -0.04
+    if (visuallyAllCaps) score += 0.22
+    else if (position === 0) score += relativeHeight >= 1.08 ? 0.16 : -0.04
     else score += relativeHeight >= 1.16 ? -0.04 : -0.28
   } else if (/^\p{Ll}$/u.test(char)) {
-    if (position > 0 && relativeHeight <= 1.12) score += 0.12
-    if (position === 0 && relativeHeight >= 1.2) score -= 0.08
+    if (visuallyAllCaps) score -= 0.1
+    else {
+      if (position > 0 && relativeHeight <= 1.12) score += 0.12
+      if (position === 0 && relativeHeight >= 1.2) score -= 0.08
+    }
   }
+
+  if (char === 'f') score += hasCrossbar && hasTallStem ? 0.16 : -0.045
+  if (char === 't') score += hasCrossbar ? 0.1 : -0.025
+  if (char === 'l') score += hasTallStem && !hasCrossbar ? 0.055 : 0
+  if (char === 'k') score += hasDiagonalArm ? 0.11 : -0.035
+  if (char === 'h') score += hasTallStem && !hasDiagonalArm ? 0.045 : 0
+  if (/^[gjpqy]$/u.test(char)) score += hasDescender ? 0.14 : -0.055
+  if (char === '9') score += hasDescender ? -0.08 : 0.025
+  if (/^[bdopq]$/u.test(char)) score += hasLoop ? 0.045 : 0
+  if (/^[ce]$/u.test(char)) score += !hasTallStem && hasLoop ? 0.035 : 0
+  if (char === '2' || char === 'z') score += hasLoop ? -0.035 : 0.02
 
   if (candidate.label.id === 'punctuation_underscore') {
     const distanceFromBaseline = centerY - baseline
@@ -4996,26 +5884,65 @@ const textGeometryCandidateScore = (
   return score
 }
 
+const learnedStrokeKind = (labelId: string) => (
+  labelId.startsWith('digit_')
+    ? 'digit'
+    : labelId.startsWith('latin_') ? 'letter' : null
+)
+
+const learnedStrokeCountCandidateScore = (candidate: TextCandidate) => {
+  if (candidate.strokeCountSupport < 8) return 0
+  const strength = clamp((candidate.strokeCountSupport - 4) / 12, 0.25, 1)
+  if (candidate.strokeCountFit >= 0.85) return 0.07 * strength
+  // A never-observed count is not negative evidence: cross-writer UJI
+  // validation contains legitimate unseen variants. Confirmed common forms
+  // receive a bonus, while rare/new forms stay neutral and remain learnable.
+  return 0
+}
+
+export const learnedStrokeCountHypothesisScore = (
+  tokens: Pick<RecognitionToken, 'strokeCountFit' | 'strokeCountSupport'>[],
+) => {
+  const supported = tokens.filter((token) => (token.strokeCountSupport ?? 0) >= 8)
+  if (!supported.length) return 0
+  return supported.reduce((score, token) => {
+    const support = token.strokeCountSupport ?? 0
+    const strength = clamp((support - 4) / 12, 0.25, 1)
+    const fit = token.strokeCountFit ?? 0
+    if (fit >= 0.85) return score + 0.08 * strength
+    return score
+  }, 0) / supported.length
+}
+
 const rerankTextChunk = (
   chunk: RecognitionToken[],
   labelMap: Map<string, LabelDefinition>,
   language: RecognitionLanguage,
+  textPrefixHint?: string,
 ) => {
   if (chunk.length === 0) return
   if (chunk.length === 1) {
     const token = chunk[0]
+    const visualPeak = token.visualConfidence ?? token.confidence
+    // For an isolated freehand glyph with no word context, personal case
+    // votes and geometry-backed near-misses are the only safe corrections.
+    // Full dictionary rewriting of a single letter is deliberately skipped.
     const personalCandidates = [{
       labelId: token.labelId,
-      confidence: token.visualConfidence ?? token.confidence,
+      confidence: visualPeak,
       baseConfidence: token.baseConfidence ?? 0,
       personalSupport: token.personalSupport ?? 0,
       personalConfidence: token.personalConfidence ?? 0,
+      strokeCountFit: token.strokeCountFit ?? 0,
+      strokeCountSupport: token.strokeCountSupport ?? 0,
     }, ...token.alternatives.map((alternative) => ({
       labelId: alternative.labelId,
       confidence: alternative.confidence,
       baseConfidence: alternative.baseConfidence ?? 0,
       personalSupport: alternative.personalSupport ?? 0,
       personalConfidence: alternative.personalConfidence ?? 0,
+      strokeCountFit: alternative.strokeCountFit ?? 0,
+      strokeCountSupport: alternative.strokeCountSupport ?? 0,
     }))]
       .filter((candidate) => {
         if (candidate.labelId === token.labelId) return true
@@ -5027,7 +5954,7 @@ const rerankTextChunk = (
         )
       })
       .filter((candidate) => candidate.personalSupport >= 2 && candidate.personalConfidence > 0)
-      .filter((candidate) => candidate.confidence >= (token.visualConfidence ?? token.confidence) - 8)
+      .filter((candidate) => candidate.confidence >= visualPeak - 8)
     const strongestBaseConfidence = personalCandidates.reduce((peak, candidate) => (
       Math.max(peak, candidate.baseConfidence)
     ), 0)
@@ -5051,6 +5978,251 @@ const rerankTextChunk = (
       token.baseConfidence = selected.baseConfidence
       token.personalSupport = selected.personalSupport
       token.personalConfidence = selected.personalConfidence
+      token.strokeCountFit = selected.strokeCountFit
+      token.strokeCountSupport = selected.strokeCountSupport
+    }
+    // Uncertain isolated letters without personal training: if a near
+    // alternative is clearly better on style-independent geometry, prefer it.
+    // Never override a trained class or switch digit↔letter kinds.
+    if (
+      visualPeak < 72 &&
+      (token.personalSupport ?? 0) < 2 &&
+      (token.personalConfidence ?? 0) < 28 &&
+      token.strokes.length > 0
+    ) {
+      const cluster = clusterFromStrokes(token.strokes)
+      if (cluster) {
+        const currentKind = token.labelId.startsWith('digit_')
+          ? 'digit'
+          : token.labelId.startsWith('latin_') || token.labelId.startsWith('german_')
+            ? 'letter'
+            : 'other'
+        const geometryLeader = [{
+          labelId: token.labelId,
+          confidence: visualPeak,
+          baseConfidence: token.baseConfidence ?? 0,
+        }, ...token.alternatives.map((alternative) => ({
+          labelId: alternative.labelId,
+          confidence: alternative.confidence,
+          baseConfidence: alternative.baseConfidence ?? 0,
+        }))]
+          .filter((candidate) => {
+            if (candidate.confidence < visualPeak - 12) return false
+            if (currentKind === 'digit') return candidate.labelId.startsWith('digit_')
+            if (currentKind === 'letter') {
+              return candidate.labelId.startsWith('latin_') || candidate.labelId.startsWith('german_')
+            }
+            return false
+          })
+          .map((candidate) => ({
+            ...candidate,
+            geometry: textGeometryAdjustment(candidate.labelId, cluster),
+          }))
+          .sort((first, second) => (
+            (first.geometry - second.geometry) ||
+            (second.baseConfidence - first.baseConfidence) ||
+            (second.confidence - first.confidence)
+          ))[0]
+        if (
+          geometryLeader &&
+          geometryLeader.labelId !== token.labelId &&
+          geometryLeader.geometry <= textGeometryAdjustment(token.labelId, cluster) - 0.035 &&
+          geometryLeader.confidence >= visualPeak - 10 &&
+          (geometryLeader.baseConfidence ?? 0) >= (token.baseConfidence ?? 0) - 4
+        ) {
+          const geometryLabel = labelMap.get(geometryLeader.labelId)
+          if (geometryLabel && isTextLabel(geometryLabel)) {
+            token.labelId = geometryLabel.id
+            token.char = geometryLabel.char
+            token.name = geometryLabel.name
+            token.latex = geometryLabel.latex
+            token.confidence = Math.max(token.confidence, geometryLeader.confidence)
+            token.baseConfidence = geometryLeader.baseConfidence
+          }
+        }
+      }
+    }
+    const extremelyNarrowDottedI = token.char !== 'i' &&
+      resemblesExtremelyNarrowDottedLowercaseI(token.strokes)
+      ? token.alternatives
+          .filter((candidate) => candidate.char === 'i')
+          .sort((first, second) => second.confidence - first.confidence)[0]
+      : undefined
+    if (
+      extremelyNarrowDottedI &&
+      extremelyNarrowDottedI.confidence >= token.confidence - 18 &&
+      (extremelyNarrowDottedI.baseConfidence ?? 0) >= (token.baseConfidence ?? 0) - 16 &&
+      (extremelyNarrowDottedI.personalConfidence ?? 0) >= (token.personalConfidence ?? 0) - 28 &&
+      (extremelyNarrowDottedI.personalSupport ?? 0) >= Math.min(2, token.personalSupport ?? 0)
+    ) {
+      const lowercaseLabel = labelMap.get(extremelyNarrowDottedI.labelId)
+      if (lowercaseLabel) {
+        token.labelId = lowercaseLabel.id
+        token.char = lowercaseLabel.char
+        token.name = lowercaseLabel.name
+        token.latex = lowercaseLabel.latex
+        token.confidence = Math.max(token.confidence, extremelyNarrowDottedI.confidence)
+        token.baseConfidence = extremelyNarrowDottedI.baseConfidence ?? 0
+        token.personalSupport = extremelyNarrowDottedI.personalSupport ?? 0
+        token.personalConfidence = extremelyNarrowDottedI.personalConfidence ?? 0
+        token.strokeCountFit = extremelyNarrowDottedI.strokeCountFit ?? 0
+        token.strokeCountSupport = extremelyNarrowDottedI.strokeCountSupport ?? 0
+      }
+    }
+    const dottedLowercaseJ = token.char !== 'i' && token.char !== 'j' &&
+      resemblesDetachedDotLowercaseJ(token.strokes)
+      ? token.alternatives
+          .filter((candidate) => candidate.char === 'j')
+          .sort((first, second) => second.confidence - first.confidence)[0]
+      : undefined
+    if (
+      dottedLowercaseJ &&
+      dottedLowercaseJ.confidence >= token.confidence - 12 &&
+      (dottedLowercaseJ.baseConfidence ?? 0) >= (token.baseConfidence ?? 0) - 24 &&
+      (dottedLowercaseJ.personalConfidence ?? 0) >= (token.personalConfidence ?? 0) - 36 &&
+      (dottedLowercaseJ.personalSupport ?? 0) >= Math.min(2, token.personalSupport ?? 0)
+    ) {
+      const lowercaseLabel = labelMap.get(dottedLowercaseJ.labelId)
+      if (lowercaseLabel) {
+        token.labelId = lowercaseLabel.id
+        token.char = lowercaseLabel.char
+        token.name = lowercaseLabel.name
+        token.latex = lowercaseLabel.latex
+        token.confidence = Math.max(token.confidence, dottedLowercaseJ.confidence)
+        token.baseConfidence = dottedLowercaseJ.baseConfidence ?? 0
+        token.personalSupport = dottedLowercaseJ.personalSupport ?? 0
+        token.personalConfidence = dottedLowercaseJ.personalConfidence ?? 0
+        token.strokeCountFit = dottedLowercaseJ.strokeCountFit ?? 0
+        token.strokeCountSupport = dottedLowercaseJ.strokeCountSupport ?? 0
+      }
+    }
+    const twoStrokeZ = token.char === '2' && token.strokes.length === 2
+      ? token.alternatives
+          .filter((candidate) => candidate.char === 'z' || candidate.char === 'Z')
+          .sort((first, second) => (
+            (second.personalConfidence ?? 0) - (first.personalConfidence ?? 0) ||
+            (second.baseConfidence ?? 0) - (first.baseConfidence ?? 0) ||
+            second.confidence - first.confidence
+          ))[0]
+      : undefined
+    if (
+      twoStrokeZ &&
+      twoStrokeZ.confidence >= token.confidence - 10 &&
+      (twoStrokeZ.baseConfidence ?? 0) >= (token.baseConfidence ?? 0) + 4 &&
+      (twoStrokeZ.personalConfidence ?? 0) >= (token.personalConfidence ?? 0) - 2 &&
+      (twoStrokeZ.personalSupport ?? 0) >= Math.min(2, token.personalSupport ?? 0)
+    ) {
+      // In the complete UJI corpus every digit 2 is a single trajectory,
+      // whereas 202/240 z/Z forms use two strokes. Requiring independent
+      // baseline and personal evidence keeps a deliberately trained
+      // two-stroke digit intact while recovering the characteristic z form.
+      const zLabel = labelMap.get(twoStrokeZ.labelId)
+      if (zLabel) {
+        token.labelId = zLabel.id
+        token.char = zLabel.char
+        token.name = zLabel.name
+        token.latex = zLabel.latex
+        token.confidence = Math.max(token.confidence, twoStrokeZ.confidence)
+        token.baseConfidence = twoStrokeZ.baseConfidence ?? 0
+        token.personalSupport = twoStrokeZ.personalSupport ?? 0
+        token.personalConfidence = twoStrokeZ.personalConfidence ?? 0
+        token.strokeCountFit = twoStrokeZ.strokeCountFit ?? 0
+        token.strokeCountSupport = twoStrokeZ.strokeCountSupport ?? 0
+      }
+    }
+    const currentLearnedStrokeKind = learnedStrokeKind(token.labelId)
+    const currentAbsoluteConfidence = token.alternatives
+      .find((candidate) => candidate.labelId === token.labelId)?.confidence ?? token.confidence
+    const learnedStrokeCountAlternative = (
+      currentLearnedStrokeKind &&
+      (token.strokeCountSupport ?? 0) >= 8 &&
+      (token.strokeCountFit ?? 0) === 0
+    ) ? token.alternatives
+        .filter((candidate) => {
+          const candidateKind = learnedStrokeKind(candidate.labelId)
+          return candidateKind &&
+            candidateKind !== currentLearnedStrokeKind &&
+            (candidate.strokeCountSupport ?? 0) >= 8 &&
+            (candidate.strokeCountFit ?? 0) >= 0.85 &&
+            candidate.confidence >= currentAbsoluteConfidence - 5
+        })
+        .sort((first, second) => (
+          (second.personalConfidence ?? 0) - (first.personalConfidence ?? 0) ||
+          (second.baseConfidence ?? 0) - (first.baseConfidence ?? 0) ||
+          second.confidence - first.confidence
+        ))[0]
+      : undefined
+    if (learnedStrokeCountAlternative) {
+      // This is a tie-breaker, not a hard label rule: eight trusted examples,
+      // an unseen count for the current class, an >=85% exact-count match for
+      // the alternative, and a close visual candidate are all required. Once
+      // the user confirms the rare form, its exact count becomes observed and
+      // this preference switches itself off on the next model rebuild.
+      const learnedLabel = labelMap.get(learnedStrokeCountAlternative.labelId)
+      if (learnedLabel) {
+        token.labelId = learnedLabel.id
+        token.char = learnedLabel.char
+        token.name = learnedLabel.name
+        token.latex = learnedLabel.latex
+        token.confidence = Math.max(token.confidence, learnedStrokeCountAlternative.confidence)
+        token.baseConfidence = learnedStrokeCountAlternative.baseConfidence ?? 0
+        token.personalSupport = learnedStrokeCountAlternative.personalSupport ?? 0
+        token.personalConfidence = learnedStrokeCountAlternative.personalConfidence ?? 0
+        token.strokeCountFit = learnedStrokeCountAlternative.strokeCountFit ?? 0
+        token.strokeCountSupport = learnedStrokeCountAlternative.strokeCountSupport ?? 0
+      }
+    }
+    const uppercaseY = token.char === 'y' && resemblesCompactUppercaseY(token.strokes)
+      ? token.alternatives
+          .filter((candidate) => candidate.char === 'Y')
+          .sort((first, second) => second.confidence - first.confidence)[0]
+      : undefined
+    if (
+      uppercaseY &&
+      uppercaseY.confidence >= token.confidence - 1 &&
+      (uppercaseY.baseConfidence ?? 0) >= (token.baseConfidence ?? 0) - 8 &&
+      (uppercaseY.personalConfidence ?? 0) >= (token.personalConfidence ?? 0) - 8 &&
+      (uppercaseY.personalSupport ?? 0) >= Math.min(2, token.personalSupport ?? 0)
+    ) {
+      const uppercaseLabel = labelMap.get(uppercaseY.labelId)
+      if (uppercaseLabel) {
+        token.labelId = uppercaseLabel.id
+        token.char = uppercaseLabel.char
+        token.name = uppercaseLabel.name
+        token.latex = uppercaseLabel.latex
+        token.confidence = Math.max(token.confidence, uppercaseY.confidence)
+        token.baseConfidence = uppercaseY.baseConfidence ?? 0
+        token.personalSupport = uppercaseY.personalSupport ?? 0
+        token.personalConfidence = uppercaseY.personalConfidence ?? 0
+        token.strokeCountFit = uppercaseY.strokeCountFit ?? 0
+        token.strokeCountSupport = uppercaseY.strokeCountSupport ?? 0
+      }
+    }
+    const uppercaseI = token.char === 'i' && resemblesNarrowUndottedUppercaseI(token.strokes)
+      ? token.alternatives
+          .filter((candidate) => candidate.char === 'I')
+          .sort((first, second) => second.confidence - first.confidence)[0]
+      : undefined
+    if (
+      uppercaseI &&
+      uppercaseI.confidence >= token.confidence - 4 &&
+      (uppercaseI.baseConfidence ?? 0) >= (token.baseConfidence ?? 0) + 4 &&
+      (uppercaseI.personalConfidence ?? 0) >= (token.personalConfidence ?? 0) - 16 &&
+      (uppercaseI.personalSupport ?? 0) >= Math.min(2, token.personalSupport ?? 0)
+    ) {
+      const uppercaseLabel = labelMap.get(uppercaseI.labelId)
+      if (uppercaseLabel) {
+        token.labelId = uppercaseLabel.id
+        token.char = uppercaseLabel.char
+        token.name = uppercaseLabel.name
+        token.latex = uppercaseLabel.latex
+        token.confidence = Math.max(token.confidence, uppercaseI.confidence)
+        token.baseConfidence = uppercaseI.baseConfidence ?? 0
+        token.personalSupport = uppercaseI.personalSupport ?? 0
+        token.personalConfidence = uppercaseI.personalConfidence ?? 0
+        token.strokeCountFit = uppercaseI.strokeCountFit ?? 0
+        token.strokeCountSupport = uppercaseI.strokeCountSupport ?? 0
+      }
     }
     // A single isolated glyph has no word context. Running it through the
     // language beam previously lowercased trained P/S forms or changed digits
@@ -5059,36 +6231,181 @@ const rerankTextChunk = (
   }
   const candidateLists = chunk.map((token) => candidatesForTextToken(token, labelMap))
   if (candidateLists.some((candidates) => candidates.length === 0)) return
-  const likelyLetters = candidateLists.filter((candidates) => candidates.some((candidate) => isLetterLabel(candidate.label))).length
-  const likelyDigits = candidateLists.filter((candidates) => candidates.some((candidate) => isDigitLabel(candidate.label))).length
-  const kind = likelyLetters >= Math.ceil(chunk.length * 0.6)
-    ? 'word'
-    : likelyDigits >= Math.ceil(chunk.length * 0.6) ? 'number' : 'mixed'
+  // Broad N-best lists almost always contain both kinds, so mere presence
+  // cannot prove that a sequence is numeric. Use both the winning kind and
+  // its evidence margin. This makes a close 5/s follow a strongly alphabetic
+  // neighbour (`sa`), lets a close q/9 follow a strongly numeric neighbour
+  // (`94`), and leaves two independently strong kinds (`E0`) mixed.
+  const kindEvidence = candidateLists.map((candidates) => {
+    const strongestLetter = candidates
+      .filter((candidate) => isLetterLabel(candidate.label))
+      .reduce((peak, candidate) => Math.max(peak, candidate.confidence), Number.NEGATIVE_INFINITY)
+    const strongestDigit = candidates
+      .filter((candidate) => isDigitLabel(candidate.label))
+      .reduce((peak, candidate) => Math.max(peak, candidate.confidence), Number.NEGATIVE_INFINITY)
+    if (!Number.isFinite(strongestLetter)) return { vote: 'number' as const, margin: 40 }
+    if (!Number.isFinite(strongestDigit)) return { vote: 'word' as const, margin: 40 }
+    const margin = strongestLetter - strongestDigit
+    if (margin >= 6) return { vote: 'word' as const, margin }
+    if (margin <= -6) return { vote: 'number' as const, margin: -margin }
+    return { vote: 'mixed' as const, margin: Math.abs(margin) }
+  })
+  const likelyLetters = kindEvidence.filter((entry) => entry.vote === 'word').length
+  const likelyDigits = kindEvidence.filter((entry) => entry.vote === 'number').length
+  const ambiguousPositions = kindEvidence.filter((entry) => entry.vote === 'mixed').length
+  const digitStrength = kindEvidence
+    .filter((entry) => entry.vote === 'number')
+    .reduce((sum, entry) => sum + entry.margin, 0)
+  const decisiveKindVotes = Math.max(1, Math.ceil(chunk.length * 0.6))
+  let kind: 'word' | 'number' | 'mixed' = 'mixed'
+  if (chunk.length >= 3 && likelyLetters >= likelyDigits) {
+    // Longer words can contain two digit-shaped visual errors and still have
+    // a fully supported lexical path (9ui2 -> quiz).
+    kind = 'word'
+  } else if (likelyDigits >= decisiveKindVotes && likelyDigits > likelyLetters) {
+    kind = 'number'
+  } else if (likelyLetters > 0 && likelyDigits > 0) {
+    kind = 'mixed'
+  } else if (likelyDigits > 0 && ambiguousPositions > 0) {
+    // A weak numeric neighbour cannot decide s2/52. A very strong second
+    // digit can still resolve a close q/9 in 94.
+    kind = digitStrength >= 32 ? 'number' : 'word'
+  } else if (likelyLetters > 0 && ambiguousPositions > 0) {
+    kind = 'word'
+  } else if (likelyLetters > 0) {
+    kind = 'word'
+  } else if (likelyDigits > 0) {
+    kind = 'number'
+  }
 
-  let beams: TextBeam[] = [{ value: '', visualScore: 0, languageScore: 0, score: 0, choices: [] }]
+  const emptyBeam = (): TextBeam => ({
+    value: '', visualScore: 0, languageScore: 0, score: 0, choices: [],
+  })
+  const extendBeam = (beam: TextBeam, candidate: TextCandidate, position: number): TextBeam => {
+    let visualScore = beam.visualScore + Math.log(0.08 + clamp(candidate.confidence / 100)) * 2.25
+    if (kind === 'word' && isDigitLabel(candidate.label)) visualScore -= 0.34
+    if (kind === 'number' && isLetterLabel(candidate.label)) visualScore -= 0.34
+    visualScore += learnedStrokeCountCandidateScore(candidate)
+    visualScore += textGeometryCandidateScore(chunk[position], candidate, chunk, position)
+    const languageScore = beam.languageScore + languageTransitionScore(
+      beam.value,
+      candidate.label.char,
+      position,
+      language,
+    )
+    return {
+      value: beam.value + candidate.label.char,
+      visualScore,
+      languageScore,
+      score: visualScore + languageScore,
+      choices: [...beam.choices, candidate],
+    }
+  }
+
+  let beams: TextBeam[] = [emptyBeam()]
   candidateLists.forEach((candidates, position) => {
-    beams = beams.flatMap((beam) => candidates.map((candidate) => {
-      let visualScore = beam.visualScore + Math.log(0.08 + clamp(candidate.confidence / 100)) * 2.25
-      if (kind === 'word' && isDigitLabel(candidate.label)) visualScore -= 0.34
-      if (kind === 'number' && isLetterLabel(candidate.label)) visualScore -= 0.34
-      visualScore += textGeometryCandidateScore(chunk[position], candidate, chunk, position)
-      const languageScore = beam.languageScore + languageTransitionScore(
-        beam.value,
-        candidate.label.char,
-        position,
-        language,
-      )
-      return {
-        value: beam.value + candidate.label.char,
-        visualScore,
-        languageScore,
-        score: visualScore + languageScore,
-        choices: [...beam.choices, candidate],
-      }
-    }))
+    beams = beams.flatMap((beam) => candidates.map((candidate) => extendBeam(beam, candidate, position)))
       .sort((first, second) => second.score - first.score)
       .slice(0, 256)
   })
+
+  // A fixed-width prefix beam can discard a complete common word before its
+  // exact-word evidence becomes available: four ambiguous early glyphs with
+  // eight plausible alternatives already produce 4096 prefixes. Preserve one
+  // visually strongest casing path for each small, hand-curated core word
+  // whose letters are all present in the recognizer candidates. The normal
+  // visual-loss and maximum-change gates below still decide whether that word
+  // may replace the visual result; this only prevents premature search loss.
+  if (kind === 'word' && chunk.length >= 3) {
+    const profile = LANGUAGE_PROFILES[language]
+    const constrainedWordBeam = (value: string, exactCase: boolean) => {
+      const characters = [...value]
+      if (characters.length !== chunk.length) return []
+      let paths: TextBeam[] = [emptyBeam()]
+      characters.forEach((character, position) => {
+        const matching = candidateLists[position].filter((candidate) => (
+          exactCase
+            ? candidate.label.char === character
+            : candidate.label.char.toLocaleLowerCase(profile.locale) === character
+        ))
+        paths = matching.length
+          ? paths.flatMap((beam) => matching.map((candidate) => extendBeam(beam, candidate, position)))
+              .sort((first, second) => second.score - first.score)
+              .slice(0, 2)
+          : []
+      })
+      return paths.slice(0, 1)
+    }
+    const coreWordBeams = [...profile.words].flatMap((word) => constrainedWordBeam(word, false))
+    const preferredNameBeams = [...SUPPLEMENTAL_CANONICAL_PROPER_NAMES].flatMap((name) => {
+      const canonicalName = name.slice(0, 1).toLocaleUpperCase(profile.locale) + name.slice(1)
+      return constrainedWordBeam(canonicalName, true)
+    })
+    const extendedProvider = installedRecognitionWordCandidateProvider[language]
+    const candidateByLowercaseCharacter = candidateLists.map((candidates) => {
+      const indexed = new Map<string, TextCandidate>()
+      candidates.forEach((candidate) => {
+        const character = candidate.label.char.toLocaleLowerCase(profile.locale)
+        const previous = indexed.get(character)
+        if (!previous || candidate.confidence > previous.confidence) indexed.set(character, candidate)
+      })
+      return indexed
+    })
+    const extendedMatches: { word: string; score: number }[] = []
+    const maximumExtendedChanges = Math.max(1, Math.ceil(chunk.length * 0.34))
+    for (const word of extendedProvider?.(chunk.length) ?? []) {
+      const characters = [...word]
+      if (characters.length !== chunk.length) continue
+      if (
+        !candidateByLowercaseCharacter[0].has(characters[0]) ||
+        !candidateByLowercaseCharacter[1].has(characters[1])
+      ) continue
+      let changes = 0
+      let score = 0
+      let supported = true
+      for (let position = 0; position < characters.length; position += 1) {
+        const character = characters[position]
+        const candidate = candidateByLowercaseCharacter[position].get(character)
+        if (!candidate) {
+          supported = false
+          break
+        }
+        const visualCharacter = (labelMap.get(
+          chunk[position].visualLabelId ?? chunk[position].labelId,
+        )?.char ?? chunk[position].char ?? '')
+          .toLocaleLowerCase(profile.locale)
+        if (visualCharacter !== character) changes += 1
+        const visualConfidence = chunk[position].visualConfidence ?? chunk[position].confidence
+        const loss = Math.max(0, visualConfidence - candidate.confidence)
+        if (changes > maximumExtendedChanges || candidate.confidence < 32 || loss > 24) {
+          supported = false
+          break
+        }
+        score += Math.log(0.08 + clamp(candidate.confidence / 100)) * 2.25
+      }
+      if (!supported) continue
+      extendedMatches.push({ word, score })
+      if (extendedMatches.length >= 512) {
+        extendedMatches.sort((first, second) => second.score - first.score)
+        extendedMatches.length = 192
+      }
+    }
+    extendedMatches.sort((first, second) => second.score - first.score)
+    const exhaustiveWordBeams = extendedMatches
+      .slice(0, 128)
+      .flatMap(({ word }) => constrainedWordBeam(word, false))
+    const byValue = new Map<string, TextBeam>()
+    ;[
+      ...beams,
+      ...coreWordBeams,
+      ...preferredNameBeams,
+      ...exhaustiveWordBeams,
+    ].forEach((beam) => {
+      const previous = byValue.get(beam.value)
+      if (!previous || beam.score > previous.score) byValue.set(beam.value, beam)
+    })
+    beams = [...byValue.values()]
+  }
 
   beams.forEach((beam) => {
     const evidence = lexicalWordEvidence(beam.value, language)
@@ -5099,11 +6416,162 @@ const rerankTextChunk = (
   })
 
   const ranked = beams.sort((first, second) => second.score - first.score)
-  const languageBest = ranked[0]
+  const correctionEvidenceForBeam = (beam?: TextBeam) => {
+    const changedIndexes = beam?.choices.flatMap((candidate, index) => (
+      candidate.label.id === (chunk[index].visualLabelId ?? chunk[index].labelId) ? [] : [index]
+    )) ?? []
+    const semanticChangedIndexes = changedIndexes.filter((index) => {
+      const visualLabel = labelMap.get(chunk[index].visualLabelId ?? chunk[index].labelId)
+      const selectedLabel = beam?.choices[index]?.label
+      if (!visualLabel || !selectedLabel) return true
+      return visualLabel.char.toLocaleLowerCase(LANGUAGE_PROFILES[language].locale) !==
+        selectedLabel.char.toLocaleLowerCase(LANGUAGE_PROFILES[language].locale)
+    })
+    const changeKinds = new Set(semanticChangedIndexes.map((index) => {
+      const visualLabel = labelMap.get(chunk[index].visualLabelId ?? chunk[index].labelId)
+      const selectedLabel = beam?.choices[index]?.label
+      return `${visualLabel?.char.toLocaleLowerCase(LANGUAGE_PROFILES[language].locale) ?? '?'}>` +
+        (selectedLabel?.char.toLocaleLowerCase(LANGUAGE_PROFILES[language].locale) ?? '?')
+    }))
+    const repeatedChanges = Math.max(0, semanticChangedIndexes.length - changeKinds.size)
+    const effectiveSemanticChanges = changeKinds.size + Math.floor(repeatedChanges * 0.5)
+    const changedVisualLosses = changedIndexes.map((index) => {
+      const visualLabelId = chunk[index].visualLabelId ?? chunk[index].labelId
+      const visualConfidence = chunk[index].visualConfidence ??
+        chunk[index].alternatives.find((alternative) => alternative.labelId === visualLabelId)?.confidence ??
+        chunk[index].confidence
+      return Math.max(0, visualConfidence - (beam?.choices[index]?.confidence ?? 0))
+    })
+    const shortWord = chunk.length <= 2
+    const changeRatio = beam?.evidence?.preferredName
+      ? 0.6
+      : beam?.evidence?.coreWord && chunk.length >= 5 ? 0.5 : 0.34
+    const maximumChanges = shortWord
+      ? 1
+      : Math.max(1, Math.ceil(chunk.length * changeRatio))
+    const maximumLossPerChangedGlyph = shortWord ? 3 : 24
+    const supported = Boolean(
+      beam?.evidence?.knownWord &&
+      effectiveSemanticChanges <= maximumChanges &&
+      changedVisualLosses.every((loss) => loss <= maximumLossPerChangedGlyph) &&
+      changedIndexes.every((index) => beam!.choices[index].confidence >= 32)
+    )
+    return {
+      changedIndexes,
+      semanticChangedIndexes,
+      effectiveSemanticChanges,
+      changedVisualLosses,
+      maximumChanges,
+      supported,
+    }
+  }
+  const leadingLanguageBeam = ranked[0]
+  const leadingCorrectionEvidence = correctionEvidenceForBeam(leadingLanguageBeam)
+  const fallbackLanguageBeam = leadingLanguageBeam?.evidence?.knownWord &&
+    !leadingCorrectionEvidence.supported
+    ? ranked.find((beam) => (
+        beam !== leadingLanguageBeam &&
+        beam.score >= leadingLanguageBeam.score - 0.28 &&
+        correctionEvidenceForBeam(beam).supported
+      ))
+    : undefined
+  const provisionalLanguageBest = fallbackLanguageBeam ?? leadingLanguageBeam
+  const provisionalCorrectionEvidence = correctionEvidenceForBeam(provisionalLanguageBest)
+  const simplerSupportedBeam = provisionalLanguageBest && provisionalCorrectionEvidence.supported
+    ? ranked.find((beam) => {
+        const evidence = correctionEvidenceForBeam(beam)
+        const competingCharacters = [...beam.value.toLocaleLowerCase(LANGUAGE_PROFILES[language].locale)]
+        const provisionalCharacters = [
+          ...provisionalLanguageBest.value.toLocaleLowerCase(LANGUAGE_PROFILES[language].locale),
+        ]
+        const competingWordDifference = competingCharacters.length === provisionalCharacters.length
+          ? competingCharacters.filter((character, index) => character !== provisionalCharacters[index]).length
+          : Number.POSITIVE_INFINITY
+        return evidence.supported &&
+          evidence.effectiveSemanticChanges < provisionalCorrectionEvidence.effectiveSemanticChanges &&
+          (beam.evidence?.preferredName || competingWordDifference >= 2) &&
+          beam.score >= provisionalLanguageBest.score - 0.12 &&
+          beam.visualScore >= provisionalLanguageBest.visualScore - 0.12
+      })
+    : undefined
+  const languageBest = simplerSupportedBeam ?? provisionalLanguageBest
+  const languageCorrectionEvidence = correctionEvidenceForBeam(languageBest)
   const visualBest = [...beams].sort((first, second) => second.visualScore - first.visualScore)[0]
+  const visualBestCharacters = Array.from(visualBest?.value ?? '')
+  const normalizedTextPrefix = typeof textPrefixHint === 'string' && textPrefixHint.length <= 320
+    ? textPrefixHint.normalize('NFC')
+    : ''
+  const stablePrefixCharacters = Array.from(normalizedTextPrefix)
+  const visualContainsStablePrefix = (
+    stablePrefixCharacters.length >= 1 &&
+    /^\p{L}{1,320}$/u.test(normalizedTextPrefix) &&
+    !/[ßẞ]/u.test(normalizedTextPrefix) &&
+    visualBestCharacters.length > stablePrefixCharacters.length &&
+    stablePrefixCharacters.every((character, index) => visualBestCharacters[index] === character)
+  )
+  const visuallyCloseIncompletePrefix = visualBest &&
+    visualContainsStablePrefix &&
+    /^\p{L}+$/u.test(visualBest.value)
+    ? ranked.find((beam) => {
+        const normalized = beam.value.toLocaleLowerCase(LANGUAGE_PROFILES[language].locale)
+        const changedIndexes = beam.choices.flatMap((candidate, index) => (
+          candidate.label.id === visualBest.choices[index]?.label.id ? [] : [index]
+        ))
+        const sameCasePattern = [...beam.value].every((character, index) => {
+          const visualCharacter = visualBestCharacters[index]
+          if (!visualCharacter) return false
+          return /^\p{Lu}$/u.test(character) === /^\p{Lu}$/u.test(visualCharacter)
+        })
+        return (
+          !beam.evidence?.knownWord &&
+          normalized.length >= 2 &&
+          /^\p{L}+$/u.test(beam.value) &&
+          LANGUAGE_PROFILES[language].prefixes.has(normalized) &&
+          sameCasePattern &&
+          changedIndexes.length <= 1 &&
+          changedIndexes.every((index) => index >= stablePrefixCharacters.length) &&
+          changedIndexes.every((index) => (
+            beam.choices[index].confidence >= visualBest.choices[index].confidence - 6
+          )) &&
+          beam.visualScore >= visualBest.visualScore - 0.26
+        )
+      })
+    : undefined
   const visualWord = visualBest?.value ?? ''
+  const rawVisualWord = chunk.map((token) => (
+    labelMap.get(token.visualLabelId ?? token.labelId)?.char ?? token.char
+  )).join('')
+  const rawVisualEvidence = lexicalWordEvidence(rawVisualWord, language)
+  const rawVisualNormalized = rawVisualWord.toLocaleLowerCase(LANGUAGE_PROFILES[language].locale)
+  const rawVisualHasInternalUppercase = [...rawVisualWord].slice(1).some((character) => (
+    /^\p{Lu}$/u.test(character)
+  ))
+  const literalKnownVisualBeam = rawVisualEvidence.knownWord &&
+    rawVisualHasInternalUppercase &&
+    /^\p{Ll}/u.test(rawVisualWord) &&
+    /^\p{L}{2,}$/u.test(rawVisualWord)
+    ? ranked.find((beam) => (
+        beam.value.toLocaleLowerCase(LANGUAGE_PROFILES[language].locale) === rawVisualNormalized
+      ))
+    : undefined
+  const rawVisualBodyHeight = median(
+    chunk.slice(1).map((token) => token.bbox[3]).filter((height) => height > 0),
+  ) || chunk[0]?.bbox[3] || 0
+  const rawVisualHasTallLowercaseInitial = /^\p{Ll}{2,}$/u.test(rawVisualWord) &&
+    (chunk[0]?.bbox[3] ?? 0) >= rawVisualBodyHeight * 1.25
+  const consistentlyCasedKnownVisualBeam = rawVisualEvidence.knownWord && (
+    (/^\p{Ll}{2,}$/u.test(rawVisualWord) && !rawVisualHasTallLowercaseInitial) ||
+    /^\p{Lu}\p{Ll}+$/u.test(rawVisualWord) ||
+    /^\p{Lu}{2,}$/u.test(rawVisualWord)
+  )
+    ? ranked.find((beam) => beam.value === rawVisualWord)
+    : undefined
   const visualLooksLikeProperName = (
     /^\p{Lu}\p{Ll}{2,}$/u.test(visualWord) &&
+    !lexicalWordEvidence(visualWord, language).knownWord
+  )
+  const visualLooksLikeAcronym = (
+    /^\p{Lu}{2,}$/u.test(visualWord) &&
     !lexicalWordEvidence(visualWord, language).knownWord
   )
   const visualNameCharacters = Array.from(visualWord.toLocaleLowerCase(LANGUAGE_PROFILES[language].locale))
@@ -5113,13 +6581,62 @@ const rerankTextChunk = (
   const visualNameChanges = visualNameCharacters.length === languageNameCharacters.length
     ? visualNameCharacters.filter((character, index) => character !== languageNameCharacters[index]).length
     : Number.POSITIVE_INFINITY
-  const languageOverwritesVisualName = Boolean(
+  const canonicalNameChangedIndexes = languageCorrectionEvidence.semanticChangedIndexes
+  const canonicalEffectiveChanges = languageCorrectionEvidence.effectiveSemanticChanges
+  const visuallyUncertainCanonicalNameCorrection = Boolean(
+    languageBest?.evidence?.properName &&
+    /^\p{Lu}\p{Ll}{2,}$/u.test(languageBest.value) &&
+    canonicalNameChangedIndexes.length >= 1 &&
+    canonicalNameChangedIndexes.length <= (
+      languageBest.evidence.preferredName
+        ? Math.max(2, Math.ceil(chunk.length * 0.6))
+        : 2
+    ) &&
+    canonicalNameChangedIndexes.some((index) => (
+      (chunk[index].visualConfidence ?? chunk[index].confidence) <= 84
+    ))
+  )
+  const visuallyConfidentUnknownTitleCase = Boolean(
     visualLooksLikeProperName &&
+    canonicalNameChangedIndexes.length >= 1 &&
+    canonicalNameChangedIndexes.every((index) => (
+      (chunk[index].visualConfidence ?? chunk[index].confidence) >= 88
+    ))
+  )
+  const uncertainTitleCaseDictionaryCorrection = Boolean(
+    visualLooksLikeProperName &&
+    languageBest?.evidence?.knownWord &&
+    !languageBest.evidence.properName &&
+    canonicalNameChangedIndexes.length >= 1 &&
+    canonicalEffectiveChanges <= languageCorrectionEvidence.maximumChanges &&
+    canonicalNameChangedIndexes.some((index) => (
+      (chunk[index].visualConfidence ?? chunk[index].confidence) <= 84
+    )) &&
+    canonicalNameChangedIndexes.every((index) => (
+      (languageBest?.choices[index]?.confidence ?? 0) >=
+      (chunk[index].visualConfidence ?? chunk[index].confidence) -
+        (languageBest?.evidence?.coreWord ? 16 : 12)
+    ))
+  )
+  const languageOverwritesVisualName = Boolean(
     languageBest &&
     languageBest.value !== visualWord &&
     (
-      !/^\p{Lu}\p{Ll}{2,}$/u.test(languageBest.value) ||
-      visualNameChanges >= 2
+      visualLooksLikeAcronym ||
+      (
+        visualLooksLikeProperName &&
+        !uncertainTitleCaseDictionaryCorrection &&
+        (
+          visuallyConfidentUnknownTitleCase ||
+          (
+            !visuallyUncertainCanonicalNameCorrection &&
+            (
+              !/^\p{Lu}\p{Ll}{2,}$/u.test(languageBest.value) ||
+              visualNameChanges >= 2
+            )
+          )
+        )
+      )
     )
   )
   // A dictionary/prefix prior may disambiguate letters inside an ordinary
@@ -5128,36 +6645,81 @@ const rerankTextChunk = (
   // fragments (for example "taboo") even though every visible glyph was
   // individually correct. Keeping the purely visual beam here still allows
   // Tost -> Test because both hypotheses retain title case.
-  const languageVisualLabels = languageBest?.choices.map((candidate) => candidate.label.id) ?? []
-  const languageChangedIndexes = languageVisualLabels.flatMap((labelId, index) => (
-    labelId === (chunk[index].visualLabelId ?? chunk[index].labelId) ? [] : [index]
-  ))
-  const languageChangedVisualLosses = languageChangedIndexes.map((index) => {
-    const visualLabelId = chunk[index].visualLabelId ?? chunk[index].labelId
-    const visualConfidence = chunk[index].visualConfidence ??
-      chunk[index].alternatives.find((alternative) => alternative.labelId === visualLabelId)?.confidence ??
-      chunk[index].confidence
-    return Math.max(0, visualConfidence - (languageBest?.choices[index]?.confidence ?? 0))
-  })
-  const shortWord = chunk.length <= 2
-  const maximumLanguageChanges = shortWord ? 1 : Math.max(1, Math.ceil(chunk.length * 0.34))
-  const maximumLossPerChangedGlyph = shortWord ? 3 : 24
-  const languageCorrectionHasVisualSupport = Boolean(
-    languageBest?.evidence?.knownWord &&
-    languageChangedIndexes.length <= maximumLanguageChanges &&
-    languageChangedVisualLosses.every((loss) => loss <= maximumLossPerChangedGlyph) &&
-    languageChangedIndexes.every((index) => languageBest!.choices[index].confidence >= 32)
-  )
+  // Case-only replacements do not consume semantic ambiguity. Repeated
+  // occurrences of the same visual confusion share a bounded decision, while
+  // every occurrence still has to pass its own confidence and loss gates.
+  const languageChangedIndexes = languageCorrectionEvidence.changedIndexes
+  const languageCorrectionHasVisualSupport = languageCorrectionEvidence.supported
   // Very short dictionary entries carry a disproportionately large prior:
   // without this gate a clear `ac` became `an`, `os` became `an`, and two
   // lower-confidence letters could turn into an unrelated common word.  A
   // language prior may resolve genuinely close shapes, but it cannot replace
   // multiple visible glyphs or pay a large visual penalty. Longer words keep
   // the wider one-letter ambiguity needed for corrections such as Tost→Test.
-  const best = languageOverwritesVisualName || (
+  let best = languageOverwritesVisualName || (
     languageChangedIndexes.length > 0 && !languageCorrectionHasVisualSupport
   ) ? visualBest : languageBest
+  if (
+    !languageOverwritesVisualName &&
+    visuallyCloseIncompletePrefix &&
+    !best?.evidence?.knownWord
+  ) {
+    // During live writing the last one or two letters are intentionally not
+    // fed back as a hard hint. A core dictionary prefix may resolve one close
+    // visual ambiguity (tes/tec), but it must preserve case, remain within six
+    // confidence points and never override a complete word or protected name.
+    best = visuallyCloseIncompletePrefix
+  }
+  if (
+    best &&
+    literalKnownVisualBeam &&
+    best.value.toLocaleLowerCase(LANGUAGE_PROFILES[language].locale) !== rawVisualNormalized
+  ) best = literalKnownVisualBeam
+  if (
+    best &&
+    consistentlyCasedKnownVisualBeam &&
+    best.value !== rawVisualWord &&
+    best.value.toLocaleLowerCase(LANGUAGE_PROFILES[language].locale) === rawVisualNormalized
+  ) {
+    // Once every visible glyph already forms a known word with a coherent
+    // case pattern, language frequency is not evidence for changing case.
+    // Mixed patterns such as teSt deliberately miss this guard and can still
+    // be normalized by the word beam.
+    best = consistentlyCasedKnownVisualBeam
+  }
   if (!best) return
+  const canonicalWordCharacters = [...(best.evidence?.word ?? '')]
+  const visualCharacters = chunk.map((token) => (
+    labelMap.get(token.visualLabelId ?? token.labelId)?.char ?? token.char
+  ))
+  const visualAllCaps = visualCharacters.length >= 2 && visualCharacters.every((character) => (
+    /^\p{Lu}$/u.test(character)
+  ))
+  const caseReferenceHeight = Math.max(0.025, median(
+    chunk.filter((token) => token.bbox[3] >= 0.025).map((token) => token.bbox[3]),
+  ))
+  if (
+    best.evidence?.knownWord &&
+    !best.evidence.properName &&
+    !visualAllCaps &&
+    canonicalWordCharacters.length === best.choices.length &&
+    best.value.toLocaleLowerCase(LANGUAGE_PROFILES[language].locale) === best.evidence.word
+  ) {
+    best.choices = best.choices.map((selected, index) => {
+      if (index === 0 || !/^\p{Lu}$/u.test(selected.label.char)) return selected
+      const canonicalCharacter = canonicalWordCharacters[index]
+      const lowercase = candidateLists[index].find((candidate) => (
+        candidate.label.char === canonicalCharacter
+      ))
+      const compactInternalGlyph = chunk[index].bbox[3] <= caseReferenceHeight * 1.12
+      return lowercase &&
+        compactInternalGlyph &&
+        lowercase.confidence >= selected.confidence - 24
+        ? lowercase
+        : selected
+    })
+    best.value = best.choices.map((candidate) => candidate.label.char).join('')
+  }
   const runnerUp = ranked.find((beam) => beam.value !== best.value)
   const scoreMargin = Math.max(0, best.score - (runnerUp?.score ?? best.score - 2))
   const visualLabels = chunk.map((token) => token.visualLabelId ?? token.labelId)
@@ -5203,14 +6765,28 @@ export const applyTextReranking = (
   tokens: RecognitionToken[],
   labels: LabelDefinition[],
   language: RecognitionLanguage,
+  textPrefixHint?: string,
 ) => {
   const result = arrangeTextTokens(tokens)
   const labelMap = new Map(labels.map((label) => [label.id, label]))
+  const normalizedLinePrefix = typeof textPrefixHint === 'string' && textPrefixHint.length <= 320
+    ? textPrefixHint.normalize('NFC')
+    : ''
+  const linePrefixCharacters = /^\p{L}{1,320}$/u.test(normalizedLinePrefix) && !/[ßẞ]/u.test(normalizedLinePrefix)
+    ? Array.from(normalizedLinePrefix)
+    : []
   refineTextSpacing(result, language)
   const rerankWords = () => {
     let chunk: RecognitionToken[] = []
+    let consumedCharacters = 0
     const flush = () => {
-      rerankTextChunk(chunk, labelMap, language)
+      const chunkCharacters = chunk.filter((token) => !token.isLayout).length
+      const prefixInsideChunk = (
+        linePrefixCharacters.length > consumedCharacters &&
+        linePrefixCharacters.length < consumedCharacters + chunkCharacters
+      ) ? linePrefixCharacters.slice(consumedCharacters).join('') : undefined
+      rerankTextChunk(chunk, labelMap, language, prefixInsideChunk)
+      consumedCharacters += chunkCharacters
       chunk = []
     }
 
@@ -5227,6 +6803,204 @@ export const applyTextReranking = (
   return result
 }
 
+/**
+ * Scores only positions that were already stable before new ink arrived.
+ *
+ * A prefix never implies the final character count. It is deliberately
+ * ignored unless the candidate contains at least one new visible position;
+ * therefore a collapsed candidate whose total length merely equals the old
+ * prefix receives neither a bonus nor a direct token replacement.
+ */
+export const textPrefixCompatibilityScore = (
+  tokens: RecognitionToken[],
+  textPrefixHint?: string,
+) => {
+  if (
+    typeof textPrefixHint !== 'string' ||
+    textPrefixHint.length < 1 ||
+    textPrefixHint.length > 320 ||
+    /[ßẞ]/u.test(textPrefixHint)
+  ) return 0
+  const visible = tokens.filter((token) => !token.isLayout)
+  const prefixCharacters = Array.from(textPrefixHint.normalize('NFC'))
+  if (
+    prefixCharacters.length < 1 ||
+    visible.length <= prefixCharacters.length ||
+    !prefixCharacters.every((character) => /^\p{L}$/u.test(character))
+  ) return 0
+
+  let total = 0
+  for (let index = 0; index < prefixCharacters.length; index += 1) {
+    const expected = prefixCharacters[index]
+    const token = visible[index]
+    if (!token) return 0
+    const candidates = [{
+      char: token.char,
+      confidence: token.confidence,
+      personalSupport: token.personalSupport ?? 0,
+      personalConfidence: token.personalConfidence ?? 0,
+      selected: true,
+    }, ...token.alternatives.map((alternative) => ({
+      char: alternative.char,
+      confidence: alternative.confidence,
+      personalSupport: alternative.personalSupport ?? 0,
+      personalConfidence: alternative.personalConfidence ?? 0,
+      selected: false,
+    }))]
+    let matching: (typeof candidates)[number] | undefined
+    let matchingScore = Number.NEGATIVE_INFINITY
+    for (const candidate of candidates) {
+      if (!(
+        candidate.char === expected &&
+        (
+          candidate.personalSupport > 0 ||
+          candidate.confidence >= Math.max(18, candidate.selected ? 18 : token.confidence - 30)
+        )
+      )) continue
+      const score = candidate.confidence + candidate.personalConfidence * 0.18 +
+        Math.min(12, candidate.personalSupport * 1.5)
+      if (score > matchingScore) {
+        matching = candidate
+        matchingScore = score
+      }
+    }
+    // Every supposedly stable position must remain visually supportable.
+    // Averaging one missing position into a long prefix could otherwise turn
+    // an already corrected word into a self-reinforcing near-match.
+    if (!matching) return 0
+    total += matching.confidence / 100 + Math.min(0.18, matching.personalConfidence / 500)
+  }
+  return total / prefixCharacters.length
+}
+
+/**
+ * Stronger than the beam compatibility score: mode selection may only use a
+ * prefix that is already present in the selected text tokens. An alternative
+ * hidden in an N-best list is useful for ranking, but is not independent
+ * enough to overrule a mathematical interpretation.
+ */
+export const selectedTextPrefixMatches = (
+  tokens: RecognitionToken[],
+  textPrefixHint?: string,
+) => {
+  if (
+    typeof textPrefixHint !== 'string' ||
+    textPrefixHint.length < 1 ||
+    textPrefixHint.length > 320 ||
+    /[ßẞ]/u.test(textPrefixHint)
+  ) return false
+  const prefix = Array.from(textPrefixHint.normalize('NFC'))
+  const visible = tokens.filter((token) => !token.isLayout)
+  return (
+    prefix.length >= 1 &&
+    visible.length > prefix.length &&
+    prefix.every((character) => /^\p{L}$/u.test(character)) &&
+    prefix.every((character, index) => visible[index]?.char === character)
+  )
+}
+
+type TextPrefixModeEvidence = {
+  compatibility: number
+  selectedPrefixMatches: boolean
+  visibleCharacters: number
+  letters: number
+}
+
+/** A hidden N-best alternative may rank a text beam, but may not change the
+ * selected text/math mode. Mode evidence requires the selected old positions
+ * themselves to match and the complete candidate to remain alphabetic. */
+export const textPrefixModeBonus = (evidence: TextPrefixModeEvidence) => (
+  Number.isFinite(evidence.compatibility) &&
+  evidence.compatibility >= 0.58 &&
+  evidence.selectedPrefixMatches &&
+  evidence.visibleCharacters >= 2 &&
+  evidence.letters === evidence.visibleCharacters
+    ? 0.38 + Math.min(0.42, evidence.compatibility * 0.4)
+    : 0
+)
+
+export const confirmedTextPrefixModeBonus = (
+  compatibility: number,
+  selectedPrefixMatches: boolean,
+  hasDecisiveMathStructure: boolean,
+) => (
+  Number.isFinite(compatibility) &&
+  compatibility >= 0.58 &&
+  selectedPrefixMatches &&
+  !hasDecisiveMathStructure
+    ? 1.85
+    : 0
+)
+
+type CollapsedMathPrefixEvidence = {
+  prefixCompatibility: number
+  selectedPrefixMatches: boolean
+  prefixLength: number
+  textVisibleCharacters: number
+  textLetters: number
+  textLines: number
+  textBaselineAlignment: number
+  inkAspectRatio: number
+  mathVisibleCharacters: number
+  mathDigits: number
+  mathOperators: number
+  mathRelations: number
+  mathFractions: number
+  mathLayoutAssignments: number
+  mathLines: number
+  mathStrongSymbols: number
+  mathHasCommandStructure: boolean
+  mathHasDecisiveStructure: boolean
+}
+
+/**
+ * Removes a bounded amount of duplicated evidence when several prefix-backed
+ * text letters collapse into one bare mathematical command. The command and
+ * strong-symbol scorers otherwise count the same singleton twice. Fractions,
+ * relations, operators, layouts, multiple lines and decisive large-operator
+ * geometry never enter this path.
+ */
+export const collapsedMathPrefixPenalty = (evidence: CollapsedMathPrefixEvidence) => (
+  evidence.prefixCompatibility >= 0.58 &&
+  evidence.selectedPrefixMatches &&
+  evidence.prefixLength >= 1 &&
+  evidence.textVisibleCharacters >= Math.max(3, evidence.prefixLength + 2) &&
+  evidence.textLetters === evidence.textVisibleCharacters &&
+  evidence.textLines === 1 &&
+  evidence.textBaselineAlignment >= 0.72 &&
+  evidence.inkAspectRatio >= 1.05 &&
+  evidence.mathVisibleCharacters === 1 &&
+  evidence.mathDigits === 0 &&
+  evidence.mathOperators === 0 &&
+  evidence.mathRelations === 0 &&
+  evidence.mathFractions === 0 &&
+  evidence.mathLayoutAssignments === 0 &&
+  evidence.mathLines === 1 &&
+  evidence.mathStrongSymbols === 1 &&
+  evidence.mathHasCommandStructure &&
+  !evidence.mathHasDecisiveStructure
+    ? 0.62
+    : 0
+)
+
+/** Penalizes only apostrophe-shaped fragments that occupy the writing body.
+ * A standalone or genuinely small/high apostrophe has no letter baseline to
+ * contradict and therefore receives no penalty. */
+export const bodySizedApostropheFragmentPenalty = (
+  tokens: Pick<RecognitionToken, 'char' | 'bbox'>[],
+) => {
+  const letters = tokens.filter((token) => /^\p{L}$/u.test(token.char))
+  if (!letters.length) return 0
+  const referenceHeight = Math.max(0.01, median(letters.map((token) => token.bbox[3])))
+  const referenceBaseline = median(letters.map((token) => token.bbox[1] + token.bbox[3]))
+  const fragments = tokens.filter((token) => (
+    /^[’']$/u.test(token.char) &&
+    token.bbox[3] >= referenceHeight * 0.58 &&
+    token.bbox[1] + token.bbox[3] >= referenceBaseline - referenceHeight * 0.35
+  )).length
+  return fragments * 0.46
+}
+
 export const recognizeExpression = (
   strokes: Stroke[],
   model: RecognitionModel,
@@ -5237,6 +7011,7 @@ export const recognizeExpression = (
   textCharacterCountHint?: number,
   textCharacterHint?: string,
   textSegmentationCandidateIndex = 0,
+  textPrefixHint?: string,
 ): RecognitionToken[] => {
   const clusters = segmentStrokes(strokes, mode)
   const labelMap = new Map(labels.map((label) => [label.id, label]))
@@ -5275,19 +7050,37 @@ export const recognizeExpression = (
         })
       }
     }
+    // The prototype shortlist, classifier and generic fallback all compare
+    // the same rendered query against overlapping model entries. Cache that
+    // per-cluster distance once; this removes repeated raster/HOG/trajectory
+    // work while keeping the exact ranking and scores unchanged.
+    const featureDistanceCache = recognitionVariants.map(() => (
+      new WeakMap<RecognitionModelEntry, number>()
+    ))
+    const cachedFeatureDistance = (entry: RecognitionModelEntry, variantIndex: number) => {
+      const cache = featureDistanceCache[variantIndex]
+      const cached = cache?.get(entry)
+      if (cached !== undefined) return cached
+      const variant = recognitionVariants[variantIndex]
+      const distance = variant
+        ? featureDistance(
+            variant.feature,
+            entry,
+            variant.strokeCount,
+            variant.geometry,
+            model.weights,
+          )
+        : Number.POSITIVE_INFINITY
+      cache?.set(entry, distance)
+      return distance
+    }
     const personalPrototypeRanking = [...model.prototypeSets.entries()]
       .filter(([labelId]) => mode !== 'text' || isTextLabel(labelMap.get(labelId)))
       .map(([labelId, prototypes]) => ({
         labelId,
         distance: Math.min(...prototypes.flatMap((prototype) => (
-          recognitionVariants.map((variant, index) => (
-            featureDistance(
-              variant.feature,
-              prototype,
-              variant.strokeCount,
-              variant.geometry,
-              model.weights,
-            ) + (index === 0 ? 0 : 0.004)
+          recognitionVariants.map((_variant, index) => (
+            cachedFeatureDistance(prototype, index) + (index === 0 ? 0 : 0.004)
           ))
         ))),
       }))
@@ -5308,24 +7101,20 @@ export const recognizeExpression = (
       standard: boolean
       trust: number
       createdAt: number
+      sessionId: string
     }[]>()
     const classifierEntries = model.classifierEntries.length ? model.classifierEntries : model
     classifierEntries.forEach((entry) => {
       if (!entry.standard && !personalShortlist.has(entry.labelId)) return
       const distances = byLabel.get(entry.labelId) ?? []
       distances.push({
-        distance: Math.min(...recognitionVariants.map((variant, index) => (
-          featureDistance(
-            variant.feature,
-            entry,
-            variant.strokeCount,
-            variant.geometry,
-            model.weights,
-          ) + (index === 0 ? 0 : 0.004)
+        distance: Math.min(...recognitionVariants.map((_variant, index) => (
+          cachedFeatureDistance(entry, index) + (index === 0 ? 0 : 0.004)
         ))) + (entry.standard ? 0 : (1 - entry.trust) * 0.082),
         standard: entry.standard,
         trust: entry.trust,
         createdAt: entry.createdAt,
+        sessionId: entry.sessionId,
       })
       byLabel.set(entry.labelId, distances)
     })
@@ -5346,8 +7135,25 @@ export const recognizeExpression = (
         // the same character. Personal samples use both the closest example
         // and a robust local consensus, so one mislabeled outlier cannot own
         // an entire class while a real recurring writing style remains strong.
-        const weights = personal.length ? [0.62, 0.25, 0.13] : [0.92, 0.08]
-        const selected = sorted.slice(0, weights.length)
+        // A nearest-neighbour-only vote overfits one writer's accidental stroke
+        // shape. A robust three-example consensus preserves real style variety
+        // while making a foreign writer less dependent on one misleading match.
+        const selectedCandidates = personal.length
+          ? (() => {
+              const diverse: typeof sortedCandidates = []
+              sortedCandidates.forEach((candidate) => {
+                if (diverse.length >= 3 || diverse.some((selected) => selected.sessionId === candidate.sessionId)) return
+                diverse.push(candidate)
+              })
+              sortedCandidates.forEach((candidate) => {
+                if (diverse.length >= 3 || diverse.includes(candidate)) return
+                diverse.push(candidate)
+              })
+              return diverse.slice(0, 3)
+            })()
+          : sortedCandidates.slice(0, 2)
+        const selected = selectedCandidates.map((candidate) => candidate.distance)
+        const weights = personal.length ? [0.42, 0.33, 0.25] : [0.92, 0.08]
         const weightTotal = weights.slice(0, selected.length).reduce((sum, weight) => sum + weight, 0)
         let aggregate = selected.reduce((sum, distance, index) => sum + distance * weights[index], 0) / weightTotal
         // Preserve an independent base-model measurement even after a class
@@ -5372,6 +7178,11 @@ export const recognizeExpression = (
         )
         const stats = model.labelStats.get(labelId)
         const aspectStats = model.aspectStats.get(labelId)
+        const strokeCountFit = stats?.strokeCountTotal
+          ? Math.max(...recognitionVariants.map((variant) => (
+              (stats.strokeCountHistogram[variant.strokeCount] ?? 0) / stats.strokeCountTotal
+            )))
+          : 0
         // Accidental merges expand a crop horizontally. Deliberately narrow
         // or compressed handwriting must remain valid, so this is an upper
         // envelope rather than a symmetric distance from the median.
@@ -5394,17 +7205,11 @@ export const recognizeExpression = (
           // for every candidate segment in a connected word.
           const cachedPrototypeDistance = prototypeDistanceByLabel.get(labelId)
           const prototypeDistance = cachedPrototypeDistance ?? Math.min(...prototypes.flatMap((prototype) => (
-            recognitionVariants.map((variant, index) => (
-              featureDistance(
-                variant.feature,
-                prototype,
-                variant.strokeCount,
-                variant.geometry,
-                model.weights,
-              ) + (index === 0 ? 0 : 0.004)
+            recognitionVariants.map((_variant, index) => (
+              cachedFeatureDistance(prototype, index) + (index === 0 ? 0 : 0.004)
             ))
           )))
-          aggregate = aggregate * 0.78 + prototypeDistance * 0.22
+          aggregate = aggregate * 0.88 + prototypeDistance * 0.12
           aggregate -= Math.min(0.034, 0.009 + Math.log2(personal.length + 1) * 0.005) *
             (0.38 + reliability * 0.42 + personalFit * 0.2)
           aggregate += (1 - reliability) * 0.024 + (1 - personalFit) * 0.012
@@ -5444,14 +7249,123 @@ export const recognizeExpression = (
           personalSupport: personal.length ? (stats?.trustedCount ?? personal.length) : 0,
           personalConfidence,
           aspectFit,
+          strokeCountFit,
+          strokeCountSupport: stats?.strokeCountTotal ?? 0,
         }
       })
       .sort((a, b) => a.distance - b.distance)
 
+    let fusedRanking = ranked
+    if (mode === 'math' && clusters.length === 1 && model.genericSymbolEntries.length) {
+      const genericByLabel = new Map<string, number[]>()
+      model.genericSymbolEntries.forEach((entry) => {
+        if (!labelMap.has(entry.labelId)) return
+        const distances = genericByLabel.get(entry.labelId) ?? []
+        distances.push(Math.min(...recognitionVariants.map((_variant, index) => (
+          cachedFeatureDistance(entry, index) + (index === 0 ? 0 : 0.004)
+        ))))
+        genericByLabel.set(entry.labelId, distances)
+      })
+      const genericRanking = [...genericByLabel.entries()].map(([labelId, distances]) => {
+        const selected = distances.sort((first, second) => first - second).slice(0, 2)
+        const weights = selected.length > 1 ? [0.92, 0.08] : [1]
+        const distance = selected.reduce((sum, value, index) => sum + value * weights[index], 0) /
+          weights.slice(0, selected.length).reduce((sum, value) => sum + value, 0)
+        return {
+          labelId,
+          distance: Math.max(0, distance + mathGeometryAdjustment(labelId, cluster)),
+        }
+      }).sort((first, second) => first.distance - second.distance)
+      const genericBest = genericRanking[0]
+      const genericRunnerUp = genericRanking[1]
+      const baselineBest = ranked[0]
+      const baselineRunnerUp = ranked[1]
+      const genericMargin = genericBest && genericRunnerUp
+        ? genericRunnerUp.distance - genericBest.distance
+        : 0
+      const baselineMargin = baselineBest && baselineRunnerUp
+        ? baselineRunnerUp.distance - baselineBest.distance
+        : 0
+      const reliability = genericBest
+        ? model.genericSymbolReliability.get(genericBest.labelId) ?? 0
+        : 0
+      const hasStrongPersonalWinner = Boolean(
+        baselineBest &&
+        baselineBest.personalSupport >= 2 &&
+        baselineBest.personalConfidence >= 34,
+      )
+      const target = genericBest
+        ? ranked.find((entry) => entry.labelId === genericBest.labelId)
+        : undefined
+      if (
+        genericBest && baselineBest && target &&
+        genericBest.labelId !== baselineBest.labelId &&
+        !hasStrongPersonalWinner &&
+        reliability >= 0.4 &&
+        genericBest.distance <= 0.42 &&
+        genericMargin >= 0.025 &&
+        (baselineBest.distance >= 0.28 || baselineMargin <= 0.07)
+      ) {
+        // A disagreement is allowed to move the result only when the generic
+        // handwriting class generalized across excluded contributors, wins
+        // its own classifier by a visible margin, and the old printed-font
+        // path is uncertain. This prevents a broad language-free prototype
+        // set from overriding trusted GlyphenWerk examples or clear geometry.
+        const advantage = clamp(
+          0.012 + genericMargin * 0.42 + (reliability - 0.4) * 0.045,
+          0.012,
+          0.065,
+        )
+        fusedRanking = ranked.map((entry) => entry === target ? {
+          ...entry,
+          distance: Math.min(entry.distance, Math.max(0, baselineBest.distance - advantage)),
+        } : entry).sort((first, second) => first.distance - second.distance)
+      }
+    }
+
     const rankedForMode = mode === 'text'
-      ? ranked.filter((entry) => isTextLabel(labelMap.get(entry.labelId)))
-      : ranked
-    const activeRanking = rankedForMode.length ? rankedForMode : ranked
+      ? fusedRanking.filter((entry) => isTextLabel(labelMap.get(entry.labelId)))
+      : fusedRanking
+    let activeRanking = rankedForMode.length ? rankedForMode : fusedRanking
+    // Isolated freehand glyphs often land in a tight band after square crop
+    // normalization. Prefer a near alternative with clearly better geometry
+    // only when personal evidence is weak, the visual margin is small, and
+    // both classes stay in the same family (letter vs digit).
+    if (mode === 'text' && clusters.length === 1 && activeRanking.length >= 2) {
+      const leading = activeRanking[0]
+      const leadingGeometry = textGeometryAdjustment(leading.labelId, cluster)
+      const leadingKind = leading.labelId.startsWith('digit_')
+        ? 'digit'
+        : leading.labelId.startsWith('latin_') || leading.labelId.startsWith('german_')
+          ? 'letter'
+          : 'other'
+      const challenger = activeRanking.slice(1, 8).find((entry) => {
+        if (entry.distance - leading.distance > 0.055) return false
+        if ((leading.personalSupport ?? 0) >= 1) return false
+        if ((leading.personalConfidence ?? 0) >= 20) return false
+        const entryKind = entry.labelId.startsWith('digit_')
+          ? 'digit'
+          : entry.labelId.startsWith('latin_') || entry.labelId.startsWith('german_')
+            ? 'letter'
+            : 'other'
+        if (leadingKind !== entryKind || leadingKind === 'other') return false
+        const geometry = textGeometryAdjustment(entry.labelId, cluster)
+        return (
+          geometry <= leadingGeometry - 0.038 &&
+          (entry.baseConfidence ?? 0) >= (leading.baseConfidence ?? 0) - 2 &&
+          entry.distance <= leading.distance + 0.03
+        )
+      })
+      if (challenger) {
+        activeRanking = [
+          {
+            ...challenger,
+            distance: Math.min(challenger.distance, Math.max(0, leading.distance - 0.008)),
+          },
+          ...activeRanking.filter((entry) => entry !== challenger),
+        ].sort((first, second) => first.distance - second.distance)
+      }
+    }
     const best = activeRanking[0]
     const runnerUp = activeRanking[1]
     const bestLabel = best ? labelMap.get(best.labelId) : undefined
@@ -5461,7 +7375,7 @@ export const recognizeExpression = (
       : absoluteCertainty
     const confidence = Math.round(clamp(absoluteCertainty * 0.72 + marginCertainty * 0.28) * 100)
 
-    const alternatives = activeRanking.slice(0, 32).flatMap((entry) => {
+    const alternatives = activeRanking.slice(0, 40).flatMap((entry) => {
       const label = labelMap.get(entry.labelId)
       if (!label) return []
       return [{
@@ -5472,6 +7386,8 @@ export const recognizeExpression = (
         baseConfidence: entry.baseConfidence,
         personalSupport: entry.personalSupport,
         personalConfidence: entry.personalConfidence,
+        strokeCountFit: entry.strokeCountFit,
+        strokeCountSupport: entry.strokeCountSupport,
       }]
     })
 
@@ -5491,6 +7407,8 @@ export const recognizeExpression = (
       baseConfidence: best?.baseConfidence ?? 0,
       personalSupport: best?.personalSupport ?? 0,
       personalConfidence: best?.personalConfidence ?? 0,
+      strokeCountFit: best?.strokeCountFit ?? 0,
+      strokeCountSupport: best?.strokeCountSupport ?? 0,
       layout: cluster.fraction,
     }
     return { token, distance: best?.distance ?? 1, aspectFit: best?.aspectFit ?? 0 }
@@ -5501,7 +7419,12 @@ export const recognizeExpression = (
     classified: { token: RecognitionToken; distance: number; aspectFit: number }[],
     independentSegmentationEvidence = 0,
   ) => {
-    const reranked = applyTextReranking(classified.map((entry) => entry.token), labels, language)
+    const reranked = applyTextReranking(
+      classified.map((entry) => entry.token),
+      labels,
+      language,
+      textPrefixHint,
+    )
     const value = recognizedSentence(reranked).replace(/\s+/gu, '')
     const evidence = lexicalWordEvidence(value, language)
     const averageConfidence = reranked.reduce((sum, token) => sum + token.confidence, 0) / Math.max(1, reranked.length)
@@ -5510,12 +7433,15 @@ export const recognizeExpression = (
     const physicalHeight = Math.max(1, (source.maxY - source.minY) * SOURCE_HEIGHT)
     const aspect = physicalWidth / physicalHeight
     const strongBoundaries = strongInternalTextBoundaries(source)
-    const expectedParts = Math.max(1, Math.min(10, Math.round(aspect / 0.78)))
+    // Freehand letters are often slightly wider than printed forms. A softer
+    // aspect prior reduces over-splitting of compact connected pairs while
+    // still guiding long cursive words toward the right character count.
+    const expectedParts = Math.max(1, Math.min(10, Math.round(aspect / 0.82)))
+    const referenceLetterTokens = reranked.filter((token) => /^\p{L}$/u.test(token.char))
     const referenceTokenHeight = Math.max(0.01, median(
-      reranked
-        .filter((token) => /^\p{L}$/u.test(token.char))
-        .map((token) => token.bbox[3]),
+      referenceLetterTokens.map((token) => token.bbox[3]),
     ))
+    const apostropheFragmentPenalty = bodySizedApostropheFragmentPenalty(reranked)
     const widthPenalty = reranked.reduce((penalty, token) => {
       const ratio = token.bbox[2] * SOURCE_WIDTH / Math.max(1, token.bbox[3] * SOURCE_HEIGHT)
       const relativeHeight = token.bbox[3] / referenceTokenHeight
@@ -5528,7 +7454,13 @@ export const recognizeExpression = (
     }, 0)
     let score = averageConfidence / 100 * 1.18 + (1 - clamp(averageDistance / 0.62)) * 0.42
       + independentSegmentationEvidence
+    score += learnedStrokeCountHypothesisScore(reranked)
     score -= widthPenalty
+    // A real apostrophe sits above the writing body and is much smaller than
+    // the x-height. A baseline-sized apostrophe is normally a fragment made
+    // by over-segmenting the last connected letter; it must not turn `te`
+    // into the dictionary-backed but geometrically impossible `Ja'`.
+    score -= apostropheFragmentPenalty
     const untouchedPersonalGlyph = classified.length === 1 ? classified[0].token : null
     if (
       untouchedPersonalGlyph &&
@@ -5592,21 +7524,48 @@ export const recognizeExpression = (
       // A cut through a cursive connector can look like a surprisingly
       // plausible extra letter. The physical word aspect is therefore a real
       // segmentation prior, not merely a tiny tie breaker.
-      score -= Math.abs(reranked.length - expectedParts) * 0.16
-      if (evidence.knownWord && evidence.word.length >= 2) {
-        score += 0.62 + Math.min(0.2, evidence.word.length * 0.025)
+      score -= Math.abs(reranked.length - expectedParts) * 0.15
+      if (
+        evidence.knownWord &&
+        evidence.word.length >= 2 &&
+        apostropheFragmentPenalty === 0
+      ) {
+        // Known multi-letter words are the strongest freehand recovery signal
+        // when each glyph still has independent visual support. Prefer them
+        // over near-matches that invent a rare fragment of the same length.
+        const minimumSupportedConfidence = Math.min(
+          ...reranked.map((token) => token.confidence),
+        )
+        const supportBonus = minimumSupportedConfidence >= 48
+          ? 0.14
+          : minimumSupportedConfidence >= 36
+            ? 0.06
+            : 0
+        score += 0.68 + Math.min(0.24, evidence.word.length * 0.03) + supportBonus
+        if (reranked.length === evidence.word.length) score += 0.08
       } else {
-        score += evidence.score * 0.16
+        score += evidence.score * 0.18
       }
       const letterRatio = reranked.filter((token) => /^\p{L}$/u.test(token.char)).length / reranked.length
-      if (letterRatio >= 0.8) score += 0.08
+      if (letterRatio >= 0.8) score += 0.1
       const penLiftBodyCount = penLiftTextBodyClusters(source).length
       if (penLiftBodyCount >= 2 && reranked.length === penLiftBodyCount) {
         // Complete pen-lift bodies are independent segmentation evidence.
         // This prevents two quickly written, slightly touching letters from
         // collapsing into one broad glyph while leaving one-stroke cursive
         // words and tightly parallel integral signs unchanged.
-        score += 0.52
+        score += 0.56
+      }
+      // When the visual peak is weak overall, a coherent known word with
+      // shared baseline beats a higher-scoring but incoherent letter soup.
+      if (
+        averageConfidence < 62 &&
+        evidence.knownWord &&
+        evidence.word.length >= 3 &&
+        apostropheFragmentPenalty === 0 &&
+        letterRatio >= 0.9
+      ) {
+        score += 0.22
       }
     }
     return { tokens: reranked, score }
@@ -5702,12 +7661,27 @@ export const recognizeExpression = (
             .sort((first, second) => second.score - first.score)
           const competitive = scored
             .filter((entry, index, entries) => index < 3 && (index === 0 || entry.score >= entries[0].score - 0.48))
+          const prefixBacked = clusters.length === 1 && textPrefixHint
+            ? scored
+                .map((entry) => ({
+                  entry,
+                  compatibility: textPrefixCompatibilityScore(entry.tokens, textPrefixHint),
+                }))
+                .filter(({ compatibility }) => compatibility >= 0.58)
+                .sort((first, second) => (
+                  second.entry.score + second.compatibility * 0.32 -
+                  first.entry.score - first.compatibility * 0.32
+                ))[0]?.entry
+            : undefined
+          const prefixPreserving = prefixBacked && !competitive.includes(prefixBacked)
+            ? [...competitive, prefixBacked]
+            : competitive
           const exactGuided = Number.isInteger(clusterCharacterCountHint)
             ? scored.find((entry) => entry.tokens.length === clusterCharacterCountHint)
             : undefined
-          return exactGuided && !competitive.includes(exactGuided)
-            ? [...competitive, exactGuided]
-            : competitive
+          return exactGuided && !prefixPreserving.includes(exactGuided)
+            ? [...prefixPreserving, exactGuided]
+            : prefixPreserving
         })
 
         // A line can contain several geometric clusters even though it is one
@@ -5731,7 +7705,14 @@ export const recognizeExpression = (
                   )),
                   textSegmentationEvidence(combined, hypothesis),
                 ))
-                .sort((first, second) => second.score - first.score)
+                .map((entry) => ({
+                  ...entry,
+                  prefixCompatibility: textPrefixCompatibilityScore(entry.tokens, textPrefixHint),
+                }))
+                .sort((first, second) => (
+                  second.score + second.prefixCompatibility * 0.32 -
+                  first.score - first.prefixCompatibility * 0.32
+                ))
               const exact = scored.filter((entry) => entry.tokens.length === textCharacterCountHint)
               return (exact.length ? exact : scored).slice(0, 3)
             })()
@@ -5769,7 +7750,7 @@ export const recognizeExpression = (
             ...token,
             alternatives: token.alternatives.map((alternative) => ({ ...alternative })),
             context: token.context ? { ...token.context } : undefined,
-          })), labels, language)
+          })), labels, language, textPrefixHint)
           const sentence = recognizedSentence(reranked)
           const words = sentence
             .split(/[\s.,;:!?()[\]{}]+/u)
@@ -5812,6 +7793,7 @@ export const recognizeExpression = (
                   : -0.34)
               }, 0) / hintCharacters.length
             : 0
+          const prefixCompatibility = textPrefixCompatibilityScore(reranked, textPrefixHint)
           return {
             tokens: reranked,
             score: (
@@ -5821,7 +7803,8 @@ export const recognizeExpression = (
               unknownLongWords * 0.08 -
               excessivePieces * 0.025 -
               hintedLengthPenalty +
-              hintCompatibility * 0.58
+              hintCompatibility * 0.58 +
+              prefixCompatibility * 0.32
             ),
           }
         })
@@ -5853,7 +7836,7 @@ export const recognizeExpression = (
     : clusters.map((cluster, index) => classifyCluster(cluster, String(index)).token)
 
   if (mode === 'text') {
-    const reranked = applyTextReranking(tokens, labels, language)
+    const reranked = applyTextReranking(tokens, labels, language, textPrefixHint)
     const visibleCount = reranked.filter((token) => !token.isLayout).length
     // The assessment is assigned inside the segmentation callback. Preserve
     // its explicit nullable type because TypeScript's closure flow analysis
@@ -5864,7 +7847,7 @@ export const recognizeExpression = (
         ...token,
         alternatives: token.alternatives.map((alternative) => ({ ...alternative })),
         context: token.context ? { ...token.context } : undefined,
-      })), labels, language)
+      })), labels, language, textPrefixHint)
       const whole = rerankedWhole.find((token) => !token.isLayout)
       if (
         whole &&
@@ -5901,7 +7884,14 @@ export const recognizeExpression = (
             )),
             textSegmentationEvidence(combined, hypothesis),
           ))
-          .sort((first, second) => second.score - first.score)
+          .map((entry) => ({
+            ...entry,
+            prefixCompatibility: textPrefixCompatibilityScore(entry.tokens, textPrefixHint),
+          }))
+          .sort((first, second) => (
+            second.score + second.prefixCompatibility * 0.32 -
+            first.score - first.prefixCompatibility * 0.32
+          ))
         : []
       const exact = exactCandidates[Math.min(
         Math.max(0, textSegmentationCandidateIndex),
@@ -6025,6 +8015,8 @@ type FormattedAtom = {
   sourceId?: string
   labelId?: string
   char?: string
+  spaceBefore?: boolean
+  lineBreakBefore?: boolean
 }
 
 type MathLayoutItem = {
@@ -6061,14 +8053,19 @@ const scriptRole = (
   // was small enough to turn an ordinary `Ha` into `H_{a}`. Require a clear
   // displacement relative to both glyphs. Eleven percent still classified
   // roughly one in six realistic height/jitter combinations as a script in a
-  // systematic baseline sweep. Sixteen percent covers ordinary pen drift but
-  // remains far below the displacement of genuine indices and limits.
-  // Learned layout examples may refine
-  // a genuinely displaced candidate below, but never relax this hard gate.
+  // systematic baseline sweep. Sixteen percent covers ordinary pen drift. For
+  // latin pairs of similar size (clearly not a tiny index) allow 18 % so
+  // words like `Test` stay index-free; a genuinely smaller child keeps the
+  // stricter 16 % gate so `i_{m}` remains mathematical.
+  const similarSizedLatinPair = Boolean(
+    base.labelId?.startsWith('latin_') &&
+    candidate.labelId?.startsWith('latin_') &&
+    candidateHeight >= baseHeight * 0.62,
+  )
   const verticalProtrusion = Math.max(
     0.005,
-    baseHeight * 0.16,
-    candidateHeight * 0.2,
+    baseHeight * (similarSizedLatinPair ? 0.18 : 0.16),
+    candidateHeight * (similarSizedLatinPair ? 0.22 : 0.2),
   )
   const supportsSuperscript = (
     candidateY <= baseY - verticalProtrusion &&
@@ -6119,6 +8116,7 @@ const isLatinWordAtom = (atom: FormattedAtom) => Boolean(
 
 const wordAtomNeighbour = (first: FormattedAtom, second: FormattedAtom) => {
   if (!isLatinWordAtom(first) || !isLatinWordAtom(second)) return false
+  if (second.spaceBefore || second.lineBreakBefore) return false
   const gap = second.bbox[0] - (first.bbox[0] + first.bbox[2])
   const physicalXHeight = Math.min(first.bbox[3], second.bbox[3]) * SOURCE_HEIGHT / SOURCE_WIDTH
   return gap <= clamp(physicalXHeight * 0.46, 0.018, 0.05)
@@ -6127,10 +8125,11 @@ const wordAtomNeighbour = (first: FormattedAtom, second: FormattedAtom) => {
 /**
  * A tall capital or ascender and the x-height body of the next letter can
  * satisfy a pairwise subscript test even though both belong to one ordinary
- * word.  Verify such a relation against the complete local letter run: a
- * dictionary-backed/title-cased run whose candidate and base still share the
- * run's baseline is prose, not a script.  A real `x_{max}` keeps its separate
- * lower baseline and its substantially smaller glyphs, so it is not blocked.
+ * word. Verify such a relation against the complete local letter run. Three
+ * or more letters that share a baseline are prose even when the word is a
+ * name, abbreviation, or technical term absent from the compact dictionary.
+ * A real `x_{max}` keeps its separate lower baseline and its substantially
+ * smaller glyphs, so it is not blocked.
  */
 const ordinaryWordScriptConflict = (
   atoms: FormattedAtom[],
@@ -6140,34 +8139,68 @@ const ordinaryWordScriptConflict = (
   const base = atoms[baseIndex]
   const candidate = atoms[candidateIndex]
   if (!base || !candidate || !isLatinWordAtom(base) || !isLatinWordAtom(candidate)) return false
-  if (candidate.bbox[3] < base.bbox[3] * 0.56) return false
 
   let start = baseIndex
   while (start > 0 && wordAtomNeighbour(atoms[start - 1], atoms[start])) start -= 1
-  let end = candidateIndex
+  let end = baseIndex
   while (end + 1 < atoms.length && wordAtomNeighbour(atoms[end], atoms[end + 1])) end += 1
+  if (candidateIndex < start || candidateIndex > end) return false
   const run = atoms.slice(start, end + 1)
-  if (run.length < 3 || !run.every(isLatinWordAtom)) return false
+  if (run.length < 2 || !run.every(isLatinWordAtom)) return false
 
   const word = run.map((atom) => atom.char).join('')
   const lexicalScore = Math.max(
     lexicalWordEvidence(word, 'de').score,
     lexicalWordEvidence(word, 'en').score,
   )
-  const titleCased = /^[A-ZÄÖÜ][a-zäöü]{2,}$/u.test(word)
-  if (lexicalScore < 0.5 && !titleCased) return false
+  // Dictionary hits plus everyday two-letter prose cores (`te`, `st`, …) that
+  // appear inside longer handwriting such as `Test` when only a pair is
+  // currently visible during incremental recognition. Avoid cores that are
+  // also common as variable+index (`im`, `in`, `x_i`), so real math scripts
+  // stay mathematical.
+  const commonTwoLetterCore = /^(?:te|st|es|er|en|to|of|or|on|as|al|el|la|le|un|um|us|ha|he|hi|ho|me|my|we|be|do|go|no|so|up)$/iu
+  const exactShortWord = run.length === 2 && (lexicalScore >= 0.5 || commonTwoLetterCore.test(word))
+  if (run.length < 3 && !exactShortWord) return false
 
   const bottoms = run.map((atom) => atom.bbox[1] + atom.bbox[3])
   const heights = run.map((atom) => atom.bbox[3])
   const baseline = median(bottoms)
   const referenceHeight = median(heights)
-  const tolerance = Math.max(0.012, referenceHeight * 0.45)
+  // Compare the candidate with the local x-height, not only with the first
+  // glyph. A capital or tall ascender may legitimately be more than twice as
+  // high as the following lowercase bodies. The old 56% base-height gate
+  // therefore rejected real words before their shared baseline could be
+  // considered. A true multi-letter index still forms a separate baseline,
+  // so its base falls outside this deliberately bounded tolerance.
+  if (candidate.bbox[3] < Math.max(base.bbox[3] * 0.36, referenceHeight * 0.52)) return false
+  const tolerance = Math.max(0.012, referenceHeight * 0.52)
   const baseBottom = base.bbox[1] + base.bbox[3]
   const candidateBottom = candidate.bbox[1] + candidate.bbox[3]
   if (
     Math.abs(baseBottom - baseline) > tolerance ||
     Math.abs(candidateBottom - baseline) > tolerance
   ) return false
+
+  const aligned = run.filter((atom) => (
+    Math.abs(atom.bbox[1] + atom.bbox[3] - baseline) <= tolerance
+  ))
+  const requiredAligned = run.length === 2 ? 2 : Math.max(3, Math.ceil(run.length * 0.75))
+  if (aligned.length < requiredAligned) return false
+
+  // Two-letter words need a separate safety rule because the pair itself
+  // cannot provide a third baseline vote. Preserve a known short word only
+  // when the second glyph still has normal x-height proportions. A genuine
+  // `x_i`/`a_n` child is deliberately smaller (the real-script sweep tops out
+  // at 55% of the base), so it remains a mathematical script.
+  if (run.length === 2) {
+    const heightRatio = candidate.bbox[3] / Math.max(0.001, base.bbox[3])
+    const bottomDelta = Math.abs(candidateBottom - baseBottom)
+    return (
+      exactShortWord &&
+      heightRatio >= 0.58 &&
+      bottomDelta <= Math.max(0.018, base.bbox[3] * 0.24, candidate.bbox[3] * 0.32)
+    )
+  }
 
   return run.some((atom, index) => {
     const absoluteIndex = start + index
@@ -6348,6 +8381,8 @@ function formatLinearItems(
         sourceId: item.token?.id ?? item.key,
         labelId: item.token?.labelId ?? item.labelId,
         char: item.token?.char,
+        spaceBefore: item.token?.spaceBefore,
+        lineBreakBefore: item.token?.lineBreakBefore,
       })
       return
     }
@@ -6517,6 +8552,8 @@ export const suggestMathLayoutAssignments = (
       bbox: token.bbox,
       sourceId: token.id,
       labelId: token.labelId,
+      spaceBefore: token.spaceBefore,
+      lineBreakBefore: token.lineBreakBefore,
     }))
   const assignments: MathLayoutAssignment[] = []
   const assignedTokens = new Set<string>()
@@ -6644,6 +8681,10 @@ export type AutomaticRecognitionEvidence = {
     plausibleWords?: number
     knownWordRatio: number
     baselineAlignment: number
+    /** Number of spatially independent full-height pen-lift bodies. */
+    independentBodies?: number
+    /** Physical ink width divided by height, with page anisotropy removed. */
+    inkAspectRatio?: number
     lines: number
     strongSentence: boolean
   }
@@ -6657,6 +8698,8 @@ export type AutomaticRecognitionEvidence = {
     relations: number
     fractions: number
     layoutAssignments: number
+    /** Script assignments whose size/displacement still resembles prose. */
+    weakScriptAssignments?: number
     lines: number
     latexStructure: boolean
     decisiveStructure: boolean
@@ -6826,7 +8869,30 @@ export const recognizeAutomaticExpression = (
   fallbackMode: RecognitionMode = 'text',
   textCharacterCountHint?: number,
   textCharacterHint?: string,
+  textPrefixHint?: string,
+  confirmedTextPrefixHint?: string,
 ): AutomaticRecognitionResult => {
+  const normalizedTextPrefix = typeof textPrefixHint === 'string'
+    ? textPrefixHint.normalize('NFC')
+    : ''
+  const safeTextPrefix = (
+    normalizedTextPrefix.length <= 320 &&
+    /^\p{L}{1,320}$/u.test(normalizedTextPrefix) &&
+    !/[ßẞ]/u.test(normalizedTextPrefix)
+  ) ? normalizedTextPrefix : undefined
+  const normalizedConfirmedTextPrefix = typeof confirmedTextPrefixHint === 'string'
+    ? confirmedTextPrefixHint.normalize('NFC')
+    : ''
+  const safeConfirmedTextPrefix = (
+    normalizedConfirmedTextPrefix.length <= 320 &&
+    /^\p{L}{1,320}$/u.test(normalizedConfirmedTextPrefix) &&
+    !/[ßẞ]/u.test(normalizedConfirmedTextPrefix) &&
+    (!safeTextPrefix || safeTextPrefix.startsWith(normalizedConfirmedTextPrefix))
+  ) ? normalizedConfirmedTextPrefix : undefined
+  // A user-confirmed prefix remains valid on append-only ink even when the
+  // geometric one-body heuristic refuses a normal automatic prefix (for
+  // example, a rapidly written multi-stroke next letter).
+  const effectiveTextPrefix = safeTextPrefix ?? safeConfirmedTextPrefix
   let textTokens = recognizeExpression(
     strokes,
     model,
@@ -6836,6 +8902,8 @@ export const recognizeAutomaticExpression = (
     language,
     textCharacterCountHint,
     textCharacterHint,
+    0,
+    effectiveTextPrefix,
   )
   const hintedCharacters = Array.from(normalizeGermanSharpS(textCharacterHint ?? ''))
     .filter((character) => !/\s/u.test(character))
@@ -6933,6 +9001,19 @@ export const recognizeAutomaticExpression = (
     visibleText.length === textCharacterCountHint &&
     textLetters === visibleText.length
   )
+  const stableTextPrefixCompatibility = textPrefixCompatibilityScore(textTokens, effectiveTextPrefix)
+  const stableSelectedTextPrefix = selectedTextPrefixMatches(textTokens, effectiveTextPrefix)
+  const stableTextPrefixLength = typeof effectiveTextPrefix === 'string'
+    ? Array.from(effectiveTextPrefix).length
+    : 0
+  const confirmedTextPrefixCompatibility = textPrefixCompatibilityScore(
+    textTokens,
+    safeConfirmedTextPrefix,
+  )
+  const confirmedSelectedTextPrefix = selectedTextPrefixMatches(
+    textTokens,
+    safeConfirmedTextPrefix,
+  )
   const wordParts = textValue.split(/\s+/u).filter((part) => /\p{L}{2,}/u.test(part))
   const lexicalTextWords = (
     textValue.match(language === 'de' ? /[a-zäöü]{2,}/giu : /[a-z]{2,}/giu) ?? []
@@ -6979,6 +9060,18 @@ export const recognizeAutomaticExpression = (
   )))
   const fractionParts = mathTokens.filter((token) => token.isLayout || token.layout?.type === 'fraction').length
   const layoutAssignments = suggestMathLayoutAssignments(mathTokens, layoutExamples)
+  const mathTokenById = new Map(visibleMath.map((token) => [token.id, token]))
+  const weakScriptAssignments = layoutAssignments.filter((assignment) => {
+    if (assignment.role !== 'subscript' && assignment.role !== 'superscript') return false
+    const base = mathTokenById.get(assignment.anchorId)
+    const child = mathTokenById.get(assignment.tokenId)
+    if (!base || !child) return false
+    const heightRatio = child.bbox[3] / Math.max(0.001, base.bbox[3])
+    const displacement = assignment.role === 'subscript'
+      ? child.bbox[1] + child.bbox[3] - (base.bbox[1] + base.bbox[3])
+      : base.bbox[1] - child.bbox[1]
+    return heightRatio >= 0.58 && displacement <= Math.max(0.018, base.bbox[3] * 0.24)
+  }).length
   const hasMathCommandStructure = /\\(?:frac|sqrt|int|iint|iiint|oint|sum|prod|partial|nabla|infty|bigcup|bigcap)\b/u.test(mathValue)
   const mathDigits = visibleMath.filter((token) => token.labelId.startsWith('digit_')).length
   const largeMathOperators = visibleMath.filter((token) => LARGE_OPERATOR_IDS.has(token.labelId))
@@ -7053,14 +9146,23 @@ export const recognizeAutomaticExpression = (
     textBaselineAlignment >= 0.72
   )
   const alignedUnknownTextSequence = (
-    textLetters >= 4 &&
-    textBaselineAlignment >= 0.82
+    textLetters >= 3 &&
+    visibleText.length === textLetters &&
+    textBaselineAlignment >= 0.9
   )
   const compactTextValue = textValue.normalize('NFC').replace(/\s+/gu, '')
   const completeKnownTextWords = (
     lexicalTextWords.length >= 1 &&
     knownTextWords.length === lexicalTextWords.length &&
     textLetters >= 3
+  )
+  const completeShortKnownTextWord = (
+    lexicalTextWords.length === 1 &&
+    knownTextWords.length === 1 &&
+    textLetters === 2 &&
+    visibleText.length === 2 &&
+    layoutAssignments.length >= 1 &&
+    weakScriptAssignments === layoutAssignments.length
   )
   const completePlausibleTextWords = (
     lexicalTextWords.length >= 1 &&
@@ -7083,6 +9185,7 @@ export const recognizeAutomaticExpression = (
     textLetterRatio >= 0.86 &&
     (
       completeKnownTextWords ||
+      completeShortKnownTextWord ||
       completePlausibleTextWords ||
       properNameTextSequence ||
       strongSentenceText ||
@@ -7095,15 +9198,18 @@ export const recognizeAutomaticExpression = (
   const hasLimitedLargeOperator = largeMathOperators.length > 0 && layoutAssignments.some((assignment) => (
     assignment.role === 'upper_limit' || assignment.role === 'lower_limit'
   ))
-  const hasStandaloneLargeOperator = (
-    largeMathOperators.length === 1 &&
-    visibleMath.length === 1 &&
-    visibleText.length <= 2 &&
-    !visibleMath.some((token) => {
-      const cluster = clusterFromStrokes(token.strokes)
-      return Boolean(cluster && resemblesUppercaseT(cluster))
+  const standaloneLargeOperator = largeMathOperators.length === 1 && visibleMath.length === 1
+    ? largeMathOperators[0]
+    : undefined
+  const hasStandaloneLargeOperator = Boolean(standaloneLargeOperator && (
+    standaloneLargeOperatorIsDecisiveForTests({
+      labelId: standaloneLargeOperator.labelId,
+      strokes: standaloneLargeOperator.strokes,
+      competingTextCharacters: visibleText.length,
+      personalSupport: standaloneLargeOperator.personalSupport,
+      personalConfidence: standaloneLargeOperator.personalConfidence,
     })
-  )
+  ))
   const hasMultilineMathStructure = mathLineCount > 1 && (
     relationTokens.length > 0 || mathOperators.length > 0 || strongMathTokens.length > 0
   )
@@ -7120,8 +9226,36 @@ export const recognizeAutomaticExpression = (
   const hasBalancedNumericOperator = (
     balancedMathOperators.length > 0 && mathDigits > 0 && !dominantProseText
   )
-  const hasDecisiveMathStructure = hasHardMathStructure || hasBalancedNumericOperator
   const strongProseText = strongSentenceText || dominantProseText
+  const symbolicVariableOperators = new Set([
+    'operator_plus',
+    'operator_minus',
+    'operator_multiply',
+    'operator_divide',
+  ])
+  // A short expression such as `a + c` has no digits or relation sign, so it
+  // used to lose the final tie-break to a noisy text path (`al c`) whenever
+  // the two visual scores were close. Require the operator to be balanced by
+  // two visible letter operands and suppress the rule for a strong prose
+  // sentence; this keeps words such as “one plus two” in text mode while
+  // treating an actual variable expression as mathematics.
+  const hasSymbolicVariableStructure = (
+    balancedMathOperators.some((token) => symbolicVariableOperators.has(token.labelId)) &&
+    visibleMath.length >= 3 &&
+    visibleMath.filter((token) => (
+      (token.labelId.startsWith('latin_') ||
+        token.labelId.startsWith('german_') ||
+        token.labelId.startsWith('greek_')) &&
+      !token.labelId.startsWith('digit_')
+    )).length >= 2 &&
+    !strongProseText &&
+    (textLetters <= 4 || knownTextWords.length === 0)
+  )
+  const hasDecisiveMathStructure = (
+    hasHardMathStructure ||
+    hasBalancedNumericOperator ||
+    hasSymbolicVariableStructure
+  )
   const unambiguousUppercaseT = (
     visibleMath.length === 1 &&
     visibleMath[0].strokes.length === 2 &&
@@ -7130,6 +9264,10 @@ export const recognizeAutomaticExpression = (
   const combinedAutomaticCluster = clusterFromStrokes(strokes)
   const independentPenLiftBodyCount = combinedAutomaticCluster
     ? penLiftTextBodyClusters(combinedAutomaticCluster).length
+    : 0
+  const physicalInkAspectRatio = combinedAutomaticCluster
+    ? (combinedAutomaticCluster.maxX - combinedAutomaticCluster.minX) * SOURCE_WIDTH /
+      Math.max(1, (combinedAutomaticCluster.maxY - combinedAutomaticCluster.minY) * SOURCE_HEIGHT)
     : 0
   const mathIsPureNumber = visibleMath.length > 0 && visibleMath.every((token) => (
     token.labelId.startsWith('digit_')
@@ -7140,6 +9278,32 @@ export const recognizeAutomaticExpression = (
     textLetters === visibleText.length &&
     !mathIsPureNumber
   )
+  const duplicatedCollapsedMathEvidencePenalty = collapsedMathPrefixPenalty({
+    prefixCompatibility: stableTextPrefixCompatibility,
+    selectedPrefixMatches: stableSelectedTextPrefix,
+    prefixLength: stableTextPrefixLength,
+    textVisibleCharacters: visibleText.length,
+    textLetters,
+    textLines: textLineCount,
+    textBaselineAlignment,
+    inkAspectRatio: physicalInkAspectRatio,
+    mathVisibleCharacters: visibleMath.length,
+    mathDigits,
+    mathOperators: mathOperators.length,
+    mathRelations: relationTokens.length,
+    mathFractions: fractionParts,
+    mathLayoutAssignments: layoutAssignments.length,
+    mathLines: mathLineCount,
+    mathStrongSymbols: strongMathTokens.length,
+    mathHasCommandStructure: hasMathCommandStructure,
+    mathHasDecisiveStructure: hasDecisiveMathStructure,
+  })
+  const stablePrefixModeBonus = textPrefixModeBonus({
+    compatibility: stableTextPrefixCompatibility,
+    selectedPrefixMatches: stableSelectedTextPrefix,
+    visibleCharacters: visibleText.length,
+    letters: textLetters,
+  })
 
   let textScore = textConfidence / 100 * 1.65
   let mathScore = mathConfidence / 100 * 1.65
@@ -7170,6 +9334,29 @@ export const recognizeAutomaticExpression = (
     // not receive this protection.
     textScore += 2.35 + Math.min(0.72, Math.max(0, textLetters - 2) * 0.24)
     textReasons.unshift('stabile wachsende Buchstabenfolge')
+  }
+  if (stablePrefixModeBonus > 0) {
+    // Unlike the former incremental count, this contributes no target length
+    // and cannot rewrite a token. It only says that independently retained
+    // older positions are still visually present after at least one new text
+    // token. Real fractions, relations and operators keep their complete math
+    // score; the bounded continuity evidence merely prevents a joined `Te`
+    // preview from flipping to ∫/∬ between pen lifts.
+    textScore += stablePrefixModeBonus
+    textReasons.unshift('stabiler Textpräfix')
+  }
+  const confirmedPrefixModeBonus = confirmedTextPrefixModeBonus(
+    confirmedTextPrefixCompatibility,
+    confirmedSelectedTextPrefix,
+    hasDecisiveMathStructure,
+  )
+  if (confirmedPrefixModeBonus > 0) {
+    // This prefix was explicitly corrected by the user on unchanged ink. It
+    // may strongly break an ambiguous text/math tie, but never overrides a
+    // real fraction, relation, radical, limit, or structurally clear operator.
+    textScore += confirmedPrefixModeBonus
+    mathScore -= 0.95
+    textReasons.unshift('bestätigter Textpräfix')
   }
   if (exactIndependentTextSequence) {
     textScore += 2.25 + Math.min(0.5, Math.max(0, independentPenLiftBodyCount - 2) * 0.16)
@@ -7257,12 +9444,17 @@ export const recognizeAutomaticExpression = (
       : Math.min(1.55, 0.82 + balancedMathOperators.length * 0.3)
     mathReasons.unshift('Operator zwischen Operanden')
   }
+  if (hasSymbolicVariableStructure) {
+    mathScore += 1.25
+    mathReasons.unshift('symbolischer Operator zwischen Variablen')
+  }
   if (visibleMath.length > 0 && visibleMath.every((token) => token.labelId.startsWith('digit_'))) {
     mathScore += 0.72
     mathReasons.push('Zahlenfolge')
   }
   if (textDigits > textLetters && mathOperators.length) textScore -= 0.45
   if (strongProseText && !hasDecisiveMathStructure) mathScore -= 1.15
+  mathScore -= duplicatedCollapsedMathEvidencePenalty
   if (
     exactIncrementalTextSequence &&
     visibleMath.length < visibleText.length &&
@@ -7307,6 +9499,8 @@ export const recognizeAutomaticExpression = (
         plausibleWords: plausibleTextWords.length,
         knownWordRatio: Math.round(knownTextWordRatio * 1_000) / 1_000,
         baselineAlignment: Math.round(textBaselineAlignment * 1_000) / 1_000,
+        independentBodies: independentPenLiftBodyCount,
+        inkAspectRatio: Math.round(physicalInkAspectRatio * 1_000) / 1_000,
         lines: textLineCount,
         strongSentence: strongSentenceText,
       },
@@ -7320,6 +9514,7 @@ export const recognizeAutomaticExpression = (
         relations: relationTokens.length,
         fractions: fractionParts,
         layoutAssignments: layoutAssignments.length,
+        weakScriptAssignments,
         lines: mathLineCount,
         latexStructure: hasLatexStructure,
         decisiveStructure: hasDecisiveMathStructure,

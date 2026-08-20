@@ -6,7 +6,7 @@ GenericName=Markdown Notes
 GenericName[de]=Markdown-Notizen
 Comment=Local Markdown notes with handwriting recognition
 Comment[de]=Lokale Markdown-Notizen mit Handschrifterkennung
-Exec=fanotes
+Exec=fanotes --ozone-platform=x11 --ozone-platform-hint=x11
 TryExec=fanotes
 Icon=fanotes
 Terminal=false

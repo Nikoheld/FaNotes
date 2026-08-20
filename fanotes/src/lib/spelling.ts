@@ -1,5 +1,15 @@
 import type { DetectedTextLanguage, SpellingLanguage, SpellingResources } from '../types'
-import { installNeuralWordContextCandidates } from './neuralWordContext'
+import { ENGLISH_CANONICAL_PROPER_NAMES } from '../../../src/data/englishProperNames'
+import { SUPPLEMENTAL_CANONICAL_PROPER_NAMES } from '../../../src/data/supplementalProperNames'
+import {
+  installRecognitionProperNameMembership,
+  installRecognitionWordCandidateProvider,
+  installRecognitionWordMembership,
+} from '../../../src/lib/recognition'
+import {
+  installNeuralWordContextCandidates,
+  neuralWordContextWordsOfLength,
+} from './neuralWordContext'
 
 export type SpellingSegment = { from: number; text: string }
 export type SpellingIgnoredRange = { from: number; to: number }
@@ -40,6 +50,11 @@ const EN_STOPWORDS = new Set([
   'it', 'not', 'of', 'on', 'or', 'she', 'that', 'the', 'this', 'to', 'was', 'we', 'were',
   'will', 'with', 'you',
 ])
+const canonicalProperName = (word: string) => (
+  ENGLISH_CANONICAL_PROPER_NAMES.has(word) || SUPPLEMENTAL_CANONICAL_PROPER_NAMES.has(word)
+)
+installRecognitionProperNameMembership('de', canonicalProperName)
+installRecognitionProperNameMembership('en', canonicalProperName)
 
 const normalizeWord = (word: string, language: SpellingLanguage) => {
   const normalized = word
@@ -201,7 +216,17 @@ const loadRecognitionCandidates = async (language: SpellingLanguage) => {
         previous = word
       })
       installNeuralWordContextCandidates(language, words)
-      return new Set(words)
+      installRecognitionWordCandidateProvider(
+        language,
+        (length) => neuralWordContextWordsOfLength(language, length),
+      )
+      const candidates = new Set(words)
+      // Share the already allocated set with the classical glyph beam. The
+      // callback adds no second word-list copy and is installed only on the
+      // first handwriting-OCR request, so normal application startup stays
+      // unchanged.
+      installRecognitionWordMembership(language, (word) => candidates.has(word))
+      return candidates
     }).catch((error) => {
       candidatePromises.delete(language)
       throw error

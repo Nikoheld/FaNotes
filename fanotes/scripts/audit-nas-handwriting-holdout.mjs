@@ -15,6 +15,11 @@ const output = path.join(temporary, 'dist')
 const profile = path.join(temporary, 'chromium')
 const entryPath = path.join(temporary, 'entry.ts')
 const trainingRoot = path.join(temporary, 'training')
+const skipTrocr = process.env.FANOTES_NAS_SKIP_TROCR === '1'
+const requestedChromiumHeap = Number(process.env.FANOTES_NAS_CHROMIUM_HEAP_MB ?? '768')
+const chromiumHeap = Number.isFinite(requestedChromiumHeap)
+  ? Math.max(384, Math.min(1024, Math.round(requestedChromiumHeap)))
+  : 768
 const mime = new Map([
   ['.html', 'text/html; charset=utf-8'], ['.js', 'text/javascript; charset=utf-8'],
   ['.mjs', 'text/javascript; charset=utf-8'], ['.json', 'application/json; charset=utf-8'],
@@ -113,7 +118,7 @@ try {
   assert.deepEqual(exactImageOverlap, [], 'Ein NAS-Holdoutbild ist bytegleich in der Trainings-ZIP enthalten.')
   fs.writeFileSync(entryPath, [
     `import { runNasHandwritingHoldout } from ${JSON.stringify(pathToFileURL(path.join(appRoot, 'scripts/fixtures/nas-handwriting-holdout-harness.ts')).href)}`,
-    `runNasHandwritingHoldout(${JSON.stringify(cases)}, './training/export.zip').then((result) => {`,
+    `runNasHandwritingHoldout(${JSON.stringify(cases)}, './training/export.zip', ${JSON.stringify({ skipTrocr })}).then((result) => {`,
     ' document.body.innerHTML = `<pre id="result">${JSON.stringify(result)}</pre>`',
     '}).catch((error) => {',
     ' document.body.innerHTML = `<pre id="error">${String(error?.stack || error)}</pre>`',
@@ -155,7 +160,7 @@ try {
   const port = server.address().port
   chromium = spawn('chromium', [
     '--headless=new', '--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage',
-    '--js-flags=--max-old-space-size=1024', `--user-data-dir=${profile}`,
+    `--js-flags=--max-old-space-size=${chromiumHeap}`, `--user-data-dir=${profile}`,
     '--remote-debugging-address=127.0.0.1', '--remote-debugging-port=0',
     `http://127.0.0.1:${port}/`,
   ], { stdio: ['ignore', 'pipe', 'pipe'] })
@@ -235,7 +240,33 @@ try {
     blindCer: blindEdits / Math.max(1, characters),
     cases: results,
   }
-  console.log(JSON.stringify(summary, null, 2))
+  const printable = process.env.FANOTES_NAS_COMPACT === '1'
+    ? {
+        ...summary,
+        cases: results.map((entry) => ({
+          id: entry.id,
+          expected: entry.expected,
+          rawPrediction: entry.rawPrediction,
+          prediction: entry.prediction,
+          personalizedPrediction: entry.personalizedPrediction,
+          blindPrediction: entry.blindPrediction,
+          neuralEdits: entry.neuralEdits,
+          edits: entry.edits,
+          blindEdits: entry.blindEdits,
+          durationMs: entry.durationMs,
+          columnBandCount: entry.columnBands.length,
+          candidates: entry.personalizedCandidates,
+        })),
+      }
+    : summary
+  const requestedJsonOutput = process.env.FANOTES_NAS_JSON_OUTPUT?.trim()
+  if (requestedJsonOutput) {
+    const jsonOutput = path.resolve(requestedJsonOutput)
+    const temporaryRoot = `${path.resolve(os.tmpdir())}${path.sep}`
+    assert.ok(jsonOutput.startsWith(temporaryRoot), 'Die Diagnoseausgabe muss unter dem temporären Verzeichnis liegen.')
+    fs.writeFileSync(jsonOutput, `${JSON.stringify(printable, null, 2)}\n`, { mode: 0o600 })
+  }
+  console.log(JSON.stringify(printable, null, 2))
   if (process.env.FANOTES_NAS_HOLDOUT_STRICT === '1') {
     assert.equal(edits, 0, `Der NAS-Holdout enthält noch ${edits} Zeichenfehler mit normalem Modellprior.`)
   }

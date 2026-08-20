@@ -205,7 +205,7 @@ void (async () => {
     await cdp.evaluate(`document.querySelector('.first-run-continue').click()`)
     await waitFor(cdp, `document.querySelector('.first-run')?.dataset.step === 'writing' && Boolean(document.querySelector('.first-run-writing-preview'))`, 'Der Schreib-Schritt')
     await cdp.evaluate(`document.querySelector('.first-run-continue').click()`)
-    await waitFor(cdp, `document.querySelector('.first-run')?.dataset.step === 'folders' && document.querySelectorAll('.first-run-subjects > button').length === 10`, 'Die Ordnerauswahl')
+    await waitFor(cdp, `document.querySelector('.first-run')?.dataset.step === 'folders' && document.querySelectorAll('.first-run-subjects > button').length === 11`, 'Die Ordnerauswahl')
     await cdp.evaluate(`document.querySelector('.first-run-continue').click()`)
     await waitFor(cdp, `Boolean(document.querySelector('.app-shell') && document.querySelector('.markdown-editor .cm-content'))`, 'Der Web-Markdown-Editor')
     await waitFor(cdp, `navigator.serviceWorker.getRegistration('./').then((registration) => Boolean(registration?.active))`, 'Der Offline-Service-Worker')
@@ -218,7 +218,7 @@ void (async () => {
       const count = (items) => items.reduce((total, entry) => total + (entry.kind === 'file' ? 1 : count(entry.children || [])), 0)
       return count(entries)
     })`)
-    await cdp.evaluate(`document.querySelector('.file-tree__root-actions button[aria-label="Neue Notiz"]').click()`)
+    await cdp.evaluate(`document.querySelector('.sidebar-header button[aria-label="Neue Notiz"]').click()`)
     await waitFor(cdp, `document.querySelector('.note-tab.active')?.title?.endsWith('Unbenannte Notiz.md')`, 'Die über den sichtbaren Button erstellte Notiz')
     const visibleNoteCreation = await cdp.evaluate(`(async () => {
       const activePath = document.querySelector('.note-tab.active')?.title || ''
@@ -291,7 +291,7 @@ void (async () => {
     }))()`)
     if (spelling.words !== 'Tset|exampel' || spelling.detected !== 'mixed' || !spelling.status.includes('DE / EN')) throw new Error(`Die Web-Rechtschreibprüfung ist unvollständig: ${JSON.stringify(spelling)}`)
 
-    await cdp.evaluate(`document.querySelector('.ribbon button[aria-label="AI-Assistent öffnen"]').click()`)
+    await cdp.evaluate(`document.querySelector('button[aria-label="AI-Assistent öffnen"]').click()`)
     await waitFor(cdp, `document.querySelectorAll('.ai-provider-grid > button').length === 6`, 'Die sechs AI-Anbieter im Web')
     const aiProviders = await cdp.evaluate(`[...document.querySelectorAll('.ai-provider-grid > button strong')].map((node) => node.textContent).join('|')`)
     if (aiProviders !== 'LM Studio|Ollama|OpenAI|Gemini|Anthropic|OpenCode') throw new Error(`Die Web-AI-Anbieter sind unvollständig: ${aiProviders}`)
@@ -301,7 +301,7 @@ void (async () => {
     await waitFor(cdp, `document.querySelector('.ai-secret-field input')?.value === 'web-secret-test'`, 'Die flüchtige AI-Schlüsseleingabe')
     await cdp.evaluate(`document.querySelector('.ai-panel button[aria-label="AI-Menü schließen"]').click()`)
     await waitFor(cdp, `!document.querySelector('.ai-panel')`, 'Das Schliessen des Web-AI-Bereichs')
-    await cdp.evaluate(`document.querySelector('.ribbon button[aria-label="AI-Assistent öffnen"]').click()`)
+    await cdp.evaluate(`document.querySelector('button[aria-label="AI-Assistent öffnen"]').click()`)
     await waitFor(cdp, `Boolean(document.querySelector('.ai-panel'))`, 'Das erneute Öffnen des Web-AI-Bereichs')
     const forgottenCloudKey = await cdp.evaluate(`document.querySelector('.ai-secret-field input')?.value === ''`)
     if (!forgottenCloudKey) throw new Error('Der Cloud-Schlüssel blieb unerwartet im Browser gespeichert.')

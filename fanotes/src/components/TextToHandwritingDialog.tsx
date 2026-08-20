@@ -2,6 +2,7 @@ import { CircleAlert, Link2, PenLine, RefreshCw, Sparkles, Type, Unlink2, X } fr
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import type { Sample } from '../../../src/types'
 import type { PaperStyle } from '../types'
+import { drawPaperBackground } from '../lib/paperStyles'
 import { getUiLocale } from '../i18n'
 import {
   createHandwritingSeed,
@@ -38,39 +39,7 @@ const drawPreviewPaper = (
   height: number,
   paperStyle: PaperStyle,
 ) => {
-  context.fillStyle = '#fbfcff'
-  context.fillRect(0, 0, width, height)
-  context.strokeStyle = 'rgba(92,107,142,.15)'
-  context.fillStyle = 'rgba(92,107,142,.27)'
-  context.lineWidth = 0.8
-  const step = 32
-  if (paperStyle === 'dots') {
-    for (let y = step; y < height; y += step) {
-      for (let x = step; x < width; x += step) {
-        context.beginPath()
-        context.arc(x, y, 1.05, 0, Math.PI * 2)
-        context.fill()
-      }
-    }
-  } else if (paperStyle === 'grid') {
-    context.beginPath()
-    for (let x = step; x < width; x += step) {
-      context.moveTo(x, 0)
-      context.lineTo(x, height)
-    }
-    for (let y = step; y < height; y += step) {
-      context.moveTo(0, y)
-      context.lineTo(width, y)
-    }
-    context.stroke()
-  } else if (paperStyle === 'lines') {
-    context.beginPath()
-    for (let y = step; y < height; y += step) {
-      context.moveTo(0, y)
-      context.lineTo(width, y)
-    }
-    context.stroke()
-  }
+  drawPaperBackground(context, width, height, paperStyle)
 }
 
 const HandwritingPreview = ({
@@ -290,7 +259,7 @@ export function TextToHandwritingDialog({
 
         <aside className="lw-tth-preview">
           <div className="lw-tth-preview-head">
-            <div><strong>Live-Vorschau</strong><small>{result.glyphCount} Zeichen · {result.lineCount} Zeilen · {result.connectionCount} Verbindungen</small></div>
+            <div><strong>Live-Vorschau</strong><small>{`${result.glyphCount} Zeichen · ${result.lineCount} Zeilen · ${result.connectionCount} Verbindungen`}</small></div>
             <button type="button" onClick={() => setSeed(createHandwritingSeed())} disabled={!text.trim()} title="Alle Zeichen mit neuen natürlichen Abweichungen erzeugen">
               <RefreshCw size={15} /> Neu variieren
             </button>

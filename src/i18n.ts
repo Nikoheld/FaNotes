@@ -13,17 +13,38 @@ const ignoredSelector = '[data-i18n-ignore], .katex'
 let catalog: EnglishCatalog = {}
 let replacements: Array<[string, string]> = []
 let replacementExpression: RegExp | null = null
-const GERMAN_HINT = /[ÄÖÜäöüß]|\b(?:der|die|das|den|dem|des|ein|eine|einen|einem|und|oder|für|mit|ohne|von|bei|auf|aus|zu|zum|zur|dein|deine|wird|werden|ist|sind|nicht|noch|nur|alle|keine|bitte)\b|(?:ung|keit|heit|lich|isch|ieren|zeichen|schrift|farbe|klasse|beispiel|erkenn|speicher|sammlung|datensatz)/iu
+const GERMAN_HINT = /[ÄÖÜäöüß]|\b(?:der|die|das|den|dem|des|ein|eine|einen|einem|und|oder|für|mit|ohne|von|bei|auf|aus|zu|zum|zur|dein|deine|wird|werden|ist|sind|nicht|noch|nur|alle|keine|bitte|datenerfassung|ausgewogen|muster|paket|modell|integriert|trainingspaket|frei|erfassen)\b|(?:ung|keit|heit|lich|isch|ieren|zeichen|schrift|farbe|klasse|beispiel|erkenn|speicher|sammlung|datensatz)/iu
+const EXACT_ONLY_REPLACEMENTS = new Set(['Frei', 'Breite', 'Pinsel', 'Farben', 'Strich'])
 
 const translateCore = (source: string) => {
   if (activeLanguage !== 'en') return source
   if (catalog[source] !== undefined) return catalog[source]
+  if (source === 'Frei') return 'Free'
+  if (source === 'Strich') return 'Stroke'
+  if (source === '1 Strich') return '1 stroke'
+  if (/^\d+ Striche$/u.test(source)) return source.replace('Striche', 'strokes')
+  if (source === 'Datenerfassung') return 'Data capture'
+  if (source === 'Ausgewogen') return 'Balanced'
+  if (source === 'Trainingspaket') return 'Training package'
+  if (source === 'Was steckt im Paket?') return 'What is in the package?'
+  if (source === 'Erkennung testen') return 'Test recognition'
+  if (source === 'Sammlung') return 'Collection'
+  if (source === 'Exportieren') return 'Export'
+  if (source === 'Erfassen') return 'Capture'
   if (/^1 Beispiel$/u.test(source)) return '1 example'
   if (/^\d+ Beispiele$/u.test(source)) return source.replace('Beispiele', 'examples')
   if (/^1 Zeichen$/u.test(source)) return '1 character'
   if (/^\d+ Zeichen$/u.test(source)) return source.replace('Zeichen', 'characters')
   if (/^1 Klasse$/u.test(source)) return '1 class'
   if (/^\d+ Klassen$/u.test(source)) return source.replace('Klassen', 'classes')
+  if (source === 'Schreibe „') return 'Write “'
+  const writeGlyph = /^Schreibe „(.+)“$/u.exec(source)
+  if (writeGlyph) return `Write “${writeGlyph[1]}”`
+  const patternCount = /^(\d+) Muster$/u.exec(source)
+  if (patternCount) {
+    const count = Number(patternCount[1])
+    return `${count} ${count === 1 ? 'pattern' : 'patterns'}`
+  }
   if (!GERMAN_HINT.test(source)) return source
   return replacementExpression
     ? source.replace(replacementExpression, (german) => catalog[german] ?? german)
@@ -76,7 +97,7 @@ export async function initializeGlyphenWerkLocalization() {
   const module = await import('../fanotes/resources/i18n/en.json')
   catalog = module.default as EnglishCatalog
   replacements = Object.entries(catalog)
-    .filter(([source, translated]) => source !== translated && source.length >= 4)
+    .filter(([source, translated]) => source !== translated && source.length >= 4 && !EXACT_ONLY_REPLACEMENTS.has(source))
     .sort(([left], [right]) => right.length - left.length)
   replacementExpression = new RegExp(replacements.map(([source]) => source.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')).join('|'), 'gu')
   document.title = translateGlyphenWerkText(document.title)

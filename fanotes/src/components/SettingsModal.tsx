@@ -1,5 +1,6 @@
 import {
   Accessibility,
+  Bug,
   Brush,
   Check,
   ChevronRight,
@@ -11,6 +12,7 @@ import {
   Download,
   FileInput,
   FileText,
+  FlaskConical,
   FolderOpen,
   Keyboard,
   KeyRound,
@@ -34,10 +36,18 @@ import {
 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { getUiLocale } from '../i18n'
+import {
+  generateHomeworkApiChannelId,
+  generateHomeworkApiSecret,
+  HOMEWORK_API_HOST,
+  homeworkApiQueryUrl,
+  homeworkApiSecretReady,
+} from '../lib/homeworkApi'
 import { bestContrastText } from '../lib/colorContrast'
-import type { AppSettings, OneNoteImportResult, ServerBackupState, UpdateState } from '../types'
+import type { RemoteSupportSession } from '../lib/remoteSupport'
+import type { AppSettings, EnhancedMathRecognitionState, OneNoteImportResult, QwenVisionState, ServerBackupState, UpdateState } from '../types'
 
-type SettingsSection = 'appearance' | 'editor' | 'drawing' | 'files' | 'updates' | 'accessibility' | 'advanced'
+type SettingsSection = 'appearance' | 'editor' | 'drawing' | 'files' | 'updates' | 'accessibility' | 'experimental' | 'advanced'
 
 export type SettingsModalProps = {
   platform?: string
@@ -55,22 +65,27 @@ export type SettingsModalProps = {
   onInstallUpdate: () => Promise<void>
   onResetSettings: () => void
   onResetAppData: () => Promise<void>
+  onOpenBugReport?: () => void
+  remoteSupportSession?: RemoteSupportSession | null
+  onRemoteSupportStart?: () => void
+  onRemoteSupportStop?: () => void
 }
 
 const SECTIONS: { id: SettingsSection; label: string; description: string; icon: typeof Palette; count: number }[] = [
   { id: 'appearance', label: 'Darstellung', description: 'Farben, Schriften und Dichte', icon: Palette, count: 12 },
-  { id: 'editor', label: 'Editor', description: 'Markdown und Schreiben', icon: FileText, count: 7 },
-  { id: 'drawing', label: 'Stift & Erkennung', description: 'Tablet, Papier und Handschrift', icon: Brush, count: 14 },
+  { id: 'editor', label: 'Editor', description: 'Markdown und Schreiben', icon: FileText, count: 8 },
+  { id: 'drawing', label: 'Stift & Erkennung', description: 'Tablet, Papier und Handschrift', icon: Brush, count: 15 },
   { id: 'files', label: 'Dateien & Vault', description: 'Import, Ordner und Speichern', icon: FolderOpen, count: 7 },
   { id: 'updates', label: 'Updates', description: 'Stable, Beta und Sicherheit', icon: RefreshCw, count: 4 },
   { id: 'accessibility', label: 'Bedienung', description: 'Bewegung und Lesbarkeit', icon: Accessibility, count: 3 },
-  { id: 'advanced', label: 'Erweitert', description: 'Ressourcen, Datenschutz und App-Daten', icon: Code2, count: 9 },
+  { id: 'experimental', label: 'Experimentell', description: 'Unfertige Funktionen, standardmässig aus', icon: FlaskConical, count: 5 },
+  { id: 'advanced', label: 'Erweitert', description: 'Ressourcen, Datenschutz und App-Daten', icon: Code2, count: 10 },
 ]
 
 const SECTION_GROUPS: Array<{ label: string; sections: SettingsSection[] }> = [
   { label: 'Aussehen & Schreiben', sections: ['appearance', 'editor'] },
   { label: 'Stift & Arbeitsbereich', sections: ['drawing', 'files'] },
-  { label: 'FaNotes & System', sections: ['updates', 'accessibility', 'advanced'] },
+  { label: 'FaNotes & System', sections: ['updates', 'accessibility', 'experimental', 'advanced'] },
 ]
 
 type SettingsSearchItem = {
@@ -90,12 +105,21 @@ const SETTINGS_SEARCH_ITEMS: SettingsSearchItem[] = [
   { label: 'Glas-Effekte', detail: 'Darstellung', section: 'appearance', target: 'settings-surface', keywords: 'transparenz blur unschärfe glass' },
   { label: 'Schriften & Textgrößen', detail: 'Darstellung', section: 'appearance', target: 'settings-typography', keywords: 'typografie font editor schrift zeilenhöhe vorschau' },
   { label: 'Inhaltsbreite & Zeilenlänge', detail: 'Editor', section: 'editor', target: 'settings-editor', keywords: 'breite lesen zeile word seite' },
+  { label: 'Zoom-Geschwindigkeit', detail: 'Editor', section: 'editor', target: 'settings-editor', keywords: 'zoom geschwindigkeit mausrad pinch trackpad' },
+  { label: 'Zoom-Limit', detail: 'Editor', section: 'editor', target: 'settings-editor', keywords: 'zoom limit maximum hinein 50 325 600 prozent' },
   { label: 'Rechtschreibprüfung', detail: 'Editor', section: 'editor', target: 'settings-editor', keywords: 'rechtschreibung sprache deutsch englisch rot unterstreichen fehler spellcheck' },
   { label: 'Zeilennummern, Wortzahl & Gliederung', detail: 'Editor', section: 'editor', target: 'settings-editor', keywords: 'statusleiste outline struktur markdown' },
   { label: 'GlyphenWerk & Training', detail: 'Stift & Erkennung', section: 'drawing', target: 'settings-glyphenwerk', keywords: 'handschrift trainieren import zip symbole mathematik' },
-  { label: 'Papier & Stift', detail: 'Stift & Erkennung', section: 'drawing', target: 'settings-tablet', keywords: 'tablet karos linien punkte farbe breite druck glättung' },
+  { label: 'Präzises Formelmodell', detail: 'Erweitert', section: 'advanced', target: 'settings-enhanced-math', keywords: 'mathematik formel latex posformer q4 sequenzmodell lokal download' },
+  { label: 'Papier & Stift', detail: 'Stift & Erkennung', section: 'drawing', target: 'settings-tablet', keywords: 'tablet karos linien punkte gepunktet häuschen kästchen millimeter farbe breite druck glättung hintergrund' },
   { label: 'Durchkritzel-Empfindlichkeit', detail: 'Stift & Erkennung', section: 'drawing', target: 'settings-tablet', keywords: 'löschen radierer scribble sensitivity' },
+  { label: 'Form-Erkennung', detail: 'Stift & Erkennung', section: 'drawing', target: 'settings-tablet', keywords: 'form zirkel kreis linie rechteck dreieck glätten snap stillhalten empfindlichkeit' },
   { label: 'Handschrifterkennung', detail: 'Stift & Erkennung', section: 'drawing', target: 'settings-recognition', keywords: 'ocr text mathematik automatisch sprache konvertieren suchindex' },
+  { label: 'Handschrift zu Text', detail: 'Experimentell', section: 'experimental', target: 'settings-experimental', keywords: 'experimentell ocr konvertieren mathe korrigierer löser suchindex qwen vision handschrift text' },
+  { label: 'Hausaufgaben API', detail: 'Experimentell', section: 'experimental', target: 'settings-homework-api', keywords: 'hausaufgaben api fasrv passwort auth termine liste' },
+  { label: 'Remote Support', detail: 'Experimentell', section: 'experimental', target: 'settings-remote-support', keywords: 'remote support sitzung debug test code token fernwartung' },
+  { label: 'Notiz-Backup', detail: 'Experimentell', section: 'experimental', target: 'settings-note-backup', keywords: 'backup sichern wiederherstellen snapshot notiz' },
+  { label: 'Send Data', detail: 'Experimentell', section: 'experimental', target: 'settings-send-data', keywords: 'send data logs nutzerdaten hyprland telemetry diagnostik server' },
   { label: 'Vault & Speicherort', detail: 'Dateien & Vault', section: 'files', target: 'settings-vault', keywords: 'ordner wechseln pfad notizen markdown nas browser' },
   { label: 'Microsoft OneNote importieren', detail: 'Dateien & Vault', section: 'files', target: 'settings-onenote', keywords: 'one onetoc2 onepkg onedrive zip notizbuch migration' },
   { label: 'Server-Backup', detail: 'Dateien & Vault', section: 'files', target: 'settings-backup', keywords: 'sicherung cloud wiederherstellen recovery kopie' },
@@ -120,7 +144,7 @@ const normalizeSearch = (value: string) => value
   .toLocaleLowerCase('de-CH')
   .trim()
 
-const ACCENTS = ['#8b7cff', '#6f8cff', '#45c9b7', '#ef7aa8', '#f09a5d', '#b878eb', '#d4b54c']
+const ACCENTS = ['#7f6df2', '#8a5cf5', '#6f8cff', '#45c9b7', '#ef7aa8', '#f09a5d', '#d4b54c']
 const THEMES: Array<{
   id: AppSettings['theme']
   label: string
@@ -130,9 +154,9 @@ const THEMES: Array<{
   accent: string
   secondary: string
 }> = [
-  { id: 'system', label: 'System', detail: 'Automatisch', background: 'linear-gradient(135deg,#171821 50%,#f4f3f7 50%)', surface: '#8b7cff', accent: '#8b7cff', secondary: '#45c9b7' },
-  { id: 'dark', label: 'Graphit', detail: 'Ruhig & dunkel', background: '#0e0f14', surface: '#1d1e28', accent: '#8b7cff', secondary: '#45c9b7' },
-  { id: 'light', label: 'Klar', detail: 'Hell & neutral', background: '#f4f3f7', surface: '#ffffff', accent: '#566ad7', secondary: '#2c8177' },
+  { id: 'system', label: 'System', detail: 'Automatisch', background: 'linear-gradient(135deg,#1e1e1e 50%,#ffffff 50%)', surface: '#7f6df2', accent: '#7f6df2', secondary: '#8a5cf5' },
+  { id: 'dark', label: 'Dunkel', detail: 'Obsidian-Nacht', background: '#1e1e1e', surface: '#262626', accent: '#7f6df2', secondary: '#8a5cf5' },
+  { id: 'light', label: 'Hell', detail: 'Obsidian-Tag', background: '#ffffff', surface: '#f2f2f2', accent: '#705dcf', secondary: '#8a5cf5' },
   { id: 'midnight', label: 'Mitternacht', detail: 'Tiefblau', background: '#080d1b', surface: '#121a2d', accent: '#6d8dff', secondary: '#44d6c6' },
   { id: 'forest', label: 'Wald', detail: 'Moos & Tinte', background: '#0d1512', surface: '#17231d', accent: '#52c98a', secondary: '#c9b85a' },
   { id: 'aurora', label: 'Aurora', detail: 'Violett & Cyan', background: '#100d1b', surface: '#211a31', accent: '#b078ff', secondary: '#4fd6d2' },
@@ -258,6 +282,10 @@ export function SettingsModal({
   onInstallUpdate,
   onResetSettings,
   onResetAppData,
+  onOpenBugReport,
+  remoteSupportSession = null,
+  onRemoteSupportStart,
+  onRemoteSupportStop,
 }: SettingsModalProps) {
   const isWeb = platform === 'web'
   const [active, setActive] = useState<SettingsSection>('appearance')
@@ -276,6 +304,12 @@ export function SettingsModal({
   const [recoveryInput, setRecoveryInput] = useState('')
   const [restoreConfirmOpen, setRestoreConfirmOpen] = useState(false)
   const [deleteBackupConfirmOpen, setDeleteBackupConfirmOpen] = useState(false)
+  const [enhancedMathState, setEnhancedMathState] = useState<EnhancedMathRecognitionState | null>(null)
+  const [enhancedMathBusy, setEnhancedMathBusy] = useState(false)
+  const [enhancedMathError, setEnhancedMathError] = useState<string | null>(null)
+  const [qwenVisionState, setQwenVisionState] = useState<QwenVisionState | null>(null)
+  const [qwenVisionBusy, setQwenVisionBusy] = useState(false)
+  const [qwenVisionError, setQwenVisionError] = useState<string | null>(null)
   const trainingInputRef = useRef<HTMLInputElement>(null)
   const modalRef = useRef<HTMLElement>(null)
   const section = useMemo(() => SECTIONS.find((candidate) => candidate.id === active)!, [active])
@@ -303,8 +337,76 @@ export function SettingsModal({
     })
     return () => { activeRequest = false }
   }, [isWeb])
+  useEffect(() => {
+    if (isWeb || !window.fanotes.getEnhancedMathRecognitionState) return
+    let activeRequest = true
+    window.fanotes.getEnhancedMathRecognitionState().then((state) => {
+      if (activeRequest) setEnhancedMathState(state)
+    }).catch(() => {
+      if (activeRequest) setEnhancedMathState(null)
+    })
+    return () => { activeRequest = false }
+  }, [isWeb])
+  useEffect(() => {
+    if (isWeb || !window.fanotes.getQwenVisionState) return
+    let activeRequest = true
+    window.fanotes.getQwenVisionState().then((state) => {
+      if (activeRequest) setQwenVisionState(state)
+    }).catch(() => {
+      if (activeRequest) setQwenVisionState(null)
+    })
+    return () => { activeRequest = false }
+  }, [isWeb])
   const update = <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => {
     onChange({ ...settings, [key]: value })
+  }
+  const installEnhancedMathModel = async () => {
+    if (!window.fanotes.installEnhancedMathRecognitionModel) return
+    setEnhancedMathBusy(true)
+    setEnhancedMathError(null)
+    try {
+      const nextState = await window.fanotes.installEnhancedMathRecognitionModel({ acceptLicense: true })
+      setEnhancedMathState(nextState)
+      onChange({
+        ...settings,
+        enhancedMathLicenseAccepted: true,
+        enhancedMathRecognition: true,
+      })
+    } catch (error) {
+      setEnhancedMathError(error instanceof Error ? error.message : 'Das Formelmodell konnte nicht installiert werden.')
+    } finally {
+      setEnhancedMathBusy(false)
+    }
+  }
+  const installQwenVisionModel = async () => {
+    if (!window.fanotes.installQwenVisionModel) return
+    setQwenVisionBusy(true)
+    setQwenVisionError(null)
+    const poll = window.setInterval(() => {
+      void window.fanotes.getQwenVisionState?.()
+        .then((state) => setQwenVisionState(state))
+        .catch(() => {})
+    }, 1_200)
+    try {
+      const nextState = await window.fanotes.installQwenVisionModel({ acceptLicense: true })
+      setQwenVisionState(nextState)
+      onChange({
+        ...settings,
+        qwenVisionLicenseAccepted: true,
+        qwenVisionRecognition: true,
+      })
+    } catch (error) {
+      setQwenVisionError(error instanceof Error ? error.message : 'Qwen3-VL konnte nicht installiert werden.')
+      try {
+        const latest = await window.fanotes.getQwenVisionState?.()
+        if (latest) setQwenVisionState(latest)
+      } catch {
+        // ignore refresh errors after failed install
+      }
+    } finally {
+      window.clearInterval(poll)
+      setQwenVisionBusy(false)
+    }
   }
   const handleTrainingFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const input = event.currentTarget
@@ -444,7 +546,7 @@ export function SettingsModal({
           <header>
             <div className="settings-heading">
               <span className="settings-heading-icon"><ActiveSectionIcon size={17} /></span>
-              <div><span className="eyebrow">Anpassung · {section.count} Optionen</span><h2>{section.label}</h2><p>{section.description}</p></div>
+              <div><span className="eyebrow">{`Anpassung · ${section.count} Optionen`}</span><h2>{section.label}</h2><p>{section.description}</p></div>
             </div>
             <button type="button" className="icon-button" onClick={onClose} aria-label="Schließen"><X size={19} /></button>
           </header>
@@ -557,6 +659,12 @@ export function SettingsModal({
                     <Toggle label="Lesbare Zeilenlänge" checked={settings.readableLineLength} onChange={(value) => update('readableLineLength', value)} />
                   </SettingRow>
                   <SettingRow title="Maximale Inhaltsbreite"><Range value={settings.contentWidth} min={560} max={1200} step={20} suffix=" px" onChange={(value) => update('contentWidth', value)} /></SettingRow>
+                  <SettingRow title="Zoom-Geschwindigkeit" description="Wie weit Strg+Mausrad oder Trackpad-Pinch das Blatt verändert. 1 ist langsam, 5 normal, 10 schnell.">
+                    <Range value={settings.viewZoomSpeed ?? 5} min={1} max={10} onChange={(value) => update('viewZoomSpeed', value)} />
+                  </SettingRow>
+                  <SettingRow title="Zoom-Limit" description="Wie weit du das Blatt hereinzoomen kannst. 50 % ist kaum näher, 325 % ist der bisherige Höchstwert, 600 % ist sehr nah.">
+                    <Range value={settings.viewZoomMax ?? 325} min={50} max={600} step={5} suffix=" %" onChange={(value) => update('viewZoomMax', value)} />
+                  </SettingRow>
                   <SettingRow title="Zeilennummern"><Toggle label="Zeilennummern" checked={settings.showLineNumbers} onChange={(value) => update('showLineNumbers', value)} /></SettingRow>
                   <SettingRow title="Rechtschreibprüfung" description="Unterstreicht Tippfehler lokal rot und erkennt Deutsch oder Englisch automatisch. Mathematik und Code bleiben unberührt."><Toggle label="Rechtschreibprüfung" checked={settings.spellcheck} onChange={(value) => update('spellcheck', value)} /></SettingRow>
                   <SettingRow title="Wortzahl in Statusleiste"><Toggle label="Wortzahl" checked={settings.showWordCount} onChange={(value) => update('showWordCount', value)} /></SettingRow>
@@ -589,16 +697,23 @@ export function SettingsModal({
                 </div>}
                 <div id="settings-tablet" className="setting-card">
                   <div className="setting-card-title"><Brush size={16} /><span>Grafiktablett</span></div>
-                  <SettingRow title="Papier">
+                  <SettingRow title="Papier" description="Standard für neue Notizen. Jede Notiz kann ihren Hintergrund selbst wählen.">
                     <select value={settings.paperStyle} onChange={(event) => update('paperStyle', event.target.value as AppSettings['paperStyle'])}>
-                      <option value="blank">Leer</option><option value="dots">Punktraster</option><option value="grid">Karos</option><option value="lines">Liniert</option>
+                      <option value="blank">Leer</option>
+                      <option value="dots">Gepunktet</option>
+                      <option value="squares">Häuschen</option>
+                      <option value="grid">Kariert</option>
+                      <option value="lines">Liniert</option>
+                      <option value="millimeter">Millimeterpapier</option>
                     </select>
                   </SettingRow>
                   <SettingRow title="Stiftfarbe"><input className="color-input" type="color" value={settings.penColor} onChange={(event) => update('penColor', event.target.value)} /></SettingRow>
                   <SettingRow title="Stiftbreite"><Range value={settings.penWidth} min={1} max={18} step={0.5} suffix=" px" onChange={(value) => update('penWidth', value)} /></SettingRow>
                   <SettingRow title="Druckempfindlichkeit" description="Nutzt den Druckwert deines Stifts."><Toggle label="Druckempfindlichkeit" checked={settings.pressureEnabled} onChange={(value) => update('pressureEnabled', value)} /></SettingRow>
+                  <SettingRow title="Nur Stift" description="Im Handschriftmodus schreiben nur echte Stifte (pointerType pen). Finger, Handfläche und Maus zeichnen nicht — Zoom und Tasten bleiben nutzbar. Unter Windows standardmäßig an."><Toggle label="Nur Stift" checked={settings.penOnly} onChange={(value) => update('penOnly', value)} /></SettingRow>
                   <SettingRow title="Strichglättung"><Range value={settings.smoothing} min={0} max={1} step={0.05} onChange={(value) => update('smoothing', value)} /></SettingRow>
                   <SettingRow title="Durchkritzel-Empfindlichkeit" description="Niedrig verlangt mehr Überkreuzungen; hoch löscht schon nach einem kürzeren, eindeutigen Durchkritzeln."><Range value={settings.scribbleEraseSensitivity} min={0} max={100} step={5} suffix=" %" onChange={(value) => update('scribbleEraseSensitivity', value)} /></SettingRow>
+                  <SettingRow title="Form-Erkennung" description="Wie bereitwillig Stillhalten eine Linie, einen Kreis oder ein Vieleck glättet. Niedrig nur bei sehr klaren Figuren; hoch früher und auch bei unsaubereren Strichen."><Range value={settings.shapeSnapSensitivity ?? 50} min={0} max={100} step={5} suffix=" %" onChange={(value) => update('shapeSnapSensitivity', value)} /></SettingRow>
                 </div>
                 <div id="settings-recognition" className="setting-card">
                   <div className="setting-card-title"><Sparkles size={16} /><span>Handschrifterkennung</span></div>
@@ -612,7 +727,7 @@ export function SettingsModal({
                     </div>
                   </SettingRow>
                   <SettingRow title="Lokales Kontextlernen" description="Löst unsichere Buchstaben anhand plausibler Wörter auf und übernimmt ausschließlich sichere Entscheidungen als begrenzte persönliche Trainingsbeispiele."><span>Automatisch aktiv</span></SettingRow>
-                  <SettingRow title="Unsichtbarer Suchindex" description="Die Seite bleibt Handschrift. Nur die Vault-Suche nutzt im Hintergrund eine lokale Transkription."><span>Immer lokal aktiv</span></SettingRow>
+                  <SettingRow title="Unsichtbarer Suchindex" description="Nur aktiv, wenn „Handschrift zu Text“ unter Experimentell eingeschaltet ist. Die Seite bleibt Handschrift; die Vault-Suche nutzt dann im Hintergrund eine lokale Transkription."><span>{settings.experimentalHandwritingToText ? 'Lokal aktiv' : 'Experimentell aus'}</span></SettingRow>
                   <SettingRow title="Zeichnung nach Einfügen behalten"><Toggle label="Zeichnung behalten" checked={settings.keepDrawingAfterInsert} onChange={(value) => update('keepDrawingAfterInsert', value)} /></SettingRow>
                 </div>
               </>
@@ -713,15 +828,46 @@ export function SettingsModal({
                   </div>
                 </div>
 
-                {(updateState.status === 'downloading' || updateState.status === 'downloaded') && (
-                  <div className="update-progress" role="status" aria-live="polite">
-                    <div><span>{updateState.status === 'downloaded' ? 'Download geprüft' : 'Update wird automatisch heruntergeladen'}</span><b>{formatBytes(updateState.downloadedBytes)} / {formatBytes(updateState.totalBytes)}</b></div>
-                    <progress value={updateState.progress} max={1}>{Math.round(updateState.progress * 100)} %</progress>
-                    <small>{updateState.installationKind.startsWith('differential-') ? 'Nur geänderte Binärblöcke werden übertragen; unveränderte Daten kommen aus der installierten Version.' : 'Der Download kann nach einem Verbindungsabbruch fortgesetzt werden.'}</small>
+                {(updateState.status === 'downloading' || updateState.status === 'downloaded' || updateState.status === 'installing') && (
+                  <div className={`update-progress ${updateState.status === 'downloading' ? 'is-active' : ''}`} role="status" aria-live="polite" aria-busy={updateState.status === 'downloading'}>
+                    <div>
+                      <span>
+                        {updateState.status === 'downloaded'
+                          ? 'Download geprüft und bereit'
+                          : updateState.status === 'installing'
+                            ? 'Update wird installiert …'
+                            : 'Download läuft …'}
+                      </span>
+                      <b>
+                        {Math.round(Math.max(0, Math.min(1, updateState.progress || 0)) * 100)} %
+                        {updateState.totalBytes > 0 ? ` · ${formatBytes(updateState.downloadedBytes)} / ${formatBytes(updateState.totalBytes)}` : ''}
+                      </b>
+                    </div>
+                    <progress value={Math.max(0, Math.min(1, updateState.progress || 0))} max={1}>
+                      {Math.round(Math.max(0, Math.min(1, updateState.progress || 0)) * 100)} %
+                    </progress>
+                    <small>
+                      {updateState.status === 'downloading'
+                        ? (updateState.installationKind.startsWith('differential-')
+                          ? 'Nur geänderte Binärblöcke werden übertragen; der Fortschritt aktualisiert sich während des Downloads.'
+                          : 'Der Fortschritt aktualisiert sich während des Downloads. Bei Abbruch wird fortgesetzt.')
+                        : updateState.installationKind.startsWith('differential-')
+                          ? 'Nur geänderte Binärblöcke wurden übertragen; unveränderte Daten kamen aus der installierten Version.'
+                          : 'Der Download kann nach einem Verbindungsabbruch fortgesetzt werden.'}
+                    </small>
                   </div>
                 )}
 
                 {updateState.error && <div className="setting-import-status is-error" role="alert"><X size={15} /><span>{updateState.error}</span></div>}
+
+                <div id="settings-bug-report" className="setting-card">
+                  <div className="setting-card-title"><Bug size={16} /><span>Fehler melden</span></div>
+                  <SettingRow title="Bug Report" description="Schreib kurz, was schiefging. Die letzten fünf Minuten (Stiftposition, Notiz, Werkzeug, Version) werden automatisch angehängt und nur an fanotes.fasrv.ch geschickt.">
+                    <button type="button" className="secondary-button" onClick={() => onOpenBugReport?.()}>
+                      <Bug size={15} /> Fehler melden
+                    </button>
+                  </SettingRow>
+                </div>
 
                 <div id="settings-update-automation" className="setting-card">
                   <div className="setting-card-title"><RefreshCw size={16} /><span>Automatisierung</span></div>
@@ -736,8 +882,8 @@ export function SettingsModal({
                       </select>
                     </SettingRow>
                     <SettingRow title="Automatisch nach Updates suchen" description={settings.updateChannel === 'beta' ? 'Prüft kurz nach dem Start und danach alle sechs Stunden den signierten Beta-Kanal.' : 'Prüft kurz nach dem Start und danach alle sechs Stunden den signierten Stable-Kanal.'}><Toggle label="Automatisch nach Updates suchen" checked={settings.autoCheckUpdates} onChange={(value) => update('autoCheckUpdates', value)} /></SettingRow>
-                    <SettingRow title="Updates automatisch herunterladen" description="Lädt nur geänderte, signierte Binärblöcke im Hintergrund und setzt abgebrochene Übertragungen fort."><Toggle label="Updates automatisch herunterladen" checked={settings.autoDownloadUpdates} onChange={(value) => update('autoDownloadUpdates', value)} /></SettingRow>
-                    <SettingRow title="Beim Beenden installieren" description="Installiert ein fertig geprüftes Update nach dem sicheren Speichern aller Notizen."><Toggle label="Update beim Beenden installieren" checked={settings.installUpdatesOnQuit} onChange={(value) => update('installUpdatesOnQuit', value)} /></SettingRow>
+                    <SettingRow title="Updates automatisch herunterladen" description="Lädt geprüfte Updates sofort im Hintergrund (bevorzugt nur geänderte Blöcke) und setzt abgebrochene Übertragungen fort – ohne Popup und ohne Unterbrechung."><Toggle label="Updates automatisch herunterladen" checked={settings.autoDownloadUpdates} onChange={(value) => update('autoDownloadUpdates', value)} /></SettingRow>
+                    <SettingRow title="Automatisch installieren" description="Installiert ein fertig geprüftes Update nahtlos: beim Beenden nach dem Speichern aller Notizen, oder still beim nächsten Start, wenn der Download schon abgeschlossen war."><Toggle label="Update automatisch installieren" checked={settings.installUpdatesOnQuit} onChange={(value) => update('installUpdatesOnQuit', value)} /></SettingRow>
                   </>}
                 </div>
 
@@ -772,6 +918,147 @@ export function SettingsModal({
               </div>
             )}
 
+            {active === 'experimental' && (
+              <div id="settings-experimental" className="setting-card">
+                <div className="setting-card-title">
+                  <FlaskConical size={16} />
+                  <span>Experimentelle Funktionen</span>
+                  <small className="settings-feature-badge">Standard aus</small>
+                </div>
+                <SettingRow
+                  title="Handschrift zu Text"
+                  description="Schaltet Konvertieren, Bereichserkennung, den unsichtbaren Suchindex sowie Mathe-Löser und Mathe-Korrigierer ein. Nach jedem Update bleibt der Schalter aus, bis du ihn hier wieder aktivierst. Die Erkennung bleibt lokal auf diesem Gerät."
+                >
+                  <Toggle
+                    label="Handschrift zu Text"
+                    checked={settings.experimentalHandwritingToText}
+                    onChange={(value) => update('experimentalHandwritingToText', value)}
+                  />
+                </SettingRow>
+                <div className="settings-resource-note">
+                  <TriangleAlert size={14} />
+                  <span>
+                    Unfertige Erkennung: Ergebnisse können falsch sein. GlyphenWerk-Training und Text → Handschrift bleiben unabhängig von diesem Schalter nutzbar.
+                    {settings.experimentalHandwritingToText ? ' Qwen3-VL nutzt deine GlyphenWerk-Buchstaben als Legende, wenn das NPU-Modell geladen ist.' : ''}
+                  </span>
+                </div>
+                <SettingRow
+                  title="Hausaufgaben API"
+                  description="Veröffentlicht deine lokale Hausaufgabenliste als Abfrage-API auf fanotes.fasrv.ch. Standard aus. Ohne Passwort und ohne diesen Schalter gibt die API keine Einträge zurück."
+                >
+                  <Toggle
+                    label="Hausaufgaben API"
+                    checked={settings.experimentalHomeworkApi}
+                    onChange={(value) => onChange({
+                      ...settings,
+                      experimentalHomeworkApi: value,
+                      homeworkApiChannelId: settings.homeworkApiChannelId || generateHomeworkApiChannelId(),
+                    })}
+                  />
+                </SettingRow>
+                {settings.experimentalHomeworkApi && (
+                  <div id="settings-homework-api" className="settings-resource-note" style={{ display: 'grid', gap: 10 }}>
+                    <label>
+                      <span>API-Passwort</span>
+                      <input
+                        type="password"
+                        autoComplete="new-password"
+                        value={settings.homeworkApiSecret}
+                        minLength={12}
+                        placeholder="Mindestens 12 Zeichen"
+                        onChange={(event) => update('homeworkApiSecret', event.target.value)}
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      className="secondary-button"
+                      onClick={() => onChange({
+                        ...settings,
+                        homeworkApiChannelId: settings.homeworkApiChannelId || generateHomeworkApiChannelId(),
+                        homeworkApiSecret: generateHomeworkApiSecret(),
+                      })}
+                    >
+                      <KeyRound size={14} /> Passwort erzeugen
+                    </button>
+                    {homeworkApiSecretReady(settings.homeworkApiSecret) && settings.homeworkApiChannelId && (
+                      <div>
+                        <strong>API-Infos</strong>
+                        <p>Abfrage nur mit diesem Passwort. Die API liefert die komplette Hausaufgabenliste, sonst nichts aus dem Vault.</p>
+                        <code>{homeworkApiQueryUrl(settings.homeworkApiChannelId)}</code>
+                        <p>Authorization: Bearer &lt;Passwort&gt;</p>
+                        <small>Host: {HOMEWORK_API_HOST}</small>
+                      </div>
+                    )}
+                  </div>
+                )}
+                <div id="settings-note-backup">
+                <SettingRow
+                  title="Notiz-Backup"
+                  description="Zeigt oben in der Notizleiste Backup. Die aktuelle Notiz lässt sich so sichern, wie sie gerade ist, und später wiederherstellen. Standard aus. Der automatische Versionsverlauf bleibt unabhängig davon."
+                >
+                  <Toggle
+                    label="Notiz-Backup"
+                    checked={settings.experimentalNoteBackup}
+                    onChange={(value) => update('experimentalNoteBackup', value)}
+                  />
+                </SettingRow>
+                </div>
+                <div id="settings-send-data">
+                <SettingRow
+                  title="Send Data"
+                  description="Schickt laufend gebündelte Logs, Laufzeit-Nutzerdaten und Linux/Hyprland-Kontext an fanotes.fasrv.ch, damit FaNotes — besonders unter Arch Linux Hyprland — verbessert werden kann. Standard aus. Es geht nicht der ganze Vault mit; Intervalle und Grösse sind begrenzt, damit der Akku nicht leidet."
+                >
+                  <Toggle
+                    label="Send Data"
+                    checked={settings.experimentalSendData}
+                    onChange={(value) => update('experimentalSendData', value)}
+                  />
+                </SettingRow>
+                </div>
+                <SettingRow
+                  title="Remote Support"
+                  description="Erlaubt einer Support-Sitzung, FaNotes auf diesem Gerät zu prüfen und zu steuern: Version, Einstellungen, geöffnete Notiz, Vault-Namen, Werkzeug, Bild und Testeingaben. Standard aus. Ohne Start gibt es keine Sitzung."
+                >
+                  <Toggle
+                    label="Remote Support"
+                    checked={settings.experimentalRemoteSupport}
+                    onChange={(value) => {
+                      onChange({ ...settings, experimentalRemoteSupport: value })
+                      if (!value) onRemoteSupportStop?.()
+                    }}
+                  />
+                </SettingRow>
+                {settings.experimentalRemoteSupport && (
+                  <div id="settings-remote-support" className="settings-resource-note" style={{ display: 'grid', gap: 10 }}>
+                    <p>Die Sitzung läuft nur, solange du sie hier startest. Nach dem Beenden oder mit ausgeschaltetem Schalter sind Prüfen und Steuern gesperrt.</p>
+                    {remoteSupportSession ? (
+                      <>
+                        <div>
+                          <strong>Sitzungscode</strong>
+                          <p>Diesen Code nur an den Support weitergeben, der gerade mit dir arbeitet.</p>
+                          <code>{remoteSupportSession.code}</code>
+                        </div>
+                        <button
+                          type="button"
+                          className="secondary-button"
+                          onClick={() => void navigator.clipboard?.writeText(remoteSupportSession.code)}
+                        >
+                          <Copy size={14} /> Code kopieren
+                        </button>
+                        <button type="button" className="secondary-button" onClick={() => onRemoteSupportStop?.()}>
+                          Sitzung beenden
+                        </button>
+                      </>
+                    ) : (
+                      <button type="button" className="secondary-button" onClick={() => onRemoteSupportStart?.()}>
+                        Sitzung starten
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
             {active === 'advanced' && (
               <>
                 <div id="settings-resources" className="setting-card">
@@ -800,12 +1087,108 @@ export function SettingsModal({
                       <option value={4}>4 Kerne · schnell</option>
                     </select>
                   </SettingRow>
-                  {!isWeb && <SettingRow title="Desktop-Erkennungsmodell" description="Kompakt verwendet nur das schnelle native 21-MB-Zeilenmodell. Erweitert ergänzt es bei schwierigen Zeilen mit dem grösseren Kontextmodell; Training, Segmentierung und Korrekturen bleiben identisch.">
+                  {!isWeb && <SettingRow title="Desktop-Erkennungsmodell" description="Rückfallebene ohne NPU. Kompakt ist das schnelle 21-MB-Zeilenmodell. Erweitert ergänzt schwierige Zeilen mit dem Kontextmodell. Für Handschrift auf Intel-NPU ist Qwen3-VL unten die empfohlene Texterkennung.">
                     <select value={settings.desktopOcrModel} onChange={(event) => update('desktopOcrModel', event.target.value as AppSettings['desktopOcrModel'])}>
                       <option value="compact">Kompakt · weniger RAM</option>
-                      <option value="extended">Erweitert · beste Genauigkeit</option>
+                      <option value="extended">Erweitert · ohne NPU</option>
                     </select>
                   </SettingRow>}
+                  {!isWeb && <div id="settings-enhanced-math">
+                    <SettingRow
+                      title="Präzises Formelmodell"
+                      description="Liest eine komplette zweidimensionale Formel gemeinsam statt Zeichen einzeln zu erraten. Das etwa 10 MB grosse Q4-Modell wird nur nach deiner Bestätigung geladen und nie beim App-Start ausgeführt."
+                    >
+                      {enhancedMathState?.installed ? (
+                        <Toggle
+                          label="Präzises Formelmodell"
+                          checked={settings.enhancedMathRecognition}
+                          onChange={(value) => update('enhancedMathRecognition', value)}
+                        />
+                      ) : (
+                        <button
+                          type="button"
+                          className="settings-inline-button"
+                          disabled={enhancedMathBusy || enhancedMathState?.supported === false}
+                          onClick={() => void installEnhancedMathModel()}
+                        >
+                          {enhancedMathBusy ? <LoaderCircle className="spin" size={15} /> : <Download size={15} />}
+                          {enhancedMathBusy ? 'Wird geprüft und geladen …' : 'Lizenz akzeptieren & laden'}
+                        </button>
+                      )}
+                    </SettingRow>
+                    <div className="settings-resource-note">
+                      <ShieldCheck size={14} />
+                      <span>
+                        PosFormer · CC BY-NC-SA 3.0 · nur lokal · SHA-256-geprüft.{' '}
+                        <button type="button" className="settings-link-button" onClick={() => void window.fanotes.openExternal(enhancedMathState?.homepage ?? 'https://huggingface.co/cstr/posformer-crohme-GGUF')}>Modellkarte und Lizenz</button>
+                        {enhancedMathState?.supported === false && ' · Native Laufzeit ist in diesem Paket nicht enthalten.'}
+                      </span>
+                    </div>
+                    {enhancedMathError && <div className="settings-inline-error">{enhancedMathError}</div>}
+                  </div>}
+                  {!isWeb && <div id="settings-qwen-vision">
+                    <SettingRow
+                      title="Empfohlen: Qwen3-VL Texterkennung (Intel NPU)"
+                      description="Empfohlene lokale Texterkennung für Handschrift. Qwen3-VL 2B liest die Notiz als Bild auf der Intel-NPU (OpenVINO INT4). Nach der Lizenzbestätigung werden Laufzeit und das ~1,8 GB-Modell automatisch geladen; jederzeit deaktivierbar."
+                    >
+                      {qwenVisionState?.installed && qwenVisionState?.supported ? (
+                        <Toggle
+                          label="Qwen3-VL · empfohlen"
+                          checked={settings.qwenVisionRecognition}
+                          onChange={(value) => update('qwenVisionRecognition', value)}
+                        />
+                      ) : (
+                        <button
+                          type="button"
+                          className="settings-inline-button"
+                          disabled={qwenVisionBusy}
+                          onClick={() => void installQwenVisionModel()}
+                        >
+                          {qwenVisionBusy ? <LoaderCircle className="spin" size={15} /> : <Download size={15} />}
+                          {qwenVisionBusy
+                            ? (qwenVisionState?.runtimeInstalling
+                              ? 'OpenVINO-Laufzeit wird geladen …'
+                              : 'NPU-Modell wird geladen …')
+                            : qwenVisionState?.installed
+                              ? 'OpenVINO-Laufzeit reparieren'
+                              : 'Lizenz akzeptieren & alles laden'}
+                        </button>
+                      )}
+                    </SettingRow>
+                    <div className="settings-resource-note">
+                      <ShieldCheck size={14} />
+                      <span>
+                        Empfohlen für Text · Qwen3-VL 2B · OpenVINO INT4 · nur Intel-NPU · Apache-2.0 · OpenVINO-Pakete auto · Modell ~1,8&nbsp;GB · SHA-256-geprüft.
+                        {' '}
+                        <button type="button" className="settings-link-button" onClick={() => void window.fanotes.openExternal(qwenVisionState?.homepage ?? 'https://huggingface.co/Qwen/Qwen3-VL-2B-Instruct')}>Modellkarte</button>
+                        {qwenVisionState?.supported && qwenVisionState?.npu && (
+                          qwenVisionState.openvinoVersion
+                            ? ` · NPU bereit · OpenVINO ${qwenVisionState.openvinoVersion}.`
+                            : ' · NPU bereit.'
+                        )}
+                        {qwenVisionState?.runtimeReady && !qwenVisionState?.supported && ' · OpenVINO installiert, NPU prüfen.'}
+                      </span>
+                    </div>
+                    {(qwenVisionBusy || qwenVisionState?.runtimeInstalling) && qwenVisionState?.runtimeMessage && (
+                      <div className="settings-resource-note" role="status">
+                        <LoaderCircle className="spin" size={14} />
+                        <span>{qwenVisionState.runtimeMessage}</span>
+                      </div>
+                    )}
+                    {qwenVisionState?.supported === false && qwenVisionState?.error && !qwenVisionBusy && (
+                      <div className="settings-inline-error" role="status">
+                        <strong>Laufzeit / Hardware</strong>
+                        <span>{qwenVisionState.error}</span>
+                        {Array.isArray(qwenVisionState.devices) && qwenVisionState.devices.length > 0 && (
+                          <span>OpenVINO-Geräte: {qwenVisionState.devices.join(', ')}</span>
+                        )}
+                        {Array.isArray(qwenVisionState.host?.hints) && qwenVisionState.host.hints.length > 0 && (
+                          <span>{qwenVisionState.host.hints.join(' ')}</span>
+                        )}
+                      </div>
+                    )}
+                    {qwenVisionError && <div className="settings-inline-error">{qwenVisionError}</div>}
+                  </div>}
                   <SettingRow title="OCR-Modell im RAM behalten" description="Kürzere Zeiten geben den grossen lokalen Erkennungsworker früher frei; die nächste Konvertierung muss das Modell dann neu laden.">
                     <select value={settings.ocrModelKeepAliveSeconds} onChange={(event) => update('ocrModelKeepAliveSeconds', Number(event.target.value))}>
                       <option value={0}>Nach der Konvertierung freigeben</option>

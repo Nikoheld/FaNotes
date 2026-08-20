@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#1e1e1e" />
+    <meta name="robots" content="noindex" />
+    <meta name="description" content="Nur-Lesen-Anzeige für FaNotes-.famd-Dateien. Die Datei bleibt auf diesem Gerät und wird nicht verändert." />
+    <title>FaNotes .famd-Viewer</title>
+    <link rel="icon" href="/assets/fanotes.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="viewer.css" />
+    <script src="viewer.js" defer></script>
+  </head>
+  <body>
+    <a class="skip" href="#stage">Zum Inhalt springen</a>
+    <header class="top">
+      <a class="brand" href="/">
+        <img src="/assets/fanotes.svg" alt="" width="22" height="22" />
+        <span>FaNotes</span>
+      </a>
+      <div class="top-copy">
+        <strong>.famd-Viewer</strong>
+        <span>Nur anschauen · Datei bleibt lokal · keine Änderung</span>
+      </div>
+      <div class="top-actions">
+        <button type="button" class="ghost" data-open>Datei öffnen</button>
+        <a class="ghost" href="/">Zur Website</a>
+      </div>
+    </header>
+
+    <main id="stage" class="stage">
+      <section class="drop" data-drop hidden>
+        <div class="drop-card">
+          <p class="eyebrow">Notfall-Anzeige</p>
+          <h1>Eine <em>.famd</em>-Notiz ansehen</h1>
+          <p>Falls die Desktop-App hängt, kannst du die Notizdatei hier nur lesen. Es wird nichts hochgeladen und nichts gespeichert.</p>
+          <div class="drop-zone" data-zone>
+            <strong>Datei hierher ziehen</strong>
+            <span>oder eine lokale <code>.famd</code>-Datei wählen. <code>.md</code> geht ebenfalls, ohne Tinte.</span>
+            <button type="button" class="primary" data-open>Notiz öffnen</button>
+          </div>
+          <p class="fine">Maximal 16&nbsp;MB. Arbeitsblätter und Bilder aus dem Vault sind in dieser Datei nicht enthalten.</p>
+        </div>
+      </section>
+
+      <section class="note" data-note hidden>
+        <aside class="meta">
+          <p class="eyebrow">Geöffnete Datei</p>
+          <h2 data-title>Notiz</h2>
+          <dl>
+            <div><dt>Datei</dt><dd data-filename>—</dd></div>
+            <div><dt>Aktualisiert</dt><dd data-updated>—</dd></div>
+            <div><dt>Text</dt><dd data-md-count>—</dd></div>
+            <div><dt>Tinte</dt><dd data-ink-count>—</dd></div>
+            <div><dt>Arbeitsblätter</dt><dd data-worksheets>—</dd></div>
+          </dl>
+          <p class="readonly">Diese Ansicht ändert die Datei nicht.</p>
+          <button type="button" class="ghost" data-open>Andere Datei</button>
+        </aside>
+        <article class="sheet">
+          <div class="markdown" data-markdown></div>
+          <section class="ink-wrap" data-ink-wrap hidden>
+            <h3>Handschrift</h3>
+            <div class="ink-page" data-paper="blank">
+              <svg class="ink-svg" data-ink viewBox="0 0 900 1273" role="img" aria-label="Handschrift der Notiz"></svg>
+            </div>
+          </section>
+        </article>
+      </section>
+
+      <p class="error" data-error hidden role="alert"></p>
+    </main>
+
+    <input id="file" class="sr-only" type="file" accept=".famd,.md,.markdown,text/markdown,text/plain" />
+  </body>
+</html>

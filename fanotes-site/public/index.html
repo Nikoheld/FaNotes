@@ -14,9 +14,9 @@
     <link rel="canonical" href="https://fanotes.fasrv.ch/" />
     <link rel="icon" href="/assets/fanotes.svg" type="image/svg+xml" />
     <link rel="preload" href="/assets/hero-desk.webp" as="image" type="image/webp" />
-    <link rel="stylesheet" href="/fanotes-site.css?v=20260715.6" />
+    <link rel="stylesheet" href="/fanotes-site.css?v=20260810.1" />
     <script src="/fanotes-i18n.js?v=20260715.6" defer></script>
-    <script src="/fanotes-site.js?v=20260715.6" defer></script>
+    <script src="/fanotes-site.js?v=20260810.1" defer></script>
     <title>FaNotes – Handschrift trifft Markdown</title>
   </head>
   <body>
@@ -313,5 +313,12 @@ makepkg --cleanbuild --syncdeps --install</code></pre>
     </footer>
 
     <div class="toast" role="status" aria-live="polite" data-toast></div>
+    <div class="download-progress" data-download-progress hidden aria-live="polite" aria-busy="false">
+      <div class="download-progress-copy">
+        <strong data-download-progress-label>Download</strong>
+        <span data-download-progress-detail>Vorbereitung …</span>
+      </div>
+      <div class="download-progress-track" aria-hidden="true"><i data-download-progress-fill></i></div>
+    </div>
   </body>
 </html>
