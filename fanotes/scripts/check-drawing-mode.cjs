@@ -129,6 +129,7 @@ const worksheetStyleSafeguards = [
   ['left: 18px', 'Entfernen-Button klebt im sichtbaren Viewport'],
   ['margin-left: 0', 'gewachsenes Blatt zentriert den Text nicht neu'],
   ['--text-origin-x', 'Textspalte bleibt unabhängig vom Schreibrand'],
+  ['margin-left: var(--text-origin-x, var(--paper-scroll-room, 18px))', 'Arbeitsblatt-Entfernen bleibt auf der Textspalte, nicht im linken Kameraraum'],
   ['.unified-paper.has-ink-width', 'A4-Tinte ändert den linken Rand nicht'],
   ['width: min(100%, var(--paper-width, 900px))', 'Text umbricht auf der A4-Spalte'],
   ['Sit above the full-sheet ink canvas so Entfernen stays clickable in pen mode.', 'PDF-Entfernen bleibt im Stiftmodus klickbar'],

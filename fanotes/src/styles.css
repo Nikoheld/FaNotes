@@ -1257,12 +1257,13 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .worksheet-layer {
   position: relative;
   z-index: 3;
-  /* Stay on the original A4 column. A 100% width follows ink-grown paper
-     and parks the Entfernen-button past the right edge of the viewport. */
+  /* Same A4 column as the text. The plane is wider than the sheet; pinning
+     to the paper’s left edge hid Entfernen in the left camera room. */
   box-sizing: border-box;
   width: min(calc(100% - 36px), 900px);
   max-width: 900px;
   margin: 0 18px 26px;
+  margin-left: var(--text-origin-x, var(--paper-scroll-room, 18px));
   color: #282a34;
   font-family: var(--ui-font);
 }

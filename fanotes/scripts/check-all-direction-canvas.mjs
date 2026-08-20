@@ -62,6 +62,13 @@ const runOnce = () => {
   assert.match(css, /\.paper-sheet-plane \{[\s\S]*?min-width:\s*100%/)
   assert.match(css, /\.paper-sheet-plane \{[\s\S]*?min-height:\s*100%/)
   assert.match(css, /\.unified-paper > \.editor-pane \{[\s\S]*?max-width:\s*900px/)
+  assert.match(css, /\.unified-paper > \.editor-pane \{[\s\S]*?margin-left:\s*var\(--text-origin-x/)
+  const worksheet = css.slice(css.indexOf('.worksheet-layer {'), css.indexOf('.worksheet-toolbar {'))
+  assert.match(worksheet, /margin-left:\s*var\(--text-origin-x/)
+  assert.match(worksheet, /max-width:\s*900px/)
+  const sheet = readFileSync(join(root, 'src/components/WorksheetLayer.tsx'), 'utf8')
+  assert.match(sheet, /className="worksheet-remove"/)
+  assert.match(sheet, /Entfernen/)
   const textOnInk = css.slice(
     css.indexOf('.unified-paper.has-ink-extent .markdown-editor .cm-content {'),
     css.indexOf('.unified-paper.has-ink-extent .markdown-editor .cm-content {') + 280,
