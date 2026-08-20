@@ -2,6 +2,10 @@
 
 ## Unveröffentlicht
 
+## 2026.8.53
+
+- **Ein Canvas, auch auf PDF:** Die gepunktete Fläche ist eine Schreibfläche. Auf einem PDF bleibt die Tinte auf der Seite unter dem Stift — nicht auf der anderen.
+
 ## 2026.8.52
 
 - **Ein Canvas:** Die gepunktete Fläche ist die Schreibfläche. Kein zweites Blatt drumherum. Du schreibst überall, wo die Punkte sind.

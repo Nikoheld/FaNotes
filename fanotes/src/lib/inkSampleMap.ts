@@ -56,6 +56,20 @@ export const acceptUsableInkClient = (
   return mapClientToPaperPoint(event, surface, rotation)
 }
 
+/**
+ * Keep 0–1 of the write surface the client was mapped against.
+ * A windowed ink bitmap is a paint clip — never a second coordinate space.
+ * Rescaling by bitmap height is what slammed page-2 PDF ink onto page 1.
+ */
+export const inkPointOnWriteSurface = (
+  mapped: { x: number; y: number } | null,
+  _surface?: PaperSurfaceBox | null,
+  _bitmap?: { width: number; height: number } | null,
+) => {
+  if (!mapped || !Number.isFinite(mapped.x) || !Number.isFinite(mapped.y)) return null
+  return { x: mapped.x, y: mapped.y }
+}
+
 export const mapClientToPaperPoint = (
   event: InkPointerLike,
   surface: PaperSurfaceBox | null,

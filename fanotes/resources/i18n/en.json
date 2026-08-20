@@ -2776,5 +2776,8 @@
   "Kalligrafie: schräge Breitfeder": "Calligraphy: angled broad nib",
   "Ein Canvas": "One canvas",
   "Die gepunktete Fläche ist die Schreibfläche. Kein zweites Blatt drumherum. Du schreibst überall, wo die Punkte sind.": "The dotted area is the writing surface. There is no second sheet around it. You write wherever the dots are.",
-  "**Ein Canvas:** Die gepunktete Fläche ist die Schreibfläche. Kein zweites Blatt drumherum. Du schreibst überall, wo die Punkte sind.": "**One canvas:** The dotted area is the writing surface. There is no second sheet around it. You write wherever the dots are."
+  "**Ein Canvas:** Die gepunktete Fläche ist die Schreibfläche. Kein zweites Blatt drumherum. Du schreibst überall, wo die Punkte sind.": "**One canvas:** The dotted area is the writing surface. There is no second sheet around it. You write wherever the dots are.",
+  "Ein Canvas, auch auf PDF": "One canvas, including PDFs",
+  "Die gepunktete Fläche ist eine Schreibfläche. Auf einem PDF bleibt die Tinte auf der Seite unter dem Stift — nicht auf der anderen.": "The dotted area is one writing surface. On a PDF, ink stays on the page under the pen — not on the other one.",
+  "**Ein Canvas, auch auf PDF:** Die gepunktete Fläche ist eine Schreibfläche. Auf einem PDF bleibt die Tinte auf der Seite unter dem Stift — nicht auf der anderen.": "**One canvas, including PDFs:** The dotted area is one writing surface. On a PDF, ink stays on the page under the pen — not on the other one."
 }

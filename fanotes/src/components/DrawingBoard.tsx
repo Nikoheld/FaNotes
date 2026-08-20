@@ -96,10 +96,11 @@ import {
   acceptUsableInkClient,
   classifyInkJumpAppend,
   collectPreviewInkPoints,
+  inkPointOnWriteSurface,
   mapClientToPaperPoint,
   resolveInkPointerDown,
 } from '../lib/inkSampleMap'
-import { INLINE_INK_ACTIVE_CLASS } from '../lib/pdfInkHit'
+import { INLINE_INK_ACTIVE_CLASS, pdfOverlaySourceHeight, shouldSyncPdfOverlaySource } from '../lib/pdfInkHit'
 import {
   applyPenUpInkCleanup,
   applyWheelInkPolicy,
@@ -1794,14 +1795,14 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
 
     const width = Math.max(1, canvas?.offsetWidth ?? originEl.offsetWidth)
     const height = Math.max(1, canvas?.offsetHeight ?? originEl.offsetHeight)
-    const paperW = Math.max(1, originEl === canvas ? width : originEl.offsetWidth)
-    const paperH = Math.max(1, originEl === canvas ? height : originEl.offsetHeight)
-    const localX = originEl === canvas ? mapped.x * paperW : mapped.x * paperW * (width / paperW)
-    const localY = originEl === canvas ? mapped.y * paperH : mapped.y * paperH * (height / paperH)
-    // The one canvas is this surface. Do not clamp onto a nested 900px card —
-    // that pinned outer-plane writing to x=0/y=1 and made two canvases.
-    let x = inline ? localX / width : clamp(localX / width)
-    let y = inline ? localY / height : clamp(localY / height)
+    const paperW = Math.max(1, originEl.offsetWidth)
+    const paperH = Math.max(1, originEl.offsetHeight)
+    const surfacePoint = inkPointOnWriteSurface(mapped, surface, { width, height })
+    if (!surfacePoint) return null
+    // Inline: 0–1 of the overlay surface. Never rescale by a windowed bitmap
+    // (that mapped PDF page 2 onto page 1). Standalone board still uses the canvas.
+    let x = inline ? surfacePoint.x : clamp(surfacePoint.x * paperW / width)
+    let y = inline ? surfacePoint.y : clamp(surfacePoint.y * paperH / height)
     if (!Number.isFinite(x) || !Number.isFinite(y)) return null
     const guides: Array<{ kind: DraftingKind; pose: DraftingPose }> = []
     if (rulerPoseRef.current) guides.push({ kind: 'ruler', pose: rulerPoseRef.current })
@@ -2124,6 +2125,16 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     const paintedW = Math.max(1, Math.max(paper.offsetWidth, surface.offsetWidth))
     const paintedH = Math.max(1, Math.max(paper.offsetHeight, surface.offsetHeight))
     if (paintedW < 2 || paintedH < 2) return false
+    if (paper.classList.contains('is-pdf-note') || paper.classList.contains('has-worksheet')) {
+      absorbOneCanvasRef.current = true
+      const overlayH = pdfOverlaySourceHeight(sourceWidthRef.current, paintedW, paintedH)
+      if (shouldSyncPdfOverlaySource(sourceHeightRef.current, overlayH)) {
+        sourceHeightRef.current = overlayH
+        setSourceHeight(overlayH)
+        applyInkExtentStyles(overlayH, sourceWidthRef.current)
+      }
+      return false
+    }
     const column = textColumnOnOneCanvas(paintedW, paintedH)
     const expanded = expandSourceToOneCanvas({
       sourceW: sourceWidthRef.current,
@@ -2138,7 +2149,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     absorbOneCanvasRef.current = true
     if (!expanded.absorb) return false
     return setPageExtent(expanded.nextH, expanded.nextW, expanded.padX, expanded.padY)
-  }, [inline, resolvePaperElement, setPageExtent])
+  }, [applyInkExtentStyles, inline, resolvePaperElement, setPageExtent])
 
   /** Grow the write surface in any direction. Camera slack stays on the plane. */
   const ensureWriteRoom = useCallback((normalizedY?: number, normalizedX?: number) => {
@@ -2277,12 +2288,26 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     applyInkExtentStyles(sourceHeight, sourceWidth)
   }, [applyInkExtentStyles, sourceHeight, sourceWidth])
 
+  const syncPdfOverlaySource = useCallback(() => {
+    const paper = resolvePaperElement()
+    if (!paper || !(paper.classList.contains('is-pdf-note') || paper.classList.contains('has-worksheet'))) return false
+    const paintedW = Math.max(1, paper.offsetWidth)
+    const paintedH = Math.max(1, paper.offsetHeight)
+    const overlayH = pdfOverlaySourceHeight(sourceWidthRef.current, paintedW, paintedH)
+    if (!shouldSyncPdfOverlaySource(sourceHeightRef.current, overlayH)) return false
+    sourceHeightRef.current = overlayH
+    setSourceHeight(overlayH)
+    applyInkExtentStyles(overlayH, sourceWidthRef.current)
+    return true
+  }, [applyInkExtentStyles, resolvePaperElement])
+
   useLayoutEffect(() => {
     const paper = resolvePaperElement()
     if (!paper) return
     absorbPaintedOneCanvas()
+    syncPdfOverlaySource()
     commitPendingGrowRemap(paper.offsetWidth, paper.offsetHeight)
-  }, [absorbPaintedOneCanvas, commitPendingGrowRemap, resolvePaperElement, sourceHeight, sourceWidth])
+  }, [absorbPaintedOneCanvas, commitPendingGrowRemap, resolvePaperElement, sourceHeight, sourceWidth, syncPdfOverlaySource])
 
   useEffect(() => {
     absorbOneCanvasRef.current = false
