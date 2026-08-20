@@ -13,11 +13,27 @@ export const inkBlockedPdfSelectors = [
   '.pdf-note-view.is-inking .pdf-note-page',
   '.pdf-note-view.is-inking .pdf-note-page canvas',
   '.pdf-note-view.is-inking .pdf-note-text-layer',
+  '.pdf-note-view.is-inking .pdf-note-text-layer :is(span, br)',
 ] as const
 
 export const inkBlockedWorksheetSelectors = [
   '.worksheet-layer.is-disabled .worksheet-page',
   '.worksheet-layer.is-disabled .worksheet-pdf-page canvas',
+  '.worksheet-layer.is-disabled .worksheet-onenote-frame',
+] as const
+
+export const inkBlockedMarkdownSelectors = [
+  '.unified-note-view.is-inking .markdown-editor .cm-content',
+  '.unified-note-view.is-inking .markdown-editor .cm-line',
+] as const
+
+/** Windows pen still starts a selection when user-select:text remains on glyphs. */
+export const inkUserSelectNoneSelectors = [
+  '.pdf-note-view.is-inking .pdf-note-text-layer',
+  '.pdf-note-view.is-inking .pdf-note-text-layer :is(span, br)',
+  ...inkBlockedMarkdownSelectors,
+  '.worksheet-layer.is-disabled .worksheet-page',
+  '.worksheet-layer.is-disabled .worksheet-onenote-frame',
 ] as const
 
 export const inkOverlayHitSelector = '.lw-drawing-board.is-inline.is-input-active .lw-canvas-surface'
@@ -29,11 +45,20 @@ export const inkCoveringPaperSelectors = [
 ] as const
 
 export const pointerEventsForInkLayer = (
-  layer: 'pdf-page' | 'pdf-canvas' | 'pdf-text' | 'worksheet-page' | 'overlay',
+  layer: 'pdf-page' | 'pdf-canvas' | 'pdf-text' | 'markdown' | 'worksheet-page' | 'overlay',
   inkOn: boolean,
 ) => {
   if (layer === 'overlay') return inkOn ? 'auto' : 'none'
   return inkOn ? 'none' : 'auto'
+}
+
+/** Text selection is Keyboard / Tastatur only. Stift must not start a glyph selection. */
+export const userSelectForInkLayer = (
+  layer: 'pdf-text' | 'markdown' | 'worksheet-page' | 'overlay',
+  inkOn: boolean,
+): 'none' | 'text' => {
+  if (layer === 'overlay') return 'none'
+  return inkOn ? 'none' : 'text'
 }
 
 export type PdfPageBox = { top: number; height: number }

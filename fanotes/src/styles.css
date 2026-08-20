@@ -1575,13 +1575,32 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .pdf-note-view.is-inking .pdf-note-canvas-host,
 .pdf-note-view.is-inking .pdf-note-page canvas,
 .pdf-note-view.is-inking .pdf-note-text-layer,
+.pdf-note-view.is-inking .pdf-note-text-layer :is(span, br),
 .pdf-note-view.is-inking .pdf-note-toolbar,
 .pdf-note-view.is-inking .pdf-note-search,
 .pdf-note-view.is-inking .pdf-note-sidebar { pointer-events: none; }
 .worksheet-layer.is-disabled .worksheet-page,
 .worksheet-layer.is-disabled .worksheet-pdf-page,
 .worksheet-layer.is-disabled .worksheet-pdf-canvas-host,
-.worksheet-layer.is-disabled .worksheet-pdf-page canvas { pointer-events: none; }
+.worksheet-layer.is-disabled .worksheet-pdf-page canvas,
+.worksheet-layer.is-disabled .worksheet-onenote-frame { pointer-events: none; }
+.unified-note-view.is-inking .markdown-editor .cm-content,
+.unified-note-view.is-inking .markdown-editor .cm-line {
+  pointer-events: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.pdf-note-view.is-inking .pdf-note-text-layer,
+.pdf-note-view.is-inking .pdf-note-text-layer :is(span, br) {
+  cursor: default;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.worksheet-layer.is-disabled .worksheet-page,
+.worksheet-layer.is-disabled .worksheet-onenote-frame {
+  -webkit-user-select: none;
+  user-select: none;
+}
 .pdf-note-text-layer :is(span, br) {
   position: absolute;
   color: transparent;
