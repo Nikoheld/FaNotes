@@ -36,7 +36,7 @@ let observer: MutationObserver | null = null
 let replacements: Array<[string, string]> = []
 let replacementExpression: RegExp | null = null
 let replacementPreparationScheduled = false
-const GERMAN_HINT = /[ÄÖÜäöüß]|\b(?:der|die|das|den|dem|des|ein|eine|einen|einem|und|oder|für|mit|ohne|von|bei|auf|aus|zu|zum|zur|dein|deine|wird|werden|ist|sind|nicht|noch|nur|alle|keine|bitte|schritt|willkommen|zurück|weiter|fertig)\b|(?:ung|keit|heit|lich|isch|ieren|zeichen|schrift|farbe|ordner|notiz|seite|speicher|erkenn|einstell)/iu
+const GERMAN_HINT = /[ÄÖÜäöüß]|\b(?:der|die|das|den|dem|des|ein|eine|einen|einem|und|oder|für|mit|ohne|von|bei|auf|aus|zu|zum|zur|dein|deine|wird|werden|ist|sind|nicht|noch|nur|alle|keine|bitte|schritt|willkommen|zurück|weiter|fertig|anpassung|optionen|blatt|schreibmodus|stiftmodus|werkzeuge|experimentell|verlinkung|sitzung|auspoppen)\b|Vault-Wurzel|(?:ung|keit|heit|lich|isch|ieren|zeichen|schrift|farbe|ordner|notiz|seite|speicher|erkenn|einstell)/iu
 
 const textSnapshots = new WeakMap<Text, { source: string; translated: string }>()
 const attributeSnapshots = new WeakMap<Element, Map<string, AttributeSnapshot>>()
@@ -195,6 +195,16 @@ function translateCore(source: string): string {
   if (source === 'Code kopieren') return 'Copy code'
   if (source === 'Sitzungscode') return 'Session code'
   if (source === 'Fehler melden') return 'Report a bug'
+  if (source === 'Blatt') return 'Sheet'
+  if (source === 'Blatt im Uhrzeigersinn drehen') return 'Rotate the sheet clockwise'
+  if (source === 'Blatt gegen den Uhrzeigersinn drehen') return 'Rotate the sheet counterclockwise'
+  if (source === 'Schreibmodus') return 'Writing mode'
+  if (source === 'Stiftmodus') return 'Pen mode'
+  if (source === 'Werkzeuge') return 'Tools'
+  if (/^\d+ Werkzeuge$/u.test(source)) return source.replace('Werkzeuge', 'Tools')
+  if (source === 'Navigation') return 'Navigation'
+  if (source === 'Vault-Wurzel') return 'vault root'
+  if (source === 'In Vault-Wurzel') return 'In vault root'
   if (source === 'Notizen im Buch') return 'Notes in the book'
   if (source === 'Buch zum Fach hinzugefügt. Oben blendest du die Ansicht ein.') return 'Book added to the subject. Use the top bar to show it.'
   if (source === 'Buch vom Fach entfernt. Die PDF-Datei bleibt im Ordner.') return 'Book removed from the subject. The PDF file stays in the folder.'

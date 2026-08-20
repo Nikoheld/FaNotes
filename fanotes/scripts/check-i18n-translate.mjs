@@ -7,7 +7,7 @@ const appRoot = fileURLToPath(new URL('..', import.meta.url))
 const require = createRequire(import.meta.url)
 const { localizeText } = require('../electron/i18n.cjs')
 
-const GERMAN_LEFTOVER = /[ÄÖÜäöüß]|\b(?:der|die|das|und|oder|für|ohne|bitte|zurück|weiter|fertig|sitzung|einstell|handschrift|verlinkung|experimentell|auspoppen)\b/iu
+const GERMAN_LEFTOVER = /[ÄÖÜäöüß]|\b(?:der|die|das|und|oder|für|ohne|bitte|zurück|weiter|fertig|sitzung|einstell|handschrift|verlinkung|experimentell|auspoppen|anpassung|optionen|blatt|schreibmodus|stiftmodus|werkzeuge)\b|Vault-Wurzel/iu
 
 const CHROME = [
   'Experimentell',
@@ -54,6 +54,12 @@ const CHROME = [
   'Glas-Effekte',
   'Notiz herunterladen',
   'Unfertige Erkennung: Ergebnisse können falsch sein. GlyphenWerk-Training und Text → Handschrift bleiben unabhängig von diesem Schalter nutzbar.',
+  'Blatt',
+  'Schreibmodus',
+  'Stiftmodus',
+  'Werkzeuge',
+  'Vault-Wurzel',
+  'In Vault-Wurzel',
 ]
 
 const installDom = () => {
@@ -157,6 +163,14 @@ const runOnce = async () => {
   assert.equal(localizeText('Links', 'en'), 'Left')
   assert.equal(i18n.translateUiText('Anpassung · 5 Optionen'), 'Customization · 5 options')
   assert.equal(i18n.translateUiText('PDF-Seite 3'), 'PDF page 3')
+  assert.equal(i18n.translateUiText('Blatt'), 'Sheet')
+  assert.equal(i18n.translateUiText('Schreibmodus'), 'Writing mode')
+  assert.equal(i18n.translateUiText('Stiftmodus'), 'Pen mode')
+  assert.equal(i18n.translateUiText('Werkzeuge'), 'Tools')
+  assert.equal(i18n.translateUiText('In Vault-Wurzel'), 'In vault root')
+  assert.equal(localizeText('Blatt', 'en'), 'Sheet')
+  assert.equal(localizeText('Werkzeuge', 'en'), 'Tools')
+  assert.equal(localizeText('Vault-Wurzel', 'en'), 'vault root')
 
   return { chrome: CHROME.length, samples: english.length }
 }

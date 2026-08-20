@@ -8,8 +8,8 @@ const appRoot = fileURLToPath(new URL('..', import.meta.url))
 const require = createRequire(import.meta.url)
 const { localizeText } = require('../electron/i18n.cjs')
 
-const GERMAN_HINT = /[ÄÖÜäöüß]|(?:ung|keit|heit|lich|ieren)|\b(?:der|die|das|und|oder|für|mit|ohne|von|bei|auf|aus|zu|bitte|zurück|weiter|fertig|sitzung|buch|fach|notiz|ordner|seite|stift|handschrift|einstell|erkenn|speicher|öffnen|schließen|hinzufügen|entfernen|standard|experimentell|verlinkung|auspoppen)\b/iu
-const GERMAN_LEFTOVER = /[ÄÖÜäöüß]|\b(?:der|die|das|und|oder|für|ohne|bitte|zurück|weiter|fertig|sitzung|experimentell|verlinkung|auspoppen)\b/iu
+const GERMAN_HINT = /[ÄÖÜäöüß]|(?:ung|keit|heit|lich|ieren)|\b(?:der|die|das|und|oder|für|mit|ohne|von|bei|auf|aus|zu|bitte|zurück|weiter|fertig|sitzung|buch|fach|notiz|ordner|seite|stift|handschrift|einstell|erkenn|speicher|öffnen|schließen|hinzufügen|entfernen|standard|experimentell|verlinkung|auspoppen|anpassung|optionen|blatt|schreibmodus|stiftmodus|werkzeuge)\b|Vault-Wurzel/iu
+const GERMAN_LEFTOVER = /[ÄÖÜäöüß]|\b(?:der|die|das|und|oder|für|ohne|bitte|zurück|weiter|fertig|sitzung|experimentell|verlinkung|auspoppen|anpassung|optionen|blatt|schreibmodus|stiftmodus|werkzeuge)\b|Vault-Wurzel/iu
 
 const CHROME_FILES = [
   'src/App.tsx',
@@ -20,6 +20,7 @@ const CHROME_FILES = [
   'src/components/SubjectBookPane.tsx',
   'src/components/BugReportModal.tsx',
   'src/components/SearchPanel.tsx',
+  'src/components/PaperView.tsx',
   'src/lib/subjectBook.ts',
   'electron/main.cjs',
 ]
@@ -31,12 +32,17 @@ const harvest = () => {
     /(?:label|title|description|detail|name|placeholder):\s*['"]([^'"${}]{2,300})['"]/gu,
     /(?:toast|localizeText|showErrorBox)\(\s*['"]([^'"${}]{2,300})['"]/gu,
     />\s*([^<>{\n]{2,90}?)\s*</gu,
+    /(?:group:\s*|\|\|\s*)['"]([^'"${}]{2,80})['"]/gu,
+    /\?\s*['"]([^'"${}]{2,80})['"]/gu,
   ]
   for (const relative of CHROME_FILES) {
     const text = readFileSync(new URL(`../${relative}`, import.meta.url), 'utf8')
     for (const pattern of patterns) {
       pattern.lastIndex = 0
       for (const match of text.matchAll(pattern)) found.add(match[1].trim())
+    }
+    for (const required of ['Blatt', 'Schreibmodus', 'Stiftmodus', 'Werkzeuge', 'Vault-Wurzel', 'In Vault-Wurzel']) {
+      if (text.includes(`'${required}'`) || text.includes(`>${required}<`) || text.includes(`>${required}</`)) found.add(required)
     }
   }
   return [...found].filter((value) => (
@@ -120,7 +126,15 @@ const i18n = await server.ssrLoadModule('/src/i18n.ts')
 
 const runOnce = async () => {
   const harvested = harvest()
+  const settingsSource = readFileSync(new URL('../src/components/SettingsModal.tsx', import.meta.url), 'utf8')
+  assert.match(settingsSource, /\{`Anpassung · \$\{section\.count\} Optionen`\}/)
+  assert.doesNotMatch(settingsSource, /Anpassung · \{section\.count\} Optionen/)
   assert.ok(harvested.includes('Experimentell'), 'harvest missed Experimentell')
+  assert.ok(harvested.includes('Blatt'), 'harvest missed Blatt toolbar chrome')
+  assert.ok(harvested.includes('Schreibmodus'), 'harvest missed Schreibmodus status chrome')
+  assert.ok(harvested.includes('Stiftmodus'), 'harvest missed Stiftmodus status chrome')
+  assert.ok(harvested.includes('Werkzeuge'), 'harvest missed Werkzeuge palette group')
+  assert.ok(harvested.includes('Vault-Wurzel'), 'harvest missed Vault-Wurzel palette detail')
   assert.ok(harvested.includes('Send Data') || harvested.includes('Notiz-Backup'), 'harvest missed experimental chrome')
   assert.ok(harvested.some((value) => value.includes('Buch')), 'harvest missed book chrome')
   assert.ok(harvested.some((value) => /Verlinkung|Backup|Remote Support/u.test(value)), 'harvest missed recent chrome')

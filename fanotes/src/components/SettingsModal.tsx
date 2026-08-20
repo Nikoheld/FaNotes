@@ -546,7 +546,7 @@ export function SettingsModal({
           <header>
             <div className="settings-heading">
               <span className="settings-heading-icon"><ActiveSectionIcon size={17} /></span>
-              <div><span className="eyebrow">Anpassung · {section.count} Optionen</span><h2>{section.label}</h2><p>{section.description}</p></div>
+              <div><span className="eyebrow">{`Anpassung · ${section.count} Optionen`}</span><h2>{section.label}</h2><p>{section.description}</p></div>
             </div>
             <button type="button" className="icon-button" onClick={onClose} aria-label="Schließen"><X size={19} /></button>
           </header>
