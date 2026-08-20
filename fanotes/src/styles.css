@@ -603,14 +603,84 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   display: flex;
   align-items: center;
   min-width: 0;
-  padding: 0 8px;
-  gap: 8px;
+  min-height: 36px;
+  height: 36px;
+  padding: 0 10px;
+  gap: 10px;
   border-bottom: 1px solid var(--border);
   background: var(--bg);
+  color: var(--text);
   pointer-events: auto;
 }
 .editor-toolbar.is-ink {
   background: var(--bg);
+}
+.editor-toolbar.is-type {
+  display: flex;
+  align-items: center;
+  min-height: 36px;
+  height: 36px;
+  padding: 4px 10px;
+  gap: 10px;
+  background: var(--bg);
+  color: var(--text);
+  border-bottom: 1px solid var(--border);
+}
+.editor-toolbar.is-type .mode-switch {
+  height: 28px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+}
+.editor-toolbar.is-type .mode-switch button {
+  height: 24px;
+  padding: 0 10px;
+  border-radius: 6px;
+  color: var(--text-muted);
+  background: transparent;
+  font-size: 10px;
+  font-weight: 650;
+}
+.editor-toolbar.is-type .mode-switch button:hover {
+  color: var(--text);
+  background: var(--panel-hover);
+}
+.editor-toolbar.is-type .mode-switch button.is-active {
+  color: var(--text);
+  background: var(--panel-active);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 34%, transparent);
+}
+.editor-toolbar.is-type .formatting-toolbar {
+  min-width: 0;
+  flex: 1 1 auto;
+  height: 28px;
+  gap: 2px;
+  padding: 0;
+  overflow: auto hidden;
+  mask-image: none;
+}
+.editor-toolbar.is-type .formatting-toolbar button {
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  color: var(--text-soft);
+  background: transparent;
+}
+.editor-toolbar.is-type .formatting-toolbar button:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--panel-hover);
+  transform: none;
+}
+.editor-toolbar.is-type .toolbar-end {
+  height: 28px;
+  padding-left: 8px;
+  border-left: 1px solid var(--border);
+  background: var(--bg);
+}
+.editor-toolbar.is-type .toolbar-button {
+  height: 28px;
+  min-width: 28px;
 }
 .mode-switch {
   flex: none;

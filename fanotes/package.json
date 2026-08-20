@@ -54,6 +54,7 @@
     "check:drawing": "node scripts/check-drawing-mode.cjs && node scripts/check-ink-pointer-session.mjs && node scripts/check-one-canvas.mjs && node scripts/check-sheet-write.mjs && node scripts/check-pdf-write.mjs && node scripts/check-ink-stroke.mjs",
     "check:ink-stroke": "node scripts/check-ink-stroke.mjs",
     "check:menus": "node scripts/check-menu-ux.cjs",
+    "check:keyboard-toolbar": "node scripts/check-keyboard-toolbar.mjs",
     "check:ai": "node scripts/check-ai-providers.cjs",
     "check:welcome": "node scripts/check-welcome-note.cjs",
     "check:onboarding": "node scripts/check-first-run-onboarding.cjs",
