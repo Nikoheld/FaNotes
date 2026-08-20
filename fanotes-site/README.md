@@ -38,6 +38,10 @@ ClamAV benötigt für die erlaubte PDF-Größe `StreamMaxLength 100M` in `/etc/c
 
 Die Desktop- und Web-App senden optionale Bug-Reports ausschließlich an `https://fanotes.fasrv.ch/api/v1/bug-report`. Der Bericht enthält eine kurze Beschreibung und das lokale 5-Minuten-Diagnosefenster (Stiftposition, Notiz, Werkzeug, Version). Ohne Beschreibung oder ohne Fenster lehnt der Server ab. Die Dateien liegen unter `/var/lib/fanotes-bug-reports`.
 
+## Send Data
+
+Unter **Einstellungen → Experimentell** kann die Desktop-App gebündelte Diagnose-Logs, Laufzeit-Nutzerdaten und Linux/Hyprland-Kontext an `https://fanotes.fasrv.ch/api/v1/send-data` schicken. Standard aus. Der Server nimmt nur POST (und CORS-OPTIONS) an, begrenzt Größe und Rate und speichert keine Vault-Dateien. Die Dateien liegen unter `/var/lib/fanotes-send-data`.
+
 ## Hausaufgaben-API
 
 Unter **Einstellungen → Experimentell** kann die lokale Hausaufgabenliste optional auf `https://fanotes.fasrv.ch/api/v1/homework/<channelId>` veröffentlicht werden. Die Abfrage liefert nur diese Liste (`GET` mit `Authorization: Bearer <Passwort>`). Ohne Schalter, ohne Passwort oder mit falschem Passwort gibt der Server keine Titel zurück. Auf dem Server liegt nur die Scrypt-Ableitung des Passworts unter `/var/lib/fanotes-homework`.

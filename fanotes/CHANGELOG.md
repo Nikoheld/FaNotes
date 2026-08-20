@@ -2,6 +2,12 @@
 
 ## Unveröffentlicht
 
+## 2026.8.51
+
+- **Buch am Fach:** An ein Fach hängst du ein PDF. Oben blendest du das Buch ein — links, rechts, oben, unten oder in einem eigenen Fenster. Die letzte Seite bleibt gemerkt, und du kannst direkt ins Buch schreiben.
+- **Send Data:** Unter Experimentell schickt FaNotes in Abständen Diagnose-Logs und Laufzeitdaten an fanotes.fasrv.ch, besonders für Linux und Hyprland. Standard aus; der Akku wird nicht leergezogen.
+- **Gepunktetes Papier überall:** Die Punktlinie geht über das ganze sichtbare Blatt, nicht nur über die mittlere Schreibfläche. Leer bleibt ohne Punkte, PDF-Notizen ohne dieses Raster.
+
 ## 2026.8.50
 
 - **Notiz-Backup:** Unter Experimentell schaltest du Backup in der oberen Leiste ein. Der erste Druck sichert die Notiz so wie sie ist; danach kannst du weitere Backups machen oder alte wiederherstellen.

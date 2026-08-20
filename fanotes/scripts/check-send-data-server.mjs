@@ -13,6 +13,8 @@ import {
 const appRoot = fileURLToPath(new URL('..', import.meta.url))
 const serverSource = readFileSync(new URL('../../fanotes-site/server.mjs', import.meta.url), 'utf8')
 const handlerSource = readFileSync(new URL('../../fanotes-site/send-data-api.mjs', import.meta.url), 'utf8')
+const nginxSource = readFileSync(new URL('../../fanotes-site/deploy/fanotes-fasrv.conf', import.meta.url), 'utf8')
+const serviceSource = readFileSync(new URL('../../fanotes-site/deploy/fanotes-site.service', import.meta.url), 'utf8')
 
 const server = await createServer({
   root: appRoot,
@@ -34,6 +36,9 @@ const runOnce = async () => {
   assert.match(handlerSource, /Access-Control-Allow-Origin/)
   assert.match(handlerSource, /OPTIONS/)
   assert.match(handlerSource, /persistSendDataReport/)
+  assert.match(nginxSource, /location = \/api\/v1\/send-data \{[\s\S]*?Cross-Origin-Resource-Policy "cross-origin"/u)
+  assert.match(serviceSource, /FANOTES_SEND_DATA_DIR=\/var\/lib\/fanotes-send-data/)
+  assert.match(serviceSource, /ReadWritePaths=\/var\/lib\/fanotes-send-data/)
   assert.equal(sendDataCorsHeaders['Access-Control-Allow-Methods'], 'POST, OPTIONS')
   assert.equal(SEND_DATA_MAX_BYTES, handlerMaxBody)
   assert.equal(SEND_DATA_PATH, '/api/v1/send-data')
