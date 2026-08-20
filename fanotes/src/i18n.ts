@@ -178,7 +178,23 @@ function translateCore(source: string): string {
   if (source === 'Buch hinzufügen') return 'Add book'
   if (source === 'Buch entfernen') return 'Remove book'
   if (source === 'Buchplatzierung') return 'Book placement'
+  if (source === 'Buch schließen') return 'Close book'
+  if (source === 'Buch einblenden') return 'Show book'
+  if (source === 'Buch ausblenden') return 'Hide book'
+  if (source === 'Links') return 'Left'
+  if (source === 'Rechts') return 'Right'
+  if (source === 'Oben') return 'Top'
+  if (source === 'Unten') return 'Bottom'
   if (source === 'Auspoppen') return 'Pop out'
+  if (source === 'Notizen') return 'Notes'
+  if (source === 'Offene Notizen') return 'Open notes'
+  if (source === 'Experimentell') return 'Experimental'
+  if (source === 'Remote Support') return 'Remote Support'
+  if (source === 'Sitzung starten') return 'Start session'
+  if (source === 'Sitzung beenden') return 'End session'
+  if (source === 'Code kopieren') return 'Copy code'
+  if (source === 'Sitzungscode') return 'Session code'
+  if (source === 'Fehler melden') return 'Report a bug'
   if (source === 'Notizen im Buch') return 'Notes in the book'
   if (source === 'Buch zum Fach hinzugefügt. Oben blendest du die Ansicht ein.') return 'Book added to the subject. Use the top bar to show it.'
   if (source === 'Buch vom Fach entfernt. Die PDF-Datei bleibt im Ordner.') return 'Book removed from the subject. The PDF file stays in the folder.'
@@ -203,7 +219,16 @@ function translateCore(source: string): string {
     return `Visual knowledge graph with ${subjects} ${subjects === 1 ? 'subject' : 'subjects'} and ${notes} ${notes === 1 ? 'note' : 'notes'}`
   }
   const closeNamed = /^(.+) schließen$/u.exec(source)
-  if (closeNamed) return `Close ${closeNamed[1]}`
+  if (closeNamed) return `Close ${catalog[closeNamed[1]] ?? closeNamed[1]}`
+  const customizationOptions = /^Anpassung · (\d+) Optionen$/u.exec(source)
+  if (customizationOptions) {
+    const count = Number(customizationOptions[1])
+    return `Customization · ${count} ${count === 1 ? 'option' : 'options'}`
+  }
+  const bookNamed = /^Buch (.+)$/u.exec(source)
+  if (bookNamed) return `Book ${bookNamed[1]}`
+  const pdfPageNamed = /^PDF-Seite (\d+)$/u.exec(source)
+  if (pdfPageNamed) return `PDF page ${pdfPageNamed[1]}`
   const canvasWith = /^Zeichenfläche mit (.+)$/u.exec(source)
   if (canvasWith) return `Canvas with ${canvasWith[1]}`
   const currentVersion = /^(FaNotes(?: Web)? \d+(?:\.\d+){2}(?:-beta\.\d+)?) ist aktuell$/u.exec(source)

@@ -73,6 +73,8 @@
     "check:windows": "node scripts/check-windows-release.cjs",
     "check:web": "node scripts/check-web-app.cjs",
     "check:i18n": "node scripts/check-i18n.cjs",
+    "check:i18n-translate": "node scripts/check-i18n-translate.mjs",
+    "check:i18n-catalog": "node scripts/check-i18n-catalog.mjs",
     "build:glyphenwerk": "npm --prefix .. run build && node scripts/stage-glyphenwerk.cjs",
     "build:spelling": "node scripts/build-spelling-filters.cjs",
     "build:proper-names": "node scripts/build-english-proper-names.cjs",

@@ -3765,7 +3765,7 @@ function registerIpcHandlers() {
       minHeight: 360,
       show: true,
       backgroundColor: '#0b0c12',
-      title: 'Buch',
+      title: localizeText('Buch', currentUiLanguage()),
       ...linuxWindowFrameOptions(),
       webPreferences: {
         preload: path.join(__dirname, 'preload.cjs'),
