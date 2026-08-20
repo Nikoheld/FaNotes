@@ -951,6 +951,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .paper-view { position: relative; }
 .paper-sheet-plane {
   --paper-scroll-room: 560px;
+  position: relative;
   display: block;
   box-sizing: border-box;
   /* Camera is this padded plane. The write surface sits inside and does not
@@ -1065,7 +1066,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   margin: 0;
   overflow: visible;
   color: var(--text);
-  background-color: #fff;
+  background-color: transparent;
   background-repeat: repeat;
   border: 1px solid rgba(31,34,47,.13);
   border-radius: 3px;
@@ -1104,41 +1105,45 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   /* Text height is independent of the write/camera surface. */
   min-height: 0;
 }
-/* Ruling is a real child so CSS zoom scales it with ink and type as one sheet.
-   Fixed SVG tiles (not repeating-linear-gradient) keep the same origin when
-   the sheet grows — gradients re-rasterize against the new box and jitter. */
-.unified-paper > .paper-ruling {
+/* Ruling paints the camera plane (write sheet + scroll sides) as one tile
+   origin. Do not also paint `.unified-paper > .paper-ruling` — that doubles
+   dots on the sheet and leaves the sides a white desk. */
+.paper-sheet-plane > .paper-ruling {
   position: absolute;
   inset: 0;
   z-index: 0;
   pointer-events: none;
-  border-radius: inherit;
   background-repeat: repeat;
   background-origin: padding-box;
   background-attachment: local;
   background-position: 0 0;
-  /* Tile size is CSS px on the sheet. The plane camera zooms this with
-     type and ink — do not pin a local zoom or a 1× background-size. */
 }
-.paper-dots .unified-paper > .paper-ruling {
+.paper-dots .paper-sheet-plane > .paper-ruling {
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28'%3E%3Ccircle cx='14' cy='14' r='0.8' fill='rgba(82,91,116,0.19)'/%3E%3C/svg%3E");
   background-size: 28px 28px;
 }
-.paper-squares .unified-paper > .paper-ruling {
+.paper-squares .paper-sheet-plane > .paper-ruling {
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20'%3E%3Cpath d='M20 0H0V20' fill='none' stroke='rgba(82,118,168,0.16)' stroke-width='1'/%3E%3C/svg%3E");
   background-size: 20px 20px;
 }
-.paper-grid .unified-paper > .paper-ruling {
+.paper-grid .paper-sheet-plane > .paper-ruling {
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28'%3E%3Cpath d='M28 0H0V28' fill='none' stroke='rgba(82,91,116,0.105)' stroke-width='1'/%3E%3C/svg%3E");
   background-size: 28px 28px;
 }
-.paper-lines .unified-paper > .paper-ruling {
+.paper-lines .paper-sheet-plane > .paper-ruling {
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28'%3E%3Cpath d='M0 27.5H28' stroke='rgba(82,91,116,0.13)' stroke-width='1'/%3E%3C/svg%3E");
   background-size: 28px 28px;
 }
-.paper-millimeter .unified-paper > .paper-ruling {
+.paper-millimeter .paper-sheet-plane > .paper-ruling {
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20'%3E%3Cpath d='M4 0V20M8 0V20M12 0V20M16 0V20M0 4H20M0 8H20M0 12H20M0 16H20' stroke='rgba(92,118,168,0.08)' stroke-width='1'/%3E%3Cpath d='M20 0H0V20' fill='none' stroke='rgba(72,98,148,0.18)' stroke-width='1'/%3E%3C/svg%3E");
   background-size: 20px 20px;
+}
+.paper-blank .paper-sheet-plane > .paper-ruling,
+.unified-note-view.is-pdf-note .paper-sheet-plane > .paper-ruling {
+  display: none;
+}
+.paper-blank .unified-paper {
+  background-color: #fff;
 }
 .unified-note-view.is-inking .unified-paper { box-shadow: 0 0 0 1px color-mix(in srgb, var(--paper-accent-readable) 40%, transparent), 0 8px 28px rgba(0,0,0,.22); }
 .unified-paper > .editor-pane {

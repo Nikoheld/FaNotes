@@ -47,6 +47,7 @@ Command-palette action ids walked from `src/App.tsx`: `new-note`, `import-pdf-no
 | Paper zoom / rotation | `src/lib/paperView.ts` | `export const clampViewZoom` |
 | Paper grow while writing | `src/lib/paperGrow.ts` | `neededWriteExtent` |
 | Camera slack around the sheet | `src/lib/paperGrow.ts` | `SCROLL_ROOM` |
+| Paper ruling fill on the camera plane | `src/lib/paperRuling.ts` | `export const paperRulingFillBox` |
 | Ink pointer session (Wacom lift) | `src/lib/inkPointerSession.ts` | `shouldHardEndInkPointerSession` |
 | Wheel / pen-up cleanup | `src/lib/inkPointerPolicy.ts` | `applyPenUpInkCleanup` |
 | Scribble erase | `src/lib/scribbleErase.ts` | `detectScribbleErase` |

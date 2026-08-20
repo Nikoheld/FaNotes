@@ -3219,7 +3219,6 @@ export default function App({ startupBootstrap }: AppProps) {
                 showHud={!drawingOpen}
               >
                 <article className={`unified-paper ${worksheetSession.documents.length ? 'has-worksheet' : ''} ${isPdfActive ? 'is-pdf-note' : ''} ${noteLinkPlacing ? 'is-placing-note-link' : ''}`} aria-label={`${activeTab.title} · ${isPdfActive ? 'PDF-Notiz mit Handschrift' : 'gemeinsame Tastatur- und Handschriftseite'}`}>
-                  {!isPdfActive && <div className="paper-ruling" aria-hidden="true" />}
                   {isPdfActive ? (
                     <Suspense fallback={<div className="pdf-note-status"><LoaderCircle className="spin" size={20} /> PDF wird geladen …</div>}>
                       <SafeBoundary name="PDF-Notiz" fallbackTitle="Der PDF-Viewer ist abgestürzt">
@@ -3288,9 +3287,8 @@ export default function App({ startupBootstrap }: AppProps) {
                 </article>
               </PaperView>
               {splitTab && (
-                <PaperView className="unified-note-view is-split-pane" viewKey={`split:${splitTab.path}`} showHud={false}>
-                  <article className="unified-paper" aria-label={`${splitTab.title} · zweite Spalte`}>
-                    <div className="paper-ruling" aria-hidden="true" />
+                <PaperView className={`unified-note-view is-split-pane paper-${splitTab.kind === 'pdf' || isPdfNotePath(splitTab.path) ? 'blank' : activePaper}`} viewKey={`split:${splitTab.path}`} showHud={false}>
+                  <article className={`unified-paper ${splitTab.kind === 'pdf' || isPdfNotePath(splitTab.path) ? 'is-pdf-note' : ''}`} aria-label={`${splitTab.title} · zweite Spalte`}>
                     <header className="split-pane-head">
                       <strong>{splitTab.title}</strong>
                       <button type="button" onClick={() => void openNote(splitTab.path)}>Fokus</button>

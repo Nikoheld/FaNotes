@@ -137,7 +137,7 @@ const paperViewSafeguards = [
   ["removeProperty('zoom')", 'kein Zoom-1 auf Kindschichten (Text bleibt sonst 1×)'],
 ]
 const paperStyleSafeguards = [
-  ['.unified-paper > .paper-ruling', 'Lineatur liegt auf einer Kind-Schicht und zoomt mit Tinte'],
+  ['.paper-sheet-plane > .paper-ruling', 'Lineatur liegt auf der Kamera-Ebene und zoomt mit Tinte'],
   ['background-repeat: repeat;', 'Kästchen nicht per round neu kacheln'],
   ['.paper-sheet-plane', 'Text, Tinte und Lineatur liegen in einer Zoom-Hülle'],
 ]

@@ -316,6 +316,7 @@ export function PaperView({ children, className = '', viewKey, showHud = true }:
         data-paper-zoom={view.zoom}
       >
         <div className="paper-sheet-plane">
+          <div className="paper-ruling" aria-hidden="true" />
           {children}
         </div>
         {showHud && (
