@@ -466,6 +466,38 @@ export const expandSourceToOneCanvas = ({
   return { nextW, nextH, padX, padY, absorb: nextW > sourceW + 1 || nextH > sourceH + 1 || padX > 0 || padY > 0 }
 }
 
+/**
+ * Bitmap scale so `penWidth` (settings: px) stays CSS pixels on the painted
+ * overlay. Using sourceWidth here made a 3.5px pen a hairline once the overlay
+ * was wider than A4 (one canvas) or shorter than a tall PDF in source space.
+ */
+export const inkStrokePaintScale = (bitmapWidth: number, layoutWidth: number) => {
+  const layout = layoutWidth > 1 ? layoutWidth : bitmapWidth
+  if (!(bitmapWidth > 0) || !(layout > 0)) return 1
+  return bitmapWidth / layout
+}
+
+/** CSS-pixel stroke width at zoom 1. Independent of source extent. */
+export const inkStrokeCssPixels = (baseWidth: number, bitmapWidth: number, layoutWidth: number) => (
+  Math.max(0, baseWidth) * inkStrokePaintScale(bitmapWidth, layoutWidth)
+)
+
+/**
+ * Tablet-board A4 box. Must not size the inline overlay — a tall PDF
+ * (`sourceHeight` ≫ A4) collapses this to a strip, so the pen misses the page
+ * or paints a hairline.
+ */
+export const a4AspectBoardSize = (
+  availableWidth: number,
+  availableHeight: number,
+  sourceWidth: number,
+  sourceHeight: number,
+) => {
+  const ratio = Math.max(0.05, sourceWidth) / Math.max(1, sourceHeight)
+  const width = Math.min(Math.max(1, availableWidth), Math.max(1, availableHeight) * ratio)
+  return { width, height: width / ratio }
+}
+
 /** Map a pointer on the one canvas to 0–1 of that canvas. Do not clamp to an inner card. */
 export const mapClientToOneCanvas = (
   clientX: number,

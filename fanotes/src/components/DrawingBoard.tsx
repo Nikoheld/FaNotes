@@ -116,6 +116,7 @@ import {
   WRITE_SLACK_WIDTH,
   expandSourceToOneCanvas,
   growLiveInkAndMapNext,
+  inkStrokePaintScale,
   mapClientToOneCanvas,
   neededWriteMinPad,
   remapNormalizedAfterExtent,
@@ -831,11 +832,13 @@ const drawInkStroke = (
   smoothing: number,
   startSegment = 1,
   sourceWidth = SOURCE_WIDTH,
+  layoutWidth = 0,
 ) => {
   if (stroke.points.length === 0) return
   const first = stroke.points[0]
-  // baseWidth is in original page units; map through the current logical page width.
-  const scale = width / Math.max(1, sourceWidth)
+  // penWidth is CSS px. Scale by the painted overlay, not source extent —
+  // sourceWidth grows with one-canvas / tall PDFs and shrank the pen to a hairline.
+  const scale = inkStrokePaintScale(width, layoutWidth > 1 ? layoutWidth : sourceWidth)
   const brush = stroke.purpose === 'art' ? stroke.brush ?? 'fineliner' : 'fineliner'
   const opacity = stroke.purpose === 'art' ? clamp(stroke.opacity ?? 1, .08, 1) : 1
   const paint = strokePaint(context, stroke, width, height)
@@ -1005,6 +1008,7 @@ const renderDocument = (
   includePaper = true,
   sourceWidth = SOURCE_WIDTH,
   inkWindow: InkWindow = FULL_INK_WINDOW,
+  layoutWidth = 0,
 ) => {
   const context = canvas.getContext('2d')
   if (!context) return
@@ -1019,7 +1023,7 @@ const renderDocument = (
   context.clip()
   context.setTransform(1, 0, 0, 1, 0, -inkWindow.y0 * virtualHeight)
   const visible = isFullInkWindow(inkWindow) ? strokes : strokes.filter((stroke) => strokeIntersectsWindow(stroke, inkWindow))
-  visible.forEach((stroke) => drawInkStroke(context, stroke, width, virtualHeight, smoothing, 1, sourceWidth))
+  visible.forEach((stroke) => drawInkStroke(context, stroke, width, virtualHeight, smoothing, 1, sourceWidth, layoutWidth))
   context.restore()
 }
 
@@ -1174,7 +1178,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const committedCanvasRef = useRef<HTMLCanvasElement | null>(null)
   const committedCanvasKeyRef = useRef('')
   const committedCanvasDirtyRef = useRef(true)
-  const canvasPixelSizeRef = useRef({ width: 0, height: 0, virtualHeight: 0 })
+  const canvasPixelSizeRef = useRef({ width: 0, height: 0, virtualHeight: 0, layoutWidth: 0 })
   const inkWindowRef = useRef<InkWindow>(FULL_INK_WINDOW)
   const inkWindowIdleRef = useRef<number | null>(null)
   const resizeDebounceRef = useRef<number | null>(null)
@@ -1493,7 +1497,13 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     const surface = surfaceRef.current
     if (!canvas || !committedCanvas || !surface) return
     const shell = surface.parentElement
-    if ((measureLayout || !canvasPixelSizeRef.current.width) && shell) {
+    // Standalone tablet board: fit an A4 box in the shell. Inline overlay
+    // must fill the paper — A4-aspect sizing on a tall PDF collapses to a
+    // strip (hairline / no hit on the note).
+    if (inline) {
+      surface.style.removeProperty('width')
+      surface.style.removeProperty('height')
+    } else if ((measureLayout || !canvasPixelSizeRef.current.width) && shell) {
       const availableWidth = Math.max(240, shell.clientWidth - 20)
       const availableHeight = Math.max(150, shell.clientHeight - 48)
       const sourceRatio = sourceWidth / sourceHeight
@@ -1530,7 +1540,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     if (shouldRemeasure && (measureLayout || !activeStrokeRef.current)) {
       const nextSize = computeInkPixelSize(layoutWidth, windowLayoutHeight, viewZoomRef.current, inline)
       const virtualHeight = nextSize.height / windowSpan
-      canvasPixelSizeRef.current = { width: nextSize.width, height: nextSize.height, virtualHeight }
+      canvasPixelSizeRef.current = { width: nextSize.width, height: nextSize.height, virtualHeight, layoutWidth }
       canvasQualityKeyRef.current = qualityKey
       committedCanvasDirtyRef.current = true
       applyInkWindowToCanvases([canvas, committedCanvas], inkWindow)
@@ -1546,11 +1556,12 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         width: nextSize.width,
         height: nextSize.height,
         virtualHeight: nextSize.height / windowSpan,
+        layoutWidth,
       }
       canvasQualityKeyRef.current = qualityKey
       applyInkWindowToCanvases([canvas, committedCanvas], inkWindow)
     }
-    const { width: pixelWidth, height: pixelHeight, virtualHeight } = canvasPixelSizeRef.current
+    const { width: pixelWidth, height: pixelHeight, virtualHeight, layoutWidth: paintLayoutWidth } = canvasPixelSizeRef.current
     if (!pixelWidth || !pixelHeight || !virtualHeight) return
     const liveCanvasResized = canvas.width !== pixelWidth || canvas.height !== pixelHeight
     if (canvas.width !== pixelWidth) canvas.width = pixelWidth
@@ -1584,6 +1595,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         !inline,
         sourceWidth,
         inkWindow,
+        paintLayoutWidth || layoutWidth,
       )
       committedCanvasKeyRef.current = cacheKey
       committedCanvasDirtyRef.current = false
@@ -1616,6 +1628,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         settings.smoothing,
         Math.max(1, activeRenderedPointCountRef.current),
         sourceWidth,
+        paintLayoutWidth || layoutWidth,
       )
       activeRenderedPointCountRef.current = activeStroke.points.length
       liveCanvasHasInkRef.current = true
@@ -1624,7 +1637,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
 
   const commitStrokeToCanvas = useCallback((stroke: InkStroke) => {
     const canvas = committedCanvasRef.current
-    const { width, height, virtualHeight } = canvasPixelSizeRef.current
+    const { width, height, virtualHeight, layoutWidth } = canvasPixelSizeRef.current
     if (!canvas || !width || !height || !virtualHeight || committedCanvasDirtyRef.current) return
     const inkWindow = inkWindowRef.current
     if (!strokeIntersectsWindow(stroke, inkWindow)) return
@@ -1635,7 +1648,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     context.rect(0, 0, width, height)
     context.clip()
     context.setTransform(1, 0, 0, 1, 0, -inkWindow.y0 * virtualHeight)
-    drawInkStroke(context, stroke, width, virtualHeight, settings.smoothing, 1, sourceWidth)
+    drawInkStroke(context, stroke, width, virtualHeight, settings.smoothing, 1, sourceWidth, layoutWidth)
     context.restore()
   }, [settings.smoothing, sourceWidth])
 
@@ -2425,7 +2438,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     const canvas = canvasRef.current
     const stroke = activeStrokeRef.current
     if (!canvas || !stroke) return false
-    const { width: pixelWidth, height: pixelHeight, virtualHeight } = canvasPixelSizeRef.current
+    const { width: pixelWidth, height: pixelHeight, virtualHeight, layoutWidth } = canvasPixelSizeRef.current
     if (!pixelWidth || !pixelHeight || !virtualHeight) return false
     const context = canvas.getContext('2d', { alpha: true })
     if (!context) return false
@@ -2451,7 +2464,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       const preview: InkStroke = previewPoints.length
         ? { ...stroke, points: [...stroke.points, ...previewPoints] }
         : stroke
-      drawInkStroke(context, preview, pixelWidth, virtualHeight, liveSmoothing, 1, sourceWidthRef.current)
+      drawInkStroke(context, preview, pixelWidth, virtualHeight, liveSmoothing, 1, sourceWidthRef.current, layoutWidth)
       activeRenderedPointCountRef.current = stroke.points.length
       liveSmoothAtRef.current = stroke.points.length
       liveCanvasHasInkRef.current = true
@@ -2465,6 +2478,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         liveSmoothing,
         Math.max(1, activeRenderedPointCountRef.current),
         sourceWidthRef.current,
+        layoutWidth,
       )
       activeRenderedPointCountRef.current = stroke.points.length
       liveCanvasHasInkRef.current = true
@@ -5909,7 +5923,7 @@ const drawingBoardStyles = `
 .lw-drawing-board.is-inline .lw-draw-workspace{position:absolute;inset:0;display:block;min-height:100%;padding:0;pointer-events:none}
 .lw-drawing-board.is-inline .lw-canvas-shell{position:absolute;inset:0;display:block;padding:0;border:0;border-radius:0;background:transparent;box-shadow:none;pointer-events:none}
 .lw-drawing-board.is-inline .lw-canvas-glow,.lw-drawing-board.is-inline .lw-canvas-meta{display:none}
-.lw-drawing-board.is-inline .lw-canvas-surface{position:absolute;inset:0;width:100%!important;height:100%!important;min-width:0;min-height:0;aspect-ratio:auto;margin:0;border-radius:0;background:transparent;box-shadow:none;will-change:auto;pointer-events:none}
+.lw-drawing-board.is-inline .lw-canvas-surface{position:absolute;inset:0;width:100%!important;height:100%!important;min-width:0;min-height:0;aspect-ratio:auto;margin:0;overflow:visible;border-radius:0;background:transparent;box-shadow:none;will-change:auto;pointer-events:none}
 .lw-drawing-board.is-inline.is-input-active .lw-canvas-surface{pointer-events:auto}
 .lw-drawing-board.is-inline .lw-tablet-canvas{position:absolute;left:0;width:100%;height:100%;pointer-events:none}
 .lw-drawing-board.is-inline .lw-tablet-canvas.is-input-active{pointer-events:none}

@@ -2,6 +2,10 @@
 
 ## Unveröffentlicht
 
+## 2026.8.55
+
+- **Sichtbare Tinte:** Auf PDF und Notiz hat der Stift wieder eine normale Strichstärke. Die Linie bleibt unter dem Stift — nicht haardünn und nicht unsichtbar.
+
 ## 2026.8.54
 
 - **PDF-Seite unter dem Stift:** Auf einem mehrseitigen PDF bleibt Handschrift und erkannter Text auf der Seite, auf der du schreibst — auch wenn das Blatt breiter als A4 ist. Nicht auf der anderen.

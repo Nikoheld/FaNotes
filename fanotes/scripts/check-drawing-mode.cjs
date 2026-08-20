@@ -98,6 +98,8 @@ const safeguards = [
   ['INK_WIDTH_ANCHOR_CLASS', 'A4-Tinte ändert den linken Rand nicht'],
   ['nextWriteExtent', 'Source wächst nicht, wenn die gemalte PDF-Fläche schon Platz hat'],
   ['mapClientToOneCanvas', 'Stift trifft die eine Canvas-Fläche, nicht eine innere Karte'],
+  ['inkStrokePaintScale', 'Stiftbreite in CSS-Pixeln, nicht an der Source-Weite'],
+  ["surface.style.removeProperty('width')", 'Inline-Overlay wird nicht auf A4-Seitenverhältnis geklemmt'],
   ['inkPointOnWriteSurface', 'Fenster-Bitmap ist kein zweites Koordinatensystem'],
   ['pdfOverlaySourceHeight', 'PDF-Overlay-Höhe steuert den Source-Raum, nicht A4'],
   ['shouldSyncPdfOverlaySource', 'Mehrseitige PDFs wachsen im Source mit den Seiten'],

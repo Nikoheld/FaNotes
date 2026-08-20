@@ -92,6 +92,7 @@ const runOnce = () => {
   assert.match(board, /\.lw-drawing-board\.is-inline\{[^}]*inset:0/)
   assert.doesNotMatch(board, /inset:calc\(-1 \* var\(--paper-scroll-room/)
   assert.match(board, /mapClientToOneCanvas/)
+  assert.match(board, /if \(inline\) \{\s*surface\.style\.removeProperty\('width'\)/)
   assert.match(board, /expandSourceToOneCanvas/)
   assert.match(board, /lw-canvas-surface/)
   assert.match(css, /\.paper-sheet-plane > \.unified-paper \{[\s\S]*?width:\s*100%/)
