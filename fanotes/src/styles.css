@@ -1521,7 +1521,11 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   transform: rotate(var(--rotate)) scaleX(var(--scale-x)) scale(var(--min-font-size-inv));
 }
 .pdf-note-text-layer .markedContent { display: contents; }
-.pdf-note-text-layer ::selection { background: color-mix(in srgb, var(--paper-accent-readable) 38%, #7aa2ff 28%); }
+.pdf-note-text-layer ::selection {
+  color: transparent;
+  background: color-mix(in srgb, var(--paper-accent-readable) 38%, #7aa2ff 28%);
+}
+.pdf-note-text-layer br::selection { background: transparent; }
 .pdf-note-sidebar {
   position: sticky;
   top: 62px;
