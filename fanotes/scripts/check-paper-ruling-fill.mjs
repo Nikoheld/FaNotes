@@ -25,18 +25,24 @@ const runOnce = () => {
   assert.equal(fill.y, layout.plane.y)
   assert.equal(fill.width, layout.plane.width)
   assert.equal(fill.height, layout.plane.height)
-  assert.equal(paperRulingCoversCameraSides(fill, layout.sheet, layout.plane), true)
-  assert.ok(fill.x < layout.sheet.x)
-  assert.ok(fill.y < layout.sheet.y)
-  assert.ok(fill.x + fill.width > layout.sheet.x + layout.sheet.width)
-  assert.ok(fill.y + fill.height > layout.sheet.y + layout.sheet.height)
-  assert.equal(paperRulingCoversCameraSides(layout.sheet, layout.sheet, layout.plane), false)
+  assert.equal(layout.sheet.x, layout.plane.x, 'write sheet is the plane — one canvas')
+  assert.equal(layout.sheet.y, layout.plane.y)
+  assert.equal(layout.sheet.width, layout.plane.width)
+  assert.equal(layout.sheet.height, layout.plane.height)
+  assert.ok(layout.text.x > 0, 'text column stays inset on the one canvas')
+  assert.ok(layout.text.width <= 900)
+  assert.equal(fill.x, layout.plane.x)
+  assert.equal(fill.width, layout.plane.width)
+  assert.ok(fill.x < layout.text.x)
+  assert.ok(fill.x + fill.width > layout.text.x + layout.text.width)
+  assert.equal(paperRulingCoversCameraSides(layout.text, layout.text, layout.plane), false)
   return {
     coversPlane: true,
-    left: layout.sheet.x - fill.x,
-    top: layout.sheet.y - fill.y,
-    right: fill.x + fill.width - (layout.sheet.x + layout.sheet.width),
-    bottom: fill.y + fill.height - (layout.sheet.y + layout.sheet.height),
+    oneCanvas: true,
+    left: layout.text.x - fill.x,
+    top: layout.text.y - fill.y,
+    right: fill.x + fill.width - (layout.text.x + layout.text.width),
+    bottom: fill.y + fill.height - (layout.text.y + layout.text.height),
   }
 }
 

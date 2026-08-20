@@ -99,8 +99,14 @@ export const paperCameraSheetLayout = (
   room = SCROLL_ROOM,
 ) => {
   const plane = { x: 0, y: 0, width: planeWidth, height: planeHeight }
-  const sheet = { x: room, y: room, width: sheetWidth, height: sheetHeight }
+  const sheet = { x: 0, y: 0, width: planeWidth, height: planeHeight }
+  const text = {
+    x: Math.max(0, Math.min(room, Math.max(0, planeWidth - sheetWidth))),
+    y: 0,
+    width: Math.max(1, Math.min(sheetWidth, planeWidth)),
+    height: Math.max(1, Math.min(sheetHeight, planeHeight) || planeHeight),
+  }
   const fill = paperRulingFillBox(sheet, plane)
   const origin = paperRulingTileOrigin(plane)
-  return { plane, sheet, fill, origin, room, tile: PAPER_DOT_TILE_PX }
+  return { plane, sheet, fill, origin, room, tile: PAPER_DOT_TILE_PX, text }
 }

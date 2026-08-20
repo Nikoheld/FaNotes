@@ -2,6 +2,8 @@
 
 ## Unveröffentlicht
 
+- **Ein Canvas:** Die gepunktete Fläche ist die Schreibfläche. Kein zweites Blatt drumherum. Du schreibst überall, wo die Punkte sind.
+
 ## 2026.8.51
 
 - **Buch am Fach:** An ein Fach hängst du ein PDF. Oben blendest du das Buch ein — links, rechts, oben, unten oder in einem eigenen Fenster. Die letzte Seite bleibt gemerkt, und du kannst direkt ins Buch schreiben.

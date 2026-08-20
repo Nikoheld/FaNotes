@@ -113,9 +113,12 @@ import {
   SCROLL_ROOM,
   WRITE_SLACK_HEIGHT,
   WRITE_SLACK_WIDTH,
+  expandSourceToOneCanvas,
   growLiveInkAndMapNext,
+  mapClientToOneCanvas,
   neededWriteMinPad,
   remapNormalizedAfterExtent,
+  textColumnOnOneCanvas,
   HAS_INK_EXTENT_CLASS,
   INK_WIDTH_ANCHOR_CLASS,
   clearInkExtentStyles,
@@ -1734,7 +1737,9 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const pointFromEvent = useCallback((event: PointerEvent): StrokePoint | null => {
     const canvas = canvasRef.current
     const originEl = (inline
-      ? (canvas?.closest('.unified-paper') as HTMLElement | null)
+      ? ((canvas?.closest('.lw-canvas-surface') as HTMLElement | null)
+        ?? (surfaceRef.current)
+        ?? (canvas?.closest('.unified-paper') as HTMLElement | null))
       : null) ?? canvas
     if (!originEl) return null
     commitPendingGrowRemapRef.current(originEl.offsetWidth, originEl.offsetHeight)
@@ -1773,7 +1778,19 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         return continued.next
       })()
       : mapClientToPaperPoint(event, surface, viewRotationRef.current)
-    if (!mapped) return null
+    if (!mapped) {
+      const fallback = inline ? mapClientToOneCanvas(event.clientX, event.clientY, surface) : null
+      if (!fallback) return null
+      mapped = {
+        x: fallback.x,
+        y: fallback.y,
+        t: Math.round((event.timeStamp ?? 0) * 100) / 100,
+        pressure: (event.pressure ?? 0) > 0 ? event.pressure : event.pointerType === 'mouse' ? 0.55 : 0.35,
+        tiltX: event.tiltX ?? 0,
+        tiltY: event.tiltY ?? 0,
+        pointerType: event.pointerType || 'mouse',
+      }
+    }
 
     const width = Math.max(1, canvas?.offsetWidth ?? originEl.offsetWidth)
     const height = Math.max(1, canvas?.offsetHeight ?? originEl.offsetHeight)
@@ -1781,8 +1798,11 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     const paperH = Math.max(1, originEl === canvas ? height : originEl.offsetHeight)
     const localX = originEl === canvas ? mapped.x * paperW : mapped.x * paperW * (width / paperW)
     const localY = originEl === canvas ? mapped.y * paperH : mapped.y * paperH * (height / paperH)
-    let x = clamp(localX / width)
-    let y = clamp(localY / height)
+    // The one canvas is this surface. Do not clamp onto a nested 900px card —
+    // that pinned outer-plane writing to x=0/y=1 and made two canvases.
+    let x = inline ? localX / width : clamp(localX / width)
+    let y = inline ? localY / height : clamp(localY / height)
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return null
     const guides: Array<{ kind: DraftingKind; pose: DraftingPose }> = []
     if (rulerPoseRef.current) guides.push({ kind: 'ruler', pose: rulerPoseRef.current })
     if (setSquarePoseRef.current) guides.push({ kind: 'setSquare', pose: setSquarePoseRef.current })
@@ -2093,6 +2113,33 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     return true
   }, [applyInkExtentStyles, resolvePaperElement, schedulePageLayoutRefresh, setDirty, redraw])
 
+  const absorbOneCanvasRef = useRef(false)
+
+  /** First paint: 0–1 covers the one plane canvas; legacy card ink stays on the text column. */
+  const absorbPaintedOneCanvas = useCallback(() => {
+    if (!inline || absorbOneCanvasRef.current) return false
+    const paper = resolvePaperElement()
+    const surface = surfaceRef.current
+    if (!paper || !surface) return false
+    const paintedW = Math.max(1, Math.max(paper.offsetWidth, surface.offsetWidth))
+    const paintedH = Math.max(1, Math.max(paper.offsetHeight, surface.offsetHeight))
+    if (paintedW < 2 || paintedH < 2) return false
+    const column = textColumnOnOneCanvas(paintedW, paintedH)
+    const expanded = expandSourceToOneCanvas({
+      sourceW: sourceWidthRef.current,
+      sourceH: sourceHeightRef.current,
+      paintedW,
+      paintedH,
+      columnW: column.width,
+      columnH: Math.max(1, Math.min(column.height, paintedH)),
+      originXpx: column.x,
+      originYpx: column.y,
+    })
+    absorbOneCanvasRef.current = true
+    if (!expanded.absorb) return false
+    return setPageExtent(expanded.nextH, expanded.nextW, expanded.padX, expanded.padY)
+  }, [inline, resolvePaperElement, setPageExtent])
+
   /** Grow the write surface in any direction. Camera slack stays on the plane. */
   const ensureWriteRoom = useCallback((normalizedY?: number, normalizedX?: number) => {
     const prevH = sourceHeightRef.current
@@ -2233,10 +2280,12 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   useLayoutEffect(() => {
     const paper = resolvePaperElement()
     if (!paper) return
+    absorbPaintedOneCanvas()
     commitPendingGrowRemap(paper.offsetWidth, paper.offsetHeight)
-  }, [commitPendingGrowRemap, resolvePaperElement, sourceHeight, sourceWidth])
+  }, [absorbPaintedOneCanvas, commitPendingGrowRemap, resolvePaperElement, sourceHeight, sourceWidth])
 
   useEffect(() => {
+    absorbOneCanvasRef.current = false
     fitPageToInk()
   }, [drawingId, fitPageToInk, initialDrawingJson])
 
@@ -5829,7 +5878,7 @@ const drawingBoardStyles = `
 .lw-empty-conversion{display:flex;flex:1;min-height:230px;align-items:center;justify-content:center;flex-direction:column;text-align:center;color:var(--text-muted,#999)}.lw-empty-conversion>svg{margin-bottom:10px;color:var(--accent-readable,var(--draw-accent))}.lw-empty-conversion strong{color:var(--text,#fff)}.lw-empty-conversion p{max-width:290px;margin:7px 0 15px;font-size:12px;line-height:1.6}.lw-model-card{gap:9px;margin-top:auto;padding:9px;border:1px solid var(--draw-border);border-radius:11px;background:color-mix(in srgb,var(--background,#111116) 42%,transparent)}.lw-model-card>span{width:7px;height:7px;flex:0 0 auto;border-radius:50%;background:var(--warning,#b36b2d)}.lw-model-card>span.is-ready{background:var(--success,#3a8f6d);box-shadow:0 0 7px color-mix(in srgb,var(--success,#3a8f6d) 65%,transparent)}.lw-model-copy{display:flex;min-width:0;flex:1;flex-direction:column}.lw-model-card strong{font-size:10px}.lw-model-card small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:9px}.lw-model-actions{display:flex;align-items:center;gap:4px}.lw-model-card button{display:flex;align-items:center;gap:4px;padding:5px 7px;border:0;border-radius:7px;background:color-mix(in srgb,var(--text,#fff) 7%,transparent)}.lw-model-card button.is-danger{color:var(--danger,#d94b63);background:color-mix(in srgb,var(--danger,#d94b63) 9%,transparent)}
 .lw-draw-notice{display:flex;align-items:center;gap:7px;margin:0 14px 10px;padding:8px 10px;border:1px solid var(--draw-border);border-radius:9px;background:var(--background-secondary,#1b1b22);font-size:11px}.lw-draw-notice.is-success{color:var(--success,#3a8f6d);border-color:color-mix(in srgb,var(--success,#3a8f6d) 28%,transparent)}.lw-draw-notice.is-error{color:var(--danger,#d94b63);border-color:color-mix(in srgb,var(--danger,#d94b63) 28%,transparent)}.lw-draw-notice.is-info{color:var(--accent-readable,var(--draw-accent));border-color:color-mix(in srgb,var(--draw-accent) 32%,transparent)}.lw-draw-notice span{flex:1}.lw-draw-notice button{display:grid;place-items:center;border:0;background:transparent;color:inherit;cursor:pointer}.lw-draw-footer{min-height:55px;flex:0 0 auto;justify-content:space-between;gap:10px;padding:9px 14px;border-top:1px solid var(--draw-border);background:color-mix(in srgb,var(--background-secondary,#17171d) 92%,transparent)}.lw-footer-actions{gap:8px}.lw-convert-action{min-height:34px}.lw-spin{animation:lw-spin .8s linear infinite}.sr-only{position:absolute!important;width:1px!important;height:1px!important;padding:0!important;margin:-1px!important;overflow:hidden!important;clip:rect(0,0,0,0)!important;white-space:nowrap!important;border:0!important}@keyframes lw-spin{to{transform:rotate(360deg)}}
 
-.lw-drawing-board.is-inline{position:absolute;z-index:4;inset:calc(-1 * var(--paper-scroll-room, 560px));height:auto;min-height:100%;overflow:visible;background:transparent;pointer-events:none}
+.lw-drawing-board.is-inline{position:absolute;z-index:4;inset:0;height:auto;min-height:100%;overflow:visible;background:transparent;pointer-events:none}
 .lw-drawing-board.is-inline .lw-draw-header{display:none}
 .lw-drawing-board.is-inline .lw-draw-footer{display:none}
 .lw-drawing-board.is-inline .lw-draw-workspace{position:absolute;inset:0;display:block;min-height:100%;padding:0;pointer-events:none}

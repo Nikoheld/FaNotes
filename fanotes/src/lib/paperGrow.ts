@@ -398,6 +398,87 @@ export const clampPaperScrollOffset = (
   }
 }
 
+/**
+ * One writable canvas = the camera plane. The inner A4 column is only the
+ * text measure; ink 0–1 maps to this surface, not to a nested card.
+ */
+export const oneCanvasSurface = (plane: { x: number; y: number; width: number; height: number }) => ({
+  x: plane.x,
+  y: plane.y,
+  width: plane.width,
+  height: plane.height,
+})
+
+export const writeSurfaceIsPlane = (
+  surface: { x: number; y: number; width: number; height: number },
+  plane: { x: number; y: number; width: number; height: number },
+) => (
+  surface.x === plane.x
+  && surface.y === plane.y
+  && surface.width === plane.width
+  && surface.height === plane.height
+)
+
+/** Place the 900px text column on the one canvas without creating a second sheet. */
+export const textColumnOnOneCanvas = (
+  canvasWidth: number,
+  canvasHeight: number,
+  room = SCROLL_ROOM,
+) => ({
+  x: Math.max(0, Math.min(room, Math.max(0, canvasWidth - PAPER_SOURCE_WIDTH))),
+  y: 0,
+  width: Math.max(1, Math.min(PAPER_SOURCE_WIDTH, canvasWidth)),
+  height: Math.max(1, canvasHeight),
+})
+
+/**
+ * Expand source space so 0–1 covers the painted canvas while the previous
+ * 900px-card ink stays on the text column (pad on the min edge).
+ */
+export const expandSourceToOneCanvas = ({
+  sourceW,
+  sourceH,
+  paintedW,
+  paintedH,
+  columnW,
+  columnH,
+  originXpx,
+  originYpx,
+}: {
+  sourceW: number
+  sourceH: number
+  paintedW: number
+  paintedH: number
+  columnW: number
+  columnH: number
+  originXpx: number
+  originYpx: number
+}) => {
+  const colW = Math.max(1, columnW)
+  const colH = Math.max(1, columnH)
+  if (!(sourceW > 0) || !(sourceH > 0) || !(paintedW > colW + 1 || paintedH > colH + 1)) {
+    return { nextW: sourceW, nextH: sourceH, padX: 0, padY: 0, absorb: false }
+  }
+  const padX = Math.max(0, originXpx) * (sourceW / colW)
+  const padY = Math.max(0, originYpx) * (sourceH / colH)
+  const nextW = paintedW * (sourceW / colW)
+  const nextH = paintedH * (sourceH / colH)
+  return { nextW, nextH, padX, padY, absorb: nextW > sourceW + 1 || nextH > sourceH + 1 || padX > 0 || padY > 0 }
+}
+
+/** Map a pointer on the one canvas to 0–1 of that canvas. Do not clamp to an inner card. */
+export const mapClientToOneCanvas = (
+  clientX: number,
+  clientY: number,
+  canvas: { left: number; top: number; width: number; height: number },
+) => {
+  if (!(canvas.width > 0) || !(canvas.height > 0)) return null
+  const x = (clientX - canvas.left) / canvas.width
+  const y = (clientY - canvas.top) / canvas.height
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return null
+  return { x, y }
+}
+
 /** Visual (zoomed) paper rect in scroller scroll coordinates. Does not add writing slack. */
 export const paperScrollBoundsFromVisualRect = (
   paper: { left: number; top: number; right: number; bottom: number },

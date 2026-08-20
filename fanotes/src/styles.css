@@ -954,14 +954,14 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   position: relative;
   display: block;
   box-sizing: border-box;
-  /* Camera is this padded plane. The write surface sits inside and does not
-     change text layout when the camera room exists. */
+  /* One canvas: the plane IS the write surface. Camera room is extra
+     canvas, not a separate dotted desk around an inner card. */
   width: max(100%, max-content);
   min-width: 100%;
   min-height: 100%;
   max-width: none;
   margin: 0;
-  padding: var(--paper-scroll-room);
+  padding: 0;
   overflow: visible;
   background: #fff;
   --view-zoom: 1;
@@ -1068,9 +1068,9 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   color: var(--text);
   background-color: transparent;
   background-repeat: repeat;
-  border: 1px solid rgba(31,34,47,.13);
-  border-radius: 3px;
-  box-shadow: 0 8px 28px rgba(0,0,0,.22), 0 1px 0 rgba(255,255,255,.04);
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
   /* Do not `isolation: isolate` — Chromium then rasterizes the sheet at 1×
      and stretches the bitmap when the plane is CSS-zoomed (sheared text,
      ruling that barely grows). z-index on ruling / editor / ink is enough. */
@@ -1079,7 +1079,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .unified-paper.has-ink-extent {
   /* Grow rightward with handwriting while keeping the original A4 width as a floor. */
   --ink-width-extent: 1;
-  width: max(var(--paper-width), calc(var(--paper-width) * var(--ink-width-extent)));
+  width: max(100%, var(--paper-width), calc(var(--paper-width) * var(--ink-width-extent)));
   max-width: none;
   /* Size to the ink extent. Do not add a viewport/A4 floor — that recreates
      empty-page scroll below short notes. */
@@ -1145,14 +1145,26 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .paper-blank .unified-paper {
   background-color: #fff;
 }
-.unified-note-view.is-inking .unified-paper { box-shadow: 0 0 0 1px color-mix(in srgb, var(--paper-accent-readable) 40%, transparent), 0 8px 28px rgba(0,0,0,.22); }
+.paper-sheet-plane > .unified-paper {
+  /* Fill the plane so ink, dots and hit-testing share one box. */
+  width: 100%;
+  min-width: 100%;
+  min-height: 100%;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+.paper-sheet-plane > .unified-paper.has-ink-extent {
+  min-height: max(100%, calc(var(--paper-width) * var(--ink-extent-ratio)));
+}
+.unified-note-view.is-inking .unified-paper { box-shadow: none; }
 .unified-paper > .editor-pane {
   z-index: 2;
   /* Text stays on the A4 column. 100% would wrap lines across a wider sheet. */
   width: min(100%, var(--paper-width, 900px));
   max-width: 900px;
   min-height: 0;
-  margin-left: var(--text-origin-x, 0px);
+  margin-left: var(--text-origin-x, var(--paper-scroll-room, 0px));
   margin-top: var(--text-origin-y, 0px);
   overflow: visible;
   background: transparent;

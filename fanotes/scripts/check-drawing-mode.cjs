@@ -97,6 +97,10 @@ const safeguards = [
   ['mergePendingGrow', 'ein Rechts-Grow verwirft kein offenes Höhen-Remap'],
   ['INK_WIDTH_ANCHOR_CLASS', 'A4-Tinte ändert den linken Rand nicht'],
   ['nextWriteExtent', 'Source wächst nicht, wenn die gemalte PDF-Fläche schon Platz hat'],
+  ['mapClientToOneCanvas', 'Stift trifft die eine Canvas-Fläche, nicht eine innere Karte'],
+  ['expandSourceToOneCanvas', 'Altes 900px-Karten-Ink bleibt auf der Textspalte der einen Fläche'],
+  ['absorbPaintedOneCanvas', 'Erste Messung macht Plane und Tinte zu einem Canvas'],
+  ['.lw-drawing-board.is-inline{position:absolute;z-index:4;inset:0', 'Inline-Tinte füllt das Blatt, ohne einen zweiten Rahmen'],
   ['flushPaintedLayoutGrow', 'PDF-Seitenwachstum remappt Tinte, damit sie nicht rutscht'],
   ['const commitPendingGrowRemap = useCallback', 'Grow-Flush ist ein gemeinsamer Helper'],
   ['activeRenderedPointCountRef.current = 0\n    wipeLiveInkCanvas(canvasRef.current)\n    redraw(true)', 'Flush nach Grow zeichnet die Live-Tinte vollständig neu'],
@@ -140,6 +144,9 @@ const paperStyleSafeguards = [
   ['.paper-sheet-plane > .paper-ruling', 'Lineatur liegt auf der Kamera-Ebene und zoomt mit Tinte'],
   ['background-repeat: repeat;', 'Kästchen nicht per round neu kacheln'],
   ['.paper-sheet-plane', 'Text, Tinte und Lineatur liegen in einer Zoom-Hülle'],
+  ['One canvas: the plane IS the write surface', 'Kameraebene hat kein separates gepunktetes Polster'],
+  ['.paper-sheet-plane > .unified-paper', 'Schreibfläche füllt die Plane — ein Canvas'],
+  ['.unified-note-view.is-inking .unified-paper { box-shadow: none', 'keine zweite Blattkarte um die Tinte'],
 ]
 const lockSafeguards = [
   ['acceptCommittedInkSample', 'Ghost-Samples werden vor dem Commit verworfen'],
