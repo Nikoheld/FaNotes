@@ -172,6 +172,7 @@ function translateCore(source: string): string {
   if (source === 'Aktuelle Notiz so sichern, wie sie ist') return 'Save the current note as it is'
   if (source === 'Backup der aktuellen Notiz') return 'Backup of the current note'
   if (source === 'Backup: weiteres Backup oder wiederherstellen') return 'Backup: take another snapshot or restore'
+  if (source === 'Send Data') return 'Send Data'
   if (source === 'Buch') return 'Book'
   if (source === 'Buchansicht') return 'Book view'
   if (source === 'Buch hinzufügen') return 'Add book'

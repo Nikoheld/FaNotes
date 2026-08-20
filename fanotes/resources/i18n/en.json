@@ -2450,6 +2450,8 @@
   "Aktuelle Notiz so sichern, wie sie ist": "Save the current note as it is",
   "Backup der aktuellen Notiz": "Backup of the current note",
   "Backup: weiteres Backup oder wiederherstellen": "Backup: take another snapshot or restore",
+  "Send Data": "Send Data",
+  "Schickt laufend gebündelte Logs, Laufzeit-Nutzerdaten und Linux/Hyprland-Kontext an fanotes.fasrv.ch, damit FaNotes — besonders unter Arch Linux Hyprland — verbessert werden kann. Standard aus. Es geht nicht der ganze Vault mit; Intervalle und Grösse sind begrenzt, damit der Akku nicht leidet.": "Continuously sends batched logs, runtime user diagnostics, and Linux/Hyprland context to fanotes.fasrv.ch so FaNotes — especially on Arch Linux Hyprland — can be improved. Off by default. The whole vault is not uploaded; interval and size are capped so the battery is not drained.",
   "Buch": "Book",
   "Buchansicht": "Book view",
   "Buch hinzufügen": "Add book",

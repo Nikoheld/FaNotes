@@ -21,7 +21,7 @@ const { defaultSettingsForPlatform } = await server.ssrLoadModule('/src/defaults
 
 const runOnce = () => {
   assert.match(settingsSource, /id: 'experimental'/)
-  assert.match(settingsSource, /count: 4/)
+  assert.match(settingsSource, /count: 5/)
   assert.match(settingsSource, /title="Handschrift zu Text"/)
   assert.match(settingsSource, /title="Hausaufgaben API"/)
   assert.match(settingsSource, /title="Remote Support"/)
@@ -57,7 +57,7 @@ try {
   runOnce()
   runOnce()
   console.log(JSON.stringify({
-    experimentalCount: 4,
+    experimentalCount: 5,
     defaultOff: true,
     rows: ['Handschrift zu Text', 'Hausaufgaben API', 'Remote Support'],
   }))

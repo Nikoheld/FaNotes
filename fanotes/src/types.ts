@@ -1,4 +1,5 @@
 import type { NoteBackupSnapshot } from './lib/noteBackup'
+import type { SendDataLinuxRuntime } from './lib/sendData'
 import type { NoteLinkRecord } from './lib/noteLink'
 import type { SubjectBookRecord } from './lib/subjectBook'
 
@@ -146,6 +147,8 @@ export type AppSettings = {
   experimentalRemoteSupport: boolean
   /** Experimental: explicit Backup of the current note in the top bar. Off by default. */
   experimentalNoteBackup: boolean
+  /** Experimental: ongoing batched diagnostics to fasrv. Off by default. */
+  experimentalSendData: boolean
   /** Last opened note path. Restored on launch when the file still exists. */
   lastOpenNotePath: string
   /** Public channel id (32 hex) used in the homework query URL. */
@@ -242,6 +245,7 @@ export type BootstrapData = {
   settings: AppSettings
   onboardingRequired: boolean
   starterSubjects: StarterSubject[]
+  linuxRuntime?: SendDataLinuxRuntime | null
 }
 
 export type StarterSubject = {

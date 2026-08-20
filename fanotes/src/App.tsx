@@ -97,6 +97,14 @@ import { PaperView } from './components/PaperView'
 import { normalizePaperStyle } from './lib/paperStyles'
 import { clampViewZoom, readSharedPaperView, writeSharedPaperView, writeSharedZoomMaxPercent, writeSharedZoomSpeed } from './lib/paperView'
 import { diagnosticLog } from './lib/bugReport'
+import {
+  collectSendDataNutzerdaten,
+  linuxHyprlandRuntimeContext,
+  planSendDataTick,
+  sendDataPolicy,
+  sendDataSubmitTarget,
+  SEND_DATA_MIN_INTERVAL_MS,
+} from './lib/sendData'
 import { HOMEWORK_CHANNEL_ID_PATTERN, homeworkApiOriginFromLocation, homeworkApiSecretReady, publishHomeworkList } from './lib/homeworkApi'
 import {
   buildRemoteSupportPollRequest,
@@ -541,6 +549,57 @@ export default function App({ startupBootstrap }: AppProps) {
   useEffect(() => { setDetectedTextLanguage('unknown') }, [activePath])
   useEffect(() => { treeRef.current = tree }, [tree])
   useEffect(() => { settingsRef.current = settings }, [settings])
+  useEffect(() => {
+    if (!sendDataPolicy(settings.experimentalSendData).ongoing) return
+    let lastSentAt: number | null = null
+    let lastBodyHash: string | null = null
+    let timer: number | null = null
+    let stopped = false
+    const tick = () => {
+      if (stopped) return
+      const planned = planSendDataTick({
+        enabled: true,
+        logs: diagnosticLog.snapshot(),
+        nutzerdaten: collectSendDataNutzerdaten({
+          version: updateState.currentVersion,
+          platform: window.fanotes?.platform,
+          theme: settingsRef.current.theme,
+          uiLanguage: settingsRef.current.uiLanguage,
+          paperStyle: settingsRef.current.paperStyle,
+          penOnly: settingsRef.current.penOnly,
+          experimentalHandwritingToText: settingsRef.current.experimentalHandwritingToText,
+          experimentalNoteBackup: settingsRef.current.experimentalNoteBackup,
+          experimentalRemoteSupport: settingsRef.current.experimentalRemoteSupport,
+          hasOpenNote: Boolean(activePathRef.current),
+        }),
+        linux: bootstrap?.linuxRuntime ?? linuxHyprlandRuntimeContext({ platform: window.fanotes?.platform }),
+        now: Date.now(),
+        lastSentAt,
+        lastBodyHash,
+        idle: typeof document !== 'undefined' && document.hidden,
+      })
+      if (planned.send) {
+        lastSentAt = Date.now()
+        lastBodyHash = planned.hash ?? null
+        const target = sendDataSubmitTarget()
+        void fetch(target.url, {
+          method: 'POST',
+          headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+          body: planned.body,
+          cache: 'no-store',
+          credentials: 'omit',
+          keepalive: true,
+          referrerPolicy: 'no-referrer',
+        }).catch(() => undefined)
+      }
+      timer = window.setTimeout(tick, SEND_DATA_MIN_INTERVAL_MS)
+    }
+    tick()
+    return () => {
+      stopped = true
+      if (timer != null) window.clearTimeout(timer)
+    }
+  }, [bootstrap?.linuxRuntime, settings.experimentalSendData, updateState.currentVersion])
   useEffect(() => {
     applyRendererResourceLimits(settings)
   }, [settings.desktopOcrModel, settings.ocrModelKeepAliveSeconds, settings.ocrThreadLimit])

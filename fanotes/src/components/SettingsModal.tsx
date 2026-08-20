@@ -78,7 +78,7 @@ const SECTIONS: { id: SettingsSection; label: string; description: string; icon:
   { id: 'files', label: 'Dateien & Vault', description: 'Import, Ordner und Speichern', icon: FolderOpen, count: 7 },
   { id: 'updates', label: 'Updates', description: 'Stable, Beta und Sicherheit', icon: RefreshCw, count: 4 },
   { id: 'accessibility', label: 'Bedienung', description: 'Bewegung und Lesbarkeit', icon: Accessibility, count: 3 },
-  { id: 'experimental', label: 'Experimentell', description: 'Unfertige Funktionen, standardmässig aus', icon: FlaskConical, count: 4 },
+  { id: 'experimental', label: 'Experimentell', description: 'Unfertige Funktionen, standardmässig aus', icon: FlaskConical, count: 5 },
   { id: 'advanced', label: 'Erweitert', description: 'Ressourcen, Datenschutz und App-Daten', icon: Code2, count: 10 },
 ]
 
@@ -119,6 +119,7 @@ const SETTINGS_SEARCH_ITEMS: SettingsSearchItem[] = [
   { label: 'Hausaufgaben API', detail: 'Experimentell', section: 'experimental', target: 'settings-homework-api', keywords: 'hausaufgaben api fasrv passwort auth termine liste' },
   { label: 'Remote Support', detail: 'Experimentell', section: 'experimental', target: 'settings-remote-support', keywords: 'remote support sitzung debug test code token fernwartung' },
   { label: 'Notiz-Backup', detail: 'Experimentell', section: 'experimental', target: 'settings-note-backup', keywords: 'backup sichern wiederherstellen snapshot notiz' },
+  { label: 'Send Data', detail: 'Experimentell', section: 'experimental', target: 'settings-send-data', keywords: 'send data logs nutzerdaten hyprland telemetry diagnostik server' },
   { label: 'Vault & Speicherort', detail: 'Dateien & Vault', section: 'files', target: 'settings-vault', keywords: 'ordner wechseln pfad notizen markdown nas browser' },
   { label: 'Microsoft OneNote importieren', detail: 'Dateien & Vault', section: 'files', target: 'settings-onenote', keywords: 'one onetoc2 onepkg onedrive zip notizbuch migration' },
   { label: 'Server-Backup', detail: 'Dateien & Vault', section: 'files', target: 'settings-backup', keywords: 'sicherung cloud wiederherstellen recovery kopie' },
@@ -999,6 +1000,18 @@ export function SettingsModal({
                     label="Notiz-Backup"
                     checked={settings.experimentalNoteBackup}
                     onChange={(value) => update('experimentalNoteBackup', value)}
+                  />
+                </SettingRow>
+                </div>
+                <div id="settings-send-data">
+                <SettingRow
+                  title="Send Data"
+                  description="Schickt laufend gebündelte Logs, Laufzeit-Nutzerdaten und Linux/Hyprland-Kontext an fanotes.fasrv.ch, damit FaNotes — besonders unter Arch Linux Hyprland — verbessert werden kann. Standard aus. Es geht nicht der ganze Vault mit; Intervalle und Grösse sind begrenzt, damit der Akku nicht leidet."
+                >
+                  <Toggle
+                    label="Send Data"
+                    checked={settings.experimentalSendData}
+                    onChange={(value) => update('experimentalSendData', value)}
                   />
                 </SettingRow>
                 </div>

@@ -23,6 +23,10 @@ Command-palette action ids walked from `src/App.tsx`: `new-note`, `import-pdf-no
 | Backup control policy | `src/lib/noteBackup.ts` | `export const noteBackupControlPolicy` |
 | Backup top chrome | `src/App.tsx` | `note-backup-control` |
 | Notiz-Backup Experimentell | `src/components/SettingsModal.tsx` | `title="Notiz-Backup"` |
+| Send Data Experimentell | `src/components/SettingsModal.tsx` | `title="Send Data"` |
+| Send Data policy | `src/lib/sendData.ts` | `export const sendDataPolicy` |
+| Send Data payload | `src/lib/sendData.ts` | `export const buildSendDataPayload` |
+| Send Data battery schedule | `src/lib/sendData.ts` | `export const decideSendDataTick` |
 | Subject PDF book attach | `src/lib/subjectBook.ts` | `export const attachSubjectBook` |
 | Subject book view policy | `src/lib/subjectBook.ts` | `export const subjectBookViewPolicy` |
 | Subject book last page | `src/lib/subjectBook.ts` | `export const recordSubjectBookPage` |

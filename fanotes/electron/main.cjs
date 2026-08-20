@@ -270,6 +270,7 @@ const DEFAULT_SETTINGS = Object.freeze({
   experimentalHomeworkApi: false,
   experimentalRemoteSupport: false,
   experimentalNoteBackup: false,
+  experimentalSendData: false,
   lastOpenNotePath: '',
   homeworkApiChannelId: '',
   homeworkApiSecret: '',
@@ -353,6 +354,7 @@ const SETTINGS_SCHEMA = Object.freeze({
   experimentalHomeworkApi: { type: 'boolean' },
   experimentalRemoteSupport: { type: 'boolean' },
   experimentalNoteBackup: { type: 'boolean' },
+  experimentalSendData: { type: 'boolean' },
   lastOpenNotePath: { type: 'string', max: 1024 },
   homeworkApiChannelId: { type: 'string', max: 32 },
   homeworkApiSecret: { type: 'string', max: 256 },
@@ -1452,6 +1454,17 @@ function bootstrapData() {
     settings: { ...currentSettings },
     onboardingRequired: currentOnboardingRequired,
     starterSubjects: starterSubjectsForLanguage(currentUiLanguage()).map((subject) => ({ ...subject })),
+    linuxRuntime: {
+      platform: process.platform,
+      ozone: linuxInputStartup.ozone || (process.platform === 'linux' ? 'x11' : ''),
+      sessionType: process.env.XDG_SESSION_TYPE || '',
+      desktop: process.env.XDG_CURRENT_DESKTOP || '',
+      hyprland: Boolean(process.env.HYPRLAND_INSTANCE_SIGNATURE) || /hyprland/i.test(process.env.XDG_CURRENT_DESKTOP || ''),
+      hyprlandInstance: Boolean(process.env.HYPRLAND_INSTANCE_SIGNATURE),
+      display: process.env.DISPLAY || '',
+      waylandDisplay: process.env.WAYLAND_DISPLAY || '',
+      hyprlandZeroScaling: Boolean(linuxInputStartup.hyprlandZeroScaling),
+    },
   }
 }
 

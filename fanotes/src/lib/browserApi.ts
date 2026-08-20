@@ -349,6 +349,7 @@ export function createBrowserApi(): FaNotesApi {
     settings: clone(settings),
     onboardingRequired: !onboardingComplete,
     starterSubjects: clone(starterSubjects),
+    linuxRuntime: null,
   })
 
   const buildTree = () => {

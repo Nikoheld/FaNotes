@@ -60,6 +60,7 @@ export const defaultSettingsForPlatform = (platform: string | undefined): AppSet
   experimentalHomeworkApi: false,
   experimentalRemoteSupport: false,
   experimentalNoteBackup: false,
+  experimentalSendData: false,
   lastOpenNotePath: '',
   homeworkApiChannelId: '',
   homeworkApiSecret: '',
