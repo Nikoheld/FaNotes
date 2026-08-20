@@ -27,6 +27,7 @@ Command-palette action ids walked from `src/App.tsx`: `new-note`, `import-pdf-no
 | Send Data policy | `src/lib/sendData.ts` | `export const sendDataPolicy` |
 | Send Data payload | `src/lib/sendData.ts` | `export const buildSendDataPayload` |
 | Send Data battery schedule | `src/lib/sendData.ts` | `export const decideSendDataTick` |
+| Send Data server accept | `../fanotes-site/send-data-api.mjs` | `export const acceptSendDataPayload` |
 | Subject PDF book attach | `src/lib/subjectBook.ts` | `export const attachSubjectBook` |
 | Subject book view policy | `src/lib/subjectBook.ts` | `export const subjectBookViewPolicy` |
 | Subject book last page | `src/lib/subjectBook.ts` | `export const recordSubjectBookPage` |

@@ -117,6 +117,7 @@
     "check:send-data-payload": "node scripts/check-send-data-payload.mjs",
     "check:send-data-battery": "node scripts/check-send-data-battery.mjs",
     "check:send-data-ui": "node scripts/check-send-data-ui.mjs",
+    "check:send-data-server": "node scripts/check-send-data-server.mjs",
     "check:bug-grow-down": "node scripts/check-bug-grow-down.mjs",
     "check:paper-lock": "node scripts/check-paper-lock.mjs",
     "check:ghost-ink": "node scripts/check-ghost-ink.mjs",
