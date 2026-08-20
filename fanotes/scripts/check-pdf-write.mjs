@@ -64,6 +64,39 @@ const runOnce = () => {
   const page2Source = page2.y * overlayH
   const page1Source = page1.y * overlayH
   assert.ok(page2Source > page1Source + 400, 'page-2 ink in source space must not sit on page 1')
+  assert.ok(page2Source > PAPER_SOURCE_HEIGHT, 'page-2 y must sit past a single A4 so conversion is not page 1')
+
+  // One-canvas plane is wider than the 900px column. That width must not
+  // shrink a two-page overlay below A4 (the live pen path maps against the plane).
+  const wideOverlay = { left: 0, top: 0, width: 2020, height: 2000 }
+  const widePages = [
+    { top: 0, height: 1000 },
+    { top: 1000, height: 1000 },
+  ]
+  const widePen1 = mapClientToPaperPoint({
+    clientX: 400,
+    clientY: 500,
+    pressure: 0.5,
+    pointerType: 'pen',
+  }, { ...wideOverlay, offsetWidth: wideOverlay.width, offsetHeight: wideOverlay.height })
+  const widePen2 = mapClientToPaperPoint({
+    clientX: 400,
+    clientY: 1500,
+    pressure: 0.5,
+    pointerType: 'pen',
+  }, { ...wideOverlay, offsetWidth: wideOverlay.width, offsetHeight: wideOverlay.height })
+  const wideInk1 = inkPointOnWriteSurface(widePen1, wideOverlay, { width: 2020, height: 800 })
+  const wideInk2 = inkPointOnWriteSurface(widePen2, wideOverlay, { width: 2020, height: 800 })
+  assert.ok(wideInk1 && wideInk2)
+  assert.ok(wideInk1.y > 0.2 && wideInk1.y < 0.3, `wide page-1 pen y ${wideInk1.y}`)
+  assert.ok(wideInk2.y > 0.7 && wideInk2.y < 0.8, `wide page-2 pen y ${wideInk2.y}`)
+  const wideHit2 = pdfOverlayPointFromClient(400, 1500, wideOverlay, widePages)
+  assert.equal(wideHit2?.page, 2)
+  assert.equal(wideInk2.y, wideHit2.y)
+  const wideH = pdfOverlaySourceHeight(PAPER_SOURCE_WIDTH, wideOverlay.width, wideOverlay.height)
+  assert.ok(wideH > PAPER_SOURCE_HEIGHT, `wide-plane overlay source ${wideH} must stay taller than A4`)
+  assert.equal(shouldSyncPdfOverlaySource(PAPER_SOURCE_HEIGHT, wideH), true)
+  assert.ok(wideInk2.y * wideH > PAPER_SOURCE_HEIGHT, 'wide-plane page-2 source must not sit on page 1')
 
   const windowed = inkPointOnWriteSurface({ x: 0.4, y: 0.75 }, overlay, { width: 800, height: 800 })
   assert.ok(windowed)
@@ -91,6 +124,8 @@ const runOnce = () => {
     page2Y: page2.y,
     tallY: tallPoint.y,
     overlayH,
+    wideH,
+    widePage2Y: wideInk2.y,
     windowedY: windowed.y,
   }
 }

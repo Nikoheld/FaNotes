@@ -67,10 +67,16 @@ export const pdfOverlayPointFromClient = (
   return { x, y, page }
 }
 
-/** Source height that keeps y×sourceHeight in the same band as y×painted overlay height. */
+/**
+ * Source height that keeps overlay y in the same page band as painted height.
+ * Scale by the A4/write column, not the one-canvas plane width. Using the plane
+ * width shrank a two-page PDF below A4, so y=0.75 × sourceHeight sat on page 1
+ * and converted text spawned on the other Blatt.
+ */
 export const pdfOverlaySourceHeight = (sourceWidth: number, paintedWidth: number, paintedHeight: number) => {
-  if (!(sourceWidth > 0) || !(paintedWidth > 1) || !(paintedHeight > 1)) return 0
-  return paintedHeight * (sourceWidth / paintedWidth)
+  if (!(sourceWidth > 0) || !(paintedHeight > 1)) return 0
+  const column = Math.min(Math.max(1, paintedWidth), sourceWidth)
+  return paintedHeight * (sourceWidth / column)
 }
 
 export const shouldSyncPdfOverlaySource = (sourceHeight: number, overlaySourceHeight: number) => (

@@ -2,6 +2,10 @@
 
 ## Unveröffentlicht
 
+## 2026.8.54
+
+- **PDF-Seite unter dem Stift:** Auf einem mehrseitigen PDF bleibt Handschrift und erkannter Text auf der Seite, auf der du schreibst — auch wenn das Blatt breiter als A4 ist. Nicht auf der anderen.
+
 ## 2026.8.53
 
 - **Ein Canvas, auch auf PDF:** Die gepunktete Fläche ist eine Schreibfläche. Auf einem PDF bleibt die Tinte auf der Seite unter dem Stift — nicht auf der anderen.
