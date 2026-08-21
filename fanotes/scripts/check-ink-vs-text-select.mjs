@@ -76,6 +76,7 @@ const runOnce = () => {
   assert.equal(inkOverlayHitSelector, '.lw-drawing-board.is-inline.is-input-active .lw-canvas-surface')
   assert.match(board, /\.lw-drawing-board\.is-inline\.is-input-active \.lw-canvas-surface\{[^}]*pointer-events:\s*auto/)
   assert.match(board, /\.lw-drawing-board\.is-inline \.lw-canvas-surface\{[^}]*pointer-events:\s*none/)
+  assert.match(board, /\.lw-drawing-board\.is-inline\.is-input-active\{[^}]*pointer-events:\s*auto/)
 
   assert.doesNotMatch(pdfView, /textEnabled=\{!inputDisabled\}/)
   assert.match(pdfView, /textEnabled\n\s+highlight=/)

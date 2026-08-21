@@ -50,10 +50,13 @@ const runOnce = () => {
   assert.ok(Math.abs(inkStrokePaintScale(1800, 900) - 2) < 1e-6)
 
   const board = readFileSync(join(root, 'src/components/DrawingBoard.tsx'), 'utf8')
-  assert.match(board, /inkStrokePaintScale/)
+  const paint = readFileSync(join(root, 'src/lib/inkStrokePaint.ts'), 'utf8')
+  assert.match(paint, /inkStrokePaintScale/)
+  assert.match(paint, /export const drawInkStroke/)
+  assert.match(board, /paintInkStroke/)
   assert.match(board, /if \(inline\) \{\s*surface\.style\.removeProperty\('width'\)/)
   assert.match(board, /overflow:visible/)
-  assert.doesNotMatch(board, /const scale = width \/ Math\.max\(1, sourceWidth\)/)
+  assert.doesNotMatch(paint, /const scale = width \/ Math\.max\(1, sourceWidth\)/)
   assert.ok(PAPER_SOURCE_HEIGHT > 1000)
 
   return {

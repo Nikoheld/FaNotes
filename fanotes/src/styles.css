@@ -1611,6 +1611,15 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .worksheet-layer.is-disabled .worksheet-pdf-canvas-host,
 .worksheet-layer.is-disabled .worksheet-pdf-page canvas,
 .worksheet-layer.is-disabled .worksheet-onenote-frame { pointer-events: none; }
+.unified-note-view.is-inking .editor-pane,
+.unified-note-view.is-inking .markdown-editor,
+.unified-note-view.is-inking .markdown-editor .cm-editor,
+.unified-note-view.is-inking .markdown-editor .cm-scroller,
+.unified-note-view.is-inking .markdown-editor .cm-gutters {
+  pointer-events: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
 .unified-note-view.is-inking .markdown-editor .cm-content,
 .unified-note-view.is-inking .markdown-editor .cm-line {
   pointer-events: none;

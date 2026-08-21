@@ -23,6 +23,11 @@ export const inkBlockedWorksheetSelectors = [
 ] as const
 
 export const inkBlockedMarkdownSelectors = [
+  '.unified-note-view.is-inking .editor-pane',
+  '.unified-note-view.is-inking .markdown-editor',
+  '.unified-note-view.is-inking .markdown-editor .cm-editor',
+  '.unified-note-view.is-inking .markdown-editor .cm-scroller',
+  '.unified-note-view.is-inking .markdown-editor .cm-gutters',
   '.unified-note-view.is-inking .markdown-editor .cm-content',
   '.unified-note-view.is-inking .markdown-editor .cm-line',
 ] as const

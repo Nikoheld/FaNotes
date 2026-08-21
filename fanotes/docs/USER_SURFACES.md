@@ -44,6 +44,7 @@ Command-palette action ids walked from `src/App.tsx`: `new-note`, `import-pdf-no
 | Surface | Source | Needle |
 | --- | --- | --- |
 | Drawing board / pen mode | `src/components/DrawingBoard.tsx` | `export const DrawingBoard` |
+| Visible ink paint | `src/lib/inkStrokePaint.ts` | `export const drawInkStroke` |
 | Paper styles | `src/lib/paperStyles.ts` | `export const PAPER_STYLES` |
 | Paper zoom / rotation | `src/lib/paperView.ts` | `export const clampViewZoom` |
 | Paper grow while writing | `src/lib/paperGrow.ts` | `neededWriteExtent` |

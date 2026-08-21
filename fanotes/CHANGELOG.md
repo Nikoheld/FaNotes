@@ -2,6 +2,10 @@
 
 ## Unveröffentlicht
 
+## 2026.8.57
+
+- **Linie beim Schreiben:** Im Stiftmodus malt der Stift wieder eine sichtbare Linie auf der Notiz. Markdown fängt den Stift nicht mehr.
+
 ## 2026.8.56
 
 - **Stift schreibt, Tastatur markiert:** Im Stiftmodus schreibt der Stift. Text auf PDF und Notiz markierst du nur im Tastaturmodus.

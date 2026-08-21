@@ -100,6 +100,7 @@ import {
   mapClientToPaperPoint,
   resolveInkPointerDown,
 } from '../lib/inkSampleMap'
+import { drawInkStroke as paintInkStroke } from '../lib/inkStrokePaint'
 import { INLINE_INK_ACTIVE_CLASS, pdfOverlaySourceHeight, shouldSyncPdfOverlaySource } from '../lib/pdfInkHit'
 import {
   applyPenUpInkCleanup,
@@ -116,7 +117,6 @@ import {
   WRITE_SLACK_WIDTH,
   expandSourceToOneCanvas,
   growLiveInkAndMapNext,
-  inkStrokePaintScale,
   mapClientToOneCanvas,
   neededWriteMinPad,
   remapNormalizedAfterExtent,
@@ -357,7 +357,7 @@ const clearInkCursor = () => {
 }
 
 const isInkSurfaceTarget = (target: EventTarget | null) => (
-  target instanceof Element && Boolean(target.closest('.lw-canvas-surface, .lw-tablet-canvas'))
+  target instanceof Element && Boolean(target.closest('.lw-canvas-surface, .lw-tablet-canvas, .lw-drawing-board.is-inline.is-input-active'))
 )
 
 /** Toolbar, ribbon and menus — never treat these as the ink surface. */
@@ -400,7 +400,7 @@ const elementFromPointSafe = (x: number, y: number) => {
 const hitTestChrome = (clientX: number, clientY: number) => {
   const hit = elementFromPointSafe(clientX, clientY)
   if (!(hit instanceof Element)) return null
-  if (hit.closest('.lw-canvas-surface, .lw-tablet-canvas')) return null
+  if (hit.closest('.lw-canvas-surface, .lw-tablet-canvas, .lw-drawing-board.is-inline.is-input-active')) return null
   return hit.closest(CHROME_HIT_SELECTOR)
 }
 
@@ -677,31 +677,6 @@ const strokeIntersectsSelection = (stroke: InkStroke, selection: SelectionRect) 
     && top <= selection.y + selection.height
 }
 
-const pressureWidth = (stroke: Stroke, pressure: number) => {
-  if (!stroke.pressureEnabled) return stroke.baseWidth
-  return stroke.baseWidth * (0.4 + Math.max(0.08, pressure) * 1.12)
-}
-
-const seededUnit = (seed: number) => {
-  const value = Math.sin(seed * 12.9898 + 78.233) * 43_758.5453
-  return value - Math.floor(value)
-}
-
-const strokePaint = (
-  context: CanvasRenderingContext2D,
-  stroke: InkStroke,
-  width: number,
-  height: number,
-) => {
-  const effect = stroke.colorEffect ?? 'solid'
-  if (effect === 'solid') return stroke.color
-  const special = SPECIAL_INKS.find(({ id }) => id === effect)
-  if (!special) return stroke.color
-  const gradient = context.createLinearGradient(0, height * .08, width, height * .28)
-  special.stops.forEach(([offset, color]) => gradient.addColorStop(offset, color))
-  return gradient
-}
-
 const paperLabel: Record<PaperStyle, string> = Object.fromEntries(
   PAPER_STYLES.map((item) => [item.id, item.label]),
 ) as Record<PaperStyle, string>
@@ -833,170 +808,19 @@ const drawInkStroke = (
   startSegment = 1,
   sourceWidth = SOURCE_WIDTH,
   layoutWidth = 0,
-) => {
-  if (stroke.points.length === 0) return
-  const first = stroke.points[0]
-  // penWidth is CSS px. Scale by the painted overlay, not source extent —
-  // sourceWidth grows with one-canvas / tall PDFs and shrank the pen to a hairline.
-  const scale = inkStrokePaintScale(width, layoutWidth > 1 ? layoutWidth : sourceWidth)
-  const brush = stroke.purpose === 'art' ? stroke.brush ?? 'fineliner' : 'fineliner'
-  const opacity = stroke.purpose === 'art' ? clamp(stroke.opacity ?? 1, .08, 1) : 1
-  const paint = strokePaint(context, stroke, width, height)
-  context.save()
-  context.strokeStyle = paint
-  context.fillStyle = paint
-  context.lineCap = 'round'
-  context.lineJoin = 'round'
-  if (brush === 'highlighter') context.globalCompositeOperation = 'multiply'
-  if (stroke.colorEffect === 'neon') {
-    context.shadowColor = stroke.color
-    context.shadowBlur = Math.max(4, stroke.baseWidth * scale * .85)
-  }
-
-  const symbol = stroke.symbolId ? artSymbolById.get(stroke.symbolId) : undefined
-  if (symbol) {
-    const symbolScale = stroke.baseWidth * scale / 24
-    context.globalAlpha = opacity
-    context.translate(first.x * width, first.y * height)
-    context.rotate((stroke.symbolRotation ?? 0) * Math.PI / 180)
-    context.scale(symbolScale, symbolScale)
-    context.translate(-12, -12)
-    context.lineWidth = 1.75
-    symbol.paths.forEach((path) => context.stroke(new Path2D(path)))
-    context.restore()
-    return
-  }
-
-  const spraySegment = (previous: StrokePoint, point: StrokePoint, index: number) => {
-    const previousX = previous.x * width
-    const previousY = previous.y * height
-    const pointX = point.x * width
-    const pointY = point.y * height
-    const radius = pressureWidth(stroke, (previous.pressure + point.pressure) / 2) * scale / 2
-    const particles = Math.round(clamp(stroke.baseWidth * .68, 6, 24))
-    const seed = stroke.textureSeed ?? 1
-    for (let particle = 0; particle < particles; particle += 1) {
-      const key = seed + index * 1_009 + particle * 37
-      const progress = seededUnit(key + 1)
-      const angle = seededUnit(key + 2) * Math.PI * 2
-      const spread = Math.sqrt(seededUnit(key + 3)) * radius
-      const x = previousX + (pointX - previousX) * progress + Math.cos(angle) * spread
-      const y = previousY + (pointY - previousY) * progress + Math.sin(angle) * spread
-      const particleRadius = Math.max(.35, scale * (.28 + seededUnit(key + 4) * .62))
-      context.globalAlpha = opacity * (.2 + seededUnit(key + 5) * .5)
-      context.beginPath()
-      context.arc(x, y, particleRadius, 0, Math.PI * 2)
-      context.fill()
-    }
-  }
-
-  const calligraphySegment = (previous: StrokePoint, point: StrokePoint) => {
-    const previousX = previous.x * width
-    const previousY = previous.y * height
-    const pointX = point.x * width
-    const pointY = point.y * height
-    const nibWidth = pressureWidth(stroke, (previous.pressure + point.pressure) / 2) * scale
-    const nibX = Math.cos(-Math.PI * .22) * nibWidth / 2
-    const nibY = Math.sin(-Math.PI * .22) * nibWidth / 2
-    context.globalAlpha = opacity
-    context.beginPath()
-    context.moveTo(previousX + nibX, previousY + nibY)
-    context.lineTo(pointX + nibX, pointY + nibY)
-    context.lineTo(pointX - nibX, pointY - nibY)
-    context.lineTo(previousX - nibX, previousY - nibY)
-    context.closePath()
-    context.fill()
-  }
-
-  if (stroke.points.length === 1 && startSegment <= 1) {
-    if (brush === 'spray') {
-      spraySegment(first, first, 0)
-    } else if (brush === 'calligraphy') {
-      const nibWidth = pressureWidth(stroke, first.pressure) * scale
-      context.globalAlpha = opacity
-      context.beginPath()
-      context.ellipse(first.x * width, first.y * height, nibWidth / 2, Math.max(.5, nibWidth * .16), -Math.PI * .22, 0, Math.PI * 2)
-      context.fill()
-    } else {
-      context.globalAlpha = brush === 'highlighter' ? opacity * .32 : opacity
-      context.beginPath()
-      context.arc(
-        first.x * width,
-        first.y * height,
-        pressureWidth(stroke, first.pressure) * scale / 2,
-        0,
-        Math.PI * 2,
-      )
-      context.fill()
-    }
-    context.restore()
-    return
-  }
-
-  for (let index = Math.max(1, startSegment); index < stroke.points.length; index += 1) {
-    const previous = stroke.points[index - 1]
-    const point = stroke.points[index]
-    const previousX = previous.x * width
-    const previousY = previous.y * height
-    const pointX = point.x * width
-    const pointY = point.y * height
-    if (brush === 'spray') {
-      spraySegment(previous, point, index)
-      continue
-    }
-    if (brush === 'calligraphy') {
-      calligraphySegment(previous, point)
-      continue
-    }
-
-    const segment = (widthFactor: number, alpha: number, offsetX = 0, offsetY = 0) => {
-      context.globalAlpha = opacity * alpha
-      context.beginPath()
-      context.moveTo(previousX + offsetX, previousY + offsetY)
-      if (smoothing > 0 && index < stroke.points.length - 1) {
-        const next = stroke.points[index + 1]
-        const blend = clamp(smoothing, 0, .92)
-        const midpointX = pointX * (1 - blend * .35) + ((pointX + next.x * width) / 2) * blend * .35
-        const midpointY = pointY * (1 - blend * .35) + ((pointY + next.y * height) / 2) * blend * .35
-        context.quadraticCurveTo(pointX + offsetX, pointY + offsetY, midpointX + offsetX, midpointY + offsetY)
-      } else if (smoothing > 0 && index >= 2) {
-        // Live tip: no next point yet, so continue the incoming direction
-        // instead of a sharp corner, while still ending under the stylus.
-        const before = stroke.points[index - 2]
-        const blend = clamp(smoothing, 0, .92)
-        const controlX = previousX + (previous.x - before.x) * width * blend * 0.4
-        const controlY = previousY + (previous.y - before.y) * height * blend * 0.4
-        context.quadraticCurveTo(controlX + offsetX, controlY + offsetY, pointX + offsetX, pointY + offsetY)
-      } else {
-        context.lineTo(pointX + offsetX, pointY + offsetY)
-      }
-      context.lineWidth = pressureWidth(stroke, (previous.pressure + point.pressure) / 2) * scale * widthFactor
-      context.stroke()
-    }
-
-    if (brush === 'pencil') {
-      segment(.72, .58)
-      const seed = (stroke.textureSeed ?? 1) + index * 53
-      segment(.22, .2, (seededUnit(seed) - .5) * scale * 1.4, (seededUnit(seed + 1) - .5) * scale * 1.4)
-      segment(.18, .14, (seededUnit(seed + 2) - .5) * scale * 1.8, (seededUnit(seed + 3) - .5) * scale * 1.8)
-    } else if (brush === 'paintbrush') {
-      segment(1.4, .16)
-      segment(.92, .82)
-    } else if (brush === 'highlighter') {
-      context.lineCap = 'butt'
-      segment(1, .34)
-    } else if (brush === 'watercolor') {
-      segment(1.48, .11)
-      segment(1.14, .17)
-      segment(.78, .27)
-    } else if (brush === 'marker') {
-      segment(1, .9)
-    } else {
-      segment(1, 1)
-    }
-  }
-  context.restore()
-}
+) => paintInkStroke(
+  context,
+  {
+    ...stroke,
+    symbolPaths: stroke.symbolId ? artSymbolById.get(stroke.symbolId)?.paths : undefined,
+  },
+  width,
+  height,
+  smoothing,
+  startSegment,
+  sourceWidth,
+  layoutWidth,
+)
 
 const renderDocument = (
   canvas: HTMLCanvasElement,
@@ -1503,6 +1327,16 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     if (inline) {
       surface.style.removeProperty('width')
       surface.style.removeProperty('height')
+      const paper = surface.closest('.unified-paper') as HTMLElement | null
+      if (
+        paper
+        && (surface.offsetWidth < 8 || surface.offsetHeight < 8)
+        && paper.offsetWidth > 8
+        && paper.offsetHeight > 8
+      ) {
+        surface.style.width = `${paper.offsetWidth}px`
+        surface.style.height = `${paper.offsetHeight}px`
+      }
     } else if ((measureLayout || !canvasPixelSizeRef.current.width) && shell) {
       const availableWidth = Math.max(240, shell.clientWidth - 20)
       const availableHeight = Math.max(150, shell.clientHeight - 48)
@@ -1517,8 +1351,9 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     // Use layout size (offset*), not getBoundingClientRect: CSS zoom/rotation of the
     // sheet must not change coordinate space mid-stroke. Quality is increased by a
     // denser backing store that tracks view zoom instead.
-    const layoutWidth = surface.offsetWidth || surface.clientWidth
-    const layoutHeight = surface.offsetHeight || surface.clientHeight
+    const paper = inline ? (surface.closest('.unified-paper') as HTMLElement | null) : null
+    const layoutWidth = paper?.offsetWidth || surface.offsetWidth || surface.clientWidth
+    const layoutHeight = paper?.offsetHeight || surface.offsetHeight || surface.clientHeight
     if (layoutWidth <= 0 || layoutHeight <= 0) return
     const inkWindow = inkWindowRef.current
     const windowSpan = inkWindowSpan(inkWindow)
@@ -2438,7 +2273,11 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     const canvas = canvasRef.current
     const stroke = activeStrokeRef.current
     if (!canvas || !stroke) return false
-    const { width: pixelWidth, height: pixelHeight, virtualHeight, layoutWidth } = canvasPixelSizeRef.current
+    let { width: pixelWidth, height: pixelHeight, virtualHeight, layoutWidth } = canvasPixelSizeRef.current
+    if (!pixelWidth || !pixelHeight || !virtualHeight) {
+      redraw(true)
+      ;({ width: pixelWidth, height: pixelHeight, virtualHeight, layoutWidth } = canvasPixelSizeRef.current)
+    }
     if (!pixelWidth || !pixelHeight || !virtualHeight) return false
     const context = canvas.getContext('2d', { alpha: true })
     if (!context) return false
@@ -2484,7 +2323,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       liveCanvasHasInkRef.current = true
     }
     return true
-  }, [pointFromEvent, settings.smoothing])
+  }, [pointFromEvent, redraw, settings.smoothing])
 
   const appendPointerEvent = useCallback((event: PointerEvent) => {
     const canvas = canvasRef.current
@@ -2854,7 +2693,14 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       }
       : null
     const start = resolveInkPointerDown(event.nativeEvent, surface, viewRotationRef.current)
-    if (!start.openStroke) return
+    if (!start.openStroke) {
+      activePointerRef.current = null
+      inkSessionRef.current = null
+      pointerBoundsRef.current = null
+      lastCapturedPointerIdRef.current = null
+      return
+    }
+    if (!canvasPixelSizeRef.current.width) redraw(true)
     // Ghost 0,0 downs stay session-open so the next real sample can start the stroke.
     const firstPoint = start.commitFirst ? pointFromEvent(event.nativeEvent) : null
     const pointerEraser = event.pointerType === 'pen' && (event.button === 5 || (event.buttons & 32) !== 0)
@@ -2963,7 +2809,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         }
     }
     appendPointerEvent(event.nativeEvent)
-  }, [activeArtBrush.pressure, activeArtSymbol, appendPointerEvent, artBrush, artColor, artEffect, artOpacity, artSymbolRotation, artSymbolSize, artWidth, bumpInkRevision, clearRecognitionScope, clearShapeDwellTimer, closeMathCorrectionSession, closeMathSolverSelection, commitPendingSolverTap, commitStrokeToCanvas, inkMode, inline, mathSolverEnabled, penColor, penWidth, pointFromEvent, scheduleRedraw, selectionMode, setDirty, settings.penOnly, settings.pressureEnabled, sourceHeight, sourceWidth, tool, updateHistoryState])
+  }, [activeArtBrush.pressure, activeArtSymbol, appendPointerEvent, artBrush, artColor, artEffect, artOpacity, artSymbolRotation, artSymbolSize, artWidth, bumpInkRevision, clearRecognitionScope, clearShapeDwellTimer, closeMathCorrectionSession, closeMathSolverSelection, commitPendingSolverTap, commitStrokeToCanvas, inkMode, inline, mathSolverEnabled, penColor, penWidth, pointFromEvent, redraw, scheduleRedraw, selectionMode, setDirty, settings.penOnly, settings.pressureEnabled, sourceHeight, sourceWidth, tool, updateHistoryState])
 
   const handlePointerMove = useCallback((event: ReactPointerEvent<HTMLElement>) => {
     if (shouldRejectNonPenInk(event.pointerType, settings.penOnly)) return
@@ -5003,6 +4849,11 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       tabIndex={inputActive ? 0 : -1}
       onKeyDown={handleKeyboard}
       onWheel={handleWheel}
+      onPointerDown={inline ? handlePointerDown : undefined}
+      onPointerMove={inline ? handlePointerMove : undefined}
+      onPointerUp={inline ? finishPointer : undefined}
+      onPointerCancel={inline ? finishPointer : undefined}
+      onLostPointerCapture={inline ? finishPointer : undefined}
     >
       <style>{drawingBoardStyles}</style>
       <header className="lw-draw-header">
@@ -5321,11 +5172,6 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
           <div
             ref={surfaceRef}
             className="lw-canvas-surface"
-            onPointerDown={inline ? handlePointerDown : undefined}
-            onPointerMove={inline ? handlePointerMove : undefined}
-            onPointerUp={inline ? finishPointer : undefined}
-            onPointerCancel={inline ? finishPointer : undefined}
-            onLostPointerCapture={inline ? finishPointer : undefined}
             onContextMenu={inline ? (event) => event.preventDefault() : undefined}
           >
             <canvas ref={committedCanvasRef} className="lw-tablet-canvas lw-tablet-canvas-committed" aria-hidden="true" />
@@ -5918,12 +5764,13 @@ const drawingBoardStyles = `
 .lw-draw-notice{display:flex;align-items:center;gap:7px;margin:0 14px 10px;padding:8px 10px;border:1px solid var(--draw-border);border-radius:9px;background:var(--background-secondary,#1b1b22);font-size:11px}.lw-draw-notice.is-success{color:var(--success,#3a8f6d);border-color:color-mix(in srgb,var(--success,#3a8f6d) 28%,transparent)}.lw-draw-notice.is-error{color:var(--danger,#d94b63);border-color:color-mix(in srgb,var(--danger,#d94b63) 28%,transparent)}.lw-draw-notice.is-info{color:var(--accent-readable,var(--draw-accent));border-color:color-mix(in srgb,var(--draw-accent) 32%,transparent)}.lw-draw-notice span{flex:1}.lw-draw-notice button{display:grid;place-items:center;border:0;background:transparent;color:inherit;cursor:pointer}.lw-draw-footer{min-height:55px;flex:0 0 auto;justify-content:space-between;gap:10px;padding:9px 14px;border-top:1px solid var(--draw-border);background:color-mix(in srgb,var(--background-secondary,#17171d) 92%,transparent)}.lw-footer-actions{gap:8px}.lw-convert-action{min-height:34px}.lw-spin{animation:lw-spin .8s linear infinite}.sr-only{position:absolute!important;width:1px!important;height:1px!important;padding:0!important;margin:-1px!important;overflow:hidden!important;clip:rect(0,0,0,0)!important;white-space:nowrap!important;border:0!important}@keyframes lw-spin{to{transform:rotate(360deg)}}
 
 .lw-drawing-board.is-inline{position:absolute;z-index:4;inset:0;height:auto;min-height:100%;overflow:visible;background:transparent;pointer-events:none}
+.lw-drawing-board.is-inline.is-input-active{pointer-events:auto}
 .lw-drawing-board.is-inline .lw-draw-header{display:none}
 .lw-drawing-board.is-inline .lw-draw-footer{display:none}
 .lw-drawing-board.is-inline .lw-draw-workspace{position:absolute;inset:0;display:block;min-height:100%;padding:0;pointer-events:none}
 .lw-drawing-board.is-inline .lw-canvas-shell{position:absolute;inset:0;display:block;padding:0;border:0;border-radius:0;background:transparent;box-shadow:none;pointer-events:none}
 .lw-drawing-board.is-inline .lw-canvas-glow,.lw-drawing-board.is-inline .lw-canvas-meta{display:none}
-.lw-drawing-board.is-inline .lw-canvas-surface{position:absolute;inset:0;width:100%!important;height:100%!important;min-width:0;min-height:0;aspect-ratio:auto;margin:0;overflow:visible;border-radius:0;background:transparent;box-shadow:none;will-change:auto;pointer-events:none}
+.lw-drawing-board.is-inline .lw-canvas-surface{position:absolute;inset:0;width:100%!important;height:100%!important;min-width:100%;min-height:100%;aspect-ratio:auto;margin:0;overflow:visible;border-radius:0;background:transparent;box-shadow:none;will-change:auto;pointer-events:none}
 .lw-drawing-board.is-inline.is-input-active .lw-canvas-surface{pointer-events:auto}
 .lw-drawing-board.is-inline .lw-tablet-canvas{position:absolute;left:0;width:100%;height:100%;pointer-events:none}
 .lw-drawing-board.is-inline .lw-tablet-canvas.is-input-active{pointer-events:none}

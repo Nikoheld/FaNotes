@@ -12,12 +12,13 @@ const inkMap = fs.readFileSync(path.join(root, 'src', 'lib', 'inkSampleMap.ts'),
 const toolErase = fs.readFileSync(path.join(root, 'src', 'lib', 'toolErase.ts'), 'utf8')
 const inkPolicy = fs.readFileSync(path.join(root, 'src', 'lib', 'inkPointerPolicy.ts'), 'utf8')
 const paperGrow = fs.readFileSync(path.join(root, 'src', 'lib', 'paperGrow.ts'), 'utf8')
+const inkPaint = fs.readFileSync(path.join(root, 'src', 'lib', 'inkStrokePaint.ts'), 'utf8')
 const defaults = fs.readFileSync(path.join(root, 'src', 'defaults.ts'), 'utf8')
 const appSource = fs.readFileSync(path.join(root, 'src', 'App.tsx'), 'utf8')
 const drafting = fs.readFileSync(path.join(root, 'src', 'lib', 'draftingTools.ts'), 'utf8')
 const bugReport = fs.readFileSync(path.join(root, 'src', 'lib', 'bugReport.ts'), 'utf8')
 const settingsModal = fs.readFileSync(path.join(root, 'src', 'components', 'SettingsModal.tsx'), 'utf8')
-const lockSource = [source, markdownEditor, paperCaret, inkMap, toolErase, inkPolicy, paperGrow, defaults, appSource, drafting, bugReport, settingsModal].join('\n')
+const lockSource = [source, markdownEditor, paperCaret, inkMap, toolErase, inkPolicy, paperGrow, inkPaint, defaults, appSource, drafting, bugReport, settingsModal].join('\n')
 
 const requiredBrushes = ['fineliner', 'pencil', 'marker', 'paintbrush', 'calligraphy', 'highlighter', 'watercolor', 'spray']
 const requiredEffects = ['solid', 'rainbow', 'aurora', 'sunset', 'ocean', 'gold', 'silver', 'neon']
@@ -62,7 +63,7 @@ const safeguards = [
   ['const isInkSurfaceTarget', 'Klick auf Leiste/Tabs beendet hängenden Stift'],
   ['const hitTestChrome', 'Klicks treffen die echte Schaltfläche, nicht eine hängende Stift-Capture'],
   ['document.elementFromPoint', 'Treffer unter dem Cursor unabhängig von Pointer-Capture'],
-  [".closest('.lw-canvas-surface, .lw-tablet-canvas')", 'nur die Tintenfläche zählt als Stiftziel, nicht die ganze Tafel'],
+  [".closest('.lw-canvas-surface, .lw-tablet-canvas, .lw-drawing-board.is-inline.is-input-active')", 'Inline-Overlay und Tintenfläche zählen als Stiftziel'],
   ['position:fixed;z-index:80;top:78px;right:16px', 'Konvertierungs-Panel bleibt im Viewport'],
   ["addEventListener('wheel', onWheel", 'Trackpad-Zoom löst Stift-Capture sofort'],
   ["from '../lib/inkPointerSession'", 'Wacom-Lift-Regeln liegen im gelieferten Session-Helper'],
@@ -99,6 +100,10 @@ const safeguards = [
   ['nextWriteExtent', 'Source wächst nicht, wenn die gemalte PDF-Fläche schon Platz hat'],
   ['mapClientToOneCanvas', 'Stift trifft die eine Canvas-Fläche, nicht eine innere Karte'],
   ['inkStrokePaintScale', 'Stiftbreite in CSS-Pixeln, nicht an der Source-Weite'],
+  ["from '../lib/inkStrokePaint'", 'eine gelieferte Paint-Funktion für sichtbare Tinte'],
+  ['export const paintVisibleInkSample', 'Check malt den echten Stiftpfad und liest Pixel'],
+  ['INK_MIN_BITMAP_PX', 'ein normaler Stift bleibt mindestens ein Pixel breit'],
+  ['.lw-drawing-board.is-inline.is-input-active{pointer-events:auto}', 'aktives Overlay nimmt den Stift, nicht nur die innere Fläche'],
   ["surface.style.removeProperty('width')", 'Inline-Overlay wird nicht auf A4-Seitenverhältnis geklemmt'],
   ['inkPointOnWriteSurface', 'Fenster-Bitmap ist kein zweites Koordinatensystem'],
   ['pdfOverlaySourceHeight', 'PDF-Overlay-Höhe steuert den Source-Raum, nicht A4'],
@@ -188,7 +193,7 @@ const lockSafeguards = [
 ]
 
 for (const [needle, label] of safeguards) {
-  if (!source.includes(needle)) throw new Error(`Zeichenmodus-Prüfung fehlgeschlagen: ${label}.`)
+  if (!lockSource.includes(needle)) throw new Error(`Zeichenmodus-Prüfung fehlgeschlagen: ${label}.`)
 }
 for (const [needle, label] of paperViewSafeguards) {
   if (!paperView.includes(needle)) throw new Error(`Zeichenmodus-Prüfung fehlgeschlagen: ${label}.`)
