@@ -42,6 +42,7 @@ import {
   Search,
   Settings,
   ShieldCheck,
+  Trash2,
   X,
 } from 'lucide-react'
 import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -63,6 +64,7 @@ import {
   linkedNotePreferredName,
   NOTE_LINK_STYLES,
   placeNewNoteLink,
+  removeNoteLink,
   restyleNoteLink,
   type NoteLinkRecord,
   type NoteLinkStyleId,
@@ -1508,6 +1510,26 @@ export default function App({ startupBootstrap }: AppProps) {
     }
   }, [persistNoteLinks, selectedNoteLinkId, toast])
 
+  const removePlacedNoteLink = useCallback(async (link: NoteLinkRecord) => {
+    const path = activePathRef.current
+    if (!path) return
+    if (!window.confirm('Verlinkung wirklich entfernen? Die verlinkte Notiz bleibt im Vault.')) return
+    try {
+      const links = removeNoteLink(noteLinksRef.current, link.id)
+      await persistNoteLinks(path, links)
+      setSelectedNoteLinkId((current) => current === link.id ? null : current)
+      toast('Verlinkung entfernt.', 'success')
+    } catch (error) {
+      toast(error instanceof Error ? error.message : 'Die Verlinkung konnte nicht entfernt werden.', 'error')
+    }
+  }, [persistNoteLinks, toast])
+
+  const removeSelectedNoteLink = useCallback(async () => {
+    const selected = noteLinksRef.current.find((link) => link.id === selectedNoteLinkId)
+    if (!selected) return
+    await removePlacedNoteLink(selected)
+  }, [removePlacedNoteLink, selectedNoteLinkId])
+
   const placeNoteLinkAt = useCallback(async (point: { page: number; x: number; y: number }) => {
     const sourcePath = activePathRef.current
     if (!sourcePath) return
@@ -2786,8 +2808,16 @@ export default function App({ startupBootstrap }: AppProps) {
       if (mod && event.shiftKey && event.key.toLowerCase() === 'e') { event.preventDefault(); toggleFocusMode() }
       if (mod && event.key.toLowerCase() === 'd') { event.preventDefault(); toggleDrawing() }
       if (mod && event.key.toLowerCase() === 'q') { event.preventDefault(); window.fanotes.requestClose() }
+      if ((event.key === 'Delete' || event.key === 'Backspace') && selectedNoteLinkId) {
+        const target = event.target as HTMLElement | null
+        if (target?.closest('textarea, input, [contenteditable="true"], .cm-editor, .markdown-editor, .worksheet-textbox')) return
+        event.preventDefault()
+        void removeSelectedNoteLink()
+        return
+      }
       if (event.key === 'Escape') {
         if (noteLinkPlacing) setNoteLinkPlacing(false)
+        else if (selectedNoteLinkId) setSelectedNoteLinkId(null)
         else if (worksheetImportOpen) setWorksheetImportOpen(false)
         else if (paletteOpen) setPaletteOpen(false)
         else if (searchOpen) setSearchOpen(false)
@@ -2802,7 +2832,7 @@ export default function App({ startupBootstrap }: AppProps) {
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [closeDrawing, closeTab, createNote, cycleTabs, focusMode, glyphenWerkOpen, homeworkOpen, lmStudioOpen, noteLinkPlacing, openGlyphenWerk, openLmStudio, openSettings, openWorksheetImport, overviewOpen, paletteOpen, saveCurrentWork, searchOpen, settingsOpen, toggleDrawing, toggleFocusMode, worksheetImportOpen])
+  }, [closeDrawing, closeTab, createNote, cycleTabs, focusMode, glyphenWerkOpen, homeworkOpen, lmStudioOpen, noteLinkPlacing, openGlyphenWerk, openLmStudio, openSettings, openWorksheetImport, overviewOpen, paletteOpen, removeSelectedNoteLink, saveCurrentWork, searchOpen, selectedNoteLinkId, settingsOpen, toggleDrawing, toggleFocusMode, worksheetImportOpen])
 
   useEffect(() => {
     const imageFile = (file: File | undefined) => file && file.type.startsWith('image/')
@@ -3130,6 +3160,17 @@ export default function App({ startupBootstrap }: AppProps) {
                   ))}
                 </div>
               )}
+              {selectedNoteLinkId && (
+                <button
+                  type="button"
+                  className="toolbar-button note-link-remove"
+                  title="Verlinkung entfernen"
+                  aria-label="Verlinkung entfernen"
+                  onClick={() => void removeSelectedNoteLink()}
+                >
+                  <Trash2 size={14} /><span>Entfernen</span>
+                </button>
+              )}
               <button
                 type="button"
                 className={`toolbar-button ${noteLinkPlacing ? 'active' : ''}`}
@@ -3283,6 +3324,7 @@ export default function App({ startupBootstrap }: AppProps) {
                       setSelectedNoteLinkId(link.id)
                       setNoteLinkStyle(link.style)
                     }}
+                    onRemove={(link) => void removePlacedNoteLink(link)}
                   />
                 </article>
               </PaperView>

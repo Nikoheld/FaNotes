@@ -546,8 +546,14 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .unified-paper.is-placing-note-link .lw-drawing-board.is-inline.is-input-active .lw-canvas-surface {
   pointer-events: none;
 }
-.note-link-marker {
+.note-link-wrap {
   position: absolute;
+  z-index: 7;
+  pointer-events: auto;
+  transform: translate(-50%, -50%);
+}
+.note-link-marker {
+  position: relative;
   z-index: 7;
   display: inline-flex;
   align-items: center;
@@ -564,7 +570,28 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   cursor: pointer;
   font-size: 11px;
   font-weight: 700;
-  transform: translate(-50%, -50%);
+}
+.note-link-wrap > .note-link-remove {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  z-index: 8;
+  width: 18px;
+  height: 18px;
+  display: none;
+  place-items: center;
+  padding: 0;
+  border: 1px solid rgba(88, 34, 47, .18);
+  border-radius: 50%;
+  color: #6f2433;
+  background: #fff;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, .16);
+  cursor: pointer;
+}
+.note-link-wrap:hover > .note-link-remove,
+.note-link-wrap.is-selected > .note-link-remove { display: grid; }
+.toolbar-button.note-link-remove {
+  color: #8b3b4a;
 }
 .note-link-marker.is-symbol {
   width: 28px;

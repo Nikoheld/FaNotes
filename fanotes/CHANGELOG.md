@@ -2,6 +2,14 @@
 
 ## Unveröffentlicht
 
+## 2026.8.56
+
+- **Stift schreibt, Tastatur markiert:** Im Stiftmodus schreibt der Stift. Text auf PDF und Notiz markierst du nur im Tastaturmodus.
+- **PDF-Text bleibt stehen:** Beim Schreiben bleibt der PDF-Text sichtbar und an seinem Platz. Markierungen folgen den Buchstaben, ohne sie doppelt zu zeichnen.
+- **Tastatur-Leiste:** Die obere Leiste im Tastaturmodus hat eigenes Aussehen, ohne Stift-Reste.
+- **Arbeitsblatt Entfernen:** Entfernen bleibt auf der Textspalte erreichbar, auch links auf dem Blatt.
+- **Verlinkung entfernen:** Eine gesetzte Verlinkung lässt sich wieder lösen — über Entfernen in der Leiste, das Kreuz am Marker oder Entf. Die verlinkte Notiz bleibt im Vault.
+
 ## 2026.8.55
 
 - **Sichtbare Tinte:** Auf PDF und Notiz hat der Stift wieder eine normale Strichstärke. Die Linie bleibt unter dem Stift — nicht haardünn und nicht unsichtbar.

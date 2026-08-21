@@ -191,6 +191,16 @@ export const restyleNoteLink = (link: NoteLinkRecord, style: unknown): NoteLinkR
   return next
 }
 
+/** Drop one placed marker. The linked note file stays in the vault. */
+export const removeNoteLink = (links: NoteLinkRecord[] | null | undefined, id: string): NoteLinkRecord[] => {
+  const list = parseNoteLinks(links)
+  const key = typeof id === 'string' ? id.trim() : ''
+  if (!key || !NOTE_LINK_ID.test(key)) throw new Error('Diese Verlinkung gibt es nicht.')
+  const next = list.filter((link) => link.id !== key)
+  if (next.length === list.length) throw new Error('Diese Verlinkung gibt es nicht.')
+  return next
+}
+
 export const emptyNoteNavStack = (): string[] => []
 
 export const followNoteNav = (stack: string[] | null | undefined, fromPath: string, toPath: string): NoteNavState => {

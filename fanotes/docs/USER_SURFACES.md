@@ -18,6 +18,7 @@ Command-palette action ids walked from `src/App.tsx`: `new-note`, `import-pdf-no
 | FAMD companion files | `src/lib/famd.ts` | `export const parseFamd` |
 | Placed note Verlinkung | `src/lib/noteLink.ts` | `export const placeNewNoteLink` |
 | Verlinkung overlay | `src/components/NoteLinkLayer.tsx` | `export function NoteLinkLayer` |
+| Remove placed Verlinkung | `src/lib/noteLink.ts` | `export const removeNoteLink` |
 | Zurück after a Verlinkung | `src/App.tsx` | `note-nav-back` |
 | Note backup snapshots | `src/lib/noteBackup.ts` | `export const createNoteBackup` |
 | Backup control policy | `src/lib/noteBackup.ts` | `export const noteBackupControlPolicy` |

@@ -36,6 +36,7 @@ const CHROME = [
   'Notizen im Buch',
   'Verlinkung',
   'Verlinkung setzen',
+  'Verlinkung entfernen',
   'Backup',
   'Weiteres Backup',
   'Darstellung',

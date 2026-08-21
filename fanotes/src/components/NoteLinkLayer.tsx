@@ -1,5 +1,5 @@
 import { useCallback, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
-import { Link2 } from 'lucide-react'
+import { Link2, X } from 'lucide-react'
 import {
   noteLinkAppearanceToken,
   noteLinkPageAtPoint,
@@ -20,6 +20,7 @@ type NoteLinkLayerProps = {
   onPlace: (point: { page: number; x: number; y: number }) => void
   onActivate: (link: NoteLinkRecord) => void
   onSelect: (link: NoteLinkRecord) => void
+  onRemove?: (link: NoteLinkRecord) => void
 }
 
 export function NoteLinkLayer({
@@ -30,6 +31,7 @@ export function NoteLinkLayer({
   onPlace,
   onActivate,
   onSelect,
+  onRemove,
 }: NoteLinkLayerProps) {
   const layerRef = useRef<HTMLDivElement>(null)
   const [layout, setLayout] = useState<MarkerLayout[]>([])
@@ -99,35 +101,60 @@ export function NoteLinkLayer({
         const appearance = noteLinkAppearanceToken(link.style)
         const showSymbol = appearance !== 'text'
         const showText = appearance !== 'symbol'
+        const selected = selectedId === link.id
         return (
-          <button
+          <div
             key={link.id}
-            type="button"
-            className={`note-link-marker is-${appearance} ${selectedId === link.id ? 'is-selected' : ''}`}
+            className={`note-link-wrap ${selected ? 'is-selected' : ''}`}
             style={{ left: position?.left ?? 0, top: position?.top ?? 0 }}
-            title={link.label}
-            aria-label={link.label}
-            data-note-link-style={link.style}
-            onPointerDown={(event) => {
-              event.stopPropagation()
-            }}
-            onClick={(event) => {
-              event.preventDefault()
-              event.stopPropagation()
-              if (placing) {
-                onSelect(link)
-                return
-              }
-              onActivate(link)
-            }}
-            onContextMenu={(event) => {
-              event.preventDefault()
-              onSelect(link)
-            }}
           >
-            {showSymbol ? <Link2 size={14} aria-hidden="true" /> : null}
-            {showText ? <span>{link.label}</span> : null}
-          </button>
+            <button
+              type="button"
+              className={`note-link-marker is-${appearance} ${selected ? 'is-selected' : ''}`}
+              title={link.label}
+              aria-label={link.label}
+              data-note-link-style={link.style}
+              onPointerDown={(event) => {
+                event.stopPropagation()
+              }}
+              onClick={(event) => {
+                event.preventDefault()
+                event.stopPropagation()
+                if (placing) {
+                  onSelect(link)
+                  return
+                }
+                onActivate(link)
+              }}
+              onContextMenu={(event) => {
+                event.preventDefault()
+                onSelect(link)
+              }}
+            >
+              {showSymbol ? <Link2 size={14} aria-hidden="true" /> : null}
+              {showText ? <span>{link.label}</span> : null}
+            </button>
+            {onRemove && (
+              <button
+                type="button"
+                className="note-link-remove"
+                title="Verlinkung entfernen"
+                aria-label="Verlinkung entfernen"
+                onPointerDown={(event) => {
+                  event.preventDefault()
+                  event.stopPropagation()
+                }}
+                onClick={(event) => {
+                  event.preventDefault()
+                  event.stopPropagation()
+                  onSelect(link)
+                  onRemove(link)
+                }}
+              >
+                <X size={11} aria-hidden="true" />
+              </button>
+            )}
+          </div>
         )
       })}
     </div>
