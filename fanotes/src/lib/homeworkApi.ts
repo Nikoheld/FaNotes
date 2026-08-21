@@ -2,6 +2,7 @@ import {
   parseHomeworkMarkdown,
   type HomeworkDocument,
   type HomeworkTask,
+  type HomeworkTaskPatch,
 } from './homeworkStore'
 
 export const HOMEWORK_API_HOST = 'fanotes.fasrv.ch'
@@ -56,6 +57,18 @@ export const homeworkApiQueryPath = (channelId: string) => `/api/v1/homework/${c
 export const homeworkApiQueryUrl = (channelId: string, origin = HOMEWORK_API_ORIGIN) => (
   `${origin.replace(/\/$/u, '')}${homeworkApiQueryPath(channelId)}`
 )
+
+export const homeworkApiTaskPath = (channelId: string, taskId?: string) => (
+  taskId
+    ? `${homeworkApiQueryPath(channelId)}/tasks/${encodeURIComponent(taskId)}`
+    : `${homeworkApiQueryPath(channelId)}/tasks`
+)
+
+export const homeworkApiTaskUrl = (channelId: string, taskId?: string, origin = HOMEWORK_API_ORIGIN) => (
+  `${origin.replace(/\/$/u, '')}${homeworkApiTaskPath(channelId, taskId)}`
+)
+
+export const HOMEWORK_API_CONTROL_METHODS = ['GET', 'POST', 'PATCH', 'DELETE'] as const
 
 export const generateHomeworkApiChannelId = () => {
   const bytes = new Uint8Array(16)
@@ -112,3 +125,125 @@ export const publishHomeworkList = async (input: {
   })
   return { ok: response.ok, status: response.status }
 }
+
+const homeworkAuthHeaders = (secret: string): HeadersInit => ({
+  Accept: 'application/json',
+  'X-FaNotes-Homework': '1',
+  ...(secret ? { Authorization: `Bearer ${secret}` } : {}),
+})
+
+const readHomeworkJson = async (response: Response) => {
+  try {
+    return await response.json() as Record<string, unknown>
+  } catch {
+    return {}
+  }
+}
+
+export const queryHomeworkList = async (input: {
+  channelId: string
+  secret: string
+  origin?: string
+}): Promise<{ ok: boolean; status: number; payload: HomeworkApiPayload | null }> => {
+  if (!HOMEWORK_CHANNEL_ID_PATTERN.test(input.channelId)) return { ok: false, status: 400, payload: null }
+  const response = await fetch(homeworkApiQueryUrl(input.channelId, input.origin), {
+    method: 'GET',
+    headers: homeworkAuthHeaders(input.secret.trim()),
+    cache: 'no-store',
+    credentials: 'omit',
+    referrerPolicy: 'no-referrer',
+  })
+  const body = await readHomeworkJson(response)
+  if (!response.ok || !Array.isArray(body.tasks)) return { ok: false, status: response.status, payload: null }
+  return {
+    ok: true,
+    status: response.status,
+    payload: homeworkDocumentToApiPayload({
+      version: 1,
+      tasks: body.tasks as HomeworkTask[],
+    }),
+  }
+}
+
+export const createHomeworkApiTask = async (input: {
+  channelId: string
+  secret: string
+  task: HomeworkTaskPatch & { title: string }
+  origin?: string
+}): Promise<{ ok: boolean; status: number; task: HomeworkApiTask | null }> => {
+  if (!HOMEWORK_CHANNEL_ID_PATTERN.test(input.channelId)) return { ok: false, status: 400, task: null }
+  const response = await fetch(homeworkApiTaskUrl(input.channelId, undefined, input.origin), {
+    method: 'POST',
+    headers: {
+      ...homeworkAuthHeaders(input.secret.trim()),
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(input.task),
+    cache: 'no-store',
+    credentials: 'omit',
+    referrerPolicy: 'no-referrer',
+  })
+  const body = await readHomeworkJson(response)
+  const task = body.task && typeof body.task === 'object' ? body.task as HomeworkApiTask : null
+  return { ok: response.ok, status: response.status, task }
+}
+
+export const patchHomeworkApiTask = async (input: {
+  channelId: string
+  secret: string
+  taskId: string
+  patch: HomeworkTaskPatch
+  origin?: string
+}): Promise<{ ok: boolean; status: number; task: HomeworkApiTask | null }> => {
+  if (!HOMEWORK_CHANNEL_ID_PATTERN.test(input.channelId) || !input.taskId) {
+    return { ok: false, status: 400, task: null }
+  }
+  const response = await fetch(homeworkApiTaskUrl(input.channelId, input.taskId, input.origin), {
+    method: 'PATCH',
+    headers: {
+      ...homeworkAuthHeaders(input.secret.trim()),
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(input.patch),
+    cache: 'no-store',
+    credentials: 'omit',
+    referrerPolicy: 'no-referrer',
+  })
+  const body = await readHomeworkJson(response)
+  const task = body.task && typeof body.task === 'object' ? body.task as HomeworkApiTask : null
+  return { ok: response.ok, status: response.status, task }
+}
+
+export const deleteHomeworkApiTask = async (input: {
+  channelId: string
+  secret: string
+  taskId: string
+  origin?: string
+}): Promise<{ ok: boolean; status: number }> => {
+  if (!HOMEWORK_CHANNEL_ID_PATTERN.test(input.channelId) || !input.taskId) {
+    return { ok: false, status: 400 }
+  }
+  const response = await fetch(homeworkApiTaskUrl(input.channelId, input.taskId, input.origin), {
+    method: 'DELETE',
+    headers: homeworkAuthHeaders(input.secret.trim()),
+    cache: 'no-store',
+    credentials: 'omit',
+    referrerPolicy: 'no-referrer',
+  })
+  return { ok: response.ok, status: response.status }
+}
+
+/** Appointments use the same `done` flag as homework. */
+export const setHomeworkApiTaskDone = async (input: {
+  channelId: string
+  secret: string
+  taskId: string
+  done: boolean
+  origin?: string
+}) => patchHomeworkApiTask({
+  channelId: input.channelId,
+  secret: input.secret,
+  taskId: input.taskId,
+  patch: { done: input.done },
+  origin: input.origin,
+})

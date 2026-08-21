@@ -18,7 +18,11 @@ export type HomeworkTask = {
 export type HomeworkDocument = {
   version: 1
   tasks: HomeworkTask[]
+  /** Ids last seen on the published API replica. Local-only; never sent as a task list. */
+  publishedIds?: string[]
 }
+
+export type HomeworkTaskPatch = Partial<Pick<HomeworkTask, 'title' | 'notes' | 'subject' | 'dueDate' | 'dueTime' | 'done' | 'kind' | 'priority'>>
 
 export const HOMEWORK_NOTE_PATH = 'Hausaufgaben.md'
 export const HOMEWORK_NOTE_TITLE = 'Hausaufgaben'
@@ -64,6 +68,15 @@ const sanitizeTask = (raw: unknown): HomeworkTask | null => {
   }
 }
 
+const sanitizePublishedIds = (value: unknown): string[] | undefined => {
+  if (!Array.isArray(value)) return undefined
+  const ids = value
+    .filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0)
+    .map((entry) => entry.trim().slice(0, 80))
+    .slice(0, 2_000)
+  return ids.length ? ids : undefined
+}
+
 export const parseHomeworkMarkdown = (markdown: string): HomeworkDocument => {
   if (typeof markdown !== 'string' || !markdown.includes(MARKER_START)) return emptyDocument()
   const start = markdown.indexOf(MARKER_START)
@@ -75,16 +88,19 @@ export const parseHomeworkMarkdown = (markdown: string): HomeworkDocument => {
     const tasks = Array.isArray(parsed.tasks)
       ? parsed.tasks.map(sanitizeTask).filter((task): task is HomeworkTask => Boolean(task))
       : []
-    return { version: 1, tasks }
+    const publishedIds = sanitizePublishedIds(parsed.publishedIds)
+    return { version: 1, tasks, ...(publishedIds ? { publishedIds } : {}) }
   } catch {
     return emptyDocument()
   }
 }
 
 export const serializeHomeworkMarkdown = (document: HomeworkDocument): string => {
+  const publishedIds = sanitizePublishedIds(document.publishedIds)
   const payload: HomeworkDocument = {
     version: 1,
     tasks: document.tasks.map((task) => sanitizeTask(task)).filter((task): task is HomeworkTask => Boolean(task)),
+    ...(publishedIds ? { publishedIds } : {}),
   }
   const json = JSON.stringify(payload, null, 2)
   return [
@@ -108,21 +124,104 @@ export const createHomeworkTask = (input: {
   dueTime?: string | null
   kind?: HomeworkKind
   priority?: HomeworkPriority
+  done?: boolean
+  id?: string
 }): HomeworkTask => {
   const now = new Date().toISOString()
   return {
-    id: crypto.randomUUID(),
+    id: typeof input.id === 'string' && input.id.trim() ? input.id.trim().slice(0, 80) : crypto.randomUUID(),
     title: input.title.trim().slice(0, 240),
     notes: (input.notes ?? '').slice(0, 4_000),
     subject: (input.subject ?? '').trim().slice(0, 80),
     dueDate: isIsoDate(input.dueDate) ? input.dueDate : null,
     dueTime: isIsoTime(input.dueTime) ? input.dueTime : null,
-    done: false,
+    done: Boolean(input.done),
     kind: input.kind === 'appointment' ? 'appointment' : 'homework',
     priority: input.priority === 'high' ? 'high' : 'normal',
     createdAt: now,
     updatedAt: now,
   }
+}
+
+const withPublishedIds = (document: HomeworkDocument, tasks: HomeworkTask[]): HomeworkDocument => ({
+  version: 1,
+  tasks,
+  ...(document.publishedIds ? { publishedIds: document.publishedIds } : {}),
+})
+
+export const rememberPublishedHomeworkIds = (document: HomeworkDocument, ids: readonly string[]): HomeworkDocument => {
+  const publishedIds = sanitizePublishedIds([...ids])
+  return {
+    version: 1,
+    tasks: document.tasks,
+    ...(publishedIds ? { publishedIds } : {}),
+  }
+}
+
+export const addHomeworkTask = (document: HomeworkDocument, input: Parameters<typeof createHomeworkTask>[0]) => {
+  const task = createHomeworkTask(input)
+  return { document: withPublishedIds(document, [task, ...document.tasks]), task }
+}
+
+export const patchHomeworkTask = (
+  document: HomeworkDocument,
+  id: string,
+  patch: HomeworkTaskPatch,
+): HomeworkDocument | null => {
+  const index = document.tasks.findIndex((task) => task.id === id)
+  if (index < 0) return null
+  const current = document.tasks[index]
+  const next = sanitizeTask({
+    ...current,
+    ...patch,
+    id: current.id,
+    createdAt: current.createdAt,
+    updatedAt: new Date().toISOString(),
+  })
+  if (!next) return null
+  const tasks = document.tasks.slice()
+  tasks[index] = next
+  return withPublishedIds(document, tasks)
+}
+
+/** Appointments and homework share `done` — the API must be able to complete both. */
+export const setHomeworkTaskDone = (document: HomeworkDocument, id: string, done: boolean) => (
+  patchHomeworkTask(document, id, { done })
+)
+
+export const removeHomeworkTask = (document: HomeworkDocument, id: string): HomeworkDocument | null => {
+  if (!document.tasks.some((task) => task.id === id)) return null
+  return withPublishedIds(document, document.tasks.filter((task) => task.id !== id))
+}
+
+const newerTimestamp = (left: string, right: string) => {
+  const leftAt = Date.parse(left)
+  const rightAt = Date.parse(right)
+  if (!Number.isFinite(leftAt)) return false
+  if (!Number.isFinite(rightAt)) return true
+  return leftAt >= rightAt
+}
+
+export const mergeHomeworkFromRemote = (
+  local: HomeworkDocument,
+  remoteTasks: HomeworkTask[],
+): HomeworkDocument => {
+  const published = new Set(sanitizePublishedIds(local.publishedIds) ?? [])
+  const localById = new Map(local.tasks.map((task) => [task.id, task]))
+  const remoteById = new Map(remoteTasks.map((task) => [task.id, task]))
+  const merged: HomeworkTask[] = []
+  const seen = new Set<string>()
+  for (const remote of remoteTasks) {
+    seen.add(remote.id)
+    const current = localById.get(remote.id)
+    merged.push(current && newerTimestamp(current.updatedAt, remote.updatedAt) ? current : remote)
+  }
+  for (const localTask of local.tasks) {
+    if (seen.has(localTask.id)) continue
+    if (published.has(localTask.id) && !remoteById.has(localTask.id)) continue
+    merged.push(localTask)
+  }
+  return withPublishedIds({ ...local, tasks: merged }, merged)
 }
 
 export const taskDueTimestamp = (task: HomeworkTask): number | null => {

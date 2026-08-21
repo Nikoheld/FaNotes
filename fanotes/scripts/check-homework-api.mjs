@@ -83,11 +83,29 @@ try {
     generateHomeworkApiSecret,
     homeworkApiQueryUrl,
     homeworkApiSecretReady,
+    homeworkApiTaskUrl,
     homeworkDocumentToApiPayload,
+    HOMEWORK_API_CONTROL_METHODS,
     publishHomeworkList,
+    queryHomeworkList,
+    setHomeworkApiTaskDone,
+    createHomeworkApiTask,
+    patchHomeworkApiTask,
+    deleteHomeworkApiTask,
   } = await vite.ssrLoadModule('/src/lib/homeworkApi.ts')
 
   const {
+    mergeHomeworkFromRemote,
+    setHomeworkTaskDone,
+    addHomeworkTask,
+    patchHomeworkTask,
+    removeHomeworkTask,
+  } = await vite.ssrLoadModule('/src/lib/homeworkStore.ts')
+
+  const {
+    applyHomeworkTaskCreate,
+    applyHomeworkTaskDelete,
+    applyHomeworkTaskPatch,
     createHomeworkSecretRecord,
     resolveHomeworkApiQuery,
     verifyHomeworkSecret,
@@ -127,6 +145,54 @@ try {
     const appSource = await fs.readFile(join(appRoot, 'src/App.tsx'), 'utf8')
     assert.match(appSource, /openSettings/u, 'settings open must load protected secrets first')
     assert.match(appSource, /lastHomeworkSecretRef\.current = next\.homeworkApiSecret/u, 'decrypt then republish')
+    assert.match(appSource, /queryHomeworkList/u, 'desktop must pull API changes before publish')
+    assert.deepEqual([...HOMEWORK_API_CONTROL_METHODS], ['GET', 'POST', 'PATCH', 'DELETE'])
+
+    const marked = setHomeworkTaskDone({ version: 1, tasks: document.tasks }, 'task-fr-2', true)
+    assert.ok(marked)
+    const appointment = marked.tasks.find((task) => task.id === 'task-fr-2')
+    assert.equal(appointment.kind, 'appointment')
+    assert.equal(appointment.done, true, 'appointments must complete through the same done flag')
+    const reopened = setHomeworkTaskDone(marked, 'task-fr-2', false)
+    assert.equal(reopened.tasks.find((task) => task.id === 'task-fr-2').done, false)
+
+    const patchedTitle = patchHomeworkTask({ version: 1, tasks: document.tasks }, 'task-math-1', { title: 'Mathe S. 13', priority: 'normal' })
+    assert.equal(patchedTitle.tasks.find((task) => task.id === 'task-math-1').title, 'Mathe S. 13')
+    const added = addHomeworkTask({ version: 1, tasks: document.tasks }, { title: 'Bio Referat', kind: 'homework' })
+    assert.equal(added.document.tasks[0].title, 'Bio Referat')
+    const removed = removeHomeworkTask(added.document, added.task.id)
+    assert.equal(removed.tasks.some((task) => task.id === added.task.id), false)
+
+    const serverPatch = applyHomeworkTaskPatch(document.tasks, 'task-fr-2', { done: true })
+    assert.equal(serverPatch.status, 200)
+    assert.equal(serverPatch.task.kind, 'appointment')
+    assert.equal(serverPatch.task.done, true)
+    const serverCreate = applyHomeworkTaskCreate(document.tasks, { title: 'Physik Versuch', kind: 'homework', dueDate: '2026-08-22' })
+    assert.equal(serverCreate.status, 201)
+    assert.equal(serverCreate.task.title, 'Physik Versuch')
+    const serverDelete = applyHomeworkTaskDelete(serverCreate.tasks, serverCreate.task.id)
+    assert.equal(serverDelete.status, 204)
+    assert.equal(serverDelete.tasks.some((task) => task.id === serverCreate.task.id), false)
+
+    const remoteDone = document.tasks.map((task) => (
+      task.id === 'task-fr-2' ? { ...task, done: true, updatedAt: '2026-08-16T12:00:00.000Z' } : task
+    ))
+    const mergedDone = mergeHomeworkFromRemote(
+      { version: 1, tasks: document.tasks, publishedIds: document.tasks.map((task) => task.id) },
+      remoteDone,
+    )
+    assert.equal(mergedDone.tasks.find((task) => task.id === 'task-fr-2').done, true)
+    const afterRemoteDelete = mergeHomeworkFromRemote(
+      { version: 1, tasks: document.tasks, publishedIds: document.tasks.map((task) => task.id) },
+      [document.tasks[0]],
+    )
+    assert.equal(afterRemoteDelete.tasks.some((task) => task.id === 'task-fr-2'), false, 'API delete must drop a previously published appointment')
+    const localOnly = mergeHomeworkFromRemote(
+      { version: 1, tasks: [...document.tasks, { ...document.tasks[0], id: 'local-only', title: 'Nur lokal', updatedAt: '2026-08-16T18:00:00.000Z' }] },
+      document.tasks,
+    )
+    assert.ok(localOnly.tasks.some((task) => task.id === 'local-only'), 'unpublished local tasks stay')
+
     console.log('UNIT deny/allow fields:', JSON.stringify({
       off: off.body,
       noSecret: noSecret.body,
@@ -219,10 +285,77 @@ try {
         assertSameTasks(listedBody.tasks, document.tasks, `launch query ${run}`)
       }
 
+      const marked = await setHomeworkApiTaskDone({
+        channelId,
+        secret,
+        taskId: 'task-fr-2',
+        done: true,
+        origin: ORIGIN,
+      })
+      assert.equal(marked.ok, true, `mark appointment done failed ${marked.status}`)
+      assert.equal(marked.task.kind, 'appointment')
+      assert.equal(marked.task.done, true)
+      for (const run of [1, 2]) {
+        const listed = await queryHomeworkList({ channelId, secret, origin: ORIGIN })
+        assert.equal(listed.ok, true, `query after done ${run} failed ${listed.status}`)
+        assert.equal(listed.payload.tasks.find((task) => task.id === 'task-fr-2').done, true, `appointment still open after done query ${run}`)
+      }
+
+      const created = await createHomeworkApiTask({
+        channelId,
+        secret,
+        origin: ORIGIN,
+        task: { title: 'Chemie Protokoll', kind: 'homework', subject: 'Chemie', dueDate: '2026-08-23' },
+      })
+      assert.equal(created.ok, true, `create failed ${created.status}`)
+      assert.equal(created.task.title, 'Chemie Protokoll')
+      const renamed = await patchHomeworkApiTask({
+        channelId,
+        secret,
+        origin: ORIGIN,
+        taskId: created.task.id,
+        patch: { title: 'Chemie Protokoll final', notes: 'Abgabe vor der Stunde' },
+      })
+      assert.equal(renamed.ok, true)
+      assert.equal(renamed.task.title, 'Chemie Protokoll final')
+      const afterCreate = await queryHomeworkList({ channelId, secret, origin: ORIGIN })
+      assert.ok(afterCreate.payload.tasks.some((task) => task.id === created.task.id))
+      const removed = await deleteHomeworkApiTask({
+        channelId,
+        secret,
+        origin: ORIGIN,
+        taskId: created.task.id,
+      })
+      assert.equal(removed.ok, true, `delete failed ${removed.status}`)
+      const afterDelete = await queryHomeworkList({ channelId, secret, origin: ORIGIN })
+      assert.equal(afterDelete.payload.tasks.some((task) => task.id === created.task.id), false)
+      const missing = await setHomeworkApiTaskDone({
+        channelId,
+        secret,
+        origin: ORIGIN,
+        taskId: created.task.id,
+        done: true,
+      })
+      assert.equal(missing.ok, false)
+      assert.equal(missing.status, 404)
+
+      const crossOrigin = await fetch(homeworkApiTaskUrl(channelId, 'task-fr-2', ORIGIN), {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${secret}`,
+          'Content-Type': 'application/json',
+          Origin: 'http://homeassistant.local:8123',
+        },
+        body: JSON.stringify({ done: false }),
+      })
+      assert.equal(crossOrigin.status, 200, 'API control must work from other origins')
+      const reopened = await readJson(crossOrigin)
+      assert.equal(reopened.task.done, false)
+
       const stored = JSON.parse(await fs.readFile(join(homeworkDir, `${channelId}.json`), 'utf8'))
       assert.equal(JSON.stringify(stored).includes(secret), false, 'server must not store the plaintext secret')
       assert.ok(stored.hash && stored.salt)
-      console.log('Hausaufgaben-API-Launch erfolgreich: enable/publish/query zweimal, keine Titel-Leaks.')
+      console.log('Hausaufgaben-API-Launch erfolgreich: enable/publish/query, Termin erledigt, anlegen/ändern/löschen.')
     } finally {
       if (child.exitCode === null) {
         child.kill('SIGTERM')

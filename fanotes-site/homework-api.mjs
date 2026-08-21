@@ -101,6 +101,53 @@ export const homeworkTasksToApiPayload = (tasks) => ({
   tasks: (Array.isArray(tasks) ? tasks : []).map(sanitizeHomeworkApiTask).filter(Boolean).slice(0, MAX_TASKS),
 })
 
+const TASK_ID_PATTERN = /^[A-Za-z0-9._:-]{1,80}$/u
+
+export const applyHomeworkTaskCreate = (tasks, raw) => {
+  const title = typeof raw?.title === 'string' ? raw.title.trim() : ''
+  if (!title) return { status: 400, error: 'Titel fehlt.', tasks }
+  if ((Array.isArray(tasks) ? tasks : []).length >= MAX_TASKS) {
+    return { status: 400, error: 'Die Liste ist voll.', tasks }
+  }
+  const task = sanitizeHomeworkApiTask({
+    ...raw,
+    id: typeof raw?.id === 'string' && TASK_ID_PATTERN.test(raw.id.trim()) ? raw.id.trim() : randomBytes(16).toString('hex'),
+    title,
+  })
+  if (!task) return { status: 400, error: 'Ungültiger Eintrag.', tasks }
+  const current = Array.isArray(tasks) ? tasks : []
+  if (current.some((entry) => entry.id === task.id)) {
+    return { status: 409, error: 'Dieser Eintrag existiert bereits.', tasks: current }
+  }
+  return { status: 201, task, tasks: [task, ...current].slice(0, MAX_TASKS) }
+}
+
+export const applyHomeworkTaskPatch = (tasks, taskId, raw) => {
+  const current = Array.isArray(tasks) ? tasks : []
+  const index = current.findIndex((task) => task.id === taskId)
+  if (index < 0) return { status: 404, error: 'Eintrag nicht gefunden.', tasks: current }
+  const patch = raw && typeof raw === 'object' ? raw : {}
+  const next = sanitizeHomeworkApiTask({
+    ...current[index],
+    ...patch,
+    id: current[index].id,
+    createdAt: current[index].createdAt,
+    updatedAt: new Date().toISOString(),
+  })
+  if (!next) return { status: 400, error: 'Ungültige Änderung.', tasks: current }
+  const tasksNext = current.slice()
+  tasksNext[index] = next
+  return { status: 200, task: next, tasks: tasksNext }
+}
+
+export const applyHomeworkTaskDelete = (tasks, taskId) => {
+  const current = Array.isArray(tasks) ? tasks : []
+  if (!current.some((task) => task.id === taskId)) {
+    return { status: 404, error: 'Eintrag nicht gefunden.', tasks: current }
+  }
+  return { status: 204, tasks: current.filter((task) => task.id !== taskId) }
+}
+
 export const resolveHomeworkApiQuery = ({ enabled, secretOk, payload }) => {
   if (!enabled || !payload) {
     return { status: 404, body: denyBody('Hausaufgaben-API ist nicht verfügbar.') }
@@ -195,7 +242,7 @@ const writeJson = (response, status, value) => {
     'X-Content-Type-Options': 'nosniff',
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Headers': 'Authorization, X-FaNotes-Homework-Secret',
-    'Access-Control-Allow-Methods': 'GET, OPTIONS',
+    'Access-Control-Allow-Methods': 'GET, POST, PATCH, PUT, DELETE, OPTIONS',
   })
   response.end(body)
 }
@@ -205,15 +252,18 @@ export const handleHomeworkRequest = async (request, response, url) => {
     response.writeHead(204, {
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Headers': 'Authorization, X-FaNotes-Homework-Secret',
-      'Access-Control-Allow-Methods': 'GET, OPTIONS',
+      'Access-Control-Allow-Methods': 'GET, POST, PATCH, PUT, DELETE, OPTIONS',
       'Access-Control-Max-Age': '600',
     })
     response.end()
     return true
   }
-  const match = /^\/api\/v1\/homework\/([a-f0-9]{32})$/u.exec(url.pathname)
-  if (!match) return false
-  const channelId = match[1]
+  const listMatch = /^\/api\/v1\/homework\/([a-f0-9]{32})$/u.exec(url.pathname)
+  const tasksMatch = /^\/api\/v1\/homework\/([a-f0-9]{32})\/tasks$/u.exec(url.pathname)
+  const taskMatch = /^\/api\/v1\/homework\/([a-f0-9]{32})\/tasks\/([A-Za-z0-9._:-]{1,80})$/u.exec(url.pathname)
+  if (!listMatch && !tasksMatch && !taskMatch) return false
+  const channelId = (listMatch || tasksMatch || taskMatch)[1]
+  const taskId = taskMatch?.[2]
   if (!CHANNEL_PATTERN.test(channelId)) return false
 
   try {
@@ -221,10 +271,87 @@ export const handleHomeworkRequest = async (request, response, url) => {
       response.writeHead(204, {
         'Access-Control-Allow-Origin': '*',
         'Access-Control-Allow-Headers': 'Authorization, X-FaNotes-Homework-Secret, Content-Type, X-FaNotes-Homework',
-        'Access-Control-Allow-Methods': 'GET, PUT, DELETE, OPTIONS',
+        'Access-Control-Allow-Methods': 'GET, POST, PATCH, PUT, DELETE, OPTIONS',
         'Access-Control-Max-Age': '600',
       })
       response.end()
+      return true
+    }
+
+    const requireEnabledAuth = async () => {
+      const record = await readRecord(channelId)
+      if (!record?.enabled) fail(404, 'Hausaufgaben-API ist nicht verfügbar.')
+      if (!(await verifyHomeworkSecret(extractSecret(request), record))) fail(401, 'Anmeldung fehlgeschlagen.')
+      return record
+    }
+
+    const persistTasks = async (record, tasks) => {
+      const payload = homeworkTasksToApiPayload(tasks)
+      await writeRecord(channelId, {
+        ...record,
+        enabled: true,
+        tasks: payload.tasks,
+        updatedAt: new Date().toISOString(),
+      })
+      return payload
+    }
+
+    if (tasksMatch && request.method === 'POST') {
+      rateLimit(`hw-post:${clientAddress(request)}`, 40, 60_000)
+      const record = await requireEnabledAuth()
+      const created = applyHomeworkTaskCreate(record.tasks, await readJsonBody(request))
+      if (created.status >= 400) {
+        writeJson(response, created.status, denyBody(created.error))
+        return true
+      }
+      await persistTasks(record, created.tasks)
+      writeJson(response, 201, { ok: true, task: created.task })
+      return true
+    }
+
+    if (taskMatch && (request.method === 'GET' || request.method === 'HEAD')) {
+      rateLimit(`hw-get:${clientAddress(request)}`, 40, 60_000)
+      const record = await requireEnabledAuth()
+      const task = (record.tasks || []).find((entry) => entry.id === taskId)
+      if (!task) fail(404, 'Eintrag nicht gefunden.')
+      if (request.method === 'HEAD') {
+        response.writeHead(200, { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' })
+        response.end()
+        return true
+      }
+      writeJson(response, 200, { task: sanitizeHomeworkApiTask(task) })
+      return true
+    }
+
+    if (taskMatch && request.method === 'PATCH') {
+      rateLimit(`hw-patch:${clientAddress(request)}`, 40, 60_000)
+      const record = await requireEnabledAuth()
+      const patched = applyHomeworkTaskPatch(record.tasks, taskId, await readJsonBody(request))
+      if (patched.status >= 400) {
+        writeJson(response, patched.status, denyBody(patched.error))
+        return true
+      }
+      await persistTasks(record, patched.tasks)
+      writeJson(response, 200, { ok: true, task: patched.task })
+      return true
+    }
+
+    if (taskMatch && request.method === 'DELETE') {
+      rateLimit(`hw-del:${clientAddress(request)}`, 40, 60_000)
+      const record = await requireEnabledAuth()
+      const removed = applyHomeworkTaskDelete(record.tasks, taskId)
+      if (removed.status >= 400) {
+        writeJson(response, removed.status, denyBody(removed.error))
+        return true
+      }
+      await persistTasks(record, removed.tasks)
+      response.writeHead(204, { 'Cache-Control': 'no-store' })
+      response.end()
+      return true
+    }
+
+    if (!listMatch) {
+      writeJson(response, 405, denyBody('Diese Methode ist nicht erlaubt.'))
       return true
     }
 

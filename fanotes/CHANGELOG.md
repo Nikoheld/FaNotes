@@ -2,6 +2,10 @@
 
 ## Unveröffentlicht
 
+## 2026.8.58
+
+- **Hausaufgaben-API:** Über die API steuerst du Hausaufgaben und Termine — abfragen, anlegen, ändern, als erledigt markieren (auch Termine) und löschen.
+
 ## 2026.8.57
 
 - **Linie beim Schreiben:** Im Stiftmodus malt der Stift wieder eine sichtbare Linie auf der Notiz. Markdown fängt den Stift nicht mehr.

@@ -116,7 +116,7 @@ const SETTINGS_SEARCH_ITEMS: SettingsSearchItem[] = [
   { label: 'Form-Erkennung', detail: 'Stift & Erkennung', section: 'drawing', target: 'settings-tablet', keywords: 'form zirkel kreis linie rechteck dreieck glätten snap stillhalten empfindlichkeit' },
   { label: 'Handschrifterkennung', detail: 'Stift & Erkennung', section: 'drawing', target: 'settings-recognition', keywords: 'ocr text mathematik automatisch sprache konvertieren suchindex' },
   { label: 'Handschrift zu Text', detail: 'Experimentell', section: 'experimental', target: 'settings-experimental', keywords: 'experimentell ocr konvertieren mathe korrigierer löser suchindex qwen vision handschrift text' },
-  { label: 'Hausaufgaben API', detail: 'Experimentell', section: 'experimental', target: 'settings-homework-api', keywords: 'hausaufgaben api fasrv passwort auth termine liste' },
+  { label: 'Hausaufgaben API', detail: 'Experimentell', section: 'experimental', target: 'settings-homework-api', keywords: 'hausaufgaben api fasrv passwort auth termine liste erledigt patch post delete' },
   { label: 'Remote Support', detail: 'Experimentell', section: 'experimental', target: 'settings-remote-support', keywords: 'remote support sitzung debug test code token fernwartung' },
   { label: 'Notiz-Backup', detail: 'Experimentell', section: 'experimental', target: 'settings-note-backup', keywords: 'backup sichern wiederherstellen snapshot notiz' },
   { label: 'Send Data', detail: 'Experimentell', section: 'experimental', target: 'settings-send-data', keywords: 'send data logs nutzerdaten hyprland telemetry diagnostik server' },
@@ -944,7 +944,7 @@ export function SettingsModal({
                 </div>
                 <SettingRow
                   title="Hausaufgaben API"
-                  description="Veröffentlicht deine lokale Hausaufgabenliste als Abfrage-API auf fanotes.fasrv.ch. Standard aus. Ohne Passwort und ohne diesen Schalter gibt die API keine Einträge zurück."
+                  description="Steuert Hausaufgaben und Termine über die API auf fanotes.fasrv.ch: abfragen, anlegen, ändern, als erledigt markieren und löschen. Standard aus. Ohne Passwort und ohne diesen Schalter gibt die API keine Einträge zurück."
                 >
                   <Toggle
                     label="Hausaufgaben API"
@@ -983,8 +983,10 @@ export function SettingsModal({
                     {homeworkApiSecretReady(settings.homeworkApiSecret) && settings.homeworkApiChannelId && (
                       <div>
                         <strong>API-Infos</strong>
-                        <p>Abfrage nur mit diesem Passwort. Die API liefert die komplette Hausaufgabenliste, sonst nichts aus dem Vault.</p>
+                        <p>Abfrage und Steuerung nur mit diesem Passwort. Die API ändert nur Hausaufgaben und Termine, sonst nichts aus dem Vault.</p>
                         <code>{homeworkApiQueryUrl(settings.homeworkApiChannelId)}</code>
+                        <p>GET Liste · POST /tasks anlegen · PATCH /tasks/&lt;id&gt; ändern · DELETE /tasks/&lt;id&gt; löschen</p>
+                        <p>PATCH mit done true markiert auch Termine als erledigt.</p>
                         <p>Authorization: Bearer &lt;Passwort&gt;</p>
                         <small>Host: {HOMEWORK_API_HOST}</small>
                       </div>

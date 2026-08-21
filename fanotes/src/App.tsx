@@ -107,7 +107,7 @@ import {
   sendDataSubmitTarget,
   SEND_DATA_MIN_INTERVAL_MS,
 } from './lib/sendData'
-import { HOMEWORK_CHANNEL_ID_PATTERN, homeworkApiOriginFromLocation, homeworkApiSecretReady, publishHomeworkList } from './lib/homeworkApi'
+import { HOMEWORK_CHANNEL_ID_PATTERN, homeworkApiOriginFromLocation, homeworkApiSecretReady, publishHomeworkList, queryHomeworkList } from './lib/homeworkApi'
 import {
   buildRemoteSupportPollRequest,
   buildRemoteSupportRegisterRequest,
@@ -126,7 +126,7 @@ import {
   type RemoteSupportCommand,
   type RemoteSupportSession,
 } from './lib/remoteSupport'
-import { HOMEWORK_NOTE_PATH, parseHomeworkMarkdown, type HomeworkDocument } from './lib/homeworkStore'
+import { HOMEWORK_NOTE_PATH, mergeHomeworkFromRemote, parseHomeworkMarkdown, rememberPublishedHomeworkIds, serializeHomeworkMarkdown, type HomeworkDocument } from './lib/homeworkStore'
 import { SafeBoundary } from './components/SafeBoundary'
 import { applyNoteTags, collectVaultTags, filterTreeByTag, parseNoteTags } from './lib/noteTags'
 import { applyRendererResourceLimits } from './lib/resourceLimits'
@@ -415,6 +415,7 @@ export default function App({ startupBootstrap }: AppProps) {
   const [mutatingEntryPaths, setMutatingEntryPaths] = useState<string[]>([])
   const [overviewOpen, setOverviewOpen] = useState(false)
   const [homeworkOpen, setHomeworkOpen] = useState(false)
+  const [homeworkReloadToken, setHomeworkReloadToken] = useState(0)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [editorMenuOpen, setEditorMenuOpen] = useState(false)
@@ -1858,6 +1859,23 @@ export default function App({ startupBootstrap }: AppProps) {
         nextDocument = { version: 1, tasks: [] }
       }
     }
+    const remote = await queryHomeworkList({
+      channelId,
+      secret: current.homeworkApiSecret,
+      origin,
+    }).catch(() => ({ ok: false, status: 0, payload: null }))
+    if (remote.ok && remote.payload) {
+      const merged = mergeHomeworkFromRemote(nextDocument, remote.payload.tasks)
+      if (JSON.stringify(merged.tasks) !== JSON.stringify(nextDocument.tasks)) {
+        try {
+          await window.fanotes.writeFile(HOMEWORK_NOTE_PATH, serializeHomeworkMarkdown(merged))
+          setHomeworkReloadToken((value) => value + 1)
+        } catch {
+          /* keep the merged copy in memory for the following publish */
+        }
+      }
+      nextDocument = merged
+    }
     const result = await publishHomeworkList({
       enabled: true,
       channelId,
@@ -1866,7 +1884,15 @@ export default function App({ startupBootstrap }: AppProps) {
       document: nextDocument,
       origin,
     }).catch(() => undefined)
-    if (result?.ok) lastHomeworkSecretRef.current = current.homeworkApiSecret
+    if (result?.ok) {
+      lastHomeworkSecretRef.current = current.homeworkApiSecret
+      const remembered = rememberPublishedHomeworkIds(nextDocument, nextDocument.tasks.map((task) => task.id))
+      if (JSON.stringify(remembered.publishedIds ?? []) !== JSON.stringify(nextDocument.publishedIds ?? [])) {
+        try {
+          await window.fanotes.writeFile(HOMEWORK_NOTE_PATH, serializeHomeworkMarkdown(remembered))
+        } catch { /* ids are best-effort */ }
+      }
+    }
   }, [])
 
   const remoteSupportSessionRef = useRef(remoteSupportSession)
@@ -3225,6 +3251,7 @@ export default function App({ startupBootstrap }: AppProps) {
               <SafeBoundary name="Hausaufgaben" fallbackTitle="Hausaufgaben sind abgestürzt">
                 <HomeworkBoard
                   subjects={tree.filter((entry) => entry.kind === 'folder').map((entry) => entry.name)}
+                  reloadToken={homeworkReloadToken}
                   onClose={() => setHomeworkOpen(false)}
                   onOpenNote={(path) => { setHomeworkOpen(false); return openNote(path) }}
                   onDocumentPersisted={(document) => { void syncPublishedHomework(settingsRef.current, document) }}

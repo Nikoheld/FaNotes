@@ -108,6 +108,7 @@ Command-palette action ids walked from `src/App.tsx`: `new-note`, `import-pdf-no
 | Homework board | `src/components/HomeworkBoard.tsx` | `HomeworkBoard` |
 | Homework store | `src/lib/homeworkStore.ts` | `HOMEWORK_NOTE_PATH` |
 | Homework API | `src/lib/homeworkApi.ts` | `publishHomeworkList` |
+| Homework API control | `src/lib/homeworkApi.ts` | `export const setHomeworkApiTaskDone` |
 
 ## PDF notes
 

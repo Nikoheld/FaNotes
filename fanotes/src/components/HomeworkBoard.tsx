@@ -29,6 +29,7 @@ import { getUiLanguage } from '../i18n'
 
 export type HomeworkBoardProps = {
   subjects: string[]
+  reloadToken?: number
   onClose: () => void
   onOpenNote?: (path: string) => void | Promise<void>
   onDocumentPersisted?: (document: HomeworkDocument) => void
@@ -197,7 +198,7 @@ const formatDue = (task: HomeworkTask) => {
   return task.dueTime ? `${label} · ${task.dueTime}` : label
 }
 
-export function HomeworkBoard({ subjects, onClose, onOpenNote, onDocumentPersisted }: HomeworkBoardProps) {
+export function HomeworkBoard({ subjects, reloadToken = 0, onClose, onOpenNote, onDocumentPersisted }: HomeworkBoardProps) {
   const [document, setDocument] = useState<HomeworkDocument>({ version: 1, tasks: [] })
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -273,7 +274,7 @@ export function HomeworkBoard({ subjects, onClose, onOpenNote, onDocumentPersist
       }
     })()
     return () => { cancelled = true }
-  }, [])
+  }, [reloadToken])
 
   const tasks = useMemo(() => sortHomeworkTasks(document.tasks), [document.tasks])
 
@@ -325,7 +326,7 @@ export function HomeworkBoard({ subjects, onClose, onOpenNote, onDocumentPersist
       kind,
       priority,
     })
-    const next = { version: 1 as const, tasks: [task, ...document.tasks] }
+    const next = { ...document, version: 1 as const, tasks: [task, ...document.tasks] }
     await persist(next)
     setTitle('')
     setNotes('')
@@ -335,6 +336,7 @@ export function HomeworkBoard({ subjects, onClose, onOpenNote, onDocumentPersist
 
   const updateTask = async (id: string, patch: Partial<HomeworkTask>) => {
     const next = {
+      ...document,
       version: 1 as const,
       tasks: document.tasks.map((task) => (
         task.id === id
@@ -346,7 +348,7 @@ export function HomeworkBoard({ subjects, onClose, onOpenNote, onDocumentPersist
   }
 
   const removeTask = async (id: string) => {
-    const next = { version: 1 as const, tasks: document.tasks.filter((task) => task.id !== id) }
+    const next = { ...document, version: 1 as const, tasks: document.tasks.filter((task) => task.id !== id) }
     await persist(next)
   }
 
