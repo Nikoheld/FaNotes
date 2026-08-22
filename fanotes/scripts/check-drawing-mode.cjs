@@ -13,12 +13,13 @@ const toolErase = fs.readFileSync(path.join(root, 'src', 'lib', 'toolErase.ts'),
 const inkPolicy = fs.readFileSync(path.join(root, 'src', 'lib', 'inkPointerPolicy.ts'), 'utf8')
 const paperGrow = fs.readFileSync(path.join(root, 'src', 'lib', 'paperGrow.ts'), 'utf8')
 const inkPaint = fs.readFileSync(path.join(root, 'src', 'lib', 'inkStrokePaint.ts'), 'utf8')
+const paperCanvas = fs.readFileSync(path.join(root, 'src', 'lib', 'paperCanvas.ts'), 'utf8')
 const defaults = fs.readFileSync(path.join(root, 'src', 'defaults.ts'), 'utf8')
 const appSource = fs.readFileSync(path.join(root, 'src', 'App.tsx'), 'utf8')
 const drafting = fs.readFileSync(path.join(root, 'src', 'lib', 'draftingTools.ts'), 'utf8')
 const bugReport = fs.readFileSync(path.join(root, 'src', 'lib', 'bugReport.ts'), 'utf8')
 const settingsModal = fs.readFileSync(path.join(root, 'src', 'components', 'SettingsModal.tsx'), 'utf8')
-const lockSource = [source, markdownEditor, paperCaret, inkMap, toolErase, inkPolicy, paperGrow, inkPaint, defaults, appSource, drafting, bugReport, settingsModal].join('\n')
+const lockSource = [source, markdownEditor, paperCaret, inkMap, toolErase, inkPolicy, paperGrow, inkPaint, paperCanvas, defaults, appSource, drafting, bugReport, settingsModal].join('\n')
 
 const requiredBrushes = ['fineliner', 'pencil', 'marker', 'paintbrush', 'calligraphy', 'highlighter', 'watercolor', 'spray']
 const requiredEffects = ['solid', 'rainbow', 'aurora', 'sunset', 'ocean', 'gold', 'silver', 'neon']
@@ -112,7 +113,9 @@ const safeguards = [
   ['shouldSyncPdfOverlaySource', 'Mehrseitige PDFs wachsen im Source mit den Seiten'],
   ['expandSourceToOneCanvas', 'Altes 900px-Karten-Ink bleibt auf der Textspalte der einen Fläche'],
   ['absorbPaintedOneCanvas', 'Erste Messung macht Plane und Tinte zu einem Canvas'],
-  ['.lw-drawing-board.is-inline{position:absolute;z-index:4;inset:0', 'Inline-Tinte füllt das Blatt, ohne einen zweiten Rahmen'],
+  ['.lw-drawing-board.is-inline{position:absolute;z-index:4;inset:calc(-1 * var(--paper-scroll-room', 'Inline-Tinte deckt Blatt und dunkle Bühne'],
+  ['mapClientToSheet', 'Stift links/oben der Blattkante malt nicht auf der Bühne'],
+  ['export const paperCanvasLayout', 'Blatt und Bühne kommen aus einem Canvas-Helper'],
   ['flushPaintedLayoutGrow', 'PDF-Seitenwachstum remappt Tinte, damit sie nicht rutscht'],
   ['const commitPendingGrowRemap = useCallback', 'Grow-Flush ist ein gemeinsamer Helper'],
   ['activeRenderedPointCountRef.current = 0\n    wipeLiveInkCanvas(canvasRef.current)\n    redraw(true)', 'Flush nach Grow zeichnet die Live-Tinte vollständig neu'],

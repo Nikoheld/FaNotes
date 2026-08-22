@@ -28,7 +28,7 @@ const runOnce = () => {
   assert.equal(pointerEventsForInkLayer('markdown', true), 'none')
   assert.equal(pointerEventsForInkLayer('overlay', true), 'auto')
   const collapsed = markdownNoteInkOverlaySize({ width: 0, height: 0 }, { width: 900, height: 1273 })
-  assert.ok(collapsed.width >= 8 && collapsed.height >= 8, '0×0 overlay must take the Blatt size')
+  assert.ok(collapsed.width >= 900 + 560 * 2 - 1, '0×0 overlay must cover Blatt plus dark stage')
   assert.equal(markdownNoteInkOverlaySize({ width: 0, height: 0 }, { width: 0, height: 0 }).width, 0)
 
   const mapped = paintVisibleInkSample()

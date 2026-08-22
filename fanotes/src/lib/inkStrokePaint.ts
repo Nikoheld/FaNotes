@@ -1,6 +1,6 @@
 import { inkStrokePaintScale } from './paperGrow'
 import { commitInkPointerSequence, type InkPointerLike } from './inkSampleMap'
-import { markdownNoteInkOverlaySize } from './pdfInkHit'
+import { inkOverlayCoversStage } from './paperCanvas'
 
 /** A 3.5px pen must occupy at least this many backing-store pixels. */
 export const INK_MIN_BITMAP_PX = 1
@@ -601,32 +601,40 @@ const emptyInkSample = (): VisibleInkSample => ({
 
 /**
  * Same hit-size + map + paint path DrawingBoard uses on a markdown note.
- * A 0×0 overlay with a real Blatt must still size, map, and paint a line.
+ * Overlay covers the dark stage; 0–1 paint stays on the Blatt.
  */
 export const paintMarkdownNoteStiftStroke = (input: {
   overlay: { left: number; top: number; width: number; height: number }
   paper: { width: number; height: number }
+  plane?: { width: number; height: number }
   events: InkPointerLike[]
 }): VisibleInkSample => {
-  const size = markdownNoteInkOverlaySize(input.overlay, input.paper)
-  if (!(size.width > 0) || !(size.height > 0)) return emptyInkSample()
-  const surface = {
+  const overlaySize = inkOverlayCoversStage(input.overlay, input.paper, input.plane)
+  const sheetW = Number(input.paper.width)
+  const sheetH = Number(input.paper.height)
+  const paintW = Number.isFinite(sheetW) && sheetW > 8 ? sheetW : overlaySize.width
+  const paintH = Number.isFinite(sheetH) && sheetH > 8 ? sheetH : overlaySize.height
+  if (!(overlaySize.width > 0) || !(overlaySize.height > 0) || !(paintW > 0) || !(paintH > 0)) {
+    return emptyInkSample()
+  }
+  const sheet = {
     left: input.overlay.left,
     top: input.overlay.top,
-    width: size.width,
-    height: size.height,
-    offsetWidth: size.width,
-    offsetHeight: size.height,
+    width: paintW,
+    height: paintH,
+    offsetWidth: paintW,
+    offsetHeight: paintH,
   }
-  const points = commitInkPointerSequence(input.events, surface, size.width, size.height)
+  const points = commitInkPointerSequence(input.events, sheet, paintW, paintH)
+    .filter((point) => point.x >= 0 && point.y >= 0)
   if (!points.length) {
     return {
       ...emptyInkSample(),
-      overlayWidth: size.width,
-      overlayHeight: size.height,
+      overlayWidth: overlaySize.width,
+      overlayHeight: overlaySize.height,
     }
   }
-  const { context, getImageData } = createInkReadbackContext(size.width, size.height)
+  const { context, getImageData } = createInkReadbackContext(paintW, paintH)
   drawInkStroke(
     context,
     {
@@ -639,18 +647,18 @@ export const paintMarkdownNoteStiftStroke = (input: {
       colorEffect: 'solid',
       opacity: 1,
     },
-    size.width,
-    size.height,
+    paintW,
+    paintH,
     0,
     1,
-    size.width,
-    size.width,
+    paintW,
+    paintW,
   )
   return {
-    overlayWidth: size.width,
-    overlayHeight: size.height,
-    bitmapWidth: size.width,
-    bitmapHeight: size.height,
+    overlayWidth: overlaySize.width,
+    overlayHeight: overlaySize.height,
+    bitmapWidth: paintW,
+    bitmapHeight: paintH,
     points: points.length,
     ...opaqueInkStats(getImageData()),
   }

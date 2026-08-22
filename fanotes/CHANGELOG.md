@@ -2,6 +2,10 @@
 
 ## Unveröffentlicht
 
+## 2026.8.60
+
+- **Ein Canvas:** Das Stift-Overlay deckt Blatt und schwarze Bühne. Die Linie liegt auf dem Blatt. Links und oben endet es; rechts und unten wächst es weiter.
+
 ## 2026.8.59
 
 - **Linie beim Zeichnen:** Im Stiftmodus malt der Stift wieder eine sichtbare Linie auf der Markdown-Notiz.

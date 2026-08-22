@@ -102,6 +102,7 @@ import {
 } from '../lib/inkSampleMap'
 import { drawInkStroke as paintInkStroke } from '../lib/inkStrokePaint'
 import { INLINE_INK_ACTIVE_CLASS, markdownNoteInkOverlaySize, pdfOverlaySourceHeight, shouldSyncPdfOverlaySource } from '../lib/pdfInkHit'
+import { mapClientToSheet } from '../lib/paperCanvas'
 import {
   applyPenUpInkCleanup,
   applyWheelInkPolicy,
@@ -1326,17 +1327,20 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     // strip (hairline / no hit on the note).
     if (inline) {
       const paper = surface.closest('.unified-paper') as HTMLElement | null
-      const overlaySize = markdownNoteInkOverlaySize(
-        { width: surface.offsetWidth, height: surface.offsetHeight },
+      const plane = (surface.closest('.paper-sheet-plane') ?? paper?.closest('.paper-sheet-plane')) as HTMLElement | null
+      markdownNoteInkOverlaySize(
+        { width: boardRef.current?.offsetWidth ?? 0, height: boardRef.current?.offsetHeight ?? 0 },
         { width: paper?.offsetWidth ?? 0, height: paper?.offsetHeight ?? 0 },
+        { width: plane?.offsetWidth ?? 0, height: plane?.offsetHeight ?? 0 },
       )
       if (
-        (surface.offsetWidth < 8 || surface.offsetHeight < 8)
-        && overlaySize.width > 8
-        && overlaySize.height > 8
+        paper
+        && (surface.offsetWidth < 8 || surface.offsetHeight < 8)
+        && paper.offsetWidth > 8
+        && paper.offsetHeight > 8
       ) {
-        surface.style.width = `${overlaySize.width}px`
-        surface.style.height = `${overlaySize.height}px`
+        surface.style.width = `${paper.offsetWidth}px`
+        surface.style.height = `${paper.offsetHeight}px`
       }
     } else if ((measureLayout || !canvasPixelSizeRef.current.width) && shell) {
       const availableWidth = Math.max(240, shell.clientWidth - 20)
@@ -1627,7 +1631,9 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         if (continued.jumped) return null
         return continued.next
       })()
-      : mapClientToPaperPoint(event, surface, viewRotationRef.current)
+      : (inline
+        ? mapClientToSheet(event, surface, viewRotationRef.current)
+        : mapClientToPaperPoint(event, surface, viewRotationRef.current))
     if (!mapped) {
       const fallback = inline ? mapClientToOneCanvas(event.clientX, event.clientY, surface) : null
       if (!fallback) return null
@@ -2693,7 +2699,10 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         offsetHeight: originEl.offsetHeight,
       }
       : null
-    const start = resolveInkPointerDown(event.nativeEvent, surface, viewRotationRef.current)
+    let start = resolveInkPointerDown(event.nativeEvent, surface, viewRotationRef.current)
+    if (inline && start.firstPoint && (start.firstPoint.x < 0 || start.firstPoint.y < 0)) {
+      start = { ...start, firstPoint: null, commitFirst: false }
+    }
     if (!start.openStroke) {
       activePointerRef.current = null
       inkSessionRef.current = null
@@ -5764,7 +5773,7 @@ const drawingBoardStyles = `
 .lw-empty-conversion{display:flex;flex:1;min-height:230px;align-items:center;justify-content:center;flex-direction:column;text-align:center;color:var(--text-muted,#999)}.lw-empty-conversion>svg{margin-bottom:10px;color:var(--accent-readable,var(--draw-accent))}.lw-empty-conversion strong{color:var(--text,#fff)}.lw-empty-conversion p{max-width:290px;margin:7px 0 15px;font-size:12px;line-height:1.6}.lw-model-card{gap:9px;margin-top:auto;padding:9px;border:1px solid var(--draw-border);border-radius:11px;background:color-mix(in srgb,var(--background,#111116) 42%,transparent)}.lw-model-card>span{width:7px;height:7px;flex:0 0 auto;border-radius:50%;background:var(--warning,#b36b2d)}.lw-model-card>span.is-ready{background:var(--success,#3a8f6d);box-shadow:0 0 7px color-mix(in srgb,var(--success,#3a8f6d) 65%,transparent)}.lw-model-copy{display:flex;min-width:0;flex:1;flex-direction:column}.lw-model-card strong{font-size:10px}.lw-model-card small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:9px}.lw-model-actions{display:flex;align-items:center;gap:4px}.lw-model-card button{display:flex;align-items:center;gap:4px;padding:5px 7px;border:0;border-radius:7px;background:color-mix(in srgb,var(--text,#fff) 7%,transparent)}.lw-model-card button.is-danger{color:var(--danger,#d94b63);background:color-mix(in srgb,var(--danger,#d94b63) 9%,transparent)}
 .lw-draw-notice{display:flex;align-items:center;gap:7px;margin:0 14px 10px;padding:8px 10px;border:1px solid var(--draw-border);border-radius:9px;background:var(--background-secondary,#1b1b22);font-size:11px}.lw-draw-notice.is-success{color:var(--success,#3a8f6d);border-color:color-mix(in srgb,var(--success,#3a8f6d) 28%,transparent)}.lw-draw-notice.is-error{color:var(--danger,#d94b63);border-color:color-mix(in srgb,var(--danger,#d94b63) 28%,transparent)}.lw-draw-notice.is-info{color:var(--accent-readable,var(--draw-accent));border-color:color-mix(in srgb,var(--draw-accent) 32%,transparent)}.lw-draw-notice span{flex:1}.lw-draw-notice button{display:grid;place-items:center;border:0;background:transparent;color:inherit;cursor:pointer}.lw-draw-footer{min-height:55px;flex:0 0 auto;justify-content:space-between;gap:10px;padding:9px 14px;border-top:1px solid var(--draw-border);background:color-mix(in srgb,var(--background-secondary,#17171d) 92%,transparent)}.lw-footer-actions{gap:8px}.lw-convert-action{min-height:34px}.lw-spin{animation:lw-spin .8s linear infinite}.sr-only{position:absolute!important;width:1px!important;height:1px!important;padding:0!important;margin:-1px!important;overflow:hidden!important;clip:rect(0,0,0,0)!important;white-space:nowrap!important;border:0!important}@keyframes lw-spin{to{transform:rotate(360deg)}}
 
-.lw-drawing-board.is-inline{position:absolute;z-index:4;inset:0;height:auto;min-height:100%;overflow:visible;background:transparent;pointer-events:none}
+.lw-drawing-board.is-inline{position:absolute;z-index:4;inset:calc(-1 * var(--paper-scroll-room, 0px));height:auto;min-height:100%;overflow:visible;background:transparent;pointer-events:none}
 .lw-drawing-board.is-inline.is-input-active{pointer-events:auto}
 .lw-drawing-board.is-inline.is-input-active .lw-draw-workspace{pointer-events:auto}
 .lw-drawing-board.is-inline.is-input-active .lw-canvas-shell{pointer-events:auto}
@@ -5773,7 +5782,7 @@ const drawingBoardStyles = `
 .lw-drawing-board.is-inline .lw-draw-workspace{position:absolute;inset:0;display:block;min-height:100%;padding:0;pointer-events:none}
 .lw-drawing-board.is-inline .lw-canvas-shell{position:absolute;inset:0;display:block;padding:0;border:0;border-radius:0;background:transparent;box-shadow:none;pointer-events:none}
 .lw-drawing-board.is-inline .lw-canvas-glow,.lw-drawing-board.is-inline .lw-canvas-meta{display:none}
-.lw-drawing-board.is-inline .lw-canvas-surface{position:absolute;inset:0;width:100%;height:100%;min-width:100%;min-height:100%;aspect-ratio:auto;margin:0;overflow:visible;border-radius:0;background:transparent;box-shadow:none;will-change:auto;pointer-events:none}
+.lw-drawing-board.is-inline .lw-canvas-surface{position:absolute;inset:var(--paper-scroll-room, 0px);width:auto;height:auto;min-width:0;min-height:0;aspect-ratio:auto;margin:0;overflow:visible;border-radius:0;background:transparent;box-shadow:none;will-change:auto;pointer-events:none}
 .lw-drawing-board.is-inline.is-input-active .lw-canvas-surface{pointer-events:auto}
 .lw-drawing-board.is-inline .lw-tablet-canvas{position:absolute;left:0;width:100%;height:100%;pointer-events:none}
 .lw-drawing-board.is-inline .lw-tablet-canvas.is-input-active{pointer-events:none}

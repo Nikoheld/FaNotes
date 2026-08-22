@@ -44,23 +44,8 @@ export const inkUserSelectNoneSelectors = [
 
 export const inkOverlayHitSelector = '.lw-drawing-board.is-inline.is-input-active .lw-canvas-surface'
 
-/** Live overlay must cover the Blatt. A 0×0 surface paints no line. */
-export const markdownNoteInkOverlaySize = (
-  overlay: { width: number; height: number },
-  paper: { width: number; height: number },
-) => {
-  const overlayW = Number(overlay.width)
-  const overlayH = Number(overlay.height)
-  if (Number.isFinite(overlayW) && Number.isFinite(overlayH) && overlayW >= 8 && overlayH >= 8) {
-    return { width: overlayW, height: overlayH }
-  }
-  const paperW = Number(paper.width)
-  const paperH = Number(paper.height)
-  if (Number.isFinite(paperW) && Number.isFinite(paperH) && paperW > 8 && paperH > 8) {
-    return { width: paperW, height: paperH }
-  }
-  return { width: 0, height: 0 }
-}
+/** Live overlay must cover Blatt + dark stage. A 0×0 Blatt overlay paints no line. */
+export { inkOverlayCoversStage as markdownNoteInkOverlaySize } from './paperCanvas'
 
 /** Paper must grow with in-flow PDF/worksheet pages so the overlay covers them. */
 export const inkCoveringPaperSelectors = [

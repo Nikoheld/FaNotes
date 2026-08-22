@@ -46,7 +46,9 @@ Command-palette action ids walked from `src/App.tsx`: `new-note`, `import-pdf-no
 | Drawing board / pen mode | `src/components/DrawingBoard.tsx` | `export const DrawingBoard` |
 | Visible ink paint | `src/lib/inkStrokePaint.ts` | `export const drawInkStroke` |
 | Markdown note Stift path | `src/lib/inkStrokePaint.ts` | `export const paintMarkdownNoteStiftStroke` |
-| Markdown overlay size | `src/lib/pdfInkHit.ts` | `export const markdownNoteInkOverlaySize` |
+| Markdown overlay size | `src/lib/pdfInkHit.ts` | `markdownNoteInkOverlaySize` |
+| Blatt vs dark stage | `src/lib/paperCanvas.ts` | `export const paperCanvasLayout` |
+| Overlay covers stage | `src/lib/paperCanvas.ts` | `export const inkOverlayCoversStage` |
 | Left/top Blatt edge | `src/lib/paperGrow.ts` | `neededWriteMinPad` |
 | Paper styles | `src/lib/paperStyles.ts` | `export const PAPER_STYLES` |
 | Paper zoom / rotation | `src/lib/paperView.ts` | `export const clampViewZoom` |
