@@ -18,17 +18,34 @@ const {
   drawInkStroke,
   inkStrokeBitmapWidth,
   opaqueInkStats,
+  paintMarkdownNoteStiftStroke,
   paintVisibleInkSample,
 } = await server.ssrLoadModule('/src/lib/inkStrokePaint.ts')
 const { inkStrokePaintScale } = await server.ssrLoadModule('/src/lib/paperGrow.ts')
-const { inkBlockedMarkdownSelectors } = await server.ssrLoadModule('/src/lib/pdfInkHit.ts')
+const { inkBlockedMarkdownSelectors, markdownNoteInkOverlaySize, pointerEventsForInkLayer } = await server.ssrLoadModule('/src/lib/pdfInkHit.ts')
 
 const runOnce = () => {
+  assert.equal(pointerEventsForInkLayer('markdown', true), 'none')
+  assert.equal(pointerEventsForInkLayer('overlay', true), 'auto')
+  const collapsed = markdownNoteInkOverlaySize({ width: 0, height: 0 }, { width: 900, height: 1273 })
+  assert.ok(collapsed.width >= 8 && collapsed.height >= 8, '0×0 overlay must take the Blatt size')
+  assert.equal(markdownNoteInkOverlaySize({ width: 0, height: 0 }, { width: 0, height: 0 }).width, 0)
+
   const mapped = paintVisibleInkSample()
+  assert.ok(mapped.overlayWidth >= 8 && mapped.overlayHeight >= 8, `markdown overlay stayed 0×0 (${mapped.overlayWidth}x${mapped.overlayHeight})`)
+  assert.ok(mapped.bitmapWidth >= 8 && mapped.bitmapHeight >= 8, `bitmap stayed 0 (${mapped.bitmapWidth}x${mapped.bitmapHeight})`)
   assert.ok(mapped.points >= 3, `mapped markdown stroke must keep real samples after a ghost 0,0 down, got ${mapped.points}`)
   assert.ok(mapped.opaque > 0, `shipped paint produced no opaque pixels (${mapped.opaque})`)
   assert.ok(mapped.area >= 16, `stroke bounding box must be a visible line, got ${mapped.boxW}x${mapped.boxH}`)
   assert.ok(mapped.boxW >= 4 && mapped.boxH >= 4, `stroke collapsed to a hairline ${mapped.boxW}x${mapped.boxH}`)
+
+  const emptyOverlay = paintMarkdownNoteStiftStroke({
+    overlay: { left: 10, top: 10, width: 0, height: 0 },
+    paper: { width: 0, height: 0 },
+    events: [{ type: 'pointerdown', clientX: 80, clientY: 90, pressure: 0.5, pointerType: 'pen', timeStamp: 1 }],
+  })
+  assert.equal(emptyOverlay.opaque, 0, 'no Blatt and no overlay must not invent a line')
+  assert.equal(emptyOverlay.overlayWidth, 0)
 
   const absorbed = createInkReadbackContext(560, 560)
   drawInkStroke(
@@ -93,8 +110,11 @@ const runOnce = () => {
   assert.match(board, /\.lw-drawing-board\.is-inline\.is-input-active\{[^}]*pointer-events:\s*auto/)
   assert.match(board, /onPointerDown=\{inline \? handlePointerDown : undefined\}/)
   assert.match(board, /from '\.\.\/lib\/inkStrokePaint'/)
+  assert.match(board, /markdownNoteInkOverlaySize/)
 
   return {
+    overlayWidth: mapped.overlayWidth,
+    overlayHeight: mapped.overlayHeight,
     points: mapped.points,
     opaque: mapped.opaque,
     boxW: mapped.boxW,

@@ -1,5 +1,6 @@
 import { inkStrokePaintScale } from './paperGrow'
-import { commitInkPointerSequence } from './inkSampleMap'
+import { commitInkPointerSequence, type InkPointerLike } from './inkSampleMap'
+import { markdownNoteInkOverlaySize } from './pdfInkHit'
 
 /** A 3.5px pen must occupy at least this many backing-store pixels. */
 export const INK_MIN_BITMAP_PX = 1
@@ -575,6 +576,10 @@ export const opaqueInkStats = (image: ImageData, minAlpha = 24) => {
 }
 
 export type VisibleInkSample = {
+  overlayWidth: number
+  overlayHeight: number
+  bitmapWidth: number
+  bitmapHeight: number
   points: number
   opaque: number
   boxW: number
@@ -582,40 +587,46 @@ export type VisibleInkSample = {
   area: number
 }
 
+const emptyInkSample = (): VisibleInkSample => ({
+  overlayWidth: 0,
+  overlayHeight: 0,
+  bitmapWidth: 0,
+  bitmapHeight: 0,
+  points: 0,
+  opaque: 0,
+  boxW: 0,
+  boxH: 0,
+  area: 0,
+})
+
 /**
- * Drive a markdown-note pen sample through the shipped map + paint path and
- * read the pixels back. A ghost 0,0 down must not swallow the real stroke.
+ * Same hit-size + map + paint path DrawingBoard uses on a markdown note.
+ * A 0×0 overlay with a real Blatt must still size, map, and paint a line.
  */
-export const paintVisibleInkSample = (): VisibleInkSample => {
-  const layoutWidth = 900
-  const layoutHeight = 1273
-  const bitmapWidth = 900
-  const bitmapHeight = 1273
+export const paintMarkdownNoteStiftStroke = (input: {
+  overlay: { left: number; top: number; width: number; height: number }
+  paper: { width: number; height: number }
+  events: InkPointerLike[]
+}): VisibleInkSample => {
+  const size = markdownNoteInkOverlaySize(input.overlay, input.paper)
+  if (!(size.width > 0) || !(size.height > 0)) return emptyInkSample()
   const surface = {
-    left: 40,
-    top: 24,
-    width: layoutWidth,
-    height: layoutHeight,
-    offsetWidth: layoutWidth,
-    offsetHeight: layoutHeight,
+    left: input.overlay.left,
+    top: input.overlay.top,
+    width: size.width,
+    height: size.height,
+    offsetWidth: size.width,
+    offsetHeight: size.height,
   }
-  const at = (nx: number, ny: number, timeStamp: number, type = 'pointermove') => ({
-    type,
-    clientX: surface.left + nx * surface.width,
-    clientY: surface.top + ny * surface.height,
-    pressure: 0.55,
-    pointerType: 'pen' as const,
-    timeStamp,
-  })
-  const events = [
-    { type: 'pointerdown', clientX: 0, clientY: 0, pressure: 0, pointerType: 'pen' as const, timeStamp: 0 },
-    at(0.22, 0.28, 16, 'pointerdown'),
-    at(0.28, 0.34, 32),
-    at(0.36, 0.41, 48),
-    at(0.44, 0.47, 64),
-  ]
-  const points = commitInkPointerSequence(events, surface, layoutWidth, layoutHeight)
-  const { context, getImageData } = createInkReadbackContext(bitmapWidth, bitmapHeight)
+  const points = commitInkPointerSequence(input.events, surface, size.width, size.height)
+  if (!points.length) {
+    return {
+      ...emptyInkSample(),
+      overlayWidth: size.width,
+      overlayHeight: size.height,
+    }
+  }
+  const { context, getImageData } = createInkReadbackContext(size.width, size.height)
   drawInkStroke(
     context,
     {
@@ -628,12 +639,48 @@ export const paintVisibleInkSample = (): VisibleInkSample => {
       colorEffect: 'solid',
       opacity: 1,
     },
-    bitmapWidth,
-    bitmapHeight,
+    size.width,
+    size.height,
     0,
     1,
-    layoutWidth,
-    layoutWidth,
+    size.width,
+    size.width,
   )
-  return { points: points.length, ...opaqueInkStats(getImageData()) }
+  return {
+    overlayWidth: size.width,
+    overlayHeight: size.height,
+    bitmapWidth: size.width,
+    bitmapHeight: size.height,
+    points: points.length,
+    ...opaqueInkStats(getImageData()),
+  }
+}
+
+/**
+ * Drive a markdown-note pen sample through the shipped map + paint path and
+ * read the pixels back. A ghost 0,0 down must not swallow the real stroke.
+ * Overlay starts at 0×0 — the Linux report path — and must still paint.
+ */
+export const paintVisibleInkSample = (): VisibleInkSample => {
+  const paper = { width: 900, height: 1273 }
+  const overlay = { left: 40, top: 24, width: 0, height: 0 }
+  const at = (nx: number, ny: number, timeStamp: number, type = 'pointermove') => ({
+    type,
+    clientX: overlay.left + nx * paper.width,
+    clientY: overlay.top + ny * paper.height,
+    pressure: 0.55,
+    pointerType: 'pen' as const,
+    timeStamp,
+  })
+  return paintMarkdownNoteStiftStroke({
+    overlay,
+    paper,
+    events: [
+      { type: 'pointerdown', clientX: 0, clientY: 0, pressure: 0, pointerType: 'pen', timeStamp: 0 },
+      at(0.22, 0.28, 16, 'pointerdown'),
+      at(0.28, 0.34, 32),
+      at(0.36, 0.41, 48),
+      at(0.44, 0.47, 64),
+    ],
+  })
 }

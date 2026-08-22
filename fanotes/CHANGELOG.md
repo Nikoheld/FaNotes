@@ -2,6 +2,11 @@
 
 ## Unveröffentlicht
 
+## 2026.8.59
+
+- **Linie beim Zeichnen:** Im Stiftmodus malt der Stift wieder eine sichtbare Linie auf der Markdown-Notiz.
+- **Blatt links und oben:** Das Blatt hat links und oben eine Kante. Dahinter bleibt der Hintergrund schwarz — es wächst dort nicht weiter.
+
 ## 2026.8.58
 
 - **Hausaufgaben-API:** Über die API steuerst du Hausaufgaben und Termine — abfragen, anlegen, ändern, als erledigt markieren (auch Termine) und löschen.

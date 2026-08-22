@@ -1036,7 +1036,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   min-width: 0;
   min-height: 0;
   overflow: auto;
-  background: #fff;
+  /* Beyond the Blatt (left/top) is the dark stage, not more paper. */
+  background: #111;
   scrollbar-gutter: stable;
   overscroll-behavior: contain;
   /* Native compositor scrolling — never `smooth` (lags and smears glyphs). */
@@ -1050,17 +1051,18 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   --paper-scroll-room: 560px;
   position: relative;
   display: block;
-  box-sizing: border-box;
-  /* One canvas: the plane IS the write surface. Camera room is extra
-     canvas, not a separate dotted desk around an inner card. */
+  /* Padding is extra dark stage, not stolen from the Blatt. */
+  box-sizing: content-box;
   width: max(100%, max-content);
   min-width: 100%;
   min-height: 100%;
   max-width: none;
   margin: 0;
-  padding: 0;
+  padding: var(--paper-scroll-room);
   overflow: visible;
   background: #fff;
+  background-clip: content-box;
+  background-origin: content-box;
   --view-zoom: 1;
   will-change: auto;
   transform-origin: center center;
@@ -1207,7 +1209,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
    dots on the sheet and leaves the sides a white desk. */
 .paper-sheet-plane > .paper-ruling {
   position: absolute;
-  inset: 0;
+  inset: var(--paper-scroll-room);
   z-index: 0;
   pointer-events: none;
   background-repeat: repeat;
@@ -1261,7 +1263,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   width: min(100%, var(--paper-width, 900px));
   max-width: 900px;
   min-height: 0;
-  margin-left: var(--text-origin-x, var(--paper-scroll-room, 0px));
+  margin-left: var(--text-origin-x, 0px);
   margin-top: var(--text-origin-y, 0px);
   overflow: visible;
   background: transparent;
@@ -1290,7 +1292,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   width: min(calc(100% - 36px), 900px);
   max-width: 900px;
   margin: 0 18px 26px;
-  margin-left: var(--text-origin-x, var(--paper-scroll-room, 18px));
+  margin-left: var(--text-origin-x, 18px);
   color: #282a34;
   font-family: var(--ui-font);
 }
@@ -1612,6 +1614,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .worksheet-layer.is-disabled .worksheet-pdf-page canvas,
 .worksheet-layer.is-disabled .worksheet-onenote-frame { pointer-events: none; }
 .unified-note-view.is-inking .editor-pane,
+.unified-note-view.is-inking .editor-pane *,
 .unified-note-view.is-inking .markdown-editor,
 .unified-note-view.is-inking .markdown-editor .cm-editor,
 .unified-note-view.is-inking .markdown-editor .cm-scroller,

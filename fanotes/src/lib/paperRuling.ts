@@ -14,12 +14,20 @@ export type RulingPoint = {
   y: number
 }
 
-export const paperRulingFillBox = (sheet: RulingBox, plane: RulingBox): RulingBox => ({
-  x: plane.x,
-  y: plane.y,
-  width: plane.width,
-  height: plane.height,
+/** Dots live on the Blatt, not in the dark left/top stage. */
+export const paperRulingFillBox = (sheet: RulingBox, _plane: RulingBox): RulingBox => ({
+  x: sheet.x,
+  y: sheet.y,
+  width: sheet.width,
+  height: sheet.height,
 })
+
+export const paperRulingStaysOnSheet = (fill: RulingBox, sheet: RulingBox) => (
+  fill.x >= sheet.x - 0.5
+  && fill.y >= sheet.y - 0.5
+  && fill.x + fill.width <= sheet.x + sheet.width + 0.5
+  && fill.y + fill.height <= sheet.y + sheet.height + 0.5
+)
 
 export const paperRulingCoversCameraSides = (
   fill: RulingBox,
@@ -99,14 +107,20 @@ export const paperCameraSheetLayout = (
   room = SCROLL_ROOM,
 ) => {
   const plane = { x: 0, y: 0, width: planeWidth, height: planeHeight }
-  const sheet = { x: 0, y: 0, width: planeWidth, height: planeHeight }
+  const pad = Math.max(0, room)
+  const sheet = {
+    x: pad,
+    y: pad,
+    width: Math.max(1, planeWidth - pad * 2),
+    height: Math.max(1, planeHeight - pad * 2),
+  }
   const text = {
-    x: Math.max(0, Math.min(room, Math.max(0, planeWidth - sheetWidth))),
-    y: 0,
-    width: Math.max(1, Math.min(sheetWidth, planeWidth)),
-    height: Math.max(1, Math.min(sheetHeight, planeHeight) || planeHeight),
+    x: sheet.x,
+    y: sheet.y,
+    width: Math.max(1, Math.min(sheetWidth, sheet.width)),
+    height: Math.max(1, Math.min(sheetHeight, sheet.height) || sheet.height),
   }
   const fill = paperRulingFillBox(sheet, plane)
-  const origin = paperRulingTileOrigin(plane)
-  return { plane, sheet, fill, origin, room, tile: PAPER_DOT_TILE_PX, text }
+  const origin = paperRulingTileOrigin(sheet)
+  return { plane, sheet, fill, origin, room: pad, tile: PAPER_DOT_TILE_PX, text }
 }

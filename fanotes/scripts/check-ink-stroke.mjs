@@ -54,7 +54,7 @@ const runOnce = () => {
   assert.match(paint, /inkStrokePaintScale/)
   assert.match(paint, /export const drawInkStroke/)
   assert.match(board, /paintInkStroke/)
-  assert.match(board, /if \(inline\) \{\s*surface\.style\.removeProperty\('width'\)/)
+  assert.match(board, /markdownNoteInkOverlaySize/)
   assert.match(board, /overflow:visible/)
   assert.doesNotMatch(paint, /const scale = width \/ Math\.max\(1, sourceWidth\)/)
   assert.ok(PAPER_SOURCE_HEIGHT > 1000)

@@ -14,6 +14,7 @@ const {
   paperCameraSheetLayout,
   paperRulingCoversCameraSides,
   paperRulingFillBox,
+  paperRulingStaysOnSheet,
 } = await server.ssrLoadModule('/src/lib/paperRuling.ts')
 const { SCROLL_ROOM } = await server.ssrLoadModule('/src/lib/paperGrow.ts')
 
@@ -21,28 +22,24 @@ const runOnce = () => {
   const layout = paperCameraSheetLayout(2020, 2393, 900, 1273)
   assert.equal(layout.room, SCROLL_ROOM)
   const fill = paperRulingFillBox(layout.sheet, layout.plane)
-  assert.equal(fill.x, layout.plane.x)
-  assert.equal(fill.y, layout.plane.y)
-  assert.equal(fill.width, layout.plane.width)
-  assert.equal(fill.height, layout.plane.height)
-  assert.equal(layout.sheet.x, layout.plane.x, 'write sheet is the plane — one canvas')
-  assert.equal(layout.sheet.y, layout.plane.y)
-  assert.equal(layout.sheet.width, layout.plane.width)
-  assert.equal(layout.sheet.height, layout.plane.height)
-  assert.ok(layout.text.x > 0, 'text column stays inset on the one canvas')
+  assert.ok(layout.sheet.x >= SCROLL_ROOM - 1, 'left of the Blatt is stage, not paper')
+  assert.ok(layout.sheet.y >= SCROLL_ROOM - 1, 'top of the Blatt is stage, not paper')
+  assert.equal(fill.x, layout.sheet.x)
+  assert.equal(fill.y, layout.sheet.y)
+  assert.equal(fill.width, layout.sheet.width)
+  assert.equal(fill.height, layout.sheet.height)
+  assert.equal(paperRulingStaysOnSheet(fill, layout.sheet), true)
+  assert.equal(paperRulingCoversCameraSides(fill, layout.sheet, layout.plane), false)
   assert.ok(layout.text.width <= 900)
-  assert.equal(fill.x, layout.plane.x)
-  assert.equal(fill.width, layout.plane.width)
-  assert.ok(fill.x < layout.text.x)
-  assert.ok(fill.x + fill.width > layout.text.x + layout.text.width)
-  assert.equal(paperRulingCoversCameraSides(layout.text, layout.text, layout.plane), false)
+  assert.ok(fill.x > layout.plane.x, 'ruling must not paint the left stage')
+  assert.ok(fill.y > layout.plane.y, 'ruling must not paint the top stage')
   return {
-    coversPlane: true,
-    oneCanvas: true,
-    left: layout.text.x - fill.x,
-    top: layout.text.y - fill.y,
-    right: fill.x + fill.width - (layout.text.x + layout.text.width),
-    bottom: fill.y + fill.height - (layout.text.y + layout.text.height),
+    coversPlane: false,
+    sheetOnStage: true,
+    left: fill.x - layout.plane.x,
+    top: fill.y - layout.plane.y,
+    right: layout.plane.x + layout.plane.width - (fill.x + fill.width),
+    bottom: layout.plane.y + layout.plane.height - (fill.y + fill.height),
   }
 }
 

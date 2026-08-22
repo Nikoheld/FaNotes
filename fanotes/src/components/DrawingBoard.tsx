@@ -101,7 +101,7 @@ import {
   resolveInkPointerDown,
 } from '../lib/inkSampleMap'
 import { drawInkStroke as paintInkStroke } from '../lib/inkStrokePaint'
-import { INLINE_INK_ACTIVE_CLASS, pdfOverlaySourceHeight, shouldSyncPdfOverlaySource } from '../lib/pdfInkHit'
+import { INLINE_INK_ACTIVE_CLASS, markdownNoteInkOverlaySize, pdfOverlaySourceHeight, shouldSyncPdfOverlaySource } from '../lib/pdfInkHit'
 import {
   applyPenUpInkCleanup,
   applyWheelInkPolicy,
@@ -1325,17 +1325,18 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     // must fill the paper — A4-aspect sizing on a tall PDF collapses to a
     // strip (hairline / no hit on the note).
     if (inline) {
-      surface.style.removeProperty('width')
-      surface.style.removeProperty('height')
       const paper = surface.closest('.unified-paper') as HTMLElement | null
+      const overlaySize = markdownNoteInkOverlaySize(
+        { width: surface.offsetWidth, height: surface.offsetHeight },
+        { width: paper?.offsetWidth ?? 0, height: paper?.offsetHeight ?? 0 },
+      )
       if (
-        paper
-        && (surface.offsetWidth < 8 || surface.offsetHeight < 8)
-        && paper.offsetWidth > 8
-        && paper.offsetHeight > 8
+        (surface.offsetWidth < 8 || surface.offsetHeight < 8)
+        && overlaySize.width > 8
+        && overlaySize.height > 8
       ) {
-        surface.style.width = `${paper.offsetWidth}px`
-        surface.style.height = `${paper.offsetHeight}px`
+        surface.style.width = `${overlaySize.width}px`
+        surface.style.height = `${overlaySize.height}px`
       }
     } else if ((measureLayout || !canvasPixelSizeRef.current.width) && shell) {
       const availableWidth = Math.max(240, shell.clientWidth - 20)
@@ -5765,12 +5766,14 @@ const drawingBoardStyles = `
 
 .lw-drawing-board.is-inline{position:absolute;z-index:4;inset:0;height:auto;min-height:100%;overflow:visible;background:transparent;pointer-events:none}
 .lw-drawing-board.is-inline.is-input-active{pointer-events:auto}
+.lw-drawing-board.is-inline.is-input-active .lw-draw-workspace{pointer-events:auto}
+.lw-drawing-board.is-inline.is-input-active .lw-canvas-shell{pointer-events:auto}
 .lw-drawing-board.is-inline .lw-draw-header{display:none}
 .lw-drawing-board.is-inline .lw-draw-footer{display:none}
 .lw-drawing-board.is-inline .lw-draw-workspace{position:absolute;inset:0;display:block;min-height:100%;padding:0;pointer-events:none}
 .lw-drawing-board.is-inline .lw-canvas-shell{position:absolute;inset:0;display:block;padding:0;border:0;border-radius:0;background:transparent;box-shadow:none;pointer-events:none}
 .lw-drawing-board.is-inline .lw-canvas-glow,.lw-drawing-board.is-inline .lw-canvas-meta{display:none}
-.lw-drawing-board.is-inline .lw-canvas-surface{position:absolute;inset:0;width:100%!important;height:100%!important;min-width:100%;min-height:100%;aspect-ratio:auto;margin:0;overflow:visible;border-radius:0;background:transparent;box-shadow:none;will-change:auto;pointer-events:none}
+.lw-drawing-board.is-inline .lw-canvas-surface{position:absolute;inset:0;width:100%;height:100%;min-width:100%;min-height:100%;aspect-ratio:auto;margin:0;overflow:visible;border-radius:0;background:transparent;box-shadow:none;will-change:auto;pointer-events:none}
 .lw-drawing-board.is-inline.is-input-active .lw-canvas-surface{pointer-events:auto}
 .lw-drawing-board.is-inline .lw-tablet-canvas{position:absolute;left:0;width:100%;height:100%;pointer-events:none}
 .lw-drawing-board.is-inline .lw-tablet-canvas.is-input-active{pointer-events:none}

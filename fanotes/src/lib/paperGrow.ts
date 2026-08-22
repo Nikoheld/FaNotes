@@ -306,20 +306,24 @@ export const nextWriteExtent = (
   )
 )
 
-/** Extra source pixels on the min edge (left/up) so writing is not stuck at 0. */
+/**
+ * Left/top of the Blatt is a hard edge. Writing or panning there must not
+ * open more paper — the stage beyond is black, not dotted sheet.
+ */
 export const neededWriteMinPad = (
+  _normalized?: number,
+  _current?: number,
+  _slack?: number,
+  _step?: number,
+) => 0
+
+/** True only if a min-edge pad would still grow the Blatt (must stay false). */
+export const paperMinEdgeGrows = (
   normalized: number | undefined,
   current: number,
   slack: number,
   step: number,
-) => {
-  if (typeof normalized !== 'number' || !Number.isFinite(normalized)) return 0
-  if (!Number.isFinite(current) || current < 1) return 0
-  if (!Number.isFinite(slack) || !Number.isFinite(step) || step < 1) return 0
-  const pixel = normalized * current
-  if (pixel >= slack) return 0
-  return Math.max(step, Math.ceil((slack - pixel) / step) * step)
-}
+) => neededWriteMinPad(normalized, current, slack, step) > 0
 
 /**
  * Keep painted pixels put when the write surface grows.
@@ -368,15 +372,13 @@ export const paperScrollPad = (bounds: PaperContentBox) => ({
   top: Math.max(0, -(Number.isFinite(bounds.minY) ? bounds.minY : 0)),
 })
 
-/** Ink source size from content pixels + write slack. Camera room stays off this box. */
+/** Ink source size from content pixels + write slack. Left/top stay at 0. */
 export const paperSourceExtentFromContent = (content: PaperContentBox) => {
-  const minX = Math.min(0, Number.isFinite(content.minX) ? content.minX : 0)
-  const minY = Math.min(0, Number.isFinite(content.minY) ? content.minY : 0)
   const maxX = Math.max(0, Number.isFinite(content.maxX) ? content.maxX : 0) + WRITE_SLACK_WIDTH
   const maxY = Math.max(0, Number.isFinite(content.maxY) ? content.maxY : 0) + WRITE_SLACK_HEIGHT
   return {
-    width: Math.min(WRITE_MEMORY_CAP_WIDTH, Math.max(PAPER_SOURCE_WIDTH, maxX - minX)),
-    height: Math.min(WRITE_MEMORY_CAP_HEIGHT, Math.max(WRITE_SLACK_HEIGHT, maxY - minY)),
+    width: Math.min(WRITE_MEMORY_CAP_WIDTH, Math.max(PAPER_SOURCE_WIDTH, maxX)),
+    height: Math.min(WRITE_MEMORY_CAP_HEIGHT, Math.max(WRITE_SLACK_HEIGHT, maxY)),
   }
 }
 

@@ -25,18 +25,20 @@ const runOnce = () => {
   const sheet = { x: 570, y: 570, width: 900, height: 1273 }
   assert.notEqual(sheet.x % PAPER_DOT_TILE_PX, 0)
   const fill = paperRulingFillBox(sheet, plane)
-  const origin = paperRulingTileOrigin(plane)
+  const origin = paperRulingTileOrigin(sheet)
   const sheetPoint = { x: sheet.x + 14, y: sheet.y + 14 }
-  const sidePoint = { x: 14, y: 14 }
-  assert.equal(paperRulingContinuousGrid(sheetPoint, sidePoint, origin, PAPER_DOT_TILE_PX), true)
+  const onSheet = { x: sheet.x + 42, y: sheet.y + 42 }
+  assert.equal(paperRulingContinuousGrid(sheetPoint, onSheet, origin, PAPER_DOT_TILE_PX), true)
   assert.equal(paperRulingSameLattice(origin, origin, PAPER_DOT_TILE_PX), true)
-  assert.equal(paperRulingSameLattice({ x: sheet.x, y: sheet.y }, origin, PAPER_DOT_TILE_PX), false)
+  assert.equal(fill.x, sheet.x)
+  assert.equal(fill.y, sheet.y)
+  assert.ok(fill.x > plane.x, 'left stage has no ruling')
   assert.equal(paperRulingDoublePaint(fill, sheet), true)
   assert.equal(paperRulingDoublePaint(fill, null), false)
   const layout = paperCameraSheetLayout(2040, 2413, 900, 1273)
   assert.equal(paperRulingContinuousGrid(
     { x: layout.sheet.x + 10, y: layout.sheet.y + 10 },
-    { x: 10, y: 10 },
+    { x: layout.sheet.x + 38, y: layout.sheet.y + 38 },
     layout.origin,
     layout.tile,
   ), true)
