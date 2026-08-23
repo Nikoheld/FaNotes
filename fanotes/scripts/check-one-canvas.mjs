@@ -15,8 +15,10 @@ const server = await createServer({
 const {
   PAGE_START_WIDTH,
   SCROLL_ROOM,
+  growPageFromMark,
   mapClientToPage,
   pageCanvasLayout,
+  writePageLayoutSize,
   writePageSurface,
   writeSurfaceIsPage,
 } = await server.ssrLoadModule('/src/lib/noteCanvas.ts')
@@ -65,7 +67,25 @@ const runOnce = () => {
   assert.match(board, /markdownNoteInkOverlaySize/)
   assert.doesNotMatch(board, /expandSourceToOneCanvas/)
   assert.match(board, /lw-canvas-surface/)
-  assert.match(css, /\.paper-sheet-plane > \.unified-paper \{[\s\S]*?width:\s*100%/)
+  assert.match(board, /--ink-page-width/)
+  const planePaper = css.slice(
+    css.indexOf('.paper-sheet-plane > .unified-paper {'),
+    css.indexOf('.paper-sheet-plane > .unified-paper.has-ink-extent {'),
+  )
+  assert.doesNotMatch(planePaper, /(?:^|\n)\s*width:\s*100%/)
+  assert.match(css, /width:\s*max\(100%,\s*var\(--ink-page-width/)
+  const grownOnWideCss = growPageFromMark(
+    { width: PAGE_START_WIDTH, height: 144 },
+    { x: 0.94, y: 0.94 },
+    { width: 1600, height: 900 },
+  )
+  assert.ok(grownOnWideCss.width > PAGE_START_WIDTH)
+  assert.ok(grownOnWideCss.height > 144)
+  const laid = writePageLayoutSize(
+    { width: grownOnWideCss.width, height: grownOnWideCss.height },
+    { width: 1052, height: 371 },
+  )
+  assert.ok(laid.width >= grownOnWideCss.width)
   assert.match(css, /\.unified-note-view\.is-inking \.unified-paper \{ box-shadow:\s*none/)
 
   return {

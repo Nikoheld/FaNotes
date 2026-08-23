@@ -74,7 +74,9 @@ try {
   assert.doesNotMatch(css, /\.unified-paper \.markdown-editor \.cm-content \{ min-height: max\(var\(--paper-a4-height\)/)
   assert.doesNotMatch(css, /\.cm-content \{ min-height: max\(var\(--paper-a4-height\), calc\(100vh/)
   const inkExtentBlock = css.slice(css.indexOf('.unified-paper.has-ink-extent {'), css.indexOf('.unified-paper.has-ink-width {'))
-  assert.match(inkExtentBlock, /min-height:\s*calc\(var\(--paper-width\) \* var\(--ink-extent-ratio\)\)/)
+  assert.match(inkExtentBlock, /--ink-page-width/)
+  assert.match(inkExtentBlock, /width:\s*max\(100%,\s*var\(--ink-page-width\)/)
+  assert.match(inkExtentBlock, /min-height:\s*var\(--ink-page-height\)/)
   assert.doesNotMatch(inkExtentBlock, /paper-a4-height/)
   const textOnInk = css.slice(
     css.indexOf('.unified-paper.has-ink-extent .markdown-editor .cm-content {'),
@@ -151,7 +153,7 @@ try {
   assert.ok(zoomedBounds.maxY !== sheetH + WRITE_MARGIN_Y, 'must not add slack on top of a sheet that already includes it')
 
   const removed = []
-  const props = new Set(['--ink-extent-ratio', '--ink-width-extent', '--text-origin-x', '--text-origin-y'])
+  const props = new Set(['--ink-extent-ratio', '--ink-width-extent', '--ink-page-width', '--ink-page-height', '--text-origin-x', '--text-origin-y'])
   clearInkExtentStyles({
     classList: { remove: (...names) => { removed.push(...names) } },
     style: { removeProperty: (name) => { props.delete(name) } },

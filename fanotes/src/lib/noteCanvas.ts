@@ -90,36 +90,26 @@ export const paperMinEdgeGrows = (
   step: number,
 ) => growWriteOrigin(normalized, current, margin, step) > 0
 
-const skipMaxGrowIfPaintedCovers = (
-  wanted: number,
-  current: number,
-  painted: number,
-  mustGrow: boolean,
-) => {
-  if (mustGrow) return wanted
-  if (!Number.isFinite(painted) || !(painted > 1)) return wanted
-  if (Number.isFinite(wanted) && wanted <= painted) return current
-  return wanted
-}
-
-/** Grow the write page around a mark. Left/top pad and right/bottom extent both move. */
+/**
+ * Grow the write page around a mark. Left/top pad and right/bottom extent both move.
+ * `painted` is the CSS box DrawingBoard sees; never compare it to source px — a
+ * viewport-filling sheet is already larger than source without having grown.
+ */
 export const growPageFromMark = (
   extent: CanvasSize,
   mark: { x?: number; y?: number },
-  painted: { width?: number; height?: number } = {},
+  _painted: { width?: number; height?: number } = {},
 ) => {
   const padX = growWriteOrigin(mark.x, extent.width, WRITE_MARGIN_X, GROW_STEP_X)
   const padY = growWriteOrigin(mark.y, extent.height, WRITE_MARGIN_Y, GROW_STEP_Y)
-  let width = Math.max(
+  const width = Math.max(
     growWriteExtent(mark.x, extent.width, WRITE_MARGIN_X, GROW_STEP_X),
     extent.width + padX,
   )
-  let height = Math.max(
+  const height = Math.max(
     growWriteExtent(mark.y, extent.height, WRITE_MARGIN_Y, GROW_STEP_Y),
     extent.height + padY,
   )
-  width = skipMaxGrowIfPaintedCovers(width, extent.width, painted.width ?? 0, padX > 0)
-  height = skipMaxGrowIfPaintedCovers(height, extent.height, painted.height ?? 0, padY > 0)
   return {
     width: Math.min(WRITE_CAP_WIDTH, Math.max(extent.width, width)),
     height: Math.min(WRITE_CAP_HEIGHT, Math.max(extent.height, height)),
@@ -127,6 +117,15 @@ export const growPageFromMark = (
     padY,
   }
 }
+
+/** CSS write-page box: fill the viewport, then grow with source as you write. */
+export const writePageLayoutSize = (
+  source: CanvasSize,
+  viewport: CanvasSize,
+) => ({
+  width: Math.max(Math.max(1, finitePositive(viewport.width) || 1), Math.max(1, finitePositive(source.width) || 1)),
+  height: Math.max(Math.max(1, finitePositive(viewport.height) || 1), Math.max(1, finitePositive(source.height) || 1)),
+})
 
 /** Keep a 0–1 mark at the same page-pixel position after the page grows. */
 export const keepMarkOnPage = (

@@ -153,6 +153,21 @@ try {
     'non-paper editors keep the default CodeMirror scroller',
   )
 
+  cmScroller.scrollTop = 40
+  editor.scrollTop = 9
+  paper.scrollTop = 0
+  let deferred = 0
+  const duringUpdate = handlePaperEditorScroll({
+    dom: editor,
+    coordsAtPos() {
+      throw new Error("Reading the editor layout isn't allowed during an update")
+    },
+    requestMeasure() { deferred += 1 },
+  }, { head: 12 })
+  assert.equal(duringUpdate, true, 'scrollHandler must swallow scroll even when layout reads are forbidden')
+  assert.equal(cmScroller.scrollTop, 0, 'forbidden layout read still zeros the editor layer')
+  assert.equal(deferred, 1, 'layout read is deferred off the ViewUpdate path')
+
   console.log(JSON.stringify({ before, paperScrollAfterDown: true, editorLocked: true, scrollHandler: true }))
   console.log('arrow-lock ok')
 } finally {

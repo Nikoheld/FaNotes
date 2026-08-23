@@ -1849,6 +1849,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     const styles = inkExtentStyleValues(height, Math.max(SOURCE_WIDTH, width), Math.max(1, paper.clientWidth))
     paper.style.setProperty('--ink-extent-ratio', String(styles.extentRatio))
     paper.style.setProperty('--ink-width-extent', String(styles.widthExtent))
+    paper.style.setProperty('--ink-page-width', `${Math.max(1, Math.round(width))}px`)
+    paper.style.setProperty('--ink-page-height', `${Math.max(1, Math.round(height))}px`)
     const originX = Math.max(0, sourceOriginXRef.current)
     const originY = Math.max(0, sourceOriginYRef.current)
     paper.style.setProperty('--text-origin-x', `${width > 0 ? (originX / width) * 100 : 0}%`)
@@ -1989,14 +1991,40 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       return false
     }
     absorbOneCanvasRef.current = true
+    const prevW = sourceWidthRef.current
+    const prevH = sourceHeightRef.current
+    if (paintedW > prevW + 1 || paintedH > prevH + 1) {
+      const nextW = Math.max(prevW, Math.round(paintedW))
+      const nextH = Math.max(prevH, Math.round(paintedH))
+      sourceWidthRef.current = nextW
+      sourceHeightRef.current = nextH
+      setSourceWidth(nextW)
+      setSourceHeight(nextH)
+      applyInkExtentStyles(nextH, nextW)
+      paintedLayoutRef.current = { w: paintedW, h: paintedH }
+    }
     return false
   }, [applyInkExtentStyles, inline, resolvePaperElement, setPageExtent])
 
   /** Grow the write page around the pen. Extra paper for pan moves with the page. */
   const ensureWriteRoom = useCallback((normalizedY?: number, normalizedX?: number) => {
+    const paper = resolvePaperElement()
+    if (paper && !paper.classList.contains('is-pdf-note') && !paper.classList.contains('has-worksheet')) {
+      const paintedW = paper.offsetWidth
+      const paintedH = paper.offsetHeight
+      if (paintedW > sourceWidthRef.current + 1 || paintedH > sourceHeightRef.current + 1) {
+        const nextW = Math.max(sourceWidthRef.current, Math.round(paintedW))
+        const nextH = Math.max(sourceHeightRef.current, Math.round(paintedH))
+        sourceWidthRef.current = nextW
+        sourceHeightRef.current = nextH
+        setSourceWidth(nextW)
+        setSourceHeight(nextH)
+        applyInkExtentStyles(nextH, nextW)
+        paintedLayoutRef.current = { w: paintedW, h: paintedH }
+      }
+    }
     const prevH = sourceHeightRef.current
     const prevW = sourceWidthRef.current
-    const paper = resolvePaperElement()
     const grown = growPageFromMark(
       { width: prevW, height: prevH },
       { x: normalizedX, y: normalizedY },
@@ -2005,7 +2033,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     if (grown.height > prevH || grown.width > prevW || grown.padX > 0 || grown.padY > 0) {
       setPageExtent(grown.height, grown.width, grown.padX, grown.padY)
     }
-  }, [resolvePaperElement, setPageExtent])
+  }, [applyInkExtentStyles, resolvePaperElement, setPageExtent])
 
   const fitPageToInk = useCallback(() => {
     if (activeStrokeRef.current) return false

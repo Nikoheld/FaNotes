@@ -972,17 +972,24 @@ const paperCaretLock = ViewPlugin.fromClass(class {
   }
 
   private onEditorLayerScroll = () => {
-    lockPaperEditorScrollIfNeeded(
-      this.view.dom,
-      this.view.coordsAtPos(this.view.state.selection.main.head),
-    )
+    this.view.requestMeasure({
+      key: 'fanotes-paper-caret-scroll',
+      read: (view) => view.coordsAtPos(view.state.selection.main.head),
+      write: (caret, view) => {
+        lockPaperEditorScrollIfNeeded(view.dom, caret)
+      },
+    })
   }
 
   update(update: ViewUpdate) {
-    lockPaperEditorScrollIfNeeded(
-      update.view.dom,
-      update.view.coordsAtPos(update.state.selection.main.head),
-    )
+    if (!update.docChanged && !update.selectionSet && !update.geometryChanged) return
+    update.view.requestMeasure({
+      key: 'fanotes-paper-caret',
+      read: (view) => view.coordsAtPos(view.state.selection.main.head),
+      write: (caret, view) => {
+        lockPaperEditorScrollIfNeeded(view.dom, caret)
+      },
+    })
   }
 
   destroy() {

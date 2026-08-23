@@ -170,6 +170,8 @@ const lockSafeguards = [
   ['handlePaperEditorScroll', 'scrollIntoView wird vor dem cm-scroller abgefangen'],
   ['lockPaperEditorScrollIfNeeded', 'Snapshot-Scroll auf dem Editor-Layer wird zurückgesetzt'],
   ['EditorView.scrollHandler', 'CodeMirror scrollHandler sitzt auf dem ausgelieferten Pfad'],
+  ["key: 'fanotes-paper-caret'", 'Caret-Sperre liest Layout erst nach der ViewUpdate'],
+  ['requestMeasure', 'CodeMirror-Layout wird nicht während des Updates gelesen'],
   ['applyToolErase', 'Werkzeug-Radierer trifft nur schneidende Tinte'],
   ['strokeTouchesEraser', 'Ein-Punkt-Piktogramm und Pfad nutzen dieselbe Hit-Fläche'],
   ['radius + visibleHalfWidth(stroke)', 'Radierer berücksichtigt die sichtbare Piktogrammgröße'],

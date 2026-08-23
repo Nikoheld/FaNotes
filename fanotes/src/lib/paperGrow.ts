@@ -19,6 +19,7 @@ export {
   growWriteExtent,
   growWriteOrigin,
   growPageFromMark,
+  writePageLayoutSize,
   keepMarkOnPage,
   markPagePosition,
   canvasScrollBounds,
@@ -372,6 +373,8 @@ export const clearInkExtentStyles = (paper: {
   paper.classList?.remove(HAS_INK_EXTENT_CLASS, INK_WIDTH_ANCHOR_CLASS)
   paper.style?.removeProperty('--ink-extent-ratio')
   paper.style?.removeProperty('--ink-width-extent')
+  paper.style?.removeProperty('--ink-page-width')
+  paper.style?.removeProperty('--ink-page-height')
   paper.style?.removeProperty('--text-origin-x')
   paper.style?.removeProperty('--text-origin-y')
   paper.closest?.('.paper-sheet-plane')?.style?.removeProperty('--paper-scroll-room')

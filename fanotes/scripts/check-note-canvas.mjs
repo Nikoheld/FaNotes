@@ -27,6 +27,7 @@ const {
   mapClientToPage,
   markPagePosition,
   pageCanvasLayout,
+  writePageLayoutSize,
   writePageSurface,
   writeSurfaceIsPage,
 } = await server.ssrLoadModule('/src/lib/noteCanvas.ts')
@@ -98,6 +99,39 @@ const runOnce = () => {
   assert.equal(growWriteOrigin(0.4, PAGE_START_WIDTH, WRITE_MARGIN_X, WRITE_MARGIN_X), 0)
   assert.ok(growWriteExtent(0.94, PAGE_START_HEIGHT, WRITE_MARGIN_Y, WRITE_MARGIN_Y) > PAGE_START_HEIGHT)
 
+  const viewportFill = { width: 1600, height: 900 }
+  const sourceOnFill = { width: 900, height: 144 }
+  const filled = writePageLayoutSize(sourceOnFill, viewportFill)
+  assert.equal(filled.width, viewportFill.width, 'short source still fills the viewport')
+  const paintedLargerThanSource = growPageFromMark(
+    sourceOnFill,
+    { x: 0.94, y: 0.94 },
+    { width: viewportFill.width, height: viewportFill.height },
+  )
+  assert.ok(paintedLargerThanSource.width > sourceOnFill.width, 'far-edge write grows even when CSS offset is already wider than source')
+  assert.ok(paintedLargerThanSource.height > sourceOnFill.height, 'far-edge write grows height even when CSS offset is already taller than source')
+  const afterPainted = writePageLayoutSize(
+    { width: paintedLargerThanSource.width, height: paintedLargerThanSource.height },
+    viewportFill,
+  )
+  assert.ok(afterPainted.width >= paintedLargerThanSource.width)
+  const grownPastViewport = growPageFromMark(
+    { width: viewportFill.width, height: viewportFill.height },
+    { x: 0.94, y: 0.94 },
+    { width: viewportFill.width, height: viewportFill.height },
+  )
+  assert.ok(grownPastViewport.width > viewportFill.width, 'a write at the filled-page edge grows past the viewport')
+  const laidPast = writePageLayoutSize(
+    { width: grownPastViewport.width, height: grownPastViewport.height },
+    viewportFill,
+  )
+  assert.ok(laidPast.width > viewportFill.width)
+  const stayPutLayout = keepMarkOnPage(mark.x, viewportFill.width, grownPastViewport.width, grownPastViewport.padX)
+  assert.ok(
+    Math.abs(stayPutLayout * grownPastViewport.width - grownPastViewport.padX - mark.x * viewportFill.width) < 1e-6,
+    'marks stay put when layout grows with source past the viewport',
+  )
+
   const layout = pageCanvasLayout(page)
   assert.equal(layout.page.x, 0)
   assert.equal(layout.page.y, 0)
@@ -130,6 +164,19 @@ const runOnce = () => {
   assert.doesNotMatch(planeBlock, /background-clip:\s*content-box/)
   const rulingBlock = css.slice(css.indexOf('.paper-sheet-plane > .paper-ruling {'), css.indexOf('.paper-dots .paper-sheet-plane > .paper-ruling {'))
   assert.match(rulingBlock, /inset:\s*0/)
+  const planePaper = css.slice(
+    css.indexOf('.paper-sheet-plane > .unified-paper {'),
+    css.indexOf('.paper-sheet-plane > .unified-paper.has-ink-extent {'),
+  )
+  assert.doesNotMatch(planePaper, /(?:^|\n)\s*width:\s*100%/, 'plane paper must not lock width to 100%')
+  assert.match(board, /--ink-page-width/)
+  assert.match(css, /width:\s*max\(100%,\s*var\(--ink-page-width/)
+  const extentBlock = css.slice(
+    css.indexOf('.paper-sheet-plane > .unified-paper.has-ink-extent {'),
+    css.indexOf('.unified-note-view.is-inking .unified-paper'),
+  )
+  assert.match(extentBlock, /--ink-page-width/)
+  assert.match(extentBlock, /width:\s*max\(100%,\s*var\(--ink-page-width/)
 
   return {
     firstHeight: first.height,

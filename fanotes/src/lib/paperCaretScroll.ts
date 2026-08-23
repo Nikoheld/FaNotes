@@ -81,10 +81,46 @@ export const lockPaperEditorScrollIfNeeded = (
   return true
 }
 
+const readCaretCoords = (
+  view: {
+    coordsAtPos: (pos: number) => { top: number; bottom: number; left: number; right: number } | null
+  },
+  pos: number,
+) => {
+  try {
+    return view.coordsAtPos(pos)
+  } catch {
+    // CodeMirror forbids layout reads during ViewUpdate.
+    return null
+  }
+}
+
 export const handlePaperEditorScroll = (
   view: {
     dom: HTMLElement
     coordsAtPos: (pos: number) => { top: number; bottom: number; left: number; right: number } | null
+    requestMeasure?: (measurement: {
+      key?: string
+      read: (view: unknown) => unknown
+      write?: (measure: unknown, view: unknown) => void
+    }) => void
   },
   range: { head: number },
-): boolean => lockPaperEditorScrollIfNeeded(view.dom, view.coordsAtPos(range.head))
+): boolean => {
+  if (!view.dom?.closest('.unified-paper, .paper-view')) return false
+  lockPaperEditorLayerScroll(view.dom)
+  const caret = readCaretCoords(view, range.head)
+  if (caret) {
+    const paper = resolvePaperCaretScroller(view.dom)
+    if (paper) keepCaretVisibleInPaperScroller(paper, caret)
+    return true
+  }
+  view.requestMeasure?.({
+    key: 'fanotes-paper-scroll',
+    read: (nextView) => (nextView as typeof view).coordsAtPos(range.head),
+    write: (nextCaret, nextView) => {
+      lockPaperEditorScrollIfNeeded((nextView as typeof view).dom, nextCaret as typeof caret)
+    },
+  })
+  return true
+}

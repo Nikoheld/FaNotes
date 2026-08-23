@@ -2,6 +2,10 @@
 
 ## Unveröffentlicht
 
+## 2026.8.62
+
+- **Blatt wächst mit dem Stift:** Schreiben ganz rechts oder unten macht das Blatt weiter als das Fenster. Vorhandene Schrift bleibt stehen. Der Editor bleibt beim Tippen und Scrollen stabil.
+
 ## 2026.8.61
 
 - **Unbegrenztes Blatt wie in OneNote:** Die Schreibfläche hat keine feste Seitengröße. Schreiben am Rand macht das Blatt weiter — auch links und oben — und vorhandene Schrift bleibt stehen. Du kannst ein Stück ins Leere schwenken, aber nicht ins Unendliche; der Schwenkraum wächst mit, wenn du weiter schreibst.

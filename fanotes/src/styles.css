@@ -1177,13 +1177,12 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   --view-zoom: 1;
 }
 .unified-paper.has-ink-extent {
-  /* Grow rightward with handwriting while keeping the original A4 width as a floor. */
   --ink-width-extent: 1;
-  width: max(100%, var(--paper-width), calc(var(--paper-width) * var(--ink-width-extent)));
+  --ink-page-width: var(--paper-width);
+  --ink-page-height: calc(var(--paper-width) * var(--ink-extent-ratio));
+  width: max(100%, var(--ink-page-width));
   max-width: none;
-  /* Size to the ink extent. Do not add a viewport/A4 floor — that recreates
-     empty-page scroll below short notes. */
-  min-height: calc(var(--paper-width) * var(--ink-extent-ratio));
+  min-height: var(--ink-page-height);
 }
 .unified-paper.has-ink-width {
   /* Width grow must not re-center the sheet — that yanks the text column. */
@@ -1244,8 +1243,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   background-color: #fff;
 }
 .paper-sheet-plane > .unified-paper {
-  /* Fill the plane so ink, dots and hit-testing share one box. */
-  width: 100%;
+  /* Fill the visible plane; width grows with --ink-page-width past the viewport. */
   min-width: 100%;
   min-height: 100%;
   border: 0;
@@ -1253,7 +1251,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   box-shadow: none;
 }
 .paper-sheet-plane > .unified-paper.has-ink-extent {
-  min-height: max(100%, calc(var(--paper-width) * var(--ink-extent-ratio)));
+  width: max(100%, var(--ink-page-width, var(--paper-width)));
+  min-height: max(100%, var(--ink-page-height, calc(var(--paper-width) * var(--ink-extent-ratio))));
 }
 .unified-note-view.is-inking .unified-paper { box-shadow: none; }
 .unified-paper > .editor-pane {
