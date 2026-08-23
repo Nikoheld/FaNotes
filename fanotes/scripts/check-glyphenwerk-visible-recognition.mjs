@@ -53,6 +53,7 @@ try {
       personalizedCharacters: 1,
       personalizedSource: 'personalized',
       personalizedConfidence: 82,
+      exactProjectionSafe: true,
     }, '*')
   })
 </script></body></html>`)
@@ -163,12 +164,11 @@ try {
   assert.equal(visible.result, 'T', JSON.stringify(visible))
   assert.match(visible.mode, /Text/u, JSON.stringify(visible))
   assert.match(visible.reason, /neuronale Satzanalyse/u, 'Das persönliche Ergebnis wurde vom sichtbaren Test-Tab verworfen.')
-  assert.ok(Number.isSafeInteger(visible.request?.textCharacterCountHint), 'Die echte Brücke überträgt keinen Zeichenanzahl-Hinweis.')
-  if (visible.request?.textCharacterHint !== undefined) {
-    assert.match(visible.request.textCharacterHint, /^\p{L}+$/u, 'Die echte Brücke überträgt einen ungültigen Buchstabenhinweis.')
-  }
+  assert.equal(visible.request?.textCharacterCountHint, undefined, 'Die echte Brücke darf keinen harten Zeichenanzahl-Hinweis übertragen.')
+  assert.equal(visible.request?.textCharacterHint, undefined, 'Die echte Brücke darf keinen geratenen Volltext zurückkoppeln.')
+  assert.equal(visible.request?.textPrefixHint, undefined, 'Ein einzelner automatischer Vorschau-Buchstabe darf noch kein stabiler Präfix sein.')
   socket.close()
-  console.log('Sichtbarer GlyphenWerk-Test: Ein persönlich bestätigtes T überstimmt eine Basisantwort ohne Wortbeleg.')
+  console.log('Sichtbarer GlyphenWerk-Test: Neuraler Text bleibt sichtbar und alte harte Rückkopplung fehlt im echten iframe-Request.')
 } finally {
   if (chromium && chromium.exitCode === null) {
     const closed = new Promise((resolve) => chromium.once('close', resolve))

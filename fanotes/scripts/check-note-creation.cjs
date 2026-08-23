@@ -1,5 +1,6 @@
 'use strict'
 
+const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
@@ -16,6 +17,30 @@ const runtime = path.join(temporary, 'runtime')
 const vault = path.join(home, 'Notizen')
 const userData = path.join(configHome, 'FaNotes')
 const timeoutMs = 20_000
+
+const packageMetadata = require(path.join(root, 'package.json'))
+assert.ok(
+  packageMetadata.build?.files?.includes('resources/i18n/**/*'),
+  'Der gepackte Main Process muss den vollständigen i18n-Katalog enthalten.',
+)
+
+// Simulate a damaged/legacy ASAR without resources/i18n. Creating a note or a
+// folder must still have English core names instead of throwing MODULE_NOT_FOUND.
+const fallbackApplication = path.join(temporary, 'fallback-application')
+const fallbackElectron = path.join(fallbackApplication, 'electron')
+fs.mkdirSync(fallbackElectron, { recursive: true, mode: 0o700 })
+fs.copyFileSync(path.join(root, 'electron', 'i18n.cjs'), path.join(fallbackElectron, 'i18n.cjs'))
+const fallbackI18n = require(path.join(fallbackElectron, 'i18n.cjs'))
+const fallbackWarnings = []
+const originalWarn = console.warn
+console.warn = (...args) => fallbackWarnings.push(args)
+try {
+  assert.equal(fallbackI18n.localizeText('Unbenannte Notiz', 'en'), 'Untitled note')
+  assert.equal(fallbackI18n.localizeText('Neuer Ordner', 'en'), 'New folder')
+} finally {
+  console.warn = originalWarn
+}
+assert.equal(fallbackWarnings.length, 0, 'Kernnamen dürfen den fehlenden Katalog nicht laden.')
 
 for (const directory of [home, configHome, runtime, vault, userData]) fs.mkdirSync(directory, { recursive: true, mode: 0o700 })
 const legacyInternalDirectory = path.join(vault, '.lernwerk')
@@ -136,17 +161,22 @@ void (async () => {
     await Promise.all([cdp.send('Runtime.enable'), cdp.send('Log.enable'), cdp.send('Page.enable')])
     await waitFor(cdp, `Boolean(window.fanotes && document.querySelector('.app-shell'))`, 'Die FaNotes-Oberfläche')
 
-    await cdp.evaluate(`document.querySelector('.file-tree__root-actions button[aria-label="Neue Notiz"]').click()`)
+    await cdp.evaluate(`document.querySelector('.sidebar-header button[aria-label="Neue Notiz"]').click()`)
     await waitFor(cdp, `document.querySelector('.note-tab.active')?.title?.endsWith('Unbenannte Notiz.md')`, 'Die sichtbare Notizerstellung')
     const uiPath = await cdp.evaluate(`document.querySelector('.note-tab.active').title`)
-    const directResult = await cdp.evaluate(`window.fanotes.createNote(null, null)`)
+    const originalSettings = await cdp.evaluate(`window.fanotes.bootstrap().then((value) => value.settings)`)
+    await cdp.evaluate(`window.fanotes.saveSettings({ ...${JSON.stringify(originalSettings)}, uiLanguage: 'en' })`)
+    const directResult = await cdp.evaluate(`window.fanotes.createNote()`)
+    const folderResult = await cdp.evaluate(`window.fanotes.createFolder()`)
     const directContent = await cdp.evaluate(`window.fanotes.readFile(${JSON.stringify(directResult.relativePath)})`)
+    await cdp.evaluate(`window.fanotes.saveSettings({ ...${JSON.stringify(originalSettings)}, uiLanguage: 'de' })`)
     const files = markdownFiles(vault).map((file) => path.relative(vault, file).split(path.sep).join('/')).sort()
     const migratedSentinel = path.join(vault, '.fanotes', 'migration-sentinel.json')
 
     if (uiPath !== 'Unbenannte Notiz.md') throw new Error(`Die UI-Notiz wurde am falschen Ort angelegt: ${uiPath}`)
-    if (directResult.relativePath !== 'Unbenannte Notiz 2.md' || !directContent.startsWith('# Unbenannte Notiz 2')) throw new Error(`Optionale IPC-Argumente wurden nicht sicher normalisiert: ${JSON.stringify(directResult)}`)
-    if (files.join('|') !== 'Unbenannte Notiz 2.md|Unbenannte Notiz.md|Vorhanden.md') throw new Error(`Die Notizdateien sind unerwartet: ${files.join('|')}`)
+    if (directResult.relativePath !== 'Untitled note.md' || !directContent.startsWith('# Untitled note')) throw new Error(`Die englische IPC-Notiz wurde nicht sicher erstellt: ${JSON.stringify(directResult)}`)
+    if (folderResult.relativePath !== 'New folder' || !fs.statSync(path.join(vault, folderResult.relativePath)).isDirectory()) throw new Error(`Der englische IPC-Ordner wurde nicht sicher erstellt: ${JSON.stringify(folderResult)}`)
+    if (files.join('|') !== 'Unbenannte Notiz.md|Untitled note.md|Vorhanden.md') throw new Error(`Die Notizdateien sind unerwartet: ${files.join('|')}`)
     if (!fs.existsSync(migratedSentinel) || fs.existsSync(legacyInternalDirectory)) throw new Error('Die internen Vaultdaten wurden nicht sicher nach .fanotes migriert.')
 
     await cdp.evaluate(`(() => {
@@ -195,6 +225,8 @@ void (async () => {
       return true
     })()`)
     await waitFor(cdp, `window.__legacyTrainingSeed === 'ready'`, 'Die bisherige Trainingsdaten-Testbasis')
+    await cdp.evaluate(`document.querySelector('button[aria-label="Zusätzliche Werkzeuge ausklappen"]').click()`)
+    await waitFor(cdp, `Boolean(document.querySelector('button[title="GlyphenWerk"]'))`, 'GlyphenWerk unter Weitere Werkzeuge')
     await cdp.evaluate(`document.querySelector('button[title="GlyphenWerk"]').click()`)
     await waitFor(cdp, `Boolean(document.querySelector('.glyphenwerk-workspace'))`, 'GlyphenWerk für die Trainingsmigration')
     await waitFor(cdp, `/Beispiele direkt in FaNotes aktiv|Synchronisierung fehlgeschlagen/u.test(document.querySelector('.glyphenwerk-sync-state')?.textContent || '')`, 'Die GlyphenWerk-Synchronisierung')
@@ -222,7 +254,7 @@ void (async () => {
     if (legacyTrainingDatabaseExists) throw new Error('Die übernommene frühere Handschrift-Datenbank wurde nicht bereinigt.')
     if (rendererErrors.length) throw new Error(`Rendererfehler bei der Notizerstellung: ${rendererErrors.join(' | ')}`)
 
-    console.log(`FaNotes-Notizerstellung geprüft: UI=${uiPath}, IPC=${directResult.relativePath}`)
+    console.log(`FaNotes-Notizerstellung geprüft: UI=${uiPath}, IPC=${directResult.relativePath}, Ordner=${folderResult.relativePath}`)
   } catch (error) {
     throw new Error(`${error instanceof Error ? error.message : String(error)}${stderr ? `\n${stderr}` : ''}`)
   } finally {

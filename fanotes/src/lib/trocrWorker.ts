@@ -104,16 +104,15 @@ globalThis.onmessage = async (event: MessageEvent<WorkerRequest>) => {
     ) throw new Error('Die gerenderte Handschriftzeile ist ungültig.')
     const recognizer = await loadRecognizer(request)
     const image = new RawImage(new Uint8ClampedArray(request.pixels), request.width, request.height, 4)
-    // Transformers.js 3.8 implements real beam search in its generation loop.
-    // Blind German ScaDS and English IAM validation shows that the second beam
-    // contains every useful additional candidate found by beams three/four:
-    // 13 lines improve and none worsen after the existing conservative visual
-    // ranker. Two beams therefore capture the measured quality gain without
-    // paying the CPU and decoder-memory cost of four paths.
+    // Transformers.js 3.8's image pipeline exposes one deterministic sequence;
+    // its generic generation loop does not spawn and retain independent beams.
+    // Asking it for two therefore paid top-k work without producing a second
+    // usable line. The caller obtains a real alternative from a separately
+    // rendered view only for unresolved lines.
     const generated = await recognizer(image, {
       max_new_tokens: 160,
-      num_beams: 2,
-      num_return_sequences: 2,
+      num_beams: 1,
+      num_return_sequences: 1,
       do_sample: false,
     })
     const outputs = generated as unknown as Array<{ generated_text: string }>

@@ -20,6 +20,25 @@ const archive = path.join(temporary, 'uji.zip')
 const dataset = path.join(temporary, 'ujipenchars2.txt')
 const output = path.join(temporary, 'dist')
 const profile = path.join(temporary, 'chromium')
+const requestedHoldoutWriterCount = Number(process.env.FANOTES_UJI_HOLDOUT_WRITERS ?? 1)
+const holdoutWriterCount = Number.isFinite(requestedHoldoutWriterCount)
+  ? Math.max(1, Math.min(12, Math.round(requestedHoldoutWriterCount)))
+  : 1
+const holdoutWriterNames = [...new Set((process.env.FANOTES_UJI_HOLDOUT_WRITER_NAMES ?? '')
+  .split(',')
+  .map((writer) => writer.trim())
+  .filter((writer) => /^tst_(?:UJI|UPV)_W\d+$/u.test(writer)))]
+  .slice(0, 12)
+const requestedPersonalWriter = process.env.FANOTES_UJI_PERSONAL_WRITER?.trim()
+const personalWriterName = requestedPersonalWriter && /^(?:trn|tst)_(?:UJI|UPV)_W\d+$/u.test(requestedPersonalWriter)
+  ? requestedPersonalWriter
+  : undefined
+const personalOnly = process.env.FANOTES_UJI_PERSONAL_ONLY === '1'
+const includeCases = process.env.FANOTES_UJI_INCLUDE_CASES === '1'
+const requestedChromiumHeap = Number(process.env.FANOTES_UJI_CHROMIUM_HEAP_MB ?? 768)
+const chromiumHeap = Number.isFinite(requestedChromiumHeap)
+  ? Math.max(384, Math.min(1_536, Math.round(requestedChromiumHeap)))
+  : 768
 
 const downloadDataset = async () => {
   const local = process.env.FANOTES_UJI_DATASET?.trim()
@@ -75,7 +94,13 @@ try {
   fs.writeFileSync(entryPath, [
     `import records from ${JSON.stringify(pathToFileURL(dataPath).href)}`,
     `import { runUjiPersonalRecognitionAudit } from ${JSON.stringify(pathToFileURL(path.join(appRoot, 'scripts/fixtures/uji-personal-recognition-harness.ts')).href)}`,
-    'runUjiPersonalRecognitionAudit(records).then((result) => {',
+    `runUjiPersonalRecognitionAudit(records, ${JSON.stringify({
+      personalWriterName,
+      personalOnly,
+      writerIndependentHoldoutCount: holdoutWriterCount,
+      writerIndependentHoldoutNames: holdoutWriterNames,
+      includeCases,
+    })}).then((result) => {`,
     '  document.body.innerHTML = `<pre id="result">${JSON.stringify(result)}</pre>`',
     '}).catch((error) => {',
     '  document.body.innerHTML = `<pre id="error">${String(error?.stack || error)}</pre>`',
@@ -93,7 +118,7 @@ try {
   fs.writeFileSync(path.join(output, 'index.html'), '<!doctype html><html><body><script type="module" src="./audit.js"></script></body></html>')
   const chromium = spawn('chromium', [
     '--headless=new', '--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage',
-    '--js-flags=--max-old-space-size=1536',
+    `--js-flags=--max-old-space-size=${chromiumHeap}`,
     '--allow-file-access-from-files', `--user-data-dir=${profile}`, '--virtual-time-budget=90000',
     '--dump-dom', pathToFileURL(path.join(output, 'index.html')).href,
   ], { stdio: ['ignore', 'pipe', 'pipe'] })
@@ -116,30 +141,52 @@ try {
       trainingSamples: result.personal.trainingSamples,
       samples: result.personal.samples,
       buildMs: result.personal.buildMs,
+      weights: result.personal.weights,
       accuracy: result.personal.accuracy,
       unhintedAccuracy: result.personal.unhintedAccuracy,
       caseNormalizedAccuracy: result.personal.caseNormalizedAccuracy,
       top3Accuracy: result.personal.top3Accuracy,
       top8Accuracy: result.personal.top8Accuracy,
       topConfusions: result.personal.topConfusions,
+      failures: result.personal.failures,
+      cases: result.personal.cases,
     },
-    writerIndependent: {
+    writerIndependent: result.writerIndependent ? {
       trainingWriters: result.writerIndependent.trainingWriters,
       holdoutWriter: result.writerIndependent.holdoutWriter,
+      holdoutWriters: result.writerIndependent.holdoutWriters,
       trainingSamples: result.writerIndependent.trainingSamples,
       samples: result.writerIndependent.samples,
       buildMs: result.writerIndependent.buildMs,
+      weights: result.writerIndependent.weights,
       accuracy: result.writerIndependent.accuracy,
       unhintedAccuracy: result.writerIndependent.unhintedAccuracy,
       caseNormalizedAccuracy: result.writerIndependent.caseNormalizedAccuracy,
       top3Accuracy: result.writerIndependent.top3Accuracy,
       top8Accuracy: result.writerIndependent.top8Accuracy,
       topConfusions: result.writerIndependent.topConfusions,
-    },
+      confusions: result.writerIndependent.confusions,
+      failures: result.writerIndependent.failures,
+      cases: result.writerIndependent.cases,
+      byWriter: result.writerIndependent.byWriter.map((entry) => ({
+        writer: entry.writer,
+        samples: entry.samples,
+        accuracy: entry.accuracy,
+        unhintedAccuracy: entry.unhintedAccuracy,
+        caseNormalizedAccuracy: entry.caseNormalizedAccuracy,
+        top3Accuracy: entry.top3Accuracy,
+        top8Accuracy: entry.top8Accuracy,
+        topConfusions: entry.topConfusions,
+        failures: entry.failures,
+        cases: entry.cases,
+      })),
+    } : null,
   } : result, null, 2))
   if (process.env.FANOTES_UJI_AUDIT_STRICT === '1') {
     assert.ok(result.personal.accuracy >= 90, `Sitzungsübergreifende Personalisierung ist zu schwach: ${JSON.stringify(result.personal)}`)
-    assert.ok(result.writerIndependent.accuracy >= 90, `Der 992-Beispiele-Holdout ist zu schwach: ${JSON.stringify(result.writerIndependent)}`)
+    if (result.writerIndependent) {
+      assert.ok(result.writerIndependent.accuracy >= 90, `Der 992-Beispiele-Holdout ist zu schwach: ${JSON.stringify(result.writerIndependent)}`)
+    }
     assert.ok(result.personal.unhintedAccuracy >= 88, `Die Segmentierung isolierter Zeichen ist zu schwach: ${JSON.stringify(result.personal)}`)
   }
 } finally {

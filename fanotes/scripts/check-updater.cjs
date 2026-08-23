@@ -195,12 +195,50 @@ async function main() {
     const reconstructedPath = path.join(releaseDirectory, path.basename(targetPath))
     assert.equal(await sha256File(reconstructedPath), delta.target.sha256)
     assert.equal(await fsp.stat(path.join(releaseDirectory, patchName)).catch(() => null), null)
+
+    // A finished background download must survive a restart and come back as
+    // "downloaded" without another transfer, ready for seamless install.
+    manager.stop()
+    const relaunchManager = createUpdateManager({
+      app,
+      getWindow: () => null,
+      getSettings: () => settings,
+      forceSupported: true,
+      platform: 'linux',
+      appImagePath: sourcePath,
+      fetchImpl,
+      publicKeyPemOverride: publicPem,
+      expectedKeyId: keyId,
+      logger: { warn: () => undefined },
+    })
+    await relaunchManager.start()
+    const resumed = await relaunchManager.check({ manual: true })
+    assert.equal(resumed.status, 'downloaded')
+    assert.equal(resumed.latestVersion, targetVersion)
+    assert.equal(resumed.progress, 1)
+    assert.equal(relaunchManager.shouldInstallAutomatically(), true)
+    relaunchManager.stop()
+
     settings.updateChannel = 'beta'
-    manager.configure()
-    const betaChecked = await manager.check({ manual: true })
+    const betaManager = createUpdateManager({
+      app: {
+        ...app,
+        getPath: (name) => name === 'home' ? path.join(temporary, 'beta-home') : path.join(temporary, 'beta-user-data'),
+      },
+      getWindow: () => null,
+      getSettings: () => settings,
+      forceSupported: true,
+      platform: 'linux',
+      appImagePath: sourcePath,
+      fetchImpl,
+      publicKeyPemOverride: publicPem,
+      expectedKeyId: keyId,
+      logger: { warn: () => undefined },
+    })
+    const betaChecked = await betaManager.check({ manual: true })
     assert.equal(betaChecked.status, 'available')
     assert.equal(betaChecked.updateChannel, 'beta')
-    manager.stop()
+    betaManager.stop()
     settings.updateChannel = 'stable'
 
     const incompatibleSourcePath = path.join(temporary, 'FaNotes-incompatible-base.AppImage')
@@ -261,7 +299,7 @@ async function main() {
     assert.equal(await fsp.readFile(helperTarget, 'utf8'), nextExecutable)
     assert.equal(JSON.parse(await fsp.readFile(markerPath, 'utf8')).version, targetVersion)
 
-    console.log(`Updaterprüfung erfolgreich: signiertes ${DELTA_LABEL(delta.patchSizeBytes, targetBytes.length)}, Range-Fortsetzung, automatische Vollpaket-Ausweichroute, lokale Rekonstruktion, SHA-256 und atomarer Rollback-Pfad.`)
+    console.log(`Updaterprüfung erfolgreich: signiertes ${DELTA_LABEL(delta.patchSizeBytes, targetBytes.length)}, Range-Fortsetzung, automatische Vollpaket-Ausweichroute, lokale Rekonstruktion, persistierter Seamless-Download, SHA-256 und atomarer Rollback-Pfad.`)
   } finally {
     await fsp.rm(temporary, { recursive: true, force: true })
   }

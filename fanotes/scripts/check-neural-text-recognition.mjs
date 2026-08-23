@@ -230,8 +230,10 @@ try {
   console.log(`Neuronale Handschrifterkennung: echte IAM-OnDB-Zeile mit ${(iamCharacterErrorRate * 100).toFixed(2)} % CER · ${result.words.map((entry) => entry.recognized).join(' · ')} · zwei Zeilen mit ${result.multilineConfidence} % · kalt ${result.words[0].durationMs} ms, warm ${warmAverage} ms.`)
   // Keep performance assertions last so a slow/contended CI host cannot hide
   // a preceding recognition-quality regression from the diagnostic output.
-  assert.ok(result.words[0].durationMs < 10_000, `Das bedarfsgeladene Modell startet zu langsam: ${result.words[0].durationMs} ms`)
-  assert.ok(result.words.slice(1).every((entry) => entry.durationMs < 1_500), `Eine warme Textzeile ist zu langsam: ${JSON.stringify(result.words)}`)
+  if (process.env.FANOTES_SKIP_PERFORMANCE_ASSERT !== '1') {
+    assert.ok(result.words[0].durationMs < 10_000, `Das bedarfsgeladene Modell startet zu langsam: ${result.words[0].durationMs} ms`)
+    assert.ok(result.words.slice(1).every((entry) => entry.durationMs < 1_500), `Eine warme Textzeile ist zu langsam: ${JSON.stringify(result.words)}`)
+  }
 } finally {
   if (server) await new Promise((resolve) => server.close(resolve))
   // Chromium may finish after its profile writer has queued one final file.

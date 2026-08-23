@@ -105,7 +105,8 @@ const variants: Array<{ id: string; options: NeuralLineRenderOptions }> = [
   { id: 'vertical-22', options: { marginXRatio: 0.22, marginYRatio: 0.22 } },
   { id: 'vertical-28', options: { marginXRatio: 0.22, marginYRatio: 0.28 } },
   { id: 'vertical-34', options: { marginXRatio: 0.22, marginYRatio: 0.34 } },
-  { id: 'vertical-40', options: { marginXRatio: 0.22, marginYRatio: 0.40 } },
+  { id: 'vertical-40-legacy', options: { marginXRatio: 0.22, marginYRatio: 0.40 } },
+  { id: 'production-alternate', options: { marginXRatio: 0.22, marginYRatio: 0.32, inkScale: 0.92 } },
 ]
 
 Object.assign(window, {
@@ -115,15 +116,24 @@ Object.assign(window, {
 })
 
 export const runTrocrPreprocessingSweep = async (records: UjiRecord[]) => {
+  const parameters = new URLSearchParams(globalThis.location?.search ?? '')
+  const requestedLimit = Number(parameters.get('limit'))
+  const writerLimit = Number.isFinite(requestedLimit)
+    ? Math.max(1, Math.min(12, Math.round(requestedLimit)))
+    : 12
+  const requestedOffset = Number(parameters.get('writer-offset'))
+  const writerOffset = Number.isFinite(requestedOffset)
+    ? Math.max(0, Math.min(11, Math.round(requestedOffset)))
+    : 0
   const usableWriters = [...new Set(records.map((entry) => entry.writer))]
     .filter((writer) => writer.startsWith('tst_'))
-    .slice(0, 12)
+    .slice(writerOffset, writerOffset + writerLimit)
   const wordValues = [
     'test', 'hallo', 'lernen', 'mathe', 'computer', 'schule',
     'arbeit', 'privat', 'notizen', 'wissen', 'gleichung', 'formel',
   ]
   const cases: Case[] = usableWriters.flatMap((writer, writerIndex) => {
-    const expected = wordValues[writerIndex % wordValues.length]
+    const expected = wordValues[(writerOffset + writerIndex) % wordValues.length]
     const strokes = createUjiWordStrokes(records, writer, expected)
     return strokes.length ? [{
       id: `${writer}-${expected}`,
@@ -171,6 +181,48 @@ export const runTrocrPreprocessingSweep = async (records: UjiRecord[]) => {
       edits,
       characters,
       durationMs: Math.round(performance.now() - startedAt),
+      predictions,
+    })
+  }
+
+  // Audit a target-independent multi-view decision as well as each crop. The
+  // modal surface never sees the expected transcription: exact agreement
+  // wins, while a tie deliberately falls back to the single production view.
+  // This tells us whether an additional inference would add robust visual
+  // evidence instead of merely choosing the crop that happens to fit a label.
+  const baseline = results.find((result) => result.id === 'baseline')
+  if (baseline) {
+    const predictions = cases.map((item, caseIndex) => {
+      const votes = new Map<string, { count: number; prediction: string }>()
+      results.forEach((result) => {
+        const prediction = result.predictions[caseIndex]?.prediction ?? ''
+        const key = prediction.toLocaleLowerCase('und')
+        const existing = votes.get(key)
+        if (existing) existing.count += 1
+        else votes.set(key, { count: 1, prediction })
+      })
+      const baselinePrediction = baseline.predictions[caseIndex]?.prediction ?? ''
+      const maximum = Math.max(...[...votes.values()].map((vote) => vote.count))
+      const winners = [...votes.values()].filter((vote) => vote.count === maximum)
+      const prediction = winners.length === 1 ? winners[0].prediction : baselinePrediction
+      const expected = normalized(item.expected)
+      return {
+        id: item.id,
+        expected,
+        prediction,
+        edits: editDistance(expected, prediction),
+        agreeingViews: maximum,
+      }
+    })
+    const edits = predictions.reduce((sum, prediction) => sum + prediction.edits, 0)
+    const characters = predictions.reduce((sum, prediction) => sum + prediction.expected.length, 0)
+    results.push({
+      id: 'view-consensus',
+      options: {},
+      cer: edits / Math.max(1, characters),
+      edits,
+      characters,
+      durationMs: results.reduce((sum, result) => sum + result.durationMs, 0),
       predictions,
     })
   }

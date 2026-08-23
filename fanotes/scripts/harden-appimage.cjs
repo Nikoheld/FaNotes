@@ -7,6 +7,7 @@ const path = require('node:path')
 const { spawnSync } = require('node:child_process')
 const { Arch } = require('builder-util')
 const { getAppImageTools } = require('app-builder-lib/out/toolsets/linux')
+const { linuxOzoneAppRunExecLine } = require('../electron/startup-preflight.cjs')
 
 const appImagePath = path.resolve(process.argv[2] ?? '')
 
@@ -60,7 +61,8 @@ export LD_LIBRARY_PATH="\${APPDIR}/usr/lib\${LD_LIBRARY_PATH:+:\${LD_LIBRARY_PAT
 export GSETTINGS_SCHEMA_DIR="\${APPDIR}/usr/share/glib-2.0/schemas\${GSETTINGS_SCHEMA_DIR:+:\${GSETTINGS_SCHEMA_DIR}}"
 
 # Sicherheit ist eine harte Anforderung: die Chromium-Sandbox bleibt aktiv.
-exec "\${APPDIR}/fanotes" "$@"
+# Ozone X11 must be on the real argv before the Electron binary starts.
+${linuxOzoneAppRunExecLine('"${APPDIR}/fanotes"')}
 `
     await fsp.writeFile(launcherPath, launcher, { mode: 0o755 })
     await fsp.chmod(launcherPath, 0o755)
@@ -129,6 +131,9 @@ exec "\${APPDIR}/fanotes" "$@"
     const verifiedDesktop = await fsp.readFile(path.join(verifyRoot, 'squashfs-root', 'fanotes.desktop'), 'utf8')
     if (verifiedLauncher.includes('NO_SANDBOX') || verifiedLauncher.includes('(--no-sandbox)') || /Exec=.*--no-sandbox/m.test(verifiedDesktop)) {
       throw new Error('Die Sandbox-Härtung konnte im fertigen AppImage nicht bestätigt werden.')
+    }
+    if (!verifiedLauncher.includes('ELECTRON_OZONE_PLATFORM_HINT=x11') || !verifiedLauncher.includes('--ozone-platform=x11')) {
+      throw new Error('Das AppImage startet Electron nicht mit Ozone X11.')
     }
 
     await fsp.rename(outputPath, appImagePath)

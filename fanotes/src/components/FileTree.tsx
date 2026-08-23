@@ -1,5 +1,6 @@
 import {
   type CSSProperties,
+  type DragEvent,
   type FormEvent,
   type KeyboardEvent,
   type MouseEvent,
@@ -12,6 +13,7 @@ import {
 import {
   Check,
   ChevronRight,
+  File,
   FileText,
   Folder,
   FolderOpen,
@@ -34,13 +36,21 @@ export type FileTreeProps = {
   onOpen: (relativePath: string) => MaybePromise
   onCreateNote: (parentPath?: string) => MaybePromise
   onCreateFolder: (parentPath?: string) => MaybePromise
+  onImportPdf?: (parentPath?: string) => MaybePromise
+  onAttachBook?: (parentPath: string) => MaybePromise
+  onDetachBook?: (parentPath: string) => MaybePromise
+  bookFolderPaths?: string[]
   onSetFolderColor?: (relativePath: string, color: string | null) => MaybePromise
   onRename: (relativePath: string, nextName: string) => MaybePromise
+  onMove: (relativePath: string, destFolder: string) => MaybePromise
   onTrash: (relativePath: string) => MaybePromise
   className?: string
   rootLabel?: string
+  showHeader?: boolean
   showRootActions?: boolean
   emptyLabel?: string
+  /** Expand this folder and its parents after creating a nested folder. */
+  revealPath?: string | null
 }
 
 type ContextMenuState = {
@@ -79,13 +89,55 @@ function parentFolders(relativePath: string) {
 }
 
 function displayName(entry: VaultEntry) {
-  return entry.kind === 'file' && entry.name.toLowerCase().endsWith('.md')
-    ? entry.name.slice(0, -3)
+  return entry.kind === 'file' && /\.(md|markdown|famd|pdf)$/i.test(entry.name)
+    ? entry.name.replace(/\.(md|markdown|famd|pdf)$/i, '')
     : entry.name
+}
+
+function isPdfEntry(entry: VaultEntry) {
+  return entry.kind === 'file' && /\.pdf$/i.test(entry.name)
 }
 
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : 'Umbenennen fehlgeschlagen.'
+}
+
+const FANOTES_DRAG_TYPE = 'application/x-fanotes-entry'
+
+function parentPath(relativePath: string) {
+  const parts = relativePath.split('/').filter(Boolean)
+  return parts.slice(0, -1).join('/')
+}
+
+function isSelfOrDescendant(candidate: string, ancestor: string) {
+  return candidate === ancestor || candidate.startsWith(`${ancestor}/`)
+}
+
+function dropFolderFor(targetKind: 'file' | 'folder' | 'root', targetPath = '') {
+  if (targetKind === 'root') return ''
+  if (targetKind === 'folder') return targetPath
+  return parentPath(targetPath)
+}
+
+function canMoveTo(sourcePath: string, sourceKind: VaultEntry['kind'], destFolder: string) {
+  if (sourceKind === 'folder' && isSelfOrDescendant(destFolder, sourcePath)) return false
+  return parentPath(sourcePath) !== destFolder
+}
+
+function parseDragSource(event: DragEvent): { path: string; kind: VaultEntry['kind'] } | null {
+  const typed = event.dataTransfer.getData(FANOTES_DRAG_TYPE)
+  if (typed) {
+    try {
+      const parsed = JSON.parse(typed) as { path?: unknown; kind?: unknown }
+      if (typeof parsed.path === 'string' && (parsed.kind === 'file' || parsed.kind === 'folder')) {
+        return { path: parsed.path, kind: parsed.kind }
+      }
+    } catch {
+      return null
+    }
+  }
+  const plain = event.dataTransfer.getData('text/plain').trim()
+  return plain ? { path: plain, kind: 'file' } : null
 }
 
 export const FileTree = memo(function FileTree({
@@ -94,19 +146,30 @@ export const FileTree = memo(function FileTree({
   onOpen,
   onCreateNote,
   onCreateFolder,
+  onImportPdf,
+  onAttachBook,
+  onDetachBook,
+  bookFolderPaths = [],
   onSetFolderColor,
   onRename,
+  onMove,
   onTrash,
   className = '',
   rootLabel = 'Dateien',
+  showHeader = true,
   showRootActions = true,
   emptyLabel = 'Noch keine Notizen vorhanden',
+  revealPath = null,
 }: FileTreeProps) {
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set())
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
   const [renaming, setRenaming] = useState<RenameState | null>(null)
   const [renameBusy, setRenameBusy] = useState(false)
+  const [dragPath, setDragPath] = useState<string | null>(null)
+  const [dropFolder, setDropFolder] = useState<string | null>(null)
+  const [moveBusy, setMoveBusy] = useState(false)
   const renameInputRef = useRef<HTMLInputElement>(null)
+  const dragSourceRef = useRef<{ path: string; kind: VaultEntry['kind'] } | null>(null)
   const orderedEntries = useMemo(() => sortedEntries(entries), [entries])
 
   useEffect(() => {
@@ -117,6 +180,16 @@ export const FileTree = memo(function FileTree({
       return next
     })
   }, [activePath])
+
+  useEffect(() => {
+    if (!revealPath) return
+    setExpanded((current) => {
+      const next = new Set(current)
+      parentFolders(revealPath).forEach((path) => next.add(path))
+      next.add(revealPath)
+      return next
+    })
+  }, [revealPath])
 
   useEffect(() => {
     if (!contextMenu) return
@@ -194,15 +267,92 @@ export const FileTree = memo(function FileTree({
     await onTrash(entry.relativePath)
   }
 
+  useEffect(() => {
+    if (dropFolder === null || dropFolder === '') return
+    const timer = window.setTimeout(() => toggleFolder(dropFolder, true), 420)
+    return () => window.clearTimeout(timer)
+  }, [dropFolder])
+
+  const beginDrag = (entry: VaultEntry, event: DragEvent) => {
+    if (renaming || moveBusy) {
+      event.preventDefault()
+      return
+    }
+    const payload = { path: entry.relativePath, kind: entry.kind }
+    dragSourceRef.current = payload
+    event.dataTransfer.setData(FANOTES_DRAG_TYPE, JSON.stringify(payload))
+    event.dataTransfer.setData('text/plain', entry.relativePath)
+    event.dataTransfer.effectAllowed = 'move'
+    setDragPath(entry.relativePath)
+    setDropFolder(null)
+  }
+
+  const endDrag = () => {
+    dragSourceRef.current = null
+    setDragPath(null)
+    setDropFolder(null)
+  }
+
+  const destForTarget = (targetKind: 'file' | 'folder' | 'root', targetPath = '') => {
+    const source = dragSourceRef.current
+    if (!source) return null
+    const dest = dropFolderFor(targetKind, targetPath)
+    return canMoveTo(source.path, source.kind, dest) ? dest : null
+  }
+
+  const handleDragOver = (
+    event: DragEvent,
+    targetKind: 'file' | 'folder' | 'root',
+    targetPath = '',
+  ) => {
+    if (targetKind !== 'root') event.stopPropagation()
+    const dest = destForTarget(targetKind, targetPath)
+    if (dest === null) {
+      setDropFolder(null)
+      return
+    }
+    event.preventDefault()
+    event.dataTransfer.dropEffect = 'move'
+    setDropFolder(dest)
+  }
+
+  const handleDrop = async (
+    event: DragEvent,
+    targetKind: 'file' | 'folder' | 'root',
+    targetPath = '',
+  ) => {
+    if (targetKind !== 'root') event.stopPropagation()
+    event.preventDefault()
+    const source = dragSourceRef.current ?? parseDragSource(event)
+    const dest = source
+      ? (canMoveTo(source.path, source.kind, dropFolderFor(targetKind, targetPath))
+        ? dropFolderFor(targetKind, targetPath)
+        : null)
+      : null
+    endDrag()
+    if (!source || dest === null || moveBusy) return
+    setMoveBusy(true)
+    try {
+      if (dest) toggleFolder(dest, true)
+      await onMove(source.path, dest)
+    } finally {
+      setMoveBusy(false)
+    }
+  }
+
   const createInFolder = (
     entry: VaultEntry,
-    kind: 'note' | 'folder',
+    kind: 'note' | 'folder' | 'pdf' | 'book',
     event?: MouseEvent,
   ) => {
     event?.stopPropagation()
     setContextMenu(null)
     toggleFolder(entry.relativePath, true)
-    const action = kind === 'note' ? onCreateNote : onCreateFolder
+    const action = kind === 'note' ? onCreateNote
+      : kind === 'pdf' ? onImportPdf
+        : kind === 'book' ? onAttachBook
+          : onCreateFolder
+    if (!action) return
     void Promise.resolve(action(entry.relativePath))
   }
 
@@ -238,17 +388,21 @@ export const FileTree = memo(function FileTree({
         aria-expanded={isFolder ? isExpanded : undefined}
         className={`file-tree__item ${isActive ? 'is-active' : ''} ${
           isExpanded ? 'is-expanded' : ''
-        }`.trim()}
+        } ${dragPath === entry.relativePath ? 'is-dragging' : ''}`.trim()}
         key={entry.relativePath}
         role="treeitem"
       >
         <div
-          className="file-tree__row"
+          className={`file-tree__row ${
+            isFolder && dropFolder === entry.relativePath ? 'is-drop-target' : ''
+          }`.trim()}
           data-kind={entry.kind}
           onContextMenu={(event) => {
             event.preventDefault()
             setContextMenu({ entry, x: event.clientX, y: event.clientY })
           }}
+          onDragOver={(event) => handleDragOver(event, entry.kind, entry.relativePath)}
+          onDrop={(event) => void handleDrop(event, entry.kind, entry.relativePath)}
           style={depthStyle}
         >
           {isRenaming ? (
@@ -308,12 +462,15 @@ export const FileTree = memo(function FileTree({
               <button
                 aria-current={isActive ? 'page' : undefined}
                 className="file-tree__entry-button"
+                draggable={!isRenaming && !moveBusy}
                 onClick={() => {
                   if (isFolder) toggleFolder(entry.relativePath)
                   else void Promise.resolve(onOpen(entry.relativePath))
                 }}
+                onDragStart={(event) => beginDrag(entry, event)}
+                onDragEnd={endDrag}
                 onKeyDown={(event) => handleRowKey(event, entry)}
-                title={entry.relativePath}
+                title={`${entry.relativePath} · Ziehen, um in einen Ordner oder auf die oberste Ebene zu legen`}
                 type="button"
               >
                 <span className="file-tree__chevron" aria-hidden="true">
@@ -326,6 +483,8 @@ export const FileTree = memo(function FileTree({
                     ) : (
                       <Folder size={16} />
                     )
+                  ) : isPdfEntry(entry) ? (
+                    <File size={16} />
                   ) : (
                     <FileText size={16} />
                   )}
@@ -335,15 +494,26 @@ export const FileTree = memo(function FileTree({
 
               <span className="file-tree__inline-actions">
                 {isFolder && (
-                  <button
-                    aria-label={`Neue Notiz in ${displayName(entry)}`}
-                    className="file-tree__mini-action"
-                    onClick={(event) => createInFolder(entry, 'note', event)}
-                    title="Neue Notiz"
-                    type="button"
-                  >
-                    <Plus aria-hidden="true" size={14} />
-                  </button>
+                  <>
+                    <button
+                      aria-label={`Neue Notiz in ${displayName(entry)}`}
+                      className="file-tree__mini-action"
+                      onClick={(event) => createInFolder(entry, 'note', event)}
+                      title="Neue Notiz in diesem Ordner"
+                      type="button"
+                    >
+                      <Plus aria-hidden="true" size={14} />
+                    </button>
+                    <button
+                      aria-label={`Neuer Unterordner in ${displayName(entry)}`}
+                      className="file-tree__mini-action"
+                      onClick={(event) => createInFolder(entry, 'folder', event)}
+                      title="Unterordner anlegen"
+                      type="button"
+                    >
+                      <FolderPlus aria-hidden="true" size={14} />
+                    </button>
+                  </>
                 )}
                 <button
                   aria-label={`Aktionen für ${displayName(entry)}`}
@@ -369,8 +539,22 @@ export const FileTree = memo(function FileTree({
             {children.length > 0 ? (
               children.map((child) => renderEntry(child, depth + 1))
             ) : (
-              <li className="file-tree__folder-empty" style={depthStyle}>
-                Leer
+              <li
+                className={`file-tree__folder-empty ${
+                  dropFolder === entry.relativePath ? 'is-drop-target' : ''
+                }`.trim()}
+                onDragOver={(event) => handleDragOver(event, 'folder', entry.relativePath)}
+                onDrop={(event) => void handleDrop(event, 'folder', entry.relativePath)}
+                style={depthStyle}
+              >
+                <span>Leer</span>
+                <button
+                  type="button"
+                  className="file-tree__empty-subfolder"
+                  onClick={(event) => createInFolder(entry, 'folder', event)}
+                >
+                  Unterordner anlegen
+                </button>
               </li>
             )}
           </ul>
@@ -380,32 +564,50 @@ export const FileTree = memo(function FileTree({
   }
 
   return (
-    <section className={`file-tree ${className}`.trim()} aria-label={rootLabel}>
-      <div className="file-tree__header">
-        <span className="file-tree__title">{rootLabel}</span>
-        {showRootActions && (
-          <span className="file-tree__root-actions">
-            <button
-              aria-label="Neue Notiz"
-              className="file-tree__action"
-              onClick={() => void Promise.resolve(onCreateNote())}
-              title="Neue Notiz"
-              type="button"
-            >
-              <Plus aria-hidden="true" size={16} />
-            </button>
-            <button
-              aria-label="Neuer Ordner"
-              className="file-tree__action"
-              onClick={() => void Promise.resolve(onCreateFolder())}
-              title="Neuer Ordner"
-              type="button"
-            >
-              <FolderPlus aria-hidden="true" size={16} />
-            </button>
-          </span>
-        )}
-      </div>
+    <section
+      className={`file-tree ${className} ${dropFolder === '' ? 'is-drop-root' : ''}`.trim()}
+      aria-label={rootLabel}
+      onDragOver={(event) => handleDragOver(event, 'root')}
+      onDrop={(event) => void handleDrop(event, 'root')}
+    >
+      {showHeader && (
+        <div className="file-tree__header">
+          <span className="file-tree__title">{rootLabel}</span>
+          {showRootActions && (
+            <span className="file-tree__root-actions">
+              <button
+                aria-label="Neue Notiz"
+                className="file-tree__action"
+                onClick={() => void Promise.resolve(onCreateNote())}
+                title="Neue Notiz"
+                type="button"
+              >
+                <Plus aria-hidden="true" size={16} />
+              </button>
+              <button
+                aria-label="Neuer Ordner"
+                className="file-tree__action"
+                onClick={() => void Promise.resolve(onCreateFolder())}
+                title="Neuer Ordner"
+                type="button"
+              >
+                <FolderPlus aria-hidden="true" size={16} />
+              </button>
+              {onImportPdf && (
+                <button
+                  aria-label="PDF importieren"
+                  className="file-tree__action"
+                  onClick={() => void Promise.resolve(onImportPdf())}
+                  title="PDF importieren"
+                  type="button"
+                >
+                  <File aria-hidden="true" size={16} />
+                </button>
+              )}
+            </span>
+          )}
+        </div>
+      )}
 
       {orderedEntries.length > 0 ? (
         <ul className="file-tree__root" role="tree">
@@ -433,13 +635,13 @@ export const FileTree = memo(function FileTree({
             left: Math.min(Math.max(8, contextMenu.x), window.innerWidth - 232),
             top: Math.min(
               Math.max(8, contextMenu.y),
-              window.innerHeight - (contextMenu.entry.kind === 'folder' ? 390 : 172),
+              window.innerHeight - (contextMenu.entry.kind === 'folder' ? 510 : 172),
             ),
           }}
         >
           <div className="file-tree__menu-head">
-            <span>{contextMenu.entry.kind === 'folder' ? <FolderOpen size={16} /> : <FileText size={16} />}</span>
-            <div><small>{contextMenu.entry.kind === 'folder' ? 'Ordner' : 'Notiz'}</small><strong>{displayName(contextMenu.entry)}</strong></div>
+            <span>{contextMenu.entry.kind === 'folder' ? <FolderOpen size={16} /> : isPdfEntry(contextMenu.entry) ? <File size={16} /> : <FileText size={16} />}</span>
+            <div><small>{contextMenu.entry.kind === 'folder' ? 'Ordner' : isPdfEntry(contextMenu.entry) ? 'PDF-Notiz' : 'Notiz'}</small><strong>{displayName(contextMenu.entry)}</strong></div>
           </div>
           {contextMenu.entry.kind === 'folder' && (
             <>
@@ -452,6 +654,40 @@ export const FileTree = memo(function FileTree({
                 <Plus aria-hidden="true" size={15} />
                 Neue Notiz
               </button>
+              {onImportPdf && (
+              <button
+                onClick={() => createInFolder(contextMenu.entry, 'pdf')}
+                role="menuitem"
+                type="button"
+              >
+                <File aria-hidden="true" size={15} />
+                PDF importieren
+              </button>
+              )}
+              {onAttachBook && (
+              <button
+                onClick={() => createInFolder(contextMenu.entry, 'book')}
+                role="menuitem"
+                type="button"
+              >
+                <FileText aria-hidden="true" size={15} />
+                Buch hinzufügen
+              </button>
+              )}
+              {onDetachBook && bookFolderPaths.includes(contextMenu.entry.relativePath) && (
+              <button
+                onClick={() => {
+                  const path = contextMenu.entry.relativePath
+                  setContextMenu(null)
+                  void Promise.resolve(onDetachBook(path))
+                }}
+                role="menuitem"
+                type="button"
+              >
+                <X aria-hidden="true" size={15} />
+                Buch entfernen
+              </button>
+              )}
               <button
                 onClick={() => createInFolder(contextMenu.entry, 'folder')}
                 role="menuitem"

@@ -10,9 +10,13 @@ const UNUSED_CHROMIUM_FEATURES = Object.freeze([
   'AutofillServerCommunication',
   'CertificateTransparencyComponentUpdater',
   'GlobalMediaControls',
+  'InterestFeedContentSuggestions',
   'MediaRouter',
   'OptimizationHints',
   'Translate',
+])
+const DESKTOP_GPU_FEATURES = Object.freeze([
+  'CanvasOopRasterization',
 ])
 const ALLOWED_MEMORY_BUDGETS_MB = Object.freeze([1536, 2048, 3072, 4096, 6144, 8192])
 
@@ -32,6 +36,153 @@ function removeSwitchValues(commandLine, name, removals) {
     .filter((value) => !blocked.has(value.toLocaleLowerCase('en-US')))
   commandLine.removeSwitch?.(name)
   if (values.length) commandLine.appendSwitch(name, values.join(','))
+}
+
+const HYPRLAND_MAX_FILES = 24
+const HYPRLAND_MAX_BYTES = 256 * 1024
+
+function stripHyprlandComment(line) {
+  const hash = String(line).indexOf('#')
+  return hash === -1 ? String(line) : String(line).slice(0, hash)
+}
+
+function expandHyprlandPath(raw, environment, fromDir) {
+  let value = String(raw ?? '').trim().replace(/^['"]|['"]$/gu, '')
+  if (!value) return ''
+  const home = typeof environment.HOME === 'string' ? environment.HOME : ''
+  const xdg = typeof environment.XDG_CONFIG_HOME === 'string' && environment.XDG_CONFIG_HOME
+    ? environment.XDG_CONFIG_HOME
+    : (home ? path.join(home, '.config') : '')
+  if (value === '~') {
+    value = home
+  } else if (value.startsWith('~/')) {
+    value = home ? path.join(home, value.slice(2)) : ''
+  }
+  value = value.replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)/gu, (_match, braced, bare) => {
+    const name = braced || bare
+    if (name === 'HOME') return home
+    if (name === 'XDG_CONFIG_HOME') return xdg
+    const found = environment[name]
+    return typeof found === 'string' ? found : ''
+  })
+  if (!value) return ''
+  return path.isAbsolute(value) ? path.normalize(value) : path.resolve(fromDir, value)
+}
+
+function resolveHyprlandSourceTargets(pattern, environment, fromDir) {
+  const expanded = expandHyprlandPath(pattern, environment, fromDir)
+  if (!expanded) return []
+  if (!/[*?\[]/u.test(expanded)) return [expanded]
+  try {
+    return fs.globSync(expanded).filter(Boolean).sort()
+  } catch {
+    return []
+  }
+}
+
+function scanHyprlandForceZeroScaling(filePath, environment, readFile, visited) {
+  const resolved = path.resolve(filePath)
+  if (visited.has(resolved) || visited.size >= HYPRLAND_MAX_FILES) return null
+  visited.add(resolved)
+  let text
+  try {
+    const info = fs.statSync(resolved)
+    if (!info.isFile() || info.size <= 0 || info.size > HYPRLAND_MAX_BYTES) return null
+    text = readFile(resolved, 'utf8')
+  } catch {
+    return null
+  }
+  let last = null
+  const fromDir = path.dirname(resolved)
+  for (const rawLine of String(text).split(/\r?\n/u)) {
+    const line = stripHyprlandComment(rawLine).trim()
+    if (!line) continue
+    const source = /^source\s*=\s*(.+)$/iu.exec(line)
+    if (source) {
+      for (const target of resolveHyprlandSourceTargets(source[1], environment, fromDir)) {
+        const nested = scanHyprlandForceZeroScaling(target, environment, readFile, visited)
+        if (nested !== null) last = nested
+      }
+      continue
+    }
+    const scaling = /^force_zero_scaling\s*=\s*(true|false)\b/iu.exec(line)
+    if (scaling) last = scaling[1].toLocaleLowerCase('en-US') === 'true'
+  }
+  return last
+}
+
+function readHyprlandForceZeroScaling(environment = process.env, readFile = fs.readFileSync) {
+  const configured = typeof environment.FANOTES_HYPRLAND_CONFIG === 'string'
+    ? environment.FANOTES_HYPRLAND_CONFIG.trim()
+    : ''
+  const home = typeof environment.HOME === 'string' ? environment.HOME : ''
+  const roots = configured
+    ? [configured]
+    : (home ? [path.join(home, '.config', 'hypr', 'hyprland.conf')] : [])
+  for (const file of roots) {
+    if (scanHyprlandForceZeroScaling(file, environment, readFile, new Set())) return true
+  }
+  return false
+}
+
+function linuxWindowFrameOptions() {
+  return Object.freeze({
+    frame: true,
+    titleBarStyle: 'default',
+    autoHideMenuBar: true,
+  })
+}
+
+function linuxOzoneLaunchPlan() {
+  return {
+    platform: 'x11',
+    env: Object.freeze({ ELECTRON_OZONE_PLATFORM_HINT: 'x11' }),
+    argv: Object.freeze(['--ozone-platform=x11', '--ozone-platform-hint=x11']),
+  }
+}
+
+function linuxOzoneDesktopExec(binary = 'fanotes') {
+  return `${binary} ${linuxOzoneLaunchPlan().argv.join(' ')}`
+}
+
+function linuxOzoneAppRunExecLine(binaryExpression) {
+  const plan = linuxOzoneLaunchPlan()
+  const exports = Object.entries(plan.env).map(([name, value]) => `export ${name}=${value}`).join('\n')
+  return `${exports}\nexec ${binaryExpression} ${plan.argv.join(' ')} "$@"`
+}
+
+function applyLinuxOzoneLaunchEnvironment(environment = process.env, argv = process.argv) {
+  if (process.platform !== 'linux') {
+    return { ozone: null, environment, argv }
+  }
+  const plan = linuxOzoneLaunchPlan()
+  for (const [name, value] of Object.entries(plan.env)) environment[name] = value
+  for (const flag of plan.argv) {
+    const separator = flag.indexOf('=')
+    const name = separator === -1 ? flag : flag.slice(0, separator)
+    const prefix = `${name}=`
+    const present = argv.some((item) => (
+      item === flag || item === name || (typeof item === 'string' && item.startsWith(prefix))
+    ))
+    if (!present) argv.push(flag)
+  }
+  return { ozone: plan.platform, environment, argv }
+}
+
+function configureLinuxInputPlatform(electronApp, environment = process.env) {
+  if (process.platform !== 'linux') {
+    return { ozone: null, scaleFactor: null, hyprlandZeroScaling: false }
+  }
+  const commandLine = electronApp.commandLine
+  commandLine.appendSwitch('ozone-platform', 'x11')
+  commandLine.appendSwitch('ozone-platform-hint', 'x11')
+  const hyprlandZeroScaling = readHyprlandForceZeroScaling(environment)
+  if (hyprlandZeroScaling) commandLine.appendSwitch('force-device-scale-factor', '2')
+  return {
+    ozone: 'x11',
+    scaleFactor: hyprlandZeroScaling ? 2 : null,
+    hyprlandZeroScaling,
+  }
 }
 
 function configureLinuxGraphics(electronApp, environment = process.env) {
@@ -85,6 +236,16 @@ function readStartupResourceLimits(userDataPath) {
   }
 }
 
+function configureDesktopGpu(electronApp) {
+  const commandLine = electronApp.commandLine
+  commandLine.appendSwitch('enable-gpu-rasterization')
+  mergeSwitchValues(commandLine, 'enable-features', DESKTOP_GPU_FEATURES)
+  // Older school laptops often sit on Chromium's GPU blocklist even though
+  // their Intel/AMD chips still composite a notes app correctly.
+  if (process.platform === 'win32') commandLine.appendSwitch('ignore-gpu-blocklist')
+  return { gpuRasterization: true, ignoreGpuBlocklist: process.platform === 'win32' }
+}
+
 function configureLeanChromiumStartup(electronApp, resourceLimits = {}) {
   const commandLine = electronApp.commandLine
   for (const name of [
@@ -94,6 +255,7 @@ function configureLeanChromiumStartup(electronApp, resourceLimits = {}) {
     'disable-component-update',
     'disable-default-apps',
     'disable-domain-reliability',
+    'disable-hang-monitor',
     'disable-sync',
     'metrics-recording-only',
     'no-first-run',
@@ -179,9 +341,18 @@ function cleanupStaleSingletonLocks(userDataPath) {
 module.exports = {
   SINGLETON_NAMES,
   VULKAN_FEATURES,
+  DESKTOP_GPU_FEATURES,
   ALLOWED_MEMORY_BUDGETS_MB,
   cleanupStaleSingletonLocks,
+  configureDesktopGpu,
   configureLeanChromiumStartup,
+  applyLinuxOzoneLaunchEnvironment,
   configureLinuxGraphics,
+  configureLinuxInputPlatform,
+  linuxOzoneAppRunExecLine,
+  linuxOzoneDesktopExec,
+  linuxOzoneLaunchPlan,
+  linuxWindowFrameOptions,
+  readHyprlandForceZeroScaling,
   readStartupResourceLimits,
 }

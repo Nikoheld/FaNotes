@@ -21,9 +21,11 @@ const USER_CONTENT_SELECTOR = [
   '.lm-result-source',
   '.lm-preview-empty b',
   '.vault-overview__recent-copy',
-  '.vault-overview__graph-label',
-  '.vault-overview__graph-note-label',
-  '.vault-overview__graph svg title',
+  '.vault-overview__name',
+  '.homework-card-body',
+  '.homework-day li',
+  '.homework-field input',
+  '.homework-field textarea',
 ].join(',')
 
 let preference: UiLanguagePreference = readStoredPreference()
@@ -34,7 +36,8 @@ let observer: MutationObserver | null = null
 let replacements: Array<[string, string]> = []
 let replacementExpression: RegExp | null = null
 let replacementPreparationScheduled = false
-const GERMAN_HINT = /[ÄÖÜäöüß]|\b(?:der|die|das|den|dem|des|ein|eine|einen|einem|und|oder|für|mit|ohne|von|bei|auf|aus|zu|zum|zur|dein|deine|wird|werden|ist|sind|nicht|noch|nur|alle|keine|bitte|schritt|willkommen|zurück|weiter|fertig)\b|(?:ung|keit|heit|lich|isch|ieren|zeichen|schrift|farbe|ordner|notiz|seite|speicher|erkenn|einstell)/iu
+const GERMAN_HINT = /[ÄÖÜäöüß]|\b(?:der|die|das|den|dem|des|ein|eine|einen|einem|und|oder|für|mit|ohne|von|bei|auf|aus|zu|zum|zur|dein|deine|wird|werden|ist|sind|nicht|noch|nur|alle|keine|bitte|schritt|willkommen|zurück|weiter|fertig|anpassung|optionen|blatt|schreibmodus|stiftmodus|werkzeuge|experimentell|verlinkung|sitzung|auspoppen|finde|pinsel|farben|piktogramme|bleistift|kalligrafie|textmarker|aquarell|deckkraft|verlauf|sammlung|ausgewogen|zeilenabstand|datenerfassung|muster|paket|modell|integriert|verbindungen|trainingspaket|aktueller|strich|frei|breite|erfassen)\b|Vault-Wurzel|(?:ung|keit|heit|lich|isch|ieren|zeichen|schrift|farbe|ordner|notiz|seite|speicher|erkenn|einstell)/iu
+const EXACT_ONLY_REPLACEMENTS = new Set(['Frei', 'Breite', 'Pinsel', 'Farben', 'Strich'])
 
 const textSnapshots = new WeakMap<Text, { source: string; translated: string }>()
 const attributeSnapshots = new WeakMap<Element, Map<string, AttributeSnapshot>>()
@@ -81,7 +84,7 @@ async function loadEnglishCatalog(): Promise<EnglishCatalog> {
 function prepareReplacementIndex() {
   if (!catalog || replacementExpression) return
   replacements = Object.entries(catalog)
-    .filter(([source, translated]) => source !== translated && source.length >= 4)
+    .filter(([source, translated]) => source !== translated && source.length >= 4 && !EXACT_ONLY_REPLACEMENTS.has(source))
     .sort(([left], [right]) => right.length - left.length)
   replacementExpression = new RegExp(replacements.map(([source]) => source.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')).join('|'), 'gu')
   if (activeLanguage === 'en') translateTree(document)
@@ -127,6 +130,12 @@ function translateCore(source: string): string {
   }
   if (/^1 (?:Fach|Fächer)(.*)$/u.test(source)) return source.replace(/^1 (?:Fach|Fächer)/u, '1 subject')
   if (/^\d+ (?:Fach|Fächer)(.*)$/u.test(source)) return source.replace(/^([\d]+) (?:Fach|Fächer)/u, '$1 subjects')
+  if (/^1 Ordner$/u.test(source)) return '1 folder'
+  if (/^\d+ Ordner$/u.test(source)) return source.replace('Ordner', 'folders')
+  if (/^1 Unterordner$/u.test(source)) return '1 subfolder'
+  if (/^\d+ Unterordner$/u.test(source)) return source.replace('Unterordner', 'subfolders')
+  if (/^\d+ Einträge$/u.test(source)) return source.replace('Einträge', 'entries')
+  if (/^1 Eintrag$/u.test(source)) return '1 entry'
   if (/^1 Zeichen$/u.test(source)) return '1 character'
   if (/^\d+ Zeichen$/u.test(source)) return source.replace('Zeichen', 'characters')
   if (/^1 Wort$/u.test(source)) return '1 word'
@@ -140,12 +149,106 @@ function translateCore(source: string): string {
   if (source === 'GlyphenWerk-Seitenleiste einklappen') return 'Collapse GlyphenWerk sidebar'
   if (source === 'Gliederung umschalten') return 'Toggle outline'
   if (source === 'Fineliner: klar & präzise') return 'Fineliner: clear & precise'
+  if (source === 'Bleistift: weich texturiert') return 'Pencil: softly textured'
   if (source === 'Marker: satt & gleichmässig') return 'Marker: bold & even'
+  if (source === 'Pinsel: dynamischer Druck') return 'Brush: dynamic pressure'
   if (source === 'Kalligrafie: schräge Breitfeder') return 'Calligraphy: angled broad nib'
+  if (source === 'Textmarker: transparent') return 'Highlighter: transparent'
+  if (source === 'Aquarell: lasierende Kanten') return 'Watercolor: glazing edges'
+  if (source === 'Spray: feine Partikel') return 'Spray: fine particles'
   if (source === 'Zeichen & Varianten erfassen') return 'Capture symbols & variants'
   if (source === 'Zurück zu Fächern & Notizen') return 'Back to folders & notes'
+  if (source === 'Verlinkung') return 'Link'
+  if (source === 'Verlinkung setzen') return 'Place a link'
+  if (source === 'Verlinkungsstil') return 'Link style'
+  if (source === 'Symbol und Text') return 'Symbol and text'
+  if (source === 'Verlinkung gesetzt. Tippen öffnet die neue Notiz.') return 'Link placed. Tap it to open the new note.'
+  if (source === 'Öffne zuerst eine Notiz, um eine Verlinkung zu setzen.') return 'Open a note first to place a link.'
+  if (source === 'Die Verlinkung konnte nicht erstellt werden.') return 'The link could not be created.'
+  if (source === 'Der Verlinkungsstil konnte nicht gespeichert werden.') return 'The link style could not be saved.'
+  if (source === 'Irgendwo auf der Seite eine neue Notiz verlinken') return 'Link a new note anywhere on the page'
+  if (source === 'Backup') return 'Backup'
+  if (source === 'Weiteres Backup') return 'Another backup'
+  if (source === 'Notiz-Backup') return 'Note backup'
+  if (source === 'Backup gespeichert.') return 'Backup saved.'
+  if (source === 'Backup wiederhergestellt.') return 'Backup restored.'
+  if (source === 'Das Backup konnte nicht erstellt werden.') return 'The backup could not be created.'
+  if (source === 'Dieses Backup gibt es nicht.') return 'That backup does not exist.'
+  if (source === 'Öffne zuerst eine Notiz, die gesichert werden kann.') return 'Open a note first that can be backed up.'
+  if (source === 'Aktuelle Notiz so sichern, wie sie ist') return 'Save the current note as it is'
+  if (source === 'Backup der aktuellen Notiz') return 'Backup of the current note'
+  if (source === 'Backup: weiteres Backup oder wiederherstellen') return 'Backup: take another snapshot or restore'
+  if (source === 'Send Data') return 'Send Data'
+  if (source === 'Buch') return 'Book'
+  if (source === 'Buchansicht') return 'Book view'
+  if (source === 'Buch hinzufügen') return 'Add book'
+  if (source === 'Buch entfernen') return 'Remove book'
+  if (source === 'Buchplatzierung') return 'Book placement'
+  if (source === 'Buch schließen') return 'Close book'
+  if (source === 'Buch einblenden') return 'Show book'
+  if (source === 'Buch ausblenden') return 'Hide book'
+  if (source === 'Links') return 'Left'
+  if (source === 'Rechts') return 'Right'
+  if (source === 'Oben') return 'Top'
+  if (source === 'Unten') return 'Bottom'
+  if (source === 'Auspoppen') return 'Pop out'
+  if (source === 'Notizen') return 'Notes'
+  if (source === 'Offene Notizen') return 'Open notes'
+  if (source === 'Experimentell') return 'Experimental'
+  if (source === 'Remote Support') return 'Remote Support'
+  if (source === 'Sitzung starten') return 'Start session'
+  if (source === 'Sitzung beenden') return 'End session'
+  if (source === 'Code kopieren') return 'Copy code'
+  if (source === 'Sitzungscode') return 'Session code'
+  if (source === 'Fehler melden') return 'Report a bug'
+  if (source === 'Blatt') return 'Sheet'
+  if (source === 'Finde alles wieder') return 'Find everything again'
+  if (source === 'Pinsel') return 'Brush'
+  if (source === 'Farben') return 'Colors'
+  if (source === 'Piktogramme') return 'Pictograms'
+  if (source === 'Bleistift') return 'Pencil'
+  if (source === 'Kalligrafie') return 'Calligraphy'
+  if (source === 'Textmarker') return 'Highlighter'
+  if (source === 'Aquarell') return 'Watercolor'
+  if (source === 'Breite') return 'Width'
+  if (source === 'Deckkraft') return 'Opacity'
+  if (source === 'Aktueller Strich') return 'Current stroke'
+  if (source === 'Strich') return 'Stroke'
+  if (source === '1 Strich') return '1 stroke'
+  if (/^\d+ Striche$/u.test(source)) return source.replace('Striche', 'strokes')
+  if (source === 'Zeilenabstand') return 'Line spacing'
+  if (source === 'Datenerfassung') return 'Data capture'
+  if (source === 'Frei') return 'Free'
+  if (source === 'Ausgewogen') return 'Balanced'
+  if (source === 'Sammlung') return 'Collection'
+  if (source === 'Erkennung testen') return 'Test recognition'
+  if (source === 'Exportieren') return 'Export'
+  if (source === 'In FaNotes integriert') return 'Built into FaNotes'
+  if (source === 'Training & Modell' || source === 'Training &amp; Modell') return 'Training & model'
+  if (source === 'Trainingspaket') return 'Training package'
+  if (source === 'Icons & Piktogramme' || source === 'Icons &amp; Piktogramme') return 'Icons & pictograms'
+  if (source === 'Was steckt im Paket?') return 'What is in the package?'
+  if (source === 'Zeichenstudio') return 'Art studio'
+  if (source === 'Blatt im Uhrzeigersinn drehen') return 'Rotate the sheet clockwise'
+  if (source === 'Blatt gegen den Uhrzeigersinn drehen') return 'Rotate the sheet counterclockwise'
+  if (source === 'Schreibmodus') return 'Writing mode'
+  if (source === 'Stiftmodus') return 'Pen mode'
+  if (source === 'Werkzeuge') return 'Tools'
+  if (/^\d+ Werkzeuge$/u.test(source)) return source.replace('Werkzeuge', 'Tools')
+  if (source === 'Navigation') return 'Navigation'
+  if (source === 'Vault-Wurzel') return 'vault root'
+  if (source === 'In Vault-Wurzel') return 'In vault root'
+  if (source === 'Notizen im Buch') return 'Notes in the book'
+  if (source === 'Buch zum Fach hinzugefügt. Oben blendest du die Ansicht ein.') return 'Book added to the subject. Use the top bar to show it.'
+  if (source === 'Buch vom Fach entfernt. Die PDF-Datei bleibt im Ordner.') return 'Book removed from the subject. The PDF file stays in the folder.'
+  if (source === 'Öffne eine Notiz in einem Fach, um ein Buch hinzuzufügen.') return 'Open a note in a subject to add a book.'
+  if (source === 'Neue Notiz in diesem Ordner') return 'New note in this folder'
   const newNoteIn = /^Neue Notiz in (.+)$/u.exec(source)
   if (newNoteIn) return `New note in ${newNoteIn[1]}`
+  const newSubfolderIn = /^Neuer Unterordner in (.+)$/u.exec(source)
+  if (newSubfolderIn) return `New subfolder in ${newSubfolderIn[1]}`
+  const dragIntoFolder = /^(.+) · Ziehen, um in einen Ordner oder auf die oberste Ebene zu legen$/u.exec(source)
+  if (dragIntoFolder) return `${dragIntoFolder[1]} · Drag to move into a folder or back to the top level`
   const actionsFor = /^Aktionen für (.+)$/u.exec(source)
   if (actionsFor) return `Actions for ${actionsFor[1]}`
   const firstNoteIn = /^(.+): erste Notiz erstellen$/u.exec(source)
@@ -159,7 +262,60 @@ function translateCore(source: string): string {
     return `Visual knowledge graph with ${subjects} ${subjects === 1 ? 'subject' : 'subjects'} and ${notes} ${notes === 1 ? 'note' : 'notes'}`
   }
   const closeNamed = /^(.+) schließen$/u.exec(source)
-  if (closeNamed) return `Close ${closeNamed[1]}`
+  if (closeNamed) return `Close ${catalog[closeNamed[1]] ?? closeNamed[1]}`
+  const customizationOptions = /^Anpassung · (\d+) Optionen$/u.exec(source)
+  if (customizationOptions) {
+    const count = Number(customizationOptions[1])
+    return `Customization · ${count} ${count === 1 ? 'option' : 'options'}`
+  }
+  const bookNamed = /^Buch (.+)$/u.exec(source)
+  if (bookNamed) return `Book ${bookNamed[1]}`
+  const pdfPageNamed = /^PDF-Seite (\d+)$/u.exec(source)
+  if (pdfPageNamed) return `PDF page ${pdfPageNamed[1]}`
+  const inHistory = /^(\d+) im Verlauf$/u.exec(source)
+  if (inHistory) {
+    const count = Number(inHistory[1])
+    return `${count} in history`
+  }
+  const glyphenwerkStatus = /^GlyphenWerk · (.+)$/u.exec(source)
+  if (glyphenwerkStatus) {
+    const view = catalog[glyphenwerkStatus[1]] ?? (
+      glyphenwerkStatus[1] === 'Erkennung testen' ? 'Test recognition'
+        : glyphenwerkStatus[1] === 'Sammlung' ? 'Collection'
+          : glyphenwerkStatus[1] === 'Exportieren' ? 'Export'
+            : glyphenwerkStatus[1] === 'Training' ? 'Training'
+              : glyphenwerkStatus[1]
+    )
+    return `GlyphenWerk · ${view}`
+  }
+  if (source === 'Schreibe „') return 'Write “'
+  const writeGlyph = /^Schreibe „(.+)“$/u.exec(source)
+  if (writeGlyph) return `Write “${writeGlyph[1]}”`
+  const namedColor = /^Farbe (.+)$/u.exec(source)
+  if (namedColor) return `Color ${namedColor[1]}`
+  const artColor = /^Zeichenfarbe (.+)$/u.exec(source)
+  if (artColor) return `Drawing color ${artColor[1]}`
+  const specialInk = /^(.+) Spezialtinte$/u.exec(source)
+  if (specialInk) return `${catalog[specialInk[1]] ?? specialInk[1]} special ink`
+  const insertNamed = /^(.+) einfügen$/u.exec(source)
+  if (insertNamed) return `Insert ${catalog[insertNamed[1]] ?? insertNamed[1]}`
+  const tthPreview = /^(\d+) Zeichen · (\d+) Zeilen · (\d+) Verbindungen$/u.exec(source)
+  if (tthPreview) {
+    const glyphs = Number(tthPreview[1])
+    const lines = Number(tthPreview[2])
+    const joins = Number(tthPreview[3])
+    return `${glyphs} ${glyphs === 1 ? 'character' : 'characters'} · ${lines} ${lines === 1 ? 'line' : 'lines'} · ${joins} ${joins === 1 ? 'connection' : 'connections'}`
+  }
+  const patternCount = /^(\d+) Muster$/u.exec(source)
+  if (patternCount) {
+    const count = Number(patternCount[1])
+    return `${count} ${count === 1 ? 'pattern' : 'patterns'}`
+  }
+  const activeSamples = /^(\d+) Beispiele direkt in FaNotes aktiv$/u.exec(source)
+  if (activeSamples) {
+    const count = Number(activeSamples[1])
+    return `${count} ${count === 1 ? 'sample' : 'samples'} active directly in FaNotes`
+  }
   const canvasWith = /^Zeichenfläche mit (.+)$/u.exec(source)
   if (canvasWith) return `Canvas with ${canvasWith[1]}`
   const currentVersion = /^(FaNotes(?: Web)? \d+(?:\.\d+){2}(?:-beta\.\d+)?) ist aktuell$/u.exec(source)
@@ -209,7 +365,7 @@ function translateAttributes(element: Element) {
   if (ignored(element)) return
   const snapshots = attributeSnapshots.get(element) ?? new Map<string, AttributeSnapshot>()
   for (const attribute of TRANSLATED_ATTRIBUTES) {
-    if (attribute === 'title' && element.matches('.note-tab, .file-tree__entry-button, .vault-overview__recent-item')) continue
+    if (attribute === 'title' && element.matches('.note-tab, .vault-overview__recent-item')) continue
     const current = element.getAttribute(attribute)
     if (current === null) continue
     const previous = snapshots.get(attribute)

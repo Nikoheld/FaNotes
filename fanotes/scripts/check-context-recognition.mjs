@@ -11,10 +11,23 @@ const server = await createServer({
 try {
   const {
     applyTextReranking,
+    bodySizedApostropheFragmentPenalty,
     calibratePersonalBaseEvidence,
+    collapsedMathPrefixPenalty,
+    confirmedTextPrefixModeBonus,
+    groupRecognitionLines,
+    installRecognitionProperNameMembership,
+    installRecognitionWordCandidateProvider,
+    installRecognitionWordMembership,
+    learnedStrokeCountHypothesisScore,
     recognizedLatex,
     recognizedSentence,
+    selectedTextPrefixMatches,
+    standaloneLargeOperatorGeometryEvidenceForTests,
+    standaloneLargeOperatorIsDecisiveForTests,
     suggestMathLayoutAssignments,
+    textPrefixCompatibilityScore,
+    textPrefixModeBonus,
   } = await server.ssrLoadModule('/../src/lib/recognition.ts')
   const {
     cleanUnsupportedTerminalWordForTests,
@@ -22,6 +35,15 @@ try {
     personalizedTextFusionSelectionScore,
   } = await server.ssrLoadModule('/src/lib/personalizedTextRecognition.ts')
   const {
+    shortConnectedSegmentationIndexesForTests,
+    textPrefixContinuityScoreForTests,
+  } = await server.ssrLoadModule('/src/lib/personalizedLineRecognition.ts')
+  const {
+    glyphenWerkExactProjectionIsIndependent,
+    validatedGlyphenWerkTextPrefixHint,
+  } = await server.ssrLoadModule('/src/lib/glyphenWerkRecognitionBridge.ts')
+  const {
+    applyFinalNeuralLineContext,
     applyFinalNeuralWordContext,
     applyMeasuredNeuralWordContext,
     applyNeuralWordContext,
@@ -38,6 +60,9 @@ try {
     rareContextCommonNeighbourForTests,
     rankTrocrCandidateTextsForTests,
     repairNeuralPhysicalWordSpacingForTests,
+    shouldRequestIndependentTrocrViewForTests,
+    trocrGermanMultiwordRepairBonusForTests,
+    trocrRepeatedWordEvidenceBonusForTests,
     trocrStructuralRewritePenaltyForTests,
     trocrOrdinaryWordNamePenaltyForTests,
     trocrDenseGermanNamePenaltyForTests,
@@ -52,7 +77,670 @@ try {
     neuralTextMayOverrideAutomaticMode,
   } = await server.ssrLoadModule('/src/lib/recognitionModeSelection.ts')
   const { BASE_CATALOG } = await server.ssrLoadModule('/../src/data/catalog.ts')
+  const {
+    advanceStableTextPrefix,
+    canCarryUncertainTextState,
+    carryStableTextPrefixAcrossUncertainInk,
+    embeddedTextRecognitionHints,
+    hasLooseTextContinuation,
+    incrementalTextCharacterHint,
+    isAppendOnlyTextInk,
+    textPrefixAfterTokenCorrection,
+    textProjectionMatchesTokens,
+  } = await server.ssrLoadModule('/../src/lib/incrementalTextRecognition.ts')
   const labelByChar = new Map(BASE_CATALOG.map((label) => [label.char, label]))
+
+  const horizontalStroke = (x1, x2, y) => ({
+    baseWidth: 3,
+    color: '#111827',
+    pressureEnabled: true,
+    points: [
+      { x: x1, y, t: 0, pressure: 0.5, pointerType: 'pen' },
+      { x: x2, y, t: 1, pressure: 0.5, pointerType: 'pen' },
+    ],
+  })
+  const penStroke = (coordinates) => ({
+    baseWidth: 3,
+    color: '#111827',
+    pressureEnabled: true,
+    points: coordinates.map(([x, y], index) => ({
+      x,
+      y,
+      t: index,
+      pressure: 0.5,
+      pointerType: 'pen',
+    })),
+  })
+  const initialBody = penStroke([[0.1, 0.2], [0.18, 0.4]])
+  const incrementalState = {
+    strokes: [initialBody],
+    characterCount: 1,
+    text: 'T',
+    pendingStrokeIndex: 0,
+    prefixText: '',
+  }
+  assert.equal(
+    advanceStableTextPrefix(null, 'Tes', false),
+    '',
+    'Ein erster verbundener Stroke darf nicht sofort mehrere geratene Buchstaben stabilisieren.',
+  )
+  assert.equal(
+    advanceStableTextPrefix(incrementalState, 'Te', true),
+    'T',
+    'Nur ein bereits zuvor beobachteter Buchstabe darf nach einem neuen Körper stabil werden.',
+  )
+  assert.equal(
+    advanceStableTextPrefix(
+      { ...incrementalState, text: 'Te', prefixText: 'T' },
+      'Tes',
+      true,
+    ),
+    'Te',
+    'Übereinstimmende Append-Snapshots müssen den Präfix genau einen sicheren Schritt weiterführen.',
+  )
+  assert.equal(
+    advanceStableTextPrefix(
+      { ...incrementalState, text: 'Tes', prefixText: '' },
+      'Tes',
+      false,
+    ),
+    '',
+    'Ein Zubehörstrich am selben Snapshot darf keinen Teil eines verbunden geratenen Wortes fördern.',
+  )
+  assert.equal(
+    advanceStableTextPrefix(
+      { ...incrementalState, text: 'Tes', prefixText: 'Te' },
+      'Tos',
+      true,
+    ),
+    'T',
+    'Widersprochene automatische Präfixzeichen dürfen nicht weiter zurückgespeist werden.',
+  )
+  assert.equal(
+    advanceStableTextPrefix(
+      { ...incrementalState, text: 'T', prefixText: 'T', confirmedPrefixLength: 1 },
+      'F',
+      true,
+    ),
+    'T',
+    'Eine explizite T-Korrektur darf durch die nächste automatische F/Integral-Vermutung nicht verschwinden.',
+  )
+  assert.deepEqual(
+    textPrefixAfterTokenCorrection(null, 'Test', 0),
+    { prefixText: 'T', confirmedPrefixLength: 1 },
+    'Eine Einzelkorrektur am ersten Token darf nur diesen einen Präfixbuchstaben bestätigen.',
+  )
+  assert.deepEqual(
+    textPrefixAfterTokenCorrection(null, 'Test', 2),
+    { prefixText: '', confirmedPrefixLength: 0 },
+    'Eine Korrektur hinter einer unbestätigten Lücke darf frühere Tokens nicht implizit bestätigen.',
+  )
+  assert.deepEqual(
+    textPrefixAfterTokenCorrection(
+      { ...incrementalState, text: 'Te', prefixText: 'T', confirmedPrefixLength: 1 },
+      'Test',
+      1,
+    ),
+    { prefixText: 'Te', confirmedPrefixLength: 2 },
+    'Die Korrektur des direkt nächsten Tokens muss den bestätigten Präfix genau um eins erweitern.',
+  )
+  assert.deepEqual(
+    textPrefixAfterTokenCorrection(
+      { ...incrementalState, text: 'T', prefixText: 'T', confirmedPrefixLength: 1 },
+      'Fe',
+      1,
+    ),
+    { prefixText: 'Te', confirmedPrefixLength: 2 },
+    'Die Korrektur des zweiten Tokens darf ein früher bestätigtes T nicht durch die aktuelle F-Vermutung ersetzen.',
+  )
+  assert.equal(
+    textProjectionMatchesTokens('Test', 'Tost'),
+    false,
+    'Ein unabhängiger Hosttext darf bei abweichenden lokalen Tokens nicht als exakte Projektion erscheinen.',
+  )
+  assert.equal(
+    textProjectionMatchesTokens('A\u0308', 'Ä'),
+    true,
+    'Kanonisch äquivalente Zeichenfolgen dürfen als dieselbe Tokenprojektion gelten.',
+  )
+  const rapidTStem = penStroke([[0.27, 0.18], [0.27, 0.42]])
+  const rapidTBar = penStroke([[0.22, 0.19], [0.32, 0.19]])
+  const clonedInitialBody = {
+    ...initialBody,
+    points: initialBody.points.map((point) => ({ ...point })),
+  }
+  const integralStroke = penStroke([
+    [0.48, 0.12], [0.46, 0.11], [0.44, 0.16], [0.43, 0.25],
+    [0.44, 0.34], [0.42, 0.43], [0.39, 0.49], [0.37, 0.47],
+  ])
+  const summationStroke = penStroke([
+    [0.5, 0.13], [0.4, 0.13], [0.46, 0.26], [0.46, 0.31],
+    [0.4, 0.39], [0.5, 0.39],
+  ])
+  assert.equal(
+    standaloneLargeOperatorGeometryEvidenceForTests('operator_integral', [integralStroke]),
+    true,
+    'Eine echte Integraltrajektorie muss unabhängig von der konkurrierenden Text-Tokenzahl geschützt sein.',
+  )
+  assert.equal(
+    standaloneLargeOperatorGeometryEvidenceForTests('operator_sum', [summationStroke]),
+    true,
+    'Eine echte Sigma-Zickzacktrajektorie muss unabhängig von Textübersegmentierung geschützt sein.',
+  )
+  assert.equal(
+    standaloneLargeOperatorGeometryEvidenceForTests('operator_integral', [rapidTStem, rapidTBar]),
+    false,
+    'Die obere T-Geometrie darf niemals als unabhängiger Integralbeleg gelten.',
+  )
+  assert.equal(
+    standaloneLargeOperatorIsDecisiveForTests({
+      labelId: 'operator_integral',
+      strokes: [integralStroke],
+      competingTextCharacters: 3,
+    }),
+    true,
+    'Ein geometrisch echtes Integral muss auch gegen drei übersegmentierte Texttokens entscheidend bleiben.',
+  )
+  assert.equal(
+    standaloneLargeOperatorIsDecisiveForTests({
+      labelId: 'operator_sum',
+      strokes: [summationStroke],
+      competingTextCharacters: 4,
+    }),
+    true,
+    'Ein geometrisch echtes Sigma muss auch gegen vier übersegmentierte Texttokens entscheidend bleiben.',
+  )
+  assert.equal(
+    standaloneLargeOperatorIsDecisiveForTests({
+      labelId: 'operator_integral',
+      strokes: [rapidTStem, rapidTBar],
+      competingTextCharacters: 3,
+      personalSupport: 8,
+      personalConfidence: 98,
+    }),
+    false,
+    'Selbst starke Trainingsdaten dürfen eine klare T-Geometrie nicht zum Integral machen.',
+  )
+  assert.equal(
+    isAppendOnlyTextInk(incrementalState, [clonedInitialBody, rapidTStem]),
+    true,
+    'Ein geklonter unveränderter Stroke mit neuer Tinte muss als append-only gelten.',
+  )
+  assert.equal(
+    isAppendOnlyTextInk(incrementalState, [rapidTStem]),
+    false,
+    'Ersetzte frühere Tinte darf keinen bestätigten Präfix erben.',
+  )
+  const carriedUncertainState = carryStableTextPrefixAcrossUncertainInk(
+    { ...incrementalState, text: 'Tes', prefixText: 'Te' },
+    [initialBody, rapidTStem],
+  )
+  assert.equal(carriedUncertainState.text, 'Tes', 'Unsichere Tinte darf den letzten Textvorschlag nicht verändern.')
+  assert.equal(carriedUncertainState.prefixText, 'Te', 'Unsichere Tinte darf keinen geratenen Buchstaben stabilisieren.')
+  assert.equal(carriedUncertainState.characterCount, 1, 'Der diagnostische Zeichenzähler darf durch unsichere Tinte nicht wachsen.')
+  assert.equal(carriedUncertainState.strokes.length, 2, 'Der Tinten-Snapshot muss trotzdem bis zur aktuellen Eingabe vorrücken.')
+  assert.equal(carriedUncertainState.pendingStrokeIndex, 2, 'Die nächste Ergänzung muss erst hinter der unsicheren Tinte beginnen.')
+  assert.equal(carriedUncertainState.uncertainCarryCount, 1, 'Genau eine unsichere Vorschau darf überbrückt werden.')
+  assert.equal(
+    canCarryUncertainTextState(carriedUncertainState, [initialBody, rapidTStem, rapidTBar]),
+    false,
+    'Ein Präfix darf nach einer zweiten aufeinanderfolgenden unsicheren Vorschau nicht weitergetragen werden.',
+  )
+  assert.equal(
+    hasLooseTextContinuation(incrementalState, [initialBody, rapidTStem]),
+    true,
+    'Eine mehrstrichige Fortsetzung am rechten Schreibrand muss den bestätigten Präfix erreichen können.',
+  )
+  const nextLineBody = penStroke([[0.12, 0.72], [0.19, 0.84]])
+  assert.equal(
+    hasLooseTextContinuation(incrementalState, [initialBody, nextLineBody]),
+    false,
+    'Ein neuer Zeilenbereich darf keinen Präfix der vorherigen Zeile erben.',
+  )
+  const leftRewriteBody = penStroke([[0.01, 0.22], [0.03, 0.4]])
+  assert.equal(
+    hasLooseTextContinuation(incrementalState, [initialBody, leftRewriteBody]),
+    false,
+    'Eine nachträgliche Tinte links vom Schreibrand darf keinen alten Präfix fortsetzen.',
+  )
+  assert.equal(
+    incrementalTextCharacterHint(
+      incrementalState,
+      [clonedInitialBody, rapidTStem, rapidTBar],
+    )?.characterCount,
+    2,
+    'Ein Canvas-Klon und der links überhängende Querstrich eines neuen T müssen den sicheren Append-Count erhalten.',
+  )
+  assert.equal(
+    incrementalTextCharacterHint(
+      incrementalState,
+      [clonedInitialBody, rapidTStem, rapidTBar],
+    )?.previousText,
+    '',
+    'Ein neuer Körper darf den letzten automatischen Vorschau-Buchstaben nicht als stabil festschreiben.',
+  )
+  const backwardsLoop = penStroke([
+    [0.18, 0.34], [0.3, 0.4], [0.31, 0.27], [0.2, 0.24], [0.28, 0.35],
+  ])
+  assert.equal(
+    incrementalTextCharacterHint(incrementalState, [initialBody, backwardsLoop])?.characterCount,
+    2,
+    'Eine rücklaufende Schleife rechts vom Wort muss als neuer Körper zählen können.',
+  )
+  const secondFastBody = penStroke([[0.37, 0.2], [0.39, 0.4]])
+  assert.equal(
+    incrementalTextCharacterHint(
+      incrementalState,
+      [initialBody, rapidTStem, secondFastBody],
+    ),
+    undefined,
+    'Zwei schnell angehängte Körper dürfen nicht als harter Plus-eins-Count ausgegeben werden.',
+  )
+  const delayedCrossbar = penStroke([[0.13, 0.25], [0.25, 0.25]])
+  assert.equal(
+    incrementalTextCharacterHint(incrementalState, [initialBody, delayedCrossbar])?.characterCount,
+    1,
+    'Ein nachträglicher Querstrich am aktuellen Buchstaben darf keinen zusätzlichen Buchstaben erzeugen.',
+  )
+  const insertedBody = penStroke([[0.13, 0.21], [0.15, 0.39]])
+  assert.equal(
+    incrementalTextCharacterHint(incrementalState, [initialBody, insertedBody]),
+    undefined,
+    'Ein nachträglich innerhalb der alten Breite gezeichneter Körper darf den alten Count nicht als exakt bestätigen.',
+  )
+  assert.equal(
+    incrementalTextCharacterHint(
+      incrementalState,
+      [{
+        ...initialBody,
+        points: initialBody.points.map((point, index) => (
+          index === 0 ? { ...point, x: point.x + 0.01 } : { ...point }
+        )),
+      }, rapidTStem],
+    ),
+    undefined,
+    'Veränderte oder neu geordnete frühere Tinte darf keinen Append-Hinweis erben.',
+  )
+  const prefixToken = (char, confidence = 84, alternatives = []) => ({
+    char,
+    confidence,
+    alternatives,
+    isLayout: false,
+  })
+  assert.equal(
+    bodySizedApostropheFragmentPenalty([{ char: "'", bbox: [0.1, 0.12, 0.01, 0.02] }]),
+    0,
+    'Ein alleinstehendes echtes Apostroph hat keine widersprechende Buchstabengrundlinie und darf nicht bestraft werden.',
+  )
+  assert.equal(
+    bodySizedApostropheFragmentPenalty([
+      { char: 'e', bbox: [0.1, 0.2, 0.05, 0.1] },
+      { char: "'", bbox: [0.16, 0.16, 0.01, 0.02] },
+    ]),
+    0,
+    'Ein kleines, hoch sitzendes Apostroph muss als echte Interpunktion erhalten bleiben.',
+  )
+  assert.equal(
+    bodySizedApostropheFragmentPenalty([
+      { char: 'e', bbox: [0.1, 0.2, 0.05, 0.1] },
+      { char: "'", bbox: [0.16, 0.21, 0.03, 0.08] },
+    ]),
+    0.46,
+    'Ein grundliniennahes Apostroph in Buchstabenkörpergröße muss als Überssegmentierungsfragment kosten.',
+  )
+  const twoTokenPrefixScore = textPrefixCompatibilityScore([
+    prefixToken('T'),
+    prefixToken('e'),
+  ], 'T')
+  const threeTokenPrefixScore = textPrefixCompatibilityScore([
+    prefixToken('T'),
+    prefixToken('e'),
+    prefixToken('s'),
+  ], 'T')
+  assert.ok(twoTokenPrefixScore > 0, 'Ein stabiler Präfix soll einen passenden vorhandenen Buchstaben weich stützen.')
+  assert.equal(
+    twoTokenPrefixScore,
+    threeTokenPrefixScore,
+    'Der Präfixscore darf weder einen Zwei- noch einen Drei-Token-Kandidaten wegen seiner Gesamtlänge bevorzugen.',
+  )
+  assert.equal(
+    textPrefixCompatibilityScore([prefixToken('T')], 'T'),
+    0,
+    'Ein auf die alte Präfixlänge kollabierter Kandidat darf keinen Kontinuitätsbonus erhalten.',
+  )
+  assert.equal(
+    textPrefixCompatibilityScore([prefixToken('T')], 'Te'),
+    0,
+    'Auch ein kürzerer Kandidat darf aus einem längeren Präfix keinen Bonus ableiten.',
+  )
+  assert.ok(
+    twoTokenPrefixScore > textPrefixCompatibilityScore([prefixToken('t'), prefixToken('e')], 'T'),
+    'Der stabile Präfix muss Gross- und Kleinbuchstaben positionsgetreu unterscheiden.',
+  )
+  assert.equal(
+    textPrefixCompatibilityScore([
+      { ...prefixToken('layout'), isLayout: true },
+      prefixToken('T'),
+      prefixToken('e'),
+    ], 'T'),
+    twoTokenPrefixScore,
+    'Layouttokens dürfen die Präfixpositionen nicht verschieben.',
+  )
+  assert.equal(
+    textPrefixCompatibilityScore([prefixToken('T'), prefixToken('e')], 'T'.repeat(321)),
+    0,
+    'Ein überlanger direkter JavaScript-Präfix muss vor jeder Verarbeitung abgewiesen werden.',
+  )
+  assert.equal(
+    textPrefixCompatibilityScore([prefixToken('T'), prefixToken('e')], ' T'),
+    0,
+    'Whitespace darf nicht stillschweigend aus einem direkten Präfix entfernt werden.',
+  )
+  assert.equal(
+    textPrefixCompatibilityScore([prefixToken('ß'), prefixToken('e')], 'ß'),
+    0,
+    'Das nicht unterstützte deutsche Eszett darf nicht in die Präfixlogik gelangen.',
+  )
+  assert.ok(
+    textPrefixCompatibilityScore([prefixToken('Ä'), prefixToken('r')], 'A\u0308') > 0,
+    'Kanonisch äquivalente Unicode-Buchstaben müssen vor dem positionsgetreuen Vergleich normalisiert werden.',
+  )
+  const alternativePrefixTokens = [
+    prefixToken('F', 86, [{ char: 'T', confidence: 73 }]),
+    prefixToken('e'),
+  ]
+  const alternativePrefixSnapshot = structuredClone(alternativePrefixTokens)
+  assert.ok(
+    textPrefixCompatibilityScore(alternativePrefixTokens, 'T') > 0,
+    'Eine visuell vorhandene Präfixalternative soll weich berücksichtigt werden.',
+  )
+  assert.deepEqual(
+    alternativePrefixTokens,
+    alternativePrefixSnapshot,
+    'Präfixe dürfen erkannte Tokens oder Alternativen niemals direkt überschreiben.',
+  )
+  assert.ok(
+    textPrefixCompatibilityScore([
+      prefixToken('F', 90, [{ char: 'T', confidence: 1 }]),
+      prefixToken('e'),
+    ], 'T') <= 0,
+    'Eine praktisch unbelegte N-Best-Alternative darf keine künstliche Präfixkontinuität erzeugen.',
+  )
+  assert.equal(
+    selectedTextPrefixMatches([prefixToken('T'), prefixToken('e')], 'T'),
+    true,
+    'Die Modusentscheidung darf einen exakt ausgewählten, fortgesetzten Präfix bestätigen.',
+  )
+  assert.equal(
+    selectedTextPrefixMatches(alternativePrefixTokens, 'T'),
+    false,
+    'Eine passende N-Best-Alternative ist kein unabhängiger Beleg für einen Moduswechsel.',
+  )
+  const prefixModeEvidence = {
+    compatibility: 0.58,
+    selectedPrefixMatches: true,
+    visibleCharacters: 3,
+    letters: 3,
+  }
+  assert.ok(
+    textPrefixModeBonus(prefixModeEvidence) > 0,
+    'Der dokumentierte inklusive Mindestscore muss einen exakt ausgewählten Textpräfix stützen.',
+  )
+  assert.equal(
+    textPrefixModeBonus({ ...prefixModeEvidence, compatibility: 0.579 }),
+    0,
+    'Ein Präfixscore knapp unter der Grenze darf den Text-/Mathemodus nicht beeinflussen.',
+  )
+  assert.equal(
+    textPrefixModeBonus({ ...prefixModeEvidence, selectedPrefixMatches: false }),
+    0,
+    'Eine nur in den Alternativen vorhandene Präfixform darf keinen Modusbonus erhalten.',
+  )
+  assert.equal(
+    textPrefixModeBonus({ ...prefixModeEvidence, letters: 2 }),
+    0,
+    'Ein gemischter Text-/Mathekandidat darf keinen Textpräfix-Modusbonus erhalten.',
+  )
+  assert.equal(
+    confirmedTextPrefixModeBonus(0.8, true, false),
+    1.85,
+    'Ein sichtbar erhaltener Benutzerpräfix muss einen ambigen Modusentscheid deutlich stabilisieren.',
+  )
+  assert.equal(
+    confirmedTextPrefixModeBonus(0.8, true, true),
+    0,
+    'Ein Benutzerpräfix darf echte Brüche, Relationen, Wurzeln oder Operatorstrukturen nicht überstimmen.',
+  )
+  const collapsedMathPrefixEvidence = {
+    prefixCompatibility: 0.78,
+    selectedPrefixMatches: true,
+    prefixLength: 1,
+    textVisibleCharacters: 3,
+    textLetters: 3,
+    textLines: 1,
+    textBaselineAlignment: 1,
+    inkAspectRatio: 2.06,
+    mathVisibleCharacters: 1,
+    mathDigits: 0,
+    mathOperators: 0,
+    mathRelations: 0,
+    mathFractions: 0,
+    mathLayoutAssignments: 0,
+    mathLines: 1,
+    mathStrongSymbols: 1,
+    mathHasCommandStructure: true,
+    mathHasDecisiveStructure: false,
+  }
+  assert.equal(
+    collapsedMathPrefixPenalty(collapsedMathPrefixEvidence),
+    0.62,
+    'Eine breite präfixbestätigte Buchstabenfolge soll die doppelte Wertung eines kollabierten Mathe-Singletons begrenzen.',
+  )
+  assert.equal(
+    collapsedMathPrefixPenalty({ ...collapsedMathPrefixEvidence, prefixCompatibility: 0.58 }),
+    0.62,
+    'Der dokumentierte Mindestscore von 0.58 muss inklusive gelten.',
+  )
+  ;[
+    { prefixCompatibility: 0.579 },
+    { selectedPrefixMatches: false },
+    { prefixLength: 0 },
+    { textVisibleCharacters: 2, textLetters: 2 },
+    { textLetters: 2 },
+    { textLines: 2 },
+    { textBaselineAlignment: 0.719 },
+    { inkAspectRatio: 1.049 },
+    { mathVisibleCharacters: 2 },
+    { mathFractions: 1 },
+    { mathRelations: 1 },
+    { mathOperators: 1 },
+    { mathLayoutAssignments: 1 },
+    { mathLines: 2 },
+    { mathStrongSymbols: 0 },
+    { mathStrongSymbols: 2 },
+    { mathHasCommandStructure: false },
+    { mathHasDecisiveStructure: true },
+  ].forEach((override) => assert.equal(
+    collapsedMathPrefixPenalty({ ...collapsedMathPrefixEvidence, ...override }),
+    0,
+    `Strukturelle Gegenbelege müssen die Präfixkorrektur sperren: ${JSON.stringify(override)}`,
+  ))
+  assert.equal(
+    textPrefixContinuityScoreForTests('Te', 'Te'),
+    0,
+    'Auch die finale Fusion darf einen auf die alte Präfixlänge kollabierten Text nicht belohnen.',
+  )
+  assert.equal(
+    textPrefixContinuityScoreForTests('Tes', 'Te'),
+    textPrefixContinuityScoreForTests('Test', 'Te'),
+    'Die finale Fusion darf aus einem stabilen Präfix keine bevorzugte Gesamtlänge ableiten.',
+  )
+  assert.ok(
+    textPrefixContinuityScoreForTests('Tes', 'Te') > textPrefixContinuityScoreForTests('Tos', 'Te'),
+    'Die finale Fusion soll passende Präfixpositionen weich vor veränderten alten Buchstaben bevorzugen.',
+  )
+  assert.equal(
+    textPrefixContinuityScoreForTests('Tosta', 'Test'),
+    0,
+    'Eine abweichende stabile Position darf auch bei langem Präfix keinen positiven Host-Bonus erhalten.',
+  )
+  assert.equal(
+    textPrefixContinuityScoreForTests('ßa', 'ß'),
+    0,
+    'Auch die finale Fusion darf das deaktivierte Eszett nicht als Kontinuitätsbeleg verwenden.',
+  )
+  assert.equal(
+    textPrefixContinuityScoreForTests('T∞', 'T'),
+    0,
+    'Die Host-Fusion darf gemischten Text/Mathe-Inhalt nicht als fortgesetztes Wort belohnen.',
+  )
+  assert.deepEqual(
+    shortConnectedSegmentationIndexesForTests({
+      neuralCharacterCount: 2,
+      neuralConfidence: 74,
+      neuralKnownWordRatio: 0,
+      physicalLineCount: 1,
+      primaryTokenCount: 1,
+      primaryAverageConfidence: 58,
+      penLiftCharacterCount: null,
+    }),
+    [1],
+    'Ein unsicheres verbundenes Zwei-Buchstaben-Präfix braucht genau einen zweiten begrenzten Schnittpfad.',
+  )
+  assert.deepEqual(
+    shortConnectedSegmentationIndexesForTests({
+      neuralCharacterCount: 2,
+      neuralConfidence: 91,
+      neuralKnownWordRatio: 1,
+      physicalLineCount: 1,
+      primaryTokenCount: 2,
+      primaryAverageConfidence: 76,
+      penLiftCharacterCount: null,
+    }),
+    [],
+    'Ein bereits sicher erkanntes kurzes Wörterbuchwort darf keine zusätzliche Inferenz bezahlen.',
+  )
+  assert.deepEqual(
+    shortConnectedSegmentationIndexesForTests({
+      neuralCharacterCount: 2,
+      neuralConfidence: 65,
+      neuralKnownWordRatio: 0,
+      physicalLineCount: 1,
+      primaryTokenCount: 1,
+      primaryAverageConfidence: 43,
+      penLiftCharacterCount: 2,
+    }),
+    [],
+    'Physisch getrennte Buchstabenkörper benötigen keinen verbundenen Alternativschnitt.',
+  )
+  assert.deepEqual(
+    shortConnectedSegmentationIndexesForTests({
+      neuralCharacterCount: 4,
+      neuralConfidence: 60,
+      neuralKnownWordRatio: 0,
+      physicalLineCount: 1,
+      primaryTokenCount: 2,
+      primaryAverageConfidence: 42,
+      penLiftCharacterCount: null,
+    }),
+    [],
+    'Längere Zeilen dürfen den kurzen Alternativpfad nicht als normalen CPU-Multiplikator verwenden.',
+  )
+  assert.deepEqual(
+    shortConnectedSegmentationIndexesForTests({
+      neuralCharacterCount: 2,
+      neuralConfidence: 58,
+      neuralKnownWordRatio: 0,
+      physicalLineCount: 2,
+      primaryTokenCount: 1,
+      primaryAverageConfidence: 39,
+      penLiftCharacterCount: null,
+    }),
+    [],
+    'Mehrzeiliger Text darf nie durch den kurzen Einzeilen-Fallback zusammengeschoben werden.',
+  )
+  const noEmbeddedHint = embeddedTextRecognitionHints(undefined)
+  assert.deepEqual(
+    noEmbeddedHint,
+    { textPrefixHint: undefined },
+    'Ohne stabilen Präfix darf die eingebettete Erkennung keinerlei Textvorgabe erhalten.',
+  )
+  assert.equal(
+    'textCharacterCountHint' in noEmbeddedHint,
+    false,
+    'Weder der Mathe- noch der klassische Textzweig darf einen harten Count posten.',
+  )
+  assert.deepEqual(
+    embeddedTextRecognitionHints({ previousText: 'Te' }),
+    { textPrefixHint: 'Te' },
+    'Nur die vor der neuen Tinte stabile Buchstabenfolge darf als weicher Präfix weitergegeben werden.',
+  )
+  assert.deepEqual(
+    embeddedTextRecognitionHints({ previousText: 'T∫' }),
+    { textPrefixHint: undefined },
+    'Ein gemischter oder mathematischer Inhalt darf niemals als Textpräfix weitergegeben werden.',
+  )
+  assert.deepEqual(
+    embeddedTextRecognitionHints({ previousText: 'ß' }),
+    { textPrefixHint: undefined },
+    'Das deaktivierte Eszett darf auch die iframe-Brücke nicht passieren.',
+  )
+  assert.equal(validatedGlyphenWerkTextPrefixHint('T'), 'T', 'Die Host-Brücke muss Grossbuchstaben exakt erhalten.')
+  assert.equal(validatedGlyphenWerkTextPrefixHint('t'), 't', 'Die Host-Brücke muss Kleinbuchstaben exakt erhalten.')
+  assert.equal(
+    validatedGlyphenWerkTextPrefixHint('A\u0308'),
+    'Ä',
+    'Die Host-Brücke muss kanonisch äquivalente Buchstaben vor dem Vergleich normalisieren.',
+  )
+  assert.equal(validatedGlyphenWerkTextPrefixHint('ß'), undefined, 'Die Host-Brücke darf das deaktivierte Eszett nicht annehmen.')
+  assert.equal(validatedGlyphenWerkTextPrefixHint('T'.repeat(321)), undefined, 'Die Host-Brücke muss überlange Präfixe vor NFC ablehnen.')
+  assert.equal(validatedGlyphenWerkTextPrefixHint('T2'), undefined, 'Die Textpräfix-Brücke darf keine Ziffern oder Formelsymbole annehmen.')
+  assert.equal(
+    glyphenWerkExactProjectionIsIndependent(undefined, 'Test', 'Toast'),
+    false,
+    'Auch ohne Präfix darf eine abweichende klassische Host-Fusion nicht hart projiziert werden.',
+  )
+  assert.equal(
+    glyphenWerkExactProjectionIsIndependent(undefined, 'Test', 'Test'),
+    true,
+    'Nur die Übereinstimmung mit der unabhängigen neuronalen Zeile erlaubt eine exakte Projektion.',
+  )
+  assert.equal(
+    glyphenWerkExactProjectionIsIndependent('Te', 'Test', 'Test'),
+    true,
+    'Neuronale und präfixbeeinflusste Fusion dürfen bei exakter unabhängiger Übereinstimmung projiziert werden.',
+  )
+  assert.equal(
+    glyphenWerkExactProjectionIsIndependent('Te', 'Toast', 'Test'),
+    false,
+    'Ein nur durch den Präfix verändertes Host-Ergebnis darf nicht erneut als harter Count/Volltext dienen.',
+  )
+  assert.equal(
+    glyphenWerkExactProjectionIsIndependent('T', 'test', 'Test'),
+    false,
+    'Die Unabhängigkeitsprüfung muss Gross-/Kleinschreibung erhalten.',
+  )
+  assert.equal(
+    glyphenWerkExactProjectionIsIndependent('T', 'Eine\nZeile', 'Eine Zeile'),
+    false,
+    'Unterschiedliche Zeilenstruktur darf nicht als whitespace-normalisierte Übereinstimmung gelten.',
+  )
+  assert.equal(
+    groupRecognitionLines([
+      horizontalStroke(0.34, 0.48, 0.33),
+      horizontalStroke(0.35, 0.47, 0.40),
+    ]).length,
+    1,
+    'Vertikal getrennte Striche eines isolierten mathematischen Operators müssen in derselben Erkennungszeile bleiben.',
+  )
+  assert.equal(
+    groupRecognitionLines([
+      horizontalStroke(0.12, 0.37, 0.17),
+      horizontalStroke(0.12, 0.37, 0.58),
+    ]).length,
+    2,
+    'Weit getrennte normale Schreibzeilen dürfen trotz gleicher x-Position nicht zu einem Operator verschmelzen.',
+  )
 
   const uncertainNeuralWord = {
     text: 'münt',
@@ -330,7 +1018,7 @@ try {
     'Vertauschte verbundene Nachbarbuchstaben müssen auch im deutschen Wortkontext korrigiert werden.',
   )
   installNeuralWordContextCandidates('en', [
-    'break', 'breve', 'computed', 'computer', 'gave', 'movement', 'tests', 'twists',
+    'break', 'breve', 'computed', 'computer', 'debauchery', 'gave', 'movement', 'tests', 'twists',
   ])
   installNeuralWordContextCandidates('de', ['das', 'des', 'hallo', 'malo'])
   assert.equal(
@@ -363,6 +1051,32 @@ try {
     '',
     'Ein grossgeschriebener Name darf keine häufigere Alternativansicht erzwingen.',
   )
+  const independentViewWords = (word) => ['hallo', 'taboo', 'test'].includes(word.toLocaleLowerCase('de-CH'))
+  assert.equal(
+    shouldRequestIndependentTrocrViewForTests(1, 'mallo', 'mallo', true, 'de', independentViewWords),
+    true,
+    'Ein weiterhin kontextbedürftiger Einzelpfad muss eine echte unabhängige Bildansicht erhalten.',
+  )
+  assert.equal(
+    shouldRequestIndependentTrocrViewForTests(1, 'mallo', 'xyqaro', false, 'de', independentViewWords),
+    true,
+    'Ein unbekannter Kontextpfad, der dem kompakten Bildpfad widerspricht, braucht eine zweite Bildansicht.',
+  )
+  assert.equal(
+    shouldRequestIndependentTrocrViewForTests(1, 'test', 'hallo', false, 'de', independentViewWords),
+    false,
+    'Zwei bekannte, bereits plausible Wörter dürfen nicht pauschal eine zweite teure Inferenz auslösen.',
+  )
+  assert.equal(
+    shouldRequestIndependentTrocrViewForTests(1, 'Fabio', 'taboo', false, 'de', independentViewWords),
+    true,
+    'Ein unbekannter visueller Name gegen ein bekanntes Kontextwort braucht eine unabhängige zweite Ansicht.',
+  )
+  assert.equal(
+    shouldRequestIndependentTrocrViewForTests(2, 'mallo', 'xyqaro', true, 'de', independentViewWords),
+    false,
+    'Liegen tatsächlich mehrere Modellkandidaten vor, darf keine redundante Bildansicht gestartet werden.',
+  )
   assert.equal(
     applyFinalNeuralWordContext('mallo', 'de'),
     'hallo',
@@ -374,15 +1088,67 @@ try {
     'Apostrophe dürfen weder Wortteile korrigieren noch die echte Grenze nach einer Kontraktion entfernen.',
   )
   assert.equal(
+    applyFinalNeuralLineContext('ment and Satanic debaucherg.', 'en'),
+    'ment and Satanic debauchery.',
+    'Ein langes unbekanntes englisches Schlusswort darf durch genau einen eindeutigen sichtbaren Edit repariert werden.',
+  )
+  assert.equal(
+    applyFinalNeuralLineContext('debaucherg appears here.', 'en'),
+    'debaucherg appears here.',
+    'Die exhaustive englische Wörterbuchstufe darf ein Wort mitten in einer Zeile nicht ohne unabhängige Positionsevidenz umschreiben.',
+  )
+  assert.equal(
+    applyFinalNeuralLineContext('brege', 'en'),
+    'brege',
+    'Ein kurzes Wort darf ohne gemessene physische Einzelwortstruktur nicht allein vom Vollwörterbuch ersetzt werden.',
+  )
+  assert.equal(
+    applyFinalNeuralLineContext('brege', 'en', 1),
+    'breve',
+    'Eine unabhängig gemessene einzelne Wortgruppe erhält weiterhin die sichere isolierte Wörterbuchkorrektur.',
+  )
+  assert.equal(
     applyFinalNeuralWordContext('Richard Harris und Helena', 'de'),
     'Richard Harris und Helena',
     'Unbekannte Namen innerhalb eines Satzes dürfen nicht zu Wörterbuchnachbarn umgeschrieben werden.',
   )
-  installNeuralWordContextCandidates('de', ['geänderten', 'gesonderten', 'graduell', 'graduelle'])
+  assert.equal(
+    applyFinalNeuralWordContext('Edward Regan "Eddie" Murphy', 'de'),
+    'Edward Regan "Eddie" Murphy',
+    'Eine Namensfolge am Satzanfang darf nicht in eine häufigere Sprachvariante übersetzt werden.',
+  )
+  assert.equal(
+    applyFinalNeuralWordContext('ÖPP TNG CBS SES', 'de'),
+    'ÖPP TNG CBS SES',
+    'Grossbuchstaben-Akronyme müssen unabhängig vom Wörterbuch exakt erhalten bleiben.',
+  )
+  installNeuralWordContextCandidates('de', [
+    'binomischer', 'englisch', 'geänderten', 'gesonderten', 'graduell', 'graduelle', 'ökonomischer',
+  ])
   assert.equal(
     applyFinalNeuralWordContext('die gesnderten Positionen', 'de'),
     'die gesnderten Positionen',
     'Gleich nahe Wörterbuchtreffer unterschiedlicher Länge sind mehrdeutig und dürfen keine visuelle Form ersetzen.',
+  )
+  assert.equal(
+    applyNeuralWordContext('englsch', 'de'),
+    'englsch',
+    'Eine häufige Zwei-Edit-Korrektur darf einen strikt näheren vollständigen Wörterbuchkandidaten nicht verdecken.',
+  )
+  assert.equal(
+    applyFinalNeuralWordContext('englsch', 'de'),
+    'englsch',
+    'Ohne physische Zeichenzählung darf auch der Endkontext kein fehlendes Zeichen ergänzen; die visuell nähere Rohform bleibt erhalten.',
+  )
+  assert.equal(
+    applyFinalNeuralWordContext('öbenomischer', 'de'),
+    'öbenomischer',
+    'Ein anders langer Wörterbuchtreffer ist nicht eindeutig, wenn eine gleich nahe positionsgetreue Alternative existiert.',
+  )
+  assert.equal(
+    applyFinalNeuralWordContext('oder gutans ("gegossen") abgeleitet', 'de'),
+    'oder gutans ("gegossen") abgeleitet',
+    'Ein unbekannter Fachbegriff vor einer zitierten Klammererklärung darf nicht in ein Alltagswort umgeschrieben werden.',
   )
   assert.equal(
     applyNeuralWordContext('jap. Sengoku', 'de'),
@@ -431,6 +1197,14 @@ try {
     ], 'en', englishNbestMembership)[0]?.rawText,
     'fascinated by the way he looked when you',
     'Ein nur geringfügig flüssigerer Beam darf den visuell besten vollständigen Satz nicht ersetzen.',
+  )
+  assert.equal(
+    rankTrocrCandidateTextsForTests([
+      'wehn movement of blood through arteries is',
+      'when movement of blood through arteries is',
+    ], 'en', (word) => ['when', 'movement', 'of', 'blood', 'through', 'arteries', 'is'].includes(word))[0]?.rawText,
+    'when movement of blood through arteries is',
+    'Eine einzige lokale unbekannt-zu-bekannt-Reparatur darf einen klar besseren zweiten Bildbeam nutzen.',
   )
   assert.equal(
     rankTrocrCandidateTextsForTests([
@@ -500,6 +1274,89 @@ try {
     'Troja (IIion) durch das Heer der Griechen',
     'Eine intern grossgeschriebene visuelle Form darf nicht allein wegen eines häufigeren Wörterbuchnamens ersetzt werden.',
   )
+  const germanBeamMembership = (word) => [
+    'bis', 'burg', 'java', 'jana', 'spielen',
+  ].includes(word.toLocaleLowerCase('de-CH'))
+  assert.equal(
+    trocrRepeatedWordEvidenceBonusForTests(
+      'Jun-Applets Anwendungsprogramme. Appletbezogene Klassen der Java',
+      'Java-Applets Anwendungsprogramme. Appletbezogene Klassen der Java',
+      'de',
+      germanBeamMembership,
+    ),
+    0.35,
+    'Eine zweite, fast gleich bewertete Bildlesung darf ein unabhängig wiederholtes Wort exakt angleichen.',
+  )
+  assert.equal(
+    trocrRepeatedWordEvidenceBonusForTests(
+      'Jun-Applets Anwendungsprogramme.',
+      'Java-Applets Anwendungsprogramme.',
+      'de',
+      germanBeamMembership,
+    ),
+    0,
+    'Wörterbuchhäufigkeit ohne eine zweite sichtbare Wiederholung ist keine Wiederholungsevidenz.',
+  )
+  assert.equal(
+    trocrRepeatedWordEvidenceBonusForTests(
+      'Jana-Applets Anwendungsprogramme. Appletbezogene Klassen der Java',
+      'Java-Applets Anwendungsprogramme. Appletbezogene Klassen der Java',
+      'de',
+      germanBeamMembership,
+    ),
+    0,
+    'Ein bereits bekanntes sichtbares Wort darf selbst bei einer späteren Wiederholung nicht ersetzt werden.',
+  )
+  assert.equal(
+    trocrGermanMultiwordRepairBonusForTests(
+      'Im Profifussleelt spischen allerdings oftmals keine Vereine mehn,',
+      'Im Profifussleell spielen allerdings oftmals keine Vereine mehn,',
+      'de',
+      germanBeamMembership,
+    ),
+    0.2,
+    'Mehrere beschädigte deutsche Oberflächen dürfen eine kleine Zusatzstütze erhalten, wenn mindestens ein Kleinwort eindeutig bekannt wird.',
+  )
+  assert.equal(
+    trocrGermanMultiwordRepairBonusForTests(
+      'von Kindern sind das his-',
+      'von Kindern sind das bis-',
+      'de',
+      germanBeamMembership,
+    ),
+    0,
+    'Ein Wort vor einem sichtbaren Fortsetzungsstrich darf nicht per Wörterbuchbonus umgeschrieben werden.',
+  )
+  assert.equal(
+    trocrGermanMultiwordRepairBonusForTests(
+      'Wettbewerbe, die ex aequo enden',
+      'Wettbewerbe, die er aequo enden',
+      'de',
+      (word) => word === 'er',
+    ),
+    0,
+    'Kurze Fremd-, Funktions- und Abkürzungswörter bleiben vollständig beim visuellen Top-Beam.',
+  )
+  assert.equal(
+    trocrGermanMultiwordRepairBonusForTests(
+      'der Burj Khalifa',
+      'der Burg Khalifa',
+      'de',
+      germanBeamMembership,
+    ),
+    0,
+    'Der Mehrwortbonus darf einen unbekannten Eigennamen nicht in ein bekanntes Substantiv umschreiben.',
+  )
+  assert.equal(
+    trocrGermanMultiwordRepairBonusForTests(
+      'wehn movement of blood',
+      'when movement of blood',
+      'en',
+      (word) => word === 'when',
+    ),
+    0,
+    'Der breitere Mehrwortbeweis ist wegen der getrennten englischen Validierung ausdrücklich deutsch-spezifisch.',
+  )
   assert.equal(applyFinalNeuralWordContext('gradwell', 'de'), 'graduell')
   assert.equal(
     rankTrocrCandidateTextsForTests([
@@ -511,6 +1368,24 @@ try {
   )
   assert.equal(trocrStructuralRewritePenaltyForTests('der', 'der der', 'de'), 4)
   assert.equal(trocrStructuralRewritePenaltyForTests('zwischen einem Coach und', 'zwischen einem (oach und', 'de'), 4)
+  assert.equal(trocrStructuralRewritePenaltyForTests(
+    'zur Neuordnung des Hamburges Eisenbahnwesens',
+    'zur Neuordnung des Hamburg, Eisenbahnwesens',
+    'de',
+  ), 4)
+  assert.equal(trocrStructuralRewritePenaltyForTests(
+    'Weltskiverband. FIS ausgetragene',
+    'Weltskiverband FIS ausgetragene',
+    'de',
+  ), 0)
+  assert.equal(
+    rankTrocrCandidateTextsForTests([
+      'zur Neuordnung des Hamburges Eisenbahnwesens',
+      'zur Neuordnung des Hamburg, Eisenbahnwesens',
+    ], 'de', (word) => ['zur', 'neuordnung', 'des', 'hamburg', 'eisenbahnwesens'].includes(word))[0]?.rawText,
+    'zur Neuordnung des Hamburges Eisenbahnwesens',
+    'Ein Wörterbuchwort darf keine neue interne Interpunktion erfinden, um den visuell führenden Beam zu verdrängen.',
+  )
   assert.equal(trocrStructuralRewritePenaltyForTests(
     'that they use Dan as a specimen demonstra-',
     'that they use Dan as a specimen demonstrations -',
@@ -567,8 +1442,13 @@ try {
     'Rabbi Eleanor ben Assarja said',
     'en',
     englishNameMembership,
-  ), 0)
+  ), 3)
   assert.equal(trocrStructuralRewritePenaltyForTests('einen Stadtkreis.', 'einen Stadt kreis.', 'de'), 4)
+  assert.equal(
+    trocrStructuralRewritePenaltyForTests('indem', 'in dem', 'de', (word) => word === 'indem'),
+    4,
+    'Ein vollständiges Wörterbuchwort darf nicht wegen kurzer Funktionswörter künstlich getrennt werden.',
+  )
   assert.equal(trocrStructuralRewritePenaltyForTests('der Genreder Brettspielt', 'der Genre der Brettspielt', 'de'), 0)
   assert.equal(trocrStructuralRewritePenaltyForTests('tax atreble the rate', 'tax a treble the rate', 'en'), 0)
   assert.equal(trocrStructuralRewritePenaltyForTests(
@@ -612,6 +1492,419 @@ try {
       visualConfidence: confidence,
     }
   }
+
+  const incompleteTec = () => [
+    token('t', 78, [['t', 78]], 0),
+    token('e', 65, [['e', 65]], 1),
+    token('c', 61, [['c', 61], ['s', 57]], 2),
+  ]
+  assert.equal(
+    recognizedSentence(applyTextReranking(incompleteTec(), BASE_CATALOG, 'de')),
+    'tec',
+    'Ohne echten inkrementellen Präfix darf ein unbekannter visueller Text nicht in einen Wörterbuchanfang umgeschrieben werden.',
+  )
+  assert.equal(
+    recognizedSentence(applyTextReranking(incompleteTec(), BASE_CATALOG, 'de', 't')),
+    'tes',
+    'Innerhalb eines echten stabilen Präfixes darf genau eine visuell nahe neue Buchstabenform einen plausiblen Wortanfang bilden.',
+  )
+  const multiwordPrefixTokens = [
+    token('e', 82, [['e', 82]], 0),
+    token('i', 82, [['i', 82]], 1),
+    token('n', 82, [['n', 82]], 2),
+    ...incompleteTec().map((entry, index) => ({
+      ...entry,
+      id: `second-word-${index}`,
+      bbox: [0.27 + index * 0.055, 0.2, 0.05, 0.1],
+      spaceBefore: index === 0,
+    })),
+  ]
+  assert.equal(
+    recognizedSentence(applyTextReranking(multiwordPrefixTokens, BASE_CATALOG, 'de', 'eint')),
+    'ein tes',
+    'Ein kompakter Zeilenpräfix muss bis zum teilweise fortgesetzten zweiten Wort weitergezählt werden.',
+  )
+  const contradictedStablePrefix = incompleteTec()
+  contradictedStablePrefix[0] = token('f', 78, [['f', 78], ['t', 76]], 0)
+  assert.equal(
+    recognizedSentence(applyTextReranking(contradictedStablePrefix, BASE_CATALOG, 'de', 't'))[0],
+    'f',
+    'Ein Präfix darf niemals eine bereits ausgewählte stabile Position über eine Alternative umschreiben.',
+  )
+
+  const uppercaseYLabel = labelByChar.get('Y')
+  const lowercaseYLabel = labelByChar.get('y')
+  assert.ok(uppercaseYLabel && lowercaseYLabel)
+  const point = (x, y, t) => ({
+    x, y, t, pressure: 0.62, tiltX: 0, tiltY: 0, pointerType: 'pen',
+  })
+  const stroke = (coordinates, timeOffset) => ({
+    baseWidth: 3.7,
+    pressureEnabled: false,
+    points: coordinates.map(([x, y], index) => point(x, y, timeOffset + index)),
+  })
+  const compactYFork = [
+    stroke([[0.2, 0.2], [0.24, 0.3]], 0),
+    stroke([[0.28, 0.2], [0.24, 0.3]], 2),
+    stroke([[0.24, 0.3], [0.24, 0.4]], 4),
+  ]
+  const longLowercaseY = [
+    stroke([[0.2, 0.2], [0.23, 0.3], [0.26, 0.2]], 0),
+    stroke([[0.26, 0.2], [0.23, 0.48], [0.2, 0.4]], 3),
+  ]
+  const ambiguousIsolatedY = (strokes, uppercaseSupport = 8) => ({
+    id: 'isolated-y-case',
+    strokes,
+    imageData: '',
+    bbox: [0.2, 0.2, 0.08, 0.2],
+    labelId: uppercaseYLabel.id,
+    char: uppercaseYLabel.char,
+    name: uppercaseYLabel.name,
+    latex: uppercaseYLabel.latex,
+    confidence: 72,
+    baseConfidence: 65,
+    personalSupport: uppercaseSupport,
+    personalConfidence: 56,
+    alternatives: [{
+      labelId: uppercaseYLabel.id,
+      char: uppercaseYLabel.char,
+      name: uppercaseYLabel.name,
+      confidence: 72,
+      baseConfidence: 65,
+      personalSupport: uppercaseSupport,
+      personalConfidence: 56,
+    }, {
+      labelId: lowercaseYLabel.id,
+      char: lowercaseYLabel.char,
+      name: lowercaseYLabel.name,
+      confidence: 70,
+      baseConfidence: 70,
+      personalSupport: 8,
+      personalConfidence: 60,
+    }],
+    visualLabelId: uppercaseYLabel.id,
+    visualConfidence: 72,
+  })
+  assert.equal(
+    recognizedSentence(applyTextReranking([ambiguousIsolatedY(compactYFork)], BASE_CATALOG, 'de')),
+    'Y',
+    'Eine kompakte Y-Gabel muss bei gleichauf liegender visueller Evidenz gross bleiben.',
+  )
+  assert.equal(
+    recognizedSentence(applyTextReranking([ambiguousIsolatedY(longLowercaseY)], BASE_CATALOG, 'de')),
+    'y',
+    'Ein lang zurücklaufendes kleines y darf nicht durch die isolierte Y-Regel grossgeschrieben werden.',
+  )
+  assert.equal(
+    recognizedSentence(applyTextReranking([ambiguousIsolatedY(compactYFork, 0)], BASE_CATALOG, 'de')),
+    'y',
+    'Explizit trainierte Kleinbuchstaben dürfen nicht von einer untrainierten Grossbuchstabenform überschrieben werden.',
+  )
+  const uppercaseILabel = labelByChar.get('I')
+  const lowercaseILabel = labelByChar.get('i')
+  assert.ok(uppercaseILabel && lowercaseILabel)
+  const ambiguousIsolatedI = (strokes, uppercaseSupport = 1) => ({
+    id: 'isolated-i-case',
+    strokes,
+    imageData: '',
+    bbox: [0.239, 0.2, 0.002, 0.2],
+    labelId: lowercaseILabel.id,
+    char: lowercaseILabel.char,
+    name: lowercaseILabel.name,
+    latex: lowercaseILabel.latex,
+    confidence: 68,
+    baseConfidence: 57,
+    personalSupport: 1,
+    personalConfidence: 51,
+    alternatives: [{
+      labelId: lowercaseILabel.id,
+      char: lowercaseILabel.char,
+      name: lowercaseILabel.name,
+      confidence: 68,
+      baseConfidence: 57,
+      personalSupport: 1,
+      personalConfidence: 51,
+    }, {
+      labelId: uppercaseILabel.id,
+      char: uppercaseILabel.char,
+      name: uppercaseILabel.name,
+      confidence: 78,
+      baseConfidence: 63,
+      personalSupport: uppercaseSupport,
+      personalConfidence: 37,
+    }],
+    visualLabelId: lowercaseILabel.id,
+    visualConfidence: 68,
+  })
+  const narrowUndottedI = [stroke([[0.24, 0.2], [0.241, 0.4]], 0)]
+  const returningLowercaseI = [stroke([[0.23, 0.2], [0.24, 0.4], [0.255, 0.37]], 0)]
+  assert.equal(
+    recognizedSentence(applyTextReranking([ambiguousIsolatedI(narrowUndottedI)], BASE_CATALOG, 'de')),
+    'I',
+    'Ein einzelner schmaler Strich ohne Punkt muss bei stärkerer Basisevidenz als grosses I lesbar bleiben.',
+  )
+  assert.equal(
+    recognizedSentence(applyTextReranking([ambiguousIsolatedI(returningLowercaseI)], BASE_CATALOG, 'de')),
+    'i',
+    'Eine breitere zurücklaufende Kleinbuchstabenform darf nicht durch die isolierte I-Regel überschrieben werden.',
+  )
+  assert.equal(
+    recognizedSentence(applyTextReranking([ambiguousIsolatedI(narrowUndottedI, 0)], BASE_CATALOG, 'de')),
+    'i',
+    'Ein untrainiertes grosses I darf ein ausdrücklich trainiertes kleines i nicht überschreiben.',
+  )
+  const dottedJBody = stroke([[0.24, 0.27], [0.24, 0.41], [0.22, 0.46]], 0)
+  const compactJDot = stroke([[0.24, 0.2]], 4)
+  const dottedJShape = [dottedJBody, compactJDot]
+  const ambiguousDottedJ = (selectedChar, strokes, lowercaseSupport = 8) => {
+    const selectedLabel = labelByChar.get(selectedChar)
+    const lowercaseJLabel = labelByChar.get('j')
+    assert.ok(selectedLabel && lowercaseJLabel)
+    return {
+      id: `isolated-dotted-j-${selectedChar}`,
+      strokes,
+      imageData: '',
+      bbox: [0.2, 0.2, 0.06, 0.27],
+      labelId: selectedLabel.id,
+      char: selectedLabel.char,
+      name: selectedLabel.name,
+      latex: selectedLabel.latex,
+      confidence: 76,
+      baseConfidence: 44,
+      personalSupport: 8,
+      personalConfidence: 70,
+      alternatives: [{
+        labelId: selectedLabel.id,
+        char: selectedLabel.char,
+        name: selectedLabel.name,
+        confidence: 76,
+        baseConfidence: 44,
+        personalSupport: 8,
+        personalConfidence: 70,
+      }, {
+        labelId: lowercaseJLabel.id,
+        char: lowercaseJLabel.char,
+        name: lowercaseJLabel.name,
+        confidence: 72,
+        baseConfidence: 38,
+        personalSupport: lowercaseSupport,
+        personalConfidence: 50,
+      }],
+      visualLabelId: selectedLabel.id,
+      visualConfidence: 76,
+    }
+  }
+  assert.equal(
+    recognizedSentence(applyTextReranking([ambiguousDottedJ('J', dottedJShape)], BASE_CATALOG, 'de')),
+    'j',
+    'Ein unabhängiger kompakter Punkt über einem hohen j-Körper muss eine falsche Gross-J-Wahl korrigieren.',
+  )
+  assert.equal(
+    recognizedSentence(applyTextReranking([ambiguousDottedJ('5', dottedJShape)], BASE_CATALOG, 'de')),
+    'j',
+    'Ein klar gepunkteter j-Körper darf nicht als Ziffer 5 bestehen bleiben.',
+  )
+  assert.equal(
+    recognizedSentence(applyTextReranking([ambiguousDottedJ('5', dottedJShape, 0)], BASE_CATALOG, 'de')),
+    '5',
+    'Ein ausdrücklich trainiertes Nicht-j-Zeichen darf nicht von einem untrainierten j-Kandidaten überschrieben werden.',
+  )
+  const shortArtifactBody = stroke([[0.2, 0.41], [0.25, 0.45], [0.3, 0.41]], 0)
+  const distantArtifact = stroke([[0.29, 0.2]], 4)
+  assert.equal(
+    recognizedSentence(applyTextReranking([
+      ambiguousDottedJ('v', [shortArtifactBody, distantArtifact]),
+    ], BASE_CATALOG, 'de')),
+    'v',
+    'Ein kleiner Artefaktpunkt über einem kurzen Buchstabenkörper darf kein j erfinden.',
+  )
+  const uppercaseJWithBar = [
+    stroke([[0.25, 0.25], [0.25, 0.43], [0.22, 0.46]], 0),
+    stroke([[0.2, 0.25], [0.28, 0.25]], 4),
+    stroke([[0.21, 0.2]], 6),
+  ]
+  assert.equal(
+    recognizedSentence(applyTextReranking([
+      ambiguousDottedJ('J', uppercaseJWithBar),
+    ], BASE_CATALOG, 'de')),
+    'J',
+    'Ein grosses J mit eigenem oberen Balken und Zusatzmarke darf nicht kleingeschrieben werden.',
+  )
+  const lowercaseJLabel = labelByChar.get('j')
+  assert.ok(lowercaseJLabel)
+  const extremelyNarrowDottedI = [
+    stroke([[0.242, 0.27], [0.244, 0.36], [0.243, 0.45]], 0),
+    stroke([[0.244, 0.2]], 4),
+  ]
+  const ambiguousNarrowDottedI = (lowercaseSupport = 16) => ({
+    id: 'isolated-extremely-narrow-dotted-i',
+    strokes: extremelyNarrowDottedI,
+    imageData: '',
+    bbox: [0.242, 0.2, 0.002, 0.25],
+    labelId: lowercaseJLabel.id,
+    char: lowercaseJLabel.char,
+    name: lowercaseJLabel.name,
+    latex: lowercaseJLabel.latex,
+    confidence: 78,
+    baseConfidence: 60,
+    personalSupport: 16,
+    personalConfidence: 57,
+    alternatives: [{
+      labelId: lowercaseJLabel.id,
+      char: lowercaseJLabel.char,
+      name: lowercaseJLabel.name,
+      confidence: 78,
+      baseConfidence: 60,
+      personalSupport: 16,
+      personalConfidence: 57,
+    }, {
+      labelId: lowercaseILabel.id,
+      char: lowercaseILabel.char,
+      name: lowercaseILabel.name,
+      confidence: 63,
+      baseConfidence: 56,
+      personalSupport: lowercaseSupport,
+      personalConfidence: 33,
+    }],
+    visualLabelId: lowercaseJLabel.id,
+    visualConfidence: 78,
+  })
+  assert.equal(
+    recognizedSentence(applyTextReranking([ambiguousNarrowDottedI()], BASE_CATALOG, 'de')),
+    'i',
+    'Ein extrem schmales gepunktetes i darf trotz eines stärkeren j-Prototyps nicht zu j werden.',
+  )
+  assert.equal(
+    recognizedSentence(applyTextReranking([ambiguousNarrowDottedI(0)], BASE_CATALOG, 'de')),
+    'j',
+    'Ein untrainiertes i darf ein ausdrücklich trainiertes j nicht allein über Geometrie überschreiben.',
+  )
+  assert.equal(
+    recognizedSentence(applyTextReranking([
+      ambiguousNarrowDottedI(),
+    ].map((token) => ({ ...token, strokes: dottedJShape })), BASE_CATALOG, 'de')),
+    'j',
+    'Ein normal breites, unten gekrümmtes j darf nicht von der extrem schmalen i-Regel verändert werden.',
+  )
+  const digitTwoLabel = labelByChar.get('2')
+  const lowercaseZLabel = labelByChar.get('z')
+  assert.ok(digitTwoLabel && lowercaseZLabel)
+  const twoStrokeZShape = [
+    stroke([[0.2, 0.2], [0.3, 0.2]], 0),
+    stroke([[0.3, 0.2], [0.2, 0.4], [0.3, 0.4]], 2),
+  ]
+  const ambiguousTwoStrokeZ = (strokes, lowercaseSupport = 16) => ({
+    id: 'isolated-two-stroke-z',
+    strokes,
+    imageData: '',
+    bbox: [0.2, 0.2, 0.1, 0.2],
+    labelId: digitTwoLabel.id,
+    char: digitTwoLabel.char,
+    name: digitTwoLabel.name,
+    latex: digitTwoLabel.latex,
+    confidence: 76,
+    baseConfidence: 34,
+    personalSupport: 16,
+    personalConfidence: 50,
+    alternatives: [{
+      labelId: digitTwoLabel.id,
+      char: digitTwoLabel.char,
+      name: digitTwoLabel.name,
+      confidence: 76,
+      baseConfidence: 34,
+      personalSupport: 16,
+      personalConfidence: 50,
+    }, {
+      labelId: lowercaseZLabel.id,
+      char: lowercaseZLabel.char,
+      name: lowercaseZLabel.name,
+      confidence: 67,
+      baseConfidence: 42,
+      personalSupport: lowercaseSupport,
+      personalConfidence: lowercaseSupport ? 49 : 0,
+    }],
+    visualLabelId: digitTwoLabel.id,
+    visualConfidence: 76,
+  })
+  assert.equal(
+    recognizedSentence(applyTextReranking([
+      ambiguousTwoStrokeZ(twoStrokeZShape),
+    ], BASE_CATALOG, 'de')),
+    'z',
+    'Ein visuell gestütztes zweistrichiges z darf nicht als einstrichige Ziffer 2 bestehen bleiben.',
+  )
+  assert.equal(
+    recognizedSentence(applyTextReranking([
+      ambiguousTwoStrokeZ(twoStrokeZShape, 0),
+    ], BASE_CATALOG, 'de')),
+    '2',
+    'Ein untrainiertes z darf eine ausdrücklich trainierte zweistrichige Ziffer 2 nicht überschreiben.',
+  )
+  assert.equal(
+    recognizedSentence(applyTextReranking([
+      ambiguousTwoStrokeZ([stroke([[0.2, 0.2], [0.3, 0.28], [0.2, 0.4], [0.3, 0.4]], 0)]),
+    ], BASE_CATALOG, 'de')),
+    '2',
+    'Eine normale einstrichige Ziffer 2 darf nicht durch den z-Strichzahlbeleg verändert werden.',
+  )
+  const learnedStrokeCountQ = (currentFit = 0, qFit = 14 / 16) => {
+    const result = token('9', 77, [['9', 77], ['q', 72]], 109)
+    result.baseConfidence = 41
+    result.personalSupport = 16
+    result.personalConfidence = 64
+    result.strokeCountFit = currentFit
+    result.strokeCountSupport = 16
+    result.alternatives = result.alternatives.map((alternative) => alternative.char === 'q' ? {
+      ...alternative,
+      baseConfidence: 34,
+      personalSupport: 16,
+      personalConfidence: 47,
+      strokeCountFit: qFit,
+      strokeCountSupport: 16,
+    } : {
+      ...alternative,
+      baseConfidence: 41,
+      personalSupport: 16,
+      personalConfidence: 64,
+      strokeCountFit: currentFit,
+      strokeCountSupport: 16,
+    })
+    return result
+  }
+  assert.equal(
+    recognizedSentence(applyTextReranking([learnedStrokeCountQ()], BASE_CATALOG, 'de')),
+    'q',
+    'Ein zweistrichiges q mit 14/16 Trainingsbelegen muss eine knappe, nie zweistrichig gelernte 9 überstimmen.',
+  )
+  assert.equal(
+    recognizedSentence(applyTextReranking([learnedStrokeCountQ(1)], BASE_CATALOG, 'de')),
+    '9',
+    'Eine bereits mit derselben Strichzahl gelernte 9 darf nicht durch die Klassenstatistik ersetzt werden.',
+  )
+  assert.equal(
+    recognizedSentence(applyTextReranking([learnedStrokeCountQ(0, 0.8)], BASE_CATALOG, 'de')),
+    '9',
+    'Eine nur mässig häufige Gegenklasse darf ohne den 85-Prozent-Beleg keine knappe Ziffer ersetzen.',
+  )
+  assert.ok(
+    learnedStrokeCountHypothesisScore([
+      { strokeCountFit: 14 / 16, strokeCountSupport: 16 },
+      { strokeCountFit: 1, strokeCountSupport: 16 },
+    ]) - learnedStrokeCountHypothesisScore([
+      { strokeCountFit: 0, strokeCountSupport: 16 },
+    ]) >= 0.075,
+    'Zwei gut gelernte Buchstabenteile müssen bei sonst knapper Bewertung einen unbestätigten Gesamtglyphenpfad überstimmen können.',
+  )
+  assert.equal(
+    learnedStrokeCountHypothesisScore([{ strokeCountFit: 0, strokeCountSupport: 16 }]),
+    0,
+    'Eine echte neue Strichvariante muss bis zu ihrer ersten Bestätigung neutral bleiben.',
+  )
+  assert.equal(
+    learnedStrokeCountHypothesisScore([{ strokeCountFit: 1, strokeCountSupport: 7 }]),
+    0,
+    'Weniger als acht Trainingsbeispiele dürfen keine Segmentierung über die Strichstatistik bevorzugen.',
+  )
 
   // A short lowercase body after a tall capital sits lower by construction.
   // Even a stale learned "subscript" relation must not turn ordinary baseline
@@ -702,6 +1995,131 @@ try {
     'Ein titelgeschriebener Name muss auch ohne Wörterbucheintrag der gemeinsamen Wortgrundlinie folgen.',
   )
 
+  // With a drawing tablet the x-height body can be less than half as tall as
+  // the initial capital. Pairwise geometry then sees every following letter
+  // as a subscript even though all bodies and the capital still share one
+  // local baseline. The local word baseline must be evaluated before the
+  // capital/body height ratio is allowed to decide.
+  const compactBodyWordTokens = [
+    token('T', 96, [['T', 96]], 10980, [0.05, 0.18, 0.06, 0.22]),
+    token('e', 94, [['e', 94]], 10981, [0.115, 0.353, 0.045, 0.085]),
+    token('s', 95, [['s', 95]], 10982, [0.165, 0.353, 0.044, 0.085]),
+    token('t', 95, [['t', 95]], 10983, [0.214, 0.328, 0.04, 0.11]),
+  ]
+  assert.doesNotMatch(
+    recognizedLatex(compactBodyWordTokens),
+    /[_^]\{/u,
+    'Kleine, aber gemeinsam ausgerichtete Wortkörper dürfen nicht als Indexkette formatiert werden.',
+  )
+  assert.equal(
+    suggestMathLayoutAssignments(compactBodyWordTokens).length,
+    0,
+    'Kompakte Kleinbuchstaben nach einem Großbuchstaben dürfen kein falsches Indextraining erzeugen.',
+  )
+
+  const compactUnknownWordTokens = [
+    token('t', 96, [['t', 96]], 10984, [0.05, 0.2, 0.045, 0.2]),
+    token('a', 94, [['a', 94]], 10985, [0.101, 0.348, 0.043, 0.09]),
+    token('v', 95, [['v', 95]], 10986, [0.15, 0.348, 0.043, 0.09]),
+    token('o', 95, [['o', 95]], 10987, [0.199, 0.348, 0.043, 0.09]),
+  ]
+  assert.doesNotMatch(
+    recognizedLatex(compactUnknownWordTokens),
+    /[_^]\{/u,
+    'Eine reine zusammenhängende Buchstabenzeile braucht keinen Wörterbucheintrag, um ihre Grundlinie zu behalten.',
+  )
+
+  const unknownThreeLetterWordTokens = [
+    token('z', 96, [['z', 96]], 109840, [0.05, 0.2, 0.05, 0.18]),
+    token('y', 94, [['y', 94]], 109841, [0.106, 0.314, 0.045, 0.1]),
+    token('v', 95, [['v', 95]], 109842, [0.157, 0.314, 0.045, 0.1]),
+  ]
+  assert.doesNotMatch(
+    recognizedLatex(unknownThreeLetterWordTokens),
+    /[_^]\{/u,
+    'Auch ein unbekanntes dreibuchstabiges Wort auf gemeinsamer Grundlinie darf kein Index werden.',
+  )
+  assert.equal(
+    suggestMathLayoutAssignments(unknownThreeLetterWordTokens).length,
+    0,
+    'Unbekannte dreibuchstabige Wörter dürfen keine persönlichen Indexbeziehungen erzeugen.',
+  )
+
+  const unknownWordBeforePunctuation = [
+    ...unknownThreeLetterWordTokens,
+    token('.', 95, [['.', 95]], 109843, [0.215, 0.385, 0.014, 0.014]),
+  ]
+  assert.doesNotMatch(
+    recognizedLatex(unknownWordBeforePunctuation),
+    /[_^]\{/u,
+    'Satzzeichen neben einem unbekannten Wort dürfen dessen Grundlinienschutz nicht deaktivieren.',
+  )
+
+  const compactShortWordTokens = [
+    token('i', 96, [['i', 96]], 10988, [0.05, 0.18, 0.045, 0.18]),
+    token('m', 95, [['m', 95]], 10989, [0.101, 0.284, 0.052, 0.11]),
+  ]
+  assert.doesNotMatch(
+    recognizedLatex(compactShortWordTokens),
+    /[_^]\{/u,
+    'Ein bekanntes kurzes Wort mit normal grossem zweiten Buchstaben darf nicht als Index erscheinen.',
+  )
+  assert.equal(
+    suggestMathLayoutAssignments(compactShortWordTokens).length,
+    0,
+    'Ein zweibuchstabiges Alltagswort darf kein falsches Indextraining erzeugen.',
+  )
+
+  const shortKnownButRealSubscriptTokens = [
+    token('i', 96, [['i', 96]], 10990, [0.05, 0.2, 0.06, 0.18]),
+    token('m', 95, [['m', 95]], 10991, [0.115, 0.3224, 0.04, 0.099]),
+  ]
+  assert.match(
+    recognizedLatex(shortKnownButRealSubscriptTokens),
+    /i_\{m\}/u,
+    'Ein sichtbar kleiner mathematischer Index muss trotz des zufälligen Wortbilds „im“ erhalten bleiben.',
+  )
+
+  const shortWordAcrossExplicitSpace = [
+    token('a', 96, [['a', 96]], 10992, [0.05, 0.2, 0.06, 0.18]),
+    { ...token('n', 95, [['n', 95]], 10993, [0.115, 0.3224, 0.04, 0.099]), spaceBefore: true },
+  ]
+  assert.match(
+    recognizedLatex(shortWordAcrossExplicitSpace),
+    /a_\{n\}/u,
+    'Ein expliziter Wortabstand darf zwei mathematische Variablen nicht zu einem Schutzwort verbinden.',
+  )
+
+  let shortWordBaselineSweepCases = 0
+  for (const word of ['im', 'in', 'an', 'am', 'es', 'du', 'er', 'zu', 'of', 'to', 'is', 'we', 'he']) {
+    for (const baseHeight of [0.14, 0.18, 0.22]) {
+      for (const bodyRatio of [0.58, 0.66, 0.74]) {
+        for (const displacementRatio of [0.17, 0.2, 0.23]) {
+          const baseY = 0.2
+          const bodyHeight = baseHeight * bodyRatio
+          const bodyBottom = baseY + baseHeight * (1 + displacementRatio)
+          const sweptTokens = [
+            token(word[0], 95, [[word[0], 95]], 12000 + shortWordBaselineSweepCases * 2, [0.05, baseY, 0.055, baseHeight]),
+            token(word[1], 94, [[word[1], 94]], 12001 + shortWordBaselineSweepCases * 2, [0.111, bodyBottom - bodyHeight, 0.045, bodyHeight]),
+          ]
+          const sweptLatex = recognizedLatex(sweptTokens)
+          assert.doesNotMatch(
+            sweptLatex,
+            /[_^]\{/u,
+            `Kurzes Alltagswort wurde im Geometrie-Sweep zum Index (${word}, H=${baseHeight}, h=${bodyRatio}, d=${displacementRatio}): ${sweptLatex}`,
+          )
+          assert.equal(
+            suggestMathLayoutAssignments(sweptTokens).length,
+            0,
+            `Kurzes Alltagswort erzeugte eine Indexzuweisung (${word}, H=${baseHeight}, h=${bodyRatio}, d=${displacementRatio}).`,
+          )
+          shortWordBaselineSweepCases += 1
+        }
+      }
+    }
+  }
+  assert.equal(shortWordBaselineSweepCases, 351, 'Der Sweep für kurze Grundlinienwörter ist unvollständig.')
+
   const trueMultiLetterSubscriptTokens = [
     token('x', 96, [['x', 96]], 1099, [0.05, 0.2, 0.06, 0.18]),
     token('m', 95, [['m', 95]], 1100, [0.115, 0.365, 0.04, 0.08]),
@@ -747,6 +2165,53 @@ try {
       }
     }
   }
+  const spacedTextTokens = (value, boundaryAfter, innerGap, wordGap, withPenPause = false) => {
+    let left = 0.06
+    let time = 0
+    return [...value].map((char, index) => {
+      const result = token(char, 98, [[char, 98]], 400 + index, [left, 0.2, 0.04, 0.1])
+      result.strokes = [stroke([[left + 0.008, 0.22], [left + 0.032, 0.28]], time)]
+      left += 0.04 + (index === boundaryAfter ? wordGap : innerGap)
+      time += index === boundaryAfter && withPenPause ? 46 : 6
+      return result
+    })
+  }
+  assert.equal(
+    recognizedSentence(applyTextReranking(
+      spacedTextTokens('meinname', 3, 0.004, 0.025),
+      BASE_CATALOG,
+      'de',
+    )),
+    'mein name',
+    'Zwei bekannte Wörter müssen auch bei einem kompakten, aber lokal klar dominanten Abstand getrennt bleiben.',
+  )
+  assert.equal(
+    recognizedSentence(applyTextReranking(
+      spacedTextTokens('meintest', -1, 0.004, 0.004),
+      BASE_CATALOG,
+      'de',
+    )),
+    'meintest',
+    'Zwei bekannte Teilwörter dürfen ohne lokal herausragenden Abstand kein Leerzeichen in eine kompakte Kennung erfinden.',
+  )
+  assert.equal(
+    recognizedSentence(applyTextReranking(
+      spacedTextTokens('nikofabio', 3, 0.004, 0.025, true),
+      BASE_CATALOG,
+      'de',
+    )),
+    'niko fabio',
+    'Eine klare Stiftpause plus kompakter Tintenabstand muss auch zwei unbekannte Namen trennen.',
+  )
+  assert.equal(
+    recognizedSentence(applyTextReranking(
+      spacedTextTokens('meintest', 3, 0.004, 0.008, true),
+      BASE_CATALOG,
+      'de',
+    )),
+    'meintest',
+    'Eine Denkpause ohne ausreichend sichtbaren Abstand darf ein kompaktes Wort nicht zerlegen.',
+  )
   assert.equal(baselineSweepCases, 336, 'Der systematische Grundlinien-Sweep ist unvollständig.')
 
   let localWordBaselineSweepCases = 0
@@ -847,6 +2312,85 @@ try {
   assert.equal(german[1].context?.knownWord, true)
   assert.equal(german[1].context?.autoLearn, true, 'Eine visuell plausible, eindeutige Kontextkorrektur soll lernbar sein.')
   assert.ok(german[1].context.scoreMargin >= 0.5)
+
+  const numericWithLetterTails = [
+    token('4', 82, [['4', 82], ['a', 76], ['A', 71]], 4),
+    token('7', 81, [['7', 81], ['n', 75], ['T', 70]], 5),
+  ]
+  assert.equal(
+    recognizedSentence(applyTextReranking(numericWithLetterTails, BASE_CATALOG, 'de')),
+    '47',
+    'Blosse Buchstaben in breiten N-best-Listen dürfen eine klar numerische Folge nicht zum Wort erklären.',
+  )
+  const alphabeticWithDigitTails = [
+    token('a', 82, [['a', 82], ['4', 76], ['A', 72]], 6),
+    token('n', 81, [['n', 81], ['7', 75], ['N', 72]], 7),
+  ]
+  assert.equal(
+    recognizedSentence(applyTextReranking(alphabeticWithDigitTails, BASE_CATALOG, 'de')),
+    'an',
+    'Ziffern in den Alternativen dürfen eine klar alphabetische Folge nicht als Zahl behandeln.',
+  )
+  const genuinelyMixedSequence = [
+    token('E', 84, [['E', 84], ['3', 76], ['F', 74]], 8),
+    token('0', 84, [['0', 84], ['O', 76], ['o', 73]], 9),
+  ]
+  assert.equal(
+    recognizedSentence(applyTextReranking(genuinelyMixedSequence, BASE_CATALOG, 'de')),
+    'E0',
+    'Eine belegte Buchstaben-Ziffern-Folge darf weder Wort- noch Zahlenprior erhalten.',
+  )
+  const ambiguousLetterThenDigit = [
+    token('s', 80, [['s', 80], ['5', 78], ['S', 76]], 10),
+    token('2', 90, [['2', 90], ['z', 72], ['Z', 69]], 11),
+  ]
+  assert.equal(
+    recognizedSentence(applyTextReranking(ambiguousLetterThenDigit, BASE_CATALOG, 'de')),
+    's2',
+    'Ein visuell als Buchstabe gestartetes knappes S/5 muss in einer gemischten Kennung Buchstabe bleiben.',
+  )
+  const ambiguousDigitSequence = [
+    token('5', 80, [['5', 80], ['s', 78], ['S', 76]], 12),
+    token('2', 95, [['2', 95], ['z', 55], ['Z', 52]], 13),
+  ]
+  assert.equal(
+    recognizedSentence(applyTextReranking(ambiguousDigitSequence, BASE_CATALOG, 'de')),
+    '52',
+    'Eine S/5-Nähe muss mit einer unabhängig sehr starken zweiten Ziffer numerisch bleiben.',
+  )
+  const weakDigitAgainstStrongLetter = [
+    token('5', 71, [['5', 71], ['s', 67], ['S', 67]], 14),
+    token('a', 72, [['a', 72], ['n', 51], ['o', 48]], 15),
+  ]
+  assert.equal(
+    recognizedSentence(applyTextReranking(weakDigitAgainstStrongLetter, BASE_CATALOG, 'de')),
+    'sa',
+    'Eine knappe 5/s-Position muss der deutlich stärkeren alphabetischen Nachbarposition folgen.',
+  )
+
+  const caseHeavyTest = [
+    token('E', 75, [['E', 75], ['t', 60]], 10),
+    token('e', 88, [['e', 88]], 11),
+    token('S', 75, [['S', 75], ['s', 61]], 12),
+    token('E', 75, [['E', 75], ['t', 60]], 13),
+  ]
+  assert.equal(
+    recognizedSentence(applyTextReranking(caseHeavyTest, BASE_CATALOG, 'de')),
+    'test',
+    'Eine reine S→s-Korrektur darf das Sicherheitsbudget für zwei visuell plausible echte Test-Korrekturen nicht verbrauchen.',
+  )
+
+  const coherentLowercaseKnownWord = [...'zwischen'].map((char, index) => token(
+    char,
+    index === 0 ? 72 : 88,
+    index === 0 ? [['z', 72], ['Z', 75]] : [[char, 88]],
+    20 + index,
+  ))
+  assert.equal(
+    recognizedSentence(applyTextReranking(coherentLowercaseKnownWord, BASE_CATALOG, 'de')),
+    'zwischen',
+    'Ein bereits vollständig bekanntes Kleinwort darf nicht allein durch den Sprachprior zu Title Case wechseln.',
+  )
 
   const untrainedCalibration = calibratePersonalBaseEvidence({
     confidence: 82,
@@ -992,6 +2536,391 @@ try {
     'fenster',
     'Ein höhengleicher innerer Buchstabe muss bei einer nahen Kleinbuchstabenform klein bleiben.',
   )
+  const internallyUppercaseKnownWord = [...'zWischen'].map((char, index) => token(
+    char,
+    char === 'W' ? 79 : 84,
+    char === 'W' ? [['W', 79], ['w', 63]] : [[char, 84]],
+    170 + index,
+  ))
+  assert.equal(
+    recognizedSentence(applyTextReranking(internallyUppercaseKnownWord, BASE_CATALOG, 'de')),
+    'zwischen',
+    'Ein höhengleicher innerer Grossbuchstabe in einem exakt bekannten Wort muss trotz moderatem visuellen Vorsprung normalisiert werden.',
+  )
+  const deliberatelyTallInternalCapital = [...'syStem'].map((char, index) => token(
+    char,
+    char === 'S' ? 79 : 84,
+    char === 'S' ? [['S', 79], ['s', 63]] : [[char, 84]],
+    175 + index,
+    char === 'S'
+      ? [0.05 + index * 0.055, 0.17, 0.05, 0.13]
+      : [0.05 + index * 0.055, 0.2, 0.05, 0.1],
+  ))
+  assert.equal(
+    recognizedSentence(applyTextReranking(deliberatelyTallInternalCapital, BASE_CATALOG, 'de')),
+    'syStem',
+    'Ein geometrisch deutlich hoher innerer Grossbuchstabe muss als bewusst gesetzte Schreibweise erhalten bleiben.',
+  )
+  const visualAcronym = [...'NASA'].map((char, index) => token(
+    char,
+    91,
+    [[char, 91], [char.toLocaleLowerCase('en'), 76]],
+    180 + index,
+  ))
+  assert.equal(
+    recognizedSentence(applyTextReranking(visualAcronym, BASE_CATALOG, 'en')),
+    'NASA',
+    'Eine sichtbare unbekannte Grossbuchstabenabkürzung darf nicht als normales Kleinwort umgeschrieben werden.',
+  )
+  const exhaustiveQuality = [...'qualit/'].map((char, index) => token(
+    char,
+    char === '/' ? 69 : 88,
+    char === '/' ? [['/', 69], ['y', 66]] : [[char, 88]],
+    190 + index,
+  ))
+  installRecognitionWordMembership('en', (word) => word === 'quality')
+  assert.equal(
+    recognizedSentence(applyTextReranking(exhaustiveQuality, BASE_CATALOG, 'en')),
+    'quality',
+    'Das bereits geladene vollständige Rechtschreiblexikon muss eine visuell nahe OCR-Endung im klassischen Wortstrahl nutzbar machen.',
+  )
+  installRecognitionWordMembership('en', null)
+  const exhaustiveBeamTarget = 'private'
+  const exhaustiveBeamVisual = 'jtivute'
+  const exhaustiveBeamDistractors = ['x', 'z', 'q', 'j', 'f', 'v']
+  const exhaustiveBeamWord = [...exhaustiveBeamVisual].map((char, index) => {
+    const expected = [...exhaustiveBeamTarget][index]
+    if (char === expected) return token(char, 84, [[char, 84]], 192 + index)
+    const alternatives = exhaustiveBeamDistractors
+      .filter((candidate) => candidate !== char && candidate !== expected)
+      .slice(0, 5)
+      .map((candidate, candidateIndex) => [candidate, 70 - candidateIndex])
+    return token(char, 71, [[char, 71], ...alternatives, [expected, 62]], 192 + index)
+  })
+  installRecognitionWordMembership('en', (word) => word === exhaustiveBeamTarget)
+  installRecognitionWordCandidateProvider('en', (length) => (
+    length === exhaustiveBeamTarget.length ? [exhaustiveBeamTarget] : []
+  ))
+  assert.equal(
+    recognizedSentence(applyTextReranking(exhaustiveBeamWord, BASE_CATALOG, 'en')),
+    exhaustiveBeamTarget,
+    'Das lazy Längenlexikon muss ein vollständig visuell gestütztes Wort gegen frühes Beam-Pruning erhalten.',
+  )
+  installRecognitionWordCandidateProvider('en', null)
+  installRecognitionWordMembership('en', null)
+  const lowercaseLiteralWithInternalCapital = [
+    token('y', 70, [['y', 70], ['f', 71]], 196),
+    token('e', 70, [['e', 70], ['o', 71]], 197),
+    token('l', 82, [['l', 82]], 198),
+    token('l', 82, [['l', 82]], 199),
+    token('o', 82, [['o', 82]], 200),
+    token('W', 78, [['W', 78], ['w', 65]], 201),
+  ]
+  const literalCaseWords = new Set(['follow', 'yellow'])
+  installRecognitionWordMembership('en', (word) => literalCaseWords.has(word))
+  installRecognitionWordCandidateProvider('en', (length) => (
+    length === 'yellow'.length ? [...literalCaseWords] : []
+  ))
+  assert.equal(
+    recognizedSentence(applyTextReranking(lowercaseLiteralWithInternalCapital, BASE_CATALOG, 'en')),
+    'yellow',
+    'Ein bereits wörtlich bekanntes Kleinwort darf wegen eines internen Case-Fehlers nicht zu einem anderen Wort driften.',
+  )
+  installRecognitionWordCandidateProvider('en', null)
+  installRecognitionWordMembership('en', null)
+  const supportedRunnerUpWord = [
+    token('9', 69, [['9', 69], ['q', 62], ['g', 60]], 202),
+    token('u', 80, [['u', 80]], 203),
+    token('i', 70, [['i', 70], ['t', 60]], 204),
+    token('2', 67, [['2', 67], ['z', 63], ['e', 60]], 205),
+  ]
+  installRecognitionWordMembership('de', (word) => word === 'quiz')
+  installRecognitionWordCandidateProvider('de', (length) => (
+    length === 'quiz'.length ? ['quiz'] : []
+  ))
+  assert.equal(
+    recognizedSentence(applyTextReranking(supportedRunnerUpWord, BASE_CATALOG, 'de')),
+    'quiz',
+    'Ein knapp zweitplatzierter vollständig gestützter Wortpfad muss einen unzulässigen Sprachsieger ersetzen.',
+  )
+  installRecognitionWordCandidateProvider('de', null)
+  installRecognitionWordMembership('de', null)
+  const uncertainTitleCaseDictionaryWord = [...'Jrivat'].map((char, index) => token(
+    char,
+    index === 0 ? 68 : 84,
+    index === 0 ? [['J', 68], ['p', 62]] : [[char, 84]],
+    198 + index,
+  ))
+  installRecognitionWordMembership('de', (word) => word === 'privat')
+  installRecognitionWordCandidateProvider('de', (length) => (
+    length === 'privat'.length ? ['privat'] : []
+  ))
+  assert.equal(
+    recognizedSentence(applyTextReranking(uncertainTitleCaseDictionaryWord, BASE_CATALOG, 'de')),
+    'privat',
+    'Ein unsicherer titelähnlicher Start darf ein eng visuell gestütztes Volllexikonwort nicht blockieren.',
+  )
+  installRecognitionWordCandidateProvider('de', null)
+  installRecognitionWordMembership('de', null)
+  const uncertainInitialCommonWord = [...'Jystem'].map((char, index) => token(
+    char,
+    index === 0 ? 68 : 84,
+    index === 0 ? [['J', 68], ['s', 62]] : [[char, 84]],
+    195 + index,
+  ))
+  assert.equal(
+    recognizedSentence(applyTextReranking(uncertainInitialCommonWord, BASE_CATALOG, 'de')),
+    'system',
+    'Ein unsicherer gross wirkender Wortanfang darf eine nahe, häufige Kleinwort-Hypothese nicht als Eigennamen blockieren.',
+  )
+  const uncertainTitleCoreTail = [...'SfStlm'].map((char, index) => {
+    const alternatives = index === 1
+      ? [['f', 66], ['y', 65]]
+      : index === 2 ? [['S', 82], ['s', 76]]
+        : index === 4 ? [['l', 74], ['e', 60]] : [[char, 82]]
+    return token(char, alternatives[0][1], alternatives, 204 + index)
+  })
+  assert.equal(
+    recognizedSentence(applyTextReranking(uncertainTitleCoreTail, BASE_CATALOG, 'de')),
+    'System',
+    'Ein unsicheres titelähnliches Kernwort darf einen einzeln um 14 Punkte schwächeren, aber voll gestützten Buchstaben nutzen.',
+  )
+  const uncertainTitleSharedBudget = [
+    token('L', 74, [['L', 74], ['h', 67]], 210),
+    token('m', 54, [['m', 54], ['e', 43]], 211),
+    token('l', 82, [['l', 82]], 212),
+    token('l', 82, [['l', 82]], 213),
+    token('c', 61, [['c', 61], ['o', 55]], 214),
+  ]
+  assert.equal(
+    recognizedSentence(applyTextReranking(uncertainTitleSharedBudget, BASE_CATALOG, 'en')),
+    'hello',
+    'Ein unsicherer Titelanfang muss dasselbe erweiterte Korrekturbudget wie das vollständig gestützte Kernwort verwenden.',
+  )
+  const queryAgainstCamry = [
+    token('q', 55, [['q', 55], ['z', 52], ['Z', 51], ['B', 48], ['7', 48], ['c', 47]], 215),
+    token('u', 58, [['u', 58], ['m', 57], ['R', 56], ['a', 55], ['r', 53], ['n', 51]], 216),
+    token('m', 54, [['m', 54], ['c', 49], ['w', 46], ['e', 43], ['n', 41], ['o', 39]], 217),
+    token('r', 77, [['r', 77], ['c', 60], ['T', 59], ['C', 57], ['v', 54], ['t', 50]], 218),
+    token('y', 66, [['Y', 71], ['/', 69], ['y', 66], ['2', 64], ['l', 61], ['g', 59]], 219),
+  ]
+  const queryCompetitors = new Set(['camry', 'query'])
+  installRecognitionWordMembership('en', (word) => queryCompetitors.has(word))
+  installRecognitionWordCandidateProvider('en', (length) => (
+    length === 'query'.length ? [...queryCompetitors] : []
+  ))
+  assert.equal(
+    recognizedSentence(applyTextReranking(queryAgainstCamry, BASE_CATALOG, 'en')),
+    'query',
+    'Bei zwei knapp gestützten Vollwörtern muss der Pfad mit weniger tatsächlichen Glyphenänderungen gewinnen.',
+  )
+  installRecognitionWordCandidateProvider('en', null)
+  installRecognitionWordMembership('en', null)
+  const qualityAgainstQualify = [
+    token('9', 71, [['9', 71], ['g', 64], ['y', 60], ['q', 58]], 220),
+    token('u', 64, [['u', 64], ['a', 64], ['U', 63], ['n', 56]], 221),
+    token('a', 66, [['a', 66], ['u', 64], ['n', 62], ['o', 61]], 222),
+    token('l', 84, [['l', 84], ['d', 71], ['A', 70], ['f', 66]], 223),
+    token('i', 77, [['i', 77], ['l', 60], ['7', 58], ['t', 55]], 224),
+    token('f', 65, [['f', 65], ['A', 64], ['[', 64], ['t', 62]], 225),
+    token('g', 73, [['g', 73], ['y', 65], ['A', 59], ['8', 57]], 226),
+  ]
+  const qualityCompetitors = new Set(['qualify', 'quality'])
+  installRecognitionWordMembership('en', (word) => qualityCompetitors.has(word))
+  installRecognitionWordCandidateProvider('en', (length) => (
+    length === 'quality'.length ? [...qualityCompetitors] : []
+  ))
+  assert.equal(
+    recognizedSentence(applyTextReranking(qualityAgainstQualify, BASE_CATALOG, 'en')),
+    'quality',
+    'Ein Ein-Buchstaben-Nachbar darf den sprachlich stärkeren voll gestützten Wortpfad nicht allein wegen einer Änderung weniger verdrängen.',
+  )
+  installRecognitionWordCandidateProvider('en', null)
+  installRecognitionWordMembership('en', null)
+  const corpusBackedFabio = [
+    token('E', 72, [['E', 72], ['F', 68]], 200),
+    token('c', 78, [['c', 78], ['a', 74]], 201),
+    token('b', 88, [['b', 88]], 202),
+    token('i', 86, [['i', 86]], 203),
+    token('a', 67, [['a', 67], ['o', 65]], 204),
+  ]
+  assert.equal(
+    recognizedSentence(applyTextReranking(corpusBackedFabio, BASE_CATALOG, 'de')),
+    'Fabio',
+    'Ein priorisierter häufiger Name muss drei nahe visuelle Fehler korrigieren können, ohne zu einem häufigen Fremdwort zu driften.',
+  )
+  const alphanumericFakeWordAgainstFabio = [
+    token('F', 84, [['F', 84]], 205),
+    token('a', 84, [['a', 84]], 206),
+    token('h', 75, [['h', 75], ['L', 70], ['b', 60]], 207),
+    token('i', 75, [['i', 75], ['l', 74]], 208),
+    token('0', 79, [['0', 79], ['o', 74]], 209),
+  ]
+  assert.equal(
+    recognizedSentence(applyTextReranking(alphanumericFakeWordAgainstFabio, BASE_CATALOG, 'de')),
+    'Fabio',
+    'Eine Endziffer darf nicht entfernt werden und dadurch einem gemischten Pfad wie FaLl0 den Lexikonbonus von fall geben.',
+  )
+  const confidentUnknownMarlo = [...'Marlo'].map((char, index) => token(
+    char,
+    92,
+    char === 'l' ? [['l', 92], ['c', 89]] : [[char, 92]],
+    210 + index,
+  ))
+  installRecognitionProperNameMembership('de', (word) => word === 'marco')
+  assert.equal(
+    recognizedSentence(applyTextReranking(confidentUnknownMarlo, BASE_CATALOG, 'de')),
+    'Marlo',
+    'Ein visuell bereits sicherer unbekannter Name darf nicht zu einem ähnlichen corpusgestützten Namen umgeschrieben werden.',
+  )
+  installRecognitionProperNameMembership('de', null)
+  installRecognitionWordMembership('de', (word) => word === 'marco')
+  installRecognitionWordCandidateProvider('de', (length) => (
+    length === 'marco'.length ? ['marco'] : []
+  ))
+  assert.equal(
+    recognizedSentence(applyTextReranking(confidentUnknownMarlo, BASE_CATALOG, 'de')),
+    'Marlo',
+    'Ein sicher sichtbarer unbekannter Name muss auch gegen ein nahes gewöhnliches Volllexikonwort geschützt bleiben.',
+  )
+  installRecognitionWordCandidateProvider('de', null)
+  installRecognitionWordMembership('de', null)
+  const longCoreWord = [...'bamdscbriye'].map((char, index) => {
+    const expected = [...'handschrift'][index]
+    return token(
+      char,
+      char === expected ? 82 : 70,
+      char === expected ? [[char, 82]] : [[char, 70], [expected, 61]],
+      220 + index,
+    )
+  })
+  assert.equal(
+    recognizedSentence(applyTextReranking(longCoreWord, BASE_CATALOG, 'de')),
+    'handschrift',
+    'Ein langes Kernwort darf fünf einzeln visuell plausible Fehler gemeinsam korrigieren.',
+  )
+  const repeatedAmbiguityWord = [...'lmrumu'].map((char, index) => {
+    const expected = [...'lernen'][index]
+    return token(
+      char,
+      char === expected ? 84 : 70,
+      char === expected ? [[char, 84]] : [[char, 70], [expected, 60]],
+      225 + index,
+    )
+  })
+  assert.equal(
+    recognizedSentence(applyTextReranking(repeatedAmbiguityWord, BASE_CATALOG, 'de')),
+    'lernen',
+    'Wiederholte gleiche visuelle Verwechslungen in einem Wort müssen eine gemeinsame Ambiguitätsentscheidung nutzen.',
+  )
+  const compactCoreWord = [...'ucte1'].map((char, index) => {
+    const expected = [...'notes'][index]
+    return token(
+      char,
+      char === expected ? 84 : 70,
+      char === expected ? [[char, 84]] : [[char, 70], [expected, 62]],
+      226 + index,
+    )
+  })
+  assert.equal(
+    recognizedSentence(applyTextReranking(compactCoreWord, BASE_CATALOG, 'en')),
+    'notes',
+    'Ein kuratiertes fünfbuchstabiges Kernwort darf drei unabhängig plausible Glyphenfehler korrigieren.',
+  )
+  const compactExhaustiveTarget = 'motes'
+  const compactExhaustiveVisual = 'rakes'
+  const compactExhaustiveWord = [...compactExhaustiveVisual].map((char, index) => {
+    const expected = [...compactExhaustiveTarget][index]
+    return token(
+      char,
+      char === expected ? 84 : 70,
+      char === expected ? [[char, 84]] : [[char, 70], [expected, 62]],
+      232 + index,
+    )
+  })
+  installRecognitionWordMembership('en', (word) => word === compactExhaustiveTarget)
+  installRecognitionWordCandidateProvider('en', (length) => (
+    length === compactExhaustiveTarget.length ? [compactExhaustiveTarget] : []
+  ))
+  assert.equal(
+    recognizedSentence(applyTextReranking(compactExhaustiveWord, BASE_CATALOG, 'en')),
+    compactExhaustiveVisual,
+    'Das grosse ungewichtete Volllexikon darf bei fünf Zeichen nicht dieselben drei sichtbaren Buchstaben überschreiben.',
+  )
+  installRecognitionWordCandidateProvider('en', null)
+  installRecognitionWordMembership('en', null)
+  const repeatedTitleAmbiguityWord = [
+    token('E', 75, [['E', 75], ['t', 71]], 228),
+    token('l', 67, [['l', 67], ['e', 64]], 229),
+    token('S', 72, [['S', 72], ['s', 66]], 230),
+    token('E', 75, [['E', 75], ['t', 71]], 231),
+  ]
+  const titleCompetitors = new Set(['else', 'test'])
+  installRecognitionWordMembership('en', (word) => titleCompetitors.has(word))
+  installRecognitionWordCandidateProvider('en', (length) => (
+    length === 'test'.length ? [...titleCompetitors] : []
+  ))
+  assert.equal(
+    recognizedSentence(applyTextReranking(repeatedTitleAmbiguityWord, BASE_CATALOG, 'en')),
+    'test',
+    'Der Schutz unbekannter Titelwörter muss wiederholte gleiche Verwechslungen ebenso begrenzt gemeinsam bewerten.',
+  )
+  installRecognitionWordCandidateProvider('en', null)
+  installRecognitionWordMembership('en', null)
+  const beamStressExpected = 'mathematik'
+  const beamStressVisual = 'nqvrematik'
+  const beamStressDistractors = ['x', 'z', 'q', 'j', 'f', 'p', 'v']
+  const beamStressWord = [...beamStressVisual].map((char, index) => {
+    const expected = [...beamStressExpected][index]
+    if (char === expected) return token(char, 84, [[char, 84]], 230 + index)
+    const alternatives = beamStressDistractors
+      .filter((candidate) => candidate !== char && candidate !== expected)
+      .slice(0, 6)
+      .map((candidate, candidateIndex) => [candidate, 71 - candidateIndex])
+    return token(char, 72, [[char, 72], ...alternatives, [expected, 60]], 230 + index)
+  })
+  assert.equal(
+    recognizedSentence(applyTextReranking(beamStressWord, BASE_CATALOG, 'de')),
+    beamStressExpected,
+    'Ein vollständig sichtbares Kernwort darf bei vielen frühen Alternativen nicht aus dem begrenzten Präfixstrahl fallen.',
+  )
+  const exhaustiveOnlyTarget = 'luminarium'
+  const exhaustiveOnlyVisual = 'tunihorjum'
+  const exhaustiveOnlyWord = [...exhaustiveOnlyVisual].map((char, index) => {
+    const expected = [...exhaustiveOnlyTarget][index]
+    return token(
+      char,
+      char === expected ? 82 : 70,
+      char === expected ? [[char, 82]] : [[char, 70], [expected, 61]],
+      240 + index,
+    )
+  })
+  installRecognitionWordMembership('en', (word) => word === exhaustiveOnlyTarget)
+  assert.equal(
+    recognizedSentence(applyTextReranking(exhaustiveOnlyWord, BASE_CATALOG, 'en')),
+    exhaustiveOnlyVisual,
+    'Ein beliebiger Treffer im grossen Rechtschreiblexikon darf nicht fünf sichtbare Buchstaben überschreiben.',
+  )
+  installRecognitionWordMembership('en', null)
+  const repeatedOverreachTarget = 'ssssssss'
+  const repeatedOverreachVisual = 'aaaaaaaa'
+  const repeatedOverreachWord = [...repeatedOverreachVisual].map((char, index) => token(
+    char,
+    70,
+    [['a', 70], ['s', 64]],
+    255 + index,
+  ))
+  installRecognitionWordMembership('en', (word) => word === repeatedOverreachTarget)
+  installRecognitionWordCandidateProvider('en', (length) => (
+    length === repeatedOverreachTarget.length ? [repeatedOverreachTarget] : []
+  ))
+  assert.equal(
+    recognizedSentence(applyTextReranking(repeatedOverreachWord, BASE_CATALOG, 'en')),
+    repeatedOverreachVisual,
+    'Wiederholte gleiche Alternativen dürfen das Korrekturbudget nicht unbegrenzt umgehen.',
+  )
+  installRecognitionWordCandidateProvider('en', null)
+  installRecognitionWordMembership('en', null)
   assert.equal(
     applyNeuralWordContext('leRnen und TEst', 'de'),
     'lernen und Test',
@@ -1207,6 +3136,27 @@ try {
     'hallo test',
     'Ein lokaler Abstandssprung muss auch zwischen breiten Buchstaben als Wortgrenze erkannt werden.',
   )
+  const singleMeasuredWordGap = [...'hallomathe'].map((char, index) => {
+    const x = 0.05 + index * 0.05 + (index >= 5 ? 0.045 : 0)
+    return token(char, 97, [[char, 97]], index, [x, 0.22, 0.05, 0.1])
+  })
+  assert.equal(
+    recognizedSentence(applyTextReranking(singleMeasuredWordGap, BASE_CATALOG, 'de')),
+    'hallo mathe',
+    'Wenn eine fast vollständig verbundene Zeile nur eine echte Wortlücke enthält, darf diese nicht als kompakter Buchstabenabstand die eigene Schwelle erhöhen.',
+  )
+  const physicallySeparatedBodies = [...'hallomathe'].map((char, index) => {
+    const inkLeft = 0.1 + index * 0.025 + (index >= 5 ? 0.05 : 0)
+    return {
+      ...token(char, 97, [[char, 97]], index, [0.05 + index * 0.05, 0.22, 0.05, 0.1]),
+      strokes: [spacingStroke(inkLeft, inkLeft + 0.015, index * 2)],
+    }
+  })
+  assert.equal(
+    recognizedSentence(applyTextReranking(physicallySeparatedBodies, BASE_CATALOG, 'de')),
+    'hallo mathe',
+    'Eine echte Tintenlücke muss auch dann als Wortgrenze erhalten bleiben, wenn zwei künstlich geschnittene Tokenboxen direkt aneinanderliegen.',
+  )
   assert.equal(
     repairNeuralWordSpacing('Te st ist gu t', 'de'),
     'Test ist gut',
@@ -1216,6 +3166,11 @@ try {
     repairNeuralWordSpacing('in form', 'en'),
     'in form',
     'Zwei bereits gültige Wörter dürfen nicht nur deshalb verbunden werden, weil auch ihre Verkettung ein Wort ist.',
+  )
+  assert.equal(
+    repairNeuralWordSpacing('die SES S.A. und Nummer N4 in einer Big Band', 'de'),
+    'die SES S.A. und Nummer N4 in einer Big Band',
+    'Abstände vor Akronymen, Kennungen und grossgeschriebenen Namen dürfen nicht entfernt werden.',
   )
 
   const neuralLine = (text, confidence = 88) => {
@@ -1631,6 +3586,16 @@ try {
     applyMeasuredNeuralWordContext('korrekt vor', 'de', 9),
     'korrektur',
     'Ein langes Wort mit einem kurzen erfundenen neuronalen Endfragment muss über die gemessene Gesamtlänge repariert werden.',
+  )
+  assert.equal(
+    applyMeasuredNeuralWordContext('wirtschaft verstehen', 'de'),
+    'wirtschaft verstehen',
+    'Ohne unabhängige Längenmessung darf eine echte Mehrwort-Zeile nicht zu einem Kunstwort verklebt werden.',
+  )
+  assert.equal(
+    applyMeasuredNeuralWordContext('wirtschaft verstehen', 'de', 19),
+    'wirtschaft verstehen',
+    'Auch bei passender gemessener Gesamtlänge muss eine echte Phrase ihren Wortabstand behalten.',
   )
 
   const sparseBuchstabe = [...'auchltaul'].map((char, index) => {
@@ -2189,6 +4154,64 @@ try {
     true,
     'Dreistellige Alltagswörter auf gemeinsamer Grundlinie müssen eine reine Indexhypothese überstimmen.',
   )
+  const falseTwoLetterWordScripts = {
+    ...falseWordScripts,
+    value: 'i_{m}',
+    textValue: 'im',
+    mathValue: 'i_{m}',
+    evidence: {
+      ...falseWordScripts.evidence,
+      text: {
+        ...falseWordScripts.evidence.text,
+        visibleCharacters: 2,
+        letters: 2,
+        words: 1,
+        knownWords: 1,
+        knownWordRatio: 1,
+      },
+      math: {
+        ...falseWordScripts.evidence.math,
+        visibleCharacters: 2,
+        layoutAssignments: 1,
+        weakScriptAssignments: 1,
+      },
+    },
+  }
+  assert.equal(
+    isScriptOnlyBaselineTextConflict(falseTwoLetterWordScripts),
+    true,
+    'Ein sicher erkanntes zweibuchstabiges Wort muss eine schwache reine Indexhypothese widerlegen.',
+  )
+  assert.equal(
+    assessNeuralTextModeCandidate('im', 'de', {
+      ...neuralResult('im', 91), wordCount: 1, knownWordRatio: 1,
+    }, falseTwoLetterWordScripts).shouldUseText,
+    true,
+    'Die Zeilenerkennung muss ein bekanntes kurzes Wort gegen eine höhenbedingte Indexverwechslung durchsetzen.',
+  )
+  const realTwoLetterSubscript = {
+    ...falseTwoLetterWordScripts,
+    evidence: {
+      ...falseTwoLetterWordScripts.evidence,
+      math: {
+        ...falseTwoLetterWordScripts.evidence.math,
+        weakScriptAssignments: 0,
+        decisiveStructure: true,
+      },
+    },
+  }
+  assert.equal(
+    isScriptOnlyBaselineTextConflict(realTwoLetterSubscript),
+    false,
+    'Ein deutlich kleiner echter Buchstabenindex darf nicht als kurzes Wörterbuchwort umgedeutet werden.',
+  )
+  assert.equal(
+    assessNeuralTextModeCandidate('im', 'de', {
+      ...neuralResult('im', 91), wordCount: 1, knownWordRatio: 1,
+    }, realTwoLetterSubscript).shouldUseText,
+    false,
+    'Eine zufällige Wortlesung darf einen klar skalierten mathematischen Index nicht überschreiben.',
+  )
   const falseUnknownNameScripts = {
     ...falseWordScripts,
     value: 'F_{a b i o}',
@@ -2222,6 +4245,67 @@ try {
     }, falseUnknownNameScripts).shouldUseText,
     true,
     'Eigennamen und Fachwörter müssen eine reine falsche Indexhypothese überstimmen können.',
+  )
+  const falseUnknownAlignedWordScripts = {
+    ...falseWordScripts,
+    value: 't_{a v o}',
+    textValue: 'tavo',
+    mathValue: 't_{a v o}',
+    evidence: {
+      ...falseWordScripts.evidence,
+      text: {
+        ...falseWordScripts.evidence.text,
+        visibleCharacters: 4,
+        letters: 4,
+        knownWords: 0,
+        knownWordRatio: 0,
+        baselineAlignment: 0.72,
+      },
+      math: {
+        ...falseWordScripts.evidence.math,
+        visibleCharacters: 4,
+        layoutAssignments: 3,
+      },
+    },
+  }
+  assert.equal(
+    assessNeuralTextModeCandidate('tavo', 'de', {
+      ...neuralResult('tavo', 84), wordCount: 1, knownWordRatio: 0,
+    }, falseUnknownAlignedWordScripts).shouldUseText,
+    true,
+    'Eine sichere reine Buchstabenlesung muss eine schwache Indexkette auch ohne Wörterbucheintrag überstimmen.',
+  )
+  const falseUnknownThreeLetterScripts = {
+    ...falseUnknownAlignedWordScripts,
+    value: 'z_{y v}',
+    textValue: 'zyv',
+    mathValue: 'z_{y v}',
+    evidence: {
+      ...falseUnknownAlignedWordScripts.evidence,
+      text: {
+        ...falseUnknownAlignedWordScripts.evidence.text,
+        visibleCharacters: 3,
+        letters: 3,
+        baselineAlignment: 0.94,
+      },
+      math: {
+        ...falseUnknownAlignedWordScripts.evidence.math,
+        visibleCharacters: 3,
+        layoutAssignments: 2,
+      },
+    },
+  }
+  assert.equal(
+    isScriptOnlyBaselineTextConflict(falseUnknownThreeLetterScripts),
+    true,
+    'Eine streng ausgerichtete unbekannte Dreierfolge darf keine reine Indexhypothese bleiben.',
+  )
+  assert.equal(
+    assessNeuralTextModeCandidate('zyv', 'de', {
+      ...neuralResult('zyv', 84), wordCount: 1, knownWordRatio: 0,
+    }, falseUnknownThreeLetterScripts).shouldUseText,
+    true,
+    'Die Zeilenerkennung muss auch kurze Namen und Fachkürzel ohne Wörterbucheintrag gegen falsche Indexe durchsetzen.',
   )
   const verticallyDisplacedUnknownScripts = {
     ...falseUnknownNameScripts,
@@ -2412,6 +4496,121 @@ try {
     false,
     'Ein geometrisch bestätigtes einzelnes Integral darf nicht durch eine feindliche persönliche T-Antwort überschrieben werden.',
   )
+  const collapsedWideWordIntegral = {
+    ...standaloneIntegral,
+    textValue: 'Test',
+    evidence: {
+      ...standaloneIntegral.evidence,
+      text: {
+        ...standaloneIntegral.evidence.text,
+        visibleCharacters: 1,
+        letters: 1,
+        words: 0,
+        knownWords: 0,
+        knownWordRatio: 0,
+        independentBodies: 0,
+        inkAspectRatio: 1.82,
+      },
+    },
+  }
+  assert.equal(
+    assessNeuralTextModeCandidate('Test', 'de', {
+      ...neuralResult('Test', 93), wordCount: 1, knownWordRatio: 1,
+    }, collapsedWideWordIntegral).shouldUseText,
+    true,
+    'Ein breites vollständiges Wort darf nicht wegen einer kollabierten Einzel-Integralhypothese zu Mathematik werden.',
+  )
+  const narrowRealIntegralWithWordHallucination = {
+    ...collapsedWideWordIntegral,
+    evidence: {
+      ...collapsedWideWordIntegral.evidence,
+      text: {
+        ...collapsedWideWordIntegral.evidence.text,
+        inkAspectRatio: 0.44,
+      },
+    },
+  }
+  assert.equal(
+    assessNeuralTextModeCandidate('Test', 'de', {
+      ...neuralResult('Test', 98), wordCount: 1, knownWordRatio: 1,
+    }, narrowRealIntegralWithWordHallucination).shouldUseText,
+    false,
+    'Eine schmale echte Integralform muss auch gegen eine sehr sichere falsche Wortlesung geschützt bleiben.',
+  )
+  const wideRealSumWithWordHallucination = {
+    ...collapsedWideWordIntegral,
+    mathValue: '\\sum',
+    value: '\\sum',
+    evidence: {
+      ...collapsedWideWordIntegral.evidence,
+      text: {
+        ...collapsedWideWordIntegral.evidence.text,
+        inkAspectRatio: 0.86,
+      },
+    },
+  }
+  assert.equal(
+    assessNeuralTextModeCandidate('sum', 'en', {
+      ...neuralResult('sum', 98), wordCount: 1, knownWordRatio: 1,
+    }, wideRealSumWithWordHallucination).shouldUseText,
+    false,
+    'Ein einzelnes breites Summenzeichen darf nicht allein wegen eines passenden Wörterbuchworts zu Text werden.',
+  )
+  const protectedMathStructures = [
+    {
+      name: 'Integralgrenzen',
+      mathValue: '\\int_{0}^{1} x',
+      math: { largeOperators: 1, digits: 2, layoutAssignments: 2 },
+    },
+    {
+      name: 'Summengrenzen',
+      mathValue: '\\sum_{i=1}^{n} i',
+      math: { largeOperators: 1, relations: 1, layoutAssignments: 2 },
+    },
+    {
+      name: 'Bruch',
+      mathValue: '\\frac{7}{9}',
+      math: { fractions: 3, digits: 2 },
+    },
+    {
+      name: 'Wurzel',
+      mathValue: '\\sqrt{7}',
+      math: { strongSymbols: 1, digits: 1 },
+    },
+    {
+      name: 'Tiefindex',
+      mathValue: 'x_{1}',
+      math: { digits: 1, layoutAssignments: 1 },
+    },
+    {
+      name: 'Hochindex',
+      mathValue: 'x^{2}',
+      math: { digits: 1, layoutAssignments: 1 },
+    },
+  ]
+  protectedMathStructures.forEach(({ name, mathValue, math }) => {
+    const automatic = {
+      ...collapsedWideWordIntegral,
+      mathValue,
+      value: mathValue,
+      evidence: {
+        ...collapsedWideWordIntegral.evidence,
+        math: {
+          ...collapsedWideWordIntegral.evidence.math,
+          ...math,
+          latexStructure: true,
+          decisiveStructure: true,
+        },
+      },
+    }
+    assert.equal(
+      assessNeuralTextModeCandidate('Test', 'de', {
+        ...neuralResult('Test', 99), wordCount: 1, knownWordRatio: 1,
+      }, automatic).shouldUseText,
+      false,
+      `${name} muss selbst bei einer sehr sicheren gegenteiligen Wortlesung Mathematik bleiben.`,
+    )
+  })
   const trainedTConflict = {
     ...standaloneIntegral,
     textValue: 'T',

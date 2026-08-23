@@ -1,7 +1,360 @@
 # Änderungsverlauf
 
+## Unveröffentlicht
+
+## 2026.8.61
+
+- **Unbegrenztes Blatt wie in OneNote:** Die Schreibfläche hat keine feste Seitengröße. Schreiben am Rand macht das Blatt weiter — auch links und oben — und vorhandene Schrift bleibt stehen. Du kannst ein Stück ins Leere schwenken, aber nicht ins Unendliche; der Schwenkraum wächst mit, wenn du weiter schreibst.
+
+## 2026.8.60
+
+- **Ein Canvas:** Das Stift-Overlay deckt Blatt und schwarze Bühne. Die Linie liegt auf dem Blatt. Links und oben endet es; rechts und unten wächst es weiter.
+
+## 2026.8.59
+
+- **Linie beim Zeichnen:** Im Stiftmodus malt der Stift wieder eine sichtbare Linie auf der Markdown-Notiz.
+- **Blatt links und oben:** Das Blatt hat links und oben eine Kante. Dahinter bleibt der Hintergrund schwarz — es wächst dort nicht weiter.
+
+## 2026.8.58
+
+- **Hausaufgaben-API:** Über die API steuerst du Hausaufgaben und Termine — abfragen, anlegen, ändern, als erledigt markieren (auch Termine) und löschen.
+
+## 2026.8.57
+
+- **Linie beim Schreiben:** Im Stiftmodus malt der Stift wieder eine sichtbare Linie auf der Notiz. Markdown fängt den Stift nicht mehr.
+
+## 2026.8.56
+
+- **Stift schreibt, Tastatur markiert:** Im Stiftmodus schreibt der Stift. Text auf PDF und Notiz markierst du nur im Tastaturmodus.
+- **PDF-Text bleibt stehen:** Beim Schreiben bleibt der PDF-Text sichtbar und an seinem Platz. Markierungen folgen den Buchstaben, ohne sie doppelt zu zeichnen.
+- **Tastatur-Leiste:** Die obere Leiste im Tastaturmodus hat eigenes Aussehen, ohne Stift-Reste.
+- **Arbeitsblatt Entfernen:** Entfernen bleibt auf der Textspalte erreichbar, auch links auf dem Blatt.
+- **Verlinkung entfernen:** Eine gesetzte Verlinkung lässt sich wieder lösen — über Entfernen in der Leiste, das Kreuz am Marker oder Entf. Die verlinkte Notiz bleibt im Vault.
+
+## 2026.8.55
+
+- **Sichtbare Tinte:** Auf PDF und Notiz hat der Stift wieder eine normale Strichstärke. Die Linie bleibt unter dem Stift — nicht haardünn und nicht unsichtbar.
+
+## 2026.8.54
+
+- **PDF-Seite unter dem Stift:** Auf einem mehrseitigen PDF bleibt Handschrift und erkannter Text auf der Seite, auf der du schreibst — auch wenn das Blatt breiter als A4 ist. Nicht auf der anderen.
+
+## 2026.8.53
+
+- **Ein Canvas, auch auf PDF:** Die gepunktete Fläche ist eine Schreibfläche. Auf einem PDF bleibt die Tinte auf der Seite unter dem Stift — nicht auf der anderen.
+
+## 2026.8.52
+
+- **Ein Canvas:** Die gepunktete Fläche ist die Schreibfläche. Kein zweites Blatt drumherum. Du schreibst überall, wo die Punkte sind.
+
+## 2026.8.51
+
+- **Buch am Fach:** An ein Fach hängst du ein PDF. Oben blendest du das Buch ein — links, rechts, oben, unten oder in einem eigenen Fenster. Die letzte Seite bleibt gemerkt, und du kannst direkt ins Buch schreiben.
+- **Send Data:** Unter Experimentell schickt FaNotes in Abständen Diagnose-Logs und Laufzeitdaten an fanotes.fasrv.ch, besonders für Linux und Hyprland. Standard aus; der Akku wird nicht leergezogen.
+- **Gepunktetes Papier überall:** Die Punktlinie geht über das ganze sichtbare Blatt, nicht nur über die mittlere Schreibfläche. Leer bleibt ohne Punkte, PDF-Notizen ohne dieses Raster.
+
+## 2026.8.50
+
+- **Notiz-Backup:** Unter Experimentell schaltest du Backup in der oberen Leiste ein. Der erste Druck sichert die Notiz so wie sie ist; danach kannst du weitere Backups machen oder alte wiederherstellen.
+- **PDF-Verlinkung trifft die Seite:** Ein Klick auf einem mehrseitigen PDF merkt sich die echte Seite, nicht immer Seite 1.
+
+## 2026.8.49
+
+- **Blatt in alle Richtungen:** Die Schreibfläche wächst links, oben, rechts und unten mit — das weisse Blatt füllt die Ansicht.
+- **Scroll getrennt vom Text:** Du kannst ein gutes Stück in jede Richtung schwenken, aber nicht ins Unendliche. Die Textspalte bleibt stehen, auch wenn du an den Rändern schreibst.
+
+## 2026.8.48
+
+- **Verlinkung auf der Seite:** Irgendwo auf einer Notiz oder einem PDF setzt du eine Verlinkung. Ein Tippen öffnet die neue Notiz — praktisch, wenn ein PDF keinen Schreibplatz hat.
+- **Zurück oben:** Nach einer Verlinkung bringt Zurück in der Tab-Leiste zur vorherigen Notiz; zwei Sprünge gehen in umgekehrter Reihenfolge zurück.
+- **Stil wählen:** Symbol und Text sehen verschieden aus, auch nach dem Speichern. Symbol und Text zusammen geht ebenfalls.
+
+## 2026.8.47
+
+- **Blatt wächst mit:** Schreiben am unteren oder rechten Rand macht das Blatt weiter — nicht an einer A4-Wand.
+- **Scroll nur über den Text:** Du scrollst Inhalt plus einen kleinen Schreibrand, nicht ins Leere nach oben, links oder weit darunter.
+
+## 2026.8.46
+
+- **Keine Linie nach oben rechts:** Schreiben auf der rechten Blatthälfte zieht keine gerade Linie zur Oberkante.
+- **Kein Zusammendrücken nach rechts:** Wird das Blatt breiter, bleibt vorhandene Schrift links stehen.
+- **PDF in der oberen Leiste:** Seite, Zoom und Suche sitzen in der Editorleiste, nicht mehr als Balken über dem PDF.
+- **Letzte Notiz bleibt:** Nach dem Schließen öffnet FaNotes wieder die zuletzt geöffnete Notiz, wenn die Datei noch da ist.
+
+## 2026.8.45
+
+- **Remote Support trifft den Stift:** Werkzeug und Modus warten, bis die Stiftebene geladen ist. Der erste Stiftbefehl geht nicht verloren.
+
+## 2026.8.44
+
+- **Remote Support:** Unter Experimentell startest du eine Sitzung mit Code. Der Support kann dann FaNotes prüfen und testen — Version, Einstellungen, geöffnete Notiz, Vault-Namen, Werkzeug und Bild. Ohne Start oder nach dem Beenden bleibt der Zugriff zu.
+
+## 2026.8.43
+
+- **Keine Linie nach oben auf PDF:** Der erste Stiftkontakt auf einem PDF zieht keine gerade Linie zur Blattoberkante. Punkte über dem Blatt und Sprünge ins obere Band werden verworfen.
+- **Tinte bleibt auf dem PDF:** Wird das Blatt unter dem Stift höher, bleibt die Schrift stehen — auch nach einer langen Linie.
+
+## 2026.8.42
+
+- **Text bleibt stehen:** Schreiben auf der Seite verschiebt den Markdown-Text nicht mehr. Tinte auf A4 ändert weder den linken Rand noch kürzt sie die Seite.
+
+## 2026.8.41
+
+- **Stift auf PDF:** Im Stiftmodus schreibt der Stift wieder auf dem PDF. Die PDF-Seite fängt den Stift nicht mehr, und die Tintenfläche deckt alle Seiten.
+
+## 2026.8.40
+
+- **Keine Linie nach oben:** Sobald du den Stift aufsetzt, entsteht keine gerade Linie zur Blattoberkante. Ein 0,0-Geist oder eine Vorhersage wird nicht als Strich übernommen.
+- **Strich geht nach dem Wachsen weiter:** Wird die Seite mitten im Schreiben höher, bleibt der nächste Punkt auf der Linie — der Rest des Worts fällt nicht weg.
+
+## 2026.8.39
+
+- **Schrift bleibt oben stehen:** Schreiben im oberen Drittel der Seite verschiebt den Text nicht mehr nach oben — auch wenn die gemalte Box noch 0 war.
+- **Nach rechts ohne Schrumpfen:** Schreiben über den rechten Rand macht das Blatt breiter, staucht vorhandene Notizen aber nicht mehr zusammen.
+- **Blatt wächst wieder nach unten:** Am unteren Rand kommt wieder eine halbe Seite dazu. Die gemalte Fläche wird mit höher, nicht nur die interne Höhe.
+
+## 2026.8.38
+
+- **Trackpad hineinzoomen:** Pinch und Strg+Scroll vergrößern das Blatt wieder. Der erste Pinch-Tick und das von Chromium geschluckte Zoom-in gehen nicht mehr verloren.
+- **Blatt wächst ohne Sprung:** Beim Schreiben am unteren oder rechten Rand wächst die Seite in halben Schritten. Vorhandene Schrift bleibt auf der Lineatur, und der laufende Strich macht danach keinen Satz nach oben.
+- **Gliederung springt zur Überschrift:** Ein Klick in der Seitenleiste setzt den Cursor auf die Zeile. Tags in der Übersicht zählen auch gesetzte Schlagwörter, nicht nur `#hashtags`.
+- **Richtige Versionsnummer:** Einstellungen, Fehlerbericht und die Web-App zeigen die echte Paketversion, nicht mehr eine alte 2026.8.2.
+- **Im Dateimanager zeigen:** Die Befehlspalette öffnet den Speicherort der Notiz — im Browser lädt sie die Datei herunter.
+- **Hyprland:** `force_zero_scaling` gilt auch aus per `source =` eingebundenen Dateien. Linux startet weiter mit Ozone X11, damit Stift und Trackpad denselben Seat teilen.
+
+## 2026.8.37
+
+- **Fehlerbericht kommt an:** Auch nach fünf Minuten Schreiben bleibt der Bericht unter dem Limit und wird an fanotes.fasrv.ch geschickt.
+
+## 2026.8.36
+
+- **Fehler melden:** Unter Einstellungen oder in der Befehlspalette kannst du kurz beschreiben, was schiefging. Die letzten fünf Minuten (Stift, Notiz, Werkzeug, Version) werden automatisch angehängt und nur an fanotes.fasrv.ch geschickt.
+- **Lineal und Geodreieck:** Das Lineal hat zwei Zeichenkanten. Das Geodreieck fängt an allen drei Seiten und zeigt 0–180° am rechten Winkel.
+
+## 2026.8.35
+
+- **Handschrift bleibt stehen:** Beim Schreiben rutscht vorhandene Schrift nicht nach oben und wird nicht kleiner — auch wenn das Blatt schon höher war als die Seite.
+- **Kein toter Stift:** Eine ungültige 0,0-Ersteingabe verschluckt den Strich nicht. Der nächste echte Punkt schreibt weiter.
+- **Windows:** Nur Stift bleibt nach dem Zurücksetzen an. Handfläche, Finger und Maus zeichnen nicht.
+
+## 2026.8.34
+
+- **Handschrift bleibt stehen:** Beim Schreiben rutscht vorhandene Schrift nicht nach oben und wird nicht kleiner. Das Blatt wächst, die Zeichen bleiben auf ihrer Zeile.
+
+## 2026.8.33
+
+- **Trackpad nach dem Stift:** Nach dem Schreiben kannst du sofort mit zwei Fingern scrollen. Das Blatt fängt die Geste nicht mehr.
+- **Keine Linie nach oben:** Ein Sprung zur Blattoberkante wird nicht mehr als Strich übernommen, auch wenn die Seite schon lang ist.
+- **Linux:** FaNotes startet über X11, damit Stift und Trackpad sich nicht gegenseitig blockieren.
+
+## 2026.8.32
+
+- **Schrift bleibt am Ort:** Nach dem Tippen oder den Pfeiltasten rutscht der Text nicht mehr vom Lineal. Auch ein späteres Editor-Scrollen verschiebt die Schrift nicht.
+
+## 2026.8.31
+
+- **Blatt wächst früher:** Beim Schreiben bleibt mehr leeres Papier vor dem Rand. Du musst nicht mehr fast anstoßen, bevor die nächste halbe Seite dazukommt.
+- **Keine Geisterlinie nach Zoom:** Eine ungültige 0,0-Stiftkoordinate auf einem verschobenen oder gezoomten Blatt zieht keine Linie mehr in die Seitenmitte. Pfeiltasten verschieben den Text weiter nicht vom Lineal.
+
+## 2026.8.30
+
+- **Text bleibt auf dem Lineal:** Geschriebener Text springt nicht mehr hin und her. Pfeiltasten ziehen die Schrift nicht vom Karopapier weg — nur das Blatt scrollt, die Schrift bleibt eins mit dem Hintergrund.
+- **Keine Geisterlinien:** Vorhersagepunkte, 0,0-Koordinaten und eine fehlende Fläche ziehen keine Linie mehr in eine Ecke oder die Blattmitte.
+- **GlyphenWerk-Korrektur bleibt:** Eine einmalige Korrektur gleicher Länge (zum Beispiel *meute* statt *heute*) setzt sich beim nächsten Erkennen durch.
+
+## 2026.8.29
+
+- **Hausaufgaben-API-Passwort:** Das API-Passwort liegt verschlüsselt im Desktop-Profil, nicht mehr als Klartext in der Konfiguration. Leerzeichen am Rand gehören nicht zum Passwort.
+
+## 2026.8.28
+
+- **Hausaufgaben-API:** Die experimentelle Abfrage auf fanotes.fasrv.ch bleibt hinter Schalter und Passwort. Ohne beides oder mit falschem Passwort kommen keine Titel zurück.
+
+## 2026.8.27
+
+- **Hausaufgaben-API:** Unter Einstellungen → Experimentell kannst du die lokale Hausaufgabenliste über fanotes.fasrv.ch abfragen. Ein eigenes Passwort schützt die Liste; ohne Schalter und ohne Passwort bleiben die Einträge unsichtbar.
+
+## 2026.8.26
+
+- **Zeichenstudio im Fenster:** Das Zeichenstudio bleibt nach dem Öffnen auf dem Bildschirm. Die Einblend-Animation schiebt es nicht mehr nach rechts aus dem Fenster.
+- **Englisch vollständig:** Suche, Hausaufgaben, Ordner-Ziehen, Stift-Einstellungen, Notizmenü und Befehlspalette erscheinen auf Englisch, wenn die App-Sprache Englisch ist.
+
+## 2026.8.25
+
+- **Langer Stiftstrich:** Du kannst weiterzeichnen, ohne den Stift nach ein paar Sekunden anzuheben. Wacom unter Linux beendet den Strich nicht mehr, nur weil der Druck kurz auf 0 geht. Abheben und ein verpasster `pointerup` funktionieren weiter wie zuvor.
+
+## 2026.8.24
+
+- **Wacom-Lift auf Linux:** Nach dem Abheben bleibt der Stift nicht mehr „halb unten“. Scrollen, Zoomen, Klicks und Trackpad-Tinte funktionieren wieder, auch wenn Wayland kein `pointerup` schickt.
+- **Zoom-Limit:** Unter Einstellungen kannst du den Höchstzoom von 50 % bis 600 % setzen. Standard bleibt 325 %.
+
+## 2026.8.23
+
+- **Eine Zoom-Kamera:** Text, Kästchen und Tinte wachsen mit demselben Faktor. Zoom sitzt nur noch auf dem Blatt, nicht noch einmal auf dem Editor — kein verzerrter Text und keine Punkte, die fast stehen bleiben. Strg+Mausrad bleibt am Cursor; danach scrollt man normal.
+- **PDF als Notiz:** Neben Neue Notiz und Neuer Ordner importiert der PDF-Button ein Dokument als eigene Notiz — nicht als Arbeitsblatt auf einer Markdown-Seite. Handschrift liegt wie gewohnt in der `.famd`. Der Viewer blättert, zoomt, sucht, wählt Text, zeigt Miniaturen und die Gliederung.
+
+## 2026.8.22
+
+- **Zoom als ein Blatt:** Text, Kästchen und Tinte zoomen und verschieben sich gemeinsam. Die Schrift bleibt nicht mehr in der alten Größe stehen.
+- **Keine Geisterschrift:** Schnelle Stiftbewegungen hinterlassen keine zweite Kopie mehr, die erst nach dem erneuten Öffnen verschwindet.
+- **Ordnerübersicht:** Eine klare Liste statt Karten und Wissensgraph — Ordner, Unterordner, Notizen und letzte Änderung auf einen Blick.
+- **Stiftleiste klickbar:** Blatt, AI und ••• reagieren auch nach dem Schreiben zuverlässig; die Werkzeuge überdecken die rechten Tasten nicht mehr.
+- **Qwen kennt deine Buchstaben:** Die Texterkennung nutzt die trainierten GlyphenWerk-Buchstaben als Legende.
+- **Experimentell:** Handschrift zu Text (Konvertieren, Suchindex, Mathe-Löser und -Korrigierer) liegt unter Einstellungen → Experimentell, standardmäßig aus. Nach jedem Update bleibt der Schalter aus, bis du ihn wieder einschaltest.
+
+## 2026.8.21
+
+- **Zoom als ein Blatt:** Kästchen, Schrift und Tinte wachsen gemeinsam. Hinweise, Zeichenstudio und Konvertieren bleiben in der normalen UI-Größe.
+- **Formen zuverlässig glätten:** Stift kurz stillhalten. Fast waagerechte Linien werden horizontal, fast senkrechte vertikal. Die Empfindlichkeit liegt in den Einstellungen (Stift & Erkennung).
+- **Tinte schon beim Schreiben rund:** Die Glättung greift unter dem Stift, nicht erst nach dem Abheben.
+- **Ruhiges neues Blatt:** Zeichnet man weiter nach unten, springen die Kästchen nicht mehr hin und her.
+
+## 2026.8.20
+
+- **Qwen3-VL empfohlen:** Die Intel-NPU-Texterkennung ist die empfohlene Engine. Crops, Prompts und Zeilenlage sind schärfer; das kleine neuronale Modell bleibt als Rückfall.
+- **Zoom ohne Hin und Her:** Die Zoom-Geschwindigkeit (1–10) liegt in den Einstellungen. Das Blatt bleibt unter dem Cursor, ohne zu springen.
+- **Häuschen-Papier:** Die Kästchen oben links sind jetzt gleich groß wie der Rest.
+- **Runder Zirkel:** Kreis und Bogen sind in jede Richtung gleich weit — kein Oval mehr, wenn das Blatt breiter oder höher als A4 ist.
+- **Formen stillhalten:** Kreis, Linie, Rechteck, Quadrat, Dreieck oder Ellipse zeichnen und den Stift kurz stillhalten. Die Form wird geglättet; Buchstaben bleiben freihand.
+
+## 2026.8.19
+
+- **Notizen in Ordner ziehen:** Dateien lassen sich per Drag-and-drop in einen Ordner legen oder wieder herausziehen; die zugehörige `.famd` wandert mit.
+- **Papier pro Notiz:** Leer, gepunktet, Häuschen, kariert, liniert oder Millimeter — der Hintergrund gehört zur Notiz, nicht zu den globalen Einstellungen.
+- **Weitere Werkzeuge unter •••:** Tagesnotiz, Übersicht, GlyphenWerk und Befehle klappen unter dem unteren Punkte-Button auf und wieder ein.
+- **Hausaufgaben-Kalender:** Die Woche beginnt am Montag. Deutsche und englische Texte bleiben getrennt.
+- **Zoom wie in OneNote:** Ein Zoom für das ganze Blatt; Strg+Mausrad zoomt um den Cursor. Geteilte Ansicht teilt denselben Zoom.
+- **Zirkel, Lineal, Geodreieck:** Beschriftung bleibt oben, Kreise sitzen auf der Vorschau, die Werkzeuge liegen flach auf dem Blatt. In Lineal und Geodreieck gezeichnete Striche rasten an der nächsten Kante ein.
+- **Ruhiges Scrollen:** Der Text verzieht sich beim Scrollen nicht mehr; das Blatt läuft weicher.
+- **Französisch:** Festes Schulfach in der Einrichtung (Englisch: French).
+- **Saubere Animationen:** Einrichtung, Buttons, Toasts und Kalender bewegen sich einheitlich, ohne Sprünge.
+- **`.famd`-Betrachter:** Unter https://fanotes.fasrv.ch/viewer lässt sich eine lokale `.famd` nur anschauen — ohne Upload und ohne Änderung.
+
+## 2026.8.18
+
+- **Obsidian-Look:** Dunkles und helles Farbschema wie in Obsidian — flache Grautöne, Violett-Akzent, ohne Leuchten.
+- **Eine obere Leiste:** Im Stiftmodus poppt kein zweites Menü mehr. Dieselbe Leiste wechselt zu Stift, Lineal, Farben und Konvertieren.
+- **Ruhigere Seitenleiste:** Nur Notizen, Suche, Stift, Hausaufgaben und Einstellungen sind sofort da. GlyphenWerk, Übersicht, Tagesnotiz und Befehle liegen unter „Weitere Werkzeuge“.
+- **Papier wächst nur mit Inhalt:** Scrollen erzeugt kein endloses Leere mehr. Hinter der letzten Schrift bleibt Platz für einen Absatz, dann stoppt das Blatt.
+- **Zirkel, Lineal und Geodreieck:** Im Stiftmodus messen, nachzeichnen, Kreise und Bögen setzen; Tinte rastet an der Kante bzw. am Kreis ein.
+- **Tinte verschieben:** Mit der Lasso-Auswahl Handschrift verschieben, skalieren, kopieren oder löschen.
+- **PDF-Markierungen:** Im Arbeitsblatt lassen sich Flächen hervorheben.
+- **Geteilte Ansicht:** Zwei Notizen nebeneinander (Umschalt+Klick auf einen Tab).
+- **Schlagwörter:** Tags in der Notiz und als Filter in der Seitenleiste.
+- **Versionsverlauf:** Frühere Stände einer Notiz wiederherstellen.
+- **PDF exportieren:** Die aktuelle Notiz inklusive Handschrift und Arbeitsblatt als PDF speichern oder drucken.
+- **Bilder einfügen:** Einfügen und Ablegen von Bildern als Arbeitsblatt.
+- **Hausaufgaben-Kalender:** Woche oder Monat statt nur der Liste.
+
+## 2026.8.17
+
+- **PDF-Entfernen bleibt sichtbar:** Die Schaltfläche „Entfernen“ sitzt auf der normalen Papier-Spalte und wandert nicht mehr mit dem unendlich nach rechts wachsenden Blatt aus dem Bild.
+
+## 2026.8.16
+
+- **Zoom auch im Textmodus:** Das Notizblatt lässt sich mit Tastatur (Strg++/−/0), Trackpad (Strg+Mausrad / Pinch) und der kleinen Zoom-Leiste unten rechts zoomen und drehen — unabhängig vom Stiftmodus. Die Ansicht bleibt beim Wechsel Tastatur ↔ Stift erhalten.
+- **Kein pixeliger Text mehr beim Zoomen:** Blatt-Zoom nutzt CSS `zoom` statt `transform: scale()`. Chromium rastert die Schrift in der Anzeigeauflösung; `will-change: transform` (1×-Bitmap) ist entfernt.
+- **Arbeitsblatt entfernen:** PDFs und Bilder lassen sich wieder über „Entfernen“ aus der Notiz lösen; Datei und Marker werden aus dem Vault gelöscht.
+- **Unterordner in Unterordnern:** In jedem Ordner lässt sich ein weiterer Unterordner anlegen (Symbol, Rechtsklick oder leerer Ordner). Die Verschachtelung ist beliebig tief.
+- **Nur Stift:** Im Handschriftmodus lässt sich „Nur Stift“ wählen — Finger/Hand zeichnen dann nicht mehr, nur der echte Stift. Unter Windows ist das die Voreinstellung.
+- **PDF-Arbeitsblätter flüssig & scharf:** PDFs kommen als Rohbytes ins Fenster (kein riesiges Data-URL/`atob` auf dem UI-Thread). Nur sichtbare Seiten rufen `getPage` auf und werden hintereinander gerendert; beim Wegscrollen bleibt die Bitmap kurz liegen, danach ist die Seite wieder nur eine leere Box. Pixel- und Tintenbudget sind enger, damit lange Arbeitsblätter FaNotes nicht ausbremsen.
+- **Desktop deutlich flüssiger (Linux & Windows):** Die Tinte rastert nur den sichtbaren Blattausschnitt in voller Schärfe statt einer riesigen Vollseiten-Bitmap. Resize wird entprellt, Chromium nutzt GPU-Rasterisierung (Windows zusätzlich ohne GPU-Blocklist), das Fenster erscheint erst wenn der Renderer bereit ist, und schwere Module (PDF.js, Editor, Formeln, Qwen) bleiben hinter dem ersten Frame.
+- **Stabiler Desktop:** Abstürze in Editor, Stift, PDF, Hausaufgaben oder Einstellungen bleiben isoliert. Ein abgestürztes Notizfenster lädt sich selbst neu. Löschen/Umbenennen speichert Tinte und Arbeitsblatt zuerst. Beschädigte Handschrift oder fehlende PDF-Seiten blockieren die Notiz nicht mehr.
+- **Kein eingefrorener Stift mehr:** Pointer-Capture gilt nicht auf dem Notizblatt. Trackpad-Zoom, Klicks auf Leiste/Tabs und ein verpasstes Stift-Ende geben die Eingabe sofort frei — Buttons bleiben klickbar, der +-Cursor bleibt nicht hängen.
+- **`.famd` neben jeder `.md`:** Beim Speichern legt FaNotes zusätzlich eine `.famd`-Datei an (gleicher Name). Darin steckt der Markdown-Text plus die Handschrift. Die `.md` bleibt wie gewohnt lesbar; in der Dateiliste erscheint nur eine Notiz.
+- **Stift schreibt unmittelbarer:** Die Tinte wird beim Bewegen gemalt, nicht erst im nächsten Bild. Chromium-Vorhersagepunkte füllen die Lücke zur Stiftspitze; Formprüfung läuft nicht mehr bei jedem Sample.
+- **Formen sauberziehen:** Nach Kreis, Ellipse, Dreieck, Quadrat, Rechteck oder Linie den Stift etwa zwei Sekunden stillhalten — nur klar erkannte Figuren werden begradigt, Handschrift bleibt unverändert.
+
+## 2026.8.15
+
+- **Papier wächst nach rechts:** Beim Schreiben oder Scrollen am rechten Rand erweitert sich die Notizseite horizontal (Soft-Limit ~20 A4-Breiten); bestehende Handschrift bleibt positions­treu.
+- **PDF-Arbeitsblatt-Import:** Grosse Data-URL-PDFs werden lokal dekodiert statt per `fetch` geladen – der Fehler „Arbeitsblatt nicht verfügbar / Failed to fetch“ entfällt.
+
+## 2026.8.14
+
+- **Stift + Trackpad-Zoom friert nicht mehr ein:** Während des Zeichnens mit dem Grafiktablett und gleichzeitigem Hereinzoomen (Trackpad/Strg+Mausrad) bleibt der +-Cursor nicht mehr hängen. Pointer-Capture gilt nur noch für die Maus; Stift/Touch enden sauber bei Zoom/Pan/Drehung, Gerätewechsel und Escape. Die schwebende Werkzeugleiste bleibt klickbar.
+
+## 2026.8.13
+
+- **Bessere Qwen3-VL-Handschrifterkennung:** Hochauflösendere, geglättete Strichbilder mit stärkerem Kontrast; OCR-Prompts (DE/EN) mit Zeilenerhalt; deterministische Decodierung; längere Token-Budgets; strengere Textbereinigung und intelligentere Übernahme gegenüber der klassischen Erkennung. Qwen wird auch genutzt, wenn der Auto-Modus Text stark vermutet.
+
+## 2026.8.12
+
+- **Qwen3-VL / OpenVINO GenAI:** Die Auto-Laufzeit installiert jetzt **OpenVINO + GenAI ≥2026.1** (inkl. `openvino-tokenizers`). Ältere 2025.x-Stacks meldeten `Unsupported 'qwen3_vl' VLM model type`. Beim Erkennen wird bei diesem Fehler einmalig die Runtime aktualisiert und der Lauf wiederholt.
+
+## 2026.8.11
+
+- **Unendlich langes Notizblatt beim Schreiben:** Scrollt man im Stiftmodus nach unten oder schreibt nah am unteren Rand, wächst die Seite in großen Schritten nach. Bestehende Handschrift bleibt positionstreu; Layout- und Canvas-Updates sind per `requestAnimationFrame` gebündelt, damit langes Scrollen nicht ruckelt (Soft-Limit ~40 A4-Seiten).
+
+## 2026.8.10
+
+- **Schärfere Handschrift beim Zoomen:** Die Tinten-Bitmap wird mit dem Zoom supersampled (bis ca. 2,6× View-Zoom, mit Speicherdeckel). Hereingezoomte Schrift bleibt klar statt pixelig; nach Zoom-Ende und Stift absetzen wird neu gerastert.
+
+## 2026.8.9
+
+- **Qwen3-VL / Core Ultra X9:** Die NPU-Erkennung erzwingt nicht mehr die veraltete Meteor-Lake-Plattform `OV_NPU_PLATFORM=3720` (das konnte NPUs neuerer Core-Ultra-Chips wie **Ultra X9 388H** unsichtbar machen). OpenVINO wählt die NPU automatisch (inkl. `NPU` / `NPU.0`).
+- Die OpenVINO-Laufzeit verlangt **≥2025** (bzw. 2024.6+) und installiert sie bei Bedarf neu; Probe- und Fehlermeldungen listen sichtbare Geräte und Linux-Hinweise (`/dev/accel`, NPU-Treiber).
+
+## 2026.8.8
+
+- **Zoom/Pan/Drehung im Stiftmodus:** Das gesamte Notizblatt (Hintergrundraster, Text und Handschrift) bewegt sich wieder als **eine Einheit**. Die obere Werkzeugleiste bleibt schmal und fix am Bildschirm (Portal außerhalb der Transform).
+- **Qwen3-VL OpenVINO-Laufzeit:** Beim „Lizenz akzeptieren & alles laden“ installiert FaNotes automatisch eine isolierte Python-Umgebung mit `openvino`, `openvino-genai` und `Pillow` (einmaliger Download), prüft danach die Intel-NPU und lädt erst dann das ~1,8&nbsp;GB INT4-Modell. Kein manuelles `pip install` mehr nötig.
+- Klarere Statusmeldungen und Fortschritt für Laufzeit- vs. Modell-Download in den Einstellungen.
+
+## 2026.8.7
+
+- Neue **Hausaufgaben- & Termine**-Ansicht (Ribbon, Befehlspalette): To-dos und Termine mit Fach, Fälligkeit, Priorität und Erledigt-Status. Speicherung lokal im Vault als `Hausaufgaben.md` (Markdown mit strukturiertem JSON-Block).
+- Der optionale Qwen3-VL-Worker startet zuverlässig aus dem AppImage/`app.asar`: Skript wird nach `userData` materialisiert, Python folgt Symlinks, `cwd` liegt nie im Asar – der frühere `spawn ENOTDIR`-Fehler entfällt.
+
+## 2026.8.6
+
+- Beim Klick auf Herunterladen erscheint sofort ein sichtbarer Download-Fortschritt (Prozent und übertragene Daten) in den Einstellungen; der Status springt nicht mehr stumm, bis der Download fertig ist.
+- Zoom, Drehung und Verschieben der Handschriftseite bewegen nur noch den Blattinhalt. Die obere Werkzeugleiste bleibt fixiert oben und zoomt nicht mit.
+- Optionales **Qwen3-VL 2B**-Vision-Modell (OpenVINO **INT4**, ~1,8&nbsp;GB) für Handschrift: erst nach Lizenzbestätigung geladen, jederzeit abschaltbar, **nur Intel-NPU** (Core Ultra, z. B. Ultra&nbsp;9) – kein CPU-Fallback, damit Strom sparsam und Performance hoch bleiben. Voraussetzung: OpenVINO GenAI + NPU-Treiber.
+- Der Qwen3-VL-Python-Worker startet zuverlässig aus dem AppImage/`app.asar`: Das Skript wird vor dem Start nach `userData` materialisiert, Python folgt Symlinks (`/usr/bin/python3`), und `cwd` liegt nie im Asar – der frühere `spawn ENOTDIR`-Fehler entfällt.
+
+## 2026.8.5
+
+- Während dem Handschriftszeichnen lässt sich das Blatt zoomen und drehen: Toolbar-Buttons, `Strg`+Mausrad (Zoom), `Alt`+Mausrad (Drehung), `[` / `]` sowie `Strg`+`0` / `Esc` zum Zurücksetzen. Im Inline-Stiftmodus folgt das gesamte Notizpapier der Ansicht, damit Text und Tinte ausgerichtet bleiben; die Zeichen-Bitmap skaliert nicht mit und bleibt scharf.
+- Nach Stiftnutzung unter Hyprland/Wayland bleiben Tastatur und Touchpad-Scroll wieder sofort nutzbar: Pointer-Capture wird robust freigegeben (inkl. globaler Sicherheitsnetz-Listener), der Canvas behält keinen hängenden Fokus mehr, und beim Verlassen des Stiftmodus wird die Eingabe freigegeben, ohne den virtuellen Desktop wechseln zu müssen.
+- Die freie Einzel- und Mehrzeichenerkennung ist robuster: unsichere Glyphen behalten ein breiteres N-Best-Fenster für Wortkontext, stilunabhängige Stiftgeometrie löst enge Verwechslungen (z. B. e/c, o/0, l/1) ohne trainierte Klassen zu überschreiben, und bekannte Mehrbuchstabenwörter mit solider visueller Stütze gewinnen gegenüber inkohärenten Fragmenten.
+- Das Notizpapier wächst mit dem Inhalt statt einer festen A4-Höhe: lange Seiten wie Willkommen.md übermalen den dunklen Workspace nicht mehr unten schwarz. Kurze Notizen behalten die A4-Mindestgröße.
+
+## 2026.8.4
+
+- Der Auto-Updater lädt Updates im Hintergrund herunter und speichert ein fertig geprüftes Paket über Neustarts hinweg. Ist die automatische Installation aktiv, wird es beim Beenden oder still beim nächsten Start installiert und die App startet nahtlos mit der neuen Version.
+- Die Handschrifterkennung schützt normale Wörter besser vor fälschlichen Hoch-/Tiefstellungen: lateinische Buchstabenpaare brauchen bei ähnlicher Größe eine klarere vertikale Verschiebung, und echte Indizes bleiben mathematisch.
+- Die Einzelzeichenerkennung nutzt stärkere stilunabhängige Stiftgeometrie (i/j-Punkt, T, F, 1/l/I, o/0 vs. offene Formen, e-Querbalken, s/5, b/h/p) und cached die teuren Cluster-Messungen pro Glyphe, damit Ranking und Live-Schreiben schnell bleiben.
+
+## 2026.8.3
+
+- Die inkrementelle GlyphenWerk-Erkennung koppelt weder die Anzahl neu gezeichneter Strichkörper noch den aktuellen klassischen Textvorschlag als harte Segmentierungsvorgabe zurück. Ein über zwei UJI-Writer getrennt ausgewerteter Audit zeigte, dass ein einzelner verbundener Stiftzug in 280 von 372 kontrollierten Doppelglyphen fälschlich wie genau ein neues Zeichen wirkte. FaNotes verwendet deshalb nur noch einen konservativen, case-sensitiven Präfix bereits stabiler Positionen als begrenzten Score; der neueste automatische Buchstabe bleibt provisorisch, ein kollabierter Kandidat erhält keinen Längenbonus und Tokens werden nie durch den Präfix überschrieben.
+- Verbundene Wortanfänge verwerfen körpergroße Pseudo-Apostroph-Fragmente und dürfen genau eine nahezu gleichwertige Buchstabenform über einen plausiblen Wortpräfix auflösen. Ein einzelnes fehlgedeutetes Unendlichzeichen erhält nicht länger denselben Mathebeleg doppelt; echte Integrale und Unendlichzeichen bleiben auch mit veraltetem Textpräfix mathematisch geschützt.
+- Bestätigte Textkorrekturen und manuell gesetzte Präfixe bleiben während der Debounce-Fenster und bei späten Host-Antworten erhalten; eine harte Host-Projektion ist nur noch erlaubt, wenn das neuronale Ergebnis exakt denselben Text erzeugt und der bestätigte Präfix weiterhin passt. Echte Großoperatoren werden zusätzlich über Strichgeometrie und direkte Mathe-Evidenz geschützt, auch wenn ein konkurrierender Textpfad sie in Fantasie-Buchstaben zerlegt.
+
+## 2026.8.2
+
+- Dieses Stable-Reparaturupdate wird Installationen von `2026.8.1` bewusst als vollständiges Paket statt als Differenzialupdate angeboten. Dadurch wird ein älterer oder unvollständig ersetzter `app.asar` sicher entfernt; der vollständige englische Übersetzungskatalog und der davon unabhängige Kern-Fallback sind im neuen Linux- und Windows-Paket enthalten. Der echte Pakettest startet die veröffentlichte AppImage und erstellt über dieselben IPC-Wege wie die Oberfläche eine deutsche Notiz, eine englische Notiz und einen Ordner.
+- GlyphenWerk ordnet nachträglich gesetzte Punkte und Querstriche zuverlässiger ihrem Buchstaben zu, unterscheidet sehr schmale gepunktete `i`-Formen sowie zweistrichige `z`-Formen und lernt klassenspezifische Strichanzahlen, ohne bisher ungesehene Schreibvarianten zu bestrafen. Die gleiche geometrische Logik schützt kompakte Wortabstände und verhindert, dass eine wachsende Buchstabenfolge zu einem einzelnen Mathematiksymbol kollabiert.
+- Die Textkorrektur verwendet den vollständigen deutschen und englischen Rechtschreibwortschatz sowie corpusgestützte Namen als begrenzte Zusatzbelege. Visuell gestützte, bereits gültige Wörter bleiben erhalten; eine nahe Modellalternative darf nur bei enger Form- und Kontextübereinstimmung gewinnen, damit normale Namen und Wörter nicht durch bloss häufigere, aber unpassende Kandidaten ersetzt werden.
+
+## 2026.8.1
+
+- Notizen und Ordner lassen sich wieder zuverlässig mit deutscher und englischer System- oder App-Sprache erstellen. Der vollständige englische Katalog wird im Linux- und Windows-Paket mitgeliefert; die Kernnamen für neue Notizen und Ordner bleiben zusätzlich ohne externe Sprachdatei verfügbar, sodass auch ein beschädigtes oder unvollständiges älteres Differenzialupdate die Vault-Funktionen nicht mehr blockiert. Ein neuer Pakettest öffnet die tatsächlich erzeugten Linux- und Windows-`app.asar`-Archive, prüft den enthaltenen Katalog und führt exakt deren Fallback-Modul ohne Ressourcendatei aus.
+- die personengerechte GlyphenWerk-Erkennung gewichtet unabhängige Formmerkmale und persönliche Trainingsbeispiele robuster, schützt explizit trainierte Zeichen vor allgemeinen Umschreibungen und unterscheidet kompakte `Y`-Formen sowie schmale, ungepunktete Grossbuchstaben `I` konservativ von ihren Kleinbuchstabenvarianten
+
+## 2026.8.1-beta.2
+
+- die englische Main-Process-Lokalisierung wird nun auch in einem neuen Paket zuverlässig ausgeliefert; Notizen und Ordner lassen sich selbst bei einer fehlenden oder unvollständigen `resources/i18n/en.json` dank des eingebauten Kern-Fallbacks weiter anlegen. Der Verpackungs- und Electron-Test prüft diesen beschädigten-Paket-Fall sowie echte englische IPC-Aufrufe.
+
+## 2026.8.1-beta.1
+
+- die gepackte Linux- und Windows-App enthält wieder den vollständigen englischen Main-Process-Übersetzungskatalog; zuvor konnte bei englischer System- oder App-Sprache das Erstellen einer Notiz oder eines Ordners mit `Cannot find module '../resources/i18n/en.json'` abbrechen. Ein eingebauter Kern-Fallback hält die Vault-Dateifunktionen jetzt selbst bei einem beschädigten Paket oder unvollständigen älteren Differenzialupdate funktionsfähig, während ein echter Test sowohl die absichtlich fehlende Ressource als auch englische Notiz- und Ordneraufrufe in der gepackten Linux-App prüft
+
 ## 2026.7.4-beta.10
 
+- ein optionales lokales PosFormer-Q4-Sequenzmodell liest auf Linux und Windows vollständige zweidimensionale Formeln gemeinsam und ergänzt die klassische Erkennung gezielt bei Brüchen, Wurzeln, Integralen, Summen, Grenzwerten sowie Hoch- und Tiefstellungen. Das rund 10 MB grosse, nicht kommerziell lizenzierte Modell wird erst nach ausdrücklicher Bestätigung geladen, per SHA-256 geprüft, nie beim Start ausgeführt und kann in den Einstellungen jederzeit deaktiviert werden; moderne x64-Prozessoren verwenden AVX2, ältere Systeme fallen nach einem isolierten SIGILL sicher auf eine generische Laufzeit zurück
+- der echte FaNotes-Canvas erzeugt für das Sequenzmodell enge seitenverhältnisgetreue Formelbilder statt breiter Weissraumflächen, überzählige reine Schlussklammern werden konservativ repariert und ein auf unabhängigen Logit-Abständen kalibriertes Gate verhindert schwache Übernahmen. Im einmalig aggregierten reservierten MathWriting-valid-Holdout mit 100 nicht zur Abstimmung verwendeten Formeln sinken 2.482 Zeichenfehler auf 1.943 (21,72 Prozent relativ), 42 Formeln verbessern sich, vier verschlechtern sich und drei werden exakt; die weiterhin hohe CER von 73,46 Prozent wird ausdrücklich nicht als perfekte Erkennung ausgegeben
 - die Text-/Mathematikentscheidung prüft scheinbare Hoch- und Tiefstellungen jetzt zusätzlich gegen die gemeinsame Grundlinie des vollständigen lokalen Wortes: Ein hoher Anfangsbuchstabe oder Ascender macht normal grosse Folgezeichen dadurch auch bei fast 20 Prozent Höhenabweichung nicht mehr zu Indizes (`Test`, `Lernen`, `Fabio`). Wörterbuchwörter, plausible Flexions- und Kompositumsformen, titelgeschriebene Namen sowie klare Sätze überstimmen reine Indexketten; ein deutlich kleineres und eigenständig versetztes `x_{max}`, Ziffernindexe, Potenzen, Brüche, Relationen und Operatoren bleiben mathematisch. Die gleiche Schranke verhindert, dass eine solche Fehlzuweisung als persönliches Index-Training gespeichert wird
 - die N-Best-Rangfolge schützt die visuell führende Zeile jetzt vor unbelegten Struktur- und Namensumschreibungen: zusätzliche Wortgrenzen mit veränderter Buchstabenfolge, erfundene Klammern, veränderte Fortsetzungsbindestriche und gewöhnliche Wörter anstelle corpusgestützter englischer Namen erhalten gezielte Strafwerte; deutsche Namenslisten werden nur in dicht gesetzten Zwei- beziehungsweise Mehrnamenfolgen geschützt. Auf drei getrennten 600-Zeilen-Holdouts sinken die sichtbaren Zeichenfehler gegenüber Beta 9 um 27, fünf weitere Zeilen werden exakt und verschlechterte Beam-Wahlen fallen von 20 auf 6; zwei zusätzliche 120-Zeilen-Audits bleiben unverändert. Breitere deutsche Namensregeln wurden wegen messbarer Verschlechterungen verworfen
 

@@ -71,9 +71,124 @@ assert.match(glyphenWerkApp, /neuralTestText \|\| recognizedSentence/u)
 assert.match(glyphenWerkApp, /neuronale Satzanalyse/u)
 assert.match(glyphenWerkApp, /recognizeAutomaticExpression\([\s\S]*?getGlyphenWerkLanguage\(\)/u, 'Der GlyphenWerk-Test muss die aktive deutsche oder englische Sprache verwenden.')
 assert.match(glyphenWerkApp, /recognizeAutomaticExpression/u)
+assert.match(
+  glyphenWerkApp,
+  /embeddedTextRecognitionHints\(incrementalHint\)/u,
+  'Die eingebettete Erkennung muss ausschließlich den bereits stabilen Präfix ableiten.',
+)
+assert.doesNotMatch(
+  glyphenWerkApp,
+  /textCharacterCountHint/u,
+  'Inkrementelle Strichgeometrie darf nie als harter Text-Count zurückgekoppelt werden.',
+)
+assert.doesNotMatch(
+  glyphenWerkApp,
+  /textCharacterHint/u,
+  'Neu geratene Buchstaben dürfen nicht als vollständige Textvorgabe zurückgekoppelt werden.',
+)
+assert.match(
+  readWorkspace('src/lib/incrementalTextRecognition.ts'),
+  /previousText[\s\S]*?textPrefixHint/u,
+  'Die Brücke braucht eine explizite Präfix- statt Volltext-/Count-Semantik.',
+)
+assert.doesNotMatch(
+  readWorkspace('src/lib/incrementalTextRecognition.ts'),
+  /textCharacterCountHint/u,
+  'Auch der klassische Textzweig darf keinen zirkulären Count erzeugen.',
+)
+assert.match(
+  panel,
+  /recognizePersonalizedTextLine\([\s\S]*?560,\s*undefined,\s*undefined,\s*textPrefixHint/u,
+  'Der Host muss Count und Volltext überspringen und den Präfix am angehängten Argumentplatz weiterreichen.',
+)
+assert.match(
+  glyphenWerkApp,
+  /recognitionFallbackRef\.current,\s*undefined,\s*undefined,\s*incrementalTextHints\.textPrefixHint/u,
+  'Die eingebettete Automatik muss Count/Volltext auslassen und ausschließlich den Präfix am neuen Argumentplatz setzen.',
+)
+assert.match(
+  glyphenWerkApp,
+  /incrementalTextHints\.textPrefixHint,\s*confirmedTextPrefixHint/u,
+  'Explizit bestätigte Präfixpositionen müssen getrennt von automatisch stabilisierten Positionen gewichtet werden.',
+)
+assert.match(
+  glyphenWerkApp,
+  /const continuationPreviousState = hasLooseTextContinuation\(previousIncrementalState, testStrokes\)[\s\S]*?const confirmedTextPrefixHint = continuationPreviousState/u,
+  'Auch bestätigte Präfixe dürfen nur in eine räumlich plausible Fortsetzung derselben Zeile gelangen.',
+)
+assert.match(
+  glyphenWerkApp,
+  /else if \(canCarryUncertainTextState\(previousIncrementalState, testStrokes\)\)[\s\S]*?carryStableTextPrefixAcrossUncertainInk/u,
+  'Ein unsicherer Textzustand muss vor dem Carry das Einmal-Budget und die räumliche Kontinuität prüfen.',
+)
+assert.match(
+  panel,
+  /glyphenWerkExactProjectionIsIndependent\([\s\S]*?exactProjectionSafe/u,
+  'Der Host muss präfixbeeinflusste Ergebnisse als nicht unabhängig markieren.',
+)
+assert.match(
+  glyphenWerkApp,
+  /hardProjectionAllowed \? modeAssessment\.visibleCharacters : undefined[\s\S]*?hardProjectionAllowed \? text : undefined/u,
+  'Ein präfixbeeinflusstes Host-Ergebnis darf nicht wieder als harter Count/Volltext projiziert werden.',
+)
+assert.match(
+  glyphenWerkApp,
+  /if \(exactProjectionSafe\) recognitionFallbackRef\.current = 'text'/u,
+  'Eine präfixabhängige Host-Fusion darf den nächsten automatischen Modus nicht vorgeben.',
+)
+assert.match(
+  glyphenWerkApp,
+  /const hardProjectionAllowed = neuralTestResult\.exactProjectionSafe &&[\s\S]*?compactHostText\.startsWith\(confirmedTextPrefix\)/u,
+  'Ein unabhängiger Hosttext darf eine explizit bestätigte Zeichenfolge nicht überschreiben.',
+)
+assert.match(
+  glyphenWerkApp,
+  /const localTokenText = recognizedSentence\(textTokens\)\.trim\(\)[\s\S]*?const exactProjectionSafe = hardProjectionAllowed && textProjectionMatchesTokens\(text, localTokenText\)[\s\S]*?const projectedText = exactProjectionSafe[\s\S]*?: localTokenText[\s\S]*?value: projectedText,[\s\S]*?textValue: projectedText/u,
+  'Bei unsicherer Host-Fusion müssen Anzeige, Korrekturtext und lokale Tokens dieselbe Projektion behalten.',
+)
+assert.match(
+  glyphenWerkApp,
+  /exactProjectionSafe &&[\s\S]{0,120}\^\\p\{L\}\{1,24\}\$[\s\S]{0,500}incrementalTextRecognitionRef\.current/u,
+  'Eine präfixabhängige Host-Fusion darf den stabilen Präfixzustand nicht selbst fortschreiben.',
+)
 assert.match(glyphenWerkApp, /correctedRecognitionInputRef/u)
 assert.match(glyphenWerkApp, /bestätigte manuelle Korrektur/u)
 assert.match(glyphenWerkApp, /correctedRecognitionInputRef\.current === testStrokes/u)
+assert.match(
+  glyphenWerkApp,
+  /const timer = window\.setTimeout\(\(\) => \{[\s\S]{0,420}correctedRecognitionInputRef\.current === testStrokes[\s\S]{0,180}return/u,
+  'Auch ein bereits geplanter lokaler Debounce muss eine inzwischen korrigierte Tintenaufnahme unangetastet lassen.',
+)
+assert.match(
+  glyphenWerkApp,
+  /const correctedVisibleIndex[\s\S]*?textPrefixAfterTokenCorrection\([\s\S]*?correctedVisibleIndex/u,
+  'Eine Einzelkorrektur darf nur ihre tatsächlich zusammenhängende Präfixposition bestätigen.',
+)
+assert.match(
+  glyphenWerkApp,
+  /value: correctedTextValue,\s*textValue: correctedTextValue/u,
+  'Tokenkorrektur, sichtbarer Wert und automatischer Textwert müssen synchron bleiben.',
+)
+assert.match(
+  glyphenWerkApp,
+  /const handleConfirmRecognition[\s\S]*?prefixText: compactConfirmedText,\s*confirmedPrefixLength: confirmedCharacters\.length/u,
+  'Der explizite Bestätigen-Button muss im Gegensatz zur Einzelkorrektur die vollständige geprüfte Textfolge fixieren.',
+)
+assert.match(
+  glyphenWerkApp,
+  /neuralTestResult\.requestId !== neuralRequestIdRef\.current[\s\S]{0,180}correctedRecognitionInputRef\.current === testStrokes/u,
+  'Auch der Host-Result-Effect muss einen bereits korrigierten Snapshot unangetastet lassen.',
+)
+assert.match(
+  glyphenWerkApp,
+  /const handleTestStrokesChange[\s\S]*?neuralRequestIdRef\.current = ''[\s\S]*?setTestStrokes\(strokes\)/u,
+  'Neue Tinte muss ausstehende Hostantworten des alten Canvas sofort invalidieren.',
+)
+assert.match(
+  glyphenWerkApp,
+  /correctedRecognitionInputRef\.current = testStrokes[\s\S]{0,260}neuralRequestIdRef\.current = ''[\s\S]{0,120}setNeuralTestResult\(null\)/u,
+  'Eine manuelle Zeichenkorrektur muss jede verspätete automatische Hostantwort invalidieren.',
+)
 assert.match(glyphenWerkApp, /Text &amp; Mathematik testen/u)
 assert.doesNotMatch(glyphenWerkApp, /className="recognition-mode-switch"/u)
 assert.match(glyphenWerkStyles, /\.app-shell\.is-fanotes-embedded \.sidebar \{ display: none; \}/u)

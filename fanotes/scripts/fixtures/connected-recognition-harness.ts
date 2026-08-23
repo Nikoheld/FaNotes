@@ -92,6 +92,7 @@ const mathShapes: Record<string, LocalPath[]> = {
   relation_equal: [[[.13, .37], [.87, .36]], [[.12, .64], [.88, .63]]],
   operator_sqrt: [[[.08, .56], [.23, .69], [.34, .82], [.48, .17], [.9, .17]]],
   operator_integral: [[[.73, .12], [.58, .08], [.47, .18], [.43, .39], [.45, .62], [.39, .84], [.25, .91], [.13, .86]]],
+  symbol_infinity: [[[.08, .5], [.23, .28], [.43, .35], [.57, .5], [.73, .7], [.91, .5], [.73, .3], [.57, .5], [.42, .68], [.23, .72], [.08, .5]]],
   operator_sum: [[[.79, .14], [.22, .14], [.56, .5], [.2, .86], [.81, .86]]],
   operator_product: [[[.27, .8], [.27, .2], [.73, .2], [.73, .8]], [[.18, .2], [.82, .2]]],
 }
@@ -287,6 +288,183 @@ const run = async () => {
   const baseClusters = segmentStrokes(wordStrokes, 'text')
   const hypotheses = connectedTextSegmentationHypotheses(baseClusters[0])
   const baselineModel = await buildRecognitionModel(standard)
+  const recognizeIncrementalPrefixes = (includeConnectedDiagnostics = false) => {
+    const incrementalTextCases = ['t', 'te', 'tes', 'test'].map((expected) => {
+      const incrementalStrokes = separatelyWrittenWord(expected, .0027)
+      // Production keeps the newest automatic character provisional. While
+      // drawing `te`, no stable prefix exists yet; `tes` may reuse only `t`.
+      const stablePrefix = expected.length > 2 ? expected.slice(0, -2) : undefined
+      const recognition = recognizeAutomaticExpression(
+        incrementalStrokes,
+        baselineModel,
+        BASE_CATALOG,
+        [],
+        'de',
+        'text',
+        undefined,
+        undefined,
+        stablePrefix,
+      )
+      return {
+        expected,
+        mode: recognition.mode,
+        value: recognition.value,
+        textValue: recognition.textValue,
+        mathValue: recognition.mathValue,
+        reason: recognition.reason,
+        textScore: recognition.textScore,
+        mathScore: recognition.mathScore,
+        evidence: recognition.evidence,
+        textTokens: recognition.textValue.length,
+        cutCandidates: textCutCandidatesForTests(incrementalStrokes),
+        segmentationSizes: segmentStrokes(incrementalStrokes, 'text').flatMap((cluster) => (
+          connectedTextSegmentationHypotheses(cluster).map((hypothesis) => hypothesis.length)
+        )),
+        guidedSegmentationSizes: segmentStrokes(incrementalStrokes, 'text').flatMap((cluster) => (
+          connectedTextSegmentationHypotheses(cluster, expected.length).map((hypothesis) => hypothesis.length)
+        )),
+        detachedConnectorRanges: segmentStrokes(incrementalStrokes, 'text').flatMap((cluster) => (
+          cluster.detachedTextConnectorRanges ?? []
+        )),
+      }
+    })
+    const incrementalConnectedTextCases = includeConnectedDiagnostics
+      ? ['te', 'tes', 'test'].map((expected, index) => {
+      const stablePrefix = expected.length > 2 ? expected.slice(0, -2) : undefined
+      const strokes = connectedWord(expected, .00315 + index * .00009)
+      const recognition = recognizeAutomaticExpression(
+        strokes,
+        baselineModel,
+        BASE_CATALOG,
+        [],
+        'de',
+        'text',
+        undefined,
+        undefined,
+        stablePrefix,
+      )
+      return {
+        expected,
+        stablePrefix,
+        mode: recognition.mode,
+        value: recognition.value,
+        textValue: recognition.textValue,
+        mathValue: recognition.mathValue,
+        reason: recognition.reason,
+        textScore: recognition.textScore,
+        mathScore: recognition.mathScore,
+        evidence: recognition.evidence,
+        textCandidates: [0, 1, 2].map((candidateIndex) => {
+          const candidate = recognizeExpression(
+            strokes,
+            baselineModel,
+            BASE_CATALOG,
+            'text',
+            [],
+            'de',
+            undefined,
+            undefined,
+            candidateIndex,
+            stablePrefix,
+          )
+          return {
+            value: recognizedSentence(candidate),
+            tokens: candidate.filter((token) => !token.isLayout).map((token) => ({
+              char: token.char,
+              confidence: token.confidence,
+              visualLabelId: token.visualLabelId,
+              visualConfidence: token.visualConfidence,
+              baseConfidence: token.baseConfidence,
+              personalConfidence: token.personalConfidence,
+              bbox: token.bbox,
+              alternatives: token.alternatives.slice(0, 6).map((alternative) => ({
+                char: alternative.char,
+                confidence: alternative.confidence,
+              })),
+            })),
+          }
+        }),
+        segmentationSizes: segmentStrokes(strokes, 'text').flatMap((cluster) => (
+          connectedTextSegmentationHypotheses(cluster).map((hypothesis) => hypothesis.length)
+        )),
+        cutCandidates: textCutCandidatesForTests(strokes),
+      }
+      })
+      : []
+    const incrementalTextRecovery = recognizeAutomaticExpression(
+      separatelyWrittenWord('te', .0027),
+      baselineModel,
+      BASE_CATALOG,
+      [],
+      'de',
+      'math',
+      undefined,
+      undefined,
+      undefined,
+      't',
+    )
+    return { incrementalTextCases, incrementalConnectedTextCases, incrementalTextRecovery }
+  }
+  if ((globalThis as { __FANOTES_PREFIX_ONLY__?: boolean }).__FANOTES_PREFIX_ONLY__) {
+    const prefixResults = recognizeIncrementalPrefixes(true)
+    const realDoubleIntegral = [
+      ...mathAt('operator_integral', .36, .24, .035, .25, .00008),
+      ...mathAt('operator_integral', .384, .24, .035, .25, .00006),
+    ]
+    const protectedMathCases = [
+      { name: 'double-integral', strokes: realDoubleIntegral, expectedValue: '\\iint', expectedLabelId: 'operator_double_integral' },
+      { name: 'integral', strokes: mathAt('operator_integral', .38, .24, .07, .25, .00008), expectedValue: '\\int', expectedLabelId: 'operator_integral' },
+      { name: 'infinity', strokes: mathAt('symbol_infinity', .37, .29, .09, .16, .00008), expectedValue: '\\infty', expectedLabelId: 'symbol_infinity' },
+      { name: 'sum', strokes: mathAt('operator_sum', .37, .25, .08, .22, .00008), expectedValue: '\\sum', expectedLabelId: 'operator_sum' },
+      { name: 'product', strokes: mathAt('operator_product', .37, .25, .08, .22, .00008), expectedValue: '\\prod', expectedLabelId: 'operator_product' },
+      { name: 'square-root', strokes: mathAt('operator_sqrt', .37, .27, .1, .19, .00008), expectedValue: '\\sqrt{}', expectedLabelId: 'operator_sqrt' },
+    ].flatMap((entry) => ['T', 't'].flatMap((prefix) => ['soft', 'confirmed'].map((prefixKind) => ({
+      ...entry,
+      name: `${entry.name}-${prefix === 'T' ? 'uppercase' : 'lowercase'}-${prefixKind}-prefix`,
+      prefix,
+      prefixKind,
+    })))).map(({ name, strokes, prefix, prefixKind, expectedValue, expectedLabelId }) => {
+      const recognition = recognizeAutomaticExpression(
+        strokes,
+        baselineModel,
+        BASE_CATALOG,
+        [],
+        'de',
+        'text',
+        undefined,
+        undefined,
+        prefixKind === 'soft' ? prefix : undefined,
+        prefixKind === 'confirmed' ? prefix : undefined,
+      )
+      return {
+        name,
+        prefix,
+        prefixKind,
+        expectedValue,
+        expectedLabelId,
+        mode: recognition.mode,
+        value: recognition.value,
+        textValue: recognition.textValue,
+        mathValue: recognition.mathValue,
+        textScore: recognition.textScore,
+        mathScore: recognition.mathScore,
+        evidence: recognition.evidence,
+        selectedTokens: recognition.tokens.filter((token) => !token.isLayout).map((token) => ({
+          labelId: token.labelId,
+          char: token.char,
+          confidence: token.confidence,
+          bbox: token.bbox,
+        })),
+      }
+    })
+    const realDoubleIntegralAutomatic = protectedMathCases[0]
+    return {
+      prefixOnly: true,
+      ...prefixResults,
+      realDoubleIntegralAutomatic,
+      protectedMathCases,
+    }
+  }
   const reusedIdOriginal = sampleFromStrokes('a', isolatedLetter('a'), 'reused-import-sample-id')
   const reusedIdUpdated = sampleFromStrokes('a', isolatedLetter('c', .0011), 'reused-import-sample-id')
   const reusedIdFirstModel = await buildRecognitionModel([reusedIdOriginal])
@@ -381,50 +559,7 @@ const run = async () => {
       mathScore: recognition.mathScore,
     }
   })
-  const incrementalTextCases = ['t', 'te', 'tes', 'test'].map((expected, index) => {
-    const incrementalStrokes = separatelyWrittenWord(expected, .0027)
-    const recognition = recognizeAutomaticExpression(
-      incrementalStrokes,
-      baselineModel,
-      BASE_CATALOG,
-      [],
-      'de',
-      'text',
-      expected.length > 1 ? expected.length : undefined,
-      expected.length > 1 ? expected : undefined,
-    )
-    return {
-      expected,
-      mode: recognition.mode,
-      value: recognition.value,
-      textValue: recognition.textValue,
-      mathValue: recognition.mathValue,
-      reason: recognition.reason,
-      textScore: recognition.textScore,
-      mathScore: recognition.mathScore,
-      textTokens: recognition.textValue.length,
-      cutCandidates: textCutCandidatesForTests(incrementalStrokes),
-      segmentationSizes: segmentStrokes(incrementalStrokes, 'text').flatMap((cluster) => (
-        connectedTextSegmentationHypotheses(cluster).map((hypothesis) => hypothesis.length)
-      )),
-      guidedSegmentationSizes: segmentStrokes(incrementalStrokes, 'text').flatMap((cluster) => (
-        connectedTextSegmentationHypotheses(cluster, expected.length).map((hypothesis) => hypothesis.length)
-      )),
-      detachedConnectorRanges: segmentStrokes(incrementalStrokes, 'text').flatMap((cluster) => (
-        cluster.detachedTextConnectorRanges ?? []
-      )),
-    }
-  })
-  const incrementalTextRecovery = recognizeAutomaticExpression(
-    separatelyWrittenWord('te', .0027),
-    baselineModel,
-    BASE_CATALOG,
-    [],
-    'de',
-    'math',
-    2,
-    'te',
-  )
+  const { incrementalTextCases, incrementalTextRecovery } = recognizeIncrementalPrefixes()
   const rapidClosePairs = ['te', 'ac', 'os', 'st'].map((expected, index) => {
     const pairStrokes = separatelyWrittenWord(expected, .0031 + index * .00011)
     const recognition = recognizeAutomaticExpression(

@@ -10,6 +10,7 @@ Example:
     --iam-train /tmp/iam-train.parquet \
     --iam-validation /tmp/iam-validation.parquet \
     --scads-root /tmp/scadsai-german-v01 \
+    --iam-cache /var/cache/fanotes-ocr/iam-images \
     --output /var/lib/fanotes-ocr/trocr-bilingual
 """
 
@@ -88,16 +89,107 @@ def writer_split(page_id: str) -> str:
     return "train"
 
 
-def load_iam(path: Path, language: str = "en") -> list[Sample]:
-    table = parquet.read_table(path, columns=["image", "text"])
-    samples: list[Sample] = []
-    for row in table.to_pylist():
-        image = row.get("image")
-        image_bytes = image.get("bytes") if isinstance(image, dict) else None
-        text = normalize_text(str(row.get("text") or ""))
-        if image_bytes and text:
-            samples.append(Sample(text=text, language=language, image_bytes=image_bytes))
-    return samples
+def load_iam(path: Path, language: str = "en", cache_root: Path | None = None) -> list[Sample]:
+    """Load IAM without retaining the complete image column in host RAM.
+
+    Hugging Face's IAM parquet uses compact 100-row groups. With a cache root,
+    each group is decoded and released independently, while subsequent runs
+    open the extracted images lazily through ``Sample.image_path``. The cache
+    key includes the source path, size, and nanosecond timestamp; a manifest is
+    published atomically only after every referenced image exists.
+    """
+    if cache_root is None:
+        table = parquet.read_table(path, columns=["image", "text"])
+        samples: list[Sample] = []
+        for row in table.to_pylist():
+            image = row.get("image")
+            image_bytes = image.get("bytes") if isinstance(image, dict) else None
+            text = normalize_text(str(row.get("text") or ""))
+            if image_bytes and text:
+                samples.append(Sample(text=text, language=language, image_bytes=image_bytes))
+        return samples
+
+    resolved = path.resolve()
+    source_stat = resolved.stat()
+    source = {
+        "path": str(resolved),
+        "size": source_stat.st_size,
+        "mtimeNs": source_stat.st_mtime_ns,
+    }
+    cache_key = hashlib.sha256(
+        json.dumps(source, sort_keys=True).encode("utf-8"),
+    ).hexdigest()[:16]
+    dataset_root = cache_root.resolve() / f"{resolved.stem}-{cache_key}"
+    manifest_path = dataset_root / "manifest.json"
+    if manifest_path.is_file():
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            records = manifest.get("records") if isinstance(manifest, dict) else None
+            if (
+                isinstance(manifest, dict)
+                and manifest.get("format") == "fanotes-iam-image-cache-v2"
+                and manifest.get("source") == source
+                and isinstance(records, list)
+                and records
+            ):
+                cached = [
+                    Sample(
+                        text=str(record["text"]),
+                        language=language,
+                        image_path=dataset_root / str(record["file"]),
+                    )
+                    for record in records
+                    if (
+                        isinstance(record, dict)
+                        and record.get("text")
+                        and record.get("file")
+                        and re.fullmatch(r"\d{6}\.image", str(record["file"]))
+                        and isinstance(record.get("size"), int)
+                        and record["size"] > 0
+                    )
+                ]
+                if len(cached) == len(records) and all(
+                    sample.image_path.is_file()
+                    and sample.image_path.stat().st_size == record["size"]
+                    for sample, record in zip(cached, records)
+                ):
+                    return cached
+        except (OSError, ValueError, TypeError, KeyError):
+            pass
+
+    dataset_root.mkdir(parents=True, exist_ok=True)
+    parquet_file = parquet.ParquetFile(resolved)
+    records: list[dict[str, object]] = []
+    for row_group in range(parquet_file.num_row_groups):
+        table = parquet_file.read_row_group(row_group, columns=["image", "text"])
+        for row in table.to_pylist():
+            image = row.get("image")
+            image_bytes = image.get("bytes") if isinstance(image, dict) else None
+            text = normalize_text(str(row.get("text") or ""))
+            if not image_bytes or not text:
+                continue
+            file_name = f"{len(records):06d}.image"
+            (dataset_root / file_name).write_bytes(image_bytes)
+            records.append({"file": file_name, "text": text, "size": len(image_bytes)})
+        del table
+    if not records:
+        raise ValueError(f"IAM parquet contains no usable samples: {resolved}")
+    manifest = {
+        "format": "fanotes-iam-image-cache-v2",
+        "source": source,
+        "records": records,
+    }
+    temporary_manifest = dataset_root / "manifest.json.tmp"
+    temporary_manifest.write_text(json.dumps(manifest, ensure_ascii=False), encoding="utf-8")
+    temporary_manifest.replace(manifest_path)
+    return [
+        Sample(
+            text=str(record["text"]),
+            language=language,
+            image_path=dataset_root / str(record["file"]),
+        )
+        for record in records
+    ]
 
 
 def load_scads(root: Path) -> dict[str, list[Sample]]:
@@ -239,6 +331,21 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--iam-train", type=Path, required=True)
     parser.add_argument("--iam-validation", type=Path, required=True)
+    parser.add_argument(
+        "--iam-cache",
+        type=Path,
+        help="Persistent extracted-image cache that keeps IAM parquet bytes out of host RAM.",
+    )
+    parser.add_argument(
+        "--prepare-iam-cache-only",
+        action="store_true",
+        help="Validate/extract the IAM cache and exit before loading the model or CUDA.",
+    )
+    parser.add_argument(
+        "--evaluate-only",
+        action="store_true",
+        help="Evaluate the selected checkpoint on the validation splits without training.",
+    )
     parser.add_argument("--scads-root", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--model", default="microsoft/trocr-small-handwritten")
@@ -253,10 +360,23 @@ def main() -> None:
     parser.add_argument("--warmup-ratio", type=float, default=0.06)
     parser.add_argument("--maximum-target-length", type=int, default=128)
     # A single loader is fast enough for the small line crops and avoids each
-    # worker retaining its own copy-on-write view of the in-memory IAM set.
+    # worker retaining its own decoder state and filesystem-cache view.
     parser.add_argument("--workers", type=int, default=0)
     parser.add_argument("--seed", type=int, default=45)
     args = parser.parse_args()
+
+    args.output.mkdir(parents=True, exist_ok=True)
+    if args.prepare_iam_cache_only:
+        if args.iam_cache is None:
+            parser.error("--prepare-iam-cache-only requires --iam-cache")
+        iam_train = load_iam(args.iam_train, cache_root=args.iam_cache)
+        iam_validation = load_iam(args.iam_validation, cache_root=args.iam_cache)
+        print(json.dumps({
+            "cache": str(args.iam_cache.resolve()),
+            "train": len(iam_train),
+            "validation": len(iam_validation),
+        }, indent=2), flush=True)
+        return
 
     random.seed(args.seed)
     np.random.seed(args.seed)
@@ -264,7 +384,6 @@ def main() -> None:
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(args.seed)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    args.output.mkdir(parents=True, exist_ok=True)
 
     processor = TrOCRProcessor.from_pretrained(args.model, use_fast=False)
     model = VisionEncoderDecoderModel.from_pretrained(args.model)
@@ -280,8 +399,8 @@ def main() -> None:
     use_bfloat16 = device.type == "cuda" and torch.cuda.is_bf16_supported()
     autocast_dtype = torch.bfloat16 if use_bfloat16 else torch.float16
 
-    iam_train = load_iam(args.iam_train)
-    iam_validation = load_iam(args.iam_validation)
+    iam_train = load_iam(args.iam_train, cache_root=args.iam_cache)
+    iam_validation = load_iam(args.iam_validation, cache_root=args.iam_cache)
     scads = load_scads(args.scads_root)
     # Keep both languages equally visible to the optimizer without discarding
     # a single real line. German samples are repeated only in the training set.
@@ -312,6 +431,26 @@ def main() -> None:
         persistent_workers=args.workers > 0,
         collate_fn=collate,
     )
+
+    if args.evaluate_only:
+        metrics = evaluate(
+            model,
+            processor,
+            validation_loader,
+            device,
+            args.maximum_target_length,
+            autocast_dtype,
+        )
+        balanced_score = sum(
+            metrics.get(language, {}).get("cer", 1.0)
+            for language in ("de", "en")
+        ) / 2
+        print(json.dumps({
+            "model": str(args.model),
+            "metrics": metrics,
+            "balancedCer": balanced_score,
+        }, indent=2), flush=True)
+        return
 
     optimizer = torch.optim.AdamW([
         {"params": model.encoder.parameters(), "lr": args.encoder_learning_rate},

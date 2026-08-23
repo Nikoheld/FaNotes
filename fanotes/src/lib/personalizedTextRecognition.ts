@@ -409,6 +409,7 @@ const personalizedDictionaryWord = (
       return Boolean(candidateEvidence(tokens[alignedTokenIndex], character, language)?.personalSupport)
     }).length
     let supportedChanges = 0
+    let repeatedlySupportedChanges = 0
     let visuallyPlausibleChanges = 0
     let contextuallyPlausibleChanges = 0
     const contextDistance = hasUsableNeuralContext
@@ -437,6 +438,12 @@ const personalizedDictionaryWord = (
         reliableReplacement &&
         evidenceStrength(replacement) >= evidenceStrength(original) + 2
       ) supportedChanges += 1
+      if (
+        replacement?.personalSupport &&
+        reliableReplacement &&
+        (replacement.personalSupport >= 2 || replacement.personalConfidence >= 60) &&
+        evidenceStrength(replacement) >= evidenceStrength(original) + 2
+      ) repeatedlySupportedChanges += 1
       if (
         replacement &&
         lexicons[language].has(candidate) &&
@@ -475,6 +482,7 @@ const personalizedDictionaryWord = (
       distance,
       alignment,
       supportedChanges,
+      repeatedlySupportedChanges,
       visuallyPlausibleChanges,
       contextuallyPlausibleChanges,
       safeLongCommonRepair,
@@ -507,6 +515,7 @@ const personalizedDictionaryWord = (
       contextDistance: entry.contextDistance,
       selectionScore: entry.selectionScore,
       supportedChanges: entry.supportedChanges,
+      repeatedlySupportedChanges: entry.repeatedlySupportedChanges,
       visuallyPlausibleChanges: entry.visuallyPlausibleChanges,
       contextuallyPlausibleChanges: entry.contextuallyPlausibleChanges,
       exactPositionMatches: entry.exactPositionMatches,
@@ -531,7 +540,7 @@ const personalizedDictionaryWord = (
   if (
     sourceIsKnown && (
       best.alignment.score < sourceAlignment.score + (best.distance === 1 ? 0.06 : 0.3) ||
-      best.supportedChanges < Math.ceil(best.distance / 2) ||
+      best.repeatedlySupportedChanges < Math.ceil(best.distance / 2) ||
       (runnerUp && best.selectionScore < runnerUp.selectionScore + 0.2)
     )
   ) return { text: source, changes: 0, ...(diagnostics ? { diagnostics } : {}) }
@@ -705,6 +714,10 @@ const chooseAlignedCharacter = (
     personal.char.toLocaleLowerCase(locale) === neural.char.toLocaleLowerCase(locale)
   )
   const decisiveSelectedOneShot = (
+    // A one-shot correction is only available with strong visual evidence.
+    // Complete known words are protected separately in the dictionary stage,
+    // so an isolated weak neighbour cannot turn `heute` into `meute` while a
+    // clearly selected glyph can still correct a low-confidence line model.
     personal.personalSupport >= 1 &&
     personal.char === token.char &&
     personal.char === visualCharacter &&
@@ -1209,6 +1222,17 @@ export const fusePersonalizedTextRecognition = (
     ) ? [{ token, personal }] : []
   })
   const trainedClassicalRatio = trainedClassicalPersonal.length / Math.max(1, visibleTokens.length)
+  const taughtClassicalPersonal = visibleTokens.filter((token) => {
+    const personal = selectedPersonalCandidate(token)
+    return Boolean(
+      personal &&
+      personal.char === token.char &&
+      personal.personalSupport >= 1 &&
+      personal.personalConfidence >= 18 &&
+      token.confidence >= 72,
+    )
+  })
+  const taughtClassicalRatio = taughtClassicalPersonal.length / Math.max(1, visibleTokens.length)
   const sequenceCharacters = Array.from(sequenceClassicalText)
   const sequenceMatchesTokenCount = sequenceCharacters.length === visibleTokens.length
   const observedClassicalPersonal = visibleTokens.flatMap((token, index) => {
@@ -1243,6 +1267,10 @@ export const fusePersonalizedTextRecognition = (
   }).length / Math.max(1, visibleTokens.length)
   const neuralVisibleCharacters = Array.from(measuredNeuralText).filter((character) => !/\s/u.test(character)).length
   const classicalVisibleCharacters = Array.from(sequenceClassicalText).filter((character) => !/\s/u.test(character)).length
+  const classicalNeuralDistance = wordDistance(
+    sequenceClassicalText.toLocaleLowerCase(language),
+    measuredNeuralText.toLocaleLowerCase(language),
+  )
   const completeLongDictionaryRepair = (
     personallyCorrectedClassicalText.changes >= 3 &&
     measuredCharacterCount !== undefined &&
@@ -1310,11 +1338,24 @@ export const fusePersonalizedTextRecognition = (
   const normalizedClassicalSequence = sequenceClassicalText.toLocaleLowerCase(
     language === 'de' ? 'de-CH' : 'en-US',
   )
+  const rawTokenSequence = recognizedSentence(visibleTokens).replace(/\s+/gu, '')
+  const rawTokenDistance = wordDistance(
+    rawTokenSequence.toLocaleLowerCase(language === 'de' ? 'de-CH' : 'en-US'),
+    measuredNeuralText.toLocaleLowerCase(language === 'de' ? 'de-CH' : 'en-US'),
+  )
+  const taughtSameLengthCorrection = (
+    taughtClassicalRatio >= 0.99 &&
+    rawTokenSequence.length >= 3 &&
+    rawTokenSequence.length === neuralVisibleCharacters &&
+    classicalConfidence >= 0.8 &&
+    rawTokenDistance >= 1
+  )
   const trustedCommonNeuralWordOutvotesOneShot = (
     /^\p{L}+$/u.test(measuredNeuralText) &&
     lexicons[language].has(normalizedMeasuredNeuralWord) &&
     neuralResult.confidence >= 68 &&
     repeatedClassicalRatio < 0.5 &&
+    !taughtSameLengthCorrection &&
     // A fluent decoder can repeat complete syllables and hallucinate a much
     // longer word. When nearly every independently segmented glyph is a
     // trained class at sufficient visual confidence, frequency alone must not
@@ -1344,12 +1385,16 @@ export const fusePersonalizedTextRecognition = (
       sequenceClassicalText.toLocaleLowerCase(language) === normalizedMeasuredNeuralWord ||
       neuralMatchesMeasuredCharacterCount ||
       Math.abs(classicalVisibleCharacters - neuralVisibleCharacters) >= 1 ||
+      // With one personal example per class, a same-length correction is not
+      // strong enough to replace a fluent known neural word. Multiple trusted
+      // examples still pass through the stronger branches above.
+      (
+        classicalVisibleCharacters === neuralVisibleCharacters &&
+        strongClassicalRatio < 0.66 &&
+        classicalNeuralDistance >= 1
+      ) ||
       !/^\p{L}+$/u.test(sequenceClassicalText)
     )
-  )
-  const classicalNeuralDistance = wordDistance(
-    sequenceClassicalText.toLocaleLowerCase(language),
-    measuredNeuralText.toLocaleLowerCase(language),
   )
   const sequenceCharactersWithCase = Array.from(sequenceClassicalText)
   const substantialTokenHeights = visibleTokens
@@ -1397,14 +1442,15 @@ export const fusePersonalizedTextRecognition = (
   // only the winning token still carries the correct visual ordering.
   if (
     visuallySupportedProperName || visuallySupportedUnknownWord ||
-    completeSelectedSequenceOutvotesLengthHallucination
+    completeSelectedSequenceOutvotesLengthHallucination ||
+    taughtSameLengthCorrection
   ) {
     // Neural word decoders are intentionally biased towards frequent words.
     // When a complete, equally long, visibly capitalized unknown word differs
     // in multiple positions, that prior is exactly wrong: it can turn a name
     // such as "Fabio" into "taboo". Prefer the independently segmented glyph
     // sequence without requiring the name to exist in any fixed dictionary.
-    text = sequenceClassicalText
+    text = taughtSameLengthCorrection ? rawTokenSequence : sequenceClassicalText
     selectedClassicalSequence = true
   }
   else if (measuredNeuralWordOutvotesShortOneShot || trustedCommonNeuralWordOutvotesOneShot) {
@@ -1610,6 +1656,7 @@ export const fusePersonalizedTextRecognition = (
     && !trainedSequenceOutvotesLengthHallucination
     && !observedSequenceOutvotesLengthHallucination
     && !completeSelectedSequenceOutvotesLengthHallucination
+    && !taughtSameLengthCorrection
     && (weakExtendedDictionaryCorrection || (
       unsupportedChanges > 0 &&
       selectedCharacters.length === neuralCharactersForSupport.length &&

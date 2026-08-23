@@ -1,0 +1,23 @@
+{
+  "format": "fanotes-enhanced-math-runtime-v1",
+  "platform": "linux",
+  "arch": "x64",
+  "source": "https://github.com/CrispStrobe/CrispEmbed.git",
+  "sourceCommit": "b9b7fb44bfa2fed866f0577e390b2a1b8ad75bac",
+  "ggmlCommit": "0714117daca2471b00e09554c7eaa74a06b0b2c5",
+  "runtimes": [
+    {
+      "flavor": "avx2",
+      "executable": "crispembed-avx2",
+      "size": 7144240,
+      "sha256": "4e3db0d125db135b50182dfc95d713dde8443602f67f7456484fd288b2e0a567"
+    },
+    {
+      "flavor": "baseline-x64",
+      "executable": "crispembed",
+      "size": 6880720,
+      "sha256": "6d3f98878a1919fe2408ad09442854b60d5a7b0459471a8e96f701abb0717e07"
+    }
+  ],
+  "modelBundled": false
+}

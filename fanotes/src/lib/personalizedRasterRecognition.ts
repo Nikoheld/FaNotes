@@ -1002,7 +1002,13 @@ const fuseRasterSequence = (
   const supportedVocabularyCharacters = segments.map((segment) => new Set(
     segment.classes.map((entry) => entry.char.toLocaleLowerCase(vocabularyLocale)),
   ))
-  const visualVocabularyValues = neural.length === 0
+  // The bounded nearest-word and compound projections above already inspect
+  // every candidate within two visual edits (plus up to three personal hybrid
+  // substitutions). Scanning and sorting the complete same-length dictionary
+  // again for every segmentation was the dominant ZIP-only CPU cost. Keep the
+  // exhaustive vocabulary pass solely as a genuine fallback when that bounded
+  // evidence found no lexical candidate at all.
+  const visualVocabularyValues = neural.length === 0 && lexicallyProjectedValues.size === 0
     ? neuralWordContextWordsOfLength(language, segments.length)
       .map((candidate) => {
         const lower = candidate[0]?.toLocaleLowerCase(vocabularyLocale) ?? ''

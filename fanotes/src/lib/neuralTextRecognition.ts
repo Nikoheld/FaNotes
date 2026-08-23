@@ -25,6 +25,7 @@ import {
   useExtendedDesktopOcrModel,
 } from './resourceLimits'
 import {
+  applyFinalNeuralLineContext,
   applyFinalNeuralWordContext,
   applyNeuralWordContext,
   isExtendedNeuralContextWord,
@@ -55,18 +56,37 @@ const LANGUAGE_WORD_RANKS = {
   de: new Map(LANGUAGE_WORD_LISTS.de.map((word, index) => [word, index])),
   en: new Map(LANGUAGE_WORD_LISTS.en.map((word, index) => [word, index])),
 }
-// Blind N-best validation on independent English IAM and German ScaDS lines
-// showed that the previous 0.10 penalty let weak language fluency override
-// the decoder's visual order too often. A candidate now needs roughly one
-// complete independently known-word advantage per displaced beam position.
+// N-best development analysis across English IAM and German ScaDS lines showed
+// that the previous 0.10 penalty let weak language fluency override the
+// decoder's visual order too often. A candidate now needs roughly one complete
+// independently known-word advantage per displaced beam position. The ScaDS
+// test fold is kept separate for final evaluation, not parameter selection.
 const TROCR_VISUAL_RANK_PENALTY = 3
+export const trocrVisualRankPenaltyForTests = TROCR_VISUAL_RANK_PENALTY
 // An independent 1,208-line IAM N-best audit found one deliberately narrow
 // exception to the full visual-rank penalty: when the next beam changes
 // exactly one ordinary lower-case word by at most two characters and turns an
 // unsupported token into a known word, it can safely receive part of the
 // lexical advantage immediately. Names, compounds, punctuation, word-boundary
 // changes and already-known visual words stay with the decoder's first beam.
-const TROCR_SAFE_WORD_REPAIR_BONUS = 2
+// A 3.5 bonus recovers one additional safe local repair on each IAM/ScaDS
+// development set and one on the untouched writer-disjoint ScaDS evaluation
+// fold without adding a worsened selection. ScaDS calibration and the
+// 600-line IAM validation aggregate remain unchanged. This is deliberately
+// narrower than lowering the visual-rank penalty: only one lower-case,
+// boundary-preserving unknown->known replacement with no competing repair is
+// eligible; names, valid words, punctuation and structural rewrites are not.
+const TROCR_SAFE_WORD_REPAIR_BONUS = 3.5
+export const trocrSafeWordRepairBonusForTests = TROCR_SAFE_WORD_REPAIR_BONUS
+// Two weaker bonuses cover independent structure that the single-word repair
+// above deliberately excludes. An exact repeated token elsewhere on the same
+// visual line is direct evidence for a near-tied reading (`Jun ... Java` ->
+// `Java ... Java`). German lines may additionally contain several damaged
+// words in the same second beam; a tiny bonus is safe when it adds a known
+// lower-case word without changing punctuation, boundaries, capitalization,
+// or any already-known word. Both remain far below one visual-rank step.
+const TROCR_REPEATED_WORD_EVIDENCE_BONUS = 0.35
+const TROCR_GERMAN_MULTIWORD_REPAIR_BONUS = 0.2
 // If the top visual word has its own different, unique dictionary repair, the
 // two lexical readings are ambiguous. The lower beam must then beat another
 // full visual-rank step instead of receiving a dictionary bonus. This keeps
@@ -668,11 +688,13 @@ const renderLineImage = (
 ): RenderedLineImage => {
   const contentWidth = Math.max(1, line.maxX - line.minX)
   const contentHeight = Math.max(1, line.maxY - line.minY)
-  // TrOCR was trained on complete line crops, which retain substantially more
-  // ascender/descender whitespace than a tight canvas bounding box. The 0.40
-  // default reduced independent recomposed-UJI CER from 22% to 15% across 12
-  // unseen writers while preserving the genuine IAM-OnDB line prediction.
-  const marginY = clamp(contentHeight * clamp(options.marginYRatio ?? 0.40, 0.04, 0.6), 4, 36)
+  // TrOCR was trained on complete line crops, which retain ascender/descender
+  // whitespace around the ink. A writer-disjoint UJI sweep found 0.34 to be
+  // the robust single-view crop: 26 rather than 34 character edits across 12
+  // unseen writers, with the genuine IAM-OnDB line unchanged. Wider crops
+  // shrink short words too much; uncertain short words receive independent
+  // wider/tighter views below.
+  const marginY = clamp(contentHeight * clamp(options.marginYRatio ?? 0.34, 0.04, 0.6), 4, 36)
   const marginX = clamp(contentHeight * clamp(options.marginXRatio ?? 0.22, 0.04, 0.8), 5, 48)
   const inkScale = clamp(options.inkScale ?? 1, 0.55, 1.8)
   const imageWidth = contentWidth + marginX * 2
@@ -1180,8 +1202,14 @@ const decodeCtc = (
 const hasTerminalPunctuationInk = (line: StrokeLine) => {
   const height = Math.max(1, line.maxY - line.minY)
   const rightEdge = line.maxX - height * 0.62
+  // A detached crossbar or t-top can be tiny and touch the right edge, but it
+  // is not terminal punctuation. Dots/commas live in the lower baseline band;
+  // requiring that band removes the recurring `test.` false positive without
+  // discarding genuine sentence punctuation.
+  const baselineBand = line.minY + height * 0.58
   return line.entries.some((entry) => (
     entry.maxX >= rightEdge
+    && entry.centerY >= baselineBand
     && entry.width <= height * 0.42
     && entry.height <= height * 0.48
   ))
@@ -1334,6 +1362,42 @@ const rareContextCommonNeighbour = (
 }
 
 export const rareContextCommonNeighbourForTests = rareContextCommonNeighbour
+
+const containsUnknownContextWord = (
+  text: string,
+  language: RecognitionLanguage,
+  wordMembership?: WordMembership,
+) => {
+  const words = text.toLocaleLowerCase(language)
+    .match(language === 'de' ? /[a-zäöü]{3,}/giu : /[a-z]{3,}/giu) ?? []
+  return words.some((word) => !LANGUAGE_WORDS[language].has(word) && !wordMembership?.(word))
+}
+
+/** Transformers.js 3.8's image pipeline currently exposes only one generated
+ * sequence even when its sampler is configured with multiple beams. Request a
+ * genuinely independent rendering only when the first context view remains
+ * unsupported, or when both visual paths disagree and either reading contains
+ * an unknown word. This includes a visually plausible uncommon name opposed
+ * by a frequent context hallucination. Fully known lines retain the
+ * single-inference fast path. */
+const shouldRequestIndependentTrocrView = (
+  candidateCount: number,
+  compactText: string,
+  contextText: string,
+  contextNeedsContext: boolean,
+  language: RecognitionLanguage,
+  wordMembership?: WordMembership,
+) => {
+  if (candidateCount > 1 || !contextText) return false
+  if (contextNeedsContext) return true
+  const compactSurface = compactText.toLocaleLowerCase(language).trim()
+  const contextSurface = contextText.toLocaleLowerCase(language).trim()
+  if (!compactSurface || compactSurface === contextSurface) return false
+  return containsUnknownContextWord(contextText, language, wordMembership)
+    || containsUnknownContextWord(compactText, language, wordMembership)
+}
+
+export const shouldRequestIndependentTrocrViewForTests = shouldRequestIndependentTrocrView
 
 /** A complete-line decoder can prepend or append a short fluent phrase beyond
  * the ink. It is not safe to trim merely because two models disagree: this
@@ -1704,6 +1768,27 @@ const trocrLineAssessment = (
   }
 }
 
+/** Chooses an alternative raster view only when it has independent structural
+ * or lexical evidence. A valid but visually different word is never replaced
+ * merely because a second crop exists. */
+const shouldPreferCtcView = (
+  current: Omit<NeuralTextLine, 'bbox'>,
+  currentAssessment: ReturnType<typeof trocrLineAssessment> | null,
+  alternate: Omit<NeuralTextLine, 'bbox'>,
+  alternateAssessment: ReturnType<typeof trocrLineAssessment> | null,
+) => Boolean(
+  alternateAssessment &&
+  currentAssessment &&
+  (
+    (currentAssessment.suspicious && !alternateAssessment.suspicious) ||
+    alternateAssessment.score > currentAssessment.score + 0.08 ||
+    (
+      alternateAssessment.score >= currentAssessment.score - 0.04 &&
+      alternate.confidence >= current.confidence + 2
+    )
+  ),
+)
+
 type TrocrWordSurface = { value: string; start: number; end: number }
 
 const trocrWordSurfaces = (value: string, language: RecognitionLanguage): TrocrWordSurface[] => {
@@ -1715,10 +1800,122 @@ const trocrWordSurfaces = (value: string, language: RecognitionLanguage): TrocrW
   }))
 }
 
+const trocrWordBoundarySignature = (value: string, language: RecognitionLanguage) => (
+  value.replace(language === 'de' ? /[A-Za-zÄÖÜäöü]+/gu : /[A-Za-z]+/gu, '#')
+)
+
+type TrocrWordCaseRole = 'lower' | 'title' | 'upper' | 'mixed'
+
+const trocrWordCaseRole = (value: string, language: RecognitionLanguage): TrocrWordCaseRole => {
+  const locale = language === 'de' ? 'de-CH' : 'en-US'
+  const characters = Array.from(value)
+  if (characters.every((character) => character === character.toLocaleLowerCase(locale))) return 'lower'
+  if (characters.every((character) => character === character.toLocaleUpperCase(locale))) return 'upper'
+  if (
+    characters[0] === characters[0]?.toLocaleUpperCase(locale) &&
+    characters.slice(1).every((character) => character === character.toLocaleLowerCase(locale))
+  ) return 'title'
+  return 'mixed'
+}
+
+const trocrKnownWord = (
+  word: string,
+  language: RecognitionLanguage,
+  wordMembership?: WordMembership,
+) => {
+  const locale = language === 'de' ? 'de-CH' : 'en-US'
+  const lower = word.toLocaleLowerCase(locale)
+  return LANGUAGE_WORDS[language].has(lower) || Boolean(wordMembership?.(lower))
+}
+
+/** A second visual beam may repeat an already visible, independently decoded
+ * token. This is stronger than mere word frequency: the target must occur
+ * unchanged elsewhere on this same line, the source must be unsupported, and
+ * every separator plus the capitalization role must remain identical. */
+const trocrRepeatedWordEvidenceBonus = (
+  visualTop: string,
+  candidate: string,
+  language: RecognitionLanguage,
+  wordMembership?: WordMembership,
+) => {
+  const sourceWords = trocrWordSurfaces(visualTop, language)
+  const candidateWords = trocrWordSurfaces(candidate, language)
+  if (
+    sourceWords.length !== candidateWords.length ||
+    trocrWordBoundarySignature(visualTop, language) !== trocrWordBoundarySignature(candidate, language)
+  ) return 0
+  const changed = sourceWords.flatMap((source, index) => (
+    source.value === candidateWords[index]?.value ? [] : [{ source, target: candidateWords[index], index }]
+  ))
+  if (changed.length !== 1 || !changed[0].target) return 0
+  const { source, target, index } = changed[0]
+  if (
+    Array.from(source.value).length < 3 ||
+    Array.from(target.value).length < 4 ||
+    trocrKnownWord(source.value, language, wordMembership) ||
+    !trocrKnownWord(target.value, language, wordMembership) ||
+    trocrWordCaseRole(source.value, language) !== trocrWordCaseRole(target.value, language) ||
+    !sourceWords.some((word, wordIndex) => wordIndex !== index && word.value === target.value)
+  ) return 0
+  return TROCR_REPEATED_WORD_EVIDENCE_BONUS
+}
+
+export const trocrRepeatedWordEvidenceBonusForTests = trocrRepeatedWordEvidenceBonus
+
+/** German compounds and inflections can leave more than one unknown surface
+ * in a lower beam, so the narrow single-repair disposition cannot score it.
+ * Grant only a tie-break-sized bonus when separators are byte-for-byte
+ * unchanged, no known source word is touched, casing roles remain stable, no
+ * changed token touches a joiner, and at least one lower-case token becomes a
+ * known word. English validation showed this broader signal is not safe there,
+ * therefore it is intentionally German-only. */
+const trocrGermanMultiwordRepairBonus = (
+  visualTop: string,
+  candidate: string,
+  language: RecognitionLanguage,
+  wordMembership?: WordMembership,
+) => {
+  if (language !== 'de') return 0
+  const sourceWords = trocrWordSurfaces(visualTop, language)
+  const candidateWords = trocrWordSurfaces(candidate, language)
+  if (
+    sourceWords.length !== candidateWords.length ||
+    trocrWordBoundarySignature(visualTop, language) !== trocrWordBoundarySignature(candidate, language)
+  ) return 0
+  const changed = sourceWords.flatMap((source, index) => (
+    source.value === candidateWords[index]?.value ? [] : [{ source, target: candidateWords[index] }]
+  ))
+  if (!changed.length) return 0
+  let addsKnownLowercaseWord = false
+  for (const { source, target } of changed) {
+    if (!target) return 0
+    const sourceRole = trocrWordCaseRole(source.value, language)
+    const targetRole = trocrWordCaseRole(target.value, language)
+    const touchesJoiner = (
+      /[-'’]/u.test(visualTop[source.start - 1] ?? '') ||
+      /[-'’]/u.test(visualTop[source.end] ?? '')
+    )
+    const targetKnown = trocrKnownWord(target.value, language, wordMembership)
+    if (
+      Array.from(source.value).length < 4 ||
+      Array.from(target.value).length < 4 ||
+      trocrKnownWord(source.value, language, wordMembership) ||
+      sourceRole !== targetRole ||
+      touchesJoiner ||
+      (sourceRole !== 'lower' && targetKnown)
+    ) return 0
+    if (sourceRole === 'lower' && targetKnown) addsKnownLowercaseWord = true
+  }
+  return addsKnownLowercaseWord ? TROCR_GERMAN_MULTIWORD_REPAIR_BONUS : 0
+}
+
+export const trocrGermanMultiwordRepairBonusForTests = trocrGermanMultiwordRepairBonus
+
 const trocrStructuralRewritePenalty = (
   visualTop: string,
   candidate: string,
   language: RecognitionLanguage,
+  wordMembership?: WordMembership,
 ) => {
   let penalty = 0
   const sourceWords = trocrWordSurfaces(visualTop, language)
@@ -1743,6 +1940,12 @@ const trocrStructuralRewritePenalty = (
         sourceOffset += Array.from(word.value).length
         sourceBoundaries.add(sourceOffset)
       })
+      sourceOffset = 0
+      const sourceWordRanges = sourceWords.map((word) => {
+        const start = sourceOffset
+        sourceOffset += Array.from(word.value).length
+        return { word: word.value.toLocaleLowerCase(locale), start, end: sourceOffset }
+      })
       let candidateOffset = 0
       for (let index = 0; index < candidateWords.length - 1; index += 1) {
         candidateOffset += Array.from(candidateWords[index].value).length
@@ -1752,7 +1955,18 @@ const trocrStructuralRewritePenalty = (
         const shortFunctionWord = [left, right].some((word) => (
           Array.from(word).length <= 3 && LANGUAGE_WORDS[language].has(word)
         ))
-        if (!shortFunctionWord) {
+        const splitSourceWord = sourceWordRanges.find((range) => (
+          candidateOffset > range.start && candidateOffset < range.end
+        ))
+        const splitsKnownVisualWord = Boolean(splitSourceWord && (
+          LANGUAGE_WORDS[language].has(splitSourceWord.word) || wordMembership?.(splitSourceWord.word)
+        ))
+        // A short function word used to exempt `indem` -> `in dem`. When the
+        // complete first-beam word is already in the shipped spelling index,
+        // the new boundary has no lexical justification. Keep the visual word
+        // here; the later physical-gap stage can still insert a genuinely
+        // visible space in cases such as `inform`/`in form`.
+        if (splitsKnownVisualWord || !shortFunctionWord) {
           penalty += TROCR_UNSUPPORTED_STRUCTURE_PENALTY
           break
         }
@@ -1768,7 +1982,26 @@ const trocrStructuralRewritePenalty = (
   ) {
     penalty += TROCR_UNSUPPORTED_STRUCTURE_PENALTY
   }
-  if ([...'([{'].some((bracket) => !visualTop.includes(bracket) && candidate.includes(bracket))) {
+  const availablePunctuation = new Map<string, number>()
+  Array.from(visualTop).forEach((character) => {
+    if (!PUNCTUATION.has(character)) return
+    availablePunctuation.set(character, (availablePunctuation.get(character) ?? 0) + 1)
+  })
+  const candidateCharacters = Array.from(candidate.trimEnd())
+  const introducesUnsupportedPunctuation = candidateCharacters.some((character, index) => {
+    if (!PUNCTUATION.has(character)) return false
+    const remaining = availablePunctuation.get(character) ?? 0
+    if (remaining > 0) {
+      availablePunctuation.set(character, remaining - 1)
+      return false
+    }
+    // Terminal punctuation is independently checked against visible ink by
+    // normalizedTrocrText. Internal punctuation has no such support and must
+    // not let a lower visual hypothesis manufacture a dictionary word
+    // (`Hamburges` -> `Hamburg,`). Removing spurious punctuation stays free.
+    return index < candidateCharacters.length - 1 || !/[.,!?]/u.test(character)
+  })
+  if (introducesUnsupportedPunctuation) {
     penalty += TROCR_UNSUPPORTED_STRUCTURE_PENALTY
   }
   return penalty
@@ -1793,13 +2026,26 @@ const trocrOrdinaryWordNamePenalty = (
   ))
   if (changed.length !== 1 || !changed[0].target) return 0
   const { source, target } = changed[0]
-  if (!/^\p{Lu}\p{Ll}{2,}$/u.test(source.value) || !/^\p{Lu}\p{Ll}{2,}$/u.test(target.value)) return 0
+  if (!/^\p{Lu}\p{Ll}{2,}$/u.test(source.value)) return 0
+  const targetIsTitleCase = /^\p{Lu}\p{Ll}{2,}$/u.test(target.value)
+  if (!targetIsTitleCase) return 0
   const prefix = visualTop.slice(0, source.start).trimEnd().replace(/["'’\])}]+$/gu, '').trimEnd()
   if (!prefix || /[.!?]$/u.test(prefix)) return 0
   const sourceLower = source.value.toLocaleLowerCase('en-US')
   const targetLower = target.value.toLocaleLowerCase('en-US')
   const known = (word: string) => LANGUAGE_WORDS.en.has(word) || Boolean(wordMembership?.(word))
-  if (known(sourceLower) || !known(targetLower) || ENGLISH_CANONICAL_PROPER_NAMES.has(targetLower)) return 0
+  if (known(sourceLower) || !known(targetLower)) return 0
+
+  if (ENGLISH_CANONICAL_PROPER_NAMES.has(targetLower)) {
+    // Replacing one plausible name with a more frequent canonical name is
+    // allowed by default (`Geleste` -> `Celeste`). An explicit title or name
+    // connector, however, independently proves that this exact visual token is
+    // part of a name sequence; frequency alone must not rewrite it.
+    const suffix = visualTop.slice(source.end)
+    const followsNameTitle = /(?:^|\s)(?:rabbi|dr|doctor|prof|professor|mr|mrs|ms|saint|st)\.?$/iu.test(prefix)
+    const precedesNameConnector = /^\s+(?:al|ben|bin|de|del|der|di|ibn|van|von)\b/iu.test(suffix)
+    if (!followsNameTitle && !precedesNameConnector) return 0
+  }
   return TROCR_ORDINARY_WORD_NAME_PENALTY
 }
 
@@ -1935,7 +2181,7 @@ const rankTrocrCandidates = (
       ? TROCR_COMPETING_WORD_REPAIR_PENALTY
       : 0
     const structuralRewritePenalty = index > 0
-      ? trocrStructuralRewritePenalty(candidates[0], rawText, language)
+      ? trocrStructuralRewritePenalty(candidates[0], rawText, language, wordMembership)
       : 0
     const ordinaryWordNamePenalty = index > 0
       ? trocrOrdinaryWordNamePenalty(candidates[0], rawText, language, wordMembership)
@@ -1943,14 +2189,22 @@ const rankTrocrCandidates = (
     const denseGermanNamePenalty = index > 0
       ? trocrDenseGermanNamePenalty(candidates[0], rawText, language, wordMembership)
       : 0
+    const repeatedWordEvidenceBonus = index > 0
+      ? trocrRepeatedWordEvidenceBonus(candidates[0], rawText, language, wordMembership)
+      : 0
+    const germanMultiwordRepairBonus = index > 0
+      ? trocrGermanMultiwordRepairBonus(candidates[0], rawText, language, wordMembership)
+      : 0
     return {
       rawText,
       text,
       assessment,
+      repairDisposition,
       visualRank: index,
       baseScore,
       score: baseScore - index * TROCR_VISUAL_RANK_PENALTY
-        + safeRepairBonus - competingRepairPenalty - structuralRewritePenalty
+        + safeRepairBonus + repeatedWordEvidenceBonus + germanMultiwordRepairBonus
+        - competingRepairPenalty - structuralRewritePenalty
         - ordinaryWordNamePenalty - denseGermanNamePenalty,
     }
   })
@@ -1978,12 +2232,13 @@ export const rankTrocrCandidateTextsForTests = (
     width: visibleLength * 14,
     height: 60,
   }])
-  return rankTrocrCandidates(rawCandidates, line, language, wordMembership).map(({ rawText, text, score, visualRank, baseScore }) => ({
+  return rankTrocrCandidates(rawCandidates, line, language, wordMembership).map(({ rawText, text, score, visualRank, baseScore, repairDisposition }) => ({
     rawText,
     text,
     score,
     visualRank,
     baseScore,
+    repairDisposition,
   }))
 }
 
@@ -2181,15 +2436,68 @@ const recognizeSeparatedWordLine = async (
     const image = renderLineImage(physicalWord, sourceWidth, sourceHeight)
     let selected: Omit<NeuralTextLine, 'bbox'> | null = null
     let selectedAssessment: ReturnType<typeof trocrLineAssessment> | null = null
+    let selectedByCtc = false
     try {
       const ctc = await recognizeCtcLine(image, language, wordMembership)
       if (ctc.text) {
         selected = ctc
         selectedAssessment = trocrLineAssessment(ctc.text, physicalWord, language, wordMembership)
+        selectedByCtc = true
         usedCtc = true
       }
     } catch {
       // TrOCR below can still recognize this physical word.
+    }
+    if (
+      selectedByCtc &&
+      selected &&
+      selectedAssessment &&
+      (
+        selected.confidence < 80 ||
+        (selected.confidence < 90 && Array.from(selected.text).length <= 3) ||
+        (selected.confidence < 90 && selectedAssessment.lexicallyUnsupported)
+      ) &&
+      /^[\p{L}]{3,14}$/u.test(selected.text)
+    ) {
+      const primaryText = selected.text
+      try {
+        // Physical word splitting bypasses the complete-line uncertainty
+        // path, so it needs the same independent crop ensemble explicitly.
+        // The wider view recovers compressed short words; a middle view is
+        // only evaluated when the first two views disagree.
+        const widerImage = renderLineImage(physicalWord, sourceWidth, sourceHeight, {
+          marginYRatio: 0.40,
+          inkScale: 0.92,
+        })
+        const wider = await recognizeCtcLine(widerImage, language, wordMembership)
+        const widerAssessment = wider.text
+          ? trocrLineAssessment(wider.text, physicalWord, language, wordMembership)
+          : null
+        if (wider.text && shouldPreferCtcView(selected, selectedAssessment, wider, widerAssessment)) {
+          selected = wider
+          selectedAssessment = widerAssessment
+        }
+        if (
+          wider.text &&
+          wider.text.toLocaleLowerCase(language) !== primaryText.toLocaleLowerCase(language) &&
+          selected.confidence < 78
+        ) {
+          const middleImage = renderLineImage(physicalWord, sourceWidth, sourceHeight, {
+            marginYRatio: 0.32,
+            inkScale: 0.96,
+          })
+          const middle = await recognizeCtcLine(middleImage, language, wordMembership)
+          const middleAssessment = middle.text
+            ? trocrLineAssessment(middle.text, physicalWord, language, wordMembership)
+            : null
+          if (middle.text && shouldPreferCtcView(selected, selectedAssessment, middle, middleAssessment)) {
+            selected = middle
+            selectedAssessment = middleAssessment
+          }
+        }
+      } catch {
+        // The original CTC word remains available if an alternate view fails.
+      }
     }
     // A confident dictionary-backed CTC word needs no second inference. This
     // keeps clear multi-word lines faster than recognizing the complete line
@@ -2305,40 +2613,58 @@ export async function recognizeNeuralText(
           ? trocrLineAssessment(compact.text, line, language, wordMembership)
           : null
         const compactVisible = Array.from(compact.text).filter((character) => !/\s/u.test(character))
-        const uncertainSingleWord = (
+        const uncertainCtcLine = (
           compact.confidence < 80 &&
-          compactVisible.length >= 4 &&
-          compactVisible.length <= 14 &&
-          /^\p{L}+$/u.test(compact.text)
+          // A missed glyph often shortens the visible path to three letters
+          // (`test` → `ort`); those outputs must still receive a second view.
+          compactVisible.length >= 3 &&
+          compactVisible.length <= 28 &&
+          /^\p{L}+(?:\s+\p{L}+)?$/u.test(compact.text)
         )
-        if (uncertainSingleWord) {
+        if (uncertainCtcLine) {
+          const primaryCompactText = compact.text
           try {
-            // A slightly tighter crop changes the relative x-height and ink
-            // thickness seen by CTC. Running it only for a low-confidence
-            // single word recovers valid-word confusions such as
-            // rennen/lernen without doubling normal sentence work.
+            // A wider crop changes the relative x-height and ink thickness
+            // seen by CTC. Running it only for a low-confidence line recovers
+            // valid-word confusions such as rennen/lernen without doubling
+            // normal sentence work.
             const alternateImage = renderLineImage(line, sourceWidth, sourceHeight, {
-              marginYRatio: 0.32,
+              marginYRatio: 0.40,
               inkScale: 0.92,
             })
             const alternate = await recognizeCtcLine(alternateImage, language, wordMembership)
             const alternateAssessment = alternate.text
               ? trocrLineAssessment(alternate.text, line, language, wordMembership)
               : null
-            if (
-              alternateAssessment &&
-              compactAssessment &&
-              (
-                (compactAssessment.suspicious && !alternateAssessment.suspicious) ||
-                alternateAssessment.score > compactAssessment.score + 0.08 ||
-                (
-                  alternateAssessment.score >= compactAssessment.score - 0.04 &&
-                  alternate.confidence >= compact.confidence + 2
-                )
-              )
-            ) {
+            if (alternate.text && shouldPreferCtcView(compact, compactAssessment, alternate, alternateAssessment)) {
               compact = alternate
               compactAssessment = alternateAssessment
+            }
+
+            // A middle crop is deliberately reserved for a genuine
+            // disagreement between the two cheap views. In writer-disjoint
+            // data, 0.34 can preserve a descender that the tighter 0.32 view
+            // clips, while the 0.40 view is better for short connected words.
+            // This third inference is therefore an uncertainty tie-breaker,
+            // never a normal-line cost multiplier.
+            if (
+              alternate.text &&
+              primaryCompactText &&
+              alternate.text.toLocaleLowerCase(language) !== primaryCompactText.toLocaleLowerCase(language) &&
+              compact.confidence < 78
+            ) {
+              const middleImage = renderLineImage(line, sourceWidth, sourceHeight, {
+                marginYRatio: 0.32,
+                inkScale: 0.96,
+              })
+              const middle = await recognizeCtcLine(middleImage, language, wordMembership)
+              const middleAssessment = middle.text
+                ? trocrLineAssessment(middle.text, line, language, wordMembership)
+                : null
+              if (middle.text && shouldPreferCtcView(compact, compactAssessment, middle, middleAssessment)) {
+                compact = middle
+                compactAssessment = middleAssessment
+              }
             }
           } catch {
             // The original compact result remains valid and already loaded.
@@ -2354,13 +2680,38 @@ export async function recognizeNeuralText(
       }
     }
 
-    const selectedWords = selected?.text.toLocaleLowerCase(language)
-      .match(language === 'de' ? /[a-zäöü]{3,}/giu : /[a-z]{3,}/giu) ?? []
-    const containsUnknownWord = selectedWords.some((word) => (
-      !LANGUAGE_WORDS[language].has(word) && !wordMembership?.(word)
-    ))
+    const containsUnknownWord = selected
+      ? containsUnknownContextWord(selected.text, language, wordMembership)
+      : false
     const isWebRuntime = window.fanotes.platform === 'web'
-    if (useContextModel && (isWebRuntime || !selected || primaryAssessment?.needsContext || containsUnknownWord)) {
+    const selectedVisualSurface = selected
+      ? fusionAlignmentSurface(selected.text, language)
+      : ''
+    const rawVisualSurface = selected
+      ? fusionAlignmentSurface(selected.rawText, language)
+      : ''
+    const hasRawVisualDisagreement = Boolean(
+      selectedVisualSurface &&
+      rawVisualSurface &&
+      selectedVisualSurface !== rawVisualSurface &&
+      wordDistance(selectedVisualSurface, rawVisualSurface) >= 1,
+    )
+    // A separated CTC line with known words and a strong visual score is
+    // already backed by the same crop ensemble used by the desktop path. Do
+    // not pay for a second full-line transformer pass in that case; reserve
+    // the context model for unknown/structurally suspicious text or genuinely
+    // low-confidence web output.
+    const needsContextModel = (
+      !selected ||
+      !primaryAssessment ||
+      primaryAssessment.needsContext ||
+      containsUnknownWord ||
+      hasRawVisualDisagreement ||
+      (!separated && Boolean(selected) && selected.confidence < 94) ||
+      Boolean(separated && separated.minimumWordConfidence < 92) ||
+      (isWebRuntime && selected.confidence < 78)
+    )
+    if (useContextModel && needsContextModel) {
       try {
         const trocrRecognition = await recognizeTrocrLineCandidates(image.pixels, image.width, image.height)
         let rankedContext = rankTrocrCandidates(
@@ -2372,6 +2723,52 @@ export async function recognizeNeuralText(
         let bestContext = rankedContext[0]
         let rawText = bestContext?.rawText ?? normalizeGermanSharpS(trocrRecognition.text).normalize('NFC').trim()
         let text = bestContext?.text ?? normalizedTrocrText(rawText, language, line)
+        let contextAssessment = trocrLineAssessment(text, line, language, wordMembership)
+        let alternateRanked: ReturnType<typeof rankTrocrCandidates> | null = null
+        const loadAlternateRanked = async () => {
+          if (alternateRanked) return alternateRanked
+          const alternateImage = renderLineImage(line, sourceWidth, sourceHeight, {
+            marginYRatio: 0.40,
+            inkScale: 0.92,
+          })
+          const alternateRecognition = await recognizeTrocrLineCandidates(
+            alternateImage.pixels,
+            alternateImage.width,
+            alternateImage.height,
+          )
+          alternateRanked = rankTrocrCandidates(
+            alternateRecognition.candidates.length
+              ? alternateRecognition.candidates
+              : [alternateRecognition.text],
+            line,
+            language,
+            wordMembership,
+          )
+          return alternateRanked
+        }
+        if (shouldRequestIndependentTrocrView(
+          trocrRecognition.candidates.length,
+          selected?.text ?? '',
+          text,
+          contextAssessment.needsContext,
+          language,
+          wordMembership,
+        )) {
+          try {
+            const independent = await loadAlternateRanked()
+            const combinedRawCandidates = [
+              ...rankedContext.map((candidate) => candidate.rawText),
+              ...independent.map((candidate) => candidate.rawText),
+            ]
+            rankedContext = rankTrocrCandidates(combinedRawCandidates, line, language, wordMembership)
+            bestContext = rankedContext[0]
+            rawText = bestContext?.rawText ?? rawText
+            text = bestContext?.text ?? text
+            contextAssessment = trocrLineAssessment(text, line, language, wordMembership)
+          } catch {
+            // The first context view and compact model remain available.
+          }
+        }
         const disputedCommonNeighbour = selected
           ? rareContextCommonNeighbour(selected.text, text, rawText, language)
           : ''
@@ -2383,24 +2780,7 @@ export async function recognizeNeuralText(
             // default crop chooses the valid but wrong past tense, while this
             // view reads the visible final `r`. Run it only after the strict
             // ambiguity gate above so ordinary lines keep one TrOCR inference.
-            const alternateImage = renderLineImage(line, sourceWidth, sourceHeight, {
-              marginYRatio: 0.32,
-              inkScale: 0.92,
-            })
-            const alternateRecognition = await recognizeTrocrLineCandidates(
-              alternateImage.pixels,
-              alternateImage.width,
-              alternateImage.height,
-            )
-            const alternateRanked = rankTrocrCandidates(
-              alternateRecognition.candidates.length
-                ? alternateRecognition.candidates
-                : [alternateRecognition.text],
-              line,
-              language,
-              wordMembership,
-            )
-            const alternateBest = alternateRanked[0]
+            const alternateBest = (await loadAlternateRanked())[0]
             const alternateWord = alternateBest
               ? fusionAlignmentSurface(alternateBest.text, language)
               : ''
@@ -2417,7 +2797,7 @@ export async function recognizeNeuralText(
             // The default context and compact visual paths remain available.
           }
         }
-        let contextAssessment = trocrLineAssessment(text, line, language, wordMembership)
+        contextAssessment = trocrLineAssessment(text, line, language, wordMembership)
         const surfaceText = normalizedTrocrSurface(rawText, line)
         const contextualEdits = wordDistance(
           surfaceText.toLocaleLowerCase(language),
@@ -2494,7 +2874,11 @@ export async function recognizeNeuralText(
       }
     }
     if (selected?.text) {
-      const contextText = applyFinalNeuralWordContext(selected.text, language)
+      const contextText = applyFinalNeuralLineContext(
+        selected.text,
+        language,
+        separated?.physicalWordCount,
+      )
       const boundedText = applyNeuralPhysicalWordBoundaries(
         contextText,
         line,

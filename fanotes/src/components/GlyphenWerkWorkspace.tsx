@@ -10,6 +10,10 @@ import {
   removeHandwritingSamples,
   replaceManagedMathLayoutExamples,
 } from '../lib/handwritingDb'
+import {
+  glyphenWerkExactProjectionIsIndependent,
+  validatedGlyphenWerkTextPrefixHint,
+} from '../lib/glyphenWerkRecognitionBridge'
 
 const SAMPLE_IDS_KEY = 'fanotes-glyphenwerk-sample-ids.v1'
 const LAYOUT_IDS_KEY = 'fanotes-glyphenwerk-layout-ids.v1'
@@ -30,8 +34,7 @@ type GlyphenWerkMessage = {
   requestId?: unknown
   strokes?: unknown
   language?: unknown
-  textCharacterCountHint?: unknown
-  textCharacterHint?: unknown
+  textPrefixHint?: unknown
 }
 
 const MAX_RECOGNITION_STROKES = 2_048
@@ -156,16 +159,7 @@ export function GlyphenWerkWorkspace({ activeView, appearance, onClose, onViewCh
     ) return
     const strokes = recognitionStrokes(message.strokes)
     if (!strokes) return
-    const textCharacterCountHint = Number.isSafeInteger(message.textCharacterCountHint)
-      && Number(message.textCharacterCountHint) >= 1
-      && Number(message.textCharacterCountHint) <= 320
-      ? Number(message.textCharacterCountHint)
-      : undefined
-    const textCharacterHint = typeof message.textCharacterHint === 'string'
-      && message.textCharacterHint.length <= 320
-      && /^\p{L}{1,320}$/u.test(message.textCharacterHint)
-      ? message.textCharacterHint
-      : undefined
+    const textPrefixHint = validatedGlyphenWerkTextPrefixHint(message.textPrefixHint)
     const respond = (payload: Record<string, unknown>) => iframeRef.current?.contentWindow?.postMessage({
       type: 'glyphenwerk:neural-result',
       schemaVersion: 1,
@@ -187,11 +181,18 @@ export function GlyphenWerkWorkspace({ activeView, appearance, onClose, onViewCh
         false,
         900,
         560,
-        textCharacterCountHint,
-        textCharacterHint,
+        undefined,
+        undefined,
+        textPrefixHint,
+      )
+      const exactProjectionSafe = glyphenWerkExactProjectionIsIndependent(
+        textPrefixHint,
+        neural.text,
+        personalized.fusion.text,
       )
       respond({
         text: personalized.fusion.text.slice(0, 4_000),
+        exactProjectionSafe,
         confidence: Math.max(neural.confidence, personalized.fusion.confidence),
         lineCount: neural.lines.length,
         wordCount: neural.wordCount ?? 0,

@@ -21,8 +21,8 @@ Nur Dateien verwenden, die mit `OK` bestätigt werden.
 Das AppImage ist der einfachste Weg und verändert keine Systemdateien:
 
 ```bash
-chmod +x FaNotes-2026.7.4-beta.10-x86_64.AppImage
-./FaNotes-2026.7.4-beta.10-x86_64.AppImage
+chmod +x FaNotes-2026.8.61-x86_64.AppImage
+./FaNotes-2026.8.61-x86_64.AppImage
 ```
 
 Für eine dauerhafte Installation im Benutzerkonto:
@@ -30,7 +30,7 @@ Für eine dauerhafte Installation im Benutzerkonto:
 ```bash
 mkdir -p "$HOME/.local/bin" "$HOME/.local/share/applications" \
   "$HOME/.local/share/icons/hicolor/scalable/apps"
-install -m755 FaNotes-2026.7.4-beta.10-x86_64.AppImage \
+install -m755 FaNotes-2026.8.61-x86_64.AppImage \
   "$HOME/.local/bin/fanotes"
 install -m644 packaging/fanotes.desktop \
   "$HOME/.local/share/applications/fanotes.desktop"
@@ -53,7 +53,7 @@ sudo pacman -S --needed fuse2
 Ohne FUSE kann es als langsamere Ausweichlösung direkt extrahiert und gestartet werden:
 
 ```bash
-./FaNotes-2026.7.4-beta.10-x86_64.AppImage --appimage-extract-and-run
+./FaNotes-2026.8.61-x86_64.AppImage --appimage-extract-and-run
 ```
 
 ## Variante 2: Portables tar.gz
@@ -62,9 +62,9 @@ Das portable Archiv besitzt genau einen Top-Level-Ordner. Es kann vollständig i
 
 ```bash
 mkdir -p "$HOME/.local/opt" "$HOME/.local/bin"
-tar -xzf FaNotes-2026.7.4-beta.10-x86_64.tar.gz -C "$HOME/.local/opt"
+tar -xzf FaNotes-2026.8.61-x86_64.tar.gz -C "$HOME/.local/opt"
 ln -sfn \
-  "$HOME/.local/opt/FaNotes-2026.7.4-beta.10-x86_64/fanotes" \
+  "$HOME/.local/opt/FaNotes-2026.8.61-x86_64/fanotes" \
   "$HOME/.local/bin/fanotes"
 "$HOME/.local/bin/fanotes"
 ```
@@ -74,7 +74,7 @@ Die Desktop-Datei wird wie bei der AppImage-Variante installiert. Zum Entfernen 
 ```bash
 rm -f "$HOME/.local/bin/fanotes"
 rm -f "$HOME/.local/share/applications/fanotes.desktop"
-rm -rf "$HOME/.local/opt/FaNotes-2026.7.4-beta.10-x86_64"
+rm -rf "$HOME/.local/opt/FaNotes-2026.8.61-x86_64"
 ```
 
 Vault und Einstellungen werden dadurch absichtlich nicht gelöscht.
@@ -83,7 +83,7 @@ Vault und Einstellungen werden dadurch absichtlich nicht gelöscht.
 
 Das mitgelieferte `PKGBUILD` verpackt exakt das portable tar.gz. Es lädt nichts aus dem Internet nach und baut Electron nicht erneut.
 
-1. `FaNotes-2026.7.4-beta.10-x86_64.tar.gz`, `PKGBUILD`, `fanotes.desktop`, `fanotes.svg` und `LICENSE` gemeinsam in einen leeren Arbeitsordner kopieren.
+1. `FaNotes-2026.8.61-x86_64.tar.gz`, `PKGBUILD`, `fanotes.desktop`, `fanotes.svg` und `LICENSE` gemeinsam in einen leeren Arbeitsordner kopieren.
 2. Die Build-Werkzeuge installieren:
 
    ```bash
@@ -127,23 +127,21 @@ libinput list-devices
 echo "$XDG_SESSION_TYPE"
 ```
 
-### Wayland
+### Hyprland und andere Wayland-Desktops
 
-Unter GNOME und KDE Plasma werden Monitorzuordnung, aktive Tablet-Fläche und Stifttasten in den jeweiligen Systemeinstellungen konfiguriert. Electron erkennt eine Wayland-Sitzung ab FaNotes 2.3.1 automatisch über `XDG_SESSION_TYPE`. FaNotes deaktiviert dort standardmäßig Vulkan und lässt Chromium den kompatiblen GL-/EGL-Pfad wählen, um Treiber- und ANGLE-Konflikte beim Start zu vermeiden:
+Unter Linux startet FaNotes immer mit Ozone X11. Stift und Trackpad teilen denselben Seat — nach dem Schreiben kannst du sofort mit zwei Fingern scrollen. Ein extra `--ozone-platform=x11` ist nicht nötig:
 
 ```bash
 fanotes
 ```
 
-Wenn der Compositor noch Probleme mit Stift-Events hat, lässt sich zum Vergleich XWayland erzwingen:
+Unter Hyprland verwendet FaNotes die normale Linux-Fensterleiste und keine zusätzliche Titelleiste in der App. Dadurch greifen Hyprland-Rahmen, Rundungen, Schatten und Fensterregeln.
 
-```bash
-fanotes --ozone-platform=x11
-```
+Wenn in `~/.config/hypr/hyprland.conf` oder einer dort per `source =` eingebundenen Datei `force_zero_scaling = true` steht, setzt FaNotes die Geräteskalierung auf 2, damit die Schrift unter XWayland nicht winzig wirkt.
 
-Unter Hyprland verwendet FaNotes die normale Linux-Fensterleiste und keine zusätzliche, fest gestaltete Titelleiste innerhalb der App. Dadurch greifen Hyprland-Rahmen, Rundungen, Schatten und andere Fensterregeln auf das Programmfenster.
+Unter GNOME und KDE Plasma werden Monitorzuordnung, aktive Tablet-Fläche und Stifttasten in den Systemeinstellungen konfiguriert.
 
-Für einen bewussten Vulkan-Test kann der automatische Schutz einmalig ausgeschaltet werden. Diese Variante ist nicht die Standardempfehlung:
+Vulkan bleibt im nativen Wayland-Pfad aus; Chromium nutzt GL/EGL. Nur zum Test:
 
 ```bash
 FANOTES_ENABLE_VULKAN=1 fanotes --use-angle=vulkan
