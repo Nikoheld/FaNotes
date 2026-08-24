@@ -271,10 +271,11 @@ try {
   const { fileURLToPath } = await import('node:url')
   const viewSource = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'src/components/PaperView.tsx'), 'utf8')
   const editorSource = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'src/components/MarkdownEditor.tsx'), 'utf8')
-  assert.match(viewSource, /lockPaperViewportEditorScroll/)
+  assert.match(viewSource, /lockPaperViewportScrollStayPut/)
   assert.match(viewSource, /tickPaperViewportEditorScrollHold/)
-  assert.match(editorSource, /lockPaperEditorLayerScroll\(this\.view\.dom\)/)
-  assert.match(editorSource, /tickPaperEditorScrollHold/)
+  assert.match(editorSource, /lockPaperViewportScrollStayPut/)
+  assert.match(editorSource, /onPaperScroll/)
+  assert.match(editorSource, /tickPaperViewportEditorScrollHold/)
   assert.match(editorSource, /PAPER_EDITOR_FLING_HOLD_FRAMES/)
 
   console.log(JSON.stringify({

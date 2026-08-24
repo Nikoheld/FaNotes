@@ -2,6 +2,10 @@
 
 ## Unveröffentlicht
 
+## 2026.8.64
+
+- **Schnell scrollen verschiebt den Text nicht mehr:** Beim schnellen Schwenken bleibt die Schrift auf den Linien. Nur das Blatt bewegt sich — der Editor zieht den Text nicht hinter dem Caret her.
+
 ## 2026.8.63
 
 - **Text bleibt beim schnellen Scrollen stehen:** Auch wenn du das Blatt schnell schwenkst, bleibt die Schrift auf den Linien. Nur das Blatt bewegt sich — der Text rutscht nicht mehr mit.

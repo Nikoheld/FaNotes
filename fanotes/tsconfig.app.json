@@ -17,5 +17,5 @@
     "noEmit": true,
     "jsx": "react-jsx"
   },
-  "include": ["src", "../src/types.ts", "../src/hershey.d.ts", "../src/lib/recognition.ts", "../src/lib/standardRecognition.ts", "../src/data/catalog.ts", "../src/data/germanLanguage.ts"]
+  "include": ["src", "../src/types.ts", "../src/hershey.d.ts", "../src/lib/recognition.ts", "../src/lib/standardRecognition.ts", "../src/data/catalog.ts", "../src/data/germanLanguage.ts", "../src/data/supplementalProperNames.ts"]
 }

@@ -33,7 +33,7 @@ import {
 } from '../lib/paperView'
 import { SCROLL_ROOM, clampCanvasScroll, paperScrollBoundsFromVisualRect } from '../lib/noteCanvas'
 import {
-  lockPaperViewportEditorScroll,
+  lockPaperViewportScrollStayPut,
   PAPER_EDITOR_FLING_HOLD_FRAMES,
   tickPaperViewportEditorScrollHold,
 } from '../lib/paperCaretScroll'
@@ -98,7 +98,7 @@ export function PaperView({ children, className = '', viewKey, showHud = true }:
       flingId = flingFrames > 0 ? window.requestAnimationFrame(holdFling) : 0
     }
     const clampScroll = () => {
-      lockPaperViewportEditorScroll(scroller)
+      lockPaperViewportScrollStayPut(scroller)
       flingFrames = PAPER_EDITOR_FLING_HOLD_FRAMES
       if (!flingId) flingId = window.requestAnimationFrame(holdFling)
       const plane = scroller.querySelector<HTMLElement>('.paper-sheet-plane')

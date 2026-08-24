@@ -4854,6 +4854,49 @@ const LANGUAGE_PROFILES = {
   trigrams: Set<string>
 }>
 
+type RecognitionWordMembership = (word: string) => boolean
+type RecognitionWordCandidateProvider = (length: number) => readonly string[]
+const installedRecognitionWordMembership: Record<RecognitionLanguage, RecognitionWordMembership | null> = {
+  de: null,
+  en: null,
+}
+const installedRecognitionWordCandidateProvider: Record<RecognitionLanguage, RecognitionWordCandidateProvider | null> = {
+  de: null,
+  en: null,
+}
+const installedRecognitionProperNameMembership: Record<RecognitionLanguage, RecognitionWordMembership | null> = {
+  de: null,
+  en: null,
+}
+
+/**
+ * Connects the exhaustive, lazily loaded FaNotes spelling vocabulary to the
+ * classical handwriting beam without copying its 380k strings or delaying
+ * application startup.
+ */
+export const installRecognitionWordMembership = (
+  language: RecognitionLanguage,
+  membership: RecognitionWordMembership | null,
+) => {
+  installedRecognitionWordMembership[language] = membership
+}
+
+/** Shares the lazily loaded, length-indexed spelling vocabulary with the classical beam. */
+export const installRecognitionWordCandidateProvider = (
+  language: RecognitionLanguage,
+  provider: RecognitionWordCandidateProvider | null,
+) => {
+  installedRecognitionWordCandidateProvider[language] = provider
+}
+
+/** Installs a local corpus of canonical title-case names for OCR only. */
+export const installRecognitionProperNameMembership = (
+  language: RecognitionLanguage,
+  membership: RecognitionWordMembership | null,
+) => {
+  installedRecognitionProperNameMembership[language] = membership
+}
+
 const normalizedWord = (value: string, language: RecognitionLanguage) => {
   const lower = normalizeGermanSharpS(value).toLocaleLowerCase(LANGUAGE_PROFILES[language].locale)
   return language === 'de'

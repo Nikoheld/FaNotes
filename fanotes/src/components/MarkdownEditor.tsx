@@ -55,11 +55,11 @@ import type { AppSettings, DetectedTextLanguage } from '../types'
 import { createTrailingValueScheduler, type TrailingValueScheduler } from '../lib/trailingValueScheduler'
 import {
   handlePaperEditorScroll,
-  lockPaperEditorLayerScroll,
   lockPaperEditorScrollIfNeeded,
+  lockPaperViewportScrollStayPut,
   PAPER_EDITOR_FLING_HOLD_FRAMES,
   resolvePaperCaretScroller,
-  tickPaperEditorScrollHold,
+  tickPaperViewportEditorScrollHold,
 } from '../lib/paperCaretScroll'
 import { revealDocumentLine } from '../lib/noteOutline'
 
@@ -972,32 +972,46 @@ const selectionDragAutoScroll = ViewPlugin.fromClass(class {
 const paperCaretLock = ViewPlugin.fromClass(class {
   private flingFrames = 0
   private flingId = 0
+  private paper: HTMLElement | null = null
 
   constructor(readonly view: EditorView) {
+    this.paper = resolvePaperCaretScroller(this.view.dom)
     this.view.scrollDOM.addEventListener('scroll', this.onEditorLayerScroll)
+    this.paper?.addEventListener('scroll', this.onPaperScroll, { passive: true })
   }
 
   private holdFling = () => {
-    const tick = tickPaperEditorScrollHold(this.view.dom, this.flingFrames)
+    const tick = tickPaperViewportEditorScrollHold(
+      resolvePaperCaretScroller(this.view.dom) ?? this.paper,
+      this.flingFrames,
+    )
     this.flingFrames = tick.remainingFrames
     this.flingId = this.flingFrames > 0 ? requestAnimationFrame(this.holdFling) : 0
   }
 
-  private onEditorLayerScroll = () => {
-    lockPaperEditorLayerScroll(this.view.dom)
+  private stayPut = (paper: HTMLElement | null) => {
+    lockPaperViewportScrollStayPut(paper)
     this.flingFrames = PAPER_EDITOR_FLING_HOLD_FRAMES
     if (!this.flingId) this.flingId = requestAnimationFrame(this.holdFling)
-    this.view.requestMeasure({
-      key: 'fanotes-paper-caret-scroll',
-      read: (view) => view.coordsAtPos(view.state.selection.main.head),
-      write: (caret, view) => {
-        lockPaperEditorScrollIfNeeded(view.dom, caret)
-      },
-    })
+  }
+
+  private onEditorLayerScroll = () => {
+    this.stayPut(resolvePaperCaretScroller(this.view.dom) ?? this.paper)
+  }
+
+  private onPaperScroll = () => {
+    this.stayPut(this.paper)
   }
 
   update(update: ViewUpdate) {
-    if (!update.docChanged && !update.selectionSet && !update.geometryChanged) return
+    const paper = resolvePaperCaretScroller(update.view.dom) ?? this.paper
+    if (paper && paper !== this.paper) {
+      this.paper?.removeEventListener('scroll', this.onPaperScroll)
+      this.paper = paper
+      this.paper.addEventListener('scroll', this.onPaperScroll, { passive: true })
+    }
+    lockPaperViewportScrollStayPut(paper)
+    if (!update.docChanged && !update.selectionSet) return
     update.view.requestMeasure({
       key: 'fanotes-paper-caret',
       read: (view) => view.coordsAtPos(view.state.selection.main.head),
@@ -1010,6 +1024,7 @@ const paperCaretLock = ViewPlugin.fromClass(class {
   destroy() {
     if (this.flingId) cancelAnimationFrame(this.flingId)
     this.view.scrollDOM.removeEventListener('scroll', this.onEditorLayerScroll)
+    this.paper?.removeEventListener('scroll', this.onPaperScroll)
   }
 })
 

@@ -160,6 +160,34 @@ export const lockPaperViewportEditorScroll = (paperScroller: HTMLElement | null)
   return locked
 }
 
+/**
+ * Fast paper-viewport pan: zero independent editor-layer scroll on every tick.
+ * Do not follow the caret — that fights a burst of pan jumps and shifts glyphs.
+ */
+export const lockPaperViewportScrollStayPut = (
+  paperScroller: HTMLElement | null,
+  requested?: { scrollTop?: number; scrollLeft?: number },
+) => {
+  if (!paperScroller) {
+    return {
+      paperScroller: null,
+      lockedLayers: [] as HTMLElement[],
+      paperScrollTop: 0,
+      paperScrollLeft: 0,
+    }
+  }
+  if (requested && Number.isFinite(requested.scrollTop)) paperScroller.scrollTop = requested.scrollTop as number
+  if (requested && Number.isFinite(requested.scrollLeft)) paperScroller.scrollLeft = requested.scrollLeft as number
+  const viewportLocked = lockPaperViewportEditorScroll(paperScroller)
+  const locked = viewportLocked.length ? viewportLocked : lockPaperEditorLayerScroll(paperScroller)
+  return {
+    paperScroller,
+    lockedLayers: locked,
+    paperScrollTop: paperScroller.scrollTop,
+    paperScrollLeft: paperScroller.scrollLeft,
+  }
+}
+
 export const keepCaretVisibleInPaperScroller = (
   scroller: HTMLElement,
   caret: { top: number; bottom: number; left: number; right: number },
