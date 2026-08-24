@@ -14,6 +14,15 @@ const {
   sheetLayerOriginOffset,
 } = await server.ssrLoadModule('/src/lib/paperView.ts')
 const {
+  keepCaretVisibleInPaperScroller,
+  lockPaperEditorLayerScroll,
+  lockPaperEditorScrollBurst,
+  lockPaperEditorScrollIfNeeded,
+  lockPaperViewportEditorScroll,
+  lockPaperViewportScrollBurst,
+  PAPER_EDITOR_FLING_HOLD_FRAMES,
+} = await server.ssrLoadModule('/src/lib/paperCaretScroll.ts')
+const {
   PAPER_SOURCE_HEIGHT,
   PAGE_GROW_STEP_HEIGHT,
   WRITE_SLACK_HEIGHT,
@@ -71,6 +80,10 @@ const makeNode = (className) => {
     layoutHeight: 1273,
     contentLeft: 40,
     contentTop: 20,
+    scrollTop: 0,
+    scrollLeft: 0,
+    clientWidth: 400,
+    clientHeight: 300,
     matches(selector) {
       return [...tokenSet(selector)].some((name) => this.classList.contains(name))
     },
@@ -95,11 +108,24 @@ const makeNode = (className) => {
     },
     getBoundingClientRect() {
       const zoom = this.classList.contains('paper-view') ? 1 : readUsedSheetZoom(this)
+      const paper = this.closest('.paper-view') ?? this.closest('.unified-note-view')
+      const isScroller = this.classList.contains('paper-view') || this.classList.contains('unified-note-view')
+      const paperScroll = paper && paper !== this ? (paper.scrollTop ?? 0) : 0
+      const ownScroll = (
+        this.classList.contains('cm-scroller')
+        || this.classList.contains('markdown-editor')
+        || this.classList.contains('editor-pane')
+        || this.classList.contains('cm-editor')
+      ) ? (this.scrollTop ?? 0) : 0
+      const width = isScroller ? this.clientWidth : this.layoutWidth * zoom
+      const height = isScroller ? this.clientHeight : this.layoutHeight * zoom
       return {
-        left: this.contentLeft,
-        top: this.contentTop,
-        width: this.layoutWidth * zoom,
-        height: this.layoutHeight * zoom,
+        left: this.contentLeft - (isScroller ? 0 : (paper?.scrollLeft ?? 0)),
+        top: this.contentTop - paperScroll - ownScroll,
+        width,
+        height,
+        right: this.contentLeft - (isScroller ? 0 : (paper?.scrollLeft ?? 0)) + width,
+        bottom: this.contentTop - paperScroll - ownScroll + height,
       }
     },
   }
@@ -117,7 +143,9 @@ try {
   const plane = append(noteView, makeNode('paper-sheet-plane'))
   const paper = append(plane, makeNode('unified-paper'))
   const ruling = append(paper, makeNode('paper-ruling'))
-  const editor = append(paper, makeNode('editor-pane markdown-editor'))
+  const pane = append(paper, makeNode('editor-pane'))
+  const editor = append(pane, makeNode('markdown-editor paper-mode'))
+  const cmScroller = append(editor, makeNode('cm-scroller'))
   const ink = append(paper, makeNode('lw-drawing-board lw-canvas-surface'))
   editor.style.zoom = '1'
   ink.style.transform = 'scale(1)'
@@ -164,7 +192,97 @@ try {
     assert.equal(after.plane, before.plane, 'grow must not change the paper camera')
   }
 
-  console.log(JSON.stringify({ atOne: measure(1), atTwo: measure(2) }))
+  const originBefore = sheetLayerOriginOffset(editor, ruling)
+  cmScroller.scrollTop = 96
+  editor.scrollTop = 40
+  pane.scrollTop = 18
+  noteView.scrollTop = 0
+  assert.ok(Math.abs(sheetLayerOriginOffset(editor, ruling).y - originBefore.y) > 1, 'independent editor scroll would drift type off the ruling')
+  lockPaperEditorLayerScroll(editor)
+  assert.equal(cmScroller.scrollTop, 0)
+  assert.equal(editor.scrollTop, 0)
+  assert.equal(pane.scrollTop, 0)
+  assert.equal(noteView.scrollTop, 0, 'zeroing the editor layer must not move the paper scroller')
+  const originLocked = sheetLayerOriginOffset(editor, ruling)
+  assert.equal(originLocked.x, originBefore.x)
+  assert.equal(originLocked.y, originBefore.y)
+
+  cmScroller.scrollTop = 70
+  editor.scrollTop = 22
+  const caret = { top: 360, bottom: 378, left: 80, right: 82 }
+  lockPaperEditorScrollIfNeeded(editor, caret)
+  assert.equal(cmScroller.scrollTop, 0)
+  assert.equal(editor.scrollTop, 0)
+  assert.ok(noteView.scrollTop > 0, 'caret keep-visible may move only the paper scroller')
+  const originCaret = sheetLayerOriginOffset(editor, ruling)
+  assert.equal(originCaret.x, originBefore.x)
+  assert.equal(originCaret.y, originBefore.y)
+
+  cmScroller.scrollTop = 55
+  editor.scrollTop = 16
+  pane.scrollTop = 9
+  const paperTop = noteView.scrollTop
+  lockPaperViewportEditorScroll(noteView)
+  assert.equal(cmScroller.scrollTop, 0)
+  assert.equal(editor.scrollTop, 0)
+  assert.equal(pane.scrollTop, 0)
+  assert.equal(noteView.scrollTop, paperTop, 'paper viewport scroll stays; only editor layers are zeroed')
+  keepCaretVisibleInPaperScroller(noteView, caret)
+  const originPaper = sheetLayerOriginOffset(editor, ruling)
+  assert.equal(originPaper.x, originBefore.x)
+  assert.equal(originPaper.y, originBefore.y)
+
+  const paperTopBeforeBurst = noteView.scrollTop
+  const burst = lockPaperEditorScrollBurst(editor, [
+    { scrollTop: 180, scrollLeft: 24 },
+    { scrollTop: 240, scrollLeft: 40 },
+    { scrollTop: 310, scrollLeft: 12 },
+    { scrollTop: 90, scrollLeft: 8 },
+    { scrollTop: 400, scrollLeft: 60 },
+  ])
+  assert.ok(burst.length >= 5 + PAPER_EDITOR_FLING_HOLD_FRAMES - 5)
+  for (const sample of burst) {
+    assert.equal(sample.editorTop, 0)
+    assert.ok(sample.layerTops.every((top) => top === 0), 'every nested editor layer is origin after a fast pulse')
+  }
+  assert.equal(cmScroller.scrollTop, 0)
+  assert.equal(editor.scrollTop, 0)
+  assert.equal(pane.scrollTop, 0)
+  assert.equal(noteView.scrollTop, paperTopBeforeBurst, 'fast editor-layer burst must not pan via nested scroll')
+  const originBurst = sheetLayerOriginOffset(editor, ruling)
+  assert.equal(originBurst.x, originBefore.x)
+  assert.equal(originBurst.y, originBefore.y)
+
+  cmScroller.scrollTop = 12
+  const viewportBurst = lockPaperViewportScrollBurst(noteView, [
+    { scrollTop: 150 },
+    { scrollTop: 220 },
+    { scrollTop: 70 },
+  ])
+  for (const sample of viewportBurst) {
+    assert.equal(sample.paperTop, paperTopBeforeBurst)
+    assert.ok(sample.layerTops.every((top) => top === 0))
+  }
+  assert.equal(cmScroller.scrollTop, 0)
+  assert.equal(sheetLayerOriginOffset(editor, ruling).y, originBefore.y)
+
+  const { readFileSync } = await import('node:fs')
+  const { dirname, join } = await import('node:path')
+  const { fileURLToPath } = await import('node:url')
+  const viewSource = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'src/components/PaperView.tsx'), 'utf8')
+  const editorSource = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'src/components/MarkdownEditor.tsx'), 'utf8')
+  assert.match(viewSource, /lockPaperViewportEditorScroll/)
+  assert.match(viewSource, /tickPaperViewportEditorScrollHold/)
+  assert.match(editorSource, /lockPaperEditorLayerScroll\(this\.view\.dom\)/)
+  assert.match(editorSource, /tickPaperEditorScrollHold/)
+  assert.match(editorSource, /PAPER_EDITOR_FLING_HOLD_FRAMES/)
+
+  console.log(JSON.stringify({
+    atOne: measure(1),
+    atTwo: measure(2),
+    originLocked,
+    paperScrollTop: noteView.scrollTop,
+  }))
   console.log('text-stay-put ok')
 } finally {
   await server.close()

@@ -42,6 +42,13 @@ const runOnce = () => {
   assert.ok(Math.abs(ink.x - sampleX) < 0.02, `sheet x ${ink.x} must stay at the pointer`)
   assert.ok(Math.abs(ink.y - sampleY) < 0.02, `sheet y ${ink.y} must stay at the pointer`)
   assert.ok(ink.y > 0.2 && ink.y < 0.4)
+  const past = mapClientToPaperPoint({
+    clientX: surface.left + surface.width + 24,
+    clientY: surface.top + surface.height + 24,
+    pressure: 0.5,
+    pointerType: 'pen',
+  }, surface)
+  assert.ok(past && past.x > 1 && past.y > 1, 'handwriting past the current sheet still maps')
 
   const prevH = PAPER_SOURCE_HEIGHT
   const start = { x: 0.42, y: 0.94 }

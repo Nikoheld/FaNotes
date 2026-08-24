@@ -31,6 +31,8 @@ const {
   writePageSurface,
   writeSurfaceIsPage,
 } = await server.ssrLoadModule('/src/lib/noteCanvas.ts')
+const { mapClientToPaperPoint } = await server.ssrLoadModule('/src/lib/inkSampleMap.ts')
+const { growLiveInkAndMapNext } = await server.ssrLoadModule('/src/lib/paperGrow.ts')
 
 const runOnce = () => {
   assert.ok(SCROLL_ROOM > WRITE_MARGIN_Y, 'extra pan room is more than the write margin')
@@ -145,6 +147,65 @@ const runOnce = () => {
   const pastRight = mapClientToPage(canvasBox.left + page.width + 40, canvasBox.top + 80, canvasBox)
   assert.ok(pastRight && pastRight.x > 1, 'a sample past the current edge maps outside 0–1 so the page can grow')
 
+  const hitBox = { ...canvasBox, offsetWidth: page.width, offsetHeight: page.height }
+  const samplePast = (clientX, clientY) => mapClientToPaperPoint(
+    { clientX, clientY, pressure: 0.55, pointerType: 'pen' },
+    hitBox,
+  )
+  const pastRightHit = samplePast(canvasBox.left + page.width + 36, canvasBox.top + 200)
+  const pastBottomHit = samplePast(canvasBox.left + 200, canvasBox.top + page.height + 48)
+  const pastLeftHit = samplePast(canvasBox.left - 40, canvasBox.top + 200)
+  const pastTopHit = samplePast(canvasBox.left + 200, canvasBox.top - 32)
+  assert.ok(pastRightHit && Number.isFinite(pastRightHit.x), 'pen past the right edge is not dropped')
+  assert.ok(pastRightHit.x > 1)
+  assert.ok(pastBottomHit && Number.isFinite(pastBottomHit.y) && pastBottomHit.y > 1, 'pen past the bottom edge is not dropped')
+  assert.ok(pastLeftHit && Number.isFinite(pastLeftHit.x) && pastLeftHit.x < 0, 'pen past the left edge is not dropped')
+  assert.ok(pastTopHit && Number.isFinite(pastTopHit.y) && pastTopHit.y < 0, 'pen past the top edge is not dropped')
+  const grownRight = growPageFromMark(page, { x: pastRightHit.x, y: 0.5 })
+  const grownBottom = growPageFromMark(page, { x: 0.5, y: pastBottomHit.y })
+  const grownLeft = growPageFromMark(page, { x: pastLeftHit.x, y: 0.5 })
+  const grownTop = growPageFromMark(page, { x: 0.5, y: pastTopHit.y })
+  assert.ok(grownRight.width > page.width)
+  assert.ok(grownBottom.height > page.height)
+  assert.ok(grownLeft.padX > 0 && grownLeft.width > page.width)
+  assert.ok(grownTop.padY > 0 && grownTop.height > page.height)
+  const grownRightAgain = growPageFromMark(
+    { width: grownRight.width, height: grownRight.height },
+    { x: pastRightHit.x, y: 0.5 },
+  )
+  assert.ok(grownRightAgain.width > grownRight.width, 'repeating a far-edge mark grows again')
+  const midLast = { x: 0.94, y: 0.5, t: 20, pressure: 0.5, tiltX: 0, tiltY: 0, pointerType: 'pen' }
+  const grownHit = {
+    left: canvasBox.left,
+    top: canvasBox.top,
+    width: grownRight.width,
+    height: page.height,
+    offsetWidth: grownRight.width,
+    offsetHeight: page.height,
+  }
+  const midNext = growLiveInkAndMapNext(
+    midLast,
+    page.height,
+    page.height,
+    { type: 'pointermove', clientX: canvasBox.left + page.width + 36, clientY: canvasBox.top + 0.5 * page.height, pressure: 0.5, pointerType: 'pen' },
+    grownHit,
+    0,
+    page.height,
+    page.height,
+    page.width,
+    grownRight.width,
+    page.width,
+    grownRight.width,
+  )
+  assert.ok(midNext.next, 'mid-stroke sample past the old edge still maps')
+  assert.equal(midNext.jumped, false, 'after grow the stroke stays continuous')
+  assert.ok(Math.abs(midNext.next.x - midNext.last.x) < 0.12, 'next sample stays continuous with the remapped last point')
+  const midStay = keepMarkOnPage(0.2, page.width, grownRight.width, grownRight.padX)
+  assert.ok(
+    Math.abs(markPagePosition(midStay, grownRight.width) - grownRight.padX - 0.2 * page.width) < 1e-6,
+    'existing marks stay put when a past-edge write grows the page',
+  )
+
   const board = readFileSync(join(root, 'src/components/DrawingBoard.tsx'), 'utf8')
   const paperView = readFileSync(join(root, 'src/components/PaperView.tsx'), 'utf8')
   const css = readFileSync(join(root, 'src/styles.css'), 'utf8')
@@ -177,6 +238,15 @@ const runOnce = () => {
   )
   assert.match(extentBlock, /--ink-page-width/)
   assert.match(extentBlock, /width:\s*max\(100%,\s*var\(--ink-page-width/)
+  assert.match(board, /\.lw-drawing-board\.is-inline \.lw-canvas-surface\{[^}]*inset:0/)
+  assert.doesNotMatch(
+    board,
+    /\.lw-drawing-board\.is-inline \.lw-canvas-surface\{[^}]*inset:var\(--paper-scroll-room/,
+    'hit overlay must cover extra paper, not shrink back to the current sheet',
+  )
+  assert.match(board, /ensureWriteRoom\(point\.y, point\.x\)/)
+  assert.match(board, /continueStrokeAfterExtentGrow\(lastSnapshot/)
+  assert.doesNotMatch(board, /start\.firstPoint\.x < 0/)
 
   return {
     firstHeight: first.height,

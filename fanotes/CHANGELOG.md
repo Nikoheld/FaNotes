@@ -2,6 +2,10 @@
 
 ## Unveröffentlicht
 
+## 2026.8.63
+
+- **Text bleibt beim schnellen Scrollen stehen:** Auch wenn du das Blatt schnell schwenkst, bleibt die Schrift auf den Linien. Nur das Blatt bewegt sich — der Text rutscht nicht mehr mit.
+
 ## 2026.8.62
 
 - **Blatt wächst mit dem Stift:** Schreiben ganz rechts oder unten macht das Blatt weiter als das Fenster. Vorhandene Schrift bleibt stehen. Der Editor bleibt beim Tippen und Scrollen stabil.

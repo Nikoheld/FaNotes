@@ -1,6 +1,14 @@
-import { isInkCorridorLeap, mapClientToPaperPoint, type InkPointerLike, type MappedInkPoint, type PaperSurfaceBox } from './inkSampleMap'
+import {
+  classifyInkJumpAppend,
+  isInkCorridorLeap,
+  mapClientToPaperPoint,
+  type InkPointerLike,
+  type MappedInkPoint,
+  type PaperSurfaceBox,
+} from './inkSampleMap'
 import {
   growWriteExtent,
+  keepMarkOnPage,
   PAPER_SOURCE_WIDTH,
   WRITE_SLACK_HEIGHT,
 } from './noteCanvas'
@@ -275,6 +283,39 @@ export const resolvePaintedLayoutGrow = (input: {
   }
 }
 
+export type WritePageExtent = {
+  width: number
+  height: number
+  padX?: number
+  padY?: number
+}
+
+/**
+ * Live markdown append path. `last` must be the pre-grow snapshot — not the
+ * live stroke point after setPageExtent already ran keepMarkOnPage on it.
+ */
+export const continueStrokeAfterExtentGrow = (
+  last: { x: number; y: number } | null | undefined,
+  current: { x: number; y: number },
+  prev: WritePageExtent,
+  next: WritePageExtent,
+  existingCount: number,
+) => {
+  const padX = Math.max(0, next.padX ?? 0)
+  const padY = Math.max(0, next.padY ?? 0)
+  const remap = (point: { x: number; y: number }) => ({
+    x: keepMarkOnPage(point.x, prev.width, next.width, padX),
+    y: keepMarkOnPage(point.y, prev.height, next.height, padY),
+  })
+  const remappedLast = last ? { ...last, ...remap(last) } : null
+  const remappedCurrent = { ...current, ...remap(current) }
+  return {
+    last: remappedLast,
+    current: remappedCurrent,
+    action: classifyInkJumpAppend(remappedLast, remappedCurrent, existingCount),
+  }
+}
+
 export const growLiveInkAndMapNext = (
   lastPoint: MappedInkPoint,
   prevHeight: number,
@@ -307,7 +348,10 @@ export const growLiveInkAndMapNext = (
   }
 }
 
-/** Skip source grow when the painted sheet is already taller/wider than the wanted extent. */
+/**
+ * PDF overlays can already be taller than A4 source. Markdown write-page grow
+ * uses growPageFromMark, which must not consult CSS fill.
+ */
 export const neededSourceExtentAgainstPainted = (
   wantedExtent: number,
   currentSource: number,

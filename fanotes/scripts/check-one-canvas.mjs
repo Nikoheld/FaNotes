@@ -51,6 +51,11 @@ const runOnce = () => {
   )
   assert.ok(bottomOuter, 'bottom of the write page is writable')
   assert.ok(bottomOuter.y > 0.9 && bottomOuter.y <= 1.05, `bottom sample is on the page, got ${bottomOuter.y}`)
+  const pastPage = mapClientToPaperPoint(
+    { clientX: canvasBox.left + page.width + 28, clientY: canvasBox.top + page.height + 28, pressure: 0.5, pointerType: 'pen' },
+    { ...canvasBox, offsetWidth: page.width, offsetHeight: page.height },
+  )
+  assert.ok(pastPage && pastPage.x > 1 && pastPage.y > 1, 'a sample just beyond the sheet still maps')
 
   const below = mapClientToPage(canvasBox.left + 40, canvasBox.top + 800 + 80, canvasBox)
   assert.ok(below && below.y > 0 && below.y < 1)

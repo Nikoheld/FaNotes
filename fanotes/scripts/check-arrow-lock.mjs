@@ -13,6 +13,9 @@ const {
   handlePaperEditorScroll,
   isIndependentEditorLayer,
   lockPaperEditorScrollIfNeeded,
+  lockPaperEditorScrollBurst,
+  lockPaperViewportEditorScroll,
+  lockPaperViewportScrollBurst,
   resolvePaperCaretScroller,
 } = await server.ssrLoadModule('/src/lib/paperCaretScroll.ts')
 const { sheetLayerOriginOffset } = await server.ssrLoadModule('/src/lib/paperView.ts')
@@ -167,6 +170,34 @@ try {
   assert.equal(duringUpdate, true, 'scrollHandler must swallow scroll even when layout reads are forbidden')
   assert.equal(cmScroller.scrollTop, 0, 'forbidden layout read still zeros the editor layer')
   assert.equal(deferred, 1, 'layout read is deferred off the ViewUpdate path')
+
+  cmScroller.scrollTop = 33
+  editor.scrollTop = 11
+  const paperTop = paper.scrollTop
+  lockPaperViewportEditorScroll(paper)
+  assert.equal(cmScroller.scrollTop, 0)
+  assert.equal(editor.scrollTop, 0)
+  assert.equal(paper.scrollTop, paperTop)
+
+  const originBurstBefore = sheetLayerOriginOffset(editor, ruling)
+  const burst = lockPaperEditorScrollBurst(editor, [
+    { scrollTop: 120 },
+    { scrollTop: 200 },
+    { scrollTop: 80 },
+    { scrollTop: 260 },
+  ])
+  for (const sample of burst) {
+    assert.equal(sample.editorTop, 0)
+    assert.ok(sample.layerTops.every((top) => top === 0))
+  }
+  assert.equal(cmScroller.scrollTop, 0)
+  assert.equal(editor.scrollTop, 0)
+  const originBurst = sheetLayerOriginOffset(editor, ruling)
+  assert.equal(originBurst.x, originBurstBefore.x)
+  assert.equal(originBurst.y, originBurstBefore.y)
+  const viewportBurst = lockPaperViewportScrollBurst(paper, [{ scrollTop: 90 }, { scrollTop: 140 }])
+  assert.ok(viewportBurst.every((sample) => sample.layerTops.every((top) => top === 0)))
+  assert.equal(paper.scrollTop, paperTop)
 
   console.log(JSON.stringify({ before, paperScrollAfterDown: true, editorLocked: true, scrollHandler: true }))
   console.log('arrow-lock ok')

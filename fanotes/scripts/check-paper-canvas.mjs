@@ -70,6 +70,20 @@ const runOnce = () => {
     pointerType: 'pen',
   }, sheetBox)
   assert.ok(pastTop && pastTop.y < 0, 'above the page is extra paper')
+  const pastRight = mapClientToSheet({
+    clientX: sheetBox.left + sheetBox.width + 40,
+    clientY: sheetBox.top + 200,
+    pressure: 0.55,
+    pointerType: 'pen',
+  }, sheetBox)
+  assert.ok(pastRight && pastRight.x > 1, 'right of the page is extra paper that can grow the page')
+  const pastBottom = mapClientToSheet({
+    clientX: sheetBox.left + 200,
+    clientY: sheetBox.top + sheetBox.height + 40,
+    pressure: 0.55,
+    pointerType: 'pen',
+  }, sheetBox)
+  assert.ok(pastBottom && pastBottom.y > 1, 'below the page is extra paper')
 
   const leftGrow = growSheetFromInk(0.02, 0.5, 900, 1273)
   assert.ok(leftGrow.padX > 0)

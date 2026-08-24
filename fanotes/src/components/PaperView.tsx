@@ -32,6 +32,11 @@ import {
   type PaperViewSnapshot,
 } from '../lib/paperView'
 import { SCROLL_ROOM, clampCanvasScroll, paperScrollBoundsFromVisualRect } from '../lib/noteCanvas'
+import {
+  lockPaperViewportEditorScroll,
+  PAPER_EDITOR_FLING_HOLD_FRAMES,
+  tickPaperViewportEditorScrollHold,
+} from '../lib/paperCaretScroll'
 
 export type PaperViewApi = PaperViewSnapshot & {
   zoomBy: (delta: number, originClient?: { x: number; y: number }) => void
@@ -85,7 +90,17 @@ export function PaperView({ children, className = '', viewKey, showHud = true }:
   useEffect(() => {
     const scroller = noteViewRef.current
     if (!scroller) return
+    let flingFrames = 0
+    let flingId = 0
+    const holdFling = () => {
+      const tick = tickPaperViewportEditorScrollHold(scroller, flingFrames)
+      flingFrames = tick.remainingFrames
+      flingId = flingFrames > 0 ? window.requestAnimationFrame(holdFling) : 0
+    }
     const clampScroll = () => {
+      lockPaperViewportEditorScroll(scroller)
+      flingFrames = PAPER_EDITOR_FLING_HOLD_FRAMES
+      if (!flingId) flingId = window.requestAnimationFrame(holdFling)
       const plane = scroller.querySelector<HTMLElement>('.paper-sheet-plane')
         ?? scroller.querySelector<HTMLElement>('.unified-paper')
       if (!plane) return
@@ -117,7 +132,10 @@ export function PaperView({ children, className = '', viewKey, showHud = true }:
       scroller.scrollTop = room
     }
     clampScroll()
-    return () => scroller.removeEventListener('scroll', clampScroll)
+    return () => {
+      scroller.removeEventListener('scroll', clampScroll)
+      if (flingId) window.cancelAnimationFrame(flingId)
+    }
   }, [viewKey])
 
   const setView = useCallback((next: Partial<PaperViewSnapshot>) => {

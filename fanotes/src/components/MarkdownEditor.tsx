@@ -55,8 +55,11 @@ import type { AppSettings, DetectedTextLanguage } from '../types'
 import { createTrailingValueScheduler, type TrailingValueScheduler } from '../lib/trailingValueScheduler'
 import {
   handlePaperEditorScroll,
+  lockPaperEditorLayerScroll,
   lockPaperEditorScrollIfNeeded,
+  PAPER_EDITOR_FLING_HOLD_FRAMES,
   resolvePaperCaretScroller,
+  tickPaperEditorScrollHold,
 } from '../lib/paperCaretScroll'
 import { revealDocumentLine } from '../lib/noteOutline'
 
@@ -967,11 +970,23 @@ const selectionDragAutoScroll = ViewPlugin.fromClass(class {
 })
 
 const paperCaretLock = ViewPlugin.fromClass(class {
+  private flingFrames = 0
+  private flingId = 0
+
   constructor(readonly view: EditorView) {
     this.view.scrollDOM.addEventListener('scroll', this.onEditorLayerScroll)
   }
 
+  private holdFling = () => {
+    const tick = tickPaperEditorScrollHold(this.view.dom, this.flingFrames)
+    this.flingFrames = tick.remainingFrames
+    this.flingId = this.flingFrames > 0 ? requestAnimationFrame(this.holdFling) : 0
+  }
+
   private onEditorLayerScroll = () => {
+    lockPaperEditorLayerScroll(this.view.dom)
+    this.flingFrames = PAPER_EDITOR_FLING_HOLD_FRAMES
+    if (!this.flingId) this.flingId = requestAnimationFrame(this.holdFling)
     this.view.requestMeasure({
       key: 'fanotes-paper-caret-scroll',
       read: (view) => view.coordsAtPos(view.state.selection.main.head),
@@ -993,6 +1008,7 @@ const paperCaretLock = ViewPlugin.fromClass(class {
   }
 
   destroy() {
+    if (this.flingId) cancelAnimationFrame(this.flingId)
     this.view.scrollDOM.removeEventListener('scroll', this.onEditorLayerScroll)
   }
 })

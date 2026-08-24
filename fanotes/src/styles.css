@@ -1267,8 +1267,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   background: transparent;
 }
 .unified-paper .markdown-editor, .unified-paper .markdown-editor .cm-editor { height: auto !important; min-height: 100%; overflow: visible; background: transparent; }
-.unified-paper .markdown-editor .cm-scroller { min-height: 100%; overflow: hidden !important; padding: 0; scrollbar-gutter: auto; background: transparent; }
-.markdown-editor.paper-mode .cm-scroller { overflow: hidden !important; }
+.unified-paper .markdown-editor .cm-scroller { min-height: 100%; overflow: hidden !important; padding: 0; scrollbar-gutter: auto; overscroll-behavior: auto; background: transparent; }
+.markdown-editor.paper-mode .cm-scroller { overflow: hidden !important; overscroll-behavior: auto; }
 .unified-paper .markdown-editor .cm-content { min-height: 0; padding: 78px clamp(52px, 8vw, 86px) var(--paper-write-slack); font-family: var(--editor-font); background: transparent; }
 .unified-paper .markdown-editor .cm-gutters { padding-top: 78px; background: color-mix(in srgb, #fff 82%, transparent); }
 .unified-paper.has-worksheet { min-height: calc(100% - 64px); padding-bottom: 24px; }

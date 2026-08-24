@@ -123,6 +123,7 @@ import {
   writeExtentFromContent,
 } from '../lib/noteCanvas'
 import {
+  continueStrokeAfterExtentGrow,
   growLiveInkAndMapNext,
   HAS_INK_EXTENT_CLASS,
   INK_WIDTH_ANCHOR_CLASS,
@@ -1589,9 +1590,9 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const pointFromEvent = useCallback((event: PointerEvent): StrokePoint | null => {
     const canvas = canvasRef.current
     const originEl = (inline
-      ? ((canvas?.closest('.lw-canvas-surface') as HTMLElement | null)
+      ? ((canvas?.closest('.unified-paper') as HTMLElement | null)
         ?? (surfaceRef.current)
-        ?? (canvas?.closest('.unified-paper') as HTMLElement | null))
+        ?? (canvas?.closest('.lw-canvas-surface') as HTMLElement | null))
       : null) ?? canvas
     if (!originEl) return null
     commitPendingGrowRemapRef.current(originEl.offsetWidth, originEl.offsetHeight)
@@ -2031,8 +2032,13 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       { width: paper?.offsetWidth ?? 0, height: paper?.offsetHeight ?? 0 },
     )
     if (grown.height > prevH || grown.width > prevW || grown.padX > 0 || grown.padY > 0) {
-      setPageExtent(grown.height, grown.width, grown.padX, grown.padY)
+      if (!setPageExtent(grown.height, grown.width, grown.padX, grown.padY)) return false
+      return {
+        prev: { width: prevW, height: prevH },
+        next: grown,
+      }
     }
+    return false
   }, [applyInkExtentStyles, resolvePaperElement, setPageExtent])
 
   const fitPageToInk = useCallback(() => {
@@ -2360,11 +2366,25 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     // Unusable/0,0 first — then remap live ink — then leap-filter. Leap
     // against the pre-grow last point would drop the next same-visual sample.
     if (!acceptUsableInkClient(event, surface, viewRotationRef.current)) return
-    const point = pointFromEvent(event)
+    let point = pointFromEvent(event)
     if (!point) return
     const live = activeStrokeRef.current
     const lastPoint = live?.points.at(-1) ?? null
-    const jump = classifyInkJumpAppend(lastPoint, point, live?.points.length ?? 0)
+    const existingCount = live?.points.length ?? 0
+    // Snapshot last before grow. setPageExtent keepMarkOnPage-mutates the
+    // live point; feeding that into continueStrokeAfterExtentGrow remaps it
+    // twice and the crossing sample is skipped again.
+    const lastSnapshot = lastPoint ? { x: lastPoint.x, y: lastPoint.y } : null
+    const grew = ensureWriteRoom(point.y, point.x)
+    const continued = grew
+      ? continueStrokeAfterExtentGrow(lastSnapshot, point, grew.prev, grew.next, existingCount)
+      : null
+    if (continued) {
+      point = { ...point, x: continued.current.x, y: continued.current.y }
+    }
+    const jump = continued
+      ? continued.action
+      : classifyInkJumpAppend(lastPoint, point, existingCount)
     if (jump === 'skip') return
     if (jump === 'restart' && live) {
       live.points.splice(0, 1, point)
@@ -2425,7 +2445,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       // Remeasuring mid-stroke freezes the UI and can drop pointerup.
       resizeDirtyRef.current = true
     }
-  }, [armShapeDwell, clearShapeDwellTimer, eraseAt, inline, paintActiveStrokeNow, pointFromEvent, scheduleRedraw, sourceHeight, sourceWidth])
+  }, [armShapeDwell, clearShapeDwellTimer, eraseAt, ensureWriteRoom, inline, paintActiveStrokeNow, pointFromEvent, scheduleRedraw, sourceHeight, sourceWidth])
 
   const commitPendingSolverTap = useCallback(() => {
     const pending = pendingSolverTapRef.current
@@ -2708,10 +2728,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         offsetHeight: originEl.offsetHeight,
       }
       : null
-    let start = resolveInkPointerDown(event.nativeEvent, surface, viewRotationRef.current)
-    if (inline && start.firstPoint && (start.firstPoint.x < 0 || start.firstPoint.y < 0)) {
-      start = { ...start, firstPoint: null, commitFirst: false }
-    }
+    const start = resolveInkPointerDown(event.nativeEvent, surface, viewRotationRef.current)
     if (!start.openStroke) {
       activePointerRef.current = null
       inkSessionRef.current = null
@@ -5791,9 +5808,9 @@ const drawingBoardStyles = `
 .lw-drawing-board.is-inline .lw-draw-workspace{position:absolute;inset:0;display:block;min-height:100%;padding:0;pointer-events:none}
 .lw-drawing-board.is-inline .lw-canvas-shell{position:absolute;inset:0;display:block;padding:0;border:0;border-radius:0;background:transparent;box-shadow:none;pointer-events:none}
 .lw-drawing-board.is-inline .lw-canvas-glow,.lw-drawing-board.is-inline .lw-canvas-meta{display:none}
-.lw-drawing-board.is-inline .lw-canvas-surface{position:absolute;inset:var(--paper-scroll-room, 0px);width:auto;height:auto;min-width:0;min-height:0;aspect-ratio:auto;margin:0;overflow:visible;border-radius:0;background:transparent;box-shadow:none;will-change:auto;pointer-events:none}
+.lw-drawing-board.is-inline .lw-canvas-surface{position:absolute;inset:0;width:auto;height:auto;min-width:0;min-height:0;aspect-ratio:auto;margin:0;overflow:visible;border-radius:0;background:transparent;box-shadow:none;will-change:auto;pointer-events:none}
 .lw-drawing-board.is-inline.is-input-active .lw-canvas-surface{pointer-events:auto}
-.lw-drawing-board.is-inline .lw-tablet-canvas{position:absolute;left:0;width:100%;height:100%;pointer-events:none}
+.lw-drawing-board.is-inline .lw-tablet-canvas{position:absolute;inset:var(--paper-scroll-room, 0px);left:auto;width:auto;height:auto;pointer-events:none}
 .lw-drawing-board.is-inline .lw-tablet-canvas.is-input-active{pointer-events:none}
 .lw-drawing-board.is-inline .lw-conversion-panel,.lw-conversion-panel.is-viewport-chrome{position:fixed;z-index:80;top:78px;right:16px;left:auto;float:none;width:min(370px,calc(100vw - 32px));max-height:calc(100vh - 175px);margin:0;overflow:auto;pointer-events:auto;box-shadow:0 22px 70px rgba(0,0,0,.34)}
 .lw-drawing-board.is-inline .lw-draw-notice,.lw-draw-notice.is-viewport-chrome{position:fixed;z-index:81;top:78px;left:50%;width:min(420px,calc(100vw - 28px));margin:0;transform:translateX(-50%);pointer-events:auto;box-shadow:0 13px 34px rgba(0,0,0,.24)}

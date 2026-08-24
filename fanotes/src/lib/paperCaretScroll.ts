@@ -21,18 +21,143 @@ export const isIndependentEditorLayer = (element: HTMLElement | null) => {
   )
 }
 
+const collectEditorScrollLayers = (editorRoot: HTMLElement) => {
+  const layers: HTMLElement[] = []
+  const seen = new Set<HTMLElement>()
+  const push = (layer: HTMLElement | null) => {
+    if (!layer || seen.has(layer)) return
+    if (layer.classList.contains('paper-view') || layer.classList.contains('unified-note-view')) return
+    seen.add(layer)
+    layers.push(layer)
+  }
+  push(editorRoot.closest('.editor-pane') as HTMLElement | null)
+  push(editorRoot.closest('.markdown-editor') as HTMLElement | null)
+  push(editorRoot)
+  editorRoot.querySelectorAll<HTMLElement>(EDITOR_LAYER_SCROLLER_SELECTOR).forEach((layer) => push(layer))
+  return layers
+}
+
 export const lockPaperEditorLayerScroll = (editorRoot: HTMLElement | null) => {
   if (!editorRoot) return [] as HTMLElement[]
-  const layers = [
-    editorRoot,
-    ...[...editorRoot.querySelectorAll<HTMLElement>(EDITOR_LAYER_SCROLLER_SELECTOR)],
-  ]
+  const layers = collectEditorScrollLayers(editorRoot)
   layers.forEach((layer) => {
-    if (layer.classList.contains('paper-view') || layer.classList.contains('unified-note-view')) return
     layer.scrollTop = 0
     layer.scrollLeft = 0
   })
-  return layers.filter((layer) => !layer.classList.contains('paper-view') && !layer.classList.contains('unified-note-view'))
+  return layers
+}
+
+/** Extra rAF locks after a fling so compositor momentum cannot leave glyphs offset. */
+export const PAPER_EDITOR_FLING_HOLD_FRAMES = 16
+
+export type NestedScrollPulse = {
+  scrollTop: number
+  scrollLeft?: number
+}
+
+export const tickPaperEditorScrollHold = (
+  editorRoot: HTMLElement | null,
+  remainingFrames: number,
+) => {
+  const layers = lockPaperEditorLayerScroll(editorRoot)
+  return {
+    layers,
+    remainingFrames: Math.max(0, remainingFrames - 1),
+  }
+}
+
+export const tickPaperViewportEditorScrollHold = (
+  paperScroller: HTMLElement | null,
+  remainingFrames: number,
+) => {
+  const layers = lockPaperViewportEditorScroll(paperScroller)
+  return {
+    layers,
+    remainingFrames: Math.max(0, remainingFrames - 1),
+  }
+}
+
+/**
+ * Fast-scroll case: compositor applies several nested scrollTops in a burst.
+ * Each pulse is locked immediately so only the paper scroller may stay offset.
+ */
+export const lockPaperEditorScrollBurst = (
+  editorRoot: HTMLElement | null,
+  pulses: readonly NestedScrollPulse[],
+) => {
+  if (!editorRoot) return [] as Array<{ editorTop: number; layerTops: number[] }>
+  const samples: Array<{ editorTop: number; layerTops: number[] }> = []
+  let remaining = PAPER_EDITOR_FLING_HOLD_FRAMES
+  for (const pulse of pulses) {
+    collectEditorScrollLayers(editorRoot).forEach((layer) => {
+      layer.scrollTop = pulse.scrollTop
+      layer.scrollLeft = pulse.scrollLeft ?? 0
+    })
+    const tick = tickPaperEditorScrollHold(editorRoot, remaining)
+    remaining = tick.remainingFrames
+    samples.push({
+      editorTop: editorRoot.scrollTop,
+      layerTops: tick.layers.map((layer) => layer.scrollTop),
+    })
+  }
+  while (remaining > 0) {
+    const tick = tickPaperEditorScrollHold(editorRoot, remaining)
+    remaining = tick.remainingFrames
+    samples.push({
+      editorTop: editorRoot.scrollTop,
+      layerTops: tick.layers.map((layer) => layer.scrollTop),
+    })
+  }
+  return samples
+}
+
+export const lockPaperViewportScrollBurst = (
+  paperScroller: HTMLElement | null,
+  pulses: readonly NestedScrollPulse[],
+) => {
+  if (!paperScroller) return [] as Array<{ paperTop: number; layerTops: number[] }>
+  const samples: Array<{ paperTop: number; layerTops: number[] }> = []
+  const paperTop = paperScroller.scrollTop
+  let remaining = PAPER_EDITOR_FLING_HOLD_FRAMES
+  for (const pulse of pulses) {
+    paperScroller.querySelectorAll<HTMLElement>(EDITOR_LAYER_SCROLLER_SELECTOR).forEach((layer) => {
+      if (!isIndependentEditorLayer(layer)) return
+      layer.scrollTop = pulse.scrollTop
+      layer.scrollLeft = pulse.scrollLeft ?? 0
+    })
+    const tick = tickPaperViewportEditorScrollHold(paperScroller, remaining)
+    remaining = tick.remainingFrames
+    samples.push({
+      paperTop: paperScroller.scrollTop,
+      layerTops: tick.layers.map((layer) => layer.scrollTop),
+    })
+  }
+  while (remaining > 0) {
+    const tick = tickPaperViewportEditorScrollHold(paperScroller, remaining)
+    remaining = tick.remainingFrames
+    samples.push({
+      paperTop: paperScroller.scrollTop,
+      layerTops: tick.layers.map((layer) => layer.scrollTop),
+    })
+  }
+  if (paperScroller.scrollTop !== paperTop) paperScroller.scrollTop = paperTop
+  return samples
+}
+
+/** Paper viewport scroll must not leave glyphs sliding in a nested editor scroller. */
+export const lockPaperViewportEditorScroll = (paperScroller: HTMLElement | null) => {
+  if (!paperScroller) return [] as HTMLElement[]
+  if (!paperScroller.classList.contains('paper-view') && !paperScroller.classList.contains('unified-note-view')) {
+    return [] as HTMLElement[]
+  }
+  const locked: HTMLElement[] = []
+  paperScroller.querySelectorAll<HTMLElement>(EDITOR_LAYER_SCROLLER_SELECTOR).forEach((layer) => {
+    if (!isIndependentEditorLayer(layer)) return
+    layer.scrollTop = 0
+    layer.scrollLeft = 0
+    locked.push(layer)
+  })
+  return locked
 }
 
 export const keepCaretVisibleInPaperScroller = (

@@ -92,24 +92,29 @@ export const mapClientToPaperPoint = (
   const paperW = Math.max(1, surface.offsetWidth ?? surface.width)
   const paperH = Math.max(1, surface.offsetHeight ?? surface.height)
   // Extra paper around the write page (matches noteCanvas.SCROLL_ROOM).
-  const hitRoomPx = SCROLL_ROOM * (surface.width / paperW)
-  const pad = Math.max(48, hitRoomPx)
+  // Samples just past the current 0–1 box must map, not return null —
+  // that null is the invisible handwriting wall.
+  const hitRoomX = SCROLL_ROOM * (surface.width / paperW)
+  const hitRoomY = SCROLL_ROOM * (surface.height / paperH)
+  const padX = Math.max(48, hitRoomX)
+  const padY = Math.max(48, hitRoomY)
   if (
-    event.clientX! < surface.left - pad
-    || event.clientX! > surface.left + surface.width + pad
-    || event.clientY! < surface.top - pad
-    || event.clientY! > surface.top + surface.height + pad
+    event.clientX! < surface.left - padX
+    || event.clientX! > surface.left + surface.width + padX
+    || event.clientY! < surface.top - padY
+    || event.clientY! > surface.top + surface.height + padY
   ) return null
 
   const visualX = (event.clientX! - surface.left) / surface.width
   const visualY = (event.clientY! - surface.top) / surface.height
   if (!Number.isFinite(visualX) || !Number.isFinite(visualY)) return null
-  const edgeSlop = Math.max(0.04, hitRoomPx / Math.max(1, surface.width))
+  const edgeSlopX = Math.max(0.04, padX / Math.max(1, surface.width))
+  const edgeSlopY = Math.max(0.04, padY / Math.max(1, surface.height))
   if (
-    visualX < -edgeSlop
-    || visualX > 1 + edgeSlop
-    || visualY < -edgeSlop
-    || visualY > 1 + edgeSlop
+    visualX < -edgeSlopX
+    || visualX > 1 + edgeSlopX
+    || visualY < -edgeSlopY
+    || visualY > 1 + edgeSlopY
   ) return null
 
   let paperLocalX = visualX * paperW

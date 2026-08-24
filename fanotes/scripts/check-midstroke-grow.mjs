@@ -9,7 +9,10 @@ const server = await createServer({
 })
 
 const {
+  continueStrokeAfterExtentGrow,
   growLiveInkAndMapNext,
+  growPageFromMark,
+  keepMarkOnPage,
   neededWriteExtent,
   pendingGrowScale,
   PAPER_SOURCE_HEIGHT,
@@ -19,7 +22,7 @@ const {
   WRITE_SLACK_HEIGHT,
   WRITE_SLACK_WIDTH,
 } = await server.ssrLoadModule('/src/lib/paperGrow.ts')
-const { classifyInkJumpAppend } = await server.ssrLoadModule('/src/lib/inkSampleMap.ts')
+const { classifyInkJumpAppend, INK_JUMP_HYPOT, mapClientToPaperPoint } = await server.ssrLoadModule('/src/lib/inkSampleMap.ts')
 
 try {
   const prevH = PAPER_SOURCE_HEIGHT
@@ -133,6 +136,35 @@ try {
   assert.equal(ready.ready, true)
   assert.ok(ready.scaleY < 1)
 
+  const page = { width: PAPER_SOURCE_WIDTH, height: PAPER_SOURCE_HEIGHT }
+  const liveLast = { x: 0.94, y: 0.5 }
+  const hitBox = { left: 40, top: 20, width: page.width, height: page.height, offsetWidth: page.width, offsetHeight: page.height }
+  const crossing = mapClientToPaperPoint(
+    { clientX: hitBox.left + page.width + 80, clientY: hitBox.top + 0.5 * page.height, pressure: 0.55, pointerType: 'pen' },
+    hitBox,
+  )
+  assert.ok(crossing && crossing.x > 1, 'sample past the old right edge must map')
+  const grown = growPageFromMark(page, { x: crossing.x, y: crossing.y })
+  assert.ok(grown.width > page.width, 'that sample must grow the write page')
+  assert.equal(
+    classifyInkJumpAppend(liveLast, crossing, 4),
+    'skip',
+    'leap-filter against the unremapped crossing sample would kill the stroke',
+  )
+  assert.ok(Math.hypot(crossing.x - liveLast.x, crossing.y - liveLast.y) > INK_JUMP_HYPOT)
+  const lastSnapshot = { x: liveLast.x, y: liveLast.y }
+  liveLast.x = keepMarkOnPage(liveLast.x, page.width, grown.width, grown.padX)
+  liveLast.y = keepMarkOnPage(liveLast.y, page.height, grown.height, grown.padY)
+  assert.ok(liveLast.x < lastSnapshot.x, 'setPageExtent mutates last in place')
+  const doubled = continueStrokeAfterExtentGrow(liveLast, crossing, page, grown, 4)
+  assert.equal(doubled.action, 'skip', 'feeding the already-mutated last remaps it twice and skips')
+  const continued = continueStrokeAfterExtentGrow(lastSnapshot, crossing, page, grown, 4)
+  assert.equal(continued.action, 'append', 'append only when last is remapped once from the pre-grow snapshot')
+  assert.ok(continued.last && continued.last.x < lastSnapshot.x)
+  assert.ok(Math.abs(continued.last.x - liveLast.x) < 1e-9, 'one remap matches setPageExtent')
+  assert.ok(continued.current.x < crossing.x)
+  assert.ok(Math.hypot(continued.current.x - continued.last.x, continued.current.y - continued.last.y) < INK_JUMP_HYPOT)
+
   const { readFileSync } = await import('node:fs')
   const { dirname, join } = await import('node:path')
   const { fileURLToPath } = await import('node:url')
@@ -140,9 +172,11 @@ try {
   const appendAt = board.indexOf('const appendPointerEvent = useCallback')
   assert.ok(appendAt >= 0)
   const usableAt = board.indexOf('acceptUsableInkClient', appendAt)
-  const remapAt = board.indexOf('const point = pointFromEvent(event)', appendAt)
-  const jumpAt = board.indexOf('classifyInkJumpAppend(lastPoint, point', appendAt)
-  assert.ok(usableAt >= 0 && remapAt > usableAt && jumpAt > remapAt, 'board must gate, remap, then leap-filter')
+  const snapshotAt = board.indexOf('lastSnapshot', appendAt)
+  const growAt = board.indexOf('ensureWriteRoom(point.y, point.x)', appendAt)
+  const continueAt = board.indexOf('continueStrokeAfterExtentGrow(lastSnapshot', appendAt)
+  assert.ok(usableAt >= 0 && snapshotAt > usableAt && growAt > snapshotAt && continueAt > growAt, 'appendPointerEvent must snapshot last, grow, then continueStrokeAfterExtentGrow(lastSnapshot)')
+  assert.match(board, /return \{\s*prev: \{ width: prevW, height: prevH \},\s*next: grown,\s*\}/)
   assert.equal(board.includes('acceptNextCommittedInkSample'), false)
 
   console.log(JSON.stringify({
