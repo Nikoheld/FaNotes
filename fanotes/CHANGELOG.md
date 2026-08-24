@@ -2,6 +2,10 @@
 
 ## Unveröffentlicht
 
+## 2026.8.65
+
+- **Reinzoomen verschiebt die Schrift nicht mehr:** Beim Hineinzoomen bleibt die Schrift genau dort, wo du sie geschrieben hast. Tinte und Linien bleiben zusammen — der Schreibpunkt rutscht nicht aus dem Bild.
+
 ## 2026.8.64
 
 - **Schnell scrollen verschiebt den Text nicht mehr:** Beim schnellen Schwenken bleibt die Schrift auf den Linien. Nur das Blatt bewegt sich — der Editor zieht den Text nicht hinter dem Caret her.

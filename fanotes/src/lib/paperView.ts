@@ -1,3 +1,6 @@
+import { clampCanvasScroll, paperScrollBoundsFromVisualRect } from './noteCanvas'
+import { lockPaperViewportScrollStayPut } from './paperCaretScroll'
+
 export const VIEW_ZOOM_MIN = 0.45
 export const VIEW_ZOOM_MAX = 3.25
 export const VIEW_ZOOM_MAX_PERCENT_MIN = 50
@@ -245,6 +248,9 @@ type PaperAnchor = {
   clientY: number
   relX: number
   relY: number
+  localX: number
+  localY: number
+  zoom: number
 }
 
 /** Remember the paper point under the cursor before CSS zoom changes layout. */
@@ -257,19 +263,24 @@ export const capturePaperAnchor = (
   const clientX = origin?.x ?? scrollerRect.left + scrollerRect.width / 2
   const clientY = origin?.y ?? scrollerRect.top + scrollerRect.height / 2
   const paperRect = paper?.getBoundingClientRect()
+  const zoom = Math.max(0.01, readUsedSheetZoom(paper))
   if (!paperRect || paperRect.width < 1 || paperRect.height < 1) {
-    return {
-      clientX,
-      clientY,
-      relX: scrollerRect.width > 0 ? (clientX - scrollerRect.left + scroller.scrollLeft) / Math.max(1, scroller.scrollWidth) : 0.5,
-      relY: scrollerRect.height > 0 ? (clientY - scrollerRect.top + scroller.scrollTop) / Math.max(1, scroller.scrollHeight) : 0.5,
-    }
+    const relX = scrollerRect.width > 0
+      ? (clientX - scrollerRect.left + scroller.scrollLeft) / Math.max(1, scroller.scrollWidth)
+      : 0.5
+    const relY = scrollerRect.height > 0
+      ? (clientY - scrollerRect.top + scroller.scrollTop) / Math.max(1, scroller.scrollHeight)
+      : 0.5
+    return { clientX, clientY, relX, relY, localX: relX, localY: relY, zoom }
   }
   return {
     clientX,
     clientY,
     relX: (clientX - paperRect.left) / paperRect.width,
     relY: (clientY - paperRect.top) / paperRect.height,
+    localX: (clientX - paperRect.left) / zoom,
+    localY: (clientY - paperRect.top) / zoom,
+    zoom,
   }
 }
 
@@ -278,10 +289,88 @@ export const restorePaperAnchor = (scroller: HTMLElement, paper: HTMLElement | n
   if (!paper) return
   const next = paper.getBoundingClientRect()
   if (next.width < 1 || next.height < 1) return
-  const pointX = next.left + anchor.relX * next.width
-  const pointY = next.top + anchor.relY * next.height
+  const used = Math.max(0.01, readUsedSheetZoom(paper))
+  // Map unzoomed local coords through the *used* camera zoom. Multiplying the
+  // post-zoom bounding width (relX * next.width) no-ops when layout is stale.
+  const pointX = next.left + anchor.localX * used
+  const pointY = next.top + anchor.localY * used
   scroller.scrollLeft += pointX - anchor.clientX
   scroller.scrollTop += pointY - anchor.clientY
+}
+
+/**
+ * Do not clamp away a just-restored camera. CSS zoom can leave scrollWidth
+ * stale while the visual sheet is already larger; shrinking then jumps writing.
+ */
+export const clampPaperScrollerToZoomedSheet = (
+  scroller: HTMLElement | null,
+  paper: HTMLElement | null,
+) => {
+  if (!scroller || !paper) return
+  const scrollerRect = scroller.getBoundingClientRect()
+  const sheetRect = paper.getBoundingClientRect()
+  const used = Math.max(0.01, readUsedSheetZoom(paper))
+  const visual = paperScrollBoundsFromVisualRect(sheetRect, {
+    left: scrollerRect.left,
+    top: scrollerRect.top,
+    scrollLeft: scroller.scrollLeft,
+    scrollTop: scroller.scrollTop,
+  })
+  const zoomedWidth = Math.max(sheetRect.width, (paper.offsetWidth || 0) * used)
+  const zoomedHeight = Math.max(sheetRect.height, (paper.offsetHeight || 0) * used)
+  const next = clampCanvasScroll(
+    { x: scroller.scrollLeft, y: scroller.scrollTop },
+    {
+      minX: 0,
+      minY: 0,
+      maxX: Math.max(
+        scroller.scrollWidth,
+        visual.maxX,
+        visual.minX + zoomedWidth,
+        scroller.scrollLeft + scroller.clientWidth,
+      ),
+      maxY: Math.max(
+        scroller.scrollHeight,
+        visual.maxY,
+        visual.minY + zoomedHeight,
+        scroller.scrollTop + scroller.clientHeight,
+      ),
+    },
+    { width: scroller.clientWidth, height: scroller.clientHeight },
+  )
+  if (next.x !== scroller.scrollLeft) scroller.scrollLeft = next.x
+  if (next.y !== scroller.scrollTop) scroller.scrollTop = next.y
+}
+
+/**
+ * One camera zoom: CSS zoom on the sheet plane, pan as native scroller offset.
+ * Capture the paper point under the origin, apply zoom, restore that point.
+ */
+export const applyPaperZoomStayPut = (
+  scroller: HTMLElement | null,
+  paper: HTMLElement | null,
+  view: PaperViewSnapshot,
+  nextZoom: number,
+  origin?: { x: number; y: number },
+  applyView?: (next: PaperViewSnapshot) => void,
+) => {
+  const zoom = clampViewZoom(nextZoom)
+  const next = zoomAroundPoint(view, zoom)
+  if (!scroller || next === view) {
+    return { view, anchor: null as PaperAnchor | null, zoom }
+  }
+  const sheet = resolvePaperViewTarget(paper, scroller)
+  lockPaperViewportScrollStayPut(scroller)
+  const anchor = capturePaperAnchor(scroller, sheet, origin)
+  if (applyView) applyView(next)
+  else applyPaperViewToElements(paper, scroller, next)
+  if (sheet) void sheet.offsetWidth
+  restorePaperAnchor(scroller, sheet, anchor)
+  lockPaperViewportScrollStayPut(scroller)
+  restorePaperAnchor(scroller, sheet, anchor)
+  clampPaperScrollerToZoomedSheet(scroller, sheet)
+  restorePaperAnchor(scroller, sheet, anchor)
+  return { view: next, anchor, zoom }
 }
 
 /** Keep the cursor (or viewport centre) on the same paper point after CSS zoom. */

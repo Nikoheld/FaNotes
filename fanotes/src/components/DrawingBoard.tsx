@@ -60,13 +60,12 @@ import {
   VIEW_ROTATE_STEP,
   VIEW_ZOOM_MIN,
   applyPaperViewToElements,
-  capturePaperAnchor,
+  applyPaperZoomStayPut,
   clampViewZoom,
   clearPaperViewFromElements,
   normalizeRotation,
   readSharedZoomMax,
   readSharedZoomSpeed,
-  restorePaperAnchor,
   zoomFactorFromWheel,
   zoomStepFromSpeed,
 } from '../lib/paperView'
@@ -2111,9 +2110,14 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     if (next === previous) return
     const surface = surfaceRef.current
     const scroller = surface?.parentElement
-    const anchor = scroller ? capturePaperAnchor(scroller, surface, originClient) : null
-    setView({ zoom: next, pan: { x: 0, y: 0 } })
-    if (scroller && surface && anchor) restorePaperAnchor(scroller, surface, anchor)
+    applyPaperZoomStayPut(
+      scroller,
+      surface,
+      { zoom: previous, rotation: viewRotationRef.current, pan: { x: 0, y: 0 } },
+      next,
+      originClient,
+      (view) => setView({ zoom: view.zoom, pan: { x: 0, y: 0 } }),
+    )
   }, [paperView, setView])
 
   const rotateBy = useCallback((delta: number) => {

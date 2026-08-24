@@ -13,7 +13,8 @@ import {
   VIEW_ROTATE_STEP,
   VIEW_ZOOM_MIN,
   applyPaperViewToElements,
-  capturePaperAnchor,
+  applyPaperZoomStayPut,
+  clampPaperScrollerToZoomedSheet,
   clampViewZoom,
   defaultPaperView,
   isPaperViewActive,
@@ -21,17 +22,15 @@ import {
   readSharedPaperView,
   readSharedZoomMax,
   readSharedZoomSpeed,
-  restorePaperAnchor,
   subscribeSharedPaperView,
   writeSharedPaperView,
-  zoomAroundPoint,
   zoomFactorFromWheel,
   zoomStepFromSpeed,
   isSheetZoomWheel,
   sheetZoomStepFromDirection,
   type PaperViewSnapshot,
 } from '../lib/paperView'
-import { SCROLL_ROOM, clampCanvasScroll, paperScrollBoundsFromVisualRect } from '../lib/noteCanvas'
+import { SCROLL_ROOM } from '../lib/noteCanvas'
 import {
   lockPaperViewportScrollStayPut,
   PAPER_EDITOR_FLING_HOLD_FRAMES,
@@ -61,6 +60,7 @@ export function PaperView({ children, className = '', viewKey, showHud = true }:
   const noteViewRef = useRef<HTMLDivElement>(null)
   const viewRef = useRef(readSharedPaperView())
   const lastWheelZoomAtRef = useRef(0)
+  const lastZoomOriginRef = useRef<{ x: number; y: number } | null>(null)
   const [view, setViewState] = useState(readSharedPaperView)
 
   const paint = useCallback((next: PaperViewSnapshot) => {
@@ -103,26 +103,7 @@ export function PaperView({ children, className = '', viewKey, showHud = true }:
       if (!flingId) flingId = window.requestAnimationFrame(holdFling)
       const plane = scroller.querySelector<HTMLElement>('.paper-sheet-plane')
         ?? scroller.querySelector<HTMLElement>('.unified-paper')
-      if (!plane) return
-      const scrollerRect = scroller.getBoundingClientRect()
-      const visual = paperScrollBoundsFromVisualRect(plane.getBoundingClientRect(), {
-        left: scrollerRect.left,
-        top: scrollerRect.top,
-        scrollLeft: scroller.scrollLeft,
-        scrollTop: scroller.scrollTop,
-      })
-      const next = clampCanvasScroll(
-        { x: scroller.scrollLeft, y: scroller.scrollTop },
-        {
-          minX: 0,
-          minY: 0,
-          maxX: Math.max(scroller.scrollWidth, visual.maxX),
-          maxY: Math.max(scroller.scrollHeight, visual.maxY),
-        },
-        { width: scroller.clientWidth, height: scroller.clientHeight },
-      )
-      if (next.x !== scroller.scrollLeft) scroller.scrollLeft = next.x
-      if (next.y !== scroller.scrollTop) scroller.scrollTop = next.y
+      clampPaperScrollerToZoomedSheet(scroller, plane)
     }
     scroller.addEventListener('scroll', clampScroll, { passive: true })
     const plane = scroller.querySelector<HTMLElement>('.paper-sheet-plane')
@@ -155,14 +136,9 @@ export function PaperView({ children, className = '', viewKey, showHud = true }:
     const sheet = scroller?.querySelector<HTMLElement>('.paper-sheet-plane')
       ?? scroller?.querySelector<HTMLElement>('.unified-paper')
       ?? null
-    const anchor = scroller ? capturePaperAnchor(scroller, sheet, originClient) : null
-    apply(zoomAroundPoint(current, zoom))
-    if (scroller && sheet && anchor) {
-      // Flush CSS zoom layout so the camera rect matches the new scale
-      // before we restore the paper point under the cursor.
-      sheet.offsetWidth
-      restorePaperAnchor(scroller, sheet, anchor)
-    }
+    const origin = originClient ?? lastZoomOriginRef.current ?? undefined
+    if (origin) lastZoomOriginRef.current = origin
+    applyPaperZoomStayPut(scroller, sheet, current, zoom, origin, apply)
   }, [apply])
 
   const zoomBy = useCallback((delta: number, originClient?: { x: number; y: number }) => {
@@ -211,6 +187,7 @@ export function PaperView({ children, className = '', viewKey, showHud = true }:
         event.stopPropagation()
         pendingFactor *= zoomFactorFromWheel(event.deltaY, event.deltaMode, readSharedZoomSpeed())
         pendingOrigin = { x: event.clientX, y: event.clientY }
+        lastZoomOriginRef.current = pendingOrigin
         lastWheelZoomAtRef.current = performance.now()
         if (!zoomFrame) zoomFrame = window.requestAnimationFrame(flushZoom)
         return
@@ -266,12 +243,17 @@ export function PaperView({ children, className = '', viewKey, showHud = true }:
       if (!event.ctrlKey && !event.metaKey && !event.altKey) scheduleRelease()
     }
 
+    const onPointer = (event: PointerEvent) => {
+      lastZoomOriginRef.current = { x: event.clientX, y: event.clientY }
+    }
     root.addEventListener('wheel', onProbe, { capture: true, passive: true })
+    root.addEventListener('pointermove', onPointer, { passive: true })
     window.addEventListener('keydown', onKeyDown)
     window.addEventListener('keyup', onKeyUp)
     window.addEventListener('blur', releaseIntercept)
     return () => {
       root.removeEventListener('wheel', onProbe, { capture: true })
+      root.removeEventListener('pointermove', onPointer)
       window.removeEventListener('keydown', onKeyDown)
       window.removeEventListener('keyup', onKeyUp)
       window.removeEventListener('blur', releaseIntercept)
@@ -285,7 +267,7 @@ export function PaperView({ children, className = '', viewKey, showHud = true }:
     if (typeof subscribe !== 'function') return undefined
     return subscribe((direction) => {
       if (performance.now() - lastWheelZoomAtRef.current < 80) return
-      zoomBy(sheetZoomStepFromDirection(direction))
+      zoomBy(sheetZoomStepFromDirection(direction), lastZoomOriginRef.current ?? undefined)
     })
   }, [zoomBy])
 
@@ -311,10 +293,10 @@ export function PaperView({ children, className = '', viewKey, showHud = true }:
       if (!(event.ctrlKey || event.metaKey)) return
       if (event.key === '=' || event.key === '+') {
         event.preventDefault()
-        zoomBy(zoomStepFromSpeed(readSharedZoomSpeed()))
+        zoomBy(zoomStepFromSpeed(readSharedZoomSpeed()), lastZoomOriginRef.current ?? undefined)
       } else if (event.key === '-' || event.key === '_') {
         event.preventDefault()
-        zoomBy(-zoomStepFromSpeed(readSharedZoomSpeed()))
+        zoomBy(-zoomStepFromSpeed(readSharedZoomSpeed()), lastZoomOriginRef.current ?? undefined)
       } else if (event.key === '0') {
         event.preventDefault()
         resetView()
@@ -339,10 +321,10 @@ export function PaperView({ children, className = '', viewKey, showHud = true }:
         </div>
         {showHud && (
           <div className={`paper-view-hud ${active ? 'is-active' : ''}`} aria-label="Blattansicht">
-            <button type="button" aria-label="Herauszoomen" title="Herauszoomen (Strg+- · Strg+Mausrad)" onClick={() => zoomBy(-zoomStepFromSpeed(readSharedZoomSpeed()))} disabled={view.zoom <= VIEW_ZOOM_MIN}>
+            <button type="button" aria-label="Herauszoomen" title="Herauszoomen (Strg+- · Strg+Mausrad)" onClick={() => zoomBy(-zoomStepFromSpeed(readSharedZoomSpeed()), lastZoomOriginRef.current ?? undefined)} disabled={view.zoom <= VIEW_ZOOM_MIN}>
               <ZoomOut size={15} />
             </button>
-            <button type="button" aria-label="Hineinzoomen" title="Hineinzoomen (Strg++ · Strg+Mausrad)" onClick={() => zoomBy(zoomStepFromSpeed(readSharedZoomSpeed()))} disabled={view.zoom >= readSharedZoomMax()}>
+            <button type="button" aria-label="Hineinzoomen" title="Hineinzoomen (Strg++ · Strg+Mausrad)" onClick={() => zoomBy(zoomStepFromSpeed(readSharedZoomSpeed()), lastZoomOriginRef.current ?? undefined)} disabled={view.zoom >= readSharedZoomMax()}>
               <ZoomIn size={15} />
             </button>
             <button type="button" aria-label="Blatt gegen den Uhrzeigersinn drehen" title="Drehen (Alt+Mausrad)" onClick={() => rotateBy(-VIEW_ROTATE_STEP)}>

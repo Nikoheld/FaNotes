@@ -175,6 +175,7 @@ const lockSafeguards = [
   ['lockPaperEditorScrollIfNeeded', 'Snapshot-Scroll auf dem Editor-Layer wird zurückgesetzt'],
   ['lockPaperViewportEditorScroll', 'Papier-Scroll setzt den Editor-Layer auf den Ursprung'],
   ['lockPaperViewportScrollStayPut', 'schnelles Paper-Scroll setzt den Editor-Layer auf jeder Tick auf 0'],
+  ['applyPaperZoomStayPut', 'Reinzoomen hält den Schreibpunkt unter dem Zoom-Ursprung'],
   ['lockPaperEditorScrollBurst', 'schneller Fling-Burst wird nach jedem Pulse genullt'],
   ['PAPER_EDITOR_FLING_HOLD_FRAMES', 'Nachlauf-Frames halten den Ursprung nach einem Fling'],
   ['onPaperScroll', 'Paper-Scroller-Ticks nullen den Editor-Layer ohne Caret-Nachzug'],
