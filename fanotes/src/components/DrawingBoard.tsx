@@ -100,7 +100,14 @@ import {
   resolveInkPointerDown,
 } from '../lib/inkSampleMap'
 import { drawInkStroke as paintInkStroke } from '../lib/inkStrokePaint'
-import { INLINE_INK_ACTIVE_CLASS, markdownNoteInkOverlaySize, pdfOverlaySourceHeight, shouldSyncPdfOverlaySource } from '../lib/pdfInkHit'
+import {
+  INLINE_INK_ACTIVE_CLASS,
+  INK_TOOLBAR_SLOT_ID,
+  markdownNoteInkOverlaySize,
+  pdfOverlaySourceHeight,
+  resolveInkToolbarHost,
+  shouldSyncPdfOverlaySource,
+} from '../lib/pdfInkHit'
 import { mapClientToSheet } from '../lib/paperCanvas'
 import {
   applyPenUpInkCleanup,
@@ -604,8 +611,6 @@ export type DrawingBoardProps = {
 }
 
 type Notice = { kind: 'success' | 'error' | 'info'; text: string }
-
-const INK_TOOLBAR_SLOT_ID = 'fanotes-ink-toolbar-slot'
 
 const cloneStrokes = (strokes: InkStroke[]): InkStroke[] => strokes.map((stroke) => ({
   ...stroke,
@@ -1170,7 +1175,21 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       setInkToolbarHost(null)
       return
     }
-    setInkToolbarHost(document.getElementById(INK_TOOLBAR_SLOT_ID))
+    const readHost = () => (
+      resolveInkToolbarHost<HTMLElement>(document)
+      ?? document.getElementById(INK_TOOLBAR_SLOT_ID)
+    )
+    const host = readHost()
+    setInkToolbarHost(host)
+    if (host) return undefined
+    const observer = new MutationObserver(() => {
+      const next = readHost()
+      if (!next) return
+      setInkToolbarHost(next)
+      observer.disconnect()
+    })
+    observer.observe(document.body, { childList: true, subtree: true })
+    return () => observer.disconnect()
   }, [inline, inputActive])
   const selectedStrokeIndexesRef = useRef<number[]>([])
   const inkDragRef = useRef<{ kind: 'move' | 'scale'; startX: number; startY: number; origin: SelectionRect } | null>(null)

@@ -15,12 +15,16 @@ const server = await createServer({
   server: { middlewareMode: true },
 })
 
-const { PDF_TOOLBAR_SLOT_ID } = await server.ssrLoadModule('/src/lib/pdfInkHit.ts')
+const { INK_TOOLBAR_SLOT_ID, PDF_TOOLBAR_SLOT_ID, penModeToolbarSlot } = await server.ssrLoadModule('/src/lib/pdfInkHit.ts')
 
 const runOnce = () => {
   assert.equal(PDF_TOOLBAR_SLOT_ID, 'fanotes-pdf-toolbar-slot')
+  assert.equal(INK_TOOLBAR_SLOT_ID, 'fanotes-ink-toolbar-slot')
+  assert.equal(penModeToolbarSlot(false, true), 'pdf')
+  assert.equal(penModeToolbarSlot(true, true), 'ink')
   assert.match(appSource, /toolbar-context/)
   assert.match(appSource, /PDF_TOOLBAR_SLOT_ID/)
+  assert.match(appSource, /penModeToolbarSlot/)
   assert.match(appSource, /pdf-toolbar-slot/)
   assert.doesNotMatch(appSource, /pdf-toolbar-hint/)
   assert.match(pdfSource, /createPortal/)

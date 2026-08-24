@@ -2,6 +2,10 @@
 
 ## Unveröffentlicht
 
+## 2026.8.67
+
+- **PDF im Stiftmodus:** Auf einem PDF kannst du wieder schreiben. Die Leiste mit Werkzeugen und Piktogrammen bleibt sichtbar.
+
 ## 2026.8.66
 
 - **Linie sitzt am Stift:** Im Stiftmodus liegt die gezeichnete Linie wieder unter dem Stift, nicht viel weiter oben auf dem Blatt.

@@ -91,7 +91,7 @@ import {
   type SubjectBookPlacement,
   type SubjectBookRecord,
 } from './lib/subjectBook'
-import { PDF_TOOLBAR_SLOT_ID } from './lib/pdfInkHit'
+import { drawingSessionFromLoad, INK_TOOLBAR_SLOT_ID, PDF_TOOLBAR_SLOT_ID, penModeToolbarSlot } from './lib/pdfInkHit'
 import { APP_VERSION } from './lib/appVersion'
 import { defaultSettingsForPlatform } from './defaults'
 import { PaperStylePicker } from './components/PaperStylePicker'
@@ -733,7 +733,7 @@ export default function App({ startupBootstrap }: AppProps) {
     const load = () => {
       const apply = (document: DrawingLibraryDocument | null) => {
         if (requestId !== drawingLoadRequestRef.current || activePathRef.current !== path) return
-        setDrawingSession({ key: document ? requestId : 0, document })
+        setDrawingSession(drawingSessionFromLoad(requestId, document))
       }
       const fromSidecar = () => {
         if (!id) {
@@ -747,7 +747,7 @@ export default function App({ startupBootstrap }: AppProps) {
           .then((embedded) => {
             if (requestId !== drawingLoadRequestRef.current || activePathRef.current !== path) return
             if (embedded) {
-              setDrawingSession({ key: requestId, document: embedded })
+              setDrawingSession(drawingSessionFromLoad(requestId, embedded))
               return
             }
             fromSidecar()
@@ -2250,18 +2250,18 @@ export default function App({ startupBootstrap }: AppProps) {
     if (drawingSession.key > 0) return
     const id = noteInkId(activeTab.content)
     if (!id) {
-      setDrawingSession({ key: 1, document: null })
+      setDrawingSession((current) => current.key > 0 ? current : drawingSessionFromLoad(1, null))
       return
     }
     const requestId = ++drawingLoadRequestRef.current
     void window.fanotes.readDrawing(id)
       .then((document) => {
         if (requestId !== drawingLoadRequestRef.current || activePathRef.current !== activeTab.path) return
-        setDrawingSession({ key: requestId, document })
+        setDrawingSession(drawingSessionFromLoad(requestId, document))
       })
       .catch(() => {
         if (requestId === drawingLoadRequestRef.current && activePathRef.current === activeTab.path) {
-          setDrawingSession({ key: requestId, document: null })
+          setDrawingSession(drawingSessionFromLoad(requestId, null))
         }
       })
   }, [activeTab, drawingSession.key, toast])
@@ -3090,11 +3090,12 @@ export default function App({ startupBootstrap }: AppProps) {
               </button>
             </div>
             <div className="toolbar-context">
-              {drawingOpen
-                ? <div id="fanotes-ink-toolbar-slot" className="ink-toolbar-slot" />
-                : isPdfActive
-                  ? <div id={PDF_TOOLBAR_SLOT_ID} className="pdf-toolbar-slot" />
-                  : <FormattingToolbar disabled={!activeTab || overviewOpen || homeworkOpen || glyphenWerkOpen || activeEntryMutating} onFormat={formatMarkdown} />}
+              {(() => {
+                const slot = penModeToolbarSlot(drawingOpen, isPdfActive)
+                if (slot === 'ink') return <div id={INK_TOOLBAR_SLOT_ID} className="ink-toolbar-slot" />
+                if (slot === 'pdf') return <div id={PDF_TOOLBAR_SLOT_ID} className="pdf-toolbar-slot" />
+                return <FormattingToolbar disabled={!activeTab || overviewOpen || homeworkOpen || glyphenWerkOpen || activeEntryMutating} onFormat={formatMarkdown} />
+              })()}
             </div>
             <div className="toolbar-group toolbar-end">
               {bookPolicy.controlVisible && (

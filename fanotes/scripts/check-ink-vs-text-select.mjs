@@ -13,9 +13,12 @@ const server = await createServer({
 })
 
 const {
+  drawingSessionFromLoad,
   inkBlockedMarkdownSelectors,
+  inkBlockedPdfSelectors,
   inkOverlayHitSelector,
   inkUserSelectNoneSelectors,
+  penModeToolbarSlot,
   pointerEventsForInkLayer,
   userSelectForInkLayer,
 } = await server.ssrLoadModule('/src/lib/pdfInkHit.ts')
@@ -72,6 +75,10 @@ const runOnce = () => {
     css,
     /\.pdf-note-view\.is-inking \.pdf-note-text-layer :is\(span, br\) \{[^}]*user-select:\s*none/,
   )
+
+  assert.ok(inkBlockedPdfSelectors.includes('.pdf-note-view.is-inking *'))
+  assert.equal(penModeToolbarSlot(true, true), 'ink')
+  assert.ok(drawingSessionFromLoad(3, null).key > 0)
 
   assert.equal(inkOverlayHitSelector, '.lw-drawing-board.is-inline.is-input-active .lw-canvas-surface')
   assert.match(board, /\.lw-drawing-board\.is-inline\.is-input-active \.lw-canvas-surface\{[^}]*pointer-events:\s*auto/)

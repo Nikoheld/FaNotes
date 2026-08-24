@@ -19,7 +19,8 @@ const appSource = fs.readFileSync(path.join(root, 'src', 'App.tsx'), 'utf8')
 const drafting = fs.readFileSync(path.join(root, 'src', 'lib', 'draftingTools.ts'), 'utf8')
 const bugReport = fs.readFileSync(path.join(root, 'src', 'lib', 'bugReport.ts'), 'utf8')
 const settingsModal = fs.readFileSync(path.join(root, 'src', 'components', 'SettingsModal.tsx'), 'utf8')
-const lockSource = [source, markdownEditor, paperCaret, inkMap, toolErase, inkPolicy, paperGrow, inkPaint, paperCanvas, defaults, appSource, drafting, bugReport, settingsModal].join('\n')
+const pdfInk = fs.readFileSync(path.join(root, 'src', 'lib', 'pdfInkHit.ts'), 'utf8')
+const lockSource = [source, markdownEditor, paperCaret, inkMap, toolErase, inkPolicy, paperGrow, inkPaint, paperCanvas, defaults, appSource, drafting, bugReport, settingsModal, pdfInk].join('\n')
 
 const requiredBrushes = ['fineliner', 'pencil', 'marker', 'paintbrush', 'calligraphy', 'highlighter', 'watercolor', 'spray']
 const requiredEffects = ['solid', 'rainbow', 'aurora', 'sunset', 'ocean', 'gold', 'silver', 'neon']
@@ -116,6 +117,10 @@ const safeguards = [
   ['const commitPendingGrowRemap = useCallback', 'Grow-Flush ist ein gemeinsamer Helper'],
   ['activeRenderedPointCountRef.current = 0\n    wipeLiveInkCanvas(canvasRef.current)\n    redraw(true)', 'Flush nach Grow zeichnet die Live-Tinte vollständig neu'],
   ['fanotes-ink-toolbar-slot', 'Handschrift-Werkzeuge sitzen in der oberen Leiste'],
+  ['drawingSessionFromLoad', 'Leere Tinte bekommt trotzdem eine Live-Stiftebene'],
+  ['penModeToolbarSlot', 'PDF im Stiftmodus dockt die Tintenleiste, nicht den PDF-Pager'],
+  ['resolveInkToolbarHost', 'Piktogramme und Werkzeuge finden den Leisten-Slot'],
+  ['Piktogramme', 'Piktogramme bleiben im Stiftmodus erreichbar'],
   ['is-docked-chrome', 'Stiftleiste dockt in das normale Menü, statt zu schweben'],
   ['is-viewport-chrome', 'Hinweise und Studio liegen außerhalb des Blatt-Zooms'],
 ]

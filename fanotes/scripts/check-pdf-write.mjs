@@ -13,10 +13,12 @@ const server = await createServer({
 })
 
 const {
+  drawingSessionFromLoad,
   inkBlockedPdfSelectors,
   inkOverlayHitSelector,
   pdfOverlayPointFromClient,
   pdfOverlaySourceHeight,
+  penModeToolbarSlot,
   pointerEventsForInkLayer,
   shouldSyncPdfOverlaySource,
 } = await server.ssrLoadModule('/src/lib/pdfInkHit.ts')
@@ -105,6 +107,8 @@ const runOnce = () => {
 
   assert.equal(pointerEventsForInkLayer('pdf-canvas', true), 'none')
   assert.equal(pointerEventsForInkLayer('overlay', true), 'auto')
+  assert.equal(penModeToolbarSlot(true, true), 'ink')
+  assert.ok(drawingSessionFromLoad(2, null).key > 0)
 
   const css = readFileSync(join(root, 'src/styles.css'), 'utf8')
   const board = readFileSync(join(root, 'src/components/DrawingBoard.tsx'), 'utf8')

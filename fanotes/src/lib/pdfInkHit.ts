@@ -2,6 +2,37 @@
 export const PDF_INKING_CLASS = 'is-inking'
 /** Top editor-bar slot for PDF page/zoom/search chrome (not an overlay on the page). */
 export const PDF_TOOLBAR_SLOT_ID = 'fanotes-pdf-toolbar-slot'
+/** Top editor-bar slot for docked ink tools, including Piktogramme on PDF+Stift. */
+export const INK_TOOLBAR_SLOT_ID = 'fanotes-ink-toolbar-slot'
+
+type ToolbarHostRoot = {
+  getElementById?: (id: string) => { id?: string } | null
+  querySelector?: (selector: string) => { id?: string } | null
+} | null | undefined
+
+/** Docked ink bar host. Pen mode on a PDF note uses this slot, never an empty PDF pager. */
+export const resolveInkToolbarHost = <T extends { id?: string }>(root: ToolbarHostRoot) => {
+  if (!root) return null
+  const host = root.getElementById?.(INK_TOOLBAR_SLOT_ID) ?? root.querySelector?.(`#${INK_TOOLBAR_SLOT_ID}`)
+  return host as T | null
+}
+
+/** Pen mode always docks ink tools. PDF pager/search chrome is Keyboard-only. */
+export const penModeToolbarSlot = (drawingOpen: boolean, isPdfNote: boolean) => (
+  drawingOpen ? 'ink' : isPdfNote ? 'pdf' : 'markdown'
+)
+
+/** Overlay + docked bar exist once a session key is assigned, even with no saved ink. */
+export const inkBoardReady = (sessionKey: number) => Number.isFinite(sessionKey) && sessionKey > 0
+
+/**
+ * Missing/empty drawings still get a live overlay. Treating “no document” as
+ * key 0 left PDF+Stift on a loading spinner with no hit target and no symbols bar.
+ */
+export const drawingSessionFromLoad = <T>(requestId: number, document: T | null) => ({
+  key: Math.max(1, requestId),
+  document,
+})
 /** Class on WorksheetLayer while the pen overlay is active. */
 export const WORKSHEET_INKING_CLASS = 'is-disabled'
 /** Class on the inline drawing board when it is the hit target. */
@@ -10,6 +41,7 @@ export const INLINE_INK_ACTIVE_CLASS = 'is-input-active'
 /** These layers must not receive the pen; the ink overlay maps the sample. */
 export const inkBlockedPdfSelectors = [
   '.pdf-note-view.is-inking',
+  '.pdf-note-view.is-inking *',
   '.pdf-note-view.is-inking .pdf-note-page',
   '.pdf-note-view.is-inking .pdf-note-page canvas',
   '.pdf-note-view.is-inking .pdf-note-text-layer',
