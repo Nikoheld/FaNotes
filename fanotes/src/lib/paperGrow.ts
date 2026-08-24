@@ -35,6 +35,7 @@ export {
   writeExtentFromContent,
   pageCanvasLayout,
   inkOverlaySize,
+  markdownInkPageBox,
   mapClientToPage,
   writePageSurface,
   writeSurfaceIsPage,

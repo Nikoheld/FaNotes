@@ -230,6 +230,38 @@ export const inkOverlaySize = (
   return { width: 0, height: 0 }
 }
 
+/**
+ * Write-page box used for both pointer mapping and stroke paint.
+ * Extra paper around the page (overlay / `--paper-scroll-room`) must not
+ * become a second 0–1 space — that paints the line further up than the pen.
+ */
+export const markdownInkPageBox = (
+  overlay: { left: number; top: number; width: number; height: number },
+  paper: CanvasSize,
+  plane: CanvasSize = { width: 0, height: 0 },
+) => {
+  const overlaySize = inkOverlaySize(overlay, paper, plane)
+  const sheetW = finitePositive(paper.width) && paper.width > 8 ? paper.width : overlaySize.width
+  const sheetH = finitePositive(paper.height) && paper.height > 8 ? paper.height : overlaySize.height
+  const visualW = finitePositive(overlay.width)
+  const visualH = finitePositive(overlay.height)
+  const padX = visualW > sheetW + 8 ? (visualW - sheetW) / 2 : 0
+  const padY = visualH > sheetH + 8 ? (visualH - sheetH) / 2 : 0
+  return {
+    overlaySize,
+    padX,
+    padY,
+    page: {
+      left: overlay.left + padX,
+      top: overlay.top + padY,
+      width: sheetW,
+      height: sheetH,
+      offsetWidth: sheetW,
+      offsetHeight: sheetH,
+    },
+  }
+}
+
 /** Map a pointer onto the write page. Values may sit slightly outside 0–1 to grow it. */
 export const mapClientToPage = (
   clientX: number,

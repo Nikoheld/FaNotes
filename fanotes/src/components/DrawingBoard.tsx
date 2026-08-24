@@ -315,12 +315,22 @@ const strokeIntersectsWindow = (stroke: { points: Array<{ y: number }> }, window
 }
 
 const applyInkWindowToCanvases = (canvases: Array<HTMLCanvasElement | null>, window: InkWindow) => {
-  const top = isFullInkWindow(window) ? '0' : `${window.y0 * 100}%`
-  const height = isFullInkWindow(window) ? '100%' : `${inkWindowSpan(window) * 100}%`
+  // Inline overlay is extra paper around the write page. Pin the bitmap to the
+  // page (same box as pointer mapping), not to overlay top/100% — that painted
+  // the line much further up than the stylus.
+  const pad = 'var(--paper-scroll-room, 0px)'
+  const paperH = `calc(100% - 2 * ${pad})`
+  const top = isFullInkWindow(window) ? pad : `calc(${pad} + ${window.y0} * ${paperH})`
+  const height = isFullInkWindow(window) ? paperH : `calc(${inkWindowSpan(window)} * ${paperH})`
+  const left = pad
   for (const canvas of canvases) {
     if (!canvas) continue
     if (canvas.style.top !== top) canvas.style.top = top
     if (canvas.style.height !== height) canvas.style.height = height
+    if (canvas.style.left !== left) canvas.style.left = left
+    if (canvas.style.right !== left) canvas.style.right = left
+    if (canvas.style.width !== 'auto') canvas.style.width = 'auto'
+    if (canvas.style.bottom !== 'auto') canvas.style.bottom = 'auto'
   }
 }
 
@@ -2109,7 +2119,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     const next = clampViewZoom(previous + delta)
     if (next === previous) return
     const surface = surfaceRef.current
-    const scroller = surface?.parentElement
+    const scroller = surface?.parentElement ?? null
     applyPaperZoomStayPut(
       scroller,
       surface,
@@ -5814,7 +5824,7 @@ const drawingBoardStyles = `
 .lw-drawing-board.is-inline .lw-canvas-glow,.lw-drawing-board.is-inline .lw-canvas-meta{display:none}
 .lw-drawing-board.is-inline .lw-canvas-surface{position:absolute;inset:0;width:auto;height:auto;min-width:0;min-height:0;aspect-ratio:auto;margin:0;overflow:visible;border-radius:0;background:transparent;box-shadow:none;will-change:auto;pointer-events:none}
 .lw-drawing-board.is-inline.is-input-active .lw-canvas-surface{pointer-events:auto}
-.lw-drawing-board.is-inline .lw-tablet-canvas{position:absolute;inset:var(--paper-scroll-room, 0px);left:auto;width:auto;height:auto;pointer-events:none}
+.lw-drawing-board.is-inline .lw-tablet-canvas{position:absolute;inset:var(--paper-scroll-room, 0px);width:auto;height:auto;pointer-events:none}
 .lw-drawing-board.is-inline .lw-tablet-canvas.is-input-active{pointer-events:none}
 .lw-drawing-board.is-inline .lw-conversion-panel,.lw-conversion-panel.is-viewport-chrome{position:fixed;z-index:80;top:78px;right:16px;left:auto;float:none;width:min(370px,calc(100vw - 32px));max-height:calc(100vh - 175px);margin:0;overflow:auto;pointer-events:auto;box-shadow:0 22px 70px rgba(0,0,0,.34)}
 .lw-drawing-board.is-inline .lw-draw-notice,.lw-draw-notice.is-viewport-chrome{position:fixed;z-index:81;top:78px;left:50%;width:min(420px,calc(100vw - 28px));margin:0;transform:translateX(-50%);pointer-events:auto;box-shadow:0 13px 34px rgba(0,0,0,.24)}

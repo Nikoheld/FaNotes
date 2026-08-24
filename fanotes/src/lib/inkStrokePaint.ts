@@ -1,6 +1,6 @@
 import { inkStrokePaintScale } from './paperGrow'
 import { commitInkPointerSequence, type InkPointerLike } from './inkSampleMap'
-import { inkOverlaySize } from './noteCanvas'
+import { markdownInkPageBox } from './noteCanvas'
 
 /** A 3.5px pen must occupy at least this many backing-store pixels. */
 export const INK_MIN_BITMAP_PX = 1
@@ -601,37 +601,37 @@ const emptyInkSample = (): VisibleInkSample => ({
 
 /**
  * Same hit-size + map + paint path DrawingBoard uses on a markdown note.
- * Overlay covers the write page; 0–1 paint stays on that page.
+ * Overlay covers extra paper; 0–1 map and paint stay on the write page.
  */
 export const paintMarkdownNoteStiftStroke = (input: {
   overlay: { left: number; top: number; width: number; height: number }
   paper: { width: number; height: number }
   plane?: { width: number; height: number }
   events: InkPointerLike[]
-}): VisibleInkSample => {
-  const overlaySize = inkOverlaySize(input.overlay, input.paper, input.plane)
-  const sheetW = Number(input.paper.width)
-  const sheetH = Number(input.paper.height)
-  const paintW = Number.isFinite(sheetW) && sheetW > 8 ? sheetW : overlaySize.width
-  const paintH = Number.isFinite(sheetH) && sheetH > 8 ? sheetH : overlaySize.height
+}): VisibleInkSample & {
+  page: { left: number; top: number; width: number; height: number }
+  samples: Array<{ y: number; paintedY: number; pointerY: number }>
+} => {
+  const { overlaySize, page } = markdownInkPageBox(input.overlay, input.paper, input.plane)
+  const paintW = page.width
+  const paintH = page.height
   if (!(overlaySize.width > 0) || !(overlaySize.height > 0) || !(paintW > 0) || !(paintH > 0)) {
-    return emptyInkSample()
+    return { ...emptyInkSample(), page, samples: [] }
   }
-  const sheet = {
-    left: input.overlay.left,
-    top: input.overlay.top,
-    width: paintW,
-    height: paintH,
-    offsetWidth: paintW,
-    offsetHeight: paintH,
-  }
-  const points = commitInkPointerSequence(input.events, sheet, paintW, paintH)
+  const points = commitInkPointerSequence(input.events, page, paintW, paintH)
     .filter((point) => point.x >= 0 && point.y >= 0)
+  const samples = points.map((point) => ({
+    y: point.y,
+    paintedY: point.y * paintH,
+    pointerY: point.y * page.height,
+  }))
   if (!points.length) {
     return {
       ...emptyInkSample(),
       overlayWidth: overlaySize.width,
       overlayHeight: overlaySize.height,
+      page,
+      samples,
     }
   }
   const { context, getImageData } = createInkReadbackContext(paintW, paintH)
@@ -660,6 +660,8 @@ export const paintMarkdownNoteStiftStroke = (input: {
     bitmapWidth: paintW,
     bitmapHeight: paintH,
     points: points.length,
+    page,
+    samples,
     ...opaqueInkStats(getImageData()),
   }
 }

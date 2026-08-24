@@ -172,6 +172,8 @@ const lockSafeguards = [
   ['continueStrokeAfterExtentGrow', 'Nach dem Wachsen wird der aktuelle Punkt mit keepMarkOnPage neu gemappt'],
   ['lastSnapshot', 'Letzter Stiftpunkt wird vor dem Wachsen kopiert, nicht zweimal remappt'],
   ['.lw-drawing-board.is-inline .lw-canvas-surface{position:absolute;inset:0', 'Stiftfläche deckt extra Papier ab'],
+  ['markdownInkPageBox', 'Stift-Map und Paint teilen dieselbe Schreibseite'],
+  ['calc(100% - 2 * ${pad})', 'Ink-Canvas sitzt auf dem Blatt, nicht auf dem Overlay-Oben'],
   ['lockPaperEditorScrollIfNeeded', 'Snapshot-Scroll auf dem Editor-Layer wird zurückgesetzt'],
   ['lockPaperViewportEditorScroll', 'Papier-Scroll setzt den Editor-Layer auf den Ursprung'],
   ['lockPaperViewportScrollStayPut', 'schnelles Paper-Scroll setzt den Editor-Layer auf jeder Tick auf 0'],

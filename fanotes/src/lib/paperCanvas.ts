@@ -28,6 +28,7 @@ export const paperCanvasLayout = (page: CanvasSize, room = SCROLL_ROOM) => {
 }
 
 export const inkOverlayCoversStage = inkOverlaySize
+export { markdownInkPageBox } from './noteCanvas'
 
 /** Map a pen sample onto the write page. Samples past an edge grow the page. */
 export const mapClientToSheet = (

@@ -2,6 +2,10 @@
 
 ## Unveröffentlicht
 
+## 2026.8.66
+
+- **Linie sitzt am Stift:** Im Stiftmodus liegt die gezeichnete Linie wieder unter dem Stift, nicht viel weiter oben auf dem Blatt.
+
 ## 2026.8.65
 
 - **Reinzoomen verschiebt die Schrift nicht mehr:** Beim Hineinzoomen bleibt die Schrift genau dort, wo du sie geschrieben hast. Tinte und Linien bleiben zusammen — der Schreibpunkt rutscht nicht aus dem Bild.
