@@ -12,9 +12,23 @@ export const pdfStartPageForLoad = (path: unknown, previousPath: unknown, reques
   return Number.isSafeInteger(page) && page >= 1 ? page : 1
 }
 export const DEFAULT_PDF_PAGE_RATIO = 297 / 210
-export const MAX_PDF_DPR = 1.75
-export const MAX_PDF_EDGE = 2_048
-export const MAX_PDF_PIXELS = 2_400_000
+/** HiDPI tablets (Hyprland 2× / 3×) must keep glyphs at device pixels. */
+export const MAX_PDF_DPR = 3
+export const MAX_PDF_EDGE = 6_144
+export const MAX_PDF_PIXELS = 12_000_000
+export const MAX_PDF_VIEW_QUALITY_ZOOM = 2.6
+
+export type PdfPaintOptions = {
+  dpr?: number
+  viewZoom?: number
+}
+
+/** Backing-store scale: screen DPR times a bounded sheet-zoom boost. */
+export const pdfPaintDeviceScale = (dpr: number, viewZoom = 1) => {
+  const screen = Math.min(Math.max(Number(dpr) || 1, 1), MAX_PDF_DPR)
+  const zoomBoost = Math.max(1, Math.min(MAX_PDF_VIEW_QUALITY_ZOOM, viewZoom > 1.02 ? viewZoom : 1))
+  return screen * zoomBoost
+}
 
 const asUint8Array = (value: ArrayBuffer | Uint8Array | ArrayBufferView): Uint8Array => {
   if (value instanceof Uint8Array) return value
@@ -129,10 +143,12 @@ export const applyPdfTextOverlayScale = (
   return scale
 }
 
-export const paintSizeForPage = (cssWidth: number, cssHeight: number) => {
-  let dpr = Math.min(Math.max(window.devicePixelRatio || 1, 1), MAX_PDF_DPR)
-  let pixelWidth = Math.round(cssWidth * dpr)
-  let pixelHeight = Math.round(cssHeight * dpr)
+export const paintSizeForPage = (cssWidth: number, cssHeight: number, options: PdfPaintOptions = {}) => {
+  const dpr = options.dpr ?? (typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1)
+  const viewZoom = options.viewZoom ?? 1
+  const scale = pdfPaintDeviceScale(dpr, viewZoom)
+  let pixelWidth = Math.max(1, Math.round(Math.max(1, cssWidth) * scale))
+  let pixelHeight = Math.max(1, Math.round(Math.max(1, cssHeight) * scale))
   const edge = Math.max(pixelWidth, pixelHeight)
   if (edge > MAX_PDF_EDGE) {
     const factor = MAX_PDF_EDGE / edge

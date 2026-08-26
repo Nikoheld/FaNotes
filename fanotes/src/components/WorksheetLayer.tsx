@@ -4,6 +4,8 @@ import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import type { PDFDocumentLoadingTask, PDFDocumentProxy, PDFPageProxy, RenderTask } from 'pdfjs-dist'
 import type { WorksheetDocument, WorksheetHighlight, WorksheetTextBox } from '../types'
 import { WORKSHEET_INKING_CLASS } from '../lib/pdfInkHit'
+import { paintSizeForPage } from '../lib/pdfDocument'
+import { readUsedSheetZoom, watchSheetZoom } from '../lib/paperView'
 
 export type WorksheetLayerHandle = {
   flush: () => Promise<void>
@@ -74,10 +76,6 @@ const enqueuePdfRender = <T,>(job: () => Promise<T>): Promise<T> => {
   return run
 }
 
-/** Backing-store caps: readable on HiDPI, cheap enough for live scrolling. */
-const MAX_PDF_DPR = 1.75
-const MAX_PDF_EDGE = 2_048
-const MAX_PDF_PIXELS = 2_400_000
 const RESIZE_DEBOUNCE_MS = 180
 const VIEWPORT_ROOT_MARGIN = '96px 0px'
 const HIDE_DEBOUNCE_MS = 360
@@ -121,24 +119,9 @@ function PdfPageCanvas({
     if (cssWidth < 8) return
     const base = page.getViewport({ scale: 1 })
     const cssHeight = Math.max(1, Math.round(cssWidth * (base.height / Math.max(1, base.width))))
-
-    let dpr = Math.min(Math.max(window.devicePixelRatio || 1, 1), MAX_PDF_DPR)
-    let pixelWidth = Math.round(cssWidth * dpr)
-    let pixelHeight = Math.round(cssHeight * dpr)
-    const edge = Math.max(pixelWidth, pixelHeight)
-    if (edge > MAX_PDF_EDGE) {
-      const factor = MAX_PDF_EDGE / edge
-      pixelWidth = Math.max(1, Math.round(pixelWidth * factor))
-      pixelHeight = Math.max(1, Math.round(pixelHeight * factor))
-    }
-    const pixels = pixelWidth * pixelHeight
-    if (pixels > MAX_PDF_PIXELS) {
-      const factor = Math.sqrt(MAX_PDF_PIXELS / pixels)
-      pixelWidth = Math.max(1, Math.round(pixelWidth * factor))
-      pixelHeight = Math.max(1, Math.round(pixelHeight * factor))
-    }
-
-    const renderKey = `${cssWidth}x${cssHeight}@${pixelWidth}x${pixelHeight}`
+    const viewZoom = readUsedSheetZoom(host)
+    const { pixelWidth, pixelHeight } = paintSizeForPage(cssWidth, cssHeight, { viewZoom })
+    const renderKey = `${cssWidth}x${cssHeight}@${pixelWidth}x${pixelHeight}@${viewZoom.toFixed(2)}`
     if (renderKey === lastRenderKeyRef.current && canvas.width === pixelWidth && canvas.height === pixelHeight) {
       return
     }
@@ -159,7 +142,7 @@ function PdfPageCanvas({
       if (!context) return
       context.setTransform(1, 0, 0, 1, 0, 0)
       context.imageSmoothingEnabled = true
-      context.imageSmoothingQuality = 'low'
+      context.imageSmoothingQuality = 'high'
       context.fillStyle = '#ffffff'
       context.fillRect(0, 0, pixelWidth, pixelHeight)
       const task = livePage.render({
@@ -222,8 +205,10 @@ function PdfPageCanvas({
     }
     const observer = new ResizeObserver(schedule)
     observer.observe(host)
+    const stopZoom = watchSheetZoom(host, schedule)
     return () => {
       observer.disconnect()
+      stopZoom()
       if (resizeTimerRef.current !== null) window.clearTimeout(resizeTimerRef.current)
     }
   }, [render])

@@ -84,7 +84,8 @@ const safeguards = [
   ['defaultCompassPose', 'Zirkel mit Nadel, Radius und Drehpunkt'],
   ['<Compass size={16} />', 'Zirkel in der Stiftleiste'],
   ['sampleCompassCircle', 'Zirkel zeichnet Kreis und Bogen als Tinte'],
-  ['MAX_CANVAS_PIXELS_TALL = 4_200_000', 'enges Tintenbudget auf langen PDF-Seiten'],
+  ['INK_MAX_CANVAS_PIXELS_TALL', 'Tintenbudget auf langen PDF-Seiten bleibt lesbar'],
+  ['inkOverlayPixelSize', 'Tinten-Bitmap folgt HiDPI und Zoom'],
   ['const measureInkWindow', 'Tinten-Bitmap nur für den sichtbaren Blattausschnitt'],
   ['const applyInkWindowToCanvases', 'sichtbares Tintenfenster auf den Canvases'],
   ['syncInkWindow(true)', 'Tintenfenster folgt Scroll und Stiftkante'],
@@ -131,7 +132,7 @@ const worksheetSafeguards = [
   ['const enqueuePdfRender', 'PDF-Seiten werden nacheinander gerendert, nicht parallel'],
   ['const loadVaultPdfBytes', 'PDF-Bytes ohne riesige Data-URL'],
   ['const HIDE_DEBOUNCE_MS', 'Off-Screen-Seiten werden nicht sofort zerstört'],
-  ['MAX_PDF_PIXELS = 2_400_000', 'enges Pixelbudget pro PDF-Seite'],
+  ['paintSizeForPage', 'PDF-Seite teilt das HiDPI-Raster mit der PDF-Notiz'],
   ['disableAutoFetch: true', 'PDF.js lädt keine Extra-Requests'],
   ['{mounted && <PdfPageCanvas', 'getPage nur für sichtbare Seiten'],
 ]
@@ -156,6 +157,7 @@ const paperViewSafeguards = [
   ["setProperty('--view-zoom', String(zoom))", 'Zoom-Faktor als CSS-Variable auf dem Blatt'],
   ["closest('.paper-sheet-plane')", 'eine Zoom-Ebene für Text, Tinte und Lineatur'],
   ["removeProperty('zoom')", 'kein Zoom-1 auf Kindschichten (Text bleibt sonst 1×)'],
+  ['export const watchSheetZoom', 'PDF-Raster folgt dem Blattzoom, nicht nur ResizeObserver'],
 ]
 const paperStyleSafeguards = [
   ['.paper-sheet-plane > .paper-ruling', 'Lineatur liegt auf der Kamera-Ebene und zoomt mit Tinte'],

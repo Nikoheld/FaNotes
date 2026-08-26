@@ -161,6 +161,25 @@ export const readUsedSheetZoom = (element: HTMLElement | null): number => {
   return 1
 }
 
+/** CSS `zoom` does not resize layout boxes — re-raster PDF/ink when the camera moves. */
+export const watchSheetZoom = (element: HTMLElement, onChange: () => void) => {
+  const plane = (
+    element.closest('.paper-sheet-plane')
+    ?? element.closest('.unified-paper')
+    ?? element
+  ) as HTMLElement
+  let last = readUsedSheetZoom(element)
+  const fire = () => {
+    const next = readUsedSheetZoom(element)
+    if (Math.abs(next - last) < 0.01) return
+    last = next
+    onChange()
+  }
+  const observer = new MutationObserver(fire)
+  observer.observe(plane, { attributes: true, attributeFilter: ['style', 'class'] })
+  return () => observer.disconnect()
+}
+
 /**
  * Apply sheet zoom as one camera on the sheet plane.
  *

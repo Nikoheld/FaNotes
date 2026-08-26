@@ -393,6 +393,57 @@ export const inkStrokeCssPixels = (baseWidth: number, bitmapWidth: number, layou
   Math.max(0, baseWidth) * inkStrokePaintScale(bitmapWidth, layoutWidth)
 )
 
+/** Cap for window.devicePixelRatio contribution on the ink overlay. */
+export const INK_MAX_DPR = 4
+/** When the paper is CSS-zoomed, supersample so ink is not a stretched bitmap. */
+export const INK_MAX_VIEW_QUALITY_ZOOM = 2.6
+export const INK_MIN_INLINE_QUALITY = 1.35
+export const INK_MAX_CANVAS_EDGE = 6_144
+export const INK_MAX_CANVAS_PIXELS = 18_000_000
+/** Tall PDF/worksheet overlays: keep HiDPI, but do not match the full 18M budget. */
+export const INK_MAX_CANVAS_PIXELS_TALL = 10_000_000
+export const INK_TALL_LAYOUT_HEIGHT = 1_800
+/** Floor so a long PDF cannot collapse a 3.5px pen to a few stretched pixels. */
+export const INK_TALL_SCALE_FLOOR = 0.72
+
+/**
+ * Backing-store size for the ink canvases. Higher when zoomed in so CSS scale
+ * stays sharp instead of a fat, pixelated upscale.
+ */
+export const inkOverlayPixelSize = (
+  layoutWidth: number,
+  layoutHeight: number,
+  viewZoom: number,
+  inlineMode: boolean,
+  devicePixelRatio = 1,
+) => {
+  const screenDpr = Math.min(Math.max(devicePixelRatio || 1, 1), INK_MAX_DPR)
+  const zoomBoost = Math.max(1, Math.min(INK_MAX_VIEW_QUALITY_ZOOM, viewZoom > 1.02 ? viewZoom : 1))
+  const baseBoost = inlineMode ? INK_MIN_INLINE_QUALITY : 1
+  const tallFactor = layoutHeight > INK_TALL_LAYOUT_HEIGHT
+    ? Math.max(INK_TALL_SCALE_FLOOR, Math.min(1, INK_TALL_LAYOUT_HEIGHT / layoutHeight))
+    : 1
+  let scale = screenDpr * baseBoost * zoomBoost * tallFactor
+  let width = Math.max(1, Math.round(Math.max(1, layoutWidth) * scale))
+  let height = Math.max(1, Math.round(Math.max(1, layoutHeight) * scale))
+  const edge = Math.max(width, height)
+  if (edge > INK_MAX_CANVAS_EDGE) {
+    const factor = INK_MAX_CANVAS_EDGE / edge
+    width = Math.max(1, Math.round(width * factor))
+    height = Math.max(1, Math.round(height * factor))
+    scale *= factor
+  }
+  const pixelBudget = layoutHeight > INK_TALL_LAYOUT_HEIGHT ? INK_MAX_CANVAS_PIXELS_TALL : INK_MAX_CANVAS_PIXELS
+  const pixels = width * height
+  if (pixels > pixelBudget) {
+    const factor = Math.sqrt(pixelBudget / pixels)
+    width = Math.max(1, Math.round(width * factor))
+    height = Math.max(1, Math.round(height * factor))
+    scale *= factor
+  }
+  return { width, height, scale }
+}
+
 /**
  * Tablet-board A4 box. Must not size the inline overlay — a tall PDF
  * (`sourceHeight` ≫ A4) collapses this to a strip, so the pen misses the page

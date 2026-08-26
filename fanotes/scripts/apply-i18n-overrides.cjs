@@ -6,6 +6,7 @@ const path = require('node:path')
 // Deliberately written UI copy. These entries take precedence over the generated
 // catalog so product names and short labels never become awkward partial translations.
 const overrides = {
+  '**Schärfere Schrift auf PDF:** PDF-Seiten und Handschrift bleiben auf HiDPI-Bildschirmen scharf. Reinzoomen macht die Schrift nicht mehr pixelig und dick.': '**Sharper type on PDFs:** PDF pages and handwriting stay sharp on HiDPI screens. Zooming in no longer makes the type pixelated and thick.',
   '**PDF im Stiftmodus:** Auf einem PDF kannst du wieder schreiben. Die Leiste mit Werkzeugen und Piktogrammen bleibt sichtbar.': '**PDF in Pen mode:** You can write on a PDF again. The bar with tools and pictograms stays visible.',
   '**Linie sitzt am Stift:** Im Stiftmodus liegt die gezeichnete Linie wieder unter dem Stift, nicht viel weiter oben auf dem Blatt.': '**The line sits at the pen:** In pen mode the drawn line is under the stylus again, not much further up the page.',
   '**Reinzoomen verschiebt die Schrift nicht mehr:** Beim Hineinzoomen bleibt die Schrift genau dort, wo du sie geschrieben hast. Tinte und Linien bleiben zusammen — der Schreibpunkt rutscht nicht aus dem Bild.': '**Zooming in no longer shifts the writing:** When you zoom in, the text stays exactly where you wrote it. Ink and ruling stay together — the writing point does not slide out of view.',

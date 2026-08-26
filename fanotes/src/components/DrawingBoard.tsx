@@ -135,6 +135,7 @@ import {
   INK_WIDTH_ANCHOR_CLASS,
   clearInkExtentStyles,
   inkExtentStyleValues,
+  inkOverlayPixelSize,
   inkWidthNeedsAnchor,
   pendingGrowScale,
   resolvePaintedLayoutGrow,
@@ -224,54 +225,15 @@ const MAX_SOURCE_WIDTH = WRITE_CAP_WIDTH
 const WRITE_SLACK_HEIGHT = WRITE_MARGIN_Y
 const WRITE_SLACK_WIDTH = WRITE_MARGIN_X
 const EXPORT_SCALE = 2
-/** Cap for window.devicePixelRatio contribution. */
-const MAX_DPR = 4
-/**
- * When the paper is CSS-zoomed, the bitmap is stretched. Supersample up to this
- * view-zoom factor so ink stays sharp when zooming in (without unbounded RAM).
- */
-const MAX_VIEW_QUALITY_ZOOM = 2.6
-const MIN_INLINE_QUALITY = 1.35
-const MAX_CANVAS_EDGE = 6_144
-const MAX_CANVAS_PIXELS = 18_000_000
-/** Tall multi-page notes (PDF worksheets) keep a lower ink bitmap budget to avoid lag. */
-const MAX_CANVAS_PIXELS_TALL = 4_200_000
-const TALL_LAYOUT_HEIGHT = 1_800
 /** Fallback hold time after the last real movement to beautify a figure. */
 const SHAPE_DWELL_MS = 700
 const SHAPE_DWELL_HINT_MS = 260
 const SHAPE_MOVE_RESET_PX = 1.8
 
 /** Backing-store size for the ink canvases. Higher when zoomed in so CSS scale stays sharp. */
-const computeInkPixelSize = (layoutWidth: number, layoutHeight: number, viewZoom: number, inlineMode: boolean) => {
-  const screenDpr = Math.min(Math.max(window.devicePixelRatio || 1, 1), MAX_DPR)
-  const zoomBoost = Math.max(1, Math.min(MAX_VIEW_QUALITY_ZOOM, viewZoom > 1.02 ? viewZoom : 1))
-  const baseBoost = inlineMode ? MIN_INLINE_QUALITY : 1
-  // Multi-page worksheets make the paper very tall; keep ink supersampling moderate
-  // so the overlay canvas does not compete with PDF page bitmaps for GPU memory.
-  const tallFactor = layoutHeight > TALL_LAYOUT_HEIGHT
-    ? Math.max(0.38, Math.min(1, TALL_LAYOUT_HEIGHT / layoutHeight))
-    : 1
-  let scale = screenDpr * baseBoost * zoomBoost * tallFactor
-  let width = Math.max(1, Math.round(layoutWidth * scale))
-  let height = Math.max(1, Math.round(layoutHeight * scale))
-  const edge = Math.max(width, height)
-  if (edge > MAX_CANVAS_EDGE) {
-    const factor = MAX_CANVAS_EDGE / edge
-    width = Math.max(1, Math.round(width * factor))
-    height = Math.max(1, Math.round(height * factor))
-    scale *= factor
-  }
-  const pixelBudget = layoutHeight > TALL_LAYOUT_HEIGHT ? MAX_CANVAS_PIXELS_TALL : MAX_CANVAS_PIXELS
-  const pixels = width * height
-  if (pixels > pixelBudget) {
-    const factor = Math.sqrt(pixelBudget / pixels)
-    width = Math.max(1, Math.round(width * factor))
-    height = Math.max(1, Math.round(height * factor))
-    scale *= factor
-  }
-  return { width, height, scale }
-}
+const computeInkPixelSize = (layoutWidth: number, layoutHeight: number, viewZoom: number, inlineMode: boolean) => (
+  inkOverlayPixelSize(layoutWidth, layoutHeight, viewZoom, inlineMode, window.devicePixelRatio || 1)
+)
 
 type InkWindow = { y0: number; y1: number }
 const FULL_INK_WINDOW: InkWindow = { y0: 0, y1: 1 }
@@ -1471,7 +1433,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     const context = canvas.getContext('2d', { alpha: true })
     if (!context) return
     context.imageSmoothingEnabled = !activeStrokeRef.current
-    context.imageSmoothingQuality = 'low'
+    context.imageSmoothingQuality = activeStrokeRef.current ? 'low' : 'high'
     const activeStroke = activeStrokeRef.current
     if (!activeStroke) {
       context.setTransform(1, 0, 0, 1, 0, 0)

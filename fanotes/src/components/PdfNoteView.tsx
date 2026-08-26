@@ -36,6 +36,7 @@ import {
   pdfStartPageForLoad,
 } from '../lib/pdfDocument'
 import { PDF_INKING_CLASS, PDF_TOOLBAR_SLOT_ID } from '../lib/pdfInkHit'
+import { readUsedSheetZoom, watchSheetZoom } from '../lib/paperView'
 
 type PdfNoteViewProps = {
   path: string
@@ -105,8 +106,9 @@ function PdfPageCanvas({
     if (cssWidth < 8) return
     const base = page.getViewport({ scale: 1, rotation })
     const cssHeight = Math.max(1, Math.round(cssWidth * (base.height / Math.max(1, base.width))))
-    const { pixelWidth, pixelHeight } = paintSizeForPage(cssWidth, cssHeight)
-    const renderKey = `${cssWidth}x${cssHeight}@${pixelWidth}x${pixelHeight}:${rotation}`
+    const viewZoom = readUsedSheetZoom(host)
+    const { pixelWidth, pixelHeight } = paintSizeForPage(cssWidth, cssHeight, { viewZoom })
+    const renderKey = `${cssWidth}x${cssHeight}@${pixelWidth}x${pixelHeight}:${rotation}@${viewZoom.toFixed(2)}`
     if (renderKey === lastRenderKeyRef.current && canvas.width === pixelWidth && canvas.height === pixelHeight) {
       return
     }
@@ -128,7 +130,7 @@ function PdfPageCanvas({
       if (!context) return
       context.setTransform(1, 0, 0, 1, 0, 0)
       context.imageSmoothingEnabled = true
-      context.imageSmoothingQuality = 'low'
+      context.imageSmoothingQuality = 'high'
       context.fillStyle = '#ffffff'
       context.fillRect(0, 0, pixelWidth, pixelHeight)
       const task = livePage.render({
@@ -208,8 +210,10 @@ function PdfPageCanvas({
     }
     const observer = new ResizeObserver(schedule)
     observer.observe(host)
+    const stopZoom = watchSheetZoom(host, schedule)
     return () => {
       observer.disconnect()
+      stopZoom()
       if (resizeTimerRef.current !== null) window.clearTimeout(resizeTimerRef.current)
     }
   }, [render])

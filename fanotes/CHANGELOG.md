@@ -2,6 +2,10 @@
 
 ## Unveröffentlicht
 
+## 2026.8.68
+
+- **Schärfere Schrift auf PDF:** PDF-Seiten und Handschrift bleiben auf HiDPI-Bildschirmen scharf. Reinzoomen macht die Schrift nicht mehr pixelig und dick.
+
 ## 2026.8.67
 
 - **PDF im Stiftmodus:** Auf einem PDF kannst du wieder schreiben. Die Leiste mit Werkzeugen und Piktogrammen bleibt sichtbar.
