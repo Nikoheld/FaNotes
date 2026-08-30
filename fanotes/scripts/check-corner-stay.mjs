@@ -20,6 +20,12 @@ const {
   paintedStayExtent,
   paperOriginScrollDelta,
 } = await server.ssrLoadModule('/src/lib/noteCanvas.ts')
+const {
+  PAPER_DOT_TILE_PX,
+  paperRulingBackgroundPosition,
+  paperRulingPhase,
+  paperRulingTileOrigin,
+} = await server.ssrLoadModule('/src/lib/paperRuling.ts')
 
 const CORNERS = {
   'top-left': { x: 0.04, y: 0.03 },
@@ -52,6 +58,10 @@ const runOnce = () => {
   }
   const firstGrow = growPageFromMark({ ...start, originX: 0, originY: 0 }, CORNERS['top-left'], paintedFirst)
   assert.ok(firstGrow.padX > 0 && firstGrow.padY > 0, 'top-left must pad both min edges')
+  assert.ok(
+    firstGrow.padX % PAPER_DOT_TILE_PX !== 0 || firstGrow.padY % PAPER_DOT_TILE_PX !== 0,
+    'min-edge pad must not secretly land on the same ruling phase without an origin shift',
+  )
 
   const combined = growPageFromMark(
     { width: firstGrow.width, height: firstGrow.height, originX: firstGrow.padX, originY: firstGrow.padY },
@@ -62,6 +72,8 @@ const runOnce = () => {
   assert.ok(combined.height > firstGrow.height, 'bottom-right after a corner pad must still grow max-edge height')
 
   const sequence = markdownAndInkAfterGrowSequence(existingInk, text, start, samples, viewport)
+  const originTextPhase = paperRulingPhase(sequence.originTextX, sequence.originTextY, PAPER_DOT_TILE_PX)
+  const originInkPhase = paperRulingPhase(sequence.originInkX, sequence.originInkY, PAPER_DOT_TILE_PX)
   for (const [index, step] of sequence.steps.entries()) {
     assert.ok(
       Math.abs(step.visualTextX - sequence.originTextX) < 1e-6,
@@ -79,6 +91,30 @@ const runOnce = () => {
       Math.abs(step.visualInkY - sequence.originInkY) < 1e-6,
       `step ${index} ink Y ${step.visualInkY} must stay ${sequence.originInkY}`,
     )
+    const plane = { x: 0, y: 0, width: step.paintW, height: step.paintH }
+    const rulingOrigin = paperRulingTileOrigin(plane, { x: step.originX, y: step.originY })
+    assert.equal(rulingOrigin.x, step.originX, `step ${index} ruling origin X must follow the min-edge pad`)
+    assert.equal(rulingOrigin.y, step.originY, `step ${index} ruling origin Y must follow the min-edge pad`)
+    const rulingCss = paperRulingBackgroundPosition(rulingOrigin, plane)
+    assert.equal(rulingCss.x, step.originX)
+    assert.equal(rulingCss.y, step.originY)
+    const textPhase = paperRulingPhase(step.paperTextX, step.paperTextY, PAPER_DOT_TILE_PX, rulingOrigin.x, rulingOrigin.y)
+    const inkPhase = paperRulingPhase(step.paperInkX, step.paperInkY, PAPER_DOT_TILE_PX, rulingOrigin.x, rulingOrigin.y)
+    assert.ok(
+      Math.abs(textPhase.u - originTextPhase.u) < 1e-6 && Math.abs(textPhase.v - originTextPhase.v) < 1e-6,
+      `step ${index} text ruling phase ${textPhase.u},${textPhase.v} must stay ${originTextPhase.u},${originTextPhase.v}`,
+    )
+    assert.ok(
+      Math.abs(inkPhase.u - originInkPhase.u) < 1e-6 && Math.abs(inkPhase.v - originInkPhase.v) < 1e-6,
+      `step ${index} ink ruling phase ${inkPhase.u},${inkPhase.v} must stay ${originInkPhase.u},${originInkPhase.v}`,
+    )
+    if (step.originX > 0 || step.originY > 0) {
+      const unshiftedText = paperRulingPhase(step.paperTextX, step.paperTextY, PAPER_DOT_TILE_PX, 0, 0)
+      assert.ok(
+        Math.abs(unshiftedText.u - originTextPhase.u) > 1e-6 || Math.abs(unshiftedText.v - originTextPhase.v) > 1e-6,
+        `step ${index} a ruling pinned at 0,0 must slide the glyph on the lattice`,
+      )
+    }
   }
 
   const last = sequence.steps.at(-1)
@@ -89,10 +125,25 @@ const runOnce = () => {
 
   const board = readFileSync(join(root, 'src/components/DrawingBoard.tsx'), 'utf8')
   const noteCanvas = readFileSync(join(root, 'src/lib/noteCanvas.ts'), 'utf8')
+  const ruling = readFileSync(join(root, 'src/lib/paperRuling.ts'), 'utf8')
+  const css = readFileSync(join(root, 'src/styles.css'), 'utf8')
+  const rulingBlock = css.slice(
+    css.indexOf('.paper-sheet-plane > .paper-ruling {'),
+    css.indexOf('.paper-dots .paper-sheet-plane > .paper-ruling {'),
+  )
   assert.match(noteCanvas, /export const paintedStayExtent/)
   assert.match(noteCanvas, /export const markdownAndInkAfterGrowSequence/)
   assert.match(noteCanvas, /liveW = paintedStayExtent/)
   assert.match(noteCanvas, /finiteOriginPx\(pad\)/)
+  assert.match(noteCanvas, /originX: page\.originX/)
+  assert.match(noteCanvas, /paperTextX: stay\.textX/)
+  assert.match(ruling, /originPad/)
+  assert.match(ruling, /export const paperRulingTileOrigin/)
+  assert.match(ruling, /export const paperRulingBackgroundPosition/)
+  assert.match(ruling, /export const paperRulingPhase/)
+  assert.match(rulingBlock, /background-position:\s*var\(--text-origin-x/)
+  assert.match(rulingBlock, /var\(--text-origin-y/)
+  assert.doesNotMatch(rulingBlock, /background-position:\s*0\s+0/)
   assert.match(board, /originX: sourceOriginXRef\.current/)
   assert.match(board, /originY: sourceOriginYRef\.current/)
   assert.match(board, /growPageFromMark\(/)
@@ -100,9 +151,17 @@ const runOnce = () => {
   assert.match(board, /paintedStayExtent\(nextW/)
   assert.match(board, /paperOriginScrollDelta\(addX\)/)
   assert.match(board, /paperOriginScrollDelta\(addY\)/)
+  assert.match(board, /paperRulingTileOrigin\(/)
+  assert.match(board, /paperRulingBackgroundPosition\(/)
+  assert.match(board, /background-position/)
   assert.doesNotMatch(board, /paintedW > sourceWidthRef\.current/)
   assert.doesNotMatch(noteCanvas, /_painted/)
 
+  const lastOrigin = paperRulingTileOrigin(
+    { x: 0, y: 0, width: last.paintW, height: last.paintH },
+    { x: last.originX, y: last.originY },
+  )
+  const lastPhase = paperRulingPhase(last.paperTextX, last.paperTextY, PAPER_DOT_TILE_PX, lastOrigin.x, lastOrigin.y)
   return {
     firstPadX: sequence.steps[0].padX,
     firstPadY: sequence.steps[0].padY,
@@ -112,6 +171,10 @@ const runOnce = () => {
     visualTextY: last.visualTextY,
     visualInkX: last.visualInkX,
     visualInkY: last.visualInkY,
+    paperRulingPhaseU: lastPhase.u,
+    paperRulingPhaseV: lastPhase.v,
+    rulingOriginX: lastOrigin.x,
+    rulingOriginY: lastOrigin.y,
     paintW: last.paintW,
     paintH: last.paintH,
   }

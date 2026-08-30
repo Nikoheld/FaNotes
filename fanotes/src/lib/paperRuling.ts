@@ -48,9 +48,29 @@ export const paperRulingCoversCameraSides = (
   return coversPlane && left && top && right && bottom
 }
 
-export const paperRulingTileOrigin = (plane: RulingBox) => ({
-  x: plane.x,
-  y: plane.y,
+const finiteOriginPad = (value: number | undefined) => (
+  Math.max(0, Number.isFinite(value) ? Number(value) : 0)
+)
+
+/**
+ * Lattice origin follows the min-edge pad so a glyph stays on the same ruling
+ * line after a top/left grow. `originPad` is the CSS `--text-origin` pad.
+ */
+export const paperRulingTileOrigin = (
+  plane: RulingBox,
+  originPad: { x?: number; y?: number } = {},
+) => ({
+  x: plane.x + finiteOriginPad(originPad.x),
+  y: plane.y + finiteOriginPad(originPad.y),
+})
+
+/** background-position relative to the ruling element's padding box. */
+export const paperRulingBackgroundPosition = (
+  origin: RulingPoint,
+  plane: RulingBox,
+) => ({
+  x: origin.x - plane.x,
+  y: origin.y - plane.y,
 })
 
 export const paperRulingPhase = (

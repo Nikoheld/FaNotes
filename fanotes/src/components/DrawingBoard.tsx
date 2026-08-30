@@ -146,6 +146,10 @@ import {
   writeExtentFromContent,
 } from '../lib/noteCanvas'
 import {
+  paperRulingBackgroundPosition,
+  paperRulingTileOrigin,
+} from '../lib/paperRuling'
+import {
   continueStrokeAfterExtentGrow,
   growLiveInkAndMapNext,
   HAS_INK_EXTENT_CLASS,
@@ -1889,6 +1893,22 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     paper.classList.toggle(INK_WIDTH_ANCHOR_CLASS, inkWidthNeedsAnchor(styles.widthExtent))
     const plane = paper.closest('.paper-sheet-plane') as HTMLElement | null
     plane?.style.setProperty('--paper-scroll-room', `${SCROLL_ROOM}px`)
+    plane?.style.setProperty('--text-origin-x', origin.x)
+    plane?.style.setProperty('--text-origin-y', origin.y)
+    const ruling = plane?.querySelector('.paper-ruling') as HTMLElement | null
+    const planeBox = {
+      x: 0,
+      y: 0,
+      width: Math.max(1, plane?.offsetWidth || paper.offsetWidth || 1),
+      height: Math.max(1, plane?.offsetHeight || paper.offsetHeight || 1),
+    }
+    const tileOrigin = paperRulingTileOrigin(planeBox, {
+      x: sourceOriginXRef.current,
+      y: sourceOriginYRef.current,
+    })
+    const rulingPos = paperRulingBackgroundPosition(tileOrigin, planeBox)
+    const rulingCss = textOriginCssPx(rulingPos.x, rulingPos.y)
+    ruling?.style.setProperty('background-position', `${rulingCss.x} ${rulingCss.y}`)
     inkExtentPaperRef.current = paper
   }, [resolvePaperElement])
 

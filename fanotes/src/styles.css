@@ -1213,7 +1213,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   background-repeat: repeat;
   background-origin: padding-box;
   background-attachment: local;
-  background-position: 0 0;
+  background-position: var(--text-origin-x, 0px) var(--text-origin-y, 0px);
 }
 .paper-dots .paper-sheet-plane > .paper-ruling {
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28'%3E%3Ccircle cx='14' cy='14' r='0.8' fill='rgba(82,91,116,0.19)'/%3E%3C/svg%3E");

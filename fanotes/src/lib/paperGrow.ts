@@ -486,7 +486,10 @@ export const a4AspectBoardSize = (
 export const clearInkExtentStyles = (paper: {
   classList?: { remove: (...names: string[]) => void }
   style?: { removeProperty: (name: string) => void }
-  closest?: (selector: string) => { style?: { removeProperty: (name: string) => void } } | null
+  closest?: (selector: string) => {
+    style?: { removeProperty: (name: string) => void }
+    querySelector?: (selector: string) => { style?: { removeProperty: (name: string) => void } } | null
+  } | null
 } | null) => {
   if (!paper) return
   paper.classList?.remove(HAS_INK_EXTENT_CLASS, INK_WIDTH_ANCHOR_CLASS)
@@ -496,5 +499,9 @@ export const clearInkExtentStyles = (paper: {
   paper.style?.removeProperty('--ink-page-height')
   paper.style?.removeProperty('--text-origin-x')
   paper.style?.removeProperty('--text-origin-y')
-  paper.closest?.('.paper-sheet-plane')?.style?.removeProperty('--paper-scroll-room')
+  const plane = paper.closest?.('.paper-sheet-plane')
+  plane?.style?.removeProperty('--paper-scroll-room')
+  plane?.style?.removeProperty('--text-origin-x')
+  plane?.style?.removeProperty('--text-origin-y')
+  plane?.querySelector?.('.paper-ruling')?.style?.removeProperty('background-position')
 }

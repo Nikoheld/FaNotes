@@ -2,6 +2,10 @@
 
 ## Unveröffentlicht
 
+## 2026.8.77
+
+- **Lineatur bleibt unter der Schrift:** Wenn du in eine Ecke des Blatts schreibst, rutscht der Text nicht mehr über die Linien. Die Lineatur wandert mit dem Ursprung mit — Schrift, Tinte und Gitter bleiben zusammen.
+
 ## 2026.8.76
 
 - **Ecken schreiben verschiebt die Schrift nicht:** Wenn du in eine Ecke des Blatts schreibst, bleibt die schon vorhandene Schrift auf den Linien. Das Blatt wächst weiter — der Text rutscht nicht.
