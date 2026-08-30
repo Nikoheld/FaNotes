@@ -2,6 +2,10 @@
 
 ## Unveröffentlicht
 
+## 2026.8.75
+
+- **Handschrift bleibt bei 500% Zoom scharf:** Auch wenn du von der normalen Ansicht weit reinzoomst, bleibt die Tinte klar. Sie wird nicht pixelig und dick.
+
 ## 2026.8.74
 
 - **Handschrift bleibt bei 500% Zoom scharf:** Weit reinzoomen macht Tinte und PDF-Schrift nicht pixelig. Die Linie bleibt klar — auch bei 500%.

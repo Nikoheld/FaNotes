@@ -107,7 +107,9 @@ import {
   INK_TOOLBAR_SLOT_ID,
   FULL_INK_WINDOW,
   inkWindowLayoutStyle,
+  isFullInkWindow,
   layoutInkWindow,
+  resolveInkOverlayWindow,
   markdownNoteInkOverlaySize,
   pdfOverlayPointFromClient,
   pdfOverlaySourceHeight,
@@ -251,7 +253,6 @@ const computeInkPixelSize = (layoutWidth: number, layoutHeight: number, viewZoom
 
 type InkWindow = { y0: number; y1: number }
 const inkWindowSpan = (window: InkWindow) => Math.max(0.06, Math.min(1, window.y1 - window.y0))
-const isFullInkWindow = (window: InkWindow) => window.y0 <= 0.002 && window.y1 >= 0.998
 /** Wait for compositor fling to die before moving the ink canvas on the paper. */
 const INK_WINDOW_IDLE_MS = 320
 
@@ -286,17 +287,6 @@ const measureInkWindow = (paper: HTMLElement, scroller: HTMLElement, viewZoom: n
     viewZoom,
   })
 )
-
-const inkWindowsDiffer = (left: InkWindow, right: InkWindow) => (
-  Math.abs(left.y0 - right.y0) > 0.04 || Math.abs(left.y1 - right.y1) > 0.04
-)
-
-const visibleFitsInkWindow = (window: InkWindow, visible: InkWindow) => {
-  if (isFullInkWindow(visible)) return isFullInkWindow(window)
-  if (isFullInkWindow(window)) return true
-  const margin = 0.05
-  return visible.y0 >= window.y0 + margin && visible.y1 <= window.y1 - margin
-}
 
 const strokeIntersectsWindow = (stroke: { points: Array<{ y: number }> }, window: InkWindow) => {
   let minY = 1
@@ -1747,13 +1737,13 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     }
     const zoom = viewZoomRef.current || 1
     const visible = measureVisibleInkRange(paper, scroller, zoom)
-    if (!force && visibleFitsInkWindow(inkWindowRef.current, visible)) return
     const next = measureInkWindow(paper, scroller, zoom)
-    if (!force && !inkWindowsDiffer(inkWindowRef.current, next)) return
-    inkWindowRef.current = next
+    const resolved = resolveInkOverlayWindow(inkWindowRef.current, visible, next, force)
+    if (resolved === inkWindowRef.current) return
+    inkWindowRef.current = resolved
     committedCanvasDirtyRef.current = true
     canvasQualityKeyRef.current = ''
-    applyInkWindowToCanvases([canvasRef.current, committedCanvasRef.current], next)
+    applyInkWindowToCanvases([canvasRef.current, committedCanvasRef.current], resolved)
     scheduleRedraw()
   }, [inline, resolvePaperElement, scheduleRedraw])
 
@@ -2198,15 +2188,17 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
 
   // Re-rasterize ink at higher backing-store resolution after zoom settles so
   // zoomed handwriting stays sharp instead of a stretched low-res bitmap.
+  // Force the keep-vs-window decision: a 100% full overlay must become a 500% slice.
   useEffect(() => {
     const timer = window.setTimeout(() => {
       if (activeStrokeRef.current) return
+      syncInkWindow(true)
       canvasQualityKeyRef.current = ''
       committedCanvasDirtyRef.current = true
       redraw(true)
     }, 90)
     return () => window.clearTimeout(timer)
-  }, [redraw, viewZoom])
+  }, [redraw, syncInkWindow, viewZoom])
 
   useEffect(() => {
     applyInkExtentStyles(sourceHeight, sourceWidth)

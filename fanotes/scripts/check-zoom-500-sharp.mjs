@@ -17,7 +17,14 @@ const {
   inkOverlayPixelSize,
   inkViewQualityZoom,
 } = await server.ssrLoadModule('/src/lib/paperGrow.ts')
-const { FULL_INK_WINDOW, inkWindowSpan, layoutInkWindow } = await server.ssrLoadModule('/src/lib/pdfInkHit.ts')
+const {
+  FULL_INK_WINDOW,
+  inkWindowSpan,
+  isFullInkWindow,
+  layoutInkWindow,
+  resolveInkOverlayWindow,
+  visibleFitsInkWindow,
+} = await server.ssrLoadModule('/src/lib/pdfInkHit.ts')
 const {
   MAX_PDF_VIEW_QUALITY_ZOOM,
   paintBoxForPage,
@@ -50,15 +57,43 @@ const runOnce = () => {
   })
   assert.deepEqual(at100, FULL_INK_WINDOW)
 
-  const inkWindow = layoutInkWindow({
+  const visible500 = layoutInkWindow({
+    paperHeight: A4.height,
+    viewHeight: VIEW.height,
+    scrollTop: 0,
+    viewZoom: ZOOM_500,
+    padRatio: 0,
+  })
+  const next500 = layoutInkWindow({
     paperHeight: A4.height,
     viewHeight: VIEW.height,
     scrollTop: 0,
     viewZoom: ZOOM_500,
   })
+  assert.ok(!isFullInkWindow(visible500), `500% visible slice must not be full, got ${JSON.stringify(visible500)}`)
+  assert.equal(
+    visibleFitsInkWindow(FULL_INK_WINDOW, visible500),
+    false,
+    'a full overlay must not keep covering a 500% visible slice',
+  )
+  const fromFull = resolveInkOverlayWindow(FULL_INK_WINDOW, visible500, next500, false)
+  const fromFullForced = resolveInkOverlayWindow(FULL_INK_WINDOW, visible500, next500, true)
+  assert.equal(fromFull, next500)
+  assert.equal(fromFullForced, next500)
+  assert.ok(!isFullInkWindow(fromFull), `100%→500% keep-vs-window must leave the full overlay, got ${JSON.stringify(fromFull)}`)
+  const kept = resolveInkOverlayWindow(next500, visible500, next500, false)
+  assert.equal(kept, next500)
+
+  const inkWindow = fromFull
   assert.ok(inkWindow.y1 - inkWindow.y0 < 0.94, `500% A4 must window the visible slice, got ${JSON.stringify(inkWindow)}`)
   const windowHeight = A4.height * inkWindowSpan(inkWindow)
   const ink500 = inkOverlayPixelSize(A4.width, windowHeight, ZOOM_500, true, DPR)
+  const fullAt500 = inkOverlayPixelSize(A4.width, A4.height, ZOOM_500, true, DPR)
+  const fullPerVisual = pixelsPerVisualCss(fullAt500.width, A4.width, ZOOM_500)
+  assert.ok(
+    fullPerVisual < DPR * 0.85,
+    `a kept full A4 at 5× must still be the budget-capped miss this check exists to catch, got ${fullPerVisual.toFixed(3)}`,
+  )
   const inkPerVisual = pixelsPerVisualCss(ink500.width, A4.width, ZOOM_500)
   assert.ok(
     inkPerVisual >= DPR * 0.85,
@@ -80,7 +115,7 @@ const runOnce = () => {
   const ink300PerVisual = pixelsPerVisualCss(ink300.width, A4.width, ZOOM_300)
   assert.ok(ink300PerVisual >= DPR * 0.85, `3× control must stay HiDPI, got ${ink300PerVisual.toFixed(3)}`)
 
-  const visible500 = visiblePageCssWindow({
+  const pdfVisible500 = visiblePageCssWindow({
     pageWidth: A4.width,
     pageHeight: A4.height,
     viewWidth: VIEW.width,
@@ -89,21 +124,21 @@ const runOnce = () => {
     scrollTop: 0,
     pageOffsetTop: 0,
   })
-  assert.ok(visible500.height < A4.height * 0.8, `500% PDF window must be the viewport, got ${visible500.height}`)
+  assert.ok(pdfVisible500.height < A4.height * 0.8, `500% PDF window must be the viewport, got ${pdfVisible500.height}`)
   const pdf500 = paintBoxForPage(A4.width, A4.height, {
     dpr: DPR,
     viewZoom: ZOOM_500,
-    visibleLeft: visible500.left,
-    visibleTop: visible500.top,
-    visibleCssWidth: visible500.width,
-    visibleCssHeight: visible500.height,
+    visibleLeft: pdfVisible500.left,
+    visibleTop: pdfVisible500.top,
+    visibleCssWidth: pdfVisible500.width,
+    visibleCssHeight: pdfVisible500.height,
   })
   const pdfPerVisual = pixelsPerVisualCss(pdf500.pixelWidth, pdf500.cssWidth, ZOOM_500)
   assert.ok(
     pdfPerVisual >= DPR * 0.85,
     `visible PDF at 500% must stay near DPR, got ${pdfPerVisual.toFixed(3)} (bitmap ${pdf500.pixelWidth} for ${pdf500.cssWidth} CSS)`,
   )
-  assert.ok(pdf500.cssHeight <= visible500.height + 1, 'windowed PDF bitmap must not cover the full sheet when the budget cannot')
+  assert.ok(pdf500.cssHeight <= pdfVisible500.height + 1, 'windowed PDF bitmap must not cover the full sheet when the budget cannot')
 
   const pdf300Visible = visiblePageCssWindow({
     pageWidth: A4.width,
@@ -131,7 +166,11 @@ const runOnce = () => {
   const pdfDoc = readFileSync(join(root, 'src', 'lib', 'pdfDocument.ts'), 'utf8')
   assert.match(board, /inkOverlayPixelSize\(/)
   assert.match(board, /layoutInkWindow\(/)
+  assert.match(board, /resolveInkOverlayWindow\(/)
+  assert.match(board, /syncInkWindow\(true\)/)
   assert.match(board, /viewZoomRef\.current/)
+  assert.match(inkHit, /export const resolveInkOverlayWindow/)
+  assert.match(inkHit, /isFullInkWindow\(window\)\) return false/)
   assert.match(pdf, /paintBoxForPage\(/)
   assert.match(pdf, /visiblePageCssWindow\(/)
   assert.match(pdf, /viewZoom/)
@@ -154,6 +193,8 @@ const runOnce = () => {
     inkWindowSpan: Number(inkWindowSpan(inkWindow).toFixed(4)),
     pdfCssHeight: Math.round(pdf500.cssHeight),
     stretched3x: Number(stretched3x.toFixed(4)),
+    fullPerVisual: Number(fullPerVisual.toFixed(4)),
+    fromFullSpan: Number(inkWindowSpan(fromFull).toFixed(4)),
   }
 }
 

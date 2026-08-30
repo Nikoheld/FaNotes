@@ -116,6 +116,35 @@ export const isFullInkWindow = (window: InkWindow) => window.y0 <= 0.002 && wind
 
 export const inkWindowSpan = (window: InkWindow) => Math.max(0.06, Math.min(1, window.y1 - window.y0))
 
+export const inkWindowsDiffer = (left: InkWindow, right: InkWindow) => (
+  Math.abs(left.y0 - right.y0) > 0.04 || Math.abs(left.y1 - right.y1) > 0.04
+)
+
+/**
+ * Whether the current overlay already covers the visible slice.
+ * A full overlay covers every paper y, but at 500% that bitmap is budget-capped
+ * and stretched — a slice visible range must replace it.
+ */
+export const visibleFitsInkWindow = (window: InkWindow, visible: InkWindow) => {
+  if (isFullInkWindow(visible)) return isFullInkWindow(window)
+  if (isFullInkWindow(window)) return false
+  const margin = 0.05
+  return visible.y0 >= window.y0 + margin && visible.y1 <= window.y1 - margin
+}
+
+/** Keep-vs-window decision for scroll and zoom. Zoom must pass force so 100%→500% windows. */
+export const resolveInkOverlayWindow = (
+  current: InkWindow,
+  visible: InkWindow,
+  next: InkWindow,
+  force = false,
+): InkWindow => {
+  if (force) return next
+  if (visibleFitsInkWindow(current, visible)) return current
+  if (!inkWindowsDiffer(current, next)) return current
+  return next
+}
+
 /** CSS pad that pins the painted bitmap to the paper inside the extra-room overlay. */
 export const INK_WINDOW_PAD_CSS = 'var(--paper-scroll-room, 0px)'
 
