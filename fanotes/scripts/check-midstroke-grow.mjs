@@ -176,7 +176,7 @@ try {
   const growAt = board.indexOf('ensureWriteRoom(point.y, point.x)', appendAt)
   const continueAt = board.indexOf('continueStrokeAfterExtentGrow(lastSnapshot', appendAt)
   assert.ok(usableAt >= 0 && snapshotAt > usableAt && growAt > snapshotAt && continueAt > growAt, 'appendPointerEvent must snapshot last, grow, then continueStrokeAfterExtentGrow(lastSnapshot)')
-  assert.match(board, /return \{\s*prev: \{ width: prevW, height: prevH \},\s*next: grown,\s*\}/)
+  assert.match(board, /prev: \{ width: prevPaintW, height: prevPaintH \}/)
   assert.equal(board.includes('acceptNextCommittedInkSample'), false)
 
   console.log(JSON.stringify({

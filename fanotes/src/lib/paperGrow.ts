@@ -27,6 +27,7 @@ export {
   growWriteExtent,
   growWriteOrigin,
   growPageFromMark,
+  paintedStayExtent,
   writePageLayoutSize,
   keepMarkOnPage,
   textOriginCssPx,

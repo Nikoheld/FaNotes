@@ -53,6 +53,13 @@ export type CanvasViewport = {
 
 const finitePositive = (value: number) => (Number.isFinite(value) && value > 0 ? value : 0)
 
+/** Painted paper box is the 0–1 space (pointer mapping). Ignore 0×0 first layout. */
+export const paintedStayExtent = (source: number, painted = 0) => {
+  const live = Number.isFinite(painted) && painted > 1 ? painted : 0
+  const base = Number.isFinite(source) && source > 0 ? source : 0
+  return Math.max(base, live)
+}
+
 /** Grow the max edge so a 0–1 mark plus write margin still fits. Repeats at the new edge. */
 export const growWriteExtent = (
   normalized: number | undefined,
@@ -105,20 +112,24 @@ export type CanvasOrigin = {
 export const growPageFromMark = (
   extent: CanvasSize & CanvasOrigin,
   mark: { x?: number; y?: number },
-  _painted: { width?: number; height?: number } = {},
+  painted: { width?: number; height?: number } = {},
 ) => {
   const haveX = Math.max(0, Number.isFinite(extent.originX) ? Number(extent.originX) : 0)
   const haveY = Math.max(0, Number.isFinite(extent.originY) ? Number(extent.originY) : 0)
-  const wantX = growWriteOrigin(mark.x, extent.width, WRITE_MARGIN_X, GROW_STEP_X)
-  const wantY = growWriteOrigin(mark.y, extent.height, WRITE_MARGIN_Y, GROW_STEP_Y)
+  const liveW = paintedStayExtent(extent.width, painted.width)
+  const liveH = paintedStayExtent(extent.height, painted.height)
+  const wantX = growWriteOrigin(mark.x, liveW, WRITE_MARGIN_X, GROW_STEP_X)
+  const wantY = growWriteOrigin(mark.y, liveH, WRITE_MARGIN_Y, GROW_STEP_Y)
   const padX = Math.max(0, wantX - haveX)
   const padY = Math.max(0, wantY - haveY)
   const width = Math.max(
-    growWriteExtent(mark.x, extent.width, WRITE_MARGIN_X, GROW_STEP_X),
+    growWriteExtent(mark.x, liveW, WRITE_MARGIN_X, GROW_STEP_X),
+    liveW + padX,
     extent.width + padX,
   )
   const height = Math.max(
-    growWriteExtent(mark.y, extent.height, WRITE_MARGIN_Y, GROW_STEP_Y),
+    growWriteExtent(mark.y, liveH, WRITE_MARGIN_Y, GROW_STEP_Y),
+    liveH + padY,
     extent.height + padY,
   )
   return {
@@ -163,15 +174,14 @@ export const textOriginCssPx = (originX: number, originY: number) => ({
   y: `${Math.round(finiteOriginPx(originY))}px`,
 })
 
-/** Camera delta that keeps pre-grow paper pixels in view after a min-edge pad. */
+/** Camera delta that keeps pre-grow paper pixels in view after a min-edge pad.
+ * Origin is applied as CSS px, so the scroller must pan by that same CSS pad —
+ * scaling pad by layout/source slides typed text on the ruling. */
 export const paperOriginScrollDelta = (
   pad: number,
-  nextExtent: number,
-  nextLayout: number,
-) => {
-  if (!(nextExtent > 0) || !(nextLayout > 0)) return 0
-  return (finiteOriginPx(pad) / nextExtent) * nextLayout
-}
+  _nextExtent?: number,
+  _nextLayout?: number,
+) => finiteOriginPx(pad)
 
 /**
  * Ink and typed text on the same paper pixels through a min-edge grow.
@@ -184,15 +194,20 @@ export const markdownAndInkAfterMinEdgeGrow = (
   prev: CanvasSize,
   next: CanvasSize & { padX: number; padY: number },
   layout: CanvasSize = next,
+  prevLayout: CanvasSize = prev,
 ) => {
   const padX = finiteOriginPx(next.padX)
   const padY = finiteOriginPx(next.padY)
-  const inkX = keepMarkOnPage(mark.x, prev.width, next.width, padX) * next.width
-  const inkY = keepMarkOnPage(mark.y, prev.height, next.height, padY) * next.height
+  const prevW = paintedStayExtent(prev.width, prevLayout.width)
+  const prevH = paintedStayExtent(prev.height, prevLayout.height)
+  const nextW = paintedStayExtent(next.width, layout.width)
+  const nextH = paintedStayExtent(next.height, layout.height)
+  const inkX = keepMarkOnPage(mark.x, prevW, nextW, padX) * nextW
+  const inkY = keepMarkOnPage(mark.y, prevH, nextH, padY) * nextH
   const textX = text.x + padX
   const textY = text.y + padY
-  const scrollX = paperOriginScrollDelta(padX, next.width, layout.width)
-  const scrollY = paperOriginScrollDelta(padY, next.height, layout.height)
+  const scrollX = paperOriginScrollDelta(padX, nextW, nextW)
+  const scrollY = paperOriginScrollDelta(padY, nextH, nextH)
   return {
     origin: textOriginCssPx(padX, padY),
     inkX,
@@ -221,20 +236,30 @@ export const markdownAndInkAfterGrowSequence = (
   text: { x: number; y: number },
   start: CanvasSize,
   samples: { x: number; y: number }[],
+  painted: CanvasSize = start,
 ) => {
   let page: CanvasSize & CanvasOrigin = { ...start, originX: 0, originY: 0 }
+  let paintW = paintedStayExtent(start.width, painted.width)
+  let paintH = paintedStayExtent(start.height, painted.height)
   let ink = { ...mark }
   let glyph = { ...text }
   let cameraX = 0
   let cameraY = 0
   const steps = samples.map((sample) => {
-    const grown = growPageFromMark(page, sample)
-    const stay = markdownAndInkAfterMinEdgeGrow(ink, glyph, page, grown)
+    const prevPaint = { width: paintW, height: paintH }
+    const grown = growPageFromMark(page, sample, prevPaint)
+    const nextPaint = {
+      width: paintedStayExtent(grown.width, paintW),
+      height: paintedStayExtent(grown.height, paintH),
+      padX: grown.padX,
+      padY: grown.padY,
+    }
+    const stay = markdownAndInkAfterMinEdgeGrow(ink, glyph, prevPaint, nextPaint, nextPaint, prevPaint)
     cameraX += stay.scrollX
     cameraY += stay.scrollY
     ink = {
-      x: grown.width > 0 ? stay.inkX / grown.width : ink.x,
-      y: grown.height > 0 ? stay.inkY / grown.height : ink.y,
+      x: nextPaint.width > 0 ? stay.inkX / nextPaint.width : ink.x,
+      y: nextPaint.height > 0 ? stay.inkY / nextPaint.height : ink.y,
     }
     glyph = { x: stay.textX, y: stay.textY }
     page = {
@@ -243,11 +268,15 @@ export const markdownAndInkAfterGrowSequence = (
       originX: (page.originX ?? 0) + grown.padX,
       originY: (page.originY ?? 0) + grown.padY,
     }
+    paintW = nextPaint.width
+    paintH = nextPaint.height
     return {
       padX: grown.padX,
       padY: grown.padY,
       width: grown.width,
       height: grown.height,
+      paintW,
+      paintH,
       visualInkX: stay.inkX - cameraX,
       visualInkY: stay.inkY - cameraY,
       visualTextX: stay.textX - cameraX,
@@ -255,8 +284,8 @@ export const markdownAndInkAfterGrowSequence = (
     }
   })
   return {
-    originInkX: mark.x * start.width,
-    originInkY: mark.y * start.height,
+    originInkX: mark.x * paintedStayExtent(start.width, painted.width),
+    originInkY: mark.y * paintedStayExtent(start.height, painted.height),
     originTextX: text.x,
     originTextY: text.y,
     cameraX,

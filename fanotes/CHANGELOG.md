@@ -2,6 +2,10 @@
 
 ## Unveröffentlicht
 
+## 2026.8.76
+
+- **Ecken schreiben verschiebt die Schrift nicht:** Wenn du in eine Ecke des Blatts schreibst, bleibt die schon vorhandene Schrift auf den Linien. Das Blatt wächst weiter — der Text rutscht nicht.
+
 ## 2026.8.75
 
 - **Handschrift bleibt bei 500% Zoom scharf:** Auch wenn du von der normalen Ansicht weit reinzoomst, bleibt die Tinte klar. Sie wird nicht pixelig und dick.
