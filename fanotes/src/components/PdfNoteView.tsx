@@ -124,12 +124,13 @@ function PdfPageCanvas({
       const viewport = livePage.getViewport({ scale, rotation })
       liveCanvas.width = pixelWidth
       liveCanvas.height = pixelHeight
-      liveCanvas.style.removeProperty('width')
-      liveCanvas.style.removeProperty('height')
+      liveCanvas.style.width = `${cssWidth}px`
+      liveCanvas.style.height = `${cssHeight}px`
       const context = liveCanvas.getContext('2d', { alpha: false })
       if (!context) return
       context.setTransform(1, 0, 0, 1, 0, 0)
-      context.imageSmoothingEnabled = true
+      const integerScale = Math.abs(scale - Math.round(scale)) < 0.02
+      context.imageSmoothingEnabled = !integerScale
       context.imageSmoothingQuality = 'high'
       context.fillStyle = '#ffffff'
       context.fillRect(0, 0, pixelWidth, pixelHeight)

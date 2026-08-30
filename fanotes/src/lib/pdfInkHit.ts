@@ -106,6 +106,80 @@ export type PdfPageBox = { top: number; height: number }
 
 export type PdfOverlayBox = { left: number; top: number; width: number; height: number }
 
+export type InkWindow = { y0: number; y1: number }
+
+export const FULL_INK_WINDOW: InkWindow = { y0: 0, y1: 1 }
+
+const clamp01 = (value: number) => Math.max(0, Math.min(1, value))
+
+export const isFullInkWindow = (window: InkWindow) => window.y0 <= 0.002 && window.y1 >= 0.998
+
+export const inkWindowSpan = (window: InkWindow) => Math.max(0.06, Math.min(1, window.y1 - window.y0))
+
+/**
+ * CSS box of a windowed ink canvas on the overlay (0–1 paper), not the plane
+ * extra-room pad. Insetting by `--paper-scroll-room` painted marks 560px below
+ * the stylus and made a later window settle look like a jump-then-snap.
+ */
+export const inkWindowLayoutStyle = (window: InkWindow) => {
+  const full = isFullInkWindow(window)
+  const span = inkWindowSpan(window)
+  return {
+    top: full ? '0%' : `${(window.y0 * 100).toFixed(4)}%`,
+    height: full ? '100%' : `${(span * 100).toFixed(4)}%`,
+    left: '0px',
+    right: '0px',
+    width: 'auto',
+    bottom: 'auto',
+  } as const
+}
+
+/** Overlay 0–1 of a mark after the window canvas is positioned with inkWindowLayoutStyle. */
+export const inkMarkOverlayY = (markY: number, window: InkWindow) => {
+  const style = inkWindowLayoutStyle(window)
+  const top = Number.parseFloat(style.top) / 100
+  const height = Number.parseFloat(style.height) / 100
+  const span = inkWindowSpan(window)
+  return top + ((markY - window.y0) / span) * height
+}
+
+/**
+ * Visible ink slice from layout scroll, not getBoundingClientRect.
+ * Visual rects lag compositor fling, so a window sized from them moves the
+ * ink canvas on the paper — marks jump, erase misses, then they snap back.
+ */
+export const layoutInkWindow = (input: {
+  paperHeight: number
+  viewHeight: number
+  scrollTop: number
+  viewZoom?: number
+  padRatio?: number
+}): InkWindow => {
+  const paperHeight = Math.max(1, Number(input.paperHeight) || 1)
+  const viewHeight = Math.max(1, Number(input.viewHeight) || 1)
+  const zoom = Math.max(0.01, Number(input.viewZoom) || 1)
+  const visualPaper = paperHeight * zoom
+  if (paperHeight < 1_600 || visualPaper <= viewHeight * 1.35) return { ...FULL_INK_WINDOW }
+  const padRatio = Number.isFinite(input.padRatio) ? Number(input.padRatio) : 1.6
+  const pad = Math.min(0.45, (viewHeight * Math.max(0, padRatio)) / visualPaper)
+  const scrollTop = Math.max(0, Number(input.scrollTop) || 0)
+  const y0 = clamp01(scrollTop / visualPaper - pad)
+  const y1 = clamp01((scrollTop + viewHeight) / visualPaper + pad)
+  if (y1 - y0 >= 0.94) return { ...FULL_INK_WINDOW }
+  return { y0, y1 }
+}
+
+/** Same paper point after overlay and page boxes translate together (native pan). */
+export const pdfOverlayShiftedBy = (
+  overlay: PdfOverlayBox,
+  pages: readonly PdfPageBox[],
+  dx: number,
+  dy: number,
+) => ({
+  overlay: { ...overlay, left: overlay.left + dx, top: overlay.top + dy },
+  pages: pages.map((page) => ({ ...page, top: page.top + dy })),
+})
+
 /** Overlay 0–1 from a client sample. Page bands come from stacked PDF boxes, not an A4 card. */
 export const pdfOverlayPointFromClient = (
   clientX: number,

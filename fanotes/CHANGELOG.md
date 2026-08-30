@@ -2,6 +2,10 @@
 
 ## Unveröffentlicht
 
+## 2026.8.70
+
+- **PDF-Schrift bleibt scharf und sitzt fest:** Auf einem PDF ist die Schrift nicht mehr pixelig und dick. Beim Scrollen bleibt die Handschrift genau auf dem Blatt — sie rutscht nicht weg und springt nicht zurück.
+
 ## 2026.8.69
 
 - **Reinzoomen vergrössert die Schrift mit dem Blatt:** Beim Hineinzoomen bleibst du auf dem Papierpunkt, wo die Schrift steht. Du zoomst in den Text hinein wie in OneNote — Lineatur, Tinte und Schrift bleiben zusammen und rutschen nicht weg.

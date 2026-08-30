@@ -106,6 +106,7 @@ import {
   INLINE_INK_ACTIVE_CLASS,
   INK_TOOLBAR_SLOT_ID,
   FULL_INK_WINDOW,
+  inkWindowLayoutStyle,
   layoutInkWindow,
   markdownNoteInkOverlaySize,
   pdfOverlayPointFromClient,
@@ -301,22 +302,17 @@ const strokeIntersectsWindow = (stroke: { points: Array<{ y: number }> }, window
 }
 
 const applyInkWindowToCanvases = (canvases: Array<HTMLCanvasElement | null>, window: InkWindow) => {
-  // Inline overlay is extra paper around the write page. Pin the bitmap to the
-  // page (same box as pointer mapping), not to overlay top/100% — that painted
-  // the line much further up than the stylus.
-  const pad = 'var(--paper-scroll-room, 0px)'
-  const paperH = `calc(100% - 2 * ${pad})`
-  const top = isFullInkWindow(window) ? pad : `calc(${pad} + ${window.y0} * ${paperH})`
-  const height = isFullInkWindow(window) ? paperH : `calc(${inkWindowSpan(window)} * ${paperH})`
-  const left = pad
+  // Pin the bitmap to the overlay (0–1 paper). Never inset by plane extra-room:
+  // that left handwriting 560px low, then a window settle snapped it back.
+  const box = inkWindowLayoutStyle(window)
   for (const canvas of canvases) {
     if (!canvas) continue
-    if (canvas.style.top !== top) canvas.style.top = top
-    if (canvas.style.height !== height) canvas.style.height = height
-    if (canvas.style.left !== left) canvas.style.left = left
-    if (canvas.style.right !== left) canvas.style.right = left
-    if (canvas.style.width !== 'auto') canvas.style.width = 'auto'
-    if (canvas.style.bottom !== 'auto') canvas.style.bottom = 'auto'
+    if (canvas.style.top !== box.top) canvas.style.top = box.top
+    if (canvas.style.height !== box.height) canvas.style.height = box.height
+    if (canvas.style.left !== box.left) canvas.style.left = box.left
+    if (canvas.style.right !== box.right) canvas.style.right = box.right
+    if (canvas.style.width !== box.width) canvas.style.width = box.width
+    if (canvas.style.bottom !== box.bottom) canvas.style.bottom = box.bottom
   }
 }
 
@@ -1830,7 +1826,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       resizeDebounceRef.current = window.setTimeout(() => {
         resizeDebounceRef.current = null
         flushPaintedLayoutGrow()
-        syncInkWindow()
+        // Do not syncInkWindow here: PDF virtualization used to change page
+        // boxes mid-fling and move the ink canvas off the written 0–1 point.
         redraw(true)
       }, 90)
     }
@@ -1849,15 +1846,24 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         syncInkWindow()
       }, INK_WINDOW_IDLE_MS)
     }
+    const onScrollEnd = () => {
+      if (inkWindowIdleRef.current !== null) window.clearTimeout(inkWindowIdleRef.current)
+      inkWindowIdleRef.current = null
+      if (activeStrokeRef.current) {
+        resizeDirtyRef.current = true
+        return
+      }
+      syncInkWindow()
+    }
     scroller?.addEventListener('scroll', settleInkWindow, { passive: true })
-    scroller?.addEventListener('scrollend', settleInkWindow, { passive: true })
+    scroller?.addEventListener('scrollend', onScrollEnd, { passive: true })
     syncInkWindow(true)
     redraw(true)
     return () => {
       mountedRef.current = false
       observer.disconnect()
       scroller?.removeEventListener('scroll', settleInkWindow)
-      scroller?.removeEventListener('scrollend', settleInkWindow)
+      scroller?.removeEventListener('scrollend', onScrollEnd)
       if (inkWindowIdleRef.current !== null) window.clearTimeout(inkWindowIdleRef.current)
       if (resizeDebounceRef.current !== null) window.clearTimeout(resizeDebounceRef.current)
       if (drawFrameRef.current !== null) cancelAnimationFrame(drawFrameRef.current)

@@ -87,6 +87,7 @@ const safeguards = [
   ['INK_MAX_CANVAS_PIXELS_TALL', 'Tintenbudget auf langen PDF-Seiten bleibt lesbar'],
   ['inkOverlayPixelSize', 'Tinten-Bitmap folgt HiDPI und Zoom'],
   ['layoutInkWindow', 'PDF-Tintenfenster folgt Layout-Scroll, nicht der Compositor-Rect'],
+  ['inkWindowLayoutStyle', 'Tintenfenster sitzt auf dem Overlay, nicht im Kamerapolster'],
   ['pdfOverlayShiftedBy', 'Pan verschiebt Overlay und Seiten gemeinsam'],
   ['pdfOverlayPointFromClient(event.clientX, event.clientY, surface, pages)', 'PDF-Stift mappt über den gelieferten Overlay-Helper'],
   ['const measureInkWindow', 'Tinten-Bitmap nur für den sichtbaren Blattausschnitt'],
@@ -150,6 +151,8 @@ const worksheetStyleSafeguards = [
   ['Sit above the full-sheet ink canvas so Entfernen stays clickable in pen mode.', 'PDF-Entfernen bleibt im Stiftmodus klickbar'],
   ['.pdf-note-view.is-inking .pdf-note-page canvas', 'PDF-Canvas nimmt den Stift nicht, wenn Tinte an ist'],
   ['.unified-paper.is-pdf-note.has-ink-extent', 'PDF-Notiz wächst mit den Seiten, Overlay deckt das Blatt'],
+  ['content-visibility: visible', 'PDF-Seiten rasterisieren nicht als 1×-Platzhalter'],
+  ['contain: none', 'kein contain:strict auf PDF-Seiten (sonst springt und verpixelt die Schrift)'],
 ]
 
 const paperViewSafeguards = [
@@ -185,7 +188,7 @@ const lockSafeguards = [
   ['lastSnapshot', 'Letzter Stiftpunkt wird vor dem Wachsen kopiert, nicht zweimal remappt'],
   ['.lw-drawing-board.is-inline .lw-canvas-surface{position:absolute;inset:0', 'Stiftfläche deckt extra Papier ab'],
   ['markdownInkPageBox', 'Stift-Map und Paint teilen dieselbe Schreibseite'],
-  ['calc(100% - 2 * ${pad})', 'Ink-Canvas sitzt auf dem Blatt, nicht auf dem Overlay-Oben'],
+  ['inkWindowLayoutStyle', 'Ink-Canvas sitzt auf dem Overlay 0–1, nicht im Kamerapolster'],
   ['lockPaperEditorScrollIfNeeded', 'Snapshot-Scroll auf dem Editor-Layer wird zurückgesetzt'],
   ['lockPaperViewportEditorScroll', 'Papier-Scroll setzt den Editor-Layer auf den Ursprung'],
   ['lockPaperViewportScrollStayPut', 'schnelles Paper-Scroll setzt den Editor-Layer auf jeder Tick auf 0'],

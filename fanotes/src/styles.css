@@ -1346,10 +1346,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   border-radius: 3px;
   background: #fff;
   box-shadow: 0 12px 34px rgba(29,31,42,.18);
-  /* Skip layout/paint for off-screen pages when the browser supports it. */
-  content-visibility: auto;
-  contain-intrinsic-size: 800px 1100px;
-  contain: layout paint style;
+  content-visibility: visible;
+  contain: none;
 }
 .worksheet-page:last-child { margin-bottom: 0; }
 .worksheet-page > img, .worksheet-pdf-page { width: 100%; display: block; background: #fff; }
@@ -1358,8 +1356,10 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .worksheet-pdf-canvas-host { position: absolute; inset: 0; }
 .worksheet-pdf-page canvas {
   display: block;
-  width: 100%;
-  height: 100%;
+  width: auto;
+  height: auto;
+  max-width: none;
+  max-height: none;
   image-rendering: auto;
 }
 .worksheet-pdf-page.is-virtualized { background: #f4f5f8; }
@@ -1546,11 +1546,14 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   border-radius: 2px;
   background: #fff;
   box-shadow: 0 12px 34px rgba(29,31,42,.16);
-  contain-intrinsic-size: 800px 1100px;
-  /* No `contain: paint` — that isolates native ::selection from the glyphs. */
+  /* Keep the real aspect box even when the canvas unmounts. `contain: strict`
+     plus content-visibility rasterizes at 1× (pixelated thick glyphs) and
+     swaps in 800×1100 placeholders so pages jump on scroll, then snap back. */
+  content-visibility: visible;
+  contain: none;
 }
 .pdf-note-page.is-visible { content-visibility: visible; contain: none; }
-.pdf-note-page.is-virtualized { content-visibility: auto; contain: strict; }
+.pdf-note-page.is-virtualized { content-visibility: visible; contain: none; }
 .pdf-note-page:last-child { margin-bottom: 0; }
 .pdf-note-page-label {
   position: absolute;
@@ -1567,10 +1570,11 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .pdf-note-canvas-host { position: absolute; inset: 0; }
 .pdf-note-page canvas {
   display: block;
-  width: 100%;
-  height: 100%;
-  max-width: 100%;
-  max-height: 100%;
+  /* Inline CSS px from paintSizeForPage. 100%/100% stretches a non-square bitmap. */
+  width: auto;
+  height: auto;
+  max-width: none;
+  max-height: none;
   image-rendering: auto;
 }
 .pdf-note-page.is-virtualized { background: #f4f5f8; }
