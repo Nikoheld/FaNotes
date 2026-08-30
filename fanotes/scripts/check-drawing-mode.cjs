@@ -86,6 +86,9 @@ const safeguards = [
   ['sampleCompassCircle', 'Zirkel zeichnet Kreis und Bogen als Tinte'],
   ['INK_MAX_CANVAS_PIXELS_TALL', 'Tintenbudget auf langen PDF-Seiten bleibt lesbar'],
   ['inkOverlayPixelSize', 'Tinten-Bitmap folgt HiDPI und Zoom'],
+  ['layoutInkWindow', 'PDF-Tintenfenster folgt Layout-Scroll, nicht der Compositor-Rect'],
+  ['pdfOverlayShiftedBy', 'Pan verschiebt Overlay und Seiten gemeinsam'],
+  ['pdfOverlayPointFromClient(event.clientX, event.clientY, surface, pages)', 'PDF-Stift mappt über den gelieferten Overlay-Helper'],
   ['const measureInkWindow', 'Tinten-Bitmap nur für den sichtbaren Blattausschnitt'],
   ['const applyInkWindowToCanvases', 'sichtbares Tintenfenster auf den Canvases'],
   ['syncInkWindow(true)', 'Tintenfenster folgt Scroll und Stiftkante'],
@@ -157,6 +160,8 @@ const paperViewSafeguards = [
   ["setProperty('--view-zoom', String(zoom))", 'Zoom-Faktor als CSS-Variable auf dem Blatt'],
   ["closest('.paper-sheet-plane')", 'eine Zoom-Ebene für Text, Tinte und Lineatur'],
   ["removeProperty('zoom')", 'kein Zoom-1 auf Kindschichten (Text bleibt sonst 1×)'],
+  ['export const stripSheetLayerZooms', 'Lineatur und Text verlieren denselben Kind-Zoom'],
+  ["'.unified-paper'", 'das Blatt selbst darf keinen zweiten Zoom tragen'],
   ['export const watchSheetZoom', 'PDF-Raster folgt dem Blattzoom, nicht nur ResizeObserver'],
 ]
 const paperStyleSafeguards = [
@@ -185,6 +190,7 @@ const lockSafeguards = [
   ['lockPaperViewportEditorScroll', 'Papier-Scroll setzt den Editor-Layer auf den Ursprung'],
   ['lockPaperViewportScrollStayPut', 'schnelles Paper-Scroll setzt den Editor-Layer auf jeder Tick auf 0'],
   ['applyPaperZoomStayPut', 'Reinzoomen hält den Schreibpunkt unter dem Zoom-Ursprung'],
+  ['resolvePaperZoomScroller', 'Stift-Zoom scrollt den Papier-Scroller, nicht die Tintenfläche'],
   ['lockPaperEditorScrollBurst', 'schneller Fling-Burst wird nach jedem Pulse genullt'],
   ['PAPER_EDITOR_FLING_HOLD_FRAMES', 'Nachlauf-Frames halten den Ursprung nach einem Fling'],
   ['onPaperScroll', 'Paper-Scroller-Ticks nullen den Editor-Layer ohne Caret-Nachzug'],

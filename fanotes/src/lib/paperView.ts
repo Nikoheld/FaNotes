@@ -97,9 +97,14 @@ export const isPaperViewActive = (view: PaperViewSnapshot) => (
  * freezes that layer at 1× (ruling stays put while type grows).
  */
 const SHEET_LAYER_SELECTOR = [
+  '.unified-paper',
   '.editor-pane',
   '.worksheet-layer',
   '.pdf-note-view',
+  '.pdf-note-pages',
+  '.pdf-note-page',
+  '.pdf-note-canvas-host',
+  '.pdf-note-text-layer',
   '.lw-canvas-surface',
   '.lw-drawing-board',
   '.paper-ruling',
@@ -127,6 +132,23 @@ const stripLocalSheetZoom = (element: HTMLElement | null) => {
   element.style.removeProperty('will-change')
 }
 
+/**
+ * Drop specified zoom on every sheet layer under the camera.
+ * Must start from the plane: ruling is a sibling of `.unified-paper`, so
+ * querying only the paper leaves leftover `zoom: 1` on the ruling (or the
+ * reverse — frozen type while the dots grow).
+ */
+export const stripSheetLayerZooms = (root: HTMLElement | null) => {
+  if (!root) return
+  if (root.classList.contains('unified-paper') || root.matches(SHEET_LAYER_SELECTOR)) {
+    stripLocalSheetZoom(root)
+  }
+  root.querySelectorAll<HTMLElement>(SHEET_LAYER_SELECTOR).forEach((element) => {
+    if (element === root) return
+    stripLocalSheetZoom(element)
+  })
+}
+
 /** Prefer the dedicated plane so ruling, text and ink share one zoom node. */
 export const resolvePaperViewTarget = (
   paper: HTMLElement | null,
@@ -135,6 +157,13 @@ export const resolvePaperViewTarget = (
   (paper?.closest('.paper-sheet-plane') as HTMLElement | null)
   ?? noteView?.querySelector<HTMLElement>('.paper-sheet-plane')
   ?? paper
+)
+
+/** Native overflow scroller for the paper camera — not a nested editor layer. */
+export const resolvePaperZoomScroller = (from: HTMLElement | null): HTMLElement | null => (
+  (from?.closest('.paper-view') as HTMLElement | null)
+  ?? (from?.closest('.unified-note-view') as HTMLElement | null)
+  ?? null
 )
 
 /**
@@ -226,11 +255,8 @@ export const applyPaperViewToElements = (
     paper.classList.toggle('is-view-transformed', active)
     paper.classList.toggle('is-view-zoomed', zoom !== 1)
   }
-  const sheet = paper ?? target
-  sheet?.querySelectorAll<HTMLElement>(SHEET_LAYER_SELECTOR).forEach((element) => {
-    if (element === target) return
-    stripLocalSheetZoom(element)
-  })
+  stripSheetLayerZooms(target)
+  if (paper && paper !== target) stripSheetLayerZooms(paper)
   if (noteView) {
     noteView.classList.toggle('is-view-transformed', active)
     noteView.classList.toggle('is-view-zoomed', zoom !== 1)
@@ -245,10 +271,15 @@ export const clearPaperViewFromElements = (
   const plane = resolvePaperViewTarget(paper, noteView)
   if (plane && plane !== paper) clearInlineViewStyle(plane)
   clearInlineViewStyle(paper)
-  const root = paper ?? plane
+  const root = plane ?? paper
   root?.querySelectorAll<HTMLElement>(SHEET_LAYER_SELECTOR).forEach((element) => {
     clearInlineViewStyle(element)
   })
+  if (paper && paper !== root) {
+    paper.querySelectorAll<HTMLElement>(SHEET_LAYER_SELECTOR).forEach((element) => {
+      clearInlineViewStyle(element)
+    })
+  }
   if (noteView && noteView !== paper && noteView !== plane) {
     noteView.classList.remove('is-view-transformed', 'is-view-zoomed')
   }

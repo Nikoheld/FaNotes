@@ -121,11 +121,24 @@ export function PaperView({ children, className = '', viewKey, showHud = true }:
 
   const setView = useCallback((next: Partial<PaperViewSnapshot>) => {
     const current = viewRef.current
-    apply({
-      zoom: clampViewZoom(next.zoom ?? current.zoom),
-      rotation: normalizeRotation(next.rotation ?? current.rotation),
-      pan: { x: 0, y: 0 },
-    })
+    const zoom = clampViewZoom(next.zoom ?? current.zoom)
+    const rotation = normalizeRotation(next.rotation ?? current.rotation)
+    if (zoom !== current.zoom) {
+      const scroller = noteViewRef.current
+      const sheet = scroller?.querySelector<HTMLElement>('.paper-sheet-plane')
+        ?? scroller?.querySelector<HTMLElement>('.unified-paper')
+        ?? null
+      applyPaperZoomStayPut(
+        scroller,
+        sheet,
+        current,
+        zoom,
+        lastZoomOriginRef.current ?? undefined,
+        (view) => apply({ ...view, rotation, pan: { x: 0, y: 0 } }),
+      )
+      return
+    }
+    apply({ zoom, rotation, pan: { x: 0, y: 0 } })
   }, [apply])
 
   const zoomTo = useCallback((nextZoom: number, originClient?: { x: number; y: number }) => {

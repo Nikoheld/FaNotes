@@ -2,6 +2,10 @@
 
 ## Unveröffentlicht
 
+## 2026.8.69
+
+- **Reinzoomen vergrössert die Schrift mit dem Blatt:** Beim Hineinzoomen bleibst du auf dem Papierpunkt, wo die Schrift steht. Du zoomst in den Text hinein wie in OneNote — Lineatur, Tinte und Schrift bleiben zusammen und rutschen nicht weg.
+
 ## 2026.8.68
 
 - **Schärfere Schrift auf PDF:** PDF-Seiten und Handschrift bleiben auf HiDPI-Bildschirmen scharf. Reinzoomen macht die Schrift nicht mehr pixelig und dick.

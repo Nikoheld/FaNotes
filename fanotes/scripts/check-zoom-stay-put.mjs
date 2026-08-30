@@ -15,6 +15,7 @@ const {
   applyPaperZoomStayPut,
   defaultPaperView,
   sheetLayerOriginOffset,
+  stripSheetLayerZooms,
 } = await server.ssrLoadModule('/src/lib/paperView.ts')
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
@@ -98,7 +99,12 @@ const makeNode = (className, extras = {}) => {
     getBoundingClientRect() {
       const scroller = this.closest('.paper-view') ?? this
       const plane = this.closest('.paper-sheet-plane') ?? this
-      const zoom = plane.classList.contains('paper-view') ? 1 : Number.parseFloat(plane.style.zoom || plane.style.getPropertyValue('--view-zoom') || '1') || 1
+      const specified = Number.parseFloat(this.style.zoom)
+      const planeZoom = plane.classList.contains('paper-view')
+        ? 1
+        : Number.parseFloat(plane.style.zoom || plane.style.getPropertyValue('--view-zoom') || '1') || 1
+      // Specified child zoom freezes that layer (zoom:1 stays 1× while the plane grows).
+      const zoom = this.style.zoom && Number.isFinite(specified) && specified > 0 ? specified : planeZoom
       const planeLeft = plane.contentLeft - (scroller.scrollLeft ?? 0)
       const planeTop = plane.contentTop - (scroller.scrollTop ?? 0)
       if (this === scroller) {
@@ -111,8 +117,8 @@ const makeNode = (className, extras = {}) => {
           bottom: this.clientHeight,
         }
       }
-      const left = planeLeft + (this.contentLeft - plane.contentLeft) * zoom
-      const top = planeTop + (this.contentTop - plane.contentTop) * zoom
+      const left = planeLeft + (this.contentLeft - plane.contentLeft) * planeZoom
+      const top = planeTop + (this.contentTop - plane.contentTop) * planeZoom
       const width = this.layoutWidth * zoom
       const height = this.layoutHeight * zoom
       return { left, top, width, height, right: left + width, bottom: top + height }
@@ -184,6 +190,10 @@ const runOnce = () => {
     contentLeft: 180,
     contentTop: 220,
   }))
+  // Leftover specified zoom on text / ruling must not freeze them at 1×.
+  editor.style.zoom = '1'
+  ruling.style.zoom = '1'
+  ink.style.zoom = '1'
 
   const beforeOrigin = sheetLayerOriginOffset(editor, ruling)
   assert.ok(Math.abs(beforeOrigin.x) <= 1 && Math.abs(beforeOrigin.y) <= 1, 'text starts on the ruling')
@@ -191,6 +201,8 @@ const runOnce = () => {
   assert.ok(Math.abs(inkBefore.x) <= 1 && Math.abs(inkBefore.y) <= 1, 'ink starts on the ruling')
 
   const start = mark.getBoundingClientRect()
+  const textStart = editor.getBoundingClientRect()
+  assert.equal(textStart.width, editor.layoutWidth, 'leftover zoom:1 must freeze text before the camera runs')
   const origin = { x: start.left + start.width / 2, y: start.top + start.height / 2 }
   assert.ok(origin.x !== 200 || origin.y !== 150, 'written mark must be off the viewport center')
 
@@ -198,6 +210,9 @@ const runOnce = () => {
   let view = defaultPaperView()
   const afterSteps = []
   for (const [index, zoom] of burst.entries()) {
+    editor.style.zoom = '1'
+    ruling.style.zoom = '1'
+    ink.style.zoom = '1'
     cmScroller.scrollTop = 48 + index * 6
     cmScroller.scrollLeft = 12
     editor.scrollTop = 24 + index * 3
@@ -205,13 +220,20 @@ const runOnce = () => {
     const result = applyPaperZoomStayPut(paper, plane, view, zoom, origin)
     view = result.view
     assert.equal(view.zoom, zoom, `camera zoom must become ${zoom}`)
+    assert.equal(plane.style.zoom, String(zoom), `plane camera zoom must be ${zoom}`)
+    assert.equal(editor.style.zoom, '', `zoom ${zoom}: text must inherit the camera, not keep zoom:1`)
+    assert.equal(ruling.style.zoom, '', `zoom ${zoom}: ruling must inherit the camera`)
+    assert.equal(ink.style.zoom, '', `zoom ${zoom}: ink must inherit the camera`)
     assert.equal(cmScroller.scrollTop, 0, `zoom ${zoom}: cm-scroller must stay at 0`)
     assert.equal(cmScroller.scrollLeft, 0, `zoom ${zoom}: cm-scroller x must stay at 0`)
     assert.equal(editor.scrollTop, 0, `zoom ${zoom}: editor layer must stay at 0`)
     assert.equal(editor.scrollLeft, 0, `zoom ${zoom}: editor layer x must stay at 0`)
     const now = mark.getBoundingClientRect()
+    const textNow = editor.getBoundingClientRect()
     const mappedX = now.left + now.width / 2
     const mappedY = now.top + now.height / 2
+    assert.ok(now.width > start.width * (zoom * 0.92), `zoom ${zoom}: mark visual width ${now.width} must grow with the camera (was ${start.width})`)
+    assert.ok(textNow.width > textStart.width * (zoom * 0.92), `zoom ${zoom}: typed text visual width ${textNow.width} must grow with the camera (was ${textStart.width})`)
     assert.ok(Math.abs(mappedX - origin.x) <= 1, `zoom ${zoom}: written X ${mappedX} left origin ${origin.x}`)
     assert.ok(Math.abs(mappedY - origin.y) <= 1, `zoom ${zoom}: written Y ${mappedY} left origin ${origin.y}`)
     const textOrigin = sheetLayerOriginOffset(editor, ruling)
@@ -220,16 +242,22 @@ const runOnce = () => {
     assert.ok(Math.abs(textOrigin.y) <= 1, `zoom ${zoom}: text-vs-ruling y ${textOrigin.y}`)
     assert.ok(Math.abs(inkOrigin.x) <= 1, `zoom ${zoom}: ink-vs-ruling x ${inkOrigin.x}`)
     assert.ok(Math.abs(inkOrigin.y) <= 1, `zoom ${zoom}: ink-vs-ruling y ${inkOrigin.y}`)
-    afterSteps.push({ zoom, mappedX, mappedY, textOrigin, inkOrigin })
+    afterSteps.push({ zoom, mappedX, mappedY, markWidth: now.width, textWidth: textNow.width, textOrigin, inkOrigin })
   }
 
   const editorSource = readFileSync(join(root, 'src/components/PaperView.tsx'), 'utf8')
   const drawing = readFileSync(join(root, 'src/components/DrawingBoard.tsx'), 'utf8')
+  const paperViewSource = readFileSync(join(root, 'src/lib/paperView.ts'), 'utf8')
   assert.match(editorSource, /applyPaperZoomStayPut/)
   assert.match(drawing, /applyPaperZoomStayPut/)
+  assert.match(drawing, /resolvePaperZoomScroller/)
   assert.match(editorSource, /lastZoomOriginRef/)
+  assert.match(editorSource, /if \(zoom !== current\.zoom\)/)
+  assert.match(paperViewSource, /export const stripSheetLayerZooms/)
+  assert.match(paperViewSource, /stripSheetLayerZooms\(target\)/)
+  assert.equal(typeof stripSheetLayerZooms, 'function')
 
-  return { burst, afterSteps, origin }
+  return { burst, afterSteps, origin, startWidth: start.width, textStartWidth: textStart.width }
 }
 
 try {
@@ -237,7 +265,13 @@ try {
   const second = runOnce()
   assert.deepEqual(first.burst, second.burst)
   assert.deepEqual(first.afterSteps, second.afterSteps)
-  console.log(JSON.stringify({ burst: first.burst, last: first.afterSteps.at(-1), origin: first.origin }))
+  console.log(JSON.stringify({
+    burst: first.burst,
+    last: first.afterSteps.at(-1),
+    origin: first.origin,
+    startWidth: first.startWidth,
+    textStartWidth: first.textStartWidth,
+  }))
   console.log('zoom-stay-put ok')
 } finally {
   await server.close()

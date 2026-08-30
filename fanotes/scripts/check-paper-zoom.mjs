@@ -221,9 +221,10 @@ const math = () => {
 const layers = () => {
   const noteView = makeNode('paper-view unified-note-view')
   const plane = append(noteView, makeNode('paper-sheet-plane', { layoutWidth: 900, layoutHeight: 1273 }))
-  const paper = append(plane, makeNode('unified-paper', { layoutWidth: 900, layoutHeight: 1273 }))
-  const ruling = append(paper, makeNode('paper-ruling', { layoutWidth: 900, layoutHeight: 1273 }))
+  const ruling = append(plane, makeNode('paper-ruling', { layoutWidth: 900, layoutHeight: 1273 }))
   ruling.style.setProperty('background-size', '28px 28px')
+  ruling.style.zoom = '1'
+  const paper = append(plane, makeNode('unified-paper', { layoutWidth: 900, layoutHeight: 1273 }))
   const editor = append(paper, makeNode('editor-pane', { layoutWidth: 900, layoutHeight: 400 }))
   editor.style.zoom = '1'
   const ink = append(paper, makeNode('lw-drawing-board lw-canvas-surface', { layoutWidth: 900, layoutHeight: 1273 }))

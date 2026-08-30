@@ -66,6 +66,8 @@ import {
   normalizeRotation,
   readSharedZoomMax,
   readSharedZoomSpeed,
+  resolvePaperViewTarget,
+  resolvePaperZoomScroller,
   zoomFactorFromWheel,
   zoomStepFromSpeed,
 } from '../lib/paperView'
@@ -103,7 +105,10 @@ import { drawInkStroke as paintInkStroke } from '../lib/inkStrokePaint'
 import {
   INLINE_INK_ACTIVE_CLASS,
   INK_TOOLBAR_SLOT_ID,
+  FULL_INK_WINDOW,
+  layoutInkWindow,
   markdownNoteInkOverlaySize,
+  pdfOverlayPointFromClient,
   pdfOverlaySourceHeight,
   resolveInkToolbarHost,
   shouldSyncPdfOverlaySource,
@@ -236,30 +241,42 @@ const computeInkPixelSize = (layoutWidth: number, layoutHeight: number, viewZoom
 )
 
 type InkWindow = { y0: number; y1: number }
-const FULL_INK_WINDOW: InkWindow = { y0: 0, y1: 1 }
 const inkWindowSpan = (window: InkWindow) => Math.max(0.06, Math.min(1, window.y1 - window.y0))
 const isFullInkWindow = (window: InkWindow) => window.y0 <= 0.002 && window.y1 >= 0.998
+/** Wait for compositor fling to die before moving the ink canvas on the paper. */
+const INK_WINDOW_IDLE_MS = 320
 
-const measureVisibleInkRange = (paper: HTMLElement, scroller: HTMLElement): InkWindow => {
-  const view = scroller.getBoundingClientRect()
-  const sheet = paper.getBoundingClientRect()
-  if (sheet.height < 1_600 || sheet.height <= view.height * 1.35) return FULL_INK_WINDOW
-  return {
-    y0: clamp((view.top - sheet.top) / sheet.height),
-    y1: clamp((view.bottom - sheet.top) / sheet.height),
+const paperOffsetTopInScroller = (paper: HTMLElement, scroller: HTMLElement) => {
+  let offset = 0
+  let node: HTMLElement | null = paper
+  while (node && node !== scroller) {
+    offset += node.offsetTop
+    const parent = node.offsetParent as HTMLElement | null
+    if (!parent || parent === scroller) break
+    if (!scroller.contains(parent)) break
+    node = parent
   }
+  return offset
 }
 
-const measureInkWindow = (paper: HTMLElement, scroller: HTMLElement): InkWindow => {
-  const view = scroller.getBoundingClientRect()
-  const sheet = paper.getBoundingClientRect()
-  if (sheet.height < 1_600 || sheet.height <= view.height * 1.35) return FULL_INK_WINDOW
-  const pad = (view.height * 1.15) / Math.max(1, sheet.height)
-  const y0 = clamp((view.top - sheet.top) / sheet.height - pad)
-  const y1 = clamp((view.bottom - sheet.top) / sheet.height + pad)
-  if (y1 - y0 >= 0.94) return FULL_INK_WINDOW
-  return { y0, y1 }
-}
+const measureVisibleInkRange = (paper: HTMLElement, scroller: HTMLElement, viewZoom: number): InkWindow => (
+  layoutInkWindow({
+    paperHeight: paper.offsetHeight,
+    viewHeight: scroller.clientHeight,
+    scrollTop: Math.max(0, scroller.scrollTop - paperOffsetTopInScroller(paper, scroller)),
+    viewZoom,
+    padRatio: 0,
+  })
+)
+
+const measureInkWindow = (paper: HTMLElement, scroller: HTMLElement, viewZoom: number): InkWindow => (
+  layoutInkWindow({
+    paperHeight: paper.offsetHeight,
+    viewHeight: scroller.clientHeight,
+    scrollTop: Math.max(0, scroller.scrollTop - paperOffsetTopInScroller(paper, scroller)),
+    viewZoom,
+  })
+)
 
 const inkWindowsDiffer = (left: InkWindow, right: InkWindow) => (
   Math.abs(left.y0 - right.y0) > 0.04 || Math.abs(left.y1 - right.y1) > 0.04
@@ -1636,6 +1653,19 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         pointerType: event.pointerType || 'mouse',
       }
     }
+    if (inline && mapped) {
+      const paper = originEl.closest('.unified-paper') as HTMLElement | null
+      if (paper?.classList.contains('is-pdf-note')) {
+        const pages = Array.from(paper.querySelectorAll('[data-pdf-page]')).map((node) => {
+          const box = (node as HTMLElement).getBoundingClientRect()
+          return { top: box.top, height: box.height }
+        })
+        const overlayHit = pdfOverlayPointFromClient(event.clientX, event.clientY, surface, pages)
+        if (overlayHit) {
+          mapped = { ...mapped, x: overlayHit.x, y: overlayHit.y }
+        }
+      }
+    }
 
     const width = Math.max(1, canvas?.offsetWidth ?? originEl.offsetWidth)
     const height = Math.max(1, canvas?.offsetHeight ?? originEl.offsetHeight)
@@ -1707,9 +1737,10 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       }
       return
     }
-    const visible = measureVisibleInkRange(paper, scroller)
+    const zoom = viewZoomRef.current || 1
+    const visible = measureVisibleInkRange(paper, scroller, zoom)
     if (!force && visibleFitsInkWindow(inkWindowRef.current, visible)) return
-    const next = measureInkWindow(paper, scroller)
+    const next = measureInkWindow(paper, scroller, zoom)
     if (!force && !inkWindowsDiffer(inkWindowRef.current, next)) return
     inkWindowRef.current = next
     committedCanvasDirtyRef.current = true
@@ -1807,9 +1838,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     if (surfaceRef.current) observer.observe(surfaceRef.current)
     if (surfaceRef.current?.parentElement) observer.observe(surfaceRef.current.parentElement)
     const scroller = resolvePaperElement()?.closest('.unified-note-view')
-    const onScroll = () => {
-      // Rebuild the ink window only after scrolling settles. Resizing canvases
-      // mid-scroll forces a full paper/text repaint and looks like warping.
+    const settleInkWindow = () => {
       if (inkWindowIdleRef.current !== null) window.clearTimeout(inkWindowIdleRef.current)
       inkWindowIdleRef.current = window.setTimeout(() => {
         inkWindowIdleRef.current = null
@@ -1818,15 +1847,17 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
           return
         }
         syncInkWindow()
-      }, 160)
+      }, INK_WINDOW_IDLE_MS)
     }
-    scroller?.addEventListener('scroll', onScroll, { passive: true })
+    scroller?.addEventListener('scroll', settleInkWindow, { passive: true })
+    scroller?.addEventListener('scrollend', settleInkWindow, { passive: true })
     syncInkWindow(true)
     redraw(true)
     return () => {
       mountedRef.current = false
       observer.disconnect()
-      scroller?.removeEventListener('scroll', onScroll)
+      scroller?.removeEventListener('scroll', settleInkWindow)
+      scroller?.removeEventListener('scrollend', settleInkWindow)
       if (inkWindowIdleRef.current !== null) window.clearTimeout(inkWindowIdleRef.current)
       if (resizeDebounceRef.current !== null) window.clearTimeout(resizeDebounceRef.current)
       if (drawFrameRef.current !== null) cancelAnimationFrame(drawFrameRef.current)
@@ -2100,16 +2131,21 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     const next = clampViewZoom(previous + delta)
     if (next === previous) return
     const surface = surfaceRef.current
-    const scroller = surface?.parentElement ?? null
+    const paper = resolvePaperElement()
+    const scroller = (
+      resolvePaperZoomScroller(paper ?? surface)
+      ?? (surface?.parentElement instanceof HTMLElement ? surface.parentElement : null)
+    )
+    const sheet = resolvePaperViewTarget(paper ?? surface, scroller)
     applyPaperZoomStayPut(
       scroller,
-      surface,
+      sheet ?? surface,
       { zoom: previous, rotation: viewRotationRef.current, pan: { x: 0, y: 0 } },
       next,
       originClient,
       (view) => setView({ zoom: view.zoom, pan: { x: 0, y: 0 } }),
     )
-  }, [paperView, setView])
+  }, [paperView, resolvePaperElement, setView])
 
   const rotateBy = useCallback((delta: number) => {
     forceEndActivePointerRef.current('view-gesture')
