@@ -22,6 +22,7 @@ const path = require('node:path')
 const { fileURLToPath, pathToFileURL } = require('node:url')
 const { Worker } = require('node:worker_threads')
 const { defaultPenOnlyForPlatform } = require('./ink-defaults.cjs')
+const { DEFAULT_TABLET_BUTTON_ACTIONS, sanitizeTabletButtonMap } = require('./tablet-buttons.cjs')
 const { localizeDialogOptions, localizeText, resolveLanguage } = require('./i18n.cjs')
 const {
   onboardingRequiredFromConfig,
@@ -246,6 +247,7 @@ const DEFAULT_SETTINGS = Object.freeze({
   penWidth: 3.5,
   pressureEnabled: true,
   penOnly: defaultPenOnlyForPlatform(process.platform),
+  tabletButtons: { ...DEFAULT_TABLET_BUTTON_ACTIONS },
   smoothing: 0.68,
   scribbleEraseSensitivity: 50,
   shapeSnapSensitivity: 50,
@@ -330,6 +332,7 @@ const SETTINGS_SCHEMA = Object.freeze({
   penWidth: { type: 'number', min: 0.5, max: 40 },
   pressureEnabled: { type: 'boolean' },
   penOnly: { type: 'boolean' },
+  tabletButtons: { type: 'tablet-buttons' },
   smoothing: { type: 'number', min: 0, max: 1 },
   scribbleEraseSensitivity: { type: 'number', min: 0, max: 100 },
   shapeSnapSensitivity: { type: 'number', min: 0, max: 100 },
@@ -866,6 +869,9 @@ function sanitizeSettings(candidate, base = DEFAULT_SETTINGS) {
     if (rule.type === 'relative') {
       const cleaned = cleanRelativeSetting(value, rule.max)
       if (cleaned !== null) result[key] = cleaned
+    }
+    if (rule.type === 'tablet-buttons') {
+      result[key] = sanitizeTabletButtonMap(value)
     }
   }
 

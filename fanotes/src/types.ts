@@ -106,6 +106,8 @@ export type AppSettings = {
   pressureEnabled: boolean
   /** When true, only pointerType "pen" can ink; touch/mouse (hand/palm) are ignored. */
   penOnly: boolean
+  /** Wacom pen and pad button → FaNotes action. */
+  tabletButtons: import('./lib/tabletButtons').TabletButtonMap
   smoothing: number
   scribbleEraseSensitivity: number
   /** 0 = nur sehr klare Figuren, 50 = normal, 100 = früher und großzügiger glätten. */

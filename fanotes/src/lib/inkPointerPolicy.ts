@@ -29,6 +29,21 @@ export const shouldIgnorePointerAfterPen = (
   return now - lastPenAt < POST_PEN_IGNORE_MS
 }
 
+/** A mapped stylus/pad button is not leftover trackpad in the post-pen window. */
+export const shouldIgnoreUnmappedPointerAfterPen = (
+  pointerType: string | undefined,
+  lastPenAt: number,
+  now: number,
+  mappedControl: boolean,
+) => mappedControl ? false : shouldIgnorePointerAfterPen(pointerType, lastPenAt, now)
+
+/** Live mapped ink/eraser (often labelled `mouse`) must still receive moves. */
+export const shouldRejectNonPenInkMove = (
+  pointerType: string | undefined,
+  penOnly: boolean,
+  isLiveStrokePointer: boolean,
+) => isLiveStrokePointer ? false : shouldRejectNonPenInk(pointerType, penOnly)
+
 export const applyWheelInkPolicy = (
   session: InkInputSession,
   wheel: { ctrlKey?: boolean; metaKey?: boolean },

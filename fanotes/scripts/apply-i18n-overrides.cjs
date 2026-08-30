@@ -6,6 +6,17 @@ const path = require('node:path')
 // Deliberately written UI copy. These entries take precedence over the generated
 // catalog so product names and short labels never become awkward partial translations.
 const overrides = {
+  '**Lange Linie nach unten verschiebt die Schrift nicht:** Wenn du mit dem Stift eine lange Linie nach unten ziehst, bleibt die schon vorhandene Schrift auf den Linien. Das Blatt wächst unten weiter — der Text rutscht nicht mit.': '**A long line down does not shift the writing:** When you draw a long line down with the pen, the writing that is already there stays on the ruling. The sheet grows further at the bottom — the text does not slide with it.',
+  'Belegt die Tasten, die FaNotes vom Stift und vom Tablett wirklich empfängt. ExpressKeys, die nur der Wacom-Treiber sieht, stellst du weiter in Wacom Center ein.': 'Assigns the buttons FaNotes actually receives from the pen and the tablet. ExpressKeys that only the Wacom driver sees are still set in Wacom Center.',
+  'Stifte- und Tablett-Tasten': 'Pen and tablet buttons',
+  'Seitliche Taste': 'Barrel button',
+  'Obere Taste': 'Upper button',
+  'Radierer-Ende': 'Eraser end',
+  'Tablett-Taste 1': 'Tablet button 1',
+  'Tablett-Taste 2': 'Tablet button 2',
+  'Keine Aktion': 'No action',
+  'System / Rechtsklick': 'System / right-click',
+  'Schwenken': 'Pan',
   '**Vorhandene Schrift bleibt beim Schreiben stehen:** Wenn du mit dem Stift am Rand des Blatts schreibst, wächst das Blatt weiter. Die schon vorhandene Schrift bleibt auf den Linien — sie rutscht nicht mehr weg.': '**Existing writing stays put while you ink:** When you write with the pen at the edge of the sheet, the page grows. The writing that is already there stays on the ruling — it no longer slides away.',
   '**Handschrift auf PDF bleibt auf dem Blatt:** Die Tinte liegt auf der PDF-Seite, nicht im extra Kameraraum. Beim Scrollen rutscht sie nicht weg und springt nicht zurück.': '**Handwriting on a PDF stays on the page:** Ink sits on the PDF page, not in the extra camera room. When you scroll it does not slide away and snap back.',
   '**PDF-Schrift bleibt scharf und sitzt fest:** Auf einem PDF ist die Schrift nicht mehr pixelig und dick. Beim Scrollen bleibt die Handschrift genau auf dem Blatt — sie rutscht nicht weg und springt nicht zurück.': '**PDF type stays sharp and stays put:** On a PDF the type is no longer pixelated and thick. When you scroll, handwriting stays on the sheet — it does not slide away and snap back.',

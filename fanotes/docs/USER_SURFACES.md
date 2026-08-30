@@ -57,6 +57,7 @@ Command-palette action ids walked from `src/App.tsx`: `new-note`, `import-pdf-no
 | Zoom-in writing stay-put | `src/lib/paperView.ts` | `export const applyPaperZoomStayPut` |
 | Fast paper-scroll text stay-put | `src/lib/paperCaretScroll.ts` | `export const lockPaperViewportScrollStayPut` |
 | Pen-write text stay-put | `src/lib/noteCanvas.ts` | `export const markdownAndInkAfterMinEdgeGrow` |
+| Long downward write stay-put | `src/lib/noteCanvas.ts` | `export const markdownAndInkAfterGrowSequence` |
 | Paper grow while writing | `src/lib/noteCanvas.ts` | `export const growWriteExtent` |
 | Finite extra-paper scroll | `src/lib/noteCanvas.ts` | `export const canvasScrollBounds` |
 | Clamp pan to extra paper | `src/lib/noteCanvas.ts` | `export const clampCanvasScroll` |
@@ -162,4 +163,6 @@ Command-palette action ids walked from `src/App.tsx`: `new-note`, `import-pdf-no
 | AppImage AppRun Ozone | `scripts/harden-appimage.cjs` | `linuxOzoneAppRunExecLine` |
 | Desktop Exec | `packaging/fanotes.desktop` | `ozone-platform=x11` |
 | Windows pen-only default | `electron/ink-defaults.cjs` | `defaultPenOnlyForPlatform` |
+| Wacom pen/tablet button map | `src/lib/tabletButtons.ts` | `export const tabletButtonActionFromPointer` |
+| Wacom button Settings | `src/components/SettingsModal.tsx` | `settings-tablet-buttons` |
 | Auto-updater | `electron/updater.cjs` | `update` |

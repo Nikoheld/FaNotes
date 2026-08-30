@@ -45,6 +45,13 @@ import {
 } from '../lib/homeworkApi'
 import { bestContrastText } from '../lib/colorContrast'
 import type { RemoteSupportSession } from '../lib/remoteSupport'
+import {
+  TABLET_BUTTON_ACTION_LABELS,
+  TABLET_BUTTON_ACTIONS,
+  sanitizeTabletButtonMap,
+  tabletButtonControlsInGroup,
+  type TabletButtonAction,
+} from '../lib/tabletButtons'
 import type { AppSettings, EnhancedMathRecognitionState, OneNoteImportResult, QwenVisionState, ServerBackupState, UpdateState } from '../types'
 
 type SettingsSection = 'appearance' | 'editor' | 'drawing' | 'files' | 'updates' | 'accessibility' | 'experimental' | 'advanced'
@@ -74,7 +81,7 @@ export type SettingsModalProps = {
 const SECTIONS: { id: SettingsSection; label: string; description: string; icon: typeof Palette; count: number }[] = [
   { id: 'appearance', label: 'Darstellung', description: 'Farben, Schriften und Dichte', icon: Palette, count: 12 },
   { id: 'editor', label: 'Editor', description: 'Markdown und Schreiben', icon: FileText, count: 8 },
-  { id: 'drawing', label: 'Stift & Erkennung', description: 'Tablet, Papier und Handschrift', icon: Brush, count: 15 },
+  { id: 'drawing', label: 'Stift & Erkennung', description: 'Tablet, Papier und Handschrift', icon: Brush, count: 16 },
   { id: 'files', label: 'Dateien & Vault', description: 'Import, Ordner und Speichern', icon: FolderOpen, count: 7 },
   { id: 'updates', label: 'Updates', description: 'Stable, Beta und Sicherheit', icon: RefreshCw, count: 4 },
   { id: 'accessibility', label: 'Bedienung', description: 'Bewegung und Lesbarkeit', icon: Accessibility, count: 3 },
@@ -112,6 +119,7 @@ const SETTINGS_SEARCH_ITEMS: SettingsSearchItem[] = [
   { label: 'GlyphenWerk & Training', detail: 'Stift & Erkennung', section: 'drawing', target: 'settings-glyphenwerk', keywords: 'handschrift trainieren import zip symbole mathematik' },
   { label: 'Präzises Formelmodell', detail: 'Erweitert', section: 'advanced', target: 'settings-enhanced-math', keywords: 'mathematik formel latex posformer q4 sequenzmodell lokal download' },
   { label: 'Papier & Stift', detail: 'Stift & Erkennung', section: 'drawing', target: 'settings-tablet', keywords: 'tablet karos linien punkte gepunktet häuschen kästchen millimeter farbe breite druck glättung hintergrund' },
+  { label: 'Stifte- und Tablett-Tasten', detail: 'Stift & Erkennung', section: 'drawing', target: 'settings-tablet-buttons', keywords: 'wacom tablett taste barrel radierer expresskey stift knopf mapping' },
   { label: 'Durchkritzel-Empfindlichkeit', detail: 'Stift & Erkennung', section: 'drawing', target: 'settings-tablet', keywords: 'löschen radierer scribble sensitivity' },
   { label: 'Form-Erkennung', detail: 'Stift & Erkennung', section: 'drawing', target: 'settings-tablet', keywords: 'form zirkel kreis linie rechteck dreieck glätten snap stillhalten empfindlichkeit' },
   { label: 'Handschrifterkennung', detail: 'Stift & Erkennung', section: 'drawing', target: 'settings-recognition', keywords: 'ocr text mathematik automatisch sprache konvertieren suchindex' },
@@ -711,6 +719,37 @@ export function SettingsModal({
                   <SettingRow title="Stiftbreite"><Range value={settings.penWidth} min={1} max={18} step={0.5} suffix=" px" onChange={(value) => update('penWidth', value)} /></SettingRow>
                   <SettingRow title="Druckempfindlichkeit" description="Nutzt den Druckwert deines Stifts."><Toggle label="Druckempfindlichkeit" checked={settings.pressureEnabled} onChange={(value) => update('pressureEnabled', value)} /></SettingRow>
                   <SettingRow title="Nur Stift" description="Im Handschriftmodus schreiben nur echte Stifte (pointerType pen). Finger, Handfläche und Maus zeichnen nicht — Zoom und Tasten bleiben nutzbar. Unter Windows standardmäßig an."><Toggle label="Nur Stift" checked={settings.penOnly} onChange={(value) => update('penOnly', value)} /></SettingRow>
+                  <div id="settings-tablet-buttons" className="tablet-button-map">
+                    <p className="tablet-button-note">Belegt die Tasten, die FaNotes vom Stift und vom Tablett wirklich empfängt. ExpressKeys, die nur der Wacom-Treiber sieht, stellst du weiter in Wacom Center ein.</p>
+                    {(['pen', 'tablet'] as const).map((group) => (
+                      <div key={group} className={`tablet-button-group is-${group}`}>
+                        <div className="tablet-button-group-label">{group === 'pen' ? 'Stift' : 'Tablett'}</div>
+                        {tabletButtonControlsInGroup(group).map((control) => {
+                          const assignments = sanitizeTabletButtonMap(settings.tabletButtons)
+                          return (
+                            <label key={control.id} className="tablet-button-row" data-control={control.id}>
+                              <span>
+                                <strong>{control.label}</strong>
+                                <small>{control.hint}</small>
+                              </span>
+                              <select
+                                aria-label={`${control.label} Aktion`}
+                                value={assignments[control.id]}
+                                onChange={(event) => update('tabletButtons', {
+                                  ...assignments,
+                                  [control.id]: event.target.value as TabletButtonAction,
+                                })}
+                              >
+                                {TABLET_BUTTON_ACTIONS.map((action) => (
+                                  <option key={action} value={action}>{TABLET_BUTTON_ACTION_LABELS[action]}</option>
+                                ))}
+                              </select>
+                            </label>
+                          )
+                        })}
+                      </div>
+                    ))}
+                  </div>
                   <SettingRow title="Strichglättung"><Range value={settings.smoothing} min={0} max={1} step={0.05} onChange={(value) => update('smoothing', value)} /></SettingRow>
                   <SettingRow title="Durchkritzel-Empfindlichkeit" description="Niedrig verlangt mehr Überkreuzungen; hoch löscht schon nach einem kürzeren, eindeutigen Durchkritzeln."><Range value={settings.scribbleEraseSensitivity} min={0} max={100} step={5} suffix=" %" onChange={(value) => update('scribbleEraseSensitivity', value)} /></SettingRow>
                   <SettingRow title="Form-Erkennung" description="Wie bereitwillig Stillhalten eine Linie, einen Kreis oder ein Vieleck glättet. Niedrig nur bei sehr klaren Figuren; hoch früher und auch bei unsaubereren Strichen."><Range value={settings.shapeSnapSensitivity ?? 50} min={0} max={100} step={5} suffix=" %" onChange={(value) => update('shapeSnapSensitivity', value)} /></SettingRow>

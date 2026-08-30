@@ -119,9 +119,15 @@ import {
   applyPenUpInkCleanup,
   applyWheelInkPolicy,
   keepGotPointerCaptureId,
-  shouldIgnorePointerAfterPen,
+  POST_PEN_IGNORE_MS,
+  shouldIgnoreUnmappedPointerAfterPen,
   shouldRejectNonPenInk,
+  shouldRejectNonPenInkMove,
 } from '../lib/inkPointerPolicy'
+import {
+  tabletButtonActionFromPointer,
+  tabletButtonIdentityFromPointer,
+} from '../lib/tabletButtons'
 import {
   PAGE_START_WIDTH,
   SCROLL_ROOM,
@@ -551,6 +557,7 @@ export type DrawingBoardProps = {
     | 'penWidth'
     | 'pressureEnabled'
     | 'penOnly'
+    | 'tabletButtons'
     | 'smoothing'
     | 'scribbleEraseSensitivity'
     | 'shapeSnapSensitivity'
@@ -1048,6 +1055,9 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const liveSmoothAtRef = useRef(0)
   const liveCanvasHasInkRef = useRef(false)
   const lastPenContactRef = useRef(0)
+  const tabletPanRef = useRef<{ pointerId: number; x: number; y: number } | null>(null)
+  const undoNowRef = useRef<() => void>(() => {})
+  const redoNowRef = useRef<() => void>(() => {})
   const shapeDwellTimerRef = useRef<number | null>(null)
   const shapeHintTimerRef = useRef<number | null>(null)
   const shapeLastMoveAtRef = useRef(0)
@@ -2056,7 +2066,12 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     const prevH = sourceHeightRef.current
     const prevW = sourceWidthRef.current
     const grown = growPageFromMark(
-      { width: prevW, height: prevH },
+      {
+        width: prevW,
+        height: prevH,
+        originX: sourceOriginXRef.current,
+        originY: sourceOriginYRef.current,
+      },
       { x: normalizedX, y: normalizedY },
       { width: paper?.offsetWidth ?? 0, height: paper?.offsetHeight ?? 0 },
     )
@@ -2710,16 +2725,34 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const handlePointerDown = useCallback((event: ReactPointerEvent<HTMLElement>) => {
     if (hitTestChrome(event.clientX, event.clientY)) return
     setArtPanelOpen(false)
-    if (event.button !== 0 && event.pointerType !== 'pen') return
-    // Pen-only (Windows palm / resting hand): ignore finger, mouse and trackpad ink.
-    if (shouldRejectNonPenInk(event.pointerType, settings.penOnly)) return
     const now = performance.now()
+    const asStylus = event.pointerType === 'pen' || (
+      lastPenContactRef.current > 0 && now - lastPenContactRef.current < POST_PEN_IGNORE_MS
+    )
+    const buttonIdentity = tabletButtonIdentityFromPointer(event.nativeEvent, asStylus)
+    const buttonAction = tabletButtonActionFromPointer(settings.tabletButtons, event.nativeEvent, asStylus)
+    if (!buttonIdentity && event.button !== 0 && event.pointerType !== 'pen') return
+    if (buttonIdentity && buttonAction === 'os') return
+    if (buttonIdentity && (buttonAction === 'none' || buttonAction === 'undo' || buttonAction === 'redo' || buttonAction === 'pan')) {
+      event.preventDefault()
+      if (buttonAction === 'undo') undoNowRef.current()
+      if (buttonAction === 'redo') redoNowRef.current()
+      if (buttonAction === 'pan') {
+        tabletPanRef.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY }
+        activePointerRef.current = event.pointerId
+        if (event.pointerType === 'pen') lastPenContactRef.current = now
+      }
+      return
+    }
+    // Pen-only (Windows palm / resting hand): ignore finger, mouse and trackpad ink.
+    // Mapped stylus/pad buttons still run even if Chromium labelled them `mouse`.
+    if (!buttonIdentity && shouldRejectNonPenInk(event.pointerType, settings.penOnly)) return
     if (activePointerRef.current !== null) {
       if (activePointerRef.current === event.pointerId) return
       if (!shouldAllowNewInkPointer(inkSessionRef.current, event, now)) return
       forceEndActivePointerRef.current('cross-device')
     }
-    if (shouldIgnorePointerAfterPen(event.pointerType, lastPenContactRef.current, now)) return
+    if (shouldIgnoreUnmappedPointerAfterPen(event.pointerType, lastPenContactRef.current, now, Boolean(buttonIdentity))) return
     if (event.pointerType === 'pen') lastPenContactRef.current = now
     inkSessionRef.current = inkPointerSessionFromSample(event.nativeEvent, now)
     event.preventDefault()
@@ -2778,7 +2811,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     if (!canvasPixelSizeRef.current.width) redraw(true)
     // Ghost 0,0 downs stay session-open so the next real sample can start the stroke.
     const firstPoint = start.commitFirst ? pointFromEvent(event.nativeEvent) : null
-    const pointerEraser = event.pointerType === 'pen' && (event.button === 5 || (event.buttons & 32) !== 0)
+    const pointerEraser = buttonAction === 'eraser'
     const pendingTap = pendingSolverTapRef.current
     if (pendingTap) {
       const elapsed = performance.now() - pendingTap.at
@@ -2884,10 +2917,26 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         }
     }
     appendPointerEvent(event.nativeEvent)
-  }, [activeArtBrush.pressure, activeArtSymbol, appendPointerEvent, artBrush, artColor, artEffect, artOpacity, artSymbolRotation, artSymbolSize, artWidth, bumpInkRevision, clearRecognitionScope, clearShapeDwellTimer, closeMathCorrectionSession, closeMathSolverSelection, commitPendingSolverTap, commitStrokeToCanvas, inkMode, inline, mathSolverEnabled, penColor, penWidth, pointFromEvent, redraw, scheduleRedraw, selectionMode, setDirty, settings.penOnly, settings.pressureEnabled, sourceHeight, sourceWidth, tool, updateHistoryState])
+  }, [activeArtBrush.pressure, activeArtSymbol, appendPointerEvent, artBrush, artColor, artEffect, artOpacity, artSymbolRotation, artSymbolSize, artWidth, bumpInkRevision, clearRecognitionScope, clearShapeDwellTimer, closeMathCorrectionSession, closeMathSolverSelection, commitPendingSolverTap, commitStrokeToCanvas, inkMode, inline, mathSolverEnabled, penColor, penWidth, pointFromEvent, redraw, scheduleRedraw, selectionMode, setDirty, settings.penOnly, settings.pressureEnabled, settings.tabletButtons, sourceHeight, sourceWidth, tool, updateHistoryState])
 
   const handlePointerMove = useCallback((event: ReactPointerEvent<HTMLElement>) => {
-    if (shouldRejectNonPenInk(event.pointerType, settings.penOnly)) return
+    const pan = tabletPanRef.current
+    if (pan && pan.pointerId === event.pointerId) {
+      event.preventDefault()
+      const paper = resolvePaperElement()
+      const scroller = paper?.closest('.unified-note-view') as HTMLElement | null
+      if (scroller) {
+        scroller.scrollLeft -= event.clientX - pan.x
+        scroller.scrollTop -= event.clientY - pan.y
+      }
+      tabletPanRef.current = { ...pan, x: event.clientX, y: event.clientY }
+      return
+    }
+    if (shouldRejectNonPenInkMove(
+      event.pointerType,
+      settings.penOnly,
+      activePointerRef.current === event.pointerId,
+    )) return
     if (activePointerRef.current !== event.pointerId) return
     const now = performance.now()
     // End only when the helper says so — not because a few seconds elapsed
@@ -2915,10 +2964,15 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       const latest = activeStrokeRef.current?.points.at(-1)
       if (latest) ensureWriteRoom(latest.y, latest.x)
     }
-  }, [appendPointerEvent, ensureWriteRoom, eraseAt, paintActiveStrokeNow, pointFromEvent, settings.penOnly])
+  }, [appendPointerEvent, ensureWriteRoom, eraseAt, paintActiveStrokeNow, pointFromEvent, resolvePaperElement, settings.penOnly])
 
   const finishPointer = useCallback((event: ReactPointerEvent<HTMLElement> | PointerEvent) => {
     const pointerId = event.pointerId
+    if (tabletPanRef.current?.pointerId === pointerId) {
+      tabletPanRef.current = null
+      if (activePointerRef.current === pointerId) activePointerRef.current = null
+      return
+    }
     if (activePointerRef.current !== pointerId) return
     if ('preventDefault' in event && typeof event.preventDefault === 'function' && event.cancelable) {
       try { event.preventDefault() } catch { /* ignore */ }
@@ -3512,6 +3566,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     updateHistoryState()
     fitPageToInk()
   }, [bumpInkRevision, clearRecognitionScope, closeMathCorrectionSession, closeMathSolverSelection, fitPageToInk, scheduleRedraw, setDirty, updateHistoryState])
+  undoNowRef.current = undo
 
   const redo = useCallback(() => {
     const next = redoRef.current.pop()
@@ -3529,6 +3584,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     updateHistoryState()
     fitPageToInk()
   }, [bumpInkRevision, clearRecognitionScope, closeMathCorrectionSession, closeMathSolverSelection, fitPageToInk, setDirty, updateHistoryState])
+  redoNowRef.current = redo
 
   const clear = useCallback(() => {
     if (!strokesRef.current.length) return
@@ -5247,7 +5303,10 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
           <div
             ref={surfaceRef}
             className="lw-canvas-surface"
-            onContextMenu={inline ? (event) => event.preventDefault() : undefined}
+            onContextMenu={inline ? (event) => {
+              const action = tabletButtonActionFromPointer(settings.tabletButtons, event.nativeEvent, true)
+              if (action !== 'os') event.preventDefault()
+            } : undefined}
           >
             <canvas ref={committedCanvasRef} className="lw-tablet-canvas lw-tablet-canvas-committed" aria-hidden="true" />
             <canvas
@@ -5262,7 +5321,10 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
               onPointerUp={inline ? undefined : finishPointer}
               onPointerCancel={inline ? undefined : finishPointer}
               onLostPointerCapture={inline ? undefined : finishPointer}
-              onContextMenu={(event) => event.preventDefault()}
+              onContextMenu={(event) => {
+                const action = tabletButtonActionFromPointer(settings.tabletButtons, event.nativeEvent, true)
+                if (action !== 'os') event.preventDefault()
+              }}
             />
             {(rulerPose || setSquarePose || compassPose) && (
               <DraftingGuides

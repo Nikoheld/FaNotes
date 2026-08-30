@@ -227,6 +227,7 @@ const DEFAULT_SETTINGS = Object.freeze({
   penWidth: 3.5,
   pressureEnabled: true,
   penOnly: process.platform === 'win32',
+  tabletButtons: { 'pen-tip': 'ink', 'pen-barrel': 'eraser', 'pen-upper': 'pan', 'pen-eraser': 'eraser', 'tablet-1': 'undo', 'tablet-2': 'redo' },
   smoothing: 0.68,
   scribbleEraseSensitivity: 50,
   shapeSnapSensitivity: 50,
@@ -307,6 +308,7 @@ const SETTINGS_SCHEMA = Object.freeze({
   penWidth: { type: 'number', min: 0.5, max: 40 },
   pressureEnabled: { type: 'boolean' },
   penOnly: { type: 'boolean' },
+  tabletButtons: { type: 'tablet-buttons' },
   smoothing: { type: 'number', min: 0, max: 1 },
   scribbleEraseSensitivity: { type: 'number', min: 0, max: 100 },
   shapeSnapSensitivity: { type: 'number', min: 0, max: 100 },
@@ -837,6 +839,15 @@ function sanitizeSettings(candidate, base = DEFAULT_SETTINGS) {
     if (rule.type === 'relative') {
       const cleaned = cleanRelativeSetting(value, rule.max)
       if (cleaned !== null) result[key] = cleaned
+    }
+    if (rule.type === 'tablet-buttons' && value && typeof value === 'object') {
+      const allowed = ['ink', 'eraser', 'undo', 'redo', 'pan', 'none', 'os']
+      const ids = ['pen-tip', 'pen-barrel', 'pen-upper', 'pen-eraser', 'tablet-1', 'tablet-2']
+      const next = { ...(result[key] || {}) }
+      for (const id of ids) {
+        if (allowed.includes(value[id])) next[id] = value[id]
+      }
+      result[key] = next
     }
   }
 

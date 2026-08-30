@@ -1,5 +1,6 @@
 import type { AppSettings } from './types'
 import { defaultPenOnlyForPlatform } from './lib/inkPointerPolicy'
+import { DEFAULT_TABLET_BUTTON_ACTIONS } from './lib/tabletButtons'
 
 /** Factory defaults for a desktop/web platform. Pass `window.fanotes.platform`. */
 export const defaultSettingsForPlatform = (platform: string | undefined): AppSettings => ({
@@ -36,6 +37,7 @@ export const defaultSettingsForPlatform = (platform: string | undefined): AppSet
   penWidth: 3.5,
   pressureEnabled: true,
   penOnly: defaultPenOnlyForPlatform(platform),
+  tabletButtons: { ...DEFAULT_TABLET_BUTTON_ACTIONS },
   smoothing: 0.68,
   scribbleEraseSensitivity: 50,
   shapeSnapSensitivity: 50,

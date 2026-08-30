@@ -90,18 +90,29 @@ export const paperMinEdgeGrows = (
   step: number,
 ) => growWriteOrigin(normalized, current, margin, step) > 0
 
+export type CanvasOrigin = {
+  originX?: number
+  originY?: number
+}
+
 /**
  * Grow the write page around a mark. Left/top pad and right/bottom extent both move.
  * `painted` is the CSS box DrawingBoard sees; never compare it to source px — a
  * viewport-filling sheet is already larger than source without having grown.
+ * `originX`/`originY` are pads already applied — a long stroke that stays in
+ * the top/left slack must not keep inserting the same margin.
  */
 export const growPageFromMark = (
-  extent: CanvasSize,
+  extent: CanvasSize & CanvasOrigin,
   mark: { x?: number; y?: number },
   _painted: { width?: number; height?: number } = {},
 ) => {
-  const padX = growWriteOrigin(mark.x, extent.width, WRITE_MARGIN_X, GROW_STEP_X)
-  const padY = growWriteOrigin(mark.y, extent.height, WRITE_MARGIN_Y, GROW_STEP_Y)
+  const haveX = Math.max(0, Number.isFinite(extent.originX) ? Number(extent.originX) : 0)
+  const haveY = Math.max(0, Number.isFinite(extent.originY) ? Number(extent.originY) : 0)
+  const wantX = growWriteOrigin(mark.x, extent.width, WRITE_MARGIN_X, GROW_STEP_X)
+  const wantY = growWriteOrigin(mark.y, extent.height, WRITE_MARGIN_Y, GROW_STEP_Y)
+  const padX = Math.max(0, wantX - haveX)
+  const padY = Math.max(0, wantY - haveY)
   const width = Math.max(
     growWriteExtent(mark.x, extent.width, WRITE_MARGIN_X, GROW_STEP_X),
     extent.width + padX,
@@ -198,6 +209,61 @@ export const markdownAndInkAfterMinEdgeGrow = (
     prevInkY: mark.y * prev.height,
     prevTextX: text.x,
     prevTextY: text.y,
+  }
+}
+
+/**
+ * Stay-put through a continuing stroke: each sample may grow max-edge and
+ * at most the remaining min-edge slack. Camera pans only by new pad.
+ */
+export const markdownAndInkAfterGrowSequence = (
+  mark: { x: number; y: number },
+  text: { x: number; y: number },
+  start: CanvasSize,
+  samples: { x: number; y: number }[],
+) => {
+  let page: CanvasSize & CanvasOrigin = { ...start, originX: 0, originY: 0 }
+  let ink = { ...mark }
+  let glyph = { ...text }
+  let cameraX = 0
+  let cameraY = 0
+  const steps = samples.map((sample) => {
+    const grown = growPageFromMark(page, sample)
+    const stay = markdownAndInkAfterMinEdgeGrow(ink, glyph, page, grown)
+    cameraX += stay.scrollX
+    cameraY += stay.scrollY
+    ink = {
+      x: grown.width > 0 ? stay.inkX / grown.width : ink.x,
+      y: grown.height > 0 ? stay.inkY / grown.height : ink.y,
+    }
+    glyph = { x: stay.textX, y: stay.textY }
+    page = {
+      width: grown.width,
+      height: grown.height,
+      originX: (page.originX ?? 0) + grown.padX,
+      originY: (page.originY ?? 0) + grown.padY,
+    }
+    return {
+      padX: grown.padX,
+      padY: grown.padY,
+      width: grown.width,
+      height: grown.height,
+      visualInkX: stay.inkX - cameraX,
+      visualInkY: stay.inkY - cameraY,
+      visualTextX: stay.textX - cameraX,
+      visualTextY: stay.textY - cameraY,
+    }
+  })
+  return {
+    originInkX: mark.x * start.width,
+    originInkY: mark.y * start.height,
+    originTextX: text.x,
+    originTextY: text.y,
+    cameraX,
+    cameraY,
+    originX: page.originX ?? 0,
+    originY: page.originY ?? 0,
+    steps,
   }
 }
 

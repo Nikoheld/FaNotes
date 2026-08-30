@@ -32,6 +32,7 @@ export {
   textOriginCssPx,
   paperOriginScrollDelta,
   markdownAndInkAfterMinEdgeGrow,
+  markdownAndInkAfterGrowSequence,
   markPagePosition,
   canvasScrollBounds,
   clampCanvasScroll,
@@ -78,6 +79,13 @@ export const layoutGrewEnough = (prevLayout: number, nextLayout: number) => (
   paintedBoxIsUsable(prevLayout)
   && Number.isFinite(nextLayout)
   && nextLayout > prevLayout + 1
+)
+
+/** Source already matches the new layout — setPageExtent remapped 0–1. */
+export const layoutGrowAlreadyInSource = (prevLayout: number, nextLayout: number, source: number) => (
+  layoutGrewEnough(prevLayout, nextLayout)
+  && paintedBoxIsUsable(source)
+  && Math.abs(source - nextLayout) <= 2
 )
 
 /** Remap 0–1 after the painted box grew. A width-only source grow that
@@ -276,8 +284,12 @@ export const resolvePaintedLayoutGrow = (input: {
   if (!paintedBoxIsUsable(input.prevLayoutW) || !paintedBoxIsUsable(input.prevLayoutH)) {
     return { scaleX: 1, scaleY: 1, pending: null, apply: false, discard: false }
   }
-  const scaleX = liveGrowScale(input.prevLayoutW, input.nextLayoutW, input.sourceW, input.sourceW, false)
-  const scaleY = liveGrowScale(input.prevLayoutH, input.nextLayoutH, input.sourceH, input.sourceH, false)
+  const scaleX = layoutGrowAlreadyInSource(input.prevLayoutW, input.nextLayoutW, input.sourceW)
+    ? 1
+    : liveGrowScale(input.prevLayoutW, input.nextLayoutW, input.sourceW, input.sourceW, false)
+  const scaleY = layoutGrowAlreadyInSource(input.prevLayoutH, input.nextLayoutH, input.sourceH)
+    ? 1
+    : liveGrowScale(input.prevLayoutH, input.nextLayoutH, input.sourceH, input.sourceH, false)
   return {
     scaleX,
     scaleY,

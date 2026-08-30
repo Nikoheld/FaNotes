@@ -2,6 +2,10 @@
 
 ## Unveröffentlicht
 
+## 2026.8.73
+
+- **Lange Linie nach unten verschiebt die Schrift nicht:** Wenn du mit dem Stift eine lange Linie nach unten ziehst, bleibt die schon vorhandene Schrift auf den Linien. Das Blatt wächst unten weiter — der Text rutscht nicht mit.
+
 ## 2026.8.72
 
 - **Vorhandene Schrift bleibt beim Schreiben stehen:** Wenn du mit dem Stift am Rand des Blatts schreibst, wächst das Blatt weiter. Die schon vorhandene Schrift bleibt auf den Linien — sie rutscht nicht mehr weg.
