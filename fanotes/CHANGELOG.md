@@ -2,6 +2,10 @@
 
 ## Unveröffentlicht
 
+## 2026.8.74
+
+- **Handschrift bleibt bei 500% Zoom scharf:** Weit reinzoomen macht Tinte und PDF-Schrift nicht pixelig. Die Linie bleibt klar — auch bei 500%.
+
 ## 2026.8.73
 
 - **Lange Linie nach unten verschiebt die Schrift nicht:** Wenn du mit dem Stift eine lange Linie nach unten ziehst, bleibt die schon vorhandene Schrift auf den Linien. Das Blatt wächst unten weiter — der Text rutscht nicht mit.

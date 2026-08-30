@@ -4,8 +4,8 @@ import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import type { PDFDocumentLoadingTask, PDFDocumentProxy, PDFPageProxy, RenderTask } from 'pdfjs-dist'
 import type { WorksheetDocument, WorksheetHighlight, WorksheetTextBox } from '../types'
 import { WORKSHEET_INKING_CLASS } from '../lib/pdfInkHit'
-import { paintSizeForPage } from '../lib/pdfDocument'
-import { readUsedSheetZoom, watchSheetZoom } from '../lib/paperView'
+import { paintBoxForPage, visiblePageCssWindow } from '../lib/pdfDocument'
+import { layoutOffsetInScroller, readUsedSheetZoom, resolvePaperZoomScroller, watchSheetZoom } from '../lib/paperView'
 
 export type WorksheetLayerHandle = {
   flush: () => Promise<void>
@@ -120,8 +120,30 @@ function PdfPageCanvas({
     const base = page.getViewport({ scale: 1 })
     const cssHeight = Math.max(1, Math.round(cssWidth * (base.height / Math.max(1, base.width))))
     const viewZoom = readUsedSheetZoom(host)
-    const { pixelWidth, pixelHeight } = paintSizeForPage(cssWidth, cssHeight, { viewZoom })
-    const renderKey = `${cssWidth}x${cssHeight}@${pixelWidth}x${pixelHeight}@${viewZoom.toFixed(2)}`
+    const scroller = resolvePaperZoomScroller(host)
+    const pageOffset = layoutOffsetInScroller(host, scroller)
+    const visible = scroller
+      ? visiblePageCssWindow({
+        pageWidth: cssWidth,
+        pageHeight: cssHeight,
+        viewWidth: scroller.clientWidth,
+        viewHeight: scroller.clientHeight,
+        viewZoom,
+        scrollLeft: scroller.scrollLeft,
+        scrollTop: scroller.scrollTop,
+        pageOffsetLeft: pageOffset.left,
+        pageOffsetTop: pageOffset.top,
+      })
+      : null
+    const box = paintBoxForPage(cssWidth, cssHeight, {
+      viewZoom,
+      visibleLeft: visible?.left,
+      visibleTop: visible?.top,
+      visibleCssWidth: visible?.width,
+      visibleCssHeight: visible?.height,
+    })
+    const { pixelWidth, pixelHeight } = box
+    const renderKey = `${cssWidth}x${cssHeight}@${box.cssLeft},${box.cssTop},${box.cssWidth}x${box.cssHeight}@${pixelWidth}x${pixelHeight}@${viewZoom.toFixed(2)}`
     if (renderKey === lastRenderKeyRef.current && canvas.width === pixelWidth && canvas.height === pixelHeight) {
       return
     }
@@ -132,18 +154,22 @@ function PdfPageCanvas({
       if (token !== renderTokenRef.current || !pageRef.current || !canvasRef.current || !hostRef.current) return
       const livePage = pageRef.current
       const liveCanvas = canvasRef.current
-      const scale = pixelWidth / Math.max(1, base.width)
+      const backingPerCss = pixelWidth / Math.max(1, box.cssWidth)
+      const scale = backingPerCss * (cssWidth / Math.max(1, base.width))
       const viewport = livePage.getViewport({ scale })
       liveCanvas.width = pixelWidth
       liveCanvas.height = pixelHeight
-      liveCanvas.style.width = `${cssWidth}px`
-      liveCanvas.style.height = `${cssHeight}px`
+      liveCanvas.style.position = 'absolute'
+      liveCanvas.style.left = `${Math.round(box.cssLeft)}px`
+      liveCanvas.style.top = `${Math.round(box.cssTop)}px`
+      liveCanvas.style.width = `${Math.round(box.cssWidth)}px`
+      liveCanvas.style.height = `${Math.round(box.cssHeight)}px`
       const context = liveCanvas.getContext('2d', { alpha: false })
       if (!context) return
-      context.setTransform(1, 0, 0, 1, 0, 0)
       const integerScale = Math.abs(scale - Math.round(scale)) < 0.02
       context.imageSmoothingEnabled = !integerScale
       context.imageSmoothingQuality = 'high'
+      context.setTransform(1, 0, 0, 1, 0, 0)
       context.fillStyle = '#ffffff'
       context.fillRect(0, 0, pixelWidth, pixelHeight)
       const task = livePage.render({
@@ -151,6 +177,7 @@ function PdfPageCanvas({
         canvasContext: context,
         viewport,
         intent: 'display',
+        transform: [1, 0, 0, 1, -box.cssLeft * backingPerCss, -box.cssTop * (pixelHeight / Math.max(1, box.cssHeight))],
       })
       renderRef.current = task
       try {
@@ -207,9 +234,12 @@ function PdfPageCanvas({
     const observer = new ResizeObserver(schedule)
     observer.observe(host)
     const stopZoom = watchSheetZoom(host, schedule)
+    const scroller = resolvePaperZoomScroller(host)
+    scroller?.addEventListener('scroll', schedule, { passive: true })
     return () => {
       observer.disconnect()
       stopZoom()
+      scroller?.removeEventListener('scroll', schedule)
       if (resizeTimerRef.current !== null) window.clearTimeout(resizeTimerRef.current)
     }
   }, [render])

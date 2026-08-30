@@ -56,8 +56,8 @@ const runOnce = () => {
   assert.doesNotMatch(pdfView, /textEnabled \? 1 : 0/)
   assert.doesNotMatch(pdfView, /else if \(textHost\) \{\s*textHost\.replaceChildren\(\)/)
   assert.match(pdfView, /textEnabled \|\| textHost\.childElementCount > 0/)
-  assert.match(pdfView, /style\.width = `\$\{cssWidth\}px`/)
-  assert.match(pdfView, /style\.height = `\$\{cssHeight\}px`/)
+  assert.match(pdfView, /style\.width = `\$\{Math\.round\(box\.cssWidth\)\}px`/)
+  assert.match(pdfView, /style\.height = `\$\{Math\.round\(box\.cssHeight\)\}px`/)
   assert.equal(pointerEventsForInkLayer('pdf-text', true), 'none')
   assert.equal(pointerEventsForInkLayer('pdf-text', false), 'auto')
 

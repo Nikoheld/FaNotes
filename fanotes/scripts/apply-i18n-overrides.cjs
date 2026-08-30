@@ -6,6 +6,7 @@ const path = require('node:path')
 // Deliberately written UI copy. These entries take precedence over the generated
 // catalog so product names and short labels never become awkward partial translations.
 const overrides = {
+  '**Handschrift bleibt bei 500% Zoom scharf:** Weit reinzoomen macht Tinte und PDF-Schrift nicht pixelig. Die Linie bleibt klar — auch bei 500%.': '**Handwriting stays sharp at 500% zoom:** Zooming far in does not make ink or PDF type pixelated. The line stays clear — even at 500%.',
   '**Lange Linie nach unten verschiebt die Schrift nicht:** Wenn du mit dem Stift eine lange Linie nach unten ziehst, bleibt die schon vorhandene Schrift auf den Linien. Das Blatt wächst unten weiter — der Text rutscht nicht mit.': '**A long line down does not shift the writing:** When you draw a long line down with the pen, the writing that is already there stays on the ruling. The sheet grows further at the bottom — the text does not slide with it.',
   'Belegt die Tasten, die FaNotes vom Stift und vom Tablett wirklich empfängt. ExpressKeys, die nur der Wacom-Treiber sieht, stellst du weiter in Wacom Center ein.': 'Assigns the buttons FaNotes actually receives from the pen and the tablet. ExpressKeys that only the Wacom driver sees are still set in Wacom Center.',
   'Stifte- und Tablett-Tasten': 'Pen and tablet buttons',

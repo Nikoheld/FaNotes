@@ -14,13 +14,27 @@ export const pdfStartPageForLoad = (path: unknown, previousPath: unknown, reques
 export const DEFAULT_PDF_PAGE_RATIO = 297 / 210
 /** HiDPI tablets (Hyprland 2× / 3×) must keep glyphs at device pixels. */
 export const MAX_PDF_DPR = 3
-export const MAX_PDF_EDGE = 8_192
-export const MAX_PDF_PIXELS = 32_000_000
-export const MAX_PDF_VIEW_QUALITY_ZOOM = 3
+export const MAX_PDF_EDGE = 16_384
+export const MAX_PDF_PIXELS = 48_000_000
+/** Match sheet zoom through 600% so 500% is not a 3× bitmap stretched by CSS. */
+export const MAX_PDF_VIEW_QUALITY_ZOOM = 6
 
 export type PdfPaintOptions = {
   dpr?: number
   viewZoom?: number
+  visibleLeft?: number
+  visibleTop?: number
+  visibleCssWidth?: number
+  visibleCssHeight?: number
+}
+
+export type PdfPaintBox = {
+  pixelWidth: number
+  pixelHeight: number
+  cssLeft: number
+  cssTop: number
+  cssWidth: number
+  cssHeight: number
 }
 
 /** Backing-store scale: screen DPR times a bounded sheet-zoom boost. */
@@ -28,6 +42,65 @@ export const pdfPaintDeviceScale = (dpr: number, viewZoom = 1) => {
   const screen = Math.min(Math.max(Number(dpr) || 1, 1), MAX_PDF_DPR)
   const zoomBoost = Math.max(1, Math.min(MAX_PDF_VIEW_QUALITY_ZOOM, viewZoom > 1.02 ? viewZoom : 1))
   return screen * zoomBoost
+}
+
+const clampPageCss = (value: number, max: number) => Math.max(0, Math.min(max, Number.isFinite(value) ? value : 0))
+
+/** Visible page rectangle in unzoomed CSS pixels (scroll is visual, like layoutInkWindow). */
+export const visiblePageCssWindow = (input: {
+  pageWidth: number
+  pageHeight: number
+  viewWidth: number
+  viewHeight: number
+  viewZoom: number
+  scrollLeft?: number
+  scrollTop?: number
+  pageOffsetLeft?: number
+  pageOffsetTop?: number
+  padRatio?: number
+}) => {
+  const pageWidth = Math.max(1, Number(input.pageWidth) || 1)
+  const pageHeight = Math.max(1, Number(input.pageHeight) || 1)
+  const zoom = Math.max(0.01, Number(input.viewZoom) || 1)
+  const viewWidth = Math.max(1, Number(input.viewWidth) || 1)
+  const viewHeight = Math.max(1, Number(input.viewHeight) || 1)
+  const padRatio = Number.isFinite(input.padRatio) ? Math.max(0, Number(input.padRatio)) : 0.35
+  const visualLeft = (Number(input.pageOffsetLeft) || 0) * zoom
+  const visualTop = (Number(input.pageOffsetTop) || 0) * zoom
+  const layoutLeft = ((Number(input.scrollLeft) || 0) - visualLeft) / zoom
+  const layoutTop = ((Number(input.scrollTop) || 0) - visualTop) / zoom
+  const visW = viewWidth / zoom
+  const visH = viewHeight / zoom
+  const padX = visW * padRatio
+  const padY = visH * padRatio
+  const left = clampPageCss(layoutLeft - padX, pageWidth)
+  const top = clampPageCss(layoutTop - padY, pageHeight)
+  const right = clampPageCss(layoutLeft + visW + padX, pageWidth)
+  const bottom = clampPageCss(layoutTop + visH + padY, pageHeight)
+  return {
+    left,
+    top,
+    width: Math.max(1, right - left),
+    height: Math.max(1, bottom - top),
+  }
+}
+
+const fitPaintBitmap = (width: number, height: number) => {
+  let pixelWidth = Math.max(1, Math.round(width))
+  let pixelHeight = Math.max(1, Math.round(height))
+  const edge = Math.max(pixelWidth, pixelHeight)
+  if (edge > MAX_PDF_EDGE) {
+    const factor = MAX_PDF_EDGE / edge
+    pixelWidth = Math.max(1, Math.round(pixelWidth * factor))
+    pixelHeight = Math.max(1, Math.round(pixelHeight * factor))
+  }
+  const pixels = pixelWidth * pixelHeight
+  if (pixels > MAX_PDF_PIXELS) {
+    const factor = Math.sqrt(MAX_PDF_PIXELS / pixels)
+    pixelWidth = Math.max(1, Math.round(pixelWidth * factor))
+    pixelHeight = Math.max(1, Math.round(pixelHeight * factor))
+  }
+  return { pixelWidth, pixelHeight }
 }
 
 const asUint8Array = (value: ArrayBuffer | Uint8Array | ArrayBufferView): Uint8Array => {
@@ -143,25 +216,49 @@ export const applyPdfTextOverlayScale = (
   return scale
 }
 
-export const paintSizeForPage = (cssWidth: number, cssHeight: number, options: PdfPaintOptions = {}) => {
+/**
+ * PDF backing box. A full A4 at 5× DPR 2 does not fit the pixel budget — then
+ * the bitmap covers only the visible CSS window at device-pixel density.
+ */
+export const paintBoxForPage = (cssWidth: number, cssHeight: number, options: PdfPaintOptions = {}): PdfPaintBox => {
   const dpr = options.dpr ?? (typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1)
   const viewZoom = options.viewZoom ?? 1
   const scale = pdfPaintDeviceScale(dpr, viewZoom)
-  let pixelWidth = Math.max(1, Math.round(Math.max(1, cssWidth) * scale))
-  let pixelHeight = Math.max(1, Math.round(Math.max(1, cssHeight) * scale))
-  const edge = Math.max(pixelWidth, pixelHeight)
-  if (edge > MAX_PDF_EDGE) {
-    const factor = MAX_PDF_EDGE / edge
-    pixelWidth = Math.max(1, Math.round(pixelWidth * factor))
-    pixelHeight = Math.max(1, Math.round(pixelHeight * factor))
+  const pageWidth = Math.max(1, cssWidth)
+  const pageHeight = Math.max(1, cssHeight)
+  const desiredWidth = pageWidth * scale
+  const desiredHeight = pageHeight * scale
+  const full = fitPaintBitmap(desiredWidth, desiredHeight)
+  const fullKeepsDensity = full.pixelWidth >= desiredWidth * 0.92 && full.pixelHeight >= desiredHeight * 0.92
+  const visW = Number(options.visibleCssWidth)
+  const visH = Number(options.visibleCssHeight)
+  const hasVisible = Number.isFinite(visW) && visW > 0 && Number.isFinite(visH) && visH > 0
+  if (fullKeepsDensity || !hasVisible) {
+    return {
+      ...full,
+      cssLeft: 0,
+      cssTop: 0,
+      cssWidth: pageWidth,
+      cssHeight: pageHeight,
+    }
   }
-  const pixels = pixelWidth * pixelHeight
-  if (pixels > MAX_PDF_PIXELS) {
-    const factor = Math.sqrt(MAX_PDF_PIXELS / pixels)
-    pixelWidth = Math.max(1, Math.round(pixelWidth * factor))
-    pixelHeight = Math.max(1, Math.round(pixelHeight * factor))
+  const left = clampPageCss(Number(options.visibleLeft) || 0, pageWidth)
+  const top = clampPageCss(Number(options.visibleTop) || 0, pageHeight)
+  const width = Math.max(1, Math.min(pageWidth - left, visW))
+  const height = Math.max(1, Math.min(pageHeight - top, visH))
+  const windowed = fitPaintBitmap(width * scale, height * scale)
+  return {
+    ...windowed,
+    cssLeft: left,
+    cssTop: top,
+    cssWidth: width,
+    cssHeight: height,
   }
-  return { pixelWidth, pixelHeight }
+}
+
+export const paintSizeForPage = (cssWidth: number, cssHeight: number, options: PdfPaintOptions = {}) => {
+  const box = paintBoxForPage(cssWidth, cssHeight, options)
+  return { pixelWidth: box.pixelWidth, pixelHeight: box.pixelHeight }
 }
 
 export const openPdfDocument = async (

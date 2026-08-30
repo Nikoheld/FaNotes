@@ -166,6 +166,23 @@ export const resolvePaperZoomScroller = (from: HTMLElement | null): HTMLElement 
   ?? null
 )
 
+/** Layout offset inside a scroller. CSS zoom must not be read from getBoundingClientRect. */
+export const layoutOffsetInScroller = (node: HTMLElement | null, scroller: HTMLElement | null) => {
+  if (!node || !scroller) return { left: 0, top: 0 }
+  let left = 0
+  let top = 0
+  let current: HTMLElement | null = node
+  while (current && current !== scroller) {
+    left += current.offsetLeft
+    top += current.offsetTop
+    const parent = current.offsetParent as HTMLElement | null
+    if (!parent || parent === scroller) break
+    if (!scroller.contains(parent)) break
+    current = parent
+  }
+  return { left, top }
+}
+
 /**
  * Used camera zoom for an element on the sheet.
  * Walks to the plane and reads the single specified zoom — children must not

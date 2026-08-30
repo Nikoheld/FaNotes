@@ -1356,9 +1356,10 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .worksheet-page > img, .worksheet-pdf-page { width: 100%; display: block; background: #fff; }
 .worksheet-page > img { height: auto; min-height: 240px; object-fit: contain; }
 .worksheet-pdf-page { position: relative; min-height: 120px; }
-.worksheet-pdf-canvas-host { position: absolute; inset: 0; }
+.worksheet-pdf-canvas-host { position: absolute; inset: 0; background: #fff; }
 .worksheet-pdf-page canvas {
   display: block;
+  position: absolute;
   width: auto;
   height: auto;
   max-width: none;
@@ -1570,10 +1571,11 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   font-size: 9px;
   pointer-events: none;
 }
-.pdf-note-canvas-host { position: absolute; inset: 0; }
+.pdf-note-canvas-host { position: absolute; inset: 0; background: #fff; }
 .pdf-note-page canvas {
   display: block;
-  /* Inline CSS px from paintSizeForPage. 100%/100% stretches a non-square bitmap. */
+  position: absolute;
+  /* Inline CSS px from paintBoxForPage. 100%/100% stretches a non-square bitmap. */
   width: auto;
   height: auto;
   max-width: none;

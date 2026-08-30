@@ -137,7 +137,7 @@ const worksheetSafeguards = [
   ['const enqueuePdfRender', 'PDF-Seiten werden nacheinander gerendert, nicht parallel'],
   ['const loadVaultPdfBytes', 'PDF-Bytes ohne riesige Data-URL'],
   ['const HIDE_DEBOUNCE_MS', 'Off-Screen-Seiten werden nicht sofort zerstört'],
-  ['paintSizeForPage', 'PDF-Seite teilt das HiDPI-Raster mit der PDF-Notiz'],
+  ['paintBoxForPage', 'PDF-Seite teilt das HiDPI-Raster mit der PDF-Notiz'],
   ['disableAutoFetch: true', 'PDF.js lädt keine Extra-Requests'],
   ['{mounted && <PdfPageCanvas', 'getPage nur für sichtbare Seiten'],
 ]

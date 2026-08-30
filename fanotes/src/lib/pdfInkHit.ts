@@ -198,7 +198,10 @@ export const layoutInkWindow = (input: {
   const viewHeight = Math.max(1, Number(input.viewHeight) || 1)
   const zoom = Math.max(0.01, Number(input.viewZoom) || 1)
   const visualPaper = paperHeight * zoom
-  if (paperHeight < 1_600 || visualPaper <= viewHeight * 1.35) return { ...FULL_INK_WINDOW }
+  if (visualPaper <= viewHeight * 1.35) return { ...FULL_INK_WINDOW }
+  // A4 stays a full overlay at ~100% so the bitmap does not jump while scrolling.
+  // At ~500% the visual sheet is far larger than the viewport — window it.
+  if (paperHeight < 1_600 && zoom <= 1.4) return { ...FULL_INK_WINDOW }
   const padRatio = Number.isFinite(input.padRatio) ? Number(input.padRatio) : 1.6
   const pad = Math.min(0.45, (viewHeight * Math.max(0, padRatio)) / visualPaper)
   const scrollTop = Math.max(0, Number(input.scrollTop) || 0)
