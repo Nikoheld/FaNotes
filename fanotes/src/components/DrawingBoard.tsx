@@ -132,6 +132,8 @@ import {
   growPageFromMark,
   keepMarkOnPage,
   mapClientToPage,
+  paperOriginScrollDelta,
+  textOriginCssPx,
   writeExtentFromContent,
 } from '../lib/noteCanvas'
 import {
@@ -1879,10 +1881,9 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     paper.style.setProperty('--ink-width-extent', String(styles.widthExtent))
     paper.style.setProperty('--ink-page-width', `${Math.max(1, Math.round(width))}px`)
     paper.style.setProperty('--ink-page-height', `${Math.max(1, Math.round(height))}px`)
-    const originX = Math.max(0, sourceOriginXRef.current)
-    const originY = Math.max(0, sourceOriginYRef.current)
-    paper.style.setProperty('--text-origin-x', `${width > 0 ? (originX / width) * 100 : 0}%`)
-    paper.style.setProperty('--text-origin-y', `${height > 0 ? (originY / height) * 100 : 0}%`)
+    const origin = textOriginCssPx(sourceOriginXRef.current, sourceOriginYRef.current)
+    paper.style.setProperty('--text-origin-x', origin.x)
+    paper.style.setProperty('--text-origin-y', origin.y)
     paper.classList.add(HAS_INK_EXTENT_CLASS)
     paper.classList.toggle(INK_WIDTH_ANCHOR_CLASS, inkWidthNeedsAnchor(styles.widthExtent))
     const plane = paper.closest('.paper-sheet-plane') as HTMLElement | null
@@ -1924,8 +1925,9 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   commitPendingGrowRemapRef.current = commitPendingGrowRemap
 
   /**
-   * Resize the writable page without shifting existing ink in absolute space.
-   * Min-edge pad shifts origin; max-edge grow only scales. Text CSS is untouched.
+   * Resize the writable page without shifting existing ink or typed text.
+   * Min-edge pad remaps 0–1 ink, offsets the markdown column in CSS px,
+   * and pans the camera by the same pad so glyphs stay on the ruling.
    */
   const setPageExtent = useCallback((targetHeight: number, targetWidth: number, padX = 0, padY = 0) => {
     const prevH = sourceHeightRef.current
@@ -1981,8 +1983,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     const nextLayoutW = paper?.offsetWidth ?? 0
     const scroller = paper?.closest('.unified-note-view') as HTMLElement | null
     if (scroller && (addX > 0 || addY > 0) && prevW > 0 && prevH > 0) {
-      if (addX > 0 && nextLayoutW > 0) scroller.scrollLeft += (addX / nextW) * nextLayoutW
-      if (addY > 0 && nextLayoutH > 0) scroller.scrollTop += (addY / nextH) * nextLayoutH
+      if (addX > 0 && nextLayoutW > 0) scroller.scrollLeft += paperOriginScrollDelta(addX, nextW, nextLayoutW)
+      if (addY > 0 && nextLayoutH > 0) scroller.scrollTop += paperOriginScrollDelta(addY, nextH, nextLayoutH)
     }
     paintedLayoutRef.current = { w: nextLayoutW, h: nextLayoutH }
     exportCacheRef.current = null

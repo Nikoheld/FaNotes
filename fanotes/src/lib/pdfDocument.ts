@@ -14,9 +14,9 @@ export const pdfStartPageForLoad = (path: unknown, previousPath: unknown, reques
 export const DEFAULT_PDF_PAGE_RATIO = 297 / 210
 /** HiDPI tablets (Hyprland 2× / 3×) must keep glyphs at device pixels. */
 export const MAX_PDF_DPR = 3
-export const MAX_PDF_EDGE = 6_144
-export const MAX_PDF_PIXELS = 12_000_000
-export const MAX_PDF_VIEW_QUALITY_ZOOM = 2.6
+export const MAX_PDF_EDGE = 8_192
+export const MAX_PDF_PIXELS = 32_000_000
+export const MAX_PDF_VIEW_QUALITY_ZOOM = 3
 
 export type PdfPaintOptions = {
   dpr?: number

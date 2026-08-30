@@ -30,10 +30,10 @@ const A4 = { width: 900, height: 1273 }
 
 const runOnce = () => {
   assert.ok(MAX_PDF_DPR >= 2.5, `HiDPI DPR cap must cover 2× tablets, got ${MAX_PDF_DPR}`)
-  assert.ok(MAX_PDF_EDGE >= 4_096, `PDF edge cap must exceed 2048, got ${MAX_PDF_EDGE}`)
-  assert.ok(MAX_PDF_PIXELS >= 8_000_000, `PDF page budget must exceed 2.4M, got ${MAX_PDF_PIXELS}`)
-  assert.ok(INK_MAX_CANVAS_PIXELS_TALL >= 8_000_000, `tall ink budget must exceed 4.2M, got ${INK_MAX_CANVAS_PIXELS_TALL}`)
-  assert.ok(INK_TALL_SCALE_FLOOR >= 0.7, `tall ink floor must not collapse to 0.38, got ${INK_TALL_SCALE_FLOOR}`)
+  assert.ok(MAX_PDF_EDGE >= 8_192, `PDF edge cap must cover zoomed HiDPI, got ${MAX_PDF_EDGE}`)
+  assert.ok(MAX_PDF_PIXELS >= 24_000_000, `PDF page budget must keep zoomed 2× A4, got ${MAX_PDF_PIXELS}`)
+  assert.ok(INK_MAX_CANVAS_PIXELS_TALL >= 16_000_000, `tall ink budget must stay HiDPI, got ${INK_MAX_CANVAS_PIXELS_TALL}`)
+  assert.ok(INK_TALL_SCALE_FLOOR >= 0.8, `tall ink floor must not collapse, got ${INK_TALL_SCALE_FLOOR}`)
 
   const hidpi = paintSizeForPage(A4.width, A4.height, { dpr: 2, viewZoom: 1 })
   assert.ok(
@@ -49,6 +49,10 @@ const runOnce = () => {
   assert.ok(
     zoomed.pixelWidth > hidpi.pixelWidth * 1.2,
     `sheet zoom 2× must re-raster PDF, got ${zoomed.pixelWidth} vs ${hidpi.pixelWidth}`,
+  )
+  assert.ok(
+    zoomed.pixelWidth >= A4.width * 2 * 2 * 0.92,
+    `zoomed 2× A4 at DPR 2 must keep device pixels (got ${zoomed.pixelWidth})`,
   )
   assert.equal(pdfPaintDeviceScale(2, 1), 2)
   assert.ok(pdfPaintDeviceScale(2, 2) > pdfPaintDeviceScale(2, 1))
@@ -78,6 +82,8 @@ const runOnce = () => {
   assert.match(pdf, /paintSizeForPage\(cssWidth, cssHeight, \{ viewZoom \}\)/)
   assert.match(pdf, /watchSheetZoom\(host, schedule\)/)
   assert.match(pdf, /imageSmoothingQuality = 'high'/)
+  assert.match(pdf, /liveCanvas\.style\.width = `\$\{cssWidth\}px`/)
+  assert.match(pdf, /liveCanvas\.style\.height = `\$\{cssHeight\}px`/)
   assert.match(worksheet, /paintSizeForPage\(cssWidth, cssHeight, \{ viewZoom \}\)/)
   assert.match(worksheet, /watchSheetZoom\(host, schedule\)/)
   assert.doesNotMatch(worksheet, /MAX_PDF_PIXELS = 2_400_000/)

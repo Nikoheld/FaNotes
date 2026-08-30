@@ -98,13 +98,14 @@ try {
 
   const board = readFileSync(join(root, 'src/components/DrawingBoard.tsx'), 'utf8')
   const paperView = readFileSync(join(root, 'src/components/PaperView.tsx'), 'utf8')
+  const paperViewLib = readFileSync(join(root, 'src/lib/paperView.ts'), 'utf8')
   assert.match(board, /writeExtentFromContent/)
   assert.match(board, /growPageFromMark/)
   assert.match(board, /clearInkExtentStyles/)
-  assert.match(paperView, /paperScrollBoundsFromVisualRect/)
+  assert.match(paperViewLib, /paperScrollBoundsFromVisualRect/)
   assert.match(paperView, /paper-sheet-plane/)
-  assert.match(paperView, /scrollHeight/)
-  assert.match(paperView, /clampCanvasScroll/)
+  assert.match(paperViewLib, /scrollHeight/)
+  assert.match(paperViewLib, /clampCanvasScroll/)
   assert.match(css, /\.paper-sheet-plane \{[\s\S]*?min-height:\s*100%/)
 
   const topMargin = 32

@@ -29,6 +29,9 @@ export {
   growPageFromMark,
   writePageLayoutSize,
   keepMarkOnPage,
+  textOriginCssPx,
+  paperOriginScrollDelta,
+  markdownAndInkAfterMinEdgeGrow,
   markPagePosition,
   canvasScrollBounds,
   clampCanvasScroll,
@@ -396,15 +399,15 @@ export const inkStrokeCssPixels = (baseWidth: number, bitmapWidth: number, layou
 /** Cap for window.devicePixelRatio contribution on the ink overlay. */
 export const INK_MAX_DPR = 4
 /** When the paper is CSS-zoomed, supersample so ink is not a stretched bitmap. */
-export const INK_MAX_VIEW_QUALITY_ZOOM = 2.6
-export const INK_MIN_INLINE_QUALITY = 1.35
-export const INK_MAX_CANVAS_EDGE = 6_144
-export const INK_MAX_CANVAS_PIXELS = 18_000_000
-/** Tall PDF/worksheet overlays: keep HiDPI, but do not match the full 18M budget. */
-export const INK_MAX_CANVAS_PIXELS_TALL = 10_000_000
+export const INK_MAX_VIEW_QUALITY_ZOOM = 3
+export const INK_MIN_INLINE_QUALITY = 1.75
+export const INK_MAX_CANVAS_EDGE = 8_192
+export const INK_MAX_CANVAS_PIXELS = 32_000_000
+/** Tall PDF/worksheet overlays: keep HiDPI on the visible window. */
+export const INK_MAX_CANVAS_PIXELS_TALL = 24_000_000
 export const INK_TALL_LAYOUT_HEIGHT = 1_800
 /** Floor so a long PDF cannot collapse a 3.5px pen to a few stretched pixels. */
-export const INK_TALL_SCALE_FLOOR = 0.72
+export const INK_TALL_SCALE_FLOOR = 0.85
 
 /**
  * Backing-store size for the ink canvases. Higher when zoomed in so CSS scale

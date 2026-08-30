@@ -56,6 +56,7 @@ Command-palette action ids walked from `src/App.tsx`: `new-note`, `import-pdf-no
 | Paper zoom / rotation | `src/lib/paperView.ts` | `export const clampViewZoom` |
 | Zoom-in writing stay-put | `src/lib/paperView.ts` | `export const applyPaperZoomStayPut` |
 | Fast paper-scroll text stay-put | `src/lib/paperCaretScroll.ts` | `export const lockPaperViewportScrollStayPut` |
+| Pen-write text stay-put | `src/lib/noteCanvas.ts` | `export const markdownAndInkAfterMinEdgeGrow` |
 | Paper grow while writing | `src/lib/noteCanvas.ts` | `export const growWriteExtent` |
 | Finite extra-paper scroll | `src/lib/noteCanvas.ts` | `export const canvasScrollBounds` |
 | Clamp pan to extra paper | `src/lib/noteCanvas.ts` | `export const clampCanvasScroll` |

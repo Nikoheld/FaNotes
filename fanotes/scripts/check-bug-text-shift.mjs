@@ -19,11 +19,14 @@ const {
   WRITE_SLACK_HEIGHT,
   a4ColumnOriginLeftPx,
   applyLiveHandwritingGrow,
+  growPageFromMark,
   inkExtentOriginLeftPx,
   inkExtentStyleValues,
   inkWidthNeedsAnchor,
+  markdownAndInkAfterMinEdgeGrow,
   neededWriteExtent,
   paperPixelY,
+  textOriginCssPx,
 } = await server.ssrLoadModule('/src/lib/paperGrow.ts')
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
@@ -66,10 +69,33 @@ try {
   assert.match(css, /\.unified-paper\.has-ink-width \{[\s\S]*?margin-left:\s*0/)
   assert.match(css, /\.unified-paper > \.editor-pane \{[\s\S]*?max-width:\s*900px/)
   assert.match(css, /--text-origin-x/)
+  const pane = css.slice(
+    css.indexOf('.unified-paper > .editor-pane {'),
+    css.indexOf('.unified-paper .markdown-editor, .unified-paper .markdown-editor .cm-editor'),
+  )
+  assert.match(pane, /padding-top:\s*var\(--text-origin-y/)
+  assert.doesNotMatch(pane, /margin-top:\s*var\(--text-origin-y/)
   const board = readFileSync(join(root, 'src/components/DrawingBoard.tsx'), 'utf8')
   assert.equal(INK_WIDTH_ANCHOR_CLASS, 'has-ink-width')
   assert.match(board, /INK_WIDTH_ANCHOR_CLASS/)
   assert.match(board, /inkWidthNeedsAnchor/)
+  assert.match(board, /textOriginCssPx\(/)
+  assert.doesNotMatch(board, /--text-origin-y.*%/u)
+
+  const topWrite = growPageFromMark(
+    { width: PAPER_SOURCE_WIDTH, height: 1800 },
+    { x: 0.046, y: 0.037 },
+  )
+  assert.ok(topWrite.padY > 0, 'pen at the top of the canvas must grow origin, not slide glyphs')
+  const stay = markdownAndInkAfterMinEdgeGrow(
+    { x: 0.2, y: 0.3 },
+    { x: 86, y: 78 },
+    { width: PAPER_SOURCE_WIDTH, height: 1800 },
+    topWrite,
+  )
+  assert.equal(stay.origin.y, textOriginCssPx(topWrite.padX, topWrite.padY).y)
+  assert.ok(Math.abs(stay.visualTextY - stay.prevTextY) < 1e-6)
+  assert.ok(Math.abs(stay.visualInkY - stay.prevInkY) < 1e-6)
 
   console.log(JSON.stringify({
     a4Origin640: inkExtentOriginLeftPx(640, a4W, 1),

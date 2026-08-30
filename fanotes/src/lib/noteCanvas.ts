@@ -140,6 +140,67 @@ export const keepMarkOnPage = (
   return (value * prevExtent + pad) / nextExtent
 }
 
+const finiteOriginPx = (value: number) => Math.max(0, Number.isFinite(value) ? value : 0)
+
+/**
+ * Markdown column offset after a min-edge grow. Must be `px`.
+ * Vertical `margin-%` is of containing-block WIDTH, and `margin-top`
+ * collapses out of `.unified-paper` — both slide existing text.
+ */
+export const textOriginCssPx = (originX: number, originY: number) => ({
+  x: `${Math.round(finiteOriginPx(originX))}px`,
+  y: `${Math.round(finiteOriginPx(originY))}px`,
+})
+
+/** Camera delta that keeps pre-grow paper pixels in view after a min-edge pad. */
+export const paperOriginScrollDelta = (
+  pad: number,
+  nextExtent: number,
+  nextLayout: number,
+) => {
+  if (!(nextExtent > 0) || !(nextLayout > 0)) return 0
+  return (finiteOriginPx(pad) / nextExtent) * nextLayout
+}
+
+/**
+ * Ink and typed text on the same paper pixels through a min-edge grow.
+ * DrawingBoard remaps 0–1 ink, offsets the editor by `textOriginCssPx`,
+ * and pans by `paperOriginScrollDelta`.
+ */
+export const markdownAndInkAfterMinEdgeGrow = (
+  mark: { x: number; y: number },
+  text: { x: number; y: number },
+  prev: CanvasSize,
+  next: CanvasSize & { padX: number; padY: number },
+  layout: CanvasSize = next,
+) => {
+  const padX = finiteOriginPx(next.padX)
+  const padY = finiteOriginPx(next.padY)
+  const inkX = keepMarkOnPage(mark.x, prev.width, next.width, padX) * next.width
+  const inkY = keepMarkOnPage(mark.y, prev.height, next.height, padY) * next.height
+  const textX = text.x + padX
+  const textY = text.y + padY
+  const scrollX = paperOriginScrollDelta(padX, next.width, layout.width)
+  const scrollY = paperOriginScrollDelta(padY, next.height, layout.height)
+  return {
+    origin: textOriginCssPx(padX, padY),
+    inkX,
+    inkY,
+    textX,
+    textY,
+    scrollX,
+    scrollY,
+    visualInkX: inkX - scrollX,
+    visualInkY: inkY - scrollY,
+    visualTextX: textX - scrollX,
+    visualTextY: textY - scrollY,
+    prevInkX: mark.x * prev.width,
+    prevInkY: mark.y * prev.height,
+    prevTextX: text.x,
+    prevTextY: text.y,
+  }
+}
+
 export const markPagePosition = (normalized: number, extent: number) => (
   Number.isFinite(normalized) && Number.isFinite(extent) ? normalized * extent : 0
 )

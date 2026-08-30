@@ -1261,8 +1261,11 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   width: min(100%, var(--paper-width, 900px));
   max-width: 900px;
   min-height: 0;
+  /* Origin pad is CSS px. margin-top % is of WIDTH and collapses out of
+     the paper, which slides typed text when the page grows at the top. */
   margin-left: var(--text-origin-x, 0px);
-  margin-top: var(--text-origin-y, 0px);
+  margin-top: 0;
+  padding-top: var(--text-origin-y, 0px);
   overflow: visible;
   background: transparent;
 }

@@ -2,6 +2,10 @@
 
 ## Unveröffentlicht
 
+## 2026.8.72
+
+- **Vorhandene Schrift bleibt beim Schreiben stehen:** Wenn du mit dem Stift am Rand des Blatts schreibst, wächst das Blatt weiter. Die schon vorhandene Schrift bleibt auf den Linien — sie rutscht nicht mehr weg.
+
 ## 2026.8.71
 
 - **Handschrift auf PDF bleibt auf dem Blatt:** Die Tinte liegt auf der PDF-Seite, nicht im extra Kameraraum. Beim Scrollen rutscht sie nicht weg und springt nicht zurück.

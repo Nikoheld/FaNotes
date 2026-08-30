@@ -10,13 +10,13 @@
       "flavor": "avx2",
       "executable": "crispembed-avx2",
       "size": 7144240,
-      "sha256": "4e3db0d125db135b50182dfc95d713dde8443602f67f7456484fd288b2e0a567"
+      "sha256": "36b9f89725ff78d1aab77bf7c8654df0a42a1bbe064f77ee401467cb3369861e"
     },
     {
       "flavor": "baseline-x64",
       "executable": "crispembed",
       "size": 6880720,
-      "sha256": "6d3f98878a1919fe2408ad09442854b60d5a7b0459471a8e96f701abb0717e07"
+      "sha256": "d9645f630aea436797c895b959b7e76755dcdb06f2b3d1c07fc33c763b258e25"
     }
   ],
   "modelBundled": false
