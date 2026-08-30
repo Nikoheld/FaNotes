@@ -302,8 +302,8 @@ const strokeIntersectsWindow = (stroke: { points: Array<{ y: number }> }, window
 }
 
 const applyInkWindowToCanvases = (canvases: Array<HTMLCanvasElement | null>, window: InkWindow) => {
-  // Pin the bitmap to the overlay (0–1 paper). Never inset by plane extra-room:
-  // that left handwriting 560px low, then a window settle snapped it back.
+  // Pin the bitmap to the paper box inside the extra-room overlay. 0%/100%
+  // fills the board (paper+2·SCROLL_ROOM) while 0–1 ink is the paper.
   const box = inkWindowLayoutStyle(window)
   for (const canvas of canvases) {
     if (!canvas) continue

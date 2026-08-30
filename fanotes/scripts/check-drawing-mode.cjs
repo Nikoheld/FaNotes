@@ -88,6 +88,7 @@ const safeguards = [
   ['inkOverlayPixelSize', 'Tinten-Bitmap folgt HiDPI und Zoom'],
   ['layoutInkWindow', 'PDF-Tintenfenster folgt Layout-Scroll, nicht der Compositor-Rect'],
   ['inkWindowLayoutStyle', 'Tintenfenster sitzt auf dem Overlay, nicht im Kamerapolster'],
+  ['inkWindowCanvasBox', 'gemaltes Tintenfenster ist das Blatt, Board minus Kamerapolster'],
   ['pdfOverlayShiftedBy', 'Pan verschiebt Overlay und Seiten gemeinsam'],
   ['pdfOverlayPointFromClient(event.clientX, event.clientY, surface, pages)', 'PDF-Stift mappt über den gelieferten Overlay-Helper'],
   ['const measureInkWindow', 'Tinten-Bitmap nur für den sichtbaren Blattausschnitt'],

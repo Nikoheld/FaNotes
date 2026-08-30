@@ -2,6 +2,10 @@
 
 ## Unveröffentlicht
 
+## 2026.8.71
+
+- **Handschrift auf PDF bleibt auf dem Blatt:** Die Tinte liegt auf der PDF-Seite, nicht im extra Kameraraum. Beim Scrollen rutscht sie nicht weg und springt nicht zurück.
+
 ## 2026.8.70
 
 - **PDF-Schrift bleibt scharf und sitzt fest:** Auf einem PDF ist die Schrift nicht mehr pixelig und dick. Beim Scrollen bleibt die Handschrift genau auf dem Blatt — sie rutscht nicht weg und springt nicht zurück.

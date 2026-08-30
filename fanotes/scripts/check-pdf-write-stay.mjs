@@ -23,12 +23,15 @@ const {
 const {
   layoutInkWindow,
   inkWindowLayoutStyle,
-  inkMarkOverlayY,
+  inkWindowCanvasBox,
+  inkWindowSpan,
+  inkMarkPaperY,
   pdfOverlayPointFromClient,
   pdfOverlayShiftedBy,
   pdfOverlaySourceHeight,
 } = await server.ssrLoadModule('/src/lib/pdfInkHit.ts')
 const { inkOverlayPixelSize } = await server.ssrLoadModule('/src/lib/paperGrow.ts')
+const { SCROLL_ROOM } = await server.ssrLoadModule('/src/lib/noteCanvas.ts')
 const {
   applyPaperZoomStayPut,
   capturePaperAnchor,
@@ -189,20 +192,39 @@ const runOnce = () => {
   assert.ok(samePaperY >= topWindow.y0 && samePaperY <= topWindow.y1)
   const laterY = 0.7
   assert.ok(laterY >= scrolledWindow.y0 && laterY <= scrolledWindow.y1)
+  const paperSize = { width: 900, height: 1800 }
+  const boardSize = {
+    width: paperSize.width + 2 * SCROLL_ROOM,
+    height: paperSize.height + 2 * SCROLL_ROOM,
+  }
+  const fullBox = inkWindowCanvasBox({ y0: 0, y1: 1 }, boardSize, SCROLL_ROOM)
+  assert.equal(fullBox.left, SCROLL_ROOM)
+  assert.equal(fullBox.top, SCROLL_ROOM)
+  assert.equal(fullBox.width, paperSize.width)
+  assert.equal(fullBox.height, paperSize.height)
+  assert.equal(boardSize.width - 2 * SCROLL_ROOM, paperSize.width, 'board − 2·pad must be the paper')
+  assert.equal(boardSize.height - 2 * SCROLL_ROOM, paperSize.height)
+  assert.equal(fullBox.paperWidth, paperSize.width)
+  assert.equal(fullBox.paperHeight, paperSize.height)
   const windowed = { y0: 0.1, y1: 0.5 }
-  const box = inkWindowLayoutStyle(windowed)
-  assert.equal(box.top.endsWith('%'), true)
-  assert.ok(!String(box.top).includes('paper-scroll-room'), 'ink window must not inherit plane extra-room')
+  const box = inkWindowCanvasBox(windowed, boardSize, SCROLL_ROOM)
+  assert.equal(box.left, SCROLL_ROOM)
+  assert.ok(Math.abs(box.top - (SCROLL_ROOM + windowed.y0 * paperSize.height)) < 1e-6)
+  assert.ok(Math.abs(box.height - inkWindowSpan(windowed) * paperSize.height) < 1e-6)
   const markY = 0.18
-  const stayed = inkMarkOverlayY(markY, windowed)
-  assert.ok(Math.abs(stayed - markY) < 1e-6, `windowed mark must stay on overlay 0–1, got ${stayed}`)
-  const afterScroll = inkMarkOverlayY(markY, layoutInkWindow({
-    paperHeight: 4000,
+  const stayed = inkMarkPaperY(markY, windowed, boardSize, SCROLL_ROOM)
+  assert.ok(Math.abs(stayed - markY) < 1e-6, `windowed mark must stay on paper 0–1, got ${stayed}`)
+  const style = inkWindowLayoutStyle(windowed)
+  assert.match(style.top, /paper-scroll-room/)
+  assert.match(style.height, /paper-scroll-room/)
+  assert.match(style.left, /paper-scroll-room/)
+  const afterScroll = inkMarkPaperY(markY, layoutInkWindow({
+    paperHeight: paperSize.height * 2,
     viewHeight: 800,
     scrollTop: 0,
     viewZoom: 1,
-  }))
-  assert.ok(Math.abs(afterScroll - markY) < 0.02, 'top-of-page window must keep the written overlay y')
+  }), boardSize, SCROLL_ROOM)
+  assert.ok(Math.abs(afterScroll - markY) < 0.02, 'top-of-page window must keep the written paper y')
 
   const pageWidth = 595.28
   const column = pdfPageColumnCssWidth(2020)
@@ -264,7 +286,8 @@ const runOnce = () => {
   assert.match(inkHit, /export const layoutInkWindow/)
   assert.match(inkHit, /export const pdfOverlayShiftedBy/)
   assert.match(inkHit, /export const inkWindowLayoutStyle/)
-  assert.match(inkHit, /export const inkMarkOverlayY/)
+  assert.match(inkHit, /export const inkWindowCanvasBox/)
+  assert.match(inkHit, /export const inkMarkPaperY/)
   assert.match(board, /layoutInkWindow\(/)
   assert.match(board, /inkWindowLayoutStyle\(/)
   assert.match(board, /pdfOverlayPointFromClient\(/)
@@ -273,7 +296,6 @@ const runOnce = () => {
   assert.match(board, /onScrollEnd/)
   assert.match(board, /applyPaperZoomStayPut/)
   assert.doesNotMatch(board, /sheet\.getBoundingClientRect\(\)/)
-  assert.doesNotMatch(board, /const pad = 'var\(--paper-scroll-room/)
   assert.match(board, /Do not syncInkWindow here/)
   assert.match(pdf, /paintSizeForPage\(cssWidth, cssHeight, \{ viewZoom \}\)/)
   assert.match(pdf, /liveCanvas\.style\.width = `\$\{cssWidth\}px`/)

@@ -116,31 +116,70 @@ export const isFullInkWindow = (window: InkWindow) => window.y0 <= 0.002 && wind
 
 export const inkWindowSpan = (window: InkWindow) => Math.max(0.06, Math.min(1, window.y1 - window.y0))
 
+/** CSS pad that pins the painted bitmap to the paper inside the extra-room overlay. */
+export const INK_WINDOW_PAD_CSS = 'var(--paper-scroll-room, 0px)'
+
+export type InkBoardSize = { width: number; height: number }
+
 /**
- * CSS box of a windowed ink canvas on the overlay (0–1 paper), not the plane
- * extra-room pad. Insetting by `--paper-scroll-room` painted marks 560px below
- * the stylus and made a later window settle look like a jump-then-snap.
+ * Layout box of the painted ink canvas on the overlay board.
+ * The board covers extra room; 0–1 ink is the paper. Canvas pad must equal
+ * that extra room so `board − 2·pad === paper`.
+ */
+export const inkWindowCanvasBox = (
+  window: InkWindow,
+  board: InkBoardSize,
+  pad: number,
+) => {
+  const safePad = Number.isFinite(pad) && pad >= 0 ? pad : 0
+  const paperWidth = Math.max(1, board.width - 2 * safePad)
+  const paperHeight = Math.max(1, board.height - 2 * safePad)
+  const full = isFullInkWindow(window)
+  const span = inkWindowSpan(window)
+  const top = full ? safePad : safePad + window.y0 * paperHeight
+  const height = full ? paperHeight : span * paperHeight
+  return {
+    left: safePad,
+    right: safePad,
+    top,
+    height,
+    width: paperWidth,
+    paperWidth,
+    paperHeight,
+  }
+}
+
+/**
+ * CSS box matching inkWindowCanvasBox. Inline `top/height: 0%/100%` would
+ * override `.lw-tablet-canvas { inset: var(--paper-scroll-room) }` and paint
+ * 0–1 ink onto the extra-room board (marks agree only at y=0.5).
  */
 export const inkWindowLayoutStyle = (window: InkWindow) => {
+  const pad = INK_WINDOW_PAD_CSS
+  const paper = `calc(100% - 2 * ${pad})`
   const full = isFullInkWindow(window)
   const span = inkWindowSpan(window)
   return {
-    top: full ? '0%' : `${(window.y0 * 100).toFixed(4)}%`,
-    height: full ? '100%' : `${(span * 100).toFixed(4)}%`,
-    left: '0px',
-    right: '0px',
+    top: full ? pad : `calc(${pad} + ${window.y0} * ${paper})`,
+    height: full ? paper : `calc(${span} * ${paper})`,
+    left: pad,
+    right: pad,
     width: 'auto',
     bottom: 'auto',
   } as const
 }
 
-/** Overlay 0–1 of a mark after the window canvas is positioned with inkWindowLayoutStyle. */
-export const inkMarkOverlayY = (markY: number, window: InkWindow) => {
-  const style = inkWindowLayoutStyle(window)
-  const top = Number.parseFloat(style.top) / 100
-  const height = Number.parseFloat(style.height) / 100
+/** Paper 0–1 of a mark after the window canvas is placed with inkWindowCanvasBox. */
+export const inkMarkPaperY = (
+  markY: number,
+  window: InkWindow,
+  board: InkBoardSize,
+  pad: number,
+) => {
+  const box = inkWindowCanvasBox(window, board, pad)
   const span = inkWindowSpan(window)
-  return top + ((markY - window.y0) / span) * height
+  const visual = box.top + ((markY - window.y0) / span) * box.height
+  return (visual - pad) / box.paperHeight
 }
 
 /**
