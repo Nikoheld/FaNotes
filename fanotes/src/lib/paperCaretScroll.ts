@@ -164,6 +164,151 @@ export const lockPaperViewportEditorScroll = (paperScroller: HTMLElement | null)
  * Fast paper-viewport pan: zero independent editor-layer scroll on every tick.
  * Do not follow the caret — that fights a burst of pan jumps and shifts glyphs.
  */
+/** Nested editor-layer scroll that moves glyphs off the paper camera. */
+export const GHOST_TEXT_SLIP_PX = 2
+
+export type GhostTextLayout = {
+  paperX: number
+  paperY: number
+  camX: number
+  camY: number
+  padX: number
+  padY: number
+  editorX: number
+  editorY: number
+}
+
+export type GhostTextSample = GhostTextLayout & {
+  visualX: number
+  visualY: number
+}
+
+export const readIndependentEditorLayerScroll = (from: HTMLElement | null) => {
+  let x = 0
+  let y = 0
+  const seen = new Set<HTMLElement>()
+  const add = (layer: HTMLElement | null) => {
+    if (!layer || seen.has(layer) || !isIndependentEditorLayer(layer)) return
+    seen.add(layer)
+    x += Number(layer.scrollLeft) || 0
+    y += Number(layer.scrollTop) || 0
+  }
+  if (from) {
+    collectEditorScrollLayers(from).forEach(add)
+    let current: HTMLElement | null = from
+    while (current) {
+      add(current)
+      current = current.parentElement
+    }
+  }
+  return { x, y }
+}
+
+export const readTextOriginPad = (paper: HTMLElement | null) => {
+  const x = Number.parseFloat(paper?.style?.getPropertyValue('--text-origin-x') || '')
+  const y = Number.parseFloat(paper?.style?.getPropertyValue('--text-origin-y') || '')
+  return {
+    x: Number.isFinite(x) ? x : 0,
+    y: Number.isFinite(y) ? y : 0,
+  }
+}
+
+/** Visual CSS px of a glyph after origin pad, paper camera, and nested editor scroll. */
+export const glyphVisualFromPaper = (layout: GhostTextLayout) => ({
+  x: layout.paperX + layout.padX - layout.camX - layout.editorX,
+  y: layout.paperY + layout.padY - layout.camY - layout.editorY,
+})
+
+/** Expected visual if only the paper camera moved — no nested editor slip. */
+export const glyphExpectedVisual = (layout: GhostTextLayout) => ({
+  x: layout.paperX + layout.padX - layout.camX,
+  y: layout.paperY + layout.padY - layout.camY,
+})
+
+export const editorLayerCausesSlip = (editorX: number, editorY: number) => (
+  Math.abs(editorX) > GHOST_TEXT_SLIP_PX || Math.abs(editorY) > GHOST_TEXT_SLIP_PX
+)
+
+export const sampleGhostTextLayout = (input: {
+  paperX: number
+  paperY: number
+  camX: number
+  camY: number
+  padX?: number
+  padY?: number
+  editorX: number
+  editorY: number
+  visualX?: number
+  visualY?: number
+}): GhostTextSample => {
+  const layout: GhostTextLayout = {
+    paperX: input.paperX,
+    paperY: input.paperY,
+    camX: input.camX,
+    camY: input.camY,
+    padX: input.padX ?? 0,
+    padY: input.padY ?? 0,
+    editorX: input.editorX,
+    editorY: input.editorY,
+  }
+  const visual = glyphVisualFromPaper(layout)
+  return {
+    ...layout,
+    visualX: Number.isFinite(input.visualX) ? input.visualX as number : visual.x,
+    visualY: Number.isFinite(input.visualY) ? input.visualY as number : visual.y,
+  }
+}
+
+/**
+ * Slip: nested editor-layer scroll or origin/camera mismatch moves the glyph.
+ * Snap-back: the same paper pixel later matches the camera-compensated expected
+ * position again (ghost text that went away and came back).
+ */
+export const classifyGhostTextMotion = (
+  previous: GhostTextSample | null | undefined,
+  next: GhostTextSample,
+) => {
+  const expected = glyphExpectedVisual(next)
+  const dx = next.visualX - expected.x
+  const dy = next.visualY - expected.y
+  const slip = editorLayerCausesSlip(next.editorX, next.editorY)
+    || Math.hypot(dx, dy) > GHOST_TEXT_SLIP_PX
+  const samePaper = Boolean(
+    previous
+    && Math.abs(previous.paperX - next.paperX) < 1e-6
+    && Math.abs(previous.paperY - next.paperY) < 1e-6,
+  )
+  const previousExpected = previous ? glyphExpectedVisual(previous) : null
+  const previousSlip = Boolean(
+    previous
+    && (
+      editorLayerCausesSlip(previous.editorX, previous.editorY)
+      || Math.hypot(previous.visualX - previousExpected!.x, previous.visualY - previousExpected!.y) > GHOST_TEXT_SLIP_PX
+    ),
+  )
+  const back = previousSlip && samePaper && !slip
+  return {
+    slip,
+    back,
+    dx,
+    dy,
+    expectedX: expected.x,
+    expectedY: expected.y,
+  }
+}
+
+export const observeGhostTextSequence = (
+  frames: Array<Parameters<typeof sampleGhostTextLayout>[0]>,
+) => {
+  let previous: GhostTextSample | null = null
+  return frames.map((frame) => {
+    const sample = sampleGhostTextLayout(frame)
+    const motion = classifyGhostTextMotion(previous, sample)
+    previous = sample
+    return { sample, ...motion }
+  })
+}
+
 export const lockPaperViewportScrollStayPut = (
   paperScroller: HTMLElement | null,
   requested?: { scrollTop?: number; scrollLeft?: number },
@@ -187,6 +332,70 @@ export const lockPaperViewportScrollStayPut = (
     paperScrollLeft: paperScroller.scrollLeft,
   }
 }
+
+/** Sample nested-editor slip, lock the paper viewport, then sample snap-back. */
+export const captureGhostTextAroundLock = (
+  paperScroller: HTMLElement | null,
+  editorRoot: HTMLElement | null,
+  glyph: { x: number; y: number } = { x: 0, y: 0 },
+) => {
+  const pad = readTextOriginPad(
+    paperScroller?.querySelector?.('.unified-paper') as HTMLElement | null
+    ?? paperScroller,
+  )
+  const camBefore = {
+    x: paperScroller?.scrollLeft ?? 0,
+    y: paperScroller?.scrollTop ?? 0,
+  }
+  const editorBefore = readIndependentEditorLayerScroll(editorRoot ?? paperScroller)
+  const before = sampleGhostTextLayout({
+    paperX: glyph.x,
+    paperY: glyph.y,
+    camX: camBefore.x,
+    camY: camBefore.y,
+    padX: pad.x,
+    padY: pad.y,
+    editorX: editorBefore.x,
+    editorY: editorBefore.y,
+  })
+  const locked = lockPaperViewportScrollStayPut(paperScroller)
+  const editorAfter = readIndependentEditorLayerScroll(editorRoot ?? paperScroller)
+  const after = sampleGhostTextLayout({
+    paperX: glyph.x,
+    paperY: glyph.y,
+    camX: locked.paperScrollLeft,
+    camY: locked.paperScrollTop,
+    padX: pad.x,
+    padY: pad.y,
+    editorX: editorAfter.x,
+    editorY: editorAfter.y,
+  })
+  return {
+    locked,
+    before,
+    after,
+    slip: classifyGhostTextMotion(null, before),
+    back: classifyGhostTextMotion(before, after),
+  }
+}
+
+export const ghostTextDiagnosticFields = (
+  sample: GhostTextSample,
+  motion: { slip: boolean; back: boolean },
+) => ({
+  visualX: sample.visualX,
+  visualY: sample.visualY,
+  paperX: sample.paperX,
+  paperY: sample.paperY,
+  camX: sample.camX,
+  camY: sample.camY,
+  padX: sample.padX,
+  padY: sample.padY,
+  edX: sample.editorX,
+  edY: sample.editorY,
+  slip: motion.slip,
+  back: motion.back,
+})
 
 export const keepCaretVisibleInPaperScroller = (
   scroller: HTMLElement,

@@ -46,7 +46,7 @@ const finiteLayout = (value) => (
 
 const sanitizeEvent = (raw) => {
   if (!raw || typeof raw !== 'object' || !Number.isFinite(raw.at)) return null
-  const kind = ['pen', 'note', 'tool', 'error', 'app'].includes(raw.kind) ? raw.kind : 'app'
+  const kind = ['pen', 'note', 'tool', 'error', 'app', 'text'].includes(raw.kind) ? raw.kind : 'app'
   return {
     at: raw.at,
     kind,
@@ -66,6 +66,12 @@ const sanitizeEvent = (raw) => {
     camY: finiteLayout(raw.camY),
     grew: raw.grew === true ? true : undefined,
     jump: raw.jump === true ? true : undefined,
+    paperX: finiteLayout(raw.paperX),
+    paperY: finiteLayout(raw.paperY),
+    edX: finiteLayout(raw.edX),
+    edY: finiteLayout(raw.edY),
+    slip: raw.slip === true ? true : undefined,
+    back: raw.back === true ? true : undefined,
   }
 }
 

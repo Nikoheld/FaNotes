@@ -12,7 +12,7 @@ const compactPx = (value: number) => Math.round(value)
 
 export type BugReportEvent = {
   at: number
-  kind: 'pen' | 'note' | 'tool' | 'error' | 'app'
+  kind: 'pen' | 'note' | 'tool' | 'error' | 'app' | 'text'
   noteId?: string
   x?: number
   y?: number
@@ -29,6 +29,12 @@ export type BugReportEvent = {
   camY?: number
   grew?: boolean
   jump?: boolean
+  paperX?: number
+  paperY?: number
+  edX?: number
+  edY?: number
+  slip?: boolean
+  back?: boolean
 }
 
 export type PenDiagnosticLayout = {
@@ -75,6 +81,54 @@ export const buildPenDiagnosticEvent = (input: {
   return event
 }
 
+export type TextMotionLayout = {
+  paperX: number
+  paperY: number
+  camX: number
+  camY: number
+  padX: number
+  padY: number
+  edX: number
+  edY: number
+  slip?: boolean
+  back?: boolean
+  pageW?: number
+  pageH?: number
+}
+
+/** Compact reconstructable ghost-text snapshot: visual vs paper vs camera vs editor layer. */
+export const buildTextMotionDiagnosticEvent = (input: {
+  at: number
+  noteId?: string
+  visualX: number
+  visualY: number
+  version?: string
+  platform?: string
+} & TextMotionLayout): BugReportEvent => {
+  const event: BugReportEvent = {
+    at: input.at,
+    kind: 'text',
+    noteId: input.noteId,
+    x: compactCoord(input.visualX),
+    y: compactCoord(input.visualY),
+    version: input.version,
+    platform: input.platform,
+    paperX: compactPx(input.paperX),
+    paperY: compactPx(input.paperY),
+    camX: compactPx(input.camX),
+    camY: compactPx(input.camY),
+    padX: compactPx(input.padX),
+    padY: compactPx(input.padY),
+    edX: compactPx(input.edX),
+    edY: compactPx(input.edY),
+  }
+  if (Number.isFinite(input.pageW)) event.pageW = compactPx(input.pageW as number)
+  if (Number.isFinite(input.pageH)) event.pageH = compactPx(input.pageH as number)
+  if (input.slip) event.slip = true
+  if (input.back) event.back = true
+  return event
+}
+
 export type BugReportPayload = {
   schemaVersion: 1
   description: string
@@ -116,6 +170,17 @@ export const createBugReportLog = (windowMs = BUG_REPORT_WINDOW_MS) => {
 }
 
 export const diagnosticLog = createBugReportLog()
+
+let lastTextMotionDiagAt = 0
+
+export const recordTextMotionDiagnostic = (
+  event: BugReportEvent,
+  now = Date.now(),
+) => {
+  if (!event.slip && !event.back && now - lastTextMotionDiagAt < BUG_REPORT_PEN_SAMPLE_MS) return
+  lastTextMotionDiagAt = now
+  diagnosticLog.record(event, now)
+}
 
 export const bugReportSubmitTarget = (origin = BUG_REPORT_ORIGIN) => {
   try {

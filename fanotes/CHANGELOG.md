@@ -2,6 +2,10 @@
 
 ## Unveröffentlicht
 
+## 2026.9.2
+
+- **Fehlerbericht sieht Geistertext:** Wenn Schrift kurz wegrutscht und dann wieder an denselben Papierpunkt springt, merkt sich der Fehlerbericht das. Dazu gehören Textlage, Blatt, Kamera und die verschachtelte Editor-Ebene — zusammen mit Stift, Ursprung und Sprungfilter.
+
 ## 2026.9.1
 
 - **Stift springt nicht mehr beim Malen:** Wenn du mit dem Stift oben am Blatt anfängst und nach unten ziehst, bleibt die Linie zusammen. Vorhandene Schrift, Tinte und die Kamera rutschen nicht. Fehlerberichte merken sich jetzt Blattgröße, Ursprung, Kamera und ob das Blatt gewachsen oder ein Sprung gefiltert wurde.

@@ -32,10 +32,13 @@ import {
 } from '../lib/paperView'
 import { SCROLL_ROOM } from '../lib/noteCanvas'
 import {
+  captureGhostTextAroundLock,
+  ghostTextDiagnosticFields,
   lockPaperViewportScrollStayPut,
   PAPER_EDITOR_FLING_HOLD_FRAMES,
   tickPaperViewportEditorScrollHold,
 } from '../lib/paperCaretScroll'
+import { buildTextMotionDiagnosticEvent, recordTextMotionDiagnostic } from '../lib/bugReport'
 
 export type PaperViewApi = PaperViewSnapshot & {
   zoomBy: (delta: number, originClient?: { x: number; y: number }) => void
@@ -98,7 +101,21 @@ export function PaperView({ children, className = '', viewKey, showHud = true }:
       flingId = flingFrames > 0 ? window.requestAnimationFrame(holdFling) : 0
     }
     const clampScroll = () => {
-      lockPaperViewportScrollStayPut(scroller)
+      const editor = scroller.querySelector<HTMLElement>('.markdown-editor, .cm-scroller')
+      const captured = captureGhostTextAroundLock(scroller, editor)
+      const now = Date.now()
+      if (captured.slip.slip) {
+        recordTextMotionDiagnostic(buildTextMotionDiagnosticEvent({
+          at: now,
+          ...ghostTextDiagnosticFields(captured.before, captured.slip),
+        }), now)
+      }
+      if (captured.back.back) {
+        recordTextMotionDiagnostic(buildTextMotionDiagnosticEvent({
+          at: now + 1,
+          ...ghostTextDiagnosticFields(captured.after, captured.back),
+        }), now + 1)
+      }
       flingFrames = PAPER_EDITOR_FLING_HOLD_FRAMES
       if (!flingId) flingId = window.requestAnimationFrame(holdFling)
       const plane = scroller.querySelector<HTMLElement>('.paper-sheet-plane')

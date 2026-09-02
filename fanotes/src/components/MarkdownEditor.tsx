@@ -54,6 +54,8 @@ import { highlightSelectionMatches, search, searchKeymap } from '@codemirror/sea
 import type { AppSettings, DetectedTextLanguage } from '../types'
 import { createTrailingValueScheduler, type TrailingValueScheduler } from '../lib/trailingValueScheduler'
 import {
+  captureGhostTextAroundLock,
+  ghostTextDiagnosticFields,
   handlePaperEditorScroll,
   lockPaperEditorScrollIfNeeded,
   lockPaperViewportScrollStayPut,
@@ -61,6 +63,7 @@ import {
   resolvePaperCaretScroller,
   tickPaperViewportEditorScrollHold,
 } from '../lib/paperCaretScroll'
+import { buildTextMotionDiagnosticEvent, recordTextMotionDiagnostic } from '../lib/bugReport'
 import { revealDocumentLine } from '../lib/noteOutline'
 
 const LazyMarkdownPreview = lazy(() => import('./MarkdownPreview').then((module) => ({
@@ -990,7 +993,20 @@ const paperCaretLock = ViewPlugin.fromClass(class {
   }
 
   private stayPut = (paper: HTMLElement | null) => {
-    lockPaperViewportScrollStayPut(paper)
+    const captured = captureGhostTextAroundLock(paper, this.view.dom)
+    const now = Date.now()
+    if (captured.slip.slip) {
+      recordTextMotionDiagnostic(buildTextMotionDiagnosticEvent({
+        at: now,
+        ...ghostTextDiagnosticFields(captured.before, captured.slip),
+      }), now)
+    }
+    if (captured.back.back) {
+      recordTextMotionDiagnostic(buildTextMotionDiagnosticEvent({
+        at: now + 1,
+        ...ghostTextDiagnosticFields(captured.after, captured.back),
+      }), now + 1)
+    }
     this.flingFrames = PAPER_EDITOR_FLING_HOLD_FRAMES
     if (!this.flingId) this.flingId = requestAnimationFrame(this.holdFling)
   }
@@ -1010,7 +1026,7 @@ const paperCaretLock = ViewPlugin.fromClass(class {
       this.paper = paper
       this.paper.addEventListener('scroll', this.onPaperScroll, { passive: true })
     }
-    lockPaperViewportScrollStayPut(paper)
+    this.stayPut(paper)
     if (!update.docChanged && !update.selectionSet) return
     update.view.requestMeasure({
       key: 'fanotes-paper-caret',
