@@ -2,6 +2,10 @@
 
 ## Unveröffentlicht
 
+## 2026.9.4
+
+- **Schrift bleibt am linken Rand stehen:** Wenn du links am Blatt schreibst und das Blatt wächst, bleibt die schon vorhandene Schrift auf denselben Papierpunkten. Auch wenn danach extra Kameraraum dazukommt, rutscht der Text nicht mehr.
+
 ## 2026.9.3
 
 - **Schrift bleibt beim Scrollen stehen:** Wenn du das Blatt schwenkst, bleibt die getippte Schrift auf denselben Papierpunkten. Auch wenn das Blatt dabei weiterwächst, rutscht der Text nicht mehr hoch und runter.

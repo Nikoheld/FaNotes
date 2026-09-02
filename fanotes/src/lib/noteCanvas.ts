@@ -60,6 +60,48 @@ export const paintedStayExtent = (source: number, painted = 0) => {
   return Math.max(base, live)
 }
 
+/**
+ * Camera room around the write page (`pageCanvasLayout` / `--paper-scroll-room`).
+ * A painted box that is exactly the page plus `2*SCROLL_ROOM` is extra pan paper,
+ * not a max-edge write-page grow — absorbing it remaps 0–1 and slides glyphs.
+ */
+export const isPaintedScrollRoomJump = (source: number, painted = 0) => {
+  const src = finitePositive(source)
+  const paint = Number.isFinite(painted) && painted > 1 ? painted : 0
+  if (!(src > 1) || !(paint > src + 1)) return false
+  return Math.abs(paint - src - 2 * SCROLL_ROOM) <= 1
+}
+
+/** 0–1 / CSS write-page extent. Camera-room overlays do not enlarge the page. */
+export const writePageStayExtent = (source: number, painted = 0) => {
+  if (isPaintedScrollRoomJump(source, painted)) return finitePositive(source)
+  return paintedStayExtent(source, painted)
+}
+
+/**
+ * Lift a 0–1 sample from a page+2·SCROLL_ROOM overlay onto the write page.
+ * Extra room is origin-aligned at the max edges (same as absorbing the overlay
+ * into source). Centered overlay padding would map near-left ink negative.
+ */
+export const overlaySampleOntoWritePage = <T extends { x: number; y: number }>(
+  sample: T,
+  page: CanvasSize,
+  painted: { width?: number; height?: number } = {},
+): T => {
+  const pageW = finitePositive(page.width)
+  const pageH = finitePositive(page.height)
+  const paintW = Number.isFinite(painted.width) && Number(painted.width) > 1 ? Number(painted.width) : 0
+  const paintH = Number.isFinite(painted.height) && Number(painted.height) > 1 ? Number(painted.height) : 0
+  const liftX = isPaintedScrollRoomJump(pageW, paintW) && pageW > 0
+  const liftY = isPaintedScrollRoomJump(pageH, paintH) && pageH > 0
+  if (!liftX && !liftY) return sample
+  return {
+    ...sample,
+    x: liftX ? sample.x * paintW / pageW : sample.x,
+    y: liftY ? sample.y * paintH / pageH : sample.y,
+  }
+}
+
 /** Grow the max edge so a 0–1 mark plus write margin still fits. Repeats at the new edge. */
 export const growWriteExtent = (
   normalized: number | undefined,
@@ -116,8 +158,8 @@ export const growPageFromMark = (
 ) => {
   const haveX = Math.max(0, Number.isFinite(extent.originX) ? Number(extent.originX) : 0)
   const haveY = Math.max(0, Number.isFinite(extent.originY) ? Number(extent.originY) : 0)
-  const liveW = paintedStayExtent(extent.width, painted.width)
-  const liveH = paintedStayExtent(extent.height, painted.height)
+  const liveW = writePageStayExtent(extent.width, painted.width)
+  const liveH = writePageStayExtent(extent.height, painted.height)
   const wantX = growWriteOrigin(mark.x, liveW, WRITE_MARGIN_X, GROW_STEP_X)
   const wantY = growWriteOrigin(mark.y, liveH, WRITE_MARGIN_Y, GROW_STEP_Y)
   const padX = Math.max(0, wantX - haveX)
@@ -164,6 +206,11 @@ export const keepMarkOnPage = (
 
 const finiteOriginPx = (value: number) => Math.max(0, Number.isFinite(value) ? value : 0)
 
+/** New min-edge pad this step. Bug-report `padX` is the cumulative origin. */
+export const originPadDelta = (have: number, next: number) => (
+  Math.max(0, finiteOriginPx(next) - finiteOriginPx(have))
+)
+
 /**
  * Markdown column offset after a min-edge grow. Must be `px`.
  * Vertical `margin-%` is of containing-block WIDTH, and `margin-top`
@@ -198,10 +245,10 @@ export const markdownAndInkAfterMinEdgeGrow = (
 ) => {
   const padX = finiteOriginPx(next.padX)
   const padY = finiteOriginPx(next.padY)
-  const prevW = paintedStayExtent(prev.width, prevLayout.width)
-  const prevH = paintedStayExtent(prev.height, prevLayout.height)
-  const nextW = paintedStayExtent(next.width, layout.width)
-  const nextH = paintedStayExtent(next.height, layout.height)
+  const prevW = writePageStayExtent(prev.width, prevLayout.width)
+  const prevH = writePageStayExtent(prev.height, prevLayout.height)
+  const nextW = writePageStayExtent(prevW, paintedStayExtent(next.width, layout.width))
+  const nextH = writePageStayExtent(prevH, paintedStayExtent(next.height, layout.height))
   const inkX = keepMarkOnPage(mark.x, prevW, nextW, padX) * nextW
   const inkY = keepMarkOnPage(mark.y, prevH, nextH, padY) * nextH
   const textX = text.x + padX
@@ -239,8 +286,8 @@ export const markdownAndInkAfterGrowSequence = (
   painted: CanvasSize = start,
 ) => {
   let page: CanvasSize & CanvasOrigin = { ...start, originX: 0, originY: 0 }
-  let paintW = paintedStayExtent(start.width, painted.width)
-  let paintH = paintedStayExtent(start.height, painted.height)
+  let paintW = writePageStayExtent(start.width, painted.width)
+  let paintH = writePageStayExtent(start.height, painted.height)
   let ink = { ...mark }
   let glyph = { ...text }
   let cameraX = 0
@@ -249,8 +296,8 @@ export const markdownAndInkAfterGrowSequence = (
     const prevPaint = { width: paintW, height: paintH }
     const grown = growPageFromMark(page, sample, prevPaint)
     const nextPaint = {
-      width: paintedStayExtent(grown.width, paintW),
-      height: paintedStayExtent(grown.height, paintH),
+      width: writePageStayExtent(paintW, grown.width),
+      height: writePageStayExtent(paintH, grown.height),
       padX: grown.padX,
       padY: grown.padY,
     }
@@ -290,8 +337,8 @@ export const markdownAndInkAfterGrowSequence = (
     }
   })
   return {
-    originInkX: mark.x * paintedStayExtent(start.width, painted.width),
-    originInkY: mark.y * paintedStayExtent(start.height, painted.height),
+    originInkX: mark.x * writePageStayExtent(start.width, painted.width),
+    originInkY: mark.y * writePageStayExtent(start.height, painted.height),
     originTextX: text.x,
     originTextY: text.y,
     cameraX,
@@ -323,18 +370,27 @@ export const markdownGlyphAfterCameraAndGrow = (
 ) => {
   let page: CanvasSize = { ...start }
   let pos = { ...glyph }
+  let originX = 0
+  let originY = 0
   const originPaperX = glyph.x
   const originPaperY = glyph.y
   const frames = steps.map((step) => {
+    const wantX = Math.max(0, step.padX ?? 0)
+    const wantY = Math.max(0, step.padY ?? 0)
     const next = {
       width: step.width,
       height: step.height,
-      padX: Math.max(0, step.padX ?? 0),
-      padY: Math.max(0, step.padY ?? 0),
+      padX: originPadDelta(originX, wantX),
+      padY: originPadDelta(originY, wantY),
     }
     const stay = markdownAndInkAfterMinEdgeGrow(pos, pos, page, next)
     pos = { x: stay.textX, y: stay.textY }
-    page = { width: next.width, height: next.height }
+    originX = wantX
+    originY = wantY
+    page = {
+      width: writePageStayExtent(page.width, next.width),
+      height: writePageStayExtent(page.height, next.height),
+    }
     const editorX = step.editorX ?? 0
     const editorY = step.editorY ?? 0
     return {
@@ -346,10 +402,10 @@ export const markdownGlyphAfterCameraAndGrow = (
       camY: step.camY,
       editorX,
       editorY,
-      width: page.width,
-      height: page.height,
-      padX: next.padX,
-      padY: next.padY,
+      width: next.width,
+      height: next.height,
+      padX: wantX,
+      padY: wantY,
     }
   })
   return { originPaperX, originPaperY, frames }

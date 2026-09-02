@@ -245,8 +245,8 @@ const runOnce = () => {
     /\.lw-drawing-board\.is-inline \.lw-canvas-surface\{[^}]*inset:var\(--paper-scroll-room/,
     'hit overlay must cover extra paper, not shrink back to the current sheet',
   )
-  assert.match(board, /ensureWriteRoom\(point\.y, point\.x\)/)
-  assert.match(board, /continueStrokeAfterExtentGrow\(lastSnapshot/)
+  assert.match(board, /ensureWriteRoom\(latest\.y, latest\.x\)/)
+  assert.match(board, /continueLiveWriteStroke\(/)
   assert.doesNotMatch(board, /start\.firstPoint\.x < 0/)
 
   return {

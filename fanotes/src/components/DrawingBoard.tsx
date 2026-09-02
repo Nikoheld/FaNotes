@@ -137,7 +137,7 @@ import {
   WRITE_MARGIN_X,
   WRITE_MARGIN_Y,
   growPageFromMark,
-  paintedStayExtent,
+  writePageStayExtent,
   keepMarkOnPage,
   mapClientToPage,
   paperOriginScrollDelta,
@@ -1960,8 +1960,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     const nextW = Math.min(MAX_SOURCE_WIDTH, Math.max(SOURCE_WIDTH, Math.round(targetWidth)))
     if (nextH === prevH && nextW === prevW && addX === 0 && addY === 0) return false
     const paper = resolvePaperElement()
-    const prevPaintW = paintedStayExtent(prevW, paintedLayoutRef.current.w)
-    const prevPaintH = paintedStayExtent(prevH, paintedLayoutRef.current.h)
+    const prevPaintW = writePageStayExtent(prevW, paintedLayoutRef.current.w)
+    const prevPaintH = writePageStayExtent(prevH, paintedLayoutRef.current.h)
     sourceOriginXRef.current += addX
     sourceOriginYRef.current += addY
     sourceHeightRef.current = nextH
@@ -1969,8 +1969,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     setSourceHeight(nextH)
     setSourceWidth(nextW)
     applyInkExtentStyles(nextH, nextW)
-    const nextPaintW = paintedStayExtent(nextW, paper?.offsetWidth ?? 0)
-    const nextPaintH = paintedStayExtent(nextH, paper?.offsetHeight ?? 0)
+    const nextPaintW = writePageStayExtent(nextW, paper?.offsetWidth ?? 0)
+    const nextPaintH = writePageStayExtent(nextH, paper?.offsetHeight ?? 0)
     const remapPoint = (point: { x: number; y: number }) => {
       point.x = keepMarkOnPage(point.x, prevPaintW, nextPaintW, addX)
       point.y = keepMarkOnPage(point.y, prevPaintH, nextPaintH, addY)
@@ -2031,8 +2031,14 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     const paper = resolvePaperElement()
     const surface = surfaceRef.current
     if (!paper || !surface) return false
-    const paintedW = Math.max(1, Math.max(paper.offsetWidth, surface.offsetWidth))
-    const paintedH = Math.max(1, Math.max(paper.offsetHeight, surface.offsetHeight))
+    const paintedW = writePageStayExtent(
+      sourceWidthRef.current,
+      Math.max(1, Math.max(paper.offsetWidth, surface.offsetWidth)),
+    )
+    const paintedH = writePageStayExtent(
+      sourceHeightRef.current,
+      Math.max(1, Math.max(paper.offsetHeight, surface.offsetHeight)),
+    )
     if (paintedW < 2 || paintedH < 2) return false
     if (paper.classList.contains('is-pdf-note') || paper.classList.contains('has-worksheet')) {
       absorbOneCanvasRef.current = true
@@ -2066,8 +2072,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     const prevH = sourceHeightRef.current
     const prevW = sourceWidthRef.current
     const painted = { width: paper?.offsetWidth ?? 0, height: paper?.offsetHeight ?? 0 }
-    const prevPaintW = paintedStayExtent(prevW, paintedLayoutRef.current.w || painted.width)
-    const prevPaintH = paintedStayExtent(prevH, paintedLayoutRef.current.h || painted.height)
+    const prevPaintW = writePageStayExtent(prevW, paintedLayoutRef.current.w || painted.width)
+    const prevPaintH = writePageStayExtent(prevH, paintedLayoutRef.current.h || painted.height)
     const grown = growPageFromMark(
       {
         width: prevW,
@@ -2076,12 +2082,12 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         originY: sourceOriginYRef.current,
       },
       { x: normalizedX, y: normalizedY },
-      painted,
+      { width: writePageStayExtent(prevW, painted.width), height: writePageStayExtent(prevH, painted.height) },
     )
     if (grown.height > prevH || grown.width > prevW || grown.padX > 0 || grown.padY > 0) {
       if (!setPageExtent(grown.height, grown.width, grown.padX, grown.padY)) return false
-      const nextPaintW = paintedStayExtent(grown.width, paper?.offsetWidth ?? 0)
-      const nextPaintH = paintedStayExtent(grown.height, paper?.offsetHeight ?? 0)
+      const nextPaintW = writePageStayExtent(grown.width, paper?.offsetWidth ?? 0)
+      const nextPaintH = writePageStayExtent(grown.height, paper?.offsetHeight ?? 0)
       return {
         prev: { width: prevPaintW, height: prevPaintH },
         next: { width: nextPaintW, height: nextPaintH, padX: grown.padX, padY: grown.padY },

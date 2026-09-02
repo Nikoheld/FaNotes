@@ -10,8 +10,10 @@ import {
   growPageFromMark,
   growWriteExtent,
   keepMarkOnPage,
+  overlaySampleOntoWritePage,
   paintedStayExtent,
   PAPER_SOURCE_WIDTH,
+  writePageStayExtent,
   WRITE_SLACK_HEIGHT,
 } from './noteCanvas'
 
@@ -29,7 +31,10 @@ export {
   growWriteExtent,
   growWriteOrigin,
   growPageFromMark,
+  overlaySampleOntoWritePage,
   paintedStayExtent,
+  writePageStayExtent,
+  originPadDelta,
   writePageLayoutSize,
   keepMarkOnPage,
   textOriginCssPx,
@@ -274,8 +279,10 @@ export const resolvePaintedLayoutGrow = (input: {
   sourceW: number
   sourceH: number
 }) => {
+  const nextLayoutW = writePageStayExtent(input.sourceW, input.nextLayoutW)
+  const nextLayoutH = writePageStayExtent(input.sourceH, input.nextLayoutH)
   if (input.pending) {
-    const flushed = pendingGrowScale(input.pending, input.nextLayoutW, input.nextLayoutH)
+    const flushed = pendingGrowScale(input.pending, nextLayoutW, nextLayoutH)
     return {
       scaleX: flushed.scaleX,
       scaleY: flushed.scaleY,
@@ -287,12 +294,12 @@ export const resolvePaintedLayoutGrow = (input: {
   if (!paintedBoxIsUsable(input.prevLayoutW) || !paintedBoxIsUsable(input.prevLayoutH)) {
     return { scaleX: 1, scaleY: 1, pending: null, apply: false, discard: false }
   }
-  const scaleX = layoutGrowAlreadyInSource(input.prevLayoutW, input.nextLayoutW, input.sourceW)
+  const scaleX = layoutGrowAlreadyInSource(input.prevLayoutW, nextLayoutW, input.sourceW)
     ? 1
-    : liveGrowScale(input.prevLayoutW, input.nextLayoutW, input.sourceW, input.sourceW, false)
-  const scaleY = layoutGrowAlreadyInSource(input.prevLayoutH, input.nextLayoutH, input.sourceH)
+    : liveGrowScale(input.prevLayoutW, nextLayoutW, input.sourceW, input.sourceW, false)
+  const scaleY = layoutGrowAlreadyInSource(input.prevLayoutH, nextLayoutH, input.sourceH)
     ? 1
-    : liveGrowScale(input.prevLayoutH, input.nextLayoutH, input.sourceH, input.sourceH, false)
+    : liveGrowScale(input.prevLayoutH, nextLayoutH, input.sourceH, input.sourceH, false)
   return {
     scaleX,
     scaleY,
@@ -387,7 +394,12 @@ export const continueLiveWriteStroke = <T extends { x: number; y: number }>(
   input: LiveWriteStrokeInput<T>,
 ) => {
   const pendingIn = input.pendingStale ?? null
-  const current = remapSampleThroughStaleLayout(input.current, pendingIn, input.painted)
+  const writePainted = {
+    width: writePageStayExtent(input.page.width, input.painted.width),
+    height: writePageStayExtent(input.page.height, input.painted.height),
+  }
+  const lifted = overlaySampleOntoWritePage(input.current, input.page, input.painted)
+  const current = remapSampleThroughStaleLayout(lifted, pendingIn, input.painted)
   const grown = growPageFromMark(
     {
       width: input.page.width,
@@ -396,15 +408,15 @@ export const continueLiveWriteStroke = <T extends { x: number; y: number }>(
       originY: input.page.originY,
     },
     current,
-    input.painted,
+    writePainted,
   )
   const grew = grown.height > input.page.height
     || grown.width > input.page.width
     || grown.padX > 0
     || grown.padY > 0
   const prev = {
-    width: paintedStayExtent(input.page.width, input.painted.width),
-    height: paintedStayExtent(input.page.height, input.painted.height),
+    width: writePainted.width,
+    height: writePainted.height,
   }
   const next = {
     width: Math.max(prev.width, grown.width),
