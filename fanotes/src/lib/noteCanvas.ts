@@ -302,6 +302,59 @@ export const markdownAndInkAfterGrowSequence = (
   }
 }
 
+/**
+ * Paper-relative glyph after a user camera pan plus optional write-page grow.
+ * Nested editor-layer scroll is extra and must be zero on the live path.
+ * User camera does not change paper pixels — only origin-pad grow does.
+ */
+export const markdownGlyphAfterCameraAndGrow = (
+  glyph: CanvasPoint,
+  start: CanvasSize,
+  steps: Array<{
+    camX: number
+    camY: number
+    width: number
+    height: number
+    padX?: number
+    padY?: number
+    editorX?: number
+    editorY?: number
+  }>,
+) => {
+  let page: CanvasSize = { ...start }
+  let pos = { ...glyph }
+  const originPaperX = glyph.x
+  const originPaperY = glyph.y
+  const frames = steps.map((step) => {
+    const next = {
+      width: step.width,
+      height: step.height,
+      padX: Math.max(0, step.padX ?? 0),
+      padY: Math.max(0, step.padY ?? 0),
+    }
+    const stay = markdownAndInkAfterMinEdgeGrow(pos, pos, page, next)
+    pos = { x: stay.textX, y: stay.textY }
+    page = { width: next.width, height: next.height }
+    const editorX = step.editorX ?? 0
+    const editorY = step.editorY ?? 0
+    return {
+      paperX: pos.x,
+      paperY: pos.y,
+      visualX: pos.x - step.camX - editorX,
+      visualY: pos.y - step.camY - editorY,
+      camX: step.camX,
+      camY: step.camY,
+      editorX,
+      editorY,
+      width: page.width,
+      height: page.height,
+      padX: next.padX,
+      padY: next.padY,
+    }
+  })
+  return { originPaperX, originPaperY, frames }
+}
+
 export const markPagePosition = (normalized: number, extent: number) => (
   Number.isFinite(normalized) && Number.isFinite(extent) ? normalized * extent : 0
 )

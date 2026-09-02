@@ -2,6 +2,10 @@
 
 ## Unveröffentlicht
 
+## 2026.9.3
+
+- **Schrift bleibt beim Scrollen stehen:** Wenn du das Blatt schwenkst, bleibt die getippte Schrift auf denselben Papierpunkten. Auch wenn das Blatt dabei weiterwächst, rutscht der Text nicht mehr hoch und runter.
+
 ## 2026.9.2
 
 - **Fehlerbericht sieht Geistertext:** Wenn Schrift kurz wegrutscht und dann wieder an denselben Papierpunkt springt, merkt sich der Fehlerbericht das. Dazu gehören Textlage, Blatt, Kamera und die verschachtelte Editor-Ebene — zusammen mit Stift, Ursprung und Sprungfilter.

@@ -443,20 +443,11 @@ export const lockPaperEditorScrollIfNeeded = (
   return true
 }
 
-const readCaretCoords = (
-  view: {
-    coordsAtPos: (pos: number) => { top: number; bottom: number; left: number; right: number } | null
-  },
-  pos: number,
-) => {
-  try {
-    return view.coordsAtPos(pos)
-  } catch {
-    // CodeMirror forbids layout reads during ViewUpdate.
-    return null
-  }
-}
-
+/**
+ * Swallow CodeMirror's scroll-into-view. Pan-to-caret here fights the paper
+ * camera (typed text slides up/down while scrolling). Keyboard caret follow
+ * stays on selection/doc updates via lockPaperEditorScrollIfNeeded.
+ */
 export const handlePaperEditorScroll = (
   view: {
     dom: HTMLElement
@@ -467,22 +458,9 @@ export const handlePaperEditorScroll = (
       write?: (measure: unknown, view: unknown) => void
     }) => void
   },
-  range: { head: number },
+  _range?: { head: number },
 ): boolean => {
   if (!view.dom?.closest('.unified-paper, .paper-view')) return false
   lockPaperEditorLayerScroll(view.dom)
-  const caret = readCaretCoords(view, range.head)
-  if (caret) {
-    const paper = resolvePaperCaretScroller(view.dom)
-    if (paper) keepCaretVisibleInPaperScroller(paper, caret)
-    return true
-  }
-  view.requestMeasure?.({
-    key: 'fanotes-paper-scroll',
-    read: (nextView) => (nextView as typeof view).coordsAtPos(range.head),
-    write: (nextCaret, nextView) => {
-      lockPaperEditorScrollIfNeeded((nextView as typeof view).dom, nextCaret as typeof caret)
-    },
-  })
   return true
 }
