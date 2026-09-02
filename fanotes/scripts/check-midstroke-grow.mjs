@@ -173,9 +173,8 @@ try {
   assert.ok(appendAt >= 0)
   const usableAt = board.indexOf('acceptUsableInkClient', appendAt)
   const snapshotAt = board.indexOf('lastSnapshot', appendAt)
-  const growAt = board.indexOf('ensureWriteRoom(point.y, point.x)', appendAt)
-  const continueAt = board.indexOf('continueStrokeAfterExtentGrow(lastSnapshot', appendAt)
-  assert.ok(usableAt >= 0 && snapshotAt > usableAt && growAt > snapshotAt && continueAt > growAt, 'appendPointerEvent must snapshot last, grow, then continueStrokeAfterExtentGrow(lastSnapshot)')
+  const liveAt = board.indexOf('continueLiveWriteStroke(', appendAt)
+  assert.ok(usableAt >= 0 && snapshotAt > usableAt && liveAt > snapshotAt, 'appendPointerEvent must snapshot last then continueLiveWriteStroke')
   assert.match(board, /prev: \{ width: prevPaintW, height: prevPaintH \}/)
   assert.equal(board.includes('acceptNextCommittedInkSample'), false)
 

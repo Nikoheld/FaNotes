@@ -83,7 +83,7 @@ import {
 } from '../lib/recognitionModeSelection'
 import type { MathSolverAction, MathSolverResult } from '../lib/mathSolver'
 import { detectScribbleErase } from '../lib/scribbleErase'
-import { BUG_REPORT_PEN_SAMPLE_MS, diagnosticLog } from '../lib/bugReport'
+import { BUG_REPORT_PEN_SAMPLE_MS, buildPenDiagnosticEvent, diagnosticLog } from '../lib/bugReport'
 import { applyToolErase } from '../lib/toolErase'
 import {
   inkPointerSessionFromSample,
@@ -95,7 +95,6 @@ import {
 } from '../lib/inkPointerSession'
 import {
   acceptUsableInkClient,
-  classifyInkJumpAppend,
   collectPreviewInkPoints,
   inkPointOnWriteSurface,
   mapClientToPaperPoint,
@@ -150,8 +149,9 @@ import {
   paperRulingTileOrigin,
 } from '../lib/paperRuling'
 import {
-  continueStrokeAfterExtentGrow,
+  continueLiveWriteStroke,
   growLiveInkAndMapNext,
+  type PendingStaleLayoutMap,
   HAS_INK_EXTENT_CLASS,
   INK_WIDTH_ANCHOR_CLASS,
   clearInkExtentStyles,
@@ -1011,6 +1011,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const sourceOriginYRef = useRef(0)
   const pageLayoutFrameRef = useRef<number | null>(null)
   const paintedLayoutRef = useRef({ w: 0, h: 0 })
+  const pendingStaleLayoutRef = useRef<PendingStaleLayoutMap | null>(null)
   const inkExtentPaperRef = useRef<HTMLElement | null>(null)
   const pendingGrowRemapRef = useRef<{
     prevH: number
@@ -2433,18 +2434,51 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     const existingCount = live?.points.length ?? 0
     // Snapshot last before grow. setPageExtent keepMarkOnPage-mutates the
     // live point; feeding that into continueStrokeAfterExtentGrow remaps it
-    // twice and the crossing sample is skipped again.
+    // twice and the crossing sample is skipped again. Mapping stays on the
+    // pre-grow box until pointerup, so continueLiveWriteStroke also lifts
+    // later samples through that stale layout before the jump filter.
     const lastSnapshot = lastPoint ? { x: lastPoint.x, y: lastPoint.y } : null
-    const grew = ensureWriteRoom(point.y, point.x)
-    const continued = grew
-      ? continueStrokeAfterExtentGrow(lastSnapshot, point, grew.prev, grew.next, existingCount)
-      : null
-    if (continued) {
-      point = { ...point, x: continued.current.x, y: continued.current.y }
+    const continued = continueLiveWriteStroke({
+      last: lastSnapshot,
+      current: point,
+      page: {
+        width: sourceWidthRef.current,
+        height: sourceHeightRef.current,
+        originX: sourceOriginXRef.current,
+        originY: sourceOriginYRef.current,
+      },
+      painted: { width: surface.width, height: surface.height },
+      existingCount,
+      pendingStale: pendingStaleLayoutRef.current,
+    })
+    pendingStaleLayoutRef.current = continued.pendingStale
+    if (continued.grew) {
+      setPageExtent(continued.grown.height, continued.grown.width, continued.grown.padX, continued.grown.padY)
     }
-    const jump = continued
-      ? continued.action
-      : classifyInkJumpAppend(lastPoint, point, existingCount)
+    point = { ...point, x: continued.current.x, y: continued.current.y }
+    const jump = continued.action
+    const scroller = originEl?.closest('.unified-note-view') as HTMLElement | null
+    const diagnosticNow = performance.now()
+    const noteworthy = continued.grew || jump === 'skip'
+    if (noteworthy || diagnosticNow - lastDiagnosticAtRef.current > BUG_REPORT_PEN_SAMPLE_MS) {
+      lastDiagnosticAtRef.current = diagnosticNow
+      diagnosticLog.record(buildPenDiagnosticEvent({
+        at: Date.now(),
+        noteId: drawingIdRef.current,
+        x: point.x,
+        y: point.y,
+        pointerType: point.pointerType,
+        tool: gestureToolRef.current || tool,
+        pageW: sourceWidthRef.current,
+        pageH: sourceHeightRef.current,
+        padX: sourceOriginXRef.current,
+        padY: sourceOriginYRef.current,
+        camX: scroller?.scrollLeft ?? 0,
+        camY: scroller?.scrollTop ?? 0,
+        grew: continued.grew,
+        jump: jump === 'skip',
+      }))
+    }
     if (jump === 'skip') return
     if (jump === 'restart' && live) {
       live.points.splice(0, 1, point)
@@ -2484,19 +2518,6 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       shapeLastMoveAtRef.current = performance.now()
     }
     stroke.points.push(point)
-    const now = performance.now()
-    if (now - lastDiagnosticAtRef.current > BUG_REPORT_PEN_SAMPLE_MS) {
-      lastDiagnosticAtRef.current = now
-      diagnosticLog.record({
-        at: Date.now(),
-        kind: 'pen',
-        noteId: drawingIdRef.current,
-        x: point.x,
-        y: point.y,
-        pointerType: point.pointerType,
-        tool: gestureToolRef.current || tool,
-      })
-    }
     gestureChangedRef.current = true
     if (!paintActiveStrokeNow()) scheduleRedraw()
     armShapeDwell()
@@ -2505,7 +2526,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       // Remeasuring mid-stroke freezes the UI and can drop pointerup.
       resizeDirtyRef.current = true
     }
-  }, [armShapeDwell, clearShapeDwellTimer, eraseAt, ensureWriteRoom, inline, paintActiveStrokeNow, pointFromEvent, scheduleRedraw, sourceHeight, sourceWidth])
+  }, [armShapeDwell, clearShapeDwellTimer, eraseAt, inline, paintActiveStrokeNow, pointFromEvent, scheduleRedraw, setPageExtent, sourceHeight, sourceWidth, tool])
 
   const commitPendingSolverTap = useCallback(() => {
     const pending = pendingSolverTapRef.current

@@ -7,8 +7,10 @@ import {
   type PaperSurfaceBox,
 } from './inkSampleMap'
 import {
+  growPageFromMark,
   growWriteExtent,
   keepMarkOnPage,
+  paintedStayExtent,
   PAPER_SOURCE_WIDTH,
   WRITE_SLACK_HEIGHT,
 } from './noteCanvas'
@@ -330,6 +332,116 @@ export const continueStrokeAfterExtentGrow = (
     last: remappedLast,
     current: remappedCurrent,
     action: classifyInkJumpAppend(remappedLast, remappedCurrent, existingCount),
+  }
+}
+
+/**
+ * Pointer mapping still uses the pre-grow box while an active stroke defers
+ * ResizeObserver. Samples in that stale 0–1 space must be lifted into the
+ * logical page before the jump filter, or the next near-top move is skipped.
+ */
+export type PendingStaleLayoutMap = {
+  prevW: number
+  prevH: number
+  nextW: number
+  nextH: number
+  padX: number
+  padY: number
+}
+
+export const layoutIsStaleAfterGrow = (
+  mapped: { width: number; height: number },
+  pending: PendingStaleLayoutMap | null | undefined,
+) => (
+  Boolean(pending)
+  && (mapped.width + 1 < pending.nextW || mapped.height + 1 < pending.nextH)
+)
+
+export const remapSampleThroughStaleLayout = <T extends { x: number; y: number }>(
+  sample: T,
+  pending: PendingStaleLayoutMap | null | undefined,
+  mapped: { width: number; height: number },
+): T => {
+  if (!pending || !layoutIsStaleAfterGrow(mapped, pending)) return sample
+  return {
+    ...sample,
+    x: keepMarkOnPage(sample.x, pending.prevW, pending.nextW, pending.padX),
+    y: keepMarkOnPage(sample.y, pending.prevH, pending.nextH, pending.padY),
+  }
+}
+
+export type LiveWriteStrokeInput<T extends { x: number; y: number }> = {
+  last: T | null | undefined
+  current: T
+  page: { width: number; height: number; originX?: number; originY?: number }
+  painted: { width: number; height: number }
+  existingCount: number
+  pendingStale?: PendingStaleLayoutMap | null
+}
+
+/**
+ * One live markdown paint sample: grow around the pen, remap 0–1 through the
+ * current logical page (including a still-stale mapping box), then jump-filter.
+ */
+export const continueLiveWriteStroke = <T extends { x: number; y: number }>(
+  input: LiveWriteStrokeInput<T>,
+) => {
+  const pendingIn = input.pendingStale ?? null
+  const current = remapSampleThroughStaleLayout(input.current, pendingIn, input.painted)
+  const grown = growPageFromMark(
+    {
+      width: input.page.width,
+      height: input.page.height,
+      originX: input.page.originX,
+      originY: input.page.originY,
+    },
+    current,
+    input.painted,
+  )
+  const grew = grown.height > input.page.height
+    || grown.width > input.page.width
+    || grown.padX > 0
+    || grown.padY > 0
+  const prev = {
+    width: paintedStayExtent(input.page.width, input.painted.width),
+    height: paintedStayExtent(input.page.height, input.painted.height),
+  }
+  const next = {
+    width: Math.max(prev.width, grown.width),
+    height: Math.max(prev.height, grown.height),
+    padX: grown.padX,
+    padY: grown.padY,
+  }
+  let last = input.last ?? null
+  let nextPoint = current
+  let action: ReturnType<typeof classifyInkJumpAppend>
+  let pendingStale = pendingIn
+  if (grew) {
+    const continued = continueStrokeAfterExtentGrow(last, current, prev, next, input.existingCount)
+    last = continued.last as T | null
+    nextPoint = { ...current, ...continued.current }
+    action = continued.action
+    pendingStale = {
+      prevW: pendingIn?.prevW ?? prev.width,
+      prevH: pendingIn?.prevH ?? prev.height,
+      nextW: next.width,
+      nextH: next.height,
+      padX: (pendingIn?.padX ?? 0) + grown.padX,
+      padY: (pendingIn?.padY ?? 0) + grown.padY,
+    }
+  } else {
+    action = classifyInkJumpAppend(last, current, input.existingCount)
+  }
+  if (pendingStale && !layoutIsStaleAfterGrow(input.painted, pendingStale)) pendingStale = null
+  return {
+    last,
+    current: nextPoint,
+    action,
+    grown,
+    grew,
+    prev,
+    next,
+    pendingStale,
   }
 }
 

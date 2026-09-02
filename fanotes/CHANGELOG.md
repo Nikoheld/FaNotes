@@ -2,6 +2,10 @@
 
 ## Unveröffentlicht
 
+## 2026.9.1
+
+- **Stift springt nicht mehr beim Malen:** Wenn du mit dem Stift oben am Blatt anfängst und nach unten ziehst, bleibt die Linie zusammen. Vorhandene Schrift, Tinte und die Kamera rutschen nicht. Fehlerberichte merken sich jetzt Blattgröße, Ursprung, Kamera und ob das Blatt gewachsen oder ein Sprung gefiltert wurde.
+
 ## 2026.8.77
 
 - **Lineatur bleibt unter der Schrift:** Wenn du in eine Ecke des Blatts schreibst, rutscht der Text nicht mehr über die Linien. Die Lineatur wandert mit dem Ursprung mit — Schrift, Tinte und Gitter bleiben zusammen.

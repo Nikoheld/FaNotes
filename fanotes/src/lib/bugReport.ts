@@ -7,6 +7,9 @@ export const BUG_REPORT_HOST = 'fanotes.fasrv.ch'
 export const BUG_REPORT_ORIGIN = `https://${BUG_REPORT_HOST}`
 export const BUG_REPORT_PATH = '/api/v1/bug-report'
 
+const compactCoord = (value: number) => Math.round(value * 10_000) / 10_000
+const compactPx = (value: number) => Math.round(value)
+
 export type BugReportEvent = {
   at: number
   kind: 'pen' | 'note' | 'tool' | 'error' | 'app'
@@ -18,6 +21,58 @@ export type BugReportEvent = {
   version?: string
   platform?: string
   message?: string
+  pageW?: number
+  pageH?: number
+  padX?: number
+  padY?: number
+  camX?: number
+  camY?: number
+  grew?: boolean
+  jump?: boolean
+}
+
+export type PenDiagnosticLayout = {
+  pageW: number
+  pageH: number
+  padX: number
+  padY: number
+  camX: number
+  camY: number
+  grew?: boolean
+  jump?: boolean
+}
+
+/** Compact reconstructable paint-layout snapshot for one diagnostic pen sample. */
+export const buildPenDiagnosticEvent = (input: {
+  at: number
+  noteId?: string
+  x: number
+  y: number
+  pointerType?: string
+  tool?: string
+  version?: string
+  platform?: string
+} & PenDiagnosticLayout): BugReportEvent => {
+  const event: BugReportEvent = {
+    at: input.at,
+    kind: 'pen',
+    noteId: input.noteId,
+    x: compactCoord(input.x),
+    y: compactCoord(input.y),
+    pointerType: input.pointerType,
+    tool: input.tool,
+    version: input.version,
+    platform: input.platform,
+    pageW: compactPx(input.pageW),
+    pageH: compactPx(input.pageH),
+    padX: compactPx(input.padX),
+    padY: compactPx(input.padY),
+    camX: compactPx(input.camX),
+    camY: compactPx(input.camY),
+  }
+  if (input.grew) event.grew = true
+  if (input.jump) event.jump = true
+  return event
 }
 
 export type BugReportPayload = {
