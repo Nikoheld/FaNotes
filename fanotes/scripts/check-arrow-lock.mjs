@@ -127,11 +127,12 @@ try {
       return { top: 340, bottom: 358, left: 80, right: 82 }
     },
   }
+  paper.scrollTop = 0
   const intercepted = handlePaperEditorScroll(mockView, { head: 12 })
   assert.equal(intercepted, true, 'scrollHandler must swallow CodeMirror scrollIntoView on paper')
   assert.equal(cmScroller.scrollTop, 0, 'scrollHandler must zero the cm-scroller after measure()')
   assert.equal(editor.scrollTop, 0, 'scrollHandler must zero the markdown editor after measure()')
-  assert.ok(paper.scrollTop > 0, 'scrollHandler may move the paper scroller')
+  assert.equal(paper.scrollTop, 0, 'scrollHandler must not pan the paper camera to the caret')
   const afterHandler = sheetLayerOriginOffset(editor, ruling)
   assert.equal(afterHandler.x, before.x, 'scrollHandler must not shift text off the ruling')
   assert.equal(afterHandler.y, before.y, 'scrollHandler must not shift text off the ruling')
@@ -169,7 +170,7 @@ try {
   }, { head: 12 })
   assert.equal(duringUpdate, true, 'scrollHandler must swallow scroll even when layout reads are forbidden')
   assert.equal(cmScroller.scrollTop, 0, 'forbidden layout read still zeros the editor layer')
-  assert.equal(deferred, 1, 'layout read is deferred off the ViewUpdate path')
+  assert.equal(deferred, 0, 'scrollHandler must not requestMeasure; pan-to-caret is not deferred')
 
   cmScroller.scrollTop = 33
   editor.scrollTop = 11
