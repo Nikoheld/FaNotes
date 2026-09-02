@@ -2426,7 +2426,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       : null
     // Unusable/0,0 first — then remap live ink — then leap-filter. Leap
     // against the pre-grow last point would drop the next same-visual sample.
-    if (!acceptUsableInkClient(event, surface, viewRotationRef.current)) return
+    if (!surface || !acceptUsableInkClient(event, surface, viewRotationRef.current)) return
     let point = pointFromEvent(event)
     if (!point) return
     const live = activeStrokeRef.current

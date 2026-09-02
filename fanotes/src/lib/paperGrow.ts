@@ -352,10 +352,10 @@ export type PendingStaleLayoutMap = {
 export const layoutIsStaleAfterGrow = (
   mapped: { width: number; height: number },
   pending: PendingStaleLayoutMap | null | undefined,
-) => (
-  Boolean(pending)
-  && (mapped.width + 1 < pending.nextW || mapped.height + 1 < pending.nextH)
-)
+) => {
+  if (!pending) return false
+  return mapped.width + 1 < pending.nextW || mapped.height + 1 < pending.nextH
+}
 
 export const remapSampleThroughStaleLayout = <T extends { x: number; y: number }>(
   sample: T,
