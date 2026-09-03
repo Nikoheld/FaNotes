@@ -210,10 +210,11 @@ try {
   cmScroller.scrollTop = 70
   editor.scrollTop = 22
   const caret = { top: 360, bottom: 378, left: 80, right: 82 }
+  const paperTopBeforeLock = noteView.scrollTop
   lockPaperEditorScrollIfNeeded(editor, caret)
   assert.equal(cmScroller.scrollTop, 0)
   assert.equal(editor.scrollTop, 0)
-  assert.ok(noteView.scrollTop > 0, 'caret keep-visible may move only the paper scroller')
+  assert.equal(noteView.scrollTop, paperTopBeforeLock, 'grow/selection lock must not pan the paper camera to the caret')
   const originCaret = sheetLayerOriginOffset(editor, ruling)
   assert.equal(originCaret.x, originBefore.x)
   assert.equal(originCaret.y, originBefore.y)
