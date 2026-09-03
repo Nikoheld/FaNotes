@@ -86,7 +86,7 @@ const runOnce = () => {
   assert.match(noteCanvas, /export const textOriginCssPx/)
   assert.match(noteCanvas, /export const markdownAndInkAfterMinEdgeGrow/)
   assert.match(board, /textOriginCssPx\(/)
-  assert.match(board, /paperOriginScrollDelta\(/)
+  assert.match(board, /paperCameraAfterMaxEdgeGrow\(/)
   assert.doesNotMatch(board, /--text-origin-y.*%/u)
   assert.doesNotMatch(board, /originY \/ height/)
   const pane = css.slice(

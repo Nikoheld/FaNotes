@@ -140,7 +140,7 @@ import {
   writePageStayExtent,
   keepMarkOnPage,
   mapClientToPage,
-  paperOriginScrollDelta,
+  paperCameraAfterMaxEdgeGrow,
   textOriginCssPx,
   writeExtentFromContent,
 } from '../lib/noteCanvas'
@@ -1960,6 +1960,12 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     const nextW = Math.min(MAX_SOURCE_WIDTH, Math.max(SOURCE_WIDTH, Math.round(targetWidth)))
     if (nextH === prevH && nextW === prevW && addX === 0 && addY === 0) return false
     const paper = resolvePaperElement()
+    const scroller = paper?.closest('.unified-note-view') as HTMLElement | null
+    const held = paperCameraAfterMaxEdgeGrow(
+      { x: scroller?.scrollLeft ?? 0, y: scroller?.scrollTop ?? 0 },
+      addX,
+      addY,
+    )
     const prevPaintW = writePageStayExtent(prevW, paintedLayoutRef.current.w)
     const prevPaintH = writePageStayExtent(prevH, paintedLayoutRef.current.h)
     sourceOriginXRef.current += addX
@@ -2005,10 +2011,9 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       compassPoseRef.current = next
       setCompassPose(next)
     }
-    const scroller = paper?.closest('.unified-note-view') as HTMLElement | null
-    if (scroller && (addX > 0 || addY > 0) && prevW > 0 && prevH > 0) {
-      if (addX > 0) scroller.scrollLeft += paperOriginScrollDelta(addX)
-      if (addY > 0) scroller.scrollTop += paperOriginScrollDelta(addY)
+    if (scroller) {
+      scroller.scrollLeft = held.x
+      scroller.scrollTop = held.y
     }
     paintedLayoutRef.current = { w: nextPaintW, h: nextPaintH }
     exportCacheRef.current = null

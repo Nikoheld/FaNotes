@@ -2,6 +2,10 @@
 
 ## Unveröffentlicht
 
+## 2026.9.7
+
+- **Schrift bleibt stehen, wenn das Blatt unten wächst:** Wenn du das Blatt schwenkst und unten mehr Papier aufmachst, bleibt die schon vorhandene Schrift auf denselben Papierpunkten. Die Kamera rutscht beim Verlängern nicht.
+
 ## 2026.9.6
 
 - **Schrift bleibt beim Scrollen stehen, auch wenn das Blatt schon gewachsen ist:** Wenn du das Blatt schwenkst und es unten weiterwächst, bleibt die schon vorhandene Schrift auf denselben Papierpunkten. Ein schon gesetzter Ursprung wird nicht noch einmal angewendet.

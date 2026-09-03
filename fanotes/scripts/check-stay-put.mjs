@@ -17,6 +17,7 @@ const {
   markdownGlyphAfterCameraAndGrow,
   originPadDelta,
   overlaySampleOntoWritePage,
+  paperCameraAfterMaxEdgeGrow,
   paperOriginScrollDelta,
   SCROLL_ROOM,
   textOriginCssPx,
@@ -64,6 +65,25 @@ const REPORT_1788416428895 = [
   { camX: 632, camY: 1978, width: 2294, height: 2160, padX: 108, padY: 144 },
   { camX: 632, camY: 1978, width: 2294, height: 2304, padX: 108, padY: 144 },
   { camX: 632, camY: 1978, width: 2294, height: 2448, padX: 108, padY: 144 },
+]
+
+/**
+ * Linux 2026.9.6 report 1788433450822: pad 0, pan cam 560/560 → 435/1745,
+ * then max-edge canvas-extend height 1408 → 1440…2160, then camY 2586
+ * with 2592 / 2736 / 2880. No jump.
+ */
+const REPORT_1788433450822 = [
+  { camX: 560, camY: 560, width: 2186, height: 1408, padX: 0, padY: 0 },
+  { camX: 435, camY: 1745, width: 2186, height: 1408, padX: 0, padY: 0 },
+  { camX: 435, camY: 1745, width: 2186, height: 1440, padX: 0, padY: 0 },
+  { camX: 435, camY: 1745, width: 2186, height: 1584, padX: 0, padY: 0 },
+  { camX: 435, camY: 1745, width: 2186, height: 1728, padX: 0, padY: 0 },
+  { camX: 435, camY: 1745, width: 2186, height: 1872, padX: 0, padY: 0 },
+  { camX: 435, camY: 1745, width: 2186, height: 2016, padX: 0, padY: 0 },
+  { camX: 435, camY: 1745, width: 2186, height: 2160, padX: 0, padY: 0 },
+  { camX: 435, camY: 2586, width: 2186, height: 2592, padX: 0, padY: 0 },
+  { camX: 435, camY: 2586, width: 2186, height: 2736, padX: 0, padY: 0 },
+  { camX: 435, camY: 2586, width: 2186, height: 2880, padX: 0, padY: 0 },
 ]
 
 const makeClassList = (initial = '') => {
@@ -220,6 +240,34 @@ const runOnce = () => {
   assert.equal(padded.frames.at(-1).paperX, padded.frames[0].paperX)
   assert.equal(padded.frames.at(-1).paperY, padded.frames[0].paperY)
 
+  const extended = markdownGlyphAfterCameraAndGrow(glyph, start, REPORT_1788433450822)
+  assert.equal(extended.frames.length, REPORT_1788433450822.length)
+  assert.equal(paperCameraAfterMaxEdgeGrow({ x: 435, y: 1745 }, 0, 0).x, 435)
+  assert.equal(paperCameraAfterMaxEdgeGrow({ x: 435, y: 1745 }, 0, 0).y, 1745)
+  assert.equal(paperCameraAfterMaxEdgeGrow({ x: 560, y: 560 }, 108, 0).x, 668)
+  for (const [index, frame] of extended.frames.entries()) {
+    assert.ok(
+      Math.abs(frame.paperX - glyph.x) < 1e-6,
+      `extend step ${index} paper X ${frame.paperX} must stay ${glyph.x}`,
+    )
+    assert.ok(
+      Math.abs(frame.paperY - glyph.y) < 1e-6,
+      `extend step ${index} paper Y ${frame.paperY} must stay ${glyph.y}`,
+    )
+    assert.equal(frame.editorY, 0)
+    assert.equal(frame.camX, REPORT_1788433450822[index].camX)
+    assert.equal(frame.camY, REPORT_1788433450822[index].camY)
+    assert.equal(frame.height, REPORT_1788433450822[index].height)
+    assert.equal(frame.padX, 0)
+  }
+  assert.equal(extended.frames[0].camX, 560)
+  assert.equal(extended.frames[1].camX, 435, 'camX 560→435 must not slide paper X')
+  assert.equal(extended.frames[1].camY, 1745)
+  assert.equal(extended.frames.at(-1).camY, 2586)
+  assert.equal(extended.frames.at(-1).height, 2880)
+  assert.equal(extended.frames.at(-1).paperX, glyph.x)
+  assert.equal(extended.frames.at(-1).paperY, glyph.y)
+
   const afterPad = markdownAndInkAfterMinEdgeGrow(
     ink,
     glyph,
@@ -357,12 +405,13 @@ const runOnce = () => {
   assert.match(noteCanvas, /export const originPadDelta/)
   assert.match(noteCanvas, /export const overlaySampleOntoWritePage/)
   assert.match(noteCanvas, /export const markdownGlyphAfterCameraAndGrow/)
+  assert.match(noteCanvas, /export const paperCameraAfterMaxEdgeGrow/)
   assert.match(paperGrow, /writePageStayExtent/)
   assert.match(paperGrow, /overlaySampleOntoWritePage/)
   assert.match(paperGrow, /export const continueLiveWriteStroke/)
   assert.match(board, /continueLiveWriteStroke/)
   assert.match(board, /textOriginCssPx\(/)
-  assert.match(board, /paperOriginScrollDelta\(/)
+  assert.match(board, /paperCameraAfterMaxEdgeGrow\(/)
   assert.match(board, /writePageStayExtent\(/)
   assert.match(board, /growPageFromMark\(/)
   assert.match(editorSource, /handlePaperEditorScroll/)
@@ -371,6 +420,7 @@ const runOnce = () => {
   assert.match(self, /REPORT_1788366080812/)
   assert.match(self, /REPORT_1788376550462/)
   assert.match(self, /REPORT_1788416428895/)
+  assert.match(self, /REPORT_1788433450822/)
   assert.match(self, /padX: 108/)
   assert.match(self, /padY: 144/)
   assert.match(self, /width: 3414/)
@@ -379,8 +429,12 @@ const runOnce = () => {
   assert.equal(REPORT_1788376550462[2].width, 2294 + 2 * SCROLL_ROOM)
   assert.equal(REPORT_1788416428895[1].camY, 1978)
   assert.equal(REPORT_1788416428895.at(-1).height, 2448)
-  assert.notEqual(REPORT_1788366080812.length, REPORT_1788416428895.length)
-  assert.notEqual(REPORT_1788376550462.length, REPORT_1788416428895.length)
+  assert.equal(REPORT_1788433450822[1].camX, 435)
+  assert.equal(REPORT_1788433450822[1].camY, 1745)
+  assert.equal(REPORT_1788433450822.at(-1).height, 2880)
+  assert.notEqual(REPORT_1788366080812.length, REPORT_1788433450822.length)
+  assert.notEqual(REPORT_1788376550462.length, REPORT_1788433450822.length)
+  assert.notEqual(REPORT_1788416428895.length, REPORT_1788433450822.length)
 
   return {
     scrollFrames: scrolled.frames.length,
@@ -405,6 +459,12 @@ const runOnce = () => {
     padX: padLive.grown.padX,
     cameraHeld: 1368,
     paddedCameraHeld: 1978,
+    extendFrames: extended.frames.length,
+    extendPaperX: extended.frames.at(-1).paperX,
+    extendPaperY: extended.frames.at(-1).paperY,
+    extendCamX: extended.frames.at(-1).camX,
+    extendCamY: extended.frames.at(-1).camY,
+    extendHeight: extended.frames.at(-1).height,
   }
 }
 

@@ -230,6 +230,17 @@ export const paperOriginScrollDelta = (
   _nextLayout?: number,
 ) => finiteOriginPx(pad)
 
+/** Camera after a write-page extent change. Max-edge grow (no new pad) must
+ * not move the scroller — that slides typed text while the canvas extends. */
+export const paperCameraAfterMaxEdgeGrow = (
+  camera: { x: number; y: number },
+  padX = 0,
+  padY = 0,
+) => ({
+  x: (Number.isFinite(camera.x) ? camera.x : 0) + paperOriginScrollDelta(padX),
+  y: (Number.isFinite(camera.y) ? camera.y : 0) + paperOriginScrollDelta(padY),
+})
+
 /**
  * Ink and typed text on the same paper pixels through a min-edge grow.
  * DrawingBoard remaps 0–1 ink, offsets the editor by `textOriginCssPx`,
