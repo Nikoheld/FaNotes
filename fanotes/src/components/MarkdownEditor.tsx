@@ -56,6 +56,7 @@ import { createTrailingValueScheduler, type TrailingValueScheduler } from '../li
 import {
   captureGhostTextAroundLock,
   ghostTextDiagnosticFields,
+  applyPaperArrowNavigation,
   handlePaperEditorScroll,
   lockPaperEditorScrollIfNeeded,
   lockPaperViewportScrollStayPut,
@@ -1028,11 +1029,17 @@ const paperCaretLock = ViewPlugin.fromClass(class {
     }
     this.stayPut(paper)
     if (!update.docChanged && !update.selectionSet) return
+    const followCaret = update.transactions.some((tr) => {
+      const user = tr.annotation(Transaction.userEvent) ?? ''
+      if (user.includes('pointer')) return false
+      return user === 'select' || user.startsWith('select.') || user === 'input' || user.startsWith('input.')
+    })
     update.view.requestMeasure({
       key: 'fanotes-paper-caret',
       read: (view) => view.coordsAtPos(view.state.selection.main.head),
       write: (caret, view) => {
-        lockPaperEditorScrollIfNeeded(view.dom, caret)
+        if (followCaret) applyPaperArrowNavigation(view.dom, caret)
+        else lockPaperEditorScrollIfNeeded(view.dom, caret)
       },
     })
   }

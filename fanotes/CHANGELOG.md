@@ -2,6 +2,10 @@
 
 ## Unveröffentlicht
 
+## 2026.9.6
+
+- **Schrift bleibt beim Scrollen stehen, auch wenn das Blatt schon gewachsen ist:** Wenn du das Blatt schwenkst und es unten weiterwächst, bleibt die schon vorhandene Schrift auf denselben Papierpunkten. Ein schon gesetzter Ursprung wird nicht noch einmal angewendet.
+
 ## 2026.9.5
 
 - **Schrift bleibt beim Scrollen und am Rand stehen:** Wenn du das Blatt schwenkst oder links am Rand schreibst, bleibt die schon vorhandene Schrift auf denselben Papierpunkten. Extra Kameraraum danach verschiebt den Text nicht mehr.

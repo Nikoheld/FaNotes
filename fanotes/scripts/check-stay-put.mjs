@@ -26,6 +26,7 @@ const { continueLiveWriteStroke } = await server.ssrLoadModule('/src/lib/paperGr
 const { classifyInkJumpAppend } = await server.ssrLoadModule('/src/lib/inkSampleMap.ts')
 const {
   handlePaperEditorScroll,
+  lockPaperEditorScrollIfNeeded,
   lockPaperViewportScrollStayPut,
 } = await server.ssrLoadModule('/src/lib/paperCaretScroll.ts')
 
@@ -50,6 +51,19 @@ const REPORT_1788376550462 = [
   { camX: 560, camY: 645, width: 2186, height: 1408, padX: 0, padY: 0 },
   { camX: 668, camY: 645, width: 2294, height: 1408, padX: 108, padY: 0 },
   { camX: 668, camY: 645, width: 3414, height: 2528, padX: 108, padY: 0 },
+]
+
+/**
+ * Linux 2026.9.5 report 1788416428895: pads 108/144 already applied,
+ * then user pan cam 668/640 → 632/1978 with max-edge height grows
+ * 1552 → 2016 → 2160 → 2304 → 2448. No jump.
+ */
+const REPORT_1788416428895 = [
+  { camX: 668, camY: 640, width: 2294, height: 1552, padX: 108, padY: 144 },
+  { camX: 632, camY: 1978, width: 2294, height: 2016, padX: 108, padY: 144 },
+  { camX: 632, camY: 1978, width: 2294, height: 2160, padX: 108, padY: 144 },
+  { camX: 632, camY: 1978, width: 2294, height: 2304, padX: 108, padY: 144 },
+  { camX: 632, camY: 1978, width: 2294, height: 2448, padX: 108, padY: 144 },
 ]
 
 const makeClassList = (initial = '') => {
@@ -177,6 +191,35 @@ const runOnce = () => {
   assert.equal(padThenScroll.frames[3].paperY, 78)
   assert.equal(padThenScroll.frames[3].camY, 1368)
 
+  const paddedStart = { width: 2294, height: 1552 }
+  const padded = markdownGlyphAfterCameraAndGrow(glyph, paddedStart, REPORT_1788416428895)
+  assert.equal(padded.frames.length, REPORT_1788416428895.length)
+  const paddedPaperX = glyph.x + 108
+  const paddedPaperY = glyph.y + 144
+  assert.equal(originPadDelta(108, 108), 0)
+  assert.equal(originPadDelta(144, 144), 0)
+  for (const [index, frame] of padded.frames.entries()) {
+    assert.ok(
+      Math.abs(frame.paperX - paddedPaperX) < 1e-6,
+      `padded-scroll step ${index} paper X ${frame.paperX} must stay ${paddedPaperX} (pads not re-applied)`,
+    )
+    assert.ok(
+      Math.abs(frame.paperY - paddedPaperY) < 1e-6,
+      `padded-scroll step ${index} paper Y ${frame.paperY} must stay ${paddedPaperY} (pads not re-applied)`,
+    )
+    assert.equal(frame.editorY, 0)
+    assert.equal(frame.camX, REPORT_1788416428895[index].camX)
+    assert.equal(frame.camY, REPORT_1788416428895[index].camY)
+    assert.equal(frame.height, REPORT_1788416428895[index].height)
+    assert.equal(frame.padX, 108)
+    assert.equal(frame.padY, 144)
+  }
+  assert.equal(padded.frames[0].camX, 668)
+  assert.equal(padded.frames[1].camX, 632, 'camX 668→632 must not slide paper X')
+  assert.equal(padded.frames.at(-1).height, 2448)
+  assert.equal(padded.frames.at(-1).paperX, padded.frames[0].paperX)
+  assert.equal(padded.frames.at(-1).paperY, padded.frames[0].paperY)
+
   const afterPad = markdownAndInkAfterMinEdgeGrow(
     ink,
     glyph,
@@ -276,6 +319,16 @@ const runOnce = () => {
   assert.equal(cm.scrollTop, 0)
   assert.equal(editor.scrollTop, 0)
 
+  paper.scrollTop = 1978
+  paper.scrollLeft = 632
+  cm.scrollTop = 40
+  editor.scrollTop = 12
+  assert.equal(lockPaperEditorScrollIfNeeded(editor, { top: 40, bottom: 60, left: 80, right: 90 }), true)
+  assert.equal(paper.scrollTop, 1978, 'grow/selection measure must not pan the paper camera to the caret')
+  assert.equal(paper.scrollLeft, 632)
+  assert.equal(cm.scrollTop, 0)
+  assert.equal(editor.scrollTop, 0)
+
   const edgeLocked = lockPaperViewportScrollStayPut(paper, { scrollTop: 645, scrollLeft: 668 })
   assert.equal(edgeLocked.paperScrollTop, 645)
   assert.equal(edgeLocked.paperScrollLeft, 668)
@@ -292,6 +345,14 @@ const runOnce = () => {
   const handlerBlock = caretSource.slice(handlerAt, handlerAt + 900)
   assert.match(handlerBlock, /lockPaperEditorLayerScroll/)
   assert.doesNotMatch(handlerBlock, /keepCaretVisibleInPaperScroller/)
+  const lockIfNeededAt = caretSource.indexOf('export const lockPaperEditorScrollIfNeeded')
+  assert.ok(lockIfNeededAt >= 0)
+  const lockIfNeededBlock = caretSource.slice(lockIfNeededAt, lockIfNeededAt + 700)
+  assert.match(lockIfNeededBlock, /lockPaperEditorLayerScroll/)
+  assert.doesNotMatch(lockIfNeededBlock, /applyPaperArrowNavigation/)
+  assert.doesNotMatch(lockIfNeededBlock, /keepCaretVisibleInPaperScroller/)
+  assert.match(editorSource, /applyPaperArrowNavigation/)
+  assert.match(editorSource, /lockPaperEditorScrollIfNeeded/)
   assert.match(noteCanvas, /export const writePageStayExtent/)
   assert.match(noteCanvas, /export const originPadDelta/)
   assert.match(noteCanvas, /export const overlaySampleOntoWritePage/)
@@ -309,12 +370,17 @@ const runOnce = () => {
   assert.match(paperView, /lockPaperViewportScrollStayPut|captureGhostTextAroundLock/)
   assert.match(self, /REPORT_1788366080812/)
   assert.match(self, /REPORT_1788376550462/)
+  assert.match(self, /REPORT_1788416428895/)
   assert.match(self, /padX: 108/)
+  assert.match(self, /padY: 144/)
   assert.match(self, /width: 3414/)
   assert.equal(REPORT_1788366080812[2].camY, 1368)
   assert.equal(REPORT_1788376550462[0].camY, 645)
   assert.equal(REPORT_1788376550462[2].width, 2294 + 2 * SCROLL_ROOM)
-  assert.notEqual(REPORT_1788366080812.length, REPORT_1788376550462.length)
+  assert.equal(REPORT_1788416428895[1].camY, 1978)
+  assert.equal(REPORT_1788416428895.at(-1).height, 2448)
+  assert.notEqual(REPORT_1788366080812.length, REPORT_1788416428895.length)
+  assert.notEqual(REPORT_1788376550462.length, REPORT_1788416428895.length)
 
   return {
     scrollFrames: scrolled.frames.length,
@@ -326,12 +392,19 @@ const runOnce = () => {
     afterPadPaperX: sequence.frames[1].paperX,
     afterJumpPaperX: sequence.frames[2].paperX,
     padThenScrollPaperX: padThenScroll.frames[3].paperX,
+    paddedScrollFrames: padded.frames.length,
+    paddedPaperX: padded.frames.at(-1).paperX,
+    paddedPaperY: padded.frames.at(-1).paperY,
+    paddedCamX: padded.frames.at(-1).camX,
+    paddedCamY: padded.frames.at(-1).camY,
+    paddedHeight: padded.frames.at(-1).height,
     visualX: visual0X,
     visualY: visual0Y,
     jumpAction: jumpLive.action,
     jumpWidth: jumpLive.grown.width,
     padX: padLive.grown.padX,
     cameraHeld: 1368,
+    paddedCameraHeld: 1978,
   }
 }
 

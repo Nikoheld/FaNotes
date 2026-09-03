@@ -431,15 +431,16 @@ export const applyPaperArrowNavigation = (
 /**
  * CodeMirror `measure()` calls `scrollIntoView` on `.cm-scroller` after
  * plugins update. `overflow: hidden` does not block that programmatic
- * scrollTop. Returning true here swallows the default so glyphs stay
- * glued to the ruling; only the paper viewport may move.
+ * scrollTop. Lock nested editor layers only — pan-to-caret here fights a
+ * user paper pan when the sheet grows (typed text slides while scrolling).
+ * Keyboard caret follow stays on arrow navigation.
  */
 export const lockPaperEditorScrollIfNeeded = (
   editorRoot: HTMLElement | null,
-  caret: { top: number; bottom: number; left: number; right: number } | null,
+  _caret?: { top: number; bottom: number; left: number; right: number } | null,
 ) => {
   if (!editorRoot?.closest('.unified-paper, .paper-view')) return false
-  applyPaperArrowNavigation(editorRoot, caret)
+  lockPaperEditorLayerScroll(editorRoot)
   return true
 }
 
