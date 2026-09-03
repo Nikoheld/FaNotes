@@ -309,6 +309,15 @@ export const observeGhostTextSequence = (
   })
 }
 
+/** Restore the held paper camera and zero nested editor scroll after a grow. */
+export const pinPaperViewportAfterExtentGrow = (
+  paperScroller: HTMLElement | null,
+  camera: { x: number; y: number },
+) => lockPaperViewportScrollStayPut(paperScroller, {
+  scrollLeft: camera.x,
+  scrollTop: camera.y,
+})
+
 export const lockPaperViewportScrollStayPut = (
   paperScroller: HTMLElement | null,
   requested?: { scrollTop?: number; scrollLeft?: number },

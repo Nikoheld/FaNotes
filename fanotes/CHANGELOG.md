@@ -2,6 +2,10 @@
 
 ## Unveröffentlicht
 
+## 2026.9.8
+
+- **Schrift bleibt stehen, wenn das Blatt grösser wird:** Wenn du das Blatt unten erweiterst, bleibt die schon vorhandene Schrift auf denselben Papierpunkten — auch nach einem schon gesetzten Ursprung. Sie rutscht nicht mehr geisterhaft weg.
+
 ## 2026.9.7
 
 - **Schrift bleibt stehen, wenn das Blatt unten wächst:** Wenn du das Blatt schwenkst und unten mehr Papier aufmachst, bleibt die schon vorhandene Schrift auf denselben Papierpunkten. Die Kamera rutscht beim Verlängern nicht.

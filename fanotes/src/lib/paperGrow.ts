@@ -15,6 +15,7 @@ import {
   PAPER_SOURCE_WIDTH,
   writePageStayExtent,
   paperCameraAfterMaxEdgeGrow,
+  paperSheetLayoutShift,
   WRITE_SLACK_HEIGHT,
 } from './noteCanvas'
 
@@ -41,6 +42,7 @@ export {
   textOriginCssPx,
   paperOriginScrollDelta,
   paperCameraAfterMaxEdgeGrow,
+  paperSheetLayoutShift,
   markdownAndInkAfterMinEdgeGrow,
   markdownAndInkAfterGrowSequence,
   markPagePosition,

@@ -230,15 +230,31 @@ export const paperOriginScrollDelta = (
   _nextLayout?: number,
 ) => finiteOriginPx(pad)
 
+/** How far the sheet’s content-space origin moved across a layout pass. */
+export const paperSheetLayoutShift = (
+  before: { x: number; y: number },
+  after: { x: number; y: number },
+) => ({
+  x: (Number.isFinite(after.x) ? after.x : 0) - (Number.isFinite(before.x) ? before.x : 0),
+  y: (Number.isFinite(after.y) ? after.y : 0) - (Number.isFinite(before.y) ? before.y : 0),
+})
+
 /** Camera after a write-page extent change. Max-edge grow (no new pad) must
- * not move the scroller — that slides typed text while the canvas extends. */
+ * not move the scroller — that slides typed text while the canvas extends.
+ * If the sheet’s content-space origin also jumped, add that shift so glyphs
+ * stay on the same viewport pixels. */
 export const paperCameraAfterMaxEdgeGrow = (
   camera: { x: number; y: number },
   padX = 0,
   padY = 0,
+  sheetShift: { x?: number; y?: number } = {},
 ) => ({
-  x: (Number.isFinite(camera.x) ? camera.x : 0) + paperOriginScrollDelta(padX),
-  y: (Number.isFinite(camera.y) ? camera.y : 0) + paperOriginScrollDelta(padY),
+  x: (Number.isFinite(camera.x) ? camera.x : 0)
+    + paperOriginScrollDelta(padX)
+    + (Number.isFinite(sheetShift.x) ? Number(sheetShift.x) : 0),
+  y: (Number.isFinite(camera.y) ? camera.y : 0)
+    + paperOriginScrollDelta(padY)
+    + (Number.isFinite(sheetShift.y) ? Number(sheetShift.y) : 0),
 })
 
 /**

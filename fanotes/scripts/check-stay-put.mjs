@@ -19,6 +19,8 @@ const {
   overlaySampleOntoWritePage,
   paperCameraAfterMaxEdgeGrow,
   paperOriginScrollDelta,
+  paperScrollBoundsFromVisualRect,
+  paperSheetLayoutShift,
   SCROLL_ROOM,
   textOriginCssPx,
   writePageStayExtent,
@@ -29,6 +31,8 @@ const {
   handlePaperEditorScroll,
   lockPaperEditorScrollIfNeeded,
   lockPaperViewportScrollStayPut,
+  observeGhostTextSequence,
+  pinPaperViewportAfterExtentGrow,
 } = await server.ssrLoadModule('/src/lib/paperCaretScroll.ts')
 
 /**
@@ -84,6 +88,22 @@ const REPORT_1788433450822 = [
   { camX: 435, camY: 2586, width: 2186, height: 2592, padX: 0, padY: 0 },
   { camX: 435, camY: 2586, width: 2186, height: 2736, padX: 0, padY: 0 },
   { camX: 435, camY: 2586, width: 2186, height: 2880, padX: 0, padY: 0 },
+]
+
+/**
+ * Linux 2026.9.7 report 1788435936618: origin pads 108 then 144 at
+ * cam 668/382 → 668/526, user pan to camY 1978, then max-edge height
+ * 1872 / 2016 / 2160 / 2304 with pads already applied, then cam 665/181.
+ */
+const REPORT_1788435936618 = [
+  { camX: 668, camY: 382, width: 2294, height: 1408, padX: 108, padY: 0 },
+  { camX: 668, camY: 526, width: 2294, height: 1552, padX: 108, padY: 144 },
+  { camX: 668, camY: 526, width: 2294, height: 1552, padX: 108, padY: 144 },
+  { camX: 668, camY: 1978, width: 2294, height: 1872, padX: 108, padY: 144 },
+  { camX: 668, camY: 1978, width: 2294, height: 2016, padX: 108, padY: 144 },
+  { camX: 668, camY: 1978, width: 2294, height: 2160, padX: 108, padY: 144 },
+  { camX: 668, camY: 1978, width: 2294, height: 2304, padX: 108, padY: 144 },
+  { camX: 665, camY: 181, width: 2294, height: 2304, padX: 108, padY: 144 },
 ]
 
 const makeClassList = (initial = '') => {
@@ -268,6 +288,81 @@ const runOnce = () => {
   assert.equal(extended.frames.at(-1).paperX, glyph.x)
   assert.equal(extended.frames.at(-1).paperY, glyph.y)
 
+  const enlarge = markdownGlyphAfterCameraAndGrow(glyph, start, REPORT_1788435936618)
+  assert.equal(enlarge.frames.length, REPORT_1788435936618.length)
+  const enlargePaperX = glyph.x + 108
+  const enlargePaperY = glyph.y + 144
+  assert.equal(enlarge.frames[0].paperX, enlargePaperX)
+  assert.equal(enlarge.frames[0].paperY, glyph.y)
+  assert.equal(enlarge.frames[1].paperY, enlargePaperY)
+  for (const [index, frame] of enlarge.frames.entries()) {
+    assert.ok(
+      Math.abs(frame.paperX - enlargePaperX) < 1e-6,
+      `enlarge step ${index} paper X ${frame.paperX} must stay ${enlargePaperX}`,
+    )
+    if (index >= 1) {
+      assert.ok(
+        Math.abs(frame.paperY - enlargePaperY) < 1e-6,
+        `enlarge step ${index} paper Y ${frame.paperY} must stay ${enlargePaperY}`,
+      )
+    }
+    assert.equal(frame.editorY, 0)
+    assert.equal(frame.camX, REPORT_1788435936618[index].camX)
+    assert.equal(frame.camY, REPORT_1788435936618[index].camY)
+    assert.equal(frame.height, REPORT_1788435936618[index].height)
+    assert.equal(frame.padX, 108)
+  }
+  assert.equal(enlarge.frames[1].padY, 144)
+  assert.equal(enlarge.frames[3].camY, 1978)
+  assert.equal(enlarge.frames[6].height, 2304)
+  assert.equal(enlarge.frames[6].paperX, enlarge.frames[1].paperX)
+  assert.equal(enlarge.frames[6].paperY, enlarge.frames[1].paperY)
+  assert.equal(enlarge.frames.at(-1).camX, 665, 'camX 668→665 must not slide paper X')
+  assert.equal(enlarge.frames.at(-1).camY, 181)
+  assert.equal(paperSheetLayoutShift({ x: 560, y: 560 }, { x: 560, y: 600 }).y, 40)
+  assert.equal(paperCameraAfterMaxEdgeGrow({ x: 668, y: 1978 }, 0, 0).y, 1978)
+  assert.equal(paperCameraAfterMaxEdgeGrow({ x: 668, y: 1978 }, 0, 0, { y: 40 }).y, 2018)
+  const sheetBefore = paperScrollBoundsFromVisualRect(
+    { left: 100, top: 80, right: 400, bottom: 500 },
+    { left: 0, top: 0, scrollLeft: 668, scrollTop: 1978 },
+  )
+  const sheetAfter = paperScrollBoundsFromVisualRect(
+    { left: 100, top: 120, right: 400, bottom: 640 },
+    { left: 0, top: 0, scrollLeft: 668, scrollTop: 1978 },
+  )
+  const enlargeShift = paperSheetLayoutShift(
+    { x: sheetBefore.minX, y: sheetBefore.minY },
+    { x: sheetAfter.minX, y: sheetAfter.minY },
+  )
+  assert.equal(enlargeShift.y, 40)
+  const pinned = paperCameraAfterMaxEdgeGrow({ x: 668, y: 1978 }, 0, 0, enlargeShift)
+  assert.equal(pinned.y, 2018)
+  const growGhost = observeGhostTextSequence(
+    REPORT_1788435936618.slice(3, 7).map((step) => ({
+      paperX: enlargePaperX,
+      paperY: enlargePaperY,
+      camX: step.camX,
+      camY: step.camY,
+      padX: step.padX,
+      padY: step.padY,
+      editorX: 0,
+      editorY: 0,
+    })),
+  )
+  for (const [index, frame] of growGhost.entries()) {
+    assert.equal(frame.slip, false, `enlarge grow ${index} must not ghost-slip`)
+    assert.equal(frame.sample.visualY, growGhost[0].sample.visualY)
+  }
+  const enlargePaper = makeNode('paper-view unified-note-view', { scrollTop: 1978, scrollLeft: 668 })
+  const enlargeSheet = append(enlargePaper, makeNode('unified-paper'))
+  const enlargeEditor = append(enlargeSheet, makeNode('editor-pane markdown-editor'))
+  const enlargeCm = append(enlargeEditor, makeNode('cm-scroller', { scrollTop: 36, scrollLeft: 4 }))
+  const enlargePinned = pinPaperViewportAfterExtentGrow(enlargePaper, { x: 668, y: 1978 })
+  assert.equal(enlargePinned.paperScrollTop, 1978)
+  assert.equal(enlargePinned.paperScrollLeft, 668)
+  assert.equal(enlargeCm.scrollTop, 0)
+  assert.equal(enlargeEditor.scrollTop, 0)
+
   const afterPad = markdownAndInkAfterMinEdgeGrow(
     ink,
     glyph,
@@ -387,6 +482,7 @@ const runOnce = () => {
   const noteCanvas = readFileSync(join(root, 'src/lib/noteCanvas.ts'), 'utf8')
   const paperGrow = readFileSync(join(root, 'src/lib/paperGrow.ts'), 'utf8')
   const caretSource = readFileSync(join(root, 'src/lib/paperCaretScroll.ts'), 'utf8')
+  const styles = readFileSync(join(root, 'src/styles.css'), 'utf8')
   const self = readFileSync(fileURLToPath(import.meta.url), 'utf8')
   const handlerAt = caretSource.indexOf('export const handlePaperEditorScroll')
   assert.ok(handlerAt >= 0)
@@ -406,14 +502,20 @@ const runOnce = () => {
   assert.match(noteCanvas, /export const overlaySampleOntoWritePage/)
   assert.match(noteCanvas, /export const markdownGlyphAfterCameraAndGrow/)
   assert.match(noteCanvas, /export const paperCameraAfterMaxEdgeGrow/)
+  assert.match(noteCanvas, /export const paperSheetLayoutShift/)
   assert.match(paperGrow, /writePageStayExtent/)
   assert.match(paperGrow, /overlaySampleOntoWritePage/)
   assert.match(paperGrow, /export const continueLiveWriteStroke/)
   assert.match(board, /continueLiveWriteStroke/)
   assert.match(board, /textOriginCssPx\(/)
   assert.match(board, /paperCameraAfterMaxEdgeGrow\(/)
+  assert.match(board, /paperSheetLayoutShift\(/)
+  assert.match(board, /pinPaperViewportAfterExtentGrow\(/)
   assert.match(board, /writePageStayExtent\(/)
   assert.match(board, /growPageFromMark\(/)
+  assert.match(caretSource, /export const pinPaperViewportAfterExtentGrow/)
+  assert.match(styles, /\.paper-sheet-plane[\s\S]{0,400}overflow-anchor:\s*none/)
+  assert.match(styles, /\.unified-paper \.markdown-editor \.cm-scroller[\s\S]{0,200}overflow-anchor:\s*none/)
   assert.match(editorSource, /handlePaperEditorScroll/)
   assert.match(editorSource, /lockPaperViewportScrollStayPut|captureGhostTextAroundLock/)
   assert.match(paperView, /lockPaperViewportScrollStayPut|captureGhostTextAroundLock/)
@@ -421,6 +523,7 @@ const runOnce = () => {
   assert.match(self, /REPORT_1788376550462/)
   assert.match(self, /REPORT_1788416428895/)
   assert.match(self, /REPORT_1788433450822/)
+  assert.match(self, /REPORT_1788435936618/)
   assert.match(self, /padX: 108/)
   assert.match(self, /padY: 144/)
   assert.match(self, /width: 3414/)
@@ -432,9 +535,14 @@ const runOnce = () => {
   assert.equal(REPORT_1788433450822[1].camX, 435)
   assert.equal(REPORT_1788433450822[1].camY, 1745)
   assert.equal(REPORT_1788433450822.at(-1).height, 2880)
-  assert.notEqual(REPORT_1788366080812.length, REPORT_1788433450822.length)
-  assert.notEqual(REPORT_1788376550462.length, REPORT_1788433450822.length)
-  assert.notEqual(REPORT_1788416428895.length, REPORT_1788433450822.length)
+  assert.equal(REPORT_1788435936618[0].camY, 382)
+  assert.equal(REPORT_1788435936618[1].padY, 144)
+  assert.equal(REPORT_1788435936618[6].height, 2304)
+  assert.equal(REPORT_1788435936618.at(-1).camY, 181)
+  assert.notEqual(REPORT_1788366080812.length, REPORT_1788435936618.length)
+  assert.notEqual(REPORT_1788376550462.length, REPORT_1788435936618.length)
+  assert.notEqual(REPORT_1788416428895.length, REPORT_1788435936618.length)
+  assert.notEqual(REPORT_1788433450822.length, REPORT_1788435936618.length)
 
   return {
     scrollFrames: scrolled.frames.length,
@@ -465,6 +573,13 @@ const runOnce = () => {
     extendCamX: extended.frames.at(-1).camX,
     extendCamY: extended.frames.at(-1).camY,
     extendHeight: extended.frames.at(-1).height,
+    enlargeFrames: enlarge.frames.length,
+    enlargePaperX: enlarge.frames.at(-1).paperX,
+    enlargePaperY: enlarge.frames.at(-1).paperY,
+    enlargeCamX: enlarge.frames.at(-1).camX,
+    enlargeCamY: enlarge.frames.at(-1).camY,
+    enlargeHeight: enlarge.frames.at(-1).height,
+    enlargeGrowCamY: enlarge.frames[6].camY,
   }
 }
 

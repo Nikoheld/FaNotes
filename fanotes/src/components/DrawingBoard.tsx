@@ -141,6 +141,8 @@ import {
   keepMarkOnPage,
   mapClientToPage,
   paperCameraAfterMaxEdgeGrow,
+  paperScrollBoundsFromVisualRect,
+  paperSheetLayoutShift,
   textOriginCssPx,
   writeExtentFromContent,
 } from '../lib/noteCanvas'
@@ -148,6 +150,7 @@ import {
   paperRulingBackgroundPosition,
   paperRulingTileOrigin,
 } from '../lib/paperRuling'
+import { pinPaperViewportAfterExtentGrow } from '../lib/paperCaretScroll'
 import {
   continueLiveWriteStroke,
   growLiveInkAndMapNext,
@@ -1010,6 +1013,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const sourceOriginXRef = useRef(0)
   const sourceOriginYRef = useRef(0)
   const pageLayoutFrameRef = useRef<number | null>(null)
+  const pinGrowFrameRef = useRef<number | null>(null)
   const paintedLayoutRef = useRef({ w: 0, h: 0 })
   const pendingStaleLayoutRef = useRef<PendingStaleLayoutMap | null>(null)
   const inkExtentPaperRef = useRef<HTMLElement | null>(null)
@@ -1875,6 +1879,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       if (inkWindowIdleRef.current !== null) window.clearTimeout(inkWindowIdleRef.current)
       if (resizeDebounceRef.current !== null) window.clearTimeout(resizeDebounceRef.current)
       if (drawFrameRef.current !== null) cancelAnimationFrame(drawFrameRef.current)
+      if (pinGrowFrameRef.current !== null) cancelAnimationFrame(pinGrowFrameRef.current)
       if (pendingSolverTapRef.current) window.clearTimeout(pendingSolverTapRef.current.timer)
     }
   }, [flushPaintedLayoutGrow, redraw, resolvePaperElement, syncInkWindow])
@@ -1961,11 +1966,19 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     if (nextH === prevH && nextW === prevW && addX === 0 && addY === 0) return false
     const paper = resolvePaperElement()
     const scroller = paper?.closest('.unified-note-view') as HTMLElement | null
-    const held = paperCameraAfterMaxEdgeGrow(
-      { x: scroller?.scrollLeft ?? 0, y: scroller?.scrollTop ?? 0 },
-      addX,
-      addY,
-    )
+    const originCamera = { x: scroller?.scrollLeft ?? 0, y: scroller?.scrollTop ?? 0 }
+    const scrollerBox = scroller
+      ? {
+        left: scroller.getBoundingClientRect().left,
+        top: scroller.getBoundingClientRect().top,
+        scrollLeft: originCamera.x,
+        scrollTop: originCamera.y,
+      }
+      : null
+    const beforeOrigin = paper && scrollerBox
+      ? paperScrollBoundsFromVisualRect(paper.getBoundingClientRect(), scrollerBox)
+      : { minX: 0, minY: 0, maxX: 0, maxY: 0 }
+    pinPaperViewportAfterExtentGrow(scroller, originCamera)
     const prevPaintW = writePageStayExtent(prevW, paintedLayoutRef.current.w)
     const prevPaintH = writePageStayExtent(prevH, paintedLayoutRef.current.h)
     sourceOriginXRef.current += addX
@@ -2011,10 +2024,30 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       compassPoseRef.current = next
       setCompassPose(next)
     }
-    if (scroller) {
-      scroller.scrollLeft = held.x
-      scroller.scrollTop = held.y
+    const pinHeldCamera = () => {
+      if (!scroller) return
+      const afterBox = {
+        left: scroller.getBoundingClientRect().left,
+        top: scroller.getBoundingClientRect().top,
+        scrollLeft: scroller.scrollLeft,
+        scrollTop: scroller.scrollTop,
+      }
+      const afterOrigin = paper
+        ? paperScrollBoundsFromVisualRect(paper.getBoundingClientRect(), afterBox)
+        : beforeOrigin
+      const shift = paperSheetLayoutShift(
+        { x: beforeOrigin.minX, y: beforeOrigin.minY },
+        { x: afterOrigin.minX, y: afterOrigin.minY },
+      )
+      const held = paperCameraAfterMaxEdgeGrow(originCamera, addX, addY, shift)
+      pinPaperViewportAfterExtentGrow(scroller, held)
     }
+    pinHeldCamera()
+    if (pinGrowFrameRef.current !== null) cancelAnimationFrame(pinGrowFrameRef.current)
+    pinGrowFrameRef.current = requestAnimationFrame(() => {
+      pinGrowFrameRef.current = null
+      pinHeldCamera()
+    })
     paintedLayoutRef.current = { w: nextPaintW, h: nextPaintH }
     exportCacheRef.current = null
     setDirty(true)
