@@ -7,4 +7,4 @@ Linux 2026.9.3 report `1788376550462` (“IT STILL MOVES AROUND”) wrote near t
 - Origin pad in bug-report frames is cumulative. The live path applies only the new pad (`originPadDelta`), offsets markdown in CSS px (`textOriginCssPx`), and pans the camera by that same pad (`paperOriginScrollDelta`).
 - A painted box that is exactly the write page plus `2*SCROLL_ROOM` is extra pan paper, not a max-edge grow (`writePageStayExtent`). Overlay 0–1 samples are lifted onto the write page (`overlaySampleOntoWritePage`) so the jump filter does not drop the stroke.
 
-Gating check: `npm run check:stay-put` (`scripts/check-stay-put.mjs`) drives report `1788376550462`.
+Gating check: `npm run check:stay-put` (`scripts/check-stay-put.mjs`) drives both report `1788366080812` (scroll) and report `1788376550462` (left-edge pad + 2×SCROLL_ROOM jump), including pad-then-scroll.
