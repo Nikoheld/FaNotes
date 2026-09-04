@@ -149,7 +149,7 @@ const runOnce = () => {
   assert.match(board, /growPageFromMark\(/)
   assert.match(board, /writePageStayExtent\(prevW/)
   assert.match(board, /writePageStayExtent\(nextW/)
-  assert.match(board, /paperCameraAfterMaxEdgeGrow\(/)
+  assert.match(board, /stayPutAfterExtentGrow\(/)
   assert.match(board, /paperRulingTileOrigin\(/)
   assert.match(board, /paperRulingBackgroundPosition\(/)
   assert.match(board, /background-position/)

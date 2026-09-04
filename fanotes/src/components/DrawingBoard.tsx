@@ -140,9 +140,9 @@ import {
   writePageStayExtent,
   keepMarkOnPage,
   mapClientToPage,
-  paperCameraAfterMaxEdgeGrow,
   paperScrollBoundsFromVisualRect,
   paperSheetLayoutShift,
+  stayPutAfterExtentGrow,
   textOriginCssPx,
   writeExtentFromContent,
 } from '../lib/noteCanvas'
@@ -2039,7 +2039,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         { x: beforeOrigin.minX, y: beforeOrigin.minY },
         { x: afterOrigin.minX, y: afterOrigin.minY },
       )
-      const held = paperCameraAfterMaxEdgeGrow(originCamera, addX, addY, shift)
+      const held = stayPutAfterExtentGrow(originCamera, addX, addY, shift)
       pinPaperViewportAfterExtentGrow(scroller, held)
     }
     pinHeldCamera()

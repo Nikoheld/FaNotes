@@ -258,6 +258,133 @@ export const paperCameraAfterMaxEdgeGrow = (
 })
 
 /**
+ * Paper coords after one write op. The only legal change is a *new* origin
+ * pad — pan, max-edge enlarge, overlay jump, and sheet-layout shift cannot
+ * move typed text on the sheet.
+ */
+export const stayPutPaperAfterOp = (
+  paper: { x: number; y: number },
+  havePadX: number,
+  havePadY: number,
+  nextPadX: number,
+  nextPadY: number,
+) => ({
+  x: paper.x + originPadDelta(havePadX, nextPadX),
+  y: paper.y + originPadDelta(havePadY, nextPadY),
+})
+
+/** Live extent grow: hold the camera, add only new pad and sheet-origin jump. */
+export const stayPutAfterExtentGrow = (
+  camera: { x: number; y: number },
+  padX = 0,
+  padY = 0,
+  sheetShift: { x?: number; y?: number } = {},
+) => paperCameraAfterMaxEdgeGrow(camera, padX, padY, sheetShift)
+
+export type StayPutState = {
+  paperX: number
+  paperY: number
+  camX: number
+  camY: number
+  width: number
+  height: number
+  originX: number
+  originY: number
+  editorX: number
+  editorY: number
+}
+
+export type StayPutOp = {
+  camX?: number
+  camY?: number
+  width?: number
+  height?: number
+  padX?: number
+  padY?: number
+  editorX?: number
+  editorY?: number
+  sheetShift?: { x?: number; y?: number }
+  paintedWidth?: number
+  paintedHeight?: number
+  lockEditor?: boolean
+}
+
+/** True only when paper X/Y changed by the new origin pad and nothing else. */
+export const stayPutPaperMovedByPadOnly = (
+  previous: StayPutState,
+  next: StayPutState,
+) => {
+  const addX = originPadDelta(previous.originX, next.originX)
+  const addY = originPadDelta(previous.originY, next.originY)
+  return (
+    Math.abs(next.paperX - previous.paperX - addX) < 1e-6
+    && Math.abs(next.paperY - previous.paperY - addY) < 1e-6
+  )
+}
+
+/**
+ * One closed write/scroll/grow step. User camera is taken as-is when provided
+ * (report pan already includes any pad pan). Live grow without a new camera
+ * holds the current camera and adds only new pad + sheet shift. Overlay
+ * painted boxes do not become write-page extent. lockEditor forces 0.
+ */
+export const applyStayPutOp = (state: StayPutState, op: StayPutOp): StayPutState => {
+  const nextPadX = Math.max(0, op.padX ?? state.originX)
+  const nextPadY = Math.max(0, op.padY ?? state.originY)
+  const addX = originPadDelta(state.originX, nextPadX)
+  const addY = originPadDelta(state.originY, nextPadY)
+  const paper = stayPutPaperAfterOp(
+    { x: state.paperX, y: state.paperY },
+    state.originX,
+    state.originY,
+    nextPadX,
+    nextPadY,
+  )
+  const width = writePageStayExtent(
+    writePageStayExtent(state.width, op.width ?? state.width),
+    op.paintedWidth ?? 0,
+  )
+  const height = writePageStayExtent(
+    writePageStayExtent(state.height, op.height ?? state.height),
+    op.paintedHeight ?? 0,
+  )
+  const hasUserCamera = Number.isFinite(op.camX) || Number.isFinite(op.camY)
+  const fromCamera = {
+    x: Number.isFinite(op.camX) ? Number(op.camX) : state.camX,
+    y: Number.isFinite(op.camY) ? Number(op.camY) : state.camY,
+  }
+  const camera = stayPutAfterExtentGrow(
+    fromCamera,
+    hasUserCamera ? 0 : addX,
+    hasUserCamera ? 0 : addY,
+    op.sheetShift,
+  )
+  const lock = op.lockEditor === true
+  return {
+    paperX: paper.x,
+    paperY: paper.y,
+    camX: camera.x,
+    camY: camera.y,
+    width,
+    height,
+    originX: nextPadX,
+    originY: nextPadY,
+    editorX: lock ? 0 : (Number.isFinite(op.editorX) ? Number(op.editorX) : 0),
+    editorY: lock ? 0 : (Number.isFinite(op.editorY) ? Number(op.editorY) : 0),
+  }
+}
+
+export const reduceStayPutOps = (start: StayPutState, ops: StayPutOp[]) => {
+  const frames = [] as StayPutState[]
+  let state = start
+  for (const op of ops) {
+    state = applyStayPutOp(state, op)
+    frames.push(state)
+  }
+  return { start, frames, end: state }
+}
+
+/**
  * Ink and typed text on the same paper pixels through a min-edge grow.
  * DrawingBoard remaps 0–1 ink, offsets the editor by `textOriginCssPx`,
  * and pans by `paperOriginScrollDelta`.
@@ -395,44 +522,35 @@ export const markdownGlyphAfterCameraAndGrow = (
     editorY?: number
   }>,
 ) => {
-  let page: CanvasSize = { ...start }
-  let pos = { ...glyph }
-  let originX = 0
-  let originY = 0
   const originPaperX = glyph.x
   const originPaperY = glyph.y
+  let state: StayPutState = {
+    paperX: glyph.x,
+    paperY: glyph.y,
+    camX: steps[0]?.camX ?? 0,
+    camY: steps[0]?.camY ?? 0,
+    width: start.width,
+    height: start.height,
+    originX: 0,
+    originY: 0,
+    editorX: 0,
+    editorY: 0,
+  }
   const frames = steps.map((step) => {
-    const wantX = Math.max(0, step.padX ?? 0)
-    const wantY = Math.max(0, step.padY ?? 0)
-    const next = {
+    state = applyStayPutOp(state, step)
+    return {
+      paperX: state.paperX,
+      paperY: state.paperY,
+      visualX: state.paperX - state.camX - state.editorX,
+      visualY: state.paperY - state.camY - state.editorY,
+      camX: state.camX,
+      camY: state.camY,
+      editorX: state.editorX,
+      editorY: state.editorY,
       width: step.width,
       height: step.height,
-      padX: originPadDelta(originX, wantX),
-      padY: originPadDelta(originY, wantY),
-    }
-    const stay = markdownAndInkAfterMinEdgeGrow(pos, pos, page, next)
-    pos = { x: stay.textX, y: stay.textY }
-    originX = wantX
-    originY = wantY
-    page = {
-      width: writePageStayExtent(page.width, next.width),
-      height: writePageStayExtent(page.height, next.height),
-    }
-    const editorX = step.editorX ?? 0
-    const editorY = step.editorY ?? 0
-    return {
-      paperX: pos.x,
-      paperY: pos.y,
-      visualX: pos.x - step.camX - editorX,
-      visualY: pos.y - step.camY - editorY,
-      camX: step.camX,
-      camY: step.camY,
-      editorX,
-      editorY,
-      width: next.width,
-      height: next.height,
-      padX: wantX,
-      padY: wantY,
+      padX: state.originX,
+      padY: state.originY,
     }
   })
   return { originPaperX, originPaperY, frames }

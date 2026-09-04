@@ -21,6 +21,11 @@ const {
   paperOriginScrollDelta,
   paperScrollBoundsFromVisualRect,
   paperSheetLayoutShift,
+  applyStayPutOp,
+  reduceStayPutOps,
+  stayPutAfterExtentGrow,
+  stayPutPaperAfterOp,
+  stayPutPaperMovedByPadOnly,
   SCROLL_ROOM,
   textOriginCssPx,
   writePageStayExtent,
@@ -104,6 +109,48 @@ const REPORT_1788435936618 = [
   { camX: 668, camY: 1978, width: 2294, height: 2160, padX: 108, padY: 144 },
   { camX: 668, camY: 1978, width: 2294, height: 2304, padX: 108, padY: 144 },
   { camX: 665, camY: 181, width: 2294, height: 2304, padX: 108, padY: 144 },
+]
+
+/** Closed stay-put ops: pan, max-edge height, max-edge width, min-edge pad, overlay. */
+const PAN_ONLY = [
+  { camX: 560, camY: 560, width: 2186, height: 1408, padX: 0, padY: 0 },
+  { camX: 435, camY: 1745, width: 2186, height: 1408, padX: 0, padY: 0 },
+  { camX: 665, camY: 181, width: 2186, height: 1408, padX: 0, padY: 0 },
+]
+const MAX_EDGE_DOWN = [
+  { camX: 435, camY: 1745, width: 2186, height: 1408, padX: 0, padY: 0 },
+  { camX: 435, camY: 1745, width: 2186, height: 1440, padX: 0, padY: 0 },
+  { camX: 435, camY: 1745, width: 2186, height: 1584, padX: 0, padY: 0 },
+  { camX: 435, camY: 1745, width: 2186, height: 1728, padX: 0, padY: 0 },
+  { camX: 435, camY: 1745, width: 2186, height: 1872, padX: 0, padY: 0 },
+  { camX: 435, camY: 1745, width: 2186, height: 2016, padX: 0, padY: 0 },
+  { camX: 435, camY: 1745, width: 2186, height: 2160, padX: 0, padY: 0 },
+  { camX: 435, camY: 1745, width: 2186, height: 2592, padX: 0, padY: 0 },
+  { camX: 435, camY: 1745, width: 2186, height: 2736, padX: 0, padY: 0 },
+  { camX: 435, camY: 1745, width: 2186, height: 2880, padX: 0, padY: 0 },
+]
+const MAX_EDGE_WIDTH = [
+  { camX: 435, camY: 1745, width: 2186, height: 1408, padX: 0, padY: 0 },
+  { camX: 435, camY: 1745, width: 2294, height: 1408, padX: 0, padY: 0 },
+  { camX: 435, camY: 1745, width: 2500, height: 1408, padX: 0, padY: 0 },
+]
+const MIN_EDGE_PAD = [
+  { camX: 560, camY: 560, width: 2186, height: 1408, padX: 0, padY: 0 },
+  { camX: 668, camY: 560, width: 2294, height: 1408, padX: 108, padY: 0 },
+  { camX: 668, camY: 704, width: 2294, height: 1552, padX: 108, padY: 144 },
+]
+const OVERLAY_JUMP = [
+  { camX: 668, camY: 645, width: 2294, height: 1408, padX: 108, padY: 0 },
+  {
+    camX: 668,
+    camY: 645,
+    width: 2294,
+    height: 1408,
+    padX: 108,
+    padY: 0,
+    paintedWidth: 2294 + 2 * 560,
+    paintedHeight: 1408 + 2 * 560,
+  },
 ]
 
 const makeClassList = (initial = '') => {
@@ -363,6 +410,86 @@ const runOnce = () => {
   assert.equal(enlargeCm.scrollTop, 0)
   assert.equal(enlargeEditor.scrollTop, 0)
 
+  const stayPutSeed = (ops) => ({
+    paperX: glyph.x,
+    paperY: glyph.y,
+    camX: ops[0].camX,
+    camY: ops[0].camY,
+    width: start.width,
+    height: start.height,
+    originX: 0,
+    originY: 0,
+    editorX: 0,
+    editorY: 0,
+  })
+  const assertClosed = (name, ops, seed = stayPutSeed(ops)) => {
+    const reduced = reduceStayPutOps(seed, ops)
+    let previous = seed
+    for (const [index, frame] of reduced.frames.entries()) {
+      assert.equal(
+        stayPutPaperMovedByPadOnly(previous, frame),
+        true,
+        `${name} step ${index} paper X/Y ${frame.paperX},${frame.paperY} moved by more than new origin pad`,
+      )
+      assert.equal(frame.editorX, 0, `${name} step ${index} editor X must be 0`)
+      assert.equal(frame.editorY, 0, `${name} step ${index} editor Y must be 0`)
+      previous = frame
+    }
+    return reduced
+  }
+  const closedLatest = assertClosed('latest-enlarge', REPORT_1788435936618)
+  assert.equal(closedLatest.end.paperX, glyph.x + 108)
+  assert.equal(closedLatest.end.paperY, glyph.y + 144)
+  assert.equal(closedLatest.end.camY, 181)
+  assert.equal(closedLatest.end.height, 2304)
+  const closedPan = assertClosed('pan-only', PAN_ONLY)
+  assert.equal(closedPan.end.paperX, glyph.x)
+  assert.equal(closedPan.end.paperY, glyph.y)
+  assert.equal(closedPan.end.camX, 665)
+  assert.equal(closedPan.end.camY, 181)
+  const closedDown = assertClosed('max-edge-down', MAX_EDGE_DOWN)
+  assert.equal(closedDown.end.paperY, glyph.y)
+  assert.equal(closedDown.end.height, 2880)
+  assert.equal(closedDown.end.camY, 1745)
+  const closedWidth = assertClosed('max-edge-width', MAX_EDGE_WIDTH)
+  assert.equal(closedWidth.end.paperX, glyph.x)
+  assert.equal(closedWidth.end.width, 2500)
+  const closedPad = assertClosed('min-edge-pad', MIN_EDGE_PAD)
+  assert.equal(closedPad.frames[1].paperX, glyph.x + 108)
+  assert.equal(closedPad.frames[2].paperY, glyph.y + 144)
+  assert.equal(closedPad.frames[1].paperX - closedPad.frames[1].camX, glyph.x - 560)
+  assert.equal(closedPad.frames[2].paperY - closedPad.frames[2].camY, glyph.y - 560)
+  const livePad = applyStayPutOp(stayPutSeed(MIN_EDGE_PAD), { padX: 108, width: 2294, height: 1408 })
+  assert.equal(livePad.paperX, glyph.x + 108)
+  assert.equal(livePad.camX, stayPutAfterExtentGrow({ x: 560, y: 560 }, 108, 0).x)
+  assert.equal(livePad.paperX - livePad.camX, glyph.x - 560)
+  assert.equal(stayPutPaperAfterOp({ x: glyph.x, y: glyph.y }, 0, 0, 108, 0).x, glyph.x + 108)
+  const closedOverlay = assertClosed('overlay-jump', OVERLAY_JUMP)
+  assert.equal(closedOverlay.end.width, 2294)
+  assert.equal(closedOverlay.end.height, 1408)
+  assert.equal(closedOverlay.end.paperX, glyph.x + 108)
+  const shifted = applyStayPutOp(stayPutSeed(MAX_EDGE_DOWN), {
+    camX: 435,
+    camY: 1745,
+    width: 2186,
+    height: 1584,
+    padX: 0,
+    padY: 0,
+    sheetShift: { x: 0, y: 40 },
+  })
+  assert.equal(shifted.paperX, glyph.x)
+  assert.equal(shifted.paperY, glyph.y)
+  assert.equal(shifted.camY, stayPutAfterExtentGrow({ x: 435, y: 1745 }, 0, 0, { y: 40 }).y)
+  const nested = applyStayPutOp({
+    ...stayPutSeed(PAN_ONLY),
+    editorX: 8,
+    editorY: 40,
+  }, { camX: 560, camY: 560, width: 2186, height: 1408, padX: 0, padY: 0, lockEditor: true, editorX: 8, editorY: 40 })
+  assert.equal(nested.editorX, 0)
+  assert.equal(nested.editorY, 0)
+  assert.equal(nested.paperX, glyph.x)
+  assert.equal(nested.camY, 560)
+
   const afterPad = markdownAndInkAfterMinEdgeGrow(
     ink,
     glyph,
@@ -503,12 +630,17 @@ const runOnce = () => {
   assert.match(noteCanvas, /export const markdownGlyphAfterCameraAndGrow/)
   assert.match(noteCanvas, /export const paperCameraAfterMaxEdgeGrow/)
   assert.match(noteCanvas, /export const paperSheetLayoutShift/)
+  assert.match(noteCanvas, /export const stayPutAfterExtentGrow/)
+  assert.match(noteCanvas, /export const stayPutPaperAfterOp/)
+  assert.match(noteCanvas, /export const applyStayPutOp/)
+  assert.match(noteCanvas, /export const stayPutPaperMovedByPadOnly/)
+  assert.match(noteCanvas, /state = applyStayPutOp\(state/)
   assert.match(paperGrow, /writePageStayExtent/)
   assert.match(paperGrow, /overlaySampleOntoWritePage/)
   assert.match(paperGrow, /export const continueLiveWriteStroke/)
   assert.match(board, /continueLiveWriteStroke/)
   assert.match(board, /textOriginCssPx\(/)
-  assert.match(board, /paperCameraAfterMaxEdgeGrow\(/)
+  assert.match(board, /stayPutAfterExtentGrow\(/)
   assert.match(board, /paperSheetLayoutShift\(/)
   assert.match(board, /pinPaperViewportAfterExtentGrow\(/)
   assert.match(board, /writePageStayExtent\(/)
@@ -524,6 +656,11 @@ const runOnce = () => {
   assert.match(self, /REPORT_1788416428895/)
   assert.match(self, /REPORT_1788433450822/)
   assert.match(self, /REPORT_1788435936618/)
+  assert.match(self, /PAN_ONLY/)
+  assert.match(self, /MAX_EDGE_DOWN/)
+  assert.match(self, /MAX_EDGE_WIDTH/)
+  assert.match(self, /MIN_EDGE_PAD/)
+  assert.match(self, /OVERLAY_JUMP/)
   assert.match(self, /padX: 108/)
   assert.match(self, /padY: 144/)
   assert.match(self, /width: 3414/)
@@ -580,6 +717,13 @@ const runOnce = () => {
     enlargeCamY: enlarge.frames.at(-1).camY,
     enlargeHeight: enlarge.frames.at(-1).height,
     enlargeGrowCamY: enlarge.frames[6].camY,
+    closedPanCamY: closedPan.end.camY,
+    closedDownHeight: closedDown.end.height,
+    closedWidth: closedWidth.end.width,
+    closedPadPaperY: closedPad.end.paperY,
+    closedOverlayWidth: closedOverlay.end.width,
+    closedShiftCamY: shifted.camY,
+    closedNestedEditorY: nested.editorY,
   }
 }
 
