@@ -22,6 +22,8 @@ const {
   paperScrollBoundsFromVisualRect,
   paperSheetLayoutShift,
   applyStayPutOp,
+  liveWriteStayPut,
+  nestedEditorOffsetOnWritePage,
   reduceStayPutOps,
   stayPutAfterExtentGrow,
   stayPutPaperAfterOp,
@@ -33,11 +35,13 @@ const {
 const { continueLiveWriteStroke } = await server.ssrLoadModule('/src/lib/paperGrow.ts')
 const { classifyInkJumpAppend } = await server.ssrLoadModule('/src/lib/inkSampleMap.ts')
 const {
+  applyLiveStayPutStep,
   handlePaperEditorScroll,
   lockPaperEditorScrollIfNeeded,
   lockPaperViewportScrollStayPut,
   observeGhostTextSequence,
   pinPaperViewportAfterExtentGrow,
+  sealNestedEditorScroll,
 } = await server.ssrLoadModule('/src/lib/paperCaretScroll.ts')
 
 /**
@@ -150,6 +154,30 @@ const OVERLAY_JUMP = [
     padY: 0,
     paintedWidth: 2294 + 2 * 560,
     paintedHeight: 1408 + 2 * 560,
+  },
+]
+const NESTED_LOCK = [
+  {
+    camX: 560,
+    camY: 560,
+    width: 2186,
+    height: 1408,
+    padX: 0,
+    padY: 0,
+    lockEditor: true,
+    editorX: 8,
+    editorY: 40,
+  },
+]
+const SHEET_ORIGIN_SHIFT = [
+  {
+    camX: 435,
+    camY: 1745,
+    width: 2186,
+    height: 1584,
+    padX: 0,
+    padY: 0,
+    sheetShift: { x: 0, y: 40 },
   },
 ]
 
@@ -489,6 +517,138 @@ const runOnce = () => {
   assert.equal(nested.editorY, 0)
   assert.equal(nested.paperX, glyph.x)
   assert.equal(nested.camY, 560)
+  assertClosed('report-1788366080812', REPORT_1788366080812)
+  assertClosed('report-1788376550462', REPORT_1788376550462)
+  assertClosed('report-1788416428895', REPORT_1788416428895)
+  assertClosed('report-1788433450822', REPORT_1788433450822)
+  assertClosed('report-1788435936618', REPORT_1788435936618)
+  const closedNested = assertClosed(
+    'nested-lock-editor',
+    NESTED_LOCK,
+    { ...stayPutSeed(NESTED_LOCK), editorX: 8, editorY: 40 },
+  )
+  assert.equal(closedNested.end.editorX, 0)
+  assert.equal(closedNested.end.editorY, 0)
+  assert.equal(closedNested.end.paperX, glyph.x)
+  const closedShift = assertClosed('sheet-origin-shift', SHEET_ORIGIN_SHIFT, stayPutSeed(MAX_EDGE_DOWN))
+  assert.equal(closedShift.end.paperX, glyph.x)
+  assert.equal(closedShift.end.paperY, glyph.y)
+  assert.equal(closedShift.end.camY, stayPutAfterExtentGrow({ x: 435, y: 1745 }, 0, 0, { y: 40 }).y)
+  const keptNested = applyStayPutOp(stayPutSeed(PAN_ONLY), {
+    camX: 560,
+    camY: 560,
+    width: 2186,
+    height: 1408,
+    editorX: 8,
+    editorY: 40,
+  })
+  assert.equal(keptNested.editorX, nestedEditorOffsetOnWritePage(8, 40).x)
+  assert.equal(keptNested.editorY, nestedEditorOffsetOnWritePage(8, 40).y)
+  assert.equal(keptNested.paperX, glyph.x)
+  assert.equal(keptNested.paperY, glyph.y)
+
+  const liveMin = continueLiveWriteStroke({
+    last: null,
+    current: { x: 0.0489, y: 0.22 },
+    page: { width: 2186, height: 1408, originX: 0, originY: 0 },
+    painted: { width: 2186, height: 1408 },
+    existingCount: 0,
+    stayPut: stayPutSeed(MIN_EDGE_PAD),
+  })
+  const reducedMin = applyStayPutOp(stayPutSeed(MIN_EDGE_PAD), {
+    width: liveMin.grown.width,
+    height: liveMin.grown.height,
+    padX: liveMin.grown.padX,
+    padY: liveMin.grown.padY,
+  })
+  const viaLiveWrite = liveWriteStayPut(stayPutSeed(MIN_EDGE_PAD), {
+    grown: liveMin.grown,
+    painted: { width: 2186, height: 1408 },
+  })
+  assert.equal(liveMin.stayPut.paperX, reducedMin.paperX)
+  assert.equal(liveMin.stayPut.paperY, reducedMin.paperY)
+  assert.equal(liveMin.stayPut.paperX, viaLiveWrite.paperX)
+  assert.equal(liveMin.stayPut.paperY, viaLiveWrite.paperY)
+  assert.equal(liveMin.stayPut.camX, viaLiveWrite.camX)
+  assert.equal(stayPutPaperMovedByPadOnly(stayPutSeed(MIN_EDGE_PAD), liveMin.stayPut), true)
+  assert.equal(liveMin.stayPut.editorX, 0)
+  assert.equal(liveMin.stayPut.editorY, 0)
+
+  const liveMax = continueLiveWriteStroke({
+    last: null,
+    current: { x: 0.5, y: 0.99 },
+    page: { width: 2186, height: 1408, originX: 0, originY: 0 },
+    painted: { width: 2186, height: 1408 },
+    existingCount: 0,
+    stayPut: stayPutSeed(MAX_EDGE_DOWN),
+  })
+  const reducedMax = applyStayPutOp(stayPutSeed(MAX_EDGE_DOWN), {
+    width: liveMax.grown.width,
+    height: liveMax.grown.height,
+    padX: stayPutSeed(MAX_EDGE_DOWN).originX + liveMax.grown.padX,
+    padY: stayPutSeed(MAX_EDGE_DOWN).originY + liveMax.grown.padY,
+  })
+  assert.equal(liveMax.stayPut.paperX, reducedMax.paperX)
+  assert.equal(liveMax.stayPut.paperY, reducedMax.paperY)
+  assert.equal(stayPutPaperMovedByPadOnly(stayPutSeed(MAX_EDGE_DOWN), liveMax.stayPut), true)
+  assert.equal(liveMax.stayPut.editorY, 0)
+
+  const nestedPaper = makeNode('paper-view unified-note-view', { scrollTop: 560, scrollLeft: 560 })
+  const nestedSheet = append(nestedPaper, makeNode('unified-paper'))
+  const nestedEditor = append(nestedSheet, makeNode('editor-pane markdown-editor'))
+  const nestedCm = append(nestedEditor, makeNode('cm-scroller', { scrollTop: 40, scrollLeft: 8 }))
+  nestedCm.scrollTop = 40
+  nestedCm.scrollLeft = 8
+  nestedEditor.scrollTop = 12
+  const nestedLive = applyLiveStayPutStep(
+    stayPutSeed(PAN_ONLY),
+    {
+      camX: 560,
+      camY: 560,
+      width: 2186,
+      height: 1408,
+      padX: 0,
+      padY: 0,
+      editorX: nestedCm.scrollLeft,
+      editorY: nestedCm.scrollTop,
+    },
+    nestedPaper,
+  )
+  assert.equal(nestedLive.editorX, 0)
+  assert.equal(nestedLive.editorY, 0)
+  assert.equal(stayPutPaperMovedByPadOnly(stayPutSeed(PAN_ONLY), nestedLive), true)
+  assert.equal(nestedCm.scrollTop, 0)
+  assert.equal(nestedCm.scrollLeft, 0)
+  assert.equal(nestedEditor.scrollTop, 0)
+  nestedCm.scrollTop = 99
+  nestedCm.scrollLeft = 77
+  nestedEditor.scrollTop = 55
+  assert.equal(nestedCm.scrollTop, 0, 'nested cm-scroller cannot keep a non-zero scroll offset')
+  assert.equal(nestedCm.scrollLeft, 0, 'nested cm-scroller cannot keep a non-zero scrollLeft')
+  assert.equal(nestedEditor.scrollTop, 0, 'nested editor-pane cannot keep a non-zero scroll offset')
+  const nestedAfterAssign = applyLiveStayPutStep(nestedLive, {
+    camX: 560,
+    camY: 1745,
+    width: 2186,
+    height: 1440,
+    padX: 0,
+    padY: 0,
+    editorX: nestedCm.scrollLeft,
+    editorY: nestedCm.scrollTop,
+  }, nestedPaper)
+  assert.equal(stayPutPaperMovedByPadOnly(nestedLive, nestedAfterAssign), true)
+  assert.equal(nestedAfterAssign.editorY, 0)
+  assert.equal(nestedAfterAssign.paperX, nestedLive.paperX)
+  assert.equal(nestedAfterAssign.paperY, nestedLive.paperY)
+  const sealedFresh = makeNode('cm-scroller', { scrollTop: 40, scrollLeft: 8 })
+  sealNestedEditorScroll(sealedFresh)
+  sealedFresh.scrollTop = 120
+  sealedFresh.scrollLeft = 60
+  assert.equal(sealedFresh.scrollTop, 0)
+  assert.equal(sealedFresh.scrollLeft, 0)
+  const sealedOffset = nestedEditorOffsetOnWritePage(sealedFresh.scrollLeft, sealedFresh.scrollTop)
+  assert.equal(sealedOffset.x, 0)
+  assert.equal(sealedOffset.y, 0)
 
   const afterPad = markdownAndInkAfterMinEdgeGrow(
     ink,
@@ -634,20 +794,29 @@ const runOnce = () => {
   assert.match(noteCanvas, /export const stayPutPaperAfterOp/)
   assert.match(noteCanvas, /export const applyStayPutOp/)
   assert.match(noteCanvas, /export const stayPutPaperMovedByPadOnly/)
+  assert.match(noteCanvas, /export const liveWriteStayPut/)
+  assert.match(noteCanvas, /export const nestedEditorOffsetOnWritePage/)
   assert.match(noteCanvas, /state = applyStayPutOp\(state/)
   assert.match(paperGrow, /writePageStayExtent/)
   assert.match(paperGrow, /overlaySampleOntoWritePage/)
   assert.match(paperGrow, /export const continueLiveWriteStroke/)
+  assert.match(paperGrow, /liveWriteStayPut/)
   assert.match(board, /continueLiveWriteStroke/)
   assert.match(board, /textOriginCssPx\(/)
-  assert.match(board, /stayPutAfterExtentGrow\(/)
+  assert.match(board, /liveWriteStayPut\(/)
   assert.match(board, /paperSheetLayoutShift\(/)
   assert.match(board, /pinPaperViewportAfterExtentGrow\(/)
+  assert.match(board, /lockPaperViewportEditorScroll\(/)
   assert.match(board, /writePageStayExtent\(/)
   assert.match(board, /growPageFromMark\(/)
+  assert.doesNotMatch(board, /requestAnimationFrame\(\(\) => \{\s*pinGrowFrameRef/)
   assert.match(caretSource, /export const pinPaperViewportAfterExtentGrow/)
+  assert.match(caretSource, /export const sealNestedEditorScroll/)
+  assert.match(caretSource, /export const applyLiveStayPutStep/)
   assert.match(styles, /\.paper-sheet-plane[\s\S]{0,400}overflow-anchor:\s*none/)
-  assert.match(styles, /\.unified-paper \.markdown-editor \.cm-scroller[\s\S]{0,200}overflow-anchor:\s*none/)
+  assert.match(styles, /\.unified-paper \.markdown-editor \.cm-scroller[\s\S]{0,280}overflow:\s*clip/)
+  assert.match(styles, /\.unified-paper \.markdown-editor \.cm-scroller[\s\S]{0,280}overflow-anchor:\s*none/)
+  assert.match(editorSource, /overflow: paperMode \? 'clip'/)
   assert.match(editorSource, /handlePaperEditorScroll/)
   assert.match(editorSource, /lockPaperViewportScrollStayPut|captureGhostTextAroundLock/)
   assert.match(paperView, /lockPaperViewportScrollStayPut|captureGhostTextAroundLock/)
@@ -661,6 +830,8 @@ const runOnce = () => {
   assert.match(self, /MAX_EDGE_WIDTH/)
   assert.match(self, /MIN_EDGE_PAD/)
   assert.match(self, /OVERLAY_JUMP/)
+  assert.match(self, /NESTED_LOCK/)
+  assert.match(self, /SHEET_ORIGIN_SHIFT/)
   assert.match(self, /padX: 108/)
   assert.match(self, /padY: 144/)
   assert.match(self, /width: 3414/)

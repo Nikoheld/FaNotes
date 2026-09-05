@@ -323,10 +323,20 @@ export const stayPutPaperMovedByPadOnly = (
 }
 
 /**
+ * Nested markdown/CodeMirror scroll is not a paper-coordinate channel.
+ * Any assigned nested scrollLeft/scrollTop maps to 0 — it cannot move glyphs.
+ */
+export const nestedEditorOffsetOnWritePage = (_scrollLeft = 0, _scrollTop = 0) => ({
+  x: 0,
+  y: 0,
+})
+
+/**
  * One closed write/scroll/grow step. User camera is taken as-is when provided
  * (report pan already includes any pad pan). Live grow without a new camera
  * holds the current camera and adds only new pad + sheet shift. Overlay
- * painted boxes do not become write-page extent. lockEditor forces 0.
+ * painted boxes do not become write-page extent. Nested editor X/Y is always
+ * 0 — lockEditor is kept for callers but cannot leave a non-zero offset.
  */
 export const applyStayPutOp = (state: StayPutState, op: StayPutOp): StayPutState => {
   const nextPadX = Math.max(0, op.padX ?? state.originX)
@@ -359,7 +369,7 @@ export const applyStayPutOp = (state: StayPutState, op: StayPutOp): StayPutState
     hasUserCamera ? 0 : addY,
     op.sheetShift,
   )
-  const lock = op.lockEditor === true
+  const nested = nestedEditorOffsetOnWritePage(op.editorX, op.editorY)
   return {
     paperX: paper.x,
     paperY: paper.y,
@@ -369,10 +379,45 @@ export const applyStayPutOp = (state: StayPutState, op: StayPutOp): StayPutState
     height,
     originX: nextPadX,
     originY: nextPadY,
-    editorX: lock ? 0 : (Number.isFinite(op.editorX) ? Number(op.editorX) : 0),
-    editorY: lock ? 0 : (Number.isFinite(op.editorY) ? Number(op.editorY) : 0),
+    editorX: nested.x,
+    editorY: nested.y,
   }
 }
+
+export type LiveWriteStayPutGrow = {
+  width: number
+  height: number
+  padX?: number
+  padY?: number
+}
+
+/**
+ * Live write/grow path: the same closed stay-put step as `applyStayPutOp`.
+ * `grown.padX`/`padY` are the *new* pads this step (growPageFromMark).
+ * Camera pans by that pad in this same step when the caller does not pass a
+ * user camera. Nested editor offset stays 0.
+ */
+export const liveWriteStayPut = (
+  state: StayPutState,
+  live: {
+    grown: LiveWriteStayPutGrow
+    painted?: { width?: number; height?: number }
+    sheetShift?: { x?: number; y?: number }
+    camX?: number
+    camY?: number
+  },
+): StayPutState => applyStayPutOp(state, {
+  width: live.grown.width,
+  height: live.grown.height,
+  padX: state.originX + Math.max(0, live.grown.padX ?? 0),
+  padY: state.originY + Math.max(0, live.grown.padY ?? 0),
+  paintedWidth: live.painted?.width,
+  paintedHeight: live.painted?.height,
+  sheetShift: live.sheetShift,
+  camX: live.camX,
+  camY: live.camY,
+  lockEditor: true,
+})
 
 export const reduceStayPutOps = (start: StayPutState, ops: StayPutOp[]) => {
   const frames = [] as StayPutState[]

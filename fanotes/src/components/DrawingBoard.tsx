@@ -142,7 +142,7 @@ import {
   mapClientToPage,
   paperScrollBoundsFromVisualRect,
   paperSheetLayoutShift,
-  stayPutAfterExtentGrow,
+  liveWriteStayPut,
   textOriginCssPx,
   writeExtentFromContent,
 } from '../lib/noteCanvas'
@@ -150,7 +150,10 @@ import {
   paperRulingBackgroundPosition,
   paperRulingTileOrigin,
 } from '../lib/paperRuling'
-import { pinPaperViewportAfterExtentGrow } from '../lib/paperCaretScroll'
+import {
+  lockPaperViewportEditorScroll,
+  pinPaperViewportAfterExtentGrow,
+} from '../lib/paperCaretScroll'
 import {
   continueLiveWriteStroke,
   growLiveInkAndMapNext,
@@ -1013,7 +1016,6 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const sourceOriginXRef = useRef(0)
   const sourceOriginYRef = useRef(0)
   const pageLayoutFrameRef = useRef<number | null>(null)
-  const pinGrowFrameRef = useRef<number | null>(null)
   const paintedLayoutRef = useRef({ w: 0, h: 0 })
   const pendingStaleLayoutRef = useRef<PendingStaleLayoutMap | null>(null)
   const inkExtentPaperRef = useRef<HTMLElement | null>(null)
@@ -1879,7 +1881,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       if (inkWindowIdleRef.current !== null) window.clearTimeout(inkWindowIdleRef.current)
       if (resizeDebounceRef.current !== null) window.clearTimeout(resizeDebounceRef.current)
       if (drawFrameRef.current !== null) cancelAnimationFrame(drawFrameRef.current)
-      if (pinGrowFrameRef.current !== null) cancelAnimationFrame(pinGrowFrameRef.current)
+
       if (pendingSolverTapRef.current) window.clearTimeout(pendingSolverTapRef.current.timer)
     }
   }, [flushPaintedLayoutGrow, redraw, resolvePaperElement, syncInkWindow])
@@ -1953,12 +1955,15 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
 
   /**
    * Resize the writable page without shifting existing ink or typed text.
-   * Min-edge pad remaps 0–1 ink, offsets the markdown column in CSS px,
-   * and pans the camera by the same pad so glyphs stay on the ruling.
+   * One stay-put step: new origin pad is the only paper-coord change, and the
+   * camera pans by that same pad here. Nested editor layers are sealed so they
+   * cannot keep an independent scroll offset.
    */
   const setPageExtent = useCallback((targetHeight: number, targetWidth: number, padX = 0, padY = 0) => {
     const prevH = sourceHeightRef.current
     const prevW = sourceWidthRef.current
+    const haveX = sourceOriginXRef.current
+    const haveY = sourceOriginYRef.current
     const addX = Math.max(0, Math.round(padX))
     const addY = Math.max(0, Math.round(padY))
     const nextH = Math.min(MAX_SOURCE_HEIGHT, Math.max(WRITE_SLACK_HEIGHT, Math.round(targetHeight)))
@@ -1978,16 +1983,18 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     const beforeOrigin = paper && scrollerBox
       ? paperScrollBoundsFromVisualRect(paper.getBoundingClientRect(), scrollerBox)
       : { minX: 0, minY: 0, maxX: 0, maxY: 0 }
-    pinPaperViewportAfterExtentGrow(scroller, originCamera)
+    lockPaperViewportEditorScroll(scroller)
     const prevPaintW = writePageStayExtent(prevW, paintedLayoutRef.current.w)
     const prevPaintH = writePageStayExtent(prevH, paintedLayoutRef.current.h)
-    sourceOriginXRef.current += addX
-    sourceOriginYRef.current += addY
+    sourceOriginXRef.current = haveX + addX
+    sourceOriginYRef.current = haveY + addY
     sourceHeightRef.current = nextH
     sourceWidthRef.current = nextW
     setSourceHeight(nextH)
     setSourceWidth(nextW)
     applyInkExtentStyles(nextH, nextW)
+    void paper?.offsetWidth
+    void paper?.offsetHeight
     const nextPaintW = writePageStayExtent(nextW, paper?.offsetWidth ?? 0)
     const nextPaintH = writePageStayExtent(nextH, paper?.offsetHeight ?? 0)
     const remapPoint = (point: { x: number; y: number }) => {
@@ -2024,30 +2031,38 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       compassPoseRef.current = next
       setCompassPose(next)
     }
-    const pinHeldCamera = () => {
-      if (!scroller) return
-      const afterBox = {
+    const afterBox = scroller
+      ? {
         left: scroller.getBoundingClientRect().left,
         top: scroller.getBoundingClientRect().top,
         scrollLeft: scroller.scrollLeft,
         scrollTop: scroller.scrollTop,
       }
-      const afterOrigin = paper
-        ? paperScrollBoundsFromVisualRect(paper.getBoundingClientRect(), afterBox)
-        : beforeOrigin
-      const shift = paperSheetLayoutShift(
-        { x: beforeOrigin.minX, y: beforeOrigin.minY },
-        { x: afterOrigin.minX, y: afterOrigin.minY },
-      )
-      const held = stayPutAfterExtentGrow(originCamera, addX, addY, shift)
-      pinPaperViewportAfterExtentGrow(scroller, held)
-    }
-    pinHeldCamera()
-    if (pinGrowFrameRef.current !== null) cancelAnimationFrame(pinGrowFrameRef.current)
-    pinGrowFrameRef.current = requestAnimationFrame(() => {
-      pinGrowFrameRef.current = null
-      pinHeldCamera()
+      : null
+    const afterOrigin = paper && afterBox
+      ? paperScrollBoundsFromVisualRect(paper.getBoundingClientRect(), afterBox)
+      : beforeOrigin
+    const shift = paperSheetLayoutShift(
+      { x: beforeOrigin.minX, y: beforeOrigin.minY },
+      { x: afterOrigin.minX, y: afterOrigin.minY },
+    )
+    const nextStay = liveWriteStayPut({
+      paperX: 0,
+      paperY: 0,
+      camX: originCamera.x,
+      camY: originCamera.y,
+      width: prevW,
+      height: prevH,
+      originX: haveX,
+      originY: haveY,
+      editorX: 0,
+      editorY: 0,
+    }, {
+      grown: { width: nextW, height: nextH, padX: addX, padY: addY },
+      painted: { width: paper?.offsetWidth ?? 0, height: paper?.offsetHeight ?? 0 },
+      sheetShift: shift,
     })
+    pinPaperViewportAfterExtentGrow(scroller, { x: nextStay.camX, y: nextStay.camY })
     paintedLayoutRef.current = { w: nextPaintW, h: nextPaintH }
     exportCacheRef.current = null
     setDirty(true)
@@ -2482,6 +2497,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     // pre-grow box until pointerup, so continueLiveWriteStroke also lifts
     // later samples through that stale layout before the jump filter.
     const lastSnapshot = lastPoint ? { x: lastPoint.x, y: lastPoint.y } : null
+    const scrollerForStay = originEl?.closest('.unified-note-view') as HTMLElement | null
     const continued = continueLiveWriteStroke({
       last: lastSnapshot,
       current: point,
@@ -2494,6 +2510,18 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       painted: { width: surface.width, height: surface.height },
       existingCount,
       pendingStale: pendingStaleLayoutRef.current,
+      stayPut: {
+        paperX: 0,
+        paperY: 0,
+        camX: scrollerForStay?.scrollLeft ?? 0,
+        camY: scrollerForStay?.scrollTop ?? 0,
+        width: sourceWidthRef.current,
+        height: sourceHeightRef.current,
+        originX: sourceOriginXRef.current,
+        originY: sourceOriginYRef.current,
+        editorX: 0,
+        editorY: 0,
+      },
     })
     pendingStaleLayoutRef.current = continued.pendingStale
     if (continued.grew) {

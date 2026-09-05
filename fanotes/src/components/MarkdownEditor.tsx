@@ -62,6 +62,7 @@ import {
   lockPaperViewportScrollStayPut,
   PAPER_EDITOR_FLING_HOLD_FRAMES,
   resolvePaperCaretScroller,
+  sealNestedEditorScroll,
   tickPaperViewportEditorScrollHold,
 } from '../lib/paperCaretScroll'
 import { buildTextMotionDiagnosticEvent, recordTextMotionDiagnostic } from '../lib/bugReport'
@@ -781,7 +782,8 @@ function editorAppearance(
       },
       '&.cm-focused': { outline: 'none' },
       '.cm-scroller': {
-        overflow: paperMode ? 'hidden' : 'auto',
+        overflow: paperMode ? 'clip' : 'auto',
+        overscrollBehavior: paperMode ? 'none' : 'auto',
         fontFamily: settings.editorFont,
         lineHeight: String(settings.lineHeight),
       },
@@ -982,6 +984,10 @@ const paperCaretLock = ViewPlugin.fromClass(class {
     this.paper = resolvePaperCaretScroller(this.view.dom)
     this.view.scrollDOM.addEventListener('scroll', this.onEditorLayerScroll)
     this.paper?.addEventListener('scroll', this.onPaperScroll, { passive: true })
+    if (this.view.dom.closest('.unified-paper, .paper-view')) {
+      sealNestedEditorScroll(this.view.scrollDOM)
+      lockPaperEditorScrollIfNeeded(this.view.dom)
+    }
   }
 
   private holdFling = () => {

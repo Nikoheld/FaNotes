@@ -16,7 +16,8 @@ import {
   writePageStayExtent,
   paperCameraAfterMaxEdgeGrow,
   paperSheetLayoutShift,
-  stayPutAfterExtentGrow,
+  liveWriteStayPut,
+  type StayPutState,
   WRITE_SLACK_HEIGHT,
 } from './noteCanvas'
 
@@ -47,6 +48,8 @@ export {
   stayPutAfterExtentGrow,
   stayPutPaperAfterOp,
   applyStayPutOp,
+  liveWriteStayPut,
+  nestedEditorOffsetOnWritePage,
   markdownAndInkAfterMinEdgeGrow,
   markdownAndInkAfterGrowSequence,
   markPagePosition,
@@ -392,6 +395,7 @@ export type LiveWriteStrokeInput<T extends { x: number; y: number }> = {
   painted: { width: number; height: number }
   existingCount: number
   pendingStale?: PendingStaleLayoutMap | null
+  stayPut?: StayPutState
 }
 
 /**
@@ -453,6 +457,27 @@ export const continueLiveWriteStroke = <T extends { x: number; y: number }>(
     action = classifyInkJumpAppend(last, current, input.existingCount)
   }
   if (pendingStale && !layoutIsStaleAfterGrow(input.painted, pendingStale)) pendingStale = null
+  const stayPutStart: StayPutState = input.stayPut ?? {
+    paperX: 0,
+    paperY: 0,
+    camX: 0,
+    camY: 0,
+    width: input.page.width,
+    height: input.page.height,
+    originX: Math.max(0, input.page.originX ?? 0),
+    originY: Math.max(0, input.page.originY ?? 0),
+    editorX: 0,
+    editorY: 0,
+  }
+  const stayPut = liveWriteStayPut(stayPutStart, {
+    grown: {
+      width: next.width,
+      height: next.height,
+      padX: grown.padX,
+      padY: grown.padY,
+    },
+    painted: input.painted,
+  })
   return {
     last,
     current: nextPoint,
@@ -462,6 +487,7 @@ export const continueLiveWriteStroke = <T extends { x: number; y: number }>(
     prev,
     next,
     pendingStale,
+    stayPut,
   }
 }
 

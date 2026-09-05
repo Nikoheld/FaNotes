@@ -1,5 +1,39 @@
+import { applyStayPutOp, liveWriteStayPut, type StayPutOp, type StayPutState } from './noteCanvas'
+
 export const PAPER_VIEW_SCROLLER_SELECTOR = '.paper-view, .unified-note-view'
 export const EDITOR_LAYER_SCROLLER_SELECTOR = '.cm-scroller, .cm-editor, .markdown-editor, .editor-pane'
+
+const WRITE_PAGE_EDITOR_SELECTOR = '.unified-paper, .paper-view'
+
+export const isWritePageEditor = (element: { closest: (selector: string) => unknown } | null) => (
+  Boolean(element?.closest(WRITE_PAGE_EDITOR_SELECTOR))
+)
+
+/**
+ * Nested write-page editor layers cannot keep an independent scroll offset.
+ * `overflow: clip` is the CSS barrier; this freeze is the JS barrier so
+ * CodeMirror `scrollIntoView` / compositor pulses cannot stick a non-zero
+ * scrollTop. Assignment is ignored — this is not a later lock-to-zero.
+ */
+export const sealNestedEditorScroll = <T extends { scrollTop: number; scrollLeft: number }>(layer: T): T => {
+  const freeze = (prop: 'scrollTop' | 'scrollLeft') => {
+    try {
+      Object.defineProperty(layer, prop, {
+        configurable: true,
+        enumerable: true,
+        get: () => 0,
+        set: () => undefined,
+      })
+    } catch {
+      layer[prop] = 0
+    }
+  }
+  freeze('scrollTop')
+  freeze('scrollLeft')
+  return layer
+}
+
+export const editorIsOnWritePage = (element: HTMLElement | null) => isWritePageEditor(element)
 
 export const resolvePaperCaretScroller = (
   from: { closest: (selector: string) => HTMLElement | null } | null,
@@ -40,9 +74,13 @@ const collectEditorScrollLayers = (editorRoot: HTMLElement) => {
 export const lockPaperEditorLayerScroll = (editorRoot: HTMLElement | null) => {
   if (!editorRoot) return [] as HTMLElement[]
   const layers = collectEditorScrollLayers(editorRoot)
+  const onWritePage = isWritePageEditor(editorRoot)
   layers.forEach((layer) => {
-    layer.scrollTop = 0
-    layer.scrollLeft = 0
+    if (onWritePage) sealNestedEditorScroll(layer)
+    else {
+      layer.scrollTop = 0
+      layer.scrollLeft = 0
+    }
   })
   return layers
 }
@@ -153,8 +191,7 @@ export const lockPaperViewportEditorScroll = (paperScroller: HTMLElement | null)
   const locked: HTMLElement[] = []
   paperScroller.querySelectorAll<HTMLElement>(EDITOR_LAYER_SCROLLER_SELECTOR).forEach((layer) => {
     if (!isIndependentEditorLayer(layer)) return
-    layer.scrollTop = 0
-    layer.scrollLeft = 0
+    sealNestedEditorScroll(layer)
     locked.push(layer)
   })
   return locked
@@ -317,6 +354,30 @@ export const pinPaperViewportAfterExtentGrow = (
   scrollLeft: camera.x,
   scrollTop: camera.y,
 })
+
+/**
+ * One live stay-put step on the write page: closed reducer + nested-editor
+ * seal + camera pin. Pad and camera cannot desync; nested scroll cannot stick.
+ */
+export const applyLiveStayPutStep = (
+  state: StayPutState,
+  op: StayPutOp,
+  paperScroller: HTMLElement | null = null,
+): StayPutState => {
+  const next = applyStayPutOp(state, { ...op, lockEditor: true })
+  if (paperScroller) pinPaperViewportAfterExtentGrow(paperScroller, { x: next.camX, y: next.camY })
+  return next
+}
+
+export const applyLiveWriteStayPut = (
+  state: StayPutState,
+  live: Parameters<typeof liveWriteStayPut>[1],
+  paperScroller: HTMLElement | null = null,
+): StayPutState => {
+  const next = liveWriteStayPut(state, live)
+  if (paperScroller) pinPaperViewportAfterExtentGrow(paperScroller, { x: next.camX, y: next.camY })
+  return next
+}
 
 export const lockPaperViewportScrollStayPut = (
   paperScroller: HTMLElement | null,

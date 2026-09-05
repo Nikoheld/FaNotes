@@ -2,6 +2,10 @@
 
 ## Unveröffentlicht
 
+## 2026.9.10
+
+- **Schrift kann nicht verrutschen:** Getippte Schrift bleibt auf denselben Papierpunkten. Schwenken, Verlängern, extra Kameraraum, verschachtelte Editor-Ebene und Nachwachsen können sie nicht bewegen. Nur ein neues Ursprungspad darf sie verschieben — und die Kamera rückt um genau dasselbe mit.
+
 ## 2026.9.9
 
 - **Schrift kann nicht mehr verrutschen, wenn das Blatt wächst:** Schwenken, Verlängern, Ursprungspad und extra Kameraraum lassen die schon vorhandene Schrift auf denselben Papierpunkten. Nur ein neues Ursprungspad darf sie verschieben — und die Kamera rückt um genau dasselbe mit.
