@@ -1,0 +1,72 @@
+{
+  "schemaVersion": 1,
+  "id": "1788698537115",
+  "filename": "1788698537115-dce775d02054.json",
+  "description": "Everything laggs, i can't press most of the things. Fix it!",
+  "version": "2026.9.11",
+  "platform": "linux",
+  "sentAt": 1788698536933,
+  "events": [
+    {
+      "at": 1788698474075,
+      "kind": "note",
+      "version": "2026.9.11",
+      "platform": "linux"
+    },
+    {
+      "at": 1788698474076,
+      "kind": "app",
+      "version": "2026.9.11",
+      "platform": "linux",
+      "message": "session-start"
+    },
+    {
+      "at": 1788698474367,
+      "kind": "note",
+      "noteId": "Englisch/Untitled note.md",
+      "version": "2026.9.11",
+      "platform": "linux"
+    },
+    {
+      "at": 1788698478342,
+      "kind": "note",
+      "noteId": "Eingang/Untitled note 3.md",
+      "version": "2026.9.11",
+      "platform": "linux"
+    },
+    {
+      "at": 1788698483861,
+      "kind": "note",
+      "version": "2026.9.11",
+      "platform": "linux"
+    },
+    {
+      "at": 1788698492148,
+      "kind": "note",
+      "noteId": "Eingang/Untitled note.md",
+      "version": "2026.9.11",
+      "platform": "linux"
+    },
+    {
+      "at": 1788698495248,
+      "kind": "note",
+      "noteId": "Eingang/Untitled note 5.famd",
+      "version": "2026.9.11",
+      "platform": "linux"
+    },
+    {
+      "at": 1788698499057,
+      "kind": "note",
+      "noteId": "Eingang/arbeitsblätter_progII.md",
+      "version": "2026.9.11",
+      "platform": "linux"
+    },
+    {
+      "at": 1788698499616,
+      "kind": "note",
+      "noteId": "Eingang/Untitled note 5.famd",
+      "version": "2026.9.11",
+      "platform": "linux"
+    }
+  ]
+}

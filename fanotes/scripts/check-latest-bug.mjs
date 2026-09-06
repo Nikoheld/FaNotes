@@ -12,123 +12,141 @@ const server = await createServer({
 })
 
 const {
-  INK_OVERLAY_CRASH_TITLE,
-  INK_TOOLBAR_SLOT_ID,
-  applyOverlayLifetimeOp,
-  drawingSessionFromLoad,
-  inkBoardReady,
-  inkToolbarPortalHost,
-  liveInkToolbarHost,
-  overlayAfterNoteSwitch,
-  overlayPenHitReady,
-  overlayShowsCrashFallback,
-  portalInkToolbar,
-} = await server.ssrLoadModule('/src/lib/pdfInkHit.ts')
-const {
-  FORM_DETECT_NOTICE_TEXT,
-  SCRIBBLE_ERASE_NOTICE_TEXT,
-  applyInkNoticeOp,
-  emptyInkNoticeState,
-  inkNoticeAutoClearDelayMs,
-} = await server.ssrLoadModule('/src/lib/inkNotice.ts')
+  applyInteractOp,
+  chromePressable,
+  emptyInteractState,
+  interactOpsFromBugEvents,
+  overlayGlobalPointerLockOn,
+  overlayHitEnabled,
+  overlayInert,
+  overlaySessionAfterNoteSwitch,
+} = await server.ssrLoadModule('/src/lib/overlayInteract.ts')
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
+const fixture = JSON.parse(readFileSync(join(root, 'scripts/fixtures/bug-1788698537115.json'), 'utf8'))
 const appSource = readFileSync(join(root, 'src/App.tsx'), 'utf8')
 const boardSource = readFileSync(join(root, 'src/components/DrawingBoard.tsx'), 'utf8')
 
-/**
- * Newest report under /var/lib/fanotes-bug-reports: directory mtime
- * 2026-09-06 14:42:17 CEST → numeric prefix 1788698537115. JSON is 0600
- * www-data and unreadable here. Post-2026.9.11 sequence: Stift stays on
- * across empty-note switch; a detached toolbar slot must not crash the overlay.
- */
-const REPORT_LATEST = {
-  id: '1788698537115',
-  version: '2026.9.11',
-  platform: 'linux',
-  notes: ['Eingang/Untitled note 4.md', 'Eingang/Untitled note 3.md'],
+const notesFromEvents = (events) => {
+  const notes = []
+  for (const event of events) {
+    if (event?.kind !== 'note' || typeof event.noteId !== 'string' || !event.noteId) continue
+    if (!notes.includes(event.noteId)) notes.push(event.noteId)
+  }
+  return notes
 }
 
-const connectedHost = () => ({ id: INK_TOOLBAR_SLOT_ID, isConnected: true })
-const detachedHost = () => ({ id: INK_TOOLBAR_SLOT_ID, isConnected: false })
-
 try {
-  const createPortalOrThrow = (node, host) => {
-    if (!host || host.isConnected === false) {
-      throw new Error('createPortal into a node that is not in the document')
-    }
-    return { portaled: true, node, host }
-  }
+  assert.equal(fixture.id, '1788698537115')
+  assert.equal(fixture.version, '2026.9.11')
+  assert.equal(fixture.platform, 'linux')
+  assert.equal(fixture.description, 'Everything laggs, i can\'t press most of the things. Fix it!')
+  const notes = notesFromEvents(fixture.events)
+  assert.deepEqual(notes, [
+    'Englisch/Untitled note.md',
+    'Eingang/Untitled note 3.md',
+    'Eingang/Untitled note.md',
+    'Eingang/Untitled note 5.famd',
+    'Eingang/arbeitsblätter_progII.md',
+  ])
+  assert.equal(notes.includes('Eingang/Untitled note 4.md'), false)
 
-  let state = {
-    session: { key: 0, document: null },
-    drawingOpen: false,
-    host: null,
-  }
-  assert.equal(inkBoardReady(state.session.key), false)
-
-  state = applyOverlayLifetimeOp(state, { type: 'note-switch', requestId: 1 })
-  state = applyOverlayLifetimeOp(state, { type: 'ink-loaded', requestId: 1, document: null })
-  state = applyOverlayLifetimeOp(state, { type: 'stift', open: true })
-  state = applyOverlayLifetimeOp(state, { type: 'host', host: connectedHost() })
-  assert.equal(inkBoardReady(state.session.key), true)
-  assert.equal(portalInkToolbar(createPortalOrThrow, { toolbar: true }, state.host, true)?.portaled, true)
-
-  const stale = detachedHost()
-  const switched = overlayAfterNoteSwitch({
-    session: state.session,
-    drawingOpen: true,
-    host: stale,
-  }, 2)
-  assert.equal(drawingSessionFromLoad(2, null).key, switched.session.key)
-  assert.equal(inkBoardReady(switched.session.key), true)
-  assert.equal(switched.drawingOpen, true)
-  assert.equal(liveInkToolbarHost(stale), null)
-  assert.equal(inkToolbarPortalHost(stale, true), null)
-  assert.equal(portalInkToolbar(createPortalOrThrow, { toolbar: true }, stale, true), null)
+  assert.equal(overlayHitEnabled(false), false)
+  assert.equal(overlayHitEnabled(true), true)
+  assert.equal(overlayInert(true, false), true)
+  assert.equal(overlayInert(true, true), false)
+  assert.equal(overlayGlobalPointerLockOn(true, false), false)
+  assert.equal(overlayGlobalPointerLockOn(true, true), true)
+  assert.deepEqual(
+    overlaySessionAfterNoteSwitch({ drawingOpen: false, session: { key: 4, document: null } }),
+    { key: 0, document: null },
+  )
   assert.equal(
-    overlayShowsCrashFallback({ fallbackTitle: INK_OVERLAY_CRASH_TITLE, ready: inkBoardReady(switched.session.key) }),
-    false,
+    overlaySessionAfterNoteSwitch({ drawingOpen: true, session: { key: 4, document: null } }).key,
+    4,
   )
 
-  const throwEvenIfConnected = () => {
-    throw new Error('createPortal into a node that is not in the document')
+  const ops = interactOpsFromBugEvents(fixture.events)
+  assert.equal(ops[0].type, 'note-switch')
+  assert.equal(ops[1].type, 'session-start')
+  const noteOps = ops.filter((op) => op.type === 'note-switch')
+  assert.equal(noteOps.length, 8)
+  assert.equal(noteOps[1].noteId, 'Englisch/Untitled note.md')
+  assert.equal(noteOps.at(-1).noteId, 'Eingang/Untitled note 5.famd')
+
+  let state = emptyInteractState()
+  assert.equal(chromePressable(state), true)
+
+  const frames = []
+  for (const op of ops) {
+    state = applyInteractOp(state, op)
+    if (op.type === 'note-switch') {
+      assert.equal(state.leftoverCapture, false)
+      assert.equal(state.sessionKey, 0, 'keyboard-mode switch must drop the overlay')
+      assert.equal(state.globalLock, false)
+      assert.equal(state.overlayHits, false)
+      assert.equal(state.inert, true)
+      assert.equal(chromePressable(state), true)
+      frames.push({
+        noteId: state.noteId,
+        sessionKey: state.sessionKey,
+        pressable: chromePressable(state),
+      })
+    }
   }
-  assert.equal(portalInkToolbar(throwEvenIfConnected, { toolbar: true }, connectedHost(), true), null)
 
-  state = switched
-  state = applyOverlayLifetimeOp(state, { type: 'host', host: connectedHost() })
-  assert.equal(overlayPenHitReady(state.session.key, state.drawingOpen), true)
-  assert.equal(portalInkToolbar(createPortalOrThrow, { toolbar: true }, state.host, true)?.portaled, true)
+  const stale = applyInteractOp(state, { type: 'ink-ready', requestId: 1 })
+  assert.equal(stale.sessionKey, 0, 'stale FAMD/ink load from an earlier note must not remount')
+  assert.equal(chromePressable(stale), true)
 
-  for (const [text, kind] of [
-    [SCRIBBLE_ERASE_NOTICE_TEXT, 'success'],
-    [FORM_DETECT_NOTICE_TEXT, 'info'],
-  ]) {
-    const shown = applyInkNoticeOp(emptyInkNoticeState(), {
-      type: 'show',
-      notice: { kind, text },
-      now: 10,
-    })
-    const delay = inkNoticeAutoClearDelayMs(shown.notice)
-    assert.ok(Number.isFinite(delay) && delay > 0)
-    assert.equal(applyInkNoticeOp(shown, { type: 'tick', now: 10 + delay }).notice, null)
-    assert.equal(applyInkNoticeOp(shown, { type: 'close' }).notice, null)
-  }
+  state = applyInteractOp(state, { type: 'ink-ready', requestId: state.loadGeneration })
+  assert.equal(state.sessionKey, state.loadGeneration)
+  assert.equal(state.noteId, 'Eingang/Untitled note 5.famd')
+  assert.equal(state.inert, true)
+  assert.equal(state.globalLock, false)
+  assert.equal(state.overlayHits, false)
+  assert.equal(chromePressable(state), true)
 
-  assert.match(appSource, /overlayAfterNoteSwitch/)
-  assert.match(boardSource, /portalInkToolbar\(createPortal/)
-  assert.match(boardSource, /inkNoticeAutoClearDelayMs/)
+  const captured = applyInteractOp(state, { type: 'capture', leftover: true })
+  assert.equal(chromePressable(captured), false)
+  state = applyInteractOp(captured, {
+    type: 'note-switch',
+    requestId: state.loadGeneration + 1,
+    noteId: 'Eingang/Untitled note 5.famd',
+  })
+  assert.equal(state.leftoverCapture, false)
+  assert.equal(chromePressable(state), true)
+
+  const stiftOn = applyInteractOp(state, { type: 'stift', open: true })
+  assert.equal(stiftOn.overlayHits, true)
+  assert.equal(stiftOn.globalLock, true)
+  assert.equal(stiftOn.inert, false)
+  const switchedOn = applyInteractOp(stiftOn, {
+    type: 'note-switch',
+    requestId: stiftOn.loadGeneration + 1,
+    noteId: 'Englisch/Untitled note.md',
+  })
+  assert.ok(switchedOn.sessionKey > 0)
+  assert.equal(switchedOn.drawingOpen, true)
+
+  assert.match(appSource, /overlaySessionAfterNoteSwitch\(switched\)/)
+  assert.match(boardSource, /overlayInert\(inline, inputActive\)/)
+  assert.match(boardSource, /overlayGlobalPointerLockOn\(inline, inputActive\)/)
+  assert.match(boardSource, /pointer-events:none!important/)
+  assert.match(boardSource, /inline && overlayHitEnabled\(inputActive\) \? handlePointerDown/)
 
   console.log(JSON.stringify({
-    report: REPORT_LATEST.id,
-    version: REPORT_LATEST.version,
-    platform: REPORT_LATEST.platform,
-    notes: REPORT_LATEST.notes,
-    lastReady: inkBoardReady(state.session.key),
-    lastHit: overlayPenHitReady(state.session.key, state.drawingOpen),
-    lastHost: inkToolbarPortalHost(state.host, state.drawingOpen)?.isConnected === true,
-    stiftStayedOn: state.drawingOpen === true,
+    report: fixture.id,
+    version: fixture.version,
+    platform: fixture.platform,
+    description: fixture.description,
+    notes,
+    frames,
+    lastNote: state.noteId,
+    lastPressable: chromePressable(state),
+    lastSessionKey: state.sessionKey,
+    lastInert: state.inert,
+    lastGlobalLock: state.globalLock,
   }))
   console.log('latest-bug ok')
 } finally {

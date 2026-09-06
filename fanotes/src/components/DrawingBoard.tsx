@@ -123,6 +123,7 @@ import {
   resolveInkToolbarHost,
   shouldSyncPdfOverlaySource,
 } from '../lib/pdfInkHit'
+import { overlayGlobalPointerLockOn, overlayHitEnabled, overlayInert } from '../lib/overlayInteract'
 import { mapClientToSheet } from '../lib/paperCanvas'
 import {
   applyPenUpInkCleanup,
@@ -2837,6 +2838,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   }, [clearRecognitionScope, settings.recognitionLanguage, sourceHeight])
 
   const handlePointerDown = useCallback((event: ReactPointerEvent<HTMLElement>) => {
+    if (overlayInert(inline, inputActive) || !overlayHitEnabled(inputActive)) return
     if (hitTestChrome(event.clientX, event.clientY)) return
     setArtPanelOpen(false)
     const now = performance.now()
@@ -3078,7 +3080,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       const latest = activeStrokeRef.current?.points.at(-1)
       if (latest) ensureWriteRoom(latest.y, latest.x)
     }
-  }, [appendPointerEvent, ensureWriteRoom, eraseAt, paintActiveStrokeNow, pointFromEvent, resolvePaperElement, settings.penOnly])
+  }, [appendPointerEvent, ensureWriteRoom, eraseAt, inline, inputActive, paintActiveStrokeNow, pointFromEvent, resolvePaperElement, settings.penOnly])
 
   const finishPointer = useCallback((event: ReactPointerEvent<HTMLElement> | PointerEvent) => {
     const pointerId = event.pointerId
@@ -3490,9 +3492,14 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   }, [forceEndActivePointer, inputActive])
 
   // Global safety net: leftover capture retargets every click onto the sheet, so
-  // ribbon/tab buttons look dead. These listeners stay up even after leaving
-  // Stiftmodus so a missed pointerup cannot keep the UI frozen.
+  // ribbon/tab buttons look dead. Keyboard mode must not keep these capture-phase
+  // locks — that is the 1788698537115 “can't press most of the things” stall.
   useEffect(() => {
+    if (!overlayGlobalPointerLockOn(inline, inputActive)) {
+      forceEndActivePointer('watchdog')
+      releaseStuckInputFocus(boardRef.current)
+      return
+    }
     const captureTargets = () => [
       activePointerTargetRef.current,
       canvasRef.current,
@@ -5092,13 +5099,15 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       ref={boardRef as React.RefObject<HTMLElement>}
       className={`lw-drawing-board ${inline ? 'is-inline' : ''} ${inputActive ? INLINE_INK_ACTIVE_CLASS : ''} ${inkMode === 'drawing' ? 'is-art-mode' : 'is-writing-mode'} ${className}`}
       tabIndex={inputActive ? 0 : -1}
+      inert={overlayInert(inline, inputActive) || undefined}
+      aria-hidden={overlayInert(inline, inputActive) || undefined}
       onKeyDown={handleKeyboard}
       onWheel={handleWheel}
-      onPointerDown={inline ? handlePointerDown : undefined}
-      onPointerMove={inline ? handlePointerMove : undefined}
-      onPointerUp={inline ? finishPointer : undefined}
-      onPointerCancel={inline ? finishPointer : undefined}
-      onLostPointerCapture={inline ? finishPointer : undefined}
+      onPointerDown={inline && overlayHitEnabled(inputActive) ? handlePointerDown : undefined}
+      onPointerMove={inline && overlayHitEnabled(inputActive) ? handlePointerMove : undefined}
+      onPointerUp={inline && overlayHitEnabled(inputActive) ? finishPointer : undefined}
+      onPointerCancel={inline && overlayHitEnabled(inputActive) ? finishPointer : undefined}
+      onLostPointerCapture={inline && overlayHitEnabled(inputActive) ? finishPointer : undefined}
     >
       <style>{drawingBoardStyles}</style>
       <header className="lw-draw-header">
@@ -5763,7 +5772,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
           </div>
         </div>
 
-        {settings.experimentalHandwritingToText && conversionOpen && (inline ? (node: ReactNode) => createPortal(node, document.body) : (node: ReactNode) => node)(
+        {settings.experimentalHandwritingToText && conversionOpen && (!inline || inputActive) && (inline ? (node: ReactNode) => createPortal(node, document.body) : (node: ReactNode) => node)(
         <aside className={`lw-conversion-panel ${inline ? 'is-viewport-chrome' : ''}`} aria-label="Handschrift konvertieren">
           <div className="lw-conversion-head">
             <span className="lw-spark"><Sparkles size={17} /></span>
@@ -5886,7 +5895,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         </aside>)}
       </div>
 
-      {notice && (inline ? (node: ReactNode) => createPortal(node, document.body) : (node: ReactNode) => node)(
+      {notice && (!inline || inputActive) && (inline ? (node: ReactNode) => createPortal(node, document.body) : (node: ReactNode) => node)(
       <div className={`lw-draw-notice is-${notice.kind} ${inline ? 'is-viewport-chrome' : ''}`} role="status">
         {notice.kind === 'success' ? <Check size={15} /> : notice.kind === 'error' ? <CircleAlert size={15} /> : <Sparkles size={15} />}
         <span>{notice.text}</span>
@@ -6015,6 +6024,8 @@ const drawingBoardStyles = `
 .lw-draw-notice{display:flex;align-items:center;gap:7px;margin:0 14px 10px;padding:8px 10px;border:1px solid var(--draw-border);border-radius:9px;background:var(--background-secondary,#1b1b22);font-size:11px}.lw-draw-notice.is-success{color:var(--success,#3a8f6d);border-color:color-mix(in srgb,var(--success,#3a8f6d) 28%,transparent)}.lw-draw-notice.is-error{color:var(--danger,#d94b63);border-color:color-mix(in srgb,var(--danger,#d94b63) 28%,transparent)}.lw-draw-notice.is-info{color:var(--accent-readable,var(--draw-accent));border-color:color-mix(in srgb,var(--draw-accent) 32%,transparent)}.lw-draw-notice span{flex:1}.lw-draw-notice button{display:grid;place-items:center;border:0;background:transparent;color:inherit;cursor:pointer}.lw-draw-footer{min-height:55px;flex:0 0 auto;justify-content:space-between;gap:10px;padding:9px 14px;border-top:1px solid var(--draw-border);background:color-mix(in srgb,var(--background-secondary,#17171d) 92%,transparent)}.lw-footer-actions{gap:8px}.lw-convert-action{min-height:34px}.lw-spin{animation:lw-spin .8s linear infinite}.sr-only{position:absolute!important;width:1px!important;height:1px!important;padding:0!important;margin:-1px!important;overflow:hidden!important;clip:rect(0,0,0,0)!important;white-space:nowrap!important;border:0!important}@keyframes lw-spin{to{transform:rotate(360deg)}}
 
 .lw-drawing-board.is-inline{position:absolute;z-index:4;inset:calc(-1 * var(--paper-scroll-room, 0px));height:auto;min-height:100%;overflow:visible;background:transparent;pointer-events:none} /* extra paper around the write page */
+.lw-drawing-board.is-inline:not(.is-input-active),.lw-drawing-board.is-inline:not(.is-input-active) *{pointer-events:none!important}
+.lw-drawing-board.is-inline:not(.is-input-active) .lw-conversion-panel,.lw-drawing-board.is-inline:not(.is-input-active) .lw-draw-notice,.lw-drawing-board.is-inline:not(.is-input-active) .lw-art-studio{display:none!important}
 .lw-drawing-board.is-inline.is-input-active{pointer-events:auto}
 .lw-drawing-board.is-inline.is-input-active .lw-draw-workspace{pointer-events:auto}
 .lw-drawing-board.is-inline.is-input-active .lw-canvas-shell{pointer-events:auto}

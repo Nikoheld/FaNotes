@@ -2,6 +2,10 @@
 
 ## Unveröffentlicht
 
+## 2026.9.13
+
+- **Notizwechsel bleibt klickbar:** Beim schnellen Wechseln — auch zu .famd — laggt die Oberfläche nicht mehr und fängt keine Klicks. Die Stiftebene sitzt erst, wenn die Notiz bereit ist; ohne Stift kann sie Tastatur, Leiste und Notizen nicht blockieren.
+
 ## 2026.9.12
 
 - **Stiftebene bleibt beim Notizwechsel:** Wenn der Stift an ist und du die Notiz wechselst, bleibt die Handschrift-Ebene. Ein abgehängtes Leisten-Ziel stürzt sie nicht mehr ab.

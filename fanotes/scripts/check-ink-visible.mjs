@@ -109,7 +109,8 @@ const runOnce = () => {
     'Stift mode must let markdown layers pass the pen to the overlay',
   )
   assert.match(board, /\.lw-drawing-board\.is-inline\.is-input-active\{[^}]*pointer-events:\s*auto/)
-  assert.match(board, /onPointerDown=\{inline \? handlePointerDown : undefined\}/)
+  assert.match(board, /onPointerDown=\{inline && overlayHitEnabled\(inputActive\) \? handlePointerDown : undefined\}/)
+  assert.match(board, /\.lw-drawing-board\.is-inline:not\(\.is-input-active\),[^}]*pointer-events:none!important/)
   assert.match(board, /from '\.\.\/lib\/inkStrokePaint'/)
   assert.match(board, /markdownNoteInkOverlaySize/)
 
