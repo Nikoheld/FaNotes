@@ -73,6 +73,7 @@ export type SettingsModalProps = {
   onResetSettings: () => void
   onResetAppData: () => Promise<void>
   onOpenBugReport?: () => void
+  onConvertNotes?: () => Promise<{ converted: number; skipped: number; failed: number }>
   remoteSupportSession?: RemoteSupportSession | null
   onRemoteSupportStart?: () => void
   onRemoteSupportStop?: () => void
@@ -291,6 +292,7 @@ export function SettingsModal({
   onResetSettings,
   onResetAppData,
   onOpenBugReport,
+  onConvertNotes,
   remoteSupportSession = null,
   onRemoteSupportStart,
   onRemoteSupportStop,
@@ -312,6 +314,8 @@ export function SettingsModal({
   const [recoveryInput, setRecoveryInput] = useState('')
   const [restoreConfirmOpen, setRestoreConfirmOpen] = useState(false)
   const [deleteBackupConfirmOpen, setDeleteBackupConfirmOpen] = useState(false)
+  const [convertBusy, setConvertBusy] = useState(false)
+  const [convertStatus, setConvertStatus] = useState<{ kind: 'success' | 'error'; text: string } | null>(null)
   const [enhancedMathState, setEnhancedMathState] = useState<EnhancedMathRecognitionState | null>(null)
   const [enhancedMathBusy, setEnhancedMathBusy] = useState(false)
   const [enhancedMathError, setEnhancedMathError] = useState<string | null>(null)
@@ -753,6 +757,44 @@ export function SettingsModal({
                   <SettingRow title="Strichglättung"><Range value={settings.smoothing} min={0} max={1} step={0.05} onChange={(value) => update('smoothing', value)} /></SettingRow>
                   <SettingRow title="Durchkritzel-Empfindlichkeit" description="Niedrig verlangt mehr Überkreuzungen; hoch löscht schon nach einem kürzeren, eindeutigen Durchkritzeln."><Range value={settings.scribbleEraseSensitivity} min={0} max={100} step={5} suffix=" %" onChange={(value) => update('scribbleEraseSensitivity', value)} /></SettingRow>
                   <SettingRow title="Form-Erkennung" description="Wie bereitwillig Stillhalten eine Linie, einen Kreis oder ein Vieleck glättet. Niedrig nur bei sehr klaren Figuren; hoch früher und auch bei unsaubereren Strichen."><Range value={settings.shapeSnapSensitivity ?? 50} min={0} max={100} step={5} suffix=" %" onChange={(value) => update('shapeSnapSensitivity', value)} /></SettingRow>
+                  <SettingRow
+                    title="Alte Notizen auf den aktuellen Standard"
+                    description="Bringt vorhandene Handschrift auf die aktuelle scharfe HiDPI-Anzeige. Markdown, Tinte, Arbeitsblätter und Seitenstatistik bleiben erhalten. Es wird zuerst eine Kopie geprüft, bevor die Notiz ersetzt wird."
+                  >
+                    <button
+                      type="button"
+                      className="secondary-button"
+                      disabled={convertBusy || !onConvertNotes}
+                      onClick={() => {
+                        if (!onConvertNotes) return
+                        setConvertBusy(true)
+                        setConvertStatus(null)
+                        void onConvertNotes()
+                          .then((result) => {
+                            setConvertStatus({
+                              kind: 'success',
+                              text: `${result.converted} Notizen aktualisiert, ${result.skipped} schon aktuell, ${result.failed} übersprungen.`,
+                            })
+                          })
+                          .catch((error: unknown) => {
+                            setConvertStatus({
+                              kind: 'error',
+                              text: error instanceof Error ? error.message : 'Die Notizen konnten nicht umgestellt werden.',
+                            })
+                          })
+                          .finally(() => setConvertBusy(false))
+                      }}
+                    >
+                      {convertBusy ? <LoaderCircle className="spin" size={14} /> : <RefreshCw size={14} />}
+                      {convertBusy ? 'Wird geprüft …' : 'Alles umstellen'}
+                    </button>
+                  </SettingRow>
+                  {convertStatus && (
+                    <div className={`setting-import-status is-${convertStatus.kind}`} role="status">
+                      {convertStatus.kind === 'success' ? <Check size={15} /> : <X size={15} />}
+                      <span>{convertStatus.text}</span>
+                    </div>
+                  )}
                 </div>
                 <div id="settings-recognition" className="setting-card">
                   <div className="setting-card-title"><Sparkles size={16} /><span>Handschrifterkennung</span></div>

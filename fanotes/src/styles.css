@@ -1923,6 +1923,11 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 
 /* Settings */
 .modal-backdrop { position: fixed; inset: 0; z-index: 200; display: grid; place-items: center; padding: 24px; background: rgba(5, 5, 9, .58); backdrop-filter: blur(7px); animation: fade-in var(--motion-fast) var(--ease-out) both; }
+.confirm-backdrop { z-index: 240; }
+.confirm-dialog { width: min(440px, 100%); max-width: 440px; }
+.confirm-dialog-body { display: flex; gap: 12px; align-items: flex-start; padding: 4px 2px 12px; color: var(--text); }
+.confirm-dialog-body p { margin: 0; line-height: 1.45; }
+.confirm-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
 .worksheet-import-dialog { width: min(620px, 92vw); overflow: hidden; border: 1px solid var(--border-strong); border-radius: 17px; color: var(--text); background: var(--panel); box-shadow: var(--shadow); animation: modal-in var(--motion-med) var(--ease-out) both; }
 .worksheet-import-dialog > header { height: 68px; display: flex; align-items: center; justify-content: space-between; padding: 0 17px; border-bottom: 1px solid var(--border); background: linear-gradient(110deg, rgba(var(--accent-rgb),.12), transparent 65%); }
 .worksheet-import-dialog > header > div { display: flex; align-items: center; gap: 11px; }

@@ -2,6 +2,13 @@
 
 ## Unveröffentlicht
 
+## 2026.9.16
+
+- **Jede Seite hat Statistik:** Jede Notiz merkt sich, wann sie erstellt und geändert wurde und wie lange du auf der Seite warst. Das siehst du in der Gliederung und unten in der Leiste.
+- **Alte Notizen scharf umstellen:** In den Einstellungen gibt es „Alles umstellen“. Vorhandene Handschrift kommt auf den aktuellen scharfen Standard. Text, Tinte, Arbeitsblätter und Statistik bleiben erhalten — es wird zuerst eine Kopie geprüft.
+- **Löschen fragt in FaNotes:** „Wirklich löschen?“ kommt als FaNotes-Dialog in der Mitte, nicht mehr als Hyprland-Fenster oben in der Ecke. Mit Send Data merkt FaNotes die Hyprland-Umgebung und nutzt genau diesen Dialog.
+- **PDF öffnet in der Mitte:** Beim Öffnen einer PDF-Notiz liegt die Seite in der Mitte des Bildes. Du musst nicht erst zum Blatt scrollen.
+
 ## 2026.9.15
 
 - **Schrift bleibt beim Randmalen stehen:** Wenn das Blatt am Rand wächst, rutscht die getippte Schrift nicht mehr visuell weg. Im selben Schritt wird die Zeichenfläche so aktualisiert wie nach dem Radieren von Geistertinte — die Schrift sitzt im nächsten Bild wieder auf ihrem Papierpunkt, ohne die Batterie mit einer Dauerschleife zu belasten.

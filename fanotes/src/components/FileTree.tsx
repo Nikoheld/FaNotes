@@ -44,6 +44,7 @@ export type FileTreeProps = {
   onRename: (relativePath: string, nextName: string) => MaybePromise
   onMove: (relativePath: string, destFolder: string) => MaybePromise
   onTrash: (relativePath: string) => MaybePromise
+  confirmTrash?: (message: string) => Promise<boolean>
   className?: string
   rootLabel?: string
   showHeader?: boolean
@@ -154,6 +155,7 @@ export const FileTree = memo(function FileTree({
   onRename,
   onMove,
   onTrash,
+  confirmTrash,
   className = '',
   rootLabel = 'Dateien',
   showHeader = true,
@@ -261,9 +263,11 @@ export const FileTree = memo(function FileTree({
   const requestTrash = async (entry: VaultEntry) => {
     setContextMenu(null)
     const type = entry.kind === 'folder' ? 'Ordner' : 'Notiz'
-    if (!window.confirm(`${type} „${displayName(entry)}“ in den Papierkorb verschieben?`)) {
-      return
-    }
+    const message = `${type} „${displayName(entry)}“ in den Papierkorb verschieben?`
+    const confirmed = confirmTrash
+      ? await confirmTrash(message)
+      : false
+    if (!confirmed) return
     await onTrash(entry.relativePath)
   }
 

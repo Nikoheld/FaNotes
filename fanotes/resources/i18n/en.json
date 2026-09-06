@@ -2849,5 +2849,19 @@
   "Zusätzliche Werkzeuge einklappen": "Hide extra tools",
   "Zwei Notizen nebeneinander": "Two notes side by side",
   "zweidimensionales lokales Formelmodell": "local two-dimensional formula model",
-  "Zweite Akzentfarbe": "Secondary accent color"
+  "Zweite Akzentfarbe": "Secondary accent color",
+  "Alte Notizen auf den aktuellen Standard": "Bring old notes to the current standard",
+  "Bringt vorhandene Handschrift auf die aktuelle scharfe HiDPI-Anzeige. Markdown, Tinte, Arbeitsblätter und Seitenstatistik bleiben erhalten. Es wird zuerst eine Kopie geprüft, bevor die Notiz ersetzt wird.": "Brings existing handwriting onto the current sharp HiDPI display. Markdown, ink, worksheets, and page statistics stay intact. A copy is checked before the note is replaced.",
+  "Alles umstellen": "Convert everything",
+  "Wird geprüft …": "Checking …",
+  "Erstellt": "Created",
+  "Geändert": "Modified",
+  "Auf der Seite": "Time on page",
+  "Öffnungen": "Opens",
+  "Bitte bestätigen": "Please confirm",
+  "Statistik erscheint, sobald die Seite geöffnet ist.": "Statistics appear once the page is open.",
+  "**Jede Seite hat Statistik:** Jede Notiz merkt sich, wann sie erstellt und geändert wurde und wie lange du auf der Seite warst. Das siehst du in der Gliederung und unten in der Leiste.": "**Every page has statistics:** Each note remembers when it was created and changed and how long you were on the page. You see that in the outline and in the bottom bar.",
+  "**Alte Notizen scharf umstellen:** In den Einstellungen gibt es „Alles umstellen“. Vorhandene Handschrift kommt auf den aktuellen scharfen Standard. Text, Tinte, Arbeitsblätter und Statistik bleiben erhalten — es wird zuerst eine Kopie geprüft.": "**Bring old notes up to sharp quality:** Settings has Convert everything. Existing handwriting moves to the current sharp standard. Text, ink, worksheets, and statistics stay intact — a copy is checked first.",
+  "**Löschen fragt in FaNotes:** „Wirklich löschen?“ kommt als FaNotes-Dialog in der Mitte, nicht mehr als Hyprland-Fenster oben in der Ecke. Mit Send Data merkt FaNotes die Hyprland-Umgebung und nutzt genau diesen Dialog.": "**Delete asks inside FaNotes:** “Are you sure to delete?” is a FaNotes dialog in the center, not a Hyprland window in the upper corner. With Send Data on, FaNotes notices the Hyprland environment and uses that dialog.",
+  "**PDF öffnet in der Mitte:** Beim Öffnen einer PDF-Notiz liegt die Seite in der Mitte des Bildes. Du musst nicht erst zum Blatt scrollen.": "**A PDF opens in the center:** When you open a PDF note, the page sits in the middle of the view. You do not have to scroll to the sheet first."
 }

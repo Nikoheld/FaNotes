@@ -1,5 +1,6 @@
 import { parseNoteBackups, serializeNoteBackups, type NoteBackupSnapshot } from './noteBackup'
 import { parseNoteLinks, serializeNoteLinks, type NoteLinkRecord } from './noteLink'
+import { parsePageStats, type PageStats } from './pageStats'
 import { isPaperStyle } from './paperStyles'
 import type { PaperStyle } from '../types'
 
@@ -19,6 +20,7 @@ export type FamdPayload = {
   paperStyle?: PaperStyle
   noteLinks?: NoteLinkRecord[]
   noteBackups?: NoteBackupSnapshot[]
+  pageStats?: PageStats
 }
 
 export const isNoteFileName = (name: string) => (
@@ -82,6 +84,7 @@ export const parseFamd = (source: string): { markdown: string; payload: FamdPayl
     const paperStyle = isPaperStyle(parsed.paperStyle) ? parsed.paperStyle : undefined
     const noteLinks = parseNoteLinks(parsed.noteLinks)
     const noteBackups = parseNoteBackups(parsed.noteBackups)
+    const pageStats = parsed.pageStats ? parsePageStats(parsed.pageStats, Date.parse(updatedAt) || Date.now()) : undefined
     return {
       markdown,
       payload: {
@@ -92,11 +95,31 @@ export const parseFamd = (source: string): { markdown: string; payload: FamdPayl
         ...(paperStyle ? { paperStyle } : {}),
         ...(noteLinks.length ? { noteLinks } : {}),
         ...(noteBackups.length ? { noteBackups } : {}),
+        ...(pageStats ? { pageStats } : {}),
       },
     }
   } catch {
     return { markdown, payload: null }
   }
+}
+
+export const readPageStatsFromNote = (content: string, now = Date.now()) => {
+  const { payload } = parseFamd(content)
+  if (payload?.pageStats) return parsePageStats(payload.pageStats, now)
+  if (payload?.updatedAt) {
+    return parsePageStats({ createdAt: payload.updatedAt, modifiedAt: payload.updatedAt }, now)
+  }
+  return parsePageStats(null, now)
+}
+
+export const writePageStatsIntoNote = (content: string, stats: PageStats) => {
+  const { markdown, payload } = parseFamd(typeof content === 'string' ? content : '')
+  const next: FamdPayload = {
+    ...(payload ?? emptyFamdPayload(stats.modifiedAt)),
+    pageStats: stats,
+    updatedAt: stats.modifiedAt,
+  }
+  return serializeFamd(markdown, next)
 }
 
 export const serializeFamd = (markdown: string, payload: FamdPayload) => {
@@ -112,6 +135,7 @@ export const serializeFamd = (markdown: string, payload: FamdPayload) => {
   if (noteLinks.length) next.noteLinks = noteLinks as NoteLinkRecord[]
   const noteBackups = serializeNoteBackups(payload.noteBackups)
   if (noteBackups.length) next.noteBackups = noteBackups
+  if (payload.pageStats) next.pageStats = payload.pageStats
   const json = JSON.stringify(next)
   return `${body ? `${body}\n\n` : ''}<!-- fanotes-famd:v1 chars=${json.length} -->\n${json}\n`
 }

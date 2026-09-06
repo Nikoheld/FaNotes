@@ -116,6 +116,11 @@ Command-palette action ids walked from `src/App.tsx`: `new-note`, `import-pdf-no
 | Markdown preview | `src/components/MarkdownPreview.tsx` | `MarkdownPreview` |
 | Outline jump / tags | `src/lib/noteOutline.ts` | `parseNoteOutline` |
 | Right inspector | `src/components/RightInspector.tsx` | `onJumpToLine` |
+| Page created / modified / dwell | `src/lib/pageStats.ts` | `export const openPageStats` |
+| Convert old notes to current ink quality | `src/lib/noteStandard.ts` | `export const convertNoteToCurrentStandard` |
+| Convert control in settings | `src/components/SettingsModal.tsx` | `Alte Notizen auf den aktuellen Standard` |
+| In-app delete confirm | `src/components/ConfirmDialog.tsx` | `role="alertdialog"` |
+| Send Data chooses in-app confirm | `src/lib/confirmUx.ts` | `export const deleteConfirmHost` |
 | App version | `src/lib/appVersion.ts` | `APP_VERSION` |
 
 ## Homework
@@ -135,6 +140,7 @@ Command-palette action ids walked from `src/App.tsx`: `new-note`, `import-pdf-no
 | PDF chrome in top bar | `src/lib/pdfInkHit.ts` | `PDF_TOOLBAR_SLOT_ID` |
 | Last opened note | `src/lib/lastOpenNote.ts` | `chooseRestoredNote` |
 | PDF document loader | `src/lib/pdfDocument.ts` | `openPdfDocument` |
+| PDF open camera centers the page | `src/lib/pdfOpenCamera.ts` | `export const pdfOpenCamera` |
 | Worksheet layer | `src/components/WorksheetLayer.tsx` | `WorksheetLayer` |
 | Import worksheet / PDF IPC | `electron/preload.cjs` | `importPdfNote: 'fanotes:import-pdf-note'` |
 

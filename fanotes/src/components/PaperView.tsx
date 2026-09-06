@@ -31,6 +31,7 @@ import {
   type PaperViewSnapshot,
 } from '../lib/paperView'
 import { SCROLL_ROOM } from '../lib/noteCanvas'
+import { pdfOpenCamera } from '../lib/pdfOpenCamera'
 import {
   captureGhostTextAroundLock,
   ghostTextDiagnosticFields,
@@ -124,10 +125,25 @@ export function PaperView({ children, className = '', viewKey, showHud = true }:
     }
     scroller.addEventListener('scroll', clampScroll, { passive: true })
     const plane = scroller.querySelector<HTMLElement>('.paper-sheet-plane')
+    const paper = scroller.querySelector<HTMLElement>('.unified-paper')
     const room = Number.parseFloat(plane?.style.getPropertyValue('--paper-scroll-room') || '') || SCROLL_ROOM
+    const pageWidth = paper?.offsetWidth || Math.max(0, (plane?.offsetWidth || 0) - room * 2)
+    const pageHeight = paper?.offsetHeight || Math.max(0, (plane?.offsetHeight || 0) - room * 2)
     if (scroller.scrollLeft === 0 && scroller.scrollTop === 0 && scroller.scrollWidth > scroller.clientWidth) {
-      scroller.scrollLeft = room
-      scroller.scrollTop = room
+      if (pageWidth > 8 && pageHeight > 8 && scroller.clientWidth > 8 && scroller.clientHeight > 8) {
+        const camera = pdfOpenCamera({
+          pageWidth,
+          pageHeight,
+          viewWidth: scroller.clientWidth,
+          viewHeight: scroller.clientHeight,
+          room,
+        })
+        scroller.scrollLeft = camera.x
+        scroller.scrollTop = camera.y
+      } else {
+        scroller.scrollLeft = room
+        scroller.scrollTop = room
+      }
     }
     clampScroll()
     return () => {

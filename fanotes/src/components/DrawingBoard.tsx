@@ -175,6 +175,8 @@ import {
   clearInkExtentStyles,
   inkExtentStyleValues,
   inkOverlayPixelSize,
+  INK_MAX_VIEW_QUALITY_ZOOM,
+  INK_MIN_INLINE_QUALITY,
   inkWidthNeedsAnchor,
   pendingGrowScale,
   resolvePaintedLayoutGrow,
@@ -529,6 +531,8 @@ type DrawingDocument = {
   sourceHeight: number
   sourceOriginX?: number
   sourceOriginY?: number
+  overlayQuality?: number
+  overlayQualityZoom?: number
   createdAt: string
   updatedAt: string
   strokes: InkStroke[]
@@ -605,6 +609,7 @@ export type DrawingBoardProps = {
   onClose?: () => void
   pagePaperStyle?: PaperStyle
   onPagePaperChange?: (style: PaperStyle) => void
+  confirmDestructive?: (message: string) => Promise<boolean>
 }
 
 type Notice = { kind: 'success' | 'error' | 'info'; text: string }
@@ -1005,6 +1010,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   onClose,
   pagePaperStyle,
   onPagePaperChange,
+  confirmDestructive,
 }: DrawingBoardProps, forwardedRef) {
   const paperView = usePaperView()
   const boardRef = useRef<HTMLElement | null>(null)
@@ -3793,6 +3799,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       sourceHeight,
       sourceOriginX: sourceOriginXRef.current,
       sourceOriginY: sourceOriginYRef.current,
+      overlayQuality: INK_MIN_INLINE_QUALITY,
+      overlayQualityZoom: INK_MAX_VIEW_QUALITY_ZOOM,
       createdAt: createdAtRef.current,
       updatedAt: now,
       strokes: strokesRef.current,
@@ -4697,9 +4705,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   }, [onTrainingChanged])
 
   const resetTraining = useCallback(async () => {
-    const confirmed = window.confirm(
-      'Lokales Handschrift-Training wirklich vollständig löschen? Diese Aktion entfernt alle importierten und durch Korrekturen gelernten Beispiele dauerhaft.',
-    )
+    const message = 'Lokales Handschrift-Training wirklich vollständig löschen? Diese Aktion entfernt alle importierten und durch Korrekturen gelernten Beispiele dauerhaft.'
+    const confirmed = confirmDestructive ? await confirmDestructive(message) : false
     if (!confirmed) return
     setIsResettingTraining(true)
     setNotice(null)
@@ -4720,7 +4727,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     } finally {
       if (mountedRef.current) setIsResettingTraining(false)
     }
-  }, [onTrainingChanged])
+  }, [confirmDestructive, onTrainingChanged])
 
   const mathPreview = useMemo(() => {
     if (activeMode !== 'math' || !correction.trim() || !katexModule) return ''

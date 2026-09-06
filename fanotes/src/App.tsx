@@ -48,13 +48,26 @@ import {
 import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { PaletteAction } from './components/CommandPalette'
 import type { DrawingBoardHandle, DrawingSavePayload } from './components/DrawingBoard'
+import { ConfirmDialog } from './components/ConfirmDialog'
 import { FileTree } from './components/FileTree'
 import { FormattingToolbar } from './components/FormattingToolbar'
 import { NoteLinkLayer } from './components/NoteLinkLayer'
 import type { GlyphenWerkView } from './components/GlyphenWerkWorkspace'
 import type { MarkdownEditorHandle, MarkdownFormatAction } from './components/MarkdownEditor'
 import type { WorksheetLayerHandle } from './components/WorksheetLayer'
-import { companionNotePath, isPdfNotePath } from './lib/famd'
+import { companionNotePath, isNoteFileName, isPdfNotePath, readPageStatsFromNote, writePageStatsIntoNote } from './lib/famd'
+import { convertNoteSourceToCurrentStandard } from './lib/noteStandard'
+import { deleteConfirmHost } from './lib/confirmUx'
+import {
+  closePageStats,
+  openPageStats,
+  snapshotPageStats,
+  tickPageStats,
+  formatPageDwell,
+  touchPageModified,
+  type PageStats,
+  type PageStatsSession,
+} from './lib/pageStats'
 import { chooseRestoredNote, collectNotePaths } from './lib/lastOpenNote'
 import {
   activateNoteLink,
@@ -438,6 +451,13 @@ export default function App({ startupBootstrap }: AppProps) {
   const [toasts, setToasts] = useState<Toast[]>([])
   const [updateState, setUpdateState] = useState<UpdateState>(INITIAL_UPDATE_STATE)
   const [bugReportOpen, setBugReportOpen] = useState(false)
+  const [confirmRequest, setConfirmRequest] = useState<{
+    message: string
+    title?: string
+    confirmLabel?: string
+    resolve: (value: boolean) => void
+  } | null>(null)
+  const [activePageStats, setActivePageStats] = useState<PageStats | null>(null)
   const [remoteSupportSession, setRemoteSupportSession] = useState<RemoteSupportSession | null>(null)
   const [revealPath, setRevealPath] = useState<string | null>(null)
   const [tagFilter, setTagFilter] = useState<string | null>(null)
@@ -484,6 +504,7 @@ export default function App({ startupBootstrap }: AppProps) {
   const saveTimers = useRef(new Map<string, number>())
   const pendingWrites = useRef(new Map<string, string>())
   const settingsTimer = useRef<number | null>(null)
+  const pageStatsRef = useRef(new Map<string, PageStatsSession>())
   const settingsRef = useRef(settings)
   const settingsRevisionRef = useRef(0)
   const settingsPersistedRevisionRef = useRef(0)
@@ -930,6 +951,61 @@ export default function App({ startupBootstrap }: AppProps) {
     setToasts((current) => current.filter((item) => item.id !== id))
   }, [])
 
+  const requestConfirm = useCallback((message: string, options?: { title?: string; confirmLabel?: string }) => {
+    const host = deleteConfirmHost({
+      sendDataEnabled: settingsRef.current.experimentalSendData,
+      linux: bootstrap?.linuxRuntime ?? linuxHyprlandRuntimeContext({ platform: window.fanotes?.platform }),
+    })
+    if (host !== 'fanotes') return Promise.resolve(false)
+    return new Promise<boolean>((resolve) => {
+      setConfirmRequest({
+        message,
+        title: options?.title,
+        confirmLabel: options?.confirmLabel,
+        resolve,
+      })
+    })
+  }, [bootstrap?.linuxRuntime])
+
+  const flushPageStats = useCallback((path: string, now = Date.now(), keepActive = true) => {
+    const session = pageStatsRef.current.get(path)
+    if (!session) return null
+    const visible = typeof document === 'undefined' ? true : !document.hidden
+    const next = tickPageStats(session, now, keepActive && visible && activePathRef.current === path)
+    pageStatsRef.current.set(path, next)
+    const stats = snapshotPageStats(next)
+    if (activePathRef.current === path) setActivePageStats(stats)
+    return stats
+  }, [])
+
+  const activatePageStats = useCallback((path: string, content: string, now = Date.now()) => {
+    const previousPath = activePathRef.current
+    if (previousPath && previousPath !== path) flushPageStats(previousPath, now, false)
+    const existing = pageStatsRef.current.get(path)
+    const opened = openPageStats(existing ?? readPageStatsFromNote(content, now), now)
+    pageStatsRef.current.set(path, opened)
+    setActivePageStats(snapshotPageStats(opened))
+    return opened
+  }, [flushPageStats])
+
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      const path = activePathRef.current
+      if (!path) return
+      flushPageStats(path, Date.now(), true)
+    }, 1000)
+    const onVisibility = () => {
+      const path = activePathRef.current
+      if (!path) return
+      flushPageStats(path, Date.now(), typeof document === 'undefined' ? true : !document.hidden)
+    }
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => {
+      window.clearInterval(id)
+      document.removeEventListener('visibilitychange', onVisibility)
+    }
+  }, [flushPageStats])
+
   useEffect(() => {
     let alive = true
     let idleId: number | null = null
@@ -1014,6 +1090,7 @@ export default function App({ startupBootstrap }: AppProps) {
     setGlyphenWerkOpen(false)
     const existing = tabsRef.current.find((tab) => tab.path === path)
     if (existing) {
+      activatePageStats(path, existing.content)
       setActivePath(path)
       setFocusToken((value) => value + 1)
       rememberLastOpenNote(path)
@@ -1047,6 +1124,7 @@ export default function App({ startupBootstrap }: AppProps) {
       }
       setTagIndex((current) => ({ ...current, [path]: parseNoteTags(content) }))
       setTabs((current) => current.some((item) => item.path === path) ? current : [...current, tab])
+      activatePageStats(path, content)
       setActivePath(path)
       setFocusToken((value) => value + 1)
       rememberLastOpenNote(path)
@@ -1060,7 +1138,7 @@ export default function App({ startupBootstrap }: AppProps) {
     } finally {
       openingNotesRef.current.delete(requestKey)
     }
-  }, [flushDocumentLayers, rememberLastOpenNote, toast])
+  }, [activatePageStats, flushDocumentLayers, rememberLastOpenNote, toast])
 
   useEffect(() => {
     if (!window.fanotes) {
@@ -1190,10 +1268,14 @@ export default function App({ startupBootstrap }: AppProps) {
     saveTimers.current.delete(path)
     setSaveState('saving')
     try {
-      await window.fanotes.writeFile(isPdfNotePath(path) ? companionNotePath(path, '.famd') : path, content)
-      setTagIndex((current) => ({ ...current, [path]: parseNoteTags(content) }))
-      if (pendingWrites.current.get(path) === content) pendingWrites.current.delete(path)
-      setTabs((current) => current.map((tab) => tab.path === path ? { ...tab, savedContent: content } : tab))
+      const stats = flushPageStats(path, Date.now(), true) ?? readPageStatsFromNote(content)
+      const nextContent = writePageStatsIntoNote(content, stats)
+      await window.fanotes.writeFile(isPdfNotePath(path) ? companionNotePath(path, '.famd') : path, nextContent)
+      setTagIndex((current) => ({ ...current, [path]: parseNoteTags(nextContent) }))
+      if (pendingWrites.current.get(path) === content || pendingWrites.current.get(path) === nextContent) {
+        pendingWrites.current.delete(path)
+      }
+      setTabs((current) => current.map((tab) => tab.path === path ? { ...tab, content: tab.content === content ? nextContent : tab.content, savedContent: nextContent } : tab))
       setSaveState(pendingWrites.current.size ? 'saving' : 'saved')
       return true
     } catch (error) {
@@ -1201,7 +1283,42 @@ export default function App({ startupBootstrap }: AppProps) {
       toast(error instanceof Error ? error.message : 'Speichern fehlgeschlagen.', 'error')
       return false
     }
-  }, [toast])
+  }, [flushPageStats, toast])
+
+  const convertAllNotesToCurrentStandard = useCallback(async () => {
+    const paths = collectNotePaths(treeRef.current)
+    let converted = 0
+    let skipped = 0
+    let failed = 0
+    for (const path of paths) {
+      const name = path.split('/').pop() || path
+      if (!isNoteFileName(name)) {
+        skipped += 1
+        continue
+      }
+      const readPath = isPdfNotePath(path) ? companionNotePath(path, '.famd') : path
+      try {
+        let source = ''
+        try {
+          source = await window.fanotes.readFile(readPath)
+        } catch {
+          skipped += 1
+          continue
+        }
+        const result = convertNoteSourceToCurrentStandard(source)
+        if (!result.converted) {
+          skipped += 1
+          continue
+        }
+        await window.fanotes.writeFile(readPath, result.source)
+        converted += 1
+        setTabs((current) => current.map((tab) => tab.path === path ? { ...tab, content: result.source, savedContent: result.source } : tab))
+      } catch {
+        failed += 1
+      }
+    }
+    return { converted, skipped, failed }
+  }, [])
 
   const flushPendingWrites = useCallback(async (): Promise<boolean> => {
     editorRef.current?.flushChanges()
@@ -1287,6 +1404,12 @@ export default function App({ startupBootstrap }: AppProps) {
   const updateContent = useCallback((content: string) => {
     if (!activePath) return
     if ([...mutatingEntryPathsRef.current].some((path) => activePath === path || activePath.startsWith(`${path}/`))) return
+    const session = pageStatsRef.current.get(activePath)
+    if (session) {
+      const next = { ...touchPageModified(snapshotPageStats(session), Date.now()), active: session.active, sessionStartedAt: session.sessionStartedAt }
+      pageStatsRef.current.set(activePath, next)
+      setActivePageStats(snapshotPageStats(next))
+    }
     setTabs((current) => current.map((tab) => tab.path === activePath ? { ...tab, content } : tab))
     setTagIndex((current) => ({ ...current, [activePath]: parseNoteTags(content) }))
     pendingWrites.current.set(activePath, content)
@@ -1298,6 +1421,14 @@ export default function App({ startupBootstrap }: AppProps) {
   }, [activePath, saveContent, settings.autosaveDelay])
 
   const closeTab = useCallback(async (path: string) => {
+    const session = pageStatsRef.current.get(path)
+    if (session) {
+      const closed = closePageStats(session, Date.now())
+      pageStatsRef.current.set(path, { ...closed, active: false, sessionStartedAt: null })
+      const closingTab = tabsRef.current.find((tab) => tab.path === path)
+      const latest = pendingWrites.current.get(path) ?? closingTab?.content
+      if (latest !== undefined) pendingWrites.current.set(path, writePageStatsIntoNote(latest, closed))
+    }
     if (activePathRef.current === path) editorRef.current?.flushChanges()
     if (activePathRef.current === path && !await flushDocumentLayers()) return
     const currentTabs = tabsRef.current
@@ -1536,7 +1667,7 @@ export default function App({ startupBootstrap }: AppProps) {
   const removePlacedNoteLink = useCallback(async (link: NoteLinkRecord) => {
     const path = activePathRef.current
     if (!path) return
-    if (!window.confirm('Verlinkung wirklich entfernen? Die verlinkte Notiz bleibt im Vault.')) return
+    if (!await requestConfirm('Verlinkung wirklich entfernen? Die verlinkte Notiz bleibt im Vault.', { title: 'Verlinkung entfernen' })) return
     try {
       const links = removeNoteLink(noteLinksRef.current, link.id)
       await persistNoteLinks(path, links)
@@ -1545,7 +1676,7 @@ export default function App({ startupBootstrap }: AppProps) {
     } catch (error) {
       toast(error instanceof Error ? error.message : 'Die Verlinkung konnte nicht entfernt werden.', 'error')
     }
-  }, [persistNoteLinks, toast])
+  }, [persistNoteLinks, requestConfirm, toast])
 
   const removeSelectedNoteLink = useCallback(async () => {
     const selected = noteLinksRef.current.find((link) => link.id === selectedNoteLinkId)
@@ -2747,7 +2878,7 @@ export default function App({ startupBootstrap }: AppProps) {
   const removeWorksheetFromNote = useCallback(async (id: string) => {
     const document = worksheetSession.documents.find((item) => item.id === id)
     const label = document?.title ?? 'Arbeitsblatt'
-    if (!window.confirm(`„${label}“ wirklich aus dieser Notiz entfernen? Die PDF-/Bilddatei wird aus dem Vault gelöscht.`)) {
+    if (!await requestConfirm(`„${label}“ wirklich aus dieser Notiz entfernen? Die PDF-/Bilddatei wird aus dem Vault gelöscht.`, { title: 'Arbeitsblatt entfernen' })) {
       return
     }
     const notePath = activePathRef.current
@@ -2768,7 +2899,7 @@ export default function App({ startupBootstrap }: AppProps) {
     } catch (error) {
       toast(error instanceof Error ? error.message : 'Das Arbeitsblatt konnte nicht entfernt werden.', 'error')
     }
-  }, [toast, updateContent, worksheetSession.documents])
+  }, [requestConfirm, toast, updateContent, worksheetSession.documents])
 
   const importOneNote = useCallback(async (): Promise<OneNoteImportResult | null> => {
     if (oneNoteImportBusy) return null
@@ -3067,6 +3198,7 @@ export default function App({ startupBootstrap }: AppProps) {
                 onRename={renameEntry}
                 onMove={moveEntry}
                 onTrash={trashEntry}
+                confirmTrash={(message) => requestConfirm(message, { title: 'In den Papierkorb', confirmLabel: 'Verschieben' })}
               />
             </div>
             <div className="sidebar-footer"><span>{counts.files} {counts.files === 1 ? 'Notiz' : 'Notizen'}</span></div>
@@ -3363,6 +3495,7 @@ export default function App({ startupBootstrap }: AppProps) {
                         onDirtyChange={handleDrawingDirtyChange}
                         onTrainingChanged={handleTrainingChanged}
                         onOpenGlyphenWerk={openGlyphenWerk}
+                        confirmDestructive={(message) => requestConfirm(message, { title: 'Training löschen', confirmLabel: 'Löschen' })}
                       />
                     </SafeBoundary>
                   </Suspense>}
@@ -3430,13 +3563,13 @@ export default function App({ startupBootstrap }: AppProps) {
           </div>
         </main>
 
-        {inspectorVisible && settings.showOutline && !overviewOpen && !homeworkOpen && !glyphenWerkOpen && !isPdfActive && <Suspense fallback={null}><RightInspector content={activeTab?.content ?? ''} path={activeTab?.path} onJumpToLine={(line) => { editorRef.current?.revealLine(line) }} /></Suspense>}
+        {inspectorVisible && settings.showOutline && !overviewOpen && !homeworkOpen && !glyphenWerkOpen && !isPdfActive && <Suspense fallback={null}><RightInspector content={activeTab?.content ?? ''} path={activeTab?.path} pageStats={activePageStats} onJumpToLine={(line) => { editorRef.current?.revealLine(line) }} /></Suspense>}
         {searchOpen && <Suspense fallback={null}><SearchPanel query={searchQuery} hits={searchHits} loading={searchLoading} onQueryChange={setSearchQuery} onOpen={(hit) => { void openSearchHit(hit) }} onClose={() => setSearchOpen(false)} /></Suspense>}
       </div>
 
       <footer className="statusbar">
         <div className="statusbar-left"><button type="button" title={sidebarVisible ? 'Seitenleiste einklappen' : 'Seitenleiste einblenden'} aria-label={sidebarVisible ? 'Seitenleiste einklappen' : 'Seitenleiste einblenden'} onClick={() => setSidebarVisible((value) => !value)}>{sidebarVisible ? <PanelLeftClose size={12} /> : <PanelLeftOpen size={12} />}</button><span>{glyphenWerkOpen ? `GlyphenWerk · ${GLYPHENWERK_VIEW_LABELS[glyphenWerkView]}` : homeworkOpen ? 'Hausaufgaben & Termine' : overviewOpen ? 'Vault-Übersicht' : activeTab ? drawingOpen ? 'Stiftmodus' : isPdfActive ? 'PDF-Notiz' : worksheetSession.documents.length ? 'Notiz mit Arbeitsblatt' : 'Schreibmodus' : 'Bereit'}</span>{worksheetSession.documents.length > 0 && <span>{worksheetSession.documents.length} {worksheetSession.documents.length === 1 ? 'Arbeitsblatt' : 'Arbeitsblätter'}</span>}</div>
-        <div className="statusbar-right">{updateState.status === 'downloaded' && <button type="button" className="update-ready-button" title={`FaNotes ${updateState.latestVersion} installieren und neu starten`} onClick={() => void installUpdate()}><ShieldCheck size={11} /> Update bereit</button>}{updateState.status === 'downloading' && <span><LoaderCircle className="spin" size={11} /> Update {Math.round(updateState.progress * 100)} %</span>}{settings.spellcheck && activeTab && !drawingOpen && detectedTextLanguage !== 'unknown' && <span className="detected-text-language" title="Automatisch erkannte Sprache für die lokale Rechtschreibprüfung"><b>Aa</b> {detectedTextLanguage === 'de' ? 'Deutsch' : detectedTextLanguage === 'en' ? 'English' : 'DE / EN'}</span>}{settings.showWordCount && activeTab && <span>{activeWordCount} Wörter</span>}<button type="button" className={`save-status ${saveState === 'saved' ? 'save-ok' : 'save-pending'}`} title="Jetzt speichern (Strg+S)" aria-live="polite" onClick={() => void saveCurrentWork()}>{saveState === 'saved' ? <CheckCircle2 size={11} /> : saveState === 'saving' ? <LoaderCircle className="spin" size={11} /> : <CircleAlert size={11} />}{saveState === 'saved' ? 'Gespeichert' : saveState === 'saving' ? 'Speichert …' : 'Speicherfehler'}</button><span title={isWeb ? 'Die Daten bleiben in diesem Browser' : 'Dein Vault bleibt auf deinem Gerät'}><ShieldCheck size={11} /> {isWeb ? 'Im Browser gespeichert' : 'Lokal & privat'}</span></div>
+        <div className="statusbar-right">{updateState.status === 'downloaded' && <button type="button" className="update-ready-button" title={`FaNotes ${updateState.latestVersion} installieren und neu starten`} onClick={() => void installUpdate()}><ShieldCheck size={11} /> Update bereit</button>}{updateState.status === 'downloading' && <span><LoaderCircle className="spin" size={11} /> Update {Math.round(updateState.progress * 100)} %</span>}{settings.spellcheck && activeTab && !drawingOpen && detectedTextLanguage !== 'unknown' && <span className="detected-text-language" title="Automatisch erkannte Sprache für die lokale Rechtschreibprüfung"><b>Aa</b> {detectedTextLanguage === 'de' ? 'Deutsch' : detectedTextLanguage === 'en' ? 'English' : 'DE / EN'}</span>}{settings.showWordCount && activeTab && <span>{activeWordCount} Wörter</span>}{activePageStats && <span title={`Erstellt ${new Date(activePageStats.createdAt).toLocaleString()} · Geändert ${new Date(activePageStats.modifiedAt).toLocaleString()}`}>Auf der Seite {formatPageDwell(activePageStats.dwellMs)}</span>}<button type="button" className={`save-status ${saveState === 'saved' ? 'save-ok' : 'save-pending'}`} title="Jetzt speichern (Strg+S)" aria-live="polite" onClick={() => void saveCurrentWork()}>{saveState === 'saved' ? <CheckCircle2 size={11} /> : saveState === 'saving' ? <LoaderCircle className="spin" size={11} /> : <CircleAlert size={11} />}{saveState === 'saved' ? 'Gespeichert' : saveState === 'saving' ? 'Speichert …' : 'Speicherfehler'}</button><span title={isWeb ? 'Die Daten bleiben in diesem Browser' : 'Dein Vault bleibt auf deinem Gerät'}><ShieldCheck size={11} /> {isWeb ? 'Im Browser gespeichert' : 'Lokal & privat'}</span></div>
       </footer>
 
       {historyOpen && (
@@ -3463,7 +3596,21 @@ export default function App({ startupBootstrap }: AppProps) {
         </div>
       )}
       {paletteOpen && <Suspense fallback={null}><SafeBoundary name="Befehlspalette"><CommandPalette actions={paletteActions} onClose={() => setPaletteOpen(false)} /></SafeBoundary></Suspense>}
-      {settingsOpen && <Suspense fallback={null}><SafeBoundary name="Einstellungen" fallbackTitle="Die Einstellungen sind abgestürzt"><SettingsModal platform={window.fanotes.platform} settings={settings} vaultPath={bootstrap.vaultPath} updateState={updateState} onChange={applySettings} onClose={() => setSettingsOpen(false)} onSelectVault={() => void selectVault()} onOpenGlyphenWerk={() => { setSettingsOpen(false); openGlyphenWerk() }} onImportTraining={importTrainingFromSettings} onImportOneNote={importOneNote} onCheckUpdate={checkForUpdates} onDownloadUpdate={downloadUpdate} onInstallUpdate={installUpdate} onResetSettings={resetSettings} onResetAppData={resetAppData} onOpenBugReport={() => { setSettingsOpen(false); setBugReportOpen(true) }} remoteSupportSession={remoteSupportSession} onRemoteSupportStart={startRemoteSupport} onRemoteSupportStop={stopRemoteSupport} /></SafeBoundary></Suspense>}
+      {settingsOpen && <Suspense fallback={null}><SafeBoundary name="Einstellungen" fallbackTitle="Die Einstellungen sind abgestürzt"><SettingsModal platform={window.fanotes.platform} settings={settings} vaultPath={bootstrap.vaultPath} updateState={updateState} onChange={applySettings} onClose={() => setSettingsOpen(false)} onSelectVault={() => void selectVault()} onOpenGlyphenWerk={() => { setSettingsOpen(false); openGlyphenWerk() }} onImportTraining={importTrainingFromSettings} onImportOneNote={importOneNote} onCheckUpdate={checkForUpdates} onDownloadUpdate={downloadUpdate} onInstallUpdate={installUpdate} onResetSettings={resetSettings} onResetAppData={resetAppData} onOpenBugReport={() => { setSettingsOpen(false); setBugReportOpen(true) }} onConvertNotes={convertAllNotesToCurrentStandard} remoteSupportSession={remoteSupportSession} onRemoteSupportStart={startRemoteSupport} onRemoteSupportStop={stopRemoteSupport} /></SafeBoundary></Suspense>}
+      <ConfirmDialog
+        open={Boolean(confirmRequest)}
+        title={confirmRequest?.title}
+        message={confirmRequest?.message ?? ''}
+        confirmLabel={confirmRequest?.confirmLabel}
+        onCancel={() => {
+          confirmRequest?.resolve(false)
+          setConfirmRequest(null)
+        }}
+        onConfirm={() => {
+          confirmRequest?.resolve(true)
+          setConfirmRequest(null)
+        }}
+      />
       {bugReportOpen && <Suspense fallback={null}><SafeBoundary name="Fehlerbericht"><BugReportModal version={updateState.currentVersion} platform={window.fanotes.platform} onClose={() => setBugReportOpen(false)} onSent={() => toast('Fehlerbericht wurde an fanotes.fasrv.ch gesendet.', 'success')} /></SafeBoundary></Suspense>}
       {lmStudioOpen && <Suspense fallback={null}><AiPanel settings={settings} note={lmStudioNote} vaultNotes={vaultNoteReferences} onSettingsChange={(changes) => applySettings({ ...settingsRef.current, ...changes })} onApply={applyLmStudioResult} onClose={() => setLmStudioOpen(false)} /></Suspense>}
       {worksheetImportOpen && <div className="modal-backdrop worksheet-import-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setWorksheetImportOpen(false) }}>

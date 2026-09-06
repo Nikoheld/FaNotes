@@ -36,6 +36,7 @@ import {
   pdfStartPageForLoad,
   visiblePageCssWindow,
 } from '../lib/pdfDocument'
+import { pdfPageScrollIntoViewBlock } from '../lib/pdfOpenCamera'
 import { PDF_INKING_CLASS, PDF_TOOLBAR_SLOT_ID } from '../lib/pdfInkHit'
 import { layoutOffsetInScroller, readUsedSheetZoom, resolvePaperZoomScroller, watchSheetZoom } from '../lib/paperView'
 
@@ -588,10 +589,16 @@ export function PdfNoteView({
 
   const appliedScale = zoomMode === 'fit-page' ? fitPageScale : scale
 
+  useLayoutEffect(() => {
+    if (!pdf) return
+    const node = pagesRef.current?.querySelector(`[data-pdf-page="${currentPage}"]`)
+    node?.scrollIntoView({ block: pdfPageScrollIntoViewBlock('center'), behavior: 'auto' })
+  }, [pdf, path])
+
   const scrollToPage = useCallback((page: number) => {
     const target = Math.max(1, Math.min(pageCount || 1, Math.round(page)))
     const node = pagesRef.current?.querySelector(`[data-pdf-page="${target}"]`)
-    node?.scrollIntoView({ block: 'start', behavior: 'smooth' })
+    node?.scrollIntoView({ block: pdfPageScrollIntoViewBlock('center'), behavior: 'smooth' })
     setCurrentPage(target)
     setPageDraft(String(target))
   }, [pageCount])
