@@ -18,7 +18,10 @@ const {
   interactOpsFromBugEvents,
   overlayGlobalPointerLockOn,
   overlayHitEnabled,
+  overlayIdleInKeyboardMode,
   overlayInert,
+  overlayInkLoadOnNoteSwitch,
+  overlaySessionAfterInkReady,
   overlaySessionAfterNoteSwitch,
 } = await server.ssrLoadModule('/src/lib/overlayInteract.ts')
 
@@ -50,6 +53,7 @@ try {
     'Eingang/arbeitsblätter_progII.md',
   ])
   assert.equal(notes.includes('Eingang/Untitled note 4.md'), false)
+  assert.equal(fixture.events.some((event) => event.kind === 'pen' || event.kind === 'tool'), false)
 
   assert.equal(overlayHitEnabled(false), false)
   assert.equal(overlayHitEnabled(true), true)
@@ -57,6 +61,8 @@ try {
   assert.equal(overlayInert(true, true), false)
   assert.equal(overlayGlobalPointerLockOn(true, false), false)
   assert.equal(overlayGlobalPointerLockOn(true, true), true)
+  assert.equal(overlayInkLoadOnNoteSwitch(false), false)
+  assert.equal(overlayInkLoadOnNoteSwitch(true), true)
   assert.deepEqual(
     overlaySessionAfterNoteSwitch({ drawingOpen: false, session: { key: 4, document: null } }),
     { key: 0, document: null },
@@ -64,6 +70,14 @@ try {
   assert.equal(
     overlaySessionAfterNoteSwitch({ drawingOpen: true, session: { key: 4, document: null } }).key,
     4,
+  )
+  assert.deepEqual(
+    overlaySessionAfterInkReady(false, { key: 8, document: { id: 'famd' } }),
+    { key: 0, document: null },
+  )
+  assert.deepEqual(
+    overlaySessionAfterInkReady(true, { key: 8, document: { id: 'famd' } }),
+    { key: 8, document: { id: 'famd' } },
   )
 
   const ops = interactOpsFromBugEvents(fixture.events)
@@ -76,6 +90,7 @@ try {
 
   let state = emptyInteractState()
   assert.equal(chromePressable(state), true)
+  assert.equal(overlayIdleInKeyboardMode(state), true)
 
   const frames = []
   for (const op of ops) {
@@ -87,10 +102,13 @@ try {
       assert.equal(state.overlayHits, false)
       assert.equal(state.inert, true)
       assert.equal(chromePressable(state), true)
+      assert.equal(overlayIdleInKeyboardMode(state), true)
+      assert.equal(overlayInkLoadOnNoteSwitch(state.drawingOpen), false)
       frames.push({
         noteId: state.noteId,
         sessionKey: state.sessionKey,
         pressable: chromePressable(state),
+        idle: overlayIdleInKeyboardMode(state),
       })
     }
   }
@@ -98,14 +116,22 @@ try {
   const stale = applyInteractOp(state, { type: 'ink-ready', requestId: 1 })
   assert.equal(stale.sessionKey, 0, 'stale FAMD/ink load from an earlier note must not remount')
   assert.equal(chromePressable(stale), true)
+  assert.equal(overlayIdleInKeyboardMode(stale), true)
 
-  state = applyInteractOp(state, { type: 'ink-ready', requestId: state.loadGeneration })
-  assert.equal(state.sessionKey, state.loadGeneration)
-  assert.equal(state.noteId, 'Eingang/Untitled note 5.famd')
-  assert.equal(state.inert, true)
-  assert.equal(state.globalLock, false)
-  assert.equal(state.overlayHits, false)
-  assert.equal(chromePressable(state), true)
+  const remounted = applyInteractOp(state, { type: 'ink-ready', requestId: state.loadGeneration })
+  assert.equal(remounted.noteId, 'Eingang/Untitled note 5.famd')
+  assert.equal(remounted.sessionKey, 0, 'keyboard-mode FAMD/ink-ready must not remount the overlay')
+  assert.equal(overlayIdleInKeyboardMode(remounted), true)
+  assert.equal(chromePressable(remounted), true)
+  assert.equal(remounted.inert, true)
+  assert.equal(remounted.globalLock, false)
+  assert.equal(remounted.overlayHits, false)
+  assert.notEqual(
+    remounted.sessionKey,
+    remounted.loadGeneration,
+    'the 2026.9.13 remount-on-ink-ready outcome must no longer be the result',
+  )
+  state = remounted
 
   const captured = applyInteractOp(state, { type: 'capture', leftover: true })
   assert.equal(chromePressable(captured), false)
@@ -115,12 +141,15 @@ try {
     noteId: 'Eingang/Untitled note 5.famd',
   })
   assert.equal(state.leftoverCapture, false)
+  assert.equal(state.sessionKey, 0)
   assert.equal(chromePressable(state), true)
+  assert.equal(overlayIdleInKeyboardMode(state), true)
 
   const stiftOn = applyInteractOp(state, { type: 'stift', open: true })
   assert.equal(stiftOn.overlayHits, true)
   assert.equal(stiftOn.globalLock, true)
   assert.equal(stiftOn.inert, false)
+  assert.equal(overlayInkLoadOnNoteSwitch(stiftOn.drawingOpen), true)
   const switchedOn = applyInteractOp(stiftOn, {
     type: 'note-switch',
     requestId: stiftOn.loadGeneration + 1,
@@ -128,8 +157,14 @@ try {
   })
   assert.ok(switchedOn.sessionKey > 0)
   assert.equal(switchedOn.drawingOpen, true)
+  const stiftReady = applyInteractOp(switchedOn, { type: 'ink-ready', requestId: switchedOn.loadGeneration })
+  assert.equal(stiftReady.sessionKey, switchedOn.loadGeneration)
+  assert.equal(overlayIdleInKeyboardMode(stiftReady), true)
 
   assert.match(appSource, /overlaySessionAfterNoteSwitch\(switched\)/)
+  assert.match(appSource, /overlayInkLoadOnNoteSwitch\(drawingOpenRef\.current\)/)
+  assert.match(appSource, /overlaySessionAfterInkReady\(/)
+  assert.match(appSource, /drawingSessionFromLoad\(requestId, document\)/)
   assert.match(boardSource, /overlayInert\(inline, inputActive\)/)
   assert.match(boardSource, /overlayGlobalPointerLockOn\(inline, inputActive\)/)
   assert.match(boardSource, /pointer-events:none!important/)
@@ -147,6 +182,7 @@ try {
     lastSessionKey: state.sessionKey,
     lastInert: state.inert,
     lastGlobalLock: state.globalLock,
+    lastIdle: overlayIdleInKeyboardMode(state),
   }))
   console.log('latest-bug ok')
 } finally {

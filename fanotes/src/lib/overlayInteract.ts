@@ -1,7 +1,7 @@
 /**
  * Keyboard-mode note switches must stay clickable and must not remount the
- * heavy ink overlay until that note's ink is ready. Report 1788698537115:
- * “Everything laggs, i can't press most of the things.”
+ * heavy ink overlay — including after that note's FAMD/ink load. Report
+ * 1788698537115: “Everything laggs, i can't press most of the things.”
  */
 
 export type OverlaySession<T = unknown> = { key: number; document: T | null }
@@ -29,14 +29,34 @@ export const overlayGlobalPointerLockOn = (inline: boolean, inputActive: boolean
 )
 
 /**
+ * FAMD/sidecar ink load on a note switch is only for Stift mode. Keyboard-mode
+ * switches must not parse or remount the overlay — that remount is the remaining
+ * 1788698537115 lag after leftover capture was dropped.
+ */
+export const overlayInkLoadOnNoteSwitch = (drawingOpen: boolean) => drawingOpen === true
+
+/**
  * Keyboard mode unmounts the overlay on the switch itself. Stift-on keeps a
- * ready session. Ink-ready later remounts for the live note only.
+ * ready session.
  */
 export const overlaySessionAfterNoteSwitch = <T>(
   switched: OverlaySwitchState<T>,
 ): OverlaySession<T> => (
   switched.drawingOpen === true
     ? switched.session
+    : { key: 0, document: null }
+)
+
+/**
+ * Ink-ready may remount only while Stift is on. Keyboard mode keeps key 0 so a
+ * finished FAMD/ink read cannot put DrawingBoard back over the chrome.
+ */
+export const overlaySessionAfterInkReady = <T>(
+  drawingOpen: boolean,
+  loaded: OverlaySession<T>,
+): OverlaySession<T> => (
+  drawingOpen === true
+    ? loaded
     : { key: 0, document: null }
 )
 
@@ -68,6 +88,11 @@ export const chromePressable = (state: InteractState) => (
   && state.globalLock === overlayGlobalPointerLockOn(true, state.drawingOpen)
   && state.inert === overlayInert(true, state.drawingOpen)
   && (state.drawingOpen === true || state.overlayHits === false)
+)
+
+/** Keyboard mode must not keep a mounted overlay — remounting it is the lag. */
+export const overlayIdleInKeyboardMode = (state: Pick<InteractState, 'drawingOpen' | 'sessionKey'>) => (
+  state.drawingOpen === true || state.sessionKey === 0
 )
 
 export type InteractOp =
@@ -113,10 +138,14 @@ export const applyInteractOp = (state: InteractState, op: InteractOp): InteractS
     }
   }
   if (op.requestId !== state.loadGeneration) return state
+  const session = overlaySessionAfterInkReady(
+    state.drawingOpen,
+    { key: Math.max(1, op.requestId), document: null },
+  )
   return {
     ...state,
     leftoverCapture: false,
-    sessionKey: Math.max(1, op.requestId),
+    sessionKey: session.key,
     globalLock: overlayGlobalPointerLockOn(true, state.drawingOpen),
     inert: overlayInert(true, state.drawingOpen),
     overlayHits: overlayHitEnabled(state.drawingOpen),

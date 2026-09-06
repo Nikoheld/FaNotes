@@ -91,7 +91,11 @@ import {
   type SubjectBookPlacement,
   type SubjectBookRecord,
 } from './lib/subjectBook'
-import { overlaySessionAfterNoteSwitch } from './lib/overlayInteract'
+import {
+  overlayInkLoadOnNoteSwitch,
+  overlaySessionAfterInkReady,
+  overlaySessionAfterNoteSwitch,
+} from './lib/overlayInteract'
 import { drawingSessionFromLoad, INK_OVERLAY_CRASH_TITLE, INK_TOOLBAR_SLOT_ID, overlayAfterNoteSwitch, PDF_TOOLBAR_SLOT_ID, penModeToolbarSlot } from './lib/pdfInkHit'
 import { APP_VERSION } from './lib/appVersion'
 import { defaultSettingsForPlatform } from './defaults'
@@ -738,13 +742,17 @@ export default function App({ startupBootstrap }: AppProps) {
     drawingOpenRef.current = switched.drawingOpen
     setDrawingOpen(switched.drawingOpen)
     setDrawingSession(overlaySessionAfterNoteSwitch(switched))
+    if (!overlayInkLoadOnNoteSwitch(drawingOpenRef.current)) return
 
     let idleId: number | null = null
     let startTimer: number | null = null
     const load = () => {
       const apply = (document: DrawingLibraryDocument | null) => {
         if (requestId !== drawingLoadRequestRef.current || activePathRef.current !== path) return
-        setDrawingSession(drawingSessionFromLoad(requestId, document))
+        setDrawingSession(overlaySessionAfterInkReady(
+          drawingOpenRef.current,
+          drawingSessionFromLoad(requestId, document),
+        ))
       }
       const fromSidecar = () => {
         if (!id) {
@@ -758,7 +766,10 @@ export default function App({ startupBootstrap }: AppProps) {
           .then((embedded) => {
             if (requestId !== drawingLoadRequestRef.current || activePathRef.current !== path) return
             if (embedded) {
-              setDrawingSession(drawingSessionFromLoad(requestId, embedded))
+              setDrawingSession(overlaySessionAfterInkReady(
+                drawingOpenRef.current,
+                drawingSessionFromLoad(requestId, embedded),
+              ))
               return
             }
             fromSidecar()

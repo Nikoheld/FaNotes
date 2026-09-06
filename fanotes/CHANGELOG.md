@@ -2,6 +2,10 @@
 
 ## Unveröffentlicht
 
+## 2026.9.14
+
+- **Notizwechsel ohne Stift bleibt leicht:** Beim schnellen Wechseln — auch zu .famd — wird die schwere Stiftebene nicht nachgeladen. Die Oberfläche laggt nicht und bleibt klickbar.
+
 ## 2026.9.13
 
 - **Notizwechsel bleibt klickbar:** Beim schnellen Wechseln — auch zu .famd — laggt die Oberfläche nicht mehr und fängt keine Klicks. Die Stiftebene sitzt erst, wenn die Notiz bereit ist; ohne Stift kann sie Tastatur, Leiste und Notizen nicht blockieren.
