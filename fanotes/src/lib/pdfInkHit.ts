@@ -53,7 +53,11 @@ export const portalInkToolbar = <Node, Host extends { isConnected?: boolean }>(
 ): Node | null => {
   const live = inkToolbarPortalHost(host, drawingOpen)
   if (!live) return null
-  return createPortal(node, live)
+  try {
+    return createPortal(node, live)
+  } catch {
+    return null
+  }
 }
 
 /** Pen mode always docks ink tools. PDF pager/search chrome is Keyboard-only. */
@@ -86,16 +90,16 @@ export type OverlayLifetimeOp<T = unknown> =
   | { type: 'host'; host: ToolbarHostNode | null }
 
 /**
- * Note switch: keep a ready overlay session (never key 0) and drop the old
- * toolbar host so a detached portal target cannot survive the remount.
+ * Note switch: keep a ready overlay session (never key 0). Stift stays on if it
+ * was on. A detached toolbar slot is dropped so createPortal cannot throw.
  */
 export const overlayAfterNoteSwitch = <T>(
-  _previous: OverlayLifetimeState<T>,
+  previous: OverlayLifetimeState<T>,
   requestId: number,
 ): OverlayLifetimeState<T> => ({
   session: drawingSessionFromLoad(requestId, null),
-  drawingOpen: false,
-  host: null,
+  drawingOpen: previous.drawingOpen === true,
+  host: liveInkToolbarHost(previous.host),
 })
 
 export const applyOverlayLifetimeOp = <T>(

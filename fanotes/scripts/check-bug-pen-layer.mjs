@@ -125,8 +125,9 @@ try {
     host: stale,
   }, 2)
   assert.equal(inkBoardReady(switched.session.key), true, 'note switch must leave a ready overlay, not key 0')
-  assert.equal(switched.drawingOpen, false)
-  assert.equal(switched.host, null)
+  assert.equal(switched.drawingOpen, true, 'Stift stays on across the note switch')
+  assert.equal(switched.host, null, 'detached slot cannot remain the portal host')
+  assert.equal(portalInkToolbar(createPortalOrThrow, { toolbar: true }, stale, switched.drawingOpen), null)
   assert.notEqual(switched.session.key, 0)
 
   state = switched

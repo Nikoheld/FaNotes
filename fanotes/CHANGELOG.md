@@ -2,6 +2,10 @@
 
 ## Unveröffentlicht
 
+## 2026.9.12
+
+- **Stiftebene bleibt beim Notizwechsel:** Wenn der Stift an ist und du die Notiz wechselst, bleibt die Handschrift-Ebene. Ein abgehängtes Leisten-Ziel stürzt sie nicht mehr ab.
+
 ## 2026.9.11
 
 - **Stiftebene stürzt nicht mehr ab:** Beim Wechseln leerer Notizen und An- und Ausschalten des Stifts bleibt die Handschrift-Ebene. Sie fällt nicht mehr auf „Die Stiftebene ist abgestürzt“ zurück.
