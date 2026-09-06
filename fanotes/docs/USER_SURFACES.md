@@ -56,6 +56,8 @@ Command-palette action ids walked from `src/App.tsx`: `new-note`, `import-pdf-no
 | Paper zoom / rotation | `src/lib/paperView.ts` | `export const clampViewZoom` |
 | 500% zoom handwriting sharpness | `src/lib/paperGrow.ts` | `export const inkOverlayPixelSize` / `inkViewQualityZoom` |
 | 500% zoom keep-vs-window | `src/lib/pdfInkHit.ts` | `export const resolveInkOverlayWindow` |
+| Ink window CSS follows the paper | `src/lib/pdfInkHit.ts` | `export const inkWindowLayoutStyle` |
+| Grow then redraw stays on paper | `src/components/DrawingBoard.tsx` | `drawFrameRef.current = null` |
 | 500% zoom PDF page sharpness | `src/lib/pdfDocument.ts` | `export const paintBoxForPage` / `visiblePageCssWindow` |
 | Zoom-in writing stay-put | `src/lib/paperView.ts` | `export const applyPaperZoomStayPut` |
 | Fast paper-scroll text stay-put | `src/lib/paperCaretScroll.ts` | `export const lockPaperViewportScrollStayPut` |

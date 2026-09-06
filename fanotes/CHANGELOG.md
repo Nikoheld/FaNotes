@@ -2,12 +2,11 @@
 
 ## Unveröffentlicht
 
-- **Send Data kommt an:** Die Seite nimmt Send-Data-Pakete unter `/api/v1/send-data` an, statt sie mit 405 zu verwerfen. Nginx und der Dienst speichern nur den begrenzten Linux/Hyprland-Kontext.
-- **PDF öffnet auch hochkant in der Mitte:** Eine hohe PDF-Seite, die nur nach unten übersteht, liegt beim Öffnen in der Bildmitte. Es reicht nicht mehr, nur die Breite zu prüfen.
-
 ## 2026.9.16
 
 - **Tinte bleibt beim Wachsen stehen:** Wenn das Blatt beim Schreiben am Rand wächst, rutscht oder dehnt sich die Handschrift nicht mehr — auch nicht beim Scrollen danach. Die Tintenfläche wird nach dem Wachsen wieder neu gezeichnet und behält die Blattbreite, statt der alten Bitmap zu folgen. Radieren, Rückgängig und erneutes Öffnen zeigen die Tinte an derselben Stelle. Beim Zoom wächst das Blatt um einen Schritt statt bis zum Anschlag.
+- **Send Data kommt an:** Die Seite nimmt Send-Data-Pakete unter `/api/v1/send-data` an, statt sie mit 405 zu verwerfen. Nginx und der Dienst speichern nur den begrenzten Linux/Hyprland-Kontext.
+- **PDF öffnet auch hochkant in der Mitte:** Eine hohe PDF-Seite, die nur nach unten übersteht, liegt beim Öffnen in der Bildmitte. Es reicht nicht mehr, nur die Breite zu prüfen.
 - **Jede Seite hat Statistik:** Jede Notiz merkt sich, wann sie erstellt und geändert wurde und wie lange du auf der Seite warst. Das siehst du in der Gliederung und unten in der Leiste.
 - **Alte Notizen scharf umstellen:** In den Einstellungen gibt es „Alles umstellen“. Vorhandene Handschrift kommt auf den aktuellen scharfen Standard. Text, Tinte, Arbeitsblätter und Statistik bleiben erhalten — es wird zuerst eine Kopie geprüft.
 - **Löschen fragt in FaNotes:** „Wirklich löschen?“ kommt als FaNotes-Dialog in der Mitte, nicht mehr als Hyprland-Fenster oben in der Ecke. Mit Send Data merkt FaNotes die Hyprland-Umgebung und nutzt genau diesen Dialog.
