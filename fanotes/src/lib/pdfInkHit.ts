@@ -270,6 +270,12 @@ export const inkWindowCanvasBox = (
  * CSS box matching inkWindowCanvasBox. Inline `top/height: 0%/100%` would
  * override `.lw-tablet-canvas { inset: var(--paper-scroll-room) }` and paint
  * 0–1 ink onto the extra-room board (marks agree only at y=0.5).
+ *
+ * `width` must be explicit. A canvas is a replaced element: with `width: auto`
+ * and a non-auto `height` the used width is `height × bitmap aspect ratio`
+ * and `right` is ignored, so the CSS box followed the backing store instead
+ * of the paper. Any moment where the bitmap and the window slice disagreed
+ * (grow, window move) stretched the painted ink sideways.
  */
 export const inkWindowLayoutStyle = (window: InkWindow) => {
   const pad = INK_WINDOW_PAD_CSS
@@ -281,7 +287,7 @@ export const inkWindowLayoutStyle = (window: InkWindow) => {
     height: full ? paper : `calc(${span} * ${paper})`,
     left: pad,
     right: pad,
-    width: 'auto',
+    width: paper,
     bottom: 'auto',
   } as const
 }

@@ -1903,11 +1903,27 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       observer.disconnect()
       scroller?.removeEventListener('scroll', settleInkWindow)
       scroller?.removeEventListener('scrollend', onScrollEnd)
-      if (inkWindowIdleRef.current !== null) window.clearTimeout(inkWindowIdleRef.current)
-      if (resizeDebounceRef.current !== null) window.clearTimeout(resizeDebounceRef.current)
-      if (drawFrameRef.current !== null) cancelAnimationFrame(drawFrameRef.current)
-      if (visualGrowFrameRef.current !== null) cancelAnimationFrame(visualGrowFrameRef.current)
-
+      if (inkWindowIdleRef.current !== null) {
+        window.clearTimeout(inkWindowIdleRef.current)
+        inkWindowIdleRef.current = null
+      }
+      if (resizeDebounceRef.current !== null) {
+        window.clearTimeout(resizeDebounceRef.current)
+        resizeDebounceRef.current = null
+      }
+      // This cleanup also runs when `redraw` changes identity (every page
+      // grow), not only on unmount. scheduleRedraw() treats a non-null handle
+      // as "frame pending", so a cancelled-but-kept id disabled every later
+      // scheduled redraw: the ink window moved on scroll while the committed
+      // bitmap stayed stale, and the ink only snapped back on an erase.
+      if (drawFrameRef.current !== null) {
+        cancelAnimationFrame(drawFrameRef.current)
+        drawFrameRef.current = null
+      }
+      if (visualGrowFrameRef.current !== null) {
+        cancelAnimationFrame(visualGrowFrameRef.current)
+        visualGrowFrameRef.current = null
+      }
       if (pendingSolverTapRef.current) window.clearTimeout(pendingSolverTapRef.current.timer)
     }
   }, [flushPaintedLayoutGrow, redraw, resolvePaperElement, syncInkWindow])
@@ -2530,7 +2546,10 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         originX: sourceOriginXRef.current,
         originY: sourceOriginYRef.current,
       },
-      painted: { width: surface.width, height: surface.height },
+      // Layout box, like setPageExtent/ensureWriteRoom. The zoomed visual
+      // rect is larger than source at zoom > 1, so every grow made the next
+      // sample grow again until the page hit WRITE_CAP.
+      painted: { width: surface.offsetWidth, height: surface.offsetHeight },
       existingCount,
       pendingStale: pendingStaleLayoutRef.current,
       stayPut: {

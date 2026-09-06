@@ -49,6 +49,7 @@
     "check:jump-filter": "node scripts/check-jump-filter.mjs",
     "check:midstroke-grow": "node scripts/check-midstroke-grow.mjs",
     "check:ink-stay-put": "node scripts/check-ink-stay-put.mjs",
+    "check:ink-render-stay": "node scripts/check-ink-render-stay.mjs",
     "check:text-stay-put": "node scripts/check-text-stay-put.mjs",
     "check:fast-scroll-text": "node scripts/check-fast-scroll-text.mjs",
     "check:zoom-stay-put": "node scripts/check-zoom-stay-put.mjs",
