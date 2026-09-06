@@ -31,7 +31,7 @@ import {
   type PaperViewSnapshot,
 } from '../lib/paperView'
 import { SCROLL_ROOM } from '../lib/noteCanvas'
-import { pdfOpenCamera } from '../lib/pdfOpenCamera'
+import { pdfOpenCameraFromScroller } from '../lib/pdfOpenCamera'
 import {
   captureGhostTextAroundLock,
   ghostTextDiagnosticFields,
@@ -124,31 +124,40 @@ export function PaperView({ children, className = '', viewKey, showHud = true }:
       clampPaperScrollerToZoomedSheet(scroller, plane)
     }
     scroller.addEventListener('scroll', clampScroll, { passive: true })
-    const plane = scroller.querySelector<HTMLElement>('.paper-sheet-plane')
-    const paper = scroller.querySelector<HTMLElement>('.unified-paper')
-    const room = Number.parseFloat(plane?.style.getPropertyValue('--paper-scroll-room') || '') || SCROLL_ROOM
-    const pageWidth = paper?.offsetWidth || Math.max(0, (plane?.offsetWidth || 0) - room * 2)
-    const pageHeight = paper?.offsetHeight || Math.max(0, (plane?.offsetHeight || 0) - room * 2)
-    if (scroller.scrollLeft === 0 && scroller.scrollTop === 0 && scroller.scrollWidth > scroller.clientWidth) {
-      if (pageWidth > 8 && pageHeight > 8 && scroller.clientWidth > 8 && scroller.clientHeight > 8) {
-        const camera = pdfOpenCamera({
-          pageWidth,
-          pageHeight,
-          viewWidth: scroller.clientWidth,
-          viewHeight: scroller.clientHeight,
-          room,
-        })
-        scroller.scrollLeft = camera.x
-        scroller.scrollTop = camera.y
-      } else {
-        scroller.scrollLeft = room
-        scroller.scrollTop = room
-      }
+    const applyOpenCamera = () => {
+      const plane = scroller.querySelector<HTMLElement>('.paper-sheet-plane')
+      const paper = scroller.querySelector<HTMLElement>('.unified-paper')
+      const room = Number.parseFloat(plane?.style.getPropertyValue('--paper-scroll-room') || '') || SCROLL_ROOM
+      const pageWidth = paper?.offsetWidth || Math.max(0, (plane?.offsetWidth || 0) - room * 2)
+      const pageHeight = paper?.offsetHeight || Math.max(0, (plane?.offsetHeight || 0) - room * 2)
+      const camera = pdfOpenCameraFromScroller({
+        scrollLeft: scroller.scrollLeft,
+        scrollTop: scroller.scrollTop,
+        scrollWidth: scroller.scrollWidth,
+        scrollHeight: scroller.scrollHeight,
+        clientWidth: scroller.clientWidth,
+        clientHeight: scroller.clientHeight,
+        pageWidth,
+        pageHeight,
+        room,
+      })
+      if (!camera) return false
+      scroller.scrollLeft = camera.x
+      scroller.scrollTop = camera.y
+      return true
+    }
+    let openCameraId = 0
+    if (!applyOpenCamera()) {
+      openCameraId = window.requestAnimationFrame(() => {
+        applyOpenCamera()
+        clampScroll()
+      })
     }
     clampScroll()
     return () => {
       scroller.removeEventListener('scroll', clampScroll)
       if (flingId) window.cancelAnimationFrame(flingId)
+      if (openCameraId) window.cancelAnimationFrame(openCameraId)
     }
   }, [viewKey])
 

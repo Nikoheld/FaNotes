@@ -52,6 +52,46 @@ export const pdfStartBlockCamera = (input: PdfOpenCameraInput): PdfOpenCamera =>
   }
 }
 
+export type PdfOpenScrollerInput = {
+  scrollLeft: number
+  scrollTop: number
+  scrollWidth: number
+  scrollHeight: number
+  clientWidth: number
+  clientHeight: number
+  pageWidth: number
+  pageHeight: number
+  room?: number
+}
+
+/**
+ * First paint at the extra-room origin. Tall pages overflow vertically only,
+ * so width-only cameras still leave the sheet below the viewport.
+ */
+export const pdfOpenCameraFromScroller = (input: PdfOpenScrollerInput): PdfOpenCamera | null => {
+  if (input.scrollLeft !== 0 || input.scrollTop !== 0) return null
+  if (!(input.pageWidth > 8 && input.pageHeight > 8 && input.clientWidth > 8 && input.clientHeight > 8)) {
+    return null
+  }
+  const room = Number.isFinite(input.room) ? Math.max(0, Number(input.room)) : SCROLL_ROOM
+  const overflowsX = input.scrollWidth > input.clientWidth || input.pageWidth + room * 2 > input.clientWidth
+  const overflowsY = input.scrollHeight > input.clientHeight || input.pageHeight + room * 2 > input.clientHeight
+  if (!overflowsX && !overflowsY) return pdfStartBlockCamera({
+    pageWidth: input.pageWidth,
+    pageHeight: input.pageHeight,
+    viewWidth: input.clientWidth,
+    viewHeight: input.clientHeight,
+    room,
+  })
+  return pdfOpenCamera({
+    pageWidth: input.pageWidth,
+    pageHeight: input.pageHeight,
+    viewWidth: input.clientWidth,
+    viewHeight: input.clientHeight,
+    room,
+  })
+}
+
 export const pdfPageCenterInViewport = (
   camera: { x: number; y: number },
   input: PdfOpenCameraInput,

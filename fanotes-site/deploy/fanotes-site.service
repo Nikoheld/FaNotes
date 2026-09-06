@@ -21,6 +21,7 @@ Environment=FANOTES_UPDATE_SIGNING_KEY=/etc/fanotes/update-signing-private.pem
 Environment=FANOTES_BACKUP_DIR=/var/lib/fanotes-backups
 Environment=FANOTES_BACKUP_ENROLLMENT_TOKEN_PATH=/etc/fanotes/backup-enrollment-token
 Environment=FANOTES_ANALYTICS_DIR=/var/lib/fanotes-analytics
+Environment=FANOTES_SEND_DATA_DIR=/var/lib/fanotes-send-data
 ExecStart=/usr/bin/node /opt/fanotes-site/server.mjs
 Restart=on-failure
 RestartSec=3s
@@ -47,6 +48,7 @@ ReadOnlyPaths=/mnt/truenas/Fabio/FaNotes-Arch-x86_64
 ReadOnlyPaths=/etc/fanotes
 ReadWritePaths=/var/lib/fanotes-backups
 ReadWritePaths=/var/lib/fanotes-analytics
+ReadWritePaths=/var/lib/fanotes-send-data
 
 [Install]
 WantedBy=multi-user.target

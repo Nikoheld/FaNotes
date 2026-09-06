@@ -1310,6 +1310,10 @@ export default function App({ startupBootstrap }: AppProps) {
           skipped += 1
           continue
         }
+        if (!result.source || result.source === source) {
+          skipped += 1
+          continue
+        }
         await window.fanotes.writeFile(readPath, result.source)
         converted += 1
         setTabs((current) => current.map((tab) => tab.path === path ? { ...tab, content: result.source, savedContent: result.source } : tab))

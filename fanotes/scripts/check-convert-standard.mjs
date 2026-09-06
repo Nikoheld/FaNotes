@@ -85,10 +85,15 @@ const runOnce = () => {
   assert.equal(fromSource.note.markdown, markdown)
   assert.deepEqual(noteInkStrokes(fromSource.note.ink), strokes)
   assert.deepEqual(fromSource.note.pageStats, pageStats)
+  assert.match(fromSource.source, /"overlayQuality":/)
+  const alreadyCurrent = convertNoteSourceToCurrentStandard(fromSource.source)
+  assert.equal(alreadyCurrent.converted, false, 'a second convert must leave already-current notes untouched')
+  assert.equal(alreadyCurrent.source, fromSource.source)
   return {
     strokes: noteInkStrokes(converted.ink).length,
     quality: noteInkQuality(converted.ink),
     droppedApplyFails: dropped,
+    roundTripKept: fromSource.source.includes(markdown.slice(0, 12)),
   }
 }
 

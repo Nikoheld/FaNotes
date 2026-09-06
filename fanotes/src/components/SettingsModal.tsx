@@ -1089,7 +1089,7 @@ export function SettingsModal({
                 <div id="settings-send-data">
                 <SettingRow
                   title="Send Data"
-                  description="Schickt laufend gebündelte Logs, Laufzeit-Nutzerdaten und Linux/Hyprland-Kontext an fanotes.fasrv.ch, damit FaNotes — besonders unter Arch Linux Hyprland — verbessert werden kann. Standard aus. Es geht nicht der ganze Vault mit; Intervalle und Grösse sind begrenzt, damit der Akku nicht leidet."
+                  description="Schickt laufend gebündelte Logs, Laufzeit-Nutzerdaten und Linux/Hyprland-Kontext an fanotes.fasrv.ch. Wenn Send Data an ist, nutzt FaNotes denselben Hyprland-Kontext lokal: Löschfragen bleiben im Fenster statt als Hyprland-Dialog oben in der Ecke. Standard aus. Es geht nicht der ganze Vault mit; Intervalle und Grösse sind begrenzt, damit der Akku nicht leidet."
                 >
                   <Toggle
                     label="Send Data"

@@ -88,7 +88,8 @@ export const convertNoteSourceToCurrentStandard = (
   source: string,
   apply?: (upgraded: ConvertibleNote) => ConvertibleNote,
 ) => {
-  const { markdown, payload } = parseFamd(typeof source === 'string' ? source : '')
+  const original = typeof source === 'string' ? source : ''
+  const { markdown, payload } = parseFamd(original)
   const note: ConvertibleNote = {
     markdown,
     ink: payload?.ink ?? null,
@@ -96,20 +97,46 @@ export const convertNoteSourceToCurrentStandard = (
     pageStats: payload?.pageStats,
   }
   if (!isOldPixelatedNote(note.ink) && note.ink) {
-    return { source: typeof source === 'string' ? source : '', converted: false, note }
+    return { source: original, converted: false, note }
   }
   if (!note.ink || noteInkStrokes(note.ink).length === 0) {
-    return { source: typeof source === 'string' ? source : '', converted: false, note }
+    return { source: original, converted: false, note }
   }
   const converted = convertNoteToCurrentStandard(note, apply)
   const nextPayload = payload ?? emptyFamdPayload()
+  const nextSource = serializeFamd(converted.markdown, {
+    ...nextPayload,
+    ink: converted.ink,
+    worksheets: converted.worksheets,
+    ...(converted.pageStats ? { pageStats: converted.pageStats } : {}),
+  })
+  const roundTrip = parseFamd(nextSource)
+  if (roundTrip.markdown !== converted.markdown) {
+    throw new Error('convert round-trip dropped markdown')
+  }
+  if (!sameJson(noteInkStrokes(roundTrip.payload?.ink), noteInkStrokes(converted.ink))) {
+    throw new Error('convert round-trip dropped or changed ink strokes')
+  }
+  if (!sameJson(roundTrip.payload?.worksheets ?? [], converted.worksheets)) {
+    throw new Error('convert round-trip dropped worksheets')
+  }
+  if (converted.pageStats && !sameJson(roundTrip.payload?.pageStats, converted.pageStats)) {
+    throw new Error('convert round-trip dropped page stats')
+  }
+  if (payload?.noteLinks && !sameJson(roundTrip.payload?.noteLinks, payload.noteLinks)) {
+    throw new Error('convert round-trip dropped note links')
+  }
+  if (payload?.noteBackups && !sameJson(roundTrip.payload?.noteBackups, payload.noteBackups)) {
+    throw new Error('convert round-trip dropped note backups')
+  }
+  if (payload?.paperStyle && roundTrip.payload?.paperStyle !== payload.paperStyle) {
+    throw new Error('convert round-trip dropped paper style')
+  }
+  if (noteInkQuality(roundTrip.payload?.ink) + 1e-6 < CURRENT_NOTE_INK_QUALITY) {
+    throw new Error('convert round-trip did not keep current ink quality')
+  }
   return {
-    source: serializeFamd(converted.markdown, {
-      ...nextPayload,
-      ink: converted.ink,
-      worksheets: converted.worksheets,
-      ...(converted.pageStats ? { pageStats: converted.pageStats } : {}),
-    }),
+    source: nextSource,
     converted: true,
     note: converted,
   }
