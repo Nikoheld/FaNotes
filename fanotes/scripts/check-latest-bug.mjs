@@ -267,7 +267,8 @@ try {
   assert.match(boardSource, /applyVisualGrowCorrection\(/)
   assert.match(boardSource, /schedulePaperVisualGrowRefresh\(/)
   assert.match(boardSource, /const canvases = \[canvasRef\.current, committedCanvasRef\.current\]/)
-  assert.match(boardSource, /committedCanvasDirtyRef\.current = true\n    redraw\(true\)/)
+  // The grow step re-plans the ink slice and paints in the same call.
+  assert.match(boardSource, /planInkWindowNow\(\)\n    canvasQualityKeyRef\.current = ''\n    redraw\(true\)\n    return true/)
   assert.doesNotMatch(boardSource, /schedulePageLayoutRefresh\(/)
   assert.match(caretSource, /export const applyVisualGrowOp/)
   assert.match(caretSource, /export const refreshPaperCanvasSurface/)

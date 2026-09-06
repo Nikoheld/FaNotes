@@ -31,6 +31,11 @@ const {
   pdfPaintDeviceScale,
   visiblePageCssWindow,
 } = await server.ssrLoadModule('/src/lib/pdfDocument.ts')
+const {
+  measureVisibleInkLayout,
+  planInkWindow,
+  placeInkWindow,
+} = await server.ssrLoadModule('/src/lib/inkWindowPlan.ts')
 
 const A4 = { width: 900, height: 1273 }
 const VIEW = { width: 1200, height: 800 }
@@ -106,6 +111,42 @@ const runOnce = () => {
     `500% must not be a 3× bitmap stretched to 5× (${inkPerVisual.toFixed(3)} vs stretched ${stretched3x.toFixed(3)})`,
   )
 
+  // The board plans the slice in layout px: at 500 % an A4 sheet is sliced to
+  // three (layout) viewports, the slice bitmap stays near DPR, and at 100 %
+  // the same planner keeps one full bitmap.
+  const measured500 = measureVisibleInkLayout({
+    scrollerTop: 0,
+    scrollerHeight: VIEW.height,
+    paperTop: 0,
+    paperVisualHeight: A4.height * ZOOM_500,
+    paperLayoutHeight: A4.height,
+  })
+  assert.ok(measured500)
+  assert.ok(Math.abs(measured500.viewportHeight - VIEW.height / ZOOM_500) < 1e-9)
+  const planned500 = planInkWindow({
+    paperHeight: A4.height,
+    viewportHeight: measured500.viewportHeight,
+    visible: measured500.visible,
+    current: null,
+  })
+  assert.ok(planned500.window, '500% A4 must be sliced by the layout planner')
+  assert.ok(Math.abs(planned500.window.height - 3 * VIEW.height / ZOOM_500) < 1e-6)
+  const slicePixels = inkOverlayPixelSize(A4.width, planned500.window.height, ZOOM_500, true, DPR)
+  assert.ok(
+    pixelsPerVisualCss(slicePixels.width, A4.width, ZOOM_500) >= DPR * 0.85,
+    `planned 500% slice must stay near DPR, got ${pixelsPerVisualCss(slicePixels.width, A4.width, ZOOM_500).toFixed(3)}`,
+  )
+  const placed500 = placeInkWindow(planned500.window, A4.height, slicePixels.height)
+  assert.ok(!isFullInkWindow(placed500.window))
+  assert.ok(Math.abs(placed500.window.y0 * placed500.virtualHeight - placed500.topPx) < 1e-6)
+  const planned100 = planInkWindow({
+    paperHeight: A4.height,
+    viewportHeight: VIEW.height,
+    visible: { top: 0, bottom: VIEW.height },
+    current: null,
+  })
+  assert.equal(planned100.window, null, '100% A4 stays one full bitmap')
+
   const ink300 = inkOverlayPixelSize(A4.width, A4.height * inkWindowSpan(layoutInkWindow({
     paperHeight: A4.height,
     viewHeight: VIEW.height,
@@ -165,9 +206,11 @@ const runOnce = () => {
   const paperGrow = readFileSync(join(root, 'src', 'lib', 'paperGrow.ts'), 'utf8')
   const pdfDoc = readFileSync(join(root, 'src', 'lib', 'pdfDocument.ts'), 'utf8')
   assert.match(board, /inkOverlayPixelSize\(/)
-  assert.match(board, /layoutInkWindow\(/)
-  assert.match(board, /resolveInkOverlayWindow\(/)
-  assert.match(board, /syncInkWindow\(true\)/)
+  // The slice is planned in layout px and painted in the same pass; the zoom
+  // settle re-plans it around the visible sheet before the sharp repaint.
+  assert.match(board, /planInkWindow\(/)
+  assert.match(board, /placeInkWindow\(/)
+  assert.match(board, /planInkWindowNow\(true\)\n      canvasQualityKeyRef\.current = ''\n      committedCanvasDirtyRef\.current = true\n      redraw\(true\)/)
   assert.match(board, /viewZoomRef\.current/)
   assert.match(inkHit, /export const resolveInkOverlayWindow/)
   assert.match(inkHit, /isFullInkWindow\(window\)\) return false/)

@@ -55,7 +55,10 @@ Command-palette action ids walked from `src/App.tsx`: `new-note`, `import-pdf-no
 | Paper styles | `src/lib/paperStyles.ts` | `export const PAPER_STYLES` |
 | Paper zoom / rotation | `src/lib/paperView.ts` | `export const clampViewZoom` |
 | 500% zoom handwriting sharpness | `src/lib/paperGrow.ts` | `export const inkOverlayPixelSize` / `inkViewQualityZoom` |
-| 500% zoom keep-vs-window | `src/lib/pdfInkHit.ts` | `export const resolveInkOverlayWindow` |
+| 500% zoom keep-vs-window | `src/lib/inkWindowPlan.ts` | `export const planInkWindow` |
+| Ink slice in paper layout px (bottom of the sheet at zoom) | `src/lib/inkWindowPlan.ts` | `export const measureVisibleInkLayout` |
+| Slice move copies the bitmap, paints one band | `src/components/DrawingBoard.tsx` | `const shiftInkWindowBitmap` |
+| Slice box + bitmap change in one pass (no jump frame) | `src/components/DrawingBoard.tsx` | `const planInkWindowNow` |
 | Ink window CSS follows the paper | `src/lib/pdfInkHit.ts` | `export const inkWindowLayoutStyle` |
 | Grow then redraw stays on paper | `src/components/DrawingBoard.tsx` | `drawFrameRef.current = null` |
 | 500% zoom PDF page sharpness | `src/lib/pdfDocument.ts` | `export const paintBoxForPage` / `visiblePageCssWindow` |
