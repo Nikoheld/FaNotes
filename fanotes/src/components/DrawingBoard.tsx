@@ -106,7 +106,7 @@ import {
   mapClientToPaperPoint,
   resolveInkPointerDown,
 } from '../lib/inkSampleMap'
-import { drawInkStroke as paintInkStroke } from '../lib/inkStrokePaint'
+import { drawInkStroke as paintInkStroke, inkStrokePaintMargin } from '../lib/inkStrokePaint'
 import {
   INLINE_INK_ACTIVE_CLASS,
   INK_TOOLBAR_SLOT_ID,
@@ -184,6 +184,7 @@ import {
   inkOverlayPixelSize,
   INK_MAX_VIEW_QUALITY_ZOOM,
   INK_MIN_INLINE_QUALITY,
+  inkStrokePaintScale,
   inkWidthNeedsAnchor,
   pendingGrowScale,
   resolvePaintedLayoutGrow,
@@ -333,12 +334,29 @@ const applyInkWindowToCanvases = (canvases: Array<HTMLCanvasElement | null>, win
   }
 }
 
-const wipeLiveInkCanvas = (canvas: HTMLCanvasElement | null) => {
+/**
+ * Clear the live layer. With the box of everything painted since the last
+ * wipe (device px) only that area is cleared; the slice bitmap can be several
+ * viewports tall, and clearing all of it after every letter costs a full
+ * texture upload per pen lift.
+ */
+const wipeLiveInkCanvas = (
+  canvas: HTMLCanvasElement | null,
+  painted: { x0: number; y0: number; x1: number; y1: number } | null = null,
+) => {
   if (!canvas || !canvas.width || !canvas.height) return
   const context = canvas.getContext('2d', { alpha: true })
   if (!context) return
   context.setTransform(1, 0, 0, 1, 0, 0)
-  context.clearRect(0, 0, canvas.width, canvas.height)
+  if (!painted) {
+    context.clearRect(0, 0, canvas.width, canvas.height)
+    return
+  }
+  const x0 = Math.max(0, Math.floor(painted.x0) - 1)
+  const y0 = Math.max(0, Math.floor(painted.y0) - 1)
+  const x1 = Math.min(canvas.width, Math.ceil(painted.x1) + 1)
+  const y1 = Math.min(canvas.height, Math.ceil(painted.y1) + 1)
+  if (x1 > x0 && y1 > y0) context.clearRect(x0, y0, x1 - x0, y1 - y0)
 }
 
 const releasePointerCaptureSafe = (target: EventTarget | null, pointerId: number) => {
@@ -818,6 +836,7 @@ const drawInkStroke = (
   startSegment = 1,
   sourceWidth = SOURCE_WIDTH,
   layoutWidth = 0,
+  endSegment = stroke.points.length,
 ) => paintInkStroke(
   context,
   {
@@ -830,7 +849,75 @@ const drawInkStroke = (
   startSegment,
   sourceWidth,
   layoutWidth,
+  endSegment,
 )
+
+/** Bitmap-space box (paint coordinates, inclusive edges). */
+type LiveInkRect = { x0: number; y0: number; x1: number; y1: number }
+
+const unionLiveInkRect = (a: LiveInkRect | null, b: LiveInkRect | null): LiveInkRect | null => {
+  if (!a) return b
+  if (!b) return a
+  return { x0: Math.min(a.x0, b.x0), y0: Math.min(a.y0, b.y0), x1: Math.max(a.x1, b.x1), y1: Math.max(a.y1, b.y1) }
+}
+
+const liveInkRectsTouch = (a: LiveInkRect, b: LiveInkRect) => (
+  a.x0 <= b.x1 && b.x0 <= a.x1 && a.y0 <= b.y1 && b.y0 <= a.y1
+)
+
+/**
+ * The closing segment of a stroke (no point after it yet) curves around a
+ * control point extrapolated past its start by up to this share of the
+ * previous segment — outside the hull of the points themselves.
+ */
+const INK_CLOSING_CONTROL_REACH = .92 * .4
+
+/**
+ * Where segments `from`..`to` of a stroke (point indexes, clamped) can paint:
+ * the points' box grown by the brush margin, snapped to whole bitmap px so a
+ * clear and its repair meet on pixel edges. Smoothing control points stay
+ * inside the hull of the neighbouring points, so include one point on each
+ * side for the curve shape — plus the extrapolated control of the closing
+ * segment when the range reaches it.
+ */
+const liveInkSegmentBox = (
+  points: ReadonlyArray<{ x: number; y: number }>,
+  from: number,
+  to: number,
+  width: number,
+  height: number,
+  margin: number,
+): LiveInkRect | null => {
+  const last = points.length - 1
+  const start = Math.max(0, Math.min(from, to) - 1)
+  const end = Math.min(last, Math.max(from, to) + 1)
+  if (start > end) return null
+  let x0 = Number.POSITIVE_INFINITY
+  let y0 = Number.POSITIVE_INFINITY
+  let x1 = Number.NEGATIVE_INFINITY
+  let y1 = Number.NEGATIVE_INFINITY
+  const include = (px: number, py: number) => {
+    if (px < x0) x0 = px
+    if (py < y0) y0 = py
+    if (px > x1) x1 = px
+    if (py > y1) y1 = py
+  }
+  for (let index = start; index <= end; index += 1) include(points[index].x * width, points[index].y * height)
+  if (end === last && last >= 2) {
+    const previous = points[last - 1]
+    const before = points[last - 2]
+    include(
+      (previous.x + (previous.x - before.x) * INK_CLOSING_CONTROL_REACH) * width,
+      (previous.y + (previous.y - before.y) * INK_CLOSING_CONTROL_REACH) * height,
+    )
+  }
+  return {
+    x0: Math.floor(x0 - margin),
+    y0: Math.floor(y0 - margin),
+    x1: Math.ceil(x1 + margin),
+    y1: Math.ceil(y1 + margin),
+  }
+}
 
 const renderDocument = (
   canvas: HTMLCanvasElement,
@@ -1095,8 +1182,15 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const redoRef = useRef<InkStroke[][]>([])
   const drawFrameRef = useRef<number | null>(null)
   const activeRenderedPointCountRef = useRef(0)
-  const liveSmoothAtRef = useRef(0)
   const liveCanvasHasInkRef = useRef(false)
+  // Paint-space box of last frame's volatile tail (the newest segment plus the
+  // predicted continuation). It is cleared and repaired before the next paint.
+  const liveVolatileRectRef = useRef<LiveInkRect | null>(null)
+  // Device-space box of everything on the live layer since the last wipe.
+  const liveInkBoundsRef = useRef<LiveInkRect | null>(null)
+  // Point count and prediction presence of the last live paint: an input
+  // event that added nothing (all samples filtered) needs no repaint.
+  const liveTailRef = useRef<{ count: number; predicted: boolean }>({ count: 0, predicted: false })
   const lastPenContactRef = useRef(0)
   const tabletPanRef = useRef<{ pointerId: number; x: number; y: number } | null>(null)
   const undoNowRef = useRef<() => void>(() => {})
@@ -1380,6 +1474,116 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     setRecognitionScope('page')
   }, [])
 
+  /**
+   * Paint the active stroke onto the live layer incrementally.
+   *
+   * Every segment whose smoothing neighbour is known is painted exactly once,
+   * in its final shape. The newest segment (its neighbour is still unknown)
+   * and the predicted continuation form a volatile tail: their box is
+   * remembered, cleared before the next paint (clipped, so nothing outside
+   * is touched) and the permanent segments underneath are repainted. This
+   * replaces clearing the whole slice bitmap and re-stroking the whole stroke
+   * on every frame — which grew with the length of the word being written.
+   *
+   * `activeRenderedPointCountRef` = 0 means the bitmap must be replaced
+   * (new stroke, or a remeasure/slice move made the old pixels stale).
+   */
+  const paintLiveInk = useCallback((
+    context: CanvasRenderingContext2D,
+    stroke: InkStroke,
+    previewPoints: ReadonlyArray<Pick<StrokePoint, 'x' | 'y' | 'pressure'>>,
+  ) => {
+    const { width: pixelWidth, height: pixelHeight, virtualHeight, layoutWidth } = canvasPixelSizeRef.current
+    if (!pixelWidth || !pixelHeight || !virtualHeight) return false
+    if (!stroke.points.length) return true
+    const paintTop = inkWindowRef.current.y0 * virtualHeight
+    const smoothing = settings.smoothing
+    const sourceWidthNow = sourceWidthRef.current
+    const margin = inkStrokePaintMargin(
+      { ...stroke, symbolPaths: stroke.symbolId ? artSymbolById.get(stroke.symbolId)?.paths : undefined },
+      inkStrokePaintScale(pixelWidth, layoutWidth > 1 ? layoutWidth : sourceWidthNow),
+    )
+    const toDevice = (rect: LiveInkRect): LiveInkRect => ({ x0: rect.x0, y0: rect.y0 - paintTop, x1: rect.x1, y1: rect.y1 - paintTop })
+    const remember = (rect: LiveInkRect | null) => {
+      if (rect) liveInkBoundsRef.current = unionLiveInkRect(liveInkBoundsRef.current, toDevice(rect))
+    }
+    const rendered = activeRenderedPointCountRef.current
+    if (
+      rendered !== 0
+      && liveTailRef.current.count === stroke.points.length
+      && !liveTailRef.current.predicted
+      && !previewPoints.length
+    ) return true
+    liveTailRef.current = { count: stroke.points.length, predicted: previewPoints.length > 0 }
+    context.imageSmoothingEnabled = false
+    // replaceLive: predicted points and remeasures never overdraw a stale
+    // bitmap — what they painted last frame is cleared before painting again.
+    const replaceLive = rendered === 0
+    if (replaceLive) {
+      if (liveCanvasHasInkRef.current) {
+        context.setTransform(1, 0, 0, 1, 0, 0)
+        context.clearRect(0, 0, pixelWidth, pixelHeight)
+      }
+      liveInkBoundsRef.current = null
+      liveVolatileRectRef.current = null
+    } else if (liveVolatileRectRef.current) {
+      const volatile = liveVolatileRectRef.current
+      liveVolatileRectRef.current = null
+      context.save()
+      context.setTransform(1, 0, 0, 1, 0, -paintTop)
+      context.beginPath()
+      context.rect(volatile.x0, volatile.y0, volatile.x1 - volatile.x0, volatile.y1 - volatile.y0)
+      context.clip()
+      context.clearRect(volatile.x0, volatile.y0, volatile.x1 - volatile.x0, volatile.y1 - volatile.y0)
+      // Restore the permanent segments the tail was painted over. Segment i
+      // joins points i-1 and i; runs of touching segments paint in one call.
+      let runStart = -1
+      for (let segment = 1; segment <= rendered; segment += 1) {
+        const touches = segment < rendered
+          && liveInkRectsTouch(volatile, liveInkSegmentBox(stroke.points, segment - 1, segment, pixelWidth, virtualHeight, margin)!)
+        if (touches && runStart < 0) runStart = segment
+        if (!touches && runStart >= 0) {
+          drawInkStroke(context, stroke, pixelWidth, virtualHeight, smoothing, runStart, sourceWidthNow, layoutWidth, segment)
+          runStart = -1
+        }
+      }
+      context.restore()
+    }
+    context.setTransform(1, 0, 0, 1, 0, -paintTop)
+    const count = stroke.points.length
+    // Segments below permanentEnd have their smoothing neighbour and are final.
+    const permanentEnd = Math.max(1, count - 1)
+    const startSegment = Math.max(1, activeRenderedPointCountRef.current)
+    if (permanentEnd > startSegment) {
+      drawInkStroke(context, stroke, pixelWidth, virtualHeight, smoothing, startSegment, sourceWidthNow, layoutWidth, permanentEnd)
+      remember(liveInkSegmentBox(stroke.points, startSegment - 1, permanentEnd - 1, pixelWidth, virtualHeight, margin))
+    }
+    activeRenderedPointCountRef.current = permanentEnd
+    // Volatile tail: the newest segment (or the single dot of a fresh stroke)
+    // plus the predicted continuation.
+    const preview: InkStroke = previewPoints.length
+      ? { ...stroke, points: [...stroke.points, ...previewPoints as StrokePoint[]] }
+      : stroke
+    const tailStart = Math.max(1, count - 1)
+    if (preview.points.length === 1) {
+      drawInkStroke(context, preview, pixelWidth, virtualHeight, smoothing, 1, sourceWidthNow, layoutWidth)
+      liveVolatileRectRef.current = liveInkSegmentBox(preview.points, 0, 0, pixelWidth, virtualHeight, margin)
+    } else {
+      drawInkStroke(context, preview, pixelWidth, virtualHeight, smoothing, tailStart, sourceWidthNow, layoutWidth)
+      liveVolatileRectRef.current = liveInkSegmentBox(preview.points, tailStart - 1, preview.points.length - 1, pixelWidth, virtualHeight, margin)
+    }
+    remember(liveVolatileRectRef.current)
+    liveCanvasHasInkRef.current = true
+    return true
+  }, [settings.smoothing])
+
+  const wipeLiveInk = useCallback(() => {
+    wipeLiveInkCanvas(canvasRef.current, liveInkBoundsRef.current)
+    liveInkBoundsRef.current = null
+    liveVolatileRectRef.current = null
+    liveCanvasHasInkRef.current = false
+  }, [])
+
   const redraw = useCallback((measureLayout = false) => {
     const canvas = canvasRef.current
     const committedCanvas = committedCanvasRef.current
@@ -1558,33 +1762,20 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     context.imageSmoothingQuality = activeStrokeRef.current ? 'low' : 'high'
     const activeStroke = activeStrokeRef.current
     if (!activeStroke) {
-      context.setTransform(1, 0, 0, 1, 0, 0)
-      context.clearRect(0, 0, pixelWidth, pixelHeight)
+      // Nothing live: the layer is already blank unless something painted
+      // since the last wipe — clearing a multi-viewport bitmap is not free.
+      if (liveCanvasHasInkRef.current) {
+        context.setTransform(1, 0, 0, 1, 0, 0)
+        context.clearRect(0, 0, pixelWidth, pixelHeight)
+      }
       activeRenderedPointCountRef.current = 0
       liveCanvasHasInkRef.current = false
+      liveInkBoundsRef.current = null
+      liveVolatileRectRef.current = null
       return
     }
-    if (activeRenderedPointCountRef.current === 0) {
-      context.setTransform(1, 0, 0, 1, 0, 0)
-      context.clearRect(0, 0, pixelWidth, pixelHeight)
-      liveCanvasHasInkRef.current = false
-    }
-    if (activeStroke.points.length > activeRenderedPointCountRef.current) {
-      context.setTransform(1, 0, 0, 1, 0, -inkWindow.y0 * virtualHeight)
-      drawInkStroke(
-        context,
-        activeStroke,
-        pixelWidth,
-        virtualHeight,
-        settings.smoothing,
-        Math.max(1, activeRenderedPointCountRef.current),
-        sourceWidth,
-        paintLayoutWidth || layoutWidth,
-      )
-      activeRenderedPointCountRef.current = activeStroke.points.length
-      liveCanvasHasInkRef.current = true
-    }
-  }, [inline, paperStyle, settings.smoothing, sourceHeight, sourceWidth])
+    paintLiveInk(context, activeStroke, [])
+  }, [inline, paintLiveInk, paperStyle, settings.smoothing, sourceHeight, sourceWidth])
 
   const commitStrokeToCanvas = useCallback((stroke: InkStroke) => {
     const canvas = committedCanvasRef.current
@@ -1927,10 +2118,10 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     canvasQualityKeyRef.current = ''
     committedCanvasDirtyRef.current = true
     activeRenderedPointCountRef.current = 0
-    wipeLiveInkCanvas(canvasRef.current)
+    wipeLiveInk()
     redraw(true)
     return true
-  }, [redraw, resolvePaperElement, scaleNormalizedSpace])
+  }, [redraw, resolvePaperElement, scaleNormalizedSpace, wipeLiveInk])
 
   useEffect(() => {
     mountedRef.current = true
@@ -2065,10 +2256,10 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     canvasQualityKeyRef.current = ''
     committedCanvasDirtyRef.current = true
     activeRenderedPointCountRef.current = 0
-    wipeLiveInkCanvas(canvasRef.current)
+    wipeLiveInk()
     redraw(true)
     return true
-  }, [redraw, scaleNormalizedSpace])
+  }, [redraw, scaleNormalizedSpace, wipeLiveInk])
   commitPendingGrowRemapRef.current = commitPendingGrowRemap
 
   /**
@@ -2456,12 +2647,11 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         lastCapturedPointerIdRef.current = null
         pointerBoundsRef.current = null
         activeStrokeRef.current = null
-        wipeLiveInkCanvas(canvas)
+        wipeLiveInk()
         activeRenderedPointCountRef.current = 0
-        liveCanvasHasInkRef.current = false
       }
     }
-  }, [inline, inputActive, paperView, resetView])
+  }, [inline, inputActive, paperView, resetView, wipeLiveInk])
 
   const eraseAt = useCallback((value: StrokePoint | StrokePoint[]) => {
     const before = strokesRef.current.length
@@ -2550,59 +2740,26 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     const canvas = canvasRef.current
     const stroke = activeStrokeRef.current
     if (!canvas || !stroke) return false
-    let { width: pixelWidth, height: pixelHeight, virtualHeight, layoutWidth } = canvasPixelSizeRef.current
+    let { width: pixelWidth, height: pixelHeight, virtualHeight } = canvasPixelSizeRef.current
     if (!pixelWidth || !pixelHeight || !virtualHeight) {
       redraw(true)
-      ;({ width: pixelWidth, height: pixelHeight, virtualHeight, layoutWidth } = canvasPixelSizeRef.current)
+      ;({ width: pixelWidth, height: pixelHeight, virtualHeight } = canvasPixelSizeRef.current)
     }
     if (!pixelWidth || !pixelHeight || !virtualHeight) return false
     const context = canvas.getContext('2d', { alpha: true })
     if (!context) return false
-    const inkWindow = inkWindowRef.current
-    const liveSmoothing = settings.smoothing
-    context.imageSmoothingEnabled = false
-    const added = stroke.points.length - activeRenderedPointCountRef.current
-    const resmooth = liveSmoothing > 0.04
-      && liveCanvasHasInkRef.current
-      && stroke.points.length - liveSmoothAtRef.current >= 5
-    // Predictions and remesures must replace the live bitmap. Incremental
-    // overdraw of predicted events leaves a ghost copy of the writing that
-    // only disappears after the canvases remount.
-    const replaceLive = resmooth || predicted.length > 0 || activeRenderedPointCountRef.current === 0
-    if (replaceLive) {
-      context.setTransform(1, 0, 0, 1, 0, 0)
-      context.clearRect(0, 0, pixelWidth, pixelHeight)
-      context.setTransform(1, 0, 0, 1, 0, -inkWindow.y0 * virtualHeight)
-      const previewPoints = collectPreviewInkPoints(
-        stroke.points,
-        predicted.map(pointFromEvent),
-      ) as StrokePoint[]
-      const preview: InkStroke = previewPoints.length
-        ? { ...stroke, points: [...stroke.points, ...previewPoints] }
-        : stroke
-      drawInkStroke(context, preview, pixelWidth, virtualHeight, liveSmoothing, 1, sourceWidthRef.current, layoutWidth)
-      activeRenderedPointCountRef.current = stroke.points.length
-      liveSmoothAtRef.current = stroke.points.length
-      liveCanvasHasInkRef.current = true
-    } else if (added > 0) {
-      context.setTransform(1, 0, 0, 1, 0, -inkWindow.y0 * virtualHeight)
-      drawInkStroke(
-        context,
-        stroke,
-        pixelWidth,
-        virtualHeight,
-        liveSmoothing,
-        Math.max(1, activeRenderedPointCountRef.current),
-        sourceWidthRef.current,
-        layoutWidth,
-      )
-      activeRenderedPointCountRef.current = stroke.points.length
-      liveCanvasHasInkRef.current = true
-    }
-    return true
-  }, [pointFromEvent, redraw, settings.smoothing])
+    // Predicted points only ever live in the volatile tail, which the next
+    // paint clears and repairs — never an incremental overdraw that would
+    // leave a ghost copy of the writing behind.
+    const previewPoints = predicted.length
+      ? collectPreviewInkPoints(stroke.points, predicted.map(pointFromEvent)) as StrokePoint[]
+      : []
+    return paintLiveInk(context, stroke, previewPoints)
+  }, [paintLiveInk, pointFromEvent, redraw])
 
-  const appendPointerEvent = useCallback((event: PointerEvent) => {
+  // deferPaint: the caller paints once for a whole batch of coalesced samples
+  // (one canvas pass per input event instead of one per sample).
+  const appendPointerEvent = useCallback((event: PointerEvent, deferPaint = false) => {
     const canvas = canvasRef.current
     const originEl = (inline
       ? (canvas?.closest('.unified-paper') as HTMLElement | null)
@@ -2693,13 +2850,13 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     if (jump === 'restart' && live) {
       live.points.splice(0, 1, point)
       activeRenderedPointCountRef.current = 0
-      wipeLiveInkCanvas(canvas)
+      wipeLiveInk()
       if (gestureToolRef.current === 'eraser') {
         eraseAt(point)
         return
       }
       gestureChangedRef.current = true
-      if (!paintActiveStrokeNow()) scheduleRedraw()
+      if (!deferPaint && !paintActiveStrokeNow()) scheduleRedraw()
       return
     }
     if (gestureToolRef.current === 'eraser') {
@@ -2729,7 +2886,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     }
     stroke.points.push(point)
     gestureChangedRef.current = true
-    if (!paintActiveStrokeNow()) scheduleRedraw()
+    if (!deferPaint && !paintActiveStrokeNow()) scheduleRedraw()
     armShapeDwell()
     // Writing toward the slice edge moves the slice now — a bitmap copy plus
     // one band, painted in this same event — so live ink is never clipped.
@@ -3133,7 +3290,6 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     gestureToolRef.current = pointerEraser ? 'eraser' : tool
     if (gestureToolRef.current === 'pen') {
       activeRenderedPointCountRef.current = 0
-      liveSmoothAtRef.current = 0
       activeStrokeRef.current = inkMode === 'drawing' ? {
           points: [],
           baseWidth: artWidth,
@@ -3196,14 +3352,14 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     if (gestureToolRef.current === 'eraser') {
       eraseAt(events.map(pointFromEvent).filter((point): point is StrokePoint => Boolean(point)))
     } else {
-      events.forEach(appendPointerEvent)
+      for (const sample of events) appendPointerEvent(sample, true)
       const predicted = event.nativeEvent.getPredictedEvents?.() ?? []
-      if (predicted.length) paintActiveStrokeNow(predicted)
+      if (activeStrokeRef.current && !paintActiveStrokeNow(predicted)) scheduleRedraw()
       // Grow the page ahead of the pen so writing never hits a hard bottom edge.
       const latest = activeStrokeRef.current?.points.at(-1)
       if (latest) ensureWriteRoom(latest.y, latest.x)
     }
-  }, [appendPointerEvent, ensureWriteRoom, eraseAt, inline, inputActive, paintActiveStrokeNow, pointFromEvent, resolvePaperElement, settings.penOnly])
+  }, [appendPointerEvent, ensureWriteRoom, eraseAt, inline, inputActive, paintActiveStrokeNow, pointFromEvent, resolvePaperElement, scheduleRedraw, settings.penOnly])
 
   const finishPointer = useCallback((event: ReactPointerEvent<HTMLElement> | PointerEvent) => {
     const pointerId = event.pointerId
@@ -3313,15 +3469,14 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       const point = solverDoubleTapPointRef.current
       solverDoubleTapPointRef.current = null
       activeStrokeRef.current = null
-      wipeLiveInkCanvas(canvasRef.current)
+      wipeLiveInk()
       activeRenderedPointCountRef.current = 0
-      liveCanvasHasInkRef.current = false
       endInteraction()
       if (event.type !== 'pointercancel') void openMathSolverAtPoint(point)
       scheduleRedraw()
       return
     }
-    if (resolveInkFinishSample(native)) appendPointerEvent(native)
+    if (resolveInkFinishSample(native)) appendPointerEvent(native, true)
     const heldLongEnough = performance.now() - shapeLastMoveAtRef.current >= readShapeSnapProfile().dwellMs
     clearShapeDwellTimer()
     const activeStroke = activeStrokeRef.current
@@ -3374,17 +3529,18 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       }
     }
     activeStrokeRef.current = null
-    wipeLiveInkCanvas(canvasRef.current)
+    wipeLiveInk()
     activeRenderedPointCountRef.current = 0
-    liveCanvasHasInkRef.current = false
     const didShapeSnap = shapeSnappedRef.current
     shapeSnappedRef.current = false
     endInteraction()
-    // If zoom changed during the stroke, upgrade the backing store once the pen lifts.
+    // If zoom changed during the stroke, upgrade the backing store once the
+    // pen lifts. Only a changed pixel size repaints the committed bitmap;
+    // the stroke itself was already appended to it. Repainting every stroke
+    // on the sheet after each letter made writing slow down as a page filled.
     queueMicrotask(() => {
       if (activeStrokeRef.current) return
       canvasQualityKeyRef.current = ''
-      committedCanvasDirtyRef.current = true
       redraw(true)
     })
     if (gestureChangedRef.current) {
@@ -3413,7 +3569,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     }
     if (gestureChangedRef.current) fitPageToInk()
     scheduleRedraw()
-  }, [analyzeMathCorrectionSelection, appendPointerEvent, bumpInkRevision, clearShapeDwellTimer, commitPendingSolverTap, commitStrokeToCanvas, fitPageToInk, flushPaintedLayoutGrow, inkMode, mathSolverEnabled, mode, openMathSolverAtPoint, pointFromEvent, readShapeSnapProfile, planInkWindowNow, redraw, scheduleRedraw, selectionPurpose, setDirty, settings.scribbleEraseSensitivity, sourceHeight, sourceWidth, trySnapActiveShape, updateHistoryState])
+  }, [analyzeMathCorrectionSelection, appendPointerEvent, bumpInkRevision, clearShapeDwellTimer, commitPendingSolverTap, commitStrokeToCanvas, fitPageToInk, flushPaintedLayoutGrow, inkMode, mathSolverEnabled, mode, openMathSolverAtPoint, pointFromEvent, readShapeSnapProfile, planInkWindowNow, redraw, scheduleRedraw, selectionPurpose, setDirty, settings.scribbleEraseSensitivity, sourceHeight, sourceWidth, trySnapActiveShape, updateHistoryState, wipeLiveInk])
 
   const readDraftingDisplay = useCallback((): DraftingDisplay => {
     const surface = surfaceRef.current
@@ -3472,9 +3628,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     }
     const commitReadyStroke = (stroke: InkStroke | null, label: string) => {
       activeStrokeRef.current = null
-      wipeLiveInkCanvas(canvasRef.current)
+      wipeLiveInk()
       activeRenderedPointCountRef.current = 0
-      liveCanvasHasInkRef.current = false
       if (!stroke || stroke.points.length < 2) {
         scheduleRedraw()
         return
@@ -3525,9 +3680,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     }
     if (event.type === 'cancel') {
       activeStrokeRef.current = null
-      wipeLiveInkCanvas(canvasRef.current)
+      wipeLiveInk()
       activeRenderedPointCountRef.current = 0
-      liveCanvasHasInkRef.current = false
       scheduleRedraw()
       return
     }
@@ -3541,7 +3695,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     const points = sampleCompassCircle(pose, sourceWidthRef.current, sourceHeightRef.current, display).map((point) => toPoint(point.x, point.y))
     beforeGestureRef.current = snapshotStrokes(strokesRef.current)
     commitReadyStroke(makeStroke(points), `Kreis ${formatMillimetres(pose.radiusMm)} gezeichnet.`)
-  }, [artBrush, artColor, artEffect, artOpacity, artWidth, bumpInkRevision, commitStrokeToCanvas, ensureWriteRoom, fitPageToInk, inkMode, paintActiveStrokeNow, penColor, penWidth, readDraftingDisplay, scheduleRedraw, setDirty, updateHistoryState])
+  }, [artBrush, artColor, artEffect, artOpacity, artWidth, bumpInkRevision, commitStrokeToCanvas, ensureWriteRoom, fitPageToInk, inkMode, paintActiveStrokeNow, penColor, penWidth, readDraftingDisplay, scheduleRedraw, setDirty, updateHistoryState, wipeLiveInk])
 
   /**
    * Hard-stop any in-progress pen/mouse stroke and scrub leftover pointer capture.
@@ -3582,9 +3736,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     } else if (activeStrokeRef.current) {
       activeStrokeRef.current = null
       pointerBoundsRef.current = null
-      wipeLiveInkCanvas(canvasRef.current)
+      wipeLiveInk()
       activeRenderedPointCountRef.current = 0
-      liveCanvasHasInkRef.current = false
       scheduleRedraw()
     }
     releaseInkPointerCaptures(
@@ -3659,9 +3812,9 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       if (gestureToolRef.current === 'eraser') {
         eraseAt(events.map(pointFromEvent).filter((point): point is StrokePoint => Boolean(point)))
       } else {
-        events.forEach(appendPointerEvent)
+        for (const sample of events) appendPointerEvent(sample, true)
         const predicted = event.getPredictedEvents?.() ?? []
-        if (predicted.length) paintActiveStrokeNow(predicted)
+        if (activeStrokeRef.current && !paintActiveStrokeNow(predicted)) scheduleRedraw()
         const latest = activeStrokeRef.current?.points.at(-1)
         if (latest) ensureWriteRoom(latest.y, latest.x)
       }
@@ -3758,7 +3911,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       releaseInkPointerCaptures(captureTargets(), activePointerRef.current)
       clearInkCursor()
     }
-  }, [appendPointerEvent, eraseAt, ensureWriteRoom, finishPointer, forceEndActivePointer, inline, inputActive, paintActiveStrokeNow, pointFromEvent])
+  }, [appendPointerEvent, eraseAt, ensureWriteRoom, finishPointer, forceEndActivePointer, inline, inputActive, paintActiveStrokeNow, pointFromEvent, scheduleRedraw])
 
   const handleWheel = useCallback((event: React.WheelEvent) => {
     const policy = applyWheelInkPolicy({

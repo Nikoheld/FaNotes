@@ -72,8 +72,28 @@ export const inkStrokeBitmapWidth = (
 ) => Math.max(INK_MIN_BITMAP_PX, pressureWidth(stroke, pressure) * scale)
 
 /**
+ * How far (bitmap px) any paint of this stroke can reach from its points:
+ * the widest pressure at the widest brush pass (watercolor, 1.48), the neon
+ * glow (a shadow blur fades out over about twice its radius), a symbol
+ * stamp's diagonal. Callers use it to clear and repaint only what a segment
+ * can have touched.
+ */
+export const inkStrokePaintMargin = (
+  stroke: Pick<InkPaintStroke, 'baseWidth' | 'pressureEnabled' | 'colorEffect' | 'symbolPaths' | 'brush' | 'purpose'>,
+  scale: number,
+) => {
+  if (stroke.symbolPaths?.length) return stroke.baseWidth * scale * Math.SQRT2 + 2
+  const widest = inkStrokeBitmapWidth(stroke, 1, scale) * 1.5
+  const glow = stroke.colorEffect === 'neon' ? Math.max(4, stroke.baseWidth * scale * .85) * 2 : 0
+  return widest / 2 + glow + 2
+}
+
+/**
  * One paint path for live/committed ink. Tests call this — a missing line is a
- * failed pixel assertion, not a CSS-scale guess.
+ * failed pixel assertion, not a CSS-scale guess. Segments `startSegment` up to
+ * (excluding) `endSegment` are painted; a segment's smoothing looks at the
+ * point after it in the full `points` array, so a range paints exactly like
+ * the same segments inside a whole-stroke paint.
  */
 export const drawInkStroke = (
   context: InkPaintContext,
@@ -84,9 +104,12 @@ export const drawInkStroke = (
   startSegment = 1,
   sourceWidth = 900,
   layoutWidth = 0,
+  endSegment = stroke.points.length,
 ) => {
   if (stroke.points.length === 0) return
   if (!(width > 0) || !(height > 0)) return
+  const lastSegment = Math.min(endSegment, stroke.points.length)
+  if (stroke.points.length > 1 && lastSegment <= Math.max(1, startSegment)) return
   const first = stroke.points[0]
   const layout = layoutWidth > 1 ? layoutWidth : width
   const scale = inkStrokePaintScale(width, layout > 1 ? layout : sourceWidth)
@@ -186,7 +209,7 @@ export const drawInkStroke = (
     return
   }
 
-  for (let index = Math.max(1, startSegment); index < stroke.points.length; index += 1) {
+  for (let index = Math.max(1, startSegment); index < lastSegment; index += 1) {
     const previous = stroke.points[index - 1]
     const point = stroke.points[index]
     const previousX = previous.x * width
