@@ -83,6 +83,12 @@ import {
 } from '../lib/recognitionModeSelection'
 import type { MathSolverAction, MathSolverResult } from '../lib/mathSolver'
 import { detectScribbleErase } from '../lib/scribbleErase'
+import {
+  FORM_DETECT_NOTICE_TEXT,
+  SCRIBBLE_ERASE_NOTICE_TEXT,
+  applyInkNoticeOp,
+  inkNoticeAutoClearDelayMs,
+} from '../lib/inkNotice'
 import { BUG_REPORT_PEN_SAMPLE_MS, buildPenDiagnosticEvent, diagnosticLog } from '../lib/bugReport'
 import { applyToolErase } from '../lib/toolErase'
 import {
@@ -112,6 +118,8 @@ import {
   markdownNoteInkOverlaySize,
   pdfOverlayPointFromClient,
   pdfOverlaySourceHeight,
+  liveInkToolbarHost,
+  portalInkToolbar,
   resolveInkToolbarHost,
   shouldSyncPdfOverlaySource,
 } from '../lib/pdfInkHit'
@@ -1123,6 +1131,17 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const [isImporting, setIsImporting] = useState(false)
   const [isResettingTraining, setIsResettingTraining] = useState(false)
   const [notice, setNotice] = useState<Notice | null>(null)
+  useEffect(() => {
+    const delay = inkNoticeAutoClearDelayMs(notice)
+    if (delay == null) return undefined
+    const timer = window.setTimeout(() => {
+      setNotice((current) => applyInkNoticeOp({
+        notice: current,
+        clearAt: inkNoticeAutoClearDelayMs(current) == null ? null : 0,
+      }, { type: 'tick', now: Date.now() }).notice)
+    }, delay)
+    return () => window.clearTimeout(timer)
+  }, [notice])
   const [mode, setMode] = useState<RecognitionPreference>(settings.recognitionMode)
   const [recognizedMode, setRecognizedMode] = useState<RecognitionMode>(
     settings.recognitionMode === 'auto' ? settings.lastRecognitionMode : settings.recognitionMode,
@@ -1164,19 +1183,15 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       setInkToolbarHost(null)
       return
     }
-    const readHost = () => (
-      resolveInkToolbarHost<HTMLElement>(document)
-      ?? document.getElementById(INK_TOOLBAR_SLOT_ID)
-    )
-    const host = readHost()
-    setInkToolbarHost(host)
-    if (host) return undefined
-    const observer = new MutationObserver(() => {
-      const next = readHost()
-      if (!next) return
-      setInkToolbarHost(next)
-      observer.disconnect()
-    })
+    const sync = () => {
+      const next = liveInkToolbarHost(
+        resolveInkToolbarHost<HTMLElement>(document)
+        ?? document.getElementById(INK_TOOLBAR_SLOT_ID),
+      )
+      setInkToolbarHost((current) => liveInkToolbarHost(current) === next ? current : next)
+    }
+    sync()
+    const observer = new MutationObserver(sync)
     observer.observe(document.body, { childList: true, subtree: true })
     return () => observer.disconnect()
   }, [inline, inputActive])
@@ -2405,7 +2420,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         if (shapeSnappedRef.current || !activeStrokeRef.current) return
         if (performance.now() - shapeLastMoveAtRef.current < profile.hintMs) return
         if (strokeLooksLikeShape(activeStrokeRef.current, sourceWidthRef.current, sourceHeightRef.current, settings.shapeSnapSensitivity ?? 50)) {
-          setNotice({ kind: 'info', text: 'Form erkannt — halte still, um sie zu glätten.' })
+          setNotice({ kind: 'info', text: FORM_DETECT_NOTICE_TEXT })
         }
       }, profile.hintMs)
     }
@@ -3265,7 +3280,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         scribbleHintShownRef.current = true
         setNotice({
           kind: 'success',
-          text: 'Durchkritzeln erkannt: Handschrift gelöscht. Mit Strg+Z kannst du sie sofort zurückholen.',
+          text: SCRIBBLE_ERASE_NOTICE_TEXT,
         })
       } else if (didShapeSnap) {
         setNotice({ kind: 'success', text: 'Form übernommen.' })
@@ -5296,7 +5311,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         </div>}
       </div>
         )
-        if (inline) return inkToolbarHost && inputActive ? createPortal(toolbar, inkToolbarHost) : null
+        if (inline) return portalInkToolbar(createPortal, toolbar, inkToolbarHost, inputActive)
         return toolbar
       })()}
 
@@ -5875,7 +5890,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       <div className={`lw-draw-notice is-${notice.kind} ${inline ? 'is-viewport-chrome' : ''}`} role="status">
         {notice.kind === 'success' ? <Check size={15} /> : notice.kind === 'error' ? <CircleAlert size={15} /> : <Sparkles size={15} />}
         <span>{notice.text}</span>
-        <button type="button" aria-label="Hinweis schließen" onClick={() => setNotice(null)}><X size={14} /></button>
+        <button type="button" aria-label="Hinweis schließen" onClick={() => setNotice(applyInkNoticeOp({ notice, clearAt: null }, { type: 'close' }).notice)}><X size={14} /></button>
       </div>
       )}
 

@@ -2,6 +2,11 @@
 
 ## Unveröffentlicht
 
+## 2026.9.11
+
+- **Stiftebene stürzt nicht mehr ab:** Beim Wechseln leerer Notizen und An- und Ausschalten des Stifts bleibt die Handschrift-Ebene. Sie fällt nicht mehr auf „Die Stiftebene ist abgestürzt“ zurück.
+- **Hinweise verschwinden von selbst:** „Durchkritzeln erkannt“ und „Form erkannt“ bleiben nicht kleben. Sie gehen nach kurzer Zeit weg — oder sofort über Schließen.
+
 ## 2026.9.10
 
 - **Schrift kann nicht verrutschen:** Getippte Schrift bleibt auf denselben Papierpunkten. Schwenken, Verlängern, extra Kameraraum, verschachtelte Editor-Ebene und Nachwachsen können sie nicht bewegen. Nur ein neues Ursprungspad darf sie verschieben — und die Kamera rückt um genau dasselbe mit.

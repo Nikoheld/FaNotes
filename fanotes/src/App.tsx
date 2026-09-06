@@ -91,7 +91,7 @@ import {
   type SubjectBookPlacement,
   type SubjectBookRecord,
 } from './lib/subjectBook'
-import { drawingSessionFromLoad, INK_TOOLBAR_SLOT_ID, PDF_TOOLBAR_SLOT_ID, penModeToolbarSlot } from './lib/pdfInkHit'
+import { drawingSessionFromLoad, INK_OVERLAY_CRASH_TITLE, INK_TOOLBAR_SLOT_ID, overlayAfterNoteSwitch, PDF_TOOLBAR_SLOT_ID, penModeToolbarSlot } from './lib/pdfInkHit'
 import { APP_VERSION } from './lib/appVersion'
 import { defaultSettingsForPlatform } from './defaults'
 import { PaperStylePicker } from './components/PaperStylePicker'
@@ -719,14 +719,24 @@ export default function App({ startupBootstrap }: AppProps) {
   useEffect(() => {
     const requestId = ++drawingLoadRequestRef.current
     drawingDirtyRef.current = false
-    drawingOpenRef.current = false
-    setDrawingOpen(false)
-    setDrawingSession({ key: 0, document: null })
     const path = activeTab?.path
     const id = activeTab ? noteInkId(activeTab.content) : null
     const initialNoteLoad = Boolean(path && initialDrawingLoadRef.current)
     if (path) initialDrawingLoadRef.current = false
-    if (!path) return
+    if (!path) {
+      drawingOpenRef.current = false
+      setDrawingOpen(false)
+      setDrawingSession({ key: 0, document: null })
+      return
+    }
+    const switched = overlayAfterNoteSwitch({
+      session: { key: 0, document: null },
+      drawingOpen: drawingOpenRef.current,
+      host: null,
+    }, requestId)
+    drawingOpenRef.current = switched.drawingOpen
+    setDrawingOpen(switched.drawingOpen)
+    setDrawingSession(switched.session)
 
     let idleId: number | null = null
     let startTimer: number | null = null
@@ -3318,7 +3328,11 @@ export default function App({ startupBootstrap }: AppProps) {
                     </SafeBoundary>
                   </Suspense>)}
                   {drawingSession.key > 0 && <Suspense fallback={drawingOpen ? <div className="inline-ink-loading"><LoaderCircle className="spin" size={18} /> Stiftebene wird geladen …</div> : null}>
-                    <SafeBoundary name="Handschrift" fallbackTitle="Die Stiftebene ist abgestürzt">
+                    <SafeBoundary
+                      key={`stiftebene:${activeTab.path}:${drawingSession.key}`}
+                      name="Handschrift"
+                      fallbackTitle={INK_OVERLAY_CRASH_TITLE}
+                    >
                       <DrawingBoard
                         ref={drawingBoardRef}
                         key={drawingSession.key}

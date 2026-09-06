@@ -5,16 +5,55 @@ export const PDF_TOOLBAR_SLOT_ID = 'fanotes-pdf-toolbar-slot'
 /** Top editor-bar slot for docked ink tools, including Piktogramme on PDF+Stift. */
 export const INK_TOOLBAR_SLOT_ID = 'fanotes-ink-toolbar-slot'
 
+type ToolbarHostNode = { id?: string; isConnected?: boolean }
+
 type ToolbarHostRoot = {
-  getElementById?: (id: string) => { id?: string } | null
-  querySelector?: (selector: string) => { id?: string } | null
+  getElementById?: (id: string) => ToolbarHostNode | null
+  querySelector?: (selector: string) => ToolbarHostNode | null
 } | null | undefined
 
+/** SafeBoundary title when the overlay throws. A remount must drop this fallback. */
+export const INK_OVERLAY_CRASH_TITLE = 'Die Stiftebene ist abgestürzt'
+
+/** Only a document-connected slot may receive the docked ink portal. */
+export const liveInkToolbarHost = <T extends { isConnected?: boolean }>(
+  host: T | null | undefined,
+): T | null => {
+  if (!host) return null
+  if (host.isConnected === false) return null
+  return host
+}
+
 /** Docked ink bar host. Pen mode on a PDF note uses this slot, never an empty PDF pager. */
-export const resolveInkToolbarHost = <T extends { id?: string }>(root: ToolbarHostRoot) => {
+export const resolveInkToolbarHost = <T extends ToolbarHostNode>(root: ToolbarHostRoot) => {
   if (!root) return null
   const host = root.getElementById?.(INK_TOOLBAR_SLOT_ID) ?? root.querySelector?.(`#${INK_TOOLBAR_SLOT_ID}`)
-  return host as T | null
+  return liveInkToolbarHost(host as T | null)
+}
+
+/**
+ * Portal target for docked ink tools. A detached slot (note switch remounts the
+ * toolbar-context div) must not be passed to createPortal — that throw is the
+ * intermittent “Die Stiftebene ist abgestürzt” fallback.
+ */
+export const inkToolbarPortalHost = <T extends { isConnected?: boolean }>(
+  host: T | null | undefined,
+  drawingOpen: boolean,
+): T | null => {
+  if (!drawingOpen) return null
+  return liveInkToolbarHost(host)
+}
+
+/** createPortal only into a live host. Detached nodes are skipped, not thrown. */
+export const portalInkToolbar = <Node, Host extends { isConnected?: boolean }>(
+  createPortal: (node: Node, host: Host) => Node,
+  node: Node,
+  host: Host | null | undefined,
+  drawingOpen: boolean,
+): Node | null => {
+  const live = inkToolbarPortalHost(host, drawingOpen)
+  if (!live) return null
+  return createPortal(node, live)
 }
 
 /** Pen mode always docks ink tools. PDF pager/search chrome is Keyboard-only. */
@@ -33,6 +72,47 @@ export const drawingSessionFromLoad = <T>(requestId: number, document: T | null)
   key: Math.max(1, requestId),
   document,
 })
+
+export type OverlayLifetimeState<T = unknown> = {
+  session: { key: number; document: T | null }
+  drawingOpen: boolean
+  host: ToolbarHostNode | null
+}
+
+export type OverlayLifetimeOp<T = unknown> =
+  | { type: 'note-switch'; requestId: number }
+  | { type: 'ink-loaded'; requestId: number; document: T | null }
+  | { type: 'stift'; open: boolean }
+  | { type: 'host'; host: ToolbarHostNode | null }
+
+/**
+ * Note switch: keep a ready overlay session (never key 0) and drop the old
+ * toolbar host so a detached portal target cannot survive the remount.
+ */
+export const overlayAfterNoteSwitch = <T>(
+  _previous: OverlayLifetimeState<T>,
+  requestId: number,
+): OverlayLifetimeState<T> => ({
+  session: drawingSessionFromLoad(requestId, null),
+  drawingOpen: false,
+  host: null,
+})
+
+export const applyOverlayLifetimeOp = <T>(
+  state: OverlayLifetimeState<T>,
+  op: OverlayLifetimeOp<T>,
+): OverlayLifetimeState<T> => {
+  if (op.type === 'note-switch') return overlayAfterNoteSwitch(state, op.requestId)
+  if (op.type === 'ink-loaded') {
+    return { ...state, session: drawingSessionFromLoad(op.requestId, op.document) }
+  }
+  if (op.type === 'stift') return { ...state, drawingOpen: op.open }
+  return { ...state, host: liveInkToolbarHost(op.host) }
+}
+
+export const overlayShowsCrashFallback = (ui: { fallbackTitle?: string; ready?: boolean }) => (
+  ui.fallbackTitle === INK_OVERLAY_CRASH_TITLE && ui.ready !== true
+)
 /** Class on WorksheetLayer while the pen overlay is active. */
 export const WORKSHEET_INKING_CLASS = 'is-disabled'
 /** Class on the inline drawing board when it is the hit target. */
@@ -92,6 +172,10 @@ export const pointerEventsForInkLayer = (
   if (layer === 'overlay') return inkOn ? 'auto' : 'none'
   return inkOn ? 'none' : 'auto'
 }
+
+export const overlayPenHitReady = (sessionKey: number, drawingOpen: boolean) => (
+  inkBoardReady(sessionKey) && pointerEventsForInkLayer('overlay', drawingOpen) === 'auto'
+)
 
 /** Text selection is Keyboard / Tastatur only. Stift must not start a glyph selection. */
 export const userSelectForInkLayer = (
