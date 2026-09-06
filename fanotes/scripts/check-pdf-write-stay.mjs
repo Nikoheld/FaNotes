@@ -30,6 +30,14 @@ const {
   pdfOverlayShiftedBy,
   pdfOverlaySourceHeight,
 } = await server.ssrLoadModule('/src/lib/pdfInkHit.ts')
+const {
+  measureVisibleInkLayout,
+  planInkWindow,
+  placeInkWindow,
+  inkWindowShift,
+  inkWindowGuardHit,
+  INK_WINDOW_VIEWPORTS,
+} = await server.ssrLoadModule('/src/lib/inkWindowPlan.ts')
 const { inkOverlayPixelSize } = await server.ssrLoadModule('/src/lib/paperGrow.ts')
 const { SCROLL_ROOM } = await server.ssrLoadModule('/src/lib/noteCanvas.ts')
 const {
@@ -226,6 +234,69 @@ const runOnce = () => {
   }), boardSize, SCROLL_ROOM)
   assert.ok(Math.abs(afterScroll - markY) < 0.02, 'top-of-page window must keep the written paper y')
 
+  // The slice is planned in paper layout px from client rects, so a CSS-zoomed
+  // plane cannot mix visual scroll px with layout ink px. At 250 % the old
+  // offsetTop/scrollTop mix put the slice below the sheet: no ink canvas at
+  // the bottom of the page.
+  const zoomedBottom = measureVisibleInkLayout({
+    scrollerTop: 100,
+    scrollerHeight: 800,
+    paperTop: 100 - (4000 * 2.5 - 800),
+    paperVisualHeight: 4000 * 2.5,
+    paperLayoutHeight: 4000,
+  })
+  assert.ok(zoomedBottom)
+  assert.ok(Math.abs(zoomedBottom.zoom - 2.5) < 1e-9)
+  assert.ok(Math.abs(zoomedBottom.visible.bottom - 4000) < 1e-6, `zoomed visible bottom ${zoomedBottom.visible.bottom} must be the sheet bottom`)
+  assert.ok(Math.abs(zoomedBottom.viewportHeight - 320) < 1e-9, 'viewport in layout px is visual / zoom')
+  assert.equal(measureVisibleInkLayout({
+    scrollerTop: 0, scrollerHeight: 800, paperTop: 0, paperVisualHeight: 4000, paperLayoutHeight: 4000, rotation: 90,
+  }), null, 'a rotated sheet has no axis-aligned slice')
+  const bottomPlan = planInkWindow({
+    paperHeight: 4000,
+    viewportHeight: zoomedBottom.viewportHeight,
+    visible: zoomedBottom.visible,
+    current: null,
+  })
+  assert.ok(bottomPlan.window, 'a 4000px sheet at a 320px viewport is sliced')
+  assert.ok(Math.abs(bottomPlan.window.top + bottomPlan.window.height - 4000) < 1e-6, 'slice must reach the sheet bottom where the pen is')
+  assert.ok(Math.abs(bottomPlan.window.height - INK_WINDOW_VIEWPORTS * 320) < 1e-6)
+
+  // Scrolling inside the guarded middle keeps the slice (no repaint); reaching
+  // the guard re-centres it at the same height, so the bitmap is copied.
+  const first = planInkWindow({ paperHeight: 6000, viewportHeight: 800, visible: { top: 0, bottom: 800 }, current: null })
+  assert.ok(first.changed && first.window && first.window.top === 0 && first.window.height === 2400)
+  const stay = planInkWindow({ paperHeight: 6000, viewportHeight: 800, visible: { top: 900, bottom: 1700 }, current: first.window })
+  assert.equal(stay.changed, false, 'visible sheet inside the guard keeps the slice')
+  assert.equal(stay.window, first.window)
+  const moved = planInkWindow({ paperHeight: 6000, viewportHeight: 800, visible: { top: 1400, bottom: 2200 }, current: first.window })
+  assert.equal(moved.changed, true, 'visible sheet in the guard zone moves the slice')
+  assert.equal(moved.window.height, first.window.height, 'a move keeps the slice height')
+  assert.ok(Math.abs(moved.window.top - 600) < 1e-6, 're-centred on the visible sheet')
+  const grown = planInkWindow({ paperHeight: 6400, viewportHeight: 800, visible: { top: 1400, bottom: 2200 }, current: moved.window })
+  assert.equal(grown.changed, false, 'a bottom grow does not move the slice')
+  const full = planInkWindow({ paperHeight: 1200, viewportHeight: 800, visible: { top: 0, bottom: 800 }, current: null })
+  assert.equal(full.window, null, 'a sheet under three viewports paints as one bitmap')
+
+  // Paint geometry: the slice top is quantized to bitmap rows, y0·virtual is
+  // that integer, and a move at the same size is an integer bitmap shift plus
+  // one exposed band.
+  const placedA = placeInkWindow(first.window, 6000, 4200)
+  const placedB = placeInkWindow(moved.window, 6000, 4200)
+  assert.equal(placedA.topPx, 0)
+  assert.ok(Number.isInteger(placedB.topPx) && placedB.topPx > 0)
+  assert.ok(Math.abs(placedB.window.y0 * placedB.virtualHeight - placedB.topPx) < 1e-6, 'y0 · virtualHeight must be the integer paint translate')
+  assert.ok(Math.abs((placedB.window.y1 - placedB.window.y0) * 6000 - 2400) < 1e-6, 'span stays the slice height')
+  const shift = inkWindowShift(placedA.topPx, placedB.topPx, 4200)
+  assert.ok(shift && shift.dy === -placedB.topPx, 'content moves up by the slice move')
+  assert.equal(shift.band.y + shift.band.height, 4200, 'exposed band is the bottom rows')
+  assert.equal(inkWindowShift(0, 5000, 4200), null, 'a move past the bitmap repaints in full')
+  assert.equal(inkWindowShift(0, 0, 4200).dy, 0)
+  // Writing at the bottom of a sheet the slice already reaches must not thrash.
+  assert.equal(inkWindowGuardHit(bottomPlan.window, 3999, 320, 4000), false)
+  assert.equal(inkWindowGuardHit(first.window, 2300, 800, 6000), true, 'pen in the guard zone re-plans the slice')
+  assert.equal(inkWindowGuardHit(null, 100, 800, 6000), false)
+
   const pageWidth = 595.28
   const column = pdfPageColumnCssWidth(2020)
   assert.equal(column, PDF_PAGE_COLUMN_MAX)
@@ -288,7 +359,10 @@ const runOnce = () => {
   assert.match(inkHit, /export const inkWindowLayoutStyle/)
   assert.match(inkHit, /export const inkWindowCanvasBox/)
   assert.match(inkHit, /export const inkMarkPaperY/)
-  assert.match(board, /layoutInkWindow\(/)
+  assert.match(board, /measureVisibleInkLayout\(/)
+  assert.match(board, /planInkWindow\(/)
+  assert.match(board, /placeInkWindow\(/)
+  assert.match(board, /inkWindowShift\(/)
   assert.match(board, /inkWindowLayoutStyle\(/)
   assert.match(board, /pdfOverlayPointFromClient\(/)
   assert.match(board, /INK_WINDOW_IDLE_MS/)
@@ -296,7 +370,11 @@ const runOnce = () => {
   assert.match(board, /onScrollEnd/)
   assert.match(board, /applyPaperZoomStayPut/)
   assert.doesNotMatch(board, /sheet\.getBoundingClientRect\(\)/)
-  assert.match(board, /Do not syncInkWindow here/)
+  // The slice box, bitmap and paint change in one synchronous pass; a scheduled
+  // redraw after a box change is the one-frame "ink jumps, then comes back".
+  assert.match(board, /planInkWindowNow\(\)\n        redraw\(true\)/)
+  assert.match(board, /if \(!planInkWindowNow\(force\)\) return false\n    canvasQualityKeyRef\.current = ''\n    redraw\(true\)/)
+  assert.doesNotMatch(board, /applyInkWindowToCanvases\([^\n]*\)\n\s*scheduleRedraw\(\)/)
   assert.match(pdf, /paintBoxForPage\(cssWidth, cssHeight, \{/)
   assert.match(pdf, /liveCanvas\.style\.width = `\$\{Math\.round\(box\.cssWidth\)\}px`/)
   assert.match(pdf, /liveCanvas\.style\.height = `\$\{Math\.round\(box\.cssHeight\)\}px`/)

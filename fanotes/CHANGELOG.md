@@ -2,6 +2,10 @@
 
 ## Unveröffentlicht
 
+## 2026.9.17
+
+- **Tinte steht beim Scrollen und Wachsen fest:** Die Handschrift bleibt auf ihrem Papierpunkt — ohne das kurze Bild, in dem sie versetzt erschien und zurücksprang. Der Tintenausschnitt wird in Blattpixeln geplant und im selben Schritt wie sein Rahmen neu gezeichnet; beim Verschieben wird die Bitmap kopiert statt neu gemalt. Ganz unten auf dem Blatt kann wieder geschrieben werden, auch nach dem Scrollen bis zum Ende und bei Zoom.
+
 ## 2026.9.16
 
 - **Tinte bleibt beim Wachsen stehen:** Wenn das Blatt beim Schreiben am Rand wächst, rutscht oder dehnt sich die Handschrift nicht mehr — auch nicht beim Scrollen danach. Die Tintenfläche wird nach dem Wachsen wieder neu gezeichnet und behält die Blattbreite, statt der alten Bitmap zu folgen. Radieren, Rückgängig und erneutes Öffnen zeigen die Tinte an derselben Stelle. Beim Zoom wächst das Blatt um einen Schritt statt bis zum Anschlag.
