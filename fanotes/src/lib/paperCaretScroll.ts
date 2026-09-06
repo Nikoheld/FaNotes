@@ -1,4 +1,10 @@
-import { applyStayPutOp, liveWriteStayPut, type StayPutOp, type StayPutState } from './noteCanvas'
+import {
+  applyStayPutOp,
+  liveWriteStayPut,
+  originPadDelta,
+  type StayPutOp,
+  type StayPutState,
+} from './noteCanvas'
 
 export const PAPER_VIEW_SCROLLER_SELECTOR = '.paper-view, .unified-note-view'
 export const EDITOR_LAYER_SCROLLER_SELECTOR = '.cm-scroller, .cm-editor, .markdown-editor, .editor-pane'
@@ -377,6 +383,368 @@ export const applyLiveWriteStayPut = (
   const next = liveWriteStayPut(state, live)
   if (paperScroller) pinPaperViewportAfterExtentGrow(paperScroller, { x: next.camX, y: next.camY })
   return next
+}
+
+/**
+ * Double-rAF canvas/surface flush after autoexpand. Fast enough to catch the
+ * next vsync without a repeating timer that would drain the battery.
+ */
+export const VISUAL_GROW_REFRESH_FRAMES = 2
+export const PAPER_COMPOSITOR_REFRESH_ATTR = 'data-fanotes-visual-gen'
+export const PAPER_CANVAS_SURFACE_REFRESH_ATTR = 'data-fanotes-canvas-gen'
+
+export type PaperCanvasPaintContext = {
+  setTransform: (a: number, b: number, c: number, d: number, e: number, f: number) => void
+  clearRect: (x: number, y: number, w: number, h: number) => void
+}
+
+export type PaperCanvasBacking = {
+  width: number
+  height: number
+  getContext?: (id: '2d', options?: { alpha?: boolean }) => PaperCanvasPaintContext | null
+  style?: { transform?: string }
+}
+
+export type PaperCanvasSurfaceHost = {
+  style?: { transform?: string; width?: string; height?: string }
+  offsetWidth?: number
+  offsetHeight?: number
+  getAttribute?: (name: string) => string | null
+  setAttribute?: (name: string, value: string) => void
+  querySelectorAll?: (selector: string) => ArrayLike<PaperCanvasBacking | Element>
+}
+
+export type VisualGrowCanvasTarget = {
+  surface?: PaperCanvasSurfaceHost | null
+  canvases?: Array<PaperCanvasBacking | null | undefined>
+}
+
+/** Force a layer invalidation. This alone does not snap slipped glyphs. */
+export const forcePaperCompositorRefresh = (root: HTMLElement | null) => {
+  if (!root) return 0
+  void root.offsetWidth
+  void root.offsetHeight
+  const current = Number.parseInt(root.getAttribute?.(PAPER_COMPOSITOR_REFRESH_ATTR) || '0', 10)
+  const next = (Number.isFinite(current) ? current : 0) + 1
+  root.setAttribute?.(PAPER_COMPOSITOR_REFRESH_ATTR, String(next))
+  const plane = (
+    typeof root.querySelector === 'function'
+      ? root.querySelector('.paper-sheet-plane, .unified-paper')
+      : null
+  ) as HTMLElement | null
+  if (plane?.style) {
+    const prev = plane.style.transform
+    plane.style.transform = prev ? `${prev} translateZ(0)` : 'translateZ(0)'
+    void plane.offsetHeight
+    plane.style.transform = prev
+  }
+  return next
+}
+
+export const paperCompositorRefreshGen = (root: HTMLElement | null) => {
+  const current = Number.parseInt(root?.getAttribute?.(PAPER_COMPOSITOR_REFRESH_ATTR) || '0', 10)
+  return Number.isFinite(current) ? current : 0
+}
+
+export const collectPaperCanvasSurfaces = (
+  surface: PaperCanvasSurfaceHost | null,
+  canvases: Array<PaperCanvasBacking | null | undefined> = [],
+): PaperCanvasBacking[] => {
+  const found: PaperCanvasBacking[] = []
+  const seen = new Set<unknown>()
+  const push = (canvas: PaperCanvasBacking | null | undefined) => {
+    if (!canvas || seen.has(canvas) || typeof canvas.width !== 'number') return
+    seen.add(canvas)
+    found.push(canvas)
+  }
+  canvases.forEach(push)
+  const listed = surface?.querySelectorAll?.('canvas')
+  if (listed) {
+    for (let index = 0; index < listed.length; index += 1) {
+      push(listed[index] as PaperCanvasBacking)
+    }
+  }
+  return found
+}
+
+/**
+ * Same class of canvas mutation as erasing leftover ghost ink: paint the
+ * backing store so sibling typed glyphs re-composite at the paper camera.
+ */
+export const paintPaperCanvasSurfaceUpdate = (canvas: PaperCanvasBacking | null) => {
+  if (!canvas) return false
+  const width = Number(canvas.width)
+  const height = Number(canvas.height)
+  if (!(width > 0) || !(height > 0)) return false
+  const ctx = typeof canvas.getContext === 'function'
+    ? canvas.getContext('2d', { alpha: true })
+    : null
+  if (!ctx) return false
+  ctx.setTransform(1, 0, 0, 1, 0, 0)
+  const painted = ctx as PaperCanvasPaintContext & {
+    getImageData?: (sx: number, sy: number, sw: number, sh: number) => { data: ArrayLike<number>; width: number; height: number }
+    putImageData?: (image: unknown, dx: number, dy: number) => void
+  }
+  if (typeof painted.getImageData === 'function' && typeof painted.putImageData === 'function') {
+    try {
+      const pixel = painted.getImageData(0, 0, 1, 1)
+      painted.putImageData(pixel, 0, 0)
+      return true
+    } catch {
+      // Tainted or mock canvas — a 1px clear still dirties the layer.
+    }
+  }
+  ctx.clearRect(0, 0, 1, 1)
+  return true
+}
+
+/** Canvas/surface visual update. Skipping this leaves the grow slip. */
+export const refreshPaperCanvasSurface = (
+  surface: PaperCanvasSurfaceHost | null,
+  canvases: Array<PaperCanvasBacking | null | undefined> = [],
+) => {
+  const targets = collectPaperCanvasSurfaces(surface, canvases)
+  if (targets.length === 0) return 0
+  void surface?.offsetWidth
+  void surface?.offsetHeight
+  if (surface?.style) {
+    const prev = surface.style.transform || ''
+    surface.style.transform = prev ? `${prev} translateZ(0)` : 'translateZ(0)'
+    void surface.offsetHeight
+    surface.style.transform = prev
+  }
+  let painted = 0
+  for (const canvas of targets) {
+    if (paintPaperCanvasSurfaceUpdate(canvas)) painted += 1
+  }
+  if (painted === 0) return 0
+  if (!surface?.setAttribute) return painted
+  const current = Number.parseInt(surface.getAttribute?.(PAPER_CANVAS_SURFACE_REFRESH_ATTR) || '0', 10)
+  const next = (Number.isFinite(current) ? current : 0) + 1
+  surface.setAttribute(PAPER_CANVAS_SURFACE_REFRESH_ATTR, String(next))
+  return next
+}
+
+export const paperCanvasSurfaceRefreshGen = (surface: PaperCanvasSurfaceHost | null) => {
+  const current = Number.parseInt(surface?.getAttribute?.(PAPER_CANVAS_SURFACE_REFRESH_ATTR) || '0', 10)
+  return Number.isFinite(current) ? current : 0
+}
+
+/**
+ * Compositor-generation-only never zeros a height-delta slip. The live grow
+ * path must paint the canvas/surface (the same update as erase-ghost-ink).
+ */
+export const growCompositorVisualOffset = (heightDelta: number, _compositorRefreshed = false) => (
+  !Number.isFinite(heightDelta) || heightDelta === 0 ? { x: 0, y: 0 } : { x: 0, y: heightDelta }
+)
+
+export const growCanvasSurfaceVisualOffset = (heightDelta: number, canvasUpdated: boolean) => (
+  canvasUpdated || !Number.isFinite(heightDelta) || heightDelta === 0
+    ? { x: 0, y: 0 }
+    : { x: 0, y: heightDelta }
+)
+
+export const sampleVisualAfterGrowRefresh = (
+  previous: GhostTextSample | null,
+  layout: GhostTextLayout,
+  canvasUpdated: boolean,
+  heightDelta = 0,
+): GhostTextSample => {
+  const expected = glyphExpectedVisual(layout)
+  const offset = growCanvasSurfaceVisualOffset(heightDelta, canvasUpdated || !previous)
+  return sampleGhostTextLayout({
+    ...layout,
+    visualX: expected.x - offset.x,
+    visualY: expected.y - offset.y,
+  })
+}
+
+/** Pin camera, compositor bump, and the canvas/surface paint that snaps glyphs. */
+export const applyVisualGrowCorrection = (
+  paperScroller: HTMLElement | null,
+  camera: { x: number; y: number },
+  canvasTarget: VisualGrowCanvasTarget | null = null,
+) => {
+  if (paperScroller) pinPaperViewportAfterExtentGrow(paperScroller, camera)
+  const compositorGen = paperScroller ? forcePaperCompositorRefresh(paperScroller) : 0
+  const canvasGen = refreshPaperCanvasSurface(
+    canvasTarget?.surface ?? null,
+    canvasTarget?.canvases ?? [],
+  )
+  return {
+    compositorGen,
+    canvasGen,
+    canvasUpdated: canvasGen > 0,
+  }
+}
+
+export type VisualGrowOp = {
+  width: number
+  height: number
+  padX: number
+  padY: number
+  camX: number
+  camY: number
+  grew: boolean
+}
+
+export type VisualGrowPenEvent = {
+  kind?: string
+  pageW?: number
+  pageH?: number
+  padX?: number
+  padY?: number
+  camX?: number
+  camY?: number
+  grew?: boolean
+}
+
+export const visualGrowOpsFromBugEvents = (events: VisualGrowPenEvent[]): VisualGrowOp[] => {
+  const ops: VisualGrowOp[] = []
+  for (const event of events) {
+    if (event?.kind !== 'pen') continue
+    if (![event.pageW, event.pageH, event.camX, event.camY].every((value) => Number.isFinite(value))) continue
+    ops.push({
+      width: Number(event.pageW),
+      height: Number(event.pageH),
+      padX: Number(event.padX) || 0,
+      padY: Number(event.padY) || 0,
+      camX: Number(event.camX),
+      camY: Number(event.camY),
+      grew: event.grew === true,
+    })
+  }
+  return ops
+}
+
+export type VisualGrowState = {
+  stay: StayPutState
+  sample: GhostTextSample | null
+  refreshGen: number
+  canvasGen: number
+}
+
+export const REPORT_VISUAL_GROW_GLYPH = { paperX: 86, paperY: 78 }
+
+export const emptyVisualGrowState = (start: {
+  width: number
+  height: number
+  padX: number
+  padY: number
+  camX: number
+  camY: number
+}): VisualGrowState => {
+  const layout: GhostTextLayout = {
+    paperX: REPORT_VISUAL_GROW_GLYPH.paperX,
+    paperY: REPORT_VISUAL_GROW_GLYPH.paperY,
+    camX: start.camX,
+    camY: start.camY,
+    padX: start.padX,
+    padY: start.padY,
+    editorX: 0,
+    editorY: 0,
+  }
+  return {
+    stay: {
+      paperX: 0,
+      paperY: 0,
+      camX: start.camX,
+      camY: start.camY,
+      width: start.width,
+      height: start.height,
+      originX: start.padX,
+      originY: start.padY,
+      editorX: 0,
+      editorY: 0,
+    },
+    sample: sampleGhostTextLayout({
+      ...layout,
+      visualX: glyphExpectedVisual(layout).x,
+      visualY: glyphExpectedVisual(layout).y,
+    }),
+    refreshGen: 0,
+    canvasGen: 0,
+  }
+}
+
+/**
+ * One live autoexpand step: stay-put reducer, camera pin, canvas/surface
+ * visual update. Skipping that canvas/surface paint leaves the height-delta
+ * slip; a compositor-generation bump alone is not enough.
+ */
+export const applyVisualGrowOp = (
+  state: VisualGrowState,
+  op: VisualGrowOp,
+  paperScroller: HTMLElement | null = null,
+  canvasTarget: VisualGrowCanvasTarget | null = null,
+) => {
+  const stay = liveWriteStayPut(state.stay, {
+    grown: {
+      width: op.width,
+      height: op.height,
+      padX: originPadDelta(state.stay.originX, op.padX),
+      padY: originPadDelta(state.stay.originY, op.padY),
+    },
+    camX: op.camX,
+    camY: op.camY,
+  })
+  const correction = op.grew
+    ? applyVisualGrowCorrection(paperScroller, { x: stay.camX, y: stay.camY }, canvasTarget)
+    : {
+      compositorGen: state.refreshGen,
+      canvasGen: 0,
+      canvasUpdated: false,
+    }
+  if (!op.grew && paperScroller) {
+    pinPaperViewportAfterExtentGrow(paperScroller, { x: stay.camX, y: stay.camY })
+  }
+  const canvasUpdated = !op.grew || correction.canvasUpdated
+  const layout: GhostTextLayout = {
+    paperX: REPORT_VISUAL_GROW_GLYPH.paperX,
+    paperY: REPORT_VISUAL_GROW_GLYPH.paperY,
+    camX: stay.camX,
+    camY: stay.camY,
+    padX: stay.originX,
+    padY: stay.originY,
+    editorX: stay.editorX,
+    editorY: stay.editorY,
+  }
+  const sample = sampleVisualAfterGrowRefresh(
+    state.sample,
+    layout,
+    canvasUpdated,
+    op.grew ? op.height - state.stay.height : 0,
+  )
+  const motion = classifyGhostTextMotion(state.sample, sample)
+  return {
+    stay,
+    sample,
+    refreshGen: paperScroller ? paperCompositorRefreshGen(paperScroller) : correction.compositorGen,
+    canvasGen: canvasUpdated && op.grew ? state.canvasGen + 1 : state.canvasGen,
+    canvasUpdated,
+    slip: motion.slip,
+    back: motion.back,
+    expectedX: motion.expectedX,
+    expectedY: motion.expectedY,
+    grew: op.grew,
+  }
+}
+
+export const schedulePaperVisualGrowRefresh = (
+  scheduleFrame: (callback: () => void) => number,
+  paperScroller: HTMLElement | null,
+  camera: { x: number; y: number },
+  remaining = VISUAL_GROW_REFRESH_FRAMES,
+  canvasTarget: VisualGrowCanvasTarget | null = null,
+) => {
+  if (remaining <= 0) return 0
+  if (!paperScroller && !canvasTarget?.surface && !(canvasTarget?.canvases?.length)) return 0
+  return scheduleFrame(() => {
+    applyVisualGrowCorrection(paperScroller, camera, canvasTarget)
+    if (remaining > 1) {
+      schedulePaperVisualGrowRefresh(scheduleFrame, paperScroller, camera, remaining - 1, canvasTarget)
+    }
+  })
 }
 
 export const lockPaperViewportScrollStayPut = (

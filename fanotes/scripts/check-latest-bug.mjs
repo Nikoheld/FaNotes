@@ -12,177 +12,285 @@ const server = await createServer({
 })
 
 const {
-  applyInteractOp,
-  chromePressable,
-  emptyInteractState,
-  interactOpsFromBugEvents,
-  overlayGlobalPointerLockOn,
-  overlayHitEnabled,
-  overlayIdleInKeyboardMode,
-  overlayInert,
-  overlayInkLoadOnNoteSwitch,
-  overlaySessionAfterInkReady,
-  overlaySessionAfterNoteSwitch,
-} = await server.ssrLoadModule('/src/lib/overlayInteract.ts')
+  REPORT_VISUAL_GROW_GLYPH,
+  VISUAL_GROW_REFRESH_FRAMES,
+  applyVisualGrowCorrection,
+  applyVisualGrowOp,
+  emptyVisualGrowState,
+  forcePaperCompositorRefresh,
+  glyphExpectedVisual,
+  growCanvasSurfaceVisualOffset,
+  growCompositorVisualOffset,
+  paintPaperCanvasSurfaceUpdate,
+  refreshPaperCanvasSurface,
+  sampleVisualAfterGrowRefresh,
+  schedulePaperVisualGrowRefresh,
+  visualGrowOpsFromBugEvents,
+} = await server.ssrLoadModule('/src/lib/paperCaretScroll.ts')
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
-const fixture = JSON.parse(readFileSync(join(root, 'scripts/fixtures/bug-1788698537115.json'), 'utf8'))
-const appSource = readFileSync(join(root, 'src/App.tsx'), 'utf8')
+const fixture = JSON.parse(readFileSync(join(root, 'scripts/fixtures/bug-1788704214528.json'), 'utf8'))
 const boardSource = readFileSync(join(root, 'src/components/DrawingBoard.tsx'), 'utf8')
+const caretSource = readFileSync(join(root, 'src/lib/paperCaretScroll.ts'), 'utf8')
 
-const notesFromEvents = (events) => {
-  const notes = []
-  for (const event of events) {
-    if (event?.kind !== 'note' || typeof event.noteId !== 'string' || !event.noteId) continue
-    if (!notes.includes(event.noteId)) notes.push(event.noteId)
+const makeClassList = (initial = '') => {
+  const values = new Set(initial.split(/\s+/u).filter(Boolean))
+  return {
+    contains: (name) => values.has(name),
+    add: (...names) => { names.forEach((name) => values.add(name)) },
   }
-  return notes
+}
+
+const makeScroller = (camX, camY) => {
+  const attrs = new Map()
+  const plane = {
+    className: 'unified-paper paper-sheet-plane',
+    classList: makeClassList('unified-paper paper-sheet-plane'),
+    style: { transform: '' },
+    offsetHeight: 1,
+    offsetWidth: 1,
+  }
+  const scroller = {
+    className: 'unified-note-view paper-view',
+    classList: makeClassList('unified-note-view paper-view'),
+    scrollTop: camY,
+    scrollLeft: camX,
+    offsetWidth: 900,
+    offsetHeight: 700,
+    style: {},
+    parentElement: null,
+    children: [],
+    closest: (selector) => {
+      const wanted = String(selector).split(',').map((part) => part.trim().replace(/^\./u, ''))
+      return wanted.some((name) => scroller.classList.contains(name)) ? scroller : null
+    },
+    querySelector: (selector) => (
+      String(selector).includes('unified-paper') || String(selector).includes('paper-sheet')
+        ? plane
+        : null
+    ),
+    querySelectorAll: () => [],
+    getAttribute: (name) => (attrs.has(name) ? attrs.get(name) : null),
+    setAttribute: (name, value) => { attrs.set(name, String(value)) },
+  }
+  return scroller
+}
+
+const makeCanvas = (width, height) => {
+  let w = width
+  let h = height
+  let paints = 0
+  const pixel = { data: new Uint8ClampedArray([0, 0, 0, 0]), width: 1, height: 1 }
+  const ctx = {
+    setTransform() {},
+    clearRect() { paints += 1 },
+    getImageData() { return pixel },
+    putImageData() { paints += 1 },
+  }
+  return {
+    get width() { return w },
+    set width(value) { w = Number(value) || 0; paints += 1 },
+    get height() { return h },
+    set height(value) { h = Number(value) || 0 },
+    getContext: () => ctx,
+    style: { transform: '' },
+    paints: () => paints,
+  }
+}
+
+const makeSurface = () => {
+  const attrs = new Map()
+  const canvases = []
+  return {
+    style: { transform: '', width: '', height: '' },
+    offsetWidth: 900,
+    offsetHeight: 700,
+    canvases,
+    querySelectorAll: (selector) => (String(selector).includes('canvas') ? canvases : []),
+    getAttribute: (name) => (attrs.has(name) ? attrs.get(name) : null),
+    setAttribute: (name, value) => { attrs.set(name, String(value)) },
+  }
 }
 
 try {
-  assert.equal(fixture.id, '1788698537115')
-  assert.equal(fixture.version, '2026.9.11')
+  assert.equal(fixture.id, '1788704214528')
+  assert.equal(fixture.version, '2026.9.14')
   assert.equal(fixture.platform, 'linux')
-  assert.equal(fixture.description, 'Everything laggs, i can\'t press most of the things. Fix it!')
-  const notes = notesFromEvents(fixture.events)
-  assert.deepEqual(notes, [
-    'Englisch/Untitled note.md',
-    'Eingang/Untitled note 3.md',
-    'Eingang/Untitled note.md',
-    'Eingang/Untitled note 5.famd',
-    'Eingang/arbeitsblätter_progII.md',
-  ])
-  assert.equal(notes.includes('Eingang/Untitled note 4.md'), false)
-  assert.equal(fixture.events.some((event) => event.kind === 'pen' || event.kind === 'tool'), false)
+  assert.equal(fixture.description, 'Bug Description in the text. Bugreport just for the logs.')
+  assert.equal(fixture.events.some((event) => event.noteId === 'Mathematik/Untitled note.md'), true)
+  assert.equal(fixture.events.some((event) => event.noteId === 'Geschichte/Dossier1_Einstieg_Zionismus.pdf'), true)
+  assert.equal(fixture.id === '1788698537115', false)
+  const pen = fixture.events.filter((event) => event.kind === 'pen')
+  assert.equal(pen.length, 14)
+  assert.equal(pen.filter((event) => event.grew === true).length, 9)
+  assert.equal(pen[0].padX, 108)
+  assert.equal(pen[0].pageH, 1408)
+  assert.equal(pen.at(-2).pageH, 2448)
+  assert.equal(pen.at(-2).camY, 2134)
 
-  assert.equal(overlayHitEnabled(false), false)
-  assert.equal(overlayHitEnabled(true), true)
-  assert.equal(overlayInert(true, false), true)
-  assert.equal(overlayInert(true, true), false)
-  assert.equal(overlayGlobalPointerLockOn(true, false), false)
-  assert.equal(overlayGlobalPointerLockOn(true, true), true)
-  assert.equal(overlayInkLoadOnNoteSwitch(false), false)
-  assert.equal(overlayInkLoadOnNoteSwitch(true), true)
-  assert.deepEqual(
-    overlaySessionAfterNoteSwitch({ drawingOpen: false, session: { key: 4, document: null } }),
-    { key: 0, document: null },
-  )
+  const ops = visualGrowOpsFromBugEvents(fixture.events)
+  assert.equal(ops.length, 14)
+  assert.equal(ops.filter((op) => op.grew).length, 9)
+  assert.equal(ops.at(-2).height, 2448)
+
+  assert.equal(VISUAL_GROW_REFRESH_FRAMES, 2)
+  assert.equal(growCompositorVisualOffset(144, false).y, 144)
   assert.equal(
-    overlaySessionAfterNoteSwitch({ drawingOpen: true, session: { key: 4, document: null } }).key,
-    4,
+    growCompositorVisualOffset(144, true).y,
+    144,
+    'compositor-generation-only must still leave the height-delta slip',
   )
-  assert.deepEqual(
-    overlaySessionAfterInkReady(false, { key: 8, document: { id: 'famd' } }),
-    { key: 0, document: null },
+  assert.equal(growCanvasSurfaceVisualOffset(144, false).y, 144)
+  assert.equal(growCanvasSurfaceVisualOffset(144, true).y, 0)
+
+  const staleLayout = {
+    paperX: REPORT_VISUAL_GROW_GLYPH.paperX,
+    paperY: REPORT_VISUAL_GROW_GLYPH.paperY,
+    camX: 637,
+    camY: 1456,
+    padX: 108,
+    padY: 0,
+    editorX: 0,
+    editorY: 0,
+  }
+  const previous = sampleVisualAfterGrowRefresh(null, { ...staleLayout, camY: 1456 }, true, 0)
+  const stale = sampleVisualAfterGrowRefresh(previous, { ...staleLayout, camY: 1456 }, false, 144)
+  const staleMotionExpected = glyphExpectedVisual(staleLayout)
+  assert.ok(
+    Math.abs(stale.visualY - staleMotionExpected.y) > 2,
+    'uncorrected grow must leave a visual slip',
   )
-  assert.deepEqual(
-    overlaySessionAfterInkReady(true, { key: 8, document: { id: 'famd' } }),
-    { key: 8, document: { id: 'famd' } },
+  const corrected = sampleVisualAfterGrowRefresh(previous, { ...staleLayout, camY: 1456 }, true, 144)
+  assert.ok(Math.abs(corrected.visualY - staleMotionExpected.y) <= 2)
+
+  const growOp = {
+    width: 2580,
+    height: 1584,
+    padX: 108,
+    padY: 0,
+    camX: 637,
+    camY: 1456,
+    grew: true,
+  }
+  const skippedState = emptyVisualGrowState({
+    width: 2580,
+    height: 1408,
+    padX: 108,
+    padY: 0,
+    camX: 637,
+    camY: 1456,
+  })
+  const skipped = applyVisualGrowOp(skippedState, growOp, null)
+  assert.equal(skipped.slip, true, 'skipping canvas/surface visual update must still be the old slip')
+  assert.equal(skipped.canvasUpdated, false)
+
+  const compositorScroller = makeScroller(637, 1456)
+  const compositorOnly = applyVisualGrowOp(skippedState, growOp, compositorScroller)
+  assert.ok(compositorOnly.refreshGen > 0, 'compositor generation can still bump')
+  assert.equal(
+    compositorOnly.slip,
+    true,
+    'grow that only bumps compositor generation must still slip',
   )
+  assert.equal(compositorOnly.canvasUpdated, false)
+  assert.ok(forcePaperCompositorRefresh(compositorScroller) > compositorOnly.refreshGen)
 
-  const ops = interactOpsFromBugEvents(fixture.events)
-  assert.equal(ops[0].type, 'note-switch')
-  assert.equal(ops[1].type, 'session-start')
-  const noteOps = ops.filter((op) => op.type === 'note-switch')
-  assert.equal(noteOps.length, 8)
-  assert.equal(noteOps[1].noteId, 'Englisch/Untitled note.md')
-  assert.equal(noteOps.at(-1).noteId, 'Eingang/Untitled note 5.famd')
+  const canvas = makeCanvas(900, 700)
+  assert.equal(paintPaperCanvasSurfaceUpdate(canvas), true)
+  assert.ok(canvas.paints() > 0)
+  const surface = makeSurface()
+  surface.canvases.push(canvas)
+  const painted = refreshPaperCanvasSurface(surface, [canvas])
+  assert.ok(painted > 0, 'canvas/surface paint must bump generation')
 
-  let state = emptyInteractState()
-  assert.equal(chromePressable(state), true)
-  assert.equal(overlayIdleInKeyboardMode(state), true)
-
+  const scroller = makeScroller(ops[0].camX, ops[0].camY)
+  const liveCanvas = makeCanvas(900, 700)
+  const committedCanvas = makeCanvas(900, 700)
+  const liveSurface = makeSurface()
+  liveSurface.canvases.push(liveCanvas, committedCanvas)
+  let state = emptyVisualGrowState({
+    width: ops[0].width,
+    height: ops[0].height,
+    padX: ops[0].padX,
+    padY: ops[0].padY,
+    camX: ops[0].camX,
+    camY: ops[0].camY,
+  })
   const frames = []
   for (const op of ops) {
-    state = applyInteractOp(state, op)
-    if (op.type === 'note-switch') {
-      assert.equal(state.leftoverCapture, false)
-      assert.equal(state.sessionKey, 0, 'keyboard-mode switch must drop the overlay')
-      assert.equal(state.globalLock, false)
-      assert.equal(state.overlayHits, false)
-      assert.equal(state.inert, true)
-      assert.equal(chromePressable(state), true)
-      assert.equal(overlayIdleInKeyboardMode(state), true)
-      assert.equal(overlayInkLoadOnNoteSwitch(state.drawingOpen), false)
-      frames.push({
-        noteId: state.noteId,
-        sessionKey: state.sessionKey,
-        pressable: chromePressable(state),
-        idle: overlayIdleInKeyboardMode(state),
-      })
+    const next = applyVisualGrowOp(state, op, scroller, {
+      surface: liveSurface,
+      canvases: [liveCanvas, committedCanvas],
+    })
+    if (op.grew) {
+      assert.equal(next.slip, false, `grow ${op.height} must not slip after canvas/surface update`)
+      assert.equal(next.back, false, 'grow must not rely on a later snap-back')
+      assert.equal(next.canvasUpdated, true, 'grow must paint the canvas/surface in the same step')
+      assert.ok(Math.abs(next.sample.visualX - next.expectedX) <= 2)
+      assert.ok(Math.abs(next.sample.visualY - next.expectedY) <= 2)
+      assert.ok(next.canvasGen > state.canvasGen, 'grow must bump the canvas/surface generation')
     }
+    frames.push({
+      height: next.stay.height,
+      camY: next.stay.camY,
+      grew: op.grew,
+      slip: next.slip,
+      back: next.back,
+      canvasUpdated: next.canvasUpdated,
+      visualY: next.sample.visualY,
+      expectedY: next.expectedY,
+    })
+    state = next
   }
+  assert.equal(state.stay.height, 2448)
+  assert.equal(frames.filter((frame) => frame.grew && frame.slip).length, 0)
+  assert.equal(frames.some((frame) => frame.back === true), false)
+  assert.equal(frames.filter((frame) => frame.grew && !frame.canvasUpdated).length, 0)
 
-  const stale = applyInteractOp(state, { type: 'ink-ready', requestId: 1 })
-  assert.equal(stale.sessionKey, 0, 'stale FAMD/ink load from an earlier note must not remount')
-  assert.equal(chromePressable(stale), true)
-  assert.equal(overlayIdleInKeyboardMode(stale), true)
-
-  const remounted = applyInteractOp(state, { type: 'ink-ready', requestId: state.loadGeneration })
-  assert.equal(remounted.noteId, 'Eingang/Untitled note 5.famd')
-  assert.equal(remounted.sessionKey, 0, 'keyboard-mode FAMD/ink-ready must not remount the overlay')
-  assert.equal(overlayIdleInKeyboardMode(remounted), true)
-  assert.equal(chromePressable(remounted), true)
-  assert.equal(remounted.inert, true)
-  assert.equal(remounted.globalLock, false)
-  assert.equal(remounted.overlayHits, false)
-  assert.notEqual(
-    remounted.sessionKey,
-    remounted.loadGeneration,
-    'the 2026.9.13 remount-on-ink-ready outcome must no longer be the result',
-  )
-  state = remounted
-
-  const captured = applyInteractOp(state, { type: 'capture', leftover: true })
-  assert.equal(chromePressable(captured), false)
-  state = applyInteractOp(captured, {
-    type: 'note-switch',
-    requestId: state.loadGeneration + 1,
-    noteId: 'Eingang/Untitled note 5.famd',
+  let scheduled = 0
+  schedulePaperVisualGrowRefresh((callback) => {
+    scheduled += 1
+    callback()
+    return scheduled
+  }, scroller, { x: 637, y: 1456 }, VISUAL_GROW_REFRESH_FRAMES, {
+    surface: liveSurface,
+    canvases: [liveCanvas, committedCanvas],
   })
-  assert.equal(state.leftoverCapture, false)
-  assert.equal(state.sessionKey, 0)
-  assert.equal(chromePressable(state), true)
-  assert.equal(overlayIdleInKeyboardMode(state), true)
-
-  const stiftOn = applyInteractOp(state, { type: 'stift', open: true })
-  assert.equal(stiftOn.overlayHits, true)
-  assert.equal(stiftOn.globalLock, true)
-  assert.equal(stiftOn.inert, false)
-  assert.equal(overlayInkLoadOnNoteSwitch(stiftOn.drawingOpen), true)
-  const switchedOn = applyInteractOp(stiftOn, {
-    type: 'note-switch',
-    requestId: stiftOn.loadGeneration + 1,
-    noteId: 'Englisch/Untitled note.md',
+  assert.equal(scheduled, VISUAL_GROW_REFRESH_FRAMES)
+  const correction = applyVisualGrowCorrection(scroller, { x: 637, y: 1456 }, {
+    surface: liveSurface,
+    canvases: [liveCanvas, committedCanvas],
   })
-  assert.ok(switchedOn.sessionKey > 0)
-  assert.equal(switchedOn.drawingOpen, true)
-  const stiftReady = applyInteractOp(switchedOn, { type: 'ink-ready', requestId: switchedOn.loadGeneration })
-  assert.equal(stiftReady.sessionKey, switchedOn.loadGeneration)
-  assert.equal(overlayIdleInKeyboardMode(stiftReady), true)
+  assert.equal(correction.canvasUpdated, true)
+  assert.ok(correction.canvasGen > 0)
 
-  assert.match(appSource, /overlaySessionAfterNoteSwitch\(switched\)/)
-  assert.match(appSource, /overlayInkLoadOnNoteSwitch\(drawingOpenRef\.current\)/)
-  assert.match(appSource, /overlaySessionAfterInkReady\(/)
-  assert.match(appSource, /drawingSessionFromLoad\(requestId, document\)/)
-  assert.match(boardSource, /overlayInert\(inline, inputActive\)/)
-  assert.match(boardSource, /overlayGlobalPointerLockOn\(inline, inputActive\)/)
-  assert.match(boardSource, /pointer-events:none!important/)
-  assert.match(boardSource, /inline && overlayHitEnabled\(inputActive\) \? handlePointerDown/)
+  assert.match(boardSource, /applyVisualGrowCorrection\(/)
+  assert.match(boardSource, /schedulePaperVisualGrowRefresh\(/)
+  assert.match(boardSource, /const canvases = \[canvasRef\.current, committedCanvasRef\.current\]/)
+  assert.match(boardSource, /committedCanvasDirtyRef\.current = true\n    redraw\(true\)/)
+  assert.doesNotMatch(boardSource, /schedulePageLayoutRefresh\(/)
+  assert.match(caretSource, /export const applyVisualGrowOp/)
+  assert.match(caretSource, /export const refreshPaperCanvasSurface/)
+  assert.match(caretSource, /export const paintPaperCanvasSurfaceUpdate/)
+  assert.match(caretSource, /export const applyVisualGrowCorrection/)
+  assert.match(caretSource, /VISUAL_GROW_REFRESH_FRAMES = 2/)
+  assert.match(caretSource, /scheduleFrame/)
+  assert.doesNotMatch(caretSource, /setInterval\(/)
+  assert.doesNotMatch(caretSource, /while\s*\(\s*true\s*\)/)
 
   console.log(JSON.stringify({
     report: fixture.id,
     version: fixture.version,
     platform: fixture.platform,
     description: fixture.description,
-    notes,
-    frames,
-    lastNote: state.noteId,
-    lastPressable: chromePressable(state),
-    lastSessionKey: state.sessionKey,
-    lastInert: state.inert,
-    lastGlobalLock: state.globalLock,
-    lastIdle: overlayIdleInKeyboardMode(state),
+    notes: ['Geschichte/Dossier1_Einstieg_Zionismus.pdf', 'Mathematik/Untitled note.md'],
+    growFrames: frames.filter((frame) => frame.grew).length,
+    lastHeight: state.stay.height,
+    lastSlip: state.slip,
+    lastBack: frames.at(-1)?.back ?? false,
+    lastCanvasUpdated: state.canvasUpdated,
+    lastVisualY: state.sample.visualY,
+    lastExpectedY: frames.at(-1)?.expectedY,
   }))
   console.log('latest-bug ok')
 } finally {

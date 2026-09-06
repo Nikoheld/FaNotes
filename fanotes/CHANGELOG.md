@@ -2,6 +2,10 @@
 
 ## Unveröffentlicht
 
+## 2026.9.15
+
+- **Schrift bleibt beim Randmalen stehen:** Wenn das Blatt am Rand wächst, rutscht die getippte Schrift nicht mehr visuell weg. Im selben Schritt wird die Zeichenfläche so aktualisiert wie nach dem Radieren von Geistertinte — die Schrift sitzt im nächsten Bild wieder auf ihrem Papierpunkt, ohne die Batterie mit einer Dauerschleife zu belasten.
+
 ## 2026.9.14
 
 - **Notizwechsel ohne Stift bleibt leicht:** Beim schnellen Wechseln — auch zu .famd — wird die schwere Stiftebene nicht nachgeladen. Die Oberfläche laggt nicht und bleibt klickbar.

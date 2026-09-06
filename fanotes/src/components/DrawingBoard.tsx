@@ -160,8 +160,11 @@ import {
   paperRulingTileOrigin,
 } from '../lib/paperRuling'
 import {
+  applyVisualGrowCorrection,
   lockPaperViewportEditorScroll,
   pinPaperViewportAfterExtentGrow,
+  schedulePaperVisualGrowRefresh,
+  VISUAL_GROW_REFRESH_FRAMES,
 } from '../lib/paperCaretScroll'
 import {
   continueLiveWriteStroke,
@@ -1024,7 +1027,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const sourceWidthRef = useRef(SOURCE_WIDTH)
   const sourceOriginXRef = useRef(0)
   const sourceOriginYRef = useRef(0)
-  const pageLayoutFrameRef = useRef<number | null>(null)
+  const visualGrowFrameRef = useRef<number | null>(null)
   const paintedLayoutRef = useRef({ w: 0, h: 0 })
   const pendingStaleLayoutRef = useRef<PendingStaleLayoutMap | null>(null)
   const inkExtentPaperRef = useRef<HTMLElement | null>(null)
@@ -1897,6 +1900,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       if (inkWindowIdleRef.current !== null) window.clearTimeout(inkWindowIdleRef.current)
       if (resizeDebounceRef.current !== null) window.clearTimeout(resizeDebounceRef.current)
       if (drawFrameRef.current !== null) cancelAnimationFrame(drawFrameRef.current)
+      if (visualGrowFrameRef.current !== null) cancelAnimationFrame(visualGrowFrameRef.current)
 
       if (pendingSolverTapRef.current) window.clearTimeout(pendingSolverTapRef.current.timer)
     }
@@ -1940,16 +1944,6 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     clearInkExtentStyles(inkExtentPaperRef.current)
     inkExtentPaperRef.current = null
   }, [])
-
-  const schedulePageLayoutRefresh = useCallback(() => {
-    if (pageLayoutFrameRef.current !== null) return
-    pageLayoutFrameRef.current = requestAnimationFrame(() => {
-      pageLayoutFrameRef.current = null
-      canvasQualityKeyRef.current = ''
-      committedCanvasDirtyRef.current = true
-      redraw(true)
-    })
-  }, [redraw])
 
   const commitPendingGrowRemap = useCallback((layoutW: number, layoutH: number) => {
     const flushed = pendingGrowScale(pendingGrowRemapRef.current, layoutW, layoutH)
@@ -2079,18 +2073,25 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       sheetShift: shift,
     })
     pinPaperViewportAfterExtentGrow(scroller, { x: nextStay.camX, y: nextStay.camY })
+    const surface = surfaceRef.current
+    const canvases = [canvasRef.current, committedCanvasRef.current]
+    applyVisualGrowCorrection(scroller, { x: nextStay.camX, y: nextStay.camY }, { surface, canvases })
+    if (visualGrowFrameRef.current !== null) cancelAnimationFrame(visualGrowFrameRef.current)
+    visualGrowFrameRef.current = schedulePaperVisualGrowRefresh(
+      (callback) => window.requestAnimationFrame(callback),
+      scroller,
+      { x: nextStay.camX, y: nextStay.camY },
+      VISUAL_GROW_REFRESH_FRAMES,
+      { surface, canvases },
+    ) || null
     paintedLayoutRef.current = { w: nextPaintW, h: nextPaintH }
     exportCacheRef.current = null
     setDirty(true)
-    if (activeStrokeRef.current) {
-      canvasQualityKeyRef.current = ''
-      committedCanvasDirtyRef.current = true
-      redraw(true)
-    } else {
-      schedulePageLayoutRefresh()
-    }
+    canvasQualityKeyRef.current = ''
+    committedCanvasDirtyRef.current = true
+    redraw(true)
     return true
-  }, [applyInkExtentStyles, resolvePaperElement, schedulePageLayoutRefresh, setDirty, redraw])
+  }, [applyInkExtentStyles, resolvePaperElement, setDirty, redraw])
 
   const absorbOneCanvasRef = useRef(false)
 
