@@ -215,6 +215,26 @@ const runOnce = async () => {
   assert.equal(i18n.translateUiText('Pinsel: dynamischer Druck'), 'Brush: dynamic pressure')
   assert.equal(i18n.translateUiText('Textmarker: transparent'), 'Highlighter: transparent')
   assert.equal(i18n.translateUiText('Aquarell: lasierende Kanten'), 'Watercolor: glazing edges')
+  // Drafting tools: names translate, measurements keep their value with English decimals.
+  assert.equal(i18n.translateUiText('Lineal'), 'Ruler')
+  assert.equal(i18n.translateUiText('Geodreieck'), 'Set square')
+  assert.equal(i18n.translateUiText('Zirkel'), 'Compass')
+  assert.equal(i18n.translateUiText('Lineal · 16 cm · 30°'), 'Ruler · 16 cm · 30°')
+  assert.equal(i18n.translateUiText('Lineal · +3,2 cm · 0°'), 'Ruler · +3.2 cm · 0°')
+  assert.equal(i18n.translateUiText('Geodreieck · −3 cm · 45°'), 'Set square · −3 cm · 45°')
+  assert.equal(i18n.translateUiText('Zirkel · r 2,5 cm · gesperrt'), 'Compass · r 2.5 cm · locked')
+  assert.equal(i18n.translateUiText('Zirkel · r 2,5 cm · 90°'), 'Compass · r 2.5 cm · 90°')
+  assert.equal(i18n.translateUiText('25 cm · beide Kanten zeichnen'), '25 cm · draws along both edges')
+  assert.equal(i18n.translateUiText('16 cm · Skala ab Mitte, Winkelmesser 0–180°'), '16 cm · scale from the centre, protractor 0–180°')
+  assert.equal(i18n.translateUiText('r 2,5 cm · Ø 5 cm'), 'r 2.5 cm · Ø 5 cm')
+  assert.equal(i18n.translateUiText('Drehen und Zirkelbögen rasten alle 15°'), 'Rotation and compass arcs snap every 15°')
+  assert.equal(i18n.translateUiText('Bogen von 90° ab der Mine zeichnen'), 'Draw a 90° arc from the pencil')
+  assert.equal(i18n.translateUiText('Bogen 90° mit r 2,5 cm gezeichnet.'), 'Arc of 90° with r 2.5 cm drawn.')
+  assert.equal(i18n.translateUiText('Bogen mit r 1,00″ gezeichnet.'), 'Arc with r 1.00″ drawn.')
+  assert.equal(i18n.translateUiText('Kreis mit r 2,5 cm gezeichnet.'), 'Circle with r 2.5 cm drawn.')
+  assert.equal(i18n.translateUiText('6,30″'), '6.30″')
+  assert.equal(i18n.translateUiText('An Lineal anlegen'), 'Attach to ruler')
+  assert.equal(localizeText('Zeichenhilfen', 'en'), 'Drafting tools')
 
   return { chrome: CHROME.length, samples: english.length }
 }
