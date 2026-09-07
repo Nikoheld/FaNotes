@@ -2,6 +2,16 @@
 
 ## Unveröffentlicht
 
+## 2026.9.20
+
+- **Text bleibt beim Zoomen scharf und in Form:** Das Blatt wird beim Zoomen nicht mehr schmaler umbrochen — Prozentbreiten werden mit dem Zoom multipliziert, sodass die Kamera das fertige Layout als Ganzes vergrößert. Schrift dehnt oder staucht sich nicht mehr, PDF-Seiten schrumpfen nicht zurück auf die Fensterbreite, und Tinte bleibt auf ihren Buchstaben. Die Zeilenleiste des Editors scrollt mit dem Text mit, statt beim seitlichen Schwenken über die ersten Buchstaben zu liegen. Unter Hyprland mit `force_zero_scaling` rendert FaNotes mit dem echten Monitor-Faktor aus `hyprctl` statt fest mit 2 (`FANOTES_DEVICE_SCALE` und `GDK_SCALE` werden beachtet); ohne `force_zero_scaling` weist das Protokoll auf die unscharfe Compositor-Skalierung hin.
+- **Jede Notiz merkt sich ihre Kamera:** Zoom und der Papierpunkt unter der Bildmitte kommen beim erneuten Öffnen und nach einem Neustart zurück — du machst genau dort weiter, wo du aufgehört hast. Getippte Notizen verankern sich an der Zeile am oberen Rand, damit die Stelle auch bei langen Dokumenten stimmt. Jede eigene Eingabe übernimmt die Kamera sofort; ein Sprung aus der Gliederung oder Suche wird nicht mehr zurückgesetzt. Der Editor doppelt die Scrollposition unter Zoom nicht mehr (CodeMirror 6.43.11).
+- **PDF ohne Flackern und ohne leeren Rand:** PDF-Seiten werden doppelt gepuffert gemalt — das nächste Bild entsteht in einer verdeckten Fläche und wird erst fertig eingetauscht, sodass Scrollen und Zoomen keine Seite mehr weiß blitzen lassen. Eine PDF öffnet auf Fensterbreite; Breite, Seite und ± in der Leiste bewegen die Kamera statt die Spalte umzubauen (Tinte bleibt 0–1 des Blatts), Breite und Seite folgen der Fenstergröße, ein eigener Zoom und eine gemerkte Kamera werden nicht neu eingepasst. Der Raum um die Seiten hat eine Farbe, und der Ladeplatzhalter lässt die Spalte nicht mehr um 220 px springen.
+- **Löschen fragt in einer eigenen Karte:** Der Bestätigungsdialog hat sein eigenes Layout statt des Einstellungsrasters, Escape bricht ab, der Fokus bleibt im Dialog und Tab wechselt nur zwischen den beiden Knöpfen.
+- **Marker ohne Streifen:** Durchscheinende Pinsel (Marker, Textmarker, Aquarell) werden als eine Form gemalt und dann mit ihrer Deckkraft aufgelegt, statt Segment für Segment übereinander — keine Nähte, Kerben oder dunklen Überlappungen mehr in der Linie.
+- **Radiertes bleibt radiert:** Ein radierter Strich kommt nicht mehr zurück. Eine leer radierte Seite wird gespeichert statt als „nichts zu speichern“ übersprungen, und die erste Speicherung einer Notiz lädt nicht mehr ihren eigenen Stand zurück über das, was du seither radiert hast.
+- **Englische Oberfläche vollständig:** Zeitstempel in der Statusleiste, die Hinweise zu Stift- und Tabletttasten und die GlyphenWerk-Aufforderung „Schreibe …“ erscheinen auf Englisch.
+
 ## 2026.9.19
 
 - **Neue Notiz bleibt Text:** Beim Anlegen und Speichern erscheint die `.famd`-Begleiter-JSON nicht im Editor. Sichtbar bleibt nur der Markdown-Text; die Statistik liegt in der Begleiterdatei.
