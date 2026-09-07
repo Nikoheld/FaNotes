@@ -1582,6 +1582,16 @@ function noteMarkdownSourcePath(relativePath) {
     : relativePath
 }
 
+/** Placeholder id for `.famd`-embedded ink whose note has no ink marker yet. */
+const FAMD_INK_ID = 'famd-ink'
+const NOTE_INK_MARKER = /<!--\s*fanotes-ink:([a-zA-Z0-9_-]{1,96})\s*-->/u
+
+/** Drawing-library id the note's markdown points at, or null. */
+function noteInkMarkerId(markdown) {
+  const match = NOTE_INK_MARKER.exec(String(markdown || ''))
+  return match ? match[1] : null
+}
+
 function noteByteLimit(relativePath) {
   return path.extname(relativePath).toLocaleLowerCase('en-US') === '.famd' ? MAX_FAMD_BYTES : MAX_TEXT_BYTES
 }
@@ -3562,13 +3572,17 @@ function registerIpcHandlers() {
     if (!parsed.payload?.ink) return null
     const drawingJson = JSON.stringify(parsed.payload.ink)
     const document = validateDrawingJson(drawingJson)
+    // The embedded ink is the note's own page. Report it under the library id
+    // the note's ink marker points at, so the renderer's next save updates
+    // that record instead of a `famd-ink` record shared by every note.
+    const markerId = noteInkMarkerId(parsed.markdown)
     let metadata
     try {
-      const id = typeof document.id === 'string' ? assertDrawingId(document.id) : 'famd-ink'
+      const id = markerId ?? (typeof document.id === 'string' ? assertDrawingId(document.id) : FAMD_INK_ID)
       metadata = drawingLibraryMetadata(document, id, parsed.payload.updatedAt)
     } catch {
       return {
-        id: typeof document.id === 'string' ? document.id : 'famd-ink',
+        id: markerId ?? (typeof document.id === 'string' ? document.id : FAMD_INK_ID),
         title: typeof document.title === 'string' ? document.title : 'Handschrift',
         updatedAt: parsed.payload.updatedAt,
         imageRelativePath: '',

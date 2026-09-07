@@ -161,6 +161,8 @@ import {
   WRITE_MARGIN_X,
   WRITE_MARGIN_Y,
   growPageFromMark,
+  paintedStayExtent,
+  savedInkPage,
   writePageStayExtent,
   keepMarkOnPage,
   mapClientToPage,
@@ -346,10 +348,16 @@ const applyInkBoxToCanvases = (canvases: Array<HTMLCanvasElement | null>, box: I
   }
 }
 
-const applyInkWindowToCanvases = (canvases: Array<HTMLCanvasElement | null>, window: InkWindow) => {
+const applyInkWindowToCanvases = (
+  canvases: Array<HTMLCanvasElement | null>,
+  window: InkWindow,
+  paper: { width: number; height: number } | null = null,
+) => {
   // Pin the bitmap to the paper box inside the extra-room overlay. 0%/100%
-  // fills the board (paper+2·SCROLL_ROOM) while 0–1 ink is the paper.
-  applyInkBoxToCanvases(canvases, inkWindowLayoutStyle(window))
+  // fills the board (paper+2·SCROLL_ROOM) while 0–1 ink is the paper. In
+  // layout px when the paper is measured: a percentage box stretches the
+  // bitmap in the frame the sheet grows, before any redraw can re-place it.
+  applyInkBoxToCanvases(canvases, inkWindowLayoutStyle(window, paper))
 }
 
 /**
@@ -359,8 +367,13 @@ const applyInkWindowToCanvases = (canvases: Array<HTMLCanvasElement | null>, win
  * compositor has to take every frame shrinks from several viewports to
  * about one.
  */
-const applyLiveInkBoxToCanvas = (canvas: HTMLCanvasElement | null, box: InkLayoutBox | null, window: InkWindow) => {
-  applyInkBoxToCanvases([canvas], box ? liveInkSliceLayoutStyle(box) : inkWindowLayoutStyle(window))
+const applyLiveInkBoxToCanvas = (
+  canvas: HTMLCanvasElement | null,
+  box: InkLayoutBox | null,
+  window: InkWindow,
+  paper: { width: number; height: number } | null = null,
+) => {
+  applyInkBoxToCanvases([canvas], box ? liveInkSliceLayoutStyle(box) : inkWindowLayoutStyle(window, paper))
 }
 
 /**
@@ -1191,6 +1204,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     prevLayoutW: number
   } | null>(null)
   const commitPendingGrowRemapRef = useRef<(layoutW: number, layoutH: number) => boolean>(() => false)
+  const applyInkExtentStylesRef = useRef<(height: number, width: number) => void>(() => {})
+  const catchUpPaintedLayoutRef = useRef<() => boolean>(() => false)
 
   const activePointerTargetRef = useRef<Element | null>(null)
   /** Last pointer id we successfully called setPointerCapture for (may outlive activePointerRef on Wayland glitches). */
@@ -1675,6 +1690,11 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     const layoutWidth = paper?.offsetWidth || surface.offsetWidth || surface.clientWidth
     const layoutHeight = paper?.offsetHeight || surface.offsetHeight || surface.clientHeight
     if (layoutWidth <= 0 || layoutHeight <= 0) return
+    // Paint only 0–1 of this sheet. The resize observer rescales the strokes
+    // after a debounce; a redraw before it (a scroll re-slice, a state change,
+    // the effect that added a text line) painted 0–1 of the previous sheet on
+    // the grown one, and the ink slid down until the observer put it back.
+    if (paper && !activeStrokeRef.current) catchUpPaintedLayoutRef.current()
     // The slice is planned in layout px (inkWindowLayoutRef); here it becomes
     // the CSS box, the bitmap size and the paint translate — all in one
     // synchronous pass, so no frame can show the bitmap at a stale box.
@@ -1710,13 +1730,14 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         topPx: placed.topPx,
       }
       canvasQualityKeyRef.current = qualityKey
-      applyInkWindowToCanvases([committedCanvas], placed.window)
+      const paperBox = inline ? { width: layoutWidth, height: layoutHeight } : null
+      applyInkWindowToCanvases([committedCanvas], placed.window, paperBox)
       const live = liveLayout
         ? placeLiveInkWindow(liveLayout, { width: layoutWidth, height: layoutHeight }, { width: nextSize.width, height: placed.virtualHeight })
         : null
       const liveMoved = !sameLiveInkSlice(liveSliceRef.current, live?.slice ?? null)
       liveSliceRef.current = live?.slice ?? null
-      applyLiveInkBoxToCanvas(canvas, live?.box ?? null, placed.window)
+      applyLiveInkBoxToCanvas(canvas, live?.box ?? null, placed.window, paperBox)
       return moved || liveMoved
     }
     // Page growth and slice moves force measureLayout=true and apply even
@@ -1912,6 +1933,14 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       if (typeof raw.sourceOriginY === 'number' && Number.isFinite(raw.sourceOriginY) && raw.sourceOriginY >= 0) {
         sourceOriginYRef.current = raw.sourceOriginY
       }
+      // Saved 0–1 ink is relative to the saved page. The sheet takes that
+      // page now — before the next redraw measures it — and a grow that
+      // follows (fit to ink, sheet larger than the page) remaps from that
+      // box, not from whatever this board measured before the document came.
+      paintedLayoutRef.current = { w: sourceWidthRef.current, h: sourceHeightRef.current }
+      pendingGrowRemapRef.current = null
+      pendingStaleLayoutRef.current = null
+      applyInkExtentStylesRef.current(sourceHeightRef.current, sourceWidthRef.current)
       if (typeof raw.createdAt === 'string') createdAtRef.current = raw.createdAt
       searchTranscriptRef.current = typeof raw.searchTranscript === 'string' ? raw.searchTranscript : ''
       transcriptUpdatedAtRef.current = typeof raw.transcriptUpdatedAt === 'string' ? raw.transcriptUpdatedAt : null
@@ -2169,13 +2198,17 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     } : current)
   }, [])
 
-  const flushPaintedLayoutGrow = useCallback(() => {
+  // 0–1 ink follows the painted sheet: when the sheet grew (a text line, a
+  // viewport minimum) the strokes are rescaled so every mark keeps its paper
+  // pixel. Returns whether a rescale happened; the caller repaints.
+  const catchUpPaintedLayout = useCallback(() => {
     const paper = resolvePaperElement()
     if (!paper) return false
     const nextW = paper.offsetWidth
     const nextH = paper.offsetHeight
     const prevW = paintedLayoutRef.current.w
     const prevH = paintedLayoutRef.current.h
+    if (nextW === prevW && nextH === prevH && !pendingGrowRemapRef.current) return false
     const resolved = resolvePaintedLayoutGrow({
       pending: pendingGrowRemapRef.current,
       prevLayoutW: prevW,
@@ -2192,11 +2225,17 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     scaleNormalizedSpace(resolved.scaleX, resolved.scaleY)
     canvasQualityKeyRef.current = ''
     committedCanvasDirtyRef.current = true
+    return true
+  }, [resolvePaperElement, scaleNormalizedSpace])
+  catchUpPaintedLayoutRef.current = catchUpPaintedLayout
+
+  const flushPaintedLayoutGrow = useCallback(() => {
+    if (!catchUpPaintedLayout()) return false
     activeRenderedPointCountRef.current = 0
     wipeLiveInk()
     redraw(true)
     return true
-  }, [redraw, resolvePaperElement, scaleNormalizedSpace, wipeLiveInk])
+  }, [catchUpPaintedLayout, redraw, wipeLiveInk])
 
   useEffect(() => {
     mountedRef.current = true
@@ -2313,6 +2352,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     ruling?.style.setProperty('background-position', `${rulingCss.x} ${rulingCss.y}`)
     inkExtentPaperRef.current = paper
   }, [resolvePaperElement])
+  applyInkExtentStylesRef.current = applyInkExtentStyles
 
   useEffect(() => () => {
     clearInkExtentStyles(inkExtentPaperRef.current)
@@ -2476,48 +2516,40 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     return true
   }, [applyInkExtentStyles, planInkWindowNow, resolvePaperElement, setDirty, redraw])
 
-  const absorbOneCanvasRef = useRef(false)
-
-  /** First paint: 0–1 covers the one plane canvas; legacy card ink stays on the text column. */
+  /**
+   * The 0–1 ink space is the painted sheet (`.unified-paper`), the same box
+   * the pen is mapped against. When the sheet is laid out larger than the
+   * write page — viewport fill on first paint, a taller text column, a saved
+   * page opened in a bigger window — the page grows to the sheet through
+   * setPageExtent, so existing ink keeps its paper position instead of being
+   * stretched into the new box.
+   *
+   * Only the sheet is measured. The canvas surface is the sheet plus the
+   * camera room on every side (`--paper-scroll-room`); absorbing it grew the
+   * page by that room, the sheet followed, and the next measurement grew it
+   * again — a runaway grow loop that crashed the overlay on a note switch.
+   */
   const absorbPaintedOneCanvas = useCallback(() => {
-    if (!inline || absorbOneCanvasRef.current) return false
+    if (!inline) return false
     const paper = resolvePaperElement()
-    const surface = surfaceRef.current
-    if (!paper || !surface) return false
-    const paintedW = writePageStayExtent(
-      sourceWidthRef.current,
-      Math.max(1, Math.max(paper.offsetWidth, surface.offsetWidth)),
-    )
-    const paintedH = writePageStayExtent(
-      sourceHeightRef.current,
-      Math.max(1, Math.max(paper.offsetHeight, surface.offsetHeight)),
-    )
-    if (paintedW < 2 || paintedH < 2) return false
-    if (paper.classList.contains('is-pdf-note') || paper.classList.contains('has-worksheet')) {
-      absorbOneCanvasRef.current = true
-      const overlayH = pdfOverlaySourceHeight(sourceWidthRef.current, paintedW, paintedH)
-      if (shouldSyncPdfOverlaySource(sourceHeightRef.current, overlayH)) {
-        sourceHeightRef.current = overlayH
-        setSourceHeight(overlayH)
-        applyInkExtentStyles(overlayH, sourceWidthRef.current)
-      }
-      return false
+    if (!paper) return false
+    if (paper.classList.contains('is-pdf-note') || paper.classList.contains('has-worksheet')) return false
+    let grew = false
+    // applyInkExtentStyles makes the sheet at least the page; a viewport
+    // minimum can leave it larger still, so a second pass adopts that box.
+    for (let pass = 0; pass < 3; pass += 1) {
+      const paintedW = paintedStayExtent(sourceWidthRef.current, paper.offsetWidth)
+      const paintedH = paintedStayExtent(sourceHeightRef.current, paper.offsetHeight)
+      if (paintedW < 2 || paintedH < 2) break
+      if (paintedW <= sourceWidthRef.current + 1 && paintedH <= sourceHeightRef.current + 1) break
+      if (!setPageExtent(
+        Math.max(sourceHeightRef.current, Math.round(paintedH)),
+        Math.max(sourceWidthRef.current, Math.round(paintedW)),
+      )) break
+      grew = true
     }
-    absorbOneCanvasRef.current = true
-    const prevW = sourceWidthRef.current
-    const prevH = sourceHeightRef.current
-    if (paintedW > prevW + 1 || paintedH > prevH + 1) {
-      const nextW = Math.max(prevW, Math.round(paintedW))
-      const nextH = Math.max(prevH, Math.round(paintedH))
-      sourceWidthRef.current = nextW
-      sourceHeightRef.current = nextH
-      setSourceWidth(nextW)
-      setSourceHeight(nextH)
-      applyInkExtentStyles(nextH, nextW)
-      paintedLayoutRef.current = { w: paintedW, h: paintedH }
-    }
-    return false
-  }, [applyInkExtentStyles, inline, resolvePaperElement, setPageExtent])
+    return grew
+  }, [inline, resolvePaperElement, setPageExtent])
 
   /** Grow the write page around the pen. Extra paper for pan moves with the page. */
   const ensureWriteRoom = useCallback((normalizedY?: number, normalizedX?: number) => {
@@ -2675,8 +2707,11 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     return () => window.clearTimeout(timer)
   }, [planInkWindowNow, redraw, viewZoom])
 
+  // Refs, not the state snapshot: a document load moves the refs and the
+  // sheet in one step, and this pass must not put the previous page back
+  // for one frame before the state catches up.
   useEffect(() => {
-    applyInkExtentStyles(sourceHeight, sourceWidth)
+    applyInkExtentStyles(sourceHeightRef.current, sourceWidthRef.current)
   }, [applyInkExtentStyles, sourceHeight, sourceWidth])
 
   const syncPdfOverlaySource = useCallback(() => {
@@ -2700,10 +2735,18 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     commitPendingGrowRemap(paper.offsetWidth, paper.offsetHeight)
   }, [absorbPaintedOneCanvas, commitPendingGrowRemap, resolvePaperElement, sourceHeight, sourceWidth, syncPdfOverlaySource])
 
-  useEffect(() => {
-    absorbOneCanvasRef.current = false
+  const fitLoadedPageRef = useRef(() => {})
+  fitLoadedPageRef.current = () => {
     fitPageToInk()
-  }, [drawingId, fitPageToInk, initialDrawingJson])
+    absorbPaintedOneCanvas()
+  }
+
+  // Once per loaded document. fitPageToInk changes identity with every page
+  // grow (through setPageExtent/redraw); running this on each grow re-armed
+  // the first-paint absorb after every step of the grow it had just caused.
+  useEffect(() => {
+    fitLoadedPageRef.current()
+  }, [drawingId, initialDrawingJson])
 
   useEffect(() => {
     if (inline && !inputActive) {
@@ -3398,7 +3441,10 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       syncInkWindow()
     }
     appendPointerEvent(event.nativeEvent)
-  }, [activeArtBrush.pressure, activeArtSymbol, appendPointerEvent, artBrush, artColor, artEffect, artOpacity, artSymbolRotation, artSymbolSize, artWidth, bumpInkRevision, clearRecognitionScope, clearShapeDwellTimer, closeMathCorrectionSession, closeMathSolverSelection, commitPendingSolverTap, commitStrokeToCanvas, inkMode, inline, mathSolverEnabled, penColor, penWidth, pointFromEvent, redraw, scheduleRedraw, selectionMode, setDirty, settings.penOnly, settings.pressureEnabled, settings.tabletButtons, sourceHeight, sourceWidth, syncInkWindow, tool, updateHistoryState])
+  // inputActive is a dependency: a board mounted inert (keyboard mode showing
+  // saved ink) kept a handler that still saw inputActive=false after the pen
+  // turned on, and every pen-down was refused until an unrelated grow rebuilt it.
+  }, [activeArtBrush.pressure, activeArtSymbol, appendPointerEvent, artBrush, artColor, artEffect, artOpacity, artSymbolRotation, artSymbolSize, artWidth, bumpInkRevision, clearRecognitionScope, clearShapeDwellTimer, closeMathCorrectionSession, closeMathSolverSelection, commitPendingSolverTap, commitStrokeToCanvas, inkMode, inline, inputActive, mathSolverEnabled, penColor, penWidth, pointFromEvent, redraw, scheduleRedraw, selectionMode, setDirty, settings.penOnly, settings.pressureEnabled, settings.tabletButtons, sourceHeight, sourceWidth, syncInkWindow, tool, updateHistoryState])
 
   const handlePointerMove = useCallback((event: ReactPointerEvent<HTMLElement>) => {
     const pan = tabletPanRef.current
@@ -4123,14 +4169,22 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   }, [bumpInkRevision, clearRecognitionScope, fitPageToInk, scheduleRedraw, setDirty, updateHistoryState])
 
   const drawingPayload = useCallback((includeImage = false): DrawingSavePayload => {
+    // Refs, not state: a grow in an effect and a save in the same commit (the
+    // unmount save of a closing board) must see the box the strokes were just
+    // remapped to. The sheet box, not the page: the page follows the sheet one
+    // layout effect later, and strokes are 0–1 of the sheet in between.
+    const page = savedInkPage(
+      { width: sourceWidthRef.current, height: sourceHeightRef.current },
+      paintedLayoutRef.current,
+    )
     let imageData: string | undefined
     if (includeImage) {
-      const exportKey = [inkRevisionRef.current, paperStyle, settings.smoothing, sourceWidth, sourceHeight].join(':')
+      const exportKey = [inkRevisionRef.current, paperStyle, settings.smoothing, page.width, page.height].join(':')
       imageData = exportCacheRef.current?.key === exportKey ? exportCacheRef.current.imageData : undefined
       if (!imageData) {
       const exportCanvas = document.createElement('canvas')
-      exportCanvas.width = sourceWidth * EXPORT_SCALE
-      exportCanvas.height = sourceHeight * EXPORT_SCALE
+      exportCanvas.width = page.width * EXPORT_SCALE
+      exportCanvas.height = page.height * EXPORT_SCALE
       renderDocument(
         exportCanvas,
         strokesRef.current,
@@ -4139,7 +4193,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         exportCanvas.width,
         exportCanvas.height,
         true,
-        sourceWidth,
+        page.width,
       )
       imageData = exportCanvas.toDataURL('image/png')
       exportCacheRef.current = { key: exportKey, imageData }
@@ -4150,8 +4204,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       schemaVersion: 1,
       title,
       paperStyle,
-      sourceWidth,
-      sourceHeight,
+      sourceWidth: page.width,
+      sourceHeight: page.height,
       sourceOriginX: sourceOriginXRef.current,
       sourceOriginY: sourceOriginYRef.current,
       overlayQuality: INK_MIN_INLINE_QUALITY,
@@ -4173,7 +4227,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       imageData,
       drawingJson: JSON.stringify(drawing),
     }
-  }, [activeMode, mathSolverEnabled, mode, paperStyle, settings.smoothing, sourceHeight, sourceWidth, title])
+  }, [activeMode, mathSolverEnabled, mode, paperStyle, settings.smoothing, title])
 
   const saveDrawing = useCallback((insertAfterSave: boolean, silent = false) => {
     if (!strokesRef.current.length) return Promise.resolve()
