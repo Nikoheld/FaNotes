@@ -2,7 +2,7 @@
 
 Inventory walked from the shipped UI entry points. Each row names a user-visible surface and the source that implements it. The check `scripts/check-user-surfaces.cjs` re-reads those files and fails if a listed needle disappears.
 
-Command-palette action ids walked from `src/App.tsx`: `new-note`, `import-pdf-note`, `new-folder`, `new-subfolder`, `save`, `search`, `drawing`, `note-link`, `subject-book`, `worksheet`, `onenote-import`, `ai-assistant`, `glyphenwerk`, `overview`, `homework`, `daily`, `export-pdf`, `history`, `split`, `focus`, `sidebar`, `inspector`, `settings`, `reveal`, `bug-report`, `quit`.
+Command-palette action ids walked from `src/App.tsx`: `new-note`, `import-pdf-note`, `new-folder`, `new-subfolder`, `save`, `search`, `drawing`, `note-link`, `subject-book`, `worksheet`, `onenote-import`, `ai-assistant`, `glyphenwerk`, `overview`, `homework`, `daily`, `export-pdf`, `history`, `quick-open`, `nav-back`, `nav-forward`, `reopen-tab`, `split`, `split-swap`, `split-orientation`, `focus`, `sidebar`, `inspector`, `settings`, `reveal`, `bug-report`, `quit`.
 
 ## Notes / vault
 
@@ -19,7 +19,17 @@ Command-palette action ids walked from `src/App.tsx`: `new-note`, `import-pdf-no
 | Placed note Verlinkung | `src/lib/noteLink.ts` | `export const placeNewNoteLink` |
 | Verlinkung overlay | `src/components/NoteLinkLayer.tsx` | `export function NoteLinkLayer` |
 | Remove placed Verlinkung | `src/lib/noteLink.ts` | `export const removeNoteLink` |
-| Zurück after a Verlinkung | `src/App.tsx` | `note-nav-back` |
+| Zurück / Vorwärts through the visited-note history | `src/App.tsx` | `note-nav-back` |
+| Visited-note history helpers | `src/lib/workspaceNav.ts` | `export const visitNote` |
+| Split view: second pane, head, divider | `src/App.tsx` | `split-divider` |
+| Split layout ratio / orientation helpers | `src/lib/workspaceNav.ts` | `export const clampSplitRatio` |
+| Read-only ink in the second pane | `src/components/InkPreviewLayer.tsx` | `export function InkPreviewLayer` |
+| Tab shortcuts, pin, reorder, context menu | `src/App.tsx` | `tab-context-menu` |
+| Reopen closed tab / tab order / workspace memory helpers | `src/lib/workspaceNav.ts` | `export const rememberClosedTab` |
+| Quick switcher (Strg+O) | `src/components/CommandPalette.tsx` | `mode === 'notes'` |
+| Fuzzy recent-first note ranking | `src/lib/workspaceNav.ts` | `export const rankSwitcherNotes` |
+| Breadcrumbs in the status bar | `src/App.tsx` | `note-breadcrumbs` |
+| File tree keyboard navigation | `src/components/FileTree.tsx` | `event.key === 'Delete'` |
 | Note backup snapshots | `src/lib/noteBackup.ts` | `export const createNoteBackup` |
 | Backup control policy | `src/lib/noteBackup.ts` | `export const noteBackupControlPolicy` |
 | Backup top chrome | `src/App.tsx` | `note-backup-control` |
