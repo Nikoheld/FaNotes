@@ -48,11 +48,29 @@ export const worksheetIdsFromMarkdown = (markdown: string) => (
   [...markdown.matchAll(WORKSHEET_MARKER)].map((match) => match[1])
 )
 
+const isFamdSidecarJson = (value: string) => {
+  const trimmed = value.trim()
+  if (!trimmed.startsWith('{') || !trimmed.includes(FAMD_SCHEMA)) return false
+  try {
+    const parsed = JSON.parse(trimmed) as { schema?: unknown }
+    return parsed?.schema === FAMD_SCHEMA
+  } catch {
+    return false
+  }
+}
+
 export const stripFamdPayload = (source: string) => {
   if (typeof source !== 'string' || !source) return ''
-  const match = [...source.matchAll(new RegExp(FAMD_HEADER.source, 'gu'))].at(-1)
-  if (!match || match.index === undefined) return source.replace(/\s+$/u, '')
-  return source.slice(0, match.index).replace(/\s+$/u, '')
+  let text = source
+  const match = [...text.matchAll(new RegExp(FAMD_HEADER.source, 'gu'))].at(-1)
+  if (match && match.index !== undefined) text = text.slice(0, match.index)
+  text = text.replace(/\s+$/u, '')
+  if (isFamdSidecarJson(text)) return ''
+  const trailing = text.match(/\n(\{[\s\S]*\})\s*$/u)
+  if (trailing?.[1] && isFamdSidecarJson(trailing[1])) {
+    return text.slice(0, trailing.index).replace(/\s+$/u, '')
+  }
+  return text
 }
 
 export const parseFamd = (source: string): { markdown: string; payload: FamdPayload | null } => {

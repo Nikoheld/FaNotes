@@ -701,7 +701,7 @@ export function createBrowserApi(): FaNotesApi {
       await ready
       const record = files.get(normalizePath(rawPath))
       if (!record) throw new Error('Die Notiz wurde im Browser-Vault nicht gefunden.')
-      return record.content
+      return parseFamd(record.content).markdown
     },
     readAssetDataUrl: async (rawPath) => {
       await ready

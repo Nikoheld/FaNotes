@@ -123,11 +123,52 @@ function worksheetIdsFromMarkdown(markdown) {
   return [...String(markdown || '').matchAll(WORKSHEET_MARKER)].map((match) => match[1])
 }
 
+function isFamdSidecarJson(value) {
+  const trimmed = String(value || '').trim()
+  if (!trimmed.startsWith('{') || !trimmed.includes(FAMD_SCHEMA)) return false
+  try {
+    const parsed = JSON.parse(trimmed)
+    return Boolean(parsed && parsed.schema === FAMD_SCHEMA)
+  } catch {
+    return false
+  }
+}
+
+function parsePageStats(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const createdAt = typeof value.createdAt === 'string' && Number.isFinite(Date.parse(value.createdAt))
+    ? new Date(value.createdAt).toISOString()
+    : undefined
+  const modifiedAt = typeof value.modifiedAt === 'string' && Number.isFinite(Date.parse(value.modifiedAt))
+    ? new Date(value.modifiedAt).toISOString()
+    : createdAt
+  if (!createdAt || !modifiedAt) return undefined
+  const lastOpenedAt = typeof value.lastOpenedAt === 'string' && Number.isFinite(Date.parse(value.lastOpenedAt))
+    ? new Date(value.lastOpenedAt).toISOString()
+    : createdAt
+  const dwell = Number(value.dwellMs)
+  const opens = Number(value.openCount)
+  return {
+    createdAt,
+    modifiedAt,
+    lastOpenedAt,
+    dwellMs: Number.isFinite(dwell) && dwell >= 0 ? Math.floor(dwell) : 0,
+    openCount: Number.isFinite(opens) && opens >= 0 ? Math.floor(opens) : 0,
+  }
+}
+
 function stripFamdPayload(source) {
   if (typeof source !== 'string' || !source) return ''
-  const match = [...source.matchAll(new RegExp(FAMD_HEADER.source, 'gu'))].at(-1)
-  if (!match || match.index === undefined) return source.replace(/\s+$/u, '')
-  return source.slice(0, match.index).replace(/\s+$/u, '')
+  let text = source
+  const match = [...text.matchAll(new RegExp(FAMD_HEADER.source, 'gu'))].at(-1)
+  if (match && match.index !== undefined) text = text.slice(0, match.index)
+  text = text.replace(/\s+$/u, '')
+  if (isFamdSidecarJson(text)) return ''
+  const trailing = text.match(/\n(\{[\s\S]*\})\s*$/u)
+  if (trailing?.[1] && isFamdSidecarJson(trailing[1])) {
+    return text.slice(0, trailing.index).replace(/\s+$/u, '')
+  }
+  return text
 }
 
 function parseFamd(source) {
@@ -157,6 +198,7 @@ function parseFamd(source) {
     const paperStyle = isPaperStyle(parsed.paperStyle) ? parsed.paperStyle : undefined
     const noteLinks = parseNoteLinks(parsed.noteLinks)
     const noteBackups = parseNoteBackups(parsed.noteBackups)
+    const pageStats = parsePageStats(parsed.pageStats)
     return {
       markdown,
       payload: {
@@ -167,6 +209,7 @@ function parseFamd(source) {
         ...(paperStyle ? { paperStyle } : {}),
         ...(noteLinks.length ? { noteLinks } : {}),
         ...(noteBackups.length ? { noteBackups } : {}),
+        ...(pageStats ? { pageStats } : {}),
       },
     }
   } catch {
@@ -189,6 +232,8 @@ function serializeFamd(markdown, payload) {
   if (noteLinks.length) next.noteLinks = noteLinks
   const noteBackups = parseNoteBackups(payload?.noteBackups)
   if (noteBackups.length) next.noteBackups = noteBackups
+  const pageStats = parsePageStats(payload?.pageStats)
+  if (pageStats) next.pageStats = pageStats
   const json = JSON.stringify(next)
   return `${body ? `${body}\n\n` : ''}<!-- fanotes-famd:v1 chars=${json.length} -->\n${json}\n`
 }

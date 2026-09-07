@@ -1722,6 +1722,7 @@
   "Neue Handschrift-Seite": "New handwriting page",
   "neue Integrations- und Browserprüfungen sichern die Theme-Palette, die sichere iframe-Kommunikation und die gemeinsame Text-/Mathematik-Oberfläche für Linux, Windows und Web ab": "new integration and browser checks cover the theme palette, secure iframe communication, and unified text and mathematics interface across Linux, Windows, and the web",
   "Neue Markdown-Notiz erstellt.": "New Markdown note created.",
+  "**Neue Notiz bleibt Text:** Beim Anlegen und Speichern erscheint die `.famd`-Begleiter-JSON nicht im Editor. Sichtbar bleibt nur der Markdown-Text; die Statistik liegt in der Begleiterdatei.": "**New notes stay text:** Creating and saving a note does not put the `.famd` sidecar JSON in the editor. Only the Markdown stays visible; statistics live in the companion file.",
   "Neue Notiz": "New note",
   "Neue Notiz (Strg+N)": "New note (Ctrl+N)",
   "Neue Notiz in": "New note in",

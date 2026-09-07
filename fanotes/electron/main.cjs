@@ -1627,7 +1627,8 @@ async function writeFamdCompanion(markdownRelativePath, markdown, ink = undefine
   const mdRelativePath = companionNotePath(markdownRelativePath, '.md')
   const existingSource = await readOptionalNoteFile(famdRelativePath)
   const existing = existingSource ? parseFamd(existingSource) : { markdown: '', payload: emptyFamdPayload() }
-  const body = stripFamdPayload(markdown)
+  const incoming = parseFamd(typeof markdown === 'string' ? markdown : '')
+  const body = incoming.markdown || stripFamdPayload(markdown)
   const existingPayload = existing.payload || emptyFamdPayload()
   const inkDocument = ink === undefined ? existingPayload.ink : ink
   const paperFromInk = inkDocument && typeof inkDocument === 'object' && isPaperStyle(inkDocument.paperStyle)
@@ -1635,10 +1636,12 @@ async function writeFamdCompanion(markdownRelativePath, markdown, ink = undefine
     : undefined
   const payload = {
     ...existingPayload,
+    ...(incoming.payload || {}),
     updatedAt: new Date().toISOString(),
     worksheets: worksheetIdsFromMarkdown(body),
     ink: inkDocument ?? null,
-    paperStyle: existingPayload.paperStyle || paperFromInk || (isPaperStyle(currentSettings.paperStyle) ? currentSettings.paperStyle : undefined),
+    paperStyle: existingPayload.paperStyle || incoming.payload?.paperStyle || paperFromInk || (isPaperStyle(currentSettings.paperStyle) ? currentSettings.paperStyle : undefined),
+    ...(incoming.payload?.pageStats ? { pageStats: incoming.payload.pageStats } : {}),
   }
   const { target } = await resolveVaultPath(famdRelativePath, { allowMissing: true, expected: 'file' })
   await atomicWrite(target, serializeFamd(body, payload), { encoding: 'utf8', mode: 0o600 })
@@ -3025,7 +3028,7 @@ function registerIpcHandlers() {
             : (markdownBody.endsWith('\n') ? markdownBody : `${markdownBody}\n`)
           await atomicWrite(target, written, { encoding: 'utf8', mode: 0o600 })
           try {
-            await writeFamdCompanion(normalizedRelativePath, markdownBody)
+            await writeFamdCompanion(normalizedRelativePath, content)
           } catch (error) {
             console.warn('FaNotes: .famd-Begleiter konnte nicht geschrieben werden:', error?.message ?? error)
           }
