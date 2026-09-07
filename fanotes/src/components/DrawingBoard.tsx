@@ -106,7 +106,7 @@ import {
   mapClientToPaperPoint,
   resolveInkPointerDown,
 } from '../lib/inkSampleMap'
-import { drawInkStroke as paintInkStroke, inkStrokePaintMargin } from '../lib/inkStrokePaint'
+import { drawInkStroke as paintInkStroke, inkStrokeIsTranslucent, inkStrokePaintMargin } from '../lib/inkStrokePaint'
 import {
   INLINE_INK_ACTIVE_CLASS,
   INK_TOOLBAR_SLOT_ID,
@@ -1578,6 +1578,28 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     ) return true
     liveTailRef.current = { count: stroke.points.length, predicted: previewPoints.length > 0 }
     context.imageSmoothingEnabled = false
+    if (!stroke.symbolId && inkStrokeIsTranslucent(stroke)) {
+      // A see-through brush is composited once per paint (inkStrokePaint), so
+      // the live layer repaints the whole stroke each frame. Appending a tail
+      // would cover the joint twice and band the marker at every sample.
+      context.setTransform(1, 0, 0, 1, 0, 0)
+      if (liveCanvasHasInkRef.current) {
+        const bounds = rendered === 0 ? null : liveInkBoundsRef.current
+        if (bounds) context.clearRect(bounds.x0, bounds.y0, bounds.x1 - bounds.x0, bounds.y1 - bounds.y0)
+        else context.clearRect(0, 0, liveWidth, liveHeight)
+      }
+      liveInkBoundsRef.current = null
+      liveVolatileRectRef.current = null
+      const whole: InkStroke = previewPoints.length
+        ? { ...stroke, points: [...stroke.points, ...previewPoints as StrokePoint[]] }
+        : stroke
+      context.setTransform(1, 0, 0, 1, -paintLeft, -paintTop)
+      drawInkStroke(context, whole, pixelWidth, virtualHeight, smoothing, 1, sourceWidthNow, layoutWidth)
+      remember(liveInkSegmentBox(whole.points, 0, whole.points.length - 1, pixelWidth, virtualHeight, margin))
+      activeRenderedPointCountRef.current = Math.max(1, stroke.points.length)
+      liveCanvasHasInkRef.current = true
+      return true
+    }
     // replaceLive: predicted points and remeasures never overdraw a stale
     // bitmap — what they painted last frame is cleared before painting again.
     const replaceLive = rendered === 0

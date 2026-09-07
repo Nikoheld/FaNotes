@@ -88,6 +88,111 @@ export const inkStrokePaintMargin = (
   return widest / 2 + glow + 2
 }
 
+type InkPaintPass = {
+  widthFactor: number
+  alpha: number
+  /** Pencil grain: per-segment offset in bitmap px per unit scale. */
+  jitter?: number
+}
+
+const OPAQUE_PASS: readonly InkPaintPass[] = [{ widthFactor: 1, alpha: 1 }]
+
+/**
+ * Stroked passes of a brush, widest first. A pass with alpha below 1 is
+ * composited as one shape (see `inkStrokeIsTranslucent`).
+ */
+const brushPasses = (brush: string): readonly InkPaintPass[] => {
+  switch (brush) {
+    case 'pencil':
+      return [
+        { widthFactor: .72, alpha: .58 },
+        { widthFactor: .22, alpha: .2, jitter: 1.4 },
+        { widthFactor: .18, alpha: .14, jitter: 1.8 },
+      ]
+    case 'paintbrush':
+      return [{ widthFactor: 1.4, alpha: .16 }, { widthFactor: .92, alpha: .82 }]
+    case 'highlighter':
+      return [{ widthFactor: 1, alpha: .34 }]
+    case 'watercolor':
+      return [{ widthFactor: 1.48, alpha: .11 }, { widthFactor: 1.14, alpha: .17 }, { widthFactor: .78, alpha: .27 }]
+    case 'marker':
+      return [{ widthFactor: 1, alpha: .9 }]
+    default:
+      return OPAQUE_PASS
+  }
+}
+
+const inkBrushOf = (stroke: Pick<InkPaintStroke, 'purpose' | 'brush'>) => (
+  stroke.purpose === 'art' ? stroke.brush ?? 'fineliner' : 'fineliner'
+)
+
+const inkOpacityOf = (stroke: Pick<InkPaintStroke, 'purpose' | 'opacity'>) => (
+  stroke.purpose === 'art' ? clamp(stroke.opacity ?? 1, .08, 1) : 1
+)
+
+/**
+ * A stroke whose paint is see-through. Segments of such a stroke must not be
+ * painted one by one on the visible bitmap: every place two segments meet
+ * (round caps, a bend of a butt-capped highlighter) is covered twice and shows
+ * as a dark band — the "lines inside the marker". The whole stroke is painted
+ * opaque on a scratch layer and composited once instead, so the live layer
+ * repaints it whole rather than appending a tail.
+ */
+export const inkStrokeIsTranslucent = (
+  stroke: Pick<InkPaintStroke, 'purpose' | 'brush' | 'opacity' | 'symbolPaths' | 'points'>,
+) => {
+  if (stroke.purpose !== 'art') return false
+  if (stroke.symbolPaths?.length) return false
+  const brush = inkBrushOf(stroke)
+  if (brush === 'spray') return false
+  const opacity = inkOpacityOf(stroke)
+  if (opacity < .999) return true
+  return brushPasses(brush).some((pass) => pass.alpha < .999)
+}
+
+type InkScratchCanvas = { width: number; height: number; getContext: (kind: '2d') => InkPaintContext | null }
+let scratchCanvas: InkScratchCanvas | null = null
+let scratchContext: InkPaintContext | null = null
+
+/** Scratch layer for translucent passes; null where no canvas exists (Node checks). */
+const acquireScratch = (width: number, height: number): InkPaintContext | null => {
+  const w = Math.max(1, Math.ceil(width))
+  const h = Math.max(1, Math.ceil(height))
+  try {
+    if (!scratchCanvas || scratchCanvas.width < w || scratchCanvas.height < h) {
+      const nextW = Math.max(w, scratchCanvas?.width ?? 0)
+      const nextH = Math.max(h, scratchCanvas?.height ?? 0)
+      const host = globalThis as typeof globalThis & {
+        OffscreenCanvas?: new (width: number, height: number) => OffscreenCanvas
+        document?: Document
+      }
+      let canvas: InkScratchCanvas | null = null
+      if (host.OffscreenCanvas) {
+        canvas = new host.OffscreenCanvas(nextW, nextH) as unknown as InkScratchCanvas
+      } else if (host.document?.createElement) {
+        const element = host.document.createElement('canvas')
+        element.width = nextW
+        element.height = nextH
+        canvas = element as unknown as InkScratchCanvas
+      }
+      if (!canvas) return null
+      const context = canvas.getContext('2d')
+      if (!context || typeof (context as { drawImage?: unknown }).drawImage !== 'function') return null
+      scratchCanvas = canvas
+      scratchContext = context
+    }
+    return scratchContext
+  } catch {
+    return null
+  }
+}
+
+const canComposite = (context: InkPaintContext) => (
+  typeof (context as { drawImage?: unknown }).drawImage === 'function'
+  && typeof (context as { getTransform?: unknown }).getTransform === 'function'
+  && Boolean((context as { canvas?: unknown }).canvas)
+)
+
 /**
  * One paint path for live/committed ink. Tests call this — a missing line is a
  * failed pixel assertion, not a CSS-scale guess. Segments `startSegment` up to
@@ -113,8 +218,8 @@ export const drawInkStroke = (
   const first = stroke.points[0]
   const layout = layoutWidth > 1 ? layoutWidth : width
   const scale = inkStrokePaintScale(width, layout > 1 ? layout : sourceWidth)
-  const brush = stroke.purpose === 'art' ? stroke.brush ?? 'fineliner' : 'fineliner'
-  const opacity = stroke.purpose === 'art' ? clamp(stroke.opacity ?? 1, .08, 1) : 1
+  const brush = inkBrushOf(stroke)
+  const opacity = inkOpacityOf(stroke)
   const paint = strokePaint(context, stroke, width, height)
   context.save()
   context.strokeStyle = paint
@@ -166,7 +271,7 @@ export const drawInkStroke = (
     }
   }
 
-  const calligraphySegment = (previous: InkPaintPoint, point: InkPaintPoint) => {
+  const calligraphyNib = (target: InkPaintContext, previous: InkPaintPoint, point: InkPaintPoint) => {
     const previousX = previous.x * width
     const previousY = previous.y * height
     const pointX = point.x * width
@@ -174,14 +279,17 @@ export const drawInkStroke = (
     const nibWidth = inkStrokeBitmapWidth(stroke, ((previous.pressure ?? 0.5) + (point.pressure ?? 0.5)) / 2, scale)
     const nibX = Math.cos(-Math.PI * .22) * nibWidth / 2
     const nibY = Math.sin(-Math.PI * .22) * nibWidth / 2
+    target.beginPath()
+    target.moveTo(previousX + nibX, previousY + nibY)
+    target.lineTo(pointX + nibX, pointY + nibY)
+    target.lineTo(pointX - nibX, pointY - nibY)
+    target.lineTo(previousX - nibX, previousY - nibY)
+    target.closePath()
+    target.fill()
+  }
+  const calligraphySegment = (previous: InkPaintPoint, point: InkPaintPoint) => {
     context.globalAlpha = opacity
-    context.beginPath()
-    context.moveTo(previousX + nibX, previousY + nibY)
-    context.lineTo(pointX + nibX, pointY + nibY)
-    context.lineTo(pointX - nibX, pointY - nibY)
-    context.lineTo(previousX - nibX, previousY - nibY)
-    context.closePath()
-    context.fill()
+    calligraphyNib(context, previous, point)
   }
 
   if (stroke.points.length === 1 && startSegment <= 1) {
@@ -209,70 +317,177 @@ export const drawInkStroke = (
     return
   }
 
-  for (let index = Math.max(1, startSegment); index < lastSegment; index += 1) {
+  const firstSegment = Math.max(1, startSegment)
+  if (brush === 'spray') {
+    for (let index = firstSegment; index < lastSegment; index += 1) {
+      spraySegment(stroke.points[index - 1], stroke.points[index], index)
+    }
+    context.restore()
+    return
+  }
+
+  const blend = clamp(smoothing, 0, .92)
+  /** Curve of segment `index` (points index-1 → index), as `segment` painted it. */
+  const segmentCurve = (
+    index: number,
+    offsetX: number,
+    offsetY: number,
+    target: InkPaintContext,
+    connected: boolean,
+    pointCount = stroke.points.length,
+  ) => {
     const previous = stroke.points[index - 1]
     const point = stroke.points[index]
     const previousX = previous.x * width
     const previousY = previous.y * height
     const pointX = point.x * width
     const pointY = point.y * height
-    if (brush === 'spray') {
-      spraySegment(previous, point, index)
-      continue
-    }
-    if (brush === 'calligraphy') {
-      calligraphySegment(previous, point)
-      continue
-    }
-
-    const segment = (widthFactor: number, alpha: number, offsetX = 0, offsetY = 0) => {
-      context.globalAlpha = opacity * alpha
-      context.beginPath()
-      context.moveTo(previousX + offsetX, previousY + offsetY)
-      if (smoothing > 0 && index < stroke.points.length - 1) {
-        const next = stroke.points[index + 1]
-        const blend = clamp(smoothing, 0, .92)
-        const midpointX = pointX * (1 - blend * .35) + ((pointX + next.x * width) / 2) * blend * .35
-        const midpointY = pointY * (1 - blend * .35) + ((pointY + next.y * height) / 2) * blend * .35
-        context.quadraticCurveTo(pointX + offsetX, pointY + offsetY, midpointX + offsetX, midpointY + offsetY)
-      } else if (smoothing > 0 && index >= 2) {
-        const before = stroke.points[index - 2]
-        const blend = clamp(smoothing, 0, .92)
-        const controlX = previousX + (previous.x - before.x) * width * blend * 0.4
-        const controlY = previousY + (previous.y - before.y) * height * blend * 0.4
-        context.quadraticCurveTo(controlX + offsetX, controlY + offsetY, pointX + offsetX, pointY + offsetY)
-      } else {
-        context.lineTo(pointX + offsetX, pointY + offsetY)
-      }
-      context.lineWidth = inkStrokeBitmapWidth(
-        stroke,
-        ((previous.pressure ?? 0.5) + (point.pressure ?? 0.5)) / 2,
-        scale,
-      ) * widthFactor
-      context.stroke()
-    }
-
-    if (brush === 'pencil') {
-      segment(.72, .58)
-      const seed = (stroke.textureSeed ?? 1) + index * 53
-      segment(.22, .2, (seededUnit(seed) - .5) * scale * 1.4, (seededUnit(seed + 1) - .5) * scale * 1.4)
-      segment(.18, .14, (seededUnit(seed + 2) - .5) * scale * 1.8, (seededUnit(seed + 3) - .5) * scale * 1.8)
-    } else if (brush === 'paintbrush') {
-      segment(1.4, .16)
-      segment(.92, .82)
-    } else if (brush === 'highlighter') {
-      context.lineCap = 'butt'
-      segment(1, .34)
-    } else if (brush === 'watercolor') {
-      segment(1.48, .11)
-      segment(1.14, .17)
-      segment(.78, .27)
-    } else if (brush === 'marker') {
-      segment(1, .9)
+    if (!connected) target.moveTo(previousX + offsetX, previousY + offsetY)
+    if (smoothing > 0 && index < pointCount - 1) {
+      const next = stroke.points[index + 1]
+      const midpointX = pointX * (1 - blend * .35) + ((pointX + next.x * width) / 2) * blend * .35
+      const midpointY = pointY * (1 - blend * .35) + ((pointY + next.y * height) / 2) * blend * .35
+      target.quadraticCurveTo(pointX + offsetX, pointY + offsetY, midpointX + offsetX, midpointY + offsetY)
+    } else if (smoothing > 0 && index >= 2) {
+      const before = stroke.points[index - 2]
+      const controlX = previousX + (previous.x - before.x) * width * blend * 0.4
+      const controlY = previousY + (previous.y - before.y) * height * blend * 0.4
+      target.quadraticCurveTo(controlX + offsetX, controlY + offsetY, pointX + offsetX, pointY + offsetY)
     } else {
-      segment(1, 1)
+      target.lineTo(pointX + offsetX, pointY + offsetY)
     }
   }
+  const segmentWidth = (index: number, widthFactor: number) => inkStrokeBitmapWidth(
+    stroke,
+    ((stroke.points[index - 1].pressure ?? 0.5) + (stroke.points[index].pressure ?? 0.5)) / 2,
+    scale,
+  ) * widthFactor
+  const passOffset = (pass: InkPaintPass, passIndex: number, index: number): [number, number] => {
+    if (!pass.jitter) return [0, 0]
+    const seed = (stroke.textureSeed ?? 1) + index * 53 + (passIndex - 1) * 2
+    return [(seededUnit(seed) - .5) * scale * pass.jitter, (seededUnit(seed + 1) - .5) * scale * pass.jitter]
+  }
+  /** Direct paint, one `stroke()` per segment, exactly as before. */
+  const paintPassSegments = (target: InkPaintContext, pass: InkPaintPass, passIndex: number, alpha: number) => {
+    for (let index = firstSegment; index < lastSegment; index += 1) {
+      const [offsetX, offsetY] = passOffset(pass, passIndex, index)
+      target.globalAlpha = alpha
+      target.beginPath()
+      segmentCurve(index, offsetX, offsetY, target, false)
+      target.lineWidth = segmentWidth(index, pass.widthFactor)
+      target.stroke()
+    }
+  }
+  /** Constant width: the whole range is one path, so bends are joins, not seams. */
+  const paintPassPath = (target: InkPaintContext, pass: InkPaintPass, alpha: number) => {
+    target.globalAlpha = alpha
+    const lineWidth = segmentWidth(firstSegment, pass.widthFactor)
+    target.lineWidth = lineWidth
+    // The pen-up sample often sits a pixel or two off the last move; a butt
+    // cap on that stub cuts a notch across a wide highlighter. Leave it out.
+    let end = lastSegment
+    if (end === stroke.points.length && end - 1 > firstSegment) {
+      const tail = stroke.points[end - 1]
+      const beforeTail = stroke.points[end - 2]
+      const stub = Math.hypot((tail.x - beforeTail.x) * width, (tail.y - beforeTail.y) * height)
+      if (stub < lineWidth * .3) end -= 1
+    }
+    target.beginPath()
+    for (let index = firstSegment; index < end; index += 1) {
+      segmentCurve(index, 0, 0, target, index > firstSegment, end)
+    }
+    target.stroke()
+  }
+
+  const passes = brush === 'calligraphy' ? OPAQUE_PASS : brushPasses(brush)
+  const constantWidth = !stroke.pressureEnabled
+  const translucent = inkStrokeIsTranslucent(stroke)
+  let compositeBox: { x: number; y: number; w: number; h: number; ex: number; ey: number } | null = null
+  if (translucent && canComposite(context)) {
+    // Device-pixel box of this range — including the smoothing neighbours,
+    // the closing control point and every pass's reach — clipped to the
+    // bitmap the caller is painting into.
+    const margin = inkStrokePaintMargin(stroke, scale)
+    const transform = context.getTransform()
+    const ex = transform.e
+    const ey = transform.f
+    let x0 = Number.POSITIVE_INFINITY
+    let y0 = Number.POSITIVE_INFINITY
+    let x1 = Number.NEGATIVE_INFINITY
+    let y1 = Number.NEGATIVE_INFINITY
+    const include = (px: number, py: number) => {
+      if (px < x0) x0 = px
+      if (py < y0) y0 = py
+      if (px > x1) x1 = px
+      if (py > y1) y1 = py
+    }
+    const last = stroke.points.length - 1
+    for (let index = Math.max(0, firstSegment - 2); index <= Math.min(last, lastSegment); index += 1) {
+      include(stroke.points[index].x * width, stroke.points[index].y * height)
+    }
+    if (lastSegment >= last && last >= 2) {
+      const previous = stroke.points[last - 1]
+      const before = stroke.points[last - 2]
+      include((previous.x + (previous.x - before.x) * .4) * width, (previous.y + (previous.y - before.y) * .4) * height)
+    }
+    const targetCanvas = (context as unknown as { canvas: { width: number; height: number } }).canvas
+    const dx0 = Math.max(0, Math.floor(x0 - margin + ex))
+    const dy0 = Math.max(0, Math.floor(y0 - margin + ey))
+    const dx1 = Math.min(targetCanvas.width, Math.ceil(x1 + margin + ex))
+    const dy1 = Math.min(targetCanvas.height, Math.ceil(y1 + margin + ey))
+    if (dx1 <= dx0 || dy1 <= dy0) {
+      context.restore()
+      return
+    }
+    compositeBox = { x: dx0, y: dy0, w: dx1 - dx0, h: dy1 - dy0, ex, ey }
+  }
+
+  passes.forEach((pass, passIndex) => {
+    const alpha = opacity * pass.alpha
+    const scratch = compositeBox && alpha < .999 ? acquireScratch(compositeBox.w, compositeBox.h) : null
+    if (scratch && compositeBox) {
+      const box = compositeBox
+      const source = (scratch as unknown as { canvas: CanvasImageSource }).canvas
+      scratch.save()
+      scratch.setTransform(1, 0, 0, 1, 0, 0)
+      scratch.globalCompositeOperation = 'source-over'
+      scratch.globalAlpha = 1
+      scratch.clearRect(0, 0, box.w, box.h)
+      // Scratch pixel (0,0) is target device pixel (box.x, box.y); user
+      // space stays the caller's so points and gradients need no remap.
+      scratch.setTransform(1, 0, 0, 1, box.ex - box.x, box.ey - box.y)
+      const scratchPaint = strokePaint(scratch, stroke, width, height)
+      scratch.strokeStyle = scratchPaint
+      scratch.fillStyle = scratchPaint
+      scratch.lineJoin = 'round'
+      scratch.lineCap = brush === 'highlighter' && constantWidth ? 'butt' : 'round'
+      if (brush === 'calligraphy') {
+        scratch.globalAlpha = 1
+        for (let index = firstSegment; index < lastSegment; index += 1) {
+          calligraphyNib(scratch, stroke.points[index - 1], stroke.points[index])
+        }
+      } else if (constantWidth) {
+        paintPassPath(scratch, pass, 1)
+      } else {
+        paintPassSegments(scratch, pass, passIndex, 1)
+      }
+      scratch.restore()
+      const restoreTransform = context.getTransform()
+      context.setTransform(1, 0, 0, 1, 0, 0)
+      context.globalAlpha = alpha
+      context.drawImage(source, 0, 0, box.w, box.h, box.x, box.y, box.w, box.h)
+      context.setTransform(restoreTransform)
+      return
+    }
+    if (brush === 'calligraphy') {
+      for (let index = firstSegment; index < lastSegment; index += 1) {
+        calligraphySegment(stroke.points[index - 1], stroke.points[index])
+      }
+      return
+    }
+    if (brush === 'highlighter') context.lineCap = 'butt'
+    paintPassSegments(context, pass, passIndex, alpha)
+  })
   context.restore()
 }
 
