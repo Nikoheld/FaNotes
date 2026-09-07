@@ -63,9 +63,16 @@ import { buildTextMotionDiagnosticEvent, recordTextMotionDiagnostic } from '../l
 
 export type PaperViewApi = PaperViewSnapshot & {
   zoomBy: (delta: number, originClient?: { x: number; y: number }) => void
+  /** Absolute camera zoom around a client point (default: the last pointer position). */
+  zoomTo: (zoom: number, originClient?: { x: number; y: number }) => void
   rotateBy: (delta: number) => void
   resetView: () => void
   setView: (next: Partial<PaperViewSnapshot>) => void
+  /**
+   * The current note came back with a remembered camera. False on a first
+   * open — memory written while the note is loading does not count.
+   */
+  recalled: boolean
 }
 
 const PaperViewContext = createContext<PaperViewApi | null>(null)
@@ -86,6 +93,7 @@ export function PaperView({ children, className = '', viewKey, showHud = true }:
   const lastWheelZoomAtRef = useRef(0)
   const lastZoomOriginRef = useRef<{ x: number; y: number } | null>(null)
   const [view, setViewState] = useState(readSharedPaperView)
+  const [recalled, setRecalled] = useState(false)
 
   const paint = useCallback((next: PaperViewSnapshot) => {
     viewRef.current = next
@@ -112,6 +120,7 @@ export function PaperView({ children, className = '', viewKey, showHud = true }:
     // must keep the same sheet zoom so ruling, ink and text stay one. A note
     // that was open before comes back at its remembered zoom.
     const remembered = recallPaperView(loadPaperViewMemory(), paperViewMemoryKey(viewKey))
+    setRecalled(remembered !== null)
     writeSharedPaperView(paperViewFromMemory(remembered))
   }, [viewKey])
 
@@ -422,10 +431,12 @@ export function PaperView({ children, className = '', viewKey, showHud = true }:
   const api = useMemo<PaperViewApi>(() => ({
     ...view,
     zoomBy,
+    zoomTo,
     rotateBy,
     resetView,
     setView,
-  }), [resetView, rotateBy, setView, view, zoomBy])
+    recalled,
+  }), [recalled, resetView, rotateBy, setView, view, zoomBy, zoomTo])
 
   useEffect(() => {
     const root = noteViewRef.current

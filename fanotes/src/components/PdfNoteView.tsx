@@ -35,15 +35,28 @@ import {
   pdfStartPageForLoad,
 } from '../lib/pdfDocument'
 import { createPdfPagePainter, type PdfBasePaintInfo, type PdfPagePainter } from '../lib/pdfPagePainter'
+import {
+  PDF_FIT_GUTTER,
+  pdfColumnCentreScrollLeft,
+  pdfFitPageZoom,
+  pdfFitWidthZoom,
+  pdfPageTopScrollTop,
+  pdfZoomModeForZoom,
+  pdfZoomStep,
+  type PdfZoomMode,
+} from '../lib/pdfCamera'
 import { pdfPageScrollIntoViewBlock } from '../lib/pdfOpenCamera'
 import { PDF_INKING_CLASS, PDF_TOOLBAR_SLOT_ID } from '../lib/pdfInkHit'
-import { resolvePaperZoomScroller, watchSheetZoom } from '../lib/paperView'
+import { VIEW_ZOOM_MIN, readSharedZoomMax, resolvePaperZoomScroller, watchSheetZoom } from '../lib/paperView'
 import { loadPaperViewMemory, recallPaperView } from '../lib/paperViewMemory'
+import { usePaperView } from './PaperView'
 
 type PdfNoteViewProps = {
   path: string
   title: string
   inputDisabled?: boolean
+  /** First open fits the page column to the viewport (camera hosts only). */
+  autoFit?: boolean
   onLayoutChange?: () => void
   toolbarSlotId?: string
   initialPage?: number
@@ -70,8 +83,14 @@ const VIEWPORT_ROOT_MARGIN = '160px 0px'
 const MIN_SCALE = 0.5
 const MAX_SCALE = 2.5
 const SCALE_STEP = 0.1
+/** `.pdf-note-page` bottom margin, part of one page's advance in the column. */
+const PAGE_GAP_PX = 16
 
-type ZoomMode = 'fit-width' | 'fit-page' | 'custom'
+type ZoomMode = PdfZoomMode
+
+type FitZoom = { width: number; page: number; measured: boolean }
+
+const UNMEASURED_FIT: FitZoom = { width: 1, page: 1, measured: false }
 
 function PdfPageCanvas({
   pdf,
@@ -425,6 +444,7 @@ export function PdfNoteView({
   inputDisabled = false,
   onLayoutChange,
   toolbarSlotId = PDF_TOOLBAR_SLOT_ID,
+  autoFit = true,
   initialPage,
   onPageChange,
 }: PdfNoteViewProps) {
@@ -460,6 +480,62 @@ export function PdfNoteView({
   const pdfTaskRef = useRef<PDFDocumentLoadingTask | null>(null)
   const loadedPathRef = useRef('')
 
+  // Inside a PaperView the toolbar zoom is the sheet camera: the page column
+  // keeps its layout width (ink is 0–1 of the paper) and the camera scales it.
+  // Without a camera host (subject book pane) the column width is scaled.
+  const camera = usePaperView()
+  const cameraHosted = camera !== null
+  const cameraZoom = camera?.zoom ?? 1
+  const cameraRef = useRef(camera)
+  cameraRef.current = camera
+  const [fit, setFit] = useState<FitZoom>(UNMEASURED_FIT)
+  const [cameraMode, setCameraModeState] = useState<ZoomMode>('custom')
+  const cameraModeRef = useRef<ZoomMode>('custom')
+  const setCameraMode = useCallback((mode: ZoomMode) => {
+    cameraModeRef.current = mode
+    setCameraModeState(mode)
+  }, [])
+  /** Zoom this view asked the camera for; anything else is the user's own zoom. */
+  const expectedZoomRef = useRef<number | null>(null)
+  const currentPageRef = useRef(1)
+
+  const measureFit = useCallback((): FitZoom | null => {
+    const pages = pagesRef.current
+    const scroller = resolvePaperZoomScroller(pages)
+    if (!pages || !scroller || !(pages.offsetWidth > 8) || !(scroller.clientWidth > 8)) return null
+    const firstPage = pages.querySelector<HTMLElement>('.pdf-note-page')
+    const input = {
+      viewWidth: scroller.clientWidth,
+      viewHeight: scroller.clientHeight,
+      columnWidth: pages.offsetWidth,
+      pageHeight: firstPage ? firstPage.offsetHeight + PAGE_GAP_PX : 0,
+      min: VIEW_ZOOM_MIN,
+      max: readSharedZoomMax(),
+    }
+    return { width: pdfFitWidthZoom(input), page: pdfFitPageZoom(input), measured: true }
+  }, [])
+
+  const applyCameraZoom = useCallback((zoom: number, mode: ZoomMode, options: { pageTop?: number } = {}) => {
+    const cam = cameraRef.current
+    const pages = pagesRef.current
+    const scroller = resolvePaperZoomScroller(pages)
+    if (!cam || !pages || !scroller) return
+    setCameraMode(mode)
+    expectedZoomRef.current = zoom
+    const viewRect = scroller.getBoundingClientRect()
+    // Client box, not the border box: the scrollbar is not part of the viewport.
+    cam.zoomTo(zoom, { x: viewRect.left + scroller.clientWidth / 2, y: viewRect.top + scroller.clientHeight / 2 })
+    // Fit modes centre the column like every PDF viewer; ± steps keep the
+    // point under the viewport centre, which is already centred then.
+    if (mode !== 'custom') {
+      scroller.scrollLeft = pdfColumnCentreScrollLeft(scroller, viewRect.left, pages.getBoundingClientRect())
+    }
+    if (options.pageTop) {
+      const node = pages.querySelector<HTMLElement>(`[data-pdf-page="${options.pageTop}"]`)
+      if (node) scroller.scrollTop = pdfPageTopScrollTop(scroller, viewRect.top, node.getBoundingClientRect())
+    }
+  }, [setCameraMode])
+
   const notifyLayout = useCallback(() => {
     if (!onLayoutChange) return
     if (layoutTimerRef.current !== null) window.clearTimeout(layoutTimerRef.current)
@@ -484,6 +560,11 @@ export function PdfNoteView({
     setRotation(0)
     setZoomMode('fit-width')
     setScale(1)
+    // Decided once the document is in the DOM (see the layout effect below):
+    // a remembered camera is the user's, a first open fits the column.
+    setCameraMode('custom')
+    expectedZoomRef.current = null
+    setFit(UNMEASURED_FIT)
     void loadVaultPdfBytes(path)
       .then(async (bytes) => {
         if (!alive) return
@@ -540,7 +621,7 @@ export function PdfNoteView({
       pdfTaskRef.current = null
       void task?.destroy().catch(() => undefined)
     }
-  }, [notifyLayout, password, path])
+  }, [notifyLayout, password, path, setCameraMode])
 
   useEffect(() => {
     if (!onPageChange || pageCount < 1) return
@@ -563,15 +644,83 @@ export function PdfNoteView({
   }, [pageRatio])
 
   const appliedScale = zoomMode === 'fit-page' ? fitPageScale : scale
+  currentPageRef.current = currentPage
 
   useLayoutEffect(() => {
     if (!pdf) return
+    const cam = cameraRef.current
     // A remembered camera (PaperView) reopens the exact spot; page-into-view
-    // would yank it to the page centre.
-    if (recallPaperView(loadPaperViewMemory(), path)) return
-    const node = pagesRef.current?.querySelector(`[data-pdf-page="${currentPage}"]`)
+    // would yank it to the page centre and a fit would overrule the user.
+    if (cam ? cam.recalled : recallPaperView(loadPaperViewMemory(), path)) {
+      if (cam) setCameraMode('custom')
+      return
+    }
+    if (cam && autoFit) {
+      // First open: the page column fills the viewport width, the start page
+      // sits at the top — no empty stage beside a 900px column on a wide window.
+      const measured = measureFit()
+      if (measured) {
+        setFit(measured)
+        applyCameraZoom(measured.width, 'fit-width', { pageTop: currentPageRef.current })
+      } else {
+        setCameraMode('fit-width')
+      }
+      return
+    }
+    const node = pagesRef.current?.querySelector(`[data-pdf-page="${currentPageRef.current}"]`)
     node?.scrollIntoView({ block: pdfPageScrollIntoViewBlock('center'), behavior: 'auto' })
-  }, [pdf, path])
+  }, [applyCameraZoom, autoFit, measureFit, pdf, path, setCameraMode])
+
+  // Fit factors follow the viewport and the page boxes (ratios arrive per page).
+  useEffect(() => {
+    if (!cameraHosted || !pdf) return
+    const pages = pagesRef.current
+    const scroller = resolvePaperZoomScroller(pages)
+    if (!pages || !scroller) return
+    let frame = 0
+    const update = () => {
+      frame = 0
+      const measured = measureFit()
+      if (!measured) return
+      setFit((current) => (
+        current.measured && Math.abs(current.width - measured.width) < 0.001 && Math.abs(current.page - measured.page) < 0.001
+          ? current
+          : measured
+      ))
+    }
+    const schedule = () => {
+      if (!frame) frame = window.requestAnimationFrame(update)
+    }
+    const observer = new ResizeObserver(schedule)
+    observer.observe(scroller)
+    observer.observe(pages)
+    const firstPage = pages.querySelector<HTMLElement>('.pdf-note-page')
+    if (firstPage) observer.observe(firstPage)
+    schedule()
+    return () => {
+      observer.disconnect()
+      if (frame) window.cancelAnimationFrame(frame)
+    }
+  }, [cameraHosted, measureFit, pdf, pageRatio])
+
+  // The user zoomed the sheet themselves (wheel, pinch, HUD): the toolbar
+  // shows that zoom and stops re-fitting on resize.
+  useEffect(() => {
+    if (!cameraHosted || !fit.measured) return
+    const expected = expectedZoomRef.current
+    if (expected !== null && Math.abs(cameraZoom - expected) <= 0.006) return
+    expectedZoomRef.current = null
+    const derived = pdfZoomModeForZoom(cameraZoom, fit)
+    if (derived !== cameraModeRef.current) setCameraMode(derived)
+  }, [cameraHosted, cameraZoom, fit, setCameraMode])
+
+  // Viewport or page boxes changed while a fit mode is active: keep the fit.
+  useEffect(() => {
+    if (!cameraHosted || !pdf || !fit.measured) return
+    const mode = cameraModeRef.current
+    if (mode === 'fit-width') applyCameraZoom(fit.width, 'fit-width')
+    else if (mode === 'fit-page') applyCameraZoom(fit.page, 'fit-page')
+  }, [applyCameraZoom, cameraHosted, fit, pdf])
 
   const scrollToPage = useCallback((page: number) => {
     const target = Math.max(1, Math.min(pageCount || 1, Math.round(page)))
@@ -697,7 +846,40 @@ export function PdfNoteView({
   ))
 
   const activeHighlight = searchHits[searchIndex]?.page === currentPage ? searchQuery.trim() : ''
-  const zoomLabel = zoomMode === 'fit-width' ? 'Breite' : zoomMode === 'fit-page' ? 'Seite' : `${Math.round(appliedScale * 100)} %`
+  const shownMode: ZoomMode = cameraHosted ? cameraMode : zoomMode
+  const zoomLabel = cameraHosted
+    ? `${Math.round(cameraZoom * 100)} %`
+    : zoomMode === 'fit-width' ? 'Breite' : zoomMode === 'fit-page' ? 'Seite' : `${Math.round(appliedScale * 100)} %`
+  const zoomOutDisabled = cameraHosted ? cameraZoom <= VIEW_ZOOM_MIN + 1e-6 : appliedScale <= MIN_SCALE
+  const zoomInDisabled = cameraHosted ? cameraZoom >= readSharedZoomMax() - 1e-6 : appliedScale >= MAX_SCALE
+  const zoomOut = () => {
+    if (cameraHosted) applyCameraZoom(pdfZoomStep(cameraZoom, -1, VIEW_ZOOM_MIN, readSharedZoomMax()), 'custom')
+    else changeScale(appliedScale - SCALE_STEP)
+  }
+  const zoomIn = () => {
+    if (cameraHosted) applyCameraZoom(pdfZoomStep(cameraZoom, 1, VIEW_ZOOM_MIN, readSharedZoomMax()), 'custom')
+    else changeScale(appliedScale + SCALE_STEP)
+  }
+  const fitWidth = () => {
+    if (cameraHosted) {
+      const measured = measureFit()
+      if (measured) setFit(measured)
+      applyCameraZoom((measured ?? fit).width, 'fit-width')
+      return
+    }
+    setZoomMode('fit-width')
+    setScale(1)
+    notifyLayout()
+  }
+  const fitPage = () => {
+    if (cameraHosted) {
+      const measured = measureFit()
+      if (measured) setFit(measured)
+      applyCameraZoom((measured ?? fit).page, 'fit-page', { pageTop: currentPage })
+      return
+    }
+    setZoomMode('fit-page')
+  }
   const thumbs = useMemo(() => (pdf ? Array.from({ length: Math.min(pdf.numPages, 80) }, (_, index) => index + 1) : []), [pdf])
 
   const chrome = (
@@ -723,11 +905,11 @@ export function PdfNoteView({
           <button type="button" aria-label="Nächste Seite" disabled={!pdf || currentPage >= pageCount} onClick={() => scrollToPage(currentPage + 1)}><ChevronDown size={14} /></button>
         </span>
         <span className="pdf-note-zoom">
-          <button type="button" aria-label="Verkleinern" disabled={appliedScale <= MIN_SCALE} onClick={() => changeScale(appliedScale - SCALE_STEP)}><ZoomOut size={14} /></button>
-          <button type="button" className={zoomMode === 'custom' ? 'is-active' : ''} title="Zoom zurücksetzen" onClick={() => { setZoomMode('fit-width'); setScale(1); notifyLayout() }}>{zoomLabel}</button>
-          <button type="button" aria-label="Vergrößern" disabled={appliedScale >= MAX_SCALE} onClick={() => changeScale(appliedScale + SCALE_STEP)}><ZoomIn size={14} /></button>
-          <button type="button" className={zoomMode === 'fit-width' ? 'is-active' : ''} title="An Breite anpassen" onClick={() => { setZoomMode('fit-width'); setScale(1); notifyLayout() }}>Breite</button>
-          <button type="button" className={zoomMode === 'fit-page' ? 'is-active' : ''} title="Ganze Seite" onClick={() => setZoomMode('fit-page')}><Maximize2 size={14} /></button>
+          <button type="button" aria-label="Verkleinern" disabled={!pdf || zoomOutDisabled} onClick={zoomOut}><ZoomOut size={14} /></button>
+          <button type="button" className={shownMode === 'custom' ? 'is-active' : ''} title="Zoom zurücksetzen" disabled={!pdf} onClick={fitWidth}>{zoomLabel}</button>
+          <button type="button" aria-label="Vergrößern" disabled={!pdf || zoomInDisabled} onClick={zoomIn}><ZoomIn size={14} /></button>
+          <button type="button" className={shownMode === 'fit-width' ? 'is-active' : ''} title="An Breite anpassen" disabled={!pdf} onClick={fitWidth}>Breite</button>
+          <button type="button" className={shownMode === 'fit-page' ? 'is-active' : ''} title="Ganze Seite" aria-label="Ganze Seite" disabled={!pdf} onClick={fitPage}><Maximize2 size={14} /></button>
         </span>
         <span className="pdf-note-tools">
           <button type="button" className={searchOpen ? 'is-active' : ''} title="Im PDF suchen (Strg+F)" aria-label="Im PDF suchen" onClick={() => setSearchOpen((value) => !value)}><Search size={14} /></button>
@@ -771,7 +953,10 @@ export function PdfNoteView({
       onKeyDown={handleChromeKey}
     >
       {toolbarHost && !inputDisabled ? createPortal(chrome, toolbarHost) : null}
-      {loading && <div className="pdf-note-status"><LoaderCircle className="spin" size={20} /> PDF wird vorbereitet …</div>}
+      {/* Only until the document exists: kept in flow above the pages, the 220px
+          placeholder shifts the column (and any camera measured against it)
+          when `loading` clears a tick after `pdf` is set. */}
+      {loading && !pdf && <div className="pdf-note-status"><LoaderCircle className="spin" size={20} /> PDF wird vorbereitet …</div>}
       {needsPassword && !pdf && (
         <form className="pdf-note-password" onSubmit={(event) => { event.preventDefault(); setPassword(passwordDraft) }}>
           <strong>Dieses PDF ist geschützt</strong>
@@ -806,7 +991,7 @@ export function PdfNoteView({
           <div
             className="pdf-note-pages"
             ref={pagesRef}
-            style={{ width: `${Math.round(appliedScale * 100)}%` }}
+            style={{ width: cameraHosted ? '100%' : `${Math.round(appliedScale * 100)}%` }}
           >
             {Array.from({ length: pdf.numPages }, (_, index) => {
               const page = index + 1

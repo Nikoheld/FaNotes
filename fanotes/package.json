@@ -164,6 +164,7 @@
     "check:ink-note-switch": "node scripts/check-ink-note-switch.mjs",
     "check:ink-erase-persist": "node scripts/check-ink-erase-persist.mjs",
     "check:paper-view-memory": "node scripts/check-paper-view-memory.mjs",
+    "check:pdf-camera": "node scripts/check-pdf-camera.mjs",
     "check:bug-text-shift": "node scripts/check-bug-text-shift.mjs",
     "check:pen-text-stay": "node scripts/check-pen-text-stay.mjs",
     "check:corner-stay": "node scripts/check-corner-stay.mjs",

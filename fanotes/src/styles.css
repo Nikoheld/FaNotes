@@ -1049,6 +1049,11 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .unified-note-view.is-pdf-note {
   background: #edeff3;
 }
+/* One stage colour: the camera room around the PDF paper must not read as a
+   second, empty white sheet beside the pages. */
+.unified-note-view.is-pdf-note .paper-sheet-plane {
+  background: #edeff3;
+}
 .paper-view { position: relative; }
 .paper-sheet-plane {
   --paper-scroll-room: 560px;
