@@ -364,6 +364,44 @@ function translateDerived(source: string, catalog: EnglishCatalog): string | nul
   const onboardingStep = /^Schritt (\d+): (.+)$/u.exec(source)
   if (onboardingStep) return `Step ${onboardingStep[1]}: ${catalog[onboardingStep[2]] ?? onboardingStep[2]}`
   if (source.startsWith('– ') && catalog[source.slice(2)]) return `– ${catalog[source.slice(2)]}`
+  const drafting = translateDraftingReadout(source)
+  if (drafting !== null) return drafting
+  return null
+}
+
+/** German decimal commas in drafting measurements ("2,5 cm", "6,30″") become points. */
+const englishMeasure = (text: string) => text.replace(/(\d),(\d)/gu, '$1.$2')
+
+const DRAFTING_TOOL_NAMES: Record<string, string> = { Lineal: 'Ruler', Geodreieck: 'Set square', Zirkel: 'Compass' }
+
+/**
+ * Ruler, set square and compass captions, live readouts, panel captions and
+ * notices: names are translated, measurements keep their value with English
+ * decimals, degree marks stay as they are.
+ */
+function translateDraftingReadout(source: string): string | null {
+  const toolReadout = /^(Lineal|Geodreieck|Zirkel) · (.+)$/u.exec(source)
+  if (toolReadout) {
+    const rest = englishMeasure(toolReadout[2]).replace(/ · gesperrt$/u, ' · locked')
+    return `${DRAFTING_TOOL_NAMES[toolReadout[1]]} · ${rest}`
+  }
+  const bothEdges = /^(.+) · beide Kanten zeichnen$/u.exec(source)
+  if (bothEdges) return `${englishMeasure(bothEdges[1])} · draws along both edges`
+  const squareCaption = /^(.+) · Skala ab Mitte, Winkelmesser 0–180°$/u.exec(source)
+  if (squareCaption) return `${englishMeasure(squareCaption[1])} · scale from the centre, protractor 0–180°`
+  const compassCaption = /^r (.+) · Ø (.+)$/u.exec(source)
+  if (compassCaption) return englishMeasure(source)
+  const angleRaster = /^Drehen und Zirkelbögen rasten alle (\d+)°$/u.exec(source)
+  if (angleRaster) return `Rotation and compass arcs snap every ${angleRaster[1]}°`
+  const presetArc = /^Bogen von (\d+)° ab der Mine zeichnen$/u.exec(source)
+  if (presetArc) return `Draw a ${presetArc[1]}° arc from the pencil`
+  const arcDrawn = /^Bogen (\d+°) mit r (.+) gezeichnet\.$/u.exec(source)
+  if (arcDrawn) return `Arc of ${arcDrawn[1]} with r ${englishMeasure(arcDrawn[2])} drawn.`
+  const freeArcDrawn = /^Bogen mit r (.+) gezeichnet\.$/u.exec(source)
+  if (freeArcDrawn) return `Arc with r ${englishMeasure(freeArcDrawn[1])} drawn.`
+  const circleDrawn = /^Kreis mit r (.+) gezeichnet\.$/u.exec(source)
+  if (circleDrawn) return `Circle with r ${englishMeasure(circleDrawn[1])} drawn.`
+  if (/^[+−-]?\d+(?:,\d+)? ?(?:cm|mm|″)$/u.test(source)) return englishMeasure(source)
   return null
 }
 

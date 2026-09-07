@@ -19,6 +19,7 @@ import {
   Save,
   ScanSearch,
   Shapes,
+  SlidersHorizontal,
   Sparkles,
   Trash2,
   Triangle,
@@ -206,23 +207,36 @@ import {
   pendingGrowScale,
   resolvePaintedLayoutGrow,
 } from '../lib/paperGrow'
-import { DraftingGuides } from './DraftingGuides'
+import { DraftingGuides, type DraftingReadout } from './DraftingGuides'
+import { DraftingPanel } from './DraftingPanel'
 import {
   asCompassPose,
+  compassCentreMarkSegments,
   compassRadiiNorm,
-  defaultCompassPose,
-  defaultRulerPose,
-  defaultSetSquarePose,
+  defaultPoseFor,
   draftingToolLabel,
-  formatMillimetres,
+  formatArcDegrees,
+  formatDegrees,
+  formatHeading,
+  formatLength,
+  keepPoseOnSheet,
+  loadDraftingSettings,
+  magnetThresholdMm,
+  mmToNorm,
+  normToMm,
+  nudgePose,
   sampleCompassArc,
   sampleCompassCircle,
+  saveDraftingSettings,
+  snapAngle,
   snapToDraftingTools,
   type CompassDrawEvent,
   type CompassPose,
   type DraftingDisplay,
   type DraftingKind,
   type DraftingPose,
+  type DraftingSettings,
+  type DraftingToolState,
 } from '../lib/draftingTools'
 import {
   createHandwritingSeed,
@@ -444,6 +458,7 @@ const CHROME_HIT_SELECTOR = [
   '.lw-draw-notice',
   '.lw-conversion-panel',
   '.lw-art-studio',
+  '.lw-drafting-panel',
   '.lw-draw-footer',
   '.editor-more-menu',
   '.ribbon',
@@ -1353,16 +1368,54 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const [setSquarePose, setSetSquarePose] = useState<DraftingPose | null>(null)
   const [compassPose, setCompassPose] = useState<CompassPose | null>(null)
   const [inkToolbarHost, setInkToolbarHost] = useState<HTMLElement | null>(null)
-  const [draftingReadout, setDraftingReadout] = useState<string | null>(null)
+  const [draftingReadout, setDraftingReadout] = useState<DraftingReadout | null>(null)
+  const [draftingSettings, setDraftingSettings] = useState<DraftingSettings>(() => loadDraftingSettings())
+  const [activeDraftingKind, setActiveDraftingKind] = useState<DraftingKind | null>(null)
   const rulerPoseRef = useRef<DraftingPose | null>(null)
   const setSquarePoseRef = useRef<DraftingPose | null>(null)
   const compassPoseRef = useRef<CompassPose | null>(null)
   const draftingLockRef = useRef<{ kind: DraftingKind; edgeIndex: number } | null>(null)
-  const draftingReadoutRef = useRef<string | null>(null)
+  const draftingReadoutRef = useRef<DraftingReadout | null>(null)
+  const draftingReadoutAtRef = useRef(0)
+  const draftingSettingsRef = useRef(draftingSettings)
+  const activeDraftingKindRef = useRef<DraftingKind | null>(null)
   const lastDiagnosticAtRef = useRef(0)
   rulerPoseRef.current = rulerPose
   setSquarePoseRef.current = setSquarePose
   compassPoseRef.current = compassPose
+  draftingSettingsRef.current = draftingSettings
+  activeDraftingKindRef.current = activeDraftingKind
+
+  const updateDraftingSettings = useCallback((patch: Partial<DraftingSettings>) => {
+    setDraftingSettings((current) => {
+      const next = { ...current, ...patch }
+      saveDraftingSettings(next)
+      return next
+    })
+  }, [])
+
+  /** One setter for all three tools; keeps the refs in step so pointer code sees the pose immediately. */
+  const setDraftingPose = useCallback((kind: DraftingKind, pose: DraftingPose | null) => {
+    if (kind === 'ruler') {
+      rulerPoseRef.current = pose
+      setRulerPose(pose)
+    } else if (kind === 'setSquare') {
+      setSquarePoseRef.current = pose
+      setSetSquarePose(pose)
+    } else {
+      const next = pose ? asCompassPose(pose) : null
+      compassPoseRef.current = next
+      setCompassPose(next)
+    }
+    if (!pose && activeDraftingKindRef.current === kind) {
+      activeDraftingKindRef.current = null
+      setActiveDraftingKind(null)
+    }
+  }, [])
+
+  const draftingPoseOf = useCallback((kind: DraftingKind): DraftingPose | null => (
+    kind === 'ruler' ? rulerPoseRef.current : kind === 'setSquare' ? setSquarePoseRef.current : compassPoseRef.current
+  ), [])
 
   useLayoutEffect(() => {
     if (!inline || !inputActive) {
@@ -2101,11 +2154,12 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     let x = inline ? surfacePoint.x : clamp(surfacePoint.x * paperW / width)
     let y = inline ? surfacePoint.y : clamp(surfacePoint.y * paperH / height)
     if (!Number.isFinite(x) || !Number.isFinite(y)) return null
-    const guides: Array<{ kind: DraftingKind; pose: DraftingPose }> = []
+    const guides: DraftingToolState[] = []
     if (rulerPoseRef.current) guides.push({ kind: 'ruler', pose: rulerPoseRef.current })
     if (setSquarePoseRef.current) guides.push({ kind: 'setSquare', pose: setSquarePoseRef.current })
     if (compassPoseRef.current) guides.push({ kind: 'compass', pose: compassPoseRef.current })
     if (guides.length && !selectionStartRef.current && gestureToolRef.current !== 'eraser') {
+      const drafting = draftingSettingsRef.current
       const snapped = snapToDraftingTools(
         x,
         y,
@@ -2114,14 +2168,25 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         sourceHeightRef.current,
         draftingLockRef.current,
         { width: paperW, height: paperH },
+        { thresholdMm: magnetThresholdMm(drafting.magnet) },
       )
       if (snapped) {
         x = snapped.x
         y = snapped.y
         draftingLockRef.current = { kind: snapped.kind, edgeIndex: snapped.edgeIndex }
-        const nextReadout = `${draftingToolLabel(snapped.kind)} · ${formatMillimetres(snapped.millimetres)}`
-        if (draftingReadoutRef.current !== nextReadout) {
+        // The Geodreieck base reads from its centre mark, so that reading carries a sign.
+        const centred = snapped.kind === 'setSquare' && snapped.edgeIndex === 0
+        const text = snapped.kind === 'compass'
+          ? `${draftingToolLabel('compass')} · r ${formatLength(snapped.millimetres, drafting.unit)} · ${formatHeading(snapped.angle)}`
+          : `${draftingToolLabel(snapped.kind)} · ${formatLength(snapped.millimetres, drafting.unit, centred)} · ${formatDegrees(snapped.angle)}`
+        const now = performance.now()
+        const previous = draftingReadoutRef.current
+        // A React render per pen sample is too dear while inking: refresh the
+        // bubble when the reading changes and otherwise a few times a second.
+        if (!previous || previous.text !== text || now - draftingReadoutAtRef.current > 90) {
+          const nextReadout = { text, x, y }
           draftingReadoutRef.current = nextReadout
+          draftingReadoutAtRef.current = now
           setDraftingReadout(nextReadout)
         }
       }
@@ -3757,9 +3822,16 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   }, [inline])
 
   const handleCompassDraw = useCallback((event: CompassDrawEvent) => {
-    const sw = sourceWidthRef.current
-    const sh = sourceHeightRef.current
-    const display = readDraftingDisplay()
+    /**
+     * Sheet geometry, read again after every grow: a page that just gained
+     * room for the arc has a new height, and radii sampled against the old one
+     * would paint an ellipse.
+     */
+    const geometry = () => ({
+      sw: sourceWidthRef.current,
+      sh: sourceHeightRef.current,
+      display: readDraftingDisplay(),
+    })
     const toPoint = (x: number, y: number): StrokePoint => ({
       x,
       y,
@@ -3793,29 +3865,75 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
             opacity: 1,
           }
     )
-    const growForPose = (pose: CompassPose) => {
-      const { rx, ry } = compassRadiiNorm(pose.radiusMm, sw, sh, display)
-      ensureWriteRoom(pose.y + ry + 0.02, pose.x + rx + 0.02)
+    /**
+     * Makes room for the whole circle (far corner, then near corner: the sheet
+     * may also grow up/left) and returns the geometry that is current afterwards.
+     * Poses are remapped by the grow, so callers re-read compassPoseRef.
+     */
+    const growForPose = (start: CompassPose) => {
+      let pose = start
+      for (const sign of [1, -1]) {
+        const g = geometry()
+        const { rx, ry } = compassRadiiNorm(pose.radiusMm, g.sw, g.sh, g.display)
+        ensureWriteRoom(pose.y + sign * (ry + 0.02), pose.x + sign * (rx + 0.02))
+        pose = compassPoseRef.current ?? pose
+      }
+      return geometry()
     }
-    const commitReadyStroke = (stroke: InkStroke | null, label: string) => {
+    const drafting = draftingSettingsRef.current
+    const unit = drafting.unit
+    /** Small cross at the needle, when the construction should keep its centre. */
+    const centreMarkStrokes = (pose: CompassPose, g = geometry()): InkStroke[] => (
+      drafting.compassCentreMark
+        ? compassCentreMarkSegments(pose, g.sw, g.sh, g.display).map((segment) => makeStroke(segment.map((point) => toPoint(point.x, point.y))))
+        : []
+    )
+    /** One undo step for the arc/circle together with its centre mark. */
+    const commitReadyStrokes = (strokes: Array<InkStroke | null>, label: string) => {
       activeStrokeRef.current = null
       wipeLiveInk()
       activeRenderedPointCountRef.current = 0
-      if (!stroke || stroke.points.length < 2) {
+      const ready = strokes.filter((stroke): stroke is InkStroke => Boolean(stroke && stroke.points.length >= 2))
+      if (!ready.length) {
         scheduleRedraw()
         return
       }
       undoRef.current.push(beforeGestureRef.current)
       if (undoRef.current.length > 80) undoRef.current.shift()
       redoRef.current = []
-      strokesRef.current.push(stroke)
-      commitStrokeToCanvas(stroke)
-      bumpInkRevision({ redrawCommitted: false, appendOnly: true, updateTranscript: stroke.purpose !== 'art' })
+      for (const stroke of ready) {
+        strokesRef.current.push(stroke)
+        commitStrokeToCanvas(stroke)
+      }
+      bumpInkRevision({ redrawCommitted: false, appendOnly: true, updateTranscript: ready.some((stroke) => stroke.purpose !== 'art') })
       setDirty(true)
       updateHistoryState()
       setNotice({ kind: 'success', text: label })
       fitPageToInk()
       scheduleRedraw()
+    }
+
+    if (event.type === 'arc') {
+      if (activePointerRef.current !== null || activeStrokeRef.current) return
+      const before = compassPoseRef.current ?? event.pose
+      const from = before.rotation
+      const to = from + event.sweep
+      const g = growForPose(before)
+      const pose = compassPoseRef.current ?? before
+      const points = [
+        ...sampleCompassArc(pose, from, from, g.sw, g.sh, 0.035, g.display),
+        ...sampleCompassArc(pose, from, to, g.sw, g.sh, 0.035, g.display),
+      ].map((point) => toPoint(point.x, point.y))
+      beforeGestureRef.current = snapshotStrokes(strokesRef.current)
+      commitReadyStrokes(
+        [makeStroke(points), ...centreMarkStrokes(pose, g)],
+        `Bogen ${formatArcDegrees(event.sweep)} mit r ${formatLength(pose.radiusMm, unit)} gezeichnet.`,
+      )
+      // Like a real compass, the pencil now rests at the end of the arc.
+      const turned = { ...pose, rotation: to }
+      compassPoseRef.current = turned
+      setCompassPose(turned)
+      return
     }
 
     if (event.type === 'begin') {
@@ -3824,9 +3942,9 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       gestureChangedRef.current = true
       gestureToolRef.current = 'pen'
       activeRenderedPointCountRef.current = 0
-      growForPose(event.pose)
+      const g = growForPose(event.pose)
       const pose = compassPoseRef.current ?? event.pose
-      const first = sampleCompassArc(pose, pose.rotation, pose.rotation, sourceWidthRef.current, sourceHeightRef.current, 0.035, display)[0]
+      const first = sampleCompassArc(pose, pose.rotation, pose.rotation, g.sw, g.sh, 0.035, g.display)[0]
       if (!first) return
       activeStrokeRef.current = makeStroke([toPoint(first.x, first.y)])
       paintActiveStrokeNow()
@@ -3835,15 +3953,17 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     if (event.type === 'append') {
       const stroke = activeStrokeRef.current
       if (!stroke) return
-      growForPose(event.pose)
+      // The grow remaps the stroke so far together with the pose; the new
+      // samples are taken around the remapped needle.
+      const g = growForPose(event.pose)
       const extra = sampleCompassArc(
         compassPoseRef.current ?? event.pose,
         event.fromAngle,
         event.toAngle,
-        sourceWidthRef.current,
-        sourceHeightRef.current,
+        g.sw,
+        g.sh,
         0.035,
-        display,
+        g.display,
       )
       for (const point of extra) stroke.points.push(toPoint(point.x, point.y))
       if (!paintActiveStrokeNow()) scheduleRedraw()
@@ -3857,16 +3977,145 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       return
     }
     if (event.type === 'commit') {
-      const label = `Bogen ${formatMillimetres(event.pose.radiusMm)} gezeichnet.`
-      commitReadyStroke(activeStrokeRef.current, label)
+      const pose = compassPoseRef.current ?? event.pose
+      const label = `Bogen mit r ${formatLength(pose.radiusMm, unit)} gezeichnet.`
+      commitReadyStrokes([activeStrokeRef.current, ...centreMarkStrokes(pose)], label)
       return
     }
-    growForPose(event.pose)
+    const g = growForPose(event.pose)
     const pose = compassPoseRef.current ?? event.pose
-    const points = sampleCompassCircle(pose, sourceWidthRef.current, sourceHeightRef.current, display).map((point) => toPoint(point.x, point.y))
+    const points = sampleCompassCircle(pose, g.sw, g.sh, g.display).map((point) => toPoint(point.x, point.y))
     beforeGestureRef.current = snapshotStrokes(strokesRef.current)
-    commitReadyStroke(makeStroke(points), `Kreis ${formatMillimetres(pose.radiusMm)} gezeichnet.`)
+    commitReadyStrokes(
+      [makeStroke(points), ...centreMarkStrokes(pose, g)],
+      `Kreis mit r ${formatLength(pose.radiusMm, unit)} gezeichnet.`,
+    )
   }, [artBrush, artColor, artEffect, artOpacity, artWidth, bumpInkRevision, commitStrokeToCanvas, ensureWriteRoom, fitPageToInk, inkMode, paintActiveStrokeNow, penColor, penWidth, readDraftingDisplay, scheduleRedraw, setDirty, updateHistoryState, wipeLiveInk])
+
+  /** Centre of the sheet the user can currently see, in normalised sheet coordinates. */
+  const visibleSheetCentre = useCallback((): { x: number; y: number } => {
+    const paper = inline ? resolvePaperElement() : (surfaceRef.current ?? canvasRef.current)
+    if (!paper) return { x: 0.5, y: 0.4 }
+    const paperBox = paper.getBoundingClientRect()
+    if (paperBox.width < 1 || paperBox.height < 1) return { x: 0.5, y: 0.4 }
+    const scroller = paper.closest('.unified-note-view, .lw-draw-workspace') as HTMLElement | null
+    const view = scroller?.getBoundingClientRect() ?? paperBox
+    const left = Math.max(paperBox.left, view.left)
+    const right = Math.min(paperBox.right, view.right)
+    const top = Math.max(paperBox.top, view.top)
+    const bottom = Math.min(paperBox.bottom, view.bottom)
+    if (right <= left || bottom <= top) return { x: 0.5, y: 0.4 }
+    return {
+      x: Math.min(1, Math.max(0, ((left + right) / 2 - paperBox.left) / paperBox.width)),
+      y: Math.min(1, Math.max(0, ((top + bottom) / 2 - paperBox.top) / paperBox.height)),
+    }
+  }, [inline, resolvePaperElement])
+
+  const showDraftingTool = useCallback((kind: DraftingKind) => {
+    const centre = visibleSheetCentre()
+    const sw = sourceWidthRef.current
+    const sh = sourceHeightRef.current
+    // A second tool does not land on top of the first: step down the sheet
+    // until the origin is clear of every tool that is already out.
+    const others = [rulerPoseRef.current, setSquarePoseRef.current, compassPoseRef.current].filter((other): other is DraftingPose => Boolean(other))
+    let target = { x: centre.x, y: centre.y }
+    for (let step = 0; step < 4; step += 1) {
+      const clear = others.every((other) => (
+        Math.hypot(normToMm(other.x - target.x, sw), normToMm(other.y - target.y, sh)) > 20
+      ))
+      if (clear) break
+      target = { x: target.x, y: target.y + mmToNorm(45, sh) }
+    }
+    const pose = keepPoseOnSheet(
+      kind,
+      { ...defaultPoseFor(kind, draftingSettingsRef.current), x: target.x, y: target.y },
+      sw,
+      sh,
+    )
+    setDraftingPose(kind, pose)
+    activeDraftingKindRef.current = kind
+    setActiveDraftingKind(kind)
+  }, [setDraftingPose, visibleSheetCentre])
+
+  const toggleDraftingTool = useCallback((kind: DraftingKind) => {
+    if (draftingPoseOf(kind)) {
+      setDraftingPose(kind, null)
+      return
+    }
+    showDraftingTool(kind)
+    if (kind === 'compass') {
+      setNotice({
+        kind: 'info',
+        text: 'Nadel ziehen zum Setzen, gelber Punkt für den Radius, grüner Punkt drehen zum Zeichnen. Schloss sperrt das Maß, Kreis-Taste zeichnet sofort.',
+      })
+    } else if (kind === 'setSquare') {
+      setNotice({
+        kind: 'info',
+        text: 'Geodreieck: Körper verschieben, blauer Punkt dreht, Stift zeichnet an allen drei Kanten. Nahe am Lineal legt es sich von selbst an.',
+      })
+    } else {
+      setNotice({
+        kind: 'info',
+        text: 'Lineal: Körper verschieben, blauer Punkt dreht, linker Griff ändert die Länge. Der Stift zeichnet an beiden Kanten entlang.',
+      })
+    }
+  }, [draftingPoseOf, setDraftingPose, showDraftingTool])
+
+  /** Brings a tool back into view with its rotation reset; size and radius stay. */
+  const recentreDraftingTool = useCallback((kind: DraftingKind) => {
+    const current = draftingPoseOf(kind)
+    if (!current) return
+    const centre = visibleSheetCentre()
+    setDraftingPose(kind, keepPoseOnSheet(kind, { ...current, x: centre.x, y: centre.y, rotation: 0 }, sourceWidthRef.current, sourceHeightRef.current))
+  }, [draftingPoseOf, setDraftingPose, visibleSheetCentre])
+
+  const activateDraftingTool = useCallback((kind: DraftingKind) => {
+    activeDraftingKindRef.current = kind
+    setActiveDraftingKind(kind)
+    const board = boardRef.current
+    if (board && !board.contains(document.activeElement)) {
+      try { board.focus({ preventScroll: true }) } catch { /* ignore */ }
+    }
+  }, [])
+
+  /** Arrow keys nudge, Q/E turn, F flips — for the tool touched last. */
+  const handleDraftingKey = useCallback((event: React.KeyboardEvent): boolean => {
+    const kind = activeDraftingKindRef.current
+    if (!kind || event.ctrlKey || event.metaKey || event.altKey) return false
+    const pose = draftingPoseOf(kind)
+    if (!pose) return false
+    const nudges: Record<string, [number, number]> = {
+      ArrowLeft: [-1, 0],
+      ArrowRight: [1, 0],
+      ArrowUp: [0, -1],
+      ArrowDown: [0, 1],
+    }
+    const nudge = nudges[event.key]
+    if (nudge) {
+      event.preventDefault()
+      if (pose.pinned) return true
+      const stepMm = event.shiftKey ? 10 : 1
+      setDraftingPose(kind, nudgePose(pose, nudge[0] * stepMm, nudge[1] * stepMm, sourceWidthRef.current, sourceHeightRef.current))
+      return true
+    }
+    const key = event.key.toLowerCase()
+    if ((key === 'q' || key === 'e') && kind !== 'compass') {
+      event.preventDefault()
+      if (pose.pinned) return true
+      const settingsStep = draftingSettingsRef.current.angleStep
+      const stepDeg = event.shiftKey ? 15 : settingsStep || 1
+      const direction = key === 'e' ? 1 : -1
+      const raw = pose.rotation + direction * stepDeg * Math.PI / 180
+      setDraftingPose(kind, { ...pose, rotation: settingsStep ? snapAngle(raw, settingsStep) : raw })
+      return true
+    }
+    if (key === 'f' && kind === 'setSquare') {
+      event.preventDefault()
+      setDraftingPose(kind, { ...pose, flipped: !pose.flipped })
+      return true
+    }
+    return false
+  }, [draftingPoseOf, setDraftingPose])
 
   /**
    * Hard-stop any in-progress pen/mouse stroke and scrub leftover pointer capture.
@@ -5502,6 +5751,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         return
       }
     }
+    if (handleDraftingKey(event)) return
     if (!(event.ctrlKey || event.metaKey)) {
       if (event.key === '[') {
         event.preventDefault()
@@ -5618,8 +5868,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
             type="button"
             className={rulerPose ? 'is-active' : ''}
             aria-pressed={Boolean(rulerPose)}
-            title="Lineal einblenden: verschieben, drehen, Zentimeter ablesen und an der Kante nachzeichnen"
-            onClick={() => setRulerPose((current) => current ? null : defaultRulerPose())}
+            title="Lineal einblenden: verschieben, drehen, Länge ändern, Zentimeter oder Zoll ablesen und an beiden Kanten nachzeichnen"
+            onClick={() => toggleDraftingTool('ruler')}
           >
             <Ruler size={16} /> <span className="lw-tool-label">Lineal</span>
           </button>
@@ -5627,8 +5877,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
             type="button"
             className={setSquarePose ? 'is-active' : ''}
             aria-pressed={Boolean(setSquarePose)}
-            title="Geodreieck einblenden: Winkel messen, verschieben und an den Kanten nachzeichnen"
-            onClick={() => setSetSquarePose((current) => current ? null : defaultSetSquarePose())}
+            title="Geodreieck einblenden: Winkel messen, an drei Kanten zeichnen, Parallelen und Senkrechte am Lineal anlegen"
+            onClick={() => toggleDraftingTool('setSquare')}
           >
             <Triangle size={16} /> <span className="lw-tool-label">Geodreieck</span>
           </button>
@@ -5637,17 +5887,21 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
             className={compassPose ? 'is-active' : ''}
             aria-pressed={Boolean(compassPose)}
             title="Zirkel: Nadel setzen, gelb Radius messen/übertragen, grün Bogen zeichnen, Kreis-Taste für einen ganzen Kreis"
-            onClick={() => setCompassPose((current) => {
-              if (current) return null
-              setNotice({
-                kind: 'info',
-                text: 'Nadel ziehen zum Setzen, gelber Punkt für den Radius, grüner Punkt drehen zum Zeichnen. Schloss sperrt das Maß, Kreis-Taste zeichnet sofort.',
-              })
-              return defaultCompassPose()
-            })}
+            onClick={() => toggleDraftingTool('compass')}
           >
             <Compass size={16} /> <span className="lw-tool-label">Zirkel</span>
           </button>
+          {(rulerPose || setSquarePose || compassPose) && (
+            <button
+              type="button"
+              className={draftingSettings.panelOpen ? 'is-active' : ''}
+              aria-pressed={draftingSettings.panelOpen}
+              title="Optionen der Zeichenhilfen: Einheit, Winkelraster, Magnet, Länge, Größe, Radius und Bögen"
+              onClick={() => updateDraftingSettings({ panelOpen: !draftingSettings.panelOpen })}
+            >
+              <SlidersHorizontal size={16} /> <span className="lw-tool-label">Optionen</span>
+            </button>
+          )}
           <button
             type="button"
             className={settings.penOnly ? 'is-active' : ''}
@@ -5794,6 +6048,30 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         return toolbar
       })()}
 
+      {(rulerPose || setSquarePose || compassPose)
+        && draftingSettings.panelOpen
+        && !(inkMode === 'drawing' && tool === 'pen' && artPanelOpen)
+        && (!inline || inputActive)
+        && (inline ? (node: ReactNode) => createPortal(node, document.body) : (node: ReactNode) => node)(
+        <DraftingPanel
+          className={inline ? 'is-viewport-chrome' : ''}
+          settings={draftingSettings}
+          ruler={rulerPose}
+          setSquare={setSquarePose}
+          compass={compassPose}
+          onSettingsChange={updateDraftingSettings}
+          onPose={(kind, pose) => {
+            activeDraftingKindRef.current = kind
+            setActiveDraftingKind(kind)
+            setDraftingPose(kind, pose)
+          }}
+          onHide={(kind) => setDraftingPose(kind, null)}
+          onRecentre={recentreDraftingTool}
+          onCompassDraw={handleCompassDraw}
+          onClose={() => updateDraftingSettings({ panelOpen: false })}
+        />,
+      )}
+
       {inkMode === 'drawing' && tool === 'pen' && artPanelOpen && (!inline || inputActive) && (inline ? (node: ReactNode) => createPortal(node, document.body) : (node: ReactNode) => node)(
       <aside className={`lw-art-studio ${inline ? 'is-viewport-chrome' : ''}`} aria-label="Zeichenstudio">
         <header>
@@ -5926,13 +6204,17 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
                 ruler={rulerPose}
                 setSquare={setSquarePose}
                 compass={compassPose}
+                settings={draftingSettings}
                 readout={draftingReadout}
                 onMove={(kind, pose) => {
-                  if (kind === 'ruler') setRulerPose(pose)
-                  else if (kind === 'setSquare') setSetSquarePose(pose)
-                  else setCompassPose(asCompassPose(pose))
+                  // A length pulled by hand becomes the default for the next ruler.
+                  if (kind === 'ruler' && pose.lengthMm && pose.lengthMm !== rulerPoseRef.current?.lengthMm) {
+                    updateDraftingSettings({ rulerLengthMm: pose.lengthMm })
+                  }
+                  setDraftingPose(kind, pose)
                 }}
                 onCompassDraw={handleCompassDraw}
+                onActivate={activateDraftingTool}
               />
             )}
             {selectionMode && !selectionRect && <div className={`lw-selection-hint ${selectionPurpose === 'math-correction' ? 'is-correction' : ''}`}>
@@ -6453,33 +6735,83 @@ const drawingBoardStyles = `
 .lw-draw-workspace{position:relative;display:grid;grid-template-columns:minmax(0,1fr);flex:1;min-height:0;padding:18px;gap:14px}.lw-draw-workspace.has-conversion{grid-template-columns:minmax(0,1fr) minmax(300px,370px)}.lw-canvas-shell{position:relative;display:flex;min-width:0;min-height:0;flex-direction:column;padding:10px 10px 7px;border:1px solid var(--draw-border);border-radius:17px;background:color-mix(in srgb,var(--background-secondary,#17171d) 84%,transparent);box-shadow:0 20px 55px rgba(0,0,0,.16)}.lw-canvas-glow{position:absolute;inset:-1px;border-radius:inherit;pointer-events:none;background:radial-gradient(circle at 15% 0,color-mix(in srgb,var(--draw-accent) 10%,transparent),transparent 36%)}.lw-canvas-surface{position:relative;z-index:1;flex:0 0 auto;min-width:220px;min-height:300px;aspect-ratio:210/297;margin:auto;overflow:hidden;border-radius:8px;background:#fbfcff;box-shadow:0 8px 32px rgba(0,0,0,.2),inset 0 0 0 1px rgba(30,42,65,.08);will-change:transform;touch-action:none}.lw-tablet-canvas{position:absolute;inset:0;display:block;width:100%;height:100%;outline:none;touch-action:none;user-select:none;-webkit-user-select:none;image-rendering:auto}
 .lw-drafting-layer{position:absolute;inset:0;z-index:6;width:100%;height:100%;overflow:visible;pointer-events:none;touch-action:none}
 .lw-drafting-body{fill:#e8edf4;stroke:#2a3348;stroke-width:1.2;cursor:grab;pointer-events:auto}
+.lw-drafting-layer.is-translucent .lw-drafting-body{fill:rgba(226,233,244,.62)}
+.lw-drafting-tool.is-pinned .lw-drafting-body{cursor:default}
 .lw-drafting-window{fill:#f7f9fc;stroke:#5b6578;stroke-width:.8;pointer-events:none}
 .lw-drafting-arm{fill:#cfd6e2;stroke:#2a3348;stroke-width:1.1;cursor:grab;pointer-events:auto}
 .lw-drafting-edge{stroke:#1e6fd6;stroke-width:2.2;stroke-linecap:round;pointer-events:none}
-.lw-drafting-tick{stroke:#2a3348;stroke-width:.8}
+.lw-drafting-tick{stroke:#2a3348;stroke-width:.8;pointer-events:none}
 .lw-drafting-tick.is-major{stroke:#151a24;stroke-width:1.2}
 .lw-drafting-label{fill:#1d2433;font:600 9px/1 var(--ui-font,system-ui);text-anchor:middle;pointer-events:none}
+.lw-drafting-label.is-inner{fill:#3f4a60}
+.lw-drafting-label.is-faint{fill:#6a7488}
+.lw-drafting-unit{fill:#4a5670;font:600 8px/1 var(--ui-font,system-ui);text-anchor:end;pointer-events:none}
+.lw-drafting-protractor{fill:none;stroke:#2a3348;stroke-width:1;pointer-events:none}
+.lw-drafting-midline{stroke:#2a3348;stroke-width:1;stroke-dasharray:4 3;pointer-events:none}
+.lw-drafting-parallel{stroke:rgba(42,51,72,.35);stroke-width:.7;pointer-events:none}
+.lw-drafting-parallel.is-major{stroke:rgba(42,51,72,.6);stroke-width:.9}
 .lw-drafting-caption{fill:#31405c;font:700 10px/1 var(--ui-font,system-ui);text-anchor:middle;pointer-events:none}
 .lw-drafting-rotate{fill:#3a6ee8;stroke:#fff;stroke-width:1.5;cursor:alias;pointer-events:auto}
+.lw-drafting-length{cursor:ew-resize;pointer-events:auto}
+.lw-drafting-length-bg{fill:#e0b23c;stroke:#fff;stroke-width:1.5}
+.lw-drafting-length-icon{fill:none;stroke:#1a1f2a;stroke-width:1.5;stroke-linecap:round;pointer-events:none}
+.lw-drafting-pin{pointer-events:none}
+.lw-drafting-pin-bg{fill:#c45b2d;stroke:#fff;stroke-width:1.2}
+.lw-drafting-pin-icon{fill:#fff}
 .lw-drafting-compass-ghost{fill:none;stroke:#1e6fd6;stroke-width:1.35;stroke-dasharray:5 4;opacity:.5;pointer-events:none}
+.lw-drafting-centre-mark{fill:none;stroke:#1e6fd6;stroke-width:1.2;opacity:.7;pointer-events:none}
 .lw-drafting-compass-arc{fill:none;stroke:#1ea86a;stroke-width:2.6;stroke-linecap:round;pointer-events:none}
 .lw-drafting-span{stroke:rgba(30,111,214,.35);stroke-width:1.1;stroke-dasharray:3 3;pointer-events:none}
-.lw-drafting-leg{fill:none;stroke:#9aa3b5;stroke-width:8;stroke-linecap:round;cursor:grab;pointer-events:stroke}
-.lw-drafting-leg.is-pencil{stroke:#c4a57a}
-.lw-drafting-hinge{fill:#8a93a5;stroke:#3a4460;stroke-width:1.2;cursor:grab;pointer-events:auto}
 .lw-drafting-needle{fill:none;stroke:#1a1f2a;stroke-width:1.6;cursor:grab;pointer-events:auto}
 .lw-drafting-needle-dot{fill:#111;pointer-events:none}
-.lw-drafting-lead{fill:#2b2f38;stroke:#111;stroke-width:.6;pointer-events:none}
 .lw-drafting-radius{fill:#f3c14e;stroke:#fff;stroke-width:1.5;cursor:ew-resize;pointer-events:auto}
 .lw-drafting-draw{fill:#1ea86a;stroke:#fff;stroke-width:1.6;cursor:alias;pointer-events:auto}
 .lw-drafting-action{cursor:pointer;pointer-events:auto}
 .lw-drafting-action-bg{fill:#3a6ee8;stroke:#fff;stroke-width:1.2}
 .lw-drafting-action.is-locked .lw-drafting-action-bg{fill:#c45b2d}
 .lw-drafting-action.is-circle .lw-drafting-action-bg{fill:#1e6fd6}
+.lw-drafting-action.is-flip .lw-drafting-action-bg{fill:#5b6578}
 .lw-drafting-action-icon{fill:#fff;pointer-events:none}
+.lw-drafting-action-icon-stroke{fill:none;stroke:#fff;stroke-width:1.4;stroke-linejoin:round;pointer-events:none}
 .lw-drafting-action-icon-ring{fill:none;stroke:#fff;stroke-width:1.6;pointer-events:none}
-.lw-drafting-hint{fill:#4a5870;font:600 8px/1 var(--ui-font,system-ui);text-anchor:middle;pointer-events:none}
-.lw-drafting-readout{fill:#15305a;font:800 13px/1 var(--ui-font,system-ui);text-anchor:middle}.lw-tablet-canvas-committed{z-index:1;pointer-events:none}.lw-tablet-canvas-live{z-index:2;pointer-events:auto}.lw-tablet-canvas.tool-pen,.lw-tablet-canvas.tool-select{cursor:crosshair}.lw-tablet-canvas.tool-eraser{cursor:cell}.lw-tablet-canvas:focus-visible{box-shadow:inset 0 0 0 2px var(--draw-accent)}.lw-selection-hint{position:absolute;z-index:3;top:18px;left:50%;display:flex;align-items:center;gap:7px;padding:8px 11px;transform:translateX(-50%);border:1px solid rgba(86,71,183,.32);border-radius:9px;color:#28233d;background:rgba(255,255,255,.92);box-shadow:0 8px 24px rgba(39,31,85,.18);font:700 11px/1.2 var(--ui-font,system-ui);pointer-events:none;white-space:nowrap}.lw-selection-rect{position:absolute;z-index:3;min-width:2px;min-height:2px;border:2px dashed #6855d9;background:rgba(104,85,217,.1);box-shadow:0 0 0 9999px rgba(38,35,55,.08);pointer-events:none}.lw-selection-rect.is-editable{pointer-events:auto;cursor:move;box-shadow:0 0 0 2px rgba(104,85,217,.2)}.lw-selection-scale{position:absolute;right:-6px;bottom:-6px;width:13px;height:13px;border-radius:3px;background:#5f4bcf;cursor:nwse-resize}.lw-selection-rect.is-selected{border-style:solid;background:rgba(104,85,217,.07);box-shadow:0 0 0 9999px rgba(38,35,55,.04),0 0 0 3px rgba(104,85,217,.14)}.lw-selection-rect span{position:absolute;bottom:calc(100% + 5px);left:-2px;padding:3px 7px;border-radius:6px;color:#fff;background:#5f4bcf;font:700 9px/1.3 var(--ui-font,system-ui);white-space:nowrap}.lw-canvas-meta{display:flex;align-items:center;justify-content:space-between;padding:7px 3px 0;color:var(--text-muted,#9292a0);font-size:10px}.lw-canvas-meta span{display:flex;align-items:center;gap:6px}.lw-pressure-dot{width:6px;height:6px;border-radius:50%;background:#4bd7a4;box-shadow:0 0 7px #4bd7a4}
+.lw-drafting-readout{pointer-events:none}
+.lw-drafting-readout-bg{fill:rgba(21,48,90,.92);stroke:rgba(255,255,255,.7);stroke-width:1}
+.lw-drafting-readout-text{fill:#fff;font:700 12px/1 var(--ui-font,system-ui);text-anchor:middle;font-variant-numeric:tabular-nums}
+.lw-drafting-panel{position:relative;z-index:13;flex:0 0 auto;display:flex;flex-direction:column;gap:8px;margin:10px 14px 0;padding:11px;border:1px solid color-mix(in srgb,var(--draw-accent) 36%,var(--draw-border));border-radius:16px;background:linear-gradient(145deg,color-mix(in srgb,var(--background-secondary,#19191f) 96%,var(--draw-accent) 4%),color-mix(in srgb,var(--background,#111116) 94%,transparent));box-shadow:0 22px 65px rgba(0,0,0,.24),inset 0 1px rgba(255,255,255,.035);color:var(--text,#fff);font-size:11px;animation:lw-art-studio-in .24s cubic-bezier(.2,.8,.2,1)}
+.lw-drafting-panel.is-viewport-chrome{position:fixed;z-index:79;top:78px;right:14px;left:auto;width:min(420px,calc(100vw - 28px));max-height:calc(100vh - 170px);margin:0;overflow:auto;background:color-mix(in srgb,var(--background-secondary,#17171d) 95%,transparent);backdrop-filter:blur(18px);pointer-events:auto}
+.lw-drafting-panel-head{display:flex;align-items:center;gap:8px}
+.lw-drafting-panel-head>span{width:29px;height:29px;display:grid;place-items:center;border-radius:9px;color:var(--on-accent,#111);background:var(--draw-accent)}
+.lw-drafting-panel-head>div{display:flex;min-width:0;flex:1;flex-direction:column}
+.lw-drafting-panel-head strong{font-size:11px}
+.lw-drafting-panel-head small{color:var(--text-muted,#999);font-size:8px}
+.lw-drafting-group{display:flex;flex-direction:column;gap:6px;padding:8px 9px;border:1px solid var(--draw-border);border-radius:12px;background:color-mix(in srgb,var(--background,#111116) 54%,transparent)}
+.lw-drafting-group>header{display:flex;align-items:center;gap:7px;min-height:26px}
+.lw-drafting-group>header>span{display:grid;place-items:center;width:22px;height:22px;border-radius:7px;color:var(--draw-accent);background:color-mix(in srgb,var(--draw-accent) 14%,transparent)}
+.lw-drafting-group>header strong{font-size:11px}
+.lw-drafting-group>header small{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-muted,#999);font-size:9px}
+.lw-drafting-group-actions{display:flex;gap:2px}
+.lw-drafting-group-actions .lw-draw-icon{width:26px;height:26px;color:var(--text-muted,#999)}
+.lw-drafting-group-actions .lw-draw-icon.is-active{color:#fff;background:#c45b2d}
+.lw-drafting-rows{display:flex;flex-direction:column;gap:6px}
+.lw-drafting-row{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px}
+.lw-drafting-segment{display:flex;align-items:center;gap:6px}
+.lw-drafting-segment>span,.lw-drafting-field>span{color:var(--text-muted,#9999a7);font-size:10px;white-space:nowrap}
+.lw-drafting-panel .lw-segmented{display:flex;padding:2px;border-radius:9px}
+.lw-drafting-panel .lw-segmented button{height:24px;padding:0 8px;font-size:10px;white-space:nowrap}
+.lw-drafting-field{display:flex;align-items:center;gap:5px}
+.lw-drafting-field input{width:64px;height:26px;padding:0 6px;border:1px solid var(--draw-border);border-radius:7px;background:color-mix(in srgb,var(--background-secondary,#17171d) 82%,transparent);color:var(--text,#fff);font:inherit;font-size:11px;font-variant-numeric:tabular-nums}
+.lw-drafting-field input:focus{outline:2px solid color-mix(in srgb,var(--draw-accent) 55%,transparent);outline-offset:1px}
+.lw-drafting-field small{color:var(--text-muted,#9999a7);font-size:10px}
+.lw-drafting-toggle{display:flex;align-items:center;gap:6px;height:26px;padding:0 8px 0 5px;border:1px solid var(--draw-border);border-radius:8px;background:transparent;color:var(--text-muted,#9999a7);font:inherit;font-size:10px;white-space:nowrap;cursor:pointer}
+.lw-drafting-toggle>i{position:relative;width:22px;height:12px;border-radius:7px;background:color-mix(in srgb,var(--text,#fff) 18%,transparent);transition:background .16s ease}
+.lw-drafting-toggle>i::after{content:"";position:absolute;top:1px;left:1px;width:10px;height:10px;border-radius:50%;background:#fff;transition:transform .16s ease}
+.lw-drafting-toggle.is-active{color:var(--text,#fff);border-color:color-mix(in srgb,var(--draw-accent) 45%,var(--draw-border))}
+.lw-drafting-toggle.is-active>i{background:var(--draw-accent)}
+.lw-drafting-toggle.is-active>i::after{transform:translateX(10px)}
+.lw-drafting-panel .lw-draw-subtle{height:26px;padding:0 9px;font-size:10px}
+.lw-drafting-direction-icon{display:grid;place-items:center;color:var(--text-muted,#9999a7)}
+.lw-drafting-panel-foot{color:var(--text-muted,#8b8b99);font-size:9px;line-height:1.4}
+.lw-drawing-board.is-inline:not(.is-input-active) .lw-drafting-panel{display:none!important}.lw-tablet-canvas-committed{z-index:1;pointer-events:none}.lw-tablet-canvas-live{z-index:2;pointer-events:auto}.lw-tablet-canvas.tool-pen,.lw-tablet-canvas.tool-select{cursor:crosshair}.lw-tablet-canvas.tool-eraser{cursor:cell}.lw-tablet-canvas:focus-visible{box-shadow:inset 0 0 0 2px var(--draw-accent)}.lw-selection-hint{position:absolute;z-index:3;top:18px;left:50%;display:flex;align-items:center;gap:7px;padding:8px 11px;transform:translateX(-50%);border:1px solid rgba(86,71,183,.32);border-radius:9px;color:#28233d;background:rgba(255,255,255,.92);box-shadow:0 8px 24px rgba(39,31,85,.18);font:700 11px/1.2 var(--ui-font,system-ui);pointer-events:none;white-space:nowrap}.lw-selection-rect{position:absolute;z-index:3;min-width:2px;min-height:2px;border:2px dashed #6855d9;background:rgba(104,85,217,.1);box-shadow:0 0 0 9999px rgba(38,35,55,.08);pointer-events:none}.lw-selection-rect.is-editable{pointer-events:auto;cursor:move;box-shadow:0 0 0 2px rgba(104,85,217,.2)}.lw-selection-scale{position:absolute;right:-6px;bottom:-6px;width:13px;height:13px;border-radius:3px;background:#5f4bcf;cursor:nwse-resize}.lw-selection-rect.is-selected{border-style:solid;background:rgba(104,85,217,.07);box-shadow:0 0 0 9999px rgba(38,35,55,.04),0 0 0 3px rgba(104,85,217,.14)}.lw-selection-rect span{position:absolute;bottom:calc(100% + 5px);left:-2px;padding:3px 7px;border-radius:6px;color:#fff;background:#5f4bcf;font:700 9px/1.3 var(--ui-font,system-ui);white-space:nowrap}.lw-canvas-meta{display:flex;align-items:center;justify-content:space-between;padding:7px 3px 0;color:var(--text-muted,#9292a0);font-size:10px}.lw-canvas-meta span{display:flex;align-items:center;gap:6px}.lw-pressure-dot{width:6px;height:6px;border-radius:50%;background:#4bd7a4;box-shadow:0 0 7px #4bd7a4}
 .lw-selection-hint.is-correction{border-color:rgba(30,142,115,.42);color:#153b32;background:rgba(242,255,250,.95)}.lw-math-correction-scope{position:absolute;z-index:3;border:1px dashed rgba(60,95,178,.5);border-radius:7px;background:rgba(67,102,190,.025);pointer-events:none}.lw-math-step-mark{position:absolute;z-index:4;min-width:5px;min-height:5px;border:2px solid rgba(91,106,151,.5);border-radius:6px;background:rgba(91,106,151,.04);pointer-events:none;transition:border-color .22s,background .22s,box-shadow .22s}.lw-math-step-mark>span{position:absolute;top:-8px;left:-8px;display:grid;width:17px;height:17px;place-items:center;border-radius:50%;color:#fff;background:#667091;font:800 8px/1 var(--ui-font,system-ui);box-shadow:0 3px 8px rgba(0,0,0,.2)}.lw-math-step-mark.is-start{border-color:#6855d9;background:rgba(104,85,217,.06)}.lw-math-step-mark.is-start>span{background:#6855d9}.lw-math-step-mark.is-correct{border-color:#249671;background:rgba(36,150,113,.07);box-shadow:0 0 0 3px rgba(36,150,113,.09)}.lw-math-step-mark.is-correct>span{background:#208963}.lw-math-step-mark.is-incorrect,.lw-math-step-mark.is-unreadable{border-color:#dc3f59;background:rgba(220,63,89,.09);box-shadow:0 0 0 3px rgba(220,63,89,.12)}.lw-math-step-mark.is-incorrect>span,.lw-math-step-mark.is-unreadable>span{background:#c9354e}.lw-math-step-mark.is-uncertain{border-color:#d18b25;background:rgba(209,139,37,.09)}.lw-math-step-mark.is-uncertain>span{background:#b87518}.lw-math-error-spot{position:absolute;z-index:7;min-width:12px;min-height:12px;border:3px solid #df304d;border-radius:7px;background:rgba(238,45,75,.14);box-shadow:0 0 0 4px rgba(238,45,75,.12),0 0 25px rgba(222,39,69,.3);pointer-events:none;animation:lw-error-pulse 1.35s ease-in-out infinite}.lw-math-error-spot.is-uncertain,.lw-math-error-spot.is-unreadable{border-color:#d38b20;background:rgba(230,151,33,.12);box-shadow:0 0 0 4px rgba(230,151,33,.12)}.lw-math-error-spot>span{position:absolute;bottom:calc(100% + 5px);left:-3px;padding:3px 7px;border-radius:6px;color:#fff;background:#d9304b;font:800 8px/1.2 var(--ui-font,system-ui);white-space:nowrap}.lw-math-error-spot.is-uncertain>span,.lw-math-error-spot.is-unreadable>span{background:#b87518}@keyframes lw-error-pulse{50%{box-shadow:0 0 0 7px rgba(238,45,75,.05),0 0 30px rgba(222,39,69,.34)}}
 .lw-math-correction-popover{position:absolute;z-index:9;display:flex;width:min(390px,calc(100% - 22px));max-height:min(560px,86%);flex-direction:column;gap:9px;overflow:auto;padding:11px;border:1px solid color-mix(in srgb,#2b9c79 42%,var(--draw-border));border-radius:14px;color:var(--text,#f4f2fa);background:linear-gradient(150deg,color-mix(in srgb,var(--background-secondary,#18171f) 95%,#2b9c79 5%),var(--background,#111116));box-shadow:0 24px 70px rgba(15,25,23,.42),0 0 0 1px rgba(255,255,255,.03);backdrop-filter:blur(18px);pointer-events:auto}.lw-math-correction-head{display:flex;align-items:center;gap:8px}.lw-math-correction-head>span{display:grid;width:28px;height:28px;flex:0 0 auto;place-items:center;border-radius:9px;color:#071b15;background:#48c39c}.lw-math-correction-head>div{display:flex;min-width:0;flex:1;flex-direction:column}.lw-math-correction-head strong{font-size:11px}.lw-math-correction-head small,.lw-math-correction-footnote{color:var(--text-muted,#aaa);font-size:8px;line-height:1.45}.lw-math-correction-loading,.lw-math-correction-error{display:flex;min-height:82px;align-items:center;justify-content:center;gap:8px;color:var(--text-muted,#aaa);text-align:center;font-size:10px}.lw-math-correction-error{flex-direction:column;color:var(--danger,#e16778)}.lw-math-correction-result{display:flex;align-items:flex-start;gap:8px;padding:8px 9px;border:1px solid var(--draw-border);border-radius:9px}.lw-math-correction-result>svg{flex:0 0 auto;margin-top:1px}.lw-math-correction-result>span,.lw-math-correction-result strong,.lw-math-correction-result small{display:block}.lw-math-correction-result strong{font-size:10px}.lw-math-correction-result small{margin-top:2px;color:var(--text-muted,#aaa);font-size:8px;line-height:1.45}.lw-math-correction-result.is-correct{color:var(--success,#4bc69d);border-color:color-mix(in srgb,var(--success,#4bc69d) 32%,var(--draw-border));background:color-mix(in srgb,var(--success,#4bc69d) 8%,transparent)}.lw-math-correction-result.is-incorrect,.lw-math-correction-result.is-unreadable{color:var(--danger,#e16778);border-color:color-mix(in srgb,var(--danger,#e16778) 34%,var(--draw-border));background:color-mix(in srgb,var(--danger,#e16778) 8%,transparent)}.lw-math-correction-result.is-uncertain,.lw-math-correction-result.is-editing{color:var(--warning,#d49a48);border-color:color-mix(in srgb,var(--warning,#d49a48) 34%,var(--draw-border));background:color-mix(in srgb,var(--warning,#d49a48) 8%,transparent)}
 .lw-math-step-list{display:flex;flex-direction:column;gap:5px}.lw-math-step-row{display:grid;grid-template-columns:22px minmax(0,1fr) 39px;align-items:center;gap:6px;padding:6px;border:1px solid var(--draw-border);border-radius:9px;background:color-mix(in srgb,var(--background,#111116) 46%,transparent)}.lw-math-step-row.is-incorrect,.lw-math-step-row.is-unreadable{border-color:color-mix(in srgb,var(--danger,#e16778) 48%,var(--draw-border));background:color-mix(in srgb,var(--danger,#e16778) 7%,transparent)}.lw-math-step-row.is-correct{border-color:color-mix(in srgb,var(--success,#4bc69d) 28%,var(--draw-border))}.lw-math-step-number{display:grid;width:20px;height:20px;place-items:center;border-radius:6px;color:var(--text-muted,#aaa);background:color-mix(in srgb,var(--background-modifier-border,#555) 42%,transparent);font:800 8px/1 var(--ui-font,system-ui)}.lw-math-step-input{display:flex;min-width:0;flex-direction:column;gap:2px}.lw-math-step-input input{width:100%;min-width:0;padding:5px 7px;border:1px solid transparent;border-radius:6px;outline:none;color:inherit;background:transparent;font:600 11px/1.2 var(--mono-font,monospace)}.lw-math-step-input input:hover,.lw-math-step-input input:focus{border-color:var(--draw-border);background:color-mix(in srgb,var(--background,#111116) 82%,transparent)}.lw-math-step-input small{overflow:hidden;color:var(--text-muted,#aaa);font-size:7px;line-height:1.25;text-overflow:ellipsis;white-space:nowrap}.lw-math-step-status{overflow:hidden;color:var(--text-muted,#aaa);font-size:7px;text-align:right;text-overflow:ellipsis;white-space:nowrap}.lw-math-step-row.is-incorrect .lw-math-step-status,.lw-math-step-row.is-unreadable .lw-math-step-status{color:var(--danger,#e16778)}.lw-math-step-row.is-correct .lw-math-step-status{color:var(--success,#4bc69d)}.lw-math-step-row.is-uncertain .lw-math-step-status{color:var(--warning,#d49a48)}.lw-math-correction-suggestion{display:flex;align-items:center;gap:7px;padding:7px 9px;border-radius:8px;color:var(--text-normal,#ddd);background:color-mix(in srgb,#6855d9 11%,transparent);font-size:9px}.lw-math-correction-suggestion code{overflow:hidden;color:#b9acf9;text-overflow:ellipsis;white-space:nowrap}.lw-math-correction-actions{display:grid;grid-template-columns:1fr 1fr;gap:6px}.lw-math-correction-actions button{display:flex;min-height:30px;align-items:center;justify-content:center;gap:5px;border:1px solid var(--draw-border);border-radius:8px;color:inherit;background:color-mix(in srgb,var(--background-secondary,#18171f) 78%,transparent);font:700 9px/1 var(--ui-font,system-ui);cursor:pointer}.lw-math-correction-actions button:first-child{border-color:color-mix(in srgb,#35b68e 40%,var(--draw-border));background:color-mix(in srgb,#35b68e 11%,transparent)}.lw-math-correction-actions button:hover{filter:brightness(1.12)}.lw-math-correction-actions button:disabled{opacity:.55;cursor:wait}.lw-math-correction-footnote{margin:0}
@@ -6508,6 +6840,8 @@ const drawingBoardStyles = `
 .lw-drawing-board.is-inline.is-input-active .lw-canvas-surface{pointer-events:auto}
 .lw-drawing-board.is-inline .lw-tablet-canvas{position:absolute;inset:var(--paper-scroll-room, 0px);width:auto;height:auto;pointer-events:none}
 .lw-drawing-board.is-inline .lw-tablet-canvas.is-input-active{pointer-events:none}
+/* The tool layer shares the ink's box (the page, not the scroll room around it): pose 0–1 × page == pen 0–1 × page. Explicit size: svg is a replaced element. */
+.lw-drawing-board.is-inline .lw-drafting-layer{inset:var(--paper-scroll-room, 0px);width:calc(100% - 2 * var(--paper-scroll-room, 0px));height:calc(100% - 2 * var(--paper-scroll-room, 0px))}
 .lw-drawing-board.is-inline .lw-conversion-panel,.lw-conversion-panel.is-viewport-chrome{position:fixed;z-index:80;top:78px;right:16px;left:auto;float:none;width:min(370px,calc(100vw - 32px));max-height:calc(100vh - 175px);margin:0;overflow:auto;pointer-events:auto;box-shadow:0 22px 70px rgba(0,0,0,.34)}
 .lw-drawing-board.is-inline .lw-draw-notice,.lw-draw-notice.is-viewport-chrome{position:fixed;z-index:81;top:78px;left:50%;width:min(420px,calc(100vw - 28px));margin:0;transform:translateX(-50%);pointer-events:auto;box-shadow:0 13px 34px rgba(0,0,0,.24)}
 .lw-drawing-board.is-inline .lw-art-studio,.lw-art-studio.is-viewport-chrome{position:fixed;z-index:79;top:78px;left:14px;right:14px;width:min(900px,calc(100vw - 28px));max-width:calc(100vw - 28px);max-height:calc(100vh - 170px);margin-left:auto;margin-right:auto;transform:none;overflow:auto;background:color-mix(in srgb,var(--background-secondary,#17171d) 95%,transparent);backdrop-filter:blur(18px);pointer-events:auto}.lw-drawing-board.is-inline:not(.is-input-active) .lw-art-studio{display:none}
