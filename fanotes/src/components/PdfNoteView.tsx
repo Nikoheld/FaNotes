@@ -39,6 +39,7 @@ import {
 import { pdfPageScrollIntoViewBlock } from '../lib/pdfOpenCamera'
 import { PDF_INKING_CLASS, PDF_TOOLBAR_SLOT_ID } from '../lib/pdfInkHit'
 import { layoutOffsetInScroller, readUsedSheetZoom, resolvePaperZoomScroller, watchSheetZoom } from '../lib/paperView'
+import { loadPaperViewMemory, recallPaperView } from '../lib/paperViewMemory'
 
 type PdfNoteViewProps = {
   path: string
@@ -591,6 +592,9 @@ export function PdfNoteView({
 
   useLayoutEffect(() => {
     if (!pdf) return
+    // A remembered camera (PaperView) reopens the exact spot; page-into-view
+    // would yank it to the page centre.
+    if (recallPaperView(loadPaperViewMemory(), path)) return
     const node = pagesRef.current?.querySelector(`[data-pdf-page="${currentPage}"]`)
     node?.scrollIntoView({ block: pdfPageScrollIntoViewBlock('center'), behavior: 'auto' })
   }, [pdf, path])
