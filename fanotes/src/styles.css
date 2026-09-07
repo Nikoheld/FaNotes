@@ -353,6 +353,9 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 }
 .file-tree__item.is-active > .file-tree__row { color: var(--text); background: var(--panel-active); }
 .file-tree__item.is-active > .file-tree__row::before { content: ''; position: absolute; left: 1px; width: 2px; height: 17px; border-radius: 2px; background: var(--accent); }
+/* The note shown in the second pane gets a faint marker so both open notes are visible in the tree. */
+.file-tree__item.is-in-split:not(.is-active) > .file-tree__row { color: var(--text-soft); }
+.file-tree__item.is-in-split:not(.is-active) > .file-tree__row::before { content: ''; position: absolute; left: 1px; width: 2px; height: 17px; border-radius: 2px; background: color-mix(in srgb, var(--accent) 45%, transparent); }
 .file-tree__entry-button { min-width: 0; height: 100%; flex: 1; display: flex; align-items: center; gap: 5px; border: 0; padding: 0; color: inherit; background: transparent; cursor: pointer; text-align: left; }
 .file-tree__chevron { width: 14px; flex: none; display: grid; place-items: center; color: var(--text-muted); transition: transform .14s ease; }
 .file-tree__item.is-expanded > .file-tree__row .file-tree__chevron { transform: rotate(90deg); }
@@ -413,8 +416,12 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   font-size: 11px;
   font-weight: 650;
 }
-.note-nav-back:hover:not(:disabled) { color: var(--text); background: color-mix(in srgb, var(--text) 5%, transparent); }
-.note-nav-back:disabled { cursor: default; opacity: .38; }
+.note-nav { flex: none; display: flex; align-items: stretch; }
+.note-nav-forward { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 33px; padding: 0; border: 0; border-right: 1px solid var(--border); color: var(--text-soft); background: transparent; cursor: pointer; }
+.note-nav-back:hover:not(:disabled), .note-nav-forward:hover:not(:disabled) { color: var(--text); background: color-mix(in srgb, var(--text) 5%, transparent); }
+.note-nav-back:disabled, .note-nav-forward:disabled { cursor: default; opacity: .38; }
+.note-nav-back:has(+ .note-nav-forward) { border-right-color: color-mix(in srgb, var(--border) 55%, transparent); }
+.tab-context-menu { width: 236px; }
 .subject-book-control { display: inline-flex; align-items: center; gap: 4px; }
 .subject-book-placements {
   display: inline-flex;
@@ -621,6 +628,17 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .note-tab .tab-close { width: 21px; height: 21px; flex: none; display: grid; place-items: center; padding: 0; border: 0; border-radius: 5px; color: inherit; background: transparent; cursor: pointer; opacity: 0; }
 .note-tab:hover .tab-close, .note-tab.active .tab-close { opacity: 1; }
 .note-tab .tab-close:hover { background: var(--panel-hover); }
+/* Pinned tabs are compact and stay at the front; the pin glyph replaces the file icon. */
+.note-tab.is-pinned { min-width: 0; max-width: 150px; flex: 0 0 auto; padding-right: 8px; }
+.note-tab.is-pinned .note-tab-main > svg:first-child { color: var(--accent-readable); }
+.note-tab.in-split .tab-split-mark { flex: none; color: var(--accent-readable); }
+.note-tab.in-split:not(.active) { color: var(--text-soft); }
+.note-tab.in-split:not(.active)::after { content: ''; position: absolute; inset: auto 0 -1px; height: 2px; background: color-mix(in srgb, var(--accent) 40%, transparent); }
+.note-tab[draggable] { cursor: default; }
+/* Drop indicator while a tab is dragged along the bar. */
+.note-tab.drop-before::before, .note-tab.drop-after::before { content: ''; position: absolute; top: 5px; bottom: 5px; width: 2px; border-radius: 2px; background: var(--accent); z-index: 2; }
+.note-tab.drop-before::before { left: -1px; }
+.note-tab.drop-after::before { right: -1px; }
 .tabs-menu { width: 35px; flex: none; display: grid; place-items: center; border: 0; border-left: 1px solid var(--border); background: transparent; color: var(--text-muted); cursor: pointer; }
 .tabs-menu:hover { background: var(--panel-hover); color: var(--text); }
 
@@ -941,12 +959,39 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 
 .editor-stage { min-width: 0; min-height: 0; position: relative; display: flex; flex-direction: column; overflow: hidden; }
 .editor-stage-main { min-width: 0; min-height: 0; flex: 1; display: flex; flex-direction: column; overflow: hidden; }
-.editor-split { min-width: 0; min-height: 0; flex: 1; display: grid; grid-template-columns: minmax(0, 1fr); }
-.editor-split.is-split { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 1px; background: var(--border); }
+.editor-split { --split-ratio: .5; --split-divider: 7px; min-width: 0; min-height: 0; flex: 1; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
+/* The divider is a real track; the first pane takes --split-ratio of what is left. */
+.editor-split.is-split.is-columns { grid-template-columns: minmax(0, calc((100% - var(--split-divider)) * var(--split-ratio))) var(--split-divider) minmax(0, 1fr); }
+.editor-split.is-split.is-rows { grid-template-rows: minmax(0, calc((100% - var(--split-divider)) * var(--split-ratio))) var(--split-divider) minmax(0, 1fr); }
 .editor-split.is-split > * { min-width: 0; min-height: 0; background: color-mix(in srgb, var(--bg) 93%, var(--panel)); }
-.split-pane-head { display: flex; align-items: center; gap: 8px; padding: 8px 12px 0; }
-.split-pane-head strong { flex: 1; font-size: 11px; }
-.split-pane-head button { height: 26px; padding: 0 8px; border: 1px solid var(--border); border-radius: 7px; background: var(--panel); color: var(--text-soft); cursor: pointer; }
+.editor-split.is-split > .unified-note-view, .split-pane { position: relative; }
+.split-pane { display: flex; flex-direction: column; overflow: hidden; }
+.split-pane > .unified-note-view { min-height: 0; flex: 1; }
+/* A thin accent edge marks the pane that keyboard shortcuts and the pen address. */
+.editor-split.is-split > .is-main-pane::after,
+.editor-split.is-split > .split-pane::after { content: ''; position: absolute; inset: 0 auto auto 0; width: 100%; height: 2px; z-index: 40; background: transparent; pointer-events: none; transition: background var(--motion-fast) ease; }
+.editor-split.is-split.focus-main > .is-main-pane::after,
+.editor-split.is-split.focus-split > .split-pane::after { background: var(--accent); }
+.split-divider { position: relative; z-index: 3; display: grid; place-items: center; background: var(--border); cursor: col-resize; touch-action: none; user-select: none; -webkit-user-select: none; transition: background var(--motion-fast) ease; }
+.editor-split.is-rows .split-divider { cursor: row-resize; }
+.split-divider::before { content: ''; position: absolute; inset: 0 -4px; }
+.editor-split.is-rows .split-divider::before { inset: -4px 0; }
+.split-divider__grip { width: 3px; height: 34px; border-radius: 2px; background: color-mix(in srgb, var(--text) 26%, transparent); pointer-events: none; transition: background var(--motion-fast) ease, height var(--motion-fast) ease, width var(--motion-fast) ease; }
+.editor-split.is-rows .split-divider__grip { width: 34px; height: 3px; }
+.split-divider:hover, .split-divider:focus-visible, .editor-split.is-resizing .split-divider { background: color-mix(in srgb, var(--accent) 55%, var(--border)); outline: 0; }
+.split-divider:hover .split-divider__grip, .split-divider:focus-visible .split-divider__grip, .editor-split.is-resizing .split-divider__grip { background: var(--accent-readable); }
+/* While the divider moves, the panes must not swallow the pointer or select text. */
+.editor-split.is-resizing { cursor: col-resize; user-select: none; -webkit-user-select: none; }
+.editor-split.is-resizing.is-rows { cursor: row-resize; }
+.editor-split.is-resizing > .unified-note-view, .editor-split.is-resizing > .split-pane { pointer-events: none; }
+.split-pane-head { flex: none; display: flex; align-items: center; gap: 6px; height: 33px; padding: 0 6px 0 10px; border-bottom: 1px solid var(--border); color: var(--text-soft); background: var(--bg-elevated); }
+.split-pane-head > svg { flex: none; color: var(--text-muted); }
+.split-pane-head strong { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; font-weight: 600; }
+.split-pane-head .dirty-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); flex: none; }
+.split-pane-head button { width: 25px; height: 25px; flex: none; display: grid; place-items: center; padding: 0; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--text-muted); cursor: pointer; transition: background var(--motion-fast) ease, color var(--motion-fast) ease; }
+.split-pane-head button:hover { color: var(--text); background: var(--panel-hover); }
+/* Read-only ink in the second pane: painted once from the saved page, aligned to the paper's origin. */
+.ink-preview-layer { position: absolute; z-index: 4; top: 0; left: 0; pointer-events: none; }
 .note-meta-bar { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 6px 12px 0; }
 .note-tags { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; flex: 1; }
 .paper-picker { position: relative; flex: none; }
@@ -1839,6 +1884,14 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .statusbar button { height: 20px; border: 0; border-radius: 5px; color: inherit; background: transparent; font-size: inherit; cursor: pointer; }
 .statusbar button:hover { background: var(--panel-hover); color: var(--text); }
 .statusbar .save-status { display: inline-flex; align-items: center; gap: 4px; padding: 0 5px; }
+/* Breadcrumbs: folder segments reveal themselves in the file tree, the note name is plain text. */
+.statusbar-left { min-width: 0; }
+.note-breadcrumbs { min-width: 0; display: flex; align-items: center; gap: 1px; overflow: hidden; padding-left: 11px; border-left: 1px solid var(--border); }
+.note-breadcrumbs__item { display: inline-flex; align-items: center; gap: 1px; min-width: 0; color: var(--text-muted); }
+.note-breadcrumbs__item > svg { flex: none; opacity: .6; }
+.note-breadcrumbs__item button { max-width: 160px; height: 20px; padding: 0 5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.note-breadcrumbs__item b { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-soft); font-weight: 600; }
+.note-breadcrumbs__item:last-child { min-width: 0; }
 .statusbar .update-ready-button { display: inline-flex; align-items: center; gap: 4px; padding-inline: 6px; color: var(--accent-readable); background: rgba(var(--accent-rgb), .1); }
 .statusbar .detected-text-language b { color: var(--text); font-size: 9px; text-decoration: underline wavy #e24f5f 1px; text-underline-offset: 2px; }
 
@@ -2344,6 +2397,10 @@ kbd { padding: 3px 6px; border: 1px solid var(--border-strong); border-bottom-wi
 .command-palette > footer { display: flex; align-items: center; gap: 14px; border-top: 1px solid var(--border); padding: 0 13px; color: var(--text-muted); font-size: 8px; }
 .command-palette > footer span { display: flex; align-items: center; gap: 3px; }
 .palette-empty { padding: 50px 20px; text-align: center; color: var(--text-muted); font-size: 10px; }
+.palette-results .palette-note { min-height: 40px; }
+.palette-results .palette-note.is-active-note .palette-action-icon { color: var(--accent-readable); border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); }
+.palette-results .palette-note kbd { display: inline-flex; align-items: center; gap: 3px; }
+.command-palette.is-note-switcher .palette-search { color: var(--text-soft); }
 .search-panel { position: absolute; z-index: 30; top: 0; bottom: 0; left: 0; width: var(--sidebar-width); background: var(--bg-elevated); border-right: 1px solid var(--border); display: flex; flex-direction: column; box-shadow: 16px 0 32px rgba(0,0,0,.14); }
 .search-panel > header { display: flex; align-items: center; justify-content: space-between; padding: 14px 12px 10px; }
 .search-panel h3 { margin: 0; font-size: 14px; }

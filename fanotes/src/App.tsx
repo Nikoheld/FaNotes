@@ -1,15 +1,19 @@
 import {
   Archive,
   ArrowLeft,
+  ArrowLeftRight,
+  ArrowRight,
   Bot,
   Bug,
   BookOpen,
   CalendarDays,
   CheckCircle2,
+  ChevronRight,
   CircleAlert,
   ClipboardList,
   Columns2,
   Command,
+  Copy,
   Database,
   Download,
   File,
@@ -36,7 +40,10 @@ import {
   PanelRightClose,
   PanelRightOpen,
   PenLine,
+  Pin,
+  PinOff,
   Plus,
+  Rows2,
   Save,
   ScanLine,
   Search,
@@ -70,9 +77,36 @@ import {
 } from './lib/pageStats'
 import { chooseRestoredNote, collectNotePaths } from './lib/lastOpenNote'
 import {
+  breadcrumbsFor,
+  canGoBack,
+  canGoForward,
+  clampSplitRatio,
+  DEFAULT_SPLIT_LAYOUT,
+  EMPTY_NOTE_HISTORY,
+  forgetNoteHistory,
+  loadSplitLayout,
+  loadWorkspaceMemory,
+  nudgeSplitRatio,
+  pruneWorkspaceMemory,
+  rankSwitcherNotes,
+  remapNoteHistory,
+  remapPath,
+  rememberClosedTab,
+  reorderTabs,
+  saveSplitLayout,
+  saveWorkspaceMemory,
+  splitRatioFromPointer,
+  stepNoteHistory,
+  tabIndexForDigit,
+  tabsToClose,
+  togglePinnedTab,
+  visitNote,
+  type NoteHistory,
+  type SplitLayout,
+} from './lib/workspaceNav'
+import { InkPreviewLayer } from './components/InkPreviewLayer'
+import {
   activateNoteLink,
-  followNoteNav,
-  goBackNoteNav,
   linkedNoteParent,
   linkedNotePreferredName,
   NOTE_LINK_STYLES,
@@ -179,6 +213,8 @@ const PdfNoteView = lazy(() => import('./components/PdfNoteView').then((module) 
 const StableWorksheetLayer = memo(WorksheetLayer)
 const STARTUP_TREE_REFRESH_DELAY_MS = 18_000
 const STARTUP_DOCUMENT_LAYER_DELAY_MS = 160
+/** How long a renamed/moved path still redirects late editor flushes to the new name. */
+const MOVED_PATH_ALIAS_MS = 30_000
 type AppProps = { startupBootstrap?: Promise<BootstrapData> }
 
 type SaveState = 'saved' | 'saving' | 'error'
@@ -188,39 +224,144 @@ const EMPTY_DRAWING_SESSION: DrawingSession = { key: 0, document: null, path: nu
 type WorksheetSession = { key: number; documents: WorksheetDocument[] }
 type NoteTabButtonProps = {
   active: boolean
+  inSplit: boolean
   dirty: boolean
+  pinned: boolean
   path: string
   title: string
-  onOpen: (path: string) => void | Promise<void>
-  onSplit: (path: string) => void | Promise<void>
+  index: number
+  dropSide: 'before' | 'after' | null
+  onOpen: (path: string) => unknown
+  onSplit: (path: string) => unknown
   onClose: (path: string) => void | Promise<void>
+  onContextMenu: (path: string, x: number, y: number) => void
+  onDragStart: (path: string) => void
+  onDragOver: (path: string, side: 'before' | 'after') => void
+  onDrop: (path: string, side: 'before' | 'after') => void
+  onDragEnd: () => void
 }
 
-const NoteTabButton = memo(function NoteTabButton({ active, dirty, path, title, onOpen, onSplit, onClose }: NoteTabButtonProps) {
+const NOTE_TAB_DRAG_TYPE = 'application/x-fanotes-tab'
+
+const NoteTabButton = memo(function NoteTabButton({
+  active, inSplit, dirty, pinned, path, title, index, dropSide,
+  onOpen, onSplit, onClose, onContextMenu, onDragStart, onDragOver, onDrop, onDragEnd,
+}: NoteTabButtonProps) {
   const tabRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
     if (active) tabRef.current?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
   }, [active])
 
+  const sideFor = (event: React.DragEvent<HTMLElement>): 'before' | 'after' => {
+    const rect = event.currentTarget.getBoundingClientRect()
+    return event.clientX < rect.left + rect.width / 2 ? 'before' : 'after'
+  }
+  // Ctrl+1…8 pick a tab by position, Ctrl+9 the last one.
+  const shortcut = index < 8 ? `Control+${index + 1}` : null
+
   return (
-    <div ref={tabRef} className={`note-tab ${active ? 'active' : ''}`} title={path}>
+    <div
+      ref={tabRef}
+      className={`note-tab ${active ? 'active' : ''} ${inSplit ? 'in-split' : ''} ${pinned ? 'is-pinned' : ''} ${dropSide ? `drop-${dropSide}` : ''}`}
+      title={path}
+      aria-keyshortcuts={shortcut ?? undefined}
+      draggable
+      onDragStart={(event) => {
+        event.dataTransfer.setData(NOTE_TAB_DRAG_TYPE, path)
+        event.dataTransfer.effectAllowed = 'move'
+        onDragStart(path)
+      }}
+      onDragOver={(event) => {
+        if (!event.dataTransfer.types.includes(NOTE_TAB_DRAG_TYPE)) return
+        event.preventDefault()
+        event.dataTransfer.dropEffect = 'move'
+        onDragOver(path, sideFor(event))
+      }}
+      onDrop={(event) => {
+        if (!event.dataTransfer.types.includes(NOTE_TAB_DRAG_TYPE)) return
+        event.preventDefault()
+        onDrop(path, sideFor(event))
+      }}
+      onDragEnd={onDragEnd}
+      onContextMenu={(event) => {
+        event.preventDefault()
+        onContextMenu(path, event.clientX, event.clientY)
+      }}
+    >
       <button
         type="button"
         className="note-tab-main"
         role="tab"
         aria-selected={active}
-        aria-label={`${title}${dirty ? ', nicht gespeicherte Änderungen' : ''}`}
+        aria-label={`${title}${pinned ? ', angeheftet' : ''}${inSplit ? ', in der zweiten Spalte' : ''}${dirty ? ', nicht gespeicherte Änderungen' : ''}`}
         onClick={(event) => { event.shiftKey ? void onSplit(path) : void onOpen(path) }}
-        onAuxClick={(event) => { if (event.button === 1) void onClose(path) }}
+        onAuxClick={(event) => { if (event.button === 1 && !pinned) void onClose(path) }}
       >
-        {isPdfNotePath(path) ? <File aria-hidden="true" size={13} /> : <Files aria-hidden="true" size={13} />}
+        {pinned ? <Pin aria-hidden="true" size={12} /> : isPdfNotePath(path) ? <File aria-hidden="true" size={13} /> : <Files aria-hidden="true" size={13} />}
         <span>{title}</span>
+        {inSplit && <Columns2 aria-hidden="true" size={11} className="tab-split-mark" />}
         {dirty && <i className="dirty-dot" title="Noch nicht gespeichert" />}
       </button>
-      <button className="tab-close" type="button" aria-label={`${title} schließen`} title="Tab schließen (Strg+W)" onClick={() => { void onClose(path) }}><X aria-hidden="true" size={12} /></button>
+      {!pinned && <button className="tab-close" type="button" aria-label={`${title} schließen`} title="Tab schließen (Strg+W)" onClick={() => { void onClose(path) }}><X aria-hidden="true" size={12} /></button>}
     </div>
   )
 })
+
+type TabMenuState = { path: string; x: number; y: number }
+
+type TabContextMenuProps = {
+  menu: TabMenuState
+  title: string
+  pinned: boolean
+  inSplit: boolean
+  isWeb: boolean
+  canCloseOthers: boolean
+  canCloseRight: boolean
+  onClose: () => void
+  onOpenInSplit: () => void
+  onTogglePin: () => void
+  onCloseTab: () => void
+  onCloseOthers: () => void
+  onCloseRight: () => void
+  onCopyPath: () => void
+  onReveal: () => void
+}
+
+function TabContextMenu({ menu, title, pinned, inSplit, isWeb, canCloseOthers, canCloseRight, onClose, onOpenInSplit, onTogglePin, onCloseTab, onCloseOthers, onCloseRight, onCopyPath, onReveal }: TabContextMenuProps) {
+  const menuRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose() }
+    document.addEventListener('pointerdown', onClose)
+    document.addEventListener('keydown', closeOnEscape)
+    menuRef.current?.querySelector('button')?.focus()
+    return () => {
+      document.removeEventListener('pointerdown', onClose)
+      document.removeEventListener('keydown', closeOnEscape)
+    }
+  }, [onClose])
+  const run = (action: () => void) => () => { onClose(); action() }
+  return (
+    <div
+      ref={menuRef}
+      className="file-tree__context-menu tab-context-menu"
+      role="menu"
+      aria-label={`Aktionen für ${title}`}
+      onPointerDown={(event) => event.stopPropagation()}
+      style={{ left: Math.min(Math.max(8, menu.x), window.innerWidth - 240), top: Math.min(Math.max(8, menu.y), window.innerHeight - 320) }}
+    >
+      <div className="file-tree__menu-head"><span>{isPdfNotePath(menu.path) ? <File size={16} /> : <FileText size={16} />}</span><div><small>Tab</small><strong>{title}</strong></div></div>
+      <button type="button" role="menuitem" disabled={inSplit} onClick={run(onOpenInSplit)}><Columns2 aria-hidden="true" size={15} /> Rechts öffnen</button>
+      <button type="button" role="menuitem" onClick={run(onTogglePin)}>{pinned ? <PinOff aria-hidden="true" size={15} /> : <Pin aria-hidden="true" size={15} />} {pinned ? 'Lösen' : 'Anheften'}</button>
+      <span className="file-tree__menu-separator" role="separator" />
+      <button type="button" role="menuitem" onClick={run(onCopyPath)}><Copy aria-hidden="true" size={15} /> Pfad kopieren</button>
+      <button type="button" role="menuitem" onClick={run(onReveal)}>{isWeb ? <Download aria-hidden="true" size={15} /> : <FolderOpen aria-hidden="true" size={15} />} {isWeb ? 'Herunterladen' : 'Im Dateimanager zeigen'}</button>
+      <span className="file-tree__menu-separator" role="separator" />
+      <button type="button" role="menuitem" disabled={pinned} onClick={run(onCloseTab)}><X aria-hidden="true" size={15} /> Schließen</button>
+      <button type="button" role="menuitem" disabled={!canCloseOthers} onClick={run(onCloseOthers)}><X aria-hidden="true" size={15} /> Andere schließen</button>
+      <button type="button" role="menuitem" disabled={!canCloseRight} onClick={run(onCloseRight)}><ArrowRight aria-hidden="true" size={15} /> Rechts davon schließen</button>
+    </div>
+  )
+}
 
 const INITIAL_UPDATE_STATE: UpdateState = {
   status: 'idle',
@@ -494,7 +635,7 @@ export default function App({ startupBootstrap }: AppProps) {
   const [noteLinkPlacing, setNoteLinkPlacing] = useState(false)
   const [noteLinkStyle, setNoteLinkStyle] = useState<NoteLinkStyleId>('symbol')
   const [selectedNoteLinkId, setSelectedNoteLinkId] = useState<string | null>(null)
-  const [noteNavStack, setNoteNavStack] = useState<string[]>([])
+  const [noteHistory, setNoteHistory] = useState<NoteHistory>(EMPTY_NOTE_HISTORY)
   const [noteBackups, setNoteBackups] = useState<NoteBackupSnapshot[]>([])
   const [backupMenuOpen, setBackupMenuOpen] = useState(false)
   const [subjectBooks, setSubjectBooks] = useState<SubjectBookRecord[]>([])
@@ -510,12 +651,24 @@ export default function App({ startupBootstrap }: AppProps) {
   })()
   const [tagDraft, setTagDraft] = useState('')
   const [splitPath, setSplitPath] = useState<string | null>(null)
+  const [splitLayout, setSplitLayout] = useState<SplitLayout>(() => loadSplitLayout())
+  const [splitDragging, setSplitDragging] = useState(false)
+  const [focusedPane, setFocusedPane] = useState<'main' | 'split'>('main')
+  const [tabMenu, setTabMenu] = useState<TabMenuState | null>(null)
+  const [tabDrag, setTabDrag] = useState<{ path: string; over: string | null; side: 'before' | 'after' } | null>(null)
+  const [paletteMode, setPaletteMode] = useState<'commands' | 'notes'>('commands')
   const [historyOpen, setHistoryOpen] = useState(false)
   const [historySnapshots, setHistorySnapshots] = useState<NoteHistorySnapshot[]>([])
   const [historyBusy, setHistoryBusy] = useState(false)
   const tabsRef = useRef(tabs)
   const activePathRef = useRef(activePath)
-  const noteNavStackRef = useRef<string[]>([])
+  const splitPathRef = useRef<string | null>(null)
+  const noteHistoryRef = useRef<NoteHistory>(EMPTY_NOTE_HISTORY)
+  const closedTabsRef = useRef<string[]>([])
+  /** old → new path of renamed/moved entries, so late keystrokes never recreate the old file. */
+  const movedPathsRef = useRef<Map<string, { to: string; at: number }>>(new Map())
+  const workspaceRestoredRef = useRef(false)
+  const splitContainerRef = useRef<HTMLDivElement>(null)
   const noteLinksRef = useRef<NoteLinkRecord[]>([])
   const noteBackupsRef = useRef<NoteBackupSnapshot[]>([])
   const subjectBooksRef = useRef<SubjectBookRecord[]>([])
@@ -538,6 +691,7 @@ export default function App({ startupBootstrap }: AppProps) {
   const lastHomeworkSecretRef = useRef('')
   const drawingOpenRef = useRef(drawingOpen)
   const drawingDirtyRef = useRef(false)
+  const drawingSessionKeyRef = useRef(0)
   const drawingLoadRequestRef = useRef(0)
   const worksheetLoadRequestRef = useRef(0)
   const initialDrawingLoadRef = useRef(true)
@@ -572,6 +726,34 @@ export default function App({ startupBootstrap }: AppProps) {
 
   useEffect(() => { tabsRef.current = tabs }, [tabs])
   useEffect(() => { activePathRef.current = activePath }, [activePath])
+  useEffect(() => { splitPathRef.current = splitPath }, [splitPath])
+  useEffect(() => { saveSplitLayout(splitLayout) }, [splitLayout])
+  useEffect(() => { if (!splitPath) setFocusedPane('main') }, [splitPath])
+
+  // Every activation is a visit; back/forward walk this list. A history jump
+  // has already moved the cursor onto the note, so visitNote records nothing.
+  useEffect(() => {
+    if (!activePath) return
+    const next = visitNote(noteHistoryRef.current, activePath)
+    if (next !== noteHistoryRef.current) {
+      noteHistoryRef.current = next
+      setNoteHistory(next)
+    }
+  }, [activePath])
+
+  // The open tabs, the split and the pins come back with the vault.
+  useEffect(() => {
+    if (!workspaceRestoredRef.current || !bootstrap) return
+    const timer = window.setTimeout(() => {
+      saveWorkspaceMemory(bootstrap.vaultPath, {
+        tabs: tabs.map((tab) => tab.path),
+        pinned: tabs.filter((tab) => tab.pinned).map((tab) => tab.path),
+        active: activePath,
+        split: splitPath,
+      })
+    }, 250)
+    return () => window.clearTimeout(timer)
+  }, [activePath, bootstrap, splitPath, tabs])
   useEffect(() => {
     diagnosticLog.record({
       at: Date.now(),
@@ -683,6 +865,13 @@ export default function App({ startupBootstrap }: AppProps) {
   // The overlay renders only the session loaded for the active note; the
   // switch effect below replaces a previous note's session one commit later.
   const noteDrawingSession = overlaySessionForNote(drawingSession, activeTab?.path ?? null)
+  // The dirty flag belongs to the mounted board. A board that just unmounted
+  // still reports (its unmount save, a resize during teardown); those reports
+  // must not describe the next note's page.
+  if (drawingSessionKeyRef.current !== noteDrawingSession.key) {
+    drawingSessionKeyRef.current = noteDrawingSession.key
+    drawingDirtyRef.current = false
+  }
   const backupPolicy = useMemo(
     () => noteBackupControlPolicy(settings.experimentalNoteBackup, noteBackups.length),
     [noteBackups.length, settings.experimentalNoteBackup],
@@ -1088,57 +1277,70 @@ export default function App({ startupBootstrap }: AppProps) {
     void window.fanotes.saveSettings(nextSettings).catch(() => undefined)
   }, [])
 
-  const openNote = useCallback(async (path: string) => {
+  /** Read a note into a tab record without activating it. */
+  const readNoteTab = useCallback(async (path: string): Promise<NoteTab> => {
+    const pdfNote = isPdfNotePath(path)
+    let content = ''
+    if (pdfNote) {
+      try {
+        content = stripFamdPayload(await window.fanotes.readFile(companionNotePath(path, '.famd')))
+      } catch {
+        content = ''
+      }
+    } else {
+      content = stripFamdPayload(await window.fanotes.readFile(path))
+    }
+    return {
+      path,
+      title: stripExtension(fileName(path)),
+      content,
+      savedContent: content,
+      kind: pdfNote ? 'pdf' : 'markdown',
+    }
+  }, [])
+
+  const openNote = useCallback(async (path: string): Promise<boolean> => {
     if (activePathRef.current && activePathRef.current !== path) {
       // Book the last keystrokes under the note that is leaving before its editor unmounts.
       editorRef.current?.flushChanges()
-      if (!await flushDocumentLayers()) return
+      if (!await flushDocumentLayers()) return false
     }
     const session = vaultSessionGenerationRef.current
     const structureRevision = vaultStructureRevisionRef.current
     setOverviewOpen(false)
     setHomeworkOpen(false)
     setGlyphenWerkOpen(false)
+    // Activating the note shown in the second pane swaps the panes instead of
+    // showing the same note twice.
+    const previousActive = activePathRef.current
+    const swapIntoSplit = splitPathRef.current === path && previousActive && previousActive !== path
     const existing = tabsRef.current.find((tab) => tab.path === path)
     if (existing) {
       activatePageStats(path, existing.content)
       setActivePath(path)
+      if (swapIntoSplit) setSplitPath(previousActive)
       setFocusToken((value) => value + 1)
       rememberLastOpenNote(path)
-      return
+      return true
     }
     const requestKey = `${session}:${structureRevision}:${path}`
-    if (openingNotesRef.current.has(requestKey)) return
+    if (openingNotesRef.current.has(requestKey)) return false
     openingNotesRef.current.add(requestKey)
     try {
-      const pdfNote = isPdfNotePath(path)
-      let content = ''
-      if (pdfNote) {
-        try {
-          content = stripFamdPayload(await window.fanotes.readFile(companionNotePath(path, '.famd')))
-        } catch {
-          content = ''
-        }
-      } else {
-        content = stripFamdPayload(await window.fanotes.readFile(path))
-      }
+      const tab = await readNoteTab(path)
       if (
         session !== vaultSessionGenerationRef.current ||
         structureRevision !== vaultStructureRevisionRef.current
-      ) return
-      const tab: NoteTab = {
-        path,
-        title: stripExtension(fileName(path)),
-        content,
-        savedContent: content,
-        kind: pdfNote ? 'pdf' : 'markdown',
-      }
+      ) return false
+      const { content } = tab
       setTagIndex((current) => ({ ...current, [path]: parseNoteTags(content) }))
       setTabs((current) => current.some((item) => item.path === path) ? current : [...current, tab])
       activatePageStats(path, content)
       setActivePath(path)
+      if (swapIntoSplit) setSplitPath(previousActive)
       setFocusToken((value) => value + 1)
       rememberLastOpenNote(path)
+      return true
     } catch (error) {
       if (
         session === vaultSessionGenerationRef.current &&
@@ -1146,10 +1348,44 @@ export default function App({ startupBootstrap }: AppProps) {
       ) {
         toast(error instanceof Error ? error.message : 'Notiz konnte nicht geöffnet werden.', 'error')
       }
+      return false
     } finally {
       openingNotesRef.current.delete(requestKey)
     }
-  }, [activatePageStats, flushDocumentLayers, rememberLastOpenNote, toast])
+  }, [activatePageStats, flushDocumentLayers, readNoteTab, rememberLastOpenNote, toast])
+
+  /**
+   * Bring back the tabs, pins and split the vault was left with. The active
+   * note was already chosen by the startup path; the other tabs load quietly.
+   */
+  const restoreWorkspace = useCallback(async (vaultPath: string, currentTree: VaultEntry[]) => {
+    if (workspaceRestoredRef.current) return
+    workspaceRestoredRef.current = true
+    const session = vaultSessionGenerationRef.current
+    const memory = loadWorkspaceMemory(vaultPath)
+    if (!memory) return
+    const existing = new Set(collectNotePaths(currentTree))
+    const remembered = pruneWorkspaceMemory(memory, (path) => existing.has(path))
+    if (!remembered.tabs.length) return
+    const missing = remembered.tabs.filter((path) => !tabsRef.current.some((tab) => tab.path === path))
+    const loaded = await Promise.all(missing.map((path) => readNoteTab(path).catch(() => null)))
+    if (session !== vaultSessionGenerationRef.current) return
+    const loadedByPath = new Map(loaded.flatMap((tab) => tab ? [[tab.path, tab] as const] : []))
+    setTabs((current) => {
+      const byPath = new Map(current.map((tab) => [tab.path, tab] as const))
+      const ordered: NoteTab[] = []
+      for (const path of remembered.tabs) {
+        const tab = byPath.get(path) ?? loadedByPath.get(path)
+        if (tab) ordered.push({ ...tab, pinned: remembered.pinned.includes(path) })
+      }
+      for (const tab of current) if (!remembered.tabs.includes(tab.path)) ordered.push(tab)
+      return ordered
+    })
+    for (const tab of loadedByPath.values()) {
+      setTagIndex((current) => current[tab.path] ? current : { ...current, [tab.path]: parseNoteTags(tab.content) })
+    }
+    if (remembered.split && remembered.split !== activePathRef.current) setSplitPath(remembered.split)
+  }, [readNoteTab])
 
   useEffect(() => {
     if (!window.fanotes) {
@@ -1199,6 +1435,7 @@ export default function App({ startupBootstrap }: AppProps) {
             treeRef.current = nextTree
             setTree(nextTree)
             if (nextNote && !activePathRef.current) await openNote(nextNote)
+            if (alive) await restoreWorkspace(data.vaultPath, nextTree)
           }
 
           const cachedTree = await window.fanotes.getCachedTree().catch(() => null)
@@ -1214,6 +1451,7 @@ export default function App({ startupBootstrap }: AppProps) {
               firstNote(startupTree),
             )
             if (startupNote) await openNote(startupNote)
+            if (alive) await restoreWorkspace(data.vaultPath, startupTree)
 
             // Cached starts and the first optimized Dirent scan both receive
             // full timestamps/sizes only after the note is already editable.
@@ -1271,7 +1509,9 @@ export default function App({ startupBootstrap }: AppProps) {
     treeRef.current = initialTree
     setTree(initialTree)
     if (initialNote) await openNote(initialNote)
-  }, [openNote])
+    // A fresh vault has no workspace to restore, but from here on it remembers one.
+    await restoreWorkspace(data.vaultPath, initialTree)
+  }, [openNote, restoreWorkspace])
 
   const saveContent = useCallback(async (path: string, content: string): Promise<boolean> => {
     const timer = saveTimers.current.get(path)
@@ -1423,8 +1663,18 @@ export default function App({ startupBootstrap }: AppProps) {
    * its own path, so a change flushed while the panes switch is booked under
    * the note it belongs to and never under whichever note is active by then.
    */
-  const updateContentFor = useCallback((path: string, content: string) => {
-    if (!path) return
+  const updateContentFor = useCallback((rawPath: string, content: string) => {
+    if (!rawPath) return
+    // An editor that flushes after its note was renamed or moved books the text under the new name.
+    let path = rawPath
+    const now = Date.now()
+    for (let hop = 0; hop < 8; hop += 1) {
+      const moved = [...movedPathsRef.current.entries()]
+        .find(([from, move]) => now - move.at < MOVED_PATH_ALIAS_MS && (path === from || path.startsWith(`${from}/`)))
+      if (!moved) break
+      path = `${moved[1].to}${path.slice(moved[0].length)}`
+    }
+    if (path !== rawPath && !tabsRef.current.some((tab) => tab.path === path)) return
     if ([...mutatingEntryPathsRef.current].some((entry) => path === entry || path.startsWith(`${entry}/`))) return
     const session = pageStatsRef.current.get(path)
     if (session) {
@@ -1470,6 +1720,7 @@ export default function App({ startupBootstrap }: AppProps) {
       // edit while this save was in flight.
       if (!saved || pendingWrites.current.has(closing.path)) return
     }
+    closedTabsRef.current = rememberClosedTab(closedTabsRef.current, path)
     setTabs((current) => current.filter((tab) => tab.path !== path))
     setSplitPath((current) => current === path ? null : current)
     setActivePath((currentActive) => {
@@ -1488,6 +1739,72 @@ export default function App({ startupBootstrap }: AppProps) {
     const nextIndex = (currentIndex + direction + currentTabs.length) % currentTabs.length
     void openNote(currentTabs[nextIndex].path)
   }, [openNote])
+
+  /** Ctrl+1 … Ctrl+9 */
+  const openTabByDigit = useCallback((digit: number) => {
+    const index = tabIndexForDigit(digit, tabsRef.current.length)
+    if (index === null) return
+    void openNote(tabsRef.current[index].path)
+  }, [openNote])
+
+  /** Ctrl+Shift+T: the most recently closed tab that still exists. */
+  const reopenClosedTab = useCallback(async () => {
+    const existing = new Set(collectNotePaths(treeRef.current))
+    while (closedTabsRef.current.length) {
+      const [path, ...rest] = closedTabsRef.current
+      closedTabsRef.current = rest
+      if (existing.has(path) && !tabsRef.current.some((tab) => tab.path === path)) {
+        await openNote(path)
+        return
+      }
+    }
+    toast('Kein kürzlich geschlossener Tab.', 'info')
+  }, [openNote, toast])
+
+  const closeTabsOf = useCallback(async (anchor: string, scope: 'others' | 'right') => {
+    for (const path of tabsToClose(tabsRef.current, anchor, scope)) await closeTab(path)
+  }, [closeTab])
+
+  const togglePinTab = useCallback((path: string) => {
+    setTabs((current) => togglePinnedTab(current, path))
+  }, [])
+
+  const moveTab = useCallback((fromPath: string, toPath: string | null, side: 'before' | 'after') => {
+    setTabs((current) => {
+      if (toPath === null) return reorderTabs(current, fromPath, null)
+      if (side === 'before') return reorderTabs(current, fromPath, toPath)
+      const toIndex = current.findIndex((tab) => tab.path === toPath)
+      const after = current[toIndex + 1]
+      return reorderTabs(current, fromPath, after && after.path !== fromPath ? after.path : after ? toPath : null)
+    })
+  }, [])
+
+  const navigateHistory = useCallback(async (direction: -1 | 1) => {
+    const exists = (path: string) => tabsRef.current.some((tab) => tab.path === path) || collectNotePaths(treeRef.current).includes(path)
+    const before = noteHistoryRef.current
+    const step = stepNoteHistory(before, direction, exists)
+    if (!step.path || step.path === activePathRef.current) return
+    // Point the history at the target first: the visit effect then sees the
+    // active note already at the cursor and records nothing new.
+    noteHistoryRef.current = step.history
+    setNoteHistory(step.history)
+    if (!await openNote(step.path)) {
+      noteHistoryRef.current = before
+      setNoteHistory(before)
+    }
+  }, [openNote])
+
+  const swapSplitPanes = useCallback(async () => {
+    const split = splitPathRef.current
+    const active = activePathRef.current
+    if (!split || !active || split === active) return
+    // openNote swaps the panes itself when the split note is activated.
+    await openNote(split)
+  }, [openNote])
+
+  const toggleSplitOrientation = useCallback(() => {
+    setSplitLayout((current) => ({ ...current, orientation: current.orientation === 'columns' ? 'rows' : 'columns' }))
+  }, [])
 
   const createNote = useCallback(async (parent?: string) => {
     const session = vaultSessionGenerationRef.current
@@ -1748,19 +2065,8 @@ export default function App({ startupBootstrap }: AppProps) {
     const target = activateNoteLink(link)
     const source = activePathRef.current
     if (!target || !source) return
-    const next = followNoteNav(noteNavStackRef.current, source, target)
-    await openNote(next.current)
-    noteNavStackRef.current = next.stack
-    setNoteNavStack(next.stack)
-  }, [openNote])
-
-  const goBackNoteLink = useCallback(async () => {
-    const current = activePathRef.current || ''
-    const next = goBackNoteNav(noteNavStackRef.current, current)
-    if (!next.current || next.current === current) return
-    await openNote(next.current)
-    noteNavStackRef.current = next.stack
-    setNoteNavStack(next.stack)
+    // The visit history records the jump; Zurück (Alt+←) returns to the source.
+    await openNote(target)
   }, [openNote])
 
   const importPdfNote = useCallback(async (parent?: string) => {
@@ -1869,17 +2175,40 @@ export default function App({ startupBootstrap }: AppProps) {
     })
   }, [])
 
+  /** The split, the history and the closed-tab stack follow a renamed or moved entry. */
+  const remapWorkspacePaths = useCallback((from: string, to: string) => {
+    movedPathsRef.current.delete(to)
+    movedPathsRef.current.set(from, { to, at: Date.now() })
+    setSplitPath((current) => (current ? remapPath(current, from, to) ?? current : current))
+    const nextHistory = remapNoteHistory(noteHistoryRef.current, from, to)
+    noteHistoryRef.current = nextHistory
+    setNoteHistory(nextHistory)
+    closedTabsRef.current = closedTabsRef.current.map((path) => remapPath(path, from, to) ?? path)
+  }, [])
+
+  const forgetWorkspacePaths = useCallback((path: string) => {
+    setSplitPath((current) => (current && (current === path || current.startsWith(`${path}/`)) ? null : current))
+    const nextHistory = forgetNoteHistory(noteHistoryRef.current, path)
+    noteHistoryRef.current = nextHistory
+    setNoteHistory(nextHistory)
+    closedTabsRef.current = closedTabsRef.current.filter((entry) => entry !== path && !entry.startsWith(`${path}/`))
+  }, [])
+
   const renameEntry = useCallback(async (path: string, nextName: string) => {
     const session = vaultSessionGenerationRef.current
     const active = activePathRef.current
-    if (active && (active === path || active.startsWith(`${path}/`)) && !await flushDocumentLayers()) {
-      toast('Umbenennen abgebrochen: Handschrift oder Arbeitsblatt konnte nicht sicher gespeichert werden.', 'error')
-      return
+    if (active && (active === path || active.startsWith(`${path}/`))) {
+      editorRef.current?.flushChanges()
+      if (!await flushDocumentLayers()) {
+        toast('Umbenennen abgebrochen: Handschrift oder Arbeitsblatt konnte nicht sicher gespeichert werden.', 'error')
+        return
+      }
     }
     vaultStructureRevisionRef.current += 1
     const nextPath = await window.fanotes.renameEntry(path, nextName)
     if (session !== vaultSessionGenerationRef.current) return
     remapNotePaperPaths(path, nextPath)
+    remapWorkspacePaths(path, nextPath)
     vaultStructureRevisionRef.current += 1
     ;[...saveTimers.current.entries()].forEach(([timerPath, timer]) => {
       if (timerPath === path || timerPath.startsWith(`${path}/`)) {
@@ -1906,14 +2235,17 @@ export default function App({ startupBootstrap }: AppProps) {
       : current)
     await refreshTree()
     await Promise.all(renamedPending.map(([renamedPath, content]) => saveContent(renamedPath, content)))
-  }, [flushDocumentLayers, refreshTree, remapNotePaperPaths, saveContent, toast])
+  }, [flushDocumentLayers, refreshTree, remapNotePaperPaths, remapWorkspacePaths, saveContent, toast])
 
   const moveEntry = useCallback(async (path: string, destFolder = '') => {
     const session = vaultSessionGenerationRef.current
     const active = activePathRef.current
-    if (active && (active === path || active.startsWith(`${path}/`)) && !await flushDocumentLayers()) {
-      toast('Verschieben abgebrochen: Handschrift oder Arbeitsblatt konnte nicht sicher gespeichert werden.', 'error')
-      return
+    if (active && (active === path || active.startsWith(`${path}/`))) {
+      editorRef.current?.flushChanges()
+      if (!await flushDocumentLayers()) {
+        toast('Verschieben abgebrochen: Handschrift oder Arbeitsblatt konnte nicht sicher gespeichert werden.', 'error')
+        return
+      }
     }
     vaultStructureRevisionRef.current += 1
     try {
@@ -1921,6 +2253,7 @@ export default function App({ startupBootstrap }: AppProps) {
       if (session !== vaultSessionGenerationRef.current) return
       if (nextPath === path) return
       remapNotePaperPaths(path, nextPath)
+      remapWorkspacePaths(path, nextPath)
       vaultStructureRevisionRef.current += 1
       ;[...saveTimers.current.entries()].forEach(([timerPath, timer]) => {
         if (timerPath === path || timerPath.startsWith(`${path}/`)) {
@@ -1960,7 +2293,7 @@ export default function App({ startupBootstrap }: AppProps) {
         toast(error instanceof Error ? error.message : 'Verschieben fehlgeschlagen.', 'error')
       }
     }
-  }, [flushDocumentLayers, refreshTree, remapNotePaperPaths, saveContent, toast])
+  }, [flushDocumentLayers, refreshTree, remapNotePaperPaths, remapWorkspacePaths, saveContent, toast])
 
   const trashEntry = useCallback(async (path: string) => {
     const session = vaultSessionGenerationRef.current
@@ -1995,7 +2328,14 @@ export default function App({ startupBootstrap }: AppProps) {
         if (pendingPath === path || pendingPath.startsWith(`${path}/`)) pendingWrites.current.delete(pendingPath)
       })
       setTabs((current) => current.filter((tab) => tab.path !== path && !tab.path.startsWith(`${path}/`)))
-      setActivePath((current) => current && (current === path || current.startsWith(`${path}/`)) ? null : current)
+      forgetWorkspacePaths(path)
+      setActivePath((current) => {
+        if (!current || (current !== path && !current.startsWith(`${path}/`))) return current
+        // Fall through to the neighbouring tab instead of an empty workspace.
+        const remaining = tabsRef.current.filter((tab) => tab.path !== path && !tab.path.startsWith(`${path}/`))
+        const previousIndex = tabsRef.current.findIndex((tab) => tab.path === current)
+        return remaining[Math.min(Math.max(previousIndex, 0), remaining.length - 1)]?.path ?? null
+      })
       await refreshTree()
       toast('In den Papierkorb verschoben.', 'success')
     } catch (error) {
@@ -2008,7 +2348,7 @@ export default function App({ startupBootstrap }: AppProps) {
         setMutatingEntryPaths((current) => current.filter((entryPath) => entryPath !== path))
       }
     }
-  }, [flushDocumentLayers, flushPendingEntry, refreshTree, remapNotePaperPaths, toast])
+  }, [flushDocumentLayers, flushPendingEntry, forgetWorkspacePaths, refreshTree, remapNotePaperPaths, toast])
 
   const syncPublishedHomework = useCallback(async (current: AppSettings, document?: HomeworkDocument) => {
     const channelId = current.homeworkApiChannelId
@@ -2267,18 +2607,24 @@ export default function App({ startupBootstrap }: AppProps) {
       setSettings(selectedSettings)
       setTabs([])
       setActivePath(null)
+      setSplitPath(null)
+      noteHistoryRef.current = EMPTY_NOTE_HISTORY
+      setNoteHistory(EMPTY_NOTE_HISTORY)
+      closedTabsRef.current = []
+      workspaceRestoredRef.current = false
       setSearchQuery('')
       setSearchHits([])
       const nextTree = await refreshTree()
-      const first = firstNote(nextTree)
-      if (first) await openNote(first)
+      const remembered = chooseRestoredNote(selectedSettings.lastOpenNotePath, collectNotePaths(nextTree), firstNote(nextTree))
+      if (remembered) await openNote(remembered)
+      await restoreWorkspace(selected.vaultPath, nextTree)
       toast(`Vault „${selected.vaultName}“ geöffnet.`, 'success')
     } catch (error) {
       toast(error instanceof Error ? error.message : 'Der Vault konnte nicht sicher gewechselt werden.', 'error')
     } finally {
       vaultSwitchInProgressRef.current = false
     }
-  }, [flushDocumentLayers, flushPendingWrites, flushSettings, openNote, refreshTree, toast])
+  }, [flushDocumentLayers, flushPendingWrites, flushSettings, openNote, refreshTree, restoreWorkspace, toast])
 
   const checkForUpdates = useCallback(async () => {
     try {
@@ -2378,9 +2724,13 @@ export default function App({ startupBootstrap }: AppProps) {
     if (!editorRef.current?.format(action)) toast('Die Formatierung konnte nicht angewandt werden.', 'error')
   }, [activeEntryMutating, drawingOpen, homeworkOpen, overviewOpen, toast])
 
-  const handleDrawingDirtyChange = useCallback((dirty: boolean) => {
-    drawingDirtyRef.current = dirty
-  }, [])
+  const handleDrawingDirtyChange = useMemo(() => {
+    const session = noteDrawingSession.key
+    return (dirty: boolean) => {
+      if (session !== drawingSessionKeyRef.current) return
+      drawingDirtyRef.current = dirty
+    }
+  }, [noteDrawingSession.key])
 
   const closeDrawing = useCallback(() => {
     drawingOpenRef.current = false
@@ -2857,12 +3207,41 @@ export default function App({ startupBootstrap }: AppProps) {
 
   const openInSplit = useCallback(async (path: string) => {
     if (activePathRef.current === path) {
-      toast('Wähle eine zweite Notiz für die geteilte Ansicht.', 'info')
+      // Splitting the note you are on: keep it on the left and put the last
+      // other note on the right, like duplicating a browser tab side by side.
+      const other = noteHistoryRef.current.entries.slice().reverse().find((entry) => entry !== path && tabsRef.current.some((tab) => tab.path === entry))
+        ?? tabsRef.current.find((tab) => tab.path !== path)?.path
+      if (!other) {
+        toast('Öffne zuerst eine zweite Notiz für die geteilte Ansicht.', 'info')
+        return
+      }
+      setSplitPath(other)
       return
     }
-    if (!tabsRef.current.some((tab) => tab.path === path)) await openNote(path)
+    if (!tabsRef.current.some((tab) => tab.path === path)) {
+      // Load the tab quietly; the main pane keeps its note.
+      try {
+        const tab = await readNoteTab(path)
+        setTagIndex((current) => ({ ...current, [path]: parseNoteTags(tab.content) }))
+        setTabs((current) => current.some((item) => item.path === path) ? current : [...current, tab])
+      } catch (error) {
+        toast(error instanceof Error ? error.message : 'Notiz konnte nicht geöffnet werden.', 'error')
+        return
+      }
+    }
     setSplitPath(path)
-  }, [openNote, toast])
+  }, [readNoteTab, toast])
+
+  /** Ctrl+\ — open the second pane with the most recent other note, or close it. */
+  const toggleSplit = useCallback(() => {
+    if (splitPathRef.current) {
+      setSplitPath(null)
+      return
+    }
+    const active = activePathRef.current
+    if (!active) return
+    void openInSplit(active)
+  }, [openInSplit])
 
   const applyTagsToNote = useCallback((tags: string[]) => {
     if (!activeTab) return
@@ -2985,14 +3364,15 @@ export default function App({ startupBootstrap }: AppProps) {
     { id: 'daily', label: 'Heutige Tagesnotiz', detail: settings.dailyNotesFolder, group: 'Dateien', icon: <CalendarDays size={15} />, run: () => void createDailyNote() },
     { id: 'export-pdf', label: 'Notiz als PDF exportieren', detail: 'Text, Handschrift und Arbeitsblatt drucken oder speichern', group: 'Dateien', keywords: 'pdf export drucken print', icon: <FileDown size={15} />, run: () => void exportCurrentPdf() },
     { id: 'history', label: 'Versionsverlauf', detail: 'Frühere Stände dieser Notiz ansehen und wiederherstellen', group: 'Dateien', keywords: 'history version wiederherstellen', icon: <History size={15} />, run: () => void openHistory() },
-    { id: 'split', label: splitPath ? 'Geteilte Ansicht schließen' : 'Notiz rechts öffnen', detail: 'Zwei Notizen nebeneinander', group: 'Ansicht', keywords: 'split teilen nebeneinander', icon: <Columns2 size={15} />, run: () => {
-      if (splitPath) setSplitPath(null)
-      else {
-        const other = tabs.find((tab) => tab.path !== activePath)
-        if (other) void openInSplit(other.path)
-        else toast('Öffne zuerst eine zweite Notiz.', 'info')
-      }
-    } },
+    { id: 'quick-open', label: 'Notiz öffnen …', detail: 'Schnell zu einer Notiz springen', shortcut: 'Ctrl O', group: 'Navigation', keywords: 'quick open switcher wechseln springen', icon: <Files size={15} />, run: () => { setPaletteMode('notes'); setPaletteOpen(true) } },
+    { id: 'nav-back', label: 'Zurück', detail: 'Zur zuvor geöffneten Notiz', shortcut: 'Alt ←', group: 'Navigation', keywords: 'zurück verlauf history', icon: <ArrowLeft size={15} />, run: () => void navigateHistory(-1) },
+    { id: 'nav-forward', label: 'Vorwärts', detail: 'Wieder zur nächsten Notiz im Verlauf', shortcut: 'Alt →', group: 'Navigation', keywords: 'vorwärts verlauf history', icon: <ArrowRight size={15} />, run: () => void navigateHistory(1) },
+    { id: 'reopen-tab', label: 'Geschlossenen Tab wieder öffnen', shortcut: 'Ctrl ⇧ T', group: 'Navigation', keywords: 'tab wieder öffnen geschlossen', icon: <History size={15} />, run: () => void reopenClosedTab() },
+    { id: 'split', label: splitPath ? 'Geteilte Ansicht schließen' : 'Geteilte Ansicht öffnen', detail: 'Zwei Notizen nebeneinander oder untereinander', shortcut: 'Ctrl \\', group: 'Ansicht', keywords: 'split teilen nebeneinander zweite spalte', icon: <Columns2 size={15} />, run: toggleSplit },
+    ...(splitPath ? [
+      { id: 'split-swap', label: 'Geteilte Ansicht tauschen', detail: 'Linke und rechte Notiz wechseln die Seite', shortcut: 'Ctrl ⇧ \\', group: 'Ansicht', keywords: 'split tauschen wechseln', icon: <ArrowLeftRight size={15} />, run: () => void swapSplitPanes() },
+      { id: 'split-orientation', label: splitLayout.orientation === 'columns' ? 'Untereinander anordnen' : 'Nebeneinander anordnen', group: 'Ansicht', keywords: 'split zeilen spalten anordnung', icon: splitLayout.orientation === 'columns' ? <Rows2 size={15} /> : <Columns2 size={15} />, run: toggleSplitOrientation },
+    ] : []),
     { id: 'focus', label: focusMode ? 'Fokusmodus verlassen' : 'Fokusmodus starten', detail: 'Blendet Seitenleisten für ungestörtes Schreiben aus', shortcut: 'Ctrl ⇧ E', group: 'Ansicht', icon: <Maximize2 size={15} />, run: toggleFocusMode },
     { id: 'sidebar', label: 'Dateileiste umschalten', group: 'Ansicht', icon: <PanelLeftClose size={15} />, run: () => setSidebarVisible((value) => !value) },
     { id: 'inspector', label: 'Gliederung umschalten', group: 'Ansicht', icon: <PanelRightClose size={15} />, run: () => setInspectorVisible((value) => !value) },
@@ -3000,15 +3380,116 @@ export default function App({ startupBootstrap }: AppProps) {
     { id: 'reveal', label: isWeb ? 'Notiz herunterladen' : 'Im Dateimanager zeigen', detail: isWeb ? 'Aktuelle Notiz exportieren' : 'Speicherort der geöffneten Notiz öffnen', group: 'Dateien', keywords: 'ordner explorer finder dateimanager download export', icon: isWeb ? <Download size={15} /> : <FolderOpen size={15} />, run: () => { if (activePath) void window.fanotes.revealInFolder(activePath) } },
     { id: 'bug-report', label: 'Fehler melden', detail: 'Kurz beschreiben; die letzten fünf Minuten werden angehängt', group: 'FaNotes', keywords: 'bug report fehler logs support', icon: <Bug size={15} />, run: () => setBugReportOpen(true) },
     { id: 'quit', label: isWeb ? 'Zur FaNotes-Website' : 'FaNotes beenden', shortcut: 'Ctrl Q', group: 'FaNotes', icon: <X size={15} />, run: () => window.fanotes.requestClose() },
-  ], [activePath, activeTab, attachBookToSubject, bookOpen, createDailyNote, createFolder, createNote, currentBook, drawingOpen, exportCurrentPdf, focusMode, importOneNote, importPdfNote, isWeb, openGlyphenWerk, openHistory, openHomework, openInSplit, openLmStudio, openOverview, openSettings, openWorksheetImport, saveCurrentWork, settings.dailyNotesFolder, splitPath, startNoteLinkPlacement, tabs, toast, toggleBookView, toggleDrawing, toggleFocusMode])
+  ], [activePath, activeTab, attachBookToSubject, bookOpen, createDailyNote, createFolder, createNote, currentBook, drawingOpen, exportCurrentPdf, focusMode, importOneNote, importPdfNote, isWeb, navigateHistory, openGlyphenWerk, openHistory, openHomework, openLmStudio, openOverview, openSettings, openWorksheetImport, reopenClosedTab, saveCurrentWork, settings.dailyNotesFolder, splitLayout.orientation, splitPath, startNoteLinkPlacement, swapSplitPanes, toast, toggleBookView, toggleDrawing, toggleFocusMode, toggleSplit, toggleSplitOrientation])
+
+  /** Notes for the quick switcher: the whole vault, most recently visited first. */
+  const switcherNotes = useMemo(() => {
+    const paths = collectNotePaths(tree).filter((path) => isNoteFileName(fileName(path)) || isPdfNotePath(path))
+    const recent = [...noteHistory.entries].reverse()
+    return { paths, recent }
+  }, [noteHistory.entries, tree])
+
+  const rankNotesForPalette = useCallback((query: string, limit: number) => (
+    rankSwitcherNotes(switcherNotes.paths, query, switcherNotes.recent, limit)
+  ), [switcherNotes])
+
+  const closePalette = useCallback(() => {
+    setPaletteOpen(false)
+    setPaletteMode('commands')
+  }, [])
+
+  const closeTabMenu = useCallback(() => setTabMenu(null), [])
+
+  // Divider drag of the split view; pointer capture keeps it smooth over iframes and canvases.
+  const beginSplitDrag = useCallback((event: React.PointerEvent<HTMLElement>) => {
+    const container = splitContainerRef.current
+    if (!container || event.button !== 0) return
+    event.preventDefault()
+    event.currentTarget.setPointerCapture(event.pointerId)
+    setSplitDragging(true)
+    const orientation = splitLayout.orientation
+    const move = (moveEvent: PointerEvent) => {
+      const rect = container.getBoundingClientRect()
+      const ratio = splitRatioFromPointer(rect, { x: moveEvent.clientX, y: moveEvent.clientY }, orientation)
+      setSplitLayout((current) => current.ratio === ratio ? current : { ...current, ratio })
+    }
+    const finish = () => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', finish)
+      window.removeEventListener('pointercancel', finish)
+      setSplitDragging(false)
+    }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', finish)
+    window.addEventListener('pointercancel', finish)
+  }, [splitLayout.orientation])
+
+  const splitDividerKey = useCallback((event: React.KeyboardEvent<HTMLElement>) => {
+    const horizontal = splitLayout.orientation === 'columns'
+    const shrink = horizontal ? 'ArrowLeft' : 'ArrowUp'
+    const grow = horizontal ? 'ArrowRight' : 'ArrowDown'
+    if (event.key === shrink || event.key === grow) {
+      event.preventDefault()
+      setSplitLayout((current) => ({ ...current, ratio: nudgeSplitRatio(current.ratio, event.key === shrink ? -1 : 1) }))
+    } else if (event.key === 'Home' || event.key === 'End') {
+      event.preventDefault()
+      setSplitLayout((current) => ({ ...current, ratio: clampSplitRatio(event.key === 'Home' ? 0 : 1) }))
+    } else if (event.key === 'Enter') {
+      event.preventDefault()
+      setSplitLayout((current) => ({ ...current, ratio: DEFAULT_SPLIT_LAYOUT.ratio }))
+    }
+  }, [splitLayout.orientation])
+
+  const loadSplitInk = useMemo(() => {
+    if (!splitTab || splitTab.kind === 'pdf' || isPdfNotePath(splitTab.path)) return null
+    // The saved text carries the ink marker; keystrokes in the pane must not re-read the page.
+    const { path, savedContent } = splitTab
+    return () => readNoteInk(path, savedContent)
+  }, [splitTab?.path, splitTab?.kind, splitTab?.savedContent])
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
       const mod = event.ctrlKey || event.metaKey
       if (mod && event.key === 'Tab') { event.preventDefault(); cycleTabs(event.shiftKey ? -1 : 1); return }
+      if (event.altKey && !mod && !event.shiftKey && (event.key === 'ArrowLeft' || event.key === 'ArrowRight')) {
+        const target = event.target as HTMLElement | null
+        // Alt+←/→ inside a text field is word navigation on macOS; the history takes it everywhere else.
+        if (target?.closest('textarea, input, [contenteditable="true"], .cm-editor') && window.fanotes.platform === 'darwin') return
+        event.preventDefault()
+        void navigateHistory(event.key === 'ArrowLeft' ? -1 : 1)
+        return
+      }
+      if (mod && !event.shiftKey && !event.altKey && /^[1-9]$/.test(event.key)) {
+        event.preventDefault()
+        openTabByDigit(Number(event.key))
+        return
+      }
+      if (mod && event.shiftKey && event.key.toLowerCase() === 't') {
+        event.preventDefault()
+        void reopenClosedTab()
+        return
+      }
+      if (mod && !event.shiftKey && event.key.toLowerCase() === 'o') {
+        event.preventDefault()
+        setPaletteMode('notes')
+        setPaletteOpen(true)
+        return
+      }
+      if (mod && (event.key === '\\' || event.code === 'Backslash' || event.code === 'IntlBackslash')) {
+        event.preventDefault()
+        if (event.shiftKey) void swapSplitPanes()
+        else toggleSplit()
+        return
+      }
       if (mod && !event.shiftKey && event.key.toLowerCase() === 'w') {
         event.preventDefault()
-        if (activePathRef.current) void closeTab(activePathRef.current)
+        const active = activePathRef.current
+        if (!active) return
+        if (tabsRef.current.find((tab) => tab.path === active)?.pinned) {
+          toast('Diese Notiz ist angeheftet. Löse sie zuerst über das Tab-Menü.', 'info')
+          return
+        }
+        void closeTab(active)
         return
       }
       if (mod && !event.shiftKey && event.key.toLowerCase() === 's' && !event.defaultPrevented) {
@@ -3016,7 +3497,7 @@ export default function App({ startupBootstrap }: AppProps) {
         void saveCurrentWork()
         return
       }
-      if (mod && event.key.toLowerCase() === 'p') { event.preventDefault(); setPaletteOpen(true) }
+      if (mod && event.key.toLowerCase() === 'p') { event.preventDefault(); setPaletteMode('commands'); setPaletteOpen(true) }
       if (mod && event.shiftKey && event.key.toLowerCase() === 'f') { event.preventDefault(); setSearchOpen(true) }
       if (mod && event.shiftKey && event.key.toLowerCase() === 'a') { event.preventDefault(); openLmStudio() }
       if (mod && event.shiftKey && event.key.toLowerCase() === 'g') { event.preventDefault(); openGlyphenWerk() }
@@ -3048,9 +3529,19 @@ export default function App({ startupBootstrap }: AppProps) {
         else if (focusMode) toggleFocusMode()
       }
     }
+    // Mouse back/forward buttons walk the note history like a browser.
+    const mouseNav = (event: MouseEvent) => {
+      if (event.button !== 3 && event.button !== 4) return
+      event.preventDefault()
+      void navigateHistory(event.button === 3 ? -1 : 1)
+    }
     window.addEventListener('keydown', handler)
-    return () => window.removeEventListener('keydown', handler)
-  }, [closeDrawing, closeTab, createNote, cycleTabs, focusMode, glyphenWerkOpen, homeworkOpen, lmStudioOpen, noteLinkPlacing, openGlyphenWerk, openLmStudio, openSettings, openWorksheetImport, overviewOpen, paletteOpen, removeSelectedNoteLink, saveCurrentWork, searchOpen, selectedNoteLinkId, settingsOpen, toggleDrawing, toggleFocusMode, worksheetImportOpen])
+    window.addEventListener('mouseup', mouseNav)
+    return () => {
+      window.removeEventListener('keydown', handler)
+      window.removeEventListener('mouseup', mouseNav)
+    }
+  }, [closeDrawing, closeTab, createNote, cycleTabs, focusMode, glyphenWerkOpen, homeworkOpen, lmStudioOpen, navigateHistory, noteLinkPlacing, openGlyphenWerk, openLmStudio, openSettings, openTabByDigit, openWorksheetImport, overviewOpen, paletteOpen, removeSelectedNoteLink, reopenClosedTab, saveCurrentWork, searchOpen, selectedNoteLinkId, settingsOpen, swapSplitPanes, toast, toggleDrawing, toggleFocusMode, toggleSplit, worksheetImportOpen])
 
   useEffect(() => {
     const imageFile = (file: File | undefined) => file && file.type.startsWith('image/')
@@ -3223,10 +3714,13 @@ export default function App({ startupBootstrap }: AppProps) {
               <FileTree
                 entries={visibleTree}
                 activePath={activePath}
+                splitPath={splitPath}
                 revealPath={revealPath}
+                expansionStorageKey={`fanotes.treeExpanded.v1:${bootstrap?.vaultPath || 'default'}`}
                 rootLabel="Notizen"
                 showHeader={false}
                 onOpen={openNote}
+                onOpenInSplit={openInSplit}
                 onCreateNote={createNote}
                 onCreateFolder={createFolder}
                 onImportPdf={importPdfNote}
@@ -3246,19 +3740,95 @@ export default function App({ startupBootstrap }: AppProps) {
 
         <main className="workspace">
           <div className="tabs-bar">
-            <button
-              type="button"
-              className="note-nav-back"
-              title="Zurück"
-              aria-label="Zurück"
-              disabled={!noteNavStack.length}
-              onClick={() => void goBackNoteLink()}
+            <div className="note-nav" role="group" aria-label="Verlauf">
+              <button
+                type="button"
+                className="note-nav-back"
+                title="Zurück (Alt+←)"
+                aria-label="Zurück"
+                disabled={!canGoBack(noteHistory)}
+                onClick={() => void navigateHistory(-1)}
+              >
+                <ArrowLeft size={14} /> Zurück
+              </button>
+              <button
+                type="button"
+                className="note-nav-forward"
+                title="Vorwärts (Alt+→)"
+                aria-label="Vorwärts"
+                disabled={!canGoForward(noteHistory)}
+                onClick={() => void navigateHistory(1)}
+              >
+                <ArrowRight size={14} />
+              </button>
+            </div>
+            <div
+              className="tabs-scroll"
+              role="tablist"
+              aria-label="Offene Notizen"
+              onDragOver={(event) => {
+                if (!event.dataTransfer.types.includes(NOTE_TAB_DRAG_TYPE)) return
+                event.preventDefault()
+                if (event.target === event.currentTarget) setTabDrag((current) => current ? { ...current, over: null, side: 'after' } : current)
+              }}
+              onDrop={(event) => {
+                if (!event.dataTransfer.types.includes(NOTE_TAB_DRAG_TYPE) || event.target !== event.currentTarget) return
+                event.preventDefault()
+                const from = event.dataTransfer.getData(NOTE_TAB_DRAG_TYPE)
+                if (from) moveTab(from, null, 'after')
+                setTabDrag(null)
+              }}
             >
-              <ArrowLeft size={14} /> Zurück
-            </button>
-            <div className="tabs-scroll" role="tablist" aria-label="Offene Notizen">{tabs.map((tab) => <NoteTabButton key={tab.path} active={tab.path === activePath} dirty={tab.content !== tab.savedContent} path={tab.path} title={tab.title} onOpen={openNote} onSplit={openInSplit} onClose={closeTab} />)}</div>
+              {tabs.map((tab, index) => (
+                <NoteTabButton
+                  key={tab.path}
+                  active={tab.path === activePath}
+                  inSplit={tab.path === splitPath}
+                  dirty={tab.content !== tab.savedContent}
+                  pinned={Boolean(tab.pinned)}
+                  path={tab.path}
+                  title={tab.title}
+                  index={index}
+                  dropSide={tabDrag && tabDrag.over === tab.path && tabDrag.path !== tab.path ? tabDrag.side : null}
+                  onOpen={openNote}
+                  onSplit={openInSplit}
+                  onClose={closeTab}
+                  onContextMenu={(path, x, y) => setTabMenu({ path, x, y })}
+                  onDragStart={(path) => setTabDrag({ path, over: null, side: 'after' })}
+                  onDragOver={(path, side) => setTabDrag((current) => current && (current.over !== path || current.side !== side) ? { ...current, over: path, side } : current)}
+                  onDrop={(path, side) => {
+                    if (tabDrag) moveTab(tabDrag.path, path, side)
+                    setTabDrag(null)
+                  }}
+                  onDragEnd={() => setTabDrag(null)}
+                />
+              ))}
+            </div>
             <button type="button" className="tabs-menu" title="Neue Notiz (Strg+N)" aria-label="Neue Notiz" onClick={() => void createNote()}><Plus size={15} /></button>
           </div>
+          {tabMenu && (() => {
+            const menuTab = tabs.find((tab) => tab.path === tabMenu.path)
+            if (!menuTab) return null
+            return (
+              <TabContextMenu
+                menu={tabMenu}
+                title={menuTab.title}
+                pinned={Boolean(menuTab.pinned)}
+                inSplit={menuTab.path === splitPath}
+                isWeb={isWeb}
+                canCloseOthers={tabsToClose(tabs, menuTab.path, 'others').length > 0}
+                canCloseRight={tabsToClose(tabs, menuTab.path, 'right').length > 0}
+                onClose={closeTabMenu}
+                onOpenInSplit={() => void openInSplit(menuTab.path)}
+                onTogglePin={() => togglePinTab(menuTab.path)}
+                onCloseTab={() => void closeTab(menuTab.path)}
+                onCloseOthers={() => void closeTabsOf(menuTab.path, 'others')}
+                onCloseRight={() => void closeTabsOf(menuTab.path, 'right')}
+                onCopyPath={() => { void navigator.clipboard?.writeText(menuTab.path).then(() => toast('Pfad kopiert.', 'success')).catch(() => undefined) }}
+                onReveal={() => void window.fanotes.revealInFolder(menuTab.path)}
+              />
+            )
+          })()}
           <div className={`editor-toolbar ${drawingOpen ? 'is-ink' : 'is-type'}`}>
             <div className="mode-switch" role="group" aria-label="Eingabemodus">
               <button
@@ -3414,7 +3984,7 @@ export default function App({ startupBootstrap }: AppProps) {
                   <span className="editor-menu-label">Datei</span>
                   <button type="button" role="menuitem" disabled={!activeTab} onClick={() => { setEditorMenuOpen(false); void exportCurrentPdf() }}><span><FileDown size={15} /></span><span><strong>Als PDF exportieren</strong><small>Text, Handschrift und Arbeitsblatt</small></span></button>
                   <button type="button" role="menuitem" disabled={!activePath} onClick={() => { setEditorMenuOpen(false); void openHistory() }}><span><History size={15} /></span><span><strong>Versionsverlauf</strong><small>Frühere Stände wiederherstellen</small></span></button>
-                  <button type="button" role="menuitem" onClick={() => { setEditorMenuOpen(false); if (splitPath) setSplitPath(null); else { const other = tabs.find((tab) => tab.path !== activePath); if (other) void openInSplit(other.path); else toast('Öffne zuerst eine zweite Notiz (Umschalt+Klick auf einen Tab).', 'info') } }}><span><Columns2 size={15} /></span><span><strong>{splitPath ? 'Teilung schließen' : 'Geteilte Ansicht'}</strong><small>Zwei Notizen nebeneinander</small></span></button>
+                  <button type="button" role="menuitem" onClick={() => { setEditorMenuOpen(false); toggleSplit() }}><span><Columns2 size={15} /></span><span><strong>{splitPath ? 'Teilung schließen' : 'Geteilte Ansicht'}</strong><small>Zwei Notizen nebeneinander oder untereinander</small></span></button>
                   <button type="button" role="menuitem" disabled={!activePath} onClick={() => { setEditorMenuOpen(false); if (activePath) void window.fanotes.revealInFolder(activePath) }}><span>{isWeb ? <Download size={15} /> : <FolderOpen size={15} />}</span><span><strong>{isWeb ? (isPdfActive ? 'PDF herunterladen' : 'Markdown herunterladen') : 'Im Dateimanager zeigen'}</strong><small>{isWeb ? 'Aktuelle Notiz exportieren' : 'Speicherort der Notiz öffnen'}</small></span></button>
                 </div>}
               </div>
@@ -3474,11 +4044,17 @@ export default function App({ startupBootstrap }: AppProps) {
                   )}
                 </div>
               )}
-              <div className={`editor-split ${splitTab ? 'is-split' : ''}`}>
+              <div
+                ref={splitContainerRef}
+                className={`editor-split ${splitTab ? 'is-split' : ''} ${splitTab ? `is-${splitLayout.orientation}` : ''} ${splitDragging ? 'is-resizing' : ''} ${splitTab ? `focus-${focusedPane}` : ''}`}
+                style={splitTab ? { '--split-ratio': splitLayout.ratio } as React.CSSProperties : undefined}
+              >
               <PaperView
-                className={`unified-note-view paper-${isPdfActive ? 'blank' : activePaper} ${drawingOpen ? 'is-inking' : ''} ${isPdfActive ? 'is-pdf-note' : ''}`}
+                className={`unified-note-view ${splitTab ? 'is-main-pane' : ''} paper-${isPdfActive ? 'blank' : activePaper} ${drawingOpen ? 'is-inking' : ''} ${isPdfActive ? 'is-pdf-note' : ''}`}
                 viewKey={activeTab.path}
                 showHud={!drawingOpen}
+                onPointerDownCapture={() => setFocusedPane('main')}
+                onFocusCapture={() => setFocusedPane('main')}
               >
                 <article className={`unified-paper ${worksheetSession.documents.length ? 'has-worksheet' : ''} ${isPdfActive ? 'is-pdf-note' : ''} ${noteLinkPlacing ? 'is-placing-note-link' : ''}`} aria-label={`${activeTab.title} · ${isPdfActive ? 'PDF-Notiz mit Handschrift' : 'gemeinsame Tastatur- und Handschriftseite'}`}>
                   {isPdfActive ? (
@@ -3555,13 +4131,45 @@ export default function App({ startupBootstrap }: AppProps) {
                 </article>
               </PaperView>
               {splitTab && (
-                <PaperView className={`unified-note-view is-split-pane paper-${splitTab.kind === 'pdf' || isPdfNotePath(splitTab.path) ? 'blank' : activePaper}`} viewKey={`split:${splitTab.path}`} showHud={false}>
+                <div
+                  className="split-divider"
+                  role="separator"
+                  aria-label="Teilung anpassen"
+                  aria-orientation={splitLayout.orientation === 'columns' ? 'vertical' : 'horizontal'}
+                  aria-valuenow={Math.round(splitLayout.ratio * 100)}
+                  aria-valuemin={20}
+                  aria-valuemax={80}
+                  tabIndex={0}
+                  title="Ziehen zum Anpassen · Doppelklick für 50/50"
+                  onPointerDown={beginSplitDrag}
+                  onDoubleClick={() => setSplitLayout((current) => ({ ...current, ratio: DEFAULT_SPLIT_LAYOUT.ratio }))}
+                  onKeyDown={splitDividerKey}
+                >
+                  <span className="split-divider__grip" aria-hidden="true" />
+                </div>
+              )}
+              {splitTab && (
+                <section
+                  className="split-pane is-split-pane"
+                  aria-label={`${splitTab.title} · zweite Notiz`}
+                  onPointerDownCapture={() => setFocusedPane('split')}
+                  onFocusCapture={() => setFocusedPane('split')}
+                >
+                <header className="split-pane-head">
+                  {splitTab.kind === 'pdf' || isPdfNotePath(splitTab.path) ? <File aria-hidden="true" size={13} /> : <Files aria-hidden="true" size={13} />}
+                  <strong title={splitTab.path}>{splitTab.title}</strong>
+                  {splitTab.content !== splitTab.savedContent && <i className="dirty-dot" title="Noch nicht gespeichert" />}
+                  <button type="button" title="Notizen tauschen (Strg+Umschalt+\)" aria-label="Notizen tauschen" onClick={() => void swapSplitPanes()}><ArrowLeftRight size={14} /></button>
+                  <button type="button" title={splitLayout.orientation === 'columns' ? 'Untereinander anordnen' : 'Nebeneinander anordnen'} aria-label={splitLayout.orientation === 'columns' ? 'Untereinander anordnen' : 'Nebeneinander anordnen'} onClick={toggleSplitOrientation}>{splitLayout.orientation === 'columns' ? <Rows2 size={14} /> : <Columns2 size={14} />}</button>
+                  <button type="button" title="Als einzige Notiz öffnen" aria-label="Als einzige Notiz öffnen" onClick={() => { const target = splitTab.path; setSplitPath(null); void openNote(target) }}><Maximize2 size={14} /></button>
+                  <button type="button" aria-label="Teilung schließen" title="Teilung schließen (Strg+\)" onClick={() => setSplitPath(null)}><X size={14} /></button>
+                </header>
+                <PaperView
+                  className={`unified-note-view paper-${splitTab.kind === 'pdf' || isPdfNotePath(splitTab.path) ? 'blank' : normalizePaperStyle(notePaperByPath[splitTab.path] ?? settings.paperStyle)} ${splitTab.kind === 'pdf' || isPdfNotePath(splitTab.path) ? 'is-pdf-note' : ''}`}
+                  viewKey={`split:${splitTab.path}`}
+                  showHud={false}
+                >
                   <article className={`unified-paper ${splitTab.kind === 'pdf' || isPdfNotePath(splitTab.path) ? 'is-pdf-note' : ''}`} aria-label={`${splitTab.title} · zweite Spalte`}>
-                    <header className="split-pane-head">
-                      <strong>{splitTab.title}</strong>
-                      <button type="button" onClick={() => void openNote(splitTab.path)}>Fokus</button>
-                      <button type="button" aria-label="Teilung schließen" onClick={() => setSplitPath(null)}><X size={14} /></button>
-                    </header>
                     {splitTab.kind === 'pdf' || isPdfNotePath(splitTab.path) ? (
                       <Suspense fallback={<div className="pdf-note-status"><LoaderCircle className="spin" size={18} /> PDF wird geladen …</div>}>
                         <SafeBoundary name="Zweite PDF-Notiz" fallbackTitle="Der PDF-Viewer ist abgestürzt">
@@ -3582,8 +4190,14 @@ export default function App({ startupBootstrap }: AppProps) {
                       </SafeBoundary>
                     </div>
                     )}
+                    {loadSplitInk && (
+                      <SafeBoundary name="Handschrift (zweite Spalte)" fallbackTitle="Die Handschrift-Vorschau ist abgestürzt">
+                        <InkPreviewLayer load={loadSplitInk} smoothing={settings.smoothing} reloadKey={drawingSession.key} />
+                      </SafeBoundary>
+                    )}
                   </article>
                 </PaperView>
+                </section>
               )}
               </div>
               </>
@@ -3600,7 +4214,18 @@ export default function App({ startupBootstrap }: AppProps) {
       </div>
 
       <footer className="statusbar">
-        <div className="statusbar-left"><button type="button" title={sidebarVisible ? 'Seitenleiste einklappen' : 'Seitenleiste einblenden'} aria-label={sidebarVisible ? 'Seitenleiste einklappen' : 'Seitenleiste einblenden'} onClick={() => setSidebarVisible((value) => !value)}>{sidebarVisible ? <PanelLeftClose size={12} /> : <PanelLeftOpen size={12} />}</button><span>{glyphenWerkOpen ? `GlyphenWerk · ${GLYPHENWERK_VIEW_LABELS[glyphenWerkView]}` : homeworkOpen ? 'Hausaufgaben & Termine' : overviewOpen ? 'Vault-Übersicht' : activeTab ? drawingOpen ? 'Stiftmodus' : isPdfActive ? 'PDF-Notiz' : worksheetSession.documents.length ? 'Notiz mit Arbeitsblatt' : 'Schreibmodus' : 'Bereit'}</span>{worksheetSession.documents.length > 0 && <span>{worksheetSession.documents.length} {worksheetSession.documents.length === 1 ? 'Arbeitsblatt' : 'Arbeitsblätter'}</span>}</div>
+        <div className="statusbar-left"><button type="button" title={sidebarVisible ? 'Seitenleiste einklappen' : 'Seitenleiste einblenden'} aria-label={sidebarVisible ? 'Seitenleiste einklappen' : 'Seitenleiste einblenden'} onClick={() => setSidebarVisible((value) => !value)}>{sidebarVisible ? <PanelLeftClose size={12} /> : <PanelLeftOpen size={12} />}</button><span>{glyphenWerkOpen ? `GlyphenWerk · ${GLYPHENWERK_VIEW_LABELS[glyphenWerkView]}` : homeworkOpen ? 'Hausaufgaben & Termine' : overviewOpen ? 'Vault-Übersicht' : activeTab ? drawingOpen ? 'Stiftmodus' : isPdfActive ? 'PDF-Notiz' : worksheetSession.documents.length ? 'Notiz mit Arbeitsblatt' : 'Schreibmodus' : 'Bereit'}</span>{worksheetSession.documents.length > 0 && <span>{worksheetSession.documents.length} {worksheetSession.documents.length === 1 ? 'Arbeitsblatt' : 'Arbeitsblätter'}</span>}{activeTab && !glyphenWerkOpen && !homeworkOpen && !overviewOpen && (
+          <nav className="note-breadcrumbs" aria-label="Pfad der Notiz">
+            {breadcrumbsFor(activeTab.path).map((crumb, index) => (
+              <span key={crumb.path} className="note-breadcrumbs__item">
+                {index > 0 && <ChevronRight aria-hidden="true" size={10} />}
+                {crumb.isNote
+                  ? <b title={activeTab.path}>{crumb.label}</b>
+                  : <button type="button" title={`„${crumb.label}“ in der Dateileiste zeigen`} onClick={() => { setSidebarVisible(true); setRevealPath(null); window.setTimeout(() => setRevealPath(crumb.path), 0) }}>{crumb.label}</button>}
+              </span>
+            ))}
+          </nav>
+        )}</div>
         <div className="statusbar-right">{updateState.status === 'downloaded' && <button type="button" className="update-ready-button" title={`FaNotes ${updateState.latestVersion} installieren und neu starten`} onClick={() => void installUpdate()}><ShieldCheck size={11} /> Update bereit</button>}{updateState.status === 'downloading' && <span><LoaderCircle className="spin" size={11} /> Update {Math.round(updateState.progress * 100)} %</span>}{settings.spellcheck && activeTab && !drawingOpen && detectedTextLanguage !== 'unknown' && <span className="detected-text-language" title="Automatisch erkannte Sprache für die lokale Rechtschreibprüfung"><b>Aa</b> {detectedTextLanguage === 'de' ? 'Deutsch' : detectedTextLanguage === 'en' ? 'English' : 'DE / EN'}</span>}{settings.showWordCount && activeTab && <span>{activeWordCount} Wörter</span>}{activePageStats && <span title={`Erstellt ${new Date(activePageStats.createdAt).toLocaleString()} · Geändert ${new Date(activePageStats.modifiedAt).toLocaleString()}`}>Auf der Seite {formatPageDwell(activePageStats.dwellMs)}</span>}<button type="button" className={`save-status ${saveState === 'saved' ? 'save-ok' : 'save-pending'}`} title="Jetzt speichern (Strg+S)" aria-live="polite" onClick={() => void saveCurrentWork()}>{saveState === 'saved' ? <CheckCircle2 size={11} /> : saveState === 'saving' ? <LoaderCircle className="spin" size={11} /> : <CircleAlert size={11} />}{saveState === 'saved' ? 'Gespeichert' : saveState === 'saving' ? 'Speichert …' : 'Speicherfehler'}</button><span title={isWeb ? 'Die Daten bleiben in diesem Browser' : 'Dein Vault bleibt auf deinem Gerät'}><ShieldCheck size={11} /> {isWeb ? 'Im Browser gespeichert' : 'Lokal & privat'}</span></div>
       </footer>
 
@@ -3627,7 +4252,7 @@ export default function App({ startupBootstrap }: AppProps) {
           </section>
         </div>
       )}
-      {paletteOpen && <Suspense fallback={null}><SafeBoundary name="Befehlspalette"><CommandPalette actions={paletteActions} onClose={() => setPaletteOpen(false)} /></SafeBoundary></Suspense>}
+      {paletteOpen && <Suspense fallback={null}><SafeBoundary name="Befehlspalette"><CommandPalette actions={paletteActions} mode={paletteMode} rankNotes={rankNotesForPalette} activePath={activePath} onOpenNote={(path) => void openNote(path)} onOpenNoteInSplit={(path) => void openInSplit(path)} onClose={closePalette} /></SafeBoundary></Suspense>}
       {settingsOpen && <Suspense fallback={null}><SafeBoundary name="Einstellungen" fallbackTitle="Die Einstellungen sind abgestürzt"><SettingsModal platform={window.fanotes.platform} settings={settings} vaultPath={bootstrap.vaultPath} updateState={updateState} onChange={applySettings} onClose={() => setSettingsOpen(false)} onSelectVault={() => void selectVault()} onOpenGlyphenWerk={() => { setSettingsOpen(false); openGlyphenWerk() }} onImportTraining={importTrainingFromSettings} onImportOneNote={importOneNote} onCheckUpdate={checkForUpdates} onDownloadUpdate={downloadUpdate} onInstallUpdate={installUpdate} onResetSettings={resetSettings} onResetAppData={resetAppData} onOpenBugReport={() => { setSettingsOpen(false); setBugReportOpen(true) }} onConvertNotes={convertAllNotesToCurrentStandard} remoteSupportSession={remoteSupportSession} onRemoteSupportStart={startRemoteSupport} onRemoteSupportStop={stopRemoteSupport} /></SafeBoundary></Suspense>}
       <ConfirmDialog
         open={Boolean(confirmRequest)}

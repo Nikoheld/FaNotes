@@ -86,9 +86,12 @@ type PaperViewProps = {
   /** Reset view when this identity changes (usually the note path). */
   viewKey?: string
   showHud?: boolean
+  /** Split view: the app tracks which pane the user last touched. */
+  onPointerDownCapture?: () => void
+  onFocusCapture?: () => void
 }
 
-export function PaperView({ children, className = '', viewKey, showHud = true }: PaperViewProps) {
+export function PaperView({ children, className = '', viewKey, showHud = true, onPointerDownCapture, onFocusCapture }: PaperViewProps) {
   const noteViewRef = useRef<HTMLDivElement>(null)
   const viewRef = useRef(readSharedPaperView())
   const lastWheelZoomAtRef = useRef(0)
@@ -599,6 +602,8 @@ export function PaperView({ children, className = '', viewKey, showHud = true }:
         ref={noteViewRef}
         className={`paper-view ${className}`}
         data-paper-zoom={view.zoom}
+        onPointerDownCapture={onPointerDownCapture}
+        onFocusCapture={onFocusCapture}
       >
         <div className="paper-sheet-plane">
           <div className="paper-ruling" aria-hidden="true" />

@@ -1561,7 +1561,10 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const setDirty = useCallback((dirty: boolean) => {
     dirtyRef.current = dirty
     setIsDirty(dirty)
-    onDirtyChange?.(dirty)
+    // The host guards note switches and the window close with this flag. A
+    // page that has nothing to write (no strokes, no record: only its extent
+    // followed the layout) must not keep those waiting on a save that never runs.
+    onDirtyChange?.(dirty && inkPagePersists(strokesRef.current.length, Boolean(drawingIdRef.current) || loadedDrawingIdRef.current !== undefined))
   }, [onDirtyChange])
 
   const bumpRevision = useCallback(() => {
@@ -4572,7 +4575,15 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       const savedRevision = revisionRef.current
       try {
         const result = await writeInkPage(drawingPayload(insertAfterSave))
-        if (!mountedRef.current) return
+        if (!mountedRef.current) {
+          // The unmount save of a closing board: no state left to set, but the
+          // host must learn the page is clean or it keeps guarding a saved page.
+          if (revisionRef.current === savedRevision) {
+            dirtyRef.current = false
+            onDirtyChange?.(false)
+          }
+          return
+        }
         if (revisionRef.current === savedRevision) setDirty(false)
         if (insertAfterSave) {
           const markdown = markdownFromSaveResult(result, title)
@@ -4617,7 +4628,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     const queued = saveQueueRef.current.catch(() => {}).then(run)
     saveQueueRef.current = queued
     return queued
-  }, [clear, drawingPayload, inkRecordExists, onInsertMarkdown, setDirty, settings.keepDrawingAfterInsert, title, writeInkPage])
+  }, [clear, drawingPayload, inkRecordExists, onDirtyChange, onInsertMarkdown, setDirty, settings.keepDrawingAfterInsert, title, writeInkPage])
 
   useEffect(() => {
     saveLatestRef.current = () => saveDrawing(false, true)
