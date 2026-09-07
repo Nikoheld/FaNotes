@@ -1,5 +1,6 @@
 'use strict'
 
+const childProcess = require('node:child_process')
 const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
@@ -169,18 +170,108 @@ function applyLinuxOzoneLaunchEnvironment(environment = process.env, argv = proc
   return { ozone: plan.platform, environment, argv }
 }
 
-function configureLinuxInputPlatform(electronApp, environment = process.env) {
+const DEVICE_SCALE_MIN = 0.5
+const DEVICE_SCALE_MAX = 4
+const DEVICE_SCALE_FALLBACK = 2
+const HYPRCTL_TIMEOUT_MS = 1500
+
+function normalizeDeviceScale(value) {
+  const scale = typeof value === 'number' ? value : Number.parseFloat(String(value ?? ''))
+  if (!Number.isFinite(scale) || scale < DEVICE_SCALE_MIN || scale > DEVICE_SCALE_MAX) return null
+  return Math.round(scale * 1000) / 1000
+}
+
+/** Scale of the focused Hyprland monitor from `hyprctl -j monitors` output. */
+function hyprlandFocusedMonitorScale(output) {
+  let monitors
+  try {
+    monitors = JSON.parse(String(output ?? ''))
+  } catch {
+    return null
+  }
+  if (!Array.isArray(monitors)) return null
+  const focused = monitors.find((monitor) => monitor && monitor.focused === true)
+  const candidates = focused ? [focused, ...monitors] : monitors
+  for (const monitor of candidates) {
+    const scale = normalizeDeviceScale(monitor?.scale)
+    if (scale) return scale
+  }
+  return null
+}
+
+function runHyprctlMonitors(environment) {
+  return childProcess.execFileSync('hyprctl', ['-j', 'monitors'], {
+    encoding: 'utf8',
+    timeout: HYPRCTL_TIMEOUT_MS,
+    env: environment,
+    stdio: ['ignore', 'pipe', 'ignore'],
+    windowsHide: true,
+  })
+}
+
+function readHyprlandMonitorScale(environment = process.env, run = runHyprctlMonitors) {
+  if (!environment.HYPRLAND_INSTANCE_SIGNATURE) return null
+  try {
+    return hyprlandFocusedMonitorScale(run(environment))
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Device scale for an XWayland window that the compositor leaves unscaled
+ * (`force_zero_scaling`). The focused monitor's real scale is the truth — a
+ * fixed 2 rendered a 1.25/1.5/1.6 desktop too large. FANOTES_DEVICE_SCALE
+ * overrides; GDK_SCALE (× GDK_DPI_SCALE, the Hyprland wiki recipe) is the
+ * fallback when hyprctl is unavailable.
+ */
+function resolveLinuxDeviceScale(environment = process.env, run = runHyprctlMonitors) {
+  const explicit = normalizeDeviceScale(environment.FANOTES_DEVICE_SCALE)
+  if (explicit) return { scale: explicit, source: 'FANOTES_DEVICE_SCALE' }
+  const monitor = readHyprlandMonitorScale(environment, run)
+  if (monitor) return { scale: monitor, source: 'hyprctl' }
+  const gdkScale = Number.parseFloat(String(environment.GDK_SCALE ?? ''))
+  if (Number.isFinite(gdkScale) && gdkScale > 0) {
+    const dpiScale = Number.parseFloat(String(environment.GDK_DPI_SCALE ?? ''))
+    const gdk = normalizeDeviceScale(gdkScale * (Number.isFinite(dpiScale) && dpiScale > 0 ? dpiScale : 1))
+    if (gdk) return { scale: gdk, source: 'GDK_SCALE' }
+  }
+  return { scale: DEVICE_SCALE_FALLBACK, source: 'fallback' }
+}
+
+function configureLinuxInputPlatform(electronApp, environment = process.env, run = runHyprctlMonitors) {
   if (process.platform !== 'linux') {
-    return { ozone: null, scaleFactor: null, hyprlandZeroScaling: false }
+    return { ozone: null, scaleFactor: null, scaleSource: null, monitorScale: null, hyprlandZeroScaling: false }
   }
   const commandLine = electronApp.commandLine
   commandLine.appendSwitch('ozone-platform', 'x11')
   commandLine.appendSwitch('ozone-platform-hint', 'x11')
   const hyprlandZeroScaling = readHyprlandForceZeroScaling(environment)
-  if (hyprlandZeroScaling) commandLine.appendSwitch('force-device-scale-factor', '2')
+  let scaleFactor = null
+  let scaleSource = null
+  let monitorScale = null
+  if (hyprlandZeroScaling) {
+    const existing = normalizeDeviceScale(commandLine.getSwitchValue('force-device-scale-factor'))
+    if (existing) {
+      scaleFactor = existing
+      scaleSource = 'command-line'
+    } else {
+      const resolved = resolveLinuxDeviceScale(environment, run)
+      scaleFactor = resolved.scale
+      scaleSource = resolved.source
+      commandLine.appendSwitch('force-device-scale-factor', String(scaleFactor))
+    }
+    monitorScale = scaleSource === 'hyprctl' ? scaleFactor : readHyprlandMonitorScale(environment, run)
+  } else {
+    // Compositor-scaled XWayland: Chromium must stay at 1, but a HiDPI monitor
+    // then shows an upscaled (blurry) window — worth a hint in the log.
+    monitorScale = readHyprlandMonitorScale(environment, run)
+  }
   return {
     ozone: 'x11',
-    scaleFactor: hyprlandZeroScaling ? 2 : null,
+    scaleFactor,
+    scaleSource,
+    monitorScale,
     hyprlandZeroScaling,
   }
 }
@@ -349,10 +440,14 @@ module.exports = {
   applyLinuxOzoneLaunchEnvironment,
   configureLinuxGraphics,
   configureLinuxInputPlatform,
+  hyprlandFocusedMonitorScale,
   linuxOzoneAppRunExecLine,
   linuxOzoneDesktopExec,
   linuxOzoneLaunchPlan,
   linuxWindowFrameOptions,
+  normalizeDeviceScale,
   readHyprlandForceZeroScaling,
+  readHyprlandMonitorScale,
   readStartupResourceLimits,
+  resolveLinuxDeviceScale,
 }

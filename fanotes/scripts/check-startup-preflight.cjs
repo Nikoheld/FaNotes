@@ -12,11 +12,14 @@ const {
   applyLinuxOzoneLaunchEnvironment,
   configureLinuxGraphics,
   configureLinuxInputPlatform,
+  hyprlandFocusedMonitorScale,
   linuxOzoneAppRunExecLine,
   linuxOzoneDesktopExec,
   linuxOzoneLaunchPlan,
   linuxWindowFrameOptions,
+  normalizeDeviceScale,
   readStartupResourceLimits,
+  resolveLinuxDeviceScale,
   VULKAN_FEATURES,
 } = require('../electron/startup-preflight.cjs')
 
@@ -135,8 +138,69 @@ try {
     { FANOTES_HYPRLAND_CONFIG: hyprConfig, HOME: '' },
   )
   assert.equal(scaledResult.hyprlandZeroScaling, true)
-  assert.equal(scaledResult.scaleFactor, 2)
+  assert.equal(scaledResult.scaleFactor, 2, 'without a Hyprland session or GDK_SCALE the HiDPI fallback stays 2')
+  assert.equal(scaledResult.scaleSource, 'fallback')
   assert.equal(scaled.getSwitchValue('force-device-scale-factor'), '2')
+
+  // Real monitor scale: a 1.5 desktop must not get a 2× window.
+  const monitorsJson = JSON.stringify([
+    { id: 1, name: 'DP-2', scale: 1, focused: false },
+    { id: 0, name: 'eDP-1', scale: 1.5, focused: true },
+  ])
+  assert.equal(hyprlandFocusedMonitorScale(monitorsJson), 1.5, 'the focused monitor wins')
+  assert.equal(hyprlandFocusedMonitorScale(JSON.stringify([{ scale: 1.25 }, { scale: 2 }])), 1.25, 'no focus flag: first valid monitor')
+  assert.equal(hyprlandFocusedMonitorScale(JSON.stringify([{ scale: 0 }, { scale: 1.666667 }])), 1.667, 'invalid scales skipped, value rounded to 1/1000')
+  assert.equal(hyprlandFocusedMonitorScale('not json'), null)
+  assert.equal(hyprlandFocusedMonitorScale(JSON.stringify({ scale: 2 })), null)
+  assert.equal(hyprlandFocusedMonitorScale('[]'), null)
+  assert.equal(normalizeDeviceScale('2'), 2)
+  assert.equal(normalizeDeviceScale(0.25), null, 'below the sane range')
+  assert.equal(normalizeDeviceScale(9), null, 'above the sane range')
+  assert.equal(normalizeDeviceScale('abc'), null)
+
+  const hyprSession = { FANOTES_HYPRLAND_CONFIG: hyprConfig, HOME: '', HYPRLAND_INSTANCE_SIGNATURE: 'sig' }
+  let hyprctlCalls = 0
+  const hyprctl = () => { hyprctlCalls += 1; return monitorsJson }
+  const real = mockCommandLine()
+  const realResult = configureLinuxInputPlatform({ commandLine: real }, hyprSession, hyprctl)
+  assert.equal(realResult.scaleFactor, 1.5, 'force_zero_scaling: Chromium renders at the focused monitor scale')
+  assert.equal(realResult.scaleSource, 'hyprctl')
+  assert.equal(realResult.monitorScale, 1.5)
+  assert.equal(real.getSwitchValue('force-device-scale-factor'), '1.5')
+  assert.equal(hyprctlCalls, 1, 'hyprctl runs once at startup')
+
+  const broken = mockCommandLine()
+  const brokenResult = configureLinuxInputPlatform({ commandLine: broken }, hyprSession, () => { throw new Error('hyprctl missing') })
+  assert.equal(brokenResult.scaleFactor, 2, 'hyprctl failure falls back to 2')
+  assert.equal(brokenResult.scaleSource, 'fallback')
+  assert.equal(brokenResult.monitorScale, null)
+  assert.equal(broken.getSwitchValue('force-device-scale-factor'), '2')
+
+  assert.deepEqual(
+    resolveLinuxDeviceScale({ ...hyprSession, GDK_SCALE: '2', GDK_DPI_SCALE: '0.75' }, () => { throw new Error('no hyprctl') }),
+    { scale: 1.5, source: 'GDK_SCALE' },
+    'the Hyprland wiki recipe GDK_SCALE × GDK_DPI_SCALE is honoured without hyprctl',
+  )
+  assert.deepEqual(resolveLinuxDeviceScale({ GDK_SCALE: '2' }, () => monitorsJson), { scale: 2, source: 'GDK_SCALE' }, 'no Hyprland signature: hyprctl is not run')
+  assert.deepEqual(resolveLinuxDeviceScale({ ...hyprSession, FANOTES_DEVICE_SCALE: '1.25' }, hyprctl), { scale: 1.25, source: 'FANOTES_DEVICE_SCALE' }, 'explicit override wins')
+  assert.deepEqual(resolveLinuxDeviceScale({ ...hyprSession, FANOTES_DEVICE_SCALE: '40' }, hyprctl), { scale: 1.5, source: 'hyprctl' }, 'an absurd override is ignored')
+
+  const userFlag = mockCommandLine({ 'force-device-scale-factor': '1.75' })
+  const userFlagResult = configureLinuxInputPlatform({ commandLine: userFlag }, hyprSession, hyprctl)
+  assert.equal(userFlag.getSwitchValue('force-device-scale-factor'), '1.75', 'a scale on the command line is kept')
+  assert.equal(userFlagResult.scaleSource, 'command-line')
+  assert.equal(userFlagResult.monitorScale, 1.5)
+
+  const compositorScaled = mockCommandLine()
+  const compositorResult = configureLinuxInputPlatform(
+    { commandLine: compositorScaled },
+    { FANOTES_HYPRLAND_CONFIG: path.join(os.tmpdir(), 'fanotes-no-such.conf'), HOME: '', HYPRLAND_INSTANCE_SIGNATURE: 'sig' },
+    hyprctl,
+  )
+  assert.equal(compositorResult.hyprlandZeroScaling, false)
+  assert.equal(compositorResult.scaleFactor, null, 'compositor-scaled XWayland must stay at Chromium scale 1')
+  assert.equal(compositorScaled.hasSwitch('force-device-scale-factor'), false)
+  assert.equal(compositorResult.monitorScale, 1.5, 'the monitor scale is still reported for the blur hint')
 
   const sourcedDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fanotes-hypr-'))
   temporaryProfiles.push(sourcedDir)
