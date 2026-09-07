@@ -2261,21 +2261,45 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     return true
   }, [planInkWindowNow, redraw])
 
+  /**
+   * Visits every stroke point the board still holds — live strokes, the stroke
+   * under the pen, undo and redo snapshots, the gesture snapshot and a pending
+   * solver tap — exactly once. Snapshots share point objects with the live
+   * strokes, but a stroke that was erased (or undone) lives only in history;
+   * remapping the live array alone left those at pre-grow coordinates, so
+   * undo after a grow brought them back shifted.
+   */
+  const forEachTrackedPoint = useCallback((visit: (point: StrokePoint) => void) => {
+    const seen = new Set<StrokePoint>()
+    const visitStrokes = (strokes: readonly InkStroke[] | null | undefined) => {
+      if (!strokes) return
+      for (const stroke of strokes) {
+        for (const point of stroke.points) {
+          if (seen.has(point)) continue
+          seen.add(point)
+          visit(point)
+        }
+      }
+    }
+    visitStrokes(strokesRef.current)
+    if (activeStrokeRef.current) visitStrokes([activeStrokeRef.current])
+    for (const snapshot of undoRef.current) visitStrokes(snapshot)
+    for (const snapshot of redoRef.current) visitStrokes(snapshot)
+    visitStrokes(beforeGestureRef.current)
+    visitStrokes(recognitionStrokesRef.current)
+    const tap = pendingSolverTapRef.current
+    if (tap) {
+      visitStrokes(tap.snapshot)
+      visitStrokes([tap.stroke])
+    }
+  }, [])
+
   const scaleNormalizedSpace = useCallback((scaleX: number, scaleY: number) => {
     if (scaleX === 1 && scaleY === 1) return
-    for (const stroke of strokesRef.current) {
-      for (const point of stroke.points) {
-        point.x *= scaleX
-        point.y *= scaleY
-      }
-    }
-    const active = activeStrokeRef.current
-    if (active) {
-      for (const point of active.points) {
-        point.x *= scaleX
-        point.y *= scaleY
-      }
-    }
+    forEachTrackedPoint((point) => {
+      point.x *= scaleX
+      point.y *= scaleY
+    })
     const scalePose = <T extends DraftingPose>(pose: T | null): T | null => (
       pose ? { ...pose, x: pose.x * scaleX, y: pose.y * scaleY } : pose
     )
@@ -2300,7 +2324,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       width: current.width * scaleX,
       height: current.height * scaleY,
     } : current)
-  }, [])
+  }, [forEachTrackedPoint])
 
   // 0–1 ink follows the painted sheet: when the sheet grew (a text line, a
   // viewport minimum) the strokes are rescaled so every mark keeps its paper
@@ -2525,17 +2549,10 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     void paper?.offsetHeight
     const nextPaintW = writePageStayExtent(nextW, paper?.offsetWidth ?? 0)
     const nextPaintH = writePageStayExtent(nextH, paper?.offsetHeight ?? 0)
-    const remapPoint = (point: { x: number; y: number }) => {
+    forEachTrackedPoint((point) => {
       point.x = keepMarkOnPage(point.x, prevPaintW, nextPaintW, addX)
       point.y = keepMarkOnPage(point.y, prevPaintH, nextPaintH, addY)
-    }
-    for (const stroke of strokesRef.current) {
-      for (const point of stroke.points) remapPoint(point)
-    }
-    const active = activeStrokeRef.current
-    if (active) {
-      for (const point of active.points) remapPoint(point)
-    }
+    })
     const remapPose = <T extends { x: number; y: number }>(pose: T | null): T | null => {
       if (!pose) return pose
       return {
@@ -2618,7 +2635,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     canvasQualityKeyRef.current = ''
     redraw(true)
     return true
-  }, [applyInkExtentStyles, planInkWindowNow, resolvePaperElement, setDirty, redraw])
+  }, [applyInkExtentStyles, forEachTrackedPoint, planInkWindowNow, resolvePaperElement, setDirty, redraw])
 
   /**
    * The 0–1 ink space is the painted sheet (`.unified-paper`), the same box
