@@ -261,6 +261,135 @@ export const paintSizeForPage = (cssWidth: number, cssHeight: number, options: P
   return { pixelWidth: box.pixelWidth, pixelHeight: box.pixelHeight }
 }
 
+export type CssRect = { left: number; top: number; width: number; height: number }
+
+export type PdfPaintJob = { key: string; box: PdfPaintBox }
+
+/**
+ * Two bitmaps per page. The *base* is the whole page at screen density and
+ * depends only on the page box — scrolling and camera zoom never touch it,
+ * so it is what stays on screen while anything else re-renders. The *detail*
+ * exists only when the camera zoom asks for more than screen density; at a
+ * zoom where the full page no longer fits the pixel budget it covers just the
+ * padded visible window.
+ */
+const normalizePdfRotation = (rotation: number) => (((Math.round(Number(rotation) || 0) % 360) + 360) % 360)
+
+const pdfScreenScale = (dpr: number) => Math.min(Math.max(Number(dpr) || 1, 1), MAX_PDF_DPR)
+
+export const pdfBasePaintKey = (cssWidth: number, cssHeight: number, rotation: number, dpr: number) => (
+  `${Math.round(cssWidth)}x${Math.round(cssHeight)}:${normalizePdfRotation(rotation)}@${pdfScreenScale(dpr).toFixed(2)}`
+)
+
+export const pdfDetailScaleKey = (cssWidth: number, cssHeight: number, rotation: number, dpr: number, viewZoom: number) => (
+  `${pdfBasePaintKey(cssWidth, cssHeight, rotation, dpr)}@${(Math.round((Number(viewZoom) || 1) * 100) / 100).toFixed(2)}`
+)
+
+/** Detail only once the camera zoom would leave the base bitmap stretched. */
+export const pdfDetailNeeded = (dpr: number, viewZoom: number) => (
+  pdfPaintDeviceScale(dpr, viewZoom) > pdfPaintDeviceScale(dpr, 1) * 1.01
+)
+
+export const pdfPaintBoxIsFullPage = (box: PdfPaintBox, cssWidth: number, cssHeight: number) => (
+  box.cssLeft <= 0.5
+  && box.cssTop <= 0.5
+  && box.cssWidth >= cssWidth - 0.5
+  && box.cssHeight >= cssHeight - 0.5
+)
+
+/**
+ * A painted window still serves the camera while the *unpadded* visible page
+ * rect lies inside it. Re-rendering on every scroll step (the padded window
+ * moves with each step) is what used to clear the page to white mid-scroll.
+ */
+export const pdfPaintBoxCovers = (
+  box: PdfPaintBox | null,
+  visible: CssRect,
+  page: { cssWidth: number; cssHeight: number },
+  slack = 0.5,
+) => {
+  if (!box) return false
+  if (pdfPaintBoxIsFullPage(box, page.cssWidth, page.cssHeight)) return true
+  return visible.left >= box.cssLeft - slack
+    && visible.top >= box.cssTop - slack
+    && visible.left + visible.width <= box.cssLeft + box.cssWidth + slack
+    && visible.top + visible.height <= box.cssTop + box.cssHeight + slack
+}
+
+export type PdfPaintPlanInput = {
+  cssWidth: number
+  cssHeight: number
+  rotation: number
+  dpr: number
+  viewZoom: number
+  /** Scroller geometry in layout px; omitted when the page is not in a camera scroller. */
+  view?: {
+    viewWidth: number
+    viewHeight: number
+    scrollLeft: number
+    scrollTop: number
+    pageOffsetLeft: number
+    pageOffsetTop: number
+  } | null
+}
+
+export type PdfPaintState = {
+  baseKey: string
+  detail: PdfPaintJob | null
+}
+
+export type PdfPaintPlan = {
+  /** Null when the current base bitmap already matches the page box. */
+  base: PdfPaintJob | null
+  /** `keep` — the current detail still covers the viewport; `drop` — screen density is enough. */
+  detail: PdfPaintJob | 'keep' | 'drop'
+}
+
+export const planPdfPagePaint = (input: PdfPaintPlanInput, current: PdfPaintState): PdfPaintPlan => {
+  const cssWidth = Math.max(1, Math.round(input.cssWidth))
+  const cssHeight = Math.max(1, Math.round(input.cssHeight))
+  const dpr = pdfScreenScale(input.dpr)
+  const viewZoom = Math.max(0.01, Number(input.viewZoom) || 1)
+  const baseKey = pdfBasePaintKey(cssWidth, cssHeight, input.rotation, dpr)
+  const base = baseKey === current.baseKey
+    ? null
+    : { key: baseKey, box: paintBoxForPage(cssWidth, cssHeight, { dpr, viewZoom: 1 }) }
+  if (!pdfDetailNeeded(dpr, viewZoom)) return { base, detail: 'drop' }
+  const scaleKey = pdfDetailScaleKey(cssWidth, cssHeight, input.rotation, dpr, viewZoom)
+  const windowInput = input.view
+    ? {
+      pageWidth: cssWidth,
+      pageHeight: cssHeight,
+      viewWidth: input.view.viewWidth,
+      viewHeight: input.view.viewHeight,
+      viewZoom,
+      scrollLeft: input.view.scrollLeft,
+      scrollTop: input.view.scrollTop,
+      pageOffsetLeft: input.view.pageOffsetLeft,
+      pageOffsetTop: input.view.pageOffsetTop,
+    }
+    : null
+  const unpadded = windowInput ? visiblePageCssWindow({ ...windowInput, padRatio: 0 }) : null
+  if (
+    current.detail
+    && current.detail.key.startsWith(`${scaleKey}|`)
+    && (!unpadded || pdfPaintBoxCovers(current.detail.box, unpadded, { cssWidth, cssHeight }))
+  ) {
+    return { base, detail: 'keep' }
+  }
+  const padded = windowInput ? visiblePageCssWindow(windowInput) : null
+  const box = paintBoxForPage(cssWidth, cssHeight, {
+    dpr,
+    viewZoom,
+    visibleLeft: padded?.left,
+    visibleTop: padded?.top,
+    visibleCssWidth: padded?.width,
+    visibleCssHeight: padded?.height,
+  })
+  const key = `${scaleKey}|${box.cssLeft.toFixed(1)},${box.cssTop.toFixed(1)},${box.cssWidth.toFixed(1)}x${box.cssHeight.toFixed(1)}`
+  return { base, detail: { key, box } }
+}
+
 export const openPdfDocument = async (
   bytes: Uint8Array,
   password?: string,

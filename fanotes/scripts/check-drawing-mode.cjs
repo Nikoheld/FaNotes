@@ -141,12 +141,23 @@ const safeguards = [
 ]
 
 const worksheetLayer = fs.readFileSync(path.join(root, 'src', 'components', 'WorksheetLayer.tsx'), 'utf8')
+const pdfPagePainter = fs.readFileSync(path.join(root, 'src', 'lib', 'pdfPagePainter.ts'), 'utf8')
+const pdfDocument = fs.readFileSync(path.join(root, 'src', 'lib', 'pdfDocument.ts'), 'utf8')
 const styles = fs.readFileSync(path.join(root, 'src', 'styles.css'), 'utf8')
+// Worksheet pages paint through the shared double-buffered painter, which in turn
+// takes its turn in the one render queue: pages still render one after another.
+if (!pdfDocument.includes('export const enqueuePdfRender') || !pdfPagePainter.includes('enqueuePdfRender(')) {
+  throw new Error('Zeichenmodus-Prüfung fehlgeschlagen: PDF-Seiten werden nacheinander gerendert, nicht parallel.')
+}
+// The painter plans every bitmap through paintBoxForPage, so worksheet pages and PDF
+// notes share one HiDPI raster.
+if (!pdfPagePainter.includes('planPdfPagePaint(') || !pdfDocument.includes('paintBoxForPage(cssWidth, cssHeight')) {
+  throw new Error('Zeichenmodus-Prüfung fehlgeschlagen: PDF-Seite teilt das HiDPI-Raster mit der PDF-Notiz.')
+}
 const worksheetSafeguards = [
-  ['const enqueuePdfRender', 'PDF-Seiten werden nacheinander gerendert, nicht parallel'],
+  ['createPdfPagePainter(', 'PDF-Seiten werden nacheinander gerendert, nicht parallel'],
   ['const loadVaultPdfBytes', 'PDF-Bytes ohne riesige Data-URL'],
   ['const HIDE_DEBOUNCE_MS', 'Off-Screen-Seiten werden nicht sofort zerstört'],
-  ['paintBoxForPage', 'PDF-Seite teilt das HiDPI-Raster mit der PDF-Notiz'],
   ['disableAutoFetch: true', 'PDF.js lädt keine Extra-Requests'],
   ['{mounted && <PdfPageCanvas', 'getPage nur für sichtbare Seiten'],
 ]

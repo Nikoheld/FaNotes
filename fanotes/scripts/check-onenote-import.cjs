@@ -116,7 +116,11 @@ void (async () => {
   assert.match(settings, /\.one · \.onetoc2 · \.onepkg · OneDrive-ZIP/u)
   assert.match(worksheetLayer, /sandbox=""/u)
   assert.match(worksheetLayer, /page\.clientWidth \/ \(initialDocument\.pageWidth/u)
-  assert.match(worksheetLayer, /enqueuePdfRender/u)
+  // Worksheet pages render through the shared double-buffered painter, which queues
+  // every bitmap in pdfDocument's single render queue.
+  assert.match(worksheetLayer, /createPdfPagePainter\(/u)
+  const pdfPagePainter = await fsp.readFile(path.join(root, 'src', 'lib', 'pdfPagePainter.ts'), 'utf8')
+  assert.match(pdfPagePainter, /enqueuePdfRender\(/u)
   assert.match(worksheetLayer, /loadVaultPdfBytes/u)
   assert.match(worksheetLayer, /HIDE_DEBOUNCE_MS/u)
   assert.match(preload, /readAssetBytes:\s*\(relativePath\)/u)

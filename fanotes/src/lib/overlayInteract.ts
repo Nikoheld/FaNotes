@@ -97,6 +97,34 @@ export const noteInkDocument = <T extends { id: string }>(
   return { ...document, id: markerId ?? '' }
 }
 
+/**
+ * Whether the board writes its stroke list. A page that has no record and no
+ * ink writes nothing — the pen merely being switched on must not create a
+ * `.famd` for every note. A page with a record (loaded from the note, or
+ * written by this board) persists even when it is empty: erasing the last
+ * stroke has to reach the vault, or the stroke is back on the next open.
+ */
+export const inkPagePersists = (strokeCount: number, hasRecord: boolean) => (
+  strokeCount > 0 || hasRecord === true
+)
+
+export type AuthoredInkSave = { id: string | null; drawingJson: string }
+
+/**
+ * The document the board receives right after its own save is the snapshot
+ * it just wrote. Loading it would put back every stroke erased — and drop
+ * every stroke drawn — while the save was in flight, and clear the undo
+ * history. Only a document this board did not author is loaded.
+ */
+export const inkDocumentIsOwnSave = (
+  authored: AuthoredInkSave | null,
+  sourceId: string | null,
+  drawingJson: string,
+) => (
+  authored !== null
+  && (authored.drawingJson === drawingJson || (authored.id !== null && authored.id === sourceId))
+)
+
 export type InteractState = {
   drawingOpen: boolean
   sessionKey: number

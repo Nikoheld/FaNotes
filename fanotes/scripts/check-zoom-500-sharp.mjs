@@ -205,6 +205,7 @@ const runOnce = () => {
   const inkHit = readFileSync(join(root, 'src', 'lib', 'pdfInkHit.ts'), 'utf8')
   const paperGrow = readFileSync(join(root, 'src', 'lib', 'paperGrow.ts'), 'utf8')
   const pdfDoc = readFileSync(join(root, 'src', 'lib', 'pdfDocument.ts'), 'utf8')
+  const painter = readFileSync(join(root, 'src', 'lib', 'pdfPagePainter.ts'), 'utf8')
   assert.match(board, /inkOverlayPixelSize\(/)
   // The slice is planned in layout px and painted in the same pass; the zoom
   // settle re-plans it around the visible sheet before the sharp repaint.
@@ -214,13 +215,16 @@ const runOnce = () => {
   assert.match(board, /viewZoomRef\.current/)
   assert.match(inkHit, /export const resolveInkOverlayWindow/)
   assert.match(inkHit, /isFullInkWindow\(window\)\) return false/)
-  assert.match(pdf, /paintBoxForPage\(/)
-  assert.match(pdf, /visiblePageCssWindow\(/)
-  assert.match(pdf, /viewZoom/)
-  assert.match(pdf, /transform: \[1, 0, 0, 1, -box\.cssLeft/)
-  assert.match(worksheet, /paintBoxForPage\(/)
-  assert.match(worksheet, /visiblePageCssWindow\(/)
-  assert.match(worksheet, /transform: \[1, 0, 0, 1, -box\.cssLeft/)
+  // Both PDF hosts paint through the shared painter: the plan windows the
+  // visible sheet at camera density and pdf.js paints that window offset.
+  assert.match(pdf, /createPdfPagePainter\(/)
+  assert.match(worksheet, /createPdfPagePainter\(/)
+  assert.match(painter, /planPdfPagePaint\(/)
+  assert.match(painter, /viewZoom: readUsedSheetZoom\(host\)/)
+  assert.match(painter, /transform: \[1, 0, 0, 1, -box\.cssLeft/)
+  assert.match(pdfDoc, /export const planPdfPagePaint/)
+  assert.match(pdfDoc, /visiblePageCssWindow\(\{ \.\.\.windowInput, padRatio: 0 \}\)/)
+  assert.match(pdfDoc, /paintBoxForPage\(cssWidth, cssHeight, \{/)
   assert.match(inkHit, /paperHeight < 1_600 && zoom <= 1\.4/)
   assert.match(paperGrow, /INK_MAX_VIEW_QUALITY_ZOOM = 6/)
   assert.match(pdfDoc, /MAX_PDF_VIEW_QUALITY_ZOOM = 6/)

@@ -19,6 +19,7 @@ const CHROME_FILES = [
   'src/components/CommandPalette.tsx',
   'src/components/SubjectBookPane.tsx',
   'src/components/BugReportModal.tsx',
+  'src/components/ConfirmDialog.tsx',
   'src/components/SearchPanel.tsx',
   'src/components/PaperView.tsx',
   'src/components/DrawingBoard.tsx',

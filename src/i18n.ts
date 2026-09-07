@@ -24,6 +24,10 @@ const translateCore = (source: string) => {
   if (/^\d+ Zeichen$/u.test(source)) return source.replace('Zeichen', 'characters')
   if (/^1 Klasse$/u.test(source)) return '1 class'
   if (/^\d+ Klassen$/u.test(source)) return source.replace('Klassen', 'classes')
+  const writeGlyph = /^Schreibe „(.+)“$/u.exec(source)
+  if (writeGlyph) return `Write “${writeGlyph[1]}”`
+  if (/^1 Muster$/u.test(source)) return '1 pattern'
+  if (/^\d+ Muster$/u.test(source)) return source.replace('Muster', 'patterns')
   if (!GERMAN_HINT.test(source)) return source
   return replacementExpression
     ? source.replace(replacementExpression, (german) => catalog[german] ?? german)

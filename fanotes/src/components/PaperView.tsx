@@ -4,6 +4,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -14,6 +15,7 @@ import {
   VIEW_ZOOM_MIN,
   applyPaperViewToElements,
   applyPaperZoomStayPut,
+  centrePageInViewportIfFits,
   clampPaperScrollerToZoomedSheet,
   clampViewZoom,
   defaultPaperView,
@@ -31,6 +33,25 @@ import {
   type PaperViewSnapshot,
 } from '../lib/paperView'
 import { SCROLL_ROOM } from '../lib/noteCanvas'
+import {
+  PAPER_VIEW_RESTORE_SETTLE_MS,
+  PAPER_VIEW_RESTORE_WARM_FRAMES,
+  cameraForPaperCentre,
+  isPaperViewTakeoverKey,
+  isProgrammaticScroll,
+  loadPaperViewMemory,
+  paperCentreFromCamera,
+  paperViewFromMemory,
+  paperViewMemoryKey,
+  recallPaperView,
+  rememberPaperView,
+  savePaperViewMemory,
+  scaledPaperCentre,
+  scrollTopForAnchorClientY,
+  shouldKeepRestoringPaperView,
+  type PaperViewMemoryEntry,
+} from '../lib/paperViewMemory'
+import { findPaperTextAnchorProvider } from '../lib/paperTextAnchor'
 import { pdfOpenCameraFromScroller } from '../lib/pdfOpenCamera'
 import {
   captureGhostTextAroundLock,
@@ -43,9 +64,16 @@ import { buildTextMotionDiagnosticEvent, recordTextMotionDiagnostic } from '../l
 
 export type PaperViewApi = PaperViewSnapshot & {
   zoomBy: (delta: number, originClient?: { x: number; y: number }) => void
+  /** Absolute camera zoom around a client point (default: the last pointer position). */
+  zoomTo: (zoom: number, originClient?: { x: number; y: number }) => void
   rotateBy: (delta: number) => void
   resetView: () => void
   setView: (next: Partial<PaperViewSnapshot>) => void
+  /**
+   * The current note came back with a remembered camera. False on a first
+   * open — memory written while the note is loading does not count.
+   */
+  recalled: boolean
 }
 
 const PaperViewContext = createContext<PaperViewApi | null>(null)
@@ -66,6 +94,7 @@ export function PaperView({ children, className = '', viewKey, showHud = true }:
   const lastWheelZoomAtRef = useRef(0)
   const lastZoomOriginRef = useRef<{ x: number; y: number } | null>(null)
   const [view, setViewState] = useState(readSharedPaperView)
+  const [recalled, setRecalled] = useState(false)
 
   const paint = useCallback((next: PaperViewSnapshot) => {
     viewRef.current = next
@@ -85,15 +114,112 @@ export function PaperView({ children, className = '', viewKey, showHud = true }:
     paint(readSharedPaperView())
   }, [paint])
 
-  useEffect(() => {
-    // Reset only when the note identity changes. Toggling the HUD (pen vs
-    // keyboard) must keep the same sheet zoom so ruling, ink and text stay one.
-    writeSharedPaperView(defaultPaperView())
+  // Layout effects: a note opened after an async read would otherwise paint
+  // one frame at 100% / scroll 0 before the remembered camera lands.
+  useLayoutEffect(() => {
+    // Only when the note identity changes. Toggling the HUD (pen vs keyboard)
+    // must keep the same sheet zoom so ruling, ink and text stay one. A note
+    // that was open before comes back at its remembered zoom.
+    const remembered = recallPaperView(loadPaperViewMemory(), paperViewMemoryKey(viewKey))
+    setRecalled(remembered !== null)
+    writeSharedPaperView(paperViewFromMemory(remembered))
   }, [viewKey])
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const scroller = noteViewRef.current
     if (!scroller) return
+    const memoryKey = paperViewMemoryKey(viewKey)
+    const remembered = memoryKey ? recallPaperView(loadPaperViewMemory(), memoryKey) : null
+    let lastProgrammatic: { scrollLeft: number; scrollTop: number } | null = null
+    let userInteracted = false
+    let saveTimer = 0
+    let measureFrame = 0
+    // Measured while this note's sheet is still in the DOM. The effect cleanup
+    // runs after React swapped in the next note, so it must not measure then.
+    let latestEntry: Omit<PaperViewMemoryEntry, 'at'> | null = null
+    const writePage = () => (
+      scroller.querySelector<HTMLElement>('.unified-paper')
+      ?? scroller.querySelector<HTMLElement>('.paper-sheet-plane')
+    )
+    const scrollTo = (next: { scrollLeft: number; scrollTop: number }) => {
+      lastProgrammatic = next
+      if (Math.abs(scroller.scrollLeft - next.scrollLeft) >= 0.5) scroller.scrollLeft = next.scrollLeft
+      if (Math.abs(scroller.scrollTop - next.scrollTop) >= 0.5) scroller.scrollTop = next.scrollTop
+    }
+    const measureEntry = () => {
+      const page = writePage()
+      if (!page) return null
+      const pageRect = page.getBoundingClientRect()
+      if (pageRect.width < 1 || pageRect.height < 1) return null
+      const view = viewRef.current
+      const scrollerRect = scroller.getBoundingClientRect()
+      const zoom = Math.max(0.01, view.zoom)
+      const centre = paperCentreFromCamera(scroller, scrollerRect, pageRect, view.zoom)
+      const anchor = findPaperTextAnchorProvider(scroller)?.anchorAtClientY(scrollerRect.top) ?? null
+      latestEntry = {
+        zoom: view.zoom,
+        rotation: view.rotation,
+        ...centre,
+        pageWidth: Math.round((pageRect.width / zoom) * 100) / 100,
+        pageHeight: Math.round((pageRect.height / zoom) * 100) / 100,
+        ...(anchor ? { anchor } : {}),
+      }
+      return latestEntry
+    }
+    const persist = (entry: Omit<PaperViewMemoryEntry, 'at'> | null) => {
+      if (!memoryKey || !entry) return
+      savePaperViewMemory(rememberPaperView(loadPaperViewMemory(), memoryKey, entry))
+    }
+    const saveNow = () => {
+      if (saveTimer) {
+        window.clearTimeout(saveTimer)
+        saveTimer = 0
+      }
+      persist(measureEntry())
+    }
+    const scheduleSave = () => {
+      if (!memoryKey) return
+      if (saveTimer) window.clearTimeout(saveTimer)
+      saveTimer = window.setTimeout(saveNow, 220)
+    }
+    // Zoom listeners fire before the anchor scroll is restored; measure a frame later.
+    const scheduleMeasureAndSave = () => {
+      if (!memoryKey) return
+      if (!measureFrame) {
+        measureFrame = window.requestAnimationFrame(() => {
+          measureFrame = 0
+          measureEntry()
+          scheduleSave()
+        })
+      }
+    }
+    // Remembered camera: put the same paper point back under the viewport
+    // centre. Layout is still settling (lazy editor, PDF page ratios), so the
+    // camera is re-applied on every plane resize until the user takes over.
+    let restoring = false
+    let restoreFrame = 0
+    const restoreRemembered = () => {
+      if (!remembered) return false
+      const page = writePage()
+      if (!page) return false
+      const pageRect = page.getBoundingClientRect()
+      if (pageRect.width < 1 || pageRect.height < 1) return false
+      const zoom = Math.max(0.01, viewRef.current.zoom)
+      const scrollerRect = scroller.getBoundingClientRect()
+      const centre = scaledPaperCentre(remembered, pageRect.width / zoom, Boolean(scroller.querySelector('.pdf-note-view')))
+      const camera = cameraForPaperCentre(scroller, scrollerRect, pageRect, zoom, centre)
+      // Typed text: the line that was under the viewport edge wins over the
+      // pixel centre — the editor's height estimate for unrendered lines is
+      // still moving while it measures.
+      const anchorY = remembered.anchor
+        ? findPaperTextAnchorProvider(scroller)?.clientYForAnchor(remembered.anchor) ?? null
+        : null
+      if (anchorY !== null && Number.isFinite(anchorY)) {
+        camera.scrollTop = scrollTopForAnchorClientY(scroller, scrollerRect, anchorY)
+      }
+      scrollTo(camera)
+      return true
+    }
     let flingFrames = 0
     let flingId = 0
     const holdFling = () => {
@@ -122,8 +248,35 @@ export function PaperView({ children, className = '', viewKey, showHud = true }:
       const plane = scroller.querySelector<HTMLElement>('.paper-sheet-plane')
         ?? scroller.querySelector<HTMLElement>('.unified-paper')
       clampPaperScrollerToZoomedSheet(scroller, plane)
+      if (restoring && !userInteracted) {
+        // Layout is still settling: the camera is not the user's yet, so it
+        // must not overwrite the remembered one. Another scroller (browser
+        // clamp, editor measure, PDF page-into-view) that moved it gets undone
+        // next frame.
+        if (!isProgrammaticScroll(scroller, lastProgrammatic) && !restoreFrame) {
+          restoreFrame = window.requestAnimationFrame(() => {
+            restoreFrame = 0
+            if (restoring && !userInteracted) restoreRemembered()
+          })
+        }
+        return
+      }
+      measureEntry()
+      scheduleSave()
     }
     scroller.addEventListener('scroll', clampScroll, { passive: true })
+    // The user takes the camera over with any input — also outside the
+    // scroller: an outline jump or a search hit right after opening must not be
+    // undone as a "foreign" scroll. The listeners attach after the pointerdown
+    // that switched the note, so the switch itself never counts.
+    const markInteraction = () => { userInteracted = true }
+    const markKeyInteraction = (event: KeyboardEvent) => {
+      if (isPaperViewTakeoverKey(event)) userInteracted = true
+    }
+    scroller.addEventListener('wheel', markInteraction, { passive: true })
+    window.addEventListener('pointerdown', markInteraction, { passive: true, capture: true })
+    window.addEventListener('touchstart', markInteraction, { passive: true, capture: true })
+    window.addEventListener('keydown', markKeyInteraction, true)
     const applyOpenCamera = () => {
       const plane = scroller.querySelector<HTMLElement>('.paper-sheet-plane')
       const paper = scroller.querySelector<HTMLElement>('.unified-paper')
@@ -142,22 +295,78 @@ export function PaperView({ children, className = '', viewKey, showHud = true }:
         room,
       })
       if (!camera) return false
-      scroller.scrollLeft = camera.x
-      scroller.scrollTop = camera.y
+      scrollTo({ scrollLeft: camera.x, scrollTop: camera.y })
       return true
     }
     let openCameraId = 0
-    if (!applyOpenCamera()) {
+    let restoreObserver: ResizeObserver | null = null
+    let restoreTimer = 0
+    const restoreStartedAt = performance.now()
+    const stopRestoring = () => {
+      restoring = false
+      restoreObserver?.disconnect()
+      restoreObserver = null
+      if (restoreTimer) {
+        window.clearTimeout(restoreTimer)
+        restoreTimer = 0
+      }
+    }
+    if (remembered) {
+      restoring = true
+      restoreRemembered()
+      // The editor measures its first line heights a frame or two after
+      // mount and the ink layer resizes the sheet: re-apply on the first
+      // frames regardless of whether a resize was observed.
+      let warmFrames = PAPER_VIEW_RESTORE_WARM_FRAMES
+      const warm = () => {
+        openCameraId = 0
+        if (!restoring || userInteracted) return
+        restoreRemembered()
+        warmFrames -= 1
+        if (warmFrames > 0) openCameraId = window.requestAnimationFrame(warm)
+      }
+      openCameraId = window.requestAnimationFrame(warm)
+      const plane = scroller.querySelector<HTMLElement>('.paper-sheet-plane')
+      if (plane && typeof ResizeObserver === 'function') {
+        restoreObserver = new ResizeObserver(() => {
+          if (!shouldKeepRestoringPaperView({ startedAt: restoreStartedAt, now: performance.now(), userInteracted })) {
+            stopRestoring()
+            return
+          }
+          restoreRemembered()
+        })
+        restoreObserver.observe(plane)
+      }
+      restoreTimer = window.setTimeout(() => {
+        stopRestoring()
+        measureEntry()
+      }, PAPER_VIEW_RESTORE_SETTLE_MS)
+    } else if (!applyOpenCamera()) {
       openCameraId = window.requestAnimationFrame(() => {
+        openCameraId = 0
         applyOpenCamera()
         clampScroll()
       })
     }
     clampScroll()
+    const unsubscribeZoom = subscribeSharedPaperView(scheduleMeasureAndSave)
+    window.addEventListener('pagehide', saveNow)
     return () => {
+      unsubscribeZoom()
+      window.removeEventListener('pagehide', saveNow)
       scroller.removeEventListener('scroll', clampScroll)
+      scroller.removeEventListener('wheel', markInteraction)
+      window.removeEventListener('pointerdown', markInteraction, true)
+      window.removeEventListener('touchstart', markInteraction, true)
+      window.removeEventListener('keydown', markKeyInteraction, true)
       if (flingId) window.cancelAnimationFrame(flingId)
       if (openCameraId) window.cancelAnimationFrame(openCameraId)
+      if (restoreFrame) window.cancelAnimationFrame(restoreFrame)
+      if (measureFrame) window.cancelAnimationFrame(measureFrame)
+      if (saveTimer) window.clearTimeout(saveTimer)
+      stopRestoring()
+      // Leaving the note: remember the last camera measured on this note's sheet.
+      persist(latestEntry)
     }
   }, [viewKey])
 
@@ -205,16 +414,37 @@ export function PaperView({ children, className = '', viewKey, showHud = true }:
   }, [apply])
 
   const resetView = useCallback(() => {
+    const current = viewRef.current
+    const scroller = noteViewRef.current
+    const sheet = scroller?.querySelector<HTMLElement>('.paper-sheet-plane')
+      ?? scroller?.querySelector<HTMLElement>('.unified-paper')
+      ?? null
+    if (current.zoom !== 1) {
+      // Back to 100% around the cursor, then centre a page that fits — never
+      // leave the sheet half under the sidebar with camera room on the other side.
+      applyPaperZoomStayPut(
+        scroller,
+        sheet,
+        current,
+        1,
+        lastZoomOriginRef.current ?? undefined,
+        (view) => apply({ ...view, rotation: 0, pan: { x: 0, y: 0 } }),
+      )
+      return
+    }
     apply(defaultPaperView())
+    centrePageInViewportIfFits(scroller, sheet)
   }, [apply])
 
   const api = useMemo<PaperViewApi>(() => ({
     ...view,
     zoomBy,
+    zoomTo,
     rotateBy,
     resetView,
     setView,
-  }), [resetView, rotateBy, setView, view, zoomBy])
+    recalled,
+  }), [recalled, resetView, rotateBy, setView, view, zoomBy, zoomTo])
 
   useEffect(() => {
     const root = noteViewRef.current

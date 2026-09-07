@@ -116,9 +116,15 @@ const graphicsStartup = configureLinuxGraphics(app)
 if (linuxInputStartup.ozone === 'x11') {
   console.info(
     linuxInputStartup.hyprlandZeroScaling
-      ? 'FaNotes: Linux Ozone X11 plus HiDPI-Skalierung 2 (Hyprland force_zero_scaling).'
+      ? `FaNotes: Linux Ozone X11 plus HiDPI-Skalierung ${linuxInputStartup.scaleFactor} aus ${linuxInputStartup.scaleSource} (Hyprland force_zero_scaling).`
       : 'FaNotes: Linux Ozone X11, damit Trackpad und Stift denselben Seat teilen.',
   )
+  if (!linuxInputStartup.hyprlandZeroScaling && linuxInputStartup.monitorScale && linuxInputStartup.monitorScale !== 1) {
+    console.info(
+      `FaNotes: Der Hyprland-Monitor skaliert mit ${linuxInputStartup.monitorScale}; das XWayland-Fenster wird hochskaliert und wirkt unscharf. `
+      + 'Scharf wird es mit `xwayland { force_zero_scaling = true }` in der hyprland.conf — FaNotes übernimmt dann die Monitor-Skalierung selbst.',
+    )
+  }
 }
 const singletonCleanup = cleanupStaleSingletonLocks(app.getPath('userData'))
 if (graphicsStartup.mode === 'wayland-vulkan-disabled') {
@@ -1470,6 +1476,9 @@ function bootstrapData() {
       display: process.env.DISPLAY || '',
       waylandDisplay: process.env.WAYLAND_DISPLAY || '',
       hyprlandZeroScaling: Boolean(linuxInputStartup.hyprlandZeroScaling),
+      deviceScaleFactor: linuxInputStartup.scaleFactor ?? null,
+      deviceScaleSource: linuxInputStartup.scaleSource ?? null,
+      monitorScale: linuxInputStartup.monitorScale ?? null,
     },
   }
 }

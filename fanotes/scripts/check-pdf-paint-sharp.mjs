@@ -18,6 +18,7 @@ const {
   MAX_PDF_PIXELS,
   paintSizeForPage,
   pdfPaintDeviceScale,
+  planPdfPagePaint,
 } = await server.ssrLoadModule('/src/lib/pdfDocument.ts')
 const {
   INK_MAX_CANVAS_PIXELS_TALL,
@@ -74,18 +75,46 @@ const runOnce = () => {
   const cssPen = bitmapPen * 900 / viewportInk.width
   assert.ok(Math.abs(cssPen - 3.5) < 1e-6, `pen must still read as 3.5 CSS px, got ${cssPen}`)
 
+  // Camera zoom 2× at DPR 2: the base bitmap (screen density) stays while a
+  // detail window for the viewport is painted on top.
+  const base = planPdfPagePaint(
+    { cssWidth: A4.width, cssHeight: A4.height, rotation: 0, dpr: 2, viewZoom: 1, view: null },
+    { baseKey: '', detail: null },
+  )
+  assert.ok(base.base, 'first plan paints the base')
+  assert.equal(base.detail, 'drop', 'no detail layer at 100%')
+  const zoomedPlan = planPdfPagePaint(
+    {
+      cssWidth: A4.width,
+      cssHeight: A4.height,
+      rotation: 0,
+      dpr: 2,
+      viewZoom: 2,
+      view: { viewWidth: 1200, viewHeight: 800, scrollLeft: 560, scrollTop: 900, pageOffsetLeft: 560, pageOffsetTop: 560 },
+    },
+    { baseKey: base.base.key, detail: null },
+  )
+  assert.equal(zoomedPlan.base, null, 'camera zoom must not re-key the base bitmap')
+  assert.ok(typeof zoomedPlan.detail === 'object', 'camera zoom 2× paints a detail layer')
+  assert.ok(
+    zoomedPlan.detail.box.pixelWidth / zoomedPlan.detail.box.cssWidth >= 2 * 2 * 0.92,
+    'detail window keeps device pixels at 2× camera zoom',
+  )
+
   const pdf = readFileSync(join(root, 'src', 'components', 'PdfNoteView.tsx'), 'utf8')
   const worksheet = readFileSync(join(root, 'src', 'components', 'WorksheetLayer.tsx'), 'utf8')
+  const painter = readFileSync(join(root, 'src', 'lib', 'pdfPagePainter.ts'), 'utf8')
   const board = readFileSync(join(root, 'src', 'components', 'DrawingBoard.tsx'), 'utf8')
   const paperView = readFileSync(join(root, 'src', 'lib', 'paperView.ts'), 'utf8')
   const css = readFileSync(join(root, 'src', 'styles.css'), 'utf8')
-  assert.match(pdf, /paintBoxForPage\(cssWidth, cssHeight, \{/)
-  assert.match(pdf, /watchSheetZoom\(host, schedule\)/)
-  assert.match(pdf, /imageSmoothingQuality = 'high'/)
-  assert.match(pdf, /liveCanvas\.style\.width = `\$\{Math\.round\(box\.cssWidth\)\}px`/)
-  assert.match(pdf, /liveCanvas\.style\.height = `\$\{Math\.round\(box\.cssHeight\)\}px`/)
-  assert.match(worksheet, /paintBoxForPage\(cssWidth, cssHeight, \{/)
-  assert.match(worksheet, /watchSheetZoom\(host, schedule\)/)
+  assert.match(pdf, /createPdfPagePainter\(\{/)
+  assert.match(pdf, /watchSheetZoom\(host, scheduleLayout\)/)
+  assert.match(worksheet, /createPdfPagePainter\(\{/)
+  assert.match(worksheet, /watchSheetZoom\(host, scheduleLayout\)/)
+  assert.match(painter, /planPdfPagePaint\(/)
+  assert.match(painter, /imageSmoothingQuality = 'high'/)
+  assert.match(painter, /canvas\.style\.width = `\$\{box\.cssWidth\.toFixed\(2\)\}px`/)
+  assert.match(painter, /canvas\.style\.height = `\$\{box\.cssHeight\.toFixed\(2\)\}px`/)
   assert.doesNotMatch(worksheet, /MAX_PDF_PIXELS = 2_400_000/)
   assert.match(board, /inkOverlayPixelSize\(/)
   assert.doesNotMatch(board, /MAX_CANVAS_PIXELS_TALL = 4_200_000/)

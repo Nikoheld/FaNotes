@@ -3535,7 +3535,7 @@ export default function App({ startupBootstrap }: AppProps) {
                     {splitTab.kind === 'pdf' || isPdfNotePath(splitTab.path) ? (
                       <Suspense fallback={<div className="pdf-note-status"><LoaderCircle className="spin" size={18} /> PDF wird geladen …</div>}>
                         <SafeBoundary name="Zweite PDF-Notiz" fallbackTitle="Der PDF-Viewer ist abgestürzt">
-                          <PdfNoteView path={splitTab.path} title={splitTab.title} inputDisabled />
+                          <PdfNoteView path={splitTab.path} title={splitTab.title} inputDisabled autoFit={false} />
                         </SafeBoundary>
                       </Suspense>
                     ) : (

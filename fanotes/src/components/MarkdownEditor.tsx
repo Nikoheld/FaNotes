@@ -39,6 +39,7 @@ import {
   drawSelection,
   dropCursor,
   EditorView,
+  gutters,
   highlightActiveLine,
   highlightActiveLineGutter,
   highlightSpecialChars,
@@ -67,6 +68,7 @@ import {
 } from '../lib/paperCaretScroll'
 import { buildTextMotionDiagnosticEvent, recordTextMotionDiagnostic } from '../lib/bugReport'
 import { revealDocumentLine } from '../lib/noteOutline'
+import { clientYFromTextAnchor, registerPaperTextAnchorProvider, textAnchorFromView } from '../lib/paperTextAnchor'
 
 const LazyMarkdownPreview = lazy(() => import('./MarkdownPreview').then((module) => ({
   default: module.MarkdownPreview,
@@ -1152,6 +1154,10 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
       extensions: [
         highlightSpecialChars(),
         history(),
+        // The paper scroller (not .cm-scroller) pans the sheet. "Fixed" gutters
+        // are `position: sticky; left: 0` and would ride over the first glyphs
+        // (82% white) whenever the zoomed sheet is scrolled sideways.
+        gutters({ fixed: false }),
         foldGutter(),
         drawSelection(),
         selectionDragAutoScroll,
@@ -1212,8 +1218,15 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
 
     const view = new EditorView({ state, parent: host })
     viewRef.current = view
+    // The paper camera remembers the text under the viewport edge, not a
+    // pixel offset: CodeMirror only estimates the height of unrendered lines.
+    const unregisterAnchor = registerPaperTextAnchorProvider(host, {
+      anchorAtClientY: (clientY) => textAnchorFromView(view, clientY),
+      clientYForAnchor: (anchor) => clientYFromTextAnchor(view, anchor),
+    })
 
     return () => {
+      unregisterAnchor()
       changeScheduler.flush()
       changeSchedulerRef.current = null
       viewRef.current = null

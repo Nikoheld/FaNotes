@@ -409,6 +409,43 @@ export const clampPaperScrollerToZoomedSheet = (
   if (next.y !== scroller.scrollTop) scroller.scrollTop = next.y
 }
 
+/** The write page inside the camera target (plane → `.unified-paper`). */
+const resolveWritePage = (sheet: HTMLElement | null) => (
+  sheet?.classList.contains('unified-paper')
+    ? sheet
+    : sheet?.querySelector<HTMLElement>('.unified-paper') ?? sheet
+)
+
+/**
+ * Horizontal camera after a zoom step. A page narrower than the viewport is
+ * centred (like every PDF viewer); a wider page keeps the anchor. Without this
+ * a zoom-out or reset left the page half under the sidebar with camera room
+ * filling the other side.
+ */
+export const centredScrollLeftForPage = (
+  scroller: { clientWidth: number; scrollLeft: number },
+  scrollerLeft: number,
+  page: { left: number; width: number },
+) => {
+  if (!(page.width > 0) || !(scroller.clientWidth > 0)) return scroller.scrollLeft
+  if (page.width > scroller.clientWidth + 1) return scroller.scrollLeft
+  const pageCentre = page.left + page.width / 2
+  const viewCentre = scrollerLeft + scroller.clientWidth / 2
+  return Math.max(0, Math.round((scroller.scrollLeft + pageCentre - viewCentre) * 100) / 100)
+}
+
+export const centrePageInViewportIfFits = (scroller: HTMLElement | null, sheet: HTMLElement | null) => {
+  if (!scroller) return false
+  const page = resolveWritePage(sheet)
+  if (!page) return false
+  const pageRect = page.getBoundingClientRect()
+  const scrollerRect = scroller.getBoundingClientRect()
+  const next = centredScrollLeftForPage(scroller, scrollerRect.left, pageRect)
+  if (Math.abs(next - scroller.scrollLeft) < 0.5) return false
+  scroller.scrollLeft = next
+  return true
+}
+
 /**
  * One camera zoom: CSS zoom on the sheet plane, pan as native scroller offset.
  * Capture the paper point under the origin, apply zoom, restore that point.
@@ -437,6 +474,7 @@ export const applyPaperZoomStayPut = (
   restorePaperAnchor(scroller, sheet, anchor)
   clampPaperScrollerToZoomedSheet(scroller, sheet)
   restorePaperAnchor(scroller, sheet, anchor)
+  centrePageInViewportIfFits(scroller, sheet)
   return { view: next, anchor, zoom }
 }
 

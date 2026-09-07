@@ -24,7 +24,7 @@ import {
   ZoomIn,
   ZoomOut,
 } from 'lucide-react'
-import type { PDFDocumentLoadingTask, PDFDocumentProxy, PDFPageProxy, RenderTask } from 'pdfjs-dist'
+import type { PDFDocumentLoadingTask, PDFDocumentProxy, PDFPageProxy } from 'pdfjs-dist'
 import { TextLayer } from 'pdfjs-dist'
 import {
   DEFAULT_PDF_PAGE_RATIO,
@@ -32,18 +32,31 @@ import {
   enqueuePdfRender,
   loadVaultPdfBytes,
   openPdfDocument,
-  paintBoxForPage,
   pdfStartPageForLoad,
-  visiblePageCssWindow,
 } from '../lib/pdfDocument'
+import { createPdfPagePainter, type PdfBasePaintInfo, type PdfPagePainter } from '../lib/pdfPagePainter'
+import {
+  PDF_FIT_GUTTER,
+  pdfColumnCentreScrollLeft,
+  pdfFitPageZoom,
+  pdfFitWidthZoom,
+  pdfPageTopScrollTop,
+  pdfZoomModeForZoom,
+  pdfZoomStep,
+  type PdfZoomMode,
+} from '../lib/pdfCamera'
 import { pdfPageScrollIntoViewBlock } from '../lib/pdfOpenCamera'
 import { PDF_INKING_CLASS, PDF_TOOLBAR_SLOT_ID } from '../lib/pdfInkHit'
-import { layoutOffsetInScroller, readUsedSheetZoom, resolvePaperZoomScroller, watchSheetZoom } from '../lib/paperView'
+import { VIEW_ZOOM_MIN, readSharedZoomMax, resolvePaperZoomScroller, watchSheetZoom } from '../lib/paperView'
+import { loadPaperViewMemory, recallPaperView } from '../lib/paperViewMemory'
+import { usePaperView } from './PaperView'
 
 type PdfNoteViewProps = {
   path: string
   title: string
   inputDisabled?: boolean
+  /** First open fits the page column to the viewport (camera hosts only). */
+  autoFit?: boolean
   onLayoutChange?: () => void
   toolbarSlotId?: string
   initialPage?: number
@@ -63,13 +76,21 @@ type SearchHit = {
 }
 
 const RESIZE_DEBOUNCE_MS = 180
+/** Scroll re-plan cadence; the plan itself is a no-op while the painted window still covers the viewport. */
+const SCROLL_PAINT_THROTTLE_MS = 140
 const HIDE_DEBOUNCE_MS = 360
 const VIEWPORT_ROOT_MARGIN = '160px 0px'
 const MIN_SCALE = 0.5
 const MAX_SCALE = 2.5
 const SCALE_STEP = 0.1
+/** `.pdf-note-page` bottom margin, part of one page's advance in the column. */
+const PAGE_GAP_PX = 16
 
-type ZoomMode = 'fit-width' | 'fit-page' | 'custom'
+type ZoomMode = PdfZoomMode
+
+type FitZoom = { width: number; page: number; measured: boolean }
+
+const UNMEASURED_FIT: FitZoom = { width: 1, page: 1, measured: false }
 
 function PdfPageCanvas({
   pdf,
@@ -89,171 +110,144 @@ function PdfPageCanvas({
   onReady: () => void
 }) {
   const hostRef = useRef<HTMLDivElement>(null)
-  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const baseARef = useRef<HTMLCanvasElement>(null)
+  const baseBRef = useRef<HTMLCanvasElement>(null)
+  const detailARef = useRef<HTMLCanvasElement>(null)
+  const detailBRef = useRef<HTMLCanvasElement>(null)
   const textRef = useRef<HTMLDivElement>(null)
-  const pageRef = useRef<PDFPageProxy | null>(null)
-  const renderRef = useRef<RenderTask | null>(null)
   const textLayerRef = useRef<TextLayer | null>(null)
-  const renderTokenRef = useRef(0)
-  const lastRenderKeyRef = useRef('')
-  const readySentRef = useRef(false)
-  const resizeTimerRef = useRef<number | null>(null)
+  const painterRef = useRef<PdfPagePainter | null>(null)
+  const onReadyRef = useRef(onReady)
+  onReadyRef.current = onReady
+  const textEnabledRef = useRef(textEnabled)
+  textEnabledRef.current = textEnabled
+  const lastBaseRef = useRef<PdfBasePaintInfo | null>(null)
 
-  const render = useCallback(async () => {
-    const host = hostRef.current
-    const canvas = canvasRef.current
-    const page = pageRef.current
-    if (!host || !canvas || !page) return
-    const cssWidth = Math.max(1, Math.round(host.clientWidth))
-    if (cssWidth < 8) return
-    const base = page.getViewport({ scale: 1, rotation })
-    const cssHeight = Math.max(1, Math.round(cssWidth * (base.height / Math.max(1, base.width))))
-    const viewZoom = readUsedSheetZoom(host)
-    const scroller = resolvePaperZoomScroller(host)
-    const pageOffset = layoutOffsetInScroller(host, scroller)
-    const visible = scroller
-      ? visiblePageCssWindow({
-        pageWidth: cssWidth,
-        pageHeight: cssHeight,
-        viewWidth: scroller.clientWidth,
-        viewHeight: scroller.clientHeight,
-        viewZoom,
-        scrollLeft: scroller.scrollLeft,
-        scrollTop: scroller.scrollTop,
-        pageOffsetLeft: pageOffset.left,
-        pageOffsetTop: pageOffset.top,
-      })
-      : null
-    const box = paintBoxForPage(cssWidth, cssHeight, {
-      viewZoom,
-      visibleLeft: visible?.left,
-      visibleTop: visible?.top,
-      visibleCssWidth: visible?.width,
-      visibleCssHeight: visible?.height,
+  // The selectable text layer follows the page box, not the camera: it is
+  // rebuilt with the base bitmap and left alone by scroll and zoom.
+  const paintTextLayer = useCallback(async (info: PdfBasePaintInfo) => {
+    const { page, cssWidth, naturalWidth, rotation: used } = info
+    lastBaseRef.current = info
+    const textHost = textRef.current
+    if (!textHost) return
+    if (!(textEnabledRef.current || textHost.childElementCount > 0)) return
+    try { textLayerRef.current?.cancel() } catch { /* ignore */ }
+    textHost.replaceChildren()
+    const overlayScale = applyPdfTextOverlayScale(textHost, cssWidth, naturalWidth)
+    const layer = new TextLayer({
+      textContentSource: page.streamTextContent(),
+      container: textHost,
+      viewport: page.getViewport({ scale: overlayScale, rotation: used }),
     })
-    const { pixelWidth, pixelHeight } = box
-    const renderKey = `${cssWidth}x${cssHeight}@${box.cssLeft},${box.cssTop},${box.cssWidth}x${box.cssHeight}@${pixelWidth}x${pixelHeight}:${rotation}@${viewZoom.toFixed(2)}`
-    if (renderKey === lastRenderKeyRef.current && canvas.width === pixelWidth && canvas.height === pixelHeight) {
-      return
-    }
-
-    const token = ++renderTokenRef.current
-    renderRef.current?.cancel()
-    textLayerRef.current?.cancel()
-    await enqueuePdfRender(async () => {
-      if (token !== renderTokenRef.current || !pageRef.current || !canvasRef.current || !hostRef.current) return
-      const livePage = pageRef.current
-      const liveCanvas = canvasRef.current
-      const backingPerCss = pixelWidth / Math.max(1, box.cssWidth)
-      const scale = backingPerCss * (cssWidth / Math.max(1, base.width))
-      const viewport = livePage.getViewport({ scale, rotation })
-      liveCanvas.width = pixelWidth
-      liveCanvas.height = pixelHeight
-      liveCanvas.style.position = 'absolute'
-      liveCanvas.style.left = `${Math.round(box.cssLeft)}px`
-      liveCanvas.style.top = `${Math.round(box.cssTop)}px`
-      liveCanvas.style.width = `${Math.round(box.cssWidth)}px`
-      liveCanvas.style.height = `${Math.round(box.cssHeight)}px`
-      const context = liveCanvas.getContext('2d', { alpha: false })
-      if (!context) return
-      const integerScale = Math.abs(scale - Math.round(scale)) < 0.02
-      context.imageSmoothingEnabled = !integerScale
-      context.imageSmoothingQuality = 'high'
-      context.setTransform(1, 0, 0, 1, 0, 0)
-      context.fillStyle = '#ffffff'
-      context.fillRect(0, 0, pixelWidth, pixelHeight)
-      const task = livePage.render({
-        canvas: liveCanvas,
-        canvasContext: context,
-        viewport,
-        intent: 'display',
-        transform: [1, 0, 0, 1, -box.cssLeft * backingPerCss, -box.cssTop * (pixelHeight / Math.max(1, box.cssHeight))],
-      })
-      renderRef.current = task
-      try {
-        await task.promise
-        if (token !== renderTokenRef.current) return
-        lastRenderKeyRef.current = renderKey
-        const textHost = textRef.current
-        if (textHost && (textEnabled || textHost.childElementCount > 0)) {
-          textHost.replaceChildren()
-          const overlayScale = applyPdfTextOverlayScale(textHost, cssWidth, base.width)
-          const cssViewport = livePage.getViewport({ scale: overlayScale, rotation })
-          const layer = new TextLayer({
-            textContentSource: livePage.streamTextContent(),
-            container: textHost,
-            viewport: cssViewport,
-          })
-          textLayerRef.current = layer
-          await layer.render()
-        }
-        if (!readySentRef.current) {
-          readySentRef.current = true
-          onReady()
-        }
-      } catch (error: unknown) {
-        if (!(error instanceof Error) || error.name !== 'RenderingCancelledException') {
-          console.error(`PDF-Seite ${number} konnte nicht gerendert werden.`, error)
-        }
+    textLayerRef.current = layer
+    try {
+      await layer.render()
+    } catch (error: unknown) {
+      if (!(error instanceof Error) || !/cancel/iu.test(error.name)) {
+        console.error(`Textebene der PDF-Seite ${number} konnte nicht aufgebaut werden.`, error)
       }
+    }
+  }, [number])
+
+  useEffect(() => {
+    const host = hostRef.current
+    const baseA = baseARef.current
+    const baseB = baseBRef.current
+    const detailA = detailARef.current
+    const detailB = detailBRef.current
+    if (!host || !baseA || !baseB || !detailA || !detailB) return
+    const painter = createPdfPagePainter({
+      host,
+      base: [baseA, baseB],
+      detail: [detailA, detailB],
+      label: `PDF-Seite ${number}`,
+      onBasePainted: paintTextLayer,
+      onFirstPaint: () => onReadyRef.current(),
     })
-  }, [number, onReady, rotation, textEnabled])
+    painterRef.current = painter
+    return () => {
+      painterRef.current = null
+      lastBaseRef.current = null
+      painter.dispose()
+      try { textLayerRef.current?.cancel() } catch { /* ignore */ }
+      textLayerRef.current = null
+    }
+  }, [number, paintTextLayer])
+
+  // Text selection switched on after the page was painted: build the layer now.
+  useEffect(() => {
+    const info = lastBaseRef.current
+    if (!textEnabled || !info || (textRef.current?.childElementCount ?? 0) > 0) return
+    void paintTextLayer(info)
+  }, [paintTextLayer, textEnabled])
 
   useEffect(() => {
     let alive = true
+    let loaded: PDFPageProxy | null = null
     void pdf.getPage(number).then((page) => {
       if (!alive) {
         page.cleanup()
         return
       }
-      pageRef.current = page
+      loaded = page
       const viewport = page.getViewport({ scale: 1, rotation })
       onRatio(viewport.height / Math.max(1, viewport.width))
-      lastRenderKeyRef.current = ''
-      void render()
+      painterRef.current?.setPage(page, rotation)
+      void painterRef.current?.paint()
     }).catch((error: unknown) => {
       if (alive) console.error(`PDF-Seite ${number} konnte nicht geladen werden.`, error)
     })
     return () => {
       alive = false
-      renderTokenRef.current += 1
-      const page = pageRef.current
-      pageRef.current = null
-      try { renderRef.current?.cancel() } catch { /* ignore */ }
-      renderRef.current = null
-      try { textLayerRef.current?.cancel() } catch { /* ignore */ }
-      textLayerRef.current = null
-      try { page?.cleanup() } catch { /* ignore */ }
+      painterRef.current?.setPage(null, rotation)
+      try { loaded?.cleanup() } catch { /* ignore */ }
+      loaded = null
     }
-  }, [number, onRatio, pdf, render, rotation])
+  }, [number, onRatio, pdf, rotation])
 
   useEffect(() => {
     const host = hostRef.current
     if (!host) return
-    const schedule = () => {
-      if (resizeTimerRef.current !== null) window.clearTimeout(resizeTimerRef.current)
-      resizeTimerRef.current = window.setTimeout(() => {
-        resizeTimerRef.current = null
-        lastRenderKeyRef.current = ''
-        void render()
+    let layoutTimer = 0
+    let scrollTimer = 0
+    const paint = () => { void painterRef.current?.paint() }
+    const scheduleLayout = () => {
+      if (layoutTimer) window.clearTimeout(layoutTimer)
+      layoutTimer = window.setTimeout(() => {
+        layoutTimer = 0
+        paint()
       }, RESIZE_DEBOUNCE_MS)
     }
-    const observer = new ResizeObserver(schedule)
+    // Scroll: planning is cheap and only re-paints once the viewport leaves
+    // the painted window, so throttle (not debounce) — a long scroll at high
+    // zoom keeps receiving sharp windows instead of waiting for a pause.
+    const scheduleScroll = () => {
+      if (scrollTimer) return
+      scrollTimer = window.setTimeout(() => {
+        scrollTimer = 0
+        paint()
+      }, SCROLL_PAINT_THROTTLE_MS)
+    }
+    const observer = new ResizeObserver(scheduleLayout)
     observer.observe(host)
-    const stopZoom = watchSheetZoom(host, schedule)
+    const stopZoom = watchSheetZoom(host, scheduleLayout)
     const scroller = resolvePaperZoomScroller(host)
-    scroller?.addEventListener('scroll', schedule, { passive: true })
+    scroller?.addEventListener('scroll', scheduleScroll, { passive: true })
     return () => {
       observer.disconnect()
       stopZoom()
-      scroller?.removeEventListener('scroll', schedule)
-      if (resizeTimerRef.current !== null) window.clearTimeout(resizeTimerRef.current)
+      scroller?.removeEventListener('scroll', scheduleScroll)
+      if (layoutTimer) window.clearTimeout(layoutTimer)
+      if (scrollTimer) window.clearTimeout(scrollTimer)
     }
-  }, [render])
+  }, [])
 
   return (
     <div className="pdf-note-canvas-host" ref={hostRef}>
-      <canvas ref={canvasRef} aria-label={`PDF-Seite ${number}`} />
+      <canvas ref={baseARef} aria-label={`PDF-Seite ${number}`} />
+      <canvas ref={baseBRef} aria-hidden="true" />
+      <canvas ref={detailARef} aria-hidden="true" />
+      <canvas ref={detailBRef} aria-hidden="true" />
       <div
         className={`pdf-note-text-layer ${highlight ? 'has-search' : ''}`}
         data-highlight={highlight || undefined}
@@ -450,6 +444,7 @@ export function PdfNoteView({
   inputDisabled = false,
   onLayoutChange,
   toolbarSlotId = PDF_TOOLBAR_SLOT_ID,
+  autoFit = true,
   initialPage,
   onPageChange,
 }: PdfNoteViewProps) {
@@ -485,6 +480,62 @@ export function PdfNoteView({
   const pdfTaskRef = useRef<PDFDocumentLoadingTask | null>(null)
   const loadedPathRef = useRef('')
 
+  // Inside a PaperView the toolbar zoom is the sheet camera: the page column
+  // keeps its layout width (ink is 0–1 of the paper) and the camera scales it.
+  // Without a camera host (subject book pane) the column width is scaled.
+  const camera = usePaperView()
+  const cameraHosted = camera !== null
+  const cameraZoom = camera?.zoom ?? 1
+  const cameraRef = useRef(camera)
+  cameraRef.current = camera
+  const [fit, setFit] = useState<FitZoom>(UNMEASURED_FIT)
+  const [cameraMode, setCameraModeState] = useState<ZoomMode>('custom')
+  const cameraModeRef = useRef<ZoomMode>('custom')
+  const setCameraMode = useCallback((mode: ZoomMode) => {
+    cameraModeRef.current = mode
+    setCameraModeState(mode)
+  }, [])
+  /** Zoom this view asked the camera for; anything else is the user's own zoom. */
+  const expectedZoomRef = useRef<number | null>(null)
+  const currentPageRef = useRef(1)
+
+  const measureFit = useCallback((): FitZoom | null => {
+    const pages = pagesRef.current
+    const scroller = resolvePaperZoomScroller(pages)
+    if (!pages || !scroller || !(pages.offsetWidth > 8) || !(scroller.clientWidth > 8)) return null
+    const firstPage = pages.querySelector<HTMLElement>('.pdf-note-page')
+    const input = {
+      viewWidth: scroller.clientWidth,
+      viewHeight: scroller.clientHeight,
+      columnWidth: pages.offsetWidth,
+      pageHeight: firstPage ? firstPage.offsetHeight + PAGE_GAP_PX : 0,
+      min: VIEW_ZOOM_MIN,
+      max: readSharedZoomMax(),
+    }
+    return { width: pdfFitWidthZoom(input), page: pdfFitPageZoom(input), measured: true }
+  }, [])
+
+  const applyCameraZoom = useCallback((zoom: number, mode: ZoomMode, options: { pageTop?: number } = {}) => {
+    const cam = cameraRef.current
+    const pages = pagesRef.current
+    const scroller = resolvePaperZoomScroller(pages)
+    if (!cam || !pages || !scroller) return
+    setCameraMode(mode)
+    expectedZoomRef.current = zoom
+    const viewRect = scroller.getBoundingClientRect()
+    // Client box, not the border box: the scrollbar is not part of the viewport.
+    cam.zoomTo(zoom, { x: viewRect.left + scroller.clientWidth / 2, y: viewRect.top + scroller.clientHeight / 2 })
+    // Fit modes centre the column like every PDF viewer; ± steps keep the
+    // point under the viewport centre, which is already centred then.
+    if (mode !== 'custom') {
+      scroller.scrollLeft = pdfColumnCentreScrollLeft(scroller, viewRect.left, pages.getBoundingClientRect())
+    }
+    if (options.pageTop) {
+      const node = pages.querySelector<HTMLElement>(`[data-pdf-page="${options.pageTop}"]`)
+      if (node) scroller.scrollTop = pdfPageTopScrollTop(scroller, viewRect.top, node.getBoundingClientRect())
+    }
+  }, [setCameraMode])
+
   const notifyLayout = useCallback(() => {
     if (!onLayoutChange) return
     if (layoutTimerRef.current !== null) window.clearTimeout(layoutTimerRef.current)
@@ -509,6 +560,11 @@ export function PdfNoteView({
     setRotation(0)
     setZoomMode('fit-width')
     setScale(1)
+    // Decided once the document is in the DOM (see the layout effect below):
+    // a remembered camera is the user's, a first open fits the column.
+    setCameraMode('custom')
+    expectedZoomRef.current = null
+    setFit(UNMEASURED_FIT)
     void loadVaultPdfBytes(path)
       .then(async (bytes) => {
         if (!alive) return
@@ -565,7 +621,7 @@ export function PdfNoteView({
       pdfTaskRef.current = null
       void task?.destroy().catch(() => undefined)
     }
-  }, [notifyLayout, password, path])
+  }, [notifyLayout, password, path, setCameraMode])
 
   useEffect(() => {
     if (!onPageChange || pageCount < 1) return
@@ -588,12 +644,83 @@ export function PdfNoteView({
   }, [pageRatio])
 
   const appliedScale = zoomMode === 'fit-page' ? fitPageScale : scale
+  currentPageRef.current = currentPage
 
   useLayoutEffect(() => {
     if (!pdf) return
-    const node = pagesRef.current?.querySelector(`[data-pdf-page="${currentPage}"]`)
+    const cam = cameraRef.current
+    // A remembered camera (PaperView) reopens the exact spot; page-into-view
+    // would yank it to the page centre and a fit would overrule the user.
+    if (cam ? cam.recalled : recallPaperView(loadPaperViewMemory(), path)) {
+      if (cam) setCameraMode('custom')
+      return
+    }
+    if (cam && autoFit) {
+      // First open: the page column fills the viewport width, the start page
+      // sits at the top — no empty stage beside a 900px column on a wide window.
+      const measured = measureFit()
+      if (measured) {
+        setFit(measured)
+        applyCameraZoom(measured.width, 'fit-width', { pageTop: currentPageRef.current })
+      } else {
+        setCameraMode('fit-width')
+      }
+      return
+    }
+    const node = pagesRef.current?.querySelector(`[data-pdf-page="${currentPageRef.current}"]`)
     node?.scrollIntoView({ block: pdfPageScrollIntoViewBlock('center'), behavior: 'auto' })
-  }, [pdf, path])
+  }, [applyCameraZoom, autoFit, measureFit, pdf, path, setCameraMode])
+
+  // Fit factors follow the viewport and the page boxes (ratios arrive per page).
+  useEffect(() => {
+    if (!cameraHosted || !pdf) return
+    const pages = pagesRef.current
+    const scroller = resolvePaperZoomScroller(pages)
+    if (!pages || !scroller) return
+    let frame = 0
+    const update = () => {
+      frame = 0
+      const measured = measureFit()
+      if (!measured) return
+      setFit((current) => (
+        current.measured && Math.abs(current.width - measured.width) < 0.001 && Math.abs(current.page - measured.page) < 0.001
+          ? current
+          : measured
+      ))
+    }
+    const schedule = () => {
+      if (!frame) frame = window.requestAnimationFrame(update)
+    }
+    const observer = new ResizeObserver(schedule)
+    observer.observe(scroller)
+    observer.observe(pages)
+    const firstPage = pages.querySelector<HTMLElement>('.pdf-note-page')
+    if (firstPage) observer.observe(firstPage)
+    schedule()
+    return () => {
+      observer.disconnect()
+      if (frame) window.cancelAnimationFrame(frame)
+    }
+  }, [cameraHosted, measureFit, pdf, pageRatio])
+
+  // The user zoomed the sheet themselves (wheel, pinch, HUD): the toolbar
+  // shows that zoom and stops re-fitting on resize.
+  useEffect(() => {
+    if (!cameraHosted || !fit.measured) return
+    const expected = expectedZoomRef.current
+    if (expected !== null && Math.abs(cameraZoom - expected) <= 0.006) return
+    expectedZoomRef.current = null
+    const derived = pdfZoomModeForZoom(cameraZoom, fit)
+    if (derived !== cameraModeRef.current) setCameraMode(derived)
+  }, [cameraHosted, cameraZoom, fit, setCameraMode])
+
+  // Viewport or page boxes changed while a fit mode is active: keep the fit.
+  useEffect(() => {
+    if (!cameraHosted || !pdf || !fit.measured) return
+    const mode = cameraModeRef.current
+    if (mode === 'fit-width') applyCameraZoom(fit.width, 'fit-width')
+    else if (mode === 'fit-page') applyCameraZoom(fit.page, 'fit-page')
+  }, [applyCameraZoom, cameraHosted, fit, pdf])
 
   const scrollToPage = useCallback((page: number) => {
     const target = Math.max(1, Math.min(pageCount || 1, Math.round(page)))
@@ -719,7 +846,40 @@ export function PdfNoteView({
   ))
 
   const activeHighlight = searchHits[searchIndex]?.page === currentPage ? searchQuery.trim() : ''
-  const zoomLabel = zoomMode === 'fit-width' ? 'Breite' : zoomMode === 'fit-page' ? 'Seite' : `${Math.round(appliedScale * 100)} %`
+  const shownMode: ZoomMode = cameraHosted ? cameraMode : zoomMode
+  const zoomLabel = cameraHosted
+    ? `${Math.round(cameraZoom * 100)} %`
+    : zoomMode === 'fit-width' ? 'Breite' : zoomMode === 'fit-page' ? 'Seite' : `${Math.round(appliedScale * 100)} %`
+  const zoomOutDisabled = cameraHosted ? cameraZoom <= VIEW_ZOOM_MIN + 1e-6 : appliedScale <= MIN_SCALE
+  const zoomInDisabled = cameraHosted ? cameraZoom >= readSharedZoomMax() - 1e-6 : appliedScale >= MAX_SCALE
+  const zoomOut = () => {
+    if (cameraHosted) applyCameraZoom(pdfZoomStep(cameraZoom, -1, VIEW_ZOOM_MIN, readSharedZoomMax()), 'custom')
+    else changeScale(appliedScale - SCALE_STEP)
+  }
+  const zoomIn = () => {
+    if (cameraHosted) applyCameraZoom(pdfZoomStep(cameraZoom, 1, VIEW_ZOOM_MIN, readSharedZoomMax()), 'custom')
+    else changeScale(appliedScale + SCALE_STEP)
+  }
+  const fitWidth = () => {
+    if (cameraHosted) {
+      const measured = measureFit()
+      if (measured) setFit(measured)
+      applyCameraZoom((measured ?? fit).width, 'fit-width')
+      return
+    }
+    setZoomMode('fit-width')
+    setScale(1)
+    notifyLayout()
+  }
+  const fitPage = () => {
+    if (cameraHosted) {
+      const measured = measureFit()
+      if (measured) setFit(measured)
+      applyCameraZoom((measured ?? fit).page, 'fit-page', { pageTop: currentPage })
+      return
+    }
+    setZoomMode('fit-page')
+  }
   const thumbs = useMemo(() => (pdf ? Array.from({ length: Math.min(pdf.numPages, 80) }, (_, index) => index + 1) : []), [pdf])
 
   const chrome = (
@@ -745,11 +905,11 @@ export function PdfNoteView({
           <button type="button" aria-label="Nächste Seite" disabled={!pdf || currentPage >= pageCount} onClick={() => scrollToPage(currentPage + 1)}><ChevronDown size={14} /></button>
         </span>
         <span className="pdf-note-zoom">
-          <button type="button" aria-label="Verkleinern" disabled={appliedScale <= MIN_SCALE} onClick={() => changeScale(appliedScale - SCALE_STEP)}><ZoomOut size={14} /></button>
-          <button type="button" className={zoomMode === 'custom' ? 'is-active' : ''} title="Zoom zurücksetzen" onClick={() => { setZoomMode('fit-width'); setScale(1); notifyLayout() }}>{zoomLabel}</button>
-          <button type="button" aria-label="Vergrößern" disabled={appliedScale >= MAX_SCALE} onClick={() => changeScale(appliedScale + SCALE_STEP)}><ZoomIn size={14} /></button>
-          <button type="button" className={zoomMode === 'fit-width' ? 'is-active' : ''} title="An Breite anpassen" onClick={() => { setZoomMode('fit-width'); setScale(1); notifyLayout() }}>Breite</button>
-          <button type="button" className={zoomMode === 'fit-page' ? 'is-active' : ''} title="Ganze Seite" onClick={() => setZoomMode('fit-page')}><Maximize2 size={14} /></button>
+          <button type="button" aria-label="Verkleinern" disabled={!pdf || zoomOutDisabled} onClick={zoomOut}><ZoomOut size={14} /></button>
+          <button type="button" className={shownMode === 'custom' ? 'is-active' : ''} title="Zoom zurücksetzen" disabled={!pdf} onClick={fitWidth}>{zoomLabel}</button>
+          <button type="button" aria-label="Vergrößern" disabled={!pdf || zoomInDisabled} onClick={zoomIn}><ZoomIn size={14} /></button>
+          <button type="button" className={shownMode === 'fit-width' ? 'is-active' : ''} title="An Breite anpassen" disabled={!pdf} onClick={fitWidth}>Breite</button>
+          <button type="button" className={shownMode === 'fit-page' ? 'is-active' : ''} title="Ganze Seite" aria-label="Ganze Seite" disabled={!pdf} onClick={fitPage}><Maximize2 size={14} /></button>
         </span>
         <span className="pdf-note-tools">
           <button type="button" className={searchOpen ? 'is-active' : ''} title="Im PDF suchen (Strg+F)" aria-label="Im PDF suchen" onClick={() => setSearchOpen((value) => !value)}><Search size={14} /></button>
@@ -793,7 +953,10 @@ export function PdfNoteView({
       onKeyDown={handleChromeKey}
     >
       {toolbarHost && !inputDisabled ? createPortal(chrome, toolbarHost) : null}
-      {loading && <div className="pdf-note-status"><LoaderCircle className="spin" size={20} /> PDF wird vorbereitet …</div>}
+      {/* Only until the document exists: kept in flow above the pages, the 220px
+          placeholder shifts the column (and any camera measured against it)
+          when `loading` clears a tick after `pdf` is set. */}
+      {loading && !pdf && <div className="pdf-note-status"><LoaderCircle className="spin" size={20} /> PDF wird vorbereitet …</div>}
       {needsPassword && !pdf && (
         <form className="pdf-note-password" onSubmit={(event) => { event.preventDefault(); setPassword(passwordDraft) }}>
           <strong>Dieses PDF ist geschützt</strong>
@@ -828,7 +991,7 @@ export function PdfNoteView({
           <div
             className="pdf-note-pages"
             ref={pagesRef}
-            style={{ width: `${Math.round(appliedScale * 100)}%` }}
+            style={{ width: cameraHosted ? '100%' : `${Math.round(appliedScale * 100)}%` }}
           >
             {Array.from({ length: pdf.numPages }, (_, index) => {
               const page = index + 1

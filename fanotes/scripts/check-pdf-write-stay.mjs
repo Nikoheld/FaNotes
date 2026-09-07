@@ -376,9 +376,14 @@ const runOnce = () => {
   assert.match(board, /planInkWindowNow\(\)\n        redraw\(true\)/)
   assert.match(board, /if \(!planInkWindowNow\(force\)\) return false\n    canvasQualityKeyRef\.current = ''\n    redraw\(true\)/)
   assert.doesNotMatch(board, /applyInkWindowToCanvases\([^\n]*\)\n\s*scheduleRedraw\(\)/)
-  assert.match(pdf, /paintBoxForPage\(cssWidth, cssHeight, \{/)
-  assert.match(pdf, /liveCanvas\.style\.width = `\$\{Math\.round\(box\.cssWidth\)\}px`/)
-  assert.match(pdf, /liveCanvas\.style\.height = `\$\{Math\.round\(box\.cssHeight\)\}px`/)
+  // Page bitmaps come from the double-buffered painter: a scroll never clears
+  // the visible canvas, the next bitmap is swapped in once pdf.js finished.
+  const painter = readFileSync(join(root, 'src/lib/pdfPagePainter.ts'), 'utf8')
+  assert.match(pdf, /createPdfPagePainter\(\{/)
+  assert.match(painter, /planPdfPagePaint\(/)
+  assert.match(painter, /const back = layer\.canvases\[layer\.front \^ 1\]/)
+  assert.match(painter, /canvas\.style\.width = `\$\{box\.cssWidth\.toFixed\(2\)\}px`/)
+  assert.match(painter, /canvas\.style\.height = `\$\{box\.cssHeight\.toFixed\(2\)\}px`/)
   assert.doesNotMatch(css, /\.pdf-note-page\.is-virtualized \{[^}]*contain:\s*strict/)
   assert.doesNotMatch(css, /contain-intrinsic-size:\s*800px 1100px/)
   assert.match(css, /\.pdf-note-page canvas \{[\s\S]*?width:\s*auto/)
