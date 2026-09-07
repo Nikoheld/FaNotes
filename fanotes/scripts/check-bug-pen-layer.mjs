@@ -157,7 +157,9 @@ try {
 
   assert.match(appSource, /overlayAfterNoteSwitch/)
   assert.match(appSource, /INK_OVERLAY_CRASH_TITLE/)
-  assert.match(appSource, /key=\{`stiftebene:\$\{activeTab\.path\}:\$\{drawingSession\.key\}`\}/)
+  // The boundary is keyed by the note's own session (overlaySessionForNote), so
+  // a session loaded for another note never mounts under this note's path.
+  assert.match(appSource, /key=\{`stiftebene:\$\{activeTab\.path\}:\$\{noteDrawingSession\.key\}`\}/)
   assert.match(boardSource, /portalInkToolbar\(createPortal/)
   assert.match(boardSource, /liveInkToolbarHost/)
   assert.match(css, new RegExp(inkOverlayHitSelector.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&').replace('\\\\', '\\')))
