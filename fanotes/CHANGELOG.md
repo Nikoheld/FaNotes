@@ -2,6 +2,11 @@
 
 ## Unveröffentlicht
 
+## 2026.9.19
+
+- **Handschrift bleibt beim Notizwechsel erhalten:** Gespeicherte Handschrift ist nach dem Wechsel zu einer anderen Notiz und zurück wieder da — auch im Tastaturmodus, in dem sie bisher gar nicht geladen wurde. Die Stiftebene wächst beim Öffnen nur bis zum Blatt statt bis zum Blatt plus Kamerarand; dieses endlose Wachsen ließ sie beim Notizwechsel abstürzen. Eine Notiz zeigt und speichert nur ihre eigene Tinte: Die Tinte der vorigen Notiz konnte für einen Moment auf dem neuen Blatt liegen und unter der falschen Notiz gespeichert werden. Eingebettete Tinte behält die Kennung ihrer Notiz, sodass der Stift nicht auf einer alten Kopie der Seite weiterschreibt, und nach dem Wechsel im Tastaturmodus nimmt er sofort wieder Eingaben an.
+- **Tinte sitzt nach dem Wachsen des Blatts an derselben Stelle:** Die Seite wird mit dem Blatt gespeichert, auf das die Striche bezogen sind, die Tintenfläche wird in Blattpixeln statt in Prozent positioniert, und die Striche werden vor jedem Neuzeichnen an das gewachsene Blatt angepasst. Wächst das Blatt um eine Textzeile oder auf die Fensterhöhe, rutscht die Handschrift nicht mehr und erscheint beim erneuten Öffnen nicht mehr zusammengeschoben.
+
 ## 2026.9.18
 
 - **Schreiben ohne Ruckeln:** Der laufende Strich wird nicht mehr bei jeder Stiftprobe komplett gelöscht und neu gemalt — nur sein letztes Stück wird ergänzt, einmal pro Eingabe statt pro Probe. Die Live-Ebene ist nur noch so groß wie der sichtbare Ausschnitt plus Rand und folgt dem Stift; ihre Bitmap wird schon beim Anlegen bereitgestellt, damit der erste Stiftkontakt sofort zeichnet. Die Tintenflächen werden nie mehr zurückgelesen, sodass Chromium sie auf der Grafikkarte belässt — unter Windows wie unter Linux/Hyprland. Beim Abheben wird die Seite nicht mehr komplett neu gezeichnet.
