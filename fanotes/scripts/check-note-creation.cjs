@@ -163,6 +163,20 @@ void (async () => {
 
     await cdp.evaluate(`document.querySelector('.sidebar-header button[aria-label="Neue Notiz"]').click()`)
     await waitFor(cdp, `document.querySelector('.note-tab.active')?.title?.endsWith('Unbenannte Notiz.md')`, 'Die sichtbare Notizerstellung')
+    const editorHasSidecar = (text) => /fanotes-famd-v1|"schema"\s*:\s*"fanotes-famd-v1"|"ink"\s*:\s*null/u.test(text || '')
+    const readEditor = `document.querySelector('.cm-content')?.innerText || document.querySelector('.cm-editor')?.innerText || ''`
+    const uiEditor = await cdp.evaluate(readEditor)
+    if (editorHasSidecar(uiEditor)) throw new Error(`Neue Notiz zeigte die .famd-Begleiterdatei im Editor: ${JSON.stringify(uiEditor).slice(0, 240)}`)
+    await cdp.evaluate(`(() => {
+      const view = document.querySelector('.cm-content')
+      if (!view) throw new Error('Kein Editor')
+      view.focus()
+      document.execCommand('insertText', false, 'x')
+      return true
+    })()`)
+    await wait(1200)
+    const afterSave = await cdp.evaluate(readEditor)
+    if (editorHasSidecar(afterSave)) throw new Error(`Nach dem Speichern lag die .famd-JSON im Editor: ${JSON.stringify(afterSave).slice(0, 240)}`)
     const uiPath = await cdp.evaluate(`document.querySelector('.note-tab.active').title`)
     const originalSettings = await cdp.evaluate(`window.fanotes.bootstrap().then((value) => value.settings)`)
     await cdp.evaluate(`window.fanotes.saveSettings({ ...${JSON.stringify(originalSettings)}, uiLanguage: 'en' })`)

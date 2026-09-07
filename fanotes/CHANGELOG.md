@@ -2,6 +2,10 @@
 
 ## Unveröffentlicht
 
+## 2026.9.19
+
+- **Neue Notiz bleibt Text:** Beim Anlegen und Speichern erscheint die `.famd`-Begleiter-JSON nicht im Editor. Sichtbar bleibt nur der Markdown-Text; die Statistik liegt in der Begleiterdatei.
+
 ## 2026.9.18
 
 - **Schreiben ohne Ruckeln:** Der laufende Strich wird nicht mehr bei jeder Stiftprobe komplett gelöscht und neu gemalt — nur sein letztes Stück wird ergänzt, einmal pro Eingabe statt pro Probe. Die Live-Ebene ist nur noch so groß wie der sichtbare Ausschnitt plus Rand und folgt dem Stift; ihre Bitmap wird schon beim Anlegen bereitgestellt, damit der erste Stiftkontakt sofort zeichnet. Die Tintenflächen werden nie mehr zurückgelesen, sodass Chromium sie auf der Grafikkarte belässt — unter Windows wie unter Linux/Hyprland. Beim Abheben wird die Seite nicht mehr komplett neu gezeichnet.

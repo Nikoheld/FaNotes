@@ -43,7 +43,16 @@ const encoded = serializeFamd(markdown, {
 
 assert.match(encoded, /<!-- fanotes-famd:v1 chars=\d+ -->/u)
 assert.equal(stripFamdPayload(encoded).includes('fanotes-famd'), false)
+assert.equal(stripFamdPayload(encoded).includes('"schema"'), false)
 assert.ok(stripFamdPayload(encoded).includes('# Analysis'))
+assert.equal(
+  stripFamdPayload('{"schema":"fanotes-famd-v1","updatedAt":"2026-09-07T00:00:00.000Z","ink":null,"worksheets":[]}'),
+  '',
+)
+assert.equal(
+  stripFamdPayload('# Hello\n\n{"schema":"fanotes-famd-v1","updatedAt":"2026-09-07T00:00:00.000Z","ink":null,"worksheets":[]}'),
+  '# Hello',
+)
 
 const parsed = parseFamd(encoded)
 assert.equal(parsed.payload?.schema, 'fanotes-famd-v1')
@@ -67,6 +76,10 @@ const path = require('node:path')
 const main = fs.readFileSync(path.join(__dirname, '..', 'electron', 'main.cjs'), 'utf8')
 const preload = fs.readFileSync(path.join(__dirname, '..', 'electron', 'preload.cjs'), 'utf8')
 const app = fs.readFileSync(path.join(__dirname, '..', 'src', 'App.tsx'), 'utf8')
+assert.match(app, /const visibleContent = stripFamdPayload\(nextContent\)/u)
+assert.match(app, /content: tab\.content === content \? visibleContent : tab\.content, savedContent: visibleContent/u)
+assert.doesNotMatch(app, /content: tab\.content === content \? nextContent : tab\.content/u)
+assert.doesNotMatch(app, /pendingWrites\.current\.set\(path, writePageStatsIntoNote/u)
 assert.match(main, /fanotes:read-famd-ink/u)
 assert.match(main, /fanotes:import-pdf-note/u)
 assert.match(main, /writeFamdCompanion/u)
