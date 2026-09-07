@@ -269,3 +269,14 @@ export const shouldKeepRestoringPaperView = (input: {
 }) => (
   !input.userInteracted && input.now - input.startedAt <= (input.settleMs ?? PAPER_VIEW_RESTORE_SETTLE_MS)
 )
+
+const MODIFIER_KEYS = new Set(['Alt', 'AltGraph', 'Control', 'Meta', 'Shift', 'CapsLock', 'NumLock', 'ScrollLock', 'Fn', 'Hyper', 'Super', 'OS'])
+
+/**
+ * A key press anywhere hands the camera to the user (outline jump, search hit,
+ * caret move). Not the keys still in flight from the note switch itself: held
+ * repeats of Ctrl+Tab / Ctrl+PageDown and bare modifiers.
+ */
+export const isPaperViewTakeoverKey = (event: { key: string; repeat?: boolean }) => (
+  !event.repeat && !MODIFIER_KEYS.has(event.key)
+)

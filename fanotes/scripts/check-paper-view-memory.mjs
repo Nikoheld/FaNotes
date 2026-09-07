@@ -21,6 +21,7 @@ const anchorMod = await server.ssrLoadModule('/src/lib/paperTextAnchor.ts')
 const {
   PAPER_VIEW_MEMORY_KEY,
   cameraForPaperCentre,
+  isPaperViewTakeoverKey,
   isProgrammaticScroll,
   loadPaperViewMemory,
   paperCentreFromCamera,
@@ -155,6 +156,11 @@ assert.equal(isProgrammaticScroll({ scrollLeft: 0, scrollTop: 0 }, null), false)
 assert.equal(shouldKeepRestoringPaperView({ startedAt: 0, now: 1000, userInteracted: false }), true)
 assert.equal(shouldKeepRestoringPaperView({ startedAt: 0, now: 1000, userInteracted: true }), false, 'first wheel/pen stops the restore')
 assert.equal(shouldKeepRestoringPaperView({ startedAt: 0, now: 5000, userInteracted: false }), false)
+assert.equal(isPaperViewTakeoverKey({ key: 'ArrowDown' }), true, 'a caret move is the user\'s')
+assert.equal(isPaperViewTakeoverKey({ key: 'Enter', repeat: false }), true)
+assert.equal(isPaperViewTakeoverKey({ key: 'Tab', repeat: true }), false, 'a held Ctrl+Tab from the note switch is not')
+assert.equal(isPaperViewTakeoverKey({ key: 'Control' }), false, 'a bare modifier is not')
+assert.equal(isPaperViewTakeoverKey({ key: 'Shift', repeat: true }), false)
 
 // --- wiring ------------------------------------------------------------------
 const here = dirname(fileURLToPath(import.meta.url))
@@ -163,6 +169,8 @@ assert.match(paperView, /useLayoutEffect\(\(\) => \{\s*\/\/ Only when the note i
 assert.match(paperView, /recallPaperView\(loadPaperViewMemory\(\), paperViewMemoryKey\(viewKey\)\)/u, 'note switch recalls the remembered camera')
 assert.match(paperView, /findPaperTextAnchorProvider\(scroller\)\?\.clientYForAnchor\(remembered\.anchor\)/u, 'typed notes restore by text anchor')
 assert.match(paperView, /if \(restoring && !userInteracted\) \{/u, 'restore never re-saves the settling camera')
+assert.match(paperView, /window\.addEventListener\('pointerdown', markInteraction, \{ passive: true, capture: true \}\)/u, 'any pointer input (outline jump, search hit) hands the camera to the user')
+assert.match(paperView, /window\.addEventListener\('keydown', markKeyInteraction, true\)/u, 'any key press hands the camera to the user')
 assert.match(paperView, /window\.addEventListener\('pagehide', saveNow\)/u, 'camera saved on window close')
 assert.match(paperView, /persist\(latestEntry\)/u, 'camera saved when leaving the note')
 const editor = readFileSync(join(here, '../src/components/MarkdownEditor.tsx'), 'utf8')

@@ -37,6 +37,7 @@ import {
   PAPER_VIEW_RESTORE_SETTLE_MS,
   PAPER_VIEW_RESTORE_WARM_FRAMES,
   cameraForPaperCentre,
+  isPaperViewTakeoverKey,
   isProgrammaticScroll,
   loadPaperViewMemory,
   paperCentreFromCamera,
@@ -264,11 +265,18 @@ export function PaperView({ children, className = '', viewKey, showHud = true }:
       scheduleSave()
     }
     scroller.addEventListener('scroll', clampScroll, { passive: true })
+    // The user takes the camera over with any input — also outside the
+    // scroller: an outline jump or a search hit right after opening must not be
+    // undone as a "foreign" scroll. The listeners attach after the pointerdown
+    // that switched the note, so the switch itself never counts.
     const markInteraction = () => { userInteracted = true }
+    const markKeyInteraction = (event: KeyboardEvent) => {
+      if (isPaperViewTakeoverKey(event)) userInteracted = true
+    }
     scroller.addEventListener('wheel', markInteraction, { passive: true })
-    scroller.addEventListener('pointerdown', markInteraction, { passive: true })
-    scroller.addEventListener('touchstart', markInteraction, { passive: true })
-    scroller.addEventListener('keydown', markInteraction)
+    window.addEventListener('pointerdown', markInteraction, { passive: true, capture: true })
+    window.addEventListener('touchstart', markInteraction, { passive: true, capture: true })
+    window.addEventListener('keydown', markKeyInteraction, true)
     const applyOpenCamera = () => {
       const plane = scroller.querySelector<HTMLElement>('.paper-sheet-plane')
       const paper = scroller.querySelector<HTMLElement>('.unified-paper')
@@ -348,9 +356,9 @@ export function PaperView({ children, className = '', viewKey, showHud = true }:
       window.removeEventListener('pagehide', saveNow)
       scroller.removeEventListener('scroll', clampScroll)
       scroller.removeEventListener('wheel', markInteraction)
-      scroller.removeEventListener('pointerdown', markInteraction)
-      scroller.removeEventListener('touchstart', markInteraction)
-      scroller.removeEventListener('keydown', markInteraction)
+      window.removeEventListener('pointerdown', markInteraction, true)
+      window.removeEventListener('touchstart', markInteraction, true)
+      window.removeEventListener('keydown', markKeyInteraction, true)
       if (flingId) window.cancelAnimationFrame(flingId)
       if (openCameraId) window.cancelAnimationFrame(openCameraId)
       if (restoreFrame) window.cancelAnimationFrame(restoreFrame)
