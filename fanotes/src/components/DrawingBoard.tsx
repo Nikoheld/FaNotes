@@ -122,7 +122,14 @@ import {
   resolveInkToolbarHost,
   shouldSyncPdfOverlaySource,
 } from '../lib/pdfInkHit'
-import { overlayGlobalPointerLockOn, overlayHitEnabled, overlayInert } from '../lib/overlayInteract'
+import {
+  type AuthoredInkSave,
+  inkDocumentIsOwnSave,
+  inkPagePersists,
+  overlayGlobalPointerLockOn,
+  overlayHitEnabled,
+  overlayInert,
+} from '../lib/overlayInteract'
 import {
   type InkLayoutBox,
   type InkLayoutPoint,
@@ -1267,6 +1274,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const initialColorRef = useRef(settings.penColor)
   const drawingIdRef = useRef(drawingId)
   const loadedDrawingIdRef = useRef<string | null | undefined>(undefined)
+  /** The last snapshot this board wrote; the session echoes it back after the save. */
+  const authoredSaveRef = useRef<AuthoredInkSave | null>(null)
   const mathSolverHistoryRef = useRef<MathSolverHistoryEntry[]>([])
 
   const [initialArtPreferences] = useState(loadArtPreferences)
@@ -1935,6 +1944,14 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     if (!initialDrawingJson) return
     const sourceId = drawingId ?? null
     if (loadedDrawingIdRef.current === sourceId) return
+    if (inkDocumentIsOwnSave(authoredSaveRef.current, sourceId, initialDrawingJson)) {
+      // The first save gives a new page its id; the session then hands that
+      // snapshot back. The live strokes are already ahead of it (an erase
+      // during the save must not be undone by it), so it is only acknowledged.
+      loadedDrawingIdRef.current = sourceId
+      if (sourceId) drawingIdRef.current = sourceId
+      return
+    }
     try {
       const document: unknown = JSON.parse(initialDrawingJson)
       if (!document || typeof document !== 'object') throw new Error('Kein Zeichnungsobjekt')
@@ -4251,8 +4268,28 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     }
   }, [activeMode, mathSolverEnabled, mode, paperStyle, settings.smoothing, title])
 
+  /** A record exists once the page was loaded from the note or written by this board. */
+  const inkRecordExists = useCallback(() => (
+    Boolean(drawingIdRef.current) || loadedDrawingIdRef.current !== undefined
+  ), [])
+
+  /**
+   * Write the page and adopt the id the app assigned. The snapshot is noted
+   * first: the app updates the session (which echoes it back as the board's
+   * document) before the save resolves.
+   */
+  const writeInkPage = useCallback(async (payload: DrawingSavePayload) => {
+    authoredSaveRef.current = { id: payload.id || null, drawingJson: payload.drawingJson }
+    const result = await onSaveDrawing(payload)
+    if (result && typeof result === 'object' && 'id' in result && typeof result.id === 'string') {
+      authoredSaveRef.current = { id: result.id, drawingJson: payload.drawingJson }
+      drawingIdRef.current = result.id
+    }
+    return result
+  }, [onSaveDrawing])
+
   const saveDrawing = useCallback((insertAfterSave: boolean, silent = false) => {
-    if (!strokesRef.current.length) return Promise.resolve()
+    if (!inkPagePersists(strokesRef.current.length, inkRecordExists())) return Promise.resolve()
     if (!silent) {
       queuedSaveCountRef.current += 1
       setIsSaving(true)
@@ -4262,11 +4299,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     const run = async () => {
       const savedRevision = revisionRef.current
       try {
-        const result = await onSaveDrawing(drawingPayload(insertAfterSave))
+        const result = await writeInkPage(drawingPayload(insertAfterSave))
         if (!mountedRef.current) return
-        if (result && typeof result === 'object' && 'id' in result && typeof result.id === 'string') {
-          drawingIdRef.current = result.id
-        }
         if (revisionRef.current === savedRevision) setDirty(false)
         if (insertAfterSave) {
           const markdown = markdownFromSaveResult(result, title)
@@ -4299,7 +4333,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     const queued = saveQueueRef.current.catch(() => {}).then(run)
     saveQueueRef.current = queued
     return queued
-  }, [clear, drawingPayload, onInsertMarkdown, onSaveDrawing, setDirty, settings.keepDrawingAfterInsert, title])
+  }, [clear, drawingPayload, inkRecordExists, onInsertMarkdown, setDirty, settings.keepDrawingAfterInsert, title, writeInkPage])
 
   useEffect(() => {
     saveLatestRef.current = () => saveDrawing(false, true)
@@ -4308,11 +4342,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   useImperativeHandle(forwardedRef, () => ({
     flush: async () => {
       await saveQueueRef.current
-      if (!dirtyRef.current || !strokesRef.current.length) return
-      const result = await onSaveDrawing(drawingPayload())
-      if (result && typeof result === 'object' && 'id' in result && typeof result.id === 'string') {
-        drawingIdRef.current = result.id
-      }
+      if (!dirtyRef.current || !inkPagePersists(strokesRef.current.length, inkRecordExists())) return
+      await writeInkPage(drawingPayload())
       setDirty(false)
     },
     refreshTraining: async () => {
@@ -4340,11 +4371,11 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       }
       setTool('pen')
     },
-  }), [drawingPayload, inkMode, onSaveDrawing, setDirty, tool])
+  }), [drawingPayload, inkMode, inkRecordExists, setDirty, tool, writeInkPage])
 
   useEffect(() => () => {
-    if (dirtyRef.current && strokesRef.current.length) void saveLatestRef.current()
-  }, [])
+    if (dirtyRef.current && inkPagePersists(strokesRef.current.length, inkRecordExists())) void saveLatestRef.current()
+  }, [inkRecordExists])
 
   const recognize = useCallback(async (
     requestedMode: RecognitionPreference = mode,
@@ -4904,8 +4935,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   }, [activeMode, mode, settings.experimentalHandwritingToText, settings.lastRecognitionMode, settings.recognitionLanguage, sourceHeight])
 
   useEffect(() => {
-    if (revision === 0 || !strokesRef.current.length) return
-    if (!dirtyRef.current) return
+    if (revision === 0 || !dirtyRef.current) return
+    if (!inkPagePersists(strokesRef.current.length, inkRecordExists())) return
     let idleId: number | null = null
     const saveTimer = window.setTimeout(() => {
       idleId = window.requestIdleCallback(() => { void saveDrawing(false, true) }, { timeout: 2_500 })
@@ -4914,7 +4945,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       window.clearTimeout(saveTimer)
       if (idleId !== null) window.cancelIdleCallback(idleId)
     }
-  }, [revision, saveDrawing])
+  }, [inkRecordExists, revision, saveDrawing])
 
   useEffect(() => {
     if (transcriptRevision === 0 || !strokesRef.current.length) return

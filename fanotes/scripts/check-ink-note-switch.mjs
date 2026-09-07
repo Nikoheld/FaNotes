@@ -102,7 +102,7 @@ for (const write of app.matchAll(/setDrawingSession\(([^\n]*)\n?/g)) {
 assert.match(app, /setDrawingSession\(\(current\) => current\.path === notePath \? \{ \.\.\.current, document \} : current\)/, 'a finished save updates only its own note\'s session')
 // The unmount save is what carried the ink over; it stays (a closed board must
 // not lose unsaved strokes), so the mismatched mount is what has to go.
-assert.match(board, /useEffect\(\(\) => \(\) => \{\s*if \(dirtyRef\.current && strokesRef\.current\.length\) void saveLatestRef\.current\(\)\s*\}, \[\]\)/)
+assert.match(board, /useEffect\(\(\) => \(\) => \{\s*if \(dirtyRef\.current && inkPagePersists\(strokesRef\.current\.length, inkRecordExists\(\)\)\) void saveLatestRef\.current\(\)\s*\}, \[inkRecordExists\]\)/)
 
 // 3. One FAMD-first read for every path that opens ink; embedded ink carries the note's marker id.
 const reader = section(app, 'const readNoteInk = async (path: string, content: string)', '\n}\n', 'readNoteInk')
