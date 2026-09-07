@@ -359,7 +359,8 @@ const runOnce = () => {
   assert.match(inkHit, /export const inkWindowLayoutStyle/)
   assert.match(inkHit, /export const inkWindowCanvasBox/)
   assert.match(inkHit, /export const inkMarkPaperY/)
-  assert.match(board, /measureVisibleInkLayout\(/)
+  // measureVisibleInkBox is measureVisibleInkLayout plus the horizontal axis.
+  assert.match(board, /measureVisibleInk(Layout|Box)\(/)
   assert.match(board, /planInkWindow\(/)
   assert.match(board, /placeInkWindow\(/)
   assert.match(board, /inkWindowShift\(/)

@@ -172,6 +172,200 @@ export const inkBandWindow = (topPx: number, band: { y: number; height: number }
   }
 }
 
+export type InkLayoutBox = { left: number; top: number; width: number; height: number }
+export type InkLayoutSize = { width: number; height: number }
+export type InkLayoutPoint = { x: number; y: number }
+
+/**
+ * Visible sheet box in paper layout px on both axes. Same zoom handling as
+ * measureVisibleInkLayout: client rects carry the plane's CSS zoom, layout
+ * ink does not.
+ */
+export const measureVisibleInkBox = (input: {
+  scrollerLeft: number
+  scrollerTop: number
+  scrollerWidth: number
+  scrollerHeight: number
+  paperLeft: number
+  paperTop: number
+  paperVisualWidth: number
+  paperVisualHeight: number
+  paperLayoutWidth: number
+  paperLayoutHeight: number
+  rotation?: number
+}): { visible: InkLayoutBox & InkVisibleRange; viewport: InkLayoutSize; zoom: number } | null => {
+  const vertical = measureVisibleInkLayout({
+    scrollerTop: input.scrollerTop,
+    scrollerHeight: input.scrollerHeight,
+    paperTop: input.paperTop,
+    paperVisualHeight: input.paperVisualHeight,
+    paperLayoutHeight: input.paperLayoutHeight,
+    rotation: input.rotation,
+  })
+  if (!vertical) return null
+  const { zoom, viewportHeight } = vertical
+  const viewportWidth = Math.max(1, finite(input.scrollerWidth, 1)) / zoom
+  const left = (finite(input.scrollerLeft, 0) - finite(input.paperLeft, 0)) / zoom
+  return {
+    visible: { ...vertical.visible, left, width: viewportWidth, height: viewportHeight },
+    viewport: { width: viewportWidth, height: viewportHeight },
+    zoom,
+  }
+}
+
+/**
+ * Live layer: the stroke in progress only needs a bitmap around the visible
+ * sheet. Guard on each side, in viewports — the pen may cross the visible
+ * edge by this much (auto-scroll, capture) before the slice has to move.
+ */
+export const LIVE_INK_GUARD_VIEWPORTS = 0.15
+/** Pen samples closer than this (layout px) to the live slice edge move it. */
+export const LIVE_INK_EDGE_PX = 24
+
+export const liveInkWindowSize = (paper: InkLayoutSize, viewport: InkLayoutSize): InkLayoutSize => {
+  const paperW = Math.max(1, finite(paper.width, 1))
+  const paperH = Math.max(1, finite(paper.height, 1))
+  const grow = 1 + 2 * LIVE_INK_GUARD_VIEWPORTS
+  return {
+    width: Math.min(paperW, Math.max(1, finite(viewport.width, 1)) * grow),
+    height: Math.min(paperH, Math.max(1, finite(viewport.height, 1)) * grow),
+  }
+}
+
+const boxContains = (box: InkLayoutBox, inner: InkLayoutBox, tolerance = 0.5) => (
+  inner.left >= box.left - tolerance
+  && inner.top >= box.top - tolerance
+  && inner.left + inner.width <= box.left + box.width + tolerance
+  && inner.top + inner.height <= box.top + box.height + tolerance
+)
+
+const clampBoxToPaper = (box: InkLayoutBox, paper: InkLayoutSize): InkLayoutBox => ({
+  left: Math.min(Math.max(0, paper.width - box.width), Math.max(0, box.left)),
+  top: Math.min(Math.max(0, paper.height - box.height), Math.max(0, box.top)),
+  width: box.width,
+  height: box.height,
+})
+
+const sameBox = (a: InkLayoutBox, b: InkLayoutBox) => (
+  Math.abs(a.left - b.left) < 0.5
+  && Math.abs(a.top - b.top) < 0.5
+  && Math.abs(a.width - b.width) < 0.5
+  && Math.abs(a.height - b.height) < 0.5
+)
+
+/** True when a layout point lies inside the box, at least `inset` from every edge. */
+export const liveInkWindowHolds = (box: InkLayoutBox | null, point: InkLayoutPoint, inset = LIVE_INK_EDGE_PX) => (
+  !box || (
+    point.x >= box.left + inset
+    && point.x <= box.left + box.width - inset
+    && point.y >= box.top + inset
+    && point.y <= box.top + box.height - inset
+  )
+)
+
+export type LiveInkWindowPlan = { window: InkLayoutBox | null; changed: boolean }
+
+/**
+ * Keep-or-move decision for the live slice. `null` means the live layer
+ * shares the committed slice (the viewport plus guard covers the sheet). The
+ * slice keeps its size while the viewport does, so a move never reallocates
+ * the bitmap. It stays while it holds the visible sheet (and the pen, when
+ * given); otherwise it re-centres on the visible sheet, shifted toward the
+ * pen as far as the guard allows, and clamped to the sheet.
+ */
+export const planLiveInkWindow = (input: {
+  paper: InkLayoutSize
+  viewport: InkLayoutSize
+  visible: InkLayoutBox
+  current: InkLayoutBox | null
+  pen?: InkLayoutPoint | null
+  force?: boolean
+}): LiveInkWindowPlan => {
+  const paper = { width: Math.max(1, finite(input.paper.width, 1)), height: Math.max(1, finite(input.paper.height, 1)) }
+  const size = liveInkWindowSize(paper, input.viewport)
+  const current = input.current
+  if (size.width >= paper.width * INK_WINDOW_FULL_RATIO && size.height >= paper.height * INK_WINDOW_FULL_RATIO) {
+    return { window: null, changed: current !== null }
+  }
+  // The visible sheet, clipped to the sheet: a viewport larger than the sheet
+  // shows margins the slice never needs to cover.
+  const visLeft = Math.min(Math.max(0, finite(input.visible.left, 0)), paper.width)
+  const visTop = Math.min(Math.max(0, finite(input.visible.top, 0)), paper.height)
+  const visRight = Math.max(visLeft, Math.min(paper.width, finite(input.visible.left, 0) + finite(input.visible.width, 0)))
+  const visBottom = Math.max(visTop, Math.min(paper.height, finite(input.visible.top, 0) + finite(input.visible.height, 0)))
+  const visible: InkLayoutBox = { left: visLeft, top: visTop, width: visRight - visLeft, height: visBottom - visTop }
+  const pen = input.pen && Number.isFinite(input.pen.x) && Number.isFinite(input.pen.y) ? input.pen : null
+  const sameSize = current !== null && Math.abs(current.width - size.width) < 0.5 && Math.abs(current.height - size.height) < 0.5
+  if (current && sameSize && !input.force && boxContains(current, visible) && (!pen || liveInkWindowHolds(current, pen))) {
+    return { window: current, changed: false }
+  }
+  let left = visLeft + visible.width / 2 - size.width / 2
+  let top = visTop + visible.height / 2 - size.height / 2
+  if (pen) {
+    // Slide toward the pen, but never uncover the visible sheet.
+    const slackX = Math.max(0, (size.width - visible.width) / 2)
+    const slackY = Math.max(0, (size.height - visible.height) / 2)
+    const wantLeft = pen.x < left + LIVE_INK_EDGE_PX
+      ? pen.x - LIVE_INK_EDGE_PX
+      : pen.x > left + size.width - LIVE_INK_EDGE_PX
+        ? pen.x + LIVE_INK_EDGE_PX - size.width
+        : left
+    const wantTop = pen.y < top + LIVE_INK_EDGE_PX
+      ? pen.y - LIVE_INK_EDGE_PX
+      : pen.y > top + size.height - LIVE_INK_EDGE_PX
+        ? pen.y + LIVE_INK_EDGE_PX - size.height
+        : top
+    left = Math.min(left + slackX, Math.max(left - slackX, wantLeft))
+    top = Math.min(top + slackY, Math.max(top - slackY, wantTop))
+  }
+  const next = clampBoxToPaper({ left, top, width: size.width, height: size.height }, paper)
+  if (current && sameBox(current, next)) return { window: current, changed: false }
+  return { window: next, changed: true }
+}
+
+export type LiveInkSlice = { leftPx: number; topPx: number; width: number; height: number }
+
+export type PlacedLiveInkWindow = {
+  /** Bitmap px of the live canvas and its offset in the sheet's paint space. */
+  slice: LiveInkSlice
+  /** Layout px box after quantizing to whole bitmap px — the CSS box. */
+  box: InkLayoutBox
+}
+
+/**
+ * Live slice → paint geometry. `paint` is the whole sheet in bitmap px at the
+ * committed scale (pixel width, virtual height), so the live bitmap has the
+ * same px pitch as the committed one and its offset is whole px: a stroke
+ * moving from the live to the committed layer lands on the same texels.
+ */
+export const placeLiveInkWindow = (
+  window: InkLayoutBox,
+  paper: InkLayoutSize,
+  paint: InkLayoutSize,
+): PlacedLiveInkWindow => {
+  const paperW = Math.max(1, finite(paper.width, 1))
+  const paperH = Math.max(1, finite(paper.height, 1))
+  const paintW = Math.max(1, Math.round(finite(paint.width, 1)))
+  const paintH = Math.max(1, Math.round(finite(paint.height, 1)))
+  const scaleX = paintW / paperW
+  const scaleY = paintH / paperH
+  const width = Math.min(paintW, Math.max(1, Math.round(window.width * scaleX)))
+  const height = Math.min(paintH, Math.max(1, Math.round(window.height * scaleY)))
+  const leftPx = Math.min(paintW - width, Math.max(0, Math.round(window.left * scaleX)))
+  const topPx = Math.min(paintH - height, Math.max(0, Math.round(window.top * scaleY)))
+  return {
+    slice: { leftPx, topPx, width, height },
+    box: { left: leftPx / scaleX, top: topPx / scaleY, width: width / scaleX, height: height / scaleY },
+  }
+}
+
+export const sameLiveInkSlice = (a: LiveInkSlice | null, b: LiveInkSlice | null) => (
+  a === b || (
+    a !== null && b !== null
+    && a.leftPx === b.leftPx && a.topPx === b.topPx && a.width === b.width && a.height === b.height
+  )
+)
+
 /** True when a pen sample (layout px) sits in the guard zone or outside the slice. */
 export const inkWindowGuardHit = (
   window: InkWindowLayout | null,

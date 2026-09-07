@@ -471,6 +471,16 @@ export const collectPaperCanvasSurfaces = (
  * Same class of canvas mutation as erasing leftover ghost ink: paint the
  * backing store so sibling typed glyphs re-composite at the paper camera.
  */
+/**
+ * Mark the canvas layer dirty without changing a pixel: a recorded 1 px fill
+ * at alpha 0. Blink flags the layer from the draw's geometry, not its alpha.
+ *
+ * This must never read the canvas back. Chromium turns an accelerated 2D
+ * canvas into a CPU bitmap for good on its second getImageData
+ * (kFallbackToCPUAfterReadbacks = 2); the old getImageData/putImageData
+ * touch did exactly that on every grow, and from then on each frame of ink
+ * cost a full software copy of a multi-viewport bitmap — the writing lag.
+ */
 export const paintPaperCanvasSurfaceUpdate = (canvas: PaperCanvasBacking | null) => {
   if (!canvas) return false
   const width = Number(canvas.width)
@@ -482,18 +492,19 @@ export const paintPaperCanvasSurfaceUpdate = (canvas: PaperCanvasBacking | null)
   if (!ctx) return false
   ctx.setTransform(1, 0, 0, 1, 0, 0)
   const painted = ctx as PaperCanvasPaintContext & {
-    getImageData?: (sx: number, sy: number, sw: number, sh: number) => { data: ArrayLike<number>; width: number; height: number }
-    putImageData?: (image: unknown, dx: number, dy: number) => void
+    save?: () => void
+    restore?: () => void
+    fillRect?: (x: number, y: number, w: number, h: number) => void
+    globalAlpha?: number
   }
-  if (typeof painted.getImageData === 'function' && typeof painted.putImageData === 'function') {
-    try {
-      const pixel = painted.getImageData(0, 0, 1, 1)
-      painted.putImageData(pixel, 0, 0)
-      return true
-    } catch {
-      // Tainted or mock canvas — a 1px clear still dirties the layer.
-    }
+  if (typeof painted.fillRect === 'function' && typeof painted.save === 'function' && typeof painted.restore === 'function') {
+    painted.save()
+    painted.globalAlpha = 0
+    painted.fillRect(0, 0, 1, 1)
+    painted.restore()
+    return true
   }
+  // Mock context without fillRect: a 1 px clear still dirties the layer.
   ctx.clearRect(0, 0, 1, 1)
   return true
 }

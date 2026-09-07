@@ -292,6 +292,23 @@ export const inkWindowLayoutStyle = (window: InkWindow) => {
   } as const
 }
 
+/**
+ * CSS box of the live slice: a layout-px box inside the paper, pinned past
+ * the scroll-room pad like inkWindowLayoutStyle. Explicit width for the same
+ * replaced-element reason.
+ */
+export const liveInkSliceLayoutStyle = (box: { left: number; top: number; width: number; height: number }) => {
+  const pad = INK_WINDOW_PAD_CSS
+  return {
+    top: `calc(${pad} + ${box.top}px)`,
+    height: `${box.height}px`,
+    left: `calc(${pad} + ${box.left}px)`,
+    right: 'auto',
+    width: `${box.width}px`,
+    bottom: 'auto',
+  } as const
+}
+
 /** Paper 0–1 of a mark after the window canvas is placed with inkWindowCanvasBox. */
 export const inkMarkPaperY = (
   markY: number,

@@ -2,6 +2,11 @@
 
 ## Unveröffentlicht
 
+## 2026.9.18
+
+- **Schreiben ohne Ruckeln:** Der laufende Strich wird nicht mehr bei jeder Stiftprobe komplett gelöscht und neu gemalt — nur sein letztes Stück wird ergänzt, einmal pro Eingabe statt pro Probe. Die Live-Ebene ist nur noch so groß wie der sichtbare Ausschnitt plus Rand und folgt dem Stift; ihre Bitmap wird schon beim Anlegen bereitgestellt, damit der erste Stiftkontakt sofort zeichnet. Die Tintenflächen werden nie mehr zurückgelesen, sodass Chromium sie auf der Grafikkarte belässt — unter Windows wie unter Linux/Hyprland. Beim Abheben wird die Seite nicht mehr komplett neu gezeichnet.
+- **Englische Oberfläche leichter:** Zusammengesetzte Texte werden einmal übersetzt und gemerkt, statt bei jeder Änderung die ganze Regelkette zu durchlaufen.
+
 ## 2026.9.17
 
 - **Tinte steht beim Scrollen und Wachsen fest:** Die Handschrift bleibt auf ihrem Papierpunkt — ohne das kurze Bild, in dem sie versetzt erschien und zurücksprang. Der Tintenausschnitt wird in Blattpixeln geplant und im selben Schritt wie sein Rahmen neu gezeichnet; beim Verschieben wird die Bitmap kopiert statt neu gemalt. Ganz unten auf dem Blatt kann wieder geschrieben werden, auch nach dem Scrollen bis zum Ende und bei Zoom.
