@@ -296,6 +296,8 @@ function translateDerived(source: string, catalog: EnglishCatalog): string | nul
   if (closeNamed) return `Close ${catalog[closeNamed[1]] ?? closeNamed[1]}`
   const trashEntry = /^(Notiz|Ordner) „(.+)“ in den Papierkorb verschieben\?$/u.exec(source)
   if (trashEntry) return `Move ${trashEntry[1] === 'Ordner' ? 'folder' : 'note'} “${trashEntry[2]}” to the trash?`
+  const pageTimestamps = /^Erstellt (.+) · Geändert (.+)$/u.exec(source)
+  if (pageTimestamps) return `Created ${pageTimestamps[1]} · Modified ${pageTimestamps[2]}`
   const customizationOptions = /^Anpassung · (\d+) Optionen$/u.exec(source)
   if (customizationOptions) {
     const count = Number(customizationOptions[1])
