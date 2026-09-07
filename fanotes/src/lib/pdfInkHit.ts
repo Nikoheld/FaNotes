@@ -276,18 +276,37 @@ export const inkWindowCanvasBox = (
  * and `right` is ignored, so the CSS box followed the backing store instead
  * of the paper. Any moment where the bitmap and the window slice disagreed
  * (grow, window move) stretched the painted ink sideways.
+ *
+ * With the paper's layout size the box is in px. A percentage box follows the
+ * sheet in the very frame the sheet grows (a text line added, the page grown
+ * at the bottom) and stretches the bitmap painted for the old sheet — the
+ * ink visibly slid until the next redraw put it back. A px box keeps the old
+ * bitmap exactly where it was painted; the redraw then re-places it.
  */
-export const inkWindowLayoutStyle = (window: InkWindow) => {
+export const inkWindowLayoutStyle = (window: InkWindow, paper: InkBoardSize | null = null) => {
   const pad = INK_WINDOW_PAD_CSS
-  const paper = `calc(100% - 2 * ${pad})`
   const full = isFullInkWindow(window)
   const span = inkWindowSpan(window)
+  if (paper && Number.isFinite(paper.width) && Number.isFinite(paper.height) && paper.width > 0 && paper.height > 0) {
+    const round = (value: number) => Math.round(value * 100) / 100
+    const top = full ? 0 : window.y0 * paper.height
+    const height = full ? paper.height : span * paper.height
+    return {
+      top: top ? `calc(${pad} + ${round(top)}px)` : pad,
+      height: `${round(height)}px`,
+      left: pad,
+      right: 'auto',
+      width: `${round(paper.width)}px`,
+      bottom: 'auto',
+    } as const
+  }
+  const sheet = `calc(100% - 2 * ${pad})`
   return {
-    top: full ? pad : `calc(${pad} + ${window.y0} * ${paper})`,
-    height: full ? paper : `calc(${span} * ${paper})`,
+    top: full ? pad : `calc(${pad} + ${window.y0} * ${sheet})`,
+    height: full ? sheet : `calc(${span} * ${sheet})`,
     left: pad,
     right: pad,
-    width: paper,
+    width: sheet,
     bottom: 'auto',
   } as const
 }

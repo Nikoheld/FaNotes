@@ -162,6 +162,7 @@ import {
   WRITE_MARGIN_Y,
   growPageFromMark,
   paintedStayExtent,
+  savedInkPage,
   writePageStayExtent,
   keepMarkOnPage,
   mapClientToPage,
@@ -347,10 +348,16 @@ const applyInkBoxToCanvases = (canvases: Array<HTMLCanvasElement | null>, box: I
   }
 }
 
-const applyInkWindowToCanvases = (canvases: Array<HTMLCanvasElement | null>, window: InkWindow) => {
+const applyInkWindowToCanvases = (
+  canvases: Array<HTMLCanvasElement | null>,
+  window: InkWindow,
+  paper: { width: number; height: number } | null = null,
+) => {
   // Pin the bitmap to the paper box inside the extra-room overlay. 0%/100%
-  // fills the board (paper+2·SCROLL_ROOM) while 0–1 ink is the paper.
-  applyInkBoxToCanvases(canvases, inkWindowLayoutStyle(window))
+  // fills the board (paper+2·SCROLL_ROOM) while 0–1 ink is the paper. In
+  // layout px when the paper is measured: a percentage box stretches the
+  // bitmap in the frame the sheet grows, before any redraw can re-place it.
+  applyInkBoxToCanvases(canvases, inkWindowLayoutStyle(window, paper))
 }
 
 /**
@@ -360,8 +367,13 @@ const applyInkWindowToCanvases = (canvases: Array<HTMLCanvasElement | null>, win
  * compositor has to take every frame shrinks from several viewports to
  * about one.
  */
-const applyLiveInkBoxToCanvas = (canvas: HTMLCanvasElement | null, box: InkLayoutBox | null, window: InkWindow) => {
-  applyInkBoxToCanvases([canvas], box ? liveInkSliceLayoutStyle(box) : inkWindowLayoutStyle(window))
+const applyLiveInkBoxToCanvas = (
+  canvas: HTMLCanvasElement | null,
+  box: InkLayoutBox | null,
+  window: InkWindow,
+  paper: { width: number; height: number } | null = null,
+) => {
+  applyInkBoxToCanvases([canvas], box ? liveInkSliceLayoutStyle(box) : inkWindowLayoutStyle(window, paper))
 }
 
 /**
@@ -1193,6 +1205,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   } | null>(null)
   const commitPendingGrowRemapRef = useRef<(layoutW: number, layoutH: number) => boolean>(() => false)
   const applyInkExtentStylesRef = useRef<(height: number, width: number) => void>(() => {})
+  const catchUpPaintedLayoutRef = useRef<() => boolean>(() => false)
 
   const activePointerTargetRef = useRef<Element | null>(null)
   /** Last pointer id we successfully called setPointerCapture for (may outlive activePointerRef on Wayland glitches). */
@@ -1677,6 +1690,11 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     const layoutWidth = paper?.offsetWidth || surface.offsetWidth || surface.clientWidth
     const layoutHeight = paper?.offsetHeight || surface.offsetHeight || surface.clientHeight
     if (layoutWidth <= 0 || layoutHeight <= 0) return
+    // Paint only 0–1 of this sheet. The resize observer rescales the strokes
+    // after a debounce; a redraw before it (a scroll re-slice, a state change,
+    // the effect that added a text line) painted 0–1 of the previous sheet on
+    // the grown one, and the ink slid down until the observer put it back.
+    if (paper && !activeStrokeRef.current) catchUpPaintedLayoutRef.current()
     // The slice is planned in layout px (inkWindowLayoutRef); here it becomes
     // the CSS box, the bitmap size and the paint translate — all in one
     // synchronous pass, so no frame can show the bitmap at a stale box.
@@ -1712,13 +1730,14 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         topPx: placed.topPx,
       }
       canvasQualityKeyRef.current = qualityKey
-      applyInkWindowToCanvases([committedCanvas], placed.window)
+      const paperBox = inline ? { width: layoutWidth, height: layoutHeight } : null
+      applyInkWindowToCanvases([committedCanvas], placed.window, paperBox)
       const live = liveLayout
         ? placeLiveInkWindow(liveLayout, { width: layoutWidth, height: layoutHeight }, { width: nextSize.width, height: placed.virtualHeight })
         : null
       const liveMoved = !sameLiveInkSlice(liveSliceRef.current, live?.slice ?? null)
       liveSliceRef.current = live?.slice ?? null
-      applyLiveInkBoxToCanvas(canvas, live?.box ?? null, placed.window)
+      applyLiveInkBoxToCanvas(canvas, live?.box ?? null, placed.window, paperBox)
       return moved || liveMoved
     }
     // Page growth and slice moves force measureLayout=true and apply even
@@ -2179,13 +2198,17 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     } : current)
   }, [])
 
-  const flushPaintedLayoutGrow = useCallback(() => {
+  // 0–1 ink follows the painted sheet: when the sheet grew (a text line, a
+  // viewport minimum) the strokes are rescaled so every mark keeps its paper
+  // pixel. Returns whether a rescale happened; the caller repaints.
+  const catchUpPaintedLayout = useCallback(() => {
     const paper = resolvePaperElement()
     if (!paper) return false
     const nextW = paper.offsetWidth
     const nextH = paper.offsetHeight
     const prevW = paintedLayoutRef.current.w
     const prevH = paintedLayoutRef.current.h
+    if (nextW === prevW && nextH === prevH && !pendingGrowRemapRef.current) return false
     const resolved = resolvePaintedLayoutGrow({
       pending: pendingGrowRemapRef.current,
       prevLayoutW: prevW,
@@ -2202,11 +2225,17 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     scaleNormalizedSpace(resolved.scaleX, resolved.scaleY)
     canvasQualityKeyRef.current = ''
     committedCanvasDirtyRef.current = true
+    return true
+  }, [resolvePaperElement, scaleNormalizedSpace])
+  catchUpPaintedLayoutRef.current = catchUpPaintedLayout
+
+  const flushPaintedLayoutGrow = useCallback(() => {
+    if (!catchUpPaintedLayout()) return false
     activeRenderedPointCountRef.current = 0
     wipeLiveInk()
     redraw(true)
     return true
-  }, [redraw, resolvePaperElement, scaleNormalizedSpace, wipeLiveInk])
+  }, [catchUpPaintedLayout, redraw, wipeLiveInk])
 
   useEffect(() => {
     mountedRef.current = true
@@ -4137,14 +4166,22 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   }, [bumpInkRevision, clearRecognitionScope, fitPageToInk, scheduleRedraw, setDirty, updateHistoryState])
 
   const drawingPayload = useCallback((includeImage = false): DrawingSavePayload => {
+    // Refs, not state: a grow in an effect and a save in the same commit (the
+    // unmount save of a closing board) must see the box the strokes were just
+    // remapped to. The sheet box, not the page: the page follows the sheet one
+    // layout effect later, and strokes are 0–1 of the sheet in between.
+    const page = savedInkPage(
+      { width: sourceWidthRef.current, height: sourceHeightRef.current },
+      paintedLayoutRef.current,
+    )
     let imageData: string | undefined
     if (includeImage) {
-      const exportKey = [inkRevisionRef.current, paperStyle, settings.smoothing, sourceWidth, sourceHeight].join(':')
+      const exportKey = [inkRevisionRef.current, paperStyle, settings.smoothing, page.width, page.height].join(':')
       imageData = exportCacheRef.current?.key === exportKey ? exportCacheRef.current.imageData : undefined
       if (!imageData) {
       const exportCanvas = document.createElement('canvas')
-      exportCanvas.width = sourceWidth * EXPORT_SCALE
-      exportCanvas.height = sourceHeight * EXPORT_SCALE
+      exportCanvas.width = page.width * EXPORT_SCALE
+      exportCanvas.height = page.height * EXPORT_SCALE
       renderDocument(
         exportCanvas,
         strokesRef.current,
@@ -4153,7 +4190,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         exportCanvas.width,
         exportCanvas.height,
         true,
-        sourceWidth,
+        page.width,
       )
       imageData = exportCanvas.toDataURL('image/png')
       exportCacheRef.current = { key: exportKey, imageData }
@@ -4164,8 +4201,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       schemaVersion: 1,
       title,
       paperStyle,
-      sourceWidth,
-      sourceHeight,
+      sourceWidth: page.width,
+      sourceHeight: page.height,
       sourceOriginX: sourceOriginXRef.current,
       sourceOriginY: sourceOriginYRef.current,
       overlayQuality: INK_MIN_INLINE_QUALITY,
@@ -4187,7 +4224,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       imageData,
       drawingJson: JSON.stringify(drawing),
     }
-  }, [activeMode, mathSolverEnabled, mode, paperStyle, settings.smoothing, sourceHeight, sourceWidth, title])
+  }, [activeMode, mathSolverEnabled, mode, paperStyle, settings.smoothing, title])
 
   const saveDrawing = useCallback((insertAfterSave: boolean, silent = false) => {
     if (!strokesRef.current.length) return Promise.resolve()

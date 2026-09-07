@@ -61,6 +61,22 @@ export const paintedStayExtent = (source: number, painted = 0) => {
 }
 
 /**
+ * The page a document is saved with. 0–1 strokes are relative to the painted
+ * sheet; the page (source) follows the sheet one layout effect later. A save
+ * in between — the unmount save of a closing overlay, the flush of a note
+ * switch — paired sheet-relative strokes with the smaller page, and the
+ * reload painted them squashed toward the top-left. Saving the sheet box
+ * keeps strokes and page in the same space.
+ */
+export const savedInkPage = (
+  source: CanvasSize,
+  painted: { w: number; h: number },
+): CanvasSize => ({
+  width: Math.round(paintedStayExtent(source.width, painted.w)),
+  height: Math.round(paintedStayExtent(source.height, painted.h)),
+})
+
+/**
  * Camera room around the write page (`pageCanvasLayout` / `--paper-scroll-room`).
  * A painted box that is exactly the page plus `2*SCROLL_ROOM` is extra pan paper,
  * not a max-edge write-page grow — absorbing it remaps 0–1 and slides glyphs.
