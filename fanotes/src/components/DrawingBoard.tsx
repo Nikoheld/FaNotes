@@ -3441,7 +3441,10 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       syncInkWindow()
     }
     appendPointerEvent(event.nativeEvent)
-  }, [activeArtBrush.pressure, activeArtSymbol, appendPointerEvent, artBrush, artColor, artEffect, artOpacity, artSymbolRotation, artSymbolSize, artWidth, bumpInkRevision, clearRecognitionScope, clearShapeDwellTimer, closeMathCorrectionSession, closeMathSolverSelection, commitPendingSolverTap, commitStrokeToCanvas, inkMode, inline, mathSolverEnabled, penColor, penWidth, pointFromEvent, redraw, scheduleRedraw, selectionMode, setDirty, settings.penOnly, settings.pressureEnabled, settings.tabletButtons, sourceHeight, sourceWidth, syncInkWindow, tool, updateHistoryState])
+  // inputActive is a dependency: a board mounted inert (keyboard mode showing
+  // saved ink) kept a handler that still saw inputActive=false after the pen
+  // turned on, and every pen-down was refused until an unrelated grow rebuilt it.
+  }, [activeArtBrush.pressure, activeArtSymbol, appendPointerEvent, artBrush, artColor, artEffect, artOpacity, artSymbolRotation, artSymbolSize, artWidth, bumpInkRevision, clearRecognitionScope, clearShapeDwellTimer, closeMathCorrectionSession, closeMathSolverSelection, commitPendingSolverTap, commitStrokeToCanvas, inkMode, inline, inputActive, mathSolverEnabled, penColor, penWidth, pointFromEvent, redraw, scheduleRedraw, selectionMode, setDirty, settings.penOnly, settings.pressureEnabled, settings.tabletButtons, sourceHeight, sourceWidth, syncInkWindow, tool, updateHistoryState])
 
   const handlePointerMove = useCallback((event: ReactPointerEvent<HTMLElement>) => {
     const pan = tabletPanRef.current

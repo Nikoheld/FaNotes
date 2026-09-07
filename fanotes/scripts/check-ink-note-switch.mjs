@@ -19,6 +19,9 @@
 //      A taller sheet grew that page, marked it dirty, and the unmount save
 //      wrote the ink under the next note (marker + `.famd`) while the previous
 //      note's own record was overwritten with the remapped strokes.
+//   5. A board mounted inert (keyboard mode showing saved ink) kept a pen-down
+//      handler that still saw inputActive=false after Stift turned on — every
+//      pen-down was refused until an unrelated page grow rebuilt the handler.
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
@@ -135,6 +138,19 @@ assert.match(load, /paintedLayoutRef\.current = \{ w: sourceWidthRef\.current, h
 assert.match(load, /applyInkExtentStylesRef\.current\(sourceHeightRef\.current, sourceWidthRef\.current\)/, 'the sheet takes the saved page before the first redraw')
 assert.match(board, /applyInkExtentStyles\(sourceHeightRef\.current, sourceWidthRef\.current\)\s*\}, \[applyInkExtentStyles, sourceHeight, sourceWidth\]\)/)
 
+// 5. Stift-on after an inert mount: the pen-down handler reads inputActive, so it
+// must be rebuilt when inputActive changes. Every handler that reads it lists it.
+const pointerDown = section(board, 'const handlePointerDown = useCallback((event: ReactPointerEvent<HTMLElement>) => {', '\n  const handlePointerMove = useCallback(', 'handlePointerDown')
+assert.match(pointerDown, /overlayInert\(inline, inputActive\) \|\| !overlayHitEnabled\(inputActive\)/, 'the handler gates on inputActive')
+const pointerDownDeps = pointerDown.slice(pointerDown.lastIndexOf('}, [') + 4, pointerDown.lastIndexOf('])')).split(',').map((dep) => dep.trim())
+assert.ok(pointerDownDeps.includes('inputActive'), 'handlePointerDown lists inputActive — an inert-mounted board must accept the pen once it turns on')
+assert.ok(pointerDownDeps.includes('inline'))
+for (const match of board.matchAll(/useCallback\(\(([^)]*)\) => \{([\s\S]*?)\n  \}, \[([^\]]*)\]\)/g)) {
+  const [, , body, deps] = match
+  if (!/\binputActive\b/.test(body)) continue
+  assert.ok(deps.split(',').map((dep) => dep.trim()).includes('inputActive'), `a callback reads inputActive without listing it: ${body.trim().slice(0, 80)}`)
+}
+
 // Geometry: with the sheet as the measure, a sheet that equals the page never grows it,
 // while the surface (sheet + 2·room) always did — by exactly the room, every pass.
 const page = { w: 1252, h: 680 }
@@ -160,6 +176,7 @@ console.log(JSON.stringify({
   famdFirstRead: true,
   embeddedInkKeepsMarkerId: true,
   sessionBoundToNote: true,
+  penAcceptsInputAfterInertMount: true,
   absorbMeasuresSheet: true,
   fitOncePerDocument: true,
 }))
