@@ -85,7 +85,9 @@ const runOnce = () => {
   const board = readFileSync(join(root, 'src/components/DrawingBoard.tsx'), 'utf8')
   assert.match(paintSource, /markdownInkPageBox/)
   assert.match(board, /var\(--paper-scroll-room, 0px\)/)
-  assert.match(board, /calc\(100% - 2 \* \$\{pad\}\)/)
+  // The paper box (board minus the scroll-room pad) is built by the ink-window style helper.
+  const inkHit = readFileSync(join(root, 'src/lib/pdfInkHit.ts'), 'utf8')
+  assert.match(inkHit, /calc\(100% - 2 \* \$\{pad\}\)/)
 
   return {
     padY,
