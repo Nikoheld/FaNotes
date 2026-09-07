@@ -107,11 +107,42 @@ const preserveOuterWhitespace = (source: string, translated: string) => {
   return `${leading}${translated}${trailing}`
 }
 
+/**
+ * Strings that missed the catalog and went through the rule chain below. The
+ * DOM observer re-translates every changed text node and attribute, so the
+ * same handful of toolbar labels hit this path on each re-render; the chain
+ * is a few hundred regex tests per miss.
+ */
+const derivedMemo = new Map<string, string>()
+const DERIVED_MEMO_LIMIT = 4096
+
+function rememberDerived(source: string, translated: string): string {
+  if (derivedMemo.size >= DERIVED_MEMO_LIMIT) derivedMemo.clear()
+  derivedMemo.set(source, translated)
+  return translated
+}
+
 function translateCore(source: string): string {
   if (activeLanguage !== 'en' || !catalog) return source
   const exact = catalog[source]
   if (exact !== undefined) return exact
+  const remembered = derivedMemo.get(source)
+  if (remembered !== undefined) return remembered
+  const derived = translateDerived(source, catalog)
+  if (derived !== null) return rememberDerived(source, derived)
 
+  if (!GERMAN_HINT.test(source)) return rememberDerived(source, source)
+
+  if (!replacementExpression) {
+    // Not memoised: once the index exists this string may translate.
+    scheduleReplacementIndex()
+    return source
+  }
+  return rememberDerived(source, source.replace(replacementExpression, (german) => catalog?.[german] ?? german))
+}
+
+/** Rule-based translations for composed strings. `null` when no rule applies. */
+function translateDerived(source: string, catalog: EnglishCatalog): string | null {
   if (/^1 Treffer$/u.test(source)) return '1 match'
   if (/^\d+ Treffer$/u.test(source)) return source.replace('Treffer', 'matches')
   if (/^Nur Eingang$/u.test(source)) return 'Only Inbox'
@@ -329,14 +360,7 @@ function translateCore(source: string): string {
   const onboardingStep = /^Schritt (\d+): (.+)$/u.exec(source)
   if (onboardingStep) return `Step ${onboardingStep[1]}: ${catalog[onboardingStep[2]] ?? onboardingStep[2]}`
   if (source.startsWith('– ') && catalog[source.slice(2)]) return `– ${catalog[source.slice(2)]}`
-
-  if (!GERMAN_HINT.test(source)) return source
-
-  if (!replacementExpression) {
-    scheduleReplacementIndex()
-    return source
-  }
-  return source.replace(replacementExpression, (german) => catalog?.[german] ?? german)
+  return null
 }
 
 export function translateUiText(value: string): string {
