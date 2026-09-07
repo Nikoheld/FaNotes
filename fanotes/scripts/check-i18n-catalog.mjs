@@ -23,6 +23,8 @@ const CHROME_FILES = [
   'src/components/SearchPanel.tsx',
   'src/components/PaperView.tsx',
   'src/components/DrawingBoard.tsx',
+  'src/components/DraftingGuides.tsx',
+  'src/components/DraftingPanel.tsx',
   'src/components/VaultOverview.tsx',
   'src/components/TextToHandwritingDialog.tsx',
   'src/components/GlyphenWerkWorkspace.tsx',
