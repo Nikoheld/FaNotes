@@ -13,6 +13,12 @@
 //      note's marker points at; FAMD-embedded ink came back as 'famd-ink' and
 //      later saves went to that shared record, so the marker's record went
 //      stale and the pen resumed an old page.
+//   4. The render right after a switch still held the previous note's session
+//      under the next note's path (the switch effect runs a commit later), so
+//      a board with the previous note's ink mounted on the next note's sheet.
+//      A taller sheet grew that page, marked it dirty, and the unmount save
+//      wrote the ink under the next note (marker + `.famd`) while the previous
+//      note's own record was overwritten with the remapped strokes.
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
@@ -32,6 +38,7 @@ const {
   overlayInert,
   overlaySessionAfterInkReady,
   overlaySessionAfterNoteSwitch,
+  overlaySessionForNote,
 } = await server.ssrLoadModule('/src/lib/overlayInteract.ts')
 const { SCROLL_ROOM, paintedStayExtent, writePageStayExtent } = await server.ssrLoadModule('/src/lib/noteCanvas.ts')
 await server.close()
@@ -64,16 +71,44 @@ const switchEffect = section(app, 'const requestId = ++drawingLoadRequestRef.cur
 assert.doesNotMatch(switchEffect, /overlayInkLoadOnNoteSwitch/, 'keyboard-mode switch must not skip the ink read')
 assert.doesNotMatch(app, /overlayInkLoadOnNoteSwitch/)
 assert.match(switchEffect, /readNoteInk\(path, content\)/)
-assert.match(switchEffect, /overlaySessionAfterInkReady\(\s*drawingOpenRef\.current,\s*drawingSessionFromLoad\(requestId, document\)/)
+assert.match(switchEffect, /\.\.\.overlaySessionAfterInkReady\(drawingOpenRef\.current, drawingSessionFromLoad\(requestId, document\)\),\s*path,/)
+assert.match(switchEffect, /setDrawingSession\(\{ \.\.\.overlaySessionAfterNoteSwitch\(switched\), path \}\)/)
 assert.match(switchEffect, /requestIdleCallback\(load/, 'the read stays off the switch itself')
+
+// 4. A session renders only for the note it was loaded for.
+const docA = { id: 'a1', drawingJson: '{}' }
+const sessionA = { key: 4, document: docA, path: 'Inbox/A.md' }
+assert.equal(overlaySessionForNote(sessionA, 'Inbox/A.md'), sessionA)
+assert.deepEqual(overlaySessionForNote(sessionA, 'Welcome.md'), { key: 0, document: null, path: 'Welcome.md' }, 'the previous note\'s ink never mounts under the next note')
+assert.deepEqual(overlaySessionForNote(sessionA, null), { key: 0, document: null, path: null })
+assert.deepEqual(overlaySessionForNote({ key: 0, document: null, path: null }, 'Welcome.md'), { key: 0, document: null, path: 'Welcome.md' })
+assert.match(app, /const noteDrawingSession = overlaySessionForNote\(drawingSession, activeTab\?\.path \?\? null\)/)
+const overlayRender = section(app, '{noteDrawingSession.key > 0 && <Suspense', 'onDirtyChange={handleDrawingDirtyChange}', 'overlay render')
+assert.match(overlayRender, /key=\{noteDrawingSession\.key\}/)
+assert.match(overlayRender, /drawingId=\{noteDrawingSession\.document\?\.id\}/)
+assert.match(overlayRender, /initialDrawingJson=\{noteDrawingSession\.document\?\.drawingJson\}/)
+assert.doesNotMatch(overlayRender, /[^e]drawingSession\./, 'the render never reads the raw session')
+assert.match(app, /drawingOpen && noteDrawingSession\.key === 0 && <div className="inline-ink-loading"/)
+for (const write of app.matchAll(/setDrawingSession\(([^\n]*)\n?/g)) {
+  const line = write[0]
+  assert.ok(
+    /path[,:} ]/.test(line) || /EMPTY_DRAWING_SESSION/.test(line) || /current\.path === notePath/.test(line) || /\{\n$/.test(line),
+    `every session write names its note: ${line.trim()}`,
+  )
+}
+assert.match(app, /setDrawingSession\(\(current\) => current\.path === notePath \? \{ \.\.\.current, document \} : current\)/, 'a finished save updates only its own note\'s session')
+// The unmount save is what carried the ink over; it stays (a closed board must
+// not lose unsaved strokes), so the mismatched mount is what has to go.
+assert.match(board, /useEffect\(\(\) => \(\) => \{\s*if \(dirtyRef\.current && strokesRef\.current\.length\) void saveLatestRef\.current\(\)\s*\}, \[\]\)/)
 
 // 3. One FAMD-first read for every path that opens ink; embedded ink carries the note's marker id.
 const reader = section(app, 'const readNoteInk = async (path: string, content: string)', '\n}\n', 'readNoteInk')
 assert.ok(reader.indexOf('readFamdInk(path)') < reader.indexOf('readDrawing(markerId)'), 'FAMD companion is read before the library record')
 assert.match(reader, /noteInkDocument\(embedded, markerId\)/)
-const openDrawing = section(app, 'const openDrawing = useCallback(() => {', '}, [activeTab, drawingSession.key, toast])', 'openDrawing')
-assert.match(openDrawing, /if \(drawingSession\.key > 0\) return/, 'a mounted session is reused — no remount when Stift turns on')
+const openDrawing = section(app, 'const openDrawing = useCallback(() => {', '}, [activeTab, noteDrawingSession.key, toast])', 'openDrawing')
+assert.match(openDrawing, /if \(noteDrawingSession\.key > 0\) return/, 'a mounted session is reused — no remount when Stift turns on')
 assert.match(openDrawing, /readNoteInk\(path, content\)/)
+assert.match(openDrawing, /setDrawingSession\(\{ \.\.\.drawingSessionFromLoad\(requestId, document\), path \}\)/)
 assert.doesNotMatch(openDrawing, /window\.fanotes\.readDrawing\(/, 'Stift-on must not resume from the library record alone')
 
 assert.equal(FAMD_INK_ID, 'famd-ink')
@@ -124,6 +159,7 @@ console.log(JSON.stringify({
   keyboardModeInert: true,
   famdFirstRead: true,
   embeddedInkKeepsMarkerId: true,
+  sessionBoundToNote: true,
   absorbMeasuresSheet: true,
   fitOncePerDocument: true,
 }))

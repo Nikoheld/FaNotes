@@ -8,6 +8,26 @@
 
 export type OverlaySession<T = unknown> = { key: number; document: T | null }
 
+/** An overlay session belongs to the note whose ink it was loaded for. */
+export type NoteOverlaySession<T = unknown> = OverlaySession<T> & { path: string | null }
+
+/**
+ * The render right after a note switch still carries the previous note's
+ * session while the active path is already the next note's — the switch
+ * effect that replaces the session runs after that commit. Mounting the pair
+ * put the previous note's ink on the next note's sheet; the sheet's different
+ * size grew the page, marked the document dirty, and the unmount save then
+ * wrote that ink under the next note (its marker, its `.famd`) and overwrote
+ * the previous note's own record with the remapped strokes. A session renders
+ * only for the note it belongs to.
+ */
+export const overlaySessionForNote = <T>(
+  session: NoteOverlaySession<T>,
+  notePath: string | null,
+): NoteOverlaySession<T> => (
+  session.path === notePath ? session : { key: 0, document: null, path: notePath }
+)
+
 export type OverlaySwitchState<T = unknown> = {
   drawingOpen: boolean
   session: OverlaySession<T>

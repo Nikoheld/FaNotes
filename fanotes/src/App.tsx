@@ -108,6 +108,8 @@ import {
   noteInkDocument,
   overlaySessionAfterInkReady,
   overlaySessionAfterNoteSwitch,
+  overlaySessionForNote,
+  type NoteOverlaySession,
 } from './lib/overlayInteract'
 import { drawingSessionFromLoad, INK_OVERLAY_CRASH_TITLE, INK_TOOLBAR_SLOT_ID, overlayAfterNoteSwitch, PDF_TOOLBAR_SLOT_ID, penModeToolbarSlot } from './lib/pdfInkHit'
 import { APP_VERSION } from './lib/appVersion'
@@ -181,7 +183,8 @@ type AppProps = { startupBootstrap?: Promise<BootstrapData> }
 
 type SaveState = 'saved' | 'saving' | 'error'
 type Toast = { id: number; kind: 'success' | 'error' | 'info'; message: string }
-type DrawingSession = { key: number; document: DrawingLibraryDocument | null }
+type DrawingSession = NoteOverlaySession<DrawingLibraryDocument>
+const EMPTY_DRAWING_SESSION: DrawingSession = { key: 0, document: null, path: null }
 type WorksheetSession = { key: number; documents: WorksheetDocument[] }
 type NoteTabButtonProps = {
   active: boolean
@@ -449,7 +452,7 @@ export default function App({ startupBootstrap }: AppProps) {
   const [inspectorVisible, setInspectorVisible] = useState(false)
   const [focusMode, setFocusMode] = useState(false)
   const [drawingOpen, setDrawingOpen] = useState(false)
-  const [drawingSession, setDrawingSession] = useState<DrawingSession>({ key: 0, document: null })
+  const [drawingSession, setDrawingSession] = useState<DrawingSession>(EMPTY_DRAWING_SESSION)
   const [worksheetSession, setWorksheetSession] = useState<WorksheetSession>({ key: 0, documents: [] })
   const [worksheetImportOpen, setWorksheetImportOpen] = useState(false)
   const [worksheetImportBusy, setWorksheetImportBusy] = useState(false)
@@ -677,6 +680,9 @@ export default function App({ startupBootstrap }: AppProps) {
     }
   }, [backupMenuOpen, editorMenuOpen])
   const activeTab = useMemo(() => tabs.find((tab) => tab.path === activePath) ?? null, [activePath, tabs])
+  // The overlay renders only the session loaded for the active note; the
+  // switch effect below replaces a previous note's session one commit later.
+  const noteDrawingSession = overlaySessionForNote(drawingSession, activeTab?.path ?? null)
   const backupPolicy = useMemo(
     () => noteBackupControlPolicy(settings.experimentalNoteBackup, noteBackups.length),
     [noteBackups.length, settings.experimentalNoteBackup],
@@ -776,7 +782,7 @@ export default function App({ startupBootstrap }: AppProps) {
     if (!path) {
       drawingOpenRef.current = false
       setDrawingOpen(false)
-      setDrawingSession({ key: 0, document: null })
+      setDrawingSession(EMPTY_DRAWING_SESSION)
       return
     }
     const switched = overlayAfterNoteSwitch({
@@ -786,7 +792,7 @@ export default function App({ startupBootstrap }: AppProps) {
     }, requestId)
     drawingOpenRef.current = switched.drawingOpen
     setDrawingOpen(switched.drawingOpen)
-    setDrawingSession(overlaySessionAfterNoteSwitch(switched))
+    setDrawingSession({ ...overlaySessionAfterNoteSwitch(switched), path })
 
     // Saved handwriting loads in both input modes; keyboard mode mounts it
     // inert and only when the note has ink (overlaySessionAfterInkReady).
@@ -795,10 +801,10 @@ export default function App({ startupBootstrap }: AppProps) {
     const load = () => {
       void readNoteInk(path, content).then((document) => {
         if (requestId !== drawingLoadRequestRef.current || activePathRef.current !== path) return
-        setDrawingSession(overlaySessionAfterInkReady(
-          drawingOpenRef.current,
-          drawingSessionFromLoad(requestId, document),
-        ))
+        setDrawingSession({
+          ...overlaySessionAfterInkReady(drawingOpenRef.current, drawingSessionFromLoad(requestId, document)),
+          path,
+        })
       })
     }
     const schedule = () => {
@@ -2235,7 +2241,7 @@ export default function App({ startupBootstrap }: AppProps) {
       worksheetLoadRequestRef.current += 1
       worksheetDirtyIdsRef.current.clear()
       setDrawingOpen(false)
-      setDrawingSession((current) => ({ key: current.key + 1, document: null }))
+      setDrawingSession((current) => ({ key: current.key + 1, document: null, path: null }))
       setWorksheetSession((current) => ({ key: current.key + 1, documents: [] }))
       setBootstrap(selected)
       const selectedSettings = { ...defaultSettingsForPlatform(window.fanotes.platform), ...selected.settings }
@@ -2407,7 +2413,7 @@ export default function App({ startupBootstrap }: AppProps) {
     setDrawingOpen(true)
     // A mounted session already shows this note's saved ink (keyboard mode
     // keeps one for notes with handwriting); the pen just becomes the input.
-    if (drawingSession.key > 0) return
+    if (noteDrawingSession.key > 0) return
     // Same FAMD-first read as the note switch. Reading only the library
     // record here resumed the pen on a stale copy of the page whenever the
     // `.famd` companion was newer, and the next save then overwrote the
@@ -2416,9 +2422,9 @@ export default function App({ startupBootstrap }: AppProps) {
     const { path, content } = activeTab
     void readNoteInk(path, content).then((document) => {
       if (requestId !== drawingLoadRequestRef.current || activePathRef.current !== path) return
-      setDrawingSession(drawingSessionFromLoad(requestId, document))
+      setDrawingSession({ ...drawingSessionFromLoad(requestId, document), path })
     })
-  }, [activeTab, drawingSession.key, toast])
+  }, [activeTab, noteDrawingSession.key, toast])
 
   const toggleDrawing = useCallback(() => {
     if (drawingOpenRef.current) closeDrawing()
@@ -2448,7 +2454,7 @@ export default function App({ startupBootstrap }: AppProps) {
     }
     pump()
     return () => { cancelled = true }
-  }, [drawingOpen, drawingSession.key])
+  }, [drawingOpen, noteDrawingSession.key])
 
   useEffect(() => {
     if (!settings.experimentalRemoteSupport || !remoteSupportSession) return
@@ -2559,7 +2565,7 @@ export default function App({ startupBootstrap }: AppProps) {
       const currentContent = pendingWrites.current.get(activeTab.path) ?? activeTab.content
       const nextContent = replaceNoteInk(currentContent, document.id)
       if (nextContent !== currentContent) updateContent(nextContent)
-      setDrawingSession((current) => ({ key: current.key + 1, document }))
+      setDrawingSession((current) => ({ key: current.key + 1, document, path: activeTab.path }))
       openDrawing()
     } catch (error) {
       toast(error instanceof Error ? error.message : 'Handschrift-Seite konnte nicht geöffnet werden.', 'error')
@@ -2696,7 +2702,7 @@ export default function App({ startupBootstrap }: AppProps) {
       }
     }
     if (activePathRef.current !== notePath) return result
-    setDrawingSession((current) => ({ ...current, document }))
+    setDrawingSession((current) => current.path === notePath ? { ...current, document } : current)
     return result
   }, [activePath, saveContent])
 
@@ -3472,18 +3478,18 @@ export default function App({ startupBootstrap }: AppProps) {
                       />
                     </SafeBoundary>
                   </Suspense>)}
-                  {drawingSession.key > 0 && <Suspense fallback={drawingOpen ? <div className="inline-ink-loading"><LoaderCircle className="spin" size={18} /> Stiftebene wird geladen …</div> : null}>
+                  {noteDrawingSession.key > 0 && <Suspense fallback={drawingOpen ? <div className="inline-ink-loading"><LoaderCircle className="spin" size={18} /> Stiftebene wird geladen …</div> : null}>
                     <SafeBoundary
-                      key={`stiftebene:${activeTab.path}:${drawingSession.key}`}
+                      key={`stiftebene:${activeTab.path}:${noteDrawingSession.key}`}
                       name="Handschrift"
                       fallbackTitle={INK_OVERLAY_CRASH_TITLE}
                     >
                       <DrawingBoard
                         ref={drawingBoardRef}
-                        key={drawingSession.key}
+                        key={noteDrawingSession.key}
                         settings={settings}
-                        drawingId={drawingSession.document?.id}
-                        initialDrawingJson={drawingSession.document?.drawingJson}
+                        drawingId={noteDrawingSession.document?.id}
+                        initialDrawingJson={noteDrawingSession.document?.drawingJson}
                         title={`Handschrift · ${activeTab.title}`}
                         inline
                         inputActive={drawingOpen}
@@ -3500,7 +3506,7 @@ export default function App({ startupBootstrap }: AppProps) {
                       />
                     </SafeBoundary>
                   </Suspense>}
-                  {drawingOpen && drawingSession.key === 0 && <div className="inline-ink-loading"><LoaderCircle className="spin" size={18} /> Gespeicherte Stiftebene wird geladen …</div>}
+                  {drawingOpen && noteDrawingSession.key === 0 && <div className="inline-ink-loading"><LoaderCircle className="spin" size={18} /> Gespeicherte Stiftebene wird geladen …</div>}
                   <NoteLinkLayer
                     links={noteLinks}
                     placing={noteLinkPlacing}
