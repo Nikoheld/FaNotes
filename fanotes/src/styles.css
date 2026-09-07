@@ -1049,25 +1049,23 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .unified-note-view.is-pdf-note {
   background: #edeff3;
 }
-/* One stage colour: the camera room around the PDF paper must not read as a
-   second, empty white sheet beside the pages. */
-.unified-note-view.is-pdf-note .paper-sheet-plane {
-  background: #edeff3;
-}
 .paper-view { position: relative; }
+/* Under CSS zoom a percentage resolves against the scroller *in zoomed units*
+   (100% at 200% = half the viewport). With a bare 100% the sheet re-flowed
+   narrower on every zoom step: the text column re-wrapped, PDF pages shrank
+   back to the viewport width and ink (0–1 of the paper) slid off the text.
+   Multiplying by the camera zoom keeps the layout exactly as at 100%; the
+   camera then scales that layout as a whole. */
 .paper-sheet-plane {
   --paper-scroll-room: 560px;
   --view-zoom: 1;
   position: relative;
   display: block;
+  overflow: visible;
+  /* Zoom grows the sheet; anchoring would fight the cursor-lock scroll. */
+  overflow-anchor: none;
   /* Padding is extra paper you can pan into, not a second surface. */
   box-sizing: content-box;
-  /* Under CSS zoom a percentage resolves against the scroller *in zoomed
-     units* (100% at 200% = half the viewport). Left alone, the sheet re-flowed
-     narrower on every zoom step: the text column re-wrapped, PDF pages shrank
-     back to the viewport width and ink (0–1 of the paper) slid off the text.
-     Multiplying by the camera zoom keeps the layout exactly as at 100%; the
-     camera then scales that layout as a whole. */
   width: max(calc(100% * var(--view-zoom)), max-content);
   min-width: calc(100% * var(--view-zoom));
   min-height: calc(100% * var(--view-zoom));
@@ -1075,11 +1073,14 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   /* Zoomed out far enough that the plane no longer fills the scroller: centre it. */
   margin: 0 auto;
   padding: var(--paper-scroll-room);
-  overflow: visible;
-  overflow-anchor: none;
   background: #fff;
   will-change: auto;
   transform-origin: center center;
+}
+/* One stage colour: the camera room around the PDF paper must not read as a
+   second, empty white sheet beside the pages. */
+.unified-note-view.is-pdf-note .paper-sheet-plane {
+  background: #edeff3;
 }
 .paper-view-hud {
   position: fixed;

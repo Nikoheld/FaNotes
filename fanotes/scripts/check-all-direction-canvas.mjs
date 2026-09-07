@@ -83,8 +83,11 @@ const runOnce = () => {
   assert.doesNotMatch(noteViewBlock, /background:\s*#111\b/)
   const planeBlock = css.slice(css.indexOf('.paper-sheet-plane {'), css.indexOf('.paper-view-hud {'))
   assert.match(planeBlock, /padding:\s*var\(--paper-scroll-room\)/)
-  assert.match(planeBlock, /min-width:\s*100%/)
-  assert.match(planeBlock, /min-height:\s*100%/)
+  // The plane must still fill the scroller in every direction, but under CSS zoom a
+  // percentage resolves in zoomed units, so 100% is multiplied by the camera zoom.
+  assert.match(planeBlock, /min-width:\s*calc\(100% \* var\(--view-zoom\)\)/)
+  assert.match(planeBlock, /min-height:\s*calc\(100% \* var\(--view-zoom\)\)/)
+  assert.match(planeBlock, /width:\s*max\(calc\(100% \* var\(--view-zoom\)\), max-content\)/)
   const board = readFileSync(join(root, 'src/components/DrawingBoard.tsx'), 'utf8')
   assert.match(board, /growPageFromMark/)
   assert.match(board, /keepMarkOnPage/)
