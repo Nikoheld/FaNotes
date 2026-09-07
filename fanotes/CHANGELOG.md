@@ -2,6 +2,8 @@
 
 ## Unveröffentlicht
 
+## 2026.9.19
+
 - **Neue Notiz bleibt Text:** Beim Anlegen und Speichern erscheint die `.famd`-Begleiter-JSON nicht im Editor. Sichtbar bleibt nur der Markdown-Text; die Statistik liegt in der Begleiterdatei.
 
 ## 2026.9.18
