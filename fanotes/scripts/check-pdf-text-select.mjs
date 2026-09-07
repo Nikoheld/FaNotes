@@ -80,7 +80,7 @@ const runOnce = () => {
   assert.match(css, /\.pdf-note-page\.is-visible \{[^}]*content-visibility:\s*visible/)
 
   assert.match(board, /applyPdfTextOverlayScale/)
-  assert.match(board, /getViewport\(\{ scale: overlayScale, rotation \}\)/)
+  assert.match(board, /getViewport\(\{ scale: overlayScale, rotation: used \}\)/)
   assert.equal(pointerEventsForInkLayer('pdf-text', false), 'auto')
   assert.equal(pointerEventsForInkLayer('pdf-text', true), 'none')
   const inking = css.slice(css.indexOf('.pdf-note-view.is-inking,'), css.indexOf('.pdf-note-view.is-inking,') + 900)

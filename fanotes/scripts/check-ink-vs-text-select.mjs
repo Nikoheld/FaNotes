@@ -87,7 +87,7 @@ const runOnce = () => {
 
   assert.doesNotMatch(pdfView, /textEnabled=\{!inputDisabled\}/)
   assert.match(pdfView, /textEnabled\n\s+highlight=/)
-  assert.match(pdfView, /textEnabled \|\| textHost\.childElementCount > 0/)
+  assert.match(pdfView, /textEnabledRef\.current \|\| textHost\.childElementCount > 0/)
 
   return {
     inkBlocksSelect: userSelectForInkLayer('pdf-text', true),

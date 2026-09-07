@@ -55,9 +55,10 @@ const runOnce = () => {
   assert.match(pdfView, /textEnabled\n\s+highlight=/)
   assert.doesNotMatch(pdfView, /textEnabled \? 1 : 0/)
   assert.doesNotMatch(pdfView, /else if \(textHost\) \{\s*textHost\.replaceChildren\(\)/)
-  assert.match(pdfView, /textEnabled \|\| textHost\.childElementCount > 0/)
-  assert.match(pdfView, /style\.width = `\$\{Math\.round\(box\.cssWidth\)\}px`/)
-  assert.match(pdfView, /style\.height = `\$\{Math\.round\(box\.cssHeight\)\}px`/)
+  assert.match(pdfView, /textEnabledRef\.current \|\| textHost\.childElementCount > 0/)
+  const painter = readFileSync(join(root, 'src/lib/pdfPagePainter.ts'), 'utf8')
+  assert.match(painter, /canvas\.style\.width = `\$\{box\.cssWidth\.toFixed\(2\)\}px`/)
+  assert.match(painter, /canvas\.style\.height = `\$\{box\.cssHeight\.toFixed\(2\)\}px`/)
   assert.equal(pointerEventsForInkLayer('pdf-text', true), 'none')
   assert.equal(pointerEventsForInkLayer('pdf-text', false), 'auto')
 

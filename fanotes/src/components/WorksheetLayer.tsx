@@ -1,11 +1,11 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import { Check, FileText, Highlighter, Image as ImageIcon, LoaderCircle, Plus, Trash2, Type, X } from 'lucide-react'
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
-import type { PDFDocumentLoadingTask, PDFDocumentProxy, PDFPageProxy, RenderTask } from 'pdfjs-dist'
+import type { PDFDocumentLoadingTask, PDFDocumentProxy, PDFPageProxy } from 'pdfjs-dist'
 import type { WorksheetDocument, WorksheetHighlight, WorksheetTextBox } from '../types'
 import { WORKSHEET_INKING_CLASS } from '../lib/pdfInkHit'
-import { paintBoxForPage, visiblePageCssWindow } from '../lib/pdfDocument'
-import { layoutOffsetInScroller, readUsedSheetZoom, resolvePaperZoomScroller, watchSheetZoom } from '../lib/paperView'
+import { createPdfPagePainter, type PdfPagePainter } from '../lib/pdfPagePainter'
+import { resolvePaperZoomScroller, watchSheetZoom } from '../lib/paperView'
 
 export type WorksheetLayerHandle = {
   flush: () => Promise<void>
@@ -68,15 +68,8 @@ const loadVaultPdfBytes = async (relativePath: string): Promise<Uint8Array> => {
   return loadPdfBytes(await api.readAssetDataUrl(relativePath))
 }
 
-/** One PDF.js paint at a time — parallel page renders stall the main thread and GPU. */
-let pdfRenderTail: Promise<void> = Promise.resolve()
-const enqueuePdfRender = <T,>(job: () => Promise<T>): Promise<T> => {
-  const run = pdfRenderTail.then(job, job)
-  pdfRenderTail = run.then(() => undefined, () => undefined)
-  return run
-}
-
 const RESIZE_DEBOUNCE_MS = 180
+const SCROLL_PAINT_THROTTLE_MS = 140
 const VIEWPORT_ROOT_MARGIN = '96px 0px'
 const HIDE_DEBOUNCE_MS = 360
 const DEFAULT_PAGE_RATIO = 297 / 210
@@ -102,151 +95,99 @@ function PdfPageCanvas({
   onReady: () => void
 }) {
   const hostRef = useRef<HTMLDivElement>(null)
-  const canvasRef = useRef<HTMLCanvasElement>(null)
-  const pageRef = useRef<PDFPageProxy | null>(null)
-  const renderRef = useRef<RenderTask | null>(null)
-  const renderTokenRef = useRef(0)
-  const lastRenderKeyRef = useRef('')
-  const readySentRef = useRef(false)
-  const resizeTimerRef = useRef<number | null>(null)
+  const baseARef = useRef<HTMLCanvasElement>(null)
+  const baseBRef = useRef<HTMLCanvasElement>(null)
+  const detailARef = useRef<HTMLCanvasElement>(null)
+  const detailBRef = useRef<HTMLCanvasElement>(null)
+  const painterRef = useRef<PdfPagePainter | null>(null)
+  const onReadyRef = useRef(onReady)
+  onReadyRef.current = onReady
 
-  const render = useCallback(async () => {
+  useEffect(() => {
     const host = hostRef.current
-    const canvas = canvasRef.current
-    const page = pageRef.current
-    if (!host || !canvas || !page) return
-    const cssWidth = Math.max(1, Math.round(host.clientWidth))
-    if (cssWidth < 8) return
-    const base = page.getViewport({ scale: 1 })
-    const cssHeight = Math.max(1, Math.round(cssWidth * (base.height / Math.max(1, base.width))))
-    const viewZoom = readUsedSheetZoom(host)
-    const scroller = resolvePaperZoomScroller(host)
-    const pageOffset = layoutOffsetInScroller(host, scroller)
-    const visible = scroller
-      ? visiblePageCssWindow({
-        pageWidth: cssWidth,
-        pageHeight: cssHeight,
-        viewWidth: scroller.clientWidth,
-        viewHeight: scroller.clientHeight,
-        viewZoom,
-        scrollLeft: scroller.scrollLeft,
-        scrollTop: scroller.scrollTop,
-        pageOffsetLeft: pageOffset.left,
-        pageOffsetTop: pageOffset.top,
-      })
-      : null
-    const box = paintBoxForPage(cssWidth, cssHeight, {
-      viewZoom,
-      visibleLeft: visible?.left,
-      visibleTop: visible?.top,
-      visibleCssWidth: visible?.width,
-      visibleCssHeight: visible?.height,
+    const baseA = baseARef.current
+    const baseB = baseBRef.current
+    const detailA = detailARef.current
+    const detailB = detailBRef.current
+    if (!host || !baseA || !baseB || !detailA || !detailB) return
+    const painter = createPdfPagePainter({
+      host,
+      base: [baseA, baseB],
+      detail: [detailA, detailB],
+      label: `PDF-Seite ${number}`,
+      onFirstPaint: () => onReadyRef.current(),
     })
-    const { pixelWidth, pixelHeight } = box
-    const renderKey = `${cssWidth}x${cssHeight}@${box.cssLeft},${box.cssTop},${box.cssWidth}x${box.cssHeight}@${pixelWidth}x${pixelHeight}@${viewZoom.toFixed(2)}`
-    if (renderKey === lastRenderKeyRef.current && canvas.width === pixelWidth && canvas.height === pixelHeight) {
-      return
+    painterRef.current = painter
+    return () => {
+      painterRef.current = null
+      painter.dispose()
     }
-
-    const token = ++renderTokenRef.current
-    renderRef.current?.cancel()
-    await enqueuePdfRender(async () => {
-      if (token !== renderTokenRef.current || !pageRef.current || !canvasRef.current || !hostRef.current) return
-      const livePage = pageRef.current
-      const liveCanvas = canvasRef.current
-      const backingPerCss = pixelWidth / Math.max(1, box.cssWidth)
-      const scale = backingPerCss * (cssWidth / Math.max(1, base.width))
-      const viewport = livePage.getViewport({ scale })
-      liveCanvas.width = pixelWidth
-      liveCanvas.height = pixelHeight
-      liveCanvas.style.position = 'absolute'
-      liveCanvas.style.left = `${Math.round(box.cssLeft)}px`
-      liveCanvas.style.top = `${Math.round(box.cssTop)}px`
-      liveCanvas.style.width = `${Math.round(box.cssWidth)}px`
-      liveCanvas.style.height = `${Math.round(box.cssHeight)}px`
-      const context = liveCanvas.getContext('2d', { alpha: false })
-      if (!context) return
-      const integerScale = Math.abs(scale - Math.round(scale)) < 0.02
-      context.imageSmoothingEnabled = !integerScale
-      context.imageSmoothingQuality = 'high'
-      context.setTransform(1, 0, 0, 1, 0, 0)
-      context.fillStyle = '#ffffff'
-      context.fillRect(0, 0, pixelWidth, pixelHeight)
-      const task = livePage.render({
-        canvas: liveCanvas,
-        canvasContext: context,
-        viewport,
-        intent: 'display',
-        transform: [1, 0, 0, 1, -box.cssLeft * backingPerCss, -box.cssTop * (pixelHeight / Math.max(1, box.cssHeight))],
-      })
-      renderRef.current = task
-      try {
-        await task.promise
-        if (token !== renderTokenRef.current) return
-        lastRenderKeyRef.current = renderKey
-        if (!readySentRef.current) {
-          readySentRef.current = true
-          onReady()
-        }
-      } catch (error: unknown) {
-        if (!(error instanceof Error) || error.name !== 'RenderingCancelledException') {
-          console.error(`PDF-Seite ${number} konnte nicht gerendert werden.`, error)
-        }
-      }
-    })
-  }, [number, onReady])
+  }, [number])
 
   useEffect(() => {
     let alive = true
+    let loaded: PDFPageProxy | null = null
     void pdf.getPage(number).then((page) => {
       if (!alive) {
         page.cleanup()
         return
       }
-      pageRef.current = page
+      loaded = page
       const viewport = page.getViewport({ scale: 1 })
       onRatio(viewport.height / Math.max(1, viewport.width))
-      void render()
+      painterRef.current?.setPage(page, 0)
+      void painterRef.current?.paint()
     }).catch((error: unknown) => {
       if (alive) console.error(`PDF-Seite ${number} konnte nicht geladen werden.`, error)
     })
     return () => {
       alive = false
-      renderTokenRef.current += 1
-      const page = pageRef.current
-      pageRef.current = null
-      try { renderRef.current?.cancel() } catch { /* ignore */ }
-      renderRef.current = null
-      try { page?.cleanup() } catch { /* ignore */ }
+      painterRef.current?.setPage(null, 0)
+      try { loaded?.cleanup() } catch { /* ignore */ }
+      loaded = null
     }
-  }, [number, onRatio, pdf, render])
+  }, [number, onRatio, pdf])
 
   useEffect(() => {
     const host = hostRef.current
     if (!host) return
-    const schedule = () => {
-      if (resizeTimerRef.current !== null) window.clearTimeout(resizeTimerRef.current)
-      resizeTimerRef.current = window.setTimeout(() => {
-        resizeTimerRef.current = null
-        void render()
+    let layoutTimer = 0
+    let scrollTimer = 0
+    const paint = () => { void painterRef.current?.paint() }
+    const scheduleLayout = () => {
+      if (layoutTimer) window.clearTimeout(layoutTimer)
+      layoutTimer = window.setTimeout(() => {
+        layoutTimer = 0
+        paint()
       }, RESIZE_DEBOUNCE_MS)
     }
-    const observer = new ResizeObserver(schedule)
+    const scheduleScroll = () => {
+      if (scrollTimer) return
+      scrollTimer = window.setTimeout(() => {
+        scrollTimer = 0
+        paint()
+      }, SCROLL_PAINT_THROTTLE_MS)
+    }
+    const observer = new ResizeObserver(scheduleLayout)
     observer.observe(host)
-    const stopZoom = watchSheetZoom(host, schedule)
+    const stopZoom = watchSheetZoom(host, scheduleLayout)
     const scroller = resolvePaperZoomScroller(host)
-    scroller?.addEventListener('scroll', schedule, { passive: true })
+    scroller?.addEventListener('scroll', scheduleScroll, { passive: true })
     return () => {
       observer.disconnect()
       stopZoom()
-      scroller?.removeEventListener('scroll', schedule)
-      if (resizeTimerRef.current !== null) window.clearTimeout(resizeTimerRef.current)
+      scroller?.removeEventListener('scroll', scheduleScroll)
+      if (layoutTimer) window.clearTimeout(layoutTimer)
+      if (scrollTimer) window.clearTimeout(scrollTimer)
     }
-  }, [render])
+  }, [])
 
   return (
     <div className="worksheet-pdf-canvas-host" ref={hostRef}>
-      <canvas ref={canvasRef} aria-label={`PDF-Seite ${number}`} />
+      <canvas ref={baseARef} aria-label={`PDF-Seite ${number}`} />
+      <canvas ref={baseBRef} aria-hidden="true" />
+      <canvas ref={detailARef} aria-hidden="true" />
+      <canvas ref={detailBRef} aria-hidden="true" />
     </div>
   )
 }

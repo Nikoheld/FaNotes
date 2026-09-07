@@ -24,7 +24,7 @@ import {
   ZoomIn,
   ZoomOut,
 } from 'lucide-react'
-import type { PDFDocumentLoadingTask, PDFDocumentProxy, PDFPageProxy, RenderTask } from 'pdfjs-dist'
+import type { PDFDocumentLoadingTask, PDFDocumentProxy, PDFPageProxy } from 'pdfjs-dist'
 import { TextLayer } from 'pdfjs-dist'
 import {
   DEFAULT_PDF_PAGE_RATIO,
@@ -32,13 +32,12 @@ import {
   enqueuePdfRender,
   loadVaultPdfBytes,
   openPdfDocument,
-  paintBoxForPage,
   pdfStartPageForLoad,
-  visiblePageCssWindow,
 } from '../lib/pdfDocument'
+import { createPdfPagePainter, type PdfBasePaintInfo, type PdfPagePainter } from '../lib/pdfPagePainter'
 import { pdfPageScrollIntoViewBlock } from '../lib/pdfOpenCamera'
 import { PDF_INKING_CLASS, PDF_TOOLBAR_SLOT_ID } from '../lib/pdfInkHit'
-import { layoutOffsetInScroller, readUsedSheetZoom, resolvePaperZoomScroller, watchSheetZoom } from '../lib/paperView'
+import { resolvePaperZoomScroller, watchSheetZoom } from '../lib/paperView'
 import { loadPaperViewMemory, recallPaperView } from '../lib/paperViewMemory'
 
 type PdfNoteViewProps = {
@@ -64,6 +63,8 @@ type SearchHit = {
 }
 
 const RESIZE_DEBOUNCE_MS = 180
+/** Scroll re-plan cadence; the plan itself is a no-op while the painted window still covers the viewport. */
+const SCROLL_PAINT_THROTTLE_MS = 140
 const HIDE_DEBOUNCE_MS = 360
 const VIEWPORT_ROOT_MARGIN = '160px 0px'
 const MIN_SCALE = 0.5
@@ -90,171 +91,144 @@ function PdfPageCanvas({
   onReady: () => void
 }) {
   const hostRef = useRef<HTMLDivElement>(null)
-  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const baseARef = useRef<HTMLCanvasElement>(null)
+  const baseBRef = useRef<HTMLCanvasElement>(null)
+  const detailARef = useRef<HTMLCanvasElement>(null)
+  const detailBRef = useRef<HTMLCanvasElement>(null)
   const textRef = useRef<HTMLDivElement>(null)
-  const pageRef = useRef<PDFPageProxy | null>(null)
-  const renderRef = useRef<RenderTask | null>(null)
   const textLayerRef = useRef<TextLayer | null>(null)
-  const renderTokenRef = useRef(0)
-  const lastRenderKeyRef = useRef('')
-  const readySentRef = useRef(false)
-  const resizeTimerRef = useRef<number | null>(null)
+  const painterRef = useRef<PdfPagePainter | null>(null)
+  const onReadyRef = useRef(onReady)
+  onReadyRef.current = onReady
+  const textEnabledRef = useRef(textEnabled)
+  textEnabledRef.current = textEnabled
+  const lastBaseRef = useRef<PdfBasePaintInfo | null>(null)
 
-  const render = useCallback(async () => {
-    const host = hostRef.current
-    const canvas = canvasRef.current
-    const page = pageRef.current
-    if (!host || !canvas || !page) return
-    const cssWidth = Math.max(1, Math.round(host.clientWidth))
-    if (cssWidth < 8) return
-    const base = page.getViewport({ scale: 1, rotation })
-    const cssHeight = Math.max(1, Math.round(cssWidth * (base.height / Math.max(1, base.width))))
-    const viewZoom = readUsedSheetZoom(host)
-    const scroller = resolvePaperZoomScroller(host)
-    const pageOffset = layoutOffsetInScroller(host, scroller)
-    const visible = scroller
-      ? visiblePageCssWindow({
-        pageWidth: cssWidth,
-        pageHeight: cssHeight,
-        viewWidth: scroller.clientWidth,
-        viewHeight: scroller.clientHeight,
-        viewZoom,
-        scrollLeft: scroller.scrollLeft,
-        scrollTop: scroller.scrollTop,
-        pageOffsetLeft: pageOffset.left,
-        pageOffsetTop: pageOffset.top,
-      })
-      : null
-    const box = paintBoxForPage(cssWidth, cssHeight, {
-      viewZoom,
-      visibleLeft: visible?.left,
-      visibleTop: visible?.top,
-      visibleCssWidth: visible?.width,
-      visibleCssHeight: visible?.height,
+  // The selectable text layer follows the page box, not the camera: it is
+  // rebuilt with the base bitmap and left alone by scroll and zoom.
+  const paintTextLayer = useCallback(async (info: PdfBasePaintInfo) => {
+    const { page, cssWidth, naturalWidth, rotation: used } = info
+    lastBaseRef.current = info
+    const textHost = textRef.current
+    if (!textHost) return
+    if (!(textEnabledRef.current || textHost.childElementCount > 0)) return
+    try { textLayerRef.current?.cancel() } catch { /* ignore */ }
+    textHost.replaceChildren()
+    const overlayScale = applyPdfTextOverlayScale(textHost, cssWidth, naturalWidth)
+    const layer = new TextLayer({
+      textContentSource: page.streamTextContent(),
+      container: textHost,
+      viewport: page.getViewport({ scale: overlayScale, rotation: used }),
     })
-    const { pixelWidth, pixelHeight } = box
-    const renderKey = `${cssWidth}x${cssHeight}@${box.cssLeft},${box.cssTop},${box.cssWidth}x${box.cssHeight}@${pixelWidth}x${pixelHeight}:${rotation}@${viewZoom.toFixed(2)}`
-    if (renderKey === lastRenderKeyRef.current && canvas.width === pixelWidth && canvas.height === pixelHeight) {
-      return
-    }
-
-    const token = ++renderTokenRef.current
-    renderRef.current?.cancel()
-    textLayerRef.current?.cancel()
-    await enqueuePdfRender(async () => {
-      if (token !== renderTokenRef.current || !pageRef.current || !canvasRef.current || !hostRef.current) return
-      const livePage = pageRef.current
-      const liveCanvas = canvasRef.current
-      const backingPerCss = pixelWidth / Math.max(1, box.cssWidth)
-      const scale = backingPerCss * (cssWidth / Math.max(1, base.width))
-      const viewport = livePage.getViewport({ scale, rotation })
-      liveCanvas.width = pixelWidth
-      liveCanvas.height = pixelHeight
-      liveCanvas.style.position = 'absolute'
-      liveCanvas.style.left = `${Math.round(box.cssLeft)}px`
-      liveCanvas.style.top = `${Math.round(box.cssTop)}px`
-      liveCanvas.style.width = `${Math.round(box.cssWidth)}px`
-      liveCanvas.style.height = `${Math.round(box.cssHeight)}px`
-      const context = liveCanvas.getContext('2d', { alpha: false })
-      if (!context) return
-      const integerScale = Math.abs(scale - Math.round(scale)) < 0.02
-      context.imageSmoothingEnabled = !integerScale
-      context.imageSmoothingQuality = 'high'
-      context.setTransform(1, 0, 0, 1, 0, 0)
-      context.fillStyle = '#ffffff'
-      context.fillRect(0, 0, pixelWidth, pixelHeight)
-      const task = livePage.render({
-        canvas: liveCanvas,
-        canvasContext: context,
-        viewport,
-        intent: 'display',
-        transform: [1, 0, 0, 1, -box.cssLeft * backingPerCss, -box.cssTop * (pixelHeight / Math.max(1, box.cssHeight))],
-      })
-      renderRef.current = task
-      try {
-        await task.promise
-        if (token !== renderTokenRef.current) return
-        lastRenderKeyRef.current = renderKey
-        const textHost = textRef.current
-        if (textHost && (textEnabled || textHost.childElementCount > 0)) {
-          textHost.replaceChildren()
-          const overlayScale = applyPdfTextOverlayScale(textHost, cssWidth, base.width)
-          const cssViewport = livePage.getViewport({ scale: overlayScale, rotation })
-          const layer = new TextLayer({
-            textContentSource: livePage.streamTextContent(),
-            container: textHost,
-            viewport: cssViewport,
-          })
-          textLayerRef.current = layer
-          await layer.render()
-        }
-        if (!readySentRef.current) {
-          readySentRef.current = true
-          onReady()
-        }
-      } catch (error: unknown) {
-        if (!(error instanceof Error) || error.name !== 'RenderingCancelledException') {
-          console.error(`PDF-Seite ${number} konnte nicht gerendert werden.`, error)
-        }
+    textLayerRef.current = layer
+    try {
+      await layer.render()
+    } catch (error: unknown) {
+      if (!(error instanceof Error) || !/cancel/iu.test(error.name)) {
+        console.error(`Textebene der PDF-Seite ${number} konnte nicht aufgebaut werden.`, error)
       }
+    }
+  }, [number])
+
+  useEffect(() => {
+    const host = hostRef.current
+    const baseA = baseARef.current
+    const baseB = baseBRef.current
+    const detailA = detailARef.current
+    const detailB = detailBRef.current
+    if (!host || !baseA || !baseB || !detailA || !detailB) return
+    const painter = createPdfPagePainter({
+      host,
+      base: [baseA, baseB],
+      detail: [detailA, detailB],
+      label: `PDF-Seite ${number}`,
+      onBasePainted: paintTextLayer,
+      onFirstPaint: () => onReadyRef.current(),
     })
-  }, [number, onReady, rotation, textEnabled])
+    painterRef.current = painter
+    return () => {
+      painterRef.current = null
+      lastBaseRef.current = null
+      painter.dispose()
+      try { textLayerRef.current?.cancel() } catch { /* ignore */ }
+      textLayerRef.current = null
+    }
+  }, [number, paintTextLayer])
+
+  // Text selection switched on after the page was painted: build the layer now.
+  useEffect(() => {
+    const info = lastBaseRef.current
+    if (!textEnabled || !info || (textRef.current?.childElementCount ?? 0) > 0) return
+    void paintTextLayer(info)
+  }, [paintTextLayer, textEnabled])
 
   useEffect(() => {
     let alive = true
+    let loaded: PDFPageProxy | null = null
     void pdf.getPage(number).then((page) => {
       if (!alive) {
         page.cleanup()
         return
       }
-      pageRef.current = page
+      loaded = page
       const viewport = page.getViewport({ scale: 1, rotation })
       onRatio(viewport.height / Math.max(1, viewport.width))
-      lastRenderKeyRef.current = ''
-      void render()
+      painterRef.current?.setPage(page, rotation)
+      void painterRef.current?.paint()
     }).catch((error: unknown) => {
       if (alive) console.error(`PDF-Seite ${number} konnte nicht geladen werden.`, error)
     })
     return () => {
       alive = false
-      renderTokenRef.current += 1
-      const page = pageRef.current
-      pageRef.current = null
-      try { renderRef.current?.cancel() } catch { /* ignore */ }
-      renderRef.current = null
-      try { textLayerRef.current?.cancel() } catch { /* ignore */ }
-      textLayerRef.current = null
-      try { page?.cleanup() } catch { /* ignore */ }
+      painterRef.current?.setPage(null, rotation)
+      try { loaded?.cleanup() } catch { /* ignore */ }
+      loaded = null
     }
-  }, [number, onRatio, pdf, render, rotation])
+  }, [number, onRatio, pdf, rotation])
 
   useEffect(() => {
     const host = hostRef.current
     if (!host) return
-    const schedule = () => {
-      if (resizeTimerRef.current !== null) window.clearTimeout(resizeTimerRef.current)
-      resizeTimerRef.current = window.setTimeout(() => {
-        resizeTimerRef.current = null
-        lastRenderKeyRef.current = ''
-        void render()
+    let layoutTimer = 0
+    let scrollTimer = 0
+    const paint = () => { void painterRef.current?.paint() }
+    const scheduleLayout = () => {
+      if (layoutTimer) window.clearTimeout(layoutTimer)
+      layoutTimer = window.setTimeout(() => {
+        layoutTimer = 0
+        paint()
       }, RESIZE_DEBOUNCE_MS)
     }
-    const observer = new ResizeObserver(schedule)
+    // Scroll: planning is cheap and only re-paints once the viewport leaves
+    // the painted window, so throttle (not debounce) — a long scroll at high
+    // zoom keeps receiving sharp windows instead of waiting for a pause.
+    const scheduleScroll = () => {
+      if (scrollTimer) return
+      scrollTimer = window.setTimeout(() => {
+        scrollTimer = 0
+        paint()
+      }, SCROLL_PAINT_THROTTLE_MS)
+    }
+    const observer = new ResizeObserver(scheduleLayout)
     observer.observe(host)
-    const stopZoom = watchSheetZoom(host, schedule)
+    const stopZoom = watchSheetZoom(host, scheduleLayout)
     const scroller = resolvePaperZoomScroller(host)
-    scroller?.addEventListener('scroll', schedule, { passive: true })
+    scroller?.addEventListener('scroll', scheduleScroll, { passive: true })
     return () => {
       observer.disconnect()
       stopZoom()
-      scroller?.removeEventListener('scroll', schedule)
-      if (resizeTimerRef.current !== null) window.clearTimeout(resizeTimerRef.current)
+      scroller?.removeEventListener('scroll', scheduleScroll)
+      if (layoutTimer) window.clearTimeout(layoutTimer)
+      if (scrollTimer) window.clearTimeout(scrollTimer)
     }
-  }, [render])
+  }, [])
 
   return (
     <div className="pdf-note-canvas-host" ref={hostRef}>
-      <canvas ref={canvasRef} aria-label={`PDF-Seite ${number}`} />
+      <canvas ref={baseARef} aria-label={`PDF-Seite ${number}`} />
+      <canvas ref={baseBRef} aria-hidden="true" />
+      <canvas ref={detailARef} aria-hidden="true" />
+      <canvas ref={detailBRef} aria-hidden="true" />
       <div
         className={`pdf-note-text-layer ${highlight ? 'has-search' : ''}`}
         data-highlight={highlight || undefined}
