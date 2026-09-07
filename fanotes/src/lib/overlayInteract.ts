@@ -1,7 +1,9 @@
 /**
- * Keyboard-mode note switches must stay clickable and must not remount the
- * heavy ink overlay — including after that note's FAMD/ink load. Report
- * 1788698537115: “Everything laggs, i can't press most of the things.”
+ * Keyboard-mode note switches must stay clickable: the overlay is inert, holds
+ * no global pointer lock, and is mounted only for notes with saved ink (report
+ * 1788698537115: “Everything laggs, i can't press most of the things.”).
+ * Saved handwriting itself always loads — a note switch in keyboard mode used
+ * to skip the FAMD/ink read, and the handwriting looked deleted.
  */
 
 export type OverlaySession<T = unknown> = { key: number; document: T | null }
@@ -29,15 +31,9 @@ export const overlayGlobalPointerLockOn = (inline: boolean, inputActive: boolean
 )
 
 /**
- * FAMD/sidecar ink load on a note switch is only for Stift mode. Keyboard-mode
- * switches must not parse or remount the overlay — that remount is the remaining
- * 1788698537115 lag after leftover capture was dropped.
- */
-export const overlayInkLoadOnNoteSwitch = (drawingOpen: boolean) => drawingOpen === true
-
-/**
- * Keyboard mode unmounts the overlay on the switch itself. Stift-on keeps a
- * ready session.
+ * Keyboard mode unmounts the overlay on the switch itself (the previous note's
+ * ink must not linger over the next note). Stift-on keeps a ready session so
+ * the pen never waits for the FAMD/ink read.
  */
 export const overlaySessionAfterNoteSwitch = <T>(
   switched: OverlaySwitchState<T>,
@@ -48,17 +44,38 @@ export const overlaySessionAfterNoteSwitch = <T>(
 )
 
 /**
- * Ink-ready may remount only while Stift is on. Keyboard mode keeps key 0 so a
- * finished FAMD/ink read cannot put DrawingBoard back over the chrome.
+ * Saved handwriting is part of the note and shows in both input modes. Stift
+ * mode always takes the ready session (an empty page is writable). Keyboard
+ * mode mounts the overlay only for notes that actually have saved ink, inert
+ * (`overlayInert`), so notes without handwriting stay as light as before and
+ * chrome stays clickable — the 1788698537115 lag was a grow loop in the
+ * overlay mount, not the mount itself.
  */
 export const overlaySessionAfterInkReady = <T>(
   drawingOpen: boolean,
   loaded: OverlaySession<T>,
 ): OverlaySession<T> => (
-  drawingOpen === true
+  drawingOpen === true || loaded.document !== null
     ? loaded
     : { key: 0, document: null }
 )
+
+/** Ink stored inside the note's `.famd` companion carries no library id of its own. */
+export const FAMD_INK_ID = 'famd-ink'
+
+/**
+ * A FAMD-embedded document takes the note's ink marker id, so its next save
+ * updates that note's library record instead of one `famd-ink` record shared
+ * by every note. Without a marker the id is cleared and Main assigns a fresh
+ * one on save.
+ */
+export const noteInkDocument = <T extends { id: string }>(
+  document: T,
+  markerId: string | null,
+): T => {
+  if (document.id !== FAMD_INK_ID) return document
+  return { ...document, id: markerId ?? '' }
+}
 
 export type InteractState = {
   drawingOpen: boolean
@@ -90,7 +107,7 @@ export const chromePressable = (state: InteractState) => (
   && (state.drawingOpen === true || state.overlayHits === false)
 )
 
-/** Keyboard mode must not keep a mounted overlay — remounting it is the lag. */
+/** Keyboard mode keeps no overlay for a note without saved ink (the replayed bug events carry no ink). */
 export const overlayIdleInKeyboardMode = (state: Pick<InteractState, 'drawingOpen' | 'sessionKey'>) => (
   state.drawingOpen === true || state.sessionKey === 0
 )

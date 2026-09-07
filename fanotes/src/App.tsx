@@ -105,7 +105,7 @@ import {
   type SubjectBookRecord,
 } from './lib/subjectBook'
 import {
-  overlayInkLoadOnNoteSwitch,
+  noteInkDocument,
   overlaySessionAfterInkReady,
   overlaySessionAfterNoteSwitch,
 } from './lib/overlayInteract'
@@ -261,6 +261,30 @@ const attachNoteInk = (content: string, id: string) => {
 const replaceNoteInk = (content: string, id: string) => noteInkId(content)
   ? content.replace(NOTE_INK_MARKER, `<!-- fanotes-ink:${id} -->`)
   : attachNoteInk(content, id)
+
+/**
+ * The note's saved handwriting: the `.famd` companion first (it is rewritten
+ * on every ink save), then the drawing-library record the note's ink marker
+ * points at. Every path that opens ink for a note goes through this, so the
+ * pen never resumes from an older copy of the page.
+ */
+const readNoteInk = async (path: string, content: string): Promise<DrawingLibraryDocument | null> => {
+  const markerId = noteInkId(content)
+  if (typeof window.fanotes.readFamdInk === 'function') {
+    try {
+      const embedded = await window.fanotes.readFamdInk(path)
+      if (embedded) return noteInkDocument(embedded, markerId)
+    } catch {
+      // Fall through to the drawing library.
+    }
+  }
+  if (!markerId) return null
+  try {
+    return await window.fanotes.readDrawing(markerId)
+  } catch {
+    return null
+  }
+}
 
 const noteWorksheetIds = (content: string) => [...content.matchAll(NOTE_WORKSHEET_MARKER)].map((match) => match[1])
 
@@ -746,7 +770,7 @@ export default function App({ startupBootstrap }: AppProps) {
     const requestId = ++drawingLoadRequestRef.current
     drawingDirtyRef.current = false
     const path = activeTab?.path
-    const id = activeTab ? noteInkId(activeTab.content) : null
+    const content = activeTab?.content ?? ''
     const initialNoteLoad = Boolean(path && initialDrawingLoadRef.current)
     if (path) initialDrawingLoadRef.current = false
     if (!path) {
@@ -763,42 +787,19 @@ export default function App({ startupBootstrap }: AppProps) {
     drawingOpenRef.current = switched.drawingOpen
     setDrawingOpen(switched.drawingOpen)
     setDrawingSession(overlaySessionAfterNoteSwitch(switched))
-    if (!overlayInkLoadOnNoteSwitch(drawingOpenRef.current)) return
 
+    // Saved handwriting loads in both input modes; keyboard mode mounts it
+    // inert and only when the note has ink (overlaySessionAfterInkReady).
     let idleId: number | null = null
     let startTimer: number | null = null
     const load = () => {
-      const apply = (document: DrawingLibraryDocument | null) => {
+      void readNoteInk(path, content).then((document) => {
         if (requestId !== drawingLoadRequestRef.current || activePathRef.current !== path) return
         setDrawingSession(overlaySessionAfterInkReady(
           drawingOpenRef.current,
           drawingSessionFromLoad(requestId, document),
         ))
-      }
-      const fromSidecar = () => {
-        if (!id) {
-          apply(null)
-          return
-        }
-        void window.fanotes.readDrawing(id).then(apply).catch(() => apply(null))
-      }
-      if (typeof window.fanotes.readFamdInk === 'function') {
-        void window.fanotes.readFamdInk(path)
-          .then((embedded) => {
-            if (requestId !== drawingLoadRequestRef.current || activePathRef.current !== path) return
-            if (embedded) {
-              setDrawingSession(overlaySessionAfterInkReady(
-                drawingOpenRef.current,
-                drawingSessionFromLoad(requestId, embedded),
-              ))
-              return
-            }
-            fromSidecar()
-          })
-          .catch(fromSidecar)
-        return
-      }
-      fromSidecar()
+      })
     }
     const schedule = () => {
       startTimer = null
@@ -2404,23 +2405,19 @@ export default function App({ startupBootstrap }: AppProps) {
     setHomeworkOpen(false)
     setSearchOpen(false)
     setDrawingOpen(true)
+    // A mounted session already shows this note's saved ink (keyboard mode
+    // keeps one for notes with handwriting); the pen just becomes the input.
     if (drawingSession.key > 0) return
-    const id = noteInkId(activeTab.content)
-    if (!id) {
-      setDrawingSession((current) => current.key > 0 ? current : drawingSessionFromLoad(1, null))
-      return
-    }
+    // Same FAMD-first read as the note switch. Reading only the library
+    // record here resumed the pen on a stale copy of the page whenever the
+    // `.famd` companion was newer, and the next save then overwrote the
+    // newer strokes for good.
     const requestId = ++drawingLoadRequestRef.current
-    void window.fanotes.readDrawing(id)
-      .then((document) => {
-        if (requestId !== drawingLoadRequestRef.current || activePathRef.current !== activeTab.path) return
-        setDrawingSession(drawingSessionFromLoad(requestId, document))
-      })
-      .catch(() => {
-        if (requestId === drawingLoadRequestRef.current && activePathRef.current === activeTab.path) {
-          setDrawingSession(drawingSessionFromLoad(requestId, null))
-        }
-      })
+    const { path, content } = activeTab
+    void readNoteInk(path, content).then((document) => {
+      if (requestId !== drawingLoadRequestRef.current || activePathRef.current !== path) return
+      setDrawingSession(drawingSessionFromLoad(requestId, document))
+    })
   }, [activeTab, drawingSession.key, toast])
 
   const toggleDrawing = useCallback(() => {
