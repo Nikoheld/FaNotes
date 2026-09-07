@@ -123,7 +123,7 @@ const safeguards = [
   ['export const paperCanvasLayout', 'Eine Schreibseite plus extra Papier, keine dunkle Bühne'],
   ['flushPaintedLayoutGrow', 'PDF-Seitenwachstum remappt Tinte, damit sie nicht rutscht'],
   ['const commitPendingGrowRemap = useCallback', 'Grow-Flush ist ein gemeinsamer Helper'],
-  ['activeRenderedPointCountRef.current = 0\n    wipeLiveInkCanvas(canvasRef.current)\n    redraw(true)', 'Flush nach Grow zeichnet die Live-Tinte vollständig neu'],
+  ['activeRenderedPointCountRef.current = 0\n    wipeLiveInk()\n    redraw(true)', 'Flush nach Grow zeichnet die Live-Tinte vollständig neu'],
   ['fanotes-ink-toolbar-slot', 'Handschrift-Werkzeuge sitzen in der oberen Leiste'],
   ['drawingSessionFromLoad', 'Leere Tinte bekommt trotzdem eine Live-Stiftebene'],
   ['penModeToolbarSlot', 'PDF im Stiftmodus dockt die Tintenleiste, nicht den PDF-Pager'],
