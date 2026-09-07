@@ -218,7 +218,7 @@ export const measureVisibleInkBox = (input: {
  * sheet. Guard on each side, in viewports — the pen may cross the visible
  * edge by this much (auto-scroll, capture) before the slice has to move.
  */
-export const LIVE_INK_GUARD_VIEWPORTS = 0.35
+export const LIVE_INK_GUARD_VIEWPORTS = 0.15
 /** Pen samples closer than this (layout px) to the live slice edge move it. */
 export const LIVE_INK_EDGE_PX = 24
 
