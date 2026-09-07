@@ -113,6 +113,7 @@ import {
   FULL_INK_WINDOW,
   inkWindowLayoutStyle,
   isFullInkWindow,
+  liveInkSliceLayoutStyle,
   markdownNoteInkOverlaySize,
   pdfOverlayPointFromClient,
   pdfOverlaySourceHeight,
@@ -123,13 +124,20 @@ import {
 } from '../lib/pdfInkHit'
 import { overlayGlobalPointerLockOn, overlayHitEnabled, overlayInert } from '../lib/overlayInteract'
 import {
+  type InkLayoutBox,
+  type InkLayoutPoint,
   type InkWindowLayout,
+  type LiveInkSlice,
   inkBandWindow,
   inkWindowGuardHit,
   inkWindowShift,
-  measureVisibleInkLayout,
+  liveInkWindowHolds,
+  measureVisibleInkBox,
   placeInkWindow,
+  placeLiveInkWindow,
   planInkWindow,
+  planLiveInkWindow,
+  sameLiveInkSlice,
 } from '../lib/inkWindowPlan'
 import { mapClientToSheet } from '../lib/paperCanvas'
 import {
@@ -298,11 +306,16 @@ const INK_WINDOW_IDLE_MS = 320
 const measureInkWindow = (paper: HTMLElement, scroller: HTMLElement, rotation: number) => {
   const paperRect = paper.getBoundingClientRect()
   const scrollerRect = scroller.getBoundingClientRect()
-  return measureVisibleInkLayout({
+  return measureVisibleInkBox({
+    scrollerLeft: scrollerRect.left,
     scrollerTop: scrollerRect.top,
+    scrollerWidth: scroller.clientWidth,
     scrollerHeight: scroller.clientHeight,
+    paperLeft: paperRect.left,
     paperTop: paperRect.top,
+    paperVisualWidth: paperRect.width,
     paperVisualHeight: paperRect.height,
+    paperLayoutWidth: paper.offsetWidth,
     paperLayoutHeight: paper.offsetHeight,
     rotation,
   })
@@ -319,10 +332,9 @@ const strokeIntersectsWindow = (stroke: { points: Array<{ y: number }> }, window
   return maxY >= window.y0 - pad && minY <= window.y1 + pad
 }
 
-const applyInkWindowToCanvases = (canvases: Array<HTMLCanvasElement | null>, window: InkWindow) => {
-  // Pin the bitmap to the paper box inside the extra-room overlay. 0%/100%
-  // fills the board (paper+2·SCROLL_ROOM) while 0–1 ink is the paper.
-  const box = inkWindowLayoutStyle(window)
+type InkCanvasBoxStyle = ReturnType<typeof inkWindowLayoutStyle> | ReturnType<typeof liveInkSliceLayoutStyle>
+
+const applyInkBoxToCanvases = (canvases: Array<HTMLCanvasElement | null>, box: InkCanvasBoxStyle) => {
   for (const canvas of canvases) {
     if (!canvas) continue
     if (canvas.style.top !== box.top) canvas.style.top = box.top
@@ -332,6 +344,23 @@ const applyInkWindowToCanvases = (canvases: Array<HTMLCanvasElement | null>, win
     if (canvas.style.width !== box.width) canvas.style.width = box.width
     if (canvas.style.bottom !== box.bottom) canvas.style.bottom = box.bottom
   }
+}
+
+const applyInkWindowToCanvases = (canvases: Array<HTMLCanvasElement | null>, window: InkWindow) => {
+  // Pin the bitmap to the paper box inside the extra-room overlay. 0%/100%
+  // fills the board (paper+2·SCROLL_ROOM) while 0–1 ink is the paper.
+  applyInkBoxToCanvases(canvases, inkWindowLayoutStyle(window))
+}
+
+/**
+ * The live layer covers only the visible sheet plus a guard (its own slice,
+ * in layout px), or the committed slice when that is no bigger. A stroke in
+ * progress is always under the pen, so nothing is lost — and the bitmap the
+ * compositor has to take every frame shrinks from several viewports to
+ * about one.
+ */
+const applyLiveInkBoxToCanvas = (canvas: HTMLCanvasElement | null, box: InkLayoutBox | null, window: InkWindow) => {
+  applyInkBoxToCanvases([canvas], box ? liveInkSliceLayoutStyle(box) : inkWindowLayoutStyle(window))
 }
 
 /**
@@ -1128,6 +1157,12 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   /** The slice in paper layout px (null = whole sheet). Page growth does not move it. */
   const inkWindowLayoutRef = useRef<InkWindowLayout | null>(null)
   const inkWindowViewportRef = useRef(0)
+  /** Live-layer slice in paper layout px (null = same box as the committed slice). */
+  const liveWindowLayoutRef = useRef<InkLayoutBox | null>(null)
+  /** Applied live bitmap: size and offset in the sheet's paint space (bitmap px). */
+  const liveSliceRef = useRef<LiveInkSlice | null>(null)
+  /** Pen sample (layout px) the next live-slice plan should keep covered. */
+  const livePenHintRef = useRef<InkLayoutPoint | null>(null)
   /** What the committed bitmap holds right now, so a slice move can reuse it. */
   const committedBitmapRef = useRef<{ key: string; topPx: number } | null>(null)
   const inkWindowIdleRef = useRef<number | null>(null)
@@ -1493,17 +1528,29 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     stroke: InkStroke,
     previewPoints: ReadonlyArray<Pick<StrokePoint, 'x' | 'y' | 'pressure'>>,
   ) => {
-    const { width: pixelWidth, height: pixelHeight, virtualHeight, layoutWidth } = canvasPixelSizeRef.current
+    const { width: pixelWidth, height: pixelHeight, virtualHeight, layoutWidth, topPx } = canvasPixelSizeRef.current
     if (!pixelWidth || !pixelHeight || !virtualHeight) return false
     if (!stroke.points.length) return true
-    const paintTop = inkWindowRef.current.y0 * virtualHeight
+    // The live bitmap is a slice of the sheet's paint space (pixelWidth ×
+    // virtualHeight): its own when it is smaller than the committed slice,
+    // else the committed one.
+    const slice = liveSliceRef.current
+    const paintLeft = slice?.leftPx ?? 0
+    const paintTop = slice?.topPx ?? topPx
+    const liveWidth = slice?.width ?? pixelWidth
+    const liveHeight = slice?.height ?? pixelHeight
     const smoothing = settings.smoothing
     const sourceWidthNow = sourceWidthRef.current
     const margin = inkStrokePaintMargin(
       { ...stroke, symbolPaths: stroke.symbolId ? artSymbolById.get(stroke.symbolId)?.paths : undefined },
       inkStrokePaintScale(pixelWidth, layoutWidth > 1 ? layoutWidth : sourceWidthNow),
     )
-    const toDevice = (rect: LiveInkRect): LiveInkRect => ({ x0: rect.x0, y0: rect.y0 - paintTop, x1: rect.x1, y1: rect.y1 - paintTop })
+    const toDevice = (rect: LiveInkRect): LiveInkRect => ({
+      x0: rect.x0 - paintLeft,
+      y0: rect.y0 - paintTop,
+      x1: rect.x1 - paintLeft,
+      y1: rect.y1 - paintTop,
+    })
     const remember = (rect: LiveInkRect | null) => {
       if (rect) liveInkBoundsRef.current = unionLiveInkRect(liveInkBoundsRef.current, toDevice(rect))
     }
@@ -1522,7 +1569,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     if (replaceLive) {
       if (liveCanvasHasInkRef.current) {
         context.setTransform(1, 0, 0, 1, 0, 0)
-        context.clearRect(0, 0, pixelWidth, pixelHeight)
+        context.clearRect(0, 0, liveWidth, liveHeight)
       }
       liveInkBoundsRef.current = null
       liveVolatileRectRef.current = null
@@ -1530,7 +1577,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       const volatile = liveVolatileRectRef.current
       liveVolatileRectRef.current = null
       context.save()
-      context.setTransform(1, 0, 0, 1, 0, -paintTop)
+      context.setTransform(1, 0, 0, 1, -paintLeft, -paintTop)
       context.beginPath()
       context.rect(volatile.x0, volatile.y0, volatile.x1 - volatile.x0, volatile.y1 - volatile.y0)
       context.clip()
@@ -1549,7 +1596,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       }
       context.restore()
     }
-    context.setTransform(1, 0, 0, 1, 0, -paintTop)
+    context.setTransform(1, 0, 0, 1, -paintLeft, -paintTop)
     const count = stroke.points.length
     // Segments below permanentEnd have their smoothing neighbour and are final.
     const permanentEnd = Math.max(1, count - 1)
@@ -1632,12 +1679,14 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     // the CSS box, the bitmap size and the paint translate — all in one
     // synchronous pass, so no frame can show the bitmap at a stale box.
     const layoutWindow = inline ? inkWindowLayoutRef.current : null
+    const liveLayout = inline ? liveWindowLayoutRef.current : null
     const windowLayoutHeight = Math.max(1, layoutWindow ? Math.min(layoutHeight, layoutWindow.height) : layoutHeight)
     const qualityKey = [
       Math.round(layoutWidth),
       Math.round(layoutHeight),
       Math.round(windowLayoutHeight),
       layoutWindow ? Math.round(layoutWindow.top) : 'full',
+      liveLayout ? [liveLayout.left, liveLayout.top, liveLayout.width, liveLayout.height].map(Math.round).join(',') : 'shared',
       viewZoomRef.current.toFixed(2),
       (window.devicePixelRatio || 1).toFixed(2),
       inline ? 'i' : 'f',
@@ -1645,10 +1694,9 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     const shouldRemeasure = measureLayout
       || !canvasPixelSizeRef.current.width
       || canvasQualityKeyRef.current !== qualityKey
-    // Page growth and slice moves force measureLayout=true and apply even
-    // mid-stroke (the live stroke is repainted whole); pure zoom waits for
-    // the pen to lift.
-    if (shouldRemeasure && (measureLayout || !activeStrokeRef.current)) {
+    // Box, bitmap size and paint offset of both canvases from the planned
+    // slices. The live layer gets its own (smaller) slice when one is planned.
+    const placeCanvases = () => {
       const nextSize = computeInkPixelSize(layoutWidth, windowLayoutHeight, viewZoomRef.current, inline)
       const placed = placeInkWindow(layoutWindow, layoutHeight, nextSize.height)
       const moved = placed.topPx !== canvasPixelSizeRef.current.topPx
@@ -1662,7 +1710,20 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         topPx: placed.topPx,
       }
       canvasQualityKeyRef.current = qualityKey
-      applyInkWindowToCanvases([canvas, committedCanvas], placed.window)
+      applyInkWindowToCanvases([committedCanvas], placed.window)
+      const live = liveLayout
+        ? placeLiveInkWindow(liveLayout, { width: layoutWidth, height: layoutHeight }, { width: nextSize.width, height: placed.virtualHeight })
+        : null
+      const liveMoved = !sameLiveInkSlice(liveSliceRef.current, live?.slice ?? null)
+      liveSliceRef.current = live?.slice ?? null
+      applyLiveInkBoxToCanvas(canvas, live?.box ?? null, placed.window)
+      return moved || liveMoved
+    }
+    // Page growth and slice moves force measureLayout=true and apply even
+    // mid-stroke (the live stroke is repainted whole); pure zoom waits for
+    // the pen to lift.
+    if (shouldRemeasure && (measureLayout || !activeStrokeRef.current)) {
+      const moved = placeCanvases()
       if (activeStrokeRef.current && (moved || liveCanvasHasInkRef.current)) {
         // Force a full live-canvas replace so a remesure cannot overdraw the
         // previous bitmap (that leftover is the "ghost copy" of the writing).
@@ -1670,26 +1731,16 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         liveCanvasHasInkRef.current = true
       }
     } else if (!canvasPixelSizeRef.current.width) {
-      const nextSize = computeInkPixelSize(layoutWidth, windowLayoutHeight, viewZoomRef.current, inline)
-      const placed = placeInkWindow(layoutWindow, layoutHeight, nextSize.height)
-      inkWindowRef.current = placed.window
-      canvasPixelSizeRef.current = {
-        width: nextSize.width,
-        height: nextSize.height,
-        virtualHeight: placed.virtualHeight,
-        layoutWidth,
-        layoutHeight,
-        topPx: placed.topPx,
-      }
-      canvasQualityKeyRef.current = qualityKey
-      applyInkWindowToCanvases([canvas, committedCanvas], placed.window)
+      placeCanvases()
     }
     const inkWindow = inkWindowRef.current
     const { width: pixelWidth, height: pixelHeight, virtualHeight, layoutWidth: paintLayoutWidth, topPx } = canvasPixelSizeRef.current
     if (!pixelWidth || !pixelHeight || !virtualHeight) return
-    const liveCanvasResized = canvas.width !== pixelWidth || canvas.height !== pixelHeight
-    if (canvas.width !== pixelWidth) canvas.width = pixelWidth
-    if (canvas.height !== pixelHeight) canvas.height = pixelHeight
+    const liveWidth = liveSliceRef.current?.width ?? pixelWidth
+    const liveHeight = liveSliceRef.current?.height ?? pixelHeight
+    const liveCanvasResized = canvas.width !== liveWidth || canvas.height !== liveHeight
+    if (canvas.width !== liveWidth) canvas.width = liveWidth
+    if (canvas.height !== liveHeight) canvas.height = liveHeight
     if (liveCanvasResized) {
       activeRenderedPointCountRef.current = 0
       liveCanvasHasInkRef.current = false
@@ -1766,7 +1817,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       // since the last wipe — clearing a multi-viewport bitmap is not free.
       if (liveCanvasHasInkRef.current) {
         context.setTransform(1, 0, 0, 1, 0, 0)
-        context.clearRect(0, 0, pixelWidth, pixelHeight)
+        context.clearRect(0, 0, canvas.width, canvas.height)
       }
       activeRenderedPointCountRef.current = 0
       liveCanvasHasInkRef.current = false
@@ -2017,26 +2068,42 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
    */
   const planInkWindowNow = useCallback((force = false) => {
     const current = inkWindowLayoutRef.current
+    const currentLive = liveWindowLayoutRef.current
+    const pen = livePenHintRef.current
+    livePenHintRef.current = null
     if (!inline) {
       inkWindowLayoutRef.current = null
-      return current !== null
+      liveWindowLayoutRef.current = null
+      return current !== null || currentLive !== null
     }
     const paper = resolvePaperElement()
     const scroller = paper?.closest('.unified-note-view') as HTMLElement | null
     const measured = paper && scroller ? measureInkWindow(paper, scroller, viewRotationRef.current) : null
     if (!paper || !measured) {
       inkWindowLayoutRef.current = null
-      return current !== null
+      liveWindowLayoutRef.current = null
+      return current !== null || currentLive !== null
     }
-    inkWindowViewportRef.current = measured.viewportHeight
+    inkWindowViewportRef.current = measured.viewport.height
     const plan = planInkWindow({
       paperHeight: paper.offsetHeight,
-      viewportHeight: measured.viewportHeight,
+      viewportHeight: measured.viewport.height,
       visible: measured.visible,
       current,
       force,
     })
-    if (!plan.changed) return false
+    // The live slice is planned from the same measurement, so a scroll that
+    // moves neither costs nothing beyond the two rects.
+    const livePlan = planLiveInkWindow({
+      paper: { width: paper.offsetWidth, height: paper.offsetHeight },
+      viewport: measured.viewport,
+      visible: measured.visible,
+      current: currentLive,
+      pen,
+      force,
+    })
+    if (livePlan.changed) liveWindowLayoutRef.current = livePlan.window
+    if (!plan.changed) return livePlan.changed
     inkWindowLayoutRef.current = plan.window
     return true
   }, [inline, resolvePaperElement])
@@ -2891,7 +2958,15 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     // Writing toward the slice edge moves the slice now — a bitmap copy plus
     // one band, painted in this same event — so live ink is never clipped.
     const sheetHeight = originEl?.offsetHeight || surface.offsetHeight
-    if (inkWindowGuardHit(inkWindowLayoutRef.current, point.y * sheetHeight, inkWindowViewportRef.current, sheetHeight)) {
+    const sheetWidth = originEl?.offsetWidth || surface.offsetWidth
+    const penOnSheet = { x: point.x * sheetWidth, y: point.y * sheetHeight }
+    if (inkWindowGuardHit(inkWindowLayoutRef.current, penOnSheet.y, inkWindowViewportRef.current, sheetHeight)) {
+      livePenHintRef.current = penOnSheet
+      syncInkWindow()
+    } else if (!liveInkWindowHolds(liveWindowLayoutRef.current, penOnSheet)) {
+      // The pen reached the live slice's edge: slide the slice toward it and
+      // repaint the stroke in progress in this same event.
+      livePenHintRef.current = penOnSheet
       syncInkWindow()
     }
   }, [armShapeDwell, clearShapeDwellTimer, eraseAt, inline, paintActiveStrokeNow, pointFromEvent, scheduleRedraw, setPageExtent, sourceHeight, sourceWidth, syncInkWindow, tool])
@@ -3310,9 +3385,12 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
           colorEffect: 'solid',
           opacity: 1,
         }
+      // The live slice has to sit under the visible sheet before the first
+      // sample paints; a scroll since the last plan may have left it behind.
+      syncInkWindow()
     }
     appendPointerEvent(event.nativeEvent)
-  }, [activeArtBrush.pressure, activeArtSymbol, appendPointerEvent, artBrush, artColor, artEffect, artOpacity, artSymbolRotation, artSymbolSize, artWidth, bumpInkRevision, clearRecognitionScope, clearShapeDwellTimer, closeMathCorrectionSession, closeMathSolverSelection, commitPendingSolverTap, commitStrokeToCanvas, inkMode, inline, mathSolverEnabled, penColor, penWidth, pointFromEvent, redraw, scheduleRedraw, selectionMode, setDirty, settings.penOnly, settings.pressureEnabled, settings.tabletButtons, sourceHeight, sourceWidth, tool, updateHistoryState])
+  }, [activeArtBrush.pressure, activeArtSymbol, appendPointerEvent, artBrush, artColor, artEffect, artOpacity, artSymbolRotation, artSymbolSize, artWidth, bumpInkRevision, clearRecognitionScope, clearShapeDwellTimer, closeMathCorrectionSession, closeMathSolverSelection, commitPendingSolverTap, commitStrokeToCanvas, inkMode, inline, mathSolverEnabled, penColor, penWidth, pointFromEvent, redraw, scheduleRedraw, selectionMode, setDirty, settings.penOnly, settings.pressureEnabled, settings.tabletButtons, sourceHeight, sourceWidth, syncInkWindow, tool, updateHistoryState])
 
   const handlePointerMove = useCallback((event: ReactPointerEvent<HTMLElement>) => {
     const pan = tabletPanRef.current
