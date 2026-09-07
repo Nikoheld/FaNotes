@@ -39,6 +39,7 @@ import {
   drawSelection,
   dropCursor,
   EditorView,
+  gutters,
   highlightActiveLine,
   highlightActiveLineGutter,
   highlightSpecialChars,
@@ -1153,6 +1154,10 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
       extensions: [
         highlightSpecialChars(),
         history(),
+        // The paper scroller (not .cm-scroller) pans the sheet. "Fixed" gutters
+        // are `position: sticky; left: 0` and would ride over the first glyphs
+        // (82% white) whenever the zoomed sheet is scrolled sideways.
+        gutters({ fixed: false }),
         foldGutter(),
         drawSelection(),
         selectionDragAutoScroll,
