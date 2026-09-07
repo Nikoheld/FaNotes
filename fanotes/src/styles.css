@@ -1052,20 +1052,27 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .paper-view { position: relative; }
 .paper-sheet-plane {
   --paper-scroll-room: 560px;
+  --view-zoom: 1;
   position: relative;
   display: block;
   /* Padding is extra paper you can pan into, not a second surface. */
   box-sizing: content-box;
-  width: max(100%, max-content);
-  min-width: 100%;
-  min-height: 100%;
+  /* Under CSS zoom a percentage resolves against the scroller *in zoomed
+     units* (100% at 200% = half the viewport). Left alone, the sheet re-flowed
+     narrower on every zoom step: the text column re-wrapped, PDF pages shrank
+     back to the viewport width and ink (0–1 of the paper) slid off the text.
+     Multiplying by the camera zoom keeps the layout exactly as at 100%; the
+     camera then scales that layout as a whole. */
+  width: max(calc(100% * var(--view-zoom)), max-content);
+  min-width: calc(100% * var(--view-zoom));
+  min-height: calc(100% * var(--view-zoom));
   max-width: none;
-  margin: 0;
+  /* Zoomed out far enough that the plane no longer fills the scroller: centre it. */
+  margin: 0 auto;
   padding: var(--paper-scroll-room);
   overflow: visible;
   overflow-anchor: none;
   background: #fff;
-  --view-zoom: 1;
   will-change: auto;
   transform-origin: center center;
 }
