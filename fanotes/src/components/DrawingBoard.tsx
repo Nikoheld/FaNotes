@@ -1744,6 +1744,14 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     if (liveCanvasResized) {
       activeRenderedPointCountRef.current = 0
       liveCanvasHasInkRef.current = false
+      // Chromium backs a fresh canvas lazily on its first draw call; a
+      // viewport-sized live bitmap costs several ms. Pay that here, in the
+      // layout pass, so the first pen-down sample paints immediately.
+      const fresh = canvas.getContext('2d', { alpha: true })
+      if (fresh) {
+        fresh.setTransform(1, 0, 0, 1, 0, 0)
+        fresh.clearRect(0, 0, 1, 1)
+      }
     }
     const committedResized = committedCanvas.width !== pixelWidth || committedCanvas.height !== pixelHeight
     if (committedCanvas.width !== pixelWidth) committedCanvas.width = pixelWidth
