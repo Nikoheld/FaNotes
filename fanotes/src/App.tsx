@@ -1089,7 +1089,11 @@ export default function App({ startupBootstrap }: AppProps) {
   }, [])
 
   const openNote = useCallback(async (path: string) => {
-    if (activePathRef.current && activePathRef.current !== path && !await flushDocumentLayers()) return
+    if (activePathRef.current && activePathRef.current !== path) {
+      // Book the last keystrokes under the note that is leaving before its editor unmounts.
+      editorRef.current?.flushChanges()
+      if (!await flushDocumentLayers()) return
+    }
     const session = vaultSessionGenerationRef.current
     const structureRevision = vaultStructureRevisionRef.current
     setOverviewOpen(false)
@@ -1414,24 +1418,33 @@ export default function App({ startupBootstrap }: AppProps) {
     await window.fanotes.resetAppData()
   }, [flushDocumentLayers, flushPendingWrites])
 
-  const updateContent = useCallback((content: string) => {
-    if (!activePath) return
-    if ([...mutatingEntryPathsRef.current].some((path) => activePath === path || activePath.startsWith(`${path}/`))) return
-    const session = pageStatsRef.current.get(activePath)
+  /**
+   * Typed text arrives bound to the note it was typed into. Each editor passes
+   * its own path, so a change flushed while the panes switch is booked under
+   * the note it belongs to and never under whichever note is active by then.
+   */
+  const updateContentFor = useCallback((path: string, content: string) => {
+    if (!path) return
+    if ([...mutatingEntryPathsRef.current].some((entry) => path === entry || path.startsWith(`${entry}/`))) return
+    const session = pageStatsRef.current.get(path)
     if (session) {
       const next = { ...touchPageModified(snapshotPageStats(session), Date.now()), active: session.active, sessionStartedAt: session.sessionStartedAt }
-      pageStatsRef.current.set(activePath, next)
-      setActivePageStats(snapshotPageStats(next))
+      pageStatsRef.current.set(path, next)
+      if (activePathRef.current === path) setActivePageStats(snapshotPageStats(next))
     }
-    setTabs((current) => current.map((tab) => tab.path === activePath ? { ...tab, content } : tab))
-    setTagIndex((current) => ({ ...current, [activePath]: parseNoteTags(content) }))
-    pendingWrites.current.set(activePath, content)
+    setTabs((current) => current.map((tab) => tab.path === path ? { ...tab, content } : tab))
+    setTagIndex((current) => ({ ...current, [path]: parseNoteTags(content) }))
+    pendingWrites.current.set(path, content)
     setSaveState('saving')
-    const existing = saveTimers.current.get(activePath)
+    const existing = saveTimers.current.get(path)
     if (existing) window.clearTimeout(existing)
-    const timer = window.setTimeout(() => { void saveContent(activePath, content) }, settings.autosaveDelay)
-    saveTimers.current.set(activePath, timer)
-  }, [activePath, saveContent, settings.autosaveDelay])
+    const timer = window.setTimeout(() => { void saveContent(path, content) }, settings.autosaveDelay)
+    saveTimers.current.set(path, timer)
+  }, [saveContent, settings.autosaveDelay])
+
+  const updateContent = useCallback((content: string) => {
+    if (activePath) updateContentFor(activePath, content)
+  }, [activePath, updateContentFor])
 
   const closeTab = useCallback(async (path: string) => {
     const session = pageStatsRef.current.get(path)
@@ -2402,6 +2415,23 @@ export default function App({ startupBootstrap }: AppProps) {
         toast(error instanceof Error ? error.message : 'Beenden wurde wegen eines Speicherfehlers abgebrochen.', 'error')
       })
   }), [flushDocumentLayers, flushPendingWrites, flushSettings, toast])
+
+  // In the browser there is no Main process to hold the window open: hand the
+  // coalesced keystrokes to the app, start the writes, and let the browser ask
+  // before it discards a page with unsaved work.
+  useEffect(() => {
+    if (!isWeb) return
+    const guard = (event: BeforeUnloadEvent) => {
+      editorRef.current?.flushChanges()
+      const unsaved = pendingWrites.current.size > 0 || drawingDirtyRef.current || worksheetDirtyIdsRef.current.size > 0
+      if (!unsaved) return
+      void flushDocumentLayers().then(() => flushPendingWrites()).catch(() => undefined)
+      event.preventDefault()
+      event.returnValue = ''
+    }
+    window.addEventListener('beforeunload', guard)
+    return () => window.removeEventListener('beforeunload', guard)
+  }, [flushDocumentLayers, flushPendingWrites, isWeb])
 
   const openDrawing = useCallback(() => {
     if (!activeTab) {
@@ -3464,7 +3494,7 @@ export default function App({ startupBootstrap }: AppProps) {
                   ) : (
                   <div className="editor-pane">
                     <SafeBoundary name="Editor" fallbackTitle="Der Editor ist abgestürzt">
-                      <MarkdownEditor ref={editorRef} key={activeTab.path} content={activeTab.content} onChange={updateContent} onSave={async (content) => { await saveContent(activeTab.path, content) }} settings={settings} focusToken={focusToken} readOnly={activeEntryMutating || drawingOpen} paperMode onLanguageDetected={setDetectedTextLanguage} />
+                      <MarkdownEditor ref={editorRef} key={activeTab.path} content={activeTab.content} onChange={(content) => updateContentFor(activeTab.path, content)} onSave={async (content) => { await saveContent(activeTab.path, content) }} settings={settings} focusToken={focusToken} readOnly={activeEntryMutating || drawingOpen} paperMode onLanguageDetected={setDetectedTextLanguage} />
                     </SafeBoundary>
                   </div>
                   )}
@@ -3544,14 +3574,7 @@ export default function App({ startupBootstrap }: AppProps) {
                         <MarkdownEditor
                           key={`split-${splitTab.path}`}
                           content={splitTab.content}
-                          onChange={(content) => {
-                            setTabs((current) => current.map((tab) => tab.path === splitTab.path ? { ...tab, content } : tab))
-                            pendingWrites.current.set(splitTab.path, content)
-                            const existing = saveTimers.current.get(splitTab.path)
-                            if (existing) window.clearTimeout(existing)
-                            const timer = window.setTimeout(() => { void saveContent(splitTab.path, content) }, settings.autosaveDelay)
-                            saveTimers.current.set(splitTab.path, timer)
-                          }}
+                          onChange={(content) => updateContentFor(splitTab.path, content)}
                           onSave={async (content) => { await saveContent(splitTab.path, content) }}
                           settings={settings}
                           paperMode

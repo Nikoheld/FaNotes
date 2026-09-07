@@ -1629,10 +1629,26 @@ async function readOptionalNoteFile(relativePath, maxBytes = MAX_FAMD_BYTES) {
   }
 }
 
-async function writeFamdCompanion(markdownRelativePath, markdown, ink = undefined) {
+/**
+ * Rewrite the `.famd` companion with new markdown and/or ink.
+ *
+ * Text and ink saves both read-modify-write the same file. The write is
+ * serialised on the companion's path so a slower writer can never revive the
+ * other's stale half (old ink under new text, or old text under new ink). A
+ * caller that already holds that queue slot passes it as `heldQueueTarget`.
+ */
+async function writeFamdCompanion(markdownRelativePath, markdown, ink = undefined, options = {}) {
   const extension = path.extname(markdownRelativePath).toLocaleLowerCase('en-US')
   if (!isNoteExtension(extension)) return
   const famdRelativePath = companionNotePath(markdownRelativePath, '.famd')
+  const { target } = await resolveVaultPath(famdRelativePath, { allowMissing: true, expected: 'file' })
+  const write = () => writeFamdCompanionNow(markdownRelativePath, famdRelativePath, target, markdown, ink)
+  if (options.heldQueueTarget === target) return write()
+  return queueFileWrite(target, write)
+}
+
+async function writeFamdCompanionNow(markdownRelativePath, famdRelativePath, target, markdown, ink) {
+  const extension = path.extname(markdownRelativePath).toLocaleLowerCase('en-US')
   const mdRelativePath = companionNotePath(markdownRelativePath, '.md')
   const existingSource = await readOptionalNoteFile(famdRelativePath)
   const existing = existingSource ? parseFamd(existingSource) : { markdown: '', payload: emptyFamdPayload() }
@@ -1652,7 +1668,6 @@ async function writeFamdCompanion(markdownRelativePath, markdown, ink = undefine
     paperStyle: existingPayload.paperStyle || incoming.payload?.paperStyle || paperFromInk || (isPaperStyle(currentSettings.paperStyle) ? currentSettings.paperStyle : undefined),
     ...(incoming.payload?.pageStats ? { pageStats: incoming.payload.pageStats } : {}),
   }
-  const { target } = await resolveVaultPath(famdRelativePath, { allowMissing: true, expected: 'file' })
   await atomicWrite(target, serializeFamd(body, payload), { encoding: 'utf8', mode: 0o600 })
   if (extension === '.famd') {
     const mdTarget = (await resolveVaultPath(mdRelativePath, { allowMissing: true, expected: 'file' })).target
@@ -3037,7 +3052,7 @@ function registerIpcHandlers() {
             : (markdownBody.endsWith('\n') ? markdownBody : `${markdownBody}\n`)
           await atomicWrite(target, written, { encoding: 'utf8', mode: 0o600 })
           try {
-            await writeFamdCompanion(normalizedRelativePath, content)
+            await writeFamdCompanion(normalizedRelativePath, content, undefined, { heldQueueTarget: target })
           } catch (error) {
             console.warn('FaNotes: .famd-Begleiter konnte nicht geschrieben werden:', error?.message ?? error)
           }
@@ -3492,15 +3507,16 @@ function registerIpcHandlers() {
     if (png) await queueFileWrite(imagePath, async () => atomicWrite(imagePath, png, { mode: 0o600 }))
     await queueFileWrite(dataPath, async () => atomicWrite(dataPath, payload.drawingJson, { encoding: 'utf8', mode: 0o600 }))
     if (typeof payload.noteRelativePath === 'string' && payload.noteRelativePath.trim()) {
+      // The note opens its ink from the .famd first, so a failed embed is a
+      // failed save: the renderer keeps the page dirty and writes it again.
       try {
         const notePath = normalizeRelativePath(payload.noteRelativePath).split(path.sep).join('/')
         assertNotePath(notePath)
         const markdownPath = noteMarkdownSourcePath(notePath)
         const noteMarkdown = (await readOptionalNoteFile(markdownPath, noteByteLimit(markdownPath))) ?? ''
-        const ink = validateDrawingJson(payload.drawingJson)
-        await writeFamdCompanion(notePath, stripFamdPayload(noteMarkdown), ink)
+        await writeFamdCompanion(notePath, stripFamdPayload(noteMarkdown), drawingDocument)
       } catch (error) {
-        console.warn('FaNotes: Handschrift konnte nicht in die .famd-Datei geschrieben werden:', error?.message ?? error)
+        throw new Error(`Handschrift konnte nicht in die Notiz geschrieben werden: ${error?.message ?? error}`)
       }
     }
     return {

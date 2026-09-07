@@ -699,6 +699,11 @@ const cloneStrokes = (strokes: InkStroke[]): InkStroke[] => strokes.map((stroke)
 // instead of copying an entire page on every pen-down event.
 const snapshotStrokes = (strokes: InkStroke[]): InkStroke[] => strokes.slice()
 
+/** A failed silent autosave is retried after this pause while the page stays dirty. */
+export const INK_SAVE_RETRY_DELAY_MS = 4_000
+/** `flush` rewrites the page while strokes keep landing during a write, up to this many rounds. */
+export const INK_FLUSH_MAX_ROUNDS = 6
+
 const BACKGROUND_RECOGNITION_CHUNK = 24
 
 /**
@@ -1285,6 +1290,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const transcriptNeedsFullRebuildRef = useRef(false)
   const saveQueueRef = useRef<Promise<void>>(Promise.resolve())
   const queuedSaveCountRef = useRef(0)
+  const saveRetryTimerRef = useRef<number | null>(null)
   const createdAtRef = useRef(new Date().toISOString())
   const initialColorRef = useRef(settings.penColor)
   const drawingIdRef = useRef(drawingId)
@@ -4587,7 +4593,19 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         if (mountedRef.current && !silent) {
           setNotice({ kind: 'error', text: error instanceof Error ? error.message : 'Handschrift-Seite konnte nicht gespeichert werden.' })
         }
-        if (silent) console.error('Automatisches Speichern der Handschrift-Seite fehlgeschlagen.', error)
+        if (silent) {
+          console.error('Automatisches Speichern der Handschrift-Seite fehlgeschlagen.', error)
+          // A failed autosave must never stay invisible: the page stays dirty,
+          // the writer sees it, and the board tries again on its own.
+          if (mountedRef.current) {
+            setNotice({ kind: 'error', text: 'Handschrift konnte nicht automatisch gespeichert werden – neuer Versuch folgt.' })
+            if (saveRetryTimerRef.current !== null) window.clearTimeout(saveRetryTimerRef.current)
+            saveRetryTimerRef.current = window.setTimeout(() => {
+              saveRetryTimerRef.current = null
+              if (mountedRef.current && dirtyRef.current) void saveLatestRef.current()
+            }, INK_SAVE_RETRY_DELAY_MS)
+          }
+        }
       } finally {
         if (!silent) {
           queuedSaveCountRef.current = Math.max(0, queuedSaveCountRef.current - 1)
@@ -4607,10 +4625,22 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
 
   useImperativeHandle(forwardedRef, () => ({
     flush: async () => {
-      await saveQueueRef.current
-      if (!dirtyRef.current || !inkPagePersists(strokesRef.current.length, inkRecordExists())) return
-      await writeInkPage(drawingPayload())
-      setDirty(false)
+      // A pen still on the sheet while the note switches or the app closes:
+      // commit that stroke first so the written page contains it.
+      if (activePointerRef.current !== null || activeStrokeRef.current) forceEndActivePointerRef.current('blur')
+      await saveQueueRef.current.catch(() => {})
+      // Strokes drawn while a write is in flight bump the revision; only a
+      // write that saw the latest revision may clear the dirty flag.
+      for (let attempt = 0; attempt < INK_FLUSH_MAX_ROUNDS; attempt += 1) {
+        if (!dirtyRef.current || !inkPagePersists(strokesRef.current.length, inkRecordExists())) return
+        const savedRevision = revisionRef.current
+        await writeInkPage(drawingPayload())
+        if (revisionRef.current === savedRevision) {
+          setDirty(false)
+          return
+        }
+      }
+      throw new Error('Die Handschrift ändert sich noch – bitte kurz warten und erneut speichern.')
     },
     refreshTraining: async () => {
       const loaded = await loadRecognitionResources()
@@ -4640,8 +4670,24 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   }), [drawingPayload, inkMode, inkRecordExists, setDirty, tool, writeInkPage])
 
   useEffect(() => () => {
+    if (saveRetryTimerRef.current !== null) window.clearTimeout(saveRetryTimerRef.current)
     if (dirtyRef.current && inkPagePersists(strokesRef.current.length, inkRecordExists())) void saveLatestRef.current()
   }, [inkRecordExists])
+
+  // A lost GPU context wipes both bitmaps; the strokes are still in the model,
+  // so repaint them the moment the browser hands the context back.
+  useEffect(() => {
+    const canvases = [canvasRef.current, committedCanvasRef.current].filter((canvas): canvas is HTMLCanvasElement => Boolean(canvas))
+    if (!canvases.length) return
+    const restore = () => {
+      committedCanvasDirtyRef.current = true
+      scheduleRedraw()
+    }
+    for (const canvas of canvases) canvas.addEventListener('contextrestored', restore)
+    return () => {
+      for (const canvas of canvases) canvas.removeEventListener('contextrestored', restore)
+    }
+  }, [scheduleRedraw])
 
   const recognize = useCallback(async (
     requestedMode: RecognitionPreference = mode,
