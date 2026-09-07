@@ -55,7 +55,7 @@ import { NoteLinkLayer } from './components/NoteLinkLayer'
 import type { GlyphenWerkView } from './components/GlyphenWerkWorkspace'
 import type { MarkdownEditorHandle, MarkdownFormatAction } from './components/MarkdownEditor'
 import type { WorksheetLayerHandle } from './components/WorksheetLayer'
-import { companionNotePath, isNoteFileName, isPdfNotePath, readPageStatsFromNote, writePageStatsIntoNote } from './lib/famd'
+import { companionNotePath, isNoteFileName, isPdfNotePath, readPageStatsFromNote, stripFamdPayload, writePageStatsIntoNote } from './lib/famd'
 import { convertNoteSourceToCurrentStandard } from './lib/noteStandard'
 import { deleteConfirmHost } from './lib/confirmUx'
 import {
@@ -1104,12 +1104,12 @@ export default function App({ startupBootstrap }: AppProps) {
       let content = ''
       if (pdfNote) {
         try {
-          content = await window.fanotes.readFile(companionNotePath(path, '.famd'))
+          content = stripFamdPayload(await window.fanotes.readFile(companionNotePath(path, '.famd')))
         } catch {
           content = ''
         }
       } else {
-        content = await window.fanotes.readFile(path)
+        content = stripFamdPayload(await window.fanotes.readFile(path))
       }
       if (
         session !== vaultSessionGenerationRef.current ||
@@ -1270,12 +1270,13 @@ export default function App({ startupBootstrap }: AppProps) {
     try {
       const stats = flushPageStats(path, Date.now(), true) ?? readPageStatsFromNote(content)
       const nextContent = writePageStatsIntoNote(content, stats)
+      const visibleContent = stripFamdPayload(nextContent)
       await window.fanotes.writeFile(isPdfNotePath(path) ? companionNotePath(path, '.famd') : path, nextContent)
-      setTagIndex((current) => ({ ...current, [path]: parseNoteTags(nextContent) }))
-      if (pendingWrites.current.get(path) === content || pendingWrites.current.get(path) === nextContent) {
+      setTagIndex((current) => ({ ...current, [path]: parseNoteTags(visibleContent) }))
+      if (pendingWrites.current.get(path) === content || pendingWrites.current.get(path) === nextContent || pendingWrites.current.get(path) === visibleContent) {
         pendingWrites.current.delete(path)
       }
-      setTabs((current) => current.map((tab) => tab.path === path ? { ...tab, content: tab.content === content ? nextContent : tab.content, savedContent: nextContent } : tab))
+      setTabs((current) => current.map((tab) => tab.path === path ? { ...tab, content: tab.content === content ? visibleContent : tab.content, savedContent: visibleContent } : tab))
       setSaveState(pendingWrites.current.size ? 'saving' : 'saved')
       return true
     } catch (error) {
@@ -1316,7 +1317,8 @@ export default function App({ startupBootstrap }: AppProps) {
         }
         await window.fanotes.writeFile(readPath, result.source)
         converted += 1
-        setTabs((current) => current.map((tab) => tab.path === path ? { ...tab, content: result.source, savedContent: result.source } : tab))
+        const visibleSource = stripFamdPayload(result.source)
+        setTabs((current) => current.map((tab) => tab.path === path ? { ...tab, content: visibleSource, savedContent: visibleSource } : tab))
       } catch {
         failed += 1
       }
@@ -1431,7 +1433,7 @@ export default function App({ startupBootstrap }: AppProps) {
       pageStatsRef.current.set(path, { ...closed, active: false, sessionStartedAt: null })
       const closingTab = tabsRef.current.find((tab) => tab.path === path)
       const latest = pendingWrites.current.get(path) ?? closingTab?.content
-      if (latest !== undefined) pendingWrites.current.set(path, writePageStatsIntoNote(latest, closed))
+      if (latest !== undefined) pendingWrites.current.set(path, stripFamdPayload(latest))
     }
     if (activePathRef.current === path) editorRef.current?.flushChanges()
     if (activePathRef.current === path && !await flushDocumentLayers()) return

@@ -18,6 +18,7 @@ const {
 } = await server.ssrLoadModule('/src/lib/pageStats.ts')
 const {
   readPageStatsFromNote,
+  stripFamdPayload,
   writePageStatsIntoNote,
 } = await server.ssrLoadModule('/src/lib/famd.ts')
 
@@ -49,6 +50,13 @@ const runOnce = () => {
   assert.equal(reloaded.createdAt, closed.createdAt)
   assert.equal(reloaded.modifiedAt, closed.modifiedAt)
   assert.equal(reloaded.openCount, 1)
+  assert.match(persisted, /"schema":"fanotes-famd-v1"/u)
+  const visible = stripFamdPayload(persisted)
+  assert.equal(visible.includes('fanotes-famd'), false)
+  assert.equal(visible.includes('"schema"'), false)
+  assert.equal(visible.includes('"ink":null'), false)
+  assert.match(visible, /^# Hello/u)
+  assert.equal(stripFamdPayload('{"schema":"fanotes-famd-v1","updatedAt":"2026-09-07T00:00:00.000Z","ink":null,"worksheets":[]}'), '')
   assert.match(formatPageDwell(8_000), /8 s/)
   assert.equal(parsePageStats({ createdAt: closed.createdAt }).createdAt, closed.createdAt)
   return { createdAt: closed.createdAt, dwellMs: closed.dwellMs, openCount: closed.openCount }
