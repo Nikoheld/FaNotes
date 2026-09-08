@@ -119,6 +119,8 @@ Command-palette action ids walked from `src/App.tsx`: `new-note`, `import-pdf-no
 | Surface | Source | Needle |
 | --- | --- | --- |
 | Settings modal sections | `src/components/SettingsModal.tsx` | `id: 'appearance'` |
+| Blocked-update diagnosis | `src/components/SettingsModal.tsx` | `update-block-report` |
+| Update download failure log | `electron/updater.cjs` | `download-failures.log` |
 | Theme / zoom / updates / experimental | `src/components/SettingsModal.tsx` | `id: 'experimental'` |
 | Remote Support session | `src/lib/remoteSupport.ts` | `startRemoteSupportSession` |
 | Remote Support Experimentell row | `src/components/SettingsModal.tsx` | `title="Remote Support"` |

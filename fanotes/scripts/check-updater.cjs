@@ -10,7 +10,7 @@ const { spawn } = require('node:child_process')
 const { pipeline } = require('node:stream/promises')
 const { applyDeltaPatch } = require('../electron/delta.cjs')
 const { createDeltaPatch } = require('./create-delta.cjs')
-const { compareVersions, createUpdateManager, INSTALL_HELPER, stableStringify, verifyManifest } = require('../electron/updater.cjs')
+const { compareVersions, createUpdateManager, diagnoseUpdateFailure, INSTALL_HELPER, isPrivateAddress, stableStringify, verifyManifest } = require('../electron/updater.cjs')
 
 async function sha256File(filePath) {
   const hash = crypto.createHash('sha256')
@@ -28,6 +28,46 @@ async function main() {
   try {
     const baseVersion = '2.16.0'
     const targetVersion = '2.17.0'
+    assert.equal(isPrivateAddress('10.0.0.1'), true)
+    assert.equal(isPrivateAddress('192.168.0.1'), true)
+    assert.equal(isPrivateAddress('8.8.8.8'), false)
+    const redirected = diagnoseUpdateFailure({
+      phase: 'download',
+      url: 'https://fanotes.fasrv.ch/download/appimage',
+      response: new Response('<html><title>WLAN-Anmeldung</title></html>', {
+        status: 302,
+        headers: { location: 'http://login.schule.local/start', 'content-type': 'text/html' },
+      }),
+      bodyText: '<html><title>WLAN-Anmeldung</title></html>',
+    })
+    assert.equal(redirected.kind, 'redirect')
+    assert.equal(redirected.locationHost, 'login.schule.local')
+    assert.equal(redirected.pageTitle, 'WLAN-Anmeldung')
+    assert.match(redirected.message, /Schul-WLAN|Anmeldeseite/u)
+    const filtered = diagnoseUpdateFailure({
+      phase: 'download',
+      url: 'https://fanotes.fasrv.ch/download/appimage',
+      response: new Response('<html><title>Zugriff verweigert</title></html>', {
+        status: 403,
+        headers: { 'content-type': 'text/html; charset=utf-8' },
+      }),
+      bodyText: '<html><title>Zugriff verweigert</title></html>',
+    })
+    assert.equal(filtered.kind, 'http-filter')
+    assert.equal(filtered.status, 403)
+    const tls = diagnoseUpdateFailure({
+      phase: 'check',
+      url: 'https://fanotes.fasrv.ch/api/v1/updates/linux-x64',
+      error: Object.assign(new Error('unable to verify the first certificate'), { code: 'UNABLE_TO_VERIFY_LEAF_SIGNATURE' }),
+    })
+    assert.equal(tls.kind, 'tls-intercept')
+    const hijack = diagnoseUpdateFailure({
+      phase: 'download',
+      url: 'https://fanotes.fasrv.ch/download/appimage',
+      error: Object.assign(new Error('getaddrinfo ENOTFOUND fanotes.fasrv.ch'), { code: 'ENOTFOUND' }),
+      resolvedAddress: '10.8.0.1',
+    })
+    assert.equal(hijack.kind, 'dns-hijack')
     assert.ok(compareVersions('2026.7.1-beta.2', '2026.7.1-beta.1') > 0)
     assert.ok(compareVersions('2026.7.1', '2026.7.1-beta.99') > 0)
     assert.ok(compareVersions('2026.7.2-beta.1', '2026.7.1') > 0)
@@ -273,6 +313,44 @@ async function main() {
     assert.ok(fallbackWarnings.some((message) => /signierte Vollpaket/u.test(message)), 'Eine inkompatible Delta-Basis muss transparent auf das signierte Vollpaket wechseln.')
     fallbackManager.stop()
 
+    const blockedWarnings = []
+    const blockedApp = {
+      ...app,
+      getPath: (name) => name === 'home' ? path.join(temporary, 'blocked-home') : path.join(temporary, 'blocked-user-data'),
+    }
+    const blockedHtml = '<!doctype html><html><head><title>Schulfilter</title></head><body>blocked</body></html>'
+    const blockedFetch = async (input, options = {}) => {
+      const url = String(input)
+      if (url === manifestUrl) return fetchImpl(input, options)
+      if (url === patchUrl || url === fullPackageUrl) {
+        return new Response(blockedHtml, { status: 302, headers: { location: 'http://captive.schule.local/login', 'content-type': 'text/html' } })
+      }
+      return new Response('not found', { status: 404 })
+    }
+    const blockedManager = createUpdateManager({
+      app: blockedApp,
+      getWindow: () => null,
+      getSettings: () => settings,
+      forceSupported: true,
+      platform: 'linux',
+      appImagePath: sourcePath,
+      fetchImpl: blockedFetch,
+      publicKeyPemOverride: publicPem,
+      expectedKeyId: keyId,
+      logger: { warn: (...messages) => blockedWarnings.push(messages.join(' ')) },
+    })
+    const blockedChecked = await blockedManager.check({ manual: true })
+    assert.equal(blockedChecked.status, 'available')
+    const blockedDownloaded = await blockedManager.download()
+    assert.equal(blockedDownloaded.status, 'error')
+    assert.equal(blockedDownloaded.block?.kind, 'redirect')
+    assert.equal(blockedDownloaded.block?.locationHost, 'captive.schule.local')
+    assert.match(blockedDownloaded.error, /umgeleitet/u)
+    const failureLog = await fsp.readFile(path.join(temporary, 'blocked-user-data', 'updates', 'download-failures.log'), 'utf8')
+    assert.match(failureLog, /captive\.schule\.local/u)
+    assert.ok(blockedWarnings.some((message) => /Updatedownload fehlgeschlagen/u.test(message)))
+    blockedManager.stop()
+
     const corruptPatch = path.join(temporary, 'corrupt.fndelta')
     const corruptBytes = Buffer.from(patchBytes)
     corruptBytes[corruptBytes.length - 1] ^= 0xff
@@ -299,7 +377,7 @@ async function main() {
     assert.equal(await fsp.readFile(helperTarget, 'utf8'), nextExecutable)
     assert.equal(JSON.parse(await fsp.readFile(markerPath, 'utf8')).version, targetVersion)
 
-    console.log(`Updaterprüfung erfolgreich: signiertes ${DELTA_LABEL(delta.patchSizeBytes, targetBytes.length)}, Range-Fortsetzung, automatische Vollpaket-Ausweichroute, lokale Rekonstruktion, persistierter Seamless-Download, SHA-256 und atomarer Rollback-Pfad.`)
+    console.log(`Updaterprüfung erfolgreich: signiertes ${DELTA_LABEL(delta.patchSizeBytes, targetBytes.length)}, Range-Fortsetzung, automatische Vollpaket-Ausweichroute, lokale Rekonstruktion, persistierter Seamless-Download, SHA-256, atomarer Rollback-Pfad und Diagnose blockierter Schul-WLAN-Downloads.`)
   } finally {
     await fsp.rm(temporary, { recursive: true, force: true })
   }

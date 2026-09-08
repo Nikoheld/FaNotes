@@ -374,6 +374,7 @@ const INITIAL_UPDATE_STATE: UpdateState = {
   totalBytes: 0,
   progress: 0,
   error: null,
+  block: null,
   checkedAt: null,
   installationKind: 'managed-appimage',
   autoCheckUpdates: true,
@@ -2648,6 +2649,7 @@ export default function App({ startupBootstrap }: AppProps) {
         progress: current.status === 'downloading' ? Math.max(current.progress, 0.01) : 0.01,
         downloadedBytes: current.status === 'downloading' ? current.downloadedBytes : 0,
         error: null,
+        block: null,
       }))
       toast('Update-Download gestartet …', 'info')
       setUpdateState(await window.fanotes.downloadUpdate())

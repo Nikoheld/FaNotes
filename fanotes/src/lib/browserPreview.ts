@@ -200,6 +200,7 @@ export function createBrowserPreviewApi(): FaNotesApi {
     totalBytes: 0,
     progress: 0,
     error: null,
+    block: null,
     checkedAt: new Date().toISOString(),
     installationKind: 'managed-appimage',
     autoCheckUpdates: true,

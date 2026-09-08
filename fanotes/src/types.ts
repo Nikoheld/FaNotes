@@ -183,6 +183,17 @@ export type AppSettings = {
 
 export type UpdateStatus = 'idle' | 'checking' | 'up-to-date' | 'available' | 'downloading' | 'downloaded' | 'installing' | 'error'
 
+export type UpdateBlock = {
+  kind: 'redirect' | 'http-filter' | 'captive-portal' | 'tls-intercept' | 'dns' | 'dns-hijack' | 'connection' | 'timeout' | 'http' | 'unknown'
+  summary: string
+  host: string
+  status: number | null
+  locationHost: string | null
+  pageTitle: string | null
+  code: string | null
+  resolvedAddress: string | null
+}
+
 export type UpdateState = {
   status: UpdateStatus
   supported: boolean
@@ -194,6 +205,7 @@ export type UpdateState = {
   totalBytes: number
   progress: number
   error: string | null
+  block: UpdateBlock | null
   checkedAt: string | null
   installationKind: 'appimage' | 'managed-appimage' | 'windows-installer' | 'differential-appimage' | 'differential-windows'
   autoCheckUpdates: boolean

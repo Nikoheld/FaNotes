@@ -2267,6 +2267,14 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .setting-import-status { display: flex; align-items: center; gap: 7px; margin: -5px 0 13px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 9px; color: var(--text-soft); background: var(--panel); font-size: 9px; }
 .setting-import-status.is-success { color: var(--success); border-color: color-mix(in srgb, var(--success) 30%, var(--border)); background: color-mix(in srgb, var(--success) 8%, var(--panel)); }
 .setting-import-status.is-error { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 30%, var(--border)); background: color-mix(in srgb, var(--danger) 8%, var(--panel)); }
+.update-block-report { display: grid; gap: 8px; margin: -5px 0 13px; }
+.update-block-report > .setting-import-status { margin: 0; align-items: flex-start; }
+.update-block-report > .setting-import-status span { min-width: 0; line-height: 1.45; }
+.update-block-facts { display: grid; gap: 5px; margin: 0; padding: 8px 10px; border: 1px solid var(--border); border-radius: 9px; background: var(--panel); }
+.update-block-facts > div { display: grid; grid-template-columns: 7.5rem minmax(0, 1fr); gap: 8px; align-items: baseline; }
+.update-block-facts dt { color: var(--text-muted); font-size: 8px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
+.update-block-facts dd { margin: 0; color: var(--text); font-size: 9px; overflow-wrap: anywhere; }
+.update-block-log { margin: 0; color: var(--text-muted); font-size: 8px; line-height: 1.4; }
 .update-hero { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 13px; margin-bottom: 13px; padding: 15px; border: 1px solid rgba(var(--accent-rgb), .22); border-radius: 13px; background: linear-gradient(125deg, rgba(var(--accent-rgb), .15), color-mix(in srgb, var(--accent-secondary) 8%, var(--panel))); }
 .update-hero.is-error { border-color: color-mix(in srgb, var(--danger) 35%, var(--border)); }
 .update-hero-icon { display: grid; width: 42px; height: 42px; place-items: center; border: 1px solid rgba(var(--accent-rgb), .2); border-radius: 12px; color: var(--accent-readable); background: rgba(var(--accent-rgb), .16); }

@@ -643,6 +643,20 @@ const overrides = {
   'Keine passende Notiz': 'No matching note',
   'geöffnet': 'open',
   'Umschalt+Enter öffnet rechts': 'Shift+Enter opens to the right',
+  'Update fehlgeschlagen': 'Update failed',
+  'Ziel': 'Target',
+  'Umgeleitet nach': 'Redirected to',
+  'Filterseite': 'Filter page',
+  'Technik': 'Technical',
+  'Der Vorgang steht im Update-Protokoll unter updates/download-failures.log.': 'The attempt is in the update log at updates/download-failures.log.',
+  'Umleitung (Anmeldeseite / Filter)': 'Redirect (sign-in page / filter)',
+  'HTTPS-Proxy / TLS-Prüfung': 'HTTPS proxy / TLS inspection',
+  'DNS blockiert': 'DNS blocked',
+  'DNS zeigt ins Schulnetz': 'DNS points into the school network',
+  'Verbindung unterbrochen': 'Connection interrupted',
+  'Zeitüberschreitung': 'Timed out',
+  'Filter- oder Anmeldeseite': 'Filter or sign-in page',
+  '**Update sagt, was das Schul-WLAN blockiert:** Scheitert die Prüfung oder der Download, schreibt FaNotes den Vorgang ins Update-Protokoll (`updates/download-failures.log`) und zeigt unter Einstellungen → Updates, was dazwischenliegt: Umleitung auf eine Anmeldeseite, HTTP-Filter, ersetzte HTML-Sperrseite, HTTPS-Proxy mit fremdem Zertifikat, DNS ins Schulnetz, abgebrochene Verbindung oder Zeitüberschreitung.': '**Updates say what the school Wi-Fi is blocking:** If the check or the download fails, FaNotes writes the attempt to the update log (`updates/download-failures.log`) and shows under Settings → Updates what sits in between: a redirect to a sign-in page, an HTTP filter, a substituted HTML block page, an HTTPS proxy with a foreign certificate, DNS into the school network, a dropped connection, or a timeout.',
 }
 
 const targets = [

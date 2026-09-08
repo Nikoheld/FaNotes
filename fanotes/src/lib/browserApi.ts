@@ -226,7 +226,7 @@ export function createBrowserApi(): FaNotesApi {
   let cachedTree: VaultEntry[] | null = null
   let updateState: UpdateState = {
     status: 'up-to-date', supported: false, currentVersion: WEB_VERSION, latestVersion: WEB_VERSION,
-    publishedAt: null, releaseNotes: [], downloadedBytes: 0, totalBytes: 0, progress: 0, error: null,
+    publishedAt: null, releaseNotes: [], downloadedBytes: 0, totalBytes: 0, progress: 0, error: null, block: null,
     checkedAt: null, installationKind: 'managed-appimage', autoCheckUpdates: false, autoDownloadUpdates: false, installUpdatesOnQuit: false, updateChannel: 'stable',
   }
   let serverBackup: StoredServerBackup | null = null
@@ -422,7 +422,7 @@ export function createBrowserApi(): FaNotesApi {
   }
 
   const refreshUpdate = async () => {
-    updateState = { ...updateState, status: 'checking', checkedAt: new Date().toISOString(), error: null }
+    updateState = { ...updateState, status: 'checking', checkedAt: new Date().toISOString(), error: null, block: null }
     try {
       const response = await fetch('/api/release', { headers: { Accept: 'application/json' }, cache: 'no-store' })
       if (!response.ok) throw new Error(`HTTP ${response.status}`)

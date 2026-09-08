@@ -402,9 +402,195 @@ const sha256File = async (filePath) => {
 }
 
 const safeErrorMessage = (error) => {
+  if (error?.diagnosis?.message) return String(error.diagnosis.message).slice(0, 900)
   if (error?.name === 'AbortError') return 'Die Update-Verbindung hat zu lange nicht geantwortet.'
   const message = typeof error?.message === 'string' ? error.message : 'Unbekannter Updatefehler.'
   return Object.values(PLATFORM_RELEASES).reduce((value, config) => value.replaceAll(config.api, 'Update-Server'), message).slice(0, 900)
+}
+
+const hostOf = (value) => {
+  try {
+    return new URL(String(value)).host || null
+  } catch {
+    return null
+  }
+}
+
+const isPrivateAddress = (address) => {
+  if (typeof address !== 'string' || !address) return false
+  if (address.includes(':')) {
+    const lower = address.toLowerCase()
+    return lower === '::1' || lower.startsWith('fe80:') || lower.startsWith('fc') || lower.startsWith('fd')
+  }
+  const parts = address.split('.').map((part) => Number(part))
+  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return false
+  const [first, second] = parts
+  return first === 10 || first === 127 || first === 0
+    || (first === 192 && second === 168)
+    || (first === 172 && second >= 16 && second <= 31)
+    || (first === 169 && second === 254)
+    || (first === 100 && second >= 64 && second <= 127)
+}
+
+const nodeErrorCode = (error) => {
+  if (!error || typeof error !== 'object') return ''
+  const code = error.code || error.cause?.code || error.cause?.errno || ''
+  return String(code || (error.name === 'AbortError' ? 'AbortError' : ''))
+}
+
+const extractHtmlTitle = (text) => {
+  const match = /<title[^>]*>([^<]{1,180})<\/title>/iu.exec(String(text || ''))
+  if (!match) return null
+  const title = match[1].replace(/\s+/gu, ' ').trim()
+  return title ? title.slice(0, 120) : null
+}
+
+const looksLikeHtml = (contentType, bodyText) => {
+  if (String(contentType || '').toLowerCase().includes('text/html')) return true
+  return /^\s*</u.test(String(bodyText || ''))
+}
+
+const lookupHost = async (hostname) => {
+  if (!hostname) return null
+  try {
+    const dns = require('node:dns').promises
+    const result = await Promise.race([
+      dns.lookup(hostname),
+      new Promise((_, reject) => { setTimeout(() => reject(new Error('dns-timeout')), 2500) }),
+    ])
+    return result?.address || null
+  } catch {
+    return null
+  }
+}
+
+const readFailureBody = async (response, limit = 8192) => {
+  if (!response) return ''
+  try {
+    const clone = response.clone()
+    const reader = clone.body?.getReader?.()
+    if (!reader) {
+      const text = await clone.text()
+      return String(text || '').slice(0, limit)
+    }
+    const chunks = []
+    let size = 0
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done || !value) break
+      chunks.push(Buffer.from(value))
+      size += value.length
+      if (size >= limit) break
+    }
+    reader.cancel().catch(() => {})
+    return Buffer.concat(chunks).subarray(0, limit).toString('utf8')
+  } catch {
+    return ''
+  }
+}
+
+const diagnoseUpdateFailure = ({
+  phase = 'download',
+  url = UPDATE_ORIGIN,
+  error = null,
+  response = null,
+  bodyText = '',
+  resolvedAddress = null,
+} = {}) => {
+  const host = hostOf(url) || 'fanotes.fasrv.ch'
+  const status = Number.isInteger(response?.status) && response.status > 0 ? response.status : null
+  const locationHeader = response?.headers?.get?.('location') || null
+  const locationHost = locationHeader ? hostOf(locationHeader) : null
+  const contentType = String(response?.headers?.get?.('content-type') || '').split(';')[0].trim()
+  const pageTitle = extractHtmlTitle(bodyText)
+  const code = nodeErrorCode(error)
+  const combined = `${code} ${error?.message || ''} ${error?.cause?.message || ''}`
+  const phaseLabel = phase === 'check' ? 'Die Updateprüfung' : 'Der Update-Download'
+  let kind = 'unknown'
+  let summary = 'Update fehlgeschlagen'
+  let message = safeErrorMessage(error)
+
+  if (status >= 300 && status < 400) {
+    kind = 'redirect'
+    summary = 'Umleitung (Anmeldeseite / Filter)'
+    message = `${phaseLabel} von ${host} wurde mit HTTP ${status} umgeleitet${locationHost ? ` nach ${locationHost}` : ''}${pageTitle ? ` („${pageTitle}“)` : ''}. So blockiert oft ein Schul-WLAN oder eine Anmeldeseite den Update-Server.`
+  } else if (status === 401 || status === 407) {
+    kind = 'http-filter'
+    summary = `HTTP ${status} (Proxy-Anmeldung)`
+    message = `${phaseLabel} von ${host} verlangt eine Proxy-Anmeldung (HTTP ${status}). Das Schulnetz lässt den Download erst nach der Anmeldung am Proxy durch.`
+  } else if (status === 403 || status === 451 || status === 406) {
+    kind = 'http-filter'
+    summary = `HTTP ${status} (Inhaltsfilter)`
+    message = `${phaseLabel} von ${host} wurde mit HTTP ${status} abgewiesen${pageTitle ? ` („${pageTitle}“)` : ''}. Ein Schul- oder Netzfilter blockiert fanotes.fasrv.ch.`
+  } else if (status && status !== 200 && status !== 206) {
+    if (looksLikeHtml(contentType, bodyText)) {
+      kind = 'captive-portal'
+      summary = pageTitle ? `Filterseite „${pageTitle}“` : 'Filter- oder Anmeldeseite'
+      message = `${phaseLabel} von ${host} lieferte HTTP ${status} als HTML-Seite${pageTitle ? ` „${pageTitle}“` : ''}. Das Schul-WLAN hat die Updatedatei durch eine Sperr- oder Anmeldeseite ersetzt.`
+    } else {
+      kind = 'http'
+      summary = `HTTP ${status}`
+      message = `${phaseLabel} von ${host} endete mit HTTP ${status}.`
+    }
+  } else if (looksLikeHtml(contentType, bodyText) && bodyText) {
+    kind = 'captive-portal'
+    summary = pageTitle ? `Filterseite „${pageTitle}“` : 'Filter- oder Anmeldeseite'
+    message = `Statt der Update-Datei von ${host} kam eine HTML-Seite${pageTitle ? ` „${pageTitle}“` : ''}. Ein Schul-WLAN oder Filter hat die Antwort ersetzt.`
+  } else if (/CERT|UNABLE_TO_VERIFY|SELF_SIGNED|ERR_TLS|ERR_CERT|UNABLE_TO_GET_ISSUER/iu.test(combined)) {
+    kind = 'tls-intercept'
+    summary = 'HTTPS-Proxy / TLS-Prüfung'
+    message = `Die HTTPS-Verbindung zu ${host} scheiterte (${code || 'Zertifikatfehler'}). Ein Schul-Proxy prüft den Datenverkehr und tauscht das Zertifikat — FaNotes bricht das zum Schutz ab.`
+  } else if (resolvedAddress && isPrivateAddress(resolvedAddress)) {
+    kind = 'dns-hijack'
+    summary = 'DNS zeigt ins Schulnetz'
+    message = `${host} zeigt auf ${resolvedAddress} (lokales Netz) statt auf den FaNotes-Server. Das Schul-WLAN fängt den Namen ab.`
+  } else if (/ENOTFOUND|EAI_AGAIN|ENODATA|ERR_NAME_NOT_RESOLVED/iu.test(code)) {
+    kind = 'dns'
+    summary = 'DNS blockiert'
+    message = `Der Name ${host} ließ sich nicht auflösen (${code || 'DNS'}). Das Schul-WLAN filtert oder unterdrückt die Namensauflösung für den Update-Server.`
+  } else if (/ECONNREFUSED|ECONNRESET|EPIPE|ERR_CONNECTION|EHOSTUNREACH|ENETUNREACH/iu.test(code)) {
+    kind = 'connection'
+    summary = 'Verbindung unterbrochen'
+    message = `Die Verbindung zu ${host} wurde abgebrochen (${code}). Eine Firewall oder ein Filter des Schulnetzes lässt den Update-Server nicht durch.`
+  } else if (error?.name === 'AbortError' || /ETIMEDOUT|UND_ERR_CONNECT_TIMEOUT|TIMEOUT/iu.test(code)) {
+    kind = 'timeout'
+    summary = 'Zeitüberschreitung'
+    message = `${phaseLabel} von ${host} hat nicht geantwortet. Das Schulnetz kann große Downloads oder unbekannte Ziele still verwerfen.`
+  }
+
+  return {
+    kind,
+    summary,
+    message: String(message).slice(0, 900),
+    phase,
+    host,
+    url: String(url || '').slice(0, 240),
+    status,
+    locationHost,
+    pageTitle,
+    contentType: contentType.slice(0, 80),
+    code: code ? code.slice(0, 80) : null,
+    resolvedAddress,
+  }
+}
+
+const publicUpdateBlock = (diagnosis) => {
+  if (!diagnosis) return null
+  return {
+    kind: diagnosis.kind,
+    summary: diagnosis.summary,
+    host: diagnosis.host,
+    status: diagnosis.status,
+    locationHost: diagnosis.locationHost,
+    pageTitle: diagnosis.pageTitle,
+    code: diagnosis.code,
+    resolvedAddress: diagnosis.resolvedAddress,
+  }
+}
+
+const attachDiagnosis = (error, diagnosis) => {
+  if (error && typeof error === 'object') error.diagnosis = diagnosis
+  return error
 }
 
 const atomicJsonWrite = async (target, value) => {
@@ -467,6 +653,7 @@ function createUpdateManager({
     totalBytes: 0,
     progress: 0,
     error: null,
+    block: null,
     checkedAt: null,
     installationKind: fullInstallationKind,
   }
@@ -523,6 +710,7 @@ function createUpdateManager({
       totalBytes: 0,
       progress: 0,
       error: null,
+      block: null,
       checkedAt: null,
       installationKind: fullInstallationKind,
     })
@@ -650,24 +838,81 @@ function createUpdateManager({
     return candidate
   }
 
+  const logUpdateFailure = async (diagnosis) => {
+    const line = [
+      new Date().toISOString(),
+      diagnosis.phase,
+      diagnosis.kind,
+      `host=${diagnosis.host}`,
+      `status=${diagnosis.status ?? '-'}`,
+      `location=${diagnosis.locationHost ?? '-'}`,
+      `title=${JSON.stringify(diagnosis.pageTitle || '')}`,
+      `code=${diagnosis.code ?? '-'}`,
+      `address=${diagnosis.resolvedAddress ?? '-'}`,
+      diagnosis.message,
+    ].join(' ')
+    logger.warn('FaNotes-Updatedownload fehlgeschlagen:', line)
+    try {
+      await fsp.mkdir(updaterRoot, { recursive: true, mode: 0o700 })
+      await fsp.appendFile(path.join(updaterRoot, 'download-failures.log'), `${line}\n`, { encoding: 'utf8' })
+    } catch (logError) {
+      logger.warn('FaNotes-Updateprotokoll konnte nicht geschrieben werden:', logError?.message ?? logError)
+    }
+  }
+
+  const failUpdate = async (phase, url, error, extras = {}) => {
+    let diagnosis = error?.diagnosis
+    if (!diagnosis) {
+      let resolvedAddress = extras.resolvedAddress ?? null
+      const requestUrl = extras.url || url || error?.updateUrl || platformConfig?.api || UPDATE_ORIGIN
+      if (!resolvedAddress) {
+        const host = hostOf(requestUrl)
+        if (host) resolvedAddress = await lookupHost(host)
+      }
+      diagnosis = diagnoseUpdateFailure({
+        phase,
+        url: requestUrl,
+        error,
+        response: extras.response || null,
+        bodyText: extras.bodyText || '',
+        resolvedAddress,
+      })
+    }
+    await logUpdateFailure(diagnosis)
+    return diagnosis
+  }
+
   const fetchManifest = async (channel) => {
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), 25_000)
+    const url = new URL(platformConfig.api)
+    url.searchParams.set('current', currentVersion)
+    url.searchParams.set('channel', channel)
     try {
       if (!platformConfig) throw new Error('Automatische Updates werden auf dieser Plattform nicht unterstützt.')
-      const url = new URL(platformConfig.api)
-      url.searchParams.set('current', currentVersion)
-      url.searchParams.set('channel', channel)
       const response = await fetchImpl(url, {
         headers: { Accept: 'application/json', 'User-Agent': `FaNotes/${currentVersion} ${platformConfig.userAgentPlatform} updater` },
-        redirect: 'error',
+        redirect: 'manual',
         signal: controller.signal,
       })
+      const status = response.status
+      if (status >= 300 && status < 400) {
+        const bodyText = await readFailureBody(response)
+        const diagnosis = diagnoseUpdateFailure({ phase: 'check', url: url.href, response, bodyText })
+        throw attachDiagnosis(new Error(diagnosis.message), diagnosis)
+      }
       const advertisedLength = Number(response.headers.get('content-length'))
       if (Number.isFinite(advertisedLength) && advertisedLength > MAX_MANIFEST_BYTES) throw new Error('Das Update-Manifest ist unerwartet groß.')
       const text = await response.text()
       if (Buffer.byteLength(text, 'utf8') > MAX_MANIFEST_BYTES) throw new Error('Das Update-Manifest ist unerwartet groß.')
-      if (!response.ok) throw new Error(`Der Update-Server antwortet mit HTTP ${response.status}.`)
+      if (!response.ok) {
+        const diagnosis = diagnoseUpdateFailure({ phase: 'check', url: url.href, response, bodyText: text })
+        throw attachDiagnosis(new Error(diagnosis.message), diagnosis)
+      }
+      if (looksLikeHtml(response.headers.get('content-type'), text)) {
+        const diagnosis = diagnoseUpdateFailure({ phase: 'check', url: url.href, response, bodyText: text })
+        throw attachDiagnosis(new Error(diagnosis.message), diagnosis)
+      }
       let candidate
       try {
         candidate = JSON.parse(text)
@@ -675,6 +920,18 @@ function createUpdateManager({
         throw new Error('Der Update-Server hat kein gültiges JSON-Manifest geliefert.')
       }
       return verifyManifest(candidate, currentVersion, publicKeyPem, platform, expectedKeyId, channel)
+    } catch (error) {
+      if (!error?.diagnosis) {
+        const resolvedAddress = await lookupHost(url.hostname)
+        error.updateUrl = url.href
+        attachDiagnosis(error, diagnoseUpdateFailure({
+          phase: 'check',
+          url: url.href,
+          error,
+          resolvedAddress,
+        }))
+      }
+      throw error
     } finally {
       clearTimeout(timeout)
     }
@@ -692,7 +949,7 @@ function createUpdateManager({
         return next
       }
       const requestedChannel = activateConfiguredChannel()
-      emit({ status: 'checking', error: null })
+      emit({ status: 'checking', error: null, block: null })
       try {
         const verified = await fetchManifest(requestedChannel)
         if (requestedChannel !== settings().updateChannel) return snapshot()
@@ -716,6 +973,7 @@ function createUpdateManager({
             totalBytes: 0,
             progress: 0,
             error: null,
+            block: null,
             checkedAt,
           })
         }
@@ -740,6 +998,7 @@ function createUpdateManager({
             progress: 1,
             installationKind: staged.installationKind,
             error: null,
+            block: null,
             checkedAt,
           })
         }
@@ -763,13 +1022,19 @@ function createUpdateManager({
             ? (platform === 'win32' ? 'differential-windows' : 'differential-appimage')
             : fullInstallationKind,
           error: null,
+          block: null,
           checkedAt,
         })
         if (settings().autoDownloadUpdates) void download().catch(() => {})
         return next
       } catch (error) {
-        logger.warn(`FaNotes-Updateprüfung${manual ? ' (manuell)' : ''} fehlgeschlagen:`, error?.message ?? error)
-        return emit({ status: 'error', error: safeErrorMessage(error), checkedAt: new Date().toISOString() })
+        const diagnosis = await failUpdate('check', platformConfig?.api, error)
+        return emit({
+          status: 'error',
+          error: diagnosis.message,
+          block: publicUpdateBlock(diagnosis),
+          checkedAt: new Date().toISOString(),
+        })
       }
     })().finally(() => { checkPromise = null })
     return checkPromise
@@ -786,7 +1051,7 @@ function createUpdateManager({
     const partial = await fsp.lstat(partPath).catch(() => null)
     if (partial?.isFile() && !partial.isSymbolicLink() && partial.size > 0 && partial.size < transferInfo.sizeBytes) offset = partial.size
     else if (partial) await fsp.rm(partPath, { force: true })
-    emit({ status: 'downloading', downloadedBytes: offset, totalBytes: transferInfo.sizeBytes, progress: offset / transferInfo.sizeBytes, error: null })
+    emit({ status: 'downloading', downloadedBytes: offset, totalBytes: transferInfo.sizeBytes, progress: offset / transferInfo.sizeBytes, error: null, block: null })
 
     const controller = new AbortController()
     activeDownloadController = controller
@@ -798,18 +1063,36 @@ function createUpdateManager({
           'User-Agent': `FaNotes/${currentVersion} ${platformConfig.userAgentPlatform} updater`,
           ...(offset ? { Range: `bytes=${offset}-` } : {}),
         },
-        redirect: 'error',
+        redirect: 'manual',
         signal: controller.signal,
       })
+      const rejectDownloadResponse = async (reasonStatus) => {
+        const bodyText = await readFailureBody(response)
+        const diagnosis = diagnoseUpdateFailure({
+          phase: 'download',
+          url: transferInfo.url,
+          response,
+          bodyText,
+          error: new Error(`Der Update-Download antwortet mit HTTP ${reasonStatus}.`),
+        })
+        throw attachDiagnosis(new Error(diagnosis.message), diagnosis)
+      }
+      if (response.status >= 300 && response.status < 400) {
+        await rejectDownloadResponse(response.status)
+      }
       if (offset && response.status !== 206) {
         if (response.status === 200) {
           offset = 0
           await fsp.rm(partPath, { force: true })
         } else {
-          throw new Error(`Der Update-Download kann nicht fortgesetzt werden (HTTP ${response.status}).`)
+          await rejectDownloadResponse(response.status)
         }
       } else if (!offset && response.status !== 200) {
-        throw new Error(`Der Update-Download antwortet mit HTTP ${response.status}.`)
+        await rejectDownloadResponse(response.status)
+      }
+      const earlyType = response.headers.get('content-type') || ''
+      if (looksLikeHtml(earlyType, '')) {
+        await rejectDownloadResponse(response.status)
       }
       if (offset) {
         const range = /^bytes (\d+)-(\d+)\/(\d+)$/u.exec(response.headers.get('content-range') || '')
@@ -845,6 +1128,17 @@ function createUpdateManager({
           mode: 0o600,
         }),
       )
+    } catch (error) {
+      if (!error?.diagnosis) {
+        const resolvedAddress = await lookupHost(hostOf(transferInfo.url))
+        attachDiagnosis(error, diagnoseUpdateFailure({
+          phase: 'download',
+          url: transferInfo.url,
+          error,
+          resolvedAddress,
+        }))
+      }
+      throw error
     } finally {
       clearTimeout(timeout)
       activeDownloadController = null
@@ -952,11 +1246,12 @@ function createUpdateManager({
           progress: 1,
           installationKind: delta ? (platform === 'win32' ? 'differential-windows' : 'differential-appimage') : state.installationKind,
           error: null,
+          block: null,
         })
       } catch (error) {
         downloadedDelta = null
-        logger.warn('FaNotes-Updatedownload fehlgeschlagen:', error?.message ?? error)
-        return emit({ status: 'error', error: safeErrorMessage(error) })
+        const diagnosis = await failUpdate('download', packageInfo?.url, error)
+        return emit({ status: 'error', error: diagnosis.message, block: publicUpdateBlock(diagnosis) })
       }
     })().finally(() => { downloadPromise = null })
     return downloadPromise
@@ -1221,6 +1516,8 @@ module.exports = {
   WINDOWS_INSTALLER_ARGS,
   compareVersions,
   createUpdateManager,
+  diagnoseUpdateFailure,
+  isPrivateAddress,
   stableStringify,
   verifyManifest,
 }

@@ -939,7 +939,25 @@ export function SettingsModal({
                   </div>
                 )}
 
-                {updateState.error && <div className="setting-import-status is-error" role="alert"><X size={15} /><span>{updateState.error}</span></div>}
+                {updateState.error && (
+                  <div className="update-block-report" role="alert">
+                    <div className="setting-import-status is-error">
+                      <X size={15} />
+                      <span><strong>{updateState.block?.summary || 'Update fehlgeschlagen'}</strong> {updateState.error}</span>
+                    </div>
+                    {updateState.block && (
+                      <dl className="update-block-facts">
+                        <div><dt>Ziel</dt><dd>{updateState.block.host}</dd></div>
+                        {updateState.block.status != null && <div><dt>HTTP</dt><dd>{updateState.block.status}</dd></div>}
+                        {updateState.block.locationHost && <div><dt>Umgeleitet nach</dt><dd>{updateState.block.locationHost}</dd></div>}
+                        {updateState.block.pageTitle && <div><dt>Filterseite</dt><dd>{updateState.block.pageTitle}</dd></div>}
+                        {updateState.block.code && <div><dt>Technik</dt><dd>{updateState.block.code}</dd></div>}
+                        {updateState.block.resolvedAddress && <div><dt>DNS</dt><dd>{updateState.block.resolvedAddress}</dd></div>}
+                      </dl>
+                    )}
+                    <p className="update-block-log">Der Vorgang steht im Update-Protokoll unter updates/download-failures.log.</p>
+                  </div>
+                )}
 
                 <div id="settings-bug-report" className="setting-card">
                   <div className="setting-card-title"><Bug size={16} /><span>Fehler melden</span></div>
