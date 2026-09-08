@@ -10,6 +10,7 @@ import { isPaperStyle } from './paperStyles'
 import { browserInitialFiles, browserStarterFolders, browserStarterSubjects } from './browserPreview'
 import { listBrowserLmStudioModels, transformWithBrowserLmStudio } from './lmStudioBrowser'
 import { listBrowserAiModels, transformWithBrowserAi } from './aiProviderBrowser'
+import { createBrowserAddonsApi } from './addons/browserAddonsApi'
 import { loadBrowserSpellingResources, loadBrowserSpellingWordCandidates } from './spellingResources'
 import { loadBrowserHandwritingRecognitionResources } from './handwritingRecognitionResources'
 
@@ -1391,6 +1392,7 @@ export function createBrowserApi(): FaNotesApi {
     cancelClose: () => undefined,
     requestClose: () => { location.href = '../' },
     onSheetZoom: () => () => {},
+    addons: createBrowserAddonsApi(),
   }
 }
 

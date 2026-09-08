@@ -28,6 +28,8 @@ export const defaultSettingsForPlatform = (platform: string | undefined): AppSet
   reduceMotion: false,
   viewZoomSpeed: 5,
   viewZoomMax: 325,
+  addonSource: 'Nikoheld/FaNotes-Addons#main',
+  addonsAutoUpdate: true,
   showWordCount: true,
   showOutline: true,
   defaultFolder: 'Eingang',

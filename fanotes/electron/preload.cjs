@@ -71,6 +71,15 @@ const CHANNELS = Object.freeze({
   updateState: 'fanotes:update-state',
   revealInFolder: 'fanotes:reveal-in-folder',
   openExternal: 'fanotes:open-external',
+  addonsFetch: 'fanotes:addons-fetch',
+  addonsList: 'fanotes:addons-list',
+  addonsSave: 'fanotes:addons-save',
+  addonsRemove: 'fanotes:addons-remove',
+  addonsReadFile: 'fanotes:addons-read-file',
+  addonsWriteFiles: 'fanotes:addons-write-files',
+  addonsReadData: 'fanotes:addons-read-data',
+  addonsWriteData: 'fanotes:addons-write-data',
+  addonsNetFetch: 'fanotes:addons-net-fetch',
   beforeClose: 'fanotes:before-close',
   confirmClose: 'fanotes:confirm-close',
   cancelClose: 'fanotes:cancel-close',
@@ -176,6 +185,17 @@ const api = Object.freeze({
     return () => ipcRenderer.removeListener(CHANNELS.sheetZoom, listener)
   },
   captureWindow: () => invoke(CHANNELS.captureWindow),
+  addons: {
+    fetchText: (url) => invoke(CHANNELS.addonsFetch, url),
+    list: () => invoke(CHANNELS.addonsList),
+    save: (record) => invoke(CHANNELS.addonsSave, record),
+    remove: (id) => invoke(CHANNELS.addonsRemove, id),
+    readFile: (id, name) => invoke(CHANNELS.addonsReadFile, id, name),
+    writeFiles: (id, files) => invoke(CHANNELS.addonsWriteFiles, id, files),
+    readData: (id) => invoke(CHANNELS.addonsReadData, id),
+    writeData: (id, value) => invoke(CHANNELS.addonsWriteData, id, value),
+    netFetch: (url, init) => invoke(CHANNELS.addonsNetFetch, url, init),
+  },
   platform: process.platform,
 })
 

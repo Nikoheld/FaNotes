@@ -4,6 +4,7 @@ import { getUiLanguage } from '../i18n'
 import type { AppSettings, DrawingLibraryDocument, FaNotesApi, UpdateState, VaultEntry, WorksheetDocument } from '../types'
 import { loadBrowserSpellingResources, loadBrowserSpellingWordCandidates } from './spellingResources'
 import { loadBrowserHandwritingRecognitionResources } from './handwritingRecognitionResources'
+import { createBrowserAddonsApi } from './addons/browserAddonsApi'
 
 export const BROWSER_INITIAL_FILES: Record<string, string> = {
   'Willkommen.md': `# Willkommen bei FaNotes
@@ -509,5 +510,6 @@ export function createBrowserPreviewApi(): FaNotesApi {
     confirmClose: () => undefined,
     cancelClose: () => undefined,
     requestClose: () => window.close(),
+    addons: createBrowserAddonsApi(),
   }
 }
