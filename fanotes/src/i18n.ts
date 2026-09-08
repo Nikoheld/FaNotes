@@ -286,6 +286,8 @@ function translateDerived(source: string, catalog: EnglishCatalog): string | nul
   if (secondPane) return `${secondPane[1]} · second ${secondPane[2] === 'Spalte' ? 'pane' : 'note'}`
   const revealCrumb = /^„(.+)“ in der Dateileiste zeigen$/u.exec(source)
   if (revealCrumb) return `Show “${revealCrumb[1]}” in the file tree`
+  const revertAutocorrect = /^Autokorrektur rückgängig: „(.+)“$/u.exec(source)
+  if (revertAutocorrect) return `Undo autocorrect: “${revertAutocorrect[1]}”`
   const firstNoteIn = /^(.+): erste Notiz erstellen$/u.exec(source)
   if (firstNoteIn) return `Create first note in ${firstNoteIn[1]}`
   const generalOpen = /^Allgemein: (.+) öffnen$/u.exec(source)

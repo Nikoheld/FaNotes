@@ -10,6 +10,7 @@ import {
   installNeuralWordContextCandidates,
   neuralWordContextWordsOfLength,
 } from './neuralWordContext'
+import { isUserAcceptedWord, personalWords, type SuggestionLexicon } from './spellingSuggest'
 
 export type SpellingSegment = { from: number; text: string }
 export type SpellingIgnoredRange = { from: number; to: number }
@@ -117,10 +118,11 @@ const loadDictionaries = async (): Promise<Dictionaries> => {
     if (de.byteLength * 8 !== resources.manifest.languages.de.bitCount || en.byteLength * 8 !== resources.manifest.languages.en.bitCount) {
       throw new Error('Die lokalen Rechtschreibdaten besitzen eine ungültige Länge.')
     }
-    return {
+    loadedDictionaries = {
       de: new BloomFilter(de, resources.manifest.languages.de, hashes),
       en: new BloomFilter(en, resources.manifest.languages.en, hashes),
     }
+    return loadedDictionaries
   }).catch((error) => {
     dictionariesPromise = null
     throw error
@@ -128,7 +130,9 @@ const loadDictionaries = async (): Promise<Dictionaries> => {
   return dictionariesPromise
 }
 
-const isGermanCompound = (rawWord: string, filter: BloomFilter) => {
+const isGermanCompound = (rawWord: string, filter: BloomFilter) => splitsIntoGermanParts(rawWord, (part) => filter.has(part, 'de'))
+
+const splitsIntoGermanParts = (rawWord: string, hasPart: (part: string) => boolean) => {
   const word = normalizeWord(rawWord, 'de')
   if (word.length < 8 || word.length > 64 || !/^\p{L}+$/u.test(word)) return false
   const memo = new Map<string, boolean>()
@@ -142,7 +146,7 @@ const isGermanCompound = (rawWord: string, filter: BloomFilter) => {
     for (let end = offset + 3; end <= maximum; end += 1) {
       if (end < word.length && word.length - end < 3) continue
       const part = word.slice(offset, end)
-      if (filter.has(part, 'de') && findParts(end, parts + 1)) {
+      if (hasPart(part) && findParts(end, parts + 1)) {
         memo.set(key, true)
         return true
       }
@@ -156,7 +160,7 @@ const isGermanCompound = (rawWord: string, filter: BloomFilter) => {
 const wordMembership = (word: string, dictionaries: Dictionaries) => {
   const normalized = normalizeWord(word, 'de')
   if (!normalized) return { de: true, en: true }
-  if (TECHNICAL_WORDS.has(normalized)) return { de: true, en: true }
+  if (TECHNICAL_WORDS.has(normalized) || isUserAcceptedWord(normalized)) return { de: true, en: true }
   if (normalized.includes('-')) {
     const parts = normalized.split('-').filter(Boolean)
     if (parts.length > 1) {
@@ -226,6 +230,7 @@ const loadRecognitionCandidates = async (language: SpellingLanguage) => {
       // first handwriting-OCR request, so normal application startup stays
       // unchanged.
       installRecognitionWordMembership(language, (word) => candidates.has(word))
+      loadedCandidates[language] = candidates
       return candidates
     }).catch((error) => {
       candidatePromises.delete(language)
@@ -255,6 +260,65 @@ export const loadSpellingWordContext = async (language: SpellingLanguage) => {
   }
 }
 
+/* ---------- corrections: synchronous view of what is already loaded ---------- */
+
+export type SpellingLexicon = SuggestionLexicon & {
+  /** True when the word would be underlined: unknown to both dictionaries and to the user. */
+  isMisspelled: (word: string) => boolean
+  languages: SpellingLanguage[]
+}
+
+let loadedDictionaries: Dictionaries | null = null
+const loadedCandidates: Partial<Record<SpellingLanguage, Set<string>>> = {}
+
+const lexiconFrom = (dictionaries: Dictionaries, languages: SpellingLanguage[]): SpellingLexicon => {
+  // A candidate is a word when the exact list (or the user) has it. The Bloom
+  // filter alone must not admit one: at 0.3 % false positives, a thousand
+  // one-edit candidates yield a few junk “words”. German compounds count when
+  // every part is an exact list word — Bloom-verified three-letter parts let
+  // junk like “Rechtschreibfehlrg” through — and rank below listed words; a
+  // compound the dictionary filter also knows as a whole (“Rechtschreibfehler”)
+  // ranks above one it does not (“Rechtschreibfehlt”).
+  const listed = (language: SpellingLanguage, normalized: string) => (
+    Boolean(loadedCandidates[language]?.has(normalized)) || personalWords().has(normalized)
+  )
+  const exactPart = (part: string) => Boolean(loadedCandidates.de?.has(part))
+  const compound = (language: SpellingLanguage, normalized: string) => language === 'de' && splitsIntoGermanParts(normalized, exactPart)
+  return {
+    languages,
+    hasWord: (language, normalized) => listed(language, normalized) || compound(language, normalized),
+    candidatePenalty: (language, normalized) => {
+      if (listed(language, normalized)) return 0
+      return dictionaries[language].has(normalized, language) ? 4 : 15
+    },
+    isMisspelled: (word) => {
+      const membership = wordMembership(word, dictionaries)
+      return !membership.de && !membership.en
+    },
+  }
+}
+
+/** What autocorrect can use right now without awaiting anything; null until primed. */
+export const loadedSpellingLexicon = (): SpellingLexicon | null => {
+  if (!loadedDictionaries) return null
+  const languages = (['de', 'en'] as SpellingLanguage[]).filter((language) => loadedCandidates[language])
+  return languages.length ? lexiconFrom(loadedDictionaries, languages) : null
+}
+
+/** Loads the Bloom filters and both exact word lists (≈4.5 MB, parsed once per session). */
+export const loadSpellingLexicon = async (): Promise<SpellingLexicon> => {
+  const [dictionaries] = await Promise.all([
+    loadDictionaries(),
+    loadRecognitionCandidates('de'),
+    loadRecognitionCandidates('en'),
+  ])
+  return lexiconFrom(dictionaries, ['de', 'en'])
+}
+
+export const isCanonicalProperName = (normalizedWord: string) => canonicalProperName(normalizedWord)
+
+export const spellingWordPattern = () => new RegExp(WORD_PATTERN.source, 'gu')
+
 const evidenceLanguage = (evidence: LanguageEvidence): SpellingLanguage | null => {
   if (evidence.de === 0 && evidence.en === 0) return null
   if (evidence.de >= evidence.en * 1.35) return 'de'
@@ -264,7 +328,7 @@ const evidenceLanguage = (evidence: LanguageEvidence): SpellingLanguage | null =
 
 const intersects = (from: number, to: number, ranges: SpellingIgnoredRange[]) => ranges.some((range) => from < range.to && to > range.from)
 
-const automaticIgnoredRanges = (segment: SpellingSegment): SpellingIgnoredRange[] => {
+export const automaticIgnoredRanges = (segment: SpellingSegment): SpellingIgnoredRange[] => {
   const ranges: SpellingIgnoredRange[] = []
   const patterns = [
     /`[^`]*`/gu,

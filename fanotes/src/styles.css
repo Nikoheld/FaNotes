@@ -2229,6 +2229,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .toggle { width: 36px; height: 20px; padding: 2px; border: 0; border-radius: 99px; background: color-mix(in srgb, var(--text-muted) 27%, transparent); cursor: pointer; transition: background .16s; }
 .toggle span { display: block; width: 16px; height: 16px; border-radius: 50%; background: #f8f8fb; box-shadow: 0 2px 5px rgba(0,0,0,.2); transition: transform .16s; }
 .toggle.is-on { background: var(--accent); }
+.toggle:disabled { opacity: .45; cursor: not-allowed; }
 .toggle.is-on span { transform: translateX(16px); }
 .segmented { display: flex; align-items: center; padding: 2px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-elevated); }
 .segmented button { height: 27px; padding: 0 10px; border: 0; border-radius: 6px; color: var(--text-muted); background: transparent; cursor: pointer; font-size: 9px; }

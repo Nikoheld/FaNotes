@@ -18,6 +18,7 @@ export const defaultSettingsForPlatform = (platform: string | undefined): AppSet
   contentWidth: 820,
   showLineNumbers: false,
   spellcheck: true,
+  autocorrect: true,
   vimMode: false,
   autosaveDelay: 750,
   sidebarWidth: 286,

@@ -84,6 +84,8 @@ export type AppSettings = {
   contentWidth: number
   showLineNumbers: boolean
   spellcheck: boolean
+  /** Fix a clear typo when the word is finished (space, punctuation, Enter); Backspace reverts. */
+  autocorrect: boolean
   vimMode: boolean
   autosaveDelay: number
   sidebarWidth: number
