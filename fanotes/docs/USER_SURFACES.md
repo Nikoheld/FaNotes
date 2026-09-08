@@ -24,6 +24,9 @@ Command-palette action ids walked from `src/App.tsx`: `new-note`, `import-pdf-no
 | Split view: second pane, head, divider | `src/App.tsx` | `split-divider` |
 | Split layout ratio / orientation helpers | `src/lib/workspaceNav.ts` | `export const clampSplitRatio` |
 | Read-only ink in the second pane | `src/components/InkPreviewLayer.tsx` | `export function InkPreviewLayer` |
+| Per-pane sheet camera (split zoom stays in its pane) | `src/lib/paperView.ts` | `export const createPaperViewStore` |
+| Device-pixel-snapped split tracks | `src/lib/workspaceNav.ts` | `export const splitFirstPaneSize` |
+| Second-pane ink re-rasters at the pane zoom | `src/components/InkPreviewLayer.tsx` | `PREVIEW_ZOOM_SETTLE_MS` |
 | Tab shortcuts, pin, reorder, context menu | `src/App.tsx` | `tab-context-menu` |
 | Reopen closed tab / tab order / workspace memory helpers | `src/lib/workspaceNav.ts` | `export const rememberClosedTab` |
 | Quick switcher (Strg+O) | `src/components/CommandPalette.tsx` | `mode === 'notes'` |

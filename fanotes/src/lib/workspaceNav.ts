@@ -140,6 +140,30 @@ export const splitRatioFromPointer = (
   return clampSplitRatio(along)
 }
 
+/**
+ * First pane size in CSS px, snapped to whole device pixels. A pure-percentage
+ * grid track lands the second pane on a half pixel (e.g. 528.5 px); its
+ * composited scroller is then composited at a fractional offset and the text
+ * inside goes soft. Snapping keeps both sheets and the divider on the pixel
+ * grid at every device scale.
+ */
+export const splitFirstPaneSize = (
+  containerSize: number,
+  dividerSize: number,
+  ratio: number,
+  devicePixelRatio: number,
+) => {
+  const available = Math.max(0, (Number.isFinite(containerSize) ? containerSize : 0) - Math.max(0, dividerSize))
+  return snapToDevicePixels(available * clampSplitRatio(ratio), devicePixelRatio)
+}
+
+/** CSS px rounded to the nearest whole device pixel (the divider track uses it too). */
+export const snapToDevicePixels = (cssPx: number, devicePixelRatio: number) => {
+  const dpr = Number.isFinite(devicePixelRatio) && devicePixelRatio > 0 ? devicePixelRatio : 1
+  const value = Number.isFinite(cssPx) ? cssPx : 0
+  return Math.round(value * dpr) / dpr
+}
+
 export const nudgeSplitRatio = (ratio: number, direction: -1 | 1) => (
   clampSplitRatio(Math.round((ratio + direction * SPLIT_RATIO_STEP) * 100) / 100)
 )
