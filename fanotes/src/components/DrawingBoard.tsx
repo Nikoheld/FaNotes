@@ -4,11 +4,13 @@ import {
   Copy,
   Check,
   ChevronDown,
+  ChevronRight,
   CircleAlert,
   Eraser,
   FileInput,
   LoaderCircle,
   ListChecks,
+  ListCollapse,
   Paintbrush,
   Palette,
   PenLine,
@@ -30,6 +32,7 @@ import {
   ZoomOut,
 } from 'lucide-react'
 import {
+  Fragment,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -162,6 +165,23 @@ import {
   tabletButtonActionFromPointer,
   tabletButtonIdentityFromPointer,
 } from '../lib/tabletButtons'
+import {
+  type InkSection,
+  type SerializedSection,
+  SECTION_HEADER_PX,
+  collapseSection,
+  deserializeSections,
+  expandSection,
+  growBodyRoom,
+  headerStrokeCount,
+  insertSection,
+  nextSectionTop,
+  planBodyRoom,
+  planCollapse,
+  planInsertSection,
+  serializeSections,
+  sortSections,
+} from '../lib/inkSections'
 import {
   PAGE_START_WIDTH,
   SCROLL_ROOM,
@@ -497,6 +517,9 @@ const elementFromPointSafe = (x: number, y: number) => {
 const hitTestChrome = (clientX: number, clientY: number) => {
   const hit = elementFromPointSafe(clientX, clientY)
   if (!(hit instanceof Element)) return null
+  // Section arrows sit on the sheet itself; a tap on one is a click, not a stroke.
+  const sectionControl = hit.closest('.lw-ink-section-control')
+  if (sectionControl) return sectionControl
   if (hit.closest('.lw-canvas-surface, .lw-tablet-canvas, .lw-drawing-board.is-inline.is-input-active')) return null
   return hit.closest(CHROME_HIT_SELECTOR)
 }
@@ -626,6 +649,8 @@ type DrawingDocument = {
   detectedRecognitionMode?: RecognitionMode
   mathSolverEnabled?: boolean
   mathSolverHistory?: MathSolverHistoryEntry[]
+  /** Collapsible handwriting sections; hidden body ink lives inside a collapsed one. */
+  sections?: SerializedSection[]
 }
 
 export type DrawingSavePayload = {
@@ -701,6 +726,8 @@ export type DrawingBoardProps = {
   pagePaperStyle?: PaperStyle
   onPagePaperChange?: (style: PaperStyle) => void
   confirmDestructive?: (message: string) => Promise<boolean>
+  /** Collapsible sections move ink up and down the sheet; off for PDF notes, whose ink must stay on its page. */
+  sectionsEnabled?: boolean
 }
 
 type Notice = { kind: 'success' | 'error' | 'info'; text: string }
@@ -1200,6 +1227,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   pagePaperStyle,
   onPagePaperChange,
   confirmDestructive,
+  sectionsEnabled = true,
 }: DrawingBoardProps, forwardedRef) {
   // Controls only: the board follows the camera through refs and a
   // subscription, so a wheel zoom does not rebuild this tree on every step.
@@ -1390,6 +1418,14 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const [mathCorrectorEnabled, setMathCorrectorEnabled] = useState(false)
   const [mathCorrectionSession, setMathCorrectionSession] = useState<MathCorrectionSession | null>(null)
   const [selectionMode, setSelectionMode] = useState(false)
+  /** Collapsible sections, kept sorted by header top. The ref is what callbacks read; the state renders the bands. */
+  const sectionsRef = useRef<InkSection<InkStroke>[]>([])
+  const [sections, setSections] = useState<InkSection<InkStroke>[]>([])
+  /** The next tap on the sheet inserts a section header there. */
+  const [sectionPlacing, setSectionPlacing] = useState(false)
+  const sectionPlacingRef = useRef(false)
+  sectionPlacingRef.current = sectionPlacing
+  const sectionGuideRef = useRef<HTMLDivElement | null>(null)
   const [selectionPurpose, setSelectionPurpose] = useState<SelectionPurpose>('conversion')
   const [selectionRect, setSelectionRect] = useState<SelectionRect | null>(null)
   const [rulerPose, setRulerPose] = useState<DraftingPose | null>(null)
@@ -2068,6 +2104,10 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       if (!document || typeof document !== 'object') throw new Error('Kein Zeichnungsobjekt')
       const raw = document as Partial<DrawingDocument>
       strokesRef.current = safeInkStrokes(raw.strokes, initialColorRef.current)
+      const loadedSections = deserializeSections<InkStroke>(raw.sections, (value) => safeInkStrokes(value, initialColorRef.current))
+      sectionsRef.current = loadedSections
+      setSections(loadedSections)
+      setSectionPlacing(false)
       if (!pagePaperStyle && raw.paperStyle && raw.paperStyle in paperLabel) setPaperStyle(raw.paperStyle)
       if (typeof raw.sourceHeight === 'number' && raw.sourceHeight >= WRITE_SLACK_HEIGHT && raw.sourceHeight <= MAX_SOURCE_HEIGHT) {
         sourceHeightRef.current = raw.sourceHeight
@@ -2117,6 +2157,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     } catch {
       loadedDrawingIdRef.current = sourceId
       strokesRef.current = []
+      sectionsRef.current = []
+      setSections([])
       committedCanvasDirtyRef.current = true
       setNotice({ kind: 'error', text: 'Die gespeicherte Zeichnung konnte nicht gelesen werden.' })
     }
@@ -2337,6 +2379,38 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
           seen.add(point)
           visit(point)
         }
+      }
+    }
+    visitStrokes(strokesRef.current)
+    if (activeStrokeRef.current) visitStrokes([activeStrokeRef.current])
+    for (const snapshot of undoRef.current) visitStrokes(snapshot)
+    for (const snapshot of redoRef.current) visitStrokes(snapshot)
+    visitStrokes(beforeGestureRef.current)
+    visitStrokes(recognitionStrokesRef.current)
+    const tap = pendingSolverTapRef.current
+    if (tap) {
+      visitStrokes(tap.snapshot)
+      visitStrokes([tap.stroke])
+    }
+    // Section edges are points too, so a grow, pad or rescale carries the bands along with the ink.
+    for (const section of sectionsRef.current) {
+      for (const edge of [section.top, section.bodyTop]) {
+        if (seen.has(edge)) continue
+        seen.add(edge)
+        visit(edge)
+      }
+    }
+  }, [])
+
+  /** Same holders as forEachTrackedPoint, stroke by stroke, for moves that depend on where a stroke starts. */
+  const forEachTrackedStroke = useCallback((visit: (stroke: InkStroke) => void) => {
+    const seen = new Set<InkStroke>()
+    const visitStrokes = (strokes: readonly InkStroke[] | null | undefined) => {
+      if (!strokes) return
+      for (const stroke of strokes) {
+        if (seen.has(stroke)) continue
+        seen.add(stroke)
+        visit(stroke)
       }
     }
     visitStrokes(strokesRef.current)
@@ -3467,6 +3541,141 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     }
   }, [clearRecognitionScope, settings.recognitionLanguage, sourceHeight])
 
+  // ── Collapsible sections ──────────────────────────────────────────────────
+  // A section is a handwritten title band with a body below it. Collapsing lifts
+  // the body ink into the section record and pulls the rest of the page up; the
+  // flat stroke list stays the only thing painting, erasing and saving look at.
+
+  /** Sheet px the 0–1 ink is measured against right now (the painted sheet, not the lagging page). */
+  const sheetPx = useCallback(() => savedInkPage(
+    { width: sourceWidthRef.current, height: sourceHeightRef.current },
+    paintedLayoutRef.current,
+  ), [])
+
+  const commitSections = useCallback((next: InkSection<InkStroke>[]) => {
+    const sorted = sortSections(next)
+    sectionsRef.current = sorted
+    setSections(sorted)
+  }, [])
+
+  const cloneSectionStroke = useCallback((stroke: InkStroke, points: StrokePoint[]): InkStroke => ({ ...stroke, points }), [])
+
+  /**
+   * Ink moved, so the committed bitmap is repainted and the page saved. Collapse
+   * and expand take strokes off the sheet and put them back at other positions;
+   * an undo snapshot from before would resurrect them where they no longer
+   * belong, so those two start the history afresh.
+   */
+  const afterSectionChange = useCallback((options: { resetHistory?: boolean } = {}) => {
+    if (options.resetHistory) {
+      undoRef.current = []
+      redoRef.current = []
+      updateHistoryState()
+    }
+    clearRecognitionScope()
+    closeMathSolverSelection()
+    closeMathCorrectionSession()
+    canvasQualityKeyRef.current = ''
+    bumpInkRevision({ redrawCommitted: true })
+    setDirty(true)
+    fitPageToInk()
+    planInkWindowNow()
+    redraw(true)
+  }, [bumpInkRevision, clearRecognitionScope, closeMathCorrectionSession, closeMathSolverSelection, fitPageToInk, planInkWindowNow, redraw, setDirty, updateHistoryState])
+
+  /** Grows the write page by `px` at the bottom without moving any mark; returns the sheet after the grow. */
+  const growSheetBy = useCallback((px: number) => {
+    if (px > 0) setPageExtent(sourceHeightRef.current + px, sourceWidthRef.current)
+    return sheetPx()
+  }, [setPageExtent, sheetPx])
+
+  const insertSectionAt = useCallback((y: number) => {
+    const id = `section-${Date.now().toString(36)}-${Math.floor(Math.random() * 1e6).toString(36)}`
+    const plan = planInsertSection(sectionsRef.current, y, sheetPx(), id)
+    if (!plan) {
+      setNotice({ kind: 'info', text: 'Hier ist bereits ein Abschnittstitel.' })
+      return false
+    }
+    // Tracked before the grow so the new edges are remapped like every other point.
+    sectionsRef.current = [...sectionsRef.current, plan.section]
+    const sheet = growSheetBy(plan.growPx)
+    insertSection(plan, sectionsRef.current, sheet, forEachTrackedStroke)
+    commitSections(sectionsRef.current)
+    afterSectionChange()
+    setNotice({ kind: 'success', text: 'Abschnitt eingefügt · Titel in die Kopfzeile schreiben, Pfeil klappt den Inhalt ein.' })
+    return true
+  }, [afterSectionChange, commitSections, forEachTrackedStroke, growSheetBy, sheetPx])
+
+  const toggleSection = useCallback((id: string) => {
+    const section = sectionsRef.current.find((entry) => entry.id === id)
+    if (!section || activeStrokeRef.current) return
+    if (section.collapsed) {
+      const hiddenPx = section.hidden?.heightPx ?? 0
+      const sheet = growSheetBy(hiddenPx)
+      strokesRef.current = expandSection(strokesRef.current, sectionsRef.current, section, sheet, forEachTrackedStroke, cloneSectionStroke)
+    } else {
+      const sheet = sheetPx()
+      const plan = planCollapse(strokesRef.current, sectionsRef.current, section, sheet)
+      if (!plan) return
+      strokesRef.current = collapseSection(plan, strokesRef.current, sectionsRef.current, sheet, forEachTrackedStroke, cloneSectionStroke)
+      if (plan.hiddenPx > 0) setPageExtent(Math.max(WRITE_SLACK_HEIGHT, sourceHeightRef.current - plan.hiddenPx), sourceWidthRef.current)
+    }
+    indexedStrokeCountRef.current = handwritingStrokes(strokesRef.current).length
+    commitSections([...sectionsRef.current])
+    afterSectionChange({ resetHistory: true })
+  }, [afterSectionChange, cloneSectionStroke, commitSections, forEachTrackedStroke, growSheetBy, setPageExtent, sheetPx])
+
+  /** Removes the band; ink stays where it is, a collapsed body comes back first so nothing is lost. */
+  const removeSection = useCallback((id: string) => {
+    const section = sectionsRef.current.find((entry) => entry.id === id)
+    if (!section || activeStrokeRef.current) return
+    let resetHistory = false
+    if (section.collapsed) {
+      const sheet = growSheetBy(section.hidden?.heightPx ?? 0)
+      strokesRef.current = expandSection(strokesRef.current, sectionsRef.current, section, sheet, forEachTrackedStroke, cloneSectionStroke)
+      indexedStrokeCountRef.current = handwritingStrokes(strokesRef.current).length
+      resetHistory = true
+    }
+    commitSections(sectionsRef.current.filter((entry) => entry !== section))
+    afterSectionChange({ resetHistory })
+  }, [afterSectionChange, cloneSectionStroke, commitSections, forEachTrackedStroke, growSheetBy])
+
+  /** A stroke near the bottom of a body pushes the next header down: writing inside a section never runs out of room. */
+  const ensureSectionRoom = useCallback((stroke: InkStroke) => {
+    if (!sectionsRef.current.length) return false
+    const plan = planBodyRoom(stroke, sectionsRef.current, sheetPx())
+    if (!plan) return false
+    const sheet = growSheetBy(plan.growPx)
+    growBodyRoom(plan, sectionsRef.current, sheet, forEachTrackedStroke)
+    commitSections([...sectionsRef.current])
+    afterSectionChange()
+    return true
+  }, [afterSectionChange, commitSections, forEachTrackedStroke, growSheetBy, sheetPx])
+
+  const beginSectionPlacement = useCallback(() => {
+    clearRecognitionScope()
+    closeMathSolverSelection()
+    closeMathCorrectionSession()
+    setSectionPlacing((current) => !current)
+  }, [clearRecognitionScope, closeMathCorrectionSession, closeMathSolverSelection])
+
+  useEffect(() => {
+    if (!sectionPlacing) return
+    setNotice({ kind: 'info', text: 'Auf das Blatt tippen, wo der Abschnitt beginnen soll · Esc bricht ab.' })
+    const surface = surfaceRef.current
+    if (!surface) return
+    // The guide follows the pen without a React render per move.
+    const onMove = (event: PointerEvent) => {
+      const guide = sectionGuideRef.current
+      const point = pointFromEvent(event)
+      if (!guide || !point) return
+      guide.style.top = `${Math.max(0, Math.min(1, point.y)) * 100}%`
+      guide.style.opacity = '1'
+    }
+    surface.addEventListener('pointermove', onMove)
+    return () => surface.removeEventListener('pointermove', onMove)
+  }, [pointFromEvent, sectionPlacing])
+
   const handlePointerDown = useCallback((event: ReactPointerEvent<HTMLElement>) => {
     if (overlayInert(inline, inputActive) || !overlayHitEnabled(inputActive)) return
     if (hitTestChrome(event.clientX, event.clientY)) return
@@ -3586,6 +3795,20 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       setSelectionRect({ x: firstPoint.x, y: firstPoint.y, width: 0, height: 0 })
       return
     }
+    if (sectionPlacing) {
+      // One tap places the header; the pointer session ends here, no stroke opens.
+      activePointerRef.current = null
+      inkSessionRef.current = null
+      pointerBoundsRef.current = null
+      releasePointerCaptureSafe(event.currentTarget, event.pointerId)
+      if (lastCapturedPointerIdRef.current === event.pointerId) lastCapturedPointerIdRef.current = null
+      activePointerTargetRef.current = null
+      if (firstPoint) {
+        setSectionPlacing(false)
+        insertSectionAt(firstPoint.y)
+      }
+      return
+    }
     if (firstPoint && inkMode === 'drawing' && tool === 'pen' && !pointerEraser && activeArtSymbol) {
       const snapshot = snapshotStrokes(strokesRef.current)
       const symbolStroke: InkStroke = {
@@ -3668,7 +3891,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   // inputActive is a dependency: a board mounted inert (keyboard mode showing
   // saved ink) kept a handler that still saw inputActive=false after the pen
   // turned on, and every pen-down was refused until an unrelated grow rebuilt it.
-  }, [activeArtBrush.pressure, activeArtSymbol, appendPointerEvent, artBrush, artColor, artEffect, artOpacity, artSymbolRotation, artSymbolSize, artWidth, bumpInkRevision, clearRecognitionScope, clearShapeDwellTimer, closeMathCorrectionSession, closeMathSolverSelection, commitPendingSolverTap, commitStrokeToCanvas, inkMode, inline, inputActive, mathSolverEnabled, penColor, penWidth, pointFromEvent, redraw, scheduleRedraw, selectionMode, setDirty, settings.penOnly, settings.pressureEnabled, settings.tabletButtons, sourceHeight, sourceWidth, syncInkWindow, tool, updateHistoryState])
+  }, [activeArtBrush.pressure, activeArtSymbol, appendPointerEvent, artBrush, artColor, artEffect, artOpacity, artSymbolRotation, artSymbolSize, artWidth, bumpInkRevision, clearRecognitionScope, clearShapeDwellTimer, closeMathCorrectionSession, closeMathSolverSelection, commitPendingSolverTap, commitStrokeToCanvas, inkMode, inline, inputActive, insertSectionAt, mathSolverEnabled, penColor, penWidth, pointFromEvent, redraw, scheduleRedraw, sectionPlacing, selectionMode, setDirty, settings.penOnly, settings.pressureEnabled, settings.tabletButtons, sourceHeight, sourceWidth, syncInkWindow, tool, updateHistoryState])
 
   const handlePointerMove = useCallback((event: ReactPointerEvent<HTMLElement>) => {
     const pan = tabletPanRef.current
@@ -3924,9 +4147,14 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         setNotice({ kind: 'success', text: 'Form übernommen.' })
       }
     }
-    if (gestureChangedRef.current) fitPageToInk()
+    if (gestureChangedRef.current) {
+      const roomGrown = activeStroke && gestureToolRef.current === 'pen' && !scribbleDeleted && strokesRef.current.includes(activeStroke)
+        ? ensureSectionRoom(activeStroke)
+        : false
+      if (!roomGrown) fitPageToInk()
+    }
     scheduleRedraw()
-  }, [analyzeMathCorrectionSelection, appendPointerEvent, bumpInkRevision, clearShapeDwellTimer, commitPendingSolverTap, commitStrokeToCanvas, fitPageToInk, flushPaintedLayoutGrow, inkMode, mathSolverEnabled, mode, openMathSolverAtPoint, pointFromEvent, readShapeSnapProfile, planInkWindowNow, redraw, scheduleRedraw, selectionPurpose, setDirty, settings.scribbleEraseSensitivity, sourceHeight, sourceWidth, trySnapActiveShape, updateHistoryState, wipeLiveInk])
+  }, [analyzeMathCorrectionSelection, appendPointerEvent, bumpInkRevision, clearShapeDwellTimer, commitPendingSolverTap, commitStrokeToCanvas, ensureSectionRoom, fitPageToInk, flushPaintedLayoutGrow, inkMode, mathSolverEnabled, mode, openMathSolverAtPoint, pointFromEvent, readShapeSnapProfile, planInkWindowNow, redraw, scheduleRedraw, selectionPurpose, setDirty, settings.scribbleEraseSensitivity, sourceHeight, sourceWidth, trySnapActiveShape, updateHistoryState, wipeLiveInk])
 
   const readDraftingDisplay = useCallback((): DraftingDisplay => {
     const surface = surfaceRef.current
@@ -4525,10 +4753,19 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   redoNowRef.current = redo
 
   const clear = useCallback(() => {
-    if (!strokesRef.current.length) return
+    if (!strokesRef.current.length && !sectionsRef.current.length) return
     clearRecognitionScope()
     closeMathSolverSelection()
     closeMathCorrectionSession()
+    // Collapsed bodies come back first so the snapshot below holds every stroke of the page.
+    for (const section of sectionsRef.current) {
+      if (!section.collapsed) continue
+      const sheet = growSheetBy(section.hidden?.heightPx ?? 0)
+      strokesRef.current = expandSection(strokesRef.current, sectionsRef.current, section, sheet, forEachTrackedStroke, cloneSectionStroke)
+    }
+    sectionsRef.current = []
+    setSections([])
+    setSectionPlacing(false)
     undoRef.current.push(snapshotStrokes(strokesRef.current))
     redoRef.current = []
     strokesRef.current = []
@@ -4541,7 +4778,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     setDirty(true)
     updateHistoryState()
     fitPageToInk()
-  }, [bumpInkRevision, clearRecognitionScope, closeMathCorrectionSession, closeMathSolverSelection, fitPageToInk, setDirty, updateHistoryState])
+  }, [bumpInkRevision, clearRecognitionScope, cloneSectionStroke, closeMathCorrectionSession, closeMathSolverSelection, fitPageToInk, forEachTrackedStroke, growSheetBy, setDirty, updateHistoryState])
 
   const insertSynthesizedHandwriting = useCallback((
     generatedStrokes: SynthesizedInkStroke[],
@@ -4629,6 +4866,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       detectedRecognitionMode: activeMode,
       mathSolverEnabled,
       mathSolverHistory: mathSolverHistoryRef.current,
+      sections: sectionsRef.current.length ? serializeSections(sectionsRef.current) : undefined,
     }
     return {
       id: drawingIdRef.current,
@@ -5911,6 +6149,12 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       setNotice({ kind: 'info', text: 'Bereichsauswahl abgebrochen.' })
       return
     }
+    if (event.key === 'Escape' && sectionPlacing) {
+      event.preventDefault()
+      setSectionPlacing(false)
+      setNotice({ kind: 'info', text: 'Abschnitt nicht eingefügt.' })
+      return
+    }
     if (event.key === 'Escape') {
       if (activePointerRef.current !== null || activeStrokeRef.current || lastCapturedPointerIdRef.current !== null) {
         event.preventDefault()
@@ -6202,6 +6446,9 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
           {inkMode === 'writing' && <button type="button" className={`lw-draw-subtle ${selectionMode && selectionPurpose === 'edit' ? 'is-active' : ''}`} onClick={beginInkEdit} disabled={!handwritingCount} title="Tinte auswählen, verschieben, kopieren oder skalieren">
             <Shapes size={14} /> <span className="lw-tool-label">Tinte</span>
           </button>}
+          {sectionsEnabled && inkMode === 'writing' && <button type="button" className={`lw-draw-subtle ${sectionPlacing ? 'is-active' : ''}`} aria-pressed={sectionPlacing} onClick={beginSectionPlacement} title="Abschnitt mit Titelzeile einfügen · der Pfeil am Rand klappt den Inhalt ein">
+            <ListCollapse size={14} /> <span className="lw-tool-label">Abschnitt</span>
+          </button>}
           {selectionPurpose === 'edit' && selectionRect && !selectionMode && <>
             <button type="button" className="lw-draw-subtle" onClick={copySelectedInk} title="Auswahl duplizieren"><Copy size={14} /> <span className="lw-tool-label">Kopieren</span></button>
             <button type="button" className="lw-draw-subtle lw-danger" onClick={deleteSelectedInk} title="Auswahl löschen"><Trash2 size={14} /> <span className="lw-tool-label">Löschen</span></button>
@@ -6389,6 +6636,49 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
                 onActivate={activateDraftingTool}
               />
             )}
+            {(sections.length > 0 || sectionPlacing) && <div className="lw-ink-sections" aria-label="Abschnitte">
+              {sections.map((section) => {
+                const bodyEnd = section.collapsed ? section.bodyTop.y : (nextSectionTop(sections, section) ?? 1)
+                const titled = headerStrokeCount(strokesRef.current, section) > 0
+                const hiddenCount = section.hidden?.strokes.length ?? 0
+                return (
+                  <Fragment key={section.id}>
+                    <div
+                      className={`lw-ink-section-header ${section.collapsed ? 'is-collapsed' : ''}`}
+                      style={{ top: `${section.top.y * 100}%`, height: `${(section.bodyTop.y - section.top.y) * 100}%` }}
+                    >
+                      <button
+                        type="button"
+                        className="lw-ink-section-control lw-ink-section-toggle"
+                        aria-expanded={!section.collapsed}
+                        aria-label={section.collapsed ? 'Abschnitt ausklappen' : 'Abschnitt einklappen'}
+                        title={section.collapsed ? 'Abschnitt ausklappen' : 'Abschnitt einklappen'}
+                        onClick={() => toggleSection(section.id)}
+                      >
+                        {section.collapsed ? <ChevronRight size={18} /> : <ChevronDown size={18} />}
+                      </button>
+                      {!titled && <span className="lw-ink-section-placeholder" aria-hidden="true">Titel</span>}
+                      {section.collapsed && <span className="lw-ink-section-badge" title={`${hiddenCount} Striche`}>Eingeklappt</span>}
+                      <button
+                        type="button"
+                        className="lw-ink-section-control lw-ink-section-remove"
+                        aria-label="Abschnitt auflösen"
+                        title="Abschnitt auflösen · die Tinte bleibt auf der Seite"
+                        onClick={() => removeSection(section.id)}
+                      >
+                        <X size={13} />
+                      </button>
+                    </div>
+                    {!section.collapsed && bodyEnd > section.bodyTop.y && <div
+                      className="lw-ink-section-rail"
+                      style={{ top: `${section.bodyTop.y * 100}%`, height: `${(bodyEnd - section.bodyTop.y) * 100}%` }}
+                    />}
+                  </Fragment>
+                )
+              })}
+              {sectionPlacing && <div ref={sectionGuideRef} className="lw-ink-section-guide" style={{ top: '-9999px', opacity: 0 }}><span>Neuer Abschnitt</span></div>}
+              {sectionPlacing && <div className="lw-selection-hint is-section"><ListCollapse size={18} /> Auf das Blatt tippen, wo der Abschnitt beginnen soll</div>}
+            </div>}
             {selectionMode && !selectionRect && <div className={`lw-selection-hint ${selectionPurpose === 'math-correction' ? 'is-correction' : ''}`}>
               {selectionPurpose === 'math-correction' ? <ListChecks size={18} /> : <ScanSearch size={18} />}
               {selectionPurpose === 'math-correction' ? 'Rechenweg mit mehreren Zeilen auswählen' : 'Bereich auf der Seite aufziehen'}
@@ -6857,6 +7147,9 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
           {inkMode === 'writing' && <button type="button" className={`lw-draw-subtle ${selectionMode && selectionPurpose === 'edit' ? 'is-active' : ''}`} onClick={beginInkEdit} disabled={!handwritingCount} title="Tinte auswählen, verschieben, kopieren oder skalieren">
             <Shapes size={14} /> Tinte
           </button>}
+          {sectionsEnabled && inkMode === 'writing' && <button type="button" className={`lw-draw-subtle ${sectionPlacing ? 'is-active' : ''}`} aria-pressed={sectionPlacing} onClick={beginSectionPlacement} title="Abschnitt mit Titelzeile einfügen · der Pfeil am Rand klappt den Inhalt ein">
+            <ListCollapse size={14} /> Abschnitt
+          </button>}
           {selectionPurpose === 'edit' && selectionRect && !selectionMode && <>
             <button type="button" className="lw-draw-subtle" onClick={copySelectedInk} title="Auswahl duplizieren"><Copy size={14} /> Kopieren</button>
             <button type="button" className="lw-draw-subtle lw-danger" onClick={deleteSelectedInk} title="Auswahl löschen"><Trash2 size={14} /> Löschen</button>
@@ -6894,6 +7187,22 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
 }))
 
 const drawingBoardStyles = `
+.lw-ink-sections{position:absolute;inset:0;z-index:3;pointer-events:none}
+.lw-drawing-board.is-inline .lw-ink-sections{inset:var(--paper-scroll-room,0px);width:calc(100% - 2 * var(--paper-scroll-room,0px));height:calc(100% - 2 * var(--paper-scroll-room,0px))}
+.lw-ink-section-header{position:absolute;left:0;right:0;box-sizing:border-box;border-top:1px solid rgba(86,71,183,.3);border-bottom:1px solid rgba(86,71,183,.3);background:linear-gradient(90deg,rgba(104,85,217,.11),rgba(104,85,217,.045) 55%,rgba(104,85,217,.02));pointer-events:none}
+.lw-ink-section-header.is-collapsed{border-bottom:2px dashed rgba(86,71,183,.45);background:linear-gradient(90deg,rgba(104,85,217,.16),rgba(104,85,217,.06) 55%,rgba(104,85,217,.03))}
+.lw-ink-section-toggle{position:absolute;left:14px;top:50%;width:30px;height:30px;display:grid;place-items:center;transform:translateY(-50%);border:1px solid rgba(86,71,183,.36);border-radius:8px;color:#4a3fb0;background:rgba(255,255,255,.96);box-shadow:0 2px 8px rgba(39,31,85,.14);cursor:pointer;pointer-events:auto;transition:background .12s ease,transform .12s ease}
+.lw-ink-section-toggle:hover{background:#efeafd}
+.lw-ink-section-toggle:active{transform:translateY(-50%) scale(.94)}
+.lw-ink-section-placeholder{position:absolute;left:12%;top:50%;transform:translateY(-50%);color:rgba(74,63,176,.34);font:600 22px/1 var(--ui-font,system-ui);letter-spacing:.02em;pointer-events:none;user-select:none}
+.lw-ink-section-badge{position:absolute;right:48px;top:50%;transform:translateY(-50%);padding:3px 9px;border-radius:999px;color:#4a3fb0;background:rgba(104,85,217,.14);font:700 10px/1.3 var(--ui-font,system-ui);white-space:nowrap;pointer-events:none}
+.lw-ink-section-remove{position:absolute;right:14px;top:50%;width:22px;height:22px;display:grid;place-items:center;transform:translateY(-50%);border:0;border-radius:6px;color:rgba(74,63,176,.6);background:transparent;cursor:pointer;pointer-events:auto;opacity:.65}
+.lw-ink-section-remove:hover{color:#b3261e;background:rgba(220,60,60,.12);opacity:1}
+.lw-ink-section-rail{position:absolute;left:28px;width:2px;border-radius:2px;background:linear-gradient(180deg,rgba(104,85,217,.36),rgba(104,85,217,.08));pointer-events:none}
+.lw-ink-section-guide{position:absolute;left:0;right:0;height:0;border-top:2px dashed #6855d9;pointer-events:none;transition:opacity .12s ease}
+.lw-ink-section-guide span{position:absolute;left:14px;top:4px;padding:2px 7px;border-radius:6px;color:#fff;background:#5f4bcf;font:700 10px/1.3 var(--ui-font,system-ui);white-space:nowrap}
+.lw-ink-sections .lw-selection-hint{top:18px}
+.lw-drawing-board.is-inline:not(.is-input-active) .lw-ink-section-toggle,.lw-drawing-board.is-inline:not(.is-input-active) .lw-ink-section-remove{opacity:.5;box-shadow:none}
 .lw-drawing-board{--draw-accent:var(--accent,#7654d6);--draw-border:var(--border-strong,color-mix(in srgb,var(--text,#e9e9ef) 20%,transparent));display:flex;flex-direction:column;min-width:0;height:100%;overflow:hidden;color:var(--text,#e9e9ef);background:linear-gradient(145deg,color-mix(in srgb,var(--background-secondary,#17171d) 96%,var(--draw-accent) 4%),var(--background,#111116));font:500 13px/1.4 var(--ui-font,Inter,system-ui,sans-serif)}
 .lw-drawing-board *{box-sizing:border-box}.lw-drawing-board button,.lw-drawing-board select,.lw-drawing-board textarea,.lw-drawing-board input{font:inherit}.lw-drawing-board button{color:inherit}.lw-draw-header{height:58px;flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;padding:0 16px;border-bottom:1px solid var(--draw-border);background:color-mix(in srgb,var(--background-secondary,#17171d) 88%,transparent)}
 .lw-draw-title,.lw-draw-header-actions,.lw-draw-toolgroup,.lw-draw-footer,.lw-footer-actions,.lw-conversion-head,.lw-confidence-row,.lw-model-card{display:flex;align-items:center}.lw-draw-title{gap:10px;min-width:0}.lw-draw-title-icon,.lw-spark{display:grid;place-items:center;color:var(--on-accent,#11131a);background:var(--draw-accent);box-shadow:0 6px 20px color-mix(in srgb,var(--draw-accent) 28%,transparent)}.lw-draw-title-icon{width:32px;height:32px;border-radius:10px}.lw-draw-title>span:last-child{display:flex;min-width:0;flex-direction:column}.lw-draw-title strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px}.lw-draw-title small,.lw-conversion-head small,.lw-model-card small{font-size:11px;color:var(--text-muted,#9292a0)}.lw-draw-header-actions{gap:7px}
