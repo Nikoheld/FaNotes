@@ -1527,7 +1527,13 @@ export default function App({ startupBootstrap }: AppProps) {
       if (pendingWrites.current.get(path) === content || pendingWrites.current.get(path) === nextContent || pendingWrites.current.get(path) === visibleContent) {
         pendingWrites.current.delete(path)
       }
-      setTabs((current) => current.map((tab) => tab.path === path ? { ...tab, content: tab.content === content ? visibleContent : tab.content, savedContent: visibleContent } : tab))
+      // The editor keeps the text exactly as typed. The saved body only differs
+      // in trailing whitespace (stripFamdPayload trims it), and pushing that
+      // trimmed body back replaced the document after every autosave — a new
+      // empty line was dropped and the cursor snapped to the last line with text.
+      setTabs((current) => current.map((tab) => (
+        tab.path === path ? { ...tab, savedContent: tab.content === content ? content : visibleContent } : tab
+      )))
       setSaveState(pendingWrites.current.size ? 'saving' : 'saved')
       return true
     } catch (error) {
