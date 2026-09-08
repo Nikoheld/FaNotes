@@ -31,7 +31,7 @@ export type HomeworkBoardProps = {
   subjects: string[]
   reloadToken?: number
   onClose: () => void
-  onOpenNote?: (path: string) => void | Promise<void>
+  onOpenNote?: (path: string) => void | Promise<unknown>
   onDocumentPersisted?: (document: HomeworkDocument) => void
 }
 

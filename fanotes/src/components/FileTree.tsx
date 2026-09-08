@@ -13,6 +13,7 @@ import {
 import {
   Check,
   ChevronRight,
+  Columns2,
   File,
   FileText,
   Folder,
@@ -33,7 +34,13 @@ type MaybePromise<T = void> = T | Promise<T>
 export type FileTreeProps = {
   entries: VaultEntry[]
   activePath?: string | null
-  onOpen: (relativePath: string) => MaybePromise
+  /** The note shown in the second split pane, marked in the tree. */
+  splitPath?: string | null
+  onOpen: (relativePath: string) => MaybePromise<unknown>
+  /** Shift+click, Shift+Enter or the context menu open a note in the second pane. */
+  onOpenInSplit?: (relativePath: string) => MaybePromise<unknown>
+  /** Remember expanded folders under this key (per vault). */
+  expansionStorageKey?: string
   onCreateNote: (parentPath?: string) => MaybePromise
   onCreateFolder: (parentPath?: string) => MaybePromise
   onImportPdf?: (parentPath?: string) => MaybePromise
@@ -125,6 +132,26 @@ function canMoveTo(sourcePath: string, sourceKind: VaultEntry['kind'], destFolde
   return parentPath(sourcePath) !== destFolder
 }
 
+const readExpandedFolders = (storageKey: string | undefined): Set<string> => {
+  if (!storageKey) return new Set()
+  try {
+    const raw = localStorage.getItem(storageKey)
+    const parsed: unknown = raw ? JSON.parse(raw) : null
+    return new Set(Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === 'string') : [])
+  } catch {
+    return new Set()
+  }
+}
+
+const writeExpandedFolders = (storageKey: string | undefined, expanded: Set<string>) => {
+  if (!storageKey) return
+  try {
+    localStorage.setItem(storageKey, JSON.stringify([...expanded]))
+  } catch {
+    // Not remembering the folders is harmless.
+  }
+}
+
 function parseDragSource(event: DragEvent): { path: string; kind: VaultEntry['kind'] } | null {
   const typed = event.dataTransfer.getData(FANOTES_DRAG_TYPE)
   if (typed) {
@@ -144,7 +171,10 @@ function parseDragSource(event: DragEvent): { path: string; kind: VaultEntry['ki
 export const FileTree = memo(function FileTree({
   entries,
   activePath = null,
+  splitPath = null,
   onOpen,
+  onOpenInSplit,
+  expansionStorageKey,
   onCreateNote,
   onCreateFolder,
   onImportPdf,
@@ -163,7 +193,7 @@ export const FileTree = memo(function FileTree({
   emptyLabel = 'Noch keine Notizen vorhanden',
   revealPath = null,
 }: FileTreeProps) {
-  const [expanded, setExpanded] = useState<Set<string>>(() => new Set())
+  const [expanded, setExpanded] = useState<Set<string>>(() => readExpandedFolders(expansionStorageKey))
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
   const [renaming, setRenaming] = useState<RenameState | null>(null)
   const [renameBusy, setRenameBusy] = useState(false)
@@ -171,8 +201,18 @@ export const FileTree = memo(function FileTree({
   const [dropFolder, setDropFolder] = useState<string | null>(null)
   const [moveBusy, setMoveBusy] = useState(false)
   const renameInputRef = useRef<HTMLInputElement>(null)
+  const treeRef = useRef<HTMLElement>(null)
   const dragSourceRef = useRef<{ path: string; kind: VaultEntry['kind'] } | null>(null)
   const orderedEntries = useMemo(() => sortedEntries(entries), [entries])
+
+  // A vault switch hands over a new key: forget the old vault's folders.
+  const storageKeyRef = useRef(expansionStorageKey)
+  useEffect(() => {
+    if (storageKeyRef.current === expansionStorageKey) return
+    storageKeyRef.current = expansionStorageKey
+    setExpanded(readExpandedFolders(expansionStorageKey))
+  }, [expansionStorageKey])
+  useEffect(() => { writeExpandedFolders(expansionStorageKey, expanded) }, [expanded, expansionStorageKey])
 
   useEffect(() => {
     if (!activePath) return
@@ -182,6 +222,16 @@ export const FileTree = memo(function FileTree({
       return next
     })
   }, [activePath])
+
+  // Keep the active note's row in view when it was activated elsewhere (tabs, history, switcher).
+  useEffect(() => {
+    if (!activePath) return
+    const frame = window.requestAnimationFrame(() => {
+      const row = treeRef.current?.querySelector<HTMLElement>(`.file-tree__item.is-active > .file-tree__row`)
+      row?.scrollIntoView({ block: 'nearest' })
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [activePath, expanded])
 
   useEffect(() => {
     if (!revealPath) return
@@ -360,19 +410,72 @@ export const FileTree = memo(function FileTree({
     void Promise.resolve(action(entry.relativePath))
   }
 
+  /** Visible rows in document order: what ArrowUp/ArrowDown walk. */
+  const visibleRowButtons = () => (
+    [...(treeRef.current?.querySelectorAll<HTMLButtonElement>('.file-tree__entry-button') ?? [])]
+  )
+
+  const focusRowAt = (offset: number, from: HTMLElement) => {
+    const rows = visibleRowButtons()
+    const index = rows.indexOf(from as HTMLButtonElement)
+    if (index === -1) return
+    const target = offset === Number.NEGATIVE_INFINITY ? rows[0]
+      : offset === Number.POSITIVE_INFINITY ? rows[rows.length - 1]
+        : rows[Math.min(rows.length - 1, Math.max(0, index + offset))]
+    target?.focus()
+    target?.scrollIntoView({ block: 'nearest' })
+  }
+
   const handleRowKey = (event: KeyboardEvent, entry: VaultEntry) => {
+    const row = event.currentTarget as HTMLElement
     if (event.key === 'F2') {
       event.preventDefault()
       beginRename(entry)
       return
     }
-    if (entry.kind !== 'folder') return
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault()
+      focusRowAt(event.key === 'ArrowDown' ? 1 : -1, row)
+      return
+    }
+    if (event.key === 'Home' || event.key === 'End') {
+      event.preventDefault()
+      focusRowAt(event.key === 'Home' ? Number.NEGATIVE_INFINITY : Number.POSITIVE_INFINITY, row)
+      return
+    }
+    if (event.key === 'Delete') {
+      event.preventDefault()
+      void requestTrash(entry)
+      return
+    }
+    if (event.key === 'Enter' && event.shiftKey && entry.kind === 'file' && onOpenInSplit) {
+      event.preventDefault()
+      void Promise.resolve(onOpenInSplit(entry.relativePath))
+      return
+    }
+    if (entry.kind !== 'folder') {
+      if (event.key === 'ArrowLeft') {
+        // Jump to the containing folder, like a file manager.
+        event.preventDefault()
+        const parent = parentPath(entry.relativePath)
+        if (!parent) return
+        const rows = visibleRowButtons()
+        rows.find((button) => button.dataset.path === parent)?.focus()
+      }
+      return
+    }
     if (event.key === 'ArrowRight') {
       event.preventDefault()
-      toggleFolder(entry.relativePath, true)
+      if (expanded.has(entry.relativePath)) focusRowAt(1, row)
+      else toggleFolder(entry.relativePath, true)
     } else if (event.key === 'ArrowLeft') {
       event.preventDefault()
-      toggleFolder(entry.relativePath, false)
+      if (expanded.has(entry.relativePath)) {
+        toggleFolder(entry.relativePath, false)
+        return
+      }
+      const parent = parentPath(entry.relativePath)
+      if (parent) visibleRowButtons().find((button) => button.dataset.path === parent)?.focus()
     }
   }
 
@@ -380,6 +483,7 @@ export const FileTree = memo(function FileTree({
     const isFolder = entry.kind === 'folder'
     const isExpanded = isFolder && expanded.has(entry.relativePath)
     const isActive = !isFolder && activePath === entry.relativePath
+    const isInSplit = !isFolder && splitPath === entry.relativePath
     const isRenaming = renaming?.entry.relativePath === entry.relativePath
     const children = isFolder ? sortedEntries(entry.children ?? []) : []
     const depthStyle = {
@@ -390,7 +494,7 @@ export const FileTree = memo(function FileTree({
     return (
       <li
         aria-expanded={isFolder ? isExpanded : undefined}
-        className={`file-tree__item ${isActive ? 'is-active' : ''} ${
+        className={`file-tree__item ${isActive ? 'is-active' : ''} ${isInSplit ? 'is-in-split' : ''} ${
           isExpanded ? 'is-expanded' : ''
         } ${dragPath === entry.relativePath ? 'is-dragging' : ''}`.trim()}
         key={entry.relativePath}
@@ -466,15 +570,19 @@ export const FileTree = memo(function FileTree({
               <button
                 aria-current={isActive ? 'page' : undefined}
                 className="file-tree__entry-button"
+                data-path={entry.relativePath}
                 draggable={!isRenaming && !moveBusy}
-                onClick={() => {
+                onClick={(event) => {
                   if (isFolder) toggleFolder(entry.relativePath)
+                  else if (event.shiftKey && onOpenInSplit) void Promise.resolve(onOpenInSplit(entry.relativePath))
                   else void Promise.resolve(onOpen(entry.relativePath))
                 }}
                 onDragStart={(event) => beginDrag(entry, event)}
                 onDragEnd={endDrag}
                 onKeyDown={(event) => handleRowKey(event, entry)}
-                title={`${entry.relativePath} · Ziehen, um in einen Ordner oder auf die oberste Ebene zu legen`}
+                title={isFolder
+                  ? `${entry.relativePath} · Ziehen, um in einen Ordner oder auf die oberste Ebene zu legen`
+                  : `${entry.relativePath} · Umschalt+Klick öffnet rechts · Ziehen zum Verschieben`}
                 type="button"
               >
                 <span className="file-tree__chevron" aria-hidden="true">
@@ -569,6 +677,7 @@ export const FileTree = memo(function FileTree({
 
   return (
     <section
+      ref={treeRef}
       className={`file-tree ${className} ${dropFolder === '' ? 'is-drop-root' : ''}`.trim()}
       aria-label={rootLabel}
       onDragOver={(event) => handleDragOver(event, 'root')}
@@ -739,6 +848,24 @@ export const FileTree = memo(function FileTree({
                   </div>
                 </div>
               )}
+              <span className="file-tree__menu-separator" role="separator" />
+            </>
+          )}
+          {contextMenu.entry.kind === 'file' && onOpenInSplit && (
+            <>
+              <span className="file-tree__menu-label">Öffnen</span>
+              <button
+                onClick={() => {
+                  const path = contextMenu.entry.relativePath
+                  setContextMenu(null)
+                  void Promise.resolve(onOpenInSplit(path))
+                }}
+                role="menuitem"
+                type="button"
+              >
+                <Columns2 aria-hidden="true" size={15} />
+                Rechts öffnen
+              </button>
               <span className="file-tree__menu-separator" role="separator" />
             </>
           )}

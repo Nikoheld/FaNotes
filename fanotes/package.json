@@ -163,6 +163,8 @@
     "check:ink-notice-dismiss": "node scripts/check-ink-notice-dismiss.mjs",
     "check:ink-note-switch": "node scripts/check-ink-note-switch.mjs",
     "check:ink-erase-persist": "node scripts/check-ink-erase-persist.mjs",
+    "check:ink-history-remap": "node scripts/check-ink-history-remap.mjs",
+    "check:workspace-nav": "node scripts/check-workspace-nav.mjs",
     "check:paper-view-memory": "node scripts/check-paper-view-memory.mjs",
     "check:pdf-camera": "node scripts/check-pdf-camera.mjs",
     "check:bug-text-shift": "node scripts/check-bug-text-shift.mjs",

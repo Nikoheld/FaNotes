@@ -699,6 +699,11 @@ const cloneStrokes = (strokes: InkStroke[]): InkStroke[] => strokes.map((stroke)
 // instead of copying an entire page on every pen-down event.
 const snapshotStrokes = (strokes: InkStroke[]): InkStroke[] => strokes.slice()
 
+/** A failed silent autosave is retried after this pause while the page stays dirty. */
+export const INK_SAVE_RETRY_DELAY_MS = 4_000
+/** `flush` rewrites the page while strokes keep landing during a write, up to this many rounds. */
+export const INK_FLUSH_MAX_ROUNDS = 6
+
 const BACKGROUND_RECOGNITION_CHUNK = 24
 
 /**
@@ -1285,6 +1290,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const transcriptNeedsFullRebuildRef = useRef(false)
   const saveQueueRef = useRef<Promise<void>>(Promise.resolve())
   const queuedSaveCountRef = useRef(0)
+  const saveRetryTimerRef = useRef<number | null>(null)
   const createdAtRef = useRef(new Date().toISOString())
   const initialColorRef = useRef(settings.penColor)
   const drawingIdRef = useRef(drawingId)
@@ -1555,7 +1561,10 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const setDirty = useCallback((dirty: boolean) => {
     dirtyRef.current = dirty
     setIsDirty(dirty)
-    onDirtyChange?.(dirty)
+    // The host guards note switches and the window close with this flag. A
+    // page that has nothing to write (no strokes, no record: only its extent
+    // followed the layout) must not keep those waiting on a save that never runs.
+    onDirtyChange?.(dirty && inkPagePersists(strokesRef.current.length, Boolean(drawingIdRef.current) || loadedDrawingIdRef.current !== undefined))
   }, [onDirtyChange])
 
   const bumpRevision = useCallback(() => {
@@ -2261,21 +2270,45 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     return true
   }, [planInkWindowNow, redraw])
 
+  /**
+   * Visits every stroke point the board still holds — live strokes, the stroke
+   * under the pen, undo and redo snapshots, the gesture snapshot and a pending
+   * solver tap — exactly once. Snapshots share point objects with the live
+   * strokes, but a stroke that was erased (or undone) lives only in history;
+   * remapping the live array alone left those at pre-grow coordinates, so
+   * undo after a grow brought them back shifted.
+   */
+  const forEachTrackedPoint = useCallback((visit: (point: StrokePoint) => void) => {
+    const seen = new Set<StrokePoint>()
+    const visitStrokes = (strokes: readonly InkStroke[] | null | undefined) => {
+      if (!strokes) return
+      for (const stroke of strokes) {
+        for (const point of stroke.points) {
+          if (seen.has(point)) continue
+          seen.add(point)
+          visit(point)
+        }
+      }
+    }
+    visitStrokes(strokesRef.current)
+    if (activeStrokeRef.current) visitStrokes([activeStrokeRef.current])
+    for (const snapshot of undoRef.current) visitStrokes(snapshot)
+    for (const snapshot of redoRef.current) visitStrokes(snapshot)
+    visitStrokes(beforeGestureRef.current)
+    visitStrokes(recognitionStrokesRef.current)
+    const tap = pendingSolverTapRef.current
+    if (tap) {
+      visitStrokes(tap.snapshot)
+      visitStrokes([tap.stroke])
+    }
+  }, [])
+
   const scaleNormalizedSpace = useCallback((scaleX: number, scaleY: number) => {
     if (scaleX === 1 && scaleY === 1) return
-    for (const stroke of strokesRef.current) {
-      for (const point of stroke.points) {
-        point.x *= scaleX
-        point.y *= scaleY
-      }
-    }
-    const active = activeStrokeRef.current
-    if (active) {
-      for (const point of active.points) {
-        point.x *= scaleX
-        point.y *= scaleY
-      }
-    }
+    forEachTrackedPoint((point) => {
+      point.x *= scaleX
+      point.y *= scaleY
+    })
     const scalePose = <T extends DraftingPose>(pose: T | null): T | null => (
       pose ? { ...pose, x: pose.x * scaleX, y: pose.y * scaleY } : pose
     )
@@ -2300,7 +2333,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       width: current.width * scaleX,
       height: current.height * scaleY,
     } : current)
-  }, [])
+  }, [forEachTrackedPoint])
 
   // 0–1 ink follows the painted sheet: when the sheet grew (a text line, a
   // viewport minimum) the strokes are rescaled so every mark keeps its paper
@@ -2525,17 +2558,10 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     void paper?.offsetHeight
     const nextPaintW = writePageStayExtent(nextW, paper?.offsetWidth ?? 0)
     const nextPaintH = writePageStayExtent(nextH, paper?.offsetHeight ?? 0)
-    const remapPoint = (point: { x: number; y: number }) => {
+    forEachTrackedPoint((point) => {
       point.x = keepMarkOnPage(point.x, prevPaintW, nextPaintW, addX)
       point.y = keepMarkOnPage(point.y, prevPaintH, nextPaintH, addY)
-    }
-    for (const stroke of strokesRef.current) {
-      for (const point of stroke.points) remapPoint(point)
-    }
-    const active = activeStrokeRef.current
-    if (active) {
-      for (const point of active.points) remapPoint(point)
-    }
+    })
     const remapPose = <T extends { x: number; y: number }>(pose: T | null): T | null => {
       if (!pose) return pose
       return {
@@ -2618,7 +2644,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     canvasQualityKeyRef.current = ''
     redraw(true)
     return true
-  }, [applyInkExtentStyles, planInkWindowNow, resolvePaperElement, setDirty, redraw])
+  }, [applyInkExtentStyles, forEachTrackedPoint, planInkWindowNow, resolvePaperElement, setDirty, redraw])
 
   /**
    * The 0–1 ink space is the painted sheet (`.unified-paper`), the same box
@@ -4549,7 +4575,15 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       const savedRevision = revisionRef.current
       try {
         const result = await writeInkPage(drawingPayload(insertAfterSave))
-        if (!mountedRef.current) return
+        if (!mountedRef.current) {
+          // The unmount save of a closing board: no state left to set, but the
+          // host must learn the page is clean or it keeps guarding a saved page.
+          if (revisionRef.current === savedRevision) {
+            dirtyRef.current = false
+            onDirtyChange?.(false)
+          }
+          return
+        }
         if (revisionRef.current === savedRevision) setDirty(false)
         if (insertAfterSave) {
           const markdown = markdownFromSaveResult(result, title)
@@ -4570,7 +4604,19 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         if (mountedRef.current && !silent) {
           setNotice({ kind: 'error', text: error instanceof Error ? error.message : 'Handschrift-Seite konnte nicht gespeichert werden.' })
         }
-        if (silent) console.error('Automatisches Speichern der Handschrift-Seite fehlgeschlagen.', error)
+        if (silent) {
+          console.error('Automatisches Speichern der Handschrift-Seite fehlgeschlagen.', error)
+          // A failed autosave must never stay invisible: the page stays dirty,
+          // the writer sees it, and the board tries again on its own.
+          if (mountedRef.current) {
+            setNotice({ kind: 'error', text: 'Handschrift konnte nicht automatisch gespeichert werden – neuer Versuch folgt.' })
+            if (saveRetryTimerRef.current !== null) window.clearTimeout(saveRetryTimerRef.current)
+            saveRetryTimerRef.current = window.setTimeout(() => {
+              saveRetryTimerRef.current = null
+              if (mountedRef.current && dirtyRef.current) void saveLatestRef.current()
+            }, INK_SAVE_RETRY_DELAY_MS)
+          }
+        }
       } finally {
         if (!silent) {
           queuedSaveCountRef.current = Math.max(0, queuedSaveCountRef.current - 1)
@@ -4582,7 +4628,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     const queued = saveQueueRef.current.catch(() => {}).then(run)
     saveQueueRef.current = queued
     return queued
-  }, [clear, drawingPayload, inkRecordExists, onInsertMarkdown, setDirty, settings.keepDrawingAfterInsert, title, writeInkPage])
+  }, [clear, drawingPayload, inkRecordExists, onDirtyChange, onInsertMarkdown, setDirty, settings.keepDrawingAfterInsert, title, writeInkPage])
 
   useEffect(() => {
     saveLatestRef.current = () => saveDrawing(false, true)
@@ -4590,10 +4636,22 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
 
   useImperativeHandle(forwardedRef, () => ({
     flush: async () => {
-      await saveQueueRef.current
-      if (!dirtyRef.current || !inkPagePersists(strokesRef.current.length, inkRecordExists())) return
-      await writeInkPage(drawingPayload())
-      setDirty(false)
+      // A pen still on the sheet while the note switches or the app closes:
+      // commit that stroke first so the written page contains it.
+      if (activePointerRef.current !== null || activeStrokeRef.current) forceEndActivePointerRef.current('blur')
+      await saveQueueRef.current.catch(() => {})
+      // Strokes drawn while a write is in flight bump the revision; only a
+      // write that saw the latest revision may clear the dirty flag.
+      for (let attempt = 0; attempt < INK_FLUSH_MAX_ROUNDS; attempt += 1) {
+        if (!dirtyRef.current || !inkPagePersists(strokesRef.current.length, inkRecordExists())) return
+        const savedRevision = revisionRef.current
+        await writeInkPage(drawingPayload())
+        if (revisionRef.current === savedRevision) {
+          setDirty(false)
+          return
+        }
+      }
+      throw new Error('Die Handschrift ändert sich noch – bitte kurz warten und erneut speichern.')
     },
     refreshTraining: async () => {
       const loaded = await loadRecognitionResources()
@@ -4623,8 +4681,24 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   }), [drawingPayload, inkMode, inkRecordExists, setDirty, tool, writeInkPage])
 
   useEffect(() => () => {
+    if (saveRetryTimerRef.current !== null) window.clearTimeout(saveRetryTimerRef.current)
     if (dirtyRef.current && inkPagePersists(strokesRef.current.length, inkRecordExists())) void saveLatestRef.current()
   }, [inkRecordExists])
+
+  // A lost GPU context wipes both bitmaps; the strokes are still in the model,
+  // so repaint them the moment the browser hands the context back.
+  useEffect(() => {
+    const canvases = [canvasRef.current, committedCanvasRef.current].filter((canvas): canvas is HTMLCanvasElement => Boolean(canvas))
+    if (!canvases.length) return
+    const restore = () => {
+      committedCanvasDirtyRef.current = true
+      scheduleRedraw()
+    }
+    for (const canvas of canvases) canvas.addEventListener('contextrestored', restore)
+    return () => {
+      for (const canvas of canvases) canvas.removeEventListener('contextrestored', restore)
+    }
+  }, [scheduleRedraw])
 
   const recognize = useCallback(async (
     requestedMode: RecognitionPreference = mode,

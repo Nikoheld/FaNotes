@@ -15,7 +15,7 @@ type MaybePromise = void | Promise<void>
 export type VaultOverviewProps = {
   entries: VaultEntry[]
   openTabs: NoteTab[]
-  onOpen: (path: string) => MaybePromise
+  onOpen: (path: string) => void | Promise<unknown>
   onCreateNote: () => MaybePromise
   onClose: () => void
 }

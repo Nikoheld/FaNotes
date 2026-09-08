@@ -1276,11 +1276,22 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
   useEffect(() => {
     const view = viewRef.current
     if (!view || lastEmittedContentRef.current === content) return
-    if (view.state.doc.toString() === content) return
+    const current = view.state.doc.toString()
+    if (current === content) return
+
+    // Keystrokes the app has not seen yet (still in the 90 ms coalescer or
+    // mid-IME composition) outrank any replacement React wants to make. Hand
+    // them to the app now and keep the editor's text; the stale prop is
+    // reconciled by the change the flush emits.
+    const scheduler = changeSchedulerRef.current
+    const typedSinceEmit = lastEmittedContentRef.current !== null && current !== lastEmittedContentRef.current
+    if (scheduler?.pending() || typedSinceEmit || view.composing) {
+      scheduler?.flush()
+      return
+    }
 
     const { anchor, head } = view.state.selection.main
     const nextLength = content.length
-    changeSchedulerRef.current?.cancel()
     syncingExternalContent.current = true
     try {
       view.dispatch({
@@ -1292,6 +1303,7 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
         // React owns this replacement. It must not become an undo step itself.
         annotations: Transaction.addToHistory.of(false),
       })
+      lastEmittedContentRef.current = content
     } finally {
       syncingExternalContent.current = false
     }
