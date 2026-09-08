@@ -16,6 +16,7 @@
 import { createHash, createHmac, randomBytes, scrypt, timingSafeEqual } from 'node:crypto'
 import { createReadStream, promises as fs } from 'node:fs'
 import { resolve, sep } from 'node:path'
+import { languageForRequest, localizeText } from './i18n.mjs'
 
 const SYNC_ROOT = resolve(process.env.FANOTES_SYNC_DIR || '/var/lib/fanotes-sync')
 const PUBLIC_ORIGIN = process.env.FANOTES_PUBLIC_ORIGIN || 'https://fanotes.fasrv.ch'
@@ -366,7 +367,9 @@ const baseHeaders = (request) => ({
 })
 
 const sendJson = (request, response, status, body, extra = {}) => {
-  const payload = JSON.stringify(body)
+  // Only the human-readable error text is localised; ids, base64 and revisions pass through untouched.
+  const localized = typeof body?.error === 'string' ? { ...body, error: localizeText(body.error, languageForRequest(request)) } : body
+  const payload = JSON.stringify(localized)
   response.writeHead(status, { ...baseHeaders(request), 'Content-Type': 'application/json; charset=utf-8', 'Content-Length': Buffer.byteLength(payload), ...extra })
   response.end(payload)
 }

@@ -54,8 +54,10 @@ import {
   type TabletButtonAction,
 } from '../lib/tabletButtons'
 import type { AppSettings, EnhancedMathRecognitionState, OneNoteImportResult, QwenVisionState, ServerBackupState, UpdateState } from '../types'
+import type { SyncEngine, SyncPublicState } from '../lib/sync/engine'
+import { SyncSettingsSection } from './SyncSettingsSection'
 
-type SettingsSection = 'appearance' | 'editor' | 'drawing' | 'files' | 'addons' | 'updates' | 'accessibility' | 'experimental' | 'advanced'
+export type SettingsSection = 'appearance' | 'editor' | 'drawing' | 'files' | 'sync' | 'addons' | 'updates' | 'accessibility' | 'experimental' | 'advanced'
 
 export type SettingsModalProps = {
   platform?: string
@@ -67,6 +69,9 @@ export type SettingsModalProps = {
   onOpenGlyphenWerk?: () => void
   onOpenAddonStore?: () => void
   addonSummary?: { installed: number; running: number }
+  syncEngine?: SyncEngine
+  syncState?: SyncPublicState
+  initialSection?: SettingsSection
   onImportTraining?: (file: File) => Promise<void>
   onImportOneNote?: () => Promise<OneNoteImportResult | null>
   updateState: UpdateState
@@ -87,6 +92,7 @@ const SECTIONS: { id: SettingsSection; label: string; description: string; icon:
   { id: 'editor', label: 'Editor', description: 'Markdown und Schreiben', icon: FileText, count: 8 },
   { id: 'drawing', label: 'Stift & Erkennung', description: 'Tablet, Papier und Handschrift', icon: Brush, count: 16 },
   { id: 'files', label: 'Dateien & Vault', description: 'Import, Ordner und Speichern', icon: FolderOpen, count: 7 },
+  { id: 'sync', label: 'Sync', description: 'Konto, Geräte und Verschlüsselung', icon: Cloud, count: 6 },
   { id: 'addons', label: 'Add-ons', description: 'Store, Quelle und Updates', icon: Puzzle, count: 3 },
   { id: 'updates', label: 'Updates', description: 'Stable, Beta und Sicherheit', icon: RefreshCw, count: 4 },
   { id: 'accessibility', label: 'Bedienung', description: 'Bewegung und Lesbarkeit', icon: Accessibility, count: 3 },
@@ -97,7 +103,7 @@ const SECTIONS: { id: SettingsSection; label: string; description: string; icon:
 const SECTION_GROUPS: Array<{ label: string; sections: SettingsSection[] }> = [
   { label: 'Aussehen & Schreiben', sections: ['appearance', 'editor'] },
   { label: 'Stift & Arbeitsbereich', sections: ['drawing', 'files'] },
-  { label: 'FaNotes & System', sections: ['addons', 'updates', 'accessibility', 'experimental', 'advanced'] },
+  { label: 'FaNotes & System', sections: ['sync', 'addons', 'updates', 'accessibility', 'experimental', 'advanced'] },
 ]
 
 type SettingsSearchItem = {
@@ -109,6 +115,10 @@ type SettingsSearchItem = {
 }
 
 const SETTINGS_SEARCH_ITEMS: SettingsSearchItem[] = [
+  { label: 'Sync-Konto', detail: 'Sync', section: 'sync', target: 'settings-sync-account', keywords: 'sync konto anmelden registrieren account login passwort e-mail cloud server geräte' },
+  { label: 'Angemeldete Geräte', detail: 'Sync', section: 'sync', target: 'settings-sync-devices', keywords: 'sync geräte devices laptop tablet abmelden' },
+  { label: 'Sync-Passwort ändern', detail: 'Sync', section: 'sync', target: 'settings-sync-password', keywords: 'sync passwort ändern password schlüssel' },
+  { label: 'Sync-Konto löschen', detail: 'Sync', section: 'sync', target: 'settings-sync-delete', keywords: 'sync konto löschen account delete server' },
   { label: 'App-Sprache', detail: 'Darstellung', section: 'appearance', target: 'settings-surface', keywords: 'sprache language system deutsch englisch english' },
   { label: 'Farbschema & Themes', detail: 'Darstellung', section: 'appearance', target: 'settings-surface', keywords: 'theme dunkel hell system graphit klar mitternacht wald aurora sepia farbe' },
   { label: 'Arbeitsflächen-Design', detail: 'Darstellung', section: 'appearance', target: 'settings-surface', keywords: 'hintergrund verlauf mesh papier clean' },
@@ -291,6 +301,9 @@ export function SettingsModal({
   onOpenGlyphenWerk,
   onOpenAddonStore,
   addonSummary,
+  syncEngine,
+  syncState,
+  initialSection,
   onImportTraining,
   onImportOneNote,
   updateState,
@@ -306,7 +319,7 @@ export function SettingsModal({
   onRemoteSupportStop,
 }: SettingsModalProps) {
   const isWeb = platform === 'web'
-  const [active, setActive] = useState<SettingsSection>('appearance')
+  const [active, setActive] = useState<SettingsSection>(initialSection ?? 'appearance')
   const [searchQuery, setSearchQuery] = useState('')
   const [trainingImportBusy, setTrainingImportBusy] = useState(false)
   const [trainingImportStatus, setTrainingImportStatus] = useState<{ kind: 'success' | 'error'; text: string } | null>(null)
@@ -892,6 +905,12 @@ export function SettingsModal({
                   <SettingRow title="Datumsformat"><input value={settings.dateFormat} placeholder="YYYY-MM-DD" onChange={(event) => update('dateFormat', event.target.value)} /></SettingRow>
                 </div>
               </>
+            )}
+
+            {active === 'sync' && (
+              syncEngine && syncState
+                ? <SyncSettingsSection engine={syncEngine} syncState={syncState} settings={settings} update={update} platform={platform} />
+                : <div className="setting-card"><div className="setting-card-title"><Cloud size={16} /><span>Sync</span></div><div className="setting-row"><div className="setting-copy"><span>Sync steht in dieser Umgebung nicht zur Verfügung.</span></div></div></div>
             )}
 
             {active === 'addons' && (

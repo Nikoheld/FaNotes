@@ -38,6 +38,12 @@ export default defineConfig({
         rewrite: (requestPath) => requestPath.replace(/^\/addons-api/u, ''),
         headers: { 'User-Agent': 'FaNotes-AddonStore' },
       },
+      // Sync in web mode is same-origin (nginx proxies /api/v1/sync in
+      // production). FANOTES_SYNC_API points it at a local test server.
+      '/api/v1/sync': {
+        target: process.env.FANOTES_SYNC_API ?? 'https://fanotes.fasrv.ch',
+        changeOrigin: true,
+      },
     },
   },
   build: {

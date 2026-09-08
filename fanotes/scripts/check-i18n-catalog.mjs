@@ -28,6 +28,7 @@ const CHROME_FILES = [
   'src/components/VaultOverview.tsx',
   'src/components/TextToHandwritingDialog.tsx',
   'src/components/GlyphenWerkWorkspace.tsx',
+  'src/components/SyncSettingsSection.tsx',
   '../src/App.tsx',
   'src/lib/subjectBook.ts',
   'electron/main.cjs',

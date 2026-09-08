@@ -204,6 +204,7 @@ export class SyncEngine {
   /** Restores a signed-in session (if any) and starts the automatic cycle. */
   async start() {
     if (!this.host || !this.options) return
+    this.disposed = false
     if (typeof window !== 'undefined') {
       const kick = () => { if (this.session && this.options?.automatic()) void this.syncNow('online') }
       const focus = () => { if (this.session && this.options?.automatic()) void this.syncNow('focus') }
