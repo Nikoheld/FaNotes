@@ -51,6 +51,7 @@ import type {
 import type { Stroke, StrokePoint } from '../../../src/types'
 import type { AppSettings, DrawingAsset, PaperStyle } from '../types'
 import { PAPER_STYLES, drawPaperBackground } from '../lib/paperStyles'
+import { strokeDurationMs, strokeLengthMm, summarizeInkStrokes, type InkStrokeActivity, type InkSummary } from '../lib/pageStats'
 import { TextToHandwritingDialog } from './TextToHandwritingDialog'
 import type {
   CorrectionLearningResult,
@@ -627,7 +628,13 @@ export type DrawingSavePayload = {
   /** Generated only when a Markdown image is explicitly requested. */
   imageData?: string
   drawingJson: string
+  /** What the saved layer contains, for the note's statistics. */
+  inkSummary?: InkSummary
 }
+
+export type InkActivity =
+  | { kind: 'stroke'; stroke: InkStrokeActivity }
+  | { kind: 'erase'; removed: number }
 
 export type DrawingSaveResult =
   | DrawingAsset
@@ -680,6 +687,8 @@ export type DrawingBoardProps = {
   onInsertMarkdown: (markdown: string) => boolean | Promise<boolean>
   onSettingsChange?: (settings: Partial<AppSettings>) => void
   onDirtyChange?: (dirty: boolean) => void
+  /** Reports finished strokes and erased strokes for the note's quiet statistics. */
+  onInkActivity?: (activity: InkActivity) => void
   onTrainingChanged?: (sampleCount: number) => void
   onOpenGlyphenWerk?: () => void
   onClose?: () => void
@@ -1178,6 +1187,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   onInsertMarkdown,
   onSettingsChange,
   onDirtyChange,
+  onInkActivity,
   onTrainingChanged,
   onOpenGlyphenWerk,
   onClose,
@@ -1950,7 +1960,34 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     paintLiveInk(context, activeStroke, [])
   }, [inline, paintLiveInk, paperStyle, settings.smoothing, sourceHeight, sourceWidth])
 
+  const onInkActivityRef = useRef(onInkActivity)
+  onInkActivityRef.current = onInkActivity
+
+  /** Every path that adds a finished stroke to the page passes through here. */
+  const noteStrokeDrawn = useCallback((stroke: InkStroke) => {
+    const report = onInkActivityRef.current
+    if (!report) return
+    const width = sourceWidthRef.current
+    const height = sourceHeightRef.current
+    report({
+      kind: 'stroke',
+      stroke: {
+        durationMs: strokeDurationMs(stroke),
+        lengthMm: strokeLengthMm(stroke, width, height),
+        points: stroke.points.length,
+        purpose: stroke.purpose === 'art' ? 'art' : 'handwriting',
+        color: stroke.color,
+        brush: stroke.purpose === 'art' ? stroke.brush ?? 'art' : 'pen',
+      },
+    })
+  }, [])
+
+  const noteStrokesErased = useCallback((removed: number) => {
+    if (removed > 0) onInkActivityRef.current?.({ kind: 'erase', removed })
+  }, [])
+
   const commitStrokeToCanvas = useCallback((stroke: InkStroke) => {
+    noteStrokeDrawn(stroke)
     const canvas = committedCanvasRef.current
     const { width, height, virtualHeight, layoutWidth } = canvasPixelSizeRef.current
     if (!canvas || !width || !height || !virtualHeight || committedCanvasDirtyRef.current) return
@@ -1965,7 +2002,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     context.setTransform(1, 0, 0, 1, 0, -inkWindow.y0 * virtualHeight)
     drawInkStroke(context, stroke, width, virtualHeight, settings.smoothing, 1, sourceWidth, layoutWidth)
     context.restore()
-  }, [settings.smoothing, sourceWidth])
+  }, [noteStrokeDrawn, settings.smoothing, sourceWidth])
 
   useEffect(() => {
     if (inline && !inputActive) {
@@ -2906,6 +2943,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     const points = Array.isArray(value) ? value : [value]
     strokesRef.current = applyToolErase(strokesRef.current, points, eraserSize, sourceWidth, sourceHeight)
     if (strokesRef.current.length !== before) {
+      noteStrokesErased(before - strokesRef.current.length)
       gestureChangedRef.current = true
       committedCanvasDirtyRef.current = true
       scheduleRedraw()
@@ -3783,6 +3821,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         const deleted = new Set(scribble.indexes.map((index) => handwritingEntries[index]?.index).filter((index): index is number => index !== undefined))
         strokesRef.current = beforeGestureRef.current.filter((_, index) => !deleted.has(index))
         scribbleDeleted = beforeGestureRef.current.length - strokesRef.current.length
+        noteStrokesErased(scribbleDeleted)
         gestureChangedRef.current = scribbleDeleted > 0
       } else {
         strokesRef.current.push(activeStroke)
@@ -4540,6 +4579,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       title,
       imageData,
       drawingJson: JSON.stringify(drawing),
+      inkSummary: summarizeInkStrokes(strokesRef.current, page.width, page.height),
     }
   }, [activeMode, mathSolverEnabled, mode, paperStyle, settings.smoothing, title])
 
@@ -5070,7 +5110,9 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const deleteSelectedInk = useCallback(() => {
     const indexes = new Set(selectedStrokeIndexesRef.current)
     if (!indexes.size) return
+    const before = strokesRef.current.length
     strokesRef.current = strokesRef.current.filter((_, index) => !indexes.has(index))
+    noteStrokesErased(before - strokesRef.current.length)
     selectedStrokeIndexesRef.current = []
     setSelectionRect(null)
     scheduleRedraw()

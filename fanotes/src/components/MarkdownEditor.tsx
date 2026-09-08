@@ -53,6 +53,7 @@ import {
 } from '@codemirror/view'
 import { highlightSelectionMatches, search, searchKeymap } from '@codemirror/search'
 import type { AppSettings, DetectedTextLanguage } from '../types'
+import type { EditActivity } from '../lib/pageStats'
 import { createTrailingValueScheduler, type TrailingValueScheduler } from '../lib/trailingValueScheduler'
 import {
   captureGhostTextAroundLock,
@@ -98,6 +99,46 @@ export type MarkdownEditorSettings = Pick<
   | 'autocorrect'
 >
 
+const WORD_CHARACTER = /[\p{L}\p{N}]/u
+const WORD_BOUNDARY = /^[\s.,;:!?)\]}»“"'…]+$/u
+
+const editActivityKind = (transaction: Transaction): EditActivity['kind'] | null => {
+  if (transaction.isUserEvent('input.autocorrect')) return 'autocorrect'
+  if (transaction.isUserEvent('input.complete')) return 'suggestion'
+  if (transaction.isUserEvent('input.paste') || transaction.isUserEvent('input.drop')) return 'paste'
+  if (transaction.isUserEvent('input')) return 'type'
+  if (transaction.isUserEvent('delete')) return 'delete'
+  if (transaction.isUserEvent('undo')) return 'undo'
+  if (transaction.isUserEvent('redo')) return 'redo'
+  if (transaction.isUserEvent('move') || transaction.isUserEvent('select')) return 'other'
+  // Programmatic edits (formatting toolbar, inserted ink markdown) are not typing.
+  return transaction.annotation(Transaction.userEvent) ? 'other' : null
+}
+
+/** Counts what one user transaction did to the document, for the page statistics. */
+export const editActivityFromTransaction = (transaction: Transaction): EditActivity | null => {
+  if (!transaction.docChanged) return null
+  const kind = editActivityKind(transaction)
+  if (!kind) return null
+  let inserted = 0
+  let deleted = 0
+  let wordsCompleted = 0
+  let lineBreaks = 0
+  transaction.changes.iterChanges((fromA, toA, _fromB, _toB, text) => {
+    inserted += text.length
+    deleted += toA - fromA
+    if (kind !== 'type') return
+    const typed = text.toString()
+    for (let index = 0; index < typed.length; index += 1) if (typed.charCodeAt(index) === 10) lineBreaks += 1
+    // A boundary typed right behind a word character finishes that word.
+    if (WORD_BOUNDARY.test(typed) && fromA > 0) {
+      const before = transaction.startState.doc.sliceString(fromA - 1, fromA)
+      if (WORD_CHARACTER.test(before)) wordsCompleted += 1
+    }
+  })
+  return { kind, inserted, deleted, wordsCompleted, lineBreaks }
+}
+
 export type MarkdownEditorProps = {
   content: string
   onChange: (content: string) => void
@@ -112,6 +153,8 @@ export type MarkdownEditorProps = {
   paperMode?: boolean
   /** Reports the locally detected keyboard-text language. */
   onLanguageDetected?: (language: DetectedTextLanguage) => void
+  /** Reports every user edit for the note's quiet statistics (typed, pasted, deleted, undone …). */
+  onEditActivity?: (activity: EditActivity) => void
 }
 
 export type MarkdownFormatAction =
@@ -1166,6 +1209,7 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
   readOnly = false,
   paperMode = false,
   onLanguageDetected,
+  onEditActivity,
 }: MarkdownEditorProps, forwardedRef) {
   const hostRef = useRef<HTMLDivElement>(null)
   const viewRef = useRef<EditorView | null>(null)
@@ -1173,6 +1217,7 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
   const onChangeRef = useRef(onChange)
   const onSaveRef = useRef(onSave)
   const onLanguageDetectedRef = useRef(onLanguageDetected)
+  const onEditActivityRef = useRef(onEditActivity)
   const changeSchedulerRef = useRef<TrailingValueScheduler<() => string> | null>(null)
   const lastEmittedContentRef = useRef<string | null>(null)
   const initialConfigurationAppliedRef = useRef(false)
@@ -1197,6 +1242,7 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
   onChangeRef.current = onChange
   onSaveRef.current = onSave
   onLanguageDetectedRef.current = onLanguageDetected
+  onEditActivityRef.current = onEditActivity
 
   useImperativeHandle(forwardedRef, () => ({
     format: (action) => {
@@ -1310,6 +1356,13 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
             // CodeMirror paints immediately. React, word count, outline and
             // autosave receive one trailing snapshot per short typing burst.
             changeScheduler.push(() => update.state.doc.toString())
+            const report = onEditActivityRef.current
+            if (report) {
+              for (const transaction of update.transactions) {
+                const activity = editActivityFromTransaction(transaction)
+                if (activity) report(activity)
+              }
+            }
           }
         }),
       ],

@@ -2,6 +2,7 @@
 
 ## Unveröffentlicht
 
+- **Statistik still in der `.famd`:** Die Statusleiste und die Gliederung zeigen nicht mehr „Auf der Seite 29 min 0 s“. Stattdessen führt jede Notiz ihre Statistik leise in der Begleiterdatei: wann sie erstellt, geändert, zuerst und zuletzt geöffnet, zuletzt geschlossen und gespeichert wurde; wie oft geöffnet und gespeichert; wie lange du auf der Seite warst (gesamt, mit Fenster im Vordergrund, längste und letzte Sitzung, je Stunde und Wochentag, an welchen Tagen); was du getippt hast (Tastenanschläge, geschriebene und gelöschte Zeichen, fertige Wörter, Zeilen, Einfügungen, Autokorrekturen, angenommene Vorschläge, Rückgängig/Wiederholen, Tippzeit und Tippschübe); was du von Hand geschrieben hast (Stift-auf-Papier-Zeit, Schreibzeit mit kurzen Pausen, Schübe, Striche, Punkte, Strichlänge in Millimetern, längster Strich, Handschrift- und Kunststriche, radierte Striche, Farben, Pinsel, aktueller Stand der Stiftebene) und wie das Dokument aussieht (Wörter, Zeichen, Zeilen, Absätze, Überschriften, Links, Bilder, Aufgaben und erledigte Aufgaben, Code- und Formelblöcke, Tabellen, Zitate, Listenpunkte, Lesezeit, Höchststand an Wörtern, hinzugefügte und entfernte Wörter). Geschrieben wird beim Speichern, beim Verlassen und Schließen der Notiz, beim Beenden und sonst alle 90 Sekunden — ohne dass „Speichern …“ aufblinkt. Der Sekundentakt der Statistik zeichnet dabei nicht mehr die ganze Oberfläche neu.
 
 ## 2026.9.21
 

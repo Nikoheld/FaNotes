@@ -137,7 +137,9 @@ Command-palette action ids walked from `src/App.tsx`: `new-note`, `import-pdf-no
 | Markdown preview | `src/components/MarkdownPreview.tsx` | `MarkdownPreview` |
 | Outline jump / tags | `src/lib/noteOutline.ts` | `parseNoteOutline` |
 | Right inspector | `src/components/RightInspector.tsx` | `onJumpToLine` |
-| Page created / modified / dwell | `src/lib/pageStats.ts` | `export const openPageStats` |
+| Quiet page statistics in `.famd` (dwell, sessions, typing, ink, document shape) | `src/lib/pageStats.ts` | `export const openPageStats` |
+| Edit activity reported to the statistics | `src/components/MarkdownEditor.tsx` | `export const editActivityFromTransaction` |
+| Ink activity and layer summary reported to the statistics | `src/components/DrawingBoard.tsx` | `onInkActivity?: (activity: InkActivity) => void` |
 | Convert old notes to current ink quality | `src/lib/noteStandard.ts` | `export const convertNoteToCurrentStandard` |
 | Convert control in settings | `src/components/SettingsModal.tsx` | `Alte Notizen auf den aktuellen Standard` |
 | In-app delete confirm | `src/components/ConfirmDialog.tsx` | `role="alertdialog"` |
