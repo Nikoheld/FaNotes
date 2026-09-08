@@ -511,5 +511,26 @@ export function createBrowserPreviewApi(): FaNotesApi {
     cancelClose: () => undefined,
     requestClose: () => window.close(),
     addons: createBrowserAddonsApi(),
+    // In-memory vault as a flat file tree; state and the session survive reloads in localStorage so the sync flow can be exercised in dev mode.
+    sync: {
+      vaultId: async () => 'browser-preview',
+      scan: async () => [...files.entries()].map(([path, content]) => ({ path, size: new TextEncoder().encode(content).byteLength, mtimeMs: 0 })),
+      read: async (path) => {
+        const content = files.get(path)
+        if (content === undefined) throw new Error(`„${path}“ gibt es in der Vorschau nicht.`)
+        return new TextEncoder().encode(content)
+      },
+      write: async (path, bytes, mtimeMs) => {
+        files.set(path, new TextDecoder().decode(bytes))
+        const folder = path.split('/').slice(0, -1).join('/')
+        if (folder) folders.add(folder)
+        return { path, size: bytes.byteLength, mtimeMs: mtimeMs || 0 }
+      },
+      remove: async (path) => { files.delete(path) },
+      readState: async (vaultId) => window.localStorage.getItem(`fanotes-preview-sync-state:${vaultId}`),
+      writeState: async (vaultId, json) => { if (json === null) window.localStorage.removeItem(`fanotes-preview-sync-state:${vaultId}`); else window.localStorage.setItem(`fanotes-preview-sync-state:${vaultId}`, json) },
+      readSecrets: async () => window.localStorage.getItem('fanotes-preview-sync-secrets'),
+      writeSecrets: async (json) => { if (json === null) window.localStorage.removeItem('fanotes-preview-sync-secrets'); else window.localStorage.setItem('fanotes-preview-sync-secrets', json) },
+    },
   }
 }

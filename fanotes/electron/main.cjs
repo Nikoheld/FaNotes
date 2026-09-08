@@ -48,6 +48,7 @@ const {
 } = require('./famd.cjs')
 const { parseSubjectBooks } = require('./subject-book.cjs')
 const { createAddonStore, registerAddonIpc } = require('./addons.cjs')
+const { createSyncHost, registerSyncIpc } = require('./sync.cjs')
 
 protocol.registerSchemesAsPrivileged([{
   scheme: 'fanotes-model',
@@ -247,6 +248,8 @@ const DEFAULT_SETTINGS = Object.freeze({
   viewZoomMax: 325,
   addonSource: 'Nikoheld/FaNotes-Addons#main',
   addonsAutoUpdate: true,
+  syncAutomatic: true,
+  syncDeviceName: '',
   showWordCount: true,
   showOutline: true,
   defaultFolder: 'Eingang',
@@ -335,6 +338,8 @@ const SETTINGS_SCHEMA = Object.freeze({
   viewZoomMax: { type: 'number', min: 50, max: 600 },
   addonSource: { type: 'string', max: 400 },
   addonsAutoUpdate: { type: 'boolean' },
+  syncAutomatic: { type: 'boolean' },
+  syncDeviceName: { type: 'string', max: 80 },
   showWordCount: { type: 'boolean' },
   showOutline: { type: 'boolean' },
   defaultFolder: { type: 'relative', max: 480 },
@@ -4461,6 +4466,12 @@ function registerIpcHandlers() {
 
   handle(IPC.openExternal, async (_event, url) => openExternalSafely(url))
   registerAddonIpc(handle, createAddonStore(path.join(app.getPath('userData'), 'addons')))
+  registerSyncIpc(handle, createSyncHost({
+    vaultRoot: () => assertCurrentVaultRoot(),
+    userDataDirectory: app.getPath('userData'),
+    safeStorage,
+    trashItem: (target) => shell.trashItem(target),
+  }))
   handle(IPC.captureWindow, async (event) => {
     const image = await event.sender.capturePage()
     const jpeg = image.toJPEG(55)
