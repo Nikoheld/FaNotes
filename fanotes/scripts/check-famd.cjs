@@ -77,7 +77,10 @@ const main = fs.readFileSync(path.join(__dirname, '..', 'electron', 'main.cjs'),
 const preload = fs.readFileSync(path.join(__dirname, '..', 'electron', 'preload.cjs'), 'utf8')
 const app = fs.readFileSync(path.join(__dirname, '..', 'src', 'App.tsx'), 'utf8')
 assert.match(app, /const visibleContent = stripFamdPayload\(nextContent\)/u)
-assert.match(app, /content: tab\.content === content \? visibleContent : tab\.content, savedContent: visibleContent/u)
+// The editor keeps the text as typed (a trimmed body pushed back moved the cursor);
+// only the saved snapshot follows the write, and never with the embedded payload.
+assert.match(app, /savedContent: tab\.content === content \? content : visibleContent/u)
+assert.doesNotMatch(app, /savedContent: nextContent/u)
 assert.doesNotMatch(app, /content: tab\.content === content \? nextContent : tab\.content/u)
 assert.doesNotMatch(app, /pendingWrites\.current\.set\(path, writePageStatsIntoNote/u)
 assert.match(main, /fanotes:read-famd-ink/u)
