@@ -104,6 +104,8 @@ import {
   reorderTabs,
   saveSplitLayout,
   saveWorkspaceMemory,
+  snapToDevicePixels,
+  splitFirstPaneSize,
   splitRatioFromPointer,
   stepNoteHistory,
   tabIndexForDigit,
@@ -160,7 +162,7 @@ import { defaultSettingsForPlatform } from './defaults'
 import { PaperStylePicker } from './components/PaperStylePicker'
 import { PaperView } from './components/PaperView'
 import { normalizePaperStyle } from './lib/paperStyles'
-import { clampViewZoom, readSharedPaperView, writeSharedPaperView, writeSharedZoomMaxPercent, writeSharedZoomSpeed } from './lib/paperView'
+import { clampViewZoom, createPaperViewStore, sharedPaperViewStore, writeSharedZoomMaxPercent, writeSharedZoomSpeed, type PaperViewStore } from './lib/paperView'
 import { diagnosticLog } from './lib/bugReport'
 import {
   collectSendDataNutzerdaten,
@@ -225,6 +227,8 @@ const STARTUP_DOCUMENT_LAYER_DELAY_MS = 160
 /** How long a renamed/moved path still redirects late editor flushes to the new name. */
 const MOVED_PATH_ALIAS_MS = 30_000
 /** Statistics of the open note reach the disk at least this often (in one-second ticks). */
+/** Width of the split divider track; mirrors `--split-divider` in styles.css. */
+const SPLIT_DIVIDER_PX = 7
 const PAGE_STATS_PERSIST_TICKS = 90
 /** Leaving a note after a shorter stay does not rewrite its file just for the dwell. */
 const PAGE_STATS_MIN_DWELL_DELTA_MS = 3_000
@@ -595,12 +599,17 @@ export default function App({ startupBootstrap }: AppProps) {
   useEffect(() => {
     writeSharedZoomSpeed(settings.viewZoomSpeed)
   }, [settings.viewZoomSpeed])
+  // The second split pane drives its own camera: zooming one sheet must never
+  // move the other. The main pane stays on the shared store the ink board uses.
+  const splitPaperViewStore = useMemo<PaperViewStore>(() => createPaperViewStore(), [])
   useEffect(() => {
     writeSharedZoomMaxPercent(settings.viewZoomMax ?? 325)
-    const view = readSharedPaperView()
-    const zoom = clampViewZoom(view.zoom)
-    writeSharedPaperView(zoom === view.zoom ? { ...view } : { ...view, zoom })
-  }, [settings.viewZoomMax])
+    for (const store of [sharedPaperViewStore, splitPaperViewStore]) {
+      const view = store.read()
+      const zoom = clampViewZoom(view.zoom)
+      store.write(zoom === view.zoom ? { ...view } : { ...view, zoom })
+    }
+  }, [settings.viewZoomMax, splitPaperViewStore])
   const [saveState, setSaveState] = useState<SaveState>('saved')
   const [detectedTextLanguage, setDetectedTextLanguage] = useState<DetectedTextLanguage>('unknown')
   const [sidebarVisible, setSidebarVisible] = useState(true)
@@ -743,6 +752,32 @@ export default function App({ startupBootstrap }: AppProps) {
   useEffect(() => { splitPathRef.current = splitPath }, [splitPath])
   useEffect(() => { saveSplitLayout(splitLayout) }, [splitLayout])
   useEffect(() => { if (!splitPath) setFocusedPane('main') }, [splitPath])
+  // The first pane's track is a whole number of device pixels, so the second
+  // pane's scroller never sits on a half pixel (that composites its text soft).
+  const [splitTracks, setSplitTracks] = useState<{ first: number; divider: number } | null>(null)
+  useEffect(() => {
+    const container = splitContainerRef.current
+    if (!splitPath || !container || typeof ResizeObserver !== 'function') {
+      setSplitTracks(null)
+      return
+    }
+    const { ratio, orientation } = splitLayout
+    const measure = () => {
+      const size = orientation === 'columns' ? container.clientWidth : container.clientHeight
+      const dpr = window.devicePixelRatio || 1
+      const divider = snapToDevicePixels(SPLIT_DIVIDER_PX, dpr)
+      setSplitTracks(size > 0 ? { first: splitFirstPaneSize(size, divider, ratio, dpr), divider } : null)
+    }
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(container)
+    const media = window.matchMedia(`(resolution: ${window.devicePixelRatio || 1}dppx)`)
+    media.addEventListener('change', measure)
+    return () => {
+      observer.disconnect()
+      media.removeEventListener('change', measure)
+    }
+  }, [splitLayout, splitPath])
 
   // Every activation is a visit; back/forward walk this list. A history jump
   // has already moved the cursor onto the note, so visitNote records nothing.
@@ -4165,12 +4200,13 @@ export default function App({ startupBootstrap }: AppProps) {
               <div
                 ref={splitContainerRef}
                 className={`editor-split ${splitTab ? 'is-split' : ''} ${splitTab ? `is-${splitLayout.orientation}` : ''} ${splitDragging ? 'is-resizing' : ''} ${splitTab ? `focus-${focusedPane}` : ''}`}
-                style={splitTab ? { '--split-ratio': splitLayout.ratio } as React.CSSProperties : undefined}
+                style={splitTab ? { '--split-ratio': splitLayout.ratio, ...(splitTracks ? { '--split-first': `${splitTracks.first}px`, '--split-divider': `${splitTracks.divider}px` } : {}) } as React.CSSProperties : undefined}
               >
               <PaperView
                 className={`unified-note-view ${splitTab ? 'is-main-pane' : ''} paper-${isPdfActive ? 'blank' : activePaper} ${drawingOpen ? 'is-inking' : ''} ${isPdfActive ? 'is-pdf-note' : ''}`}
                 viewKey={activeTab.path}
                 showHud={!drawingOpen}
+                globalShortcuts={!splitTab || focusedPane === 'main'}
                 onPointerDownCapture={() => setFocusedPane('main')}
                 onFocusCapture={() => setFocusedPane('main')}
               >
@@ -4287,6 +4323,8 @@ export default function App({ startupBootstrap }: AppProps) {
                   className={`unified-note-view paper-${splitTab.kind === 'pdf' || isPdfNotePath(splitTab.path) ? 'blank' : normalizePaperStyle(notePaperByPath[splitTab.path] ?? settings.paperStyle)} ${splitTab.kind === 'pdf' || isPdfNotePath(splitTab.path) ? 'is-pdf-note' : ''}`}
                   viewKey={`split:${splitTab.path}`}
                   showHud={false}
+                  store={splitPaperViewStore}
+                  globalShortcuts={focusedPane === 'split'}
                 >
                   <article className={`unified-paper ${splitTab.kind === 'pdf' || isPdfNotePath(splitTab.path) ? 'is-pdf-note' : ''}`} aria-label={`${splitTab.title} · zweite Spalte`}>
                     {splitTab.kind === 'pdf' || isPdfNotePath(splitTab.path) ? (

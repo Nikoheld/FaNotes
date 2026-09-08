@@ -21,16 +21,15 @@ import {
   defaultPaperView,
   isPaperViewActive,
   normalizeRotation,
-  readSharedPaperView,
   readSharedZoomMax,
   readSharedZoomSpeed,
-  subscribeSharedPaperView,
-  writeSharedPaperView,
+  sharedPaperViewStore,
   zoomFactorFromWheel,
   zoomStepFromSpeed,
   isSheetZoomWheel,
   sheetZoomStepFromDirection,
   type PaperViewSnapshot,
+  type PaperViewStore,
 } from '../lib/paperView'
 import { SCROLL_ROOM } from '../lib/noteCanvas'
 import {
@@ -108,14 +107,27 @@ type PaperViewProps = {
   /** Split view: the app tracks which pane the user last touched. */
   onPointerDownCapture?: () => void
   onFocusCapture?: () => void
+  /**
+   * The camera this pane drives. Defaults to the shared store the main note,
+   * ink board and settings use; a second pane passes its own so its zoom stays
+   * its own. Must not change while the pane lives.
+   */
+  store?: PaperViewStore
+  /**
+   * Electron pinch (`zoom-changed`) and the window-wide Ctrl+/- / Ctrl+0 keys
+   * land on this pane. In a split the app points them at the focused pane.
+   */
+  globalShortcuts?: boolean
 }
 
-export function PaperView({ children, className = '', viewKey, showHud = true, onPointerDownCapture, onFocusCapture }: PaperViewProps) {
+export function PaperView({ children, className = '', viewKey, showHud = true, onPointerDownCapture, onFocusCapture, store = sharedPaperViewStore, globalShortcuts = true }: PaperViewProps) {
   const noteViewRef = useRef<HTMLDivElement>(null)
-  const viewRef = useRef(readSharedPaperView())
+  const storeRef = useRef(store)
+  storeRef.current = store
+  const viewRef = useRef(store.read())
   const lastWheelZoomAtRef = useRef(0)
   const lastZoomOriginRef = useRef<{ x: number; y: number } | null>(null)
-  const [view, setViewState] = useState(readSharedPaperView)
+  const [view, setViewState] = useState(store.read)
   const [recalled, setRecalled] = useState(false)
 
   const paint = useCallback((next: PaperViewSnapshot) => {
@@ -127,14 +139,14 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
   }, [])
 
   const apply = useCallback((next: PaperViewSnapshot) => {
-    writeSharedPaperView(next)
+    storeRef.current.write(next)
   }, [])
 
-  useEffect(() => subscribeSharedPaperView(paint), [paint])
+  useEffect(() => store.subscribe(paint), [paint, store])
 
   useEffect(() => {
-    paint(readSharedPaperView())
-  }, [paint])
+    paint(store.read())
+  }, [paint, store])
 
   // Layout effects: a note opened after an async read would otherwise paint
   // one frame at 100% / scroll 0 before the remembered camera lands.
@@ -144,7 +156,7 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
     // that was open before comes back at its remembered zoom.
     const remembered = recallPaperView(loadPaperViewMemory(), paperViewMemoryKey(viewKey))
     setRecalled(remembered !== null)
-    writeSharedPaperView(paperViewFromMemory(remembered))
+    storeRef.current.write(paperViewFromMemory(remembered))
   }, [viewKey])
 
   useLayoutEffect(() => {
@@ -371,7 +383,7 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
       })
     }
     clampScroll()
-    const unsubscribeZoom = subscribeSharedPaperView(scheduleMeasureAndSave)
+    const unsubscribeZoom = storeRef.current.subscribe(scheduleMeasureAndSave)
     window.addEventListener('pagehide', saveNow)
     return () => {
       unsubscribeZoom()
@@ -475,8 +487,8 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
     resetView,
     setView,
     getView: () => viewRef.current,
-    subscribe: subscribeSharedPaperView,
-  }), [resetView, rotateBy, setView, zoomBy, zoomTo])
+    subscribe: store.subscribe,
+  }), [resetView, rotateBy, setView, store, zoomBy, zoomTo])
 
   useEffect(() => {
     const root = noteViewRef.current
@@ -580,16 +592,17 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
   }, [rotateBy, zoomTo])
 
   useEffect(() => {
+    if (!globalShortcuts) return undefined
     const subscribe = window.fanotes?.onSheetZoom
     if (typeof subscribe !== 'function') return undefined
     return subscribe((direction) => {
       if (performance.now() - lastWheelZoomAtRef.current < 80) return
       zoomBy(sheetZoomStepFromDirection(direction), lastZoomOriginRef.current ?? undefined)
     })
-  }, [zoomBy])
+  }, [globalShortcuts, zoomBy])
 
   useEffect(() => {
-    if (!showHud) return
+    if (!showHud || !globalShortcuts) return
     const onKeyDown = (event: KeyboardEvent) => {
       const target = event.target
       if (target instanceof HTMLElement) {
@@ -621,7 +634,7 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [resetView, showHud, zoomBy])
+  }, [globalShortcuts, resetView, showHud, zoomBy])
 
   const active = isPaperViewActive(view)
 
