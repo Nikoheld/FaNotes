@@ -70,6 +70,8 @@ import { buildTextMotionDiagnosticEvent, recordTextMotionDiagnostic } from '../l
 import { revealDocumentLine } from '../lib/noteOutline'
 import { clientYFromTextAnchor, registerPaperTextAnchorProvider, textAnchorFromView } from '../lib/paperTextAnchor'
 import { minimalReplacement } from '../lib/textReplacement'
+import { primeSpellingCorrections, rerunSpellingCheck, spellingCorrections } from '../lib/spellingCorrections'
+import type { SpellingLanguage } from '../types'
 
 const LazyMarkdownPreview = lazy(() => import('./MarkdownPreview').then((module) => ({
   default: module.MarkdownPreview,
@@ -93,6 +95,7 @@ export type MarkdownEditorSettings = Pick<
   | 'lineHeight'
   | 'showLineNumbers'
   | 'spellcheck'
+  | 'autocorrect'
 >
 
 export type MarkdownEditorProps = {
@@ -655,6 +658,21 @@ const spellingDecorations = StateField.define<DecorationSet>({
   provide: (field) => EditorView.decorations.from(field),
 })
 
+/** The language the last spelling pass assigned to the line at `pos`, if any. */
+const spellingLanguageAt = (state: EditorState, pos: number): SpellingLanguage | null => {
+  const lineFrom = state.doc.lineAt(pos).from
+  let language: SpellingLanguage | null = null
+  state.field(spellingDecorations, false)?.between(lineFrom, lineFrom, (_from, _to, decoration) => {
+    const value = decoration.spec.attributes?.['data-spelling-language']
+    if (value === 'de' || value === 'en') {
+      language = value
+      return false
+    }
+    return undefined
+  })
+  return language
+}
+
 function spellingExtensions(onLanguageDetected: (language: DetectedTextLanguage) => void): Extension {
   const plugin = ViewPlugin.fromClass(class {
     private timer: number | null = null
@@ -670,7 +688,8 @@ function spellingExtensions(onLanguageDetected: (language: DetectedTextLanguage)
     }
 
     update(update: ViewUpdate) {
-      if (update.docChanged) this.schedule(update.view, 360)
+      if (update.transactions.some((transaction) => transaction.effects.some((effect) => effect.is(rerunSpellingCheck)))) this.schedule(update.view, 0)
+      else if (update.docChanged) this.schedule(update.view, 360)
       else if (update.viewportChanged || update.selectionSet) this.schedule(update.view, 220)
     }
 
@@ -856,6 +875,78 @@ function editorAppearance(
         textDecorationThickness: '1.5px',
         textUnderlineOffset: '3px',
         textDecorationSkipInk: 'none',
+      },
+      // A word autocorrect just changed: dotted accent underline until the next edit elsewhere.
+      '.cm-autocorrected': {
+        textDecorationLine: 'underline',
+        textDecorationStyle: 'dotted',
+        textDecorationColor: 'var(--accent)',
+        textDecorationThickness: '1.5px',
+        textUnderlineOffset: '3px',
+      },
+      '.cm-tooltip:has(> .cm-spelling-menu)': {
+        border: '1px solid var(--border)',
+        borderRadius: '10px',
+        boxShadow: 'var(--shadow-lg)',
+        backgroundColor: 'var(--surface-elevated)',
+      },
+      '.cm-spelling-menu': {
+        minWidth: '200px',
+        maxWidth: '320px',
+        padding: '6px',
+        fontFamily: 'var(--font-ui, system-ui, sans-serif)',
+        fontSize: '13px',
+        lineHeight: '1.35',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '4px',
+      },
+      '.cm-spelling-menu__word': {
+        padding: '4px 8px 2px',
+        color: 'var(--text-muted)',
+        fontSize: '12px',
+        textDecorationLine: 'underline',
+        textDecorationStyle: 'wavy',
+        textDecorationColor: '#e24f5f',
+        textUnderlineOffset: '3px',
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        whiteSpace: 'nowrap',
+      },
+      '.cm-spelling-menu__suggestions, .cm-spelling-menu__actions': {
+        display: 'flex',
+        flexDirection: 'column',
+      },
+      '.cm-spelling-menu__actions': {
+        borderTop: '1px solid var(--border)',
+        paddingTop: '4px',
+      },
+      '.cm-spelling-menu__note': {
+        padding: '5px 8px',
+        color: 'var(--text-faint)',
+        fontStyle: 'italic',
+      },
+      '.cm-spelling-menu__item': {
+        appearance: 'none',
+        border: 'none',
+        background: 'transparent',
+        color: 'var(--text-primary)',
+        font: 'inherit',
+        textAlign: 'left',
+        padding: '5px 8px',
+        borderRadius: '6px',
+        cursor: 'pointer',
+      },
+      '.cm-spelling-menu__suggestion': {
+        fontWeight: '600',
+      },
+      '.cm-spelling-menu__ignore, .cm-spelling-menu__learn, .cm-spelling-menu__revert': {
+        color: 'var(--text-muted)',
+      },
+      '.cm-spelling-menu__item:hover, .cm-spelling-menu__item:focus-visible': {
+        backgroundColor: 'color-mix(in srgb, var(--accent) 14%, transparent)',
+        color: 'var(--text-primary)',
+        outline: 'none',
       },
     },
     { dark },
@@ -1085,6 +1176,9 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
   const changeSchedulerRef = useRef<TrailingValueScheduler<() => string> | null>(null)
   const lastEmittedContentRef = useRef<string | null>(null)
   const initialConfigurationAppliedRef = useRef(false)
+  const autocorrectEnabled = settings.spellcheck && settings.autocorrect && !readOnly
+  const autocorrectEnabledRef = useRef(autocorrectEnabled)
+  autocorrectEnabledRef.current = autocorrectEnabled
   const systemDark = useSystemDarkMode()
   const resolvedTheme = settings.theme === 'system' ? (systemDark ? 'dark' : 'light') : settings.theme
   const dark = !paperMode && resolvedTheme !== 'light' && resolvedTheme !== 'sepia'
@@ -1207,6 +1301,10 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
         compartments.spelling.of(settings.spellcheck
           ? spellingExtensions((language) => onLanguageDetectedRef.current?.(language))
           : []),
+        spellingCorrections({
+          autocorrectEnabled: () => autocorrectEnabledRef.current,
+          languageAt: spellingLanguageAt,
+        }),
         EditorView.updateListener.of((update) => {
           if (update.docChanged && !syncingExternalContent.current) {
             // CodeMirror paints immediately. React, word count, outline and
@@ -1306,6 +1404,23 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
       syncingExternalContent.current = false
     }
   }, [content])
+
+  useEffect(() => {
+    if (!autocorrectEnabled) return
+    // The exact word lists (≈4.5 MB) load once, after the note is interactive,
+    // so opening a note stays inside the startup budget. Until then the
+    // spellchecker still underlines; autocorrect simply waits.
+    let idle: number | null = null
+    const timer = window.setTimeout(() => {
+      const run = () => { primeSpellingCorrections().catch((error: unknown) => console.warn('Autokorrektur konnte die Wortlisten nicht laden:', error)) }
+      if ('requestIdleCallback' in window) idle = window.requestIdleCallback(run, { timeout: 4_000 })
+      else run()
+    }, 2_500)
+    return () => {
+      window.clearTimeout(timer)
+      if (idle !== null && 'cancelIdleCallback' in window) window.cancelIdleCallback(idle)
+    }
+  }, [autocorrectEnabled])
 
   useEffect(() => {
     const flushWhenHidden = () => {

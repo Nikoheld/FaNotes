@@ -116,6 +116,7 @@ const SETTINGS_SEARCH_ITEMS: SettingsSearchItem[] = [
   { label: 'Zoom-Geschwindigkeit', detail: 'Editor', section: 'editor', target: 'settings-editor', keywords: 'zoom geschwindigkeit mausrad pinch trackpad' },
   { label: 'Zoom-Limit', detail: 'Editor', section: 'editor', target: 'settings-editor', keywords: 'zoom limit maximum hinein 50 325 600 prozent' },
   { label: 'Rechtschreibprüfung', detail: 'Editor', section: 'editor', target: 'settings-editor', keywords: 'rechtschreibung sprache deutsch englisch rot unterstreichen fehler spellcheck' },
+  { label: 'Autokorrektur', detail: 'Editor', section: 'editor', target: 'settings-editor', keywords: 'autokorrektur tippfehler korrigieren vorschläge wörterbuch autocorrect' },
   { label: 'Zeilennummern, Wortzahl & Gliederung', detail: 'Editor', section: 'editor', target: 'settings-editor', keywords: 'statusleiste outline struktur markdown' },
   { label: 'GlyphenWerk & Training', detail: 'Stift & Erkennung', section: 'drawing', target: 'settings-glyphenwerk', keywords: 'handschrift trainieren import zip symbole mathematik' },
   { label: 'Präzises Formelmodell', detail: 'Erweitert', section: 'advanced', target: 'settings-enhanced-math', keywords: 'mathematik formel latex posformer q4 sequenzmodell lokal download' },
@@ -234,13 +235,14 @@ const SettingRow = ({
   </div>
 )
 
-const Toggle = ({ checked, onChange, label }: { checked: boolean; onChange: (value: boolean) => void; label: string }) => (
+const Toggle = ({ checked, onChange, label, disabled = false }: { checked: boolean; onChange: (value: boolean) => void; label: string; disabled?: boolean }) => (
   <button
     type="button"
     className={`toggle ${checked ? 'is-on' : ''}`}
     role="switch"
     aria-checked={checked}
     aria-label={label}
+    disabled={disabled}
     onClick={() => onChange(!checked)}
   >
     <span />
@@ -679,6 +681,7 @@ export function SettingsModal({
                   </SettingRow>
                   <SettingRow title="Zeilennummern"><Toggle label="Zeilennummern" checked={settings.showLineNumbers} onChange={(value) => update('showLineNumbers', value)} /></SettingRow>
                   <SettingRow title="Rechtschreibprüfung" description="Unterstreicht Tippfehler lokal rot und erkennt Deutsch oder Englisch automatisch. Mathematik und Code bleiben unberührt."><Toggle label="Rechtschreibprüfung" checked={settings.spellcheck} onChange={(value) => update('spellcheck', value)} /></SettingRow>
+                  <SettingRow title="Autokorrektur" description="Ersetzt einen eindeutigen Tippfehler, sobald du das Wort mit Leerzeichen, Satzzeichen oder Enter abschliesst. Rückschritt direkt danach stellt dein Wort wieder her; Rechtsklick oder Strg+. auf ein unterstrichenes Wort zeigt Vorschläge, „Ignorieren“ und „Zum Wörterbuch hinzufügen“."><Toggle label="Autokorrektur" checked={settings.autocorrect} onChange={(value) => update('autocorrect', value)} disabled={!settings.spellcheck} /></SettingRow>
                   <SettingRow title="Wortzahl in Statusleiste"><Toggle label="Wortzahl" checked={settings.showWordCount} onChange={(value) => update('showWordCount', value)} /></SettingRow>
                   <SettingRow title="Gliederung anzeigen"><Toggle label="Gliederung" checked={settings.showOutline} onChange={(value) => update('showOutline', value)} /></SettingRow>
                 </div>
