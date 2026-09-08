@@ -786,6 +786,22 @@ const overrides = {
   'Die Datei ist zu groß für den Sync.': 'The file is too large for sync.',
   'Der Sync-Server hat einen internen Fehler.': 'The sync server hit an internal error.',
   'Dieses Gerät ist nicht bekannt.': 'This device is not known.',
+  // Collapsible handwriting sections
+  'Abschnitt': 'Section',
+  'Abschnitte': 'Sections',
+  'Abschnitt mit Titelzeile einfügen · der Pfeil am Rand klappt den Inhalt ein': 'Insert a section with a title band · the arrow at the margin collapses its content',
+  'Auf das Blatt tippen, wo der Abschnitt beginnen soll': 'Tap the sheet where the section should begin',
+  'Auf das Blatt tippen, wo der Abschnitt beginnen soll · Esc bricht ab.': 'Tap the sheet where the section should begin · Esc cancels.',
+  'Abschnitt eingefügt · Titel in die Kopfzeile schreiben, Pfeil klappt den Inhalt ein.': 'Section inserted · write the title into the header, the arrow collapses the content.',
+  'Hier ist bereits ein Abschnittstitel.': 'There is already a section title here.',
+  'Abschnitt nicht eingefügt.': 'Section not inserted.',
+  'Abschnitt einklappen': 'Collapse section',
+  'Abschnitt ausklappen': 'Expand section',
+  'Abschnitt auflösen': 'Dissolve section',
+  'Abschnitt auflösen · die Tinte bleibt auf der Seite': 'Dissolve section · the ink stays on the page',
+  'Neuer Abschnitt': 'New section',
+  'Eingeklappt': 'Collapsed',
+  'Titel': 'Title',
 }
 
 const targets = [

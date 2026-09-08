@@ -1082,8 +1082,16 @@ const shiftInkWindowBitmap = (canvas: HTMLCanvasElement, dy: number) => {
   context.restore()
 }
 
-const safeInkStrokes = (value: unknown, fallbackColor: string): InkStroke[] => {
+/**
+ * Sheet ink is clamped to the 0–1 page. Ink hidden inside a collapsed section
+ * is normalised to its own body box and may legitimately reach past it (a
+ * stroke that ran into the next header), so that box is only bounded loosely.
+ */
+const safeInkStrokes = (value: unknown, fallbackColor: string, options: { clampToSheet?: boolean } = {}): InkStroke[] => {
   if (!Array.isArray(value)) return []
+  const bound = options.clampToSheet === false
+    ? (coordinate: number) => clamp(coordinate, -4, 4)
+    : (coordinate: number) => clamp(coordinate)
   return value.flatMap((entry) => {
     if (!entry || typeof entry !== 'object') return []
     const raw = entry as Partial<InkStroke>
@@ -1091,8 +1099,8 @@ const safeInkStrokes = (value: unknown, fallbackColor: string): InkStroke[] => {
     const points = raw.points.flatMap((point) => {
       if (!point || typeof point !== 'object') return []
       return [{
-        x: clamp(Number(point.x) || 0),
-        y: clamp(Number(point.y) || 0),
+        x: bound(Number(point.x) || 0),
+        y: bound(Number(point.y) || 0),
         t: Number(point.t) || 0,
         pressure: clamp(Number(point.pressure) || 0.5),
         tiltX: clamp(Number(point.tiltX) || 0, -90, 90),
@@ -2104,7 +2112,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       if (!document || typeof document !== 'object') throw new Error('Kein Zeichnungsobjekt')
       const raw = document as Partial<DrawingDocument>
       strokesRef.current = safeInkStrokes(raw.strokes, initialColorRef.current)
-      const loadedSections = deserializeSections<InkStroke>(raw.sections, (value) => safeInkStrokes(value, initialColorRef.current))
+      const loadedSections = deserializeSections<InkStroke>(raw.sections, (value) => safeInkStrokes(value, initialColorRef.current, { clampToSheet: false }))
       sectionsRef.current = loadedSections
       setSections(loadedSections)
       setSectionPlacing(false)
@@ -3651,6 +3659,12 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     afterSectionChange()
     return true
   }, [afterSectionChange, commitSections, forEachTrackedStroke, growSheetBy, sheetPx])
+
+  /** Sections whose header band already holds ink; the others show the „Titel“ placeholder. */
+  const titledSectionIds = useMemo(() => {
+    void revision
+    return new Set(sections.filter((section) => headerStrokeCount(strokesRef.current, section) > 0).map((section) => section.id))
+  }, [revision, sections])
 
   const beginSectionPlacement = useCallback(() => {
     clearRecognitionScope()
@@ -6639,7 +6653,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
             {(sections.length > 0 || sectionPlacing) && <div className="lw-ink-sections" aria-label="Abschnitte">
               {sections.map((section) => {
                 const bodyEnd = section.collapsed ? section.bodyTop.y : (nextSectionTop(sections, section) ?? 1)
-                const titled = headerStrokeCount(strokesRef.current, section) > 0
+                const titled = titledSectionIds.has(section.id)
                 const hiddenCount = section.hidden?.strokes.length ?? 0
                 return (
                   <Fragment key={section.id}>
