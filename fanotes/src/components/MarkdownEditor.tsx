@@ -69,6 +69,7 @@ import {
 import { buildTextMotionDiagnosticEvent, recordTextMotionDiagnostic } from '../lib/bugReport'
 import { revealDocumentLine } from '../lib/noteOutline'
 import { clientYFromTextAnchor, registerPaperTextAnchorProvider, textAnchorFromView } from '../lib/paperTextAnchor'
+import { minimalReplacement } from '../lib/textReplacement'
 
 const LazyMarkdownPreview = lazy(() => import('./MarkdownPreview').then((module) => ({
   default: module.MarkdownPreview,
@@ -1290,16 +1291,13 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
       return
     }
 
-    const { anchor, head } = view.state.selection.main
-    const nextLength = content.length
     syncingExternalContent.current = true
     try {
       view.dispatch({
-        changes: { from: 0, to: view.state.doc.length, insert: content },
-        selection: EditorSelection.single(
-          Math.min(anchor, nextLength),
-          Math.min(head, nextLength),
-        ),
+        // Replace only the span that differs. CodeMirror maps the selection
+        // through the change, so a cursor after the edited span stays where it
+        // is instead of being clamped to the new document length.
+        changes: minimalReplacement(current, content),
         // React owns this replacement. It must not become an undo step itself.
         annotations: Transaction.addToHistory.of(false),
       })
