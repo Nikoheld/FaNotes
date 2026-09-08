@@ -1,0 +1,26 @@
+{
+  "name": "FaNotes",
+  "install": "bash .cursor/install.sh",
+  "terminals": [
+    {
+      "name": "glyphenwerk",
+      "command": "npm run dev",
+      "description": "GlyphenWerk handwriting-capture UI (Vite) on http://localhost:5173"
+    },
+    {
+      "name": "fanotes-web",
+      "command": "cd fanotes && npm run dev:web",
+      "description": "FaNotes web app (Vite) on http://localhost:5174 — the primary development target"
+    },
+    {
+      "name": "fanotes-site",
+      "command": "bash .cursor/run-site.sh",
+      "description": "FaNotes website, update API, AI proxy and backup service on http://127.0.0.1:18185"
+    }
+  ],
+  "ports": [
+    { "name": "glyphenwerk", "port": 5173 },
+    { "name": "fanotes-web", "port": 5174 },
+    { "name": "fanotes-site", "port": 18185 }
+  ]
+}
