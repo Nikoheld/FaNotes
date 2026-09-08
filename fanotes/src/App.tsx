@@ -54,7 +54,7 @@ import {
 } from 'lucide-react'
 import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { PaletteAction } from './components/CommandPalette'
-import type { DrawingBoardHandle, DrawingSavePayload } from './components/DrawingBoard'
+import type { DrawingBoardHandle, DrawingSavePayload, InkActivity } from './components/DrawingBoard'
 import { ConfirmDialog } from './components/ConfirmDialog'
 import { FileTree } from './components/FileTree'
 import { FormattingToolbar } from './components/FormattingToolbar'
@@ -67,12 +67,21 @@ import { convertNoteSourceToCurrentStandard } from './lib/noteStandard'
 import { deleteConfirmHost } from './lib/confirmUx'
 import {
   closePageStats,
+  idlePageStatsSession,
+  markPageStatsPersisted,
   openPageStats,
+  pageStatsNeedPersist,
+  recordDocumentSaved,
+  recordEditActivity,
+  recordInkErased,
+  recordInkSnapshot,
+  recordInkStroke,
   snapshotPageStats,
   tickPageStats,
-  formatPageDwell,
   touchPageModified,
-  type PageStats,
+  type EditActivity,
+  type InkStrokeActivity,
+  type InkSummary,
   type PageStatsSession,
 } from './lib/pageStats'
 import { chooseRestoredNote, collectNotePaths } from './lib/lastOpenNote'
@@ -215,6 +224,10 @@ const STARTUP_TREE_REFRESH_DELAY_MS = 18_000
 const STARTUP_DOCUMENT_LAYER_DELAY_MS = 160
 /** How long a renamed/moved path still redirects late editor flushes to the new name. */
 const MOVED_PATH_ALIAS_MS = 30_000
+/** Statistics of the open note reach the disk at least this often (in one-second ticks). */
+const PAGE_STATS_PERSIST_TICKS = 90
+/** Leaving a note after a shorter stay does not rewrite its file just for the dwell. */
+const PAGE_STATS_MIN_DWELL_DELTA_MS = 3_000
 type AppProps = { startupBootstrap?: Promise<BootstrapData> }
 
 type SaveState = 'saved' | 'saving' | 'error'
@@ -626,7 +639,6 @@ export default function App({ startupBootstrap }: AppProps) {
     confirmLabel?: string
     resolve: (value: boolean) => void
   } | null>(null)
-  const [activePageStats, setActivePageStats] = useState<PageStats | null>(null)
   const [remoteSupportSession, setRemoteSupportSession] = useState<RemoteSupportSession | null>(null)
   const [revealPath, setRevealPath] = useState<string | null>(null)
   const [tagFilter, setTagFilter] = useState<string | null>(null)
@@ -686,6 +698,7 @@ export default function App({ startupBootstrap }: AppProps) {
   const pendingWrites = useRef(new Map<string, string>())
   const settingsTimer = useRef<number | null>(null)
   const pageStatsRef = useRef(new Map<string, PageStatsSession>())
+  const previousActivePathRef = useRef<string | null>(null)
   const settingsRef = useRef(settings)
   const settingsRevisionRef = useRef(0)
   const settingsPersistedRevisionRef = useRef(0)
@@ -1164,15 +1177,64 @@ export default function App({ startupBootstrap }: AppProps) {
     })
   }, [bootstrap?.linuxRuntime])
 
+  // Page statistics are recorded quietly into the .famd payload; nothing here
+  // touches React state, so the one-second tick never re-renders the app.
   const flushPageStats = useCallback((path: string, now = Date.now(), keepActive = true) => {
     const session = pageStatsRef.current.get(path)
     if (!session) return null
     const visible = typeof document === 'undefined' ? true : !document.hidden
-    const next = tickPageStats(session, now, keepActive && visible && activePathRef.current === path)
+    const focused = typeof document === 'undefined' || typeof document.hasFocus !== 'function' ? true : document.hasFocus()
+    const next = tickPageStats(session, now, keepActive && visible && activePathRef.current === path, focused)
     pageStatsRef.current.set(path, next)
-    const stats = snapshotPageStats(next)
-    if (activePathRef.current === path) setActivePageStats(stats)
-    return stats
+    return snapshotPageStats(next)
+  }, [])
+
+  /** Session for a note that has a tab, created from the note's payload on first use. */
+  const ensurePageStatsSession = useCallback((path: string) => {
+    const existing = pageStatsRef.current.get(path)
+    if (existing) return existing
+    const tab = tabsRef.current.find((candidate) => candidate.path === path)
+    if (!tab) return null
+    const session = idlePageStatsSession(readPageStatsFromNote(pendingWrites.current.get(path) ?? tab.content))
+    pageStatsRef.current.set(path, session)
+    return session
+  }, [])
+
+  const updatePageStats = useCallback((path: string, update: (session: PageStatsSession) => PageStatsSession) => {
+    const session = ensurePageStatsSession(path)
+    if (!session) return
+    pageStatsRef.current.set(path, update(session))
+  }, [ensurePageStatsSession])
+
+  const recordEditActivityFor = useCallback((path: string, activity: EditActivity) => {
+    updatePageStats(path, (session) => recordEditActivity(session, activity, Date.now()))
+  }, [updatePageStats])
+
+  const recordInkStrokeFor = useCallback((path: string, stroke: InkStrokeActivity) => {
+    updatePageStats(path, (session) => recordInkStroke(session, stroke, Date.now()))
+  }, [updatePageStats])
+
+  const recordInkErasedFor = useCallback((path: string, removed: number) => {
+    updatePageStats(path, (session) => recordInkErased(session, removed, Date.now()))
+  }, [updatePageStats])
+
+  const recordInkSnapshotFor = useCallback((path: string, summary: InkSummary) => {
+    updatePageStats(path, (session) => recordInkSnapshot(session, summary, Date.now()))
+  }, [updatePageStats])
+
+  /**
+   * Queues a write for a note whose statistics moved on since the last save
+   * but whose text did not: the autosave path does not fire without typing.
+   * Returns true when a write was queued.
+   */
+  const queuePageStatsWrite = useCallback((path: string, minDwellDeltaMs = PAGE_STATS_MIN_DWELL_DELTA_MS) => {
+    const session = pageStatsRef.current.get(path)
+    if (!session || !pageStatsNeedPersist(session, minDwellDeltaMs)) return false
+    if (pendingWrites.current.has(path)) return true
+    const tab = tabsRef.current.find((candidate) => candidate.path === path)
+    if (!tab) return false
+    pendingWrites.current.set(path, tab.content)
+    return true
   }, [])
 
   const activatePageStats = useCallback((path: string, content: string, now = Date.now()) => {
@@ -1181,26 +1243,7 @@ export default function App({ startupBootstrap }: AppProps) {
     const existing = pageStatsRef.current.get(path)
     const opened = openPageStats(existing ?? readPageStatsFromNote(content, now), now)
     pageStatsRef.current.set(path, opened)
-    setActivePageStats(snapshotPageStats(opened))
     return opened
-  }, [flushPageStats])
-
-  useEffect(() => {
-    const id = window.setInterval(() => {
-      const path = activePathRef.current
-      if (!path) return
-      flushPageStats(path, Date.now(), true)
-    }, 1000)
-    const onVisibility = () => {
-      const path = activePathRef.current
-      if (!path) return
-      flushPageStats(path, Date.now(), typeof document === 'undefined' ? true : !document.hidden)
-    }
-    document.addEventListener('visibilitychange', onVisibility)
-    return () => {
-      window.clearInterval(id)
-      document.removeEventListener('visibilitychange', onVisibility)
-    }
   }, [flushPageStats])
 
   useEffect(() => {
@@ -1514,16 +1557,29 @@ export default function App({ startupBootstrap }: AppProps) {
     await restoreWorkspace(data.vaultPath, initialTree)
   }, [openNote, restoreWorkspace])
 
-  const saveContent = useCallback(async (path: string, content: string): Promise<boolean> => {
+  const saveContent = useCallback(async (path: string, content: string, options?: { quiet?: boolean }): Promise<boolean> => {
     const timer = saveTimers.current.get(path)
     if (timer) window.clearTimeout(timer)
     saveTimers.current.delete(path)
-    setSaveState('saving')
+    // A statistics-only write (no typing happened) must not flash "Speichern…".
+    if (!options?.quiet) setSaveState('saving')
     try {
-      const stats = flushPageStats(path, Date.now(), true) ?? readPageStatsFromNote(content)
+      const now = Date.now()
+      flushPageStats(path, now, true)
+      const body = stripFamdPayload(content)
+      const session = pageStatsRef.current.get(path)
+      const savedSession = session ? recordDocumentSaved(session, body, now) : null
+      if (savedSession) pageStatsRef.current.set(path, savedSession)
+      const stats = savedSession ? snapshotPageStats(savedSession) : readPageStatsFromNote(content, now)
       const nextContent = writePageStatsIntoNote(content, stats)
       const visibleContent = stripFamdPayload(nextContent)
       await window.fanotes.writeFile(isPdfNotePath(path) ? companionNotePath(path, '.famd') : path, nextContent)
+      if (savedSession) {
+        // Activity during the write builds on the saved session; only the
+        // revision that actually reached the disk counts as persisted.
+        const latest = pageStatsRef.current.get(path)
+        if (latest) pageStatsRef.current.set(path, markPageStatsPersisted(latest, savedSession.revision, savedSession.dwellMs))
+      }
       setTagIndex((current) => ({ ...current, [path]: parseNoteTags(visibleContent) }))
       if (pendingWrites.current.get(path) === content || pendingWrites.current.get(path) === nextContent || pendingWrites.current.get(path) === visibleContent) {
         pendingWrites.current.delete(path)
@@ -1543,6 +1599,47 @@ export default function App({ startupBootstrap }: AppProps) {
       return false
     }
   }, [flushPageStats, toast])
+
+  /** Writes statistics that moved on without any typing, without touching the save indicator. */
+  const persistPageStatsQuietly = useCallback((path: string, minDwellDeltaMs: number) => {
+    const session = pageStatsRef.current.get(path)
+    if (!session || !pageStatsNeedPersist(session, minDwellDeltaMs)) return
+    // A pending typed edit already carries the statistics with it.
+    if (pendingWrites.current.has(path) || saveTimers.current.has(path)) return
+    const tab = tabsRef.current.find((candidate) => candidate.path === path)
+    if (!tab) return
+    void saveContent(path, tab.content, { quiet: true })
+  }, [saveContent])
+
+  useEffect(() => {
+    let ticks = 0
+    const id = window.setInterval(() => {
+      const path = activePathRef.current
+      if (!path) return
+      flushPageStats(path, Date.now(), true)
+      ticks += 1
+      if (ticks % PAGE_STATS_PERSIST_TICKS === 0) persistPageStatsQuietly(path, 0)
+    }, 1000)
+    const onVisibility = () => {
+      const path = activePathRef.current
+      if (!path) return
+      const visible = typeof document === 'undefined' ? true : !document.hidden
+      flushPageStats(path, Date.now(), visible)
+      if (!visible) persistPageStatsQuietly(path, PAGE_STATS_MIN_DWELL_DELTA_MS)
+    }
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => {
+      window.clearInterval(id)
+      document.removeEventListener('visibilitychange', onVisibility)
+    }
+  }, [flushPageStats, persistPageStatsQuietly])
+
+  // Leaving a note writes its statistics once the text is settled.
+  useEffect(() => {
+    const previous = previousActivePathRef.current
+    previousActivePathRef.current = activePath
+    if (previous && previous !== activePath) persistPageStatsQuietly(previous, PAGE_STATS_MIN_DWELL_DELTA_MS)
+  }, [activePath, persistPageStatsQuietly])
 
   const convertAllNotesToCurrentStandard = useCallback(async () => {
     const paths = collectNotePaths(treeRef.current)
@@ -1591,6 +1688,8 @@ export default function App({ startupBootstrap }: AppProps) {
 
     // A new edit can arrive while an earlier IPC write is in flight. Repeat
     // with the latest snapshots instead of silently dropping that newer edit.
+    // Open notes whose statistics moved on since their last write go along.
+    for (const tab of tabsRef.current) queuePageStatsWrite(tab.path)
     for (let pass = 0; pass < 8; pass += 1) {
       const pending = [...pendingWrites.current.entries()]
       if (!pending.length) return true
@@ -1598,7 +1697,7 @@ export default function App({ startupBootstrap }: AppProps) {
       if (results.some((saved) => !saved)) return false
     }
     return pendingWrites.current.size === 0
-  }, [saveContent])
+  }, [queuePageStatsWrite, saveContent])
 
   const saveCurrentWork = useCallback(async (announce = false): Promise<boolean> => {
     if (!activePathRef.current) {
@@ -1684,11 +1783,7 @@ export default function App({ startupBootstrap }: AppProps) {
     if (path !== rawPath && !tabsRef.current.some((tab) => tab.path === path)) return
     if ([...mutatingEntryPathsRef.current].some((entry) => path === entry || path.startsWith(`${entry}/`))) return
     const session = pageStatsRef.current.get(path)
-    if (session) {
-      const next = { ...touchPageModified(snapshotPageStats(session), Date.now()), active: session.active, sessionStartedAt: session.sessionStartedAt }
-      pageStatsRef.current.set(path, next)
-      if (activePathRef.current === path) setActivePageStats(snapshotPageStats(next))
-    }
+    if (session) pageStatsRef.current.set(path, touchPageModified(session, now))
     setTabs((current) => current.map((tab) => tab.path === path ? { ...tab, content } : tab))
     setTagIndex((current) => ({ ...current, [path]: parseNoteTags(content) }))
     pendingWrites.current.set(path, content)
@@ -1705,19 +1800,25 @@ export default function App({ startupBootstrap }: AppProps) {
 
   const closeTab = useCallback(async (path: string) => {
     const session = pageStatsRef.current.get(path)
+    let statsNeedWrite = false
     if (session) {
       const closed = closePageStats(session, Date.now())
-      pageStatsRef.current.set(path, { ...closed, active: false, sessionStartedAt: null })
-      const closingTab = tabsRef.current.find((tab) => tab.path === path)
-      const latest = pendingWrites.current.get(path) ?? closingTab?.content
-      if (latest !== undefined) pendingWrites.current.set(path, stripFamdPayload(latest))
+      const idle: PageStatsSession = {
+        ...idlePageStatsSession(closed),
+        revision: session.revision,
+        persistedRevision: session.persistedRevision,
+        persistedDwellMs: session.persistedDwellMs,
+      }
+      pageStatsRef.current.set(path, idle)
+      // The stay on the page is written with the note even when nothing was typed.
+      statsNeedWrite = pageStatsNeedPersist(idle, PAGE_STATS_MIN_DWELL_DELTA_MS)
     }
     if (activePathRef.current === path) editorRef.current?.flushChanges()
     if (activePathRef.current === path && !await flushDocumentLayers()) return
     const currentTabs = tabsRef.current
     const closing = currentTabs.find((tab) => tab.path === path)
     const latestContent = pendingWrites.current.get(path) ?? closing?.content
-    if (closing && latestContent !== undefined && latestContent !== closing.savedContent) {
+    if (closing && latestContent !== undefined && (latestContent !== closing.savedContent || statsNeedWrite)) {
       // pendingWrites is updated synchronously by CodeMirror and can be newer
       // than tabsRef until React's passive effect runs. Never overwrite it
       // with the stale tab snapshot during a rapid type-and-close gesture.
@@ -2740,6 +2841,13 @@ export default function App({ startupBootstrap }: AppProps) {
     }
   }, [noteDrawingSession.key])
 
+  const handleInkActivity = useCallback((activity: InkActivity) => {
+    const path = activePathRef.current
+    if (!path) return
+    if (activity.kind === 'stroke') recordInkStrokeFor(path, activity.stroke)
+    else recordInkErasedFor(path, activity.removed)
+  }, [recordInkErasedFor, recordInkStrokeFor])
+
   const closeDrawing = useCallback(() => {
     drawingOpenRef.current = false
     setDrawingOpen(false)
@@ -3055,10 +3163,12 @@ export default function App({ startupBootstrap }: AppProps) {
   const saveDrawingAsset = useCallback(async (payload: DrawingSavePayload) => {
     const session = vaultSessionGenerationRef.current
     const notePath = activePath
+    const { inkSummary, ...drawing } = payload
     const asset = await window.fanotes.saveDrawing({
-      ...payload,
+      ...drawing,
       noteRelativePath: notePath ?? undefined,
     })
+    if (notePath && inkSummary) recordInkSnapshotFor(notePath, inkSummary)
     let updatedAt = asset.updatedAt ?? new Date().toISOString()
     try {
       const drawingData = JSON.parse(payload.drawingJson) as { updatedAt?: unknown }
@@ -3094,7 +3204,7 @@ export default function App({ startupBootstrap }: AppProps) {
     if (activePathRef.current !== notePath) return result
     setDrawingSession((current) => current.path === notePath ? { ...current, document } : current)
     return result
-  }, [activePath, saveContent])
+  }, [activePath, recordInkSnapshotFor, saveContent])
 
   const saveWorksheetDocument = useCallback(async (document: WorksheetDocument) => {
     const session = vaultSessionGenerationRef.current
@@ -4078,7 +4188,7 @@ export default function App({ startupBootstrap }: AppProps) {
                   ) : (
                   <div className="editor-pane">
                     <SafeBoundary name="Editor" fallbackTitle="Der Editor ist abgestürzt">
-                      <MarkdownEditor ref={editorRef} key={activeTab.path} content={activeTab.content} onChange={(content) => updateContentFor(activeTab.path, content)} onSave={async (content) => { await saveContent(activeTab.path, content) }} settings={settings} focusToken={focusToken} readOnly={activeEntryMutating || drawingOpen} paperMode onLanguageDetected={setDetectedTextLanguage} />
+                      <MarkdownEditor ref={editorRef} key={activeTab.path} content={activeTab.content} onChange={(content) => updateContentFor(activeTab.path, content)} onSave={async (content) => { await saveContent(activeTab.path, content) }} settings={settings} focusToken={focusToken} readOnly={activeEntryMutating || drawingOpen} paperMode onLanguageDetected={setDetectedTextLanguage} onEditActivity={(activity) => recordEditActivityFor(activeTab.path, activity)} />
                     </SafeBoundary>
                   </div>
                   )}
@@ -4116,6 +4226,7 @@ export default function App({ startupBootstrap }: AppProps) {
                         onPagePaperChange={(style) => { if (activeTab) void applyNotePaper(activeTab.path, style) }}
                         onSettingsChange={handleDrawingSettingsChange}
                         onDirtyChange={handleDrawingDirtyChange}
+                        onInkActivity={handleInkActivity}
                         onTrainingChanged={handleTrainingChanged}
                         onOpenGlyphenWerk={openGlyphenWerk}
                         confirmDestructive={(message) => requestConfirm(message, { title: 'Training löschen', confirmLabel: 'Löschen' })}
@@ -4192,6 +4303,7 @@ export default function App({ startupBootstrap }: AppProps) {
                           content={splitTab.content}
                           onChange={(content) => updateContentFor(splitTab.path, content)}
                           onSave={async (content) => { await saveContent(splitTab.path, content) }}
+                          onEditActivity={(activity) => recordEditActivityFor(splitTab.path, activity)}
                           settings={settings}
                           paperMode
                         />
@@ -4217,7 +4329,7 @@ export default function App({ startupBootstrap }: AppProps) {
           </div>
         </main>
 
-        {inspectorVisible && settings.showOutline && !overviewOpen && !homeworkOpen && !glyphenWerkOpen && !isPdfActive && <Suspense fallback={null}><RightInspector content={activeTab?.content ?? ''} path={activeTab?.path} pageStats={activePageStats} onJumpToLine={(line) => { editorRef.current?.revealLine(line) }} /></Suspense>}
+        {inspectorVisible && settings.showOutline && !overviewOpen && !homeworkOpen && !glyphenWerkOpen && !isPdfActive && <Suspense fallback={null}><RightInspector content={activeTab?.content ?? ''} path={activeTab?.path} onJumpToLine={(line) => { editorRef.current?.revealLine(line) }} /></Suspense>}
         {searchOpen && <Suspense fallback={null}><SearchPanel query={searchQuery} hits={searchHits} loading={searchLoading} onQueryChange={setSearchQuery} onOpen={(hit) => { void openSearchHit(hit) }} onClose={() => setSearchOpen(false)} /></Suspense>}
       </div>
 
@@ -4234,7 +4346,7 @@ export default function App({ startupBootstrap }: AppProps) {
             ))}
           </nav>
         )}</div>
-        <div className="statusbar-right">{updateState.status === 'downloaded' && <button type="button" className="update-ready-button" title={`FaNotes ${updateState.latestVersion} installieren und neu starten`} onClick={() => void installUpdate()}><ShieldCheck size={11} /> Update bereit</button>}{updateState.status === 'downloading' && <span><LoaderCircle className="spin" size={11} /> Update {Math.round(updateState.progress * 100)} %</span>}{settings.spellcheck && activeTab && !drawingOpen && detectedTextLanguage !== 'unknown' && <span className="detected-text-language" title="Automatisch erkannte Sprache für die lokale Rechtschreibprüfung"><b>Aa</b> {detectedTextLanguage === 'de' ? 'Deutsch' : detectedTextLanguage === 'en' ? 'English' : 'DE / EN'}</span>}{settings.showWordCount && activeTab && <span>{activeWordCount} Wörter</span>}{activePageStats && <span title={`Erstellt ${new Date(activePageStats.createdAt).toLocaleString()} · Geändert ${new Date(activePageStats.modifiedAt).toLocaleString()}`}>Auf der Seite {formatPageDwell(activePageStats.dwellMs)}</span>}<button type="button" className={`save-status ${saveState === 'saved' ? 'save-ok' : 'save-pending'}`} title="Jetzt speichern (Strg+S)" aria-live="polite" onClick={() => void saveCurrentWork()}>{saveState === 'saved' ? <CheckCircle2 size={11} /> : saveState === 'saving' ? <LoaderCircle className="spin" size={11} /> : <CircleAlert size={11} />}{saveState === 'saved' ? 'Gespeichert' : saveState === 'saving' ? 'Speichert …' : 'Speicherfehler'}</button><span title={isWeb ? 'Die Daten bleiben in diesem Browser' : 'Dein Vault bleibt auf deinem Gerät'}><ShieldCheck size={11} /> {isWeb ? 'Im Browser gespeichert' : 'Lokal & privat'}</span></div>
+        <div className="statusbar-right">{updateState.status === 'downloaded' && <button type="button" className="update-ready-button" title={`FaNotes ${updateState.latestVersion} installieren und neu starten`} onClick={() => void installUpdate()}><ShieldCheck size={11} /> Update bereit</button>}{updateState.status === 'downloading' && <span><LoaderCircle className="spin" size={11} /> Update {Math.round(updateState.progress * 100)} %</span>}{settings.spellcheck && activeTab && !drawingOpen && detectedTextLanguage !== 'unknown' && <span className="detected-text-language" title="Automatisch erkannte Sprache für die lokale Rechtschreibprüfung"><b>Aa</b> {detectedTextLanguage === 'de' ? 'Deutsch' : detectedTextLanguage === 'en' ? 'English' : 'DE / EN'}</span>}{settings.showWordCount && activeTab && <span>{activeWordCount} Wörter</span>}<button type="button" className={`save-status ${saveState === 'saved' ? 'save-ok' : 'save-pending'}`} title="Jetzt speichern (Strg+S)" aria-live="polite" onClick={() => void saveCurrentWork()}>{saveState === 'saved' ? <CheckCircle2 size={11} /> : saveState === 'saving' ? <LoaderCircle className="spin" size={11} /> : <CircleAlert size={11} />}{saveState === 'saved' ? 'Gespeichert' : saveState === 'saving' ? 'Speichert …' : 'Speicherfehler'}</button><span title={isWeb ? 'Die Daten bleiben in diesem Browser' : 'Dein Vault bleibt auf deinem Gerät'}><ShieldCheck size={11} /> {isWeb ? 'Im Browser gespeichert' : 'Lokal & privat'}</span></div>
       </footer>
 
       {historyOpen && (

@@ -51,6 +51,7 @@ import type {
 import type { Stroke, StrokePoint } from '../../../src/types'
 import type { AppSettings, DrawingAsset, PaperStyle } from '../types'
 import { PAPER_STYLES, drawPaperBackground } from '../lib/paperStyles'
+import { strokeDurationMs, strokeLengthMm, summarizeInkStrokes, type InkStrokeActivity, type InkSummary } from '../lib/pageStats'
 import { TextToHandwritingDialog } from './TextToHandwritingDialog'
 import type {
   CorrectionLearningResult,
@@ -72,7 +73,7 @@ import {
   zoomFactorFromWheel,
   zoomStepFromSpeed,
 } from '../lib/paperView'
-import { usePaperView } from './PaperView'
+import { usePaperViewController } from './PaperView'
 import { getHandwritingTrainingSampleCount } from '../lib/handwritingDbSummary'
 import { changedMathTokenRect } from '../lib/mathCorrectionLayout'
 import { groupMathInkLines, selectMathInkAtPoint } from '../lib/mathInkSelection'
@@ -319,6 +320,12 @@ type InkWindow = { y0: number; y1: number }
 const inkWindowSpan = (window: InkWindow) => Math.max(0.06, Math.min(1, window.y1 - window.y0))
 /** Final slice check after the last scroll event, in case scrollend never fires. */
 const INK_WINDOW_IDLE_MS = 320
+/**
+ * A wheel zoom arrives as a burst of steps ~16–50 ms apart. The ink bitmap is
+ * only re-sliced and re-rasterised once no step came for this long; in between,
+ * the sheet's CSS zoom scales the existing bitmap.
+ */
+const ZOOM_SETTLE_MS = 160
 
 /**
  * Visible sheet range in paper layout px. Client rects carry the plane's CSS
@@ -627,7 +634,13 @@ export type DrawingSavePayload = {
   /** Generated only when a Markdown image is explicitly requested. */
   imageData?: string
   drawingJson: string
+  /** What the saved layer contains, for the note's statistics. */
+  inkSummary?: InkSummary
 }
+
+export type InkActivity =
+  | { kind: 'stroke'; stroke: InkStrokeActivity }
+  | { kind: 'erase'; removed: number }
 
 export type DrawingSaveResult =
   | DrawingAsset
@@ -680,6 +693,8 @@ export type DrawingBoardProps = {
   onInsertMarkdown: (markdown: string) => boolean | Promise<boolean>
   onSettingsChange?: (settings: Partial<AppSettings>) => void
   onDirtyChange?: (dirty: boolean) => void
+  /** Reports finished strokes and erased strokes for the note's quiet statistics. */
+  onInkActivity?: (activity: InkActivity) => void
   onTrainingChanged?: (sampleCount: number) => void
   onOpenGlyphenWerk?: () => void
   onClose?: () => void
@@ -1178,6 +1193,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   onInsertMarkdown,
   onSettingsChange,
   onDirtyChange,
+  onInkActivity,
   onTrainingChanged,
   onOpenGlyphenWerk,
   onClose,
@@ -1185,7 +1201,9 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   onPagePaperChange,
   confirmDestructive,
 }: DrawingBoardProps, forwardedRef) {
-  const paperView = usePaperView()
+  // Controls only: the board follows the camera through refs and a
+  // subscription, so a wheel zoom does not rebuild this tree on every step.
+  const paperView = usePaperViewController()
   const boardRef = useRef<HTMLElement | null>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const surfaceRef = useRef<HTMLDivElement>(null)
@@ -1212,6 +1230,10 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const canvasQualityKeyRef = useRef('')
   const pointerBoundsRef = useRef<{ left: number; top: number; width: number; height: number } | null>(null)
   const viewZoomRef = useRef(1)
+  /** Wall-clock until which a zoom gesture counts as still moving. */
+  const zoomInFlightUntilRef = useRef(0)
+  const zoomSettleTimerRef = useRef<number | null>(null)
+  const zoomInFlight = useCallback(() => performance.now() < zoomInFlightUntilRef.current, [])
   const viewRotationRef = useRef(0)
   const viewPanRef = useRef({ x: 0, y: 0 })
   const sourceHeightRef = useRef(WRITE_SLACK_HEIGHT)
@@ -1950,7 +1972,34 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     paintLiveInk(context, activeStroke, [])
   }, [inline, paintLiveInk, paperStyle, settings.smoothing, sourceHeight, sourceWidth])
 
+  const onInkActivityRef = useRef(onInkActivity)
+  onInkActivityRef.current = onInkActivity
+
+  /** Every path that adds a finished stroke to the page passes through here. */
+  const noteStrokeDrawn = useCallback((stroke: InkStroke) => {
+    const report = onInkActivityRef.current
+    if (!report) return
+    const width = sourceWidthRef.current
+    const height = sourceHeightRef.current
+    report({
+      kind: 'stroke',
+      stroke: {
+        durationMs: strokeDurationMs(stroke),
+        lengthMm: strokeLengthMm(stroke, width, height),
+        points: stroke.points.length,
+        purpose: stroke.purpose === 'art' ? 'art' : 'handwriting',
+        color: stroke.color,
+        brush: stroke.purpose === 'art' ? stroke.brush ?? 'art' : 'pen',
+      },
+    })
+  }, [])
+
+  const noteStrokesErased = useCallback((removed: number) => {
+    if (removed > 0) onInkActivityRef.current?.({ kind: 'erase', removed })
+  }, [])
+
   const commitStrokeToCanvas = useCallback((stroke: InkStroke) => {
+    noteStrokeDrawn(stroke)
     const canvas = committedCanvasRef.current
     const { width, height, virtualHeight, layoutWidth } = canvasPixelSizeRef.current
     if (!canvas || !width || !height || !virtualHeight || committedCanvasDirtyRef.current) return
@@ -1965,7 +2014,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     context.setTransform(1, 0, 0, 1, 0, -inkWindow.y0 * virtualHeight)
     drawInkStroke(context, stroke, width, virtualHeight, settings.smoothing, 1, sourceWidth, layoutWidth)
     context.restore()
-  }, [settings.smoothing, sourceWidth])
+  }, [noteStrokeDrawn, settings.smoothing, sourceWidth])
 
   useEffect(() => {
     if (inline && !inputActive) {
@@ -2398,10 +2447,15 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     // The slice follows every scroll frame. The canvases scroll with the
     // sheet, so ink inside the slice never moves; a move only re-slices
     // (bitmap copy + one band) once the visible sheet reaches the guard zone.
+    // While a zoom gesture is moving, every step scrolls the sheet to keep the
+    // point under the cursor still. Those scrolls must not re-slice and
+    // re-rasterise the ink per step (a full repaint of every stroke into a
+    // zoom-sized bitmap); the settle after the gesture does it once.
     const followScroll = () => {
       if (inkScrollFrameRef.current !== null) return
       inkScrollFrameRef.current = window.requestAnimationFrame(() => {
         inkScrollFrameRef.current = null
+        if (zoomInFlight()) return
         syncInkWindow()
       })
     }
@@ -2410,12 +2464,14 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       if (inkWindowIdleRef.current !== null) window.clearTimeout(inkWindowIdleRef.current)
       inkWindowIdleRef.current = window.setTimeout(() => {
         inkWindowIdleRef.current = null
+        if (zoomInFlight()) return
         syncInkWindow()
       }, INK_WINDOW_IDLE_MS)
     }
     const onScrollEnd = () => {
       if (inkWindowIdleRef.current !== null) window.clearTimeout(inkWindowIdleRef.current)
       inkWindowIdleRef.current = null
+      if (zoomInFlight()) return
       syncInkWindow()
     }
     scroller?.addEventListener('scroll', settleInkWindow, { passive: true })
@@ -2454,7 +2510,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       }
       if (pendingSolverTapRef.current) window.clearTimeout(pendingSolverTapRef.current.timer)
     }
-  }, [flushPaintedLayoutGrow, planInkWindowNow, redraw, resolvePaperElement, syncInkWindow])
+  }, [flushPaintedLayoutGrow, planInkWindowNow, redraw, resolvePaperElement, syncInkWindow, zoomInFlight])
 
   const applyInkExtentStyles = useCallback((height: number, width: number = sourceWidthRef.current) => {
     const paper = resolvePaperElement()
@@ -2806,36 +2862,73 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     setView({ zoom: 1, rotation: 0, pan: { x: 0, y: 0 } })
   }, [setView])
 
+  // Re-rasterize ink at higher backing-store resolution after zoom settles so
+  // zoomed handwriting stays sharp instead of a stretched low-res bitmap.
+  // The slice is re-planned around the now-visible sheet (a 100% full
+  // overlay becomes a 500% slice) and painted by the same redraw.
+  const settleZoomedInk = useCallback(() => {
+    if (activeStrokeRef.current) return
+    planInkWindowNow(true)
+    canvasQualityKeyRef.current = ''
+    committedCanvasDirtyRef.current = true
+    redraw(true)
+  }, [planInkWindowNow, redraw])
+
   useEffect(() => {
-    if (paperView) {
-      setViewZoom(paperView.zoom)
-      setViewRotation(paperView.rotation)
-      setViewPan(paperView.pan)
-      viewZoomRef.current = paperView.zoom
-      viewRotationRef.current = paperView.rotation
-      viewPanRef.current = paperView.pan
-      return
+    if (!paperView) return
+    const adopt = (view: { zoom: number; rotation: number; pan: { x: number; y: number } }) => {
+      viewZoomRef.current = view.zoom
+      viewRotationRef.current = view.rotation
+      viewPanRef.current = view.pan
     }
+    const settle = () => {
+      zoomSettleTimerRef.current = null
+      zoomInFlightUntilRef.current = 0
+      const view = paperView.getView()
+      adopt(view)
+      // One React render per gesture, not per step: the toolbar percentage
+      // and everything else that reads the state catch up here.
+      setViewZoom(view.zoom)
+      setViewRotation(view.rotation)
+      setViewPan(view.pan)
+      settleZoomedInk()
+    }
+    const initial = paperView.getView()
+    adopt(initial)
+    setViewZoom(initial.zoom)
+    setViewRotation(initial.rotation)
+    setViewPan(initial.pan)
+    const unsubscribe = paperView.subscribe((view) => {
+      const zoomed = view.zoom !== viewZoomRef.current
+      adopt(view)
+      if (zoomed) zoomInFlightUntilRef.current = performance.now() + ZOOM_SETTLE_MS
+      if (zoomSettleTimerRef.current !== null) window.clearTimeout(zoomSettleTimerRef.current)
+      zoomSettleTimerRef.current = window.setTimeout(settle, ZOOM_SETTLE_MS)
+    })
+    return () => {
+      unsubscribe()
+      if (zoomSettleTimerRef.current !== null) {
+        window.clearTimeout(zoomSettleTimerRef.current)
+        zoomSettleTimerRef.current = null
+      }
+      zoomInFlightUntilRef.current = 0
+    }
+  }, [paperView, settleZoomedInk])
+
+  useEffect(() => {
+    if (paperView) return
     applyViewTransform(viewZoom, viewRotation, viewPan)
     return () => {
       clearViewTransformTargets()
     }
   }, [applyViewTransform, clearViewTransformTargets, paperView, viewPan, viewRotation, viewZoom])
 
-  // Re-rasterize ink at higher backing-store resolution after zoom settles so
-  // zoomed handwriting stays sharp instead of a stretched low-res bitmap.
-  // The slice is re-planned around the now-visible sheet (a 100% full
-  // overlay becomes a 500% slice) and painted by the same redraw.
+  // Without a camera host the zoom is this board's own state; settle from it.
   useEffect(() => {
-    const timer = window.setTimeout(() => {
-      if (activeStrokeRef.current) return
-      planInkWindowNow(true)
-      canvasQualityKeyRef.current = ''
-      committedCanvasDirtyRef.current = true
-      redraw(true)
-    }, 90)
+    if (paperView) return
+    const timer = window.setTimeout(settleZoomedInk, 90)
     return () => window.clearTimeout(timer)
-  }, [planInkWindowNow, redraw, viewZoom])
+  }, [paperView, settleZoomedInk, viewZoom])
 
   // Refs, not the state snapshot: a document load moves the refs and the
   // sheet in one step, and this pass must not put the previous page back
@@ -2906,6 +2999,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     const points = Array.isArray(value) ? value : [value]
     strokesRef.current = applyToolErase(strokesRef.current, points, eraserSize, sourceWidth, sourceHeight)
     if (strokesRef.current.length !== before) {
+      noteStrokesErased(before - strokesRef.current.length)
       gestureChangedRef.current = true
       committedCanvasDirtyRef.current = true
       scheduleRedraw()
@@ -3783,6 +3877,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         const deleted = new Set(scribble.indexes.map((index) => handwritingEntries[index]?.index).filter((index): index is number => index !== undefined))
         strokesRef.current = beforeGestureRef.current.filter((_, index) => !deleted.has(index))
         scribbleDeleted = beforeGestureRef.current.length - strokesRef.current.length
+        noteStrokesErased(scribbleDeleted)
         gestureChangedRef.current = scribbleDeleted > 0
       } else {
         strokesRef.current.push(activeStroke)
@@ -4540,6 +4635,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       title,
       imageData,
       drawingJson: JSON.stringify(drawing),
+      inkSummary: summarizeInkStrokes(strokesRef.current, page.width, page.height),
     }
   }, [activeMode, mathSolverEnabled, mode, paperStyle, settings.smoothing, title])
 
@@ -5070,7 +5166,9 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const deleteSelectedInk = useCallback(() => {
     const indexes = new Set(selectedStrokeIndexesRef.current)
     if (!indexes.size) return
+    const before = strokesRef.current.length
     strokesRef.current = strokesRef.current.filter((_, index) => !indexes.has(index))
+    noteStrokesErased(before - strokesRef.current.length)
     selectedStrokeIndexesRef.current = []
     setSelectionRect(null)
     scheduleRedraw()
@@ -5819,7 +5917,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         forceEndActivePointer('escape')
         return
       }
-      if (viewZoom !== 1 || viewRotation !== 0 || viewPan.x !== 0 || viewPan.y !== 0) {
+      if (viewZoomRef.current !== 1 || viewRotationRef.current !== 0 || viewPanRef.current.x !== 0 || viewPanRef.current.y !== 0) {
         event.preventDefault()
         resetView()
         return

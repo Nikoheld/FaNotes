@@ -211,8 +211,20 @@ const runOnce = () => {
   // settle re-plans it around the visible sheet before the sharp repaint.
   assert.match(board, /planInkWindow\(/)
   assert.match(board, /placeInkWindow\(/)
-  assert.match(board, /planInkWindowNow\(true\)\n      canvasQualityKeyRef\.current = ''\n      committedCanvasDirtyRef\.current = true\n      redraw\(true\)/)
+  assert.match(board, /const settleZoomedInk = useCallback\(\(\) => \{\n    if \(activeStrokeRef\.current\) return\n    planInkWindowNow\(true\)\n    canvasQualityKeyRef\.current = ''\n    committedCanvasDirtyRef\.current = true\n    redraw\(true\)/)
   assert.match(board, /viewZoomRef\.current/)
+  // A wheel zoom is a burst of steps. The board follows the camera through a
+  // subscription and refs (no React render per step) and re-slices/re-rasterises
+  // the ink once the burst settled, never per step from the anchor scrolls.
+  assert.match(board, /const paperView = usePaperViewController\(\)/)
+  assert.doesNotMatch(board, /usePaperView\(\)/)
+  assert.match(board, /paperView\.subscribe\(\(view\) => \{/)
+  assert.match(board, /if \(zoomed\) zoomInFlightUntilRef\.current = performance\.now\(\) \+ ZOOM_SETTLE_MS/)
+  assert.match(board, /zoomSettleTimerRef\.current = window\.setTimeout\(settle, ZOOM_SETTLE_MS\)/)
+  assert.equal((board.match(/if \(zoomInFlight\(\)\) return/g) ?? []).length, 3, 'scroll frame, idle timer and scrollend all skip the re-slice while the zoom is moving')
+  const paperViewSource = readFileSync(join(root, 'src', 'components', 'PaperView.tsx'), 'utf8')
+  assert.match(paperViewSource, /export const usePaperViewController = \(\) => useContext\(PaperViewControllerContext\)/)
+  assert.match(paperViewSource, /const controller = useMemo<PaperViewController>\(\(\) => \(\{[\s\S]*?\}\), \[resetView, rotateBy, setView, zoomBy, zoomTo\]\)/, 'the controller identity must not depend on the view snapshot')
   assert.match(inkHit, /export const resolveInkOverlayWindow/)
   assert.match(inkHit, /isFullInkWindow\(window\)\) return false/)
   // Both PDF hosts paint through the shared painter: the plan windows the

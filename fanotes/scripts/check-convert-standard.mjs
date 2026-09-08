@@ -18,6 +18,7 @@ const {
   noteInkStrokes,
 } = await server.ssrLoadModule('/src/lib/noteStandard.ts')
 const { serializeFamd } = await server.ssrLoadModule('/src/lib/famd.ts')
+const { parsePageStats } = await server.ssrLoadModule('/src/lib/pageStats.ts')
 
 const markdown = '# Alte Notiz\n\nText bleibt.'
 const strokes = [
@@ -84,7 +85,10 @@ const runOnce = () => {
   assert.equal(fromSource.converted, true)
   assert.equal(fromSource.note.markdown, markdown)
   assert.deepEqual(noteInkStrokes(fromSource.note.ink), strokes)
-  assert.deepEqual(fromSource.note.pageStats, pageStats)
+  // Parsing lifts the legacy five-field record to the current shape; the
+  // legacy values themselves must come through untouched.
+  assert.deepEqual(fromSource.note.pageStats, parsePageStats(pageStats))
+  for (const [key, value] of Object.entries(pageStats)) assert.equal(fromSource.note.pageStats[key], value, `legacy ${key} survives the convert`)
   assert.match(fromSource.source, /"overlayQuality":/)
   const alreadyCurrent = convertNoteSourceToCurrentStandard(fromSource.source)
   assert.equal(alreadyCurrent.converted, false, 'a second convert must leave already-current notes untouched')
