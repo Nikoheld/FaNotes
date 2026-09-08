@@ -76,9 +76,28 @@ export type PaperViewApi = PaperViewSnapshot & {
   recalled: boolean
 }
 
-const PaperViewContext = createContext<PaperViewApi | null>(null)
+/**
+ * The camera's controls without its state. Identity never changes while the
+ * host lives, so a consumer can hold it without re-rendering on every zoom
+ * step; the current snapshot comes from `getView`, changes from `subscribe`.
+ */
+export type PaperViewController = Pick<PaperViewApi, 'zoomBy' | 'zoomTo' | 'rotateBy' | 'resetView' | 'setView'> & {
+  getView: () => PaperViewSnapshot
+  subscribe: (listener: (view: PaperViewSnapshot) => void) => () => void
+}
 
+const PaperViewContext = createContext<PaperViewApi | null>(null)
+const PaperViewControllerContext = createContext<PaperViewController | null>(null)
+
+/** Camera state and controls; re-renders the consumer on every camera change. */
 export const usePaperView = () => useContext(PaperViewContext)
+
+/**
+ * Controls only. Heavy consumers (the ink board) use this so a wheel zoom
+ * does not rebuild their whole tree per step; they follow the camera through
+ * `subscribe` and refs instead.
+ */
+export const usePaperViewController = () => useContext(PaperViewControllerContext)
 
 type PaperViewProps = {
   children: ReactNode
@@ -449,6 +468,16 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
     recalled,
   }), [recalled, resetView, rotateBy, setView, view, zoomBy, zoomTo])
 
+  const controller = useMemo<PaperViewController>(() => ({
+    zoomBy,
+    zoomTo,
+    rotateBy,
+    resetView,
+    setView,
+    getView: () => viewRef.current,
+    subscribe: subscribeSharedPaperView,
+  }), [resetView, rotateBy, setView, zoomBy, zoomTo])
+
   useEffect(() => {
     const root = noteViewRef.current
     if (!root) return
@@ -598,6 +627,7 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
 
   return (
     <PaperViewContext.Provider value={api}>
+      <PaperViewControllerContext.Provider value={controller}>
       <div
         ref={noteViewRef}
         className={`paper-view ${className}`}
@@ -636,6 +666,7 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
           </div>
         )}
       </div>
+      </PaperViewControllerContext.Provider>
     </PaperViewContext.Provider>
   )
 }
