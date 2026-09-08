@@ -2,7 +2,7 @@
 
 Inventory walked from the shipped UI entry points. Each row names a user-visible surface and the source that implements it. The check `scripts/check-user-surfaces.cjs` re-reads those files and fails if a listed needle disappears.
 
-Command-palette action ids walked from `src/App.tsx`: `new-note`, `import-pdf-note`, `new-folder`, `new-subfolder`, `save`, `search`, `drawing`, `note-link`, `subject-book`, `worksheet`, `onenote-import`, `ai-assistant`, `glyphenwerk`, `overview`, `homework`, `daily`, `export-pdf`, `history`, `quick-open`, `nav-back`, `nav-forward`, `reopen-tab`, `split`, `split-swap`, `split-orientation`, `focus`, `sidebar`, `inspector`, `settings`, `reveal`, `bug-report`, `quit`.
+Command-palette action ids walked from `src/App.tsx`: `new-note`, `import-pdf-note`, `new-folder`, `new-subfolder`, `save`, `search`, `drawing`, `note-link`, `subject-book`, `worksheet`, `onenote-import`, `ai-assistant`, `glyphenwerk`, `overview`, `homework`, `daily`, `export-pdf`, `history`, `quick-open`, `nav-back`, `nav-forward`, `reopen-tab`, `split`, `split-swap`, `split-orientation`, `focus`, `sidebar`, `inspector`, `settings`, `addon-store`, `reveal`, `bug-report`, `quit`. Commands contributed by add-ons appear under `Add-on: <name>` and are prefixed `addon:` internally.
 
 ## Notes / vault
 
@@ -183,6 +183,27 @@ Command-palette action ids walked from `src/App.tsx`: `new-note`, `import-pdf-no
 | Place Verlinkung palette | `src/App.tsx` | `id: 'note-link'` |
 | Subject book palette | `src/App.tsx` | `id: 'subject-book'` |
 | Editor more menu | `src/App.tsx` | `editor-menu-label">Datei` |
+
+## Add-ons
+
+| Surface | Source | Needle |
+| --- | --- | --- |
+| Add-on-Store (Entdecken / Installiert / Entwickeln) | `src/components/addons/AddonStoreModal.tsx` | `export function AddonStoreModal` |
+| Store palette entry and settings section | `src/App.tsx` | `id: 'addon-store'` |
+| Add-on settings (source, auto-update) | `src/components/SettingsModal.tsx` | `id: 'addons'` |
+| Registry: index.json from GitHub with contents-API fallback | `src/lib/addons/registry.ts` | `export const fetchAddonIndex` |
+| Manifest schema and permission labels | `src/lib/addons/manifest.ts` | `export const parseAddonManifest` |
+| Worker runtime: permissions, rate limit, ping, restarts | `src/lib/addons/runtime.ts` | `export class AddonRuntime` |
+| Worker SDK (`fanotes` global) | `src/lib/addons/workerBootstrap.ts` | `export const ADDON_WORKER_BOOTSTRAP` |
+| Host bridge to App state (safe settings view) | `src/lib/addons/appBridge.ts` | `export const safeSettingsView` |
+| Declarative panel blocks | `src/lib/addons/blocks.ts` | `export const normaliseAddonBlocks` |
+| Panel dock beside the editor | `src/components/addons/AddonPanelDock.tsx` | `export function AddonPanelDock` |
+| Block renderer | `src/components/addons/AddonBlocks.tsx` | `export function AddonBlocks` |
+| Add-on prompt dialog | `src/components/addons/AddonPromptDialog.tsx` | `export function AddonPromptDialog` |
+| Status-bar items and dock toggle | `src/App.tsx` | `addon-status-item` |
+| Auto-update on start | `src/App.tsx` | `addonsAutoUpdate` |
+| Electron: GitHub fetch allow-list, on-disk store, add-on https proxy | `electron/addons.cjs` | `registerAddonIpc` |
+| Web: same-origin registry proxy paths | `src/lib/addons/browserAddonsApi.ts` | `rewriteAddonUrlForProxy` |
 
 ## Bug report
 
