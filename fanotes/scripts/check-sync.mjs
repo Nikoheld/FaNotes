@@ -22,6 +22,15 @@ globalThis.window = Object.assign(Object.create(null), {
   location: { origin: 'http://127.0.0.1' },
 })
 
+// Browsers and Electron send the system locale; the server answers in German for it and in
+// English otherwise. Node sends nothing, so pin German to keep the message assertions stable.
+const nodeFetch = globalThis.fetch
+globalThis.fetch = (input, init = {}) => {
+  const headers = new Headers(init.headers)
+  if (!headers.has('accept-language')) headers.set('Accept-Language', 'de-CH,de;q=0.9')
+  return nodeFetch(input, { ...init, headers })
+}
+
 const dataDirectory = mkdtempSync(join(tmpdir(), 'fanotes-sync-check-'))
 process.env.FANOTES_SYNC_DIR = dataDirectory
 const PORT = 18_600 + Math.floor(Math.random() * 300)
@@ -165,6 +174,30 @@ try {
   assert.equal(info.devices[0].name, 'Laptop')
 
   await assert.rejects(new SyncEngine(new SyncApi(ORIGIN)).login('fabio@example.com', 'x'), /Sync steht in dieser Umgebung/u)
+
+  // ── Transport: a dropped request is repeated once, but only when repeating is side-effect free ──
+  {
+    const calls = []
+    const flakyFetch = (input, init) => {
+      calls.push(`${init?.method ?? 'GET'} ${new URL(String(input)).pathname}`)
+      if (calls.length % 2 === 1) return Promise.reject(new TypeError('Failed to fetch'))
+      return fetch(input, init)
+    }
+    const flaky = new SyncApi(ORIGIN, flakyFetch)
+    const { kdf } = await flaky.prelogin('fabio@example.com')
+    assert.ok(kdf.salt, 'prelogin survives one dropped request')
+    assert.deepEqual(calls, ['POST /api/v1/sync/prelogin', 'POST /api/v1/sync/prelogin'])
+    calls.length = 0
+    const session = { accountId: 'x', deviceId: 'y', token: 'z', email: 'fabio@example.com' }
+    await assert.rejects(flaky.account(session), (error) => error.status === 401, 'GET is retried and then reports the server answer')
+    assert.equal(calls.length, 2)
+    calls.length = 0
+    await assert.rejects(flaky.register({ email: 'x@example.com', authKey: 'a', kdf, vaultKeyWrap: {}, device: { name: 'n', platform: 'p' } }), (error) => error.status === 0 && error.offline, 'register is never repeated')
+    assert.equal(calls.length, 1)
+    const alwaysDown = new SyncApi(ORIGIN, () => Promise.reject(new TypeError('Failed to fetch')))
+    await assert.rejects(alwaysDown.prelogin('fabio@example.com'), (error) => error.offline)
+  }
+
   const hostB = createFakeHost('b')
   const B = createEngine(hostB, 'Tablet')
   await B.engine.start()

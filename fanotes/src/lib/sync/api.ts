@@ -6,6 +6,7 @@ import type { SyncKdf, SyncKeyWrap } from './crypto'
 export const SYNC_HOST = 'fanotes.fasrv.ch'
 export const SYNC_ORIGIN = `https://${SYNC_HOST}`
 export const SYNC_API_PATH = '/api/v1/sync'
+const RETRY_DELAY_MS = 400
 
 export type SyncSession = { accountId: string; deviceId: string; token: string; expiresAt: string; email: string }
 
@@ -62,27 +63,45 @@ const parseError = async (response: Response): Promise<SyncApiError> => {
 }
 
 export class SyncApi {
-  constructor(private readonly origin: string = resolveSyncOrigin(), private readonly fetchImpl: typeof fetch = (...args) => fetch(...args)) {}
+  /**
+   * The origin is resolved per request, not at construction: the engine singleton is created while
+   * modules load, before main.tsx has installed window.fanotes, so an eager lookup would always pick
+   * the desktop default and the web build would end up cross-origin.
+   */
+  constructor(private readonly origin: string | null = null, private readonly fetchImpl: typeof fetch = (...args) => fetch(...args)) {}
 
-  private url(path: string) { return `${this.origin}${SYNC_API_PATH}${path}` }
+  private url(path: string) { return `${this.origin ?? resolveSyncOrigin()}${SYNC_API_PATH}${path}` }
 
-  private async request(path: string, init: RequestInit & { session?: SyncSession | null } = {}): Promise<Response> {
-    const headers = new Headers(init.headers)
-    if (init.session) {
-      headers.set('Authorization', `Bearer ${init.session.token}`)
-      headers.set('X-FaNotes-Account', init.session.accountId)
+  private async request(path: string, init: RequestInit & { session?: SyncSession | null; retry?: boolean } = {}): Promise<Response> {
+    const { session, retry, ...fetchInit } = init
+    const headers = new Headers(fetchInit.headers)
+    if (session) {
+      headers.set('Authorization', `Bearer ${session.token}`)
+      headers.set('X-FaNotes-Account', session.accountId)
     }
-    let response: Response
-    try {
-      response = await this.fetchImpl(this.url(path), { ...init, headers, credentials: 'omit', cache: 'no-store' })
-    } catch (error) {
-      throw new SyncApiError(0, error instanceof Error && error.name === 'AbortError' ? 'Die Anfrage wurde abgebrochen.' : 'Der Sync-Server ist nicht erreichbar.')
+    // A request that fails before any response arrived (connection dropped, renderer cancelled it)
+    // is repeated once when repeating cannot change server state: reads, and prelogin, which only
+    // returns KDF parameters. Everything that creates or mutates stays single-shot so that a lost
+    // response can never turn into a duplicate account, device or upload.
+    const retryable = retry ?? (fetchInit.method ?? 'GET') === 'GET'
+    for (let attempt = 0; ; attempt += 1) {
+      let response: Response
+      try {
+        response = await this.fetchImpl(this.url(path), { ...fetchInit, headers, credentials: 'omit', cache: 'no-store' })
+      } catch (error) {
+        const aborted = error instanceof Error && error.name === 'AbortError'
+        if (retryable && !aborted && attempt === 0) {
+          await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS))
+          continue
+        }
+        throw new SyncApiError(0, aborted ? 'Die Anfrage wurde abgebrochen.' : 'Der Sync-Server ist nicht erreichbar.')
+      }
+      if (!response.ok) throw await parseError(response)
+      return response
     }
-    if (!response.ok) throw await parseError(response)
-    return response
   }
 
-  private async json<T>(path: string, init: RequestInit & { session?: SyncSession | null } = {}): Promise<T> {
+  private async json<T>(path: string, init: RequestInit & { session?: SyncSession | null; retry?: boolean } = {}): Promise<T> {
     const response = await this.request(path, init)
     if (response.status === 204) return undefined as T
     return await response.json() as T
@@ -93,7 +112,7 @@ export class SyncApi {
   }
 
   prelogin(email: string) {
-    return this.json<{ kdf: SyncKdf }>('/prelogin', this.post('/prelogin', { email }))
+    return this.json<{ kdf: SyncKdf }>('/prelogin', { ...this.post('/prelogin', { email }), retry: true })
   }
 
   register(body: { email: string; authKey: string; kdf: SyncKdf; vaultKeyWrap: SyncKeyWrap; device: { name: string; platform: string } }) {
