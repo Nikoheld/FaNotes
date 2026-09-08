@@ -30,6 +30,10 @@ Command-palette action ids walked from `src/App.tsx`: `new-note`, `import-pdf-no
 | Fuzzy recent-first note ranking | `src/lib/workspaceNav.ts` | `export const rankSwitcherNotes` |
 | Breadcrumbs in the status bar | `src/App.tsx` | `note-breadcrumbs` |
 | File tree keyboard navigation | `src/components/FileTree.tsx` | `event.key === 'Delete'` |
+| Autocorrect while typing (space, punctuation, Enter; Backspace reverts) | `src/lib/spellingCorrections.ts` | `key: 'Backspace', run: revertAutocorrect` |
+| Spelling suggestion menu (right-click / Strg+.) with Ignore and Add to dictionary | `src/lib/spellingCorrections.ts` | `cm-spelling-menu__learn` |
+| Correction candidates, ranking and the autocorrect decision | `src/lib/spellingSuggest.ts` | `export const decideAutocorrect` |
+| Autokorrektur setting | `src/components/SettingsModal.tsx` | `title="Autokorrektur"` |
 | Note backup snapshots | `src/lib/noteBackup.ts` | `export const createNoteBackup` |
 | Backup control policy | `src/lib/noteBackup.ts` | `export const noteBackupControlPolicy` |
 | Backup top chrome | `src/App.tsx` | `note-backup-control` |
