@@ -10,6 +10,8 @@ import {
   CheckCircle2,
   ChevronRight,
   CircleAlert,
+  Cloud,
+  CloudOff,
   ClipboardList,
   Columns2,
   Command,
@@ -43,6 +45,7 @@ import {
   Pin,
   PinOff,
   Plus,
+  Puzzle,
   Rows2,
   Save,
   ScanLine,
@@ -52,7 +55,7 @@ import {
   Trash2,
   X,
 } from 'lucide-react'
-import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { PaletteAction } from './components/CommandPalette'
 import type { DrawingBoardHandle, DrawingSavePayload, InkActivity } from './components/DrawingBoard'
 import { ConfirmDialog } from './components/ConfirmDialog'
@@ -63,6 +66,15 @@ import type { GlyphenWerkView } from './components/GlyphenWerkWorkspace'
 import type { MarkdownEditorHandle, MarkdownFormatAction } from './components/MarkdownEditor'
 import type { WorksheetLayerHandle } from './components/WorksheetLayer'
 import { companionNotePath, isNoteFileName, isPdfNotePath, readPageStatsFromNote, stripFamdPayload, writePageStatsIntoNote } from './lib/famd'
+import { createAppAddonBridge, safeSettingsView, type AppAddonDeps } from './lib/addons/appBridge'
+import { addonIndexCache } from './lib/addons/indexCache'
+import { parseAddonSource } from './lib/addons/registry'
+import { addonRuntime } from './lib/addons/runtime'
+import { syncEngine } from './lib/sync/engine'
+import { syncStatusLabel } from './lib/sync/status'
+import type { SettingsSection } from './components/SettingsModal'
+import { createAddonFetchText, createAddonStoragePort } from './lib/addons/storagePort'
+import type { AddonPromptRequest } from './components/addons/AddonPromptDialog'
 import { convertNoteSourceToCurrentStandard } from './lib/noteStandard'
 import { deleteConfirmHost } from './lib/confirmUx'
 import {
@@ -104,6 +116,8 @@ import {
   reorderTabs,
   saveSplitLayout,
   saveWorkspaceMemory,
+  snapToDevicePixels,
+  splitFirstPaneSize,
   splitRatioFromPointer,
   stepNoteHistory,
   tabIndexForDigit,
@@ -160,7 +174,7 @@ import { defaultSettingsForPlatform } from './defaults'
 import { PaperStylePicker } from './components/PaperStylePicker'
 import { PaperView } from './components/PaperView'
 import { normalizePaperStyle } from './lib/paperStyles'
-import { clampViewZoom, readSharedPaperView, writeSharedPaperView, writeSharedZoomMaxPercent, writeSharedZoomSpeed } from './lib/paperView'
+import { clampViewZoom, createPaperViewStore, sharedPaperViewStore, writeSharedZoomMaxPercent, writeSharedZoomSpeed, type PaperViewStore } from './lib/paperView'
 import { diagnosticLog } from './lib/bugReport'
 import {
   collectSendDataNutzerdaten,
@@ -193,7 +207,7 @@ import { HOMEWORK_NOTE_PATH, mergeHomeworkFromRemote, parseHomeworkMarkdown, rem
 import { SafeBoundary } from './components/SafeBoundary'
 import { applyNoteTags, collectVaultTags, filterTreeByTag, parseNoteTags } from './lib/noteTags'
 import { applyRendererResourceLimits } from './lib/resourceLimits'
-import { getUiLocale, setUiLanguage, translateUiText } from './i18n'
+import { getUiLanguage, getUiLocale, setUiLanguage, translateUiText } from './i18n'
 import { bestContrastText, ensureReadableColor } from './lib/colorContrast'
 import type { AppSettings, BootstrapData, CreateResult, DetectedTextLanguage, DrawingLibraryDocument, NoteHistorySnapshot, NoteTab, OneNoteImportResult, PaperStyle, SearchHit, UpdateState, VaultEntry, WorksheetDocument } from './types'
 
@@ -211,6 +225,9 @@ const loadMarkdownEditor = () => {
 }
 const MarkdownEditor = lazy(loadMarkdownEditor)
 const RightInspector = lazy(() => import('./components/RightInspector').then((module) => ({ default: module.RightInspector })))
+const AddonStoreModal = lazy(() => import('./components/addons/AddonStoreModal').then((module) => ({ default: module.AddonStoreModal })))
+const AddonPanelDock = lazy(() => import('./components/addons/AddonPanelDock').then((module) => ({ default: module.AddonPanelDock })))
+const AddonPromptDialog = lazy(() => import('./components/addons/AddonPromptDialog').then((module) => ({ default: module.AddonPromptDialog })))
 const SearchPanel = lazy(() => import('./components/SearchPanel').then((module) => ({ default: module.SearchPanel })))
 const SettingsModal = lazy(() => import('./components/SettingsModal').then((module) => ({ default: module.SettingsModal })))
 const BugReportModal = lazy(() => import('./components/BugReportModal').then((module) => ({ default: module.BugReportModal })))
@@ -225,6 +242,8 @@ const STARTUP_DOCUMENT_LAYER_DELAY_MS = 160
 /** How long a renamed/moved path still redirects late editor flushes to the new name. */
 const MOVED_PATH_ALIAS_MS = 30_000
 /** Statistics of the open note reach the disk at least this often (in one-second ticks). */
+/** Width of the split divider track; mirrors `--split-divider` in styles.css. */
+const SPLIT_DIVIDER_PX = 7
 const PAGE_STATS_PERSIST_TICKS = 90
 /** Leaving a note after a shorter stay does not rewrite its file just for the dwell. */
 const PAGE_STATS_MIN_DWELL_DELTA_MS = 3_000
@@ -595,12 +614,17 @@ export default function App({ startupBootstrap }: AppProps) {
   useEffect(() => {
     writeSharedZoomSpeed(settings.viewZoomSpeed)
   }, [settings.viewZoomSpeed])
+  // The second split pane drives its own camera: zooming one sheet must never
+  // move the other. The main pane stays on the shared store the ink board uses.
+  const splitPaperViewStore = useMemo<PaperViewStore>(() => createPaperViewStore(), [])
   useEffect(() => {
     writeSharedZoomMaxPercent(settings.viewZoomMax ?? 325)
-    const view = readSharedPaperView()
-    const zoom = clampViewZoom(view.zoom)
-    writeSharedPaperView(zoom === view.zoom ? { ...view } : { ...view, zoom })
-  }, [settings.viewZoomMax])
+    for (const store of [sharedPaperViewStore, splitPaperViewStore]) {
+      const view = store.read()
+      const zoom = clampViewZoom(view.zoom)
+      store.write(zoom === view.zoom ? { ...view } : { ...view, zoom })
+    }
+  }, [settings.viewZoomMax, splitPaperViewStore])
   const [saveState, setSaveState] = useState<SaveState>('saved')
   const [detectedTextLanguage, setDetectedTextLanguage] = useState<DetectedTextLanguage>('unknown')
   const [sidebarVisible, setSidebarVisible] = useState(true)
@@ -633,6 +657,13 @@ export default function App({ startupBootstrap }: AppProps) {
   const [toasts, setToasts] = useState<Toast[]>([])
   const [updateState, setUpdateState] = useState<UpdateState>(INITIAL_UPDATE_STATE)
   const [bugReportOpen, setBugReportOpen] = useState(false)
+  const [addonStoreOpen, setAddonStoreOpen] = useState(false)
+  const [addonPrompt, setAddonPrompt] = useState<AddonPromptRequest | null>(null)
+  const addonState = useSyncExternalStore(addonRuntime.subscribe, addonRuntime.getState, addonRuntime.getState)
+  const syncState = useSyncExternalStore(syncEngine.subscribe, syncEngine.getState, syncEngine.getState)
+  const syncApi = window.fanotes?.sync ?? null
+  const [settingsSection, setSettingsSection] = useState<SettingsSection | undefined>(undefined)
+  const addonNoteChangedRef = useRef<((path: string, content: string) => void) | null>(null)
   const [confirmRequest, setConfirmRequest] = useState<{
     message: string
     title?: string
@@ -743,6 +774,32 @@ export default function App({ startupBootstrap }: AppProps) {
   useEffect(() => { splitPathRef.current = splitPath }, [splitPath])
   useEffect(() => { saveSplitLayout(splitLayout) }, [splitLayout])
   useEffect(() => { if (!splitPath) setFocusedPane('main') }, [splitPath])
+  // The first pane's track is a whole number of device pixels, so the second
+  // pane's scroller never sits on a half pixel (that composites its text soft).
+  const [splitTracks, setSplitTracks] = useState<{ first: number; divider: number } | null>(null)
+  useEffect(() => {
+    const container = splitContainerRef.current
+    if (!splitPath || !container || typeof ResizeObserver !== 'function') {
+      setSplitTracks(null)
+      return
+    }
+    const { ratio, orientation } = splitLayout
+    const measure = () => {
+      const size = orientation === 'columns' ? container.clientWidth : container.clientHeight
+      const dpr = window.devicePixelRatio || 1
+      const divider = snapToDevicePixels(SPLIT_DIVIDER_PX, dpr)
+      setSplitTracks(size > 0 ? { first: splitFirstPaneSize(size, divider, ratio, dpr), divider } : null)
+    }
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(container)
+    const media = window.matchMedia(`(resolution: ${window.devicePixelRatio || 1}dppx)`)
+    media.addEventListener('change', measure)
+    return () => {
+      observer.disconnect()
+      media.removeEventListener('change', measure)
+    }
+  }, [splitLayout, splitPath])
 
   // Every activation is a visit; back/forward walk this list. A history jump
   // has already moved the cursor onto the note, so visitNote records nothing.
@@ -1212,6 +1269,7 @@ export default function App({ startupBootstrap }: AppProps) {
 
   const recordInkStrokeFor = useCallback((path: string, stroke: InkStrokeActivity) => {
     updatePageStats(path, (session) => recordInkStroke(session, stroke, Date.now()))
+    addonRuntime.emit('ink:stroke', { path, ...stroke })
   }, [updatePageStats])
 
   const recordInkErasedFor = useCallback((path: string, removed: number) => {
@@ -1311,6 +1369,7 @@ export default function App({ startupBootstrap }: AppProps) {
     if (session !== vaultSessionGenerationRef.current) return treeRef.current
     treeRef.current = nextTree
     setTree(nextTree)
+    syncEngine.notifyLocalChange()
     return nextTree
   }, [])
 
@@ -1574,6 +1633,8 @@ export default function App({ startupBootstrap }: AppProps) {
       const nextContent = writePageStatsIntoNote(content, stats)
       const visibleContent = stripFamdPayload(nextContent)
       await window.fanotes.writeFile(isPdfNotePath(path) ? companionNotePath(path, '.famd') : path, nextContent)
+      addonRuntime.emit('note:saved', { path, title: fileName(path).replace(/\.(md|markdown|pdf)$/iu, ''), length: visibleContent.length })
+      syncEngine.notifyLocalChange()
       if (savedSession) {
         // Activity during the write builds on the saved session; only the
         // revision that actually reached the disk counts as persisted.
@@ -1787,6 +1848,7 @@ export default function App({ startupBootstrap }: AppProps) {
     setTabs((current) => current.map((tab) => tab.path === path ? { ...tab, content } : tab))
     setTagIndex((current) => ({ ...current, [path]: parseNoteTags(content) }))
     pendingWrites.current.set(path, content)
+    addonNoteChangedRef.current?.(path, content)
     setSaveState('saving')
     const existing = saveTimers.current.get(path)
     if (existing) window.clearTimeout(existing)
@@ -1839,6 +1901,74 @@ export default function App({ startupBootstrap }: AppProps) {
       return remaining[Math.min(Math.max(latestIndex, 0), remaining.length - 1)]?.path ?? null
     })
   }, [flushDocumentLayers, saveContent])
+
+  /** True while this device holds unsaved work for a path – the sync engine then leaves that file alone until the next cycle. */
+  const isSyncPathBusy = useCallback((path: string) => {
+    const companionOwner = path.endsWith('.famd') ? tabsRef.current.find((tab) => companionNotePath(tab.path, '.famd') === path)?.path : undefined
+    const notePath = companionOwner ?? path
+    if (pendingWrites.current.has(notePath) || saveTimers.current.has(notePath)) return true
+    const tab = tabsRef.current.find((candidate) => candidate.path === notePath)
+    if (tab && tab.content !== tab.savedContent) return true
+    // Ink and worksheet layers live in the .famd companion; while they are open here, the other device's copy waits.
+    if (path.endsWith('.famd') && activePathRef.current === notePath && (drawingOpenRef.current || drawingDirtyRef.current)) return true
+    return false
+  }, [])
+
+  /** Files another device changed: refresh the tree, reload clean open tabs, drop tabs of deleted notes. */
+  const applyRemoteChanges = useCallback(async ({ written, removed }: { written: string[]; removed: string[] }) => {
+    await refreshTree()
+    for (const path of removed) {
+      if (!tabsRef.current.some((tab) => tab.path === path)) continue
+      setTabs((current) => current.filter((tab) => tab.path !== path))
+      setSplitPath((current) => current === path ? null : current)
+      setActivePath((currentActive) => {
+        if (currentActive !== path) return currentActive
+        const remaining = tabsRef.current.filter((tab) => tab.path !== path)
+        return remaining[0]?.path ?? null
+      })
+    }
+    const touched = new Set<string>()
+    for (const path of written) {
+      for (const tab of tabsRef.current) {
+        if (tab.path === path || companionNotePath(tab.path, '.famd') === path) touched.add(tab.path)
+      }
+    }
+    for (const path of touched) {
+      const tab = tabsRef.current.find((candidate) => candidate.path === path)
+      if (!tab || tab.content !== tab.savedContent || pendingWrites.current.has(path)) continue
+      try {
+        const fresh = await readNoteTab(path)
+        setTabs((current) => current.map((candidate) => candidate.path === path && candidate.content === candidate.savedContent ? { ...candidate, content: fresh.content, savedContent: fresh.content } : candidate))
+        setTagIndex((current) => ({ ...current, [path]: parseNoteTags(fresh.content) }))
+      } catch {
+        // The note vanished between the change list and the read; the next tree refresh reflects that.
+      }
+    }
+  }, [readNoteTab, refreshTree])
+
+  const syncDepsRef = useRef({ isSyncPathBusy, applyRemoteChanges, toast })
+  syncDepsRef.current = { isSyncPathBusy, applyRemoteChanges, toast }
+
+  useEffect(() => {
+    if (!syncApi) return
+    syncEngine.attach(syncApi, {
+      platform: window.fanotes.platform,
+      deviceName: () => settingsRef.current.syncDeviceName,
+      automatic: () => settingsRef.current.syncAutomatic,
+      isPathBusy: (path) => syncDepsRef.current.isSyncPathBusy(path),
+      onApplied: (change) => { void syncDepsRef.current.applyRemoteChanges(change) },
+      onConflict: (conflict) => syncDepsRef.current.toast(`Sync-Konflikt bei „${fileName(conflict.path)}“ – deine Fassung liegt als Kopie daneben.`, 'info'),
+      onSignedOut: (reason) => syncDepsRef.current.toast(reason, 'error'),
+    })
+    // Sync never delays startup: the first cycle runs once the notes are on screen.
+    let cancelled = false
+    const timer = window.setTimeout(() => { if (!cancelled) void syncEngine.start() }, 2500)
+    return () => {
+      cancelled = true
+      window.clearTimeout(timer)
+      syncEngine.dispose()
+    }
+  }, [syncApi])
 
   const cycleTabs = useCallback((direction: 1 | -1) => {
     const currentTabs = tabsRef.current
@@ -2643,7 +2773,8 @@ export default function App({ startupBootstrap }: AppProps) {
     if (settingsRef.current.experimentalHomeworkApi) void loadSecureSettings()
   }, [bootstrap?.vaultPath, loadSecureSettings])
 
-  const openSettings = useCallback(() => {
+  const openSettings = useCallback((section?: SettingsSection) => {
+    setSettingsSection(section)
     void loadSecureSettings()
       .catch(() => undefined)
       .finally(() => setSettingsOpen(true))
@@ -2707,6 +2838,7 @@ export default function App({ startupBootstrap }: AppProps) {
       setDrawingSession((current) => ({ key: current.key + 1, document: null, path: null }))
       setWorksheetSession((current) => ({ key: current.key + 1, documents: [] }))
       setBootstrap(selected)
+      void syncEngine.switchVault().catch(() => undefined)
       const selectedSettings = { ...defaultSettingsForPlatform(window.fanotes.platform), ...selected.settings }
       const selectedSettingsRevision = settingsRevisionRef.current + 1
       settingsRevisionRef.current = selectedSettingsRevision
@@ -3455,6 +3587,21 @@ export default function App({ startupBootstrap }: AppProps) {
     }
   }, [isWeb, oneNoteImportBusy, openNote, refreshTree, toast])
 
+  /** Commands contributed by running add-ons; each run is isolated by the runtime and can never throw here. */
+  const addonPaletteActions = useMemo<PaletteAction[]>(() => addonState.commands.map((command) => {
+    const addonName = addonState.installed.find((record) => record.id === command.addonId)?.manifest.name ?? command.addonId
+    return {
+      id: `addon:${command.addonId}:${command.id}`,
+      label: command.title,
+      detail: command.detail,
+      shortcut: command.shortcut,
+      group: `Add-on: ${addonName}`,
+      keywords: `${command.keywords ?? ''} ${addonName} addon`,
+      icon: <Puzzle size={15} />,
+      run: () => { void addonRuntime.runCommand(command.addonId, command.id) },
+    }
+  }), [addonState.commands, addonState.installed])
+
   const paletteActions = useMemo<PaletteAction[]>(() => [
     { id: 'new-note', label: 'Neue Notiz', detail: 'Markdown-Datei im Standardordner', shortcut: 'Ctrl N', group: 'Dateien', icon: <FilePlus2 size={15} />, run: () => void createNote() },
     { id: 'import-pdf-note', label: 'PDF importieren', detail: 'PDF wird selbst zur Notiz — mit Handschrift und Viewer', group: 'Dateien', keywords: 'pdf import notiz viewer', icon: <FileText size={15} />, run: () => void importPdfNote() },
@@ -3495,10 +3642,193 @@ export default function App({ startupBootstrap }: AppProps) {
     { id: 'sidebar', label: 'Dateileiste umschalten', group: 'Ansicht', icon: <PanelLeftClose size={15} />, run: () => setSidebarVisible((value) => !value) },
     { id: 'inspector', label: 'Gliederung umschalten', group: 'Ansicht', icon: <PanelRightClose size={15} />, run: () => setInspectorVisible((value) => !value) },
     { id: 'settings', label: 'Einstellungen öffnen', shortcut: 'Ctrl ,', group: 'FaNotes', icon: <Settings size={15} />, run: () => openSettings() },
+    ...(syncApi && syncState.account ? [{ id: 'sync-now', label: 'Jetzt synchronisieren', detail: syncStatusLabel(syncState), group: 'FaNotes', keywords: 'sync synchronisieren cloud server geräte', icon: <Cloud size={15} />, run: () => { void syncEngine.syncNow('manual') } }] : []),
+    ...(syncApi ? [{ id: 'sync-settings', label: syncState.account ? 'Sync-Einstellungen' : 'Sync einrichten', detail: syncState.account ? syncState.account.email : 'Konto erstellen oder anmelden – Notizen auf allen Geräten', group: 'FaNotes', keywords: 'sync konto anmelden cloud geräte account login', icon: <Cloud size={15} />, run: () => openSettings('sync') }] : []),
+    { id: 'addon-store', label: 'Add-on-Store', detail: 'Add-ons aus GitHub entdecken, installieren und verwalten', group: 'FaNotes', keywords: 'addon add-on plugin erweiterung store extension', icon: <Puzzle size={15} />, run: () => setAddonStoreOpen(true) },
+    ...addonPaletteActions,
     { id: 'reveal', label: isWeb ? 'Notiz herunterladen' : 'Im Dateimanager zeigen', detail: isWeb ? 'Aktuelle Notiz exportieren' : 'Speicherort der geöffneten Notiz öffnen', group: 'Dateien', keywords: 'ordner explorer finder dateimanager download export', icon: isWeb ? <Download size={15} /> : <FolderOpen size={15} />, run: () => { if (activePath) void window.fanotes.revealInFolder(activePath) } },
     { id: 'bug-report', label: 'Fehler melden', detail: 'Kurz beschreiben; die letzten fünf Minuten werden angehängt', group: 'FaNotes', keywords: 'bug report fehler logs support', icon: <Bug size={15} />, run: () => setBugReportOpen(true) },
     { id: 'quit', label: isWeb ? 'Zur FaNotes-Website' : 'FaNotes beenden', shortcut: 'Ctrl Q', group: 'FaNotes', icon: <X size={15} />, run: () => window.fanotes.requestClose() },
-  ], [activePath, activeTab, attachBookToSubject, bookOpen, createDailyNote, createFolder, createNote, currentBook, drawingOpen, exportCurrentPdf, focusMode, importOneNote, importPdfNote, isWeb, navigateHistory, openGlyphenWerk, openHistory, openHomework, openLmStudio, openOverview, openSettings, openWorksheetImport, reopenClosedTab, saveCurrentWork, settings.dailyNotesFolder, splitLayout.orientation, splitPath, startNoteLinkPlacement, swapSplitPanes, toast, toggleBookView, toggleDrawing, toggleFocusMode, toggleSplit, toggleSplitOrientation])
+  ], [addonPaletteActions, activePath, activeTab, syncApi, syncState, attachBookToSubject, bookOpen, createDailyNote, createFolder, createNote, currentBook, drawingOpen, exportCurrentPdf, focusMode, importOneNote, importPdfNote, isWeb, navigateHistory, openGlyphenWerk, openHistory, openHomework, openLmStudio, openOverview, openSettings, openWorksheetImport, reopenClosedTab, saveCurrentWork, settings.dailyNotesFolder, splitLayout.orientation, splitPath, startNoteLinkPlacement, swapSplitPanes, toast, toggleBookView, toggleDrawing, toggleFocusMode, toggleSplit, toggleSplitOrientation])
+
+  // ---- Add-ons -------------------------------------------------------------
+  // Everything add-ons may touch flows through this bridge. The deps object is
+  // rebuilt every render but read through a ref, so the runtime (a module
+  // singleton) always sees current state without ever being re-attached.
+  const addonsApi = window.fanotes?.addons ?? null
+  const addonFetchText = useMemo(() => (addonsApi ? createAddonFetchText(addonsApi) : null), [addonsApi])
+  const addonSource = useMemo(() => parseAddonSource(settings.addonSource), [settings.addonSource])
+  const paletteActionsRef = useRef(paletteActions)
+  paletteActionsRef.current = paletteActions
+  const addonNoteChangeTimers = useRef(new Map<string, number>())
+  const addonDeps: AppAddonDeps = {
+    appVersion: APP_VERSION,
+    platform: window.fanotes?.platform ?? 'web',
+    web: isWeb,
+    language: () => getUiLanguage(),
+    tree: () => treeRef.current,
+    activePath: () => activePathRef.current,
+    activeKind: () => {
+      const path = activePathRef.current
+      if (!path) return 'none'
+      if (isPdfNotePath(path)) return 'pdf'
+      return drawingOpen ? 'ink' : 'markdown'
+    },
+    noteContent: (path) => {
+      const pending = pendingWrites.current.get(path)
+      if (typeof pending === 'string') return pending
+      const tab = tabsRef.current.find((candidate) => candidate.path === path)
+      return tab ? tab.content : null
+    },
+    updateOpenNote: (path, content) => {
+      if (!tabsRef.current.some((tab) => tab.path === path)) return false
+      updateContentFor(path, content)
+      return true
+    },
+    readFile: (path) => window.fanotes.readFile(path),
+    writeFile: async (path, content) => {
+      await window.fanotes.writeFile(path, content)
+      await refreshTree().catch(() => undefined)
+    },
+    createNote: async (folder, name) => {
+      const created = await window.fanotes.createNote(folder, name)
+      await refreshTree().catch(() => undefined)
+      addonRuntime.emit('note:created', { path: created.relativePath })
+      return created.relativePath
+    },
+    openNote: (path) => openNote(path),
+    search: (query) => window.fanotes.search(query),
+    createFolder: async (parent, name) => {
+      const created = await window.fanotes.createFolder(parent, name)
+      await refreshTree().catch(() => undefined)
+      return created.relativePath
+    },
+    renameEntry: async (path, name) => {
+      await renameEntry(path, name)
+      const parent = parentPath(path)
+      return parent ? `${parent}/${name}` : name
+    },
+    moveEntry: async (path, folder) => {
+      await moveEntry(path, folder)
+      return folder ? `${folder}/${fileName(path)}` : fileName(path)
+    },
+    trashEntry: async (path) => {
+      await trashEntry(path)
+      addonRuntime.emit('note:deleted', { path })
+    },
+    refreshTree: () => refreshTree(),
+    editor: {
+      getText: () => editorRef.current?.getText() ?? (activePathRef.current ? (pendingWrites.current.get(activePathRef.current) ?? tabsRef.current.find((tab) => tab.path === activePathRef.current)?.content ?? null) : null),
+      getSelection: () => editorRef.current?.getSelection() ?? null,
+      insert: (text, where) => editorRef.current?.insertText(text, where) ?? false,
+      replaceSelection: (text) => editorRef.current?.replaceSelection(text) ?? false,
+      setText: (text) => editorRef.current?.setText(text) ?? false,
+      format: (action) => editorRef.current?.format(action as MarkdownFormatAction) ?? false,
+    },
+    readInk: async (path) => {
+      const document = await window.fanotes.readFamdInk(path)
+      if (!document) return null
+      try {
+        return JSON.parse(document.drawingJson)
+      } catch {
+        return null
+      }
+    },
+    pageStats: (path) => {
+      const session = pageStatsRef.current.get(path)
+      return session ? snapshotPageStats(session) : null
+    },
+    settings: () => settingsRef.current,
+    writeClipboard: (text) => navigator.clipboard.writeText(text),
+    fetch: async (url, init) => {
+      if (!addonsApi?.netFetch) throw new Error('Netzwerkzugriff für Add-ons ist in der Web-Version nicht verfügbar.')
+      return addonsApi.netFetch(url, init)
+    },
+    toast: (message, kind) => toast(message, kind),
+    confirm: (message, options) => requestConfirm(message, options),
+    prompt: (message, options) => new Promise<string | null>((resolve) => {
+      setAddonPrompt({
+        title: options.title ?? 'Add-on',
+        message,
+        placeholder: options.placeholder,
+        value: options.value,
+        multiline: options.multiline,
+        resolve: (value) => {
+          setAddonPrompt(null)
+          resolve(value)
+        },
+      })
+    }),
+    openExternal: (url) => window.fanotes.openExternal(url),
+    paletteActions: () => paletteActionsRef.current,
+  }
+  const addonDepsRef = useRef(addonDeps)
+  addonDepsRef.current = addonDeps
+
+  useEffect(() => {
+    if (!addonsApi) return
+    const live = new Proxy({} as AppAddonDeps, { get: (_target, key) => addonDepsRef.current[key as keyof AppAddonDeps] })
+    addonRuntime.attach(createAppAddonBridge(live), createAddonStoragePort(addonsApi))
+    // Add-ons never delay startup: they load after the first idle moment.
+    let cancelled = false
+    const begin = () => {
+      if (cancelled) return
+      void addonRuntime.start().then(async () => {
+        if (cancelled || !settingsRef.current.addonsAutoUpdate || !addonFetchText) return
+        if (!addonRuntime.getState().installed.some((record) => record.origin === 'store')) return
+        const index = await addonIndexCache.load(parseAddonSource(settingsRef.current.addonSource), addonFetchText)
+        const updates = addonRuntime.updatesFor(index)
+        let updated = 0
+        for (const update of updates) {
+          try {
+            await addonRuntime.install(update.entry, addonFetchText)
+            updated += 1
+          } catch (error) {
+            console.warn(`Add-on ${update.record.id} konnte nicht aktualisiert werden:`, error)
+          }
+        }
+        if (updated && !cancelled) toast(updated === 1 ? 'Ein Add-on wurde aktualisiert.' : `${updated} Add-ons wurden aktualisiert.`, 'info')
+      })
+    }
+    const useIdle = typeof window.requestIdleCallback === 'function'
+    const idle = useIdle ? window.requestIdleCallback(begin, { timeout: 4000 }) : window.setTimeout(begin, 1500)
+    return () => {
+      cancelled = true
+      if (useIdle) window.cancelIdleCallback(idle)
+      else window.clearTimeout(idle)
+    }
+  }, [addonFetchText, addonsApi, toast])
+
+  useEffect(() => {
+    if (!activePath) return
+    addonRuntime.emit('note:opened', { path: activePath, title: stripExtension(fileName(activePath)), kind: isPdfNotePath(activePath) ? 'pdf' : 'markdown' })
+  }, [activePath])
+
+  useEffect(() => {
+    addonRuntime.emit('mode:changed', { mode: drawingOpen ? 'ink' : 'keyboard', path: activePath })
+  }, [activePath, drawingOpen])
+
+  useEffect(() => {
+    addonRuntime.emit('vault:changed', { notes: collectNotePaths(tree).length })
+  }, [tree])
+
+  useEffect(() => {
+    addonRuntime.emit('settings:changed', safeSettingsView(settings))
+  }, [settings])
+
+  const addonNoteChanged = useCallback((path: string, content: string) => {
+    if (!addonRuntime.hasSubscribers('note:changed')) return
+    const timers = addonNoteChangeTimers.current
+    const existing = timers.get(path)
+    if (existing) window.clearTimeout(existing)
+    timers.set(path, window.setTimeout(() => {
+      timers.delete(path)
+      addonRuntime.emit('note:changed', { path, length: content.length })
+    }, 400))
+  }, [])
+  addonNoteChangedRef.current = addonNoteChanged
+
+  const openAddonStore = useCallback(() => setAddonStoreOpen(true), [])
 
   /** Notes for the quick switcher: the whole vault, most recently visited first. */
   const switcherNotes = useMemo(() => {
@@ -4165,12 +4495,13 @@ export default function App({ startupBootstrap }: AppProps) {
               <div
                 ref={splitContainerRef}
                 className={`editor-split ${splitTab ? 'is-split' : ''} ${splitTab ? `is-${splitLayout.orientation}` : ''} ${splitDragging ? 'is-resizing' : ''} ${splitTab ? `focus-${focusedPane}` : ''}`}
-                style={splitTab ? { '--split-ratio': splitLayout.ratio } as React.CSSProperties : undefined}
+                style={splitTab ? { '--split-ratio': splitLayout.ratio, ...(splitTracks ? { '--split-first': `${splitTracks.first}px`, '--split-divider': `${splitTracks.divider}px` } : {}) } as React.CSSProperties : undefined}
               >
               <PaperView
                 className={`unified-note-view ${splitTab ? 'is-main-pane' : ''} paper-${isPdfActive ? 'blank' : activePaper} ${drawingOpen ? 'is-inking' : ''} ${isPdfActive ? 'is-pdf-note' : ''}`}
                 viewKey={activeTab.path}
                 showHud={!drawingOpen}
+                globalShortcuts={!splitTab || focusedPane === 'main'}
                 onPointerDownCapture={() => setFocusedPane('main')}
                 onFocusCapture={() => setFocusedPane('main')}
               >
@@ -4223,6 +4554,7 @@ export default function App({ startupBootstrap }: AppProps) {
                         onSaveDrawing={saveDrawingAsset}
                         onInsertMarkdown={insertIntoNote}
                         pagePaperStyle={activePaper}
+                        sectionsEnabled={!isPdfActive}
                         onPagePaperChange={(style) => { if (activeTab) void applyNotePaper(activeTab.path, style) }}
                         onSettingsChange={handleDrawingSettingsChange}
                         onDirtyChange={handleDrawingDirtyChange}
@@ -4287,6 +4619,8 @@ export default function App({ startupBootstrap }: AppProps) {
                   className={`unified-note-view paper-${splitTab.kind === 'pdf' || isPdfNotePath(splitTab.path) ? 'blank' : normalizePaperStyle(notePaperByPath[splitTab.path] ?? settings.paperStyle)} ${splitTab.kind === 'pdf' || isPdfNotePath(splitTab.path) ? 'is-pdf-note' : ''}`}
                   viewKey={`split:${splitTab.path}`}
                   showHud={false}
+                  store={splitPaperViewStore}
+                  globalShortcuts={focusedPane === 'split'}
                 >
                   <article className={`unified-paper ${splitTab.kind === 'pdf' || isPdfNotePath(splitTab.path) ? 'is-pdf-note' : ''}`} aria-label={`${splitTab.title} · zweite Spalte`}>
                     {splitTab.kind === 'pdf' || isPdfNotePath(splitTab.path) ? (
@@ -4330,6 +4664,7 @@ export default function App({ startupBootstrap }: AppProps) {
         </main>
 
         {inspectorVisible && settings.showOutline && !overviewOpen && !homeworkOpen && !glyphenWerkOpen && !isPdfActive && <Suspense fallback={null}><RightInspector content={activeTab?.content ?? ''} path={activeTab?.path} onJumpToLine={(line) => { editorRef.current?.revealLine(line) }} /></Suspense>}
+        {addonState.dockOpen && addonState.panels.length > 0 && !glyphenWerkOpen && <Suspense fallback={null}><SafeBoundary name="Add-on-Dock" fallbackTitle="Das Add-on-Dock ist abgestürzt"><AddonPanelDock panels={addonState.panels} activeKey={addonState.activePanel} runtime={addonRuntime} onClose={() => addonRuntime.setDockOpen(false)} /></SafeBoundary></Suspense>}
         {searchOpen && <Suspense fallback={null}><SearchPanel query={searchQuery} hits={searchHits} loading={searchLoading} onQueryChange={setSearchQuery} onOpen={(hit) => { void openSearchHit(hit) }} onClose={() => setSearchOpen(false)} /></Suspense>}
       </div>
 
@@ -4346,7 +4681,7 @@ export default function App({ startupBootstrap }: AppProps) {
             ))}
           </nav>
         )}</div>
-        <div className="statusbar-right">{updateState.status === 'downloaded' && <button type="button" className="update-ready-button" title={`FaNotes ${updateState.latestVersion} installieren und neu starten`} onClick={() => void installUpdate()}><ShieldCheck size={11} /> Update bereit</button>}{updateState.status === 'downloading' && <span><LoaderCircle className="spin" size={11} /> Update {Math.round(updateState.progress * 100)} %</span>}{settings.spellcheck && activeTab && !drawingOpen && detectedTextLanguage !== 'unknown' && <span className="detected-text-language" title="Automatisch erkannte Sprache für die lokale Rechtschreibprüfung"><b>Aa</b> {detectedTextLanguage === 'de' ? 'Deutsch' : detectedTextLanguage === 'en' ? 'English' : 'DE / EN'}</span>}{settings.showWordCount && activeTab && <span>{activeWordCount} Wörter</span>}<button type="button" className={`save-status ${saveState === 'saved' ? 'save-ok' : 'save-pending'}`} title="Jetzt speichern (Strg+S)" aria-live="polite" onClick={() => void saveCurrentWork()}>{saveState === 'saved' ? <CheckCircle2 size={11} /> : saveState === 'saving' ? <LoaderCircle className="spin" size={11} /> : <CircleAlert size={11} />}{saveState === 'saved' ? 'Gespeichert' : saveState === 'saving' ? 'Speichert …' : 'Speicherfehler'}</button><span title={isWeb ? 'Die Daten bleiben in diesem Browser' : 'Dein Vault bleibt auf deinem Gerät'}><ShieldCheck size={11} /> {isWeb ? 'Im Browser gespeichert' : 'Lokal & privat'}</span></div>
+        <div className="statusbar-right">{updateState.status === 'downloaded' && <button type="button" className="update-ready-button" title={`FaNotes ${updateState.latestVersion} installieren und neu starten`} onClick={() => void installUpdate()}><ShieldCheck size={11} /> Update bereit</button>}{updateState.status === 'downloading' && <span><LoaderCircle className="spin" size={11} /> Update {Math.round(updateState.progress * 100)} %</span>}{settings.spellcheck && activeTab && !drawingOpen && detectedTextLanguage !== 'unknown' && <span className="detected-text-language" title="Automatisch erkannte Sprache für die lokale Rechtschreibprüfung"><b>Aa</b> {detectedTextLanguage === 'de' ? 'Deutsch' : detectedTextLanguage === 'en' ? 'English' : 'DE / EN'}</span>}{settings.showWordCount && activeTab && <span>{activeWordCount} Wörter</span>}{addonState.statusItems.map((item) => item.clickable ? <button key={`${item.addonId}/${item.id}`} type="button" className="addon-status-item" title={item.title ?? undefined} data-i18n-ignore onClick={() => addonRuntime.clickStatusItem(item.addonId, item.id)}>{item.text}</button> : <span key={`${item.addonId}/${item.id}`} className="addon-status-item" title={item.title ?? undefined} data-i18n-ignore>{item.text}</span>)}{addonState.panels.length > 0 && !addonState.dockOpen && <button type="button" className="addon-status-item addon-status-item--dock" title="Add-on-Panels einblenden" onClick={() => addonRuntime.setDockOpen(true)}><Puzzle size={11} /> {addonState.panels.length}</button>}{syncApi && syncState.account && <button type="button" className={`sync-status-item is-${syncState.status}`} title={`Sync · ${syncState.account.email} · ${syncStatusLabel(syncState)}${syncState.error ? ` · ${syncState.error}` : ''}`} aria-live="polite" onClick={() => openSettings('sync')}>{syncState.status === 'syncing' ? <LoaderCircle className="spin" size={11} /> : syncState.status === 'offline' ? <CloudOff size={11} /> : syncState.status === 'error' ? <CircleAlert size={11} /> : <Cloud size={11} />}{syncState.status === 'syncing' ? 'Sync …' : syncState.status === 'offline' ? 'Offline' : syncState.status === 'error' ? 'Sync-Fehler' : 'Synchron'}{syncState.conflicts.length > 0 && <em>{syncState.conflicts.length}</em>}</button>}<button type="button" className={`save-status ${saveState === 'saved' ? 'save-ok' : 'save-pending'}`} title="Jetzt speichern (Strg+S)" aria-live="polite" onClick={() => void saveCurrentWork()}>{saveState === 'saved' ? <CheckCircle2 size={11} /> : saveState === 'saving' ? <LoaderCircle className="spin" size={11} /> : <CircleAlert size={11} />}{saveState === 'saved' ? 'Gespeichert' : saveState === 'saving' ? 'Speichert …' : 'Speicherfehler'}</button><span title={isWeb ? 'Die Daten bleiben in diesem Browser' : 'Dein Vault bleibt auf deinem Gerät'}><ShieldCheck size={11} /> {isWeb ? 'Im Browser gespeichert' : 'Lokal & privat'}</span></div>
       </footer>
 
       {historyOpen && (
@@ -4373,7 +4708,9 @@ export default function App({ startupBootstrap }: AppProps) {
         </div>
       )}
       {paletteOpen && <Suspense fallback={null}><SafeBoundary name="Befehlspalette"><CommandPalette actions={paletteActions} mode={paletteMode} rankNotes={rankNotesForPalette} activePath={activePath} onOpenNote={(path) => void openNote(path)} onOpenNoteInSplit={(path) => void openInSplit(path)} onClose={closePalette} /></SafeBoundary></Suspense>}
-      {settingsOpen && <Suspense fallback={null}><SafeBoundary name="Einstellungen" fallbackTitle="Die Einstellungen sind abgestürzt"><SettingsModal platform={window.fanotes.platform} settings={settings} vaultPath={bootstrap.vaultPath} updateState={updateState} onChange={applySettings} onClose={() => setSettingsOpen(false)} onSelectVault={() => void selectVault()} onOpenGlyphenWerk={() => { setSettingsOpen(false); openGlyphenWerk() }} onImportTraining={importTrainingFromSettings} onImportOneNote={importOneNote} onCheckUpdate={checkForUpdates} onDownloadUpdate={downloadUpdate} onInstallUpdate={installUpdate} onResetSettings={resetSettings} onResetAppData={resetAppData} onOpenBugReport={() => { setSettingsOpen(false); setBugReportOpen(true) }} onConvertNotes={convertAllNotesToCurrentStandard} remoteSupportSession={remoteSupportSession} onRemoteSupportStart={startRemoteSupport} onRemoteSupportStop={stopRemoteSupport} /></SafeBoundary></Suspense>}
+      {settingsOpen && <Suspense fallback={null}><SafeBoundary name="Einstellungen" fallbackTitle="Die Einstellungen sind abgestürzt"><SettingsModal syncEngine={syncApi ? syncEngine : undefined} syncState={syncState} initialSection={settingsSection} platform={window.fanotes.platform} settings={settings} vaultPath={bootstrap.vaultPath} updateState={updateState} onChange={applySettings} onClose={() => { setSettingsOpen(false); setSettingsSection(undefined) }} onSelectVault={() => void selectVault()} onOpenGlyphenWerk={() => { setSettingsOpen(false); openGlyphenWerk() }} onOpenAddonStore={() => { setSettingsOpen(false); openAddonStore() }} addonSummary={{ installed: addonState.installed.length, running: addonState.installed.filter((record) => addonState.statuses[record.id]?.state === 'running').length }} onImportTraining={importTrainingFromSettings} onImportOneNote={importOneNote} onCheckUpdate={checkForUpdates} onDownloadUpdate={downloadUpdate} onInstallUpdate={installUpdate} onResetSettings={resetSettings} onResetAppData={resetAppData} onOpenBugReport={() => { setSettingsOpen(false); setBugReportOpen(true) }} onConvertNotes={convertAllNotesToCurrentStandard} remoteSupportSession={remoteSupportSession} onRemoteSupportStart={startRemoteSupport} onRemoteSupportStop={stopRemoteSupport} /></SafeBoundary></Suspense>}
+      {addonStoreOpen && <Suspense fallback={null}><SafeBoundary name="Add-on-Store" fallbackTitle="Der Add-on-Store ist abgestürzt"><AddonStoreModal open onClose={() => setAddonStoreOpen(false)} runtime={addonRuntime} runtimeState={addonState} source={addonSource} fetchText={addonFetchText} onOpenExternal={(url) => { void window.fanotes.openExternal(url).catch(() => toast('Der Link konnte nicht geöffnet werden.', 'error')) }} toast={toast} sourceText={settings.addonSource} onChangeSource={(value) => { addonIndexCache.reset(); applySettings({ ...settingsRef.current, addonSource: value }) }} autoUpdate={settings.addonsAutoUpdate} onChangeAutoUpdate={(value) => applySettings({ ...settingsRef.current, addonsAutoUpdate: value })} /></SafeBoundary></Suspense>}
+      {addonPrompt && <Suspense fallback={null}><SafeBoundary name="Add-on-Eingabe" fallbackTitle="Der Add-on-Dialog ist abgestürzt"><AddonPromptDialog request={addonPrompt} /></SafeBoundary></Suspense>}
       <ConfirmDialog
         open={Boolean(confirmRequest)}
         title={confirmRequest?.title}

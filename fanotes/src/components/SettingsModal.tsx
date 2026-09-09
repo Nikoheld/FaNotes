@@ -21,6 +21,7 @@ import {
   MemoryStick,
   NotebookTabs,
   Palette,
+  Puzzle,
   RefreshCw,
   RotateCcw,
   Rocket,
@@ -53,8 +54,10 @@ import {
   type TabletButtonAction,
 } from '../lib/tabletButtons'
 import type { AppSettings, EnhancedMathRecognitionState, OneNoteImportResult, QwenVisionState, ServerBackupState, UpdateState } from '../types'
+import type { SyncEngine, SyncPublicState } from '../lib/sync/engine'
+import { SyncSettingsSection } from './SyncSettingsSection'
 
-type SettingsSection = 'appearance' | 'editor' | 'drawing' | 'files' | 'updates' | 'accessibility' | 'experimental' | 'advanced'
+export type SettingsSection = 'appearance' | 'editor' | 'drawing' | 'files' | 'sync' | 'addons' | 'updates' | 'accessibility' | 'experimental' | 'advanced'
 
 export type SettingsModalProps = {
   platform?: string
@@ -64,6 +67,11 @@ export type SettingsModalProps = {
   onClose: () => void
   onSelectVault: () => void
   onOpenGlyphenWerk?: () => void
+  onOpenAddonStore?: () => void
+  addonSummary?: { installed: number; running: number }
+  syncEngine?: SyncEngine
+  syncState?: SyncPublicState
+  initialSection?: SettingsSection
   onImportTraining?: (file: File) => Promise<void>
   onImportOneNote?: () => Promise<OneNoteImportResult | null>
   updateState: UpdateState
@@ -84,6 +92,8 @@ const SECTIONS: { id: SettingsSection; label: string; description: string; icon:
   { id: 'editor', label: 'Editor', description: 'Markdown und Schreiben', icon: FileText, count: 8 },
   { id: 'drawing', label: 'Stift & Erkennung', description: 'Tablet, Papier und Handschrift', icon: Brush, count: 16 },
   { id: 'files', label: 'Dateien & Vault', description: 'Import, Ordner und Speichern', icon: FolderOpen, count: 7 },
+  { id: 'sync', label: 'Sync', description: 'Konto, Geräte und Verschlüsselung', icon: Cloud, count: 6 },
+  { id: 'addons', label: 'Add-ons', description: 'Store, Quelle und Updates', icon: Puzzle, count: 3 },
   { id: 'updates', label: 'Updates', description: 'Stable, Beta und Sicherheit', icon: RefreshCw, count: 4 },
   { id: 'accessibility', label: 'Bedienung', description: 'Bewegung und Lesbarkeit', icon: Accessibility, count: 3 },
   { id: 'experimental', label: 'Experimentell', description: 'Unfertige Funktionen, standardmässig aus', icon: FlaskConical, count: 5 },
@@ -93,7 +103,7 @@ const SECTIONS: { id: SettingsSection; label: string; description: string; icon:
 const SECTION_GROUPS: Array<{ label: string; sections: SettingsSection[] }> = [
   { label: 'Aussehen & Schreiben', sections: ['appearance', 'editor'] },
   { label: 'Stift & Arbeitsbereich', sections: ['drawing', 'files'] },
-  { label: 'FaNotes & System', sections: ['updates', 'accessibility', 'experimental', 'advanced'] },
+  { label: 'FaNotes & System', sections: ['sync', 'addons', 'updates', 'accessibility', 'experimental', 'advanced'] },
 ]
 
 type SettingsSearchItem = {
@@ -105,6 +115,10 @@ type SettingsSearchItem = {
 }
 
 const SETTINGS_SEARCH_ITEMS: SettingsSearchItem[] = [
+  { label: 'Sync-Konto', detail: 'Sync', section: 'sync', target: 'settings-sync-account', keywords: 'sync konto anmelden registrieren account login passwort e-mail cloud server geräte' },
+  { label: 'Angemeldete Geräte', detail: 'Sync', section: 'sync', target: 'settings-sync-devices', keywords: 'sync geräte devices laptop tablet abmelden' },
+  { label: 'Sync-Passwort ändern', detail: 'Sync', section: 'sync', target: 'settings-sync-password', keywords: 'sync passwort ändern password schlüssel' },
+  { label: 'Sync-Konto löschen', detail: 'Sync', section: 'sync', target: 'settings-sync-delete', keywords: 'sync konto löschen account delete server' },
   { label: 'App-Sprache', detail: 'Darstellung', section: 'appearance', target: 'settings-surface', keywords: 'sprache language system deutsch englisch english' },
   { label: 'Farbschema & Themes', detail: 'Darstellung', section: 'appearance', target: 'settings-surface', keywords: 'theme dunkel hell system graphit klar mitternacht wald aurora sepia farbe' },
   { label: 'Arbeitsflächen-Design', detail: 'Darstellung', section: 'appearance', target: 'settings-surface', keywords: 'hintergrund verlauf mesh papier clean' },
@@ -285,6 +299,11 @@ export function SettingsModal({
   onClose,
   onSelectVault,
   onOpenGlyphenWerk,
+  onOpenAddonStore,
+  addonSummary,
+  syncEngine,
+  syncState,
+  initialSection,
   onImportTraining,
   onImportOneNote,
   updateState,
@@ -300,7 +319,7 @@ export function SettingsModal({
   onRemoteSupportStop,
 }: SettingsModalProps) {
   const isWeb = platform === 'web'
-  const [active, setActive] = useState<SettingsSection>('appearance')
+  const [active, setActive] = useState<SettingsSection>(initialSection ?? 'appearance')
   const [searchQuery, setSearchQuery] = useState('')
   const [trainingImportBusy, setTrainingImportBusy] = useState(false)
   const [trainingImportStatus, setTrainingImportStatus] = useState<{ kind: 'success' | 'error'; text: string } | null>(null)
@@ -884,6 +903,32 @@ export function SettingsModal({
                   <SettingRow title="Standardordner"><input value={settings.defaultFolder} placeholder="z. B. Eingang" onChange={(event) => update('defaultFolder', event.target.value)} /></SettingRow>
                   <SettingRow title="Tagesnotizen"><input value={settings.dailyNotesFolder} placeholder="Tagesnotizen" onChange={(event) => update('dailyNotesFolder', event.target.value)} /></SettingRow>
                   <SettingRow title="Datumsformat"><input value={settings.dateFormat} placeholder="YYYY-MM-DD" onChange={(event) => update('dateFormat', event.target.value)} /></SettingRow>
+                </div>
+              </>
+            )}
+
+            {active === 'sync' && (
+              syncEngine && syncState
+                ? <SyncSettingsSection engine={syncEngine} syncState={syncState} settings={settings} update={update} platform={platform} />
+                : <div className="setting-card"><div className="setting-card-title"><Cloud size={16} /><span>Sync</span></div><div className="setting-row"><div className="setting-copy"><span>Sync steht in dieser Umgebung nicht zur Verfügung.</span></div></div></div>
+            )}
+
+            {active === 'addons' && (
+              <>
+                <div id="settings-addon-store" className="setting-callout">
+                  <span><Puzzle size={18} /></span>
+                  <div><strong>Add-ons erweitern FaNotes ohne Update</strong><p>Der Store liest das GitHub-Repository {settings.addonSource || 'Nikoheld/FaNotes-Addons'} direkt. Jedes Add-on läuft in einem eigenen Worker mit nur den Berechtigungen aus seinem Manifest – ein Fehler darin kann FaNotes nicht zum Absturz bringen.</p>
+                  <div className="setting-callout-actions">
+                    {onOpenAddonStore && <button type="button" className="primary-button" onClick={onOpenAddonStore}>
+                      <Puzzle size={15} /> Add-on-Store öffnen
+                    </button>}
+                    {addonSummary && <small>{addonSummary.installed === 0 ? 'Noch keine Add-ons installiert.' : `${addonSummary.installed} installiert · ${addonSummary.running} aktiv`}</small>}
+                  </div></div>
+                </div>
+                <div id="settings-addon-source" className="setting-card">
+                  <div className="setting-card-title"><Puzzle size={16} /><span>Quelle & Updates</span></div>
+                  <SettingRow title="Add-on-Quelle" description="GitHub-Repository als besitzer/repo, optional #branch, oder https-Adresse einer index.json."><input data-i18n-ignore type="text" value={settings.addonSource} placeholder="Nikoheld/FaNotes-Addons#main" spellCheck={false} onChange={(event) => update('addonSource', event.target.value)} /></SettingRow>
+                  <SettingRow title="Automatisch aktualisieren" description="Installierte Add-ons beim Start auf neue Versionen im Repository prüfen und still aktualisieren."><Toggle label="Add-ons automatisch aktualisieren" checked={settings.addonsAutoUpdate} onChange={(value) => update('addonsAutoUpdate', value)} /></SettingRow>
                 </div>
               </>
             )}

@@ -224,7 +224,7 @@ const runOnce = () => {
   assert.equal((board.match(/if \(zoomInFlight\(\)\) return/g) ?? []).length, 3, 'scroll frame, idle timer and scrollend all skip the re-slice while the zoom is moving')
   const paperViewSource = readFileSync(join(root, 'src', 'components', 'PaperView.tsx'), 'utf8')
   assert.match(paperViewSource, /export const usePaperViewController = \(\) => useContext\(PaperViewControllerContext\)/)
-  assert.match(paperViewSource, /const controller = useMemo<PaperViewController>\(\(\) => \(\{[\s\S]*?\}\), \[resetView, rotateBy, setView, zoomBy, zoomTo\]\)/, 'the controller identity must not depend on the view snapshot')
+  assert.match(paperViewSource, /const controller = useMemo<PaperViewController>\(\(\) => \(\{[\s\S]*?\}\), \[resetView, rotateBy, setView, store, zoomBy, zoomTo\]\)/, 'the controller identity must not depend on the view snapshot')
   assert.match(inkHit, /export const resolveInkOverlayWindow/)
   assert.match(inkHit, /isFullInkWindow\(window\)\) return false/)
   // Both PDF hosts paint through the shared painter: the plan windows the

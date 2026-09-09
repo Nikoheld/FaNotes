@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { drawInkStroke, type InkPaintStroke } from '../lib/inkStrokePaint'
 import { textOriginCssPx } from '../lib/noteCanvas'
+import { usePaperViewController } from './PaperView'
 
 /**
  * Read-only handwriting for the second split pane.
@@ -13,6 +14,10 @@ import { textOriginCssPx } from '../lib/noteCanvas'
  */
 
 const PREVIEW_MAX_PIXELS = 24_000_000
+/** Sheet zoom above this no longer raises the bitmap; the budget caps tall pages anyway. */
+const PREVIEW_MAX_SCALE = 4
+/** Wait for a wheel/pinch burst to end before rasterising at the new zoom. */
+const PREVIEW_ZOOM_SETTLE_MS = 160
 
 export type InkPreviewDocument = { drawingJson: string }
 
@@ -68,9 +73,13 @@ export const parseInkPreviewPage = (drawingJson: string): ParsedInkPage | null =
   return { strokes, width, height, originX, originY }
 }
 
-/** Backing-store scale: device pixels, capped so a very tall page stays affordable. */
-export const inkPreviewScale = (width: number, height: number, devicePixelRatio: number) => {
-  const wanted = Math.max(1, Math.min(3, devicePixelRatio || 1))
+/**
+ * Backing-store scale: device pixels times the sheet zoom, capped so a very
+ * tall page stays affordable. Without the zoom the CSS camera stretched a
+ * 1×-DPR bitmap and the handwriting in the second pane went soft.
+ */
+export const inkPreviewScale = (width: number, height: number, devicePixelRatio: number, zoom = 1) => {
+  const wanted = Math.max(1, Math.min(PREVIEW_MAX_SCALE, (devicePixelRatio || 1) * Math.max(0.01, zoom || 1)))
   const affordable = Math.sqrt(PREVIEW_MAX_PIXELS / Math.max(1, width * height))
   return Math.max(0.25, Math.min(wanted, affordable))
 }
@@ -83,6 +92,7 @@ export function InkPreviewLayer({ load, smoothing, reloadKey }: {
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [page, setPage] = useState<ParsedInkPage | null>(null)
+  const paperView = usePaperViewController()
 
   useEffect(() => {
     let alive = true
@@ -122,10 +132,14 @@ export function InkPreviewLayer({ load, smoothing, reloadKey }: {
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas || !page) return
+    let paintedScale = 0
     const paint = () => {
-      const scale = inkPreviewScale(page.width, page.height, window.devicePixelRatio || 1)
+      const zoom = paperView?.getView().zoom ?? 1
+      const scale = inkPreviewScale(page.width, page.height, window.devicePixelRatio || 1, zoom)
       const width = Math.max(1, Math.round(page.width * scale))
       const height = Math.max(1, Math.round(page.height * scale))
+      if (canvas.width === width && canvas.height === height && paintedScale === scale) return
+      paintedScale = scale
       if (canvas.width !== width) canvas.width = width
       if (canvas.height !== height) canvas.height = height
       const context = canvas.getContext('2d')
@@ -134,15 +148,31 @@ export function InkPreviewLayer({ load, smoothing, reloadKey }: {
       context.clearRect(0, 0, width, height)
       for (const stroke of page.strokes) drawInkStroke(context, stroke, width, height, smoothing, 1, page.width)
     }
-    paint()
-    const media = window.matchMedia(`(resolution: ${window.devicePixelRatio || 1}dppx)`)
-    media.addEventListener('change', paint)
-    canvas.addEventListener('contextrestored', paint)
-    return () => {
-      media.removeEventListener('change', paint)
-      canvas.removeEventListener('contextrestored', paint)
+    const repaint = () => {
+      paintedScale = 0
+      paint()
     }
-  }, [page, smoothing])
+    paint()
+    // During a zoom gesture the CSS camera scales the existing bitmap; the
+    // sharp re-raster happens once the wheel/pinch burst has settled.
+    let settleTimer = 0
+    const unsubscribeZoom = paperView?.subscribe(() => {
+      if (settleTimer) window.clearTimeout(settleTimer)
+      settleTimer = window.setTimeout(() => {
+        settleTimer = 0
+        paint()
+      }, PREVIEW_ZOOM_SETTLE_MS)
+    })
+    const media = window.matchMedia(`(resolution: ${window.devicePixelRatio || 1}dppx)`)
+    media.addEventListener('change', repaint)
+    canvas.addEventListener('contextrestored', repaint)
+    return () => {
+      if (settleTimer) window.clearTimeout(settleTimer)
+      unsubscribeZoom?.()
+      media.removeEventListener('change', repaint)
+      canvas.removeEventListener('contextrestored', repaint)
+    }
+  }, [page, paperView, smoothing])
 
   if (!page) return null
   return (

@@ -24,6 +24,7 @@ Environment=FANOTES_ANALYTICS_DIR=/var/lib/fanotes-analytics
 Environment=FANOTES_HOMEWORK_DIR=/var/lib/fanotes-homework
 Environment=FANOTES_BUG_REPORT_DIR=/var/lib/fanotes-bug-reports
 Environment=FANOTES_SEND_DATA_DIR=/var/lib/fanotes-send-data
+Environment=FANOTES_SYNC_DIR=/var/lib/fanotes-sync
 ExecStart=/usr/bin/node /opt/fanotes-site/server.mjs
 Restart=on-failure
 RestartSec=3s
@@ -53,6 +54,7 @@ ReadWritePaths=/var/lib/fanotes-analytics
 ReadWritePaths=/var/lib/fanotes-homework
 ReadWritePaths=/var/lib/fanotes-bug-reports
 ReadWritePaths=/var/lib/fanotes-send-data
+ReadWritePaths=/var/lib/fanotes-sync
 
 [Install]
 WantedBy=multi-user.target

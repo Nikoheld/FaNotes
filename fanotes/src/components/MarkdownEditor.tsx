@@ -181,6 +181,12 @@ export type MarkdownEditorHandle = {
   focus: () => void
   flushChanges: () => void
   revealLine: (line: number) => boolean
+  /** Programmatic access used by add-ons; every call goes through a normal editor transaction. */
+  getText: () => string | null
+  getSelection: () => { from: number; to: number; text: string; line: number } | null
+  insertText: (text: string, where: 'cursor' | 'start' | 'end' | 'line-end') => boolean
+  replaceSelection: (text: string) => boolean
+  setText: (text: string) => boolean
 }
 
 function commitEditorChange(
@@ -1263,6 +1269,33 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
       })
       view.focus()
       return true
+    },
+    getText: () => viewRef.current?.state.doc.toString() ?? null,
+    getSelection: () => {
+      const view = viewRef.current
+      if (!view) return null
+      const { from, to } = view.state.selection.main
+      return { from, to, text: view.state.sliceDoc(from, to), line: view.state.doc.lineAt(from).number }
+    },
+    insertText: (text, where) => {
+      const view = viewRef.current
+      if (!view || readOnly) return false
+      const { doc } = view.state
+      const head = view.state.selection.main.head
+      const at = where === 'start' ? 0 : where === 'end' ? doc.length : where === 'line-end' ? doc.lineAt(head).to : head
+      return commitEditorChange(view, at, at, text, at + text.length)
+    },
+    replaceSelection: (text) => {
+      const view = viewRef.current
+      if (!view || readOnly) return false
+      const { from, to } = view.state.selection.main
+      return commitEditorChange(view, from, to, text, from + text.length)
+    },
+    setText: (text) => {
+      const view = viewRef.current
+      if (!view || readOnly) return false
+      const length = view.state.doc.length
+      return commitEditorChange(view, 0, length, text, Math.min(text.length, view.state.selection.main.head))
     },
   }), [readOnly])
 

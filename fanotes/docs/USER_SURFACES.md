@@ -2,7 +2,7 @@
 
 Inventory walked from the shipped UI entry points. Each row names a user-visible surface and the source that implements it. The check `scripts/check-user-surfaces.cjs` re-reads those files and fails if a listed needle disappears.
 
-Command-palette action ids walked from `src/App.tsx`: `new-note`, `import-pdf-note`, `new-folder`, `new-subfolder`, `save`, `search`, `drawing`, `note-link`, `subject-book`, `worksheet`, `onenote-import`, `ai-assistant`, `glyphenwerk`, `overview`, `homework`, `daily`, `export-pdf`, `history`, `quick-open`, `nav-back`, `nav-forward`, `reopen-tab`, `split`, `split-swap`, `split-orientation`, `focus`, `sidebar`, `inspector`, `settings`, `reveal`, `bug-report`, `quit`.
+Command-palette action ids walked from `src/App.tsx`: `new-note`, `import-pdf-note`, `new-folder`, `new-subfolder`, `save`, `search`, `drawing`, `note-link`, `subject-book`, `worksheet`, `onenote-import`, `ai-assistant`, `glyphenwerk`, `overview`, `homework`, `daily`, `export-pdf`, `history`, `quick-open`, `nav-back`, `nav-forward`, `reopen-tab`, `split`, `split-swap`, `split-orientation`, `focus`, `sidebar`, `inspector`, `settings`, `sync-now`, `sync-settings`, `addon-store`, `reveal`, `bug-report`, `quit`. Commands contributed by add-ons appear under `Add-on: <name>` and are prefixed `addon:` internally.
 
 ## Notes / vault
 
@@ -24,6 +24,9 @@ Command-palette action ids walked from `src/App.tsx`: `new-note`, `import-pdf-no
 | Split view: second pane, head, divider | `src/App.tsx` | `split-divider` |
 | Split layout ratio / orientation helpers | `src/lib/workspaceNav.ts` | `export const clampSplitRatio` |
 | Read-only ink in the second pane | `src/components/InkPreviewLayer.tsx` | `export function InkPreviewLayer` |
+| Per-pane sheet camera (split zoom stays in its pane) | `src/lib/paperView.ts` | `export const createPaperViewStore` |
+| Device-pixel-snapped split tracks | `src/lib/workspaceNav.ts` | `export const splitFirstPaneSize` |
+| Second-pane ink re-rasters at the pane zoom | `src/components/InkPreviewLayer.tsx` | `PREVIEW_ZOOM_SETTLE_MS` |
 | Tab shortcuts, pin, reorder, context menu | `src/App.tsx` | `tab-context-menu` |
 | Reopen closed tab / tab order / workspace memory helpers | `src/lib/workspaceNav.ts` | `export const rememberClosedTab` |
 | Quick switcher (Strg+O) | `src/components/CommandPalette.tsx` | `mode === 'notes'` |
@@ -93,6 +96,8 @@ Command-palette action ids walked from `src/App.tsx`: `new-note`, `import-pdf-no
 | Shape snap | `src/lib/shapeSnap.ts` | `strokeLooksLikeShape` |
 | Drafting tools (ruler / set square / compass) | `src/lib/draftingTools.ts` | `millimetresAlongEdge` |
 | Drafting guides UI | `src/components/DraftingGuides.tsx` | `DraftingGuides` |
+| Collapsible handwriting sections (title band, infinite body, fold arrow) | `src/lib/inkSections.ts` | `export const collapseSection` |
+| Section bands on the sheet + „Abschnitt“ tool in the pen toolbar | `src/components/DrawingBoard.tsx` | `lw-ink-section-toggle` |
 | Text to handwriting | `src/lib/textToHandwriting.ts` | `synthesizeHandwriting` |
 | Pen-only factory default | `src/defaults.ts` | `defaultSettingsForPlatform` |
 
@@ -180,6 +185,48 @@ Command-palette action ids walked from `src/App.tsx`: `new-note`, `import-pdf-no
 | Place Verlinkung palette | `src/App.tsx` | `id: 'note-link'` |
 | Subject book palette | `src/App.tsx` | `id: 'subject-book'` |
 | Editor more menu | `src/App.tsx` | `editor-menu-label">Datei` |
+
+## Sync
+
+End-to-end encrypted synchronisation of the whole vault (notes, `.famd` companions, PDFs, images and the shared `.fanotes/` metadata; local history stays local) through an account on `fanotes.fasrv.ch`. Design and threat model: `docs/SYNC.md`.
+
+| Surface | Source | Needle |
+| --- | --- | --- |
+| Settings section: account, devices, password, deletion | `src/components/SettingsModal.tsx` | `id: 'sync'` |
+| Sign-in / create-account form, status hero, device list, conflict list, log | `src/components/SyncSettingsSection.tsx` | `export function SyncSettingsSection` |
+| Palette: „Jetzt synchronisieren“ | `src/App.tsx` | `id: 'sync-now'` |
+| Palette: „Sync einrichten“ / „Sync-Einstellungen“ | `src/App.tsx` | `id: 'sync-settings'` |
+| Status-bar item (state, conflict badge, opens the Sync section) | `src/App.tsx` | `sync-status-item` |
+| Remote changes: tree refresh, reload of clean tabs, tabs of deleted notes | `src/App.tsx` | `const applyRemoteChanges` |
+| Busy notes are never overwritten mid-edit | `src/App.tsx` | `const isSyncPathBusy` |
+| Engine: pull → scan → push, conflict copies, tombstones, cursor hold | `src/lib/sync/engine.ts` | `export class SyncEngine` |
+| Crypto: PBKDF2 → wrapping/auth key, HKDF → data/id keys, AES-256-GCM | `src/lib/sync/crypto.ts` | `export const deriveFromPassword` |
+| HTTP client (Bearer session, If-Match revisions) | `src/lib/sync/api.ts` | `export class SyncApi` |
+| Desktop host: raw vault access, safeStorage secrets | `electron/sync.cjs` | `function createSyncHost` |
+| Web host: IndexedDB stores mapped to vault paths | `src/lib/sync/browserSyncHost.ts` | `export const createBrowserSyncHost` |
+| Server: accounts, sessions, encrypted blob store, change feed | `../fanotes-site/sync-api.mjs` | `export const handleSyncRequest` |
+| Settings: automatic sync, device name | `src/types.ts` | `syncAutomatic: boolean` |
+
+## Add-ons
+
+| Surface | Source | Needle |
+| --- | --- | --- |
+| Add-on-Store (Entdecken / Installiert / Entwickeln) | `src/components/addons/AddonStoreModal.tsx` | `export function AddonStoreModal` |
+| Store palette entry and settings section | `src/App.tsx` | `id: 'addon-store'` |
+| Add-on settings (source, auto-update) | `src/components/SettingsModal.tsx` | `id: 'addons'` |
+| Registry: index.json from GitHub with contents-API fallback | `src/lib/addons/registry.ts` | `export const fetchAddonIndex` |
+| Manifest schema and permission labels | `src/lib/addons/manifest.ts` | `export const parseAddonManifest` |
+| Worker runtime: permissions, rate limit, ping, restarts | `src/lib/addons/runtime.ts` | `export class AddonRuntime` |
+| Worker SDK (`fanotes` global) | `src/lib/addons/workerBootstrap.ts` | `export const ADDON_WORKER_BOOTSTRAP` |
+| Host bridge to App state (safe settings view) | `src/lib/addons/appBridge.ts` | `export const safeSettingsView` |
+| Declarative panel blocks | `src/lib/addons/blocks.ts` | `export const normaliseAddonBlocks` |
+| Panel dock beside the editor | `src/components/addons/AddonPanelDock.tsx` | `export function AddonPanelDock` |
+| Block renderer | `src/components/addons/AddonBlocks.tsx` | `export function AddonBlocks` |
+| Add-on prompt dialog | `src/components/addons/AddonPromptDialog.tsx` | `export function AddonPromptDialog` |
+| Status-bar items and dock toggle | `src/App.tsx` | `addon-status-item` |
+| Auto-update on start | `src/App.tsx` | `addonsAutoUpdate` |
+| Electron: GitHub fetch allow-list, on-disk store, add-on https proxy | `electron/addons.cjs` | `registerAddonIpc` |
+| Web: same-origin registry proxy paths | `src/lib/addons/browserAddonsApi.ts` | `rewriteAddonUrlForProxy` |
 
 ## Bug report
 

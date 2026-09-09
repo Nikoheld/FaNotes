@@ -492,17 +492,39 @@ export const scrollViewportToZoomPoint = (
 }
 
 type SharedViewListener = (view: PaperViewSnapshot) => void
-let sharedPaperView = defaultPaperView()
-const sharedPaperViewListeners = new Set<SharedViewListener>()
 
-export const readSharedPaperView = () => sharedPaperView
-
-export const writeSharedPaperView = (view: PaperViewSnapshot) => {
-  sharedPaperView = view
-  sharedPaperViewListeners.forEach((listener) => listener(view))
+/**
+ * One camera: the current snapshot plus its listeners. Every pane that shows a
+ * sheet owns one — the main note uses the shared store below so the ink board,
+ * PDF view and settings find it; a split pane gets its own, so zooming one
+ * sheet never moves the other.
+ */
+export type PaperViewStore = {
+  read: () => PaperViewSnapshot
+  write: (view: PaperViewSnapshot) => void
+  subscribe: (listener: SharedViewListener) => () => void
 }
 
-export const subscribeSharedPaperView = (listener: SharedViewListener) => {
-  sharedPaperViewListeners.add(listener)
-  return () => { sharedPaperViewListeners.delete(listener) }
+export const createPaperViewStore = (initial: PaperViewSnapshot = defaultPaperView()): PaperViewStore => {
+  let current = initial
+  const listeners = new Set<SharedViewListener>()
+  return {
+    read: () => current,
+    write: (view) => {
+      current = view
+      listeners.forEach((listener) => listener(view))
+    },
+    subscribe: (listener) => {
+      listeners.add(listener)
+      return () => { listeners.delete(listener) }
+    },
+  }
 }
+
+export const sharedPaperViewStore = createPaperViewStore()
+
+export const readSharedPaperView = () => sharedPaperViewStore.read()
+
+export const writeSharedPaperView = (view: PaperViewSnapshot) => { sharedPaperViewStore.write(view) }
+
+export const subscribeSharedPaperView = (listener: SharedViewListener) => sharedPaperViewStore.subscribe(listener)

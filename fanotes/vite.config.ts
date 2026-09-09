@@ -23,6 +23,28 @@ export default defineConfig({
     fs: {
       allow: [path.resolve(__dirname, '..')],
     },
+    // Web-mode add-on store: same-origin proxies to GitHub, mirroring the
+    // production nginx config (fanotes-site/deploy). FANOTES_ADDONS_REGISTRY
+    // points the raw-file proxy at a local static server for testing.
+    proxy: {
+      '/addons-registry': {
+        target: process.env.FANOTES_ADDONS_REGISTRY ?? 'https://raw.githubusercontent.com',
+        changeOrigin: true,
+        rewrite: (requestPath) => requestPath.replace(/^\/addons-registry/u, ''),
+      },
+      '/addons-api': {
+        target: process.env.FANOTES_ADDONS_API ?? 'https://api.github.com',
+        changeOrigin: true,
+        rewrite: (requestPath) => requestPath.replace(/^\/addons-api/u, ''),
+        headers: { 'User-Agent': 'FaNotes-AddonStore' },
+      },
+      // Sync in web mode is same-origin (nginx proxies /api/v1/sync in
+      // production). FANOTES_SYNC_API points it at a local test server.
+      '/api/v1/sync': {
+        target: process.env.FANOTES_SYNC_API ?? 'https://fanotes.fasrv.ch',
+        changeOrigin: true,
+      },
+    },
   },
   build: {
     target: 'es2022',
