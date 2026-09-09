@@ -96,6 +96,8 @@ Command-palette action ids walked from `src/App.tsx`: `new-note`, `import-pdf-no
 | Shape snap | `src/lib/shapeSnap.ts` | `strokeLooksLikeShape` |
 | Drafting tools (ruler / set square / compass) | `src/lib/draftingTools.ts` | `millimetresAlongEdge` |
 | Drafting guides UI | `src/components/DraftingGuides.tsx` | `DraftingGuides` |
+| Collapsible handwriting sections (title band, infinite body, fold arrow) | `src/lib/inkSections.ts` | `export const collapseSection` |
+| Section bands on the sheet + „Abschnitt“ tool in the pen toolbar | `src/components/DrawingBoard.tsx` | `lw-ink-section-toggle` |
 | Text to handwriting | `src/lib/textToHandwriting.ts` | `synthesizeHandwriting` |
 | Pen-only factory default | `src/defaults.ts` | `defaultSettingsForPlatform` |
 

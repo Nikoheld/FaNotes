@@ -4554,6 +4554,7 @@ export default function App({ startupBootstrap }: AppProps) {
                         onSaveDrawing={saveDrawingAsset}
                         onInsertMarkdown={insertIntoNote}
                         pagePaperStyle={activePaper}
+                        sectionsEnabled={!isPdfActive}
                         onPagePaperChange={(style) => { if (activeTab) void applyNotePaper(activeTab.path, style) }}
                         onSettingsChange={handleDrawingSettingsChange}
                         onDirtyChange={handleDrawingDirtyChange}
