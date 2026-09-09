@@ -1,5 +1,6 @@
 import type { Sample, Stroke, StrokePoint } from '../../../src/types'
 import { normalizeGermanSharpS } from '../../../src/lib/orthography'
+import { WRITE_CAP_HEIGHT, WRITE_CAP_WIDTH } from './noteCanvas'
 
 export type SynthesizedInkStroke = Stroke & { color: string }
 
@@ -31,6 +32,8 @@ export type HandwritingSynthesisResult = {
   usedSampleIds: string[]
   fontSizeUsed: number
   bounds: [number, number, number, number] | null
+  pageWidth: number
+  pageHeight: number
 }
 
 type Random = () => number
@@ -211,7 +214,10 @@ const createPlans = (
     const sample = selectSample(match.samples, random, previousSampleId)
     const profile = glyphProfile(char)
     const scaleX = globalWidth * (1 + between(random, -0.075, 0.075) * variation)
-    const scaleY = 1 + between(random, -0.04, 0.04) * variation
+    // Per-glyph height and baseline must move a little at the default
+    // variation so repeated letters are not obviously typeset. Variation 0
+    // keeps both uniform (the multipliers collapse to zero).
+    const scaleY = 1 + between(random, -0.11, 0.13) * variation
     const height = em * (profile.top + profile.bottom) * scaleY
     const rawWidth = height * sampleAspect(sample) * profile.widthScale * scaleX
     const width = clamp(rawWidth, em * 0.16, em * (/^[MWmw]$/u.test(char) ? 1.32 : 1.08))
@@ -229,7 +235,7 @@ const createPlans = (
       scaleY,
       slant: globalSlant + between(random, -0.045, 0.045) * variation,
       rotation: between(random, -1.25, 1.25) * Math.PI / 180 * variation,
-      baselineJitter: between(random, -1.65, 1.65) * variation,
+      baselineJitter: between(random, -0.22, 0.20) * em * variation,
       warpPhase: between(random, 0, Math.PI * 2),
       widthVariation: 1 + between(random, -0.09, 0.09) * variation,
       pressurePhase: between(random, 0, Math.PI * 2),
@@ -475,56 +481,49 @@ const strokeBounds = (
   return [left * width, top * height, (right - left) * width, (bottom - top) * height]
 }
 
-export const synthesizeHandwriting = (
-  input: string,
-  samples: Sample[],
+type LayoutSlot = {
+  plan: Plan
+  x: number
+  baseline: number
+  line: number
+  bottom: number
+}
+
+const layoutSlots = (
+  plans: Plan[],
   options: HandwritingSynthesisOptions,
-  page = { width: 900, height: 1273 },
-): HandwritingSynthesisResult => {
-  const width = Math.max(240, page.width)
-  const height = Math.max(300, page.height)
-  const text = normalizeText(input)
-  const random = createRandom(options.seed)
-  const { plans, missing } = createPlans(text, samples, options, random)
+  width: number,
+  startHeight: number,
+): { slots: LayoutSlot[]; lineCount: number; maxBottom: number } => {
   const em = clamp(options.fontSize, 16, 96)
   const left = clamp(options.marginLeft ?? 72, 0, width - 24)
   const right = Math.max(left + 12, width - clamp(options.marginRight ?? 72, 0, width - 24))
-  const top = clamp(options.marginTop ?? 72, 0, height * 0.4)
-  const bottom = height - clamp(options.marginBottom ?? 72, 0, height * 0.4)
+  const top = clamp(options.marginTop ?? 72, 0, startHeight * 0.4)
   const lineHeight = em * clamp(options.lineSpacing, 1, 2.4)
   let baseline = Math.max(top + em * 0.92, options.startY ?? top + em * 0.92)
   let cursorX = left
   let line = 0
-  let lineCount = text ? 1 : 0
-  let glyphCount = 0
-  let connectionCount = 0
-  let overflow = false
-  let overflowCharacters = 0
-  let previousExit: Anchor | null = null
-  let previousChar = ''
-  const strokes: SynthesizedInkStroke[] = []
-  const usedSampleIds = new Set<string>()
-  const clock = { value: Date.now() }
+  let lineCount = plans.length ? 1 : 0
+  let maxBottom = 0
+  const slots: LayoutSlot[] = []
 
   const nextLine = () => {
     cursorX = left
     baseline += lineHeight
     line += 1
     lineCount += 1
-    previousExit = null
-    previousChar = ''
   }
 
   for (let index = 0; index < plans.length; index += 1) {
     const plan = plans[index]
     if (plan.kind === 'newline') {
       nextLine()
+      slots.push({ plan, x: cursorX, baseline, line, bottom: baseline })
       continue
     }
     if (plan.kind === 'space') {
       cursorX += plan.width
-      previousExit = null
-      previousChar = ''
+      slots.push({ plan, x: cursorX, baseline, line, bottom: baseline })
       continue
     }
 
@@ -535,24 +534,67 @@ export const synthesizeHandwriting = (
       const widthOfWord = planWidth(plans.slice(index, end))
       if (widthOfWord <= right - left && cursorX + widthOfWord > right) nextLine()
     }
-    const requiredWidth = plan.kind === 'glyph' ? plan.width : plan.width
+    const requiredWidth = plan.width
     if (cursorX > left && cursorX + requiredWidth > right) nextLine()
 
     const planBottom = plan.kind === 'glyph' ? plan.bottom * em * plan.scaleY : em * 0.12
-    if (baseline + planBottom > bottom) {
-      overflow = true
-      overflowCharacters = plans.slice(index).filter((remaining) => remaining.kind === 'glyph' || remaining.kind === 'missing').length
+    const bottom = baseline + planBottom
+    maxBottom = Math.max(maxBottom, bottom)
+    slots.push({ plan, x: cursorX, baseline, line, bottom })
+    cursorX += plan.kind === 'glyph' ? plan.advance : plan.width
+  }
+
+  return { slots, lineCount, maxBottom }
+}
+
+export const synthesizeHandwriting = (
+  input: string,
+  samples: Sample[],
+  options: HandwritingSynthesisOptions,
+  page = { width: 900, height: 1273 },
+): HandwritingSynthesisResult => {
+  const width = Math.min(WRITE_CAP_WIDTH, Math.max(240, page.width))
+  const startHeight = Math.min(WRITE_CAP_HEIGHT, Math.max(300, page.height))
+  const text = normalizeText(input)
+  const random = createRandom(options.seed)
+  const { plans, missing } = createPlans(text, samples, options, random)
+  const em = clamp(options.fontSize, 16, 96)
+  const marginBottom = clamp(options.marginBottom ?? 72, 0, startHeight * 0.4)
+  const { slots, lineCount: plannedLines, maxBottom } = layoutSlots(plans, options, width, startHeight)
+  const neededHeight = Math.max(startHeight, Math.ceil(maxBottom + marginBottom))
+  const height = Math.min(WRITE_CAP_HEIGHT, neededHeight)
+  const writableBottom = height - marginBottom
+  const overflow = neededHeight > WRITE_CAP_HEIGHT
+  let overflowCharacters = 0
+  let lineCount = text ? plannedLines : 0
+  let glyphCount = 0
+  let connectionCount = 0
+  let previousExit: Anchor | null = null
+  let previousChar = ''
+  const strokes: SynthesizedInkStroke[] = []
+  const usedSampleIds = new Set<string>()
+  const clock = { value: Date.now() }
+
+  for (const slot of slots) {
+    const { plan } = slot
+    if (plan.kind === 'newline' || plan.kind === 'space') {
+      previousExit = null
+      previousChar = ''
+      continue
+    }
+    if (slot.bottom > writableBottom) {
+      overflowCharacters = slots
+        .slice(slots.indexOf(slot))
+        .filter((remaining) => remaining.plan.kind === 'glyph' || remaining.plan.kind === 'missing').length
       break
     }
-
     if (plan.kind === 'missing') {
-      cursorX += plan.width
       previousExit = null
       previousChar = ''
       continue
     }
 
-    const generated = transformGlyph(plan, cursorX, baseline, line, options, width, height, clock)
+    const generated = transformGlyph(plan, slot.x, slot.baseline, slot.line, options, width, height, clock)
     if (options.connectLetters && previousExit && generated.anchors && canJoin(previousChar) && canJoin(plan.char)) {
       const connector = connectorStroke(previousExit, generated.anchors.entry, options, width, height, random, clock)
       if (connector) {
@@ -563,9 +605,12 @@ export const synthesizeHandwriting = (
     strokes.push(...generated.strokes)
     previousExit = generated.anchors?.exit ?? null
     previousChar = plan.char
-    cursorX += plan.advance
     glyphCount += 1
     usedSampleIds.add(plan.sample.id)
+  }
+
+  if (overflow && overflowCharacters === 0) {
+    overflowCharacters = plans.filter((remaining) => remaining.kind === 'glyph' || remaining.kind === 'missing').length - glyphCount
   }
 
   return {
@@ -580,6 +625,8 @@ export const synthesizeHandwriting = (
     usedSampleIds: [...usedSampleIds],
     fontSizeUsed: em,
     bounds: strokeBounds(strokes, width, height),
+    pageWidth: width,
+    pageHeight: height,
   }
 }
 

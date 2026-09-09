@@ -99,6 +99,9 @@ Command-palette action ids walked from `src/App.tsx`: `new-note`, `import-pdf-no
 | Collapsible handwriting sections (title band, infinite body, fold arrow) | `src/lib/inkSections.ts` | `export const collapseSection` |
 | Section bands on the sheet + „Abschnitt“ tool in the pen toolbar | `src/components/DrawingBoard.tsx` | `lw-ink-section-toggle` |
 | Text to handwriting | `src/lib/textToHandwriting.ts` | `synthesizeHandwriting` |
+| Text-to-handwriting grows the page up to the write cap | `src/lib/textToHandwriting.ts` | `WRITE_CAP_HEIGHT` |
+| Text-to-handwriting dialog (text, sliders, paste) | `src/components/TextToHandwritingDialog.tsx` | `data-tth-control="text"` |
+| Dialog chrome on an inline pen board | `src/lib/overlayInteract.ts` | `DRAWING_MODAL_CHROME_SELECTOR` |
 | Pen-only factory default | `src/defaults.ts` | `defaultSettingsForPlatform` |
 
 ## Recognition

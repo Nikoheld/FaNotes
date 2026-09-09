@@ -129,8 +129,10 @@ import {
 } from '../lib/pdfInkHit'
 import {
   type AuthoredInkSave,
+  drawingChromeFromHit,
   inkDocumentIsOwnSave,
   inkPagePersists,
+  isDrawingInkSurfaceTarget,
   overlayGlobalPointerLockOn,
   overlayHitEnabled,
   overlayInert,
@@ -472,38 +474,7 @@ const clearInkCursor = () => {
   }
 }
 
-const isInkSurfaceTarget = (target: EventTarget | null) => (
-  target instanceof Element && Boolean(target.closest('.lw-canvas-surface, .lw-tablet-canvas, .lw-drawing-board.is-inline.is-input-active'))
-)
-
-/** Toolbar, ribbon and menus — never treat these as the ink surface. */
-const CHROME_HIT_SELECTOR = [
-  '.editor-toolbar',
-  '.toolbar-button',
-  '.ink-toolbar-slot',
-  '.lw-draw-toolbar',
-  '.lw-draw-notice',
-  '.lw-conversion-panel',
-  '.lw-art-studio',
-  '.lw-drafting-panel',
-  '.lw-draw-footer',
-  '.editor-more-menu',
-  '.ribbon',
-  '.tabs-bar',
-  '.tabs-menu',
-  '.note-tab',
-  '.paper-view-hud',
-  '.sidebar',
-  '.statusbar',
-  '[data-fanotes-drawing-chrome]',
-  'button',
-  'select',
-  'input',
-  'textarea',
-  'a',
-  '[role="button"]',
-  '[role="menuitem"]',
-].join(', ')
+const isInkSurfaceTarget = (target: EventTarget | null) => isDrawingInkSurfaceTarget(target)
 
 const elementFromPointSafe = (x: number, y: number) => {
   try {
@@ -514,15 +485,9 @@ const elementFromPointSafe = (x: number, y: number) => {
 }
 
 /** Real hit under the cursor — ignores leftover pointer-capture retargeting. */
-const hitTestChrome = (clientX: number, clientY: number) => {
-  const hit = elementFromPointSafe(clientX, clientY)
-  if (!(hit instanceof Element)) return null
-  // Section arrows sit on the sheet itself; a tap on one is a click, not a stroke.
-  const sectionControl = hit.closest('.lw-ink-section-control')
-  if (sectionControl) return sectionControl
-  if (hit.closest('.lw-canvas-surface, .lw-tablet-canvas, .lw-drawing-board.is-inline.is-input-active')) return null
-  return hit.closest(CHROME_HIT_SELECTOR)
-}
+const hitTestChrome = (clientX: number, clientY: number) => (
+  drawingChromeFromHit(elementFromPointSafe(clientX, clientY))
+)
 
 const clickableChromeControl = (chrome: Element) => (
   chrome.closest('button, [role="button"], [role="menuitem"], select, a, input, textarea, label')
@@ -533,6 +498,7 @@ const releaseStuckInputFocus = (preferred?: HTMLElement | null) => {
   if (!(active instanceof HTMLElement)) return
   // Keep intentional board focus (keyboard shortcuts), but never leave the
   // canvas itself focused after pen input — that traps keys/scroll on Hyprland.
+  if (active.closest?.('.lw-tth-dialog, .lw-tth-backdrop')) return
   if (active.classList.contains('lw-tablet-canvas')) {
     try { active.blur() } catch { /* ignore */ }
     if (preferred && preferred !== active) {
@@ -4799,6 +4765,11 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     result: HandwritingSynthesisResult,
   ) => {
     if (!generatedStrokes.length) return
+    const nextHeight = Math.max(sourceHeightRef.current, result.pageHeight || sourceHeightRef.current)
+    const nextWidth = Math.max(sourceWidthRef.current, result.pageWidth || sourceWidthRef.current)
+    if (nextHeight > sourceHeightRef.current || nextWidth > sourceWidthRef.current) {
+      setPageExtent(nextHeight, nextWidth)
+    }
     clearRecognitionScope()
     undoRef.current.push(snapshotStrokes(strokesRef.current))
     if (undoRef.current.length > 80) undoRef.current.shift()
@@ -4826,7 +4797,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       text: `${result.glyphCount} Zeichen als persönliche Handschrift eingefügt${result.connectionCount ? ` · ${result.connectionCount} natürliche Verbindungen` : ''}.`,
     })
     fitPageToInk()
-  }, [bumpInkRevision, clearRecognitionScope, fitPageToInk, scheduleRedraw, setDirty, updateHistoryState])
+  }, [bumpInkRevision, clearRecognitionScope, fitPageToInk, scheduleRedraw, setDirty, setPageExtent, updateHistoryState])
 
   const drawingPayload = useCallback((includeImage = false): DrawingSavePayload => {
     // Refs, not state: a grow in an effect and a save in the same commit (the
@@ -6145,6 +6116,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   }
 
   const handleKeyboard = (event: React.KeyboardEvent) => {
+    const keyTarget = event.target
+    if (keyTarget instanceof Element && keyTarget.closest('.lw-tth-dialog, .lw-tth-backdrop')) return
     if (event.key === 'Escape' && mathCorrectionSession) {
       event.preventDefault()
       closeMathCorrectionSession()

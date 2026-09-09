@@ -55,6 +55,7 @@ try {
     synthesizeHandwriting,
     synthesizeHandwritingToFit,
   } = await server.ssrLoadModule('/src/lib/textToHandwriting.ts')
+  const { WRITE_CAP_HEIGHT } = await server.ssrLoadModule('/src/lib/noteCanvas.ts')
 
   const characters = [...new Set('Test einer langen Zeile')].filter((char) => char !== ' ')
   const samples = characters.flatMap((char) => [sample(char, 1), sample(char, 2)])
@@ -105,14 +106,54 @@ try {
   )
 
   const longText = 'test einer langen Zeile '.repeat(5).trim()
-  const tooLarge = synthesizeHandwriting(longText, samples, { ...options, fontSize: 60 }, { width: 400, height: 420 })
-  assert.equal(tooLarge.overflow, true)
-  const fitted = synthesizeHandwritingToFit(longText, samples, { ...options, fontSize: 60 }, { width: 400, height: 420 }, 18)
-  assert.ok(fitted.fontSizeUsed < 60, 'Die automatische Anpassung muss die Schrift bei Platzmangel verkleinern.')
-  assert.equal(fitted.overflow, false)
+  const longGlyphCount = [...longText].filter((char) => char !== ' ').length
+  const shortPage = { width: 400, height: 420 }
+  const grown = synthesizeHandwriting(longText, samples, { ...options, fontSize: 60 }, shortPage)
+  assert.equal(grown.overflow, false, 'Ein zu hoher Text muss die Seite wachsen lassen statt zu blockieren.')
+  assert.equal(grown.glyphCount, longGlyphCount, 'Jedes GlyphenWerk-Zeichen muss nach dem Wachsen ausgegeben werden.')
+  assert.ok(grown.pageHeight > shortPage.height, 'Die benutzte Seitenhöhe muss über der Startseite liegen.')
+  assert.ok(grown.pageHeight <= WRITE_CAP_HEIGHT)
+
+  const atCap = synthesizeHandwriting(longText, samples, {
+    ...options,
+    fontSize: 60,
+    startY: WRITE_CAP_HEIGHT - 8,
+  }, { width: 400, height: WRITE_CAP_HEIGHT })
+  assert.equal(atCap.overflow, true, 'Am Schreibhöhen-Anschlag muss Overflow gemeldet werden.')
+  assert.ok(atCap.overflowCharacters > 0, 'Overflow am Anschlag darf Glyphen nicht still verwerfen.')
+  assert.ok(atCap.glyphCount < longGlyphCount)
+
+  const fitted = synthesizeHandwritingToFit(longText, samples, { ...options, fontSize: 60, startY: WRITE_CAP_HEIGHT - 8 }, { width: 400, height: WRITE_CAP_HEIGHT }, 18)
+  assert.ok(fitted.fontSizeUsed <= 60)
   assert.equal(JSON.stringify(samples), sourceSnapshot, 'Die Synthese darf Trainingsdaten nicht verändern.')
 
-  console.log(`Text-zu-Handschrift erfolgreich: ${first.glyphCount} Glyphen, ${first.connectionCount} Verbindungen, Variation, freie Fortsetzungsposition, Umbruch, Auto-Fit und Sicherheitsgrenzen geprüft.`)
+  const eSamples = [sample('e', 1)]
+  const glyphBox = (stroke, pageHeight) => {
+    const ys = stroke.points.map((point) => point.y * pageHeight)
+    return { height: Math.max(...ys) - Math.min(...ys), baseline: Math.max(...ys) }
+  }
+  const defaultVariation = synthesizeHandwriting('eeee', eSamples, {
+    ...options,
+    variation: 0.62,
+    connectLetters: false,
+    seed: 1_337,
+  })
+  const defaultBoxes = defaultVariation.strokes.map((stroke) => glyphBox(stroke, defaultVariation.pageHeight))
+  assert.equal(defaultVariation.glyphCount, 4)
+  assert.ok(new Set(defaultBoxes.map((box) => box.height.toFixed(4))).size > 1, 'Wiederholte Buchstaben brauchen unterschiedliche Höhen.')
+  assert.ok(new Set(defaultBoxes.map((box) => box.baseline.toFixed(4))).size > 1, 'Wiederholte Buchstaben dürfen nicht auf einer Linie sitzen.')
+
+  const uniform = synthesizeHandwriting('eeee', eSamples, {
+    ...options,
+    variation: 0,
+    connectLetters: false,
+    seed: 1_337,
+  })
+  const uniformBoxes = uniform.strokes.map((stroke) => glyphBox(stroke, uniform.pageHeight))
+  assert.equal(new Set(uniformBoxes.map((box) => box.height.toFixed(6))).size, 1, 'Variation 0 muss gleiche Höhen behalten.')
+  assert.equal(new Set(uniformBoxes.map((box) => box.baseline.toFixed(6))).size, 1, 'Variation 0 muss die Grundlinie halten.')
+
+  console.log(`Text-zu-Handschrift erfolgreich: ${first.glyphCount} Glyphen, ${first.connectionCount} Verbindungen, Seitenwachstum, Variation, freie Fortsetzungsposition, Umbruch und Sicherheitsgrenzen geprüft.`)
 } finally {
   await server.close()
 }

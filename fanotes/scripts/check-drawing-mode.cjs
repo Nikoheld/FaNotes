@@ -20,7 +20,8 @@ const drafting = fs.readFileSync(path.join(root, 'src', 'lib', 'draftingTools.ts
 const bugReport = fs.readFileSync(path.join(root, 'src', 'lib', 'bugReport.ts'), 'utf8')
 const settingsModal = fs.readFileSync(path.join(root, 'src', 'components', 'SettingsModal.tsx'), 'utf8')
 const pdfInk = fs.readFileSync(path.join(root, 'src', 'lib', 'pdfInkHit.ts'), 'utf8')
-const lockSource = [source, markdownEditor, paperCaret, inkMap, toolErase, inkPolicy, paperGrow, inkPaint, paperCanvas, defaults, appSource, drafting, bugReport, settingsModal, pdfInk].join('\n')
+const overlayInteract = fs.readFileSync(path.join(root, 'src', 'lib', 'overlayInteract.ts'), 'utf8')
+const lockSource = [source, markdownEditor, paperCaret, inkMap, toolErase, inkPolicy, paperGrow, inkPaint, paperCanvas, defaults, appSource, drafting, bugReport, settingsModal, pdfInk, overlayInteract].join('\n')
 
 const requiredBrushes = ['fineliner', 'pencil', 'marker', 'paintbrush', 'calligraphy', 'highlighter', 'watercolor', 'spray']
 const requiredEffects = ['solid', 'rainbow', 'aurora', 'sunset', 'ocean', 'gold', 'silver', 'neon']
@@ -65,7 +66,9 @@ const safeguards = [
   ['const isInkSurfaceTarget', 'Klick auf Leiste/Tabs beendet hängenden Stift'],
   ['const hitTestChrome', 'Klicks treffen die echte Schaltfläche, nicht eine hängende Stift-Capture'],
   ['document.elementFromPoint', 'Treffer unter dem Cursor unabhängig von Pointer-Capture'],
-  [".closest('.lw-canvas-surface, .lw-tablet-canvas, .lw-drawing-board.is-inline.is-input-active')", 'Inline-Overlay und Tintenfläche zählen als Stiftziel'],
+  ["const DRAWING_INK_SURFACE_SELECTOR = '.lw-canvas-surface, .lw-tablet-canvas, .lw-drawing-board.is-inline.is-input-active'", 'Inline-Overlay und Tintenfläche zählen als Stiftziel'],
+  ['DRAWING_MODAL_CHROME_SELECTOR', 'Text-zu-Handschrift-Dialog bleibt Chrome auf dem Inline-Blatt'],
+  ['drawingChromeFromHit', 'Chrome-Hit-Test für Dialoge auf dem Inline-Blatt'],
   ['position:fixed;z-index:80;top:78px;right:16px', 'Konvertierungs-Panel bleibt im Viewport'],
   ["addEventListener('wheel', onWheel", 'Trackpad-Zoom löst Stift-Capture sofort'],
   ["from '../lib/inkPointerSession'", 'Wacom-Lift-Regeln liegen im gelieferten Session-Helper'],

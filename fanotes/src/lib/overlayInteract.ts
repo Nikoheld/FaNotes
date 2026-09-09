@@ -242,3 +242,67 @@ export const interactOpsFromBugEvents = (events: BugInteractEvent[]): InteractOp
   }
   return ops
 }
+
+/**
+ * Modal chrome hosted inside the drawing board. The text-to-handwriting
+ * dialog is a child of `.lw-drawing-board.is-inline.is-input-active`, so a
+ * naive “closest board = ink” test would treat its sliders and textarea as
+ * the sheet and steal pointer/keyboard/paste.
+ */
+export const DRAWING_MODAL_CHROME_SELECTOR = '.lw-tth-backdrop, .lw-tth-dialog'
+
+export const DRAWING_INK_SURFACE_SELECTOR = '.lw-canvas-surface, .lw-tablet-canvas, .lw-drawing-board.is-inline.is-input-active'
+
+/** Toolbar, ribbon, menus and form controls — never treat these as ink. */
+export const DRAWING_CHROME_SELECTOR = [
+  DRAWING_MODAL_CHROME_SELECTOR,
+  '.lw-ink-section-control',
+  '.editor-toolbar',
+  '.toolbar-button',
+  '.ink-toolbar-slot',
+  '.lw-draw-toolbar',
+  '.lw-draw-notice',
+  '.lw-conversion-panel',
+  '.lw-art-studio',
+  '.lw-drafting-panel',
+  '.lw-draw-footer',
+  '.editor-more-menu',
+  '.ribbon',
+  '.tabs-bar',
+  '.tabs-menu',
+  '.note-tab',
+  '.paper-view-hud',
+  '.sidebar',
+  '.statusbar',
+  '[data-fanotes-drawing-chrome]',
+  'button',
+  'select',
+  'input',
+  'textarea',
+  'a',
+  '[role="button"]',
+  '[role="menuitem"]',
+  '[role="dialog"]',
+].join(', ')
+
+/**
+ * Real chrome under a hit. Modal dialogs inside an inline active board stay
+ * chrome so a pointerdown cannot start a stroke or preventDefault a slider.
+ */
+export const drawingChromeFromHit = (hit: EventTarget | null): Element | null => {
+  if (!(hit instanceof Element)) return null
+  const modal = hit.closest(DRAWING_MODAL_CHROME_SELECTOR)
+  if (modal) return hit.closest(DRAWING_CHROME_SELECTOR) ?? modal
+  const sectionControl = hit.closest('.lw-ink-section-control')
+  if (sectionControl) return sectionControl
+  if (hit.closest(DRAWING_INK_SURFACE_SELECTOR)) return null
+  return hit.closest(DRAWING_CHROME_SELECTOR)
+}
+
+export const drawingPointerStartsInk = (hit: EventTarget | null) => drawingChromeFromHit(hit) === null
+
+export const isDrawingInkSurfaceTarget = (target: EventTarget | null) => {
+  if (!(target instanceof Element)) return false
+  if (drawingChromeFromHit(target)) return false
+  return Boolean(target.closest(DRAWING_INK_SURFACE_SELECTOR))
+}

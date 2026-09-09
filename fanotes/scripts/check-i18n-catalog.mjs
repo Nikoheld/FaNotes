@@ -148,7 +148,19 @@ const runOnce = async () => {
   assert.ok(harvested.includes('Pinsel'), 'harvest missed art-studio Pinsel')
   assert.ok(harvested.includes('Zeilenabstand'), 'harvest missed handwriting dialog Zeilenabstand')
   assert.ok(harvested.includes('Datenerfassung'), 'harvest missed GlyphenWerk Datenerfassung')
-  assert.match(readFileSync(new URL('../../src/App.tsx', import.meta.url), 'utf8'), /\{`Schreibe „\$\{selectedLabel\.char\}“`\}/)
+  const glyphenWerkApps = [
+    new URL('../../src/App.tsx', import.meta.url),
+    new URL('../../../upstream-git/src/App.tsx', import.meta.url),
+  ]
+  assert.ok(glyphenWerkApps.some((url) => {
+    try {
+      const text = readFileSync(url, 'utf8')
+      return /\{`Schreibe „\$\{selectedLabel\.char\}“`\}/.test(text)
+        || /Schreibe „\{selectedLabel\.char\}“/.test(text)
+    } catch {
+      return false
+    }
+  }), 'GlyphenWerk write prompt')
   assert.ok(harvested.includes('In FaNotes integriert'), 'harvest missed GlyphenWerk shell integriert')
   assert.ok(harvested.includes('Aktueller Strich'), 'harvest missed art-studio current stroke')
   assert.ok(harvested.includes('Trainingspaket'), 'harvest missed GlyphenWerk Trainingspaket')
