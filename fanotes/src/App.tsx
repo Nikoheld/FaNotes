@@ -10,6 +10,8 @@ import {
   CheckCircle2,
   ChevronRight,
   CircleAlert,
+  Cloud,
+  CloudOff,
   ClipboardList,
   Columns2,
   Command,
@@ -68,6 +70,9 @@ import { createAppAddonBridge, safeSettingsView, type AppAddonDeps } from './lib
 import { addonIndexCache } from './lib/addons/indexCache'
 import { parseAddonSource } from './lib/addons/registry'
 import { addonRuntime } from './lib/addons/runtime'
+import { syncEngine } from './lib/sync/engine'
+import { syncStatusLabel } from './lib/sync/status'
+import type { SettingsSection } from './components/SettingsModal'
 import { createAddonFetchText, createAddonStoragePort } from './lib/addons/storagePort'
 import type { AddonPromptRequest } from './components/addons/AddonPromptDialog'
 import { convertNoteSourceToCurrentStandard } from './lib/noteStandard'
@@ -655,6 +660,9 @@ export default function App({ startupBootstrap }: AppProps) {
   const [addonStoreOpen, setAddonStoreOpen] = useState(false)
   const [addonPrompt, setAddonPrompt] = useState<AddonPromptRequest | null>(null)
   const addonState = useSyncExternalStore(addonRuntime.subscribe, addonRuntime.getState, addonRuntime.getState)
+  const syncState = useSyncExternalStore(syncEngine.subscribe, syncEngine.getState, syncEngine.getState)
+  const syncApi = window.fanotes?.sync ?? null
+  const [settingsSection, setSettingsSection] = useState<SettingsSection | undefined>(undefined)
   const addonNoteChangedRef = useRef<((path: string, content: string) => void) | null>(null)
   const [confirmRequest, setConfirmRequest] = useState<{
     message: string
@@ -1361,6 +1369,7 @@ export default function App({ startupBootstrap }: AppProps) {
     if (session !== vaultSessionGenerationRef.current) return treeRef.current
     treeRef.current = nextTree
     setTree(nextTree)
+    syncEngine.notifyLocalChange()
     return nextTree
   }, [])
 
@@ -1625,6 +1634,7 @@ export default function App({ startupBootstrap }: AppProps) {
       const visibleContent = stripFamdPayload(nextContent)
       await window.fanotes.writeFile(isPdfNotePath(path) ? companionNotePath(path, '.famd') : path, nextContent)
       addonRuntime.emit('note:saved', { path, title: fileName(path).replace(/\.(md|markdown|pdf)$/iu, ''), length: visibleContent.length })
+      syncEngine.notifyLocalChange()
       if (savedSession) {
         // Activity during the write builds on the saved session; only the
         // revision that actually reached the disk counts as persisted.
@@ -1891,6 +1901,74 @@ export default function App({ startupBootstrap }: AppProps) {
       return remaining[Math.min(Math.max(latestIndex, 0), remaining.length - 1)]?.path ?? null
     })
   }, [flushDocumentLayers, saveContent])
+
+  /** True while this device holds unsaved work for a path – the sync engine then leaves that file alone until the next cycle. */
+  const isSyncPathBusy = useCallback((path: string) => {
+    const companionOwner = path.endsWith('.famd') ? tabsRef.current.find((tab) => companionNotePath(tab.path, '.famd') === path)?.path : undefined
+    const notePath = companionOwner ?? path
+    if (pendingWrites.current.has(notePath) || saveTimers.current.has(notePath)) return true
+    const tab = tabsRef.current.find((candidate) => candidate.path === notePath)
+    if (tab && tab.content !== tab.savedContent) return true
+    // Ink and worksheet layers live in the .famd companion; while they are open here, the other device's copy waits.
+    if (path.endsWith('.famd') && activePathRef.current === notePath && (drawingOpenRef.current || drawingDirtyRef.current)) return true
+    return false
+  }, [])
+
+  /** Files another device changed: refresh the tree, reload clean open tabs, drop tabs of deleted notes. */
+  const applyRemoteChanges = useCallback(async ({ written, removed }: { written: string[]; removed: string[] }) => {
+    await refreshTree()
+    for (const path of removed) {
+      if (!tabsRef.current.some((tab) => tab.path === path)) continue
+      setTabs((current) => current.filter((tab) => tab.path !== path))
+      setSplitPath((current) => current === path ? null : current)
+      setActivePath((currentActive) => {
+        if (currentActive !== path) return currentActive
+        const remaining = tabsRef.current.filter((tab) => tab.path !== path)
+        return remaining[0]?.path ?? null
+      })
+    }
+    const touched = new Set<string>()
+    for (const path of written) {
+      for (const tab of tabsRef.current) {
+        if (tab.path === path || companionNotePath(tab.path, '.famd') === path) touched.add(tab.path)
+      }
+    }
+    for (const path of touched) {
+      const tab = tabsRef.current.find((candidate) => candidate.path === path)
+      if (!tab || tab.content !== tab.savedContent || pendingWrites.current.has(path)) continue
+      try {
+        const fresh = await readNoteTab(path)
+        setTabs((current) => current.map((candidate) => candidate.path === path && candidate.content === candidate.savedContent ? { ...candidate, content: fresh.content, savedContent: fresh.content } : candidate))
+        setTagIndex((current) => ({ ...current, [path]: parseNoteTags(fresh.content) }))
+      } catch {
+        // The note vanished between the change list and the read; the next tree refresh reflects that.
+      }
+    }
+  }, [readNoteTab, refreshTree])
+
+  const syncDepsRef = useRef({ isSyncPathBusy, applyRemoteChanges, toast })
+  syncDepsRef.current = { isSyncPathBusy, applyRemoteChanges, toast }
+
+  useEffect(() => {
+    if (!syncApi) return
+    syncEngine.attach(syncApi, {
+      platform: window.fanotes.platform,
+      deviceName: () => settingsRef.current.syncDeviceName,
+      automatic: () => settingsRef.current.syncAutomatic,
+      isPathBusy: (path) => syncDepsRef.current.isSyncPathBusy(path),
+      onApplied: (change) => { void syncDepsRef.current.applyRemoteChanges(change) },
+      onConflict: (conflict) => syncDepsRef.current.toast(`Sync-Konflikt bei „${fileName(conflict.path)}“ – deine Fassung liegt als Kopie daneben.`, 'info'),
+      onSignedOut: (reason) => syncDepsRef.current.toast(reason, 'error'),
+    })
+    // Sync never delays startup: the first cycle runs once the notes are on screen.
+    let cancelled = false
+    const timer = window.setTimeout(() => { if (!cancelled) void syncEngine.start() }, 2500)
+    return () => {
+      cancelled = true
+      window.clearTimeout(timer)
+      syncEngine.dispose()
+    }
+  }, [syncApi])
 
   const cycleTabs = useCallback((direction: 1 | -1) => {
     const currentTabs = tabsRef.current
@@ -2695,7 +2773,8 @@ export default function App({ startupBootstrap }: AppProps) {
     if (settingsRef.current.experimentalHomeworkApi) void loadSecureSettings()
   }, [bootstrap?.vaultPath, loadSecureSettings])
 
-  const openSettings = useCallback(() => {
+  const openSettings = useCallback((section?: SettingsSection) => {
+    setSettingsSection(section)
     void loadSecureSettings()
       .catch(() => undefined)
       .finally(() => setSettingsOpen(true))
@@ -2759,6 +2838,7 @@ export default function App({ startupBootstrap }: AppProps) {
       setDrawingSession((current) => ({ key: current.key + 1, document: null, path: null }))
       setWorksheetSession((current) => ({ key: current.key + 1, documents: [] }))
       setBootstrap(selected)
+      void syncEngine.switchVault().catch(() => undefined)
       const selectedSettings = { ...defaultSettingsForPlatform(window.fanotes.platform), ...selected.settings }
       const selectedSettingsRevision = settingsRevisionRef.current + 1
       settingsRevisionRef.current = selectedSettingsRevision
@@ -3562,12 +3642,14 @@ export default function App({ startupBootstrap }: AppProps) {
     { id: 'sidebar', label: 'Dateileiste umschalten', group: 'Ansicht', icon: <PanelLeftClose size={15} />, run: () => setSidebarVisible((value) => !value) },
     { id: 'inspector', label: 'Gliederung umschalten', group: 'Ansicht', icon: <PanelRightClose size={15} />, run: () => setInspectorVisible((value) => !value) },
     { id: 'settings', label: 'Einstellungen öffnen', shortcut: 'Ctrl ,', group: 'FaNotes', icon: <Settings size={15} />, run: () => openSettings() },
+    ...(syncApi && syncState.account ? [{ id: 'sync-now', label: 'Jetzt synchronisieren', detail: syncStatusLabel(syncState), group: 'FaNotes', keywords: 'sync synchronisieren cloud server geräte', icon: <Cloud size={15} />, run: () => { void syncEngine.syncNow('manual') } }] : []),
+    ...(syncApi ? [{ id: 'sync-settings', label: syncState.account ? 'Sync-Einstellungen' : 'Sync einrichten', detail: syncState.account ? syncState.account.email : 'Konto erstellen oder anmelden – Notizen auf allen Geräten', group: 'FaNotes', keywords: 'sync konto anmelden cloud geräte account login', icon: <Cloud size={15} />, run: () => openSettings('sync') }] : []),
     { id: 'addon-store', label: 'Add-on-Store', detail: 'Add-ons aus GitHub entdecken, installieren und verwalten', group: 'FaNotes', keywords: 'addon add-on plugin erweiterung store extension', icon: <Puzzle size={15} />, run: () => setAddonStoreOpen(true) },
     ...addonPaletteActions,
     { id: 'reveal', label: isWeb ? 'Notiz herunterladen' : 'Im Dateimanager zeigen', detail: isWeb ? 'Aktuelle Notiz exportieren' : 'Speicherort der geöffneten Notiz öffnen', group: 'Dateien', keywords: 'ordner explorer finder dateimanager download export', icon: isWeb ? <Download size={15} /> : <FolderOpen size={15} />, run: () => { if (activePath) void window.fanotes.revealInFolder(activePath) } },
     { id: 'bug-report', label: 'Fehler melden', detail: 'Kurz beschreiben; die letzten fünf Minuten werden angehängt', group: 'FaNotes', keywords: 'bug report fehler logs support', icon: <Bug size={15} />, run: () => setBugReportOpen(true) },
     { id: 'quit', label: isWeb ? 'Zur FaNotes-Website' : 'FaNotes beenden', shortcut: 'Ctrl Q', group: 'FaNotes', icon: <X size={15} />, run: () => window.fanotes.requestClose() },
-  ], [addonPaletteActions, activePath, activeTab, attachBookToSubject, bookOpen, createDailyNote, createFolder, createNote, currentBook, drawingOpen, exportCurrentPdf, focusMode, importOneNote, importPdfNote, isWeb, navigateHistory, openGlyphenWerk, openHistory, openHomework, openLmStudio, openOverview, openSettings, openWorksheetImport, reopenClosedTab, saveCurrentWork, settings.dailyNotesFolder, splitLayout.orientation, splitPath, startNoteLinkPlacement, swapSplitPanes, toast, toggleBookView, toggleDrawing, toggleFocusMode, toggleSplit, toggleSplitOrientation])
+  ], [addonPaletteActions, activePath, activeTab, syncApi, syncState, attachBookToSubject, bookOpen, createDailyNote, createFolder, createNote, currentBook, drawingOpen, exportCurrentPdf, focusMode, importOneNote, importPdfNote, isWeb, navigateHistory, openGlyphenWerk, openHistory, openHomework, openLmStudio, openOverview, openSettings, openWorksheetImport, reopenClosedTab, saveCurrentWork, settings.dailyNotesFolder, splitLayout.orientation, splitPath, startNoteLinkPlacement, swapSplitPanes, toast, toggleBookView, toggleDrawing, toggleFocusMode, toggleSplit, toggleSplitOrientation])
 
   // ---- Add-ons -------------------------------------------------------------
   // Everything add-ons may touch flows through this bridge. The deps object is
@@ -4598,7 +4680,7 @@ export default function App({ startupBootstrap }: AppProps) {
             ))}
           </nav>
         )}</div>
-        <div className="statusbar-right">{updateState.status === 'downloaded' && <button type="button" className="update-ready-button" title={`FaNotes ${updateState.latestVersion} installieren und neu starten`} onClick={() => void installUpdate()}><ShieldCheck size={11} /> Update bereit</button>}{updateState.status === 'downloading' && <span><LoaderCircle className="spin" size={11} /> Update {Math.round(updateState.progress * 100)} %</span>}{settings.spellcheck && activeTab && !drawingOpen && detectedTextLanguage !== 'unknown' && <span className="detected-text-language" title="Automatisch erkannte Sprache für die lokale Rechtschreibprüfung"><b>Aa</b> {detectedTextLanguage === 'de' ? 'Deutsch' : detectedTextLanguage === 'en' ? 'English' : 'DE / EN'}</span>}{settings.showWordCount && activeTab && <span>{activeWordCount} Wörter</span>}{addonState.statusItems.map((item) => item.clickable ? <button key={`${item.addonId}/${item.id}`} type="button" className="addon-status-item" title={item.title ?? undefined} data-i18n-ignore onClick={() => addonRuntime.clickStatusItem(item.addonId, item.id)}>{item.text}</button> : <span key={`${item.addonId}/${item.id}`} className="addon-status-item" title={item.title ?? undefined} data-i18n-ignore>{item.text}</span>)}{addonState.panels.length > 0 && !addonState.dockOpen && <button type="button" className="addon-status-item addon-status-item--dock" title="Add-on-Panels einblenden" onClick={() => addonRuntime.setDockOpen(true)}><Puzzle size={11} /> {addonState.panels.length}</button>}<button type="button" className={`save-status ${saveState === 'saved' ? 'save-ok' : 'save-pending'}`} title="Jetzt speichern (Strg+S)" aria-live="polite" onClick={() => void saveCurrentWork()}>{saveState === 'saved' ? <CheckCircle2 size={11} /> : saveState === 'saving' ? <LoaderCircle className="spin" size={11} /> : <CircleAlert size={11} />}{saveState === 'saved' ? 'Gespeichert' : saveState === 'saving' ? 'Speichert …' : 'Speicherfehler'}</button><span title={isWeb ? 'Die Daten bleiben in diesem Browser' : 'Dein Vault bleibt auf deinem Gerät'}><ShieldCheck size={11} /> {isWeb ? 'Im Browser gespeichert' : 'Lokal & privat'}</span></div>
+        <div className="statusbar-right">{updateState.status === 'downloaded' && <button type="button" className="update-ready-button" title={`FaNotes ${updateState.latestVersion} installieren und neu starten`} onClick={() => void installUpdate()}><ShieldCheck size={11} /> Update bereit</button>}{updateState.status === 'downloading' && <span><LoaderCircle className="spin" size={11} /> Update {Math.round(updateState.progress * 100)} %</span>}{settings.spellcheck && activeTab && !drawingOpen && detectedTextLanguage !== 'unknown' && <span className="detected-text-language" title="Automatisch erkannte Sprache für die lokale Rechtschreibprüfung"><b>Aa</b> {detectedTextLanguage === 'de' ? 'Deutsch' : detectedTextLanguage === 'en' ? 'English' : 'DE / EN'}</span>}{settings.showWordCount && activeTab && <span>{activeWordCount} Wörter</span>}{addonState.statusItems.map((item) => item.clickable ? <button key={`${item.addonId}/${item.id}`} type="button" className="addon-status-item" title={item.title ?? undefined} data-i18n-ignore onClick={() => addonRuntime.clickStatusItem(item.addonId, item.id)}>{item.text}</button> : <span key={`${item.addonId}/${item.id}`} className="addon-status-item" title={item.title ?? undefined} data-i18n-ignore>{item.text}</span>)}{addonState.panels.length > 0 && !addonState.dockOpen && <button type="button" className="addon-status-item addon-status-item--dock" title="Add-on-Panels einblenden" onClick={() => addonRuntime.setDockOpen(true)}><Puzzle size={11} /> {addonState.panels.length}</button>}{syncApi && syncState.account && <button type="button" className={`sync-status-item is-${syncState.status}`} title={`Sync · ${syncState.account.email} · ${syncStatusLabel(syncState)}${syncState.error ? ` · ${syncState.error}` : ''}`} aria-live="polite" onClick={() => openSettings('sync')}>{syncState.status === 'syncing' ? <LoaderCircle className="spin" size={11} /> : syncState.status === 'offline' ? <CloudOff size={11} /> : syncState.status === 'error' ? <CircleAlert size={11} /> : <Cloud size={11} />}{syncState.status === 'syncing' ? 'Sync …' : syncState.status === 'offline' ? 'Offline' : syncState.status === 'error' ? 'Sync-Fehler' : 'Synchron'}{syncState.conflicts.length > 0 && <em>{syncState.conflicts.length}</em>}</button>}<button type="button" className={`save-status ${saveState === 'saved' ? 'save-ok' : 'save-pending'}`} title="Jetzt speichern (Strg+S)" aria-live="polite" onClick={() => void saveCurrentWork()}>{saveState === 'saved' ? <CheckCircle2 size={11} /> : saveState === 'saving' ? <LoaderCircle className="spin" size={11} /> : <CircleAlert size={11} />}{saveState === 'saved' ? 'Gespeichert' : saveState === 'saving' ? 'Speichert …' : 'Speicherfehler'}</button><span title={isWeb ? 'Die Daten bleiben in diesem Browser' : 'Dein Vault bleibt auf deinem Gerät'}><ShieldCheck size={11} /> {isWeb ? 'Im Browser gespeichert' : 'Lokal & privat'}</span></div>
       </footer>
 
       {historyOpen && (
@@ -4625,7 +4707,7 @@ export default function App({ startupBootstrap }: AppProps) {
         </div>
       )}
       {paletteOpen && <Suspense fallback={null}><SafeBoundary name="Befehlspalette"><CommandPalette actions={paletteActions} mode={paletteMode} rankNotes={rankNotesForPalette} activePath={activePath} onOpenNote={(path) => void openNote(path)} onOpenNoteInSplit={(path) => void openInSplit(path)} onClose={closePalette} /></SafeBoundary></Suspense>}
-      {settingsOpen && <Suspense fallback={null}><SafeBoundary name="Einstellungen" fallbackTitle="Die Einstellungen sind abgestürzt"><SettingsModal platform={window.fanotes.platform} settings={settings} vaultPath={bootstrap.vaultPath} updateState={updateState} onChange={applySettings} onClose={() => setSettingsOpen(false)} onSelectVault={() => void selectVault()} onOpenGlyphenWerk={() => { setSettingsOpen(false); openGlyphenWerk() }} onOpenAddonStore={() => { setSettingsOpen(false); openAddonStore() }} addonSummary={{ installed: addonState.installed.length, running: addonState.installed.filter((record) => addonState.statuses[record.id]?.state === 'running').length }} onImportTraining={importTrainingFromSettings} onImportOneNote={importOneNote} onCheckUpdate={checkForUpdates} onDownloadUpdate={downloadUpdate} onInstallUpdate={installUpdate} onResetSettings={resetSettings} onResetAppData={resetAppData} onOpenBugReport={() => { setSettingsOpen(false); setBugReportOpen(true) }} onConvertNotes={convertAllNotesToCurrentStandard} remoteSupportSession={remoteSupportSession} onRemoteSupportStart={startRemoteSupport} onRemoteSupportStop={stopRemoteSupport} /></SafeBoundary></Suspense>}
+      {settingsOpen && <Suspense fallback={null}><SafeBoundary name="Einstellungen" fallbackTitle="Die Einstellungen sind abgestürzt"><SettingsModal syncEngine={syncApi ? syncEngine : undefined} syncState={syncState} initialSection={settingsSection} platform={window.fanotes.platform} settings={settings} vaultPath={bootstrap.vaultPath} updateState={updateState} onChange={applySettings} onClose={() => { setSettingsOpen(false); setSettingsSection(undefined) }} onSelectVault={() => void selectVault()} onOpenGlyphenWerk={() => { setSettingsOpen(false); openGlyphenWerk() }} onOpenAddonStore={() => { setSettingsOpen(false); openAddonStore() }} addonSummary={{ installed: addonState.installed.length, running: addonState.installed.filter((record) => addonState.statuses[record.id]?.state === 'running').length }} onImportTraining={importTrainingFromSettings} onImportOneNote={importOneNote} onCheckUpdate={checkForUpdates} onDownloadUpdate={downloadUpdate} onInstallUpdate={installUpdate} onResetSettings={resetSettings} onResetAppData={resetAppData} onOpenBugReport={() => { setSettingsOpen(false); setBugReportOpen(true) }} onConvertNotes={convertAllNotesToCurrentStandard} remoteSupportSession={remoteSupportSession} onRemoteSupportStart={startRemoteSupport} onRemoteSupportStop={stopRemoteSupport} /></SafeBoundary></Suspense>}
       {addonStoreOpen && <Suspense fallback={null}><SafeBoundary name="Add-on-Store" fallbackTitle="Der Add-on-Store ist abgestürzt"><AddonStoreModal open onClose={() => setAddonStoreOpen(false)} runtime={addonRuntime} runtimeState={addonState} source={addonSource} fetchText={addonFetchText} onOpenExternal={(url) => { void window.fanotes.openExternal(url).catch(() => toast('Der Link konnte nicht geöffnet werden.', 'error')) }} toast={toast} sourceText={settings.addonSource} onChangeSource={(value) => { addonIndexCache.reset(); applySettings({ ...settingsRef.current, addonSource: value }) }} autoUpdate={settings.addonsAutoUpdate} onChangeAutoUpdate={(value) => applySettings({ ...settingsRef.current, addonsAutoUpdate: value })} /></SafeBoundary></Suspense>}
       {addonPrompt && <Suspense fallback={null}><SafeBoundary name="Add-on-Eingabe" fallbackTitle="Der Add-on-Dialog ist abgestürzt"><AddonPromptDialog request={addonPrompt} /></SafeBoundary></Suspense>}
       <ConfirmDialog

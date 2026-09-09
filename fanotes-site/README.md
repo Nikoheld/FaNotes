@@ -34,6 +34,12 @@ Die Daten liegen außerhalb des Webroots unter `/var/lib/fanotes-backups`, gehö
 
 ClamAV benötigt für die erlaubte PDF-Größe `StreamMaxLength 100M` in `/etc/clamav/clamd.conf`. Nach einer Änderung wird `clamav-daemon.service` neu gestartet. Der systemd-Dienst darf nur `/var/lib/fanotes-backups` beschreiben; `/etc/fanotes` und das Release-Verzeichnis bleiben schreibgeschützt.
 
+## Sync-API
+
+`sync-api.mjs` bedient unter `/api/v1/sync` die Ende-zu-Ende-verschlüsselte Synchronisation der Desktop- und Web-App (Einstellungen → Sync). Der Server sieht nie ein Passwort und nie einen Dateinamen oder Inhalt: Der Client leitet aus dem Passwort per PBKDF2 einen Anmeldeschlüssel ab, den der Server zusätzlich mit Scrypt hasht, und einen Einpackschlüssel, der das Gerät nicht verlässt; der eigentliche Tresorschlüssel liegt nur eingepackt auf dem Server. Dateien kommen als AES-256-GCM-Chiffrate unter HMAC-Kennungen an, ihre Metadaten (Pfad, Größe, Änderungszeit) ebenfalls verschlüsselt in einem Header. Ein vergessenes Passwort kann deshalb nicht zurückgesetzt werden.
+
+Die Daten liegen unter `/var/lib/fanotes-sync` (`FANOTES_SYNC_DIR`), gehören `www-data` und sind neben den anderen Datenverzeichnissen der einzige beschreibbare Pfad des systemd-Dienstes: `emails/<sha256(E-Mail)>` zeigt auf ein Konto, `accounts/<id>/account.json` hält Zugangsdaten, KDF-Parameter, eingepackten Schlüssel, Geräte und Sitzungen, `index.json` plus `changes.jsonl` die Dateitabelle mit Revisionen und Tombstones, `blobs/<fileId>` die Chiffrate. Schreibvorgänge sind atomar und je Konto serialisiert. Grenzen: 100 MB je Datei, 4 GB und 50 000 Dateien je Konto, 20 Geräte, Sitzungen verfallen nach 90 Tagen ohne Nutzung (`FANOTES_SYNC_MAX_FILE_BYTES`, `FANOTES_SYNC_QUOTA_BYTES`, `FANOTES_SYNC_MAX_FILES`). `prelogin`, `register`, `login`, Passwortwechsel und Kontolöschung sind je Adresse bzw. Konto ratenbegrenzt; unbekannte E-Mail-Adressen erhalten einen deterministischen Schein-Salt, damit der Endpunkt nicht verrät, welche Adressen ein Konto haben. Nginx reicht Bodies unter `/api/v1/sync/` ungepuffert mit 110 MB Limit an Node weiter (`deploy/fanotes-fasrv.conf`). Entwurf und Prüfungen: `fanotes/docs/SYNC.md`, `npm run check:sync` im App-Repository.
+
 ## Update-API
 
 Die Apps fragen Stable oder Beta plattformspezifisch über folgende APIs ab:

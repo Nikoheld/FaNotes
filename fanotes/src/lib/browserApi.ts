@@ -11,6 +11,7 @@ import { browserInitialFiles, browserStarterFolders, browserStarterSubjects } fr
 import { listBrowserLmStudioModels, transformWithBrowserLmStudio } from './lmStudioBrowser'
 import { listBrowserAiModels, transformWithBrowserAi } from './aiProviderBrowser'
 import { createBrowserAddonsApi } from './addons/browserAddonsApi'
+import { createBrowserSyncHost } from './sync/browserSyncHost'
 import { loadBrowserSpellingResources, loadBrowserSpellingWordCandidates } from './spellingResources'
 import { loadBrowserHandwritingRecognitionResources } from './handwritingRecognitionResources'
 
@@ -1393,6 +1394,41 @@ export function createBrowserApi(): FaNotesApi {
     requestClose: () => { location.href = '../' },
     onSheetZoom: () => () => {},
     addons: createBrowserAddonsApi(),
+    sync: createBrowserSyncHost({
+      files, folders, assets, drawings, worksheets,
+      getSubjectBooks: () => subjectBooks,
+      setSubjectBooks: async (books) => { subjectBooks = books; await setMeta('subjectBooks', books) },
+      putFile: async (record) => { await write('files', (store) => { store.put(record) }); files.set(record.path, record) },
+      deleteFile: async (path) => { await write('files', (store) => { store.delete(path) }); files.delete(path); noteHistory.delete(path) },
+      putAsset: async (path, blob) => {
+        await write('assets', (store) => { store.put({ path, value: blob } satisfies AssetRecord) })
+        const previous = assetUrls.get(path)
+        if (previous) { URL.revokeObjectURL(previous); assetUrls.delete(path) }
+        assets.set(path, blob)
+      },
+      deleteAsset: async (path) => {
+        await write('assets', (store) => { store.delete(path) })
+        const previous = assetUrls.get(path)
+        if (previous) { URL.revokeObjectURL(previous); assetUrls.delete(path) }
+        assets.delete(path)
+      },
+      putDrawing: async (document) => { await write('drawings', (store) => { store.put(document) }); drawings.set(document.id, document) },
+      deleteDrawing: async (id) => { await write('drawings', (store) => { store.delete(id) }); drawings.delete(id) },
+      putWorksheet: async (document) => { await write('worksheets', (store) => { store.put(document) }); worksheets.set(document.id, document) },
+      deleteWorksheet: async (id) => { await write('worksheets', (store) => { store.delete(id) }); worksheets.delete(id) },
+      putFolders: async (list) => {
+        await write('folders', (store) => { store.clear(); list.forEach((folder) => store.put(folder satisfies FolderRecord)) })
+        folders.clear()
+        list.forEach((folder) => folders.set(folder.path, folder))
+      },
+      readMeta: async (key) => {
+        await ready
+        const row = await requestResult(database.transaction('meta', 'readonly').objectStore('meta').get(key) as IDBRequest<MetaRecord | undefined>)
+        return row?.value
+      },
+      writeMeta: async (key, value) => { await ready; await setMeta(key, value, false) },
+      invalidateTree: () => { cachedTree = null },
+    }),
   }
 }
 

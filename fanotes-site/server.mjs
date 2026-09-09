@@ -8,6 +8,7 @@ import { handleHomeworkRequest } from './homework-api.mjs'
 import { handleRemoteSupportRequest } from './remote-support-api.mjs'
 import { handleBugReportRequest } from './bug-report-api.mjs'
 import { handleSendDataRequest } from './send-data-api.mjs'
+import { handleSyncRequest } from './sync-api.mjs'
 import { handleAiProxyRequest } from './ai-proxy.mjs'
 import { languageForRequest, localizeExactText, localizeResponse } from './i18n.mjs'
 import { createAnalyticsService } from './analytics.mjs'
@@ -473,6 +474,7 @@ const server = createServer(async (request, response) => {
     }
     const url = new URL(request.url, 'http://localhost')
     if (await handleBackupRequest(request, response, url)) return
+    if (await handleSyncRequest(request, response, url)) return
     if (await handleHomeworkRequest(request, response, url)) return
     if (await handleRemoteSupportRequest(request, response, url)) return
     if (await handleBugReportRequest(request, response, url)) return

@@ -2,7 +2,7 @@
 
 Inventory walked from the shipped UI entry points. Each row names a user-visible surface and the source that implements it. The check `scripts/check-user-surfaces.cjs` re-reads those files and fails if a listed needle disappears.
 
-Command-palette action ids walked from `src/App.tsx`: `new-note`, `import-pdf-note`, `new-folder`, `new-subfolder`, `save`, `search`, `drawing`, `note-link`, `subject-book`, `worksheet`, `onenote-import`, `ai-assistant`, `glyphenwerk`, `overview`, `homework`, `daily`, `export-pdf`, `history`, `quick-open`, `nav-back`, `nav-forward`, `reopen-tab`, `split`, `split-swap`, `split-orientation`, `focus`, `sidebar`, `inspector`, `settings`, `addon-store`, `reveal`, `bug-report`, `quit`. Commands contributed by add-ons appear under `Add-on: <name>` and are prefixed `addon:` internally.
+Command-palette action ids walked from `src/App.tsx`: `new-note`, `import-pdf-note`, `new-folder`, `new-subfolder`, `save`, `search`, `drawing`, `note-link`, `subject-book`, `worksheet`, `onenote-import`, `ai-assistant`, `glyphenwerk`, `overview`, `homework`, `daily`, `export-pdf`, `history`, `quick-open`, `nav-back`, `nav-forward`, `reopen-tab`, `split`, `split-swap`, `split-orientation`, `focus`, `sidebar`, `inspector`, `settings`, `sync-now`, `sync-settings`, `addon-store`, `reveal`, `bug-report`, `quit`. Commands contributed by add-ons appear under `Add-on: <name>` and are prefixed `addon:` internally.
 
 ## Notes / vault
 
@@ -183,6 +183,27 @@ Command-palette action ids walked from `src/App.tsx`: `new-note`, `import-pdf-no
 | Place Verlinkung palette | `src/App.tsx` | `id: 'note-link'` |
 | Subject book palette | `src/App.tsx` | `id: 'subject-book'` |
 | Editor more menu | `src/App.tsx` | `editor-menu-label">Datei` |
+
+## Sync
+
+End-to-end encrypted synchronisation of the whole vault (notes, `.famd` companions, PDFs, images and the shared `.fanotes/` metadata; local history stays local) through an account on `fanotes.fasrv.ch`. Design and threat model: `docs/SYNC.md`.
+
+| Surface | Source | Needle |
+| --- | --- | --- |
+| Settings section: account, devices, password, deletion | `src/components/SettingsModal.tsx` | `id: 'sync'` |
+| Sign-in / create-account form, status hero, device list, conflict list, log | `src/components/SyncSettingsSection.tsx` | `export function SyncSettingsSection` |
+| Palette: „Jetzt synchronisieren“ | `src/App.tsx` | `id: 'sync-now'` |
+| Palette: „Sync einrichten“ / „Sync-Einstellungen“ | `src/App.tsx` | `id: 'sync-settings'` |
+| Status-bar item (state, conflict badge, opens the Sync section) | `src/App.tsx` | `sync-status-item` |
+| Remote changes: tree refresh, reload of clean tabs, tabs of deleted notes | `src/App.tsx` | `const applyRemoteChanges` |
+| Busy notes are never overwritten mid-edit | `src/App.tsx` | `const isSyncPathBusy` |
+| Engine: pull → scan → push, conflict copies, tombstones, cursor hold | `src/lib/sync/engine.ts` | `export class SyncEngine` |
+| Crypto: PBKDF2 → wrapping/auth key, HKDF → data/id keys, AES-256-GCM | `src/lib/sync/crypto.ts` | `export const deriveFromPassword` |
+| HTTP client (Bearer session, If-Match revisions) | `src/lib/sync/api.ts` | `export class SyncApi` |
+| Desktop host: raw vault access, safeStorage secrets | `electron/sync.cjs` | `function createSyncHost` |
+| Web host: IndexedDB stores mapped to vault paths | `src/lib/sync/browserSyncHost.ts` | `export const createBrowserSyncHost` |
+| Server: accounts, sessions, encrypted blob store, change feed | `../fanotes-site/sync-api.mjs` | `export const handleSyncRequest` |
+| Settings: automatic sync, device name | `src/types.ts` | `syncAutomatic: boolean` |
 
 ## Add-ons
 

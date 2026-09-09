@@ -99,6 +99,10 @@ export type AppSettings = {
   viewZoomMax: number
   addonSource: string
   addonsAutoUpdate: boolean
+  /** Sync runs on its own once a device is signed in; off keeps the account but only syncs on demand. */
+  syncAutomatic: boolean
+  /** Display name of this device in the account's device list. */
+  syncDeviceName: string
   showWordCount: boolean
   showOutline: boolean
   defaultFolder: string
@@ -562,6 +566,7 @@ export type FaNotesApi = {
   onSheetZoom?: (callback: (direction: 'in' | 'out') => void) => () => void
   captureWindow?: () => Promise<string>
   addons?: AddonsHostApi
+  sync?: SyncHostApi
   platform: string
 }
 
@@ -570,6 +575,28 @@ export type FaNotesApi = {
  * in the main process) and the per-add-on file/data storage outside the vault.
  * Records are opaque JSON here; src/lib/addons/runtime.ts owns their shape.
  */
+/** One file as the sync engine sees the vault: path relative to the vault root with forward slashes, size and modification time (0 when unknown). */
+export type SyncScanEntry = { path: string; size: number; mtimeMs: number }
+
+/**
+ * What the host (Electron main or the browser vault) gives the sync engine:
+ * a raw view of every file in the vault – including the hidden `.fanotes/`
+ * folder and `.famd` companions the tree hides – plus a place for the
+ * engine's own state and for the account secrets (safeStorage on desktop).
+ */
+export type SyncHostApi = {
+  /** Stable id of the current vault so that state is kept per vault. */
+  vaultId: () => Promise<string>
+  scan: () => Promise<SyncScanEntry[]>
+  read: (path: string) => Promise<Uint8Array>
+  write: (path: string, bytes: Uint8Array, mtimeMs: number) => Promise<SyncScanEntry>
+  remove: (path: string) => Promise<void>
+  readState: (vaultId: string) => Promise<string | null>
+  writeState: (vaultId: string, json: string | null) => Promise<void>
+  readSecrets: () => Promise<string | null>
+  writeSecrets: (json: string | null) => Promise<void>
+}
+
 export type AddonsHostApi = {
   fetchText: (url: string) => Promise<string>
   list: () => Promise<unknown[]>
