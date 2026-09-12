@@ -55,8 +55,10 @@ import { pdfOpenCameraFromScroller } from '../lib/pdfOpenCamera'
 import {
   captureGhostTextAroundLock,
   ghostTextDiagnosticFields,
+  lockPaperEditorScrollIfNeeded,
   lockPaperViewportScrollStayPut,
   PAPER_EDITOR_FLING_HOLD_FRAMES,
+  pinPaperViewportAfterColumnResize,
   tickPaperViewportEditorScrollHold,
 } from '../lib/paperCaretScroll'
 import { buildTextMotionDiagnosticEvent, recordTextMotionDiagnostic } from '../lib/bugReport'
@@ -383,6 +385,34 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
       })
     }
     clampScroll()
+    let lastColumn = { width: scroller.clientWidth, height: scroller.clientHeight }
+    const pinColumnStayPut = () => {
+      const nextColumn = { width: scroller.clientWidth, height: scroller.clientHeight }
+      if (
+        Math.abs(nextColumn.width - lastColumn.width) < 0.5
+        && Math.abs(nextColumn.height - lastColumn.height) < 0.5
+      ) return
+      lastColumn = nextColumn
+      if (restoring && !userInteracted) return
+      pinPaperViewportAfterColumnResize(scroller, nextColumn, {
+        paperX: 0,
+        paperY: 0,
+        camX: scroller.scrollLeft,
+        camY: scroller.scrollTop,
+        width: Math.max(1, scroller.scrollWidth),
+        height: Math.max(1, scroller.scrollHeight),
+        originX: 0,
+        originY: 0,
+        editorX: 0,
+        editorY: 0,
+      })
+      lockPaperEditorScrollIfNeeded(scroller.querySelector('.markdown-editor, .cm-scroller'))
+    }
+    let columnObserver: ResizeObserver | null = null
+    if (typeof ResizeObserver === 'function') {
+      columnObserver = new ResizeObserver(pinColumnStayPut)
+      columnObserver.observe(scroller)
+    }
     const unsubscribeZoom = storeRef.current.subscribe(scheduleMeasureAndSave)
     window.addEventListener('pagehide', saveNow)
     return () => {
@@ -393,6 +423,7 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
       window.removeEventListener('pointerdown', markInteraction, true)
       window.removeEventListener('touchstart', markInteraction, true)
       window.removeEventListener('keydown', markKeyInteraction, true)
+      columnObserver?.disconnect()
       if (flingId) window.cancelAnimationFrame(flingId)
       if (openCameraId) window.cancelAnimationFrame(openCameraId)
       if (restoreFrame) window.cancelAnimationFrame(restoreFrame)

@@ -2,6 +2,7 @@ import {
   applyStayPutOp,
   liveWriteStayPut,
   originPadDelta,
+  stayPutAfterColumnResize,
   type StayPutOp,
   type StayPutState,
 } from './noteCanvas'
@@ -381,6 +382,20 @@ export const applyLiveWriteStayPut = (
   paperScroller: HTMLElement | null = null,
 ): StayPutState => {
   const next = liveWriteStayPut(state, live)
+  if (paperScroller) pinPaperViewportAfterExtentGrow(paperScroller, { x: next.camX, y: next.camY })
+  return next
+}
+
+/**
+ * Split or window-width cut: same stay-put reducer, then pin the camera and
+ * seal nested editor scroll so already-written glyphs do not jump.
+ */
+export const pinPaperViewportAfterColumnResize = (
+  paperScroller: HTMLElement | null,
+  column: { width: number; height?: number },
+  state: StayPutState,
+) => {
+  const next = stayPutAfterColumnResize(state, column)
   if (paperScroller) pinPaperViewportAfterExtentGrow(paperScroller, { x: next.camX, y: next.camY })
   return next
 }

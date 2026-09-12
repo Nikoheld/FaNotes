@@ -3,6 +3,10 @@
 ## Unveröffentlicht
 
 
+## 2026.9.23
+
+- **Geteilte Ansicht und Hyprland: der Text bleibt stehen.** Wenn du zwei Notizen nebeneinander öffnest oder das Fenster unter Hyprland auf halbe Breite ziehst, rutscht die schon geschriebene Schrift nicht mehr von ihrem Papierpunkt. Die Textspalte behält ihre Blattbreite statt mit der Spalte zu schrumpfen, der Innenabstand folgt nicht mehr der Fensterbreite, und die Kamera bleibt auf denselben Papierpunkten — nur ein neues Ursprungspad darf die Schrift verschieben, und dann rückt die Kamera um genau dasselbe mit.
+
 ## 2026.9.22
 
 - **Text in deine Handschrift: Schieber, Einfügen, Seite wächst, Buchstaben schwanken.** Die drei Regler Schriftgröße, Zeilenabstand und Natürliche Variation ändern Wert und Live-Vorschau, und Einfügen in das Textfeld setzt den Zwischenablage-Text ein — auch wenn der Stift auf einem Inline-Blatt aktiv ist; der Dialog zählt als Oberfläche, nicht als Tinte. Ein Text, der höher ist als das aktuelle Blatt, wird vollständig gesetzt, indem die Seite bis zur bestehenden Schreibgrenze wächst, statt „Der Text passt nicht auf diese Seite“ zu zeigen. Nur am Anschlag selbst wird blockiert. Bei der Voreinstellung der Variation haben wiederholte Buchstaben leicht unterschiedliche Höhen und sitzen nicht auf einer Linie; Variation 0 bleibt gleichmäßig. Die Tinte kommt weiter aus deinen GlyphenWerk-Vorlagen. GitHub-PRs #30 (stille Seitenstatistik / Zoom ohne Ruckeln), #31 (eigene Kamera je Spalte), #32 (Add-on-Store), #33 (Sync) und #34 (einklappbare Handschrift-Abschnitte).

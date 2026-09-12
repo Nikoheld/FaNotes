@@ -65,6 +65,7 @@ Command-palette action ids walked from `src/App.tsx`: `new-note`, `import-pdf-no
 | Markdown note Stift path | `src/lib/inkStrokePaint.ts` | `export const paintMarkdownNoteStiftStroke` |
 | Markdown overlay size | `src/lib/pdfInkHit.ts` | `markdownNoteInkOverlaySize` |
 | OneNote-like write page | `src/lib/noteCanvas.ts` | `export const growPageFromMark` |
+| Split / window-width cut keeps typed text on paper | `src/lib/noteCanvas.ts` | `export const stayPutAfterColumnResize` |
 | Overlay covers write page | `src/lib/noteCanvas.ts` | `export const inkOverlaySize` |
 | Ink map and paint share the write page | `src/lib/noteCanvas.ts` | `export const markdownInkPageBox` |
 | Page grows at every edge | `src/lib/noteCanvas.ts` | `export const growWriteOrigin` |

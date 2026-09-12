@@ -70,7 +70,7 @@ try {
   assert.match(paperBlock, /min-height:\s*0/)
   assert.doesNotMatch(paperBlock, /min-height:\s*max\(calc\(100%/)
   assert.match(css, /\.unified-paper \.markdown-editor \.cm-content \{ min-height:\s*0/)
-  assert.match(css, /padding: 78px clamp\(52px, 8vw, 86px\) var\(--paper-write-slack\)/)
+  assert.match(css, /padding: var\(--paper-text-pad-y\) var\(--paper-text-pad-x\) var\(--paper-write-slack\)/)
   assert.doesNotMatch(css, /\.unified-paper \.markdown-editor \.cm-content \{ min-height: max\(var\(--paper-a4-height\)/)
   assert.doesNotMatch(css, /\.cm-content \{ min-height: max\(var\(--paper-a4-height\), calc\(100vh/)
   const inkExtentBlock = css.slice(css.indexOf('.unified-paper.has-ink-extent {'), css.indexOf('.unified-paper.has-ink-width {'))

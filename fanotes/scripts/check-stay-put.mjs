@@ -24,7 +24,13 @@ const {
   applyStayPutOp,
   liveWriteStayPut,
   nestedEditorOffsetOnWritePage,
+  paperLayoutAfterColumnResize,
+  paperTextColumnWidth,
+  paperTextPadX,
+  PAPER_TEXT_COLUMN_WIDTH,
+  PAPER_TEXT_PAD_X,
   reduceStayPutOps,
+  stayPutAfterColumnResize,
   stayPutAfterExtentGrow,
   stayPutPaperAfterOp,
   stayPutPaperMovedByPadOnly,
@@ -32,6 +38,7 @@ const {
   textOriginCssPx,
   writePageStayExtent,
 } = await server.ssrLoadModule('/src/lib/noteCanvas.ts')
+const { splitFirstPaneSize } = await server.ssrLoadModule('/src/lib/workspaceNav.ts')
 const { continueLiveWriteStroke } = await server.ssrLoadModule('/src/lib/paperGrow.ts')
 const { classifyInkJumpAppend } = await server.ssrLoadModule('/src/lib/inkSampleMap.ts')
 const {
@@ -40,6 +47,7 @@ const {
   lockPaperEditorScrollIfNeeded,
   lockPaperViewportScrollStayPut,
   observeGhostTextSequence,
+  pinPaperViewportAfterColumnResize,
   pinPaperViewportAfterExtentGrow,
   sealNestedEditorScroll,
 } = await server.ssrLoadModule('/src/lib/paperCaretScroll.ts')
@@ -795,6 +803,8 @@ const runOnce = () => {
   assert.match(noteCanvas, /export const applyStayPutOp/)
   assert.match(noteCanvas, /export const stayPutPaperMovedByPadOnly/)
   assert.match(noteCanvas, /export const liveWriteStayPut/)
+  assert.match(noteCanvas, /export const stayPutAfterColumnResize/)
+  assert.match(noteCanvas, /export const paperTextColumnWidth/)
   assert.match(noteCanvas, /export const nestedEditorOffsetOnWritePage/)
   assert.match(noteCanvas, /state = applyStayPutOp\(state/)
   assert.match(paperGrow, /writePageStayExtent/)
@@ -811,8 +821,15 @@ const runOnce = () => {
   assert.match(board, /growPageFromMark\(/)
   assert.doesNotMatch(board, /requestAnimationFrame\(\(\) => \{\s*pinGrowFrameRef/)
   assert.match(caretSource, /export const pinPaperViewportAfterExtentGrow/)
+  assert.match(caretSource, /export const pinPaperViewportAfterColumnResize/)
   assert.match(caretSource, /export const sealNestedEditorScroll/)
   assert.match(caretSource, /export const applyLiveStayPutStep/)
+  assert.match(paperView, /pinPaperViewportAfterColumnResize/)
+  assert.doesNotMatch(styles, /clamp\(52px, 8vw, 86px\)/)
+  assert.doesNotMatch(styles, /--paper-width:\s*min\(900px, var\(--content-width\), calc\(100% - 64px\)\)/)
+  assert.match(styles, /--paper-width:\s*min\(900px, var\(--content-width\)\)/)
+  assert.match(styles, /--paper-text-pad-x:\s*72px/)
+  assert.match(styles, /padding: var\(--paper-text-pad-y\) var\(--paper-text-pad-x\) var\(--paper-write-slack\)/)
   assert.match(styles, /\.paper-sheet-plane[\s\S]{0,400}overflow-anchor:\s*none/)
   assert.match(styles, /\.unified-paper \.markdown-editor \.cm-scroller[\s\S]{0,280}overflow:\s*clip/)
   assert.match(styles, /\.unified-paper \.markdown-editor \.cm-scroller[\s\S]{0,280}overflow-anchor:\s*none/)
@@ -851,6 +868,40 @@ const runOnce = () => {
   assert.notEqual(REPORT_1788376550462.length, REPORT_1788435936618.length)
   assert.notEqual(REPORT_1788416428895.length, REPORT_1788435936618.length)
   assert.notEqual(REPORT_1788433450822.length, REPORT_1788435936618.length)
+
+  const singlePane = 1400
+  const splitPane = splitFirstPaneSize(singlePane, 7, 0.5, 1)
+  assert.ok(splitPane < singlePane * 0.6, 'a ~50% split must cut the first pane')
+  assert.equal(paperTextColumnWidth(singlePane), PAPER_TEXT_COLUMN_WIDTH)
+  assert.equal(paperTextColumnWidth(splitPane), paperTextColumnWidth(singlePane))
+  assert.equal(paperTextPadX(singlePane), PAPER_TEXT_PAD_X)
+  assert.equal(paperTextPadX(splitPane), paperTextPadX(singlePane))
+  const singleLayout = paperLayoutAfterColumnResize({ width: singlePane, height: 900 })
+  const splitLayout = paperLayoutAfterColumnResize({ width: splitPane, height: 900 })
+  assert.equal(singleLayout.columnWidth, splitLayout.columnWidth)
+  assert.equal(singleLayout.padX, splitLayout.padX)
+  const splitStart = stayPutSeed(PAN_ONLY)
+  const afterSplit = stayPutAfterColumnResize(splitStart, { width: splitPane, height: 900 })
+  assert.equal(stayPutPaperMovedByPadOnly(splitStart, afterSplit), true)
+  assert.equal(afterSplit.paperX, splitStart.paperX)
+  assert.equal(afterSplit.paperY, splitStart.paperY)
+  assert.equal(afterSplit.camX, splitStart.camX)
+  assert.equal(afterSplit.camY, splitStart.camY)
+  assert.equal(afterSplit.editorX, 0)
+  assert.equal(afterSplit.editorY, 0)
+  const splitPaper = makeNode('paper-view unified-note-view', { scrollTop: splitStart.camY, scrollLeft: splitStart.camX })
+  const splitSheet = append(splitPaper, makeNode('unified-paper'))
+  const splitEditor = append(splitSheet, makeNode('editor-pane markdown-editor'))
+  const splitCm = append(splitEditor, makeNode('cm-scroller', { scrollTop: 40, scrollLeft: 8 }))
+  const splitPinned = pinPaperViewportAfterColumnResize(splitPaper, { width: splitPane, height: 900 }, splitStart)
+  assert.equal(splitPinned.paperX, splitStart.paperX)
+  assert.equal(splitPinned.paperY, splitStart.paperY)
+  assert.equal(splitPinned.camX, splitStart.camX)
+  assert.equal(splitPinned.camY, splitStart.camY)
+  assert.equal(splitPaper.scrollLeft, splitStart.camX)
+  assert.equal(splitPaper.scrollTop, splitStart.camY)
+  assert.equal(splitCm.scrollTop, 0)
+  assert.equal(splitEditor.scrollTop, 0)
 
   return {
     scrollFrames: scrolled.frames.length,
@@ -895,6 +946,13 @@ const runOnce = () => {
     closedOverlayWidth: closedOverlay.end.width,
     closedShiftCamY: shifted.camY,
     closedNestedEditorY: nested.editorY,
+    splitPane,
+    splitColumn: splitLayout.columnWidth,
+    splitPadX: splitLayout.padX,
+    splitPaperX: afterSplit.paperX,
+    splitPaperY: afterSplit.paperY,
+    splitCamX: afterSplit.camX,
+    splitCamY: afterSplit.camY,
   }
 }
 

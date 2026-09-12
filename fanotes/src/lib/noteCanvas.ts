@@ -435,6 +435,47 @@ export const liveWriteStayPut = (
   lockEditor: true,
 })
 
+/**
+ * A4 text column in CSS px. Matches `--content-width` / `--paper-width` without
+ * a viewport `100%` term: an in-app split or a Hyprland window-width cut must
+ * not shrink the column. The camera pans if the pane is narrower than this.
+ */
+export const PAPER_TEXT_COLUMN_WIDTH = 820
+/** Horizontal pad of typed text on the sheet — paper px, never `vw`. */
+export const PAPER_TEXT_PAD_X = 72
+export const PAPER_TEXT_PAD_Y = 78
+
+export const paperTextColumnWidth = (_paneWidth = 0) => PAPER_TEXT_COLUMN_WIDTH
+export const paperTextPadX = (_paneWidth = 0) => PAPER_TEXT_PAD_X
+
+/**
+ * Column/window resize (FaNotes two-pane split or a Hyprland-style width cut).
+ * The write page does not shrink with the pane, so already-written glyphs keep
+ * their paper coords. Camera is pinned (no recenter). Nested editor scroll is 0.
+ */
+export const paperLayoutAfterColumnResize = (column: { width: number; height?: number }) => ({
+  columnWidth: paperTextColumnWidth(column.width),
+  padX: paperTextPadX(column.width),
+})
+
+export const stayPutAfterColumnResize = (
+  state: StayPutState,
+  nextColumn: { width: number; height?: number },
+): StayPutState => {
+  paperLayoutAfterColumnResize(nextColumn)
+  return applyStayPutOp(state, {
+    camX: state.camX,
+    camY: state.camY,
+    width: state.width,
+    height: state.height,
+    padX: state.originX,
+    padY: state.originY,
+    paintedWidth: 0,
+    paintedHeight: 0,
+    lockEditor: true,
+  })
+}
+
 export const reduceStayPutOps = (start: StayPutState, ops: StayPutOp[]) => {
   const frames = [] as StayPutState[]
   let state = start
