@@ -234,6 +234,7 @@ const BugReportModal = lazy(() => import('./components/BugReportModal').then((mo
 const SubjectBookPane = lazy(() => import('./components/SubjectBookPane').then((module) => ({ default: module.SubjectBookPane })))
 const VaultOverview = lazy(() => import('./components/VaultOverview').then((module) => ({ default: module.VaultOverview })))
 const HomeworkBoard = lazy(() => import('./components/HomeworkBoard').then((module) => ({ default: module.HomeworkBoard })))
+const CalendarView = lazy(() => import('./components/CalendarView').then((module) => ({ default: module.CalendarView })))
 const WorksheetLayer = lazy(() => import('./components/WorksheetLayer').then((module) => ({ default: module.WorksheetLayer })))
 const PdfNoteView = lazy(() => import('./components/PdfNoteView').then((module) => ({ default: module.PdfNoteView })))
 const StableWorksheetLayer = memo(WorksheetLayer)
@@ -640,6 +641,7 @@ export default function App({ startupBootstrap }: AppProps) {
   const [overviewOpen, setOverviewOpen] = useState(false)
   const [homeworkOpen, setHomeworkOpen] = useState(false)
   const [homeworkReloadToken, setHomeworkReloadToken] = useState(0)
+  const [calendarOpen, setCalendarOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [editorMenuOpen, setEditorMenuOpen] = useState(false)
@@ -1412,6 +1414,7 @@ export default function App({ startupBootstrap }: AppProps) {
     const structureRevision = vaultStructureRevisionRef.current
     setOverviewOpen(false)
     setHomeworkOpen(false)
+    setCalendarOpen(false)
     setGlyphenWerkOpen(false)
     // Activating the note shown in the second pane swaps the panes instead of
     // showing the same note twice.
@@ -2364,7 +2367,7 @@ export default function App({ startupBootstrap }: AppProps) {
     }
   }, [refreshTree, toast])
 
-  const createDailyNote = useCallback(async () => {
+  const createDailyNote = useCallback(async (when?: Date) => {
     const session = vaultSessionGenerationRef.current
     vaultStructureRevisionRef.current += 1
     try {
@@ -2381,7 +2384,7 @@ export default function App({ startupBootstrap }: AppProps) {
           known.add(folder)
         } else folder = candidate
       }
-      const title = formatDate(settings.dateFormat || 'YYYY-MM-DD')
+      const title = formatDate(settings.dateFormat || 'YYYY-MM-DD', when ?? new Date())
       const expectedPath = folder ? `${folder}/${title}.md` : `${title}.md`
       if (filePaths(tree).has(expectedPath)) {
         await openNote(expectedPath)
@@ -2786,6 +2789,7 @@ export default function App({ startupBootstrap }: AppProps) {
     setGlyphenWerkOpen(false)
     setOverviewOpen(false)
     setHomeworkOpen(false)
+    setCalendarOpen(false)
     void loadSecureSettings()
       .then(() => setLmStudioOpen(true))
       .catch((error) => toast(error instanceof Error ? error.message : 'Geschützte AI-Einstellungen konnten nicht geladen werden.', 'error'))
@@ -3039,6 +3043,7 @@ export default function App({ startupBootstrap }: AppProps) {
     drawingOpenRef.current = true
     setOverviewOpen(false)
     setHomeworkOpen(false)
+    setCalendarOpen(false)
     setSearchOpen(false)
     setDrawingOpen(true)
     // A mounted session already shows this note's saved ink (keyboard mode
@@ -3207,6 +3212,7 @@ export default function App({ startupBootstrap }: AppProps) {
     setSearchOpen(false)
     setOverviewOpen(false)
     setHomeworkOpen(false)
+    setCalendarOpen(false)
     setGlyphenWerkOpen(false)
     setSidebarVisible(true)
   }, [closeDrawing])
@@ -3215,6 +3221,7 @@ export default function App({ startupBootstrap }: AppProps) {
     if (!closeDrawing()) return
     setGlyphenWerkOpen(false)
     setHomeworkOpen(false)
+    setCalendarOpen(false)
     setOverviewOpen(true)
   }, [closeDrawing])
 
@@ -3223,7 +3230,17 @@ export default function App({ startupBootstrap }: AppProps) {
     setGlyphenWerkOpen(false)
     setOverviewOpen(false)
     setSearchOpen(false)
+    setCalendarOpen(false)
     setHomeworkOpen(true)
+  }, [closeDrawing])
+
+  const openCalendar = useCallback(() => {
+    if (!closeDrawing()) return
+    setGlyphenWerkOpen(false)
+    setOverviewOpen(false)
+    setSearchOpen(false)
+    setHomeworkOpen(false)
+    setCalendarOpen(true)
   }, [closeDrawing])
 
   const openGlyphenWerk = useCallback(() => {
@@ -3232,6 +3249,7 @@ export default function App({ startupBootstrap }: AppProps) {
     setSearchOpen(false)
     setOverviewOpen(false)
     setHomeworkOpen(false)
+    setCalendarOpen(false)
     setLmStudioOpen(false)
     setSidebarVisible(true)
     setGlyphenWerkOpen(true)
@@ -3377,6 +3395,7 @@ export default function App({ startupBootstrap }: AppProps) {
     setSearchOpen(false)
     setOverviewOpen(false)
     setHomeworkOpen(false)
+    setCalendarOpen(false)
     setWorksheetImportOpen(true)
   }, [])
 
@@ -3626,6 +3645,7 @@ export default function App({ startupBootstrap }: AppProps) {
     { id: 'glyphenwerk', label: 'GlyphenWerk öffnen', detail: 'Handschrift trainieren, live testen, korrigieren und verwalten', shortcut: 'Ctrl ⇧ G', group: 'Werkzeuge', keywords: 'training erkennung symbole test datensatz', icon: <Database size={15} />, run: openGlyphenWerk },
     { id: 'overview', label: 'Vault-Übersicht', detail: 'Ordner und offene Notizen überblicken', group: 'Navigation', icon: <Network size={15} />, run: openOverview },
     { id: 'homework', label: 'Hausaufgaben & Termine', detail: 'To-dos, Hausaufgaben und Termine mit Fälligkeit', group: 'Navigation', keywords: 'todo hausaufgaben schule termin fällig aufgabe checklist', icon: <ClipboardList size={15} />, run: openHomework },
+    { id: 'calendar', label: 'Kalender', detail: 'Tag, 3 Tage, Woche, Monat und Agenda', group: 'Navigation', keywords: 'kalender termin woche monat agenda notion calendar event', icon: <CalendarDays size={15} />, run: openCalendar },
     { id: 'daily', label: 'Heutige Tagesnotiz', detail: settings.dailyNotesFolder, group: 'Dateien', icon: <CalendarDays size={15} />, run: () => void createDailyNote() },
     { id: 'export-pdf', label: 'Notiz als PDF exportieren', detail: 'Text, Handschrift und Arbeitsblatt drucken oder speichern', group: 'Dateien', keywords: 'pdf export drucken print', icon: <FileDown size={15} />, run: () => void exportCurrentPdf() },
     { id: 'history', label: 'Versionsverlauf', detail: 'Frühere Stände dieser Notiz ansehen und wiederherstellen', group: 'Dateien', keywords: 'history version wiederherstellen', icon: <History size={15} />, run: () => void openHistory() },
@@ -3649,7 +3669,7 @@ export default function App({ startupBootstrap }: AppProps) {
     { id: 'reveal', label: isWeb ? 'Notiz herunterladen' : 'Im Dateimanager zeigen', detail: isWeb ? 'Aktuelle Notiz exportieren' : 'Speicherort der geöffneten Notiz öffnen', group: 'Dateien', keywords: 'ordner explorer finder dateimanager download export', icon: isWeb ? <Download size={15} /> : <FolderOpen size={15} />, run: () => { if (activePath) void window.fanotes.revealInFolder(activePath) } },
     { id: 'bug-report', label: 'Fehler melden', detail: 'Kurz beschreiben; die letzten fünf Minuten werden angehängt', group: 'FaNotes', keywords: 'bug report fehler logs support', icon: <Bug size={15} />, run: () => setBugReportOpen(true) },
     { id: 'quit', label: isWeb ? 'Zur FaNotes-Website' : 'FaNotes beenden', shortcut: 'Ctrl Q', group: 'FaNotes', icon: <X size={15} />, run: () => window.fanotes.requestClose() },
-  ], [addonPaletteActions, activePath, activeTab, syncApi, syncState, attachBookToSubject, bookOpen, createDailyNote, createFolder, createNote, currentBook, drawingOpen, exportCurrentPdf, focusMode, importOneNote, importPdfNote, isWeb, navigateHistory, openGlyphenWerk, openHistory, openHomework, openLmStudio, openOverview, openSettings, openWorksheetImport, reopenClosedTab, saveCurrentWork, settings.dailyNotesFolder, splitLayout.orientation, splitPath, startNoteLinkPlacement, swapSplitPanes, toast, toggleBookView, toggleDrawing, toggleFocusMode, toggleSplit, toggleSplitOrientation])
+  ], [addonPaletteActions, activePath, activeTab, syncApi, syncState, attachBookToSubject, bookOpen, createDailyNote, createFolder, createNote, currentBook, drawingOpen, exportCurrentPdf, focusMode, importOneNote, importPdfNote, isWeb, navigateHistory, openCalendar, openGlyphenWerk, openHistory, openHomework, openLmStudio, openOverview, openSettings, openWorksheetImport, reopenClosedTab, saveCurrentWork, settings.dailyNotesFolder, splitLayout.orientation, splitPath, startNoteLinkPlacement, swapSplitPanes, toast, toggleBookView, toggleDrawing, toggleFocusMode, toggleSplit, toggleSplitOrientation])
 
   // ---- Add-ons -------------------------------------------------------------
   // Everything add-ons may touch flows through this bridge. The deps object is
@@ -3970,6 +3990,7 @@ export default function App({ startupBootstrap }: AppProps) {
         else if (searchOpen) setSearchOpen(false)
         else if (settingsOpen) setSettingsOpen(false)
         else if (lmStudioOpen) setLmStudioOpen(false)
+        else if (calendarOpen) setCalendarOpen(false)
         else if (homeworkOpen) setHomeworkOpen(false)
         else if (overviewOpen) setOverviewOpen(false)
         else if (glyphenWerkOpen) setGlyphenWerkOpen(false)
@@ -3989,7 +4010,7 @@ export default function App({ startupBootstrap }: AppProps) {
       window.removeEventListener('keydown', handler)
       window.removeEventListener('mouseup', mouseNav)
     }
-  }, [closeDrawing, closeTab, createNote, cycleTabs, focusMode, glyphenWerkOpen, homeworkOpen, lmStudioOpen, navigateHistory, noteLinkPlacing, openGlyphenWerk, openLmStudio, openSettings, openTabByDigit, openWorksheetImport, overviewOpen, paletteOpen, removeSelectedNoteLink, reopenClosedTab, saveCurrentWork, searchOpen, selectedNoteLinkId, settingsOpen, swapSplitPanes, toast, toggleDrawing, toggleFocusMode, toggleSplit, worksheetImportOpen])
+  }, [calendarOpen, closeDrawing, closeTab, createNote, cycleTabs, focusMode, glyphenWerkOpen, homeworkOpen, lmStudioOpen, navigateHistory, noteLinkPlacing, openGlyphenWerk, openLmStudio, openSettings, openTabByDigit, openWorksheetImport, overviewOpen, paletteOpen, removeSelectedNoteLink, reopenClosedTab, saveCurrentWork, searchOpen, selectedNoteLinkId, settingsOpen, swapSplitPanes, toast, toggleDrawing, toggleFocusMode, toggleSplit, worksheetImportOpen])
 
   useEffect(() => {
     const imageFile = (file: File | undefined) => file && file.type.startsWith('image/')
@@ -4074,10 +4095,11 @@ export default function App({ startupBootstrap }: AppProps) {
     <div className={`app-shell theme-${theme} background-${settings.workspaceBackground} ${focusMode ? 'focus-mode' : ''} ${settings.compactMode ? 'compact' : ''} ${settings.reduceMotion ? 'no-motion' : ''} ${settings.glassEffects ? 'with-glass' : 'no-glass'}`} style={cssVars}>
       {settings.customCss && <style>{settings.customCss}</style>}
       <nav className="ribbon" aria-label="Hauptnavigation">
-        <button type="button" className={!searchOpen && !overviewOpen && !homeworkOpen && !lmStudioOpen && !glyphenWerkOpen ? 'active' : ''} title="Dateien" data-tooltip="Notizen" aria-label="Notizen" onClick={showFiles}><Files size={19} /></button>
+        <button type="button" className={!searchOpen && !overviewOpen && !homeworkOpen && !calendarOpen && !lmStudioOpen && !glyphenWerkOpen ? 'active' : ''} title="Dateien" data-tooltip="Notizen" aria-label="Notizen" onClick={showFiles}><Files size={19} /></button>
         <button type="button" className={searchOpen ? 'active' : ''} title="Im Vault suchen (Strg+Umschalt+F)" data-tooltip="Suchen · Strg ⇧ F" aria-label="Im gesamten Vault suchen" onClick={() => { setSearchOpen(true); setSidebarVisible(true) }}><Search size={19} /></button>
         <button type="button" className={drawingOpen ? 'active' : ''} title={drawingOpen ? 'Zur Tastatureingabe wechseln' : 'Auf derselben Seite mit Stift schreiben'} data-tooltip={drawingOpen ? 'Zur Tastatur · Strg D' : 'Mit Stift schreiben · Strg D'} aria-pressed={drawingOpen} onClick={toggleDrawing}><PenLine size={19} /></button>
         <button type="button" className={homeworkOpen ? 'active' : ''} title="Hausaufgaben & Termine" data-tooltip="Hausaufgaben" aria-label="Hausaufgaben und Termine öffnen" onClick={openHomework}><ClipboardList size={18} /></button>
+        <button type="button" className={calendarOpen ? 'active' : ''} title="Kalender" data-tooltip="Kalender" aria-label="Kalender öffnen" onClick={openCalendar}><CalendarDays size={18} /></button>
         <div className="ribbon-spacer" />
         <button
           type="button"
@@ -4305,7 +4327,7 @@ export default function App({ startupBootstrap }: AppProps) {
                 const slot = penModeToolbarSlot(drawingOpen, isPdfActive)
                 if (slot === 'ink') return <div id={INK_TOOLBAR_SLOT_ID} className="ink-toolbar-slot" />
                 if (slot === 'pdf') return <div id={PDF_TOOLBAR_SLOT_ID} className="pdf-toolbar-slot" />
-                return <FormattingToolbar disabled={!activeTab || overviewOpen || homeworkOpen || glyphenWerkOpen || activeEntryMutating} onFormat={formatMarkdown} />
+                return <FormattingToolbar disabled={!activeTab || overviewOpen || homeworkOpen || calendarOpen || glyphenWerkOpen || activeEntryMutating} onFormat={formatMarkdown} />
               })()}
             </div>
             <div className="toolbar-group toolbar-end">
@@ -4458,6 +4480,14 @@ export default function App({ startupBootstrap }: AppProps) {
               {glyphenWerkOpen ? (
               <SafeBoundary name="GlyphenWerk" fallbackTitle="GlyphenWerk ist abgestürzt">
                 <GlyphenWerkWorkspace appearance={{ theme, reduceMotion: settings.reduceMotion }} activeView={glyphenWerkView} onViewChange={setGlyphenWerkView} onClose={() => setGlyphenWerkOpen(false)} onTrainingChanged={handleGlyphenWerkTrainingChanged} onImportTraining={importTrainingFromSettings} />
+              </SafeBoundary>
+            ) : calendarOpen ? (
+              <SafeBoundary name="Kalender" fallbackTitle="Der Kalender ist abgestürzt">
+                <CalendarView
+                  onClose={() => setCalendarOpen(false)}
+                  onOpenNote={(path) => openNote(path)}
+                  onOpenDaily={(date) => createDailyNote(date)}
+                />
               </SafeBoundary>
             ) : homeworkOpen ? (
               <SafeBoundary name="Hausaufgaben" fallbackTitle="Hausaufgaben sind abgestürzt">
@@ -4663,13 +4693,13 @@ export default function App({ startupBootstrap }: AppProps) {
           </div>
         </main>
 
-        {inspectorVisible && settings.showOutline && !overviewOpen && !homeworkOpen && !glyphenWerkOpen && !isPdfActive && <Suspense fallback={null}><RightInspector content={activeTab?.content ?? ''} path={activeTab?.path} onJumpToLine={(line) => { editorRef.current?.revealLine(line) }} /></Suspense>}
+        {inspectorVisible && settings.showOutline && !overviewOpen && !homeworkOpen && !calendarOpen && !glyphenWerkOpen && !isPdfActive && <Suspense fallback={null}><RightInspector content={activeTab?.content ?? ''} path={activeTab?.path} onJumpToLine={(line) => { editorRef.current?.revealLine(line) }} /></Suspense>}
         {addonState.dockOpen && addonState.panels.length > 0 && !glyphenWerkOpen && <Suspense fallback={null}><SafeBoundary name="Add-on-Dock" fallbackTitle="Das Add-on-Dock ist abgestürzt"><AddonPanelDock panels={addonState.panels} activeKey={addonState.activePanel} runtime={addonRuntime} onClose={() => addonRuntime.setDockOpen(false)} /></SafeBoundary></Suspense>}
         {searchOpen && <Suspense fallback={null}><SearchPanel query={searchQuery} hits={searchHits} loading={searchLoading} onQueryChange={setSearchQuery} onOpen={(hit) => { void openSearchHit(hit) }} onClose={() => setSearchOpen(false)} /></Suspense>}
       </div>
 
       <footer className="statusbar">
-        <div className="statusbar-left"><button type="button" title={sidebarVisible ? 'Seitenleiste einklappen' : 'Seitenleiste einblenden'} aria-label={sidebarVisible ? 'Seitenleiste einklappen' : 'Seitenleiste einblenden'} onClick={() => setSidebarVisible((value) => !value)}>{sidebarVisible ? <PanelLeftClose size={12} /> : <PanelLeftOpen size={12} />}</button><span>{glyphenWerkOpen ? `GlyphenWerk · ${GLYPHENWERK_VIEW_LABELS[glyphenWerkView]}` : homeworkOpen ? 'Hausaufgaben & Termine' : overviewOpen ? 'Vault-Übersicht' : activeTab ? drawingOpen ? 'Stiftmodus' : isPdfActive ? 'PDF-Notiz' : worksheetSession.documents.length ? 'Notiz mit Arbeitsblatt' : 'Schreibmodus' : 'Bereit'}</span>{worksheetSession.documents.length > 0 && <span>{worksheetSession.documents.length} {worksheetSession.documents.length === 1 ? 'Arbeitsblatt' : 'Arbeitsblätter'}</span>}{activeTab && !glyphenWerkOpen && !homeworkOpen && !overviewOpen && (
+        <div className="statusbar-left"><button type="button" title={sidebarVisible ? 'Seitenleiste einklappen' : 'Seitenleiste einblenden'} aria-label={sidebarVisible ? 'Seitenleiste einklappen' : 'Seitenleiste einblenden'} onClick={() => setSidebarVisible((value) => !value)}>{sidebarVisible ? <PanelLeftClose size={12} /> : <PanelLeftOpen size={12} />}</button><span>{glyphenWerkOpen ? `GlyphenWerk · ${GLYPHENWERK_VIEW_LABELS[glyphenWerkView]}` : calendarOpen ? 'Kalender' : homeworkOpen ? 'Hausaufgaben & Termine' : overviewOpen ? 'Vault-Übersicht' : activeTab ? drawingOpen ? 'Stiftmodus' : isPdfActive ? 'PDF-Notiz' : worksheetSession.documents.length ? 'Notiz mit Arbeitsblatt' : 'Schreibmodus' : 'Bereit'}</span>{worksheetSession.documents.length > 0 && <span>{worksheetSession.documents.length} {worksheetSession.documents.length === 1 ? 'Arbeitsblatt' : 'Arbeitsblätter'}</span>}{activeTab && !glyphenWerkOpen && !homeworkOpen && !calendarOpen && !overviewOpen && (
           <nav className="note-breadcrumbs" aria-label="Pfad der Notiz">
             {breadcrumbsFor(activeTab.path).map((crumb, index) => (
               <span key={crumb.path} className="note-breadcrumbs__item">

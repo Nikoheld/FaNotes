@@ -155,6 +155,14 @@ Command-palette action ids walked from `src/App.tsx`: `new-note`, `import-pdf-no
 | Send Data chooses in-app confirm | `src/lib/confirmUx.ts` | `export const deleteConfirmHost` |
 | App version | `src/lib/appVersion.ts` | `APP_VERSION` |
 
+## Calendar
+
+| Surface | Source | Needle |
+| --- | --- | --- |
+| Calendar | `src/components/CalendarView.tsx` | `export function CalendarView` |
+| Calendar model | `src/lib/calendarModel.ts` | `export const CALENDAR_NOTE_PATH` |
+| Calendar command | `src/App.tsx` | `id: 'calendar'` |
+
 ## Homework
 
 | Surface | Source | Needle |

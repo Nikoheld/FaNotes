@@ -5,6 +5,7 @@
 
 ## 2026.9.23
 
+- **Kalender wie bei Notion.** Eine eigene Kalenderansicht (Tag, 3 Tage, Woche, Monat, Agenda) mit mehreren farbigen Kalendern, Ganztageszeile, Ziehen zum Anlegen, Verschieben und Verlängern, Wiederholungen, Suche, Minikalender und Verknüpfung zu Notizen und Tagesnotizen. Alles liegt lokal in `Kalender.md`.
 - **Geteilte Ansicht und Hyprland: der Text bleibt stehen.** Wenn du zwei Notizen nebeneinander öffnest oder das Fenster unter Hyprland auf halbe Breite ziehst, rutscht die schon geschriebene Schrift nicht mehr von ihrem Papierpunkt. Die Textspalte behält ihre Blattbreite statt mit der Spalte zu schrumpfen, der Innenabstand folgt nicht mehr der Fensterbreite, und die Kamera bleibt auf denselben Papierpunkten — nur ein neues Ursprungspad darf die Schrift verschieben, und dann rückt die Kamera um genau dasselbe mit.
 
 ## 2026.9.22
