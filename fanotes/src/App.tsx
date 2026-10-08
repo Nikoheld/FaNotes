@@ -65,7 +65,7 @@ import { NoteLinkLayer } from './components/NoteLinkLayer'
 import type { GlyphenWerkView } from './components/GlyphenWerkWorkspace'
 import type { MarkdownEditorHandle, MarkdownFormatAction } from './components/MarkdownEditor'
 import type { WorksheetLayerHandle } from './components/WorksheetLayer'
-import { companionNotePath, emptyFamdPayload, isNoteFileName, isPdfNotePath, readPageStatsFromNote, serializeFamd, stripFamdPayload, writePageStatsIntoNote } from './lib/famd'
+import { companionNotePath, emptyFamdPayload, isNoteFileName, isPdfNotePath, parseFamd, readPageStatsFromNote, serializeFamd, stripFamdPayload, writePageStatsIntoNote } from './lib/famd'
 import { createAppAddonBridge, safeSettingsView, type AppAddonDeps } from './lib/addons/appBridge'
 import { addonIndexCache } from './lib/addons/indexCache'
 import { parseAddonSource } from './lib/addons/registry'
@@ -736,6 +736,8 @@ export default function App({ startupBootstrap }: AppProps) {
   const pageStatsRef = useRef(new Map<string, PageStatsSession>())
   /** A failed page-stats read. Saving must not invent a fresh session over the companion. */
   const pageStatsUnreadableRef = useRef(new Set<string>())
+  /** Ink from a PDF history snapshot. The next save of that note writes it back. */
+  const pendingHistoryInkRef = useRef(new Map<string, Record<string, unknown>>())
   const worksheetEffectPathRef = useRef('')
   const previousActivePathRef = useRef<string | null>(null)
   const settingsRef = useRef(settings)
@@ -1697,7 +1699,15 @@ export default function App({ startupBootstrap }: AppProps) {
       if (savedSession) pageStatsRef.current.set(path, savedSession)
       // No session and a failed companion read: write the markdown only.
       // Embedding a fresh session would replace the statistics still on disk.
-      const nextContent = savedSession ? writePageStatsIntoNote(content, snapshotPageStats(savedSession)) : content
+      let nextContent = savedSession ? writePageStatsIntoNote(content, snapshotPageStats(savedSession)) : content
+      const historyInk = pendingHistoryInkRef.current.get(path)
+      if (historyInk) {
+        const parsed = parseFamd(nextContent)
+        nextContent = serializeFamd(stripFamdPayload(nextContent), {
+          ...(parsed.payload ?? emptyFamdPayload()),
+          ink: historyInk,
+        })
+      }
       const visibleContent = stripFamdPayload(nextContent)
       await window.fanotes.writeFile(isPdfNotePath(path) ? companionNotePath(path, '.famd') : path, nextContent)
       addonRuntime.emit('note:saved', { path, title: fileName(path).replace(/\.(md|markdown|pdf)$/iu, ''), length: visibleContent.length })
@@ -1712,6 +1722,7 @@ export default function App({ startupBootstrap }: AppProps) {
       if (pendingWrites.current.get(path) === content || pendingWrites.current.get(path) === nextContent || pendingWrites.current.get(path) === visibleContent) {
         pendingWrites.current.delete(path)
       }
+      pendingHistoryInkRef.current.delete(path)
       // The editor keeps the text exactly as typed. The saved body only differs
       // in trailing whitespace (stripFamdPayload trims it), and pushing that
       // trimmed body back replaced the document after every autosave — a new
@@ -2526,6 +2537,11 @@ export default function App({ startupBootstrap }: AppProps) {
     })
     pageStatsRef.current = next
     pageStatsUnreadableRef.current = new Set([...pageStatsUnreadableRef.current].map((key) => renamedPageStatsKey(key, from, to)))
+    const nextInk = new Map<string, Record<string, unknown>>()
+    pendingHistoryInkRef.current.forEach((ink, key) => {
+      nextInk.set(renamedPageStatsKey(key, from, to), ink)
+    })
+    pendingHistoryInkRef.current = nextInk
   }, [])
 
   const forgetPageStats = useCallback((path: string) => {
@@ -2534,6 +2550,9 @@ export default function App({ startupBootstrap }: AppProps) {
     }
     for (const key of [...pageStatsUnreadableRef.current]) {
       if (key === path || key.startsWith(`${path}/`)) pageStatsUnreadableRef.current.delete(key)
+    }
+    for (const key of [...pendingHistoryInkRef.current.keys()]) {
+      if (key === path || key.startsWith(`${path}/`)) pendingHistoryInkRef.current.delete(key)
     }
   }, [])
 
@@ -2956,6 +2975,7 @@ export default function App({ startupBootstrap }: AppProps) {
       searchRequestRef.current += 1
       pageStatsRef.current = new Map()
       pageStatsUnreadableRef.current = new Set()
+      pendingHistoryInkRef.current = new Map()
       treeRef.current = []
       setTree([])
       setSearchLoading(false)
@@ -3667,7 +3687,34 @@ export default function App({ startupBootstrap }: AppProps) {
     setHistoryBusy(true)
     try {
       const snapshot = await window.fanotes.readNoteHistory(historyPathFor(activePath), snapshotId)
-      updateContent(snapshot.content)
+      const raw = typeof snapshot.content === 'string' ? snapshot.content : ''
+      // PDF history stores the .famd file. The editor shows the note text;
+      // the payload's handwriting is written back with the next save.
+      const restored = stripFamdPayload(raw)
+      if (isPdfNotePath(activePath)) {
+        const ink = parseFamd(raw).payload?.ink
+        if (ink && typeof ink === 'object' && !Array.isArray(ink)) {
+          pendingHistoryInkRef.current.set(activePath, ink)
+          const markerId = noteInkId(restored)
+          const id = markerId || (typeof ink.id === 'string' ? ink.id : 'famd-ink')
+          setDrawingSession({
+            key: drawingSessionKeyRef.current + 1,
+            document: {
+              id,
+              title: typeof ink.title === 'string' ? ink.title : 'Handschrift',
+              updatedAt: new Date().toISOString(),
+              imageRelativePath: '',
+              dataRelativePath: companionNotePath(activePath, '.famd'),
+              drawingJson: JSON.stringify({ ...ink, id }),
+            },
+            path: activePath,
+          })
+          drawingSessionKeyRef.current += 1
+        } else {
+          pendingHistoryInkRef.current.delete(activePath)
+        }
+      }
+      updateContent(restored)
       setHistoryOpen(false)
       toast('Ältere Version wiederhergestellt. Speichern sichert sie.', 'success')
     } catch (error) {
