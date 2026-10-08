@@ -1636,8 +1636,10 @@ async function readOptionalNoteFile(relativePath, maxBytes = MAX_FAMD_BYTES) {
     const { target } = await resolveVaultPath(relativePath, { allowMissing: true, expected: 'file' })
     return (await readRegularFileNoFollow(target, maxBytes)).toString('utf8')
   } catch (error) {
+    // A missing companion is empty. Any other failure must not look like
+    // "no file": the next text save would rewrite the companion without its ink.
     if (error?.code === 'ENOENT') return null
-    return null
+    throw error
   }
 }
 
