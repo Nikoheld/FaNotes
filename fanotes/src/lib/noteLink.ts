@@ -235,6 +235,54 @@ export const noteLinkPointFromRect = (
   }
 }
 
+export type NoteLinkPaperBox = {
+  layoutWidth: number
+  layoutHeight: number
+  visualWidth: number
+  visualHeight: number
+}
+
+export type NoteLinkCssBox = {
+  left: number
+  top: number
+  width: number
+  height: number
+}
+
+/**
+ * CSS left/top for a note-link pin. `link.x`/`link.y` are 0–1 of the paper
+ * (or of one PDF page). CSS left/top are unzoomed layout px on the sheet
+ * plane; getBoundingClientRect is already zoomed, so a fraction times the
+ * visual width places the pin again after CSS zoom.
+ */
+const sheetZoomAxis = (visual: number, layout: number) => {
+  const layoutPx = Math.max(1, Number.isFinite(layout) ? layout : 0)
+  const visualPx = Number.isFinite(visual) ? visual : layoutPx
+  const zoom = visualPx / layoutPx
+  return Number.isFinite(zoom) && zoom > 0 ? zoom : 1
+}
+
+export const noteLinkMarkerCss = (
+  link: { x: number; y: number },
+  paper: NoteLinkPaperBox,
+  page?: NoteLinkCssBox | null,
+  layer?: { left: number; top: number } | null,
+): { left: number; top: number } => {
+  const x = Number.isFinite(link.x) ? link.x : 0
+  const y = Number.isFinite(link.y) ? link.y : 0
+  if (page && layer) {
+    const zoomX = sheetZoomAxis(paper.visualWidth, paper.layoutWidth)
+    const zoomY = sheetZoomAxis(paper.visualHeight, paper.layoutHeight)
+    return {
+      left: (page.left - layer.left) / zoomX + x * (page.width / zoomX),
+      top: (page.top - layer.top) / zoomY + y * (page.height / zoomY),
+    }
+  }
+  const width = Number.isFinite(paper.layoutWidth) ? paper.layoutWidth : 0
+  const height = Number.isFinite(paper.layoutHeight) ? paper.layoutHeight : 0
+  return { left: x * width, top: y * height }
+}
+
 type NoteLinkHitBox = {
   left: number
   top: number

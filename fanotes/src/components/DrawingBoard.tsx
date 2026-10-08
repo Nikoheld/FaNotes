@@ -71,6 +71,7 @@ import {
   normalizeRotation,
   readSharedZoomMax,
   readSharedZoomSpeed,
+  readUsedSheetZoom,
   resolvePaperViewTarget,
   resolvePaperZoomScroller,
   zoomFactorFromWheel,
@@ -200,6 +201,7 @@ import {
   paperScrollBoundsFromVisualRect,
   paperSheetLayoutShift,
   liveWriteStayPut,
+  scrollForZoomedOriginPad,
   textOriginCssPx,
   writeExtentFromContent,
 } from '../lib/noteCanvas'
@@ -2703,7 +2705,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       { x: beforeOrigin.minX, y: beforeOrigin.minY },
       { x: afterOrigin.minX, y: afterOrigin.minY },
     )
-    const nextStay = liveWriteStayPut({
+    liveWriteStayPut({
       paperX: 0,
       paperY: 0,
       camX: originCamera.x,
@@ -2719,15 +2721,21 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       painted: { width: paper?.offsetWidth ?? 0, height: paper?.offsetHeight ?? 0 },
       sheetShift: shift,
     })
-    pinPaperViewportAfterExtentGrow(scroller, { x: nextStay.camX, y: nextStay.camY })
+    const stayScroll = scrollForZoomedOriginPad(
+      originCamera,
+      { x: addX, y: addY },
+      shift,
+      readUsedSheetZoom(paper),
+    )
+    pinPaperViewportAfterExtentGrow(scroller, stayScroll)
     const surface = surfaceRef.current
     const canvases = [canvasRef.current, committedCanvasRef.current]
-    applyVisualGrowCorrection(scroller, { x: nextStay.camX, y: nextStay.camY }, { surface, canvases })
+    applyVisualGrowCorrection(scroller, stayScroll, { surface, canvases })
     if (visualGrowFrameRef.current !== null) cancelAnimationFrame(visualGrowFrameRef.current)
     visualGrowFrameRef.current = schedulePaperVisualGrowRefresh(
       (callback) => window.requestAnimationFrame(callback),
       scroller,
-      { x: nextStay.camX, y: nextStay.camY },
+      stayScroll,
       VISUAL_GROW_REFRESH_FRAMES,
       { surface, canvases },
     ) || null
