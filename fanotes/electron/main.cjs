@@ -3108,7 +3108,12 @@ function registerIpcHandlers() {
             : (markdownBody.endsWith('\n') ? markdownBody : `${markdownBody}\n`)
           await atomicWrite(target, written, { encoding: 'utf8', mode: 0o600 })
           try {
-            await writeFamdCompanion(normalizedRelativePath, content, undefined, { heldQueueTarget: target })
+            // A page-stats save carries ink:null and must leave the companion
+            // handwriting alone. A real ink object (the note-standard upgrade)
+            // is the new handwriting and has to replace it.
+            const incomingInk = parseFamd(content).payload?.ink
+            const companionInk = incomingInk && typeof incomingInk === 'object' ? incomingInk : undefined
+            await writeFamdCompanion(normalizedRelativePath, content, companionInk, { heldQueueTarget: target })
           } catch (error) {
             console.warn('FaNotes: .famd-Begleiter konnte nicht geschrieben werden:', error?.message ?? error)
           }

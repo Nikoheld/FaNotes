@@ -65,7 +65,7 @@ import { NoteLinkLayer } from './components/NoteLinkLayer'
 import type { GlyphenWerkView } from './components/GlyphenWerkWorkspace'
 import type { MarkdownEditorHandle, MarkdownFormatAction } from './components/MarkdownEditor'
 import type { WorksheetLayerHandle } from './components/WorksheetLayer'
-import { companionNotePath, isNoteFileName, isPdfNotePath, readPageStatsFromNote, stripFamdPayload, writePageStatsIntoNote } from './lib/famd'
+import { companionNotePath, emptyFamdPayload, isNoteFileName, isPdfNotePath, readPageStatsFromNote, serializeFamd, stripFamdPayload, writePageStatsIntoNote } from './lib/famd'
 import { createAppAddonBridge, safeSettingsView, type AppAddonDeps } from './lib/addons/appBridge'
 import { addonIndexCache } from './lib/addons/indexCache'
 import { parseAddonSource } from './lib/addons/registry'
@@ -1724,10 +1724,29 @@ export default function App({ startupBootstrap }: AppProps) {
       }
       const readPath = isPdfNotePath(path) ? companionNotePath(path, '.famd') : path
       try {
-        let source = ''
+        const open = tabsRef.current.find((tab) => tab.path === path)
+        const live = pendingWrites.current.get(path) ?? (open && open.content !== open.savedContent ? open.content : null)
+        let markdown = ''
         try {
-          source = await window.fanotes.readFile(readPath)
+          markdown = live ?? await window.fanotes.readFile(readPath)
         } catch {
+          skipped += 1
+          continue
+        }
+        // Handwriting lives in the companion, and readFile strips that payload.
+        // Without it the upgrade always looks like a note that has no ink.
+        const embedded = await readNoteInk(path, markdown)
+        let source = markdown
+        if (embedded?.drawingJson) {
+          try {
+            const ink = JSON.parse(embedded.drawingJson) as Record<string, unknown>
+            source = serializeFamd(markdown, { ...emptyFamdPayload(), ink })
+          } catch {
+            source = markdown
+          }
+        }
+        const latest = pendingWrites.current.get(path) ?? tabsRef.current.find((tab) => tab.path === path)?.content
+        if (live !== null && latest !== markdown) {
           skipped += 1
           continue
         }
@@ -1743,7 +1762,15 @@ export default function App({ startupBootstrap }: AppProps) {
         await window.fanotes.writeFile(readPath, result.source)
         converted += 1
         const visibleSource = stripFamdPayload(result.source)
-        setTabs((current) => current.map((tab) => tab.path === path ? { ...tab, content: visibleSource, savedContent: visibleSource } : tab))
+        const timer = saveTimers.current.get(path)
+        if (timer) window.clearTimeout(timer)
+        saveTimers.current.delete(path)
+        if (pendingWrites.current.get(path) === markdown) pendingWrites.current.delete(path)
+        setTabs((current) => current.map((tab) => {
+          if (tab.path !== path) return tab
+          if (tab.content !== markdown && pendingWrites.current.get(path) !== markdown) return { ...tab, savedContent: visibleSource }
+          return { ...tab, content: visibleSource, savedContent: visibleSource }
+        }))
       } catch {
         failed += 1
       }
