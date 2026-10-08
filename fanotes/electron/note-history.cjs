@@ -24,8 +24,13 @@ const readIndex = async (directory) => {
     const parsed = JSON.parse(raw)
     if (!parsed || parsed.format !== 'fanotes-history-v1' || !Array.isArray(parsed.snapshots)) return { format: 'fanotes-history-v1', snapshots: [] }
     return parsed
-  } catch {
-    return { format: 'fanotes-history-v1', snapshots: [] }
+  } catch (error) {
+    // A missing or unreadable index starts empty. An I/O error must not: the
+    // next snapshot would replace the index and hide every earlier revision.
+    if (error?.code === 'ENOENT' || error instanceof SyntaxError) {
+      return { format: 'fanotes-history-v1', snapshots: [] }
+    }
+    throw error
   }
 }
 

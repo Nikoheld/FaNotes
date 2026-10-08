@@ -719,6 +719,8 @@ export default function App({ startupBootstrap }: AppProps) {
   const noteBackupsRef = useRef<NoteBackupSnapshot[]>([])
   const subjectBooksRef = useRef<SubjectBookRecord[]>([])
   const subjectBooksDiskRef = useRef<SubjectBookRecord[]>([])
+  /** False until a subject-book read succeeds. A failed read must not be saved back as an empty list. */
+  const subjectBooksLoadedRef = useRef(false)
   const bookPlacementRef = useRef<SubjectBookPlacement>('rechts')
   const editorRef = useRef<MarkdownEditorHandle>(null)
   const drawingBoardRef = useRef<DrawingBoardHandle>(null)
@@ -998,9 +1000,12 @@ export default function App({ startupBootstrap }: AppProps) {
         try {
           const disk = window.fanotes.readSubjectBooks ? await window.fanotes.readSubjectBooks() : []
           const parsed = parseSubjectBooks(disk)
+          subjectBooksLoadedRef.current = true
           subjectBooksDiskRef.current = parsed
           setSubjectBooksDisk(parsed)
           setSubjectBooks((memory) => mergeSubjectBooksPreferDisk(memory, parsed))
+        } catch {
+          // A failed re-read is not an empty book list.
         } finally {
           setSubjectBooksHydrating(false)
         }
@@ -1145,24 +1150,25 @@ export default function App({ startupBootstrap }: AppProps) {
 
   useEffect(() => {
     if (!window.fanotes.readSubjectBooks) {
+      subjectBooksLoadedRef.current = true
       setSubjectBooksReady(true)
       return
     }
     let alive = true
+    subjectBooksLoadedRef.current = false
     setSubjectBooksReady(false)
     void window.fanotes.readSubjectBooks()
       .then((list) => {
         if (!alive) return
         const parsed = parseSubjectBooks(list)
+        subjectBooksLoadedRef.current = true
         subjectBooksDiskRef.current = parsed
         setSubjectBooksDisk(parsed)
         setSubjectBooks(parsed)
       })
       .catch(() => {
         if (!alive) return
-        subjectBooksDiskRef.current = []
-        setSubjectBooksDisk([])
-        setSubjectBooks([])
+        subjectBooksLoadedRef.current = false
       })
       .finally(() => {
         if (alive) setSubjectBooksReady(true)
@@ -2115,6 +2121,9 @@ export default function App({ startupBootstrap }: AppProps) {
   }, [])
 
   const persistSubjectBooks = useCallback(async (list: SubjectBookRecord[]) => {
+    if (!subjectBooksLoadedRef.current) {
+      throw new Error('Die Fachbücher konnten nicht gelesen werden. Es wurde nichts überschrieben.')
+    }
     const next = parseSubjectBooks(list)
     subjectBooksRef.current = next
     subjectBooksDiskRef.current = next
@@ -2128,9 +2137,12 @@ export default function App({ startupBootstrap }: AppProps) {
     try {
       const disk = window.fanotes.readSubjectBooks ? await window.fanotes.readSubjectBooks() : []
       const parsed = parseSubjectBooks(disk)
+      subjectBooksLoadedRef.current = true
       subjectBooksDiskRef.current = parsed
       setSubjectBooksDisk(parsed)
       setSubjectBooks((memory) => mergeSubjectBooksPreferDisk(memory, parsed))
+    } catch {
+      // Keep the books already on screen when the file cannot be read.
     } finally {
       setSubjectBooksHydrating(false)
     }
@@ -2185,7 +2197,7 @@ export default function App({ startupBootstrap }: AppProps) {
   }, [bookPlacement, refreshSubjectBooksFromDisk])
 
   const handleBookPage = useCallback((page: number, pageCount: number) => {
-    if (!currentBook) return
+    if (!currentBook || !subjectBooksLoadedRef.current) return
     const patched = patchSubjectBookPage(subjectBooksDiskRef.current, currentBook, page, pageCount)
     const current = subjectBooksDiskRef.current.find((book) => book.subjectPath === currentBook.subjectPath)
     const next = patched.find((book) => book.subjectPath === currentBook.subjectPath)

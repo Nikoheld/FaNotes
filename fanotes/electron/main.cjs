@@ -1165,17 +1165,23 @@ async function readFolderColors(root) {
   const metadataPath = path.join(internalDirectory, 'folder-colors.json')
   try {
     const parentInfo = await fsp.lstat(path.dirname(metadataPath))
-    if (!parentInfo.isDirectory() || parentInfo.isSymbolicLink()) return new Map()
+    if (!parentInfo.isDirectory() || parentInfo.isSymbolicLink()) {
+      throw new Error('Der interne FaNotes-Ordner ist unsicher.')
+    }
     const info = await fsp.lstat(metadataPath)
-    if (!info.isFile() || info.isSymbolicLink() || info.size > MAX_FOLDER_COLOR_BYTES) return new Map()
+    if (!info.isFile() || info.isSymbolicLink() || info.size > MAX_FOLDER_COLOR_BYTES) {
+      throw new Error('Die Ordnerfarben sind ungültig oder zu groß.')
+    }
     const raw = (await readRegularFileNoFollow(metadataPath, MAX_FOLDER_COLOR_BYTES)).toString('utf8')
     const parsed = JSON.parse(raw)
     return cleanFolderColorEntries(isPlainObject(parsed) && isPlainObject(parsed.colors) ? parsed.colors : parsed)
   } catch (error) {
-    if (error?.code !== 'ENOENT') {
+    if (error?.code === 'ENOENT') return new Map()
+    if (error instanceof SyntaxError) {
       console.warn('Ordnerfarben konnten nicht gelesen werden:', error?.message ?? error)
+      return new Map()
     }
-    return new Map()
+    throw error
   }
 }
 
@@ -1204,15 +1210,19 @@ async function readSubjectBooksFromVault(root) {
   const metadataPath = path.join(internalDirectory, 'subject-books.json')
   try {
     const info = await fsp.lstat(metadataPath)
-    if (!info.isFile() || info.isSymbolicLink() || info.size > MAX_SUBJECT_BOOK_BYTES) return []
+    if (!info.isFile() || info.isSymbolicLink() || info.size > MAX_SUBJECT_BOOK_BYTES) {
+      throw new Error('Die Fachbuch-Liste ist ungültig oder zu groß.')
+    }
     const raw = (await readRegularFileNoFollow(metadataPath, MAX_SUBJECT_BOOK_BYTES)).toString('utf8')
     const parsed = JSON.parse(raw)
     return parseSubjectBooks(parsed?.books ?? parsed)
   } catch (error) {
-    if (error?.code !== 'ENOENT') {
+    if (error?.code === 'ENOENT') return []
+    if (error instanceof SyntaxError) {
       console.warn('Fachbücher konnten nicht gelesen werden:', error?.message ?? error)
+      return []
     }
-    return []
+    throw error
   }
 }
 
@@ -1659,6 +1669,38 @@ async function writeFamdCompanion(markdownRelativePath, markdown, ink = undefine
   const write = () => writeFamdCompanionNow(markdownRelativePath, famdRelativePath, target, markdown, ink)
   if (options.heldQueueTarget === target) return write()
   return queueFileWrite(target, write)
+}
+
+/**
+ * Read-modify-write one `.famd` on the same queue as text and ink saves.
+ * The read happens inside the queue, so a paper-style, link, or backup update
+ * cannot revive a stale companion over a save that already landed.
+ */
+async function mutateFamdCompanion(notePath, mutate) {
+  const markdownPath = noteMarkdownSourcePath(notePath)
+  const famdRelative = companionNotePath(notePath, '.famd')
+  const { target } = await resolveVaultPath(famdRelative, { allowMissing: true, expected: 'file' })
+  return queueFileWrite(target, async () => {
+    const markdown = (await readOptionalNoteFile(markdownPath, noteByteLimit(markdownPath))) ?? ''
+    const existingSource = await readOptionalNoteFile(famdRelative)
+    const existing = existingSource ? parseFamd(existingSource) : { markdown: stripFamdPayload(markdown), payload: emptyFamdPayload() }
+    const body = stripFamdPayload(markdown || existing.markdown)
+    const basePayload = {
+      ...(existing.payload || emptyFamdPayload()),
+      updatedAt: new Date().toISOString(),
+      worksheets: worksheetIdsFromMarkdown(body),
+    }
+    const next = mutate({ body, payload: basePayload }) || {}
+    const nextBody = typeof next.body === 'string' ? next.body : body
+    const nextPayload = {
+      ...basePayload,
+      ...(next.payload || {}),
+      updatedAt: new Date().toISOString(),
+      worksheets: worksheetIdsFromMarkdown(nextBody),
+    }
+    await atomicWrite(target, serializeFamd(nextBody, nextPayload), { encoding: 'utf8', mode: 0o600 })
+    return next.result
+  })
 }
 
 async function writeFamdCompanionNow(markdownRelativePath, famdRelativePath, target, markdown, ink) {
@@ -3526,9 +3568,16 @@ function registerIpcHandlers() {
       try {
         const notePath = normalizeRelativePath(payload.noteRelativePath).split(path.sep).join('/')
         assertNotePath(notePath)
-        const markdownPath = noteMarkdownSourcePath(notePath)
-        const noteMarkdown = (await readOptionalNoteFile(markdownPath, noteByteLimit(markdownPath))) ?? ''
-        await writeFamdCompanion(notePath, stripFamdPayload(noteMarkdown), drawingDocument)
+        const famdRelativePath = companionNotePath(notePath, '.famd')
+        const { target: famdTarget } = await resolveVaultPath(famdRelativePath, { allowMissing: true, expected: 'file' })
+        // Read the note text inside the companion queue. A snapshot taken
+        // before this slot runs is already stale once a text save lands first,
+        // and writing it back would drop that text from the only PDF copy.
+        await queueFileWrite(famdTarget, async () => {
+          const markdownPath = noteMarkdownSourcePath(notePath)
+          const noteMarkdown = (await readOptionalNoteFile(markdownPath, noteByteLimit(markdownPath))) ?? ''
+          await writeFamdCompanion(notePath, stripFamdPayload(noteMarkdown), drawingDocument, { heldQueueTarget: famdTarget })
+        })
       } catch (error) {
         throw new Error(`Handschrift konnte nicht in die Notiz geschrieben werden: ${error?.message ?? error}`)
       }
@@ -3655,25 +3704,12 @@ function registerIpcHandlers() {
     if (typeof relativePath !== 'string') throw new Error('Ungültiger Notizpfad.')
     const notePath = normalizeRelativePath(relativePath).split(path.sep).join('/')
     assertNotePath(notePath)
-    const markdownPath = noteMarkdownSourcePath(notePath)
-    const markdown = (await readOptionalNoteFile(markdownPath, noteByteLimit(markdownPath))) ?? ''
-    const famdRelative = companionNotePath(notePath, '.famd')
-    const existingSource = await readOptionalNoteFile(famdRelative)
-    const existing = existingSource ? parseFamd(existingSource) : { markdown: stripFamdPayload(markdown), payload: emptyFamdPayload() }
-    const ink = existing.payload?.ink && typeof existing.payload.ink === 'object'
-      ? { ...existing.payload.ink, paperStyle }
-      : existing.payload?.ink ?? null
-    const body = stripFamdPayload(markdown || existing.markdown)
-    const payload = {
-      ...(existing.payload || emptyFamdPayload()),
-      updatedAt: new Date().toISOString(),
-      ink,
-      worksheets: worksheetIdsFromMarkdown(body),
-      paperStyle,
-    }
-    const { target } = await resolveVaultPath(famdRelative, { allowMissing: true, expected: 'file' })
-    await atomicWrite(target, serializeFamd(body, payload), { encoding: 'utf8', mode: 0o600 })
-    return paperStyle
+    return mutateFamdCompanion(notePath, ({ payload }) => {
+      const ink = payload.ink && typeof payload.ink === 'object'
+        ? { ...payload.ink, paperStyle }
+        : payload.ink ?? null
+      return { payload: { ink, paperStyle }, result: paperStyle }
+    })
   })
 
   handle(IPC.readNoteLinks, async (_event, relativePath) => {
@@ -3692,21 +3728,7 @@ function registerIpcHandlers() {
     const notePath = normalizeRelativePath(relativePath).split(path.sep).join('/')
     assertNotePath(notePath)
     const links = parseNoteLinks(rawLinks).map((link) => ({ ...link, sourcePath: notePath }))
-    const markdownPath = noteMarkdownSourcePath(notePath)
-    const markdown = (await readOptionalNoteFile(markdownPath, noteByteLimit(markdownPath))) ?? ''
-    const famdRelative = companionNotePath(notePath, '.famd')
-    const existingSource = await readOptionalNoteFile(famdRelative)
-    const existing = existingSource ? parseFamd(existingSource) : { markdown: stripFamdPayload(markdown), payload: emptyFamdPayload() }
-    const body = stripFamdPayload(markdown || existing.markdown)
-    const payload = {
-      ...(existing.payload || emptyFamdPayload()),
-      updatedAt: new Date().toISOString(),
-      worksheets: worksheetIdsFromMarkdown(body),
-      noteLinks: links,
-    }
-    const { target } = await resolveVaultPath(famdRelative, { allowMissing: true, expected: 'file' })
-    await atomicWrite(target, serializeFamd(body, payload), { encoding: 'utf8', mode: 0o600 })
-    return links
+    return mutateFamdCompanion(notePath, () => ({ payload: { noteLinks: links }, result: links }))
   })
 
   handle(IPC.readNoteBackups, async (_event, relativePath) => {
@@ -3725,21 +3747,7 @@ function registerIpcHandlers() {
     const notePath = normalizeRelativePath(relativePath).split(path.sep).join('/')
     assertNotePath(notePath)
     const backups = parseNoteBackups(rawBackups).map((snapshot) => ({ ...snapshot, notePath }))
-    const markdownPath = noteMarkdownSourcePath(notePath)
-    const markdown = (await readOptionalNoteFile(markdownPath, noteByteLimit(markdownPath))) ?? ''
-    const famdRelative = companionNotePath(notePath, '.famd')
-    const existingSource = await readOptionalNoteFile(famdRelative)
-    const existing = existingSource ? parseFamd(existingSource) : { markdown: stripFamdPayload(markdown), payload: emptyFamdPayload() }
-    const body = stripFamdPayload(markdown || existing.markdown)
-    const payload = {
-      ...(existing.payload || emptyFamdPayload()),
-      updatedAt: new Date().toISOString(),
-      worksheets: worksheetIdsFromMarkdown(body),
-      noteBackups: backups,
-    }
-    const { target } = await resolveVaultPath(famdRelative, { allowMissing: true, expected: 'file' })
-    await atomicWrite(target, serializeFamd(body, payload), { encoding: 'utf8', mode: 0o600 })
-    return backups
+    return mutateFamdCompanion(notePath, () => ({ payload: { noteBackups: backups }, result: backups }))
   })
 
   handle(IPC.readSubjectBooks, async () => {
