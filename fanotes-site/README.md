@@ -12,6 +12,12 @@ Der Node-Dienst erkennt den neuesten vollständigen FaNotes-Release bei jedem AP
 
 Sobald dort ein vollständiger Linux-Satz aus AppImage und portablem Archiv liegt, zeigt die Website ohne Neubau die neue Version, Dateigrößen, Prüfsummen und Änderungen an. Liegen zusätzlich Windows-Installer und portable Windows-App vor, werden sie als eigener Downloadkanal veröffentlicht. `SHA256SUMS`, `CHANGELOG.md` sowie die Installationsanleitungen für Linux und Windows werden gemeinsam ausgeliefert.
 
+Automatische Updates und die Paketdownloads werden nur ausgeliefert, wenn `SHA256SUMS` mit dem Update-Schlüssel signiert ist. Die Signatur liegt **nicht** im Release-Ordner, sondern standardmäßig unter `/etc/fanotes/SHA256SUMS.sig` (oder `FANOTES_RELEASE_CHECKSUM_SIGNATURE`). So kann ein Schreibzugriff auf das Release-Verzeichnis allein kein signiertes Update erzeugen. `scripts/publish-release.cjs` schreibt diese Datei, wenn `FANOTES_UPDATE_SIGNING_KEY` gesetzt ist. Manuell:
+
+```bash
+node -e "const fs=require('fs');const c=require('crypto');const pem=fs.readFileSync('/etc/fanotes/update-signing-private.pem');const body=fs.readFileSync('SHA256SUMS');fs.writeFileSync('/etc/fanotes/SHA256SUMS.sig',c.sign(null,body,c.createPrivateKey(pem)).toString('base64')+'\n',{mode:0o600})"
+```
+
 ## Lokaler Test
 
 ```bash

@@ -1,6 +1,7 @@
 import { createReadStream, promises as fs } from 'node:fs'
 import { createServer } from 'node:http'
 import { createHash, createPrivateKey, createPublicKey, sign } from 'node:crypto'
+import { assertReleaseFileName, hashRegularFile, parseChecksumMap, verifyChecksumSignature } from './release-trust.mjs'
 import { extname, join, normalize, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { handleBackupRequest, initializeBackupService } from './backup-service.mjs'
@@ -21,6 +22,7 @@ const PORT = Number(process.env.FANOTES_PORT || 18185)
 const INTERNAL_DOWNLOAD_PREFIX = process.env.FANOTES_INTERNAL_DOWNLOAD_PREFIX || '/_fanotes_release/'
 const PUBLIC_ORIGIN = process.env.FANOTES_PUBLIC_ORIGIN || 'https://fanotes.fasrv.ch'
 const UPDATE_SIGNING_KEY_PATH = process.env.FANOTES_UPDATE_SIGNING_KEY || '/etc/fanotes/update-signing-private.pem'
+const RELEASE_CHECKSUM_SIGNATURE_PATH = process.env.FANOTES_RELEASE_CHECKSUM_SIGNATURE || '/etc/fanotes/SHA256SUMS.sig'
 const ANALYTICS_DIR = resolve(process.env.FANOTES_ANALYTICS_DIR || '/var/lib/fanotes-analytics')
 const MAX_STATIC_BYTES = 12 * 1024 * 1024
 const MAX_NEURAL_TEXT_MODEL_BYTES = 32 * 1024 * 1024
@@ -117,6 +119,65 @@ const checksumMap = async () => {
     const match = /^([a-f0-9]{64})\s+\*?(.+)$/iu.exec(line.trim())
     return match ? [[match[2], match[1].toLowerCase()]] : []
   }))
+}
+
+let trustedChecksumCache = null
+const releaseDigestCache = new Map()
+
+const trustedChecksumMap = async () => {
+  const sumsPath = join(RELEASE_DIR, 'SHA256SUMS')
+  const [sumsStat, signatureStat] = await Promise.all([
+    fs.lstat(sumsPath),
+    fs.lstat(RELEASE_CHECKSUM_SIGNATURE_PATH),
+  ])
+  if (sumsStat.isSymbolicLink() || signatureStat.isSymbolicLink() || !sumsStat.isFile() || !signatureStat.isFile()) {
+    throw new Error('Die signierten Release-Prüfsummen sind keine sicheren Dateien.')
+  }
+  if (
+    trustedChecksumCache
+    && trustedChecksumCache.sumsMtime === sumsStat.mtimeMs
+    && trustedChecksumCache.sumsSize === sumsStat.size
+    && trustedChecksumCache.signatureMtime === signatureStat.mtimeMs
+    && trustedChecksumCache.signatureSize === signatureStat.size
+  ) return trustedChecksumCache.map
+  const payload = await fs.readFile(sumsPath)
+  const signature = Buffer.from((await fs.readFile(RELEASE_CHECKSUM_SIGNATURE_PATH, 'utf8')).trim(), 'base64')
+  const { privateKey } = await updateSigningMaterial()
+  if (!verifyChecksumSignature(payload, signature, createPublicKey(privateKey))) {
+    throw new Error('Die Release-Prüfsummen sind nicht mit dem FaNotes-Update-Schlüssel signiert.')
+  }
+  const map = parseChecksumMap(payload.toString('utf8'))
+  trustedChecksumCache = {
+    sumsMtime: sumsStat.mtimeMs,
+    sumsSize: sumsStat.size,
+    signatureMtime: signatureStat.mtimeMs,
+    signatureSize: signatureStat.size,
+    map,
+  }
+  return map
+}
+
+const trustedFileDigest = async (fileName) => {
+  assertReleaseFileName(fileName)
+  const fullPath = join(RELEASE_DIR, fileName)
+  const info = await fs.lstat(fullPath)
+  if (!info.isFile() || info.isSymbolicLink()) throw new Error(`${fileName} ist keine sichere Release-Datei.`)
+  const cached = releaseDigestCache.get(fileName)
+  if (cached && cached.mtimeMs === info.mtimeMs && cached.size === info.size) return cached.digest
+  const digest = await hashRegularFile(fullPath)
+  releaseDigestCache.set(fileName, { mtimeMs: info.mtimeMs, size: info.size, digest })
+  return digest
+}
+
+const assertTrustedPackage = async (fileName, expectedSha) => {
+  const signed = (await trustedChecksumMap()).get(fileName)
+  if (!signed || (expectedSha && signed !== expectedSha)) {
+    throw new Error(`${fileName} ist nicht von den signierten Release-Prüfsummen abgedeckt.`)
+  }
+  if (await trustedFileDigest(fileName) !== signed) {
+    throw new Error(`${fileName} stimmt nicht mit den signierten Release-Prüfsummen überein.`)
+  }
+  return signed
 }
 
 const changelogFor = async (version) => {
@@ -339,6 +400,10 @@ const signedUpdateManifest = async (release, currentVersion, language, channel =
     delta: await deltaForRelease(release, currentVersion, channel),
     websiteUrl: `${PUBLIC_ORIGIN}/`,
   }
+  for (const candidate of Object.values(payload.packages)) {
+    await assertTrustedPackage(candidate.fileName, candidate.sha256)
+  }
+  if (payload.delta) await assertTrustedPackage(payload.delta.fileName, payload.delta.sha256)
   const { privateKey, keyId } = await updateSigningMaterial()
   return {
     ...payload,
@@ -354,6 +419,7 @@ const deltaDownload = async (request, response, platform, currentVersion, channe
   const releases = await discoverReleases(channel)
   const delta = await deltaForRelease(releases[platform], currentVersion, channel)
   if (!delta) throw new Error('Für diese Basisversion ist kein differentielles Update verfügbar.')
+  await assertTrustedPackage(delta.fileName, delta.sha256)
   response.statusCode = 200
   response.setHeader('Content-Disposition', `attachment; filename="${delta.fileName}"`)
   response.setHeader('Content-Type', 'application/vnd.fanotes.delta')
@@ -379,9 +445,15 @@ const releaseDownload = async (request, response, kind, channel = 'stable') => {
               ? { fileName: 'INSTALL_WINDOWS.md', label: 'Windows-Installationsanleitung' }
               : { fileName: 'INSTALL_ARCH.md', label: 'Linux-Installationsanleitung' }
   if (!target) throw new Error('Für diese Plattform ist noch kein vollständiger Release verfügbar.')
+  assertReleaseFileName(target.fileName)
   const fullPath = join(RELEASE_DIR, target.fileName)
-  const stats = await fs.stat(fullPath)
-  if (!stats.isFile()) throw new Error('Download nicht gefunden.')
+  const stats = await fs.lstat(fullPath)
+  if (!stats.isFile() || stats.isSymbolicLink()) throw new Error('Download nicht gefunden.')
+  if (['appimage', 'portable', 'windows-installer', 'windows-portable'].includes(kind)) {
+    await assertTrustedPackage(target.fileName, target.sha256)
+  } else if (kind === 'checksums') {
+    await trustedChecksumMap()
+  }
   const downloadName = target.fileName.replaceAll('"', '')
   const releaseVersion = kind.startsWith('windows') ? releases.windows?.version ?? releases.linux.version : releases.linux.version
   if (['appimage', 'portable', 'windows-installer', 'windows-portable'].includes(kind)) {

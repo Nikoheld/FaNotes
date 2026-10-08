@@ -49,7 +49,22 @@ void (async () => {
     throw new Error('GITHUB_TOKEN fehlt. FaNotes veröffentlicht keinen Server-Release ohne denselben vollständigen GitHub-Release.')
   }
 
-  const checksumsText = await fsp.readFile(path.join(stage, 'SHA256SUMS'), 'utf8')
+  const checksumsPath = path.join(stage, 'SHA256SUMS')
+  const checksumsText = await fsp.readFile(checksumsPath, 'utf8')
+  const signingKeyPath = process.env.FANOTES_UPDATE_SIGNING_KEY
+  if (signingKeyPath) {
+    const signature = crypto.sign(null, Buffer.from(checksumsText, 'utf8'), crypto.createPrivateKey(await fsp.readFile(signingKeyPath, 'utf8'))).toString('base64') + '\n'
+    const signaturePath = process.env.FANOTES_RELEASE_CHECKSUM_SIGNATURE || '/etc/fanotes/SHA256SUMS.sig'
+    if (path.resolve(signaturePath).startsWith(`${path.resolve(target)}${path.sep}`)) {
+      throw new Error('Die Prüfsummen-Signatur darf nicht im Release-Ordner liegen.')
+    }
+    await fsp.mkdir(path.dirname(signaturePath), { recursive: true, mode: 0o700 })
+    const temporarySignature = `${signaturePath}.${process.pid}.tmp`
+    await fsp.writeFile(temporarySignature, signature, { mode: 0o600 })
+    await fsp.rename(temporarySignature, signaturePath)
+  } else {
+    console.warn('FANOTES_UPDATE_SIGNING_KEY fehlt. Der Update-Server signiert keine Pakete, bis SHA256SUMS außerhalb des Release-Ordners signiert wurde.')
+  }
   const checksums = new Map(checksumsText.split(/\r?\n/u).flatMap((line) => {
     const match = /^([a-f0-9]{64})\s+\*?([^/\\]+)$/iu.exec(line.trim())
     return match ? [[match[2], match[1].toLowerCase()]] : []
