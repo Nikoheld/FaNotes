@@ -412,6 +412,23 @@ const SECRET_SETTING_KEYS = Object.freeze([
   'homeworkApiSecret',
 ])
 const ENCRYPTED_SETTING_PREFIX = 'fanotes-secret-v1:'
+const DANGEROUS_CUSTOM_CSS = /(?:@import|@charset|@namespace|@font-face|expression\s*\(|url\s*\(|-moz-binding|behavior\s*:|javascript\s*:|vbscript\s*:|<\/)/iu
+let plaintextSecretsNeedScrub = false
+
+function encryptionAvailable() {
+  try {
+    return safeStorage.isEncryptionAvailable()
+  } catch {
+    return false
+  }
+}
+
+function sanitizeCustomCss(value) {
+  if (typeof value !== 'string' || !value.trim()) return ''
+  const normalized = value.replace(/\/\*[\s\S]*?\*\//gu, '').replace(/\\[0-9a-f]{1,6}\s?/giu, '').replace(/\\/gu, '')
+  if (DANGEROUS_CUSTOM_CSS.test(normalized)) return ''
+  return value.length > 100000 ? value.slice(0, 100000) : value
+}
 
 const MARKDOWN_EXTENSIONS = new Set(['.md', '.markdown', '.famd'])
 const MAX_FAMD_BYTES = 40 * 1024 * 1024
@@ -893,6 +910,7 @@ function sanitizeSettings(candidate, base = DEFAULT_SETTINGS) {
       result[key] = sanitizeTabletButtonMap(value)
     }
   }
+  if (typeof result.customCss === 'string') result.customCss = sanitizeCustomCss(result.customCss)
 
   return result
 }
@@ -912,8 +930,13 @@ function settingsForDisk(settings, { preserveProtectedSecrets = true } = {}) {
   for (const key of SECRET_SETTING_KEYS) {
     const value = encoded[key]
     if (typeof value === 'string' && value) {
-      if (safeStorage.isEncryptionAvailable()) {
+      if (encryptionAvailable()) {
         encoded[key] = `${ENCRYPTED_SETTING_PREFIX}${safeStorage.encryptString(value).toString('base64')}`
+      } else if (preserveProtectedSecrets && protectedSettingsOnDisk.has(key)) {
+        encoded[key] = protectedSettingsOnDisk.get(key)
+      } else {
+        encoded[key] = ''
+        console.warn(`FaNotes: „${key}“ wird ohne verfügbaren Systemschlüsselbund nicht gespeichert.`)
       }
       continue
     }
@@ -929,7 +952,14 @@ function settingsFromDisk(candidate) {
   const decoded = { ...candidate }
   for (const key of SECRET_SETTING_KEYS) {
     const value = decoded[key]
-    if (typeof value !== 'string' || !value.startsWith(ENCRYPTED_SETTING_PREFIX)) continue
+    if (typeof value !== 'string' || !value) continue
+    if (!value.startsWith(ENCRYPTED_SETTING_PREFIX)) {
+      plaintextSecretsNeedScrub = true
+      if (encryptionAvailable()) continue
+      decoded[key] = ''
+      console.warn(`FaNotes: Der unverschlüsselte Schlüssel „${key}“ wurde verworfen, weil kein Systemschlüsselbund verfügbar ist.`)
+      continue
+    }
     // Linux safeStorage may wake the desktop keyring and D-Bus service. Keep
     // that work completely outside ordinary note startup and preserve the
     // encrypted value across unrelated setting writes.
@@ -1311,6 +1341,10 @@ function readConfig() {
             : { ...decodedSettings, recognitionMode: 'auto', lastRecognitionMode: previousMode }
           const sanitized = sanitizeSettings(settingsCandidate)
           currentSettings = applyExperimentalHandwritingGate(sanitized)
+          if (plaintextSecretsNeedScrub) {
+            plaintextSecretsNeedScrub = false
+            void persistConfig()
+          }
           if (
             currentSettings.experimentalHandwritingToTextSeenVersion
             !== sanitized.experimentalHandwritingToTextSeenVersion
@@ -2433,8 +2467,12 @@ function rendererFilePath() {
 function isTrustedIpcSender(event) {
   const senderUrl = event.senderFrame?.url
   if (!senderUrl) return false
+  return isTrustedRendererNavigation(senderUrl)
+}
+
+function isTrustedRendererNavigation(navigationUrl) {
   try {
-    const parsed = new URL(senderUrl)
+    const parsed = new URL(navigationUrl)
     const devUrl = trustedDevUrl()
     if (devUrl) return parsed.origin === new URL(devUrl).origin
     if (parsed.protocol !== 'file:') return false
@@ -3884,6 +3922,10 @@ function registerIpcHandlers() {
     })
     subjectBookWindow.setMenuBarVisibility(false)
     void subjectBookWindow.webContents.setVisualZoomLevelLimits(1, 1)
+    subjectBookWindow.webContents.on('will-attach-webview', (event) => event.preventDefault())
+    subjectBookWindow.webContents.on('will-navigate', (event, navigationUrl) => {
+      if (!isTrustedRendererNavigation(navigationUrl)) event.preventDefault()
+    })
     subjectBookWindow.webContents.setWindowOpenHandler(({ url }) => {
       void openExternalSafely(url).catch(() => {})
       return { action: 'deny' }

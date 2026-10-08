@@ -39,7 +39,7 @@ const SETTING_KEYS = new Set([
   'showWordCount', 'showOutline', 'defaultFolder', 'dailyNotesFolder', 'dateFormat', 'paperStyle', 'penColor',
   'penWidth', 'pressureEnabled', 'smoothing', 'scribbleEraseSensitivity', 'recognitionMode', 'lastRecognitionMode',
   'recognitionLanguage', 'autoOpenConversion', 'keepDrawingAfterInsert', 'autoCheckUpdates',
-  'autoDownloadUpdates', 'installUpdatesOnQuit', 'updateChannel', 'lmStudioBaseUrl', 'lmStudioModel', 'customCss',
+  'autoDownloadUpdates', 'installUpdatesOnQuit', 'updateChannel', 'lmStudioBaseUrl', 'lmStudioModel',
 ])
 const rateWindows = new Map()
 const activeVaults = new Set()
