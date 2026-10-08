@@ -3,6 +3,19 @@
 ## Unveröffentlicht
 
 
+## 2026.10.2
+
+- **Verbundene Handschrift bleibt lesbar.** Eine klare Addition wie `a + c` fällt nicht mehr in den Textmodus. Eine Null wird nicht mehr als Ü gelesen und Unendlich nicht als a. Ein trainiertes Wort wird nicht mehr von einem billigen Schnitt verdrängt, ein Apostroph in Buchstabengröße schlägt kein e, und ein verbundenes s kein c. GlyphenWerk bekommt nur den schon feststehenden Textanfang.
+- **Englisch.** Dateibaum, Befehlssuche, Rechtschreibung, Tabs und Update-Hinweise mit Versionsnummer erscheinen auf Englisch, wenn die Oberfläche Englisch ist.
+- **Die Handschrift bleibt beim Speichern.** Ein fehlgeschlagenes Lesen der Begleiterdatei gilt nicht mehr als leere Datei. Papier, Verknüpfungen, Sicherungen und Tinte werden in derselben Warteschlange geschrieben wie der Text. Schlägt das Schreiben der Begleiterdatei fehl, bleibt die Notiz ungespeichert. „Alte Notizen auf den aktuellen Standard“ übernimmt die vorhandene Handschrift.
+- **Seitenstatistik bleibt in der Notiz.** Sie wird beim Öffnen aus der Begleiterdatei gelesen. Ein Lesefehler wird nicht als neue leere Statistik zurückgeschrieben. Umbenennen, Verschieben und ein Vault-Wechsel nehmen die laufende Sitzung mit oder verwerfen sie mit der Notiz.
+- **Verlauf, Ordnerfarben, Fachbücher und Add-ons** ersetzen bei einem Lesefehler nicht mehr die vorhandene Datei durch eine leere Fassung.
+- **Ein geleertes Kalenderfeld löscht den Kalender nicht.** Der letzte gespeicherte Name bleibt, und die Termine dieses Kalenders bleiben.
+- **Arbeitsblätter folgen der wiederhergestellten Notiz.** Ändern sich die Marker im Text, lädt die Seite diese Blätter. Ein Blatt mit ungespeicherten Änderungen bleibt liegen.
+- **Die Suche öffnet die Notiz der gefundenen Handschrift.** Sie hängt die Zeichnung nicht mehr an die gerade offene Notiz. Eine Zeichnung ohne Notiz kann weiter auf der offenen Notiz gezeigt werden.
+- **PDF-Verlauf stellt den Text wieder her**, nicht die JSON-Begleiterdatei. Die Handschrift aus diesem Stand wird mit dem nächsten Speichern zurückgeschrieben.
+- **Sync lädt Handschrift und Statistik neu**, wenn ein anderes Gerät die Begleiterdatei geändert hat und der Stift hier nichts Ungespeichertes hat.
+
 ## 2026.10.1
 
 - **Kalender wie bei Notion.** Eine eigene Kalenderansicht (Tag, 3 Tage, Woche, Monat, Agenda) mit mehreren farbigen Kalendern, Ganztageszeile, Ziehen zum Anlegen, Verschieben und Verlängern, Wiederholungen, Suche, Minikalender und Verknüpfung zu Notizen und Tagesnotizen. Alles liegt lokal in `Kalender.md`.
