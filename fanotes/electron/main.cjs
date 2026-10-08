@@ -168,6 +168,7 @@ const IPC = Object.freeze({
   listDrawings: 'fanotes:list-drawings',
   readDrawing: 'fanotes:read-drawing',
   readFamdInk: 'fanotes:read-famd-ink',
+  readNotePageStats: 'fanotes:read-note-page-stats',
   readNotePaperStyle: 'fanotes:read-note-paper-style',
   setNotePaperStyle: 'fanotes:set-note-paper-style',
   readNoteLinks: 'fanotes:read-note-links',
@@ -1616,6 +1617,19 @@ function noteMarkdownSourcePath(relativePath) {
 /** Placeholder id for `.famd`-embedded ink whose note has no ink marker yet. */
 const FAMD_INK_ID = 'famd-ink'
 const NOTE_INK_MARKER = /<!--\s*fanotes-ink:([a-zA-Z0-9_-]{1,96})\s*-->/u
+
+/** Map a drawing id to the note that already embeds it, so search can open that note. */
+function rememberDrawingOwner(owners, notePath, markdown, ink) {
+  const markerId = noteInkMarkerId(markdown)
+  if (markerId && !owners.has(markerId)) owners.set(markerId, notePath)
+  if (!ink || typeof ink !== 'object' || typeof ink.id !== 'string') return
+  try {
+    const id = assertDrawingId(ink.id)
+    if (!owners.has(id)) owners.set(id, notePath)
+  } catch {
+    // Only a library id can be opened from search.
+  }
+}
 
 /** Drawing-library id the note's markdown points at, or null. */
 function noteInkMarkerId(markdown) {
@@ -3107,16 +3121,14 @@ function registerIpcHandlers() {
             })
             : (markdownBody.endsWith('\n') ? markdownBody : `${markdownBody}\n`)
           await atomicWrite(target, written, { encoding: 'utf8', mode: 0o600 })
-          try {
-            // A page-stats save carries ink:null and must leave the companion
-            // handwriting alone. A real ink object (the note-standard upgrade)
-            // is the new handwriting and has to replace it.
-            const incomingInk = parseFamd(content).payload?.ink
-            const companionInk = incomingInk && typeof incomingInk === 'object' ? incomingInk : undefined
-            await writeFamdCompanion(normalizedRelativePath, content, companionInk, { heldQueueTarget: target })
-          } catch (error) {
-            console.warn('FaNotes: .famd-Begleiter konnte nicht geschrieben werden:', error?.message ?? error)
-          }
+          // A failed companion write has to fail the save. The markdown is
+          // already on disk; the renderer stays dirty and writes it again.
+          // A page-stats save carries ink:null and must leave the companion
+          // handwriting alone. A real ink object (the note-standard upgrade)
+          // is the new handwriting and has to replace it.
+          const incomingInk = parseFamd(content).payload?.ink
+          const companionInk = incomingInk && typeof incomingInk === 'object' ? incomingInk : undefined
+          await writeFamdCompanion(normalizedRelativePath, content, companionInk, { heldQueueTarget: target })
           assertVaultWriteContext(requestedVaultPath, requestedVaultGeneration)
           const info = await fsp.stat(target)
           return { modifiedAt: info.mtime.toISOString() }
@@ -3434,6 +3446,7 @@ function registerIpcHandlers() {
     await collectMarkdownFiles(root, root, markdownFiles)
     const needle = query.toLocaleLowerCase('de-DE')
     const hits = []
+    const drawingOwners = new Map()
 
     for (const file of markdownFiles) {
       const relativePath = toRelativePosix(root, file.absolutePath)
@@ -3448,11 +3461,13 @@ function registerIpcHandlers() {
       }
       let content = ''
       let inkTranscript = ''
+      let ownerInk = null
       if (file.kind !== 'pdf') {
         try {
           const raw = (await readRegularFileNoFollow(file.absolutePath, noteByteLimit(relativePath))).toString('utf8')
           const parsed = parseFamd(raw)
           content = parsed.markdown || stripFamdPayload(raw)
+          ownerInk = parsed.payload?.ink ?? null
           if (typeof parsed.payload?.ink?.searchTranscript === 'string') {
             inkTranscript = parsed.payload.ink.searchTranscript.slice(0, 500_000)
           }
@@ -3466,6 +3481,7 @@ function registerIpcHandlers() {
           const parsedCompanion = companion ? parseFamd(companion) : null
           if (file.kind === 'pdf' && parsedCompanion?.markdown) content = parsedCompanion.markdown
           const ink = parsedCompanion?.payload?.ink
+          if (ink && typeof ink === 'object') ownerInk = ink
           if (ink && typeof ink.searchTranscript === 'string') {
             inkTranscript = ink.searchTranscript.slice(0, 500_000)
           }
@@ -3473,6 +3489,7 @@ function registerIpcHandlers() {
           // Companion search is optional.
         }
       }
+      rememberDrawingOwner(drawingOwners, relativePath, content, ownerInk)
       const contentHaystack = content.toLocaleLowerCase('de-DE')
       const firstContentIndex = contentHaystack.indexOf(needle)
       const haystack = `${relativePath}\n${content}\n${inkTranscript}`.toLocaleLowerCase('de-DE')
@@ -3533,6 +3550,7 @@ function registerIpcHandlers() {
           matches += 1
           cursor = index + Math.max(needle.length, 1)
         }
+        const notePath = drawingOwners.get(id)
         hits.push({
           relativePath: metadata.dataRelativePath,
           title: metadata.title,
@@ -3540,6 +3558,7 @@ function registerIpcHandlers() {
           matches,
           kind: 'drawing',
           drawingId: id,
+          ...(typeof notePath === 'string' ? { notePath } : {}),
         })
       } catch {
         // A malformed or half-written drawing must never break vault search.
@@ -3688,6 +3707,17 @@ function registerIpcHandlers() {
       drawingJson,
       dataRelativePath: famdRelative,
     }
+  })
+
+  handle(IPC.readNotePageStats, async (_event, relativePath) => {
+    await ensureBootstrap()
+    if (typeof relativePath !== 'string') throw new Error('Ungültiger Notizpfad.')
+    const notePath = normalizeRelativePath(relativePath).split(path.sep).join('/')
+    assertNotePath(notePath)
+    const source = await readOptionalNoteFile(companionNotePath(notePath, '.famd'))
+    if (!source) return null
+    const parsed = parseFamd(source)
+    return parsed.payload?.pageStats ?? null
   })
 
   handle(IPC.readNotePaperStyle, async (_event, relativePath) => {

@@ -83,6 +83,7 @@ import {
   markPageStatsPersisted,
   openPageStats,
   pageStatsNeedPersist,
+  parsePageStats,
   recordDocumentSaved,
   recordEditActivity,
   recordInkErased,
@@ -733,6 +734,9 @@ export default function App({ startupBootstrap }: AppProps) {
   const pendingWrites = useRef(new Map<string, string>())
   const settingsTimer = useRef<number | null>(null)
   const pageStatsRef = useRef(new Map<string, PageStatsSession>())
+  /** A failed page-stats read. Saving must not invent a fresh session over the companion. */
+  const pageStatsUnreadableRef = useRef(new Set<string>())
+  const worksheetEffectPathRef = useRef('')
   const previousActivePathRef = useRef<string | null>(null)
   const settingsRef = useRef(settings)
   const settingsRevisionRef = useRef(0)
@@ -1176,22 +1180,44 @@ export default function App({ startupBootstrap }: AppProps) {
     return () => { alive = false }
   }, [bootstrap?.vaultPath])
 
+  const activeWorksheetMarkerKey = activeTab ? noteWorksheetIds(activeTab.content).join('\0') : ''
   useEffect(() => {
     const requestId = ++worksheetLoadRequestRef.current
-    worksheetDirtyIdsRef.current.clear()
-    setWorksheetSession({ key: requestId, documents: [] })
     const path = activeTab?.path
-    const ids = activeTab ? noteWorksheetIds(activeTab.content) : []
-    const initialNoteLoad = Boolean(path && initialWorksheetLoadRef.current)
-    if (path) initialWorksheetLoadRef.current = false
-    if (!path || !ids.length) return
+    const ids = activeWorksheetMarkerKey ? activeWorksheetMarkerKey.split('\0') : []
+    const pathChanged = worksheetEffectPathRef.current !== (path ?? '')
+    worksheetEffectPathRef.current = path ?? ''
+    if (pathChanged) {
+      worksheetDirtyIdsRef.current.clear()
+      setWorksheetSession({ key: requestId, documents: [] })
+    } else {
+      for (const id of [...worksheetDirtyIdsRef.current]) {
+        if (!ids.includes(id)) worksheetDirtyIdsRef.current.delete(id)
+      }
+    }
+    const initialNoteLoad = Boolean(path && pathChanged && initialWorksheetLoadRef.current)
+    if (path && pathChanged) initialWorksheetLoadRef.current = false
+    if (!path || !ids.length) {
+      if (!pathChanged) setWorksheetSession({ key: requestId, documents: [] })
+      return
+    }
     let idleId: number | null = null
     let startTimer: number | null = null
     const load = () => {
       void Promise.allSettled(ids.map((id) => window.fanotes.readWorksheet(id))).then((results) => {
         if (requestId !== worksheetLoadRequestRef.current || activePathRef.current !== path) return
-        const documents = results.flatMap((result) => result.status === 'fulfilled' ? [result.value] : [])
-        setWorksheetSession({ key: requestId, documents })
+        const loaded = new Map(results.flatMap((result) => result.status === 'fulfilled' ? [[result.value.id, result.value] as const] : []))
+        setWorksheetSession((current) => {
+          const documents = ids.flatMap((id) => {
+            if (worksheetDirtyIdsRef.current.has(id)) {
+              const kept = current.documents.find((document) => document.id === id)
+              if (kept) return [kept]
+            }
+            const document = loaded.get(id)
+            return document ? [document] : []
+          })
+          return { key: requestId, documents }
+        })
       })
     }
     const schedule = () => {
@@ -1204,7 +1230,7 @@ export default function App({ startupBootstrap }: AppProps) {
       if (startTimer !== null) window.clearTimeout(startTimer)
       if (idleId !== null) window.cancelIdleCallback(idleId)
     }
-  }, [activeTab?.path])
+  }, [activeTab?.path, activeWorksheetMarkerKey])
 
   useEffect(() => {
     const activeIds = new Set(worksheetSession.documents.map((document) => document.id))
@@ -1254,10 +1280,32 @@ export default function App({ startupBootstrap }: AppProps) {
     return snapshotPageStats(next)
   }, [])
 
+  /**
+   * The editor only holds stripped markdown, so page stats have to be read
+   * from the `.famd` companion. A failed read is remembered: the next save
+   * must not replace the companion's statistics with a new session.
+   */
+  const preparePageStats = useCallback(async (path: string) => {
+    if (pageStatsRef.current.has(path) || pageStatsUnreadableRef.current.has(path)) return
+    const read = window.fanotes.readNotePageStats
+    if (typeof read !== 'function') return
+    try {
+      const raw = await read(path)
+      if (pageStatsRef.current.has(path)) return
+      pageStatsUnreadableRef.current.delete(path)
+      if (raw && typeof raw === 'object') {
+        pageStatsRef.current.set(path, idlePageStatsSession(parsePageStats(raw)))
+      }
+    } catch {
+      pageStatsUnreadableRef.current.add(path)
+    }
+  }, [])
+
   /** Session for a note that has a tab, created from the note's payload on first use. */
   const ensurePageStatsSession = useCallback((path: string) => {
     const existing = pageStatsRef.current.get(path)
     if (existing) return existing
+    if (pageStatsUnreadableRef.current.has(path)) return null
     const tab = tabsRef.current.find((candidate) => candidate.path === path)
     if (!tab) return null
     const session = idlePageStatsSession(readPageStatsFromNote(pendingWrites.current.get(path) ?? tab.content))
@@ -1306,6 +1354,7 @@ export default function App({ startupBootstrap }: AppProps) {
   const activatePageStats = useCallback((path: string, content: string, now = Date.now()) => {
     const previousPath = activePathRef.current
     if (previousPath && previousPath !== path) flushPageStats(previousPath, now, false)
+    if (pageStatsUnreadableRef.current.has(path)) return null
     const existing = pageStatsRef.current.get(path)
     const opened = openPageStats(existing ?? readPageStatsFromNote(content, now), now)
     pageStatsRef.current.set(path, opened)
@@ -1428,6 +1477,8 @@ export default function App({ startupBootstrap }: AppProps) {
     const swapIntoSplit = splitPathRef.current === path && previousActive && previousActive !== path
     const existing = tabsRef.current.find((tab) => tab.path === path)
     if (existing) {
+      await preparePageStats(path)
+      if (session !== vaultSessionGenerationRef.current) return false
       activatePageStats(path, existing.content)
       setActivePath(path)
       if (swapIntoSplit) setSplitPath(previousActive)
@@ -1445,6 +1496,11 @@ export default function App({ startupBootstrap }: AppProps) {
         structureRevision !== vaultStructureRevisionRef.current
       ) return false
       const { content } = tab
+      await preparePageStats(path)
+      if (
+        session !== vaultSessionGenerationRef.current ||
+        structureRevision !== vaultStructureRevisionRef.current
+      ) return false
       setTagIndex((current) => ({ ...current, [path]: parseNoteTags(content) }))
       setTabs((current) => current.some((item) => item.path === path) ? current : [...current, tab])
       activatePageStats(path, content)
@@ -1464,7 +1520,7 @@ export default function App({ startupBootstrap }: AppProps) {
     } finally {
       openingNotesRef.current.delete(requestKey)
     }
-  }, [activatePageStats, flushDocumentLayers, readNoteTab, rememberLastOpenNote, toast])
+  }, [activatePageStats, flushDocumentLayers, preparePageStats, readNoteTab, rememberLastOpenNote, toast])
 
   /**
    * Bring back the tabs, pins and split the vault was left with. The active
@@ -1635,11 +1691,13 @@ export default function App({ startupBootstrap }: AppProps) {
       const now = Date.now()
       flushPageStats(path, now, true)
       const body = stripFamdPayload(content)
-      const session = pageStatsRef.current.get(path)
+      const unreadableStats = pageStatsUnreadableRef.current.has(path)
+      const session = unreadableStats ? null : pageStatsRef.current.get(path)
       const savedSession = session ? recordDocumentSaved(session, body, now) : null
       if (savedSession) pageStatsRef.current.set(path, savedSession)
-      const stats = savedSession ? snapshotPageStats(savedSession) : readPageStatsFromNote(content, now)
-      const nextContent = writePageStatsIntoNote(content, stats)
+      // No session and a failed companion read: write the markdown only.
+      // Embedding a fresh session would replace the statistics still on disk.
+      const nextContent = savedSession ? writePageStatsIntoNote(content, snapshotPageStats(savedSession)) : content
       const visibleContent = stripFamdPayload(nextContent)
       await window.fanotes.writeFile(isPdfNotePath(path) ? companionNotePath(path, '.famd') : path, nextContent)
       addonRuntime.emit('note:saved', { path, title: fileName(path).replace(/\.(md|markdown|pdf)$/iu, ''), length: visibleContent.length })
@@ -2455,6 +2513,30 @@ export default function App({ startupBootstrap }: AppProps) {
     })
   }, [])
 
+  const renamedPageStatsKey = (key: string, from: string, to: string) => (
+    key === from || key.startsWith(`${from}/`)
+      ? (key === from ? to : `${to}${key.slice(from.length)}`)
+      : key
+  )
+
+  const remapPageStats = useCallback((from: string, to: string) => {
+    const next = new Map<string, PageStatsSession>()
+    pageStatsRef.current.forEach((session, key) => {
+      next.set(renamedPageStatsKey(key, from, to), session)
+    })
+    pageStatsRef.current = next
+    pageStatsUnreadableRef.current = new Set([...pageStatsUnreadableRef.current].map((key) => renamedPageStatsKey(key, from, to)))
+  }, [])
+
+  const forgetPageStats = useCallback((path: string) => {
+    for (const key of [...pageStatsRef.current.keys()]) {
+      if (key === path || key.startsWith(`${path}/`)) pageStatsRef.current.delete(key)
+    }
+    for (const key of [...pageStatsUnreadableRef.current]) {
+      if (key === path || key.startsWith(`${path}/`)) pageStatsUnreadableRef.current.delete(key)
+    }
+  }, [])
+
   /** The split, the history and the closed-tab stack follow a renamed or moved entry. */
   const remapWorkspacePaths = useCallback((from: string, to: string) => {
     movedPathsRef.current.delete(to)
@@ -2489,6 +2571,7 @@ export default function App({ startupBootstrap }: AppProps) {
     if (session !== vaultSessionGenerationRef.current) return
     remapNotePaperPaths(path, nextPath)
     remapWorkspacePaths(path, nextPath)
+    remapPageStats(path, nextPath)
     vaultStructureRevisionRef.current += 1
     ;[...saveTimers.current.entries()].forEach(([timerPath, timer]) => {
       if (timerPath === path || timerPath.startsWith(`${path}/`)) {
@@ -2515,7 +2598,7 @@ export default function App({ startupBootstrap }: AppProps) {
       : current)
     await refreshTree()
     await Promise.all(renamedPending.map(([renamedPath, content]) => saveContent(renamedPath, content)))
-  }, [flushDocumentLayers, refreshTree, remapNotePaperPaths, remapWorkspacePaths, saveContent, toast])
+  }, [flushDocumentLayers, refreshTree, remapNotePaperPaths, remapPageStats, remapWorkspacePaths, saveContent, toast])
 
   const moveEntry = useCallback(async (path: string, destFolder = '') => {
     const session = vaultSessionGenerationRef.current
@@ -2534,6 +2617,7 @@ export default function App({ startupBootstrap }: AppProps) {
       if (nextPath === path) return
       remapNotePaperPaths(path, nextPath)
       remapWorkspacePaths(path, nextPath)
+      remapPageStats(path, nextPath)
       vaultStructureRevisionRef.current += 1
       ;[...saveTimers.current.entries()].forEach(([timerPath, timer]) => {
         if (timerPath === path || timerPath.startsWith(`${path}/`)) {
@@ -2573,7 +2657,7 @@ export default function App({ startupBootstrap }: AppProps) {
         toast(error instanceof Error ? error.message : 'Verschieben fehlgeschlagen.', 'error')
       }
     }
-  }, [flushDocumentLayers, refreshTree, remapNotePaperPaths, remapWorkspacePaths, saveContent, toast])
+  }, [flushDocumentLayers, refreshTree, remapNotePaperPaths, remapPageStats, remapWorkspacePaths, saveContent, toast])
 
   const trashEntry = useCallback(async (path: string) => {
     const session = vaultSessionGenerationRef.current
@@ -2608,6 +2692,7 @@ export default function App({ startupBootstrap }: AppProps) {
         if (pendingPath === path || pendingPath.startsWith(`${path}/`)) pendingWrites.current.delete(pendingPath)
       })
       setTabs((current) => current.filter((tab) => tab.path !== path && !tab.path.startsWith(`${path}/`)))
+      forgetPageStats(path)
       forgetWorkspacePaths(path)
       setActivePath((current) => {
         if (!current || (current !== path && !current.startsWith(`${path}/`))) return current
@@ -2628,7 +2713,7 @@ export default function App({ startupBootstrap }: AppProps) {
         setMutatingEntryPaths((current) => current.filter((entryPath) => entryPath !== path))
       }
     }
-  }, [flushDocumentLayers, flushPendingEntry, forgetWorkspacePaths, refreshTree, remapNotePaperPaths, toast])
+  }, [flushDocumentLayers, flushPendingEntry, forgetPageStats, forgetWorkspacePaths, refreshTree, remapNotePaperPaths, toast])
 
   const syncPublishedHomework = useCallback(async (current: AppSettings, document?: HomeworkDocument) => {
     const channelId = current.homeworkApiChannelId
@@ -2869,6 +2954,8 @@ export default function App({ startupBootstrap }: AppProps) {
       if (!selected) return
       vaultSessionGenerationRef.current += 1
       searchRequestRef.current += 1
+      pageStatsRef.current = new Map()
+      pageStatsUnreadableRef.current = new Set()
       treeRef.current = []
       setTree([])
       setSearchLoading(false)
@@ -3226,6 +3313,10 @@ export default function App({ startupBootstrap }: AppProps) {
     setSearchOpen(false)
     if (hit.kind !== 'drawing' || !hit.drawingId) {
       await openNote(hit.relativePath)
+      return
+    }
+    if (hit.notePath) {
+      await openNote(hit.notePath)
       return
     }
 
