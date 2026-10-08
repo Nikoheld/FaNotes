@@ -5,11 +5,11 @@ import { DEFAULT_TABLET_BUTTON_ACTIONS } from './lib/tabletButtons'
 /** Factory defaults for a desktop/web platform. Pass `window.fanotes.platform`. */
 export const defaultSettingsForPlatform = (platform: string | undefined): AppSettings => ({
   uiLanguage: 'system',
-  theme: 'dark',
+  theme: 'light',
   workspaceBackground: 'clean',
-  accent: '#7f6df2',
-  accentSecondary: '#8a5cf5',
-  uiFont: "'DM Sans', ui-sans-serif, system-ui",
+  accent: '#2a6f97',
+  accentSecondary: '#6b7280',
+  uiFont: 'Inter, ui-sans-serif, system-ui',
   editorFont: "'JetBrains Mono', ui-monospace, monospace",
   editorFontSize: 16,
   previewFontSize: 17,

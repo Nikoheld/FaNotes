@@ -168,7 +168,7 @@ const normalizeSearch = (value: string) => value
   .toLocaleLowerCase('de-CH')
   .trim()
 
-const ACCENTS = ['#7f6df2', '#8a5cf5', '#6f8cff', '#45c9b7', '#ef7aa8', '#f09a5d', '#d4b54c']
+const ACCENTS = ['#2a6f97', '#6b7280', '#0f7b6c', '#d9730d', '#c4554d', '#9065b0', '#ba9b4a']
 const THEMES: Array<{
   id: AppSettings['theme']
   label: string
@@ -178,13 +178,13 @@ const THEMES: Array<{
   accent: string
   secondary: string
 }> = [
-  { id: 'system', label: 'System', detail: 'Automatisch', background: 'linear-gradient(135deg,#1e1e1e 50%,#ffffff 50%)', surface: '#7f6df2', accent: '#7f6df2', secondary: '#8a5cf5' },
-  { id: 'dark', label: 'Dunkel', detail: 'Obsidian-Nacht', background: '#1e1e1e', surface: '#262626', accent: '#7f6df2', secondary: '#8a5cf5' },
-  { id: 'light', label: 'Hell', detail: 'Obsidian-Tag', background: '#ffffff', surface: '#f2f2f2', accent: '#705dcf', secondary: '#8a5cf5' },
-  { id: 'midnight', label: 'Mitternacht', detail: 'Tiefblau', background: '#080d1b', surface: '#121a2d', accent: '#6d8dff', secondary: '#44d6c6' },
-  { id: 'forest', label: 'Wald', detail: 'Moos & Tinte', background: '#0d1512', surface: '#17231d', accent: '#52c98a', secondary: '#c9b85a' },
-  { id: 'aurora', label: 'Aurora', detail: 'Violett & Cyan', background: '#100d1b', surface: '#211a31', accent: '#b078ff', secondary: '#4fd6d2' },
-  { id: 'sepia', label: 'Studierzimmer', detail: 'Warm & papiernah', background: '#f2eadc', surface: '#fffaf0', accent: '#91562f', secondary: '#806326' },
+  { id: 'system', label: 'System', detail: 'Automatisch', background: 'linear-gradient(135deg,#191919 50%,#ffffff 50%)', surface: '#f7f6f3', accent: '#2a6f97', secondary: '#6b7280' },
+  { id: 'dark', label: 'Dunkel', detail: 'Graphit', background: '#191919', surface: '#202020', accent: '#2a6f97', secondary: '#6b7280' },
+  { id: 'light', label: 'Hell', detail: 'Papier', background: '#ffffff', surface: '#f7f6f3', accent: '#2a6f97', secondary: '#6b7280' },
+  { id: 'midnight', label: 'Mitternacht', detail: 'Schiefer', background: '#17181b', surface: '#1e1f23', accent: '#2a6f97', secondary: '#6b7280' },
+  { id: 'forest', label: 'Wald', detail: 'Stein', background: '#171a18', surface: '#1e221f', accent: '#2a6f97', secondary: '#6b7280' },
+  { id: 'aurora', label: 'Aurora', detail: 'Nebel', background: '#18181c', surface: '#1f1f24', accent: '#2a6f97', secondary: '#6b7280' },
+  { id: 'sepia', label: 'Studierzimmer', detail: 'Warm', background: '#fbfaf7', surface: '#f4f1ea', accent: '#2a6f97', secondary: '#6b7280' },
 ]
 
 const BACKGROUNDS: Array<{ id: AppSettings['workspaceBackground']; label: string }> = [

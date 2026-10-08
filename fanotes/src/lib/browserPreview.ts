@@ -115,49 +115,49 @@ Enjoy capturing your thoughts!
 }
 
 export const BROWSER_STARTER_SUBJECTS = [
-  { name: 'Mathematik', color: '#6f8cff' },
-  { name: 'AMAT', color: '#9a7cff' },
-  { name: 'Deutsch', color: '#ef7aa8' },
-  { name: 'Englisch', color: '#45c9b7' },
-  { name: 'Französisch', color: '#3d8be0' },
-  { name: 'Physik', color: '#b878eb' },
-  { name: 'Chemie', color: '#f09a5d' },
-  { name: 'Biologie', color: '#55cfa8' },
-  { name: 'Geschichte', color: '#d4b54c' },
-  { name: 'Informatik', color: '#4f9df8' },
-  { name: 'Wirtschaft', color: '#e58a62' },
+  { name: 'Mathematik', color: '#2a6f97' },
+  { name: 'AMAT', color: '#9065b0' },
+  { name: 'Deutsch', color: '#c4554d' },
+  { name: 'Englisch', color: '#0f7b6c' },
+  { name: 'Französisch', color: '#1d5f86' },
+  { name: 'Physik', color: '#7c6a9a' },
+  { name: 'Chemie', color: '#d9730d' },
+  { name: 'Biologie', color: '#448361' },
+  { name: 'Geschichte', color: '#ba9b4a' },
+  { name: 'Informatik', color: '#337ea9' },
+  { name: 'Wirtschaft', color: '#c47d4e' },
 ]
 export const BROWSER_STARTER_SUBJECTS_EN = [
-  { name: 'Mathematics', color: '#6f8cff' },
-  { name: 'AMAT', color: '#9a7cff' },
-  { name: 'German', color: '#ef7aa8' },
-  { name: 'English', color: '#45c9b7' },
-  { name: 'French', color: '#3d8be0' },
-  { name: 'Physics', color: '#b878eb' },
-  { name: 'Chemistry', color: '#f09a5d' },
-  { name: 'Biology', color: '#55cfa8' },
-  { name: 'History', color: '#d4b54c' },
-  { name: 'Computer Science', color: '#4f9df8' },
-  { name: 'Economics', color: '#e58a62' },
+  { name: 'Mathematics', color: '#2a6f97' },
+  { name: 'AMAT', color: '#9065b0' },
+  { name: 'German', color: '#c4554d' },
+  { name: 'English', color: '#0f7b6c' },
+  { name: 'French', color: '#1d5f86' },
+  { name: 'Physics', color: '#7c6a9a' },
+  { name: 'Chemistry', color: '#d9730d' },
+  { name: 'Biology', color: '#448361' },
+  { name: 'History', color: '#ba9b4a' },
+  { name: 'Computer Science', color: '#337ea9' },
+  { name: 'Economics', color: '#c47d4e' },
 ]
 
 const BROWSER_OTHER_STARTER_FOLDERS = [
-  { name: 'Vorlesungen', color: '#6f8cff' }, { name: 'Seminare', color: '#9a7cff' },
-  { name: 'Forschung', color: '#45c9b7' }, { name: 'Prüfungen', color: '#ef7aa8' },
-  { name: 'Literatur', color: '#d4b54c' }, { name: 'Persönlich', color: '#ef7aa8' },
-  { name: 'Ideen', color: '#9a7cff' }, { name: 'Projekte', color: '#4f9df8' },
-  { name: 'Tagebuch', color: '#55cfa8' }, { name: 'Dokumente', color: '#d4b54c' },
-  { name: 'Meetings', color: '#9a7cff' }, { name: 'Aufgaben', color: '#ef7aa8' },
-  { name: 'Wissen', color: '#45c9b7' }, { name: 'Archiv', color: '#d4b54c' },
+  { name: 'Vorlesungen', color: '#2a6f97' }, { name: 'Seminare', color: '#9065b0' },
+  { name: 'Forschung', color: '#0f7b6c' }, { name: 'Prüfungen', color: '#c4554d' },
+  { name: 'Literatur', color: '#ba9b4a' }, { name: 'Persönlich', color: '#c4554d' },
+  { name: 'Ideen', color: '#9065b0' }, { name: 'Projekte', color: '#337ea9' },
+  { name: 'Tagebuch', color: '#448361' }, { name: 'Dokumente', color: '#ba9b4a' },
+  { name: 'Meetings', color: '#9065b0' }, { name: 'Aufgaben', color: '#c4554d' },
+  { name: 'Wissen', color: '#0f7b6c' }, { name: 'Archiv', color: '#ba9b4a' },
 ]
 const BROWSER_OTHER_STARTER_FOLDERS_EN = [
-  { name: 'Lectures', color: '#6f8cff' }, { name: 'Seminars', color: '#9a7cff' },
-  { name: 'Research', color: '#45c9b7' }, { name: 'Exams', color: '#ef7aa8' },
-  { name: 'Reading', color: '#d4b54c' }, { name: 'Personal', color: '#ef7aa8' },
-  { name: 'Ideas', color: '#9a7cff' }, { name: 'Projects', color: '#4f9df8' },
-  { name: 'Journal', color: '#55cfa8' }, { name: 'Documents', color: '#d4b54c' },
-  { name: 'Meetings', color: '#9a7cff' }, { name: 'Tasks', color: '#ef7aa8' },
-  { name: 'Knowledge', color: '#45c9b7' }, { name: 'Archive', color: '#d4b54c' },
+  { name: 'Lectures', color: '#2a6f97' }, { name: 'Seminars', color: '#9065b0' },
+  { name: 'Research', color: '#0f7b6c' }, { name: 'Exams', color: '#c4554d' },
+  { name: 'Reading', color: '#ba9b4a' }, { name: 'Personal', color: '#c4554d' },
+  { name: 'Ideas', color: '#9065b0' }, { name: 'Projects', color: '#337ea9' },
+  { name: 'Journal', color: '#448361' }, { name: 'Documents', color: '#ba9b4a' },
+  { name: 'Meetings', color: '#9065b0' }, { name: 'Tasks', color: '#c4554d' },
+  { name: 'Knowledge', color: '#0f7b6c' }, { name: 'Archive', color: '#ba9b4a' },
 ]
 
 export const browserInitialFiles = () => getUiLanguage() === 'en' ? BROWSER_INITIAL_FILES_EN : BROWSER_INITIAL_FILES
@@ -186,7 +186,7 @@ export function createBrowserPreviewApi(): FaNotesApi {
   const files = new Map(Object.entries(browserInitialFiles()))
   const initialFolders = [english ? 'Inbox' : 'Eingang', ...starterSubjects.map(({ name }) => name)]
   const folders = new Set(initialFolders)
-  const folderColors = new Map<string, string>([[english ? 'Inbox' : 'Eingang', '#8b7cff'], ...starterSubjects.map(({ name, color }) => [name, color] as [string, string])])
+  const folderColors = new Map<string, string>([[english ? 'Inbox' : 'Eingang', '#6b7280'], ...starterSubjects.map(({ name, color }) => [name, color] as [string, string])])
   const assets = new Map<string, string>()
   const drawings = new Map<string, DrawingLibraryDocument>()
   const worksheets = new Map<string, WorksheetDocument>()

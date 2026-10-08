@@ -578,7 +578,7 @@ const hexRgb = (hex: string) => {
   const value = hex.replace('#', '')
   const full = value.length === 3 ? value.split('').map((part) => part + part).join('') : value
   const parsed = Number.parseInt(full, 16)
-  if (!Number.isFinite(parsed)) return '139, 124, 255'
+  if (!Number.isFinite(parsed)) return '42, 111, 151'
   return `${(parsed >> 16) & 255}, ${(parsed >> 8) & 255}, ${parsed & 255}`
 }
 
@@ -587,12 +587,12 @@ const effectiveTheme = (settings: AppSettings, systemDark: boolean) => settings.
   : settings.theme
 
 const THEME_CONTRAST_SURFACES: Record<string, string[]> = {
-  dark: ['#1e1e1e', '#1a1a1a', '#262626', '#2a2a2a'],
-  light: ['#ffffff', '#f6f6f6', '#f2f2f2', '#ffffff'],
-  midnight: ['#080d1b', '#0d1424', '#10182a', '#162139'],
-  forest: ['#0c1411', '#111c17', '#15211b', '#1a2a22'],
-  aurora: ['#100d1b', '#171226', '#1b152c', '#241b38'],
-  sepia: ['#f2eadc', '#eae0cf', '#f8f0e3', '#fffaf0'],
+  dark: ['#191919', '#202020', '#202020', '#2f2f2f'],
+  light: ['#ffffff', '#f7f6f3', '#f7f6f3', '#ffffff'],
+  midnight: ['#17181b', '#1e1f23', '#1e1f23', '#2a2c31'],
+  forest: ['#171a18', '#1e221f', '#1e221f', '#2a2f2c'],
+  aurora: ['#18181c', '#1f1f24', '#1f1f24', '#2c2c33'],
+  sepia: ['#fbfaf7', '#f4f1ea', '#f4f1ea', '#fffdf8'],
 }
 
 const useSystemDark = () => {
@@ -4293,11 +4293,12 @@ export default function App({ startupBootstrap }: AppProps) {
     <div className={`app-shell theme-${theme} background-${settings.workspaceBackground} ${focusMode ? 'focus-mode' : ''} ${settings.compactMode ? 'compact' : ''} ${settings.reduceMotion ? 'no-motion' : ''} ${settings.glassEffects ? 'with-glass' : 'no-glass'}`} style={cssVars}>
       {settings.customCss && <style>{settings.customCss}</style>}
       <nav className="ribbon" aria-label="Hauptnavigation">
-        <button type="button" className={!searchOpen && !overviewOpen && !homeworkOpen && !calendarOpen && !lmStudioOpen && !glyphenWerkOpen ? 'active' : ''} title="Dateien" data-tooltip="Notizen" aria-label="Notizen" onClick={showFiles}><Files size={19} /></button>
-        <button type="button" className={searchOpen ? 'active' : ''} title="Im Vault suchen (Strg+Umschalt+F)" data-tooltip="Suchen · Strg ⇧ F" aria-label="Im gesamten Vault suchen" onClick={() => { setSearchOpen(true); setSidebarVisible(true) }}><Search size={19} /></button>
-        <button type="button" className={drawingOpen ? 'active' : ''} title={drawingOpen ? 'Zur Tastatureingabe wechseln' : 'Auf derselben Seite mit Stift schreiben'} data-tooltip={drawingOpen ? 'Zur Tastatur · Strg D' : 'Mit Stift schreiben · Strg D'} aria-pressed={drawingOpen} onClick={toggleDrawing}><PenLine size={19} /></button>
-        <button type="button" className={homeworkOpen ? 'active' : ''} title="Hausaufgaben & Termine" data-tooltip="Hausaufgaben" aria-label="Hausaufgaben und Termine öffnen" onClick={openHomework}><ClipboardList size={18} /></button>
-        <button type="button" className={calendarOpen ? 'active' : ''} title="Kalender" data-tooltip="Kalender" aria-label="Kalender öffnen" onClick={openCalendar}><CalendarDays size={18} /></button>
+        <div className="ribbon-brand"><span aria-hidden="true">F</span><strong>FaNotes</strong></div>
+        <button type="button" className={!searchOpen && !overviewOpen && !homeworkOpen && !calendarOpen && !lmStudioOpen && !glyphenWerkOpen ? 'active' : ''} title="Dateien" data-tooltip="Notizen" aria-label="Notizen" onClick={showFiles}><Files size={16} /><span className="ribbon-label">Notizen</span></button>
+        <button type="button" className={searchOpen ? 'active' : ''} title="Im Vault suchen (Strg+Umschalt+F)" data-tooltip="Suchen · Strg ⇧ F" aria-label="Im gesamten Vault suchen" onClick={() => { setSearchOpen(true); setSidebarVisible(true) }}><Search size={16} /><span className="ribbon-label">Suchen</span></button>
+        <button type="button" className={drawingOpen ? 'active' : ''} title={drawingOpen ? 'Zur Tastatureingabe wechseln' : 'Auf derselben Seite mit Stift schreiben'} data-tooltip={drawingOpen ? 'Zur Tastatur · Strg D' : 'Mit Stift schreiben · Strg D'} aria-pressed={drawingOpen} onClick={toggleDrawing}><PenLine size={16} /><span className="ribbon-label">Stift</span></button>
+        <button type="button" className={homeworkOpen ? 'active' : ''} title="Hausaufgaben & Termine" data-tooltip="Hausaufgaben" aria-label="Hausaufgaben und Termine öffnen" onClick={openHomework}><ClipboardList size={16} /><span className="ribbon-label">Aufgaben</span></button>
+        <button type="button" className={calendarOpen ? 'active' : ''} title="Kalender" data-tooltip="Kalender" aria-label="Kalender öffnen" onClick={openCalendar}><CalendarDays size={16} /><span className="ribbon-label">Kalender</span></button>
         <div className="ribbon-spacer" />
         <button
           type="button"
@@ -4308,17 +4309,17 @@ export default function App({ startupBootstrap }: AppProps) {
           aria-expanded={sidebarToolsOpen}
           onClick={() => setSidebarToolsOpen((open) => !open)}
         >
-          <MoreVertical size={18} />
+          <MoreVertical size={16} /><span className="ribbon-label">Werkzeuge</span>
         </button>
         {sidebarToolsOpen && (
           <div className="ribbon-extras" role="group" aria-label="Weitere Werkzeuge">
-            <button type="button" title="Heutige Tagesnotiz" data-tooltip="Tagesnotiz" aria-label="Heutige Tagesnotiz öffnen" onClick={() => void createDailyNote()}><CalendarDays size={18} /></button>
-            <button type="button" className={overviewOpen ? 'active' : ''} title="Vault-Übersicht" data-tooltip="Übersicht" aria-label="Vault-Übersicht öffnen" onClick={openOverview}><Network size={18} /></button>
-            <button type="button" className={glyphenWerkOpen ? 'active' : ''} title="GlyphenWerk" data-tooltip="GlyphenWerk" aria-label="GlyphenWerk öffnen" onClick={openGlyphenWerk}><Database size={18} /></button>
-            <button type="button" title="Befehlspalette (Strg+P)" data-tooltip="Befehle · Strg P" aria-label="Befehlspalette öffnen" onClick={() => setPaletteOpen(true)}><Command size={18} /></button>
+            <button type="button" title="Heutige Tagesnotiz" data-tooltip="Tagesnotiz" aria-label="Heutige Tagesnotiz öffnen" onClick={() => void createDailyNote()}><CalendarDays size={16} /><span className="ribbon-label">Tagesnotiz</span></button>
+            <button type="button" className={overviewOpen ? 'active' : ''} title="Vault-Übersicht" data-tooltip="Übersicht" aria-label="Vault-Übersicht öffnen" onClick={openOverview}><Network size={16} /><span className="ribbon-label">Übersicht</span></button>
+            <button type="button" className={glyphenWerkOpen ? 'active' : ''} title="GlyphenWerk" data-tooltip="GlyphenWerk" aria-label="GlyphenWerk öffnen" onClick={openGlyphenWerk}><Database size={16} /><span className="ribbon-label">GlyphenWerk</span></button>
+            <button type="button" title="Befehlspalette (Strg+P)" data-tooltip="Befehle · Strg P" aria-label="Befehlspalette öffnen" onClick={() => setPaletteOpen(true)}><Command size={16} /><span className="ribbon-label">Befehle</span></button>
           </div>
         )}
-        <button type="button" title="Einstellungen (Strg+,)" data-tooltip="Einstellungen · Strg ," aria-label="Einstellungen öffnen" onClick={() => openSettings()}><Settings size={19} /></button>
+        <button type="button" title="Einstellungen (Strg+,)" data-tooltip="Einstellungen · Strg ," aria-label="Einstellungen öffnen" onClick={() => openSettings()}><Settings size={16} /><span className="ribbon-label">Einstellungen</span></button>
       </nav>
 
       <div className="app-body" style={{ gridTemplateColumns: `${sidebarVisible ? 'var(--sidebar-width)' : '0px'} minmax(420px, 1fr) auto` }}>
