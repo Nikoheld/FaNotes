@@ -9,10 +9,11 @@ const server = await createServer({
   server: { middlewareMode: true },
 })
 
-const { noteLinkMarkerCss } = await server.ssrLoadModule('/src/lib/noteLink.ts')
-const { liveWriteStayPut, scrollForZoomedOriginPad } = await server.ssrLoadModule('/src/lib/noteCanvas.ts')
+const { noteLinkMarkerCss, noteLinksAfterOriginGrow } = await server.ssrLoadModule('/src/lib/noteLink.ts')
+const { keepMarkOnPage, liveWriteStayPut, scrollForZoomedOriginPad } = await server.ssrLoadModule('/src/lib/noteCanvas.ts')
 const layerSource = readFileSync(new URL('../src/components/NoteLinkLayer.tsx', import.meta.url), 'utf8')
 const boardSource = readFileSync(new URL('../src/components/DrawingBoard.tsx', import.meta.url), 'utf8')
+const appSource = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
 
 const near = (actual, expected, label) => {
   assert.ok(Math.abs(actual - expected) < 1e-9, `${label}: ${actual} must be ${expected}`)
@@ -116,6 +117,47 @@ const runOnce = () => {
   near(pinned.y, 472 + 48 * 2.5, 'DOM pin uses pad*zoom, not reducer cam')
   assert.notEqual(pinned.y, stay.camY)
 
+  const heading = {
+    id: 'nl-heading',
+    sourcePath: 'Faecher/Mechanik.md',
+    targetPath: 'Faecher/Mechanik · Notiz.md',
+    page: 1,
+    x: 0.25,
+    y: 0.4,
+    style: 'symbol',
+    label: 'Notiz',
+  }
+  const prevSheet = { width: 800, height: 1000 }
+  const glyphY = heading.y * prevSheet.height
+  const padY = 48
+  let pinPaperY = 0
+  for (const item of [
+    { height: 1000, zoom: 1 },
+    { height: 1000, zoom: 2.5 },
+    { height: 1048, zoom: 1 },
+    { height: 1048, zoom: 2.5 },
+  ]) {
+    const grownLinks = noteLinksAfterOriginGrow([heading], prevSheet, {
+      width: prevSheet.width,
+      height: item.height,
+      padX: 0,
+      padY,
+    })
+    const textY = glyphY + padY
+    const inkY = keepMarkOnPage(heading.y, prevSheet.height, item.height, padY) * item.height
+    near(inkY, textY, `ink paper y matches text after pad at h ${item.height}`)
+    const css = noteLinkMarkerCss(grownLinks[0], {
+      layoutWidth: prevSheet.width,
+      layoutHeight: item.height,
+      visualWidth: prevSheet.width * item.zoom,
+      visualHeight: item.height * item.zoom,
+    })
+    near(css.top, textY, `pin paper y after pad ${padY} zoom ${item.zoom} h ${item.height}`)
+    near(css.top * item.zoom, textY * item.zoom, `pin visual y zoom ${item.zoom} h ${item.height}`)
+    near(grownLinks[0].y, keepMarkOnPage(heading.y, prevSheet.height, item.height, padY), `stored fraction zoom ${item.zoom} h ${item.height}`)
+    pinPaperY = css.top
+  }
+
   assert.match(layerSource, /noteLinkMarkerCss\(/)
   assert.match(layerSource, /layoutWidth = host\.offsetWidth/)
   assert.match(layerSource, /readUsedSheetZoom\(host\)/)
@@ -129,12 +171,17 @@ const runOnce = () => {
   assert.match(boardSource, /applyVisualGrowCorrection\(scroller, stayScroll/)
   assert.match(boardSource, /liveWriteStayPut\(/)
   assert.doesNotMatch(boardSource, /pinPaperViewportAfterExtentGrow\(scroller, \{ x: nextStay\.camX/)
+  assert.match(boardSource, /noteLinksAfterOriginGrow\(\s*noteLinksRef\.current/)
+  assert.match(appSource, /onNoteLinksExtent=\{remapPlacedNoteLinks\}/)
+  assert.match(appSource, /persistNoteLinks\(path, links\)/)
+  assert.match(appSource, /if \(isPdfActive\) return/)
 
   return {
     zoomedLeft: zoomed.left,
     pdfLeft: pdfCss.left,
     growY: visual.y,
     reducerY: stay.camY,
+    pinPaperY,
   }
 }
 

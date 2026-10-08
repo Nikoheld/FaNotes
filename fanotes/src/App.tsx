@@ -2223,12 +2223,20 @@ export default function App({ startupBootstrap }: AppProps) {
     }
   }, [openNote, refreshTree, settings.defaultFolder, toast, tree])
 
-  const persistNoteLinks = useCallback(async (path: string, links: NoteLinkRecord[]) => {
-    noteLinksRef.current = links
-    setNoteLinks(links)
+  const persistNoteLinks = useCallback(async (path: string, links: readonly NoteLinkRecord[]) => {
+    const next = [...links]
+    noteLinksRef.current = next
+    setNoteLinks(next)
     if (!window.fanotes.writeNoteLinks) return
-    await window.fanotes.writeNoteLinks(path, links)
+    await window.fanotes.writeNoteLinks(path, next)
   }, [])
+
+  const remapPlacedNoteLinks = useCallback((links: readonly NoteLinkRecord[]) => {
+    if (isPdfActive) return
+    const path = activeTab?.path
+    if (!path || links === noteLinksRef.current) return
+    void persistNoteLinks(path, links)
+  }, [activeTab?.path, isPdfActive, persistNoteLinks])
 
   const persistNoteBackups = useCallback(async (path: string, backups: NoteBackupSnapshot[]) => {
     const next = listNoteBackups(backups, path)
@@ -4781,6 +4789,8 @@ export default function App({ startupBootstrap }: AppProps) {
                         onPagePaperChange={(style) => { if (activeTab) void applyNotePaper(activeTab.path, style) }}
                         onSettingsChange={handleDrawingSettingsChange}
                         onDirtyChange={handleDrawingDirtyChange}
+                        noteLinks={noteLinks}
+                        onNoteLinksExtent={remapPlacedNoteLinks}
                         onInkActivity={handleInkActivity}
                         onTrainingChanged={handleTrainingChanged}
                         onOpenGlyphenWerk={openGlyphenWerk}

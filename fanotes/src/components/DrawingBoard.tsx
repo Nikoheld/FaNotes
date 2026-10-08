@@ -209,6 +209,7 @@ import {
   paperRulingBackgroundPosition,
   paperRulingTileOrigin,
 } from '../lib/paperRuling'
+import { noteLinksAfterOriginGrow, type NoteLinkRecord } from '../lib/noteLink'
 import {
   applyVisualGrowCorrection,
   lockPaperViewportEditorScroll,
@@ -695,6 +696,9 @@ export type DrawingBoardProps = {
   confirmDestructive?: (message: string) => Promise<boolean>
   /** Collapsible sections move ink up and down the sheet; off for PDF notes, whose ink must stay on its page. */
   sectionsEnabled?: boolean
+  /** Sheet-relative note links. Remapped with the ink when the write page grows. */
+  noteLinks?: readonly NoteLinkRecord[]
+  onNoteLinksExtent?: (links: readonly NoteLinkRecord[]) => void
 }
 
 type Notice = { kind: 'success' | 'error' | 'info'; text: string }
@@ -1203,6 +1207,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   onPagePaperChange,
   confirmDestructive,
   sectionsEnabled = true,
+  noteLinks,
+  onNoteLinksExtent,
 }: DrawingBoardProps, forwardedRef) {
   // Controls only: the board follows the camera through refs and a
   // subscription, so a wheel zoom does not rebuild this tree on every step.
@@ -1985,6 +1991,10 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
 
   const onInkActivityRef = useRef(onInkActivity)
   onInkActivityRef.current = onInkActivity
+  const noteLinksRef = useRef(noteLinks ?? [])
+  noteLinksRef.current = noteLinks ?? []
+  const onNoteLinksExtentRef = useRef(onNoteLinksExtent)
+  onNoteLinksExtentRef.current = onNoteLinksExtent
 
   /** Every path that adds a finished stroke to the page passes through here. */
   const noteStrokeDrawn = useCallback((stroke: InkStroke) => {
@@ -2690,6 +2700,12 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       compassPoseRef.current = next
       setCompassPose(next)
     }
+    const remappedLinks = noteLinksAfterOriginGrow(
+      noteLinksRef.current,
+      { width: prevPaintW, height: prevPaintH },
+      { width: nextPaintW, height: nextPaintH, padX: addX, padY: addY },
+    )
+    if (remappedLinks !== noteLinksRef.current) onNoteLinksExtentRef.current?.(remappedLinks)
     const afterBox = scroller
       ? {
         left: scroller.getBoundingClientRect().left,

@@ -47,6 +47,18 @@ Existing checks missed it. `markdownAndInkAfterMinEdgeGrow` and `check-stay-put.
 
 Smallest fix: `scrollForZoomedOriginPad` (`noteCanvas.ts`) is the DOM write only. It adds `shift` (already visual) plus `pad × zoom`. `liveWriteStayPut` and `paperOriginScrollDelta` stay unscaled, so zoom 1 matches the old camera (`200 + 48 = 248`). At zoom 2.5, scroll y 200 and pad 48 become 320. `setPageExtent` pins, corrects, and refreshes with that visual scroll and `readUsedSheetZoom(paper)`. Shift is not scaled: scroll (100, 200), pad 48, shift y 10, zoom 2 → y = 306.
 
+### 3. Origin grow remaps ink and text, not stored note links
+
+Severity: high on a typed note that already has a pin. Layers: note-link pins against the heading and the ink. Paint CSS is not enough: `.famd` stores `x` / `y` as 0–1 of the sheet, and the next open paints that fraction again.
+
+`setPageExtent` runs `keepMarkOnPage` on every ink point (`DrawingBoard.tsx`, the tracked-point loop) and `textOriginCssPx` shifts typed text by the new pad. A pin at `y = 0.4` on a 1000px sheet is CSS 400. After `padY` 48 the glyph and the stroke are at 448. The stored fraction stays 0.4, so the pin stays at 400 when the sheet height does not change, or at `0.4 × 1048 = 419.2` when the sheet grows to 1048. That is 48px or 28.8px off the heading. Zoom scales the error: at 2.5 those gaps are 120px and 72px on screen.
+
+Reproduce: place a note link on a heading, zoom to 100% or 250%, and write into the top margin until the page takes an origin pad. Reload the note. The pin is no longer on the heading. The ink still is.
+
+Existing checks missed it. They remap ink and text in one unzoomed unit and never pass a note link through `setPageExtent`.
+
+Smallest fix: `noteLinksAfterOriginGrow` (`noteLink.ts`) stores `keepMarkOnPage` for `x` and `y`, using the same previous extent, next extent, and pad as the ink loop. `setPageExtent` calls it and `App` writes the records through `persistNoteLinks` (skipped for a PDF note, whose pins are page-relative). Example: 0.4 of 1000px, pad 48, next height 1000 → stored `0.448`, CSS 448. Next height 1048 → stored `448/1048`, CSS 448. Same paper y at zoom 1 and 2.5.
+
 ## Hypotheses
 
 Refuted, so the next pass can skip them:
@@ -75,7 +87,7 @@ Residual, not a confirmed separate bug: a PDF note-link pin while the plane is r
 
 ## Checks
 
-Added `fanotes/scripts/check-canvas-text-stay.mjs`. It loads `noteLinkMarkerCss`, `scrollForZoomedOriginPad`, and `liveWriteStayPut` through Vite `ssrLoadModule` and asserts the paper point. On the pre-patch math (visual width used as CSS px, pad not scaled) it failed with `zoom-2 markdown left: 400 must be 200`. After the patch it prints `{"zoomedLeft":200,"pdfLeft":450,"growY":320,"reducerY":520}` and `canvas-text-stay ok`. It also asserts the call sites: `NoteLinkLayer` uses `offsetWidth` and `readUsedSheetZoom`, and `DrawingBoard` pins `stayScroll` from `scrollForZoomedOriginPad(originCamera, …, readUsedSheetZoom(paper))`. `liveWriteStayPut` is still required to keep the unzoomed pad (`reducerY` 520).
+Added `fanotes/scripts/check-canvas-text-stay.mjs`. It loads `noteLinkMarkerCss`, `noteLinksAfterOriginGrow`, `scrollForZoomedOriginPad`, `keepMarkOnPage`, and `liveWriteStayPut` through Vite `ssrLoadModule` and asserts the paper point. On the pre-patch math (visual width used as CSS px, pad not scaled) it failed with `zoom-2 markdown left: 400 must be 200`. After that patch it printed `zoomedLeft` 200, `pdfLeft` 450, `growY` 320, reducer camera 520. With links still left at the old fraction, the same script failed with `pin paper y after pad 48 zoom 1 h 1000: 400 must be 448`. After `noteLinksAfterOriginGrow` it prints `pinPaperY` 448 and `canvas-text-stay ok`, at zoom 1 and 2.5, for a sheet that stays 1000px and one that grows to 1048. The stored fraction matches `keepMarkOnPage`. It also asserts `setPageExtent` calls `noteLinksAfterOriginGrow(noteLinksRef.current, …)` and `App` persists that array, skipping PDF notes.
 
 Still needed, not landed as a passing check of an unconfirmed bug:
 

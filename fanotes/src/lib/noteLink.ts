@@ -1,3 +1,5 @@
+import { keepMarkOnPage } from './noteCanvas'
+
 export const NOTE_LINK_STYLE_IDS = ['symbol', 'text', 'symbol-text'] as const
 
 export type NoteLinkStyleId = (typeof NOTE_LINK_STYLE_IDS)[number]
@@ -220,6 +222,29 @@ export const goBackNoteNav = (stack: string[] | null | undefined, current: strin
   const previous = sanitizePath(next.pop())
   if (!previous) return { stack: next, current: here }
   return { stack: next, current: previous }
+}
+
+/**
+ * Stored note-link x/y are 0–1 of the painted sheet, the same space as ink.
+ * A min-edge pad moves text by CSS px and ink by `keepMarkOnPage`. Leaving
+ * the fraction untouched parks the pin on the pre-grow paper point.
+ */
+export const noteLinksAfterOriginGrow = <T extends { x: number; y: number }>(
+  links: readonly T[],
+  prev: { width: number; height: number },
+  next: { width: number; height: number; padX?: number; padY?: number },
+): readonly T[] => {
+  const padX = Math.max(0, Number.isFinite(next.padX) ? Number(next.padX) : 0)
+  const padY = Math.max(0, Number.isFinite(next.padY) ? Number(next.padY) : 0)
+  let changed = false
+  const remapped = links.map((link) => {
+    const x = keepMarkOnPage(link.x, prev.width, next.width, padX)
+    const y = keepMarkOnPage(link.y, prev.height, next.height, padY)
+    if (x === link.x && y === link.y) return link
+    changed = true
+    return { ...link, x, y }
+  })
+  return changed ? remapped : links
 }
 
 export const noteLinkPointFromRect = (
