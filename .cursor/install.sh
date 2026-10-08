@@ -16,9 +16,19 @@ IMAGEMAGICK_URL="https://github.com/ImageMagick/ImageMagick/releases/download/${
 # qpdf + clamdscan (ClamAV) are checked at server start; magick (ImageMagick 7)
 # rebuilds uploaded images. Ubuntu ships ImageMagick 6 (convert only), so the
 # ImageMagick 7 `magick` binary is staged separately below.
-if ! command -v qpdf >/dev/null 2>&1 || ! command -v clamdscan >/dev/null 2>&1; then
+# tmux hosts the dev servers launched by .cursor/start.sh.
+# Require /usr/bin/tmux specifically. A Cursor-managed tmux elsewhere on PATH
+# is not available to every agent boot.
+if ! command -v qpdf >/dev/null 2>&1 || ! command -v clamdscan >/dev/null 2>&1 || [ ! -x /usr/bin/tmux ]; then
   sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq
-  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq qpdf clamav clamav-daemon
+  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq qpdf clamav clamav-daemon tmux
+fi
+
+# Virus definitions are files, not a process. Download them once so start can
+# launch clamd without another network fetch. Skip when a database is present.
+if ! compgen -G "/var/lib/clamav/main.c[vl]d" >/dev/null && ! compgen -G "/var/lib/clamav/daily.c[vl]d" >/dev/null; then
+  sudo systemctl stop clamav-freshclam >/dev/null 2>&1 || true
+  sudo freshclam
 fi
 
 # Several repository check scripts spawn a browser at the hard-coded path
