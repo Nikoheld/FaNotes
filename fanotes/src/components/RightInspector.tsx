@@ -1,18 +1,34 @@
-import { ChevronRight, FileText, Hash, ListTree, Sparkles, Tags } from 'lucide-react'
-import { useMemo } from 'react'
+import { ChevronRight, FileText, Hash, History, Link2, ListTree, Sparkles, Tags } from 'lucide-react'
+import { useMemo, useState } from 'react'
 import { getUiLocale } from '../i18n'
+import { backlinksFor } from '../lib/backlinks'
+import { diffNoteLines, timelineHasInk } from '../lib/markdownDiff'
 import { outlineTagsFromNote, parseNoteOutline } from '../lib/noteOutline'
+import type { NoteHistorySnapshot } from '../types'
 
 export function RightInspector({
   content,
   path,
+  notes = [],
+  history = [],
   onJumpToLine,
+  onOpenNote,
+  onShowHistory,
+  onRestoreHistory,
 }: {
   content: string
   path?: string
+  notes?: Array<{ path: string; content: string }>
+  history?: NoteHistorySnapshot[]
   onJumpToLine?: (line: number) => void
+  onOpenNote?: (path: string) => void
+  onShowHistory?: () => void
+  onRestoreHistory?: (id: string) => void
 }) {
   const headings = useMemo(() => parseNoteOutline(content), [content])
+  const backlinks = useMemo(() => path ? backlinksFor(path, notes) : [], [notes, path])
+  const [diffId, setDiffId] = useState<string | null>(null)
+  const [diffText, setDiffText] = useState('')
   const stats = useMemo(() => {
     const visibleContent = content
       .replace(/<!--\s*fanotes-(?:ink|worksheet):[a-zA-Z0-9_-]{1,96}\s*-->/gu, '')
@@ -44,6 +60,35 @@ export function RightInspector({
           <h4><FileText size={14} /> Dokument</h4>
           <dl className="document-stats"><div><dt>Wörter</dt><dd>{stats.words.toLocaleString(getUiLocale())}</dd></div><div><dt>Zeichen</dt><dd>{stats.characters.toLocaleString(getUiLocale())}</dd></div><div><dt>Lesezeit</dt><dd>~ {stats.reading} min</dd></div></dl>
           {path && <div className="property-row"><Hash size={13} /><span>{path}</span></div>}
+        </section>
+        <section>
+          <h4><Link2 size={14} /> Rückverweise</h4>
+          {!backlinks.length && <p className="inspector-empty">Keine Wiki-Links auf diese Notiz.</p>}
+          {backlinks.map((link) => (
+            <button type="button" key={link.path} className="outline-list" onClick={() => onOpenNote?.(link.path)}>
+              <span>{link.title}</span>
+              <small>{link.excerpt}</small>
+            </button>
+          ))}
+        </section>
+        <section>
+          <h4><History size={14} /> Versionen</h4>
+          <button type="button" className="secondary-button" onClick={() => onShowHistory?.()}>Verlauf laden</button>
+          {history.map((snapshot) => (
+            <div key={snapshot.id}>
+              <button type="button" onClick={() => {
+                if (!path || !window.fanotes.readNoteHistory) return
+                void window.fanotes.readNoteHistory(path, snapshot.id).then((loaded) => {
+                  const previous = typeof loaded.content === 'string' ? loaded.content : ''
+                  setDiffId(snapshot.id)
+                  setDiffText(diffNoteLines(previous, content).map((row) => `${row.kind === 'added' ? '+' : '-'} ${row.text}`).join('\n') || 'Kein Textunterschied.')
+                })
+              }}>{new Date(snapshot.createdAt).toLocaleString(getUiLocale())}</button>
+              <button type="button" onClick={() => onRestoreHistory?.(snapshot.id)}>Wiederherstellen</button>
+              {timelineHasInk(diffId === snapshot.id ? diffText : '') && diffId === snapshot.id && <small>Enthält Handschrift.</small>}
+            </div>
+          ))}
+          {diffId && <pre>{diffText}</pre>}
         </section>
         <section>
           <h4><Tags size={14} /> Tags</h4>

@@ -11,6 +11,7 @@ import {
   neuralWordContextWordsOfLength,
 } from './neuralWordContext'
 import { isUserAcceptedWord, personalWords, type SuggestionLexicon } from './spellingSuggest'
+import { FRENCH_STOPWORDS, isFrenchWord } from './frenchLexicon'
 
 export type SpellingSegment = { from: number; text: string }
 export type SpellingIgnoredRange = { from: number; to: number }
@@ -31,7 +32,7 @@ export type SpellingCheckResult = {
   detectedLanguage: DetectedTextLanguage
 }
 
-type LanguageEvidence = { de: number; en: number }
+type LanguageEvidence = { de: number; en: number; fr: number }
 type FilterDescriptor = SpellingResources['manifest']['languages'][SpellingLanguage]
 
 const WORD_PATTERN = /\p{L}[\p{L}\p{M}'’\-]*/gu
@@ -387,20 +388,25 @@ export async function checkSpelling({
     const evidence = words.reduce<LanguageEvidence>((score, token) => {
       if (DE_STOPWORDS.has(token.normalized)) score.de += 3
       if (EN_STOPWORDS.has(token.normalized)) score.en += 3
+      if (FRENCH_STOPWORDS.has(token.normalized) || isFrenchWord(token.word)) score.fr += 3
       if (token.membership.de && !token.membership.en) score.de += 2
       if (token.membership.en && !token.membership.de) score.en += 2
       return score
-    }, { de: 0, en: 0 })
+    }, { de: 0, en: 0, fr: 0 })
     return { segment, words, evidence, language: evidenceLanguage(evidence) }
   })
 
   const documentEvidence = segmentWords.reduce<LanguageEvidence>((score, segment) => ({
     de: score.de + segment.evidence.de,
     en: score.en + segment.evidence.en,
-  }), { de: 0, en: 0 })
+    fr: score.fr + segment.evidence.fr,
+  }), { de: 0, en: 0, fr: 0 })
   const documentLanguage = evidenceLanguage(documentEvidence) ?? (documentEvidence.en > documentEvidence.de ? 'en' : 'de')
   const explicitLanguages = new Set(segmentWords.map(({ language }) => language).filter(Boolean))
-  const detectedLanguage: DetectedTextLanguage = explicitLanguages.size > 1
+  const frenchLead = documentEvidence.fr > documentEvidence.de && documentEvidence.fr > documentEvidence.en
+  const detectedLanguage: DetectedTextLanguage = frenchLead
+    ? 'fr'
+    : explicitLanguages.size > 1
     ? 'mixed'
     : explicitLanguages.values().next().value ?? (documentEvidence.de || documentEvidence.en ? documentLanguage : 'unknown')
 
@@ -411,6 +417,7 @@ export async function checkSpelling({
     if (segment.text.trim()) lines.push({ from: segment.from, to: segment.from + segment.text.length, language: resolvedLanguage })
     for (const token of words) {
       if (token.membership.de || token.membership.en) continue
+      if (isFrenchWord(token.word)) continue
       errors.push({ from: token.from, to: token.to, word: token.word, language: resolvedLanguage })
     }
   }

@@ -1,5 +1,6 @@
 import {
   Archive,
+  BarChart3,
   ArrowLeft,
   ArrowLeftRight,
   ArrowRight,
@@ -52,6 +53,7 @@ import {
   Search,
   Settings,
   ShieldCheck,
+  Sparkles,
   Trash2,
   X,
 } from 'lucide-react'
@@ -130,6 +132,7 @@ import {
   type SplitLayout,
 } from './lib/workspaceNav'
 import { InkPreviewLayer } from './components/InkPreviewLayer'
+import { SplitInkEditor } from './components/SplitInkEditor'
 import {
   activateNoteLink,
   linkedNoteParent,
@@ -206,6 +209,17 @@ import {
   type RemoteSupportSession,
 } from './lib/remoteSupport'
 import { HOMEWORK_NOTE_PATH, mergeHomeworkFromRemote, parseHomeworkMarkdown, rememberPublishedHomeworkIds, serializeHomeworkMarkdown, type HomeworkDocument } from './lib/homeworkStore'
+import { scrollTopForNormalizedY } from './lib/searchInkAnchor'
+import { headingLineForSection } from './lib/inkSectionMarkdown'
+import { syncPrefixesFromSetting, toggleSyncPrefix, RECOGNITION_MODEL_SYNC_PATH } from './lib/sync/folderSync'
+import { parseRecognitionBundle, serializeRecognitionBundle, emptyRecognitionBundle } from './lib/sync/recognitionModelBundle'
+import { polishRecognizedText } from './lib/recognitionPolish'
+import { sanitizeAddonStrokes, inkDocumentWithStrokes } from './lib/addonInk'
+import { sanitizeCalendarDocument, serializeCalendarMarkdown, parseCalendarMarkdown, CALENDAR_NOTE_PATH } from './lib/calendarModel'
+import { templatesToSeed, templatePath, NOTE_TEMPLATES, type NoteProfileId } from './lib/noteTemplates'
+import { backlinksFor } from './lib/backlinks'
+import { readPdfMarks, writePdfMarks, addPdfMark } from './lib/pdfTextMarks'
+import { getHandwritingSamples, getMathLayoutExamples, getImportedLabels, putHandwritingSamples, putMathLayoutExamples, putHandwritingLabels } from './lib/handwritingDb'
 import { SafeBoundary } from './components/SafeBoundary'
 import { applyNoteTags, collectVaultTags, filterTreeByTag, parseNoteTags } from './lib/noteTags'
 import { applyRendererResourceLimits } from './lib/resourceLimits'
@@ -217,6 +231,8 @@ const DrawingBoard = lazy(() => import('./components/DrawingBoard').then((module
 const FirstRunOnboarding = lazy(() => import('./components/FirstRunOnboarding').then((module) => ({ default: module.FirstRunOnboarding })))
 const GlyphenWerkWorkspace = lazy(() => import('./components/GlyphenWerkWorkspace').then((module) => ({ default: module.GlyphenWerkWorkspace })))
 const CommandPalette = lazy(() => import('./components/CommandPalette').then((module) => ({ default: module.CommandPalette })))
+const StudyOverview = lazy(() => import('./components/StudyOverview').then((module) => ({ default: module.StudyOverview })))
+const FlashcardReview = lazy(() => import('./components/FlashcardReview').then((module) => ({ default: module.FlashcardReview })))
 const AiPanel = lazy(() => import('./components/AiPanel').then((module) => ({ default: module.AiPanel })))
 type MarkdownEditorModule = { default: typeof import('./components/MarkdownEditor')['MarkdownEditor'] }
 let markdownEditorModulePromise: Promise<MarkdownEditorModule> | null = null
@@ -655,6 +671,9 @@ export default function App({ startupBootstrap }: AppProps) {
   const [glyphenWerkSampleCount, setGlyphenWerkSampleCount] = useState<number | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [searchHits, setSearchHits] = useState<SearchHit[]>([])
+  const [inkReveal, setInkReveal] = useState<{ path: string; y: number; token: number } | null>(null)
+  const [studyOpen, setStudyOpen] = useState(false)
+  const [cardsOpen, setCardsOpen] = useState(false)
   const [searchLoading, setSearchLoading] = useState(false)
   const [focusToken, setFocusToken] = useState(0)
   const [fatalError, setFatalError] = useState<string | null>(null)
@@ -1666,9 +1685,22 @@ export default function App({ startupBootstrap }: AppProps) {
     }
   }, [bootstrap?.vaultPath, bootstrap?.onboardingRequired])
 
-  const completeOnboarding = useCallback(async (subjects: string[]) => {
+  const completeOnboarding = useCallback(async (subjects: string[], profile: NoteProfileId = 'school') => {
     const data = await window.fanotes.completeOnboarding(subjects)
     setBootstrap(data)
+    try {
+      await window.fanotes.createFolder(undefined, 'Vorlagen')
+      for (const template of templatesToSeed([], profile)) {
+        const created = await window.fanotes.createNote('Vorlagen', template.fileName)
+        if (created.relativePath !== templatePath(template)) {
+          await window.fanotes.writeFile(created.relativePath, template.markdown)
+        } else {
+          await window.fanotes.writeFile(templatePath(template), template.markdown)
+        }
+      }
+    } catch {
+      /* templates are also available from the command palette */
+    }
     setSettings({ ...defaultSettingsForPlatform(window.fanotes.platform), ...data.settings })
     let initialTree = await window.fanotes.getTree()
     let initialNote = firstNote(initialTree)
@@ -2034,6 +2066,15 @@ export default function App({ startupBootstrap }: AppProps) {
       })
     }
     const touched = new Set<string>()
+    if (written.includes(RECOGNITION_MODEL_SYNC_PATH) && settingsRef.current.syncHandwritingModel && window.fanotes.readRecognitionModel) {
+      const raw = await window.fanotes.readRecognitionModel().catch(() => null)
+      const bundle = raw ? parseRecognitionBundle(raw) : null
+      if (bundle) {
+        await putHandwritingSamples(bundle.samples as Awaited<ReturnType<typeof getHandwritingSamples>>).catch(() => undefined)
+        await putMathLayoutExamples(bundle.layouts as Awaited<ReturnType<typeof getMathLayoutExamples>>).catch(() => undefined)
+        await putHandwritingLabels(bundle.labels as Awaited<ReturnType<typeof getImportedLabels>>).catch(() => undefined)
+      }
+    }
     for (const path of written) {
       for (const tab of tabsRef.current) {
         if (tab.path === path || companionNotePath(tab.path, '.famd') === path) touched.add(tab.path)
@@ -2082,6 +2123,9 @@ export default function App({ startupBootstrap }: AppProps) {
       platform: window.fanotes.platform,
       deviceName: () => settingsRef.current.syncDeviceName,
       automatic: () => settingsRef.current.syncAutomatic,
+      excludedPrefixes: () => syncPrefixesFromSetting(settingsRef.current.syncExcludedFolders),
+      includeRecognitionModel: () => settingsRef.current.syncHandwritingModel === true,
+      includeHistory: () => settingsRef.current.syncNoteHistory === true,
       isPathBusy: (path) => syncDepsRef.current.isSyncPathBusy(path),
       onApplied: (change) => { void syncDepsRef.current.applyRemoteChanges(change) },
       onConflict: (conflict) => syncDepsRef.current.toast(`Sync-Konflikt bei „${fileName(conflict.path)}“ – deine Fassung liegt als Kopie daneben.`, 'info'),
@@ -2096,6 +2140,32 @@ export default function App({ startupBootstrap }: AppProps) {
       syncEngine.dispose()
     }
   }, [syncApi])
+
+  useEffect(() => {
+    if (!settings.syncHandwritingModel || !window.fanotes.writeRecognitionModel) return
+    let cancelled = false
+    const publish = async () => {
+      const [samples, layouts, labels, previousRaw] = await Promise.all([
+        getHandwritingSamples(),
+        getMathLayoutExamples(),
+        getImportedLabels(),
+        window.fanotes.readRecognitionModel?.() ?? Promise.resolve(null),
+      ])
+      if (cancelled) return
+      const previous = typeof previousRaw === 'string' ? parseRecognitionBundle(previousRaw) : null
+      const bundle = {
+        ...(previous ?? emptyRecognitionBundle()),
+        samples,
+        layouts,
+        labels,
+        exportedAt: new Date().toISOString(),
+      }
+      await window.fanotes.writeRecognitionModel?.(serializeRecognitionBundle(bundle))
+      syncEngine.notifyLocalChange()
+    }
+    void publish().catch(() => undefined)
+    return () => { cancelled = true }
+  }, [settings.syncHandwritingModel])
 
   const cycleTabs = useCallback((direction: 1 | -1) => {
     const currentTabs = tabsRef.current
@@ -3346,12 +3416,20 @@ export default function App({ startupBootstrap }: AppProps) {
 
   const openSearchHit = useCallback(async (hit: SearchHit) => {
     setSearchOpen(false)
+    const reveal = (path: string) => {
+      if (!hit.inkAnchor) return
+      setInkReveal({ path, y: hit.inkAnchor.y, token: Date.now() })
+    }
     if (hit.kind !== 'drawing' || !hit.drawingId) {
       await openNote(hit.relativePath)
+      reveal(hit.relativePath)
       return
     }
     if (hit.notePath) {
       await openNote(hit.notePath)
+      reveal(hit.notePath)
+      drawingOpenRef.current = true
+      setDrawingOpen(true)
       return
     }
 
@@ -3371,6 +3449,16 @@ export default function App({ startupBootstrap }: AppProps) {
       toast(error instanceof Error ? error.message : 'Handschrift-Seite konnte nicht geöffnet werden.', 'error')
     }
   }, [activeTab, openDrawing, openNote, toast, updateContent])
+
+  useEffect(() => {
+    if (!inkReveal || inkReveal.path !== activePath) return
+    const frame = window.requestAnimationFrame(() => {
+      const scroller = document.querySelector('.unified-note-view .cm-scroller') as HTMLElement | null
+      if (!scroller) return
+      scroller.scrollTop = scrollTopForNormalizedY(scroller.scrollHeight, scroller.clientHeight, inkReveal.y)
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [activePath, inkReveal])
 
   const showFiles = useCallback(() => {
     if (!closeDrawing()) return
@@ -3475,9 +3563,9 @@ export default function App({ startupBootstrap }: AppProps) {
     return true
   }, [toast, updateContent])
 
-  const saveDrawingAsset = useCallback(async (payload: DrawingSavePayload) => {
+  const saveDrawingAsset = useCallback(async (payload: DrawingSavePayload, notePathOverride?: string | null) => {
     const session = vaultSessionGenerationRef.current
-    const notePath = activePath
+    const notePath = notePathOverride ?? activePath
     const { inkSummary, ...drawing } = payload
     const asset = await window.fanotes.saveDrawing({
       ...drawing,
@@ -3836,6 +3924,23 @@ export default function App({ startupBootstrap }: AppProps) {
     { id: 'ai-assistant', label: 'AI-Assistent', detail: 'LM Studio, Ollama, OpenAI, Gemini, Anthropic oder OpenCode nutzen', shortcut: 'Ctrl ⇧ A', group: 'Werkzeuge', keywords: 'ki ai lm studio ollama openai gemini anthropic opencode rechtschreibung fakten', icon: <Bot size={15} />, run: openLmStudio },
     { id: 'glyphenwerk', label: 'GlyphenWerk öffnen', detail: 'Handschrift trainieren, live testen, korrigieren und verwalten', shortcut: 'Ctrl ⇧ G', group: 'Werkzeuge', keywords: 'training erkennung symbole test datensatz', icon: <Database size={15} />, run: openGlyphenWerk },
     { id: 'overview', label: 'Vault-Übersicht', detail: 'Ordner und offene Notizen überblicken', group: 'Navigation', icon: <Network size={15} />, run: openOverview },
+    { id: 'study', label: 'Lernzeit', detail: 'Zeit, Tippen und Handschrift je Fach, nur lokal', group: 'Ansicht', keywords: 'statistik lernen heatmap', icon: <BarChart3 size={15} />, run: () => { setStudyOpen(true); setOverviewOpen(false); setHomeworkOpen(false); setCalendarOpen(false); setGlyphenWerkOpen(false) } },
+    { id: 'flashcards', label: 'Karteikarten', detail: 'Lernfragen dieser Notiz wiederholen', group: 'Lernen', keywords: 'flashcards karten spaced', icon: <Sparkles size={15} />, run: () => setCardsOpen(true) },
+    ...NOTE_TEMPLATES.map((template) => ({
+      id: `template-${template.id}`,
+      label: `Vorlage: ${template.title}`,
+      detail: 'In den aktuellen Ordner einfügen',
+      group: 'Vorlagen',
+      keywords: `vorlage template ${template.profile} ${template.title}`,
+      icon: <FilePlus2 size={15} />,
+      run: () => {
+        const folder = activePathRef.current ? activePathRef.current.split('/').slice(0, -1).join('/') : settingsRef.current.defaultFolder
+        void window.fanotes.createNote(folder || undefined, template.fileName).then(async (created) => {
+          await window.fanotes.writeFile(created.relativePath, template.markdown)
+          await openNoteRef.current(created.relativePath)
+        }).catch((error) => toast(error instanceof Error ? error.message : 'Vorlage konnte nicht angelegt werden.', 'error'))
+      },
+    })),
     { id: 'homework', label: 'Hausaufgaben & Termine', detail: 'To-dos, Hausaufgaben und Termine mit Fälligkeit', group: 'Navigation', keywords: 'todo hausaufgaben schule termin fällig aufgabe checklist', icon: <ClipboardList size={15} />, run: openHomework },
     { id: 'calendar', label: 'Kalender', detail: 'Tag, 3 Tage, Woche, Monat und Agenda', group: 'Navigation', keywords: 'kalender termin woche monat agenda notion calendar event', icon: <CalendarDays size={15} />, run: openCalendar },
     { id: 'daily', label: 'Heutige Tagesnotiz', detail: settings.dailyNotesFolder, group: 'Dateien', icon: <CalendarDays size={15} />, run: () => void createDailyNote() },
@@ -3945,6 +4050,49 @@ export default function App({ startupBootstrap }: AppProps) {
       } catch {
         return null
       }
+    },
+    writeInk: async (path, strokes, mode) => {
+      const clean = sanitizeAddonStrokes(strokes)
+      if (!clean) return false
+      const current = await window.fanotes.readFamdInk(path).catch(() => null)
+      const drawingJson = inkDocumentWithStrokes(current?.drawingJson ?? null, clean, mode)
+      await window.fanotes.saveDrawing({
+        id: current?.id,
+        title: current?.title || 'Handschrift',
+        drawingJson,
+        noteRelativePath: path,
+      })
+      return true
+    },
+    runRecognition: async (request) => {
+      const language = request.language === 'en' || request.language === 'fr' || request.language === 'de' ? request.language : settingsRef.current.recognitionLanguage
+      const text = typeof request.text === 'string' ? request.text : ''
+      return { text: polishRecognizedText(text, language), language, source: 'lexicon' }
+    },
+    readCalendar: async () => {
+      try {
+        return parseCalendarMarkdown(await window.fanotes.readFile(CALENDAR_NOTE_PATH))
+      } catch {
+        return parseCalendarMarkdown('')
+      }
+    },
+    writeCalendar: async (document) => {
+      const clean = sanitizeCalendarDocument(document)
+      await window.fanotes.writeFile(CALENDAR_NOTE_PATH, serializeCalendarMarkdown(clean))
+      return true
+    },
+    readHomework: async () => {
+      try {
+        return parseHomeworkMarkdown(await window.fanotes.readFile(HOMEWORK_NOTE_PATH))
+      } catch {
+        return parseHomeworkMarkdown('')
+      }
+    },
+    writeHomework: async (document) => {
+      if (!document || typeof document !== 'object') return false
+      const markdown = serializeHomeworkMarkdown(document as HomeworkDocument)
+      await window.fanotes.writeFile(HOMEWORK_NOTE_PATH, markdown)
+      return true
     },
     pageStats: (path) => {
       const session = pageStatsRef.current.get(path)
@@ -4389,6 +4537,8 @@ export default function App({ startupBootstrap }: AppProps) {
                 onImportPdf={importPdfNote}
                 onAttachBook={attachBookToSubject}
                 onDetachBook={detachBookFromSubject}
+                localOnlyPaths={syncPrefixesFromSetting(settings.syncExcludedFolders)}
+                onToggleLocalOnly={(folder) => applySettings({ ...settingsRef.current, syncExcludedFolders: toggleSyncPrefix(settingsRef.current.syncExcludedFolders, folder) })}
                 bookFolderPaths={subjectBooks.map((book) => book.subjectPath)}
                 onSetFolderColor={setFolderColor}
                 onRename={renameEntry}
@@ -4692,6 +4842,10 @@ export default function App({ startupBootstrap }: AppProps) {
                   onDocumentPersisted={(document) => { void syncPublishedHomework(settingsRef.current, document) }}
                 />
               </SafeBoundary>
+            ) : studyOpen ? (
+              <SafeBoundary name="Lernzeit" fallbackTitle="Die Lernzeit ist abgestürzt">
+                <StudyOverview entries={tree} onClose={() => setStudyOpen(false)} />
+              </SafeBoundary>
             ) : overviewOpen ? (
               <VaultOverview entries={tree} openTabs={tabs} onOpen={(path) => { setOverviewOpen(false); return openNote(path) }} onCreateNote={() => createNote()} onClose={() => setOverviewOpen(false)} />
             ) : activeTab ? (
@@ -4736,13 +4890,18 @@ export default function App({ startupBootstrap }: AppProps) {
                           path={activeTab.path}
                           title={activeTab.title}
                           inputDisabled={drawingOpen || activeEntryMutating}
+                          quotes={readPdfMarks(activeTab.content)}
+                          onMarkSelection={(quote, page) => {
+                            const marks = addPdfMark(readPdfMarks(activeTab.content), { page, quote, kind: 'highlight' })
+                            updateContentFor(activeTab.path, writePdfMarks(activeTab.content, marks))
+                          }}
                         />
                       </SafeBoundary>
                     </Suspense>
                   ) : (
                   <div className="editor-pane">
                     <SafeBoundary name="Editor" fallbackTitle="Der Editor ist abgestürzt">
-                      <MarkdownEditor ref={editorRef} key={activeTab.path} content={activeTab.content} onChange={(content) => updateContentFor(activeTab.path, content)} onSave={async (content) => { await saveContent(activeTab.path, content) }} settings={settings} focusToken={focusToken} readOnly={activeEntryMutating || drawingOpen} paperMode onLanguageDetected={setDetectedTextLanguage} onEditActivity={(activity) => recordEditActivityFor(activeTab.path, activity)} />
+                      <MarkdownEditor ref={editorRef} key={activeTab.path} content={activeTab.content} onChange={(content) => updateContentFor(activeTab.path, content)} onSave={async (content) => { await saveContent(activeTab.path, content) }} settings={settings} focusToken={focusToken} readOnly={activeEntryMutating || (drawingOpen && focusedPane === 'main')} paperMode onLanguageDetected={setDetectedTextLanguage} onEditActivity={(activity) => recordEditActivityFor(activeTab.path, activity)} />
                     </SafeBoundary>
                   </div>
                   )}
@@ -4784,6 +4943,10 @@ export default function App({ startupBootstrap }: AppProps) {
                         onInkActivity={handleInkActivity}
                         onTrainingChanged={handleTrainingChanged}
                         onOpenGlyphenWerk={openGlyphenWerk}
+                        onSectionFold={(index, collapsed) => {
+                          const line = headingLineForSection(activeTab.content, index)
+                          if (line) editorRef.current?.foldHeading(line, collapsed)
+                        }}
                         confirmDestructive={(message) => requestConfirm(message, { title: 'Training löschen', confirmLabel: 'Löschen' })}
                       />
                     </SafeBoundary>
@@ -4863,11 +5026,16 @@ export default function App({ startupBootstrap }: AppProps) {
                           onEditActivity={(activity) => recordEditActivityFor(splitTab.path, activity)}
                           settings={settings}
                           paperMode
+                          readOnly={drawingOpen && focusedPane === 'split'}
                         />
                       </SafeBoundary>
                     </div>
                     )}
-                    {loadSplitInk && (
+                    {drawingOpen && focusedPane === 'split' && loadSplitInk ? (
+                      <SafeBoundary name="Handschrift (zweite Spalte)" fallbackTitle="Die zweite Stiftebene ist abgestürzt">
+                        <SplitInkEditor path={splitTab.path} title={splitTab.title} load={loadSplitInk} settings={settings} onSaveDrawing={saveDrawingAsset} />
+                      </SafeBoundary>
+                    ) : loadSplitInk && (
                       <SafeBoundary name="Handschrift (zweite Spalte)" fallbackTitle="Die Handschrift-Vorschau ist abgestürzt">
                         <InkPreviewLayer load={loadSplitInk} smoothing={settings.smoothing} reloadKey={drawingSession.key} />
                       </SafeBoundary>
@@ -4886,7 +5054,7 @@ export default function App({ startupBootstrap }: AppProps) {
           </div>
         </main>
 
-        {inspectorVisible && settings.showOutline && !overviewOpen && !homeworkOpen && !calendarOpen && !glyphenWerkOpen && !isPdfActive && <Suspense fallback={null}><RightInspector content={activeTab?.content ?? ''} path={activeTab?.path} onJumpToLine={(line) => { editorRef.current?.revealLine(line) }} /></Suspense>}
+        {inspectorVisible && settings.showOutline && !overviewOpen && !studyOpen && !homeworkOpen && !calendarOpen && !glyphenWerkOpen && !isPdfActive && <Suspense fallback={null}><RightInspector content={activeTab?.content ?? ''} path={activeTab?.path} notes={tabs.map((tab) => ({ path: tab.path, content: tab.content }))} history={historySnapshots} onShowHistory={() => { void openHistory() }} onRestoreHistory={(id) => { void restoreHistory(id) }} onJumpToLine={(line) => { editorRef.current?.revealLine(line) }} onOpenNote={(path) => { void openNote(path) }} /></Suspense>}
         {addonState.dockOpen && addonState.panels.length > 0 && !glyphenWerkOpen && <Suspense fallback={null}><SafeBoundary name="Add-on-Dock" fallbackTitle="Das Add-on-Dock ist abgestürzt"><AddonPanelDock panels={addonState.panels} activeKey={addonState.activePanel} runtime={addonRuntime} onClose={() => addonRuntime.setDockOpen(false)} /></SafeBoundary></Suspense>}
         {searchOpen && <Suspense fallback={null}><SearchPanel query={searchQuery} hits={searchHits} loading={searchLoading} onQueryChange={setSearchQuery} onOpen={(hit) => { void openSearchHit(hit) }} onClose={() => setSearchOpen(false)} /></Suspense>}
       </div>
@@ -4904,9 +5072,10 @@ export default function App({ startupBootstrap }: AppProps) {
             ))}
           </nav>
         )}</div>
-        <div className="statusbar-right">{updateState.status === 'downloaded' && <button type="button" className="update-ready-button" title={`FaNotes ${updateState.latestVersion} installieren und neu starten`} onClick={() => void installUpdate()}><ShieldCheck size={11} /> Update bereit</button>}{updateState.status === 'downloading' && <span><LoaderCircle className="spin" size={11} /> Update {Math.round(updateState.progress * 100)} %</span>}{settings.spellcheck && activeTab && !drawingOpen && detectedTextLanguage !== 'unknown' && <span className="detected-text-language" title="Automatisch erkannte Sprache für die lokale Rechtschreibprüfung"><b>Aa</b> {detectedTextLanguage === 'de' ? 'Deutsch' : detectedTextLanguage === 'en' ? 'English' : 'DE / EN'}</span>}{settings.showWordCount && activeTab && <span>{activeWordCount} Wörter</span>}{addonState.statusItems.map((item) => item.clickable ? <button key={`${item.addonId}/${item.id}`} type="button" className="addon-status-item" title={item.title ?? undefined} data-i18n-ignore onClick={() => addonRuntime.clickStatusItem(item.addonId, item.id)}>{item.text}</button> : <span key={`${item.addonId}/${item.id}`} className="addon-status-item" title={item.title ?? undefined} data-i18n-ignore>{item.text}</span>)}{addonState.panels.length > 0 && !addonState.dockOpen && <button type="button" className="addon-status-item addon-status-item--dock" title="Add-on-Panels einblenden" onClick={() => addonRuntime.setDockOpen(true)}><Puzzle size={11} /> {addonState.panels.length}</button>}{syncApi && syncState.account && <button type="button" className={`sync-status-item is-${syncState.status}`} title={`Sync · ${syncState.account.email} · ${syncStatusLabel(syncState)}${syncState.error ? ` · ${syncState.error}` : ''}`} aria-live="polite" onClick={() => openSettings('sync')}>{syncState.status === 'syncing' ? <LoaderCircle className="spin" size={11} /> : syncState.status === 'offline' ? <CloudOff size={11} /> : syncState.status === 'error' ? <CircleAlert size={11} /> : <Cloud size={11} />}{syncState.status === 'syncing' ? 'Sync …' : syncState.status === 'offline' ? 'Offline' : syncState.status === 'error' ? 'Sync-Fehler' : 'Synchron'}{syncState.conflicts.length > 0 && <em>{syncState.conflicts.length}</em>}</button>}<button type="button" className={`save-status ${saveState === 'saved' ? 'save-ok' : 'save-pending'}`} title="Jetzt speichern (Strg+S)" aria-live="polite" onClick={() => void saveCurrentWork()}>{saveState === 'saved' ? <CheckCircle2 size={11} /> : saveState === 'saving' ? <LoaderCircle className="spin" size={11} /> : <CircleAlert size={11} />}{saveState === 'saved' ? 'Gespeichert' : saveState === 'saving' ? 'Speichert …' : 'Speicherfehler'}</button><span title={isWeb ? 'Die Daten bleiben in diesem Browser' : 'Dein Vault bleibt auf deinem Gerät'}><ShieldCheck size={11} /> {isWeb ? 'Im Browser gespeichert' : 'Lokal & privat'}</span></div>
+        <div className="statusbar-right">{updateState.status === 'downloaded' && <button type="button" className="update-ready-button" title={`FaNotes ${updateState.latestVersion} installieren und neu starten`} onClick={() => void installUpdate()}><ShieldCheck size={11} /> Update bereit</button>}{updateState.status === 'downloading' && <span><LoaderCircle className="spin" size={11} /> Update {Math.round(updateState.progress * 100)} %</span>}{settings.spellcheck && activeTab && !drawingOpen && detectedTextLanguage !== 'unknown' && <span className="detected-text-language" title="Automatisch erkannte Sprache für die lokale Rechtschreibprüfung"><b>Aa</b> {detectedTextLanguage === 'de' ? 'Deutsch' : detectedTextLanguage === 'en' ? 'English' : detectedTextLanguage === 'fr' ? 'Français' : 'DE / EN'}</span>}{settings.showWordCount && activeTab && <span>{activeWordCount} Wörter</span>}{addonState.statusItems.map((item) => item.clickable ? <button key={`${item.addonId}/${item.id}`} type="button" className="addon-status-item" title={item.title ?? undefined} data-i18n-ignore onClick={() => addonRuntime.clickStatusItem(item.addonId, item.id)}>{item.text}</button> : <span key={`${item.addonId}/${item.id}`} className="addon-status-item" title={item.title ?? undefined} data-i18n-ignore>{item.text}</span>)}{addonState.panels.length > 0 && !addonState.dockOpen && <button type="button" className="addon-status-item addon-status-item--dock" title="Add-on-Panels einblenden" onClick={() => addonRuntime.setDockOpen(true)}><Puzzle size={11} /> {addonState.panels.length}</button>}{syncApi && syncState.account && <button type="button" className={`sync-status-item is-${syncState.status}`} title={`Sync · ${syncState.account.email} · ${syncStatusLabel(syncState)}${syncState.error ? ` · ${syncState.error}` : ''}`} aria-live="polite" onClick={() => openSettings('sync')}>{syncState.status === 'syncing' ? <LoaderCircle className="spin" size={11} /> : syncState.status === 'offline' ? <CloudOff size={11} /> : syncState.status === 'error' ? <CircleAlert size={11} /> : <Cloud size={11} />}{syncState.status === 'syncing' ? 'Sync …' : syncState.status === 'offline' ? 'Offline' : syncState.status === 'error' ? 'Sync-Fehler' : 'Synchron'}{syncState.conflicts.length > 0 && <em>{syncState.conflicts.length}</em>}</button>}<button type="button" className={`save-status ${saveState === 'saved' ? 'save-ok' : 'save-pending'}`} title="Jetzt speichern (Strg+S)" aria-live="polite" onClick={() => void saveCurrentWork()}>{saveState === 'saved' ? <CheckCircle2 size={11} /> : saveState === 'saving' ? <LoaderCircle className="spin" size={11} /> : <CircleAlert size={11} />}{saveState === 'saved' ? 'Gespeichert' : saveState === 'saving' ? 'Speichert …' : 'Speicherfehler'}</button><span title={isWeb ? 'Die Daten bleiben in diesem Browser' : 'Dein Vault bleibt auf deinem Gerät'}><ShieldCheck size={11} /> {isWeb ? 'Im Browser gespeichert' : 'Lokal & privat'}</span></div>
       </footer>
 
+      {cardsOpen && activeTab && <Suspense fallback={null}><FlashcardReview markdown={activeTab.content} title={activeTab.title} onSave={(markdown) => updateContentFor(activeTab.path, markdown)} onClose={() => setCardsOpen(false)} /></Suspense>}
       {historyOpen && (
         <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setHistoryOpen(false) }}>
           <section className="history-dialog" role="dialog" aria-modal="true" aria-labelledby="history-title">

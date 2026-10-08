@@ -20,7 +20,7 @@ export type PaperStyle = 'blank' | 'dots' | 'squares' | 'grid' | 'lines' | 'mill
 export type UiLanguagePreference = 'system' | 'de' | 'en'
 
 export type SpellingLanguage = 'de' | 'en'
-export type DetectedTextLanguage = SpellingLanguage | 'mixed' | 'unknown'
+export type DetectedTextLanguage = SpellingLanguage | 'fr' | 'mixed' | 'unknown'
 
 export type SpellingFilterManifest = {
   format: 'fanotes-spelling-bloom-v2'
@@ -103,6 +103,14 @@ export type AppSettings = {
   syncAutomatic: boolean
   /** Display name of this device in the account's device list. */
   syncDeviceName: string
+  /** Newline-separated vault folders that stay on this device. */
+  syncExcludedFolders: string
+  /** Upload the personal handwriting model as its own encrypted file. */
+  syncHandwritingModel: boolean
+  /** Also synchronise the local note-history folder. */
+  syncNoteHistory: boolean
+  /** Show the invisible handwriting transcript in the margin. */
+  marginTranscript: boolean
   showWordCount: boolean
   showOutline: boolean
   defaultFolder: string
@@ -122,7 +130,7 @@ export type AppSettings = {
   shapeSnapSensitivity: number
   recognitionMode: 'auto' | 'math' | 'text'
   lastRecognitionMode: 'math' | 'text'
-  recognitionLanguage: 'de' | 'en'
+  recognitionLanguage: 'de' | 'en' | 'fr'
   autoOpenConversion: boolean
   keepDrawingAfterInsert: boolean
   autoCheckUpdates: boolean
@@ -300,6 +308,8 @@ export type SearchHit = {
   drawingId?: string
   /** Note that already owns this drawing. Opening the hit must not retarget another note. */
   notePath?: string
+  /** 0–1 page position when the hit is handwriting. */
+  inkAnchor?: { y: number }
 }
 
 export type DrawingAsset = {
@@ -490,6 +500,8 @@ export type FaNotesApi = {
     confidence: number
   }>
   writeFile: (relativePath: string, content: string) => Promise<{ modifiedAt: string }>
+  readRecognitionModel?: () => Promise<string | null>
+  writeRecognitionModel?: (content: string) => Promise<{ modifiedAt: string }>
   createNote: (parentPath?: string, preferredName?: string) => Promise<CreateResult>
   createFolder: (parentPath?: string, preferredName?: string) => Promise<CreateResult>
   setFolderColor: (relativePath: string, color: string | null) => Promise<{ color: string | null }>

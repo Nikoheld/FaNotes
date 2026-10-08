@@ -47,6 +47,8 @@ export type FileTreeProps = {
   onAttachBook?: (parentPath: string) => MaybePromise
   onDetachBook?: (parentPath: string) => MaybePromise
   bookFolderPaths?: string[]
+  localOnlyPaths?: string[]
+  onToggleLocalOnly?: (relativePath: string) => void
   onSetFolderColor?: (relativePath: string, color: string | null) => MaybePromise
   onRename: (relativePath: string, nextName: string) => MaybePromise
   onMove: (relativePath: string, destFolder: string) => MaybePromise
@@ -181,6 +183,8 @@ export const FileTree = memo(function FileTree({
   onAttachBook,
   onDetachBook,
   bookFolderPaths = [],
+  localOnlyPaths = [],
+  onToggleLocalOnly,
   onSetFolderColor,
   onRename,
   onMove,
@@ -785,6 +789,20 @@ export const FileTree = memo(function FileTree({
               >
                 <FileText aria-hidden="true" size={15} />
                 Buch hinzufügen
+              </button>
+              )}
+              {onToggleLocalOnly && contextMenu.entry.kind === 'folder' && (
+              <button
+                onClick={() => {
+                  const path = contextMenu.entry.relativePath
+                  setContextMenu(null)
+                  onToggleLocalOnly(path)
+                }}
+                role="menuitem"
+                type="button"
+              >
+                <Folder aria-hidden="true" size={15} />
+                {localOnlyPaths.includes(contextMenu.entry.relativePath) ? 'Wieder synchronisieren' : 'Nur auf diesem Gerät'}
               </button>
               )}
               {onDetachBook && bookFolderPaths.includes(contextMenu.entry.relativePath) && (

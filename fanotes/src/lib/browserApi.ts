@@ -3,6 +3,7 @@ import { DEFAULT_SETTINGS } from '../defaults'
 import { getUiLanguage } from '../i18n'
 import type { AppSettings, BootstrapData, DrawingLibraryDocument, FaNotesApi, PaperStyle, ServerBackupState, UpdateState, VaultEntry, WorksheetDocument } from '../types'
 import { companionNotePath, emptyFamdPayload, parseFamd, serializeFamd } from './famd'
+import { inkAnchorForQuery } from './searchInkAnchor'
 import { parseNoteBackups, type NoteBackupSnapshot } from './noteBackup'
 import { parseNoteLinks, type NoteLinkRecord } from './noteLink'
 import { parseSubjectBooks, type SubjectBookRecord } from './subjectBook'
@@ -378,6 +379,7 @@ export function createBrowserApi(): FaNotesApi {
       if (noteStems.has(key)) hiddenFamd.add(record.path)
     })
     files.forEach((record) => {
+      if (record.path === '.fanotes/recognition-model.json') return
       if (hiddenFamd.has(record.path)) return
       const extension = fileName(record.path).split('.').pop()?.toLocaleLowerCase('en-US') || 'md'
       const entry: VaultEntry = { name: fileName(record.path), relativePath: record.path, kind: 'file', extension, modifiedAt: record.modifiedAt, size: textBytes(record.content) }
@@ -723,6 +725,20 @@ export function createBrowserApi(): FaNotesApi {
       if (!blob) throw new Error('Die lokale Bild- oder PDF-Datei wurde nicht gefunden.')
       return new Uint8Array(await blob.arrayBuffer())
     },
+    readRecognitionModel: async () => {
+      await ready
+      return files.get('.fanotes/recognition-model.json')?.content ?? null
+    },
+    writeRecognitionModel: async (content) => {
+      await ready
+      if (typeof content !== 'string' || textBytes(content) > 20_000_000) throw new Error('Das Handschriftmodell ist ungültig oder zu groß.')
+      const path = '.fanotes/recognition-model.json'
+      const record = { path, content, modifiedAt: new Date().toISOString() }
+      await write('files', (store) => { store.put(record) })
+      files.set(path, record)
+      cachedTree = null
+      return { modifiedAt: record.modifiedAt }
+    },
     writeFile: async (rawPath, content) => {
       await ready
       const path = normalizePath(rawPath)
@@ -1003,7 +1019,8 @@ export function createBrowserApi(): FaNotesApi {
         const excerpt = index >= 0
           ? record.content.slice(Math.max(0, index - 60), Math.min(record.content.length, index + needle.length + 120)).replace(/[#*_`]/gu, '')
           : `Dateiname · ${record.path}`
-        return [{ relativePath: record.path, title: stem(fileName(record.path)), excerpt, matches: lower.split(needle).length - 1, kind: 'note' as const }]
+        const inkAnchor = inkAnchorForQuery(record.content, query)
+        return [{ relativePath: record.path, title: stem(fileName(record.path)), excerpt, matches: lower.split(needle).length - 1, kind: 'note' as const, ...(inkAnchor ? { inkAnchor } : {}) }]
       })
       const drawingHits = [...drawings.values()].flatMap((drawing) => {
         try {
@@ -1011,7 +1028,8 @@ export function createBrowserApi(): FaNotesApi {
           const transcript = typeof parsed.searchTranscript === 'string' ? parsed.searchTranscript : ''
           const haystack = `${drawing.title}\n${transcript}`
           if (!haystack.toLocaleLowerCase('de').includes(needle)) return []
-          return [{ relativePath: drawing.dataRelativePath, title: drawing.title, excerpt: haystack.slice(0, 180), matches: 1, kind: 'drawing' as const, drawingId: drawing.id }]
+          const inkAnchor = inkAnchorForQuery(transcript, query)
+          return [{ relativePath: drawing.dataRelativePath, title: drawing.title, excerpt: haystack.slice(0, 180), matches: 1, kind: 'drawing' as const, drawingId: drawing.id, ...(inkAnchor ? { inkAnchor } : {}) }]
         } catch { return [] }
       })
       const pdfHits = [...assets.keys()].flatMap((path) => {
