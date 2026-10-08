@@ -136,6 +136,8 @@ assert.match(searchHandler, /const notePath = drawingOwners\.get\(id\)/u)
 assert.match(app, /activeWorksheetMarkerKey/u)
 assert.match(app, /const restored = stripFamdPayload\(raw\)/u)
 assert.match(app, /pendingHistoryInkRef/u)
+assert.match(app, /pageStatsRef\.current\.delete\(path\)/u)
+assert.match(app, /drawingLoadRequestRef\.current/u)
 
 const os = require('node:os')
 const fsp = require('node:fs/promises')

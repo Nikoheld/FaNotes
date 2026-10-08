@@ -2041,15 +2041,36 @@ export default function App({ startupBootstrap }: AppProps) {
     for (const path of touched) {
       const tab = tabsRef.current.find((candidate) => candidate.path === path)
       if (!tab || tab.content !== tab.savedContent || pendingWrites.current.has(path)) continue
+      const famdPath = companionNotePath(path, '.famd')
+      const famdTouched = written.includes(famdPath) || (isPdfNotePath(path) && written.includes(path))
       try {
         const fresh = await readNoteTab(path)
+        const open = tabsRef.current.find((candidate) => candidate.path === path)
+        if (!open || open.content !== open.savedContent || pendingWrites.current.has(path)) continue
         setTabs((current) => current.map((candidate) => candidate.path === path && candidate.content === candidate.savedContent ? { ...candidate, content: fresh.content, savedContent: fresh.content } : candidate))
         setTagIndex((current) => ({ ...current, [path]: parseNoteTags(fresh.content) }))
+        if (!famdTouched || (activePathRef.current === path && drawingDirtyRef.current)) continue
+        // The open session was loaded from the previous companion. Keeping it
+        // would write those statistics and that ink back over the other device.
+        pageStatsRef.current.delete(path)
+        pageStatsUnreadableRef.current.delete(path)
+        await preparePageStats(path)
+        if (activePathRef.current === path && !pageStatsUnreadableRef.current.has(path)) {
+          activatePageStats(path, fresh.content)
+        }
+        if (activePathRef.current !== path || drawingDirtyRef.current) continue
+        const requestId = ++drawingLoadRequestRef.current
+        const document = await readNoteInk(path, fresh.content)
+        if (requestId !== drawingLoadRequestRef.current || activePathRef.current !== path || drawingDirtyRef.current) continue
+        setDrawingSession({
+          ...overlaySessionAfterInkReady(drawingOpenRef.current, drawingSessionFromLoad(requestId, document)),
+          path,
+        })
       } catch {
         // The note vanished between the change list and the read; the next tree refresh reflects that.
       }
     }
-  }, [readNoteTab, refreshTree])
+  }, [activatePageStats, preparePageStats, readNoteTab, refreshTree])
 
   const syncDepsRef = useRef({ isSyncPathBusy, applyRemoteChanges, toast })
   syncDepsRef.current = { isSyncPathBusy, applyRemoteChanges, toast }
