@@ -23,6 +23,7 @@ mathe mathematik informatik physik chemie biologie wirtschaft formel gleichung a
 läuft läufts funktioniert erkannt verbessert verbessern korrekt korrektur modell zeichnen falsch lokal automatisch direkt
 äusserst ausserdem ändern ähnlich öffnen öffentlich grösste grösser grünen führen zurück übermorgen übung
 heiss heissen weiss weisst gross grossartig strasse strassen fuss grüsse süss schön schöner schönes
+handschrift
 `.trim().split(/\s+/)
 
 export const GERMAN_COMMON_WORDS = new Set(words.map((word) => word.toLocaleLowerCase('de')))

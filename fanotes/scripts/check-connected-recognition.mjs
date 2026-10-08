@@ -291,8 +291,8 @@ try {
   )
   if (process.env.FANOTES_RECOGNITION_DEBUG === '1') console.log(JSON.stringify(result.zeroShotMath, null, 2))
   assert.deepEqual(result.zeroShotMath.map((entry) => entry.recognized), result.zeroShotMath.map((entry) => [entry.expected]), `Das Standardmodell muss Ziffern und Mathematiksymbole ohne Training lesen: ${JSON.stringify(result.zeroShotMath)}`)
-  assert.equal(result.personalMathBenchmark.suppliedSamples, 216)
-  assert.equal(result.personalMathBenchmark.retainedSamples, 216)
+  assert.equal(result.personalMathBenchmark.suppliedSamples, 228)
+  assert.equal(result.personalMathBenchmark.retainedSamples, 228)
   assert.deepEqual(
     result.personalMathBenchmark.holdouts.map((entry) => entry.recognized),
     result.personalMathBenchmark.holdouts.map((entry) => [entry.expected]),
