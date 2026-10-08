@@ -41,7 +41,7 @@ export const ADDON_PERMISSION_LABELS: Record<AddonPermission, { title: string; d
   clipboard: { title: 'Zwischenablage', detail: 'Schreibt Text in die Zwischenablage.', risk: 'low' },
   network: { title: 'Internet', detail: 'Lädt Daten von den im Manifest aufgeführten Hosts.', risk: 'high' },
   ui: { title: 'Oberfläche', detail: 'Zeigt Hinweise, Dialoge, Panels und Statusleisten-Einträge.', risk: 'low' },
-  commands: { title: 'Befehle', detail: 'Registriert Befehle in der Befehlspalette und führt FaNotes-Befehle aus.', risk: 'low' },
+  commands: { title: 'Befehle', detail: 'Registriert eigene Palettenbefehle und darf ungefährliche FaNotes-Befehle ausführen. Import, Export, Sync, Einstellungen und Beenden bleiben gesperrt.', risk: 'medium' },
   storage: { title: 'Eigener Speicher', detail: 'Speichert bis zu 1 MB eigene Daten getrennt vom Vault.', risk: 'low' },
 }
 

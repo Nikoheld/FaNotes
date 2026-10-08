@@ -81,6 +81,27 @@ export const safeSettingsView = (settings: AppSettings): Record<string, unknown>
   return view
 }
 
+/** Built-in actions an add-on must not trigger, even with the commands permission. */
+export const ADDON_BLOCKED_APP_COMMANDS = new Set([
+  'import-pdf-note',
+  'onenote-import',
+  'worksheet',
+  'export-pdf',
+  'history',
+  'settings',
+  'sync-now',
+  'sync-settings',
+  'addon-store',
+  'reveal',
+  'bug-report',
+  'quit',
+  'ai-assistant',
+])
+
+export const addonMayRunAppCommand = (id: string) => (
+  typeof id === 'string' && id.length > 0 && id.length <= 80 && !id.startsWith('addon:') && !ADDON_BLOCKED_APP_COMMANDS.has(id)
+)
+
 export const stripTreeForAddons = (entries: VaultEntry[]): unknown => entries.map((entry) => ({
   name: entry.name,
   path: entry.relativePath,
@@ -152,6 +173,7 @@ export const createAppAddonBridge = (deps: AppAddonDeps): AddonHostBridge => ({
   },
   commands: {
     execute: async (id, _args) => {
+      if (!addonMayRunAppCommand(id)) throw new AddonApiError('E_PERMISSION', `Der Befehl "${id}" darf von Add-ons nicht ausgeführt werden.`)
       const action = deps.paletteActions().find((candidate) => candidate.id === id)
       if (!action) throw new AddonApiError('E_NO_COMMAND', `Unbekannter FaNotes-Befehl "${id}".`)
       action.run()

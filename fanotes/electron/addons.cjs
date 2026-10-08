@@ -8,8 +8,10 @@
 // <userData>/addons/<id>/ with an addons.json manifest list. Nothing here
 // touches the vault; a broken add-on file can never corrupt a note.
 
+const dns = require('node:dns')
 const fsp = require('node:fs/promises')
 const https = require('node:https')
+const net = require('node:net')
 const path = require('node:path')
 
 const ALLOWED_HOSTS = new Set(['raw.githubusercontent.com', 'api.github.com', 'github.com', 'objects.githubusercontent.com'])
@@ -87,14 +89,54 @@ const NET_TIMEOUT_MS = 20_000
 const NET_ALLOWED_METHODS = new Set(['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD'])
 const NET_RESPONSE_HEADERS = ['content-type', 'content-length', 'cache-control', 'etag', 'last-modified', 'x-ratelimit-remaining', 'retry-after', 'location']
 
+const isPrivateIPv4 = (address) => {
+  const parts = address.split('.').map(Number)
+  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return true
+  const [a, b] = parts
+  return a === 0 || a === 10 || a === 127 || a >= 224 || (a === 100 && b >= 64 && b <= 127) || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168)
+}
+
+/** True for loopback, private, link-local, multicast and non-global addresses. */
+const isPrivateAddress = (address) => {
+  const value = String(address || '').toLowerCase().split('%', 1)[0]
+  if (value.startsWith('::ffff:')) return isPrivateAddress(value.slice('::ffff:'.length))
+  if (net.isIP(value) === 4) return isPrivateIPv4(value)
+  if (net.isIP(value) !== 6) return true
+  if (value === '::' || value === '::1') return true
+  const first = Number.parseInt(value.split(':', 1)[0] || '0', 16)
+  return !(first >= 0x2000 && first <= 0x3fff)
+}
+
 const isPrivateHost = (hostname) => {
-  const host = hostname.toLowerCase()
-  if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local') || host.endsWith('.internal')) return true
-  if (/^\d{1,3}(?:\.\d{1,3}){3}$/u.test(host)) {
-    const [a, b] = host.split('.').map(Number)
-    return a === 10 || a === 127 || a === 0 || (a === 192 && b === 168) || (a === 172 && b >= 16 && b <= 31) || (a === 169 && b === 254) || a >= 224
-  }
+  const host = hostname.toLowerCase().replace(/\.$/u, '')
+  if (!host || host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local') || host.endsWith('.internal')) return true
+  if (/^\d+$/u.test(host)) return true
+  if (net.isIP(host)) return isPrivateAddress(host)
   return host.includes(':')
+}
+
+const resolvePublicAddresses = (hostname) => new Promise((resolveAddresses, rejectAddresses) => {
+  dns.lookup(hostname, { all: true, verbatim: true }, (error, addresses) => {
+    if (error) rejectAddresses(error)
+    else resolveAddresses(Array.isArray(addresses) ? addresses : [])
+  })
+})
+
+const publicAddressesFor = async (hostname) => {
+  if (net.isIP(hostname)) {
+    if (isPrivateAddress(hostname)) throw new Error('Add-ons dürfen keine privaten oder lokalen Adressen aufrufen.')
+    return [{ address: hostname, family: net.isIP(hostname) }]
+  }
+  let addresses
+  try {
+    addresses = await resolvePublicAddresses(hostname)
+  } catch {
+    throw new Error('Der Add-on-Host konnte nicht aufgelöst werden.')
+  }
+  if (!addresses.length || addresses.some((entry) => isPrivateAddress(entry.address))) {
+    throw new Error('Add-ons dürfen keine privaten oder lokalen Adressen aufrufen.')
+  }
+  return addresses
 }
 
 /**
@@ -124,9 +166,19 @@ const fetchForAddon = (rawUrl, rawInit, redirectsLeft = MAX_REDIRECTS) => new Pr
       headers[key] = value.slice(0, 2000)
     }
   }
-  const body = typeof init.body === 'string' && method !== 'GET' && method !== 'HEAD' ? init.body : undefined
+  const body = typeof init.body === 'string' && method !== 'GET' && method !== 'HEAD' ? init.body.slice(0, 2_000_000) : undefined
   if (body !== undefined) headers['Content-Length'] = String(Buffer.byteLength(body, 'utf8'))
-  const request = https.request(url, { method, headers, timeout: NET_TIMEOUT_MS }, (response) => {
+  publicAddressesFor(url.hostname).then((pinned) => {
+  const request = https.request(url, {
+    method,
+    headers,
+    timeout: NET_TIMEOUT_MS,
+    lookup: (_hostname, options, callback) => {
+      const done = typeof options === 'function' ? options : callback
+      if (typeof options === 'object' && options?.all) done(null, pinned)
+      else done(null, pinned[0].address, pinned[0].family)
+    },
+  }, (response) => {
     const status = response.statusCode ?? 0
     if (status >= 300 && status < 400 && response.headers.location && redirectsLeft > 0 && (method === 'GET' || method === 'HEAD')) {
       response.resume()
@@ -164,6 +216,7 @@ const fetchForAddon = (rawUrl, rawInit, redirectsLeft = MAX_REDIRECTS) => new Pr
   request.on('error', reject)
   if (body !== undefined) request.write(body)
   request.end()
+  }).catch(reject)
 })
 
 const createAddonStore = (rootDir) => {
@@ -291,4 +344,4 @@ const registerAddonIpc = (handle, store) => {
   handle(ADDON_IPC.netFetch, (_event, url, init) => fetchForAddon(url, init))
 }
 
-module.exports = { ADDON_IPC, ALLOWED_HOSTS, assertAllowedUrl, createAddonStore, fetchAddonText, fetchForAddon, isPrivateHost, registerAddonIpc }
+module.exports = { ADDON_IPC, ALLOWED_HOSTS, assertAllowedUrl, createAddonStore, fetchAddonText, fetchForAddon, isPrivateAddress, isPrivateHost, registerAddonIpc }
