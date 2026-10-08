@@ -730,7 +730,13 @@ const fuseRasterSequence = (
     // closer trained form can override one wrong line-model character. Only
     // fully connected crops with a usable line prior receive the softer
     // quarter weight because every artificial cut contains connector ink.
-    const personalWeight = bestCost <= 0.08
+    // A very low best cost on that same artificial cut is not independent
+    // proof of the winning class: a cursive stem often matches `I` more
+    // closely than the writer's own `t` or `e`. Keeping the 1.75 lock there
+    // lets a two-edit neighbour (`Inst`) replace the prior, and lets an
+    // untrained lookalike (`Miet`) replace the personally trained word when
+    // the line model supplied no letters at all.
+    const personalWeight = bestCost <= 0.08 && !fullyConnected
       ? 1.75
       : neural.length === 0 || !fullyConnected ? 0.50 : 0.25
     const aligned = alignedNeural[index]
