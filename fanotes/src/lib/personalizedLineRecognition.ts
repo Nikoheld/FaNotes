@@ -8,6 +8,7 @@ import type { NeuralTextRecognitionResult } from './neuralTextRecognition'
 import { ENGLISH_COMMON_WORDS } from '../../../src/data/englishLanguage'
 import { GERMAN_COMMON_WORDS } from '../../../src/data/germanLanguage'
 import { normalizeGermanSharpS } from '../../../src/lib/orthography'
+import { decideLetterSpans, spanSupportsCharacter } from '../../../src/lib/letterSegmentation'
 import { isExtendedNeuralContextWord, wordDistance } from './neuralWordContext'
 import {
   fusePersonalizedTextRecognition,
@@ -1033,6 +1034,9 @@ export const recognizePersonalizedTextLine = async (
           const char = rasterCharacters[visibleIndex++]
           const alternative = token.alternatives.find((entry) => entry.char === char)
           const label = resources.labels.find((entry) => entry.char === char)
+          // A line string may confirm a span. It may not invent a letter the
+          // span does not already support, and it may not change the cut.
+          if (!char || !spanSupportsCharacter(token, char)) return token
           if ((alternative?.personalSupport ?? 0) > 0) mappedPersonalCharacters += 1
           const previousAlternative = {
             labelId: token.labelId,
@@ -1054,10 +1058,12 @@ export const recognizePersonalizedTextLine = async (
             name: alternative?.name ?? label?.name ?? char,
             latex: label?.latex ?? char,
             confidence: Math.max(token.confidence, alternative?.confidence ?? 0),
-            baseConfidence: alternative?.baseConfidence ?? 0,
-            personalSupport: alternative?.personalSupport ?? 0,
-            personalConfidence: alternative?.personalConfidence ?? 0,
+            baseConfidence: alternative?.baseConfidence ?? token.baseConfidence ?? 0,
+            personalSupport: alternative?.personalSupport ?? token.personalSupport ?? 0,
+            personalConfidence: alternative?.personalConfidence ?? token.personalConfidence ?? 0,
             visualLabelId: alternative?.labelId ?? label?.id ?? token.visualLabelId,
+            letterStatus: 'labeled' as const,
+            cutConfidence: Math.max(0, Math.min(100, Math.round(token.confidence - (token.alternatives.find((entry) => entry.char !== char)?.confidence ?? 0)))),
             alternatives,
             context: {
               word: rasterText,
@@ -1172,7 +1178,7 @@ export const recognizePersonalizedTextLine = async (
     }
   }
   return {
-    tokens: selected.tokens,
+    tokens: decideLetterSpans(selected.tokens),
     fusion: selected.fusion,
     ...(includeCandidateScores ? {
       ...(rasterDecision ? { rasterDecision } : {}),

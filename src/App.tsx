@@ -22,7 +22,8 @@ import {
   type RecognitionModel,
   type RecognitionToken,
 } from './lib/recognition'
-import { containsGermanSharpS, isSupportedRecognitionLabel, normalizeGermanSharpS } from './lib/orthography'
+import { decideLetterSpans, reconcileLetterReading } from './lib/letterSegmentation'
+import { isSupportedRecognitionLabel } from './lib/orthography'
 import {
   advanceStableTextPrefix,
   canCarryUncertainTextState,
@@ -466,7 +467,7 @@ const App = () => {
         setRecognitionMode(recognition.mode)
         automaticRecognitionRef.current = recognition
         setAutomaticRecognition(recognition)
-        setRecognitionTokens(recognition.tokens)
+        setRecognitionTokens(recognition.mode === 'text' ? decideLetterSpans(recognition.tokens) : recognition.tokens)
         setMathLayoutAssignments(
           recognition.mode === 'math' ? suggestMathLayoutAssignments(recognition.tokens, mathLayoutExamples) : [],
         )
@@ -532,7 +533,7 @@ const App = () => {
       !testStrokes.length
     ) return
     setIsRecognizing(false)
-    const text = normalizeGermanSharpS(neuralTestResult.text)
+    const text = neuralTestResult.text
       .normalize('NFC')
       .replace(/[ \t]{2,}/gu, ' ')
       .replace(/\s+([,.;:!?])/gu, '$1')
@@ -558,7 +559,7 @@ const App = () => {
     const compactHostText = text.replace(/\s+/gu, '')
     const hardProjectionAllowed = neuralTestResult.exactProjectionSafe &&
       compactHostText.startsWith(confirmedTextPrefix)
-    const textTokens = recognizeExpression(
+    const hintedTokens = recognizeExpression(
       testStrokes,
       recognitionModel,
       labels,
@@ -566,6 +567,21 @@ const App = () => {
       mathLayoutExamples,
       language,
       hardProjectionAllowed ? modeAssessment.visibleCharacters : undefined,
+      hardProjectionAllowed ? text : undefined,
+    )
+    const geometricTokens = hardProjectionAllowed
+      ? recognizeExpression(
+        testStrokes,
+        recognitionModel,
+        labels,
+        'text',
+        mathLayoutExamples,
+        language,
+      )
+      : hintedTokens
+    const textTokens = reconcileLetterReading(
+      geometricTokens,
+      hintedTokens,
       hardProjectionAllowed ? text : undefined,
     )
     const localTokenText = recognizedSentence(textTokens).trim()
@@ -715,10 +731,6 @@ const App = () => {
     event.preventDefault()
     const char = customChar.trim()
     if (!char) return
-    if (containsGermanSharpS(char)) {
-      showToast('FaNotes verwendet Schweizer Rechtschreibung mit „ss“ statt „ß“.', 'error')
-      return
-    }
     const label: LabelDefinition = {
       id: `custom_${createUuid().slice(0, 12)}`,
       char: char.slice(0, 4),
@@ -1299,6 +1311,25 @@ const App = () => {
                       <small>Wortabstände, Brüche, Indizes und Integrationsgrenzen werden gemeinsam analysiert</small>
                     </div>
                   )}
+                  {recognitionMode === 'text' && reviewTokens.length > 0 && (
+                    <div className="letter-span-layer" aria-hidden="true">
+                      {reviewTokens.map((token) => (
+                        <span
+                          key={token.id}
+                          className={token.letterStatus === 'undecidable' ? 'letter-span is-undecidable' : 'letter-span'}
+                          style={{
+                            left: `${token.bbox[0] * 100}%`,
+                            top: `${token.bbox[1] * 100}%`,
+                            width: `${Math.max(token.bbox[2], 0.01) * 100}%`,
+                            height: `${Math.max(token.bbox[3], 0.01) * 100}%`,
+                          }}
+                          title={token.letterStatus === 'undecidable' ? 'nicht entscheidbar' : `${token.char} ${token.confidence}%`}
+                        >
+                          <em>{token.letterStatus === 'undecidable' ? '?' : token.char}</em>
+                        </span>
+                      ))}
+                    </div>
+                  )}
                   <DrawingCanvas
                     ref={testCanvasRef}
                     brushSize={brushSize}
@@ -1376,7 +1407,7 @@ const App = () => {
                           const assignmentValue = assignment ? `${assignment.role}|${assignment.anchorId}` : ''
                           const indexAnchors = reviewTokens.filter((anchor) => anchor.id !== token.id)
                           return (
-                            <div className={learnedTokenIds.has(token.id) ? 'token-row learned' : 'token-row'} key={token.id}>
+                            <div className={`token-row${learnedTokenIds.has(token.id) ? ' learned' : ''}${token.letterStatus === 'undecidable' ? ' is-undecidable' : ''}`} key={token.id}>
                               <span className="token-index">{index + 1}</span>
                               <img src={token.imageData} alt={`Segment ${index + 1}`} />
                               <div className="token-choice">
@@ -1417,9 +1448,10 @@ const App = () => {
                                   </select>
                                 )}
                                 <div className="confidence-line">
-                                  <span><i style={{ width: `${token.confidence}%` }} /></span>
-                                  <em>{learnedTokenIds.has(token.id) ? 'Form gelernt' : `${token.confidence}%`}</em>
+                                  <span><i style={{ width: `${token.letterStatus === 'undecidable' ? token.cutConfidence ?? 0 : token.confidence}%` }} /></span>
+                                  <em>{token.letterStatus === 'undecidable' ? 'nicht entscheidbar' : learnedTokenIds.has(token.id) ? 'Form gelernt' : `${token.confidence}%`}</em>
                                 </div>
+                                <p className="letter-span-meta">Spanne {token.bbox[0].toFixed(2)}–{(token.bbox[0] + token.bbox[2]).toFixed(2)} · Schnitt {Math.round(token.cutConfidence ?? token.confidence)}%</p>
                               </div>
                             </div>
                           )

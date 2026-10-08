@@ -116,6 +116,7 @@ const german: LabelDefinition[] = [
   ['german_lower_a_umlaut', 'ä', 'Kleines Ä', '\\"a'],
   ['german_lower_o_umlaut', 'ö', 'Kleines Ö', '\\"o'],
   ['german_lower_u_umlaut', 'ü', 'Kleines Ü', '\\"u'],
+  ['german_eszett', 'ß', 'Eszett', 'ß'],
 ].map(([id, char, name, latex]) => ({ id, char, name, latex, category: 'german' as const }))
 
 const greekData = [

@@ -1,0 +1,124 @@
+{
+  "stage": "index slice of a line string after ß → ss",
+  "isolatedWithSample": {
+    "beforeMisleadingSlice": {
+      "precision": 0,
+      "recall": 0,
+      "accuracy": 0
+    },
+    "after": {
+      "precision": 1,
+      "recall": 1,
+      "accuracy": 1
+    },
+    "afterMisleadingLine": {
+      "precision": 1,
+      "recall": 1,
+      "accuracy": 1
+    }
+  },
+  "lineCer": {
+    "reader": "offline geometric recognizer; TrOCR line decoding is unchanged and not re-scored here",
+    "before": 0.494,
+    "after": 0.494,
+    "iamBefore": 0.962,
+    "iamAfter": 0.962
+  },
+  "isolatedCount": 81,
+  "lines": [
+    {
+      "name": "iam-online-a01-001z-01",
+      "truth": "By Trevor Williams. A move",
+      "before": "A__mq",
+      "after": "A__mq",
+      "beforeCer": 0.962,
+      "afterCer": 0.962
+    },
+    {
+      "name": "oc",
+      "truth": "oc",
+      "before": ".7",
+      "after": ".7",
+      "beforeCer": 1,
+      "afterCer": 1
+    },
+    {
+      "name": "li",
+      "truth": "li",
+      "before": "a-",
+      "after": "a-",
+      "beforeCer": 1,
+      "afterCer": 1
+    },
+    {
+      "name": "ab",
+      "truth": "ab",
+      "before": "ab",
+      "after": "ab",
+      "beforeCer": 0,
+      "afterCer": 0
+    },
+    {
+      "name": "Te",
+      "truth": "Te",
+      "before": "Te",
+      "after": "Te",
+      "beforeCer": 0,
+      "afterCer": 0
+    },
+    {
+      "name": "ßa",
+      "truth": "ßa",
+      "before": "ßa",
+      "after": "ßa",
+      "beforeCer": 0,
+      "afterCer": 0
+    }
+  ],
+  "withheldQ": {
+    "predicted": "",
+    "status": [
+      "undecidable"
+    ],
+    "confidence": [
+      26
+    ],
+    "cutConfidence": [
+      0
+    ]
+  },
+  "scribble": {
+    "predicted": "",
+    "status": [
+      "undecidable"
+    ]
+  },
+  "wideWave": {
+    "predicted": "",
+    "status": [
+      "undecidable"
+    ]
+  },
+  "rerecognizedQ": "q",
+  "misses": [
+    {
+      "name": "iam-online-a01-001z-01",
+      "truth": "By Trevor Williams. A move",
+      "recognized": "A__mq",
+      "cer": 0.962
+    },
+    {
+      "name": "oc",
+      "truth": "oc",
+      "recognized": ".7",
+      "cer": 1
+    },
+    {
+      "name": "li",
+      "truth": "li",
+      "recognized": "a-",
+      "cer": 1
+    }
+  ],
+  "misleadingMisses": []
+}
