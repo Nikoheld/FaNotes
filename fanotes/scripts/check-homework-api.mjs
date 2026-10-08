@@ -124,7 +124,8 @@ try {
     assertNoLeak(off.body, document, 'toggle off')
 
     const noSecret = resolveHomeworkApiQuery({ enabled: true, secretOk: false, payload })
-    assert.equal(noSecret.status, 401)
+    assert.equal(noSecret.status, 404)
+    assert.deepEqual(noSecret.body, off.body)
     assertNoLeak(noSecret.body, document, 'missing/wrong secret')
 
     const allowed = resolveHomeworkApiQuery({ enabled: true, secretOk: true, payload })
@@ -273,7 +274,7 @@ try {
       const wrong = await fetch(url, { headers: { Authorization: 'Bearer totally-wrong-secret-value' } })
       const wrongBody = await readJson(wrong)
       console.log('LAUNCH wrong-secret', wrong.status, JSON.stringify(wrongBody))
-      assert.equal(wrong.status, 401)
+      assert.equal(wrong.status, 404)
       assertNoLeak(wrongBody, document, 'launch wrong-secret')
 
       for (const run of [1, 2]) {
