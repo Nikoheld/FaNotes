@@ -144,9 +144,28 @@ export const takeRemoteSupportPending = (session) => {
   return pending
 }
 
+const SECRET_RESULT_KEY = /(?:apikey|api_key|token|secret|password|passwd|credential|cookie|authorization|customcss)/iu
+
+const redactRemoteSupportValue = (value, depth = 0) => {
+  if (depth > 6 || value == null) return value == null ? value : null
+  if (typeof value === 'string') {
+    if (value.startsWith('data:') || value.length > 2_000) return ''
+    return value
+  }
+  if (typeof value === 'number' || typeof value === 'boolean') return value
+  if (Array.isArray(value)) return value.slice(0, 200).map((entry) => redactRemoteSupportValue(entry, depth + 1))
+  if (typeof value !== 'object') return null
+  const redacted = {}
+  for (const [key, entry] of Object.entries(value)) {
+    if (SECRET_RESULT_KEY.test(key) || key === 'snapshot') continue
+    redacted[key] = redactRemoteSupportValue(entry, depth + 1)
+  }
+  return redacted
+}
+
 export const storeRemoteSupportResult = (session, id, result) => {
   if (typeof id !== 'string' || !id) fail(400, 'Die Ergebnis-ID fehlt.')
-  session.results.set(id, { result, at: Date.now() })
+  session.results.set(id, { result: redactRemoteSupportValue(result), at: Date.now() })
   for (const [key, entry] of session.results) {
     if (Date.now() - entry.at > RESULT_TTL_MS) session.results.delete(key)
   }

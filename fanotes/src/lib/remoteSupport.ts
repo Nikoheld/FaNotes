@@ -113,6 +113,35 @@ export const noteTitleFromPath = (path: string) => {
   return base.replace(/\.(md|pdf|famd)$/iu, '')
 }
 
+const PUBLIC_REMOTE_SUPPORT_SETTINGS = new Set([
+  'theme',
+  'uiLanguage',
+  'paperStyle',
+  'penOnly',
+  'recognitionLanguage',
+  'updateChannel',
+  'experimentalRemoteSupport',
+  'experimentalHomeworkApi',
+  'experimentalHandwritingToText',
+  'experimentalNoteBackup',
+  'experimentalSendData',
+  'enhancedMathRecognition',
+  'qwenVisionRecognition',
+])
+
+const SECRET_SETTING_KEY = /(?:key|token|secret|password|passwd|credential|vault|cookie|authorization)/iu
+
+/** Display flags only. API keys, passwords, paths and custom CSS never leave the device. */
+export const publicRemoteSupportSettings = (settings: Record<string, unknown> | null | undefined): Record<string, unknown> => {
+  const view: Record<string, unknown> = {}
+  if (!settings || typeof settings !== 'object') return view
+  for (const [key, value] of Object.entries(settings)) {
+    if (!PUBLIC_REMOTE_SUPPORT_SETTINGS.has(key) || SECRET_SETTING_KEY.test(key)) continue
+    if (typeof value === 'boolean' || (typeof value === 'string' && value.length <= 40 && !value.includes('\n'))) view[key] = value
+  }
+  return view
+}
+
 export const collectVaultTreeNames = (entries: Array<{ name?: string; children?: unknown[] }> | null | undefined): string[] => {
   const names: string[] = []
   const walk = (nodes: unknown) => {
@@ -133,26 +162,28 @@ export const createRemoteSupportLiveState = (
 ): RemoteSupportLiveState => ({
   version: partial.version || '',
   platform: partial.platform || '',
-  settings: { ...(partial.settings || {}) },
+  settings: publicRemoteSupportSettings(partial.settings),
   openNote: partial.openNote || '',
   openPath: partial.openPath || '',
   vaultTree: [...(partial.vaultTree || [])],
   tool: partial.tool || 'pen',
   mode: partial.mode || 'keyboard',
-  snapshot: partial.snapshot || '',
+  // Screen captures can show open notes and typed secrets. Support sees the
+  // live tool state, not a picture of the window.
+  snapshot: '',
   injected: [...(partial.injected || [])],
 })
 
 const copyInspect = (live: RemoteSupportLiveState): RemoteSupportInspectOk['inspect'] => ({
   version: String(live.version || ''),
   platform: String(live.platform || ''),
-  settings: { ...live.settings },
+  settings: publicRemoteSupportSettings(live.settings),
   openNote: String(live.openNote || ''),
   openPath: String(live.openPath || ''),
   vaultTree: [...live.vaultTree],
   tool: String(live.tool || ''),
   mode: String(live.mode || ''),
-  snapshot: String(live.snapshot || ''),
+  snapshot: '',
 })
 
 export const inspectRemoteSupport = (

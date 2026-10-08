@@ -67,6 +67,7 @@ import type { MarkdownEditorHandle, MarkdownFormatAction } from './components/Ma
 import type { WorksheetLayerHandle } from './components/WorksheetLayer'
 import { companionNotePath, emptyFamdPayload, isNoteFileName, isPdfNotePath, parseFamd, readPageStatsFromNote, serializeFamd, stripFamdPayload, writePageStatsIntoNote } from './lib/famd'
 import { createAppAddonBridge, safeSettingsView, type AppAddonDeps } from './lib/addons/appBridge'
+import { sanitizeCustomCss } from './lib/customCss'
 import { addonIndexCache } from './lib/addons/indexCache'
 import { parseAddonSource } from './lib/addons/registry'
 import { addonRuntime } from './lib/addons/runtime'
@@ -3262,14 +3263,8 @@ export default function App({ startupBootstrap }: AppProps) {
     if (!settings.experimentalRemoteSupport || !remoteSupportSession) return
     const session = remoteSupportSession
     const origin = homeworkApiOriginFromLocation(window.fanotes.platform)
-    const fallbackSnapshot = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
     let cancelled = false
     const readLive = async () => {
-      let snapshot = fallbackSnapshot
-      try {
-        const captured = await window.fanotes.captureWindow?.()
-        if (typeof captured === 'string' && captured.length > 8) snapshot = captured
-      } catch { /* keep fallback */ }
       const board = drawingBoardRef.current?.supportSnapshot?.()
       return createRemoteSupportLiveState({
         version: APP_VERSION,
@@ -3280,7 +3275,6 @@ export default function App({ startupBootstrap }: AppProps) {
         vaultTree: collectVaultTreeNames(treeRef.current),
         tool: board?.tool || (drawingOpenRef.current ? 'pen' : 'keyboard'),
         mode: drawingOpenRef.current ? (board?.inkMode || 'ink') : 'keyboard',
-        snapshot,
       })
     }
     const applySideEffect = async (command: RemoteSupportCommand) => {
@@ -4282,7 +4276,7 @@ export default function App({ startupBootstrap }: AppProps) {
   }
   if (bootstrap.onboardingRequired) return (
     <div className={`app-shell first-run-shell theme-${theme} background-${settings.workspaceBackground} ${settings.reduceMotion ? 'no-motion' : ''}`} style={cssVars}>
-      {settings.customCss && <style>{settings.customCss}</style>}
+      {sanitizeCustomCss(settings.customCss) && <style>{sanitizeCustomCss(settings.customCss)}</style>}
       <Suspense fallback={<div className="fatal-screen"><section className="fatal-card"><LoaderCircle className="spin" color="var(--accent)" /><h1>Fächerauswahl wird geladen …</h1></section></div>}>
         <FirstRunOnboarding subjects={bootstrap.starterSubjects} onComplete={completeOnboarding} />
       </Suspense>
@@ -4291,7 +4285,7 @@ export default function App({ startupBootstrap }: AppProps) {
 
   return (
     <div className={`app-shell theme-${theme} background-${settings.workspaceBackground} ${focusMode ? 'focus-mode' : ''} ${settings.compactMode ? 'compact' : ''} ${settings.reduceMotion ? 'no-motion' : ''} ${settings.glassEffects ? 'with-glass' : 'no-glass'}`} style={cssVars}>
-      {settings.customCss && <style>{settings.customCss}</style>}
+      {sanitizeCustomCss(settings.customCss) && <style>{sanitizeCustomCss(settings.customCss)}</style>}
       <nav className="ribbon" aria-label="Hauptnavigation">
         <button type="button" className={!searchOpen && !overviewOpen && !homeworkOpen && !calendarOpen && !lmStudioOpen && !glyphenWerkOpen ? 'active' : ''} title="Dateien" data-tooltip="Notizen" aria-label="Notizen" onClick={showFiles}><Files size={19} /></button>
         <button type="button" className={searchOpen ? 'active' : ''} title="Im Vault suchen (Strg+Umschalt+F)" data-tooltip="Suchen · Strg ⇧ F" aria-label="Im gesamten Vault suchen" onClick={() => { setSearchOpen(true); setSidebarVisible(true) }}><Search size={19} /></button>

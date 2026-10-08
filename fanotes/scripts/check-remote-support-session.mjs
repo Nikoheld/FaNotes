@@ -43,7 +43,14 @@ const secretTitle = 'Oberstufenklausur'
 const liveFor = () => createRemoteSupportLiveState({
   version: '2026.8.44',
   platform: 'linux',
-  settings: { theme: 'dark', experimentalRemoteSupport: true, experimentalHomeworkApi: false },
+  settings: {
+    theme: 'dark',
+    experimentalRemoteSupport: true,
+    experimentalHomeworkApi: false,
+    openAiApiKey: 'sk-live-secret',
+    homeworkApiSecret: 'homework-secret-value',
+    customCss: 'body{background:url(https://evil.example)}',
+  },
   openNote: 'Willkommen',
   openPath: 'Willkommen.md',
   vaultTree: ['Eingang', secretNote, secretTitle],
@@ -81,12 +88,16 @@ const runOnce = () => {
   assert.equal(inspect.inspect.version, '2026.8.44')
   assert.equal(inspect.inspect.platform, 'linux')
   assert.ok(inspect.inspect.settings.experimentalRemoteSupport)
+  assert.equal(inspect.inspect.settings.openAiApiKey, undefined)
+  assert.equal(inspect.inspect.settings.homeworkApiSecret, undefined)
+  assert.equal(JSON.stringify(inspect).includes('sk-live-secret'), false)
+  assert.equal(JSON.stringify(inspect).includes('homework-secret-value'), false)
   assert.equal(inspect.inspect.openNote, 'Willkommen')
   assert.equal(inspect.inspect.openPath, 'Willkommen.md')
   assert.deepEqual(inspect.inspect.vaultTree, live.vaultTree)
   assert.equal(inspect.inspect.tool, 'pen')
   assert.equal(inspect.inspect.mode, 'keyboard')
-  assert.ok(inspect.inspect.snapshot.length > 0)
+  assert.equal(inspect.inspect.snapshot, '')
 
   const opened = driveRemoteSupport(session, true, session.token, { kind: 'open-note', path: `Faecher/${secretNote}` }, live)
   assert.equal(opened.ok, true)
