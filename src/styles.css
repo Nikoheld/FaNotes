@@ -1,21 +1,21 @@
 :root {
-  font-family: "Avenir Next", Avenir, "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
-  color: #18312f;
-  background: #f3f1ea;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  color: #37352f;
+  background: #f7f6f3;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
-  --ink: #18312f;
-  --ink-soft: #61706d;
-  --green: #173f3b;
-  --green-2: #245c54;
-  --mint: #b9d9c9;
-  --mint-pale: #e7f1eb;
-  --cream: #f3f1ea;
-  --paper: #fffefa;
-  --line: #deded6;
-  --peach: #f1bf9d;
-  --danger: #a64f43;
-  --shadow: 0 18px 50px rgba(41, 57, 53, 0.08);
+  --ink: #37352f;
+  --ink-soft: #5e5c57;
+  --green: #202020;
+  --green-2: #37352f;
+  --mint: #e8e7e4;
+  --mint-pale: #f7f6f3;
+  --cream: #f7f6f3;
+  --paper: #ffffff;
+  --line: #e6e5e2;
+  --peach: #e3e2de;
+  --danger: #c03543;
+  --shadow: 0 18px 50px rgba(15, 15, 15, 0.08);
 }
 
 * {
@@ -32,9 +32,7 @@ body {
   min-width: 320px;
   min-height: 100vh;
   margin: 0;
-  background:
-    radial-gradient(circle at 78% 0%, rgba(199, 221, 208, 0.18), transparent 30%),
-    var(--cream);
+  background: var(--cream);
 }
 
 button,

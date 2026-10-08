@@ -1,87 +1,87 @@
 'use strict'
 
 const REQUIRED_STARTER_FOLDERS = Object.freeze([
-  Object.freeze({ name: 'Eingang', color: '#8b7cff' }),
+  Object.freeze({ name: 'Eingang', color: '#6b7280' }),
 ])
 
 const REQUIRED_STARTER_FOLDERS_EN = Object.freeze([
-  Object.freeze({ name: 'Inbox', color: '#8b7cff' }),
+  Object.freeze({ name: 'Inbox', color: '#6b7280' }),
 ])
 
 const STARTER_SUBJECTS = Object.freeze([
-  Object.freeze({ name: 'Mathematik', color: '#6f8cff' }),
-  Object.freeze({ name: 'AMAT', color: '#9a7cff' }),
-  Object.freeze({ name: 'Deutsch', color: '#ef7aa8' }),
-  Object.freeze({ name: 'Englisch', color: '#45c9b7' }),
-  Object.freeze({ name: 'Französisch', color: '#3d8be0' }),
-  Object.freeze({ name: 'Physik', color: '#b878eb' }),
-  Object.freeze({ name: 'Chemie', color: '#f09a5d' }),
-  Object.freeze({ name: 'Biologie', color: '#55cfa8' }),
-  Object.freeze({ name: 'Geschichte', color: '#d4b54c' }),
-  Object.freeze({ name: 'Informatik', color: '#4f9df8' }),
-  Object.freeze({ name: 'Wirtschaft', color: '#e58a62' }),
+  Object.freeze({ name: 'Mathematik', color: '#2a6f97' }),
+  Object.freeze({ name: 'AMAT', color: '#9065b0' }),
+  Object.freeze({ name: 'Deutsch', color: '#c4554d' }),
+  Object.freeze({ name: 'Englisch', color: '#0f7b6c' }),
+  Object.freeze({ name: 'Französisch', color: '#1d5f86' }),
+  Object.freeze({ name: 'Physik', color: '#7c6a9a' }),
+  Object.freeze({ name: 'Chemie', color: '#d9730d' }),
+  Object.freeze({ name: 'Biologie', color: '#448361' }),
+  Object.freeze({ name: 'Geschichte', color: '#ba9b4a' }),
+  Object.freeze({ name: 'Informatik', color: '#337ea9' }),
+  Object.freeze({ name: 'Wirtschaft', color: '#c47d4e' }),
 ])
 
 const STARTER_SUBJECTS_EN = Object.freeze([
-  Object.freeze({ name: 'Mathematics', color: '#6f8cff' }),
-  Object.freeze({ name: 'AMAT', color: '#9a7cff' }),
-  Object.freeze({ name: 'German', color: '#ef7aa8' }),
-  Object.freeze({ name: 'English', color: '#45c9b7' }),
-  Object.freeze({ name: 'French', color: '#3d8be0' }),
-  Object.freeze({ name: 'Physics', color: '#b878eb' }),
-  Object.freeze({ name: 'Chemistry', color: '#f09a5d' }),
-  Object.freeze({ name: 'Biology', color: '#55cfa8' }),
-  Object.freeze({ name: 'History', color: '#d4b54c' }),
-  Object.freeze({ name: 'Computer Science', color: '#4f9df8' }),
-  Object.freeze({ name: 'Economics', color: '#e58a62' }),
+  Object.freeze({ name: 'Mathematics', color: '#2a6f97' }),
+  Object.freeze({ name: 'AMAT', color: '#9065b0' }),
+  Object.freeze({ name: 'German', color: '#c4554d' }),
+  Object.freeze({ name: 'English', color: '#0f7b6c' }),
+  Object.freeze({ name: 'French', color: '#1d5f86' }),
+  Object.freeze({ name: 'Physics', color: '#7c6a9a' }),
+  Object.freeze({ name: 'Chemistry', color: '#d9730d' }),
+  Object.freeze({ name: 'Biology', color: '#448361' }),
+  Object.freeze({ name: 'History', color: '#ba9b4a' }),
+  Object.freeze({ name: 'Computer Science', color: '#337ea9' }),
+  Object.freeze({ name: 'Economics', color: '#c47d4e' }),
 ])
 
 const STARTER_UNIVERSITY = Object.freeze([
-  Object.freeze({ name: 'Vorlesungen', color: '#6f8cff' }),
-  Object.freeze({ name: 'Seminare', color: '#9a7cff' }),
-  Object.freeze({ name: 'Forschung', color: '#45c9b7' }),
-  Object.freeze({ name: 'Prüfungen', color: '#ef7aa8' }),
-  Object.freeze({ name: 'Literatur', color: '#d4b54c' }),
+  Object.freeze({ name: 'Vorlesungen', color: '#2a6f97' }),
+  Object.freeze({ name: 'Seminare', color: '#9065b0' }),
+  Object.freeze({ name: 'Forschung', color: '#0f7b6c' }),
+  Object.freeze({ name: 'Prüfungen', color: '#c4554d' }),
+  Object.freeze({ name: 'Literatur', color: '#ba9b4a' }),
 ])
 
 const STARTER_UNIVERSITY_EN = Object.freeze([
-  Object.freeze({ name: 'Lectures', color: '#6f8cff' }),
-  Object.freeze({ name: 'Seminars', color: '#9a7cff' }),
-  Object.freeze({ name: 'Research', color: '#45c9b7' }),
-  Object.freeze({ name: 'Exams', color: '#ef7aa8' }),
-  Object.freeze({ name: 'Reading', color: '#d4b54c' }),
+  Object.freeze({ name: 'Lectures', color: '#2a6f97' }),
+  Object.freeze({ name: 'Seminars', color: '#9065b0' }),
+  Object.freeze({ name: 'Research', color: '#0f7b6c' }),
+  Object.freeze({ name: 'Exams', color: '#c4554d' }),
+  Object.freeze({ name: 'Reading', color: '#ba9b4a' }),
 ])
 
 const STARTER_PRIVATE = Object.freeze([
-  Object.freeze({ name: 'Persönlich', color: '#ef7aa8' }),
-  Object.freeze({ name: 'Ideen', color: '#9a7cff' }),
-  Object.freeze({ name: 'Projekte', color: '#4f9df8' }),
-  Object.freeze({ name: 'Tagebuch', color: '#55cfa8' }),
-  Object.freeze({ name: 'Dokumente', color: '#d4b54c' }),
+  Object.freeze({ name: 'Persönlich', color: '#c4554d' }),
+  Object.freeze({ name: 'Ideen', color: '#9065b0' }),
+  Object.freeze({ name: 'Projekte', color: '#337ea9' }),
+  Object.freeze({ name: 'Tagebuch', color: '#448361' }),
+  Object.freeze({ name: 'Dokumente', color: '#ba9b4a' }),
 ])
 
 const STARTER_PRIVATE_EN = Object.freeze([
-  Object.freeze({ name: 'Personal', color: '#ef7aa8' }),
-  Object.freeze({ name: 'Ideas', color: '#9a7cff' }),
-  Object.freeze({ name: 'Projects', color: '#4f9df8' }),
-  Object.freeze({ name: 'Journal', color: '#55cfa8' }),
-  Object.freeze({ name: 'Documents', color: '#d4b54c' }),
+  Object.freeze({ name: 'Personal', color: '#c4554d' }),
+  Object.freeze({ name: 'Ideas', color: '#9065b0' }),
+  Object.freeze({ name: 'Projects', color: '#337ea9' }),
+  Object.freeze({ name: 'Journal', color: '#448361' }),
+  Object.freeze({ name: 'Documents', color: '#ba9b4a' }),
 ])
 
 const STARTER_WORK = Object.freeze([
-  Object.freeze({ name: 'Projekte', color: '#4f9df8' }),
-  Object.freeze({ name: 'Meetings', color: '#9a7cff' }),
-  Object.freeze({ name: 'Aufgaben', color: '#ef7aa8' }),
-  Object.freeze({ name: 'Wissen', color: '#45c9b7' }),
-  Object.freeze({ name: 'Archiv', color: '#d4b54c' }),
+  Object.freeze({ name: 'Projekte', color: '#337ea9' }),
+  Object.freeze({ name: 'Meetings', color: '#9065b0' }),
+  Object.freeze({ name: 'Aufgaben', color: '#c4554d' }),
+  Object.freeze({ name: 'Wissen', color: '#0f7b6c' }),
+  Object.freeze({ name: 'Archiv', color: '#ba9b4a' }),
 ])
 
 const STARTER_WORK_EN = Object.freeze([
-  Object.freeze({ name: 'Projects', color: '#4f9df8' }),
-  Object.freeze({ name: 'Meetings', color: '#9a7cff' }),
-  Object.freeze({ name: 'Tasks', color: '#ef7aa8' }),
-  Object.freeze({ name: 'Knowledge', color: '#45c9b7' }),
-  Object.freeze({ name: 'Archive', color: '#d4b54c' }),
+  Object.freeze({ name: 'Projects', color: '#337ea9' }),
+  Object.freeze({ name: 'Meetings', color: '#9065b0' }),
+  Object.freeze({ name: 'Tasks', color: '#c4554d' }),
+  Object.freeze({ name: 'Knowledge', color: '#0f7b6c' }),
+  Object.freeze({ name: 'Archive', color: '#ba9b4a' }),
 ])
 
 const STARTER_PROFILES = Object.freeze({

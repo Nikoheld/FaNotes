@@ -75,8 +75,8 @@ type RenameState = {
 
 const collator = new Intl.Collator('de', { numeric: true, sensitivity: 'base' })
 const FOLDER_COLORS = [
-  '#8b7cff', '#6f8cff', '#4f9df8', '#45c9b7', '#55cfa8',
-  '#d4b54c', '#f09a5d', '#ef7aa8', '#b878eb', '#8b8994',
+  '#6b7280', '#2a6f97', '#337ea9', '#0f7b6c', '#448361',
+  '#ba9b4a', '#d9730d', '#c4554d', '#9065b0', '#787774',
 ]
 const sortedEntryCache = new WeakMap<VaultEntry[], VaultEntry[]>()
 

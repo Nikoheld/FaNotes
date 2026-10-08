@@ -44,46 +44,46 @@ const STEPS = [
 ] as const
 
 const UNIVERSITY_FOLDERS = [
-  { name: 'Vorlesungen', color: '#6f8cff' },
-  { name: 'Seminare', color: '#9a7cff' },
-  { name: 'Forschung', color: '#45c9b7' },
-  { name: 'Prüfungen', color: '#ef7aa8' },
-  { name: 'Literatur', color: '#d4b54c' },
+  { name: 'Vorlesungen', color: '#2a6f97' },
+  { name: 'Seminare', color: '#9065b0' },
+  { name: 'Forschung', color: '#0f7b6c' },
+  { name: 'Prüfungen', color: '#c4554d' },
+  { name: 'Literatur', color: '#ba9b4a' },
 ]
 const UNIVERSITY_FOLDERS_EN = [
-  { name: 'Lectures', color: '#6f8cff' },
-  { name: 'Seminars', color: '#9a7cff' },
-  { name: 'Research', color: '#45c9b7' },
-  { name: 'Exams', color: '#ef7aa8' },
-  { name: 'Reading', color: '#d4b54c' },
+  { name: 'Lectures', color: '#2a6f97' },
+  { name: 'Seminars', color: '#9065b0' },
+  { name: 'Research', color: '#0f7b6c' },
+  { name: 'Exams', color: '#c4554d' },
+  { name: 'Reading', color: '#ba9b4a' },
 ]
 const PRIVATE_FOLDERS = [
-  { name: 'Persönlich', color: '#ef7aa8' },
-  { name: 'Ideen', color: '#9a7cff' },
-  { name: 'Projekte', color: '#4f9df8' },
-  { name: 'Tagebuch', color: '#55cfa8' },
-  { name: 'Dokumente', color: '#d4b54c' },
+  { name: 'Persönlich', color: '#c4554d' },
+  { name: 'Ideen', color: '#9065b0' },
+  { name: 'Projekte', color: '#337ea9' },
+  { name: 'Tagebuch', color: '#448361' },
+  { name: 'Dokumente', color: '#ba9b4a' },
 ]
 const PRIVATE_FOLDERS_EN = [
-  { name: 'Personal', color: '#ef7aa8' },
-  { name: 'Ideas', color: '#9a7cff' },
-  { name: 'Projects', color: '#4f9df8' },
-  { name: 'Journal', color: '#55cfa8' },
-  { name: 'Documents', color: '#d4b54c' },
+  { name: 'Personal', color: '#c4554d' },
+  { name: 'Ideas', color: '#9065b0' },
+  { name: 'Projects', color: '#337ea9' },
+  { name: 'Journal', color: '#448361' },
+  { name: 'Documents', color: '#ba9b4a' },
 ]
 const WORK_FOLDERS = [
-  { name: 'Projekte', color: '#4f9df8' },
-  { name: 'Meetings', color: '#9a7cff' },
-  { name: 'Aufgaben', color: '#ef7aa8' },
-  { name: 'Wissen', color: '#45c9b7' },
-  { name: 'Archiv', color: '#d4b54c' },
+  { name: 'Projekte', color: '#337ea9' },
+  { name: 'Meetings', color: '#9065b0' },
+  { name: 'Aufgaben', color: '#c4554d' },
+  { name: 'Wissen', color: '#0f7b6c' },
+  { name: 'Archiv', color: '#ba9b4a' },
 ]
 const WORK_FOLDERS_EN = [
-  { name: 'Projects', color: '#4f9df8' },
-  { name: 'Meetings', color: '#9a7cff' },
-  { name: 'Tasks', color: '#ef7aa8' },
-  { name: 'Knowledge', color: '#45c9b7' },
-  { name: 'Archive', color: '#d4b54c' },
+  { name: 'Projects', color: '#337ea9' },
+  { name: 'Meetings', color: '#9065b0' },
+  { name: 'Tasks', color: '#c4554d' },
+  { name: 'Knowledge', color: '#0f7b6c' },
+  { name: 'Archive', color: '#ba9b4a' },
 ]
 
 const SUBJECT_DETAILS: Record<string, { mark: string; description: string }> = {

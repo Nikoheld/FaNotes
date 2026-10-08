@@ -288,7 +288,7 @@ export function createBrowserApi(): FaNotesApi {
         stores.get('meta')!.put({ key: 'onboardingComplete', value: false } satisfies MetaRecord)
         const inbox = english ? 'Inbox' : 'Eingang'
         const welcome = english ? 'Welcome.md' : 'Willkommen.md'
-        stores.get('folders')!.put({ path: inbox, color: '#8b7cff' } satisfies FolderRecord)
+        stores.get('folders')!.put({ path: inbox, color: '#6b7280' } satisfies FolderRecord)
         stores.get('files')!.put({ path: welcome, content: initialFiles[welcome], modifiedAt: now } satisfies FileRecord)
       })
     }

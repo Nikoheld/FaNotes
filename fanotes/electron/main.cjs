@@ -224,11 +224,11 @@ const IPC = Object.freeze({
 
 const DEFAULT_SETTINGS = Object.freeze({
   uiLanguage: 'system',
-  theme: 'dark',
-  workspaceBackground: 'gradient',
-  accent: '#8b7cff',
-  accentSecondary: '#45c9b7',
-  uiFont: 'DM Sans, system-ui, sans-serif',
+  theme: 'light',
+  workspaceBackground: 'clean',
+  accent: '#2a6f97',
+  accentSecondary: '#6b7280',
+  uiFont: 'Inter, ui-sans-serif, system-ui',
   editorFont: 'JetBrains Mono, ui-monospace, monospace',
   editorFontSize: 16,
   previewFontSize: 17,
@@ -243,7 +243,7 @@ const DEFAULT_SETTINGS = Object.freeze({
   sidebarWidth: 286,
   rightPanelWidth: 286,
   compactMode: false,
-  glassEffects: true,
+  glassEffects: false,
   reduceMotion: false,
   viewZoomSpeed: 5,
   viewZoomMax: 325,
@@ -3907,7 +3907,7 @@ function registerIpcHandlers() {
       minWidth: 420,
       minHeight: 360,
       show: true,
-      backgroundColor: '#0b0c12',
+      backgroundColor: '#f7f6f3',
       title: localizeText('Buch', currentUiLanguage()),
       ...linuxWindowFrameOptions(),
       webPreferences: {
@@ -4677,7 +4677,7 @@ async function createWindow() {
     minWidth: 940,
     minHeight: 640,
     show: false,
-    backgroundColor: '#0b0c12',
+    backgroundColor: '#f7f6f3',
     title: 'FaNotes',
     ...linuxWindowFrameOptions(),
     ...(process.platform === 'win32' ? {} : {
