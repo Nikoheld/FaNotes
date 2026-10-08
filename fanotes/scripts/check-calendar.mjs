@@ -20,6 +20,7 @@ const {
   expandOccurrences,
   layoutDayColumns,
   moveOccurrence,
+  healCalendarNames,
   parseCalendarMarkdown,
   resizeOccurrence,
   saveOccurrenceEdit,
@@ -109,6 +110,25 @@ assert.equal(edited.events.some((event) => event.title === 'Sprechstunde' && eve
 
 const skipped = skipOccurrence(roundTrip, `${focus.id}@${dateKey(monday)}`)
 assert.equal(skipped.events.some((event) => event.id === focus.id), false)
+
+const clearedName = {
+  ...doc,
+  calendars: doc.calendars.map((calendar) => calendar.id === personal ? { ...calendar, name: '' } : calendar),
+  events: [createEvent({ calendarId: personal, title: 'Zahnarzt', start: at(monday, 9), end: at(monday, 10) })],
+}
+const dropped = parseCalendarMarkdown(serializeCalendarMarkdown(clearedName))
+assert.equal(dropped.calendars.some((calendar) => calendar.id === personal), false)
+assert.equal(dropped.events.some((event) => event.title === 'Zahnarzt'), false)
+const healed = healCalendarNames(clearedName, doc)
+const kept = parseCalendarMarkdown(serializeCalendarMarkdown(healed))
+assert.equal(kept.calendars.find((calendar) => calendar.id === personal)?.name, 'Persönlich')
+assert.equal(kept.events.some((event) => event.title === 'Zahnarzt' && event.calendarId === personal), true)
+const removed = healCalendarNames({
+  ...doc,
+  calendars: doc.calendars.filter((calendar) => calendar.id !== personal),
+  events: [],
+}, doc)
+assert.equal(removed.calendars.some((calendar) => calendar.id === personal), false)
 
 const month = viewRange('month', monday)
 assert.equal(month.days.length, 42)

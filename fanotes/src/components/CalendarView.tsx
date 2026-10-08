@@ -26,6 +26,7 @@ import {
   duplicateEvent,
   emptyCalendarDocument,
   expandOccurrences,
+  healCalendarNames,
   isoWeek,
   layoutDayColumns,
   minutesSinceMidnight,
@@ -189,6 +190,7 @@ export function CalendarView({ reloadToken = 0, onClose, onOpenNote, onOpenDaily
   const [now, setNow] = useState(() => new Date())
   const persistQueue = useRef(Promise.resolve())
   const persistGeneration = useRef(0)
+  const committedDocument = useRef<CalendarDocument>(emptyCalendarDocument())
   const scrollerRef = useRef<HTMLDivElement>(null)
   const dragRef = useRef<{
     kind: 'create' | 'move' | 'resize'
@@ -204,13 +206,14 @@ export function CalendarView({ reloadToken = 0, onClose, onOpenNote, onOpenDaily
   const [draftSpan, setDraftSpan] = useState<{ day: Date, start: Date, end: Date } | null>(null)
 
   const persist = useCallback(async (next: CalendarDocument) => {
+    const healed = healCalendarNames(next, committedDocument.current)
     const generation = ++persistGeneration.current
     const run = async () => {
       if (generation !== persistGeneration.current) return
       setSaving(true)
       setError(null)
       try {
-        const markdown = serializeCalendarMarkdown(next)
+        const markdown = serializeCalendarMarkdown(healed)
         try {
           await window.fanotes.writeFile(CALENDAR_NOTE_PATH, markdown)
         } catch (writeError) {
@@ -219,7 +222,10 @@ export function CalendarView({ reloadToken = 0, onClose, onOpenNote, onOpenDaily
           const created = await window.fanotes.createNote('', CALENDAR_NOTE_TITLE)
           await window.fanotes.writeFile(created.relativePath === CALENDAR_NOTE_PATH ? CALENDAR_NOTE_PATH : created.relativePath, markdown)
         }
-        if (generation === persistGeneration.current) setDocument(next)
+        if (generation === persistGeneration.current) {
+          committedDocument.current = healed
+          setDocument(healed)
+        }
       } catch (persistError) {
         if (generation === persistGeneration.current) {
           setError(persistError instanceof Error ? persistError.message : 'Kalender konnte nicht gespeichert werden.')
@@ -238,9 +244,17 @@ export function CalendarView({ reloadToken = 0, onClose, onOpenNote, onOpenDaily
     void (async () => {
       try {
         const markdown = await window.fanotes.readFile(CALENDAR_NOTE_PATH)
-        if (!cancelled) setDocument(parseCalendarMarkdown(markdown))
+        if (!cancelled) {
+          const loaded = parseCalendarMarkdown(markdown)
+          committedDocument.current = loaded
+          setDocument(loaded)
+        }
       } catch {
-        if (!cancelled) setDocument(emptyCalendarDocument())
+        if (!cancelled) {
+          const empty = emptyCalendarDocument()
+          committedDocument.current = empty
+          setDocument(empty)
+        }
       } finally {
         if (!cancelled) setLoading(false)
       }
@@ -477,7 +491,15 @@ export function CalendarView({ reloadToken = 0, onClose, onOpenNote, onOpenDaily
                 })}
                 onBlur={(event) => {
                   const name = event.target.value.trim()
-                  if (!name) return
+                  if (!name) {
+                    const restored = committedDocument.current.calendars.find((item) => item.id === calendar.id)?.name ?? ''
+                    if (!restored) return
+                    setDocument({
+                      ...document,
+                      calendars: document.calendars.map((item) => item.id === calendar.id ? { ...item, name: restored } : item),
+                    })
+                    return
+                  }
                   void persist({
                     ...document,
                     calendars: document.calendars.map((item) => item.id === calendar.id ? { ...item, name } : item),

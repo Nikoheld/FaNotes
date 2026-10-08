@@ -165,6 +165,24 @@ export const emptyCalendarDocument = (): CalendarDocument => ({
   events: [],
 })
 
+/**
+ * A blank rename is not a deletion. Restore the last committed name so the
+ * next save does not drop the calendar and every event that belongs to it.
+ * A calendar that is absent from `next` stays removed.
+ */
+export const healCalendarNames = (next: CalendarDocument, previous: CalendarDocument): CalendarDocument => {
+  const previousNames = new Map(previous.calendars.map((calendar) => [calendar.id, calendar.name]))
+  return {
+    ...next,
+    calendars: next.calendars.map((calendar) => {
+      const name = calendar.name.trim()
+      if (name) return name === calendar.name ? calendar : { ...calendar, name }
+      const restored = previousNames.get(calendar.id)?.trim() ?? ''
+      return restored ? { ...calendar, name: restored } : calendar
+    }),
+  }
+}
+
 const sanitizeCalendar = (raw: unknown, index: number): CalendarDef | null => {
   if (!raw || typeof raw !== 'object') return null
   const candidate = raw as Partial<CalendarDef>
