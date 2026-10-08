@@ -212,7 +212,10 @@ function createSyncHost({ vaultRoot, userDataDirectory, safeStorage, trashItem }
         if (!safeStorage.isEncryptionAvailable()) throw new Error('Die Sync-Anmeldung ist mit dem Schlüsselbund dieses Systems geschützt, der gerade nicht verfügbar ist.')
         return safeStorage.decryptString(Buffer.from(raw.slice(SECRETS_PREFIX_ENCRYPTED.length), 'base64'))
       }
-      if (raw.startsWith(SECRETS_PREFIX_PLAIN)) return raw.slice(SECRETS_PREFIX_PLAIN.length)
+      if (raw.startsWith(SECRETS_PREFIX_PLAIN)) {
+        await fsp.rm(secretsPath, { force: true })
+        return null
+      }
       return null
     },
     async writeSecrets(json) {
@@ -221,9 +224,12 @@ function createSyncHost({ vaultRoot, userDataDirectory, safeStorage, trashItem }
         return
       }
       if (typeof json !== 'string' || json.length > 64 * 1024) throw new Error('Die Sync-Anmeldedaten sind ungültig.')
-      const encoded = safeStorage.isEncryptionAvailable()
-        ? `${SECRETS_PREFIX_ENCRYPTED}${safeStorage.encryptString(json).toString('base64')}`
-        : `${SECRETS_PREFIX_PLAIN}${json}`
+      let encryptionAvailable = false
+      try { encryptionAvailable = safeStorage.isEncryptionAvailable() } catch { encryptionAvailable = false }
+      if (!encryptionAvailable) {
+        throw new Error('Sync-Anmeldedaten können ohne verfügbaren Systemschlüsselbund nicht gespeichert werden.')
+      }
+      const encoded = `${SECRETS_PREFIX_ENCRYPTED}${safeStorage.encryptString(json).toString('base64')}`
       await atomicWriteBytes(secretsPath, Buffer.from(encoded, 'utf8'), 0)
     },
   }

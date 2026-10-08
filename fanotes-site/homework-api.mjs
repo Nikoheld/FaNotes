@@ -13,6 +13,8 @@ const TASK_FIELDS = Object.freeze([
 ])
 
 const rateWindows = new Map()
+const DUMMY_HOMEWORK_SALT = randomBytes(16).toString('base64')
+const DUMMY_HOMEWORK_HASH = randomBytes(32).toString('base64')
 
 class HomeworkApiError extends Error {
   constructor(status, publicMessage) {
@@ -102,11 +104,8 @@ export const homeworkTasksToApiPayload = (tasks) => ({
 })
 
 export const resolveHomeworkApiQuery = ({ enabled, secretOk, payload }) => {
-  if (!enabled || !payload) {
+  if (!enabled || !payload || !secretOk) {
     return { status: 404, body: denyBody('Hausaufgaben-API ist nicht verfügbar.') }
-  }
-  if (!secretOk) {
-    return { status: 401, body: denyBody('Anmeldung fehlgeschlagen.') }
   }
   return { status: 200, body: payload }
 }
@@ -231,7 +230,10 @@ export const handleHomeworkRequest = async (request, response, url) => {
     if (request.method === 'GET' || request.method === 'HEAD') {
       rateLimit(`hw-get:${clientAddress(request)}`, 40, 60_000)
       const record = await readRecord(channelId)
-      const secretOk = record ? await verifyHomeworkSecret(extractSecret(request), record) : false
+      const provided = extractSecret(request)
+      const secretOk = record
+        ? await verifyHomeworkSecret(provided, record)
+        : await verifyHomeworkSecret(provided.length >= MIN_SECRET_LENGTH ? provided : 'x'.repeat(MIN_SECRET_LENGTH), { salt: DUMMY_HOMEWORK_SALT, hash: DUMMY_HOMEWORK_HASH })
       const result = resolveHomeworkApiQuery({
         enabled: Boolean(record?.enabled),
         secretOk,

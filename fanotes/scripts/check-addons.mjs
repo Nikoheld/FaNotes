@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { existsSync, readFileSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import { createServer } from 'vite'
 
 // The add-on system: manifest and index parsing, the registry fallback, block
@@ -36,6 +37,12 @@ try {
   assert.deepEqual(good.manifest.categories, ['writing'])
   assert.deepEqual(good.manifest.keywords, ['a', 'b'])
   assert.equal(good.manifest.api, 1)
+  assert.equal(manifest.ADDON_PERMISSION_LABELS.commands.risk, 'medium')
+  assert.equal(appBridge.addonMayRunAppCommand('save'), true)
+  assert.equal(appBridge.addonMayRunAppCommand('quit'), false)
+  assert.equal(appBridge.addonMayRunAppCommand('onenote-import'), false)
+  assert.equal(appBridge.addonMayRunAppCommand('sync-now'), false)
+  assert.equal(appBridge.addonMayRunAppCommand('addon:other:run'), false)
   assert.ok(good.warnings.some((w) => w.includes('nope')))
 
   const bad = manifest.parseAddonManifest({ id: 'Bad_ID', version: 'x', permissions: ['root'], api: 2, networkHosts: ['not a host'], main: 'index.js', homepage: 'http://x' }, { expectedId: 'other' })
@@ -464,6 +471,14 @@ try {
   const electron = src('electron/addons.cjs')
   assert.match(electron, /ALLOWED_HOSTS = new Set\(\['raw\.githubusercontent\.com', 'api\.github\.com', 'github\.com', 'objects\.githubusercontent\.com'\]\)/u)
   assert.match(electron, /isPrivateHost/u)
+  assert.match(electron, /lookup:/u)
+  const { isPrivateAddress } = createRequire(import.meta.url)('../electron/addons.cjs')
+  assert.equal(isPrivateAddress('127.0.0.1'), true)
+  assert.equal(isPrivateAddress('10.1.2.3'), true)
+  assert.equal(isPrivateAddress('169.254.169.254'), true)
+  assert.equal(isPrivateAddress('8.8.8.8'), false)
+  assert.equal(isPrivateAddress('::1'), true)
+  assert.equal(isPrivateAddress('2001:4860:4860::8888'), false)
   assert.match(electron, /cookie|authorization/iu)
   const main = src('electron/main.cjs')
   assert.match(main, /registerAddonIpc\(/u)
@@ -476,6 +491,8 @@ try {
   const nginx = src('../fanotes-site/deploy/fanotes-fasrv.conf')
   assert.match(nginx, /location \^~ \/notes\/addons-registry\//u)
   assert.match(nginx, /location \^~ \/notes\/addons-api\//u)
+  assert.match(nginx, /Content-Type "text\/plain; charset=utf-8"/u)
+  assert.match(nginx, /X-Content-Type-Options "nosniff"/u)
   const vite = src('vite.config.ts')
   assert.match(vite, /'\/addons-registry'/u)
   assert.match(vite, /'\/addons-api'/u)

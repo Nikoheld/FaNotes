@@ -399,6 +399,7 @@ const handleRegister = async (request, response) => {
   rateLimit(`sync:register:${clientAddress(request)}`, 10, 60 * 60 * 1000)
   const body = await readJsonBody(request)
   const email = normalizeEmail(body.email)
+  rateLimit(`sync:register-email:${sha256(email)}`, 8, 60 * 60 * 1000)
   const authKey = parseAuthKey(body.authKey)
   const kdf = parseKdf(body.kdf)
   const vaultKeyWrap = parseKeyWrap(body.vaultKeyWrap)
@@ -426,10 +427,21 @@ const handleRegister = async (request, response) => {
     await fs.writeFile(emailIndexPath(email), id, { flag: 'wx', mode: 0o600 })
   } catch (error) {
     await fs.rm(accountDirectory(id), { recursive: true, force: true })
-    if (error?.code === 'EEXIST') fail(409, 'Für diese E-Mail-Adresse gibt es bereits ein Konto. Bitte anmelden.')
+    if (error?.code === 'EEXIST') {
+      const existing = await loadAccountByEmail(email)
+      if (existing?.auth?.hash && existing?.auth?.salt) {
+        const expected = Buffer.from(existing.auth.hash, 'base64')
+        const actual = await scryptHash(authKey, Buffer.from(existing.auth.salt, 'base64'))
+        if (expected.length === actual.length) safeEqual(expected, actual)
+      } else {
+        await scryptHash(authKey, randomBytes(16))
+      }
+      fail(401, 'E-Mail-Adresse oder Passwort stimmen nicht.')
+    }
     throw error
   }
   await saveAccount(account)
+  await scryptHash(authKey, randomBytes(16))
   sendJson(request, response, 201, { accountId: id, deviceId, token: session.token, expiresAt: session.expiresAt, revision: 0 })
 }
 

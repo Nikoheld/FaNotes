@@ -31,12 +31,26 @@ export default defineConfig({
         target: process.env.FANOTES_ADDONS_REGISTRY ?? 'https://raw.githubusercontent.com',
         changeOrigin: true,
         rewrite: (requestPath) => requestPath.replace(/^\/addons-registry/u, ''),
+        configure: (proxy) => {
+          proxy.on('proxyRes', (proxyRes) => {
+            proxyRes.headers['content-type'] = 'text/plain; charset=utf-8'
+            proxyRes.headers['x-content-type-options'] = 'nosniff'
+            proxyRes.headers['content-security-policy'] = "default-src 'none'; sandbox; frame-ancestors 'none'"
+          })
+        },
       },
       '/addons-api': {
         target: process.env.FANOTES_ADDONS_API ?? 'https://api.github.com',
         changeOrigin: true,
         rewrite: (requestPath) => requestPath.replace(/^\/addons-api/u, ''),
         headers: { 'User-Agent': 'FaNotes-AddonStore' },
+        configure: (proxy) => {
+          proxy.on('proxyRes', (proxyRes) => {
+            proxyRes.headers['content-type'] = 'text/plain; charset=utf-8'
+            proxyRes.headers['x-content-type-options'] = 'nosniff'
+            proxyRes.headers['content-security-policy'] = "default-src 'none'; sandbox; frame-ancestors 'none'"
+          })
+        },
       },
       // Sync in web mode is same-origin (nginx proxies /api/v1/sync in
       // production). FANOTES_SYNC_API points it at a local test server.

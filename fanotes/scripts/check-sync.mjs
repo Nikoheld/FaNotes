@@ -166,6 +166,12 @@ try {
   await assert.rejects(A.engine.register('fabio@example.com', 'kurz'), /mindestens 10 Zeichen/u)
   await A.engine.register('Fabio@Example.com', 'korrektes pferd batterie')
   assert.equal(A.engine.getState().account.email, 'fabio@example.com')
+  await assert.rejects(
+    A.engine.register('fabio@example.com', 'korrektes pferd batterie'),
+    (error) => error instanceof Error && error.message === 'E-Mail-Adresse oder Passwort stimmen nicht.' && !error.message.includes('bereits ein Konto'),
+    'eine bestehende Adresse darf bei der Registrierung nicht bestätigt werden',
+  )
+  assert.equal(A.engine.getState().account.email, 'fabio@example.com')
   await A.engine.syncNow()
   assert.equal(A.engine.getState().status, 'idle', A.engine.getState().error)
   assert.equal(A.engine.getState().trackedFiles, 4, 'history is excluded, everything else uploaded')
