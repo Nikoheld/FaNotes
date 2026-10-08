@@ -167,6 +167,18 @@ function translateDerived(source: string, catalog: EnglishCatalog): string | nul
   if (/^\d+ Unterordner$/u.test(source)) return source.replace('Unterordner', 'subfolders')
   if (/^\d+ Einträge$/u.test(source)) return source.replace('Einträge', 'entries')
   if (/^1 Eintrag$/u.test(source)) return '1 entry'
+  if (source === 'Ein Update ist verfügbar.') return 'An update is available.'
+  const availableUpdates = /^(\d+) Updates sind verfügbar\.$/u.exec(source)
+  if (availableUpdates) {
+    const count = Number(availableUpdates[1])
+    return `${count} ${count === 1 ? 'update is' : 'updates are'} available.`
+  }
+  const spellingMistake = /^Möglicher Rechtschreibfehler · (Deutsch|Englisch)$/u.exec(source)
+  if (spellingMistake) return `Possible spelling mistake · ${spellingMistake[1] === 'Deutsch' ? 'German' : 'English'}`
+  const tabState = /^(.+?)(, angeheftet)?(, in der zweiten Spalte)?(, nicht gespeicherte Änderungen)?$/u.exec(source)
+  if (tabState && (tabState[2] || tabState[3] || tabState[4])) {
+    return `${tabState[1]}${tabState[2] ? ', pinned' : ''}${tabState[3] ? ', in the second pane' : ''}${tabState[4] ? ', unsaved changes' : ''}`
+  }
   if (/^1 Zeichen$/u.test(source)) return '1 character'
   if (/^\d+ Zeichen$/u.test(source)) return source.replace('Zeichen', 'characters')
   if (/^1 Wort$/u.test(source)) return '1 word'
@@ -280,6 +292,8 @@ function translateDerived(source: string, catalog: EnglishCatalog): string | nul
   if (newSubfolderIn) return `New subfolder in ${newSubfolderIn[1]}`
   const dragIntoFolder = /^(.+) · Ziehen, um in einen Ordner oder auf die oberste Ebene zu legen$/u.exec(source)
   if (dragIntoFolder) return `${dragIntoFolder[1]} · Drag to move into a folder or back to the top level`
+  const openBeside = /^(.+) · Umschalt\+Klick öffnet rechts · Ziehen zum Verschieben$/u.exec(source)
+  if (openBeside) return `${openBeside[1]} · Shift+click opens on the right · Drag to move`
   const actionsFor = /^Aktionen für (.+)$/u.exec(source)
   if (actionsFor) return `Actions for ${actionsFor[1]}`
   const secondPane = /^(.+) · zweite (Spalte|Notiz)$/u.exec(source)

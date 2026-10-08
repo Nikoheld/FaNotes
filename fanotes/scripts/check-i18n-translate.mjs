@@ -198,6 +198,20 @@ const runOnce = async () => {
   assert.equal(i18n.translateUiText('Stiftmodus'), 'Pen mode')
   assert.equal(i18n.translateUiText('Werkzeuge'), 'Tools')
   assert.equal(i18n.translateUiText('In Vault-Wurzel'), 'In vault root')
+  assert.equal(
+    i18n.translateUiText('Welcome.md · Umschalt+Klick öffnet rechts · Ziehen zum Verschieben'),
+    'Welcome.md · Shift+click opens on the right · Drag to move',
+  )
+  assert.equal(i18n.translateUiText('Befehl suchen'), 'Search commands')
+  assert.equal(i18n.translateUiText('Ein Update ist verfügbar.'), 'An update is available.')
+  assert.equal(i18n.translateUiText('2 Updates sind verfügbar.'), '2 updates are available.')
+  assert.equal(i18n.translateUiText('Möglicher Rechtschreibfehler · Deutsch'), 'Possible spelling mistake · German')
+  assert.equal(i18n.translateUiText('Möglicher Rechtschreibfehler · Englisch'), 'Possible spelling mistake · English')
+  assert.equal(
+    i18n.translateUiText('Welcome.md, angeheftet, in der zweiten Spalte, nicht gespeicherte Änderungen'),
+    'Welcome.md, pinned, in the second pane, unsaved changes',
+  )
+  assert.equal(i18n.translateUiText('Welcome.md, nicht gespeicherte Änderungen'), 'Welcome.md, unsaved changes')
   assert.equal(localizeText('Blatt', 'en'), 'Sheet')
   assert.equal(localizeText('Werkzeuge', 'en'), 'Tools')
   assert.equal(localizeText('Vault-Wurzel', 'en'), 'vault root')
