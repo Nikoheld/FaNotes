@@ -193,6 +193,13 @@ const runDialog = async () => {
       assert.equal(hit.ink, false, `${hit.name} must not start an ink stroke`)
     }
 
+    const shotPath = process.env.FANOTES_TTH_SCREENSHOT
+    if (shotPath) {
+      const shot = await call('Page.captureScreenshot', { format: 'png', fromSurface: true })
+      fs.mkdirSync(path.dirname(shotPath), { recursive: true })
+      fs.writeFileSync(shotPath, Buffer.from(shot.data, 'base64'))
+    }
+
     socket.close()
     return { sliders: true, paste: true, chrome: true, pointer }
   } finally {
