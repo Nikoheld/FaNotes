@@ -182,7 +182,11 @@ function translateDerived(source: string, catalog: EnglishCatalog): string | nul
   if (/^1 Zeichen$/u.test(source)) return '1 character'
   if (/^\d+ Zeichen$/u.test(source)) return source.replace('Zeichen', 'characters')
   if (/^1 Wort$/u.test(source)) return '1 word'
-  if (/^\d+ Wörter$/u.test(source)) return source.replace('Wörter', 'words')
+  const wordCount = /^(\d+) Wörter$/u.exec(source)
+  if (wordCount) {
+    const count = Number(wordCount[1])
+    return `${count} ${count === 1 ? 'word' : 'words'}`
+  }
   if (source === 'Notizen ·') return 'notes ·'
   if (source === 'Notizen') return 'Notes'
   if (source === 'Offene Notizen') return 'Open notes'
@@ -375,8 +379,16 @@ function translateDerived(source: string, catalog: EnglishCatalog): string | nul
   if (canvasWith) return `Canvas with ${canvasWith[1]}`
   const currentVersion = /^(FaNotes(?: Web)? \d+(?:\.\d+){2}(?:-beta\.\d+)?) ist aktuell$/u.exec(source)
   if (currentVersion) return `${currentVersion[1]} is up to date`
-  const availableVersion = /^(FaNotes(?: Web)? \d+(?:\.\d+){2}(?:-beta\.\d+)?) ist verfügbar$/u.exec(source)
-  if (availableVersion) return `${availableVersion[1]} is available`
+  const availableVersion = /^(FaNotes(?: Web)? \d+(?:\.\d+){2}(?:-beta\.\d+)?) ist verfügbar(\.)?$/u.exec(source)
+  if (availableVersion) return `${availableVersion[1]} is available${availableVersion[2] ?? ''}`
+  const checkedOnExit = /^(FaNotes \d+(?:\.\d+){2}(?:-beta\.\d+)?) ist geprüft und wird beim Beenden installiert\.$/u.exec(source)
+  if (checkedOnExit) return `${checkedOnExit[1]} is checked and will be installed on exit.`
+  const readyToInstall = /^(FaNotes \d+(?:\.\d+){2}(?:-beta\.\d+)?) ist installationsbereit$/u.exec(source)
+  if (readyToInstall) return `${readyToInstall[1]} is ready to install`
+  const downloadingUpdate = /^Update wird geladen · (\d+) %$/u.exec(source)
+  if (downloadingUpdate) return `Loading update · ${downloadingUpdate[1]} %`
+  const installAndRestart = /^(FaNotes \d+(?:\.\d+){2}(?:-beta\.\d+)?) installieren und neu starten$/u.exec(source)
+  if (installAndRestart) return `Install ${installAndRestart[1]} and restart`
   const learnedCorrection = /^Korrektur sofort gelernt: (.+)$/u.exec(source)
   if (learnedCorrection) return `Correction learned immediately: ${learnedCorrection[1]}`
   const localAiStatus = /^(.+) verarbeitet die Notiz über (.+)$/u.exec(source)
