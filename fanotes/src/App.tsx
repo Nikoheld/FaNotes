@@ -65,7 +65,7 @@ import { NoteLinkLayer } from './components/NoteLinkLayer'
 import type { GlyphenWerkView } from './components/GlyphenWerkWorkspace'
 import type { MarkdownEditorHandle, MarkdownFormatAction } from './components/MarkdownEditor'
 import type { WorksheetLayerHandle } from './components/WorksheetLayer'
-import { companionNotePath, isNoteFileName, isPdfNotePath, readPageStatsFromNote, stripFamdPayload, writePageStatsIntoNote } from './lib/famd'
+import { companionNotePath, emptyFamdPayload, isNoteFileName, isPdfNotePath, parseFamd, readPageStatsFromNote, serializeFamd, stripFamdPayload, writePageStatsIntoNote } from './lib/famd'
 import { createAppAddonBridge, safeSettingsView, type AppAddonDeps } from './lib/addons/appBridge'
 import { addonIndexCache } from './lib/addons/indexCache'
 import { parseAddonSource } from './lib/addons/registry'
@@ -83,6 +83,7 @@ import {
   markPageStatsPersisted,
   openPageStats,
   pageStatsNeedPersist,
+  parsePageStats,
   recordDocumentSaved,
   recordEditActivity,
   recordInkErased,
@@ -719,6 +720,8 @@ export default function App({ startupBootstrap }: AppProps) {
   const noteBackupsRef = useRef<NoteBackupSnapshot[]>([])
   const subjectBooksRef = useRef<SubjectBookRecord[]>([])
   const subjectBooksDiskRef = useRef<SubjectBookRecord[]>([])
+  /** False until a subject-book read succeeds. A failed read must not be saved back as an empty list. */
+  const subjectBooksLoadedRef = useRef(false)
   const bookPlacementRef = useRef<SubjectBookPlacement>('rechts')
   const editorRef = useRef<MarkdownEditorHandle>(null)
   const drawingBoardRef = useRef<DrawingBoardHandle>(null)
@@ -731,6 +734,11 @@ export default function App({ startupBootstrap }: AppProps) {
   const pendingWrites = useRef(new Map<string, string>())
   const settingsTimer = useRef<number | null>(null)
   const pageStatsRef = useRef(new Map<string, PageStatsSession>())
+  /** A failed page-stats read. Saving must not invent a fresh session over the companion. */
+  const pageStatsUnreadableRef = useRef(new Set<string>())
+  /** Ink from a PDF history snapshot. The next save of that note writes it back. */
+  const pendingHistoryInkRef = useRef(new Map<string, Record<string, unknown>>())
+  const worksheetEffectPathRef = useRef('')
   const previousActivePathRef = useRef<string | null>(null)
   const settingsRef = useRef(settings)
   const settingsRevisionRef = useRef(0)
@@ -998,9 +1006,12 @@ export default function App({ startupBootstrap }: AppProps) {
         try {
           const disk = window.fanotes.readSubjectBooks ? await window.fanotes.readSubjectBooks() : []
           const parsed = parseSubjectBooks(disk)
+          subjectBooksLoadedRef.current = true
           subjectBooksDiskRef.current = parsed
           setSubjectBooksDisk(parsed)
           setSubjectBooks((memory) => mergeSubjectBooksPreferDisk(memory, parsed))
+        } catch {
+          // A failed re-read is not an empty book list.
         } finally {
           setSubjectBooksHydrating(false)
         }
@@ -1145,24 +1156,25 @@ export default function App({ startupBootstrap }: AppProps) {
 
   useEffect(() => {
     if (!window.fanotes.readSubjectBooks) {
+      subjectBooksLoadedRef.current = true
       setSubjectBooksReady(true)
       return
     }
     let alive = true
+    subjectBooksLoadedRef.current = false
     setSubjectBooksReady(false)
     void window.fanotes.readSubjectBooks()
       .then((list) => {
         if (!alive) return
         const parsed = parseSubjectBooks(list)
+        subjectBooksLoadedRef.current = true
         subjectBooksDiskRef.current = parsed
         setSubjectBooksDisk(parsed)
         setSubjectBooks(parsed)
       })
       .catch(() => {
         if (!alive) return
-        subjectBooksDiskRef.current = []
-        setSubjectBooksDisk([])
-        setSubjectBooks([])
+        subjectBooksLoadedRef.current = false
       })
       .finally(() => {
         if (alive) setSubjectBooksReady(true)
@@ -1170,22 +1182,44 @@ export default function App({ startupBootstrap }: AppProps) {
     return () => { alive = false }
   }, [bootstrap?.vaultPath])
 
+  const activeWorksheetMarkerKey = activeTab ? noteWorksheetIds(activeTab.content).join('\0') : ''
   useEffect(() => {
     const requestId = ++worksheetLoadRequestRef.current
-    worksheetDirtyIdsRef.current.clear()
-    setWorksheetSession({ key: requestId, documents: [] })
     const path = activeTab?.path
-    const ids = activeTab ? noteWorksheetIds(activeTab.content) : []
-    const initialNoteLoad = Boolean(path && initialWorksheetLoadRef.current)
-    if (path) initialWorksheetLoadRef.current = false
-    if (!path || !ids.length) return
+    const ids = activeWorksheetMarkerKey ? activeWorksheetMarkerKey.split('\0') : []
+    const pathChanged = worksheetEffectPathRef.current !== (path ?? '')
+    worksheetEffectPathRef.current = path ?? ''
+    if (pathChanged) {
+      worksheetDirtyIdsRef.current.clear()
+      setWorksheetSession({ key: requestId, documents: [] })
+    } else {
+      for (const id of [...worksheetDirtyIdsRef.current]) {
+        if (!ids.includes(id)) worksheetDirtyIdsRef.current.delete(id)
+      }
+    }
+    const initialNoteLoad = Boolean(path && pathChanged && initialWorksheetLoadRef.current)
+    if (path && pathChanged) initialWorksheetLoadRef.current = false
+    if (!path || !ids.length) {
+      if (!pathChanged) setWorksheetSession({ key: requestId, documents: [] })
+      return
+    }
     let idleId: number | null = null
     let startTimer: number | null = null
     const load = () => {
       void Promise.allSettled(ids.map((id) => window.fanotes.readWorksheet(id))).then((results) => {
         if (requestId !== worksheetLoadRequestRef.current || activePathRef.current !== path) return
-        const documents = results.flatMap((result) => result.status === 'fulfilled' ? [result.value] : [])
-        setWorksheetSession({ key: requestId, documents })
+        const loaded = new Map(results.flatMap((result) => result.status === 'fulfilled' ? [[result.value.id, result.value] as const] : []))
+        setWorksheetSession((current) => {
+          const documents = ids.flatMap((id) => {
+            if (worksheetDirtyIdsRef.current.has(id)) {
+              const kept = current.documents.find((document) => document.id === id)
+              if (kept) return [kept]
+            }
+            const document = loaded.get(id)
+            return document ? [document] : []
+          })
+          return { key: requestId, documents }
+        })
       })
     }
     const schedule = () => {
@@ -1198,7 +1232,7 @@ export default function App({ startupBootstrap }: AppProps) {
       if (startTimer !== null) window.clearTimeout(startTimer)
       if (idleId !== null) window.cancelIdleCallback(idleId)
     }
-  }, [activeTab?.path])
+  }, [activeTab?.path, activeWorksheetMarkerKey])
 
   useEffect(() => {
     const activeIds = new Set(worksheetSession.documents.map((document) => document.id))
@@ -1248,10 +1282,32 @@ export default function App({ startupBootstrap }: AppProps) {
     return snapshotPageStats(next)
   }, [])
 
+  /**
+   * The editor only holds stripped markdown, so page stats have to be read
+   * from the `.famd` companion. A failed read is remembered: the next save
+   * must not replace the companion's statistics with a new session.
+   */
+  const preparePageStats = useCallback(async (path: string) => {
+    if (pageStatsRef.current.has(path) || pageStatsUnreadableRef.current.has(path)) return
+    const read = window.fanotes.readNotePageStats
+    if (typeof read !== 'function') return
+    try {
+      const raw = await read(path)
+      if (pageStatsRef.current.has(path)) return
+      pageStatsUnreadableRef.current.delete(path)
+      if (raw && typeof raw === 'object') {
+        pageStatsRef.current.set(path, idlePageStatsSession(parsePageStats(raw)))
+      }
+    } catch {
+      pageStatsUnreadableRef.current.add(path)
+    }
+  }, [])
+
   /** Session for a note that has a tab, created from the note's payload on first use. */
   const ensurePageStatsSession = useCallback((path: string) => {
     const existing = pageStatsRef.current.get(path)
     if (existing) return existing
+    if (pageStatsUnreadableRef.current.has(path)) return null
     const tab = tabsRef.current.find((candidate) => candidate.path === path)
     if (!tab) return null
     const session = idlePageStatsSession(readPageStatsFromNote(pendingWrites.current.get(path) ?? tab.content))
@@ -1300,6 +1356,7 @@ export default function App({ startupBootstrap }: AppProps) {
   const activatePageStats = useCallback((path: string, content: string, now = Date.now()) => {
     const previousPath = activePathRef.current
     if (previousPath && previousPath !== path) flushPageStats(previousPath, now, false)
+    if (pageStatsUnreadableRef.current.has(path)) return null
     const existing = pageStatsRef.current.get(path)
     const opened = openPageStats(existing ?? readPageStatsFromNote(content, now), now)
     pageStatsRef.current.set(path, opened)
@@ -1422,6 +1479,8 @@ export default function App({ startupBootstrap }: AppProps) {
     const swapIntoSplit = splitPathRef.current === path && previousActive && previousActive !== path
     const existing = tabsRef.current.find((tab) => tab.path === path)
     if (existing) {
+      await preparePageStats(path)
+      if (session !== vaultSessionGenerationRef.current) return false
       activatePageStats(path, existing.content)
       setActivePath(path)
       if (swapIntoSplit) setSplitPath(previousActive)
@@ -1439,6 +1498,11 @@ export default function App({ startupBootstrap }: AppProps) {
         structureRevision !== vaultStructureRevisionRef.current
       ) return false
       const { content } = tab
+      await preparePageStats(path)
+      if (
+        session !== vaultSessionGenerationRef.current ||
+        structureRevision !== vaultStructureRevisionRef.current
+      ) return false
       setTagIndex((current) => ({ ...current, [path]: parseNoteTags(content) }))
       setTabs((current) => current.some((item) => item.path === path) ? current : [...current, tab])
       activatePageStats(path, content)
@@ -1458,7 +1522,7 @@ export default function App({ startupBootstrap }: AppProps) {
     } finally {
       openingNotesRef.current.delete(requestKey)
     }
-  }, [activatePageStats, flushDocumentLayers, readNoteTab, rememberLastOpenNote, toast])
+  }, [activatePageStats, flushDocumentLayers, preparePageStats, readNoteTab, rememberLastOpenNote, toast])
 
   /**
    * Bring back the tabs, pins and split the vault was left with. The active
@@ -1629,11 +1693,21 @@ export default function App({ startupBootstrap }: AppProps) {
       const now = Date.now()
       flushPageStats(path, now, true)
       const body = stripFamdPayload(content)
-      const session = pageStatsRef.current.get(path)
+      const unreadableStats = pageStatsUnreadableRef.current.has(path)
+      const session = unreadableStats ? null : pageStatsRef.current.get(path)
       const savedSession = session ? recordDocumentSaved(session, body, now) : null
       if (savedSession) pageStatsRef.current.set(path, savedSession)
-      const stats = savedSession ? snapshotPageStats(savedSession) : readPageStatsFromNote(content, now)
-      const nextContent = writePageStatsIntoNote(content, stats)
+      // No session and a failed companion read: write the markdown only.
+      // Embedding a fresh session would replace the statistics still on disk.
+      let nextContent = savedSession ? writePageStatsIntoNote(content, snapshotPageStats(savedSession)) : content
+      const historyInk = pendingHistoryInkRef.current.get(path)
+      if (historyInk) {
+        const parsed = parseFamd(nextContent)
+        nextContent = serializeFamd(stripFamdPayload(nextContent), {
+          ...(parsed.payload ?? emptyFamdPayload()),
+          ink: historyInk,
+        })
+      }
       const visibleContent = stripFamdPayload(nextContent)
       await window.fanotes.writeFile(isPdfNotePath(path) ? companionNotePath(path, '.famd') : path, nextContent)
       addonRuntime.emit('note:saved', { path, title: fileName(path).replace(/\.(md|markdown|pdf)$/iu, ''), length: visibleContent.length })
@@ -1648,6 +1722,7 @@ export default function App({ startupBootstrap }: AppProps) {
       if (pendingWrites.current.get(path) === content || pendingWrites.current.get(path) === nextContent || pendingWrites.current.get(path) === visibleContent) {
         pendingWrites.current.delete(path)
       }
+      pendingHistoryInkRef.current.delete(path)
       // The editor keeps the text exactly as typed. The saved body only differs
       // in trailing whitespace (stripFamdPayload trims it), and pushing that
       // trimmed body back replaced the document after every autosave — a new
@@ -1718,10 +1793,29 @@ export default function App({ startupBootstrap }: AppProps) {
       }
       const readPath = isPdfNotePath(path) ? companionNotePath(path, '.famd') : path
       try {
-        let source = ''
+        const open = tabsRef.current.find((tab) => tab.path === path)
+        const live = pendingWrites.current.get(path) ?? (open && open.content !== open.savedContent ? open.content : null)
+        let markdown = ''
         try {
-          source = await window.fanotes.readFile(readPath)
+          markdown = live ?? await window.fanotes.readFile(readPath)
         } catch {
+          skipped += 1
+          continue
+        }
+        // Handwriting lives in the companion, and readFile strips that payload.
+        // Without it the upgrade always looks like a note that has no ink.
+        const embedded = await readNoteInk(path, markdown)
+        let source = markdown
+        if (embedded?.drawingJson) {
+          try {
+            const ink = JSON.parse(embedded.drawingJson) as Record<string, unknown>
+            source = serializeFamd(markdown, { ...emptyFamdPayload(), ink })
+          } catch {
+            source = markdown
+          }
+        }
+        const latest = pendingWrites.current.get(path) ?? tabsRef.current.find((tab) => tab.path === path)?.content
+        if (live !== null && latest !== markdown) {
           skipped += 1
           continue
         }
@@ -1737,7 +1831,15 @@ export default function App({ startupBootstrap }: AppProps) {
         await window.fanotes.writeFile(readPath, result.source)
         converted += 1
         const visibleSource = stripFamdPayload(result.source)
-        setTabs((current) => current.map((tab) => tab.path === path ? { ...tab, content: visibleSource, savedContent: visibleSource } : tab))
+        const timer = saveTimers.current.get(path)
+        if (timer) window.clearTimeout(timer)
+        saveTimers.current.delete(path)
+        if (pendingWrites.current.get(path) === markdown) pendingWrites.current.delete(path)
+        setTabs((current) => current.map((tab) => {
+          if (tab.path !== path) return tab
+          if (tab.content !== markdown && pendingWrites.current.get(path) !== markdown) return { ...tab, savedContent: visibleSource }
+          return { ...tab, content: visibleSource, savedContent: visibleSource }
+        }))
       } catch {
         failed += 1
       }
@@ -1939,15 +2041,36 @@ export default function App({ startupBootstrap }: AppProps) {
     for (const path of touched) {
       const tab = tabsRef.current.find((candidate) => candidate.path === path)
       if (!tab || tab.content !== tab.savedContent || pendingWrites.current.has(path)) continue
+      const famdPath = companionNotePath(path, '.famd')
+      const famdTouched = written.includes(famdPath) || (isPdfNotePath(path) && written.includes(path))
       try {
         const fresh = await readNoteTab(path)
+        const open = tabsRef.current.find((candidate) => candidate.path === path)
+        if (!open || open.content !== open.savedContent || pendingWrites.current.has(path)) continue
         setTabs((current) => current.map((candidate) => candidate.path === path && candidate.content === candidate.savedContent ? { ...candidate, content: fresh.content, savedContent: fresh.content } : candidate))
         setTagIndex((current) => ({ ...current, [path]: parseNoteTags(fresh.content) }))
+        if (!famdTouched || (activePathRef.current === path && drawingDirtyRef.current)) continue
+        // The open session was loaded from the previous companion. Keeping it
+        // would write those statistics and that ink back over the other device.
+        pageStatsRef.current.delete(path)
+        pageStatsUnreadableRef.current.delete(path)
+        await preparePageStats(path)
+        if (activePathRef.current === path && !pageStatsUnreadableRef.current.has(path)) {
+          activatePageStats(path, fresh.content)
+        }
+        if (activePathRef.current !== path || drawingDirtyRef.current) continue
+        const requestId = ++drawingLoadRequestRef.current
+        const document = await readNoteInk(path, fresh.content)
+        if (requestId !== drawingLoadRequestRef.current || activePathRef.current !== path || drawingDirtyRef.current) continue
+        setDrawingSession({
+          ...overlaySessionAfterInkReady(drawingOpenRef.current, drawingSessionFromLoad(requestId, document)),
+          path,
+        })
       } catch {
         // The note vanished between the change list and the read; the next tree refresh reflects that.
       }
     }
-  }, [readNoteTab, refreshTree])
+  }, [activatePageStats, preparePageStats, readNoteTab, refreshTree])
 
   const syncDepsRef = useRef({ isSyncPathBusy, applyRemoteChanges, toast })
   syncDepsRef.current = { isSyncPathBusy, applyRemoteChanges, toast }
@@ -2115,6 +2238,9 @@ export default function App({ startupBootstrap }: AppProps) {
   }, [])
 
   const persistSubjectBooks = useCallback(async (list: SubjectBookRecord[]) => {
+    if (!subjectBooksLoadedRef.current) {
+      throw new Error('Die Fachbücher konnten nicht gelesen werden. Es wurde nichts überschrieben.')
+    }
     const next = parseSubjectBooks(list)
     subjectBooksRef.current = next
     subjectBooksDiskRef.current = next
@@ -2128,9 +2254,12 @@ export default function App({ startupBootstrap }: AppProps) {
     try {
       const disk = window.fanotes.readSubjectBooks ? await window.fanotes.readSubjectBooks() : []
       const parsed = parseSubjectBooks(disk)
+      subjectBooksLoadedRef.current = true
       subjectBooksDiskRef.current = parsed
       setSubjectBooksDisk(parsed)
       setSubjectBooks((memory) => mergeSubjectBooksPreferDisk(memory, parsed))
+    } catch {
+      // Keep the books already on screen when the file cannot be read.
     } finally {
       setSubjectBooksHydrating(false)
     }
@@ -2185,7 +2314,7 @@ export default function App({ startupBootstrap }: AppProps) {
   }, [bookPlacement, refreshSubjectBooksFromDisk])
 
   const handleBookPage = useCallback((page: number, pageCount: number) => {
-    if (!currentBook) return
+    if (!currentBook || !subjectBooksLoadedRef.current) return
     const patched = patchSubjectBookPage(subjectBooksDiskRef.current, currentBook, page, pageCount)
     const current = subjectBooksDiskRef.current.find((book) => book.subjectPath === currentBook.subjectPath)
     const next = patched.find((book) => book.subjectPath === currentBook.subjectPath)
@@ -2416,6 +2545,38 @@ export default function App({ startupBootstrap }: AppProps) {
     })
   }, [])
 
+  const renamedPageStatsKey = (key: string, from: string, to: string) => (
+    key === from || key.startsWith(`${from}/`)
+      ? (key === from ? to : `${to}${key.slice(from.length)}`)
+      : key
+  )
+
+  const remapPageStats = useCallback((from: string, to: string) => {
+    const next = new Map<string, PageStatsSession>()
+    pageStatsRef.current.forEach((session, key) => {
+      next.set(renamedPageStatsKey(key, from, to), session)
+    })
+    pageStatsRef.current = next
+    pageStatsUnreadableRef.current = new Set([...pageStatsUnreadableRef.current].map((key) => renamedPageStatsKey(key, from, to)))
+    const nextInk = new Map<string, Record<string, unknown>>()
+    pendingHistoryInkRef.current.forEach((ink, key) => {
+      nextInk.set(renamedPageStatsKey(key, from, to), ink)
+    })
+    pendingHistoryInkRef.current = nextInk
+  }, [])
+
+  const forgetPageStats = useCallback((path: string) => {
+    for (const key of [...pageStatsRef.current.keys()]) {
+      if (key === path || key.startsWith(`${path}/`)) pageStatsRef.current.delete(key)
+    }
+    for (const key of [...pageStatsUnreadableRef.current]) {
+      if (key === path || key.startsWith(`${path}/`)) pageStatsUnreadableRef.current.delete(key)
+    }
+    for (const key of [...pendingHistoryInkRef.current.keys()]) {
+      if (key === path || key.startsWith(`${path}/`)) pendingHistoryInkRef.current.delete(key)
+    }
+  }, [])
+
   /** The split, the history and the closed-tab stack follow a renamed or moved entry. */
   const remapWorkspacePaths = useCallback((from: string, to: string) => {
     movedPathsRef.current.delete(to)
@@ -2450,6 +2611,7 @@ export default function App({ startupBootstrap }: AppProps) {
     if (session !== vaultSessionGenerationRef.current) return
     remapNotePaperPaths(path, nextPath)
     remapWorkspacePaths(path, nextPath)
+    remapPageStats(path, nextPath)
     vaultStructureRevisionRef.current += 1
     ;[...saveTimers.current.entries()].forEach(([timerPath, timer]) => {
       if (timerPath === path || timerPath.startsWith(`${path}/`)) {
@@ -2476,7 +2638,7 @@ export default function App({ startupBootstrap }: AppProps) {
       : current)
     await refreshTree()
     await Promise.all(renamedPending.map(([renamedPath, content]) => saveContent(renamedPath, content)))
-  }, [flushDocumentLayers, refreshTree, remapNotePaperPaths, remapWorkspacePaths, saveContent, toast])
+  }, [flushDocumentLayers, refreshTree, remapNotePaperPaths, remapPageStats, remapWorkspacePaths, saveContent, toast])
 
   const moveEntry = useCallback(async (path: string, destFolder = '') => {
     const session = vaultSessionGenerationRef.current
@@ -2495,6 +2657,7 @@ export default function App({ startupBootstrap }: AppProps) {
       if (nextPath === path) return
       remapNotePaperPaths(path, nextPath)
       remapWorkspacePaths(path, nextPath)
+      remapPageStats(path, nextPath)
       vaultStructureRevisionRef.current += 1
       ;[...saveTimers.current.entries()].forEach(([timerPath, timer]) => {
         if (timerPath === path || timerPath.startsWith(`${path}/`)) {
@@ -2534,7 +2697,7 @@ export default function App({ startupBootstrap }: AppProps) {
         toast(error instanceof Error ? error.message : 'Verschieben fehlgeschlagen.', 'error')
       }
     }
-  }, [flushDocumentLayers, refreshTree, remapNotePaperPaths, remapWorkspacePaths, saveContent, toast])
+  }, [flushDocumentLayers, refreshTree, remapNotePaperPaths, remapPageStats, remapWorkspacePaths, saveContent, toast])
 
   const trashEntry = useCallback(async (path: string) => {
     const session = vaultSessionGenerationRef.current
@@ -2569,6 +2732,7 @@ export default function App({ startupBootstrap }: AppProps) {
         if (pendingPath === path || pendingPath.startsWith(`${path}/`)) pendingWrites.current.delete(pendingPath)
       })
       setTabs((current) => current.filter((tab) => tab.path !== path && !tab.path.startsWith(`${path}/`)))
+      forgetPageStats(path)
       forgetWorkspacePaths(path)
       setActivePath((current) => {
         if (!current || (current !== path && !current.startsWith(`${path}/`))) return current
@@ -2589,7 +2753,7 @@ export default function App({ startupBootstrap }: AppProps) {
         setMutatingEntryPaths((current) => current.filter((entryPath) => entryPath !== path))
       }
     }
-  }, [flushDocumentLayers, flushPendingEntry, forgetWorkspacePaths, refreshTree, remapNotePaperPaths, toast])
+  }, [flushDocumentLayers, flushPendingEntry, forgetPageStats, forgetWorkspacePaths, refreshTree, remapNotePaperPaths, toast])
 
   const syncPublishedHomework = useCallback(async (current: AppSettings, document?: HomeworkDocument) => {
     const channelId = current.homeworkApiChannelId
@@ -2830,6 +2994,9 @@ export default function App({ startupBootstrap }: AppProps) {
       if (!selected) return
       vaultSessionGenerationRef.current += 1
       searchRequestRef.current += 1
+      pageStatsRef.current = new Map()
+      pageStatsUnreadableRef.current = new Set()
+      pendingHistoryInkRef.current = new Map()
       treeRef.current = []
       setTree([])
       setSearchLoading(false)
@@ -3189,6 +3356,10 @@ export default function App({ startupBootstrap }: AppProps) {
       await openNote(hit.relativePath)
       return
     }
+    if (hit.notePath) {
+      await openNote(hit.notePath)
+      return
+    }
 
     if (!activeTab) {
       toast('Öffne eine Notiz, um die gefundene Handschrift darauf anzuzeigen.', 'info')
@@ -3537,7 +3708,34 @@ export default function App({ startupBootstrap }: AppProps) {
     setHistoryBusy(true)
     try {
       const snapshot = await window.fanotes.readNoteHistory(historyPathFor(activePath), snapshotId)
-      updateContent(snapshot.content)
+      const raw = typeof snapshot.content === 'string' ? snapshot.content : ''
+      // PDF history stores the .famd file. The editor shows the note text;
+      // the payload's handwriting is written back with the next save.
+      const restored = stripFamdPayload(raw)
+      if (isPdfNotePath(activePath)) {
+        const ink = parseFamd(raw).payload?.ink
+        if (ink && typeof ink === 'object' && !Array.isArray(ink)) {
+          pendingHistoryInkRef.current.set(activePath, ink)
+          const markerId = noteInkId(restored)
+          const id = markerId || (typeof ink.id === 'string' ? ink.id : 'famd-ink')
+          setDrawingSession({
+            key: drawingSessionKeyRef.current + 1,
+            document: {
+              id,
+              title: typeof ink.title === 'string' ? ink.title : 'Handschrift',
+              updatedAt: new Date().toISOString(),
+              imageRelativePath: '',
+              dataRelativePath: companionNotePath(activePath, '.famd'),
+              drawingJson: JSON.stringify({ ...ink, id }),
+            },
+            path: activePath,
+          })
+          drawingSessionKeyRef.current += 1
+        } else {
+          pendingHistoryInkRef.current.delete(activePath)
+        }
+      }
+      updateContent(restored)
       setHistoryOpen(false)
       toast('Ältere Version wiederhergestellt. Speichern sichert sie.', 'success')
     } catch (error) {

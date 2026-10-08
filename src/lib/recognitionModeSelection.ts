@@ -58,6 +58,13 @@ export const isScriptOnlyBaselineTextConflict = (automatic: AutomaticRecognition
     text.letters >= 4 &&
     /^[A-ZÄÖÜ][a-zäöü]+$/u.test(compactText)
   )
+  const weakTwoLetterWord = (
+    text.words === 1 &&
+    text.letters === 2 &&
+    text.knownWords === 1 &&
+    (math.weakScriptAssignments ?? 0) >= 1 &&
+    !math.decisiveStructure
+  )
   return (
     math.layoutAssignments >= 1 &&
     math.fractions === 0 &&
@@ -76,6 +83,7 @@ export const isScriptOnlyBaselineTextConflict = (automatic: AutomaticRecognition
       // above and therefore keep real x_1-style formulae decisive.
       completeKnownWords ||
       completePlausibleWords ||
+      weakTwoLetterWord ||
       properNameShape ||
       text.strongSentence ||
       (
@@ -87,7 +95,12 @@ export const isScriptOnlyBaselineTextConflict = (automatic: AutomaticRecognition
       (
         text.visibleCharacters >= 4 &&
         text.letters >= 4 &&
-        text.baselineAlignment >= 0.82
+        text.baselineAlignment >= 0.72
+      ) ||
+      (
+        text.visibleCharacters >= 3 &&
+        text.letters >= 3 &&
+        text.baselineAlignment >= 0.9
       )
     )
   )
@@ -225,7 +238,23 @@ export const assessNeuralTextModeCandidate = (
     !/[√∫∑Σ∏Π∞^_≤≥≠≈]/u.test(normalized)
   )
   const safeCandidate = !formulaSyntax || proseDominatesCandidateFormula
-  const enoughTextEvidence = strongPersonalized || strongKnownWord || strongSentence || strongLetterSequence
+  const alignedUnknownLetters = (
+    letters >= 3 &&
+    letterRatio >= 0.86 &&
+    neural.confidence >= 64 &&
+    words.length >= 1 &&
+    isScriptOnlyBaselineTextConflict(automatic ?? null)
+  )
+  const knownTwoLetterWord = (
+    letters === 2 &&
+    words.length === 1 &&
+    letterRatio >= 0.86 &&
+    neural.confidence >= 50 &&
+    (neural.wordCount ?? 0) >= 1 &&
+    (neural.knownWordRatio ?? 0) >= 1 &&
+    isScriptOnlyBaselineTextConflict(automatic ?? null)
+  )
+  const enoughTextEvidence = strongPersonalized || strongKnownWord || strongSentence || strongLetterSequence || knownTwoLetterWord || alignedUnknownLetters
   const candidateProperName = (
     neural.confidence >= 70 &&
     words.length === 1 &&
@@ -247,8 +276,22 @@ export const assessNeuralTextModeCandidate = (
     !formulaSyntax &&
     (strongKnownWord || strongSentence || candidateProperName)
   )
+  const collapsedWideWordIntegral = Boolean(
+    automatic?.evidence &&
+    /^\\int$/u.test(automatic.mathValue.trim()) &&
+    automatic.evidence.math.largeOperators >= 1 &&
+    automatic.evidence.math.visibleCharacters <= 1 &&
+    automatic.evidence.math.digits === 0 &&
+    automatic.evidence.math.fractions === 0 &&
+    automatic.evidence.math.relations === 0 &&
+    automatic.evidence.math.layoutAssignments === 0 &&
+    (automatic.evidence.text.inkAspectRatio ?? 0) >= 1.2 &&
+    letters >= 3 &&
+    (neural.wordCount ?? 0) >= 1 &&
+    (neural.knownWordRatio ?? 0) >= 1
+  )
   const decisiveAutomaticMath = Boolean(
-    automatic && (() => {
+    automatic && !collapsedWideWordIntegral && (() => {
       const math = automatic.evidence?.math
       // A bare integral-like glyph has no mathematical context of its own.
       // When the independent text beam sees the same letter, or a complete
@@ -276,7 +319,7 @@ export const assessNeuralTextModeCandidate = (
   )
   const mayOverride = neuralTextMayOverrideAutomaticMode(neural, automatic, letters, wordLike)
   const shouldUseText = safeCandidate && enoughTextEvidence && !decisiveAutomaticMath && (
-    automatic?.mode === 'text' || mayOverride || strongPersonalized
+    automatic?.mode === 'text' || mayOverride || strongPersonalized || collapsedWideWordIntegral
   )
   const reason: NeuralTextModeAssessment['reason'] = !safeCandidate
     ? 'formula'

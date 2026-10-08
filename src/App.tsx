@@ -24,6 +24,17 @@ import {
 } from './lib/recognition'
 import { containsGermanSharpS, isSupportedRecognitionLabel, normalizeGermanSharpS } from './lib/orthography'
 import {
+  advanceStableTextPrefix,
+  canCarryUncertainTextState,
+  carryStableTextPrefixAcrossUncertainInk,
+  embeddedTextRecognitionHints,
+  hasLooseTextContinuation,
+  incrementalTextCharacterHint,
+  textPrefixAfterTokenCorrection,
+  textProjectionMatchesTokens,
+  type IncrementalTextRecognitionState,
+} from './lib/incrementalTextRecognition'
+import {
   assessNeuralTextModeCandidate,
 } from './lib/recognitionModeSelection'
 import { createStandardRecognitionSamples } from './lib/standardRecognition'
@@ -63,6 +74,7 @@ const notifyFaNotes = (payload: Record<string, unknown>) => {
 type NeuralTestResult = {
   requestId: string
   text: string
+  exactProjectionSafe?: boolean
   confidence: number
   lineCount: number
   wordCount: number
@@ -181,63 +193,6 @@ const layoutTrainingKey = (assignments: MathLayoutAssignment[]) => assignments
   .sort()
   .join('|')
 
-type IncrementalTextRecognitionState = {
-  strokes: Stroke[]
-  characterCount: number
-  text: string
-  pendingStrokeIndex: number
-  prefixText: string
-}
-
-const strokeExtent = (strokes: Stroke[]) => {
-  const points = strokes.flatMap((stroke) => stroke.points)
-  if (!points.length) return null
-  return {
-    minX: Math.min(...points.map((point) => point.x)),
-    maxX: Math.max(...points.map((point) => point.x)),
-    minY: Math.min(...points.map((point) => point.y)),
-    maxY: Math.max(...points.map((point) => point.y)),
-  }
-}
-
-/**
- * Derives a character-count hint only from append-only pen input.  A new
- * stroke whose body starts at the right edge of the previous word is a new
- * glyph; a dot, crossbar or second loop inside the current glyph keeps the
- * previous count.  New lines and undo/erase deliberately disable the hint.
- */
-const incrementalTextCharacterHint = (
-  previous: IncrementalTextRecognitionState | null,
-  current: Stroke[],
-) => {
-  if (
-    !previous ||
-    previous.characterCount < 1 ||
-    previous.characterCount >= 24 ||
-    current.length <= previous.strokes.length
-  ) return undefined
-  const before = strokeExtent(previous.strokes)
-  const added = strokeExtent(current.slice(previous.strokes.length))
-  if (!before || !added) return undefined
-  const lineHeight = Math.max(0.012, before.maxY - before.minY)
-  const overlapsLine = added.maxY >= before.minY - lineHeight * 0.35
-    && added.minY <= before.maxY + lineHeight * 0.35
-  if (!overlapsLine) return undefined
-  const beginsAtRightEdge = added.minX >= before.maxX - Math.max(0.018, lineHeight * 0.34)
-  const extendsWord = added.maxX >= before.maxX + Math.max(0.004, lineHeight * 0.035)
-  const beginsNewGlyph = beginsAtRightEdge && extendsWord
-  const pendingStrokeIndex = beginsNewGlyph
-    ? previous.strokes.length
-    : Math.max(0, Math.min(previous.pendingStrokeIndex, previous.strokes.length))
-  return {
-    characterCount: beginsNewGlyph ? previous.characterCount + 1 : previous.characterCount,
-    beginsNewGlyph,
-    addedStrokes: current.slice(pendingStrokeIndex),
-    previousText: beginsNewGlyph ? previous.text : previous.prefixText,
-    pendingStrokeIndex,
-  }
-}
-
 const App = () => {
   const canvasRef = useRef<DrawingCanvasHandle>(null)
   const testCanvasRef = useRef<DrawingCanvasHandle>(null)
@@ -323,7 +278,7 @@ const App = () => {
     if (!EMBEDDED_IN_FANOTES || window.parent === window) return
     const receiveNavigation = (event: MessageEvent<unknown>) => {
       if (event.source !== window.parent || !event.data || typeof event.data !== 'object') return
-      const message = event.data as { type?: unknown; schemaVersion?: unknown; view?: unknown; theme?: unknown; reduceMotion?: unknown; palette?: unknown; requestId?: unknown; text?: unknown; confidence?: unknown; lineCount?: unknown; wordCount?: unknown; knownWordRatio?: unknown; personalizedCharacters?: unknown; personalizedSource?: unknown; personalizedConfidence?: unknown }
+      const message = event.data as { type?: unknown; schemaVersion?: unknown; view?: unknown; theme?: unknown; reduceMotion?: unknown; palette?: unknown; requestId?: unknown; text?: unknown; exactProjectionSafe?: unknown; confidence?: unknown; lineCount?: unknown; wordCount?: unknown; knownWordRatio?: unknown; personalizedCharacters?: unknown; personalizedSource?: unknown; personalizedConfidence?: unknown }
       if (message.schemaVersion !== 1) return
       if (message.type === 'glyphenwerk:navigate' && isViewId(message.view)) setView(message.view)
       if (message.type === 'glyphenwerk:appearance') applyFaNotesAppearance(message)
@@ -339,6 +294,7 @@ const App = () => {
         setNeuralTestResult({
           requestId: message.requestId,
           text: message.text,
+          exactProjectionSafe: message.exactProjectionSafe === true,
           confidence: Math.max(0, Math.min(100, Math.round(message.confidence))),
           lineCount: typeof message.lineCount === 'number' && Number.isSafeInteger(message.lineCount)
             ? Math.max(0, message.lineCount)
@@ -392,6 +348,7 @@ const App = () => {
   }, [])
 
   const handleTestStrokesChange = useCallback((strokes: Stroke[]) => {
+    neuralRequestIdRef.current = ''
     setTestStrokes(strokes)
     setLearnedTokenIds(new Set())
     setNeuralTestResult(null)
@@ -468,30 +425,30 @@ const App = () => {
     let active = true
     setIsRecognizing(true)
     const timer = window.setTimeout(() => {
+      if (correctedRecognitionInputRef.current === testStrokes) {
+        setIsRecognizing(false)
+        return
+      }
       // Keep append-only text evidence available even if an unfinished new
       // letter made the immediately preceding preview flip to mathematics.
-      // Strong operators and real formula layout are still decided by the
-      // automatic recognizer, but the next pen stroke can now recover the
-      // stable word prefix instead of inheriting the transient wrong mode.
+      // Only a prefix that was already stable, and only inside the same
+      // writing line, may influence the next guess.
+      const previousIncrementalState = incrementalTextRecognitionRef.current
       const incrementalHint = incrementalTextCharacterHint(
-        incrementalTextRecognitionRef.current,
+        previousIncrementalState,
         testStrokes,
       )
-      const addedCharacter = incrementalHint
-        ? recognizedSentence(recognizeExpression(
-            incrementalHint.addedStrokes,
-            recognitionModel,
-            labels,
-            'text',
-            mathLayoutExamples,
-            getGlyphenWerkLanguage(),
-          )).replace(/\s+/gu, '')
-        : ''
-      const textCharacterHint = incrementalHint
-        ? /^\p{L}$/u.test(addedCharacter)
-          ? `${incrementalHint.previousText}${addedCharacter}`
-          : incrementalHint.previousText
+      const continuationPreviousState = hasLooseTextContinuation(previousIncrementalState, testStrokes)
+        ? previousIncrementalState
+        : null
+      const confirmedTextPrefixHint = continuationPreviousState
+        ? (
+          Array.from(continuationPreviousState.prefixText)
+            .slice(0, continuationPreviousState.confirmedPrefixLength ?? 0)
+            .join('') || undefined
+        )
         : undefined
+      const incrementalTextHints = embeddedTextRecognitionHints(incrementalHint)
       const recognition = recognizeAutomaticExpression(
         testStrokes,
         recognitionModel,
@@ -499,8 +456,10 @@ const App = () => {
         mathLayoutExamples,
         getGlyphenWerkLanguage(),
         recognitionFallbackRef.current,
-        incrementalHint?.characterCount,
-        textCharacterHint,
+        undefined,
+        undefined,
+        incrementalTextHints.textPrefixHint,
+        confirmedTextPrefixHint,
       )
       if (active) {
         recognitionFallbackRef.current = recognition.mode
@@ -518,11 +477,24 @@ const App = () => {
         ) {
           incrementalTextRecognitionRef.current = {
             strokes: testStrokes.slice(),
-            characterCount: Array.from(compactText).length,
+            characterCount: incrementalHint?.characterCount
+              ?? previousIncrementalState?.characterCount
+              ?? 1,
             text: compactText,
             pendingStrokeIndex: incrementalHint?.pendingStrokeIndex ?? 0,
-            prefixText: incrementalHint?.previousText ?? '',
+            prefixText: advanceStableTextPrefix(
+              previousIncrementalState,
+              compactText,
+              Boolean(incrementalHint?.beginsNewGlyph),
+            ),
+            confirmedPrefixLength: previousIncrementalState?.confirmedPrefixLength ?? 0,
+            uncertainCarryCount: 0,
           }
+        } else if (canCarryUncertainTextState(previousIncrementalState, testStrokes)) {
+          incrementalTextRecognitionRef.current = carryStableTextPrefixAcrossUncertainInk(
+            previousIncrementalState,
+            testStrokes,
+          )
         } else if (incrementalHint === undefined) {
           incrementalTextRecognitionRef.current = null
         }
@@ -534,10 +506,7 @@ const App = () => {
             requestId,
             strokes: testStrokes,
             language: getGlyphenWerkLanguage(),
-            textCharacterCountHint: incrementalHint?.characterCount
-              ?? recognition.tokens.filter((token) => !token.isLayout).length,
-            textCharacterHint: textCharacterHint
-              ?? (/^\p{L}{1,24}$/u.test(compactText) ? compactText : undefined),
+            textPrefixHint: incrementalTextHints.textPrefixHint,
           })
         } else {
           setIsRecognizing(false)
@@ -556,7 +525,12 @@ const App = () => {
   }, [labels, mathLayoutExamples, recognitionModel, testStrokes])
 
   useEffect(() => {
-    if (!neuralTestResult || neuralTestResult.requestId !== neuralRequestIdRef.current || !testStrokes.length) return
+    if (
+      !neuralTestResult ||
+      neuralTestResult.requestId !== neuralRequestIdRef.current ||
+      correctedRecognitionInputRef.current === testStrokes ||
+      !testStrokes.length
+    ) return
     setIsRecognizing(false)
     const text = normalizeGermanSharpS(neuralTestResult.text)
       .normalize('NFC')
@@ -577,6 +551,13 @@ const App = () => {
       },
     )
     if (!modeAssessment.shouldUseText) return
+    const confirmedTextPrefix = incrementalTextRecognitionRef.current?.prefixText.slice(
+      0,
+      incrementalTextRecognitionRef.current.confirmedPrefixLength ?? 0,
+    ) ?? ''
+    const compactHostText = text.replace(/\s+/gu, '')
+    const hardProjectionAllowed = neuralTestResult.exactProjectionSafe &&
+      compactHostText.startsWith(confirmedTextPrefix)
     const textTokens = recognizeExpression(
       testStrokes,
       recognitionModel,
@@ -584,30 +565,36 @@ const App = () => {
       'text',
       mathLayoutExamples,
       language,
-      modeAssessment.visibleCharacters,
-      text,
+      hardProjectionAllowed ? modeAssessment.visibleCharacters : undefined,
+      hardProjectionAllowed ? text : undefined,
     )
-    recognitionFallbackRef.current = 'text'
-    const compactNeuralText = text.replace(/\s+/gu, '')
-    if (/^\p{L}{1,24}$/u.test(compactNeuralText)) {
+    const localTokenText = recognizedSentence(textTokens).trim()
+    const exactProjectionSafe = hardProjectionAllowed && textProjectionMatchesTokens(text, localTokenText)
+    const projectedText = exactProjectionSafe
+      ? text
+      : localTokenText
+    if (exactProjectionSafe) recognitionFallbackRef.current = 'text'
+    const compactNeuralText = projectedText.replace(/\s+/gu, '')
+    if (exactProjectionSafe && /^\p{L}{1,24}$/u.test(compactNeuralText)) {
       incrementalTextRecognitionRef.current = {
         strokes: testStrokes.slice(),
         characterCount: Array.from(compactNeuralText).length,
         text: compactNeuralText,
-        pendingStrokeIndex: 0,
-        prefixText: '',
+        pendingStrokeIndex: incrementalTextRecognitionRef.current?.pendingStrokeIndex ?? 0,
+        prefixText: incrementalTextRecognitionRef.current?.prefixText ?? '',
+        confirmedPrefixLength: incrementalTextRecognitionRef.current?.confirmedPrefixLength ?? 0,
       }
     }
     setRecognitionMode('text')
     setRecognitionTokens(textTokens)
     setMathLayoutAssignments([])
-    setNeuralTestText(text)
+    setNeuralTestText(projectedText)
     setAutomaticRecognition((current) => {
       const next = {
         mode: 'text' as const,
         tokens: textTokens,
-        value: text,
-        textValue: text,
+        value: projectedText,
+        textValue: projectedText,
         mathValue: current?.mathValue ?? '',
         confidence: Math.max(neuralTestResult.confidence, current?.confidence ?? 0),
         reason: neuralTestResult.lineCount > 1 ? 'neuronale Textzeilen' : 'neuronale Satzanalyse',
@@ -804,14 +791,23 @@ const App = () => {
         : entry
     )
     correctedRecognitionInputRef.current = testStrokes
+    neuralRequestIdRef.current = ''
+    setNeuralTestResult(null)
     setNeuralTestText('')
     setRecognitionTokens(correctedTokens)
     const visible = correctedTokens.filter((entry) => !entry.isLayout)
+    const correctedVisibleIndex = visible.findIndex((entry) => entry.id === tokenId)
     const correctedToSingleTextLetter = (
       visible.length === 1 &&
       (label.category === 'uppercase' || label.category === 'lowercase' || label.category === 'german')
     )
-    const compactCorrectedText = recognizedSentence(correctedTokens).replace(/\s+/gu, '')
+    const correctedTextValue = recognizedSentence(correctedTokens)
+    const compactCorrectedText = correctedTextValue.replace(/\s+/gu, '')
+    const correctedPrefix = textPrefixAfterTokenCorrection(
+      incrementalTextRecognitionRef.current,
+      compactCorrectedText,
+      correctedVisibleIndex,
+    )
     if (
       (correctedToSingleTextLetter || recognitionMode === 'text') &&
       /^\p{L}{1,24}$/u.test(compactCorrectedText)
@@ -821,7 +817,8 @@ const App = () => {
         characterCount: Array.from(compactCorrectedText).length,
         text: compactCorrectedText,
         pendingStrokeIndex: 0,
-        prefixText: '',
+        prefixText: correctedPrefix.prefixText,
+        confirmedPrefixLength: correctedPrefix.confirmedPrefixLength,
       }
     }
     if (correctedToSingleTextLetter) {
@@ -834,7 +831,8 @@ const App = () => {
           ...current,
           mode: 'text' as const,
           tokens: correctedTokens,
-          value: recognizedSentence(correctedTokens),
+          value: correctedTextValue,
+          textValue: correctedTextValue,
           confidence: 100,
           reason: 'bestätigte manuelle Korrektur',
           textScore: Math.max(current.textScore, current.mathScore + 1),
@@ -868,6 +866,19 @@ const App = () => {
   }
 
   const handleConfirmRecognition = async () => {
+    const compactConfirmedText = recognizedSentence(recognitionTokens).replace(/\s+/gu, '')
+    const confirmedCharacters = Array.from(compactConfirmedText)
+    if (/^\p{L}{1,320}$/u.test(compactConfirmedText)) {
+      correctedRecognitionInputRef.current = testStrokes
+      incrementalTextRecognitionRef.current = {
+        strokes: testStrokes.slice(),
+        characterCount: confirmedCharacters.length,
+        text: compactConfirmedText,
+        pendingStrokeIndex: testStrokes.length,
+        prefixText: compactConfirmedText,
+        confirmedPrefixLength: confirmedCharacters.length,
+      }
+    }
     const entries = recognitionTokens.flatMap((token) => {
       if (learnedTokenIds.has(token.id)) return []
       const label = labels.find((candidate) => candidate.id === token.labelId)

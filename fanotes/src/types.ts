@@ -298,6 +298,8 @@ export type SearchHit = {
   matches: number
   kind?: 'note' | 'drawing'
   drawingId?: string
+  /** Note that already owns this drawing. Opening the hit must not retarget another note. */
+  notePath?: string
 }
 
 export type DrawingAsset = {
@@ -499,6 +501,7 @@ export type FaNotesApi = {
   listDrawings: () => Promise<DrawingLibraryItem[]>
   readDrawing: (id: string) => Promise<DrawingLibraryDocument>
   readFamdInk: (relativePath: string) => Promise<DrawingLibraryDocument | null>
+  readNotePageStats?: (relativePath: string) => Promise<unknown>
   readNotePaperStyle?: (relativePath: string) => Promise<PaperStyle | null>
   setNotePaperStyle?: (relativePath: string, paperStyle: PaperStyle) => Promise<PaperStyle>
   readNoteLinks?: (relativePath: string) => Promise<NoteLinkRecord[]>

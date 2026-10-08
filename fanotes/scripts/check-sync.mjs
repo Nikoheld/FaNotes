@@ -125,7 +125,8 @@ try {
     const blob = await crypto.encryptBytes(keys, id1, plain)
     assert.notDeepEqual(blob.subarray(12), plain)
     assert.deepEqual(await crypto.decryptBytes(keys, id1, blob), plain)
-    await assert.rejects(crypto.decryptBytes(keys, id2.replace(/./u, 'f'), blob), /nicht entschlüsselt/u, 'blob is bound to its file id (AAD)')
+    const tamperedFileId = `${id2.startsWith('a') ? 'b' : 'a'}${id2.slice(1)}`
+    await assert.rejects(crypto.decryptBytes(keys, tamperedFileId, blob), /nicht entschlüsselt/u, 'blob is bound to its file id (AAD)')
     const otherKeys = await crypto.deriveSyncKeys(await crypto.importVaultSecret(crypto.newVaultSecret()))
     await assert.rejects(crypto.decryptBytes(otherKeys, id1, blob))
     const meta = await crypto.encryptMeta(keys, id1, { path: 'Mathe/Algebra.md', mtimeMs: 5, size: plain.byteLength, sha256: await crypto.sha256Hex(plain) })

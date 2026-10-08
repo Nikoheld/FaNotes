@@ -201,8 +201,11 @@ const createAddonStore = (rootDir) => {
       return Array.isArray(parsed) ? parsed : []
     } catch (error) {
       if (error && error.code === 'ENOENT') return []
-      console.warn('addons.json ist beschädigt und wird neu angelegt:', error?.message ?? error)
-      return []
+      if (error instanceof SyntaxError) {
+        console.warn('addons.json ist beschädigt und wird neu angelegt:', error?.message ?? error)
+        return []
+      }
+      throw error
     }
   }
 
