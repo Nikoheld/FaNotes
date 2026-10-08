@@ -60,7 +60,7 @@ import type {
   CorrectionLearningResult,
   RecognitionResources,
 } from '../lib/handwritingDb'
-import { SHAPE_SNAP_LABEL, shapeSnapProfile, snapStrokeToShape, strokeLooksLikeShape } from '../lib/shapeSnap'
+import { SHAPE_SNAP_LABEL, inkStrokeAllowsShapeSnap, shapeSnapAllowsLiveSample, shapeSnapProfile, snapStrokeToShape, strokeLooksLikeShape } from '../lib/shapeSnap'
 import {
   VIEW_ROTATE_STEP,
   VIEW_ZOOM_MIN,
@@ -331,7 +331,6 @@ const EXPORT_SCALE = 2
 /** Fallback hold time after the last real movement to beautify a figure. */
 const SHAPE_DWELL_MS = 700
 const SHAPE_DWELL_HINT_MS = 260
-const SHAPE_MOVE_RESET_PX = 1.8
 
 /** Backing-store size for the ink canvases. Higher when zoomed in so CSS scale stays sharp. */
 const computeInkPixelSize = (layoutWidth: number, layoutHeight: number, viewZoom: number, inlineMode: boolean) => (
@@ -3072,7 +3071,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     if (gestureToolRef.current !== 'pen' || selectionStartRef.current) return false
     const stroke = activeStrokeRef.current
     const profile = readShapeSnapProfile()
-    if (!stroke || stroke.symbolId || stroke.points.length < profile.minPoints) return false
+    if (!inkStrokeAllowsShapeSnap(stroke) || stroke.points.length < profile.minPoints) return false
     const snapped = snapStrokeToShape(stroke, sourceWidth, sourceHeight, settings.shapeSnapSensitivity ?? 50)
     if (!snapped || snapped.confidence < profile.minConfidence) return false
     activeStrokeRef.current = {
@@ -3110,7 +3109,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     if (gestureToolRef.current !== 'pen' || selectionStartRef.current || shapeSnappedRef.current) return
     const stroke = activeStrokeRef.current
     const profile = readShapeSnapProfile()
-    if (!stroke || stroke.symbolId || stroke.points.length < profile.minPoints) return
+    if (!inkStrokeAllowsShapeSnap(stroke) || stroke.points.length < profile.minPoints) return
     if (shapeDwellTimerRef.current === null) {
       shapeDwellTimerRef.current = window.setTimeout(onShapeDwellElapsed, profile.dwellMs)
     }
@@ -3141,8 +3140,10 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     // Predicted points only ever live in the volatile tail, which the next
     // paint clears and repairs — never an incremental overdraw that would
     // leave a ghost copy of the writing behind.
-    const previewPoints = predicted.length
-      ? collectPreviewInkPoints(stroke.points, predicted.map(pointFromEvent)) as StrokePoint[]
+    // Predicted samples must not draw a tail past a figure that already snapped.
+    const livePredicted = shapeSnapAllowsLiveSample(shapeSnappedRef.current) ? predicted : []
+    const previewPoints = livePredicted.length
+      ? collectPreviewInkPoints(stroke.points, livePredicted.map(pointFromEvent)) as StrokePoint[]
       : []
     return paintLiveInk(context, stroke, previewPoints)
   }, [paintLiveInk, pointFromEvent, redraw])
@@ -3150,6 +3151,9 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   // deferPaint: the caller paints once for a whole batch of coalesced samples
   // (one canvas pass per input event instead of one per sample).
   const appendPointerEvent = useCallback((event: PointerEvent, deferPaint = false) => {
+    // The clean figure is final until this pen lifts. Lift jitter and a
+    // continued drag must not add a dot or start freehand on the same contact.
+    if (!shapeSnapAllowsLiveSample(shapeSnappedRef.current)) return
     const canvas = canvasRef.current
     const originEl = (inline
       ? (canvas?.closest('.unified-paper') as HTMLElement | null)
@@ -3269,8 +3273,6 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       }
       shapeLastMoveAtRef.current = performance.now()
       clearShapeDwellTimer()
-      // A larger correction after a snap lets the user keep drawing freehand.
-      if (distance > SHAPE_MOVE_RESET_PX && shapeSnappedRef.current) shapeSnappedRef.current = false
     } else {
       shapeLastMoveAtRef.current = performance.now()
     }
@@ -4035,11 +4037,16 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       scheduleRedraw()
       return
     }
-    if (resolveInkFinishSample(native)) appendPointerEvent(native, true)
     const heldLongEnough = performance.now() - shapeLastMoveAtRef.current >= readShapeSnapProfile().dwellMs
     clearShapeDwellTimer()
-    const activeStroke = activeStrokeRef.current
     if (heldLongEnough && !shapeSnappedRef.current) trySnapActiveShape()
+    // Capture after the snap so pen-up commits the clean figure. The lift
+    // sample is applied only when the stroke is still freehand — a snapped
+    // line must not gain the small move that happens as the pen leaves.
+    const activeStroke = activeStrokeRef.current
+    if (shapeSnapAllowsLiveSample(shapeSnappedRef.current) && resolveInkFinishSample(native)) {
+      appendPointerEvent(native, true)
+    }
     if (
       mathSolverEnabled
       && inkMode === 'writing'

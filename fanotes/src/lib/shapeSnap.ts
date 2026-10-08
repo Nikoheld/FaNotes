@@ -31,6 +31,19 @@ export const SHAPE_SNAP_LABEL: Record<ShapeSnapKind, string> = {
   rectangle: 'Rechteck',
 }
 
+/** Art strokes (marker, highlighter, …) are drawings. A pause while turning must not replace them with a snapped figure. */
+export const inkStrokeAllowsShapeSnap = <T extends { purpose?: string; symbolId?: string }>(
+  stroke: T | null | undefined,
+): stroke is T => stroke != null && stroke.purpose !== 'art' && !stroke.symbolId
+
+/**
+ * After a hold replaces the live stroke with a clean figure, the pen is still
+ * down. Further samples — a wobble, a new direction, or the small move on
+ * lift — must not extend that figure or resume freehand. The next pen-down
+ * starts a new stroke.
+ */
+export const shapeSnapAllowsLiveSample = (snapped: boolean): boolean => !snapped
+
 export const SHAPE_SNAP_SENSITIVITY_DEFAULT = 50
 
 export const clampShapeSnapSensitivity = (value: number) => {

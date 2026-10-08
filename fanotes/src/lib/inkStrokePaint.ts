@@ -399,6 +399,85 @@ export const drawInkStroke = (
     target.stroke()
   }
 
+  /**
+   * Marker centerline. A quadratic fillet sits inside each corner and the
+   * stroke ends on the last sample. The old last-segment control kept going
+   * in the previous direction, so a turn ballooned past the nib and then
+   * snapped back when the next sample arrived.
+   */
+  const paintMarkerStroke = (target: InkPaintContext, alpha: number) => {
+    target.globalAlpha = alpha
+    target.lineJoin = 'round'
+    target.lineCap = 'round'
+    target.lineWidth = segmentWidth(Math.min(firstSegment, stroke.points.length - 1), 1)
+    const from = Math.max(0, firstSegment - 1)
+    const to = Math.max(from, lastSegment - 1)
+    const px = (index: number) => stroke.points[index].x * width
+    const py = (index: number) => stroke.points[index].y * height
+    target.beginPath()
+    target.moveTo(px(from), py(from))
+    if (to === from) {
+      target.stroke()
+      return
+    }
+    const radius = target.lineWidth / 2
+    const smooth = clamp(smoothing, 0, 1)
+    if (smooth <= 0 || to - from < 2) {
+      for (let index = from + 1; index <= to; index += 1) target.lineTo(px(index), py(index))
+      target.stroke()
+      return
+    }
+    let cursorX = px(from)
+    let cursorY = py(from)
+    for (let index = from + 1; index < to; index += 1) {
+      const ax = px(index - 1)
+      const ay = py(index - 1)
+      const bx = px(index)
+      const by = py(index)
+      const cx = px(index + 1)
+      const cy = py(index + 1)
+      const inX = bx - ax
+      const inY = by - ay
+      const outX = cx - bx
+      const outY = cy - by
+      const inLen = Math.hypot(inX, inY)
+      const outLen = Math.hypot(outX, outY)
+      if (inLen < 0.01 || outLen < 0.01) {
+        target.lineTo(bx, by)
+        cursorX = bx
+        cursorY = by
+        continue
+      }
+      const dot = clamp((inX * outX + inY * outY) / (inLen * outLen), -1, 1)
+      const turn = Math.acos(dot)
+      const sinHalf = Math.sin(turn / 2)
+      let trim = 0
+      if (sinHalf > 0.02) {
+        // Keep the centerline inside the nib of the sample so the pen point
+        // stays covered, and inside each leg so neighbouring fillets cannot cross.
+        const maxByNib = (1.7 * radius) / sinHalf
+        const maxByLeg = 0.45 * Math.min(inLen, outLen)
+        trim = Math.min(maxByNib, maxByLeg) * smooth
+      }
+      if (trim < 0.75) {
+        target.lineTo(bx, by)
+        cursorX = bx
+        cursorY = by
+        continue
+      }
+      const startX = bx - (inX / inLen) * trim
+      const startY = by - (inY / inLen) * trim
+      const endX = bx + (outX / outLen) * trim
+      const endY = by + (outY / outLen) * trim
+      if (Math.hypot(startX - cursorX, startY - cursorY) > 0.4) target.lineTo(startX, startY)
+      target.quadraticCurveTo(bx, by, endX, endY)
+      cursorX = endX
+      cursorY = endY
+    }
+    target.lineTo(px(to), py(to))
+    target.stroke()
+  }
+
   const passes = brush === 'calligraphy' ? OPAQUE_PASS : brushPasses(brush)
   const constantWidth = !stroke.pressureEnabled
   const translucent = inkStrokeIsTranslucent(stroke)
@@ -466,6 +545,8 @@ export const drawInkStroke = (
         for (let index = firstSegment; index < lastSegment; index += 1) {
           calligraphyNib(scratch, stroke.points[index - 1], stroke.points[index])
         }
+      } else if (brush === 'marker') {
+        paintMarkerStroke(scratch, 1)
       } else if (constantWidth) {
         paintPassPath(scratch, pass, 1)
       } else {
@@ -483,6 +564,10 @@ export const drawInkStroke = (
       for (let index = firstSegment; index < lastSegment; index += 1) {
         calligraphySegment(stroke.points[index - 1], stroke.points[index])
       }
+      return
+    }
+    if (brush === 'marker') {
+      paintMarkerStroke(context, alpha)
       return
     }
     if (brush === 'highlighter') context.lineCap = 'butt'

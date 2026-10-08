@@ -66,6 +66,8 @@
     "check:paper-canvas": "node scripts/check-paper-canvas.mjs",
     "check:ink-stroke": "node scripts/check-ink-stroke.mjs",
     "check:ink-visible": "node scripts/check-ink-visible.mjs",
+    "check:marker": "node scripts/check-marker.mjs",
+    "check:shape-snap": "node scripts/check-shape-snap-hold.mjs",
     "check:menus": "node scripts/check-menu-ux.cjs",
     "check:keyboard-toolbar": "node scripts/check-keyboard-toolbar.mjs",
     "check:ai": "node scripts/check-ai-providers.cjs",
