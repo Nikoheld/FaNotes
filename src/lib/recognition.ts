@@ -11,7 +11,7 @@ import {
 } from '../data/englishLanguage'
 import { SUPPLEMENTAL_CANONICAL_PROPER_NAMES } from '../data/supplementalProperNames'
 import { isStandardRecognitionSample } from './standardRecognition'
-import { normalizeGermanSharpS } from './orthography'
+import { normalizeGermanSharpS, preservedReadingCharacters } from './orthography'
 
 const SOURCE_WIDTH = 900
 const SOURCE_HEIGHT = 560
@@ -200,6 +200,13 @@ export type RecognitionToken = {
     scoreMargin: number
     autoLearn: boolean
   }
+  /**
+   * `undecidable` means the cut or the label is too close to force a letter.
+   * The ink is unchanged; the character is withheld from the reading.
+   */
+  letterStatus?: 'labeled' | 'undecidable'
+  /** Confidence that this span's boundaries are the right letter cut, 0–100. */
+  cutConfidence?: number
   spaceBefore?: boolean
   lineBreakBefore?: boolean
   isLayout?: boolean
@@ -6541,8 +6548,7 @@ export const recognizeExpression = (
           const hintedLengthPenalty = Number.isInteger(textCharacterCountHint) && textCharacterCountHint! > 0
             ? Math.abs(reranked.length - textCharacterCountHint!) * 0.34
             : 0
-          const hintCharacters = Array.from(normalizeGermanSharpS(textCharacterHint ?? ''))
-            .filter((character) => !/\s/u.test(character))
+          const hintCharacters = preservedReadingCharacters(textCharacterHint ?? '')
           const hintCompatibility = hintCharacters.length === reranked.length && hintCharacters.length > 0
             ? reranked.reduce((sum, token, index) => {
                 const expected = hintCharacters[index]
@@ -7370,8 +7376,8 @@ export const recognizedSentence = (tokens: RecognitionToken[]) => {
   const closingPunctuation = new Set(['.', ',', ';', ':', '!', '?', ')', ']'])
   const openingPunctuation = new Set(['(', '['])
   let previousChar = ''
-  return normalizeGermanSharpS(tokens
-    .filter((token) => !token.isLayout)
+  return tokens
+    .filter((token) => !token.isLayout && token.letterStatus !== 'undecidable')
     .map((token) => {
       const char = token.labelId === 'operator_minus' ? '-' : token.char
       const separator = token.lineBreakBefore
@@ -7380,7 +7386,7 @@ export const recognizedSentence = (tokens: RecognitionToken[]) => {
       previousChar = char
       return `${separator}${char}`
     })
-    .join(''))
+    .join('')
 }
 
 export type AutomaticRecognitionResult = {
@@ -7761,8 +7767,7 @@ export const recognizeAutomaticExpression = (
     textCharacterCountHint,
     textCharacterHint,
   )
-  const hintedCharacters = Array.from(normalizeGermanSharpS(textCharacterHint ?? ''))
-    .filter((character) => !/\s/u.test(character))
+  const hintedCharacters = preservedReadingCharacters(textCharacterHint ?? '')
   const visibleHintedTokens = textTokens.filter((token) => !token.isLayout)
   if (
     hintedCharacters.length >= 1 &&

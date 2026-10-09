@@ -75,6 +75,7 @@
     "check:onboarding": "node scripts/check-first-run-onboarding.cjs",
     "check:glyphenwerk": "node scripts/check-glyphenwerk-integration.cjs",
     "check:glyphenwerk-visible": "node scripts/check-glyphenwerk-visible-recognition.mjs",
+    "check:letter-holdout": "node scripts/check-letter-holdout.mjs",
     "check:glyphenwerk-input": "node scripts/check-drawing-canvas-input.mjs",
     "check:math-solver": "node scripts/check-math-solver.mjs",
     "check:math-corrector": "node scripts/check-math-corrector.mjs",

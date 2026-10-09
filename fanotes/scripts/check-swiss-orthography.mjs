@@ -16,22 +16,23 @@ try {
   const { applyNeuralWordContext } = await server.ssrLoadModule('/src/lib/neuralTextRecognition.ts')
   const { synthesizeHandwriting } = await server.ssrLoadModule('/src/lib/textToHandwriting.ts')
 
-  assert.equal(BASE_CATALOG.some((label) => containsGermanSharpS(label.char)), false)
+  assert.equal(BASE_CATALOG.some((label) => label.char === 'ß' && label.id === 'german_eszett'), true)
   assert.equal(BASE_CATALOG.some((label) => /sharp[_-]?s/iu.test(label.id)), false)
   assert.equal([...GERMAN_COMMON_WORDS].some(containsGermanSharpS), false)
   assert.equal(normalizeGermanSharpS('Straße ẞ'), 'Strasse SS')
   assert.equal(isSupportedRecognitionLabel('ss', 'german_lower_sharp_s'), false)
-  assert.equal(isSupportedRecognitionLabel('ß', 'custom-legacy'), false)
+  assert.equal(isSupportedRecognitionLabel('ß', 'german_eszett'), true)
+  assert.equal(isSupportedRecognitionLabel('ẞ', 'custom-legacy'), false)
   assert.equal(isSupportedRecognitionLabel('ü', 'german_lower_u_umlaut'), true)
 
-  const legacyToken = {
-    labelId: 'german_lower_sharp_s',
+  const eszettToken = {
+    labelId: 'german_eszett',
     char: 'ß',
     alternatives: [],
     confidence: 100,
     bbox: [0, 0, 0.1, 0.1],
   }
-  assert.equal(recognizedSentence([legacyToken]), 'ss')
+  assert.equal(recognizedSentence([eszettToken]), 'ß')
   assert.equal(applyNeuralWordContext('Straße ẞ', 'de'), 'Strasse SS')
   assert.equal(applyNeuralWordContext('ß', 'en'), 'ss')
 
@@ -49,7 +50,7 @@ try {
   assert.equal(synthesized.missingCharacters.includes('ß'), false)
   assert.equal(synthesized.missingCharacters.includes('ẞ'), false)
 
-  console.log('Schweizer Orthografie geprüft: kein ß/ẞ im Katalog, Training oder in Erkennungsausgaben.')
+  console.log('Schweizer Orthografie geprüft: ß bleibt ein Buchstabe; Wörterbuch und Text-zu-Handschrift falten ß/ẞ weiter zu ss/SS.')
 } finally {
   await server.close()
 }
