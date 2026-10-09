@@ -2,9 +2,11 @@ import { useCallback, useLayoutEffect, useRef, useState, type PointerEvent as Re
 import { Link2, X } from 'lucide-react'
 import {
   noteLinkAppearanceToken,
+  noteLinkMarkerCss,
   noteLinkPageAtPoint,
   type NoteLinkRecord,
 } from '../lib/noteLink'
+import { readUsedSheetZoom } from '../lib/paperView'
 
 type MarkerLayout = {
   id: string
@@ -41,25 +43,30 @@ export function NoteLinkLayer({
     if (!layer) return
     const layerRect = layer.getBoundingClientRect()
     const paper = layer.closest('.unified-paper') as HTMLElement | null
-    const paperRect = (paper ?? layer).getBoundingClientRect()
+    const host = paper ?? layer
+    const layoutWidth = host.offsetWidth
+    const layoutHeight = host.offsetHeight
+    const zoom = readUsedSheetZoom(host)
+    const paperBox = {
+      layoutWidth,
+      layoutHeight,
+      visualWidth: layoutWidth * zoom,
+      visualHeight: layoutHeight * zoom,
+    }
     setLayout(links.map((link) => {
-      if (!pdf) {
-        return {
-          id: link.id,
-          left: link.x * paperRect.width,
-          top: link.y * paperRect.height,
-        }
-      }
-      const page = paper?.querySelector<HTMLElement>(`[data-pdf-page="${link.page}"]`)
-      if (!page) {
-        return { id: link.id, left: link.x * paperRect.width, top: link.y * paperRect.height }
-      }
-      const rect = page.getBoundingClientRect()
-      return {
-        id: link.id,
-        left: rect.left - layerRect.left + link.x * rect.width,
-        top: rect.top - layerRect.top + link.y * rect.height,
-      }
+      const page = pdf
+        ? paper?.querySelector<HTMLElement>(`[data-pdf-page="${link.page}"]`)
+        : null
+      const pageRect = page?.getBoundingClientRect()
+      const css = noteLinkMarkerCss(
+        link,
+        paperBox,
+        pageRect
+          ? { left: pageRect.left, top: pageRect.top, width: pageRect.width, height: pageRect.height }
+          : null,
+        { left: layerRect.left, top: layerRect.top },
+      )
+      return { id: link.id, left: css.left, top: css.top }
     }))
   }, [links, pdf])
 

@@ -1,3 +1,5 @@
+import { keepMarkOnPage } from './noteCanvas'
+
 export const NOTE_LINK_STYLE_IDS = ['symbol', 'text', 'symbol-text'] as const
 
 export type NoteLinkStyleId = (typeof NOTE_LINK_STYLE_IDS)[number]
@@ -222,6 +224,29 @@ export const goBackNoteNav = (stack: string[] | null | undefined, current: strin
   return { stack: next, current: previous }
 }
 
+/**
+ * Stored note-link x/y are 0–1 of the painted sheet, the same space as ink.
+ * A min-edge pad moves text by CSS px and ink by `keepMarkOnPage`. Leaving
+ * the fraction untouched parks the pin on the pre-grow paper point.
+ */
+export const noteLinksAfterOriginGrow = <T extends { x: number; y: number }>(
+  links: readonly T[],
+  prev: { width: number; height: number },
+  next: { width: number; height: number; padX?: number; padY?: number },
+): readonly T[] => {
+  const padX = Math.max(0, Number.isFinite(next.padX) ? Number(next.padX) : 0)
+  const padY = Math.max(0, Number.isFinite(next.padY) ? Number(next.padY) : 0)
+  let changed = false
+  const remapped = links.map((link) => {
+    const x = keepMarkOnPage(link.x, prev.width, next.width, padX)
+    const y = keepMarkOnPage(link.y, prev.height, next.height, padY)
+    if (x === link.x && y === link.y) return link
+    changed = true
+    return { ...link, x, y }
+  })
+  return changed ? remapped : links
+}
+
 export const noteLinkPointFromRect = (
   clientX: number,
   clientY: number,
@@ -233,6 +258,54 @@ export const noteLinkPointFromRect = (
     x: sanitizeCoord((clientX - rect.left) / width),
     y: sanitizeCoord((clientY - rect.top) / height),
   }
+}
+
+export type NoteLinkPaperBox = {
+  layoutWidth: number
+  layoutHeight: number
+  visualWidth: number
+  visualHeight: number
+}
+
+export type NoteLinkCssBox = {
+  left: number
+  top: number
+  width: number
+  height: number
+}
+
+/**
+ * CSS left/top for a note-link pin. `link.x`/`link.y` are 0–1 of the paper
+ * (or of one PDF page). CSS left/top are unzoomed layout px on the sheet
+ * plane; getBoundingClientRect is already zoomed, so a fraction times the
+ * visual width places the pin again after CSS zoom.
+ */
+const sheetZoomAxis = (visual: number, layout: number) => {
+  const layoutPx = Math.max(1, Number.isFinite(layout) ? layout : 0)
+  const visualPx = Number.isFinite(visual) ? visual : layoutPx
+  const zoom = visualPx / layoutPx
+  return Number.isFinite(zoom) && zoom > 0 ? zoom : 1
+}
+
+export const noteLinkMarkerCss = (
+  link: { x: number; y: number },
+  paper: NoteLinkPaperBox,
+  page?: NoteLinkCssBox | null,
+  layer?: { left: number; top: number } | null,
+): { left: number; top: number } => {
+  const x = Number.isFinite(link.x) ? link.x : 0
+  const y = Number.isFinite(link.y) ? link.y : 0
+  if (page && layer) {
+    const zoomX = sheetZoomAxis(paper.visualWidth, paper.layoutWidth)
+    const zoomY = sheetZoomAxis(paper.visualHeight, paper.layoutHeight)
+    return {
+      left: (page.left - layer.left) / zoomX + x * (page.width / zoomX),
+      top: (page.top - layer.top) / zoomY + y * (page.height / zoomY),
+    }
+  }
+  const width = Number.isFinite(paper.layoutWidth) ? paper.layoutWidth : 0
+  const height = Number.isFinite(paper.layoutHeight) ? paper.layoutHeight : 0
+  return { left: x * width, top: y * height }
 }
 
 type NoteLinkHitBox = {

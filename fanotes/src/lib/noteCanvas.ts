@@ -246,6 +246,30 @@ export const paperOriginScrollDelta = (
   _nextLayout?: number,
 ) => finiteOriginPx(pad)
 
+/**
+ * Visual scroll after a min-edge pad. `pad` is unzoomed CSS px (same unit as
+ * `paperOriginScrollDelta` / `liveWriteStayPut`). `shift` is already a
+ * viewport delta from `paperSheetLayoutShift`. The scroller’s scrollLeft /
+ * scrollTop are visual px, and a CSS pad inside a zoomed plane moves by
+ * pad * zoom, so the DOM write scales the pad. The reducer stays unscaled.
+ */
+export const scrollForZoomedOriginPad = (
+  scroll: { x: number; y: number },
+  pad: { x: number; y: number },
+  shift: { x?: number; y?: number } = {},
+  zoom = 1,
+) => {
+  const used = Number.isFinite(zoom) && zoom > 0 ? zoom : 1
+  const shiftX = Number.isFinite(shift.x) ? Number(shift.x) : 0
+  const shiftY = Number.isFinite(shift.y) ? Number(shift.y) : 0
+  const scrollX = Number.isFinite(scroll.x) ? scroll.x : 0
+  const scrollY = Number.isFinite(scroll.y) ? scroll.y : 0
+  return {
+    x: scrollX + shiftX + finiteOriginPx(pad.x) * used,
+    y: scrollY + shiftY + finiteOriginPx(pad.y) * used,
+  }
+}
+
 /** How far the sheet’s content-space origin moved across a layout pass. */
 export const paperSheetLayoutShift = (
   before: { x: number; y: number },

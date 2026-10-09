@@ -71,6 +71,7 @@ import {
   normalizeRotation,
   readSharedZoomMax,
   readSharedZoomSpeed,
+  readUsedSheetZoom,
   resolvePaperViewTarget,
   resolvePaperZoomScroller,
   zoomFactorFromWheel,
@@ -200,6 +201,7 @@ import {
   paperScrollBoundsFromVisualRect,
   paperSheetLayoutShift,
   liveWriteStayPut,
+  scrollForZoomedOriginPad,
   textOriginCssPx,
   writeExtentFromContent,
 } from '../lib/noteCanvas'
@@ -207,6 +209,7 @@ import {
   paperRulingBackgroundPosition,
   paperRulingTileOrigin,
 } from '../lib/paperRuling'
+import { noteLinksAfterOriginGrow, type NoteLinkRecord } from '../lib/noteLink'
 import {
   applyVisualGrowCorrection,
   lockPaperViewportEditorScroll,
@@ -693,6 +696,9 @@ export type DrawingBoardProps = {
   confirmDestructive?: (message: string) => Promise<boolean>
   /** Collapsible sections move ink up and down the sheet; off for PDF notes, whose ink must stay on its page. */
   sectionsEnabled?: boolean
+  /** Sheet-relative note links. Remapped with the ink when the write page grows. */
+  noteLinks?: readonly NoteLinkRecord[]
+  onNoteLinksExtent?: (links: readonly NoteLinkRecord[]) => void
 }
 
 type Notice = { kind: 'success' | 'error' | 'info'; text: string }
@@ -1201,6 +1207,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   onPagePaperChange,
   confirmDestructive,
   sectionsEnabled = true,
+  noteLinks,
+  onNoteLinksExtent,
 }: DrawingBoardProps, forwardedRef) {
   // Controls only: the board follows the camera through refs and a
   // subscription, so a wheel zoom does not rebuild this tree on every step.
@@ -1983,6 +1991,10 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
 
   const onInkActivityRef = useRef(onInkActivity)
   onInkActivityRef.current = onInkActivity
+  const noteLinksRef = useRef(noteLinks ?? [])
+  noteLinksRef.current = noteLinks ?? []
+  const onNoteLinksExtentRef = useRef(onNoteLinksExtent)
+  onNoteLinksExtentRef.current = onNoteLinksExtent
 
   /** Every path that adds a finished stroke to the page passes through here. */
   const noteStrokeDrawn = useCallback((stroke: InkStroke) => {
@@ -2688,6 +2700,12 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       compassPoseRef.current = next
       setCompassPose(next)
     }
+    const remappedLinks = noteLinksAfterOriginGrow(
+      noteLinksRef.current,
+      { width: prevPaintW, height: prevPaintH },
+      { width: nextPaintW, height: nextPaintH, padX: addX, padY: addY },
+    )
+    if (remappedLinks !== noteLinksRef.current) onNoteLinksExtentRef.current?.(remappedLinks)
     const afterBox = scroller
       ? {
         left: scroller.getBoundingClientRect().left,
@@ -2703,7 +2721,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       { x: beforeOrigin.minX, y: beforeOrigin.minY },
       { x: afterOrigin.minX, y: afterOrigin.minY },
     )
-    const nextStay = liveWriteStayPut({
+    liveWriteStayPut({
       paperX: 0,
       paperY: 0,
       camX: originCamera.x,
@@ -2719,15 +2737,21 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       painted: { width: paper?.offsetWidth ?? 0, height: paper?.offsetHeight ?? 0 },
       sheetShift: shift,
     })
-    pinPaperViewportAfterExtentGrow(scroller, { x: nextStay.camX, y: nextStay.camY })
+    const stayScroll = scrollForZoomedOriginPad(
+      originCamera,
+      { x: addX, y: addY },
+      shift,
+      readUsedSheetZoom(paper),
+    )
+    pinPaperViewportAfterExtentGrow(scroller, stayScroll)
     const surface = surfaceRef.current
     const canvases = [canvasRef.current, committedCanvasRef.current]
-    applyVisualGrowCorrection(scroller, { x: nextStay.camX, y: nextStay.camY }, { surface, canvases })
+    applyVisualGrowCorrection(scroller, stayScroll, { surface, canvases })
     if (visualGrowFrameRef.current !== null) cancelAnimationFrame(visualGrowFrameRef.current)
     visualGrowFrameRef.current = schedulePaperVisualGrowRefresh(
       (callback) => window.requestAnimationFrame(callback),
       scroller,
-      { x: nextStay.camX, y: nextStay.camY },
+      stayScroll,
       VISUAL_GROW_REFRESH_FRAMES,
       { surface, canvases },
     ) || null
