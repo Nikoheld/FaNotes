@@ -197,11 +197,9 @@ import {
   WRITE_CAP_WIDTH,
   WRITE_MARGIN_X,
   WRITE_MARGIN_Y,
-  growPageFromMark,
   paintedStayExtent,
   savedInkPage,
   writePageStayExtent,
-  keepMarkOnPage,
   mapClientToPage,
   paperScrollBoundsFromVisualRect,
   paperSheetLayoutShift,
@@ -210,6 +208,7 @@ import {
   textOriginCssPx,
   writeExtentFromContent,
 } from '../lib/noteCanvas'
+import { growPageFromMark, keepMarkOnPage } from '../lib/paperCore'
 import {
   paperRulingBackgroundPosition,
   paperRulingTileOrigin,

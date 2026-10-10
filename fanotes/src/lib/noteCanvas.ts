@@ -1,3 +1,5 @@
+import { applyStayPutOp as applyStayPutOpCore, growPageFromMark as growPageFromMarkCore, keepMarkOnPage as keepMarkOnPageCore } from './paperCore'
+
 /**
  * OneNote-like note canvas: one writable page that grows with ink/text,
  * plus a finite extra-paper scroll room that moves with that page.
@@ -171,32 +173,7 @@ export const growPageFromMark = (
   extent: CanvasSize & CanvasOrigin,
   mark: { x?: number; y?: number },
   painted: { width?: number; height?: number } = {},
-) => {
-  const haveX = Math.max(0, Number.isFinite(extent.originX) ? Number(extent.originX) : 0)
-  const haveY = Math.max(0, Number.isFinite(extent.originY) ? Number(extent.originY) : 0)
-  const liveW = writePageStayExtent(extent.width, painted.width)
-  const liveH = writePageStayExtent(extent.height, painted.height)
-  const wantX = growWriteOrigin(mark.x, liveW, WRITE_MARGIN_X, GROW_STEP_X)
-  const wantY = growWriteOrigin(mark.y, liveH, WRITE_MARGIN_Y, GROW_STEP_Y)
-  const padX = Math.max(0, wantX - haveX)
-  const padY = Math.max(0, wantY - haveY)
-  const width = Math.max(
-    growWriteExtent(mark.x, liveW, WRITE_MARGIN_X, GROW_STEP_X),
-    liveW + padX,
-    extent.width + padX,
-  )
-  const height = Math.max(
-    growWriteExtent(mark.y, liveH, WRITE_MARGIN_Y, GROW_STEP_Y),
-    liveH + padY,
-    extent.height + padY,
-  )
-  return {
-    width: Math.min(WRITE_CAP_WIDTH, Math.max(extent.width, width)),
-    height: Math.min(WRITE_CAP_HEIGHT, Math.max(extent.height, height)),
-    padX,
-    padY,
-  }
-}
+) => growPageFromMarkCore(extent, mark, painted)
 
 /** CSS write-page box: fill the viewport, then grow with source as you write. */
 export const writePageLayoutSize = (
@@ -213,12 +190,7 @@ export const keepMarkOnPage = (
   prevExtent: number,
   nextExtent: number,
   minPad = 0,
-) => {
-  if (!Number.isFinite(value) || !(prevExtent > 0) || !(nextExtent > 0)) return value
-  const pad = Math.max(0, Number.isFinite(minPad) ? minPad : 0)
-  if (Math.abs(nextExtent - prevExtent) < 1e-6 && pad === 0) return value
-  return (value * prevExtent + pad) / nextExtent
-}
+) => keepMarkOnPageCore(value, prevExtent, nextExtent, minPad)
 
 const finiteOriginPx = (value: number) => Math.max(0, Number.isFinite(value) ? value : 0)
 
@@ -378,51 +350,9 @@ export const nestedEditorOffsetOnWritePage = (_scrollLeft = 0, _scrollTop = 0) =
  * painted boxes do not become write-page extent. Nested editor X/Y is always
  * 0 — lockEditor is kept for callers but cannot leave a non-zero offset.
  */
-export const applyStayPutOp = (state: StayPutState, op: StayPutOp): StayPutState => {
-  const nextPadX = Math.max(0, op.padX ?? state.originX)
-  const nextPadY = Math.max(0, op.padY ?? state.originY)
-  const addX = originPadDelta(state.originX, nextPadX)
-  const addY = originPadDelta(state.originY, nextPadY)
-  const paper = stayPutPaperAfterOp(
-    { x: state.paperX, y: state.paperY },
-    state.originX,
-    state.originY,
-    nextPadX,
-    nextPadY,
-  )
-  const width = writePageStayExtent(
-    writePageStayExtent(state.width, op.width ?? state.width),
-    op.paintedWidth ?? 0,
-  )
-  const height = writePageStayExtent(
-    writePageStayExtent(state.height, op.height ?? state.height),
-    op.paintedHeight ?? 0,
-  )
-  const hasUserCamera = Number.isFinite(op.camX) || Number.isFinite(op.camY)
-  const fromCamera = {
-    x: Number.isFinite(op.camX) ? Number(op.camX) : state.camX,
-    y: Number.isFinite(op.camY) ? Number(op.camY) : state.camY,
-  }
-  const camera = stayPutAfterExtentGrow(
-    fromCamera,
-    hasUserCamera ? 0 : addX,
-    hasUserCamera ? 0 : addY,
-    op.sheetShift,
-  )
-  const nested = nestedEditorOffsetOnWritePage(op.editorX, op.editorY)
-  return {
-    paperX: paper.x,
-    paperY: paper.y,
-    camX: camera.x,
-    camY: camera.y,
-    width,
-    height,
-    originX: nextPadX,
-    originY: nextPadY,
-    editorX: nested.x,
-    editorY: nested.y,
-  }
-}
+export const applyStayPutOp = (state: StayPutState, op: StayPutOp): StayPutState => (
+  applyStayPutOpCore(state, op)
+)
 
 export type LiveWriteStayPutGrow = {
   width: number
