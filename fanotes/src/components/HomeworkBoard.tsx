@@ -25,6 +25,8 @@ import {
   type HomeworkKind,
   type HomeworkTask,
 } from '../lib/homeworkStore'
+import { CALENDAR_NOTE_PATH, CALENDAR_NOTE_TITLE } from '../lib/calendarModel'
+import { calendarMarkdownWithHomework } from '../lib/homeworkCalendar'
 import { getUiLanguage } from '../i18n'
 
 export type HomeworkBoardProps = {
@@ -239,6 +241,19 @@ export function HomeworkBoard({ subjects, reloadToken = 0, onClose, onOpenNote, 
           } else {
             await window.fanotes.writeFile(HOMEWORK_NOTE_PATH, markdown)
           }
+        }
+        try {
+          let calendarMarkdown = ''
+          try {
+            calendarMarkdown = await window.fanotes.readFile(CALENDAR_NOTE_PATH)
+          } catch {
+            const created = await window.fanotes.createNote('', CALENDAR_NOTE_TITLE)
+            calendarMarkdown = created.relativePath === CALENDAR_NOTE_PATH ? '' : await window.fanotes.readFile(created.relativePath).catch(() => '')
+          }
+          const synced = calendarMarkdownWithHomework(calendarMarkdown, next)
+          await window.fanotes.writeFile(CALENDAR_NOTE_PATH, synced)
+        } catch {
+          /* the homework list itself is already stored */
         }
         if (generation === persistGenerationRef.current) {
           setDocument(next)

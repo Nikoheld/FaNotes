@@ -2,6 +2,26 @@
 
 ## Unveröffentlicht
 
+- **Suche springt zur Handschrift.** Ein Treffer in der unsichtbaren Transkription merkt sich die Höhe auf der Seite und scrollt dorthin.
+- **Zweite Spalte schreibt mit.** Im Stiftmodus ist die fokussierte Spalte ein eigener Editor mit eigenem Verlauf und eigener Speicherung.
+- **Abschnitte klappen auch den Text.** Der erste Handschrift-Abschnitt faltet die erste Überschrift, der zweite die zweite.
+- **Sync-Konflikte bei Markdown.** In den Sync-Einstellungen vergleichst du die Fassungen und behältst die Serverfassung, die lokale Fassung oder führst beide zusammen. PDF und Tinte bleiben Kopien.
+- **Handschriftmodell auf Wunsch.** Unter Sync kannst du die persönlichen GlyphenWerk-Beispiele als verschlüsselte Datei mitnehmen.
+- **Ordner nur auf diesem Gerät.** Im Ordnermenü oder unter Sync bleiben große Bücher lokal, der Rest des Vaults synchronisiert weiter. Der Versionsverlauf kann zusätzlich mit.
+- **Add-ons schreiben Tinte, erkennen, und erreichen Kalender und Hausaufgaben.** Neue Berechtigungen: `ink:write`, `recognition`, `calendar:read`, `calendar:write`, `homework:read`, `homework:write`.
+- **Lernzeit.** Die stille Seitenstatistik wird lokal je Fach, als Tippzeit, Stiftzeit und Wochentag gezeigt.
+- **Hausaufgaben im Kalender.** Ein Fälligkeitsdatum legt einen Termin im Kalender Hausaufgaben an. Erledigt wird er mit einem Haken.
+- **Kalenderdatei und Erinnerung.** Der Kalender importiert und exportiert `.ics` und zeigt einen Hinweis, wenn ein Termin in den nächsten 15 Minuten beginnt.
+- **macOS-Paket.** `npm run dist:mac` baut DMG und Zip für Apple Silicon und Intel. Bauen geht auf einem Mac; die Schritte stehen in `packaging/INSTALL_MAC.md`.
+- **Französisch und bessere deutsche Zeilen.** Die Textsprache hat Französisch für Rechtschreibung und eine französische Nachkorrektur. Deutsche `ae`/`oe`/`ue`/`ss`-Verwechslungen werden auf ein bekanntes Wort mit Umlaut gezogen.
+- **Nächster Schritt.** Der Mathe-Löser schreibt nur den nächsten Umformungsschritt in der eigenen Handschrift.
+- **Lasso.** Ein Rahmen wählt Striche und verschiebt, kopiert, färbt oder löscht sie in einem Rückgängig-Schritt.
+- **Randtranskript.** Die unsichtbare Erkennung steht am Rand. Ein Wort antippen korrigiert es, die Tinte bleibt.
+- **Vorlagen.** Schule, UNI, Privat und Arbeit legen Vorlagen an; die Palette fügt Protokoll, Beweis, Cornell, Vokabeln, Tagebuch oder Besprechung ein.
+- **Rückverweise.** Die Gliederung zeigt, welche Notizen mit einem Wiki-Link auf die offene Notiz zeigen.
+- **PDF-Markierungen.** Ausgewählter PDF-Text wird an Seite und Zitat gehängt, übersteht Zoom und bleibt suchbar.
+- **Versionen in der Gliederung.** Der Verlauf zeigt einen Textunterschied, ob Handschrift dabei ist, und stellt eine Fassung wieder her.
+- **Karteikarten.** Lernfragen aus der Notiz werden mit Nochmal, Schwer, Gut und Leicht wiederholt. Der Plan bleibt in der Notiz.
 
 ## 2026.10.2
 

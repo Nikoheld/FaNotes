@@ -90,7 +90,13 @@ export type AddonHostBridge = {
     setText: (text: string) => boolean
     format: (action: string) => boolean
   }
-  ink: { read: (path: string) => Promise<unknown> }
+  ink: {
+    read: (path: string) => Promise<unknown>
+    write: (path: string, strokes: unknown, mode: 'append' | 'replace') => Promise<boolean>
+  }
+  recognition: { run: (request: { text?: string; language?: string; pngBase64?: string }) => Promise<{ text: string; language: string; source: string }> }
+  calendar: { read: () => Promise<unknown>; write: (document: unknown) => Promise<boolean> }
+  homework: { read: () => Promise<unknown>; write: (document: unknown) => Promise<boolean> }
   stats: { read: (path: string) => Promise<unknown> }
   settings: { read: () => Record<string, unknown> }
   clipboard: { writeText: (text: string) => Promise<void> }
@@ -636,6 +642,20 @@ export class AddonRuntime {
         return bridge.editor.format(asText(args[0], 40, 'Formatierung'))
       case 'ink.read':
         return bridge.ink.read(asPath(args[0]))
+      case 'ink.write':
+        return bridge.ink.write(asPath(args[0]), args[1], args[2] === 'replace' ? 'replace' : 'append')
+      case 'recognition.run':
+        return bridge.recognition.run(isRecord(args[0]) ? args[0] as { text?: string; language?: string; pngBase64?: string } : {})
+      case 'calendar.read':
+        return bridge.calendar.read()
+      case 'calendar.write':
+        await bridge.calendar.write(args[0])
+        return true
+      case 'homework.read':
+        return bridge.homework.read()
+      case 'homework.write':
+        await bridge.homework.write(args[0])
+        return true
       case 'stats.read':
         return bridge.stats.read(asPath(args[0]))
       case 'settings.read':

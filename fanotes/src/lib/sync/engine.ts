@@ -12,6 +12,7 @@
 // as "Name (Konflikt <Gerät> <Datum>).ext", which is then uploaded as a new
 // file so every device ends up with both.
 import type { SyncHostApi, SyncScanEntry } from '../../types'
+import { pathIsSyncExcluded, RECOGNITION_MODEL_SYNC_PATH } from './folderSync'
 import { SyncApi, SyncApiError, type SyncAccountInfo, type SyncRemoteEntry, type SyncSession } from './api'
 import {
   decryptBytes, decryptMeta, deriveFromPassword, deriveSyncKeys, encryptBytes, encryptMeta, fileIdFor, fromBase64, importVaultSecret,
@@ -47,6 +48,12 @@ export type SyncEngineOptions = {
   automatic: () => boolean
   /** True while the app holds unsaved edits for the path; remote changes to it wait for the next cycle. */
   isPathBusy?: (path: string) => boolean
+  /** Folders that stay on this device. The rest of the vault still syncs. */
+  excludedPrefixes?: () => readonly string[]
+  /** The personal handwriting model is a separate encrypted blob. Off by default. */
+  includeRecognitionModel?: () => boolean
+  /** Local note history is skipped unless the user opts in. */
+  includeHistory?: () => boolean
   /** Files the engine wrote or removed on behalf of another device – the app refreshes its tree and open tabs. */
   onApplied?: (change: { written: string[]; removed: string[] }) => void
   onConflict?: (conflict: SyncConflict) => void
@@ -65,16 +72,24 @@ const INTERNAL_DIRECTORY = '.fanotes'
 const SKIPPED_INTERNAL = new Set(['history', 'onboarding.json', 'tree-cache'])
 const SKIPPED_NAMES = new Set(['.DS_Store', 'Thumbs.db', 'desktop.ini'])
 
+export type SyncPathOptions = {
+  excludedPrefixes?: readonly string[]
+  includeRecognitionModel?: boolean
+  includeHistory?: boolean
+}
+
 /** Which vault paths take part in sync: notes, assets and the shared `.fanotes/` metadata, but no local caches or temp files. */
-export const isSyncablePath = (path: string) => {
+export const isSyncablePath = (path: string, options: SyncPathOptions = {}) => {
   if (!path || path.length > 1024 || path.includes('\0') || path.startsWith('/') || path.includes('//')) return false
   const segments = path.split('/')
   if (segments.some((segment) => !segment || segment === '.' || segment === '..')) return false
   const name = segments[segments.length - 1]
   if (SKIPPED_NAMES.has(name) || /\.tmp$/iu.test(name) || /^\.~lock\./u.test(name) || /^~\$/u.test(name)) return false
+  if (path === RECOGNITION_MODEL_SYNC_PATH && !options.includeRecognitionModel) return false
+  if (pathIsSyncExcluded(path, options.excludedPrefixes ?? [])) return false
   if (segments[0] === INTERNAL_DIRECTORY) {
     if (segments.length < 2) return false
-    if (SKIPPED_INTERNAL.has(segments[1])) return false
+    if (SKIPPED_INTERNAL.has(segments[1]) && !(options.includeHistory && segments[1] === 'history')) return false
     return !segments.slice(1).some((segment) => segment.startsWith('.'))
   }
   return !segments.some((segment) => segment.startsWith('.'))
@@ -187,6 +202,18 @@ export class SyncEngine {
     for (const listener of [...this.listeners]) {
       try { listener() } catch (error) { console.error('[sync] listener failed', error) }
     }
+  }
+
+  private pathOptions(): SyncPathOptions {
+    return {
+      excludedPrefixes: this.options?.excludedPrefixes?.() ?? [],
+      includeRecognitionModel: this.options?.includeRecognitionModel?.() ?? false,
+      includeHistory: this.options?.includeHistory?.() ?? false,
+    }
+  }
+
+  private acceptsPath(path: string) {
+    return isSyncablePath(path, this.pathOptions())
   }
 
   private log(level: SyncLogEntry['level'], text: string) {
@@ -550,7 +577,7 @@ export class SyncEngine {
       return { result: 'skipped', path: null }
     }
     const path = meta.path
-    if (!isSyncablePath(path)) return { result: 'skipped', path: null }
+    if (!this.acceptsPath(path)) return { result: 'skipped', path: null }
     const base = this.state.files[path]
     // We already hold this or a newer revision (our own upload, or a re-fetch after a held cursor).
     if (base && base.id === entry.id && entry.revision <= base.revision) return { result: 'noop', path }
@@ -600,7 +627,7 @@ export class SyncEngine {
   private async push(): Promise<{ uploads: number; deletes: number; conflicts: number }> {
     if (!this.session || !this.host || !this.state || !this.keys) return { uploads: 0, deletes: 0, conflicts: 0 }
     this.setState({ progress: { phase: 'scan', done: 0, total: 0 } })
-    const entries = (await this.host.scan()).filter((entry) => isSyncablePath(entry.path))
+    const entries = (await this.host.scan()).filter((entry) => this.acceptsPath(entry.path))
     this.scanCache = new Map(entries.map((entry) => [entry.path, entry]))
     const present = new Set(entries.map((entry) => entry.path))
     const changed: SyncScanEntry[] = []
@@ -609,7 +636,7 @@ export class SyncEngine {
       const base = this.state.files[entry.path]
       if (!base || base.size !== entry.size || base.mtimeMs !== entry.mtimeMs || !entry.mtimeMs || !base.sha256) changed.push(entry)
     }
-    const deleted = Object.keys(this.state.files).filter((path) => !present.has(path))
+    const deleted = Object.keys(this.state.files).filter((path) => this.acceptsPath(path) && !present.has(path))
     this.setState({ pendingLocal: changed.length + deleted.length, progress: { phase: 'push', done: 0, total: changed.length + deleted.length } })
 
     let uploads = 0
@@ -694,6 +721,13 @@ export class SyncEngine {
     if (!this.state) return
     this.state.conflicts = []
     void this.persistState()
+  }
+
+  dismissConflict(copyPath: string) {
+    if (!this.state) return
+    this.state.conflicts = this.state.conflicts.filter((conflict) => conflict.copyPath !== copyPath)
+    void this.persistState()
+    this.setState({ conflicts: this.state.conflicts })
   }
 }
 

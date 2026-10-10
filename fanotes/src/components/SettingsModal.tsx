@@ -827,7 +827,11 @@ export function SettingsModal({
                     <div className="segmented compact">
                       <button type="button" className={settings.recognitionLanguage === 'de' ? 'active' : ''} onClick={() => update('recognitionLanguage', 'de')}>Deutsch</button>
                       <button type="button" className={settings.recognitionLanguage === 'en' ? 'active' : ''} onClick={() => update('recognitionLanguage', 'en')}>Englisch</button>
+                      <button type="button" className={settings.recognitionLanguage === 'fr' ? 'active' : ''} onClick={() => update('recognitionLanguage', 'fr')}>Französisch</button>
                     </div>
+                  </SettingRow>
+                  <SettingRow title="Randtranskript" description="Nach dem Schreiben steht die unsichtbare Erkennung am Rand. Ein Wort antippen korrigiert es, die Tinte bleibt.">
+                    <button type="button" className={`toggle ${settings.marginTranscript ? 'is-on' : ''}`} role="switch" aria-checked={settings.marginTranscript} aria-label="Randtranskript" onClick={() => update('marginTranscript', !settings.marginTranscript)}><span /></button>
                   </SettingRow>
                   <SettingRow title="Lokales Kontextlernen" description="Löst unsichere Buchstaben anhand plausibler Wörter auf und übernimmt ausschließlich sichere Entscheidungen als begrenzte persönliche Trainingsbeispiele."><span>Automatisch aktiv</span></SettingRow>
                   <SettingRow title="Unsichtbarer Suchindex" description="Nur aktiv, wenn „Handschrift zu Text“ unter Experimentell eingeschaltet ist. Die Seite bleibt Handschrift; die Vault-Suche nutzt dann im Hintergrund eine lokale Transkription."><span>{settings.experimentalHandwritingToText ? 'Lokal aktiv' : 'Experimentell aus'}</span></SettingRow>

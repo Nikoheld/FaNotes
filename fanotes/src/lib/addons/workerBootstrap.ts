@@ -69,7 +69,10 @@ export const ADDON_WORKER_BOOTSTRAP = String.raw`
   const notes = api('notes', ['list', 'tree', 'read', 'search', 'active', 'exists', 'write', 'append', 'create', 'open']);
   const vault = api('vault', ['createFolder', 'rename', 'move', 'trash']);
   const editor = api('editor', ['getText', 'getSelection', 'insert', 'replaceSelection', 'setText', 'format']);
-  const ink = api('ink', ['read']);
+  const ink = api('ink', ['read', 'write']);
+  const recognition = api('recognition', ['run']);
+  const calendar = api('calendar', ['read', 'write']);
+  const homework = api('homework', ['read', 'write']);
   const stats = api('stats', ['read']);
   const settings = api('settings', ['read']);
   const clipboard = api('clipboard', ['writeText']);
@@ -179,7 +182,7 @@ export const ADDON_WORKER_BOOTSTRAP = String.raw`
     onDeactivate: (hook) => { if (typeof hook === 'function') deactivateHooks.push(hook); },
     hasPermission: (permission) => addonInfo.permissions.includes(String(permission)),
     log: (...args) => post({ t: 'log', level: 'log', text: args.map(stringify).join(' ').slice(0, 4000) }),
-    notes, vault, editor, ink, stats, settings, clipboard, storage, net, ui, events,
+    notes, vault, editor, ink, recognition, calendar, homework, stats, settings, clipboard, storage, net, ui, events,
     commands: commandsApi,
     FaNotesError,
   });

@@ -35,6 +35,7 @@ export type BrowserSyncVault = {
 }
 
 const FOLDER_COLORS_PATH = '.fanotes/folder-colors.json'
+const RECOGNITION_MODEL_PATH = '.fanotes/recognition-model.json'
 const SUBJECT_BOOKS_PATH = '.fanotes/subject-books.json'
 const DRAWING_PREFIX = '.fanotes/assets/'
 const WORKSHEET_PREFIX = '.fanotes/worksheets/'
@@ -183,7 +184,7 @@ export const createBrowserSyncHost = (vault: BrowserSyncVault): SyncHostApi => {
       await vault.putWorksheet({ ...parsed, updatedAt: when })
       return { path, size: bytes.byteLength, mtimeMs: Math.round(Date.parse(when)) }
     }
-    if (isTextNotePath(path)) {
+    if (path === RECOGNITION_MODEL_PATH || isTextNotePath(path)) {
       const record = { path, content: decoder.decode(bytes), modifiedAt: when }
       await vault.putFile(record)
       vault.invalidateTree()
