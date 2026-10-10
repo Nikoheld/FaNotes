@@ -21,6 +21,7 @@ const os = require('node:os')
 const path = require('node:path')
 const { fileURLToPath, pathToFileURL } = require('node:url')
 const { Worker } = require('node:worker_threads')
+const { coerceWorksheetBytes } = require('./worksheet-bytes.cjs')
 const { encodeWindowCapture } = require('./window-capture.cjs')
 const { publishNewFile } = require('./exclusive-publish.cjs')
 const { safeEntryName } = require('./entry-names.cjs')
@@ -4136,9 +4137,7 @@ function registerIpcHandlers() {
     )
     const format = WORKSHEET_FORMATS.get(extension)
     if (!format) throw new Error('Dieses Bildformat kann nicht auf das Blatt gelegt werden.')
-    const bytes = payload?.bytes
-    const source = Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes?.buffer ? bytes : bytes ?? [])
-    if (!source.length || source.length > format.maxBytes) throw new Error('Das Bild ist leer oder zu groß.')
+    const source = coerceWorksheetBytes(payload?.bytes, format.maxBytes)
     return createWorksheetFromBuffer(source, extension, name)
   })
 
