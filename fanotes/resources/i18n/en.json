@@ -3219,5 +3219,11 @@
   "Wieder synchronisieren": "Sync again",
   "Zeit, Tippen und Handschrift je Fach, nur lokal": "Time, typing and handwriting per subject, local only",
   "Zusammenführen": "Merge",
-  "Lokale Fassung behalten": "Keep local version"
+  "Lokale Fassung behalten": "Keep local version",
+  "Die letzten fünf Minuten (Stift, Notiz, Werkzeug) werden automatisch angehängt und nur an fanotes.fasrv.ch geschickt.": "The last five minutes (pen, note, tool) are attached automatically and sent only to fanotes.fasrv.ch.",
+  "Was ist passiert?": "What happened?",
+  "Bericht senden": "Send report",
+  "Wird gesendet …": "Sending …",
+  "Bitte beschreibe den Fehler kurz. Die letzten fünf Minuten müssen am Bericht hängen.": "Please describe the problem briefly. The last five minutes have to be attached to the report.",
+  "Der Bericht konnte nicht gesendet werden. Prüfe die Verbindung zu fanotes.fasrv.ch.": "The report could not be sent. Check the connection to fanotes.fasrv.ch."
 }

@@ -10,7 +10,7 @@ import {
   Trash2,
   X,
 } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { getUiLanguage } from '../i18n'
 import { dueReminders } from '../lib/calendarReminders'
 import { exportIcs, importIcs } from '../lib/icsCalendar'
@@ -597,7 +597,7 @@ export function CalendarView({ reloadToken = 0, onClose, onOpenNote, onOpenDaily
                   {occurrences.filter((item) => item.event.allDay && occurrenceOnDay(item, day)).map((item) => {
                     const calendar = calendarById(document, item.event.calendarId)
                     return (
-                      <button key={item.key} type="button" className="cal-chip" style={{ background: calendar?.color }} onClick={() => openOccurrence(item)}>{item.event.title}</button>
+                      <button key={item.key} type="button" className="cal-chip" style={chipStyle(calendar?.color)} onClick={() => openOccurrence(item)}>{item.event.title}</button>
                     )
                   })}
                   <button type="button" className="cal-allday-add" aria-label={copy.newEvent} onClick={() => openComposer(day, addDays(day, 1), true)}><Plus size={12} /></button>
@@ -680,6 +680,24 @@ const blockStyle = (start: Date, end: Date): React.CSSProperties => {
   return { top, height }
 }
 
+const inkOn = (hex: string) => {
+  const raw = hex.replace('#', '')
+  const value = raw.length === 3 ? raw.split('').map((part) => `${part}${part}`).join('') : raw.slice(0, 6)
+  const num = Number.parseInt(value, 16)
+  if (!Number.isFinite(num) || value.length < 6) return '#ffffff'
+  const channels = [16, 8, 0].map((shift) => {
+    const channel = ((num >> shift) & 255) / 255
+    return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4
+  })
+  const luminance = channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722
+  return luminance > 0.42 ? '#191919' : '#ffffff'
+}
+
+const chipStyle = (hex?: string): CSSProperties => {
+  const background = hex && /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i.test(hex) ? hex : '#2a6f97'
+  return { background, color: inkOn(background) }
+}
+
 const tint = (hex: string) => {
   const value = hex.replace('#', '')
   const num = Number.parseInt(value, 16)
@@ -712,7 +730,7 @@ function MonthGrid({
               <button type="button" onClick={() => onSelectDay(startOfDay(day))}>{day.getDate()}</button>
               {items.slice(0, 3).map((item) => {
                 const calendar = calendarById({ version: 1, calendars, events: [] }, item.event.calendarId)
-                return <button key={item.key} type="button" className="cal-chip" style={{ background: calendar?.color }} onClick={() => onOpen(item)}>{item.event.allDay ? item.event.title : `${timeLabel(item.start)} ${item.event.title}`}</button>
+                return <button key={item.key} type="button" className="cal-chip" style={chipStyle(calendar?.color)} onClick={() => onOpen(item)}>{item.event.allDay ? item.event.title : `${timeLabel(item.start)} ${item.event.title}`}</button>
               })}
               {items.length > 3 && <em>+{items.length - 3} {copy.more}</em>}
             </div>
