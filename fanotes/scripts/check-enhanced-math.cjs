@@ -13,6 +13,13 @@ const {
   cleanEnhancedMathLatex,
   createEnhancedMathService,
 } = require('../electron/enhanced-math.cjs')
+const { assertModelDownloadUrl } = require('../electron/download-hosts.cjs')
+
+assert.throws(() => assertModelDownloadUrl('https://huggingface.co/cstr/model/resolve/main/model.gguf', 'https://evil.example/model.gguf'), /Unsicheres Downloadziel/u)
+assert.equal(
+  assertModelDownloadUrl('https://huggingface.co/cstr/model/resolve/main/model.gguf', 'https://cas-bridge.xethub.hf.co/repos/model.gguf').hostname,
+  'cas-bridge.xethub.hf.co',
+)
 
 assert.equal(cleanEnhancedMathLatex('<sos> \\frac{x+1}{2} <eos>'), '\\frac{x+1}{2}')
 assert.equal(cleanEnhancedMathLatex('$$ \\sum_{i=1}^{n} i $$'), '\\sum_{i=1}^{n} i')
@@ -138,6 +145,20 @@ const service = createEnhancedMathService({
     service.recognize({ pixels: new Uint8Array(3), width: 64, height: 48 }),
     /Formelbild ist ungültig/u,
   )
+  const locked = createEnhancedMathService({
+    userDataPath: path.join(temporary, 'lock'),
+    runtimePath: () => path.join(temporary, 'missing-runtime'),
+    fetchImpl: async () => { throw new Error('Kein Download in diesem Test.') },
+    spawnImpl: () => { throw new Error('Kein Prozess in diesem Test.') },
+    model,
+  })
+  await fsp.mkdir(path.join(temporary, 'lock'))
+  const pixels = new Uint8Array(64 * 48)
+  const firstLock = await locked.recognize({ pixels, width: 64, height: 48 }).catch((error) => error)
+  const secondLock = await locked.recognize({ pixels, width: 64, height: 48 }).catch((error) => error)
+  assert.match(firstLock.message, /nicht verfügbar/u)
+  assert.match(secondLock.message, /nicht verfügbar/u)
+  assert.doesNotMatch(secondLock.message, /läuft bereits/u)
   console.log('Erweiterte Formelerkennung geprüft: Lizenz-Gate, atomarer Hash-Download, Eingabelimits, PGM-Prozessgrenze und LaTeX-Sanitizing.')
 })().finally(() => {
   fs.rmSync(temporary, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 })

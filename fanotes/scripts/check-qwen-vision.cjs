@@ -79,4 +79,46 @@ for (const [source, needle, label] of checks) {
   if (!source.includes(needle)) throw new Error(`Qwen-Vision-Prüfung fehlgeschlagen: ${label}`)
 }
 
-console.log('Qwen-Vision-Prüfung erfolgreich: optionales Qwen3-VL INT4 NPU-only, Settings, IPC und DrawingBoard-Pfad sind verdrahtet.')
+const assert = require('node:assert/strict')
+const fsp = require('node:fs/promises')
+const os = require('node:os')
+const { assertDownloadSize, createQwenVisionService } = require('../electron/qwen-vision.cjs')
+const { assertModelDownloadUrl } = require('../electron/download-hosts.cjs')
+
+assert.throws(() => assertDownloadSize(10, 4), /unvollständig/u)
+assert.throws(() => assertDownloadSize(3_000_000_000, 3_000_000_000), /gross/u)
+assert.doesNotThrow(() => assertDownloadSize(null, 12))
+assert.throws(
+  () => assertModelDownloadUrl('https://huggingface.co/org/model/resolve/main/config.json', 'https://evil.example/config.json'),
+  /Unsicheres Downloadziel/u,
+)
+assert.equal(
+  assertModelDownloadUrl('https://huggingface.co/org/model/resolve/main/config.json', 'https://cdn-lfs.huggingface.co/org/config.json').hostname,
+  'cdn-lfs.huggingface.co',
+)
+
+async function assertRecognitionLockClears() {
+  const userData = await fsp.mkdtemp(path.join(os.tmpdir(), 'fanotes-qwen-lock-'))
+  try {
+    const service = createQwenVisionService({
+      userDataPath: userData,
+      spawnImpl() { throw new Error('Python darf in diesem Test nicht starten.') },
+      fetchImpl: async () => { throw new Error('Kein Download in diesem Test.') },
+    })
+    const pixels = new Uint8Array(32 * 32 * 3)
+    const first = await service.recognize({ pixels, width: 32, height: 32 }).then(() => null, (error) => error)
+    const second = await service.recognize({ pixels, width: 32, height: 32 }).then(() => null, (error) => error)
+    assert.match(first.message, /nicht installiert/u)
+    assert.match(second.message, /nicht installiert/u)
+    assert.doesNotMatch(second.message, /läuft bereits/u)
+  } finally {
+    await fsp.rm(userData, { recursive: true, force: true })
+  }
+}
+
+void assertRecognitionLockClears().then(() => {
+  console.log('Qwen-Vision-Prüfung erfolgreich: NPU-INT4, Downloadgrenzen, Sperre wird nach einem Fehler wieder freigegeben.')
+}).catch((error) => {
+  console.error(error)
+  process.exit(1)
+})
