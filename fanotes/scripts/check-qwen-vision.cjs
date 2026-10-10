@@ -80,6 +80,7 @@ for (const [source, needle, label] of checks) {
 }
 
 const assert = require('node:assert/strict')
+const { spawnSync } = require('node:child_process')
 const fsp = require('node:fs/promises')
 const os = require('node:os')
 const { assertDownloadSize, createQwenVisionService } = require('../electron/qwen-vision.cjs')
@@ -96,6 +97,15 @@ assert.equal(
   assertModelDownloadUrl('https://huggingface.co/org/model/resolve/main/config.json', 'https://cdn-lfs.huggingface.co/org/config.json').hostname,
   'cdn-lfs.huggingface.co',
 )
+
+const badTokens = spawnSync('python3', [path.join(root, 'electron', 'qwen-vision-worker.py')], {
+  input: '{"command":"recognize","maxNewTokens":"no"}\n',
+  encoding: 'utf8',
+})
+assert.equal(badTokens.status, 2)
+assert.match(badTokens.stdout, /"ok": false/u)
+assert.match(badTokens.stdout, /Ungültige Tokenanzahl/u)
+assert.doesNotMatch(badTokens.stderr, /Traceback/u)
 
 async function assertRecognitionLockClears() {
   const userData = await fsp.mkdtemp(path.join(os.tmpdir(), 'fanotes-qwen-lock-'))

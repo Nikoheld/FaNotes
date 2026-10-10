@@ -374,7 +374,12 @@ def main() -> int:
     model_dir = Path(str(request.get("modelDir") or ""))
     image_path = Path(str(request.get("imagePath") or ""))
     prompt = str(request.get("prompt") or "").strip()
-    max_new_tokens = int(request.get("maxNewTokens") or 220)
+    raw_tokens = request.get("maxNewTokens")
+    try:
+        max_new_tokens = int(raw_tokens) if raw_tokens is not None else 220
+    except (TypeError, ValueError):
+        emit({"ok": False, "error": "Ungültige Tokenanzahl."})
+        return 2
     max_new_tokens = max(48, min(512, max_new_tokens))
     if not prompt:
         prompt = (
