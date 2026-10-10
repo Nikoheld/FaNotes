@@ -4500,7 +4500,7 @@ export default function App({ startupBootstrap }: AppProps) {
               />
             )
           })()}
-          <div className={`editor-toolbar ${drawingOpen ? 'is-ink' : 'is-type'}`}>
+          {!calendarOpen && !homeworkOpen && !overviewOpen && !glyphenWerkOpen && <div className={`editor-toolbar ${drawingOpen ? 'is-ink' : 'is-type'}`}>
             <div className="mode-switch" role="group" aria-label="Eingabemodus">
               <button
                 type="button"
@@ -4660,7 +4660,7 @@ export default function App({ startupBootstrap }: AppProps) {
                 </div>}
               </div>
             </div>
-          </div>
+          </div>}
           <div className={`editor-stage ${bookPolicy.paneVisible && bookPolicy.placement && bookPolicy.placement !== 'popout' ? `has-subject-book is-${bookPolicy.placement}` : ''}`}>
             {bookPolicy.paneVisible && bookPolicy.placement && bookPolicy.placement !== 'popout' && (
               currentBook ? (
