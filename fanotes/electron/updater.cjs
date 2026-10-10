@@ -416,20 +416,36 @@ const hostOf = (value) => {
   }
 }
 
-const isPrivateAddress = (address) => {
-  if (typeof address !== 'string' || !address) return false
-  if (address.includes(':')) {
-    const lower = address.toLowerCase()
-    return lower === '::1' || lower.startsWith('fe80:') || lower.startsWith('fc') || lower.startsWith('fd')
-  }
+const isPrivateIpv4 = (address) => {
   const parts = address.split('.').map((part) => Number(part))
   if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return false
   const [first, second] = parts
-  return first === 10 || first === 127 || first === 0
+  return first === 10 || first === 127 || first === 0 || first >= 224
     || (first === 192 && second === 168)
     || (first === 172 && second >= 16 && second <= 31)
     || (first === 169 && second === 254)
     || (first === 100 && second >= 64 && second <= 127)
+}
+
+const isPrivateAddress = (address) => {
+  if (typeof address !== 'string' || !address) return false
+  const value = address.trim().toLowerCase().replace(/^\[|\]$/gu, '').split('%', 1)[0]
+  const dottedMapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/u.exec(value)
+  if (dottedMapped) return isPrivateIpv4(dottedMapped[1])
+  const hexMapped = /^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/u.exec(value)
+  if (hexMapped) {
+    const high = Number.parseInt(hexMapped[1], 16)
+    const low = Number.parseInt(hexMapped[2], 16)
+    return isPrivateIpv4(`${high >> 8}.${high & 255}.${low >> 8}.${low & 255}`)
+  }
+  if (value.includes(':')) {
+    if (value === '::' || value === '::1') return true
+    const first = Number.parseInt(value.split(':', 1)[0] || '0', 16)
+    if (!Number.isInteger(first)) return true
+    // 2000::/3 is global unicast. Loopback, ULA, link-local and multicast are not the update host.
+    return !(first >= 0x2000 && first <= 0x3fff)
+  }
+  return isPrivateIpv4(value)
 }
 
 const nodeErrorCode = (error) => {

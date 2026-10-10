@@ -31,6 +31,20 @@ async function main() {
     assert.equal(isPrivateAddress('10.0.0.1'), true)
     assert.equal(isPrivateAddress('192.168.0.1'), true)
     assert.equal(isPrivateAddress('8.8.8.8'), false)
+    assert.equal(isPrivateAddress('::ffff:10.8.0.1'), true)
+    assert.equal(isPrivateAddress('::ffff:8.8.8.8'), false)
+    assert.equal(isPrivateAddress('::ffff:7f00:1'), true)
+    assert.equal(isPrivateAddress('::1'), true)
+    assert.equal(isPrivateAddress('[fe80::1]'), true)
+    assert.equal(isPrivateAddress('2001:4860:4860::8888'), false)
+    assert.equal(isPrivateAddress('169.254.169.254'), true)
+    const mappedHijack = diagnoseUpdateFailure({
+      phase: 'download',
+      url: 'https://fanotes.fasrv.ch/download/appimage',
+      error: Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED' }),
+      resolvedAddress: '::ffff:10.8.0.1',
+    })
+    assert.equal(mappedHijack.kind, 'dns-hijack')
     const redirected = diagnoseUpdateFailure({
       phase: 'download',
       url: 'https://fanotes.fasrv.ch/download/appimage',
