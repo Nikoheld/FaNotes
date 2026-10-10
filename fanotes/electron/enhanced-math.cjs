@@ -6,6 +6,7 @@ const fsp = require('node:fs/promises')
 const os = require('node:os')
 const path = require('node:path')
 const { spawn } = require('node:child_process')
+const { assertModelDownloadUrl } = require('./download-hosts.cjs')
 
 const MODEL = Object.freeze({
   id: 'posformer-crohme-q4-k',
@@ -224,8 +225,7 @@ function createEnhancedMathService({
           headers: { 'User-Agent': 'FaNotes enhanced-math-model/1' },
         })
         if (!response?.ok || !response.body) throw new Error(`Modell-Download fehlgeschlagen (${response?.status ?? 'Netzwerk'}).`)
-        const finalUrl = new URL(response.url || descriptor.url)
-        if (finalUrl.protocol !== 'https:') throw new Error('Unsicheres Modell-Downloadziel abgelehnt.')
+        assertModelDownloadUrl(descriptor.url, response.url || descriptor.url)
         const declaredLength = Number(response.headers?.get?.('content-length'))
         if (Number.isFinite(declaredLength) && declaredLength !== descriptor.size) {
           throw new Error('Der Modellserver meldet eine unerwartete Dateigrösse.')
@@ -260,7 +260,6 @@ function createEnhancedMathService({
   }
 
   const recognize = async (request) => {
-    if (recognitionActive) throw new Error('Eine erweiterte Formelerkennung läuft bereits.')
     if (
       !request
       || !(request.pixels instanceof Uint8Array)
@@ -273,12 +272,14 @@ function createEnhancedMathService({
       || request.pixels.length !== request.width * request.height
       || request.pixels.length > MAX_IMAGE_BYTES
     ) throw new Error('Das Formelbild ist ungültig.')
+    if (recognitionActive) throw new Error('Eine erweiterte Formelerkennung läuft bereits.')
     recognitionActive = true
     const startedAt = Date.now()
-    const temporary = await fsp.mkdtemp(path.join(os.tmpdir(), 'fanotes-enhanced-math-'))
-    const imagePath = path.join(temporary, 'formula.pgm')
+    let temporary = null
     let child
     try {
+      temporary = await fsp.mkdtemp(path.join(os.tmpdir(), 'fanotes-enhanced-math-'))
+      const imagePath = path.join(temporary, 'formula.pgm')
       const [executables, verifiedModel] = await Promise.all([verifyRuntime(), verifyModel()])
       const header = Buffer.from(`P5\n${request.width} ${request.height}\n255\n`, 'ascii')
       await fsp.writeFile(imagePath, Buffer.concat([header, Buffer.from(request.pixels)]), { mode: 0o600, flag: 'wx' })
@@ -362,7 +363,7 @@ function createEnhancedMathService({
     } finally {
       child?.kill('SIGKILL')
       recognitionActive = false
-      await fsp.rm(temporary, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }).catch(() => {})
+      if (temporary) await fsp.rm(temporary, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }).catch(() => {})
     }
   }
 

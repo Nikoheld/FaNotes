@@ -37,6 +37,8 @@ const isInside = (root, target) => {
   return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative))
 }
 
+const WINDOWS_DEVICE_NAME = /^(con|prn|aux|nul|com[0-9]|lpt[0-9])$/iu
+
 const safeSegment = (value, fallback = 'Unbenannt') => {
   const safe = String(value ?? '')
     .normalize('NFC')
@@ -45,7 +47,8 @@ const safeSegment = (value, fallback = 'Unbenannt') => {
     .replace(/[. ]+$/gu, '')
     .trim()
     .slice(0, 120)
-  return safe && safe !== '.' && safe !== '..' ? safe : fallback
+  if (!safe || safe === '.' || safe === '..' || WINDOWS_DEVICE_NAME.test(safe.split('.')[0].trim())) return fallback
+  return safe
 }
 
 const markdownTitle = (value) => safeSegment(value, 'OneNote-Seite').replace(/([\\`*_{}\[\]()#+.!|-])/gu, '\\$1')
@@ -260,9 +263,15 @@ async function materializeOneNoteTools({ embeddedRoot, cacheRoot, platform = pro
   return tools
 }
 
+const codePointFromEntity = (raw, radix) => {
+  const point = radix === 16 ? Number.parseInt(raw, 16) : Number(raw)
+  if (!Number.isInteger(point) || point < 0 || point > 0x10ffff || (point >= 0xD800 && point <= 0xDFFF)) return '\uFFFD'
+  return String.fromCodePoint(point)
+}
+
 const decodeHtmlEntities = (value) => value
-  .replace(/&#x([0-9a-f]+);/giu, (_match, number) => String.fromCodePoint(Math.min(0x10ffff, Number.parseInt(number, 16))))
-  .replace(/&#([0-9]+);/gu, (_match, number) => String.fromCodePoint(Math.min(0x10ffff, Number(number))))
+  .replace(/&#x([0-9a-f]+);/giu, (_match, number) => codePointFromEntity(number, 16))
+  .replace(/&#([0-9]+);/gu, (_match, number) => codePointFromEntity(number, 10))
   .replace(/&(nbsp|amp|lt|gt|quot|apos);/giu, (_match, entity) => ({ nbsp: ' ', amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" })[entity.toLocaleLowerCase('en-US')])
 
 function extractSearchText(html) {
@@ -283,7 +292,14 @@ function extractSearchText(html) {
 function pageDimensions(html) {
   const values = (name) => [...html.matchAll(new RegExp(`(?:^|[;\\s\"])(?:max-)?${name}\\s*:\\s*(-?[0-9.]+)px`, 'giu'))]
     .map((match) => Number(match[1])).filter((value) => Number.isFinite(value) && value >= 0)
-  const max = (items, fallback) => items.length ? Math.max(...items) : fallback
+  const max = (items, fallback) => {
+    if (!items.length) return fallback
+    let best = items[0]
+    for (let index = 1; index < items.length; index += 1) {
+      if (items[index] > best) best = items[index]
+    }
+    return best
+  }
   const blockCount = (html.match(/<(?:p|li|tr|h[1-6])\b/giu) ?? []).length
   const width = Math.max(720, Math.min(3000, max(values('left'), 0) + max(values('width'), 720) + 96))
   const height = Math.max(900, Math.min(30_000, max(values('top'), 0) + max(values('height'), 160) + 140, blockCount * 24 + 280))
@@ -379,6 +395,32 @@ function buildPageParentMap(htmlFiles, outputRoot) {
   return parents
 }
 
+async function writeUniqueMarkdown(directory, title, markdown) {
+  const stem = safeSegment(title, 'OneNote-Seite')
+  for (let index = 0; index < 10_000; index += 1) {
+    const name = index === 0 ? `${stem}.md` : `${stem} ${index + 1}.md`
+    const target = path.join(directory, name)
+    let handle
+    try {
+      handle = await fsp.open(
+        target,
+        fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_WRONLY | (fs.constants.O_NOFOLLOW || 0),
+        0o600,
+      )
+      await handle.writeFile(markdown)
+      await handle.sync()
+      await handle.close()
+      return target
+    } catch (error) {
+      await handle?.close().catch(() => {})
+      if (error?.code === 'EEXIST') continue
+      await fsp.rm(target, { force: true }).catch(() => {})
+      throw error
+    }
+  }
+  throw new Error('Für die OneNote-Seite konnte kein freier Dateiname erzeugt werden.')
+}
+
 async function uniqueDirectory(parent, preferred) {
   for (let index = 0; index < 10_000; index += 1) {
     const name = index ? `${preferred} ${index + 1}` : preferred
@@ -442,6 +484,7 @@ async function importOneNoteToVault({ inputPath, vaultRoot, one2html, sevenZip }
   const temporaryRoot = await fsp.mkdtemp(path.join(os.tmpdir(), 'fanotes-onenote-'))
   let noteRoot = null
   let internalBatch = null
+  const createdWorksheets = []
   try {
     const inputs = await prepareInput(inputPath, temporaryRoot, sevenZip)
     const outputRoot = path.join(temporaryRoot, 'rendered')
@@ -504,14 +547,14 @@ async function importOneNoteToVault({ inputPath, vaultRoot, one2html, sevenZip }
         textBoxes: [],
       }
       await atomicWrite(sourcePath, page.html)
+      createdWorksheets.push(sourcePath)
       await atomicWrite(dataPath, `${JSON.stringify(worksheet, null, 2)}\n`)
-      let notePath = path.join(noteDirectory, `${safeSegment(page.title, 'OneNote-Seite')}.md`)
-      for (let index = 2; fs.existsSync(notePath); index += 1) notePath = path.join(noteDirectory, `${safeSegment(page.title, 'OneNote-Seite')} ${index}.md`)
+      createdWorksheets.push(dataPath)
       const searchable = page.transcript
         ? `\n<details>\n<summary>Importierter Text · suchbar und bearbeitbar</summary>\n\n\`\`\`text\n${page.transcript.replaceAll('```', 'ˋˋˋ')}\n\`\`\`\n\n</details>\n`
         : ''
       const markdown = `# ${markdownTitle(page.title)}\n\n<!-- fanotes-onenote:${sourceDigest.slice(0, 24)} -->\n<!-- fanotes-worksheet:${id} -->\n${searchable}`
-      await atomicWrite(notePath, markdown)
+      const notePath = await writeUniqueMarkdown(noteDirectory, page.title, markdown)
       importedNotes.push(path.relative(vaultRoot, notePath).split(path.sep).join('/'))
     }
     const manifest = {
@@ -538,10 +581,19 @@ async function importOneNoteToVault({ inputPath, vaultRoot, one2html, sevenZip }
   } catch (error) {
     if (noteRoot) await fsp.rm(noteRoot, { recursive: true, force: true }).catch(() => {})
     if (internalBatch) await fsp.rm(internalBatch, { recursive: true, force: true }).catch(() => {})
+    await Promise.all(createdWorksheets.map((file) => fsp.rm(file, { force: true }).catch(() => {})))
     throw error
   } finally {
     await fsp.rm(temporaryRoot, { recursive: true, force: true }).catch(() => {})
   }
 }
 
-module.exports = { importOneNoteToVault, materializeOneNoteTools, TOOL_MANIFEST }
+module.exports = {
+  decodeHtmlEntities,
+  importOneNoteToVault,
+  materializeOneNoteTools,
+  pageDimensions,
+  safeSegment,
+  TOOL_MANIFEST,
+  writeUniqueMarkdown,
+}

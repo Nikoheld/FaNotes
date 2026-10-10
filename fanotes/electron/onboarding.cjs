@@ -131,6 +131,11 @@ function onboardingRequiredFromConfig(candidate) {
   return candidate?.onboarding?.version === 1 && candidate.onboarding.completed === false
 }
 
+/** Only an explicit pending marker blocks the shell. Missing status is a pre-onboarding vault. */
+function onboardingRequiredFromVaultStatus(status) {
+  return status === 'pending'
+}
+
 function parseOnboardingStatus(candidate) {
   return candidate?.version === 1 && ['pending', 'complete'].includes(candidate.status)
     ? candidate.status
@@ -147,6 +152,7 @@ module.exports = {
   starterProfilesForLanguage,
   starterFoldersForLanguage,
   onboardingRequiredFromConfig,
+  onboardingRequiredFromVaultStatus,
   parseOnboardingStatus,
   validateStarterSubjectSelection,
 }

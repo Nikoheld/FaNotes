@@ -7,7 +7,38 @@ const fsp = require('node:fs/promises')
 const os = require('node:os')
 const path = require('node:path')
 const { spawnSync } = require('node:child_process')
-const { importOneNoteToVault, materializeOneNoteTools, TOOL_MANIFEST } = require('../electron/onenote-importer.cjs')
+const {
+  decodeHtmlEntities,
+  importOneNoteToVault,
+  materializeOneNoteTools,
+  pageDimensions,
+  safeSegment,
+  TOOL_MANIFEST,
+  writeUniqueMarkdown,
+} = require('../electron/onenote-importer.cjs')
+
+assert.equal(decodeHtmlEntities('A&#x41;&#65;&amp;'), 'AAA&')
+assert.equal(decodeHtmlEntities('&#xD800;&#x110000;&#999999999999;'), '\uFFFD\uFFFD\uFFFD')
+assert.equal(safeSegment('CON', 'OneNote-Seite'), 'OneNote-Seite')
+assert.equal(safeSegment('comic', 'OneNote-Seite'), 'comic')
+{
+  const widths = Array.from({ length: 150_000 }, () => 'width:2px;').join('')
+  const dimensions = pageDimensions(`<div style="width:1800px;${widths}">`)
+  assert.equal(dimensions.width, Math.min(3000, 1800 + 96))
+}
+async function assertUniqueNoteDoesNotReplace() {
+  const directory = await fsp.mkdtemp(path.join(os.tmpdir(), 'fanotes-onenote-name-'))
+  try {
+    await fsp.writeFile(path.join(directory, 'Seite.md'), 'keep')
+    const created = await writeUniqueMarkdown(directory, 'Seite', 'new')
+    assert.equal(await fsp.readFile(path.join(directory, 'Seite.md'), 'utf8'), 'keep')
+    assert.equal(await fsp.readFile(created, 'utf8'), 'new')
+    const device = await writeUniqueMarkdown(directory, 'NUL.txt', 'device')
+    assert.match(path.basename(device), /^OneNote-Seite\.md$/u)
+  } finally {
+    await fsp.rm(directory, { recursive: true, force: true })
+  }
+}
 
 const root = path.resolve(__dirname, '..')
 const fixtures = path.join(__dirname, 'fixtures', 'onenote')
@@ -77,6 +108,7 @@ async function verifyImport(inputPath, suffix) {
 }
 
 void (async () => {
+  await assertUniqueNoteDoesNotReplace()
   if (process.platform !== 'linux') {
     console.log('Der binäre OneNote-Regressionstest läuft auf dem Linux-Buildhost.')
     return

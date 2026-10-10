@@ -354,7 +354,11 @@ try {
   assert.match(syncHostSource, /safeStorage\.encryptString/u, 'secrets go through safeStorage')
   assert.match(syncHostSource, /O_EXCL/u, 'atomic writes via exclusive temp file')
 
-  const { createSyncHost, resolveInside } = await import('../electron/sync.cjs')
+  const { coerceSyncBytes, createSyncHost, resolveInside } = await import('../electron/sync.cjs')
+  assert.deepEqual([...coerceSyncBytes(new Uint8Array([1, 2, 3]))], [1, 2, 3])
+  assert.deepEqual([...coerceSyncBytes([4, 5])], [4, 5])
+  assert.throws(() => coerceSyncBytes(100_000_000), /binär/u)
+  assert.throws(() => coerceSyncBytes({ length: 100_000_000 }), /binär/u)
   {
     const { mkdirSync, writeFileSync, symlinkSync } = await import('node:fs')
     const root = mkdtempSync(join(tmpdir(), 'fanotes-sync-vault-'))

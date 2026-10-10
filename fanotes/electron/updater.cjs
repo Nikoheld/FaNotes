@@ -416,20 +416,36 @@ const hostOf = (value) => {
   }
 }
 
-const isPrivateAddress = (address) => {
-  if (typeof address !== 'string' || !address) return false
-  if (address.includes(':')) {
-    const lower = address.toLowerCase()
-    return lower === '::1' || lower.startsWith('fe80:') || lower.startsWith('fc') || lower.startsWith('fd')
-  }
+const isPrivateIpv4 = (address) => {
   const parts = address.split('.').map((part) => Number(part))
   if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return false
   const [first, second] = parts
-  return first === 10 || first === 127 || first === 0
+  return first === 10 || first === 127 || first === 0 || first >= 224
     || (first === 192 && second === 168)
     || (first === 172 && second >= 16 && second <= 31)
     || (first === 169 && second === 254)
     || (first === 100 && second >= 64 && second <= 127)
+}
+
+const isPrivateAddress = (address) => {
+  if (typeof address !== 'string' || !address) return false
+  const value = address.trim().toLowerCase().replace(/^\[|\]$/gu, '').split('%', 1)[0]
+  const dottedMapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/u.exec(value)
+  if (dottedMapped) return isPrivateIpv4(dottedMapped[1])
+  const hexMapped = /^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/u.exec(value)
+  if (hexMapped) {
+    const high = Number.parseInt(hexMapped[1], 16)
+    const low = Number.parseInt(hexMapped[2], 16)
+    return isPrivateIpv4(`${high >> 8}.${high & 255}.${low >> 8}.${low & 255}`)
+  }
+  if (value.includes(':')) {
+    if (value === '::' || value === '::1') return true
+    const first = Number.parseInt(value.split(':', 1)[0] || '0', 16)
+    if (!Number.isInteger(first)) return true
+    // 2000::/3 is global unicast. Loopback, ULA, link-local and multicast are not the update host.
+    return !(first >= 0x2000 && first <= 0x3fff)
+  }
+  return isPrivateIpv4(value)
 }
 
 const nodeErrorCode = (error) => {
@@ -598,6 +614,18 @@ const atomicJsonWrite = async (target, value) => {
   const temporary = `${target}.${process.pid}.${crypto.randomBytes(6).toString('hex')}.tmp`
   await fsp.writeFile(temporary, `${JSON.stringify(value, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 })
   await fsp.rename(temporary, target)
+}
+
+function shouldReplaceManagedDesktopFile(existing) {
+  if (typeof existing !== 'string' || !existing.trim()) return true
+  return existing.includes('X-FaNotes-Managed=true')
+}
+
+function waitForChildSpawn(child) {
+  return new Promise((resolve, reject) => {
+    child.once('spawn', resolve)
+    child.once('error', reject)
+  })
 }
 
 const desktopEscape = (value) => {
@@ -1291,6 +1319,11 @@ function createUpdateManager({
         const iconInfo = await fsp.lstat(packagedIconPath)
         if (iconInfo.isFile() && !iconInfo.isSymbolicLink() && iconInfo.size > 0 && iconInfo.size <= 4 * 1024 * 1024) {
           await fsp.mkdir(iconsDirectory, { recursive: true, mode: 0o700 })
+          const destinationInfo = await fsp.lstat(installedIconPath).catch((error) => {
+            if (error?.code === 'ENOENT') return null
+            throw error
+          })
+          if (destinationInfo?.isSymbolicLink()) throw new Error('Das Symbolziel ist ein symbolischer Link.')
           await fsp.copyFile(packagedIconPath, installedIconPath, fs.constants.COPYFILE_FICLONE)
           await fsp.chmod(installedIconPath, 0o644)
           iconValue = installedIconPath
@@ -1303,7 +1336,33 @@ function createUpdateManager({
     const escapedIcon = desktopEscape(iconValue)
     const content = `[Desktop Entry]\nType=Application\nName=FaNotes\nComment=Markdown-Notizen mit Handschrift\nExec="${escapedTarget}" %U\nTryExec="${escapedTarget}"\nIcon=${escapedIcon}\nTerminal=false\nCategories=Education;Office;\nStartupNotify=true\nX-FaNotes-Managed=true\n`
     await fsp.mkdir(applicationsDirectory, { recursive: true, mode: 0o700 })
-    await fsp.writeFile(desktopPath, content, { encoding: 'utf8', mode: 0o644 })
+    let existing = ''
+    try {
+      const info = await fsp.lstat(desktopPath)
+      if (info.isSymbolicLink()) {
+        logger.warn('Der FaNotes-Launcher ist ein symbolischer Link und wird nicht verändert.')
+        return
+      }
+      if (!info.isFile() || info.size > 64 * 1024) return
+      existing = await fsp.readFile(desktopPath, 'utf8')
+    } catch (error) {
+      if (error?.code !== 'ENOENT') {
+        logger.warn('Der bestehende FaNotes-Launcher konnte nicht geprüft werden:', error?.message ?? error)
+        return
+      }
+    }
+    if (!shouldReplaceManagedDesktopFile(existing)) {
+      logger.warn('Ein bestehender FaNotes-Launcher wird nicht ersetzt, weil er nicht von FaNotes verwaltet wird.')
+      return
+    }
+    const temporary = `${desktopPath}.${process.pid}.tmp`
+    await fsp.writeFile(temporary, content, { encoding: 'utf8', mode: 0o644 })
+    try {
+      await fsp.rename(temporary, desktopPath)
+    } catch (error) {
+      await fsp.rm(temporary, { force: true }).catch(() => {})
+      throw error
+    }
   }
 
   const prepareInstall = async () => {
@@ -1347,10 +1406,7 @@ function createUpdateManager({
           '-LogFile', logPath,
           '-MarkerFile', markerPath,
         ], { detached: true, stdio: 'ignore', windowsHide: true })
-        await new Promise((resolve, reject) => {
-          child.once('spawn', resolve)
-          child.once('error', reject)
-        })
+        await waitForChildSpawn(child)
         child.unref()
         installPrepared = true
         stop({ abortDownload: false })
@@ -1361,10 +1417,7 @@ function createUpdateManager({
         stdio: 'ignore',
         windowsHide: false,
       })
-      await new Promise((resolve, reject) => {
-        child.once('spawn', resolve)
-        child.once('error', reject)
-      })
+      await waitForChildSpawn(child)
       child.unref()
       installPrepared = true
       stop({ abortDownload: false })
@@ -1392,6 +1445,7 @@ function createUpdateManager({
       logPath,
       markerPath,
     ], { detached: true, stdio: 'ignore' })
+    await waitForChildSpawn(child)
     child.unref()
     installPrepared = true
     stop({ abortDownload: false })
@@ -1516,6 +1570,8 @@ module.exports = {
   WINDOWS_INSTALLER_ARGS,
   compareVersions,
   createUpdateManager,
+  shouldReplaceManagedDesktopFile,
+  waitForChildSpawn,
   diagnoseUpdateFailure,
   isPrivateAddress,
   stableStringify,

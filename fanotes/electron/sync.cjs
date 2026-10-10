@@ -59,6 +59,23 @@ const resolveInside = async (root, raw, { allowMissing = false } = {}) => {
 
 const toPosix = (root, absolute) => path.relative(root, absolute).split(path.sep).join('/')
 
+/** Accept binary IPC payloads. A bare number must not become `new Uint8Array(length)`. */
+const coerceSyncBytes = (bytes) => {
+  if (bytes instanceof ArrayBuffer) {
+    if (bytes.byteLength > MAX_FILE_BYTES) throw new Error('Die Datei ist zu groß für den Sync.')
+    return new Uint8Array(bytes)
+  }
+  if (ArrayBuffer.isView(bytes)) {
+    if (bytes.byteLength > MAX_FILE_BYTES) throw new Error('Die Datei ist zu groß für den Sync.')
+    return bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+  }
+  if (Array.isArray(bytes)) {
+    if (bytes.length > MAX_FILE_BYTES) throw new Error('Die Datei ist zu groß für den Sync.')
+    return Uint8Array.from(bytes)
+  }
+  throw new Error('Der Sync-Inhalt muss binär sein.')
+}
+
 async function scanDirectory(root, directory, depth, out) {
   if (depth > MAX_DEPTH || out.length >= MAX_ENTRIES) return
   let entries
@@ -251,7 +268,7 @@ function registerSyncIpc(handle, host) {
   handle(SYNC_CHANNELS.vaultId, () => host.vaultId())
   handle(SYNC_CHANNELS.scan, () => host.scan())
   handle(SYNC_CHANNELS.read, (_event, relativePath) => host.read(relativePath))
-  handle(SYNC_CHANNELS.write, (_event, relativePath, bytes, mtimeMs) => host.write(relativePath, bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes), mtimeMs))
+  handle(SYNC_CHANNELS.write, (_event, relativePath, bytes, mtimeMs) => host.write(relativePath, coerceSyncBytes(bytes), mtimeMs))
   handle(SYNC_CHANNELS.remove, (_event, relativePath) => host.remove(relativePath))
   handle(SYNC_CHANNELS.readState, (_event, vaultId) => host.readState(vaultId))
   handle(SYNC_CHANNELS.writeState, (_event, vaultId, json) => host.writeState(vaultId, json))
@@ -259,4 +276,4 @@ function registerSyncIpc(handle, host) {
   handle(SYNC_CHANNELS.writeSecrets, (_event, json) => host.writeSecrets(json))
 }
 
-module.exports = { createSyncHost, registerSyncIpc, SYNC_CHANNELS, resolveInside, normalizeRelative }
+module.exports = { coerceSyncBytes, createSyncHost, registerSyncIpc, SYNC_CHANNELS, resolveInside, normalizeRelative }

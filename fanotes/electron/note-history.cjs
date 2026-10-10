@@ -59,14 +59,30 @@ const recordNoteHistorySnapshot = async (vaultRoot, relativePath, content) => {
   }
   const createdAt = new Date().toISOString()
   const id = `${createdAt.replace(/[:.]/gu, '-')}-${crypto.randomBytes(3).toString('hex')}`
-  await fsp.writeFile(path.join(directory, `${id}.md`), content, { encoding: 'utf8', mode: 0o600 })
+  const snapshotPath = path.join(directory, `${id}.md`)
+  await fsp.writeFile(snapshotPath, content, { encoding: 'utf8', mode: 0o600 })
   index.path = relativePath
   index.snapshots.push({ id, createdAt, bytes })
-  while (index.snapshots.length > HISTORY_LIMIT) {
-    const removed = index.snapshots.shift()
-    if (removed) await fsp.rm(path.join(directory, `${removed.id}.md`), { force: true }).catch(() => {})
+  try {
+    // Point the index at the new snapshot before deleting anything. A crash
+    // between those steps used to drop the newest revision and the oldest file.
+    await writeIndex(directory, index)
+  } catch (error) {
+    await fsp.rm(snapshotPath, { force: true }).catch(() => {})
+    throw error
   }
-  await writeIndex(directory, index)
+  if (index.snapshots.length <= HISTORY_LIMIT) return
+  const removed = index.snapshots.splice(0, index.snapshots.length - HISTORY_LIMIT)
+  try {
+    await writeIndex(directory, index)
+  } catch (error) {
+    // The longer index already names every file. Leave them in place.
+    console.warn('FaNotes: Verlauf konnte nicht gekürzt werden:', error?.message ?? error)
+    return
+  }
+  for (const entry of removed) {
+    await fsp.rm(path.join(directory, `${entry.id}.md`), { force: true }).catch(() => {})
+  }
 }
 
 const listNoteHistory = async (vaultRoot, relativePath) => {
@@ -86,6 +102,7 @@ const readNoteHistory = async (vaultRoot, relativePath, snapshotId) => {
 }
 
 module.exports = {
+  HISTORY_LIMIT,
   recordNoteHistorySnapshot,
   listNoteHistory,
   readNoteHistory,

@@ -23,6 +23,8 @@ const FILE_PATTERN = /^[A-Za-z0-9_.-]{1,80}$/u
 const MAX_FILE_BYTES = 2_000_000
 const MAX_DATA_BYTES = 1_100_000
 const MAX_RECORDS = 500
+const MAX_RECORD_BYTES = 256 * 1024
+const MAX_RECORDS_FILE_BYTES = 2 * 1024 * 1024
 
 const assertAllowedUrl = (rawUrl) => {
   let parsed
@@ -244,12 +246,62 @@ const createAddonStore = (rootDir) => {
 
   const writeAtomic = async (target, content) => {
     const temp = `${target}.${process.pid}.${Date.now()}.tmp`
-    await fsp.writeFile(temp, content, 'utf8')
-    await fsp.rename(temp, target)
+    try {
+      await fsp.writeFile(temp, content, { encoding: 'utf8', mode: 0o600 })
+      await fsp.rename(temp, target)
+    } catch (error) {
+      await fsp.rm(temp, { force: true }).catch(() => {})
+      throw error
+    }
+  }
+
+  const boundedRecord = (record) => {
+    if (!record || typeof record !== 'object' || Array.isArray(record) || typeof record.id !== 'string') {
+      throw new Error('Ungültiger Add-on-Eintrag.')
+    }
+    const state = { bytes: 0 }
+    const visit = (value, depth) => {
+      if (state.bytes > MAX_RECORD_BYTES) throw new Error('Der Add-on-Eintrag ist zu groß.')
+      if (depth > 8) throw new Error('Ungültiger Add-on-Eintrag.')
+      if (value == null || typeof value === 'boolean') {
+        state.bytes += 8
+        return
+      }
+      if (typeof value === 'number') {
+        if (!Number.isFinite(value)) throw new Error('Ungültiger Add-on-Eintrag.')
+        state.bytes += 24
+        return
+      }
+      if (typeof value === 'string') {
+        state.bytes += Buffer.byteLength(value, 'utf8')
+        if (state.bytes > MAX_RECORD_BYTES) throw new Error('Der Add-on-Eintrag ist zu groß.')
+        return
+      }
+      if (Array.isArray(value)) {
+        if (value.length > 400) throw new Error('Ungültiger Add-on-Eintrag.')
+        for (const item of value) visit(item, depth + 1)
+        return
+      }
+      if (typeof value === 'object') {
+        const keys = Object.keys(value)
+        if (keys.length > 80) throw new Error('Ungültiger Add-on-Eintrag.')
+        for (const key of keys) {
+          state.bytes += Buffer.byteLength(key, 'utf8')
+          visit(value[key], depth + 1)
+        }
+        return
+      }
+      throw new Error('Ungültiger Add-on-Eintrag.')
+    }
+    visit(record, 0)
+    return JSON.parse(JSON.stringify(record))
   }
 
   const readRecords = async () => {
     try {
+      const info = await fsp.lstat(recordsFile)
+      if (!info.isFile() || info.isSymbolicLink()) throw new Error('addons.json ist ungültig.')
+      if (info.size > MAX_RECORDS_FILE_BYTES) throw new Error('Die Add-on-Liste ist zu groß.')
       const parsed = JSON.parse(await fsp.readFile(recordsFile, 'utf8'))
       return Array.isArray(parsed) ? parsed : []
     } catch (error) {
@@ -264,16 +316,18 @@ const createAddonStore = (rootDir) => {
 
   const writeRecords = async (records) => {
     await ensureRoot()
-    await writeAtomic(recordsFile, JSON.stringify(records.slice(0, MAX_RECORDS), null, 2))
+    const snapshot = JSON.stringify(records.slice(0, MAX_RECORDS), null, 2)
+    if (Buffer.byteLength(snapshot, 'utf8') > MAX_RECORDS_FILE_BYTES) throw new Error('Die Add-on-Liste ist zu groß.')
+    await writeAtomic(recordsFile, snapshot)
   }
 
   return {
     list: () => serial(readRecords),
     save: (record) => serial(async () => {
-      if (!record || typeof record !== 'object' || typeof record.id !== 'string') throw new Error('Ungültiger Add-on-Eintrag.')
-      safeId(record.id)
-      const records = (await readRecords()).filter((item) => !item || item.id !== record.id)
-      records.push(JSON.parse(JSON.stringify(record)))
+      const stored = boundedRecord(record)
+      safeId(stored.id)
+      const records = (await readRecords()).filter((item) => !item || item.id !== stored.id)
+      records.push(stored)
       await writeRecords(records)
     }),
     remove: (id) => serial(async () => {
@@ -344,4 +398,4 @@ const registerAddonIpc = (handle, store) => {
   handle(ADDON_IPC.netFetch, (_event, url, init) => fetchForAddon(url, init))
 }
 
-module.exports = { ADDON_IPC, ALLOWED_HOSTS, assertAllowedUrl, createAddonStore, fetchAddonText, fetchForAddon, isPrivateAddress, isPrivateHost, registerAddonIpc }
+module.exports = { ADDON_IPC, ALLOWED_HOSTS, MAX_RECORD_BYTES, assertAllowedUrl, createAddonStore, fetchAddonText, fetchForAddon, isPrivateAddress, isPrivateHost, registerAddonIpc }

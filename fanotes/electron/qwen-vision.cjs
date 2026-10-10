@@ -6,6 +6,7 @@ const fsp = require('node:fs/promises')
 const os = require('node:os')
 const path = require('node:path')
 const { spawn } = require('node:child_process')
+const { assertModelDownloadUrl } = require('./download-hosts.cjs')
 
 /**
  * Optional Qwen3-VL vision recognizer for Intel Core Ultra NPUs.
@@ -54,6 +55,8 @@ const MODEL = Object.freeze({
 
 const MAX_IMAGE_BYTES = 12 * 1024 * 1024
 const MAX_OUTPUT_CHARS = 4_000
+const MAX_DOWNLOAD_BYTES = 2_500_000_000
+const MAX_WORKER_OUTPUT = 1_000_000
 const DOWNLOAD_TIMEOUT_MS = 30 * 60_000
 const WORKER_TIMEOUT_MS = 90_000
 const RUNTIME_INSTALL_TIMEOUT_MS = 45 * 60_000
@@ -72,6 +75,14 @@ const RUNTIME_PIP_PACKAGES = Object.freeze([
 const RUNTIME_MARKER_VERSION = 2
 const MIN_OPENVINO_MAJOR = 2026
 const MIN_OPENVINO_MINOR = 1
+
+function assertDownloadSize(advertised, received) {
+  if (advertised == null) return
+  if (!Number.isFinite(advertised) || advertised < 0 || advertised > MAX_DOWNLOAD_BYTES) {
+    throw new Error('Die Datei ist unerwartet gross.')
+  }
+  if (received !== advertised) throw new Error('Der Download wurde unvollständig übertragen.')
+}
 
 const hashFile = (filename) => new Promise((resolve, reject) => {
   const hash = crypto.createHash('sha256')
@@ -440,6 +451,16 @@ function createQwenVisionService({
         })
         let stdout = ''
         let stderr = ''
+        let overflow = false
+        const take = (current, chunk) => {
+          const next = `${current}${chunk}`
+          if (next.length > MAX_WORKER_OUTPUT) {
+            overflow = true
+            child.kill('SIGKILL')
+            return current
+          }
+          return next
+        }
         const timer = setTimeout(() => {
           child.kill('SIGKILL')
           reject(new Error('Qwen-Vision-Worker Zeitlimit überschritten.'))
@@ -447,14 +468,18 @@ function createQwenVisionService({
         timer.unref?.()
         child.stdout.setEncoding('utf8')
         child.stderr.setEncoding('utf8')
-        child.stdout.on('data', (chunk) => { stdout += chunk })
-        child.stderr.on('data', (chunk) => { stderr += chunk })
+        child.stdout.on('data', (chunk) => { stdout = take(stdout, chunk) })
+        child.stderr.on('data', (chunk) => { stderr = take(stderr, chunk) })
         child.once('error', (error) => {
           clearTimeout(timer)
           reject(error)
         })
         child.once('close', (code) => {
           clearTimeout(timer)
+          if (overflow) {
+            reject(new Error('Qwen-Vision-Worker-Ausgabe ist unerwartet gross.'))
+            return
+          }
           const line = stdout.trim().split(/\r?\n/u).filter(Boolean).at(-1) || ''
           if (!line) {
             reject(new Error(stderr.trim() || `Qwen-Vision-Worker beendete mit Code ${code ?? '?'}.`))
@@ -658,19 +683,22 @@ function createQwenVisionService({
       if (!response?.ok || !response.body) {
         throw new Error(`Download fehlgeschlagen für ${relativePath} (HTTP ${response?.status ?? 'Netzwerk'}).`)
       }
-      const finalUrl = new URL(response.url || fileUrl(relativePath))
-      if (finalUrl.protocol !== 'https:') throw new Error('Unsicheres Downloadziel abgelehnt.')
+      assertModelDownloadUrl(fileUrl(relativePath), response.url || fileUrl(relativePath))
+      const rawLength = response.headers?.get?.('content-length')
+      const advertised = rawLength == null || rawLength === '' ? null : Number(rawLength)
+      assertDownloadSize(advertised, advertised ?? 0)
       handle = await fsp.open(temporary, 'wx', 0o600)
       const hash = crypto.createHash('sha256')
       let received = 0
       for await (const rawChunk of response.body) {
         const chunk = Buffer.from(rawChunk)
         received += chunk.length
-        if (received > 2_500_000_000) throw new Error(`Datei ${relativePath} ist unerwartet gross.`)
+        if (received > MAX_DOWNLOAD_BYTES) throw new Error(`Datei ${relativePath} ist unerwartet gross.`)
         hash.update(chunk)
         await handle.write(chunk)
       }
       if (received <= 0) throw new Error(`Leere Datei: ${relativePath}`)
+      assertDownloadSize(advertised, received)
       await handle.sync()
       await handle.close()
       handle = null
@@ -775,7 +803,6 @@ function createQwenVisionService({
   }
 
   const recognize = async (request) => {
-    if (recognitionActive) throw new Error('Eine Qwen3-VL-Erkennung läuft bereits.')
     if (
       !request
       || !(request.pixels instanceof Uint8Array)
@@ -788,20 +815,21 @@ function createQwenVisionService({
       || request.pixels.length !== request.width * request.height * 3
       || request.pixels.length > MAX_IMAGE_BYTES
     ) throw new Error('Das Vision-Bild ist ungültig.')
-
-    if (!(await verifyInstalled())) {
-      throw new Error('Qwen3-VL ist nicht installiert. Lade das NPU-Modell in den Einstellungen.')
-    }
-
-    // Ensure GenAI is new enough for model_type qwen3_vl before the first call.
-    if (!(await venvHasRuntimePackages())) {
-      await ensureOpenVinoRuntime()
-    }
-
+    if (recognitionActive) throw new Error('Eine Qwen3-VL-Erkennung läuft bereits.')
     recognitionActive = true
-    const temporary = await fsp.mkdtemp(path.join(os.tmpdir(), 'fanotes-qwen-vision-'))
-    const imagePath = path.join(temporary, 'input.ppm')
+    let temporary = null
     try {
+      if (!(await verifyInstalled())) {
+        throw new Error('Qwen3-VL ist nicht installiert. Lade das NPU-Modell in den Einstellungen.')
+      }
+
+      // Ensure GenAI is new enough for model_type qwen3_vl before the first call.
+      if (!(await venvHasRuntimePackages())) {
+        await ensureOpenVinoRuntime()
+      }
+
+      temporary = await fsp.mkdtemp(path.join(os.tmpdir(), 'fanotes-qwen-vision-'))
+      const imagePath = path.join(temporary, 'input.ppm')
       // RGB binary PPM — no extra dependency in main process.
       const header = Buffer.from(`P6\n${request.width} ${request.height}\n255\n`, 'ascii')
       await fsp.writeFile(imagePath, Buffer.concat([header, Buffer.from(request.pixels)]), {
@@ -885,7 +913,7 @@ function createQwenVisionService({
       }
     } finally {
       recognitionActive = false
-      await fsp.rm(temporary, { recursive: true, force: true }).catch(() => {})
+      if (temporary) await fsp.rm(temporary, { recursive: true, force: true }).catch(() => {})
     }
   }
 
@@ -900,5 +928,6 @@ function createQwenVisionService({
 
 module.exports = {
   MODEL,
+  assertDownloadSize,
   createQwenVisionService,
 }

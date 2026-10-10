@@ -10,7 +10,8 @@ const { spawn } = require('node:child_process')
 const { pipeline } = require('node:stream/promises')
 const { applyDeltaPatch } = require('../electron/delta.cjs')
 const { createDeltaPatch } = require('./create-delta.cjs')
-const { compareVersions, createUpdateManager, diagnoseUpdateFailure, INSTALL_HELPER, isPrivateAddress, stableStringify, verifyManifest } = require('../electron/updater.cjs')
+const { EventEmitter } = require('node:events')
+const { compareVersions, createUpdateManager, diagnoseUpdateFailure, INSTALL_HELPER, isPrivateAddress, shouldReplaceManagedDesktopFile, stableStringify, verifyManifest, waitForChildSpawn } = require('../electron/updater.cjs')
 
 async function sha256File(filePath) {
   const hash = crypto.createHash('sha256')
@@ -31,6 +32,31 @@ async function main() {
     assert.equal(isPrivateAddress('10.0.0.1'), true)
     assert.equal(isPrivateAddress('192.168.0.1'), true)
     assert.equal(isPrivateAddress('8.8.8.8'), false)
+    assert.equal(shouldReplaceManagedDesktopFile(''), true)
+    assert.equal(shouldReplaceManagedDesktopFile('[Desktop Entry]\nX-FaNotes-Managed=true\n'), true)
+    assert.equal(shouldReplaceManagedDesktopFile('[Desktop Entry]\nExec=custom-fanotes\n'), false)
+    const spawned = new EventEmitter()
+    const started = waitForChildSpawn(spawned)
+    spawned.emit('spawn')
+    await started
+    const failedSpawn = new EventEmitter()
+    const spawnError = waitForChildSpawn(failedSpawn)
+    failedSpawn.emit('error', Object.assign(new Error('spawn failed'), { code: 'ENOENT' }))
+    await assert.rejects(spawnError, { code: 'ENOENT' })
+    assert.equal(isPrivateAddress('::ffff:10.8.0.1'), true)
+    assert.equal(isPrivateAddress('::ffff:8.8.8.8'), false)
+    assert.equal(isPrivateAddress('::ffff:7f00:1'), true)
+    assert.equal(isPrivateAddress('::1'), true)
+    assert.equal(isPrivateAddress('[fe80::1]'), true)
+    assert.equal(isPrivateAddress('2001:4860:4860::8888'), false)
+    assert.equal(isPrivateAddress('169.254.169.254'), true)
+    const mappedHijack = diagnoseUpdateFailure({
+      phase: 'download',
+      url: 'https://fanotes.fasrv.ch/download/appimage',
+      error: Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED' }),
+      resolvedAddress: '::ffff:10.8.0.1',
+    })
+    assert.equal(mappedHijack.kind, 'dns-hijack')
     const redirected = diagnoseUpdateFailure({
       phase: 'download',
       url: 'https://fanotes.fasrv.ch/download/appimage',

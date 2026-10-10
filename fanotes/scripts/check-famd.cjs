@@ -142,7 +142,7 @@ assert.match(app, /drawingLoadRequestRef\.current/u)
 const os = require('node:os')
 const fsp = require('node:fs/promises')
 const crypto = require('node:crypto')
-const { recordNoteHistorySnapshot, listNoteHistory } = require('../electron/note-history.cjs')
+const { HISTORY_LIMIT, recordNoteHistorySnapshot, listNoteHistory, readNoteHistory } = require('../electron/note-history.cjs')
 const { createAddonStore } = require('../electron/addons.cjs')
 
 async function assertUnreadableRecordsStayPut() {
@@ -151,11 +151,28 @@ async function assertUnreadableRecordsStayPut() {
     await recordNoteHistorySnapshot(root, 'Note.md', 'first revision\n')
     await recordNoteHistorySnapshot(root, 'Note.md', 'second revision\n')
     assert.equal((await listNoteHistory(root, 'Note.md')).length, 2)
-    const index = path.join(root, '.fanotes', 'history', crypto.createHash('sha1').update('Note.md').digest('hex'), 'index.json')
+    const historyDir = path.join(root, '.fanotes', 'history', crypto.createHash('sha1').update('Note.md').digest('hex'))
+    const index = path.join(historyDir, 'index.json')
+    const snapshotCount = async () => (await fsp.readdir(historyDir)).filter((name) => name.endsWith('.md')).length
     await fsp.chmod(index, 0)
     await assert.rejects(recordNoteHistorySnapshot(root, 'Note.md', 'third revision\n'), { code: 'EACCES' })
     await fsp.chmod(index, 0o600)
     assert.equal((await listNoteHistory(root, 'Note.md')).length, 2)
+    assert.equal(await snapshotCount(), 2, 'Ein fehlgeschlagener Index darf keine verwaiste Verlaufsdatei hinterlassen.')
+
+    for (let revision = 0; revision < HISTORY_LIMIT + 1; revision += 1) {
+      await recordNoteHistorySnapshot(root, 'Long.md', `revision ${revision}\n`)
+    }
+    const history = await listNoteHistory(root, 'Long.md')
+    assert.equal(history.length, HISTORY_LIMIT)
+    const newest = await readNoteHistory(root, 'Long.md', history[0].id)
+    assert.equal(newest.content, `revision ${HISTORY_LIMIT}\n`)
+    const retained = new Set()
+    for (const item of history) retained.add((await readNoteHistory(root, 'Long.md', item.id)).content)
+    assert.equal(retained.has('revision 0\n'), false)
+    const longDir = path.join(root, '.fanotes', 'history', crypto.createHash('sha1').update('Long.md').digest('hex'))
+    const longFiles = (await fsp.readdir(longDir)).filter((name) => name.endsWith('.md'))
+    assert.equal(longFiles.length, HISTORY_LIMIT)
 
     const addonRoot = path.join(root, 'addons')
     const store = createAddonStore(addonRoot)
