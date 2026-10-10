@@ -21,6 +21,7 @@ const os = require('node:os')
 const path = require('node:path')
 const { fileURLToPath, pathToFileURL } = require('node:url')
 const { Worker } = require('node:worker_threads')
+const { encodeWindowCapture } = require('./window-capture.cjs')
 const { publishNewFile } = require('./exclusive-publish.cjs')
 const { safeEntryName } = require('./entry-names.cjs')
 const { defaultPenOnlyForPlatform } = require('./ink-defaults.cjs')
@@ -4595,11 +4596,7 @@ function registerIpcHandlers() {
     safeStorage,
     trashItem: (target) => shell.trashItem(target),
   }))
-  handle(IPC.captureWindow, async (event) => {
-    const image = await event.sender.capturePage()
-    const jpeg = image.toJPEG(55)
-    return `data:image/jpeg;base64,${Buffer.from(jpeg).toString('base64')}`
-  })
+  handle(IPC.captureWindow, async (event) => encodeWindowCapture(await event.sender.capturePage()))
 
   ipcMain.on(IPC.confirmClose, (event) => {
     if (!isTrustedIpcSender(event) || !mainWindow || mainWindow.isDestroyed()) return

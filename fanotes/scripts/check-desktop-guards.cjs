@@ -6,6 +6,8 @@ const os = require('node:os')
 const path = require('node:path')
 const { safeEntryName } = require('../electron/entry-names.cjs')
 const { publishNewFile } = require('../electron/exclusive-publish.cjs')
+const { MAX_RECORD_BYTES, createAddonStore } = require('../electron/addons.cjs')
+const { MAX_CAPTURE_BYTES, encodeWindowCapture } = require('../electron/window-capture.cjs')
 
 assert.equal(safeEntryName('  Mathe  ', 'Notiz'), 'Mathe')
 assert.equal(safeEntryName('', 'Unbenannte Notiz'), 'Unbenannte Notiz')
@@ -55,8 +57,38 @@ async function assertExclusivePublish() {
   }
 }
 
-void assertExclusivePublish().then(() => {
-  console.log('Desktop-Schutz geprüft: reservierte Dateinamen und exklusives Anlegen.')
+function fakeCapture(width, height) {
+  return {
+    getSize: () => ({ width, height }),
+    resize(options) { return fakeCapture(options.width, options.height) },
+    toJPEG(quality) { return Buffer.alloc(Math.max(1, Math.ceil(width * height * (quality / 400)))) },
+  }
+}
+
+async function assertAddonRecordCap() {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'fanotes-addon-cap-'))
+  try {
+    const store = createAddonStore(root)
+    await store.save({ id: 'alpha', title: 'Alpha' })
+    await assert.rejects(store.save({ id: 'huge', title: 'x'.repeat(MAX_RECORD_BYTES + 1) }), /zu groß/u)
+    const listed = await store.list()
+    assert.deepEqual(listed.map((item) => item.id), ['alpha'])
+  } finally {
+    await fsp.rm(root, { recursive: true, force: true })
+  }
+}
+
+function assertWindowCaptureBound() {
+  const encoded = encodeWindowCapture(fakeCapture(4000, 3000))
+  assert.match(encoded, /^data:image\/jpeg;base64,/u)
+  const bytes = Buffer.from(encoded.slice(encoded.indexOf(',') + 1), 'base64')
+  assert.ok(bytes.length <= MAX_CAPTURE_BYTES)
+  assert.throws(() => encodeWindowCapture({ getSize: () => ({ width: 0, height: 10 }), toJPEG: () => Buffer.from([1]) }), /leer/u)
+}
+
+void Promise.all([assertExclusivePublish(), assertAddonRecordCap()]).then(() => {
+  assertWindowCaptureBound()
+  console.log('Desktop-Schutz geprüft: reservierte Dateinamen, exklusives Anlegen, Add-on-Größe und Fensterbild.')
 }).catch((error) => {
   console.error(error)
   process.exit(1)
