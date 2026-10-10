@@ -1,0 +1,10 @@
+[package]
+name = "fanotes-input"
+version = "0.1.0"
+description = "Pen tip, idle lift, post-pen ignore, and the ink jump filter"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+fanotes-paper = { path = "../fanotes-paper" }
