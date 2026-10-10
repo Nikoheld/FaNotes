@@ -393,6 +393,21 @@ name = "fanotes-paper"
 version = "0.1.0"
 
 [[package]]
+name = "fanotes-raster"
+version = "0.1.0"
+dependencies = [
+ "tiny-skia",
+]
+
+[[package]]
+name = "fanotes-raster-wasm"
+version = "0.1.0"
+dependencies = [
+ "fanotes-raster",
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "fanotes-wasm"
 version = "0.1.0"
 dependencies = [

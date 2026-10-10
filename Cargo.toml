@@ -6,6 +6,8 @@ members = [
     "crates/fanotes-wasm",
     "crates/fanotes-famd",
     "crates/fanotes-input",
+    "crates/fanotes-raster",
+    "crates/fanotes-raster-wasm",
     "apps/paper-proto",
 ]
 

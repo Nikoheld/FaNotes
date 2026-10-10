@@ -32,10 +32,41 @@ const {
   visiblePageCssWindow,
 } = await server.ssrLoadModule('/src/lib/pdfDocument.ts')
 const {
+  measureVisibleInkBox,
   measureVisibleInkLayout,
   planInkWindow,
+  planLiveInkWindow,
   placeInkWindow,
 } = await server.ssrLoadModule('/src/lib/inkWindowPlan.ts')
+const { viewportRasterEnabled } = await server.ssrLoadModule('/src/lib/viewportRasterFlag.ts')
+const viewportRaster = viewportRasterEnabled() ? await server.ssrLoadModule('/src/lib/viewportRaster.ts') : null
+const { placeViewportRaster } = await server.ssrLoadModule('/src/lib/viewportRasterPlan.ts')
+
+/** Opaque rows of a horizontal 3.5 px pen across the middle of a viewport bitmap. */
+const viewportLineRows = (zoom) => {
+  const raster = viewportRaster.createViewportRaster()
+  try {
+    raster.setScene(900, 1273, 0, [{
+      points: [{ x: 0.1, y: 0.5, pressure: 0.5 }, { x: 0.9, y: 0.5, pressure: 0.5 }],
+      baseWidth: 3.5,
+      pressureEnabled: false,
+      color: '#202333',
+      purpose: 'handwriting',
+    }])
+    const scale = zoom * 2
+    const width = 1200
+    const height = 400
+    const view = { scale, dpr: 2, originX: Math.round(0.4 * 900 * scale), originY: Math.round(0.5 * 1273 * scale) - height / 2, width, height }
+    const image = raster.paint(view, { x: 0, y: 0, width, height })
+    let rows = 0
+    for (let y = 0; y < image.height; y += 1) {
+      if (image.data[(y * image.width + width / 2) * 4 + 3] >= 24) rows += 1
+    }
+    return { rows, bucket: raster.lastBucket(), tiles: raster.tileCount(), bytes: image.data.length }
+  } finally {
+    raster.dispose()
+  }
+}
 
 const A4 = { width: 900, height: 1273 }
 const VIEW = { width: 1200, height: 800 }
@@ -244,7 +275,53 @@ const runOnce = () => {
   assert.doesNotMatch(pdfDoc, /MAX_PDF_VIEW_QUALITY_ZOOM = 3/)
   assert.match(paperGrow, /Math\.max\(baseBoost, zoomBoost\)/)
 
+  let raster = null
+  if (viewportRaster) {
+    // Flag on: one box (visible sheet + live guard) at the camera's device scale.
+    const measured = measureVisibleInkBox({
+      scrollerLeft: 0,
+      scrollerTop: 0,
+      scrollerWidth: VIEW.width,
+      scrollerHeight: VIEW.height,
+      paperLeft: 0,
+      paperTop: 0,
+      paperVisualWidth: A4.width * ZOOM_500,
+      paperVisualHeight: A4.height * ZOOM_500,
+      paperLayoutWidth: A4.width,
+      paperLayoutHeight: A4.height,
+    })
+    assert.ok(measured)
+    const box = planLiveInkWindow({ paper: A4, viewport: measured.viewport, visible: measured.visible, current: null }).window
+    assert.ok(box, '500% A4 must not paint the whole sheet')
+    const placed = placeViewportRaster(box, A4, ZOOM_500, DPR)
+    const rasterPerVisual = pixelsPerVisualCss(placed.slice.width, placed.box.width, ZOOM_500)
+    assert.ok(Math.abs(rasterPerVisual - DPR) < 1e-9, `viewport raster at 500% must be exactly DPR, got ${rasterPerVisual}`)
+    assert.ok(rasterPerVisual >= DPR * 0.85)
+    const viewportDevicePixels = VIEW.width * VIEW.height * DPR * DPR
+    const rasterPixels = placed.slice.width * placed.slice.height
+    assert.ok(rasterPixels <= viewportDevicePixels * 1.3 * 1.3 * 1.01, `the 500% bitmap is the viewport plus its guard, got ${rasterPixels} px`)
+    assert.ok(rasterPixels < fullAt500.width * fullAt500.height, 'never a page-sized bitmap')
+    const placed100 = placeViewportRaster(null, A4, 1, DPR)
+    assert.equal(pixelsPerVisualCss(placed100.slice.width, A4.width, 1), DPR, 'at 100% the whole A4 is one DPR bitmap')
+    assert.equal(viewportRaster.viewportRasterTilePx(), 512)
+    assert.equal(viewportRaster.viewportRasterBucket(1), 1)
+    assert.equal(viewportRaster.viewportRasterBucket(2), 2)
+    assert.equal(viewportRaster.viewportRasterBucket(ZOOM_300), 4)
+    assert.equal(viewportRaster.viewportRasterBucket(ZOOM_500), null, '500% is above the 4× bucket: painted at the exact device scale')
+    const at500 = viewportLineRows(ZOOM_500)
+    assert.equal(at500.bucket, null)
+    assert.equal(at500.tiles, 0, '500% paints the viewport directly, no tile allocation')
+    assert.equal(at500.bytes, 1200 * 400 * 4, 'the paint returns only the requested viewport')
+    assert.ok(Math.abs(at500.rows - 3.5 * ZOOM_500 * DPR) <= 2, `3.5 px pen at 500% DPR 2 must be 35 device px, got ${at500.rows}`)
+    const at300 = viewportLineRows(ZOOM_300)
+    assert.equal(at300.bucket, 4, '300% resamples the 4× bucket tiles')
+    assert.ok(at300.tiles > 0)
+    assert.ok(Math.abs(at300.rows - 3.5 * ZOOM_300 * DPR) <= 2, `3.5 px pen at 300% DPR 2 must be 21 device px, got ${at300.rows}`)
+    raster = { perVisual: rasterPerVisual, pixels: rasterPixels, rows500: at500.rows, rows300: at300.rows }
+  }
+
   return {
+    ...(raster ? { raster } : {}),
     inkPerVisual: Number(inkPerVisual.toFixed(4)),
     pdfPerVisual: Number(pdfPerVisual.toFixed(4)),
     ink300PerVisual: Number(ink300PerVisual.toFixed(4)),

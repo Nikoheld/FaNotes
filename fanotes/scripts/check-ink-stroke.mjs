@@ -19,6 +19,27 @@ const {
   inkStrokeCssPixels,
   inkStrokePaintScale,
 } = await server.ssrLoadModule('/src/lib/paperGrow.ts')
+const { pressureWidth } = await server.ssrLoadModule('/src/lib/inkStrokePaint.ts')
+const { viewportRasterEnabled } = await server.ssrLoadModule('/src/lib/viewportRasterFlag.ts')
+const viewportRaster = viewportRasterEnabled() ? await server.ssrLoadModule('/src/lib/viewportRaster.ts') : null
+
+/** Opaque rows the viewport raster paints for a horizontal pen line, at the bitmap's center column. */
+const rasterLineRows = (pen, bitmapWidth, layoutWidth) => {
+  const width = Math.round(bitmapWidth)
+  const image = viewportRaster.rasterizeInkStrokes([{
+    points: [{ x: 0.1, y: 0.5, pressure: 0.5 }, { x: 0.9, y: 0.5, pressure: 0.5 }],
+    baseWidth: pen,
+    pressureEnabled: false,
+    color: '#202333',
+    purpose: 'handwriting',
+  }], width, width, { layoutWidth })
+  const x = Math.floor(image.width / 2)
+  let rows = 0
+  for (let y = 0; y < image.height; y += 1) {
+    if (image.data[(y * image.width + x) * 4 + 3] >= 24) rows += 1
+  }
+  return rows
+}
 
 const runOnce = () => {
   const pen = 3.5
@@ -59,6 +80,29 @@ const runOnce = () => {
   assert.doesNotMatch(paint, /const scale = width \/ Math\.max\(1, sourceWidth\)/)
   assert.ok(PAPER_SOURCE_HEIGHT > 1000)
 
+  let raster = null
+  if (viewportRaster) {
+    // Flag on: the Rust viewport raster paints the same CSS pen on every sheet.
+    for (const pressure of [0, 0.35, 0.5, 1]) {
+      assert.equal(viewportRaster.rasterPressureWidth(pen, true, pressure), pressureWidth({ baseWidth: pen, pressureEnabled: true }, pressure))
+    }
+    assert.equal(viewportRaster.rasterPressureWidth(pen, false, 0.9), pen)
+    raster = {
+      a4Rows: rasterLineRows(pen, 900, 900),
+      dprRows: rasterLineRows(pen, 1800, 900),
+      stripRows: rasterLineRows(pen, tallPdf.width, tallPdf.width),
+      absorbedRows: rasterLineRows(pen, 560, 560),
+    }
+    assert.ok(Math.abs(raster.a4Rows - pen) <= 1.5, `raster A4 pen must be ${pen} px, got ${raster.a4Rows}`)
+    assert.ok(Math.abs(raster.dprRows - pen * 2) <= 1.5, `raster dpr-2 pen must be ${pen * 2} px, got ${raster.dprRows}`)
+    assert.ok(Math.abs(raster.stripRows - pen) <= 1.5, `raster pen on the tall PDF strip must stay ${pen} px, got ${raster.stripRows}`)
+    assert.ok(Math.abs(raster.absorbedRows - pen) <= 1.5, `raster pen on an absorbed sheet must stay ${pen} px, got ${raster.absorbedRows}`)
+    assert.match(board, /viewportRasterEnabled\(\)/)
+    assert.match(board, /import\('\.\.\/lib\/viewportRaster'\)/)
+    assert.match(board, /redrawViewportRaster\(layoutWidth, layoutHeight, measureLayout\)/)
+    assert.match(board, /renderDocument\(\s*committedCanvas,\s*strokesRef\.current/, 'the slice bitmap stays the flag-off path')
+  }
+
   return {
     a4,
     plane: newNote,
@@ -66,6 +110,7 @@ const runOnce = () => {
     oldPdfHairline,
     fixedPdf,
     oldAbsorbed,
+    ...(raster ? { raster } : {}),
   }
 }
 
