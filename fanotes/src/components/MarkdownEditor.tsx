@@ -924,7 +924,7 @@ function editorAppearance(
       '.cm-spelling-error': {
         textDecorationLine: 'underline',
         textDecorationStyle: 'wavy',
-        textDecorationColor: '#e24f5f',
+        textDecorationColor: 'var(--danger)',
         textDecorationThickness: '1.5px',
         textUnderlineOffset: '3px',
         textDecorationSkipInk: 'none',
@@ -960,7 +960,7 @@ function editorAppearance(
         fontSize: '12px',
         textDecorationLine: 'underline',
         textDecorationStyle: 'wavy',
-        textDecorationColor: '#e24f5f',
+        textDecorationColor: 'var(--danger)',
         textUnderlineOffset: '3px',
         overflow: 'hidden',
         textOverflow: 'ellipsis',

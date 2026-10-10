@@ -131,7 +131,7 @@ function summarizeFolders(entries: VaultEntry[]): FolderRow[] {
 
 const styles = `
 .vault-overview {
-  --vault-overview-card-radius: 12px;
+  --vault-overview-card-radius: 10px;
   width: 100%;
   height: 100%;
   min-width: 0;
@@ -165,7 +165,7 @@ const styles = `
 .vault-overview__heading p {
   margin: 6px 0 0;
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.5;
 }
 .vault-overview__header-actions {
@@ -188,7 +188,7 @@ const styles = `
   border: 1px solid color-mix(in srgb, var(--accent) 55%, var(--border-strong));
   color: var(--on-accent);
   background: var(--accent);
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 650;
 }
 .vault-overview__new-note:hover { filter: brightness(1.07); }
@@ -208,7 +208,7 @@ const styles = `
   gap: 8px;
   margin-bottom: 14px;
   color: var(--text-muted);
-  font-size: 10px;
+  font-size: 12px;
 }
 .vault-overview__stats strong { color: var(--text-soft); font-weight: 680; }
 .vault-overview__stat-dot {
@@ -244,12 +244,12 @@ const styles = `
 .vault-overview__section-title h2 {
   margin: 0;
   color: var(--text-soft);
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 680;
   letter-spacing: .04em;
   text-transform: uppercase;
 }
-.vault-overview__section-head small { color: var(--text-muted); font-size: 9px; }
+.vault-overview__section-head small { color: var(--text-muted); font-size: 12px; }
 .vault-overview__list-head,
 .vault-overview__folder-row {
   display: grid;
@@ -260,7 +260,7 @@ const styles = `
 .vault-overview__list-head {
   padding: 7px 12px 6px;
   color: var(--text-faint);
-  font-size: 8px;
+  font-size: 12px;
   font-weight: 720;
   letter-spacing: .06em;
   text-transform: uppercase;
@@ -309,10 +309,10 @@ const styles = `
   white-space: nowrap;
 }
 .vault-overview__folder-copy strong { color: var(--text); font-size: 12px; font-weight: 620; }
-.vault-overview__folder-copy span { margin-top: 1px; color: var(--text-muted); font-size: 8px; }
+.vault-overview__folder-copy span { margin-top: 1px; color: var(--text-muted); font-size: 12px; }
 .vault-overview__count {
   color: var(--text-muted);
-  font-size: 10px;
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
 }
 .vault-overview__latest,
@@ -321,7 +321,7 @@ const styles = `
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--text-muted);
-  font-size: 10px;
+  font-size: 12px;
 }
 .vault-overview__date { text-align: right; font-variant-numeric: tabular-nums; }
 .vault-overview__empty {
@@ -332,7 +332,7 @@ const styles = `
   text-align: center;
 }
 .vault-overview__empty strong { display: block; color: var(--text); font-size: 13px; }
-.vault-overview__empty p { max-width: 320px; margin: 6px auto 14px; color: var(--text-muted); font-size: 10px; line-height: 1.55; }
+.vault-overview__empty p { max-width: 320px; margin: 6px auto 14px; color: var(--text-muted); font-size: 12px; line-height: 1.55; }
 .vault-overview__empty button {
   height: 30px;
   display: inline-flex;
@@ -344,7 +344,7 @@ const styles = `
   background: var(--panel-active);
   padding: 0 10px;
   cursor: pointer;
-  font-size: 9px;
+  font-size: 12px;
 }
 .vault-overview__recent-list { display: flex; flex-direction: column; padding: 6px; }
 .vault-overview__recent-item {
@@ -376,15 +376,15 @@ const styles = `
 .vault-overview__recent-copy { min-width: 0; }
 .vault-overview__recent-copy strong,
 .vault-overview__recent-copy span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.vault-overview__recent-copy strong { font-size: 11px; font-weight: 610; }
-.vault-overview__recent-copy span { margin-top: 2px; color: var(--text-muted); font-size: 8px; }
+.vault-overview__recent-copy strong { font-size: 12px; font-weight: 610; }
+.vault-overview__recent-copy span { margin-top: 2px; color: var(--text-muted); font-size: 12px; }
 .vault-overview__recent-status { display: flex; align-items: center; gap: 5px; color: var(--text-muted); }
 .vault-overview__dirty { width: 5px; height: 5px; border-radius: 50%; background: var(--accent); }
 .vault-overview__recent-empty { min-height: 140px; display: grid; place-items: center; padding: 18px; color: var(--text-muted); text-align: center; }
 .vault-overview__recent-empty > div { max-width: 200px; }
 .vault-overview__recent-empty svg { margin-bottom: 8px; color: var(--text-muted); }
-.vault-overview__recent-empty strong { display: block; color: var(--text-soft); font-size: 11px; }
-.vault-overview__recent-empty p { margin: 5px 0 0; font-size: 9px; line-height: 1.5; }
+.vault-overview__recent-empty strong { display: block; color: var(--text-soft); font-size: 12px; }
+.vault-overview__recent-empty p { margin: 5px 0 0; font-size: 12px; line-height: 1.5; }
 @keyframes vault-overview-enter {
   from { opacity: 0; transform: translateY(6px); }
   to { opacity: 1; transform: translateY(0); }
