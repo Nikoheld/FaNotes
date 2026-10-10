@@ -21,11 +21,14 @@ const os = require('node:os')
 const path = require('node:path')
 const { fileURLToPath, pathToFileURL } = require('node:url')
 const { Worker } = require('node:worker_threads')
+const { publishNewFile } = require('./exclusive-publish.cjs')
+const { safeEntryName } = require('./entry-names.cjs')
 const { defaultPenOnlyForPlatform } = require('./ink-defaults.cjs')
 const { DEFAULT_TABLET_BUTTON_ACTIONS, sanitizeTabletButtonMap } = require('./tablet-buttons.cjs')
 const { localizeDialogOptions, localizeText, resolveLanguage } = require('./i18n.cjs')
 const {
   onboardingRequiredFromConfig,
+  onboardingRequiredFromVaultStatus,
   parseOnboardingStatus,
   requiredStarterFoldersForLanguage,
   starterFoldersForLanguage,
@@ -1132,7 +1135,8 @@ async function atomicWrite(targetPath, data, options = {}) {
     await handle.sync()
     await handle.close()
     handle = null
-    await fsp.rename(temporaryPath, targetPath)
+    if (options.exclusive) await publishNewFile(temporaryPath, targetPath)
+    else await fsp.rename(temporaryPath, targetPath)
 
     try {
       const directoryHandle = await fsp.open(directory, fs.constants.O_RDONLY)
@@ -1458,7 +1462,7 @@ async function ensureDefaultVault() {
   }
   return {
     vaultPath: validatedPath,
-    onboardingRequired: await readOnboardingStatus(validatedPath) === 'pending',
+    onboardingRequired: onboardingRequiredFromVaultStatus(await readOnboardingStatus(validatedPath)),
   }
 }
 
@@ -1936,26 +1940,6 @@ function queueLogicalFileWrite(vaultPath, vaultGeneration, relativePath, operati
     if (logicalFileWriteQueues.get(key) === next) logicalFileWriteQueues.delete(key)
   }).catch(() => {})
   return next
-}
-
-function safeEntryName(value, fallback) {
-  const raw = typeof value === 'string' ? value.trim() : ''
-  const name = raw || fallback
-  if (
-    !name ||
-    name.length > 180 ||
-    name === '.' ||
-    name === '..' ||
-    name.includes('/') ||
-    name.includes('\\') ||
-    /[\0-\x1f\x7f]/.test(name) ||
-    PROTECTED_INTERNAL_VAULT_DIRECTORIES.has(name.toLocaleLowerCase('en-US'))
-  ) {
-    throw new Error('Dieser Name ist nicht erlaubt.')
-  }
-  const cleaned = name.replace(/[. ]+$/u, '').trim()
-  if (!cleaned || cleaned === '.' || cleaned === '..') throw new Error('Dieser Name ist nicht erlaubt.')
-  return cleaned
 }
 
 function splitName(name) {
@@ -3045,21 +3029,32 @@ function registerIpcHandlers() {
       const previousVaultPath = currentVaultPath
       const previousVaultGeneration = currentVaultGeneration
       const previousSettings = { ...currentSettings }
+      const previousOnboardingRequired = currentOnboardingRequired
 
       try {
         const validatedVaultPath = await validateVaultRoot(selectedVaultPath)
+        // The onboarding flag lives in the vault, not in the previous profile.
+        // Copying the old flag would skip setup on a pending vault, or create
+        // starter folders in a vault that was already set up.
+        const onboardingRequired = onboardingRequiredFromVaultStatus(await readOnboardingStatus(validatedVaultPath))
         // Persist the complete candidate snapshot first. Main-process state is
         // committed only after the atomic config write succeeds, so renderer
         // and main can never observe a half-applied vault switch.
-        await persistConfig({ vaultPath: validatedVaultPath, settings: previousSettings })
+        await persistConfig({
+          vaultPath: validatedVaultPath,
+          settings: previousSettings,
+          onboardingCompleted: !onboardingRequired,
+        })
         setCurrentVaultPath(validatedVaultPath)
         markCurrentVaultValidated()
         currentSettings = previousSettings
+        currentOnboardingRequired = onboardingRequired
         return bootstrapData()
       } catch (error) {
         currentVaultPath = previousVaultPath
         currentVaultGeneration = previousVaultGeneration
         currentSettings = previousSettings
+        currentOnboardingRequired = previousOnboardingRequired
         throw error
       }
     })
@@ -3911,7 +3906,7 @@ function registerIpcHandlers() {
       if (occupied.has(candidateKey) || occupied.has(famdKey)) continue
       const absolutePath = path.join(parentTarget, candidate)
       try {
-        await queueFileWrite(absolutePath, async () => atomicWrite(absolutePath, source, { mode: 0o600 }))
+        await queueFileWrite(absolutePath, async () => atomicWrite(absolutePath, source, { mode: 0o600, exclusive: true }))
         const info = await fsp.lstat(absolutePath)
         const entry = entryFromStat(root, absolutePath, info)
         try {
@@ -4110,7 +4105,7 @@ function registerIpcHandlers() {
       if (occupied.has(candidateKey) || occupied.has(famdKey)) continue
       const absolutePath = path.join(parentTarget, candidate)
       try {
-        await queueFileWrite(absolutePath, async () => atomicWrite(absolutePath, source, { mode: 0o600 }))
+        await queueFileWrite(absolutePath, async () => atomicWrite(absolutePath, source, { mode: 0o600, exclusive: true }))
         occupied.add(candidateKey)
         occupied.add(famdKey)
         const info = await fsp.lstat(absolutePath)

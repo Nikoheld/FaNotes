@@ -8,6 +8,7 @@ const {
   STARTER_SUBJECTS,
   STARTER_PROFILES,
   onboardingRequiredFromConfig,
+  onboardingRequiredFromVaultStatus,
   parseOnboardingStatus,
   validateStarterSubjectSelection,
 } = require('../electron/onboarding.cjs')
@@ -35,8 +36,17 @@ assert.equal(onboardingRequiredFromConfig({ version: 3, onboarding: { version: 1
 assert.equal(parseOnboardingStatus({ version: 1, status: 'pending' }), 'pending')
 assert.equal(parseOnboardingStatus({ version: 1, status: 'complete' }), 'complete')
 assert.equal(parseOnboardingStatus({ version: 1, status: 'invalid' }), null)
+assert.equal(onboardingRequiredFromVaultStatus('pending'), true)
+assert.equal(onboardingRequiredFromVaultStatus('complete'), false)
+assert.equal(onboardingRequiredFromVaultStatus(null), false, 'Vaults ohne Marker bleiben ohne nachträgliche Einrichtung.')
 
 const root = path.resolve(__dirname, '..')
+const main = fs.readFileSync(path.join(root, 'electron', 'main.cjs'), 'utf8')
+const selectVault = main.slice(main.indexOf('handle(IPC.selectVault'), main.indexOf('handle(IPC.getCachedTree'))
+assert.match(selectVault, /onboardingRequiredFromVaultStatus\(await readOnboardingStatus\(validatedVaultPath\)\)/u)
+assert.match(selectVault, /currentOnboardingRequired = onboardingRequired/u)
+assert.match(selectVault, /currentOnboardingRequired = previousOnboardingRequired/u)
+
 const preload = fs.readFileSync(path.join(root, 'electron', 'preload.cjs'), 'utf8')
 const renderer = fs.readFileSync(path.join(root, 'src', 'components', 'FirstRunOnboarding.tsx'), 'utf8')
 assert.match(preload, /completeOnboarding:\s*\(subjects\)/u, 'Die sichere Renderer-API fehlt.')
