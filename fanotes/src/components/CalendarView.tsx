@@ -12,6 +12,8 @@ import {
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { getUiLanguage } from '../i18n'
+import { dueReminders } from '../lib/calendarReminders'
+import { exportIcs, importIcs } from '../lib/icsCalendar'
 import {
   CALENDAR_NOTE_PATH,
   CALENDAR_NOTE_TITLE,
@@ -204,6 +206,8 @@ export function CalendarView({ reloadToken = 0, onClose, onOpenNote, onOpenDaily
   } | null>(null)
   const suppressClick = useRef(false)
   const [draftSpan, setDraftSpan] = useState<{ day: Date, start: Date, end: Date } | null>(null)
+  const [dismissedReminders, setDismissedReminders] = useState<string[]>([])
+  const reminders = useMemo(() => dueReminders(document, now).filter((item) => !dismissedReminders.includes(item.key)), [dismissedReminders, document, now])
 
   const persist = useCallback(async (next: CalendarDocument) => {
     const healed = healCalendarNames(next, committedDocument.current)
@@ -545,7 +549,29 @@ export function CalendarView({ reloadToken = 0, onClose, onOpenNote, onOpenDaily
             ))}
           </div>
           <button type="button" className="cal-primary" onClick={() => { const start = snapMinutes(new Date()); openComposer(start, addMinutes(start, 60)) }}><Plus size={14} />{copy.newEvent}</button>
+          <button type="button" className="cal-today" onClick={() => {
+            const ics = exportIcs(document)
+            const blob = new Blob([ics], { type: 'text/calendar' })
+            const url = URL.createObjectURL(blob)
+            const link = window.document.createElement('a')
+            link.href = url
+            link.download = 'fanotes.ics'
+            link.click()
+            URL.revokeObjectURL(url)
+          }}>Exportieren</button>
+          <label className="cal-today">Importieren<input type="file" accept=".ics,text/calendar" hidden onChange={(event) => {
+            const file = event.target.files?.[0]
+            event.target.value = ''
+            if (!file) return
+            void file.text().then((text) => {
+              const calendarId = document.calendars[0]?.id
+              if (!calendarId) return
+              const imported = importIcs(text, calendarId)
+              void persist({ ...document, events: [...document.events, ...imported].slice(0, 2000) })
+            })
+          }} /></label>
         </header>
+        {reminders[0] && <p className="cal-error" role="status">{reminders[0].title} beginnt {reminders[0].minutesUntil === 0 ? 'jetzt' : `in ${reminders[0].minutesUntil} min`}. <button type="button" onClick={() => setDismissedReminders((current) => [...current, reminders[0].key])}>Schließen</button></p>}
         {error && <p className="cal-error" role="alert">{error}</p>}
         {loading ? (
           <div className="cal-loading"><LoaderCircle className="spin" size={18} /></div>

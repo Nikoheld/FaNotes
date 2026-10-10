@@ -88,6 +88,11 @@ import {
   hasDecisiveMathLayout,
 } from '../lib/recognitionModeSelection'
 import type { MathSolverAction, MathSolverResult } from '../lib/mathSolver'
+import { polishRecognizedText } from '../lib/recognitionPolish'
+import { applyLasso, strokesInsideLasso, type LassoPoint } from '../lib/inkLasso'
+import { MarginTranscript } from './MarginTranscript'
+import { addPersonalWord } from '../lib/spellingSuggest'
+import { replaceTranscriptWord } from '../lib/marginTranscript'
 import { detectScribbleErase } from '../lib/scribbleErase'
 import {
   FORM_DETECT_NOTICE_TEXT,
@@ -672,7 +677,9 @@ export type DrawingBoardProps = {
     | 'viewZoomMax'
     | 'autoOpenConversion'
     | 'keepDrawingAfterInsert'
+    | 'marginTranscript'
   >
+  onSectionFold?: (sectionIndex: number, collapsed: boolean) => void
   drawingId?: string
   title?: string
   initialDrawingJson?: string | null
@@ -1099,7 +1106,7 @@ const safeInkStrokes = (value: unknown, fallbackColor: string, options: { clampT
 
 const safeMathSolverHistory = (value: unknown): MathSolverHistoryEntry[] => {
   if (!Array.isArray(value)) return []
-  const actions = new Set<MathSolverAction>(['simplify', 'solve', 'expand', 'factor', 'calculate'])
+  const actions = new Set<MathSolverAction>(['step', 'simplify', 'solve', 'expand', 'factor', 'calculate'])
   return value.slice(-24).flatMap((entry) => {
     if (!entry || typeof entry !== 'object') return []
     const raw = entry as Partial<MathSolverHistoryEntry>
@@ -1150,6 +1157,7 @@ const isShortTapStroke = (stroke: InkStroke, sourceWidth: number, sourceHeight: 
 }
 
 const mathSolverActionLabel: Record<MathSolverAction, string> = {
+  step: 'Nächster Schritt',
   simplify: 'Term vereinfachen',
   solve: 'Gleichung lösen',
   expand: 'Ausmultiplizieren',
@@ -1209,10 +1217,15 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   sectionsEnabled = true,
   noteLinks,
   onNoteLinksExtent,
+  onSectionFold,
 }: DrawingBoardProps, forwardedRef) {
+  const lineLanguage = settings.recognitionLanguage
+  const recognitionLanguage = lineLanguage === 'de' ? 'de' : 'en'
   // Controls only: the board follows the camera through refs and a
   // subscription, so a wheel zoom does not rebuild this tree on every step.
   const paperView = usePaperViewController()
+  const onSectionFoldRef = useRef(onSectionFold)
+  onSectionFoldRef.current = onSectionFold
   const boardRef = useRef<HTMLElement | null>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const surfaceRef = useRef<HTMLDivElement>(null)
@@ -1391,6 +1404,11 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const [conversionOpen, setConversionOpen] = useState(false)
   const [textToHandwritingOpen, setTextToHandwritingOpen] = useState(false)
   const [mathSolverEnabled, setMathSolverEnabled] = useState(false)
+  const [marginTranscript, setMarginTranscript] = useState('')
+  const [lassoOn, setLassoOn] = useState(false)
+  const [lassoPoints, setLassoPoints] = useState<LassoPoint[]>([])
+  const [lassoIndexes, setLassoIndexes] = useState<number[]>([])
+  const lassoDragRef = useRef(false)
   const [mathSolverSelection, setMathSolverSelection] = useState<MathSolverSelection | null>(null)
   const [mathSolverInput, setMathSolverInput] = useState('')
   const [mathSolverVariable, setMathSolverVariable] = useState('')
@@ -2118,6 +2136,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       applyInkExtentStylesRef.current(sourceHeightRef.current, sourceWidthRef.current)
       if (typeof raw.createdAt === 'string') createdAtRef.current = raw.createdAt
       searchTranscriptRef.current = typeof raw.searchTranscript === 'string' ? raw.searchTranscript : ''
+      setMarginTranscript(searchTranscriptRef.current)
       transcriptUpdatedAtRef.current = typeof raw.transcriptUpdatedAt === 'string' ? raw.transcriptUpdatedAt : null
       indexedStrokeCountRef.current = handwritingStrokes(strokesRef.current).length
       transcriptNeedsFullRebuildRef.current = false
@@ -3424,7 +3443,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
           loaded.labels,
           'math',
           loaded.layoutExamples,
-          settings.recognitionLanguage,
+          recognitionLanguage,
         )
         const usableTokens = recognized.filter((token) => !token.isLayout)
         const averageConfidence = usableTokens.length
@@ -3458,7 +3477,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       setMathCorrectionSession({ rect, lines: [], status: 'error', error: message })
       setNotice({ kind: 'error', text: message })
     }
-  }, [settings.recognitionLanguage, sourceHeight, verifyMathCorrectionLines])
+  }, [recognitionLanguage, sourceHeight, verifyMathCorrectionLines])
 
   const openMathSolverAtPoint = useCallback(async (point: Pick<StrokePoint, 'x' | 'y'>) => {
     const selection = selectMathInkAtPoint(handwritingStrokes(strokesRef.current), point, {
@@ -3500,7 +3519,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         loaded.labels,
         'math',
         loaded.layoutExamples,
-        settings.recognitionLanguage,
+        recognitionLanguage,
       )
       const input = recognitionEngine.recognizedText(recognized, loaded.layoutExamples).trim()
       const latex = recognitionEngine.recognizedLatex(recognized, loaded.layoutExamples).trim()
@@ -3539,7 +3558,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         error: message,
       })
     }
-  }, [clearRecognitionScope, settings.recognitionLanguage, sourceHeight])
+  }, [clearRecognitionScope, recognitionLanguage, sourceHeight])
 
   // ── Collapsible sections ──────────────────────────────────────────────────
   // A section is a handwritten title band with a body below it. Collapsing lifts
@@ -3622,6 +3641,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     }
     indexedStrokeCountRef.current = handwritingStrokes(strokesRef.current).length
     commitSections([...sectionsRef.current])
+    const sectionIndex = sortSections(sectionsRef.current).findIndex((entry) => entry.id === id)
+    onSectionFoldRef.current?.(sectionIndex, section.collapsed)
     afterSectionChange({ resetHistory: true })
   }, [afterSectionChange, cloneSectionStroke, commitSections, forEachTrackedStroke, growSheetBy, setPageExtent, sheetPx])
 
@@ -5091,7 +5112,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
           loaded.model,
           loaded.labels,
           loaded.layoutExamples,
-          settings.recognitionLanguage,
+          recognitionLanguage,
           settings.lastRecognitionMode,
         )
         resolvedMode = detected.mode
@@ -5106,7 +5127,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
               loaded.model,
               loaded.labels,
               loaded.layoutExamples,
-              settings.recognitionLanguage,
+              recognitionLanguage,
             )
           : recognitionEngine.recognizeExpression(
               engineStrokes,
@@ -5114,7 +5135,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
               loaded.labels,
               requestedMode,
               loaded.layoutExamples,
-              settings.recognitionLanguage,
+              recognitionLanguage,
             )
         value = requestedMode === 'math'
           ? recognitionEngine.recognizedLatex(recognized, loaded.layoutExamples)
@@ -5156,7 +5177,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
               width: visionPage.width,
               height: visionPage.height,
               lineCount: visionPage.lineCount,
-              language: settings.recognitionLanguage === 'en' ? 'en' : 'de',
+              language: recognitionLanguage === 'en' ? 'en' : 'de',
               hasGlyphLegend: Boolean(visionPage.hasGlyphLegend),
               maxNewTokens: Math.min(512, Math.max(128, visionPage.lineCount * 48 + engineStrokes.length * 6 + 96)),
             })
@@ -5195,7 +5216,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
           const { recognizeNeuralText } = await import('../lib/neuralTextRecognition')
           const neural = await recognizeNeuralText(
             engineStrokes,
-            settings.recognitionLanguage,
+            recognitionLanguage,
             sourceWidth,
             sourceHeight,
           )
@@ -5203,7 +5224,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
           const compact = neural.text.replace(/\s/gu, '')
           const neuralModeAssessment = assessNeuralTextModeCandidate(
             neural.text,
-            settings.recognitionLanguage,
+            recognitionLanguage,
             neural,
             automaticDetection,
           )
@@ -5222,7 +5243,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
               engineStrokes,
               loaded,
               neural,
-              settings.recognitionLanguage,
+              recognitionLanguage,
               false,
               sourceWidth,
               sourceHeight,
@@ -5344,7 +5365,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     } finally {
       if (mountedRef.current && runId === recognitionRunRef.current) setIsRecognizing(false)
     }
-  }, [mode, onSettingsChange, settings.enhancedMathLicenseAccepted, settings.enhancedMathRecognition, settings.experimentalHandwritingToText, settings.lastRecognitionMode, settings.qwenVisionLicenseAccepted, settings.qwenVisionRecognition, settings.recognitionLanguage, sourceHeight, sourceWidth])
+  }, [mode, onSettingsChange, settings.enhancedMathLicenseAccepted, settings.enhancedMathRecognition, settings.experimentalHandwritingToText, settings.lastRecognitionMode, settings.qwenVisionLicenseAccepted, settings.qwenVisionRecognition, recognitionLanguage, sourceHeight, sourceWidth])
 
   useEffect(() => {
     recognizeLatestRef.current = recognize
@@ -5488,7 +5509,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
             loaded.model,
             loaded.labels,
             loaded.layoutExamples,
-            settings.recognitionLanguage,
+            recognitionLanguage,
             settings.lastRecognitionMode,
           )
           : null
@@ -5505,7 +5526,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
                 loaded.labels,
                 'text',
                 loaded.layoutExamples,
-                settings.recognitionLanguage,
+                recognitionLanguage,
               )
           const hasPersonalTextEvidence = chunkTextTokens.some((token) => (
             (token.personalSupport ?? 0) > 0 ||
@@ -5516,13 +5537,13 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
             const { recognizeNeuralText } = await import('../lib/neuralTextRecognition')
             const neural = await recognizeNeuralText(
               chunk,
-              settings.recognitionLanguage,
+              recognitionLanguage,
               sourceWidth,
               sourceHeight,
             )
             const neuralModeAssessment = assessNeuralTextModeCandidate(
               neural.text,
-              settings.recognitionLanguage,
+              recognitionLanguage,
               neural,
               automatic,
             )
@@ -5542,7 +5563,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
                 chunk,
                 loaded,
                 neural,
-                settings.recognitionLanguage,
+                recognitionLanguage,
                 false,
                 sourceWidth,
                 sourceHeight,
@@ -5575,7 +5596,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
               loaded.labels,
               'math',
               loaded.layoutExamples,
-              settings.recognitionLanguage,
+              recognitionLanguage,
             )
           const mathValue = (automatic?.mode === 'math'
             ? automatic.value
@@ -5584,18 +5605,19 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         }
       }
       if (learningRun !== contextualLearningRunRef.current) return
-      const latestTranscript = [textValues.join('\n'), mathValues.join('\n')].filter(Boolean)
+      const latestTranscript = [textValues.map((value) => polishRecognizedText(value, lineLanguage)).join('\n'), mathValues.join('\n')].filter(Boolean)
       const replaceTranscript = !appendOnly && currentStrokeCount <= 360
       searchTranscriptRef.current = [...new Set([
         ...(replaceTranscript ? [] : searchTranscriptRef.current.split('\n').filter(Boolean)),
         ...latestTranscript,
       ])].slice(-2_000).join('\n')
+      setMarginTranscript(searchTranscriptRef.current)
       transcriptUpdatedAtRef.current = new Date().toISOString()
       indexedStrokeCountRef.current = currentHandwriting.length
       transcriptNeedsFullRebuildRef.current = false
       const learning = await learnFromContextualRecognition(
         textTokens,
-        settings.recognitionLanguage,
+        recognitionLanguage,
         loaded.labels,
       )
       if (learning.learnedSamples > 0 && learningRun === contextualLearningRunRef.current) {
@@ -5607,7 +5629,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       // Background indexing must never interrupt freehand writing.
       console.error('Unsichtbares Handschrift-Transkript konnte nicht aktualisiert werden.', error)
     }
-  }, [activeMode, mode, settings.experimentalHandwritingToText, settings.lastRecognitionMode, settings.recognitionLanguage, sourceHeight])
+  }, [activeMode, mode, settings.experimentalHandwritingToText, settings.lastRecognitionMode, recognitionLanguage, sourceHeight])
 
   useEffect(() => {
     if (revision === 0 || !dirtyRef.current) return
@@ -6248,6 +6270,21 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       })
   }
 
+  const commitLasso = (action: 'delete' | 'move' | 'copy' | 'recolor') => {
+    if (!lassoIndexes.length) return
+    undoRef.current.push(snapshotStrokes(strokesRef.current))
+    if (undoRef.current.length > 80) undoRef.current.shift()
+    redoRef.current = []
+    strokesRef.current = applyLasso(strokesRef.current, lassoIndexes, action, {
+      dx: 0.04,
+      dy: 0.04,
+      color: settings.penColor,
+    })
+    setDirty(true)
+    bumpInkRevision({ redrawCommitted: true })
+    updateHistoryState()
+  }
+
   return (
     <section
       ref={boardRef as React.RefObject<HTMLElement>}
@@ -6464,6 +6501,15 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
           {inkMode === 'writing' && <button type="button" className={`lw-draw-subtle ${selectionMode && selectionPurpose === 'edit' ? 'is-active' : ''}`} onClick={beginInkEdit} disabled={!handwritingCount} title="Tinte auswählen, verschieben, kopieren oder skalieren">
             <Shapes size={14} /> <span className="lw-tool-label">Tinte</span>
           </button>}
+          {inkMode === 'writing' && <button type="button" className={`lw-draw-subtle ${lassoOn ? 'is-active' : ''}`} aria-pressed={lassoOn} onClick={() => { setLassoOn((value) => !value); setLassoPoints([]); setLassoIndexes([]) }} disabled={!handwritingCount} title="Lasso: Striche einrahmen, dann verschieben, kopieren, färben oder löschen">
+            <ScanSearch size={14} /> <span className="lw-tool-label">Lasso</span>
+          </button>}
+          {lassoOn && lassoIndexes.length > 0 && <>
+            <button type="button" className="lw-draw-subtle" onClick={() => commitLasso('move')}>Verschieben</button>
+            <button type="button" className="lw-draw-subtle" onClick={() => commitLasso('copy')}>Kopieren</button>
+            <button type="button" className="lw-draw-subtle" onClick={() => commitLasso('recolor')}>Färben</button>
+            <button type="button" className="lw-draw-subtle lw-danger" onClick={() => commitLasso('delete')}>Löschen</button>
+          </>}
           {sectionsEnabled && inkMode === 'writing' && <button type="button" className={`lw-draw-subtle ${sectionPlacing ? 'is-active' : ''}`} aria-pressed={sectionPlacing} onClick={beginSectionPlacement} title="Abschnitt mit Titelzeile einfügen · der Pfeil am Rand klappt den Inhalt ein">
             <ListCollapse size={14} /> <span className="lw-tool-label">Abschnitt</span>
           </button>}
@@ -6973,7 +7019,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
                     </label>
                   </div>
                   <div className="lw-math-solver-actions">
-                    {(['simplify', 'solve', 'expand', 'factor', 'calculate'] as MathSolverAction[]).map((action) => {
+                    {(['step', 'simplify', 'solve', 'expand', 'factor', 'calculate'] as MathSolverAction[]).map((action) => {
                       const inspection = mathSolverInspection.inspection
                       const disabled = !inspection
                         || isMathSolving
@@ -6983,7 +7029,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
                         type="button"
                         key={action}
                         disabled={disabled}
-                        className={action === 'simplify' || action === 'solve' ? 'is-primary' : ''}
+                        className={action === 'step' || action === 'simplify' || action === 'solve' ? 'is-primary' : ''}
                         onClick={() => void runMathSolverAction(action)}
                       >
                         {isMathSolving ? <LoaderCircle className="lw-spin" size={13} /> : <Calculator size={13} />}
@@ -7165,6 +7211,9 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
           {inkMode === 'writing' && <button type="button" className={`lw-draw-subtle ${selectionMode && selectionPurpose === 'edit' ? 'is-active' : ''}`} onClick={beginInkEdit} disabled={!handwritingCount} title="Tinte auswählen, verschieben, kopieren oder skalieren">
             <Shapes size={14} /> Tinte
           </button>}
+          {inkMode === 'writing' && <button type="button" className={`lw-draw-subtle ${lassoOn ? 'is-active' : ''}`} aria-pressed={lassoOn} onClick={() => { setLassoOn((value) => !value); setLassoPoints([]); setLassoIndexes([]) }} disabled={!handwritingCount} title="Lasso: Striche einrahmen, dann verschieben, kopieren, färben oder löschen">
+            <ScanSearch size={14} /> Lasso
+          </button>}
           {sectionsEnabled && inkMode === 'writing' && <button type="button" className={`lw-draw-subtle ${sectionPlacing ? 'is-active' : ''}`} aria-pressed={sectionPlacing} onClick={beginSectionPlacement} title="Abschnitt mit Titelzeile einfügen · der Pfeil am Rand klappt den Inhalt ein">
             <ListCollapse size={14} /> Abschnitt
           </button>}
@@ -7200,6 +7249,48 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         onInsert={insertSynthesizedHandwriting}
         onRequestTraining={requestTraining}
       />
+      {lassoOn && inputActive && (
+        <div
+          className="lw-lasso-layer"
+          onPointerDown={(event) => {
+            event.stopPropagation()
+            event.preventDefault()
+            const point = pointFromEvent(event.nativeEvent)
+            if (!point) return
+            lassoDragRef.current = true
+            setLassoPoints([{ x: point.x, y: point.y }])
+            setLassoIndexes([])
+          }}
+          onPointerMove={(event) => {
+            if (!lassoDragRef.current) return
+            const point = pointFromEvent(event.nativeEvent)
+            if (!point) return
+            setLassoPoints((current) => [...current, { x: point.x, y: point.y }].slice(-400))
+          }}
+          onPointerUp={() => {
+            lassoDragRef.current = false
+            setLassoPoints((current) => {
+              setLassoIndexes(strokesInsideLasso(strokesRef.current, current))
+              return current
+            })
+          }}
+        >
+          <svg viewBox="0 0 1 1" preserveAspectRatio="none">
+            <polyline points={lassoPoints.map((point) => `${point.x},${point.y}`).join(' ')} />
+          </svg>
+        </div>
+      )}
+      {settings.marginTranscript !== false && inputActive && (
+        <MarginTranscript
+          transcript={marginTranscript}
+          onCorrect={(from, to) => {
+            searchTranscriptRef.current = replaceTranscriptWord(searchTranscriptRef.current, from, to)
+            setMarginTranscript(searchTranscriptRef.current)
+            addPersonalWord(to)
+            setDirty(true)
+          }}
+        />
+      )}
     </section>
   )
 }))
@@ -7354,6 +7445,13 @@ const drawingBoardStyles = `
 .lw-art-studio-body>.lw-art-control-section{display:flex;flex-direction:column}
 @media(max-width:640px){.lw-art-studio-tabs>button{height:38px;justify-content:center;padding:0 6px}.lw-art-studio-tabs>button>span small{display:none}.lw-art-studio-body{grid-template-columns:1fr}.lw-art-studio-body>.lw-art-brush-section,.lw-art-studio-body>.lw-art-color-section,.lw-art-studio-body>.lw-art-symbol-section,.lw-art-studio-body>.lw-art-control-section{grid-column:1;grid-row:auto}.lw-art-symbols{grid-template-columns:repeat(4,minmax(0,1fr))}}
 @media(prefers-reduced-motion:reduce){.lw-drawing-board *{scroll-behavior:auto!important;transition:none!important;animation-duration:.001ms!important}}
+.lw-lasso-layer{position:absolute;inset:0;z-index:6;touch-action:none}
+.lw-lasso-layer svg{width:100%;height:100%;overflow:visible}
+.lw-lasso-layer polyline{fill:rgba(42,111,151,.12);stroke:#2a6f97;stroke-width:.004}
+.lw-margin-transcript{position:absolute;top:12px;right:12px;z-index:7;width:min(220px,40%);max-height:46%;overflow:auto;padding:8px 10px;border:1px solid var(--border);border-radius:12px;background:color-mix(in srgb,var(--panel) 92%,transparent);font-size:12px}
+.lw-margin-transcript ol{margin:6px 0 0;padding-left:16px}
+.lw-margin-transcript button{border:0;background:transparent;color:inherit;cursor:pointer;padding:0}
+.lw-margin-transcript input{width:7em}
 `
 
 export default DrawingBoard

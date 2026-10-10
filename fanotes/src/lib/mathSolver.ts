@@ -3,7 +3,7 @@ import { MATH_SOLVER_MAX_VARIABLES, normalizeMathInput } from './mathSolverInput
 
 export { normalizeMathInput } from './mathSolverInput'
 
-export type MathSolverAction = 'simplify' | 'solve' | 'expand' | 'factor' | 'calculate'
+export type MathSolverAction = 'simplify' | 'solve' | 'expand' | 'factor' | 'calculate' | 'step'
 
 export type MathSolutionStep = {
   expression: string
@@ -147,7 +147,22 @@ export const solveMathExpression = (
   let steps: MathSolutionStep[]
   let variable: string | undefined
 
-  if (action === 'solve') {
+  if (action === 'step') {
+    if (inspected.isEquation && inspected.variables.length) {
+      const solved = solveEquation(inspected.normalizedInput, requestedVariable)
+      variable = solved.variable
+      const first = solved.steps[0]
+      steps = [{ ...first, kind: solved.steps.length > 1 ? 'intermediate' : first.kind }]
+    } else {
+      const simplified = transformBothSides(inspected.normalizedInput, (value) => nerdamer(`simplify(${value})`))
+      if (simplified !== inspected.normalizedInput) {
+        steps = [stepFor(simplified, 'intermediate')]
+      } else {
+        const expanded = transformBothSides(inspected.normalizedInput, (value) => nerdamer(value).expand())
+        steps = [stepFor(expanded, expanded === inspected.normalizedInput ? 'result' : 'intermediate')]
+      }
+    }
+  } else if (action === 'solve') {
     const solved = solveEquation(inspected.normalizedInput, requestedVariable)
     steps = solved.steps
     variable = solved.variable

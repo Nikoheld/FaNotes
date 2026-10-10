@@ -1,6 +1,7 @@
 import { ENGLISH_COMMON_WORDS } from '../../../src/data/englishLanguage'
 import { GERMAN_COMMON_WORDS } from '../../../src/data/germanLanguage'
 import { normalizeGermanSharpS } from '../../../src/lib/orthography'
+import { applyGermanTokenCase, repairGermanToken } from './germanRecognition'
 import type { RecognitionLanguage } from '../../../src/lib/recognition'
 
 const LANGUAGE_WORDS = {
@@ -432,6 +433,10 @@ export const applyNeuralWordContext = (
       // it has to be present here as well because this local stage runs first.
       if (lexicon.has(lower) || (preserveExtendedWords && isExtendedNeuralContextWord(lower, language))) {
         return normalizeKnownWordCase(source, lower, language)
+      }
+      if (language === 'de') {
+        const repaired = repairGermanToken(lower, (word) => lexicon.has(word) || isExtendedNeuralContextWord(word, 'de'))
+        if (repaired) return applyGermanTokenCase(source, repaired)
       }
       if (lower.length < 3 || /\p{Ll}\p{Lu}/u.test(source)) return source
       const beginsSentence = beginsSentenceAt(complete, offset)

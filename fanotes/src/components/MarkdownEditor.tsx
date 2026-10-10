@@ -17,8 +17,11 @@ import { markdown } from '@codemirror/lang-markdown'
 import {
   bracketMatching,
   defaultHighlightStyle,
+  foldEffect,
   foldGutter,
   foldKeymap,
+  foldable,
+  unfoldEffect,
   indentOnInput,
   syntaxTree,
   syntaxHighlighting,
@@ -181,6 +184,7 @@ export type MarkdownEditorHandle = {
   focus: () => void
   flushChanges: () => void
   revealLine: (line: number) => boolean
+  foldHeading: (line: number, collapsed: boolean) => boolean
   /** Programmatic access used by add-ons; every call goes through a normal editor transaction. */
   getText: () => string | null
   getSelection: () => { from: number; to: number; text: string; line: number } | null
@@ -1258,6 +1262,15 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
     },
     focus: () => viewRef.current?.focus(),
     flushChanges: () => changeSchedulerRef.current?.flush(),
+    foldHeading: (line, collapsed) => {
+      const view = viewRef.current
+      if (!view) return false
+      const lineInfo = view.state.doc.line(Math.min(view.state.doc.lines, Math.max(1, Math.trunc(line))))
+      const range = foldable(view.state, lineInfo.from, lineInfo.to)
+      if (!range) return false
+      view.dispatch({ effects: collapsed ? foldEffect.of(range) : unfoldEffect.of(range) })
+      return true
+    },
     revealLine: (line) => {
       const view = viewRef.current
       if (!view) return false

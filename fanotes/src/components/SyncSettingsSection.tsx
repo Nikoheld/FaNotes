@@ -2,6 +2,7 @@ import { Check, Cloud, CloudOff, KeyRound, Laptop, LoaderCircle, LogOut, Refresh
 import { useEffect, useState } from 'react'
 import { getUiLocale } from '../i18n'
 import type { SyncEngine, SyncPublicState } from '../lib/sync/engine'
+import { diffLines, isMarkdownConflictPath, resolveMarkdownConflict, type ConflictChoice } from '../lib/sync/markdownConflict'
 import { syncStatusLabel } from '../lib/sync/status'
 import type { AppSettings } from '../types'
 
@@ -37,6 +38,7 @@ export function SyncSettingsSection({ engine, syncState, settings, update, platf
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [deletePassword, setDeletePassword] = useState('')
   const [logOpen, setLogOpen] = useState(false)
+  const [review, setReview] = useState<{ path: string; copyPath: string; remote: string; local: string } | null>(null)
   const signedIn = Boolean(syncState.account)
   const unavailable = syncState.status === 'unavailable'
 
@@ -152,6 +154,18 @@ export function SyncSettingsSection({ engine, syncState, settings, update, platf
               <div className="setting-control"><button type="button" className={`toggle ${settings.syncAutomatic ? 'is-on' : ''}`} role="switch" aria-checked={settings.syncAutomatic} aria-label="Automatisch synchronisieren" onClick={() => update('syncAutomatic', !settings.syncAutomatic)}><span /></button></div>
             </div>
             <div className="setting-row">
+              <div className="setting-copy"><span>Handschriftmodell synchronisieren</span><small>Persönliche GlyphenWerk-Beispiele als eigene verschlüsselte Datei. Aus: das Modell bleibt auf diesem Gerät.</small></div>
+              <div className="setting-control"><button type="button" className={`toggle ${settings.syncHandwritingModel ? 'is-on' : ''}`} role="switch" aria-checked={settings.syncHandwritingModel} aria-label="Handschriftmodell synchronisieren" onClick={() => update('syncHandwritingModel', !settings.syncHandwritingModel)}><span /></button></div>
+            </div>
+            <div className="setting-row">
+              <div className="setting-copy"><span>Versionsverlauf synchronisieren</span><small>Die lokalen Sicherungen unter .fanotes/history mitnehmen. Aus: der Verlauf bleibt auf diesem Gerät.</small></div>
+              <div className="setting-control"><button type="button" className={`toggle ${settings.syncNoteHistory ? 'is-on' : ''}`} role="switch" aria-checked={settings.syncNoteHistory} aria-label="Versionsverlauf synchronisieren" onClick={() => update('syncNoteHistory', !settings.syncNoteHistory)}><span /></button></div>
+            </div>
+            <div className="setting-row">
+              <div className="setting-copy"><span>Ordner nur auf diesem Gerät</span><small>Ein Ordner je Zeile, zum Beispiel Physik/Buch. Der Rest des Vaults wird weiter synchronisiert.</small></div>
+              <div className="setting-control"><textarea value={settings.syncExcludedFolders} rows={3} aria-label="Ordner nur auf diesem Gerät" onChange={(event) => update('syncExcludedFolders', event.target.value)} /></div>
+            </div>
+            <div className="setting-row">
               <div className="setting-copy"><span>Name dieses Geräts</span><small>Erscheint in der Geräteliste und im Namen von Konfliktkopien.</small></div>
               <div className="setting-control"><input data-i18n-ignore type="text" maxLength={80} value={settings.syncDeviceName} placeholder={isWeb ? 'Browser' : 'z. B. Laptop'} onChange={(event) => update('syncDeviceName', event.target.value)} /></div>
             </div>
@@ -179,8 +193,37 @@ export function SyncSettingsSection({ engine, syncState, settings, update, platf
               {syncState.conflicts.slice().reverse().map((conflict) => (
                 <div key={`${conflict.copyPath}-${conflict.at}`} className="setting-row">
                   <div className="setting-copy"><span data-i18n-ignore>{conflict.path}</span><small>Lokale Fassung gesichert als „{conflict.copyPath}“ · {formatWhen(conflict.at)}</small></div>
+                  {isMarkdownConflictPath(conflict.path) && (
+                    <div className="setting-control">
+                      <button type="button" className="secondary-button" onClick={() => void (async () => {
+                        const [remote, local] = await Promise.all([
+                          window.fanotes.readFile(conflict.path),
+                          window.fanotes.readFile(conflict.copyPath),
+                        ])
+                        setReview({ path: conflict.path, copyPath: conflict.copyPath, remote, local })
+                      })()}>Vergleichen</button>
+                    </div>
+                  )}
                 </div>
               ))}
+              {review && (
+                <div className="sync-conflict-review">
+                  <p>Markdown-Konflikt. Die Serverfassung behält den Pfad, die lokale Fassung liegt in der Kopie. Binärdateien bleiben Kopien.</p>
+                  <pre>{diffLines(review.local, review.remote).slice(0, 80).map((row) => `${row.kind === 'added' ? '+' : row.kind === 'removed' ? '-' : ' '} ${row.text}`).join('\n')}</pre>
+                  <div className="sync-form-actions">
+                    {(['remote', 'local', 'both'] as ConflictChoice[]).map((choice) => (
+                      <button key={choice} type="button" className="secondary-button" onClick={() => void (async () => {
+                        const next = resolveMarkdownConflict(review.remote, review.local, choice)
+                        await window.fanotes.writeFile(review.path, next)
+                        if (choice !== 'local') await window.fanotes.trashEntry(review.copyPath).catch(() => undefined)
+                        engine.dismissConflict(review.copyPath)
+                        setReview(null)
+                        setNotice({ kind: 'success', text: choice === 'both' ? 'Beide Fassungen wurden zusammengeführt.' : choice === 'local' ? 'Die lokale Fassung behält den Pfad.' : 'Die Serverfassung bleibt.' })
+                      })()}>{choice === 'remote' ? 'Serverfassung behalten' : choice === 'local' ? 'Lokale Fassung behalten' : 'Zusammenführen'}</button>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 

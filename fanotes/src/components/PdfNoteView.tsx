@@ -61,6 +61,8 @@ type PdfNoteViewProps = {
   toolbarSlotId?: string
   initialPage?: number
   onPageChange?: (page: number, pageCount: number) => void
+  quotes?: Array<{ page: number; quote: string }>
+  onMarkSelection?: (quote: string, page: number) => void
 }
 
 type OutlineItem = {
@@ -98,6 +100,7 @@ function PdfPageCanvas({
   rotation,
   textEnabled,
   highlight,
+  quotes = [],
   onRatio,
   onReady,
 }: {
@@ -106,6 +109,7 @@ function PdfPageCanvas({
   rotation: number
   textEnabled: boolean
   highlight?: string
+  quotes?: string[]
   onRatio: (ratio: number) => void
   onReady: () => void
 }) {
@@ -142,12 +146,19 @@ function PdfPageCanvas({
     textLayerRef.current = layer
     try {
       await layer.render()
+      for (const quote of quotes) {
+        if (!quote) continue
+        textHost.querySelectorAll('span').forEach((span) => {
+          const text = span.textContent?.trim() ?? ''
+          if (text.length > 1 && quote.includes(text)) span.classList.add('pdf-anchored-mark')
+        })
+      }
     } catch (error: unknown) {
       if (!(error instanceof Error) || !/cancel/iu.test(error.name)) {
         console.error(`Textebene der PDF-Seite ${number} konnte nicht aufgebaut werden.`, error)
       }
     }
-  }, [number])
+  }, [number, quotes])
 
   useEffect(() => {
     const host = hostRef.current
@@ -263,6 +274,7 @@ function PdfPage({
   rotation,
   textEnabled,
   highlight,
+  quotes = [],
   defaultRatio,
   active,
   onRatio,
@@ -274,6 +286,7 @@ function PdfPage({
   rotation: number
   textEnabled: boolean
   highlight?: string
+  quotes?: string[]
   defaultRatio: number
   active: boolean
   onRatio: (number: number, ratio: number) => void
@@ -340,6 +353,7 @@ function PdfPage({
           rotation={rotation}
           textEnabled={textEnabled}
           highlight={highlight}
+          quotes={quotes}
           onRatio={handleRatio}
           onReady={onReady}
         />
@@ -447,6 +461,8 @@ export function PdfNoteView({
   autoFit = true,
   initialPage,
   onPageChange,
+  quotes = [],
+  onMarkSelection,
 }: PdfNoteViewProps) {
   const [pdf, setPdf] = useState<PDFDocumentProxy | null>(null)
   const [loading, setLoading] = useState(true)
@@ -901,6 +917,11 @@ export function PdfNoteView({
               disabled={!pdf}
             />
           </form>
+          <button type="button" aria-label="Auswahl markieren" title="Markiert die ausgewählte PDF-Textstelle und macht sie suchbar" onClick={() => {
+            const quote = window.getSelection()?.toString().replace(/\s+/gu, ' ').trim() ?? ''
+            if (quote.length < 2) return
+            onMarkSelection?.(quote, currentPage)
+          }}>Markieren</button>
           <span>/ {pageCount || '…'}</span>
           <button type="button" aria-label="Nächste Seite" disabled={!pdf || currentPage >= pageCount} onClick={() => scrollToPage(currentPage + 1)}><ChevronDown size={14} /></button>
         </span>
@@ -1003,6 +1024,7 @@ export function PdfNoteView({
                   rotation={rotation}
                   textEnabled
                   highlight={searchHits.some((hit) => hit.page === page) ? searchQuery.trim() : activeHighlight}
+                  quotes={quotes.filter((mark) => mark.page === page).map((mark) => mark.quote)}
                   defaultRatio={pageRatio}
                   active={page === currentPage}
                   onRatio={handlePageRatio}

@@ -157,6 +157,8 @@ const IPC = Object.freeze({
   getTree: 'fanotes:get-tree',
   readFile: 'fanotes:read-file',
   writeFile: 'fanotes:write-file',
+  readRecognitionModel: 'fanotes:read-recognition-model',
+  writeRecognitionModel: 'fanotes:write-recognition-model',
   createNote: 'fanotes:create-note',
   createFolder: 'fanotes:create-folder',
   setFolderColor: 'fanotes:set-folder-color',
@@ -251,6 +253,10 @@ const DEFAULT_SETTINGS = Object.freeze({
   addonsAutoUpdate: true,
   syncAutomatic: true,
   syncDeviceName: '',
+  syncExcludedFolders: '',
+  syncHandwritingModel: false,
+  syncNoteHistory: false,
+  marginTranscript: true,
   showWordCount: true,
   showOutline: true,
   defaultFolder: 'Eingang',
@@ -341,6 +347,10 @@ const SETTINGS_SCHEMA = Object.freeze({
   addonsAutoUpdate: { type: 'boolean' },
   syncAutomatic: { type: 'boolean' },
   syncDeviceName: { type: 'string', max: 80 },
+  syncExcludedFolders: { type: 'string', max: 4000 },
+  syncHandwritingModel: { type: 'boolean' },
+  syncNoteHistory: { type: 'boolean' },
+  marginTranscript: { type: 'boolean' },
   showWordCount: { type: 'boolean' },
   showOutline: { type: 'boolean' },
   defaultFolder: { type: 'relative', max: 480 },
@@ -357,7 +367,7 @@ const SETTINGS_SCHEMA = Object.freeze({
   shapeSnapSensitivity: { type: 'number', min: 0, max: 100 },
   recognitionMode: { type: 'enum', values: ['auto', 'math', 'text'] },
   lastRecognitionMode: { type: 'enum', values: ['math', 'text'] },
-  recognitionLanguage: { type: 'enum', values: ['de', 'en'] },
+  recognitionLanguage: { type: 'enum', values: ['de', 'en', 'fr'] },
   autoOpenConversion: { type: 'boolean' },
   keepDrawingAfterInsert: { type: 'boolean' },
   autoCheckUpdates: { type: 'boolean' },
@@ -3474,7 +3484,34 @@ function registerIpcHandlers() {
     }
   })
 
+  const RECOGNITION_MODEL_RELATIVE = '.fanotes/recognition-model.json'
+  const MAX_RECOGNITION_MODEL_BYTES = 20 * 1024 * 1024
+
+  handle(IPC.readRecognitionModel, async () => {
+    await ensureBootstrap()
+    const { target } = await resolveVaultPath(RECOGNITION_MODEL_RELATIVE, { allowMissing: true, allowInternal: true, expected: 'file' })
+    try {
+      return (await readRegularFileNoFollow(target, MAX_RECOGNITION_MODEL_BYTES)).toString('utf8')
+    } catch (error) {
+      if (error?.code === 'ENOENT') return null
+      throw error
+    }
+  })
+
+  handle(IPC.writeRecognitionModel, async (_event, content) => {
+    await ensureBootstrap()
+    if (typeof content !== 'string' || Buffer.byteLength(content, 'utf8') > MAX_RECOGNITION_MODEL_BYTES) {
+      throw new Error('Das Handschriftmodell ist ungültig oder zu groß.')
+    }
+    const { target } = await resolveVaultPath(RECOGNITION_MODEL_RELATIVE, { allowMissing: true, allowInternal: true, expected: 'file' })
+    await fsp.mkdir(path.dirname(target), { recursive: true })
+    await atomicWrite(target, content, { encoding: 'utf8', mode: 0o600 })
+    const info = await fsp.stat(target)
+    return { modifiedAt: info.mtime.toISOString() }
+  })
+
   handle(IPC.search, async (_event, rawQuery) => {
+    const { inkAnchorForQuery } = require('./search-ink.cjs')
     await ensureBootstrap()
     if (typeof rawQuery !== 'string') throw new Error('Ungültige Suchanfrage.')
     const query = rawQuery.trim().slice(0, 500)
@@ -3541,6 +3578,7 @@ function registerIpcHandlers() {
         matches += 1
         cursor = index + Math.max(needle.length, 1)
       }
+      const inkAnchor = inkTranscript ? inkAnchorForQuery(inkTranscript, query) : null
       hits.push({
         relativePath,
         title: splitName(path.basename(file.absolutePath)).stem,
@@ -3549,6 +3587,7 @@ function registerIpcHandlers() {
           : `Dateiname · ${relativePath}`,
         matches,
         kind: 'note',
+        ...(inkAnchor ? { inkAnchor } : {}),
       })
     }
 
@@ -3589,6 +3628,7 @@ function registerIpcHandlers() {
           cursor = index + Math.max(needle.length, 1)
         }
         const notePath = drawingOwners.get(id)
+        const inkAnchor = inkAnchorForQuery(transcript, query)
         hits.push({
           relativePath: metadata.dataRelativePath,
           title: metadata.title,
@@ -3597,6 +3637,7 @@ function registerIpcHandlers() {
           kind: 'drawing',
           drawingId: id,
           ...(typeof notePath === 'string' ? { notePath } : {}),
+          ...(inkAnchor ? { inkAnchor } : {}),
         })
       } catch {
         // A malformed or half-written drawing must never break vault search.
@@ -4411,7 +4452,7 @@ function registerIpcHandlers() {
     }
     return getQwenVisionService().recognize({
       ...request,
-      language: currentSettings.recognitionLanguage === 'en' ? 'en' : 'de',
+      language: currentSettings.recognitionLanguage === 'de' ? 'de' : 'en',
     })
   })
 

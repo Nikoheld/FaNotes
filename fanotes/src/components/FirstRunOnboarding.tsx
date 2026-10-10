@@ -22,7 +22,7 @@ import type { StarterSubject } from '../types'
 
 type FirstRunOnboardingProps = {
   subjects: StarterSubject[]
-  onComplete: (subjects: string[]) => Promise<void>
+  onComplete: (subjects: string[], profile: ProfileId) => Promise<void>
 }
 
 type OnboardingStep = 0 | 1 | 2 | 3
@@ -161,7 +161,7 @@ export function FirstRunOnboarding({ subjects, onComplete }: FirstRunOnboardingP
     setBusy(true)
     setError(null)
     try {
-      await onComplete(allNames.filter((name) => selected.has(name)))
+      await onComplete(allNames.filter((name) => selected.has(name)), profileId)
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Die Fächer konnten nicht eingerichtet werden.')
       setBusy(false)

@@ -31,6 +31,12 @@ export type AppAddonDeps = {
   refreshTree: () => Promise<unknown>
   editor: AddonHostBridge['editor']
   readInk: (path: string) => Promise<unknown>
+  writeInk: (path: string, strokes: unknown, mode: 'append' | 'replace') => Promise<boolean>
+  runRecognition: (request: { text?: string; language?: string; pngBase64?: string }) => Promise<{ text: string; language: string; source: string }>
+  readCalendar: () => Promise<unknown>
+  writeCalendar: (document: unknown) => Promise<boolean>
+  readHomework: () => Promise<unknown>
+  writeHomework: (document: unknown) => Promise<boolean>
   pageStats: (path: string) => unknown | null
   settings: () => AppSettings
   writeClipboard: (text: string) => Promise<void>
@@ -153,7 +159,19 @@ export const createAppAddonBridge = (deps: AppAddonDeps): AddonHostBridge => ({
     trash: async (path) => deps.trashEntry(path),
   },
   editor: deps.editor,
-  ink: { read: (path) => deps.readInk(path) },
+  ink: {
+    read: (path) => deps.readInk(path),
+    write: (path, strokes, mode) => deps.writeInk(path, strokes, mode),
+  },
+  recognition: { run: (request) => deps.runRecognition(request) },
+  calendar: {
+    read: () => deps.readCalendar(),
+    write: (document) => deps.writeCalendar(document),
+  },
+  homework: {
+    read: () => deps.readHomework(),
+    write: (document) => deps.writeHomework(document),
+  },
   stats: {
     read: async (path) => {
       const live = deps.pageStats(path)
