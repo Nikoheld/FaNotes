@@ -40,6 +40,16 @@ async function assertExclusivePublish() {
     await fsp.writeFile(third, 'via-link')
     await assert.rejects(publishNewFile(third, link), { code: 'EEXIST' })
     assert.equal(await fsp.readFile(target, 'utf8'), 'original')
+    const unsupported = async () => {
+      const error = new Error('hard links are unavailable')
+      error.code = 'ENOTSUP'
+      throw error
+    }
+    await assert.rejects(publishNewFile(second, target, unsupported), { code: 'EEXIST' })
+    assert.equal(await fsp.readFile(target, 'utf8'), 'original')
+    const created = path.join(directory, 'Neu.pdf')
+    await publishNewFile(second, created, unsupported)
+    assert.equal(await fsp.readFile(created, 'utf8'), 'replacement')
   } finally {
     await fsp.rm(directory, { recursive: true, force: true })
   }
