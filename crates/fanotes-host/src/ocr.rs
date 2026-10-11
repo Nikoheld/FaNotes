@@ -25,8 +25,9 @@ struct Sidecar {
 static SIDECAR: Mutex<Option<Sidecar>> = Mutex::new(None);
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 
-pub fn recognize_line(request: &Value) -> Result<Value, String> {
-    let (width, threads, input) = parse_line(request)?;
+pub fn recognize_line(request: &Value, configured_threads: i64) -> Result<Value, String> {
+    let (width, input) = parse_line(request)?;
+    let threads = ocr_thread_count(request.get("threads"), configured_threads, logical_cores());
     let mut guard = SIDECAR.lock().unwrap_or_else(|error| error.into_inner());
     if guard.is_none() {
         *guard = Some(start_sidecar()?);
@@ -78,7 +79,7 @@ pub fn recognize_line(request: &Value) -> Result<Value, String> {
     }
 }
 
-fn parse_line(request: &Value) -> Result<(usize, usize, Vec<f32>), String> {
+fn parse_line(request: &Value) -> Result<(usize, Vec<f32>), String> {
     let invalid = || "Die native OCR-Eingabe ist ungültig.".to_owned();
     let width = request
         .get("width")
@@ -88,14 +89,13 @@ fn parse_line(request: &Value) -> Result<(usize, usize, Vec<f32>), String> {
         .get("height")
         .and_then(Value::as_u64)
         .ok_or_else(invalid)? as usize;
-    let threads = request.get("threads").and_then(Value::as_u64).unwrap_or(1) as usize;
+    if height != MODEL_HEIGHT || !(32..=4096).contains(&width) {
+        return Err(invalid());
+    }
     let encoded = request
         .get("inputBase64")
         .and_then(Value::as_str)
         .ok_or_else(invalid)?;
-    if height != MODEL_HEIGHT || !(32..=4096).contains(&width) || !(1..=4).contains(&threads) {
-        return Err(invalid());
-    }
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(encoded)
         .map_err(|_| invalid())?;
@@ -106,7 +106,51 @@ fn parse_line(request: &Value) -> Result<(usize, usize, Vec<f32>), String> {
         .chunks_exact(4)
         .map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
         .collect();
-    Ok((width, threads, input))
+    Ok((width, input))
+}
+
+/// Desktop `recognizeNativeOcrLine`: the setting and the CPU count cap the
+/// request. `0` means automatic, half the logical cores, at most four.
+pub(crate) fn ocr_thread_count(
+    requested: Option<&Value>,
+    configured: i64,
+    logical_cores: usize,
+) -> usize {
+    let logical = logical_cores.max(1) as i64;
+    let automatic = (logical / 2).clamp(1, 4);
+    let maximum = if (1..=4).contains(&configured) {
+        configured
+    } else {
+        automatic
+    };
+    let requested = integer_threads(requested).unwrap_or(maximum);
+    let threads = [4, logical, maximum, requested]
+        .into_iter()
+        .min()
+        .unwrap_or(1);
+    threads.max(1) as usize
+}
+
+fn integer_threads(value: Option<&Value>) -> Option<i64> {
+    let value = value?;
+    if let Some(number) = value.as_i64() {
+        return Some(number);
+    }
+    if let Some(number) = value.as_u64() {
+        return i64::try_from(number).ok();
+    }
+    let number = value.as_f64()?;
+    if number.is_finite() && number.fract() == 0.0 {
+        Some(number as i64)
+    } else {
+        None
+    }
+}
+
+fn logical_cores() -> usize {
+    std::thread::available_parallelism()
+        .map(|count| count.get())
+        .unwrap_or(1)
 }
 
 fn start_sidecar() -> Result<Sidecar, String> {
@@ -262,5 +306,24 @@ fn arch_name() -> &'static str {
         "x86_64" => "x64",
         "aarch64" => "arm64",
         other => other,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ocr_thread_count;
+    use serde_json::json;
+
+    #[test]
+    fn native_ocr_threads_follow_the_desktop_cap() {
+        assert_eq!(ocr_thread_count(Some(&json!(4)), 1, 8), 1);
+        assert_eq!(ocr_thread_count(Some(&json!(4)), 0, 8), 4);
+        assert_eq!(ocr_thread_count(Some(&json!(4)), 0, 2), 1);
+        assert_eq!(ocr_thread_count(None, 0, 4), 2);
+        assert_eq!(ocr_thread_count(Some(&json!(2)), 3, 8), 2);
+        assert_eq!(ocr_thread_count(Some(&json!(0)), 4, 8), 1);
+        assert_eq!(ocr_thread_count(Some(&json!(-3)), 4, 8), 1);
+        assert_eq!(ocr_thread_count(Some(&json!(2.5)), 4, 8), 4);
+        assert_eq!(ocr_thread_count(Some(&json!(8)), 0, 16), 4);
     }
 }
