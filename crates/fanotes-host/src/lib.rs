@@ -8,6 +8,7 @@ mod drawings;
 mod ocr;
 mod policy;
 mod vault;
+mod worksheets;
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -141,9 +142,11 @@ impl Host {
             "fanotes:open-subject-book-popout" | "fanotes:close-subject-book-popout" => {
                 Ok(Value::Null)
             }
-            "fanotes:read-worksheet" | "fanotes:save-worksheet" | "fanotes:delete-worksheet" => {
-                Ok(Value::Null)
+            "fanotes:read-worksheet" => worksheets::read_worksheet(self, &arg_string(args, 0)?),
+            "fanotes:save-worksheet" => {
+                worksheets::save_worksheet(self, args.first().unwrap_or(&Value::Null))
             }
+            "fanotes:delete-worksheet" => worksheets::delete_worksheet(self, &arg_string(args, 0)?),
             "fanotes:list-note-history" => Ok(json!([])),
             "fanotes:read-note-history" => Ok(Value::Null),
             "fanotes:export-note-pdf" => Err("PDF-Export bleibt im Electron-Release.".to_owned()),
