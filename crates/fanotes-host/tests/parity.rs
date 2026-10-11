@@ -94,6 +94,18 @@ fn vault_paths_reject_traversal_and_internal_files() {
         .as_str()
         .unwrap()
         .starts_with("data:application/pdf;base64,"));
+    fs::write(
+        dir.0.join("vault").join("skizze.svg"),
+        b"<svg xmlns=\"http://www.w3.org/2000/svg\"/>",
+    )
+    .unwrap();
+    let svg_url = host
+        .dispatch("fanotes:read-asset-data-url", &[json!("skizze.svg")])
+        .unwrap();
+    assert!(svg_url
+        .as_str()
+        .unwrap()
+        .starts_with("data:image/svg+xml;base64,"));
     assert_eq!(
         host.dispatch("fanotes:read-asset-bytes", &[json!("Notiz.md")])
             .unwrap_err(),

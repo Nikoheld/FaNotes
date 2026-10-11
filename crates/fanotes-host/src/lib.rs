@@ -1604,6 +1604,7 @@ fn asset_mime(relative: &str) -> Result<&'static str, String> {
         "jpg" | "jpeg" => Ok("image/jpeg"),
         "webp" => Ok("image/webp"),
         "gif" => Ok("image/gif"),
+        "svg" => Ok("image/svg+xml"),
         "pdf" => Ok("application/pdf"),
         "html" | "htm" => Ok("text/html"),
         _ => Err("Dieser Dateityp ist für die Vorschau nicht erlaubt.".to_owned()),
