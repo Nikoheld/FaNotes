@@ -3,6 +3,7 @@
 //! Tauri commands use the preload channel strings. Electron stays the release host:
 //! update commands report `supported: false` and do not install a package.
 
+mod addons;
 mod channels;
 mod drawings;
 mod notes;
@@ -211,17 +212,27 @@ impl Host {
                 Ok(Value::Null)
             }
             "fanotes:open-external" => self.open_external(&arg_string(args, 0)?),
-            "fanotes:addons-fetch" | "fanotes:addons-net-fetch" => {
-                addon_request_allowed(&arg_string(args, 0)?)?;
-                Err("Der Add-on-Host konnte nicht aufgelöst werden.".to_owned())
+            "fanotes:addons-fetch" => addons::fetch_text(&arg_string(args, 0)?),
+            "fanotes:addons-list" => addons::list(self),
+            "fanotes:addons-save" => addons::save(self, args.first().unwrap_or(&Value::Null)),
+            "fanotes:addons-remove" => addons::remove(self, &arg_string(args, 0)?),
+            "fanotes:addons-read-file" => {
+                addons::read_file(self, &arg_string(args, 0)?, &arg_string(args, 1)?)
             }
-            "fanotes:addons-list" => Ok(json!([])),
-            "fanotes:addons-save"
-            | "fanotes:addons-remove"
-            | "fanotes:addons-read-file"
-            | "fanotes:addons-write-files"
-            | "fanotes:addons-read-data"
-            | "fanotes:addons-write-data" => Ok(Value::Null),
+            "fanotes:addons-write-files" => addons::write_files(
+                self,
+                &arg_string(args, 0)?,
+                args.get(1).unwrap_or(&Value::Null),
+            ),
+            "fanotes:addons-read-data" => addons::read_data(self, &arg_string(args, 0)?),
+            "fanotes:addons-write-data" => addons::write_data(
+                self,
+                &arg_string(args, 0)?,
+                args.get(1).unwrap_or(&Value::Null),
+            ),
+            "fanotes:addons-net-fetch" => {
+                addons::net_fetch(&arg_string(args, 0)?, args.get(1).unwrap_or(&Value::Null))
+            }
             "fanotes:sync-vault-id" => Ok(json!(self.vault_id())),
             "fanotes:sync-scan" => self.tree(),
             "fanotes:sync-read" => self.sync_read(&arg_string(args, 0)?),
