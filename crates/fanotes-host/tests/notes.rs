@@ -59,6 +59,7 @@ fn a_note_with_an_invalid_byte_still_opens_and_can_be_found() {
 #[test]
 fn paper_links_books_and_history_round_trip() {
     let (mut host, vault) = host();
+    std::fs::write(vault.join("Mathe/Seite.md"), b"\n").unwrap();
     host.dispatch(
         "fanotes:write-file",
         &[json!("Mathe/Seite.md"), json!("Hallo\n")],
@@ -183,6 +184,7 @@ fn paper_links_books_and_history_round_trip() {
 #[test]
 fn saving_markdown_keeps_the_handwriting_sidecar() {
     let (mut host, vault) = host();
+    std::fs::write(vault.join("Seite.md"), b"\n").unwrap();
     let saved = host
         .dispatch(
             "fanotes:write-file",
@@ -226,6 +228,7 @@ fn saving_markdown_keeps_the_handwriting_sidecar() {
 #[test]
 fn renaming_and_deleting_a_note_moves_its_companion() {
     let (mut host, vault) = host();
+    std::fs::write(vault.join("Mathe/Seite.md"), b"\n").unwrap();
     host.dispatch(
         "fanotes:write-file",
         &[json!("Mathe/Seite.md"), json!("Hallo\n")],
@@ -309,6 +312,34 @@ fn a_new_note_adopts_an_existing_handwriting_companion() {
         .dispatch("fanotes:create-note", &[json!("Mathe"), json!("Seite")])
         .unwrap();
     assert_eq!(second["relativePath"], "Mathe/Seite 2.md");
+}
+
+#[test]
+fn a_missing_markdown_note_is_not_created_by_writing() {
+    let (mut host, vault) = host();
+    let error = host
+        .dispatch(
+            "fanotes:write-file",
+            &[json!("Mathe/Neu.md"), json!("Hallo\n")],
+        )
+        .unwrap_err();
+    assert!(error.contains("nicht gefunden"), "{error}");
+    assert!(!vault.join("Mathe/Neu.md").exists());
+
+    let saved = host
+        .dispatch(
+            "fanotes:write-file",
+            &[json!("Mathe/Neu.famd"), json!("Hallo\n")],
+        )
+        .unwrap();
+    assert!(saved["modifiedAt"].as_str().unwrap().contains('T'));
+    assert!(vault.join("Mathe/Neu.famd").is_file());
+    assert!(!vault.join("Mathe/Neu.md").exists());
+    assert_eq!(
+        host.dispatch("fanotes:read-file", &[json!("Mathe/Neu.famd")])
+            .unwrap(),
+        "Hallo"
+    );
 }
 
 #[test]
@@ -430,6 +461,7 @@ fn a_saved_note_is_private_and_leaves_no_temporary_file() {
     std::fs::create_dir_all(&vault).unwrap();
     let mut host = Host::open(dir.join("app"));
     host.trash_dir = Some(dir.join("trash"));
+    std::fs::write(vault.join("Seite.md"), b"\n").unwrap();
     host.set_vault(vault.clone()).unwrap();
     host.dispatch("fanotes:write-file", &[json!("Seite.md"), json!("Hallo")])
         .unwrap();
@@ -466,6 +498,7 @@ fn page_stats_keep_the_fields_the_editor_stores() {
     let _ = std::fs::remove_dir_all(&dir);
     let vault = dir.join("vault");
     std::fs::create_dir_all(&vault).unwrap();
+    std::fs::write(vault.join("Seite.md"), b"\n").unwrap();
     let mut host = Host::open(dir.join("app"));
     host.trash_dir = Some(dir.join("trash"));
     host.set_vault(vault).unwrap();
@@ -625,6 +658,7 @@ fn a_long_german_title_uses_character_length() {
 #[test]
 fn a_history_index_with_an_invalid_byte_still_lists_its_snapshots() {
     let (mut host, vault) = host();
+    std::fs::write(vault.join("Mathe/Seite.md"), b"\n").unwrap();
     host.dispatch(
         "fanotes:write-file",
         &[json!("Mathe/Seite.md"), json!("Hallo\n")],
@@ -667,7 +701,9 @@ fn a_history_index_with_an_invalid_byte_still_lists_its_snapshots() {
 
 #[test]
 fn history_uses_the_desktop_trim_for_a_blank_note() {
-    let (mut host, _vault) = host();
+    let (mut host, vault) = host();
+    std::fs::write(vault.join("Mathe/Seite.md"), b"\n").unwrap();
+    std::fs::write(vault.join("Mathe/Neben.md"), b"\n").unwrap();
     host.dispatch(
         "fanotes:write-file",
         &[json!("Mathe/Seite.md"), json!("\u{FEFF}")],
@@ -736,7 +772,8 @@ fn a_subject_book_with_a_bad_byte_stays_in_the_list() {
 
 #[test]
 fn a_note_link_trims_a_byte_order_mark_and_keeps_a_next_line() {
-    let (mut host, _vault) = host();
+    let (mut host, vault) = host();
+    std::fs::write(vault.join("Mathe/Seite.md"), b"\n").unwrap();
     host.dispatch(
         "fanotes:write-file",
         &[json!("Mathe/Seite.md"), json!("Hallo\n")],
@@ -799,6 +836,7 @@ fn a_dotfile_with_one_dot_is_not_a_note() {
         .unwrap_err();
     assert!(error.contains("Markdown"), "{error}");
     assert!(!vault.join("Mathe/.md").exists());
+    std::fs::write(vault.join("Mathe/.hidden.md"), b"\n").unwrap();
 
     host.dispatch(
         "fanotes:write-file",

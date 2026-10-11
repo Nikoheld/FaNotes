@@ -69,6 +69,7 @@ fn vault_paths_reject_traversal_and_internal_files() {
             .unwrap_err(),
         "Interne FaNotes-Dateien sind geschützt."
     );
+    fs::write(dir.0.join("vault").join("Notiz.md"), b"\n").unwrap();
     host.dispatch("fanotes:write-file", &[json!("Notiz.md"), json!("Hallo")])
         .unwrap();
     assert_eq!(

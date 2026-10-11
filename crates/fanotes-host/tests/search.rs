@@ -3,6 +3,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use fanotes_host::Host;
 use serde_json::json;
 
+fn touch(host: &Host, relative: &str) {
+    std::fs::write(host.vault.as_ref().unwrap().join(relative), b"\n").unwrap();
+}
+
 fn host() -> Host {
     static NEXT: AtomicU64 = AtomicU64::new(0);
     let id = NEXT.fetch_add(1, Ordering::Relaxed);
@@ -18,6 +22,7 @@ fn host() -> Host {
 #[test]
 fn search_returns_title_excerpt_and_handwriting_anchor() {
     let mut host = host();
+    touch(&host, "Bio/Blatt.md");
     host.dispatch(
         "fanotes:write-file",
         &[
@@ -332,6 +337,7 @@ fn search_skips_companions_links_and_notes_buried_too_deep() {
 #[test]
 fn search_excerpt_follows_a_case_fold_that_grows() {
     let mut host = host();
+    touch(&host, "Bio/Istanbul.md");
     let body = format!("{}Zielwort am Ende.\n", "İ".repeat(120));
     host.dispatch(
         "fanotes:write-file",
@@ -349,6 +355,7 @@ fn search_excerpt_follows_a_case_fold_that_grows() {
 #[test]
 fn a_search_excerpt_keeps_95_characters_before_the_match() {
     let mut host = host();
+    touch(&host, "Bio/Umlaut.md");
     let body = format!("{}Zielwort am Ende.\n", "Ä".repeat(100));
     host.dispatch("fanotes:write-file", &[json!("Bio/Umlaut.md"), json!(body)])
         .unwrap();
@@ -371,6 +378,7 @@ fn a_search_excerpt_keeps_95_characters_before_the_match() {
 fn equal_search_hits_follow_german_dictionary_order() {
     let mut host = host();
     for name in ["Seite 2", "Seite 10", "Apfel", "Äpfel", "Strasse", "Straße"] {
+        touch(&host, &format!("Bio/{name}.md"));
         host.dispatch(
             "fanotes:write-file",
             &[json!(format!("Bio/{name}.md")), json!("Licht\n")],
@@ -393,6 +401,7 @@ fn equal_search_hits_follow_german_dictionary_order() {
 #[test]
 fn a_search_query_stops_at_500_utf16_units() {
     let mut host = host();
+    touch(&host, "Bio/Emoji.md");
     host.dispatch(
         "fanotes:write-file",
         &[json!("Bio/Emoji.md"), json!("Nur das letzte Zeichen.\n")],
@@ -463,6 +472,7 @@ fn search_skips_a_note_that_cannot_be_read() {
 #[test]
 fn search_trims_a_byte_order_mark_and_keeps_a_next_line() {
     let mut host = host();
+    touch(&host, "Bio/Blatt.md");
     host.dispatch(
         "fanotes:write-file",
         &[

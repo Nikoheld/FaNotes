@@ -63,6 +63,11 @@ pub fn write_note_file(
     } else {
         let path = vault::resolve_note_file(root, relative)?;
         require_parent_directory(&path)?;
+        // The desktop creates a missing `.famd` on save. A missing markdown
+        // note is not created here; that is `create-note`.
+        if !path.is_file() {
+            return Err("Der Eintrag wurde nicht gefunden.".to_owned());
+        }
         atomic_write(&path, markdown.as_bytes(), 0o600)?;
         path
     };
@@ -965,6 +970,7 @@ mod publish_tests {
         ));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("Mathe")).unwrap();
+        std::fs::write(dir.join("Mathe/Seite.md"), b"alt\n").unwrap();
         let stamp = write_note_file(&dir, "Mathe/Seite.md", "Hallo", None).unwrap();
         let path = dir.join("Mathe/Seite.md");
         assert_eq!(stamp, file_mtime_iso(&path));
