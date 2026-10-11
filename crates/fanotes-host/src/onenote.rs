@@ -26,6 +26,9 @@ const MAX_EXPANDED_BYTES: u64 = 6 * 1024 * 1024 * 1024;
 const MAX_OUTPUT_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 const TOOL_TIMEOUT: Duration = Duration::from_secs(12 * 60);
 const ARCHIVE_LISTING_TIMEOUT: Duration = Duration::from_secs(90);
+/// JavaScript `/u` `\s`: includes U+FEFF and excludes U+0085.
+const JS_WS: &str = r"[\t\n\u{000B}\u{000C}\r \u{00A0}\u{1680}\u{2000}-\u{200A}\u{2028}\u{2029}\u{202F}\u{205F}\u{3000}\u{FEFF}]";
+const JS_NOT_WS_OR_GT: &str = r"[^\t\n\u{000B}\u{000C}\r \u{00A0}\u{1680}\u{2000}-\u{200A}\u{2028}\u{2029}\u{202F}\u{205F}\u{3000}\u{FEFF}>]";
 
 pub fn import_onenote(host: &Host, args: &[Value]) -> Result<Value, String> {
     if let Some(path) = args
@@ -343,19 +346,23 @@ fn title_fallback(page_path: &Path) -> String {
 fn strip_active_html(html: &str) -> String {
     let mut html = html.to_owned();
     let patterns = [
-        r"(?is)<script\b[^>]*>.*?</script>",
-        r"(?is)<(?:iframe|frame|frameset|object|embed|audio|video|source|track|link|base|form|input|button|textarea|select)\b[^>]*>.*?</(?:iframe|frame|frameset|object|embed|audio|video|source|track|link|base|form|input|button|textarea|select)>",
-        r"(?is)<(?:iframe|frame|frameset|object|embed|audio|video|source|track|link|base|form|input|button|textarea|select)\b[^>]*/?>",
-        r#"(?i)\s+on[a-z][a-z0-9_-]*\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)"#,
-        r#"(?i)\s+(?:href|action|formaction|poster)\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)"#,
-        r"(?i)(?:javascript|vbscript)\s*:",
-        r"(?i)@import\s+[^;]+;?",
-        r"(?i)url\s*\([^)]*\)",
-        r"(?i)expression\s*\([^)]*\)",
+        r"(?is)<script\b[^>]*>.*?</script>".to_owned(),
+        r"(?is)<(?:iframe|frame|frameset|object|embed|audio|video|source|track|link|base|form|input|button|textarea|select)\b[^>]*>.*?</(?:iframe|frame|frameset|object|embed|audio|video|source|track|link|base|form|input|button|textarea|select)>".to_owned(),
+        r"(?is)<(?:iframe|frame|frameset|object|embed|audio|video|source|track|link|base|form|input|button|textarea|select)\b[^>]*/?>".to_owned(),
+        format!(
+            r#"(?i){JS_WS}+on[a-z][a-z0-9_-]*{JS_WS}*={JS_WS}*(?:"[^"]*"|'[^']*'|{JS_NOT_WS_OR_GT}+)"#
+        ),
+        format!(
+            r#"(?i){JS_WS}+(?:href|action|formaction|poster){JS_WS}*={JS_WS}*(?:"[^"]*"|'[^']*'|{JS_NOT_WS_OR_GT}+)"#
+        ),
+        format!(r"(?i)(?:javascript|vbscript){JS_WS}*:"),
+        format!(r"(?i)@import{JS_WS}+[^;]+;?"),
+        format!(r"(?i)url{JS_WS}*\([^)]*\)"),
+        format!(r"(?i)expression{JS_WS}*\([^)]*\)"),
     ];
-    for pattern in patterns {
+    for pattern in &patterns {
         if let Ok(regex) = Regex::new(pattern) {
-            let replacement = if pattern.contains("url\\s*") {
+            let replacement = if pattern.starts_with("(?i)url") {
                 "none"
             } else {
                 ""
@@ -491,7 +498,7 @@ fn extract_search_text(html: &str) -> String {
             text = regex.replace_all(&text, " ").into_owned();
         }
     }
-    if let Ok(regex) = Regex::new(r"(?i)<br\s*/?\s*>") {
+    if let Ok(regex) = Regex::new(&format!(r"(?i)<br{JS_WS}*/?{JS_WS}*>")) {
         text = regex.replace_all(&text, "\n").into_owned();
     }
     if let Ok(regex) = Regex::new(r"(?i)</(?:p|h[1-6]|li|tr|td|div|table)>") {
@@ -502,7 +509,7 @@ fn extract_search_text(html: &str) -> String {
     }
     let text = decode_entities(&text);
     let text = replace_all(&text, r"[ \t]+", " ");
-    let text = replace_all(&text, r"\s*\n\s*", "\n");
+    let text = replace_all(&text, &format!(r"{JS_WS}*\n{JS_WS}*"), "\n");
     let text = replace_all(&text, r"\n{3,}", "\n\n");
     crate::vault::truncate_utf16(crate::vault::js_trim(&text), 2_000_000)
 }
@@ -515,7 +522,8 @@ fn replace_all(text: &str, pattern: &str, replacement: &str) -> String {
 
 fn page_dimensions(html: &str) -> (i64, i64) {
     let measured = |name: &str| -> Vec<f64> {
-        let pattern = format!(r"(?i)(?:^|[;\s\x22])(?:max-)?{name}\s*:\s*(-?[0-9.]+)px");
+        let pattern =
+            format!(r"(?i)(?:^|[;{JS_WS}\x22])(?:max-)?{name}{JS_WS}*:{JS_WS}*(-?[0-9.]+)px");
         Regex::new(&pattern)
             .map(|regex| {
                 regex
@@ -1542,7 +1550,7 @@ mod tests {
     use super::{
         common_ancestor, extract_search_text, inline_images, page_dimensions, page_parents,
         page_title, render_inputs, safe_segment, sanitize_page, stored_relative_path,
-        tool_failure_message, tool_limit, validate_listing, walk_limited,
+        strip_active_html, tool_failure_message, tool_limit, validate_listing, walk_limited,
     };
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -1665,12 +1673,28 @@ mod tests {
         assert_eq!(extract_search_text("a\n\n\nb"), "a\nb");
         assert_eq!(extract_search_text("a\n\n\n\nb"), "a\nb");
         assert_eq!(extract_search_text("a\n \n \nb"), "a\nb");
+        assert_eq!(extract_search_text("a\u{FEFF}\nb"), "a\nb");
+        assert_eq!(extract_search_text("a\u{0085}\nb"), "a\u{0085}\nb");
+        assert_eq!(extract_search_text("<br\u{FEFF}/>Hi"), "Hi");
         assert_eq!(
             extract_search_text("<p>Eins</p>\n<p>Zwei</p>"),
             "Eins\nZwei"
         );
         let long = "😀".repeat(1_000_001);
         assert_eq!(extract_search_text(&long).encode_utf16().count(), 2_000_000);
+    }
+
+    #[test]
+    fn an_event_handler_after_a_byte_order_mark_is_removed() {
+        let stripped = strip_active_html("<div\u{FEFF}onclick=\"alert(1)\">x</div>");
+        assert!(!stripped.to_ascii_lowercase().contains("onclick"));
+        assert!(stripped.contains(">x</div>"));
+        let kept = strip_active_html("<div\u{0085}onclick=\"alert(1)\">x</div>");
+        assert!(kept.contains("onclick"));
+        let styled = strip_active_html("a{background:url(javascript:alert(1))}");
+        assert!(!styled.contains("javascript:"));
+        assert!(!styled.contains("url("));
+        assert!(styled.contains("none"));
     }
 
     #[test]
