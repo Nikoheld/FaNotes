@@ -363,6 +363,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "fanotes-famd"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "fanotes-ink"
 version = "0.1.0"
 dependencies = [
@@ -371,6 +379,13 @@ dependencies = [
  "serde_json",
  "slotmap",
  "thiserror 1.0.69",
+]
+
+[[package]]
+name = "fanotes-input"
+version = "0.1.0"
+dependencies = [
+ "fanotes-paper",
 ]
 
 [[package]]
@@ -1275,6 +1290,7 @@ version = "1.0.152"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1741ab7a6cc54a03a89b5d563ed60075c277d9e3cfa73ad0c1f23f23974703c6"
 dependencies = [
+ "indexmap",
  "itoa",
  "memchr",
  "serde",
