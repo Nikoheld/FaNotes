@@ -758,7 +758,8 @@ fn render_inputs(
             "Es wurden keine OneNote-Abschnitte für die Konvertierung gefunden.".to_owned(),
         );
     }
-    render_sections(&sections, common_ancestor(&sections), output_root, one2html)?;
+    let ancestor = common_ancestor(&sections);
+    render_sections(&sections, &ancestor, output_root, one2html)?;
     Ok(Vec::new())
 }
 
@@ -1239,11 +1240,23 @@ fn unique_directory(parent: &Path, preferred: &str) -> Result<PathBuf, String> {
     Err("Für den OneNote-Import konnte kein freier Zielordner angelegt werden.".to_owned())
 }
 
-fn common_ancestor(paths: &[PathBuf]) -> &Path {
-    paths
-        .first()
-        .and_then(|path| path.parent())
-        .unwrap_or(Path::new("."))
+fn common_ancestor(paths: &[PathBuf]) -> PathBuf {
+    let Some(first) = paths.first() else {
+        return PathBuf::from("/");
+    };
+    let mut ancestor = first.parent().unwrap_or(first.as_path()).to_path_buf();
+    while !paths.iter().all(|candidate| {
+        candidate == &ancestor || crate::vault::is_inside_root(&ancestor, candidate)
+    }) {
+        let Some(parent) = ancestor.parent().map(Path::to_path_buf) else {
+            break;
+        };
+        if parent == ancestor {
+            break;
+        }
+        ancestor = parent;
+    }
+    ancestor
 }
 
 fn safe_segment(value: &str, fallback: &str) -> String {
@@ -1487,9 +1500,10 @@ fn civil_date(mut days: u64) -> (i32, u32, u32) {
 #[cfg(test)]
 mod tests {
     use super::{
-        extract_search_text, inline_images, page_dimensions, page_parents, safe_segment,
-        tool_failure_message, validate_listing, walk_limited,
+        common_ancestor, extract_search_text, inline_images, page_dimensions, page_parents,
+        safe_segment, tool_failure_message, validate_listing, walk_limited,
     };
+    use std::path::PathBuf;
 
     #[test]
     fn a_page_title_stops_at_120_utf16_units() {
@@ -1659,5 +1673,27 @@ mod tests {
             assert!(linked.contains("Symbolische"));
         }
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn onenote_sections_share_the_nearest_common_folder() {
+        assert_eq!(
+            common_ancestor(&[
+                PathBuf::from("/notes/Mathe/Gruppe A/a.one"),
+                PathBuf::from("/notes/Mathe/Gruppe B/b.one"),
+            ]),
+            PathBuf::from("/notes/Mathe")
+        );
+        assert_eq!(
+            common_ancestor(&[
+                PathBuf::from("/notes/Mathe/Gruppe/tief/a.one"),
+                PathBuf::from("/notes/Mathe/b.one"),
+            ]),
+            PathBuf::from("/notes/Mathe")
+        );
+        assert_eq!(
+            common_ancestor(&[PathBuf::from("/notes/Mathe/a.one")]),
+            PathBuf::from("/notes/Mathe")
+        );
     }
 }
