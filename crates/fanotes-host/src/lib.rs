@@ -2065,28 +2065,17 @@ pub fn openable_http_url(raw: &str) -> Option<String> {
 }
 
 fn http_link(raw: &str) -> Result<String, String> {
-    if raw.is_empty()
-        || raw.len() > 4096
-        || raw.chars().any(|ch| ch.is_control() || ch.is_whitespace())
-    {
+    if raw.is_empty() || vault::utf16_len(raw) > 4096 {
         return Err("Ungültiger externer Link.".to_owned());
     }
-    let (scheme, rest) = if let Some(rest) = raw.strip_prefix("https://") {
-        ("https", rest)
-    } else if let Some(rest) = raw.strip_prefix("http://") {
-        ("http", rest)
-    } else {
-        return Err("Nur sichere HTTP(S)-Links ohne Zugangsdaten sind erlaubt.".to_owned());
-    };
-    let authority = rest.split(['/', '?', '#']).next().unwrap_or(rest);
-    if authority.is_empty() || authority.contains('@') {
+    let parsed = url::Url::parse(raw).map_err(|_| "Ungültiger externer Link.".to_owned())?;
+    if !matches!(parsed.scheme(), "http" | "https")
+        || !parsed.username().is_empty()
+        || parsed.password().is_some()
+    {
         return Err("Nur sichere HTTP(S)-Links ohne Zugangsdaten sind erlaubt.".to_owned());
     }
-    if rest.contains('/') || rest.contains('?') || rest.contains('#') {
-        Ok(format!("{scheme}://{rest}"))
-    } else {
-        Ok(format!("{scheme}://{rest}/"))
-    }
+    Ok(parsed.to_string())
 }
 
 fn reveal_target(root: &Path, relative: &str) -> Result<PathBuf, String> {
