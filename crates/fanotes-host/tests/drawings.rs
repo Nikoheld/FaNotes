@@ -26,6 +26,55 @@ fn drawing(title: &str) -> String {
 }
 
 #[test]
+fn a_drawing_image_follows_the_desktop_png_checks() {
+    let (dir, mut host) = host();
+    let assets = dir.join("vault/.fanotes/assets");
+    let missing = host
+        .dispatch(
+            "fanotes:save-drawing",
+            &[json!({
+                "id": "ohne-bild",
+                "title": "Skizze",
+                "drawingJson": drawing("Skizze"),
+                "imageData": null,
+            })],
+        )
+        .unwrap_err();
+    assert!(missing.contains("kein PNG"), "{missing}");
+    assert!(!assets.join("ohne-bild.json").exists());
+
+    let empty = host
+        .dispatch(
+            "fanotes:save-drawing",
+            &[json!({
+                "id": "leer-bild",
+                "title": "Skizze",
+                "drawingJson": drawing("Skizze"),
+                "imageData": "data:image/png;base64,",
+            })],
+        )
+        .unwrap_err();
+    assert!(empty.contains("leer oder zu groß"), "{empty}");
+
+    let saved = host
+        .dispatch(
+            "fanotes:save-drawing",
+            &[json!({
+                "id": "mit-bild",
+                "title": "Skizze",
+                "drawingJson": drawing("Skizze"),
+                "imageData": "data:image/png;base64,iVBORw0KGgo=",
+            })],
+        )
+        .unwrap();
+    assert_eq!(saved["id"], "mit-bild");
+    assert_eq!(
+        std::fs::read(assets.join("mit-bild.png")).unwrap(),
+        [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]
+    );
+}
+
+#[test]
 fn a_drawing_title_uses_the_desktop_entry_name_rules() {
     let (_dir, mut host) = host();
     let saved = host

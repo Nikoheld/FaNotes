@@ -105,9 +105,17 @@ pub fn save_drawing(host: &Host, payload: &Value) -> Result<Value, String> {
     if item["title"].as_str() != Some(title.as_str()) {
         return Err("Der Zeichnungstitel stimmt nicht mit den Zeichnungsdaten überein.".to_owned());
     }
+    let png = if object.contains_key("imageData") {
+        let image = object
+            .get("imageData")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "Die Zeichnung enthält kein PNG.".to_owned())?;
+        Some(decode_png(image)?)
+    } else {
+        None
+    };
     let assets = assets_dir(vault_root(host)?)?;
-    if let Some(image) = object.get("imageData").filter(|value| !value.is_null()) {
-        let png = decode_png(image.as_str().unwrap_or(""))?;
+    if let Some(png) = png {
         crate::notes::atomic_write(&assets.join(format!("{id}.png")), &png, 0o600)
             .map_err(|_| "Die Zeichnung konnte nicht gespeichert werden.".to_owned())?;
     }
@@ -358,7 +366,10 @@ fn decode_png(image_data: &str) -> Result<Vec<u8>, String> {
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(encoded)
         .map_err(|_| "Die Zeichnung ist keine gültige PNG-Data-URL.".to_owned())?;
-    if bytes.is_empty() || bytes.len() > MAX_IMAGE_BYTES || !bytes.starts_with(PNG_SIGNATURE) {
+    if bytes.is_empty() || bytes.len() > MAX_IMAGE_BYTES {
+        return Err("Die Zeichnung ist leer oder zu groß.".to_owned());
+    }
+    if !bytes.starts_with(PNG_SIGNATURE) {
         return Err("Die Bilddaten sind keine gültige PNG-Datei.".to_owned());
     }
     Ok(bytes)
