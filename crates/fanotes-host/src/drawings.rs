@@ -6,8 +6,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use base64::Engine;
 use fanotes_famd::{
-    companion_note_path, empty_famd_payload, is_paper_style, parse_famd, serialize_famd,
-    strip_famd_payload, worksheet_ids_from_markdown,
+    companion_note_path, empty_famd_payload, is_js_whitespace, is_paper_style, parse_famd,
+    serialize_famd, strip_famd_payload, worksheet_ids_from_markdown,
 };
 use serde_json::{json, Value};
 
@@ -209,7 +209,7 @@ fn is_note_path(relative: &str) -> bool {
 pub(crate) fn note_ink_marker_id(markdown: &str) -> Option<String> {
     let mut rest = markdown;
     while let Some(start) = rest.find("<!--") {
-        let after = rest[start + 4..].trim_start();
+        let after = skip_js_whitespace(&rest[start + 4..]);
         if let Some(id) = ink_marker_at(after) {
             return Some(id);
         }
@@ -228,11 +228,22 @@ fn ink_marker_at(after: &str) -> Option<String> {
         return None;
     }
     let id = &after[..length];
-    if after[length..].trim_start().starts_with("-->") {
+    if skip_js_whitespace(&after[length..]).starts_with("-->") {
         Some(id.to_owned())
     } else {
         None
     }
+}
+
+fn skip_js_whitespace(value: &str) -> &str {
+    let mut rest = value;
+    while let Some(character) = rest.chars().next() {
+        if !is_js_whitespace(character) {
+            break;
+        }
+        rest = &rest[character.len_utf8()..];
+    }
+    rest
 }
 
 fn embed_in_note(host: &Host, note_path: &str, drawing: &Value) -> Result<(), String> {
@@ -497,7 +508,7 @@ pub(crate) fn canonical_iso(value: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::canonical_iso;
+    use super::{canonical_iso, note_ink_marker_id};
 
     #[test]
     fn drawing_dates_become_utc_with_milliseconds() {
@@ -565,5 +576,25 @@ mod tests {
         );
         assert_eq!(canonical_iso("2026-01-02T03:04:60Z"), None);
         assert_eq!(canonical_iso("2026-13-01T00:00:00Z"), None);
+    }
+
+    #[test]
+    fn an_ink_marker_uses_javascript_whitespace() {
+        assert_eq!(
+            note_ink_marker_id("<!--\u{FEFF}fanotes-ink:abc\u{FEFF}-->").as_deref(),
+            Some("abc")
+        );
+        assert_eq!(
+            note_ink_marker_id("<!--\u{0085}fanotes-ink:abc-->").as_deref(),
+            None
+        );
+        assert_eq!(
+            note_ink_marker_id("<!--fanotes-ink:abc\u{0085}-->").as_deref(),
+            None
+        );
+        assert_eq!(
+            note_ink_marker_id("<!-- fanotes-ink:marker1 -->").as_deref(),
+            Some("marker1")
+        );
     }
 }
