@@ -820,6 +820,7 @@ impl Host {
         let parent_path = if parent_relative.is_empty() {
             root.clone()
         } else {
+            vault::reject_symlinks(&root, &parent_relative)?;
             let path = vault::resolve_inside(&root, &parent_relative)?;
             fs::create_dir_all(&path)
                 .map_err(|_| "Der Ordner konnte nicht angelegt werden.".to_owned())?;
@@ -901,7 +902,7 @@ impl Host {
     fn set_folder_color(&mut self, relative: &str, color: &Value) -> Result<Value, String> {
         let root = self.require_vault()?.to_path_buf();
         let normalized = vault::normalize_relative_path(relative, false, false)?;
-        let path = vault::resolve_inside(&root, &normalized)?;
+        let path = vault::resolve_existing_entry(&root, &normalized)?;
         let meta = fs::symlink_metadata(&path)
             .map_err(|_| "Der Ordner wurde nicht gefunden.".to_owned())?;
         if meta.file_type().is_symlink() || !meta.is_dir() {
@@ -931,7 +932,7 @@ impl Host {
         if !path.to_ascii_lowercase().ends_with(".pdf") {
             return Err("Nur ein PDF-Buch kann auspoppen.".to_owned());
         }
-        let file = vault::resolve_inside(root, &path)?;
+        let file = vault::resolve_existing_entry(root, &path)?;
         let meta = fs::symlink_metadata(&file).map_err(|_| "Ungültiger Buchpfad.".to_owned())?;
         if meta.file_type().is_symlink() || !meta.is_file() {
             return Err("Nur ein PDF-Buch kann auspoppen.".to_owned());
@@ -941,7 +942,7 @@ impl Host {
 
     fn rename_entry(&mut self, relative: &str, next_name: &str) -> Result<Value, String> {
         let root = self.require_vault()?.to_path_buf();
-        let source = vault::resolve_inside(&root, relative)?;
+        let source = vault::resolve_existing_entry(&root, relative)?;
         let normalized = vault::normalize_relative_path(relative, false, false)?;
         let meta = fs::symlink_metadata(&source)
             .map_err(|_| "Der Eintrag wurde nicht gefunden.".to_owned())?;
@@ -991,7 +992,7 @@ impl Host {
 
     fn move_entry(&mut self, relative: &str, dest_folder: &str) -> Result<Value, String> {
         let root = self.require_vault()?.to_path_buf();
-        let source = vault::resolve_inside(&root, relative)?;
+        let source = vault::resolve_existing_entry(&root, relative)?;
         let normalized = vault::normalize_relative_path(relative, false, false)?;
         let meta = fs::symlink_metadata(&source)
             .map_err(|_| "Der Eintrag wurde nicht gefunden.".to_owned())?;
@@ -1012,7 +1013,7 @@ impl Host {
         let folder = if dest_relative.is_empty() {
             root.clone()
         } else {
-            let path = vault::resolve_inside(&root, &dest_relative)?;
+            let path = vault::resolve_existing_entry(&root, &dest_relative)?;
             let folder_meta = fs::symlink_metadata(&path)
                 .map_err(|_| "Der Zielordner wurde nicht gefunden.".to_owned())?;
             if folder_meta.file_type().is_symlink() || !folder_meta.is_dir() {
@@ -1051,13 +1052,15 @@ impl Host {
     fn trash_entry(&mut self, relative: &str) -> Result<Value, String> {
         let root = self.require_vault()?.to_path_buf();
         let normalized = vault::normalize_relative_path(relative, false, false)?;
-        let path = vault::resolve_inside(&root, &normalized)?;
+        let path = vault::resolve_existing_entry(&root, &normalized)?;
         let is_dir = fs::symlink_metadata(&path).is_ok_and(|meta| meta.is_dir());
         send_to_trash(self, &path)?;
         if !is_dir {
             if let Some(companion) = note_companion_relative(&normalized) {
-                if let Ok(companion_path) = vault::resolve_inside(&root, &companion) {
-                    if companion_path.is_file() {
+                if let Ok(companion_path) = vault::resolve_existing_entry(&root, &companion) {
+                    if fs::symlink_metadata(&companion_path)
+                        .is_ok_and(|meta| meta.is_file() && !meta.file_type().is_symlink())
+                    {
                         let _ = send_to_trash(self, &companion_path);
                     }
                 }

@@ -81,6 +81,55 @@ pub fn resolve_note_file(root: &Path, relative: &str) -> Result<PathBuf, String>
     Ok(cursor)
 }
 
+/// An existing file or folder. A symlink anywhere in the path is rejected.
+pub fn resolve_existing_entry(root: &Path, relative: &str) -> Result<PathBuf, String> {
+    let normalized = normalize_relative_path(relative, false, false)?;
+    let segments: Vec<&str> = normalized.split('/').collect();
+    let mut cursor = root.to_path_buf();
+    for (index, segment) in segments.iter().enumerate() {
+        cursor.push(segment);
+        if !is_inside_root(root, &cursor) {
+            return Err("Der Pfad liegt außerhalb des Vaults.".to_owned());
+        }
+        let last = index + 1 == segments.len();
+        match fs::symlink_metadata(&cursor) {
+            Ok(info) if info.file_type().is_symlink() => {
+                return Err("Symbolische Links sind innerhalb des Vaults nicht erlaubt.".to_owned());
+            }
+            Ok(info) if !last && !info.is_dir() => {
+                return Err("Ein Pfadbestandteil ist kein Ordner.".to_owned());
+            }
+            Ok(info) if last && !info.is_file() && !info.is_dir() => {
+                return Err("Der Eintrag wurde nicht gefunden.".to_owned());
+            }
+            Ok(_) => {}
+            Err(_) => return Err("Der Eintrag wurde nicht gefunden.".to_owned()),
+        }
+    }
+    Ok(cursor)
+}
+
+/// Missing folders may be created later. An existing symlink may not.
+pub fn reject_symlinks(root: &Path, relative: &str) -> Result<(), String> {
+    if relative.is_empty() {
+        return Ok(());
+    }
+    let normalized = normalize_relative_path(relative, true, false)?;
+    let mut cursor = root.to_path_buf();
+    for segment in normalized.split('/').filter(|segment| !segment.is_empty()) {
+        cursor.push(segment);
+        match fs::symlink_metadata(&cursor) {
+            Ok(info) if info.file_type().is_symlink() => {
+                return Err("Symbolische Links sind innerhalb des Vaults nicht erlaubt.".to_owned());
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(_) => return Err("Der Zielordner wurde nicht gefunden.".to_owned()),
+        }
+    }
+    Ok(())
+}
+
 pub fn resolve_inside(root: &Path, relative: &str) -> Result<PathBuf, String> {
     let normalized = normalize_relative_path(relative, false, false)?;
     let mut target = root.to_path_buf();
