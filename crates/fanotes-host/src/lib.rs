@@ -9,6 +9,7 @@ mod drawings;
 mod imports;
 mod notes;
 mod ocr;
+mod onboarding;
 mod onenote;
 mod policy;
 mod vault;
@@ -75,6 +76,7 @@ impl Host {
             return Err("Der Vault wurde unsicher verändert.".to_owned());
         }
         self.vault = Some(path);
+        self.refresh_onboarding();
         Ok(())
     }
 
@@ -94,12 +96,10 @@ impl Host {
         }
         match channel {
             "fanotes:bootstrap" => self.bootstrap(),
-            "fanotes:complete-onboarding" => {
-                self.onboarding_required = false;
-                self.persist_settings()?;
-                self.bootstrap()
-            }
-            "fanotes:get-cached-tree" | "fanotes:get-fast-tree" | "fanotes:get-tree" => self.tree(),
+            "fanotes:complete-onboarding" => self.complete_onboarding(args),
+            "fanotes:get-cached-tree" => self.cached_tree(),
+            "fanotes:get-fast-tree" => self.tree(false),
+            "fanotes:get-tree" => self.tree(true),
             "fanotes:select-vault" => self.select_vault(args),
             "fanotes:read-file" => self.read_file(&arg_string(args, 0)?),
             "fanotes:write-file" => self.write_file(&arg_string(args, 0)?, &arg_string(args, 1)?),
@@ -518,7 +518,7 @@ impl Host {
             "vaultName": vault.file_name().and_then(|name| name.to_str()).unwrap_or("Vault"),
             "settings": self.settings,
             "onboardingRequired": self.onboarding_required,
-            "starterSubjects": [],
+            "starterSubjects": onboarding::starter_subjects(self.ui_language()),
             "linuxRuntime": {
                 "platform": std::env::consts::OS,
                 "ozone": "",
@@ -536,10 +536,85 @@ impl Host {
         }))
     }
 
-    fn tree(&self) -> Result<Value, String> {
+    fn tree(&self, stats: bool) -> Result<Value, String> {
         let root = self.require_vault()?;
         let colors = read_folder_colors(root)?;
-        read_tree(root, root, &colors, 0)
+        let entries = read_tree(root, root, &colors, 0, stats)?;
+        write_tree_cache(&self.app_data, root, &entries);
+        Ok(entries)
+    }
+
+    fn cached_tree(&self) -> Result<Value, String> {
+        let root = self.require_vault()?;
+        Ok(read_tree_cache(&self.app_data, root).unwrap_or(Value::Null))
+    }
+
+    fn complete_onboarding(&mut self, args: &[Value]) -> Result<Value, String> {
+        if !self.onboarding_required {
+            return self.bootstrap();
+        }
+        let selected = onboarding::validate_selection(args.first().unwrap_or(&Value::Null))?;
+        let root = self.require_vault()?.to_path_buf();
+        let language = self.ui_language();
+        for (name, _) in onboarding::folders_to_create(language, &selected) {
+            onboarding::ensure_folder(&root, name)?;
+        }
+        let mut colors = read_folder_colors(&root)?;
+        for (name, color) in onboarding::folders_to_create(language, &selected) {
+            colors.insert(name.to_owned(), color.to_owned());
+        }
+        write_folder_colors(&root, &colors)?;
+        onboarding::write_status(&root, "complete")?;
+        if language == "en" {
+            if self.settings.get("defaultFolder").and_then(Value::as_str) == Some("Eingang") {
+                self.settings
+                    .insert("defaultFolder".to_owned(), json!("Inbox"));
+            }
+            if self
+                .settings
+                .get("dailyNotesFolder")
+                .and_then(Value::as_str)
+                == Some("Tagesnotizen")
+            {
+                self.settings
+                    .insert("dailyNotesFolder".to_owned(), json!("Daily Notes"));
+            }
+            if self
+                .settings
+                .get("recognitionLanguage")
+                .and_then(Value::as_str)
+                == Some("de")
+            {
+                self.settings
+                    .insert("recognitionLanguage".to_owned(), json!("en"));
+            }
+        }
+        self.onboarding_required = false;
+        self.persist_settings()?;
+        self.bootstrap()
+    }
+
+    fn ui_language(&self) -> &'static str {
+        match self.settings.get("uiLanguage").and_then(Value::as_str) {
+            Some("de") => "de",
+            Some("en") => "en",
+            _ => {
+                let locale = std::env::var("LC_ALL")
+                    .or_else(|_| std::env::var("LC_MESSAGES"))
+                    .or_else(|_| std::env::var("LANG"))
+                    .unwrap_or_default();
+                if german_locale(&locale) {
+                    "de"
+                } else {
+                    "en"
+                }
+            }
+        }
+    }
+
+    fn refresh_onboarding(&mut self) {
+        self.onboarding_required =
+            self.vault.as_deref().and_then(onboarding::read_status) == Some("pending");
     }
 
     fn read_file(&self, relative: &str) -> Result<Value, String> {
@@ -589,8 +664,15 @@ impl Host {
         } else {
             vault::normalize_relative_path(parent, true, false)?
         };
+        let english = self.ui_language() == "en";
         let fallback = if note {
-            "Unbenannte Notiz"
+            if english {
+                "Untitled note"
+            } else {
+                "Unbenannte Notiz"
+            }
+        } else if english {
+            "New folder"
         } else {
             "Neuer Ordner"
         };
@@ -1025,12 +1107,7 @@ impl Host {
 
     fn vault_id(&self) -> Result<String, String> {
         let path = self.require_vault()?;
-        let absolute = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
-        let digest = Sha256::digest(absolute.to_string_lossy().as_bytes());
-        Ok(digest[..16]
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect())
+        Ok(vault_path_digest(path)[..32].to_owned())
     }
 
     fn persist_settings(&self) -> Result<(), String> {
@@ -1055,6 +1132,7 @@ impl Host {
             let path = PathBuf::from(text.trim());
             if path.is_dir() {
                 self.vault = Some(path);
+                self.refresh_onboarding();
             }
         }
     }
@@ -1083,6 +1161,8 @@ const MAX_SYNC_STATE_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_SYNC_ENTRIES: usize = 100_000;
 const MAX_SYNC_DEPTH: usize = 40;
 const MAX_RECOGNITION_MODEL_BYTES: u64 = 20 * 1024 * 1024;
+const MAX_TREE_CACHE_BYTES: u64 = 24 * 1024 * 1024;
+const MAX_TREE_CACHE_ENTRIES: usize = 100_000;
 const MAX_PDF_BITMAP_BYTES: usize = 48 * 1024 * 1024;
 
 fn asset_mime(relative: &str) -> Result<&'static str, String> {
@@ -1457,11 +1537,185 @@ fn created_entry(relative: &str, path: &Path, note: bool) -> Value {
     }
 }
 
+fn vault_path_digest(path: &Path) -> String {
+    let absolute = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
+    let digest = Sha256::digest(absolute.to_string_lossy().as_bytes());
+    digest.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+fn german_locale(locale: &str) -> bool {
+    let lower = locale.to_ascii_lowercase();
+    let Some(rest) = lower.strip_prefix("de") else {
+        return false;
+    };
+    rest.is_empty() || rest.starts_with(['-', '_', '.', '@'])
+}
+
+fn write_tree_cache(app_data: &Path, root: &Path, entries: &Value) {
+    let identity = vault_path_digest(root);
+    let path = app_data
+        .join("tree-cache-v1")
+        .join(format!("{identity}.json"));
+    let Ok(text) = serde_json::to_string(&json!({
+        "version": 1,
+        "vaultIdentity": identity,
+        "updatedAt": notes::iso_from_system_time(SystemTime::now()),
+        "entries": entries,
+    })) else {
+        return;
+    };
+    let snapshot = format!("{text}\n");
+    if snapshot.len() as u64 > MAX_TREE_CACHE_BYTES {
+        return;
+    }
+    let _ = notes::atomic_write(&path, snapshot.as_bytes(), 0o600);
+}
+
+fn read_tree_cache(app_data: &Path, root: &Path) -> Option<Value> {
+    let identity = vault_path_digest(root);
+    let path = app_data
+        .join("tree-cache-v1")
+        .join(format!("{identity}.json"));
+    let meta = fs::symlink_metadata(&path).ok()?;
+    if meta.file_type().is_symlink() || !meta.is_file() || meta.len() > MAX_TREE_CACHE_BYTES {
+        return None;
+    }
+    let text = fs::read_to_string(&path).ok()?;
+    let parsed = serde_json::from_str::<Value>(&text).ok()?;
+    if parsed.get("version").and_then(Value::as_u64) != Some(1)
+        || parsed.get("vaultIdentity").and_then(Value::as_str) != Some(identity.as_str())
+    {
+        let _ = fs::remove_file(&path);
+        return None;
+    }
+    match clean_cached_entries(parsed.get("entries")?, "", 0, &mut 0) {
+        Ok(entries) => Some(Value::Array(entries)),
+        Err(()) => {
+            let _ = fs::remove_file(&path);
+            None
+        }
+    }
+}
+
+fn clean_cached_entries(
+    candidate: &Value,
+    parent: &str,
+    depth: usize,
+    count: &mut usize,
+) -> Result<Vec<Value>, ()> {
+    if depth > 80 {
+        return Err(());
+    }
+    let list = candidate.as_array().ok_or(())?;
+    let mut cleaned = Vec::new();
+    for entry in list {
+        *count += 1;
+        if *count > MAX_TREE_CACHE_ENTRIES {
+            return Err(());
+        }
+        let name = entry.get("name").and_then(Value::as_str).ok_or(())?;
+        if name.is_empty()
+            || name.len() > 255
+            || name.starts_with('.')
+            || name.contains('/')
+            || name.contains('\\')
+            || name.contains('\0')
+        {
+            return Err(());
+        }
+        let expected = if parent.is_empty() {
+            name.to_owned()
+        } else {
+            format!("{parent}/{name}")
+        };
+        if entry.get("relativePath").and_then(Value::as_str) != Some(expected.as_str()) {
+            return Err(());
+        }
+        match entry.get("kind").and_then(Value::as_str) {
+            Some("folder") => {
+                if let Some(color) = entry.get("color").filter(|color| !color.is_null()) {
+                    if color
+                        .as_str()
+                        .filter(|value| folder_color_hex(value))
+                        .is_none()
+                    {
+                        return Err(());
+                    }
+                }
+                let children = clean_cached_entries(
+                    entry.get("children").unwrap_or(&json!([])),
+                    &expected,
+                    depth + 1,
+                    count,
+                )?;
+                let mut folder = json!({
+                    "name": name,
+                    "relativePath": expected,
+                    "kind": "folder",
+                    "children": children,
+                });
+                if let Some(color) = entry
+                    .get("color")
+                    .and_then(Value::as_str)
+                    .filter(|value| folder_color_hex(value))
+                {
+                    folder["color"] = json!(color.to_ascii_lowercase());
+                }
+                cleaned.push(folder);
+            }
+            Some("file") => {
+                let extension = name
+                    .rsplit_once('.')
+                    .map(|(_, extension)| extension.to_ascii_lowercase())
+                    .unwrap_or_default();
+                if extension.is_empty() || !tree_extension(&extension) {
+                    return Err(());
+                }
+                let mut file = json!({
+                    "name": name,
+                    "relativePath": expected,
+                    "kind": "file",
+                    "extension": extension,
+                });
+                if let Some(modified) = entry.get("modifiedAt") {
+                    let text = modified
+                        .as_str()
+                        .filter(|text| text.contains('T'))
+                        .ok_or(())?;
+                    file["modifiedAt"] = json!(text);
+                }
+                if let Some(size) = entry.get("size") {
+                    let size = size
+                        .as_u64()
+                        .filter(|size| *size <= 1024 * 1024 * 1024)
+                        .ok_or(())?;
+                    file["size"] = json!(size);
+                }
+                cleaned.push(file);
+            }
+            _ => return Err(()),
+        }
+    }
+    cleaned.sort_by(|left, right| {
+        let left_folder = left["kind"].as_str() == Some("folder");
+        let right_folder = right["kind"].as_str() == Some("folder");
+        right_folder.cmp(&left_folder).then_with(|| {
+            left["name"]
+                .as_str()
+                .unwrap_or("")
+                .to_lowercase()
+                .cmp(&right["name"].as_str().unwrap_or("").to_lowercase())
+        })
+    });
+    Ok(cleaned)
+}
+
 fn read_tree(
     root: &Path,
     directory: &Path,
     colors: &BTreeMap<String, String>,
     depth: usize,
+    stats: bool,
 ) -> Result<Value, String> {
     if depth > 80 {
         return Ok(json!([]));
@@ -1491,8 +1745,13 @@ fn read_tree(
                 "name": name,
                 "relativePath": relative,
                 "kind": "folder",
-                "children": read_tree(root, &path, colors, depth + 1)?
+                "children": read_tree(root, &path, colors, depth + 1, stats)?
             });
+            if stats {
+                if let Ok(modified) = meta.modified() {
+                    folder["modifiedAt"] = Value::String(notes::iso_from_system_time(modified));
+                }
+            }
             if let Some(color) = colors.get(&relative) {
                 folder["color"] = Value::String(color.clone());
             }
@@ -1505,13 +1764,19 @@ fn read_tree(
             if !tree_extension(&extension) {
                 continue;
             }
-            children.push(json!({
+            let mut file = json!({
                 "name": name,
                 "relativePath": relative,
                 "kind": "file",
                 "extension": extension,
-                "size": meta.len()
-            }));
+            });
+            if stats {
+                file["size"] = json!(meta.len());
+                if let Ok(modified) = meta.modified() {
+                    file["modifiedAt"] = Value::String(notes::iso_from_system_time(modified));
+                }
+            }
+            children.push(file);
         }
     }
     children = omit_famd_companions(children);
