@@ -55,14 +55,12 @@ pub fn transform(payload: &Value) -> Result<Value, String> {
     let model = required_model(connection)?;
     let markdown = required_markdown(object.get("markdown"))?;
     let actions = required_actions(object.get("actions"))?;
-    let instruction = object
-        .get("instruction")
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .trim()
-        .chars()
-        .take(12_000)
-        .collect::<String>();
+    let instruction = limited_instruction(
+        object
+            .get("instruction")
+            .and_then(Value::as_str)
+            .unwrap_or(""),
+    );
     if actions.iter().any(|action| action == "instruction") && instruction.is_empty() {
         return Err("Schreibe zuerst den freien Auftrag in das Textfeld.".to_owned());
     }
@@ -130,14 +128,12 @@ pub fn transform_lm_studio(payload: &Value) -> Result<Value, String> {
     let model = required_model(payload)?;
     let markdown = required_markdown(object.get("markdown"))?;
     let actions = required_actions(object.get("actions"))?;
-    let instruction = object
-        .get("instruction")
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .trim()
-        .chars()
-        .take(12_000)
-        .collect::<String>();
+    let instruction = limited_instruction(
+        object
+            .get("instruction")
+            .and_then(Value::as_str)
+            .unwrap_or(""),
+    );
     if actions.iter().any(|action| action == "instruction") && instruction.is_empty() {
         return Err("Schreibe zuerst den freien Auftrag in das Textfeld.".to_owned());
     }
@@ -1216,6 +1212,10 @@ fn required_model(value: &Value) -> Result<String, String> {
     }
 }
 
+fn limited_instruction(value: &str) -> String {
+    crate::vault::truncate_utf16(value.trim(), 12_000)
+}
+
 fn build_prompt(
     markdown: &str,
     actions: &[String],
@@ -1363,6 +1363,15 @@ mod tests {
         provider_http_error, unwrap_markdown,
     };
     use serde_json::json;
+
+    #[test]
+    #[test]
+    fn a_free_instruction_stops_at_12000_utf16_units() {
+        let instruction = super::limited_instruction(&format!("{}Ende", "😀".repeat(6_001)));
+        assert_eq!(crate::vault::utf16_len(&instruction), 12_000);
+        assert!(!instruction.contains("Ende"));
+        assert_eq!(instruction.chars().count(), 6_000);
+    }
 
     #[test]
     fn a_long_note_gets_a_larger_answer_budget() {

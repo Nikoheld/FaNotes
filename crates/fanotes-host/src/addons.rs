@@ -183,13 +183,13 @@ pub fn net_fetch(raw_url: &str, init: &Value) -> Result<Value, String> {
             if !is_header_name(key) || is_blocked_header(key) {
                 continue;
             }
-            headers.push((key.clone(), value.chars().take(2000).collect::<String>()));
+            headers.push((key.clone(), crate::vault::truncate_utf16(value, 2000)));
         }
     }
     let body = if method != "GET" && method != "HEAD" {
         init.get("body")
             .and_then(Value::as_str)
-            .map(|body| body.chars().take(2_000_000).collect::<String>())
+            .map(|body| crate::vault::truncate_utf16(body, 2_000_000))
     } else {
         None
     };
@@ -314,7 +314,7 @@ fn request_text(
             {
                 picked.insert(
                     (*name).to_owned(),
-                    Value::String(value.chars().take(2000).collect()),
+                    Value::String(crate::vault::truncate_utf16(value, 2000)),
                 );
             }
         }

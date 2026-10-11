@@ -1082,7 +1082,7 @@ impl Host {
         if query.is_empty() {
             return Ok(json!([]));
         }
-        let query = query.chars().take(500).collect::<String>();
+        let query = vault::truncate_utf16(query, 500);
         let root = self.require_vault()?;
         let needle = query.to_lowercase();
         let mut files = Vec::new();
@@ -2964,10 +2964,12 @@ fn search_drawings(
         let Some(title) = document.get("title").and_then(Value::as_str) else {
             continue;
         };
-        let transcript = document
-            .get("searchTranscript")
-            .and_then(Value::as_str)
-            .unwrap_or("");
+        let transcript = bounded_transcript(
+            document
+                .get("searchTranscript")
+                .and_then(Value::as_str)
+                .unwrap_or(""),
+        );
         let searchable = format!("{title}\n{transcript}");
         let haystack = searchable.to_lowercase();
         let Some(first) = haystack.find(needle) else {
@@ -3053,13 +3055,16 @@ fn collect_search_files(
     Ok(())
 }
 
+fn bounded_transcript(value: &str) -> String {
+    vault::truncate_utf16(value, 500_000)
+}
+
 fn ink_transcript(ink: Option<&Value>) -> String {
-    ink.and_then(|value| value.get("searchTranscript"))
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .chars()
-        .take(500_000)
-        .collect()
+    bounded_transcript(
+        ink.and_then(|value| value.get("searchTranscript"))
+            .and_then(Value::as_str)
+            .unwrap_or(""),
+    )
 }
 
 fn count_matches(haystack: &str, needle: &str) -> usize {
@@ -3227,6 +3232,15 @@ mod search_span_tests {
         let window = excerpt(&note, start, span);
         assert!(window.contains("Zielwort"), "{window}");
         let _ = excerpt("kurz", 10_000, word.len());
+    }
+
+    #[test]
+    fn a_handwriting_transcript_stops_at_500_000_utf16_units() {
+        let transcript = format!("{}Ziel", "😀".repeat(250_000));
+        let ink = serde_json::json!({ "searchTranscript": transcript });
+        let kept = super::ink_transcript(Some(&ink));
+        assert_eq!(crate::vault::utf16_len(&kept), 500_000);
+        assert!(!kept.contains("Ziel"));
     }
 }
 

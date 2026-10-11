@@ -167,3 +167,16 @@ fn search_excerpt_follows_a_case_fold_that_grows() {
     let excerpt = hits[0]["excerpt"].as_str().unwrap();
     assert!(excerpt.contains("Zielwort"), "{excerpt}");
 }
+
+#[test]
+fn a_search_query_stops_at_500_utf16_units() {
+    let mut host = host();
+    host.dispatch(
+        "fanotes:write-file",
+        &[json!("Bio/Emoji.md"), json!("Nur das letzte Zeichen.\n")],
+    )
+    .unwrap();
+    let query = format!("{}Zeichen", "😀".repeat(250));
+    let hits = host.dispatch("fanotes:search", &[json!(query)]).unwrap();
+    assert!(hits.as_array().unwrap().is_empty());
+}
