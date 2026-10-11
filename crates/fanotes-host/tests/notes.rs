@@ -8,6 +8,7 @@ fn host() -> (Host, std::path::PathBuf) {
     let vault = dir.join("vault");
     std::fs::create_dir_all(&vault).unwrap();
     let mut host = Host::open(dir.join("app"));
+    host.trash_dir = Some(dir.join("trash"));
     host.set_vault(vault.clone()).unwrap();
     (host, vault)
 }

@@ -57,10 +57,10 @@ pub fn list_drawings(host: &Host) -> Result<Value, String> {
             .unwrap_or("")
             .cmp(left["updatedAt"].as_str().unwrap_or(""))
             .then_with(|| {
-                left["title"]
-                    .as_str()
-                    .unwrap_or("")
-                    .cmp(right["title"].as_str().unwrap_or(""))
+                crate::compare_names(
+                    left["title"].as_str().unwrap_or(""),
+                    right["title"].as_str().unwrap_or(""),
+                )
             })
     });
     Ok(Value::Array(drawings))

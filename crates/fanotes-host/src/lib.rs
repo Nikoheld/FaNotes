@@ -57,6 +57,8 @@ pub struct Host {
     pub documents_dir: Option<PathBuf>,
     /// When set, link and file-manager actions are appended here instead of launched.
     pub open_log: Option<PathBuf>,
+    /// When set, deleted notes go to this trash directory instead of the desktop trash.
+    pub trash_dir: Option<PathBuf>,
 }
 
 impl Host {
@@ -71,6 +73,7 @@ impl Host {
             file_dialogs: true,
             documents_dir: None,
             open_log: None,
+            trash_dir: None,
         };
         host.load_persisted();
         host
@@ -361,8 +364,10 @@ impl Host {
                 Err("Nur Dateien können über den Sync entfernt werden.".to_owned())
             }
             Ok(_) => {
-                fs::remove_file(&path)
-                    .map_err(|_| "Der Eintrag konnte nicht entfernt werden.".to_owned())?;
+                if send_to_trash(self, &path).is_err() {
+                    fs::remove_file(&path)
+                        .map_err(|_| "Der Eintrag konnte nicht entfernt werden.".to_owned())?;
+                }
                 Ok(Value::Null)
             }
         }
@@ -945,13 +950,15 @@ impl Host {
         let normalized = vault::normalize_relative_path(relative, false, false)?;
         let path = vault::resolve_inside(&root, &normalized)?;
         let is_dir = fs::symlink_metadata(&path).is_ok_and(|meta| meta.is_dir());
-        if is_dir {
-            fs::remove_dir_all(&path)
-                .map_err(|_| "Der Eintrag konnte nicht entfernt werden.".to_owned())?;
-        } else {
-            fs::remove_file(&path)
-                .map_err(|_| "Der Eintrag konnte nicht entfernt werden.".to_owned())?;
-            remove_note_companion(&root, &normalized);
+        send_to_trash(self, &path)?;
+        if !is_dir {
+            if let Some(companion) = note_companion_relative(&normalized) {
+                if let Ok(companion_path) = vault::resolve_inside(&root, &companion) {
+                    if companion_path.is_file() {
+                        let _ = send_to_trash(self, &companion_path);
+                    }
+                }
+            }
         }
         let _ = forget_folder_colors(&root, &normalized);
         Ok(Value::Null)
@@ -1055,11 +1062,10 @@ impl Host {
                 .unwrap_or(0)
                 .cmp(&left["matches"].as_u64().unwrap_or(0))
                 .then_with(|| {
-                    left["title"]
-                        .as_str()
-                        .unwrap_or("")
-                        .to_lowercase()
-                        .cmp(&right["title"].as_str().unwrap_or("").to_lowercase())
+                    compare_names(
+                        left["title"].as_str().unwrap_or(""),
+                        right["title"].as_str().unwrap_or(""),
+                    )
                 })
         });
         hits.truncate(250);
@@ -1729,6 +1735,144 @@ fn file_uri(path: &Path) -> String {
     uri
 }
 
+pub(crate) fn compare_names(left: &str, right: &str) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
+    let left: Vec<char> = left.chars().flat_map(|ch| ch.to_lowercase()).collect();
+    let right: Vec<char> = right.chars().flat_map(|ch| ch.to_lowercase()).collect();
+    let mut left_index = 0;
+    let mut right_index = 0;
+    while left_index < left.len() && right_index < right.len() {
+        if left[left_index].is_ascii_digit() && right[right_index].is_ascii_digit() {
+            while left_index < left.len() && left[left_index] == '0' {
+                left_index += 1;
+            }
+            while right_index < right.len() && right[right_index] == '0' {
+                right_index += 1;
+            }
+            let left_start = left_index;
+            let right_start = right_index;
+            while left_index < left.len() && left[left_index].is_ascii_digit() {
+                left_index += 1;
+            }
+            while right_index < right.len() && right[right_index].is_ascii_digit() {
+                right_index += 1;
+            }
+            let order = (left_index - left_start)
+                .cmp(&(right_index - right_start))
+                .then_with(|| left[left_start..left_index].cmp(&right[right_start..right_index]));
+            if order != Ordering::Equal {
+                return order;
+            }
+            continue;
+        }
+        if left[left_index] != right[right_index] {
+            return left[left_index].cmp(&right[right_index]);
+        }
+        left_index += 1;
+        right_index += 1;
+    }
+    left.len().cmp(&right.len())
+}
+
+fn entry_name_order(left: &Value, right: &Value) -> std::cmp::Ordering {
+    let left_folder = left["kind"].as_str() == Some("folder");
+    let right_folder = right["kind"].as_str() == Some("folder");
+    right_folder.cmp(&left_folder).then_with(|| {
+        compare_names(
+            left["name"].as_str().unwrap_or(""),
+            right["name"].as_str().unwrap_or(""),
+        )
+    })
+}
+
+fn send_to_trash(host: &Host, path: &Path) -> Result<(), String> {
+    if let Some(dir) = &host.trash_dir {
+        return place_in_trash(dir, path);
+    }
+    if gio_trash(path).is_ok() {
+        return Ok(());
+    }
+    if let Some(dir) = xdg_trash_dir() {
+        if place_in_trash(&dir, path).is_ok() {
+            return Ok(());
+        }
+    }
+    Err("Der Eintrag konnte nicht in den Papierkorb verschoben werden.".to_owned())
+}
+
+fn gio_trash(path: &Path) -> Result<(), ()> {
+    let status = std::process::Command::new("gio")
+        .args(["trash", &path.to_string_lossy()])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map_err(|_| ())?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(())
+    }
+}
+
+fn xdg_trash_dir() -> Option<PathBuf> {
+    let data = std::env::var_os("XDG_DATA_HOME")
+        .map(PathBuf::from)
+        .or_else(|| {
+            std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".local/share"))
+        })?;
+    Some(data.join("Trash"))
+}
+
+fn place_in_trash(trash_root: &Path, source: &Path) -> Result<(), String> {
+    let files = trash_root.join("files");
+    let info = trash_root.join("info");
+    fs::create_dir_all(&files)
+        .map_err(|_| "Der Eintrag konnte nicht in den Papierkorb verschoben werden.".to_owned())?;
+    fs::create_dir_all(&info)
+        .map_err(|_| "Der Eintrag konnte nicht in den Papierkorb verschoben werden.".to_owned())?;
+    let base = source
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("datei");
+    let mut stored = base.to_owned();
+    for number in 2..10_000 {
+        if !files.join(&stored).exists() && !info.join(format!("{stored}.trashinfo")).exists() {
+            break;
+        }
+        stored = format!("{base}_{number}");
+        if number == 9_999 {
+            return Err("Der Eintrag konnte nicht in den Papierkorb verschoben werden.".to_owned());
+        }
+    }
+    let destination = files.join(&stored);
+    let original = std::path::absolute(source).unwrap_or_else(|_| source.to_path_buf());
+    fs::rename(source, &destination)
+        .map_err(|_| "Der Eintrag konnte nicht in den Papierkorb verschoben werden.".to_owned())?;
+    let when = notes::iso_from_system_time(SystemTime::now());
+    let when = when.split('.').next().unwrap_or(when.as_str());
+    let record = format!(
+        "[Trash Info]\nPath={}\nDeletionDate={when}\n",
+        percent_encode(&original)
+    );
+    fs::write(info.join(format!("{stored}.trashinfo")), record)
+        .map_err(|_| "Der Eintrag konnte nicht in den Papierkorb verschoben werden.".to_owned())
+}
+
+fn percent_encode(path: &Path) -> String {
+    let absolute = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
+    let mut encoded = String::new();
+    for byte in absolute.to_string_lossy().as_bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'/' | b'-' | b'_' | b'.' | b'~' => {
+                encoded.push(*byte as char);
+            }
+            _ => encoded.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    encoded
+}
+
 fn onboarding_open(channel: &str) -> bool {
     matches!(
         channel,
@@ -1939,17 +2083,7 @@ fn clean_cached_entries(
             _ => return Err(()),
         }
     }
-    cleaned.sort_by(|left, right| {
-        let left_folder = left["kind"].as_str() == Some("folder");
-        let right_folder = right["kind"].as_str() == Some("folder");
-        right_folder.cmp(&left_folder).then_with(|| {
-            left["name"]
-                .as_str()
-                .unwrap_or("")
-                .to_lowercase()
-                .cmp(&right["name"].as_str().unwrap_or("").to_lowercase())
-        })
-    });
+    cleaned.sort_by(entry_name_order);
     Ok(cleaned)
 }
 
@@ -2023,17 +2157,7 @@ fn read_tree(
         }
     }
     children = omit_famd_companions(children);
-    children.sort_by(|left, right| {
-        let left_folder = left["kind"].as_str() == Some("folder");
-        let right_folder = right["kind"].as_str() == Some("folder");
-        right_folder.cmp(&left_folder).then_with(|| {
-            left["name"]
-                .as_str()
-                .unwrap_or("")
-                .to_lowercase()
-                .cmp(&right["name"].as_str().unwrap_or("").to_lowercase())
-        })
-    });
+    children.sort_by(entry_name_order);
     Ok(Value::Array(children))
 }
 
@@ -2160,18 +2284,6 @@ fn move_note_companion(root: &Path, old_relative: &str, new_relative: &str) {
         let _ = fs::create_dir_all(parent);
     }
     let _ = fs::rename(source, destination);
-}
-
-fn remove_note_companion(root: &Path, relative: &str) {
-    let Some(companion) = note_companion_relative(relative) else {
-        return;
-    };
-    let Ok(path) = vault::resolve_inside(root, &companion) else {
-        return;
-    };
-    if path.is_file() {
-        let _ = fs::remove_file(path);
-    }
 }
 
 fn note_companion_relative(relative: &str) -> Option<String> {
