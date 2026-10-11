@@ -2,7 +2,12 @@
 
 ## Unveröffentlicht
 
+## 2026.10.2
+
 - **Nightly-Kanal.** Neben Stable und Beta kann der Update-Kanal auf Nightly stehen. Nightly ist jeder Commit auf main, der kein Stable- oder Beta-Release ist. Diese Stände können unfertig sein. Ein neuerer Stable-Stand wird automatisch bevorzugt.
+- **Erscheinungsbild.** Schalter sind flach, die Schrift ist lesbar, die Farben folgen dem Thema, und Kalender, Hausaufgaben, Übersicht und GlyphenWerk füllen die Seite.
+- **Marker und gerade Linie.** Der Marker bleibt in einer Wendung in der Spur. Eine Linie, die durch Halten gerade wird, bleibt so, bis der Stift abhebt; das Abheben setzt keinen Punkt mehr.
+- **Zeilenerkennung im nativen Programm.** Die Erkennung einer Zeile läuft über fanotes-ocr statt über den bisherigen ONNX-Worker.
 - **Suche springt zur Handschrift.** Ein Treffer in der unsichtbaren Transkription merkt sich die Höhe auf der Seite und scrollt dorthin.
 - **Zweite Spalte schreibt mit.** Im Stiftmodus ist die fokussierte Spalte ein eigener Editor mit eigenem Verlauf und eigener Speicherung.
 - **Abschnitte klappen auch den Text.** Der erste Handschrift-Abschnitt faltet die erste Überschrift, der zweite die zweite.
@@ -23,9 +28,6 @@
 - **PDF-Markierungen.** Ausgewählter PDF-Text wird an Seite und Zitat gehängt, übersteht Zoom und bleibt suchbar.
 - **Versionen in der Gliederung.** Der Verlauf zeigt einen Textunterschied, ob Handschrift dabei ist, und stellt eine Fassung wieder her.
 - **Karteikarten.** Lernfragen aus der Notiz werden mit Nochmal, Schwer, Gut und Leicht wiederholt. Der Plan bleibt in der Notiz.
-
-## 2026.10.2
-
 - **Verbundene Handschrift bleibt lesbar.** Eine klare Addition wie `a + c` fällt nicht mehr in den Textmodus. Eine Null wird nicht mehr als Ü gelesen und Unendlich nicht als a. Ein trainiertes Wort wird nicht mehr von einem billigen Schnitt verdrängt, ein Apostroph in Buchstabengröße schlägt kein e, und ein verbundenes s kein c. GlyphenWerk bekommt nur den schon feststehenden Textanfang.
 - **Englisch.** Dateibaum, Befehlssuche, Rechtschreibung, Tabs und Update-Hinweise mit Versionsnummer erscheinen auf Englisch, wenn die Oberfläche Englisch ist.
 - **Die Handschrift bleibt beim Speichern.** Ein fehlgeschlagenes Lesen der Begleiterdatei gilt nicht mehr als leere Datei. Papier, Verknüpfungen, Sicherungen und Tinte werden in derselben Warteschlange geschrieben wie der Text. Schlägt das Schreiben der Begleiterdatei fehl, bleibt die Notiz ungespeichert. „Alte Notizen auf den aktuellen Standard“ übernimmt die vorhandene Handschrift.
