@@ -13,7 +13,11 @@ pub fn normalize_relative_path(
     if utf16_len(value) > 4096 || value.contains('\0') {
         return Err("Ungültiger Vault-Pfad.".to_owned());
     }
-    if value.contains('\\') || Path::new(value).is_absolute() || value.starts_with('/') {
+    if value.contains('\\')
+        || Path::new(value).is_absolute()
+        || value.starts_with('/')
+        || is_windows_drive_path(value)
+    {
         return Err("Nur relative Vault-Pfade sind erlaubt.".to_owned());
     }
     let without_prefix = value.strip_prefix("./").unwrap_or(value);
@@ -39,6 +43,15 @@ pub fn normalize_relative_path(
         return Err("Interne FaNotes-Dateien sind geschützt.".to_owned());
     }
     Ok(segments.join("/"))
+}
+
+/// `path.win32.isAbsolute`: a drive letter, a colon, then a slash.
+fn is_windows_drive_path(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    bytes.len() >= 3
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && (bytes[2] == b'/' || bytes[2] == b'\\')
 }
 
 /// A note path may not follow a symlink, including a symlink directory.
@@ -338,5 +351,10 @@ mod tests {
         assert!(normalize_relative_path("Seite.md//", false, false).is_err());
         assert_eq!(normalize_relative_path("./", true, false).unwrap(), "");
         assert!(normalize_relative_path("././", true, false).is_err());
+        assert!(normalize_relative_path("C:/Notiz.md", false, false).is_err());
+        assert!(normalize_relative_path("c:/Notiz.md", false, false).is_err());
+        assert!(normalize_relative_path("C:/", false, false).is_err());
+        assert!(normalize_relative_path("C:Notiz.md", false, false).is_ok());
+        assert!(normalize_relative_path("Mathe/C:/Notiz.md", false, false).is_ok());
     }
 }
