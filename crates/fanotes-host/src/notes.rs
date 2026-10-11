@@ -604,6 +604,7 @@ pub(crate) fn atomic_write(path: &Path, bytes: &[u8], mode: u32) -> Result<(), S
     Ok(())
 }
 
+#[derive(Debug)]
 pub(crate) enum NewFileError {
     Exists,
     Io,
