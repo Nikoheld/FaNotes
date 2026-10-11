@@ -460,10 +460,9 @@ fn replace_all(text: &str, pattern: &str, replacement: &str) -> String {
 }
 
 fn page_dimensions(html: &str) -> (i64, i64) {
-    let max_of = |name: &str| -> f64 {
+    let measured = |name: &str| -> Vec<f64> {
         let pattern = format!(r"(?i)(?:^|[;\s\x22])(?:max-)?{name}\s*:\s*(-?[0-9.]+)px");
         Regex::new(&pattern)
-            .ok()
             .map(|regex| {
                 regex
                     .captures_iter(html)
@@ -472,17 +471,20 @@ fn page_dimensions(html: &str) -> (i64, i64) {
                             .and_then(|item| item.as_str().parse::<f64>().ok())
                     })
                     .filter(|value| value.is_finite() && *value >= 0.0)
-                    .fold(0.0, f64::max)
+                    .collect()
             })
-            .unwrap_or(0.0)
+            .unwrap_or_default()
     };
+    let max_or =
+        |values: Vec<f64>, fallback: f64| values.into_iter().reduce(f64::max).unwrap_or(fallback);
     let blocks = Regex::new(r"(?i)<(?:p|li|tr|h[1-6])\b")
         .map(|regex| regex.find_iter(html).count())
         .unwrap_or(0);
-    let width = (max_of("left") + max_of("width").max(720.0) + 96.0).clamp(720.0, 3000.0);
-    let height = (max_of("top") + max_of("height").max(160.0) + 140.0)
-        .max(blocks as f64 * 24.0 + 280.0)
-        .clamp(900.0, 30_000.0);
+    let width = (max_or(measured("left"), 0.0) + max_or(measured("width"), 720.0) + 96.0)
+        .clamp(720.0, 3000.0);
+    let css_height = max_or(measured("top"), 0.0) + max_or(measured("height"), 160.0) + 140.0;
+    let block_height = blocks as f64 * 24.0 + 280.0;
+    let height = css_height.min(block_height).clamp(900.0, 30_000.0);
     (width.round() as i64, height.round() as i64)
 }
 
@@ -1339,7 +1341,7 @@ fn civil_date(mut days: u64) -> (i32, u32, u32) {
 
 #[cfg(test)]
 mod tests {
-    use super::{extract_search_text, safe_segment};
+    use super::{extract_search_text, page_dimensions, safe_segment};
 
     #[test]
     fn a_page_title_stops_at_120_utf16_units() {
@@ -1371,5 +1373,20 @@ mod tests {
         );
         let long = "😀".repeat(1_000_001);
         assert_eq!(extract_search_text(&long).encode_utf16().count(), 2_000_000);
+    }
+
+    #[test]
+    fn onenote_page_size_uses_the_smaller_estimate() {
+        assert_eq!(page_dimensions(""), (816, 900));
+        assert_eq!(page_dimensions("left:400px;width:100px;<p>"), (720, 900));
+        assert_eq!(
+            page_dimensions(&format!(
+                "left:0px;width:2000px;top:100px;height:4000px;{}",
+                "<p>".repeat(10)
+            )),
+            (2096, 900)
+        );
+        assert_eq!(page_dimensions(&"<p>".repeat(100)), (816, 900));
+        assert_eq!(page_dimensions("height:40px;top:10px;<p><p>"), (816, 900));
     }
 }
