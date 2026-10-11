@@ -126,6 +126,11 @@ fn import_pdf_payload(host: &Host, parent: &str, payload: &Value) -> Result<Valu
     }
     let meta = fs::symlink_metadata(&absolute)
         .map_err(|_| "Die PDF-Datei konnte nicht gespeichert werden.".to_owned())?;
+    let modified = meta
+        .modified()
+        .ok()
+        .map(crate::notes::iso_from_system_time)
+        .unwrap_or_else(now_iso);
     Ok(json!({
         "relativePath": relative,
         "entry": {
@@ -133,7 +138,7 @@ fn import_pdf_payload(host: &Host, parent: &str, payload: &Value) -> Result<Valu
             "relativePath": relative,
             "kind": "file",
             "extension": "pdf",
-            "modifiedAt": now_iso(),
+            "modifiedAt": modified,
             "size": meta.len(),
         }
     }))
@@ -228,6 +233,43 @@ fn safe_stem(value: &str, fallback: &str) -> Result<String, String> {
         Err("Dieser Name ist nicht erlaubt.".to_owned())
     } else {
         Ok(cleaned.to_owned())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::import_pdf_payload;
+    use crate::Host;
+    use serde_json::json;
+
+    #[test]
+    fn an_imported_pdf_reports_the_file_modification_time() {
+        let dir = std::env::temp_dir().join(format!(
+            "fanotes-pdf-mtime-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        let vault = dir.join("vault");
+        std::fs::create_dir_all(vault.join("Mathe")).unwrap();
+        let mut host = Host::open(dir.join("app"));
+        host.set_vault(vault.clone()).unwrap();
+        let result = import_pdf_payload(
+            &host,
+            "Mathe",
+            &json!({ "name": "Skript.pdf", "bytes": b"%PDF-1.4\n".to_vec() }),
+        )
+        .unwrap();
+        let path = vault.join("Mathe/Skript.pdf");
+        let modified = std::fs::metadata(&path).unwrap().modified().unwrap();
+        assert_eq!(
+            result["entry"]["modifiedAt"],
+            crate::notes::iso_from_system_time(modified)
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
 
