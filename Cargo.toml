@@ -9,6 +9,8 @@ members = [
     "crates/fanotes-raster",
     "crates/fanotes-raster-wasm",
     "crates/fanotes-ort",
+    "crates/fanotes-recog",
+    "crates/fanotes-recog-wasm",
     "apps/paper-proto",
 ]
 

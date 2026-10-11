@@ -29,6 +29,13 @@ const modules = [
     constant: 'RASTER_WASM_BASE64',
     bindgenFlags: ['--remove-name-section', '--remove-producers-section'],
   },
+  {
+    crate: 'fanotes-recog-wasm',
+    artifact: 'fanotes_recog_wasm',
+    dir: join(appRoot, 'src', 'lib', 'recogWasm'),
+    constant: 'RECOG_WASM_BASE64',
+    bindgenFlags: ['--remove-name-section', '--remove-producers-section'],
+  },
 ]
 
 const lockedBindgen = () => {
