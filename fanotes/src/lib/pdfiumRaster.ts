@@ -14,7 +14,7 @@ const decodeBase64 = (body: string): Uint8Array => {
   return bytes.subarray(0, offset)
 }
 
-const asBytes = (result: PdfiumRasterResult): Uint8ClampedArray | null => {
+const asBytes = (result: PdfiumRasterResult): Uint8ClampedArray<ArrayBuffer> | null => {
   const width = result.width ?? 0
   const height = result.height ?? 0
   if (!Number.isSafeInteger(width) || !Number.isSafeInteger(height) || width < 1 || height < 1) return null
@@ -25,7 +25,10 @@ const asBytes = (result: PdfiumRasterResult): Uint8ClampedArray | null => {
   const tight = bytes.byteOffset === 0 && bytes.byteLength === bytes.buffer.byteLength
     ? bytes
     : bytes.slice()
-  return new Uint8ClampedArray(tight.buffer, tight.byteOffset, tight.byteLength)
+  // ImageData accepts only a Uint8ClampedArray backed by a plain ArrayBuffer.
+  const pixels = new Uint8ClampedArray(tight.byteLength)
+  pixels.set(tight)
+  return pixels
 }
 
 /**
@@ -34,7 +37,7 @@ const asBytes = (result: PdfiumRasterResult): Uint8ClampedArray | null => {
  */
 export const rasterizePdfPage = async (
   request: PdfiumRasterRequest,
-): Promise<Uint8ClampedArray | null> => {
+): Promise<Uint8ClampedArray<ArrayBuffer> | null> => {
   if (unavailable) return null
   const render = window.fanotes.renderPdfPage
   if (typeof render !== 'function') return null
