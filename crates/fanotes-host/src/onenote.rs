@@ -447,18 +447,16 @@ fn extract_search_text(html: &str) -> String {
         text = regex.replace_all(&text, " ").into_owned();
     }
     let text = decode_entities(&text);
-    let text = Regex::new(r"[ \t]+")
-        .map(|regex| regex.replace_all(&text, " ").into_owned())
-        .unwrap_or(text);
-    text.lines()
-        .map(str::trim)
-        .collect::<Vec<_>>()
-        .join("\n")
-        .replace("\n\n\n", "\n\n")
-        .trim()
-        .chars()
-        .take(2_000_000)
-        .collect()
+    let text = replace_all(&text, r"[ \t]+", " ");
+    let text = replace_all(&text, r"\s*\n\s*", "\n");
+    let text = replace_all(&text, r"\n{3,}", "\n\n");
+    crate::vault::truncate_utf16(text.trim(), 2_000_000)
+}
+
+fn replace_all(text: &str, pattern: &str, replacement: &str) -> String {
+    Regex::new(pattern)
+        .map(|regex| regex.replace_all(text, replacement).into_owned())
+        .unwrap_or_else(|_| text.to_owned())
 }
 
 fn page_dimensions(html: &str) -> (i64, i64) {
@@ -1341,7 +1339,7 @@ fn civil_date(mut days: u64) -> (i32, u32, u32) {
 
 #[cfg(test)]
 mod tests {
-    use super::safe_segment;
+    use super::{extract_search_text, safe_segment};
 
     #[test]
     fn a_page_title_stops_at_120_utf16_units() {
@@ -1360,5 +1358,18 @@ mod tests {
             safe_segment(&format!("Seite{}", '\u{007f}'), "fallback"),
             "Seite"
         );
+    }
+
+    #[test]
+    fn onenote_search_text_collapses_blank_lines() {
+        assert_eq!(extract_search_text("a\n\n\nb"), "a\nb");
+        assert_eq!(extract_search_text("a\n\n\n\nb"), "a\nb");
+        assert_eq!(extract_search_text("a\n \n \nb"), "a\nb");
+        assert_eq!(
+            extract_search_text("<p>Eins</p>\n<p>Zwei</p>"),
+            "Eins\nZwei"
+        );
+        let long = "😀".repeat(1_000_001);
+        assert_eq!(extract_search_text(&long).encode_utf16().count(), 2_000_000);
     }
 }
