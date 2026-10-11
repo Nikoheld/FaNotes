@@ -5,6 +5,7 @@
 
 use std::time::Duration;
 
+use base64::Engine;
 use serde_json::{json, Value};
 use ureq::Agent;
 
@@ -72,6 +73,9 @@ pub fn transform(payload: &Value) -> Result<Value, String> {
             &model,
             &prompt,
         )?,
+        "gemini" => gemini_generate(connection, &model, &prompt)?,
+        "anthropic" => anthropic_message(connection, &model, &prompt)?,
+        "opencode" => opencode_message(connection, &model, &prompt)?,
         _ => return Err("Wähle einen unterstützten AI-Anbieter.".to_owned()),
     };
     Ok(json!({
@@ -113,11 +117,10 @@ fn list_provider(connection: &Value) -> Result<Value, String> {
     let models = match provider {
         "ollama" => ollama_models(connection)?,
         "lmstudio" => lmstudio_models(connection)?,
-        "openai" | "gemini" | "anthropic" => {
-            require_key(connection)?;
-            Vec::new()
-        }
-        "opencode" => Vec::new(),
+        "openai" => openai_models(connection)?,
+        "gemini" => gemini_models(connection)?,
+        "anthropic" => anthropic_models(connection)?,
+        "opencode" => opencode_models(connection)?,
         _ => return Err("Wähle einen unterstützten AI-Anbieter.".to_owned()),
     };
     Ok(Value::Array(models))
@@ -205,6 +208,313 @@ fn lmstudio_models(connection: &Value) -> Result<Vec<Value>, String> {
         .collect())
 }
 
+fn openai_models(connection: &Value) -> Result<Vec<Value>, String> {
+    require_key(connection)?;
+    parse_openai_models(&request_json(
+        "GET",
+        "https://api.openai.com/v1/models",
+        connection,
+        None,
+        Duration::from_secs(20),
+    )?)
+}
+
+fn parse_openai_models(body: &Value) -> Result<Vec<Value>, String> {
+    let models = body
+        .get("data")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "OpenAI hat keine Modellliste geliefert.".to_owned())?;
+    Ok(models
+        .iter()
+        .filter_map(|entry| {
+            let id = entry.get("id").and_then(Value::as_str)?;
+            let mut record = model_record("openai", id, id);
+            if let Some(object) = record.as_object_mut() {
+                object.insert(
+                    "publisher".into(),
+                    Value::String(
+                        entry
+                            .get("owned_by")
+                            .and_then(Value::as_str)
+                            .unwrap_or("")
+                            .to_owned(),
+                    ),
+                );
+            }
+            Some(record)
+        })
+        .take(1000)
+        .collect())
+}
+
+fn gemini_models(connection: &Value) -> Result<Vec<Value>, String> {
+    require_key(connection)?;
+    parse_gemini_models(&request_json(
+        "GET",
+        "https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000",
+        connection,
+        None,
+        Duration::from_secs(20),
+    )?)
+}
+
+fn parse_gemini_models(body: &Value) -> Result<Vec<Value>, String> {
+    let models = body
+        .get("models")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "Gemini hat keine Modellliste geliefert.".to_owned())?;
+    Ok(models
+        .iter()
+        .filter_map(|entry| {
+            let name = entry.get("name").and_then(Value::as_str)?;
+            let methods = entry
+                .get("supportedGenerationMethods")
+                .and_then(Value::as_array)?;
+            if !methods
+                .iter()
+                .any(|method| method.as_str() == Some("generateContent"))
+            {
+                return None;
+            }
+            let key = name.trim_start_matches("models/");
+            let display = entry
+                .get("displayName")
+                .and_then(Value::as_str)
+                .unwrap_or(key);
+            let mut record = model_record("gemini", key, display);
+            if let Some(object) = record.as_object_mut() {
+                object.insert("publisher".into(), Value::String("Google".to_owned()));
+            }
+            Some(record)
+        })
+        .take(1000)
+        .collect())
+}
+
+fn anthropic_models(connection: &Value) -> Result<Vec<Value>, String> {
+    require_key(connection)?;
+    parse_anthropic_models(&request_json(
+        "GET",
+        "https://api.anthropic.com/v1/models?limit=1000",
+        connection,
+        None,
+        Duration::from_secs(20),
+    )?)
+}
+
+fn parse_anthropic_models(body: &Value) -> Result<Vec<Value>, String> {
+    let models = body
+        .get("data")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "Anthropic hat keine Modellliste geliefert.".to_owned())?;
+    Ok(models
+        .iter()
+        .filter_map(|entry| {
+            let id = entry.get("id").and_then(Value::as_str)?;
+            let display = entry
+                .get("display_name")
+                .and_then(Value::as_str)
+                .unwrap_or(id);
+            let mut record = model_record("anthropic", id, display);
+            if let Some(object) = record.as_object_mut() {
+                object.insert("publisher".into(), Value::String("Anthropic".to_owned()));
+            }
+            Some(record)
+        })
+        .take(1000)
+        .collect())
+}
+
+fn opencode_models(connection: &Value) -> Result<Vec<Value>, String> {
+    let origin = origin(connection, "opencode")?;
+    request_json(
+        "GET",
+        &format!("{origin}/global/health"),
+        connection,
+        None,
+        Duration::from_secs(20),
+    )?;
+    parse_opencode_models(&request_json(
+        "GET",
+        &format!("{origin}/provider"),
+        connection,
+        None,
+        Duration::from_secs(20),
+    )?)
+}
+
+fn parse_opencode_models(body: &Value) -> Result<Vec<Value>, String> {
+    let providers = body
+        .get("all")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let mut models = Vec::new();
+    for provider in providers {
+        let Some(provider_id) = provider.get("id").and_then(Value::as_str) else {
+            continue;
+        };
+        let provider_name = provider
+            .get("name")
+            .and_then(Value::as_str)
+            .unwrap_or(provider_id);
+        let entries = match provider.get("models") {
+            Some(Value::Object(object)) => object
+                .iter()
+                .map(|(id, entry)| (id.clone(), entry.clone()))
+                .collect::<Vec<_>>(),
+            Some(Value::Array(items)) => items
+                .iter()
+                .filter_map(|entry| {
+                    let id = entry.get("id").and_then(Value::as_str)?;
+                    Some((id.to_owned(), entry.clone()))
+                })
+                .collect(),
+            _ => Vec::new(),
+        };
+        for (id, entry) in entries {
+            if id.is_empty() {
+                continue;
+            }
+            let display = entry
+                .get("name")
+                .and_then(Value::as_str)
+                .unwrap_or(id.as_str());
+            let mut record = model_record(
+                "opencode",
+                &format!("{provider_id}/{id}"),
+                &format!("{provider_name} · {display}"),
+            );
+            if let Some(object) = record.as_object_mut() {
+                object.insert("publisher".into(), Value::String(provider_name.to_owned()));
+            }
+            models.push(record);
+            if models.len() == 1000 {
+                return Ok(models);
+            }
+        }
+    }
+    Ok(models)
+}
+
+fn gemini_generate(connection: &Value, model: &str, prompt: &str) -> Result<String, String> {
+    require_key(connection)?;
+    let body = request_json(
+        "POST",
+        &format!(
+            "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent",
+            urlencoding_encode(model)
+        ),
+        connection,
+        Some(json!({
+            "systemInstruction": { "parts": [{ "text": "Du bist der Markdown-Assistent von FaNotes." }] },
+            "contents": [{ "role": "user", "parts": [{ "text": prompt }] }]
+        })),
+        Duration::from_secs(120),
+    )?;
+    body["candidates"][0]["content"]["parts"]
+        .as_array()
+        .and_then(|parts| {
+            parts
+                .iter()
+                .filter_map(|part| part.get("text").and_then(Value::as_str))
+                .next()
+        })
+        .map(str::to_owned)
+        .ok_or_else(|| {
+            "Der AI-Anbieter hat kein verwendbares Markdown-Dokument zurückgegeben.".to_owned()
+        })
+}
+
+fn anthropic_message(connection: &Value, model: &str, prompt: &str) -> Result<String, String> {
+    require_key(connection)?;
+    let body = request_json(
+        "POST",
+        "https://api.anthropic.com/v1/messages",
+        connection,
+        Some(json!({
+            "model": model,
+            "max_tokens": 2048,
+            "system": "Du bist der Markdown-Assistent von FaNotes.",
+            "messages": [{ "role": "user", "content": prompt }]
+        })),
+        Duration::from_secs(120),
+    )?;
+    body["content"]
+        .as_array()
+        .and_then(|parts| {
+            parts.iter().find_map(|part| {
+                if part.get("type").and_then(Value::as_str) == Some("text") {
+                    part.get("text").and_then(Value::as_str)
+                } else {
+                    None
+                }
+            })
+        })
+        .map(str::to_owned)
+        .ok_or_else(|| {
+            "Der AI-Anbieter hat kein verwendbares Markdown-Dokument zurückgegeben.".to_owned()
+        })
+}
+
+fn opencode_message(connection: &Value, model: &str, prompt: &str) -> Result<String, String> {
+    let Some((provider_id, model_id)) = model.split_once('/') else {
+        return Err("Das OpenCode-Modell besitzt keine gültige Anbieterkennung.".to_owned());
+    };
+    if provider_id.is_empty() || model_id.is_empty() {
+        return Err("Das OpenCode-Modell besitzt keine gültige Anbieterkennung.".to_owned());
+    }
+    let origin = origin(connection, "opencode")?;
+    let session = request_json(
+        "POST",
+        &format!("{origin}/session"),
+        connection,
+        Some(json!({ "title": "FaNotes" })),
+        Duration::from_secs(20),
+    )?;
+    let Some(session_id) = session.get("id").and_then(Value::as_str) else {
+        return Err("OpenCode konnte keine kurzlebige Sitzung erstellen.".to_owned());
+    };
+    let response = request_json(
+        "POST",
+        &format!(
+            "{origin}/session/{}/message",
+            urlencoding_encode(session_id)
+        ),
+        connection,
+        Some(json!({
+            "model": { "providerID": provider_id, "modelID": model_id },
+            "system": "Du bist der Markdown-Assistent von FaNotes.",
+            "parts": [{ "type": "text", "text": prompt }]
+        })),
+        Duration::from_secs(120),
+    );
+    let _ = request_json(
+        "DELETE",
+        &format!("{origin}/session/{session_id}"),
+        connection,
+        None,
+        Duration::from_secs(20),
+    );
+    let response = response?;
+    response
+        .get("parts")
+        .and_then(Value::as_array)
+        .and_then(|parts| {
+            parts.iter().find_map(|part| {
+                if part.get("type").and_then(Value::as_str) == Some("text") {
+                    part.get("text").and_then(Value::as_str)
+                } else {
+                    None
+                }
+            })
+        })
+        .map(str::to_owned)
+        .ok_or_else(|| {
+            "Der AI-Anbieter hat kein verwendbares Markdown-Dokument zurückgegeben.".to_owned()
+        })
+}
+
 fn ollama_chat(connection: &Value, model: &str, prompt: &str) -> Result<String, String> {
     let origin = origin(connection, "ollama")?;
     let body = request_json(
@@ -270,26 +580,26 @@ fn request_json(
         .http_status_as_error(true)
         .build()
         .into();
-    let token = connection
-        .get("apiKey")
-        .and_then(Value::as_str)
-        .unwrap_or("");
+    let headers = auth_headers(connection);
     let request = if method == "POST" {
         let body = body.unwrap_or(Value::Null);
-        agent
-            .post(url)
-            .header("Accept", "application/json")
-            .header("Authorization", &format!("Bearer {token}"))
-            .send_json(body)
-    } else {
-        let request = agent.get(url).header("Accept", "application/json");
-        if token.is_empty() {
-            request.call()
-        } else {
-            request
-                .header("Authorization", &format!("Bearer {token}"))
-                .call()
+        let mut request = agent.post(url).header("Accept", "application/json");
+        for (name, value) in &headers {
+            request = request.header(name, value);
         }
+        request.send_json(body)
+    } else if method == "DELETE" {
+        let mut request = agent.delete(url).header("Accept", "application/json");
+        for (name, value) in &headers {
+            request = request.header(name, value);
+        }
+        request.call()
+    } else {
+        let mut request = agent.get(url).header("Accept", "application/json");
+        for (name, value) in &headers {
+            request = request.header(name, value);
+        }
+        request.call()
     };
     let mut response =
         request.map_err(|error| format!("Der AI-Dienst ist nicht erreichbar: {error}"))?;
@@ -302,6 +612,49 @@ fn request_json(
     }
     serde_json::from_str(&text)
         .map_err(|_| "Der AI-Dienst hat keine gültige JSON-Antwort geliefert.".to_owned())
+}
+
+fn auth_headers(connection: &Value) -> Vec<(String, String)> {
+    let provider = connection
+        .get("provider")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let key = connection
+        .get("apiKey")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    if key.is_empty() {
+        return Vec::new();
+    }
+    match provider {
+        "gemini" => vec![("x-goog-api-key".to_owned(), key.to_owned())],
+        "anthropic" => vec![
+            ("x-api-key".to_owned(), key.to_owned()),
+            ("anthropic-version".to_owned(), "2023-06-01".to_owned()),
+        ],
+        "opencode" => {
+            let user = connection
+                .get("username")
+                .and_then(Value::as_str)
+                .filter(|value| !value.is_empty())
+                .unwrap_or("opencode");
+            let token = base64::engine::general_purpose::STANDARD.encode(format!("{user}:{key}"));
+            vec![("Authorization".to_owned(), format!("Basic {token}"))]
+        }
+        _ => vec![("Authorization".to_owned(), format!("Bearer {key}"))],
+    }
+}
+
+fn urlencoding_encode(value: &str) -> String {
+    let mut encoded = String::new();
+    for byte in value.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~') {
+            encoded.push(byte as char);
+        } else {
+            encoded.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    encoded
 }
 
 fn model_record(provider: &str, key: &str, display_name: &str) -> Value {
@@ -422,5 +775,50 @@ fn unwrap_markdown(value: &str) -> Result<String, String> {
         Err("Der AI-Anbieter hat kein verwendbares Markdown-Dokument zurückgegeben.".to_owned())
     } else {
         Ok(output)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{parse_anthropic_models, parse_gemini_models, parse_openai_models};
+    use serde_json::json;
+
+    #[test]
+    fn cloud_lists_keep_the_provider_shape() {
+        let openai = parse_openai_models(&json!({
+            "data": [{ "id": "gpt-4.1", "owned_by": "openai" }]
+        }))
+        .unwrap();
+        assert_eq!(openai[0]["provider"], "openai");
+        assert_eq!(openai[0]["key"], "gpt-4.1");
+        assert_eq!(openai[0]["publisher"], "openai");
+
+        let gemini = parse_gemini_models(&json!({
+            "models": [
+                {
+                    "name": "models/gemini-2.5-flash",
+                    "displayName": "Gemini Flash",
+                    "supportedGenerationMethods": ["generateContent"]
+                },
+                {
+                    "name": "models/embedding",
+                    "displayName": "Embed",
+                    "supportedGenerationMethods": ["embedContent"]
+                }
+            ]
+        }))
+        .unwrap();
+        assert_eq!(gemini.len(), 1);
+        assert_eq!(gemini[0]["key"], "gemini-2.5-flash");
+        assert_eq!(gemini[0]["displayName"], "Gemini Flash");
+        assert_eq!(gemini[0]["publisher"], "Google");
+
+        let anthropic = parse_anthropic_models(&json!({
+            "data": [{ "id": "claude-sonnet", "display_name": "Claude Sonnet" }]
+        }))
+        .unwrap();
+        assert_eq!(anthropic[0]["provider"], "anthropic");
+        assert_eq!(anthropic[0]["displayName"], "Claude Sonnet");
+        assert_eq!(anthropic[0]["publisher"], "Anthropic");
     }
 }
