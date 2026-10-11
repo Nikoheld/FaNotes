@@ -1851,20 +1851,21 @@ fn unique_sibling_name(
             let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
                 continue;
             };
-            if excluding.is_some_and(|current| current.eq_ignore_ascii_case(&name)) {
+            if excluding.is_some_and(|current| current == name) {
                 continue;
             }
-            occupied.insert(name.to_lowercase());
+            occupied.insert(vault::entry_name_key(&name));
         }
     }
     for number in 1..=10_000 {
         let candidate = numbered_entry_name(desired, number);
-        if occupied.contains(&candidate.to_lowercase()) {
+        if occupied.contains(&vault::entry_name_key(&candidate)) {
             continue;
         }
         if let Some(extension) = companion_extension {
             let (stem, _) = split_entry_name(&candidate);
-            if occupied.contains(&format!("{stem}{extension}").to_lowercase()) {
+            let companion = format!("{stem}{extension}");
+            if occupied.contains(&vault::entry_name_key(&companion)) {
                 continue;
             }
         }
@@ -1878,20 +1879,20 @@ fn available_entry_name(parent: &Path, desired: &str, note: bool) -> Result<Stri
     if let Ok(entries) = fs::read_dir(parent) {
         for entry in entries.flatten() {
             if let Some(name) = entry.file_name().to_str() {
-                occupied.insert(name.to_lowercase());
+                occupied.insert(vault::entry_name_key(name));
             }
         }
     }
     for number in 1..=10_000 {
         let candidate = numbered_entry_name(desired, number);
-        if occupied.contains(&candidate.to_lowercase()) {
+        if occupied.contains(&vault::entry_name_key(&candidate)) {
             continue;
         }
         if note {
             let lower = candidate.to_lowercase();
             if lower.ends_with(".md") || lower.ends_with(".markdown") || lower.ends_with(".pdf") {
-                let famd = format!("{}.famd", fanotes_famd::note_stem(&candidate)).to_lowercase();
-                if occupied.contains(&famd) {
+                let famd = format!("{}.famd", fanotes_famd::note_stem(&candidate));
+                if occupied.contains(&vault::entry_name_key(&famd)) {
                     continue;
                 }
             }
@@ -2562,7 +2563,7 @@ fn omit_famd_companions(entries: Vec<Value>) -> Vec<Value> {
         {
             if let Some(name) = entry["name"].as_str() {
                 let stem = name.rsplit_once('.').map(|(stem, _)| stem).unwrap_or(name);
-                stems.insert(stem.to_lowercase());
+                stems.insert(vault::entry_name_key(stem));
             }
         }
     }
@@ -2574,7 +2575,7 @@ fn omit_famd_companions(entries: Vec<Value>) -> Vec<Value> {
             }
             let name = entry["name"].as_str().unwrap_or("");
             let stem = name.rsplit_once('.').map(|(stem, _)| stem).unwrap_or(name);
-            !stems.contains(&stem.to_lowercase())
+            !stems.contains(&vault::entry_name_key(stem))
         })
         .collect()
 }

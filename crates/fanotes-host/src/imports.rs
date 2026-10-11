@@ -144,7 +144,7 @@ fn unique_pdf_name(directory: &Path, desired: &str) -> Result<String, String> {
     if let Ok(entries) = fs::read_dir(directory) {
         for entry in entries.flatten() {
             if let Some(name) = entry.file_name().to_str() {
-                occupied.insert(name.to_lowercase());
+                occupied.insert(crate::vault::entry_name_key(name));
             }
         }
     }
@@ -165,7 +165,9 @@ fn unique_pdf_name(directory: &Path, desired: &str) -> Result<String, String> {
                 .map(|(stem, _)| stem)
                 .unwrap_or(candidate.as_str())
         );
-        if occupied.contains(&candidate.to_lowercase()) || occupied.contains(&famd.to_lowercase()) {
+        if occupied.contains(&crate::vault::entry_name_key(&candidate))
+            || occupied.contains(&crate::vault::entry_name_key(&famd))
+        {
             continue;
         }
         return Ok(candidate);

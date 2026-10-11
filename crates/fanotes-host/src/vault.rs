@@ -148,6 +148,14 @@ pub fn resolve_inside(root: &Path, relative: &str) -> Result<PathBuf, String> {
     Ok(target)
 }
 
+/// NFC plus lowercase, matching Electron's `normalize('NFC').toLocaleLowerCase('de-DE')`.
+///
+/// A macOS file `Mühe.md` and a Linux file `Mühe.md` are the same note name.
+pub(crate) fn entry_name_key(name: &str) -> String {
+    use unicode_normalization::UnicodeNormalization;
+    name.nfc().collect::<String>().to_lowercase()
+}
+
 pub fn is_inside_root(root: &Path, candidate: &Path) -> bool {
     let Ok(relative) = candidate.strip_prefix(root) else {
         return false;

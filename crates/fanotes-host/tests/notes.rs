@@ -430,3 +430,27 @@ fn a_pdf_note_keeps_history_of_its_famd_file() {
         .contains("Zweite Fassung"));
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn a_decomposed_umlaut_is_the_same_note_name() {
+    let (mut host, vault) = host();
+    let nfd_note = "Mu\u{0308}he.md";
+    let nfd_ink = "Mu\u{0308}he.famd";
+    std::fs::write(vault.join(nfd_note), b"bleibt\n").unwrap();
+    std::fs::write(vault.join(nfd_ink), b"ink").unwrap();
+    let created = host
+        .dispatch("fanotes:create-note", &[json!(""), json!("Mühe")])
+        .unwrap();
+    assert_eq!(created["relativePath"], "Mühe 2.md");
+    assert_eq!(std::fs::read(vault.join(nfd_note)).unwrap(), b"bleibt\n");
+    let names: Vec<_> = host
+        .dispatch("fanotes:get-tree", &[])
+        .unwrap()
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|entry| entry["name"].as_str().unwrap().to_owned())
+        .collect();
+    assert!(names.iter().any(|name| name == nfd_note));
+    assert!(names.iter().all(|name| name != nfd_ink));
+}
