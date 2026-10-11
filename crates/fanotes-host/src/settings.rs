@@ -438,7 +438,7 @@ fn clean_relative(value: &str, max: usize) -> Option<String> {
     if crate::vault::utf16_len(value) > max || value.contains('\0') {
         return None;
     }
-    let normalized = value.trim().replace('\\', "/");
+    let normalized = crate::vault::js_trim(value).replace('\\', "/");
     if normalized.is_empty() {
         return Some(String::new());
     }
@@ -478,7 +478,7 @@ fn sanitize_tablet(value: &Value) -> Value {
 }
 
 fn sanitize_css(value: &str) -> String {
-    if value.trim().is_empty() {
+    if crate::vault::js_trim(value).is_empty() {
         return String::new();
     }
     let without_comments = comment_pattern().replace_all(value, "");

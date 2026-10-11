@@ -89,8 +89,7 @@ fn a_long_umlaut_secret_is_kept() {
     )
     .unwrap();
     assert_eq!(
-        host.dispatch("fanotes:load-secure-settings", &[])
-            .unwrap()["openAiApiKey"],
+        host.dispatch("fanotes:load-secure-settings", &[]).unwrap()["openAiApiKey"],
         secret
     );
     let homework = "Ä".repeat(200);
@@ -100,8 +99,7 @@ fn a_long_umlaut_secret_is_kept() {
     )
     .unwrap();
     assert_eq!(
-        host.dispatch("fanotes:load-secure-settings", &[])
-            .unwrap()["homeworkApiSecret"],
+        host.dispatch("fanotes:load-secure-settings", &[]).unwrap()["homeworkApiSecret"],
         homework
     );
     host.dispatch(
@@ -110,8 +108,7 @@ fn a_long_umlaut_secret_is_kept() {
     )
     .unwrap();
     assert_eq!(
-        host.dispatch("fanotes:load-secure-settings", &[])
-            .unwrap()["homeworkApiSecret"],
+        host.dispatch("fanotes:load-secure-settings", &[]).unwrap()["homeworkApiSecret"],
         homework
     );
 }
@@ -369,4 +366,32 @@ fn os_keyring_stores_an_api_key_when_the_session_bus_is_up() {
         ""
     );
     let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_folder_setting_trims_a_byte_order_mark_and_keeps_a_next_line() {
+    let (_app, mut host) = host();
+    let saved = host
+        .dispatch(
+            "fanotes:save-settings",
+            &[json!({
+                "defaultFolder": "\u{FEFF}Mathe",
+                "customCss": "\u{FEFF}"
+            })],
+        )
+        .unwrap();
+    assert_eq!(saved["defaultFolder"], "Mathe");
+    assert_eq!(saved["customCss"], "");
+
+    let saved = host
+        .dispatch(
+            "fanotes:save-settings",
+            &[json!({
+                "defaultFolder": "\u{0085}Mathe",
+                "customCss": "\u{0085}"
+            })],
+        )
+        .unwrap();
+    assert_eq!(saved["defaultFolder"], "\u{0085}Mathe");
+    assert_eq!(saved["customCss"], "\u{0085}");
 }

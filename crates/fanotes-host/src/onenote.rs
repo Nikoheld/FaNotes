@@ -326,7 +326,7 @@ fn page_title(html: &str, page_path: &Path) -> String {
     let stripped = Regex::new(r"<[^>]+>")
         .map(|pattern| pattern.replace_all(&decoded, "").into_owned())
         .unwrap_or(decoded);
-    safe_segment(stripped.trim(), "OneNote-Seite")
+    safe_segment(crate::vault::js_trim(&stripped), "OneNote-Seite")
 }
 
 fn title_fallback(page_path: &Path) -> String {
@@ -504,7 +504,7 @@ fn extract_search_text(html: &str) -> String {
     let text = replace_all(&text, r"[ \t]+", " ");
     let text = replace_all(&text, r"\s*\n\s*", "\n");
     let text = replace_all(&text, r"\n{3,}", "\n\n");
-    crate::vault::truncate_utf16(text.trim(), 2_000_000)
+    crate::vault::truncate_utf16(crate::vault::js_trim(&text), 2_000_000)
 }
 
 fn replace_all(text: &str, pattern: &str, replacement: &str) -> String {
@@ -1094,7 +1094,7 @@ fn tool_failure_message(
         .unwrap_or_default();
     format!(
         "{label} ist fehlgeschlagen{signal}: {}",
-        keep_tail(chosen.trim(), 1800)
+        keep_tail(crate::vault::js_trim(chosen), 1800)
     )
 }
 
@@ -1298,12 +1298,10 @@ fn safe_segment(value: &str, fallback: &str) -> String {
             }
         })
         .collect();
-    let collapsed = Regex::new(r"\s+")
-        .map(|regex| regex.replace_all(cleaned.trim(), " ").into_owned())
-        .unwrap_or_else(|_| cleaned.trim().to_owned());
-    let trimmed = collapsed.trim_end_matches(['.', ' ']).trim();
+    let collapsed = collapse_js_spaces(&cleaned);
+    let trimmed = crate::vault::js_trim(collapsed.trim_end_matches(['.', ' ']));
     let trimmed = crate::vault::truncate_utf16(trimmed, 120);
-    let device = trimmed.split('.').next().unwrap_or("").trim();
+    let device = crate::vault::js_trim(trimmed.split('.').next().unwrap_or(""));
     let reserved = matches!(
         device.to_ascii_lowercase().as_str(),
         "con" | "prn" | "aux" | "nul"
@@ -1316,6 +1314,26 @@ fn safe_segment(value: &str, fallback: &str) -> String {
     } else {
         trimmed.to_owned()
     }
+}
+
+fn collapse_js_spaces(value: &str) -> String {
+    let mut collapsed = String::new();
+    let mut pending = false;
+    for character in value.chars() {
+        if fanotes_famd::is_js_whitespace(character) {
+            pending = true;
+            continue;
+        }
+        if pending {
+            collapsed.push(' ');
+            pending = false;
+        }
+        collapsed.push(character);
+    }
+    if pending {
+        collapsed.push(' ');
+    }
+    collapsed
 }
 
 fn markdown_title(value: &str) -> String {
@@ -1637,6 +1655,9 @@ mod tests {
             safe_segment(&format!("Seite{}", '\u{007f}'), "fallback"),
             "Seite"
         );
+        assert_eq!(safe_segment("A\u{FEFF}B", "fallback"), "A B");
+        assert_eq!(safe_segment("\u{FEFF}Seite", "fallback"), "Seite");
+        assert_eq!(safe_segment("A\u{0085}B", "fallback"), "A\u{0085}B");
     }
 
     #[test]

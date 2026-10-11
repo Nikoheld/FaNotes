@@ -299,14 +299,14 @@ fn parse_lmstudio_models(body: &Value) -> Result<Vec<Value>, String> {
                 return None;
             }
             let raw_key = entry.get("key").and_then(Value::as_str)?;
-            if raw_key.trim().is_empty() {
+            if crate::vault::js_trim(raw_key).is_empty() {
                 return None;
             }
             let key = crate::vault::truncate_utf16(raw_key, 500);
             let display_raw = entry.get("display_name").and_then(Value::as_str);
             let display = match display_raw {
-                Some(name) if !name.trim().is_empty() => {
-                    crate::vault::truncate_utf16(name.trim(), 500)
+                Some(name) if !crate::vault::js_trim(name).is_empty() => {
+                    crate::vault::truncate_utf16(crate::vault::js_trim(name), 500)
                 }
                 _ => key.clone(),
             };
@@ -1117,7 +1117,7 @@ fn clean_secret(value: &str, label: &str) -> Result<String, String> {
     {
         return Err(format!("Der {label} ist ungültig."));
     }
-    Ok(value.trim().to_owned())
+    Ok(crate::vault::js_trim(value).to_owned())
 }
 
 fn clean_lm_studio_token(value: &str) -> Result<String, String> {
@@ -1131,14 +1131,14 @@ fn clean_lm_studio_token(value: &str) -> Result<String, String> {
     {
         return Err("Das LM-Studio-API-Token ist ungültig.".to_owned());
     }
-    Ok(value.trim().to_owned())
+    Ok(crate::vault::js_trim(value).to_owned())
 }
 
 fn opencode_username(value: Option<&str>) -> String {
     let Some(value) = value else {
         return "opencode".to_owned();
     };
-    let trimmed = value.trim();
+    let trimmed = crate::vault::js_trim(value);
     if trimmed.is_empty()
         || crate::vault::utf16_len(value) > 200
         || value
@@ -1293,7 +1293,7 @@ fn required_model(value: &Value) -> Result<String, String> {
                 .and_then(Value::as_str)
         })
         .unwrap_or("");
-    if model.trim().is_empty()
+    if crate::vault::js_trim(model).is_empty()
         || crate::vault::utf16_len(model) > 500
         || model
             .chars()
@@ -1301,12 +1301,12 @@ fn required_model(value: &Value) -> Result<String, String> {
     {
         Err("Wähle zuerst ein gültiges AI-Modell.".to_owned())
     } else {
-        Ok(model.trim().to_owned())
+        Ok(crate::vault::js_trim(model).to_owned())
     }
 }
 
 fn limited_instruction(value: &str) -> String {
-    crate::vault::truncate_utf16(value.trim(), 12_000)
+    crate::vault::truncate_utf16(crate::vault::js_trim(value), 12_000)
 }
 
 fn build_prompt(
@@ -1413,8 +1413,8 @@ fn vault_notes(value: Option<&Value>) -> Vec<(String, String)> {
             let title = entry.get("title")?.as_str()?;
             let path = entry.get("relativePath")?.as_str()?;
             Some((
-                crate::vault::truncate_utf16(title.trim(), 500),
-                crate::vault::truncate_utf16(path.trim(), 1000),
+                crate::vault::truncate_utf16(crate::vault::js_trim(title), 500),
+                crate::vault::truncate_utf16(crate::vault::js_trim(path), 1000),
             ))
         })
         .collect()
@@ -1458,7 +1458,7 @@ fn strip_think_prefix(value: &str) -> Option<String> {
         return None;
     }
     let end = lower.find("</think>")?;
-    Some(value[end + "</think>".len()..].trim().to_owned())
+    Some(crate::vault::js_trim(&value[end + "</think>".len()..]).to_owned())
 }
 
 fn outer_markdown_fence(value: &str) -> Option<String> {
@@ -1468,15 +1468,15 @@ fn outer_markdown_fence(value: &str) -> Option<String> {
         .or_else(|| value.strip_prefix("```"))?;
     let rest = rest.strip_prefix('\n').unwrap_or(rest);
     let end = rest.rfind("\n```")?;
-    if rest[end + 4..].trim().is_empty() {
-        Some(rest[..end].trim().to_owned())
+    if crate::vault::js_trim(&rest[end + 4..]).is_empty() {
+        Some(crate::vault::js_trim(&rest[..end]).to_owned())
     } else {
         None
     }
 }
 
 fn unwrap_markdown(value: &str) -> Result<String, String> {
-    let mut output = value.trim().to_owned();
+    let mut output = crate::vault::js_trim(value).to_owned();
     if let Some(rest) = strip_think_prefix(&output) {
         output = rest;
     }

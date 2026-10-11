@@ -118,8 +118,8 @@ pub fn save_drawing(host: &Host, payload: &Value) -> Result<Value, String> {
     )
     .map_err(|_| "Die Zeichnung konnte nicht gespeichert werden.".to_owned())?;
     if let Some(note) = object.get("noteRelativePath").and_then(Value::as_str) {
-        if !note.trim().is_empty() {
-            embed_in_note(host, note.trim(), &document).map_err(|error| {
+        if !vault::js_trim(note).is_empty() {
+            embed_in_note(host, note, &document).map_err(|error| {
                 format!("Handschrift konnte nicht in die Notiz geschrieben werden: {error}")
             })?;
         }

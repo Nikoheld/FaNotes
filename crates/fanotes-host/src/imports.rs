@@ -117,7 +117,7 @@ fn import_pdf_file(
     kind: PdfKind,
 ) -> Result<Value, String> {
     let root = vault_root(host)?.to_path_buf();
-    let parent_relative = if parent.trim().is_empty() {
+    let parent_relative = if parent.is_empty() {
         String::new()
     } else {
         vault::normalize_relative_path(parent, true, false)?
@@ -261,9 +261,9 @@ fn file_stem(name: &str) -> &str {
 }
 
 fn safe_stem(value: &str, fallback: &str) -> Result<String, String> {
-    let raw = value.trim();
+    let raw = crate::vault::js_trim(value);
     let name = if raw.is_empty() { fallback } else { raw };
-    let cleaned = name.trim_end_matches(['.', ' ']).trim();
+    let cleaned = crate::vault::js_trim(name.trim_end_matches(['.', ' ']));
     if cleaned.is_empty()
         || crate::vault::utf16_len(cleaned) > 180
         || cleaned == "."

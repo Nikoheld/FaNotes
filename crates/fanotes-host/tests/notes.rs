@@ -289,6 +289,13 @@ fn a_second_note_is_numbered_and_reads_without_the_sidecar() {
     host.settings.insert("uiLanguage".to_owned(), json!("en"));
     let english = host.dispatch("fanotes:create-note", &[json!("")]).unwrap();
     assert_eq!(english["relativePath"], "Untitled note.md");
+    let marked = host
+        .dispatch(
+            "fanotes:create-note",
+            &[json!("Mathe"), json!("\u{0085}Blatt")],
+        )
+        .unwrap();
+    assert_eq!(marked["relativePath"], "Mathe/\u{0085}Blatt.md");
     assert_eq!(
         host.dispatch("fanotes:create-note", &[json!(""), json!("Blatt.txt")])
             .unwrap_err(),

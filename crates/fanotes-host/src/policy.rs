@@ -26,7 +26,7 @@ pub fn local_ai_origin(raw_url: &str, provider: &str) -> Result<String, String> 
     if crate::vault::utf16_len(raw_url) > 2048 {
         return Err(format!("Die {label}-Adresse ist ungültig."));
     }
-    let url = url::Url::parse(raw_url.trim())
+    let url = url::Url::parse(crate::vault::js_trim(raw_url))
         .map_err(|_| format!("Gib eine vollständige {label}-Adresse ein."))?;
     if (url.scheme() != "http" && url.scheme() != "https")
         || !url.username().is_empty()
@@ -68,7 +68,7 @@ pub fn lm_studio_origin(raw_url: &str) -> Result<String, String> {
     if crate::vault::utf16_len(raw_url) > 2048 {
         return Err("Die LM-Studio-Adresse ist ungültig.".to_owned());
     }
-    let url = url::Url::parse(raw_url.trim()).map_err(|_| {
+    let url = url::Url::parse(crate::vault::js_trim(raw_url)).map_err(|_| {
         "Gib eine vollständige LM-Studio-Adresse wie http://127.0.0.1:1234 ein.".to_owned()
     })?;
     if (url.scheme() != "http" && url.scheme() != "https")

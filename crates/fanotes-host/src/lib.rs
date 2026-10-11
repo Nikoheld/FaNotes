@@ -805,8 +805,7 @@ impl Host {
         };
         let preferred = preferred
             .as_deref()
-            .map(str::trim)
-            .filter(|name| !name.is_empty())
+            .filter(|name| !vault::js_trim(name).is_empty())
             .unwrap_or(fallback);
         let mut desired = safe_entry_name(preferred)?;
         if note {

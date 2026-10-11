@@ -163,3 +163,19 @@ fn a_blank_pdf_stem_uses_the_interface_language() {
         .unwrap_err();
     assert!(note_error.contains("PDF-Notiz"));
 }
+
+#[test]
+fn a_next_line_import_folder_is_not_the_vault_root() {
+    let (mut host, vault) = host();
+    let error = host
+        .dispatch(
+            "fanotes:import-pdf-note",
+            &[
+                json!("\u{0085}"),
+                json!({ "name": "Skript.pdf", "bytesBase64": b64(b"%PDF-1.4\n") }),
+            ],
+        )
+        .unwrap_err();
+    assert!(error.contains("nicht gefunden"), "{error}");
+    assert!(!vault.join("Skript.pdf").exists());
+}
