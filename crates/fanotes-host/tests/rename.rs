@@ -149,3 +149,24 @@ fn a_blank_rename_keeps_a_valid_name_and_rejects_a_device_name() {
     );
     assert!(vault.join("Mathe/CON.md").is_file());
 }
+
+#[test]
+fn a_blank_move_target_returns_the_note_to_the_vault_root() {
+    let (vault, mut host) = host();
+    host.dispatch(
+        "fanotes:write-file",
+        &[json!("Mathe/Seite.md"), json!("Hallo\n")],
+    )
+    .unwrap();
+    let moved = host
+        .dispatch(
+            "fanotes:move-entry",
+            &[json!("Mathe/Seite.md"), json!("   ")],
+        )
+        .unwrap();
+    assert_eq!(moved, "Seite.md");
+    assert!(vault.join("Seite.md").is_file());
+    assert!(vault.join("Seite.famd").is_file());
+    assert!(!vault.join("Mathe/Seite.md").exists());
+    assert!(!vault.join("Mathe/Seite.famd").exists());
+}

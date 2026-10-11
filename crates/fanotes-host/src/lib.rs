@@ -1017,7 +1017,7 @@ impl Host {
             return Err("Dieser Eintrag kann nicht verschoben werden.".to_owned());
         }
         let was_dir = meta.is_dir();
-        let dest_relative = if dest_folder.is_empty() {
+        let dest_relative = if dest_folder.trim().is_empty() {
             String::new()
         } else {
             vault::normalize_relative_path(dest_folder, true, false)?
