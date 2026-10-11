@@ -53,8 +53,8 @@ pub fn import_pdf_note(host: &Host, args: &[Value]) -> Result<Value, String> {
 }
 
 pub fn import_subject_book(host: &Host, args: &[Value]) -> Result<Value, String> {
-    let subject = args.first().and_then(Value::as_str).unwrap_or("").trim();
-    if subject.is_empty() {
+    let subject = args.first().and_then(Value::as_str).unwrap_or("");
+    if vault::js_trim(subject).is_empty() {
         return Err("Wähle zuerst ein Fach für das Buch.".to_owned());
     }
     if let Some(payload) = args.get(1).filter(|value| value.is_object()) {

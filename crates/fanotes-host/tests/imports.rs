@@ -179,3 +179,37 @@ fn a_next_line_import_folder_is_not_the_vault_root() {
     assert!(error.contains("nicht gefunden"), "{error}");
     assert!(!vault.join("Skript.pdf").exists());
 }
+
+#[test]
+fn a_subject_book_uses_the_desktop_trim_only_to_reject_a_blank_subject() {
+    let (mut host, vault) = host();
+    let pdf = json!({ "name": "Skript.pdf", "bytesBase64": b64(b"%PDF-1.4\n") });
+    let blank = host
+        .dispatch(
+            "fanotes:import-subject-book",
+            &[json!("\u{FEFF}"), pdf.clone()],
+        )
+        .unwrap_err();
+    assert!(blank.contains("Wähle zuerst ein Fach"), "{blank}");
+    assert!(!vault.join("Skript.pdf").exists());
+
+    let spaced = host
+        .dispatch(
+            "fanotes:import-subject-book",
+            &[json!(" Mathe"), pdf.clone()],
+        )
+        .unwrap_err();
+    assert!(spaced.contains("nicht gefunden"), "{spaced}");
+    assert!(!vault.join("Mathe/Skript.pdf").exists());
+
+    let next_line = host
+        .dispatch(
+            "fanotes:import-subject-book",
+            &[json!("\u{0085}Mathe"), pdf],
+        )
+        .unwrap_err();
+    assert!(next_line.contains("nicht gefunden"), "{next_line}");
+    assert!(!next_line.contains("Wähle zuerst ein Fach"), "{next_line}");
+    assert!(!vault.join("Mathe/Skript.pdf").exists());
+    assert!(!vault.join("Skript.pdf").exists());
+}
