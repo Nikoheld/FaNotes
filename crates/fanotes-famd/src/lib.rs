@@ -717,27 +717,252 @@ fn json_number(value: f64) -> Value {
         .unwrap_or(Value::from(0))
 }
 
-fn canonical_iso(value: &str) -> Option<String> {
+/// `Date.parse` plus `toISOString`. A zoned timestamp becomes UTC with milliseconds.
+///
+/// A date without a time is midnight UTC. A time without a zone is local time.
+/// A day past the end of the month rolls forward, and `24:00:00` is the next midnight.
+pub fn canonical_iso(value: &str) -> Option<String> {
     let bytes = value.as_bytes();
-    if bytes.len() == 24
-        && bytes[4] == b'-'
-        && bytes[7] == b'-'
-        && bytes[10] == b'T'
-        && bytes[13] == b':'
-        && bytes[16] == b':'
-        && bytes[19] == b'.'
-        && bytes[23] == b'Z'
-        && bytes[..4].iter().all(u8::is_ascii_digit)
-        && bytes[5..7].iter().all(u8::is_ascii_digit)
-        && bytes[8..10].iter().all(u8::is_ascii_digit)
-        && bytes[11..13].iter().all(u8::is_ascii_digit)
-        && bytes[14..16].iter().all(u8::is_ascii_digit)
-        && bytes[17..19].iter().all(u8::is_ascii_digit)
-        && bytes[20..23].iter().all(u8::is_ascii_digit)
-    {
-        return Some(value.to_string());
+    if bytes.len() < 10 || bytes[4] != b'-' || bytes[7] != b'-' {
+        return None;
     }
-    None
+    let year: i32 = value.get(0..4)?.parse().ok()?;
+    let month: i32 = value.get(5..7)?.parse().ok()?;
+    let day: i32 = value.get(8..10)?.parse().ok()?;
+    if !(1..=12).contains(&month) || !(1..=31).contains(&day) {
+        return None;
+    }
+    if bytes.len() == 10 {
+        let (year, month, day) = normalize_ymd(year, month, day)?;
+        return Some(format!("{year:04}-{month:02}-{day:02}T00:00:00.000Z"));
+    }
+    let separator = *bytes.get(10)?;
+    if separator != b'T' && separator != b't' && separator != b' ' {
+        return None;
+    }
+    if bytes.len() < 19 || bytes.get(13) != Some(&b':') || bytes.get(16) != Some(&b':') {
+        return None;
+    }
+    let mut hour: i32 = value.get(11..13)?.parse().ok()?;
+    let minute: i32 = value.get(14..16)?.parse().ok()?;
+    let second: i32 = value.get(17..19)?.parse().ok()?;
+    if !(0..=24).contains(&hour) || !(0..=59).contains(&minute) || !(0..=59).contains(&second) {
+        return None;
+    }
+    let mut index = 19;
+    let mut millis = 0u32;
+    if bytes.get(index) == Some(&b'.') {
+        index += 1;
+        let start = index;
+        while bytes.get(index).is_some_and(u8::is_ascii_digit) {
+            index += 1;
+        }
+        if index == start {
+            return None;
+        }
+        let digits = value.get(start..index)?;
+        let taken = digits.chars().take(3).collect::<String>();
+        let parsed: u32 = taken.parse().ok()?;
+        millis = parsed * 10u32.pow((3 - taken.len()) as u32);
+    }
+    let (mut year, mut month, mut day) = normalize_ymd(year, month, day)?;
+    if hour == 24 {
+        if minute != 0 || second != 0 || millis != 0 {
+            return None;
+        }
+        hour = 0;
+        (year, month, day) = add_day(year, month, day);
+    }
+    let rest = value.get(index..)?;
+    let (year, month, day, hour, minute, second) = if rest.eq_ignore_ascii_case("Z") {
+        (year, month, day, hour, minute, second)
+    } else if rest.is_empty() {
+        local_civil_to_utc(year, month, day, hour, minute, second)?
+    } else {
+        let offset = parse_offset(rest)?;
+        shift_seconds(year, month, day, hour, minute, second, -(offset as i64))?
+    };
+    Some(format!(
+        "{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}.{millis:03}Z"
+    ))
+}
+
+fn parse_offset(rest: &str) -> Option<i32> {
+    let bytes = rest.as_bytes();
+    let sign = match bytes.first() {
+        Some(b'+') => 1,
+        Some(b'-') => -1,
+        _ => return None,
+    };
+    let (hour, minute) = if rest.len() == 5 && bytes[1..].iter().all(u8::is_ascii_digit) {
+        (
+            rest.get(1..3)?.parse::<i32>().ok()?,
+            rest.get(3..5)?.parse::<i32>().ok()?,
+        )
+    } else if rest.len() == 6 && bytes.get(3) == Some(&b':') {
+        (
+            rest.get(1..3)?.parse::<i32>().ok()?,
+            rest.get(4..6)?.parse::<i32>().ok()?,
+        )
+    } else {
+        return None;
+    };
+    if !(0..=23).contains(&hour) || !(0..=59).contains(&minute) {
+        return None;
+    }
+    Some(sign * (hour * 3600 + minute * 60))
+}
+
+fn normalize_ymd(mut year: i32, mut month: i32, mut day: i32) -> Option<(i32, i32, i32)> {
+    if !(1..=12).contains(&month) || day < 1 || day > 31 {
+        return None;
+    }
+    while day > days_in_month(year, month as u32) as i32 {
+        day -= days_in_month(year, month as u32) as i32;
+        month += 1;
+        if month > 12 {
+            month = 1;
+            year += 1;
+        }
+    }
+    if !(0..10_000).contains(&year) {
+        return None;
+    }
+    Some((year, month, day))
+}
+
+fn add_day(mut year: i32, mut month: i32, mut day: i32) -> (i32, i32, i32) {
+    day += 1;
+    if day > days_in_month(year, month as u32) as i32 {
+        day = 1;
+        month += 1;
+        if month > 12 {
+            month = 1;
+            year += 1;
+        }
+    }
+    (year, month, day)
+}
+
+fn days_in_month(year: i32, month: u32) -> u32 {
+    match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if is_leap(year) => 29,
+        2 => 28,
+        _ => 0,
+    }
+}
+
+fn is_leap(year: i32) -> bool {
+    (year % 4 == 0 && year % 100 != 0) || year % 400 == 0
+}
+
+fn local_civil_to_utc(
+    year: i32,
+    month: i32,
+    day: i32,
+    hour: i32,
+    minute: i32,
+    second: i32,
+) -> Option<(i32, i32, i32, i32, i32, i32)> {
+    let assumed = unix_from_utc(year, month, day, hour, minute, second)?;
+    let mut utc = assumed;
+    for _ in 0..3 {
+        let offset = local_offset_seconds(utc);
+        let next = assumed - offset;
+        if next == utc {
+            break;
+        }
+        utc = next;
+    }
+    civil_from_unix(utc)
+}
+
+fn local_offset_seconds(utc_secs: i64) -> i64 {
+    let mut tm = unsafe { std::mem::zeroed::<libc::tm>() };
+    let seconds = utc_secs as libc::time_t;
+    unsafe {
+        if libc::localtime_r(&seconds, &mut tm).is_null() {
+            return 0;
+        }
+        tm.tm_gmtoff as i64
+    }
+}
+
+fn shift_seconds(
+    year: i32,
+    month: i32,
+    day: i32,
+    hour: i32,
+    minute: i32,
+    second: i32,
+    delta: i64,
+) -> Option<(i32, i32, i32, i32, i32, i32)> {
+    let unix = unix_from_utc(year, month, day, hour, minute, second)?.checked_add(delta)?;
+    civil_from_unix(unix)
+}
+
+fn unix_from_utc(
+    year: i32,
+    month: i32,
+    day: i32,
+    hour: i32,
+    minute: i32,
+    second: i32,
+) -> Option<i64> {
+    let days = days_from_civil(year, month as u32, day as u32)?;
+    days.checked_mul(86_400)?
+        .checked_add(hour as i64 * 3600 + minute as i64 * 60 + second as i64)
+}
+
+fn civil_from_unix(seconds: i64) -> Option<(i32, i32, i32, i32, i32, i32)> {
+    let days = seconds.div_euclid(86_400);
+    let day_seconds = seconds.rem_euclid(86_400) as i32;
+    let (year, month, day) = civil_from_days(days)?;
+    Some((
+        year,
+        month,
+        day,
+        day_seconds / 3600,
+        (day_seconds % 3600) / 60,
+        day_seconds % 60,
+    ))
+}
+
+fn days_from_civil(mut year: i32, month: u32, day: u32) -> Option<i64> {
+    if !(1..=12).contains(&month) || !(1..=31).contains(&day) {
+        return None;
+    }
+    year -= i32::from(month <= 2);
+    let era = if year >= 0 { year } else { year - 399 } / 400;
+    let year_of_era = (year - era * 400) as u32;
+    let day_of_year =
+        (153 * (month as i32 + if month > 2 { -3 } else { 9 }) as u32 + 2) / 5 + day - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    Some(era as i64 * 146_097 + day_of_era as i64 - 719_468)
+}
+
+fn civil_from_days(days: i64) -> Option<(i32, i32, i32)> {
+    let shifted = days.checked_add(719_468)?;
+    let era = if shifted >= 0 {
+        shifted
+    } else {
+        shifted - 146_096
+    } / 146_097;
+    let day_of_era = (shifted - era * 146_097) as u32;
+    let year_of_era =
+        (day_of_era - day_of_era / 1460 + day_of_era / 36524 - day_of_era / 146096) / 365;
+    let year = year_of_era as i32 + era as i32 * 400;
+    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+    let month_part = (5 * day_of_year + 2) / 153;
+    let day = day_of_year - (153 * month_part + 2) / 5 + 1;
+    let month = if month_part < 10 {
+        month_part + 3
+    } else {
+        month_part - 9
+    };
+    Some((year + i32::from(month <= 2), month as i32, day as i32))
 }
 
 fn now_iso() -> String {

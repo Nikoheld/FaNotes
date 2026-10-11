@@ -450,6 +450,10 @@ fn now_iso() -> String {
     )
 }
 
+fn is_leap(year: i32) -> bool {
+    (year % 4 == 0 && year % 100 != 0) || year % 400 == 0
+}
+
 fn civil_date(mut days: u64) -> (i32, u32, u32) {
     let mut year = 1970i32;
     loop {
@@ -485,135 +489,9 @@ fn civil_date(mut days: u64) -> (i32, u32, u32) {
     (year, 12, 31)
 }
 
-fn is_leap(year: i32) -> bool {
-    (year % 4 == 0 && year % 100 != 0) || year % 400 == 0
-}
-
 /// `Date.parse` plus `toISOString`: a zoned timestamp becomes UTC with milliseconds.
 pub(crate) fn canonical_iso(value: &str) -> Option<String> {
-    let bytes = value.as_bytes();
-    if bytes.len() < 19
-        || bytes.get(4) != Some(&b'-')
-        || bytes.get(7) != Some(&b'-')
-        || bytes.get(10) != Some(&b'T')
-    {
-        return None;
-    }
-    let year: i32 = value.get(0..4)?.parse().ok()?;
-    let month: i32 = value.get(5..7)?.parse().ok()?;
-    let day: i32 = value.get(8..10)?.parse().ok()?;
-    if bytes.get(13) != Some(&b':') || bytes.get(16) != Some(&b':') {
-        return None;
-    }
-    let hour: i32 = value.get(11..13)?.parse().ok()?;
-    let minute: i32 = value.get(14..16)?.parse().ok()?;
-    let second: i32 = value.get(17..19)?.parse().ok()?;
-    if !(1..=12).contains(&month)
-        || day < 1
-        || day > days_in_month(year, month as u32) as i32
-        || !(0..=23).contains(&hour)
-        || !(0..=59).contains(&minute)
-        || !(0..=59).contains(&second)
-    {
-        return None;
-    }
-    let mut index = 19;
-    let mut millis = 0u32;
-    if bytes.get(index) == Some(&b'.') {
-        index += 1;
-        let start = index;
-        while bytes.get(index).is_some_and(u8::is_ascii_digit) {
-            index += 1;
-        }
-        if index == start || index - start > 9 {
-            return None;
-        }
-        let digits = value.get(start..index)?;
-        let parsed: u32 = digits.parse().ok()?;
-        millis = if digits.len() >= 3 {
-            parsed / 10u32.pow((digits.len() - 3) as u32)
-        } else {
-            parsed * 10u32.pow((3 - digits.len()) as u32)
-        };
-    }
-    let rest = value.get(index..)?;
-    let offset_minutes = if rest == "Z" {
-        0
-    } else if rest.len() == 6
-        && (rest.starts_with('+') || rest.starts_with('-'))
-        && rest.as_bytes().get(3) == Some(&b':')
-    {
-        let sign = if rest.starts_with('+') { 1 } else { -1 };
-        let offset_hour: i32 = rest.get(1..3)?.parse().ok()?;
-        let offset_minute: i32 = rest.get(4..6)?.parse().ok()?;
-        if !(0..=23).contains(&offset_hour) || !(0..=59).contains(&offset_minute) {
-            return None;
-        }
-        sign * (offset_hour * 60 + offset_minute)
-    } else {
-        return None;
-    };
-    let (year, month, day, hour, minute) =
-        shift_minutes(year, month, day, hour, minute, offset_minutes)?;
-    Some(format!(
-        "{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}.{millis:03}Z"
-    ))
-}
-
-fn shift_minutes(
-    mut year: i32,
-    mut month: i32,
-    mut day: i32,
-    hour: i32,
-    minute: i32,
-    offset_minutes: i32,
-) -> Option<(i32, u32, u32, u32, u32)> {
-    let mut total = hour * 60 + minute - offset_minutes;
-    while total < 0 {
-        total += 24 * 60;
-        day -= 1;
-        if day < 1 {
-            month -= 1;
-            if month < 1 {
-                month = 12;
-                year -= 1;
-            }
-            day = days_in_month(year, month as u32) as i32;
-        }
-    }
-    while total >= 24 * 60 {
-        total -= 24 * 60;
-        day += 1;
-        let length = days_in_month(year, month as u32) as i32;
-        if day > length {
-            day = 1;
-            month += 1;
-            if month > 12 {
-                month = 1;
-                year += 1;
-            }
-        }
-    }
-    if !(0..10_000).contains(&year) || day < 1 {
-        return None;
-    }
-    Some((
-        year,
-        month as u32,
-        day as u32,
-        (total / 60) as u32,
-        (total % 60) as u32,
-    ))
-}
-
-fn days_in_month(year: i32, month: u32) -> u32 {
-    match month {
-        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
-        4 | 6 | 9 | 11 => 30,
-        2 if is_leap(year) => 29,
-        2 => 28,
-        _ => 0,
-    }
+    fanotes_famd::canonical_iso(value)
 }
 
 #[cfg(test)]
@@ -638,6 +516,53 @@ mod tests {
             canonical_iso("2020-01-01T01:00:00+02:00").as_deref(),
             Some("2019-12-31T23:00:00.000Z")
         );
-        assert_eq!(canonical_iso("2020-02-31T00:00:00Z"), None);
+        assert_eq!(
+            canonical_iso("2020-02-31T00:00:00Z").as_deref(),
+            Some("2020-03-02T00:00:00.000Z")
+        );
+        assert_eq!(
+            canonical_iso("2026-01-02").as_deref(),
+            Some("2026-01-02T00:00:00.000Z")
+        );
+        assert_eq!(
+            canonical_iso("2026-02-31").as_deref(),
+            Some("2026-03-03T00:00:00.000Z")
+        );
+        assert_eq!(canonical_iso("2026-01-32"), None);
+        assert_eq!(
+            canonical_iso("2026-01-02T24:00:00Z").as_deref(),
+            Some("2026-01-03T00:00:00.000Z")
+        );
+        assert_eq!(canonical_iso("2026-01-02T24:00:01Z"), None);
+        assert_eq!(
+            canonical_iso("2026-01-02T03:04:05.1Z").as_deref(),
+            Some("2026-01-02T03:04:05.100Z")
+        );
+        assert_eq!(
+            canonical_iso("2026-01-02T03:04:05.12Z").as_deref(),
+            Some("2026-01-02T03:04:05.120Z")
+        );
+        assert_eq!(
+            canonical_iso("2026-01-02T03:04:05.1234Z").as_deref(),
+            Some("2026-01-02T03:04:05.123Z")
+        );
+        assert_eq!(
+            canonical_iso("2026-01-02T03:04:05+0000").as_deref(),
+            Some("2026-01-02T03:04:05.000Z")
+        );
+        assert_eq!(
+            canonical_iso("2026-01-02t03:04:05z").as_deref(),
+            Some("2026-01-02T03:04:05.000Z")
+        );
+        assert_eq!(
+            canonical_iso("2026-01-02 03:04:05Z").as_deref(),
+            Some("2026-01-02T03:04:05.000Z")
+        );
+        assert_eq!(
+            canonical_iso("2026-04-31T00:00:00Z").as_deref(),
+            Some("2026-05-01T00:00:00.000Z")
+        );
+        assert_eq!(canonical_iso("2026-01-02T03:04:60Z"), None);
+        assert_eq!(canonical_iso("2026-13-01T00:00:00Z"), None);
     }
 }
