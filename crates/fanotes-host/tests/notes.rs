@@ -687,3 +687,57 @@ fn a_subject_book_with_a_bad_byte_stays_in_the_list() {
     let books = host.dispatch("fanotes:read-subject-books", &[]).unwrap();
     assert!(books.as_array().unwrap().is_empty());
 }
+
+#[test]
+fn a_note_link_trims_a_byte_order_mark_and_keeps_a_next_line() {
+    let (mut host, _vault) = host();
+    host.dispatch(
+        "fanotes:write-file",
+        &[json!("Mathe/Seite.md"), json!("Hallo\n")],
+    )
+    .unwrap();
+    let links = host
+        .dispatch(
+            "fanotes:write-note-links",
+            &[
+                json!("Mathe/Seite.md"),
+                json!([
+                    {
+                        "id": "nl-feff",
+                        "sourcePath": "anders.md",
+                        "targetPath": "\u{FEFF}Physik/Kraft.md",
+                        "label": "A\u{FEFF}B\u{0085}C  "
+                    },
+                    {
+                        "id": "nl-next",
+                        "sourcePath": "anders.md",
+                        "targetPath": "\u{0085}Physik/Andere.md",
+                        "label": "\u{0085}"
+                    },
+                    {
+                        "id": "nl-blank",
+                        "sourcePath": "anders.md",
+                        "targetPath": "Ordner/Ziel.md",
+                        "label": "\u{FEFF}"
+                    },
+                    {
+                        "id": "nl-tail",
+                        "sourcePath": "anders.md",
+                        "targetPath": "Ziel.md\u{0085}"
+                    }
+                ]),
+            ],
+        )
+        .unwrap();
+    assert_eq!(links.as_array().unwrap().len(), 3);
+    assert_eq!(links[0]["targetPath"], "Physik/Kraft.md");
+    assert_eq!(links[0]["label"], "A B\u{0085}C");
+    assert_eq!(links[1]["targetPath"], "\u{0085}Physik/Andere.md");
+    assert_eq!(links[1]["label"], "\u{0085}");
+    assert_eq!(links[2]["targetPath"], "Ordner/Ziel.md");
+    assert_eq!(links[2]["label"], "Ziel");
+    let stored = host
+        .dispatch("fanotes:read-note-links", &[json!("Mathe/Seite.md")])
+        .unwrap();
+    assert_eq!(stored, links);
+}

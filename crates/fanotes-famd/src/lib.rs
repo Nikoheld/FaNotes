@@ -443,12 +443,8 @@ fn sanitize_note_backup(value: &Value) -> Option<NoteBackup> {
 }
 
 fn sanitize_path(value: Option<&Value>) -> Option<String> {
-    let path = value?
-        .as_str()?
-        .replace('\\', "/")
-        .trim_start_matches('/')
-        .trim()
-        .to_string();
+    let replaced = value?.as_str()?.replace('\\', "/");
+    let path = trim_js(replaced.trim_start_matches('/')).to_string();
     if path.is_empty()
         || path.encode_utf16().count() > 500
         || path.contains("..")
@@ -459,8 +455,28 @@ fn sanitize_path(value: Option<&Value>) -> Option<String> {
     Some(path)
 }
 
+/// JavaScript `replace(/\s+/gu, ' ').trim()`.
+///
+/// A byte-order mark collapses into a space. U+0085 stays in the label.
 fn collapse_ws(value: &str) -> String {
-    value.split_whitespace().collect::<Vec<_>>().join(" ")
+    let mut collapsed = String::with_capacity(value.len());
+    let mut pending_space = false;
+    let mut started = false;
+    for character in value.chars() {
+        if is_js_whitespace(character) {
+            if started {
+                pending_space = true;
+            }
+            continue;
+        }
+        if pending_space {
+            collapsed.push(' ');
+            pending_space = false;
+        }
+        started = true;
+        collapsed.push(character);
+    }
+    collapsed
 }
 
 fn link_stem(target_path: &str) -> String {
