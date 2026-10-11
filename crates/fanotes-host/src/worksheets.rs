@@ -67,8 +67,12 @@ pub fn save_worksheet(host: &Host, candidate: &Value) -> Result<Value, String> {
     ));
     let format = format_for(document["sourceRelativePath"].as_str().unwrap_or(""))?;
     stat_regular(&source, format.max_bytes)?;
-    fs::write(directory.join(format!("{id}.json")), serialized)
-        .map_err(|_| "Das Arbeitsblatt konnte nicht gespeichert werden.".to_owned())?;
+    crate::notes::atomic_write(
+        &directory.join(format!("{id}.json")),
+        serialized.as_bytes(),
+        0o600,
+    )
+    .map_err(|_| "Das Arbeitsblatt konnte nicht gespeichert werden.".to_owned())?;
     Ok(document)
 }
 
@@ -150,11 +154,11 @@ pub(crate) fn import_named_bytes(
     );
     let source_path = directory.join(format!("{id}{extension}"));
     let data_path = directory.join(format!("{id}.json"));
-    if fs::write(&source_path, &bytes).is_err() {
+    if crate::notes::atomic_write(&source_path, &bytes, 0o600).is_err() {
         let _ = fs::remove_file(&source_path);
         return Err("Das Arbeitsblatt konnte nicht gespeichert werden.".to_owned());
     }
-    if fs::write(&data_path, serialized).is_err() {
+    if crate::notes::atomic_write(&data_path, serialized.as_bytes(), 0o600).is_err() {
         let _ = fs::remove_file(&source_path);
         let _ = fs::remove_file(&data_path);
         return Err("Das Arbeitsblatt konnte nicht gespeichert werden.".to_owned());

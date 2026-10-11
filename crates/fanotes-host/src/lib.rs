@@ -643,9 +643,10 @@ impl Host {
             onboarding::write_status(&vault, "pending")?;
         }
         self.set_vault(vault.clone())?;
-        fs::write(
-            self.app_data.join("vault-path"),
+        notes::atomic_write(
+            &self.app_data.join("vault-path"),
             vault.to_string_lossy().as_bytes(),
+            0o600,
         )
         .map_err(|_| "Die Einstellungen konnten nicht gespeichert werden.".to_owned())?;
         Ok(())
@@ -891,9 +892,10 @@ impl Host {
             path
         };
         self.set_vault(path.clone())?;
-        fs::write(
-            self.app_data.join("vault-path"),
+        notes::atomic_write(
+            &self.app_data.join("vault-path"),
             path.to_string_lossy().as_bytes(),
+            0o600,
         )
         .map_err(|_| "Die Einstellungen konnten nicht gespeichert werden.".to_owned())?;
         self.bootstrap()
@@ -1352,7 +1354,7 @@ impl Host {
         let path = self.app_data.join("settings.json");
         let text = serde_json::to_string_pretty(&self.settings)
             .map_err(|_| "Die Einstellungen sind ungültig.".to_owned())?;
-        fs::write(path, text)
+        notes::atomic_write(&path, text.as_bytes(), 0o600)
             .map_err(|_| "Die Einstellungen konnten nicht gespeichert werden.".to_owned())
     }
 
@@ -2630,8 +2632,12 @@ fn write_folder_colors(root: &Path, colors: &BTreeMap<String, String>) -> Result
     if snapshot.len() > 512 * 1024 {
         return Err("Zu viele Ordnerfarben für diesen Vault.".to_owned());
     }
-    fs::write(internal.join("folder-colors.json"), snapshot)
-        .map_err(|_| "Die Ordnerfarbe konnte nicht gespeichert werden.".to_owned())
+    notes::atomic_write(
+        &internal.join("folder-colors.json"),
+        snapshot.as_bytes(),
+        0o600,
+    )
+    .map_err(|_| "Die Ordnerfarbe konnte nicht gespeichert werden.".to_owned())
 }
 
 fn move_note_companion(root: &Path, old_relative: &str, new_relative: &str) {

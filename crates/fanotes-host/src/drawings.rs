@@ -105,11 +105,15 @@ pub fn save_drawing(host: &Host, payload: &Value) -> Result<Value, String> {
     let assets = assets_dir(vault_root(host)?)?;
     if let Some(image) = object.get("imageData").filter(|value| !value.is_null()) {
         let png = decode_png(image.as_str().unwrap_or(""))?;
-        fs::write(assets.join(format!("{id}.png")), png)
+        crate::notes::atomic_write(&assets.join(format!("{id}.png")), &png, 0o600)
             .map_err(|_| "Die Zeichnung konnte nicht gespeichert werden.".to_owned())?;
     }
-    fs::write(assets.join(format!("{id}.json")), drawing_json)
-        .map_err(|_| "Die Zeichnung konnte nicht gespeichert werden.".to_owned())?;
+    crate::notes::atomic_write(
+        assets.join(format!("{id}.json")).as_path(),
+        drawing_json.as_bytes(),
+        0o600,
+    )
+    .map_err(|_| "Die Zeichnung konnte nicht gespeichert werden.".to_owned())?;
     if let Some(note) = object.get("noteRelativePath").and_then(Value::as_str) {
         if !note.trim().is_empty() {
             embed_in_note(host, note.trim(), &document).map_err(|error| {
@@ -146,8 +150,11 @@ fn embed_in_note(host: &Host, note_path: &str, drawing: &Value) -> Result<(), St
         fs::create_dir_all(parent)
             .map_err(|_| "Der Ordner konnte nicht angelegt werden.".to_owned())?;
     }
-    fs::write(famd_path, serialize_famd(&body, &payload))
-        .map_err(|_| "Die Datei konnte nicht geschrieben werden.".to_owned())?;
+    crate::notes::atomic_write(
+        &famd_path,
+        serialize_famd(&body, &payload).as_bytes(),
+        0o600,
+    )?;
     let _ = markdown_path;
     Ok(())
 }

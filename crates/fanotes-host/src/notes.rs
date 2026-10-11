@@ -423,8 +423,7 @@ fn store_note(path: &Path, body: &str, payload: &FamdPayload) -> Result<(), Stri
         fs::create_dir_all(parent)
             .map_err(|_| "Der Ordner konnte nicht angelegt werden.".to_owned())?;
     }
-    fs::write(path, serialize_famd(body, payload))
-        .map_err(|_| "Die Datei konnte nicht geschrieben werden.".to_owned())
+    atomic_write(path, serialize_famd(body, payload).as_bytes(), 0o600)
 }
 
 fn note_path(relative: &str) -> Result<String, String> {
