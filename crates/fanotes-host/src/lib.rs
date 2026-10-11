@@ -14,6 +14,7 @@ mod ocr;
 mod onboarding;
 mod onenote;
 mod policy;
+mod profile;
 mod resources;
 mod secrets;
 mod settings;
@@ -37,7 +38,7 @@ pub use channels::{find_channel, ChannelKind, CHANNELS};
 pub use policy::{addon_request_allowed, local_ai_origin};
 pub use secrets::SecretStore;
 
-const SECRET_KEYS: &[&str] = &[
+pub(crate) const SECRET_KEYS: &[&str] = &[
     "lmStudioApiToken",
     "ollamaApiToken",
     "openAiApiKey",
@@ -1356,6 +1357,7 @@ impl Host {
     }
 
     fn load_persisted(&mut self) {
+        profile::import_electron_profile(&self.app_data, self.secret_store);
         if let Ok(text) = fs::read_to_string(self.app_data.join("settings.json")) {
             if let Ok(parsed) = serde_json::from_str::<Value>(&text) {
                 self.settings = settings::sanitize(&parsed, &default_settings());

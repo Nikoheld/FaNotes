@@ -131,3 +131,75 @@ Viel Freude beim Lernen!
     host.set_vault(linked).unwrap();
     assert_eq!(fs::read_to_string(dir.join("target.md")).unwrap(), legacy);
 }
+
+#[test]
+fn an_electron_profile_supplies_the_vault_and_settings() {
+    let dir = scratch();
+    let vault = dir.join("vault");
+    fs::create_dir_all(&vault).unwrap();
+    let legacy = dir.join("Lernwerk Notes");
+    fs::create_dir_all(&legacy).unwrap();
+    let config = json!({
+        "version": 1,
+        "vaultPath": vault,
+        "settings": {
+            "theme": "midnight",
+            "recognitionMode": "math",
+            "openAiApiKey": "sk-from-electron",
+            "geminiApiKey": "fanotes-secret-v1:abc"
+        }
+    });
+    fs::write(
+        legacy.join("config.json"),
+        serde_json::to_string(&config).unwrap(),
+    )
+    .unwrap();
+    let app = dir.join("app");
+    let mut host = Host::open(app.clone());
+    let boot = host.dispatch("fanotes:bootstrap", &[]).unwrap();
+    assert_eq!(boot["vaultPath"], vault.to_string_lossy().as_ref());
+    assert_eq!(boot["settings"]["theme"], "midnight");
+    assert_eq!(boot["settings"]["recognitionMode"], "auto");
+    assert_eq!(boot["settings"]["lastRecognitionMode"], "math");
+    assert_eq!(boot["settings"]["openAiApiKey"], "");
+    let settings = fs::read_to_string(app.join("settings.json")).unwrap();
+    assert!(!settings.contains("sk-from-electron"));
+    assert!(!settings.contains("fanotes-secret-v1"));
+    fs::write(
+        legacy.join("config.json"),
+        r#"{"version":3,"settings":{"theme":"forest"}}"#,
+    )
+    .unwrap();
+    let mut again = Host::open(app);
+    assert_eq!(
+        again.dispatch("fanotes:bootstrap", &[]).unwrap()["settings"]["theme"],
+        "midnight"
+    );
+}
+
+#[test]
+fn a_reset_profile_does_not_import_the_electron_config_again() {
+    let dir = scratch();
+    let app = dir.join("app");
+    let mut host = Host::open(app.clone());
+    host.dispatch("fanotes:reset-app-data", &[]).unwrap();
+    let trap = dir.join("should-not-open");
+    fs::create_dir_all(&trap).unwrap();
+    let legacy = dir.join("Lernwerk Notes");
+    fs::create_dir_all(&legacy).unwrap();
+    fs::write(
+        legacy.join("config.json"),
+        format!(
+            r#"{{"version":3,"vaultPath":"{}","settings":{{"theme":"midnight"}}}}"#,
+            trap.display()
+        ),
+    )
+    .unwrap();
+    drop(host);
+    let _ = Host::open(app.clone());
+    let settings = fs::read_to_string(app.join("settings.json")).unwrap_or_default();
+    assert!(!settings.contains("midnight"));
+    assert!(!app.join("vault-path").exists());
+    assert!(app.join(".fanotes-legacy-migration-v1-complete").is_file());
+    assert!(!app.join(".fanotes-reset-complete").exists());
+}
