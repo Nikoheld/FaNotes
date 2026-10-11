@@ -97,6 +97,7 @@
     requestClose: () => invoke('fanotes:request-close'),
     onSheetZoom: (callback) => listen('fanotes:sheet-zoom', (direction) => callback(direction)),
     captureWindow: () => invoke('fanotes:capture-window'),
+    renderPdfPage: (request) => invoke('fanotes:render-pdf-page', request),
     addons: {
       fetchText: (url) => invoke('fanotes:addons-fetch', url),
       list: () => invoke('fanotes:addons-list'),

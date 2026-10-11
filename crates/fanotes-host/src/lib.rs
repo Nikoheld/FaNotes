@@ -211,8 +211,24 @@ impl Host {
                 self.write_secrets(args.first().cloned().unwrap_or(Value::Null))
             }
             "fanotes:capture-window" => Ok(Value::Null),
+            "fanotes:render-pdf-page" => self.render_pdf_page(args),
             _ => Err(format!("Unbekannter Kanal: {channel}")),
         }
+    }
+
+    fn render_pdf_page(&self, args: &[Value]) -> Result<Value, String> {
+        let (path, job) = fanotes_pdf::parse_vault_request(args.first().unwrap_or(&Value::Null))
+            .map_err(|error| error.to_string())?;
+        let file = vault::resolve_inside(self.require_vault()?, &path)?;
+        let bytes =
+            fs::read(&file).map_err(|_| "Die PDF-Datei konnte nicht gelesen werden.".to_owned())?;
+        let bitmap =
+            fanotes_pdf::render_pdf_page(&bytes, &job).map_err(|error| error.to_string())?;
+        Ok(json!({
+            "width": bitmap.width,
+            "height": bitmap.height,
+            "rgbaBase64": bitmap.rgba_base64(),
+        }))
     }
 
     fn dispatch_message(&mut self, channel: &str) -> Result<Value, String> {

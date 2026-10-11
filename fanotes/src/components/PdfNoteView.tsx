@@ -101,6 +101,8 @@ function PdfPageCanvas({
   textEnabled,
   highlight,
   quotes = [],
+  sourcePath,
+  password,
   onRatio,
   onReady,
 }: {
@@ -110,6 +112,8 @@ function PdfPageCanvas({
   textEnabled: boolean
   highlight?: string
   quotes?: string[]
+  sourcePath: string
+  password?: string
   onRatio: (ratio: number) => void
   onReady: () => void
 }) {
@@ -172,6 +176,7 @@ function PdfPageCanvas({
       base: [baseA, baseB],
       detail: [detailA, detailB],
       label: `PDF-Seite ${number}`,
+      pdfium: () => ({ path: sourcePath, pageIndex: number - 1, password }),
       onBasePainted: paintTextLayer,
       onFirstPaint: () => onReadyRef.current(),
     })
@@ -183,7 +188,7 @@ function PdfPageCanvas({
       try { textLayerRef.current?.cancel() } catch { /* ignore */ }
       textLayerRef.current = null
     }
-  }, [number, paintTextLayer])
+  }, [number, paintTextLayer, password, sourcePath])
 
   // Text selection switched on after the page was painted: build the layer now.
   useEffect(() => {
@@ -277,6 +282,8 @@ function PdfPage({
   quotes = [],
   defaultRatio,
   active,
+  sourcePath,
+  password,
   onRatio,
   onReady,
   onVisible,
@@ -289,6 +296,8 @@ function PdfPage({
   quotes?: string[]
   defaultRatio: number
   active: boolean
+  sourcePath: string
+  password?: string
   onRatio: (number: number, ratio: number) => void
   onReady: () => void
   onVisible: (number: number, ratio: number) => void
@@ -354,6 +363,8 @@ function PdfPage({
           textEnabled={textEnabled}
           highlight={highlight}
           quotes={quotes}
+          sourcePath={sourcePath}
+          password={password}
           onRatio={handleRatio}
           onReady={onReady}
         />
@@ -1027,6 +1038,8 @@ export function PdfNoteView({
                   quotes={quotes.filter((mark) => mark.page === page).map((mark) => mark.quote)}
                   defaultRatio={pageRatio}
                   active={page === currentPage}
+                  sourcePath={path}
+                  password={password}
                   onRatio={handlePageRatio}
                   onReady={notifyLayout}
                   onVisible={handleVisible}
