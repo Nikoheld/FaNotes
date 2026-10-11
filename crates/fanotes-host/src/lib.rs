@@ -286,7 +286,7 @@ impl Host {
     fn render_pdf_page(&self, args: &[Value]) -> Result<Value, String> {
         let (path, job) = fanotes_pdf::parse_vault_request(args.first().unwrap_or(&Value::Null))
             .map_err(|error| error.to_string())?;
-        let file = vault::resolve_inside(self.require_vault()?, &path)?;
+        let file = vault::resolve_existing_entry(self.require_vault()?, &path)?;
         let bytes = read_regular_limited(&file, PDF_ASSET_MAX)?;
         let bitmap =
             fanotes_pdf::render_pdf_page(&bytes, &job).map_err(|error| error.to_string())?;
@@ -318,7 +318,7 @@ impl Host {
     }
 
     fn read_asset(&self, relative: &str, max: u64) -> Result<Vec<u8>, String> {
-        let file = vault::resolve_inside(self.require_vault()?, relative)?;
+        let file = vault::resolve_existing_entry(self.require_vault()?, relative)?;
         let bytes = read_regular_limited(&file, max)?;
         if bytes.is_empty() {
             return Err("Die Datei ist leer oder fehlt im Vault.".to_owned());
@@ -1094,7 +1094,7 @@ impl Host {
                     continue;
                 }
             }
-            let path = vault::resolve_inside(root, &relative)?;
+            let path = vault::resolve_existing_entry(root, &relative)?;
             let raw = fs::read_to_string(&path).unwrap_or_default();
             let parsed = fanotes_famd::parse_famd(&raw);
             let mut content = if parsed.markdown.is_empty() {
@@ -1109,7 +1109,7 @@ impl Host {
             let mut transcript = ink_transcript(ink.as_ref());
             if !lower.ends_with(".famd") {
                 let famd = fanotes_famd::companion_note_path(&relative, ".famd");
-                if let Ok(companion_path) = vault::resolve_inside(root, &famd) {
+                if let Ok(companion_path) = vault::resolve_existing_entry(root, &famd) {
                     if let Ok(companion) = fs::read_to_string(companion_path) {
                         let parsed_companion = fanotes_famd::parse_famd(&companion);
                         if lower.ends_with(".pdf") && !parsed_companion.markdown.is_empty() {
@@ -1185,11 +1185,7 @@ impl Host {
         } else {
             format!("{note}.famd")
         };
-        let path = vault::resolve_inside(self.require_vault()?, &famd).or_else(|_| {
-            let root = self.require_vault()?;
-            let normalized = vault::normalize_relative_path(&famd, false, true)?;
-            Ok::<_, String>(root.join(normalized))
-        })?;
+        let path = vault::resolve_note_file(self.require_vault()?, &famd)?;
         let Ok(source) = fs::read_to_string(&path) else {
             return Ok(Value::Null);
         };
@@ -2645,13 +2641,15 @@ fn move_note_companion(root: &Path, old_relative: &str, new_relative: &str) {
     let Some(new_companion) = note_companion_relative(new_relative) else {
         return;
     };
-    let Ok(source) = vault::resolve_inside(root, &old_companion) else {
+    let Ok(source) = vault::resolve_existing_entry(root, &old_companion) else {
         return;
     };
-    if !source.is_file() {
+    if !fs::symlink_metadata(&source)
+        .is_ok_and(|meta| meta.is_file() && !meta.file_type().is_symlink())
+    {
         return;
     }
-    let Ok(destination) = vault::resolve_inside(root, &new_companion) else {
+    let Ok(destination) = vault::resolve_note_file(root, &new_companion) else {
         return;
     };
     if let Some(parent) = destination.parent() {

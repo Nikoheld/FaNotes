@@ -123,9 +123,9 @@ pub fn save_drawing(host: &Host, payload: &Value) -> Result<Value, String> {
 fn embed_in_note(host: &Host, note_path: &str, drawing: &Value) -> Result<(), String> {
     let vault_root = vault_root(host)?;
     let note = vault::normalize_relative_path(note_path, false, false)?;
-    let markdown_path = vault::resolve_inside(vault_root, &companion_note_path(&note, ".md"))?;
+    let markdown_path = vault::resolve_note_file(vault_root, &companion_note_path(&note, ".md"))?;
     let famd_relative = companion_note_path(&note, ".famd");
-    let famd_path = vault::resolve_inside(vault_root, &famd_relative)?;
+    let famd_path = vault::resolve_note_file(vault_root, &famd_relative)?;
     let markdown = fs::read_to_string(&markdown_path).unwrap_or_default();
     let body = strip_famd_payload(&markdown);
     let mut payload = fs::read_to_string(&famd_path)
