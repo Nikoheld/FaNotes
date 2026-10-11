@@ -11,7 +11,9 @@ members = [
     "crates/fanotes-ort",
     "crates/fanotes-recog",
     "crates/fanotes-recog-wasm",
+    "crates/fanotes-host",
     "apps/paper-proto",
+    "fanotes/src-tauri",
 ]
 
 [workspace.package]
