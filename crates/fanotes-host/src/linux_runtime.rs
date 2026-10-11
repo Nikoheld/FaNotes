@@ -148,13 +148,13 @@ fn monitor_scale(
 }
 
 fn gdk_scale(env: &BTreeMap<String, String>) -> Option<f64> {
-    let gdk = env.get("GDK_SCALE")?.parse::<f64>().ok()?;
+    let gdk = parse_float(env.get("GDK_SCALE")?)?;
     if !gdk.is_finite() || gdk <= 0.0 {
         return None;
     }
     let dpi = env
         .get("GDK_DPI_SCALE")
-        .and_then(|value| value.parse::<f64>().ok())
+        .and_then(|value| parse_float(value))
         .filter(|value| value.is_finite() && *value > 0.0)
         .unwrap_or(1.0);
     normalize_scale_number(gdk * dpi)
@@ -176,13 +176,27 @@ pub fn focused_monitor_scale(output: &str) -> Option<f64> {
             monitor
                 .get("scale")
                 .and_then(Value::as_str)
-                .and_then(|text| text.parse().ok())
+                .and_then(parse_float)
         })?)
     })
 }
 
 fn normalize_scale(value: Option<&str>) -> Option<f64> {
-    normalize_scale_number(value?.parse().ok()?)
+    normalize_scale_number(parse_float(value?)?)
+}
+
+/// `Number.parseFloat` after JavaScript whitespace, including a byte-order mark.
+fn parse_float(value: &str) -> Option<f64> {
+    let trimmed = crate::vault::js_trim(value);
+    let end = trimmed
+        .char_indices()
+        .find(|(_, character)| !matches!(character, '0'..='9' | '.' | '+' | '-' | 'e' | 'E'))
+        .map(|(index, _)| index)
+        .unwrap_or(trimmed.len());
+    if end == 0 {
+        return None;
+    }
+    trimmed[..end].parse().ok()
 }
 
 fn normalize_scale_number(scale: f64) -> Option<f64> {
@@ -195,7 +209,7 @@ fn normalize_scale_number(scale: f64) -> Option<f64> {
 fn force_zero_scaling(env: &BTreeMap<String, String>) -> bool {
     let configured = env
         .get("FANOTES_HYPRLAND_CONFIG")
-        .map(|value| value.trim())
+        .map(|value| crate::vault::js_trim(value))
         .filter(|value| !value.is_empty());
     let roots = if let Some(path) = configured {
         vec![PathBuf::from(path)]
@@ -226,16 +240,16 @@ fn scan_force_zero_scaling(
     let text = std::fs::read_to_string(&resolved).ok()?;
     let mut last = None;
     let from_dir = resolved.parent().unwrap_or(Path::new("."));
-    for raw_line in text.split(['\n', '\r']) {
-        let line = strip_comment(raw_line).trim();
+    for raw_line in text.split('\n') {
+        let line = crate::vault::js_trim(strip_comment(raw_line));
         if line.is_empty() {
             continue;
         }
         let Some((key, value)) = line.split_once('=') else {
             continue;
         };
-        let key = key.trim();
-        let value = value.trim();
+        let key = crate::vault::js_trim(key);
+        let value = crate::vault::js_trim(value);
         if key.eq_ignore_ascii_case("source") {
             for target in source_targets(value, env, from_dir) {
                 if let Some(nested) = scan_force_zero_scaling(&target, env, visited) {
@@ -263,7 +277,7 @@ fn source_targets(pattern: &str, env: &BTreeMap<String, String>, from_dir: &Path
 }
 
 fn expand_path(raw: &str, env: &BTreeMap<String, String>, from_dir: &Path) -> Option<PathBuf> {
-    let mut value = unquote(raw.trim()).to_string();
+    let mut value = unquote(crate::vault::js_trim(raw)).to_string();
     if value.is_empty() {
         return None;
     }
@@ -691,6 +705,103 @@ mod tests {
         );
         assert_eq!(desktop_only["hyprland"], true);
         assert_eq!(desktop_only["hyprlandInstance"], false);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_byte_order_mark_still_enables_zero_scaling() {
+        let dir = std::env::temp_dir().join(format!("fanotes-hypr-ws-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(dir.join(".config/hypr")).unwrap();
+        let bom = dir.join("bom.conf");
+        fs::write(&bom, "\u{FEFF}force_zero_scaling = true\n").unwrap();
+        let marked = report(
+            "linux",
+            &env(&[
+                ("FANOTES_HYPRLAND_CONFIG", bom.to_str().unwrap()),
+                ("HOME", ""),
+            ]),
+            || panic!("hyprctl"),
+        );
+        assert_eq!(marked["hyprlandZeroScaling"], true);
+
+        let value = dir.join("value.conf");
+        fs::write(&value, "force_zero_scaling =\u{FEFF}true\n").unwrap();
+        let valued = report(
+            "linux",
+            &env(&[
+                ("FANOTES_HYPRLAND_CONFIG", value.to_str().unwrap()),
+                ("HOME", ""),
+            ]),
+            || panic!("hyprctl"),
+        );
+        assert_eq!(valued["hyprlandZeroScaling"], true);
+
+        let next = dir.join("next.conf");
+        fs::write(&next, "\u{0085}force_zero_scaling = true\n").unwrap();
+        let skipped = report(
+            "linux",
+            &env(&[
+                ("FANOTES_HYPRLAND_CONFIG", next.to_str().unwrap()),
+                ("HOME", ""),
+            ]),
+            || panic!("hyprctl"),
+        );
+        assert_eq!(skipped["hyprlandZeroScaling"], false);
+
+        let carriage = dir.join("carriage.conf");
+        fs::write(
+            &carriage,
+            "force_zero_scaling = false\rforce_zero_scaling = true",
+        )
+        .unwrap();
+        let first = report(
+            "linux",
+            &env(&[
+                ("FANOTES_HYPRLAND_CONFIG", carriage.to_str().unwrap()),
+                ("HOME", ""),
+            ]),
+            || panic!("hyprctl"),
+        );
+        assert_eq!(first["hyprlandZeroScaling"], false);
+
+        fs::write(
+            dir.join(".config/hypr/hyprland.conf"),
+            "force_zero_scaling = true\n",
+        )
+        .unwrap();
+        let blank = report(
+            "linux",
+            &env(&[
+                ("FANOTES_HYPRLAND_CONFIG", "\u{FEFF}"),
+                ("HOME", dir.to_str().unwrap()),
+            ]),
+            || panic!("hyprctl"),
+        );
+        assert_eq!(blank["hyprlandZeroScaling"], true);
+
+        let scale = report(
+            "linux",
+            &env(&[
+                ("FANOTES_HYPRLAND_CONFIG", bom.to_str().unwrap()),
+                ("HOME", ""),
+                ("FANOTES_DEVICE_SCALE", "\u{FEFF}1.5"),
+            ]),
+            || panic!("hyprctl"),
+        );
+        assert_eq!(scale["deviceScaleFactor"], 1.5);
+        assert_eq!(scale["deviceScaleSource"], "FANOTES_DEVICE_SCALE");
+        let ignored = report(
+            "linux",
+            &env(&[
+                ("FANOTES_HYPRLAND_CONFIG", bom.to_str().unwrap()),
+                ("HOME", ""),
+                ("FANOTES_DEVICE_SCALE", "\u{0085}1.5"),
+            ]),
+            || panic!("hyprctl"),
+        );
+        assert_eq!(ignored["deviceScaleFactor"], 2.0);
+        assert_eq!(ignored["deviceScaleSource"], "fallback");
         let _ = fs::remove_dir_all(&dir);
     }
 }
