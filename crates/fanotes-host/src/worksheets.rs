@@ -100,7 +100,8 @@ fn worksheet_source_name(data_path: &Path, id: &str) -> Result<String, String> {
         }
         Ok(_) => {}
     }
-    let raw = fs::read_to_string(data_path)
+    let raw = fs::read(data_path)
+        .map(lossy_utf8)
         .map_err(|_| "Das Arbeitsblatt konnte nicht gelesen werden.".to_owned())?;
     let candidate = serde_json::from_str::<Value>(&raw)
         .map_err(|_| "Die Arbeitsblattdaten sind beschädigt.".to_owned())?;
@@ -609,7 +610,15 @@ fn read_text(path: &Path, max: usize) -> Result<String, String> {
     if meta.file_type().is_symlink() || !meta.is_file() || meta.len() as usize > max {
         return Err("Die Datei ist ungültig oder zu groß.".to_owned());
     }
-    fs::read_to_string(path).map_err(|_| "Die Datei konnte nicht gelesen werden.".to_owned())
+    fs::read(path)
+        .map(lossy_utf8)
+        .map_err(|_| "Die Datei konnte nicht gelesen werden.".to_owned())
+}
+
+/// Node `Buffer.toString('utf8')`: invalid bytes become U+FFFD and the rest stays.
+fn lossy_utf8(bytes: Vec<u8>) -> String {
+    String::from_utf8(bytes)
+        .unwrap_or_else(|error| String::from_utf8_lossy(error.as_bytes()).into_owned())
 }
 
 fn unlink_regular(path: &Path) -> Result<(), String> {

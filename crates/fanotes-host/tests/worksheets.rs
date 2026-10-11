@@ -190,6 +190,51 @@ fn a_worksheet_title_is_checked_before_trimming() {
 }
 
 #[test]
+fn a_worksheet_with_a_bad_byte_still_opens() {
+    let (dir, mut host) = host();
+    let worksheets = dir.join("vault/.fanotes/worksheets");
+    let mut bytes = br#"{"schemaVersion":1,"id":"blatt-1","title":"UXbung","kind":"pdf","mimeType":"application/pdf","sourceRelativePath":".fanotes/worksheets/blatt-1.pdf","dataRelativePath":".fanotes/worksheets/blatt-1.json","createdAt":"2026-01-02T03:04:05.000Z","updatedAt":"2026-01-02T03:04:05.000Z","textBoxes":[],"highlights":[]}"#.to_vec();
+    let index = bytes.iter().position(|byte| *byte == b'X').unwrap();
+    bytes[index] = 0xff;
+    fs::write(worksheets.join("blatt-1.json"), &bytes).unwrap();
+
+    let loaded = host
+        .dispatch("fanotes:read-worksheet", &[json!("blatt-1")])
+        .unwrap();
+    assert_eq!(loaded["title"], "U\u{FFFD}bung");
+    assert_eq!(
+        host.dispatch("fanotes:delete-worksheet", &[json!("blatt-1")])
+            .unwrap()["id"],
+        "blatt-1"
+    );
+    assert!(!worksheets.join("blatt-1.json").exists());
+    assert!(!worksheets.join("blatt-1.pdf").exists());
+
+    fs::write(
+        worksheets.join("seite-1.html"),
+        b"fanotes-onenote-safe-v1\xff",
+    )
+    .unwrap();
+    fs::write(
+        worksheets.join("seite-1.json"),
+        r#"{"schemaVersion":1,"id":"seite-1","title":"Seite","kind":"html","mimeType":"text/html","sourceRelativePath":".fanotes/worksheets/seite-1.html","dataRelativePath":".fanotes/worksheets/seite-1.json","createdAt":"2026-01-02T03:04:05.000Z","updatedAt":"2026-01-02T03:04:05.000Z","pageWidth":800,"pageHeight":900,"textBoxes":[],"highlights":[]}"#,
+    )
+    .unwrap();
+    let page = host
+        .dispatch("fanotes:read-worksheet", &[json!("seite-1")])
+        .unwrap();
+    assert_eq!(page["title"], "Seite");
+    assert_eq!(page["kind"], "html");
+
+    fs::write(worksheets.join("muell-1.json"), b"{\xff").unwrap();
+    assert_eq!(
+        host.dispatch("fanotes:read-worksheet", &[json!("muell-1")])
+            .unwrap_err(),
+        "Die Arbeitsblattdaten sind beschädigt."
+    );
+}
+
+#[test]
 fn a_bad_mark_reports_a_different_position_error_than_a_text_box() {
     let (_dir, mut host) = host();
     let mut document = json!({
