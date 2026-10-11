@@ -214,13 +214,11 @@ impl Host {
             "fanotes:recognize-native-handwriting-line" => {
                 ocr::recognize_line(args.first().unwrap_or(&Value::Null))
             }
-            "fanotes:enhanced-math-get-state" => {
-                Ok(feature_state("posformer-crohme-q4-k", "CC-BY-NC-SA-3.0"))
-            }
+            "fanotes:enhanced-math-get-state" => Ok(enhanced_math_state()),
             "fanotes:enhanced-math-install" | "fanotes:enhanced-math-recognize" => {
                 Err("PosFormer ist nicht installiert.".to_owned())
             }
-            "fanotes:qwen-vision-get-state" => Ok(feature_state("qwen-vision", "Apache-2.0")),
+            "fanotes:qwen-vision-get-state" => Ok(qwen_vision_state()),
             "fanotes:qwen-vision-install" | "fanotes:qwen-vision-recognize" => {
                 Err("Qwen Vision ist nicht installiert.".to_owned())
             }
@@ -1152,7 +1150,8 @@ impl Host {
             let matches = count_matches(&haystack, &needle);
             let content_index = content.to_lowercase().find(&needle);
             let excerpt = if let Some(index) = content_index {
-                excerpt(&content, index, needle.len())
+                let (start, span) = original_match_span(&content, &needle, index);
+                excerpt(&content, start, span)
             } else {
                 format!("Dateiname · {relative}")
             };
@@ -1649,15 +1648,43 @@ fn default_settings() -> Map<String, Value> {
     settings::defaults()
 }
 
-fn feature_state(model_id: &str, license: &str) -> Value {
+fn enhanced_math_state() -> Value {
     json!({
         "supported": false,
         "installed": false,
         "downloading": false,
-        "modelId": model_id,
-        "size": 0,
-        "license": license,
-        "homepage": ""
+        "modelId": "posformer-crohme-q4-k",
+        "size": 10_316_032,
+        "license": "CC-BY-NC-SA-3.0",
+        "homepage": "https://huggingface.co/cstr/posformer-crohme-GGUF"
+    })
+}
+
+fn qwen_vision_state() -> Value {
+    json!({
+        "supported": false,
+        "installed": false,
+        "downloading": false,
+        "runtimeInstalling": false,
+        "runtimeReady": false,
+        "runtimePhase": "idle",
+        "runtimeMessage": null,
+        "npu": false,
+        "genai": false,
+        "devices": [],
+        "npuDevice": null,
+        "host": null,
+        "openvinoVersion": null,
+        "modelId": "qwen3-vl-2b-int4-npu",
+        "label": "Empfohlen · Qwen3-VL 2B · OpenVINO INT4 · NPU",
+        "recommended": true,
+        "precision": "int4",
+        "device": "NPU",
+        "license": "Apache-2.0",
+        "homepage": "https://huggingface.co/Qwen/Qwen3-VL-2B-Instruct",
+        "repo": "shawnxhong/Qwen3-VL-2B-Instruct-ov-int4",
+        "error": "Qwen Vision ist in diesem Paket nicht enthalten.",
+        "installHint": null
     })
 }
 
@@ -2840,10 +2867,11 @@ fn search_drawings(
         let Some(first) = haystack.find(needle) else {
             continue;
         };
+        let (start, span) = original_match_span(&searchable, needle, first);
         let mut hit = json!({
             "relativePath": format!(".fanotes/assets/{id}.json"),
             "title": title,
-            "excerpt": excerpt(&searchable, first, needle.len()),
+            "excerpt": excerpt(&searchable, start, span),
             "matches": count_matches(&haystack, needle),
             "kind": "drawing",
             "drawingId": id,
@@ -2944,13 +2972,66 @@ fn count_matches(haystack: &str, needle: &str) -> usize {
     matches
 }
 
+/// Maps a hit in `text.to_lowercase()` back onto `text`.
+///
+/// Some letters grow when folded (`İ` becomes `i` plus a combining dot). The
+/// lowercase byte index is then past the original note, and `excerpt` must
+/// not use it as a slice bound.
+fn original_match_span(text: &str, needle: &str, folded_index: usize) -> (usize, usize) {
+    let needle_len = needle.len();
+    if needle_len == 0 {
+        let start = floor_char_boundary(text, folded_index);
+        return (start, 0);
+    }
+    let folded_end = folded_index.saturating_add(needle_len);
+    if folded_end <= text.len()
+        && text.is_char_boundary(folded_index)
+        && text.is_char_boundary(folded_end)
+        && text[folded_index..folded_end].to_lowercase() == needle
+    {
+        return (folded_index, needle_len);
+    }
+    let mut produced = 0usize;
+    let mut start = None;
+    for (offset, ch) in text.char_indices() {
+        let folded_len = ch.to_lowercase().map(char::len_utf8).sum::<usize>();
+        let next = produced + folded_len;
+        if start.is_none() && next > folded_index {
+            start = Some(offset);
+        }
+        if start.is_some() && next >= folded_end {
+            let start = start.unwrap_or(0);
+            let end = offset + ch.len_utf8();
+            return (start, end.saturating_sub(start));
+        }
+        produced = next;
+    }
+    let start = start.unwrap_or_else(|| floor_char_boundary(text, folded_index));
+    (start, text.len().saturating_sub(start))
+}
+
+fn floor_char_boundary(text: &str, index: usize) -> usize {
+    let mut index = index.min(text.len());
+    while index > 0 && !text.is_char_boundary(index) {
+        index -= 1;
+    }
+    index
+}
+
 fn excerpt(text: &str, match_index: usize, query_length: usize) -> String {
-    let mut start = match_index.saturating_sub(95);
-    let mut end = (match_index + query_length + 145).min(text.len());
+    let len = text.len();
+    let mut start = match_index.min(len).saturating_sub(95);
+    let mut end = match_index
+        .saturating_add(query_length)
+        .saturating_add(145)
+        .min(len);
+    if start > end {
+        start = end;
+    }
     while start > 0 && !text.is_char_boundary(start) {
         start -= 1;
     }
-    while end < text.len() && !text.is_char_boundary(end) {
+    while end < len && !text.is_char_boundary(end) {
         end += 1;
     }
     let slice = text[start..end]
@@ -3016,5 +3097,29 @@ mod sort_tests {
         assert_eq!(compare_names("Seite 2", "Seite 10"), Ordering::Less);
         assert_eq!(compare_names("Äpfel", "Zen"), Ordering::Less);
         assert_eq!(compare_names("Über", "Zen"), Ordering::Less);
+    }
+}
+
+#[cfg(test)]
+mod search_span_tests {
+    use super::{excerpt, original_match_span};
+
+    #[test]
+    fn a_growing_case_fold_keeps_the_match_on_the_original_letters() {
+        let city = "İstanbul";
+        let needle = "stan";
+        let index = city.to_lowercase().find(needle).unwrap();
+        let (start, span) = original_match_span(city, needle, index);
+        assert_eq!(&city[start..start + span], "stan");
+
+        let note = format!("{}Zielwort", "İ".repeat(120));
+        let word = "zielwort";
+        let folded = note.to_lowercase().find(word).unwrap();
+        assert!(folded > note.len());
+        let (start, span) = original_match_span(&note, word, folded);
+        assert_eq!(&note[start..start + span], "Zielwort");
+        let window = excerpt(&note, start, span);
+        assert!(window.contains("Zielwort"), "{window}");
+        let _ = excerpt("kurz", 10_000, word.len());
     }
 }

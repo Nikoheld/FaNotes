@@ -150,3 +150,20 @@ fn search_skips_companions_links_and_notes_buried_too_deep() {
         .unwrap();
     assert!(buried.as_array().unwrap().is_empty());
 }
+
+#[test]
+fn search_excerpt_follows_a_case_fold_that_grows() {
+    let mut host = host();
+    let body = format!("{}Zielwort am Ende.\n", "İ".repeat(120));
+    host.dispatch(
+        "fanotes:write-file",
+        &[json!("Bio/Istanbul.md"), json!(body)],
+    )
+    .unwrap();
+    let hits = host
+        .dispatch("fanotes:search", &[json!("Zielwort")])
+        .unwrap();
+    assert_eq!(hits[0]["relativePath"], "Bio/Istanbul.md");
+    let excerpt = hits[0]["excerpt"].as_str().unwrap();
+    assert!(excerpt.contains("Zielwort"), "{excerpt}");
+}
