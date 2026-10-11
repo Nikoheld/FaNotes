@@ -487,8 +487,12 @@ impl Host {
         let Some(raw) = raw else {
             return Ok(Value::Null);
         };
-        if raw.starts_with("safe1:") || raw.trim().is_empty() {
+        if raw.starts_with("safe1:") {
             return Err(secrets::KEYRING_UNAVAILABLE.to_owned());
+        }
+        // A blank file is not a legacy secret. The desktop returns no login.
+        if raw.trim().is_empty() {
+            return Ok(Value::Null);
         }
         secrets::set(
             self.secret_store,

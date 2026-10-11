@@ -128,6 +128,31 @@ fn sync_lists_files_and_keeps_account_state_outside_the_vault() {
 }
 
 #[test]
+fn a_blank_sync_secret_file_has_no_login() {
+    let (_vault, app, mut host) = host();
+    fs::create_dir_all(app.join("sync")).unwrap();
+    fs::write(app.join("sync/account.secret"), "").unwrap();
+    assert!(host
+        .dispatch("fanotes:sync-read-secrets", &[])
+        .unwrap()
+        .is_null());
+    assert_eq!(
+        fs::read_to_string(app.join("sync/account.secret")).unwrap(),
+        ""
+    );
+
+    fs::write(app.join("sync/account.secret"), " \n\t").unwrap();
+    assert!(host
+        .dispatch("fanotes:sync-read-secrets", &[])
+        .unwrap()
+        .is_null());
+
+    fs::write(app.join("sync/account.secret"), "safe1:").unwrap();
+    let error = host.dispatch("fanotes:sync-read-secrets", &[]).unwrap_err();
+    assert!(error.contains("Schlüsselbund"), "{error}");
+}
+
+#[test]
 fn sync_credentials_keep_a_long_unicode_secret() {
     let (_vault, _app, mut host) = host();
     let kept = "Ä".repeat(40_000);
