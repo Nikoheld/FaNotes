@@ -30,6 +30,110 @@ pub fn records_history(relative: &str) -> bool {
     lower.ends_with(".md") || lower.ends_with(".markdown")
 }
 
+pub fn is_note_text(relative: &str) -> bool {
+    let lower = relative.to_lowercase();
+    lower.ends_with(".md") || lower.ends_with(".markdown") || lower.ends_with(".famd")
+}
+
+pub fn write_note_file(
+    root: &Path,
+    relative: &str,
+    content: &str,
+    settings_paper: Option<&str>,
+) -> Result<String, String> {
+    let is_famd = relative.to_lowercase().ends_with(".famd");
+    let body = strip_famd_payload(content);
+    let markdown = if body.ends_with('\n') {
+        body
+    } else {
+        format!("{body}\n")
+    };
+    if !is_famd {
+        let path = vault::resolve_inside(root, relative)?;
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)
+                .map_err(|_| "Der Ordner konnte nicht angelegt werden.".to_owned())?;
+        }
+        fs::write(&path, &markdown)
+            .map_err(|_| "Die Datei konnte nicht geschrieben werden.".to_owned())?;
+    }
+    sync_sidecar(root, relative, content, settings_paper)?;
+    Ok(now_iso())
+}
+
+fn sync_sidecar(
+    root: &Path,
+    relative: &str,
+    content: &str,
+    settings_paper: Option<&str>,
+) -> Result<(), String> {
+    let famd_relative = companion_note_path(relative, ".famd");
+    let famd_path = vault::resolve_inside(root, &famd_relative)?;
+    let existing = fs::read_to_string(&famd_path)
+        .ok()
+        .map(|source| parse_famd(&source))
+        .unwrap_or_else(|| parse_famd(""));
+    let incoming = parse_famd(content);
+    let body = if incoming.markdown.is_empty() {
+        strip_famd_payload(content)
+    } else {
+        incoming.markdown
+    };
+    let mut payload = existing
+        .payload
+        .unwrap_or_else(|| empty_famd_payload(now_iso()));
+    if let Some(incoming_payload) = incoming.payload {
+        if incoming_payload.ink.as_ref().is_some_and(Value::is_object) {
+            payload.ink = incoming_payload.ink;
+        }
+        if payload.paper_style.is_none() {
+            payload.paper_style = incoming_payload.paper_style;
+        }
+        if incoming_payload.page_stats.is_some() {
+            payload.page_stats = incoming_payload.page_stats;
+        }
+    }
+    if payload.paper_style.is_none() {
+        if let Some(style) = payload
+            .ink
+            .as_ref()
+            .and_then(|ink| ink.get("paperStyle"))
+            .and_then(Value::as_str)
+            .filter(|style| is_paper_style(style))
+        {
+            payload.paper_style = Some(style.to_owned());
+        }
+    }
+    if payload.paper_style.is_none() {
+        if let Some(style) = settings_paper.filter(|style| is_paper_style(style)) {
+            payload.paper_style = Some(style.to_owned());
+        }
+    }
+    payload.updated_at = now_iso();
+    payload.worksheets = worksheet_ids_from_markdown(&body);
+    if let Some(parent) = famd_path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|_| "Der Ordner konnte nicht angelegt werden.".to_owned())?;
+    }
+    fs::write(&famd_path, serialize_famd(&body, &payload))
+        .map_err(|_| "Die Datei konnte nicht geschrieben werden.".to_owned())?;
+    if relative.to_lowercase().ends_with(".famd") {
+        let markdown_relative = companion_note_path(relative, ".md");
+        if let Ok(markdown_path) = vault::resolve_inside(root, &markdown_relative) {
+            if markdown_path.is_file() {
+                let text = if body.ends_with('\n') {
+                    body
+                } else {
+                    format!("{body}\n")
+                };
+                fs::write(markdown_path, text)
+                    .map_err(|_| "Die Datei konnte nicht geschrieben werden.".to_owned())?;
+            }
+        }
+    }
+    Ok(())
+}
+
 pub fn read_page_stats(host: &Host, relative: &str) -> Result<Value, String> {
     let (_path, _body, payload) = load_note(host, relative)?;
     Ok(payload

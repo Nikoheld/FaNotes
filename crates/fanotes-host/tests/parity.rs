@@ -74,7 +74,7 @@ fn vault_paths_reject_traversal_and_internal_files() {
     assert_eq!(
         host.dispatch("fanotes:read-file", &[json!("Notiz.md")])
             .unwrap(),
-        json!("Hallo")
+        json!("Hallo\n")
     );
     fs::write(dir.0.join("vault").join("seite.pdf"), b"%PDF-1.4 test").unwrap();
     let encoded_value = host

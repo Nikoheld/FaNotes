@@ -96,4 +96,56 @@ fn paper_links_books_and_history_round_trip() {
         )
         .unwrap();
     assert_eq!(snapshot["content"], "Hallo\n");
+    assert_eq!(
+        host.dispatch("fanotes:read-note-paper-style", &[json!("Mathe/Seite.md")])
+            .unwrap(),
+        "grid"
+    );
+    assert_eq!(
+        std::fs::read_to_string(vault.join("Mathe/Seite.md")).unwrap(),
+        "Welt\n"
+    );
+}
+
+#[test]
+fn saving_markdown_keeps_the_handwriting_sidecar() {
+    let (mut host, vault) = host();
+    let saved = host
+        .dispatch(
+            "fanotes:write-file",
+            &[json!("Seite.md"), json!("Ohne Umbruch")],
+        )
+        .unwrap();
+    assert!(saved["modifiedAt"].as_str().unwrap().contains('T'));
+    assert_eq!(
+        std::fs::read_to_string(vault.join("Seite.md")).unwrap(),
+        "Ohne Umbruch\n"
+    );
+    let mut payload = fanotes_famd::empty_famd_payload("2026-10-11T00:00:00.000Z");
+    payload.ink = Some(json!({
+        "schemaVersion": 1,
+        "title": "Seite",
+        "strokes": [],
+        "paperStyle": "lines"
+    }));
+    payload.paper_style = Some("lines".to_owned());
+    std::fs::write(
+        vault.join("Seite.famd"),
+        fanotes_famd::serialize_famd("Ohne Umbruch", &payload),
+    )
+    .unwrap();
+    host.dispatch(
+        "fanotes:write-file",
+        &[json!("Seite.md"), json!("Neue Fassung\n")],
+    )
+    .unwrap();
+    let ink = host
+        .dispatch("fanotes:read-famd-ink", &[json!("Seite.md")])
+        .unwrap();
+    assert!(ink["drawingJson"].as_str().unwrap().contains("Seite"));
+    assert_eq!(
+        host.dispatch("fanotes:read-note-paper-style", &[json!("Seite.md")])
+            .unwrap(),
+        "lines"
+    );
 }

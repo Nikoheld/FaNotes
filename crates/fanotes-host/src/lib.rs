@@ -425,6 +425,15 @@ impl Host {
                 }
             }
         }
+        if notes::is_note_text(&normalized) {
+            let paper = self
+                .settings
+                .get("paperStyle")
+                .and_then(Value::as_str)
+                .map(str::to_owned);
+            let modified = notes::write_note_file(&root, &normalized, content, paper.as_deref())?;
+            return Ok(json!({ "modifiedAt": modified }));
+        }
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)
                 .map_err(|_| "Der Ordner konnte nicht angelegt werden.".to_owned())?;
