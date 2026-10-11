@@ -90,3 +90,72 @@ fn handwriting_is_not_saved_through_a_symlink_folder() {
     assert!(!outside.join("Notiz.famd").exists());
     assert_eq!(fs::read(outside.join("Notiz.md")).unwrap(), b"geheim\n");
 }
+
+#[test]
+fn pdf_and_markdown_notes_reopen_their_handwriting() {
+    let (dir, mut host) = host();
+    let vault = dir.join("vault");
+    fs::create_dir_all(vault.join("Mathe")).unwrap();
+    fs::write(vault.join("Mathe/Buch.pdf"), b"%PDF-1.4\n").unwrap();
+    let payload = fanotes_famd::empty_famd_payload("2026-01-02T03:04:05.000Z");
+    fs::write(
+        vault.join("Mathe/Buch.famd"),
+        fanotes_famd::serialize_famd("Randnotiz zum Kapitel", &payload),
+    )
+    .unwrap();
+    host.dispatch(
+        "fanotes:save-drawing",
+        &[json!({
+            "id": "buch-1",
+            "title": "Skizze",
+            "drawingJson": drawing("Skizze"),
+            "noteRelativePath": "Mathe/Buch.pdf",
+        })],
+    )
+    .unwrap();
+    let saved = parse_famd(&fs::read_to_string(vault.join("Mathe/Buch.famd")).unwrap());
+    assert_eq!(saved.markdown.trim(), "Randnotiz zum Kapitel");
+    assert_eq!(saved.payload.unwrap().ink.unwrap()["title"], "Skizze");
+    let book = host
+        .dispatch("fanotes:read-famd-ink", &[json!("Mathe/Buch.pdf")])
+        .unwrap();
+    assert_eq!(book["id"], "famd-ink");
+    assert_eq!(book["title"], "Skizze");
+    assert_eq!(book["dataRelativePath"], "Mathe/Buch.famd");
+    assert_eq!(book["updatedAt"], "2026-01-02T03:04:05.000Z");
+    assert!(book["drawingJson"]
+        .as_str()
+        .unwrap()
+        .contains("\"title\":\"Skizze\""));
+    assert!(host
+        .dispatch("fanotes:read-famd-ink", &[json!("Mathe/Leer.pdf")])
+        .unwrap()
+        .is_null());
+
+    fs::write(
+        vault.join("Kapitel.markdown"),
+        "Text\n\n<!-- fanotes-ink:skizze-1 -->\n",
+    )
+    .unwrap();
+    host.dispatch(
+        "fanotes:save-drawing",
+        &[json!({
+            "id": "skizze-1",
+            "title": "Skizze",
+            "drawingJson": drawing("Skizze"),
+            "noteRelativePath": "Kapitel.markdown",
+        })],
+    )
+    .unwrap();
+    let chapter = host
+        .dispatch("fanotes:read-famd-ink", &[json!("Kapitel.markdown")])
+        .unwrap();
+    assert_eq!(chapter["dataRelativePath"], "Kapitel.famd");
+    assert_eq!(chapter["id"], "skizze-1");
+    assert_eq!(chapter["title"], "Skizze");
+    assert_eq!(
+        host.dispatch("fanotes:read-famd-ink", &[json!("Bild.png")])
+            .unwrap_err(),
+        "Es dürfen nur Markdown-Dateien, PDF-Notizen und FaNotes-Handschriftdateien (.famd) bearbeitet werden."
+    );
+}

@@ -1,8 +1,12 @@
+use std::sync::atomic::{AtomicU64, Ordering};
+
 use fanotes_host::Host;
 use serde_json::json;
 
 fn host() -> Host {
-    let dir = std::env::temp_dir().join(format!("fanotes-search-{}", std::process::id()));
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let id = NEXT.fetch_add(1, Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!("fanotes-search-{}-{id}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     let vault = dir.join("vault");
     std::fs::create_dir_all(vault.join("Bio")).unwrap();
@@ -96,4 +100,53 @@ fn search_returns_title_excerpt_and_handwriting_anchor() {
     assert_eq!(drawing_hit["title"], "Skizze");
     assert_eq!(drawing_hit["notePath"], "Bio/Blatt.md");
     assert_eq!(drawing_hit["inkAnchor"]["y"], 0.2);
+}
+
+#[test]
+fn search_skips_companions_links_and_notes_buried_too_deep() {
+    let mut host = host();
+    let vault = host.vault.clone().unwrap();
+    std::fs::write(vault.join("Bio/Formel.md"), "Apfel\n").unwrap();
+    std::fs::write(vault.join("Bio/Formel.FAMD"), "Birne\n").unwrap();
+    let hits = host.dispatch("fanotes:search", &[json!("Birne")]).unwrap();
+    assert!(hits.as_array().unwrap().is_empty());
+    assert_eq!(
+        host.dispatch("fanotes:search", &[json!("Apfel")]).unwrap()[0]["relativePath"],
+        "Bio/Formel.md"
+    );
+
+    let outside = vault.parent().unwrap().join("outside");
+    std::fs::create_dir_all(outside.join("assets")).unwrap();
+    std::fs::write(
+        outside.join("assets/leak.json"),
+        r#"{"schemaVersion":1,"title":"Draussen","strokes":[],"updatedAt":"2026-01-02T03:04:05.000Z","searchTranscript":"Geheimwort"}"#,
+    )
+    .unwrap();
+    let internal = vault.join(".fanotes");
+    if internal.symlink_metadata().is_ok() {
+        std::fs::remove_dir_all(&internal).unwrap();
+    }
+    std::os::unix::fs::symlink(&outside, &internal).unwrap();
+    let leaked = host
+        .dispatch("fanotes:search", &[json!("Geheimwort")])
+        .unwrap();
+    assert!(leaked.as_array().unwrap().is_empty());
+    assert_eq!(
+        std::fs::read(outside.join("assets/leak.json"))
+            .unwrap()
+            .len()
+            > 0,
+        true
+    );
+
+    let mut deep = vault.join("tief");
+    for _ in 0..81 {
+        deep.push("ebene");
+    }
+    std::fs::create_dir_all(&deep).unwrap();
+    std::fs::write(deep.join("Unten.md"), "Vergraben\n").unwrap();
+    let buried = host
+        .dispatch("fanotes:search", &[json!("Vergraben")])
+        .unwrap();
+    assert!(buried.as_array().unwrap().is_empty());
 }

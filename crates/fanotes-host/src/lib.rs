@@ -1088,14 +1088,14 @@ impl Host {
         let root = self.require_vault()?;
         let needle = query.to_lowercase();
         let mut files = Vec::new();
-        collect_search_files(root, root, &mut files)?;
+        collect_search_files(root, root, &mut files, 0)?;
         let present: std::collections::HashSet<String> = files.iter().cloned().collect();
         let mut hits = Vec::new();
         let mut owners = std::collections::HashMap::new();
         for relative in files {
             let lower = relative.to_lowercase();
             if lower.ends_with(".famd") {
-                let stem = relative.trim_end_matches(".famd");
+                let stem = fanotes_famd::note_stem(&relative);
                 if present.contains(&format!("{stem}.md"))
                     || present.contains(&format!("{stem}.pdf"))
                     || present.contains(&format!("{stem}.markdown"))
@@ -1104,7 +1104,11 @@ impl Host {
                 }
             }
             let path = vault::resolve_existing_entry(root, &relative)?;
-            let raw = fs::read_to_string(&path).unwrap_or_default();
+            let raw = if lower.ends_with(".pdf") {
+                String::new()
+            } else {
+                fs::read_to_string(&path).unwrap_or_default()
+            };
             let parsed = fanotes_famd::parse_famd(&raw);
             let mut content = if parsed.markdown.is_empty() {
                 fanotes_famd::strip_famd_payload(&raw)
@@ -1188,28 +1192,7 @@ impl Host {
     }
 
     fn read_famd_ink(&self, relative: &str) -> Result<Value, String> {
-        let note = vault::normalize_relative_path(relative, false, false)?;
-        let famd = if let Some(stem) = note.strip_suffix(".md") {
-            format!("{stem}.famd")
-        } else {
-            format!("{note}.famd")
-        };
-        let path = vault::resolve_note_file(self.require_vault()?, &famd)?;
-        let Ok(source) = fs::read_to_string(&path) else {
-            return Ok(Value::Null);
-        };
-        let parsed = fanotes_famd::parse_famd(&source);
-        let Some(payload) = parsed.payload else {
-            return Ok(Value::Null);
-        };
-        let Some(ink) = payload.ink else {
-            return Ok(Value::Null);
-        };
-        Ok(json!({
-            "updatedAt": payload.updated_at,
-            "drawingJson": ink.to_string(),
-            "dataRelativePath": famd,
-        }))
+        drawings::read_famd_ink(self, relative)
     }
 
     fn save_settings(&mut self, incoming: Value, options: &Value) -> Result<Value, String> {
@@ -2757,8 +2740,21 @@ fn search_drawings(
     owners: &std::collections::HashMap<String, String>,
     hits: &mut Vec<Value>,
 ) {
-    let assets = root.join(".fanotes").join("assets");
-    let Ok(entries) = fs::read_dir(assets) else {
+    let internal = root.join(".fanotes");
+    let Ok(internal_meta) = fs::symlink_metadata(&internal) else {
+        return;
+    };
+    if internal_meta.file_type().is_symlink() || !internal_meta.is_dir() {
+        return;
+    }
+    let assets = internal.join("assets");
+    let Ok(assets_meta) = fs::symlink_metadata(&assets) else {
+        return;
+    };
+    if assets_meta.file_type().is_symlink() || !assets_meta.is_dir() {
+        return;
+    }
+    let Ok(entries) = fs::read_dir(&assets) else {
         return;
     };
     for entry in entries.flatten() {
@@ -2769,7 +2765,14 @@ fn search_drawings(
         if !is_drawing_id(id) {
             continue;
         }
-        let Ok(text) = fs::read_to_string(entry.path()) else {
+        let path = entry.path();
+        let Ok(meta) = fs::symlink_metadata(&path) else {
+            continue;
+        };
+        if meta.file_type().is_symlink() || !meta.is_file() || meta.len() > 24 * 1024 * 1024 {
+            continue;
+        }
+        let Ok(text) = fs::read_to_string(&path) else {
             continue;
         };
         let Ok(document) = serde_json::from_str::<Value>(&text) else {
@@ -2809,7 +2812,11 @@ fn collect_search_files(
     root: &Path,
     directory: &Path,
     files: &mut Vec<String>,
+    depth: usize,
 ) -> Result<(), String> {
+    if depth > 80 {
+        return Ok(());
+    }
     for entry in
         fs::read_dir(directory).map_err(|_| "Der Vault konnte nicht gelesen werden.".to_owned())?
     {
@@ -2825,7 +2832,16 @@ fn collect_search_files(
             continue;
         }
         if meta.is_dir() {
-            collect_search_files(root, &path, files)?;
+            let Ok(real) = fs::canonicalize(&path) else {
+                continue;
+            };
+            let Ok(root_real) = fs::canonicalize(root) else {
+                continue;
+            };
+            if !vault::is_inside_root(&root_real, &real) {
+                continue;
+            }
+            collect_search_files(root, &path, files, depth + 1)?;
             continue;
         }
         let extension = name
