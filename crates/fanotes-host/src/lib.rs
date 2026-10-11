@@ -3277,17 +3277,55 @@ fn excerpt(text: &str, match_byte: usize, query_units: usize) -> String {
         .saturating_add(145)
         .min(total);
     let (start, end) = byte_range_for_utf16(text, start_units, end_units);
-    let slice = text
-        .get(start..end)
-        .unwrap_or("")
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ");
+    let slice = collapse_js_whitespace(text.get(start..end).unwrap_or(""));
     format!(
         "{}{slice}{}",
         if start_units > 0 { "…" } else { "" },
         if end_units < total { "…" } else { "" }
     )
+}
+
+fn js_whitespace(character: char) -> bool {
+    matches!(
+        character,
+        '\u{0009}'
+            | '\u{000A}'
+            | '\u{000B}'
+            | '\u{000C}'
+            | '\u{000D}'
+            | '\u{0020}'
+            | '\u{00A0}'
+            | '\u{1680}'
+            | '\u{2000}'
+            ..='\u{200A}'
+                | '\u{2028}'
+                | '\u{2029}'
+                | '\u{202F}'
+                | '\u{205F}'
+                | '\u{3000}'
+                | '\u{FEFF}'
+    )
+}
+
+fn collapse_js_whitespace(text: &str) -> String {
+    let mut collapsed = String::new();
+    let mut pending = false;
+    let mut started = false;
+    for character in text.chars() {
+        if js_whitespace(character) {
+            if started {
+                pending = true;
+            }
+            continue;
+        }
+        if pending {
+            collapsed.push(' ');
+            pending = false;
+        }
+        started = true;
+        collapsed.push(character);
+    }
+    collapsed
 }
 
 fn utf16_units_before(text: &str, byte_index: usize) -> usize {
@@ -3461,6 +3499,13 @@ mod search_span_tests {
         let window = excerpt(&note, start, span);
         assert!(window.contains("Zielwort"), "{window}");
         let _ = excerpt("kurz", 10_000, word.len());
+    }
+
+    #[test]
+    fn a_search_excerpt_collapses_javascript_whitespace() {
+        let text = "Hallo\u{FEFF}Welt\nZiel\u{0085}Wort";
+        let index = text.find("Ziel").unwrap();
+        assert_eq!(excerpt(text, index, 4), "Hallo Welt Ziel\u{0085}Wort");
     }
 
     #[test]
