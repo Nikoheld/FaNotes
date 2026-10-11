@@ -282,6 +282,33 @@ fn a_worksheet_with_a_bad_byte_still_opens() {
 }
 
 #[test]
+fn a_string_page_size_opens_like_the_desktop() {
+    let (dir, mut host) = host();
+    let worksheets = dir.join("vault/.fanotes/worksheets");
+    fs::write(worksheets.join("seite-1.html"), b"fanotes-onenote-safe-v1").unwrap();
+    fs::write(
+        worksheets.join("seite-1.json"),
+        r#"{"schemaVersion":1,"id":"seite-1","title":"Seite","kind":"html","mimeType":"text/html","sourceRelativePath":".fanotes/worksheets/seite-1.html","dataRelativePath":".fanotes/worksheets/seite-1.json","createdAt":"2026-01-02T03:04:05.000Z","updatedAt":"2026-01-02T03:04:05.000Z","pageWidth":"800.5","pageHeight":" 1200 ","textBoxes":[],"highlights":[]}"#,
+    )
+    .unwrap();
+    let page = host
+        .dispatch("fanotes:read-worksheet", &[json!("seite-1")])
+        .unwrap();
+    assert_eq!(page["pageWidth"], 801);
+    assert_eq!(page["pageHeight"], 1200);
+
+    fs::write(
+        worksheets.join("seite-1.json"),
+        r#"{"schemaVersion":1,"id":"seite-1","title":"Seite","kind":"html","mimeType":"text/html","sourceRelativePath":".fanotes/worksheets/seite-1.html","dataRelativePath":".fanotes/worksheets/seite-1.json","createdAt":"2026-01-02T03:04:05.000Z","updatedAt":"2026-01-02T03:04:05.000Z","pageWidth":"800px","pageHeight":900,"textBoxes":[],"highlights":[]}"#,
+    )
+    .unwrap();
+    let broken = host
+        .dispatch("fanotes:read-worksheet", &[json!("seite-1")])
+        .unwrap_err();
+    assert!(broken.contains("Größe"), "{broken}");
+}
+
+#[test]
 fn a_bad_mark_reports_a_different_position_error_than_a_text_box() {
     let (_dir, mut host) = host();
     let mut document = json!({
