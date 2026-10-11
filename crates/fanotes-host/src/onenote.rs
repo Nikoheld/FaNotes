@@ -164,11 +164,11 @@ fn import_in_temp(
                 hierarchy.remove(0);
             }
             let mut directory = note_root.clone();
-            for segment in hierarchy
-                .into_iter()
-                .chain(parents.get(page_path).cloned().unwrap_or_default())
-            {
-                directory.push(safe_segment(&segment, "OneNote-Seite"));
+            for segment in note_directory_segments(
+                hierarchy,
+                parents.get(page_path).cloned().unwrap_or_default(),
+            ) {
+                directory.push(segment);
             }
             create_private_dir(&directory)
                 .map_err(|_| "Eine OneNote-Seitenhierarchie ist ungültig.".to_owned())?;
@@ -853,7 +853,7 @@ fn render_sections(
             if name.is_empty() || name == "." || name == ".." {
                 continue;
             }
-            destination.push(safe_segment(name, "Abschnitt"));
+            destination.push(import_folder_segment(name));
         }
         create_private_dir(&destination)
             .map_err(|_| "Der OneNote-Import konnte nicht vorbereitet werden.".to_owned())?;
@@ -1344,6 +1344,20 @@ fn common_ancestor(paths: &[PathBuf]) -> PathBuf {
     ancestor
 }
 
+/// Export folders and outline parents use the desktop default, `Unbenannt`.
+/// Page titles and markdown file names keep the `OneNote-Seite` fallback.
+fn import_folder_segment(segment: &str) -> String {
+    safe_segment(segment, "Unbenannt")
+}
+
+fn note_directory_segments(hierarchy: Vec<String>, parents: Vec<String>) -> Vec<String> {
+    hierarchy
+        .into_iter()
+        .chain(parents)
+        .map(|segment| import_folder_segment(&segment))
+        .collect()
+}
+
 fn safe_segment(value: &str, fallback: &str) -> String {
     use unicode_normalization::UnicodeNormalization;
     let value: String = value.nfc().collect();
@@ -1636,10 +1650,10 @@ fn civil_date(mut days: u64) -> (i32, u32, u32) {
 #[cfg(test)]
 mod tests {
     use super::{
-        common_ancestor, extract_search_text, inline_images, outline_level, page_dimensions,
-        page_parents, page_title, render_inputs, safe_segment, sanitize_page, stored_relative_path,
-        strip_active_html, tool_failure_message, tool_limit, urlencoding_decode, validate_listing,
-        walk_limited,
+        common_ancestor, extract_search_text, import_folder_segment, inline_images,
+        note_directory_segments, outline_level, page_dimensions, page_parents, page_title,
+        render_inputs, safe_segment, sanitize_page, stored_relative_path, strip_active_html,
+        tool_failure_message, tool_limit, urlencoding_decode, validate_listing, walk_limited,
     };
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -1714,6 +1728,27 @@ mod tests {
         assert_eq!(parsed.title, "Grüße");
         assert!(parsed.transcript.contains('\u{FFFD}'));
         let _ = std::fs::remove_dir_all(&directory);
+    }
+
+    #[test]
+    fn an_import_folder_uses_the_unnamed_fallback() {
+        assert_eq!(import_folder_segment(""), "Unbenannt");
+        assert_eq!(import_folder_segment("CON"), "Unbenannt");
+        assert_eq!(import_folder_segment(".."), "Unbenannt");
+        assert_eq!(import_folder_segment("Kapitel"), "Kapitel");
+        assert_eq!(import_folder_segment("OneNote-Seite"), "OneNote-Seite");
+        assert_eq!(
+            note_directory_segments(
+                vec!["CON".to_owned(), "Kapitel".to_owned()],
+                vec![String::new(), "Echt".to_owned()],
+            ),
+            vec![
+                "Unbenannt".to_owned(),
+                "Kapitel".to_owned(),
+                "Unbenannt".to_owned(),
+                "Echt".to_owned(),
+            ]
+        );
     }
 
     #[test]
