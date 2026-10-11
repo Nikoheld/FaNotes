@@ -1131,14 +1131,21 @@ impl Host {
                             .as_ref()
                             .and_then(|payload| payload.ink.clone())
                         {
-                            if transcript.is_empty() {
-                                transcript = ink_transcript(Some(&companion_ink));
+                            // The companion is the handwriting the note opens.
+                            // A string transcript there replaces one embedded in
+                            // the markdown file, including an empty string.
+                            if let Some(text) = companion_ink
+                                .get("searchTranscript")
+                                .and_then(Value::as_str)
+                            {
+                                transcript = bounded_transcript(text);
                             }
                             ink = Some(companion_ink);
                         }
                     }
                 }
             }
+            remember_drawing_owner(&mut owners, &relative, &content, ink.as_ref());
             let haystack = format!("{relative}\n{content}\n{transcript}").to_lowercase();
             if !haystack.contains(&needle) {
                 continue;
@@ -1167,9 +1174,6 @@ impl Host {
             });
             if let Some(anchor) = ink_anchor(&transcript, &query) {
                 hit["inkAnchor"] = json!({ "y": anchor });
-            }
-            if let Some(id) = drawing_owner_id(&content, ink.as_ref()) {
-                owners.entry(id).or_insert_with(|| relative.clone());
             }
             hits.push(hit);
         }
@@ -2965,20 +2969,25 @@ fn retarget_folder_colors(root: &Path, old: &str, new: &str) -> Result<(), Strin
     Ok(())
 }
 
-fn drawing_owner_id(markdown: &str, ink: Option<&Value>) -> Option<String> {
-    if let Some(id) = markdown.split("fanotes-ink:").nth(1) {
-        let id = id
-            .split(|character: char| {
-                !character.is_ascii_alphanumeric() && character != '_' && character != '-'
-            })
-            .next()
-            .unwrap_or("");
-        if is_drawing_id(id) {
-            return Some(id.to_owned());
-        }
+fn remember_drawing_owner(
+    owners: &mut std::collections::HashMap<String, String>,
+    note: &str,
+    markdown: &str,
+    ink: Option<&Value>,
+) {
+    if let Some(id) = drawings::note_ink_marker_id(markdown) {
+        owners.entry(id).or_insert_with(|| note.to_owned());
     }
-    let id = ink?.get("id")?.as_str()?;
-    is_drawing_id(id).then(|| id.to_owned())
+    let Some(id) = ink
+        .and_then(|value| value.get("id"))
+        .and_then(Value::as_str)
+        .filter(|id| is_drawing_id(id))
+    else {
+        return;
+    };
+    owners
+        .entry(id.to_owned())
+        .or_insert_with(|| note.to_owned());
 }
 
 fn is_drawing_id(value: &str) -> bool {

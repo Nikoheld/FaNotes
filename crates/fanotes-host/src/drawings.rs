@@ -210,7 +210,7 @@ fn is_note_path(relative: &str) -> bool {
         || lower.ends_with(".pdf")
 }
 
-fn note_ink_marker_id(markdown: &str) -> Option<String> {
+pub(crate) fn note_ink_marker_id(markdown: &str) -> Option<String> {
     let mut rest = markdown;
     while let Some(start) = rest.find("<!--") {
         let after = rest[start + 4..].trim_start();

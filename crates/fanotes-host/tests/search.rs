@@ -122,6 +122,116 @@ fn search_returns_title_excerpt_and_handwriting_anchor() {
 }
 
 #[test]
+fn search_uses_the_companion_transcript_and_both_drawing_ids() {
+    let mut host = host();
+    let vault = host.vault.clone().unwrap();
+    let old = ink_note("Sichtbarer Text", Some("Veraltet"));
+    std::fs::write(vault.join("Bio/Alt.md"), old).unwrap();
+    std::fs::write(
+        vault.join("Bio/Alt.famd"),
+        ink_note("Sichtbarer Text", Some("Aktuell")),
+    )
+    .unwrap();
+    std::fs::write(
+        vault.join("Bio/Keep.md"),
+        ink_note("Notiz", Some("Behalten")),
+    )
+    .unwrap();
+    std::fs::write(vault.join("Bio/Keep.famd"), ink_note("Notiz", None)).unwrap();
+
+    assert!(host
+        .dispatch("fanotes:search", &[json!("Veraltet")])
+        .unwrap()
+        .as_array()
+        .unwrap()
+        .is_empty());
+    assert_eq!(
+        host.dispatch("fanotes:search", &[json!("Aktuell")])
+            .unwrap()[0]["relativePath"],
+        "Bio/Alt.md"
+    );
+    assert_eq!(
+        host.dispatch("fanotes:search", &[json!("Behalten")])
+            .unwrap()[0]["relativePath"],
+        "Bio/Keep.md"
+    );
+
+    std::fs::write(
+        vault.join("Bio/Blatt.md"),
+        "Siehe fanotes-ink:prose\n\n<!-- fanotes-ink:marker1 -->\n",
+    )
+    .unwrap();
+    std::fs::write(
+        vault.join("Bio/Blatt.famd"),
+        ink_with_id("library1", "0.50\tTinte"),
+    )
+    .unwrap();
+    let assets = vault.join(".fanotes/assets");
+    std::fs::create_dir_all(&assets).unwrap();
+    for (id, transcript) in [
+        ("prose", "0.10\tProsewort"),
+        ("marker1", "0.20\tMarkerwort"),
+        ("library1", "0.30\tLibrarywort"),
+    ] {
+        std::fs::write(
+            assets.join(format!("{id}.json")),
+            format!(
+                r#"{{"schemaVersion":1,"id":"{id}","title":"{id}","strokes":[],"updatedAt":"2026-10-11T00:00:00.000Z","searchTranscript":"{transcript}"}}"#
+            ),
+        )
+        .unwrap();
+    }
+
+    let prose = drawing_hit(&host, "Prosewort");
+    assert!(prose.get("notePath").is_none());
+    assert_eq!(drawing_hit(&host, "Markerwort")["notePath"], "Bio/Blatt.md");
+    assert_eq!(
+        drawing_hit(&host, "Librarywort")["notePath"],
+        "Bio/Blatt.md"
+    );
+}
+
+fn ink_note(body: &str, transcript: Option<&str>) -> String {
+    let mut payload = fanotes_famd::empty_famd_payload("2026-10-11T00:00:00.000Z");
+    payload.ink = Some(match transcript {
+        Some(transcript) => json!({
+            "schemaVersion": 1,
+            "title": "Blatt",
+            "strokes": [],
+            "searchTranscript": transcript
+        }),
+        None => json!({
+            "schemaVersion": 1,
+            "title": "Blatt",
+            "strokes": []
+        }),
+    });
+    fanotes_famd::serialize_famd(body, &payload)
+}
+
+fn ink_with_id(id: &str, transcript: &str) -> String {
+    let mut payload = fanotes_famd::empty_famd_payload("2026-10-11T00:00:00.000Z");
+    payload.ink = Some(json!({
+        "schemaVersion": 1,
+        "id": id,
+        "title": "Blatt",
+        "strokes": [],
+        "searchTranscript": transcript
+    }));
+    fanotes_famd::serialize_famd("Siehe fanotes-ink:prose", &payload)
+}
+
+fn drawing_hit(host: &Host, query: &str) -> serde_json::Value {
+    host.dispatch("fanotes:search", &[json!(query)])
+        .unwrap()
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|hit| hit["kind"] == "drawing")
+        .cloned()
+        .unwrap()
+}
+
 fn drawing_search_uses_the_library_title_and_skips_invalid_files() {
     let mut host = host();
     let assets = host.vault.as_ref().unwrap().join(".fanotes/assets");
