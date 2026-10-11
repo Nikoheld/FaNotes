@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::Read;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -20,6 +20,7 @@ const SEVENZIP_SHA: &str = "afc9448bd0cc2eeda131cce313ef4994f9656417e0a15c8465fc
 const MAX_SOURCE_BYTES: u64 = 4 * 1024 * 1024 * 1024;
 const MAX_HTML_BYTES: usize = 128 * 1024 * 1024;
 const MAX_IMAGE_BYTES: u64 = 32 * 1024 * 1024;
+const MAX_EMBEDDED_IMAGE_BYTES: u64 = 96 * 1024 * 1024;
 
 pub fn import_onenote(host: &Host, args: &[Value]) -> Result<Value, String> {
     if let Some(path) = args
@@ -351,56 +352,61 @@ fn strip_active_html(html: &str) -> String {
 }
 
 fn inline_images(html: &str, page_path: &Path, output_root: &Path) -> String {
-    let mut html = html.to_owned();
-    for pattern in [
-        r#"(?i)<img\b[^>]*\bsrc="([^"]+)"[^>]*>"#,
-        r#"(?i)<img\b[^>]*\bsrc='([^']+)'[^>]*>"#,
-    ] {
-        let Ok(regex) = Regex::new(pattern) else {
+    let Ok(regex) = Regex::new(r#"(?i)(<img\b[^>]*\bsrc=)(['"])([^'"]+)\2"#) else {
+        return html.to_owned();
+    };
+    let mut embedded_bytes = 0u64;
+    let mut replacements = HashMap::new();
+    for caps in regex.captures_iter(html) {
+        let Some(source) = caps.get(3).map(|item| item.as_str()) else {
             continue;
         };
-        let quote = if pattern.contains("src=\"") {
-            "\""
-        } else {
-            "'"
-        };
-        let mut replacements = HashMap::new();
-        for caps in regex.captures_iter(&html) {
-            let source = caps.get(1).map(|item| item.as_str()).unwrap_or("");
-            replacements.insert(
-                source.to_owned(),
-                image_data_url(source, page_path, output_root),
-            );
-        }
-        html = regex
-            .replace_all(&html, |caps: &regex::Captures| {
-                let source = caps.get(1).map(|item| item.as_str()).unwrap_or("");
-                match replacements.get(source).map(String::as_str) {
-                    Some("") | None => {
-                        format!("<img data-fanotes-missing-image={quote}blocked{quote}>")
-                    }
-                    Some(replacement) => format!("<img src={quote}{replacement}{quote}>"),
-                }
-            })
-            .into_owned();
+        let replacement = image_data_url(source, page_path, output_root, &mut embedded_bytes);
+        replacements.insert(source.to_owned(), replacement);
     }
-    html
+    regex
+        .replace_all(html, |caps: &regex::Captures| {
+            let prefix = caps.get(1).map(|item| item.as_str()).unwrap_or("");
+            let quote = caps.get(2).map(|item| item.as_str()).unwrap_or("\"");
+            let source = caps.get(3).map(|item| item.as_str()).unwrap_or("");
+            match replacements.get(source).map(String::as_str) {
+                None => caps
+                    .get(0)
+                    .map(|item| item.as_str())
+                    .unwrap_or("")
+                    .to_owned(),
+                Some("") => {
+                    let kept = prefix.trim_end_matches("src=");
+                    format!("{kept}data-fanotes-missing-image={quote}blocked{quote}")
+                }
+                Some(replacement) => format!("{prefix}{quote}{replacement}{quote}"),
+            }
+        })
+        .into_owned()
 }
 
-fn image_data_url(source: &str, page_path: &Path, output_root: &Path) -> String {
-    if source.starts_with("data:") {
-        return source.to_owned();
-    }
-    if source.starts_with("http:")
-        || source.starts_with("https:")
-        || source.starts_with("file:")
-        || source.starts_with("javascript:")
+fn image_data_url(
+    source: &str,
+    page_path: &Path,
+    output_root: &Path,
+    embedded_bytes: &mut u64,
+) -> String {
+    let lower = source.to_ascii_lowercase();
+    if lower.starts_with("data:")
+        || lower.starts_with("http:")
+        || lower.starts_with("https:")
+        || lower.starts_with("file:")
+        || lower.starts_with("javascript:")
     {
-        return String::new();
+        return if source.starts_with("data:") {
+            source.to_owned()
+        } else {
+            String::new()
+        };
     }
     let decoded = urlencoding_decode(source);
     let image_path = page_path.parent().unwrap_or(output_root).join(decoded);
-    if !image_path.starts_with(output_root) {
+    if !image_stays_inside(output_root, &image_path) {
         return String::new();
     }
     let extension = extension_of(&image_path);
@@ -414,6 +420,7 @@ fn image_data_url(source: &str, page_path: &Path, output_root: &Path) -> String 
         || !meta.is_file()
         || meta.len() == 0
         || meta.len() > MAX_IMAGE_BYTES
+        || embedded_bytes.saturating_add(meta.len()) > MAX_EMBEDDED_IMAGE_BYTES
     {
         return String::new();
     }
@@ -423,7 +430,28 @@ fn image_data_url(source: &str, page_path: &Path, output_root: &Path) -> String 
     if !image_signature(&extension, &data) {
         return String::new();
     }
+    *embedded_bytes = embedded_bytes.saturating_add(data.len() as u64);
     format!("data:{mime};base64,{}", base64_encode(&data))
+}
+
+fn image_stays_inside(output_root: &Path, image_path: &Path) -> bool {
+    let root = normalize_lexical(output_root);
+    let candidate = normalize_lexical(image_path);
+    candidate == root || crate::vault::is_inside_root(&root, &candidate)
+}
+
+fn normalize_lexical(path: &Path) -> PathBuf {
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                normalized.pop();
+            }
+            other => normalized.push(other.as_os_str()),
+        }
+    }
+    normalized
 }
 
 fn extract_search_text(html: &str) -> String {
@@ -1341,7 +1369,7 @@ fn civil_date(mut days: u64) -> (i32, u32, u32) {
 
 #[cfg(test)]
 mod tests {
-    use super::{extract_search_text, page_dimensions, safe_segment};
+    use super::{extract_search_text, inline_images, page_dimensions, safe_segment};
 
     #[test]
     fn a_page_title_stops_at_120_utf16_units() {
@@ -1388,5 +1416,35 @@ mod tests {
         );
         assert_eq!(page_dimensions(&"<p>".repeat(100)), (816, 900));
         assert_eq!(page_dimensions("height:40px;top:10px;<p><p>"), (816, 900));
+    }
+
+    #[test]
+    fn onenote_images_keep_their_attributes_and_stay_inside_the_import() {
+        let root = std::env::temp_dir().join(format!(
+            "fanotes-onenote-img-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        let output = root.join("out");
+        let pages = output.join("pages");
+        std::fs::create_dir_all(output.join("images")).unwrap();
+        std::fs::create_dir_all(&pages).unwrap();
+        let png = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0];
+        std::fs::write(output.join("images/ok.png"), png).unwrap();
+        std::fs::write(root.join("secret.png"), png).unwrap();
+        let page = pages.join("note.html");
+        let html = r#"<img class="pic" src="../images/ok.png" alt="Bild"><img class="pic" src="missing.png" alt="Leer"><img src="../../secret.png" alt="Geheim"><img src="HTTP://example.com/a.png" alt="Netz">"#;
+        let result = inline_images(html, &page, &output);
+        assert!(result.contains(r#"class="pic" src="data:image/png;base64,"#));
+        assert!(result.contains(r#"alt="Bild""#));
+        assert!(result.contains(r#"class="pic" data-fanotes-missing-image="blocked" alt="Leer""#));
+        assert!(result.contains(r#"data-fanotes-missing-image="blocked" alt="Geheim""#));
+        assert!(result.contains(r#"data-fanotes-missing-image="blocked" alt="Netz""#));
+        assert!(!result.contains("secret"));
+        let _ = std::fs::remove_dir_all(&root);
     }
 }
