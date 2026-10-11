@@ -229,13 +229,14 @@ fn request_text(
     user_agent: &str,
 ) -> Result<HttpText, String> {
     let mut url = raw_url.to_owned();
+    let mut redirects_left = MAX_REDIRECTS;
     let agent: Agent = Agent::config_builder()
         .max_redirects(0)
         .timeout_global(Some(Duration::from_secs(20)))
         .http_status_as_error(false)
         .build()
         .into();
-    for _ in 0..=MAX_REDIRECTS {
+    loop {
         if registry {
             assert_registry_url(&url)?;
             assert_public_resolution(&hostname_of(&url)?)?;
@@ -270,17 +271,20 @@ fn request_text(
             format!("Zeitüberschreitung beim Laden oder der Host ist nicht erreichbar: {error}")
         })?;
         let status = response.status().as_u16();
-        if (300..400).contains(&status) {
-            if method != "GET" && method != "HEAD" {
-                break;
+        let location = response
+            .headers()
+            .get("location")
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_owned);
+        match redirect_step(registry, redirects_left, method, status, location.is_some()) {
+            RedirectStep::Follow => {
+                let location = location.ok_or_else(|| "Ungültige Weiterleitung.".to_owned())?;
+                url = resolve_redirect(&url, &location)?;
+                redirects_left = redirects_left.saturating_sub(1);
+                continue;
             }
-            let location = response
-                .headers()
-                .get("location")
-                .and_then(|value| value.to_str().ok())
-                .ok_or_else(|| "Ungültige Weiterleitung.".to_owned())?;
-            url = resolve_redirect(&url, location)?;
-            continue;
+            RedirectStep::TooMany => return Err("Zu viele Weiterleitungen.".to_owned()),
+            RedirectStep::Stop => {}
         }
         if registry && !(200..300).contains(&status) {
             let host = hostname_of(&url).unwrap_or_default();
@@ -330,7 +334,6 @@ fn request_text(
             url,
         });
     }
-    Err("Zu viele Weiterleitungen.".to_owned())
 }
 
 fn assert_registry_url(raw_url: &str) -> Result<(), String> {
@@ -419,6 +422,35 @@ fn path_of(raw_url: &str) -> String {
     url::Url::parse(raw_url)
         .map(|url| url.path().to_owned())
         .unwrap_or_default()
+}
+
+enum RedirectStep {
+    Follow,
+    Stop,
+    TooMany,
+}
+
+fn redirect_step(
+    registry: bool,
+    redirects_left: u8,
+    method: &str,
+    status: u16,
+    has_location: bool,
+) -> RedirectStep {
+    let can_follow =
+        (300..400).contains(&status) && has_location && (method == "GET" || method == "HEAD");
+    if !can_follow {
+        return RedirectStep::Stop;
+    }
+    if redirects_left == 0 {
+        if registry {
+            RedirectStep::TooMany
+        } else {
+            RedirectStep::Stop
+        }
+    } else {
+        RedirectStep::Follow
+    }
 }
 
 fn resolve_redirect(current: &str, location: &str) -> Result<String, String> {
@@ -619,7 +651,7 @@ fn lock() -> std::sync::MutexGuard<'static, ()> {
 
 #[cfg(test)]
 mod tests {
-    use super::resolve_redirect;
+    use super::{redirect_step, resolve_redirect, RedirectStep};
 
     #[test]
     fn redirects_resolve_like_the_desktop_url_parser() {
@@ -656,5 +688,33 @@ mod tests {
             resolve_redirect(base, "#section").unwrap(),
             "https://example.com/a/b?q=1#section"
         );
+    }
+
+    #[test]
+    fn redirects_follow_get_and_head_until_the_budget_is_spent() {
+        assert!(matches!(
+            redirect_step(false, 3, "GET", 302, true),
+            RedirectStep::Follow
+        ));
+        assert!(matches!(
+            redirect_step(false, 0, "GET", 302, true),
+            RedirectStep::Stop
+        ));
+        assert!(matches!(
+            redirect_step(true, 0, "GET", 302, true),
+            RedirectStep::TooMany
+        ));
+        assert!(matches!(
+            redirect_step(false, 3, "POST", 302, true),
+            RedirectStep::Stop
+        ));
+        assert!(matches!(
+            redirect_step(false, 3, "GET", 302, false),
+            RedirectStep::Stop
+        ));
+        assert!(matches!(
+            redirect_step(false, 3, "HEAD", 200, true),
+            RedirectStep::Stop
+        ));
     }
 }
