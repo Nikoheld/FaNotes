@@ -338,7 +338,7 @@ try {
   assert.match(hardeningSource, /linuxOzoneAppRunExecLine\(/u, 'AppRun must be generated from the shipped Ozone helper, not a copy')
   assert.deepEqual(packageMetadata.build?.appImage?.executableArgs, [...ozonePlan.argv])
   assert.doesNotMatch(mainSource.slice(0, 4000), /require\('\.\/updater\.cjs'\)/u, 'Der Updater darf den Main-Prozess nicht vor dem Fenster blockieren.')
-  assert.doesNotMatch(mainSource.slice(0, 4000), /onnxruntime-node/u, 'Die native OCR-Laufzeit darf nicht während des Starts geladen werden.')
+  assert.doesNotMatch(mainSource.slice(0, 4000), /onnxruntime|native-ocr\.cjs/u, 'Die native OCR-Laufzeit darf nicht während des Starts geladen werden.')
   assert.match(mainSource, /function ensureUpdateManager\(\)[\s\S]*require\('\.\/updater\.cjs'\)/u)
   assert.match(mainSource, /show:\s*false/u, 'Das Fenster darf nicht vor dem ersten gerenderten Frame aufblitzen.')
   assert.match(mainSource, /ready-to-show/u, 'Das Fenster erscheint erst wenn der Renderer bereit ist.')
@@ -369,7 +369,8 @@ try {
   assert.match(appSource, /STARTUP_TREE_REFRESH_DELAY_MS\s*=\s*18_000/u, 'Der vollständige Vault-Abgleich darf nicht in die Startphase fallen.')
   assert.match(appSource, /STARTUP_DOCUMENT_LAYER_DELAY_MS\s*=\s*160/u, 'Tinte der ersten Notiz lädt schnell, ohne den Editor zu blockieren.')
   assert.match(mainSource, /require\('\.\/onenote-importer\.cjs'\)/u, 'Der OneNote-Importer muss explizit und verzögert geladen werden.')
-  assert.match(mainSource, /new Worker\(path\.join\(__dirname, 'native-ocr-worker\.cjs'\)/u, 'Native ONNX-Inferenz muss ausserhalb des Electron-Hauptthreads laufen.')
+  assert.match(mainSource, /function ensureNativeOcrHost\(model\) \{[\s\S]*?require\('\.\/native-ocr\.cjs'\)/u, 'Native ONNX-Inferenz wird erst bei der ersten Umwandlung geladen.')
+  assert.match(fs.readFileSync(path.join(root, 'electron', 'native-ocr.cjs'), 'utf8'), /spawnImpl\(checkedExecutable\(executable\)/u, 'Native ONNX-Inferenz muss in einem eigenen Prozess ausserhalb von Electron laufen.')
   assert.match(mainSource, /currentSettings\.ocrModelKeepAliveSeconds/u, 'Der native Modellworker muss das konfigurierbare RAM-Freigabeintervall verwenden.')
   assert.deepEqual(packageMetadata.dependencies ?? {}, {}, 'Vollständig gebündelte Renderer-Abhängigkeiten dürfen nicht nochmals als Laufzeit-node_modules ausgeliefert werden.')
   assert.deepEqual(

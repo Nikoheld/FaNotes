@@ -1,0 +1,21 @@
+{
+  "format": "fanotes-native-ocr-runtime-v1",
+  "platform": "linux",
+  "arch": "x64",
+  "engine": "fanotes-ort-cpu",
+  "source": "crates/fanotes-ort",
+  "rustTarget": "x86_64-unknown-linux-gnu",
+  "executable": {
+    "file": "fanotes-ocr",
+    "size": 626272,
+    "sha256": "776128501c1813040fe4240b8116d2dbf95a5bf1c552ad87194a131ba04cc699"
+  },
+  "onnxruntime": {
+    "version": "1.21.0",
+    "package": "onnxruntime-node@1.21.0",
+    "from": "node_modules/onnxruntime-node/bin/napi-v3/linux/x64/libonnxruntime.so.1",
+    "file": "libonnxruntime.so.1",
+    "size": 21914784,
+    "sha256": "05bfddeefc536a44478c20226218dae8853995518bb2a994b4fa15a996f5f412"
+  }
+}

@@ -462,7 +462,7 @@ export type FaNotesApi = {
     width: number
     height: number
     threads: number
-  }) => Promise<{ probabilities: Float32Array; dims: number[]; characters: string[]; engine: 'onnxruntime-node-cpu' }>
+  }) => Promise<{ probabilities: Float32Array; dims: number[]; characters: string[]; engine: 'fanotes-ort-cpu' }>
   getEnhancedMathRecognitionState?: () => Promise<EnhancedMathRecognitionState>
   installEnhancedMathRecognitionModel?: (request: { acceptLicense: true }) => Promise<EnhancedMathRecognitionState>
   recognizeEnhancedMath?: (request: {
