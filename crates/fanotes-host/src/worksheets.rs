@@ -400,7 +400,7 @@ fn boxes(value: Option<&Value>) -> Result<Vec<Value>, String> {
                 .get("text")
                 .and_then(Value::as_str)
                 .ok_or_else(|| "Ein Arbeitsblatt-Text ist ungültig.".to_owned())?;
-            if text.len() > 20_000 || text.contains('\0') {
+            if crate::vault::utf16_len(text) > 20_000 || text.contains('\0') {
                 return Err("Ein Arbeitsblatt-Text ist ungültig.".to_owned());
             }
             Ok(json!({

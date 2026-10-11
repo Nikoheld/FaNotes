@@ -719,7 +719,7 @@ fn required_model(value: &Value) -> Result<String, String> {
         .unwrap_or("")
         .trim();
     if model.is_empty()
-        || model.len() > 500
+        || crate::vault::utf16_len(model) > 500
         || model.chars().any(|character| character.is_control())
     {
         Err("Wähle zuerst ein gültiges AI-Modell.".to_owned())
