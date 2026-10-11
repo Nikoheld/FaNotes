@@ -178,6 +178,35 @@ fn an_electron_profile_supplies_the_vault_and_settings() {
 }
 
 #[test]
+fn a_long_unicode_vault_path_is_remembered() {
+    let dir = scratch();
+    let legacy = dir.join("Lernwerk Notes");
+    fs::create_dir_all(&legacy).unwrap();
+    let vault = format!("/Notizen/{}", "Ä".repeat(3000));
+    assert!(vault.len() > 4096);
+    assert!(vault.encode_utf16().count() <= 4096);
+    fs::write(
+        legacy.join("config.json"),
+        json!({ "version": 3, "vaultPath": vault }).to_string(),
+    )
+    .unwrap();
+    let app = dir.join("app");
+    let _host = Host::open(app.clone());
+    let stored = fs::read_to_string(app.join("vault-path")).unwrap();
+    assert_eq!(stored.trim(), vault);
+
+    let other = dir.join("other-app");
+    let too_long = format!("/{}/", "Ä".repeat(4096));
+    fs::write(
+        legacy.join("config.json"),
+        json!({ "version": 3, "vaultPath": too_long }).to_string(),
+    )
+    .unwrap();
+    let _again = Host::open(other.clone());
+    assert!(!other.join("vault-path").exists());
+}
+
+#[test]
 fn a_reset_profile_does_not_import_the_electron_config_again() {
     let dir = scratch();
     let app = dir.join("app");
