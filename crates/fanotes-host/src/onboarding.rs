@@ -268,6 +268,22 @@ const CATALOGS: &[&[StarterFolder]] = &[
     WORK_EN,
 ];
 
+pub(crate) fn welcome_note(language: &str) -> &'static str {
+    if language == "en" {
+        include_str!("welcome_en.md")
+    } else {
+        include_str!("welcome_de.md")
+    }
+}
+
+pub(crate) fn welcome_file_name(language: &str) -> &'static str {
+    if language == "en" {
+        "Welcome.md"
+    } else {
+        "Willkommen.md"
+    }
+}
+
 pub(crate) fn starter_subjects(language: &str) -> Value {
     let source = if language == "en" {
         SCHOOL_EN

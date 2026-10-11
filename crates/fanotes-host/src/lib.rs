@@ -53,6 +53,8 @@ pub struct Host {
     pub close_requested: bool,
     /// Native file dialogs. The channel sweep turns this off so a picker cannot block the test.
     pub file_dialogs: bool,
+    /// Overrides the documents directory used for a first-run vault.
+    pub documents_dir: Option<PathBuf>,
 }
 
 impl Host {
@@ -65,6 +67,7 @@ impl Host {
             onboarding_required: false,
             close_requested: false,
             file_dialogs: true,
+            documents_dir: None,
         };
         host.load_persisted();
         host
@@ -94,6 +97,9 @@ impl Host {
             ChannelKind::Event => return Ok(Value::Null),
             ChannelKind::Message => return self.dispatch_message(channel),
             ChannelKind::Command => {}
+        }
+        if self.onboarding_required && !onboarding_open(channel) {
+            return Err("Bitte schließe zuerst die FaNotes-Ersteinrichtung ab.".to_owned());
         }
         match channel {
             "fanotes:bootstrap" => self.bootstrap(),
@@ -511,7 +517,8 @@ impl Host {
         Ok(Value::Null)
     }
 
-    fn bootstrap(&self) -> Result<Value, String> {
+    fn bootstrap(&mut self) -> Result<Value, String> {
+        self.ensure_default_vault()?;
         let vault = self.require_vault()?;
         Ok(json!({
             "vaultPath": vault,
@@ -534,6 +541,59 @@ impl Host {
                 "monitorScale": null
             }
         }))
+    }
+
+    fn ensure_default_vault(&mut self) -> Result<(), String> {
+        if self.vault.is_some() {
+            return Ok(());
+        }
+        let documents = match self.documents_dir.clone() {
+            Some(path) => path,
+            None => default_documents_dir()?,
+        };
+        let vault = documents.join("FaNotes");
+        let created = match fs::symlink_metadata(&vault) {
+            Ok(meta) if meta.file_type().is_symlink() || !meta.is_dir() => {
+                return Err(format!(
+                    "Der Standard-Vault kann nicht unter {} angelegt werden.",
+                    vault.display()
+                ));
+            }
+            Ok(_) => false,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                fs::create_dir_all(&vault).map_err(|_| {
+                    format!(
+                        "Der Standard-Vault kann nicht unter {} angelegt werden.",
+                        vault.display()
+                    )
+                })?;
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    let _ = fs::set_permissions(&vault, fs::Permissions::from_mode(0o700));
+                }
+                true
+            }
+            Err(_) => {
+                return Err(format!(
+                    "Der Standard-Vault kann nicht unter {} angelegt werden.",
+                    vault.display()
+                ));
+            }
+        };
+        if created {
+            let language = self.ui_language();
+            let note = vault.join(onboarding::welcome_file_name(language));
+            notes::atomic_write(&note, onboarding::welcome_note(language).as_bytes(), 0o600)?;
+            onboarding::write_status(&vault, "pending")?;
+        }
+        self.set_vault(vault.clone())?;
+        fs::write(
+            self.app_data.join("vault-path"),
+            vault.to_string_lossy().as_bytes(),
+        )
+        .map_err(|_| "Die Einstellungen konnten nicht gespeichert werden.".to_owned())?;
+        Ok(())
     }
 
     fn tree(&self, stats: bool) -> Result<Value, String> {
@@ -623,6 +683,15 @@ impl Host {
             return Err("Es dürfen nur Markdown-Dateien und FaNotes-Handschriftdateien (.famd) bearbeitet werden.".to_owned());
         }
         let path = vault::resolve_inside(self.require_vault()?, &normalized)?;
+        let limit = note_byte_limit(&normalized);
+        let meta = fs::symlink_metadata(&path)
+            .map_err(|_| "Die Datei konnte nicht gelesen werden.".to_owned())?;
+        if meta.file_type().is_symlink() || !meta.is_file() {
+            return Err("Die Datei konnte nicht gelesen werden.".to_owned());
+        }
+        if meta.len() > limit {
+            return Err("Der Notizinhalt ist ungültig oder zu groß.".to_owned());
+        }
         let bytes =
             fs::read(&path).map_err(|_| "Die Datei konnte nicht gelesen werden.".to_owned())?;
         let text = String::from_utf8(bytes).map_err(|_| "Die Datei ist kein Text.".to_owned())?;
@@ -634,6 +703,9 @@ impl Host {
         let normalized = vault::normalize_relative_path(relative, false, false)?;
         if !notes::is_note_text(&normalized) {
             return Err("Es dürfen nur Markdown-Dateien und FaNotes-Handschriftdateien (.famd) bearbeitet werden.".to_owned());
+        }
+        if content.len() as u64 > note_byte_limit(&normalized) {
+            return Err("Der Notizinhalt ist ungültig oder zu groß.".to_owned());
         }
         let path = vault::resolve_inside(&root, &normalized)?;
         if notes::records_history(&normalized) {
@@ -1160,6 +1232,8 @@ const SYNC_MAX_BYTES: u64 = 100 * 1024 * 1024;
 const MAX_SYNC_STATE_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_SYNC_ENTRIES: usize = 100_000;
 const MAX_SYNC_DEPTH: usize = 40;
+const MAX_TEXT_BYTES: u64 = 16 * 1024 * 1024;
+const MAX_FAMD_BYTES: u64 = 40 * 1024 * 1024;
 const MAX_RECOGNITION_MODEL_BYTES: u64 = 20 * 1024 * 1024;
 const MAX_TREE_CACHE_BYTES: u64 = 24 * 1024 * 1024;
 const MAX_TREE_CACHE_ENTRIES: usize = 100_000;
@@ -1535,6 +1609,57 @@ fn created_entry(relative: &str, path: &Path, note: bool) -> Value {
             }
         })
     }
+}
+
+fn onboarding_open(channel: &str) -> bool {
+    matches!(
+        channel,
+        "fanotes:bootstrap"
+            | "fanotes:complete-onboarding"
+            | "fanotes:select-vault"
+            | "fanotes:get-cached-tree"
+            | "fanotes:update-get-state"
+            | "fanotes:update-check"
+            | "fanotes:update-download"
+            | "fanotes:update-install"
+    )
+}
+
+fn note_byte_limit(relative: &str) -> u64 {
+    if relative.to_ascii_lowercase().ends_with(".famd") {
+        MAX_FAMD_BYTES
+    } else {
+        MAX_TEXT_BYTES
+    }
+}
+
+fn default_documents_dir() -> Result<PathBuf, String> {
+    if let Some(dir) = xdg_documents_dir() {
+        return Ok(dir);
+    }
+    let home = std::env::var_os("HOME")
+        .ok_or_else(|| "Der Standard-Vault kann nicht angelegt werden.".to_owned())?;
+    Ok(PathBuf::from(home).join("Documents"))
+}
+
+fn xdg_documents_dir() -> Option<PathBuf> {
+    let home = PathBuf::from(std::env::var_os("HOME")?);
+    let config = std::env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| home.join(".config"));
+    let text = fs::read_to_string(config.join("user-dirs.dirs")).ok()?;
+    let home_text = home.to_string_lossy();
+    for line in text.lines() {
+        let Some(rest) = line.trim().strip_prefix("XDG_DOCUMENTS_DIR=") else {
+            continue;
+        };
+        let rest = rest.trim().trim_matches('"');
+        if rest.is_empty() {
+            continue;
+        }
+        return Some(PathBuf::from(rest.replace("$HOME", home_text.as_ref())));
+    }
+    None
 }
 
 fn vault_path_digest(path: &Path) -> String {

@@ -41,6 +41,10 @@ fn first_run_creates_the_chosen_subjects_and_stamps_the_tree() {
     assert!(host
         .dispatch("fanotes:complete-onboarding", &[json!(["Kein Fach"])])
         .is_err());
+    assert_eq!(
+        host.dispatch("fanotes:get-tree", &[]).unwrap_err(),
+        "Bitte schließe zuerst die FaNotes-Ersteinrichtung ab."
+    );
 
     let done = host
         .dispatch(
