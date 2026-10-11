@@ -122,6 +122,7 @@ fanotes_commands! {
     request_close => "fanotes:request-close",
     sheet_zoom => "fanotes:sheet-zoom",
     capture_window => "fanotes:capture-window",
+    render_pdf_page => "fanotes:render-pdf-page",
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

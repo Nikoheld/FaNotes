@@ -226,6 +226,7 @@ const IPC = Object.freeze({
   cancelClose: 'fanotes:cancel-close',
   requestClose: 'fanotes:request-close',
   captureWindow: 'fanotes:capture-window',
+  renderPdfPage: 'fanotes:render-pdf-page',
 })
 
 const DEFAULT_SETTINGS = Object.freeze({
@@ -4550,6 +4551,32 @@ function registerIpcHandlers() {
     trashItem: (target) => shell.trashItem(target),
   }))
   handle(IPC.captureWindow, async (event) => encodeWindowCapture(await event.sender.capturePage()))
+  handle(IPC.renderPdfPage, async (_event, request) => {
+    await ensureBootstrap()
+    if (!request || typeof request.path !== 'string') throw new Error('Die PDF-Rasteranfrage ist unvollständig.')
+    const geometry = ['pageIndex', 'pixelWidth', 'pixelHeight', 'pagePixelWidth', 'pagePixelHeight', 'originX', 'originY', 'rotation']
+    for (const name of geometry) {
+      if (!Number.isSafeInteger(request[name])) throw new Error('Die PDF-Rasteranfrage ist unvollständig.')
+    }
+    const { target } = await resolveVaultPath(request.path, { expected: 'file' })
+    const info = await fsp.lstat(target)
+    if (!info.isFile() || info.isSymbolicLink()) throw new Error('Die PDF-Datei konnte nicht gelesen werden.')
+    const key = `${target}:${info.mtimeMs}:${info.size}`
+    const pdfium = require('./pdfium.cjs')
+    return pdfium.renderPdfPage({
+      key,
+      readBytes: () => readRegularFileNoFollow(target, WORKSHEET_FORMATS.get('.pdf').maxBytes),
+      pageIndex: request.pageIndex,
+      pixelWidth: request.pixelWidth,
+      pixelHeight: request.pixelHeight,
+      pagePixelWidth: request.pagePixelWidth,
+      pagePixelHeight: request.pagePixelHeight,
+      originX: request.originX,
+      originY: request.originY,
+      rotation: request.rotation,
+      password: typeof request.password === 'string' ? request.password : '',
+    })
+  })
 
   ipcMain.on(IPC.confirmClose, (event) => {
     if (!isTrustedIpcSender(event) || !mainWindow || mainWindow.isDestroyed()) return

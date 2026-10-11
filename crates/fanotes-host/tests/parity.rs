@@ -46,6 +46,23 @@ fn vault_paths_reject_traversal_and_internal_files() {
         "Pfad-Traversal ist nicht erlaubt."
     );
     assert_eq!(
+        host.dispatch(
+            "fanotes:render-pdf-page",
+            &[json!({
+                "path": "../secret.pdf",
+                "pageIndex": 0,
+                "pixelWidth": 16,
+                "pixelHeight": 16,
+                "pagePixelWidth": 16,
+                "pagePixelHeight": 16,
+                "originX": 0,
+                "originY": 0
+            })]
+        )
+        .unwrap_err(),
+        "Pfad-Traversal ist nicht erlaubt."
+    );
+    assert_eq!(
         host.dispatch("fanotes:read-file", &[json!(".fanotes/settings.json")])
             .unwrap_err(),
         "Interne FaNotes-Dateien sind geschützt."

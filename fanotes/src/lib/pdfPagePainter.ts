@@ -6,6 +6,7 @@ import {
   type PdfPaintBox,
   type PdfPaintJob,
 } from './pdfDocument'
+import { rasterizePdfPage } from './pdfiumRaster'
 import { layoutOffsetInScroller, readUsedSheetZoom, resolvePaperZoomScroller } from './paperView'
 
 /**
@@ -41,11 +42,19 @@ export type PdfBasePaintInfo = {
   rotation: number
 }
 
+export type PdfiumPageSource = {
+  path: string
+  pageIndex: number
+  password?: string
+}
+
 export type PdfPagePainterOptions = {
   host: HTMLElement
   base: PdfPageLayerCanvases
   detail: PdfPageLayerCanvases
   label: string
+  /** Vault PDF for PDFium. The same paper camera still plans the bitmap. */
+  pdfium?: () => PdfiumPageSource | null
   /** After a base paint has been swapped in (text layer). Awaited in the render queue slot. */
   onBasePainted?: (info: PdfBasePaintInfo) => void | Promise<void>
   onFirstPaint?: () => void
@@ -159,16 +168,7 @@ export const createPdfPagePainter = (options: PdfPagePainterOptions): PdfPagePai
       context.setTransform(1, 0, 0, 1, 0, 0)
       context.fillStyle = '#ffffff'
       context.fillRect(0, 0, box.pixelWidth, box.pixelHeight)
-      const task = livePage.render({
-        canvas: back,
-        canvasContext: context,
-        viewport,
-        intent: 'display',
-        transform: [1, 0, 0, 1, -box.cssLeft * backingPerCss, -box.cssTop * (box.pixelHeight / Math.max(1, box.cssHeight))],
-      })
-      layer.task = task
-      try {
-        await task.promise
+      const showBack = async () => {
         if (disposed || token !== layer.token) return
         // One synchronous step: the new bitmap shows in the frame the old one hides.
         const front = layer.canvases[layer.front]
@@ -184,6 +184,46 @@ export const createPdfPagePainter = (options: PdfPagePainterOptions): PdfPagePai
           firstPaintSent = true
           options.onFirstPaint?.()
         }
+      }
+      const source = options.pdfium?.() ?? null
+      if (source?.path) {
+        const fullPage = box.cssLeft === 0 && box.cssTop === 0
+          && Math.abs(box.cssWidth - cssWidth) < 1.5
+          && Math.abs(box.cssHeight - cssHeight) < 1.5
+        const bitmap = await rasterizePdfPage({
+          path: source.path,
+          pageIndex: source.pageIndex,
+          password: source.password,
+          pixelWidth: box.pixelWidth,
+          pixelHeight: box.pixelHeight,
+          pagePixelWidth: fullPage ? box.pixelWidth : Math.max(1, Math.round(viewport.width)),
+          pagePixelHeight: fullPage ? box.pixelHeight : Math.max(1, Math.round(viewport.height)),
+          originX: Math.round(box.cssLeft * backingPerCss),
+          originY: Math.round(box.cssTop * (box.pixelHeight / Math.max(1, box.cssHeight))),
+          rotation: usedRotation,
+        })
+        if (bitmap && bitmap.length === box.pixelWidth * box.pixelHeight * 4 && token === layer.token) {
+          try {
+            context.putImageData(new ImageData(bitmap, box.pixelWidth, box.pixelHeight), 0, 0)
+            await showBack()
+            return
+          } catch {
+            // pdf.js paints this window when the bitmap cannot be blitted.
+          }
+        }
+      }
+      if (disposed || token !== layer.token || page !== livePage) return
+      const task = livePage.render({
+        canvas: back,
+        canvasContext: context,
+        viewport,
+        intent: 'display',
+        transform: [1, 0, 0, 1, -box.cssLeft * backingPerCss, -box.cssTop * (box.pixelHeight / Math.max(1, box.cssHeight))],
+      })
+      layer.task = task
+      try {
+        await task.promise
+        await showBack()
       } catch (error: unknown) {
         if (token === layer.token) layer.pending = ''
         if (!isCancel(error)) console.error(`${label} konnte nicht gerendert werden.`, error)

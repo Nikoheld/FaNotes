@@ -117,6 +117,7 @@ pub const CHANNELS: &[Channel] = &[
     channel("fanotes:request-close", ChannelKind::Message),
     channel("fanotes:sheet-zoom", ChannelKind::Event),
     channel("fanotes:capture-window", ChannelKind::Command),
+    channel("fanotes:render-pdf-page", ChannelKind::Command),
 ];
 
 const fn channel(name: &'static str, kind: ChannelKind) -> Channel {

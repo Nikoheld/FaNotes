@@ -12,6 +12,7 @@ members = [
     "crates/fanotes-recog",
     "crates/fanotes-recog-wasm",
     "crates/fanotes-host",
+    "crates/fanotes-pdf",
     "apps/paper-proto",
     "fanotes/src-tauri",
 ]

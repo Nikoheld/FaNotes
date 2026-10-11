@@ -443,6 +443,27 @@ export type ServerBackupState = {
   error: string | null
 }
 
+export type PdfiumRasterRequest = {
+  path: string
+  pageIndex: number
+  pixelWidth: number
+  pixelHeight: number
+  pagePixelWidth: number
+  pagePixelHeight: number
+  originX: number
+  originY: number
+  rotation: number
+  password?: string
+}
+
+export type PdfiumRasterResult = {
+  unavailable?: boolean
+  width?: number
+  height?: number
+  rgba?: Uint8Array
+  rgbaBase64?: string
+}
+
 export type FaNotesApi = {
   bootstrap: () => Promise<BootstrapData>
   reportRendererReady: () => void
@@ -580,6 +601,8 @@ export type FaNotesApi = {
   requestClose: () => void
   onSheetZoom?: (callback: (direction: 'in' | 'out') => void) => () => void
   captureWindow?: () => Promise<string>
+  /** PDFium bitmap for one camera window. Absent in the browser; pdf.js paints instead. */
+  renderPdfPage?: (request: PdfiumRasterRequest) => Promise<PdfiumRasterResult>
   addons?: AddonsHostApi
   sync?: SyncHostApi
   platform: string
