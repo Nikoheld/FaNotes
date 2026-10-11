@@ -241,3 +241,26 @@ fn a_cached_tree_keeps_a_long_unicode_name() {
         .unwrap()
         .is_null());
 }
+
+#[test]
+fn onboarding_stays_pending_when_its_file_contains_a_bad_byte() {
+    let dir = std::env::temp_dir().join(format!(
+        "fanotes-onboarding-byte-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    let vault = dir.join("vault");
+    fs::create_dir_all(vault.join(".fanotes")).unwrap();
+    let mut bytes = br#"{"version":1,"status":"pending","note":"X"}"#.to_vec();
+    let index = bytes.iter().position(|byte| *byte == b'X').unwrap();
+    bytes[index] = 0xff;
+    fs::write(vault.join(".fanotes/onboarding.json"), &bytes).unwrap();
+    let mut host = Host::open(dir.join("app"));
+    host.set_vault(vault).unwrap();
+    let bootstrap = host.dispatch("fanotes:bootstrap", &[]).unwrap();
+    assert_eq!(bootstrap["onboardingRequired"], true);
+}

@@ -458,7 +458,8 @@ pub(crate) fn read_status(root: &Path) -> Option<&'static str> {
     if meta.file_type().is_symlink() || !meta.is_file() || meta.len() > 16 * 1024 {
         return None;
     }
-    let text = fs::read_to_string(&path).ok()?;
+    let bytes = fs::read(&path).ok()?;
+    let text = String::from_utf8_lossy(&bytes);
     let parsed = serde_json::from_str::<Value>(&text).ok()?;
     if parsed.get("version").and_then(Value::as_u64) != Some(1) {
         return None;

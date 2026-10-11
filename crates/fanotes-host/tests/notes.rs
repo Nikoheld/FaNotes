@@ -611,3 +611,23 @@ fn a_history_index_with_an_invalid_byte_still_lists_its_snapshots() {
         .unwrap();
     assert_eq!(snapshot["content"], "Hallo\n");
 }
+
+#[test]
+fn a_subject_book_with_a_bad_byte_stays_in_the_list() {
+    let (mut host, vault) = host();
+    std::fs::create_dir_all(vault.join(".fanotes")).unwrap();
+    let mut bytes = br#"{"version":1,"books":[{"subjectPath":"MaXthe","bookPath":"Mathe/Buch.pdf","lastPage":4}]}"#.to_vec();
+    let index = bytes.iter().position(|byte| *byte == b'X').unwrap();
+    bytes[index] = 0xff;
+    std::fs::write(vault.join(".fanotes/subject-books.json"), &bytes).unwrap();
+
+    let books = host.dispatch("fanotes:read-subject-books", &[]).unwrap();
+    assert_eq!(books.as_array().unwrap().len(), 1);
+    assert_eq!(books[0]["subjectPath"], "Ma\u{FFFD}the");
+    assert_eq!(books[0]["bookPath"], "Mathe/Buch.pdf");
+    assert_eq!(books[0]["lastPage"], 4);
+
+    std::fs::write(vault.join(".fanotes/subject-books.json"), b"{\xff").unwrap();
+    let books = host.dispatch("fanotes:read-subject-books", &[]).unwrap();
+    assert!(books.as_array().unwrap().is_empty());
+}
