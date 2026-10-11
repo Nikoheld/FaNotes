@@ -184,7 +184,10 @@ pub fn transform_lm_studio(payload: &Value) -> Result<Value, String> {
         output_token_limit(&markdown),
     )?;
     Ok(json!({
-        "markdown": unwrap_markdown(&reply.text)?,
+        "markdown": unwrap_markdown_with(
+            &reply.text,
+            "LM Studio hat kein verwendbares Markdown-Dokument zurückgegeben.",
+        )?,
         "model": model,
         "stats": reply.stats,
     }))
@@ -810,35 +813,31 @@ fn lm_studio_chat(
 }
 
 fn lm_studio_text(body: &Value) -> Result<AiReply, String> {
-    let text = body
+    let items = body
         .get("output")
         .and_then(Value::as_array)
-        .map(|items| {
-            items
-                .iter()
-                .filter_map(|item| {
-                    if item.get("type").and_then(Value::as_str) == Some("message") {
-                        item.get("content").and_then(Value::as_str)
-                    } else {
-                        None
-                    }
-                })
-                .collect::<Vec<_>>()
-                .join("\n\n")
+        .ok_or_else(|| "LM Studio hat keine Textantwort geliefert.".to_owned())?;
+    let messages: Vec<&str> = items
+        .iter()
+        .filter_map(|item| {
+            if item.get("type").and_then(Value::as_str) == Some("message") {
+                item.get("content").and_then(Value::as_str)
+            } else {
+                None
+            }
         })
-        .unwrap_or_default();
-    if text.is_empty() {
-        Err("Der AI-Anbieter hat kein verwendbares Markdown-Dokument zurückgegeben.".to_owned())
-    } else {
-        Ok(AiReply {
-            text,
-            stats: stats_object(
-                finite_number(&body["stats"]["input_tokens"]),
-                finite_number(&body["stats"]["total_output_tokens"]),
-                finite_number(&body["stats"]["tokens_per_second"]),
-            ),
-        })
+        .collect();
+    if messages.is_empty() {
+        return Err("LM Studio hat keine Textantwort geliefert.".to_owned());
     }
+    Ok(AiReply {
+        text: messages.join("\n\n"),
+        stats: stats_object(
+            finite_number(&body["stats"]["input_tokens"]),
+            finite_number(&body["stats"]["total_output_tokens"]),
+            finite_number(&body["stats"]["tokens_per_second"]),
+        ),
+    })
 }
 
 fn openai_response(
@@ -934,22 +933,17 @@ fn chat_completions(
         })),
         Duration::from_secs(600),
     )?;
-    let text = body["choices"][0]["message"]["content"]
-        .as_str()
-        .unwrap_or("")
-        .to_owned();
-    if text.is_empty() {
-        Err("Der AI-Anbieter hat kein verwendbares Markdown-Dokument zurückgegeben.".to_owned())
-    } else {
-        Ok(AiReply {
-            text,
-            stats: stats_object(
-                finite_number(&body["usage"]["prompt_tokens"]),
-                finite_number(&body["usage"]["completion_tokens"]),
-                None,
-            ),
-        })
-    }
+    let Some(text) = body["choices"][0]["message"]["content"].as_str() else {
+        return Err("LM Studio hat keine Textantwort geliefert.".to_owned());
+    };
+    Ok(AiReply {
+        text: text.to_owned(),
+        stats: stats_object(
+            finite_number(&body["usage"]["prompt_tokens"]),
+            finite_number(&body["usage"]["completion_tokens"]),
+            None,
+        ),
+    })
 }
 
 fn finite_number(value: &Value) -> Option<f64> {
@@ -1524,6 +1518,13 @@ fn skip_js_whitespace(value: &str) -> &str {
 }
 
 fn unwrap_markdown(value: &str) -> Result<String, String> {
+    unwrap_markdown_with(
+        value,
+        "Der AI-Anbieter hat kein verwendbares Markdown-Dokument zurückgegeben.",
+    )
+}
+
+fn unwrap_markdown_with(value: &str, empty_message: &str) -> Result<String, String> {
     let mut output = crate::vault::js_trim(value).to_owned();
     if let Some(rest) = strip_think_block(&output) {
         output = rest;
@@ -1532,7 +1533,7 @@ fn unwrap_markdown(value: &str) -> Result<String, String> {
         output = inner;
     }
     if output.is_empty() || output.len() > 4 * 1024 * 1024 {
-        Err("Der AI-Anbieter hat kein verwendbares Markdown-Dokument zurückgegeben.".to_owned())
+        Err(empty_message.to_owned())
     } else {
         Ok(output)
     }
@@ -1745,6 +1746,30 @@ mod tests {
         assert_eq!(
             unwrap_markdown("<THINK>x</THINK>\nHallo\n\n").unwrap(),
             "Hallo"
+        );
+        assert_eq!(
+            unwrap_markdown("<think>x</think>").unwrap_err(),
+            "Der AI-Anbieter hat kein verwendbares Markdown-Dokument zurückgegeben."
+        );
+        assert_eq!(
+            super::unwrap_markdown_with(
+                "<think>x</think>",
+                "LM Studio hat kein verwendbares Markdown-Dokument zurückgegeben."
+            )
+            .unwrap_err(),
+            "LM Studio hat kein verwendbares Markdown-Dokument zurückgegeben."
+        );
+        assert_eq!(
+            lm_studio_text(&json!({ "output": [] })).err().as_deref(),
+            Some("LM Studio hat keine Textantwort geliefert.")
+        );
+        assert_eq!(
+            lm_studio_text(&json!({
+                "output": [{ "type": "message", "content": "" }]
+            }))
+            .ok()
+            .map(|reply| reply.text),
+            Some(String::new())
         );
     }
 
