@@ -2101,8 +2101,8 @@ fn file_uri(path: &Path) -> String {
 
 pub(crate) fn compare_names(left: &str, right: &str) -> std::cmp::Ordering {
     use std::cmp::Ordering;
-    let left: Vec<char> = left.chars().flat_map(|ch| ch.to_lowercase()).collect();
-    let right: Vec<char> = right.chars().flat_map(|ch| ch.to_lowercase()).collect();
+    let left = sort_key(left);
+    let right = sort_key(right);
     let mut left_index = 0;
     let mut right_index = 0;
     while left_index < left.len() && right_index < right.len() {
@@ -2135,7 +2135,43 @@ pub(crate) fn compare_names(left: &str, right: &str) -> std::cmp::Ordering {
         left_index += 1;
         right_index += 1;
     }
-    left.len().cmp(&right.len())
+    match (left_index == left.len(), right_index == right.len()) {
+        (true, true) => Ordering::Equal,
+        (true, false) => Ordering::Less,
+        (false, true) => Ordering::Greater,
+        (false, false) => Ordering::Equal,
+    }
+}
+
+/// German base order: case and accents do not change the position, and `ß` sorts as `ss`.
+fn sort_key(name: &str) -> Vec<char> {
+    use unicode_normalization::UnicodeNormalization;
+    let mut folded = String::new();
+    for character in name.nfd() {
+        for lower in character.to_lowercase() {
+            match lower {
+                'ß' => folded.push_str("ss"),
+                'æ' => folded.push_str("ae"),
+                'œ' => folded.push_str("oe"),
+                'ø' => folded.push('o'),
+                'ł' => folded.push('l'),
+                character if is_combining_mark(character) => {}
+                character => folded.push(character),
+            }
+        }
+    }
+    folded.chars().collect()
+}
+
+fn is_combining_mark(character: char) -> bool {
+    matches!(
+        character,
+        '\u{0300}'..='\u{036F}'
+            | '\u{1AB0}'..='\u{1AFF}'
+            | '\u{1DC0}'..='\u{1DFF}'
+            | '\u{20D0}'..='\u{20FF}'
+            | '\u{FE20}'..='\u{FE2F}'
+    )
 }
 
 fn entry_name_order(left: &Value, right: &Value) -> std::cmp::Ordering {
@@ -2951,4 +2987,21 @@ fn ink_anchor(transcript: &str, query: &str) -> Option<f64> {
             Some(index as f64 / (parsed.len() - 1) as f64)
         }
     })
+}
+
+#[cfg(test)]
+mod sort_tests {
+    use super::compare_names;
+    use std::cmp::Ordering;
+
+    #[test]
+    fn german_names_use_the_electron_base_order() {
+        assert_eq!(compare_names("Äpfel", "Apfel"), Ordering::Equal);
+        assert_eq!(compare_names("Straße", "Strasse"), Ordering::Equal);
+        assert_eq!(compare_names("Mu\u{0308}he", "Mühe"), Ordering::Equal);
+        assert_eq!(compare_names("02", "2"), Ordering::Equal);
+        assert_eq!(compare_names("Seite 2", "Seite 10"), Ordering::Less);
+        assert_eq!(compare_names("Äpfel", "Zen"), Ordering::Less);
+        assert_eq!(compare_names("Über", "Zen"), Ordering::Less);
+    }
 }

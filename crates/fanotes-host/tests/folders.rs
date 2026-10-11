@@ -155,3 +155,36 @@ fn a_legacy_lernwerk_directory_becomes_fanotes() {
     assert!(!unsafe_vault.join(".fanotes").exists());
     let _ = fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn the_tree_sorts_umlauts_with_their_base_letters() {
+    let (mut host, vault, _) = host();
+    for name in [
+        "Zen.md",
+        "Äpfel.md",
+        "Banane.md",
+        "Straße.md",
+        "Apfel.md",
+        "Seite 10.md",
+        "Seite 2.md",
+        "Mu\u{0308}he.md",
+    ] {
+        fs::write(vault.join(name), b"x\n").unwrap();
+    }
+    let names: Vec<_> = host
+        .dispatch("fanotes:get-tree", &[])
+        .unwrap()
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|entry| entry["kind"] == "file")
+        .map(|entry| entry["name"].as_str().unwrap().to_owned())
+        .collect();
+    let index = |name: &str| names.iter().position(|entry| entry == name).unwrap();
+    assert!(index("Apfel.md") < index("Banane.md"));
+    assert!(index("Äpfel.md") < index("Banane.md"));
+    assert!(index("Äpfel.md") < index("Zen.md"));
+    assert!(index("Straße.md") < index("Zen.md"));
+    assert!(index("Seite 2.md") < index("Seite 10.md"));
+    assert!(index("Mu\u{0308}he.md") < index("Zen.md"));
+}
