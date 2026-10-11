@@ -40,7 +40,7 @@
     "check:correction-learn": "node scripts/check-correction-learn.mjs",
     "check:trocr": "node scripts/check-trocr-integration.cjs",
     "check:native-ocr": "node scripts/check-native-ocr.cjs",
-    "check:packaged-native-ocr": "node scripts/check-packaged-native-ocr.cjs",
+    "check:packaged-native-ocr": "node scripts/check-packaged-native-ocr.cjs && node scripts/check-packaged-native-ocr-startup.cjs",
     "check:standard-recognition": "node scripts/check-standard-recognition.cjs",
     "check:text-to-handwriting": "node scripts/check-text-to-handwriting.mjs",
     "check:tth-dialog": "node scripts/check-tth-dialog.mjs",
