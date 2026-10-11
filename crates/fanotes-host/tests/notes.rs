@@ -149,3 +149,45 @@ fn saving_markdown_keeps_the_handwriting_sidecar() {
         "lines"
     );
 }
+
+#[test]
+fn renaming_and_deleting_a_note_moves_its_companion() {
+    let (mut host, vault) = host();
+    host.dispatch(
+        "fanotes:write-file",
+        &[json!("Mathe/Seite.md"), json!("Hallo\n")],
+    )
+    .unwrap();
+    host.dispatch(
+        "fanotes:set-note-paper-style",
+        &[json!("Mathe/Seite.md"), json!("grid")],
+    )
+    .unwrap();
+    let renamed = host
+        .dispatch(
+            "fanotes:rename-entry",
+            &[json!("Mathe/Seite.md"), json!("Blatt.md")],
+        )
+        .unwrap();
+    assert_eq!(renamed, "Mathe/Blatt.md");
+    assert!(!vault.join("Mathe/Seite.famd").exists());
+    assert!(vault.join("Mathe/Blatt.famd").is_file());
+    assert_eq!(
+        host.dispatch("fanotes:read-note-paper-style", &[json!("Mathe/Blatt.md")])
+            .unwrap(),
+        "grid"
+    );
+    host.dispatch("fanotes:create-folder", &[json!(""), json!("Physik")])
+        .unwrap();
+    host.dispatch(
+        "fanotes:move-entry",
+        &[json!("Mathe/Blatt.md"), json!("Physik")],
+    )
+    .unwrap();
+    assert!(vault.join("Physik/Blatt.famd").is_file());
+    assert!(!vault.join("Mathe/Blatt.famd").exists());
+    host.dispatch("fanotes:trash-entry", &[json!("Physik/Blatt.md")])
+        .unwrap();
+    assert!(!vault.join("Physik/Blatt.md").exists());
+    assert!(!vault.join("Physik/Blatt.famd").exists());
+}

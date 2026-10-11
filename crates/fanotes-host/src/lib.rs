@@ -603,15 +603,17 @@ impl Host {
         }
         fs::rename(&source, &destination)
             .map_err(|_| "Der Eintrag konnte nicht umbenannt werden.".to_owned())?;
+        let next = destination
+            .strip_prefix(&root)
+            .unwrap_or(&destination)
+            .to_string_lossy()
+            .replace('\\', "/");
         if was_dir {
-            let next = destination
-                .strip_prefix(&root)
-                .unwrap_or(&destination)
-                .to_string_lossy()
-                .replace('\\', "/");
             let _ = retarget_folder_colors(&root, &normalized, &next);
+        } else {
+            move_note_companion(&root, &normalized, &next);
         }
-        Ok(Value::Null)
+        Ok(Value::String(next))
     }
 
     fn move_entry(&mut self, relative: &str, dest_folder: &str) -> Result<Value, String> {
@@ -630,26 +632,33 @@ impl Host {
         let destination = folder.join(name);
         fs::rename(&source, &destination)
             .map_err(|_| "Der Eintrag konnte nicht verschoben werden.".to_owned())?;
+        let next = destination
+            .strip_prefix(&root)
+            .unwrap_or(&destination)
+            .to_string_lossy()
+            .replace('\\', "/");
         if was_dir {
-            let next = destination
-                .strip_prefix(&root)
-                .unwrap_or(&destination)
-                .to_string_lossy()
-                .replace('\\', "/");
             let _ = retarget_folder_colors(&root, &normalized, &next);
+        } else {
+            move_note_companion(&root, &normalized, &next);
         }
         Ok(Value::Null)
     }
 
     fn trash_entry(&mut self, relative: &str) -> Result<Value, String> {
-        let path = vault::resolve_inside(self.require_vault()?, relative)?;
-        if path.is_dir() {
+        let root = self.require_vault()?.to_path_buf();
+        let normalized = vault::normalize_relative_path(relative, false, false)?;
+        let path = vault::resolve_inside(&root, &normalized)?;
+        let is_dir = fs::symlink_metadata(&path).is_ok_and(|meta| meta.is_dir());
+        if is_dir {
             fs::remove_dir_all(&path)
                 .map_err(|_| "Der Eintrag konnte nicht entfernt werden.".to_owned())?;
         } else {
             fs::remove_file(&path)
                 .map_err(|_| "Der Eintrag konnte nicht entfernt werden.".to_owned())?;
+            remove_note_companion(&root, &normalized);
         }
+        let _ = forget_folder_colors(&root, &normalized);
         Ok(Value::Null)
     }
 
@@ -1176,6 +1185,62 @@ fn write_folder_colors(root: &Path, colors: &BTreeMap<String, String>) -> Result
     }
     fs::write(internal.join("folder-colors.json"), snapshot)
         .map_err(|_| "Die Ordnerfarbe konnte nicht gespeichert werden.".to_owned())
+}
+
+fn move_note_companion(root: &Path, old_relative: &str, new_relative: &str) {
+    let Some(old_companion) = note_companion_relative(old_relative) else {
+        return;
+    };
+    let Some(new_companion) = note_companion_relative(new_relative) else {
+        return;
+    };
+    let Ok(source) = vault::resolve_inside(root, &old_companion) else {
+        return;
+    };
+    if !source.is_file() {
+        return;
+    }
+    let Ok(destination) = vault::resolve_inside(root, &new_companion) else {
+        return;
+    };
+    if let Some(parent) = destination.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    let _ = fs::rename(source, destination);
+}
+
+fn remove_note_companion(root: &Path, relative: &str) {
+    let Some(companion) = note_companion_relative(relative) else {
+        return;
+    };
+    let Ok(path) = vault::resolve_inside(root, &companion) else {
+        return;
+    };
+    if path.is_file() {
+        let _ = fs::remove_file(path);
+    }
+}
+
+fn note_companion_relative(relative: &str) -> Option<String> {
+    let lower = relative.to_lowercase();
+    let extension = if lower.ends_with(".famd") {
+        ".md"
+    } else if lower.ends_with(".md") || lower.ends_with(".markdown") || lower.ends_with(".pdf") {
+        ".famd"
+    } else {
+        return None;
+    };
+    Some(fanotes_famd::companion_note_path(relative, extension))
+}
+
+fn forget_folder_colors(root: &Path, relative: &str) -> Result<(), String> {
+    let mut colors = read_folder_colors(root)?;
+    let before = colors.len();
+    colors.retain(|path, _| path != relative && !path.starts_with(&format!("{relative}/")));
+    if colors.len() != before {
+        write_folder_colors(root, &colors)?;
+    }
+    Ok(())
 }
 
 fn retarget_folder_colors(root: &Path, old: &str, new: &str) -> Result<(), String> {
