@@ -275,3 +275,45 @@ fn pdf_and_markdown_notes_reopen_their_handwriting() {
         "Es dürfen nur Markdown-Dateien, PDF-Notizen und FaNotes-Handschriftdateien (.famd) bearbeitet werden."
     );
 }
+
+#[test]
+fn handwriting_with_a_bad_byte_still_opens() {
+    let (dir, mut host) = host();
+    fs::write(dir.join("vault").join("Notiz.md"), "Hallo\n").unwrap();
+    host.dispatch(
+        "fanotes:save-drawing",
+        &[json!({
+            "id": "skizze-1",
+            "title": "Skizze",
+            "drawingJson": drawing("Skizze"),
+            "noteRelativePath": "Notiz.md",
+        })],
+    )
+    .unwrap();
+    let famd_path = dir.join("vault").join("Notiz.famd");
+    let mut bytes = fs::read(&famd_path).unwrap();
+    let needle = b"Skizze";
+    let start = bytes
+        .windows(needle.len())
+        .position(|window| window == needle)
+        .unwrap();
+    bytes[start + 2] = 0xff;
+    fs::write(&famd_path, &bytes).unwrap();
+
+    let loaded = host
+        .dispatch("fanotes:read-famd-ink", &[json!("Notiz.md")])
+        .unwrap();
+    assert_eq!(loaded["title"], "Sk\u{FFFD}zze");
+    assert!(loaded["drawingJson"]
+        .as_str()
+        .unwrap()
+        .contains("Sk\u{FFFD}zze"));
+
+    let brace = bytes.iter().position(|byte| *byte == b'{').unwrap();
+    bytes[brace] = 0xff;
+    fs::write(&famd_path, &bytes).unwrap();
+    assert!(host
+        .dispatch("fanotes:read-famd-ink", &[json!("Notiz.md")])
+        .unwrap()
+        .is_null());
+}

@@ -151,8 +151,9 @@ pub fn read_famd_ink(host: &Host, relative: &str) -> Result<Value, String> {
         Ok(meta) if meta.len() as usize > MAX_FAMD_BYTES => {
             return Err("Die Datei ist zu groß.".to_owned());
         }
-        Ok(_) => fs::read_to_string(&path)
-            .map_err(|_| "Die Datei konnte nicht gelesen werden.".to_owned())?,
+        Ok(_) => lossy_utf8(
+            fs::read(&path).map_err(|_| "Die Datei konnte nicht gelesen werden.".to_owned())?,
+        ),
     };
     let parsed = parse_famd(&source);
     let Some(payload) = parsed.payload else {
