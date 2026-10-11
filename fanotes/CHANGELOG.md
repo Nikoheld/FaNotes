@@ -2,6 +2,8 @@
 
 ## Unveröffentlicht
 
+- **Stabile Paketnamen.** Die Website erkennt wieder vollständige Stable-Pakete. Der Nightly-Zusatz im Dateinamen ist optional.
+
 ## 2026.10.2
 
 - **Nightly-Kanal.** Neben Stable und Beta kann der Update-Kanal auf Nightly stehen. Nightly ist jeder Commit auf main, der kein Stable- oder Beta-Release ist. Diese Stände können unfertig sein. Ein neuerer Stable-Stand wird automatisch bevorzugt.

@@ -7,7 +7,7 @@
 
 const VERSION_PATTERN = /^\d+\.\d+\.\d+(?:-beta\.\d+|-nightly\.\d{14}\.[a-f0-9]{7,40})?$/u
 const VERSION_CAPTURE = /^(\d+)\.(\d+)\.(\d+)(?:-beta\.(\d+)|-nightly\.(\d{14})\.([a-f0-9]{7,40}))?$/u
-const RELEASE_VERSION_SOURCE = String.raw`\d+\.\d+\.\d+(?:-beta\.\d+|-nightly\.\d{14}\.[a-f0-9]{7,40})`
+const RELEASE_VERSION_SOURCE = String.raw`\d+\.\d+\.\d+(?:-beta\.\d+|-nightly\.\d{14}\.[a-f0-9]{7,40})?`
 const LINUX_PACKAGE_PATTERN = new RegExp(`^FaNotes-(${RELEASE_VERSION_SOURCE})-x86_64\\.(AppImage|tar\\.gz)$`, 'u')
 const WINDOWS_PACKAGE_PATTERN = new RegExp(`^FaNotes-(Setup|Portable)-(${RELEASE_VERSION_SOURCE})-x64\\.exe$`, 'u')
 const DELTA_ROUTE_PATTERN = new RegExp(`^/download/delta/(linux|windows)-x64/(?:(beta|nightly)/)?(${RELEASE_VERSION_SOURCE})$`, 'u')

@@ -14,6 +14,7 @@ const { EventEmitter } = require('node:events')
 const { compareVersions, createUpdateManager, diagnoseUpdateFailure, INSTALL_HELPER, isPrivateAddress, shouldReplaceManagedDesktopFile, stableStringify, verifyManifest, waitForChildSpawn } = require('../electron/updater.cjs')
 const {
   EMPTY_NIGHTLY_CHANGELOG,
+  DELTA_ROUTE_PATTERN,
   LINUX_PACKAGE_PATTERN,
   WINDOWS_PACKAGE_PATTERN,
   channelForPackagedVersion,
@@ -128,9 +129,15 @@ async function main() {
     assert.equal(channelForPackagedVersion('2026.10.2-beta.1'), 'beta')
     assert.equal(channelForPackagedVersion('2026.10.2'), 'stable')
     assert.equal(channelForPackagedVersion('nope'), 'stable')
+    assert.equal(LINUX_PACKAGE_PATTERN.test('FaNotes-2026.10.2-x86_64.AppImage'), true)
+    assert.equal(LINUX_PACKAGE_PATTERN.test('FaNotes-2026.10.2-x86_64.tar.gz'), true)
     assert.equal(LINUX_PACKAGE_PATTERN.test(`FaNotes-${nightlySample}-x86_64.AppImage`), true)
     assert.equal(LINUX_PACKAGE_PATTERN.test('FaNotes-2026.10.2-nightly.1.abcdef0-x86_64.AppImage'), false)
+    assert.equal(WINDOWS_PACKAGE_PATTERN.test('FaNotes-Setup-2026.10.2-x64.exe'), true)
+    assert.equal(WINDOWS_PACKAGE_PATTERN.test('FaNotes-Portable-2026.10.2-x64.exe'), true)
     assert.equal(WINDOWS_PACKAGE_PATTERN.test(`FaNotes-Setup-${nightlySample}-x64.exe`), true)
+    assert.equal(DELTA_ROUTE_PATTERN.test('/download/delta/linux-x64/2026.10.1'), true)
+    assert.equal(DELTA_ROUTE_PATTERN.test(`/download/delta/windows-x64/nightly/${nightlySample}`), true)
     assert.equal(EMPTY_NIGHTLY_CHANGELOG.includes('Nightly'), true)
     const sourcePath = path.join(temporary, 'FaNotes-2.16.0-x86_64.AppImage')
     const targetPath = path.join(temporary, 'FaNotes-2.17.0-x86_64.AppImage')
