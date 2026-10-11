@@ -16,7 +16,8 @@ pub fn normalize_relative_path(
     if value.contains('\\') || Path::new(value).is_absolute() || value.starts_with('/') {
         return Err("Nur relative Vault-Pfade sind erlaubt.".to_owned());
     }
-    let trimmed = value.trim_start_matches("./").trim_end_matches('/');
+    let without_prefix = value.strip_prefix("./").unwrap_or(value);
+    let trimmed = without_prefix.strip_suffix('/').unwrap_or(without_prefix);
     if trimmed.is_empty() {
         if allow_root {
             return Ok(String::new());
@@ -321,5 +322,21 @@ mod tests {
         assert!(note_path.len() > 4096);
         assert!(normalize_relative_path(&note_path, false, false).is_ok());
         assert!(normalize_relative_path(&"Ä".repeat(4097), false, false).is_err());
+    }
+
+    #[test]
+    fn a_repeated_dot_slash_is_rejected() {
+        assert_eq!(
+            normalize_relative_path("./Seite.md", false, false).unwrap(),
+            "Seite.md"
+        );
+        assert_eq!(
+            normalize_relative_path("./Seite.md/", false, false).unwrap(),
+            "Seite.md"
+        );
+        assert!(normalize_relative_path("././Seite.md", false, false).is_err());
+        assert!(normalize_relative_path("Seite.md//", false, false).is_err());
+        assert_eq!(normalize_relative_path("./", true, false).unwrap(), "");
+        assert!(normalize_relative_path("././", true, false).is_err());
     }
 }
