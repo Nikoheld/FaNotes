@@ -29,7 +29,6 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use base64::Engine;
-use filetime::{set_file_mtime, FileTime};
 use sha2::{Digest, Sha256};
 
 use serde_json::{json, Map, Value};
@@ -212,15 +211,18 @@ impl Host {
             ),
             "fanotes:load-handwriting-recognition-resources" => resources::load_handwriting(),
             "fanotes:recognize-native-handwriting-line" => {
-                ocr::recognize_line(args.first().unwrap_or(&Value::Null))
+                let configured = self
+                    .settings
+                    .get("ocrThreadLimit")
+                    .and_then(Value::as_i64)
+                    .unwrap_or(0);
+                ocr::recognize_line(args.first().unwrap_or(&Value::Null), configured)
             }
-            "fanotes:enhanced-math-get-state" => {
-                Ok(feature_state("posformer-crohme-q4-k", "CC-BY-NC-SA-3.0"))
-            }
+            "fanotes:enhanced-math-get-state" => Ok(enhanced_math_state()),
             "fanotes:enhanced-math-install" | "fanotes:enhanced-math-recognize" => {
                 Err("PosFormer ist nicht installiert.".to_owned())
             }
-            "fanotes:qwen-vision-get-state" => Ok(feature_state("qwen-vision", "Apache-2.0")),
+            "fanotes:qwen-vision-get-state" => Ok(qwen_vision_state()),
             "fanotes:qwen-vision-install" | "fanotes:qwen-vision-recognize" => {
                 Err("Qwen Vision ist nicht installiert.".to_owned())
             }
@@ -355,12 +357,9 @@ impl Host {
         }
         let root = self.require_vault()?.to_path_buf();
         let (path, normalized) = vault::resolve_sync_path(&root, &relative, true)?;
-        notes::atomic_write(&path, &bytes, 0o600)?;
-        if let Some(mtime_ms) = arg_mtime_ms(args.get(2)) {
-            let seconds = mtime_ms.div_euclid(1000);
-            let nanos = (mtime_ms.rem_euclid(1000) as u32).saturating_mul(1_000_000);
-            let _ = set_file_mtime(&path, FileTime::from_unix_time(seconds, nanos));
-        }
+        create_sync_directories(&root, &path)?;
+        let mtime = arg_mtime_ms(args.get(2)).and_then(system_time_from_millis);
+        notes::atomic_write_with_mtime(&path, &bytes, 0o600, mtime)?;
         let meta = fs::symlink_metadata(&path)
             .map_err(|_| "Die Datei konnte nicht gelesen werden.".to_owned())?;
         if meta.file_type().is_symlink() || !meta.is_file() {
@@ -516,7 +515,7 @@ impl Host {
         let Some(json) = incoming.as_str() else {
             return Err("Die Sync-Anmeldedaten sind ungültig.".to_owned());
         };
-        if json.len() > 64 * 1024 {
+        if vault::utf16_len(json) > 64 * 1024 {
             return Err("Die Sync-Anmeldedaten sind ungültig.".to_owned());
         }
         secrets::set(self.secret_store, &account, json)?;
@@ -753,7 +752,7 @@ impl Host {
         }
         let bytes =
             fs::read(&path).map_err(|_| "Die Datei konnte nicht gelesen werden.".to_owned())?;
-        let text = String::from_utf8(bytes).map_err(|_| "Die Datei ist kein Text.".to_owned())?;
+        let text = String::from_utf8_lossy(&bytes);
         Ok(Value::String(fanotes_famd::strip_famd_payload(&text)))
     }
 
@@ -768,10 +767,8 @@ impl Host {
         }
         let path = vault::resolve_note_file(&root, &normalized)?;
         if notes::records_history(&normalized) {
-            if let Ok(previous) = fs::read(&path) {
-                if let Ok(text) = String::from_utf8(previous) {
-                    let _ = notes::record_history(&root, &normalized, &text);
-                }
+            if let Some(text) = notes::read_lossy_string(&path) {
+                let _ = notes::record_history(&root, &normalized, &text);
             }
         }
         let paper = self
@@ -968,7 +965,12 @@ impl Host {
             .and_then(|name| name.to_str())
             .ok_or_else(|| "Ungültiger Name.".to_owned())?
             .to_owned();
-        let mut desired = safe_entry_name(next_name)?;
+        let name_input = if next_name.trim().is_empty() {
+            current_name.as_str()
+        } else {
+            next_name
+        };
+        let mut desired = safe_entry_name(name_input)?;
         if !was_dir {
             if entry_extension(&desired).is_empty() {
                 desired.push_str(&entry_extension(&current_name));
@@ -1088,7 +1090,7 @@ impl Host {
         if query.is_empty() {
             return Ok(json!([]));
         }
-        let query = query.chars().take(500).collect::<String>();
+        let query = vault::truncate_utf16(query, 500);
         let root = self.require_vault()?;
         let needle = query.to_lowercase();
         let mut files = Vec::new();
@@ -1111,7 +1113,7 @@ impl Host {
             let raw = if lower.ends_with(".pdf") {
                 String::new()
             } else {
-                fs::read_to_string(&path).unwrap_or_default()
+                notes::read_lossy_string(&path).unwrap_or_default()
             };
             let parsed = fanotes_famd::parse_famd(&raw);
             let mut content = if parsed.markdown.is_empty() {
@@ -1127,7 +1129,7 @@ impl Host {
             if !lower.ends_with(".famd") {
                 let famd = fanotes_famd::companion_note_path(&relative, ".famd");
                 if let Ok(companion_path) = vault::resolve_existing_entry(root, &famd) {
-                    if let Ok(companion) = fs::read_to_string(companion_path) {
+                    if let Some(companion) = notes::read_lossy_string(&companion_path) {
                         let parsed_companion = fanotes_famd::parse_famd(&companion);
                         if lower.ends_with(".pdf") && !parsed_companion.markdown.is_empty() {
                             content = parsed_companion.markdown;
@@ -1137,14 +1139,21 @@ impl Host {
                             .as_ref()
                             .and_then(|payload| payload.ink.clone())
                         {
-                            if transcript.is_empty() {
-                                transcript = ink_transcript(Some(&companion_ink));
+                            // The companion is the handwriting the note opens.
+                            // A string transcript there replaces one embedded in
+                            // the markdown file, including an empty string.
+                            if let Some(text) = companion_ink
+                                .get("searchTranscript")
+                                .and_then(Value::as_str)
+                            {
+                                transcript = bounded_transcript(text);
                             }
                             ink = Some(companion_ink);
                         }
                     }
                 }
             }
+            remember_drawing_owner(&mut owners, &relative, &content, ink.as_ref());
             let haystack = format!("{relative}\n{content}\n{transcript}").to_lowercase();
             if !haystack.contains(&needle) {
                 continue;
@@ -1152,7 +1161,8 @@ impl Host {
             let matches = count_matches(&haystack, &needle);
             let content_index = content.to_lowercase().find(&needle);
             let excerpt = if let Some(index) = content_index {
-                excerpt(&content, index, needle.len())
+                let (start, _) = original_match_span(&content, &needle, index);
+                excerpt(&content, start, vault::utf16_len(&query))
             } else {
                 format!("Dateiname · {relative}")
             };
@@ -1173,9 +1183,6 @@ impl Host {
             if let Some(anchor) = ink_anchor(&transcript, &query) {
                 hit["inkAnchor"] = json!({ "y": anchor });
             }
-            if let Some(id) = drawing_owner_id(&content, ink.as_ref()) {
-                owners.entry(id).or_insert_with(|| relative.clone());
-            }
             hits.push(hit);
         }
         search_drawings(root, &needle, &query, &owners, &mut hits);
@@ -1185,7 +1192,7 @@ impl Host {
                 .unwrap_or(0)
                 .cmp(&left["matches"].as_u64().unwrap_or(0))
                 .then_with(|| {
-                    compare_names(
+                    dictionary_order(
                         left["title"].as_str().unwrap_or(""),
                         right["title"].as_str().unwrap_or(""),
                     )
@@ -1222,7 +1229,7 @@ impl Host {
                 } else {
                     4096
                 };
-                if value.contains('\0') || value.len() > limit {
+                if value.contains('\0') || vault::utf16_len(value) > limit {
                     continue;
                 }
                 if value.is_empty() && !self.secrets_loaded {
@@ -1317,6 +1324,13 @@ impl Host {
     }
 
     fn update_state(&self) -> Value {
+        let enabled = |key| self.settings.get(key).and_then(Value::as_bool) != Some(false);
+        let channel = if self.settings.get("updateChannel").and_then(Value::as_str) == Some("beta")
+        {
+            "beta"
+        } else {
+            "stable"
+        };
         json!({
             "status": "idle",
             "supported": false,
@@ -1330,11 +1344,11 @@ impl Host {
             "error": null,
             "block": null,
             "checkedAt": null,
-            "installationKind": "managed-appimage",
-            "autoCheckUpdates": true,
-            "autoDownloadUpdates": false,
-            "installUpdatesOnQuit": false,
-            "updateChannel": "stable",
+            "installationKind": installation_kind(),
+            "autoCheckUpdates": enabled("autoCheckUpdates"),
+            "autoDownloadUpdates": enabled("autoDownloadUpdates"),
+            "installUpdatesOnQuit": enabled("installUpdatesOnQuit"),
+            "updateChannel": channel,
             "releaseHost": "electron"
         })
     }
@@ -1609,6 +1623,7 @@ fn asset_mime(relative: &str) -> Result<&'static str, String> {
         "jpg" | "jpeg" => Ok("image/jpeg"),
         "webp" => Ok("image/webp"),
         "gif" => Ok("image/gif"),
+        "svg" => Ok("image/svg+xml"),
         "pdf" => Ok("application/pdf"),
         "html" | "htm" => Ok("text/html"),
         _ => Err("Dieser Dateityp ist für die Vorschau nicht erlaubt.".to_owned()),
@@ -1646,18 +1661,60 @@ fn arg_string(args: &[Value], index: usize) -> Result<String, String> {
 }
 
 fn default_settings() -> Map<String, Value> {
-    settings::defaults()
+    let mut settings = settings::defaults();
+    if settings::is_beta_release(APP_VERSION) {
+        settings.insert("updateChannel".to_owned(), Value::String("beta".to_owned()));
+    }
+    settings
 }
 
-fn feature_state(model_id: &str, license: &str) -> Value {
+fn installation_kind() -> &'static str {
+    if cfg!(windows) {
+        "windows-installer"
+    } else if std::env::var_os("APPIMAGE").is_some_and(|value| !value.is_empty()) {
+        "appimage"
+    } else {
+        "managed-appimage"
+    }
+}
+
+fn enhanced_math_state() -> Value {
     json!({
         "supported": false,
         "installed": false,
         "downloading": false,
-        "modelId": model_id,
-        "size": 0,
-        "license": license,
-        "homepage": ""
+        "modelId": "posformer-crohme-q4-k",
+        "size": 10_316_032,
+        "license": "CC-BY-NC-SA-3.0",
+        "homepage": "https://huggingface.co/cstr/posformer-crohme-GGUF"
+    })
+}
+
+fn qwen_vision_state() -> Value {
+    json!({
+        "supported": false,
+        "installed": false,
+        "downloading": false,
+        "runtimeInstalling": false,
+        "runtimeReady": false,
+        "runtimePhase": "idle",
+        "runtimeMessage": null,
+        "npu": false,
+        "genai": false,
+        "devices": [],
+        "npuDevice": null,
+        "host": null,
+        "openvinoVersion": null,
+        "modelId": "qwen3-vl-2b-int4-npu",
+        "label": "Empfohlen · Qwen3-VL 2B · OpenVINO INT4 · NPU",
+        "recommended": true,
+        "precision": "int4",
+        "device": "NPU",
+        "license": "Apache-2.0",
+        "homepage": "https://huggingface.co/Qwen/Qwen3-VL-2B-Instruct",
+        "repo": "shawnxhong/Qwen3-VL-2B-Instruct-ov-int4",
+        "error": "Qwen Vision ist in diesem Paket nicht enthalten.",
+        "installHint": null
     })
 }
 
@@ -1677,6 +1734,46 @@ fn is_vault_id(value: &str) -> bool {
         && value
             .bytes()
             .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+}
+
+fn system_time_from_millis(millis: i64) -> Option<SystemTime> {
+    if millis <= 0 {
+        return None;
+    }
+    let seconds = millis.div_euclid(1000);
+    let nanos = (millis.rem_euclid(1000) as u32).saturating_mul(1_000_000);
+    UNIX_EPOCH.checked_add(std::time::Duration::new(seconds as u64, nanos))
+}
+
+fn create_sync_directories(root: &Path, file: &Path) -> Result<(), String> {
+    let Some(parent) = file.parent() else {
+        return Ok(());
+    };
+    let relative = parent
+        .strip_prefix(root)
+        .map_err(|_| "Der Pfad liegt außerhalb des Vaults.".to_owned())?;
+    let mut cursor = root.to_path_buf();
+    for component in relative.components() {
+        cursor.push(component);
+        match fs::symlink_metadata(&cursor) {
+            Ok(meta) if meta.file_type().is_symlink() || !meta.is_dir() => {
+                return Err("Ein Pfadbestandteil ist kein Ordner.".to_owned());
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                fs::create_dir(&cursor)
+                    .map_err(|_| "Der Ordner konnte nicht angelegt werden.".to_owned())?;
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    fs::set_permissions(&cursor, fs::Permissions::from_mode(0o700))
+                        .map_err(|_| "Der Ordner konnte nicht angelegt werden.".to_owned())?;
+                }
+            }
+            Err(_) => return Err("Der Ordner konnte nicht angelegt werden.".to_owned()),
+        }
+    }
+    Ok(())
 }
 
 fn arg_mtime_ms(value: Option<&Value>) -> Option<i64> {
@@ -1789,7 +1886,7 @@ fn entry_name_allowed(name: &str) -> bool {
         && name != ".."
         && !name.contains('/')
         && !name.contains('\\')
-        && !name.chars().any(|ch| ch.is_control() || ch == '\u{7f}')
+        && !vault::has_c0_or_del(name)
         && !matches!(name.to_ascii_lowercase().as_str(), ".fanotes" | ".lernwerk")
 }
 
@@ -2002,28 +2099,17 @@ pub fn openable_http_url(raw: &str) -> Option<String> {
 }
 
 fn http_link(raw: &str) -> Result<String, String> {
-    if raw.is_empty()
-        || raw.len() > 4096
-        || raw.chars().any(|ch| ch.is_control() || ch.is_whitespace())
-    {
+    if raw.is_empty() || vault::utf16_len(raw) > 4096 {
         return Err("Ungültiger externer Link.".to_owned());
     }
-    let (scheme, rest) = if let Some(rest) = raw.strip_prefix("https://") {
-        ("https", rest)
-    } else if let Some(rest) = raw.strip_prefix("http://") {
-        ("http", rest)
-    } else {
-        return Err("Nur sichere HTTP(S)-Links ohne Zugangsdaten sind erlaubt.".to_owned());
-    };
-    let authority = rest.split(['/', '?', '#']).next().unwrap_or(rest);
-    if authority.is_empty() || authority.contains('@') {
+    let parsed = url::Url::parse(raw).map_err(|_| "Ungültiger externer Link.".to_owned())?;
+    if !matches!(parsed.scheme(), "http" | "https")
+        || !parsed.username().is_empty()
+        || parsed.password().is_some()
+    {
         return Err("Nur sichere HTTP(S)-Links ohne Zugangsdaten sind erlaubt.".to_owned());
     }
-    if rest.contains('/') || rest.contains('?') || rest.contains('#') {
-        Ok(format!("{scheme}://{rest}"))
-    } else {
-        Ok(format!("{scheme}://{rest}/"))
-    }
+    Ok(parsed.to_string())
 }
 
 fn reveal_target(root: &Path, relative: &str) -> Result<PathBuf, String> {
@@ -2104,6 +2190,15 @@ fn file_uri(path: &Path) -> String {
 }
 
 pub(crate) fn compare_names(left: &str, right: &str) -> std::cmp::Ordering {
+    static COLLATOR: std::sync::OnceLock<Option<icu_collator::CollatorBorrowed<'static>>> =
+        std::sync::OnceLock::new();
+    if let Some(collator) = COLLATOR.get_or_init(german_numeric_base_collator).as_ref() {
+        return collator.compare(left, right);
+    }
+    compare_names_fallback(left, right)
+}
+
+fn compare_names_fallback(left: &str, right: &str) -> std::cmp::Ordering {
     use std::cmp::Ordering;
     let left = sort_key(left);
     let right = sort_key(right);
@@ -2176,6 +2271,72 @@ fn is_combining_mark(character: char) -> bool {
             | '\u{20D0}'..='\u{20FF}'
             | '\u{FE20}'..='\u{FE2F}'
     )
+}
+
+fn german_dictionary_collator() -> Option<icu_collator::CollatorBorrowed<'static>> {
+    icu_collator::Collator::try_new(
+        icu_locale_core::locale!("de").into(),
+        icu_collator::options::CollatorOptions::default(),
+    )
+    .ok()
+}
+
+/// German dictionary order, matching `localeCompare(name, 'de')`.
+pub(crate) fn dictionary_order(left: &str, right: &str) -> std::cmp::Ordering {
+    static COLLATOR: std::sync::OnceLock<Option<icu_collator::CollatorBorrowed<'static>>> =
+        std::sync::OnceLock::new();
+    compare_with(
+        left,
+        right,
+        COLLATOR.get_or_init(german_dictionary_collator),
+    )
+}
+
+/// German base order without numeric runs, matching `localeCompare(name, 'de', { sensitivity: 'base' })`.
+pub(crate) fn base_dictionary_order(left: &str, right: &str) -> std::cmp::Ordering {
+    static COLLATOR: std::sync::OnceLock<Option<icu_collator::CollatorBorrowed<'static>>> =
+        std::sync::OnceLock::new();
+    compare_with(left, right, COLLATOR.get_or_init(german_base_collator))
+}
+
+/// German dictionary order with numeric runs, matching `localeCompare(name, 'de', { numeric: true })`.
+pub(crate) fn numeric_dictionary_order(left: &str, right: &str) -> std::cmp::Ordering {
+    static COLLATOR: std::sync::OnceLock<Option<icu_collator::CollatorBorrowed<'static>>> =
+        std::sync::OnceLock::new();
+    compare_with(left, right, COLLATOR.get_or_init(german_numeric_collator))
+}
+
+fn compare_with(
+    left: &str,
+    right: &str,
+    collator: &Option<icu_collator::CollatorBorrowed<'static>>,
+) -> std::cmp::Ordering {
+    if let Some(collator) = collator {
+        collator.compare(left, right)
+    } else {
+        left.cmp(right)
+    }
+}
+
+fn german_base_collator() -> Option<icu_collator::CollatorBorrowed<'static>> {
+    let mut options = icu_collator::options::CollatorOptions::default();
+    options.strength = Some(icu_collator::options::Strength::Primary);
+    icu_collator::Collator::try_new(icu_locale_core::locale!("de").into(), options).ok()
+}
+
+fn german_numeric_collator() -> Option<icu_collator::CollatorBorrowed<'static>> {
+    let mut prefs = icu_collator::CollatorPreferences::from(icu_locale_core::locale!("de"));
+    prefs.numeric_ordering = Some(icu_collator::preferences::CollationNumericOrdering::True);
+    icu_collator::Collator::try_new(prefs, icu_collator::options::CollatorOptions::default()).ok()
+}
+
+/// `localeCompare(name, 'de', { numeric: true, sensitivity: 'base' })`.
+fn german_numeric_base_collator() -> Option<icu_collator::CollatorBorrowed<'static>> {
+    let mut prefs = icu_collator::CollatorPreferences::from(icu_locale_core::locale!("de"));
+    prefs.numeric_ordering = Some(icu_collator::preferences::CollationNumericOrdering::True);
+    let mut options = icu_collator::options::CollatorOptions::default();
+    options.strength = Some(icu_collator::options::Strength::Primary);
+    icu_collator::Collator::try_new(prefs, options).ok()
 }
 
 fn entry_name_order(left: &Value, right: &Value) -> std::cmp::Ordering {
@@ -2253,8 +2414,7 @@ fn place_in_trash(trash_root: &Path, source: &Path) -> Result<(), String> {
     let original = std::path::absolute(source).unwrap_or_else(|_| source.to_path_buf());
     fs::rename(source, &destination)
         .map_err(|_| "Der Eintrag konnte nicht in den Papierkorb verschoben werden.".to_owned())?;
-    let when = notes::iso_from_system_time(SystemTime::now());
-    let when = when.split('.').next().unwrap_or(when.as_str());
+    let when = trash_deletion_date();
     let record = format!(
         "[Trash Info]\nPath={}\nDeletionDate={when}\n",
         percent_encode(&original)
@@ -2270,6 +2430,77 @@ fn place_in_trash(trash_root: &Path, source: &Path) -> Result<(), String> {
         return Err("Der Eintrag konnte nicht in den Papierkorb verschoben werden.".to_owned());
     }
     Ok(())
+}
+
+/// Freedesktop trash info wants the user's local clock, with no zone suffix.
+static TRASH_CLOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn trash_deletion_date() -> String {
+    let _lock = TRASH_CLOCK
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    trash_deletion_date_unlocked()
+}
+
+fn trash_deletion_date_unlocked() -> String {
+    #[cfg(unix)]
+    if let Some(stamp) = unix_local_stamp() {
+        return stamp;
+    }
+    #[cfg(windows)]
+    if let Some(stamp) = windows_local_stamp() {
+        return stamp;
+    }
+    let when = notes::iso_from_system_time(SystemTime::now());
+    when.split('.').next().unwrap_or(when.as_str()).to_owned()
+}
+
+#[cfg(unix)]
+fn unix_local_stamp() -> Option<String> {
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).ok()?;
+    let secs = libc::time_t::try_from(now.as_secs()).ok()?;
+    let mut local: libc::tm = unsafe { std::mem::zeroed() };
+    let ptr = unsafe { libc::localtime_r(&secs, &mut local) };
+    if ptr.is_null() {
+        return None;
+    }
+    Some(format!(
+        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}",
+        local.tm_year + 1900,
+        local.tm_mon + 1,
+        local.tm_mday,
+        local.tm_hour,
+        local.tm_min,
+        local.tm_sec
+    ))
+}
+
+#[cfg(windows)]
+fn windows_local_stamp() -> Option<String> {
+    #[repr(C)]
+    struct SystemTime {
+        year: u16,
+        month: u16,
+        day_of_week: u16,
+        day: u16,
+        hour: u16,
+        minute: u16,
+        second: u16,
+        milliseconds: u16,
+    }
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn GetLocalTime(out: *mut SystemTime);
+    }
+    let mut time = unsafe { std::mem::zeroed::<SystemTime>() };
+    unsafe { GetLocalTime(&mut time) };
+    if time.month == 0 || time.day == 0 {
+        return None;
+    }
+    Some(format!(
+        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}",
+        time.year, time.month, time.day, time.hour, time.minute, time.second
+    ))
 }
 
 fn percent_encode(path: &Path) -> String {
@@ -2415,7 +2646,7 @@ fn clean_cached_entries(
         }
         let name = entry.get("name").and_then(Value::as_str).ok_or(())?;
         if name.is_empty()
-            || name.len() > 255
+            || vault::utf16_len(name) > 255
             || name.starts_with('.')
             || name.contains('/')
             || name.contains('\\')
@@ -2442,12 +2673,12 @@ fn clean_cached_entries(
                         return Err(());
                     }
                 }
-                let children = clean_cached_entries(
-                    entry.get("children").unwrap_or(&json!([])),
-                    &expected,
-                    depth + 1,
-                    count,
-                )?;
+                let empty_children = Value::Array(Vec::new());
+                let children_source = match entry.get("children") {
+                    Some(Value::Null) | None => &empty_children,
+                    Some(value) => value,
+                };
+                let children = clean_cached_entries(children_source, &expected, depth + 1, count)?;
                 let mut folder = json!({
                     "name": name,
                     "relativePath": expected,
@@ -2480,7 +2711,7 @@ fn clean_cached_entries(
                 if let Some(modified) = entry.get("modifiedAt") {
                     let text = modified
                         .as_str()
-                        .filter(|text| text.contains('T'))
+                        .filter(|text| drawings::canonical_iso(text).is_some())
                         .ok_or(())?;
                     file["modifiedAt"] = json!(text);
                 }
@@ -2514,7 +2745,9 @@ fn read_tree(
     let entries =
         fs::read_dir(directory).map_err(|_| "Der Vault konnte nicht gelesen werden.".to_owned())?;
     for entry in entries {
-        let entry = entry.map_err(|_| "Der Vault konnte nicht gelesen werden.".to_owned())?;
+        let Ok(entry) = entry else {
+            continue;
+        };
         let name = entry.file_name().to_string_lossy().to_string();
         if name.starts_with('.') {
             continue;
@@ -2525,8 +2758,9 @@ fn read_tree(
             .unwrap_or(&path)
             .to_string_lossy()
             .replace('\\', "/");
-        let meta = fs::symlink_metadata(&path)
-            .map_err(|_| "Der Vault konnte nicht gelesen werden.".to_owned())?;
+        let Ok(meta) = fs::symlink_metadata(&path) else {
+            continue;
+        };
         if meta.file_type().is_symlink() {
             continue;
         }
@@ -2540,11 +2774,19 @@ fn read_tree(
             if !vault::is_inside_root(&root_real, &real) {
                 continue;
             }
+            let nested = if stats {
+                read_tree(root, &path, colors, depth + 1, stats)?
+            } else {
+                match read_tree(root, &path, colors, depth + 1, stats) {
+                    Ok(nested) => nested,
+                    Err(_) => continue,
+                }
+            };
             let mut folder = json!({
                 "name": name,
                 "relativePath": relative,
                 "kind": "folder",
-                "children": read_tree(root, &path, colors, depth + 1, stats)?
+                "children": nested,
             });
             if stats {
                 if let Ok(modified) = meta.modified() {
@@ -2667,16 +2909,23 @@ fn read_folder_colors(root: &Path) -> Result<BTreeMap<String, String>, String> {
 fn write_folder_colors(root: &Path, colors: &BTreeMap<String, String>) -> Result<(), String> {
     let internal = internal_directory(root)?;
     let mut entries: Vec<_> = colors.iter().take(5000).collect();
-    entries.sort_by(|left, right| left.0.cmp(right.0));
-    let mut object = Map::new();
-    for (path, color) in entries {
-        object.insert(path.clone(), Value::String(color.clone()));
-    }
-    let snapshot = format!(
-        "{}\n",
-        serde_json::to_string_pretty(&json!({ "version": 1, "colors": object }))
-            .unwrap_or_default()
-    );
+    entries.sort_by(|left, right| dictionary_order(left.0, right.0));
+    let colors_json = if entries.is_empty() {
+        "{}".to_owned()
+    } else {
+        let mut body = String::from("{\n");
+        for (index, (path, color)) in entries.iter().enumerate() {
+            let comma = if index + 1 == entries.len() { "" } else { "," };
+            body.push_str(&format!(
+                "    {}: {}{comma}\n",
+                serde_json::to_string(path).unwrap_or_else(|_| "\"\"".to_owned()),
+                serde_json::to_string(color).unwrap_or_else(|_| "\"\"".to_owned()),
+            ));
+        }
+        body.push_str("  }");
+        body
+    };
+    let snapshot = format!("{{\n  \"version\": 1,\n  \"colors\": {colors_json}\n}}\n");
     if snapshot.len() > 512 * 1024 {
         return Err("Zu viele Ordnerfarben für diesen Vault.".to_owned());
     }
@@ -2759,20 +3008,25 @@ fn retarget_folder_colors(root: &Path, old: &str, new: &str) -> Result<(), Strin
     Ok(())
 }
 
-fn drawing_owner_id(markdown: &str, ink: Option<&Value>) -> Option<String> {
-    if let Some(id) = markdown.split("fanotes-ink:").nth(1) {
-        let id = id
-            .split(|character: char| {
-                !character.is_ascii_alphanumeric() && character != '_' && character != '-'
-            })
-            .next()
-            .unwrap_or("");
-        if is_drawing_id(id) {
-            return Some(id.to_owned());
-        }
+fn remember_drawing_owner(
+    owners: &mut std::collections::HashMap<String, String>,
+    note: &str,
+    markdown: &str,
+    ink: Option<&Value>,
+) {
+    if let Some(id) = drawings::note_ink_marker_id(markdown) {
+        owners.entry(id).or_insert_with(|| note.to_owned());
     }
-    let id = ink?.get("id")?.as_str()?;
-    is_drawing_id(id).then(|| id.to_owned())
+    let Some(id) = ink
+        .and_then(|value| value.get("id"))
+        .and_then(Value::as_str)
+        .filter(|id| is_drawing_id(id))
+    else {
+        return;
+    };
+    owners
+        .entry(id.to_owned())
+        .or_insert_with(|| note.to_owned());
 }
 
 fn is_drawing_id(value: &str) -> bool {
@@ -2809,10 +3063,10 @@ fn search_drawings(
     };
     for entry in entries.flatten() {
         let name = entry.file_name().to_string_lossy().to_string();
-        let Some(id) = name.strip_suffix(".json") else {
+        let Some((id, extension)) = name.rsplit_once('.') else {
             continue;
         };
-        if !is_drawing_id(id) {
+        if !extension.eq_ignore_ascii_case("json") || !is_drawing_id(id) {
             continue;
         }
         let path = entry.path();
@@ -2828,22 +3082,27 @@ fn search_drawings(
         let Ok(document) = serde_json::from_str::<Value>(&text) else {
             continue;
         };
-        let Some(title) = document.get("title").and_then(Value::as_str) else {
+        let fallback = meta.modified().ok().map(notes::iso_from_system_time);
+        let Ok(metadata) = drawings::library_metadata(&document, id, fallback.as_deref()) else {
             continue;
         };
-        let transcript = document
-            .get("searchTranscript")
-            .and_then(Value::as_str)
-            .unwrap_or("");
+        let title = metadata["title"].as_str().unwrap_or("");
+        let transcript = bounded_transcript(
+            document
+                .get("searchTranscript")
+                .and_then(Value::as_str)
+                .unwrap_or(""),
+        );
         let searchable = format!("{title}\n{transcript}");
         let haystack = searchable.to_lowercase();
         let Some(first) = haystack.find(needle) else {
             continue;
         };
+        let (start, _) = original_match_span(&searchable, needle, first);
         let mut hit = json!({
             "relativePath": format!(".fanotes/assets/{id}.json"),
             "title": title,
-            "excerpt": excerpt(&searchable, first, needle.len()),
+            "excerpt": excerpt(&searchable, start, vault::utf16_len(query)),
             "matches": count_matches(&haystack, needle),
             "kind": "drawing",
             "drawingId": id,
@@ -2851,7 +3110,7 @@ fn search_drawings(
         if let Some(note) = owners.get(id) {
             hit["notePath"] = Value::String(note.clone());
         }
-        if let Some(anchor) = ink_anchor(transcript, query) {
+        if let Some(anchor) = ink_anchor(&transcript, query) {
             hit["inkAnchor"] = json!({ "y": anchor });
         }
         hits.push(hit);
@@ -2870,14 +3129,17 @@ fn collect_search_files(
     for entry in
         fs::read_dir(directory).map_err(|_| "Der Vault konnte nicht gelesen werden.".to_owned())?
     {
-        let entry = entry.map_err(|_| "Der Vault konnte nicht gelesen werden.".to_owned())?;
+        let Ok(entry) = entry else {
+            continue;
+        };
         let name = entry.file_name().to_string_lossy().to_string();
         if name.starts_with('.') {
             continue;
         }
         let path = entry.path();
-        let meta = fs::symlink_metadata(&path)
-            .map_err(|_| "Der Vault konnte nicht gelesen werden.".to_owned())?;
+        let Ok(meta) = fs::symlink_metadata(&path) else {
+            continue;
+        };
         if meta.file_type().is_symlink() {
             continue;
         }
@@ -2919,13 +3181,16 @@ fn collect_search_files(
     Ok(())
 }
 
+fn bounded_transcript(value: &str) -> String {
+    vault::truncate_utf16(value, 500_000)
+}
+
 fn ink_transcript(ink: Option<&Value>) -> String {
-    ink.and_then(|value| value.get("searchTranscript"))
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .chars()
-        .take(500_000)
-        .collect()
+    bounded_transcript(
+        ink.and_then(|value| value.get("searchTranscript"))
+            .and_then(Value::as_str)
+            .unwrap_or(""),
+    )
 }
 
 fn count_matches(haystack: &str, needle: &str) -> usize {
@@ -2944,33 +3209,109 @@ fn count_matches(haystack: &str, needle: &str) -> usize {
     matches
 }
 
-fn excerpt(text: &str, match_index: usize, query_length: usize) -> String {
-    let mut start = match_index.saturating_sub(95);
-    let mut end = (match_index + query_length + 145).min(text.len());
-    while start > 0 && !text.is_char_boundary(start) {
-        start -= 1;
+/// Maps a hit in `text.to_lowercase()` back onto `text`.
+///
+/// Some letters grow when folded (`İ` becomes `i` plus a combining dot). The
+/// lowercase byte index is then past the original note, and `excerpt` must
+/// not use it as a slice bound.
+fn original_match_span(text: &str, needle: &str, folded_index: usize) -> (usize, usize) {
+    let needle_len = needle.len();
+    if needle_len == 0 {
+        let start = floor_char_boundary(text, folded_index);
+        return (start, 0);
     }
-    while end < text.len() && !text.is_char_boundary(end) {
-        end += 1;
+    let folded_end = folded_index.saturating_add(needle_len);
+    if folded_end <= text.len()
+        && text.is_char_boundary(folded_index)
+        && text.is_char_boundary(folded_end)
+        && text[folded_index..folded_end].to_lowercase() == needle
+    {
+        return (folded_index, needle_len);
     }
-    let slice = text[start..end]
+    let mut produced = 0usize;
+    let mut start = None;
+    for (offset, ch) in text.char_indices() {
+        let folded_len = ch.to_lowercase().map(char::len_utf8).sum::<usize>();
+        let next = produced + folded_len;
+        if start.is_none() && next > folded_index {
+            start = Some(offset);
+        }
+        if start.is_some() && next >= folded_end {
+            let start = start.unwrap_or(0);
+            let end = offset + ch.len_utf8();
+            return (start, end.saturating_sub(start));
+        }
+        produced = next;
+    }
+    let start = start.unwrap_or_else(|| floor_char_boundary(text, folded_index));
+    (start, text.len().saturating_sub(start))
+}
+
+fn floor_char_boundary(text: &str, index: usize) -> usize {
+    let mut index = index.min(text.len());
+    while index > 0 && !text.is_char_boundary(index) {
+        index -= 1;
+    }
+    index
+}
+
+fn excerpt(text: &str, match_byte: usize, query_units: usize) -> String {
+    let match_units = utf16_units_before(text, match_byte);
+    let total = vault::utf16_len(text);
+    let start_units = match_units.saturating_sub(95);
+    let end_units = match_units
+        .saturating_add(query_units)
+        .saturating_add(145)
+        .min(total);
+    let (start, end) = byte_range_for_utf16(text, start_units, end_units);
+    let slice = text
+        .get(start..end)
+        .unwrap_or("")
         .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ");
     format!(
         "{}{slice}{}",
-        if start > 0 { "…" } else { "" },
-        if end < text.len() { "…" } else { "" }
+        if start_units > 0 { "…" } else { "" },
+        if end_units < total { "…" } else { "" }
     )
+}
+
+fn utf16_units_before(text: &str, byte_index: usize) -> usize {
+    text.char_indices()
+        .take_while(|(index, _)| *index < byte_index)
+        .map(|(_, character)| character.len_utf16())
+        .sum()
+}
+
+fn byte_range_for_utf16(text: &str, start_units: usize, end_units: usize) -> (usize, usize) {
+    let mut units = 0usize;
+    let mut start_byte = None;
+    let mut end_byte = text.len();
+    for (index, character) in text.char_indices() {
+        if start_byte.is_none() && units >= start_units {
+            start_byte = Some(index);
+        }
+        if units >= end_units {
+            end_byte = index;
+            break;
+        }
+        units += character.len_utf16();
+        if units >= end_units {
+            end_byte = index + character.len_utf8();
+            break;
+        }
+    }
+    (start_byte.unwrap_or(0), end_byte)
 }
 
 fn ink_anchor(transcript: &str, query: &str) -> Option<f64> {
     let needle = query.trim().to_lowercase();
-    if needle.len() < 2 || transcript.trim().is_empty() {
+    if vault::utf16_len(&needle) < 2 || transcript.trim().is_empty() {
         return None;
     }
     let lines: Vec<&str> = transcript
-        .lines()
+        .split('\n')
         .map(str::trim)
         .filter(|line| !line.is_empty())
         .collect();
@@ -2979,15 +3320,9 @@ fn ink_anchor(transcript: &str, query: &str) -> Option<f64> {
     }
     let parsed: Vec<(Option<f64>, String)> = lines
         .iter()
-        .map(|line| {
-            if let Some((y, text)) = line.split_once('\t') {
-                if let Ok(value) = y.parse::<f64>() {
-                    if value.is_finite() {
-                        return (Some(value.clamp(0.0, 1.0)), text.trim().to_owned());
-                    }
-                }
-            }
-            (None, (*line).to_owned())
+        .map(|line| match transcript_position(line) {
+            Some((y, text)) => (Some(y), text),
+            None => (None, (*line).to_owned()),
         })
         .collect();
     let index = parsed
@@ -3002,10 +3337,48 @@ fn ink_anchor(transcript: &str, query: &str) -> Option<f64> {
     })
 }
 
+/// `^(\d+(?:\.\d+)?)\t(.*)$` from the desktop handwriting search.
+fn transcript_position(line: &str) -> Option<(f64, String)> {
+    static PATTERN: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let pattern = PATTERN.get_or_init(|| {
+        regex::Regex::new(r"^([0-9]+(?:\.[0-9]+)?)\t(.*)$").expect("transcript line pattern")
+    });
+    let caps = pattern.captures(line)?;
+    let y: f64 = caps.get(1)?.as_str().parse().ok()?;
+    if !y.is_finite() {
+        return None;
+    }
+    Some((y.clamp(0.0, 1.0), caps.get(2)?.as_str().trim().to_owned()))
+}
+
 #[cfg(test)]
 mod sort_tests {
     use super::compare_names;
     use std::cmp::Ordering;
+
+    #[test]
+    fn notebook_folders_use_base_order_without_numeric_runs() {
+        use super::{base_dictionary_order, numeric_dictionary_order};
+        assert_eq!(
+            base_dictionary_order("Seite 2", "Seite 02"),
+            Ordering::Greater
+        );
+        assert_eq!(
+            base_dictionary_order("Mathematik", "mathematik"),
+            Ordering::Equal
+        );
+        assert_eq!(base_dictionary_order("Straße", "Strasse"), Ordering::Equal);
+        assert_eq!(base_dictionary_order("Apfel", "Äpfel"), Ordering::Equal);
+        assert_eq!(
+            base_dictionary_order("Kapitel 10", "Kapitel 2"),
+            Ordering::Less
+        );
+        assert_eq!(
+            numeric_dictionary_order("Kapitel 10", "Kapitel 2"),
+            Ordering::Greater
+        );
+        assert_eq!(compare_names("Seite 2", "Seite 02"), Ordering::Equal);
+    }
 
     #[test]
     fn german_names_use_the_electron_base_order() {
@@ -3016,5 +3389,160 @@ mod sort_tests {
         assert_eq!(compare_names("Seite 2", "Seite 10"), Ordering::Less);
         assert_eq!(compare_names("Äpfel", "Zen"), Ordering::Less);
         assert_eq!(compare_names("Über", "Zen"), Ordering::Less);
+        assert_eq!(compare_names("ð", "d"), Ordering::Equal);
+        assert_eq!(compare_names("ﬁle", "file"), Ordering::Equal);
+        assert_eq!(compare_names("Note2", "Note 2"), Ordering::Greater);
+        assert_eq!(compare_names("2.0", "2"), Ordering::Greater);
+        assert_eq!(compare_names("2.0", "2.00"), Ordering::Equal);
+        assert_eq!(compare_names("1,5", "1.5"), Ordering::Less);
+        assert_eq!(compare_names("Þ", "Th"), Ordering::Greater);
+        assert_eq!(compare_names("łódź", "lodz"), Ordering::Equal);
+        assert_eq!(compare_names("a b", "ab"), Ordering::Less);
+    }
+
+    #[test]
+    fn onenote_pages_use_numeric_german_dictionary_order() {
+        let mut pages = [
+            "Seite 10.html",
+            "Seite 2.html",
+            "apfel.html",
+            "äpfel.html",
+            "strasse.html",
+            "straße.html",
+            "ä.html",
+        ];
+        pages.sort_by(|left, right| super::numeric_dictionary_order(left, right));
+        assert_eq!(
+            pages,
+            [
+                "ä.html",
+                "apfel.html",
+                "äpfel.html",
+                "Seite 2.html",
+                "Seite 10.html",
+                "strasse.html",
+                "straße.html",
+            ]
+        );
+    }
+}
+
+#[cfg(test)]
+mod search_span_tests {
+    use super::{excerpt, original_match_span};
+
+    #[test]
+    fn a_growing_case_fold_keeps_the_match_on_the_original_letters() {
+        let city = "İstanbul";
+        let needle = "stan";
+        let index = city.to_lowercase().find(needle).unwrap();
+        let (start, span) = original_match_span(city, needle, index);
+        assert_eq!(&city[start..start + span], "stan");
+
+        let note = format!("{}Zielwort", "İ".repeat(120));
+        let word = "zielwort";
+        let folded = note.to_lowercase().find(word).unwrap();
+        assert!(folded > note.len());
+        let (start, span) = original_match_span(&note, word, folded);
+        assert_eq!(&note[start..start + span], "Zielwort");
+        let window = excerpt(&note, start, span);
+        assert!(window.contains("Zielwort"), "{window}");
+        let _ = excerpt("kurz", 10_000, word.len());
+    }
+
+    #[test]
+    fn a_handwriting_transcript_stops_at_500_000_utf16_units() {
+        let transcript = format!("{}Ziel", "😀".repeat(250_000));
+        let ink = serde_json::json!({ "searchTranscript": transcript });
+        let kept = super::ink_transcript(Some(&ink));
+        assert_eq!(crate::vault::utf16_len(&kept), 500_000);
+        assert!(!kept.contains("Ziel"));
+    }
+}
+
+#[cfg(test)]
+mod ink_anchor_tests {
+    use super::ink_anchor;
+
+    #[test]
+    fn a_handwriting_anchor_uses_the_desktop_line_pattern() {
+        assert_eq!(ink_anchor("0.4200\tChlorophyll", "chlor"), Some(0.42));
+        assert_eq!(ink_anchor("1e2\tChlorophyll", "chlor"), Some(0.15));
+        assert_eq!(ink_anchor("1.\tHallo", "hallo"), Some(0.15));
+        assert_eq!(
+            ink_anchor("1e2\tChlorophyll\n0.2500\tBlattgrün", "chlor"),
+            Some(0.0)
+        );
+        assert_eq!(
+            ink_anchor("1e2\tChlorophyll\n0.2500\tBlattgrün", "blatt"),
+            Some(0.25)
+        );
+        assert_eq!(
+            ink_anchor("0.2000\twort\r0.8000\tanders", "anders"),
+            Some(0.2)
+        );
+    }
+}
+
+#[cfg(all(test, unix))]
+mod trash_date_tests {
+    use super::TRASH_CLOCK;
+    use std::ffi::OsString;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    unsafe extern "C" {
+        fn tzset();
+    }
+
+    struct RestoreTz(Option<OsString>);
+
+    impl Drop for RestoreTz {
+        fn drop(&mut self) {
+            match self.0.take() {
+                Some(value) => unsafe { std::env::set_var("TZ", value) },
+                None => unsafe { std::env::remove_var("TZ") },
+            }
+            unsafe { tzset() }
+        }
+    }
+
+    fn stamp_epoch(stamp: &str) -> i64 {
+        let mut time: libc::tm = unsafe { std::mem::zeroed() };
+        time.tm_year = stamp[0..4].parse::<i32>().unwrap() - 1900;
+        time.tm_mon = stamp[5..7].parse::<i32>().unwrap() - 1;
+        time.tm_mday = stamp[8..10].parse::<i32>().unwrap();
+        time.tm_hour = stamp[11..13].parse::<i32>().unwrap();
+        time.tm_min = stamp[14..16].parse::<i32>().unwrap();
+        time.tm_sec = stamp[17..19].parse::<i32>().unwrap();
+        unsafe { libc::timegm(&mut time) }
+    }
+
+    #[test]
+    fn the_trash_record_uses_the_local_clock() {
+        let _lock = TRASH_CLOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let _restore = RestoreTz(std::env::var_os("TZ"));
+        unsafe { std::env::set_var("TZ", "Pacific/Kiritimati") };
+        unsafe { tzset() };
+        let before = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+        let stamp = super::trash_deletion_date_unlocked();
+        let after = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+        assert_eq!(stamp.len(), 19, "{stamp}");
+        assert_eq!(&stamp[10..11], "T");
+        assert!(!stamp.contains('Z'), "{stamp}");
+        assert!(!stamp.contains('.'), "{stamp}");
+        let local = stamp_epoch(&stamp);
+        assert!(
+            (13 * 3600..=15 * 3600).contains(&(local - before))
+                && (13 * 3600..=15 * 3600).contains(&(local - after)),
+            "{stamp} is not fourteen hours ahead of UTC ({before})"
+        );
     }
 }

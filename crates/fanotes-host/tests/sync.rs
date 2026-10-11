@@ -128,6 +128,29 @@ fn sync_lists_files_and_keeps_account_state_outside_the_vault() {
 }
 
 #[test]
+fn sync_credentials_keep_a_long_unicode_secret() {
+    let (_vault, _app, mut host) = host();
+    let kept = "Ä".repeat(40_000);
+    assert!(kept.len() > 64 * 1024);
+    assert!(kept.encode_utf16().count() <= 64 * 1024);
+    host.dispatch("fanotes:sync-write-secrets", &[json!(kept)])
+        .unwrap();
+    assert_eq!(
+        host.dispatch("fanotes:sync-read-secrets", &[]).unwrap(),
+        kept
+    );
+    let too_long = "Ä".repeat(64 * 1024 + 1);
+    let error = host
+        .dispatch("fanotes:sync-write-secrets", &[json!(too_long)])
+        .unwrap_err();
+    assert!(error.contains("ungültig"), "{error}");
+    assert_eq!(
+        host.dispatch("fanotes:sync-read-secrets", &[]).unwrap(),
+        kept
+    );
+}
+
+#[test]
 fn sync_secrets_stay_out_of_the_profile_without_a_keyring() {
     let dir = std::env::temp_dir().join(format!("fanotes-sync-locked-{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
@@ -150,4 +173,43 @@ fn sync_secrets_stay_out_of_the_profile_without_a_keyring() {
     let error = host.dispatch("fanotes:sync-read-secrets", &[]).unwrap_err();
     assert!(error.contains("Schlüsselbund"));
     let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn sync_write_keeps_the_requested_time_and_a_private_folder() {
+    let (vault, _app, mut host) = host();
+    let written = host
+        .dispatch(
+            "fanotes:sync-write",
+            &[
+                json!("Neu/Seite.md"),
+                json!("SGFsbG8K"),
+                json!(1_600_000_000_000i64),
+            ],
+        )
+        .unwrap();
+    assert_eq!(written["path"], "Neu/Seite.md");
+    assert_eq!(written["size"], 6);
+    assert_eq!(written["mtimeMs"], 1_600_000_000_000i64);
+    assert_eq!(fs::read(vault.join("Neu/Seite.md")).unwrap(), b"Hallo\n");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            fs::metadata(vault.join("Neu"))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o700
+        );
+        assert_eq!(
+            fs::metadata(vault.join("Neu/Seite.md"))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
+    }
 }

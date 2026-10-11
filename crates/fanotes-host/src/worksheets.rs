@@ -80,19 +80,34 @@ pub fn delete_worksheet(host: &Host, raw_id: &str) -> Result<Value, String> {
     let id = worksheet_id(raw_id)?;
     let directory = worksheets_dir(vault_root(host)?)?;
     let data_path = directory.join(format!("{id}.json"));
-    let mut source_name = String::new();
-    if let Ok(raw) = read_text(&data_path, MAX_WORKSHEET_JSON_BYTES) {
-        if let Ok(candidate) = serde_json::from_str::<Value>(&raw) {
-            if let Ok(document) = validate_document(&candidate, &id) {
-                source_name = file_name(document["sourceRelativePath"].as_str().unwrap_or(""));
-            }
-        }
-    }
+    let source_name = worksheet_source_name(&data_path, &id)?;
     if source_name.starts_with(&format!("{id}.")) {
-        let _ = unlink_regular(&directory.join(&source_name));
+        unlink_regular(&directory.join(&source_name))?;
     }
-    let _ = unlink_regular(&data_path);
+    unlink_regular(&data_path)?;
     Ok(json!({ "id": id }))
+}
+
+fn worksheet_source_name(data_path: &Path, id: &str) -> Result<String, String> {
+    match fs::symlink_metadata(data_path) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(String::new()),
+        Err(_) => return Err("Das Arbeitsblatt konnte nicht gelesen werden.".to_owned()),
+        Ok(meta) if meta.file_type().is_symlink() || !meta.is_file() => {
+            return Err("Die Datei ist keine reguläre Datei.".to_owned());
+        }
+        Ok(meta) if meta.len() as usize > MAX_WORKSHEET_JSON_BYTES => {
+            return Err("Die Datei ist zu groß.".to_owned());
+        }
+        Ok(_) => {}
+    }
+    let raw = fs::read_to_string(data_path)
+        .map_err(|_| "Das Arbeitsblatt konnte nicht gelesen werden.".to_owned())?;
+    let candidate = serde_json::from_str::<Value>(&raw)
+        .map_err(|_| "Die Arbeitsblattdaten sind beschädigt.".to_owned())?;
+    let document = validate_document(&candidate, id)?;
+    Ok(file_name(
+        document["sourceRelativePath"].as_str().unwrap_or(""),
+    ))
 }
 
 pub fn import_from_data(host: &Host, payload: &Value) -> Result<Value, String> {
@@ -257,7 +272,7 @@ fn safe_title(value: &str, fallback: &str) -> Result<String, String> {
         || cleaned == ".."
         || cleaned.contains('/')
         || cleaned.contains('\\')
-        || cleaned.chars().any(|character| character.is_control())
+        || crate::vault::has_c0_or_del(cleaned)
         || cleaned.eq_ignore_ascii_case(".fanotes")
         || cleaned.eq_ignore_ascii_case(".lernwerk")
     {
@@ -285,14 +300,11 @@ fn validate_document(candidate: &Value, expected_id: &str) -> Result<Value, Stri
     {
         return Err("Die Arbeitsblattdatei hat ein ungültiges Format.".to_owned());
     }
-    let title = object
-        .get("title")
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .trim();
+    let raw_title = object.get("title").and_then(Value::as_str).unwrap_or("");
+    let title = raw_title.trim();
     if title.is_empty()
-        || crate::vault::utf16_len(title) > 180
-        || title.chars().any(|character| character.is_control())
+        || crate::vault::utf16_len(raw_title) > 180
+        || crate::vault::has_c0_or_del(raw_title)
     {
         return Err("Der Arbeitsblatttitel ist ungültig.".to_owned());
     }
@@ -321,12 +333,12 @@ fn validate_document(candidate: &Value, expected_id: &str) -> Result<Value, Stri
     let created = object
         .get("createdAt")
         .and_then(Value::as_str)
-        .filter(|value| iso_like(value))
+        .and_then(crate::drawings::canonical_iso)
         .ok_or_else(|| "Die Arbeitsblatt-Zeitangaben sind ungültig.".to_owned())?;
     let updated = object
         .get("updatedAt")
         .and_then(Value::as_str)
-        .filter(|value| iso_like(value))
+        .and_then(crate::drawings::canonical_iso)
         .ok_or_else(|| "Die Arbeitsblatt-Zeitangaben sind ungültig.".to_owned())?;
     let text_boxes = boxes(object.get("textBoxes"))?;
     let highlights = highlights(object.get("highlights"))?;
@@ -338,8 +350,8 @@ fn validate_document(candidate: &Value, expected_id: &str) -> Result<Value, Stri
     document.insert("mimeType".into(), Value::String(format.mime.to_owned()));
     document.insert("sourceRelativePath".into(), Value::String(expected_source));
     document.insert("dataRelativePath".into(), Value::String(expected_data));
-    document.insert("createdAt".into(), Value::String(created.to_owned()));
-    document.insert("updatedAt".into(), Value::String(updated.to_owned()));
+    document.insert("createdAt".into(), Value::String(created));
+    document.insert("updatedAt".into(), Value::String(updated));
     if format.kind == "html" {
         let page_width = object
             .get("pageWidth")
@@ -608,15 +620,6 @@ fn unlink_regular(path: &Path) -> Result<(), String> {
         }
         _ => Err("Die Arbeitsblattdatei ist unsicher.".to_owned()),
     }
-}
-
-fn iso_like(value: &str) -> bool {
-    let bytes = value.as_bytes();
-    bytes.len() >= 20
-        && bytes[4] == b'-'
-        && bytes[7] == b'-'
-        && bytes[10] == b'T'
-        && value.ends_with('Z')
 }
 
 fn now_iso() -> String {
