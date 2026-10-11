@@ -5,6 +5,7 @@
 
 mod channels;
 mod drawings;
+mod notes;
 mod ocr;
 mod policy;
 mod vault;
@@ -125,15 +126,27 @@ impl Host {
             }
             "fanotes:read-drawing" => drawings::read_drawing(self, &arg_string(args, 0)?),
             "fanotes:read-famd-ink" => self.read_famd_ink(&arg_string(args, 0)?),
-            "fanotes:read-note-page-stats"
-            | "fanotes:read-note-paper-style"
-            | "fanotes:read-note-links"
-            | "fanotes:read-note-backups" => Ok(Value::Null),
-            "fanotes:set-note-paper-style"
-            | "fanotes:write-note-links"
-            | "fanotes:write-note-backups" => Ok(Value::Null),
-            "fanotes:read-subject-books" => Ok(json!([])),
-            "fanotes:write-subject-books" => Ok(Value::Null),
+            "fanotes:read-note-page-stats" => notes::read_page_stats(self, &arg_string(args, 0)?),
+            "fanotes:read-note-paper-style" => notes::read_paper_style(self, &arg_string(args, 0)?),
+            "fanotes:set-note-paper-style" => {
+                notes::set_paper_style(self, &arg_string(args, 0)?, &arg_string(args, 1)?)
+            }
+            "fanotes:read-note-links" => notes::read_links(self, &arg_string(args, 0)?),
+            "fanotes:write-note-links" => notes::write_links(
+                self,
+                &arg_string(args, 0)?,
+                args.get(1).unwrap_or(&Value::Null),
+            ),
+            "fanotes:read-note-backups" => notes::read_backups(self, &arg_string(args, 0)?),
+            "fanotes:write-note-backups" => notes::write_backups(
+                self,
+                &arg_string(args, 0)?,
+                args.get(1).unwrap_or(&Value::Null),
+            ),
+            "fanotes:read-subject-books" => notes::read_subject_books(self),
+            "fanotes:write-subject-books" => {
+                notes::write_subject_books(self, args.first().unwrap_or(&Value::Null))
+            }
             "fanotes:import-subject-book"
             | "fanotes:import-worksheet"
             | "fanotes:import-worksheet-from-data"
@@ -149,8 +162,10 @@ impl Host {
                 worksheets::save_worksheet(self, args.first().unwrap_or(&Value::Null))
             }
             "fanotes:delete-worksheet" => worksheets::delete_worksheet(self, &arg_string(args, 0)?),
-            "fanotes:list-note-history" => Ok(json!([])),
-            "fanotes:read-note-history" => Ok(Value::Null),
+            "fanotes:list-note-history" => notes::list_history(self, &arg_string(args, 0)?),
+            "fanotes:read-note-history" => {
+                notes::read_history(self, &arg_string(args, 0)?, &arg_string(args, 1)?)
+            }
             "fanotes:export-note-pdf" => Err("PDF-Export bleibt im Electron-Release.".to_owned()),
             "fanotes:read-asset-data-url" => self.read_asset_data_url(&arg_string(args, 0)?),
             "fanotes:read-asset-bytes" => self.read_asset_bytes(&arg_string(args, 0)?),
@@ -381,7 +396,16 @@ impl Host {
     }
 
     fn write_file(&mut self, relative: &str, content: &str) -> Result<Value, String> {
-        let path = vault::resolve_inside(self.require_vault()?, relative)?;
+        let root = self.require_vault()?.to_path_buf();
+        let normalized = vault::normalize_relative_path(relative, false, false)?;
+        let path = vault::resolve_inside(&root, &normalized)?;
+        if notes::records_history(&normalized) {
+            if let Ok(previous) = fs::read(&path) {
+                if let Ok(text) = String::from_utf8(previous) {
+                    let _ = notes::record_history(&root, &normalized, &text);
+                }
+            }
+        }
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)
                 .map_err(|_| "Der Ordner konnte nicht angelegt werden.".to_owned())?;
