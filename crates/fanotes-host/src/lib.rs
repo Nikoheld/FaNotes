@@ -504,8 +504,15 @@ impl Host {
                 fs::create_dir_all(folder)
                     .map_err(|_| "Der Ordner konnte nicht angelegt werden.".to_owned())?;
             }
-            fs::write(&path, "")
+            fs::write(&path, &format!("# {stem}\n\n"))
                 .map_err(|_| "Die Notiz konnte nicht angelegt werden.".to_owned())?;
+            let paper = self
+                .settings
+                .get("paperStyle")
+                .and_then(Value::as_str)
+                .map(str::to_owned);
+            let _ =
+                notes::attach_sidecar(&root, &relative, &format!("# {stem}\n\n"), paper.as_deref());
         } else {
             fs::create_dir_all(&path)
                 .map_err(|_| "Der Ordner konnte nicht angelegt werden.".to_owned())?;
@@ -647,14 +654,94 @@ impl Host {
     }
 
     fn search(&self, query: &str) -> Result<Value, String> {
+        let query = query.trim();
+        if query.is_empty() {
+            return Ok(json!([]));
+        }
+        let query = query.chars().take(500).collect::<String>();
         let root = self.require_vault()?;
         let needle = query.to_lowercase();
+        let mut files = Vec::new();
+        collect_search_files(root, root, &mut files)?;
+        let present: std::collections::HashSet<String> = files.iter().cloned().collect();
         let mut hits = Vec::new();
-        walk_files(root, root, &mut |relative, text| {
-            if text.to_lowercase().contains(&needle) {
-                hits.push(json!({ "relativePath": relative }));
+        for relative in files {
+            let lower = relative.to_lowercase();
+            if lower.ends_with(".famd") {
+                let stem = relative.trim_end_matches(".famd");
+                if present.contains(&format!("{stem}.md"))
+                    || present.contains(&format!("{stem}.pdf"))
+                    || present.contains(&format!("{stem}.markdown"))
+                {
+                    continue;
+                }
             }
-        })?;
+            let path = vault::resolve_inside(root, &relative)?;
+            let raw = fs::read_to_string(&path).unwrap_or_default();
+            let parsed = fanotes_famd::parse_famd(&raw);
+            let mut content = if parsed.markdown.is_empty() {
+                fanotes_famd::strip_famd_payload(&raw)
+            } else {
+                parsed.markdown
+            };
+            let mut transcript = ink_transcript(
+                parsed
+                    .payload
+                    .as_ref()
+                    .and_then(|payload| payload.ink.as_ref()),
+            );
+            if !lower.ends_with(".famd") {
+                let famd = fanotes_famd::companion_note_path(&relative, ".famd");
+                if let Ok(companion_path) = vault::resolve_inside(root, &famd) {
+                    if let Ok(companion) = fs::read_to_string(companion_path) {
+                        let parsed_companion = fanotes_famd::parse_famd(&companion);
+                        if lower.ends_with(".pdf") && !parsed_companion.markdown.is_empty() {
+                            content = parsed_companion.markdown;
+                        }
+                        if transcript.is_empty() {
+                            transcript = ink_transcript(
+                                parsed_companion
+                                    .payload
+                                    .as_ref()
+                                    .and_then(|payload| payload.ink.as_ref()),
+                            );
+                        }
+                    }
+                }
+            }
+            let haystack = format!("{relative}\n{content}\n{transcript}").to_lowercase();
+            if !haystack.contains(&needle) {
+                continue;
+            }
+            let matches = count_matches(&haystack, &needle);
+            let content_index = content.to_lowercase().find(&needle);
+            let excerpt = if let Some(index) = content_index {
+                excerpt(&content, index, needle.len())
+            } else {
+                format!("Dateiname · {relative}")
+            };
+            let title = relative
+                .rsplit('/')
+                .next()
+                .unwrap_or(&relative)
+                .rsplit_once('.')
+                .map(|(stem, _)| stem)
+                .unwrap_or(&relative);
+            let mut hit = json!({
+                "relativePath": relative,
+                "title": title,
+                "excerpt": excerpt,
+                "matches": matches,
+                "kind": "note",
+            });
+            if let Some(anchor) = ink_anchor(&transcript, &query) {
+                hit["inkAnchor"] = json!({ "y": anchor });
+            }
+            hits.push(hit);
+            if hits.len() == 250 {
+                break;
+            }
+        }
         Ok(Value::Array(hits))
     }
 
@@ -1116,10 +1203,10 @@ fn retarget_folder_colors(root: &Path, old: &str, new: &str) -> Result<(), Strin
     Ok(())
 }
 
-fn walk_files(
+fn collect_search_files(
     root: &Path,
     directory: &Path,
-    visit: &mut dyn FnMut(String, String),
+    files: &mut Vec<String>,
 ) -> Result<(), String> {
     for entry in
         fs::read_dir(directory).map_err(|_| "Der Vault konnte nicht gelesen werden.".to_owned())?
@@ -1130,18 +1217,111 @@ fn walk_files(
             continue;
         }
         let path = entry.path();
-        if path.is_dir() {
-            walk_files(root, &path, visit)?;
-        } else if name.ends_with(".md") {
-            if let Ok(text) = fs::read_to_string(&path) {
-                let relative = path
-                    .strip_prefix(root)
-                    .unwrap_or(&path)
-                    .to_string_lossy()
-                    .replace('\\', "/");
-                visit(relative, text);
-            }
+        let meta = fs::symlink_metadata(&path)
+            .map_err(|_| "Der Vault konnte nicht gelesen werden.".to_owned())?;
+        if meta.file_type().is_symlink() {
+            continue;
         }
+        if meta.is_dir() {
+            collect_search_files(root, &path, files)?;
+            continue;
+        }
+        let extension = name
+            .rsplit_once('.')
+            .map(|(_, extension)| extension.to_ascii_lowercase())
+            .unwrap_or_default();
+        if !matches!(extension.as_str(), "md" | "markdown" | "famd" | "pdf") {
+            continue;
+        }
+        let relative = path
+            .strip_prefix(root)
+            .unwrap_or(&path)
+            .to_string_lossy()
+            .replace('\\', "/");
+        files.push(relative);
     }
     Ok(())
+}
+
+fn ink_transcript(ink: Option<&Value>) -> String {
+    ink.and_then(|value| value.get("searchTranscript"))
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .chars()
+        .take(500_000)
+        .collect()
+}
+
+fn count_matches(haystack: &str, needle: &str) -> usize {
+    if needle.is_empty() {
+        return 0;
+    }
+    let mut matches = 0;
+    let mut cursor = 0;
+    while let Some(index) = haystack[cursor..].find(needle) {
+        matches += 1;
+        cursor += index + needle.len().max(1);
+        if cursor >= haystack.len() {
+            break;
+        }
+    }
+    matches
+}
+
+fn excerpt(text: &str, match_index: usize, query_length: usize) -> String {
+    let mut start = match_index.saturating_sub(95);
+    let mut end = (match_index + query_length + 145).min(text.len());
+    while start > 0 && !text.is_char_boundary(start) {
+        start -= 1;
+    }
+    while end < text.len() && !text.is_char_boundary(end) {
+        end += 1;
+    }
+    let slice = text[start..end]
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    format!(
+        "{}{slice}{}",
+        if start > 0 { "…" } else { "" },
+        if end < text.len() { "…" } else { "" }
+    )
+}
+
+fn ink_anchor(transcript: &str, query: &str) -> Option<f64> {
+    let needle = query.trim().to_lowercase();
+    if needle.len() < 2 || transcript.trim().is_empty() {
+        return None;
+    }
+    let lines: Vec<&str> = transcript
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect();
+    if lines.is_empty() {
+        return None;
+    }
+    let parsed: Vec<(Option<f64>, String)> = lines
+        .iter()
+        .map(|line| {
+            if let Some((y, text)) = line.split_once('\t') {
+                if let Ok(value) = y.parse::<f64>() {
+                    if value.is_finite() {
+                        return (Some(value.clamp(0.0, 1.0)), text.trim().to_owned());
+                    }
+                }
+            }
+            (None, (*line).to_owned())
+        })
+        .collect();
+    let index = parsed
+        .iter()
+        .position(|(_, text)| text.to_lowercase().contains(&needle))?;
+    parsed[index].0.or_else(|| {
+        if parsed.len() == 1 {
+            Some(0.15)
+        } else {
+            Some(index as f64 / (parsed.len() - 1) as f64)
+        }
+    })
 }

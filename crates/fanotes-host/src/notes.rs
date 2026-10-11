@@ -57,11 +57,11 @@ pub fn write_note_file(
         fs::write(&path, &markdown)
             .map_err(|_| "Die Datei konnte nicht geschrieben werden.".to_owned())?;
     }
-    sync_sidecar(root, relative, content, settings_paper)?;
+    attach_sidecar(root, relative, content, settings_paper)?;
     Ok(now_iso())
 }
 
-fn sync_sidecar(
+pub fn attach_sidecar(
     root: &Path,
     relative: &str,
     content: &str,
