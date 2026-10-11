@@ -81,8 +81,10 @@ fn open_subject_book_popout(
             .title("Buch")
             .inner_size(980.0, 1080.0)
             .min_inner_size(420.0, 360.0)
+            .background_color(paper_color())
             .build()
             .map_err(|_| "Das Buchfenster konnte nicht geöffnet werden.".to_owned())?;
+    install_webview_guards(&window, false);
     let app_handle = app.clone();
     window.on_window_event(move |event| {
         if matches!(event, tauri::WindowEvent::Destroyed) {
@@ -322,7 +324,18 @@ fn sheet_zoom_direction(level: f64) -> Option<&'static str> {
     }
 }
 
-fn install_sheet_zoom(window: &tauri::WebviewWindow) {
+fn paper_color() -> tauri::utils::config::Color {
+    "#f7f6f3".parse().expect("paper color")
+}
+
+/// A second launch focuses the window that is already open.
+fn focus_running_window(window: &tauri::WebviewWindow) {
+    let _ = window.unminimize();
+    let _ = window.show();
+    let _ = window.set_focus();
+}
+
+fn install_webview_guards(window: &tauri::WebviewWindow, emit_sheet_zoom: bool) {
     let emit_window = window.clone();
     let _ = window.with_webview(move |webview| {
         let view = webview.inner();
@@ -332,7 +345,9 @@ fn install_sheet_zoom(window: &tauri::WebviewWindow) {
                 return;
             };
             view.set_zoom_level(1.0);
-            let _ = emit_window.emit("fanotes:sheet-zoom", direction);
+            if emit_sheet_zoom {
+                let _ = emit_window.emit("fanotes:sheet-zoom", direction);
+            }
         });
         view.connect_create(|_view, action| {
             if let Some(uri) = action.request().and_then(|request| request.uri()) {
@@ -397,6 +412,11 @@ mod tests {
 pub fn run() {
     let _ = (find_channel, CHANNELS);
     tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            if let Some(window) = app.get_webview_window("main") {
+                focus_running_window(&window);
+            }
+        }))
         .plugin(navigation_plugin())
         .setup(|app| {
             let app_data = app
@@ -405,7 +425,7 @@ pub fn run() {
                 .unwrap_or_else(|_| std::env::temp_dir().join("fanotes"));
             app.manage(HostState(Mutex::new(Host::open(app_data))));
             if let Some(window) = app.get_webview_window("main") {
-                install_sheet_zoom(&window);
+                install_webview_guards(&window, true);
                 let handle = app.handle().clone();
                 window.on_window_event(move |event| {
                     if let tauri::WindowEvent::CloseRequested { api, .. } = event {
