@@ -1,9 +1,13 @@
+use std::sync::atomic::{AtomicU64, Ordering};
+
 use fanotes_famd::parse_famd;
 use fanotes_host::Host;
 use serde_json::json;
 
 fn host() -> (Host, std::path::PathBuf) {
-    let dir = std::env::temp_dir().join(format!("fanotes-notes-{}", std::process::id()));
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let id = NEXT.fetch_add(1, Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!("fanotes-notes-{}-{id}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     let vault = dir.join("vault");
     std::fs::create_dir_all(&vault).unwrap();
