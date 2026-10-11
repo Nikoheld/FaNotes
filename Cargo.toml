@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/fanotes-paper",
     "crates/fanotes-ink",
+    "crates/fanotes-wasm",
     "apps/paper-proto",
 ]
 
