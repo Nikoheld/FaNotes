@@ -9,13 +9,17 @@ import {
   MM_PER_INCH,
   RULER_LENGTH_PRESETS_MM,
   RULER_MAX_LENGTH_MM,
+  RULER_MAX_WIDTH_MM,
   RULER_MIN_LENGTH_MM,
+  RULER_MIN_WIDTH_MM,
+  RULER_WIDTH_PRESETS_MM,
   SET_SQUARE_MAX_SIZE_MM,
   SET_SQUARE_MIN_SIZE_MM,
   SET_SQUARE_SIZE_PRESETS_MM,
   asCompassPose,
   clampCompassRadius,
   clampRulerLength,
+  clampRulerWidth,
   clampSetSquareSize,
   degreesToRadians,
   formatLength,
@@ -23,6 +27,7 @@ import {
   presetArcSweep,
   radiansToDegrees,
   rulerLength,
+  rulerWidth,
   setSquareSize,
   type CompassDrawEvent,
   type CompassPose,
@@ -239,6 +244,7 @@ export function DraftingPanel({
 }: DraftingPanelProps) {
   const unit = settings.unit
   const lengthStep = unit === 'in' ? 0.25 : 0.5
+  const widthStep = unit === 'in' ? 0.05 : 0.1
   const angleField = (kind: DraftingKind, pose: DraftingPose) => (
     <div className="lw-drafting-row">
       <NumberField
@@ -328,7 +334,7 @@ export function DraftingPanel({
         <ToolSection
           icon={<Ruler size={15} />}
           title="Lineal"
-          caption={`${formatLength(rulerLength(ruler), unit)} · beide Kanten zeichnen`}
+          caption={`${formatLength(rulerLength(ruler), unit)} × ${formatLength(rulerWidth(ruler), unit)} · beide Kanten zeichnen`}
           kind="ruler"
           pose={ruler}
           onPose={onPose}
@@ -359,6 +365,37 @@ export function DraftingPanel({
                   onClick={() => {
                     onPose('ruler', { ...ruler, lengthMm: preset })
                     onSettingsChange({ rulerLengthMm: preset })
+                  }}
+                >
+                  {formatLength(preset, unit)}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="lw-drafting-row">
+            <NumberField
+              label="Breite"
+              value={formatUnitValue(rulerWidth(ruler), unit)}
+              suffix={unitSuffix(unit)}
+              min={toUnit(RULER_MIN_WIDTH_MM, unit)}
+              max={toUnit(RULER_MAX_WIDTH_MM, unit)}
+              step={widthStep}
+              title="Abstand der beiden Zeichenkanten"
+              onCommit={(value) => {
+                const widthMm = clampRulerWidth(fromUnit(value, unit))
+                onPose('ruler', { ...ruler, widthMm })
+                onSettingsChange({ rulerWidthMm: widthMm })
+              }}
+            />
+            <div className="lw-segmented lw-drafting-presets" role="group" aria-label="Breiten-Vorgaben">
+              {RULER_WIDTH_PRESETS_MM.map((preset) => (
+                <button
+                  key={preset}
+                  type="button"
+                  className={Math.abs(rulerWidth(ruler) - preset) < 0.5 ? 'is-active' : ''}
+                  onClick={() => {
+                    onPose('ruler', { ...ruler, widthMm: preset })
+                    onSettingsChange({ rulerWidthMm: preset })
                   }}
                 >
                   {formatLength(preset, unit)}

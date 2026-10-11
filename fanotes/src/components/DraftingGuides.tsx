@@ -1,7 +1,6 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import {
   PEN_EDGE_ZONE_MM,
-  RULER_HEIGHT_MM,
   angleStepRadians,
   angleToPoint,
   asCompassPose,
@@ -18,7 +17,9 @@ import {
   normalizeAngle,
   pxPerMmOnDisplay,
   radiusMmBetween,
+  resizeRulerWidth,
   rulerLength,
+  rulerWidth,
   scaleTicks,
   setSquareApexSign,
   setSquareSize,
@@ -51,7 +52,7 @@ type DraftingGuidesProps = {
   onActivate?: (kind: DraftingKind) => void
 }
 
-type DragMode = 'move' | 'rotate' | 'radius' | 'draw' | 'length'
+type DragMode = 'move' | 'rotate' | 'radius' | 'draw' | 'length' | 'width'
 
 type DragState = {
   kind: DraftingKind
@@ -79,6 +80,7 @@ type BodyPointerHandler = (event: ReactPointerEvent<SVGElement>) => void
 
 type RulerBodyProps = {
   lengthMm: number
+  widthMm: number
   pxPerMm: number
   unit: DraftingUnit
   flipLabels: boolean
@@ -86,16 +88,20 @@ type RulerBodyProps = {
 }
 
 /** Static print of the ruler: only re-rendered when its size, unit or reading direction changes. */
-const RulerBody = memo(function RulerBody({ lengthMm, pxPerMm, unit, flipLabels, onGrab }: RulerBodyProps) {
+const RulerBody = memo(function RulerBody({ lengthMm, widthMm, pxPerMm, unit, flipLabels, onGrab }: RulerBodyProps) {
   const mm = (value: number) => value * pxPerMm
   const length = mm(lengthMm)
-  const height = mm(RULER_HEIGHT_MM)
+  const height = mm(widthMm)
   const left = -length / 2
   const top = -height / 2
   const bottom = height / 2
-  const tickLength = [mm(2), mm(3.4), mm(5)]
+  const maxTick = Math.max(mm(1.2), height / 2 - mm(1))
+  const tickLength = [mm(2), mm(3.4), mm(5)].map((value) => Math.min(value, maxTick))
   const fontSize = mm(2.7)
   const ticks = scaleTicks(lengthMm, unit)
+  const topLabelY = top + tickLength[2] + fontSize * 1.02
+  const bottomLabelY = bottom - tickLength[2] - fontSize * 0.28
+  const bothLabels = bottomLabelY - topLabelY >= fontSize
   return (
     <g>
       <rect className="lw-drafting-body" x={left} y={top} width={length} height={height} rx={mm(1)} onPointerDown={onGrab} />
@@ -104,8 +110,6 @@ const RulerBody = memo(function RulerBody({ lengthMm, pxPerMm, unit, flipLabels,
       {ticks.map((tick) => {
         const x = left + mm(tick.mm)
         const tickClass = `lw-drafting-tick ${tick.level === 2 ? 'is-major' : ''}`
-        const topLabelY = top + tickLength[2] + fontSize * 1.02
-        const bottomLabelY = bottom - tickLength[2] - fontSize * 0.28
         return (
           <g key={tick.mm}>
             <line className={tickClass} x1={x} y1={top} x2={x} y2={top + tickLength[tick.level]} />
@@ -113,7 +117,9 @@ const RulerBody = memo(function RulerBody({ lengthMm, pxPerMm, unit, flipLabels,
             {tick.label && (
               <>
                 <text className="lw-drafting-label" x={x} y={topLabelY} style={{ fontSize }} transform={flipTransform(x, topLabelY, flipLabels)}>{tick.label}</text>
-                <text className="lw-drafting-label" x={x} y={bottomLabelY} style={{ fontSize }} transform={flipTransform(x, bottomLabelY, flipLabels)}>{tick.label}</text>
+                {bothLabels && (
+                  <text className="lw-drafting-label" x={x} y={bottomLabelY} style={{ fontSize }} transform={flipTransform(x, bottomLabelY, flipLabels)}>{tick.label}</text>
+                )}
               </>
             )}
           </g>
@@ -355,6 +361,11 @@ export function DraftingGuides({
       move('ruler', { ...drag.origin, x: centre.x, y: centre.y, lengthMm: clampRulerLength(lengthMm) })
       return
     }
+    if (drag.mode === 'width' && drag.kind === 'ruler') {
+      const local = normToLocalMm(point.x, point.y, drag.origin, width, height)
+      move('ruler', resizeRulerWidth(drag.origin, local.y, width, height, altKey))
+      return
+    }
     if (drag.kind === 'compass' && (drag.mode === 'radius' || drag.mode === 'draw')) {
       // The needle stays where the board says it is: a page that grew for the
       // arc remaps every pose, and the grab-time copy would put it back.
@@ -493,6 +504,11 @@ export function DraftingGuides({
   const captionSize = Math.max(9, mm(2.5))
   const compassGeometry = compass ? { radiusPx: mm(compass.radiusMm) } : null
   const rulerLengthMm = ruler ? rulerLength(ruler) : 0
+  const rulerWidthMm = ruler ? rulerWidth(ruler) : 0
+  // Keep the width grip inside the body, clear of the pen's edge zone, so a
+  // stroke along the drawing edge still reaches the ink layer.
+  const rulerWidthClearanceMm = PEN_EDGE_ZONE_MM + 9 / Math.max(pxPerMm, 1e-6) + 0.4
+  const rulerWidthHandleY = mm(Math.max(0, rulerWidthMm / 2 - rulerWidthClearanceMm))
   const squareSizeMm = setSquare ? setSquareSize(setSquare) : 0
   const squareSign = setSquare ? setSquareApexSign(setSquare) : -1
 
@@ -511,7 +527,7 @@ export function DraftingGuides({
           className={`lw-drafting-tool is-ruler ${ruler.pinned ? 'is-pinned' : ''}`}
           transform={`translate(${nx(ruler.x)} ${ny(ruler.y)}) rotate(${degrees(ruler.rotation)})`}
         >
-          <RulerBody lengthMm={rulerLengthMm} pxPerMm={pxPerMm} unit={settings.unit} flipLabels={upsideDown(ruler.rotation)} onGrab={grabRuler} />
+          <RulerBody lengthMm={rulerLengthMm} widthMm={rulerWidthMm} pxPerMm={pxPerMm} unit={settings.unit} flipLabels={upsideDown(ruler.rotation)} onGrab={grabRuler} />
           {!ruler.pinned && (
             <>
               <circle
@@ -532,6 +548,15 @@ export function DraftingGuides({
                 <path className="lw-drafting-length-icon" d="M -5 0 h 10 M -5 0 l 2.4 -2.4 M -5 0 l 2.4 2.4 M 5 0 l -2.4 -2.4 M 5 0 l -2.4 2.4" />
                 <title>Länge ändern (Alt: millimetergenau)</title>
               </g>
+              <g
+                className="lw-drafting-width"
+                transform={`translate(0 ${rulerWidthHandleY})`}
+                onPointerDown={(event) => beginDrag('ruler', 'width', event)}
+              >
+                <circle className="lw-drafting-length-bg" r="9" />
+                <path className="lw-drafting-length-icon" d="M 0 -5 v 10 M 0 -5 l -2.4 2.4 M 0 -5 l 2.4 2.4 M 0 5 l -2.4 -2.4 M 0 5 l 2.4 -2.4" />
+                <title>Breite ändern (Alt: halbe Millimeter)</title>
+              </g>
             </>
           )}
           {ruler.pinned && <PinGlyph x={mm(rulerLengthMm) / 2 - 14} y={0} />}
@@ -542,7 +567,7 @@ export function DraftingGuides({
             style={{ fontSize: captionSize }}
             transform={flipTransform(0, captionSize * 0.36, upsideDown(ruler.rotation))}
           >
-            {`Lineal · ${formatLength(rulerLengthMm, settings.unit)} · ${formatDegrees(ruler.rotation)}`}
+            {`Lineal · ${formatLength(rulerLengthMm, settings.unit)} × ${formatLength(rulerWidthMm, settings.unit)} · ${formatDegrees(ruler.rotation)}`}
           </text>
         </g>
       )}

@@ -4651,7 +4651,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     } else {
       setNotice({
         kind: 'info',
-        text: 'Lineal: Körper verschieben, blauer Punkt dreht, linker Griff ändert die Länge. Der Stift zeichnet an beiden Kanten entlang.',
+        text: 'Lineal: Körper verschieben, blauer Punkt dreht, linker Griff ändert die Länge, unterer Griff die Breite. Der Stift zeichnet an beiden Kanten entlang.',
       })
     }
   }, [draftingPoseOf, setDraftingPose, showDraftingTool])
@@ -6554,7 +6554,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
             type="button"
             className={rulerPose ? 'is-active' : ''}
             aria-pressed={Boolean(rulerPose)}
-            title="Lineal einblenden: verschieben, drehen, Länge ändern, Zentimeter oder Zoll ablesen und an beiden Kanten nachzeichnen"
+            title="Lineal einblenden: verschieben, drehen, Länge und Breite ändern, Zentimeter oder Zoll ablesen und an beiden Kanten nachzeichnen"
             onClick={() => toggleDraftingTool('ruler')}
           >
             <Ruler size={16} /> <span className="lw-tool-label">Lineal</span>
@@ -6905,9 +6905,13 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
                 settings={draftingSettings}
                 readout={draftingReadout}
                 onMove={(kind, pose) => {
-                  // A length pulled by hand becomes the default for the next ruler.
-                  if (kind === 'ruler' && pose.lengthMm && pose.lengthMm !== rulerPoseRef.current?.lengthMm) {
-                    updateDraftingSettings({ rulerLengthMm: pose.lengthMm })
+                  // A length or width pulled by hand becomes the default for the next ruler.
+                  if (kind === 'ruler') {
+                    const current = rulerPoseRef.current
+                    const patch: Partial<DraftingSettings> = {}
+                    if (pose.lengthMm && pose.lengthMm !== current?.lengthMm) patch.rulerLengthMm = pose.lengthMm
+                    if (pose.widthMm && pose.widthMm !== current?.widthMm) patch.rulerWidthMm = pose.widthMm
+                    if (patch.rulerLengthMm !== undefined || patch.rulerWidthMm !== undefined) updateDraftingSettings(patch)
                   }
                   setDraftingPose(kind, pose)
                 }}
@@ -7558,6 +7562,7 @@ const drawingBoardStyles = `
 .lw-drafting-caption{fill:#31405c;font:700 12px/1 var(--ui-font,system-ui);text-anchor:middle;pointer-events:none}
 .lw-drafting-rotate{fill:#3a6ee8;stroke:#fff;stroke-width:1.5;cursor:alias;pointer-events:auto}
 .lw-drafting-length{cursor:ew-resize;pointer-events:auto}
+.lw-drafting-width{cursor:ns-resize;pointer-events:auto}
 .lw-drafting-length-bg{fill:#e0b23c;stroke:#fff;stroke-width:1.5}
 .lw-drafting-length-icon{fill:none;stroke:#1a1f2a;stroke-width:1.5;stroke-linecap:round;pointer-events:none}
 .lw-drafting-pin{pointer-events:none}
