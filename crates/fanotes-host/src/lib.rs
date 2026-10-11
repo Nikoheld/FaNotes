@@ -211,7 +211,12 @@ impl Host {
             ),
             "fanotes:load-handwriting-recognition-resources" => resources::load_handwriting(),
             "fanotes:recognize-native-handwriting-line" => {
-                ocr::recognize_line(args.first().unwrap_or(&Value::Null))
+                let configured = self
+                    .settings
+                    .get("ocrThreadLimit")
+                    .and_then(Value::as_i64)
+                    .unwrap_or(0);
+                ocr::recognize_line(args.first().unwrap_or(&Value::Null), configured)
             }
             "fanotes:enhanced-math-get-state" => Ok(enhanced_math_state()),
             "fanotes:enhanced-math-install" | "fanotes:enhanced-math-recognize" => {
@@ -960,7 +965,12 @@ impl Host {
             .and_then(|name| name.to_str())
             .ok_or_else(|| "Ungültiger Name.".to_owned())?
             .to_owned();
-        let mut desired = safe_entry_name(next_name)?;
+        let name_input = if next_name.trim().is_empty() {
+            current_name.as_str()
+        } else {
+            next_name
+        };
+        let mut desired = safe_entry_name(name_input)?;
         if !was_dir {
             if entry_extension(&desired).is_empty() {
                 desired.push_str(&entry_extension(&current_name));
@@ -3301,7 +3311,7 @@ fn ink_anchor(transcript: &str, query: &str) -> Option<f64> {
         return None;
     }
     let lines: Vec<&str> = transcript
-        .lines()
+        .split('\n')
         .map(str::trim)
         .filter(|line| !line.is_empty())
         .collect();
@@ -3310,15 +3320,9 @@ fn ink_anchor(transcript: &str, query: &str) -> Option<f64> {
     }
     let parsed: Vec<(Option<f64>, String)> = lines
         .iter()
-        .map(|line| {
-            if let Some((y, text)) = line.split_once('\t') {
-                if let Ok(value) = y.parse::<f64>() {
-                    if value.is_finite() {
-                        return (Some(value.clamp(0.0, 1.0)), text.trim().to_owned());
-                    }
-                }
-            }
-            (None, (*line).to_owned())
+        .map(|line| match transcript_position(line) {
+            Some((y, text)) => (Some(y), text),
+            None => (None, (*line).to_owned()),
         })
         .collect();
     let index = parsed
@@ -3331,6 +3335,20 @@ fn ink_anchor(transcript: &str, query: &str) -> Option<f64> {
             Some(index as f64 / (parsed.len() - 1) as f64)
         }
     })
+}
+
+/// `^(\d+(?:\.\d+)?)\t(.*)$` from the desktop handwriting search.
+fn transcript_position(line: &str) -> Option<(f64, String)> {
+    static PATTERN: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let pattern = PATTERN.get_or_init(|| {
+        regex::Regex::new(r"^([0-9]+(?:\.[0-9]+)?)\t(.*)$").expect("transcript line pattern")
+    });
+    let caps = pattern.captures(line)?;
+    let y: f64 = caps.get(1)?.as_str().parse().ok()?;
+    if !y.is_finite() {
+        return None;
+    }
+    Some((y.clamp(0.0, 1.0), caps.get(2)?.as_str().trim().to_owned()))
 }
 
 #[cfg(test)]
@@ -3439,6 +3457,30 @@ mod search_span_tests {
         let kept = super::ink_transcript(Some(&ink));
         assert_eq!(crate::vault::utf16_len(&kept), 500_000);
         assert!(!kept.contains("Ziel"));
+    }
+}
+
+#[cfg(test)]
+mod ink_anchor_tests {
+    use super::ink_anchor;
+
+    #[test]
+    fn a_handwriting_anchor_uses_the_desktop_line_pattern() {
+        assert_eq!(ink_anchor("0.4200\tChlorophyll", "chlor"), Some(0.42));
+        assert_eq!(ink_anchor("1e2\tChlorophyll", "chlor"), Some(0.15));
+        assert_eq!(ink_anchor("1.\tHallo", "hallo"), Some(0.15));
+        assert_eq!(
+            ink_anchor("1e2\tChlorophyll\n0.2500\tBlattgrün", "chlor"),
+            Some(0.0)
+        );
+        assert_eq!(
+            ink_anchor("1e2\tChlorophyll\n0.2500\tBlattgrün", "blatt"),
+            Some(0.25)
+        );
+        assert_eq!(
+            ink_anchor("0.2000\twort\r0.8000\tanders", "anders"),
+            Some(0.2)
+        );
     }
 }
 
