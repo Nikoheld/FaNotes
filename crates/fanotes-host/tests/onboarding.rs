@@ -113,3 +113,65 @@ fn first_run_creates_the_chosen_subjects_and_stamps_the_tree() {
     assert_eq!(again["onboardingRequired"], false);
     assert!(!vault.join("Deutsch").exists());
 }
+
+#[test]
+fn a_cached_tree_keeps_a_long_unicode_name() {
+    let (vault, mut host) = host();
+    host.dispatch("fanotes:complete-onboarding", &[json!(["Mathematik"])])
+        .unwrap();
+    host.dispatch("fanotes:get-tree", &[]).unwrap();
+    let cache_dir = vault.parent().unwrap().join("app/tree-cache-v1");
+    let cache_path = fs::read_dir(&cache_dir)
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    let name = format!("{}.md", "Ä".repeat(200));
+    assert!(name.len() > 255);
+    assert!(name.encode_utf16().count() <= 255);
+    let cache = json!({
+        "version": 1,
+        "vaultIdentity": fs::read_to_string(&cache_path)
+            .unwrap()
+            .split("\"vaultIdentity\":\"")
+            .nth(1)
+            .unwrap()
+            .split('"')
+            .next()
+            .unwrap(),
+        "entries": [{
+            "name": name,
+            "relativePath": name,
+            "kind": "file",
+            "extension": "md"
+        }]
+    });
+    fs::write(&cache_path, format!("{cache}\n")).unwrap();
+    let cached = host.dispatch("fanotes:get-cached-tree", &[]).unwrap();
+    assert_eq!(cached[0]["name"], name);
+
+    let too_long = "a".repeat(256);
+    let identity = cache["vaultIdentity"].clone();
+    fs::write(
+        &cache_path,
+        format!(
+            "{}\n",
+            json!({
+                "version": 1,
+                "vaultIdentity": identity,
+                "entries": [{
+                    "name": too_long,
+                    "relativePath": too_long,
+                    "kind": "folder",
+                    "children": []
+                }]
+            })
+        ),
+    )
+    .unwrap();
+    assert!(host
+        .dispatch("fanotes:get-cached-tree", &[])
+        .unwrap()
+        .is_null());
+}

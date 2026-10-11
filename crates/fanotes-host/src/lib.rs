@@ -2603,7 +2603,7 @@ fn clean_cached_entries(
         }
         let name = entry.get("name").and_then(Value::as_str).ok_or(())?;
         if name.is_empty()
-            || name.len() > 255
+            || vault::utf16_len(name) > 255
             || name.starts_with('.')
             || name.contains('/')
             || name.contains('\\')
