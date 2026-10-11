@@ -169,6 +169,29 @@ fn search_excerpt_follows_a_case_fold_that_grows() {
 }
 
 #[test]
+fn equal_search_hits_follow_german_dictionary_order() {
+    let mut host = host();
+    for name in ["Seite 2", "Seite 10", "Apfel", "Äpfel", "Strasse", "Straße"] {
+        host.dispatch(
+            "fanotes:write-file",
+            &[json!(format!("Bio/{name}.md")), json!("Licht\n")],
+        )
+        .unwrap();
+    }
+    let hits = host.dispatch("fanotes:search", &[json!("Licht")]).unwrap();
+    let titles: Vec<_> = hits
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|hit| hit["title"].as_str().unwrap().to_owned())
+        .collect();
+    assert_eq!(
+        titles,
+        vec!["Apfel", "Äpfel", "Seite 10", "Seite 2", "Strasse", "Straße"]
+    );
+}
+
+#[test]
 fn a_search_query_stops_at_500_utf16_units() {
     let mut host = host();
     host.dispatch(

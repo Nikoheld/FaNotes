@@ -1174,13 +1174,15 @@ impl Host {
             hits.push(hit);
         }
         search_drawings(root, &needle, &query, &owners, &mut hits);
+        let collator = german_search_collator();
         hits.sort_by(|left, right| {
             right["matches"]
                 .as_u64()
                 .unwrap_or(0)
                 .cmp(&left["matches"].as_u64().unwrap_or(0))
                 .then_with(|| {
-                    compare_names(
+                    search_title_order(
+                        collator.as_ref(),
                         left["title"].as_str().unwrap_or(""),
                         right["title"].as_str().unwrap_or(""),
                     )
@@ -2228,6 +2230,26 @@ fn is_combining_mark(character: char) -> bool {
             | '\u{20D0}'..='\u{20FF}'
             | '\u{FE20}'..='\u{FE2F}'
     )
+}
+
+fn german_search_collator() -> Option<icu_collator::CollatorBorrowed<'static>> {
+    icu_collator::Collator::try_new(
+        icu_locale_core::locale!("de").into(),
+        icu_collator::options::CollatorOptions::default(),
+    )
+    .ok()
+}
+
+fn search_title_order(
+    collator: Option<&icu_collator::CollatorBorrowed<'static>>,
+    left: &str,
+    right: &str,
+) -> std::cmp::Ordering {
+    if let Some(collator) = collator {
+        collator.compare(left, right)
+    } else {
+        left.cmp(right)
+    }
 }
 
 fn entry_name_order(left: &Value, right: &Value) -> std::cmp::Ordering {
