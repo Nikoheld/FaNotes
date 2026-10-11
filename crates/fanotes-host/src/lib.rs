@@ -55,6 +55,8 @@ pub struct Host {
     pub file_dialogs: bool,
     /// Overrides the documents directory used for a first-run vault.
     pub documents_dir: Option<PathBuf>,
+    /// When set, link and file-manager actions are appended here instead of launched.
+    pub open_log: Option<PathBuf>,
 }
 
 impl Host {
@@ -68,6 +70,7 @@ impl Host {
             close_requested: false,
             file_dialogs: true,
             documents_dir: None,
+            open_log: None,
         };
         host.load_persisted();
         host
@@ -215,10 +218,7 @@ impl Host {
             | "fanotes:update-check"
             | "fanotes:update-download"
             | "fanotes:update-install" => Ok(self.update_state()),
-            "fanotes:reveal-in-folder" => {
-                let _ = vault::resolve_inside(self.require_vault()?, &arg_string(args, 0)?)?;
-                Ok(Value::Null)
-            }
+            "fanotes:reveal-in-folder" => self.reveal_in_folder(&arg_string(args, 0)?),
             "fanotes:open-external" => self.open_external(&arg_string(args, 0)?),
             "fanotes:addons-fetch" => addons::fetch_text(&arg_string(args, 0)?),
             "fanotes:addons-list" => addons::list(self),
@@ -1141,17 +1141,33 @@ impl Host {
     }
 
     fn open_external(&self, url: &str) -> Result<Value, String> {
-        addon_request_allowed(url).or_else(|_| {
-            if url.starts_with("https://")
-                || url.starts_with("http://127.0.0.1")
-                || url.starts_with("http://localhost")
-            {
-                Ok(())
-            } else {
-                Err("Nur https-Adressen können geöffnet werden.".to_owned())
-            }
-        })?;
-        Ok(Value::Null)
+        let href = http_link(url)?;
+        self.launch("open", &href)
+    }
+
+    fn reveal_in_folder(&self, relative: &str) -> Result<Value, String> {
+        let root = self.require_vault()?.to_path_buf();
+        let target = reveal_target(&root, relative)?;
+        self.launch("reveal", &target.to_string_lossy())
+    }
+
+    fn launch(&self, kind: &str, target: &str) -> Result<Value, String> {
+        if let Some(log) = &self.open_log {
+            let mut file = fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(log)
+                .map_err(|_| "Der Link konnte nicht geöffnet werden.".to_owned())?;
+            use std::io::Write;
+            writeln!(file, "{kind} {target}")
+                .map_err(|_| "Der Link konnte nicht geöffnet werden.".to_owned())?;
+            return Ok(Value::Null);
+        }
+        match kind {
+            "reveal" => reveal_on_desktop(Path::new(target)),
+            _ => spawn_detached("xdg-open", &[target.to_owned()]),
+        }
+        .map(|()| Value::Null)
     }
 
     fn update_state(&self) -> Value {
@@ -1609,6 +1625,108 @@ fn created_entry(relative: &str, path: &Path, note: bool) -> Value {
             }
         })
     }
+}
+
+fn http_link(raw: &str) -> Result<String, String> {
+    if raw.is_empty()
+        || raw.len() > 4096
+        || raw.chars().any(|ch| ch.is_control() || ch.is_whitespace())
+    {
+        return Err("Ungültiger externer Link.".to_owned());
+    }
+    let (scheme, rest) = if let Some(rest) = raw.strip_prefix("https://") {
+        ("https", rest)
+    } else if let Some(rest) = raw.strip_prefix("http://") {
+        ("http", rest)
+    } else {
+        return Err("Nur sichere HTTP(S)-Links ohne Zugangsdaten sind erlaubt.".to_owned());
+    };
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or(rest);
+    if authority.is_empty() || authority.contains('@') {
+        return Err("Nur sichere HTTP(S)-Links ohne Zugangsdaten sind erlaubt.".to_owned());
+    }
+    if rest.contains('/') || rest.contains('?') || rest.contains('#') {
+        Ok(format!("{scheme}://{rest}"))
+    } else {
+        Ok(format!("{scheme}://{rest}/"))
+    }
+}
+
+fn reveal_target(root: &Path, relative: &str) -> Result<PathBuf, String> {
+    let normalized = vault::normalize_relative_path(relative, true, true)?;
+    if normalized.is_empty() {
+        return Ok(root.to_path_buf());
+    }
+    let mut target = root.to_path_buf();
+    for (index, segment) in normalized.split('/').enumerate() {
+        target.push(segment);
+        let meta = fs::symlink_metadata(&target)
+            .map_err(|_| "Der Eintrag wurde nicht gefunden.".to_owned())?;
+        if meta.file_type().is_symlink() {
+            return Err("Symbolische Links sind innerhalb des Vaults nicht erlaubt.".to_owned());
+        }
+        let last = index + 1 == normalized.split('/').count();
+        if !last && !meta.is_dir() {
+            return Err("Der Eintrag wurde nicht gefunden.".to_owned());
+        }
+        if last && !meta.is_file() && !meta.is_dir() {
+            return Err("Der Eintrag wurde nicht gefunden.".to_owned());
+        }
+    }
+    if !vault::is_inside_root(root, &target) {
+        return Err("Der Pfad liegt außerhalb des Vaults.".to_owned());
+    }
+    Ok(target)
+}
+
+fn reveal_on_desktop(path: &Path) -> Result<(), String> {
+    let uri = file_uri(path);
+    if spawn_detached(
+        "dbus-send",
+        &[
+            "--session".to_owned(),
+            "--dest=org.freedesktop.FileManager1".to_owned(),
+            "--type=method_call".to_owned(),
+            "/org/freedesktop/FileManager1".to_owned(),
+            "org.freedesktop.FileManager1.ShowItems".to_owned(),
+            format!("array:string:{uri}"),
+            "string:".to_owned(),
+        ],
+    )
+    .is_ok()
+    {
+        return Ok(());
+    }
+    let folder = if path.is_dir() {
+        path.to_path_buf()
+    } else {
+        path.parent().unwrap_or(path).to_path_buf()
+    };
+    spawn_detached("xdg-open", &[folder.to_string_lossy().into_owned()])
+}
+
+fn spawn_detached(program: &str, args: &[String]) -> Result<(), String> {
+    std::process::Command::new(program)
+        .args(args)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map(|_| ())
+        .map_err(|_| "Der Link konnte nicht geöffnet werden.".to_owned())
+}
+
+fn file_uri(path: &Path) -> String {
+    let mut uri = String::from("file://");
+    for byte in path.to_string_lossy().as_bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'/' | b'-' | b'_' | b'.' | b'~' => {
+                uri.push(*byte as char);
+            }
+            _ => uri.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    uri
 }
 
 fn onboarding_open(channel: &str) -> bool {
@@ -2210,6 +2328,14 @@ fn collect_search_files(
             .map(|(_, extension)| extension.to_ascii_lowercase())
             .unwrap_or_default();
         if !matches!(extension.as_str(), "md" | "markdown" | "famd" | "pdf") {
+            continue;
+        }
+        let max = if extension == "pdf" {
+            PDF_ASSET_MAX
+        } else {
+            MAX_TEXT_BYTES
+        };
+        if meta.len() > max {
             continue;
         }
         let relative = path
