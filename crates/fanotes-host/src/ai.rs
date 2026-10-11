@@ -543,7 +543,8 @@ fn parse_opencode_models(body: &Value) -> Result<Vec<Value>, String> {
 }
 
 fn output_token_limit(markdown: &str) -> u64 {
-    (crate::vault::utf16_len(markdown) / 2).clamp(2_048, 16_000) as u64
+    let half = crate::vault::utf16_len(markdown).div_ceil(2);
+    half.clamp(2_048, 16_000) as u64
 }
 
 fn gemini_generate(
@@ -1562,7 +1563,13 @@ mod tests {
     #[test]
     fn a_long_note_gets_a_larger_answer_budget() {
         assert_eq!(output_token_limit("kurz"), 2048);
+        assert_eq!(output_token_limit(&"a".repeat(4_097)), 2049);
         assert_eq!(output_token_limit(&"a".repeat(10_000)), 5000);
+        assert_eq!(output_token_limit(&"a".repeat(10_001)), 5001);
+        assert_eq!(
+            output_token_limit(&format!("{}b", "😀".repeat(2_048))),
+            2049
+        );
         assert_eq!(output_token_limit(&"a".repeat(100_000)), 16_000);
         let reply = lm_studio_text(&json!({
             "output": [{ "type": "message", "content": "# Fertig" }],
