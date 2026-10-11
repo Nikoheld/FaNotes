@@ -281,7 +281,7 @@ fn validate_document(candidate: &Value, expected_id: &str) -> Result<Value, Stri
         .ok_or_else(|| "Die Arbeitsblattdaten sind ungültig.".to_owned())?;
     let id = worksheet_id(expected_id)?;
     if object.get("id").and_then(Value::as_str) != Some(id.as_str())
-        || object.get("schemaVersion").and_then(Value::as_i64) != Some(1)
+        || object.get("schemaVersion").and_then(json_integer) != Some(1)
     {
         return Err("Die Arbeitsblattdatei hat ein ungültiges Format.".to_owned());
     }
@@ -377,7 +377,7 @@ fn boxes(value: Option<&Value>) -> Result<Vec<Value>, String> {
             worksheet_id(id)?;
             let page = object
                 .get("page")
-                .and_then(Value::as_i64)
+                .and_then(json_integer)
                 .ok_or_else(|| "Eine Textfeldseite ist ungültig.".to_owned())?;
             if !(1..=2000).contains(&page) {
                 return Err("Eine Textfeldseite ist ungültig.".to_owned());
@@ -414,10 +414,9 @@ fn boxes(value: Option<&Value>) -> Result<Vec<Value>, String> {
 }
 
 fn highlights(value: Option<&Value>) -> Result<Vec<Value>, String> {
-    let items = match value {
-        Some(Value::Array(items)) => items,
-        Some(_) => return Err("Das Arbeitsblatt enthält zu viele Markierungen.".to_owned()),
-        None => return Ok(Vec::new()),
+    // The desktop keeps a missing or non-array list as no marks.
+    let Some(items) = value.and_then(Value::as_array) else {
+        return Ok(Vec::new());
     };
     if items.len() > 4000 {
         return Err("Das Arbeitsblatt enthält zu viele Markierungen.".to_owned());
@@ -435,7 +434,7 @@ fn highlights(value: Option<&Value>) -> Result<Vec<Value>, String> {
             worksheet_id(id)?;
             let page = object
                 .get("page")
-                .and_then(Value::as_i64)
+                .and_then(json_integer)
                 .ok_or_else(|| "Eine Markierungsseite ist ungültig.".to_owned())?;
             if !(1..=2000).contains(&page) {
                 return Err("Eine Markierungsseite ist ungültig.".to_owned());
@@ -474,6 +473,19 @@ fn highlights(value: Option<&Value>) -> Result<Vec<Value>, String> {
             }))
         })
         .collect()
+}
+
+/// `Number.isInteger`: a whole JSON number, including `1.0`.
+fn json_integer(value: &Value) -> Option<i64> {
+    if let Some(number) = value.as_i64() {
+        return Some(number);
+    }
+    let number = value.as_f64()?;
+    if number.is_finite() && number.fract() == 0.0 {
+        Some(number as i64)
+    } else {
+        None
+    }
 }
 
 fn number(object: &Map<String, Value>, name: &str, error: &str) -> Result<f64, String> {

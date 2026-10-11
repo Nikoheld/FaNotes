@@ -21,6 +21,53 @@ fn host() -> (std::path::PathBuf, Host) {
 }
 
 #[test]
+fn a_null_highlight_list_and_a_whole_page_number_still_open() {
+    let (dir, mut host) = host();
+    let worksheets = dir.join("vault/.fanotes/worksheets");
+    fs::write(
+        worksheets.join("blatt-1.json"),
+        r#"{"schemaVersion":1.0,"id":"blatt-1","title":"Übung","kind":"pdf","mimeType":"application/pdf","sourceRelativePath":".fanotes/worksheets/blatt-1.pdf","dataRelativePath":".fanotes/worksheets/blatt-1.json","createdAt":"2026-01-02T03:04:05.000Z","updatedAt":"2026-01-02T03:04:05.000Z","textBoxes":[{"id":"box-1","page":1.0,"x":0.1,"y":0.2,"width":0.3,"text":"Hallo","fontSize":16}],"highlights":null}"#,
+    )
+    .unwrap();
+    let loaded = host
+        .dispatch("fanotes:read-worksheet", &[json!("blatt-1")])
+        .unwrap();
+    assert_eq!(loaded["textBoxes"][0]["page"], 1);
+    assert_eq!(loaded["textBoxes"][0]["text"], "Hallo");
+    assert!(loaded["highlights"].as_array().unwrap().is_empty());
+
+    let saved = host
+        .dispatch(
+            "fanotes:save-worksheet",
+            &[json!({
+                "schemaVersion": 1,
+                "id": "blatt-1",
+                "title": "Übung",
+                "kind": "pdf",
+                "mimeType": "application/pdf",
+                "sourceRelativePath": ".fanotes/worksheets/blatt-1.pdf",
+                "dataRelativePath": ".fanotes/worksheets/blatt-1.json",
+                "createdAt": "2026-01-02T03:04:05.000Z",
+                "updatedAt": "2026-01-02T03:04:05.000Z",
+                "textBoxes": [],
+                "highlights": {}
+            })],
+        )
+        .unwrap();
+    assert!(saved["highlights"].as_array().unwrap().is_empty());
+
+    fs::write(
+        worksheets.join("blatt-1.json"),
+        r#"{"schemaVersion":1,"id":"blatt-1","title":"Übung","kind":"pdf","mimeType":"application/pdf","sourceRelativePath":".fanotes/worksheets/blatt-1.pdf","dataRelativePath":".fanotes/worksheets/blatt-1.json","createdAt":"2026-01-02T03:04:05.000Z","updatedAt":"2026-01-02T03:04:05.000Z","textBoxes":[{"id":"box-1","page":1.5,"x":0.1,"y":0.2,"width":0.3,"text":"Hallo","fontSize":16}],"highlights":[]}"#,
+    )
+    .unwrap();
+    let fraction = host
+        .dispatch("fanotes:read-worksheet", &[json!("blatt-1")])
+        .unwrap_err();
+    assert!(fraction.contains("Textfeldseite"), "{fraction}");
+}
+
+#[test]
 fn a_pdf_worksheet_saves_reads_and_deletes() {
     let (dir, mut host) = host();
     let saved = host
