@@ -397,10 +397,10 @@ fn boxes(value: Option<&Value>) -> Result<Vec<Value>, String> {
             if !(1..=2000).contains(&page) {
                 return Err("Eine Textfeldseite ist ungültig.".to_owned());
             }
-            let x = number(object, "x")?;
-            let y = number(object, "y")?;
-            let width = number(object, "width")?;
-            let font_size = number(object, "fontSize")?;
+            let x = number(object, "x", "Eine Textfeldposition ist ungültig.")?;
+            let y = number(object, "y", "Eine Textfeldposition ist ungültig.")?;
+            let width = number(object, "width", "Eine Textfeldposition ist ungültig.")?;
+            let font_size = number(object, "fontSize", "Eine Textfeldposition ist ungültig.")?;
             if !(0.0..=1.0).contains(&x)
                 || !(0.0..=1.0).contains(&y)
                 || !(0.05..=1.0).contains(&width)
@@ -455,10 +455,10 @@ fn highlights(value: Option<&Value>) -> Result<Vec<Value>, String> {
             if !(1..=2000).contains(&page) {
                 return Err("Eine Markierungsseite ist ungültig.".to_owned());
             }
-            let x = number(object, "x")?;
-            let y = number(object, "y")?;
-            let width = number(object, "width")?;
-            let height = number(object, "height")?;
+            let x = number(object, "x", "Eine Markierungsposition ist ungültig.")?;
+            let y = number(object, "y", "Eine Markierungsposition ist ungültig.")?;
+            let width = number(object, "width", "Eine Markierungsposition ist ungültig.")?;
+            let height = number(object, "height", "Eine Markierungsposition ist ungültig.")?;
             if !(0.0..=1.0).contains(&x)
                 || !(0.0..=1.0).contains(&y)
                 || !(0.004..=1.0).contains(&width)
@@ -491,12 +491,12 @@ fn highlights(value: Option<&Value>) -> Result<Vec<Value>, String> {
         .collect()
 }
 
-fn number(object: &Map<String, Value>, name: &str) -> Result<f64, String> {
+fn number(object: &Map<String, Value>, name: &str, error: &str) -> Result<f64, String> {
     object
         .get(name)
         .and_then(Value::as_f64)
         .filter(|value| value.is_finite())
-        .ok_or_else(|| "Eine Textfeldposition ist ungültig.".to_owned())
+        .ok_or_else(|| error.to_owned())
 }
 
 fn format_for(source: &str) -> Result<Format, String> {
