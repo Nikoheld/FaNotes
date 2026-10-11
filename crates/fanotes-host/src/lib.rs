@@ -2242,12 +2242,36 @@ fn german_dictionary_collator() -> Option<icu_collator::CollatorBorrowed<'static
 pub(crate) fn dictionary_order(left: &str, right: &str) -> std::cmp::Ordering {
     static COLLATOR: std::sync::OnceLock<Option<icu_collator::CollatorBorrowed<'static>>> =
         std::sync::OnceLock::new();
-    let collator = COLLATOR.get_or_init(german_dictionary_collator);
+    compare_with(
+        left,
+        right,
+        COLLATOR.get_or_init(german_dictionary_collator),
+    )
+}
+
+/// German dictionary order with numeric runs, matching `localeCompare(name, 'de', { numeric: true })`.
+pub(crate) fn numeric_dictionary_order(left: &str, right: &str) -> std::cmp::Ordering {
+    static COLLATOR: std::sync::OnceLock<Option<icu_collator::CollatorBorrowed<'static>>> =
+        std::sync::OnceLock::new();
+    compare_with(left, right, COLLATOR.get_or_init(german_numeric_collator))
+}
+
+fn compare_with(
+    left: &str,
+    right: &str,
+    collator: &Option<icu_collator::CollatorBorrowed<'static>>,
+) -> std::cmp::Ordering {
     if let Some(collator) = collator {
         collator.compare(left, right)
     } else {
         left.cmp(right)
     }
+}
+
+fn german_numeric_collator() -> Option<icu_collator::CollatorBorrowed<'static>> {
+    let mut prefs = icu_collator::CollatorPreferences::from(icu_locale_core::locale!("de"));
+    prefs.numeric_ordering = Some(icu_collator::preferences::CollationNumericOrdering::True);
+    icu_collator::Collator::try_new(prefs, icu_collator::options::CollatorOptions::default()).ok()
 }
 
 fn entry_name_order(left: &Value, right: &Value) -> std::cmp::Ordering {
@@ -3224,6 +3248,32 @@ mod sort_tests {
         assert_eq!(compare_names("Seite 2", "Seite 10"), Ordering::Less);
         assert_eq!(compare_names("Äpfel", "Zen"), Ordering::Less);
         assert_eq!(compare_names("Über", "Zen"), Ordering::Less);
+    }
+
+    #[test]
+    fn onenote_pages_use_numeric_german_dictionary_order() {
+        let mut pages = [
+            "Seite 10.html",
+            "Seite 2.html",
+            "apfel.html",
+            "äpfel.html",
+            "strasse.html",
+            "straße.html",
+            "ä.html",
+        ];
+        pages.sort_by(|left, right| super::numeric_dictionary_order(left, right));
+        assert_eq!(
+            pages,
+            [
+                "ä.html",
+                "apfel.html",
+                "äpfel.html",
+                "Seite 2.html",
+                "Seite 10.html",
+                "strasse.html",
+                "straße.html",
+            ]
+        );
     }
 }
 

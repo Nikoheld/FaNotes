@@ -101,7 +101,7 @@ fn import_in_temp(
         return Err("Im OneNote-Export wurden keine lesbaren Seiten gefunden. Verwende einen aktuellen OneDrive-Export oder eine moderne .one-Datei.".to_owned());
     }
     pages.sort_by(|left, right| {
-        crate::compare_names(&left.to_string_lossy(), &right.to_string_lossy())
+        crate::numeric_dictionary_order(&left.to_string_lossy(), &right.to_string_lossy())
     });
 
     let source_digest = sha256_file(input)?;
