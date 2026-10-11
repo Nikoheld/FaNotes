@@ -84,10 +84,16 @@ pub fn transform(payload: &Value) -> Result<Value, String> {
         &relative_path,
         &notes,
     );
+    let temperature = if actions.iter().any(|action| action == "facts") {
+        0.05
+    } else {
+        0.15
+    };
+    let max_tokens = output_token_limit(&markdown);
     let text = match provider {
-        "ollama" => ollama_chat(connection, &model, &prompt)?,
-        "lmstudio" => chat_completions(connection, &model, &prompt)?,
-        "openai" => chat_completions(
+        "ollama" => ollama_chat(connection, &model, &prompt, temperature)?,
+        "lmstudio" => lm_studio_chat(connection, &model, &prompt, temperature, max_tokens)?,
+        "openai" => openai_response(
             &json!({
                 "provider": "openai",
                 "baseUrl": "https://api.openai.com",
@@ -95,10 +101,11 @@ pub fn transform(payload: &Value) -> Result<Value, String> {
             }),
             &model,
             &prompt,
+            max_tokens,
         )?,
-        "gemini" => gemini_generate(connection, &model, &prompt)?,
-        "anthropic" => anthropic_message(connection, &model, &prompt)?,
-        "opencode" => opencode_message(connection, &model, &prompt)?,
+        "gemini" => gemini_generate(connection, &model, &prompt, temperature, max_tokens)?,
+        "anthropic" => anthropic_message(connection, &model, &prompt, max_tokens)?,
+        "opencode" => opencode_message(connection, &model, &prompt, &title)?,
         _ => return Err("Wähle einen unterstützten AI-Anbieter.".to_owned()),
     };
     Ok(json!({
@@ -134,8 +141,19 @@ pub fn transform_lm_studio(payload: &Value) -> Result<Value, String> {
         "baseUrl": origin,
         "apiKey": object.get("apiToken").and_then(Value::as_str).unwrap_or(""),
     });
+    let temperature = if actions.iter().any(|action| action == "facts") {
+        0.05
+    } else {
+        0.15
+    };
     let prompt = build_prompt(&markdown, &actions, &instruction, "Notiz", "", &[]);
-    let text = chat_completions(&connection, &model, &prompt)?;
+    let text = lm_studio_chat(
+        &connection,
+        &model,
+        &prompt,
+        temperature,
+        output_token_limit(&markdown),
+    )?;
     Ok(json!({
         "markdown": unwrap_markdown(&text)?,
         "model": model,
@@ -428,7 +446,17 @@ fn parse_opencode_models(body: &Value) -> Result<Vec<Value>, String> {
     Ok(models)
 }
 
-fn gemini_generate(connection: &Value, model: &str, prompt: &str) -> Result<String, String> {
+fn output_token_limit(markdown: &str) -> u64 {
+    (crate::vault::utf16_len(markdown) / 2).clamp(2_048, 16_000) as u64
+}
+
+fn gemini_generate(
+    connection: &Value,
+    model: &str,
+    prompt: &str,
+    temperature: f64,
+    max_tokens: u64,
+) -> Result<String, String> {
     require_key(connection)?;
     let body = request_json(
         "POST",
@@ -438,26 +466,35 @@ fn gemini_generate(connection: &Value, model: &str, prompt: &str) -> Result<Stri
         ),
         connection,
         Some(json!({
-            "systemInstruction": { "parts": [{ "text": "Du bist der Markdown-Assistent von FaNotes." }] },
-            "contents": [{ "role": "user", "parts": [{ "text": prompt }] }]
+            "systemInstruction": { "parts": [{ "text": SYSTEM_PROMPT }] },
+            "contents": [{ "role": "user", "parts": [{ "text": prompt }] }],
+            "generationConfig": { "temperature": temperature, "maxOutputTokens": max_tokens }
         })),
-        Duration::from_secs(120),
+        Duration::from_secs(600),
     )?;
-    body["candidates"][0]["content"]["parts"]
+    let text = body["candidates"][0]["content"]["parts"]
         .as_array()
-        .and_then(|parts| {
+        .map(|parts| {
             parts
                 .iter()
                 .filter_map(|part| part.get("text").and_then(Value::as_str))
-                .next()
+                .collect::<Vec<_>>()
+                .join("\n\n")
         })
-        .map(str::to_owned)
-        .ok_or_else(|| {
-            "Der AI-Anbieter hat kein verwendbares Markdown-Dokument zurückgegeben.".to_owned()
-        })
+        .unwrap_or_default();
+    if text.is_empty() {
+        Err("Der AI-Anbieter hat kein verwendbares Markdown-Dokument zurückgegeben.".to_owned())
+    } else {
+        Ok(text)
+    }
 }
 
-fn anthropic_message(connection: &Value, model: &str, prompt: &str) -> Result<String, String> {
+fn anthropic_message(
+    connection: &Value,
+    model: &str,
+    prompt: &str,
+    max_tokens: u64,
+) -> Result<String, String> {
     require_key(connection)?;
     let body = request_json(
         "POST",
@@ -465,30 +502,41 @@ fn anthropic_message(connection: &Value, model: &str, prompt: &str) -> Result<St
         connection,
         Some(json!({
             "model": model,
-            "max_tokens": 2048,
-            "system": "Du bist der Markdown-Assistent von FaNotes.",
+            "max_tokens": max_tokens,
+            "system": SYSTEM_PROMPT,
             "messages": [{ "role": "user", "content": prompt }]
         })),
-        Duration::from_secs(120),
+        Duration::from_secs(600),
     )?;
-    body["content"]
+    let text = body["content"]
         .as_array()
-        .and_then(|parts| {
-            parts.iter().find_map(|part| {
-                if part.get("type").and_then(Value::as_str) == Some("text") {
-                    part.get("text").and_then(Value::as_str)
-                } else {
-                    None
-                }
-            })
+        .map(|parts| {
+            parts
+                .iter()
+                .filter_map(|part| {
+                    if part.get("type").and_then(Value::as_str) == Some("text") {
+                        part.get("text").and_then(Value::as_str)
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("\n\n")
         })
-        .map(str::to_owned)
-        .ok_or_else(|| {
-            "Der AI-Anbieter hat kein verwendbares Markdown-Dokument zurückgegeben.".to_owned()
-        })
+        .unwrap_or_default();
+    if text.is_empty() {
+        Err("Der AI-Anbieter hat kein verwendbares Markdown-Dokument zurückgegeben.".to_owned())
+    } else {
+        Ok(text)
+    }
 }
 
-fn opencode_message(connection: &Value, model: &str, prompt: &str) -> Result<String, String> {
+fn opencode_message(
+    connection: &Value,
+    model: &str,
+    prompt: &str,
+    title: &str,
+) -> Result<String, String> {
     let Some((provider_id, model_id)) = model.split_once('/') else {
         return Err("Das OpenCode-Modell besitzt keine gültige Anbieterkennung.".to_owned());
     };
@@ -500,7 +548,7 @@ fn opencode_message(connection: &Value, model: &str, prompt: &str) -> Result<Str
         "POST",
         &format!("{origin}/session"),
         connection,
-        Some(json!({ "title": "FaNotes" })),
+        Some(json!({ "title": format!("FaNotes · {title}") })),
         Duration::from_secs(20),
     )?;
     let Some(session_id) = session.get("id").and_then(Value::as_str) else {
@@ -515,10 +563,22 @@ fn opencode_message(connection: &Value, model: &str, prompt: &str) -> Result<Str
         connection,
         Some(json!({
             "model": { "providerID": provider_id, "modelID": model_id },
-            "system": "Du bist der Markdown-Assistent von FaNotes.",
+            "system": SYSTEM_PROMPT,
+            "tools": {
+                "bash": false,
+                "edit": false,
+                "write": false,
+                "patch": false,
+                "read": false,
+                "glob": false,
+                "grep": false,
+                "webfetch": false,
+                "websearch": false,
+                "task": false
+            },
             "parts": [{ "type": "text", "text": prompt }]
         })),
-        Duration::from_secs(120),
+        Duration::from_secs(600),
     );
     let _ = request_json(
         "DELETE",
@@ -528,25 +588,36 @@ fn opencode_message(connection: &Value, model: &str, prompt: &str) -> Result<Str
         Duration::from_secs(20),
     );
     let response = response?;
-    response
+    let text = response
         .get("parts")
         .and_then(Value::as_array)
-        .and_then(|parts| {
-            parts.iter().find_map(|part| {
-                if part.get("type").and_then(Value::as_str) == Some("text") {
-                    part.get("text").and_then(Value::as_str)
-                } else {
-                    None
-                }
-            })
+        .map(|parts| {
+            parts
+                .iter()
+                .filter_map(|part| {
+                    if part.get("type").and_then(Value::as_str) == Some("text") {
+                        part.get("text").and_then(Value::as_str)
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("\n\n")
         })
-        .map(str::to_owned)
-        .ok_or_else(|| {
-            "Der AI-Anbieter hat kein verwendbares Markdown-Dokument zurückgegeben.".to_owned()
-        })
+        .unwrap_or_default();
+    if text.is_empty() {
+        Err("Der AI-Anbieter hat kein verwendbares Markdown-Dokument zurückgegeben.".to_owned())
+    } else {
+        Ok(text)
+    }
 }
 
-fn ollama_chat(connection: &Value, model: &str, prompt: &str) -> Result<String, String> {
+fn ollama_chat(
+    connection: &Value,
+    model: &str,
+    prompt: &str,
+    temperature: f64,
+) -> Result<String, String> {
     let origin = origin(connection, "ollama")?;
     let body = request_json(
         "POST",
@@ -558,9 +629,11 @@ fn ollama_chat(connection: &Value, model: &str, prompt: &str) -> Result<String, 
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": prompt}
             ],
-            "stream": false
+            "stream": false,
+            "think": false,
+            "options": { "temperature": temperature }
         })),
-        Duration::from_secs(120),
+        Duration::from_secs(600),
     )?;
     body.get("message")
         .and_then(|message| message.get("content"))
@@ -569,7 +642,124 @@ fn ollama_chat(connection: &Value, model: &str, prompt: &str) -> Result<String, 
         .ok_or_else(|| "Ollama hat kein verwendbares Markdown-Dokument zurückgegeben.".to_owned())
 }
 
-fn chat_completions(connection: &Value, model: &str, prompt: &str) -> Result<String, String> {
+fn lm_studio_chat(
+    connection: &Value,
+    model: &str,
+    prompt: &str,
+    temperature: f64,
+    max_tokens: u64,
+) -> Result<String, String> {
+    let origin = origin(connection, "lmstudio")?;
+    match request_json(
+        "POST",
+        &format!("{origin}/api/v1/chat"),
+        connection,
+        Some(json!({
+            "model": model,
+            "input": prompt,
+            "system_prompt": SYSTEM_PROMPT,
+            "stream": false,
+            "store": false,
+            "temperature": temperature,
+            "max_output_tokens": max_tokens
+        })),
+        Duration::from_secs(600),
+    ) {
+        Ok(body) => lm_studio_text(&body),
+        Err(error) if error.contains("404") => {
+            chat_completions(connection, model, prompt, temperature, max_tokens)
+        }
+        Err(error) => Err(error),
+    }
+}
+
+fn lm_studio_text(body: &Value) -> Result<String, String> {
+    let text = body
+        .get("output")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| {
+                    if item.get("type").and_then(Value::as_str) == Some("message") {
+                        item.get("content").and_then(Value::as_str)
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("\n\n")
+        })
+        .unwrap_or_default();
+    if text.is_empty() {
+        Err("Der AI-Anbieter hat kein verwendbares Markdown-Dokument zurückgegeben.".to_owned())
+    } else {
+        Ok(text)
+    }
+}
+
+fn openai_response(
+    connection: &Value,
+    model: &str,
+    prompt: &str,
+    max_tokens: u64,
+) -> Result<String, String> {
+    require_key(connection)?;
+    let body = request_json(
+        "POST",
+        "https://api.openai.com/v1/responses",
+        connection,
+        Some(json!({
+            "model": model,
+            "instructions": SYSTEM_PROMPT,
+            "input": prompt,
+            "max_output_tokens": max_tokens,
+            "store": false
+        })),
+        Duration::from_secs(600),
+    )?;
+    if let Some(text) = body.get("output_text").and_then(Value::as_str) {
+        if !text.is_empty() {
+            return Ok(text.to_owned());
+        }
+    }
+    let text = body
+        .get("output")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .flat_map(|item| {
+                    item.get("content")
+                        .and_then(Value::as_array)
+                        .into_iter()
+                        .flatten()
+                })
+                .filter_map(|part| {
+                    if part.get("type").and_then(Value::as_str) == Some("output_text") {
+                        part.get("text").and_then(Value::as_str)
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("\n\n")
+        })
+        .unwrap_or_default();
+    if text.is_empty() {
+        Err("Der AI-Anbieter hat kein verwendbares Markdown-Dokument zurückgegeben.".to_owned())
+    } else {
+        Ok(text)
+    }
+}
+
+fn chat_completions(
+    connection: &Value,
+    model: &str,
+    prompt: &str,
+    temperature: f64,
+    max_tokens: u64,
+) -> Result<String, String> {
     let provider = provider_name(connection)?;
     let origin = if provider == "openai" {
         "https://api.openai.com".to_owned()
@@ -586,9 +776,11 @@ fn chat_completions(connection: &Value, model: &str, prompt: &str) -> Result<Str
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": prompt}
             ],
-            "stream": false
+            "stream": false,
+            "temperature": temperature,
+            "max_tokens": max_tokens
         })),
-        Duration::from_secs(120),
+        Duration::from_secs(600),
     )?;
     body["choices"][0]["message"]["content"]
         .as_str()
@@ -901,10 +1093,22 @@ fn unwrap_markdown(value: &str) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_prompt, parse_anthropic_models, parse_gemini_models, parse_openai_models,
-        unwrap_markdown,
+        build_prompt, lm_studio_text, output_token_limit, parse_anthropic_models,
+        parse_gemini_models, parse_openai_models, unwrap_markdown,
     };
     use serde_json::json;
+
+    #[test]
+    fn a_long_note_gets_a_larger_answer_budget() {
+        assert_eq!(output_token_limit("kurz"), 2048);
+        assert_eq!(output_token_limit(&"a".repeat(10_000)), 5000);
+        assert_eq!(output_token_limit(&"a".repeat(100_000)), 16_000);
+        let text = lm_studio_text(&json!({
+            "output": [{ "type": "message", "content": "# Fertig" }]
+        }))
+        .unwrap();
+        assert_eq!(text, "# Fertig");
+    }
 
     #[test]
     fn a_spelling_request_names_the_action_and_the_note() {
