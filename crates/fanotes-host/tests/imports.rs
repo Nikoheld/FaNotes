@@ -93,6 +93,65 @@ fn a_dropped_image_and_a_pdf_note_land_in_the_vault() {
 }
 
 #[test]
+fn a_device_name_cannot_be_imported_as_a_note_or_worksheet() {
+    let (mut host, vault) = host();
+    let pdf = b"%PDF-1.4\n";
+    let note_error = host
+        .dispatch(
+            "fanotes:import-pdf-note",
+            &[
+                json!("Mathe"),
+                json!({ "name": "CON.pdf", "bytesBase64": b64(pdf) }),
+            ],
+        )
+        .unwrap_err();
+    assert!(note_error.contains("nicht erlaubt"), "{note_error}");
+    assert!(!vault.join("Mathe/CON.pdf").exists());
+
+    let allowed = host
+        .dispatch(
+            "fanotes:import-pdf-note",
+            &[
+                json!("Mathe"),
+                json!({ "name": "COM10.pdf", "bytesBase64": b64(pdf) }),
+            ],
+        )
+        .unwrap();
+    assert_eq!(allowed["relativePath"], "Mathe/COM10.pdf");
+
+    let png = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0];
+    let sheet_error = host
+        .dispatch(
+            "fanotes:import-worksheet-from-data",
+            &[json!({
+                "name": "CON.png",
+                "bytesBase64": b64(&png),
+            })],
+        )
+        .unwrap_err();
+    assert!(sheet_error.contains("nicht erlaubt"), "{sheet_error}");
+    let marked = host
+        .dispatch(
+            "fanotes:import-worksheet-from-data",
+            &[json!({
+                "name": "a<b.png",
+                "bytesBase64": b64(&png),
+            })],
+        )
+        .unwrap_err();
+    assert!(marked.contains("nicht erlaubt"), "{marked}");
+    assert!(
+        vault.join(".fanotes/worksheets").read_dir().is_err()
+            || vault
+                .join(".fanotes/worksheets")
+                .read_dir()
+                .unwrap()
+                .next()
+                .is_none()
+    );
+}
+
+#[test]
 fn a_one_dot_worksheet_name_uses_the_image_fallback() {
     let (mut host, vault) = host();
     let png = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0];

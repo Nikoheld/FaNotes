@@ -26,6 +26,58 @@ fn drawing(title: &str) -> String {
 }
 
 #[test]
+fn a_drawing_title_uses_the_desktop_entry_name_rules() {
+    let (_dir, mut host) = host();
+    let saved = host
+        .dispatch(
+            "fanotes:save-drawing",
+            &[json!({
+                "id": "leer-1",
+                "title": "",
+                "drawingJson": drawing("Zeichnung"),
+            })],
+        )
+        .unwrap();
+    assert_eq!(saved["title"], "Zeichnung");
+
+    let mismatch = host
+        .dispatch(
+            "fanotes:save-drawing",
+            &[json!({
+                "id": "leer-2",
+                "title": " \u{FEFF}",
+                "drawingJson": drawing("Skizze"),
+            })],
+        )
+        .unwrap_err();
+    assert!(mismatch.contains("stimmt nicht"), "{mismatch}");
+
+    let device = host
+        .dispatch(
+            "fanotes:save-drawing",
+            &[json!({
+                "id": "con-1",
+                "title": "CON",
+                "drawingJson": drawing("CON"),
+            })],
+        )
+        .unwrap_err();
+    assert!(device.contains("nicht erlaubt"), "{device}");
+
+    let marked = host
+        .dispatch(
+            "fanotes:save-drawing",
+            &[json!({
+                "id": "mark-1",
+                "title": "a<b",
+                "drawingJson": drawing("a<b"),
+            })],
+        )
+        .unwrap_err();
+    assert!(marked.contains("nicht erlaubt"), "{marked}");
+}
+
+#[test]
 fn drawings_round_trip_and_land_in_the_note() {
     let (dir, mut host) = host();
     fs::write(dir.join("vault").join("Notiz.md"), "Hallo\n").unwrap();

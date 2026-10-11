@@ -263,23 +263,7 @@ fn file_stem(name: &str) -> &str {
 }
 
 fn safe_stem(value: &str, fallback: &str) -> Result<String, String> {
-    let raw = crate::vault::js_trim(value);
-    let name = if raw.is_empty() { fallback } else { raw };
-    let cleaned = crate::vault::js_trim(name.trim_end_matches(['.', ' ']));
-    if cleaned.is_empty()
-        || crate::vault::utf16_len(cleaned) > 180
-        || cleaned == "."
-        || cleaned == ".."
-        || cleaned.contains('/')
-        || cleaned.contains('\\')
-        || crate::vault::has_c0_or_del(cleaned)
-        || cleaned.eq_ignore_ascii_case(".fanotes")
-        || cleaned.eq_ignore_ascii_case(".lernwerk")
-    {
-        Err("Dieser Name ist nicht erlaubt.".to_owned())
-    } else {
-        Ok(cleaned.to_owned())
-    }
+    super::safe_entry_name_or(value, fallback)
 }
 
 #[cfg(test)]

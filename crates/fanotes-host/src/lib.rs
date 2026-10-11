@@ -1868,7 +1868,20 @@ enum CreateAttempt {
 }
 
 fn safe_entry_name(value: &str) -> Result<String, String> {
-    let name = vault::js_trim(value);
+    safe_entry_name_or(value, "")
+}
+
+/// `safeEntryName` from the desktop host.
+///
+/// A blank name uses `fallback`. Windows device names and the characters
+/// `<>:"|?*` are refused even when the title is not a vault file.
+fn safe_entry_name_or(value: &str, fallback: &str) -> Result<String, String> {
+    let trimmed = vault::js_trim(value);
+    let name = if trimmed.is_empty() {
+        fallback
+    } else {
+        trimmed
+    };
     if !entry_name_allowed(name) {
         return Err("Dieser Name ist nicht erlaubt.".to_owned());
     }

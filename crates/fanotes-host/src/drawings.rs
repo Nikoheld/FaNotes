@@ -365,20 +365,7 @@ fn decode_png(image_data: &str) -> Result<Vec<u8>, String> {
 }
 
 fn safe_title(value: &str) -> Result<String, String> {
-    let name = vault::js_trim(vault::js_trim(value).trim_end_matches(['.', ' ']));
-    if name.is_empty()
-        || crate::vault::utf16_len(name) > 180
-        || name == "."
-        || name == ".."
-        || name.contains('/')
-        || name.contains('\\')
-        || crate::vault::has_c0_or_del(name)
-        || name.eq_ignore_ascii_case(".fanotes")
-        || name.eq_ignore_ascii_case(".lernwerk")
-    {
-        return Err("Dieser Name ist nicht erlaubt.".to_owned());
-    }
-    Ok(name.to_owned())
+    super::safe_entry_name_or(value, "Zeichnung")
 }
 
 fn drawing_file_id(name: &str) -> Option<&str> {
