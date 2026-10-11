@@ -553,18 +553,10 @@ fn page_parents(html_files: &[PathBuf], output_root: &Path) -> HashMap<PathBuf, 
             let Some(href) = attr(attributes, "href") else {
                 continue;
             };
-            let level = attr(attributes, "class")
-                .and_then(|class| {
-                    class.split_whitespace().find_map(|token| {
-                        token
-                            .strip_prefix('l')
-                            .and_then(|number| number.parse::<usize>().ok())
-                    })
-                })
-                .unwrap_or(1);
+            let level = outline_level(attr(attributes, "class").as_deref());
             let decoded = urlencoding_decode(&href);
-            let target = entry.parent().unwrap_or(output_root).join(decoded);
-            if !target.starts_with(output_root) {
+            let target = entry.parent().unwrap_or(output_root).join(&decoded);
+            if !image_stays_inside(output_root, &target) {
                 continue;
             }
             let title = safe_segment(
@@ -595,6 +587,20 @@ fn page_parents(html_files: &[PathBuf], output_root: &Path) -> HashMap<PathBuf, 
         }
     }
     parents
+}
+
+fn outline_level(class: Option<&str>) -> usize {
+    class
+        .unwrap_or("")
+        .split_whitespace()
+        .find_map(|token| {
+            let bytes = token.as_bytes();
+            (bytes.len() == 2
+                && bytes[0].eq_ignore_ascii_case(&b'l')
+                && (b'1'..=b'9').contains(&bytes[1]))
+            .then_some((bytes[1] - b'0') as usize)
+        })
+        .unwrap_or(1)
 }
 
 fn attr(attributes: &str, name: &str) -> Option<String> {
@@ -1380,7 +1386,7 @@ fn civil_date(mut days: u64) -> (i32, u32, u32) {
 
 #[cfg(test)]
 mod tests {
-    use super::{extract_search_text, inline_images, page_dimensions, safe_segment};
+    use super::{extract_search_text, inline_images, page_dimensions, page_parents, safe_segment};
 
     #[test]
     fn a_page_title_stops_at_120_utf16_units() {
@@ -1456,6 +1462,44 @@ mod tests {
         assert!(result.contains(r#"data-fanotes-missing-image="blocked" alt="Geheim""#));
         assert!(result.contains(r#"data-fanotes-missing-image="blocked" alt="Netz""#));
         assert!(!result.contains("secret"));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn onenote_outline_levels_stay_between_one_and_nine() {
+        let root = std::env::temp_dir().join(format!(
+            "fanotes-onenote-nav-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        let section = root.join("section");
+        std::fs::create_dir_all(&section).unwrap();
+        let nav = section.join("nav.html");
+        std::fs::write(
+            &nav,
+            r#"<nav>
+<a class="l1" href="a.html" title="Kapitel">Kapitel</a>
+<a class="L2" href="c.html" title="Zweig">Zweig</a>
+<a class="l10" href="b.html" title="Zehn">Zehn</a>
+<a class="l1" href="../../secret.html" title="Draussen">Draussen</a>
+</nav>"#,
+        )
+        .unwrap();
+        let parents = page_parents(&[nav], &root);
+        let parent_of = |name: &str| {
+            parents
+                .iter()
+                .find(|(path, _)| path.ends_with(name))
+                .map(|(_, prefix)| prefix.clone())
+        };
+        assert_eq!(parent_of("a.html"), Some(Vec::<String>::new()));
+        assert_eq!(parent_of("c.html"), Some(vec!["Kapitel".to_owned()]));
+        assert_eq!(parent_of("b.html"), Some(Vec::<String>::new()));
+        assert!(parent_of("secret.html").is_none());
         let _ = std::fs::remove_dir_all(&root);
     }
 }
