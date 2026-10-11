@@ -211,7 +211,12 @@ impl Host {
             ),
             "fanotes:load-handwriting-recognition-resources" => resources::load_handwriting(),
             "fanotes:recognize-native-handwriting-line" => {
-                ocr::recognize_line(args.first().unwrap_or(&Value::Null))
+                let configured = self
+                    .settings
+                    .get("ocrThreadLimit")
+                    .and_then(Value::as_i64)
+                    .unwrap_or(0);
+                ocr::recognize_line(args.first().unwrap_or(&Value::Null), configured)
             }
             "fanotes:enhanced-math-get-state" => Ok(enhanced_math_state()),
             "fanotes:enhanced-math-install" | "fanotes:enhanced-math-recognize" => {
