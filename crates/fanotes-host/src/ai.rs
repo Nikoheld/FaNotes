@@ -9,7 +9,7 @@ use base64::Engine;
 use serde_json::{json, Value};
 use ureq::Agent;
 
-use crate::policy::local_ai_origin;
+use crate::policy::{lm_studio_origin, local_ai_origin};
 
 const ACTIONS: &[&str] = &[
     "instruction",
@@ -31,7 +31,7 @@ struct AiReply {
 }
 
 pub fn list_lm_studio(base_url: &str, api_token: &str) -> Result<Value, String> {
-    let origin = local_ai_origin(base_url, "lmstudio")?;
+    let origin = lm_studio_origin(base_url)?;
     let connection = json!({
         "provider": "lmstudio",
         "baseUrl": origin,
@@ -132,7 +132,7 @@ pub fn transform_lm_studio(payload: &Value) -> Result<Value, String> {
         .as_object()
         .ok_or_else(|| "Der LM-Studio-Auftrag ist ungültig.".to_owned())?;
     let base_url = object.get("baseUrl").and_then(Value::as_str).unwrap_or("");
-    let origin = local_ai_origin(base_url, "lmstudio")?;
+    let origin = lm_studio_origin(base_url)?;
     let model = required_model(payload)?;
     let markdown = required_markdown(object.get("markdown"))?;
     let actions = required_actions(object.get("actions"))?;
