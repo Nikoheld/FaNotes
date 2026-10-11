@@ -422,23 +422,10 @@ fn path_of(raw_url: &str) -> String {
 }
 
 fn resolve_redirect(current: &str, location: &str) -> Result<String, String> {
-    if location.starts_with("https://") || location.starts_with("http://") {
-        return Ok(location.to_owned());
-    }
-    let (scheme, rest) = current
-        .split_once("://")
-        .ok_or_else(|| "Ungültige Weiterleitung.".to_owned())?;
-    let host = rest.split_once('/').map(|(host, _)| host).unwrap_or(rest);
-    if location.starts_with('/') {
-        Ok(format!("{scheme}://{host}{location}"))
-    } else {
-        let base = current
-            .split_once('?')
-            .map(|(path, _)| path)
-            .unwrap_or(current);
-        let directory = base.rsplit_once('/').map(|(dir, _)| dir).unwrap_or(base);
-        Ok(format!("{directory}/{location}"))
-    }
+    let base = url::Url::parse(current).map_err(|_| "Ungültige Weiterleitung.".to_owned())?;
+    base.join(location)
+        .map(|next| next.to_string())
+        .map_err(|_| "Ungültige Weiterleitung.".to_owned())
 }
 
 fn read_records(root: &Path) -> Result<Vec<Value>, String> {
@@ -628,4 +615,46 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), String> {
 fn lock() -> std::sync::MutexGuard<'static, ()> {
     static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
     LOCK.lock().unwrap_or_else(|poison| poison.into_inner())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::resolve_redirect;
+
+    #[test]
+    fn redirects_resolve_like_the_desktop_url_parser() {
+        let base = "https://example.com/a/b?q=1#old";
+        assert_eq!(
+            resolve_redirect(base, "https://cdn.example/file").unwrap(),
+            "https://cdn.example/file"
+        );
+        assert_eq!(
+            resolve_redirect(base, "HTTP://cdn.example/file").unwrap(),
+            "http://cdn.example/file"
+        );
+        assert_eq!(
+            resolve_redirect(base, "//cdn.example/file").unwrap(),
+            "https://cdn.example/file"
+        );
+        assert_eq!(
+            resolve_redirect(base, "/root").unwrap(),
+            "https://example.com/root"
+        );
+        assert_eq!(
+            resolve_redirect(base, "other").unwrap(),
+            "https://example.com/a/other"
+        );
+        assert_eq!(
+            resolve_redirect(base, "../other").unwrap(),
+            "https://example.com/other"
+        );
+        assert_eq!(
+            resolve_redirect(base, "?x=1").unwrap(),
+            "https://example.com/a/b?x=1"
+        );
+        assert_eq!(
+            resolve_redirect(base, "#section").unwrap(),
+            "https://example.com/a/b?q=1#section"
+        );
+    }
 }
