@@ -1082,7 +1082,7 @@ fn finish_models(mut models: Vec<Value>) -> Vec<Value> {
             .and_then(Value::as_bool)
             .unwrap_or(false);
         right_loaded.cmp(&left_loaded).then_with(|| {
-            crate::compare_names(
+            crate::dictionary_order(
                 left.get("displayName")
                     .and_then(Value::as_str)
                     .unwrap_or(""),
@@ -1400,6 +1400,26 @@ mod tests {
         assert_eq!(models[0]["loaded"], true);
         assert_eq!(models[1]["key"], "zeta");
         assert_eq!(models[1]["loaded"], false);
+        let named = finish_models(
+            parse_lmstudio_models(&json!({
+                "models": [
+                    { "type": "llm", "key": "s2", "display_name": "Seite 2", "loaded_instances": [] },
+                    { "type": "llm", "key": "s10", "display_name": "Seite 10", "loaded_instances": [] },
+                    { "type": "llm", "key": "ss", "display_name": "Strasse", "loaded_instances": [] },
+                    { "type": "llm", "key": "sz", "display_name": "Straße", "loaded_instances": [] },
+                    { "type": "llm", "key": "live", "display_name": "Zeta", "loaded_instances": [{ "id": "1" }] }
+                ]
+            }))
+            .unwrap(),
+        );
+        let names: Vec<_> = named
+            .iter()
+            .map(|model| model["displayName"].as_str().unwrap())
+            .collect();
+        assert_eq!(
+            names,
+            vec!["Zeta", "Seite 10", "Seite 2", "Strasse", "Straße"]
+        );
         let ollama = parse_ollama_models(&json!({
             "models": [{
                 "name": "llama3",

@@ -1174,15 +1174,13 @@ impl Host {
             hits.push(hit);
         }
         search_drawings(root, &needle, &query, &owners, &mut hits);
-        let collator = german_search_collator();
         hits.sort_by(|left, right| {
             right["matches"]
                 .as_u64()
                 .unwrap_or(0)
                 .cmp(&left["matches"].as_u64().unwrap_or(0))
                 .then_with(|| {
-                    search_title_order(
-                        collator.as_ref(),
+                    dictionary_order(
                         left["title"].as_str().unwrap_or(""),
                         right["title"].as_str().unwrap_or(""),
                     )
@@ -2232,7 +2230,7 @@ fn is_combining_mark(character: char) -> bool {
     )
 }
 
-fn german_search_collator() -> Option<icu_collator::CollatorBorrowed<'static>> {
+fn german_dictionary_collator() -> Option<icu_collator::CollatorBorrowed<'static>> {
     icu_collator::Collator::try_new(
         icu_locale_core::locale!("de").into(),
         icu_collator::options::CollatorOptions::default(),
@@ -2240,11 +2238,11 @@ fn german_search_collator() -> Option<icu_collator::CollatorBorrowed<'static>> {
     .ok()
 }
 
-fn search_title_order(
-    collator: Option<&icu_collator::CollatorBorrowed<'static>>,
-    left: &str,
-    right: &str,
-) -> std::cmp::Ordering {
+/// German dictionary order, matching `localeCompare(name, 'de')`.
+pub(crate) fn dictionary_order(left: &str, right: &str) -> std::cmp::Ordering {
+    static COLLATOR: std::sync::OnceLock<Option<icu_collator::CollatorBorrowed<'static>>> =
+        std::sync::OnceLock::new();
+    let collator = COLLATOR.get_or_init(german_dictionary_collator);
     if let Some(collator) = collator {
         collator.compare(left, right)
     } else {
