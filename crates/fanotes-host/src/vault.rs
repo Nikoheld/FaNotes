@@ -156,6 +156,16 @@ pub(crate) fn utf16_len(value: &str) -> usize {
     value.encode_utf16().count()
 }
 
+/// C0 controls and DEL, matching `/[\0-\x1f\x7f]/`.
+pub(crate) fn is_c0_or_del(character: char) -> bool {
+    let code = u32::from(character);
+    code <= 0x1F || code == 0x7F
+}
+
+pub(crate) fn has_c0_or_del(value: &str) -> bool {
+    value.chars().any(is_c0_or_del)
+}
+
 pub(crate) fn truncate_utf16(value: &str, max: usize) -> String {
     let mut units = 0;
     let mut end = 0;

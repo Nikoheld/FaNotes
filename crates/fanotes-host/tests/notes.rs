@@ -487,4 +487,16 @@ fn a_long_german_title_uses_character_length() {
         .unwrap_err();
     assert!(error.contains("nicht erlaubt"));
     assert!(!vault.join(format!("{too_long}.md")).exists());
+    let kept = format!("Notiz{}", '\u{0080}');
+    let created = host
+        .dispatch("fanotes:create-note", &[json!(""), json!(kept)])
+        .unwrap();
+    assert_eq!(created["relativePath"], format!("{kept}.md"));
+    let rejected = host
+        .dispatch(
+            "fanotes:create-note",
+            &[json!(""), json!(format!("Notiz{}", '\u{007f}'))],
+        )
+        .unwrap_err();
+    assert!(rejected.contains("nicht erlaubt"));
 }

@@ -1110,7 +1110,7 @@ fn safe_segment(value: &str, fallback: &str) -> String {
             if matches!(
                 character,
                 '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*'
-            ) || character.is_control()
+            ) || crate::vault::is_c0_or_del(character)
             {
                 ' '
             } else {
@@ -1354,5 +1354,11 @@ mod tests {
         let trimmed = safe_segment(&emoji, "fallback");
         assert_eq!(trimmed.encode_utf16().count(), 120);
         assert_eq!(trimmed.chars().count(), 60);
+        let kept = format!("Seite{}", '\u{0080}');
+        assert_eq!(safe_segment(&kept, "fallback"), kept);
+        assert_eq!(
+            safe_segment(&format!("Seite{}", '\u{007f}'), "fallback"),
+            "Seite"
+        );
     }
 }

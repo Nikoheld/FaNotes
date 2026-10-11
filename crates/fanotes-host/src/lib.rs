@@ -1853,7 +1853,7 @@ fn entry_name_allowed(name: &str) -> bool {
         && name != ".."
         && !name.contains('/')
         && !name.contains('\\')
-        && !name.chars().any(|ch| ch.is_control() || ch == '\u{7f}')
+        && !vault::has_c0_or_del(name)
         && !matches!(name.to_ascii_lowercase().as_str(), ".fanotes" | ".lernwerk")
 }
 

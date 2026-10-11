@@ -226,7 +226,7 @@ fn safe_stem(value: &str, fallback: &str) -> Result<String, String> {
         || cleaned == ".."
         || cleaned.contains('/')
         || cleaned.contains('\\')
-        || cleaned.chars().any(|character| character.is_control())
+        || crate::vault::has_c0_or_del(cleaned)
         || cleaned.eq_ignore_ascii_case(".fanotes")
         || cleaned.eq_ignore_ascii_case(".lernwerk")
     {

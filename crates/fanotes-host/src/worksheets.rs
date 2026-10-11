@@ -257,7 +257,7 @@ fn safe_title(value: &str, fallback: &str) -> Result<String, String> {
         || cleaned == ".."
         || cleaned.contains('/')
         || cleaned.contains('\\')
-        || cleaned.chars().any(|character| character.is_control())
+        || crate::vault::has_c0_or_del(cleaned)
         || cleaned.eq_ignore_ascii_case(".fanotes")
         || cleaned.eq_ignore_ascii_case(".lernwerk")
     {
@@ -292,7 +292,7 @@ fn validate_document(candidate: &Value, expected_id: &str) -> Result<Value, Stri
         .trim();
     if title.is_empty()
         || crate::vault::utf16_len(title) > 180
-        || title.chars().any(|character| character.is_control())
+        || crate::vault::has_c0_or_del(title)
     {
         return Err("Der Arbeitsblatttitel ist ungültig.".to_owned());
     }

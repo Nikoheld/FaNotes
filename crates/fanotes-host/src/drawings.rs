@@ -309,7 +309,7 @@ pub(crate) fn library_metadata(
     if document.get("schemaVersion").and_then(Value::as_i64) != Some(1)
         || title.is_empty()
         || crate::vault::utf16_len(title) > 180
-        || title.chars().any(|character| character.is_control())
+        || crate::vault::has_c0_or_del(title)
         || !document.get("strokes").is_some_and(Value::is_array)
     {
         return Err("Die Zeichnungsdatei hat ein ungültiges Format.".to_owned());
@@ -369,7 +369,7 @@ fn safe_title(value: &str) -> Result<String, String> {
         || name == ".."
         || name.contains('/')
         || name.contains('\\')
-        || name.chars().any(|character| character.is_control())
+        || crate::vault::has_c0_or_del(name)
         || name.eq_ignore_ascii_case(".fanotes")
         || name.eq_ignore_ascii_case(".lernwerk")
     {
