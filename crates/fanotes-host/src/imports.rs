@@ -27,12 +27,12 @@ pub fn import_worksheet(host: &Host) -> Result<Value, String> {
         .and_then(|name| name.to_str())
         .unwrap_or("Bild.png");
     let bytes = fs::read(&path).map_err(|_| "Das ausgewählte Arbeitsblatt ist leer.".to_owned())?;
-    let extension = match name.rsplit_once('.') {
-        Some((_, extension)) if !extension.is_empty() => {
-            format!(".{}", extension.to_ascii_lowercase())
-        }
-        _ => ".png".to_owned(),
-    };
+    let extension = vault::posix_extname(name).to_ascii_lowercase();
+    if extension.is_empty() {
+        return Err(
+            "Es werden PDF-, PNG-, JPEG-, WebP- und GIF-Arbeitsblätter unterstützt.".to_owned(),
+        );
+    }
     import_named_bytes(host, name, &extension, &bytes)
 }
 

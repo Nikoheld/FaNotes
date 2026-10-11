@@ -501,7 +501,7 @@ fn number(object: &Map<String, Value>, name: &str, error: &str) -> Result<f64, S
 }
 
 fn format_for(source: &str) -> Result<Format, String> {
-    match extension_of(source).as_str() {
+    match worksheet_suffix(source).as_str() {
         ".png" => Ok(Format {
             kind: "image",
             mime: "image/png",
@@ -537,13 +537,23 @@ fn format_for(source: &str) -> Result<Format, String> {
 }
 
 fn extension_of(source: &str) -> String {
-    source
-        .rsplit(['/', '\\'])
-        .next()
-        .unwrap_or(source)
-        .rsplit_once('.')
-        .map(|(_, extension)| format!(".{}", extension.to_ascii_lowercase()))
-        .unwrap_or_default()
+    let base = source.rsplit(['/', '\\']).next().unwrap_or(source);
+    crate::vault::posix_extname(base).to_ascii_lowercase()
+}
+
+/// A path uses `path.posix.extname`. A suffix that was already chosen, such as
+/// `.png`, is the same string as a one-dot filename, which has no extension.
+fn worksheet_suffix(source: &str) -> String {
+    if let Some(rest) = source.strip_prefix('.') {
+        if !rest.is_empty()
+            && !rest.contains('.')
+            && !source.contains('/')
+            && !source.contains('\\')
+        {
+            return source.to_ascii_lowercase();
+        }
+    }
+    extension_of(source)
 }
 
 fn file_name(source: &str) -> String {

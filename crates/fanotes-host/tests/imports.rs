@@ -93,6 +93,69 @@ fn a_dropped_image_and_a_pdf_note_land_in_the_vault() {
 }
 
 #[test]
+fn a_one_dot_worksheet_name_uses_the_image_fallback() {
+    let (mut host, vault) = host();
+    let png = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0];
+    let dropped = host
+        .dispatch(
+            "fanotes:import-worksheet-from-data",
+            &[json!({
+                "name": ".pdf",
+                "bytesBase64": b64(&png),
+            })],
+        )
+        .unwrap();
+    let source = dropped["sourceRelativePath"].as_str().unwrap();
+    assert!(source.ends_with(".png"), "{source}");
+    assert_eq!(dropped["mimeType"], "image/png");
+    assert_eq!(dropped["title"], ".pdf");
+    assert!(vault.join(source).is_file());
+
+    let pdf = b"%PDF-1.4\n";
+    let mismatch = host
+        .dispatch(
+            "fanotes:import-worksheet-from-data",
+            &[json!({
+                "name": ".pdf",
+                "bytesBase64": b64(pdf),
+            })],
+        )
+        .unwrap_err();
+    assert!(mismatch.contains("stimmt nicht"), "{mismatch}");
+
+    let typed = host
+        .dispatch(
+            "fanotes:import-worksheet-from-data",
+            &[json!({
+                "name": ".pdf",
+                "mimeType": "application/pdf",
+                "bytesBase64": b64(pdf),
+            })],
+        )
+        .unwrap();
+    assert!(typed["sourceRelativePath"]
+        .as_str()
+        .unwrap()
+        .ends_with(".pdf"));
+    assert_eq!(typed["kind"], "pdf");
+
+    let hidden = host
+        .dispatch(
+            "fanotes:import-worksheet-from-data",
+            &[json!({
+                "name": ".hidden.png",
+                "bytesBase64": b64(&png),
+            })],
+        )
+        .unwrap();
+    assert!(hidden["sourceRelativePath"]
+        .as_str()
+        .unwrap()
+        .ends_with(".png"));
+    assert_eq!(hidden["title"], ".hidden");
+}
+
+#[test]
 fn a_blank_pdf_stem_uses_the_interface_language() {
     let (mut host, vault) = host();
     let pdf = b"%PDF-1.4\n";
