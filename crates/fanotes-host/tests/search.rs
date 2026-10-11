@@ -69,6 +69,25 @@ fn search_returns_title_excerpt_and_handwriting_anchor() {
     assert_eq!(ink_hits[0]["relativePath"], "Bio/Blatt.md");
     assert_eq!(ink_hits[0]["inkAnchor"]["y"], 0.42);
 
+    std::fs::write(
+        host.vault.as_ref().unwrap().join("Bio/Blatt.famd"),
+        fanotes_famd::serialize_famd("Die Photosynthese braucht Licht.", &{
+            let mut umlaut = fanotes_famd::empty_famd_payload("2026-10-11T00:00:00.000Z");
+            umlaut.ink = Some(json!({
+                "schemaVersion": 1,
+                "title": "Blatt",
+                "strokes": [],
+                "searchTranscript": "0.42\täpfel"
+            }));
+            umlaut
+        }),
+    )
+    .unwrap();
+    let short = host.dispatch("fanotes:search", &[json!("ä")]).unwrap();
+    assert!(short[0].get("inkAnchor").is_none());
+    let longer = host.dispatch("fanotes:search", &[json!("äp")]).unwrap();
+    assert_eq!(longer[0]["inkAnchor"]["y"], 0.42);
+
     let drawing = json!({
         "schemaVersion": 1,
         "id": "sketch1",

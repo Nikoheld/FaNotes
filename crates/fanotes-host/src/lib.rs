@@ -3167,7 +3167,7 @@ fn excerpt(text: &str, match_index: usize, query_length: usize) -> String {
 
 fn ink_anchor(transcript: &str, query: &str) -> Option<f64> {
     let needle = query.trim().to_lowercase();
-    if needle.len() < 2 || transcript.trim().is_empty() {
+    if vault::utf16_len(&needle) < 2 || transcript.trim().is_empty() {
         return None;
     }
     let lines: Vec<&str> = transcript
