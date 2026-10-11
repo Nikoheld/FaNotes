@@ -352,37 +352,48 @@ fn strip_active_html(html: &str) -> String {
 }
 
 fn inline_images(html: &str, page_path: &Path, output_root: &Path) -> String {
-    let Ok(regex) = Regex::new(r#"(?i)(<img\b[^>]*\bsrc=)(['"])([^'"]+)\2"#) else {
-        return html.to_owned();
-    };
+    let mut html = html.to_owned();
     let mut embedded_bytes = 0u64;
-    let mut replacements = HashMap::new();
-    for caps in regex.captures_iter(html) {
-        let Some(source) = caps.get(3).map(|item| item.as_str()) else {
+    for (pattern, quote) in [
+        (r#"(?i)(<img\b[^>]*\bsrc=")([^"]+)""#, "\""),
+        (r#"(?i)(<img\b[^>]*\bsrc=')([^']+)'"#, "'"),
+    ] {
+        let Ok(regex) = Regex::new(pattern) else {
             continue;
         };
-        let replacement = image_data_url(source, page_path, output_root, &mut embedded_bytes);
-        replacements.insert(source.to_owned(), replacement);
-    }
-    regex
-        .replace_all(html, |caps: &regex::Captures| {
-            let prefix = caps.get(1).map(|item| item.as_str()).unwrap_or("");
-            let quote = caps.get(2).map(|item| item.as_str()).unwrap_or("\"");
-            let source = caps.get(3).map(|item| item.as_str()).unwrap_or("");
-            match replacements.get(source).map(String::as_str) {
-                None => caps
-                    .get(0)
-                    .map(|item| item.as_str())
-                    .unwrap_or("")
-                    .to_owned(),
-                Some("") => {
-                    let kept = prefix.trim_end_matches("src=");
-                    format!("{kept}data-fanotes-missing-image={quote}blocked{quote}")
-                }
-                Some(replacement) => format!("{prefix}{quote}{replacement}{quote}"),
+        let mut replacements = HashMap::new();
+        for caps in regex.captures_iter(&html) {
+            let Some(source) = caps.get(2).map(|item| item.as_str()) else {
+                continue;
+            };
+            if replacements.contains_key(source) {
+                continue;
             }
-        })
-        .into_owned()
+            replacements.insert(
+                source.to_owned(),
+                image_data_url(source, page_path, output_root, &mut embedded_bytes),
+            );
+        }
+        html = regex
+            .replace_all(&html, |caps: &regex::Captures| {
+                let prefix = caps.get(1).map(|item| item.as_str()).unwrap_or("");
+                let source = caps.get(2).map(|item| item.as_str()).unwrap_or("");
+                match replacements.get(source).map(String::as_str) {
+                    Some("") => {
+                        let kept = prefix.trim_end_matches(&format!("src={quote}"));
+                        format!("{kept}data-fanotes-missing-image={quote}blocked{quote}")
+                    }
+                    Some(replacement) => format!("{prefix}{replacement}{quote}"),
+                    None => caps
+                        .get(0)
+                        .map(|item| item.as_str())
+                        .unwrap_or("")
+                        .to_owned(),
+                }
+            })
+            .into_owned();
+    }
+    html
 }
 
 fn image_data_url(
