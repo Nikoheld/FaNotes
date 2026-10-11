@@ -298,15 +298,19 @@ fn parse_lmstudio_models(body: &Value) -> Result<Vec<Value>, String> {
             if entry.get("type").and_then(Value::as_str) != Some("llm") {
                 return None;
             }
-            let key = entry.get("key").and_then(Value::as_str)?.trim();
-            if key.is_empty() {
+            let raw_key = entry.get("key").and_then(Value::as_str)?;
+            if raw_key.trim().is_empty() {
                 return None;
             }
-            let display = entry
-                .get("display_name")
-                .and_then(Value::as_str)
-                .unwrap_or(key);
-            let mut record = model_record("lmstudio", key, display);
+            let key = crate::vault::truncate_utf16(raw_key, 500);
+            let display_raw = entry.get("display_name").and_then(Value::as_str);
+            let display = match display_raw {
+                Some(name) if !name.trim().is_empty() => {
+                    crate::vault::truncate_utf16(name.trim(), 500)
+                }
+                _ => key.clone(),
+            };
+            let mut record = model_record("lmstudio", &key, &display);
             let loaded = entry
                 .get("loaded_instances")
                 .and_then(Value::as_array)
@@ -539,7 +543,8 @@ fn parse_opencode_models(body: &Value) -> Result<Vec<Value>, String> {
 }
 
 fn output_token_limit(markdown: &str) -> u64 {
-    (crate::vault::utf16_len(markdown) / 2).clamp(2_048, 16_000) as u64
+    let half = crate::vault::utf16_len(markdown).div_ceil(2);
+    half.clamp(2_048, 16_000) as u64
 }
 
 fn gemini_generate(
@@ -1558,7 +1563,13 @@ mod tests {
     #[test]
     fn a_long_note_gets_a_larger_answer_budget() {
         assert_eq!(output_token_limit("kurz"), 2048);
+        assert_eq!(output_token_limit(&"a".repeat(4_097)), 2049);
         assert_eq!(output_token_limit(&"a".repeat(10_000)), 5000);
+        assert_eq!(output_token_limit(&"a".repeat(10_001)), 5001);
+        assert_eq!(
+            output_token_limit(&format!("{}b", "😀".repeat(2_048))),
+            2049
+        );
         assert_eq!(output_token_limit(&"a".repeat(100_000)), 16_000);
         let reply = lm_studio_text(&json!({
             "output": [{ "type": "message", "content": "# Fertig" }],
@@ -1583,6 +1594,19 @@ mod tests {
         assert_eq!(models[0]["loaded"], true);
         assert_eq!(models[1]["key"], "zeta");
         assert_eq!(models[1]["loaded"], false);
+        let spaced = parse_lmstudio_models(&json!({
+            "models": [
+                { "type": "llm", "key": " llama ", "display_name": "  Llama  " },
+                { "type": "llm", "key": "blank", "display_name": "   " },
+                { "type": "llm", "key": "   ", "display_name": "Hidden" }
+            ]
+        }))
+        .unwrap();
+        assert_eq!(spaced.len(), 2);
+        assert_eq!(spaced[0]["key"], " llama ");
+        assert_eq!(spaced[0]["displayName"], "Llama");
+        assert_eq!(spaced[1]["key"], "blank");
+        assert_eq!(spaced[1]["displayName"], "blank");
         let named = finish_models(
             parse_lmstudio_models(&json!({
                 "models": [
