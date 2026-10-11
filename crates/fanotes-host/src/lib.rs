@@ -16,6 +16,7 @@ mod worksheets;
 
 mod ai;
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
@@ -98,7 +99,7 @@ impl Host {
                 self.bootstrap()
             }
             "fanotes:get-cached-tree" | "fanotes:get-fast-tree" | "fanotes:get-tree" => self.tree(),
-            "fanotes:select-vault" => Ok(Value::Null),
+            "fanotes:select-vault" => self.select_vault(args),
             "fanotes:read-file" => self.read_file(&arg_string(args, 0)?),
             "fanotes:write-file" => self.write_file(&arg_string(args, 0)?, &arg_string(args, 1)?),
             "fanotes:read-recognition-model" => {
@@ -118,7 +119,7 @@ impl Host {
                 false,
             ),
             "fanotes:set-folder-color" => {
-                self.set_folder_color(&arg_string(args, 0)?, &arg_string(args, 1)?)
+                self.set_folder_color(&arg_string(args, 0)?, args.get(1).unwrap_or(&Value::Null))
             }
             "fanotes:rename-entry" => {
                 self.rename_entry(&arg_string(args, 0)?, &arg_string(args, 1)?)
@@ -402,7 +403,8 @@ impl Host {
 
     fn tree(&self) -> Result<Value, String> {
         let root = self.require_vault()?;
-        read_tree(root, root)
+        let colors = read_folder_colors(root)?;
+        read_tree(root, root, &colors)
     }
 
     fn read_file(&self, relative: &str) -> Result<Value, String> {
@@ -505,17 +507,61 @@ impl Host {
         )
     }
 
-    fn set_folder_color(&mut self, relative: &str, color: &str) -> Result<Value, String> {
-        let _ = vault::resolve_inside(self.require_vault()?, relative)?;
-        if !color.is_empty() && !color.starts_with('#') {
-            return Err("Ungültige Ordnerfarbe.".to_owned());
+    fn select_vault(&mut self, args: &[Value]) -> Result<Value, String> {
+        let path = if let Some(text) = args.first().and_then(Value::as_str) {
+            if text.is_empty() {
+                return Err("Der Vault wurde unsicher verändert.".to_owned());
+            }
+            PathBuf::from(text)
+        } else if !self.file_dialogs {
+            return Ok(Value::Null);
+        } else {
+            let Some(path) = rfd::FileDialog::new()
+                .set_title("FaNotes-Vault auswählen")
+                .pick_folder()
+            else {
+                return Ok(Value::Null);
+            };
+            path
+        };
+        self.set_vault(path.clone())?;
+        fs::write(
+            self.app_data.join("vault-path"),
+            path.to_string_lossy().as_bytes(),
+        )
+        .map_err(|_| "Die Einstellungen konnten nicht gespeichert werden.".to_owned())?;
+        self.bootstrap()
+    }
+
+    fn set_folder_color(&mut self, relative: &str, color: &Value) -> Result<Value, String> {
+        let root = self.require_vault()?.to_path_buf();
+        let normalized = vault::normalize_relative_path(relative, false, false)?;
+        let path = vault::resolve_inside(&root, &normalized)?;
+        let meta = fs::symlink_metadata(&path)
+            .map_err(|_| "Der Ordner wurde nicht gefunden.".to_owned())?;
+        if meta.file_type().is_symlink() || !meta.is_dir() {
+            return Err("Der Ordner wurde nicht gefunden.".to_owned());
         }
-        Ok(Value::Null)
+        let stored = match color {
+            Value::Null => None,
+            Value::String(value) if folder_color_hex(value) => Some(value.to_ascii_lowercase()),
+            _ => return Err("Ungültige Ordnerfarbe.".to_owned()),
+        };
+        let mut colors = read_folder_colors(&root)?;
+        if let Some(color) = stored.clone() {
+            colors.insert(normalized.clone(), color);
+        } else {
+            colors.remove(&normalized);
+        }
+        write_folder_colors(&root, &colors)?;
+        Ok(json!({ "color": stored }))
     }
 
     fn rename_entry(&mut self, relative: &str, next_name: &str) -> Result<Value, String> {
         let root = self.require_vault()?.to_path_buf();
         let source = vault::resolve_inside(&root, relative)?;
+        let normalized = vault::normalize_relative_path(relative, false, false)?;
+        let was_dir = fs::symlink_metadata(&source).is_ok_and(|meta| meta.is_dir());
         if next_name.contains('/') || next_name.contains('\\') || next_name.is_empty() {
             return Err("Ungültiger Name.".to_owned());
         }
@@ -525,12 +571,22 @@ impl Host {
         }
         fs::rename(&source, &destination)
             .map_err(|_| "Der Eintrag konnte nicht umbenannt werden.".to_owned())?;
+        if was_dir {
+            let next = destination
+                .strip_prefix(&root)
+                .unwrap_or(&destination)
+                .to_string_lossy()
+                .replace('\\', "/");
+            let _ = retarget_folder_colors(&root, &normalized, &next);
+        }
         Ok(Value::Null)
     }
 
     fn move_entry(&mut self, relative: &str, dest_folder: &str) -> Result<Value, String> {
         let root = self.require_vault()?.to_path_buf();
         let source = vault::resolve_inside(&root, relative)?;
+        let normalized = vault::normalize_relative_path(relative, false, false)?;
+        let was_dir = fs::symlink_metadata(&source).is_ok_and(|meta| meta.is_dir());
         let folder = if dest_folder.is_empty() {
             root.clone()
         } else {
@@ -542,6 +598,14 @@ impl Host {
         let destination = folder.join(name);
         fs::rename(&source, &destination)
             .map_err(|_| "Der Eintrag konnte nicht verschoben werden.".to_owned())?;
+        if was_dir {
+            let next = destination
+                .strip_prefix(&root)
+                .unwrap_or(&destination)
+                .to_string_lossy()
+                .replace('\\', "/");
+            let _ = retarget_folder_colors(&root, &normalized, &next);
+        }
         Ok(Value::Null)
     }
 
@@ -720,6 +784,12 @@ impl Host {
                 }
             }
         }
+        if let Ok(text) = fs::read_to_string(self.app_data.join("vault-path")) {
+            let path = PathBuf::from(text.trim());
+            if path.is_dir() {
+                self.vault = Some(path);
+            }
+        }
     }
 
     fn load_secrets(&self) -> Map<String, Value> {
@@ -821,7 +891,11 @@ fn feature_state(model_id: &str, license: &str) -> Value {
     })
 }
 
-fn read_tree(root: &Path, directory: &Path) -> Result<Value, String> {
+fn read_tree(
+    root: &Path,
+    directory: &Path,
+    colors: &BTreeMap<String, String>,
+) -> Result<Value, String> {
     let mut children = Vec::new();
     let entries =
         fs::read_dir(directory).map_err(|_| "Der Vault konnte nicht gelesen werden.".to_owned())?;
@@ -841,12 +915,16 @@ fn read_tree(root: &Path, directory: &Path) -> Result<Value, String> {
             .metadata()
             .map_err(|_| "Der Vault konnte nicht gelesen werden.".to_owned())?;
         if meta.is_dir() {
-            children.push(json!({
+            let mut folder = json!({
                 "name": name,
                 "relativePath": relative,
                 "kind": "folder",
-                "children": read_tree(root, &path)?
-            }));
+                "children": read_tree(root, &path, colors)?
+            });
+            if let Some(color) = colors.get(&relative) {
+                folder["color"] = Value::String(color.clone());
+            }
+            children.push(folder);
         } else if name.ends_with(".md") {
             children.push(json!({
                 "name": name,
@@ -864,6 +942,88 @@ fn read_tree(root: &Path, directory: &Path) -> Result<Value, String> {
             .cmp(right["name"].as_str().unwrap_or(""))
     });
     Ok(Value::Array(children))
+}
+
+fn folder_color_hex(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    bytes.len() == 7 && bytes[0] == b'#' && bytes[1..].iter().all(|byte| byte.is_ascii_hexdigit())
+}
+
+fn read_folder_colors(root: &Path) -> Result<BTreeMap<String, String>, String> {
+    let path = root.join(".fanotes").join("folder-colors.json");
+    let text = match fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(BTreeMap::new()),
+        Err(_) => return Err("Die Ordnerfarben sind ungültig oder zu groß.".to_owned()),
+    };
+    if text.len() > 512 * 1024 {
+        return Err("Die Ordnerfarben sind ungültig oder zu groß.".to_owned());
+    }
+    let Ok(parsed) = serde_json::from_str::<Value>(&text) else {
+        return Ok(BTreeMap::new());
+    };
+    let source = parsed.get("colors").unwrap_or(&parsed);
+    let Some(object) = source.as_object() else {
+        return Ok(BTreeMap::new());
+    };
+    let mut colors = BTreeMap::new();
+    for (path, color) in object.iter().take(5000) {
+        let Some(color) = color.as_str().filter(|value| folder_color_hex(value)) else {
+            continue;
+        };
+        let Ok(normalized) = vault::normalize_relative_path(path, false, false) else {
+            continue;
+        };
+        colors.insert(normalized, color.to_ascii_lowercase());
+    }
+    Ok(colors)
+}
+
+fn write_folder_colors(root: &Path, colors: &BTreeMap<String, String>) -> Result<(), String> {
+    let internal = root.join(".fanotes");
+    fs::create_dir_all(&internal)
+        .map_err(|_| "Der Ordner konnte nicht angelegt werden.".to_owned())?;
+    let mut entries: Vec<_> = colors.iter().take(5000).collect();
+    entries.sort_by(|left, right| left.0.cmp(right.0));
+    let mut object = Map::new();
+    for (path, color) in entries {
+        object.insert(path.clone(), Value::String(color.clone()));
+    }
+    let snapshot = format!(
+        "{}\n",
+        serde_json::to_string_pretty(&json!({ "version": 1, "colors": object }))
+            .unwrap_or_default()
+    );
+    if snapshot.len() > 512 * 1024 {
+        return Err("Zu viele Ordnerfarben für diesen Vault.".to_owned());
+    }
+    fs::write(internal.join("folder-colors.json"), snapshot)
+        .map_err(|_| "Die Ordnerfarbe konnte nicht gespeichert werden.".to_owned())
+}
+
+fn retarget_folder_colors(root: &Path, old: &str, new: &str) -> Result<(), String> {
+    let mut colors = read_folder_colors(root)?;
+    let keys: Vec<String> = colors.keys().cloned().collect();
+    let mut changed = false;
+    for key in keys {
+        if key != old && !key.starts_with(&format!("{old}/")) {
+            continue;
+        }
+        let Some(color) = colors.remove(&key) else {
+            continue;
+        };
+        let next = if key == old {
+            new.to_owned()
+        } else {
+            format!("{new}{}", &key[old.len()..])
+        };
+        colors.insert(next, color);
+        changed = true;
+    }
+    if changed {
+        write_folder_colors(root, &colors)?;
+    }
+    Ok(())
 }
 
 fn walk_files(
