@@ -296,3 +296,41 @@ fn a_symlinked_note_cannot_leave_the_vault() {
     assert!(!outside.join("Seite.md").exists());
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn a_saved_note_is_private_and_leaves_no_temporary_file() {
+    let dir = std::env::temp_dir().join(format!("fanotes-notes-atomic-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let vault = dir.join("vault");
+    std::fs::create_dir_all(&vault).unwrap();
+    let mut host = Host::open(dir.join("app"));
+    host.trash_dir = Some(dir.join("trash"));
+    host.set_vault(vault.clone()).unwrap();
+    host.dispatch("fanotes:write-file", &[json!("Seite.md"), json!("Hallo")])
+        .unwrap();
+    assert_eq!(
+        std::fs::read_to_string(vault.join("Seite.md")).unwrap(),
+        "Hallo\n"
+    );
+    assert!(vault.join("Seite.famd").is_file());
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        for name in ["Seite.md", "Seite.famd"] {
+            let mode = std::fs::metadata(vault.join(name))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777;
+            assert_eq!(mode, 0o600, "{name}");
+        }
+    }
+    let leftovers: Vec<_> = std::fs::read_dir(&vault)
+        .unwrap()
+        .flatten()
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .filter(|name| name.contains(".tmp"))
+        .collect();
+    assert!(leftovers.is_empty(), "{leftovers:?}");
+    let _ = std::fs::remove_dir_all(&dir);
+}

@@ -54,8 +54,7 @@ pub fn write_note_file(
             fs::create_dir_all(parent)
                 .map_err(|_| "Der Ordner konnte nicht angelegt werden.".to_owned())?;
         }
-        fs::write(&path, &markdown)
-            .map_err(|_| "Die Datei konnte nicht geschrieben werden.".to_owned())?;
+        atomic_write(&path, markdown.as_bytes(), 0o600)?;
     }
     attach_sidecar(root, relative, content, settings_paper)?;
     Ok(now_iso())
@@ -115,8 +114,11 @@ pub fn attach_sidecar(
         fs::create_dir_all(parent)
             .map_err(|_| "Der Ordner konnte nicht angelegt werden.".to_owned())?;
     }
-    fs::write(&famd_path, serialize_famd(&body, &payload))
-        .map_err(|_| "Die Datei konnte nicht geschrieben werden.".to_owned())?;
+    atomic_write(
+        &famd_path,
+        serialize_famd(&body, &payload).as_bytes(),
+        0o600,
+    )?;
     if relative.to_lowercase().ends_with(".famd") {
         let markdown_relative = companion_note_path(relative, ".md");
         if let Ok(markdown_path) = vault::resolve_note_file(root, &markdown_relative) {
@@ -126,8 +128,7 @@ pub fn attach_sidecar(
                 } else {
                     format!("{body}\n")
                 };
-                fs::write(markdown_path, text)
-                    .map_err(|_| "Die Datei konnte nicht geschrieben werden.".to_owned())?;
+                atomic_write(&markdown_path, text.as_bytes(), 0o600)?;
             }
         }
     }
@@ -335,7 +336,7 @@ pub fn record_history(vault_root: &Path, relative: &str, content: &str) -> Resul
         random_suffix()?
     );
     let snapshot_path = directory.join(format!("{id}.md"));
-    fs::write(&snapshot_path, content)
+    atomic_write(&snapshot_path, content.as_bytes(), 0o600)
         .map_err(|_| "Der Verlauf konnte nicht gespeichert werden.".to_owned())?;
     index["path"] = Value::String(relative.to_owned());
     index["format"] = Value::String("fanotes-history-v1".to_owned());
@@ -587,26 +588,64 @@ pub(crate) fn atomic_write(path: &Path, bytes: &[u8], mode: u32) -> Result<(), S
         fs::create_dir_all(parent)
             .map_err(|_| "Der Ordner konnte nicht angelegt werden.".to_owned())?;
     }
+    let suffix = random_suffix().unwrap_or_else(|_| std::process::id().to_string());
     let temporary = path.with_file_name(format!(
-        ".{}-{}.tmp",
+        ".{}.{}.{suffix}.tmp",
         path.file_name()
             .and_then(|name| name.to_str())
             .unwrap_or("file"),
         std::process::id()
     ));
-    fs::write(&temporary, bytes)
-        .map_err(|_| "Die Datei konnte nicht geschrieben werden.".to_owned())?;
+    if let Err(error) = write_exclusive(&temporary, bytes, mode) {
+        let _ = fs::remove_file(&temporary);
+        return Err(error);
+    }
+    if fs::rename(&temporary, path).is_err() {
+        let _ = fs::remove_file(&temporary);
+        return Err("Die Datei konnte nicht geschrieben werden.".to_owned());
+    }
+    if let Some(parent) = path.parent() {
+        if let Ok(directory) = fs::File::open(parent) {
+            let _ = directory.sync_all();
+        }
+    }
+    Ok(())
+}
+
+fn write_exclusive(path: &Path, bytes: &[u8], mode: u32) -> Result<(), String> {
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create_new(true);
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = fs::set_permissions(&temporary, fs::Permissions::from_mode(mode));
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(mode);
+        let nofollow = if cfg!(target_os = "linux") {
+            0x20000
+        } else if cfg!(target_os = "macos") {
+            0x0100
+        } else {
+            0
+        };
+        if nofollow != 0 {
+            options.custom_flags(nofollow);
+        }
     }
     #[cfg(not(unix))]
     {
         let _ = mode;
     }
-    fs::rename(&temporary, path)
-        .map_err(|_| "Die Datei konnte nicht geschrieben werden.".to_owned())
+    let mut file = options
+        .open(path)
+        .map_err(|_| "Die Datei konnte nicht geschrieben werden.".to_owned())?;
+    std::io::Write::write_all(&mut file, bytes)
+        .and_then(|_| file.sync_all())
+        .map_err(|_| "Die Datei konnte nicht geschrieben werden.".to_owned())?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(path, fs::Permissions::from_mode(mode));
+    }
+    Ok(())
 }
 
 fn vault_root(host: &Host) -> Result<&Path, String> {
