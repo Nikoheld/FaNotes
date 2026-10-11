@@ -506,7 +506,7 @@ fn sanitize_folder_path(value: Option<&str>) -> Option<String> {
         .to_string();
     let lower = path.to_lowercase();
     if path.is_empty()
-        || path.len() > MAX_PATH
+        || crate::vault::utf16_len(&path) > MAX_PATH
         || path.contains("..")
         || path.contains('\0')
         || lower.ends_with(".md")
@@ -526,7 +526,7 @@ fn sanitize_pdf_path(value: Option<&str>) -> Option<String> {
         .trim()
         .to_string();
     if path.is_empty()
-        || path.len() > MAX_PATH
+        || crate::vault::utf16_len(&path) > MAX_PATH
         || path.contains("..")
         || path.contains('\0')
         || !path.to_lowercase().ends_with(".pdf")

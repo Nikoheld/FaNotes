@@ -389,7 +389,7 @@ fn apply_rule(rule: &Rule, value: &Value) -> Option<Value> {
             .map(|number| json!(number)),
         Rule::String { max } => value
             .as_str()
-            .filter(|text| text.len() <= *max && !text.contains('\0'))
+            .filter(|text| crate::vault::utf16_len(text) <= *max && !text.contains('\0'))
             .map(|text| Value::String(text.to_owned())),
         Rule::Color => value
             .as_str()
@@ -427,7 +427,7 @@ fn color_hex(value: &str) -> bool {
 }
 
 fn clean_relative(value: &str, max: usize) -> Option<String> {
-    if value.len() > max || value.contains('\0') {
+    if crate::vault::utf16_len(value) > max || value.contains('\0') {
         return None;
     }
     let normalized = value.trim().replace('\\', "/");
@@ -479,8 +479,8 @@ fn sanitize_css(value: &str) -> String {
     if dangerous_css_pattern().is_match(&normalized) {
         return String::new();
     }
-    if value.len() > 100_000 {
-        value.chars().take(100_000).collect()
+    if crate::vault::utf16_len(value) > 100_000 {
+        crate::vault::truncate_utf16(value, 100_000)
     } else {
         value.to_owned()
     }

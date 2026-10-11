@@ -53,4 +53,26 @@ fn deleted_notes_go_to_the_trash_and_the_tree_sorts_numbers() {
         .unwrap();
     assert!(!vault.join("kopie.md").exists());
     assert!(dir.join("trash/files/kopie.md").is_file());
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            fs::metadata(dir.join("trash/info/Seite 2.md.trashinfo"))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
+        let info = dir.join("trash/info");
+        fs::set_permissions(&info, fs::Permissions::from_mode(0o500)).unwrap();
+        fs::write(vault.join("zurueck.md"), b"bleibt\n").unwrap();
+        let error = host
+            .dispatch("fanotes:trash-entry", &[json!("zurueck.md")])
+            .unwrap_err();
+        assert!(error.contains("Papierkorb"));
+        assert_eq!(fs::read(vault.join("zurueck.md")).unwrap(), b"bleibt\n");
+        assert!(!dir.join("trash/files/zurueck.md").exists());
+        fs::set_permissions(&info, fs::Permissions::from_mode(0o700)).unwrap();
+    }
 }

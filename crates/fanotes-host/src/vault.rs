@@ -151,6 +151,25 @@ pub fn resolve_inside(root: &Path, relative: &str) -> Result<PathBuf, String> {
 /// NFC plus lowercase, matching Electron's `normalize('NFC').toLocaleLowerCase('de-DE')`.
 ///
 /// A macOS file `Mühe.md` and a Linux file `Mühe.md` are the same note name.
+/// JavaScript `string.length`: one unit for each basic character, two for the rest.
+pub(crate) fn utf16_len(value: &str) -> usize {
+    value.encode_utf16().count()
+}
+
+pub(crate) fn truncate_utf16(value: &str, max: usize) -> String {
+    let mut units = 0;
+    let mut end = 0;
+    for (index, character) in value.char_indices() {
+        let width = character.len_utf16();
+        if units + width > max {
+            break;
+        }
+        units += width;
+        end = index + character.len_utf8();
+    }
+    value[..end].to_owned()
+}
+
 pub(crate) fn entry_name_key(name: &str) -> String {
     use unicode_normalization::UnicodeNormalization;
     name.nfc().collect::<String>().to_lowercase()

@@ -452,7 +452,11 @@ fn sanitize_path(value: Option<&Value>) -> Option<String> {
         .trim_start_matches('/')
         .trim()
         .to_string();
-    if path.is_empty() || path.len() > 500 || path.contains("..") || path.contains('\0') {
+    if path.is_empty()
+        || path.encode_utf16().count() > 500
+        || path.contains("..")
+        || path.contains('\0')
+    {
         return None;
     }
     Some(path)

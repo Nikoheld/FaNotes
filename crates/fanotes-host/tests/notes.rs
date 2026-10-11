@@ -471,3 +471,20 @@ fn a_missing_folder_is_not_created_for_a_new_note() {
     assert!(written.contains("Zielordner"));
     assert!(!vault.join("Fehlt").exists());
 }
+
+#[test]
+fn a_long_german_title_uses_character_length() {
+    let (mut host, vault) = host();
+    let title = "Ä".repeat(91);
+    let created = host
+        .dispatch("fanotes:create-note", &[json!(""), json!(title)])
+        .unwrap();
+    assert_eq!(created["relativePath"], format!("{title}.md"));
+    assert!(vault.join(format!("{title}.md")).is_file());
+    let too_long = "Ä".repeat(181);
+    let error = host
+        .dispatch("fanotes:create-note", &[json!(""), json!(too_long)])
+        .unwrap_err();
+    assert!(error.contains("nicht erlaubt"));
+    assert!(!vault.join(format!("{too_long}.md")).exists());
+}

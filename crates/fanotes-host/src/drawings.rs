@@ -295,7 +295,7 @@ fn library_metadata(
         .trim();
     if document.get("schemaVersion").and_then(Value::as_i64) != Some(1)
         || title.is_empty()
-        || title.len() > 180
+        || crate::vault::utf16_len(title) > 180
         || title.chars().any(|character| character.is_control())
         || !document.get("strokes").is_some_and(Value::is_array)
     {
@@ -356,7 +356,7 @@ fn decode_png(image_data: &str) -> Result<Vec<u8>, String> {
 fn safe_title(value: &str) -> Result<String, String> {
     let name = value.trim().trim_end_matches(['.', ' ']).trim();
     if name.is_empty()
-        || name.len() > 180
+        || crate::vault::utf16_len(name) > 180
         || name == "."
         || name == ".."
         || name.contains('/')

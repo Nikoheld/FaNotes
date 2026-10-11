@@ -79,6 +79,26 @@ fn invalid_settings_stay_on_the_previous_value() {
 }
 
 #[test]
+fn a_german_device_name_keeps_its_umlauts() {
+    let (_app, mut host) = host();
+    let name = "Ä".repeat(50);
+    let saved = host
+        .dispatch(
+            "fanotes:save-settings",
+            &[json!({ "syncDeviceName": name })],
+        )
+        .unwrap();
+    assert_eq!(saved["syncDeviceName"], name);
+    let saved = host
+        .dispatch(
+            "fanotes:save-settings",
+            &[json!({ "syncDeviceName": "Ä".repeat(81) })],
+        )
+        .unwrap();
+    assert_eq!(saved["syncDeviceName"], name);
+}
+
+#[test]
 fn api_keys_from_a_plaintext_file_move_into_the_secret_store() {
     let (app, mut host) = host();
     fs::write(

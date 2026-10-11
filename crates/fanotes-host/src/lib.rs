@@ -1784,7 +1784,7 @@ fn safe_entry_name(value: &str) -> Result<String, String> {
 
 fn entry_name_allowed(name: &str) -> bool {
     !name.is_empty()
-        && name.len() <= 180
+        && vault::utf16_len(name) <= 180
         && name != "."
         && name != ".."
         && !name.contains('/')
@@ -2259,8 +2259,17 @@ fn place_in_trash(trash_root: &Path, source: &Path) -> Result<(), String> {
         "[Trash Info]\nPath={}\nDeletionDate={when}\n",
         percent_encode(&original)
     );
-    fs::write(info.join(format!("{stored}.trashinfo")), record)
-        .map_err(|_| "Der Eintrag konnte nicht in den Papierkorb verschoben werden.".to_owned())
+    if notes::atomic_write(
+        &info.join(format!("{stored}.trashinfo")),
+        record.as_bytes(),
+        0o600,
+    )
+    .is_err()
+    {
+        let _ = fs::rename(&destination, source);
+        return Err("Der Eintrag konnte nicht in den Papierkorb verschoben werden.".to_owned());
+    }
+    Ok(())
 }
 
 fn percent_encode(path: &Path) -> String {
