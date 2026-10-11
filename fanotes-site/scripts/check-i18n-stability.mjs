@@ -1,5 +1,6 @@
 import fs from 'node:fs'
 import assert from 'node:assert/strict'
+import { localizeText } from '../i18n.mjs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -50,5 +51,14 @@ assert.match(runtime, /const textTranslations = new WeakMap\(\)/u, 'Text transla
 assert.match(runtime, /const attributeTranslations = new WeakMap\(\)/u, 'Attribute translations must be stabilized per DOM node.')
 assert.doesNotMatch(homepage, /class="web-app-shell reveal interactive-surface"/u, 'The large Web-App spotlight must not use nested 3D compositing.')
 assert.match(stylesheet, /@supports \(-moz-appearance: none\)[\s\S]+backdrop-filter: none!important; filter: none!important;/u, 'Firefox must use the WebRender-safe visual fallback.')
+for (const [source, english] of [
+  ['Zeitraum', 'Period'],
+  ['Kennzahlen', 'Metrics'],
+  ['Zeitverlauf', 'Timeline'],
+  ['FaNotes Statistik', 'FaNotes Statistics'],
+]) {
+  if (catalog[source] !== undefined) assert.equal(localizeText(source, 'en'), english, source)
+  assert.equal(localizeText(source, 'de'), source, source)
+}
 
 console.log(`${replacements.length} englische Übersetzungen sind idempotent; Firefox-Stabilitätsschutz ist aktiv.`)

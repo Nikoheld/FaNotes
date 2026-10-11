@@ -29,6 +29,16 @@ const CHROME_FILES = [
   'src/components/TextToHandwritingDialog.tsx',
   'src/components/GlyphenWerkWorkspace.tsx',
   'src/components/SyncSettingsSection.tsx',
+  'src/components/CalendarView.tsx',
+  'src/components/FlashcardReview.tsx',
+  'src/components/RightInspector.tsx',
+  'src/components/StudyOverview.tsx',
+  'src/components/SafeBoundary.tsx',
+  'src/components/HomeworkBoard.tsx',
+  'src/components/FormattingToolbar.tsx',
+  'src/components/addons/AddonStoreModal.tsx',
+  'src/components/addons/AddonPanelDock.tsx',
+  'src/lib/addons/manifest.ts',
   '../src/App.tsx',
   'src/lib/subjectBook.ts',
   'electron/main.cjs',
@@ -133,8 +143,53 @@ const server = await createServer({
 installDom()
 const i18n = await server.ssrLoadModule('/src/i18n.ts')
 
+const EXTRA_VISIBLE = [
+  'Kalender hinzufügen',
+  'Ganztägig',
+  'Rückverweise',
+  'Enthält Handschrift.',
+  'Keine fälligen Karten. Die nächsten liegen an späteren Tagen.',
+  'Deutsche Sonderzeichen',
+  'Ziffer 7',
+  'Großes A',
+  'Kleines B',
+  'Liest den Text jeder Notiz im Vault, den Dateibaum und Suchergebnisse.',
+  'Die Updateprüfung von fanotes.fasrv.ch endete mit HTTP 500.',
+  'Der Update-Download von fanotes.fasrv.ch verlangt eine Proxy-Anmeldung (HTTP 407). Das Schulnetz lässt den Download erst nach der Anmeldung am Proxy durch.',
+  'Qwen3-VL konnte nicht auf der NPU ausgeführt werden.',
+  'Noch keine älteren Stände. Nach dem nächsten Speichern erscheint hier die vorherige Version.',
+  'Die Einstellungen sind abgestürzt',
+  'Add-ons können nur Markdown-Notizen (.md) schreiben.',
+  'Nur https:// Links können geöffnet werden.',
+  'Befehls-IDs dürfen nur Buchstaben, Ziffern, Punkte, Doppelpunkte und Bindestriche enthalten.',
+  'Die Stiftebene ist abgestürzt',
+  'Lädt hoch',
+  'Holt',
+  'Prüft',
+  'Holt 3/10',
+  'Lädt hoch 1/4',
+  'Prüft 2/2',
+  'Ungültige Add-on-ID.',
+  'Ungültige Add-on-ID: demo',
+  'Ungültiger Verlaufseintrag.',
+  'Ungültige Vault-ID.',
+  'Kalender konnte nicht gespeichert werden.',
+  'gemeinsame Tastatur- und Handschriftseite',
+  'manifest.json muss ein JSON-Objekt sein.',
+  'Feld "id" fehlt.',
+  'Feld "description" fehlt (max. 280 Zeichen).',
+  'Die Berechtigung "network" braucht mindestens einen Eintrag in "networkHosts".',
+  '"id" (Bad) darf nur Kleinbuchstaben, Ziffern und Bindestriche enthalten (2-64 Zeichen).',
+  '"id" (demo) muss dem Ordnernamen (other) entsprechen.',
+  'Unbekannte Berechtigung "shell".',
+  '"networkHosts" enthält einen ungültigen Host: *',
+  'Unbekannte Kategorie "foo" wurde ignoriert.',
+  'Vorlagen: Cornell öffnen',
+  'Allgemein: Willkommen öffnen',
+]
+
 const runOnce = async () => {
-  const harvested = harvest()
+  const harvested = [...new Set([...harvest(), ...EXTRA_VISIBLE])].sort((left, right) => left.localeCompare(right, 'de'))
   const settingsSource = readFileSync(new URL('../src/components/SettingsModal.tsx', import.meta.url), 'utf8')
   assert.match(settingsSource, /\{`Anpassung · \$\{section\.count\} Optionen`\}/)
   assert.doesNotMatch(settingsSource, /Anpassung · \{section\.count\} Optionen/)
@@ -181,6 +236,7 @@ const runOnce = async () => {
   for (const source of harvested) {
     const rendered = i18n.translateUiText(source)
     const main = localizeText(source, 'en')
+    if (rendered !== main) leftovers.push({ path: 'disagree', source, rendered, main })
     if (GERMAN_LEFTOVER.test(rendered)) leftovers.push({ path: 'renderer', source, rendered })
     if (GERMAN_LEFTOVER.test(main)) leftovers.push({ path: 'main', source, rendered: main })
   }

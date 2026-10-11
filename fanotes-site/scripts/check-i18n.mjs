@@ -42,9 +42,10 @@ const server = http.createServer((request, response) => {
     return
   }
   const relative = url.pathname === '/' ? 'index.html' : decodeURIComponent(url.pathname.slice(1))
-  const candidate = path.resolve(publicRoot, relative)
+  let candidate = path.resolve(publicRoot, relative)
   if (candidate !== publicRoot && !candidate.startsWith(`${publicRoot}${path.sep}`)) return response.writeHead(403).end()
   try {
+    if (fs.existsSync(candidate) && fs.statSync(candidate).isDirectory()) candidate = path.join(candidate, 'index.html')
     const data = fs.readFileSync(candidate)
     response.writeHead(200, { 'Content-Type': mime.get(path.extname(candidate)) || 'application/octet-stream', 'Content-Length': data.length, 'Cache-Control': 'no-cache' }).end(data)
   } catch { response.writeHead(404).end() }
@@ -171,6 +172,25 @@ try {
   await wait(500)
   await audit(cdp, 'Mobile website')
   await capture(cdp, 'mobile-menu')
+  await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false })
+  await cdp.send('Page.navigate', { url: new URL('stats/', target).href })
+  await waitFor(cdp, `document.documentElement.lang === 'en' && document.title === 'FaNotes Statistics'`, 'English statistics')
+  await audit(cdp, 'Statistics page')
+  const statsState = await cdp.evaluate(`(() => ({
+    title: document.title,
+    description: document.querySelector('meta[name="description"]')?.getAttribute('content') || '',
+    aria: [...document.querySelectorAll('[aria-label]')].map((element) => element.getAttribute('aria-label')),
+    text: document.body.innerText,
+  }))()`)
+  if (statsState.title !== 'FaNotes Statistics') throw new Error(`Statistics title is ${statsState.title}`)
+  if (!/anonymous totals/u.test(statsState.description)) throw new Error(`Statistics description is ${statsState.description}`)
+  for (const label of ['Period', 'Metrics', 'Timeline', 'FaNotes website']) {
+    if (!statsState.aria.includes(label)) throw new Error(`Statistics aria missing ${label}: ${JSON.stringify(statsState.aria)}`)
+  }
+  if (/Zeitraum|Kennzahlen|Zeitverlauf|Sitzungen|Aufrufe|Statistik|Aktualisieren|Herkunft|Länder|Produktstatistik/u.test(`${statsState.description}\n${statsState.aria.join('\n')}\n${statsState.text}`)) {
+    throw new Error(`Statistics page still contains German UI: ${statsState.title}`)
+  }
+  await capture(cdp, 'statistics')
   console.log(`English website localization passed on desktop, interactions, hidden panels, metadata, and mobile. Screenshots: ${screenshots}`)
 } finally {
   socket?.close()

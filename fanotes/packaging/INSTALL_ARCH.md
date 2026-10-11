@@ -210,3 +210,216 @@ Funktioniert dies, System, Mesa und Grafiktreiber aktualisieren und danach wiede
 ### App startet nicht aus dem Menü
 
 Im Terminal `command -v fanotes` prüfen. Bei einer Benutzerinstallation muss `~/.local/bin` für die Desktop-Sitzung erreichbar sein, oder in der installierten `.desktop`-Datei muss wie oben beschrieben der absolute Pfad stehen.
+
+## English
+
+The following paths work on Arch Linux and Arch-based distributions on `x86_64`. AppImage and the portable build do not need Node.js or Electron packages; Electron is already in the bundle.
+
+For the shortest startup, use the portable build or a Pacman package built from it. It runs directly from the file system and skips the extra FUSE decompression of an AppImage. The checked start until the editor is editable stays well under three seconds even with 10,000 notes.
+
+GlyphenWerk, with training, a live test, the collection, and export, is built into FaNotes and opens from the database icon or `Ctrl+Shift+G`. Newly confirmed samples apply without a ZIP detour. In pen mode, existing handwriting can be deleted by scribbling back and forth over the word. `Ctrl+Z` restores that deletion as a single undo step. The gesture works the same way on Wayland and X11.
+
+## Check the files first
+
+If the delivery folder contains `SHA256SUMS`, run this from that folder before installing:
+
+```bash
+sha256sum -c SHA256SUMS
+```
+
+Use only files that are confirmed with `OK`.
+
+## Option 1: AppImage
+
+The AppImage is the simplest path and does not change system files:
+
+```bash
+chmod +x FaNotes-2026.10.2-x86_64.AppImage
+./FaNotes-2026.10.2-x86_64.AppImage
+```
+
+For a lasting install in the user account:
+
+```bash
+mkdir -p "$HOME/.local/bin" "$HOME/.local/share/applications" \
+  "$HOME/.local/share/icons/hicolor/scalable/apps"
+install -m755 FaNotes-2026.10.2-x86_64.AppImage \
+  "$HOME/.local/bin/fanotes"
+install -m644 packaging/fanotes.desktop \
+  "$HOME/.local/share/applications/fanotes.desktop"
+install -m644 packaging/fanotes.svg \
+  "$HOME/.local/share/icons/hicolor/scalable/apps/fanotes.svg"
+sed -i "s|^Exec=.*|Exec=$HOME/.local/bin/fanotes|" \
+  "$HOME/.local/share/applications/fanotes.desktop"
+sed -i '/^TryExec=/d' \
+  "$HOME/.local/share/applications/fanotes.desktop"
+```
+
+Log out and back in if the desktop launcher needs to be reread. `update-desktop-database ~/.local/share/applications` is optional.
+
+If the AppImage does not start because of FUSE:
+
+```bash
+sudo pacman -S --needed fuse2
+```
+
+Without FUSE it can be extracted and started directly as a slower fallback:
+
+```bash
+./FaNotes-2026.10.2-x86_64.AppImage --appimage-extract-and-run
+```
+
+## Option 2: Portable tar.gz
+
+The portable archive has exactly one top-level folder. It can be installed entirely in the user account:
+
+```bash
+mkdir -p "$HOME/.local/opt" "$HOME/.local/bin"
+tar -xzf FaNotes-2026.10.2-x86_64.tar.gz -C "$HOME/.local/opt"
+ln -sfn \
+  "$HOME/.local/opt/FaNotes-2026.10.2-x86_64/fanotes" \
+  "$HOME/.local/bin/fanotes"
+"$HOME/.local/bin/fanotes"
+```
+
+Install the desktop file the same way as for the AppImage. To remove it:
+
+```bash
+rm -f "$HOME/.local/bin/fanotes"
+rm -f "$HOME/.local/share/applications/fanotes.desktop"
+rm -rf "$HOME/.local/opt/FaNotes-2026.10.2-x86_64"
+```
+
+The vault and settings are intentionally left in place.
+
+## Option 3: Build a real Pacman package
+
+The included `PKGBUILD` packages exactly the portable tar.gz. It does not download anything from the internet and does not rebuild Electron.
+
+1. Copy `FaNotes-2026.10.2-x86_64.tar.gz`, `PKGBUILD`, `fanotes.desktop`, `fanotes.svg`, and `LICENSE` together into an empty working directory.
+2. Install the build tools:
+
+   ```bash
+   sudo pacman -S --needed base-devel pacman-contrib
+   ```
+
+3. As a normal user, replace the intentionally open archive hash with the real hash and build:
+
+   ```bash
+   updpkgsums
+   makepkg --cleanbuild --syncdeps --install
+   ```
+
+`updpkgsums` replaces the single `SKIP` entry with the SHA-256 value of this exact archive. The package that follows therefore does not contain an invented or stale checksum. Arch replaces the hyphen of a prerelease marker in the package name with a dot. The result is named something like `fanotes-bin-2026.7.1.beta.1-1-x86_64.pkg.tar.zst` and can then be installed on other Arch machines:
+
+```bash
+sudo pacman -U fanotes-bin-2026.7.1.beta.1-1-x86_64.pkg.tar.zst
+```
+
+Uninstall:
+
+```bash
+sudo pacman -Rns fanotes-bin
+```
+
+For a new app version, update `pkgver`, the archive name, and the checksum together. Never run `makepkg` with `sudo`.
+
+## Automatic updates
+
+By default FaNotes checks the Stable channel shortly after startup and then every six hours. Under **Settings → Updates → Update channel** you can choose Beta instead. Stable receives only bundled, fully tested releases. Beta receives new features earlier as a preview. Switching back to Stable never installs an older version. A found update is downloaded in the background and installed on a normal quit, after every open note, handwriting page, and worksheet has been saved. Each automatic step can be turned off, or a checked update can be installed immediately.
+
+A directly started, writable AppImage keeps its path. For portable, package-managed, or read-only starts, the updater sets up a managed AppImage install at `~/.local/opt/FaNotes/FaNotes.AppImage` together with a user launcher. A package installed system-wide with Pacman is not overwritten.
+
+## Graphics tablet on Wayland and X11
+
+FaNotes uses Chromium's standard pointer events. Pen pressure is used when the driver and the desktop session provide a variable pressure value. The kernel and `libinput` must see the tablet:
+
+```bash
+sudo pacman -S --needed libinput
+libinput list-devices
+echo "$XDG_SESSION_TYPE"
+```
+
+### Hyprland and other Wayland desktops
+
+On Linux, FaNotes always starts with Ozone X11. The pen and the trackpad share the same seat, so you can scroll with two fingers right after writing. An extra `--ozone-platform=x11` is not required:
+
+```bash
+fanotes
+```
+
+Under Hyprland, FaNotes uses the normal Linux window bar and no extra title bar inside the app. Hyprland borders, rounding, shadows, and window rules therefore apply.
+
+If `force_zero_scaling = true` is set in `~/.config/hypr/hyprland.conf` or in a file included from there with `source =`, FaNotes sets the device scale to 2 so text is not tiny under XWayland.
+
+On GNOME and KDE Plasma, configure monitor mapping, the active tablet area, and pen buttons in the system settings.
+
+Vulkan stays off on the native Wayland path; Chromium uses GL/EGL. For a test only:
+
+```bash
+FANOTES_ENABLE_VULKAN=1 fanotes --use-angle=vulkan
+```
+
+### X11
+
+Wacom-compatible devices can also be checked with `xsetwacom` and mapped to a monitor:
+
+```bash
+sudo pacman -S --needed xf86-input-wacom
+xsetwacom --list devices
+xrandr --listmonitors
+xsetwacom set "NAME OF THE PEN DEVICE" MapToOutput DP-1
+```
+
+The device name and output must match the output of the two previous commands. For Huion, XP-Pen, and other vendors, current desktops often only need the kernel and `libinput`. Vendor-specific drivers may need their own documentation.
+
+If strokes work but are always the same width, try turning pressure sensitivity off under **Settings → Pen & recognition**. That is usually a driver or compositor issue and does not affect drawing or recognition.
+
+## Import GlyphenWerk training
+
+1. In GlyphenWerk, export the trained dataset as a ZIP.
+2. In FaNotes, open **Settings → Pen & recognition**.
+3. Choose **Import training**. The ZIP file picker opens directly, and the model updates as soon as you select the file.
+4. To write, open the pen button, then choose **Convert page** or **Convert region**.
+5. Keep the default mode **Automatic**, or set **Text** or **Mathematics** manually.
+6. Check the result in the live preview and correct it if needed.
+7. Confirm with **Insert as text** or **Insert as formula**. Usable corrections are stored locally as new samples.
+
+For integrals, sums, fractions, roots, and indices, a GlyphenWerk export should include matching layout samples, not only single symbol samples.
+
+## Vault, sync, and backup
+
+- Default vault on a fresh install: the `FaNotes` folder in Documents
+- Notes: ordinary Markdown files in the vault
+- Drawings: `.fanotes/assets/*.png` and `.fanotes/assets/*.json` in the vault
+- Imported worksheets and text fields: `.fanotes/worksheets/*` in the vault
+- Settings and the training model: the Electron profile under `~/.config/FaNotes/`. Earlier local profiles are taken over automatically on the first start
+- Trash: deleted vault files are handed to the desktop environment's trash
+
+For a backup, quit the app first and copy the vault plus the profile folder. With Syncthing, Git, or NAS sync, do not edit the same Markdown text on two devices at once; otherwise the sync tool decides the conflict files. The hidden `.fanotes` folder belongs in the vault backup.
+
+The app sends neither notes nor training samples to a cloud service. An imported GlyphenWerk ZIP is read locally. The original file can afterwards be archived or removed separately.
+
+## Troubleshooting
+
+### The app reports a running instance, but none is open
+
+Before every start, FaNotes checks the Electron files `SingletonLock`, `SingletonCookie`, and `SingletonSocket`. If the lock belongs to a local process that clearly no longer exists, only those three symlinks are removed. Active processes, ordinary files, and fresh locks that cannot be judged safely are left alone. Manually deleting files under `~/.config/FaNotes/` is normally no longer required from version 2.3.1.
+
+### Chromium sandbox
+
+The AppImage is deliberately shipped without a switch that disables the Chromium sandbox. If the AppImage or the portable build exits with a sandbox message on a specially hardened system, use the Pacman package. The `PKGBUILD` installs `chrome-sandbox` with the required owner and mode. Do not turn the sandbox off with a launch argument.
+
+### Blank or flickering window
+
+To narrow down a graphics-driver problem, start once with:
+
+```bash
+fanotes --disable-gpu
+```
+
+If that works, update the system, Mesa, and the graphics driver, then start again without the flag.
+
+### The app does not start from the menu
+
+In a terminal, check `command -v fanotes`. For a user install, `~/.local/bin` must be available to the desktop session, or the installed `.desktop` file must contain the absolute path as described above.

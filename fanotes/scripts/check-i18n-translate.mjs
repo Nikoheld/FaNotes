@@ -90,6 +90,21 @@ const CHROME = [
   '3 Zeichen · 1 Zeilen · 2 Verbindungen',
   '0 Muster',
   '4 Beispiele direkt in FaNotes aktiv',
+  'Die Einstellungen sind abgestürzt',
+  'Add-ons können nur Markdown-Notizen (.md) schreiben.',
+  'Nur https:// Links können geöffnet werden.',
+  'Befehls-IDs dürfen nur Buchstaben, Ziffern, Punkte, Doppelpunkte und Bindestriche enthalten.',
+  'Die Stiftebene ist abgestürzt',
+  'Lädt hoch',
+  'Holt',
+  'Prüft',
+  'Ungültige Add-on-ID.',
+  'Ungültiger Verlaufseintrag.',
+  'Ungültige Vault-ID.',
+  'Kalender konnte nicht gespeichert werden.',
+  'gemeinsame Tastatur- und Handschriftseite',
+  'manifest.json muss ein JSON-Objekt sein.',
+  'Die Berechtigung "network" braucht mindestens einen Eintrag in "networkHosts".',
 ]
 
 const installDom = () => {
@@ -184,6 +199,7 @@ const runOnce = async () => {
     if (GERMAN_LEFTOVER.test(main)) {
       throw new Error(`Main-process English leftover in «${source}»: «${main}»`)
     }
+    assert.equal(rendered, main, `renderer and main disagree on «${source}»`)
     english.push({ source, rendered, main })
   }
 
@@ -257,6 +273,36 @@ const runOnce = async () => {
   assert.equal(i18n.translateUiText('6,30″'), '6.30″')
   assert.equal(i18n.translateUiText('An Lineal anlegen'), 'Attach to ruler')
   assert.equal(localizeText('Zeichenhilfen', 'en'), 'Drafting tools')
+  assert.equal(i18n.translateUiText('Die Einstellungen sind abgestürzt'), 'Settings have crashed')
+  assert.equal(localizeText('Die Stiftebene ist abgestürzt', 'en'), 'The pen layer has crashed')
+  assert.equal(i18n.translateUiText('Holt 3/10'), 'Fetching 3/10')
+  assert.equal(localizeText('Lädt hoch 1/4', 'en'), 'Uploading 1/4')
+  assert.equal(i18n.translateUiText('Prüft 2/2'), 'Checking 2/2')
+  assert.equal(localizeText('Prüft 2/2', 'en'), 'Checking 2/2')
+  assert.equal(i18n.translateUiText('Ungültige Add-on-ID: demo'), 'Invalid add-on ID: demo')
+  assert.equal(localizeText('Ungültige Add-on-ID: demo', 'en'), 'Invalid add-on ID: demo')
+  assert.equal(i18n.translateUiText('Kalender konnte nicht gespeichert werden.'), 'The calendar could not be saved.')
+  assert.equal(i18n.translateUiText('gemeinsame Tastatur- und Handschriftseite'), 'shared keyboard and handwriting page')
+  assert.equal(
+    i18n.translateUiText('"id" (Bad) darf nur Kleinbuchstaben, Ziffern und Bindestriche enthalten (2-64 Zeichen).'),
+    '"id" (Bad) may only contain lowercase letters, digits, and hyphens (2-64 characters).',
+  )
+  assert.equal(
+    localizeText('Unbekannte Berechtigung "shell".', 'en'),
+    'Unknown permission "shell".',
+  )
+  assert.equal(
+    i18n.translateUiText('Die Updateprüfung von fanotes.fasrv.ch endete mit HTTP 500.'),
+    'The update check from fanotes.fasrv.ch ended with HTTP 500.',
+  )
+  assert.equal(
+    localizeText('Die Updateprüfung von fanotes.fasrv.ch endete mit HTTP 500.', 'en'),
+    'The update check from fanotes.fasrv.ch ended with HTTP 500.',
+  )
+  assert.equal(i18n.translateUiText('Vorlagen: Cornell öffnen'), 'Templates: open Cornell')
+  assert.equal(localizeText('Vorlagen: Cornell öffnen', 'en'), 'Templates: open Cornell')
+  assert.equal(i18n.translateUiText('Allgemein: Willkommen öffnen'), 'General: open Willkommen')
+  assert.equal(localizeText('Allgemein: Willkommen öffnen', 'en'), 'General: open Willkommen')
 
   return { chrome: CHROME.length, samples: english.length }
 }
