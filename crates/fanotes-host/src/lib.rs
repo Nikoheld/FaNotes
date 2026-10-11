@@ -96,12 +96,14 @@ impl Host {
     }
 
     pub fn set_vault(&mut self, path: PathBuf) -> Result<(), String> {
-        let meta =
-            fs::metadata(&path).map_err(|_| "Der Vault wurde unsicher verändert.".to_owned())?;
-        if !meta.is_dir() {
-            return Err("Der Vault wurde unsicher verändert.".to_owned());
+        let canonical = fs::canonicalize(&path)
+            .map_err(|_| "Der gewählte Vault ist kein sicherer Ordner.".to_owned())?;
+        let meta = fs::symlink_metadata(&canonical)
+            .map_err(|_| "Der gewählte Vault ist kein sicherer Ordner.".to_owned())?;
+        if meta.file_type().is_symlink() || !meta.is_dir() {
+            return Err("Der gewählte Vault ist kein sicherer Ordner.".to_owned());
         }
-        self.vault = Some(path);
+        self.vault = Some(canonical);
         self.refresh_onboarding();
         if let Some(root) = self.vault.clone() {
             onboarding::upgrade_welcome_notes(&root);
@@ -643,9 +645,10 @@ impl Host {
             onboarding::write_status(&vault, "pending")?;
         }
         self.set_vault(vault.clone())?;
+        let stored = self.vault.clone().unwrap_or(vault);
         notes::atomic_write(
             &self.app_data.join("vault-path"),
-            vault.to_string_lossy().as_bytes(),
+            stored.to_string_lossy().as_bytes(),
             0o600,
         )
         .map_err(|_| "Die Einstellungen konnten nicht gespeichert werden.".to_owned())?;
@@ -891,10 +894,14 @@ impl Host {
             };
             path
         };
-        self.set_vault(path.clone())?;
+        self.set_vault(path)?;
+        let stored = self
+            .vault
+            .clone()
+            .ok_or_else(|| "Die Einstellungen konnten nicht gespeichert werden.".to_owned())?;
         notes::atomic_write(
             &self.app_data.join("vault-path"),
-            path.to_string_lossy().as_bytes(),
+            stored.to_string_lossy().as_bytes(),
             0o600,
         )
         .map_err(|_| "Die Einstellungen konnten nicht gespeichert werden.".to_owned())?;
@@ -1375,8 +1382,7 @@ impl Host {
         if let Ok(text) = fs::read_to_string(self.app_data.join("vault-path")) {
             let path = PathBuf::from(text.trim());
             if path.is_dir() {
-                self.vault = Some(path);
-                self.refresh_onboarding();
+                let _ = self.set_vault(path);
             }
         }
     }
@@ -2492,6 +2498,15 @@ fn read_tree(
             continue;
         }
         if meta.is_dir() {
+            let Ok(real) = fs::canonicalize(&path) else {
+                continue;
+            };
+            let Ok(root_real) = fs::canonicalize(root) else {
+                continue;
+            };
+            if !vault::is_inside_root(&root_real, &real) {
+                continue;
+            }
             let mut folder = json!({
                 "name": name,
                 "relativePath": relative,

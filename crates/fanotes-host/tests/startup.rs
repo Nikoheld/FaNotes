@@ -203,3 +203,35 @@ fn a_reset_profile_does_not_import_the_electron_config_again() {
     assert!(app.join(".fanotes-legacy-migration-v1-complete").is_file());
     assert!(!app.join(".fanotes-reset-complete").exists());
 }
+
+#[test]
+fn reopening_a_linked_vault_uses_the_real_folder_and_refreshes_the_welcome_note() {
+    let dir = scratch();
+    let real = dir.join("real");
+    fs::create_dir_all(&real).unwrap();
+    fs::write(
+        real.join("Willkommen.md"),
+        "Mit `Strg+Z` holst du eine versehentliche Löschung sofort zurück.\n",
+    )
+    .unwrap();
+    fs::create_dir_all(real.join("Mathe")).unwrap();
+    let link = dir.join("link");
+    std::os::unix::fs::symlink(&real, &link).unwrap();
+    let app = dir.join("app");
+    fs::create_dir_all(&app).unwrap();
+    fs::write(app.join("vault-path"), format!("{}\n", link.display())).unwrap();
+    let mut host = Host::open(app);
+    assert_eq!(
+        host.vault.as_deref(),
+        Some(fs::canonicalize(&real).unwrap().as_path())
+    );
+    let welcome = fs::read_to_string(real.join("Willkommen.md")).unwrap();
+    assert!(welcome.contains("**Strg+Z**"));
+    assert!(!welcome.contains("`Strg+Z`"));
+    let tree = host.dispatch("fanotes:get-tree", &[]).unwrap();
+    assert!(tree
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|entry| entry["name"] == "Mathe"));
+}
