@@ -101,6 +101,35 @@ fn paper_links_books_and_history_round_trip() {
         )
         .unwrap();
     assert_eq!(snapshot["content"], "Hallo\n");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let history = vault.join(".fanotes/history");
+        let mode = std::fs::symlink_metadata(&history)
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(mode, 0o700);
+        let note_dir = std::fs::read_dir(&history)
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap()
+            .path();
+        let mode = std::fs::symlink_metadata(&note_dir)
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(mode, 0o700);
+        let mode = std::fs::symlink_metadata(note_dir.join(format!("{id}.md")))
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(mode, 0o600);
+    }
     assert_eq!(
         host.dispatch("fanotes:read-note-paper-style", &[json!("Mathe/Seite.md")])
             .unwrap(),

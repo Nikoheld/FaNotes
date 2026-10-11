@@ -331,8 +331,7 @@ pub fn record_history(vault_root: &Path, relative: &str, content: &str) -> Resul
         return Ok(());
     }
     let directory = history_dir(vault_root, relative)?;
-    fs::create_dir_all(&directory)
-        .map_err(|_| "Der Verlauf konnte nicht gespeichert werden.".to_owned())?;
+    ensure_private_history_dir(&directory)?;
     let mut index = read_history_index(&directory)?;
     if let Some(last) = index
         .get("snapshots")
@@ -549,6 +548,32 @@ fn sanitize_pdf_path(value: Option<&str>) -> Option<String> {
 
 fn books_path(root: &Path) -> Result<PathBuf, String> {
     Ok(crate::vault::ensure_internal_directory(root)?.join("subject-books.json"))
+}
+
+fn ensure_private_history_dir(directory: &Path) -> Result<(), String> {
+    if let Some(parent) = directory.parent() {
+        if fs::symlink_metadata(parent).is_err() {
+            ensure_private_history_dir(parent)?;
+        }
+    }
+    match fs::symlink_metadata(directory) {
+        Ok(meta) if meta.file_type().is_symlink() || !meta.is_dir() => {
+            Err("Der Verlauf konnte nicht gespeichert werden.".to_owned())
+        }
+        Ok(_) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            fs::create_dir(directory)
+                .map_err(|_| "Der Verlauf konnte nicht gespeichert werden.".to_owned())?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                fs::set_permissions(directory, fs::Permissions::from_mode(0o700))
+                    .map_err(|_| "Der Verlauf konnte nicht gespeichert werden.".to_owned())?;
+            }
+            Ok(())
+        }
+        Err(_) => Err("Der Verlauf konnte nicht gespeichert werden.".to_owned()),
+    }
 }
 
 fn history_dir(root: &Path, relative: &str) -> Result<PathBuf, String> {
