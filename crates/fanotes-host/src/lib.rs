@@ -2180,6 +2180,15 @@ fn file_uri(path: &Path) -> String {
 }
 
 pub(crate) fn compare_names(left: &str, right: &str) -> std::cmp::Ordering {
+    static COLLATOR: std::sync::OnceLock<Option<icu_collator::CollatorBorrowed<'static>>> =
+        std::sync::OnceLock::new();
+    if let Some(collator) = COLLATOR.get_or_init(german_numeric_base_collator).as_ref() {
+        return collator.compare(left, right);
+    }
+    compare_names_fallback(left, right)
+}
+
+fn compare_names_fallback(left: &str, right: &str) -> std::cmp::Ordering {
     use std::cmp::Ordering;
     let left = sort_key(left);
     let right = sort_key(right);
@@ -2309,6 +2318,15 @@ fn german_numeric_collator() -> Option<icu_collator::CollatorBorrowed<'static>> 
     let mut prefs = icu_collator::CollatorPreferences::from(icu_locale_core::locale!("de"));
     prefs.numeric_ordering = Some(icu_collator::preferences::CollationNumericOrdering::True);
     icu_collator::Collator::try_new(prefs, icu_collator::options::CollatorOptions::default()).ok()
+}
+
+/// `localeCompare(name, 'de', { numeric: true, sensitivity: 'base' })`.
+fn german_numeric_base_collator() -> Option<icu_collator::CollatorBorrowed<'static>> {
+    let mut prefs = icu_collator::CollatorPreferences::from(icu_locale_core::locale!("de"));
+    prefs.numeric_ordering = Some(icu_collator::preferences::CollationNumericOrdering::True);
+    let mut options = icu_collator::options::CollatorOptions::default();
+    options.strength = Some(icu_collator::options::Strength::Primary);
+    icu_collator::Collator::try_new(prefs, options).ok()
 }
 
 fn entry_name_order(left: &Value, right: &Value) -> std::cmp::Ordering {
@@ -3353,6 +3371,15 @@ mod sort_tests {
         assert_eq!(compare_names("Seite 2", "Seite 10"), Ordering::Less);
         assert_eq!(compare_names("Äpfel", "Zen"), Ordering::Less);
         assert_eq!(compare_names("Über", "Zen"), Ordering::Less);
+        assert_eq!(compare_names("ð", "d"), Ordering::Equal);
+        assert_eq!(compare_names("ﬁle", "file"), Ordering::Equal);
+        assert_eq!(compare_names("Note2", "Note 2"), Ordering::Greater);
+        assert_eq!(compare_names("2.0", "2"), Ordering::Greater);
+        assert_eq!(compare_names("2.0", "2.00"), Ordering::Equal);
+        assert_eq!(compare_names("1,5", "1.5"), Ordering::Less);
+        assert_eq!(compare_names("Þ", "Th"), Ordering::Greater);
+        assert_eq!(compare_names("łódź", "lodz"), Ordering::Equal);
+        assert_eq!(compare_names("a b", "ab"), Ordering::Less);
     }
 
     #[test]
