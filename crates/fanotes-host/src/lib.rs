@@ -1,3 +1,4 @@
+#![recursion_limit = "512"]
 //! Desktop host operations behind `FaNotesApi`.
 //!
 //! Tauri commands use the preload channel strings. Electron stays the release host:
@@ -13,6 +14,7 @@ mod onboarding;
 mod onenote;
 mod policy;
 mod resources;
+mod settings;
 mod vault;
 mod worksheets;
 
@@ -1161,17 +1163,21 @@ impl Host {
         let mut secrets = self.load_secrets();
         for key in SECRET_KEYS {
             if let Some(value) = object.get(*key).and_then(Value::as_str) {
-                secrets.insert((*key).to_owned(), Value::String(value.to_owned()));
+                let limit = if *key == "homeworkApiSecret" {
+                    256
+                } else {
+                    4096
+                };
+                if value.len() <= limit && !value.contains('\0') {
+                    secrets.insert((*key).to_owned(), Value::String(value.to_owned()));
+                }
             }
         }
         self.store_secrets(&secrets)?;
-        for (key, value) in object {
-            if SECRET_KEYS.contains(&key.as_str()) {
-                self.settings
-                    .insert(key.clone(), Value::String(String::new()));
-            } else {
-                self.settings.insert(key.clone(), value.clone());
-            }
+        self.settings = settings::sanitize(&incoming, &self.settings);
+        for key in SECRET_KEYS {
+            self.settings
+                .insert((*key).to_owned(), Value::String(String::new()));
         }
         self.persist_settings()?;
         Ok(json!(self.settings))
@@ -1267,11 +1273,11 @@ impl Host {
 
     fn load_persisted(&mut self) {
         if let Ok(text) = fs::read_to_string(self.app_data.join("settings.json")) {
-            if let Ok(Value::Object(object)) = serde_json::from_str(&text) {
-                for (key, value) in object {
-                    if !SECRET_KEYS.contains(&key.as_str()) {
-                        self.settings.insert(key, value);
-                    }
+            if let Ok(parsed) = serde_json::from_str::<Value>(&text) {
+                self.settings = settings::sanitize(&parsed, &default_settings());
+                for key in SECRET_KEYS {
+                    self.settings
+                        .insert((*key).to_owned(), Value::String(String::new()));
                 }
             }
         }
@@ -1365,18 +1371,7 @@ fn arg_string(args: &[Value], index: usize) -> Result<String, String> {
 }
 
 fn default_settings() -> Map<String, Value> {
-    json!({
-        "uiLanguage": "system",
-        "theme": "light",
-        "paperStyle": "dots",
-        "recognitionLanguage": "de",
-        "recognitionMode": "auto",
-        "updateChannel": "stable",
-        "autoCheckUpdates": true
-    })
-    .as_object()
-    .cloned()
-    .unwrap_or_default()
+    settings::defaults()
 }
 
 fn feature_state(model_id: &str, license: &str) -> Value {
