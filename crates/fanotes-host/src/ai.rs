@@ -177,7 +177,7 @@ fn list_provider(connection: &Value) -> Result<Value, String> {
         "opencode" => opencode_models(connection)?,
         _ => return Err("Wähle einen unterstützten AI-Anbieter.".to_owned()),
     };
-    Ok(Value::Array(models))
+    Ok(Value::Array(finish_models(models)))
 }
 
 fn ollama_models(connection: &Value) -> Result<Vec<Value>, String> {
@@ -219,27 +219,10 @@ fn lmstudio_models(connection: &Value) -> Result<Vec<Value>, String> {
         None,
         Duration::from_secs(20),
     );
-    if let Ok(body) = native {
-        if let Some(models) = body.get("models").and_then(Value::as_array) {
-            return Ok(models
-                .iter()
-                .filter_map(|entry| {
-                    if entry.get("type").and_then(Value::as_str) != Some("llm") {
-                        return None;
-                    }
-                    let key = entry.get("key").and_then(Value::as_str)?;
-                    Some(model_record(
-                        "lmstudio",
-                        key,
-                        entry
-                            .get("display_name")
-                            .and_then(Value::as_str)
-                            .unwrap_or(key),
-                    ))
-                })
-                .take(1000)
-                .collect());
-        }
+    match native {
+        Ok(body) => return parse_lmstudio_models(&body),
+        Err(error) if error.contains("404") => {}
+        Err(error) => return Err(error),
     }
     let legacy = request_json(
         "GET",
@@ -259,6 +242,47 @@ fn lmstudio_models(connection: &Value) -> Result<Vec<Value>, String> {
             Some(model_record("lmstudio", id, id))
         })
         .take(1000)
+        .collect())
+}
+
+fn parse_lmstudio_models(body: &Value) -> Result<Vec<Value>, String> {
+    let models = body
+        .get("models")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "LM Studio hat keine Modellliste geliefert.".to_owned())?;
+    Ok(models
+        .iter()
+        .filter_map(|entry| {
+            if entry.get("type").and_then(Value::as_str) != Some("llm") {
+                return None;
+            }
+            let key = entry.get("key").and_then(Value::as_str)?.trim();
+            if key.is_empty() {
+                return None;
+            }
+            let display = entry
+                .get("display_name")
+                .and_then(Value::as_str)
+                .unwrap_or(key);
+            let mut record = model_record("lmstudio", key, display);
+            let loaded = entry
+                .get("loaded_instances")
+                .and_then(Value::as_array)
+                .is_some_and(|items| !items.is_empty());
+            set_model_details(
+                &mut record,
+                entry.get("publisher").and_then(Value::as_str),
+                entry
+                    .get("quantization")
+                    .and_then(|value| value.get("name"))
+                    .and_then(Value::as_str),
+                entry.get("params_string").and_then(Value::as_str),
+                Some(loaded),
+                finite_number(&entry["max_context_length"]),
+                entry.get("description").and_then(Value::as_str),
+            );
+            Some(record)
+        })
         .collect())
 }
 
@@ -965,11 +989,78 @@ fn urlencoding_encode(value: &str) -> String {
     encoded
 }
 
+fn finish_models(mut models: Vec<Value>) -> Vec<Value> {
+    models.sort_by(|left, right| {
+        let left_loaded = left.get("loaded").and_then(Value::as_bool).unwrap_or(false);
+        let right_loaded = right
+            .get("loaded")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        right_loaded.cmp(&left_loaded).then_with(|| {
+            crate::compare_names(
+                left.get("displayName")
+                    .and_then(Value::as_str)
+                    .unwrap_or(""),
+                right
+                    .get("displayName")
+                    .and_then(Value::as_str)
+                    .unwrap_or(""),
+            )
+        })
+    });
+    models.truncate(1000);
+    models
+}
+
+fn set_model_details(
+    record: &mut Value,
+    publisher: Option<&str>,
+    quantization: Option<&str>,
+    params: Option<&str>,
+    loaded: Option<bool>,
+    max_context: Option<f64>,
+    description: Option<&str>,
+) {
+    let Some(object) = record.as_object_mut() else {
+        return;
+    };
+    if let Some(publisher) = publisher {
+        object.insert(
+            "publisher".into(),
+            Value::String(crate::vault::truncate_utf16(publisher, 200)),
+        );
+    }
+    if let Some(quantization) = quantization {
+        object.insert(
+            "quantization".into(),
+            Value::String(crate::vault::truncate_utf16(quantization, 100)),
+        );
+    }
+    if let Some(params) = params {
+        object.insert(
+            "params".into(),
+            Value::String(crate::vault::truncate_utf16(params, 100)),
+        );
+    }
+    if let Some(loaded) = loaded {
+        object.insert("loaded".into(), json!(loaded));
+    }
+    if let Some(max_context) = max_context {
+        object.insert("maxContextLength".into(), json!(max_context));
+    }
+    if let Some(description) = description {
+        object.insert(
+            "description".into(),
+            Value::String(crate::vault::truncate_utf16(description, 1200)),
+        );
+    }
+}
+
 fn model_record(provider: &str, key: &str, display_name: &str) -> Value {
     json!({
         "provider": provider,
-        "key": key,
-        "displayName": display_name,
+        "key": crate::vault::truncate_utf16(key, 500),
+        "displayName": crate::vault::truncate_utf16(display_name, 500),
         "publisher": "",
         "quantization": null,
         "params": null,
@@ -1178,8 +1269,8 @@ fn unwrap_markdown(value: &str) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_prompt, lm_studio_text, output_token_limit, parse_anthropic_models,
-        parse_gemini_models, parse_openai_models, unwrap_markdown,
+        build_prompt, finish_models, lm_studio_text, output_token_limit, parse_anthropic_models,
+        parse_gemini_models, parse_lmstudio_models, parse_openai_models, unwrap_markdown,
     };
     use serde_json::json;
 
@@ -1197,6 +1288,20 @@ mod tests {
         assert_eq!(reply.stats["inputTokens"], 12.0);
         assert_eq!(reply.stats["outputTokens"], 4.0);
         assert_eq!(reply.stats["tokensPerSecond"], 8.5);
+        let models = parse_lmstudio_models(&json!({
+            "models": [
+                { "type": "llm", "key": "zeta", "display_name": "Zeta", "loaded_instances": [] },
+                { "type": "llm", "key": "alpha", "display_name": "Alpha", "loaded_instances": [{ "id": "1" }] },
+                { "type": "embedding", "key": "embed", "display_name": "Embed" }
+            ]
+        }))
+        .unwrap();
+        let models = finish_models(models);
+        assert_eq!(models.len(), 2);
+        assert_eq!(models[0]["key"], "alpha");
+        assert_eq!(models[0]["loaded"], true);
+        assert_eq!(models[1]["key"], "zeta");
+        assert_eq!(models[1]["loaded"], false);
     }
 
     #[test]
