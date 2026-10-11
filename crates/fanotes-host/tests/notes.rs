@@ -315,6 +315,25 @@ fn a_new_note_adopts_an_existing_handwriting_companion() {
 }
 
 #[test]
+fn a_directory_named_like_a_note_cannot_be_read() {
+    let (mut host, vault) = host();
+    std::fs::create_dir(vault.join("Mathe/Seite.md")).unwrap();
+    assert_eq!(
+        host.dispatch("fanotes:read-file", &[json!("Mathe/Seite.md")])
+            .unwrap_err(),
+        "Die gewählte Datei ist keine reguläre Datei."
+    );
+    assert_eq!(
+        host.dispatch(
+            "fanotes:write-file",
+            &[json!("Mathe/Seite.md"), json!("Hallo\n")],
+        )
+        .unwrap_err(),
+        "Die Notiz ist keine sichere reguläre Datei."
+    );
+}
+
+#[test]
 fn a_missing_markdown_note_is_not_created_by_writing() {
     let (mut host, vault) = host();
     let error = host

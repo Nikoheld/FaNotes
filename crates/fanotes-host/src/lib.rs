@@ -743,15 +743,25 @@ impl Host {
         if !notes::is_note_text(&normalized) {
             return Err("Es dürfen nur Markdown-Dateien und FaNotes-Handschriftdateien (.famd) bearbeitet werden.".to_owned());
         }
-        let path = vault::resolve_note_file(self.require_vault()?, &normalized)?;
+        let path =
+            vault::resolve_note_file(self.require_vault()?, &normalized).map_err(|error| {
+                if error == "Die Notiz ist keine sichere reguläre Datei." {
+                    "Die gewählte Datei ist keine reguläre Datei.".to_owned()
+                } else {
+                    error
+                }
+            })?;
         let limit = note_byte_limit(&normalized);
         let meta = fs::symlink_metadata(&path)
             .map_err(|_| "Die Datei konnte nicht gelesen werden.".to_owned())?;
-        if meta.file_type().is_symlink() || !meta.is_file() {
-            return Err("Die Datei konnte nicht gelesen werden.".to_owned());
+        if meta.file_type().is_symlink() {
+            return Err("Symbolische Links sind innerhalb des Vaults nicht erlaubt.".to_owned());
+        }
+        if !meta.is_file() {
+            return Err("Die gewählte Datei ist keine reguläre Datei.".to_owned());
         }
         if meta.len() > limit {
-            return Err("Der Notizinhalt ist ungültig oder zu groß.".to_owned());
+            return Err("Die Datei ist zu groß.".to_owned());
         }
         let bytes =
             fs::read(&path).map_err(|_| "Die Datei konnte nicht gelesen werden.".to_owned())?;
