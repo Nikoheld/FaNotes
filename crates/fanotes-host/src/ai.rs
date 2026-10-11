@@ -1518,7 +1518,10 @@ mod tests {
         let kept = super::opencode_username(Some(&"Ä".repeat(200)));
         assert_eq!(kept, "Ä".repeat(200));
         assert_eq!(super::opencode_username(Some(&"Ä".repeat(201))), "opencode");
-        assert_eq!(super::opencode_username(Some(&"😀".repeat(101))), "opencode");
+        assert_eq!(
+            super::opencode_username(Some(&"😀".repeat(101))),
+            "opencode"
+        );
 
         assert!(super::auth_headers(&json!({
             "provider": "openai",
