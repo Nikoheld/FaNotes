@@ -597,13 +597,14 @@ fn history_dir(root: &Path, relative: &str) -> Result<PathBuf, String> {
 
 fn read_history_index(directory: &Path) -> Result<Value, String> {
     let path = directory.join("index.json");
-    let raw = match fs::read_to_string(&path) {
-        Ok(raw) => raw,
+    let bytes = match fs::read(&path) {
+        Ok(bytes) => bytes,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
             return Ok(json!({ "format": "fanotes-history-v1", "snapshots": [] }));
         }
         Err(_) => return Err("Der Verlauf konnte nicht gelesen werden.".to_owned()),
     };
+    let raw = String::from_utf8_lossy(&bytes);
     match serde_json::from_str::<Value>(&raw) {
         Ok(parsed)
             if parsed.get("format").and_then(Value::as_str) == Some("fanotes-history-v1")

@@ -568,3 +568,46 @@ fn a_long_german_title_uses_character_length() {
         .unwrap_err();
     assert!(rejected.contains("nicht erlaubt"));
 }
+
+#[test]
+fn a_history_index_with_an_invalid_byte_still_lists_its_snapshots() {
+    let (mut host, vault) = host();
+    host.dispatch(
+        "fanotes:write-file",
+        &[json!("Mathe/Seite.md"), json!("Hallo\n")],
+    )
+    .unwrap();
+    host.dispatch(
+        "fanotes:write-file",
+        &[json!("Mathe/Seite.md"), json!("Welt\n")],
+    )
+    .unwrap();
+    let history_root = vault.join(".fanotes/history");
+    let index = std::fs::read_dir(&history_root)
+        .unwrap()
+        .find_map(|entry| {
+            let path = entry.unwrap().path().join("index.json");
+            path.is_file().then_some(path)
+        })
+        .unwrap();
+    let mut bytes = std::fs::read(&index).unwrap();
+    let marker = bytes
+        .windows(6)
+        .position(|window| window == b"Hallo\n" || window == br#""path""#)
+        .unwrap();
+    bytes.insert(marker + 1, 0xff);
+    std::fs::write(&index, &bytes).unwrap();
+
+    let history = host
+        .dispatch("fanotes:list-note-history", &[json!("Mathe/Seite.md")])
+        .unwrap();
+    assert_eq!(history.as_array().unwrap().len(), 1);
+    let id = history[0]["id"].as_str().unwrap();
+    let snapshot = host
+        .dispatch(
+            "fanotes:read-note-history",
+            &[json!("Mathe/Seite.md"), json!(id)],
+        )
+        .unwrap();
+    assert_eq!(snapshot["content"], "Hallo\n");
+}
