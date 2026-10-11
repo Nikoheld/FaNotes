@@ -255,8 +255,8 @@ fn random_id() -> Result<String, String> {
 }
 
 fn assets_dir(vault_root: &Path) -> Result<PathBuf, String> {
-    let internal = vault_root.join(".fanotes");
-    ensure_private_dir(&internal)?;
+    let internal = crate::vault::ensure_internal_directory(vault_root)
+        .map_err(|_| "Der interne Asset-Ordner ist unsicher.".to_owned())?;
     let assets = internal.join("assets");
     ensure_private_dir(&assets)?;
     Ok(assets)

@@ -533,8 +533,8 @@ impl Host {
     }
 
     fn read_recognition_model(&self) -> Result<Value, String> {
-        let root = self.require_vault()?;
-        let path = root.join(".fanotes").join("recognition-model.json");
+        let root = self.require_vault()?.to_path_buf();
+        let path = internal_directory(&root)?.join("recognition-model.json");
         match fs::symlink_metadata(&path) {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Value::Null),
             Err(_) => Err("Das Handschriftmodell konnte nicht gelesen werden.".to_owned()),
@@ -1705,19 +1705,7 @@ fn mtime_millis(meta: &fs::Metadata) -> i64 {
 }
 
 fn internal_directory(root: &Path) -> Result<PathBuf, String> {
-    let directory = root.join(".fanotes");
-    match fs::symlink_metadata(&directory) {
-        Ok(meta) if meta.file_type().is_symlink() || !meta.is_dir() => {
-            Err("Interne FaNotes-Dateien sind geschützt.".to_owned())
-        }
-        Ok(_) => Ok(directory),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            fs::create_dir_all(&directory)
-                .map_err(|_| "Der Ordner konnte nicht angelegt werden.".to_owned())?;
-            Ok(directory)
-        }
-        Err(_) => Err("Der Ordner konnte nicht angelegt werden.".to_owned()),
-    }
+    vault::ensure_internal_directory(root)
 }
 
 fn scan_sync_directory(root: &Path, directory: &Path, depth: usize, out: &mut Vec<Value>) {
@@ -2589,7 +2577,7 @@ fn folder_color_hex(value: &str) -> bool {
 }
 
 fn read_folder_colors(root: &Path) -> Result<BTreeMap<String, String>, String> {
-    let path = root.join(".fanotes").join("folder-colors.json");
+    let path = internal_directory(root)?.join("folder-colors.json");
     let text = match fs::read_to_string(&path) {
         Ok(text) => text,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(BTreeMap::new()),
@@ -2619,9 +2607,7 @@ fn read_folder_colors(root: &Path) -> Result<BTreeMap<String, String>, String> {
 }
 
 fn write_folder_colors(root: &Path, colors: &BTreeMap<String, String>) -> Result<(), String> {
-    let internal = root.join(".fanotes");
-    fs::create_dir_all(&internal)
-        .map_err(|_| "Der Ordner konnte nicht angelegt werden.".to_owned())?;
+    let internal = internal_directory(root)?;
     let mut entries: Vec<_> = colors.iter().take(5000).collect();
     entries.sort_by(|left, right| left.0.cmp(right.0));
     let mut object = Map::new();

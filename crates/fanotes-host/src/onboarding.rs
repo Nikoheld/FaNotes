@@ -386,7 +386,9 @@ fn starter_folder_error(name: &str) -> String {
 }
 
 pub(crate) fn read_status(root: &Path) -> Option<&'static str> {
-    let path = root.join(".fanotes").join("onboarding.json");
+    let path = crate::vault::ensure_internal_directory(root)
+        .ok()?
+        .join("onboarding.json");
     let meta = fs::symlink_metadata(&path).ok()?;
     if meta.file_type().is_symlink() || !meta.is_file() || meta.len() > 16 * 1024 {
         return None;
@@ -407,7 +409,7 @@ pub(crate) fn write_status(root: &Path, status: &str) -> Result<(), String> {
     if status != "pending" && status != "complete" {
         return Err("Ungültiger Einrichtungsstatus.".to_owned());
     }
-    let path = root.join(".fanotes").join("onboarding.json");
+    let path = crate::vault::ensure_internal_directory(root)?.join("onboarding.json");
     let snapshot = format!(
         "{}\n",
         serde_json::to_string_pretty(&json!({

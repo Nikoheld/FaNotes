@@ -528,16 +528,7 @@ fn sanitize_pdf_path(value: Option<&str>) -> Option<String> {
 }
 
 fn books_path(root: &Path) -> Result<PathBuf, String> {
-    let internal = root.join(".fanotes");
-    if let Ok(meta) = fs::symlink_metadata(&internal) {
-        if meta.file_type().is_symlink() || !meta.is_dir() {
-            return Err("Der interne Ordner ist unsicher.".to_owned());
-        }
-    } else {
-        fs::create_dir_all(&internal)
-            .map_err(|_| "Der Ordner konnte nicht angelegt werden.".to_owned())?;
-    }
-    Ok(internal.join("subject-books.json"))
+    Ok(crate::vault::ensure_internal_directory(root)?.join("subject-books.json"))
 }
 
 fn history_dir(root: &Path, relative: &str) -> Result<PathBuf, String> {
@@ -548,7 +539,7 @@ fn history_dir(root: &Path, relative: &str) -> Result<PathBuf, String> {
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect::<String>();
-    let history = root.join(".fanotes").join("history");
+    let history = crate::vault::ensure_internal_directory(root)?.join("history");
     if let Ok(meta) = fs::symlink_metadata(&history) {
         if meta.file_type().is_symlink() || !meta.is_dir() {
             return Err("Der Verlaufsordner ist unsicher.".to_owned());

@@ -122,3 +122,59 @@ fn sync_segments(raw: &str) -> Result<Vec<String>, String> {
     }
     Ok(segments)
 }
+
+/// `.fanotes` is the internal vault directory. An older vault keeps the same
+/// files under `.lernwerk`; that directory is renamed into place once.
+pub(crate) fn ensure_internal_directory(root: &Path) -> Result<PathBuf, String> {
+    let directory = root.join(".fanotes");
+    match fs::symlink_metadata(&directory) {
+        Ok(meta) if meta.file_type().is_symlink() || !meta.is_dir() => {
+            return Err("Interne FaNotes-Dateien sind geschützt.".to_owned());
+        }
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            if !rename_legacy_internal(root, &directory)? {
+                fs::create_dir(&directory)
+                    .map_err(|_| "Der Ordner konnte nicht angelegt werden.".to_owned())?;
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    let _ = fs::set_permissions(&directory, fs::Permissions::from_mode(0o700));
+                }
+            }
+        }
+        Err(_) => return Err("Der Ordner konnte nicht angelegt werden.".to_owned()),
+    }
+    let root_real = fs::canonicalize(root)
+        .map_err(|_| "Der interne FaNotes-Ordner verlässt den Vault.".to_owned())?;
+    let real = fs::canonicalize(&directory)
+        .map_err(|_| "Der interne FaNotes-Ordner verlässt den Vault.".to_owned())?;
+    if real == root_real || !is_inside_root(&root_real, &real) {
+        return Err("Der interne FaNotes-Ordner verlässt den Vault.".to_owned());
+    }
+    Ok(directory)
+}
+
+fn rename_legacy_internal(root: &Path, directory: &Path) -> Result<bool, String> {
+    let legacy = root.join(".lernwerk");
+    match fs::symlink_metadata(&legacy) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Ok(meta) if meta.file_type().is_symlink() || !meta.is_dir() => {
+            return Err("Der bisherige interne FaNotes-Ordner ist unsicher.".to_owned());
+        }
+        Ok(_) => {}
+        Err(_) => return Err("Der bisherige interne FaNotes-Ordner ist unsicher.".to_owned()),
+    }
+    let root_real = fs::canonicalize(root)
+        .map_err(|_| "Der bisherige interne FaNotes-Ordner verlässt den Vault.".to_owned())?;
+    let legacy_real = fs::canonicalize(&legacy)
+        .map_err(|_| "Der bisherige interne FaNotes-Ordner verlässt den Vault.".to_owned())?;
+    if !is_inside_root(&root_real, &legacy_real) {
+        return Err("Der bisherige interne FaNotes-Ordner verlässt den Vault.".to_owned());
+    }
+    match fs::rename(&legacy, directory) {
+        Ok(()) => Ok(true),
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => Ok(false),
+        Err(_) => Err("Der bisherige interne FaNotes-Ordner ist unsicher.".to_owned()),
+    }
+}

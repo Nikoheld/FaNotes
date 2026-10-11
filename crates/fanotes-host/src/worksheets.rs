@@ -551,8 +551,8 @@ fn worksheet_id(value: &str) -> Result<String, String> {
 }
 
 fn worksheets_dir(vault_root: &Path) -> Result<PathBuf, String> {
-    let internal = vault_root.join(".fanotes");
-    ensure_private_dir(&internal)?;
+    let internal = crate::vault::ensure_internal_directory(vault_root)
+        .map_err(|_| "Der interne Arbeitsblatt-Ordner ist unsicher.".to_owned())?;
     let worksheets = internal.join("worksheets");
     ensure_private_dir(&worksheets)?;
     Ok(worksheets)

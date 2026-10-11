@@ -118,11 +118,13 @@ fn import_in_temp(
     };
     let notebook_name = safe_segment(notebook_source, "OneNote-Notizbuch");
     let note_root = unique_directory(vault, &format!("OneNote – {notebook_name}"))?;
-    let batch = vault.join(".fanotes").join("onenote").join(uuid());
+    let internal = crate::vault::ensure_internal_directory(vault)
+        .map_err(|_| "Der OneNote-Import konnte nicht angelegt werden.".to_owned())?;
+    let batch = internal.join("onenote").join(uuid());
     let attachment_dir = batch.join("attachments");
     fs::create_dir_all(&attachment_dir)
         .map_err(|_| "Der OneNote-Import konnte nicht angelegt werden.".to_owned())?;
-    fs::create_dir_all(vault.join(".fanotes").join("worksheets"))
+    fs::create_dir_all(internal.join("worksheets"))
         .map_err(|_| "Der OneNote-Import konnte nicht angelegt werden.".to_owned())?;
 
     let import_result = (|| {
