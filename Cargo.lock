@@ -1095,8 +1095,10 @@ dependencies = [
 name = "fanotes-host"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
  "fanotes-famd",
  "fanotes-pdf",
+ "filetime",
  "serde",
  "serde_json",
 ]
