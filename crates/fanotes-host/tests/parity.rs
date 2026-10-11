@@ -111,6 +111,17 @@ fn vault_paths_reject_traversal_and_internal_files() {
             .unwrap_err(),
         "Dieser Dateityp ist für die Vorschau nicht erlaubt."
     );
+    assert_eq!(
+        host.dispatch("fanotes:read-asset-data-url", &[json!("Notiz.md")])
+            .unwrap_err(),
+        "Dieser Bildtyp ist für die Vorschau nicht erlaubt."
+    );
+    fs::write(dir.0.join("vault").join("seite.htm"), b"<p>alt</p>").unwrap();
+    assert_eq!(
+        host.dispatch("fanotes:read-asset-bytes", &[json!("seite.htm")])
+            .unwrap_err(),
+        "Dieser Dateityp ist für die Vorschau nicht erlaubt."
+    );
     let link = dir.0.join("vault").join("link.pdf");
     std::os::unix::fs::symlink(dir.0.join("vault").join("seite.pdf"), &link).unwrap();
     assert_eq!(

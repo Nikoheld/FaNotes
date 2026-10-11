@@ -305,7 +305,8 @@ impl Host {
     }
 
     fn read_asset_bytes(&self, relative: &str) -> Result<Value, String> {
-        let mime = asset_mime(relative)?;
+        let mime = asset_mime(relative)
+            .ok_or_else(|| "Dieser Dateityp ist für die Vorschau nicht erlaubt.".to_owned())?;
         let bytes = self.read_asset(relative, asset_limit(mime))?;
         Ok(Value::String(
             base64::engine::general_purpose::STANDARD.encode(bytes),
@@ -313,7 +314,8 @@ impl Host {
     }
 
     fn read_asset_data_url(&self, relative: &str) -> Result<Value, String> {
-        let mime = asset_mime(relative)?;
+        let mime = asset_mime(relative)
+            .ok_or_else(|| "Dieser Bildtyp ist für die Vorschau nicht erlaubt.".to_owned())?;
         let bytes = self.read_asset(relative, asset_limit(mime))?;
         Ok(Value::String(format!(
             "data:{mime};base64,{}",
@@ -1609,24 +1611,24 @@ const MAX_TREE_CACHE_BYTES: u64 = 24 * 1024 * 1024;
 const MAX_TREE_CACHE_ENTRIES: usize = 100_000;
 const MAX_PDF_BITMAP_BYTES: usize = 48 * 1024 * 1024;
 
-fn asset_mime(relative: &str) -> Result<&'static str, String> {
-    let extension = relative
-        .rsplit(['/', '\\'])
-        .next()
-        .unwrap_or(relative)
-        .rsplit('.')
-        .next()
-        .unwrap_or("")
-        .to_ascii_lowercase();
-    match extension.as_str() {
-        "png" => Ok("image/png"),
-        "jpg" | "jpeg" => Ok("image/jpeg"),
-        "webp" => Ok("image/webp"),
-        "gif" => Ok("image/gif"),
-        "svg" => Ok("image/svg+xml"),
-        "pdf" => Ok("application/pdf"),
-        "html" | "htm" => Ok("text/html"),
-        _ => Err("Dieser Dateityp ist für die Vorschau nicht erlaubt.".to_owned()),
+fn asset_mime(relative: &str) -> Option<&'static str> {
+    match preview_extension(relative).as_str() {
+        "png" => Some("image/png"),
+        "jpg" | "jpeg" => Some("image/jpeg"),
+        "webp" => Some("image/webp"),
+        "gif" => Some("image/gif"),
+        "svg" => Some("image/svg+xml"),
+        "pdf" => Some("application/pdf"),
+        "html" => Some("text/html"),
+        _ => None,
+    }
+}
+
+fn preview_extension(relative: &str) -> String {
+    let base = relative.rsplit(['/', '\\']).next().unwrap_or(relative);
+    match base.rfind('.') {
+        Some(dot) if dot > 0 => base[dot + 1..].to_ascii_lowercase(),
+        _ => String::new(),
     }
 }
 
