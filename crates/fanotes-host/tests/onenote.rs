@@ -85,6 +85,45 @@ fn the_sample_notebook_becomes_a_searchable_note() {
     let attachment = fs::read(batch.join("attachments").join(stored)).unwrap();
     assert!(stored.ends_with(".fanotes-attachment"));
     assert_eq!(format!("{:x}", Sha256::digest(&attachment)), digest);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            fs::metadata(batch.join("attachments").join(stored))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
+        let source_name = manifest["originalSources"][0]["storedName"]
+            .as_str()
+            .unwrap();
+        assert_eq!(
+            fs::metadata(batch.join("original").join(source_name))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
+        assert_eq!(
+            fs::metadata(vault.join(result["rootFolder"].as_str().unwrap()))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o700
+        );
+        assert_eq!(
+            fs::metadata(batch.join("attachments"))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o700
+        );
+    }
 
     let archive = vault.parent().unwrap().join("export.zip");
     let seven = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))

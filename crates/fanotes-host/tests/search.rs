@@ -69,6 +69,25 @@ fn search_returns_title_excerpt_and_handwriting_anchor() {
     assert_eq!(ink_hits[0]["relativePath"], "Bio/Blatt.md");
     assert_eq!(ink_hits[0]["inkAnchor"]["y"], 0.42);
 
+    std::fs::write(
+        host.vault.as_ref().unwrap().join("Bio/Blatt.famd"),
+        fanotes_famd::serialize_famd("Die Photosynthese braucht Licht.", &{
+            let mut umlaut = fanotes_famd::empty_famd_payload("2026-10-11T00:00:00.000Z");
+            umlaut.ink = Some(json!({
+                "schemaVersion": 1,
+                "title": "Blatt",
+                "strokes": [],
+                "searchTranscript": "0.42\täpfel"
+            }));
+            umlaut
+        }),
+    )
+    .unwrap();
+    let short = host.dispatch("fanotes:search", &[json!("ä")]).unwrap();
+    assert!(short[0].get("inkAnchor").is_none());
+    let longer = host.dispatch("fanotes:search", &[json!("äp")]).unwrap();
+    assert_eq!(longer[0]["inkAnchor"]["y"], 0.42);
+
     let drawing = json!({
         "schemaVersion": 1,
         "id": "sketch1",
@@ -100,6 +119,165 @@ fn search_returns_title_excerpt_and_handwriting_anchor() {
     assert_eq!(drawing_hit["title"], "Skizze");
     assert_eq!(drawing_hit["notePath"], "Bio/Blatt.md");
     assert_eq!(drawing_hit["inkAnchor"]["y"], 0.2);
+}
+
+#[test]
+fn search_uses_the_companion_transcript_and_both_drawing_ids() {
+    let mut host = host();
+    let vault = host.vault.clone().unwrap();
+    let old = ink_note("Sichtbarer Text", Some("Veraltet"));
+    std::fs::write(vault.join("Bio/Alt.md"), old).unwrap();
+    std::fs::write(
+        vault.join("Bio/Alt.famd"),
+        ink_note("Sichtbarer Text", Some("Aktuell")),
+    )
+    .unwrap();
+    std::fs::write(
+        vault.join("Bio/Keep.md"),
+        ink_note("Notiz", Some("Behalten")),
+    )
+    .unwrap();
+    std::fs::write(vault.join("Bio/Keep.famd"), ink_note("Notiz", None)).unwrap();
+
+    assert!(host
+        .dispatch("fanotes:search", &[json!("Veraltet")])
+        .unwrap()
+        .as_array()
+        .unwrap()
+        .is_empty());
+    assert_eq!(
+        host.dispatch("fanotes:search", &[json!("Aktuell")])
+            .unwrap()[0]["relativePath"],
+        "Bio/Alt.md"
+    );
+    assert_eq!(
+        host.dispatch("fanotes:search", &[json!("Behalten")])
+            .unwrap()[0]["relativePath"],
+        "Bio/Keep.md"
+    );
+
+    std::fs::write(
+        vault.join("Bio/Blatt.md"),
+        "Siehe fanotes-ink:prose\n\n<!-- fanotes-ink:marker1 -->\n",
+    )
+    .unwrap();
+    std::fs::write(
+        vault.join("Bio/Blatt.famd"),
+        ink_with_id("library1", "0.50\tTinte"),
+    )
+    .unwrap();
+    let assets = vault.join(".fanotes/assets");
+    std::fs::create_dir_all(&assets).unwrap();
+    for (id, transcript) in [
+        ("prose", "0.10\tProsewort"),
+        ("marker1", "0.20\tMarkerwort"),
+        ("library1", "0.30\tLibrarywort"),
+    ] {
+        std::fs::write(
+            assets.join(format!("{id}.json")),
+            serde_json::to_string(&json!({
+                "schemaVersion": 1,
+                "id": id,
+                "title": id,
+                "strokes": [],
+                "updatedAt": "2026-10-11T00:00:00.000Z",
+                "searchTranscript": transcript
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+    }
+
+    let prose = drawing_hit(&mut host, "Prosewort");
+    assert!(prose.get("notePath").is_none());
+    assert_eq!(
+        drawing_hit(&mut host, "Markerwort")["notePath"],
+        "Bio/Blatt.md"
+    );
+    assert_eq!(
+        drawing_hit(&mut host, "Librarywort")["notePath"],
+        "Bio/Blatt.md"
+    );
+}
+
+fn ink_note(body: &str, transcript: Option<&str>) -> String {
+    let mut payload = fanotes_famd::empty_famd_payload("2026-10-11T00:00:00.000Z");
+    payload.ink = Some(match transcript {
+        Some(transcript) => json!({
+            "schemaVersion": 1,
+            "title": "Blatt",
+            "strokes": [],
+            "searchTranscript": transcript
+        }),
+        None => json!({
+            "schemaVersion": 1,
+            "title": "Blatt",
+            "strokes": []
+        }),
+    });
+    fanotes_famd::serialize_famd(body, &payload)
+}
+
+fn ink_with_id(id: &str, transcript: &str) -> String {
+    let mut payload = fanotes_famd::empty_famd_payload("2026-10-11T00:00:00.000Z");
+    payload.ink = Some(json!({
+        "schemaVersion": 1,
+        "id": id,
+        "title": "Blatt",
+        "strokes": [],
+        "searchTranscript": transcript
+    }));
+    fanotes_famd::serialize_famd("Siehe fanotes-ink:prose", &payload)
+}
+
+fn drawing_hit(host: &mut Host, query: &str) -> serde_json::Value {
+    host.dispatch("fanotes:search", &[json!(query)])
+        .unwrap()
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|hit| hit["kind"] == "drawing")
+        .cloned()
+        .unwrap()
+}
+
+#[test]
+fn drawing_search_uses_the_library_title_and_skips_invalid_files() {
+    let mut host = host();
+    let assets = host.vault.as_ref().unwrap().join(".fanotes/assets");
+    std::fs::create_dir_all(&assets).unwrap();
+    std::fs::write(
+        assets.join("padded.json"),
+        r#"{"schemaVersion":1,"title":"  Skizze  ","strokes":[],"updatedAt":"2026-10-11T00:00:00.000Z","searchTranscript":"0.20\tBaumkrone"}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        assets.join("broken.json"),
+        r#"{"schemaVersion":2,"title":"Geheim","searchTranscript":"Verborgen"}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        assets.join("newline.json"),
+        "{\"schemaVersion\":1,\"title\":\"\\nGeheim\",\"strokes\":[],\"updatedAt\":\"2026-10-11T00:00:00.000Z\",\"searchTranscript\":\"0.20\\tZeilenumbruch\"}",
+    )
+    .unwrap();
+
+    let hits = host
+        .dispatch("fanotes:search", &[json!("Baumkrone")])
+        .unwrap();
+    assert_eq!(hits.as_array().unwrap().len(), 1);
+    assert_eq!(hits[0]["title"], "Skizze");
+    assert_eq!(hits[0]["drawingId"], "padded");
+    assert_eq!(hits[0]["kind"], "drawing");
+
+    let hidden = host
+        .dispatch("fanotes:search", &[json!("Verborgen")])
+        .unwrap();
+    assert!(hidden.as_array().unwrap().is_empty());
+    let newline = host
+        .dispatch("fanotes:search", &[json!("Zeilenumbruch")])
+        .unwrap();
+    assert!(newline.as_array().unwrap().is_empty());
 }
 
 #[test]
@@ -149,4 +327,78 @@ fn search_skips_companions_links_and_notes_buried_too_deep() {
         .dispatch("fanotes:search", &[json!("Vergraben")])
         .unwrap();
     assert!(buried.as_array().unwrap().is_empty());
+}
+
+#[test]
+fn search_excerpt_follows_a_case_fold_that_grows() {
+    let mut host = host();
+    let body = format!("{}Zielwort am Ende.\n", "İ".repeat(120));
+    host.dispatch(
+        "fanotes:write-file",
+        &[json!("Bio/Istanbul.md"), json!(body)],
+    )
+    .unwrap();
+    let hits = host
+        .dispatch("fanotes:search", &[json!("Zielwort")])
+        .unwrap();
+    assert_eq!(hits[0]["relativePath"], "Bio/Istanbul.md");
+    let excerpt = hits[0]["excerpt"].as_str().unwrap();
+    assert!(excerpt.contains("Zielwort"), "{excerpt}");
+}
+
+#[test]
+fn a_search_excerpt_keeps_95_characters_before_the_match() {
+    let mut host = host();
+    let body = format!("{}Zielwort am Ende.\n", "Ä".repeat(100));
+    host.dispatch("fanotes:write-file", &[json!("Bio/Umlaut.md"), json!(body)])
+        .unwrap();
+    let hits = host
+        .dispatch("fanotes:search", &[json!("Zielwort")])
+        .unwrap();
+    let excerpt = hits[0]["excerpt"].as_str().unwrap();
+    assert!(excerpt.starts_with('…'), "{excerpt}");
+    assert!(excerpt.contains("Zielwort"), "{excerpt}");
+    assert_eq!(
+        excerpt
+            .chars()
+            .filter(|character| *character == 'Ä')
+            .count(),
+        95
+    );
+}
+
+#[test]
+fn equal_search_hits_follow_german_dictionary_order() {
+    let mut host = host();
+    for name in ["Seite 2", "Seite 10", "Apfel", "Äpfel", "Strasse", "Straße"] {
+        host.dispatch(
+            "fanotes:write-file",
+            &[json!(format!("Bio/{name}.md")), json!("Licht\n")],
+        )
+        .unwrap();
+    }
+    let hits = host.dispatch("fanotes:search", &[json!("Licht")]).unwrap();
+    let titles: Vec<_> = hits
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|hit| hit["title"].as_str().unwrap().to_owned())
+        .collect();
+    assert_eq!(
+        titles,
+        vec!["Apfel", "Äpfel", "Seite 10", "Seite 2", "Strasse", "Straße"]
+    );
+}
+
+#[test]
+fn a_search_query_stops_at_500_utf16_units() {
+    let mut host = host();
+    host.dispatch(
+        "fanotes:write-file",
+        &[json!("Bio/Emoji.md"), json!("Nur das letzte Zeichen.\n")],
+    )
+    .unwrap();
+    let query = format!("{}Zeichen", "😀".repeat(250));
+    let hits = host.dispatch("fanotes:search", &[json!(query)]).unwrap();
+    assert!(hits.as_array().unwrap().is_empty());
 }

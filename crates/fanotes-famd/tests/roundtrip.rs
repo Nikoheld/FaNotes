@@ -1,6 +1,7 @@
 use fanotes_famd::{
-    companion_note_path, empty_famd_payload, parse_famd, serialize_famd, strip_famd_payload,
-    worksheet_ids_from_markdown, FamdPayload, NoteBackup, NoteLink,
+    companion_note_path, empty_famd_payload, parse_famd, parse_note_backups, parse_note_links,
+    serialize_famd, strip_famd_payload, worksheet_ids_from_markdown, FamdPayload, NoteBackup,
+    NoteLink,
 };
 use serde_json::json;
 
@@ -80,4 +81,25 @@ fn check_famd_roundtrip_matches_the_electron_codec() {
 
     let poisoned = format!("{encoded}\n<!-- fanotes-famd:v1 chars=2 -->\n{{}}");
     assert!(parse_famd(&poisoned).payload.is_none());
+}
+
+#[test]
+fn note_text_stops_at_js_character_limits() {
+    let links = parse_note_links(&json!([{
+        "id": "nl-emoji",
+        "sourcePath": "A.md",
+        "targetPath": "B.md",
+        "label": "😀".repeat(41),
+    }]));
+    assert_eq!(links[0].label, "😀".repeat(40));
+    assert_eq!(links[0].label.encode_utf16().count(), 80);
+
+    let exact = "😀".repeat(1_048_576);
+    let backups = parse_note_backups(&json!([{
+        "id": "nb-emoji",
+        "notePath": "A.md",
+        "content": format!("{exact}😀"),
+    }]));
+    assert_eq!(backups[0].content, exact);
+    assert_eq!(backups[0].content.encode_utf16().count(), 2 * 1024 * 1024);
 }

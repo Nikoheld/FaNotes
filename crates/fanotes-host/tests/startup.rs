@@ -178,6 +178,35 @@ fn an_electron_profile_supplies_the_vault_and_settings() {
 }
 
 #[test]
+fn a_long_unicode_vault_path_is_remembered() {
+    let dir = scratch();
+    let legacy = dir.join("Lernwerk Notes");
+    fs::create_dir_all(&legacy).unwrap();
+    let vault = format!("/Notizen/{}", "Ä".repeat(3000));
+    assert!(vault.len() > 4096);
+    assert!(vault.encode_utf16().count() <= 4096);
+    fs::write(
+        legacy.join("config.json"),
+        json!({ "version": 3, "vaultPath": vault }).to_string(),
+    )
+    .unwrap();
+    let app = dir.join("app");
+    let _host = Host::open(app.clone());
+    let stored = fs::read_to_string(app.join("vault-path")).unwrap();
+    assert_eq!(stored.trim(), vault);
+
+    let other = dir.join("other-app");
+    let too_long = format!("/{}/", "Ä".repeat(4096));
+    fs::write(
+        legacy.join("config.json"),
+        json!({ "version": 3, "vaultPath": too_long }).to_string(),
+    )
+    .unwrap();
+    let _again = Host::open(other.clone());
+    assert!(!other.join("vault-path").exists());
+}
+
+#[test]
 fn a_reset_profile_does_not_import_the_electron_config_again() {
     let dir = scratch();
     let app = dir.join("app");
@@ -234,4 +263,83 @@ fn reopening_a_linked_vault_uses_the_real_folder_and_refreshes_the_welcome_note(
         .unwrap()
         .iter()
         .any(|entry| entry["name"] == "Mathe"));
+}
+
+#[test]
+fn optional_recognition_models_stay_uninstalled_with_the_renderer_shape() {
+    let dir = scratch();
+    let mut host = Host::open(dir.join("app"));
+    let math = host
+        .dispatch("fanotes:enhanced-math-get-state", &[])
+        .unwrap();
+    assert_eq!(math["supported"], false);
+    assert_eq!(math["installed"], false);
+    assert_eq!(math["downloading"], false);
+    assert_eq!(math["modelId"], "posformer-crohme-q4-k");
+    assert_eq!(math["size"], 10_316_032);
+    assert_eq!(math["license"], "CC-BY-NC-SA-3.0");
+    assert_eq!(
+        math["homepage"],
+        "https://huggingface.co/cstr/posformer-crohme-GGUF"
+    );
+    assert_eq!(
+        host.dispatch(
+            "fanotes:enhanced-math-install",
+            &[json!({ "acceptLicense": true })]
+        )
+        .unwrap_err(),
+        "PosFormer ist nicht installiert."
+    );
+    assert_eq!(
+        host.dispatch("fanotes:enhanced-math-recognize", &[json!({})])
+            .unwrap_err(),
+        "PosFormer ist nicht installiert."
+    );
+
+    let qwen = host.dispatch("fanotes:qwen-vision-get-state", &[]).unwrap();
+    assert_eq!(qwen["supported"], false);
+    assert_eq!(qwen["installed"], false);
+    assert_eq!(qwen["downloading"], false);
+    assert_eq!(qwen["runtimeInstalling"], false);
+    assert_eq!(qwen["runtimeReady"], false);
+    assert_eq!(qwen["runtimePhase"], "idle");
+    assert!(qwen["runtimeMessage"].is_null());
+    assert_eq!(qwen["npu"], false);
+    assert_eq!(qwen["genai"], false);
+    assert_eq!(qwen["devices"], json!([]));
+    assert!(qwen["npuDevice"].is_null());
+    assert!(qwen["host"].is_null());
+    assert!(qwen["openvinoVersion"].is_null());
+    assert_eq!(qwen["modelId"], "qwen3-vl-2b-int4-npu");
+    assert_eq!(
+        qwen["label"],
+        "Empfohlen · Qwen3-VL 2B · OpenVINO INT4 · NPU"
+    );
+    assert_eq!(qwen["recommended"], true);
+    assert_eq!(qwen["precision"], "int4");
+    assert_eq!(qwen["device"], "NPU");
+    assert_eq!(qwen["license"], "Apache-2.0");
+    assert_eq!(
+        qwen["homepage"],
+        "https://huggingface.co/Qwen/Qwen3-VL-2B-Instruct"
+    );
+    assert_eq!(qwen["repo"], "shawnxhong/Qwen3-VL-2B-Instruct-ov-int4");
+    assert_eq!(
+        qwen["error"],
+        "Qwen Vision ist in diesem Paket nicht enthalten."
+    );
+    assert!(qwen["installHint"].is_null());
+    assert_eq!(
+        host.dispatch(
+            "fanotes:qwen-vision-install",
+            &[json!({ "acceptLicense": true })]
+        )
+        .unwrap_err(),
+        "Qwen Vision ist nicht installiert."
+    );
+    assert_eq!(
+        host.dispatch("fanotes:qwen-vision-recognize", &[json!({})])
+            .unwrap_err(),
+        "Qwen Vision ist nicht installiert."
+    );
 }
