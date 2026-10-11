@@ -35,7 +35,7 @@ pub fn list_lm_studio(base_url: &str, api_token: &str) -> Result<Value, String> 
     let connection = json!({
         "provider": "lmstudio",
         "baseUrl": origin,
-        "apiKey": api_token,
+        "apiKey": clean_lm_studio_token(api_token)?,
         "model": "",
     });
     list_provider(&connection)
@@ -160,7 +160,7 @@ pub fn transform_lm_studio(payload: &Value) -> Result<Value, String> {
     let connection = json!({
         "provider": "lmstudio",
         "baseUrl": origin,
-        "apiKey": object.get("apiToken").and_then(Value::as_str).unwrap_or(""),
+        "apiKey": clean_lm_studio_token(object.get("apiToken").and_then(Value::as_str).unwrap_or(""))?,
     });
     let temperature = if actions.iter().any(|action| action == "facts") {
         0.05
@@ -982,7 +982,7 @@ fn request_json(
         .http_status_as_error(false)
         .build()
         .into();
-    let headers = auth_headers(connection);
+    let headers = auth_headers(connection)?;
     let request = if method == "POST" {
         let body = body.unwrap_or(Value::Null);
         let mut request = agent.post(url).header("Accept", "application/json");
@@ -1066,34 +1066,83 @@ fn http_error_detail(data: &Value) -> Option<String> {
         .map(str::to_owned)
 }
 
-fn auth_headers(connection: &Value) -> Vec<(String, String)> {
+fn auth_headers(connection: &Value) -> Result<Vec<(String, String)>, String> {
     let provider = connection
         .get("provider")
         .and_then(Value::as_str)
         .unwrap_or("");
-    let key = connection
-        .get("apiKey")
-        .and_then(Value::as_str)
-        .unwrap_or("");
+    let label = if provider == "opencode" {
+        "OpenCode-Passwort"
+    } else {
+        "API-Schlüssel"
+    };
+    let key = clean_secret(
+        connection
+            .get("apiKey")
+            .and_then(Value::as_str)
+            .unwrap_or(""),
+        label,
+    )?;
     if key.is_empty() {
-        return Vec::new();
+        return Ok(Vec::new());
     }
     match provider {
-        "gemini" => vec![("x-goog-api-key".to_owned(), key.to_owned())],
-        "anthropic" => vec![
-            ("x-api-key".to_owned(), key.to_owned()),
+        "gemini" => Ok(vec![("x-goog-api-key".to_owned(), key)]),
+        "anthropic" => Ok(vec![
+            ("x-api-key".to_owned(), key),
             ("anthropic-version".to_owned(), "2023-06-01".to_owned()),
-        ],
+        ]),
         "opencode" => {
-            let user = connection
-                .get("username")
-                .and_then(Value::as_str)
-                .filter(|value| !value.is_empty())
-                .unwrap_or("opencode");
+            let user = opencode_username(connection.get("username").and_then(Value::as_str));
             let token = base64::engine::general_purpose::STANDARD.encode(format!("{user}:{key}"));
-            vec![("Authorization".to_owned(), format!("Basic {token}"))]
+            Ok(vec![("Authorization".to_owned(), format!("Basic {token}"))])
         }
-        _ => vec![("Authorization".to_owned(), format!("Bearer {key}"))],
+        _ => Ok(vec![("Authorization".to_owned(), format!("Bearer {key}"))]),
+    }
+}
+
+fn clean_secret(value: &str, label: &str) -> Result<String, String> {
+    if value.is_empty() {
+        return Ok(String::new());
+    }
+    if crate::vault::utf16_len(value) > 4096
+        || value
+            .chars()
+            .any(|character| matches!(character, '\0' | '\r' | '\n'))
+    {
+        return Err(format!("Der {label} ist ungültig."));
+    }
+    Ok(value.trim().to_owned())
+}
+
+fn clean_lm_studio_token(value: &str) -> Result<String, String> {
+    if value.is_empty() {
+        return Ok(String::new());
+    }
+    if crate::vault::utf16_len(value) > 4096
+        || value
+            .chars()
+            .any(|character| matches!(character, '\0' | '\r' | '\n'))
+    {
+        return Err("Das LM-Studio-API-Token ist ungültig.".to_owned());
+    }
+    Ok(value.trim().to_owned())
+}
+
+fn opencode_username(value: Option<&str>) -> String {
+    let Some(value) = value else {
+        return "opencode".to_owned();
+    };
+    let trimmed = value.trim();
+    if trimmed.is_empty()
+        || crate::vault::utf16_len(value) > 200
+        || value
+            .chars()
+            .any(|character| matches!(character, '\0' | '\r' | '\n' | ':'))
+    {
+        "opencode".to_owned()
+    } else {
+        trimmed.to_owned()
     }
 }
 
@@ -1214,10 +1263,13 @@ fn origin(connection: &Value, provider: &str) -> Result<String, String> {
 }
 
 fn require_key(connection: &Value) -> Result<(), String> {
-    let key = connection
-        .get("apiKey")
-        .and_then(Value::as_str)
-        .unwrap_or("");
+    let key = clean_secret(
+        connection
+            .get("apiKey")
+            .and_then(Value::as_str)
+            .unwrap_or(""),
+        "API-Schlüssel",
+    )?;
     if key.is_empty() {
         Err("Gib zuerst den API-Schlüssel dieses Anbieters ein.".to_owned())
     } else {
@@ -1235,15 +1287,16 @@ fn required_model(value: &Value) -> Result<String, String> {
                 .and_then(|connection| connection.get("model"))
                 .and_then(Value::as_str)
         })
-        .unwrap_or("")
-        .trim();
-    if model.is_empty()
+        .unwrap_or("");
+    if model.trim().is_empty()
         || crate::vault::utf16_len(model) > 500
-        || model.chars().any(|character| character.is_control())
+        || model
+            .chars()
+            .any(|character| matches!(character, '\0' | '\r' | '\n'))
     {
         Err("Wähle zuerst ein gültiges AI-Modell.".to_owned())
     } else {
-        Ok(model.to_owned())
+        Ok(model.trim().to_owned())
     }
 }
 
@@ -1439,7 +1492,57 @@ mod tests {
         parse_gemini_models, parse_lmstudio_models, parse_ollama_models, parse_openai_models,
         provider_http_error, unwrap_markdown,
     };
+    use base64::Engine;
     use serde_json::json;
+
+    #[test]
+    fn opencode_login_and_model_names_follow_the_desktop_rules() {
+        let headers = super::auth_headers(&json!({
+            "provider": "opencode",
+            "apiKey": "  geheim  ",
+            "username": "  ada  "
+        }))
+        .unwrap();
+        let token = base64::engine::general_purpose::STANDARD.encode("ada:geheim");
+        assert_eq!(headers[0].1, format!("Basic {token}"));
+
+        let fallback = super::auth_headers(&json!({
+            "provider": "opencode",
+            "apiKey": "geheim",
+            "username": format!("a:{}", "Ä".repeat(100))
+        }))
+        .unwrap();
+        let token = base64::engine::general_purpose::STANDARD.encode("opencode:geheim");
+        assert_eq!(fallback[0].1, format!("Basic {token}"));
+
+        let kept = super::opencode_username(Some(&"Ä".repeat(200)));
+        assert_eq!(kept, "Ä".repeat(200));
+        assert_eq!(super::opencode_username(Some(&"Ä".repeat(201))), "opencode");
+        assert_eq!(super::opencode_username(Some(&"😀".repeat(101))), "opencode");
+
+        assert!(super::auth_headers(&json!({
+            "provider": "openai",
+            "apiKey": "sk\nlive"
+        }))
+        .unwrap_err()
+        .contains("API-Schlüssel"));
+        assert_eq!(super::clean_lm_studio_token("  token  ").unwrap(), "token");
+        assert!(super::clean_lm_studio_token("token\r").is_err());
+
+        assert_eq!(
+            super::required_model(&json!({ "model": "gpt\t4" })).unwrap(),
+            "gpt\t4"
+        );
+        assert!(super::required_model(&json!({ "model": "gpt\n4" })).is_err());
+        let padded = format!(" {}", "Ä".repeat(499));
+        assert_eq!(
+            super::required_model(&json!({ "model": padded })).unwrap(),
+            "Ä".repeat(499)
+        );
+        assert!(
+            super::required_model(&json!({ "model": format!(" {}", "a".repeat(500)) })).is_err()
+        );
+    }
 
     #[test]
     fn a_free_instruction_stops_at_12000_utf16_units() {
