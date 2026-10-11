@@ -1312,6 +1312,13 @@ impl Host {
     }
 
     fn update_state(&self) -> Value {
+        let enabled = |key| self.settings.get(key).and_then(Value::as_bool) != Some(false);
+        let channel = if self.settings.get("updateChannel").and_then(Value::as_str) == Some("beta")
+        {
+            "beta"
+        } else {
+            "stable"
+        };
         json!({
             "status": "idle",
             "supported": false,
@@ -1325,11 +1332,11 @@ impl Host {
             "error": null,
             "block": null,
             "checkedAt": null,
-            "installationKind": "managed-appimage",
-            "autoCheckUpdates": true,
-            "autoDownloadUpdates": false,
-            "installUpdatesOnQuit": false,
-            "updateChannel": "stable",
+            "installationKind": installation_kind(),
+            "autoCheckUpdates": enabled("autoCheckUpdates"),
+            "autoDownloadUpdates": enabled("autoDownloadUpdates"),
+            "installUpdatesOnQuit": enabled("installUpdatesOnQuit"),
+            "updateChannel": channel,
             "releaseHost": "electron"
         })
     }
@@ -1642,7 +1649,21 @@ fn arg_string(args: &[Value], index: usize) -> Result<String, String> {
 }
 
 fn default_settings() -> Map<String, Value> {
-    settings::defaults()
+    let mut settings = settings::defaults();
+    if settings::is_beta_release(APP_VERSION) {
+        settings.insert("updateChannel".to_owned(), Value::String("beta".to_owned()));
+    }
+    settings
+}
+
+fn installation_kind() -> &'static str {
+    if cfg!(windows) {
+        "windows-installer"
+    } else if std::env::var_os("APPIMAGE").is_some_and(|value| !value.is_empty()) {
+        "appimage"
+    } else {
+        "managed-appimage"
+    }
 }
 
 fn enhanced_math_state() -> Value {

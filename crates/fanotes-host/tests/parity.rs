@@ -226,6 +226,26 @@ fn updater_does_not_replace_the_electron_release() {
     assert_eq!(state["supported"], false);
     assert_eq!(state["releaseHost"], "electron");
     assert_eq!(state["status"], "idle");
+    assert_eq!(state["autoDownloadUpdates"], true);
+    assert_eq!(state["installUpdatesOnQuit"], true);
+    assert_eq!(state["updateChannel"], "stable");
+    assert_eq!(state["installationKind"], "managed-appimage");
+    host.dispatch(
+        "fanotes:save-settings",
+        &[json!({
+            "autoCheckUpdates": false,
+            "autoDownloadUpdates": false,
+            "installUpdatesOnQuit": false,
+            "updateChannel": "beta"
+        })],
+    )
+    .unwrap();
+    let state = host.dispatch("fanotes:update-get-state", &[]).unwrap();
+    assert_eq!(state["autoCheckUpdates"], false);
+    assert_eq!(state["autoDownloadUpdates"], false);
+    assert_eq!(state["installUpdatesOnQuit"], false);
+    assert_eq!(state["updateChannel"], "beta");
+    assert_eq!(state["supported"], false);
 }
 
 #[test]

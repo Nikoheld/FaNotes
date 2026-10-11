@@ -23,6 +23,14 @@ const TABLET_IDS: &[&str] = &[
 ];
 const TABLET_ACTIONS: &[&str] = &["ink", "eraser", "undo", "redo", "pan", "none", "os"];
 
+/// Matches `/-beta\.\d+$/` on the desktop app version.
+pub(crate) fn is_beta_release(version: &str) -> bool {
+    let Some((_, suffix)) = version.rsplit_once("-beta.") else {
+        return false;
+    };
+    !suffix.is_empty() && suffix.bytes().all(|byte| byte.is_ascii_digit())
+}
+
 pub(crate) fn defaults() -> Map<String, Value> {
     json!({
         "uiLanguage": "system",
@@ -496,6 +504,20 @@ fn hex_escape_pattern() -> &'static regex::Regex {
     PATTERN.get_or_init(|| {
         regex::Regex::new(r"(?i)\\[0-9a-f]{1,6}\s?").expect("css hex escape pattern")
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_beta_release;
+
+    #[test]
+    fn a_beta_version_selects_the_beta_update_channel() {
+        assert!(is_beta_release("2026.10.2-beta.1"));
+        assert!(is_beta_release("1.0.0-beta.12"));
+        assert!(!is_beta_release("2026.10.2"));
+        assert!(!is_beta_release("2026.10.2-beta."));
+        assert!(!is_beta_release("2026.10.2-beta.1a"));
+    }
 }
 
 fn dangerous_css_pattern() -> &'static regex::Regex {
