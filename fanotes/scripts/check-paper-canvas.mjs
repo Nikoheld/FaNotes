@@ -21,6 +21,8 @@ const {
 } = await server.ssrLoadModule('/src/lib/paperCanvas.ts')
 const { SCROLL_ROOM } = await server.ssrLoadModule('/src/lib/noteCanvas.ts')
 const { paintMarkdownNoteStiftStroke } = await server.ssrLoadModule('/src/lib/inkStrokePaint.ts')
+const { viewportRasterEnabled } = await server.ssrLoadModule('/src/lib/viewportRasterFlag.ts')
+const viewportRaster = viewportRasterEnabled() ? await server.ssrLoadModule('/src/lib/viewportRaster.ts') : null
 
 const runOnce = () => {
   const page = { width: 900, height: 1273 }
@@ -93,9 +95,10 @@ const runOnce = () => {
   const right = growSheetFromInk(0.94, 0.5, 900, 1273)
   assert.ok(right.width > 900, 'writing at the right still grows the page')
 
-  const painted = paintMarkdownNoteStiftStroke({
+  const pageStroke = (rasterize) => paintMarkdownNoteStiftStroke({
     overlay: { left: 40, top: 24, width: 0, height: 0 },
     paper: page,
+    rasterize,
     events: [
       { type: 'pointerdown', clientX: 0, clientY: 0, pressure: 0, pointerType: 'pen', timeStamp: 0 },
       { type: 'pointerdown', clientX: 40 + 0.22 * 900, clientY: 24 + 0.28 * 1273, pressure: 0.55, pointerType: 'pen', timeStamp: 16 },
@@ -104,12 +107,25 @@ const runOnce = () => {
       { type: 'pointermove', clientX: 40 + 0.44 * 900, clientY: 24 + 0.47 * 1273, pressure: 0.55, pointerType: 'pen', timeStamp: 64 },
     ],
   })
-  assert.ok(painted.overlayWidth >= layout.scroll.width - 1, `overlay must cover extra paper, got ${painted.overlayWidth}`)
-  assert.ok(painted.bitmapWidth >= 8 && painted.bitmapHeight >= 8)
-  assert.ok(painted.points >= 3, `mapped page stroke must keep real samples, got ${painted.points}`)
-  assert.ok(painted.opaque > 0, `page-covering overlay still paints on the page (${painted.opaque})`)
-  assert.ok(painted.area >= 16, `stroke bounding box must be a visible line, got ${painted.boxW}x${painted.boxH}`)
-  assert.ok(painted.boxW >= 4 && painted.boxH >= 4)
+  const assertPagePaint = (painted, label) => {
+    assert.ok(painted.overlayWidth >= layout.scroll.width - 1, `${label}: overlay must cover extra paper, got ${painted.overlayWidth}`)
+    assert.ok(painted.bitmapWidth >= 8 && painted.bitmapHeight >= 8)
+    assert.ok(painted.points >= 3, `${label}: mapped page stroke must keep real samples, got ${painted.points}`)
+    assert.ok(painted.opaque > 0, `${label}: page-covering overlay still paints on the page (${painted.opaque})`)
+    assert.ok(painted.area >= 16, `${label}: stroke bounding box must be a visible line, got ${painted.boxW}x${painted.boxH}`)
+    assert.ok(painted.boxW >= 4 && painted.boxH >= 4)
+  }
+  const painted = pageStroke()
+  assertPagePaint(painted, 'canvas')
+  // Flag on: the same page-covering overlay, painted by the Rust viewport raster.
+  const rasterPainted = viewportRaster
+    ? pageStroke((stroke, width, height, layoutWidth) => viewportRaster.rasterizeInkStrokes([stroke], width, height, { layoutWidth }))
+    : null
+  if (rasterPainted) {
+    assertPagePaint(rasterPainted, 'viewport raster')
+    assert.equal(rasterPainted.points, painted.points)
+    assert.ok(Math.abs(rasterPainted.boxW - painted.boxW) <= 4 && Math.abs(rasterPainted.boxH - painted.boxH) <= 4)
+  }
 
   const css = readFileSync(join(root, 'src/styles.css'), 'utf8')
   const board = readFileSync(join(root, 'src/components/DrawingBoard.tsx'), 'utf8')
@@ -125,6 +141,7 @@ const runOnce = () => {
     opaque: painted.opaque,
     leftPad: leftGrow.padX,
     downH: down.height,
+    ...(rasterPainted ? { rasterOpaque: rasterPainted.opaque } : {}),
   }
 }
 

@@ -876,7 +876,7 @@ export const createInkReadbackContext = (width: number, height: number): InkRead
   }
 }
 
-export const opaqueInkStats = (image: ImageData, minAlpha = 24) => {
+export const opaqueInkStats = (image: Pick<ImageData, 'width' | 'height' | 'data'>, minAlpha = 24) => {
   let opaque = 0
   let minX = image.width
   let minY = image.height
@@ -922,15 +922,25 @@ const emptyInkSample = (): VisibleInkSample => ({
   area: 0,
 })
 
+/** Paints one stroke into a `width` × `height` bitmap and returns its pixels (the viewport raster in checks). */
+export type InkStrokeRasterizer = (
+  stroke: InkPaintStroke,
+  width: number,
+  height: number,
+  layoutWidth: number,
+) => Pick<ImageData, 'width' | 'height' | 'data'>
+
 /**
  * Same hit-size + map + paint path DrawingBoard uses on a markdown note.
  * Overlay covers extra paper; 0–1 map and paint stay on the write page.
+ * `rasterize` swaps the canvas paint for another painter on the same samples.
  */
 export const paintMarkdownNoteStiftStroke = (input: {
   overlay: { left: number; top: number; width: number; height: number }
   paper: { width: number; height: number }
   plane?: { width: number; height: number }
   events: InkPointerLike[]
+  rasterize?: InkStrokeRasterizer
 }): VisibleInkSample & {
   page: { left: number; top: number; width: number; height: number }
   samples: Array<{ y: number; paintedY: number; pointerY: number }>
@@ -957,26 +967,33 @@ export const paintMarkdownNoteStiftStroke = (input: {
       samples,
     }
   }
-  const { context, getImageData } = createInkReadbackContext(paintW, paintH)
-  drawInkStroke(
-    context,
-    {
-      points,
-      baseWidth: 3.5,
-      pressureEnabled: true,
-      color: '#202333',
-      purpose: 'handwriting',
-      brush: 'fineliner',
-      colorEffect: 'solid',
-      opacity: 1,
-    },
-    paintW,
-    paintH,
-    0,
-    1,
-    paintW,
-    paintW,
-  )
+  const stroke: InkPaintStroke = {
+    points,
+    baseWidth: 3.5,
+    pressureEnabled: true,
+    color: '#202333',
+    purpose: 'handwriting',
+    brush: 'fineliner',
+    colorEffect: 'solid',
+    opacity: 1,
+  }
+  let image: Pick<ImageData, 'width' | 'height' | 'data'>
+  if (input.rasterize) {
+    image = input.rasterize(stroke, paintW, paintH, paintW)
+  } else {
+    const { context, getImageData } = createInkReadbackContext(paintW, paintH)
+    drawInkStroke(
+      context,
+      stroke,
+      paintW,
+      paintH,
+      0,
+      1,
+      paintW,
+      paintW,
+    )
+    image = getImageData()
+  }
   return {
     overlayWidth: overlaySize.width,
     overlayHeight: overlaySize.height,
@@ -985,7 +1002,7 @@ export const paintMarkdownNoteStiftStroke = (input: {
     points: points.length,
     page,
     samples,
-    ...opaqueInkStats(getImageData()),
+    ...opaqueInkStats(image),
   }
 }
 
@@ -994,7 +1011,7 @@ export const paintMarkdownNoteStiftStroke = (input: {
  * read the pixels back. A ghost 0,0 down must not swallow the real stroke.
  * Overlay starts at 0×0 — the Linux report path — and must still paint.
  */
-export const paintVisibleInkSample = (): VisibleInkSample => {
+export const paintVisibleInkSample = (rasterize?: InkStrokeRasterizer): VisibleInkSample => {
   const paper = { width: 900, height: 1273 }
   const overlay = { left: 40, top: 24, width: 0, height: 0 }
   const at = (nx: number, ny: number, timeStamp: number, type = 'pointermove') => ({
@@ -1008,6 +1025,7 @@ export const paintVisibleInkSample = (): VisibleInkSample => {
   return paintMarkdownNoteStiftStroke({
     overlay,
     paper,
+    rasterize,
     events: [
       { type: 'pointerdown', clientX: 0, clientY: 0, pressure: 0, pointerType: 'pen', timeStamp: 0 },
       at(0.22, 0.28, 16, 'pointerdown'),
