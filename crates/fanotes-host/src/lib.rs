@@ -2100,12 +2100,17 @@ fn http_link(raw: &str) -> Result<String, String> {
     if raw.is_empty() || vault::utf16_len(raw) > 4096 {
         return Err("Ungültiger externer Link.".to_owned());
     }
-    let parsed = url::Url::parse(raw).map_err(|_| "Ungültiger externer Link.".to_owned())?;
+    let mut parsed = url::Url::parse(raw).map_err(|_| "Ungültiger externer Link.".to_owned())?;
+    let password = parsed.password().unwrap_or("");
     if !matches!(parsed.scheme(), "http" | "https")
         || !parsed.username().is_empty()
-        || parsed.password().is_some()
+        || !password.is_empty()
     {
         return Err("Nur sichere HTTP(S)-Links ohne Zugangsdaten sind erlaubt.".to_owned());
+    }
+    // An empty password is falsy in the desktop check, and `href` drops it.
+    if parsed.password().is_some() {
+        let _ = parsed.set_password(None);
     }
     Ok(parsed.to_string())
 }
