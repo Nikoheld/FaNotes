@@ -180,6 +180,13 @@ pub(crate) fn has_c0_or_del(value: &str) -> bool {
     value.chars().any(is_c0_or_del)
 }
 
+/// JavaScript `String.prototype.trim`.
+///
+/// U+FEFF is removed. U+0085 is kept. Rust `str::trim` does the reverse.
+pub(crate) fn js_trim(value: &str) -> &str {
+    fanotes_famd::trim_js(value)
+}
+
 pub(crate) fn truncate_utf16(value: &str, max: usize) -> String {
     let mut units = 0;
     let mut end = 0;

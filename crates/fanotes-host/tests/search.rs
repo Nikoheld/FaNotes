@@ -459,3 +459,24 @@ fn search_skips_a_note_that_cannot_be_read() {
     }
     std::fs::set_permissions(&note, permissions).unwrap();
 }
+
+#[test]
+fn search_trims_a_byte_order_mark_and_keeps_a_next_line() {
+    let mut host = host();
+    host.dispatch(
+        "fanotes:write-file",
+        &[
+            json!("Bio/Blatt.md"),
+            json!("Die Photosynthese braucht Licht.\n"),
+        ],
+    )
+    .unwrap();
+    let found = host
+        .dispatch("fanotes:search", &[json!("\u{FEFF}Photosynthese")])
+        .unwrap();
+    assert_eq!(found[0]["relativePath"], "Bio/Blatt.md");
+    let missed = host
+        .dispatch("fanotes:search", &[json!("\u{0085}Photosynthese")])
+        .unwrap();
+    assert!(missed.as_array().unwrap().is_empty());
+}

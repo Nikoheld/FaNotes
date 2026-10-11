@@ -613,6 +613,40 @@ fn a_history_index_with_an_invalid_byte_still_lists_its_snapshots() {
 }
 
 #[test]
+fn history_uses_the_desktop_trim_for_a_blank_note() {
+    let (mut host, _vault) = host();
+    host.dispatch(
+        "fanotes:write-file",
+        &[json!("Mathe/Seite.md"), json!("\u{FEFF}")],
+    )
+    .unwrap();
+    host.dispatch(
+        "fanotes:write-file",
+        &[json!("Mathe/Seite.md"), json!("Hallo\n")],
+    )
+    .unwrap();
+    let history = host
+        .dispatch("fanotes:list-note-history", &[json!("Mathe/Seite.md")])
+        .unwrap();
+    assert!(history.as_array().unwrap().is_empty());
+
+    host.dispatch(
+        "fanotes:write-file",
+        &[json!("Mathe/Neben.md"), json!("\u{0085}")],
+    )
+    .unwrap();
+    host.dispatch(
+        "fanotes:write-file",
+        &[json!("Mathe/Neben.md"), json!("Hallo\n")],
+    )
+    .unwrap();
+    let history = host
+        .dispatch("fanotes:list-note-history", &[json!("Mathe/Neben.md")])
+        .unwrap();
+    assert_eq!(history.as_array().unwrap().len(), 1);
+}
+
+#[test]
 fn a_recognition_model_with_a_bad_byte_still_loads() {
     let (mut host, vault) = host();
     std::fs::create_dir_all(vault.join(".fanotes")).unwrap();

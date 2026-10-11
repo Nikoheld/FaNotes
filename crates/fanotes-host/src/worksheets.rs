@@ -264,9 +264,9 @@ fn random_id() -> Result<String, String> {
 }
 
 fn safe_title(value: &str, fallback: &str) -> Result<String, String> {
-    let raw = value.trim();
+    let raw = crate::vault::js_trim(value);
     let name = if raw.is_empty() { fallback } else { raw };
-    let cleaned = name.trim_end_matches(['.', ' ']).trim();
+    let cleaned = crate::vault::js_trim(name.trim_end_matches(['.', ' ']));
     if cleaned.is_empty()
         || crate::vault::utf16_len(cleaned) > 180
         || cleaned == "."
@@ -302,7 +302,7 @@ fn validate_document(candidate: &Value, expected_id: &str) -> Result<Value, Stri
         return Err("Die Arbeitsblattdatei hat ein ungültiges Format.".to_owned());
     }
     let raw_title = object.get("title").and_then(Value::as_str).unwrap_or("");
-    let title = raw_title.trim();
+    let title = crate::vault::js_trim(raw_title);
     if title.is_empty()
         || crate::vault::utf16_len(raw_title) > 180
         || crate::vault::has_c0_or_del(raw_title)

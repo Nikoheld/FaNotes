@@ -581,7 +581,7 @@ fn header_at(source: &str) -> Option<(usize, u64)> {
 }
 
 fn is_famd_sidecar_json(value: &str) -> bool {
-    let trimmed = value.trim();
+    let trimmed = trim_js(value);
     if !trimmed.starts_with('{') || !trimmed.contains(FAMD_SCHEMA) {
         return false;
     }
@@ -622,7 +622,7 @@ fn trailing_sidecar_index(text: &str) -> Option<usize> {
 fn skip_ws(source: &str, mut index: usize) -> usize {
     while index < source.len() {
         let ch = source[index..].chars().next().unwrap();
-        if !ch.is_whitespace() {
+        if !is_js_whitespace(ch) {
             break;
         }
         index += ch.len_utf8();
@@ -630,8 +630,46 @@ fn skip_ws(source: &str, mut index: usize) -> usize {
     index
 }
 
+/// JavaScript `String.prototype.trim` and the `/u` flag of `\s`.
+///
+/// U+FEFF is whitespace. U+0085 is not.
+pub fn is_js_whitespace(character: char) -> bool {
+    matches!(
+        character,
+        '\u{0009}'
+            | '\u{000A}'
+            | '\u{000B}'
+            | '\u{000C}'
+            | '\u{000D}'
+            | '\u{0020}'
+            | '\u{00A0}'
+            | '\u{1680}'
+            | '\u{2028}'
+            | '\u{2029}'
+            | '\u{202F}'
+            | '\u{205F}'
+            | '\u{3000}'
+            | '\u{FEFF}'
+    ) || ('\u{2000}'..='\u{200A}').contains(&character)
+}
+
+pub fn trim_js(value: &str) -> &str {
+    let start = value
+        .char_indices()
+        .find(|(_, character)| !is_js_whitespace(*character))
+        .map(|(index, _)| index)
+        .unwrap_or(value.len());
+    let end = value[start..]
+        .char_indices()
+        .rev()
+        .find(|(_, character)| !is_js_whitespace(*character))
+        .map(|(index, character)| start + index + character.len_utf8())
+        .unwrap_or(start);
+    &value[start..end]
+}
+
 fn trim_end_js(value: &str) -> &str {
-    value.trim_end_matches(|ch: char| ch.is_whitespace())
+    value.trim_end_matches(is_js_whitespace)
 }
 
 fn slice_js(source: &str, start_byte: usize, js_chars: usize) -> Option<&str> {

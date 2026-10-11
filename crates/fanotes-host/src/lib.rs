@@ -964,7 +964,7 @@ impl Host {
             .and_then(|name| name.to_str())
             .ok_or_else(|| "Ungültiger Name.".to_owned())?
             .to_owned();
-        let name_input = if next_name.trim().is_empty() {
+        let name_input = if vault::js_trim(next_name).is_empty() {
             current_name.as_str()
         } else {
             next_name
@@ -1014,7 +1014,7 @@ impl Host {
             return Err("Dieser Eintrag kann nicht verschoben werden.".to_owned());
         }
         let was_dir = meta.is_dir();
-        let dest_relative = if dest_folder.trim().is_empty() {
+        let dest_relative = if vault::js_trim(dest_folder).is_empty() {
             String::new()
         } else {
             vault::normalize_relative_path(dest_folder, true, false)?
@@ -1085,7 +1085,7 @@ impl Host {
     }
 
     fn search(&self, query: &str) -> Result<Value, String> {
-        let query = query.trim();
+        let query = vault::js_trim(query);
         if query.is_empty() {
             return Ok(json!([]));
         }
@@ -1867,11 +1867,11 @@ enum CreateAttempt {
 }
 
 fn safe_entry_name(value: &str) -> Result<String, String> {
-    let name = value.trim();
+    let name = vault::js_trim(value);
     if !entry_name_allowed(name) {
         return Err("Dieser Name ist nicht erlaubt.".to_owned());
     }
-    let cleaned = name.trim_end_matches(['.', ' ']).trim();
+    let cleaned = vault::js_trim(name.trim_end_matches(['.', ' ']));
     if !entry_name_allowed(cleaned)
         || windows_device_name(cleaned)
         || cleaned.contains(['<', '>', ':', '"', '|', '?', '*'])
@@ -1893,12 +1893,8 @@ fn entry_name_allowed(name: &str) -> bool {
 }
 
 fn windows_device_name(name: &str) -> bool {
-    let label = name
-        .split('.')
-        .next()
-        .unwrap_or(name)
-        .trim()
-        .to_ascii_lowercase();
+    let label = name.split('.').next().unwrap_or(name);
+    let label = vault::js_trim(label).to_ascii_lowercase();
     matches!(label.as_str(), "con" | "prn" | "aux" | "nul")
         || (label.len() == 4
             && (label.starts_with("com") || label.starts_with("lpt"))
@@ -3362,13 +3358,13 @@ fn byte_range_for_utf16(text: &str, start_units: usize, end_units: usize) -> (us
 }
 
 fn ink_anchor(transcript: &str, query: &str) -> Option<f64> {
-    let needle = query.trim().to_lowercase();
-    if vault::utf16_len(&needle) < 2 || transcript.trim().is_empty() {
+    let needle = vault::js_trim(query).to_lowercase();
+    if vault::utf16_len(&needle) < 2 || vault::js_trim(transcript).is_empty() {
         return None;
     }
     let lines: Vec<&str> = transcript
         .split('\n')
-        .map(str::trim)
+        .map(vault::js_trim)
         .filter(|line| !line.is_empty())
         .collect();
     if lines.is_empty() {
@@ -3404,7 +3400,10 @@ fn transcript_position(line: &str) -> Option<(f64, String)> {
     if !y.is_finite() {
         return None;
     }
-    Some((y.clamp(0.0, 1.0), caps.get(2)?.as_str().trim().to_owned()))
+    Some((
+        y.clamp(0.0, 1.0),
+        vault::js_trim(caps.get(2)?.as_str()).to_owned(),
+    ))
 }
 
 #[cfg(test)]

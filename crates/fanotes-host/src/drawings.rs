@@ -296,7 +296,7 @@ pub(crate) fn library_metadata(
     fallback_time: Option<&str>,
 ) -> Result<Value, String> {
     let raw_title = document.get("title").and_then(Value::as_str).unwrap_or("");
-    let title = raw_title.trim();
+    let title = vault::js_trim(raw_title);
     if document.get("schemaVersion").and_then(Value::as_i64) != Some(1)
         || title.is_empty()
         || crate::vault::utf16_len(raw_title) > 180
@@ -353,7 +353,7 @@ fn decode_png(image_data: &str) -> Result<Vec<u8>, String> {
 }
 
 fn safe_title(value: &str) -> Result<String, String> {
-    let name = value.trim().trim_end_matches(['.', ' ']).trim();
+    let name = vault::js_trim(vault::js_trim(value).trim_end_matches(['.', ' ']));
     if name.is_empty()
         || crate::vault::utf16_len(name) > 180
         || name == "."

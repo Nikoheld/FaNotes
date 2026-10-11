@@ -330,7 +330,7 @@ pub fn read_history(host: &Host, relative: &str, snapshot_id: &str) -> Result<Va
 }
 
 pub fn record_history(vault_root: &Path, relative: &str, content: &str) -> Result<(), String> {
-    if content.trim().is_empty() {
+    if vault::js_trim(content).is_empty() {
         return Ok(());
     }
     let bytes = content.len();
@@ -512,11 +512,8 @@ fn sanitize_subject_book(value: &Value) -> Option<Value> {
 }
 
 fn sanitize_folder_path(value: Option<&str>) -> Option<String> {
-    let path = value?
-        .replace('\\', "/")
-        .trim_matches('/')
-        .trim()
-        .to_string();
+    let raw = value?.replace('\\', "/");
+    let path = vault::js_trim(raw.trim_matches('/')).to_string();
     let lower = path.to_lowercase();
     if path.is_empty()
         || crate::vault::utf16_len(&path) > MAX_PATH
@@ -533,11 +530,8 @@ fn sanitize_folder_path(value: Option<&str>) -> Option<String> {
 }
 
 fn sanitize_pdf_path(value: Option<&str>) -> Option<String> {
-    let path = value?
-        .replace('\\', "/")
-        .trim_start_matches('/')
-        .trim()
-        .to_string();
+    let raw = value?.replace('\\', "/");
+    let path = vault::js_trim(raw.trim_start_matches('/')).to_string();
     if path.is_empty()
         || crate::vault::utf16_len(&path) > MAX_PATH
         || path.contains("..")
