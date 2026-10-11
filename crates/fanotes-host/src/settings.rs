@@ -129,6 +129,29 @@ pub(crate) fn defaults() -> Map<String, Value> {
     .unwrap_or_default()
 }
 
+/// An upgraded app turns the experimental handwriting toggle off once.
+pub(crate) fn gate_experimental_handwriting(
+    settings: &mut Map<String, Value>,
+    version: &str,
+) -> bool {
+    let seen = settings
+        .get("experimentalHandwritingToTextSeenVersion")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    if seen == version {
+        return false;
+    }
+    settings.insert(
+        "experimentalHandwritingToText".to_owned(),
+        Value::Bool(false),
+    );
+    settings.insert(
+        "experimentalHandwritingToTextSeenVersion".to_owned(),
+        Value::String(version.to_owned()),
+    );
+    true
+}
+
 pub(crate) fn sanitize(candidate: &Value, base: &Map<String, Value>) -> Map<String, Value> {
     let mut result = defaults();
     for (key, value) in base {

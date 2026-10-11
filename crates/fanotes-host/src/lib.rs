@@ -8,11 +8,13 @@ mod addons;
 mod channels;
 mod drawings;
 mod imports;
+mod linux_runtime;
 mod notes;
 mod ocr;
 mod onboarding;
 mod onenote;
 mod policy;
+mod profile;
 mod resources;
 mod secrets;
 mod settings;
@@ -36,7 +38,7 @@ pub use channels::{find_channel, ChannelKind, CHANNELS};
 pub use policy::{addon_request_allowed, local_ai_origin};
 pub use secrets::SecretStore;
 
-const SECRET_KEYS: &[&str] = &[
+pub(crate) const SECRET_KEYS: &[&str] = &[
     "lmStudioApiToken",
     "ollamaApiToken",
     "openAiApiKey",
@@ -73,6 +75,7 @@ pub struct Host {
 
 impl Host {
     pub fn open(app_data: PathBuf) -> Self {
+        complete_pending_app_data_reset(&app_data);
         fs::create_dir_all(&app_data).ok();
         let mut host = Self {
             vault: None,
@@ -93,13 +96,18 @@ impl Host {
     }
 
     pub fn set_vault(&mut self, path: PathBuf) -> Result<(), String> {
-        let meta =
-            fs::metadata(&path).map_err(|_| "Der Vault wurde unsicher verändert.".to_owned())?;
-        if !meta.is_dir() {
-            return Err("Der Vault wurde unsicher verändert.".to_owned());
+        let canonical = fs::canonicalize(&path)
+            .map_err(|_| "Der gewählte Vault ist kein sicherer Ordner.".to_owned())?;
+        let meta = fs::symlink_metadata(&canonical)
+            .map_err(|_| "Der gewählte Vault ist kein sicherer Ordner.".to_owned())?;
+        if meta.file_type().is_symlink() || !meta.is_dir() {
+            return Err("Der gewählte Vault ist kein sicherer Ordner.".to_owned());
         }
-        self.vault = Some(path);
+        self.vault = Some(canonical);
         self.refresh_onboarding();
+        if let Some(root) = self.vault.clone() {
+            onboarding::upgrade_welcome_notes(&root);
+        }
         Ok(())
     }
 
@@ -280,7 +288,7 @@ impl Host {
     fn render_pdf_page(&self, args: &[Value]) -> Result<Value, String> {
         let (path, job) = fanotes_pdf::parse_vault_request(args.first().unwrap_or(&Value::Null))
             .map_err(|error| error.to_string())?;
-        let file = vault::resolve_inside(self.require_vault()?, &path)?;
+        let file = vault::resolve_existing_entry(self.require_vault()?, &path)?;
         let bytes = read_regular_limited(&file, PDF_ASSET_MAX)?;
         let bitmap =
             fanotes_pdf::render_pdf_page(&bytes, &job).map_err(|error| error.to_string())?;
@@ -312,7 +320,7 @@ impl Host {
     }
 
     fn read_asset(&self, relative: &str, max: u64) -> Result<Vec<u8>, String> {
-        let file = vault::resolve_inside(self.require_vault()?, relative)?;
+        let file = vault::resolve_existing_entry(self.require_vault()?, relative)?;
         let bytes = read_regular_limited(&file, max)?;
         if bytes.is_empty() {
             return Err("Die Datei ist leer oder fehlt im Vault.".to_owned());
@@ -531,8 +539,8 @@ impl Host {
     }
 
     fn read_recognition_model(&self) -> Result<Value, String> {
-        let root = self.require_vault()?;
-        let path = root.join(".fanotes").join("recognition-model.json");
+        let root = self.require_vault()?.to_path_buf();
+        let path = internal_directory(&root)?.join("recognition-model.json");
         match fs::symlink_metadata(&path) {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Value::Null),
             Err(_) => Err("Das Handschriftmodell konnte nicht gelesen werden.".to_owned()),
@@ -588,20 +596,7 @@ impl Host {
             "settings": self.settings,
             "onboardingRequired": self.onboarding_required,
             "starterSubjects": onboarding::starter_subjects(self.ui_language()),
-            "linuxRuntime": {
-                "platform": std::env::consts::OS,
-                "ozone": "",
-                "sessionType": std::env::var("XDG_SESSION_TYPE").unwrap_or_default(),
-                "desktop": std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default(),
-                "hyprland": std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE").is_some(),
-                "hyprlandInstance": std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE").is_some(),
-                "display": std::env::var("DISPLAY").unwrap_or_default(),
-                "waylandDisplay": std::env::var("WAYLAND_DISPLAY").unwrap_or_default(),
-                "hyprlandZeroScaling": false,
-                "deviceScaleFactor": null,
-                "deviceScaleSource": null,
-                "monitorScale": null
-            }
+            "linuxRuntime": linux_runtime::bootstrap_linux()
         }))
     }
 
@@ -650,9 +645,11 @@ impl Host {
             onboarding::write_status(&vault, "pending")?;
         }
         self.set_vault(vault.clone())?;
-        fs::write(
-            self.app_data.join("vault-path"),
-            vault.to_string_lossy().as_bytes(),
+        let stored = self.vault.clone().unwrap_or(vault);
+        notes::atomic_write(
+            &self.app_data.join("vault-path"),
+            stored.to_string_lossy().as_bytes(),
+            0o600,
         )
         .map_err(|_| "Die Einstellungen konnten nicht gespeichert werden.".to_owned())?;
         Ok(())
@@ -744,7 +741,7 @@ impl Host {
         if !notes::is_note_text(&normalized) {
             return Err("Es dürfen nur Markdown-Dateien und FaNotes-Handschriftdateien (.famd) bearbeitet werden.".to_owned());
         }
-        let path = vault::resolve_inside(self.require_vault()?, &normalized)?;
+        let path = vault::resolve_note_file(self.require_vault()?, &normalized)?;
         let limit = note_byte_limit(&normalized);
         let meta = fs::symlink_metadata(&path)
             .map_err(|_| "Die Datei konnte nicht gelesen werden.".to_owned())?;
@@ -769,7 +766,7 @@ impl Host {
         if content.len() as u64 > note_byte_limit(&normalized) {
             return Err("Der Notizinhalt ist ungültig oder zu groß.".to_owned());
         }
-        let path = vault::resolve_inside(&root, &normalized)?;
+        let path = vault::resolve_note_file(&root, &normalized)?;
         if notes::records_history(&normalized) {
             if let Ok(previous) = fs::read(&path) {
                 if let Ok(text) = String::from_utf8(previous) {
@@ -827,6 +824,7 @@ impl Host {
         let parent_path = if parent_relative.is_empty() {
             root.clone()
         } else {
+            vault::reject_symlinks(&root, &parent_relative)?;
             let path = vault::resolve_inside(&root, &parent_relative)?;
             fs::create_dir_all(&path)
                 .map_err(|_| "Der Ordner konnte nicht angelegt werden.".to_owned())?;
@@ -896,10 +894,15 @@ impl Host {
             };
             path
         };
-        self.set_vault(path.clone())?;
-        fs::write(
-            self.app_data.join("vault-path"),
-            path.to_string_lossy().as_bytes(),
+        self.set_vault(path)?;
+        let stored = self
+            .vault
+            .clone()
+            .ok_or_else(|| "Die Einstellungen konnten nicht gespeichert werden.".to_owned())?;
+        notes::atomic_write(
+            &self.app_data.join("vault-path"),
+            stored.to_string_lossy().as_bytes(),
+            0o600,
         )
         .map_err(|_| "Die Einstellungen konnten nicht gespeichert werden.".to_owned())?;
         self.bootstrap()
@@ -908,7 +911,7 @@ impl Host {
     fn set_folder_color(&mut self, relative: &str, color: &Value) -> Result<Value, String> {
         let root = self.require_vault()?.to_path_buf();
         let normalized = vault::normalize_relative_path(relative, false, false)?;
-        let path = vault::resolve_inside(&root, &normalized)?;
+        let path = vault::resolve_existing_entry(&root, &normalized)?;
         let meta = fs::symlink_metadata(&path)
             .map_err(|_| "Der Ordner wurde nicht gefunden.".to_owned())?;
         if meta.file_type().is_symlink() || !meta.is_dir() {
@@ -938,7 +941,7 @@ impl Host {
         if !path.to_ascii_lowercase().ends_with(".pdf") {
             return Err("Nur ein PDF-Buch kann auspoppen.".to_owned());
         }
-        let file = vault::resolve_inside(root, &path)?;
+        let file = vault::resolve_existing_entry(root, &path)?;
         let meta = fs::symlink_metadata(&file).map_err(|_| "Ungültiger Buchpfad.".to_owned())?;
         if meta.file_type().is_symlink() || !meta.is_file() {
             return Err("Nur ein PDF-Buch kann auspoppen.".to_owned());
@@ -948,7 +951,7 @@ impl Host {
 
     fn rename_entry(&mut self, relative: &str, next_name: &str) -> Result<Value, String> {
         let root = self.require_vault()?.to_path_buf();
-        let source = vault::resolve_inside(&root, relative)?;
+        let source = vault::resolve_existing_entry(&root, relative)?;
         let normalized = vault::normalize_relative_path(relative, false, false)?;
         let meta = fs::symlink_metadata(&source)
             .map_err(|_| "Der Eintrag wurde nicht gefunden.".to_owned())?;
@@ -998,7 +1001,7 @@ impl Host {
 
     fn move_entry(&mut self, relative: &str, dest_folder: &str) -> Result<Value, String> {
         let root = self.require_vault()?.to_path_buf();
-        let source = vault::resolve_inside(&root, relative)?;
+        let source = vault::resolve_existing_entry(&root, relative)?;
         let normalized = vault::normalize_relative_path(relative, false, false)?;
         let meta = fs::symlink_metadata(&source)
             .map_err(|_| "Der Eintrag wurde nicht gefunden.".to_owned())?;
@@ -1019,7 +1022,7 @@ impl Host {
         let folder = if dest_relative.is_empty() {
             root.clone()
         } else {
-            let path = vault::resolve_inside(&root, &dest_relative)?;
+            let path = vault::resolve_existing_entry(&root, &dest_relative)?;
             let folder_meta = fs::symlink_metadata(&path)
                 .map_err(|_| "Der Zielordner wurde nicht gefunden.".to_owned())?;
             if folder_meta.file_type().is_symlink() || !folder_meta.is_dir() {
@@ -1058,13 +1061,15 @@ impl Host {
     fn trash_entry(&mut self, relative: &str) -> Result<Value, String> {
         let root = self.require_vault()?.to_path_buf();
         let normalized = vault::normalize_relative_path(relative, false, false)?;
-        let path = vault::resolve_inside(&root, &normalized)?;
+        let path = vault::resolve_existing_entry(&root, &normalized)?;
         let is_dir = fs::symlink_metadata(&path).is_ok_and(|meta| meta.is_dir());
         send_to_trash(self, &path)?;
         if !is_dir {
             if let Some(companion) = note_companion_relative(&normalized) {
-                if let Ok(companion_path) = vault::resolve_inside(&root, &companion) {
-                    if companion_path.is_file() {
+                if let Ok(companion_path) = vault::resolve_existing_entry(&root, &companion) {
+                    if fs::symlink_metadata(&companion_path)
+                        .is_ok_and(|meta| meta.is_file() && !meta.file_type().is_symlink())
+                    {
                         let _ = send_to_trash(self, &companion_path);
                     }
                 }
@@ -1098,7 +1103,7 @@ impl Host {
                     continue;
                 }
             }
-            let path = vault::resolve_inside(root, &relative)?;
+            let path = vault::resolve_existing_entry(root, &relative)?;
             let raw = fs::read_to_string(&path).unwrap_or_default();
             let parsed = fanotes_famd::parse_famd(&raw);
             let mut content = if parsed.markdown.is_empty() {
@@ -1113,7 +1118,7 @@ impl Host {
             let mut transcript = ink_transcript(ink.as_ref());
             if !lower.ends_with(".famd") {
                 let famd = fanotes_famd::companion_note_path(&relative, ".famd");
-                if let Ok(companion_path) = vault::resolve_inside(root, &famd) {
+                if let Ok(companion_path) = vault::resolve_existing_entry(root, &famd) {
                     if let Ok(companion) = fs::read_to_string(companion_path) {
                         let parsed_companion = fanotes_famd::parse_famd(&companion);
                         if lower.ends_with(".pdf") && !parsed_companion.markdown.is_empty() {
@@ -1189,11 +1194,7 @@ impl Host {
         } else {
             format!("{note}.famd")
         };
-        let path = vault::resolve_inside(self.require_vault()?, &famd).or_else(|_| {
-            let root = self.require_vault()?;
-            let normalized = vault::normalize_relative_path(&famd, false, true)?;
-            Ok::<_, String>(root.join(normalized))
-        })?;
+        let path = vault::resolve_note_file(self.require_vault()?, &famd)?;
         let Ok(source) = fs::read_to_string(&path) else {
             return Ok(Value::Null);
         };
@@ -1251,6 +1252,7 @@ impl Host {
             self.settings
                 .insert((*key).to_owned(), Value::String(String::new()));
         }
+        settings::gate_experimental_handwriting(&mut self.settings, APP_VERSION);
         self.persist_settings()?;
         Ok(json!(self.settings))
     }
@@ -1276,14 +1278,25 @@ impl Host {
     }
 
     fn reset_app_data(&mut self) -> Result<Value, String> {
-        let _ = fs::remove_file(self.app_data.join("settings.json"));
-        let _ = fs::remove_file(self.app_data.join("secrets.json"));
-        for key in SECRET_KEYS {
-            let _ = secrets::delete(self.secret_store, &self.secret_account(key));
+        let Some(marker_path) = pending_reset_marker(&self.app_data) else {
+            return Err("Die App-Daten konnten nicht zurückgesetzt werden.".to_owned());
+        };
+        if valid_reset_marker(&marker_path, &self.app_data) {
+            self.allow_close = true;
+            return Ok(json!({ "restarting": true }));
         }
-        let _ = secrets::delete(self.secret_store, &self.secret_account(SYNC_SECRET_ACCOUNT));
-        self.settings = default_settings();
-        Ok(Value::Null)
+        let user_data =
+            std::path::absolute(&self.app_data).unwrap_or_else(|_| self.app_data.clone());
+        let marker = json!({
+            "version": 1,
+            "userDataPath": user_data.to_string_lossy(),
+            "createdAt": notes::iso_from_system_time(SystemTime::now()),
+        });
+        let text = serde_json::to_string(&marker)
+            .map_err(|_| "Die App-Daten konnten nicht zurückgesetzt werden.".to_owned())?;
+        notes::atomic_write(&marker_path, text.as_bytes(), 0o600)?;
+        self.allow_close = true;
+        Ok(json!({ "restarting": true }))
     }
 
     fn open_external(&self, url: &str) -> Result<Value, String> {
@@ -1348,11 +1361,12 @@ impl Host {
         let path = self.app_data.join("settings.json");
         let text = serde_json::to_string_pretty(&self.settings)
             .map_err(|_| "Die Einstellungen sind ungültig.".to_owned())?;
-        fs::write(path, text)
+        notes::atomic_write(&path, text.as_bytes(), 0o600)
             .map_err(|_| "Die Einstellungen konnten nicht gespeichert werden.".to_owned())
     }
 
     fn load_persisted(&mut self) {
+        profile::import_electron_profile(&self.app_data, self.secret_store);
         if let Ok(text) = fs::read_to_string(self.app_data.join("settings.json")) {
             if let Ok(parsed) = serde_json::from_str::<Value>(&text) {
                 self.settings = settings::sanitize(&parsed, &default_settings());
@@ -1360,13 +1374,15 @@ impl Host {
                     self.settings
                         .insert((*key).to_owned(), Value::String(String::new()));
                 }
+                if settings::gate_experimental_handwriting(&mut self.settings, APP_VERSION) {
+                    let _ = self.persist_settings();
+                }
             }
         }
         if let Ok(text) = fs::read_to_string(self.app_data.join("vault-path")) {
             let path = PathBuf::from(text.trim());
             if path.is_dir() {
-                self.vault = Some(path);
-                self.refresh_onboarding();
+                let _ = self.set_vault(path);
             }
         }
     }
@@ -1427,6 +1443,156 @@ impl Host {
 }
 
 const SYNC_SECRET_ACCOUNT: &str = "sync-account";
+const APP_DATA_RESET_MARKER: &str = ".fanotes-reset-pending.json";
+const APP_DATA_RESET_COMPLETE: &str = ".fanotes-reset-complete";
+const RESET_MAX_BYTES: u64 = 4096;
+const RESET_MAX_AGE_MS: u64 = 24 * 60 * 60 * 1000;
+
+fn pending_reset_marker(app_data: &Path) -> Option<PathBuf> {
+    Some(app_data.parent()?.join(APP_DATA_RESET_MARKER))
+}
+
+fn complete_pending_app_data_reset(app_data: &Path) {
+    let Some(marker_path) = pending_reset_marker(app_data) else {
+        return;
+    };
+    if !valid_reset_marker(&marker_path, app_data) {
+        if fs::symlink_metadata(&marker_path).is_ok() {
+            let _ = fs::remove_file(&marker_path);
+        }
+        return;
+    }
+    if fs::symlink_metadata(app_data).is_ok_and(|meta| meta.file_type().is_symlink()) {
+        let _ = fs::remove_file(&marker_path);
+        return;
+    }
+    let mut names = SECRET_KEYS.to_vec();
+    names.push(SYNC_SECRET_ACCOUNT);
+    secrets::forget_profile(app_data, &names);
+    match fs::remove_dir_all(app_data) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(_) => return,
+    }
+    if fs::create_dir_all(app_data).is_err() {
+        return;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(app_data, fs::Permissions::from_mode(0o700));
+    }
+    let stamp = format!("{}\n", notes::iso_from_system_time(SystemTime::now()));
+    if notes::atomic_write(
+        &app_data.join(APP_DATA_RESET_COMPLETE),
+        stamp.as_bytes(),
+        0o600,
+    )
+    .is_err()
+    {
+        return;
+    }
+    let _ = fs::remove_file(&marker_path);
+}
+
+fn valid_reset_marker(marker_path: &Path, app_data: &Path) -> bool {
+    let Ok(meta) = fs::symlink_metadata(marker_path) else {
+        return false;
+    };
+    if meta.file_type().is_symlink() || !meta.is_file() || meta.len() > RESET_MAX_BYTES {
+        return false;
+    }
+    let Ok(text) = fs::read_to_string(marker_path) else {
+        return false;
+    };
+    let Ok(marker) = serde_json::from_str::<Value>(&text) else {
+        return false;
+    };
+    if marker.get("version").and_then(Value::as_u64) != Some(1) {
+        return false;
+    }
+    let Some(recorded) = marker.get("userDataPath").and_then(Value::as_str) else {
+        return false;
+    };
+    let Ok(recorded) = std::path::absolute(recorded) else {
+        return false;
+    };
+    let Ok(current) = std::path::absolute(app_data) else {
+        return false;
+    };
+    if recorded != current {
+        return false;
+    }
+    let Some(created_at) = marker.get("createdAt").and_then(Value::as_str) else {
+        return false;
+    };
+    marker_is_fresh(created_at)
+}
+
+fn marker_is_fresh(created_at: &str) -> bool {
+    let Some(created_ms) = unix_millis_from_iso(created_at) else {
+        return false;
+    };
+    let Ok(now) = SystemTime::now().duration_since(UNIX_EPOCH) else {
+        return false;
+    };
+    let now_ms = now.as_millis() as u64;
+    created_ms > now_ms || now_ms - created_ms <= RESET_MAX_AGE_MS
+}
+
+fn unix_millis_from_iso(value: &str) -> Option<u64> {
+    let (date, time) = value.split_once('T')?;
+    let mut date_parts = date.split('-');
+    let year: i32 = date_parts.next()?.parse().ok()?;
+    let month: u32 = date_parts.next()?.parse().ok()?;
+    let day: u32 = date_parts.next()?.parse().ok()?;
+    if date_parts.next().is_some() {
+        return None;
+    }
+    let time = time.strip_suffix('Z')?;
+    let (clock, millis) = match time.split_once('.') {
+        Some((clock, fraction)) if (1..=3).contains(&fraction.len()) => {
+            let millis: u32 = fraction.parse().ok()?;
+            let scale = 10u32.pow(3 - fraction.len() as u32);
+            (clock, millis * scale)
+        }
+        None => (time, 0),
+        Some(_) => return None,
+    };
+    let mut clock_parts = clock.split(':');
+    let hour: u32 = clock_parts.next()?.parse().ok()?;
+    let minute: u32 = clock_parts.next()?.parse().ok()?;
+    let second: u32 = clock_parts.next()?.parse().ok()?;
+    if clock_parts.next().is_some()
+        || hour > 23
+        || minute > 59
+        || second > 60
+        || !(1..=12).contains(&month)
+        || !(1..=31).contains(&day)
+    {
+        return None;
+    }
+    let days = days_from_civil(year, month, day)?;
+    Some(
+        days * 86_400_000
+            + u64::from(hour) * 3_600_000
+            + u64::from(minute) * 60_000
+            + u64::from(second) * 1000
+            + u64::from(millis),
+    )
+}
+
+fn days_from_civil(year: i32, month: u32, day: u32) -> Option<u64> {
+    let year = if month <= 2 { year - 1 } else { year };
+    let era = if year >= 0 { year } else { year - 399 } / 400;
+    let year_of_era = (year - era * 400) as u64;
+    let month_prime = if month > 2 { month - 3 } else { month + 9 };
+    let day_of_year = (153 * month_prime + 2) / 5 + day - 1;
+    let day_of_era =
+        year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + u64::from(day_of_year);
+    let days = era as i64 * 146_097 + day_of_era as i64 - 719_468;
+    u64::try_from(days).ok()
+}
 
 const PDF_ASSET_MAX: u64 = 96 * 1024 * 1024;
 const HTML_ASSET_MAX: u64 = 128 * 1024 * 1024;
@@ -1555,19 +1721,7 @@ fn mtime_millis(meta: &fs::Metadata) -> i64 {
 }
 
 fn internal_directory(root: &Path) -> Result<PathBuf, String> {
-    let directory = root.join(".fanotes");
-    match fs::symlink_metadata(&directory) {
-        Ok(meta) if meta.file_type().is_symlink() || !meta.is_dir() => {
-            Err("Interne FaNotes-Dateien sind geschützt.".to_owned())
-        }
-        Ok(_) => Ok(directory),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            fs::create_dir_all(&directory)
-                .map_err(|_| "Der Ordner konnte nicht angelegt werden.".to_owned())?;
-            Ok(directory)
-        }
-        Err(_) => Err("Der Ordner konnte nicht angelegt werden.".to_owned()),
-    }
+    vault::ensure_internal_directory(root)
 }
 
 fn scan_sync_directory(root: &Path, directory: &Path, depth: usize, out: &mut Vec<Value>) {
@@ -2344,6 +2498,15 @@ fn read_tree(
             continue;
         }
         if meta.is_dir() {
+            let Ok(real) = fs::canonicalize(&path) else {
+                continue;
+            };
+            let Ok(root_real) = fs::canonicalize(root) else {
+                continue;
+            };
+            if !vault::is_inside_root(&root_real, &real) {
+                continue;
+            }
             let mut folder = json!({
                 "name": name,
                 "relativePath": relative,
@@ -2439,7 +2602,7 @@ fn folder_color_hex(value: &str) -> bool {
 }
 
 fn read_folder_colors(root: &Path) -> Result<BTreeMap<String, String>, String> {
-    let path = root.join(".fanotes").join("folder-colors.json");
+    let path = internal_directory(root)?.join("folder-colors.json");
     let text = match fs::read_to_string(&path) {
         Ok(text) => text,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(BTreeMap::new()),
@@ -2469,9 +2632,7 @@ fn read_folder_colors(root: &Path) -> Result<BTreeMap<String, String>, String> {
 }
 
 fn write_folder_colors(root: &Path, colors: &BTreeMap<String, String>) -> Result<(), String> {
-    let internal = root.join(".fanotes");
-    fs::create_dir_all(&internal)
-        .map_err(|_| "Der Ordner konnte nicht angelegt werden.".to_owned())?;
+    let internal = internal_directory(root)?;
     let mut entries: Vec<_> = colors.iter().take(5000).collect();
     entries.sort_by(|left, right| left.0.cmp(right.0));
     let mut object = Map::new();
@@ -2486,8 +2647,12 @@ fn write_folder_colors(root: &Path, colors: &BTreeMap<String, String>) -> Result
     if snapshot.len() > 512 * 1024 {
         return Err("Zu viele Ordnerfarben für diesen Vault.".to_owned());
     }
-    fs::write(internal.join("folder-colors.json"), snapshot)
-        .map_err(|_| "Die Ordnerfarbe konnte nicht gespeichert werden.".to_owned())
+    notes::atomic_write(
+        &internal.join("folder-colors.json"),
+        snapshot.as_bytes(),
+        0o600,
+    )
+    .map_err(|_| "Die Ordnerfarbe konnte nicht gespeichert werden.".to_owned())
 }
 
 fn move_note_companion(root: &Path, old_relative: &str, new_relative: &str) {
@@ -2497,13 +2662,15 @@ fn move_note_companion(root: &Path, old_relative: &str, new_relative: &str) {
     let Some(new_companion) = note_companion_relative(new_relative) else {
         return;
     };
-    let Ok(source) = vault::resolve_inside(root, &old_companion) else {
+    let Ok(source) = vault::resolve_existing_entry(root, &old_companion) else {
         return;
     };
-    if !source.is_file() {
+    if !fs::symlink_metadata(&source)
+        .is_ok_and(|meta| meta.is_file() && !meta.file_type().is_symlink())
+    {
         return;
     }
-    let Ok(destination) = vault::resolve_inside(root, &new_companion) else {
+    let Ok(destination) = vault::resolve_note_file(root, &new_companion) else {
         return;
     };
     if let Some(parent) = destination.parent() {

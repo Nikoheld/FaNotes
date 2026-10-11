@@ -256,3 +256,173 @@ fn a_second_note_is_numbered_and_reads_without_the_sidecar() {
         .dispatch("fanotes:read-file", &[json!("Mathe/Seite.pdf")])
         .is_err());
 }
+
+#[test]
+fn a_symlinked_note_cannot_leave_the_vault() {
+    let dir = std::env::temp_dir().join(format!("fanotes-notes-link-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let vault = dir.join("vault");
+    let outside = dir.join("outside");
+    std::fs::create_dir_all(&vault).unwrap();
+    std::fs::create_dir_all(&outside).unwrap();
+    std::fs::write(outside.join("secret.md"), b"geheim\n").unwrap();
+    std::os::unix::fs::symlink(outside.join("secret.md"), vault.join("Notiz.md")).unwrap();
+    std::os::unix::fs::symlink(&outside, vault.join("weg")).unwrap();
+    let mut host = Host::open(dir.join("app"));
+    host.trash_dir = Some(dir.join("trash"));
+    host.set_vault(vault).unwrap();
+    assert_eq!(
+        host.dispatch("fanotes:read-file", &[json!("Notiz.md")])
+            .unwrap_err(),
+        "Symbolische Links sind innerhalb des Vaults nicht erlaubt."
+    );
+    assert_eq!(
+        host.dispatch("fanotes:write-file", &[json!("Notiz.md"), json!("neu\n")])
+            .unwrap_err(),
+        "Symbolische Links sind innerhalb des Vaults nicht erlaubt."
+    );
+    assert_eq!(
+        std::fs::read(outside.join("secret.md")).unwrap(),
+        b"geheim\n"
+    );
+    assert_eq!(
+        host.dispatch(
+            "fanotes:write-file",
+            &[json!("weg/Seite.md"), json!("raus\n")]
+        )
+        .unwrap_err(),
+        "Symbolische Links sind innerhalb des Vaults nicht erlaubt."
+    );
+    assert!(!outside.join("Seite.md").exists());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_saved_note_is_private_and_leaves_no_temporary_file() {
+    let dir = std::env::temp_dir().join(format!("fanotes-notes-atomic-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let vault = dir.join("vault");
+    std::fs::create_dir_all(&vault).unwrap();
+    let mut host = Host::open(dir.join("app"));
+    host.trash_dir = Some(dir.join("trash"));
+    host.set_vault(vault.clone()).unwrap();
+    host.dispatch("fanotes:write-file", &[json!("Seite.md"), json!("Hallo")])
+        .unwrap();
+    assert_eq!(
+        std::fs::read_to_string(vault.join("Seite.md")).unwrap(),
+        "Hallo\n"
+    );
+    assert!(vault.join("Seite.famd").is_file());
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        for name in ["Seite.md", "Seite.famd"] {
+            let mode = std::fs::metadata(vault.join(name))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777;
+            assert_eq!(mode, 0o600, "{name}");
+        }
+    }
+    let leftovers: Vec<_> = std::fs::read_dir(&vault)
+        .unwrap()
+        .flatten()
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .filter(|name| name.contains(".tmp"))
+        .collect();
+    assert!(leftovers.is_empty(), "{leftovers:?}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn page_stats_keep_the_fields_the_editor_stores() {
+    let dir = std::env::temp_dir().join(format!("fanotes-notes-stats-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let vault = dir.join("vault");
+    std::fs::create_dir_all(&vault).unwrap();
+    let mut host = Host::open(dir.join("app"));
+    host.trash_dir = Some(dir.join("trash"));
+    host.set_vault(vault).unwrap();
+    let stats = json!({
+        "version": 1,
+        "createdAt": "2026-01-02T03:04:05.000Z",
+        "modifiedAt": "2026-01-02T03:04:05.000Z",
+        "firstOpenedAt": "2026-01-02T03:04:05.000Z",
+        "lastOpenedAt": "2026-01-02T03:05:05.000Z",
+        "lastClosedAt": null,
+        "lastSavedAt": "2026-01-02T03:06:05.000Z",
+        "openCount": 2,
+        "saveCount": 3,
+        "dwellMs": 1500,
+        "focusMs": 1200,
+        "longestSessionMs": 800,
+        "lastSessionMs": 400,
+        "activeDays": ["2026-01-02"],
+        "typing": { "wordsAdded": 4, "wordsRemoved": 1 }
+    });
+    let mut payload = fanotes_famd::empty_famd_payload("2026-01-02T03:04:05.000Z");
+    payload.page_stats = Some(stats.clone());
+    let content = fanotes_famd::serialize_famd("Hallo", &payload);
+    host.dispatch("fanotes:write-file", &[json!("Seite.md"), json!(content)])
+        .unwrap();
+    assert_eq!(
+        host.dispatch("fanotes:read-note-page-stats", &[json!("Seite.md")])
+            .unwrap(),
+        stats
+    );
+    host.dispatch(
+        "fanotes:write-file",
+        &[json!("Seite.md"), json!("Hallo nochmal\n")],
+    )
+    .unwrap();
+    assert_eq!(
+        host.dispatch("fanotes:read-note-page-stats", &[json!("Seite.md")])
+            .unwrap(),
+        stats
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_pdf_note_keeps_history_of_its_famd_file() {
+    let dir =
+        std::env::temp_dir().join(format!("fanotes-notes-pdf-history-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let vault = dir.join("vault");
+    std::fs::create_dir_all(&vault).unwrap();
+    let mut host = Host::open(dir.join("app"));
+    host.trash_dir = Some(dir.join("trash"));
+    host.set_vault(vault).unwrap();
+    host.dispatch(
+        "fanotes:write-file",
+        &[json!("Buch.famd"), json!("Erste Fassung\n")],
+    )
+    .unwrap();
+    host.dispatch(
+        "fanotes:write-file",
+        &[json!("Buch.famd"), json!("Zweite Fassung\n")],
+    )
+    .unwrap();
+    let history = host
+        .dispatch("fanotes:list-note-history", &[json!("Buch.famd")])
+        .unwrap();
+    let snapshots = history.as_array().unwrap();
+    assert_eq!(snapshots.len(), 1);
+    let id = snapshots[0]["id"].as_str().unwrap();
+    let loaded = host
+        .dispatch(
+            "fanotes:read-note-history",
+            &[json!("Buch.famd"), json!(id)],
+        )
+        .unwrap();
+    assert!(loaded["content"]
+        .as_str()
+        .unwrap()
+        .contains("Erste Fassung"));
+    assert!(!loaded["content"]
+        .as_str()
+        .unwrap()
+        .contains("Zweite Fassung"));
+    let _ = std::fs::remove_dir_all(&dir);
+}

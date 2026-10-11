@@ -2,7 +2,9 @@
 //! The window loads the existing React bundle and installs `window.fanotes`
 //! from `fanotes-api.js` before that bundle runs.
 
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
+use std::time::Duration;
 
 use fanotes_host::{find_channel, Host, CHANNELS};
 use serde_json::{json, Value};
@@ -10,6 +12,86 @@ use tauri::{Emitter, Manager, State};
 use webkit2gtk::{URIRequestExt, WebViewExt};
 
 struct HostState(Mutex<Host>);
+
+const CLOSE_WARNING_DELAY: Duration = Duration::from_secs(12);
+const QUIT_WITHOUT_SAVING: &str = "Ohne Speichern beenden";
+static CLOSE_WARNING_GENERATION: AtomicU64 = AtomicU64::new(0);
+static CLOSE_WARNING_ARMED: AtomicBool = AtomicBool::new(false);
+
+fn invalidate_close_warning() {
+    CLOSE_WARNING_GENERATION.fetch_add(1, Ordering::Relaxed);
+    CLOSE_WARNING_ARMED.store(false, Ordering::Relaxed);
+}
+
+fn close_warning_discards_changes(choice: &rfd::MessageDialogResult) -> bool {
+    matches!(choice, rfd::MessageDialogResult::Custom(text) if text == QUIT_WITHOUT_SAVING)
+}
+
+fn arm_close_warning(handle: tauri::AppHandle) {
+    if CLOSE_WARNING_ARMED.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    let generation = CLOSE_WARNING_GENERATION.load(Ordering::Relaxed);
+    std::thread::spawn(move || {
+        std::thread::sleep(CLOSE_WARNING_DELAY);
+        if CLOSE_WARNING_GENERATION.load(Ordering::Relaxed) != generation {
+            return;
+        }
+        let allow = handle
+            .state::<HostState>()
+            .0
+            .lock()
+            .map(|host| host.allow_close)
+            .unwrap_or(true);
+        if allow {
+            CLOSE_WARNING_ARMED.store(false, Ordering::Relaxed);
+            return;
+        }
+        let app = handle.clone();
+        let _ = handle.run_on_main_thread(move || {
+            if CLOSE_WARNING_GENERATION.load(Ordering::Relaxed) != generation {
+                return;
+            }
+            let allow = app
+                .state::<HostState>()
+                .0
+                .lock()
+                .map(|host| host.allow_close)
+                .unwrap_or(true);
+            if allow {
+                CLOSE_WARNING_ARMED.store(false, Ordering::Relaxed);
+                return;
+            }
+            let choice = rfd::MessageDialog::new()
+                .set_title("Speichern dauert länger als erwartet")
+                .set_description(
+                    "FaNotes wartet noch darauf, deine Änderungen sicher zu speichern.\n\nDu kannst weiter warten. Beende nur ohne Speichern, wenn du mögliche ungespeicherte Änderungen bewusst verwerfen möchtest.",
+                )
+                .set_level(rfd::MessageLevel::Warning)
+                .set_buttons(rfd::MessageButtons::OkCancelCustom(
+                    "Weiter warten".to_owned(),
+                    QUIT_WITHOUT_SAVING.to_owned(),
+                ))
+                .show();
+            CLOSE_WARNING_ARMED.store(false, Ordering::Relaxed);
+            if CLOSE_WARNING_GENERATION.load(Ordering::Relaxed) != generation {
+                return;
+            }
+            if close_warning_discards_changes(&choice) {
+                if let Ok(mut host) = app.state::<HostState>().0.lock() {
+                    host.allow_close = true;
+                }
+                invalidate_close_warning();
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.close();
+                }
+            } else if let Some(window) = app.get_webview_window("main") {
+                let _ = window.emit("fanotes:before-close", ());
+                arm_close_warning(app);
+            }
+        });
+    });
+}
 
 mod capture;
 mod export;
@@ -125,6 +207,7 @@ fn confirm_close(
     window: tauri::WebviewWindow,
     state: State<'_, HostState>,
 ) -> Result<Value, String> {
+    invalidate_close_warning();
     {
         let mut host = state
             .0
@@ -138,8 +221,26 @@ fn confirm_close(
     Ok(Value::Null)
 }
 
+#[tauri::command(rename = "fanotes:reset-app-data")]
+fn reset_app_data(app: tauri::AppHandle, state: State<'_, HostState>) -> Result<Value, String> {
+    let result = {
+        let mut host = state
+            .0
+            .lock()
+            .map_err(|_| "Der Host ist belegt.".to_owned())?;
+        host.dispatch("fanotes:reset-app-data", &[])?
+    };
+    let app = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        app.restart();
+    });
+    Ok(result)
+}
+
 #[tauri::command(rename = "fanotes:cancel-close")]
 fn cancel_close(state: State<'_, HostState>) -> Result<Value, String> {
+    invalidate_close_warning();
     let mut host = state
         .0
         .lock()
@@ -198,7 +299,8 @@ macro_rules! fanotes_commands {
                 capture_window,
                 request_close,
                 confirm_close,
-                cancel_close
+                cancel_close,
+                reset_app_data
             ]
         }
     };
@@ -265,7 +367,6 @@ fanotes_commands! {
     ai_transform => "fanotes:ai-transform",
     load_secure_settings => "fanotes:load-secure-settings",
     save_settings => "fanotes:save-settings",
-    reset_app_data => "fanotes:reset-app-data",
     update_get_state => "fanotes:update-get-state",
     update_check => "fanotes:update-check",
     update_download => "fanotes:update-download",
@@ -370,6 +471,19 @@ mod tests {
     use super::sheet_zoom_direction;
 
     #[test]
+    fn quitting_without_saving_is_the_discard_choice() {
+        assert!(super::close_warning_discards_changes(
+            &rfd::MessageDialogResult::Custom(super::QUIT_WITHOUT_SAVING.to_owned())
+        ));
+        assert!(!super::close_warning_discards_changes(
+            &rfd::MessageDialogResult::Custom("Weiter warten".to_owned())
+        ));
+        assert!(!super::close_warning_discards_changes(
+            &rfd::MessageDialogResult::Cancel
+        ));
+    }
+
+    #[test]
     fn pinch_becomes_a_sheet_zoom_direction() {
         assert_eq!(sheet_zoom_direction(1.0), None);
         assert_eq!(sheet_zoom_direction(1.25), Some("in"));
@@ -440,6 +554,7 @@ pub fn run() {
                             if let Some(main) = handle.get_webview_window("main") {
                                 let _ = main.emit("fanotes:before-close", ());
                             }
+                            arm_close_warning(handle.clone());
                         }
                     }
                 });

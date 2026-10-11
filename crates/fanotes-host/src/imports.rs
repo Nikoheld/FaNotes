@@ -82,7 +82,7 @@ fn import_pdf_payload(host: &Host, parent: &str, payload: &Value) -> Result<Valu
     let parent_path = if parent_relative.is_empty() {
         root.clone()
     } else {
-        let path = vault::resolve_inside(&root, &parent_relative)?;
+        let path = vault::resolve_existing_entry(&root, &parent_relative)?;
         let meta = fs::symlink_metadata(&path)
             .map_err(|_| "Der Zielordner wurde nicht gefunden.".to_owned())?;
         if meta.file_type().is_symlink() || !meta.is_dir() {
@@ -119,9 +119,10 @@ fn import_pdf_payload(host: &Host, parent: &str, payload: &Value) -> Result<Valu
     };
     let famd_relative = companion_note_path(&relative, ".famd");
     if let Ok(famd_path) = vault::resolve_inside(&root, &famd_relative) {
-        let _ = fs::write(
-            famd_path,
-            serialize_famd("", &empty_famd_payload(now_iso())),
+        let _ = crate::notes::atomic_write(
+            &famd_path,
+            serialize_famd("", &empty_famd_payload(now_iso())).as_bytes(),
+            0o600,
         );
     }
     let meta = fs::symlink_metadata(&absolute)

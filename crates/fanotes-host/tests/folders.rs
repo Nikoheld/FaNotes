@@ -85,3 +85,69 @@ fn the_tree_shows_pdf_notes_and_hides_their_famd_companion() {
         .iter()
         .any(|entry| entry["extension"] == "pdf"));
 }
+
+#[test]
+fn a_legacy_lernwerk_directory_becomes_fanotes() {
+    let dir = std::env::temp_dir().join(format!("fanotes-legacy-internal-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    let vault = dir.join("vault");
+    fs::create_dir_all(vault.join("Mathe")).unwrap();
+    fs::create_dir_all(vault.join(".lernwerk")).unwrap();
+    fs::write(
+        vault.join(".lernwerk/folder-colors.json"),
+        r##"{"version":1,"colors":{"Mathe":"#112233"}}"##,
+    )
+    .unwrap();
+    let mut host = Host::open(dir.join("app"));
+    host.set_vault(vault.clone()).unwrap();
+    assert!(!vault.join(".lernwerk").exists());
+    assert!(vault.join(".fanotes/folder-colors.json").is_file());
+    let tree = host.dispatch("fanotes:get-tree", &[]).unwrap();
+    let mathe = tree
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|entry| entry["name"] == "Mathe")
+        .unwrap();
+    assert_eq!(mathe["color"], "#112233");
+
+    let kept = dir.join("kept");
+    fs::create_dir_all(kept.join(".fanotes")).unwrap();
+    fs::create_dir_all(kept.join(".lernwerk")).unwrap();
+    fs::write(
+        kept.join(".fanotes/folder-colors.json"),
+        r##"{"colors":{"A":"#abcdef"}}"##,
+    )
+    .unwrap();
+    fs::write(
+        kept.join(".lernwerk/folder-colors.json"),
+        r##"{"colors":{"B":"#000000"}}"##,
+    )
+    .unwrap();
+    fs::create_dir_all(kept.join("A")).unwrap();
+    host.set_vault(kept.clone()).unwrap();
+    assert!(kept.join(".lernwerk").is_dir());
+    let tree = host.dispatch("fanotes:get-tree", &[]).unwrap();
+    let folder = tree
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|entry| entry["name"] == "A")
+        .unwrap();
+    assert_eq!(folder["color"], "#abcdef");
+
+    let unsafe_vault = dir.join("unsafe");
+    fs::create_dir_all(&unsafe_vault).unwrap();
+    std::os::unix::fs::symlink(dir.join("app"), unsafe_vault.join(".lernwerk")).unwrap();
+    host.set_vault(unsafe_vault.clone()).unwrap();
+    let error = host.dispatch("fanotes:get-tree", &[]).unwrap_err();
+    assert!(error.contains("unsicher") || error.contains("verlässt"));
+    assert!(unsafe_vault
+        .join(".lernwerk")
+        .symlink_metadata()
+        .unwrap()
+        .file_type()
+        .is_symlink());
+    assert!(!unsafe_vault.join(".fanotes").exists());
+    let _ = fs::remove_dir_all(&dir);
+}

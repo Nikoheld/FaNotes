@@ -67,3 +67,26 @@ fn drawings_round_trip_and_land_in_the_note() {
         "Ungültige Zeichnungs-ID."
     );
 }
+
+#[test]
+fn handwriting_is_not_saved_through_a_symlink_folder() {
+    let (dir, mut host) = host();
+    let outside = dir.join("outside");
+    fs::create_dir_all(&outside).unwrap();
+    fs::write(outside.join("Notiz.md"), b"geheim\n").unwrap();
+    std::os::unix::fs::symlink(&outside, dir.join("vault/weg")).unwrap();
+    let error = host
+        .dispatch(
+            "fanotes:save-drawing",
+            &[json!({
+                "id": "skizze-2",
+                "title": "Skizze",
+                "drawingJson": drawing("Skizze"),
+                "noteRelativePath": "weg/Notiz.md",
+            })],
+        )
+        .unwrap_err();
+    assert!(error.contains("Symbolische Links"));
+    assert!(!outside.join("Notiz.famd").exists());
+    assert_eq!(fs::read(outside.join("Notiz.md")).unwrap(), b"geheim\n");
+}

@@ -27,7 +27,7 @@ const MAX_SNAPSHOT_BYTES: usize = 16 * 1024 * 1024;
 
 pub fn records_history(relative: &str) -> bool {
     let lower = relative.to_lowercase();
-    lower.ends_with(".md") || lower.ends_with(".markdown")
+    lower.ends_with(".md") || lower.ends_with(".markdown") || lower.ends_with(".famd")
 }
 
 pub fn is_note_text(relative: &str) -> bool {
@@ -49,13 +49,12 @@ pub fn write_note_file(
         format!("{body}\n")
     };
     if !is_famd {
-        let path = vault::resolve_inside(root, relative)?;
+        let path = vault::resolve_note_file(root, relative)?;
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)
                 .map_err(|_| "Der Ordner konnte nicht angelegt werden.".to_owned())?;
         }
-        fs::write(&path, &markdown)
-            .map_err(|_| "Die Datei konnte nicht geschrieben werden.".to_owned())?;
+        atomic_write(&path, markdown.as_bytes(), 0o600)?;
     }
     attach_sidecar(root, relative, content, settings_paper)?;
     Ok(now_iso())
@@ -68,7 +67,7 @@ pub fn attach_sidecar(
     settings_paper: Option<&str>,
 ) -> Result<(), String> {
     let famd_relative = companion_note_path(relative, ".famd");
-    let famd_path = vault::resolve_inside(root, &famd_relative)?;
+    let famd_path = vault::resolve_note_file(root, &famd_relative)?;
     let existing = fs::read_to_string(&famd_path)
         .ok()
         .map(|source| parse_famd(&source))
@@ -115,19 +114,21 @@ pub fn attach_sidecar(
         fs::create_dir_all(parent)
             .map_err(|_| "Der Ordner konnte nicht angelegt werden.".to_owned())?;
     }
-    fs::write(&famd_path, serialize_famd(&body, &payload))
-        .map_err(|_| "Die Datei konnte nicht geschrieben werden.".to_owned())?;
+    atomic_write(
+        &famd_path,
+        serialize_famd(&body, &payload).as_bytes(),
+        0o600,
+    )?;
     if relative.to_lowercase().ends_with(".famd") {
         let markdown_relative = companion_note_path(relative, ".md");
-        if let Ok(markdown_path) = vault::resolve_inside(root, &markdown_relative) {
+        if let Ok(markdown_path) = vault::resolve_note_file(root, &markdown_relative) {
             if markdown_path.is_file() {
                 let text = if body.ends_with('\n') {
                     body
                 } else {
                     format!("{body}\n")
                 };
-                fs::write(markdown_path, text)
-                    .map_err(|_| "Die Datei konnte nicht geschrieben werden.".to_owned())?;
+                atomic_write(&markdown_path, text.as_bytes(), 0o600)?;
             }
         }
     }
@@ -136,10 +137,7 @@ pub fn attach_sidecar(
 
 pub fn read_page_stats(host: &Host, relative: &str) -> Result<Value, String> {
     let (_path, _body, payload) = load_note(host, relative)?;
-    Ok(payload
-        .page_stats
-        .map(|stats| stats.to_value())
-        .unwrap_or(Value::Null))
+    Ok(payload.page_stats.unwrap_or(Value::Null))
 }
 
 pub fn read_paper_style(host: &Host, relative: &str) -> Result<Value, String> {
@@ -335,7 +333,7 @@ pub fn record_history(vault_root: &Path, relative: &str, content: &str) -> Resul
         random_suffix()?
     );
     let snapshot_path = directory.join(format!("{id}.md"));
-    fs::write(&snapshot_path, content)
+    atomic_write(&snapshot_path, content.as_bytes(), 0o600)
         .map_err(|_| "Der Verlauf konnte nicht gespeichert werden.".to_owned())?;
     index["path"] = Value::String(relative.to_owned());
     index["format"] = Value::String("fanotes-history-v1".to_owned());
@@ -395,7 +393,7 @@ fn load_note(host: &Host, relative: &str) -> Result<(PathBuf, String, FamdPayloa
     let root = vault_root(host)?;
     let note = note_path(relative)?;
     let famd_relative = companion_note_path(&note, ".famd");
-    let famd_path = vault::resolve_inside(root, &famd_relative)?;
+    let famd_path = vault::resolve_note_file(root, &famd_relative)?;
     let source = fs::read_to_string(&famd_path).unwrap_or_default();
     let parsed = if source.is_empty() {
         parse_famd("")
@@ -405,7 +403,7 @@ fn load_note(host: &Host, relative: &str) -> Result<(PathBuf, String, FamdPayloa
     let markdown = if note.to_lowercase().ends_with(".pdf") {
         parsed.markdown.clone()
     } else {
-        let markdown_path = vault::resolve_inside(root, &note)?;
+        let markdown_path = vault::resolve_note_file(root, &note)?;
         fs::read_to_string(markdown_path).unwrap_or_else(|_| parsed.markdown.clone())
     };
     let body = strip_famd_payload(&markdown);
@@ -422,8 +420,7 @@ fn store_note(path: &Path, body: &str, payload: &FamdPayload) -> Result<(), Stri
         fs::create_dir_all(parent)
             .map_err(|_| "Der Ordner konnte nicht angelegt werden.".to_owned())?;
     }
-    fs::write(path, serialize_famd(body, payload))
-        .map_err(|_| "Die Datei konnte nicht geschrieben werden.".to_owned())
+    atomic_write(path, serialize_famd(body, payload).as_bytes(), 0o600)
 }
 
 fn note_path(relative: &str) -> Result<String, String> {
@@ -528,16 +525,7 @@ fn sanitize_pdf_path(value: Option<&str>) -> Option<String> {
 }
 
 fn books_path(root: &Path) -> Result<PathBuf, String> {
-    let internal = root.join(".fanotes");
-    if let Ok(meta) = fs::symlink_metadata(&internal) {
-        if meta.file_type().is_symlink() || !meta.is_dir() {
-            return Err("Der interne Ordner ist unsicher.".to_owned());
-        }
-    } else {
-        fs::create_dir_all(&internal)
-            .map_err(|_| "Der Ordner konnte nicht angelegt werden.".to_owned())?;
-    }
-    Ok(internal.join("subject-books.json"))
+    Ok(crate::vault::ensure_internal_directory(root)?.join("subject-books.json"))
 }
 
 fn history_dir(root: &Path, relative: &str) -> Result<PathBuf, String> {
@@ -548,7 +536,7 @@ fn history_dir(root: &Path, relative: &str) -> Result<PathBuf, String> {
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect::<String>();
-    let history = root.join(".fanotes").join("history");
+    let history = crate::vault::ensure_internal_directory(root)?.join("history");
     if let Ok(meta) = fs::symlink_metadata(&history) {
         if meta.file_type().is_symlink() || !meta.is_dir() {
             return Err("Der Verlaufsordner ist unsicher.".to_owned());
@@ -596,26 +584,64 @@ pub(crate) fn atomic_write(path: &Path, bytes: &[u8], mode: u32) -> Result<(), S
         fs::create_dir_all(parent)
             .map_err(|_| "Der Ordner konnte nicht angelegt werden.".to_owned())?;
     }
+    let suffix = random_suffix().unwrap_or_else(|_| std::process::id().to_string());
     let temporary = path.with_file_name(format!(
-        ".{}-{}.tmp",
+        ".{}.{}.{suffix}.tmp",
         path.file_name()
             .and_then(|name| name.to_str())
             .unwrap_or("file"),
         std::process::id()
     ));
-    fs::write(&temporary, bytes)
-        .map_err(|_| "Die Datei konnte nicht geschrieben werden.".to_owned())?;
+    if let Err(error) = write_exclusive(&temporary, bytes, mode) {
+        let _ = fs::remove_file(&temporary);
+        return Err(error);
+    }
+    if fs::rename(&temporary, path).is_err() {
+        let _ = fs::remove_file(&temporary);
+        return Err("Die Datei konnte nicht geschrieben werden.".to_owned());
+    }
+    if let Some(parent) = path.parent() {
+        if let Ok(directory) = fs::File::open(parent) {
+            let _ = directory.sync_all();
+        }
+    }
+    Ok(())
+}
+
+fn write_exclusive(path: &Path, bytes: &[u8], mode: u32) -> Result<(), String> {
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create_new(true);
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = fs::set_permissions(&temporary, fs::Permissions::from_mode(mode));
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(mode);
+        let nofollow = if cfg!(target_os = "linux") {
+            0x20000
+        } else if cfg!(target_os = "macos") {
+            0x0100
+        } else {
+            0
+        };
+        if nofollow != 0 {
+            options.custom_flags(nofollow);
+        }
     }
     #[cfg(not(unix))]
     {
         let _ = mode;
     }
-    fs::rename(&temporary, path)
-        .map_err(|_| "Die Datei konnte nicht geschrieben werden.".to_owned())
+    let mut file = options
+        .open(path)
+        .map_err(|_| "Die Datei konnte nicht geschrieben werden.".to_owned())?;
+    std::io::Write::write_all(&mut file, bytes)
+        .and_then(|_| file.sync_all())
+        .map_err(|_| "Die Datei konnte nicht geschrieben werden.".to_owned())?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(path, fs::Permissions::from_mode(mode));
+    }
+    Ok(())
 }
 
 fn vault_root(host: &Host) -> Result<&Path, String> {

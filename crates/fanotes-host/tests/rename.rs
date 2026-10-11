@@ -85,3 +85,45 @@ fn rename_keeps_the_extension_and_move_numbers_a_collision() {
         "Ein Ordner kann nicht in sich selbst verschoben werden."
     );
 }
+
+#[test]
+fn a_symlinked_folder_cannot_rename_move_or_receive_a_note() {
+    let dir = std::env::temp_dir().join(format!("fanotes-rename-link-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    let vault = dir.join("vault");
+    let outside = dir.join("outside");
+    fs::create_dir_all(&outside).unwrap();
+    fs::write(outside.join("Seite.md"), b"bleibt\n").unwrap();
+    fs::create_dir_all(&vault).unwrap();
+    std::os::unix::fs::symlink(&outside, vault.join("weg")).unwrap();
+    let mut host = Host::open(dir.join("app"));
+    host.trash_dir = Some(dir.join("trash"));
+    host.set_vault(vault).unwrap();
+    let message = "Symbolische Links sind innerhalb des Vaults nicht erlaubt.";
+    assert_eq!(
+        host.dispatch(
+            "fanotes:rename-entry",
+            &[json!("weg/Seite.md"), json!("Neu.md")]
+        )
+        .unwrap_err(),
+        message
+    );
+    assert_eq!(
+        host.dispatch("fanotes:move-entry", &[json!("weg/Seite.md"), json!("")])
+            .unwrap_err(),
+        message
+    );
+    assert_eq!(
+        host.dispatch("fanotes:trash-entry", &[json!("weg/Seite.md")])
+            .unwrap_err(),
+        message
+    );
+    assert_eq!(
+        host.dispatch("fanotes:create-note", &[json!("weg"), json!("Neu")])
+            .unwrap_err(),
+        message
+    );
+    assert_eq!(fs::read(outside.join("Seite.md")).unwrap(), b"bleibt\n");
+    assert!(!outside.join("Neu.md").exists());
+    let _ = fs::remove_dir_all(&dir);
+}
