@@ -1365,7 +1365,6 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    #[test]
     fn a_free_instruction_stops_at_12000_utf16_units() {
         let instruction = super::limited_instruction(&format!("{}Ende", "😀".repeat(6_001)));
         assert_eq!(crate::vault::utf16_len(&instruction), 12_000);

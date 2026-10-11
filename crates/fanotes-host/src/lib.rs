@@ -2987,7 +2987,7 @@ fn search_drawings(
         if let Some(note) = owners.get(id) {
             hit["notePath"] = Value::String(note.clone());
         }
-        if let Some(anchor) = ink_anchor(transcript, query) {
+        if let Some(anchor) = ink_anchor(&transcript, query) {
             hit["inkAnchor"] = json!({ "y": anchor });
         }
         hits.push(hit);
