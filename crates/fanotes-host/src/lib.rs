@@ -510,7 +510,7 @@ impl Host {
         let Some(json) = incoming.as_str() else {
             return Err("Die Sync-Anmeldedaten sind ungültig.".to_owned());
         };
-        if json.len() > 64 * 1024 {
+        if vault::utf16_len(json) > 64 * 1024 {
             return Err("Die Sync-Anmeldedaten sind ungültig.".to_owned());
         }
         secrets::set(self.secret_store, &account, json)?;
