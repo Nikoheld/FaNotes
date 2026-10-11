@@ -29,6 +29,7 @@ impl Drop for TempDir {
 #[test]
 fn every_preload_channel_dispatches() {
     let (_dir, mut host) = host();
+    host.file_dialogs = false;
     assert!(CHANNELS.len() > 90);
     for channel in CHANNELS {
         let result = host.dispatch(channel.name, &[]);
@@ -163,6 +164,19 @@ fn secrets_do_not_land_in_settings() {
     assert!(settings.contains("dark"));
     let secrets = host.dispatch("fanotes:load-secure-settings", &[]).unwrap();
     assert_eq!(secrets["openAiApiKey"], "sk-live-secret");
+}
+
+#[test]
+fn close_waits_until_the_page_confirms() {
+    let (_dir, mut host) = host();
+    host.dispatch("fanotes:request-close", &[]).unwrap();
+    assert!(host.close_requested);
+    assert!(!host.allow_close);
+    host.dispatch("fanotes:cancel-close", &[]).unwrap();
+    assert!(!host.close_requested);
+    assert!(!host.allow_close);
+    host.dispatch("fanotes:confirm-close", &[]).unwrap();
+    assert!(host.allow_close);
 }
 
 #[test]

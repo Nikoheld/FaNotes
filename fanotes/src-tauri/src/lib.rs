@@ -5,10 +5,176 @@
 use std::sync::Mutex;
 
 use fanotes_host::{find_channel, Host, CHANNELS};
-use serde_json::Value;
-use tauri::{Manager, State};
+use serde_json::{json, Value};
+use tauri::{Emitter, Manager, State};
 
 struct HostState(Mutex<Host>);
+
+mod capture;
+mod export;
+
+pub use capture::capture_html;
+pub use export::print_html_to_pdf;
+
+#[tauri::command(rename = "fanotes:export-note-pdf")]
+fn export_note_pdf(window: tauri::WebviewWindow, args: Vec<Value>) -> Result<Value, String> {
+    let destination = if let Some(path) = args.first().and_then(Value::as_str) {
+        std::path::PathBuf::from(path)
+    } else {
+        let Some(path) = rfd::FileDialog::new()
+            .set_title("Notiz als PDF speichern")
+            .set_file_name("FaNotes-Notiz.pdf")
+            .add_filter("PDF", &["pdf"])
+            .save_file()
+        else {
+            return Ok(Value::Null);
+        };
+        path
+    };
+    let file_path = destination.display().to_string();
+    let _ = window.eval("document.documentElement.classList.add('is-printing')");
+    let (started, started_rx) = std::sync::mpsc::channel();
+    window
+        .with_webview(move |webview| {
+            let result = export::print_view(&webview.inner(), &destination);
+            let _ = started.send(result);
+        })
+        .map_err(|_| "Das Fenster ist nicht bereit für den PDF-Export.".to_owned())?;
+    let printed = started_rx
+        .recv_timeout(std::time::Duration::from_secs(25))
+        .map_err(|_| "PDF-Export fehlgeschlagen.".to_owned())?;
+    let _ = window.eval("document.documentElement.classList.remove('is-printing')");
+    printed?;
+    Ok(json!({ "filePath": file_path }))
+}
+
+#[tauri::command(rename = "fanotes:open-subject-book-popout")]
+fn open_subject_book_popout(
+    app: tauri::AppHandle,
+    state: State<'_, HostState>,
+    args: Vec<Value>,
+) -> Result<Value, String> {
+    let result = {
+        let mut host = state
+            .0
+            .lock()
+            .map_err(|_| "Der Host ist belegt.".to_owned())?;
+        host.dispatch("fanotes:open-subject-book-popout", &args)?
+    };
+    let book = result["bookPath"].as_str().unwrap_or("").to_owned();
+    let fragment = format!("subject-book={}", encode_uri_component(&book));
+    if let Some(existing) = app.get_webview_window("subject-book") {
+        let _ = existing.eval(&format!("location.hash = '#{fragment}'"));
+        let _ = existing.set_focus();
+        return Ok(result);
+    }
+    let main = app
+        .get_webview_window("main")
+        .ok_or_else(|| "Das Fenster ist nicht bereit.".to_owned())?;
+    let mut url = main
+        .url()
+        .map_err(|_| "Das Fenster ist nicht bereit.".to_owned())?;
+    url.set_fragment(Some(&fragment));
+    let window =
+        tauri::WebviewWindowBuilder::new(&app, "subject-book", tauri::WebviewUrl::External(url))
+            .title("Buch")
+            .inner_size(980.0, 1080.0)
+            .min_inner_size(420.0, 360.0)
+            .build()
+            .map_err(|_| "Das Buchfenster konnte nicht geöffnet werden.".to_owned())?;
+    let app_handle = app.clone();
+    window.on_window_event(move |event| {
+        if matches!(event, tauri::WindowEvent::Destroyed) {
+            let _ = app_handle.emit("fanotes:subject-book-popout-closed", ());
+        }
+    });
+    Ok(result)
+}
+
+#[tauri::command(rename = "fanotes:close-subject-book-popout")]
+fn close_subject_book_popout(app: tauri::AppHandle) -> Result<Value, String> {
+    if let Some(window) = app.get_webview_window("subject-book") {
+        let _ = window.close();
+    }
+    Ok(json!({ "open": false }))
+}
+
+#[tauri::command(rename = "fanotes:request-close")]
+fn request_close(
+    window: tauri::WebviewWindow,
+    state: State<'_, HostState>,
+) -> Result<Value, String> {
+    {
+        let mut host = state
+            .0
+            .lock()
+            .map_err(|_| "Der Host ist belegt.".to_owned())?;
+        host.dispatch("fanotes:request-close", &[])?;
+    }
+    window
+        .close()
+        .map_err(|_| "Das Fenster konnte nicht geschlossen werden.".to_owned())?;
+    Ok(Value::Null)
+}
+
+#[tauri::command(rename = "fanotes:confirm-close")]
+fn confirm_close(
+    window: tauri::WebviewWindow,
+    state: State<'_, HostState>,
+) -> Result<Value, String> {
+    {
+        let mut host = state
+            .0
+            .lock()
+            .map_err(|_| "Der Host ist belegt.".to_owned())?;
+        host.dispatch("fanotes:confirm-close", &[])?;
+    }
+    window
+        .close()
+        .map_err(|_| "Das Fenster konnte nicht geschlossen werden.".to_owned())?;
+    Ok(Value::Null)
+}
+
+#[tauri::command(rename = "fanotes:cancel-close")]
+fn cancel_close(state: State<'_, HostState>) -> Result<Value, String> {
+    let mut host = state
+        .0
+        .lock()
+        .map_err(|_| "Der Host ist belegt.".to_owned())?;
+    host.dispatch("fanotes:cancel-close", &[])
+}
+
+#[tauri::command(rename = "fanotes:capture-window")]
+fn capture_window(window: tauri::WebviewWindow) -> Result<Value, String> {
+    let (captured, captured_rx) = std::sync::mpsc::channel();
+    window
+        .with_webview(move |webview| {
+            let result = capture::capture_view(&webview.inner());
+            let _ = captured.send(result);
+        })
+        .map_err(|_| "Das Fensterbild ist ungültig.".to_owned())?;
+    let image = captured_rx
+        .recv_timeout(std::time::Duration::from_secs(20))
+        .map_err(|_| "Das Fensterbild ist ungültig.".to_owned())??;
+    Ok(Value::String(image))
+}
+
+fn encode_uri_component(value: &str) -> String {
+    let mut encoded = String::new();
+    for byte in value.bytes() {
+        if byte.is_ascii_alphanumeric()
+            || matches!(
+                byte,
+                b'-' | b'_' | b'.' | b'!' | b'~' | b'*' | b'\'' | b'(' | b')'
+            )
+        {
+            encoded.push(byte as char);
+        } else {
+            encoded.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    encoded
+}
 
 macro_rules! fanotes_commands {
     ($($name:ident => $channel:literal),* $(,)?) => {
@@ -21,7 +187,16 @@ macro_rules! fanotes_commands {
         )*
 
         pub fn register() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync + 'static {
-            tauri::generate_handler![$($name),*]
+            tauri::generate_handler![
+                $($name),*,
+                export_note_pdf,
+                open_subject_book_popout,
+                close_subject_book_popout,
+                capture_window,
+                request_close,
+                confirm_close,
+                cancel_close
+            ]
         }
     };
 }
@@ -59,8 +234,6 @@ fanotes_commands! {
     read_subject_books => "fanotes:read-subject-books",
     write_subject_books => "fanotes:write-subject-books",
     import_subject_book => "fanotes:import-subject-book",
-    open_subject_book_popout => "fanotes:open-subject-book-popout",
-    close_subject_book_popout => "fanotes:close-subject-book-popout",
     subject_book_popout_closed => "fanotes:subject-book-popout-closed",
     import_worksheet => "fanotes:import-worksheet",
     import_worksheet_from_data => "fanotes:import-worksheet-from-data",
@@ -71,7 +244,6 @@ fanotes_commands! {
     delete_worksheet => "fanotes:delete-worksheet",
     list_note_history => "fanotes:list-note-history",
     read_note_history => "fanotes:read-note-history",
-    export_note_pdf => "fanotes:export-note-pdf",
     read_asset_data_url => "fanotes:read-asset-data-url",
     read_asset_bytes => "fanotes:read-asset-bytes",
     load_spelling_resources => "fanotes:load-spelling-resources",
@@ -117,11 +289,7 @@ fanotes_commands! {
     sync_read_secrets => "fanotes:sync-read-secrets",
     sync_write_secrets => "fanotes:sync-write-secrets",
     before_close => "fanotes:before-close",
-    confirm_close => "fanotes:confirm-close",
-    cancel_close => "fanotes:cancel-close",
-    request_close => "fanotes:request-close",
     sheet_zoom => "fanotes:sheet-zoom",
-    capture_window => "fanotes:capture-window",
     render_pdf_page => "fanotes:render-pdf-page",
 }
 
@@ -135,6 +303,25 @@ pub fn run() {
                 .app_data_dir()
                 .unwrap_or_else(|_| std::env::temp_dir().join("fanotes"));
             app.manage(HostState(Mutex::new(Host::open(app_data))));
+            if let Some(window) = app.get_webview_window("main") {
+                let handle = app.handle().clone();
+                window.on_window_event(move |event| {
+                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                        let allow = handle
+                            .state::<HostState>()
+                            .0
+                            .lock()
+                            .map(|host| host.allow_close)
+                            .unwrap_or(true);
+                        if !allow {
+                            api.prevent_close();
+                            if let Some(main) = handle.get_webview_window("main") {
+                                let _ = main.emit("fanotes:before-close", ());
+                            }
+                        }
+                    }
+                });
+            }
             Ok(())
         })
         .invoke_handler(register())

@@ -1,20 +1,33 @@
+#![recursion_limit = "512"]
 //! Desktop host operations behind `FaNotesApi`.
 //!
 //! Tauri commands use the preload channel strings. Electron stays the release host:
 //! update commands report `supported: false` and do not install a package.
 
+mod addons;
 mod channels;
 mod drawings;
+mod imports;
+mod notes;
 mod ocr;
+mod onboarding;
+mod onenote;
 mod policy;
+mod resources;
+mod settings;
 mod vault;
+mod worksheets;
 
+mod ai;
+
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::time::UNIX_EPOCH;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use base64::Engine;
 use filetime::{set_file_mtime, FileTime};
+use sha2::{Digest, Sha256};
 
 use serde_json::{json, Map, Value};
 
@@ -40,6 +53,18 @@ pub struct Host {
     pub settings: Map<String, Value>,
     pub onboarding_required: bool,
     pub close_requested: bool,
+    /// Set only after the page has saved and confirmed the window may close.
+    pub allow_close: bool,
+    /// Native file dialogs. The channel sweep turns this off so a picker cannot block the test.
+    pub file_dialogs: bool,
+    /// Overrides the documents directory used for a first-run vault.
+    pub documents_dir: Option<PathBuf>,
+    /// When set, link and file-manager actions are appended here instead of launched.
+    pub open_log: Option<PathBuf>,
+    /// When set, deleted notes go to this trash directory instead of the desktop trash.
+    pub trash_dir: Option<PathBuf>,
+    /// True after this session has shown the stored API keys to the page.
+    secrets_loaded: bool,
 }
 
 impl Host {
@@ -51,6 +76,12 @@ impl Host {
             settings: default_settings(),
             onboarding_required: false,
             close_requested: false,
+            allow_close: false,
+            file_dialogs: true,
+            documents_dir: None,
+            open_log: None,
+            trash_dir: None,
+            secrets_loaded: false,
         };
         host.load_persisted();
         host
@@ -63,6 +94,7 @@ impl Host {
             return Err("Der Vault wurde unsicher verändert.".to_owned());
         }
         self.vault = Some(path);
+        self.refresh_onboarding();
         Ok(())
     }
 
@@ -80,35 +112,30 @@ impl Host {
             ChannelKind::Message => return self.dispatch_message(channel),
             ChannelKind::Command => {}
         }
+        if self.onboarding_required && !onboarding_open(channel) {
+            return Err("Bitte schließe zuerst die FaNotes-Ersteinrichtung ab.".to_owned());
+        }
         match channel {
             "fanotes:bootstrap" => self.bootstrap(),
-            "fanotes:complete-onboarding" => {
-                self.onboarding_required = false;
-                self.persist_settings()?;
-                self.bootstrap()
-            }
-            "fanotes:get-cached-tree" | "fanotes:get-fast-tree" | "fanotes:get-tree" => self.tree(),
-            "fanotes:select-vault" => Ok(Value::Null),
+            "fanotes:complete-onboarding" => self.complete_onboarding(args),
+            "fanotes:get-cached-tree" => self.cached_tree(),
+            "fanotes:get-fast-tree" => self.tree(false),
+            "fanotes:get-tree" => self.tree(true),
+            "fanotes:select-vault" => self.select_vault(args),
             "fanotes:read-file" => self.read_file(&arg_string(args, 0)?),
             "fanotes:write-file" => self.write_file(&arg_string(args, 0)?, &arg_string(args, 1)?),
-            "fanotes:read-recognition-model" => {
-                self.read_internal(".fanotes/recognition-model.json")
-            }
+            "fanotes:read-recognition-model" => self.read_recognition_model(),
             "fanotes:write-recognition-model" => {
-                self.write_internal(".fanotes/recognition-model.json", &arg_string(args, 0)?)
+                self.write_recognition_model(&arg_string(args, 0)?)
             }
-            "fanotes:create-note" => self.create_entry(
-                &arg_string(args, 0)?,
-                arg_string(args, 1).ok().as_deref(),
-                true,
-            ),
-            "fanotes:create-folder" => self.create_entry(
-                &arg_string(args, 0)?,
-                arg_string(args, 1).ok().as_deref(),
-                false,
-            ),
+            "fanotes:create-note" => {
+                self.create_entry(&loose_string(args, 0), loose_string_opt(args, 1), true)
+            }
+            "fanotes:create-folder" => {
+                self.create_entry(&loose_string(args, 0), loose_string_opt(args, 1), false)
+            }
             "fanotes:set-folder-color" => {
-                self.set_folder_color(&arg_string(args, 0)?, &arg_string(args, 1)?)
+                self.set_folder_color(&arg_string(args, 0)?, args.get(1).unwrap_or(&Value::Null))
             }
             "fanotes:rename-entry" => {
                 self.rename_entry(&arg_string(args, 0)?, &arg_string(args, 1)?)
@@ -122,39 +149,55 @@ impl Host {
             }
             "fanotes:read-drawing" => drawings::read_drawing(self, &arg_string(args, 0)?),
             "fanotes:read-famd-ink" => self.read_famd_ink(&arg_string(args, 0)?),
-            "fanotes:read-note-page-stats"
-            | "fanotes:read-note-paper-style"
-            | "fanotes:read-note-links"
-            | "fanotes:read-note-backups" => Ok(Value::Null),
-            "fanotes:set-note-paper-style"
-            | "fanotes:write-note-links"
-            | "fanotes:write-note-backups" => Ok(Value::Null),
-            "fanotes:read-subject-books" => Ok(json!([])),
-            "fanotes:write-subject-books" => Ok(Value::Null),
-            "fanotes:import-subject-book"
-            | "fanotes:import-worksheet"
-            | "fanotes:import-worksheet-from-data"
-            | "fanotes:import-pdf-note"
-            | "fanotes:import-onenote" => {
-                Err("Dieser Import ist im Tauri-Host noch nicht freigeschaltet.".to_owned())
+            "fanotes:read-note-page-stats" => notes::read_page_stats(self, &arg_string(args, 0)?),
+            "fanotes:read-note-paper-style" => notes::read_paper_style(self, &arg_string(args, 0)?),
+            "fanotes:set-note-paper-style" => {
+                notes::set_paper_style(self, &arg_string(args, 0)?, &arg_string(args, 1)?)
             }
-            "fanotes:open-subject-book-popout" | "fanotes:close-subject-book-popout" => {
-                Ok(Value::Null)
+            "fanotes:read-note-links" => notes::read_links(self, &arg_string(args, 0)?),
+            "fanotes:write-note-links" => notes::write_links(
+                self,
+                &arg_string(args, 0)?,
+                args.get(1).unwrap_or(&Value::Null),
+            ),
+            "fanotes:read-note-backups" => notes::read_backups(self, &arg_string(args, 0)?),
+            "fanotes:write-note-backups" => notes::write_backups(
+                self,
+                &arg_string(args, 0)?,
+                args.get(1).unwrap_or(&Value::Null),
+            ),
+            "fanotes:read-subject-books" => notes::read_subject_books(self),
+            "fanotes:write-subject-books" => {
+                notes::write_subject_books(self, args.first().unwrap_or(&Value::Null))
             }
-            "fanotes:read-worksheet" | "fanotes:save-worksheet" | "fanotes:delete-worksheet" => {
-                Ok(Value::Null)
+            "fanotes:import-subject-book" => imports::import_subject_book(self, args),
+            "fanotes:import-worksheet" => imports::import_worksheet(self),
+            "fanotes:import-worksheet-from-data" => {
+                worksheets::import_from_data(self, args.first().unwrap_or(&Value::Null))
             }
-            "fanotes:list-note-history" => Ok(json!([])),
-            "fanotes:read-note-history" => Ok(Value::Null),
-            "fanotes:export-note-pdf" => Err("PDF-Export bleibt im Electron-Release.".to_owned()),
+            "fanotes:import-pdf-note" => imports::import_pdf_note(self, args),
+            "fanotes:import-onenote" => onenote::import_onenote(self, args),
+            "fanotes:open-subject-book-popout" => self.open_subject_book(&arg_string(args, 0)?),
+            "fanotes:close-subject-book-popout" => Ok(json!({ "open": false })),
+            "fanotes:read-worksheet" => worksheets::read_worksheet(self, &arg_string(args, 0)?),
+            "fanotes:save-worksheet" => {
+                worksheets::save_worksheet(self, args.first().unwrap_or(&Value::Null))
+            }
+            "fanotes:delete-worksheet" => worksheets::delete_worksheet(self, &arg_string(args, 0)?),
+            "fanotes:list-note-history" => notes::list_history(self, &arg_string(args, 0)?),
+            "fanotes:read-note-history" => {
+                notes::read_history(self, &arg_string(args, 0)?, &arg_string(args, 1)?)
+            }
+            "fanotes:export-note-pdf" => {
+                Err("Das Fenster ist nicht bereit für den PDF-Export.".to_owned())
+            }
             "fanotes:read-asset-data-url" => self.read_asset_data_url(&arg_string(args, 0)?),
             "fanotes:read-asset-bytes" => self.read_asset_bytes(&arg_string(args, 0)?),
-            "fanotes:load-spelling-resources"
-            | "fanotes:load-spelling-word-candidates"
-            | "fanotes:load-handwriting-recognition-resources" => Err(
-                "Die Ressourcen liegen im Anwendungsbundle und werden vom Renderer geladen."
-                    .to_owned(),
+            "fanotes:load-spelling-resources" => resources::load_spelling(),
+            "fanotes:load-spelling-word-candidates" => resources::load_spelling_candidates(
+                args.first().and_then(Value::as_str).unwrap_or(""),
             ),
+            "fanotes:load-handwriting-recognition-resources" => resources::load_handwriting(),
             "fanotes:recognize-native-handwriting-line" => {
                 ocr::recognize_line(args.first().unwrap_or(&Value::Null))
             }
@@ -168,55 +211,62 @@ impl Host {
             "fanotes:qwen-vision-install" | "fanotes:qwen-vision-recognize" => {
                 Err("Qwen Vision ist nicht installiert.".to_owned())
             }
-            "fanotes:lm-studio-list-models" => {
-                let origin = local_ai_origin(&arg_string(args, 0)?, "lmstudio")?;
-                Ok(json!({ "origin": origin, "models": [] }))
+            "fanotes:lm-studio-list-models" => ai::list_lm_studio(
+                &arg_string(args, 0)?,
+                args.get(1).and_then(Value::as_str).unwrap_or(""),
+            ),
+            "fanotes:lm-studio-transform" => {
+                ai::transform_lm_studio(args.first().unwrap_or(&Value::Null))
             }
-            "fanotes:lm-studio-transform" | "fanotes:ai-transform" => {
-                Err("Der AI-Dienst hat keine Antwort geliefert.".to_owned())
-            }
-            "fanotes:ai-list-models" => {
-                self.ai_list_models(args.first().cloned().unwrap_or(Value::Null))
-            }
-            "fanotes:load-secure-settings" => Ok(self.secret_snapshot()),
-            "fanotes:save-settings" => {
-                self.save_settings(args.first().cloned().unwrap_or(Value::Null))
-            }
+            "fanotes:ai-list-models" => ai::list_models(args.first().unwrap_or(&Value::Null)),
+            "fanotes:ai-transform" => ai::transform(args.first().unwrap_or(&Value::Null)),
+            "fanotes:load-secure-settings" => Ok(self.load_secure_settings()),
+            "fanotes:save-settings" => self.save_settings(
+                args.first().cloned().unwrap_or(Value::Null),
+                args.get(1).unwrap_or(&Value::Null),
+            ),
             "fanotes:reset-app-data" => self.reset_app_data(),
             "fanotes:update-get-state"
             | "fanotes:update-check"
             | "fanotes:update-download"
             | "fanotes:update-install" => Ok(self.update_state()),
-            "fanotes:reveal-in-folder" => {
-                let _ = vault::resolve_inside(self.require_vault()?, &arg_string(args, 0)?)?;
-                Ok(Value::Null)
-            }
+            "fanotes:reveal-in-folder" => self.reveal_in_folder(&arg_string(args, 0)?),
             "fanotes:open-external" => self.open_external(&arg_string(args, 0)?),
-            "fanotes:addons-fetch" | "fanotes:addons-net-fetch" => {
-                addon_request_allowed(&arg_string(args, 0)?)?;
-                Err("Der Add-on-Host konnte nicht aufgelöst werden.".to_owned())
+            "fanotes:addons-fetch" => addons::fetch_text(&arg_string(args, 0)?),
+            "fanotes:addons-list" => addons::list(self),
+            "fanotes:addons-save" => addons::save(self, args.first().unwrap_or(&Value::Null)),
+            "fanotes:addons-remove" => addons::remove(self, &arg_string(args, 0)?),
+            "fanotes:addons-read-file" => {
+                addons::read_file(self, &arg_string(args, 0)?, &arg_string(args, 1)?)
             }
-            "fanotes:addons-list" => Ok(json!([])),
-            "fanotes:addons-save"
-            | "fanotes:addons-remove"
-            | "fanotes:addons-read-file"
-            | "fanotes:addons-write-files"
-            | "fanotes:addons-read-data"
-            | "fanotes:addons-write-data" => Ok(Value::Null),
-            "fanotes:sync-vault-id" => Ok(json!(self.vault_id())),
-            "fanotes:sync-scan" => self.tree(),
+            "fanotes:addons-write-files" => addons::write_files(
+                self,
+                &arg_string(args, 0)?,
+                args.get(1).unwrap_or(&Value::Null),
+            ),
+            "fanotes:addons-read-data" => addons::read_data(self, &arg_string(args, 0)?),
+            "fanotes:addons-write-data" => addons::write_data(
+                self,
+                &arg_string(args, 0)?,
+                args.get(1).unwrap_or(&Value::Null),
+            ),
+            "fanotes:addons-net-fetch" => {
+                addons::net_fetch(&arg_string(args, 0)?, args.get(1).unwrap_or(&Value::Null))
+            }
+            "fanotes:sync-vault-id" => Ok(Value::String(self.vault_id()?)),
+            "fanotes:sync-scan" => self.sync_scan(),
             "fanotes:sync-read" => self.sync_read(&arg_string(args, 0)?),
             "fanotes:sync-write" => self.sync_write(args),
             "fanotes:sync-remove" => self.sync_remove(&arg_string(args, 0)?),
-            "fanotes:sync-read-state" => self.read_internal(".fanotes/sync-state.json"),
-            "fanotes:sync-write-state" => {
-                self.write_internal(".fanotes/sync-state.json", &arg_string(args, 1)?)
+            "fanotes:sync-read-state" => {
+                self.read_sync_state(args.first().and_then(Value::as_str).unwrap_or(""))
             }
-            "fanotes:sync-read-secrets" => Ok(self.secret_snapshot()),
+            "fanotes:sync-write-state" => self.write_sync_state(args),
+            "fanotes:sync-read-secrets" => self.read_sync_secrets(),
             "fanotes:sync-write-secrets" => {
-                self.write_secrets(args.first().cloned().unwrap_or(Value::Null))
+                self.write_sync_secrets(args.first().cloned().unwrap_or(Value::Null))
             }
-            "fanotes:capture-window" => Ok(Value::Null),
+            "fanotes:capture-window" => Err("Das Fensterbild ist ungültig.".to_owned()),
             "fanotes:render-pdf-page" => self.render_pdf_page(args),
             _ => Err(format!("Unbekannter Kanal: {channel}")),
         }
@@ -266,7 +316,15 @@ impl Host {
     }
 
     fn sync_read(&self, relative: &str) -> Result<Value, String> {
-        let file = vault::resolve_inside(self.require_vault()?, relative)?;
+        let (file, _) = vault::resolve_sync_path(self.require_vault()?, relative, false)?;
+        let meta = fs::symlink_metadata(&file)
+            .map_err(|_| "Die Datei konnte nicht gelesen werden.".to_owned())?;
+        if !meta.is_file() {
+            return Err("Die Datei ist keine reguläre Datei.".to_owned());
+        }
+        if meta.len() > SYNC_MAX_BYTES {
+            return Err("Die Datei ist zu groß für den Sync.".to_owned());
+        }
         let bytes = read_regular_limited(&file, SYNC_MAX_BYTES)?;
         Ok(Value::String(
             base64::engine::general_purpose::STANDARD.encode(bytes),
@@ -282,70 +340,211 @@ impl Host {
         if bytes.len() as u64 > SYNC_MAX_BYTES {
             return Err("Die Datei ist zu groß für den Sync.".to_owned());
         }
-        let path = vault::resolve_inside(self.require_vault()?, &relative)?;
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)
-                .map_err(|_| "Der Ordner konnte nicht angelegt werden.".to_owned())?;
-        }
-        fs::write(&path, &bytes)
-            .map_err(|_| "Die Datei konnte nicht geschrieben werden.".to_owned())?;
-        if let Some(mtime_ms) = args.get(2).and_then(Value::as_i64) {
+        let root = self.require_vault()?.to_path_buf();
+        let (path, normalized) = vault::resolve_sync_path(&root, &relative, true)?;
+        notes::atomic_write(&path, &bytes, 0o600)?;
+        if let Some(mtime_ms) = arg_mtime_ms(args.get(2)) {
             let seconds = mtime_ms.div_euclid(1000);
             let nanos = (mtime_ms.rem_euclid(1000) as u32).saturating_mul(1_000_000);
             let _ = set_file_mtime(&path, FileTime::from_unix_time(seconds, nanos));
         }
         let meta = fs::symlink_metadata(&path)
             .map_err(|_| "Die Datei konnte nicht gelesen werden.".to_owned())?;
-        let mtime_ms = meta
-            .modified()
-            .ok()
-            .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
-            .map(|time| time.as_millis() as i64)
-            .unwrap_or(0);
+        if meta.file_type().is_symlink() || !meta.is_file() {
+            return Err("Die Datei ist keine reguläre Datei.".to_owned());
+        }
         Ok(json!({
-            "path": relative,
-            "size": bytes.len(),
-            "mtimeMs": mtime_ms,
+            "path": normalized,
+            "size": meta.len(),
+            "mtimeMs": mtime_millis(&meta),
         }))
     }
 
     fn sync_remove(&mut self, relative: &str) -> Result<Value, String> {
-        let path = vault::resolve_inside(self.require_vault()?, relative)?;
+        let root = self.require_vault()?;
+        let (path, _) = vault::resolve_sync_path(root, relative, true)?;
         match fs::symlink_metadata(&path) {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Value::Null),
             Err(_) => Err("Die Datei konnte nicht gelesen werden.".to_owned()),
             Ok(meta) if meta.file_type().is_symlink() => {
-                Err("Symbolische Links sind innerhalb des Vaults nicht erlaubt.".to_owned())
+                Err("Symbolische Links sind im Vault nicht erlaubt.".to_owned())
             }
             Ok(meta) if !meta.is_file() => {
                 Err("Nur Dateien können über den Sync entfernt werden.".to_owned())
             }
             Ok(_) => {
-                fs::remove_file(&path)
-                    .map_err(|_| "Der Eintrag konnte nicht entfernt werden.".to_owned())?;
+                if send_to_trash(self, &path).is_err() {
+                    fs::remove_file(&path)
+                        .map_err(|_| "Der Eintrag konnte nicht entfernt werden.".to_owned())?;
+                }
                 Ok(Value::Null)
             }
         }
     }
 
+    fn sync_scan(&self) -> Result<Value, String> {
+        let root = self.require_vault()?;
+        let mut entries = Vec::new();
+        scan_sync_directory(root, root, 0, &mut entries);
+        Ok(Value::Array(entries))
+    }
+
+    fn read_sync_state(&self, vault_id: &str) -> Result<Value, String> {
+        let path = self.sync_state_path(vault_id)?;
+        match fs::symlink_metadata(&path) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Value::Null),
+            Err(_) => Err("Der Sync-Zustand konnte nicht gelesen werden.".to_owned()),
+            Ok(meta)
+                if meta.file_type().is_symlink()
+                    || !meta.is_file()
+                    || meta.len() > MAX_SYNC_STATE_BYTES =>
+            {
+                Ok(Value::Null)
+            }
+            Ok(_) => match fs::read_to_string(&path) {
+                Ok(text) => Ok(Value::String(text)),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Value::Null),
+                Err(_) => Err("Der Sync-Zustand konnte nicht gelesen werden.".to_owned()),
+            },
+        }
+    }
+
+    fn write_sync_state(&self, args: &[Value]) -> Result<Value, String> {
+        let vault_id = args.first().and_then(Value::as_str).unwrap_or("");
+        let path = self.sync_state_path(vault_id)?;
+        match args.get(1) {
+            None | Some(Value::Null) => {
+                if path.is_file() {
+                    fs::remove_file(&path)
+                        .map_err(|_| "Der Sync-Zustand konnte nicht gelöscht werden.".to_owned())?;
+                }
+                Ok(Value::Null)
+            }
+            Some(Value::String(json)) => {
+                if json.len() > MAX_SYNC_STATE_BYTES as usize {
+                    return Err("Der Sync-Zustand ist ungültig.".to_owned());
+                }
+                notes::atomic_write(&path, json.as_bytes(), 0o600)?;
+                Ok(Value::Null)
+            }
+            Some(_) => Err("Der Sync-Zustand ist ungültig.".to_owned()),
+        }
+    }
+
+    fn read_sync_secrets(&self) -> Result<Value, String> {
+        let path = self.sync_secrets_path();
+        let raw = match fs::read_to_string(&path) {
+            Ok(raw) => raw,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Value::Null),
+            Err(_) => {
+                return Err("Die Sync-Anmeldung konnte nicht gelesen werden.".to_owned());
+            }
+        };
+        if raw.starts_with("safe1:") {
+            return Err("Die Sync-Anmeldung ist mit dem Schlüsselbund dieses Systems geschützt, der gerade nicht verfügbar ist.".to_owned());
+        }
+        if raw.starts_with("plain1:") {
+            let _ = fs::remove_file(&path);
+            return Ok(Value::Null);
+        }
+        if raw.trim().is_empty() {
+            return Ok(Value::Null);
+        }
+        Ok(Value::String(raw))
+    }
+
+    fn write_sync_secrets(&self, incoming: Value) -> Result<Value, String> {
+        let path = self.sync_secrets_path();
+        if incoming.is_null() {
+            if path.is_file() {
+                fs::remove_file(&path).map_err(|_| {
+                    "Die Sync-Anmeldedaten konnten nicht gelöscht werden.".to_owned()
+                })?;
+            }
+            return Ok(Value::Null);
+        }
+        let Some(json) = incoming.as_str() else {
+            return Err("Die Sync-Anmeldedaten sind ungültig.".to_owned());
+        };
+        if json.len() > 64 * 1024 {
+            return Err("Die Sync-Anmeldedaten sind ungültig.".to_owned());
+        }
+        notes::atomic_write(&path, json.as_bytes(), 0o600)?;
+        Ok(Value::Null)
+    }
+
+    fn sync_state_path(&self, vault_id: &str) -> Result<PathBuf, String> {
+        if !is_vault_id(vault_id) {
+            return Err("Ungültige Vault-ID.".to_owned());
+        }
+        Ok(self
+            .app_data
+            .join("sync")
+            .join(format!("state-{vault_id}.json")))
+    }
+
+    fn sync_secrets_path(&self) -> PathBuf {
+        self.app_data.join("sync").join("account.secret")
+    }
+
+    fn read_recognition_model(&self) -> Result<Value, String> {
+        let root = self.require_vault()?;
+        let path = root.join(".fanotes").join("recognition-model.json");
+        match fs::symlink_metadata(&path) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Value::Null),
+            Err(_) => Err("Das Handschriftmodell konnte nicht gelesen werden.".to_owned()),
+            Ok(meta) if meta.file_type().is_symlink() || !meta.is_file() => {
+                Err("Das Handschriftmodell konnte nicht gelesen werden.".to_owned())
+            }
+            Ok(meta) if meta.len() > MAX_RECOGNITION_MODEL_BYTES => {
+                Err("Das Handschriftmodell ist ungültig oder zu groß.".to_owned())
+            }
+            Ok(_) => fs::read_to_string(&path)
+                .map(Value::String)
+                .map_err(|_| "Das Handschriftmodell konnte nicht gelesen werden.".to_owned()),
+        }
+    }
+
+    fn write_recognition_model(&mut self, content: &str) -> Result<Value, String> {
+        if content.len() > MAX_RECOGNITION_MODEL_BYTES as usize {
+            return Err("Das Handschriftmodell ist ungültig oder zu groß.".to_owned());
+        }
+        let root = self.require_vault()?.to_path_buf();
+        let directory = internal_directory(&root)?;
+        let path = directory.join("recognition-model.json");
+        notes::atomic_write(&path, content.as_bytes(), 0o600)?;
+        let modified = fs::symlink_metadata(&path)
+            .ok()
+            .and_then(|meta| meta.modified().ok())
+            .map(notes::iso_from_system_time)
+            .unwrap_or_else(|| notes::iso_from_system_time(SystemTime::now()));
+        Ok(json!({ "modifiedAt": modified }))
+    }
+
     fn dispatch_message(&mut self, channel: &str) -> Result<Value, String> {
-        if channel == "fanotes:request-close" || channel == "fanotes:confirm-close" {
+        if channel == "fanotes:confirm-close" {
+            self.close_requested = true;
+            self.allow_close = true;
+        }
+        if channel == "fanotes:request-close" {
             self.close_requested = true;
         }
         if channel == "fanotes:cancel-close" {
             self.close_requested = false;
+            self.allow_close = false;
         }
         Ok(Value::Null)
     }
 
-    fn bootstrap(&self) -> Result<Value, String> {
+    fn bootstrap(&mut self) -> Result<Value, String> {
+        self.ensure_default_vault()?;
         let vault = self.require_vault()?;
         Ok(json!({
             "vaultPath": vault,
             "vaultName": vault.file_name().and_then(|name| name.to_str()).unwrap_or("Vault"),
             "settings": self.settings,
             "onboardingRequired": self.onboarding_required,
-            "starterSubjects": [],
+            "starterSubjects": onboarding::starter_subjects(self.ui_language()),
             "linuxRuntime": {
                 "platform": std::env::consts::OS,
                 "ozone": "",
@@ -363,57 +562,191 @@ impl Host {
         }))
     }
 
-    fn tree(&self) -> Result<Value, String> {
+    fn ensure_default_vault(&mut self) -> Result<(), String> {
+        if self.vault.is_some() {
+            return Ok(());
+        }
+        let documents = match self.documents_dir.clone() {
+            Some(path) => path,
+            None => default_documents_dir()?,
+        };
+        let vault = documents.join("FaNotes");
+        let created = match fs::symlink_metadata(&vault) {
+            Ok(meta) if meta.file_type().is_symlink() || !meta.is_dir() => {
+                return Err(format!(
+                    "Der Standard-Vault kann nicht unter {} angelegt werden.",
+                    vault.display()
+                ));
+            }
+            Ok(_) => false,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                fs::create_dir_all(&vault).map_err(|_| {
+                    format!(
+                        "Der Standard-Vault kann nicht unter {} angelegt werden.",
+                        vault.display()
+                    )
+                })?;
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    let _ = fs::set_permissions(&vault, fs::Permissions::from_mode(0o700));
+                }
+                true
+            }
+            Err(_) => {
+                return Err(format!(
+                    "Der Standard-Vault kann nicht unter {} angelegt werden.",
+                    vault.display()
+                ));
+            }
+        };
+        if created {
+            let language = self.ui_language();
+            let note = vault.join(onboarding::welcome_file_name(language));
+            notes::atomic_write(&note, onboarding::welcome_note(language).as_bytes(), 0o600)?;
+            onboarding::write_status(&vault, "pending")?;
+        }
+        self.set_vault(vault.clone())?;
+        fs::write(
+            self.app_data.join("vault-path"),
+            vault.to_string_lossy().as_bytes(),
+        )
+        .map_err(|_| "Die Einstellungen konnten nicht gespeichert werden.".to_owned())?;
+        Ok(())
+    }
+
+    fn tree(&self, stats: bool) -> Result<Value, String> {
         let root = self.require_vault()?;
-        read_tree(root, root)
+        let colors = read_folder_colors(root)?;
+        let entries = read_tree(root, root, &colors, 0, stats)?;
+        write_tree_cache(&self.app_data, root, &entries);
+        Ok(entries)
+    }
+
+    fn cached_tree(&self) -> Result<Value, String> {
+        let root = self.require_vault()?;
+        Ok(read_tree_cache(&self.app_data, root).unwrap_or(Value::Null))
+    }
+
+    fn complete_onboarding(&mut self, args: &[Value]) -> Result<Value, String> {
+        if !self.onboarding_required {
+            return self.bootstrap();
+        }
+        let selected = onboarding::validate_selection(args.first().unwrap_or(&Value::Null))?;
+        let root = self.require_vault()?.to_path_buf();
+        let language = self.ui_language();
+        for (name, _) in onboarding::folders_to_create(language, &selected) {
+            onboarding::ensure_folder(&root, name)?;
+        }
+        let mut colors = read_folder_colors(&root)?;
+        for (name, color) in onboarding::folders_to_create(language, &selected) {
+            colors.insert(name.to_owned(), color.to_owned());
+        }
+        write_folder_colors(&root, &colors)?;
+        onboarding::write_status(&root, "complete")?;
+        if language == "en" {
+            if self.settings.get("defaultFolder").and_then(Value::as_str) == Some("Eingang") {
+                self.settings
+                    .insert("defaultFolder".to_owned(), json!("Inbox"));
+            }
+            if self
+                .settings
+                .get("dailyNotesFolder")
+                .and_then(Value::as_str)
+                == Some("Tagesnotizen")
+            {
+                self.settings
+                    .insert("dailyNotesFolder".to_owned(), json!("Daily Notes"));
+            }
+            if self
+                .settings
+                .get("recognitionLanguage")
+                .and_then(Value::as_str)
+                == Some("de")
+            {
+                self.settings
+                    .insert("recognitionLanguage".to_owned(), json!("en"));
+            }
+        }
+        self.onboarding_required = false;
+        self.persist_settings()?;
+        self.bootstrap()
+    }
+
+    fn ui_language(&self) -> &'static str {
+        match self.settings.get("uiLanguage").and_then(Value::as_str) {
+            Some("de") => "de",
+            Some("en") => "en",
+            _ => {
+                let locale = std::env::var("LC_ALL")
+                    .or_else(|_| std::env::var("LC_MESSAGES"))
+                    .or_else(|_| std::env::var("LANG"))
+                    .unwrap_or_default();
+                if german_locale(&locale) {
+                    "de"
+                } else {
+                    "en"
+                }
+            }
+        }
+    }
+
+    fn refresh_onboarding(&mut self) {
+        self.onboarding_required =
+            self.vault.as_deref().and_then(onboarding::read_status) == Some("pending");
     }
 
     fn read_file(&self, relative: &str) -> Result<Value, String> {
-        let path = vault::resolve_inside(self.require_vault()?, relative)?;
+        let normalized = vault::normalize_relative_path(relative, false, false)?;
+        if !notes::is_note_text(&normalized) {
+            return Err("Es dürfen nur Markdown-Dateien und FaNotes-Handschriftdateien (.famd) bearbeitet werden.".to_owned());
+        }
+        let path = vault::resolve_inside(self.require_vault()?, &normalized)?;
+        let limit = note_byte_limit(&normalized);
+        let meta = fs::symlink_metadata(&path)
+            .map_err(|_| "Die Datei konnte nicht gelesen werden.".to_owned())?;
+        if meta.file_type().is_symlink() || !meta.is_file() {
+            return Err("Die Datei konnte nicht gelesen werden.".to_owned());
+        }
+        if meta.len() > limit {
+            return Err("Der Notizinhalt ist ungültig oder zu groß.".to_owned());
+        }
         let bytes =
             fs::read(&path).map_err(|_| "Die Datei konnte nicht gelesen werden.".to_owned())?;
         let text = String::from_utf8(bytes).map_err(|_| "Die Datei ist kein Text.".to_owned())?;
-        Ok(Value::String(text))
+        Ok(Value::String(fanotes_famd::strip_famd_payload(&text)))
     }
 
     fn write_file(&mut self, relative: &str, content: &str) -> Result<Value, String> {
-        let path = vault::resolve_inside(self.require_vault()?, relative)?;
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)
-                .map_err(|_| "Der Ordner konnte nicht angelegt werden.".to_owned())?;
+        let root = self.require_vault()?.to_path_buf();
+        let normalized = vault::normalize_relative_path(relative, false, false)?;
+        if !notes::is_note_text(&normalized) {
+            return Err("Es dürfen nur Markdown-Dateien und FaNotes-Handschriftdateien (.famd) bearbeitet werden.".to_owned());
         }
-        fs::write(&path, content)
-            .map_err(|_| "Die Datei konnte nicht geschrieben werden.".to_owned())?;
-        Ok(Value::Null)
-    }
-
-    fn read_internal(&self, relative: &str) -> Result<Value, String> {
-        let root = self.require_vault()?;
-        let normalized = vault::normalize_relative_path(relative, false, true)?;
-        let path = root.join(&normalized);
-        match fs::read_to_string(&path) {
-            Ok(text) => Ok(Value::String(text)),
-            Err(_) => Ok(Value::Null),
+        if content.len() as u64 > note_byte_limit(&normalized) {
+            return Err("Der Notizinhalt ist ungültig oder zu groß.".to_owned());
         }
-    }
-
-    fn write_internal(&mut self, relative: &str, content: &str) -> Result<Value, String> {
-        let root = self.require_vault()?;
-        let normalized = vault::normalize_relative_path(relative, false, true)?;
-        let path = root.join(&normalized);
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)
-                .map_err(|_| "Der Ordner konnte nicht angelegt werden.".to_owned())?;
+        let path = vault::resolve_inside(&root, &normalized)?;
+        if notes::records_history(&normalized) {
+            if let Ok(previous) = fs::read(&path) {
+                if let Ok(text) = String::from_utf8(previous) {
+                    let _ = notes::record_history(&root, &normalized, &text);
+                }
+            }
         }
-        fs::write(path, content)
-            .map_err(|_| "Die Datei konnte nicht geschrieben werden.".to_owned())?;
-        Ok(Value::Null)
+        let paper = self
+            .settings
+            .get("paperStyle")
+            .and_then(Value::as_str)
+            .map(str::to_owned);
+        let modified = notes::write_note_file(&root, &normalized, content, paper.as_deref())?;
+        Ok(json!({ "modifiedAt": modified }))
     }
 
     fn create_entry(
         &mut self,
         parent: &str,
-        preferred: Option<&str>,
+        preferred: Option<String>,
         note: bool,
     ) -> Result<Value, String> {
         let root = self.require_vault()?.to_path_buf();
@@ -422,104 +755,387 @@ impl Host {
         } else {
             vault::normalize_relative_path(parent, true, false)?
         };
-        let name = preferred.unwrap_or(if note { "Unbenannt" } else { "Ordner" });
-        if name.contains('/') || name.contains('\\') || name.contains('\0') {
-            return Err("Ungültiger Name.".to_owned());
-        }
-        let stem = if note {
-            name.trim_end_matches(".md")
-        } else {
-            name
-        };
-        let relative = if parent_relative.is_empty() {
-            if note {
-                format!("{stem}.md")
+        let english = self.ui_language() == "en";
+        let fallback = if note {
+            if english {
+                "Untitled note"
             } else {
-                stem.to_owned()
+                "Unbenannte Notiz"
             }
-        } else if note {
-            format!("{parent_relative}/{stem}.md")
+        } else if english {
+            "New folder"
         } else {
-            format!("{parent_relative}/{stem}")
+            "Neuer Ordner"
         };
-        let path = vault::resolve_inside(&root, &relative)?;
+        let preferred = preferred
+            .as_deref()
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .unwrap_or(fallback);
+        let mut desired = safe_entry_name(preferred)?;
         if note {
-            if let Some(folder) = path.parent() {
-                fs::create_dir_all(folder)
-                    .map_err(|_| "Der Ordner konnte nicht angelegt werden.".to_owned())?;
+            let extension = entry_extension(&desired);
+            if extension.is_empty() {
+                desired = format!("{desired}.md");
+            } else if !matches!(extension.as_str(), ".md" | ".markdown" | ".famd") {
+                return Err("Neue Notizen müssen Markdown-Dateien sein.".to_owned());
             }
-            fs::write(&path, "")
-                .map_err(|_| "Die Notiz konnte nicht angelegt werden.".to_owned())?;
+        }
+        let parent_path = if parent_relative.is_empty() {
+            root.clone()
         } else {
+            let path = vault::resolve_inside(&root, &parent_relative)?;
             fs::create_dir_all(&path)
                 .map_err(|_| "Der Ordner konnte nicht angelegt werden.".to_owned())?;
+            let meta = fs::symlink_metadata(&path)
+                .map_err(|_| "Der Zielordner wurde nicht gefunden.".to_owned())?;
+            if meta.file_type().is_symlink() || !meta.is_dir() {
+                return Err("Der Zielordner wurde nicht gefunden.".to_owned());
+            }
+            path
+        };
+        let paper = self
+            .settings
+            .get("paperStyle")
+            .and_then(Value::as_str)
+            .map(str::to_owned);
+        for _attempt in 0..10_000 {
+            let candidate = available_entry_name(&parent_path, &desired, note)?;
+            let relative = if parent_relative.is_empty() {
+                candidate.clone()
+            } else {
+                format!("{parent_relative}/{candidate}")
+            };
+            let path = parent_path.join(&candidate);
+            if !vault::is_inside_root(&root, &path) {
+                return Err("Der Pfad liegt außerhalb des Vaults.".to_owned());
+            }
+            let (title, _) = split_entry_name(&candidate);
+            let markdown = format!("# {title}\n\n");
+            let created = if note {
+                create_exclusive_note(&path, &markdown)
+            } else {
+                create_exclusive_folder(&path)
+            };
+            match created {
+                Ok(()) => {
+                    if note {
+                        let _ =
+                            notes::attach_sidecar(&root, &relative, &markdown, paper.as_deref());
+                    }
+                    return Ok(created_entry(&relative, &path, note));
+                }
+                Err(CreateAttempt::Taken) => continue,
+                Err(CreateAttempt::Failed(message)) => return Err(message),
+            }
         }
-        Ok(
-            json!({ "relativePath": relative, "name": path.file_name().and_then(|n| n.to_str()).unwrap_or(stem) }),
-        )
+        Err(if note {
+            "Es konnte kein eindeutiger Notizname erzeugt werden.".to_owned()
+        } else {
+            "Es konnte kein eindeutiger Ordnername erzeugt werden.".to_owned()
+        })
     }
 
-    fn set_folder_color(&mut self, relative: &str, color: &str) -> Result<Value, String> {
-        let _ = vault::resolve_inside(self.require_vault()?, relative)?;
-        if !color.is_empty() && !color.starts_with('#') {
-            return Err("Ungültige Ordnerfarbe.".to_owned());
+    fn select_vault(&mut self, args: &[Value]) -> Result<Value, String> {
+        let path = if let Some(text) = args.first().and_then(Value::as_str) {
+            if text.is_empty() {
+                return Err("Der Vault wurde unsicher verändert.".to_owned());
+            }
+            PathBuf::from(text)
+        } else if !self.file_dialogs {
+            return Ok(Value::Null);
+        } else {
+            let Some(path) = rfd::FileDialog::new()
+                .set_title("FaNotes-Vault auswählen")
+                .pick_folder()
+            else {
+                return Ok(Value::Null);
+            };
+            path
+        };
+        self.set_vault(path.clone())?;
+        fs::write(
+            self.app_data.join("vault-path"),
+            path.to_string_lossy().as_bytes(),
+        )
+        .map_err(|_| "Die Einstellungen konnten nicht gespeichert werden.".to_owned())?;
+        self.bootstrap()
+    }
+
+    fn set_folder_color(&mut self, relative: &str, color: &Value) -> Result<Value, String> {
+        let root = self.require_vault()?.to_path_buf();
+        let normalized = vault::normalize_relative_path(relative, false, false)?;
+        let path = vault::resolve_inside(&root, &normalized)?;
+        let meta = fs::symlink_metadata(&path)
+            .map_err(|_| "Der Ordner wurde nicht gefunden.".to_owned())?;
+        if meta.file_type().is_symlink() || !meta.is_dir() {
+            return Err("Der Ordner wurde nicht gefunden.".to_owned());
         }
-        Ok(Value::Null)
+        let stored = match color {
+            Value::Null => None,
+            Value::String(value) if folder_color_hex(value) => Some(value.to_ascii_lowercase()),
+            _ => return Err("Ungültige Ordnerfarbe.".to_owned()),
+        };
+        let mut colors = read_folder_colors(&root)?;
+        if let Some(color) = stored.clone() {
+            colors.insert(normalized.clone(), color);
+        } else {
+            colors.remove(&normalized);
+        }
+        write_folder_colors(&root, &colors)?;
+        Ok(json!({ "color": stored }))
+    }
+
+    fn open_subject_book(&self, relative: &str) -> Result<Value, String> {
+        if relative.is_empty() {
+            return Err("Ungültiger Buchpfad.".to_owned());
+        }
+        let root = self.require_vault()?;
+        let path = vault::normalize_relative_path(relative, false, false)?;
+        if !path.to_ascii_lowercase().ends_with(".pdf") {
+            return Err("Nur ein PDF-Buch kann auspoppen.".to_owned());
+        }
+        let file = vault::resolve_inside(root, &path)?;
+        let meta = fs::symlink_metadata(&file).map_err(|_| "Ungültiger Buchpfad.".to_owned())?;
+        if meta.file_type().is_symlink() || !meta.is_file() {
+            return Err("Nur ein PDF-Buch kann auspoppen.".to_owned());
+        }
+        Ok(json!({ "open": true, "bookPath": path }))
     }
 
     fn rename_entry(&mut self, relative: &str, next_name: &str) -> Result<Value, String> {
         let root = self.require_vault()?.to_path_buf();
         let source = vault::resolve_inside(&root, relative)?;
-        if next_name.contains('/') || next_name.contains('\\') || next_name.is_empty() {
-            return Err("Ungültiger Name.".to_owned());
+        let normalized = vault::normalize_relative_path(relative, false, false)?;
+        let meta = fs::symlink_metadata(&source)
+            .map_err(|_| "Der Eintrag wurde nicht gefunden.".to_owned())?;
+        if meta.file_type().is_symlink() || (!meta.is_file() && !meta.is_dir()) {
+            return Err("Dieser Eintrag kann nicht umbenannt werden.".to_owned());
         }
-        let destination = source.parent().unwrap_or(&root).join(next_name);
+        let was_dir = meta.is_dir();
+        let current_name = source
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| "Ungültiger Name.".to_owned())?
+            .to_owned();
+        let mut desired = safe_entry_name(next_name)?;
+        if !was_dir {
+            if entry_extension(&desired).is_empty() {
+                desired.push_str(&entry_extension(&current_name));
+            }
+            let extension = entry_extension(&desired);
+            if !tree_extension(extension.trim_start_matches('.')) {
+                return Err("Dieser Dateityp wird nicht unterstützt.".to_owned());
+            }
+        }
+        if desired == current_name {
+            return Ok(Value::String(normalized));
+        }
+        let parent = source.parent().unwrap_or(&root).to_path_buf();
+        let unique = unique_sibling_name(
+            &parent,
+            &desired,
+            Some(current_name.as_str()),
+            companion_extension(was_dir, &current_name),
+        )?;
+        let destination = parent.join(&unique);
         if !vault::is_inside_root(&root, &destination) {
             return Err("Der Pfad liegt außerhalb des Vaults.".to_owned());
         }
         fs::rename(&source, &destination)
             .map_err(|_| "Der Eintrag konnte nicht umbenannt werden.".to_owned())?;
-        Ok(Value::Null)
+        let next = relative_from_root(&root, &destination);
+        if was_dir {
+            let _ = retarget_folder_colors(&root, &normalized, &next);
+        } else {
+            move_note_companion(&root, &normalized, &next);
+        }
+        Ok(Value::String(next))
     }
 
     fn move_entry(&mut self, relative: &str, dest_folder: &str) -> Result<Value, String> {
         let root = self.require_vault()?.to_path_buf();
         let source = vault::resolve_inside(&root, relative)?;
-        let folder = if dest_folder.is_empty() {
+        let normalized = vault::normalize_relative_path(relative, false, false)?;
+        let meta = fs::symlink_metadata(&source)
+            .map_err(|_| "Der Eintrag wurde nicht gefunden.".to_owned())?;
+        if meta.file_type().is_symlink() || (!meta.is_file() && !meta.is_dir()) {
+            return Err("Dieser Eintrag kann nicht verschoben werden.".to_owned());
+        }
+        let was_dir = meta.is_dir();
+        let dest_relative = if dest_folder.is_empty() {
+            String::new()
+        } else {
+            vault::normalize_relative_path(dest_folder, true, false)?
+        };
+        if was_dir
+            && (dest_relative == normalized || dest_relative.starts_with(&format!("{normalized}/")))
+        {
+            return Err("Ein Ordner kann nicht in sich selbst verschoben werden.".to_owned());
+        }
+        let folder = if dest_relative.is_empty() {
             root.clone()
         } else {
-            vault::resolve_inside(&root, dest_folder)?
+            let path = vault::resolve_inside(&root, &dest_relative)?;
+            let folder_meta = fs::symlink_metadata(&path)
+                .map_err(|_| "Der Zielordner wurde nicht gefunden.".to_owned())?;
+            if folder_meta.file_type().is_symlink() || !folder_meta.is_dir() {
+                return Err("Der Zielordner wurde nicht gefunden.".to_owned());
+            }
+            path
         };
-        let name = source
+        if source.parent() == Some(folder.as_path()) {
+            return Ok(Value::String(normalized));
+        }
+        let current_name = source
             .file_name()
+            .and_then(|name| name.to_str())
             .ok_or_else(|| "Ungültiger Name.".to_owned())?;
-        let destination = folder.join(name);
+        let unique = unique_sibling_name(
+            &folder,
+            current_name,
+            None,
+            companion_extension(was_dir, current_name),
+        )?;
+        let destination = folder.join(&unique);
+        if !vault::is_inside_root(&root, &destination) {
+            return Err("Das Verschiebeziel liegt außerhalb des Vaults.".to_owned());
+        }
         fs::rename(&source, &destination)
             .map_err(|_| "Der Eintrag konnte nicht verschoben werden.".to_owned())?;
-        Ok(Value::Null)
+        let next = relative_from_root(&root, &destination);
+        if was_dir {
+            let _ = retarget_folder_colors(&root, &normalized, &next);
+        } else {
+            move_note_companion(&root, &normalized, &next);
+        }
+        Ok(Value::String(next))
     }
 
     fn trash_entry(&mut self, relative: &str) -> Result<Value, String> {
-        let path = vault::resolve_inside(self.require_vault()?, relative)?;
-        if path.is_dir() {
-            fs::remove_dir_all(&path)
-                .map_err(|_| "Der Eintrag konnte nicht entfernt werden.".to_owned())?;
-        } else {
-            fs::remove_file(&path)
-                .map_err(|_| "Der Eintrag konnte nicht entfernt werden.".to_owned())?;
+        let root = self.require_vault()?.to_path_buf();
+        let normalized = vault::normalize_relative_path(relative, false, false)?;
+        let path = vault::resolve_inside(&root, &normalized)?;
+        let is_dir = fs::symlink_metadata(&path).is_ok_and(|meta| meta.is_dir());
+        send_to_trash(self, &path)?;
+        if !is_dir {
+            if let Some(companion) = note_companion_relative(&normalized) {
+                if let Ok(companion_path) = vault::resolve_inside(&root, &companion) {
+                    if companion_path.is_file() {
+                        let _ = send_to_trash(self, &companion_path);
+                    }
+                }
+            }
         }
+        let _ = forget_folder_colors(&root, &normalized);
         Ok(Value::Null)
     }
 
     fn search(&self, query: &str) -> Result<Value, String> {
+        let query = query.trim();
+        if query.is_empty() {
+            return Ok(json!([]));
+        }
+        let query = query.chars().take(500).collect::<String>();
         let root = self.require_vault()?;
         let needle = query.to_lowercase();
+        let mut files = Vec::new();
+        collect_search_files(root, root, &mut files)?;
+        let present: std::collections::HashSet<String> = files.iter().cloned().collect();
         let mut hits = Vec::new();
-        walk_files(root, root, &mut |relative, text| {
-            if text.to_lowercase().contains(&needle) {
-                hits.push(json!({ "relativePath": relative }));
+        let mut owners = std::collections::HashMap::new();
+        for relative in files {
+            let lower = relative.to_lowercase();
+            if lower.ends_with(".famd") {
+                let stem = relative.trim_end_matches(".famd");
+                if present.contains(&format!("{stem}.md"))
+                    || present.contains(&format!("{stem}.pdf"))
+                    || present.contains(&format!("{stem}.markdown"))
+                {
+                    continue;
+                }
             }
-        })?;
+            let path = vault::resolve_inside(root, &relative)?;
+            let raw = fs::read_to_string(&path).unwrap_or_default();
+            let parsed = fanotes_famd::parse_famd(&raw);
+            let mut content = if parsed.markdown.is_empty() {
+                fanotes_famd::strip_famd_payload(&raw)
+            } else {
+                parsed.markdown
+            };
+            let mut ink = parsed
+                .payload
+                .as_ref()
+                .and_then(|payload| payload.ink.clone());
+            let mut transcript = ink_transcript(ink.as_ref());
+            if !lower.ends_with(".famd") {
+                let famd = fanotes_famd::companion_note_path(&relative, ".famd");
+                if let Ok(companion_path) = vault::resolve_inside(root, &famd) {
+                    if let Ok(companion) = fs::read_to_string(companion_path) {
+                        let parsed_companion = fanotes_famd::parse_famd(&companion);
+                        if lower.ends_with(".pdf") && !parsed_companion.markdown.is_empty() {
+                            content = parsed_companion.markdown;
+                        }
+                        if let Some(companion_ink) = parsed_companion
+                            .payload
+                            .as_ref()
+                            .and_then(|payload| payload.ink.clone())
+                        {
+                            if transcript.is_empty() {
+                                transcript = ink_transcript(Some(&companion_ink));
+                            }
+                            ink = Some(companion_ink);
+                        }
+                    }
+                }
+            }
+            let haystack = format!("{relative}\n{content}\n{transcript}").to_lowercase();
+            if !haystack.contains(&needle) {
+                continue;
+            }
+            let matches = count_matches(&haystack, &needle);
+            let content_index = content.to_lowercase().find(&needle);
+            let excerpt = if let Some(index) = content_index {
+                excerpt(&content, index, needle.len())
+            } else {
+                format!("Dateiname · {relative}")
+            };
+            let title = relative
+                .rsplit('/')
+                .next()
+                .unwrap_or(&relative)
+                .rsplit_once('.')
+                .map(|(stem, _)| stem)
+                .unwrap_or(&relative);
+            let mut hit = json!({
+                "relativePath": relative,
+                "title": title,
+                "excerpt": excerpt,
+                "matches": matches,
+                "kind": "note",
+            });
+            if let Some(anchor) = ink_anchor(&transcript, &query) {
+                hit["inkAnchor"] = json!({ "y": anchor });
+            }
+            if let Some(id) = drawing_owner_id(&content, ink.as_ref()) {
+                owners.entry(id).or_insert_with(|| relative.clone());
+            }
+            hits.push(hit);
+        }
+        search_drawings(root, &needle, &query, &owners, &mut hits);
+        hits.sort_by(|left, right| {
+            right["matches"]
+                .as_u64()
+                .unwrap_or(0)
+                .cmp(&left["matches"].as_u64().unwrap_or(0))
+                .then_with(|| {
+                    compare_names(
+                        left["title"].as_str().unwrap_or(""),
+                        right["title"].as_str().unwrap_or(""),
+                    )
+                })
+        });
+        hits.truncate(250);
         Ok(Value::Array(hits))
     }
 
@@ -552,53 +1168,51 @@ impl Host {
         }))
     }
 
-    fn ai_list_models(&self, connection: Value) -> Result<Value, String> {
-        let provider = connection
-            .get("provider")
-            .and_then(Value::as_str)
-            .unwrap_or("");
-        if matches!(provider, "lmstudio" | "ollama" | "opencode") {
-            let base = connection
-                .get("baseUrl")
-                .and_then(Value::as_str)
-                .unwrap_or("");
-            let origin = local_ai_origin(base, provider)?;
-            return Ok(json!({ "origin": origin, "models": [] }));
-        }
-        if !matches!(provider, "openai" | "gemini" | "anthropic") {
-            return Err("Wähle einen unterstützten AI-Anbieter.".to_owned());
-        }
-        let key = connection
-            .get("apiKey")
-            .and_then(Value::as_str)
-            .unwrap_or("");
-        if key.is_empty() {
-            return Err("Gib zuerst den API-Schlüssel dieses Anbieters ein.".to_owned());
-        }
-        Ok(json!({ "models": [] }))
-    }
-
-    fn save_settings(&mut self, incoming: Value) -> Result<Value, String> {
+    fn save_settings(&mut self, incoming: Value, options: &Value) -> Result<Value, String> {
         let Some(object) = incoming.as_object() else {
             return Err("Die Einstellungen sind ungültig.".to_owned());
         };
+        let clear = options
+            .get("clearProtectedSecrets")
+            .and_then(Value::as_bool)
+            == Some(true);
         let mut secrets = self.load_secrets();
-        for key in SECRET_KEYS {
-            if let Some(value) = object.get(*key).and_then(Value::as_str) {
+        if clear {
+            for key in SECRET_KEYS {
+                secrets.insert((*key).to_owned(), Value::String(String::new()));
+            }
+        } else {
+            for key in SECRET_KEYS {
+                let Some(value) = object.get(*key).and_then(Value::as_str) else {
+                    continue;
+                };
+                let limit = if *key == "homeworkApiSecret" {
+                    256
+                } else {
+                    4096
+                };
+                if value.contains('\0') || value.len() > limit {
+                    continue;
+                }
+                if value.is_empty() && !self.secrets_loaded {
+                    continue;
+                }
                 secrets.insert((*key).to_owned(), Value::String(value.to_owned()));
             }
         }
         self.store_secrets(&secrets)?;
-        for (key, value) in object {
-            if SECRET_KEYS.contains(&key.as_str()) {
-                self.settings
-                    .insert(key.clone(), Value::String(String::new()));
-            } else {
-                self.settings.insert(key.clone(), value.clone());
-            }
+        self.settings = settings::sanitize(&incoming, &self.settings);
+        for key in SECRET_KEYS {
+            self.settings
+                .insert((*key).to_owned(), Value::String(String::new()));
         }
         self.persist_settings()?;
         Ok(json!(self.settings))
+    }
+
+    fn load_secure_settings(&mut self) -> Value {
+        self.secrets_loaded = true;
+        self.secret_snapshot()
     }
 
     fn secret_snapshot(&self) -> Value {
@@ -616,19 +1230,6 @@ impl Host {
         Value::Object(object)
     }
 
-    fn write_secrets(&mut self, incoming: Value) -> Result<Value, String> {
-        let mut secrets = self.load_secrets();
-        if let Some(object) = incoming.as_object() {
-            for key in SECRET_KEYS {
-                if let Some(value) = object.get(*key).and_then(Value::as_str) {
-                    secrets.insert((*key).to_owned(), Value::String(value.to_owned()));
-                }
-            }
-        }
-        self.store_secrets(&secrets)?;
-        Ok(self.secret_snapshot())
-    }
-
     fn reset_app_data(&mut self) -> Result<Value, String> {
         let _ = fs::remove_file(self.app_data.join("settings.json"));
         let _ = fs::remove_file(self.app_data.join("secrets.json"));
@@ -637,17 +1238,33 @@ impl Host {
     }
 
     fn open_external(&self, url: &str) -> Result<Value, String> {
-        addon_request_allowed(url).or_else(|_| {
-            if url.starts_with("https://")
-                || url.starts_with("http://127.0.0.1")
-                || url.starts_with("http://localhost")
-            {
-                Ok(())
-            } else {
-                Err("Nur https-Adressen können geöffnet werden.".to_owned())
-            }
-        })?;
-        Ok(Value::Null)
+        let href = http_link(url)?;
+        self.launch("open", &href)
+    }
+
+    fn reveal_in_folder(&self, relative: &str) -> Result<Value, String> {
+        let root = self.require_vault()?.to_path_buf();
+        let target = reveal_target(&root, relative)?;
+        self.launch("reveal", &target.to_string_lossy())
+    }
+
+    fn launch(&self, kind: &str, target: &str) -> Result<Value, String> {
+        if let Some(log) = &self.open_log {
+            let mut file = fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(log)
+                .map_err(|_| "Der Link konnte nicht geöffnet werden.".to_owned())?;
+            use std::io::Write;
+            writeln!(file, "{kind} {target}")
+                .map_err(|_| "Der Link konnte nicht geöffnet werden.".to_owned())?;
+            return Ok(Value::Null);
+        }
+        match kind {
+            "reveal" => reveal_on_desktop(Path::new(target)),
+            _ => spawn_detached("xdg-open", &[target.to_owned()]),
+        }
+        .map(|()| Value::Null)
     }
 
     fn update_state(&self) -> Value {
@@ -673,13 +1290,9 @@ impl Host {
         })
     }
 
-    fn vault_id(&self) -> String {
-        self.vault
-            .as_ref()
-            .and_then(|path| path.file_name())
-            .and_then(|name| name.to_str())
-            .unwrap_or("")
-            .to_owned()
+    fn vault_id(&self) -> Result<String, String> {
+        let path = self.require_vault()?;
+        Ok(vault_path_digest(path)[..32].to_owned())
     }
 
     fn persist_settings(&self) -> Result<(), String> {
@@ -692,12 +1305,19 @@ impl Host {
 
     fn load_persisted(&mut self) {
         if let Ok(text) = fs::read_to_string(self.app_data.join("settings.json")) {
-            if let Ok(Value::Object(object)) = serde_json::from_str(&text) {
-                for (key, value) in object {
-                    if !SECRET_KEYS.contains(&key.as_str()) {
-                        self.settings.insert(key, value);
-                    }
+            if let Ok(parsed) = serde_json::from_str::<Value>(&text) {
+                self.settings = settings::sanitize(&parsed, &default_settings());
+                for key in SECRET_KEYS {
+                    self.settings
+                        .insert((*key).to_owned(), Value::String(String::new()));
                 }
+            }
+        }
+        if let Ok(text) = fs::read_to_string(self.app_data.join("vault-path")) {
+            let path = PathBuf::from(text.trim());
+            if path.is_dir() {
+                self.vault = Some(path);
+                self.refresh_onboarding();
             }
         }
     }
@@ -722,6 +1342,14 @@ const PDF_ASSET_MAX: u64 = 96 * 1024 * 1024;
 const HTML_ASSET_MAX: u64 = 128 * 1024 * 1024;
 const IMAGE_ASSET_MAX: u64 = 32 * 1024 * 1024;
 const SYNC_MAX_BYTES: u64 = 100 * 1024 * 1024;
+const MAX_SYNC_STATE_BYTES: u64 = 64 * 1024 * 1024;
+const MAX_SYNC_ENTRIES: usize = 100_000;
+const MAX_SYNC_DEPTH: usize = 40;
+const MAX_TEXT_BYTES: u64 = 16 * 1024 * 1024;
+const MAX_FAMD_BYTES: u64 = 40 * 1024 * 1024;
+const MAX_RECOGNITION_MODEL_BYTES: u64 = 20 * 1024 * 1024;
+const MAX_TREE_CACHE_BYTES: u64 = 24 * 1024 * 1024;
+const MAX_TREE_CACHE_ENTRIES: usize = 100_000;
 const MAX_PDF_BITMAP_BYTES: usize = 48 * 1024 * 1024;
 
 fn asset_mime(relative: &str) -> Result<&'static str, String> {
@@ -775,18 +1403,7 @@ fn arg_string(args: &[Value], index: usize) -> Result<String, String> {
 }
 
 fn default_settings() -> Map<String, Value> {
-    json!({
-        "uiLanguage": "system",
-        "theme": "light",
-        "paperStyle": "dots",
-        "recognitionLanguage": "de",
-        "recognitionMode": "auto",
-        "updateChannel": "stable",
-        "autoCheckUpdates": true
-    })
-    .as_object()
-    .cloned()
-    .unwrap_or_default()
+    settings::defaults()
 }
 
 fn feature_state(model_id: &str, license: &str) -> Value {
@@ -801,7 +1418,817 @@ fn feature_state(model_id: &str, license: &str) -> Value {
     })
 }
 
-fn read_tree(root: &Path, directory: &Path) -> Result<Value, String> {
+fn loose_string(args: &[Value], index: usize) -> String {
+    args.get(index)
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_owned()
+}
+
+fn loose_string_opt(args: &[Value], index: usize) -> Option<String> {
+    args.get(index).and_then(Value::as_str).map(str::to_owned)
+}
+
+fn is_vault_id(value: &str) -> bool {
+    (16..=64).contains(&value.len())
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+}
+
+fn arg_mtime_ms(value: Option<&Value>) -> Option<i64> {
+    let value = value?;
+    let millis = if let Some(number) = value.as_i64() {
+        number
+    } else if let Some(number) = value.as_u64() {
+        i64::try_from(number).ok()?
+    } else if let Some(number) = value.as_f64() {
+        if !number.is_finite() || number <= 0.0 || number >= i64::MAX as f64 {
+            return None;
+        }
+        return Some(number.round() as i64);
+    } else {
+        return None;
+    };
+    (millis > 0).then_some(millis)
+}
+
+fn mtime_millis(meta: &fs::Metadata) -> i64 {
+    meta.modified()
+        .ok()
+        .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+        .map(|duration| {
+            let nanos = duration.as_nanos();
+            ((nanos + 500_000) / 1_000_000) as i64
+        })
+        .unwrap_or(0)
+}
+
+fn internal_directory(root: &Path) -> Result<PathBuf, String> {
+    let directory = root.join(".fanotes");
+    match fs::symlink_metadata(&directory) {
+        Ok(meta) if meta.file_type().is_symlink() || !meta.is_dir() => {
+            Err("Interne FaNotes-Dateien sind geschützt.".to_owned())
+        }
+        Ok(_) => Ok(directory),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            fs::create_dir_all(&directory)
+                .map_err(|_| "Der Ordner konnte nicht angelegt werden.".to_owned())?;
+            Ok(directory)
+        }
+        Err(_) => Err("Der Ordner konnte nicht angelegt werden.".to_owned()),
+    }
+}
+
+fn scan_sync_directory(root: &Path, directory: &Path, depth: usize, out: &mut Vec<Value>) {
+    if depth > MAX_SYNC_DEPTH || out.len() >= MAX_SYNC_ENTRIES {
+        return;
+    }
+    let Ok(entries) = fs::read_dir(directory) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        if out.len() >= MAX_SYNC_ENTRIES {
+            return;
+        }
+        let name = entry.file_name().to_string_lossy().to_string();
+        let path = entry.path();
+        let Ok(meta) = fs::symlink_metadata(&path) else {
+            continue;
+        };
+        if meta.file_type().is_symlink() {
+            continue;
+        }
+        if name.starts_with('.') && !(depth == 0 && name == ".fanotes") {
+            continue;
+        }
+        let relative = path
+            .strip_prefix(root)
+            .unwrap_or(&path)
+            .to_string_lossy()
+            .replace('\\', "/");
+        if depth == 1
+            && relative.starts_with(".fanotes/")
+            && matches!(name.as_str(), "history" | "tree-cache")
+        {
+            continue;
+        }
+        if meta.is_dir() {
+            scan_sync_directory(root, &path, depth + 1, out);
+            continue;
+        }
+        if !meta.is_file()
+            || name.to_ascii_lowercase().ends_with(".tmp")
+            || meta.len() > SYNC_MAX_BYTES
+        {
+            continue;
+        }
+        out.push(json!({
+            "path": relative,
+            "size": meta.len(),
+            "mtimeMs": mtime_millis(&meta),
+        }));
+    }
+}
+
+enum CreateAttempt {
+    Taken,
+    Failed(String),
+}
+
+fn safe_entry_name(value: &str) -> Result<String, String> {
+    let name = value.trim();
+    if !entry_name_allowed(name) {
+        return Err("Dieser Name ist nicht erlaubt.".to_owned());
+    }
+    let cleaned = name.trim_end_matches(['.', ' ']).trim();
+    if !entry_name_allowed(cleaned)
+        || windows_device_name(cleaned)
+        || cleaned.contains(['<', '>', ':', '"', '|', '?', '*'])
+    {
+        return Err("Dieser Name ist nicht erlaubt.".to_owned());
+    }
+    Ok(cleaned.to_owned())
+}
+
+fn entry_name_allowed(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 180
+        && name != "."
+        && name != ".."
+        && !name.contains('/')
+        && !name.contains('\\')
+        && !name.chars().any(|ch| ch.is_control() || ch == '\u{7f}')
+        && !matches!(name.to_ascii_lowercase().as_str(), ".fanotes" | ".lernwerk")
+}
+
+fn windows_device_name(name: &str) -> bool {
+    let label = name
+        .split('.')
+        .next()
+        .unwrap_or(name)
+        .trim()
+        .to_ascii_lowercase();
+    matches!(label.as_str(), "con" | "prn" | "aux" | "nul")
+        || (label.len() == 4
+            && (label.starts_with("com") || label.starts_with("lpt"))
+            && label.as_bytes()[3].is_ascii_digit())
+}
+
+fn split_entry_name(name: &str) -> (&str, &str) {
+    match name.rfind('.') {
+        Some(index) if index > 0 => (&name[..index], &name[index..]),
+        _ => (name, ""),
+    }
+}
+
+fn entry_extension(name: &str) -> String {
+    split_entry_name(name).1.to_ascii_lowercase()
+}
+
+fn numbered_entry_name(name: &str, number: u32) -> String {
+    if number == 1 {
+        return name.to_owned();
+    }
+    let (stem, extension) = split_entry_name(name);
+    format!("{stem} {number}{extension}")
+}
+
+fn companion_extension(directory: bool, name: &str) -> Option<&'static str> {
+    if directory {
+        return None;
+    }
+    match entry_extension(name).as_str() {
+        ".famd" => Some(".md"),
+        ".md" | ".markdown" | ".pdf" => Some(".famd"),
+        _ => None,
+    }
+}
+
+fn relative_from_root(root: &Path, path: &Path) -> String {
+    path.strip_prefix(root)
+        .unwrap_or(path)
+        .to_string_lossy()
+        .replace('\\', "/")
+}
+
+fn unique_sibling_name(
+    parent: &Path,
+    desired: &str,
+    excluding: Option<&str>,
+    companion_extension: Option<&str>,
+) -> Result<String, String> {
+    let mut occupied = std::collections::HashSet::new();
+    if let Ok(entries) = fs::read_dir(parent) {
+        for entry in entries.flatten() {
+            let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
+                continue;
+            };
+            if excluding.is_some_and(|current| current.eq_ignore_ascii_case(&name)) {
+                continue;
+            }
+            occupied.insert(name.to_lowercase());
+        }
+    }
+    for number in 1..=10_000 {
+        let candidate = numbered_entry_name(desired, number);
+        if occupied.contains(&candidate.to_lowercase()) {
+            continue;
+        }
+        if let Some(extension) = companion_extension {
+            let (stem, _) = split_entry_name(&candidate);
+            if occupied.contains(&format!("{stem}{extension}").to_lowercase()) {
+                continue;
+            }
+        }
+        return Ok(candidate);
+    }
+    Err("Es konnte kein eindeutiger Name erzeugt werden.".to_owned())
+}
+
+fn available_entry_name(parent: &Path, desired: &str, note: bool) -> Result<String, String> {
+    let mut occupied = std::collections::HashSet::new();
+    if let Ok(entries) = fs::read_dir(parent) {
+        for entry in entries.flatten() {
+            if let Some(name) = entry.file_name().to_str() {
+                occupied.insert(name.to_lowercase());
+            }
+        }
+    }
+    for number in 1..=10_000 {
+        let candidate = numbered_entry_name(desired, number);
+        if occupied.contains(&candidate.to_lowercase()) {
+            continue;
+        }
+        if note {
+            let lower = candidate.to_lowercase();
+            if lower.ends_with(".md") || lower.ends_with(".markdown") || lower.ends_with(".pdf") {
+                let famd = format!("{}.famd", fanotes_famd::note_stem(&candidate)).to_lowercase();
+                if occupied.contains(&famd) {
+                    continue;
+                }
+            }
+        }
+        return Ok(candidate);
+    }
+    Err(if note {
+        "Es konnte kein eindeutiger Notizname erzeugt werden.".to_owned()
+    } else {
+        "Es konnte kein eindeutiger Ordnername erzeugt werden.".to_owned()
+    })
+}
+
+fn create_exclusive_note(path: &Path, markdown: &str) -> Result<(), CreateAttempt> {
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = match options.open(path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+            return Err(CreateAttempt::Taken);
+        }
+        Err(_) => {
+            return Err(CreateAttempt::Failed(
+                "Die Notiz konnte nicht angelegt werden.".to_owned(),
+            ));
+        }
+    };
+    use std::io::Write;
+    if file.write_all(markdown.as_bytes()).is_err() {
+        drop(file);
+        let _ = fs::remove_file(path);
+        return Err(CreateAttempt::Failed(
+            "Die Notiz konnte nicht angelegt werden.".to_owned(),
+        ));
+    }
+    let _ = file.sync_all();
+    Ok(())
+}
+
+fn create_exclusive_folder(path: &Path) -> Result<(), CreateAttempt> {
+    match fs::create_dir(path) {
+        Ok(()) => {
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let _ = fs::set_permissions(path, fs::Permissions::from_mode(0o700));
+            }
+            Ok(())
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+            Err(CreateAttempt::Taken)
+        }
+        Err(_) => Err(CreateAttempt::Failed(
+            "Der Ordner konnte nicht angelegt werden.".to_owned(),
+        )),
+    }
+}
+
+fn created_entry(relative: &str, path: &Path, note: bool) -> Value {
+    let name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(relative);
+    let meta = fs::symlink_metadata(path).ok();
+    let modified = meta
+        .as_ref()
+        .and_then(|meta| meta.modified().ok())
+        .map(notes::iso_from_system_time)
+        .unwrap_or_else(|| notes::iso_from_system_time(SystemTime::now()));
+    if note {
+        json!({
+            "relativePath": relative,
+            "entry": {
+                "name": name,
+                "relativePath": relative,
+                "kind": "file",
+                "extension": entry_extension(name).trim_start_matches('.'),
+                "modifiedAt": modified,
+                "size": meta.as_ref().map(fs::Metadata::len).unwrap_or(0),
+            }
+        })
+    } else {
+        json!({
+            "relativePath": relative,
+            "entry": {
+                "name": name,
+                "relativePath": relative,
+                "kind": "folder",
+                "modifiedAt": modified,
+                "children": [],
+            }
+        })
+    }
+}
+
+fn http_link(raw: &str) -> Result<String, String> {
+    if raw.is_empty()
+        || raw.len() > 4096
+        || raw.chars().any(|ch| ch.is_control() || ch.is_whitespace())
+    {
+        return Err("Ungültiger externer Link.".to_owned());
+    }
+    let (scheme, rest) = if let Some(rest) = raw.strip_prefix("https://") {
+        ("https", rest)
+    } else if let Some(rest) = raw.strip_prefix("http://") {
+        ("http", rest)
+    } else {
+        return Err("Nur sichere HTTP(S)-Links ohne Zugangsdaten sind erlaubt.".to_owned());
+    };
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or(rest);
+    if authority.is_empty() || authority.contains('@') {
+        return Err("Nur sichere HTTP(S)-Links ohne Zugangsdaten sind erlaubt.".to_owned());
+    }
+    if rest.contains('/') || rest.contains('?') || rest.contains('#') {
+        Ok(format!("{scheme}://{rest}"))
+    } else {
+        Ok(format!("{scheme}://{rest}/"))
+    }
+}
+
+fn reveal_target(root: &Path, relative: &str) -> Result<PathBuf, String> {
+    let normalized = vault::normalize_relative_path(relative, true, true)?;
+    if normalized.is_empty() {
+        return Ok(root.to_path_buf());
+    }
+    let mut target = root.to_path_buf();
+    for (index, segment) in normalized.split('/').enumerate() {
+        target.push(segment);
+        let meta = fs::symlink_metadata(&target)
+            .map_err(|_| "Der Eintrag wurde nicht gefunden.".to_owned())?;
+        if meta.file_type().is_symlink() {
+            return Err("Symbolische Links sind innerhalb des Vaults nicht erlaubt.".to_owned());
+        }
+        let last = index + 1 == normalized.split('/').count();
+        if !last && !meta.is_dir() {
+            return Err("Der Eintrag wurde nicht gefunden.".to_owned());
+        }
+        if last && !meta.is_file() && !meta.is_dir() {
+            return Err("Der Eintrag wurde nicht gefunden.".to_owned());
+        }
+    }
+    if !vault::is_inside_root(root, &target) {
+        return Err("Der Pfad liegt außerhalb des Vaults.".to_owned());
+    }
+    Ok(target)
+}
+
+fn reveal_on_desktop(path: &Path) -> Result<(), String> {
+    let uri = file_uri(path);
+    if spawn_detached(
+        "dbus-send",
+        &[
+            "--session".to_owned(),
+            "--dest=org.freedesktop.FileManager1".to_owned(),
+            "--type=method_call".to_owned(),
+            "/org/freedesktop/FileManager1".to_owned(),
+            "org.freedesktop.FileManager1.ShowItems".to_owned(),
+            format!("array:string:{uri}"),
+            "string:".to_owned(),
+        ],
+    )
+    .is_ok()
+    {
+        return Ok(());
+    }
+    let folder = if path.is_dir() {
+        path.to_path_buf()
+    } else {
+        path.parent().unwrap_or(path).to_path_buf()
+    };
+    spawn_detached("xdg-open", &[folder.to_string_lossy().into_owned()])
+}
+
+fn spawn_detached(program: &str, args: &[String]) -> Result<(), String> {
+    std::process::Command::new(program)
+        .args(args)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map(|_| ())
+        .map_err(|_| "Der Link konnte nicht geöffnet werden.".to_owned())
+}
+
+fn file_uri(path: &Path) -> String {
+    let mut uri = String::from("file://");
+    for byte in path.to_string_lossy().as_bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'/' | b'-' | b'_' | b'.' | b'~' => {
+                uri.push(*byte as char);
+            }
+            _ => uri.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    uri
+}
+
+pub(crate) fn compare_names(left: &str, right: &str) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
+    let left: Vec<char> = left.chars().flat_map(|ch| ch.to_lowercase()).collect();
+    let right: Vec<char> = right.chars().flat_map(|ch| ch.to_lowercase()).collect();
+    let mut left_index = 0;
+    let mut right_index = 0;
+    while left_index < left.len() && right_index < right.len() {
+        if left[left_index].is_ascii_digit() && right[right_index].is_ascii_digit() {
+            while left_index < left.len() && left[left_index] == '0' {
+                left_index += 1;
+            }
+            while right_index < right.len() && right[right_index] == '0' {
+                right_index += 1;
+            }
+            let left_start = left_index;
+            let right_start = right_index;
+            while left_index < left.len() && left[left_index].is_ascii_digit() {
+                left_index += 1;
+            }
+            while right_index < right.len() && right[right_index].is_ascii_digit() {
+                right_index += 1;
+            }
+            let order = (left_index - left_start)
+                .cmp(&(right_index - right_start))
+                .then_with(|| left[left_start..left_index].cmp(&right[right_start..right_index]));
+            if order != Ordering::Equal {
+                return order;
+            }
+            continue;
+        }
+        if left[left_index] != right[right_index] {
+            return left[left_index].cmp(&right[right_index]);
+        }
+        left_index += 1;
+        right_index += 1;
+    }
+    left.len().cmp(&right.len())
+}
+
+fn entry_name_order(left: &Value, right: &Value) -> std::cmp::Ordering {
+    let left_folder = left["kind"].as_str() == Some("folder");
+    let right_folder = right["kind"].as_str() == Some("folder");
+    right_folder.cmp(&left_folder).then_with(|| {
+        compare_names(
+            left["name"].as_str().unwrap_or(""),
+            right["name"].as_str().unwrap_or(""),
+        )
+    })
+}
+
+fn send_to_trash(host: &Host, path: &Path) -> Result<(), String> {
+    if let Some(dir) = &host.trash_dir {
+        return place_in_trash(dir, path);
+    }
+    if gio_trash(path).is_ok() {
+        return Ok(());
+    }
+    if let Some(dir) = xdg_trash_dir() {
+        if place_in_trash(&dir, path).is_ok() {
+            return Ok(());
+        }
+    }
+    Err("Der Eintrag konnte nicht in den Papierkorb verschoben werden.".to_owned())
+}
+
+fn gio_trash(path: &Path) -> Result<(), ()> {
+    let status = std::process::Command::new("gio")
+        .args(["trash", &path.to_string_lossy()])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map_err(|_| ())?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(())
+    }
+}
+
+fn xdg_trash_dir() -> Option<PathBuf> {
+    let data = std::env::var_os("XDG_DATA_HOME")
+        .map(PathBuf::from)
+        .or_else(|| {
+            std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".local/share"))
+        })?;
+    Some(data.join("Trash"))
+}
+
+fn place_in_trash(trash_root: &Path, source: &Path) -> Result<(), String> {
+    let files = trash_root.join("files");
+    let info = trash_root.join("info");
+    fs::create_dir_all(&files)
+        .map_err(|_| "Der Eintrag konnte nicht in den Papierkorb verschoben werden.".to_owned())?;
+    fs::create_dir_all(&info)
+        .map_err(|_| "Der Eintrag konnte nicht in den Papierkorb verschoben werden.".to_owned())?;
+    let base = source
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("datei");
+    let mut stored = base.to_owned();
+    for number in 2..10_000 {
+        if !files.join(&stored).exists() && !info.join(format!("{stored}.trashinfo")).exists() {
+            break;
+        }
+        stored = format!("{base}_{number}");
+        if number == 9_999 {
+            return Err("Der Eintrag konnte nicht in den Papierkorb verschoben werden.".to_owned());
+        }
+    }
+    let destination = files.join(&stored);
+    let original = std::path::absolute(source).unwrap_or_else(|_| source.to_path_buf());
+    fs::rename(source, &destination)
+        .map_err(|_| "Der Eintrag konnte nicht in den Papierkorb verschoben werden.".to_owned())?;
+    let when = notes::iso_from_system_time(SystemTime::now());
+    let when = when.split('.').next().unwrap_or(when.as_str());
+    let record = format!(
+        "[Trash Info]\nPath={}\nDeletionDate={when}\n",
+        percent_encode(&original)
+    );
+    fs::write(info.join(format!("{stored}.trashinfo")), record)
+        .map_err(|_| "Der Eintrag konnte nicht in den Papierkorb verschoben werden.".to_owned())
+}
+
+fn percent_encode(path: &Path) -> String {
+    let absolute = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
+    let mut encoded = String::new();
+    for byte in absolute.to_string_lossy().as_bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'/' | b'-' | b'_' | b'.' | b'~' => {
+                encoded.push(*byte as char);
+            }
+            _ => encoded.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    encoded
+}
+
+fn onboarding_open(channel: &str) -> bool {
+    matches!(
+        channel,
+        "fanotes:bootstrap"
+            | "fanotes:complete-onboarding"
+            | "fanotes:select-vault"
+            | "fanotes:get-cached-tree"
+            | "fanotes:update-get-state"
+            | "fanotes:update-check"
+            | "fanotes:update-download"
+            | "fanotes:update-install"
+    )
+}
+
+fn note_byte_limit(relative: &str) -> u64 {
+    if relative.to_ascii_lowercase().ends_with(".famd") {
+        MAX_FAMD_BYTES
+    } else {
+        MAX_TEXT_BYTES
+    }
+}
+
+fn default_documents_dir() -> Result<PathBuf, String> {
+    if let Some(dir) = xdg_documents_dir() {
+        return Ok(dir);
+    }
+    let home = std::env::var_os("HOME")
+        .ok_or_else(|| "Der Standard-Vault kann nicht angelegt werden.".to_owned())?;
+    Ok(PathBuf::from(home).join("Documents"))
+}
+
+fn xdg_documents_dir() -> Option<PathBuf> {
+    let home = PathBuf::from(std::env::var_os("HOME")?);
+    let config = std::env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| home.join(".config"));
+    let text = fs::read_to_string(config.join("user-dirs.dirs")).ok()?;
+    let home_text = home.to_string_lossy();
+    for line in text.lines() {
+        let Some(rest) = line.trim().strip_prefix("XDG_DOCUMENTS_DIR=") else {
+            continue;
+        };
+        let rest = rest.trim().trim_matches('"');
+        if rest.is_empty() {
+            continue;
+        }
+        return Some(PathBuf::from(rest.replace("$HOME", home_text.as_ref())));
+    }
+    None
+}
+
+fn vault_path_digest(path: &Path) -> String {
+    let absolute = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
+    let digest = Sha256::digest(absolute.to_string_lossy().as_bytes());
+    digest.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+fn german_locale(locale: &str) -> bool {
+    let lower = locale.to_ascii_lowercase();
+    let Some(rest) = lower.strip_prefix("de") else {
+        return false;
+    };
+    rest.is_empty() || rest.starts_with(['-', '_', '.', '@'])
+}
+
+fn write_tree_cache(app_data: &Path, root: &Path, entries: &Value) {
+    let identity = vault_path_digest(root);
+    let path = app_data
+        .join("tree-cache-v1")
+        .join(format!("{identity}.json"));
+    let Ok(text) = serde_json::to_string(&json!({
+        "version": 1,
+        "vaultIdentity": identity,
+        "updatedAt": notes::iso_from_system_time(SystemTime::now()),
+        "entries": entries,
+    })) else {
+        return;
+    };
+    let snapshot = format!("{text}\n");
+    if snapshot.len() as u64 > MAX_TREE_CACHE_BYTES {
+        return;
+    }
+    let _ = notes::atomic_write(&path, snapshot.as_bytes(), 0o600);
+}
+
+fn read_tree_cache(app_data: &Path, root: &Path) -> Option<Value> {
+    let identity = vault_path_digest(root);
+    let path = app_data
+        .join("tree-cache-v1")
+        .join(format!("{identity}.json"));
+    let meta = fs::symlink_metadata(&path).ok()?;
+    if meta.file_type().is_symlink() || !meta.is_file() || meta.len() > MAX_TREE_CACHE_BYTES {
+        return None;
+    }
+    let text = fs::read_to_string(&path).ok()?;
+    let parsed = serde_json::from_str::<Value>(&text).ok()?;
+    if parsed.get("version").and_then(Value::as_u64) != Some(1)
+        || parsed.get("vaultIdentity").and_then(Value::as_str) != Some(identity.as_str())
+    {
+        let _ = fs::remove_file(&path);
+        return None;
+    }
+    match clean_cached_entries(parsed.get("entries")?, "", 0, &mut 0) {
+        Ok(entries) => Some(Value::Array(entries)),
+        Err(()) => {
+            let _ = fs::remove_file(&path);
+            None
+        }
+    }
+}
+
+fn clean_cached_entries(
+    candidate: &Value,
+    parent: &str,
+    depth: usize,
+    count: &mut usize,
+) -> Result<Vec<Value>, ()> {
+    if depth > 80 {
+        return Err(());
+    }
+    let list = candidate.as_array().ok_or(())?;
+    let mut cleaned = Vec::new();
+    for entry in list {
+        *count += 1;
+        if *count > MAX_TREE_CACHE_ENTRIES {
+            return Err(());
+        }
+        let name = entry.get("name").and_then(Value::as_str).ok_or(())?;
+        if name.is_empty()
+            || name.len() > 255
+            || name.starts_with('.')
+            || name.contains('/')
+            || name.contains('\\')
+            || name.contains('\0')
+        {
+            return Err(());
+        }
+        let expected = if parent.is_empty() {
+            name.to_owned()
+        } else {
+            format!("{parent}/{name}")
+        };
+        if entry.get("relativePath").and_then(Value::as_str) != Some(expected.as_str()) {
+            return Err(());
+        }
+        match entry.get("kind").and_then(Value::as_str) {
+            Some("folder") => {
+                if let Some(color) = entry.get("color").filter(|color| !color.is_null()) {
+                    if color
+                        .as_str()
+                        .filter(|value| folder_color_hex(value))
+                        .is_none()
+                    {
+                        return Err(());
+                    }
+                }
+                let children = clean_cached_entries(
+                    entry.get("children").unwrap_or(&json!([])),
+                    &expected,
+                    depth + 1,
+                    count,
+                )?;
+                let mut folder = json!({
+                    "name": name,
+                    "relativePath": expected,
+                    "kind": "folder",
+                    "children": children,
+                });
+                if let Some(color) = entry
+                    .get("color")
+                    .and_then(Value::as_str)
+                    .filter(|value| folder_color_hex(value))
+                {
+                    folder["color"] = json!(color.to_ascii_lowercase());
+                }
+                cleaned.push(folder);
+            }
+            Some("file") => {
+                let extension = name
+                    .rsplit_once('.')
+                    .map(|(_, extension)| extension.to_ascii_lowercase())
+                    .unwrap_or_default();
+                if extension.is_empty() || !tree_extension(&extension) {
+                    return Err(());
+                }
+                let mut file = json!({
+                    "name": name,
+                    "relativePath": expected,
+                    "kind": "file",
+                    "extension": extension,
+                });
+                if let Some(modified) = entry.get("modifiedAt") {
+                    let text = modified
+                        .as_str()
+                        .filter(|text| text.contains('T'))
+                        .ok_or(())?;
+                    file["modifiedAt"] = json!(text);
+                }
+                if let Some(size) = entry.get("size") {
+                    let size = size
+                        .as_u64()
+                        .filter(|size| *size <= 1024 * 1024 * 1024)
+                        .ok_or(())?;
+                    file["size"] = json!(size);
+                }
+                cleaned.push(file);
+            }
+            _ => return Err(()),
+        }
+    }
+    cleaned.sort_by(entry_name_order);
+    Ok(cleaned)
+}
+
+fn read_tree(
+    root: &Path,
+    directory: &Path,
+    colors: &BTreeMap<String, String>,
+    depth: usize,
+    stats: bool,
+) -> Result<Value, String> {
+    if depth > 80 {
+        return Ok(json!([]));
+    }
     let mut children = Vec::new();
     let entries =
         fs::read_dir(directory).map_err(|_| "Der Vault konnte nicht gelesen werden.".to_owned())?;
@@ -817,39 +2244,310 @@ fn read_tree(root: &Path, directory: &Path) -> Result<Value, String> {
             .unwrap_or(&path)
             .to_string_lossy()
             .replace('\\', "/");
-        let meta = entry
-            .metadata()
+        let meta = fs::symlink_metadata(&path)
             .map_err(|_| "Der Vault konnte nicht gelesen werden.".to_owned())?;
+        if meta.file_type().is_symlink() {
+            continue;
+        }
         if meta.is_dir() {
-            children.push(json!({
+            let mut folder = json!({
                 "name": name,
                 "relativePath": relative,
                 "kind": "folder",
-                "children": read_tree(root, &path)?
-            }));
-        } else if name.ends_with(".md") {
-            children.push(json!({
+                "children": read_tree(root, &path, colors, depth + 1, stats)?
+            });
+            if stats {
+                if let Ok(modified) = meta.modified() {
+                    folder["modifiedAt"] = Value::String(notes::iso_from_system_time(modified));
+                }
+            }
+            if let Some(color) = colors.get(&relative) {
+                folder["color"] = Value::String(color.clone());
+            }
+            children.push(folder);
+        } else if meta.is_file() {
+            let extension = name
+                .rsplit_once('.')
+                .map(|(_, extension)| extension.to_ascii_lowercase())
+                .unwrap_or_default();
+            if !tree_extension(&extension) {
+                continue;
+            }
+            let mut file = json!({
                 "name": name,
                 "relativePath": relative,
                 "kind": "file",
-                "extension": "md",
-                "size": meta.len()
-            }));
+                "extension": extension,
+            });
+            if stats {
+                file["size"] = json!(meta.len());
+                if let Ok(modified) = meta.modified() {
+                    file["modifiedAt"] = Value::String(notes::iso_from_system_time(modified));
+                }
+            }
+            children.push(file);
         }
     }
-    children.sort_by(|left, right| {
-        left["name"]
-            .as_str()
-            .unwrap_or("")
-            .cmp(right["name"].as_str().unwrap_or(""))
-    });
+    children = omit_famd_companions(children);
+    children.sort_by(entry_name_order);
     Ok(Value::Array(children))
 }
 
-fn walk_files(
+fn tree_extension(extension: &str) -> bool {
+    matches!(
+        extension,
+        "md" | "markdown"
+            | "famd"
+            | "pdf"
+            | "png"
+            | "jpg"
+            | "jpeg"
+            | "webp"
+            | "gif"
+            | "svg"
+            | "mp3"
+            | "wav"
+            | "ogg"
+            | "m4a"
+            | "mp4"
+            | "webm"
+    )
+}
+
+fn omit_famd_companions(entries: Vec<Value>) -> Vec<Value> {
+    let mut stems = std::collections::HashSet::new();
+    for entry in &entries {
+        if entry["kind"].as_str() == Some("file")
+            && matches!(entry["extension"].as_str(), Some("md" | "markdown" | "pdf"))
+        {
+            if let Some(name) = entry["name"].as_str() {
+                let stem = name.rsplit_once('.').map(|(stem, _)| stem).unwrap_or(name);
+                stems.insert(stem.to_lowercase());
+            }
+        }
+    }
+    entries
+        .into_iter()
+        .filter(|entry| {
+            if entry["extension"].as_str() != Some("famd") {
+                return true;
+            }
+            let name = entry["name"].as_str().unwrap_or("");
+            let stem = name.rsplit_once('.').map(|(stem, _)| stem).unwrap_or(name);
+            !stems.contains(&stem.to_lowercase())
+        })
+        .collect()
+}
+
+fn folder_color_hex(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    bytes.len() == 7 && bytes[0] == b'#' && bytes[1..].iter().all(|byte| byte.is_ascii_hexdigit())
+}
+
+fn read_folder_colors(root: &Path) -> Result<BTreeMap<String, String>, String> {
+    let path = root.join(".fanotes").join("folder-colors.json");
+    let text = match fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(BTreeMap::new()),
+        Err(_) => return Err("Die Ordnerfarben sind ungültig oder zu groß.".to_owned()),
+    };
+    if text.len() > 512 * 1024 {
+        return Err("Die Ordnerfarben sind ungültig oder zu groß.".to_owned());
+    }
+    let Ok(parsed) = serde_json::from_str::<Value>(&text) else {
+        return Ok(BTreeMap::new());
+    };
+    let source = parsed.get("colors").unwrap_or(&parsed);
+    let Some(object) = source.as_object() else {
+        return Ok(BTreeMap::new());
+    };
+    let mut colors = BTreeMap::new();
+    for (path, color) in object.iter().take(5000) {
+        let Some(color) = color.as_str().filter(|value| folder_color_hex(value)) else {
+            continue;
+        };
+        let Ok(normalized) = vault::normalize_relative_path(path, false, false) else {
+            continue;
+        };
+        colors.insert(normalized, color.to_ascii_lowercase());
+    }
+    Ok(colors)
+}
+
+fn write_folder_colors(root: &Path, colors: &BTreeMap<String, String>) -> Result<(), String> {
+    let internal = root.join(".fanotes");
+    fs::create_dir_all(&internal)
+        .map_err(|_| "Der Ordner konnte nicht angelegt werden.".to_owned())?;
+    let mut entries: Vec<_> = colors.iter().take(5000).collect();
+    entries.sort_by(|left, right| left.0.cmp(right.0));
+    let mut object = Map::new();
+    for (path, color) in entries {
+        object.insert(path.clone(), Value::String(color.clone()));
+    }
+    let snapshot = format!(
+        "{}\n",
+        serde_json::to_string_pretty(&json!({ "version": 1, "colors": object }))
+            .unwrap_or_default()
+    );
+    if snapshot.len() > 512 * 1024 {
+        return Err("Zu viele Ordnerfarben für diesen Vault.".to_owned());
+    }
+    fs::write(internal.join("folder-colors.json"), snapshot)
+        .map_err(|_| "Die Ordnerfarbe konnte nicht gespeichert werden.".to_owned())
+}
+
+fn move_note_companion(root: &Path, old_relative: &str, new_relative: &str) {
+    let Some(old_companion) = note_companion_relative(old_relative) else {
+        return;
+    };
+    let Some(new_companion) = note_companion_relative(new_relative) else {
+        return;
+    };
+    let Ok(source) = vault::resolve_inside(root, &old_companion) else {
+        return;
+    };
+    if !source.is_file() {
+        return;
+    }
+    let Ok(destination) = vault::resolve_inside(root, &new_companion) else {
+        return;
+    };
+    if let Some(parent) = destination.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    let _ = fs::rename(source, destination);
+}
+
+fn note_companion_relative(relative: &str) -> Option<String> {
+    let lower = relative.to_lowercase();
+    let extension = if lower.ends_with(".famd") {
+        ".md"
+    } else if lower.ends_with(".md") || lower.ends_with(".markdown") || lower.ends_with(".pdf") {
+        ".famd"
+    } else {
+        return None;
+    };
+    Some(fanotes_famd::companion_note_path(relative, extension))
+}
+
+fn forget_folder_colors(root: &Path, relative: &str) -> Result<(), String> {
+    let mut colors = read_folder_colors(root)?;
+    let before = colors.len();
+    colors.retain(|path, _| path != relative && !path.starts_with(&format!("{relative}/")));
+    if colors.len() != before {
+        write_folder_colors(root, &colors)?;
+    }
+    Ok(())
+}
+
+fn retarget_folder_colors(root: &Path, old: &str, new: &str) -> Result<(), String> {
+    let mut colors = read_folder_colors(root)?;
+    let keys: Vec<String> = colors.keys().cloned().collect();
+    let mut changed = false;
+    for key in keys {
+        if key != old && !key.starts_with(&format!("{old}/")) {
+            continue;
+        }
+        let Some(color) = colors.remove(&key) else {
+            continue;
+        };
+        let next = if key == old {
+            new.to_owned()
+        } else {
+            format!("{new}{}", &key[old.len()..])
+        };
+        colors.insert(next, color);
+        changed = true;
+    }
+    if changed {
+        write_folder_colors(root, &colors)?;
+    }
+    Ok(())
+}
+
+fn drawing_owner_id(markdown: &str, ink: Option<&Value>) -> Option<String> {
+    if let Some(id) = markdown.split("fanotes-ink:").nth(1) {
+        let id = id
+            .split(|character: char| {
+                !character.is_ascii_alphanumeric() && character != '_' && character != '-'
+            })
+            .next()
+            .unwrap_or("");
+        if is_drawing_id(id) {
+            return Some(id.to_owned());
+        }
+    }
+    let id = ink?.get("id")?.as_str()?;
+    is_drawing_id(id).then(|| id.to_owned())
+}
+
+fn is_drawing_id(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 96
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+}
+
+fn search_drawings(
+    root: &Path,
+    needle: &str,
+    query: &str,
+    owners: &std::collections::HashMap<String, String>,
+    hits: &mut Vec<Value>,
+) {
+    let assets = root.join(".fanotes").join("assets");
+    let Ok(entries) = fs::read_dir(assets) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().to_string();
+        let Some(id) = name.strip_suffix(".json") else {
+            continue;
+        };
+        if !is_drawing_id(id) {
+            continue;
+        }
+        let Ok(text) = fs::read_to_string(entry.path()) else {
+            continue;
+        };
+        let Ok(document) = serde_json::from_str::<Value>(&text) else {
+            continue;
+        };
+        let Some(title) = document.get("title").and_then(Value::as_str) else {
+            continue;
+        };
+        let transcript = document
+            .get("searchTranscript")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        let searchable = format!("{title}\n{transcript}");
+        let haystack = searchable.to_lowercase();
+        let Some(first) = haystack.find(needle) else {
+            continue;
+        };
+        let mut hit = json!({
+            "relativePath": format!(".fanotes/assets/{id}.json"),
+            "title": title,
+            "excerpt": excerpt(&searchable, first, needle.len()),
+            "matches": count_matches(&haystack, needle),
+            "kind": "drawing",
+            "drawingId": id,
+        });
+        if let Some(note) = owners.get(id) {
+            hit["notePath"] = Value::String(note.clone());
+        }
+        if let Some(anchor) = ink_anchor(transcript, query) {
+            hit["inkAnchor"] = json!({ "y": anchor });
+        }
+        hits.push(hit);
+    }
+}
+
+fn collect_search_files(
     root: &Path,
     directory: &Path,
-    visit: &mut dyn FnMut(String, String),
+    files: &mut Vec<String>,
 ) -> Result<(), String> {
     for entry in
         fs::read_dir(directory).map_err(|_| "Der Vault konnte nicht gelesen werden.".to_owned())?
@@ -860,18 +2558,119 @@ fn walk_files(
             continue;
         }
         let path = entry.path();
-        if path.is_dir() {
-            walk_files(root, &path, visit)?;
-        } else if name.ends_with(".md") {
-            if let Ok(text) = fs::read_to_string(&path) {
-                let relative = path
-                    .strip_prefix(root)
-                    .unwrap_or(&path)
-                    .to_string_lossy()
-                    .replace('\\', "/");
-                visit(relative, text);
-            }
+        let meta = fs::symlink_metadata(&path)
+            .map_err(|_| "Der Vault konnte nicht gelesen werden.".to_owned())?;
+        if meta.file_type().is_symlink() {
+            continue;
         }
+        if meta.is_dir() {
+            collect_search_files(root, &path, files)?;
+            continue;
+        }
+        let extension = name
+            .rsplit_once('.')
+            .map(|(_, extension)| extension.to_ascii_lowercase())
+            .unwrap_or_default();
+        if !matches!(extension.as_str(), "md" | "markdown" | "famd" | "pdf") {
+            continue;
+        }
+        let max = if extension == "pdf" {
+            PDF_ASSET_MAX
+        } else {
+            MAX_TEXT_BYTES
+        };
+        if meta.len() > max {
+            continue;
+        }
+        let relative = path
+            .strip_prefix(root)
+            .unwrap_or(&path)
+            .to_string_lossy()
+            .replace('\\', "/");
+        files.push(relative);
     }
     Ok(())
+}
+
+fn ink_transcript(ink: Option<&Value>) -> String {
+    ink.and_then(|value| value.get("searchTranscript"))
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .chars()
+        .take(500_000)
+        .collect()
+}
+
+fn count_matches(haystack: &str, needle: &str) -> usize {
+    if needle.is_empty() {
+        return 0;
+    }
+    let mut matches = 0;
+    let mut cursor = 0;
+    while let Some(index) = haystack[cursor..].find(needle) {
+        matches += 1;
+        cursor += index + needle.len().max(1);
+        if cursor >= haystack.len() {
+            break;
+        }
+    }
+    matches
+}
+
+fn excerpt(text: &str, match_index: usize, query_length: usize) -> String {
+    let mut start = match_index.saturating_sub(95);
+    let mut end = (match_index + query_length + 145).min(text.len());
+    while start > 0 && !text.is_char_boundary(start) {
+        start -= 1;
+    }
+    while end < text.len() && !text.is_char_boundary(end) {
+        end += 1;
+    }
+    let slice = text[start..end]
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    format!(
+        "{}{slice}{}",
+        if start > 0 { "…" } else { "" },
+        if end < text.len() { "…" } else { "" }
+    )
+}
+
+fn ink_anchor(transcript: &str, query: &str) -> Option<f64> {
+    let needle = query.trim().to_lowercase();
+    if needle.len() < 2 || transcript.trim().is_empty() {
+        return None;
+    }
+    let lines: Vec<&str> = transcript
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect();
+    if lines.is_empty() {
+        return None;
+    }
+    let parsed: Vec<(Option<f64>, String)> = lines
+        .iter()
+        .map(|line| {
+            if let Some((y, text)) = line.split_once('\t') {
+                if let Ok(value) = y.parse::<f64>() {
+                    if value.is_finite() {
+                        return (Some(value.clamp(0.0, 1.0)), text.trim().to_owned());
+                    }
+                }
+            }
+            (None, (*line).to_owned())
+        })
+        .collect();
+    let index = parsed
+        .iter()
+        .position(|(_, text)| text.to_lowercase().contains(&needle))?;
+    parsed[index].0.or_else(|| {
+        if parsed.len() == 1 {
+            Some(0.15)
+        } else {
+            Some(index as f64 / (parsed.len() - 1) as f64)
+        }
+    })
 }

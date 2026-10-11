@@ -282,9 +282,17 @@ impl FamdPayload {
 }
 
 impl PageStats {
-    fn to_value(&self) -> Value {
+    pub fn to_value(&self) -> Value {
         serde_json::to_value(self).unwrap_or(Value::Null)
     }
+}
+
+pub fn parse_note_links(value: &Value) -> Vec<NoteLink> {
+    parse_note_links_value(value)
+}
+
+pub fn parse_note_backups(value: &Value) -> Vec<NoteBackup> {
+    parse_note_backups_value(value)
 }
 
 fn parse_note_links_value(value: &Value) -> Vec<NoteLink> {
@@ -311,7 +319,7 @@ fn sanitize_note_links(links: &[NoteLink]) -> Vec<NoteLink> {
 }
 
 impl NoteLink {
-    fn to_json(&self) -> Value {
+    pub fn to_json(&self) -> Value {
         let mut object = Map::new();
         object.insert("id".into(), Value::String(self.id.clone()));
         object.insert("sourcePath".into(), Value::String(self.source_path.clone()));
@@ -412,7 +420,7 @@ fn sanitize_note_backups(backups: &[NoteBackup]) -> Vec<NoteBackup> {
 }
 
 impl NoteBackup {
-    fn to_json(&self) -> Value {
+    pub fn to_json(&self) -> Value {
         let mut object = Map::new();
         object.insert("id".into(), Value::String(self.id.clone()));
         object.insert("notePath".into(), Value::String(self.note_path.clone()));

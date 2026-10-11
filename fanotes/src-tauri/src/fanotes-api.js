@@ -3,6 +3,14 @@
 (() => {
   const internals = window.__TAURI_INTERNALS__
   if (!internals || typeof internals.invoke !== 'function') return
+  const decodeByteFields = (value) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return value
+    const next = { ...value }
+    for (const key of ['de', 'en', 'bytes', 'model', 'wasm']) {
+      if (typeof next[key] === 'string') next[key] = bytesFromBase64(next[key])
+    }
+    return next
+  }
   const bytesFromBase64 = (value) => {
     if (typeof value !== 'string') throw new Error('Die Datei konnte nicht gelesen werden.')
     const binary = atob(value)
@@ -72,7 +80,15 @@
     closeSubjectBookPopout: () => invoke('fanotes:close-subject-book-popout'),
     onSubjectBookPopoutClosed: (callback) => listen('fanotes:subject-book-popout-closed', callback),
     importWorksheet: () => invoke('fanotes:import-worksheet'),
-    importWorksheetFromData: (payload) => invoke('fanotes:import-worksheet-from-data', payload),
+    importWorksheetFromData: (payload) => {
+      const source = payload && payload.bytes
+      const bytes = source instanceof Uint8Array ? source : new Uint8Array(source || [])
+      return invoke('fanotes:import-worksheet-from-data', {
+        name: payload && payload.name,
+        mimeType: payload && payload.mimeType,
+        bytesBase64: bytesToBase64(bytes),
+      })
+    },
     importPdfNote: (parentPath) => invoke('fanotes:import-pdf-note', parentPath),
     importOneNote: () => invoke('fanotes:import-onenote'),
     readWorksheet: (id) => invoke('fanotes:read-worksheet', id),
@@ -83,9 +99,9 @@
     exportNotePdf: () => invoke('fanotes:export-note-pdf'),
     readAssetDataUrl: (relativePath) => invoke('fanotes:read-asset-data-url', relativePath),
     readAssetBytes: async (relativePath) => bytesFromBase64(await invoke('fanotes:read-asset-bytes', relativePath)),
-    loadSpellingResources: () => invoke('fanotes:load-spelling-resources'),
-    loadSpellingWordCandidates: (language) => invoke('fanotes:load-spelling-word-candidates', language),
-    loadHandwritingRecognitionResources: () => invoke('fanotes:load-handwriting-recognition-resources'),
+    loadSpellingResources: async () => decodeByteFields(await invoke('fanotes:load-spelling-resources')),
+    loadSpellingWordCandidates: async (language) => decodeByteFields(await invoke('fanotes:load-spelling-word-candidates', language)),
+    loadHandwritingRecognitionResources: async () => decodeByteFields(await invoke('fanotes:load-handwriting-recognition-resources')),
     recognizeNativeHandwritingLine: async (request) => {
       const input = request && request.input instanceof Float32Array
         ? request.input
