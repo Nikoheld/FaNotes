@@ -10,6 +10,8 @@ mod policy;
 mod vault;
 mod worksheets;
 
+mod ai;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
@@ -171,16 +173,15 @@ impl Host {
             "fanotes:qwen-vision-install" | "fanotes:qwen-vision-recognize" => {
                 Err("Qwen Vision ist nicht installiert.".to_owned())
             }
-            "fanotes:lm-studio-list-models" => {
-                let origin = local_ai_origin(&arg_string(args, 0)?, "lmstudio")?;
-                Ok(json!({ "origin": origin, "models": [] }))
+            "fanotes:lm-studio-list-models" => ai::list_lm_studio(
+                &arg_string(args, 0)?,
+                args.get(1).and_then(Value::as_str).unwrap_or(""),
+            ),
+            "fanotes:lm-studio-transform" => {
+                ai::transform_lm_studio(args.first().unwrap_or(&Value::Null))
             }
-            "fanotes:lm-studio-transform" | "fanotes:ai-transform" => {
-                Err("Der AI-Dienst hat keine Antwort geliefert.".to_owned())
-            }
-            "fanotes:ai-list-models" => {
-                self.ai_list_models(args.first().cloned().unwrap_or(Value::Null))
-            }
+            "fanotes:ai-list-models" => ai::list_models(args.first().unwrap_or(&Value::Null)),
+            "fanotes:ai-transform" => ai::transform(args.first().unwrap_or(&Value::Null)),
             "fanotes:load-secure-settings" => Ok(self.secret_snapshot()),
             "fanotes:save-settings" => {
                 self.save_settings(args.first().cloned().unwrap_or(Value::Null))
@@ -553,32 +554,6 @@ impl Host {
             "drawingJson": ink.to_string(),
             "dataRelativePath": famd,
         }))
-    }
-
-    fn ai_list_models(&self, connection: Value) -> Result<Value, String> {
-        let provider = connection
-            .get("provider")
-            .and_then(Value::as_str)
-            .unwrap_or("");
-        if matches!(provider, "lmstudio" | "ollama" | "opencode") {
-            let base = connection
-                .get("baseUrl")
-                .and_then(Value::as_str)
-                .unwrap_or("");
-            let origin = local_ai_origin(base, provider)?;
-            return Ok(json!({ "origin": origin, "models": [] }));
-        }
-        if !matches!(provider, "openai" | "gemini" | "anthropic") {
-            return Err("Wähle einen unterstützten AI-Anbieter.".to_owned());
-        }
-        let key = connection
-            .get("apiKey")
-            .and_then(Value::as_str)
-            .unwrap_or("");
-        if key.is_empty() {
-            return Err("Gib zuerst den API-Schlüssel dieses Anbieters ein.".to_owned());
-        }
-        Ok(json!({ "models": [] }))
     }
 
     fn save_settings(&mut self, incoming: Value) -> Result<Value, String> {
