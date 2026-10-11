@@ -5,14 +5,15 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="robots" content="noindex,nofollow,noarchive" />
     <meta name="theme-color" content="#0b0b12" />
-    <title>FaNotes Statistics</title>
+    <title>FaNotes Statistik</title>
+    <meta name="description" content="Private Produktstatistik von FaNotes: anonyme Summen für Website, Downloads und App-Starts." />
     <link rel="icon" href="/assets/fanotes.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="/stats/stats.css?v=20260715.1" />
     <script src="/stats/stats.js?v=20260715.1" defer></script>
   </head>
   <body>
     <header class="topbar">
-      <a class="brand" href="/" aria-label="FaNotes Website">
+      <a class="brand" href="/" aria-label="FaNotes-Website" data-aria="brand">
         <span><img src="/assets/fanotes.svg" alt="" /></span>
         <b>FaNotes</b>
       </a>
@@ -32,15 +33,15 @@
         </div>
       </section>
 
-      <nav class="periods" aria-label="Zeitraum">
+      <nav class="periods" aria-label="Zeitraum" data-aria="period">
         <button type="button" data-days="7" data-copy="days7">7 Tage</button>
         <button class="active" type="button" data-days="30" data-copy="days30">30 Tage</button>
         <button type="button" data-days="90" data-copy="days90">90 Tage</button>
         <button type="button" data-days="all" data-copy="all">Gesamt</button>
       </nav>
 
-      <section class="metrics" aria-label="Kennzahlen">
-        <article class="metric violet"><div><span data-copy="websiteViews">Website-Aufrufe</span><i>↗</i></div><strong data-metric="websiteViews">–</strong><small data-today="websiteViews">–</small></article>
+      <section class="metrics" aria-label="Kennzahlen" data-aria="metrics">
+        <article class="metric violet"><div><span data-copy="websiteViews">Website-Sitzungen</span><i>↗</i></div><strong data-metric="websiteViews">–</strong><small data-today="websiteViews">–</small></article>
         <article class="metric mint"><div><span data-copy="downloads">Downloads</span><i>↓</i></div><strong data-metric="downloads">–</strong><small data-today="downloads">–</small></article>
         <article class="metric orange"><div><span data-copy="desktopOpens">Desktop-App-Starts</span><i>⌁</i></div><strong data-metric="desktopAppOpens">–</strong><small data-today="desktopAppOpens">–</small></article>
         <article class="metric blue"><div><span data-copy="webOpens">Web-App-Starts</span><i>◎</i></div><strong data-metric="webAppOpens">–</strong><small data-today="webAppOpens">–</small></article>
@@ -51,7 +52,7 @@
           <div><span data-copy="development">Entwicklung</span><h2 data-copy="activity">Aktivität im gewählten Zeitraum</h2></div>
           <div class="legend"><span class="violet" data-copy="websiteShort">Website</span><span class="mint" data-copy="downloads">Downloads</span><span class="orange" data-copy="desktopShort">Desktop</span><span class="blue" data-copy="webShort">Web-App</span></div>
         </div>
-        <div class="chart" data-chart role="img" aria-label="Zeitverlauf"><div class="chart-empty" data-copy="noData">Noch keine Daten in diesem Zeitraum.</div></div>
+        <div class="chart" data-chart role="img" aria-label="Zeitverlauf" data-aria="timeline"><div class="chart-empty" data-copy="noData">Noch keine Daten in diesem Zeitraum.</div></div>
       </section>
 
       <section class="detail-grid">

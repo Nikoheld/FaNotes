@@ -118,6 +118,52 @@ Calendar versions use names such as `2026.7.1`; previews use names such as `2026
 
 Download the latest build from [GitHub Releases](https://github.com/Nikoheld/FaNotes/releases), open the [web app](https://fanotes.fasrv.ch/notes/), or visit the [product website](https://fanotes.fasrv.ch/) for platform-specific installation help.
 
+### Develop locally
+
+Requirements: Node.js 22+, npm, and Linux or Windows. Desktop packages also need the platform-specific Electron dependencies.
+
+```bash
+# GlyphenWerk
+npm install
+npm run dev
+
+# FaNotes desktop and web
+cd fanotes
+npm install
+npm run dev          # Electron + Vite
+npm run dev:web      # browser build
+```
+
+Useful checks:
+
+```bash
+cd fanotes
+npm run typecheck
+npm run check:updater
+npm run check:i18n
+npm run check:connected-recognition
+```
+
+### Repository layout
+
+```text
+src/                  GlyphenWerk interface and the shared recognition engine
+fanotes/              FaNotes React, Electron, and web app, tests, and packaging
+fanotes-site/         Product website, update API, AI proxy, and backup service
+deliverables/         Small publishable companion files
+```
+
+Generated builds, `node_modules`, private keys, local vaults, analytics, and server backups do not belong in Git. Release binaries are attached in full, with checksums, to the matching GitHub release.
+
+### Privacy and security
+
+- Local notes do not require an account.
+- The Markdown vault, drawings, and personal handwriting training stay on the device unless you opt in.
+- Cloud AI is used only when you configure a provider yourself.
+- The desktop app stores API keys in the protected system store.
+- Update manifests, package sizes, file names, origin, signature, and SHA-256 are checked before installation.
+- The optional server backup accepts only bounded FaNotes data and revalidated media. Active PDF content and unknown file types are blocked.
+
 ## License
 
 FaNotes source code is available under the [MIT License](fanotes/packaging/LICENSE). Bundled models, fonts, dictionaries and third-party components retain their respective licenses; see [THIRD_PARTY_NOTICES.md](fanotes/packaging/THIRD_PARTY_NOTICES.md).

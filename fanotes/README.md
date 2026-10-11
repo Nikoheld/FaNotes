@@ -207,3 +207,213 @@ tar --sort=name --owner=0 --group=0 --numeric-owner --mtime='@0' \
 ## Lizenz
 
 Der Anwendungscode steht unter der MIT-Lizenz. Abhängigkeiten und eingebettete Schriften behalten ihre jeweiligen Lizenzen; siehe deren Paketmetadaten im npm-Lockfile.
+
+## English
+
+## Web app
+
+The full browser build runs at `https://fanotes.fasrv.ch/notes/`. It uses the same React interface and the same handwriting and mathematics engine as the desktop app. Notes, folders, drawings, worksheets, and settings are stored persistently in IndexedDB, separate from the program cache. After the first full load, a versioned service worker also makes the app available offline.
+
+Desktop-specific actions have safe web equivalents: images and PDFs are imported through the browser file picker, Markdown notes can be downloaded, and updates are swapped through the PWA cache. The shared AI area supports LM Studio, Ollama, and OpenCode directly over `localhost`. OpenAI, Gemini, and Anthropic run in the web app through a tightly limited FaNotes proxy. Cloud keys are kept in memory only for the current call and are not stored in the browser, in a backup, or on the server. Local services must allow CORS for `https://fanotes.fasrv.ch`.
+
+Under **Settings → Files & vault**, an extra server backup stays optional. The first activation needs the private setup code of the FaNotes server. After that, a personal recovery code authenticates every access. Notes, handwriting, worksheets, settings without AI credentials, and personal training are backed up automatically. Images and PDFs are scanned and rebuilt on the server, and active PDF content is blocked. Keep the recovery code outside the browser, because the server can neither read it nor reset it.
+
+FaNotes is a local desktop app for school, university, personal life, and work. It combines an open vault and Markdown workflow with one paper-like page for keyboard and graphics tablet, plus handwriting recognition that learns from you.
+
+## What the app can do
+
+- Manage subjects and subfolders as real directories
+- Organize subjects with individual folder colors stored directly in the vault
+- Write Markdown files in a single FaNotes live view and save them automatically
+- Place a link on a note or a PDF (symbol or text); a tap opens the new note, and Back at the top returns
+- Under Experimental, turn on a backup button in the top bar: save the current note as it is, then make further backups or restore older ones
+- Attach a PDF book to a subject and show the view at the top (left, right, above, below, or popped out); the page is remembered, and notes sit on the book PDF
+- Mark possible typos with a red wavy underline, as in Word, and detect German or English per text span automatically — fully local, including in mixed notes
+- Insert headings, emphasis, links, lists, tasks, tables, code, and mathematics from a formatting bar
+- Collapse and expand whole sections under a heading directly in the live editor
+- Edit Markdown directly on a word-processor-style paper page, without a separate source, split, or preview mode
+- Render GitHub-flavored Markdown, tables, task lists, and wiki links such as `[[Mechanics]]`
+- Hide Markdown marks outside the line being edited, and set inline and block mathematics directly with KaTeX
+- Import images and one- or multi-page PDFs as worksheets into the current note, or automatically into a new note
+- Fill imported worksheets in the same paper view with freely placed text fields or directly with a graphics tablet
+- Search the whole vault, open several notes in tabs, and show an outline
+- Collapse the folder sidebar from its header and expand it again from the file icon, the status bar, or the command palette
+- Switch on the same note page at any time between keyboard and mouse, touch, or graphics tablet, including pressure, eraser, smoothing, and undo/redo
+- Write full A4 handwriting pages without being forced into Markdown, and automatically store them as editable stroke data linked to the note
+- Index unconverted handwriting locally and invisibly as text and mathematics, so vault search can still find it
+- Classify handwriting automatically as text or mathematics, remember the last recognized mode, and correct the result before inserting it
+- Resolve uncertain letters with German or English word candidates, for example `Test` instead of `Tost`
+- Learn in the background from confident word-context decisions after each writing pause, without changing the visible handwriting
+- Open GlyphenWerk entirely inside FaNotes: capture characters and mathematical arrangements, live-test whole equations or sentences, manage samples, and export backups
+- Take new GlyphenWerk samples, confirmed test corrections, custom characters, and integral, sum, and index layouts straight into the active FaNotes model, without an export detour
+- Place ordinary text on the page as naturally varied, connected, still editable handwriting through **Text → Handwriting**, using your own GlyphenWerk strokes
+- Convert the whole handwriting page, or only a freely drawn region, with a quick button
+- Keep the pen quick bar permanently at the bottom edge of the window; the training import disappears there automatically after a successful setup
+- Delete a written word or a drawn region naturally by scribbling back and forth, and undo the whole gesture with a single `Ctrl+Z`
+- Choose German or English language models for ordinary handwritten sentences
+- Turn fractions, roots, superscripts and subscripts, and the limits of integrals and sums into spatial LaTeX
+- Enable the local **math solver** in the pen bar, double-tap handwritten terms or equations, and simplify, solve, expand, factor, or evaluate them
+- Enable the **math checker** in the same toolbar, freely frame a multi-line calculation, and mark the first provably wrong step directly on the page
+- Edit recognized calculation lines before they are judged; uncertain characters and gaps in the definition are shown in yellow for confirmation instead of being reported as errors
+- Continue calculated steps automatically to the right or below, using your own GlyphenWerk characters as personal, still editable handwriting
+- Use confirmed corrections as new personal training samples
+- Adjust colors, fonts, sizes, layout, paper, pen, and animations extensively
+- Use seven design worlds, four workspace backgrounds, and a distraction-free focus mode
+- On Linux, start with Ozone X11 so pen and trackpad share the same seat, and use the native window bar so Hyprland can affect frames and window decoration
+- Use the same full feature set on Windows 10/11 x64 and Linux x86_64, including graphics tablet, recognition, mathematics, worksheets, and AI providers
+- Use LM Studio, Ollama, OpenAI, Gemini, Anthropic, or OpenCode directly in an open Markdown note
+- Combine several AI actions at once: free instruction, spelling, wiki links, fact check, style, structure, added knowledge, summary, and study questions
+- Review every AI result first as a rendered or raw Markdown preview, and apply it only when you choose to
+- Check for new versions automatically through the signed FaNotes update API, download them resumable, and install them after a safe save
+- Open the interface immediately while a NAS vault and heavy editor pieces load safely in the background
+- Spare CPU and battery at the same input response: batched editor updates, incremental canvas rendering, and idle transcription avoid redundant work
+- Under **Settings → Advanced**, reset all app data without deleting documents in the vault
+- In FaNotes Web, optionally keep an authenticated, automatically updated recovery copy that is checked for malware on the server
+
+## Data, vault, and privacy
+
+On the first start, a vault named `FaNotes` is created in the Documents folder by default. The app adds an Inbox, the subjects Mathematics, German, English, Physics, Chemistry, Biology, History, and Computer science, and a welcome note. Under **Settings → Files & vault** you can choose another local folder at any time.
+
+Notes stay ordinary `.md` files. Saved handwriting pages live as PNG and as editable stroke data in the vault's protected `.fanotes/assets` folder. Imported worksheets and their freely placed text fields live under `.fanotes/worksheets`. An invisible marker ties them to the matching Markdown note. The invisible local search transcript of the handwriting is stored there too; it changes neither the page nor a Markdown file. Folder colors are stored in `.fanotes/folder-colors.json` and move with a subject when it is renamed. The whole vault can therefore be backed up with Git, Syncthing, Nextcloud, or a NAS without being locked to FaNotes. FaNotes takes over older internal vault data automatically and atomically the first time it is opened.
+
+The app does not require a cloud. Vault access goes through a limited Electron interface; the editor has neither free file-system access nor free network access. For local AI providers, only the protected main process may contact a checked `localhost` or private LAN address. OpenAI, Gemini, and Anthropic use only the fixed official HTTPS endpoints. Credentials are encrypted in the desktop profile through Electron's secure operating-system store and are excluded from backups. External HTTP(S) links open in the default browser only after a click.
+
+The auto-updater connects only over HTTPS to `fanotes.fasrv.ch`. Linux and Windows have separate platform channels; the app accepts only the channel that matches the running system. The update manifest is also signed with Ed25519; the app contains only the public verification key. Package address, version, size, and SHA-256 value are part of the signature. Downloads resume after an interruption, are checked in full after they arrive, and are hashed again immediately before restart. A version older than the one already known is blocked. Under **Settings → Updates**, automatic checking, background download, and install-on-quit can be controlled separately.
+
+The shipped AppImage starts without an unsafe sandbox switch. On unusually hardened systems without unprivileged user namespaces, use the Pacman package instead of turning the Chromium sandbox off.
+
+On Linux, FaNotes starts with Ozone X11 so pen and trackpad share the same seat. If `force_zero_scaling = true` is set in the Hyprland config or in a file included with `source =`, the app takes over device scaling itself: it reads the scale of the focused monitor through `hyprctl -j monitors` (1.25, 1.5, 2, …). `FANOTES_DEVICE_SCALE` overrides that. `GDK_SCALE` (times `GDK_DPI_SCALE`) is the fallback without `hyprctl`, otherwise 2. Without `force_zero_scaling`, Hyprland scales the XWayland window up, which looks soft on HiDPI monitors — the app notes that in the startup log. Vulkan and ANGLE-Vulkan experiments stay off on the native Wayland path; Chromium chooses the compatible GL/EGL path. An explicitly set graphics option is left untouched. Before the single-instance lock, the app also removes only Chromium startup symlinks that are demonstrably orphaned. An active process, or one that cannot be assigned safely, is never killed or unlocked.
+
+Settings and the personal recognition model belong to the local Electron profile and therefore are not in the vault. On Linux the profile is typically under `~/.config/FaNotes/`, on Windows under `%APPDATA%\FaNotes\`. On the first start, FaNotes automatically takes over an existing earlier configuration and handwriting database without overwriting FaNotes data that is already present. For a complete backup, quit the app and save both the vault and the profile folder.
+
+Under **Settings → Advanced → Reset app data**, the whole local profile can be cleared. That removes settings, personal handwriting training, browser data, caches, and update downloads, then restarts FaNotes. Markdown files, images, PDFs, handwriting pages, and drawings in the chosen vault are explicitly kept.
+
+## Set up handwriting
+
+Recognition is deliberately personal: it is trained on the samples that match your own handwriting.
+
+1. In FaNotes, choose **GlyphenWerk** on the left or press `Ctrl+Shift+G`.
+2. Under **Capture**, write enough samples for letters, digits, and symbols. For superscripts, subscripts, or the limits of integrals and sums, confirm the recognized spatial assignment in the mathematics test.
+3. Under **Test recognition**, write complete equations, terms, or ordinary sentences and correct uncertain results. Confirmed samples and layouts become active in FaNotes immediately. A ZIP export is only needed for backup or transfer.
+4. Press `Ctrl+D` on the same note page to switch to pen input and write freely on the A4 page.
+5. Only when you want visible text or LaTeX, choose **Convert page** or **Convert region**. **Automatic** compares text and mathematics from the characters and their spatial arrangement. **Text** and **Mathematics** remain available as a manual choice.
+6. Correct uncertain characters through their alternatives or directly in the correction field. On insert, the local model keeps learning from confirmed corrections.
+
+For the reverse direction, in pen mode choose **Text → Handwriting**, paste text, and adjust the live preview. FaNotes picks a personal training template for each character, varies it in a controlled way, and connects suitable letters inside a word. Missing training characters and lack of space are shown before insert. The result stays ordinary pen ink, so it can be erased, extended, and undone.
+
+To calculate in the same view, enable the **math solver** in the pen toolbar and double-tap a complete term or equation. FaNotes also recognizes spatially written fractions, roots, and indices, shows the recognized expression for review, and then offers simplify, solve, expand, factor, or evaluate. The output continues as editable ink using your personal training strokes. Under **Continuation** you can set the position. **Learned automatically** takes font size, line spacing, and the preferred arrangement from previous solutions.
+
+To check your own working, choose **Math checker** and draw a frame around at least two steps written one under the other. FaNotes separates the lines spatially, keeps fractions and indices together, and checks each step locally with symbolic algebra. The first refuted step is marked in red. When only individual changed characters are responsible, the marker sits as close as possible to that spot. Lost or illegally added solutions mark the whole target line. Every recognized line stays editable in the review panel. Yellow means deliberately “not safely decidable” — for example ambiguous handwriting, a gap in the definition, or a transformation for which the local engine cannot give a complete proof.
+
+GlyphenWerk and FaNotes still store in separate local IndexedDB databases. A validated internal bridge copies confirmed training data directly into the active FaNotes model. ZIP import remains available for existing datasets. It understands `manifest.jsonl`, `labels.json`, and, when present, `layout_examples.jsonl` from a GlyphenWerk export. Recognition quality depends on the variety, amount, and clean labeling of the samples. Recognized content therefore stays reviewable and correctable before it is inserted.
+
+## Set up an AI provider
+
+1. For a local provider, start LM Studio, Ollama, or OpenCode together with a model. For OpenAI, Gemini, or Anthropic, have an API key ready.
+2. Open a Markdown file in FaNotes and press `Ctrl+Shift+A`.
+3. Choose the provider at the top. FaNotes shows only the matching connection fields and loads that provider's models automatically. Local addresses are limited to `localhost` or private networks. Cloud providers use fixed official endpoints.
+4. Mark one or more actions. For **Run a free instruction**, also write the concrete request.
+5. Choose **Create preview** and check the result in the rendered view or the Markdown view.
+6. Only when the result fits, choose **Apply result**. Only then is the open note changed and saved automatically.
+
+The provider and model choice stay stored locally. Desktop credentials are encrypted. In FaNotes Web, cloud keys are forgotten when the AI area closes. The fact check uses only the capabilities of the chosen model, so time-dependent or uncertain statements still need to be checked. FaNotes disables every tool for OpenCode, so editing a note cannot run files, shell commands, or web access.
+
+## Import worksheets
+
+1. Open an existing note and choose **Worksheet** at the top, or press `Ctrl+Shift+I`.
+2. Choose **Into the current note** or **As a new note**, then open a PDF, PNG, JPEG, WebP, or GIF file.
+3. For keyboard input on the imported sheet, choose **Text field** and click the place you want. Fields and answers save automatically.
+4. For handwritten answers, switch to **Pen** as usual. The shared pen layer covers Markdown and every imported page.
+
+PDFs are rendered only locally. The original file, text fields, and pen strokes belong to the vault and should be backed up together.
+
+## Keyboard shortcuts
+
+| Action | Shortcut |
+| --- | --- |
+| Command palette | `Ctrl+P` |
+| New note | `Ctrl+N` |
+| Save | `Ctrl+S` |
+| Search the vault | `Ctrl+Shift+F` |
+| AI assistant | `Ctrl+Shift+A` |
+| GlyphenWerk training and test | `Ctrl+Shift+G` |
+| Image or PDF as a worksheet | `Ctrl+Shift+I` |
+| Switch keyboard/pen | `Ctrl+D` |
+| Focus mode | `Ctrl+Shift+E` |
+| Bold / italic / link | `Ctrl+B` / `Ctrl+I` / `Ctrl+K` |
+| Settings | `Ctrl+,` |
+| Undo/redo drawing | `Ctrl+Z` / `Ctrl+Y` |
+
+## Install on Windows and Arch Linux
+
+For Windows 10/11 x64 there is a per-user installer and a single portable EXE. Both include every feature of the Linux build. The full steps, tablet notes, update information, and PowerShell checksum commands are in [packaging/INSTALL_WINDOWS.md](packaging/INSTALL_WINDOWS.md).
+
+For Arch Linux there are three paths:
+
+- **AppImage:** run it directly, without a system install
+- **Portable tar.gz:** unpack it into any user folder
+- **Pacman package:** package the portable archive locally as `.pkg.tar.zst` with the included `PKGBUILD`
+
+The full steps, desktop integration, and tablet notes are in [packaging/INSTALL_ARCH.md](packaging/INSTALL_ARCH.md).
+
+## Development
+
+Node.js 22 or newer and npm are required.
+
+### Shared recognition, matching runtime
+
+FaNotes keeps segmentation, personal GlyphenWerk data, the text/mathematics decision, and the correction logic on one shared renderer path. Only the local neural inference is platform-specific:
+
+- The web app uses a dynamically quantized Q8 line model and a Q8 encoder/Q8 decoder through ONNX Runtime WASM. It uses at most two OCR threads and releases the workers after the configured idle time.
+- Linux and Windows use the same FP32 line model through ONNX Runtime Node in a CPU worker that starts on demand. The runtime picks the matching SIMD instructions of the Intel or AMD processor and uses at most four threads.
+- In desktop mode, the larger context model can optionally be added. Compact mode saves RAM. Both modes use the same training samples and the corrections that follow.
+
+The native packages contain only the matching x64 CPU library. Every model and runtime file is checked against the size and SHA-256 checksum stored in the manifest before it is used.
+
+```bash
+cd fanotes
+npm ci
+npm run dev
+```
+
+Useful checks and builds:
+
+```bash
+npm run typecheck
+npm run check:efficiency
+npm run check:startup
+npm run check:themes
+npm run check:scribble-erase
+npm run check:glyphenwerk
+npm run check:math-corrector
+npm run check:updater
+npm run build
+npm run dist:dir
+npm run dist:windows
+```
+
+`dist:dir` produces the unpacked Linux build under `release/linux-unpacked`. The Arch-compatible portable archive contains a single top-level folder:
+
+```text
+FaNotes-2.50.1-x86_64/
+├── fanotes
+├── resources/
+└── ...
+```
+
+A reproducibly sorted archive can be made from that with GNU tar:
+
+```bash
+version=2.50.1
+stage="release/FaNotes-${version}-x86_64"
+rm -rf "$stage"
+cp -a release/linux-unpacked "$stage"
+tar --sort=name --owner=0 --group=0 --numeric-owner --mtime='@0' \
+  --mode='u+rwX,go+rX,go-w' \
+  -czf "release/FaNotes-${version}-x86_64.tar.gz" \
+  -C release "$(basename "$stage")"
+```
+
+## License
+
+The application code is under the MIT license. Dependencies and embedded fonts keep their own licenses; see their package metadata in the npm lockfile.
