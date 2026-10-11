@@ -62,6 +62,43 @@ pub fn local_ai_origin(raw_url: &str, provider: &str) -> Result<String, String> 
     Ok(url.origin().ascii_serialization())
 }
 
+/// The LM Studio panel accepts the server root and the `/v1` or `/api/v1`
+/// suffixes LM Studio shows, then keeps only the origin.
+pub fn lm_studio_origin(raw_url: &str) -> Result<String, String> {
+    if crate::vault::utf16_len(raw_url) > 2048 {
+        return Err("Die LM-Studio-Adresse ist ungültig.".to_owned());
+    }
+    let url = url::Url::parse(raw_url.trim()).map_err(|_| {
+        "Gib eine vollständige LM-Studio-Adresse wie http://127.0.0.1:1234 ein.".to_owned()
+    })?;
+    if (url.scheme() != "http" && url.scheme() != "https")
+        || !url.username().is_empty()
+        || url.password().is_some_and(|password| !password.is_empty())
+        || url.query().is_some_and(|query| !query.is_empty())
+        || url.fragment().is_some_and(|fragment| !fragment.is_empty())
+    {
+        return Err("Die LM-Studio-Adresse darf nur eine lokale HTTP(S)-Adresse ohne Zugangsdaten enthalten.".to_owned());
+    }
+    let hostname = url
+        .host_str()
+        .unwrap_or("")
+        .trim_matches(['[', ']'])
+        .to_lowercase();
+    let private_ipv4 = parse_ipv4(&hostname).is_some_and(is_lan_ipv4);
+    let private_ipv6 = hostname == "::1"
+        || hostname.starts_with("fc")
+        || hostname.starts_with("fd")
+        || hostname.starts_with("fe80:");
+    if hostname != "localhost" && !private_ipv4 && !private_ipv6 {
+        return Err("Aus Datenschutzgründen sind für LM Studio nur localhost und private LAN-Adressen erlaubt.".to_owned());
+    }
+    let path = url.path().trim_end_matches('/');
+    if !path.is_empty() && path != "/v1" && path != "/api/v1" {
+        return Err("Die LM-Studio-Adresse darf keinen zusätzlichen Pfad enthalten.".to_owned());
+    }
+    Ok(url.origin().ascii_serialization())
+}
+
 fn is_private_host(hostname: &str) -> bool {
     let host = hostname.trim_end_matches('.').to_lowercase();
     if host.is_empty()
@@ -133,4 +170,29 @@ fn is_private_ipv6(value: &str) -> bool {
     }
     let first = u32::from_str_radix(value.split(':').next().unwrap_or("0"), 16).unwrap_or(0);
     !(0x2000..=0x3fff).contains(&first)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{lm_studio_origin, local_ai_origin};
+
+    #[test]
+    fn lm_studio_keeps_the_api_suffix_the_desktop_panel_accepts() {
+        assert_eq!(
+            lm_studio_origin("http://127.0.0.1:1234/v1").unwrap(),
+            "http://127.0.0.1:1234"
+        );
+        assert_eq!(
+            lm_studio_origin("http://127.0.0.1:1234/api/v1/").unwrap(),
+            "http://127.0.0.1:1234"
+        );
+        assert_eq!(
+            lm_studio_origin("http://localhost:1234").unwrap(),
+            "http://localhost:1234"
+        );
+        assert!(lm_studio_origin("http://127.0.0.1:1234/v1/models").is_err());
+        assert!(lm_studio_origin("https://api.openai.com/v1").is_err());
+        assert!(local_ai_origin("http://127.0.0.1:1234/v1", "ollama").is_err());
+        assert!(local_ai_origin("http://127.0.0.1:1234/v1", "lmstudio").is_err());
+    }
 }
