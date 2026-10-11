@@ -604,7 +604,7 @@ impl Host {
         }
         let documents = match self.documents_dir.clone() {
             Some(path) => path,
-            None => default_documents_dir()?,
+            None => default_documents_dir(),
         };
         let vault = documents.join("FaNotes");
         let created = match fs::symlink_metadata(&vault) {
@@ -2537,33 +2537,96 @@ fn note_byte_limit(relative: &str) -> u64 {
     }
 }
 
-fn default_documents_dir() -> Result<PathBuf, String> {
-    if let Some(dir) = xdg_documents_dir() {
-        return Ok(dir);
-    }
-    let home = std::env::var_os("HOME")
-        .ok_or_else(|| "Der Standard-Vault kann nicht angelegt werden.".to_owned())?;
-    Ok(PathBuf::from(home).join("Documents"))
+/// Electron `app.getPath('documents')` uses Chromium's `xdg_user_dir_lookup`.
+///
+/// A missing or unquoted documents entry is the home directory. `$HOME/Documents`
+/// is used only when the config file says so. The last matching line wins.
+fn default_documents_dir() -> PathBuf {
+    documents_directory(
+        std::env::var_os("HOME").as_deref(),
+        std::env::var_os("XDG_CONFIG_HOME").as_deref(),
+    )
 }
 
-fn xdg_documents_dir() -> Option<PathBuf> {
-    let home = PathBuf::from(std::env::var_os("HOME")?);
-    let config = std::env::var_os("XDG_CONFIG_HOME")
+fn documents_directory(
+    home: Option<&std::ffi::OsStr>,
+    config_home: Option<&std::ffi::OsStr>,
+) -> PathBuf {
+    let Some(home) = home.filter(|home| !home.is_empty()) else {
+        return PathBuf::from("/tmp");
+    };
+    strip_trailing_separators(
+        xdg_documents_dir(home, config_home).unwrap_or_else(|| PathBuf::from(home)),
+    )
+}
+
+fn xdg_documents_dir(
+    home: &std::ffi::OsStr,
+    config_home: Option<&std::ffi::OsStr>,
+) -> Option<PathBuf> {
+    let config = config_home
+        .filter(|value| !value.is_empty())
         .map(PathBuf::from)
-        .unwrap_or_else(|| home.join(".config"));
-    let text = fs::read_to_string(config.join("user-dirs.dirs")).ok()?;
-    let home_text = home.to_string_lossy();
-    for line in text.lines() {
-        let Some(rest) = line.trim().strip_prefix("XDG_DOCUMENTS_DIR=") else {
-            continue;
-        };
-        let rest = rest.trim().trim_matches('"');
-        if rest.is_empty() {
-            continue;
+        .unwrap_or_else(|| PathBuf::from(home).join(".config"));
+    let bytes = fs::read(config.join("user-dirs.dirs")).ok()?;
+    let text = String::from_utf8_lossy(&bytes);
+    let mut found = None;
+    for line in text.split('\n') {
+        if let Some(dir) = documents_dir_from_line(line, home) {
+            found = Some(dir);
         }
-        return Some(PathBuf::from(rest.replace("$HOME", home_text.as_ref())));
     }
-    None
+    found
+}
+
+fn documents_dir_from_line(line: &str, home: &std::ffi::OsStr) -> Option<PathBuf> {
+    let mut rest = line;
+    while rest.starts_with([' ', '\t']) {
+        rest = &rest[1..];
+    }
+    let rest = rest.strip_prefix("XDG_DOCUMENTS_DIR")?;
+    let mut rest = rest;
+    while rest.starts_with([' ', '\t']) {
+        rest = &rest[1..];
+    }
+    let rest = rest.strip_prefix('=')?;
+    let mut rest = rest;
+    while rest.starts_with([' ', '\t']) {
+        rest = &rest[1..];
+    }
+    let rest = rest.strip_prefix('"')?;
+    let (relative, rest) = if let Some(tail) = rest.strip_prefix("$HOME/") {
+        (true, tail)
+    } else if rest.starts_with('/') {
+        (false, rest)
+    } else {
+        return None;
+    };
+    let bytes = rest.as_bytes();
+    let mut index = 0;
+    let mut copied = Vec::new();
+    while index < bytes.len() && bytes[index] != b'"' {
+        if bytes[index] == b'\\' && index + 1 < bytes.len() {
+            index += 1;
+        }
+        copied.push(bytes[index]);
+        index += 1;
+    }
+    let mut path = std::ffi::OsString::new();
+    if relative {
+        path.push(home);
+        path.push("/");
+    }
+    path.push(String::from_utf8_lossy(&copied).as_ref());
+    Some(PathBuf::from(path))
+}
+
+fn strip_trailing_separators(path: PathBuf) -> PathBuf {
+    let text = path.to_string_lossy();
+    if text.len() <= 1 || !text.ends_with('/') {
+        return path;
+    }
+    PathBuf::from(text.trim_end_matches('/'))
 }
 
 fn vault_path_digest(path: &Path) -> String {
@@ -3613,5 +3676,83 @@ mod trash_date_tests {
                 && (13 * 3600..=15 * 3600).contains(&(local - after)),
             "{stamp} is not fourteen hours ahead of UTC ({before})"
         );
+    }
+}
+
+#[cfg(test)]
+mod documents_dir_tests {
+    use super::documents_directory;
+    use std::fs;
+    use std::path::Path;
+
+    fn config(home: &Path, body: &str) -> std::ffi::OsString {
+        let dir = home.join("config");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("user-dirs.dirs"), body).unwrap();
+        dir.into_os_string()
+    }
+
+    #[test]
+    fn the_documents_folder_follows_xdg_user_dir_lookup() {
+        let root = std::env::temp_dir().join(format!(
+            "fanotes-docs-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        let home = root.join("home");
+        fs::create_dir_all(&home).unwrap();
+        let home_os = home.as_os_str();
+
+        assert_eq!(
+            documents_directory(Some(home_os), Some(root.join("missing").as_os_str())),
+            home
+        );
+        assert_eq!(documents_directory(None, None), Path::new("/tmp"));
+
+        let quoted = config(&home, "XDG_DOCUMENTS_DIR=\"$HOME/Documents\"\n");
+        assert_eq!(
+            documents_directory(Some(home_os), Some(quoted.as_os_str())),
+            home.join("Documents")
+        );
+
+        let spaced = config(
+            &home,
+            "XDG_DOCUMENTS_DIR = \"$HOME/Notes\"\nXDG_DOCUMENTS_DIR=\"/absolute/Docs\"\n",
+        );
+        assert_eq!(
+            documents_directory(Some(home_os), Some(spaced.as_os_str())),
+            Path::new("/absolute/Docs")
+        );
+
+        let bare = config(
+            &home,
+            "XDG_DOCUMENTS_DIR=\"$HOME\"\nXDG_DOCUMENTS_DIR=$HOME/Nope\n",
+        );
+        assert_eq!(
+            documents_directory(Some(home_os), Some(bare.as_os_str())),
+            home
+        );
+
+        let escaped = config(&home, "XDG_DOCUMENTS_DIR=\"$HOME/My\\\"Docs\"\n");
+        assert_eq!(
+            documents_directory(Some(home_os), Some(escaped.as_os_str())),
+            home.join("My\"Docs")
+        );
+
+        fs::create_dir_all(home.join(".config")).unwrap();
+        fs::write(
+            home.join(".config/user-dirs.dirs"),
+            "XDG_DOCUMENTS_DIR=\"$HOME/Documents/\"\n",
+        )
+        .unwrap();
+        assert_eq!(
+            documents_directory(Some(home_os), Some(std::ffi::OsStr::new(""))),
+            home.join("Documents")
+        );
+        let _ = fs::remove_dir_all(&root);
     }
 }
