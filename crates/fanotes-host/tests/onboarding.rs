@@ -264,3 +264,48 @@ fn onboarding_stays_pending_when_its_file_contains_a_bad_byte() {
     let bootstrap = host.dispatch("fanotes:bootstrap", &[]).unwrap();
     assert_eq!(bootstrap["onboardingRequired"], true);
 }
+
+#[test]
+fn a_cached_tree_with_a_bad_byte_still_opens() {
+    let (vault, mut host) = host();
+    host.dispatch("fanotes:complete-onboarding", &[json!(["Mathematik"])])
+        .unwrap();
+    host.dispatch("fanotes:get-tree", &[]).unwrap();
+    let cache_dir = vault.parent().unwrap().join("app/tree-cache-v1");
+    let cache_path = fs::read_dir(&cache_dir)
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    let mut bytes = fs::read(&cache_path).unwrap();
+    let needle = b"Mathematik";
+    let mut start = 0;
+    let mut found = false;
+    while let Some(index) = bytes[start..]
+        .windows(needle.len())
+        .position(|window| window == needle)
+    {
+        let at = start + index;
+        bytes[at + 1] = 0xff;
+        start = at + needle.len();
+        found = true;
+    }
+    assert!(found);
+    fs::write(&cache_path, &bytes).unwrap();
+
+    let cached = host.dispatch("fanotes:get-cached-tree", &[]).unwrap();
+    assert!(cached
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|entry| entry["name"] == "M\u{FFFD}thematik"));
+    assert!(cache_path.is_file());
+
+    fs::write(&cache_path, b"{\xff").unwrap();
+    assert!(host
+        .dispatch("fanotes:get-cached-tree", &[])
+        .unwrap()
+        .is_null());
+    assert!(!cache_path.is_file());
+}

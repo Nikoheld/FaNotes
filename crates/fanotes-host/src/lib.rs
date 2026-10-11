@@ -2609,8 +2609,15 @@ fn read_tree_cache(app_data: &Path, root: &Path) -> Option<Value> {
     if meta.file_type().is_symlink() || !meta.is_file() || meta.len() > MAX_TREE_CACHE_BYTES {
         return None;
     }
-    let text = fs::read_to_string(&path).ok()?;
-    let parsed = serde_json::from_str::<Value>(&text).ok()?;
+    let bytes = fs::read(&path).ok()?;
+    let text = String::from_utf8_lossy(&bytes);
+    let parsed = match serde_json::from_str::<Value>(&text) {
+        Ok(parsed) => parsed,
+        Err(_) => {
+            let _ = fs::remove_file(&path);
+            return None;
+        }
+    };
     if parsed.get("version").and_then(Value::as_u64) != Some(1)
         || parsed.get("vaultIdentity").and_then(Value::as_str) != Some(identity.as_str())
     {
