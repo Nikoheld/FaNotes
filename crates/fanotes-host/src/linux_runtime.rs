@@ -186,17 +186,57 @@ fn normalize_scale(value: Option<&str>) -> Option<f64> {
 }
 
 /// `Number.parseFloat` after JavaScript whitespace, including a byte-order mark.
+///
+/// `1.2.3` is 1.2. An unfinished exponent such as `1e` keeps the number before it.
 fn parse_float(value: &str) -> Option<f64> {
     let trimmed = crate::vault::js_trim(value);
-    let end = trimmed
-        .char_indices()
-        .find(|(_, character)| !matches!(character, '0'..='9' | '.' | '+' | '-' | 'e' | 'E'))
-        .map(|(index, _)| index)
-        .unwrap_or(trimmed.len());
-    if end == 0 {
+    let bytes = trimmed.as_bytes();
+    let mut index = 0;
+    if bytes
+        .get(index)
+        .is_some_and(|byte| matches!(byte, b'+' | b'-'))
+    {
+        index += 1;
+    }
+    if trimmed[index..].starts_with("Infinity") {
+        return trimmed[..index + "Infinity".len()].parse().ok();
+    }
+    let mut saw_digit = false;
+    while bytes.get(index).is_some_and(u8::is_ascii_digit) {
+        saw_digit = true;
+        index += 1;
+    }
+    if bytes.get(index) == Some(&b'.') {
+        index += 1;
+        while bytes.get(index).is_some_and(u8::is_ascii_digit) {
+            saw_digit = true;
+            index += 1;
+        }
+    }
+    if !saw_digit {
         return None;
     }
-    trimmed[..end].parse().ok()
+    if bytes
+        .get(index)
+        .is_some_and(|byte| matches!(byte, b'e' | b'E'))
+    {
+        let exponent = index;
+        index += 1;
+        if bytes
+            .get(index)
+            .is_some_and(|byte| matches!(byte, b'+' | b'-'))
+        {
+            index += 1;
+        }
+        let digits = index;
+        while bytes.get(index).is_some_and(u8::is_ascii_digit) {
+            index += 1;
+        }
+        if index == digits {
+            index = exponent;
+        }
+    }
+    trimmed[..index].parse().ok()
 }
 
 fn normalize_scale_number(scale: f64) -> Option<f64> {
@@ -802,6 +842,35 @@ mod tests {
         );
         assert_eq!(ignored["deviceScaleFactor"], 2.0);
         assert_eq!(ignored["deviceScaleSource"], "fallback");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_device_scale_uses_parse_float() {
+        let dir = std::env::temp_dir().join(format!("fanotes-scale-parse-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let config = dir.join("hyprland.conf");
+        fs::write(&config, "force_zero_scaling = true\n").unwrap();
+        let config = config.to_str().unwrap();
+        let scaled = |value: &str| {
+            report(
+                "linux",
+                &env(&[
+                    ("FANOTES_HYPRLAND_CONFIG", config),
+                    ("HOME", ""),
+                    ("FANOTES_DEVICE_SCALE", value),
+                ]),
+                || panic!("hyprctl"),
+            )
+        };
+        let dotted = scaled("1.2.3");
+        assert_eq!(dotted["deviceScaleFactor"], 1.2);
+        assert_eq!(dotted["deviceScaleSource"], "FANOTES_DEVICE_SCALE");
+        assert_eq!(scaled("1e")["deviceScaleFactor"], 1.0);
+        assert_eq!(scaled("1.25e0px")["deviceScaleFactor"], 1.25);
+        assert_eq!(scaled("2E-1")["deviceScaleFactor"], 2.0);
+        assert_eq!(scaled("2E-1")["deviceScaleSource"], "fallback");
         let _ = fs::remove_dir_all(&dir);
     }
 }
