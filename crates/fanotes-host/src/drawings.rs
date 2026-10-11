@@ -296,7 +296,7 @@ fn metadata_value(document: &Value, id: &str) -> Result<Value, String> {
     library_metadata(document, id, Some(&now_iso()))
 }
 
-fn library_metadata(
+pub(crate) fn library_metadata(
     document: &Value,
     id: &str,
     fallback_time: Option<&str>,

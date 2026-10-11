@@ -122,6 +122,36 @@ fn search_returns_title_excerpt_and_handwriting_anchor() {
 }
 
 #[test]
+fn drawing_search_uses_the_library_title_and_skips_invalid_files() {
+    let mut host = host();
+    let assets = host.vault.as_ref().unwrap().join(".fanotes/assets");
+    std::fs::create_dir_all(&assets).unwrap();
+    std::fs::write(
+        assets.join("padded.json"),
+        r#"{"schemaVersion":1,"title":"  Skizze  ","strokes":[],"updatedAt":"2026-10-11T00:00:00.000Z","searchTranscript":"0.20\tBaumkrone"}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        assets.join("broken.json"),
+        r#"{"schemaVersion":2,"title":"Geheim","searchTranscript":"Verborgen"}"#,
+    )
+    .unwrap();
+
+    let hits = host
+        .dispatch("fanotes:search", &[json!("Baumkrone")])
+        .unwrap();
+    assert_eq!(hits.as_array().unwrap().len(), 1);
+    assert_eq!(hits[0]["title"], "Skizze");
+    assert_eq!(hits[0]["drawingId"], "padded");
+    assert_eq!(hits[0]["kind"], "drawing");
+
+    let hidden = host
+        .dispatch("fanotes:search", &[json!("Verborgen")])
+        .unwrap();
+    assert!(hidden.as_array().unwrap().is_empty());
+}
+
+#[test]
 fn search_skips_companions_links_and_notes_buried_too_deep() {
     let mut host = host();
     let vault = host.vault.clone().unwrap();

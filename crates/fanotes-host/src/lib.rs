@@ -3002,9 +3002,11 @@ fn search_drawings(
         let Ok(document) = serde_json::from_str::<Value>(&text) else {
             continue;
         };
-        let Some(title) = document.get("title").and_then(Value::as_str) else {
+        let fallback = meta.modified().ok().map(notes::iso_from_system_time);
+        let Ok(metadata) = drawings::library_metadata(&document, id, fallback.as_deref()) else {
             continue;
         };
+        let title = metadata["title"].as_str().unwrap_or("");
         let transcript = bounded_transcript(
             document
                 .get("searchTranscript")
