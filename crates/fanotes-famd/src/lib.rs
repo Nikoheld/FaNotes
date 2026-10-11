@@ -4,7 +4,6 @@
 //! length-prefixed `<!-- fanotes-famd:v1 chars=N -->` header, then JSON.
 //! `N` is the JavaScript string length of that JSON.
 
-use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
 pub const FAMD_SCHEMA: &str = "fanotes-famd-v1";
@@ -35,16 +34,6 @@ pub struct NoteBackup {
     pub content: String,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PageStats {
-    pub created_at: String,
-    pub modified_at: String,
-    pub last_opened_at: String,
-    pub dwell_ms: u64,
-    pub open_count: u64,
-}
-
 #[derive(Clone, Debug, PartialEq)]
 pub struct FamdPayload {
     pub schema: String,
@@ -54,7 +43,7 @@ pub struct FamdPayload {
     pub paper_style: Option<String>,
     pub note_links: Vec<NoteLink>,
     pub note_backups: Vec<NoteBackup>,
-    pub page_stats: Option<PageStats>,
+    pub page_stats: Option<Value>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -217,10 +206,10 @@ pub fn serialize_famd(markdown: &str, payload: &FamdPayload) -> String {
     }
     if let Some(stats) = payload
         .page_stats
-        .clone()
-        .and_then(|stats| parse_page_stats_value(&stats.to_value()))
+        .as_ref()
+        .filter(|stats| stats.is_object())
     {
-        object.insert("pageStats".into(), stats.to_value());
+        object.insert("pageStats".into(), stats.clone());
     }
     let json = Value::Object(object).to_string();
     let header = format!("<!-- fanotes-famd:v1 chars={} -->\n{json}\n", js_len(&json));
@@ -267,7 +256,10 @@ impl FamdPayload {
             .get("noteBackups")
             .map(parse_note_backups_value)
             .unwrap_or_default();
-        let page_stats = object.get("pageStats").and_then(parse_page_stats_value);
+        let page_stats = object
+            .get("pageStats")
+            .filter(|stats| stats.is_object())
+            .cloned();
         Self {
             schema: FAMD_SCHEMA.to_string(),
             updated_at,
@@ -278,12 +270,6 @@ impl FamdPayload {
             note_backups,
             page_stats,
         }
-    }
-}
-
-impl PageStats {
-    pub fn to_value(&self) -> Value {
-        serde_json::to_value(self).unwrap_or(Value::Null)
     }
 }
 
@@ -456,43 +442,6 @@ fn sanitize_note_backup(value: &Value) -> Option<NoteBackup> {
         note_path,
         created_at,
         content,
-    })
-}
-
-fn parse_page_stats_value(value: &Value) -> Option<PageStats> {
-    let object = value.as_object()?;
-    let created_at = object
-        .get("createdAt")
-        .and_then(Value::as_str)
-        .and_then(canonical_iso)?;
-    let modified_at = object
-        .get("modifiedAt")
-        .and_then(Value::as_str)
-        .and_then(canonical_iso)
-        .unwrap_or_else(|| created_at.clone());
-    let last_opened_at = object
-        .get("lastOpenedAt")
-        .and_then(Value::as_str)
-        .and_then(canonical_iso)
-        .unwrap_or_else(|| created_at.clone());
-    let dwell_ms = object
-        .get("dwellMs")
-        .and_then(Value::as_f64)
-        .filter(|value| value.is_finite() && *value >= 0.0)
-        .map(|value| value.floor() as u64)
-        .unwrap_or(0);
-    let open_count = object
-        .get("openCount")
-        .and_then(Value::as_f64)
-        .filter(|value| value.is_finite() && *value >= 0.0)
-        .map(|value| value.floor() as u64)
-        .unwrap_or(0);
-    Some(PageStats {
-        created_at,
-        modified_at,
-        last_opened_at,
-        dwell_ms,
-        open_count,
     })
 }
 

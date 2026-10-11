@@ -137,10 +137,7 @@ pub fn attach_sidecar(
 
 pub fn read_page_stats(host: &Host, relative: &str) -> Result<Value, String> {
     let (_path, _body, payload) = load_note(host, relative)?;
-    Ok(payload
-        .page_stats
-        .map(|stats| stats.to_value())
-        .unwrap_or(Value::Null))
+    Ok(payload.page_stats.unwrap_or(Value::Null))
 }
 
 pub fn read_paper_style(host: &Host, relative: &str) -> Result<Value, String> {

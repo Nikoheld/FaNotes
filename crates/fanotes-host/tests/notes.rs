@@ -334,3 +334,52 @@ fn a_saved_note_is_private_and_leaves_no_temporary_file() {
     assert!(leftovers.is_empty(), "{leftovers:?}");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn page_stats_keep_the_fields_the_editor_stores() {
+    let dir = std::env::temp_dir().join(format!("fanotes-notes-stats-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let vault = dir.join("vault");
+    std::fs::create_dir_all(&vault).unwrap();
+    let mut host = Host::open(dir.join("app"));
+    host.trash_dir = Some(dir.join("trash"));
+    host.set_vault(vault).unwrap();
+    let stats = json!({
+        "version": 1,
+        "createdAt": "2026-01-02T03:04:05.000Z",
+        "modifiedAt": "2026-01-02T03:04:05.000Z",
+        "firstOpenedAt": "2026-01-02T03:04:05.000Z",
+        "lastOpenedAt": "2026-01-02T03:05:05.000Z",
+        "lastClosedAt": null,
+        "lastSavedAt": "2026-01-02T03:06:05.000Z",
+        "openCount": 2,
+        "saveCount": 3,
+        "dwellMs": 1500,
+        "focusMs": 1200,
+        "longestSessionMs": 800,
+        "lastSessionMs": 400,
+        "activeDays": ["2026-01-02"],
+        "typing": { "wordsAdded": 4, "wordsRemoved": 1 }
+    });
+    let mut payload = fanotes_famd::empty_famd_payload("2026-01-02T03:04:05.000Z");
+    payload.page_stats = Some(stats.clone());
+    let content = fanotes_famd::serialize_famd("Hallo", &payload);
+    host.dispatch("fanotes:write-file", &[json!("Seite.md"), json!(content)])
+        .unwrap();
+    assert_eq!(
+        host.dispatch("fanotes:read-note-page-stats", &[json!("Seite.md")])
+            .unwrap(),
+        stats
+    );
+    host.dispatch(
+        "fanotes:write-file",
+        &[json!("Seite.md"), json!("Hallo nochmal\n")],
+    )
+    .unwrap();
+    assert_eq!(
+        host.dispatch("fanotes:read-note-page-stats", &[json!("Seite.md")])
+            .unwrap(),
+        stats
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
