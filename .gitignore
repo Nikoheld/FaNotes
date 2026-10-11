@@ -1,5 +1,6 @@
 # Dependencies and generated application bundles
 node_modules/
+/target/
 dist/
 release/
 *.tsbuildinfo
