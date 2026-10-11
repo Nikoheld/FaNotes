@@ -429,3 +429,33 @@ fn search_ignores_a_companion_above_the_desktop_limit() {
     assert_eq!(kept.as_array().unwrap().len(), 1);
     assert_eq!(kept[0]["relativePath"], "Bio/Seite.md");
 }
+
+#[test]
+fn search_skips_a_note_that_cannot_be_read() {
+    let mut host = host();
+    let vault = host.vault.clone().unwrap();
+    let note = vault.join("Bio/Geheim.md");
+    std::fs::write(&note, "Inhalt\n").unwrap();
+    let before = host.dispatch("fanotes:search", &[json!("Geheim")]).unwrap();
+    assert_eq!(before.as_array().unwrap().len(), 1);
+
+    let mut permissions = std::fs::metadata(&note).unwrap().permissions();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        permissions.set_mode(0o000);
+    }
+    std::fs::set_permissions(&note, permissions).unwrap();
+    let hidden = host.dispatch("fanotes:search", &[json!("Geheim")]).unwrap();
+    assert!(hidden.as_array().unwrap().is_empty());
+    let content = host.dispatch("fanotes:search", &[json!("Inhalt")]).unwrap();
+    assert!(content.as_array().unwrap().is_empty());
+
+    let mut permissions = std::fs::metadata(&note).unwrap().permissions();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        permissions.set_mode(0o600);
+    }
+    std::fs::set_permissions(&note, permissions).unwrap();
+}

@@ -1115,7 +1115,10 @@ impl Host {
             let raw = if lower.ends_with(".pdf") {
                 String::new()
             } else {
-                notes::read_lossy_string(&path).unwrap_or_default()
+                match notes::read_lossy_string(&path) {
+                    Some(text) => text,
+                    None => continue,
+                }
             };
             let parsed = fanotes_famd::parse_famd(&raw);
             let mut content = if parsed.markdown.is_empty() {
