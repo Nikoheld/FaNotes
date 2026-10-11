@@ -132,6 +132,48 @@ fn pdf_and_markdown_notes_reopen_their_handwriting() {
         .unwrap()
         .is_null());
 
+    let assets = vault.join(".fanotes/assets");
+    fs::create_dir_all(&assets).unwrap();
+    fs::write(
+        assets.join("alt.json"),
+        r#"{"schemaVersion":1,"title":"Alt","strokes":[]}"#,
+    )
+    .unwrap();
+    filetime::set_file_mtime(
+        assets.join("alt.json"),
+        filetime::FileTime::from_unix_time(1_600_000_000, 0),
+    )
+    .unwrap();
+    fs::write(
+        assets.join("neu.json"),
+        r#"{"schemaVersion":1,"title":"Neu","strokes":[],"updatedAt":"2021-01-01T00:00:00Z"}"#,
+    )
+    .unwrap();
+    fs::write(
+        assets.join("zone.json"),
+        r#"{"schemaVersion":1,"title":"Zone","strokes":[],"updatedAt":"2020-06-01T12:00:00+02:00"}"#,
+    )
+    .unwrap();
+    let listed = host.dispatch("fanotes:list-drawings", &[]).unwrap();
+    let titles: Vec<_> = listed
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|item| item["title"].as_str().unwrap().to_owned())
+        .collect();
+    assert_eq!(titles, vec!["Skizze", "Neu", "Alt", "Zone"]);
+    let by_title = |name: &str| {
+        listed
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["title"] == name)
+            .unwrap()
+    };
+    assert_eq!(by_title("Neu")["updatedAt"], "2021-01-01T00:00:00.000Z");
+    assert_eq!(by_title("Zone")["updatedAt"], "2020-06-01T10:00:00.000Z");
+    assert_eq!(by_title("Alt")["updatedAt"], "2020-09-13T12:26:40.000Z");
+
     fs::write(
         vault.join("Kapitel.markdown"),
         "Text\n\n<!-- fanotes-ink:skizze-1 -->\n",

@@ -47,7 +47,12 @@ pub fn list_drawings(host: &Host) -> Result<Value, String> {
         let Ok(text) = String::from_utf8(text) else {
             continue;
         };
-        if let Ok(item) = metadata_from_json(&text, id) {
+        let mtime = fs::symlink_metadata(&path)
+            .ok()
+            .filter(|meta| meta.is_file() && !meta.file_type().is_symlink())
+            .and_then(|meta| meta.modified().ok())
+            .map(crate::notes::iso_from_system_time);
+        if let Ok(item) = metadata_from_json(&text, id, mtime.as_deref()) {
             drawings.push(item);
         }
     }
@@ -79,7 +84,11 @@ pub fn read_drawing(host: &Host, raw_id: &str) -> Result<Value, String> {
     })?;
     let drawing_json = String::from_utf8(bytes)
         .map_err(|_| "Die Zeichnungsdaten sind kein gültiges JSON.".to_owned())?;
-    let mut item = metadata_from_json(&drawing_json, &id)?;
+    let mtime = fs::symlink_metadata(&path)
+        .ok()
+        .and_then(|meta| meta.modified().ok())
+        .map(crate::notes::iso_from_system_time);
+    let mut item = metadata_from_json(&drawing_json, &id, mtime.as_deref())?;
     item["drawingJson"] = Value::String(drawing_json);
     Ok(item)
 }
@@ -274,13 +283,17 @@ fn embed_in_note(host: &Host, note_path: &str, drawing: &Value) -> Result<(), St
     Ok(())
 }
 
-fn metadata_from_json(drawing_json: &str, id: &str) -> Result<Value, String> {
+fn metadata_from_json(
+    drawing_json: &str,
+    id: &str,
+    fallback_time: Option<&str>,
+) -> Result<Value, String> {
     let document = validate_drawing_json(drawing_json)?;
-    metadata_value(&document, id)
+    library_metadata(&document, id, fallback_time)
 }
 
 fn metadata_value(document: &Value, id: &str) -> Result<Value, String> {
-    library_metadata(document, id, None)
+    library_metadata(document, id, Some(&now_iso()))
 }
 
 fn library_metadata(
@@ -304,14 +317,9 @@ fn library_metadata(
     let updated_at = document
         .get("updatedAt")
         .and_then(Value::as_str)
-        .filter(|value| chrono_like(value))
-        .map(str::to_owned)
-        .or_else(|| {
-            fallback_time
-                .filter(|value| chrono_like(value))
-                .map(str::to_owned)
-        })
-        .unwrap_or_else(now_iso);
+        .and_then(canonical_iso)
+        .or_else(|| fallback_time.and_then(canonical_iso))
+        .ok_or_else(|| "Die Zeichnungsdatei enthält kein gültiges Änderungsdatum.".to_owned())?;
     Ok(json!({
         "id": id,
         "title": title,
@@ -476,11 +484,155 @@ fn is_leap(year: i32) -> bool {
     (year % 4 == 0 && year % 100 != 0) || year % 400 == 0
 }
 
-fn chrono_like(value: &str) -> bool {
+/// `Date.parse` plus `toISOString`: a zoned timestamp becomes UTC with milliseconds.
+fn canonical_iso(value: &str) -> Option<String> {
     let bytes = value.as_bytes();
-    bytes.len() >= 20
-        && bytes[4] == b'-'
-        && bytes[7] == b'-'
-        && bytes[10] == b'T'
-        && value.ends_with('Z')
+    if bytes.len() < 19
+        || bytes.get(4) != Some(&b'-')
+        || bytes.get(7) != Some(&b'-')
+        || bytes.get(10) != Some(&b'T')
+    {
+        return None;
+    }
+    let year: i32 = value.get(0..4)?.parse().ok()?;
+    let month: i32 = value.get(5..7)?.parse().ok()?;
+    let day: i32 = value.get(8..10)?.parse().ok()?;
+    if bytes.get(13) != Some(&b':') || bytes.get(16) != Some(&b':') {
+        return None;
+    }
+    let hour: i32 = value.get(11..13)?.parse().ok()?;
+    let minute: i32 = value.get(14..16)?.parse().ok()?;
+    let second: i32 = value.get(17..19)?.parse().ok()?;
+    if !(1..=12).contains(&month)
+        || day < 1
+        || day > days_in_month(year, month as u32) as i32
+        || !(0..=23).contains(&hour)
+        || !(0..=59).contains(&minute)
+        || !(0..=59).contains(&second)
+    {
+        return None;
+    }
+    let mut index = 19;
+    let mut millis = 0u32;
+    if bytes.get(index) == Some(&b'.') {
+        index += 1;
+        let start = index;
+        while bytes.get(index).is_some_and(u8::is_ascii_digit) {
+            index += 1;
+        }
+        if index == start || index - start > 9 {
+            return None;
+        }
+        let digits = value.get(start..index)?;
+        let parsed: u32 = digits.parse().ok()?;
+        millis = if digits.len() >= 3 {
+            parsed / 10u32.pow((digits.len() - 3) as u32)
+        } else {
+            parsed * 10u32.pow((3 - digits.len()) as u32)
+        };
+    }
+    let rest = value.get(index..)?;
+    let offset_minutes = if rest == "Z" {
+        0
+    } else if rest.len() == 6
+        && (rest.starts_with('+') || rest.starts_with('-'))
+        && rest.as_bytes().get(3) == Some(&b':')
+    {
+        let sign = if rest.starts_with('+') { 1 } else { -1 };
+        let offset_hour: i32 = rest.get(1..3)?.parse().ok()?;
+        let offset_minute: i32 = rest.get(4..6)?.parse().ok()?;
+        if !(0..=23).contains(&offset_hour) || !(0..=59).contains(&offset_minute) {
+            return None;
+        }
+        sign * (offset_hour * 60 + offset_minute)
+    } else {
+        return None;
+    };
+    let (year, month, day, hour, minute) =
+        shift_minutes(year, month, day, hour, minute, offset_minutes)?;
+    Some(format!(
+        "{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}.{millis:03}Z"
+    ))
+}
+
+fn shift_minutes(
+    mut year: i32,
+    mut month: i32,
+    mut day: i32,
+    hour: i32,
+    minute: i32,
+    offset_minutes: i32,
+) -> Option<(i32, u32, u32, u32, u32)> {
+    let mut total = hour * 60 + minute - offset_minutes;
+    while total < 0 {
+        total += 24 * 60;
+        day -= 1;
+        if day < 1 {
+            month -= 1;
+            if month < 1 {
+                month = 12;
+                year -= 1;
+            }
+            day = days_in_month(year, month as u32) as i32;
+        }
+    }
+    while total >= 24 * 60 {
+        total -= 24 * 60;
+        day += 1;
+        let length = days_in_month(year, month as u32) as i32;
+        if day > length {
+            day = 1;
+            month += 1;
+            if month > 12 {
+                month = 1;
+                year += 1;
+            }
+        }
+    }
+    if !(0..10_000).contains(&year) || day < 1 {
+        return None;
+    }
+    Some((
+        year,
+        month as u32,
+        day as u32,
+        (total / 60) as u32,
+        (total % 60) as u32,
+    ))
+}
+
+fn days_in_month(year: i32, month: u32) -> u32 {
+    match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if is_leap(year) => 29,
+        2 => 28,
+        _ => 0,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::canonical_iso;
+
+    #[test]
+    fn drawing_dates_become_utc_with_milliseconds() {
+        assert_eq!(
+            canonical_iso("2026-01-02T03:04:05.000Z").as_deref(),
+            Some("2026-01-02T03:04:05.000Z")
+        );
+        assert_eq!(
+            canonical_iso("2026-01-02T03:04:05Z").as_deref(),
+            Some("2026-01-02T03:04:05.000Z")
+        );
+        assert_eq!(
+            canonical_iso("2020-06-01T12:00:00+02:00").as_deref(),
+            Some("2020-06-01T10:00:00.000Z")
+        );
+        assert_eq!(
+            canonical_iso("2020-01-01T01:00:00+02:00").as_deref(),
+            Some("2019-12-31T23:00:00.000Z")
+        );
+        assert_eq!(canonical_iso("2020-02-31T00:00:00Z"), None);
+    }
 }
