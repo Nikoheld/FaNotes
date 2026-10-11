@@ -6,6 +6,7 @@
 mod addons;
 mod channels;
 mod drawings;
+mod imports;
 mod notes;
 mod ocr;
 mod policy;
@@ -45,6 +46,8 @@ pub struct Host {
     pub settings: Map<String, Value>,
     pub onboarding_required: bool,
     pub close_requested: bool,
+    /// Native file dialogs. The channel sweep turns this off so a picker cannot block the test.
+    pub file_dialogs: bool,
 }
 
 impl Host {
@@ -56,6 +59,7 @@ impl Host {
             settings: default_settings(),
             onboarding_required: false,
             close_requested: false,
+            file_dialogs: true,
         };
         host.load_persisted();
         host
@@ -148,11 +152,13 @@ impl Host {
             "fanotes:write-subject-books" => {
                 notes::write_subject_books(self, args.first().unwrap_or(&Value::Null))
             }
-            "fanotes:import-subject-book"
-            | "fanotes:import-worksheet"
-            | "fanotes:import-worksheet-from-data"
-            | "fanotes:import-pdf-note"
-            | "fanotes:import-onenote" => {
+            "fanotes:import-subject-book" => imports::import_subject_book(self, args),
+            "fanotes:import-worksheet" => imports::import_worksheet(self),
+            "fanotes:import-worksheet-from-data" => {
+                worksheets::import_from_data(self, args.first().unwrap_or(&Value::Null))
+            }
+            "fanotes:import-pdf-note" => imports::import_pdf_note(self, args),
+            "fanotes:import-onenote" => {
                 Err("Dieser Import ist im Tauri-Host noch nicht freigeschaltet.".to_owned())
             }
             "fanotes:open-subject-book-popout" | "fanotes:close-subject-book-popout" => {

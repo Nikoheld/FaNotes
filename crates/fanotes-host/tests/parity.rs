@@ -29,6 +29,7 @@ impl Drop for TempDir {
 #[test]
 fn every_preload_channel_dispatches() {
     let (_dir, mut host) = host();
+    host.file_dialogs = false;
     assert!(CHANNELS.len() > 90);
     for channel in CHANNELS {
         let result = host.dispatch(channel.name, &[]);

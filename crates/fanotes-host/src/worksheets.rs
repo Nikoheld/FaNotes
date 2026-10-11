@@ -4,6 +4,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use base64::Engine;
 use serde_json::{json, Map, Value};
 
 use crate::Host;
@@ -88,6 +89,186 @@ pub fn delete_worksheet(host: &Host, raw_id: &str) -> Result<Value, String> {
     }
     let _ = unlink_regular(&data_path);
     Ok(json!({ "id": id }))
+}
+
+pub fn import_from_data(host: &Host, payload: &Value) -> Result<Value, String> {
+    let name = payload
+        .get("name")
+        .and_then(Value::as_str)
+        .unwrap_or("Bild.png");
+    let mime = payload
+        .get("mimeType")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let extension = worksheet_extension(name, mime)?;
+    let format = format_for(&extension)
+        .map_err(|_| "Dieses Bildformat kann nicht auf das Blatt gelegt werden.".to_owned())?;
+    let bytes = decode_bytes(
+        payload.get("bytesBase64").or_else(|| payload.get("bytes")),
+        format.max_bytes as usize,
+    )?;
+    import_named_bytes(host, name, &extension, &bytes)
+}
+
+pub(crate) fn import_named_bytes(
+    host: &Host,
+    name: &str,
+    extension: &str,
+    bytes: &[u8],
+) -> Result<Value, String> {
+    let format = format_for(extension)
+        .map_err(|_| "Dieses Bildformat kann nicht auf das Blatt gelegt werden.".to_owned())?;
+    if bytes.is_empty() || bytes.len() as u64 > format.max_bytes {
+        return Err("Das Bild ist leer oder zu groß.".to_owned());
+    }
+    validate_bytes(bytes, extension)?;
+    let id = random_id()?;
+    let title = safe_title(file_stem(name), "Arbeitsblatt")?;
+    let directory = worksheets_dir(vault_root(host)?)?;
+    let source_relative = format!(".fanotes/worksheets/{id}{extension}");
+    let data_relative = format!(".fanotes/worksheets/{id}.json");
+    let created = now_iso();
+    let document = validate_document(
+        &json!({
+            "schemaVersion": 1,
+            "id": id,
+            "title": title,
+            "kind": format.kind,
+            "mimeType": format.mime,
+            "sourceRelativePath": source_relative,
+            "dataRelativePath": data_relative,
+            "createdAt": created,
+            "updatedAt": created,
+            "textBoxes": [],
+            "highlights": [],
+        }),
+        &id,
+    )?;
+    let serialized = format!(
+        "{}\n",
+        serde_json::to_string_pretty(&document).unwrap_or_default()
+    );
+    let source_path = directory.join(format!("{id}{extension}"));
+    let data_path = directory.join(format!("{id}.json"));
+    if fs::write(&source_path, &bytes).is_err() {
+        let _ = fs::remove_file(&source_path);
+        return Err("Das Arbeitsblatt konnte nicht gespeichert werden.".to_owned());
+    }
+    if fs::write(&data_path, serialized).is_err() {
+        let _ = fs::remove_file(&source_path);
+        let _ = fs::remove_file(&data_path);
+        return Err("Das Arbeitsblatt konnte nicht gespeichert werden.".to_owned());
+    }
+    Ok(document)
+}
+
+fn worksheet_extension(name: &str, mime: &str) -> Result<String, String> {
+    let extension = extension_of(name);
+    let extension = if extension.is_empty() {
+        match mime {
+            "application/pdf" => ".pdf".to_owned(),
+            "image/jpeg" => ".jpg".to_owned(),
+            "image/webp" => ".webp".to_owned(),
+            "image/gif" => ".gif".to_owned(),
+            _ => ".png".to_owned(),
+        }
+    } else {
+        extension
+    };
+    format_for(&extension)
+        .map_err(|_| "Dieses Bildformat kann nicht auf das Blatt gelegt werden.".to_owned())?;
+    Ok(extension)
+}
+
+pub(crate) fn decode_payload_bytes(payload: &Value, max_bytes: usize) -> Result<Vec<u8>, String> {
+    decode_bytes(
+        payload.get("bytesBase64").or_else(|| payload.get("bytes")),
+        max_bytes,
+    )
+}
+
+fn decode_bytes(value: Option<&Value>, max_bytes: usize) -> Result<Vec<u8>, String> {
+    let too_big = "Das Bild ist leer oder zu groß.";
+    let Some(value) = value else {
+        return Err(too_big.to_owned());
+    };
+    let bytes = if let Some(text) = value.as_str() {
+        base64::engine::general_purpose::STANDARD
+            .decode(text)
+            .map_err(|_| too_big.to_owned())?
+    } else if let Some(items) = value.as_array() {
+        if items.len() > max_bytes {
+            return Err(too_big.to_owned());
+        }
+        let mut bytes = Vec::with_capacity(items.len());
+        for item in items {
+            let Some(number) = item.as_u64().filter(|number| *number <= 255) else {
+                return Err(too_big.to_owned());
+            };
+            bytes.push(number as u8);
+        }
+        bytes
+    } else {
+        return Err(too_big.to_owned());
+    };
+    if bytes.is_empty() || bytes.len() > max_bytes {
+        Err(too_big.to_owned())
+    } else {
+        Ok(bytes)
+    }
+}
+
+fn validate_bytes(bytes: &[u8], extension: &str) -> Result<(), String> {
+    let ok = match extension {
+        ".pdf" => bytes.starts_with(b"%PDF-"),
+        ".png" => bytes.starts_with(&[0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+        ".jpg" | ".jpeg" => bytes.starts_with(&[0xff, 0xd8, 0xff]),
+        ".webp" => bytes.len() >= 12 && &bytes[0..4] == b"RIFF" && &bytes[8..12] == b"WEBP",
+        ".gif" => bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a"),
+        _ => false,
+    };
+    if ok {
+        Ok(())
+    } else {
+        Err(
+            "Die ausgewählte Datei stimmt nicht mit ihrem Bild- oder PDF-Format überein."
+                .to_owned(),
+        )
+    }
+}
+
+fn random_id() -> Result<String, String> {
+    let mut bytes = [0u8; 16];
+    getrandom::getrandom(&mut bytes).map_err(|_| "Ungültige Arbeitsblatt-ID.".to_owned())?;
+    Ok(bytes.iter().map(|byte| format!("{byte:02x}")).collect())
+}
+
+fn safe_title(value: &str, fallback: &str) -> Result<String, String> {
+    let raw = value.trim();
+    let name = if raw.is_empty() { fallback } else { raw };
+    let cleaned = name.trim_end_matches(['.', ' ']).trim();
+    if cleaned.is_empty()
+        || cleaned.len() > 180
+        || cleaned == "."
+        || cleaned == ".."
+        || cleaned.contains('/')
+        || cleaned.contains('\\')
+        || cleaned.chars().any(|character| character.is_control())
+        || cleaned.eq_ignore_ascii_case(".fanotes")
+        || cleaned.eq_ignore_ascii_case(".lernwerk")
+    {
+        Err("Dieser Name ist nicht erlaubt.".to_owned())
+    } else {
+        Ok(cleaned.to_owned())
+    }
+}
+
+fn file_stem(name: &str) -> &str {
+    let base = name.rsplit(['/', '\\']).next().unwrap_or(name);
+    base.rsplit_once('.')
+        .map(|(stem, _)| stem)
+        .filter(|stem| !stem.is_empty())
+        .unwrap_or(base)
 }
 
 fn validate_document(candidate: &Value, expected_id: &str) -> Result<Value, String> {

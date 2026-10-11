@@ -72,7 +72,15 @@
     closeSubjectBookPopout: () => invoke('fanotes:close-subject-book-popout'),
     onSubjectBookPopoutClosed: (callback) => listen('fanotes:subject-book-popout-closed', callback),
     importWorksheet: () => invoke('fanotes:import-worksheet'),
-    importWorksheetFromData: (payload) => invoke('fanotes:import-worksheet-from-data', payload),
+    importWorksheetFromData: (payload) => {
+      const source = payload && payload.bytes
+      const bytes = source instanceof Uint8Array ? source : new Uint8Array(source || [])
+      return invoke('fanotes:import-worksheet-from-data', {
+        name: payload && payload.name,
+        mimeType: payload && payload.mimeType,
+        bytesBase64: bytesToBase64(bytes),
+      })
+    },
     importPdfNote: (parentPath) => invoke('fanotes:import-pdf-note', parentPath),
     importOneNote: () => invoke('fanotes:import-onenote'),
     readWorksheet: (id) => invoke('fanotes:read-worksheet', id),
