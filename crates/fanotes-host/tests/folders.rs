@@ -48,6 +48,30 @@ fn folder_color_survives_a_rename_and_the_vault_is_remembered() {
         )
         .is_err());
 
+    for name in ["zoo", "apfel", "äpfel", "straße", "strasse", "ä"] {
+        host.dispatch("fanotes:create-folder", &[json!(""), json!(name)])
+            .unwrap();
+        host.dispatch(
+            "fanotes:set-folder-color",
+            &[json!(name), json!("#112233")],
+        )
+        .unwrap();
+    }
+    let stored = fs::read_to_string(vault.join(".fanotes/folder-colors.json")).unwrap();
+    let keys: Vec<_> = stored
+        .lines()
+        .filter_map(|line| {
+            line.trim()
+                .strip_prefix('"')
+                .and_then(|rest| rest.split('"').next())
+        })
+        .filter(|key| *key != "version" && *key != "colors")
+        .collect();
+    assert_eq!(
+        keys,
+        vec!["ä", "apfel", "äpfel", "strasse", "straße", "zoo"]
+    );
+
     let other = vault.parent().unwrap().join("other-vault");
     std::fs::create_dir_all(&other).unwrap();
     let switched = host

@@ -2809,16 +2809,23 @@ fn read_folder_colors(root: &Path) -> Result<BTreeMap<String, String>, String> {
 fn write_folder_colors(root: &Path, colors: &BTreeMap<String, String>) -> Result<(), String> {
     let internal = internal_directory(root)?;
     let mut entries: Vec<_> = colors.iter().take(5000).collect();
-    entries.sort_by(|left, right| left.0.cmp(right.0));
-    let mut object = Map::new();
-    for (path, color) in entries {
-        object.insert(path.clone(), Value::String(color.clone()));
-    }
-    let snapshot = format!(
-        "{}\n",
-        serde_json::to_string_pretty(&json!({ "version": 1, "colors": object }))
-            .unwrap_or_default()
-    );
+    entries.sort_by(|left, right| dictionary_order(left.0, right.0));
+    let colors_json = if entries.is_empty() {
+        "{}".to_owned()
+    } else {
+        let mut body = String::from("{\n");
+        for (index, (path, color)) in entries.iter().enumerate() {
+            let comma = if index + 1 == entries.len() { "" } else { "," };
+            body.push_str(&format!(
+                "    {}: {}{comma}\n",
+                serde_json::to_string(path).unwrap_or_else(|_| "\"\"".to_owned()),
+                serde_json::to_string(color).unwrap_or_else(|_| "\"\"".to_owned()),
+            ));
+        }
+        body.push_str("  }");
+        body
+    };
+    let snapshot = format!("{{\n  \"version\": 1,\n  \"colors\": {colors_json}\n}}\n");
     if snapshot.len() > 512 * 1024 {
         return Err("Zu viele Ordnerfarben für diesen Vault.".to_owned());
     }
