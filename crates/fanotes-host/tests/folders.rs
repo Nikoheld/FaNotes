@@ -250,3 +250,49 @@ fn an_unreadable_name_does_not_hide_the_rest_of_the_tree() {
     assert_eq!(hits.as_array().unwrap().len(), 1);
     assert!(hits[0]["relativePath"].as_str().unwrap().ends_with("ok.md"));
 }
+
+#[test]
+fn a_fast_tree_skips_a_folder_that_cannot_be_listed() {
+    let (mut host, vault, _) = host();
+    let hidden = vault.join("Geheim");
+    fs::create_dir(&hidden).unwrap();
+    fs::write(hidden.join("versteckt.md"), "x\n").unwrap();
+    fs::write(vault.join("Sichtbar.md"), "x\n").unwrap();
+    let restore = RestoreMode(hidden.clone());
+    let mut permissions = fs::metadata(&hidden).unwrap().permissions();
+    permissions.set_readonly(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        permissions.set_mode(0o000);
+    }
+    fs::set_permissions(&hidden, permissions).unwrap();
+
+    let fast = host
+        .dispatch("fanotes:get-fast-tree", &[])
+        .unwrap()
+        .to_string();
+    assert!(fast.contains("Sichtbar.md"), "{fast}");
+    assert!(!fast.contains("Geheim"), "{fast}");
+    let error = host.dispatch("fanotes:get-tree", &[]).unwrap_err();
+    assert!(error.contains("nicht gelesen"), "{error}");
+    drop(restore);
+}
+
+struct RestoreMode(std::path::PathBuf);
+
+impl Drop for RestoreMode {
+    fn drop(&mut self) {
+        let Ok(meta) = fs::metadata(&self.0) else {
+            return;
+        };
+        let mut permissions = meta.permissions();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            permissions.set_mode(0o700);
+        }
+        permissions.set_readonly(false);
+        let _ = fs::set_permissions(&self.0, permissions);
+    }
+}

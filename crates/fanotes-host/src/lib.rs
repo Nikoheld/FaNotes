@@ -2731,11 +2731,19 @@ fn read_tree(
             if !vault::is_inside_root(&root_real, &real) {
                 continue;
             }
+            let nested = if stats {
+                read_tree(root, &path, colors, depth + 1, stats)?
+            } else {
+                match read_tree(root, &path, colors, depth + 1, stats) {
+                    Ok(nested) => nested,
+                    Err(_) => continue,
+                }
+            };
             let mut folder = json!({
                 "name": name,
                 "relativePath": relative,
                 "kind": "folder",
-                "children": read_tree(root, &path, colors, depth + 1, stats)?
+                "children": nested,
             });
             if stats {
                 if let Ok(modified) = meta.modified() {
