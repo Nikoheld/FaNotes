@@ -285,14 +285,11 @@ fn validate_document(candidate: &Value, expected_id: &str) -> Result<Value, Stri
     {
         return Err("Die Arbeitsblattdatei hat ein ungültiges Format.".to_owned());
     }
-    let title = object
-        .get("title")
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .trim();
+    let raw_title = object.get("title").and_then(Value::as_str).unwrap_or("");
+    let title = raw_title.trim();
     if title.is_empty()
-        || crate::vault::utf16_len(title) > 180
-        || crate::vault::has_c0_or_del(title)
+        || crate::vault::utf16_len(raw_title) > 180
+        || crate::vault::has_c0_or_del(raw_title)
     {
         return Err("Der Arbeitsblatttitel ist ungültig.".to_owned());
     }

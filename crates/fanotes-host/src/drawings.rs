@@ -301,15 +301,12 @@ pub(crate) fn library_metadata(
     id: &str,
     fallback_time: Option<&str>,
 ) -> Result<Value, String> {
-    let title = document
-        .get("title")
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .trim();
+    let raw_title = document.get("title").and_then(Value::as_str).unwrap_or("");
+    let title = raw_title.trim();
     if document.get("schemaVersion").and_then(Value::as_i64) != Some(1)
         || title.is_empty()
-        || crate::vault::utf16_len(title) > 180
-        || crate::vault::has_c0_or_del(title)
+        || crate::vault::utf16_len(raw_title) > 180
+        || crate::vault::has_c0_or_del(raw_title)
         || !document.get("strokes").is_some_and(Value::is_array)
     {
         return Err("Die Zeichnungsdatei hat ein ungültiges Format.".to_owned());

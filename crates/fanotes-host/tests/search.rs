@@ -136,6 +136,11 @@ fn drawing_search_uses_the_library_title_and_skips_invalid_files() {
         r#"{"schemaVersion":2,"title":"Geheim","searchTranscript":"Verborgen"}"#,
     )
     .unwrap();
+    std::fs::write(
+        assets.join("newline.json"),
+        "{\"schemaVersion\":1,\"title\":\"\\nGeheim\",\"strokes\":[],\"updatedAt\":\"2026-10-11T00:00:00.000Z\",\"searchTranscript\":\"0.20\\tZeilenumbruch\"}",
+    )
+    .unwrap();
 
     let hits = host
         .dispatch("fanotes:search", &[json!("Baumkrone")])
@@ -149,6 +154,10 @@ fn drawing_search_uses_the_library_title_and_skips_invalid_files() {
         .dispatch("fanotes:search", &[json!("Verborgen")])
         .unwrap();
     assert!(hidden.as_array().unwrap().is_empty());
+    let newline = host
+        .dispatch("fanotes:search", &[json!("Zeilenumbruch")])
+        .unwrap();
+    assert!(newline.as_array().unwrap().is_empty());
 }
 
 #[test]
