@@ -126,14 +126,33 @@ fn parse_ipv4(value: &str) -> Option<[u8; 4]> {
         if count == 4 {
             return None;
         }
-        let number: u16 = part.parse().ok()?;
-        if number > 255 || (part.len() > 1 && part.starts_with('0')) {
-            return None;
-        }
-        parts[count] = number as u8;
+        parts[count] = js_number_octet(part)?;
         count += 1;
     }
     (count == 4).then_some(parts)
+}
+
+/// One dotted label the way `Number(part)` accepts it in the desktop address check.
+///
+/// `1e1` is 10, `0b10` is 2, and `+1` is 1. A fraction is not an address byte.
+fn js_number_octet(part: &str) -> Option<u8> {
+    if part.is_empty() {
+        return None;
+    }
+    let value = if let Some(digits) = part.strip_prefix("0b") {
+        u32::from_str_radix(digits, 2).ok()?
+    } else if let Some(digits) = part.strip_prefix("0o") {
+        u32::from_str_radix(digits, 8).ok()?
+    } else if let Some(digits) = part.strip_prefix("0x") {
+        u32::from_str_radix(digits, 16).ok()?
+    } else {
+        let number: f64 = part.parse().ok()?;
+        if !number.is_finite() || number < 0.0 || number > 255.0 || number.fract() != 0.0 {
+            return None;
+        }
+        number as u32
+    };
+    u8::try_from(value).ok()
 }
 
 /// Local model servers use the desktop LAN list. Carrier-grade `100.64/10`
@@ -174,7 +193,7 @@ fn is_private_ipv6(value: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{lm_studio_origin, local_ai_origin};
+    use super::{addon_request_allowed, lm_studio_origin, local_ai_origin};
 
     #[test]
     fn lm_studio_keeps_the_api_suffix_the_desktop_panel_accepts() {
@@ -194,5 +213,24 @@ mod tests {
         assert!(lm_studio_origin("https://api.openai.com/v1").is_err());
         assert!(local_ai_origin("http://127.0.0.1:1234/v1", "ollama").is_err());
         assert!(local_ai_origin("http://127.0.0.1:1234/v1", "lmstudio").is_err());
+    }
+
+    #[test]
+    fn a_scientific_octet_is_the_same_address_as_on_the_desktop() {
+        assert_eq!(
+            local_ai_origin("http://10.1.2.3e1:11434", "ollama").unwrap(),
+            "http://10.1.2.3e1:11434"
+        );
+        assert_eq!(
+            lm_studio_origin("http://127.0.0.0b10:1234").unwrap(),
+            "http://127.0.0.0b10:1234"
+        );
+        assert_eq!(
+            local_ai_origin("http://192.168.0.+1:9", "ollama").unwrap(),
+            "http://192.168.0.+1:9"
+        );
+        assert!(local_ai_origin("http://8.8.8.1e1:11434", "ollama").is_err());
+        assert!(addon_request_allowed("https://10.0.0.1e1/hook").is_err());
+        assert!(addon_request_allowed("https://8.8.8.1e1/hook").is_ok());
     }
 }

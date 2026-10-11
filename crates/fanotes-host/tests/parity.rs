@@ -186,6 +186,8 @@ fn addon_ssrf_blocks_private_and_non_https() {
     assert!(addon_request_allowed("https://[2001:db8::1]/hook").is_err());
     assert!(addon_request_allowed("https://localhost/hook").is_err());
     assert!(addon_request_allowed("https://192.168.1.20/hook").is_err());
+    assert!(addon_request_allowed("https://10.0.0.1e1/hook").is_err());
+    assert!(addon_request_allowed("https://10.0.0.0b1/hook").is_err());
     assert!(addon_request_allowed("https://100.64.0.1/hook").is_err());
     assert!(addon_request_allowed("https://224.0.0.1/hook").is_err());
     assert!(addon_request_allowed("https://user:pass@example.com").is_err());
