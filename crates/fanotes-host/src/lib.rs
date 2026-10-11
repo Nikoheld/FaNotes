@@ -2630,12 +2630,12 @@ fn clean_cached_entries(
                         return Err(());
                     }
                 }
-                let children = clean_cached_entries(
-                    entry.get("children").unwrap_or(&json!([])),
-                    &expected,
-                    depth + 1,
-                    count,
-                )?;
+                let empty_children = Value::Array(Vec::new());
+                let children_source = match entry.get("children") {
+                    Some(Value::Null) | None => &empty_children,
+                    Some(value) => value,
+                };
+                let children = clean_cached_entries(children_source, &expected, depth + 1, count)?;
                 let mut folder = json!({
                     "name": name,
                     "relativePath": expected,

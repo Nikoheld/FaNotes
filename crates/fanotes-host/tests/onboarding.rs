@@ -151,6 +151,28 @@ fn a_cached_tree_keeps_a_long_unicode_name() {
     let cached = host.dispatch("fanotes:get-cached-tree", &[]).unwrap();
     assert_eq!(cached[0]["name"], name);
 
+    let identity = cache["vaultIdentity"].clone();
+    fs::write(
+        &cache_path,
+        format!(
+            "{}\n",
+            json!({
+                "version": 1,
+                "vaultIdentity": identity,
+                "entries": [{
+                    "name": "Ordner",
+                    "relativePath": "Ordner",
+                    "kind": "folder",
+                    "children": null
+                }]
+            })
+        ),
+    )
+    .unwrap();
+    let cached = host.dispatch("fanotes:get-cached-tree", &[]).unwrap();
+    assert_eq!(cached[0]["name"], "Ordner");
+    assert!(cached[0]["children"].as_array().unwrap().is_empty());
+
     let too_long = "a".repeat(256);
     let identity = cache["vaultIdentity"].clone();
     fs::write(
