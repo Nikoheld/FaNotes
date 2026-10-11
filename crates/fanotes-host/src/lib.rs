@@ -4,6 +4,7 @@
 //! update commands report `supported: false` and do not install a package.
 
 mod channels;
+mod drawings;
 mod ocr;
 mod policy;
 mod vault;
@@ -115,10 +116,11 @@ impl Host {
             "fanotes:move-entry" => self.move_entry(&arg_string(args, 0)?, &arg_string(args, 1)?),
             "fanotes:trash-entry" => self.trash_entry(&arg_string(args, 0)?),
             "fanotes:search" => self.search(&arg_string(args, 0)?),
-            "fanotes:list-drawings" => Ok(json!([])),
-            "fanotes:save-drawing" | "fanotes:read-drawing" => Err(
-                "Die Zeichnungsbibliothek ist in diesem Host noch nicht freigeschaltet.".to_owned(),
-            ),
+            "fanotes:list-drawings" => drawings::list_drawings(self),
+            "fanotes:save-drawing" => {
+                drawings::save_drawing(self, args.first().unwrap_or(&Value::Null))
+            }
+            "fanotes:read-drawing" => drawings::read_drawing(self, &arg_string(args, 0)?),
             "fanotes:read-famd-ink" => self.read_famd_ink(&arg_string(args, 0)?),
             "fanotes:read-note-page-stats"
             | "fanotes:read-note-paper-style"
