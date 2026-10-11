@@ -53,6 +53,8 @@ pub struct Host {
     pub settings: Map<String, Value>,
     pub onboarding_required: bool,
     pub close_requested: bool,
+    /// Set only after the page has saved and confirmed the window may close.
+    pub allow_close: bool,
     /// Native file dialogs. The channel sweep turns this off so a picker cannot block the test.
     pub file_dialogs: bool,
     /// Overrides the documents directory used for a first-run vault.
@@ -74,6 +76,7 @@ impl Host {
             settings: default_settings(),
             onboarding_required: false,
             close_requested: false,
+            allow_close: false,
             file_dialogs: true,
             documents_dir: None,
             open_log: None,
@@ -519,11 +522,16 @@ impl Host {
     }
 
     fn dispatch_message(&mut self, channel: &str) -> Result<Value, String> {
-        if channel == "fanotes:request-close" || channel == "fanotes:confirm-close" {
+        if channel == "fanotes:confirm-close" {
+            self.close_requested = true;
+            self.allow_close = true;
+        }
+        if channel == "fanotes:request-close" {
             self.close_requested = true;
         }
         if channel == "fanotes:cancel-close" {
             self.close_requested = false;
+            self.allow_close = false;
         }
         Ok(Value::Null)
     }

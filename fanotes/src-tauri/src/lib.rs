@@ -99,6 +99,51 @@ fn close_subject_book_popout(app: tauri::AppHandle) -> Result<Value, String> {
     Ok(json!({ "open": false }))
 }
 
+#[tauri::command(rename = "fanotes:request-close")]
+fn request_close(
+    window: tauri::WebviewWindow,
+    state: State<'_, HostState>,
+) -> Result<Value, String> {
+    {
+        let mut host = state
+            .0
+            .lock()
+            .map_err(|_| "Der Host ist belegt.".to_owned())?;
+        host.dispatch("fanotes:request-close", &[])?;
+    }
+    window
+        .close()
+        .map_err(|_| "Das Fenster konnte nicht geschlossen werden.".to_owned())?;
+    Ok(Value::Null)
+}
+
+#[tauri::command(rename = "fanotes:confirm-close")]
+fn confirm_close(
+    window: tauri::WebviewWindow,
+    state: State<'_, HostState>,
+) -> Result<Value, String> {
+    {
+        let mut host = state
+            .0
+            .lock()
+            .map_err(|_| "Der Host ist belegt.".to_owned())?;
+        host.dispatch("fanotes:confirm-close", &[])?;
+    }
+    window
+        .close()
+        .map_err(|_| "Das Fenster konnte nicht geschlossen werden.".to_owned())?;
+    Ok(Value::Null)
+}
+
+#[tauri::command(rename = "fanotes:cancel-close")]
+fn cancel_close(state: State<'_, HostState>) -> Result<Value, String> {
+    let mut host = state
+        .0
+        .lock()
+        .map_err(|_| "Der Host ist belegt.".to_owned())?;
+    host.dispatch("fanotes:cancel-close", &[])
+}
+
 #[tauri::command(rename = "fanotes:capture-window")]
 fn capture_window(window: tauri::WebviewWindow) -> Result<Value, String> {
     let (captured, captured_rx) = std::sync::mpsc::channel();
@@ -142,7 +187,16 @@ macro_rules! fanotes_commands {
         )*
 
         pub fn register() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync + 'static {
-            tauri::generate_handler![$($name),*, export_note_pdf, open_subject_book_popout, close_subject_book_popout, capture_window]
+            tauri::generate_handler![
+                $($name),*,
+                export_note_pdf,
+                open_subject_book_popout,
+                close_subject_book_popout,
+                capture_window,
+                request_close,
+                confirm_close,
+                cancel_close
+            ]
         }
     };
 }
@@ -235,9 +289,6 @@ fanotes_commands! {
     sync_read_secrets => "fanotes:sync-read-secrets",
     sync_write_secrets => "fanotes:sync-write-secrets",
     before_close => "fanotes:before-close",
-    confirm_close => "fanotes:confirm-close",
-    cancel_close => "fanotes:cancel-close",
-    request_close => "fanotes:request-close",
     sheet_zoom => "fanotes:sheet-zoom",
     render_pdf_page => "fanotes:render-pdf-page",
 }
@@ -252,6 +303,25 @@ pub fn run() {
                 .app_data_dir()
                 .unwrap_or_else(|_| std::env::temp_dir().join("fanotes"));
             app.manage(HostState(Mutex::new(Host::open(app_data))));
+            if let Some(window) = app.get_webview_window("main") {
+                let handle = app.handle().clone();
+                window.on_window_event(move |event| {
+                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                        let allow = handle
+                            .state::<HostState>()
+                            .0
+                            .lock()
+                            .map(|host| host.allow_close)
+                            .unwrap_or(true);
+                        if !allow {
+                            api.prevent_close();
+                            if let Some(main) = handle.get_webview_window("main") {
+                                let _ = main.emit("fanotes:before-close", ());
+                            }
+                        }
+                    }
+                });
+            }
             Ok(())
         })
         .invoke_handler(register())

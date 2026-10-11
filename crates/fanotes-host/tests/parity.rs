@@ -167,6 +167,19 @@ fn secrets_do_not_land_in_settings() {
 }
 
 #[test]
+fn close_waits_until_the_page_confirms() {
+    let (_dir, mut host) = host();
+    host.dispatch("fanotes:request-close", &[]).unwrap();
+    assert!(host.close_requested);
+    assert!(!host.allow_close);
+    host.dispatch("fanotes:cancel-close", &[]).unwrap();
+    assert!(!host.close_requested);
+    assert!(!host.allow_close);
+    host.dispatch("fanotes:confirm-close", &[]).unwrap();
+    assert!(host.allow_close);
+}
+
+#[test]
 fn updater_does_not_replace_the_electron_release() {
     let (_dir, mut host) = host();
     let state = host.dispatch("fanotes:update-install", &[]).unwrap();
