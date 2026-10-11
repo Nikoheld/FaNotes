@@ -9,6 +9,10 @@ mod vault;
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::UNIX_EPOCH;
+
+use base64::Engine;
+use filetime::{set_file_mtime, FileTime};
 
 use serde_json::{json, Map, Value};
 
@@ -140,9 +144,8 @@ impl Host {
             "fanotes:list-note-history" => Ok(json!([])),
             "fanotes:read-note-history" => Ok(Value::Null),
             "fanotes:export-note-pdf" => Err("PDF-Export bleibt im Electron-Release.".to_owned()),
-            "fanotes:read-asset-data-url" | "fanotes:read-asset-bytes" => {
-                self.read_file(&arg_string(args, 0)?)
-            }
+            "fanotes:read-asset-data-url" => self.read_asset_data_url(&arg_string(args, 0)?),
+            "fanotes:read-asset-bytes" => self.read_asset_bytes(&arg_string(args, 0)?),
             "fanotes:load-spelling-resources"
             | "fanotes:load-spelling-word-candidates"
             | "fanotes:load-handwriting-recognition-resources" => Err(
@@ -199,9 +202,9 @@ impl Host {
             | "fanotes:addons-write-data" => Ok(Value::Null),
             "fanotes:sync-vault-id" => Ok(json!(self.vault_id())),
             "fanotes:sync-scan" => self.tree(),
-            "fanotes:sync-read" => self.read_file(&arg_string(args, 0)?),
-            "fanotes:sync-write" => self.write_file(&arg_string(args, 0)?, &arg_string(args, 1)?),
-            "fanotes:sync-remove" => self.trash_entry(&arg_string(args, 0)?),
+            "fanotes:sync-read" => self.sync_read(&arg_string(args, 0)?),
+            "fanotes:sync-write" => self.sync_write(args),
+            "fanotes:sync-remove" => self.sync_remove(&arg_string(args, 0)?),
             "fanotes:sync-read-state" => self.read_internal(".fanotes/sync-state.json"),
             "fanotes:sync-write-state" => {
                 self.write_internal(".fanotes/sync-state.json", &arg_string(args, 1)?)
@@ -220,15 +223,106 @@ impl Host {
         let (path, job) = fanotes_pdf::parse_vault_request(args.first().unwrap_or(&Value::Null))
             .map_err(|error| error.to_string())?;
         let file = vault::resolve_inside(self.require_vault()?, &path)?;
-        let bytes =
-            fs::read(&file).map_err(|_| "Die PDF-Datei konnte nicht gelesen werden.".to_owned())?;
+        let bytes = read_regular_limited(&file, PDF_ASSET_MAX)?;
         let bitmap =
             fanotes_pdf::render_pdf_page(&bytes, &job).map_err(|error| error.to_string())?;
+        if bitmap.rgba.len() > MAX_PDF_BITMAP_BYTES {
+            return Err("Die PDF-Seite ist für den Transport zu groß.".to_owned());
+        }
         Ok(json!({
             "width": bitmap.width,
             "height": bitmap.height,
             "rgbaBase64": bitmap.rgba_base64(),
         }))
+    }
+
+    fn read_asset_bytes(&self, relative: &str) -> Result<Value, String> {
+        let mime = asset_mime(relative)?;
+        let bytes = self.read_asset(relative, asset_limit(mime))?;
+        Ok(Value::String(
+            base64::engine::general_purpose::STANDARD.encode(bytes),
+        ))
+    }
+
+    fn read_asset_data_url(&self, relative: &str) -> Result<Value, String> {
+        let mime = asset_mime(relative)?;
+        let bytes = self.read_asset(relative, asset_limit(mime))?;
+        Ok(Value::String(format!(
+            "data:{mime};base64,{}",
+            base64::engine::general_purpose::STANDARD.encode(bytes)
+        )))
+    }
+
+    fn read_asset(&self, relative: &str, max: u64) -> Result<Vec<u8>, String> {
+        let file = vault::resolve_inside(self.require_vault()?, relative)?;
+        let bytes = read_regular_limited(&file, max)?;
+        if bytes.is_empty() {
+            return Err("Die Datei ist leer oder fehlt im Vault.".to_owned());
+        }
+        Ok(bytes)
+    }
+
+    fn sync_read(&self, relative: &str) -> Result<Value, String> {
+        let file = vault::resolve_inside(self.require_vault()?, relative)?;
+        let bytes = read_regular_limited(&file, SYNC_MAX_BYTES)?;
+        Ok(Value::String(
+            base64::engine::general_purpose::STANDARD.encode(bytes),
+        ))
+    }
+
+    fn sync_write(&mut self, args: &[Value]) -> Result<Value, String> {
+        let relative = arg_string(args, 0)?;
+        let encoded = arg_string(args, 1)?;
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(encoded.as_bytes())
+            .map_err(|_| "Der Sync-Inhalt muss binär sein.".to_owned())?;
+        if bytes.len() as u64 > SYNC_MAX_BYTES {
+            return Err("Die Datei ist zu groß für den Sync.".to_owned());
+        }
+        let path = vault::resolve_inside(self.require_vault()?, &relative)?;
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)
+                .map_err(|_| "Der Ordner konnte nicht angelegt werden.".to_owned())?;
+        }
+        fs::write(&path, &bytes)
+            .map_err(|_| "Die Datei konnte nicht geschrieben werden.".to_owned())?;
+        if let Some(mtime_ms) = args.get(2).and_then(Value::as_i64) {
+            let seconds = mtime_ms.div_euclid(1000);
+            let nanos = (mtime_ms.rem_euclid(1000) as u32).saturating_mul(1_000_000);
+            let _ = set_file_mtime(&path, FileTime::from_unix_time(seconds, nanos));
+        }
+        let meta = fs::symlink_metadata(&path)
+            .map_err(|_| "Die Datei konnte nicht gelesen werden.".to_owned())?;
+        let mtime_ms = meta
+            .modified()
+            .ok()
+            .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+            .map(|time| time.as_millis() as i64)
+            .unwrap_or(0);
+        Ok(json!({
+            "path": relative,
+            "size": bytes.len(),
+            "mtimeMs": mtime_ms,
+        }))
+    }
+
+    fn sync_remove(&mut self, relative: &str) -> Result<Value, String> {
+        let path = vault::resolve_inside(self.require_vault()?, relative)?;
+        match fs::symlink_metadata(&path) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Value::Null),
+            Err(_) => Err("Die Datei konnte nicht gelesen werden.".to_owned()),
+            Ok(meta) if meta.file_type().is_symlink() => {
+                Err("Symbolische Links sind innerhalb des Vaults nicht erlaubt.".to_owned())
+            }
+            Ok(meta) if !meta.is_file() => {
+                Err("Nur Dateien können über den Sync entfernt werden.".to_owned())
+            }
+            Ok(_) => {
+                fs::remove_file(&path)
+                    .map_err(|_| "Der Eintrag konnte nicht entfernt werden.".to_owned())?;
+                Ok(Value::Null)
+            }
+        }
     }
 
     fn dispatch_message(&mut self, channel: &str) -> Result<Value, String> {
@@ -619,6 +713,55 @@ impl Host {
         fs::write(self.app_data.join("secrets.json"), text)
             .map_err(|_| "Die Geheimnisse konnten nicht gespeichert werden.".to_owned())
     }
+}
+
+const PDF_ASSET_MAX: u64 = 96 * 1024 * 1024;
+const HTML_ASSET_MAX: u64 = 128 * 1024 * 1024;
+const IMAGE_ASSET_MAX: u64 = 32 * 1024 * 1024;
+const SYNC_MAX_BYTES: u64 = 100 * 1024 * 1024;
+const MAX_PDF_BITMAP_BYTES: usize = 48 * 1024 * 1024;
+
+fn asset_mime(relative: &str) -> Result<&'static str, String> {
+    let extension = relative
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or(relative)
+        .rsplit('.')
+        .next()
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    match extension.as_str() {
+        "png" => Ok("image/png"),
+        "jpg" | "jpeg" => Ok("image/jpeg"),
+        "webp" => Ok("image/webp"),
+        "gif" => Ok("image/gif"),
+        "pdf" => Ok("application/pdf"),
+        "html" | "htm" => Ok("text/html"),
+        _ => Err("Dieser Dateityp ist für die Vorschau nicht erlaubt.".to_owned()),
+    }
+}
+
+fn asset_limit(mime: &str) -> u64 {
+    match mime {
+        "application/pdf" => PDF_ASSET_MAX,
+        "text/html" => HTML_ASSET_MAX,
+        _ => IMAGE_ASSET_MAX,
+    }
+}
+
+fn read_regular_limited(path: &Path, max: u64) -> Result<Vec<u8>, String> {
+    let meta = fs::symlink_metadata(path)
+        .map_err(|_| "Die Datei konnte nicht gelesen werden.".to_owned())?;
+    if meta.file_type().is_symlink() {
+        return Err("Symbolische Links sind innerhalb des Vaults nicht erlaubt.".to_owned());
+    }
+    if !meta.is_file() {
+        return Err("Die gewählte Datei ist keine reguläre Datei.".to_owned());
+    }
+    if meta.len() > max {
+        return Err("Die Datei ist zu groß.".to_owned());
+    }
+    fs::read(path).map_err(|_| "Die Datei konnte nicht gelesen werden.".to_owned())
 }
 
 fn arg_string(args: &[Value], index: usize) -> Result<String, String> {

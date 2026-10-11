@@ -1,5 +1,6 @@
 use std::fs;
 
+use base64::Engine;
 use fanotes_host::{addon_request_allowed, local_ai_origin, Host, CHANNELS};
 use serde_json::json;
 
@@ -39,7 +40,7 @@ fn every_preload_channel_dispatches() {
 
 #[test]
 fn vault_paths_reject_traversal_and_internal_files() {
-    let (_dir, mut host) = host();
+    let (dir, mut host) = host();
     assert_eq!(
         host.dispatch("fanotes:read-file", &[json!("../secret.md")])
             .unwrap_err(),
@@ -74,6 +75,58 @@ fn vault_paths_reject_traversal_and_internal_files() {
             .unwrap(),
         json!("Hallo")
     );
+    fs::write(dir.0.join("vault").join("seite.pdf"), b"%PDF-1.4 test").unwrap();
+    let encoded_value = host
+        .dispatch("fanotes:read-asset-bytes", &[json!("seite.pdf")])
+        .unwrap();
+    let encoded = encoded_value.as_str().unwrap();
+    assert_eq!(
+        base64::engine::general_purpose::STANDARD
+            .decode(encoded)
+            .unwrap(),
+        b"%PDF-1.4 test"
+    );
+    let data_url = host
+        .dispatch("fanotes:read-asset-data-url", &[json!("seite.pdf")])
+        .unwrap();
+    assert!(data_url
+        .as_str()
+        .unwrap()
+        .starts_with("data:application/pdf;base64,"));
+    assert_eq!(
+        host.dispatch("fanotes:read-asset-bytes", &[json!("Notiz.md")])
+            .unwrap_err(),
+        "Dieser Dateityp ist für die Vorschau nicht erlaubt."
+    );
+    let link = dir.0.join("vault").join("link.pdf");
+    std::os::unix::fs::symlink(dir.0.join("vault").join("seite.pdf"), &link).unwrap();
+    assert_eq!(
+        host.dispatch("fanotes:read-asset-bytes", &[json!("link.pdf")])
+            .unwrap_err(),
+        "Symbolische Links sind innerhalb des Vaults nicht erlaubt."
+    );
+    let synced = host
+        .dispatch("fanotes:sync-read", &[json!("seite.pdf")])
+        .unwrap();
+    assert_eq!(synced.as_str(), Some(encoded));
+    let written = host
+        .dispatch(
+            "fanotes:sync-write",
+            &[
+                json!("kopie.pdf"),
+                json!(encoded),
+                json!(1_700_000_000_000i64),
+            ],
+        )
+        .unwrap();
+    assert_eq!(written["path"], "kopie.pdf");
+    assert_eq!(written["size"], 13);
+    assert_eq!(
+        fs::read(dir.0.join("vault").join("kopie.pdf")).unwrap(),
+        b"%PDF-1.4 test"
+    );
+    host.dispatch("fanotes:sync-remove", &[json!("fehlt.pdf")])
+        .unwrap();
 }
 
 #[test]

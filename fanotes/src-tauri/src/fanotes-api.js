@@ -3,6 +3,22 @@
 (() => {
   const internals = window.__TAURI_INTERNALS__
   if (!internals || typeof internals.invoke !== 'function') return
+  const bytesFromBase64 = (value) => {
+    if (typeof value !== 'string') throw new Error('Die Datei konnte nicht gelesen werden.')
+    const binary = atob(value)
+    const bytes = new Uint8Array(binary.length)
+    for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index)
+    return bytes
+  }
+  const bytesToBase64 = (value) => {
+    const bytes = value instanceof Uint8Array ? value : new Uint8Array(value)
+    let binary = ''
+    const chunk = 0x2000
+    for (let index = 0; index < bytes.length; index += chunk) {
+      binary += String.fromCharCode(...bytes.subarray(index, index + chunk))
+    }
+    return btoa(binary)
+  }
   const invoke = (channel, ...args) => internals.invoke(channel, { args })
   const listen = (channel, callback) => {
     if (typeof callback !== 'function') return () => {}
@@ -66,7 +82,7 @@
     readNoteHistory: (relativePath, snapshotId) => invoke('fanotes:read-note-history', relativePath, snapshotId),
     exportNotePdf: () => invoke('fanotes:export-note-pdf'),
     readAssetDataUrl: (relativePath) => invoke('fanotes:read-asset-data-url', relativePath),
-    readAssetBytes: (relativePath) => invoke('fanotes:read-asset-bytes', relativePath),
+    readAssetBytes: async (relativePath) => bytesFromBase64(await invoke('fanotes:read-asset-bytes', relativePath)),
     loadSpellingResources: () => invoke('fanotes:load-spelling-resources'),
     loadSpellingWordCandidates: (language) => invoke('fanotes:load-spelling-word-candidates', language),
     loadHandwritingRecognitionResources: () => invoke('fanotes:load-handwriting-recognition-resources'),
@@ -112,8 +128,8 @@
     sync: {
       vaultId: () => invoke('fanotes:sync-vault-id'),
       scan: () => invoke('fanotes:sync-scan'),
-      read: (relativePath) => invoke('fanotes:sync-read', relativePath),
-      write: (relativePath, bytes, mtimeMs) => invoke('fanotes:sync-write', relativePath, bytes, mtimeMs),
+      read: async (relativePath) => bytesFromBase64(await invoke('fanotes:sync-read', relativePath)),
+      write: (relativePath, bytes, mtimeMs) => invoke('fanotes:sync-write', relativePath, bytesToBase64(bytes), mtimeMs),
       remove: (relativePath) => invoke('fanotes:sync-remove', relativePath),
       readState: (vaultId) => invoke('fanotes:sync-read-state', vaultId),
       writeState: (vaultId, json) => invoke('fanotes:sync-write-state', vaultId, json),

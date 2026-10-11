@@ -204,7 +204,9 @@ export const createPdfPagePainter = (options: PdfPagePainterOptions): PdfPagePai
         })
         if (bitmap && bitmap.length === box.pixelWidth * box.pixelHeight * 4 && token === layer.token) {
           try {
-            context.putImageData(new ImageData(bitmap, box.pixelWidth, box.pixelHeight), 0, 0)
+            const pixels = new Uint8ClampedArray(bitmap.length)
+            pixels.set(bitmap)
+            context.putImageData(new ImageData(pixels, box.pixelWidth, box.pixelHeight), 0, 0)
             await showBack()
             return
           } catch {
