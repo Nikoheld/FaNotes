@@ -69,6 +69,45 @@ fn drawings_round_trip_and_land_in_the_note() {
 }
 
 #[test]
+fn the_drawing_library_uses_one_json_suffix_without_case() {
+    let (dir, mut host) = host();
+    let assets = dir.join("vault/.fanotes/assets");
+    fs::create_dir_all(&assets).unwrap();
+    let document = |title: &str, transcript: &str| {
+        format!(
+            r#"{{"schemaVersion":1,"title":"{title}","strokes":[],"updatedAt":"2026-01-02T03:04:05.000Z","searchTranscript":"0.20\t{transcript}"}}"#
+        )
+    };
+    fs::write(assets.join("keep.json"), document("Behalten", "Echtwort")).unwrap();
+    fs::write(
+        assets.join("keep.json.json"),
+        document("Doppelt", "Doppelwort"),
+    )
+    .unwrap();
+    fs::write(assets.join("Upper.JSON"), document("Gross", "Grosswort")).unwrap();
+    fs::create_dir(assets.join("ordner.json")).unwrap();
+
+    let listed = host.dispatch("fanotes:list-drawings", &[]).unwrap();
+    let titles: Vec<_> = listed
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|item| item["title"].as_str().unwrap().to_owned())
+        .collect();
+    assert_eq!(titles, vec!["Behalten".to_owned(), "Gross".to_owned()]);
+
+    let upper = host
+        .dispatch("fanotes:search", &[json!("Grosswort")])
+        .unwrap();
+    assert_eq!(upper[0]["drawingId"], "Upper");
+    assert_eq!(upper[0]["title"], "Gross");
+    let hidden = host
+        .dispatch("fanotes:search", &[json!("Doppelwort")])
+        .unwrap();
+    assert!(hidden.as_array().unwrap().is_empty());
+}
+
+#[test]
 fn handwriting_is_not_saved_through_a_symlink_folder() {
     let (dir, mut host) = host();
     let outside = dir.join("outside");

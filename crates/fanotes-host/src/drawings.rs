@@ -33,14 +33,10 @@ pub fn list_drawings(host: &Host) -> Result<Value, String> {
     };
     for entry in entries.flatten() {
         let name = entry.file_name().to_string_lossy().to_string();
-        if !name.ends_with(".json") {
+        let Some(id) = drawing_file_id(&name) else {
             continue;
-        }
-        let id = name.trim_end_matches(".json");
-        if drawing_id(id).is_err() {
-            continue;
-        }
-        let path = assets.join(format!("{id}.json"));
+        };
+        let path = entry.path();
         let Ok(text) = read_limited(&path, MAX_DRAWING_JSON_BYTES) else {
             continue;
         };
@@ -373,6 +369,14 @@ fn safe_title(value: &str) -> Result<String, String> {
         return Err("Dieser Name ist nicht erlaubt.".to_owned());
     }
     Ok(name.to_owned())
+}
+
+fn drawing_file_id(name: &str) -> Option<&str> {
+    let (id, extension) = name.rsplit_once('.')?;
+    extension
+        .eq_ignore_ascii_case("json")
+        .then_some(id)
+        .filter(|id| drawing_id(id).is_ok())
 }
 
 fn drawing_id(value: &str) -> Result<String, String> {

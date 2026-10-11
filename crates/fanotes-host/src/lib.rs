@@ -3024,10 +3024,10 @@ fn search_drawings(
     };
     for entry in entries.flatten() {
         let name = entry.file_name().to_string_lossy().to_string();
-        let Some(id) = name.strip_suffix(".json") else {
+        let Some((id, extension)) = name.rsplit_once('.') else {
             continue;
         };
-        if !is_drawing_id(id) {
+        if !extension.eq_ignore_ascii_case("json") || !is_drawing_id(id) {
             continue;
         }
         let path = entry.path();
