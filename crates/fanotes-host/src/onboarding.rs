@@ -284,6 +284,71 @@ pub(crate) fn welcome_file_name(language: &str) -> &'static str {
     }
 }
 
+const LEGACY_WELCOME_DE: &str = r#"# Willkommen bei FaNotes
+
+Deine Notizen liegen als normale Markdown-Dateien in diesem Ordner. Du kannst sie jederzeit auch mit anderen Editoren öffnen.
+
+## Schnellstart
+
+- Wähle links einen Bereich oder erstelle einen eigenen Ordner.
+- Schreibe mit Tastatur oder Grafiktablett direkt auf derselben Notizseite.
+- Importiere Bilder oder PDFs als Arbeitsblätter und fülle sie mit Textfeldern oder dem Stift aus.
+- Konvertierte Mathematik wird als LaTeX gespeichert und sauber gesetzt dargestellt.
+- Mit `[[Notizname]]` kannst du später Wissensseiten miteinander verbinden.
+
+Viel Freude beim Lernen!
+"#;
+
+const WELCOME_MAX_BYTES: u64 = 16 * 1024 * 1024;
+
+/// Refresh an untouched starter note. A note the user has rewritten stays as it is.
+pub(crate) fn upgrade_welcome_notes(root: &Path) {
+    repair_welcome_file(root, "Willkommen.md", |content| {
+        if content == LEGACY_WELCOME_DE {
+            return Some(welcome_note("de").to_owned());
+        }
+        replace_first(
+            content,
+            "Mit `Strg+Z` holst du eine versehentliche Löschung sofort zurück.",
+            "Mit **Strg+Z** holst du eine versehentliche Löschung sofort zurück.",
+        )
+    });
+    repair_welcome_file(root, "Welcome.md", |content| {
+        replace_first(
+            content,
+            "Press `Ctrl+Z` to restore something you erased by accident.",
+            "Press **Ctrl+Z** to restore something you erased by accident.",
+        )
+    });
+}
+
+fn replace_first(content: &str, from: &str, to: &str) -> Option<String> {
+    if !content.contains(from) {
+        return None;
+    }
+    Some(content.replacen(from, to, 1))
+}
+
+fn repair_welcome_file(root: &Path, name: &str, repair: impl Fn(&str) -> Option<String>) {
+    let path = root.join(name);
+    let Ok(meta) = fs::symlink_metadata(&path) else {
+        return;
+    };
+    if meta.file_type().is_symlink() || !meta.is_file() || meta.len() > WELCOME_MAX_BYTES {
+        return;
+    }
+    let Ok(existing) = fs::read_to_string(&path) else {
+        return;
+    };
+    let Some(repaired) = repair(&existing) else {
+        return;
+    };
+    if repaired == existing {
+        return;
+    }
+    let _ = notes::atomic_write(&path, repaired.as_bytes(), 0o600);
+}
+
 pub(crate) fn starter_subjects(language: &str) -> Value {
     let source = if language == "en" {
         SCHOOL_EN

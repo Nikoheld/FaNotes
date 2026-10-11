@@ -102,6 +102,9 @@ impl Host {
         }
         self.vault = Some(path);
         self.refresh_onboarding();
+        if let Some(root) = self.vault.clone() {
+            onboarding::upgrade_welcome_notes(&root);
+        }
         Ok(())
     }
 
