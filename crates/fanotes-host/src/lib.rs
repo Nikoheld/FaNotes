@@ -29,7 +29,6 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use base64::Engine;
-use filetime::{set_file_mtime, FileTime};
 use sha2::{Digest, Sha256};
 
 use serde_json::{json, Map, Value};
@@ -353,12 +352,9 @@ impl Host {
         }
         let root = self.require_vault()?.to_path_buf();
         let (path, normalized) = vault::resolve_sync_path(&root, &relative, true)?;
-        notes::atomic_write(&path, &bytes, 0o600)?;
-        if let Some(mtime_ms) = arg_mtime_ms(args.get(2)) {
-            let seconds = mtime_ms.div_euclid(1000);
-            let nanos = (mtime_ms.rem_euclid(1000) as u32).saturating_mul(1_000_000);
-            let _ = set_file_mtime(&path, FileTime::from_unix_time(seconds, nanos));
-        }
+        create_sync_directories(&root, &path)?;
+        let mtime = arg_mtime_ms(args.get(2)).and_then(system_time_from_millis);
+        notes::atomic_write_with_mtime(&path, &bytes, 0o600, mtime)?;
         let meta = fs::symlink_metadata(&path)
             .map_err(|_| "Die Datei konnte nicht gelesen werden.".to_owned())?;
         if meta.file_type().is_symlink() || !meta.is_file() {
@@ -1704,6 +1700,46 @@ fn is_vault_id(value: &str) -> bool {
         && value
             .bytes()
             .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+}
+
+fn system_time_from_millis(millis: i64) -> Option<SystemTime> {
+    if millis <= 0 {
+        return None;
+    }
+    let seconds = millis.div_euclid(1000);
+    let nanos = (millis.rem_euclid(1000) as u32).saturating_mul(1_000_000);
+    UNIX_EPOCH.checked_add(std::time::Duration::new(seconds as u64, nanos))
+}
+
+fn create_sync_directories(root: &Path, file: &Path) -> Result<(), String> {
+    let Some(parent) = file.parent() else {
+        return Ok(());
+    };
+    let relative = parent
+        .strip_prefix(root)
+        .map_err(|_| "Der Pfad liegt außerhalb des Vaults.".to_owned())?;
+    let mut cursor = root.to_path_buf();
+    for component in relative.components() {
+        cursor.push(component);
+        match fs::symlink_metadata(&cursor) {
+            Ok(meta) if meta.file_type().is_symlink() || !meta.is_dir() => {
+                return Err("Ein Pfadbestandteil ist kein Ordner.".to_owned());
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                fs::create_dir(&cursor)
+                    .map_err(|_| "Der Ordner konnte nicht angelegt werden.".to_owned())?;
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    fs::set_permissions(&cursor, fs::Permissions::from_mode(0o700))
+                        .map_err(|_| "Der Ordner konnte nicht angelegt werden.".to_owned())?;
+                }
+            }
+            Err(_) => return Err("Der Ordner konnte nicht angelegt werden.".to_owned()),
+        }
+    }
+    Ok(())
 }
 
 fn arg_mtime_ms(value: Option<&Value>) -> Option<i64> {

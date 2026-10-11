@@ -151,3 +151,42 @@ fn sync_secrets_stay_out_of_the_profile_without_a_keyring() {
     assert!(error.contains("Schlüsselbund"));
     let _ = fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn sync_write_keeps_the_requested_time_and_a_private_folder() {
+    let (vault, _app, mut host) = host();
+    let written = host
+        .dispatch(
+            "fanotes:sync-write",
+            &[
+                json!("Neu/Seite.md"),
+                json!("SGFsbG8K"),
+                json!(1_600_000_000_000i64),
+            ],
+        )
+        .unwrap();
+    assert_eq!(written["path"], "Neu/Seite.md");
+    assert_eq!(written["size"], 6);
+    assert_eq!(written["mtimeMs"], 1_600_000_000_000i64);
+    assert_eq!(fs::read(vault.join("Neu/Seite.md")).unwrap(), b"Hallo\n");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            fs::metadata(vault.join("Neu"))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o700
+        );
+        assert_eq!(
+            fs::metadata(vault.join("Neu/Seite.md"))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
+    }
+}

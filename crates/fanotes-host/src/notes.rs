@@ -592,6 +592,15 @@ fn random_suffix() -> Result<String, String> {
 }
 
 pub(crate) fn atomic_write(path: &Path, bytes: &[u8], mode: u32) -> Result<(), String> {
+    atomic_write_with_mtime(path, bytes, mode, None)
+}
+
+pub(crate) fn atomic_write_with_mtime(
+    path: &Path,
+    bytes: &[u8],
+    mode: u32,
+    mtime: Option<SystemTime>,
+) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
             .map_err(|_| "Der Ordner konnte nicht angelegt werden.".to_owned())?;
@@ -600,6 +609,11 @@ pub(crate) fn atomic_write(path: &Path, bytes: &[u8], mode: u32) -> Result<(), S
     if let Err(error) = write_exclusive(&temporary, bytes, mode) {
         let _ = fs::remove_file(&temporary);
         return Err(error);
+    }
+    if let Some(mtime) = mtime {
+        // Stamp the temporary file. The final name then appears with the
+        // sync time already set, matching the Electron sync host.
+        let _ = filetime::set_file_mtime(&temporary, filetime::FileTime::from_system_time(mtime));
     }
     if fs::rename(&temporary, path).is_err() {
         let _ = fs::remove_file(&temporary);
