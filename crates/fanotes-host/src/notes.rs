@@ -48,13 +48,24 @@ pub fn write_note_file(
     } else {
         format!("{body}\n")
     };
-    if !is_famd {
+    let written = if is_famd {
+        vault::resolve_note_file(root, relative)?
+    } else {
         let path = vault::resolve_note_file(root, relative)?;
         require_parent_directory(&path)?;
         atomic_write(&path, markdown.as_bytes(), 0o600)?;
-    }
+        path
+    };
     attach_sidecar(root, relative, content, settings_paper)?;
-    Ok(now_iso())
+    Ok(file_mtime_iso(&written))
+}
+
+fn file_mtime_iso(path: &Path) -> String {
+    fs::symlink_metadata(path)
+        .ok()
+        .and_then(|meta| meta.modified().ok())
+        .map(iso_from_system_time)
+        .unwrap_or_else(now_iso)
 }
 
 fn require_parent_directory(path: &Path) -> Result<(), String> {
@@ -869,7 +880,7 @@ fn is_leap(year: i32) -> bool {
 
 #[cfg(test)]
 mod publish_tests {
-    use super::{publish_new_file, NewFileError};
+    use super::{file_mtime_iso, publish_new_file, write_note_file, NewFileError};
 
     #[test]
     fn a_new_file_stays_private_and_an_existing_name_is_left_alone() {
@@ -915,6 +926,23 @@ mod publish_tests {
             .filter(|entry| entry.file_name().to_string_lossy().contains(".tmp"))
             .collect();
         assert!(leftovers.is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_saved_note_reports_the_file_modification_time() {
+        let dir = std::env::temp_dir().join(format!(
+            "fanotes-mtime-{}-{}",
+            std::process::id(),
+            super::random_suffix().unwrap()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("Mathe")).unwrap();
+        let stamp = write_note_file(&dir, "Mathe/Seite.md", "Hallo", None).unwrap();
+        let path = dir.join("Mathe/Seite.md");
+        assert_eq!(stamp, file_mtime_iso(&path));
+        let famd = write_note_file(&dir, "Mathe/Seite.famd", "Rand\n", None).unwrap();
+        assert_eq!(famd, file_mtime_iso(&dir.join("Mathe/Seite.famd")));
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
