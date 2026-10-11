@@ -8,8 +8,10 @@ publish.workspace = true
 
 [dependencies]
 fanotes-famd = { path = "../fanotes-famd" }
+fanotes-ort = { path = "../fanotes-ort" }
 fanotes-pdf = { path = "../fanotes-pdf" }
 base64 = "0.22"
 filetime = "0.2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+sha2 = "0.10"

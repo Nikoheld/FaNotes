@@ -86,7 +86,27 @@
     loadSpellingResources: () => invoke('fanotes:load-spelling-resources'),
     loadSpellingWordCandidates: (language) => invoke('fanotes:load-spelling-word-candidates', language),
     loadHandwritingRecognitionResources: () => invoke('fanotes:load-handwriting-recognition-resources'),
-    recognizeNativeHandwritingLine: (request) => invoke('fanotes:recognize-native-handwriting-line', request),
+    recognizeNativeHandwritingLine: async (request) => {
+      const input = request && request.input instanceof Float32Array
+        ? request.input
+        : new Float32Array((request && request.input) || [])
+      const view = new Uint8Array(input.buffer, input.byteOffset, input.byteLength)
+      const tight = view.byteOffset === 0 && view.byteLength === view.buffer.byteLength ? view : view.slice()
+      const result = await invoke('fanotes:recognize-native-handwriting-line', {
+        width: request.width,
+        height: request.height,
+        threads: request.threads,
+        inputBase64: bytesToBase64(tight),
+      })
+      const raw = bytesFromBase64(result.probabilitiesBase64 || '')
+      const probabilities = new Float32Array(raw.buffer, raw.byteOffset, Math.floor(raw.byteLength / 4))
+      return {
+        engine: result.engine,
+        dims: result.dims,
+        characters: result.characters,
+        probabilities,
+      }
+    },
     getEnhancedMathRecognitionState: () => invoke('fanotes:enhanced-math-get-state'),
     installEnhancedMathRecognitionModel: (request) => invoke('fanotes:enhanced-math-install', request),
     recognizeEnhancedMath: (request) => invoke('fanotes:enhanced-math-recognize', request),

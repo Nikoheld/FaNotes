@@ -4,6 +4,7 @@
 //! update commands report `supported: false` and do not install a package.
 
 mod channels;
+mod ocr;
 mod policy;
 mod vault;
 
@@ -153,7 +154,7 @@ impl Host {
                     .to_owned(),
             ),
             "fanotes:recognize-native-handwriting-line" => {
-                Err("Die native OCR-Antwort ist ungültig.".to_owned())
+                ocr::recognize_line(args.first().unwrap_or(&Value::Null))
             }
             "fanotes:enhanced-math-get-state" => {
                 Ok(feature_state("posformer-crohme-q4-k", "CC-BY-NC-SA-3.0"))
