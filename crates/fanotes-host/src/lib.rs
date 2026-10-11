@@ -1765,6 +1765,10 @@ fn created_entry(relative: &str, path: &Path, note: bool) -> Value {
     }
 }
 
+pub fn openable_http_url(raw: &str) -> Option<String> {
+    http_link(raw).ok()
+}
+
 fn http_link(raw: &str) -> Result<String, String> {
     if raw.is_empty()
         || raw.len() > 4096
