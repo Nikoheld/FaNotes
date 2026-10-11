@@ -418,3 +418,22 @@ fn a_settings_file_with_a_bad_byte_still_loads() {
     let boot = host.dispatch("fanotes:bootstrap", &[]).unwrap();
     assert_eq!(boot["settings"]["syncDeviceName"], "La\u{FFFD}ptop");
 }
+
+#[test]
+fn custom_css_rejects_an_expression_after_a_byte_order_mark() {
+    let (_app, mut host) = host();
+    let saved = host
+        .dispatch(
+            "fanotes:save-settings",
+            &[json!({ "customCss": "div{color:expression\u{FEFF}(alert(1))}" })],
+        )
+        .unwrap();
+    assert_eq!(saved["customCss"], "");
+    let saved = host
+        .dispatch(
+            "fanotes:save-settings",
+            &[json!({ "customCss": "div{color:expression\u{0085}(alert(1))}" })],
+        )
+        .unwrap();
+    assert!(saved["customCss"].as_str().unwrap().contains("expression"));
+}
