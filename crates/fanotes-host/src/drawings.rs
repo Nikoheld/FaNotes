@@ -124,13 +124,129 @@ pub fn save_drawing(host: &Host, payload: &Value) -> Result<Value, String> {
     Ok(item)
 }
 
+const FAMD_INK_ID: &str = "famd-ink";
+const MAX_FAMD_BYTES: usize = 40 * 1024 * 1024;
+
+/// Handwriting stored in the note's `.famd` companion.
+///
+/// PDF books, `.markdown` notes, and `.md` notes all share that companion.
+/// The result is a drawing-library document whose `dataRelativePath` names
+/// the companion, matching the Electron host.
+pub fn read_famd_ink(host: &Host, relative: &str) -> Result<Value, String> {
+    let note = vault::normalize_relative_path(relative, false, false)?;
+    if !is_note_path(&note) {
+        return Err("Es dürfen nur Markdown-Dateien, PDF-Notizen und FaNotes-Handschriftdateien (.famd) bearbeitet werden.".to_owned());
+    }
+    let famd_relative = companion_note_path(&note, ".famd");
+    let path = vault::resolve_note_file(vault_root(host)?, &famd_relative)?;
+    let source = match fs::symlink_metadata(&path) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Value::Null),
+        Err(_) => return Err("Die Datei konnte nicht gelesen werden.".to_owned()),
+        Ok(meta) if meta.file_type().is_symlink() || !meta.is_file() => {
+            return Err("Die Notiz ist keine sichere reguläre Datei.".to_owned());
+        }
+        Ok(meta) if meta.len() as usize > MAX_FAMD_BYTES => {
+            return Err("Die Datei ist zu groß.".to_owned());
+        }
+        Ok(_) => fs::read_to_string(&path)
+            .map_err(|_| "Die Datei konnte nicht gelesen werden.".to_owned())?,
+    };
+    let parsed = parse_famd(&source);
+    let Some(payload) = parsed.payload else {
+        return Ok(Value::Null);
+    };
+    let Some(ink) = payload.ink.as_ref().filter(|ink| ink.is_object()) else {
+        return Ok(Value::Null);
+    };
+    let drawing_json = ink.to_string();
+    let document = validate_drawing_json(&drawing_json)?;
+    let marker = note_ink_marker_id(&parsed.markdown);
+    let raw_id = document.get("id").and_then(Value::as_str);
+    let metadata_id = if let Some(marker) = marker.clone() {
+        Ok(marker)
+    } else if let Some(raw_id) = raw_id {
+        drawing_id(raw_id)
+    } else {
+        Ok(FAMD_INK_ID.to_owned())
+    };
+    if let Ok(id) = metadata_id {
+        if let Ok(mut item) = library_metadata(&document, &id, Some(payload.updated_at.as_str())) {
+            item["drawingJson"] = Value::String(drawing_json);
+            item["dataRelativePath"] = Value::String(famd_relative);
+            return Ok(item);
+        }
+    }
+    let id = marker
+        .or_else(|| raw_id.map(str::to_owned))
+        .unwrap_or_else(|| FAMD_INK_ID.to_owned());
+    let title = document
+        .get("title")
+        .and_then(Value::as_str)
+        .unwrap_or("Handschrift");
+    Ok(json!({
+        "id": id,
+        "title": title,
+        "updatedAt": payload.updated_at,
+        "imageRelativePath": "",
+        "dataRelativePath": famd_relative,
+        "drawingJson": drawing_json,
+    }))
+}
+
+fn is_note_path(relative: &str) -> bool {
+    let lower = relative.to_lowercase();
+    lower.ends_with(".md")
+        || lower.ends_with(".markdown")
+        || lower.ends_with(".famd")
+        || lower.ends_with(".pdf")
+}
+
+fn note_ink_marker_id(markdown: &str) -> Option<String> {
+    let mut rest = markdown;
+    while let Some(start) = rest.find("<!--") {
+        let after = rest[start + 4..].trim_start();
+        if let Some(id) = ink_marker_at(after) {
+            return Some(id);
+        }
+        rest = &rest[start + 4..];
+    }
+    None
+}
+
+fn ink_marker_at(after: &str) -> Option<String> {
+    let after = after.strip_prefix("fanotes-ink:")?;
+    let length = after
+        .bytes()
+        .take_while(|byte| byte.is_ascii_alphanumeric() || matches!(*byte, b'_' | b'-'))
+        .count();
+    if !(1..=96).contains(&length) {
+        return None;
+    }
+    let id = &after[..length];
+    if after[length..].trim_start().starts_with("-->") {
+        Some(id.to_owned())
+    } else {
+        None
+    }
+}
+
 fn embed_in_note(host: &Host, note_path: &str, drawing: &Value) -> Result<(), String> {
     let vault_root = vault_root(host)?;
     let note = vault::normalize_relative_path(note_path, false, false)?;
-    let markdown_path = vault::resolve_note_file(vault_root, &companion_note_path(&note, ".md"))?;
+    if !is_note_path(&note) {
+        return Err("Es dürfen nur Markdown-Dateien, PDF-Notizen und FaNotes-Handschriftdateien (.famd) bearbeitet werden.".to_owned());
+    }
     let famd_relative = companion_note_path(&note, ".famd");
     let famd_path = vault::resolve_note_file(vault_root, &famd_relative)?;
-    let markdown = fs::read_to_string(&markdown_path).unwrap_or_default();
+    // A PDF note keeps its text in the companion. Other notes keep it in the
+    // file the editor opened, including `.markdown`.
+    let source_relative = if note.to_lowercase().ends_with(".pdf") {
+        famd_relative
+    } else {
+        note
+    };
+    let source_path = vault::resolve_note_file(vault_root, &source_relative)?;
+    let markdown = fs::read_to_string(&source_path).unwrap_or_default();
     let body = strip_famd_payload(&markdown);
     let mut payload = fs::read_to_string(&famd_path)
         .ok()
@@ -155,7 +271,6 @@ fn embed_in_note(host: &Host, note_path: &str, drawing: &Value) -> Result<(), St
         serialize_famd(&body, &payload).as_bytes(),
         0o600,
     )?;
-    let _ = markdown_path;
     Ok(())
 }
 
@@ -165,6 +280,14 @@ fn metadata_from_json(drawing_json: &str, id: &str) -> Result<Value, String> {
 }
 
 fn metadata_value(document: &Value, id: &str) -> Result<Value, String> {
+    library_metadata(document, id, None)
+}
+
+fn library_metadata(
+    document: &Value,
+    id: &str,
+    fallback_time: Option<&str>,
+) -> Result<Value, String> {
     let title = document
         .get("title")
         .and_then(Value::as_str)
@@ -183,6 +306,11 @@ fn metadata_value(document: &Value, id: &str) -> Result<Value, String> {
         .and_then(Value::as_str)
         .filter(|value| chrono_like(value))
         .map(str::to_owned)
+        .or_else(|| {
+            fallback_time
+                .filter(|value| chrono_like(value))
+                .map(str::to_owned)
+        })
         .unwrap_or_else(now_iso);
     Ok(json!({
         "id": id,

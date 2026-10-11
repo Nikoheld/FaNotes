@@ -1188,28 +1188,7 @@ impl Host {
     }
 
     fn read_famd_ink(&self, relative: &str) -> Result<Value, String> {
-        let note = vault::normalize_relative_path(relative, false, false)?;
-        let famd = if let Some(stem) = note.strip_suffix(".md") {
-            format!("{stem}.famd")
-        } else {
-            format!("{note}.famd")
-        };
-        let path = vault::resolve_note_file(self.require_vault()?, &famd)?;
-        let Ok(source) = fs::read_to_string(&path) else {
-            return Ok(Value::Null);
-        };
-        let parsed = fanotes_famd::parse_famd(&source);
-        let Some(payload) = parsed.payload else {
-            return Ok(Value::Null);
-        };
-        let Some(ink) = payload.ink else {
-            return Ok(Value::Null);
-        };
-        Ok(json!({
-            "updatedAt": payload.updated_at,
-            "drawingJson": ink.to_string(),
-            "dataRelativePath": famd,
-        }))
+        drawings::read_famd_ink(self, relative)
     }
 
     fn save_settings(&mut self, incoming: Value, options: &Value) -> Result<Value, String> {
