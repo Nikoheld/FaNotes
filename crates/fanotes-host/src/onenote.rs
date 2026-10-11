@@ -1400,39 +1400,69 @@ fn markdown_title(value: &str) -> String {
 }
 
 fn decode_entities(value: &str) -> String {
+    // The desktop replaces hex, then decimal, then the six named entities.
+    // A later pass sees text produced by an earlier one, so `&#38;amp;` becomes `&`.
+    let value = replace_entities(value, EntityPass::Hex);
+    let value = replace_entities(&value, EntityPass::Decimal);
+    replace_entities(&value, EntityPass::Named)
+}
+
+enum EntityPass {
+    Hex,
+    Decimal,
+    Named,
+}
+
+fn replace_entities(value: &str, pass: EntityPass) -> String {
     let mut output = String::new();
     let mut rest = value;
     while let Some(start) = rest.find('&') {
         output.push_str(&rest[..start]);
-        rest = &rest[start..];
-        let Some(end) = rest.find(';') else {
-            output.push_str(rest);
+        let after = &rest[start + 1..];
+        let Some(end) = after.find(';') else {
+            output.push_str(&rest[start..]);
             return output;
         };
-        let entity = &rest[1..end];
-        let decoded = if let Some(hex) = entity
-            .strip_prefix("#x")
-            .or_else(|| entity.strip_prefix("#X"))
-        {
-            code_point(u32::from_str_radix(hex, 16).ok())
-        } else if let Some(decimal) = entity.strip_prefix('#') {
-            code_point(decimal.parse().ok())
+        if let Some(decoded) = decode_one_entity(&after[..end], &pass) {
+            output.push_str(&decoded);
+            rest = &after[end + 1..];
         } else {
-            match entity.to_ascii_lowercase().as_str() {
-                "nbsp" => " ".to_owned(),
-                "amp" => "&".to_owned(),
-                "lt" => "<".to_owned(),
-                "gt" => ">".to_owned(),
-                "quot" => "\"".to_owned(),
-                "apos" => "'".to_owned(),
-                _ => format!("&{entity};"),
-            }
-        };
-        output.push_str(&decoded);
-        rest = &rest[end + 1..];
+            output.push('&');
+            rest = after;
+        }
     }
     output.push_str(rest);
     output
+}
+
+fn decode_one_entity(entity: &str, pass: &EntityPass) -> Option<String> {
+    match pass {
+        EntityPass::Hex => {
+            let hex = entity
+                .strip_prefix("#x")
+                .or_else(|| entity.strip_prefix("#X"))?;
+            if hex.is_empty() || !hex.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+                return None;
+            }
+            Some(code_point(u32::from_str_radix(hex, 16).ok()))
+        }
+        EntityPass::Decimal => {
+            let decimal = entity.strip_prefix('#')?;
+            if decimal.is_empty() || !decimal.bytes().all(|byte| byte.is_ascii_digit()) {
+                return None;
+            }
+            Some(code_point(decimal.parse().ok()))
+        }
+        EntityPass::Named => match entity.to_ascii_lowercase().as_str() {
+            "nbsp" => Some(" ".to_owned()),
+            "amp" => Some("&".to_owned()),
+            "lt" => Some("<".to_owned()),
+            "gt" => Some(">".to_owned()),
+            "quot" => Some("\"".to_owned()),
+            "apos" => Some("'".to_owned()),
+            _ => None,
+        },
+    }
 }
 
 fn code_point(point: Option<u32>) -> String {
@@ -1718,6 +1748,13 @@ mod tests {
         assert_eq!(extract_search_text("a\u{FEFF}\nb"), "a\nb");
         assert_eq!(extract_search_text("a\u{0085}\nb"), "a\u{0085}\nb");
         assert_eq!(extract_search_text("<br\u{FEFF}/>Hi"), "Hi");
+        assert_eq!(extract_search_text("&#65;"), "A");
+        assert_eq!(extract_search_text("&#x26;amp;"), "&");
+        assert_eq!(extract_search_text("&#38;amp;"), "&");
+        assert_eq!(extract_search_text("A&nbsp;B"), "A B");
+        assert_eq!(extract_search_text("&#x;"), "&#x;");
+        assert_eq!(extract_search_text("&#xZZ;"), "&#xZZ;");
+        assert_eq!(extract_search_text("&unknown;"), "&unknown;");
         assert_eq!(
             extract_search_text("<p>Eins</p>\n<p>Zwei</p>"),
             "Eins\nZwei"
