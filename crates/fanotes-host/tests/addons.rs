@@ -56,6 +56,26 @@ fn installed_addons_stay_outside_the_vault() {
             .unwrap(),
         "{\"open\":1}"
     );
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let root = _dir.join("app/addons");
+        for name in [
+            "addons.json",
+            "margin-notes.data.json",
+            "margin-notes/main.js",
+        ] {
+            assert_eq!(
+                std::fs::metadata(root.join(name))
+                    .unwrap()
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                0o600,
+                "{name}"
+            );
+        }
+    }
     assert!(host
         .dispatch(
             "fanotes:addons-read-file",

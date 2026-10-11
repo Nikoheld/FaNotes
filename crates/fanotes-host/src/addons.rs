@@ -616,24 +616,13 @@ fn is_blocked_header(name: &str) -> bool {
 
 fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), String> {
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|_| "Der Add-on-Ordner konnte nicht angelegt werden.".to_owned())?;
+        if fs::symlink_metadata(parent).is_err() {
+            fs::create_dir_all(parent)
+                .map_err(|_| "Der Add-on-Ordner konnte nicht angelegt werden.".to_owned())?;
+        }
     }
-    let temporary = path.with_file_name(format!(
-        ".{}-{}.tmp",
-        path.file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("file"),
-        std::process::id()
-    ));
-    fs::write(&temporary, bytes)
-        .map_err(|_| "Die Add-on-Datei konnte nicht geschrieben werden.".to_owned())?;
-    if let Err(error) = fs::rename(&temporary, path) {
-        let _ = fs::remove_file(&temporary);
-        let _ = error;
-        return Err("Die Add-on-Datei konnte nicht geschrieben werden.".to_owned());
-    }
-    Ok(())
+    crate::notes::atomic_write(path, bytes, 0o600)
+        .map_err(|_| "Die Add-on-Datei konnte nicht geschrieben werden.".to_owned())
 }
 
 fn lock() -> std::sync::MutexGuard<'static, ()> {
