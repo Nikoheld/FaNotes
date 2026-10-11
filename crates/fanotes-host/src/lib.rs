@@ -172,7 +172,9 @@ impl Host {
             "fanotes:read-note-history" => {
                 notes::read_history(self, &arg_string(args, 0)?, &arg_string(args, 1)?)
             }
-            "fanotes:export-note-pdf" => Err("PDF-Export bleibt im Electron-Release.".to_owned()),
+            "fanotes:export-note-pdf" => {
+                Err("Das Fenster ist nicht bereit für den PDF-Export.".to_owned())
+            }
             "fanotes:read-asset-data-url" => self.read_asset_data_url(&arg_string(args, 0)?),
             "fanotes:read-asset-bytes" => self.read_asset_bytes(&arg_string(args, 0)?),
             "fanotes:load-spelling-resources"

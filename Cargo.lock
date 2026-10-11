@@ -1222,10 +1222,13 @@ name = "fanotes-tauri"
 version = "2026.10.2"
 dependencies = [
  "fanotes-host",
+ "gtk",
+ "rfd",
  "serde",
  "serde_json",
  "tauri",
  "tauri-build",
+ "webkit2gtk",
 ]
 
 [[package]]

@@ -1,0 +1,103 @@
+//! Print the visible page to a PDF file through WebKit, matching Electron's
+//! `printToPDF` with background graphics and an A4 page.
+
+use std::path::Path;
+use std::sync::mpsc;
+use std::time::{Duration, Instant};
+
+use gtk::prelude::*;
+use webkit2gtk::{PrintOperationExt, WebViewExt};
+
+pub fn print_html_to_pdf(html: &str, destination: &Path) -> Result<(), String> {
+    gtk::init().map_err(|_| "Das Fenster ist nicht bereit für den PDF-Export.".to_owned())?;
+    let window = gtk::Window::new(gtk::WindowType::Toplevel);
+    let view = webkit2gtk::WebView::new();
+    window.add(&view);
+    window.show_all();
+    let (loaded, loaded_rx) = mpsc::channel();
+    view.connect_load_changed(move |_view, event| {
+        if event == webkit2gtk::LoadEvent::Finished {
+            let _ = loaded.send(());
+        }
+    });
+    view.load_html(html, None);
+    wait_for(&loaded_rx, Duration::from_secs(15))?;
+    print_view(&view, destination)?;
+    window.close();
+    Ok(())
+}
+
+pub fn print_view(view: &webkit2gtk::WebView, destination: &Path) -> Result<(), String> {
+    if let Some(parent) = destination.parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent)
+                .map_err(|_| "Die PDF-Datei konnte nicht geschrieben werden.".to_owned())?;
+        }
+    }
+    let settings = gtk::PrintSettings::new();
+    settings.set("printer", Some("Print to File"));
+    settings.set("output-file-format", Some("pdf"));
+    settings.set("output-uri", Some(&file_uri(destination)));
+    let page = gtk::PageSetup::new();
+    page.set_paper_size(&gtk::PaperSize::new(Some("iso_a4")));
+    let operation = webkit2gtk::PrintOperation::new(view);
+    operation.set_print_settings(&settings);
+    operation.set_page_setup(&page);
+    let (finished, finished_rx) = mpsc::channel();
+    let (failed, failed_rx) = mpsc::channel();
+    operation.connect_finished(move |_| {
+        let _ = finished.send(());
+    });
+    operation.connect_failed(move |_, error| {
+        let _ = failed.send(error.to_string());
+    });
+    operation.print();
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while Instant::now() < deadline {
+        while gtk::events_pending() {
+            gtk::main_iteration();
+        }
+        if failed_rx.try_recv().is_ok() {
+            return Err("PDF-Export fehlgeschlagen.".to_owned());
+        }
+        if finished_rx.try_recv().is_ok() || pdf_ready(destination) {
+            return Ok(());
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    if pdf_ready(destination) {
+        Ok(())
+    } else {
+        Err("PDF-Export fehlgeschlagen.".to_owned())
+    }
+}
+
+fn wait_for(receiver: &mpsc::Receiver<()>, timeout: Duration) -> Result<(), String> {
+    let deadline = Instant::now() + timeout;
+    while Instant::now() < deadline {
+        while gtk::events_pending() {
+            gtk::main_iteration();
+        }
+        if receiver.try_recv().is_ok() {
+            return Ok(());
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    Err("Das Fenster ist nicht bereit für den PDF-Export.".to_owned())
+}
+
+fn pdf_ready(path: &Path) -> bool {
+    std::fs::read(path)
+        .ok()
+        .is_some_and(|bytes| bytes.starts_with(b"%PDF-") && bytes.len() > 8)
+}
+
+fn file_uri(path: &Path) -> String {
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir().unwrap_or_default().join(path)
+    };
+    let text = absolute.to_string_lossy().replace(' ', "%20");
+    format!("file://{text}")
+}

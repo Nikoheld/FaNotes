@@ -5,10 +5,46 @@
 use std::sync::Mutex;
 
 use fanotes_host::{find_channel, Host, CHANNELS};
-use serde_json::Value;
+use serde_json::{json, Value};
 use tauri::{Manager, State};
 
 struct HostState(Mutex<Host>);
+
+mod export;
+
+pub use export::print_html_to_pdf;
+
+#[tauri::command(rename = "fanotes:export-note-pdf")]
+fn export_note_pdf(window: tauri::WebviewWindow, args: Vec<Value>) -> Result<Value, String> {
+    let destination = if let Some(path) = args.first().and_then(Value::as_str) {
+        std::path::PathBuf::from(path)
+    } else {
+        let Some(path) = rfd::FileDialog::new()
+            .set_title("Notiz als PDF speichern")
+            .set_file_name("FaNotes-Notiz.pdf")
+            .add_filter("PDF", &["pdf"])
+            .save_file()
+        else {
+            return Ok(Value::Null);
+        };
+        path
+    };
+    let file_path = destination.display().to_string();
+    let _ = window.eval("document.documentElement.classList.add('is-printing')");
+    let (started, started_rx) = std::sync::mpsc::channel();
+    window
+        .with_webview(move |webview| {
+            let result = export::print_view(&webview.inner(), &destination);
+            let _ = started.send(result);
+        })
+        .map_err(|_| "Das Fenster ist nicht bereit für den PDF-Export.".to_owned())?;
+    let printed = started_rx
+        .recv_timeout(std::time::Duration::from_secs(25))
+        .map_err(|_| "PDF-Export fehlgeschlagen.".to_owned())?;
+    let _ = window.eval("document.documentElement.classList.remove('is-printing')");
+    printed?;
+    Ok(json!({ "filePath": file_path }))
+}
 
 macro_rules! fanotes_commands {
     ($($name:ident => $channel:literal),* $(,)?) => {
@@ -21,7 +57,7 @@ macro_rules! fanotes_commands {
         )*
 
         pub fn register() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync + 'static {
-            tauri::generate_handler![$($name),*]
+            tauri::generate_handler![$($name),*, export_note_pdf]
         }
     };
 }
@@ -71,7 +107,6 @@ fanotes_commands! {
     delete_worksheet => "fanotes:delete-worksheet",
     list_note_history => "fanotes:list-note-history",
     read_note_history => "fanotes:read-note-history",
-    export_note_pdf => "fanotes:export-note-pdf",
     read_asset_data_url => "fanotes:read-asset-data-url",
     read_asset_bytes => "fanotes:read-asset-bytes",
     load_spelling_resources => "fanotes:load-spelling-resources",
