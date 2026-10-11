@@ -154,6 +154,27 @@ fn vault_paths_reject_traversal_and_internal_files() {
 }
 
 #[test]
+fn an_empty_asset_preview_returns_an_empty_payload() {
+    let (dir, mut host) = host();
+    fs::write(dir.0.join("vault").join("leer.pdf"), b"").unwrap();
+    assert_eq!(
+        host.dispatch("fanotes:read-asset-bytes", &[json!("leer.pdf")])
+            .unwrap(),
+        json!("")
+    );
+    assert_eq!(
+        host.dispatch("fanotes:read-asset-data-url", &[json!("leer.pdf")])
+            .unwrap(),
+        json!("data:application/pdf;base64,")
+    );
+    assert_eq!(
+        host.dispatch("fanotes:read-asset-bytes", &[json!("fehlt.pdf")])
+            .unwrap_err(),
+        "Der Eintrag wurde nicht gefunden."
+    );
+}
+
+#[test]
 fn addon_ssrf_blocks_private_and_non_https() {
     assert!(addon_request_allowed("http://example.com").is_err());
     assert!(addon_request_allowed("https://127.0.0.1/hook").is_err());

@@ -325,11 +325,8 @@ impl Host {
 
     fn read_asset(&self, relative: &str, max: u64) -> Result<Vec<u8>, String> {
         let file = vault::resolve_existing_entry(self.require_vault()?, relative)?;
-        let bytes = read_regular_limited(&file, max)?;
-        if bytes.is_empty() {
-            return Err("Die Datei ist leer oder fehlt im Vault.".to_owned());
-        }
-        Ok(bytes)
+        // Desktop preview returns an existing empty file. A missing file fails above.
+        read_regular_limited(&file, max)
     }
 
     fn sync_read(&self, relative: &str) -> Result<Value, String> {
