@@ -1217,7 +1217,7 @@ impl Host {
                 } else {
                     4096
                 };
-                if value.contains('\0') || value.len() > limit {
+                if value.contains('\0') || vault::utf16_len(value) > limit {
                     continue;
                 }
                 if value.is_empty() && !self.secrets_loaded {

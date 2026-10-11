@@ -142,7 +142,7 @@ fn take_plaintext_secrets(settings: &mut Value) -> Map<String, Value> {
         if value.is_empty()
             || value.starts_with(SECRET_PREFIX)
             || value.contains('\0')
-            || value.len() > limit
+            || crate::vault::utf16_len(&value) > limit
         {
             continue;
         }

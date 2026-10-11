@@ -79,6 +79,44 @@ fn invalid_settings_stay_on_the_previous_value() {
 }
 
 #[test]
+fn a_long_umlaut_secret_is_kept() {
+    let (_app, mut host) = host();
+    let secret = "Ä".repeat(2100);
+    assert!(secret.len() > 4096);
+    host.dispatch(
+        "fanotes:save-settings",
+        &[json!({ "openAiApiKey": secret })],
+    )
+    .unwrap();
+    assert_eq!(
+        host.dispatch("fanotes:load-secure-settings", &[])
+            .unwrap()["openAiApiKey"],
+        secret
+    );
+    let homework = "Ä".repeat(200);
+    host.dispatch(
+        "fanotes:save-settings",
+        &[json!({ "homeworkApiSecret": homework })],
+    )
+    .unwrap();
+    assert_eq!(
+        host.dispatch("fanotes:load-secure-settings", &[])
+            .unwrap()["homeworkApiSecret"],
+        homework
+    );
+    host.dispatch(
+        "fanotes:save-settings",
+        &[json!({ "homeworkApiSecret": "Ä".repeat(257) })],
+    )
+    .unwrap();
+    assert_eq!(
+        host.dispatch("fanotes:load-secure-settings", &[])
+            .unwrap()["homeworkApiSecret"],
+        homework
+    );
+}
+
+#[test]
 fn a_german_device_name_keeps_its_umlauts() {
     let (_app, mut host) = host();
     let name = "Ä".repeat(50);
