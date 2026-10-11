@@ -21,6 +21,9 @@ const MAX_SOURCE_BYTES: u64 = 4 * 1024 * 1024 * 1024;
 const MAX_HTML_BYTES: usize = 128 * 1024 * 1024;
 const MAX_IMAGE_BYTES: u64 = 32 * 1024 * 1024;
 const MAX_EMBEDDED_IMAGE_BYTES: u64 = 96 * 1024 * 1024;
+const MAX_ARCHIVE_ENTRIES: usize = 20_000;
+const MAX_EXPANDED_BYTES: u64 = 6 * 1024 * 1024 * 1024;
+const MAX_OUTPUT_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 
 pub fn import_onenote(host: &Host, args: &[Value]) -> Result<Value, String> {
     if let Some(path) = args
@@ -83,7 +86,7 @@ fn import_in_temp(
     create_private_dir(&output_root)
         .map_err(|_| "Der OneNote-Import konnte nicht vorbereitet werden.".to_owned())?;
     let warnings = render_inputs(&inputs, &output_root, one2html)?;
-    let output_files = walk_files(&output_root)?;
+    let output_files = walk_files(&output_root, MAX_OUTPUT_BYTES)?;
     let html_files: Vec<PathBuf> = output_files
         .iter()
         .filter(|path| extension_of(path) == ".html")
@@ -648,7 +651,7 @@ fn prepare_input(input: &Path, temporary: &Path, seven_zip: &Path) -> Result<Vec
         Duration::from_secs(120),
         "Archivextraktion",
     )?;
-    let files = walk_files(&extracted)?;
+    let files = walk_files(&extracted, MAX_EXPANDED_BYTES)?;
     let mut toc: Vec<PathBuf> = files
         .iter()
         .filter(|path| extension_of(path) == ".onetoc2")
@@ -672,6 +675,7 @@ fn prepare_input(input: &Path, temporary: &Path, seven_zip: &Path) -> Result<Vec
 fn validate_listing(stdout: &str) -> Result<(), String> {
     let mut count = 0usize;
     let mut bytes = 0u64;
+    let stdout = stdout.replace("\r\n", "\n");
     for record in stdout.split("\n\n") {
         let mut fields = HashMap::new();
         for line in record.lines() {
@@ -686,12 +690,7 @@ fn validate_listing(stdout: &str) -> Result<(), String> {
             continue;
         }
         let normalized = entry_path.replace('\\', "/");
-        if normalized.starts_with('/')
-            || normalized
-                .split('/')
-                .any(|segment| segment.is_empty() || segment == "..")
-            || (normalized.len() > 2 && normalized.as_bytes()[1] == b':')
-        {
+        if unsafe_archive_path(&normalized) {
             return Err("Das OneNote-Archiv enthält einen unsicheren Pfad.".to_owned());
         }
         if fields.get("Folder").map(String::as_str) != Some("+") {
@@ -734,7 +733,7 @@ fn render_inputs(
             return Ok(Vec::new());
         }
         let notebook = inputs[0].parent().unwrap_or(Path::new("."));
-        let sections: Vec<PathBuf> = walk_files(notebook)?
+        let sections: Vec<PathBuf> = walk_files(notebook, MAX_EXPANDED_BYTES)?
             .into_iter()
             .filter(|path| extension_of(path) == ".one")
             .collect();
@@ -852,7 +851,7 @@ fn preserve_sources(input: &Path, batch: &Path) -> Result<Vec<Value>, String> {
     let mut sources = vec![input.to_path_buf()];
     let source_root = input.parent().unwrap_or(Path::new("."));
     if extension == ".onetoc2" {
-        sources = walk_files(source_root)?
+        sources = walk_files(source_root, MAX_EXPANDED_BYTES)?
             .into_iter()
             .filter(|path| matches!(extension_of(path).as_str(), ".one" | ".onetoc2"))
             .collect();
@@ -1105,18 +1104,43 @@ fn signal_name(signal: i32) -> String {
     .to_owned()
 }
 
-fn walk_files(root: &Path) -> Result<Vec<PathBuf>, String> {
+fn unsafe_archive_path(normalized: &str) -> bool {
+    let bytes = normalized.as_bytes();
+    normalized.starts_with('/')
+        || normalized
+            .split('/')
+            .any(|segment| segment.is_empty() || segment == "..")
+        || (bytes.len() >= 3
+            && bytes[0].is_ascii_alphabetic()
+            && bytes[1] == b':'
+            && bytes[2] == b'/')
+}
+
+fn walk_files(root: &Path, max_bytes: u64) -> Result<Vec<PathBuf>, String> {
+    walk_limited(root, max_bytes, MAX_ARCHIVE_ENTRIES)
+}
+
+fn walk_limited(root: &Path, max_bytes: u64, max_entries: usize) -> Result<Vec<PathBuf>, String> {
     let mut files = Vec::new();
     let mut pending = vec![root.to_path_buf()];
+    let mut total_bytes = 0u64;
     while let Some(directory) = pending.pop() {
-        let entries = fs::read_dir(&directory).map_err(|_| {
+        let mut listed = Vec::new();
+        for entry in fs::read_dir(&directory).map_err(|_| {
             "Der OneNote-Export enthält einen nicht unterstützten Dateityp.".to_owned()
-        })?;
-        for entry in entries {
-            let entry = entry.map_err(|_| {
+        })? {
+            listed.push(entry.map_err(|_| {
                 "Der OneNote-Export enthält einen nicht unterstützten Dateityp.".to_owned()
-            })?;
+            })?);
+        }
+        if files.len() + listed.len() > max_entries {
+            return Err("Der OneNote-Export enthält zu viele Dateien.".to_owned());
+        }
+        for entry in listed {
             let target = entry.path();
+            if !image_stays_inside(root, &target) {
+                return Err("Ein OneNote-Pfad verlässt das Importverzeichnis.".to_owned());
+            }
             let meta = fs::symlink_metadata(&target).map_err(|_| {
                 "Der OneNote-Export enthält einen nicht unterstützten Dateityp.".to_owned()
             })?;
@@ -1129,6 +1153,10 @@ fn walk_files(root: &Path) -> Result<Vec<PathBuf>, String> {
             if meta.is_dir() {
                 pending.push(target);
             } else if meta.is_file() {
+                total_bytes = total_bytes.saturating_add(meta.len());
+                if total_bytes > max_bytes {
+                    return Err("Der entpackte OneNote-Export ist zu groß.".to_owned());
+                }
                 files.push(target);
             } else {
                 return Err(
@@ -1460,7 +1488,7 @@ fn civil_date(mut days: u64) -> (i32, u32, u32) {
 mod tests {
     use super::{
         extract_search_text, inline_images, page_dimensions, page_parents, safe_segment,
-        tool_failure_message,
+        tool_failure_message, validate_listing, walk_limited,
     };
 
     #[test]
@@ -1596,5 +1624,40 @@ mod tests {
         let message = tool_failure_message("Werkzeug", &long, "", Some(1), None);
         assert!(message.ends_with(&"ä".repeat(1800)));
         assert_eq!(message.matches('ä').count(), 1800);
+    }
+
+    #[test]
+    fn an_onenote_export_stops_at_the_desktop_limits() {
+        assert!(
+            validate_listing("Path = a.txt\r\nSize = 1\r\n\r\nPath = b.txt\r\nSize = 2\r\n")
+                .is_ok()
+        );
+        assert!(validate_listing("Path = C:/secret.txt\nSize = 1\n").is_err());
+        assert!(validate_listing("Path = note.one\nSize = 1\n").is_ok());
+
+        let root = std::env::temp_dir().join(format!(
+            "fanotes-onenote-walk-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("a.bin"), vec![1u8; 10]).unwrap();
+        std::fs::write(root.join("b.bin"), vec![2u8; 10]).unwrap();
+        let too_big = walk_limited(&root, 15, 20).unwrap_err();
+        assert!(too_big.contains("zu groß"));
+        std::fs::write(root.join("c.bin"), vec![3u8; 1]).unwrap();
+        let too_many = walk_limited(&root, 1_000, 2).unwrap_err();
+        assert!(too_many.contains("zu viele Dateien"));
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(root.join("a.bin"), root.join("link.bin")).unwrap();
+            let linked = walk_limited(&root, 1_000, 20).unwrap_err();
+            assert!(linked.contains("Symbolische"));
+        }
+        let _ = std::fs::remove_dir_all(&root);
     }
 }
