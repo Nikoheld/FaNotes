@@ -44,14 +44,14 @@ const NET_RESPONSE_HEADERS: &[&str] = &[
 
 pub fn list(host: &Host) -> Result<Value, String> {
     let _guard = lock();
-    Ok(Value::Array(read_records(&store_root(host))?))
+    Ok(Value::Array(read_records(&store_root(host)?)?))
 }
 
 pub fn save(host: &Host, record: &Value) -> Result<Value, String> {
     let _guard = lock();
     let stored = bounded_record(record)?;
     let id = safe_id(stored.get("id").and_then(Value::as_str).unwrap_or(""))?;
-    let root = store_root(host);
+    let root = store_root(host)?;
     let mut records = read_records(&root)?;
     records.retain(|item| item.get("id").and_then(Value::as_str) != Some(id.as_str()));
     records.push(stored);
@@ -62,7 +62,7 @@ pub fn save(host: &Host, record: &Value) -> Result<Value, String> {
 pub fn remove(host: &Host, id: &str) -> Result<Value, String> {
     let _guard = lock();
     let id = safe_id(id)?;
-    let root = store_root(host);
+    let root = store_root(host)?;
     let mut records = read_records(&root)?;
     records.retain(|item| item.get("id").and_then(Value::as_str) != Some(id.as_str()));
     write_records(&root, &records)?;
@@ -116,9 +116,14 @@ pub fn write_files(host: &Host, id: &str, files: &Value) -> Result<Value, String
 
 pub fn read_data(host: &Host, id: &str) -> Result<Value, String> {
     let _guard = lock();
-    let path = store_root(host).join(format!("{}.data.json", safe_id(id)?));
-    match fs::read_to_string(path) {
-        Ok(text) => Ok(Value::String(text)),
+    let path = store_root(host)?.join(format!("{}.data.json", safe_id(id)?));
+    match fs::symlink_metadata(&path) {
+        Ok(meta) if meta.file_type().is_symlink() || !meta.is_file() => {
+            Err("Die Add-on-Daten sind unsicher.".to_owned())
+        }
+        Ok(_) => fs::read_to_string(path)
+            .map(Value::String)
+            .map_err(|_| "Die Add-on-Daten konnten nicht gelesen werden.".to_owned()),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Value::Null),
         Err(_) => Err("Die Add-on-Daten konnten nicht gelesen werden.".to_owned()),
     }
@@ -132,13 +137,14 @@ pub fn write_data(host: &Host, id: &str, value: &Value) -> Result<Value, String>
     if text.len() > MAX_DATA_BYTES {
         return Err("Der Add-on-Speicher ist auf 1 MB begrenzt.".to_owned());
     }
-    let root = store_root(host);
-    fs::create_dir_all(&root)
-        .map_err(|_| "Der Add-on-Ordner konnte nicht angelegt werden.".to_owned())?;
-    atomic_write(
-        &root.join(format!("{}.data.json", safe_id(id)?)),
-        text.as_bytes(),
-    )?;
+    let root = store_root(host)?;
+    let path = root.join(format!("{}.data.json", safe_id(id)?));
+    if fs::symlink_metadata(&path)
+        .is_ok_and(|meta| meta.file_type().is_symlink() || !meta.is_file())
+    {
+        return Err("Die Add-on-Daten sind unsicher.".to_owned());
+    }
+    atomic_write(&path, text.as_bytes())?;
     Ok(Value::Null)
 }
 
@@ -528,15 +534,37 @@ fn addon_file(host: &Host, id: &str, name: &str) -> Result<PathBuf, String> {
 
 fn addon_dir(host: &Host, id: &str) -> Result<PathBuf, String> {
     let id = safe_id(id)?;
-    let dir = store_root(host).join(id);
+    let dir = store_root(host)?.join(id);
     if fs::symlink_metadata(&dir).is_ok_and(|meta| meta.file_type().is_symlink()) {
         return Err("Der Add-on-Ordner ist unsicher.".to_owned());
     }
     Ok(dir)
 }
 
-fn store_root(host: &Host) -> PathBuf {
-    host.app_data.join("addons")
+fn store_root(host: &Host) -> Result<PathBuf, String> {
+    let root = host.app_data.join("addons");
+    match fs::symlink_metadata(&root) {
+        Ok(meta) if meta.file_type().is_symlink() || !meta.is_dir() => {
+            Err("Der Add-on-Ordner ist unsicher.".to_owned())
+        }
+        Ok(_) => Ok(root),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            fs::create_dir(&root)
+                .map_err(|_| "Der Add-on-Ordner konnte nicht angelegt werden.".to_owned())?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let _ = fs::set_permissions(&root, fs::Permissions::from_mode(0o700));
+            }
+            let meta = fs::symlink_metadata(&root)
+                .map_err(|_| "Der Add-on-Ordner konnte nicht angelegt werden.".to_owned())?;
+            if meta.file_type().is_symlink() || !meta.is_dir() {
+                return Err("Der Add-on-Ordner ist unsicher.".to_owned());
+            }
+            Ok(root)
+        }
+        Err(_) => Err("Der Add-on-Ordner konnte nicht angelegt werden.".to_owned()),
+    }
 }
 
 fn safe_id(id: &str) -> Result<String, String> {
