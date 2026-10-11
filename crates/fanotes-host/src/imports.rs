@@ -58,7 +58,7 @@ pub fn import_subject_book(host: &Host, args: &[Value]) -> Result<Value, String>
         return Err("Wähle zuerst ein Fach für das Buch.".to_owned());
     }
     if let Some(payload) = args.get(1).filter(|value| value.is_object()) {
-        return import_pdf_payload(host, subject, payload);
+        return import_pdf_file(host, subject, payload, PdfKind::Book);
     }
     let Some(path) = pick_file(host, "PDF-Buch zum Fach hinzufügen", &["pdf"])? else {
         return Ok(Value::Null);
@@ -68,10 +68,54 @@ pub fn import_subject_book(host: &Host, args: &[Value]) -> Result<Value, String>
         .and_then(|name| name.to_str())
         .unwrap_or("Buch.pdf");
     let bytes = fs::read(&path).map_err(|_| "Die ausgewählte PDF-Datei ist leer.".to_owned())?;
-    import_pdf_payload(host, subject, &json!({ "name": name, "bytes": bytes }))
+    import_pdf_file(
+        host,
+        subject,
+        &json!({ "name": name, "bytes": bytes }),
+        PdfKind::Book,
+    )
 }
 
 fn import_pdf_payload(host: &Host, parent: &str, payload: &Value) -> Result<Value, String> {
+    import_pdf_file(host, parent, payload, PdfKind::Note)
+}
+
+enum PdfKind {
+    Note,
+    Book,
+}
+
+impl PdfKind {
+    fn fallback(&self, english: bool) -> &'static str {
+        match (self, english) {
+            (PdfKind::Note, false) => "PDF-Notiz",
+            (PdfKind::Note, true) => "PDF note",
+            (PdfKind::Book, false) => "Buch",
+            (PdfKind::Book, true) => "Book",
+        }
+    }
+
+    fn not_pdf(&self) -> &'static str {
+        match self {
+            PdfKind::Note => "Es können nur PDF-Dateien als PDF-Notiz importiert werden.",
+            PdfKind::Book => "Es können nur PDF-Dateien als Buch hinzugefügt werden.",
+        }
+    }
+
+    fn no_unique_name(&self) -> &'static str {
+        match self {
+            PdfKind::Note => "Es konnte kein eindeutiger PDF-Name erzeugt werden.",
+            PdfKind::Book => "Es konnte kein eindeutiger Buchname erzeugt werden.",
+        }
+    }
+}
+
+fn import_pdf_file(
+    host: &Host,
+    parent: &str,
+    payload: &Value,
+    kind: PdfKind,
+) -> Result<Value, String> {
     let root = vault_root(host)?.to_path_buf();
     let parent_relative = if parent.trim().is_empty() {
         String::new()
@@ -89,12 +133,14 @@ fn import_pdf_payload(host: &Host, parent: &str, payload: &Value) -> Result<Valu
         }
         path
     };
+    let fallback = kind.fallback(host.ui_language() == "en");
     let name = payload
         .get("name")
         .and_then(Value::as_str)
-        .unwrap_or("PDF-Notiz.pdf");
+        .filter(|name| !name.is_empty())
+        .unwrap_or(fallback);
     if !name.to_ascii_lowercase().ends_with(".pdf") && payload.get("name").is_some() {
-        return Err("Es können nur PDF-Dateien als PDF-Notiz importiert werden.".to_owned());
+        return Err(kind.not_pdf().to_owned());
     }
     let bytes = decode_payload_bytes(payload, 96 * 1024 * 1024)?;
     if bytes.is_empty() {
@@ -106,11 +152,11 @@ fn import_pdf_payload(host: &Host, parent: &str, payload: &Value) -> Result<Valu
                 .to_owned(),
         );
     }
-    let stem = safe_stem(file_stem(name), "PDF-Notiz")?;
+    let stem = safe_stem(file_stem(name), fallback)?;
     let desired = format!("{stem}.pdf");
-    let candidate = unique_pdf_name(&parent_path, &desired)?;
+    let candidate = unique_pdf_name(&parent_path, &desired, kind.no_unique_name())?;
     let absolute = parent_path.join(&candidate);
-    write_new(&absolute, &bytes)?;
+    write_new(&absolute, &bytes, kind.no_unique_name())?;
     let relative = if parent_relative.is_empty() {
         candidate.clone()
     } else {
@@ -144,7 +190,7 @@ fn import_pdf_payload(host: &Host, parent: &str, payload: &Value) -> Result<Valu
     }))
 }
 
-fn unique_pdf_name(directory: &Path, desired: &str) -> Result<String, String> {
+fn unique_pdf_name(directory: &Path, desired: &str, exhausted: &str) -> Result<String, String> {
     let mut occupied = std::collections::HashSet::new();
     if let Ok(entries) = fs::read_dir(directory) {
         for entry in entries.flatten() {
@@ -177,15 +223,13 @@ fn unique_pdf_name(directory: &Path, desired: &str) -> Result<String, String> {
         }
         return Ok(candidate);
     }
-    Err("Es konnte kein eindeutiger PDF-Name erzeugt werden.".to_owned())
+    Err(exhausted.to_owned())
 }
 
-fn write_new(path: &Path, bytes: &[u8]) -> Result<(), String> {
+fn write_new(path: &Path, bytes: &[u8], exhausted: &str) -> Result<(), String> {
     match crate::notes::publish_new_file(path, bytes, 0o600) {
         Ok(()) => Ok(()),
-        Err(crate::notes::NewFileError::Exists) => {
-            Err("Es konnte kein eindeutiger PDF-Name erzeugt werden.".to_owned())
-        }
+        Err(crate::notes::NewFileError::Exists) => Err(exhausted.to_owned()),
         Err(crate::notes::NewFileError::Io) => {
             Err("Die PDF-Datei konnte nicht gespeichert werden.".to_owned())
         }

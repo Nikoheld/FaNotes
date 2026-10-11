@@ -127,3 +127,25 @@ fn a_symlinked_folder_cannot_rename_move_or_receive_a_note() {
     assert!(!outside.join("Neu.md").exists());
     let _ = fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn a_blank_rename_keeps_a_valid_name_and_rejects_a_device_name() {
+    let (vault, mut host) = host();
+    fs::write(vault.join("Mathe/Seite.md"), "Hallo\n").unwrap();
+    let kept = host
+        .dispatch(
+            "fanotes:rename-entry",
+            &[json!("Mathe/Seite.md"), json!("  ")],
+        )
+        .unwrap();
+    assert_eq!(kept, "Mathe/Seite.md");
+    assert_eq!(fs::read(vault.join("Mathe/Seite.md")).unwrap(), b"Hallo\n");
+
+    fs::write(vault.join("Mathe/CON.md"), "x\n").unwrap();
+    assert_eq!(
+        host.dispatch("fanotes:rename-entry", &[json!("Mathe/CON.md"), json!("")])
+            .unwrap_err(),
+        "Dieser Name ist nicht erlaubt."
+    );
+    assert!(vault.join("Mathe/CON.md").is_file());
+}
