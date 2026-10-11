@@ -1988,15 +1988,8 @@ fn available_entry_name(parent: &Path, desired: &str, note: bool) -> Result<Stri
         if occupied.contains(&vault::entry_name_key(&candidate)) {
             continue;
         }
-        if note {
-            let lower = candidate.to_lowercase();
-            if lower.ends_with(".md") || lower.ends_with(".markdown") || lower.ends_with(".pdf") {
-                let famd = format!("{}.famd", fanotes_famd::note_stem(&candidate));
-                if occupied.contains(&vault::entry_name_key(&famd)) {
-                    continue;
-                }
-            }
-        }
+        // A free filename is enough. Creating the note rewrites the `.famd`
+        // companion and keeps its handwriting.
         return Ok(candidate);
     }
     Err(if note {

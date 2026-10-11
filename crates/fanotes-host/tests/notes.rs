@@ -266,6 +266,52 @@ fn renaming_and_deleting_a_note_moves_its_companion() {
 }
 
 #[test]
+fn a_new_note_adopts_an_existing_handwriting_companion() {
+    let (mut host, vault) = host();
+    let mut payload = fanotes_famd::empty_famd_payload("2026-10-11T00:00:00.000Z");
+    payload.ink = Some(json!({
+        "schemaVersion": 1,
+        "title": "Seite",
+        "strokes": [],
+        "searchTranscript": "Handschrift"
+    }));
+    std::fs::write(
+        vault.join("Mathe/Seite.famd"),
+        fanotes_famd::serialize_famd("Alte Handschrift", &payload),
+    )
+    .unwrap();
+
+    let created = host
+        .dispatch("fanotes:create-note", &[json!("Mathe"), json!("Seite")])
+        .unwrap();
+    assert_eq!(created["relativePath"], "Mathe/Seite.md");
+    assert_eq!(
+        std::fs::read_to_string(vault.join("Mathe/Seite.md")).unwrap(),
+        "# Seite\n\n"
+    );
+    let famd = std::fs::read_to_string(vault.join("Mathe/Seite.famd")).unwrap();
+    let parsed = parse_famd(&famd);
+    assert!(parsed.markdown.contains("# Seite"));
+    assert!(!parsed.markdown.contains("Alte Handschrift"));
+    assert_eq!(
+        parsed.payload.unwrap().ink.unwrap()["searchTranscript"],
+        "Handschrift"
+    );
+    let names: Vec<_> = host.dispatch("fanotes:get-tree", &[]).unwrap()[0]["children"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|entry| entry["name"].as_str().unwrap().to_owned())
+        .collect();
+    assert_eq!(names, vec!["Seite.md"]);
+
+    let second = host
+        .dispatch("fanotes:create-note", &[json!("Mathe"), json!("Seite")])
+        .unwrap();
+    assert_eq!(second["relativePath"], "Mathe/Seite 2.md");
+}
+
+#[test]
 fn a_second_note_is_numbered_and_reads_without_the_sidecar() {
     let (mut host, vault) = host();
     let first = host
