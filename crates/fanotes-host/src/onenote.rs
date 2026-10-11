@@ -2,8 +2,8 @@
 //! Electron ships. Pages become Markdown notes plus sanitized HTML worksheets.
 
 use std::collections::HashMap;
-use std::fs::{self, File, OpenOptions};
-use std::io::{Read, Write};
+use std::fs::{self, File};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::thread;
@@ -100,7 +100,9 @@ fn import_in_temp(
     if pages.is_empty() {
         return Err("Im OneNote-Export wurden keine lesbaren Seiten gefunden. Verwende einen aktuellen OneDrive-Export oder eine moderne .one-Datei.".to_owned());
     }
-    pages.sort_by(|left, right| left.to_string_lossy().cmp(&right.to_string_lossy()));
+    pages.sort_by(|left, right| {
+        crate::compare_names(&left.to_string_lossy(), &right.to_string_lossy())
+    });
 
     let source_digest = sha256_file(input)?;
     let source_base = input
@@ -147,10 +149,9 @@ fn import_in_temp(
                         .collect()
                 })
                 .unwrap_or_default();
-            if hierarchy
-                .first()
-                .is_some_and(|segment| segment.eq_ignore_ascii_case(&notebook_name))
-            {
+            if hierarchy.first().is_some_and(|segment| {
+                crate::compare_names(segment, &notebook_name) == std::cmp::Ordering::Equal
+            }) {
                 hierarchy.remove(0);
             }
             let mut directory = note_root.clone();
@@ -166,7 +167,7 @@ fn import_in_temp(
             let worksheets = vault.join(".fanotes").join("worksheets");
             let html_path = worksheets.join(format!("{id}.html"));
             let json_path = worksheets.join(format!("{id}.json"));
-            fs::write(&html_path, &page.html)
+            crate::notes::atomic_write(&html_path, page.html.as_bytes(), 0o600)
                 .map_err(|_| "Eine OneNote-Seite konnte nicht gespeichert werden.".to_owned())?;
             created.push(html_path);
             let worksheet = json!({
@@ -183,14 +184,12 @@ fn import_in_temp(
                 "pageHeight": page.height,
                 "textBoxes": [],
             });
-            fs::write(
-                &json_path,
-                format!(
-                    "{}\n",
-                    serde_json::to_string_pretty(&worksheet).unwrap_or_default()
-                ),
-            )
-            .map_err(|_| "Eine OneNote-Seite konnte nicht gespeichert werden.".to_owned())?;
+            let worksheet_json = format!(
+                "{}\n",
+                serde_json::to_string_pretty(&worksheet).unwrap_or_default()
+            );
+            crate::notes::atomic_write(&json_path, worksheet_json.as_bytes(), 0o600)
+                .map_err(|_| "Eine OneNote-Seite konnte nicht gespeichert werden.".to_owned())?;
             created.push(json_path);
             let searchable = if page.transcript.is_empty() {
                 String::new()
@@ -225,12 +224,14 @@ fn import_in_temp(
             "originalSources": originals,
             "safety": "Attachments are stored byte-identically with an inert .fanotes-attachment suffix and are never executed.",
         });
-        fs::write(
-            batch.join("manifest.json"),
-            format!(
-                "{}\n",
-                serde_json::to_string_pretty(&manifest).unwrap_or_default()
-            ),
+        let manifest_json = format!(
+            "{}\n",
+            serde_json::to_string_pretty(&manifest).unwrap_or_default()
+        );
+        crate::notes::atomic_write(
+            &batch.join("manifest.json"),
+            manifest_json.as_bytes(),
+            0o600,
         )
         .map_err(|_| "Der OneNote-Import konnte nicht gespeichert werden.".to_owned())?;
         let mut all_warnings = warnings;
@@ -1029,18 +1030,12 @@ fn write_unique_markdown(directory: &Path, title: &str, markdown: &str) -> Resul
             format!("{stem} {}.md", index + 1)
         };
         let target = directory.join(name);
-        match OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&target)
-        {
-            Ok(mut file) => {
-                file.write_all(markdown.as_bytes())
-                    .map_err(|_| "Die OneNote-Seite konnte nicht geschrieben werden.".to_owned())?;
-                return Ok(target);
+        match crate::notes::publish_new_file(&target, markdown.as_bytes(), 0o600) {
+            Ok(()) => return Ok(target),
+            Err(crate::notes::NewFileError::Exists) => continue,
+            Err(crate::notes::NewFileError::Io) => {
+                return Err("Die OneNote-Seite konnte nicht geschrieben werden.".to_owned());
             }
-            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
-            Err(_) => return Err("Die OneNote-Seite konnte nicht geschrieben werden.".to_owned()),
         }
     }
     Err("Für die OneNote-Seite konnte kein freier Dateiname erzeugt werden.".to_owned())
@@ -1069,6 +1064,8 @@ fn common_ancestor(paths: &[PathBuf]) -> &Path {
 }
 
 fn safe_segment(value: &str, fallback: &str) -> String {
+    use unicode_normalization::UnicodeNormalization;
+    let value: String = value.nfc().collect();
     let cleaned: String = value
         .chars()
         .map(|character| {
