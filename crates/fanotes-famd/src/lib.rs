@@ -352,7 +352,7 @@ fn sanitize_note_link(value: &Value) -> Option<NoteLink> {
     let label = object
         .get("label")
         .and_then(Value::as_str)
-        .map(|label| collapse_ws(label).chars().take(80).collect::<String>())
+        .map(|label| truncate_js(&collapse_ws(label), 80))
         .filter(|label| !label.is_empty())
         .unwrap_or_else(|| link_stem(&target_path));
     let id = object
@@ -424,13 +424,10 @@ fn sanitize_note_backup(value: &Value) -> Option<NoteBackup> {
         .and_then(Value::as_str)
         .and_then(canonical_iso)
         .unwrap_or_else(now_iso);
-    let content = object
-        .get("content")
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .chars()
-        .take(2 * 1024 * 1024)
-        .collect();
+    let content = truncate_js(
+        object.get("content").and_then(Value::as_str).unwrap_or(""),
+        2 * 1024 * 1024,
+    );
     let id = object
         .get("id")
         .and_then(Value::as_str)
@@ -660,6 +657,20 @@ fn js_len(value: &str) -> usize {
         .chars()
         .map(|ch| if (ch as u32) > 0xFFFF { 2 } else { 1 })
         .sum()
+}
+
+fn truncate_js(value: &str, max_units: usize) -> String {
+    let mut taken = 0;
+    let mut end = 0;
+    for (index, character) in value.char_indices() {
+        let units = character.len_utf16();
+        if taken + units > max_units {
+            break;
+        }
+        taken += units;
+        end = index + character.len_utf8();
+    }
+    value[..end].to_owned()
 }
 
 fn json_number(value: f64) -> Value {
