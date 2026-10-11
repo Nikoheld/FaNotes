@@ -98,6 +98,7 @@ const CHANNELS = Object.freeze({
   requestClose: 'fanotes:request-close',
   sheetZoom: 'fanotes:sheet-zoom',
   captureWindow: 'fanotes:capture-window',
+  renderPdfPage: 'fanotes:render-pdf-page',
 })
 
 const invoke = (channel, ...args) => ipcRenderer.invoke(channel, ...args)
@@ -200,6 +201,7 @@ const api = Object.freeze({
     return () => ipcRenderer.removeListener(CHANNELS.sheetZoom, listener)
   },
   captureWindow: () => invoke(CHANNELS.captureWindow),
+  renderPdfPage: (request) => invoke(CHANNELS.renderPdfPage, request),
   addons: {
     fetchText: (url) => invoke(CHANNELS.addonsFetch, url),
     list: () => invoke(CHANNELS.addonsList),

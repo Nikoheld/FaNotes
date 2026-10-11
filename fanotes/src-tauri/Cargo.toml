@@ -1,0 +1,20 @@
+[package]
+name = "fanotes-tauri"
+version = "2026.10.2"
+description = "Tauri 2 shell for the unchanged FaNotes React bundle"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+fanotes-host = { path = "../../crates/fanotes-host" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tauri = { version = "2", features = [] }
+
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]

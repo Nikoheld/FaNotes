@@ -104,8 +104,8 @@ assert.ok(packageConfig.build.files.includes('!dist/ocr/fanotes-trocr-web/**/*')
 assert.ok(packageConfig.build.files.includes('!dist/ocr/pylaia-iam-q8.onnx'))
 assert.equal(packageConfig.build.win.extraResources.length, 3)
 const windowsNativeMathResource = packageConfig.build.win.extraResources.find((entry) => entry.to === 'native-math')
-const windowsNativeOcrResource = packageConfig.build.win.extraResources.find((entry) => entry.from === 'node_modules/onnxruntime-node')
-const windowsNativeCommonResource = packageConfig.build.win.extraResources.find((entry) => entry.to === 'native-ocr/node_modules/onnxruntime-common')
+const windowsNativeOcrResource = packageConfig.build.win.extraResources.find((entry) => entry.from === 'native-ocr/win32-x64')
+const windowsNativeRuntimeResource = packageConfig.build.win.extraResources.find((entry) => entry.from === 'node_modules/onnxruntime-node/bin/napi-v3/win32/x64')
 assert.ok(windowsNativeMathResource)
 assert.equal(windowsNativeMathResource.from, 'native-math/win32-x64')
 assert.deepEqual(windowsNativeMathResource.filter, [
@@ -114,14 +114,22 @@ assert.deepEqual(windowsNativeMathResource.filter, [
   'runtime-manifest.json',
 ])
 assert.ok(windowsNativeOcrResource)
-assert.ok(windowsNativeCommonResource)
-assert.equal(windowsNativeOcrResource.from, 'node_modules/onnxruntime-node')
-assert.equal(windowsNativeOcrResource.to, 'native-ocr/node_modules/onnxruntime-node')
-assert.ok(windowsNativeOcrResource.filter.includes('bin/napi-v3/win32/x64/onnxruntime_binding.node'))
-assert.ok(windowsNativeOcrResource.filter.includes('bin/napi-v3/win32/x64/onnxruntime.dll'))
-assert.ok(!windowsNativeOcrResource.filter.some((entry) => /cuda|directml|tensorrt|linux/iu.test(entry)))
-assert.equal(windowsNativeCommonResource.from, 'node_modules/onnxruntime-node/node_modules/onnxruntime-common')
-assert.ok(windowsNativeCommonResource.filter.includes('dist/cjs/**/*'))
+assert.ok(windowsNativeRuntimeResource)
+assert.equal(windowsNativeOcrResource.to, 'native-ocr')
+assert.deepEqual(windowsNativeOcrResource.filter, ['fanotes-ocr.exe', 'runtime-manifest.json'])
+assert.equal(windowsNativeRuntimeResource.to, 'native-ocr')
+assert.deepEqual(windowsNativeRuntimeResource.filter, ['onnxruntime.dll'])
+assert.ok(![...windowsNativeOcrResource.filter, ...windowsNativeRuntimeResource.filter].some((entry) => /cuda|directml|tensorrt|linux|\.node$/iu.test(entry)))
+const windowsOcrManifest = JSON.parse(read('native-ocr/win32-x64/runtime-manifest.json'))
+const windowsOcrExecutable = fs.readFileSync(path.join(root, 'native-ocr', 'win32-x64', 'fanotes-ocr.exe'))
+assert.equal(windowsOcrManifest.rustTarget, 'x86_64-pc-windows-gnu')
+assert.equal(windowsOcrExecutable.subarray(0, 2).toString('latin1'), 'MZ')
+assert.equal(windowsOcrExecutable.length, windowsOcrManifest.executable.size)
+assert.equal(crypto.createHash('sha256').update(windowsOcrExecutable).digest('hex'), windowsOcrManifest.executable.sha256)
+assert.equal(
+  crypto.createHash('sha256').update(fs.readFileSync(path.join(root, windowsOcrManifest.onnxruntime.from))).digest('hex'),
+  windowsOcrManifest.onnxruntime.sha256,
+)
 assert.equal(
   crypto.createHash('sha256').update(fs.readFileSync(path.join(root, 'resources', 'onenote', 'windows', 'one2html.exe'))).digest('hex'),
   'cfcba9231edf433e3f84b92a7ce119ec4af3df870301691bbefea83618f295af',
@@ -146,7 +154,8 @@ assert.match(settingsSource, /desktopOcrModel/u)
 assert.match(settingsSource, /memoryBudgetMb/u)
 assert.match(mainSource, /materializeOneNoteTools/u)
 assert.match(mainSource, /recognizeNativeOcrLine/u)
-assert.match(mainSource, /native-ocr-worker\.cjs/u)
+assert.match(mainSource, /require\('\.\/native-ocr\.cjs'\)/u)
+assert.match(read('electron/native-ocr.cjs'), /platform === 'win32' \? 'fanotes-ocr\.exe'/u)
 assert.match(read('electron/preload.cjs'), /recognizeNativeHandwritingLine/u)
 
 console.log('Windows-Prüfung erfolgreich: differenzielles app.asar-Update, schlanke native ONNX-CPU-Laufzeit, OneNote-Werkzeuge, PowerShell-Rollback, NSIS-Fallback, signierte Plattformbindung und Website-Integration geprüft.')

@@ -13,7 +13,8 @@ import { ENGLISH_CANONICAL_PROPER_NAMES } from '../../../src/data/englishProperN
 import type { Stroke } from '../../../src/types'
 import { normalizeGermanSharpS } from '../../../src/lib/orthography'
 import type { HandwritingRecognitionResources } from '../types'
-import { loadSpellingWordContext } from './spelling'
+import { loadRecognitionCandidates, loadSpellingWordContext } from './spelling'
+import { decodeRecogCtc, installRecogLexicon, renderRecogLineTensor } from './recogCore'
 import {
   recognizeTrocrLine,
   recognizeTrocrLineCandidates,
@@ -44,7 +45,6 @@ const MAX_LINES = 32
 const MAX_PHYSICAL_WORDS = 24
 const MIN_LINE_PIXELS = 6
 const PUNCTUATION = new Set(Array.from(`!"#$%&'()*+,-./:;<=>?@[\\]^_\`{|}~`))
-const GERMAN_LETTERS = new Set(Array.from('ÄÖÜäöü'))
 const LANGUAGE_WORDS = { de: GERMAN_COMMON_WORDS, en: ENGLISH_COMMON_WORDS }
 const LANGUAGE_BIGRAMS = { de: GERMAN_COMMON_BIGRAMS, en: ENGLISH_COMMON_BIGRAMS }
 const LANGUAGE_TRIGRAMS = { de: GERMAN_COMMON_TRIGRAMS, en: ENGLISH_COMMON_TRIGRAMS }
@@ -754,316 +754,6 @@ export const renderNeuralTextLineImage = (
   return line ? renderLineImage(line, sourceWidth, sourceHeight, options) : null
 }
 
-const lineTensorInput = (image: RenderedLineImage) => {
-  const plane = image.width * image.height
-  const input = new Float32Array(plane)
-  for (let index = 0; index < plane; index += 1) {
-    // PyLaia was trained on grayscale IAM lines with a black background and
-    // bright ink. The canvas uses the opposite convention, so invert it while
-    // converting to the model's 0…1 input range.
-    input[index] = 1 - image.pixels[index * 4] / 255
-  }
-  return input
-}
-
-const allowedCharacterIndexes = (characters: string[], language: RecognitionLanguage) => characters.flatMap((character, index) => {
-  const allowed = /^[A-Za-z0-9]$/u.test(character)
-    || PUNCTUATION.has(character)
-    || character === ' '
-    || (language === 'de' && GERMAN_LETTERS.has(character))
-  return allowed ? [index + 1] : []
-})
-
-const logAdd = (values: number[]) => {
-  const maximum = Math.max(...values)
-  if (!Number.isFinite(maximum)) return Number.NEGATIVE_INFINITY
-  return maximum + Math.log(values.reduce((sum, value) => sum + Math.exp(value - maximum), 0))
-}
-
-const ctcWordScore = (
-  probabilities: Float32Array,
-  classes: number,
-  start: number,
-  end: number,
-  indexes: number[],
-) => {
-  const steps = end - start
-  if (!indexes.length || steps < indexes.length) return Number.NEGATIVE_INFINITY
-  const states = indexes.length * 2 + 1
-  const labels = Array.from({ length: states }, (_, index) => index % 2 ? indexes[(index - 1) / 2] : 0)
-  let previous = new Float64Array(states).fill(Number.NEGATIVE_INFINITY)
-  const firstOffset = start * classes
-  previous[0] = Math.log(Math.max(1e-12, probabilities[firstOffset]))
-  previous[1] = Math.log(Math.max(1e-12, probabilities[firstOffset + labels[1]]))
-  for (let step = start + 1; step < end; step += 1) {
-    const current = new Float64Array(states).fill(Number.NEGATIVE_INFINITY)
-    const offset = step * classes
-    for (let state = 0; state < states; state += 1) {
-      const transitions = [previous[state]]
-      if (state > 0) transitions.push(previous[state - 1])
-      if (state > 1 && labels[state] !== 0 && labels[state] !== labels[state - 2]) transitions.push(previous[state - 2])
-      current[state] = logAdd(transitions) + Math.log(Math.max(1e-12, probabilities[offset + labels[state]]))
-    }
-    previous = current
-  }
-  return logAdd([previous[states - 1], previous[states - 2]])
-}
-
-type CtcWordSpan = { source: string; start: number; end: number }
-
-const ctcWordSpans = (path: number[], characters: string[]) => {
-  const spans: CtcWordSpan[] = []
-  let source = ''
-  let start = 0
-  let previous = -1
-  const flush = (end: number) => {
-    if (source) spans.push({ source, start, end })
-    source = ''
-  }
-  path.forEach((index, step) => {
-    if (!index || index === previous) {
-      previous = index
-      return
-    }
-    const character = characters[index - 1]
-    if (/^\p{L}$/u.test(character)) {
-      if (!source) start = Math.max(0, start)
-      source += character
-    } else {
-      flush(step)
-      start = step + 1
-    }
-    previous = index
-  })
-  flush(path.length)
-  return spans
-}
-
-const applyCtcWordContext = (
-  text: string,
-  probabilities: Float32Array,
-  classes: number,
-  path: number[],
-  characters: string[],
-  language: RecognitionLanguage,
-) => {
-  const locale = language === 'de' ? 'de' : 'en'
-  const lexicon = LANGUAGE_WORDS[language]
-  const characterIndexes = new Map(characters.map((character, index) => [character, index + 1]))
-  const spans = ctcWordSpans(path, characters)
-  let spanIndex = 0
-  const pattern = language === 'de' ? /[A-Za-zÄÖÜäöü]{2,}/gu : /[A-Za-z]{2,}/gu
-  return text.replace(pattern, (source) => {
-    const span = spans[spanIndex]
-    spanIndex += 1
-    if (!span || span.source.toLocaleLowerCase(locale) !== source.toLocaleLowerCase(locale)) return source
-    const lower = source.toLocaleLowerCase(locale)
-    if (lexicon.has(lower) || lower.length < 3) return source
-    const maximumDistance = lower.length >= 4 ? 2 : 1
-    const sourceIndexes = [...lower].map((character) => characterIndexes.get(character) ?? -1)
-    if (sourceIndexes.includes(-1)) return source
-    const sourceScore = ctcWordScore(probabilities, classes, span.start, span.end, sourceIndexes)
-    const candidates = [...lexicon]
-      .filter((candidate) => Math.abs(candidate.length - lower.length) <= maximumDistance)
-      .map((candidate) => ({ candidate, distance: wordDistance(lower, candidate) }))
-      .filter(({ candidate, distance }) => distance <= maximumDistance && [...candidate].every((character) => characterIndexes.has(character)))
-      .map(({ candidate, distance }) => ({
-        candidate,
-        distance,
-        score: ctcWordScore(
-          probabilities,
-          classes,
-          span.start,
-          span.end,
-          [...candidate].map((character) => characterIndexes.get(character)!),
-        ),
-      }))
-      .sort((first, second) => second.score - first.score || first.distance - second.distance)
-    const best = candidates[0]
-    const runnerUp = candidates[1]
-    const visualAllowance = best?.distance === 2
-      ? lower.length <= 5 ? 1.5 : Math.max(5.8, lower.length * 0.8)
-      : Math.max(8, lower.length * 1.4)
-    if (
-      !best
-      || best.score < sourceScore - visualAllowance
-      || (runnerUp && best.score - runnerUp.score < 0.5)
-    ) return source
-    return preserveWordCase(source, best.candidate, language)
-  })
-}
-
-type CtcBeamState = {
-  prefix: string
-  blank: number
-  nonblank: number
-  languageScore: number
-  characterCount: number
-}
-
-const CTC_BEAM_WIDTH = 8
-const CTC_BEAM_TOP_K = 5
-const CTC_LANGUAGE_WEIGHT = 0.42
-const CTC_INSERTION_BONUS = 0.04
-
-const trailingBeamWord = (value: string) => (
-  /([\p{L}]+(?:'[\p{L}]+)?)$/u.exec(value)?.[1] ?? ''
-)
-
-const beamWordCompletionScore = (
-  word: string,
-  language: RecognitionLanguage,
-  wordMembership?: WordMembership,
-) => {
-  if (!word) return 0
-  const lower = word.toLocaleLowerCase(language)
-  if (LANGUAGE_WORDS[language].has(lower) || wordMembership?.(lower)) {
-    return 1.25 + Math.min(1.1, lower.length * 0.09)
-  }
-  if (lower.length === 1 && (lower === 'a' || lower === 'i')) return 0.65
-  // Proper names and technical terms must remain possible.
-  return -Math.min(0.42, 0.08 + lower.length * 0.025)
-}
-
-const beamExtensionLanguageDelta = (
-  prefix: string,
-  character: string,
-  language: RecognitionLanguage,
-  wordMembership?: WordMembership,
-) => {
-  let delta = 0
-  if (/^\p{L}$/u.test(character)) {
-    const letters = Array.from(`${prefix.slice(-3)}${character}`)
-      .filter((entry) => /^\p{L}$/u.test(entry))
-      .join('')
-      .toLocaleLowerCase(language)
-    if (letters.length >= 2) delta += LANGUAGE_BIGRAMS[language].has(letters.slice(-2)) ? 0.1 : -0.025
-    if (letters.length >= 3) delta += LANGUAGE_TRIGRAMS[language].has(letters.slice(-3)) ? 0.17 : -0.02
-  } else if (/\s/u.test(character) || /^[,.;:!?]$/u.test(character)) {
-    delta += beamWordCompletionScore(trailingBeamWord(prefix), language, wordMembership)
-    if (/\s/u.test(character) && (!prefix || /\s$/u.test(prefix))) delta -= 1.2
-    if (/^[,.;:!?]$/u.test(character) && prefix.endsWith(character)) delta -= 0.8
-  }
-  return delta
-}
-
-const topCtcIndexes = (
-  probabilities: Float32Array,
-  offset: number,
-  allowed: number[],
-) => {
-  const top: { index: number; probability: number }[] = []
-  allowed.forEach((index) => {
-    const probability = probabilities[offset + index]
-    if (top.length === CTC_BEAM_TOP_K && probability <= top.at(-1)!.probability) return
-    const insertion = top.findIndex((entry) => probability > entry.probability)
-    if (insertion < 0) top.push({ index, probability })
-    else top.splice(insertion, 0, { index, probability })
-    if (top.length > CTC_BEAM_TOP_K) top.pop()
-  })
-  return top
-}
-
-const ctcBeamScore = (
-  state: CtcBeamState,
-  final = false,
-  language?: RecognitionLanguage,
-  wordMembership?: WordMembership,
-) => {
-  const completedLanguageScore = final && language
-    ? state.languageScore + beamWordCompletionScore(trailingBeamWord(state.prefix), language, wordMembership)
-    : state.languageScore
-  return logAdd([state.blank, state.nonblank])
-    + CTC_LANGUAGE_WEIGHT * completedLanguageScore
-    + CTC_INSERTION_BONUS * state.characterCount
-}
-
-const decodeCtcBeam = (
-  probabilities: Float32Array,
-  timeSteps: number,
-  classes: number,
-  allowed: number[],
-  characters: string[],
-  language: RecognitionLanguage,
-  wordMembership?: WordMembership,
-) => {
-  let beam = new Map<string, CtcBeamState>([[
-    '',
-    {
-      prefix: '',
-      blank: 0,
-      nonblank: Number.NEGATIVE_INFINITY,
-      languageScore: 0,
-      characterCount: 0,
-    },
-  ]])
-
-  for (let step = 0; step < timeSteps; step += 1) {
-    const offset = step * classes
-    const candidates = topCtcIndexes(probabilities, offset, allowed)
-    const blankLog = Math.log(Math.max(1e-12, probabilities[offset]))
-    const next = new Map<string, CtcBeamState>()
-    const target = (
-      prefix: string,
-      languageScore: number,
-      characterCount: number,
-    ) => {
-      let state = next.get(prefix)
-      if (!state) {
-        state = {
-          prefix,
-          blank: Number.NEGATIVE_INFINITY,
-          nonblank: Number.NEGATIVE_INFINITY,
-          languageScore,
-          characterCount,
-        }
-        next.set(prefix, state)
-      }
-      return state
-    }
-
-    beam.forEach((state) => {
-      const total = logAdd([state.blank, state.nonblank])
-      const same = target(state.prefix, state.languageScore, state.characterCount)
-      same.blank = logAdd([same.blank, total + blankLog])
-      const last = state.prefix.at(-1) ?? ''
-      candidates.forEach(({ index, probability }) => {
-        const character = characters[index - 1]
-        const characterLog = Math.log(Math.max(1e-12, probability))
-        let source = total
-        if (character === last) {
-          same.nonblank = logAdd([same.nonblank, state.nonblank + characterLog])
-          source = state.blank
-        }
-        if (!Number.isFinite(source)) return
-        const prefix = `${state.prefix}${character}`
-        const extended = target(
-          prefix,
-          state.languageScore + beamExtensionLanguageDelta(state.prefix, character, language, wordMembership),
-          state.characterCount + Number(!/\s/u.test(character)),
-        )
-        extended.nonblank = logAdd([extended.nonblank, source + characterLog])
-      })
-    })
-    beam = new Map(
-      [...next.values()]
-        .sort((first, second) => ctcBeamScore(second) - ctcBeamScore(first))
-        .slice(0, CTC_BEAM_WIDTH)
-        .map((state) => [state.prefix, state]),
-    )
-  }
-  const best = [...beam.values()]
-    .sort((first, second) => (
-      ctcBeamScore(second, true, language, wordMembership) -
-      ctcBeamScore(first, true, language, wordMembership)
-    ))[0]
-  return best?.prefix
-    .normalize('NFC')
-    .replace(/[ \t]{2,}/gu, ' ')
-    .replace(/\s+([,.;:!?])/gu, '$1')
-    .trim() ?? ''
-}
-
 const neuralTextHypothesisScore = (
   value: string,
   language: RecognitionLanguage,
@@ -1104,71 +794,17 @@ const decodeCtc = (
   language: RecognitionLanguage,
   wordMembership?: WordMembership,
 ) => {
-  const timeSteps = dimensions.at(-2) ?? 0
-  const classes = dimensions.at(-1) ?? 0
-  if (!timeSteps || classes !== characters.length + 1 || probabilities.length !== timeSteps * classes) {
-    throw new Error('Das Handschriftmodell hat ein unerwartetes Ergebnis geliefert.')
-  }
-  const allowed = allowedCharacterIndexes(characters, language)
-  const output: string[] = []
-  const confidences: number[] = []
-  const path: number[] = []
-  let previous = -1
-  for (let step = 0; step < timeSteps; step += 1) {
-    const offset = step * classes
-    let bestIndex = 0
-    let bestProbability = probabilities[offset]
-    for (let candidateIndex = 0; candidateIndex < allowed.length; candidateIndex += 1) {
-      const index = allowed[candidateIndex]
-      const probability = probabilities[offset + index]
-      if (probability > bestProbability) {
-        bestIndex = index
-        bestProbability = probability
-      }
-    }
-    if (bestIndex && bestIndex !== previous) {
-      output.push(characters[bestIndex - 1])
-      confidences.push(bestProbability)
-    }
-    path.push(bestIndex)
-    previous = bestIndex
-  }
-  const rawText = normalizeGermanSharpS(output.join(''))
-    .normalize('NFC')
-    .replace(/[ \t]{2,}/gu, ' ')
-    .replace(/\s+([,.;:!?])/gu, '$1')
-    .trim()
-  const characterRuns: NeuralTextCharacter[] = []
-  let runStart = 0
-  while (runStart < path.length) {
-    const index = path[runStart]
-    let runEnd = runStart + 1
-    while (runEnd < path.length && path[runEnd] === index) runEnd += 1
-    if (index) {
-      let peak = 0
-      for (let step = runStart; step < runEnd; step += 1) {
-        peak = Math.max(peak, probabilities[step * classes + index])
-      }
-      characterRuns.push({
-        char: characters[index - 1],
-        confidence: Math.round(peak * 100),
-        start: runStart / timeSteps,
-        end: runEnd / timeSteps,
-      })
-    }
-    runStart = runEnd
-  }
-  const beamText = rawText.length >= 3
-    ? decodeCtcBeam(probabilities, timeSteps, classes, allowed, characters, language, wordMembership)
-    : ''
+  // Greedy CTC, the prefix beam and the CTC word rescore come from fanotes-recog, the same
+  // decoder the desktop and the web use. Lexical polish stays here.
+  const decoded = decodeRecogCtc(probabilities, dimensions, characters, language)
   const greedyText = applyNeuralWordContext(
-    applyCtcWordContext(rawText, probabilities, classes, path, characters, language),
+    decoded.ctcGreedyText,
     language,
     { preserveExtendedWords: false, requirePlausibilityLead: false },
   )
-  const contextualBeamText = beamText
+  const contextualBeamText = decoded.rawBeamText
     ? applyNeuralWordContext(
-      beamText,
+      decoded.rawBeamText,
       language,
       { preserveExtendedWords: false, requirePlausibilityLead: false },
     )
@@ -1193,10 +829,14 @@ const decodeCtc = (
       >= neuralTextHypothesisScore(greedyText, language, wordMembership) - 0.15
     ? contextualBeamText
     : greedyText
-  const confidence = confidences.length
-    ? Math.round(confidences.reduce((sum, value) => sum + value, 0) / confidences.length * 100)
-    : 0
-  return { text, rawText, beamText: contextualBeamText, greedyText, confidence, characters: characterRuns }
+  return {
+    text,
+    rawText: decoded.rawText,
+    beamText: contextualBeamText,
+    greedyText,
+    confidence: decoded.confidence,
+    characters: decoded.characters,
+  }
 }
 
 const hasTerminalPunctuationInk = (line: StrokeLine) => {
@@ -2376,21 +2016,25 @@ export const preferNeuralContextCandidateForTests = (
 }
 
 const recognizeCtcLine = async (
-  image: RenderedLineImage,
+  line: StrokeLine,
+  sourceWidth: number,
+  sourceHeight: number,
+  options: NeuralLineRenderOptions,
   language: RecognitionLanguage,
   wordMembership?: WordMembership,
 ) => {
-  const input = lineTensorInput(image)
+  const rendered = renderRecogLineTensor(line, sourceWidth, sourceHeight, options)
+  const input = new Float32Array(rendered.values)
   if (window.fanotes.platform !== 'web' && window.fanotes.recognizeNativeHandwritingLine) {
     try {
       const native = await window.fanotes.recognizeNativeHandwritingLine({
         input,
-        width: image.width,
-        height: image.height,
+        width: rendered.width,
+        height: MODEL_HEIGHT,
         threads: effectiveOcrThreadCount(4),
       })
       if (
-        native.engine !== 'onnxruntime-node-cpu'
+        native.engine !== 'fanotes-ort-cpu'
         || !(native.probabilities instanceof Float32Array)
         || !Array.isArray(native.dims)
         || !Array.isArray(native.characters)
@@ -2407,7 +2051,7 @@ const recognizeCtcLine = async (
     import('onnxruntime-web/wasm'),
   ])
   try {
-    const tensor = new ort.Tensor('float32', input, [1, 1, image.height, image.width])
+    const tensor = new ort.Tensor('float32', input, [1, 1, MODEL_HEIGHT, rendered.width])
     const output = await session.run({ x: tensor })
     const prediction = output.fetch_name_0 ?? output[session.outputNames[0]]
     if (!prediction || !(prediction.data instanceof Float32Array)) {
@@ -2438,7 +2082,7 @@ const recognizeSeparatedWordLine = async (
     let selectedAssessment: ReturnType<typeof trocrLineAssessment> | null = null
     let selectedByCtc = false
     try {
-      const ctc = await recognizeCtcLine(image, language, wordMembership)
+      const ctc = await recognizeCtcLine(physicalWord, sourceWidth, sourceHeight, {}, language, wordMembership)
       if (ctc.text) {
         selected = ctc
         selectedAssessment = trocrLineAssessment(ctc.text, physicalWord, language, wordMembership)
@@ -2469,7 +2113,7 @@ const recognizeSeparatedWordLine = async (
           marginYRatio: 0.40,
           inkScale: 0.92,
         })
-        const wider = await recognizeCtcLine(widerImage, language, wordMembership)
+        const wider = await recognizeCtcLine(physicalWord, sourceWidth, sourceHeight, { marginYRatio: 0.40, inkScale: 0.92 }, language, wordMembership)
         const widerAssessment = wider.text
           ? trocrLineAssessment(wider.text, physicalWord, language, wordMembership)
           : null
@@ -2486,7 +2130,7 @@ const recognizeSeparatedWordLine = async (
             marginYRatio: 0.32,
             inkScale: 0.96,
           })
-          const middle = await recognizeCtcLine(middleImage, language, wordMembership)
+          const middle = await recognizeCtcLine(physicalWord, sourceWidth, sourceHeight, { marginYRatio: 0.32, inkScale: 0.96 }, language, wordMembership)
           const middleAssessment = middle.text
             ? trocrLineAssessment(middle.text, physicalWord, language, wordMembership)
             : null
@@ -2586,6 +2230,10 @@ export async function recognizeNeuralText(
     knownWordRatio: 0,
   }
   const wordMembership = await loadSpellingWordContext(language).catch(() => undefined)
+  if (wordMembership) {
+    const candidates = await loadRecognitionCandidates(language).catch(() => null)
+    if (candidates) installRecogLexicon(language, [...candidates])
+  }
   const results: NeuralTextLine[] = []
   const trocrFailures: string[] = []
   let trocrLines = 0
@@ -2608,7 +2256,7 @@ export async function recognizeNeuralText(
     if (separated?.usedTrocr) trocrLines += 1
     if (!selected) {
       try {
-        let compact = await recognizeCtcLine(image, language, wordMembership)
+        let compact = await recognizeCtcLine(line, sourceWidth, sourceHeight, {}, language, wordMembership)
         let compactAssessment = compact.text
           ? trocrLineAssessment(compact.text, line, language, wordMembership)
           : null
@@ -2632,7 +2280,7 @@ export async function recognizeNeuralText(
               marginYRatio: 0.40,
               inkScale: 0.92,
             })
-            const alternate = await recognizeCtcLine(alternateImage, language, wordMembership)
+            const alternate = await recognizeCtcLine(line, sourceWidth, sourceHeight, { marginYRatio: 0.40, inkScale: 0.92 }, language, wordMembership)
             const alternateAssessment = alternate.text
               ? trocrLineAssessment(alternate.text, line, language, wordMembership)
               : null
@@ -2657,7 +2305,7 @@ export async function recognizeNeuralText(
                 marginYRatio: 0.32,
                 inkScale: 0.96,
               })
-              const middle = await recognizeCtcLine(middleImage, language, wordMembership)
+              const middle = await recognizeCtcLine(line, sourceWidth, sourceHeight, { marginYRatio: 0.32, inkScale: 0.96 }, language, wordMembership)
               const middleAssessment = middle.text
                 ? trocrLineAssessment(middle.text, line, language, wordMembership)
                 : null

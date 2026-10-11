@@ -20,7 +20,6 @@ const fsp = require('node:fs/promises')
 const os = require('node:os')
 const path = require('node:path')
 const { fileURLToPath, pathToFileURL } = require('node:url')
-const { Worker } = require('node:worker_threads')
 const { coerceWorksheetBytes } = require('./worksheet-bytes.cjs')
 const { encodeWindowCapture } = require('./window-capture.cjs')
 const { publishNewFile } = require('./exclusive-publish.cjs')
@@ -227,6 +226,7 @@ const IPC = Object.freeze({
   cancelClose: 'fanotes:cancel-close',
   requestClose: 'fanotes:request-close',
   captureWindow: 'fanotes:capture-window',
+  renderPdfPage: 'fanotes:render-pdf-page',
 })
 
 const DEFAULT_SETTINGS = Object.freeze({
@@ -642,10 +642,9 @@ const treeCacheWriteQueues = new Map()
 let nextFileMutationBarrierId = 1
 let activeTreeIo = 0
 const treeIoWaiters = []
-let nativeOcrWorker = null
-let nativeOcrWorkerIdleTimer = null
-let nativeOcrModelPathPromise = null
-const nativeOcrPending = new Map()
+let nativeOcrHost = null
+let nativeOcrIdleTimer = null
+let nativeOcrModelPromise = null
 let enhancedMathService = null
 let qwenVisionService = null
 
@@ -682,81 +681,39 @@ function getQwenVisionService() {
   return qwenVisionService
 }
 
-function nativeOcrRuntimeEntry() {
-  return app.isPackaged
-    ? path.join(process.resourcesPath, 'native-ocr', 'node_modules', 'onnxruntime-node', 'dist', 'index.js')
-    : require.resolve('onnxruntime-node')
+function stopNativeOcr(reason) {
+  if (nativeOcrIdleTimer) clearTimeout(nativeOcrIdleTimer)
+  nativeOcrIdleTimer = null
+  nativeOcrHost?.stop(reason)
 }
 
-function rejectNativeOcrPending(error) {
-  for (const request of nativeOcrPending.values()) {
-    clearTimeout(request.timeout)
-    request.reject(error)
-  }
-  nativeOcrPending.clear()
-}
-
-function stopNativeOcrWorker(reason) {
-  if (nativeOcrWorkerIdleTimer) clearTimeout(nativeOcrWorkerIdleTimer)
-  nativeOcrWorkerIdleTimer = null
-  const previous = nativeOcrWorker
-  nativeOcrWorker = null
-  previous?.removeAllListeners()
-  void previous?.terminate()
-  if (reason) rejectNativeOcrPending(reason)
-}
-
-function scheduleNativeOcrWorkerShutdown() {
-  if (nativeOcrWorkerIdleTimer) clearTimeout(nativeOcrWorkerIdleTimer)
+function scheduleNativeOcrShutdown() {
+  if (nativeOcrIdleTimer) clearTimeout(nativeOcrIdleTimer)
   const configured = Number(currentSettings.ocrModelKeepAliveSeconds)
   const milliseconds = Number.isSafeInteger(configured) && configured >= 0 && configured <= 600
     ? Math.max(1, configured * 1_000)
     : 120_000
-  nativeOcrWorkerIdleTimer = setTimeout(() => stopNativeOcrWorker(), milliseconds)
-  nativeOcrWorkerIdleTimer.unref?.()
+  nativeOcrIdleTimer = setTimeout(() => {
+    nativeOcrIdleTimer = null
+    if (!nativeOcrHost?.pending) nativeOcrHost?.stop()
+  }, milliseconds)
+  nativeOcrIdleTimer.unref?.()
 }
 
-function ensureNativeOcrWorker(modelPath) {
-  if (nativeOcrWorker) return nativeOcrWorker
-  const worker = new Worker(path.join(__dirname, 'native-ocr-worker.cjs'), {
-    workerData: { modelPath, runtimeEntry: nativeOcrRuntimeEntry() },
+function ensureNativeOcrHost(model) {
+  if (nativeOcrHost) return nativeOcrHost
+  const { createNativeOcrHost, nativeOcrExecutable, nativeOcrRuntime } = require('./native-ocr.cjs')
+  const location = { packaged: app.isPackaged, resourcesPath: process.resourcesPath, appPath: app.getAppPath() }
+  nativeOcrHost = createNativeOcrHost({
+    executable: nativeOcrExecutable(location),
+    runtime: nativeOcrRuntime(location),
+    model,
   })
-  worker.on('message', (message) => {
-    const request = nativeOcrPending.get(message?.id)
-    if (!request) return
-    nativeOcrPending.delete(message.id)
-    clearTimeout(request.timeout)
-    if (message.error) request.reject(new Error(String(message.error).slice(0, 500)))
-    else if (
-      !(message.probabilities instanceof ArrayBuffer)
-      || !Array.isArray(message.dims)
-      || message.dims.length !== 3
-      || message.probabilities.byteLength <= 0
-      || message.probabilities.byteLength > 32 * 1024 * 1024
-    ) request.reject(new Error('Die native OCR-Antwort ist ungültig.'))
-    else request.resolve({
-      probabilities: new Float32Array(message.probabilities),
-      dims: message.dims.map(Number),
-      engine: 'onnxruntime-node-cpu',
-    })
-    scheduleNativeOcrWorkerShutdown()
-  })
-  worker.once('error', (error) => {
-    if (nativeOcrWorker === worker) stopNativeOcrWorker(error)
-  })
-  worker.once('exit', (code) => {
-    if (nativeOcrWorker !== worker) return
-    nativeOcrWorker = null
-    if (nativeOcrPending.size) {
-      rejectNativeOcrPending(new Error(`Die native OCR-Laufzeit wurde mit Status ${code} beendet.`))
-    }
-  })
-  nativeOcrWorker = worker
-  return worker
+  return nativeOcrHost
 }
 
-async function verifiedNativeOcrModelPath() {
-  nativeOcrModelPathPromise ??= (async () => {
+async function verifiedNativeOcrModel() {
+  nativeOcrModelPromise ??= (async () => {
     const directory = path.join(app.getAppPath(), app.isPackaged ? 'dist' : 'public', 'ocr')
     const manifestPath = path.join(directory, 'manifest.json')
     const manifestInfo = await fsp.lstat(manifestPath)
@@ -784,20 +741,17 @@ async function verifiedNativeOcrModelPath() {
       || !Number.isSafeInteger(charactersDescriptor.count)
       || !/^[a-f0-9]{64}$/u.test(charactersDescriptor.sha256)
     ) throw new Error('Unbekanntes natives Handschriftmodell.')
-    // Native ONNX Runtime receives a filesystem path and cannot resolve an
-    // Electron app.asar virtual path. electron-builder unpacks only this FP32
-    // model; manifest, characters and all browser models remain in app.asar.
+    // fanotes-ocr reads a filesystem path and cannot resolve an Electron app.asar
+    // virtual path. electron-builder unpacks only this FP32 model; manifest,
+    // characters and all browser models remain in app.asar, so the size and
+    // SHA-256 the sidecar checks before building its session come from there.
     const nativeModelDirectory = app.isPackaged
       ? path.join(process.resourcesPath, 'app.asar.unpacked', 'dist', 'ocr')
       : directory
-    const modelPath = path.join(nativeModelDirectory, descriptor.file)
-    const modelInfo = await fsp.lstat(modelPath)
-    if (!modelInfo.isFile() || modelInfo.isSymbolicLink() || modelInfo.size !== descriptor.size) {
-      throw new Error('Das native Handschriftmodell ist unvollständig.')
-    }
-    const bytes = await fsp.readFile(modelPath)
-    if (crypto.createHash('sha256').update(bytes).digest('hex') !== descriptor.sha256) {
-      throw new Error('Das native Handschriftmodell ist beschädigt.')
+    const model = {
+      path: path.join(nativeModelDirectory, descriptor.file),
+      size: descriptor.size,
+      sha256: descriptor.sha256,
     }
     const characterBytes = await fsp.readFile(path.join(directory, charactersDescriptor.file))
     if (
@@ -810,12 +764,12 @@ async function verifiedNativeOcrModelPath() {
       || characters.length !== charactersDescriptor.count
       || characters.some((character) => typeof character !== 'string' || Array.from(character).length !== 1)
     ) throw new Error('Der native OCR-Zeichensatz ist ungültig.')
-    return { modelPath, characters }
+    return { model, characters }
   })().catch((error) => {
-    nativeOcrModelPathPromise = null
+    nativeOcrModelPromise = null
     throw error
   })
-  return nativeOcrModelPathPromise
+  return nativeOcrModelPromise
 }
 
 async function recognizeNativeOcrLine(request) {
@@ -836,25 +790,26 @@ async function recognizeNativeOcrLine(request) {
   const maximumThreads = Number.isSafeInteger(configuredThreads) && configuredThreads >= 1
     ? configuredThreads
     : automaticThreads
-  const threads = Number.isSafeInteger(requestedThreads)
-    ? Math.max(1, Math.min(4, logicalCores, maximumThreads, requestedThreads))
-    : maximumThreads
-  const { modelPath, characters } = await verifiedNativeOcrModelPath()
-  if (nativeOcrWorkerIdleTimer) clearTimeout(nativeOcrWorkerIdleTimer)
-  nativeOcrWorkerIdleTimer = null
-  const worker = ensureNativeOcrWorker(modelPath)
-  if (nativeOcrPending.size >= 4) throw new Error('Zu viele native OCR-Aufträge sind gleichzeitig aktiv.')
-  const input = Float32Array.from(request.input)
-  const id = crypto.randomUUID()
-  return new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => {
-      nativeOcrPending.delete(id)
-      stopNativeOcrWorker(new Error('Die native OCR-Erkennung hat das Zeitlimit überschritten.'))
-      reject(new Error('Die native OCR-Erkennung hat das Zeitlimit überschritten.'))
-    }, 120_000)
-    nativeOcrPending.set(id, { resolve, reject, timeout })
-    worker.postMessage({ id, input: input.buffer, width: request.width, height: request.height, threads }, [input.buffer])
-  }).then((result) => ({ ...result, characters }))
+  const threads = Math.max(1, Math.min(
+    4,
+    logicalCores,
+    maximumThreads,
+    Number.isSafeInteger(requestedThreads) ? requestedThreads : maximumThreads,
+  ))
+  const { model, characters } = await verifiedNativeOcrModel()
+  if (nativeOcrIdleTimer) clearTimeout(nativeOcrIdleTimer)
+  nativeOcrIdleTimer = null
+  try {
+    const result = await ensureNativeOcrHost(model).recognize({
+      input: request.input,
+      width: request.width,
+      height: request.height,
+      threads,
+    })
+    return { ...result, characters }
+  } finally {
+    scheduleNativeOcrShutdown()
+  }
 }
 
 async function withTreeIoSlot(operation) {
@@ -4596,6 +4551,32 @@ function registerIpcHandlers() {
     trashItem: (target) => shell.trashItem(target),
   }))
   handle(IPC.captureWindow, async (event) => encodeWindowCapture(await event.sender.capturePage()))
+  handle(IPC.renderPdfPage, async (_event, request) => {
+    await ensureBootstrap()
+    if (!request || typeof request.path !== 'string') throw new Error('Die PDF-Rasteranfrage ist unvollständig.')
+    const geometry = ['pageIndex', 'pixelWidth', 'pixelHeight', 'pagePixelWidth', 'pagePixelHeight', 'originX', 'originY', 'rotation']
+    for (const name of geometry) {
+      if (!Number.isSafeInteger(request[name])) throw new Error('Die PDF-Rasteranfrage ist unvollständig.')
+    }
+    const { target } = await resolveVaultPath(request.path, { expected: 'file' })
+    const info = await fsp.lstat(target)
+    if (!info.isFile() || info.isSymbolicLink()) throw new Error('Die PDF-Datei konnte nicht gelesen werden.')
+    const key = `${target}:${info.mtimeMs}:${info.size}`
+    const pdfium = require('./pdfium.cjs')
+    return pdfium.renderPdfPage({
+      key,
+      readBytes: () => readRegularFileNoFollow(target, WORKSHEET_FORMATS.get('.pdf').maxBytes),
+      pageIndex: request.pageIndex,
+      pixelWidth: request.pixelWidth,
+      pixelHeight: request.pixelHeight,
+      pagePixelWidth: request.pagePixelWidth,
+      pagePixelHeight: request.pagePixelHeight,
+      originX: request.originX,
+      originY: request.originY,
+      rotation: request.rotation,
+      password: typeof request.password === 'string' ? request.password : '',
+    })
+  })
 
   ipcMain.on(IPC.confirmClose, (event) => {
     if (!isTrustedIpcSender(event) || !mainWindow || mainWindow.isDestroyed()) return
@@ -4851,6 +4832,6 @@ app.on('window-all-closed', () => {
 })
 
 app.on('before-quit', () => {
-  stopNativeOcrWorker(new Error('FaNotes wird beendet.'))
+  stopNativeOcr(new Error('FaNotes wird beendet.'))
   updateManager?.stop()
 })

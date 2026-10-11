@@ -86,11 +86,13 @@ type WorksheetLayerProps = {
 function PdfPageCanvas({
   pdf,
   number,
+  sourcePath,
   onRatio,
   onReady,
 }: {
   pdf: PDFDocumentProxy
   number: number
+  sourcePath: string
   onRatio: (ratio: number) => void
   onReady: () => void
 }) {
@@ -115,6 +117,7 @@ function PdfPageCanvas({
       base: [baseA, baseB],
       detail: [detailA, detailB],
       label: `PDF-Seite ${number}`,
+      pdfium: () => ({ path: sourcePath, pageIndex: number - 1 }),
       onFirstPaint: () => onReadyRef.current(),
     })
     painterRef.current = painter
@@ -122,7 +125,7 @@ function PdfPageCanvas({
       painterRef.current = null
       painter.dispose()
     }
-  }, [number])
+  }, [number, sourcePath])
 
   useEffect(() => {
     let alive = true
@@ -196,11 +199,13 @@ function PdfPage({
   pdf,
   number,
   defaultRatio,
+  sourcePath,
   onReady,
 }: {
   pdf: PDFDocumentProxy
   number: number
   defaultRatio: number
+  sourcePath: string
   onReady: () => void
 }) {
   const hostRef = useRef<HTMLDivElement>(null)
@@ -248,7 +253,7 @@ function PdfPage({
       ref={hostRef}
       style={{ aspectRatio: `1 / ${ratio}` }}
     >
-      {mounted && <PdfPageCanvas pdf={pdf} number={number} onRatio={handleRatio} onReady={onReady} />}
+      {mounted && <PdfPageCanvas pdf={pdf} number={number} sourcePath={sourcePath} onRatio={handleRatio} onReady={onReady} />}
     </div>
   )
 }
@@ -615,7 +620,7 @@ export const WorksheetLayer = forwardRef<WorksheetLayerHandle, WorksheetLayerPro
             onPointerUp={endHighlight}
             onPointerCancel={() => { highlightOriginRef.current = null; setDraftHighlight(null) }}
           >
-            <PdfPage pdf={pdf} number={page} defaultRatio={pageRatio} onReady={notifyLayout} />
+            <PdfPage pdf={pdf} number={page} defaultRatio={pageRatio} sourcePath={initialDocument.sourceRelativePath} onReady={notifyLayout} />
             {renderHighlights(page)}
             {renderTextBoxes(page)}
           </div>

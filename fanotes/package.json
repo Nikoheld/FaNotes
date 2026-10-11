@@ -16,10 +16,12 @@
     "check:visual": "node scripts/check-visual-rendering.cjs",
     "check:notes": "node scripts/check-note-creation.cjs",
     "check:desktop-guards": "node scripts/check-desktop-guards.cjs",
+    "check:tauri-channels": "node scripts/check-tauri-channel-parity.mjs",
     "check:famd": "node scripts/check-famd.cjs",
     "check:packaged-i18n": "node scripts/check-packaged-i18n.cjs",
     "check:markdown": "node scripts/check-markdown.mjs",
     "check:recognition": "node scripts/check-context-recognition.mjs",
+    "check:recognition:fusion": "node scripts/check-recognition-fusion.mjs",
     "audit:recognition": "node scripts/audit-personal-recognition.mjs",
     "audit:recognition:uji": "node scripts/audit-uji-personal-recognition.mjs",
     "audit:recognition:uji-calibration": "node scripts/analyze-uji-personal-base-calibration.mjs",
@@ -40,7 +42,7 @@
     "check:correction-learn": "node scripts/check-correction-learn.mjs",
     "check:trocr": "node scripts/check-trocr-integration.cjs",
     "check:native-ocr": "node scripts/check-native-ocr.cjs",
-    "check:packaged-native-ocr": "node scripts/check-packaged-native-ocr.cjs",
+    "check:packaged-native-ocr": "node scripts/check-packaged-native-ocr.cjs && node scripts/check-packaged-native-ocr-startup.cjs",
     "check:standard-recognition": "node scripts/check-standard-recognition.cjs",
     "check:text-to-handwriting": "node scripts/check-text-to-handwriting.mjs",
     "check:tth-dialog": "node scripts/check-tth-dialog.mjs",
@@ -125,6 +127,10 @@
     "check:pdf-write": "node scripts/check-pdf-write.mjs",
     "check:pdf-paint-sharp": "node scripts/check-pdf-paint-sharp.mjs",
     "check:zoom-500-sharp": "node scripts/check-zoom-500-sharp.mjs",
+    "check:viewport-raster": "node scripts/check-viewport-raster.mjs && cross-env VITE_FANOTES_VIEWPORT_RASTER=1 node scripts/check-ink-stroke.mjs && cross-env VITE_FANOTES_VIEWPORT_RASTER=1 node scripts/check-ink-visible.mjs && cross-env VITE_FANOTES_VIEWPORT_RASTER=1 node scripts/check-zoom-500-sharp.mjs && cross-env VITE_FANOTES_VIEWPORT_RASTER=1 node scripts/check-paper-canvas.mjs",
+    "check:viewport-raster-browser": "node scripts/check-viewport-raster-browser.mjs",
+    "build:rust-wasm": "node scripts/build-rust-wasm.mjs",
+    "build:native-ocr": "node scripts/build-native-ocr.mjs",
     "check:pdf-write-stay": "node scripts/check-pdf-write-stay.mjs",
     "check:bug-pixel-ink": "node scripts/check-pdf-paint-sharp.mjs",
     "check:pdf-text-select": "node scripts/check-pdf-text-select.mjs",
@@ -292,21 +298,18 @@
           ]
         },
         {
-          "from": "node_modules/onnxruntime-node",
-          "to": "native-ocr/node_modules/onnxruntime-node",
+          "from": "native-ocr/linux-x64",
+          "to": "native-ocr",
           "filter": [
-            "package.json",
-            "dist/*.js",
-            "bin/napi-v3/linux/x64/onnxruntime_binding.node",
-            "bin/napi-v3/linux/x64/libonnxruntime.so.1"
+            "fanotes-ocr",
+            "runtime-manifest.json"
           ]
         },
         {
-          "from": "node_modules/onnxruntime-node/node_modules/onnxruntime-common",
-          "to": "native-ocr/node_modules/onnxruntime-common",
+          "from": "node_modules/onnxruntime-node/bin/napi-v3/linux/x64",
+          "to": "native-ocr",
           "filter": [
-            "package.json",
-            "dist/cjs/**/*"
+            "libonnxruntime.so.1"
           ]
         }
       ]
@@ -340,21 +343,18 @@
           ]
         },
         {
-          "from": "node_modules/onnxruntime-node",
-          "to": "native-ocr/node_modules/onnxruntime-node",
+          "from": "native-ocr/win32-x64",
+          "to": "native-ocr",
           "filter": [
-            "package.json",
-            "dist/*.js",
-            "bin/napi-v3/win32/x64/onnxruntime_binding.node",
-            "bin/napi-v3/win32/x64/onnxruntime.dll"
+            "fanotes-ocr.exe",
+            "runtime-manifest.json"
           ]
         },
         {
-          "from": "node_modules/onnxruntime-node/node_modules/onnxruntime-common",
-          "to": "native-ocr/node_modules/onnxruntime-common",
+          "from": "node_modules/onnxruntime-node/bin/napi-v3/win32/x64",
+          "to": "native-ocr",
           "filter": [
-            "package.json",
-            "dist/cjs/**/*"
+            "onnxruntime.dll"
           ]
         }
       ]

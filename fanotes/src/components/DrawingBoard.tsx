@@ -197,11 +197,9 @@ import {
   WRITE_CAP_WIDTH,
   WRITE_MARGIN_X,
   WRITE_MARGIN_Y,
-  growPageFromMark,
   paintedStayExtent,
   savedInkPage,
   writePageStayExtent,
-  keepMarkOnPage,
   mapClientToPage,
   paperScrollBoundsFromVisualRect,
   paperSheetLayoutShift,
@@ -210,6 +208,17 @@ import {
   textOriginCssPx,
   writeExtentFromContent,
 } from '../lib/noteCanvas'
+import { growPageFromMark, keepMarkOnPage } from '../lib/paperCore'
+import { viewportRasterEnabled } from '../lib/viewportRasterFlag'
+import {
+  placeViewportRaster,
+  viewportRasterShift,
+  viewportRasterViewOf,
+  type ViewportRasterPlacement,
+  type ViewportRasterRegion,
+  type ViewportRasterView,
+} from '../lib/viewportRasterPlan'
+import type { ViewportRaster } from '../lib/viewportRaster'
 import {
   paperRulingBackgroundPosition,
   paperRulingTileOrigin,
@@ -1060,6 +1069,19 @@ const shiftInkWindowBitmap = (canvas: HTMLCanvasElement, dy: number) => {
   context.restore()
 }
 
+/** Viewport raster: the same whole-pixel copy on both axes; the uncovered strips are painted after. */
+const shiftCanvasBitmap = (canvas: HTMLCanvasElement, dx: number, dy: number) => {
+  if (dx === 0 && dy === 0) return
+  const context = canvas.getContext('2d')
+  if (!context) return
+  context.save()
+  context.setTransform(1, 0, 0, 1, 0, 0)
+  context.globalCompositeOperation = 'copy'
+  context.imageSmoothingEnabled = false
+  context.drawImage(canvas, dx, dy)
+  context.restore()
+}
+
 /**
  * Sheet ink is clamped to the 0–1 page. Ink hidden inside a collapsed section
  * is normalised to its own body box and may legitimately reach past it (a
@@ -1245,6 +1267,13 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const livePenHintRef = useRef<InkLayoutPoint | null>(null)
   /** What the committed bitmap holds right now, so a slice move can reuse it. */
   const committedBitmapRef = useRef<{ key: string; topPx: number } | null>(null)
+  /** Rust viewport raster: set once the flag is on and the module loaded; null keeps the slice bitmap. */
+  const viewportRasterRef = useRef<ViewportRaster | null>(null)
+  const viewportPlacementRef = useRef<ViewportRasterPlacement | null>(null)
+  /** What the committed viewport bitmap shows, so a box move can shift it instead of repainting. */
+  const viewportPaintedRef = useRef<ViewportRasterView | null>(null)
+  const viewportSceneRef = useRef({ width: 0, height: 0, smoothing: Number.NaN })
+  const viewportRasterReadyRef = useRef<() => void>(() => {})
   const inkWindowIdleRef = useRef<number | null>(null)
   const inkScrollFrameRef = useRef<number | null>(null)
   const resizeDebounceRef = useRef<number | null>(null)
@@ -1796,6 +1825,129 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     liveCanvasHasInkRef.current = false
   }, [])
 
+  /** Brings the Rust page up to date. Strokes that did not change keep their tiles. */
+  const syncViewportScene = useCallback((layoutWidth: number, layoutHeight: number) => {
+    const raster = viewportRasterRef.current
+    if (!raster) return
+    const scene = viewportSceneRef.current
+    const stale = scene.width !== layoutWidth || scene.height !== layoutHeight || scene.smoothing !== settings.smoothing
+    if (!committedCanvasDirtyRef.current && !stale) return
+    raster.setScene(layoutWidth, layoutHeight, settings.smoothing, strokesRef.current)
+    viewportSceneRef.current = { width: layoutWidth, height: layoutHeight, smoothing: settings.smoothing }
+    committedCanvasDirtyRef.current = false
+  }, [settings.smoothing])
+
+  /**
+   * Committed layer of the viewport raster. A box move at the same scale
+   * shifts the bitmap and paints only the uncovered strips; a page change
+   * paints only the region its strokes touched; anything else repaints the box.
+   */
+  const paintViewportCommitted = useCallback((placement: ViewportRasterPlacement) => {
+    const raster = viewportRasterRef.current
+    const canvas = committedCanvasRef.current
+    const context = canvas?.getContext('2d')
+    if (!raster || !canvas || !context) return
+    const view = viewportRasterViewOf(placement)
+    const shift = viewportRasterShift(viewportPaintedRef.current, view)
+    const regions: ViewportRasterRegion[] = []
+    if (shift) {
+      shiftCanvasBitmap(canvas, shift.dx, shift.dy)
+      regions.push(...shift.regions)
+      const dirty = raster.dirtyRegion(view)
+      if (dirty) regions.push(dirty)
+    } else {
+      regions.push({ x: 0, y: 0, width: view.width, height: view.height })
+    }
+    for (const region of regions) {
+      if (region.width <= 0 || region.height <= 0) continue
+      const image = raster.paint(view, region)
+      if (!image.width || !image.height) continue
+      context.putImageData(new ImageData(image.data as Uint8ClampedArray<ArrayBuffer>, image.width, image.height), region.x, region.y)
+    }
+    raster.clearDirty()
+    viewportPaintedRef.current = view
+  }, [])
+
+  /**
+   * Viewport raster (flag on): both canvases cover one box — the visible
+   * sheet plus the live guard — at the camera's device scale, so the bitmap
+   * stays one px per screen px at any zoom and is never page-sized.
+   */
+  const redrawViewportRaster = useCallback((layoutWidth: number, layoutHeight: number, measureLayout: boolean) => {
+    const canvas = canvasRef.current
+    const committedCanvas = committedCanvasRef.current
+    if (!canvas || !committedCanvas || !viewportRasterRef.current) return
+    const next = placeViewportRaster(
+      liveWindowLayoutRef.current,
+      { width: layoutWidth, height: layoutHeight },
+      viewZoomRef.current,
+      window.devicePixelRatio || 1,
+    )
+    const current = viewportPlacementRef.current
+    const moved = !current
+      || current.key !== next.key
+      || current.paint.width !== next.paint.width
+      || current.paint.height !== next.paint.height
+    // As on the slice path: a grow or a box move under the pen applies now,
+    // a pure zoom waits for the pen to lift.
+    const placement = moved && current && activeStrokeRef.current && !measureLayout ? current : next
+    if (placement !== current) {
+      viewportPlacementRef.current = placement
+      canvasPixelSizeRef.current = {
+        width: placement.paint.width,
+        height: placement.slice.height,
+        virtualHeight: placement.paint.height,
+        layoutWidth,
+        layoutHeight,
+        topPx: placement.slice.topPx,
+      }
+      liveSliceRef.current = { ...placement.slice }
+      inkWindowRef.current = FULL_INK_WINDOW
+      applyInkBoxToCanvases([committedCanvas, canvas], liveInkSliceLayoutStyle(placement.box))
+      if (activeStrokeRef.current) {
+        activeRenderedPointCountRef.current = 0
+        liveCanvasHasInkRef.current = true
+      }
+    }
+    const { width, height } = placement.slice
+    if (canvas.width !== width || canvas.height !== height) {
+      canvas.width = width
+      canvas.height = height
+      activeRenderedPointCountRef.current = 0
+      liveCanvasHasInkRef.current = false
+      const fresh = canvas.getContext('2d', { alpha: true })
+      if (fresh) {
+        fresh.setTransform(1, 0, 0, 1, 0, 0)
+        fresh.clearRect(0, 0, 1, 1)
+      }
+    }
+    if (committedCanvas.width !== width || committedCanvas.height !== height) {
+      committedCanvas.width = width
+      committedCanvas.height = height
+      viewportPaintedRef.current = null
+    }
+    syncViewportScene(layoutWidth, layoutHeight)
+    paintViewportCommitted(placement)
+
+    const context = canvas.getContext('2d', { alpha: true })
+    if (!context) return
+    context.imageSmoothingEnabled = !activeStrokeRef.current
+    context.imageSmoothingQuality = activeStrokeRef.current ? 'low' : 'high'
+    const activeStroke = activeStrokeRef.current
+    if (!activeStroke) {
+      if (liveCanvasHasInkRef.current) {
+        context.setTransform(1, 0, 0, 1, 0, 0)
+        context.clearRect(0, 0, canvas.width, canvas.height)
+      }
+      activeRenderedPointCountRef.current = 0
+      liveCanvasHasInkRef.current = false
+      liveInkBoundsRef.current = null
+      liveVolatileRectRef.current = null
+      return
+    }
+    paintLiveInk(context, activeStroke, [])
+  }, [paintLiveInk, paintViewportCommitted, syncViewportScene])
+
   const redraw = useCallback((measureLayout = false) => {
     const canvas = canvasRef.current
     const committedCanvas = committedCanvasRef.current
@@ -1845,6 +1997,10 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     // the effect that added a text line) painted 0–1 of the previous sheet on
     // the grown one, and the ink slid down until the observer put it back.
     if (paper && !activeStrokeRef.current) catchUpPaintedLayoutRef.current()
+    if (inline && viewportRasterRef.current) {
+      redrawViewportRaster(layoutWidth, layoutHeight, measureLayout)
+      return
+    }
     // The slice is planned in layout px (inkWindowLayoutRef); here it becomes
     // the CSS box, the bitmap size and the paint translate — all in one
     // synchronous pass, so no frame can show the bitmap at a stale box.
@@ -2005,7 +2161,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       return
     }
     paintLiveInk(context, activeStroke, [])
-  }, [inline, paintLiveInk, paperStyle, settings.smoothing, sourceHeight, sourceWidth])
+  }, [inline, paintLiveInk, paperStyle, redrawViewportRaster, settings.smoothing, sourceHeight, sourceWidth])
 
   const onInkActivityRef = useRef(onInkActivity)
   onInkActivityRef.current = onInkActivity
@@ -2039,6 +2195,16 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
 
   const commitStrokeToCanvas = useCallback((stroke: InkStroke) => {
     noteStrokeDrawn(stroke)
+    if (viewportRasterRef.current) {
+      // The stroke is already in strokesRef: the scene diff sees one appended
+      // stroke and paints only its region, in this same event.
+      committedCanvasDirtyRef.current = true
+      const placement = viewportPlacementRef.current
+      if (!placement) return
+      syncViewportScene(canvasPixelSizeRef.current.layoutWidth, canvasPixelSizeRef.current.layoutHeight)
+      paintViewportCommitted(placement)
+      return
+    }
     const canvas = committedCanvasRef.current
     const { width, height, virtualHeight, layoutWidth } = canvasPixelSizeRef.current
     if (!canvas || !width || !height || !virtualHeight || committedCanvasDirtyRef.current) return
@@ -2053,7 +2219,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     context.setTransform(1, 0, 0, 1, 0, -inkWindow.y0 * virtualHeight)
     drawInkStroke(context, stroke, width, virtualHeight, settings.smoothing, 1, sourceWidth, layoutWidth)
     context.restore()
-  }, [noteStrokeDrawn, settings.smoothing, sourceWidth])
+  }, [noteStrokeDrawn, paintViewportCommitted, settings.smoothing, sourceWidth, syncViewportScene])
 
   useEffect(() => {
     if (inline && !inputActive) {
@@ -2330,6 +2496,20 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       return current !== null || currentLive !== null
     }
     inkWindowViewportRef.current = measured.viewport.height
+    if (viewportRasterRef.current) {
+      // Viewport raster: no vertical slice, one box for both layers.
+      inkWindowLayoutRef.current = null
+      const boxPlan = planLiveInkWindow({
+        paper: { width: paper.offsetWidth, height: paper.offsetHeight },
+        viewport: measured.viewport,
+        visible: measured.visible,
+        current: currentLive,
+        pen,
+        force,
+      })
+      if (boxPlan.changed) liveWindowLayoutRef.current = boxPlan.window
+      return boxPlan.changed || current !== null
+    }
     const plan = planInkWindow({
       paperHeight: paper.offsetHeight,
       viewportHeight: measured.viewport.height,
@@ -2364,6 +2544,40 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     redraw(true)
     return true
   }, [planInkWindowNow, redraw])
+
+  viewportRasterReadyRef.current = () => {
+    viewportPlacementRef.current = null
+    viewportPaintedRef.current = null
+    viewportSceneRef.current = { width: 0, height: 0, smoothing: Number.NaN }
+    planInkWindowNow(true)
+    canvasQualityKeyRef.current = ''
+    committedCanvasDirtyRef.current = true
+    redraw(true)
+  }
+
+  // The viewport raster flag swaps the committed slice bitmap for Rust tiles.
+  // The module loads on demand, so the default path never pays for it.
+  useEffect(() => {
+    if (!inline || !viewportRasterEnabled()) return undefined
+    let cancelled = false
+    void import('../lib/viewportRaster')
+      .then(({ createViewportRaster }) => {
+        if (cancelled) return
+        viewportRasterRef.current = createViewportRaster(ART_SYMBOLS)
+        viewportRasterReadyRef.current()
+      })
+      .catch((error: unknown) => {
+        // The slice bitmap keeps painting.
+        console.error('Viewport-Raster konnte nicht geladen werden.', error)
+      })
+    return () => {
+      cancelled = true
+      viewportRasterRef.current?.dispose()
+      viewportRasterRef.current = null
+      viewportPlacementRef.current = null
+      viewportPaintedRef.current = null
+    }
+  }, [inline])
 
   /**
    * Visits every stroke point the board still holds — live strokes, the stroke
@@ -5063,6 +5277,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     if (!canvases.length) return
     const restore = () => {
       committedCanvasDirtyRef.current = true
+      viewportPaintedRef.current = null
       scheduleRedraw()
     }
     for (const canvas of canvases) canvas.addEventListener('contextrestored', restore)

@@ -1,0 +1,83 @@
+use fanotes_famd::{
+    companion_note_path, empty_famd_payload, parse_famd, serialize_famd, strip_famd_payload,
+    worksheet_ids_from_markdown, FamdPayload, NoteBackup, NoteLink,
+};
+use serde_json::json;
+
+const MARKDOWN: &str =
+    "# Analysis\n\n$$\\int x$$\n\n<!-- fanotes-ink:abc -->\n<!-- fanotes-worksheet:ws-1 -->\n";
+
+fn fixture() -> FamdPayload {
+    let mut payload = empty_famd_payload("2026-08-14T12:00:00.000Z");
+    payload.ink = Some(json!({
+        "schemaVersion": 1,
+        "title": "Handschrift",
+        "strokes": [{ "points": [{ "x": 0.2, "y": 0.3, "t": 1, "pressure": 0.5 }] }],
+        "searchTranscript": "integral"
+    }));
+    payload.worksheets = worksheet_ids_from_markdown(MARKDOWN);
+    payload.note_links = vec![NoteLink {
+        id: "nl-famd-check".into(),
+        source_path: "Mathe/Skript.pdf".into(),
+        target_path: "Mathe/Skript-Notiz.md".into(),
+        page: 3,
+        x: 0.72,
+        y: 0.18,
+        style: "text".into(),
+        label: "Skript-Notiz".into(),
+        appearance: "text".into(),
+    }];
+    payload.note_backups = vec![NoteBackup {
+        id: "nb-famd-check".into(),
+        note_path: "Mathe/Analysis.md".into(),
+        created_at: "2026-08-19T12:00:00.000Z".into(),
+        content: "Stand A".into(),
+    }];
+    payload
+}
+
+#[test]
+fn check_famd_roundtrip_matches_the_electron_codec() {
+    let encoded = serialize_famd(MARKDOWN, &fixture());
+    let golden = "# Analysis\n\n$$\\int x$$\n\n<!-- fanotes-ink:abc -->\n<!-- fanotes-worksheet:ws-1 -->\n\n<!-- fanotes-famd:v1 chars=551 -->\n{\"schema\":\"fanotes-famd-v1\",\"updatedAt\":\"2026-08-14T12:00:00.000Z\",\"ink\":{\"schemaVersion\":1,\"title\":\"Handschrift\",\"strokes\":[{\"points\":[{\"x\":0.2,\"y\":0.3,\"t\":1,\"pressure\":0.5}]}],\"searchTranscript\":\"integral\"},\"worksheets\":[\"ws-1\"],\"noteLinks\":[{\"id\":\"nl-famd-check\",\"sourcePath\":\"Mathe/Skript.pdf\",\"targetPath\":\"Mathe/Skript-Notiz.md\",\"page\":3,\"x\":0.72,\"y\":0.18,\"style\":\"text\",\"label\":\"Skript-Notiz\",\"appearance\":\"text\"}],\"noteBackups\":[{\"id\":\"nb-famd-check\",\"notePath\":\"Mathe/Analysis.md\",\"createdAt\":\"2026-08-19T12:00:00.000Z\",\"content\":\"Stand A\"}]}\n";
+    assert_eq!(encoded, golden);
+    assert!(encoded.contains("<!-- fanotes-famd:v1 chars="));
+    let stripped = strip_famd_payload(&encoded);
+    assert!(!stripped.contains("fanotes-famd"));
+    assert!(!stripped.contains("\"schema\""));
+    assert!(stripped.contains("# Analysis"));
+    assert_eq!(
+        strip_famd_payload("{\"schema\":\"fanotes-famd-v1\",\"updatedAt\":\"2026-09-07T00:00:00.000Z\",\"ink\":null,\"worksheets\":[]}"),
+        ""
+    );
+    assert_eq!(
+        strip_famd_payload("# Hello\n\n{\"schema\":\"fanotes-famd-v1\",\"updatedAt\":\"2026-09-07T00:00:00.000Z\",\"ink\":null,\"worksheets\":[]}"),
+        "# Hello"
+    );
+
+    let parsed = parse_famd(&encoded);
+    let payload = parsed.payload.expect("payload");
+    assert_eq!(payload.schema, "fanotes-famd-v1");
+    assert_eq!(payload.ink.unwrap()["title"], "Handschrift");
+    assert_eq!(payload.worksheets, vec!["ws-1".to_string()]);
+    assert_eq!(payload.note_links[0].target_path, "Mathe/Skript-Notiz.md");
+    assert_eq!(payload.note_links[0].page, 3);
+    assert_eq!(payload.note_links[0].style, "text");
+    assert_eq!(payload.note_backups[0].content, "Stand A");
+    assert!(parsed.markdown.contains("$$\\int x$$"));
+    assert_eq!(
+        companion_note_path("Mathe/Analysis.md", ".famd"),
+        "Mathe/Analysis.famd"
+    );
+    assert_eq!(
+        companion_note_path("Mathe/Analysis.famd", ".md"),
+        "Mathe/Analysis.md"
+    );
+    assert_eq!(
+        companion_note_path("Mathe/Skript.pdf", ".famd"),
+        "Mathe/Skript.famd"
+    );
+
+    let poisoned = format!("{encoded}\n<!-- fanotes-famd:v1 chars=2 -->\n{{}}");
+    assert!(parse_famd(&poisoned).payload.is_none());
+}

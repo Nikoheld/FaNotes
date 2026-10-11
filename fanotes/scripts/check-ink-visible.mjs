@@ -23,6 +23,11 @@ const {
 } = await server.ssrLoadModule('/src/lib/inkStrokePaint.ts')
 const { inkStrokePaintScale } = await server.ssrLoadModule('/src/lib/paperGrow.ts')
 const { inkBlockedMarkdownSelectors, markdownNoteInkOverlaySize, pointerEventsForInkLayer } = await server.ssrLoadModule('/src/lib/pdfInkHit.ts')
+const { viewportRasterEnabled } = await server.ssrLoadModule('/src/lib/viewportRasterFlag.ts')
+const viewportRaster = viewportRasterEnabled() ? await server.ssrLoadModule('/src/lib/viewportRaster.ts') : null
+const rasterize = viewportRaster
+  ? (stroke, width, height, layoutWidth) => viewportRaster.rasterizeInkStrokes([stroke], width, height, { layoutWidth })
+  : null
 
 const runOnce = () => {
   assert.equal(pointerEventsForInkLayer('markdown', true), 'none')
@@ -114,6 +119,43 @@ const runOnce = () => {
   assert.match(board, /from '\.\.\/lib\/inkStrokePaint'/)
   assert.match(board, /markdownNoteInkOverlaySize/)
 
+  let raster = null
+  if (rasterize) {
+    // Flag on: the same mapped samples painted by the Rust viewport raster.
+    const rasterMapped = paintVisibleInkSample(rasterize)
+    assert.equal(rasterMapped.points, mapped.points, 'both painters see the same samples')
+    assert.ok(rasterMapped.opaque > 0, `viewport raster produced no opaque pixels (${rasterMapped.opaque})`)
+    assert.ok(rasterMapped.area >= 16, `viewport raster stroke must be a visible line, got ${rasterMapped.boxW}x${rasterMapped.boxH}`)
+    assert.ok(rasterMapped.boxW >= 4 && rasterMapped.boxH >= 4, `viewport raster stroke collapsed to ${rasterMapped.boxW}x${rasterMapped.boxH}`)
+    assert.ok(Math.abs(rasterMapped.boxW - mapped.boxW) <= 4 && Math.abs(rasterMapped.boxH - mapped.boxH) <= 4, `the raster footprint ${rasterMapped.boxW}x${rasterMapped.boxH} must match the canvas footprint ${mapped.boxW}x${mapped.boxH}`)
+    const rasterEmpty = paintMarkdownNoteStiftStroke({
+      overlay: { left: 10, top: 10, width: 0, height: 0 },
+      paper: { width: 0, height: 0 },
+      events: [{ type: 'pointerdown', clientX: 80, clientY: 90, pressure: 0.5, pointerType: 'pen', timeStamp: 1 }],
+      rasterize,
+    })
+    assert.equal(rasterEmpty.opaque, 0, 'no Blatt and no overlay must not invent a line on the raster either')
+    const rasterAbsorbed = opaqueInkStats(rasterize({
+      points: [
+        { x: 0.2, y: 0.25, pressure: 0.55 },
+        { x: 0.55, y: 0.48, pressure: 0.6 },
+        { x: 0.72, y: 0.62, pressure: 0.5 },
+      ],
+      baseWidth: 3.5,
+      pressureEnabled: true,
+      color: '#202333',
+      purpose: 'handwriting',
+      brush: 'fineliner',
+      colorEffect: 'solid',
+      opacity: 1,
+    }, 560, 560, 560))
+    assert.ok(rasterAbsorbed.opaque > 0, 'absorbed one-canvas note must still paint a visible pen on the raster')
+    assert.ok(rasterAbsorbed.area >= 16, `absorbed raster stroke was a hairline ${rasterAbsorbed.boxW}x${rasterAbsorbed.boxH}`)
+    const rasterBlank = opaqueInkStats(rasterize({ points: [], baseWidth: 3.5, color: '#202333', purpose: 'handwriting' }, 200, 200, 200))
+    assert.equal(rasterBlank.opaque, 0, 'empty stroke must not invent pixels on the raster')
+    raster = { opaque: rasterMapped.opaque, boxW: rasterMapped.boxW, boxH: rasterMapped.boxH, absorbedOpaque: rasterAbsorbed.opaque }
+  }
+
   return {
     overlayWidth: mapped.overlayWidth,
     overlayHeight: mapped.overlayHeight,
@@ -122,6 +164,7 @@ const runOnce = () => {
     boxW: mapped.boxW,
     boxH: mapped.boxH,
     absorbedOpaque: absorbedStats.opaque,
+    ...(raster ? { raster } : {}),
   }
 }
 
