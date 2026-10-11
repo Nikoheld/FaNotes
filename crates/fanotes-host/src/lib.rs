@@ -8,6 +8,7 @@ mod addons;
 mod channels;
 mod drawings;
 mod imports;
+mod linux_runtime;
 mod notes;
 mod ocr;
 mod onboarding;
@@ -589,20 +590,7 @@ impl Host {
             "settings": self.settings,
             "onboardingRequired": self.onboarding_required,
             "starterSubjects": onboarding::starter_subjects(self.ui_language()),
-            "linuxRuntime": {
-                "platform": std::env::consts::OS,
-                "ozone": "",
-                "sessionType": std::env::var("XDG_SESSION_TYPE").unwrap_or_default(),
-                "desktop": std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default(),
-                "hyprland": std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE").is_some(),
-                "hyprlandInstance": std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE").is_some(),
-                "display": std::env::var("DISPLAY").unwrap_or_default(),
-                "waylandDisplay": std::env::var("WAYLAND_DISPLAY").unwrap_or_default(),
-                "hyprlandZeroScaling": false,
-                "deviceScaleFactor": null,
-                "deviceScaleSource": null,
-                "monitorScale": null
-            }
+            "linuxRuntime": linux_runtime::bootstrap_linux()
         }))
     }
 
