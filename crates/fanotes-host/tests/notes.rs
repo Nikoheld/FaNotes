@@ -613,6 +613,21 @@ fn a_history_index_with_an_invalid_byte_still_lists_its_snapshots() {
 }
 
 #[test]
+fn a_recognition_model_with_a_bad_byte_still_loads() {
+    let (mut host, vault) = host();
+    std::fs::create_dir_all(vault.join(".fanotes")).unwrap();
+    let mut bytes = br#"{"version":1,"name":"X"}"#.to_vec();
+    let index = bytes.iter().position(|byte| *byte == b'X').unwrap();
+    bytes[index] = 0xff;
+    std::fs::write(vault.join(".fanotes/recognition-model.json"), &bytes).unwrap();
+    assert_eq!(
+        host.dispatch("fanotes:read-recognition-model", &[])
+            .unwrap(),
+        json!("{\"version\":1,\"name\":\"\u{FFFD}\"}")
+    );
+}
+
+#[test]
 fn a_subject_book_with_a_bad_byte_stays_in_the_list() {
     let (mut host, vault) = host();
     std::fs::create_dir_all(vault.join(".fanotes")).unwrap();

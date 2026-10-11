@@ -548,8 +548,8 @@ impl Host {
             Ok(meta) if meta.len() > MAX_RECOGNITION_MODEL_BYTES => {
                 Err("Das Handschriftmodell ist ungültig oder zu groß.".to_owned())
             }
-            Ok(_) => fs::read_to_string(&path)
-                .map(Value::String)
+            Ok(_) => fs::read(&path)
+                .map(|bytes| Value::String(String::from_utf8_lossy(&bytes).into_owned()))
                 .map_err(|_| "Das Handschriftmodell konnte nicht gelesen werden.".to_owned()),
         }
     }
