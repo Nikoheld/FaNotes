@@ -2280,8 +2280,7 @@ fn place_in_trash(trash_root: &Path, source: &Path) -> Result<(), String> {
     let original = std::path::absolute(source).unwrap_or_else(|_| source.to_path_buf());
     fs::rename(source, &destination)
         .map_err(|_| "Der Eintrag konnte nicht in den Papierkorb verschoben werden.".to_owned())?;
-    let when = notes::iso_from_system_time(SystemTime::now());
-    let when = when.split('.').next().unwrap_or(when.as_str());
+    let when = trash_deletion_date();
     let record = format!(
         "[Trash Info]\nPath={}\nDeletionDate={when}\n",
         percent_encode(&original)
@@ -2297,6 +2296,77 @@ fn place_in_trash(trash_root: &Path, source: &Path) -> Result<(), String> {
         return Err("Der Eintrag konnte nicht in den Papierkorb verschoben werden.".to_owned());
     }
     Ok(())
+}
+
+/// Freedesktop trash info wants the user's local clock, with no zone suffix.
+static TRASH_CLOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn trash_deletion_date() -> String {
+    let _lock = TRASH_CLOCK
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    trash_deletion_date_unlocked()
+}
+
+fn trash_deletion_date_unlocked() -> String {
+    #[cfg(unix)]
+    if let Some(stamp) = unix_local_stamp() {
+        return stamp;
+    }
+    #[cfg(windows)]
+    if let Some(stamp) = windows_local_stamp() {
+        return stamp;
+    }
+    let when = notes::iso_from_system_time(SystemTime::now());
+    when.split('.').next().unwrap_or(when.as_str()).to_owned()
+}
+
+#[cfg(unix)]
+fn unix_local_stamp() -> Option<String> {
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).ok()?;
+    let secs = libc::time_t::try_from(now.as_secs()).ok()?;
+    let mut local: libc::tm = unsafe { std::mem::zeroed() };
+    let ptr = unsafe { libc::localtime_r(&secs, &mut local) };
+    if ptr.is_null() {
+        return None;
+    }
+    Some(format!(
+        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}",
+        local.tm_year + 1900,
+        local.tm_mon + 1,
+        local.tm_mday,
+        local.tm_hour,
+        local.tm_min,
+        local.tm_sec
+    ))
+}
+
+#[cfg(windows)]
+fn windows_local_stamp() -> Option<String> {
+    #[repr(C)]
+    struct SystemTime {
+        year: u16,
+        month: u16,
+        day_of_week: u16,
+        day: u16,
+        hour: u16,
+        minute: u16,
+        second: u16,
+        milliseconds: u16,
+    }
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn GetLocalTime(out: *mut SystemTime);
+    }
+    let mut time = unsafe { std::mem::zeroed::<SystemTime>() };
+    unsafe { GetLocalTime(&mut time) };
+    if time.month == 0 || time.day == 0 {
+        return None;
+    }
+    Some(format!(
+        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}",
+        time.year, time.month, time.day, time.hour, time.minute, time.second
+    ))
 }
 
 fn percent_encode(path: &Path) -> String {
@@ -3121,5 +3191,68 @@ mod search_span_tests {
         let window = excerpt(&note, start, span);
         assert!(window.contains("Zielwort"), "{window}");
         let _ = excerpt("kurz", 10_000, word.len());
+    }
+}
+
+#[cfg(all(test, unix))]
+mod trash_date_tests {
+    use super::TRASH_CLOCK;
+    use std::ffi::OsString;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    unsafe extern "C" {
+        fn tzset();
+    }
+
+    struct RestoreTz(Option<OsString>);
+
+    impl Drop for RestoreTz {
+        fn drop(&mut self) {
+            match self.0.take() {
+                Some(value) => unsafe { std::env::set_var("TZ", value) },
+                None => unsafe { std::env::remove_var("TZ") },
+            }
+            unsafe { tzset() }
+        }
+    }
+
+    fn stamp_epoch(stamp: &str) -> i64 {
+        let mut time: libc::tm = unsafe { std::mem::zeroed() };
+        time.tm_year = stamp[0..4].parse::<i32>().unwrap() - 1900;
+        time.tm_mon = stamp[5..7].parse::<i32>().unwrap() - 1;
+        time.tm_mday = stamp[8..10].parse::<i32>().unwrap();
+        time.tm_hour = stamp[11..13].parse::<i32>().unwrap();
+        time.tm_min = stamp[14..16].parse::<i32>().unwrap();
+        time.tm_sec = stamp[17..19].parse::<i32>().unwrap();
+        unsafe { libc::timegm(&mut time) }
+    }
+
+    #[test]
+    fn the_trash_record_uses_the_local_clock() {
+        let _lock = TRASH_CLOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let _restore = RestoreTz(std::env::var_os("TZ"));
+        unsafe { std::env::set_var("TZ", "Pacific/Kiritimati") };
+        unsafe { tzset() };
+        let before = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+        let stamp = super::trash_deletion_date_unlocked();
+        let after = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+        assert_eq!(stamp.len(), 19, "{stamp}");
+        assert_eq!(&stamp[10..11], "T");
+        assert!(!stamp.contains('Z'), "{stamp}");
+        assert!(!stamp.contains('.'), "{stamp}");
+        let local = stamp_epoch(&stamp);
+        assert!(
+            (13 * 3600..=15 * 3600).contains(&(local - before))
+                && (13 * 3600..=15 * 3600).contains(&(local - after)),
+            "{stamp} is not fourteen hours ahead of UTC ({before})"
+        );
     }
 }
