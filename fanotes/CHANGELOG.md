@@ -2,6 +2,7 @@
 
 ## Unveröffentlicht
 
+- **Sync ohne Schlüsselbund.** Die Anmeldung wird auf dem Gerät verschlüsselt gespeichert, wenn kein Systemschlüsselbund verfügbar ist. Die Datei bleibt nur für den eigenen Benutzer lesbar.
 - **Stabile Paketnamen.** Die Website erkennt wieder vollständige Stable-Pakete. Der Nightly-Zusatz im Dateinamen ist optional.
 
 ## 2026.10.2

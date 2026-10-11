@@ -3,7 +3,7 @@
 // the wiring in App / Electron / nginx / systemd.
 import assert from 'node:assert/strict'
 import { createServer as createHttpServer } from 'node:http'
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -394,8 +394,29 @@ try {
     await host.writeSecrets('{"v":1}')
     assert.equal(await host.readSecrets(), '{"v":1}')
     assert.ok(readFileSync(join(userData, 'sync', 'account.secret'), 'utf8').startsWith('safe1:'))
+    const lockedStorage = {
+      isEncryptionAvailable: () => false,
+      encryptString() { throw new Error('no keychain') },
+      decryptString() { throw new Error('no keychain') },
+    }
+    const lockedOnSafe = createSyncHost({ vaultRoot: async () => root, userDataDirectory: userData, safeStorage: lockedStorage })
+    await assert.rejects(lockedOnSafe.readSecrets(), /Schlüsselbund/u)
     await host.writeSecrets(null)
     assert.equal(await host.readSecrets(), null)
+    const lockedUserData = mkdtempSync(join(tmpdir(), 'fanotes-sync-nokeyring-'))
+    const locked = createSyncHost({ vaultRoot: async () => root, userDataDirectory: lockedUserData, safeStorage: lockedStorage })
+    await locked.writeSecrets('{"token":"secret"}')
+    const storedSecret = readFileSync(join(lockedUserData, 'sync', 'account.secret'), 'utf8')
+    assert.ok(storedSecret.startsWith('local1:'), 'missing keychain stores an encrypted local envelope')
+    assert.equal(storedSecret.includes('secret'), false)
+    assert.equal(statSync(join(lockedUserData, 'sync', 'account.secret')).mode & 0o077, 0)
+    assert.equal(statSync(join(lockedUserData, 'sync', 'account.key')).mode & 0o077, 0)
+    assert.equal(await locked.readSecrets(), '{"token":"secret"}')
+    rmSync(lockedUserData, { recursive: true, force: true })
+    const { localizeText } = await import('../electron/i18n.cjs')
+    const translated = localizeText('Error invoking remote method \'fanotes:sync-write-secrets\': Error: Sync-Anmeldedaten können ohne verfügbaren Systemschlüsselbund nicht gespeichert werden.', 'en')
+    assert.match(translated, /Sync sign-in cannot be saved without an available system keychain\./u)
+    assert.doesNotMatch(translated, /saved become/u)
     const vaultId = await host.vaultId()
     await host.writeState(vaultId, '{"cursor":1}')
     assert.equal(await host.readState(vaultId), '{"cursor":1}')

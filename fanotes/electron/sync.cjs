@@ -3,7 +3,9 @@
 // Sync host for the desktop app: raw file access to the whole vault for the
 // renderer-side sync engine (electron/../src/lib/sync/engine.ts), the engine's
 // per-vault state under userData, and the account secrets protected with the
-// OS keychain via safeStorage where available.
+// OS keychain via safeStorage. Without a keychain they are AES-256-GCM
+// encrypted with a random key that stays in the user-data directory at mode
+// 0600. The account JSON is never written in the clear.
 //
 // Everything the renderer hands in is treated as untrusted: paths are
 // normalised, confined to the vault root and rejected when any component is a
@@ -21,7 +23,9 @@ const MAX_DEPTH = 40
 const MAX_FILE_BYTES = 100 * 1024 * 1024
 const MAX_STATE_BYTES = 64 * 1024 * 1024
 const SECRETS_PREFIX_ENCRYPTED = 'safe1:'
+const SECRETS_PREFIX_LOCAL = 'local1:'
 const SECRETS_PREFIX_PLAIN = 'plain1:'
+const LOCAL_KEY_BYTES = 32
 
 const normalizeRelative = (raw) => {
   if (typeof raw !== 'string' || !raw || raw.length > 1024 || raw.includes('\0')) throw new Error('Ungültiger Sync-Pfad.')
@@ -148,6 +152,53 @@ function createSyncHost({ vaultRoot, userDataDirectory, safeStorage, trashItem }
     return path.join(stateDirectory, `state-${vaultId}.json`)
   }
   const secretsPath = path.join(stateDirectory, 'account.secret')
+  const localKeyPath = path.join(stateDirectory, 'account.key')
+
+  const readLocalKey = async () => {
+    try {
+      const existing = await fsp.readFile(localKeyPath)
+      if (existing.length !== LOCAL_KEY_BYTES) throw new Error('Die lokale Sync-Anmeldung konnte nicht entschlüsselt werden.')
+      return existing
+    } catch (error) {
+      if (error?.code === 'ENOENT') return null
+      throw error
+    }
+  }
+
+  const localKey = async () => {
+    const existing = await readLocalKey()
+    if (existing) return existing
+    const created = crypto.randomBytes(LOCAL_KEY_BYTES)
+    await atomicWriteBytes(localKeyPath, created, 0)
+    return created
+  }
+
+  const sealLocal = (json, key) => {
+    const iv = crypto.randomBytes(12)
+    const cipher = crypto.createCipheriv('aes-256-gcm', key, iv)
+    const body = Buffer.concat([cipher.update(json, 'utf8'), cipher.final()])
+    const tag = cipher.getAuthTag()
+    return `${SECRETS_PREFIX_LOCAL}${Buffer.concat([iv, tag, body]).toString('base64')}`
+  }
+
+  const openLocal = (payload, key) => {
+    const raw = Buffer.from(payload, 'base64')
+    if (raw.length < 12 + 16 + 1) throw new Error('Die lokale Sync-Anmeldung konnte nicht entschlüsselt werden.')
+    const iv = raw.subarray(0, 12)
+    const tag = raw.subarray(12, 28)
+    const body = raw.subarray(28)
+    try {
+      const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv)
+      decipher.setAuthTag(tag)
+      return Buffer.concat([decipher.update(body), decipher.final()]).toString('utf8')
+    } catch {
+      throw new Error('Die lokale Sync-Anmeldung konnte nicht entschlüsselt werden.')
+    }
+  }
+
+  const encryptionAvailable = () => {
+    try { return safeStorage.isEncryptionAvailable() } catch { return false }
+  }
 
   return {
     async vaultId() {
@@ -226,8 +277,13 @@ function createSyncHost({ vaultRoot, userDataDirectory, safeStorage, trashItem }
         throw error
       }
       if (raw.startsWith(SECRETS_PREFIX_ENCRYPTED)) {
-        if (!safeStorage.isEncryptionAvailable()) throw new Error('Die Sync-Anmeldung ist mit dem Schlüsselbund dieses Systems geschützt, der gerade nicht verfügbar ist.')
+        if (!encryptionAvailable()) throw new Error('Die Sync-Anmeldung ist mit dem Schlüsselbund dieses Systems geschützt, der gerade nicht verfügbar ist.')
         return safeStorage.decryptString(Buffer.from(raw.slice(SECRETS_PREFIX_ENCRYPTED.length), 'base64'))
+      }
+      if (raw.startsWith(SECRETS_PREFIX_LOCAL)) {
+        const key = await readLocalKey()
+        if (!key) throw new Error('Die lokale Sync-Anmeldung konnte nicht entschlüsselt werden.')
+        return openLocal(raw.slice(SECRETS_PREFIX_LOCAL.length), key)
       }
       if (raw.startsWith(SECRETS_PREFIX_PLAIN)) {
         await fsp.rm(secretsPath, { force: true })
@@ -241,12 +297,15 @@ function createSyncHost({ vaultRoot, userDataDirectory, safeStorage, trashItem }
         return
       }
       if (typeof json !== 'string' || json.length > 64 * 1024) throw new Error('Die Sync-Anmeldedaten sind ungültig.')
-      let encryptionAvailable = false
-      try { encryptionAvailable = safeStorage.isEncryptionAvailable() } catch { encryptionAvailable = false }
-      if (!encryptionAvailable) {
-        throw new Error('Sync-Anmeldedaten können ohne verfügbaren Systemschlüsselbund nicht gespeichert werden.')
+      let encoded = null
+      if (encryptionAvailable()) {
+        try {
+          encoded = `${SECRETS_PREFIX_ENCRYPTED}${safeStorage.encryptString(json).toString('base64')}`
+        } catch {
+          encoded = null
+        }
       }
-      const encoded = `${SECRETS_PREFIX_ENCRYPTED}${safeStorage.encryptString(json).toString('base64')}`
+      if (!encoded) encoded = sealLocal(json, await localKey())
       await atomicWriteBytes(secretsPath, Buffer.from(encoded, 'utf8'), 0)
     },
   }

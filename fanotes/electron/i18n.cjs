@@ -30,7 +30,7 @@ function loadEnglishCatalog() {
   }
 }
 
-const EXACT_ONLY_REPLACEMENTS = new Set(['Frei', 'Breite', 'Pinsel', 'Farben', 'Strich'])
+const EXACT_ONLY_REPLACEMENTS = new Set(['Frei', 'Breite', 'Pinsel', 'Farben', 'Strich', 'gespeichert', 'werden'])
 
 function applyEnglishUnits(source) {
   if (source === 'Finde alles wieder') return 'Find everything again'
