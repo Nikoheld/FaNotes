@@ -155,7 +155,8 @@ fn resetting_app_data_waits_for_the_next_launch_and_keeps_the_vault() {
     reopened.secret_store = SecretStore::Memory;
     assert!(!app.join("settings.json").exists());
     assert!(!app.join("sync-state-extra.txt").exists());
-    assert!(app.join(".fanotes-reset-complete").is_file());
+    assert!(!app.join(".fanotes-reset-complete").exists());
+    assert!(app.join(".fanotes-legacy-migration-v1-complete").is_file());
     assert!(!marker.exists());
     assert_eq!(fs::read(vault.join("Seite.md")).unwrap(), b"bleibt\n");
     assert_eq!(
@@ -205,6 +206,68 @@ fn a_symlinked_reset_marker_is_discarded() {
     let _ = Host::open(app.clone());
     assert!(app.join("settings.json").is_file());
     assert!(fs::symlink_metadata(&marker).is_err());
+}
+
+#[test]
+fn an_upgrade_turns_experimental_handwriting_off_once() {
+    let dir = std::env::temp_dir().join(format!("fanotes-settings-gate-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    let app = dir.join("app");
+    let vault = dir.join("vault");
+    fs::create_dir_all(&app).unwrap();
+    fs::create_dir_all(&vault).unwrap();
+    fs::write(
+        app.join("settings.json"),
+        r#"{"theme":"midnight","experimentalHandwritingToText":true,"experimentalHandwritingToTextSeenVersion":"2020.1.0"}"#,
+    )
+    .unwrap();
+    let mut host = Host::open(app.clone());
+    host.secret_store = SecretStore::Memory;
+    host.set_vault(vault).unwrap();
+    let version = host.dispatch("fanotes:update-get-state", &[]).unwrap()["currentVersion"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let settings = host.dispatch("fanotes:bootstrap", &[]).unwrap();
+    assert_eq!(settings["settings"]["theme"], "midnight");
+    assert_eq!(settings["settings"]["experimentalHandwritingToText"], false);
+    assert_eq!(
+        settings["settings"]["experimentalHandwritingToTextSeenVersion"],
+        version
+    );
+    let disk = fs::read_to_string(app.join("settings.json")).unwrap();
+    assert!(disk.contains(&version));
+    assert!(!disk.contains("2020.1.0"));
+
+    let saved = host
+        .dispatch(
+            "fanotes:save-settings",
+            &[json!({
+                "theme": "midnight",
+                "experimentalHandwritingToText": true,
+                "experimentalHandwritingToTextSeenVersion": "2020.1.0"
+            })],
+        )
+        .unwrap();
+    assert_eq!(saved["experimentalHandwritingToText"], false);
+
+    host.dispatch(
+        "fanotes:save-settings",
+        &[json!({
+            "theme": "midnight",
+            "experimentalHandwritingToText": true,
+            "experimentalHandwritingToTextSeenVersion": version
+        })],
+    )
+    .unwrap();
+    let mut reopened = Host::open(app);
+    reopened.secret_store = SecretStore::Memory;
+    assert_eq!(
+        reopened.dispatch("fanotes:bootstrap", &[]).unwrap()["settings"]
+            ["experimentalHandwritingToText"],
+        true
+    );
+    let _ = fs::remove_dir_all(&dir);
 }
 
 #[test]

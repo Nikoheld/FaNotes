@@ -1244,6 +1244,7 @@ impl Host {
             self.settings
                 .insert((*key).to_owned(), Value::String(String::new()));
         }
+        settings::gate_experimental_handwriting(&mut self.settings, APP_VERSION);
         self.persist_settings()?;
         Ok(json!(self.settings))
     }
@@ -1364,6 +1365,9 @@ impl Host {
                 for key in SECRET_KEYS {
                     self.settings
                         .insert((*key).to_owned(), Value::String(String::new()));
+                }
+                if settings::gate_experimental_handwriting(&mut self.settings, APP_VERSION) {
+                    let _ = self.persist_settings();
                 }
             }
         }
