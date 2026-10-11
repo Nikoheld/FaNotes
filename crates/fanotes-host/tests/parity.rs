@@ -1,7 +1,7 @@
 use std::fs;
 
 use base64::Engine;
-use fanotes_host::{addon_request_allowed, local_ai_origin, Host, CHANNELS};
+use fanotes_host::{addon_request_allowed, local_ai_origin, Host, SecretStore, CHANNELS};
 use serde_json::json;
 
 fn host() -> (TempDir, Host) {
@@ -154,6 +154,7 @@ fn local_ai_urls_stay_on_the_lan() {
 #[test]
 fn secrets_do_not_land_in_settings() {
     let (dir, mut host) = host();
+    host.secret_store = SecretStore::Memory;
     host.dispatch(
         "fanotes:save-settings",
         &[json!({ "theme": "dark", "openAiApiKey": "sk-live-secret" })],
