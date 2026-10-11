@@ -181,6 +181,25 @@ fn a_next_line_import_folder_is_not_the_vault_root() {
 }
 
 #[test]
+fn a_one_dot_pdf_name_is_not_a_pdf_import() {
+    let (mut host, vault) = host();
+    let payload = json!({ "name": ".pdf", "bytesBase64": b64(b"%PDF-1.4\n") });
+    let note = host
+        .dispatch(
+            "fanotes:import-pdf-note",
+            &[json!("Mathe"), payload.clone()],
+        )
+        .unwrap_err();
+    assert!(note.contains("PDF-Notiz"), "{note}");
+    let book = host
+        .dispatch("fanotes:import-subject-book", &[json!("Mathe"), payload])
+        .unwrap_err();
+    assert!(book.contains("als Buch"), "{book}");
+    assert!(!vault.join("Mathe/.pdf").exists());
+    assert!(!vault.join(".pdf").exists());
+}
+
+#[test]
 fn a_subject_book_uses_the_desktop_trim_only_to_reject_a_blank_subject() {
     let (mut host, vault) = host();
     let pdf = json!({ "name": "Skript.pdf", "bytesBase64": b64(b"%PDF-1.4\n") });

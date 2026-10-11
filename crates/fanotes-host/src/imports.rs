@@ -139,7 +139,9 @@ fn import_pdf_file(
         .and_then(Value::as_str)
         .filter(|name| !name.is_empty())
         .unwrap_or(fallback);
-    if !name.to_ascii_lowercase().ends_with(".pdf") && payload.get("name").is_some() {
+    if payload.get("name").is_some()
+        && !crate::vault::posix_extname(name).eq_ignore_ascii_case(".pdf")
+    {
         return Err(kind.not_pdf().to_owned());
     }
     let bytes = decode_payload_bytes(payload, 96 * 1024 * 1024)?;
