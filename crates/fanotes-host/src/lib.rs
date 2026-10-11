@@ -1784,7 +1784,7 @@ fn safe_entry_name(value: &str) -> Result<String, String> {
 
 fn entry_name_allowed(name: &str) -> bool {
     !name.is_empty()
-        && name.len() <= 180
+        && vault::utf16_len(name) <= 180
         && name != "."
         && name != ".."
         && !name.contains('/')

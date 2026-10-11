@@ -252,7 +252,7 @@ fn safe_title(value: &str, fallback: &str) -> Result<String, String> {
     let name = if raw.is_empty() { fallback } else { raw };
     let cleaned = name.trim_end_matches(['.', ' ']).trim();
     if cleaned.is_empty()
-        || cleaned.len() > 180
+        || crate::vault::utf16_len(cleaned) > 180
         || cleaned == "."
         || cleaned == ".."
         || cleaned.contains('/')
@@ -291,7 +291,7 @@ fn validate_document(candidate: &Value, expected_id: &str) -> Result<Value, Stri
         .unwrap_or("")
         .trim();
     if title.is_empty()
-        || title.len() > 180
+        || crate::vault::utf16_len(title) > 180
         || title.chars().any(|character| character.is_control())
     {
         return Err("Der Arbeitsblatttitel ist ungültig.".to_owned());

@@ -216,7 +216,7 @@ fn safe_stem(value: &str, fallback: &str) -> Result<String, String> {
     let name = if raw.is_empty() { fallback } else { raw };
     let cleaned = name.trim_end_matches(['.', ' ']).trim();
     if cleaned.is_empty()
-        || cleaned.len() > 180
+        || crate::vault::utf16_len(cleaned) > 180
         || cleaned == "."
         || cleaned == ".."
         || cleaned.contains('/')
