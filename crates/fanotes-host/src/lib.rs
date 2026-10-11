@@ -12,6 +12,7 @@ mod ocr;
 mod onboarding;
 mod onenote;
 mod policy;
+mod resources;
 mod vault;
 mod worksheets;
 
@@ -172,12 +173,11 @@ impl Host {
             }
             "fanotes:read-asset-data-url" => self.read_asset_data_url(&arg_string(args, 0)?),
             "fanotes:read-asset-bytes" => self.read_asset_bytes(&arg_string(args, 0)?),
-            "fanotes:load-spelling-resources"
-            | "fanotes:load-spelling-word-candidates"
-            | "fanotes:load-handwriting-recognition-resources" => Err(
-                "Die Ressourcen liegen im Anwendungsbundle und werden vom Renderer geladen."
-                    .to_owned(),
+            "fanotes:load-spelling-resources" => resources::load_spelling(),
+            "fanotes:load-spelling-word-candidates" => resources::load_spelling_candidates(
+                args.first().and_then(Value::as_str).unwrap_or(""),
             ),
+            "fanotes:load-handwriting-recognition-resources" => resources::load_handwriting(),
             "fanotes:recognize-native-handwriting-line" => {
                 ocr::recognize_line(args.first().unwrap_or(&Value::Null))
             }
