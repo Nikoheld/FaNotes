@@ -2702,7 +2702,9 @@ fn read_tree(
     let entries =
         fs::read_dir(directory).map_err(|_| "Der Vault konnte nicht gelesen werden.".to_owned())?;
     for entry in entries {
-        let entry = entry.map_err(|_| "Der Vault konnte nicht gelesen werden.".to_owned())?;
+        let Ok(entry) = entry else {
+            continue;
+        };
         let name = entry.file_name().to_string_lossy().to_string();
         if name.starts_with('.') {
             continue;
@@ -2713,8 +2715,9 @@ fn read_tree(
             .unwrap_or(&path)
             .to_string_lossy()
             .replace('\\', "/");
-        let meta = fs::symlink_metadata(&path)
-            .map_err(|_| "Der Vault konnte nicht gelesen werden.".to_owned())?;
+        let Ok(meta) = fs::symlink_metadata(&path) else {
+            continue;
+        };
         if meta.file_type().is_symlink() {
             continue;
         }
@@ -3070,14 +3073,17 @@ fn collect_search_files(
     for entry in
         fs::read_dir(directory).map_err(|_| "Der Vault konnte nicht gelesen werden.".to_owned())?
     {
-        let entry = entry.map_err(|_| "Der Vault konnte nicht gelesen werden.".to_owned())?;
+        let Ok(entry) = entry else {
+            continue;
+        };
         let name = entry.file_name().to_string_lossy().to_string();
         if name.starts_with('.') {
             continue;
         }
         let path = entry.path();
-        let meta = fs::symlink_metadata(&path)
-            .map_err(|_| "Der Vault konnte nicht gelesen werden.".to_owned())?;
+        let Ok(meta) = fs::symlink_metadata(&path) else {
+            continue;
+        };
         if meta.file_type().is_symlink() {
             continue;
         }
