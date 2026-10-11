@@ -49,7 +49,7 @@ pub fn write_note_file(
         format!("{body}\n")
     };
     if !is_famd {
-        let path = vault::resolve_inside(root, relative)?;
+        let path = vault::resolve_note_file(root, relative)?;
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)
                 .map_err(|_| "Der Ordner konnte nicht angelegt werden.".to_owned())?;
@@ -68,7 +68,7 @@ pub fn attach_sidecar(
     settings_paper: Option<&str>,
 ) -> Result<(), String> {
     let famd_relative = companion_note_path(relative, ".famd");
-    let famd_path = vault::resolve_inside(root, &famd_relative)?;
+    let famd_path = vault::resolve_note_file(root, &famd_relative)?;
     let existing = fs::read_to_string(&famd_path)
         .ok()
         .map(|source| parse_famd(&source))
@@ -119,7 +119,7 @@ pub fn attach_sidecar(
         .map_err(|_| "Die Datei konnte nicht geschrieben werden.".to_owned())?;
     if relative.to_lowercase().ends_with(".famd") {
         let markdown_relative = companion_note_path(relative, ".md");
-        if let Ok(markdown_path) = vault::resolve_inside(root, &markdown_relative) {
+        if let Ok(markdown_path) = vault::resolve_note_file(root, &markdown_relative) {
             if markdown_path.is_file() {
                 let text = if body.ends_with('\n') {
                     body
@@ -395,7 +395,7 @@ fn load_note(host: &Host, relative: &str) -> Result<(PathBuf, String, FamdPayloa
     let root = vault_root(host)?;
     let note = note_path(relative)?;
     let famd_relative = companion_note_path(&note, ".famd");
-    let famd_path = vault::resolve_inside(root, &famd_relative)?;
+    let famd_path = vault::resolve_note_file(root, &famd_relative)?;
     let source = fs::read_to_string(&famd_path).unwrap_or_default();
     let parsed = if source.is_empty() {
         parse_famd("")
@@ -405,7 +405,7 @@ fn load_note(host: &Host, relative: &str) -> Result<(PathBuf, String, FamdPayloa
     let markdown = if note.to_lowercase().ends_with(".pdf") {
         parsed.markdown.clone()
     } else {
-        let markdown_path = vault::resolve_inside(root, &note)?;
+        let markdown_path = vault::resolve_note_file(root, &note)?;
         fs::read_to_string(markdown_path).unwrap_or_else(|_| parsed.markdown.clone())
     };
     let body = strip_famd_payload(&markdown);

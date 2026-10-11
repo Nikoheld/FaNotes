@@ -737,7 +737,7 @@ impl Host {
         if !notes::is_note_text(&normalized) {
             return Err("Es dürfen nur Markdown-Dateien und FaNotes-Handschriftdateien (.famd) bearbeitet werden.".to_owned());
         }
-        let path = vault::resolve_inside(self.require_vault()?, &normalized)?;
+        let path = vault::resolve_note_file(self.require_vault()?, &normalized)?;
         let limit = note_byte_limit(&normalized);
         let meta = fs::symlink_metadata(&path)
             .map_err(|_| "Die Datei konnte nicht gelesen werden.".to_owned())?;
@@ -762,7 +762,7 @@ impl Host {
         if content.len() as u64 > note_byte_limit(&normalized) {
             return Err("Der Notizinhalt ist ungültig oder zu groß.".to_owned());
         }
-        let path = vault::resolve_inside(&root, &normalized)?;
+        let path = vault::resolve_note_file(&root, &normalized)?;
         if notes::records_history(&normalized) {
             if let Ok(previous) = fs::read(&path) {
                 if let Ok(text) = String::from_utf8(previous) {

@@ -256,3 +256,43 @@ fn a_second_note_is_numbered_and_reads_without_the_sidecar() {
         .dispatch("fanotes:read-file", &[json!("Mathe/Seite.pdf")])
         .is_err());
 }
+
+#[test]
+fn a_symlinked_note_cannot_leave_the_vault() {
+    let dir = std::env::temp_dir().join(format!("fanotes-notes-link-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let vault = dir.join("vault");
+    let outside = dir.join("outside");
+    std::fs::create_dir_all(&vault).unwrap();
+    std::fs::create_dir_all(&outside).unwrap();
+    std::fs::write(outside.join("secret.md"), b"geheim\n").unwrap();
+    std::os::unix::fs::symlink(outside.join("secret.md"), vault.join("Notiz.md")).unwrap();
+    std::os::unix::fs::symlink(&outside, vault.join("weg")).unwrap();
+    let mut host = Host::open(dir.join("app"));
+    host.trash_dir = Some(dir.join("trash"));
+    host.set_vault(vault).unwrap();
+    assert_eq!(
+        host.dispatch("fanotes:read-file", &[json!("Notiz.md")])
+            .unwrap_err(),
+        "Symbolische Links sind innerhalb des Vaults nicht erlaubt."
+    );
+    assert_eq!(
+        host.dispatch("fanotes:write-file", &[json!("Notiz.md"), json!("neu\n")])
+            .unwrap_err(),
+        "Symbolische Links sind innerhalb des Vaults nicht erlaubt."
+    );
+    assert_eq!(
+        std::fs::read(outside.join("secret.md")).unwrap(),
+        b"geheim\n"
+    );
+    assert_eq!(
+        host.dispatch(
+            "fanotes:write-file",
+            &[json!("weg/Seite.md"), json!("raus\n")]
+        )
+        .unwrap_err(),
+        "Symbolische Links sind innerhalb des Vaults nicht erlaubt."
+    );
+    assert!(!outside.join("Seite.md").exists());
+    let _ = std::fs::remove_dir_all(&dir);
+}

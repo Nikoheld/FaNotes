@@ -40,6 +40,47 @@ pub fn normalize_relative_path(
     Ok(segments.join("/"))
 }
 
+/// A note path may not follow a symlink, including a symlink directory.
+pub fn resolve_note_file(root: &Path, relative: &str) -> Result<PathBuf, String> {
+    let normalized = normalize_relative_path(relative, false, false)?;
+    let segments: Vec<&str> = normalized.split('/').collect();
+    let mut cursor = root.to_path_buf();
+    let mut missing = false;
+    for (index, segment) in segments.iter().enumerate() {
+        cursor.push(segment);
+        if !is_inside_root(root, &cursor) {
+            return Err("Der Pfad liegt außerhalb des Vaults.".to_owned());
+        }
+        if missing {
+            continue;
+        }
+        let last = index + 1 == segments.len();
+        match fs::symlink_metadata(&cursor) {
+            Ok(info) if info.file_type().is_symlink() => {
+                return Err("Symbolische Links sind innerhalb des Vaults nicht erlaubt.".to_owned());
+            }
+            Ok(info) if !last && !info.is_dir() => {
+                return Err("Ein Pfadbestandteil ist kein Ordner.".to_owned());
+            }
+            Ok(info) if last && !info.is_file() => {
+                return Err("Die Notiz ist keine sichere reguläre Datei.".to_owned());
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => missing = true,
+            Err(_) => return Err("Die Datei konnte nicht gelesen werden.".to_owned()),
+        }
+    }
+    if let Some(parent) = cursor.parent() {
+        if let (Ok(root_real), Ok(parent_real)) = (fs::canonicalize(root), fs::canonicalize(parent))
+        {
+            if parent_real != root_real && !is_inside_root(&root_real, &parent_real) {
+                return Err("Der Pfad verlässt den Vault über einen Link.".to_owned());
+            }
+        }
+    }
+    Ok(cursor)
+}
+
 pub fn resolve_inside(root: &Path, relative: &str) -> Result<PathBuf, String> {
     let normalized = normalize_relative_path(relative, false, false)?;
     let mut target = root.to_path_buf();
