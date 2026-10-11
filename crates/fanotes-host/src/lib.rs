@@ -893,21 +893,44 @@ impl Host {
         let root = self.require_vault()?.to_path_buf();
         let source = vault::resolve_inside(&root, relative)?;
         let normalized = vault::normalize_relative_path(relative, false, false)?;
-        let was_dir = fs::symlink_metadata(&source).is_ok_and(|meta| meta.is_dir());
-        if next_name.contains('/') || next_name.contains('\\') || next_name.is_empty() {
-            return Err("Ungültiger Name.".to_owned());
+        let meta = fs::symlink_metadata(&source)
+            .map_err(|_| "Der Eintrag wurde nicht gefunden.".to_owned())?;
+        if meta.file_type().is_symlink() || (!meta.is_file() && !meta.is_dir()) {
+            return Err("Dieser Eintrag kann nicht umbenannt werden.".to_owned());
         }
-        let destination = source.parent().unwrap_or(&root).join(next_name);
+        let was_dir = meta.is_dir();
+        let current_name = source
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| "Ungültiger Name.".to_owned())?
+            .to_owned();
+        let mut desired = safe_entry_name(next_name)?;
+        if !was_dir {
+            if entry_extension(&desired).is_empty() {
+                desired.push_str(&entry_extension(&current_name));
+            }
+            let extension = entry_extension(&desired);
+            if !tree_extension(extension.trim_start_matches('.')) {
+                return Err("Dieser Dateityp wird nicht unterstützt.".to_owned());
+            }
+        }
+        if desired == current_name {
+            return Ok(Value::String(normalized));
+        }
+        let parent = source.parent().unwrap_or(&root).to_path_buf();
+        let unique = unique_sibling_name(
+            &parent,
+            &desired,
+            Some(current_name.as_str()),
+            companion_extension(was_dir, &current_name),
+        )?;
+        let destination = parent.join(&unique);
         if !vault::is_inside_root(&root, &destination) {
             return Err("Der Pfad liegt außerhalb des Vaults.".to_owned());
         }
         fs::rename(&source, &destination)
             .map_err(|_| "Der Eintrag konnte nicht umbenannt werden.".to_owned())?;
-        let next = destination
-            .strip_prefix(&root)
-            .unwrap_or(&destination)
-            .to_string_lossy()
-            .replace('\\', "/");
+        let next = relative_from_root(&root, &destination);
         if was_dir {
             let _ = retarget_folder_colors(&root, &normalized, &next);
         } else {
@@ -920,29 +943,59 @@ impl Host {
         let root = self.require_vault()?.to_path_buf();
         let source = vault::resolve_inside(&root, relative)?;
         let normalized = vault::normalize_relative_path(relative, false, false)?;
-        let was_dir = fs::symlink_metadata(&source).is_ok_and(|meta| meta.is_dir());
-        let folder = if dest_folder.is_empty() {
+        let meta = fs::symlink_metadata(&source)
+            .map_err(|_| "Der Eintrag wurde nicht gefunden.".to_owned())?;
+        if meta.file_type().is_symlink() || (!meta.is_file() && !meta.is_dir()) {
+            return Err("Dieser Eintrag kann nicht verschoben werden.".to_owned());
+        }
+        let was_dir = meta.is_dir();
+        let dest_relative = if dest_folder.is_empty() {
+            String::new()
+        } else {
+            vault::normalize_relative_path(dest_folder, true, false)?
+        };
+        if was_dir
+            && (dest_relative == normalized || dest_relative.starts_with(&format!("{normalized}/")))
+        {
+            return Err("Ein Ordner kann nicht in sich selbst verschoben werden.".to_owned());
+        }
+        let folder = if dest_relative.is_empty() {
             root.clone()
         } else {
-            vault::resolve_inside(&root, dest_folder)?
+            let path = vault::resolve_inside(&root, &dest_relative)?;
+            let folder_meta = fs::symlink_metadata(&path)
+                .map_err(|_| "Der Zielordner wurde nicht gefunden.".to_owned())?;
+            if folder_meta.file_type().is_symlink() || !folder_meta.is_dir() {
+                return Err("Der Zielordner wurde nicht gefunden.".to_owned());
+            }
+            path
         };
-        let name = source
+        if source.parent() == Some(folder.as_path()) {
+            return Ok(Value::String(normalized));
+        }
+        let current_name = source
             .file_name()
+            .and_then(|name| name.to_str())
             .ok_or_else(|| "Ungültiger Name.".to_owned())?;
-        let destination = folder.join(name);
+        let unique = unique_sibling_name(
+            &folder,
+            current_name,
+            None,
+            companion_extension(was_dir, current_name),
+        )?;
+        let destination = folder.join(&unique);
+        if !vault::is_inside_root(&root, &destination) {
+            return Err("Das Verschiebeziel liegt außerhalb des Vaults.".to_owned());
+        }
         fs::rename(&source, &destination)
             .map_err(|_| "Der Eintrag konnte nicht verschoben werden.".to_owned())?;
-        let next = destination
-            .strip_prefix(&root)
-            .unwrap_or(&destination)
-            .to_string_lossy()
-            .replace('\\', "/");
+        let next = relative_from_root(&root, &destination);
         if was_dir {
             let _ = retarget_folder_colors(&root, &normalized, &next);
         } else {
             move_note_companion(&root, &normalized, &next);
         }
-        Ok(Value::Null)
+        Ok(Value::String(next))
     }
 
     fn trash_entry(&mut self, relative: &str) -> Result<Value, String> {
@@ -1512,6 +1565,58 @@ fn numbered_entry_name(name: &str, number: u32) -> String {
     }
     let (stem, extension) = split_entry_name(name);
     format!("{stem} {number}{extension}")
+}
+
+fn companion_extension(directory: bool, name: &str) -> Option<&'static str> {
+    if directory {
+        return None;
+    }
+    match entry_extension(name).as_str() {
+        ".famd" => Some(".md"),
+        ".md" | ".markdown" | ".pdf" => Some(".famd"),
+        _ => None,
+    }
+}
+
+fn relative_from_root(root: &Path, path: &Path) -> String {
+    path.strip_prefix(root)
+        .unwrap_or(path)
+        .to_string_lossy()
+        .replace('\\', "/")
+}
+
+fn unique_sibling_name(
+    parent: &Path,
+    desired: &str,
+    excluding: Option<&str>,
+    companion_extension: Option<&str>,
+) -> Result<String, String> {
+    let mut occupied = std::collections::HashSet::new();
+    if let Ok(entries) = fs::read_dir(parent) {
+        for entry in entries.flatten() {
+            let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
+                continue;
+            };
+            if excluding.is_some_and(|current| current.eq_ignore_ascii_case(&name)) {
+                continue;
+            }
+            occupied.insert(name.to_lowercase());
+        }
+    }
+    for number in 1..=10_000 {
+        let candidate = numbered_entry_name(desired, number);
+        if occupied.contains(&candidate.to_lowercase()) {
+            continue;
+        }
+        if let Some(extension) = companion_extension {
+            let (stem, _) = split_entry_name(&candidate);
+            if occupied.contains(&format!("{stem}{extension}").to_lowercase()) {
+                continue;
+            }
+        }
+        return Ok(candidate);
+    }
+    Err("Es konnte kein eindeutiger Name erzeugt werden.".to_owned())
 }
 
 fn available_entry_name(parent: &Path, desired: &str, note: bool) -> Result<String, String> {
