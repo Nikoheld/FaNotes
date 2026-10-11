@@ -64,4 +64,36 @@ fn search_returns_title_excerpt_and_handwriting_anchor() {
         .unwrap();
     assert_eq!(ink_hits[0]["relativePath"], "Bio/Blatt.md");
     assert_eq!(ink_hits[0]["inkAnchor"]["y"], 0.42);
+
+    let drawing = json!({
+        "schemaVersion": 1,
+        "id": "sketch1",
+        "title": "Skizze",
+        "strokes": [],
+        "updatedAt": "2026-10-11T00:00:00.000Z",
+        "searchTranscript": "0.20\tBaumkrone"
+    });
+    host.dispatch(
+        "fanotes:save-drawing",
+        &[json!({
+            "id": "sketch1",
+            "title": "Skizze",
+            "drawingJson": drawing.to_string(),
+            "noteRelativePath": "Bio/Blatt.md"
+        })],
+    )
+    .unwrap();
+    let drawings = host
+        .dispatch("fanotes:search", &[json!("Baumkrone")])
+        .unwrap();
+    let drawing_hit = drawings
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|hit| hit["kind"] == "drawing")
+        .unwrap();
+    assert_eq!(drawing_hit["drawingId"], "sketch1");
+    assert_eq!(drawing_hit["title"], "Skizze");
+    assert_eq!(drawing_hit["notePath"], "Bio/Blatt.md");
+    assert_eq!(drawing_hit["inkAnchor"]["y"], 0.2);
 }

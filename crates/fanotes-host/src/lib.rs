@@ -674,6 +674,7 @@ impl Host {
         collect_search_files(root, root, &mut files)?;
         let present: std::collections::HashSet<String> = files.iter().cloned().collect();
         let mut hits = Vec::new();
+        let mut owners = std::collections::HashMap::new();
         for relative in files {
             let lower = relative.to_lowercase();
             if lower.ends_with(".famd") {
@@ -693,12 +694,11 @@ impl Host {
             } else {
                 parsed.markdown
             };
-            let mut transcript = ink_transcript(
-                parsed
-                    .payload
-                    .as_ref()
-                    .and_then(|payload| payload.ink.as_ref()),
-            );
+            let mut ink = parsed
+                .payload
+                .as_ref()
+                .and_then(|payload| payload.ink.clone());
+            let mut transcript = ink_transcript(ink.as_ref());
             if !lower.ends_with(".famd") {
                 let famd = fanotes_famd::companion_note_path(&relative, ".famd");
                 if let Ok(companion_path) = vault::resolve_inside(root, &famd) {
@@ -707,13 +707,15 @@ impl Host {
                         if lower.ends_with(".pdf") && !parsed_companion.markdown.is_empty() {
                             content = parsed_companion.markdown;
                         }
-                        if transcript.is_empty() {
-                            transcript = ink_transcript(
-                                parsed_companion
-                                    .payload
-                                    .as_ref()
-                                    .and_then(|payload| payload.ink.as_ref()),
-                            );
+                        if let Some(companion_ink) = parsed_companion
+                            .payload
+                            .as_ref()
+                            .and_then(|payload| payload.ink.clone())
+                        {
+                            if transcript.is_empty() {
+                                transcript = ink_transcript(Some(&companion_ink));
+                            }
+                            ink = Some(companion_ink);
                         }
                     }
                 }
@@ -746,11 +748,26 @@ impl Host {
             if let Some(anchor) = ink_anchor(&transcript, &query) {
                 hit["inkAnchor"] = json!({ "y": anchor });
             }
-            hits.push(hit);
-            if hits.len() == 250 {
-                break;
+            if let Some(id) = drawing_owner_id(&content, ink.as_ref()) {
+                owners.entry(id).or_insert_with(|| relative.clone());
             }
+            hits.push(hit);
         }
+        search_drawings(root, &needle, &query, &owners, &mut hits);
+        hits.sort_by(|left, right| {
+            right["matches"]
+                .as_u64()
+                .unwrap_or(0)
+                .cmp(&left["matches"].as_u64().unwrap_or(0))
+                .then_with(|| {
+                    left["title"]
+                        .as_str()
+                        .unwrap_or("")
+                        .to_lowercase()
+                        .cmp(&right["title"].as_str().unwrap_or("").to_lowercase())
+                })
+        });
+        hits.truncate(250);
         Ok(Value::Array(hits))
     }
 
@@ -1266,6 +1283,85 @@ fn retarget_folder_colors(root: &Path, old: &str, new: &str) -> Result<(), Strin
         write_folder_colors(root, &colors)?;
     }
     Ok(())
+}
+
+fn drawing_owner_id(markdown: &str, ink: Option<&Value>) -> Option<String> {
+    if let Some(id) = markdown.split("fanotes-ink:").nth(1) {
+        let id = id
+            .split(|character: char| {
+                !character.is_ascii_alphanumeric() && character != '_' && character != '-'
+            })
+            .next()
+            .unwrap_or("");
+        if is_drawing_id(id) {
+            return Some(id.to_owned());
+        }
+    }
+    let id = ink?.get("id")?.as_str()?;
+    is_drawing_id(id).then(|| id.to_owned())
+}
+
+fn is_drawing_id(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 96
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+}
+
+fn search_drawings(
+    root: &Path,
+    needle: &str,
+    query: &str,
+    owners: &std::collections::HashMap<String, String>,
+    hits: &mut Vec<Value>,
+) {
+    let assets = root.join(".fanotes").join("assets");
+    let Ok(entries) = fs::read_dir(assets) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().to_string();
+        let Some(id) = name.strip_suffix(".json") else {
+            continue;
+        };
+        if !is_drawing_id(id) {
+            continue;
+        }
+        let Ok(text) = fs::read_to_string(entry.path()) else {
+            continue;
+        };
+        let Ok(document) = serde_json::from_str::<Value>(&text) else {
+            continue;
+        };
+        let Some(title) = document.get("title").and_then(Value::as_str) else {
+            continue;
+        };
+        let transcript = document
+            .get("searchTranscript")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        let searchable = format!("{title}\n{transcript}");
+        let haystack = searchable.to_lowercase();
+        let Some(first) = haystack.find(needle) else {
+            continue;
+        };
+        let mut hit = json!({
+            "relativePath": format!(".fanotes/assets/{id}.json"),
+            "title": title,
+            "excerpt": excerpt(&searchable, first, needle.len()),
+            "matches": count_matches(&haystack, needle),
+            "kind": "drawing",
+            "drawingId": id,
+        });
+        if let Some(note) = owners.get(id) {
+            hit["notePath"] = Value::String(note.clone());
+        }
+        if let Some(anchor) = ink_anchor(transcript, query) {
+            hit["inkAnchor"] = json!({ "y": anchor });
+        }
+        hits.push(hit);
+    }
 }
 
 fn collect_search_files(
