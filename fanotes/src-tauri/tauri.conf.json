@@ -13,9 +13,12 @@
       {
         "label": "main",
         "title": "FaNotes",
-        "width": 1280,
-        "height": 800,
-        "resizable": true
+        "width": 1480,
+        "height": 940,
+        "minWidth": 940,
+        "minHeight": 640,
+        "resizable": true,
+        "backgroundColor": "#f7f6f3"
       }
     ],
     "security": {

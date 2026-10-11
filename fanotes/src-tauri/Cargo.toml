@@ -22,6 +22,7 @@ cairo-rs = "0.18.5"
 gio = "0.18.4"
 rfd = { version = "0.15", default-features = false, features = ["gtk3"] }
 webkit2gtk = "2.0.2"
+tauri-plugin-single-instance = "2.5.3"
 
 [features]
 default = ["custom-protocol"]

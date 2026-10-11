@@ -14,6 +14,7 @@ mod onboarding;
 mod onenote;
 mod policy;
 mod resources;
+mod secrets;
 mod settings;
 mod vault;
 mod worksheets;
@@ -33,6 +34,7 @@ use serde_json::{json, Map, Value};
 
 pub use channels::{find_channel, ChannelKind, CHANNELS};
 pub use policy::{addon_request_allowed, local_ai_origin};
+pub use secrets::SecretStore;
 
 const SECRET_KEYS: &[&str] = &[
     "lmStudioApiToken",
@@ -63,6 +65,8 @@ pub struct Host {
     pub open_log: Option<PathBuf>,
     /// When set, deleted notes go to this trash directory instead of the desktop trash.
     pub trash_dir: Option<PathBuf>,
+    /// Where API keys and the sync login are kept. Tests can substitute memory.
+    pub secret_store: SecretStore,
     /// True after this session has shown the stored API keys to the page.
     secrets_loaded: bool,
 }
@@ -81,6 +85,7 @@ impl Host {
             documents_dir: None,
             open_log: None,
             trash_dir: None,
+            secret_store: SecretStore::Keyring,
             secrets_loaded: false,
         };
         host.load_persisted();
@@ -434,28 +439,65 @@ impl Host {
     fn read_sync_secrets(&self) -> Result<Value, String> {
         let path = self.sync_secrets_path();
         let raw = match fs::read_to_string(&path) {
-            Ok(raw) => raw,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Value::Null),
+            Ok(raw) => Some(raw),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
             Err(_) => {
                 return Err("Die Sync-Anmeldung konnte nicht gelesen werden.".to_owned());
             }
         };
-        if raw.starts_with("safe1:") {
-            return Err("Die Sync-Anmeldung ist mit dem Schlüsselbund dieses Systems geschützt, der gerade nicht verfügbar ist.".to_owned());
-        }
-        if raw.starts_with("plain1:") {
+        if raw
+            .as_ref()
+            .is_some_and(|value| value.starts_with("plain1:"))
+        {
             let _ = fs::remove_file(&path);
+            let _ = secrets::delete(self.secret_store, &self.secret_account(SYNC_SECRET_ACCOUNT));
             return Ok(Value::Null);
         }
-        if raw.trim().is_empty() {
-            return Ok(Value::Null);
+        match secrets::get(self.secret_store, &self.secret_account(SYNC_SECRET_ACCOUNT)) {
+            Ok(Some(secret)) => {
+                if raw
+                    .as_ref()
+                    .is_some_and(|value| !value.starts_with("safe1:"))
+                {
+                    let _ = notes::atomic_write(&path, b"safe1:", 0o600);
+                }
+                Ok(Value::String(secret))
+            }
+            Ok(None) => self.read_legacy_sync_secret(raw.as_deref(), &path),
+            Err(error) => {
+                if raw
+                    .as_ref()
+                    .is_some_and(|value| value.starts_with("safe1:"))
+                {
+                    Err(error)
+                } else {
+                    Ok(Value::Null)
+                }
+            }
         }
-        Ok(Value::String(raw))
+    }
+
+    fn read_legacy_sync_secret(&self, raw: Option<&str>, path: &Path) -> Result<Value, String> {
+        let Some(raw) = raw else {
+            return Ok(Value::Null);
+        };
+        if raw.starts_with("safe1:") || raw.trim().is_empty() {
+            return Err(secrets::KEYRING_UNAVAILABLE.to_owned());
+        }
+        secrets::set(
+            self.secret_store,
+            &self.secret_account(SYNC_SECRET_ACCOUNT),
+            raw,
+        )?;
+        notes::atomic_write(path, b"safe1:", 0o600)?;
+        Ok(Value::String(raw.to_owned()))
     }
 
     fn write_sync_secrets(&self, incoming: Value) -> Result<Value, String> {
         let path = self.sync_secrets_path();
+        let account = self.secret_account(SYNC_SECRET_ACCOUNT);
         if incoming.is_null() {
+            secrets::delete(self.secret_store, &account)?;
             if path.is_file() {
                 fs::remove_file(&path).map_err(|_| {
                     "Die Sync-Anmeldedaten konnten nicht gelöscht werden.".to_owned()
@@ -469,7 +511,8 @@ impl Host {
         if json.len() > 64 * 1024 {
             return Err("Die Sync-Anmeldedaten sind ungültig.".to_owned());
         }
-        notes::atomic_write(&path, json.as_bytes(), 0o600)?;
+        secrets::set(self.secret_store, &account, json)?;
+        notes::atomic_write(&path, b"safe1:", 0o600)?;
         Ok(Value::Null)
     }
 
@@ -1200,7 +1243,9 @@ impl Host {
                 secrets.insert((*key).to_owned(), Value::String(value.to_owned()));
             }
         }
-        self.store_secrets(&secrets)?;
+        // A missing keyring must not block the rest of the settings, and must
+        // not leave the new key in the profile file.
+        let _ = self.store_secrets(&secrets);
         self.settings = settings::sanitize(&incoming, &self.settings);
         for key in SECRET_KEYS {
             self.settings
@@ -1233,6 +1278,10 @@ impl Host {
     fn reset_app_data(&mut self) -> Result<Value, String> {
         let _ = fs::remove_file(self.app_data.join("settings.json"));
         let _ = fs::remove_file(self.app_data.join("secrets.json"));
+        for key in SECRET_KEYS {
+            let _ = secrets::delete(self.secret_store, &self.secret_account(key));
+        }
+        let _ = secrets::delete(self.secret_store, &self.secret_account(SYNC_SECRET_ACCOUNT));
         self.settings = default_settings();
         Ok(Value::Null)
     }
@@ -1322,21 +1371,62 @@ impl Host {
         }
     }
 
+    fn secret_account(&self, name: &str) -> String {
+        secrets::account(&self.app_data, name)
+    }
+
     fn load_secrets(&self) -> Map<String, Value> {
-        fs::read_to_string(self.app_data.join("secrets.json"))
-            .ok()
-            .and_then(|text| serde_json::from_str::<Value>(&text).ok())
-            .and_then(|value| value.as_object().cloned())
-            .unwrap_or_default()
+        self.migrate_plaintext_secrets();
+        let mut object = Map::new();
+        for key in SECRET_KEYS {
+            if let Ok(Some(value)) = secrets::get(self.secret_store, &self.secret_account(key)) {
+                object.insert((*key).to_owned(), Value::String(value));
+            }
+        }
+        object
+    }
+
+    fn migrate_plaintext_secrets(&self) {
+        let path = self.app_data.join("secrets.json");
+        let Ok(text) = fs::read_to_string(&path) else {
+            return;
+        };
+        let Ok(parsed) = serde_json::from_str::<Value>(&text) else {
+            return;
+        };
+        let Some(stored) = parsed.as_object() else {
+            return;
+        };
+        for key in SECRET_KEYS {
+            let Some(value) = stored.get(*key).and_then(Value::as_str) else {
+                continue;
+            };
+            if value.is_empty() {
+                continue;
+            }
+            if secrets::set(self.secret_store, &self.secret_account(key), value).is_err() {
+                return;
+            }
+        }
+        let _ = fs::remove_file(&path);
     }
 
     fn store_secrets(&self, secrets: &Map<String, Value>) -> Result<(), String> {
-        let text = serde_json::to_string(secrets)
-            .map_err(|_| "Die Geheimnisse sind ungültig.".to_owned())?;
-        fs::write(self.app_data.join("secrets.json"), text)
-            .map_err(|_| "Die Geheimnisse konnten nicht gespeichert werden.".to_owned())
+        for key in SECRET_KEYS {
+            let value = secrets.get(*key).and_then(Value::as_str).unwrap_or("");
+            let account = self.secret_account(key);
+            if value.is_empty() {
+                secrets::delete(self.secret_store, &account)?;
+            } else {
+                secrets::set(self.secret_store, &account, value)?;
+            }
+        }
+        let _ = fs::remove_file(self.app_data.join("secrets.json"));
+        Ok(())
     }
 }
+
+const SYNC_SECRET_ACCOUNT: &str = "sync-account";
 
 const PDF_ASSET_MAX: u64 = 96 * 1024 * 1024;
 const HTML_ASSET_MAX: u64 = 128 * 1024 * 1024;
@@ -1763,6 +1853,10 @@ fn created_entry(relative: &str, path: &Path, note: bool) -> Value {
             }
         })
     }
+}
+
+pub fn openable_http_url(raw: &str) -> Option<String> {
+    http_link(raw).ok()
 }
 
 fn http_link(raw: &str) -> Result<String, String> {

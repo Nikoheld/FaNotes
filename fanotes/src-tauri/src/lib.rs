@@ -7,6 +7,7 @@ use std::sync::Mutex;
 use fanotes_host::{find_channel, Host, CHANNELS};
 use serde_json::{json, Value};
 use tauri::{Emitter, Manager, State};
+use webkit2gtk::{URIRequestExt, WebViewExt};
 
 struct HostState(Mutex<Host>);
 
@@ -80,8 +81,10 @@ fn open_subject_book_popout(
             .title("Buch")
             .inner_size(980.0, 1080.0)
             .min_inner_size(420.0, 360.0)
+            .background_color(paper_color())
             .build()
             .map_err(|_| "Das Buchfenster konnte nicht geöffnet werden.".to_owned())?;
+    install_webview_guards(&window, false);
     let app_handle = app.clone();
     window.on_window_event(move |event| {
         if matches!(event, tauri::WindowEvent::Destroyed) {
@@ -293,10 +296,128 @@ fanotes_commands! {
     render_pdf_page => "fanotes:render-pdf-page",
 }
 
+fn navigation_allowed(url: &tauri::Url) -> bool {
+    match url.scheme() {
+        "about" => url.as_str() == "about:blank" || url.path() == "blank",
+        "tauri" | "asset" | "ipc" => true,
+        "http" | "https" => matches!(
+            url.host_str(),
+            Some("127.0.0.1") | Some("localhost") | Some("::1") | Some("tauri.localhost")
+        ),
+        _ => false,
+    }
+}
+
+fn navigation_plugin() -> tauri::plugin::TauriPlugin<tauri::Wry> {
+    tauri::plugin::Builder::new("fanotes-navigation")
+        .on_navigation(|_webview, url| navigation_allowed(url))
+        .build()
+}
+
+fn sheet_zoom_direction(level: f64) -> Option<&'static str> {
+    if !level.is_finite() || (level - 1.0).abs() < 0.001 {
+        None
+    } else if level > 1.0 {
+        Some("in")
+    } else {
+        Some("out")
+    }
+}
+
+fn paper_color() -> tauri::utils::config::Color {
+    "#f7f6f3".parse().expect("paper color")
+}
+
+/// A second launch focuses the window that is already open.
+fn focus_running_window(window: &tauri::WebviewWindow) {
+    let _ = window.unminimize();
+    let _ = window.show();
+    let _ = window.set_focus();
+}
+
+fn install_webview_guards(window: &tauri::WebviewWindow, emit_sheet_zoom: bool) {
+    let emit_window = window.clone();
+    let _ = window.with_webview(move |webview| {
+        let view = webview.inner();
+        view.set_zoom_level(1.0);
+        view.connect_zoom_level_notify(move |view| {
+            let Some(direction) = sheet_zoom_direction(view.zoom_level()) else {
+                return;
+            };
+            view.set_zoom_level(1.0);
+            if emit_sheet_zoom {
+                let _ = emit_window.emit("fanotes:sheet-zoom", direction);
+            }
+        });
+        view.connect_create(|_view, action| {
+            if let Some(uri) = action.request().and_then(|request| request.uri()) {
+                if let Some(href) = fanotes_host::openable_http_url(uri.as_str()) {
+                    let _ = std::process::Command::new("xdg-open")
+                        .arg(href)
+                        .stdin(std::process::Stdio::null())
+                        .stdout(std::process::Stdio::null())
+                        .stderr(std::process::Stdio::null())
+                        .spawn();
+                }
+            }
+            None
+        });
+    });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::sheet_zoom_direction;
+
+    #[test]
+    fn pinch_becomes_a_sheet_zoom_direction() {
+        assert_eq!(sheet_zoom_direction(1.0), None);
+        assert_eq!(sheet_zoom_direction(1.25), Some("in"));
+        assert_eq!(sheet_zoom_direction(0.8), Some("out"));
+        assert_eq!(sheet_zoom_direction(f64::NAN), None);
+    }
+
+    #[test]
+    fn only_the_app_origin_can_navigate() {
+        let allowed = [
+            "about:blank",
+            "http://127.0.0.1:5174/",
+            "http://127.0.0.1:5174/#subject-book=Mathe%2FBuch.pdf",
+            "http://localhost:5174/index.html",
+            "https://tauri.localhost/",
+            "tauri://localhost",
+            "asset://localhost/index.html",
+        ];
+        for url in allowed {
+            assert!(
+                super::navigation_allowed(&tauri::Url::parse(url).unwrap()),
+                "{url}"
+            );
+        }
+        let blocked = [
+            "https://example.com/",
+            "http://192.168.1.20/",
+            "file:///etc/passwd",
+            "javascript:alert(1)",
+        ];
+        for url in blocked {
+            let parsed = tauri::Url::parse(url);
+            let allowed = parsed.is_ok_and(|url| super::navigation_allowed(&url));
+            assert!(!allowed, "{url}");
+        }
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let _ = (find_channel, CHANNELS);
     tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            if let Some(window) = app.get_webview_window("main") {
+                focus_running_window(&window);
+            }
+        }))
+        .plugin(navigation_plugin())
         .setup(|app| {
             let app_data = app
                 .path()
@@ -304,6 +425,7 @@ pub fn run() {
                 .unwrap_or_else(|_| std::env::temp_dir().join("fanotes"));
             app.manage(HostState(Mutex::new(Host::open(app_data))));
             if let Some(window) = app.get_webview_window("main") {
+                install_webview_guards(&window, true);
                 let handle = app.handle().clone();
                 window.on_window_event(move |event| {
                     if let tauri::WindowEvent::CloseRequested { api, .. } = event {

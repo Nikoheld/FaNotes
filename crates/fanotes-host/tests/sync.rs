@@ -1,7 +1,7 @@
 use std::fs;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use fanotes_host::Host;
+use fanotes_host::{Host, SecretStore};
 use serde_json::json;
 
 fn host() -> (std::path::PathBuf, std::path::PathBuf, Host) {
@@ -13,6 +13,7 @@ fn host() -> (std::path::PathBuf, std::path::PathBuf, Host) {
     let app = dir.join("app");
     fs::create_dir_all(&vault).unwrap();
     let mut host = Host::open(app.clone());
+    host.secret_store = SecretStore::Memory;
     host.set_vault(vault.clone()).unwrap();
     (vault, app, host)
 }
@@ -97,7 +98,9 @@ fn sync_lists_files_and_keeps_account_state_outside_the_vault() {
     let secrets = fs::read_to_string(app.join("secrets.json")).unwrap_or_default();
     assert!(!settings.contains("geheim"));
     assert!(!secrets.contains("geheim"));
-    assert!(app.join("sync/account.secret").is_file());
+    let stored = fs::read_to_string(app.join("sync/account.secret")).unwrap();
+    assert_eq!(stored, "safe1:");
+    assert!(!stored.contains("geheim"));
     host.dispatch("fanotes:sync-write-secrets", &[json!(null)])
         .unwrap();
     assert!(host
@@ -111,4 +114,40 @@ fn sync_lists_files_and_keeps_account_state_outside_the_vault() {
         .unwrap()
         .is_null());
     assert!(!app.join("sync/account.secret").exists());
+
+    let legacy = "{\"v\":1,\"token\":\"alt\"}";
+    fs::write(app.join("sync/account.secret"), legacy).unwrap();
+    assert_eq!(
+        host.dispatch("fanotes:sync-read-secrets", &[]).unwrap(),
+        legacy
+    );
+    assert_eq!(
+        fs::read_to_string(app.join("sync/account.secret")).unwrap(),
+        "safe1:"
+    );
+}
+
+#[test]
+fn sync_secrets_stay_out_of_the_profile_without_a_keyring() {
+    let dir = std::env::temp_dir().join(format!("fanotes-sync-locked-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    let vault = dir.join("vault");
+    fs::create_dir_all(&vault).unwrap();
+    let app = dir.join("app");
+    let mut host = Host::open(app.clone());
+    host.secret_store = SecretStore::Unavailable;
+    host.set_vault(vault).unwrap();
+    let error = host
+        .dispatch(
+            "fanotes:sync-write-secrets",
+            &[json!("{\"token\":\"geheim\"}")],
+        )
+        .unwrap_err();
+    assert!(error.contains("Systemschlüsselbund"));
+    assert!(!app.join("sync/account.secret").exists());
+    fs::create_dir_all(app.join("sync")).unwrap();
+    fs::write(app.join("sync/account.secret"), "safe1:Y2lwaGVy").unwrap();
+    let error = host.dispatch("fanotes:sync-read-secrets", &[]).unwrap_err();
+    assert!(error.contains("Schlüsselbund"));
+    let _ = fs::remove_dir_all(&dir);
 }
