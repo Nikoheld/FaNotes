@@ -669,16 +669,29 @@ fn is_ascii_word(byte: u8) -> bool {
 }
 
 fn attr(attributes: &str, name: &str) -> Option<String> {
-    let needle = format!("{name}=");
+    let needle = format!("{name}=").to_ascii_lowercase();
     let lower = attributes.to_ascii_lowercase();
-    let index = lower.find(&needle.to_ascii_lowercase())?;
+    let bytes = lower.as_bytes();
+    let mut search_from = 0;
+    let index = loop {
+        let found = lower[search_from..].find(&needle)? + search_from;
+        let boundary = found == 0 || !is_ascii_word(bytes[found - 1]);
+        if boundary {
+            break found;
+        }
+        search_from = found + 1;
+    };
     let rest = &attributes[index + needle.len()..];
     let mut chars = rest.chars();
     let quote = chars.next()?;
     if quote != '"' && quote != '\'' {
         return None;
     }
-    Some(rest[quote.len_utf8()..].split(quote).next()?.to_owned())
+    let value = rest[quote.len_utf8()..].split(quote).next()?;
+    if value.is_empty() {
+        return None;
+    }
+    Some(value.to_owned())
 }
 
 fn prepare_input(input: &Path, temporary: &Path, seven_zip: &Path) -> Result<Vec<PathBuf>, String> {
@@ -1854,6 +1867,10 @@ mod tests {
 <a class="foo-l2" href="d.html" title="Bindestrich">Bindestrich</a>
 <a class="l10" href="b.html" title="Zehn">Zehn</a>
 <a class="l1" href="../../secret.html" title="Draussen">Draussen</a>
+<a class="l1" myhref="nope.html" href="real.html" title="Echt">Echt</a>
+<a class="l2" href="" title="Leer">Leer</a>
+<a class="l2" href="inner.html" title="">Inner text</a>
+<a class="l3" href="leaf.html">Leaf</a>
 </nav>"#,
         )
         .unwrap();
@@ -1869,6 +1886,12 @@ mod tests {
         assert_eq!(parent_of("d.html"), Some(vec!["Kapitel".to_owned()]));
         assert_eq!(parent_of("b.html"), Some(Vec::<String>::new()));
         assert!(parent_of("secret.html").is_none());
+        assert!(parent_of("nope.html").is_none());
+        assert_eq!(parent_of("real.html"), Some(Vec::<String>::new()));
+        assert_eq!(
+            parent_of("leaf.html"),
+            Some(vec!["Echt".to_owned(), "Inner text".to_owned()])
+        );
         assert_eq!(outline_level(r#" class="l2 l9""#), 9);
         assert_eq!(outline_level(" class=\"l2\u{FEFF}\""), 2);
         assert_eq!(outline_level(" class=\"l2\u{0085}\""), 2);
