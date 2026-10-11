@@ -576,7 +576,7 @@ fn page_parents(html_files: &[PathBuf], output_root: &Path) -> HashMap<PathBuf, 
             let Some(href) = attr(attributes, "href") else {
                 continue;
             };
-            let level = outline_level(attr(attributes, "class").as_deref());
+            let level = outline_level(attributes);
             let decoded = urlencoding_decode(&href);
             let target = entry.parent().unwrap_or(output_root).join(&decoded);
             if !image_stays_inside(output_root, &target) {
@@ -612,18 +612,60 @@ fn page_parents(html_files: &[PathBuf], output_root: &Path) -> HashMap<PathBuf, 
     parents
 }
 
-fn outline_level(class: Option<&str>) -> usize {
-    class
-        .unwrap_or("")
-        .split_whitespace()
-        .find_map(|token| {
-            let bytes = token.as_bytes();
-            (bytes.len() == 2
-                && bytes[0].eq_ignore_ascii_case(&b'l')
-                && (b'1'..=b'9').contains(&bytes[1]))
-            .then_some((bytes[1] - b'0') as usize)
-        })
-        .unwrap_or(1)
+/// Desktop pattern: the last `\bl[1-9]\b` inside the first matching `class`.
+///
+/// Word boundaries are ASCII, so a hyphen or a byte-order mark still counts.
+/// The `regex` crate has no backreference, so the quote pair is matched here.
+fn outline_level(attributes: &str) -> usize {
+    let bytes = attributes.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        if class_attribute_at(bytes, index) {
+            let quote_at = index + 6;
+            if quote_at < bytes.len() && matches!(bytes[quote_at], b'"' | b'\'') {
+                let quote = bytes[quote_at];
+                let start = quote_at + 1;
+                if let Some(end) = bytes[start..].iter().position(|byte| *byte == quote) {
+                    let interior = &attributes[start..start + end];
+                    let other = if quote == b'"' { '\'' } else { '"' };
+                    if !interior.contains(other) {
+                        if let Some(level) = last_outline_digit(interior) {
+                            return level;
+                        }
+                    }
+                }
+            }
+        }
+        index += 1;
+    }
+    1
+}
+
+fn class_attribute_at(bytes: &[u8], index: usize) -> bool {
+    let boundary = index == 0 || !is_ascii_word(bytes[index - 1]);
+    boundary && index + 6 <= bytes.len() && bytes[index..index + 6].eq_ignore_ascii_case(b"class=")
+}
+
+fn last_outline_digit(interior: &str) -> Option<usize> {
+    let bytes = interior.as_bytes();
+    let mut found = None;
+    for index in 0..bytes.len() {
+        let boundary = index == 0 || !is_ascii_word(bytes[index - 1]);
+        if !boundary || index + 2 > bytes.len() || !bytes[index].eq_ignore_ascii_case(&b'l') {
+            continue;
+        }
+        let digit = bytes[index + 1];
+        let after = index + 2;
+        if (b'1'..=b'9').contains(&digit) && (after == bytes.len() || !is_ascii_word(bytes[after]))
+        {
+            found = Some((digit - b'0') as usize);
+        }
+    }
+    found
+}
+
+fn is_ascii_word(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || byte == b'_'
 }
 
 fn attr(attributes: &str, name: &str) -> Option<String> {
@@ -1548,8 +1590,8 @@ fn civil_date(mut days: u64) -> (i32, u32, u32) {
 #[cfg(test)]
 mod tests {
     use super::{
-        common_ancestor, extract_search_text, inline_images, page_dimensions, page_parents,
-        page_title, render_inputs, safe_segment, sanitize_page, stored_relative_path,
+        common_ancestor, extract_search_text, inline_images, outline_level, page_dimensions,
+        page_parents, page_title, render_inputs, safe_segment, sanitize_page, stored_relative_path,
         strip_active_html, tool_failure_message, tool_limit, validate_listing, walk_limited,
     };
     use std::path::{Path, PathBuf};
@@ -1760,7 +1802,8 @@ mod tests {
             &nav,
             r#"<nav>
 <a class="l1" href="a.html" title="Kapitel">Kapitel</a>
-<a class="L2" href="c.html" title="Zweig">Zweig</a>
+<a class="l9 l2" href="c.html" title="Zweig">Zweig</a>
+<a class="foo-l2" href="d.html" title="Bindestrich">Bindestrich</a>
 <a class="l10" href="b.html" title="Zehn">Zehn</a>
 <a class="l1" href="../../secret.html" title="Draussen">Draussen</a>
 </nav>"#,
@@ -1775,8 +1818,24 @@ mod tests {
         };
         assert_eq!(parent_of("a.html"), Some(Vec::<String>::new()));
         assert_eq!(parent_of("c.html"), Some(vec!["Kapitel".to_owned()]));
+        assert_eq!(parent_of("d.html"), Some(vec!["Kapitel".to_owned()]));
         assert_eq!(parent_of("b.html"), Some(Vec::<String>::new()));
         assert!(parent_of("secret.html").is_none());
+        assert_eq!(outline_level(r#" class="l2 l9""#), 9);
+        assert_eq!(outline_level(" class=\"l2\u{FEFF}\""), 2);
+        assert_eq!(outline_level(" class=\"l2\u{0085}\""), 2);
+        assert_eq!(outline_level(" class=\"outline\u{FEFF}l3\""), 3);
+        assert_eq!(outline_level(r#" class="äl2""#), 2);
+        assert_eq!(outline_level(r#" class="l2ä""#), 2);
+        assert_eq!(outline_level(r#" class="xl2""#), 1);
+        assert_eq!(outline_level(r#" class="l2extra""#), 1);
+        assert_eq!(outline_level(r#" class="l10""#), 1);
+        assert_eq!(outline_level(r#" class = "l4""#), 1);
+        assert_eq!(outline_level(r#" CLASS="l5""#), 5);
+        assert_eq!(outline_level(r#" class='l3'"#), 3);
+        assert_eq!(outline_level(r#" data-class="l6" class="page""#), 6);
+        assert_eq!(outline_level(r#" myclass="l6""#), 1);
+        assert_eq!(outline_level(r#" class="_l2""#), 1);
         let _ = std::fs::remove_dir_all(&root);
     }
 
