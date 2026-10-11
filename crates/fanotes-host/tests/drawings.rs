@@ -108,6 +108,41 @@ fn the_drawing_library_uses_one_json_suffix_without_case() {
 }
 
 #[test]
+fn a_drawing_with_a_bad_byte_still_opens() {
+    let (dir, mut host) = host();
+    let assets = dir.join("vault/.fanotes/assets");
+    fs::create_dir_all(&assets).unwrap();
+    let mut bytes = br#"{"schemaVersion":1,"title":"SkiXze","strokes":[],"updatedAt":"2026-01-02T03:04:05.000Z","searchTranscript":"0.20\tWort"}"#.to_vec();
+    let index = bytes.iter().position(|byte| *byte == b'X').unwrap();
+    bytes[index] = 0xff;
+    fs::write(assets.join("skizze.json"), &bytes).unwrap();
+    fs::write(assets.join("muell.json"), b"{\xff").unwrap();
+
+    let listed = host.dispatch("fanotes:list-drawings", &[]).unwrap();
+    assert_eq!(listed.as_array().unwrap().len(), 1);
+    assert_eq!(listed[0]["id"], "skizze");
+    assert_eq!(listed[0]["title"], "Ski\u{FFFD}ze");
+
+    let loaded = host
+        .dispatch("fanotes:read-drawing", &[json!("skizze")])
+        .unwrap();
+    assert_eq!(loaded["title"], "Ski\u{FFFD}ze");
+    assert!(loaded["drawingJson"]
+        .as_str()
+        .unwrap()
+        .contains("Ski\u{FFFD}ze"));
+    assert_eq!(
+        host.dispatch("fanotes:read-drawing", &[json!("muell")])
+            .unwrap_err(),
+        "Die Zeichnungsdaten sind kein gültiges JSON."
+    );
+
+    let hits = host.dispatch("fanotes:search", &[json!("Wort")]).unwrap();
+    assert_eq!(hits[0]["drawingId"], "skizze");
+    assert_eq!(hits[0]["title"], "Ski\u{FFFD}ze");
+}
+
+#[test]
 fn handwriting_is_not_saved_through_a_symlink_folder() {
     let (dir, mut host) = host();
     let outside = dir.join("outside");

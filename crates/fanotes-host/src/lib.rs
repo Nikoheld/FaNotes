@@ -3081,7 +3081,8 @@ fn search_drawings(
         if meta.file_type().is_symlink() || !meta.is_file() || meta.len() > 24 * 1024 * 1024 {
             continue;
         }
-        let Ok(text) = fs::read_to_string(&path) else {
+        // Desktop search decodes drawing JSON with Buffer.toString('utf8').
+        let Some(text) = notes::read_lossy_string(&path) else {
             continue;
         };
         let Ok(document) = serde_json::from_str::<Value>(&text) else {

@@ -40,9 +40,8 @@ pub fn list_drawings(host: &Host) -> Result<Value, String> {
         let Ok(text) = read_limited(&path, MAX_DRAWING_JSON_BYTES) else {
             continue;
         };
-        let Ok(text) = String::from_utf8(text) else {
-            continue;
-        };
+        // Node `Buffer.toString('utf8')` keeps the drawing and replaces a bad byte.
+        let text = lossy_utf8(text);
         let mtime = fs::symlink_metadata(&path)
             .ok()
             .filter(|meta| meta.is_file() && !meta.file_type().is_symlink())
@@ -78,8 +77,7 @@ pub fn read_drawing(host: &Host, raw_id: &str) -> Result<Value, String> {
             "Die gespeicherte Zeichnung wurde nicht gefunden.".to_owned()
         }
     })?;
-    let drawing_json = String::from_utf8(bytes)
-        .map_err(|_| "Die Zeichnungsdaten sind kein gültiges JSON.".to_owned())?;
+    let drawing_json = lossy_utf8(bytes);
     let mtime = fs::symlink_metadata(&path)
         .ok()
         .and_then(|meta| meta.modified().ok())
@@ -417,6 +415,12 @@ fn ensure_private_dir(path: &Path) -> Result<(), String> {
             Ok(())
         }
     }
+}
+
+/// Node `Buffer.toString('utf8')`: invalid bytes become U+FFFD and the rest stays.
+fn lossy_utf8(bytes: Vec<u8>) -> String {
+    String::from_utf8(bytes)
+        .unwrap_or_else(|error| String::from_utf8_lossy(error.as_bytes()).into_owned())
 }
 
 fn read_limited(path: &Path, max: usize) -> Result<Vec<u8>, String> {
