@@ -1,18 +1,18 @@
 use fanotes_host::Host;
 use serde_json::json;
 
-fn host(name: &str) -> Host {
+fn scratch(name: &str) -> (std::path::PathBuf, Host) {
     let dir = std::env::temp_dir().join(format!("fanotes-addons-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(dir.join("vault")).unwrap();
     let mut host = Host::open(dir.join("app"));
     host.set_vault(dir.join("vault")).unwrap();
-    host
+    (dir, host)
 }
 
 #[test]
 fn installed_addons_stay_outside_the_vault() {
-    let mut host = host("store");
+    let (_dir, mut host) = scratch("store");
     host.dispatch(
         "fanotes:addons-save",
         &[json!({
@@ -93,7 +93,7 @@ fn installed_addons_stay_outside_the_vault() {
 
 #[test]
 fn registry_and_network_reads_use_public_https() {
-    let mut host = host("network");
+    let (_dir, mut host) = scratch("network");
     let text = host
         .dispatch(
             "fanotes:addons-fetch",
@@ -114,4 +114,51 @@ fn registry_and_network_reads_use_public_https() {
         .as_str()
         .unwrap_or("")
         .contains("Example Domain"));
+}
+
+#[test]
+fn a_symlinked_addon_store_is_not_followed() {
+    let (dir, mut host) = scratch("symlink");
+    let outside = dir.join("outside");
+    std::fs::create_dir_all(&outside).unwrap();
+    std::fs::write(outside.join("secret"), b"geheim").unwrap();
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&outside, dir.join("app/addons")).unwrap();
+    let listed = host.dispatch("fanotes:addons-list", &[]);
+    #[cfg(unix)]
+    {
+        assert!(listed.unwrap_err().contains("unsicher"));
+        assert_eq!(std::fs::read(outside.join("secret")).unwrap(), b"geheim");
+        assert!(!outside.join("addons.json").exists());
+    }
+    #[cfg(not(unix))]
+    {
+        assert!(listed.is_ok());
+    }
+
+    let (_dir, mut host) = scratch("data-link");
+    host.dispatch(
+        "fanotes:addons-write-data",
+        &[json!("margin-notes"), json!("{\"open\":1}")],
+    )
+    .unwrap();
+    let data = _dir.join("app/addons/margin-notes.data.json");
+    std::fs::remove_file(&data).unwrap();
+    std::fs::write(outside.join("data"), b"leak").unwrap();
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(outside.join("data"), &data).unwrap();
+        assert!(host
+            .dispatch("fanotes:addons-read-data", &[json!("margin-notes")])
+            .unwrap_err()
+            .contains("unsicher"));
+        assert!(host
+            .dispatch(
+                "fanotes:addons-write-data",
+                &[json!("margin-notes"), json!("replaced")]
+            )
+            .unwrap_err()
+            .contains("unsicher"));
+        assert_eq!(std::fs::read(outside.join("data")).unwrap(), b"leak");
+    }
 }

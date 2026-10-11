@@ -1,3 +1,5 @@
+use std::sync::atomic::{AtomicU64, Ordering};
+
 use fanotes_host::Host;
 use serde_json::json;
 use std::io::{Read, Write};
@@ -5,7 +7,9 @@ use std::net::TcpListener;
 use std::thread;
 
 fn host() -> Host {
-    let dir = std::env::temp_dir().join(format!("fanotes-ai-{}", std::process::id()));
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let id = NEXT.fetch_add(1, Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!("fanotes-ai-{}-{id}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(dir.join("vault")).unwrap();
     let mut host = Host::open(dir.join("app"));

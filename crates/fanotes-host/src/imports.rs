@@ -4,7 +4,6 @@
 //! Tests and callers that already have the file pass `{ name, bytesBase64 }`.
 
 use std::fs;
-use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
 use fanotes_famd::{companion_note_path, empty_famd_payload, serialize_famd};
@@ -175,25 +174,14 @@ fn unique_pdf_name(directory: &Path, desired: &str) -> Result<String, String> {
 }
 
 fn write_new(path: &Path, bytes: &[u8]) -> Result<(), String> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|_| "Der Ordner konnte nicht angelegt werden.".to_owned())?;
-    }
-    match fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(path)
-    {
-        Ok(mut file) => {
-            use std::io::Write;
-            file.write_all(bytes)
-                .map_err(|_| "Die PDF-Datei konnte nicht gespeichert werden.".to_owned())?;
-            Ok(())
-        }
-        Err(error) if error.kind() == ErrorKind::AlreadyExists => {
+    match crate::notes::publish_new_file(path, bytes, 0o600) {
+        Ok(()) => Ok(()),
+        Err(crate::notes::NewFileError::Exists) => {
             Err("Es konnte kein eindeutiger PDF-Name erzeugt werden.".to_owned())
         }
-        Err(_) => Err("Die PDF-Datei konnte nicht gespeichert werden.".to_owned()),
+        Err(crate::notes::NewFileError::Io) => {
+            Err("Die PDF-Datei konnte nicht gespeichert werden.".to_owned())
+        }
     }
 }
 

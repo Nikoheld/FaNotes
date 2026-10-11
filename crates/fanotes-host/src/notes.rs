@@ -600,12 +600,87 @@ pub(crate) fn atomic_write(path: &Path, bytes: &[u8], mode: u32) -> Result<(), S
         let _ = fs::remove_file(&temporary);
         return Err("Die Datei konnte nicht geschrieben werden.".to_owned());
     }
+    sync_parent(path);
+    Ok(())
+}
+
+#[derive(Debug)]
+pub(crate) enum NewFileError {
+    Exists,
+    Io,
+}
+
+/// Publish bytes at `path` only when that path is absent.
+///
+/// A hard link fails for a file, directory, or symlink, so an import cannot
+/// replace a note that already uses the name. Filesystems without hard links
+/// fall back to an exclusive create. The bytes are flushed before the name
+/// appears, and the file mode is private.
+pub(crate) fn publish_new_file(path: &Path, bytes: &[u8], mode: u32) -> Result<(), NewFileError> {
+    let _parent = parent_directory(path)?;
+    let suffix = random_suffix().map_err(|_| NewFileError::Io)?;
+    let temporary = path.with_file_name(format!(
+        ".{}.{}.{suffix}.tmp",
+        path.file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("file"),
+        std::process::id()
+    ));
+    if write_exclusive(&temporary, bytes, mode).is_err() {
+        let _ = fs::remove_file(&temporary);
+        return Err(NewFileError::Io);
+    }
+    match fs::hard_link(&temporary, path) {
+        Ok(()) => {
+            let _ = fs::remove_file(&temporary);
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+            let _ = fs::remove_file(&temporary);
+            return Err(NewFileError::Exists);
+        }
+        Err(error) if link_unsupported(&error) => {
+            if write_exclusive(path, bytes, mode).is_err() {
+                let _ = fs::remove_file(&temporary);
+                return Err(NewFileError::Io);
+            }
+            let _ = fs::remove_file(&temporary);
+        }
+        Err(_) => {
+            let _ = fs::remove_file(&temporary);
+            return Err(NewFileError::Io);
+        }
+    }
+    sync_parent(path);
+    Ok(())
+}
+
+fn parent_directory(path: &Path) -> Result<&Path, NewFileError> {
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .ok_or(NewFileError::Io)?;
+    let meta = fs::symlink_metadata(parent).map_err(|_| NewFileError::Io)?;
+    if meta.file_type().is_symlink() || !meta.is_dir() {
+        return Err(NewFileError::Io);
+    }
+    Ok(parent)
+}
+
+fn link_unsupported(error: &std::io::Error) -> bool {
+    matches!(
+        error.kind(),
+        std::io::ErrorKind::PermissionDenied
+            | std::io::ErrorKind::Unsupported
+            | std::io::ErrorKind::CrossesDevices
+    )
+}
+
+fn sync_parent(path: &Path) {
     if let Some(parent) = path.parent() {
         if let Ok(directory) = fs::File::open(parent) {
             let _ = directory.sync_all();
         }
     }
-    Ok(())
 }
 
 fn write_exclusive(path: &Path, bytes: &[u8], mode: u32) -> Result<(), String> {
@@ -633,9 +708,14 @@ fn write_exclusive(path: &Path, bytes: &[u8], mode: u32) -> Result<(), String> {
     let mut file = options
         .open(path)
         .map_err(|_| "Die Datei konnte nicht geschrieben werden.".to_owned())?;
-    std::io::Write::write_all(&mut file, bytes)
+    if std::io::Write::write_all(&mut file, bytes)
         .and_then(|_| file.sync_all())
-        .map_err(|_| "Die Datei konnte nicht geschrieben werden.".to_owned())?;
+        .is_err()
+    {
+        drop(file);
+        let _ = fs::remove_file(path);
+        return Err("Die Datei konnte nicht geschrieben werden.".to_owned());
+    }
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -706,4 +786,56 @@ fn civil_date(mut days: u64) -> (i32, u32, u32) {
 
 fn is_leap(year: i32) -> bool {
     year % 4 == 0 && (year % 100 != 0 || year % 400 == 0)
+}
+
+#[cfg(test)]
+mod publish_tests {
+    use super::{publish_new_file, NewFileError};
+
+    #[test]
+    fn a_new_file_stays_private_and_an_existing_name_is_left_alone() {
+        let dir = std::env::temp_dir().join(format!(
+            "fanotes-publish-{}-{}",
+            std::process::id(),
+            super::random_suffix().unwrap()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let target = dir.join("Skript.pdf");
+        publish_new_file(&target, b"%PDF-1.4\n", 0o600).unwrap();
+        assert_eq!(std::fs::read(&target).unwrap(), b"%PDF-1.4\n");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                std::fs::metadata(&target).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+        }
+        assert!(matches!(
+            publish_new_file(&target, b"replaced", 0o600),
+            Err(NewFileError::Exists)
+        ));
+        assert_eq!(std::fs::read(&target).unwrap(), b"%PDF-1.4\n");
+
+        #[cfg(unix)]
+        {
+            let outside = dir.join("outside");
+            std::fs::write(&outside, b"bleibt").unwrap();
+            let link = dir.join("link.pdf");
+            std::os::unix::fs::symlink(&outside, &link).unwrap();
+            assert!(matches!(
+                publish_new_file(&link, b"%PDF-1.4\n", 0o600),
+                Err(NewFileError::Exists)
+            ));
+            assert_eq!(std::fs::read(&outside).unwrap(), b"bleibt");
+        }
+
+        let leftovers: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap()
+            .flatten()
+            .filter(|entry| entry.file_name().to_string_lossy().contains(".tmp"))
+            .collect();
+        assert!(leftovers.is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

@@ -1,9 +1,13 @@
+use std::sync::atomic::{AtomicU64, Ordering};
+
 use base64::Engine;
 use fanotes_host::Host;
 use serde_json::json;
 
 fn host() -> Host {
-    let dir = std::env::temp_dir().join(format!("fanotes-ocr-host-{}", std::process::id()));
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let id = NEXT.fetch_add(1, Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!("fanotes-ocr-host-{}-{id}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(dir.join("vault")).unwrap();
     let mut host = Host::open(dir.join("app"));
