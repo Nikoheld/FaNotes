@@ -1146,8 +1146,8 @@ impl Host {
             let matches = count_matches(&haystack, &needle);
             let content_index = content.to_lowercase().find(&needle);
             let excerpt = if let Some(index) = content_index {
-                let (start, span) = original_match_span(&content, &needle, index);
-                excerpt(&content, start, span)
+                let (start, _) = original_match_span(&content, &needle, index);
+                excerpt(&content, start, vault::utf16_len(&query))
             } else {
                 format!("Dateiname · {relative}")
             };
@@ -3015,11 +3015,11 @@ fn search_drawings(
         let Some(first) = haystack.find(needle) else {
             continue;
         };
-        let (start, span) = original_match_span(&searchable, needle, first);
+        let (start, _) = original_match_span(&searchable, needle, first);
         let mut hit = json!({
             "relativePath": format!(".fanotes/assets/{id}.json"),
             "title": title,
-            "excerpt": excerpt(&searchable, start, span),
+            "excerpt": excerpt(&searchable, start, vault::utf16_len(query)),
             "matches": count_matches(&haystack, needle),
             "kind": "drawing",
             "drawingId": id,
@@ -3169,31 +3169,54 @@ fn floor_char_boundary(text: &str, index: usize) -> usize {
     index
 }
 
-fn excerpt(text: &str, match_index: usize, query_length: usize) -> String {
-    let len = text.len();
-    let mut start = match_index.min(len).saturating_sub(95);
-    let mut end = match_index
-        .saturating_add(query_length)
+fn excerpt(text: &str, match_byte: usize, query_units: usize) -> String {
+    let match_units = utf16_units_before(text, match_byte);
+    let total = vault::utf16_len(text);
+    let start_units = match_units.saturating_sub(95);
+    let end_units = match_units
+        .saturating_add(query_units)
         .saturating_add(145)
-        .min(len);
-    if start > end {
-        start = end;
-    }
-    while start > 0 && !text.is_char_boundary(start) {
-        start -= 1;
-    }
-    while end < len && !text.is_char_boundary(end) {
-        end += 1;
-    }
-    let slice = text[start..end]
+        .min(total);
+    let (start, end) = byte_range_for_utf16(text, start_units, end_units);
+    let slice = text
+        .get(start..end)
+        .unwrap_or("")
         .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ");
     format!(
         "{}{slice}{}",
-        if start > 0 { "…" } else { "" },
-        if end < text.len() { "…" } else { "" }
+        if start_units > 0 { "…" } else { "" },
+        if end_units < total { "…" } else { "" }
     )
+}
+
+fn utf16_units_before(text: &str, byte_index: usize) -> usize {
+    text.char_indices()
+        .take_while(|(index, _)| *index < byte_index)
+        .map(|(_, character)| character.len_utf16())
+        .sum()
+}
+
+fn byte_range_for_utf16(text: &str, start_units: usize, end_units: usize) -> (usize, usize) {
+    let mut units = 0usize;
+    let mut start_byte = None;
+    let mut end_byte = text.len();
+    for (index, character) in text.char_indices() {
+        if start_byte.is_none() && units >= start_units {
+            start_byte = Some(index);
+        }
+        if units >= end_units {
+            end_byte = index;
+            break;
+        }
+        units += character.len_utf16();
+        if units >= end_units {
+            end_byte = index + character.len_utf8();
+            break;
+        }
+    }
+    (start_byte.unwrap_or(0), end_byte)
 }
 
 fn ink_anchor(transcript: &str, query: &str) -> Option<f64> {

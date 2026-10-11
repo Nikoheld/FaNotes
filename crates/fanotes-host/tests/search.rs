@@ -188,6 +188,27 @@ fn search_excerpt_follows_a_case_fold_that_grows() {
 }
 
 #[test]
+fn a_search_excerpt_keeps_95_characters_before_the_match() {
+    let mut host = host();
+    let body = format!("{}Zielwort am Ende.\n", "Ä".repeat(100));
+    host.dispatch("fanotes:write-file", &[json!("Bio/Umlaut.md"), json!(body)])
+        .unwrap();
+    let hits = host
+        .dispatch("fanotes:search", &[json!("Zielwort")])
+        .unwrap();
+    let excerpt = hits[0]["excerpt"].as_str().unwrap();
+    assert!(excerpt.starts_with('…'), "{excerpt}");
+    assert!(excerpt.contains("Zielwort"), "{excerpt}");
+    assert_eq!(
+        excerpt
+            .chars()
+            .filter(|character| *character == 'Ä')
+            .count(),
+        95
+    );
+}
+
+#[test]
 fn equal_search_hits_follow_german_dictionary_order() {
     let mut host = host();
     for name in ["Seite 2", "Seite 10", "Apfel", "Äpfel", "Strasse", "Straße"] {
