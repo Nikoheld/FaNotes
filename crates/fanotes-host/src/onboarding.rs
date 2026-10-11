@@ -337,9 +337,10 @@ fn repair_welcome_file(root: &Path, name: &str, repair: impl Fn(&str) -> Option<
     if meta.file_type().is_symlink() || !meta.is_file() || meta.len() > WELCOME_MAX_BYTES {
         return;
     }
-    let Ok(existing) = fs::read_to_string(&path) else {
+    let Ok(bytes) = fs::read(&path) else {
         return;
     };
+    let existing = String::from_utf8_lossy(&bytes);
     let Some(repaired) = repair(&existing) else {
         return;
     };

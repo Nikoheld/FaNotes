@@ -170,7 +170,8 @@ fn read_config(path: &Path) -> Option<Value> {
     if meta.len() > MAX_CONFIG_BYTES {
         return None;
     }
-    let text = fs::read_to_string(path).ok()?;
+    let bytes = fs::read(path).ok()?;
+    let text = String::from_utf8_lossy(&bytes);
     serde_json::from_str(&text).ok()
 }
 

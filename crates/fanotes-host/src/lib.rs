@@ -412,8 +412,8 @@ impl Host {
             {
                 Ok(Value::Null)
             }
-            Ok(_) => match fs::read_to_string(&path) {
-                Ok(text) => Ok(Value::String(text)),
+            Ok(_) => match fs::read(&path) {
+                Ok(bytes) => Ok(Value::String(String::from_utf8_lossy(&bytes).into_owned())),
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Value::Null),
                 Err(_) => Err("Der Sync-Zustand konnte nicht gelesen werden.".to_owned()),
             },
@@ -1369,7 +1369,8 @@ impl Host {
 
     fn load_persisted(&mut self) {
         profile::import_electron_profile(&self.app_data, self.secret_store);
-        if let Ok(text) = fs::read_to_string(self.app_data.join("settings.json")) {
+        if let Ok(bytes) = fs::read(self.app_data.join("settings.json")) {
+            let text = String::from_utf8_lossy(&bytes);
             if let Ok(parsed) = serde_json::from_str::<Value>(&text) {
                 self.settings = settings::sanitize(&parsed, &default_settings());
                 for key in SECRET_KEYS {

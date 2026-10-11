@@ -395,3 +395,26 @@ fn a_folder_setting_trims_a_byte_order_mark_and_keeps_a_next_line() {
     assert_eq!(saved["defaultFolder"], "\u{0085}Mathe");
     assert_eq!(saved["customCss"], "\u{0085}");
 }
+
+#[test]
+fn a_settings_file_with_a_bad_byte_still_loads() {
+    let dir = std::env::temp_dir().join(format!(
+        "fanotes-settings-byte-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    let app = dir.join("app");
+    fs::create_dir_all(&app).unwrap();
+    let mut bytes = br#"{"syncDeviceName":"LaXptop"}"#.to_vec();
+    let index = bytes.iter().position(|byte| *byte == b'X').unwrap();
+    bytes[index] = 0xff;
+    fs::write(app.join("settings.json"), &bytes).unwrap();
+    let mut host = Host::open(app);
+    host.secret_store = SecretStore::Memory;
+    let boot = host.dispatch("fanotes:bootstrap", &[]).unwrap();
+    assert_eq!(boot["settings"]["syncDeviceName"], "La\u{FFFD}ptop");
+}

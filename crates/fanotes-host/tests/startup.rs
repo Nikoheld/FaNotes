@@ -133,6 +133,25 @@ Viel Freude beim Lernen!
 }
 
 #[test]
+fn a_welcome_note_with_a_bad_byte_still_receives_the_shortcut_fix() {
+    let dir = scratch();
+    let vault = dir.join("vault");
+    fs::create_dir_all(&vault).unwrap();
+    let mut bytes = "Notiz X\nMit `Strg+Z` holst du eine versehentliche Löschung sofort zurück.\n"
+        .as_bytes()
+        .to_vec();
+    let index = bytes.iter().position(|byte| *byte == b'X').unwrap();
+    bytes[index] = 0xff;
+    fs::write(vault.join("Willkommen.md"), &bytes).unwrap();
+    let mut host = Host::open(dir.join("app"));
+    host.set_vault(vault.clone()).unwrap();
+    let welcome = fs::read_to_string(vault.join("Willkommen.md")).unwrap();
+    assert!(welcome.contains("**Strg+Z**"));
+    assert!(!welcome.contains("`Strg+Z`"));
+    assert!(welcome.contains('\u{FFFD}'));
+}
+
+#[test]
 fn an_electron_profile_supplies_the_vault_and_settings() {
     let dir = scratch();
     let vault = dir.join("vault");
@@ -175,6 +194,27 @@ fn an_electron_profile_supplies_the_vault_and_settings() {
         again.dispatch("fanotes:bootstrap", &[]).unwrap()["settings"]["theme"],
         "midnight"
     );
+}
+
+#[test]
+fn an_electron_config_with_a_bad_byte_still_imports() {
+    let dir = scratch();
+    let vault = dir.join("vault");
+    fs::create_dir_all(&vault).unwrap();
+    let app = dir.join("app");
+    fs::create_dir_all(&app).unwrap();
+    let mut bytes = format!(
+        r#"{{"version":2,"vaultPath":"{}","settings":{{"syncDeviceName":"LaXptop"}}}}"#,
+        vault.display()
+    )
+    .into_bytes();
+    let index = bytes.iter().position(|byte| *byte == b'X').unwrap();
+    bytes[index] = 0xff;
+    fs::write(app.join("config.json"), &bytes).unwrap();
+    let mut host = Host::open(app);
+    let boot = host.dispatch("fanotes:bootstrap", &[]).unwrap();
+    assert_eq!(boot["vaultPath"], vault.to_string_lossy().as_ref());
+    assert_eq!(boot["settings"]["syncDeviceName"], "La\u{FFFD}ptop");
 }
 
 #[test]

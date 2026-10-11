@@ -213,3 +213,28 @@ fn sync_write_keeps_the_requested_time_and_a_private_folder() {
         );
     }
 }
+
+#[test]
+fn a_sync_state_with_a_bad_byte_still_loads() {
+    let (_vault, app, mut host) = host();
+    let id = host
+        .dispatch("fanotes:sync-vault-id", &[])
+        .unwrap()
+        .as_str()
+        .unwrap()
+        .to_owned();
+    host.dispatch(
+        "fanotes:sync-write-state",
+        &[json!(id), json!("{\"note\":\"X\"}")],
+    )
+    .unwrap();
+    let path = app.join(format!("sync/state-{id}.json"));
+    let mut bytes = fs::read(&path).unwrap();
+    let index = bytes.iter().position(|byte| *byte == b'X').unwrap();
+    bytes[index] = 0xff;
+    fs::write(&path, &bytes).unwrap();
+    let state = host
+        .dispatch("fanotes:sync-read-state", &[json!(id)])
+        .unwrap();
+    assert_eq!(state, "{\"note\":\"\u{FFFD}\"}");
+}
