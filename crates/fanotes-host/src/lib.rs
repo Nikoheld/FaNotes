@@ -965,7 +965,12 @@ impl Host {
             .and_then(|name| name.to_str())
             .ok_or_else(|| "Ungültiger Name.".to_owned())?
             .to_owned();
-        let mut desired = safe_entry_name(next_name)?;
+        let name_input = if next_name.trim().is_empty() {
+            current_name.as_str()
+        } else {
+            next_name
+        };
+        let mut desired = safe_entry_name(name_input)?;
         if !was_dir {
             if entry_extension(&desired).is_empty() {
                 desired.push_str(&entry_extension(&current_name));
