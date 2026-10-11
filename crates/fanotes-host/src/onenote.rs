@@ -983,16 +983,8 @@ fn run_tool(
         .map_err(|error| format!("{label} ist fehlgeschlagen: {error}"))?;
     let mut stdout_pipe = child.stdout.take().unwrap();
     let mut stderr_pipe = child.stderr.take().unwrap();
-    let stdout_handle = thread::spawn(move || {
-        let mut buffer = String::new();
-        let _ = stdout_pipe.read_to_string(&mut buffer);
-        buffer
-    });
-    let stderr_handle = thread::spawn(move || {
-        let mut buffer = String::new();
-        let _ = stderr_pipe.read_to_string(&mut buffer);
-        buffer
-    });
+    let stdout_handle = thread::spawn(move || read_output_tail(&mut stdout_pipe));
+    let stderr_handle = thread::spawn(move || read_output_tail(&mut stderr_pipe));
     let deadline = Instant::now() + timeout;
     let status = loop {
         if let Some(status) = child
@@ -1013,24 +1005,104 @@ fn run_tool(
     if status.success() {
         Ok(stdout)
     } else {
-        let detail = if stderr.trim().is_empty() {
-            stdout
-        } else {
-            stderr
-        };
-        Err(format!(
-            "{label} ist fehlgeschlagen: {}",
-            detail
-                .trim()
-                .chars()
-                .rev()
-                .take(1800)
-                .collect::<String>()
-                .chars()
-                .rev()
-                .collect::<String>()
+        Err(tool_failure_message(
+            label,
+            &stdout,
+            &stderr,
+            status.code(),
+            exit_signal(&status).as_deref(),
         ))
     }
+}
+
+fn read_output_tail(reader: &mut impl Read) -> String {
+    let mut buffer = Vec::new();
+    let mut chunk = [0u8; 8192];
+    let cap = 256 * 1024 * 4;
+    loop {
+        match reader.read(&mut chunk) {
+            Ok(0) | Err(_) => break,
+            Ok(count) => {
+                buffer.extend_from_slice(&chunk[..count]);
+                if buffer.len() > cap {
+                    buffer.drain(..buffer.len() - cap);
+                }
+            }
+        }
+    }
+    keep_tail(&String::from_utf8_lossy(&buffer), 256 * 1024)
+}
+
+fn keep_tail(value: &str, max_units: usize) -> String {
+    let total = crate::vault::utf16_len(value);
+    if total <= max_units {
+        return value.to_owned();
+    }
+    let skip = total - max_units;
+    let mut units = 0usize;
+    for (index, character) in value.char_indices() {
+        if units >= skip {
+            return value[index..].to_owned();
+        }
+        units += character.len_utf16();
+    }
+    String::new()
+}
+
+fn tool_failure_message(
+    label: &str,
+    stdout: &str,
+    stderr: &str,
+    code: Option<i32>,
+    signal: Option<&str>,
+) -> String {
+    let fallback = match code {
+        Some(code) => format!("Code {code}"),
+        None => "Code null".to_owned(),
+    };
+    let chosen = if !stderr.is_empty() {
+        stderr
+    } else if !stdout.is_empty() {
+        stdout
+    } else {
+        fallback.as_str()
+    };
+    let signal = signal
+        .map(|signal| format!(" ({signal})"))
+        .unwrap_or_default();
+    format!(
+        "{label} ist fehlgeschlagen{signal}: {}",
+        keep_tail(chosen.trim(), 1800)
+    )
+}
+
+fn exit_signal(status: &std::process::ExitStatus) -> Option<String> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::ExitStatusExt;
+        return status.signal().map(signal_name);
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = status;
+        None
+    }
+}
+
+fn signal_name(signal: i32) -> String {
+    match signal {
+        1 => "SIGHUP",
+        2 => "SIGINT",
+        3 => "SIGQUIT",
+        6 => "SIGABRT",
+        9 => "SIGKILL",
+        11 => "SIGSEGV",
+        13 => "SIGPIPE",
+        14 => "SIGALRM",
+        15 => "SIGTERM",
+        other => return format!("SIG{other}"),
+    }
+    .to_owned()
 }
 
 fn walk_files(root: &Path) -> Result<Vec<PathBuf>, String> {
@@ -1386,7 +1458,10 @@ fn civil_date(mut days: u64) -> (i32, u32, u32) {
 
 #[cfg(test)]
 mod tests {
-    use super::{extract_search_text, inline_images, page_dimensions, page_parents, safe_segment};
+    use super::{
+        extract_search_text, inline_images, page_dimensions, page_parents, safe_segment,
+        tool_failure_message,
+    };
 
     #[test]
     fn a_page_title_stops_at_120_utf16_units() {
@@ -1501,5 +1576,25 @@ mod tests {
         assert_eq!(parent_of("b.html"), Some(Vec::<String>::new()));
         assert!(parent_of("secret.html").is_none());
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_failed_onenote_tool_reports_the_exit_status() {
+        assert_eq!(
+            tool_failure_message("Archivprüfung", "", "", Some(7), None),
+            "Archivprüfung ist fehlgeschlagen: Code 7"
+        );
+        assert_eq!(
+            tool_failure_message("OneNote-Konvertierung", "out", "err", Some(1), None),
+            "OneNote-Konvertierung ist fehlgeschlagen: err"
+        );
+        assert_eq!(
+            tool_failure_message("OneNote-Konvertierung", "", "kaputt", None, Some("SIGKILL")),
+            "OneNote-Konvertierung ist fehlgeschlagen (SIGKILL): kaputt"
+        );
+        let long = "ä".repeat(1801);
+        let message = tool_failure_message("Werkzeug", &long, "", Some(1), None);
+        assert!(message.ends_with(&"ä".repeat(1800)));
+        assert_eq!(message.matches('ä').count(), 1800);
     }
 }
