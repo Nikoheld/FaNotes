@@ -221,7 +221,7 @@ fn lmstudio_models(connection: &Value) -> Result<Vec<Value>, String> {
     );
     match native {
         Ok(body) => return parse_lmstudio_models(&body),
-        Err(error) if error.contains("404") => {}
+        Err(error) if error.contains("[HTTP 404]") => {}
         Err(error) => return Err(error),
     }
     let legacy = request_json(
@@ -728,7 +728,7 @@ fn lm_studio_chat(
         Duration::from_secs(600),
     ) {
         Ok(body) => lm_studio_text(&body),
-        Err(error) if error.contains("404") => {
+        Err(error) if error.contains("[HTTP 404]") => {
             chat_completions(connection, model, prompt, temperature, max_tokens)
         }
         Err(error) => Err(error),
@@ -909,7 +909,7 @@ fn request_json(
     let agent: Agent = Agent::config_builder()
         .max_redirects(0)
         .timeout_global(Some(timeout))
-        .http_status_as_error(true)
+        .http_status_as_error(false)
         .build()
         .into();
     let headers = auth_headers(connection);
@@ -933,17 +933,67 @@ fn request_json(
         }
         request.call()
     };
-    let mut response =
-        request.map_err(|error| format!("Der AI-Dienst ist nicht erreichbar: {error}"))?;
+    let label = provider_label(connection);
+    let mut response = request.map_err(|error| {
+        let text = error.to_string();
+        if text.starts_with("timeout:") {
+            format!("{label} hat nicht rechtzeitig geantwortet.")
+        } else {
+            format!("{label} ist nicht erreichbar: {text}")
+        }
+    })?;
+    let status = response.status().as_u16();
     let text = response
         .body_mut()
         .read_to_string()
-        .map_err(|_| "Der AI-Dienst hat keine gültige JSON-Antwort geliefert.".to_owned())?;
+        .map_err(|_| format!("{label} hat keine gültige JSON-Antwort geliefert."))?;
     if text.len() > 8 * 1024 * 1024 {
-        return Err("Der AI-Dienst hat eine unerwartet große Antwort geliefert.".to_owned());
+        return Err(format!(
+            "{label} hat eine unerwartet große Antwort geliefert."
+        ));
+    }
+    if !(200..300).contains(&status) {
+        return Err(provider_http_error(label, status, &text));
+    }
+    if text.is_empty() {
+        return Ok(Value::Null);
     }
     serde_json::from_str(&text)
-        .map_err(|_| "Der AI-Dienst hat keine gültige JSON-Antwort geliefert.".to_owned())
+        .map_err(|_| format!("{label} hat keine gültige JSON-Antwort geliefert."))
+}
+
+fn provider_label(connection: &Value) -> &'static str {
+    match connection
+        .get("provider")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+    {
+        "lmstudio" => "LM Studio",
+        "ollama" => "Ollama",
+        "openai" => "OpenAI",
+        "gemini" => "Gemini",
+        "anthropic" => "Anthropic",
+        "opencode" => "OpenCode",
+        _ => "AI-Dienst",
+    }
+}
+
+fn provider_http_error(label: &str, status: u16, text: &str) -> String {
+    let detail = serde_json::from_str::<Value>(text)
+        .ok()
+        .and_then(|data| http_error_detail(&data))
+        .unwrap_or_else(|| format!("HTTP {status}"));
+    let detail = crate::vault::truncate_utf16(&detail, 700);
+    format!("{label}: {detail} [HTTP {status}]")
+}
+
+fn http_error_detail(data: &Value) -> Option<String> {
+    data.get("error")
+        .and_then(|error| error.get("message"))
+        .and_then(Value::as_str)
+        .or_else(|| data.get("error").and_then(Value::as_str))
+        .or_else(|| data.get("message").and_then(Value::as_str))
+        .map(str::to_owned)
 }
 
 fn auth_headers(connection: &Value) -> Vec<(String, String)> {
@@ -1270,7 +1320,8 @@ fn unwrap_markdown(value: &str) -> Result<String, String> {
 mod tests {
     use super::{
         build_prompt, finish_models, lm_studio_text, output_token_limit, parse_anthropic_models,
-        parse_gemini_models, parse_lmstudio_models, parse_openai_models, unwrap_markdown,
+        parse_gemini_models, parse_lmstudio_models, parse_openai_models, provider_http_error,
+        unwrap_markdown,
     };
     use serde_json::json;
 
@@ -1302,6 +1353,14 @@ mod tests {
         assert_eq!(models[0]["loaded"], true);
         assert_eq!(models[1]["key"], "zeta");
         assert_eq!(models[1]["loaded"], false);
+        assert_eq!(
+            provider_http_error(
+                "Ollama",
+                400,
+                r#"{"error":{"message":"model 'gemma' not found"}}"#
+            ),
+            "Ollama: model 'gemma' not found [HTTP 400]"
+        );
     }
 
     #[test]
