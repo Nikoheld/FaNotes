@@ -825,9 +825,13 @@ impl Host {
             root.clone()
         } else {
             vault::reject_symlinks(&root, &parent_relative)?;
-            let path = vault::resolve_inside(&root, &parent_relative)?;
-            fs::create_dir_all(&path)
-                .map_err(|_| "Der Ordner konnte nicht angelegt werden.".to_owned())?;
+            let path = vault::resolve_existing_entry(&root, &parent_relative).map_err(|error| {
+                if error == "Der Eintrag wurde nicht gefunden." {
+                    "Der Zielordner wurde nicht gefunden.".to_owned()
+                } else {
+                    error
+                }
+            })?;
             let meta = fs::symlink_metadata(&path)
                 .map_err(|_| "Der Zielordner wurde nicht gefunden.".to_owned())?;
             if meta.file_type().is_symlink() || !meta.is_dir() {
@@ -1851,20 +1855,21 @@ fn unique_sibling_name(
             let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
                 continue;
             };
-            if excluding.is_some_and(|current| current.eq_ignore_ascii_case(&name)) {
+            if excluding.is_some_and(|current| current == name) {
                 continue;
             }
-            occupied.insert(name.to_lowercase());
+            occupied.insert(vault::entry_name_key(&name));
         }
     }
     for number in 1..=10_000 {
         let candidate = numbered_entry_name(desired, number);
-        if occupied.contains(&candidate.to_lowercase()) {
+        if occupied.contains(&vault::entry_name_key(&candidate)) {
             continue;
         }
         if let Some(extension) = companion_extension {
             let (stem, _) = split_entry_name(&candidate);
-            if occupied.contains(&format!("{stem}{extension}").to_lowercase()) {
+            let companion = format!("{stem}{extension}");
+            if occupied.contains(&vault::entry_name_key(&companion)) {
                 continue;
             }
         }
@@ -1878,20 +1883,20 @@ fn available_entry_name(parent: &Path, desired: &str, note: bool) -> Result<Stri
     if let Ok(entries) = fs::read_dir(parent) {
         for entry in entries.flatten() {
             if let Some(name) = entry.file_name().to_str() {
-                occupied.insert(name.to_lowercase());
+                occupied.insert(vault::entry_name_key(name));
             }
         }
     }
     for number in 1..=10_000 {
         let candidate = numbered_entry_name(desired, number);
-        if occupied.contains(&candidate.to_lowercase()) {
+        if occupied.contains(&vault::entry_name_key(&candidate)) {
             continue;
         }
         if note {
             let lower = candidate.to_lowercase();
             if lower.ends_with(".md") || lower.ends_with(".markdown") || lower.ends_with(".pdf") {
-                let famd = format!("{}.famd", fanotes_famd::note_stem(&candidate)).to_lowercase();
-                if occupied.contains(&famd) {
+                let famd = format!("{}.famd", fanotes_famd::note_stem(&candidate));
+                if occupied.contains(&vault::entry_name_key(&famd)) {
                     continue;
                 }
             }
@@ -2100,8 +2105,8 @@ fn file_uri(path: &Path) -> String {
 
 pub(crate) fn compare_names(left: &str, right: &str) -> std::cmp::Ordering {
     use std::cmp::Ordering;
-    let left: Vec<char> = left.chars().flat_map(|ch| ch.to_lowercase()).collect();
-    let right: Vec<char> = right.chars().flat_map(|ch| ch.to_lowercase()).collect();
+    let left = sort_key(left);
+    let right = sort_key(right);
     let mut left_index = 0;
     let mut right_index = 0;
     while left_index < left.len() && right_index < right.len() {
@@ -2134,7 +2139,43 @@ pub(crate) fn compare_names(left: &str, right: &str) -> std::cmp::Ordering {
         left_index += 1;
         right_index += 1;
     }
-    left.len().cmp(&right.len())
+    match (left_index == left.len(), right_index == right.len()) {
+        (true, true) => Ordering::Equal,
+        (true, false) => Ordering::Less,
+        (false, true) => Ordering::Greater,
+        (false, false) => Ordering::Equal,
+    }
+}
+
+/// German base order: case and accents do not change the position, and `ß` sorts as `ss`.
+fn sort_key(name: &str) -> Vec<char> {
+    use unicode_normalization::UnicodeNormalization;
+    let mut folded = String::new();
+    for character in name.nfd() {
+        for lower in character.to_lowercase() {
+            match lower {
+                'ß' => folded.push_str("ss"),
+                'æ' => folded.push_str("ae"),
+                'œ' => folded.push_str("oe"),
+                'ø' => folded.push('o'),
+                'ł' => folded.push('l'),
+                character if is_combining_mark(character) => {}
+                character => folded.push(character),
+            }
+        }
+    }
+    folded.chars().collect()
+}
+
+fn is_combining_mark(character: char) -> bool {
+    matches!(
+        character,
+        '\u{0300}'..='\u{036F}'
+            | '\u{1AB0}'..='\u{1AFF}'
+            | '\u{1DC0}'..='\u{1DFF}'
+            | '\u{20D0}'..='\u{20FF}'
+            | '\u{FE20}'..='\u{FE2F}'
+    )
 }
 
 fn entry_name_order(left: &Value, right: &Value) -> std::cmp::Ordering {
@@ -2562,7 +2603,7 @@ fn omit_famd_companions(entries: Vec<Value>) -> Vec<Value> {
         {
             if let Some(name) = entry["name"].as_str() {
                 let stem = name.rsplit_once('.').map(|(stem, _)| stem).unwrap_or(name);
-                stems.insert(stem.to_lowercase());
+                stems.insert(vault::entry_name_key(stem));
             }
         }
     }
@@ -2574,7 +2615,7 @@ fn omit_famd_companions(entries: Vec<Value>) -> Vec<Value> {
             }
             let name = entry["name"].as_str().unwrap_or("");
             let stem = name.rsplit_once('.').map(|(stem, _)| stem).unwrap_or(name);
-            !stems.contains(&stem.to_lowercase())
+            !stems.contains(&vault::entry_name_key(stem))
         })
         .collect()
 }
@@ -2950,4 +2991,21 @@ fn ink_anchor(transcript: &str, query: &str) -> Option<f64> {
             Some(index as f64 / (parsed.len() - 1) as f64)
         }
     })
+}
+
+#[cfg(test)]
+mod sort_tests {
+    use super::compare_names;
+    use std::cmp::Ordering;
+
+    #[test]
+    fn german_names_use_the_electron_base_order() {
+        assert_eq!(compare_names("Äpfel", "Apfel"), Ordering::Equal);
+        assert_eq!(compare_names("Straße", "Strasse"), Ordering::Equal);
+        assert_eq!(compare_names("Mu\u{0308}he", "Mühe"), Ordering::Equal);
+        assert_eq!(compare_names("02", "2"), Ordering::Equal);
+        assert_eq!(compare_names("Seite 2", "Seite 10"), Ordering::Less);
+        assert_eq!(compare_names("Äpfel", "Zen"), Ordering::Less);
+        assert_eq!(compare_names("Über", "Zen"), Ordering::Less);
+    }
 }

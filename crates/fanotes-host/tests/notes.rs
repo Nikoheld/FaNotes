@@ -10,7 +10,7 @@ fn host() -> (Host, std::path::PathBuf) {
     let dir = std::env::temp_dir().join(format!("fanotes-notes-{}-{id}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     let vault = dir.join("vault");
-    std::fs::create_dir_all(&vault).unwrap();
+    std::fs::create_dir_all(vault.join("Mathe")).unwrap();
     let mut host = Host::open(dir.join("app"));
     host.trash_dir = Some(dir.join("trash"));
     host.set_vault(vault.clone()).unwrap();
@@ -429,4 +429,45 @@ fn a_pdf_note_keeps_history_of_its_famd_file() {
         .unwrap()
         .contains("Zweite Fassung"));
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_decomposed_umlaut_is_the_same_note_name() {
+    let (mut host, vault) = host();
+    let nfd_note = "Mu\u{0308}he.md";
+    let nfd_ink = "Mu\u{0308}he.famd";
+    std::fs::write(vault.join(nfd_note), b"bleibt\n").unwrap();
+    std::fs::write(vault.join(nfd_ink), b"ink").unwrap();
+    let created = host
+        .dispatch("fanotes:create-note", &[json!(""), json!("Mühe")])
+        .unwrap();
+    assert_eq!(created["relativePath"], "Mühe 2.md");
+    assert_eq!(std::fs::read(vault.join(nfd_note)).unwrap(), b"bleibt\n");
+    let names: Vec<_> = host
+        .dispatch("fanotes:get-tree", &[])
+        .unwrap()
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|entry| entry["name"].as_str().unwrap().to_owned())
+        .collect();
+    assert!(names.iter().any(|name| name == nfd_note));
+    assert!(names.iter().all(|name| name != nfd_ink));
+}
+
+#[test]
+fn a_missing_folder_is_not_created_for_a_new_note() {
+    let (mut host, vault) = host();
+    let created = host
+        .dispatch("fanotes:create-note", &[json!("Fehlt"), json!("Seite")])
+        .unwrap_err();
+    assert!(created.contains("Zielordner"));
+    let written = host
+        .dispatch(
+            "fanotes:write-file",
+            &[json!("Fehlt/Seite.md"), json!("Hallo\n")],
+        )
+        .unwrap_err();
+    assert!(written.contains("Zielordner"));
+    assert!(!vault.join("Fehlt").exists());
 }

@@ -31,7 +31,7 @@ fn the_sample_notebook_becomes_a_searchable_note() {
         .unwrap()
         .starts_with("OneNote – "));
     let note_path = vault.join(result["importedNotes"][0].as_str().unwrap());
-    let note = fs::read_to_string(note_path).unwrap();
+    let note = fs::read_to_string(&note_path).unwrap();
     assert!(note.starts_with("# Test Page") || note.starts_with("# Test\\ Page"));
     assert!(note.contains("fanotes-worksheet:"));
     assert!(note.contains("Lorem ipsum dolor sit amet"));
@@ -43,7 +43,20 @@ fn the_sample_notebook_becomes_a_searchable_note() {
         .next()
         .unwrap()
         .trim_end_matches("-->");
-    let html = fs::read_to_string(vault.join(format!(".fanotes/worksheets/{id}.html"))).unwrap();
+    let html_path = vault.join(format!(".fanotes/worksheets/{id}.html"));
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            fs::metadata(&note_path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        assert_eq!(
+            fs::metadata(&html_path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+    }
+    let html = fs::read_to_string(html_path).unwrap();
     assert!(html.contains("fanotes-onenote-safe-v1"));
     assert!(html.contains("Content-Security-Policy"));
     assert!(html.contains("<math"));
