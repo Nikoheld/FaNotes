@@ -146,10 +146,17 @@ fn vault_paths_reject_traversal_and_internal_files() {
 fn addon_ssrf_blocks_private_and_non_https() {
     assert!(addon_request_allowed("http://example.com").is_err());
     assert!(addon_request_allowed("https://127.0.0.1/hook").is_err());
+    assert!(addon_request_allowed("https://127.1/hook").is_err());
+    assert!(addon_request_allowed("https://0x7f.0.0.1/hook").is_err());
+    assert!(addon_request_allowed("https://0177.0.0.1/hook").is_err());
+    assert!(addon_request_allowed("https://0x7f000001/hook").is_err());
+    assert!(addon_request_allowed("https://[::1]/hook").is_err());
+    assert!(addon_request_allowed("https://[2001:db8::1]/hook").is_err());
     assert!(addon_request_allowed("https://localhost/hook").is_err());
     assert!(addon_request_allowed("https://192.168.1.20/hook").is_err());
     assert!(addon_request_allowed("https://user:pass@example.com").is_err());
     assert!(addon_request_allowed("https://example.com/hook").is_ok());
+    assert!(addon_request_allowed("HTTPS://example.com/hook").is_ok());
     let (_dir, mut host) = host();
     assert!(host
         .dispatch("fanotes:addons-net-fetch", &[json!("https://10.0.0.4/")])

@@ -4,13 +4,14 @@ const ADDON_PRIVATE: &str = "Add-ons dürfen keine privaten oder lokalen Adresse
 const ADDON_HTTPS: &str = "Add-ons dürfen nur öffentliche https-Adressen aufrufen.";
 
 pub fn addon_request_allowed(raw_url: &str) -> Result<(), String> {
-    let url = raw_url
-        .parse::<UrlLite>()
-        .map_err(|_| "Ungültige URL.".to_owned())?;
-    if url.protocol != "https" || url.has_credentials {
+    let url = url::Url::parse(raw_url).map_err(|_| "Ungültige URL.".to_owned())?;
+    if url.scheme() != "https"
+        || !url.username().is_empty()
+        || url.password().is_some_and(|password| !password.is_empty())
+    {
         return Err(ADDON_HTTPS.to_owned());
     }
-    if is_private_host(&url.hostname) {
+    if is_private_host(url.host_str().unwrap_or("")) {
         return Err(ADDON_PRIVATE.to_owned());
     }
     Ok(())
@@ -59,52 +60,6 @@ pub fn local_ai_origin(raw_url: &str, provider: &str) -> Result<String, String> 
         ));
     }
     Ok(url.origin().ascii_serialization())
-}
-
-pub(crate) struct UrlLite {
-    pub(crate) protocol: String,
-    pub(crate) hostname: String,
-    pub(crate) path: String,
-    pub(crate) has_credentials: bool,
-}
-
-impl std::str::FromStr for UrlLite {
-    type Err = ();
-
-    fn from_str(value: &str) -> Result<Self, ()> {
-        let (protocol, rest) = value.split_once("://").ok_or(())?;
-        if protocol.is_empty() || rest.is_empty() {
-            return Err(());
-        }
-        let before_query = rest.split_once('?').map(|(head, _)| head).unwrap_or(rest);
-        let before_fragment = before_query
-            .split_once('#')
-            .map(|(head, _)| head)
-            .unwrap_or(before_query);
-        let (authority, path) = before_fragment
-            .split_once('/')
-            .map(|(authority, rest)| (authority, format!("/{rest}")))
-            .unwrap_or((before_fragment, String::new()));
-        if authority.is_empty() {
-            return Err(());
-        }
-        let has_credentials = authority.contains('@');
-        let host = authority
-            .rsplit_once('@')
-            .map(|(_, host)| host)
-            .unwrap_or(authority);
-        let hostname = if let Some(inner) = host.strip_prefix('[') {
-            inner.split_once(']').map(|(name, _)| name).unwrap_or(host)
-        } else {
-            host.split_once(':').map(|(name, _)| name).unwrap_or(host)
-        };
-        Ok(Self {
-            protocol: protocol.to_owned(),
-            hostname: hostname.to_owned(),
-            path,
-            has_credentials,
-        })
-    }
 }
 
 fn is_private_host(hostname: &str) -> bool {

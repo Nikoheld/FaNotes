@@ -334,18 +334,19 @@ fn request_text(
 }
 
 fn assert_registry_url(raw_url: &str) -> Result<(), String> {
-    let url = raw_url
-        .parse::<crate::policy::UrlLite>()
-        .map_err(|_| "Ungültige Add-on-Adresse.".to_owned())?;
-    let hostname = url.hostname.to_lowercase();
-    if url.protocol != "https" || url.has_credentials || !ALLOWED_HOSTS.contains(&hostname.as_str())
+    let url = url::Url::parse(raw_url).map_err(|_| "Ungültige Add-on-Adresse.".to_owned())?;
+    let hostname = url.host_str().unwrap_or("");
+    if url.scheme() != "https"
+        || !url.username().is_empty()
+        || url.password().is_some_and(|password| !password.is_empty())
+        || !ALLOWED_HOSTS.contains(&hostname)
     {
         return Err(format!(
             "Diese Adresse ist für Add-ons nicht erlaubt: {}",
             if hostname.is_empty() {
                 raw_url
             } else {
-                hostname.as_str()
+                hostname
             }
         ));
     }
@@ -408,16 +409,15 @@ fn ipv6_is_private(address: Ipv6Addr) -> bool {
 }
 
 fn hostname_of(raw_url: &str) -> Result<String, String> {
-    Ok(raw_url
-        .parse::<crate::policy::UrlLite>()
-        .map_err(|_| "Ungültige URL.".to_owned())?
-        .hostname)
+    url::Url::parse(raw_url)
+        .ok()
+        .and_then(|url| url.host_str().map(str::to_owned))
+        .ok_or_else(|| "Ungültige URL.".to_owned())
 }
 
 fn path_of(raw_url: &str) -> String {
-    raw_url
-        .parse::<crate::policy::UrlLite>()
-        .map(|url| url.path)
+    url::Url::parse(raw_url)
+        .map(|url| url.path().to_owned())
         .unwrap_or_default()
 }
 
