@@ -61,7 +61,16 @@ fn a_dropped_image_and_a_pdf_note_land_in_the_vault() {
         )
         .unwrap();
     assert_eq!(first["relativePath"], "Mathe/Skript.pdf");
-    assert_eq!(std::fs::read(vault.join("Mathe/Skript.pdf")).unwrap(), pdf);
+    let imported = vault.join("Mathe/Skript.pdf");
+    assert_eq!(std::fs::read(&imported).unwrap(), pdf);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            std::fs::metadata(&imported).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+    }
     let famd = std::fs::read_to_string(vault.join("Mathe/Skript.famd")).unwrap();
     assert!(parse_famd(&famd).payload.is_some());
 
