@@ -7,6 +7,7 @@ use std::sync::Mutex;
 use fanotes_host::{find_channel, Host, CHANNELS};
 use serde_json::{json, Value};
 use tauri::{Emitter, Manager, State};
+use webkit2gtk::WebViewExt;
 
 struct HostState(Mutex<Host>);
 
@@ -293,6 +294,44 @@ fanotes_commands! {
     render_pdf_page => "fanotes:render-pdf-page",
 }
 
+fn sheet_zoom_direction(level: f64) -> Option<&'static str> {
+    if !level.is_finite() || (level - 1.0).abs() < 0.001 {
+        None
+    } else if level > 1.0 {
+        Some("in")
+    } else {
+        Some("out")
+    }
+}
+
+fn install_sheet_zoom(window: &tauri::WebviewWindow) {
+    let emit_window = window.clone();
+    let _ = window.with_webview(move |webview| {
+        let view = webview.inner();
+        view.set_zoom_level(1.0);
+        view.connect_zoom_level_notify(move |view| {
+            let Some(direction) = sheet_zoom_direction(view.zoom_level()) else {
+                return;
+            };
+            view.set_zoom_level(1.0);
+            let _ = emit_window.emit("fanotes:sheet-zoom", direction);
+        });
+    });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::sheet_zoom_direction;
+
+    #[test]
+    fn pinch_becomes_a_sheet_zoom_direction() {
+        assert_eq!(sheet_zoom_direction(1.0), None);
+        assert_eq!(sheet_zoom_direction(1.25), Some("in"));
+        assert_eq!(sheet_zoom_direction(0.8), Some("out"));
+        assert_eq!(sheet_zoom_direction(f64::NAN), None);
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let _ = (find_channel, CHANNELS);
@@ -304,6 +343,7 @@ pub fn run() {
                 .unwrap_or_else(|_| std::env::temp_dir().join("fanotes"));
             app.manage(HostState(Mutex::new(Host::open(app_data))));
             if let Some(window) = app.get_webview_window("main") {
+                install_sheet_zoom(&window);
                 let handle = app.handle().clone();
                 window.on_window_event(move |event| {
                     if let tauri::WindowEvent::CloseRequested { api, .. } = event {
