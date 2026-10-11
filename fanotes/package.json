@@ -48,6 +48,7 @@
     "check:tth-dialog": "node scripts/check-tth-dialog.mjs",
     "check:scribble-erase": "node scripts/check-scribble-erase.mjs",
     "check:tool-erase": "node scripts/check-tool-erase.mjs",
+    "check:ink-select": "node scripts/check-ink-select.mjs",
     "check:trackpad-after-pen": "node scripts/check-trackpad-after-pen.mjs",
     "check:wacom-buttons": "node scripts/check-wacom-buttons.mjs",
     "check:jump-filter": "node scripts/check-jump-filter.mjs",
