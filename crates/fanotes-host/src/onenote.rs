@@ -717,7 +717,7 @@ fn render_inputs(
     one2html: &Path,
 ) -> Result<Vec<String>, String> {
     if inputs.len() == 1 && extension_of(&inputs[0]) == ".onetoc2" {
-        if run_tool(
+        if let Err(error) = run_tool(
             one2html,
             &[
                 "--input",
@@ -727,26 +727,22 @@ fn render_inputs(
             ],
             Duration::from_secs(120),
             "OneNote-Konvertierung",
-        )
-        .is_ok()
-        {
-            return Ok(Vec::new());
+        ) {
+            let notebook = inputs[0].parent().unwrap_or(Path::new("."));
+            let sections: Vec<PathBuf> = walk_files(notebook, MAX_EXPANDED_BYTES)?
+                .into_iter()
+                .filter(|path| extension_of(path) == ".one")
+                .collect();
+            if sections.is_empty() {
+                return Err(error);
+            }
+            let _ = fs::remove_dir_all(output_root);
+            create_private_dir(output_root)
+                .map_err(|_| "Der OneNote-Import konnte nicht vorbereitet werden.".to_owned())?;
+            render_sections(&sections, notebook, output_root, one2html)?;
+            return Ok(vec!["Verschachtelte OneNote-Abschnittsgruppen wurden abschnittsweise mit ihrer Ordnerhierarchie übernommen.".to_owned()]);
         }
-        let notebook = inputs[0].parent().unwrap_or(Path::new("."));
-        let sections: Vec<PathBuf> = walk_files(notebook, MAX_EXPANDED_BYTES)?
-            .into_iter()
-            .filter(|path| extension_of(path) == ".one")
-            .collect();
-        if sections.is_empty() {
-            return Err(
-                "Es wurden keine OneNote-Abschnitte für die Konvertierung gefunden.".to_owned(),
-            );
-        }
-        let _ = fs::remove_dir_all(output_root);
-        create_private_dir(output_root)
-            .map_err(|_| "Der OneNote-Import konnte nicht vorbereitet werden.".to_owned())?;
-        render_sections(&sections, notebook, output_root, one2html)?;
-        return Ok(vec!["Verschachtelte OneNote-Abschnittsgruppen wurden abschnittsweise mit ihrer Ordnerhierarchie übernommen.".to_owned()]);
+        return Ok(Vec::new());
     }
     let sections: Vec<PathBuf> = inputs
         .iter()
@@ -786,6 +782,11 @@ fn render_sections(
         }
         create_private_dir(&destination)
             .map_err(|_| "Der OneNote-Import konnte nicht vorbereitet werden.".to_owned())?;
+        let section_name = section
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("Abschnitt");
+        let label = format!("OneNote-Abschnitt {section_name}");
         run_tool(
             one2html,
             &[
@@ -795,7 +796,7 @@ fn render_sections(
                 &destination.to_string_lossy(),
             ],
             Duration::from_secs(120),
-            "OneNote-Abschnitt",
+            &label,
         )?;
     }
     Ok(())
@@ -1501,9 +1502,9 @@ fn civil_date(mut days: u64) -> (i32, u32, u32) {
 mod tests {
     use super::{
         common_ancestor, extract_search_text, inline_images, page_dimensions, page_parents,
-        safe_segment, tool_failure_message, validate_listing, walk_limited,
+        render_inputs, safe_segment, tool_failure_message, validate_listing, walk_limited,
     };
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
 
     #[test]
     fn a_page_title_stops_at_120_utf16_units() {
@@ -1695,5 +1696,32 @@ mod tests {
             common_ancestor(&[PathBuf::from("/notes/Mathe/a.one")]),
             PathBuf::from("/notes/Mathe")
         );
+    }
+
+    #[test]
+    fn a_failed_notebook_keeps_the_tool_error_when_no_section_remains() {
+        let root = std::env::temp_dir().join(format!(
+            "fanotes-onenote-render-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        let notebook = root.join("notebook");
+        let output = root.join("rendered");
+        std::fs::create_dir_all(&notebook).unwrap();
+        std::fs::create_dir_all(&output).unwrap();
+        let toc = notebook.join("Open Notebook.onetoc2");
+        std::fs::write(&toc, b"notebook").unwrap();
+        let missing = render_inputs(&[toc.clone()], &output, Path::new("/bin/false")).unwrap_err();
+        assert!(missing.contains("OneNote-Konvertierung ist fehlgeschlagen: Code 1"));
+        assert!(!missing.contains("keine OneNote-Abschnitte"));
+
+        std::fs::write(notebook.join("Algebra.one"), b"section").unwrap();
+        let named = render_inputs(&[toc], &output, Path::new("/bin/false")).unwrap_err();
+        assert!(named.contains("OneNote-Abschnitt Algebra.one"));
+        let _ = std::fs::remove_dir_all(&root);
     }
 }
