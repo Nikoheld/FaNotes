@@ -7,10 +7,12 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
 # fanotes-site refuses to start until clamd answers. policy-rc.d in this image
-# blocks `service`/`systemctl`, so launch the daemon directly.
+# blocks `service`/`systemctl`, so launch the daemon directly. /var/run is a
+# real directory here, not a symlink to /run, and clamd's socket is
+# /var/run/clamav/clamd.ctl.
 if ! /usr/bin/clamdscan --ping 1 >/dev/null 2>&1; then
-  sudo mkdir -p /run/clamav
-  sudo chown clamav:clamav /run/clamav
+  sudo mkdir -p /var/run/clamav
+  sudo chown clamav:clamav /var/run/clamav
   if ! pidof clamd >/dev/null 2>&1; then
     sudo -u clamav /usr/sbin/clamd
   fi

@@ -13,6 +13,11 @@ const MAX_EXECUTABLE_BYTES = 256 * 1024 * 1024
 const REQUEST_TIMEOUT_MS = 120_000
 const STOP_GRACE_MS = 2_000
 
+function isPdfiumHostFailure(error) {
+  const message = String(error && error.message ? error.message : error)
+  return /nicht verfügbar|beendet|nicht rechtzeitig|ENOENT|spawn /iu.test(message)
+}
+
 function encodeFrame(header, payload = Buffer.alloc(0)) {
   const json = Buffer.from(JSON.stringify(header), 'utf8')
   if (json.length > MAX_HEADER_BYTES || payload.length > MAX_PAYLOAD_BYTES) {
@@ -222,7 +227,7 @@ function createPdfiumHost(spawnImpl = spawn) {
     })
     chain = run.then(() => undefined, () => undefined)
     return run.catch((error) => {
-      failures += 1
+      if (isPdfiumHostFailure(error)) failures += 1
       if (failures >= 2) return { unavailable: true }
       throw error
     })
@@ -246,4 +251,4 @@ function renderPdfPage(request) {
   return host.renderPdfPage(request)
 }
 
-module.exports = { createPdfiumHost, findExecutable, renderPdfPage }
+module.exports = { createPdfiumHost, findExecutable, isPdfiumHostFailure, renderPdfPage }

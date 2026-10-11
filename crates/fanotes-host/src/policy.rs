@@ -55,12 +55,12 @@ pub fn local_ai_origin(raw_url: &str, provider: &str) -> Result<String, String> 
     Ok(format!("{}://{}", url.protocol, url.host_header()))
 }
 
-struct UrlLite {
-    protocol: String,
-    hostname: String,
+pub(crate) struct UrlLite {
+    pub(crate) protocol: String,
+    pub(crate) hostname: String,
     host_with_port: String,
-    path: String,
-    has_credentials: bool,
+    pub(crate) path: String,
+    pub(crate) has_credentials: bool,
     has_query: bool,
     has_fragment: bool,
 }

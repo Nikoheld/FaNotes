@@ -40,6 +40,33 @@ if [ ! -e /usr/bin/chromium ]; then
   fi
 fi
 
+# Tauri 2 (fanotes/src-tauri) links the system WebKitGTK 4.1. A fresh image
+# does not ship those headers, so cargo check -p fanotes-tauri fails until
+# they are installed.
+if ! pkg-config --exists webkit2gtk-4.1; then
+  sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq
+  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+    build-essential pkg-config patchelf file \
+    libwebkit2gtk-4.1-dev libssl-dev \
+    libayatana-appindicator3-dev librsvg2-dev
+fi
+
+# rust-toolchain.toml selects the compiler. Install that toolchain, the wasm32
+# target used by fanotes/scripts/build-rust-wasm.mjs, and the matching
+# wasm-bindgen CLI. The image's default toolchain is older than the pin.
+if command -v rustup >/dev/null 2>&1; then
+  rustup show active-toolchain >/dev/null
+  rustup target add wasm32-unknown-unknown
+  BINDGEN_VERSION="$(awk '
+    $0 == "name = \"wasm-bindgen\"" { found = 1; next }
+    found && $1 == "version" { gsub(/"/, "", $3); print $3; exit }
+  ' Cargo.lock)"
+  INSTALLED_BINDGEN="$(wasm-bindgen --version 2>/dev/null | awk '{ print $2 }' || true)"
+  if [ -n "${BINDGEN_VERSION}" ] && [ "${INSTALLED_BINDGEN}" != "${BINDGEN_VERSION}" ]; then
+    cargo install wasm-bindgen-cli --version "${BINDGEN_VERSION}" --locked --force
+  fi
+fi
+
 # ImageMagick 7 (provides the `magick` dispatcher fanotes-site invokes).
 if [ ! -x /opt/imagemagick7/AppRun ]; then
   TMP_IM="$(mktemp -d)"

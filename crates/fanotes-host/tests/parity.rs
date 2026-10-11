@@ -1,6 +1,7 @@
 use std::fs;
 
-use fanotes_host::{addon_request_allowed, local_ai_origin, Host, CHANNELS};
+use base64::Engine;
+use fanotes_host::{addon_request_allowed, local_ai_origin, Host, SecretStore, CHANNELS};
 use serde_json::json;
 
 fn host() -> (TempDir, Host) {
@@ -28,6 +29,7 @@ impl Drop for TempDir {
 #[test]
 fn every_preload_channel_dispatches() {
     let (_dir, mut host) = host();
+    host.file_dialogs = false;
     assert!(CHANNELS.len() > 90);
     for channel in CHANNELS {
         let result = host.dispatch(channel.name, &[]);
@@ -39,7 +41,7 @@ fn every_preload_channel_dispatches() {
 
 #[test]
 fn vault_paths_reject_traversal_and_internal_files() {
-    let (_dir, mut host) = host();
+    let (dir, mut host) = host();
     assert_eq!(
         host.dispatch("fanotes:read-file", &[json!("../secret.md")])
             .unwrap_err(),
@@ -74,6 +76,58 @@ fn vault_paths_reject_traversal_and_internal_files() {
             .unwrap(),
         json!("Hallo")
     );
+    fs::write(dir.0.join("vault").join("seite.pdf"), b"%PDF-1.4 test").unwrap();
+    let encoded_value = host
+        .dispatch("fanotes:read-asset-bytes", &[json!("seite.pdf")])
+        .unwrap();
+    let encoded = encoded_value.as_str().unwrap();
+    assert_eq!(
+        base64::engine::general_purpose::STANDARD
+            .decode(encoded)
+            .unwrap(),
+        b"%PDF-1.4 test"
+    );
+    let data_url = host
+        .dispatch("fanotes:read-asset-data-url", &[json!("seite.pdf")])
+        .unwrap();
+    assert!(data_url
+        .as_str()
+        .unwrap()
+        .starts_with("data:application/pdf;base64,"));
+    assert_eq!(
+        host.dispatch("fanotes:read-asset-bytes", &[json!("Notiz.md")])
+            .unwrap_err(),
+        "Dieser Dateityp ist für die Vorschau nicht erlaubt."
+    );
+    let link = dir.0.join("vault").join("link.pdf");
+    std::os::unix::fs::symlink(dir.0.join("vault").join("seite.pdf"), &link).unwrap();
+    assert_eq!(
+        host.dispatch("fanotes:read-asset-bytes", &[json!("link.pdf")])
+            .unwrap_err(),
+        "Symbolische Links sind innerhalb des Vaults nicht erlaubt."
+    );
+    let synced = host
+        .dispatch("fanotes:sync-read", &[json!("seite.pdf")])
+        .unwrap();
+    assert_eq!(synced.as_str(), Some(encoded));
+    let written = host
+        .dispatch(
+            "fanotes:sync-write",
+            &[
+                json!("kopie.pdf"),
+                json!(encoded),
+                json!(1_700_000_000_000i64),
+            ],
+        )
+        .unwrap();
+    assert_eq!(written["path"], "kopie.pdf");
+    assert_eq!(written["size"], 13);
+    assert_eq!(
+        fs::read(dir.0.join("vault").join("kopie.pdf")).unwrap(),
+        b"%PDF-1.4 test"
+    );
+    host.dispatch("fanotes:sync-remove", &[json!("fehlt.pdf")])
+        .unwrap();
 }
 
 #[test]
@@ -100,6 +154,7 @@ fn local_ai_urls_stay_on_the_lan() {
 #[test]
 fn secrets_do_not_land_in_settings() {
     let (dir, mut host) = host();
+    host.secret_store = SecretStore::Memory;
     host.dispatch(
         "fanotes:save-settings",
         &[json!({ "theme": "dark", "openAiApiKey": "sk-live-secret" })],
@@ -110,6 +165,19 @@ fn secrets_do_not_land_in_settings() {
     assert!(settings.contains("dark"));
     let secrets = host.dispatch("fanotes:load-secure-settings", &[]).unwrap();
     assert_eq!(secrets["openAiApiKey"], "sk-live-secret");
+}
+
+#[test]
+fn close_waits_until_the_page_confirms() {
+    let (_dir, mut host) = host();
+    host.dispatch("fanotes:request-close", &[]).unwrap();
+    assert!(host.close_requested);
+    assert!(!host.allow_close);
+    host.dispatch("fanotes:cancel-close", &[]).unwrap();
+    assert!(!host.close_requested);
+    assert!(!host.allow_close);
+    host.dispatch("fanotes:confirm-close", &[]).unwrap();
+    assert!(host.allow_close);
 }
 
 #[test]

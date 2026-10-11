@@ -3,6 +3,30 @@
 (() => {
   const internals = window.__TAURI_INTERNALS__
   if (!internals || typeof internals.invoke !== 'function') return
+  const decodeByteFields = (value) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return value
+    const next = { ...value }
+    for (const key of ['de', 'en', 'bytes', 'model', 'wasm']) {
+      if (typeof next[key] === 'string') next[key] = bytesFromBase64(next[key])
+    }
+    return next
+  }
+  const bytesFromBase64 = (value) => {
+    if (typeof value !== 'string') throw new Error('Die Datei konnte nicht gelesen werden.')
+    const binary = atob(value)
+    const bytes = new Uint8Array(binary.length)
+    for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index)
+    return bytes
+  }
+  const bytesToBase64 = (value) => {
+    const bytes = value instanceof Uint8Array ? value : new Uint8Array(value)
+    let binary = ''
+    const chunk = 0x2000
+    for (let index = 0; index < bytes.length; index += chunk) {
+      binary += String.fromCharCode(...bytes.subarray(index, index + chunk))
+    }
+    return btoa(binary)
+  }
   const invoke = (channel, ...args) => internals.invoke(channel, { args })
   const listen = (channel, callback) => {
     if (typeof callback !== 'function') return () => {}
@@ -56,7 +80,15 @@
     closeSubjectBookPopout: () => invoke('fanotes:close-subject-book-popout'),
     onSubjectBookPopoutClosed: (callback) => listen('fanotes:subject-book-popout-closed', callback),
     importWorksheet: () => invoke('fanotes:import-worksheet'),
-    importWorksheetFromData: (payload) => invoke('fanotes:import-worksheet-from-data', payload),
+    importWorksheetFromData: (payload) => {
+      const source = payload && payload.bytes
+      const bytes = source instanceof Uint8Array ? source : new Uint8Array(source || [])
+      return invoke('fanotes:import-worksheet-from-data', {
+        name: payload && payload.name,
+        mimeType: payload && payload.mimeType,
+        bytesBase64: bytesToBase64(bytes),
+      })
+    },
     importPdfNote: (parentPath) => invoke('fanotes:import-pdf-note', parentPath),
     importOneNote: () => invoke('fanotes:import-onenote'),
     readWorksheet: (id) => invoke('fanotes:read-worksheet', id),
@@ -66,11 +98,31 @@
     readNoteHistory: (relativePath, snapshotId) => invoke('fanotes:read-note-history', relativePath, snapshotId),
     exportNotePdf: () => invoke('fanotes:export-note-pdf'),
     readAssetDataUrl: (relativePath) => invoke('fanotes:read-asset-data-url', relativePath),
-    readAssetBytes: (relativePath) => invoke('fanotes:read-asset-bytes', relativePath),
-    loadSpellingResources: () => invoke('fanotes:load-spelling-resources'),
-    loadSpellingWordCandidates: (language) => invoke('fanotes:load-spelling-word-candidates', language),
-    loadHandwritingRecognitionResources: () => invoke('fanotes:load-handwriting-recognition-resources'),
-    recognizeNativeHandwritingLine: (request) => invoke('fanotes:recognize-native-handwriting-line', request),
+    readAssetBytes: async (relativePath) => bytesFromBase64(await invoke('fanotes:read-asset-bytes', relativePath)),
+    loadSpellingResources: async () => decodeByteFields(await invoke('fanotes:load-spelling-resources')),
+    loadSpellingWordCandidates: async (language) => decodeByteFields(await invoke('fanotes:load-spelling-word-candidates', language)),
+    loadHandwritingRecognitionResources: async () => decodeByteFields(await invoke('fanotes:load-handwriting-recognition-resources')),
+    recognizeNativeHandwritingLine: async (request) => {
+      const input = request && request.input instanceof Float32Array
+        ? request.input
+        : new Float32Array((request && request.input) || [])
+      const view = new Uint8Array(input.buffer, input.byteOffset, input.byteLength)
+      const tight = view.byteOffset === 0 && view.byteLength === view.buffer.byteLength ? view : view.slice()
+      const result = await invoke('fanotes:recognize-native-handwriting-line', {
+        width: request.width,
+        height: request.height,
+        threads: request.threads,
+        inputBase64: bytesToBase64(tight),
+      })
+      const raw = bytesFromBase64(result.probabilitiesBase64 || '')
+      const probabilities = new Float32Array(raw.buffer, raw.byteOffset, Math.floor(raw.byteLength / 4))
+      return {
+        engine: result.engine,
+        dims: result.dims,
+        characters: result.characters,
+        probabilities,
+      }
+    },
     getEnhancedMathRecognitionState: () => invoke('fanotes:enhanced-math-get-state'),
     installEnhancedMathRecognitionModel: (request) => invoke('fanotes:enhanced-math-install', request),
     recognizeEnhancedMath: (request) => invoke('fanotes:enhanced-math-recognize', request),
@@ -112,8 +164,8 @@
     sync: {
       vaultId: () => invoke('fanotes:sync-vault-id'),
       scan: () => invoke('fanotes:sync-scan'),
-      read: (relativePath) => invoke('fanotes:sync-read', relativePath),
-      write: (relativePath, bytes, mtimeMs) => invoke('fanotes:sync-write', relativePath, bytes, mtimeMs),
+      read: async (relativePath) => bytesFromBase64(await invoke('fanotes:sync-read', relativePath)),
+      write: (relativePath, bytes, mtimeMs) => invoke('fanotes:sync-write', relativePath, bytesToBase64(bytes), mtimeMs),
       remove: (relativePath) => invoke('fanotes:sync-remove', relativePath),
       readState: (vaultId) => invoke('fanotes:sync-read-state', vaultId),
       writeState: (vaultId, json) => invoke('fanotes:sync-write-state', vaultId, json),

@@ -11,7 +11,12 @@ const read = (relative) => fs.readFileSync(path.join(appRoot, relative), 'utf8')
 const names = (source, pattern) => [...source.matchAll(pattern)].map((match) => match[1])
 const preload = names(read('electron/preload.cjs').slice(0, read('electron/preload.cjs').indexOf('const invoke')), /'(fanotes:[^']+)'/g)
 const host = [...new Set(names(fs.readFileSync(path.join(repoRoot, 'crates/fanotes-host/src/channels.rs'), 'utf8'), /"(fanotes:[^"]+)"/g))]
-const commands = names(read('src-tauri/src/lib.rs'), /=> "(fanotes:[^"]+)"/g)
+// The generated list is `name => "fanotes:..."`. Window commands are handwritten
+// as `#[tauri::command(rename = "fanotes:...")]` and are not in that list.
+const commands = [...new Set([
+  ...names(read('src-tauri/src/lib.rs'), /=> "(fanotes:[^"]+)"/g),
+  ...names(read('src-tauri/src/lib.rs'), /rename = "(fanotes:[^"]+)"/g),
+])]
 const bridge = [...new Set([
   ...names(read('src-tauri/src/fanotes-api.js'), /invoke\('(fanotes:[^']+)'/g),
   ...names(read('src-tauri/src/fanotes-api.js'), /listen\('(fanotes:[^']+)'/g),

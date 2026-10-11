@@ -11,6 +11,7 @@ import {
   neuralWordContextWordsOfLength,
 } from './neuralWordContext'
 import { isUserAcceptedWord, personalWords, type SuggestionLexicon } from './spellingSuggest'
+import { loadBrowserSpellingResources, loadBrowserSpellingWordCandidates } from './spellingResources'
 import { FRENCH_STOPWORDS, isFrenchWord } from './frenchLexicon'
 
 export type SpellingSegment = { from: number; text: string }
@@ -107,7 +108,11 @@ const sha256 = async (bytes: Uint8Array) => {
 }
 
 const loadDictionaries = async (): Promise<Dictionaries> => {
-  dictionariesPromise ??= window.fanotes.loadSpellingResources().then(async (resources) => {
+  dictionariesPromise ??= window.fanotes.loadSpellingResources().catch((hostError: unknown) => (
+    loadBrowserSpellingResources().catch(() => {
+      throw hostError
+    })
+  )).then(async (resources) => {
     const hashes = resources.manifest.hashes
     if (resources.manifest.format !== 'fanotes-spelling-bloom-v2' || hashes !== 8) throw new Error('Unbekanntes Rechtschreibformat.')
     const de = new Uint8Array(resources.de)
@@ -199,7 +204,11 @@ const candidatePromises = new Map<SpellingLanguage, Promise<Set<string>>>()
 export const loadRecognitionCandidates = async (language: SpellingLanguage) => {
   let pending = candidatePromises.get(language)
   if (!pending) {
-    pending = window.fanotes.loadSpellingWordCandidates(language).then(async (resource) => {
+    pending = window.fanotes.loadSpellingWordCandidates(language).catch((hostError: unknown) => (
+      loadBrowserSpellingWordCandidates(language).catch(() => {
+        throw hostError
+      })
+    )).then(async (resource) => {
       if (resource.language !== language) throw new Error('Die OCR-Wortliste gehört zur falschen Sprache.')
       const bytes = new Uint8Array(resource.bytes)
       if (bytes.byteLength !== resource.descriptor.size || bytes.byteLength > 8 * 1024 * 1024) {
