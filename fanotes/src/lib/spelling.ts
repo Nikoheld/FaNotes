@@ -196,7 +196,7 @@ export const loadSpellingWordMembership = async (language: SpellingLanguage) => 
 
 const candidatePromises = new Map<SpellingLanguage, Promise<Set<string>>>()
 
-const loadRecognitionCandidates = async (language: SpellingLanguage) => {
+export const loadRecognitionCandidates = async (language: SpellingLanguage) => {
   let pending = candidatePromises.get(language)
   if (!pending) {
     pending = window.fanotes.loadSpellingWordCandidates(language).then(async (resource) => {
