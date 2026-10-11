@@ -1,0 +1,18 @@
+[package]
+name = "fanotes-pdf"
+version = "0.1.0"
+description = "Rasterize PDF pages with PDFium into the shared paper-camera bitmap size"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "fanotes-pdfium"
+path = "src/bin/fanotes-pdfium.rs"
+
+[dependencies]
+base64 = "0.22"
+pdfium-bundled = "0.2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "1"
