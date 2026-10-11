@@ -44,7 +44,7 @@ pub fn local_ai_origin(raw_url: &str, provider: &str) -> Result<String, String> 
     if hostname.is_empty() {
         return Err(format!("Gib eine vollständige {label}-Adresse ein."));
     }
-    let private_ipv4 = parse_ipv4(&hostname).is_some_and(is_private_ipv4);
+    let private_ipv4 = parse_ipv4(&hostname).is_some_and(is_lan_ipv4);
     let private_ipv6 = hostname == "::1"
         || hostname.starts_with("fc")
         || hostname.starts_with("fd")
@@ -97,6 +97,18 @@ fn parse_ipv4(value: &str) -> Option<[u8; 4]> {
         count += 1;
     }
     (count == 4).then_some(parts)
+}
+
+/// Local model servers use the desktop LAN list. Carrier-grade `100.64/10`
+/// and multicast addresses stay off that list.
+fn is_lan_ipv4(address: [u8; 4]) -> bool {
+    let [a, b, _, _] = address;
+    a == 0
+        || a == 10
+        || a == 127
+        || (a == 169 && b == 254)
+        || (a == 172 && (16..=31).contains(&b))
+        || (a == 192 && b == 168)
 }
 
 fn is_private_ipv4(address: [u8; 4]) -> bool {
