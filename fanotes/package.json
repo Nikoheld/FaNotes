@@ -16,6 +16,7 @@
     "check:visual": "node scripts/check-visual-rendering.cjs",
     "check:notes": "node scripts/check-note-creation.cjs",
     "check:desktop-guards": "node scripts/check-desktop-guards.cjs",
+    "check:tauri-channels": "node scripts/check-tauri-channel-parity.mjs",
     "check:famd": "node scripts/check-famd.cjs",
     "check:packaged-i18n": "node scripts/check-packaged-i18n.cjs",
     "check:markdown": "node scripts/check-markdown.mjs",
