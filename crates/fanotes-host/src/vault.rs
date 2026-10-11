@@ -10,7 +10,7 @@ pub fn normalize_relative_path(
     allow_root: bool,
     allow_internal: bool,
 ) -> Result<String, String> {
-    if value.len() > 4096 || value.contains('\0') {
+    if utf16_len(value) > 4096 || value.contains('\0') {
         return Err("Ungültiger Vault-Pfad.".to_owned());
     }
     if value.contains('\\') || Path::new(value).is_absolute() || value.starts_with('/') {
@@ -222,7 +222,7 @@ pub fn resolve_sync_path(
 }
 
 fn sync_segments(raw: &str) -> Result<Vec<String>, String> {
-    if raw.is_empty() || raw.len() > 1024 || raw.contains('\0') {
+    if raw.is_empty() || utf16_len(raw) > 1024 || raw.contains('\0') {
         return Err("Ungültiger Sync-Pfad.".to_owned());
     }
     let normalized = raw.replace('\\', "/");
@@ -293,5 +293,23 @@ fn rename_legacy_internal(root: &Path, directory: &Path) -> Result<bool, String>
         Ok(()) => Ok(true),
         Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => Ok(false),
         Err(_) => Err("Der bisherige interne FaNotes-Ordner ist unsicher.".to_owned()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{normalize_relative_path, sync_segments};
+
+    #[test]
+    fn path_limits_count_characters() {
+        let sync_path = "Ä".repeat(600);
+        assert_eq!(sync_path.len(), 1200);
+        assert!(sync_segments(&sync_path).is_ok());
+        assert!(sync_segments(&"Ä".repeat(1025)).is_err());
+
+        let note_path = "Ä".repeat(3000);
+        assert!(note_path.len() > 4096);
+        assert!(normalize_relative_path(&note_path, false, false).is_ok());
+        assert!(normalize_relative_path(&"Ä".repeat(4097), false, false).is_err());
     }
 }
