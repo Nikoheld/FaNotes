@@ -154,7 +154,7 @@ fn import_in_temp(
                 })
                 .unwrap_or_default();
             if hierarchy.first().is_some_and(|segment| {
-                crate::compare_names(segment, &notebook_name) == std::cmp::Ordering::Equal
+                crate::base_dictionary_order(segment, &notebook_name) == std::cmp::Ordering::Equal
             }) {
                 hierarchy.remove(0);
             }

@@ -2273,6 +2273,13 @@ pub(crate) fn dictionary_order(left: &str, right: &str) -> std::cmp::Ordering {
     )
 }
 
+/// German base order without numeric runs, matching `localeCompare(name, 'de', { sensitivity: 'base' })`.
+pub(crate) fn base_dictionary_order(left: &str, right: &str) -> std::cmp::Ordering {
+    static COLLATOR: std::sync::OnceLock<Option<icu_collator::CollatorBorrowed<'static>>> =
+        std::sync::OnceLock::new();
+    compare_with(left, right, COLLATOR.get_or_init(german_base_collator))
+}
+
 /// German dictionary order with numeric runs, matching `localeCompare(name, 'de', { numeric: true })`.
 pub(crate) fn numeric_dictionary_order(left: &str, right: &str) -> std::cmp::Ordering {
     static COLLATOR: std::sync::OnceLock<Option<icu_collator::CollatorBorrowed<'static>>> =
@@ -2290,6 +2297,12 @@ fn compare_with(
     } else {
         left.cmp(right)
     }
+}
+
+fn german_base_collator() -> Option<icu_collator::CollatorBorrowed<'static>> {
+    let mut options = icu_collator::options::CollatorOptions::default();
+    options.strength = Some(icu_collator::options::Strength::Primary);
+    icu_collator::Collator::try_new(icu_locale_core::locale!("de").into(), options).ok()
 }
 
 fn german_numeric_collator() -> Option<icu_collator::CollatorBorrowed<'static>> {
@@ -3306,6 +3319,30 @@ fn ink_anchor(transcript: &str, query: &str) -> Option<f64> {
 mod sort_tests {
     use super::compare_names;
     use std::cmp::Ordering;
+
+    #[test]
+    fn notebook_folders_use_base_order_without_numeric_runs() {
+        use super::{base_dictionary_order, numeric_dictionary_order};
+        assert_eq!(
+            base_dictionary_order("Seite 2", "Seite 02"),
+            Ordering::Greater
+        );
+        assert_eq!(
+            base_dictionary_order("Mathematik", "mathematik"),
+            Ordering::Equal
+        );
+        assert_eq!(base_dictionary_order("Straße", "Strasse"), Ordering::Equal);
+        assert_eq!(base_dictionary_order("Apfel", "Äpfel"), Ordering::Equal);
+        assert_eq!(
+            base_dictionary_order("Kapitel 10", "Kapitel 2"),
+            Ordering::Less
+        );
+        assert_eq!(
+            numeric_dictionary_order("Kapitel 10", "Kapitel 2"),
+            Ordering::Greater
+        );
+        assert_eq!(compare_names("Seite 2", "Seite 02"), Ordering::Equal);
+    }
 
     #[test]
     fn german_names_use_the_electron_base_order() {
