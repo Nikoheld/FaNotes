@@ -27,7 +27,7 @@ const MAX_SNAPSHOT_BYTES: usize = 16 * 1024 * 1024;
 
 pub fn records_history(relative: &str) -> bool {
     let lower = relative.to_lowercase();
-    lower.ends_with(".md") || lower.ends_with(".markdown")
+    lower.ends_with(".md") || lower.ends_with(".markdown") || lower.ends_with(".famd")
 }
 
 pub fn is_note_text(relative: &str) -> bool {

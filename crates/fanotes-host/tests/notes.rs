@@ -383,3 +383,46 @@ fn page_stats_keep_the_fields_the_editor_stores() {
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn a_pdf_note_keeps_history_of_its_famd_file() {
+    let dir =
+        std::env::temp_dir().join(format!("fanotes-notes-pdf-history-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let vault = dir.join("vault");
+    std::fs::create_dir_all(&vault).unwrap();
+    let mut host = Host::open(dir.join("app"));
+    host.trash_dir = Some(dir.join("trash"));
+    host.set_vault(vault).unwrap();
+    host.dispatch(
+        "fanotes:write-file",
+        &[json!("Buch.famd"), json!("Erste Fassung\n")],
+    )
+    .unwrap();
+    host.dispatch(
+        "fanotes:write-file",
+        &[json!("Buch.famd"), json!("Zweite Fassung\n")],
+    )
+    .unwrap();
+    let history = host
+        .dispatch("fanotes:list-note-history", &[json!("Buch.famd")])
+        .unwrap();
+    let snapshots = history.as_array().unwrap();
+    assert_eq!(snapshots.len(), 1);
+    let id = snapshots[0]["id"].as_str().unwrap();
+    let loaded = host
+        .dispatch(
+            "fanotes:read-note-history",
+            &[json!("Buch.famd"), json!(id)],
+        )
+        .unwrap();
+    assert!(loaded["content"]
+        .as_str()
+        .unwrap()
+        .contains("Erste Fassung"));
+    assert!(!loaded["content"]
+        .as_str()
+        .unwrap()
+        .contains("Zweite Fassung"));
+    let _ = std::fs::remove_dir_all(&dir);
+}
