@@ -1452,32 +1452,80 @@ fn required_actions(value: Option<&Value>) -> Result<Vec<String>, String> {
     Ok(unique)
 }
 
-fn strip_think_prefix(value: &str) -> Option<String> {
-    let lower = value.to_lowercase();
-    if !lower.starts_with("<think>") {
-        return None;
-    }
-    let end = lower.find("</think>")?;
-    Some(crate::vault::js_trim(&value[end + "</think>".len()..]).to_owned())
+fn strip_think_block(value: &str) -> Option<String> {
+    let rest = strip_ascii_prefix_ignore_case(value, "<think>")?;
+    let close = find_ascii_ignore_case(rest, "</think>")?;
+    let rest = &rest[close + "</think>".len()..];
+    Some(skip_js_whitespace(rest).to_owned())
 }
 
 fn outer_markdown_fence(value: &str) -> Option<String> {
-    let rest = value
-        .strip_prefix("```markdown")
-        .or_else(|| value.strip_prefix("```md"))
-        .or_else(|| value.strip_prefix("```"))?;
-    let rest = rest.strip_prefix('\n').unwrap_or(rest);
-    let end = rest.rfind("\n```")?;
-    if crate::vault::js_trim(&rest[end + 4..]).is_empty() {
-        Some(crate::vault::js_trim(&rest[..end]).to_owned())
-    } else {
-        None
+    let rest = value.strip_prefix("```")?;
+    let rest = skip_fence_language(rest);
+    let rest = skip_opening_fence_line(rest)?;
+    let rest = rest.strip_suffix("```")?;
+    rest.strip_suffix('\n').map(str::to_owned)
+}
+
+fn skip_fence_language(value: &str) -> &str {
+    for language in ["markdown", "md"] {
+        let Some(after) = strip_ascii_prefix_ignore_case(value, language) else {
+            continue;
+        };
+        if skip_opening_fence_line(after).is_some() {
+            return after;
+        }
     }
+    value
+}
+
+fn skip_opening_fence_line(value: &str) -> Option<&str> {
+    let mut rest = value;
+    let mut after_newline = None;
+    while let Some(character) = rest.chars().next() {
+        if !fanotes_famd::is_js_whitespace(character) {
+            break;
+        }
+        rest = &rest[character.len_utf8()..];
+        if character == '\n' {
+            after_newline = Some(rest);
+        }
+    }
+    after_newline
+}
+
+fn strip_ascii_prefix_ignore_case<'a>(value: &'a str, prefix: &str) -> Option<&'a str> {
+    let mut rest = value;
+    for expected in prefix.chars() {
+        let mut chars = rest.chars();
+        let actual = chars.next()?;
+        if !actual.eq_ignore_ascii_case(&expected) {
+            return None;
+        }
+        rest = chars.as_str();
+    }
+    Some(rest)
+}
+
+fn find_ascii_ignore_case(haystack: &str, needle: &str) -> Option<usize> {
+    haystack
+        .as_bytes()
+        .windows(needle.len())
+        .position(|window| window.eq_ignore_ascii_case(needle.as_bytes()))
+}
+
+fn skip_js_whitespace(value: &str) -> &str {
+    let start = value
+        .char_indices()
+        .find(|(_, character)| !fanotes_famd::is_js_whitespace(*character))
+        .map(|(index, _)| index)
+        .unwrap_or(value.len());
+    &value[start..]
 }
 
 fn unwrap_markdown(value: &str) -> Result<String, String> {
     let mut output = crate::vault::js_trim(value).to_owned();
-    if let Some(rest) = strip_think_prefix(&output) {
+    if let Some(rest) = strip_think_block(&output) {
         output = rest;
     }
     if let Some(inner) = outer_markdown_fence(&output) {
@@ -1678,6 +1726,25 @@ mod tests {
         assert_eq!(
             unwrap_markdown("<think>geheim</think>\n```markdown\n# Fertig\n```").unwrap(),
             "# Fertig"
+        );
+        assert_eq!(
+            unwrap_markdown("```MARKDOWN\n# Fertig\n```").unwrap(),
+            "# Fertig"
+        );
+        assert_eq!(unwrap_markdown("```MD\n# Fertig\n```").unwrap(), "# Fertig");
+        assert_eq!(
+            unwrap_markdown("```markdown\u{FEFF}\n# Fertig\n```").unwrap(),
+            "# Fertig"
+        );
+        assert_eq!(unwrap_markdown("```\nHallo  \n```").unwrap(), "Hallo  ");
+        assert_eq!(unwrap_markdown("```\n\nHallo\n```").unwrap(), "Hallo");
+        assert_eq!(
+            unwrap_markdown("```foo\nHallo\n```").unwrap(),
+            "```foo\nHallo\n```"
+        );
+        assert_eq!(
+            unwrap_markdown("<THINK>x</THINK>\nHallo\n\n").unwrap(),
+            "Hallo"
         );
     }
 
