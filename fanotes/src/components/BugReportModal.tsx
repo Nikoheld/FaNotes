@@ -40,8 +40,8 @@ export function BugReportModal({ version, platform, onClose, onSent }: BugReport
   }
 
   return (
-    <div className="modal-backdrop" onMouseDown={onClose}>
-      <section className="settings-modal bug-report-modal" role="dialog" aria-modal="true" aria-label="Fehler melden" onMouseDown={(event) => event.stopPropagation()}>
+    <div className="modal-backdrop" onPointerDown={onClose}>
+      <section className="settings-modal bug-report-modal" role="dialog" aria-modal="true" aria-label="Fehler melden" onPointerDown={(event) => event.stopPropagation()}>
         <header className="settings-header">
           <div className="settings-heading">
             <Bug size={18} />

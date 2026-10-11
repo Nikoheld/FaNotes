@@ -63,7 +63,7 @@ export function ConfirmDialog({
     <div
       className="modal-backdrop confirm-backdrop"
       role="presentation"
-      onMouseDown={(event) => {
+      onPointerDown={(event) => {
         if (event.target === event.currentTarget) onCancel()
       }}
     >
@@ -74,7 +74,7 @@ export function ConfirmDialog({
         aria-modal="true"
         aria-labelledby="fanotes-confirm-title"
         aria-describedby="fanotes-confirm-message"
-        onMouseDown={(event) => event.stopPropagation()}
+        onPointerDown={(event) => event.stopPropagation()}
         onKeyDown={onDialogKeyDown}
       >
         <header className="confirm-dialog-header">

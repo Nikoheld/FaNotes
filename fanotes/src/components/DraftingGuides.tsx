@@ -1,4 +1,5 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
+import { HAND_GESTURE_CLAIM } from '../../../src/lib/handGestures'
 import {
   PEN_EDGE_ZONE_MM,
   RULER_HEIGHT_MM,
@@ -426,13 +427,21 @@ export function DraftingGuides({
       if (!dragRef.current) return
       finishDrag()
     }
+    const onClaim = (event: Event) => {
+      const root = (event as CustomEvent<{ root?: Node }>).detail?.root
+      const svg = svgRef.current
+      if (!svg || !(root instanceof Node) || !root.contains(svg)) return
+      finishDrag()
+    }
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', onUp)
     window.addEventListener('pointercancel', onUp)
+    window.addEventListener(HAND_GESTURE_CLAIM, onClaim)
     return () => {
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', onUp)
       window.removeEventListener('pointercancel', onUp)
+      window.removeEventListener(HAND_GESTURE_CLAIM, onClaim)
     }
   }, [])
 

@@ -169,6 +169,7 @@ import {
   shouldRejectNonPenInk,
   shouldRejectNonPenInkMove,
 } from '../lib/inkPointerPolicy'
+import { HAND_GESTURE_CLAIM } from '../../../src/lib/handGestures'
 import {
   tabletButtonActionFromPointer,
   tabletButtonIdentityFromPointer,
@@ -1249,6 +1250,26 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const onSectionFoldRef = useRef(onSectionFold)
   onSectionFoldRef.current = onSectionFold
   const boardRef = useRef<HTMLElement | null>(null)
+  const penContactTimerRef = useRef(0)
+  const sawPenRef = useRef(false)
+  const markPenContact = useCallback((active: boolean) => {
+    if (penContactTimerRef.current) {
+      window.clearTimeout(penContactTimerRef.current)
+      penContactTimerRef.current = 0
+    }
+    const board = boardRef.current
+    if (!board) return
+    if (active) {
+      sawPenRef.current = true
+      board.dataset.penContact = '1'
+      return
+    }
+    penContactTimerRef.current = window.setTimeout(() => {
+      penContactTimerRef.current = 0
+      sawPenRef.current = false
+      delete boardRef.current?.dataset.penContact
+    }, POST_PEN_IGNORE_MS)
+  }, [])
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const surfaceRef = useRef<HTMLDivElement>(null)
   const committedCanvasRef = useRef<HTMLCanvasElement | null>(null)
@@ -3936,7 +3957,10 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       if (buttonAction === 'pan') {
         tabletPanRef.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY }
         activePointerRef.current = event.pointerId
-        if (event.pointerType === 'pen') lastPenContactRef.current = now
+        if (event.pointerType === 'pen') {
+          lastPenContactRef.current = now
+          markPenContact(true)
+        }
       }
       return
     }
@@ -3949,7 +3973,10 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       forceEndActivePointerRef.current('cross-device')
     }
     if (shouldIgnoreUnmappedPointerAfterPen(event.pointerType, lastPenContactRef.current, now, Boolean(buttonIdentity))) return
-    if (event.pointerType === 'pen') lastPenContactRef.current = now
+    if (event.pointerType === 'pen') {
+      lastPenContactRef.current = now
+      markPenContact(true)
+    }
     inkSessionRef.current = inkPointerSessionFromSample(event.nativeEvent, now)
     event.preventDefault()
     // User input always wins over cooperative background transcription.
@@ -4132,7 +4159,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   // inputActive is a dependency: a board mounted inert (keyboard mode showing
   // saved ink) kept a handler that still saw inputActive=false after the pen
   // turned on, and every pen-down was refused until an unrelated grow rebuilt it.
-  }, [activeArtBrush.pressure, activeArtSymbol, appendPointerEvent, artBrush, artColor, artEffect, artOpacity, artSymbolRotation, artSymbolSize, artWidth, bumpInkRevision, clearRecognitionScope, clearShapeDwellTimer, closeMathCorrectionSession, closeMathSolverSelection, commitPendingSolverTap, commitStrokeToCanvas, inkMode, inline, inputActive, insertSectionAt, mathSolverEnabled, penColor, penWidth, pointFromEvent, redraw, scheduleRedraw, sectionPlacing, selectionMode, setDirty, settings.penOnly, settings.pressureEnabled, settings.tabletButtons, sourceHeight, sourceWidth, syncInkWindow, tool, updateHistoryState])
+  }, [activeArtBrush.pressure, activeArtSymbol, appendPointerEvent, artBrush, artColor, artEffect, artOpacity, artSymbolRotation, artSymbolSize, artWidth, bumpInkRevision, clearRecognitionScope, clearShapeDwellTimer, closeMathCorrectionSession, closeMathSolverSelection, commitPendingSolverTap, commitStrokeToCanvas, inkMode, inline, inputActive, insertSectionAt, markPenContact, mathSolverEnabled, penColor, penWidth, pointFromEvent, redraw, scheduleRedraw, sectionPlacing, selectionMode, setDirty, settings.penOnly, settings.pressureEnabled, settings.tabletButtons, sourceHeight, sourceWidth, syncInkWindow, tool, updateHistoryState])
 
   const handlePointerMove = useCallback((event: ReactPointerEvent<HTMLElement>) => {
     const pan = tabletPanRef.current
@@ -4167,7 +4194,10 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       if (next) setSelectionRect(selectionBetween(selectionStartRef.current, next))
       return
     }
-    if (event.pointerType === 'pen') lastPenContactRef.current = performance.now()
+    if (event.pointerType === 'pen') {
+      lastPenContactRef.current = performance.now()
+      markPenContact(true)
+    }
     const events = event.nativeEvent.getCoalescedEvents?.() ?? [event.nativeEvent]
     if (gestureToolRef.current === 'eraser') {
       eraseAt(events.map(pointFromEvent).filter((point): point is StrokePoint => Boolean(point)))
@@ -4200,6 +4230,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       ?? ('currentTarget' in event && event.currentTarget instanceof Element ? event.currentTarget : canvasRef.current)
     const pointerType = native.pointerType || lastPointerTypeRef.current
     const endInteraction = () => {
+      if (pointerType === 'pen') markPenContact(false)
       const cleanup = applyPenUpInkCleanup({
         activePointerId: activePointerRef.current,
         captureId: lastCapturedPointerIdRef.current,
@@ -4774,8 +4805,67 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       releaseStuckInputFocus(boardRef.current)
       clearInkCursor()
     }, 0)
-  }, [finishPointer, scheduleRedraw])
+    if (sawPenRef.current) markPenContact(false)
+  }, [finishPointer, markPenContact, scheduleRedraw])
   forceEndActivePointerRef.current = forceEndActivePointer
+
+  const discardHandGestureRef = useRef(() => {})
+  discardHandGestureRef.current = () => {
+    if (lastPointerTypeRef.current !== 'touch') {
+      if (activePointerRef.current !== null || activeStrokeRef.current) {
+        forceEndActivePointerRef.current('view-gesture')
+      }
+      return
+    }
+    if (
+      activePointerRef.current === null
+      && !activeStrokeRef.current
+      && !lassoDragRef.current
+      && !gestureChangedRef.current
+    ) return
+    if (pendingSolverTapRef.current) {
+      window.clearTimeout(pendingSolverTapRef.current.timer)
+      pendingSolverTapRef.current = null
+    }
+    strokesRef.current = snapshotStrokes(beforeGestureRef.current)
+    activeStrokeRef.current = null
+    gestureChangedRef.current = false
+    lassoDragRef.current = false
+    setLassoPoints([])
+    setLassoIndexes([])
+    selectionStartRef.current = null
+    setSelectionRect(null)
+    shapeSnappedRef.current = false
+    clearShapeDwellTimer()
+    const pointerId = activePointerRef.current ?? lastCapturedPointerIdRef.current
+    releaseInkPointerCaptures(
+      [activePointerTargetRef.current, canvasRef.current, surfaceRef.current, boardRef.current],
+      pointerId,
+    )
+    activePointerRef.current = null
+    inkSessionRef.current = null
+    lastCapturedPointerIdRef.current = null
+    activePointerTargetRef.current = null
+    pointerBoundsRef.current = null
+    wipeLiveInk()
+    activeRenderedPointCountRef.current = 0
+    committedCanvasDirtyRef.current = true
+    redraw(true)
+  }
+
+  useEffect(() => {
+    const onClaim = (event: Event) => {
+      const root = (event as CustomEvent<{ root?: Node }>).detail?.root
+      const board = boardRef.current
+      if (!board || !(root instanceof Node) || !root.contains(board)) return
+      discardHandGestureRef.current()
+    }
+    window.addEventListener(HAND_GESTURE_CLAIM, onClaim)
+    return () => {
+      window.removeEventListener(HAND_GESTURE_CLAIM, onClaim)
+      if (penContactTimerRef.current) window.clearTimeout(penContactTimerRef.current)
+    }
+  }, [])
 
   useEffect(() => {
     if (inputActive) return
@@ -4822,7 +4912,10 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         if (next) setSelectionRect(selectionBetween(selectionStartRef.current, next))
         return
       }
-      if (event.pointerType === 'pen') lastPenContactRef.current = performance.now()
+      if (event.pointerType === 'pen') {
+      lastPenContactRef.current = performance.now()
+      markPenContact(true)
+    }
       const events = event.getCoalescedEvents?.() ?? [event]
       if (gestureToolRef.current === 'eraser') {
         eraseAt(events.map(pointFromEvent).filter((point): point is StrokePoint => Boolean(point)))

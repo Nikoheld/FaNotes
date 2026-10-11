@@ -3915,7 +3915,7 @@ function registerIpcHandlers() {
       },
     })
     subjectBookWindow.setMenuBarVisibility(false)
-    void subjectBookWindow.webContents.setVisualZoomLevelLimits(1, 1)
+    forwardLockedSheetZoom(subjectBookWindow.webContents)
     subjectBookWindow.webContents.on('will-attach-webview', (event) => event.preventDefault())
     subjectBookWindow.webContents.on('will-navigate', (event, navigationUrl) => {
       if (!isTrustedRendererNavigation(navigationUrl)) event.preventDefault()
@@ -4682,6 +4682,18 @@ function installModelProtocol() {
   })
 }
 
+function forwardLockedSheetZoom(webContents) {
+  // Page pinch-zoom would fight the note scroller and smear text. Sheet zoom
+  // is handled in the renderer; lock Chromium's visual zoom to 100%.
+  void webContents.setVisualZoomLevelLimits(1, 1)
+  // Locked visual zoom swallows trackpad pinch unless we forward it.
+  webContents.on('zoom-changed', (_event, direction) => {
+    if (webContents.isDestroyed()) return
+    if (direction !== 'in' && direction !== 'out') return
+    webContents.send('fanotes:sheet-zoom', direction)
+  })
+}
+
 async function createWindow() {
   allowWindowClose = false
   invalidateCloseWarningState()
@@ -4715,15 +4727,7 @@ async function createWindow() {
     },
   })
   mainWindow.setMenuBarVisibility(false)
-  // Page pinch-zoom would fight the note scroller and smear text. Sheet zoom
-  // is handled in the renderer; lock Chromium's visual zoom to 100%.
-  void mainWindow.webContents.setVisualZoomLevelLimits(1, 1)
-  // Locked visual zoom swallows trackpad pinch unless we forward it.
-  mainWindow.webContents.on('zoom-changed', (_event, direction) => {
-    if (!mainWindow || mainWindow.isDestroyed()) return
-    if (direction !== 'in' && direction !== 'out') return
-    mainWindow.webContents.send('fanotes:sheet-zoom', direction)
-  })
+  forwardLockedSheetZoom(mainWindow.webContents)
   const revealWindow = () => {
     if (!mainWindow || mainWindow.isDestroyed() || mainWindow.isVisible()) return
     mainWindow.show()

@@ -4887,6 +4887,7 @@ export default function App({ startupBootstrap }: AppProps) {
                 viewKey={activeTab.path}
                 showHud={!drawingOpen}
                 globalShortcuts={!splitTab || focusedPane === 'main'}
+                onEdgeSwipe={(direction) => void navigateHistory(direction === 'back' ? -1 : 1)}
                 onPointerDownCapture={() => setFocusedPane('main')}
                 onFocusCapture={() => setFocusedPane('main')}
               >
@@ -5017,6 +5018,7 @@ export default function App({ startupBootstrap }: AppProps) {
                   showHud={false}
                   store={splitPaperViewStore}
                   globalShortcuts={focusedPane === 'split'}
+                  onEdgeSwipe={(direction) => void navigateHistory(direction === 'back' ? -1 : 1)}
                 >
                   <article className={`unified-paper ${splitTab.kind === 'pdf' || isPdfNotePath(splitTab.path) ? 'is-pdf-note' : ''}`} aria-label={`${splitTab.title} · zweite Spalte`}>
                     {splitTab.kind === 'pdf' || isPdfNotePath(splitTab.path) ? (
@@ -5087,7 +5089,7 @@ export default function App({ startupBootstrap }: AppProps) {
 
       {cardsOpen && activeTab && <Suspense fallback={null}><FlashcardReview markdown={activeTab.content} title={activeTab.title} onSave={(markdown) => updateContentFor(activeTab.path, markdown)} onClose={() => setCardsOpen(false)} /></Suspense>}
       {historyOpen && (
-        <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setHistoryOpen(false) }}>
+        <div className="modal-backdrop" role="presentation" onPointerDown={(event) => { if (event.target === event.currentTarget) setHistoryOpen(false) }}>
           <section className="history-dialog" role="dialog" aria-modal="true" aria-labelledby="history-title">
             <header>
               <div><History size={18} /><div><small>Lokaler Verlauf</small><h2 id="history-title">Frühere Versionen</h2></div></div>
@@ -5129,7 +5131,7 @@ export default function App({ startupBootstrap }: AppProps) {
       />
       {bugReportOpen && <Suspense fallback={null}><SafeBoundary name="Fehlerbericht"><BugReportModal version={updateState.currentVersion} platform={window.fanotes.platform} onClose={() => setBugReportOpen(false)} onSent={() => toast('Fehlerbericht wurde an fanotes.fasrv.ch gesendet.', 'success')} /></SafeBoundary></Suspense>}
       {lmStudioOpen && <Suspense fallback={null}><AiPanel settings={settings} note={lmStudioNote} vaultNotes={vaultNoteReferences} onSettingsChange={(changes) => applySettings({ ...settingsRef.current, ...changes })} onApply={applyLmStudioResult} onClose={() => setLmStudioOpen(false)} /></Suspense>}
-      {worksheetImportOpen && <div className="modal-backdrop worksheet-import-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setWorksheetImportOpen(false) }}>
+      {worksheetImportOpen && <div className="modal-backdrop worksheet-import-backdrop" role="presentation" onPointerDown={(event) => { if (event.target === event.currentTarget) setWorksheetImportOpen(false) }}>
         <section className="worksheet-import-dialog" role="dialog" aria-modal="true" aria-labelledby="worksheet-import-title">
           <header><div><span><FileUp size={19} /></span><div><small>Bild oder PDF</small><h2 id="worksheet-import-title">Arbeitsblatt importieren</h2></div></div><button type="button" aria-label="Schließen" onClick={() => setWorksheetImportOpen(false)}><X size={17} /></button></header>
           <p>Das Arbeitsblatt bleibt Teil deines Vaults. Anschließend kannst du direkt darauf Textfelder platzieren oder mit dem Grafiktablett schreiben.</p>

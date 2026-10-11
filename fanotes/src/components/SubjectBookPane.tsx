@@ -66,7 +66,7 @@ export function SubjectBookPane({
   }, [book.bookPath])
 
   return (
-    <section className={`subject-book-pane ${popout ? 'is-popout' : ''} ${inking ? 'is-inking' : ''}`} aria-label={`Buch ${title}`}>
+    <section className={`subject-book-pane ${popout ? 'is-popout' : ''} ${inking ? 'is-inking' : ''}`} data-hand-gesture-root="" aria-label={`Buch ${title}`}>
       <header className="subject-book-pane-bar">
         <strong><BookOpen size={14} /> {title}</strong>
         <div id={SUBJECT_BOOK_TOOLBAR_SLOT_ID} className="subject-book-pdf-toolbar" />

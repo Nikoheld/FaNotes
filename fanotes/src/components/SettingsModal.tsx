@@ -541,8 +541,8 @@ export function SettingsModal({
   }
 
   return (
-    <div className="modal-backdrop settings-backdrop" role="presentation" onMouseDown={onClose}>
-      <section ref={modalRef} className="settings-modal" role="dialog" aria-modal="true" aria-label="Einstellungen" onMouseDown={(event) => event.stopPropagation()}>
+    <div className="modal-backdrop settings-backdrop" role="presentation" onPointerDown={onClose}>
+      <section ref={modalRef} className="settings-modal" role="dialog" aria-modal="true" aria-label="Einstellungen" onPointerDown={(event) => event.stopPropagation()}>
         <aside className="settings-nav">
           <div className="settings-brand">
             <span className="brand-glyph"><Settings2 size={17} /></span>

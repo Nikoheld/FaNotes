@@ -1,5 +1,6 @@
 import { X } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { bindHandGestures } from '../../../src/lib/handGestures'
 import { applyReview, cardsFromMarkdown, dueCards, type FlashGrade } from '../lib/flashcards'
 
 export function FlashcardReview({
@@ -15,9 +16,14 @@ export function FlashcardReview({
 }) {
   const [source, setSource] = useState(markdown)
   const [revealed, setRevealed] = useState(false)
+  const dialogRef = useRef<HTMLElement>(null)
   const cards = useMemo(() => cardsFromMarkdown(source), [source])
   const queue = dueCards(cards)
   const card = queue[0]
+  const cardRef = useRef(card)
+  const revealedRef = useRef(revealed)
+  cardRef.current = card
+  revealedRef.current = revealed
 
   const grade = (value: FlashGrade) => {
     if (!card) return
@@ -26,10 +32,30 @@ export function FlashcardReview({
     setRevealed(false)
     onSave(next)
   }
+  const gradeRef = useRef(grade)
+  gradeRef.current = grade
+
+  useEffect(() => {
+    const root = dialogRef.current
+    if (!root) return undefined
+    return bindHandGestures(root, {
+      onSwipe: (direction) => {
+        if (!cardRef.current) return
+        if (!revealedRef.current) {
+          setRevealed(true)
+          return
+        }
+        if (direction === 'left') gradeRef.current('again')
+        else if (direction === 'right') gradeRef.current('good')
+        else if (direction === 'up') gradeRef.current('easy')
+        else gradeRef.current('hard')
+      },
+    })
+  }, [])
 
   return (
-    <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
-      <section className="history-dialog" role="dialog" aria-modal="true" aria-labelledby="cards-title">
+    <div className="modal-backdrop" role="presentation" onPointerDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
+      <section ref={dialogRef} className="history-dialog" role="dialog" aria-modal="true" aria-labelledby="cards-title" data-hand-gesture-root="" onPointerDown={(event) => event.stopPropagation()}>
         <header>
           <div><div><small>Karteikarten</small><h2 id="cards-title">{title}</h2></div></div>
           <button type="button" aria-label="Karteikarten schließen" onClick={onClose}><X size={17} /></button>
