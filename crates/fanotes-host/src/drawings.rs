@@ -485,7 +485,7 @@ fn is_leap(year: i32) -> bool {
 }
 
 /// `Date.parse` plus `toISOString`: a zoned timestamp becomes UTC with milliseconds.
-fn canonical_iso(value: &str) -> Option<String> {
+pub(crate) fn canonical_iso(value: &str) -> Option<String> {
     let bytes = value.as_bytes();
     if bytes.len() < 19
         || bytes.get(4) != Some(&b'-')

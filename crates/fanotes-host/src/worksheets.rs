@@ -321,12 +321,12 @@ fn validate_document(candidate: &Value, expected_id: &str) -> Result<Value, Stri
     let created = object
         .get("createdAt")
         .and_then(Value::as_str)
-        .filter(|value| iso_like(value))
+        .and_then(crate::drawings::canonical_iso)
         .ok_or_else(|| "Die Arbeitsblatt-Zeitangaben sind ungültig.".to_owned())?;
     let updated = object
         .get("updatedAt")
         .and_then(Value::as_str)
-        .filter(|value| iso_like(value))
+        .and_then(crate::drawings::canonical_iso)
         .ok_or_else(|| "Die Arbeitsblatt-Zeitangaben sind ungültig.".to_owned())?;
     let text_boxes = boxes(object.get("textBoxes"))?;
     let highlights = highlights(object.get("highlights"))?;
@@ -338,8 +338,8 @@ fn validate_document(candidate: &Value, expected_id: &str) -> Result<Value, Stri
     document.insert("mimeType".into(), Value::String(format.mime.to_owned()));
     document.insert("sourceRelativePath".into(), Value::String(expected_source));
     document.insert("dataRelativePath".into(), Value::String(expected_data));
-    document.insert("createdAt".into(), Value::String(created.to_owned()));
-    document.insert("updatedAt".into(), Value::String(updated.to_owned()));
+    document.insert("createdAt".into(), Value::String(created));
+    document.insert("updatedAt".into(), Value::String(updated));
     if format.kind == "html" {
         let page_width = object
             .get("pageWidth")
@@ -608,15 +608,6 @@ fn unlink_regular(path: &Path) -> Result<(), String> {
         }
         _ => Err("Die Arbeitsblattdatei ist unsicher.".to_owned()),
     }
-}
-
-fn iso_like(value: &str) -> bool {
-    let bytes = value.as_bytes();
-    bytes.len() >= 20
-        && bytes[4] == b'-'
-        && bytes[7] == b'-'
-        && bytes[10] == b'T'
-        && value.ends_with('Z')
 }
 
 fn now_iso() -> String {

@@ -70,3 +70,28 @@ fn a_pdf_worksheet_saves_reads_and_deletes() {
     );
     assert!(!dir.join("vault/.fanotes/worksheets/blatt-1.pdf").exists());
 }
+
+#[test]
+fn a_zoned_worksheet_time_is_stored_as_utc() {
+    let (dir, mut host) = host();
+    let saved = host
+        .dispatch(
+            "fanotes:save-worksheet",
+            &[json!({
+                "schemaVersion": 1,
+                "id": "blatt-1",
+                "title": "Übung",
+                "kind": "pdf",
+                "mimeType": "application/pdf",
+                "sourceRelativePath": ".fanotes/worksheets/blatt-1.pdf",
+                "dataRelativePath": ".fanotes/worksheets/blatt-1.json",
+                "createdAt": "2020-06-01T12:00:00+02:00",
+                "updatedAt": "2020-06-01T12:00:00+02:00",
+                "textBoxes": [],
+                "highlights": []
+            })],
+        )
+        .unwrap();
+    assert_eq!(saved["createdAt"], "2020-06-01T10:00:00.000Z");
+    let _ = dir;
+}
