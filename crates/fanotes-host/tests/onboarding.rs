@@ -173,6 +173,50 @@ fn a_cached_tree_keeps_a_long_unicode_name() {
     assert_eq!(cached[0]["name"], "Ordner");
     assert!(cached[0]["children"].as_array().unwrap().is_empty());
 
+    fs::write(
+        &cache_path,
+        format!(
+            "{}\n",
+            json!({
+                "version": 1,
+                "vaultIdentity": identity,
+                "entries": [{
+                    "name": "Zeit.md",
+                    "relativePath": "Zeit.md",
+                    "kind": "file",
+                    "extension": "md",
+                    "modifiedAt": "2026-10-11T00:00:00.000Z"
+                }]
+            })
+        ),
+    )
+    .unwrap();
+    let cached = host.dispatch("fanotes:get-cached-tree", &[]).unwrap();
+    assert_eq!(cached[0]["modifiedAt"], "2026-10-11T00:00:00.000Z");
+
+    fs::write(
+        &cache_path,
+        format!(
+            "{}\n",
+            json!({
+                "version": 1,
+                "vaultIdentity": identity,
+                "entries": [{
+                    "name": "Zeit.md",
+                    "relativePath": "Zeit.md",
+                    "kind": "file",
+                    "extension": "md",
+                    "modifiedAt": "not-a-dateT"
+                }]
+            })
+        ),
+    )
+    .unwrap();
+    assert!(host
+        .dispatch("fanotes:get-cached-tree", &[])
+        .unwrap()
+        .is_null());
+
     let too_long = "a".repeat(256);
     let identity = cache["vaultIdentity"].clone();
     fs::write(

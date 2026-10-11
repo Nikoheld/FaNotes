@@ -2668,7 +2668,7 @@ fn clean_cached_entries(
                 if let Some(modified) = entry.get("modifiedAt") {
                     let text = modified
                         .as_str()
-                        .filter(|text| text.contains('T'))
+                        .filter(|text| drawings::canonical_iso(text).is_some())
                         .ok_or(())?;
                     file["modifiedAt"] = json!(text);
                 }
