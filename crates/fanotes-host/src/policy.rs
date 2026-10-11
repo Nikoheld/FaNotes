@@ -4,13 +4,14 @@ const ADDON_PRIVATE: &str = "Add-ons dürfen keine privaten oder lokalen Adresse
 const ADDON_HTTPS: &str = "Add-ons dürfen nur öffentliche https-Adressen aufrufen.";
 
 pub fn addon_request_allowed(raw_url: &str) -> Result<(), String> {
-    let url = raw_url
-        .parse::<UrlLite>()
-        .map_err(|_| "Ungültige URL.".to_owned())?;
-    if url.protocol != "https" || url.has_credentials {
+    let url = url::Url::parse(raw_url).map_err(|_| "Ungültige URL.".to_owned())?;
+    if url.scheme() != "https"
+        || !url.username().is_empty()
+        || url.password().is_some_and(|password| !password.is_empty())
+    {
         return Err(ADDON_HTTPS.to_owned());
     }
-    if is_private_host(&url.hostname) {
+    if is_private_host(url.host_str().unwrap_or("")) {
         return Err(ADDON_PRIVATE.to_owned());
     }
     Ok(())
@@ -22,22 +23,28 @@ pub fn local_ai_origin(raw_url: &str, provider: &str) -> Result<String, String> 
         "ollama" => "Ollama",
         _ => "OpenCode",
     };
-    if raw_url.len() > 2048 {
+    if crate::vault::utf16_len(raw_url) > 2048 {
         return Err(format!("Die {label}-Adresse ist ungültig."));
     }
-    let url = raw_url
-        .trim()
-        .parse::<UrlLite>()
+    let url = url::Url::parse(raw_url.trim())
         .map_err(|_| format!("Gib eine vollständige {label}-Adresse ein."))?;
-    if (url.protocol != "http" && url.protocol != "https")
-        || url.has_credentials
-        || url.has_query
-        || url.has_fragment
+    if (url.scheme() != "http" && url.scheme() != "https")
+        || !url.username().is_empty()
+        || url.password().is_some_and(|password| !password.is_empty())
+        || url.query().is_some_and(|query| !query.is_empty())
+        || url.fragment().is_some_and(|fragment| !fragment.is_empty())
     {
         return Err(format!("Die {label}-Adresse darf nur eine lokale HTTP(S)-Adresse ohne eingebettete Zugangsdaten enthalten."));
     }
-    let hostname = url.hostname.trim_matches(['[', ']']).to_lowercase();
-    let private_ipv4 = parse_ipv4(&hostname).is_some_and(is_private_ipv4);
+    let hostname = url
+        .host_str()
+        .unwrap_or("")
+        .trim_matches(['[', ']'])
+        .to_lowercase();
+    if hostname.is_empty() {
+        return Err(format!("Gib eine vollständige {label}-Adresse ein."));
+    }
+    let private_ipv4 = parse_ipv4(&hostname).is_some_and(is_lan_ipv4);
     let private_ipv6 = hostname == "::1"
         || hostname.starts_with("fc")
         || hostname.starts_with("fd")
@@ -47,73 +54,49 @@ pub fn local_ai_origin(raw_url: &str, provider: &str) -> Result<String, String> 
             "{label} darf aus Datenschutzgründen nur auf localhost oder im privaten LAN liegen."
         ));
     }
-    if !url.path.trim_end_matches('/').is_empty() {
+    if !url.path().trim_end_matches('/').is_empty() {
         return Err(format!(
             "Die {label}-Adresse darf keinen zusätzlichen Pfad enthalten."
         ));
     }
-    Ok(format!("{}://{}", url.protocol, url.host_header()))
+    Ok(url.origin().ascii_serialization())
 }
 
-pub(crate) struct UrlLite {
-    pub(crate) protocol: String,
-    pub(crate) hostname: String,
-    host_with_port: String,
-    pub(crate) path: String,
-    pub(crate) has_credentials: bool,
-    has_query: bool,
-    has_fragment: bool,
-}
-
-impl UrlLite {
-    fn host_header(&self) -> String {
-        self.host_with_port.clone()
+/// The LM Studio panel accepts the server root and the `/v1` or `/api/v1`
+/// suffixes LM Studio shows, then keeps only the origin.
+pub fn lm_studio_origin(raw_url: &str) -> Result<String, String> {
+    if crate::vault::utf16_len(raw_url) > 2048 {
+        return Err("Die LM-Studio-Adresse ist ungültig.".to_owned());
     }
-}
-
-impl std::str::FromStr for UrlLite {
-    type Err = ();
-
-    fn from_str(value: &str) -> Result<Self, ()> {
-        let (protocol, rest) = value.split_once("://").ok_or(())?;
-        if protocol.is_empty() || rest.is_empty() {
-            return Err(());
-        }
-        let (before_query, query) = rest
-            .split_once('?')
-            .map(|(a, b)| (a, Some(b)))
-            .unwrap_or((rest, None));
-        let (before_fragment, fragment) = before_query
-            .split_once('#')
-            .map(|(a, b)| (a, Some(b)))
-            .unwrap_or((before_query, None));
-        let (authority, path) = before_fragment
-            .split_once('/')
-            .map(|(a, b)| (a, format!("/{b}")))
-            .unwrap_or((before_fragment, String::new()));
-        if authority.is_empty() {
-            return Err(());
-        }
-        let has_credentials = authority.contains('@');
-        let host = authority
-            .rsplit_once('@')
-            .map(|(_, host)| host)
-            .unwrap_or(authority);
-        let hostname = if let Some(inner) = host.strip_prefix('[') {
-            inner.split_once(']').map(|(name, _)| name).unwrap_or(host)
-        } else {
-            host.split_once(':').map(|(name, _)| name).unwrap_or(host)
-        };
-        Ok(Self {
-            protocol: protocol.to_owned(),
-            hostname: hostname.to_owned(),
-            host_with_port: host.to_owned(),
-            path,
-            has_credentials,
-            has_query: query.is_some(),
-            has_fragment: fragment.is_some(),
-        })
+    let url = url::Url::parse(raw_url.trim()).map_err(|_| {
+        "Gib eine vollständige LM-Studio-Adresse wie http://127.0.0.1:1234 ein.".to_owned()
+    })?;
+    if (url.scheme() != "http" && url.scheme() != "https")
+        || !url.username().is_empty()
+        || url.password().is_some_and(|password| !password.is_empty())
+        || url.query().is_some_and(|query| !query.is_empty())
+        || url.fragment().is_some_and(|fragment| !fragment.is_empty())
+    {
+        return Err("Die LM-Studio-Adresse darf nur eine lokale HTTP(S)-Adresse ohne Zugangsdaten enthalten.".to_owned());
     }
+    let hostname = url
+        .host_str()
+        .unwrap_or("")
+        .trim_matches(['[', ']'])
+        .to_lowercase();
+    let private_ipv4 = parse_ipv4(&hostname).is_some_and(is_lan_ipv4);
+    let private_ipv6 = hostname == "::1"
+        || hostname.starts_with("fc")
+        || hostname.starts_with("fd")
+        || hostname.starts_with("fe80:");
+    if hostname != "localhost" && !private_ipv4 && !private_ipv6 {
+        return Err("Aus Datenschutzgründen sind für LM Studio nur localhost und private LAN-Adressen erlaubt.".to_owned());
+    }
+    let path = url.path().trim_end_matches('/');
+    if !path.is_empty() && path != "/v1" && path != "/api/v1" {
+        return Err("Die LM-Studio-Adresse darf keinen zusätzlichen Pfad enthalten.".to_owned());
+    }
+    Ok(url.origin().ascii_serialization())
 }
 
 fn is_private_host(hostname: &str) -> bool {
@@ -153,6 +136,18 @@ fn parse_ipv4(value: &str) -> Option<[u8; 4]> {
     (count == 4).then_some(parts)
 }
 
+/// Local model servers use the desktop LAN list. Carrier-grade `100.64/10`
+/// and multicast addresses stay off that list.
+fn is_lan_ipv4(address: [u8; 4]) -> bool {
+    let [a, b, _, _] = address;
+    a == 0
+        || a == 10
+        || a == 127
+        || (a == 169 && b == 254)
+        || (a == 172 && (16..=31).contains(&b))
+        || (a == 192 && b == 168)
+}
+
 fn is_private_ipv4(address: [u8; 4]) -> bool {
     let [a, b, _, _] = address;
     a == 0
@@ -175,4 +170,29 @@ fn is_private_ipv6(value: &str) -> bool {
     }
     let first = u32::from_str_radix(value.split(':').next().unwrap_or("0"), 16).unwrap_or(0);
     !(0x2000..=0x3fff).contains(&first)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{lm_studio_origin, local_ai_origin};
+
+    #[test]
+    fn lm_studio_keeps_the_api_suffix_the_desktop_panel_accepts() {
+        assert_eq!(
+            lm_studio_origin("http://127.0.0.1:1234/v1").unwrap(),
+            "http://127.0.0.1:1234"
+        );
+        assert_eq!(
+            lm_studio_origin("http://127.0.0.1:1234/api/v1/").unwrap(),
+            "http://127.0.0.1:1234"
+        );
+        assert_eq!(
+            lm_studio_origin("http://localhost:1234").unwrap(),
+            "http://localhost:1234"
+        );
+        assert!(lm_studio_origin("http://127.0.0.1:1234/v1/models").is_err());
+        assert!(lm_studio_origin("https://api.openai.com/v1").is_err());
+        assert!(local_ai_origin("http://127.0.0.1:1234/v1", "ollama").is_err());
+        assert!(local_ai_origin("http://127.0.0.1:1234/v1", "lmstudio").is_err());
+    }
 }

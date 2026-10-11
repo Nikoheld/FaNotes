@@ -51,11 +51,8 @@ fn folder_color_survives_a_rename_and_the_vault_is_remembered() {
     for name in ["zoo", "apfel", "äpfel", "straße", "strasse", "ä"] {
         host.dispatch("fanotes:create-folder", &[json!(""), json!(name)])
             .unwrap();
-        host.dispatch(
-            "fanotes:set-folder-color",
-            &[json!(name), json!("#112233")],
-        )
-        .unwrap();
+        host.dispatch("fanotes:set-folder-color", &[json!(name), json!("#112233")])
+            .unwrap();
     }
     let stored = fs::read_to_string(vault.join(".fanotes/folder-colors.json")).unwrap();
     let keys: Vec<_> = stored
@@ -211,4 +208,91 @@ fn the_tree_sorts_umlauts_with_their_base_letters() {
     assert!(index("Straße.md") < index("Zen.md"));
     assert!(index("Seite 2.md") < index("Seite 10.md"));
     assert!(index("Mu\u{0308}he.md") < index("Zen.md"));
+}
+
+#[test]
+fn an_unreadable_name_does_not_hide_the_rest_of_the_tree() {
+    let (mut host, vault, _) = host();
+    let mut directory = vault.clone();
+    while directory.to_string_lossy().len() + 80 < 3950 {
+        let used = directory.to_string_lossy().len();
+        let piece = (3940usize.saturating_sub(used + 1)).clamp(1, 200);
+        directory.push("d".repeat(piece));
+        fs::create_dir(&directory).unwrap();
+    }
+    fs::write(directory.join("ok.md"), "Sichtwort\n").unwrap();
+    let dir_len = directory.to_string_lossy().len();
+    let name_len = (4099usize.saturating_sub(dir_len + 1)).clamp(4, 255);
+    let name = format!("{}.md", "y".repeat(name_len - 3));
+    let status = std::process::Command::new("python3")
+        .arg("-c")
+        .arg(format!(
+            "import os; fd = os.open({dir:?}, os.O_RDONLY); os.close(os.open({name:?}, os.O_CREAT | os.O_WRONLY | os.O_EXCL, 0o644, dir_fd=fd)); os.close(fd)",
+            dir = directory,
+            name = name,
+        ))
+        .status()
+        .unwrap();
+    assert!(status.success());
+    assert!(std::fs::symlink_metadata(directory.join(&name)).is_err());
+
+    let tree = host.dispatch("fanotes:get-tree", &[]).unwrap().to_string();
+    assert!(tree.contains("ok.md"), "{tree}");
+    assert!(!tree.contains(&name), "{tree}");
+    let fast = host
+        .dispatch("fanotes:get-fast-tree", &[])
+        .unwrap()
+        .to_string();
+    assert!(fast.contains("ok.md"));
+    let hits = host
+        .dispatch("fanotes:search", &[json!("Sichtwort")])
+        .unwrap();
+    assert_eq!(hits.as_array().unwrap().len(), 1);
+    assert!(hits[0]["relativePath"].as_str().unwrap().ends_with("ok.md"));
+}
+
+#[test]
+fn a_fast_tree_skips_a_folder_that_cannot_be_listed() {
+    let (mut host, vault, _) = host();
+    let hidden = vault.join("Geheim");
+    fs::create_dir(&hidden).unwrap();
+    fs::write(hidden.join("versteckt.md"), "x\n").unwrap();
+    fs::write(vault.join("Sichtbar.md"), "x\n").unwrap();
+    let restore = RestoreMode(hidden.clone());
+    let mut permissions = fs::metadata(&hidden).unwrap().permissions();
+    permissions.set_readonly(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        permissions.set_mode(0o000);
+    }
+    fs::set_permissions(&hidden, permissions).unwrap();
+
+    let fast = host
+        .dispatch("fanotes:get-fast-tree", &[])
+        .unwrap()
+        .to_string();
+    assert!(fast.contains("Sichtbar.md"), "{fast}");
+    assert!(!fast.contains("Geheim"), "{fast}");
+    let error = host.dispatch("fanotes:get-tree", &[]).unwrap_err();
+    assert!(error.contains("nicht gelesen"), "{error}");
+    drop(restore);
+}
+
+struct RestoreMode(std::path::PathBuf);
+
+impl Drop for RestoreMode {
+    fn drop(&mut self) {
+        let Ok(meta) = fs::metadata(&self.0) else {
+            return;
+        };
+        let mut permissions = meta.permissions();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            permissions.set_mode(0o700);
+        }
+        permissions.set_readonly(false);
+        let _ = fs::set_permissions(&self.0, permissions);
+    }
 }

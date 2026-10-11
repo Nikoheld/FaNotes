@@ -13,10 +13,15 @@ pub fn normalize_relative_path(
     if utf16_len(value) > 4096 || value.contains('\0') {
         return Err("Ungültiger Vault-Pfad.".to_owned());
     }
-    if value.contains('\\') || Path::new(value).is_absolute() || value.starts_with('/') {
+    if value.contains('\\')
+        || Path::new(value).is_absolute()
+        || value.starts_with('/')
+        || is_windows_drive_path(value)
+    {
         return Err("Nur relative Vault-Pfade sind erlaubt.".to_owned());
     }
-    let trimmed = value.trim_start_matches("./").trim_end_matches('/');
+    let without_prefix = value.strip_prefix("./").unwrap_or(value);
+    let trimmed = without_prefix.strip_suffix('/').unwrap_or(without_prefix);
     if trimmed.is_empty() {
         if allow_root {
             return Ok(String::new());
@@ -38,6 +43,15 @@ pub fn normalize_relative_path(
         return Err("Interne FaNotes-Dateien sind geschützt.".to_owned());
     }
     Ok(segments.join("/"))
+}
+
+/// `path.win32.isAbsolute`: a drive letter, a colon, then a slash.
+fn is_windows_drive_path(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    bytes.len() >= 3
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && (bytes[2] == b'/' || bytes[2] == b'\\')
 }
 
 /// A note path may not follow a symlink, including a symlink directory.
@@ -154,6 +168,16 @@ pub fn resolve_inside(root: &Path, relative: &str) -> Result<PathBuf, String> {
 /// JavaScript `string.length`: one unit for each basic character, two for the rest.
 pub(crate) fn utf16_len(value: &str) -> usize {
     value.encode_utf16().count()
+}
+
+/// C0 controls and DEL, matching `/[\0-\x1f\x7f]/`.
+pub(crate) fn is_c0_or_del(character: char) -> bool {
+    let code = u32::from(character);
+    code <= 0x1F || code == 0x7F
+}
+
+pub(crate) fn has_c0_or_del(value: &str) -> bool {
+    value.chars().any(is_c0_or_del)
 }
 
 pub(crate) fn truncate_utf16(value: &str, max: usize) -> String {
@@ -311,5 +335,26 @@ mod tests {
         assert!(note_path.len() > 4096);
         assert!(normalize_relative_path(&note_path, false, false).is_ok());
         assert!(normalize_relative_path(&"Ä".repeat(4097), false, false).is_err());
+    }
+
+    #[test]
+    fn a_repeated_dot_slash_is_rejected() {
+        assert_eq!(
+            normalize_relative_path("./Seite.md", false, false).unwrap(),
+            "Seite.md"
+        );
+        assert_eq!(
+            normalize_relative_path("./Seite.md/", false, false).unwrap(),
+            "Seite.md"
+        );
+        assert!(normalize_relative_path("././Seite.md", false, false).is_err());
+        assert!(normalize_relative_path("Seite.md//", false, false).is_err());
+        assert_eq!(normalize_relative_path("./", true, false).unwrap(), "");
+        assert!(normalize_relative_path("././", true, false).is_err());
+        assert!(normalize_relative_path("C:/Notiz.md", false, false).is_err());
+        assert!(normalize_relative_path("c:/Notiz.md", false, false).is_err());
+        assert!(normalize_relative_path("C:/", false, false).is_err());
+        assert!(normalize_relative_path("C:Notiz.md", false, false).is_ok());
+        assert!(normalize_relative_path("Mathe/C:/Notiz.md", false, false).is_ok());
     }
 }

@@ -229,13 +229,14 @@ fn request_text(
     user_agent: &str,
 ) -> Result<HttpText, String> {
     let mut url = raw_url.to_owned();
+    let mut redirects_left = MAX_REDIRECTS;
     let agent: Agent = Agent::config_builder()
         .max_redirects(0)
         .timeout_global(Some(Duration::from_secs(20)))
         .http_status_as_error(false)
         .build()
         .into();
-    for _ in 0..=MAX_REDIRECTS {
+    loop {
         if registry {
             assert_registry_url(&url)?;
             assert_public_resolution(&hostname_of(&url)?)?;
@@ -270,17 +271,20 @@ fn request_text(
             format!("Zeitüberschreitung beim Laden oder der Host ist nicht erreichbar: {error}")
         })?;
         let status = response.status().as_u16();
-        if (300..400).contains(&status) {
-            if method != "GET" && method != "HEAD" {
-                break;
+        let location = response
+            .headers()
+            .get("location")
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_owned);
+        match redirect_step(registry, redirects_left, method, status, location.is_some()) {
+            RedirectStep::Follow => {
+                let location = location.ok_or_else(|| "Ungültige Weiterleitung.".to_owned())?;
+                url = resolve_redirect(&url, &location)?;
+                redirects_left = redirects_left.saturating_sub(1);
+                continue;
             }
-            let location = response
-                .headers()
-                .get("location")
-                .and_then(|value| value.to_str().ok())
-                .ok_or_else(|| "Ungültige Weiterleitung.".to_owned())?;
-            url = resolve_redirect(&url, location)?;
-            continue;
+            RedirectStep::TooMany => return Err("Zu viele Weiterleitungen.".to_owned()),
+            RedirectStep::Stop => {}
         }
         if registry && !(200..300).contains(&status) {
             let host = hostname_of(&url).unwrap_or_default();
@@ -330,22 +334,22 @@ fn request_text(
             url,
         });
     }
-    Err("Zu viele Weiterleitungen.".to_owned())
 }
 
 fn assert_registry_url(raw_url: &str) -> Result<(), String> {
-    let url = raw_url
-        .parse::<crate::policy::UrlLite>()
-        .map_err(|_| "Ungültige Add-on-Adresse.".to_owned())?;
-    let hostname = url.hostname.to_lowercase();
-    if url.protocol != "https" || url.has_credentials || !ALLOWED_HOSTS.contains(&hostname.as_str())
+    let url = url::Url::parse(raw_url).map_err(|_| "Ungültige Add-on-Adresse.".to_owned())?;
+    let hostname = url.host_str().unwrap_or("");
+    if url.scheme() != "https"
+        || !url.username().is_empty()
+        || url.password().is_some_and(|password| !password.is_empty())
+        || !ALLOWED_HOSTS.contains(&hostname)
     {
         return Err(format!(
             "Diese Adresse ist für Add-ons nicht erlaubt: {}",
             if hostname.is_empty() {
                 raw_url
             } else {
-                hostname.as_str()
+                hostname
             }
         ));
     }
@@ -408,37 +412,52 @@ fn ipv6_is_private(address: Ipv6Addr) -> bool {
 }
 
 fn hostname_of(raw_url: &str) -> Result<String, String> {
-    Ok(raw_url
-        .parse::<crate::policy::UrlLite>()
-        .map_err(|_| "Ungültige URL.".to_owned())?
-        .hostname)
+    url::Url::parse(raw_url)
+        .ok()
+        .and_then(|url| url.host_str().map(str::to_owned))
+        .ok_or_else(|| "Ungültige URL.".to_owned())
 }
 
 fn path_of(raw_url: &str) -> String {
-    raw_url
-        .parse::<crate::policy::UrlLite>()
-        .map(|url| url.path)
+    url::Url::parse(raw_url)
+        .map(|url| url.path().to_owned())
         .unwrap_or_default()
 }
 
-fn resolve_redirect(current: &str, location: &str) -> Result<String, String> {
-    if location.starts_with("https://") || location.starts_with("http://") {
-        return Ok(location.to_owned());
+enum RedirectStep {
+    Follow,
+    Stop,
+    TooMany,
+}
+
+fn redirect_step(
+    registry: bool,
+    redirects_left: u8,
+    method: &str,
+    status: u16,
+    has_location: bool,
+) -> RedirectStep {
+    let can_follow =
+        (300..400).contains(&status) && has_location && (method == "GET" || method == "HEAD");
+    if !can_follow {
+        return RedirectStep::Stop;
     }
-    let (scheme, rest) = current
-        .split_once("://")
-        .ok_or_else(|| "Ungültige Weiterleitung.".to_owned())?;
-    let host = rest.split_once('/').map(|(host, _)| host).unwrap_or(rest);
-    if location.starts_with('/') {
-        Ok(format!("{scheme}://{host}{location}"))
+    if redirects_left == 0 {
+        if registry {
+            RedirectStep::TooMany
+        } else {
+            RedirectStep::Stop
+        }
     } else {
-        let base = current
-            .split_once('?')
-            .map(|(path, _)| path)
-            .unwrap_or(current);
-        let directory = base.rsplit_once('/').map(|(dir, _)| dir).unwrap_or(base);
-        Ok(format!("{directory}/{location}"))
+        RedirectStep::Follow
     }
+}
+
+fn resolve_redirect(current: &str, location: &str) -> Result<String, String> {
+    let base = url::Url::parse(current).map_err(|_| "Ungültige Weiterleitung.".to_owned())?;
+    base.join(location)
+        .map(|next| next.to_string())
+        .map_err(|_| "Ungültige Weiterleitung.".to_owned())
 }
 
 fn read_records(root: &Path) -> Result<Vec<Value>, String> {
@@ -628,4 +647,74 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), String> {
 fn lock() -> std::sync::MutexGuard<'static, ()> {
     static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
     LOCK.lock().unwrap_or_else(|poison| poison.into_inner())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{redirect_step, resolve_redirect, RedirectStep};
+
+    #[test]
+    fn redirects_resolve_like_the_desktop_url_parser() {
+        let base = "https://example.com/a/b?q=1#old";
+        assert_eq!(
+            resolve_redirect(base, "https://cdn.example/file").unwrap(),
+            "https://cdn.example/file"
+        );
+        assert_eq!(
+            resolve_redirect(base, "HTTP://cdn.example/file").unwrap(),
+            "http://cdn.example/file"
+        );
+        assert_eq!(
+            resolve_redirect(base, "//cdn.example/file").unwrap(),
+            "https://cdn.example/file"
+        );
+        assert_eq!(
+            resolve_redirect(base, "/root").unwrap(),
+            "https://example.com/root"
+        );
+        assert_eq!(
+            resolve_redirect(base, "other").unwrap(),
+            "https://example.com/a/other"
+        );
+        assert_eq!(
+            resolve_redirect(base, "../other").unwrap(),
+            "https://example.com/other"
+        );
+        assert_eq!(
+            resolve_redirect(base, "?x=1").unwrap(),
+            "https://example.com/a/b?x=1"
+        );
+        assert_eq!(
+            resolve_redirect(base, "#section").unwrap(),
+            "https://example.com/a/b?q=1#section"
+        );
+    }
+
+    #[test]
+    fn redirects_follow_get_and_head_until_the_budget_is_spent() {
+        assert!(matches!(
+            redirect_step(false, 3, "GET", 302, true),
+            RedirectStep::Follow
+        ));
+        assert!(matches!(
+            redirect_step(false, 0, "GET", 302, true),
+            RedirectStep::Stop
+        ));
+        assert!(matches!(
+            redirect_step(true, 0, "GET", 302, true),
+            RedirectStep::TooMany
+        ));
+        assert!(matches!(
+            redirect_step(false, 3, "POST", 302, true),
+            RedirectStep::Stop
+        ));
+        assert!(matches!(
+            redirect_step(false, 3, "GET", 302, false),
+            RedirectStep::Stop
+        ));
+        assert!(matches!(
+            redirect_step(false, 3, "HEAD", 200, true),
+            RedirectStep::Stop
+        ));
+    }
 }

@@ -128,6 +128,29 @@ fn sync_lists_files_and_keeps_account_state_outside_the_vault() {
 }
 
 #[test]
+fn sync_credentials_keep_a_long_unicode_secret() {
+    let (_vault, _app, mut host) = host();
+    let kept = "Ä".repeat(40_000);
+    assert!(kept.len() > 64 * 1024);
+    assert!(kept.encode_utf16().count() <= 64 * 1024);
+    host.dispatch("fanotes:sync-write-secrets", &[json!(kept)])
+        .unwrap();
+    assert_eq!(
+        host.dispatch("fanotes:sync-read-secrets", &[]).unwrap(),
+        kept
+    );
+    let too_long = "Ä".repeat(64 * 1024 + 1);
+    let error = host
+        .dispatch("fanotes:sync-write-secrets", &[json!(too_long)])
+        .unwrap_err();
+    assert!(error.contains("ungültig"), "{error}");
+    assert_eq!(
+        host.dispatch("fanotes:sync-read-secrets", &[]).unwrap(),
+        kept
+    );
+}
+
+#[test]
 fn sync_secrets_stay_out_of_the_profile_without_a_keyring() {
     let dir = std::env::temp_dir().join(format!("fanotes-sync-locked-{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);

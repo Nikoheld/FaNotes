@@ -33,14 +33,10 @@ pub fn list_drawings(host: &Host) -> Result<Value, String> {
     };
     for entry in entries.flatten() {
         let name = entry.file_name().to_string_lossy().to_string();
-        if !name.ends_with(".json") {
+        let Some(id) = drawing_file_id(&name) else {
             continue;
-        }
-        let id = name.trim_end_matches(".json");
-        if drawing_id(id).is_err() {
-            continue;
-        }
-        let path = assets.join(format!("{id}.json"));
+        };
+        let path = entry.path();
         let Ok(text) = read_limited(&path, MAX_DRAWING_JSON_BYTES) else {
             continue;
         };
@@ -210,7 +206,7 @@ fn is_note_path(relative: &str) -> bool {
         || lower.ends_with(".pdf")
 }
 
-fn note_ink_marker_id(markdown: &str) -> Option<String> {
+pub(crate) fn note_ink_marker_id(markdown: &str) -> Option<String> {
     let mut rest = markdown;
     while let Some(start) = rest.find("<!--") {
         let after = rest[start + 4..].trim_start();
@@ -255,10 +251,9 @@ fn embed_in_note(host: &Host, note_path: &str, drawing: &Value) -> Result<(), St
         note
     };
     let source_path = vault::resolve_note_file(vault_root, &source_relative)?;
-    let markdown = fs::read_to_string(&source_path).unwrap_or_default();
+    let markdown = crate::notes::read_lossy_string(&source_path).unwrap_or_default();
     let body = strip_famd_payload(&markdown);
-    let mut payload = fs::read_to_string(&famd_path)
-        .ok()
+    let mut payload = crate::notes::read_lossy_string(&famd_path)
         .and_then(|source| parse_famd(&source).payload)
         .unwrap_or_else(|| empty_famd_payload(now_iso()));
     payload.ink = Some(drawing.clone());
@@ -296,20 +291,17 @@ fn metadata_value(document: &Value, id: &str) -> Result<Value, String> {
     library_metadata(document, id, Some(&now_iso()))
 }
 
-fn library_metadata(
+pub(crate) fn library_metadata(
     document: &Value,
     id: &str,
     fallback_time: Option<&str>,
 ) -> Result<Value, String> {
-    let title = document
-        .get("title")
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .trim();
+    let raw_title = document.get("title").and_then(Value::as_str).unwrap_or("");
+    let title = raw_title.trim();
     if document.get("schemaVersion").and_then(Value::as_i64) != Some(1)
         || title.is_empty()
-        || crate::vault::utf16_len(title) > 180
-        || title.chars().any(|character| character.is_control())
+        || crate::vault::utf16_len(raw_title) > 180
+        || crate::vault::has_c0_or_del(raw_title)
         || !document.get("strokes").is_some_and(Value::is_array)
     {
         return Err("Die Zeichnungsdatei hat ein ungültiges Format.".to_owned());
@@ -369,13 +361,21 @@ fn safe_title(value: &str) -> Result<String, String> {
         || name == ".."
         || name.contains('/')
         || name.contains('\\')
-        || name.chars().any(|character| character.is_control())
+        || crate::vault::has_c0_or_del(name)
         || name.eq_ignore_ascii_case(".fanotes")
         || name.eq_ignore_ascii_case(".lernwerk")
     {
         return Err("Dieser Name ist nicht erlaubt.".to_owned());
     }
     Ok(name.to_owned())
+}
+
+fn drawing_file_id(name: &str) -> Option<&str> {
+    let (id, extension) = name.rsplit_once('.')?;
+    extension
+        .eq_ignore_ascii_case("json")
+        .then_some(id)
+        .filter(|id| drawing_id(id).is_ok())
 }
 
 fn drawing_id(value: &str) -> Result<String, String> {

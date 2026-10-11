@@ -152,7 +152,7 @@ fn take_plaintext_secrets(settings: &mut Value) -> Map<String, Value> {
 }
 
 fn remembered_vault(path: &str) -> Option<PathBuf> {
-    if path.is_empty() || path.len() > 4096 || !Path::new(path).is_absolute() {
+    if path.is_empty() || crate::vault::utf16_len(path) > 4096 || !Path::new(path).is_absolute() {
         return None;
     }
     let path = PathBuf::from(path);
