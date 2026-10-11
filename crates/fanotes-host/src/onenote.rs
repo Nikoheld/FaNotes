@@ -1476,20 +1476,23 @@ fn code_point(point: Option<u32>) -> String {
     }
 }
 
+/// `decodeURIComponent`. One bad escape keeps the original string.
 fn urlencoding_decode(value: &str) -> String {
     let bytes = value.as_bytes();
     let mut output = Vec::new();
     let mut index = 0;
     while index < bytes.len() {
-        if bytes[index] == b'%' && index + 2 < bytes.len() {
-            if let Ok(byte) = u8::from_str_radix(
-                std::str::from_utf8(&bytes[index + 1..index + 3]).unwrap_or(""),
-                16,
-            ) {
-                output.push(byte);
-                index += 3;
-                continue;
+        if bytes[index] == b'%' {
+            if index + 2 >= bytes.len() {
+                return value.to_owned();
             }
+            let hex = std::str::from_utf8(&bytes[index + 1..index + 3]).unwrap_or("");
+            let Ok(byte) = u8::from_str_radix(hex, 16) else {
+                return value.to_owned();
+            };
+            output.push(byte);
+            index += 3;
+            continue;
         }
         output.push(bytes[index]);
         index += 1;
@@ -1622,7 +1625,8 @@ mod tests {
     use super::{
         common_ancestor, extract_search_text, inline_images, outline_level, page_dimensions,
         page_parents, page_title, render_inputs, safe_segment, sanitize_page, stored_relative_path,
-        strip_active_html, tool_failure_message, tool_limit, validate_listing, walk_limited,
+        strip_active_html, tool_failure_message, tool_limit, urlencoding_decode, validate_listing,
+        walk_limited,
     };
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -1754,6 +1758,13 @@ mod tests {
         assert_eq!(extract_search_text("A&nbsp;B"), "A B");
         assert_eq!(extract_search_text("&#x;"), "&#x;");
         assert_eq!(extract_search_text("&#xZZ;"), "&#xZZ;");
+        assert_eq!(urlencoding_decode("a%20b"), "a b");
+        assert_eq!(urlencoding_decode("caf%C3%A9"), "café");
+        assert_eq!(urlencoding_decode("%E2%9C%93"), "✓");
+        assert_eq!(urlencoding_decode("a%20b%"), "a%20b%");
+        assert_eq!(urlencoding_decode("a%2Gb"), "a%2Gb");
+        assert_eq!(urlencoding_decode("%E2%9C"), "%E2%9C");
+        assert_eq!(urlencoding_decode("%"), "%");
         assert_eq!(extract_search_text("&unknown;"), "&unknown;");
         assert_eq!(
             extract_search_text("<p>Eins</p>\n<p>Zwei</p>"),
