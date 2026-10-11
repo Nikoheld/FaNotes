@@ -1129,7 +1129,7 @@ impl Host {
             if !lower.ends_with(".famd") {
                 let famd = fanotes_famd::companion_note_path(&relative, ".famd");
                 if let Ok(companion_path) = vault::resolve_existing_entry(root, &famd) {
-                    if let Some(companion) = notes::read_lossy_string(&companion_path) {
+                    if let Some(companion) = read_search_companion(&companion_path) {
                         let parsed_companion = fanotes_famd::parse_famd(&companion);
                         if lower.ends_with(".pdf") && !parsed_companion.markdown.is_empty() {
                             content = parsed_companion.markdown;
@@ -3191,6 +3191,14 @@ fn ink_transcript(ink: Option<&Value>) -> String {
             .and_then(Value::as_str)
             .unwrap_or(""),
     )
+}
+
+fn read_search_companion(path: &Path) -> Option<String> {
+    let meta = fs::symlink_metadata(path).ok()?;
+    if meta.file_type().is_symlink() || !meta.is_file() || meta.len() > MAX_FAMD_BYTES {
+        return None;
+    }
+    notes::read_lossy_string(path)
 }
 
 fn count_matches(haystack: &str, needle: &str) -> usize {

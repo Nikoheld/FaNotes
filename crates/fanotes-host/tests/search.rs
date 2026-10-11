@@ -402,3 +402,30 @@ fn a_search_query_stops_at_500_utf16_units() {
     let hits = host.dispatch("fanotes:search", &[json!(query)]).unwrap();
     assert!(hits.as_array().unwrap().is_empty());
 }
+
+#[test]
+fn search_ignores_a_companion_above_the_desktop_limit() {
+    let mut host = host();
+    let vault = host.vault.clone().unwrap();
+    std::fs::write(vault.join("Bio/Seite.md"), "Hallo Welt\n").unwrap();
+    let companion = vault.join("Bio/Seite.famd");
+    std::fs::write(&companion, ink_note("Notiz", Some("Geheimwort"))).unwrap();
+    let hits = host
+        .dispatch("fanotes:search", &[json!("Geheimwort")])
+        .unwrap();
+    assert_eq!(hits.as_array().unwrap().len(), 1);
+
+    let file = std::fs::OpenOptions::new()
+        .write(true)
+        .open(&companion)
+        .unwrap();
+    file.set_len(40 * 1024 * 1024 + 1).unwrap();
+    drop(file);
+    let hidden = host
+        .dispatch("fanotes:search", &[json!("Geheimwort")])
+        .unwrap();
+    assert!(hidden.as_array().unwrap().is_empty());
+    let kept = host.dispatch("fanotes:search", &[json!("Hallo")]).unwrap();
+    assert_eq!(kept.as_array().unwrap().len(), 1);
+    assert_eq!(kept[0]["relativePath"], "Bio/Seite.md");
+}
