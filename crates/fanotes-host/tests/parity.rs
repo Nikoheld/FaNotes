@@ -154,6 +154,8 @@ fn addon_ssrf_blocks_private_and_non_https() {
     assert!(addon_request_allowed("https://[2001:db8::1]/hook").is_err());
     assert!(addon_request_allowed("https://localhost/hook").is_err());
     assert!(addon_request_allowed("https://192.168.1.20/hook").is_err());
+    assert!(addon_request_allowed("https://100.64.0.1/hook").is_err());
+    assert!(addon_request_allowed("https://224.0.0.1/hook").is_err());
     assert!(addon_request_allowed("https://user:pass@example.com").is_err());
     assert!(addon_request_allowed("https://example.com/hook").is_ok());
     assert!(addon_request_allowed("HTTPS://example.com/hook").is_ok());
@@ -178,6 +180,17 @@ fn local_ai_urls_stay_on_the_lan() {
         "http://127.0.0.1:1234"
     );
     assert!(local_ai_origin("https://api.openai.com", "lmstudio").is_err());
+    assert!(local_ai_origin("http://100.64.0.1:1234", "ollama").is_err());
+    assert!(local_ai_origin("http://224.0.0.1:1234", "lmstudio").is_err());
+    assert!(local_ai_origin("http://240.0.0.1:1234", "opencode").is_err());
+    assert_eq!(
+        local_ai_origin("http://192.168.1.20:11434", "ollama").unwrap(),
+        "http://192.168.1.20:11434"
+    );
+    assert_eq!(
+        local_ai_origin("http://10.1.2.3:1234", "lmstudio").unwrap(),
+        "http://10.1.2.3:1234"
+    );
     assert!(local_ai_origin("http://127.0.0.1:1234/v1", "ollama").is_err());
     assert!(local_ai_origin("http://user:pass@127.0.0.1:1234", "lmstudio").is_err());
     let too_long = "ä".repeat(2049);
