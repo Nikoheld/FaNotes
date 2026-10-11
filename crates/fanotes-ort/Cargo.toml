@@ -1,0 +1,24 @@
+[package]
+name = "fanotes-ort"
+version = "0.1.0"
+description = "PyLaia line recognition on the native ONNX Runtime (ort); replaces electron/native-ocr-worker.cjs"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "fanotes-ocr"
+path = "src/bin/fanotes-ocr.rs"
+
+[[test]]
+name = "session"
+harness = false
+
+[dependencies]
+# Loads the ONNX Runtime 1.21.0 library that onnxruntime-node@1.21.0 ships, so the build downloads no
+# runtime and `api-21` asks that library for exactly the C API it provides.
+ort = { version = "=2.0.0-rc.13", default-features = false, features = ["std", "load-dynamic", "api-21"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+thiserror = "1"
