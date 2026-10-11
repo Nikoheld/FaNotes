@@ -7,7 +7,10 @@ use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
 
-use fanotes_recog::{decode_ctc, line_tensor, Language, LineBounds, LineOptions, LineStroke};
+use fanotes_recog::{
+    decode_ctc, fuse_recognition_model, line_tensor, FusionEntry, Language, LineBounds,
+    LineOptions, LineStroke,
+};
 use wasm_bindgen::prelude::*;
 
 thread_local! {
@@ -94,6 +97,16 @@ pub fn line_tensor_js(
     out.push(tensor.width as f32);
     out.extend(tensor.values);
     Ok(out)
+}
+
+/// Personal prototype fusion for entries that already have features. The TypeScript builder
+/// stays available; callers switch only after the published model matches.
+#[wasm_bindgen(js_name = fuseRecognitionModel)]
+pub fn fuse_recognition_model_js(payload: &str) -> Result<String, JsError> {
+    let entries: Vec<FusionEntry> =
+        serde_json::from_str(payload).map_err(|error| JsError::new(&error.to_string()))?;
+    let fused = fuse_recognition_model(&entries);
+    serde_json::to_string(&fused).map_err(|error| JsError::new(&error.to_string()))
 }
 
 fn finite(value: f64) -> Option<f64> {

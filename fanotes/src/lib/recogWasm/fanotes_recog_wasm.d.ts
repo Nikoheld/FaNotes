@@ -4,6 +4,12 @@
 export function decodeCtc(probabilities: Float32Array, time_steps: number, classes: number, characters: string[], language: string): string;
 
 /**
+ * Personal prototype fusion for entries that already have features. The TypeScript builder
+ * stays available; callers switch only after the published model matches.
+ */
+export function fuseRecognitionModel(payload: string): string;
+
+/**
  * Packed strokes: for each stroke, `baseWidth`, `pointCount`, then that many `x, y` page coordinates.
  * Ratios are `NaN` when the caller wants the default crop.
  */
@@ -20,6 +26,7 @@ export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembl
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
     readonly decodeCtc: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => [number, number, number, number];
+    readonly fuseRecognitionModel: (a: number, b: number) => [number, number, number, number];
     readonly lineTensor: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number) => [number, number, number, number];
     readonly setLexicon: (a: number, b: number, c: number, d: number) => void;
     readonly __wbindgen_malloc: (a: number, b: number) => number;
