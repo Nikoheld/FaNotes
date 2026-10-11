@@ -508,16 +508,33 @@ fn sanitize_subject_book(value: &Value) -> Option<Value> {
     let object = value.as_object()?;
     let subject_path = sanitize_folder_path(object.get("subjectPath").and_then(Value::as_str))?;
     let book_path = sanitize_pdf_path(object.get("bookPath").and_then(Value::as_str))?;
-    let page = object
-        .get("lastPage")
-        .and_then(Value::as_i64)
-        .filter(|page| *page >= 1)
-        .unwrap_or(1);
+    let page = subject_book_page(object.get("lastPage"));
     Some(json!({
         "subjectPath": subject_path,
         "bookPath": book_path,
         "lastPage": page,
     }))
+}
+
+/// Desktop `Number(lastPage)` followed by `Number.isSafeInteger`.
+fn subject_book_page(value: Option<&Value>) -> i64 {
+    let number = match value {
+        Some(Value::Number(number)) => number.as_f64().unwrap_or(f64::NAN),
+        Some(Value::String(text)) => vault::js_tonumber(text).unwrap_or(f64::NAN),
+        Some(Value::Bool(true)) => 1.0,
+        Some(Value::Bool(false)) => 0.0,
+        Some(Value::Null) => 0.0,
+        _ => f64::NAN,
+    };
+    if number.is_finite()
+        && number.fract() == 0.0
+        && number.abs() <= 9_007_199_254_740_991.0
+        && number >= 1.0
+    {
+        number as i64
+    } else {
+        1
+    }
 }
 
 fn sanitize_folder_path(value: Option<&str>) -> Option<String> {

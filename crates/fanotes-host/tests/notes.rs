@@ -18,6 +18,26 @@ fn host() -> (Host, std::path::PathBuf) {
 }
 
 #[test]
+fn a_subject_book_page_follows_javascript_number() {
+    let (mut host, _) = host();
+    let books = host
+        .dispatch(
+            "fanotes:write-subject-books",
+            &[json!([
+                { "subjectPath": "Mathe", "bookPath": "Mathe/Buch.pdf", "lastPage": "12" },
+                { "subjectPath": "Physik", "bookPath": "Physik/Buch.pdf", "lastPage": " 4 " },
+                { "subjectPath": "Chemie", "bookPath": "Chemie/Buch.pdf", "lastPage": "12.5" },
+                { "subjectPath": "Bio", "bookPath": "Bio/Buch.pdf", "lastPage": 9007199254740992_i64 }
+            ])],
+        )
+        .unwrap();
+    assert_eq!(books[0]["lastPage"], 12);
+    assert_eq!(books[1]["lastPage"], 4);
+    assert_eq!(books[2]["lastPage"], 1);
+    assert_eq!(books[3]["lastPage"], 1);
+}
+
+#[test]
 fn a_note_with_an_invalid_byte_still_opens_and_can_be_found() {
     let (mut host, vault) = host();
     let mut bytes = b"Die Photosynthese braucht Licht.\n".to_vec();

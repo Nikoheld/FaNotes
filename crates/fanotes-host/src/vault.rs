@@ -341,9 +341,108 @@ fn rename_legacy_internal(root: &Path, directory: &Path) -> Result<bool, String>
     }
 }
 
+/// `Number(string)`: the whole string is one numeric literal after JavaScript trim.
+///
+/// A sign applies to decimals and `Infinity`. `0x` / `0b` / `0o` are unsigned.
+/// `800px`, `1e`, and `+0x10` are not numbers.
+pub(crate) fn js_tonumber(value: &str) -> Option<f64> {
+    let text = js_trim(value);
+    if text.is_empty() {
+        return Some(0.0);
+    }
+    let bytes = text.as_bytes();
+    if bytes.len() >= 2 && bytes[0] == b'0' {
+        let radix = match bytes[1] {
+            b'x' | b'X' => Some(16),
+            b'b' | b'B' => Some(2),
+            b'o' | b'O' => Some(8),
+            _ => None,
+        };
+        if let Some(radix) = radix {
+            return integer_literal(&text[2..], radix);
+        }
+    }
+    decimal_literal(text)
+}
+
+fn integer_literal(digits: &str, radix: u32) -> Option<f64> {
+    if digits.is_empty() {
+        return None;
+    }
+    let mut value = 0.0_f64;
+    for byte in digits.bytes() {
+        let digit = match byte {
+            b'0'..=b'9' => byte - b'0',
+            b'a'..=b'f' => byte - b'a' + 10,
+            b'A'..=b'F' => byte - b'A' + 10,
+            _ => return None,
+        };
+        if u32::from(digit) >= radix {
+            return None;
+        }
+        value = value.mul_add(f64::from(radix), f64::from(digit));
+        if !value.is_finite() {
+            return Some(f64::INFINITY);
+        }
+    }
+    Some(value)
+}
+
+fn decimal_literal(text: &str) -> Option<f64> {
+    let bytes = text.as_bytes();
+    let mut index = 0;
+    if bytes
+        .first()
+        .is_some_and(|byte| matches!(byte, b'+' | b'-'))
+    {
+        index = 1;
+    }
+    if text[index..].eq("Infinity") {
+        return text.parse().ok();
+    }
+    let mut saw_digit = false;
+    while bytes.get(index).is_some_and(u8::is_ascii_digit) {
+        saw_digit = true;
+        index += 1;
+    }
+    if bytes.get(index) == Some(&b'.') {
+        index += 1;
+        while bytes.get(index).is_some_and(u8::is_ascii_digit) {
+            saw_digit = true;
+            index += 1;
+        }
+    }
+    if !saw_digit {
+        return None;
+    }
+    if bytes
+        .get(index)
+        .is_some_and(|byte| matches!(byte, b'e' | b'E'))
+    {
+        index += 1;
+        if bytes
+            .get(index)
+            .is_some_and(|byte| matches!(byte, b'+' | b'-'))
+        {
+            index += 1;
+        }
+        let exponent = index;
+        while bytes.get(index).is_some_and(u8::is_ascii_digit) {
+            index += 1;
+        }
+        if index == exponent {
+            return None;
+        }
+    }
+    if index != bytes.len() {
+        return None;
+    }
+    text.parse().ok()
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{normalize_relative_path, posix_extname, sync_segments};
+    use super::{js_tonumber, normalize_relative_path, posix_extname, sync_segments};
 
     #[test]
     fn path_limits_count_characters() {
@@ -388,5 +487,40 @@ mod tests {
         assert_eq!(posix_extname("Note.MD"), ".MD");
         assert_eq!(posix_extname("a."), ".");
         assert_eq!(posix_extname("..."), ".");
+    }
+
+    #[test]
+    fn a_page_size_string_uses_javascript_number() {
+        assert_eq!(js_tonumber("800"), Some(800.0));
+        assert_eq!(js_tonumber("800.4"), Some(800.4));
+        assert_eq!(js_tonumber("800.5"), Some(800.5));
+        assert_eq!(js_tonumber(" 800 "), Some(800.0));
+        assert_eq!(js_tonumber("\u{FEFF}800"), Some(800.0));
+        assert_eq!(js_tonumber("8e2"), Some(800.0));
+        assert_eq!(js_tonumber("8E+2"), Some(800.0));
+        assert_eq!(js_tonumber("+800"), Some(800.0));
+        assert_eq!(js_tonumber("0x320"), Some(800.0));
+        assert_eq!(js_tonumber("0X10"), Some(16.0));
+        assert_eq!(js_tonumber("0b1010"), Some(10.0));
+        assert_eq!(js_tonumber("0o10"), Some(8.0));
+        assert_eq!(js_tonumber("0800"), Some(800.0));
+        assert_eq!(js_tonumber("1."), Some(1.0));
+        assert_eq!(js_tonumber(" .5"), Some(0.5));
+        assert_eq!(js_tonumber(""), Some(0.0));
+        assert_eq!(js_tonumber("  0x320  "), Some(800.0));
+        assert!(js_tonumber("800px").is_none());
+        assert!(js_tonumber("1.2.3").is_none());
+        assert!(js_tonumber("1e").is_none());
+        assert!(js_tonumber(".").is_none());
+        assert!(js_tonumber("+0x10").is_none());
+        assert!(js_tonumber("0x").is_none());
+        assert!(js_tonumber("0b").is_none());
+        assert!(js_tonumber("1_000").is_none());
+        assert!(js_tonumber("true").is_none());
+        assert!(js_tonumber("\u{0085}800").is_none());
+        assert!(js_tonumber("800\u{0085}").is_none());
+        assert_eq!(js_tonumber("Infinity"), Some(f64::INFINITY));
+        assert_eq!(js_tonumber("+Infinity"), Some(f64::INFINITY));
+        assert_eq!(js_tonumber("-Infinity"), Some(f64::NEG_INFINITY));
     }
 }
