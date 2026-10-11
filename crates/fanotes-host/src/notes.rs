@@ -591,7 +591,7 @@ fn random_suffix() -> Result<String, String> {
     Ok(bytes.iter().map(|byte| format!("{byte:02x}")).collect())
 }
 
-fn atomic_write(path: &Path, bytes: &[u8], mode: u32) -> Result<(), String> {
+pub(crate) fn atomic_write(path: &Path, bytes: &[u8], mode: u32) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
             .map_err(|_| "Der Ordner konnte nicht angelegt werden.".to_owned())?;
@@ -624,10 +624,8 @@ fn vault_root(host: &Host) -> Result<&Path, String> {
         .ok_or_else(|| "Der Vault ist noch nicht initialisiert.".to_owned())
 }
 
-fn now_iso() -> String {
-    let elapsed = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default();
+pub(crate) fn iso_from_system_time(time: SystemTime) -> String {
+    let elapsed = time.duration_since(UNIX_EPOCH).unwrap_or_default();
     let secs = elapsed.as_secs();
     let millis = elapsed.subsec_millis();
     let days = secs / 86_400;
@@ -639,6 +637,10 @@ fn now_iso() -> String {
         (time % 3600) / 60,
         time % 60
     )
+}
+
+fn now_iso() -> String {
+    iso_from_system_time(SystemTime::now())
 }
 
 fn civil_date(mut days: u64) -> (i32, u32, u32) {

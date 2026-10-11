@@ -191,3 +191,63 @@ fn renaming_and_deleting_a_note_moves_its_companion() {
     assert!(!vault.join("Physik/Blatt.md").exists());
     assert!(!vault.join("Physik/Blatt.famd").exists());
 }
+
+#[test]
+fn a_second_note_is_numbered_and_reads_without_the_sidecar() {
+    let (mut host, vault) = host();
+    let first = host
+        .dispatch("fanotes:create-note", &[json!("Mathe"), json!("Seite")])
+        .unwrap();
+    assert_eq!(first["relativePath"], "Mathe/Seite.md");
+    assert_eq!(first["entry"]["kind"], "file");
+    assert_eq!(first["entry"]["name"], "Seite.md");
+    assert_eq!(first["entry"]["extension"], "md");
+    assert_eq!(
+        std::fs::read_to_string(vault.join("Mathe/Seite.md")).unwrap(),
+        "# Seite\n\n"
+    );
+    let second = host
+        .dispatch("fanotes:create-note", &[json!("Mathe"), json!("Seite")])
+        .unwrap();
+    assert_eq!(second["relativePath"], "Mathe/Seite 2.md");
+    let untitled = host.dispatch("fanotes:create-note", &[json!("")]).unwrap();
+    assert_eq!(untitled["relativePath"], "Unbenannte Notiz.md");
+    assert_eq!(
+        host.dispatch("fanotes:create-note", &[json!(""), json!("Blatt.txt")])
+            .unwrap_err(),
+        "Neue Notizen müssen Markdown-Dateien sein."
+    );
+    let folder = host
+        .dispatch("fanotes:create-folder", &[json!(""), json!("Ordner")])
+        .unwrap();
+    assert_eq!(folder["entry"]["kind"], "folder");
+    let folder_again = host
+        .dispatch("fanotes:create-folder", &[json!(""), json!("Ordner")])
+        .unwrap();
+    assert_eq!(folder_again["relativePath"], "Ordner 2");
+    let saved = host
+        .dispatch(
+            "fanotes:write-recognition-model",
+            &[json!("{\"version\":1}")],
+        )
+        .unwrap();
+    assert!(saved["modifiedAt"].as_str().unwrap().contains('T'));
+    assert_eq!(
+        host.dispatch("fanotes:read-recognition-model", &[])
+            .unwrap(),
+        "{\"version\":1}"
+    );
+    std::fs::write(
+        vault.join("Mathe/Seite.md"),
+        "Hallo\n\n<!-- fanotes-famd:v1 chars=2 -->\n{}\n",
+    )
+    .unwrap();
+    assert_eq!(
+        host.dispatch("fanotes:read-file", &[json!("Mathe/Seite.md")])
+            .unwrap(),
+        "Hallo"
+    );
+    assert!(host
+        .dispatch("fanotes:read-file", &[json!("Mathe/Seite.pdf")])
+        .is_err());
+}
