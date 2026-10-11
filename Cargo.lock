@@ -1221,7 +1221,12 @@ dependencies = [
 name = "fanotes-tauri"
 version = "2026.10.2"
 dependencies = [
+ "base64 0.22.1",
+ "cairo-rs",
  "fanotes-host",
+ "gdk",
+ "gdk-pixbuf",
+ "gio",
  "gtk",
  "rfd",
  "serde",

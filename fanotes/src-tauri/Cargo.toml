@@ -15,6 +15,11 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tauri = { version = "2", features = [] }
 gtk = "0.18.2"
+gdk = "0.18.2"
+gdk-pixbuf = "0.18.5"
+base64 = "0.22"
+cairo-rs = "0.18.5"
+gio = "0.18.4"
 rfd = { version = "0.15", default-features = false, features = ["gtk3"] }
 webkit2gtk = "2.0.2"
 

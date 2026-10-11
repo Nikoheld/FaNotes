@@ -161,9 +161,8 @@ impl Host {
             }
             "fanotes:import-pdf-note" => imports::import_pdf_note(self, args),
             "fanotes:import-onenote" => onenote::import_onenote(self, args),
-            "fanotes:open-subject-book-popout" | "fanotes:close-subject-book-popout" => {
-                Ok(Value::Null)
-            }
+            "fanotes:open-subject-book-popout" => self.open_subject_book(&arg_string(args, 0)?),
+            "fanotes:close-subject-book-popout" => Ok(json!({ "open": false })),
             "fanotes:read-worksheet" => worksheets::read_worksheet(self, &arg_string(args, 0)?),
             "fanotes:save-worksheet" => {
                 worksheets::save_worksheet(self, args.first().unwrap_or(&Value::Null))
@@ -254,7 +253,7 @@ impl Host {
             "fanotes:sync-write-secrets" => {
                 self.write_secrets(args.first().cloned().unwrap_or(Value::Null))
             }
-            "fanotes:capture-window" => Ok(Value::Null),
+            "fanotes:capture-window" => Err("Das Fensterbild ist ungültig.".to_owned()),
             "fanotes:render-pdf-page" => self.render_pdf_page(args),
             _ => Err(format!("Unbekannter Kanal: {channel}")),
         }
@@ -555,6 +554,23 @@ impl Host {
         }
         write_folder_colors(&root, &colors)?;
         Ok(json!({ "color": stored }))
+    }
+
+    fn open_subject_book(&self, relative: &str) -> Result<Value, String> {
+        if relative.is_empty() {
+            return Err("Ungültiger Buchpfad.".to_owned());
+        }
+        let root = self.require_vault()?;
+        let path = vault::normalize_relative_path(relative, false, false)?;
+        if !path.to_ascii_lowercase().ends_with(".pdf") {
+            return Err("Nur ein PDF-Buch kann auspoppen.".to_owned());
+        }
+        let file = vault::resolve_inside(root, &path)?;
+        let meta = fs::symlink_metadata(&file).map_err(|_| "Ungültiger Buchpfad.".to_owned())?;
+        if meta.file_type().is_symlink() || !meta.is_file() {
+            return Err("Nur ein PDF-Buch kann auspoppen.".to_owned());
+        }
+        Ok(json!({ "open": true, "bookPath": path }))
     }
 
     fn rename_entry(&mut self, relative: &str, next_name: &str) -> Result<Value, String> {
