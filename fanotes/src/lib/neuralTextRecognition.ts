@@ -2390,7 +2390,7 @@ const recognizeCtcLine = async (
         threads: effectiveOcrThreadCount(4),
       })
       if (
-        native.engine !== 'onnxruntime-node-cpu'
+        native.engine !== 'fanotes-ort-cpu'
         || !(native.probabilities instanceof Float32Array)
         || !Array.isArray(native.dims)
         || !Array.isArray(native.characters)

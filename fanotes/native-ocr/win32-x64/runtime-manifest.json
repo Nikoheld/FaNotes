@@ -1,0 +1,21 @@
+{
+  "format": "fanotes-native-ocr-runtime-v1",
+  "platform": "win32",
+  "arch": "x64",
+  "engine": "fanotes-ort-cpu",
+  "source": "crates/fanotes-ort",
+  "rustTarget": "x86_64-pc-windows-gnu",
+  "executable": {
+    "file": "fanotes-ocr.exe",
+    "size": 1339392,
+    "sha256": "8c9128eb69562761ede425abc0651abf9740ba6aaeed6c6736409837a27655d6"
+  },
+  "onnxruntime": {
+    "version": "1.21.0",
+    "package": "onnxruntime-node@1.21.0",
+    "from": "node_modules/onnxruntime-node/bin/napi-v3/win32/x64/onnxruntime.dll",
+    "file": "onnxruntime.dll",
+    "size": 16021504,
+    "sha256": "cf96b2b7de5328adafe79f9b1d818abdc04931cbcb39c6a6c9ae2ddc872ef63b"
+  }
+}
