@@ -596,14 +596,7 @@ pub(crate) fn atomic_write(path: &Path, bytes: &[u8], mode: u32) -> Result<(), S
         fs::create_dir_all(parent)
             .map_err(|_| "Der Ordner konnte nicht angelegt werden.".to_owned())?;
     }
-    let suffix = random_suffix().unwrap_or_else(|_| std::process::id().to_string());
-    let temporary = path.with_file_name(format!(
-        ".{}.{}.{suffix}.tmp",
-        path.file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("file"),
-        std::process::id()
-    ));
+    let temporary = temporary_path(path)?;
     if let Err(error) = write_exclusive(&temporary, bytes, mode) {
         let _ = fs::remove_file(&temporary);
         return Err(error);
@@ -614,6 +607,40 @@ pub(crate) fn atomic_write(path: &Path, bytes: &[u8], mode: u32) -> Result<(), S
     }
     sync_parent(path);
     Ok(())
+}
+
+/// Copy `source` onto `destination` as a private file.
+///
+/// The bytes are flushed before the final name appears, and the mode is the
+/// requested one. A world-readable OneNote export therefore does not stay
+/// world-readable inside the vault.
+pub(crate) fn atomic_copy(source: &Path, destination: &Path, mode: u32) -> Result<(), String> {
+    if let Some(parent) = destination.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|_| "Der Ordner konnte nicht angelegt werden.".to_owned())?;
+    }
+    let temporary = temporary_path(destination)?;
+    if let Err(error) = copy_exclusive(&temporary, source, mode) {
+        let _ = fs::remove_file(&temporary);
+        return Err(error);
+    }
+    if fs::rename(&temporary, destination).is_err() {
+        let _ = fs::remove_file(&temporary);
+        return Err("Die Datei konnte nicht geschrieben werden.".to_owned());
+    }
+    sync_parent(destination);
+    Ok(())
+}
+
+fn temporary_path(path: &Path) -> Result<PathBuf, String> {
+    let suffix = random_suffix().unwrap_or_else(|_| std::process::id().to_string());
+    Ok(path.with_file_name(format!(
+        ".{}.{}.{suffix}.tmp",
+        path.file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("file"),
+        std::process::id()
+    )))
 }
 
 #[derive(Debug)]
@@ -630,14 +657,7 @@ pub(crate) enum NewFileError {
 /// appears, and the file mode is private.
 pub(crate) fn publish_new_file(path: &Path, bytes: &[u8], mode: u32) -> Result<(), NewFileError> {
     let _parent = parent_directory(path)?;
-    let suffix = random_suffix().map_err(|_| NewFileError::Io)?;
-    let temporary = path.with_file_name(format!(
-        ".{}.{}.{suffix}.tmp",
-        path.file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("file"),
-        std::process::id()
-    ));
+    let temporary = temporary_path(path).map_err(|_| NewFileError::Io)?;
     if write_exclusive(&temporary, bytes, mode).is_err() {
         let _ = fs::remove_file(&temporary);
         return Err(NewFileError::Io);
@@ -696,6 +716,41 @@ fn sync_parent(path: &Path) {
 }
 
 fn write_exclusive(path: &Path, bytes: &[u8], mode: u32) -> Result<(), String> {
+    let mut file = open_new_file(path, mode)?;
+    if std::io::Write::write_all(&mut file, bytes)
+        .and_then(|_| file.sync_all())
+        .is_err()
+    {
+        drop(file);
+        let _ = fs::remove_file(path);
+        return Err("Die Datei konnte nicht geschrieben werden.".to_owned());
+    }
+    set_private_mode(path, mode);
+    Ok(())
+}
+
+fn copy_exclusive(path: &Path, source: &Path, mode: u32) -> Result<(), String> {
+    let meta = fs::symlink_metadata(source)
+        .map_err(|_| "Die Datei konnte nicht geschrieben werden.".to_owned())?;
+    if meta.file_type().is_symlink() || !meta.is_file() {
+        return Err("Die Datei konnte nicht geschrieben werden.".to_owned());
+    }
+    let mut input = fs::File::open(source)
+        .map_err(|_| "Die Datei konnte nicht geschrieben werden.".to_owned())?;
+    let mut output = open_new_file(path, mode)?;
+    if std::io::copy(&mut input, &mut output)
+        .and_then(|_| output.sync_all())
+        .is_err()
+    {
+        drop(output);
+        let _ = fs::remove_file(path);
+        return Err("Die Datei konnte nicht geschrieben werden.".to_owned());
+    }
+    set_private_mode(path, mode);
+    Ok(())
+}
+
+fn open_new_file(path: &Path, mode: u32) -> Result<fs::File, String> {
     let mut options = fs::OpenOptions::new();
     options.write(true).create_new(true);
     #[cfg(unix)]
@@ -717,23 +772,21 @@ fn write_exclusive(path: &Path, bytes: &[u8], mode: u32) -> Result<(), String> {
     {
         let _ = mode;
     }
-    let mut file = options
+    options
         .open(path)
-        .map_err(|_| "Die Datei konnte nicht geschrieben werden.".to_owned())?;
-    if std::io::Write::write_all(&mut file, bytes)
-        .and_then(|_| file.sync_all())
-        .is_err()
-    {
-        drop(file);
-        let _ = fs::remove_file(path);
-        return Err("Die Datei konnte nicht geschrieben werden.".to_owned());
-    }
+        .map_err(|_| "Die Datei konnte nicht geschrieben werden.".to_owned())
+}
+
+fn set_private_mode(path: &Path, mode: u32) {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         let _ = fs::set_permissions(path, fs::Permissions::from_mode(mode));
     }
-    Ok(())
+    #[cfg(not(unix))]
+    {
+        let _ = (path, mode);
+    }
 }
 
 fn vault_root(host: &Host) -> Result<&Path, String> {

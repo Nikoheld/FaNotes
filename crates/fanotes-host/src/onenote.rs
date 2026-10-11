@@ -63,7 +63,7 @@ fn import_path(host: &Host, input: &Path) -> Result<Value, String> {
     }
     let (one2html, seven_zip) = materialize_tools(&host.app_data)?;
     let temporary = std::env::temp_dir().join(format!("fanotes-onenote-{}", uuid()));
-    fs::create_dir_all(&temporary)
+    create_private_dir(&temporary)
         .map_err(|_| "Der OneNote-Import konnte nicht vorbereitet werden.".to_owned())?;
     let result = import_in_temp(input, vault, &one2html, &seven_zip, &temporary);
     let _ = fs::remove_dir_all(&temporary);
@@ -79,7 +79,7 @@ fn import_in_temp(
 ) -> Result<Value, String> {
     let inputs = prepare_input(input, temporary, seven_zip)?;
     let output_root = temporary.join("rendered");
-    fs::create_dir_all(&output_root)
+    create_private_dir(&output_root)
         .map_err(|_| "Der OneNote-Import konnte nicht vorbereitet werden.".to_owned())?;
     let warnings = render_inputs(&inputs, &output_root, one2html)?;
     let output_files = walk_files(&output_root)?;
@@ -124,9 +124,9 @@ fn import_in_temp(
         .map_err(|_| "Der OneNote-Import konnte nicht angelegt werden.".to_owned())?;
     let batch = internal.join("onenote").join(uuid());
     let attachment_dir = batch.join("attachments");
-    fs::create_dir_all(&attachment_dir)
+    create_private_dir(&attachment_dir)
         .map_err(|_| "Der OneNote-Import konnte nicht angelegt werden.".to_owned())?;
-    fs::create_dir_all(internal.join("worksheets"))
+    create_private_dir(&internal.join("worksheets"))
         .map_err(|_| "Der OneNote-Import konnte nicht angelegt werden.".to_owned())?;
 
     let import_result = (|| {
@@ -161,7 +161,7 @@ fn import_in_temp(
             {
                 directory.push(safe_segment(&segment, "OneNote-Seite"));
             }
-            fs::create_dir_all(&directory)
+            create_private_dir(&directory)
                 .map_err(|_| "Eine OneNote-Seitenhierarchie ist ungültig.".to_owned())?;
             let id = uuid();
             let worksheets = vault.join(".fanotes").join("worksheets");
@@ -580,7 +580,7 @@ fn prepare_input(input: &Path, temporary: &Path, seven_zip: &Path) -> Result<Vec
         return Err("Unterstützt werden .one, .onetoc2, OneDrive-ZIP und .onepkg.".to_owned());
     }
     let extracted = temporary.join("extracted");
-    fs::create_dir_all(&extracted)
+    create_private_dir(&extracted)
         .map_err(|_| "Das OneNote-Archiv konnte nicht entpackt werden.".to_owned())?;
     let listing = run_tool(
         seven_zip,
@@ -699,7 +699,7 @@ fn render_inputs(
             );
         }
         let _ = fs::remove_dir_all(output_root);
-        fs::create_dir_all(output_root)
+        create_private_dir(output_root)
             .map_err(|_| "Der OneNote-Import konnte nicht vorbereitet werden.".to_owned())?;
         render_sections(&sections, notebook, output_root, one2html)?;
         return Ok(vec!["Verschachtelte OneNote-Abschnittsgruppen wurden abschnittsweise mit ihrer Ordnerhierarchie übernommen.".to_owned()]);
@@ -739,7 +739,7 @@ fn render_sections(
             }
             destination.push(safe_segment(name, "Abschnitt"));
         }
-        fs::create_dir_all(&destination)
+        create_private_dir(&destination)
             .map_err(|_| "Der OneNote-Import konnte nicht vorbereitet werden.".to_owned())?;
         run_tool(
             one2html,
@@ -785,8 +785,10 @@ fn copy_attachments(
             )
         );
         let target = attachment_dir.join(&stored);
-        if !target.exists() {
-            fs::copy(path, &target)
+        let already_stored = fs::symlink_metadata(&target)
+            .is_ok_and(|meta| meta.is_file() && !meta.file_type().is_symlink());
+        if !already_stored {
+            crate::notes::atomic_copy(path, &target, 0o600)
                 .map_err(|_| "Eine OneNote-Anlage konnte nicht verwahrt werden.".to_owned())?;
         }
         let size = fs::metadata(path).map(|meta| meta.len()).unwrap_or(0);
@@ -811,7 +813,7 @@ fn preserve_sources(input: &Path, batch: &Path) -> Result<Vec<Value>, String> {
             .collect();
     }
     let directory = batch.join("original");
-    fs::create_dir_all(&directory)
+    create_private_dir(&directory)
         .map_err(|_| "Die OneNote-Quelle konnte nicht verwahrt werden.".to_owned())?;
     let mut preserved = Vec::new();
     for source in sources {
@@ -834,7 +836,7 @@ fn preserve_sources(input: &Path, batch: &Path) -> Result<Vec<Value>, String> {
                 "OneNote"
             )
         );
-        fs::copy(&source, directory.join(&stored))
+        crate::notes::atomic_copy(&source, &directory.join(&stored), 0o600)
             .map_err(|_| "Die OneNote-Quelle konnte nicht verwahrt werden.".to_owned())?;
         let size = fs::metadata(&source).map(|meta| meta.len()).unwrap_or(0);
         preserved.push(json!({
@@ -853,7 +855,7 @@ fn materialize_tools(app_data: &Path) -> Result<(PathBuf, PathBuf), String> {
         .join("tool-cache")
         .join("onenote")
         .join("v1-linux-x64");
-    fs::create_dir_all(&cache)
+    create_private_dir(&cache)
         .map_err(|_| "Der lokale OneNote-Werkzeugcache ist unsicher.".to_owned())?;
     let one2html = install_tool(
         &embedded.join("linux").join("one2html"),
@@ -1041,6 +1043,31 @@ fn write_unique_markdown(directory: &Path, title: &str, markdown: &str) -> Resul
     Err("Für die OneNote-Seite konnte kein freier Dateiname erzeugt werden.".to_owned())
 }
 
+fn create_private_dir(path: &Path) -> Result<(), std::io::Error> {
+    if let Some(parent) = path.parent() {
+        if !parent.as_os_str().is_empty() && !parent.exists() {
+            create_private_dir(parent)?;
+        }
+    }
+    match fs::symlink_metadata(path) {
+        Ok(meta) if meta.file_type().is_symlink() || !meta.is_dir() => {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::AlreadyExists,
+                "unsafe directory",
+            ));
+        }
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => fs::create_dir(path)?,
+        Err(error) => return Err(error),
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(path, fs::Permissions::from_mode(0o700))?;
+    }
+    Ok(())
+}
+
 fn unique_directory(parent: &Path, preferred: &str) -> Result<PathBuf, String> {
     for index in 0..10_000 {
         let name = if index == 0 {
@@ -1050,6 +1077,17 @@ fn unique_directory(parent: &Path, preferred: &str) -> Result<PathBuf, String> {
         };
         let target = parent.join(name);
         if fs::create_dir(&target).is_ok() {
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                if fs::set_permissions(&target, fs::Permissions::from_mode(0o700)).is_err() {
+                    let _ = fs::remove_dir(&target);
+                    return Err(
+                        "Für den OneNote-Import konnte kein freier Zielordner angelegt werden."
+                            .to_owned(),
+                    );
+                }
+            }
             return Ok(target);
         }
     }
@@ -1084,7 +1122,7 @@ fn safe_segment(value: &str, fallback: &str) -> String {
         .map(|regex| regex.replace_all(cleaned.trim(), " ").into_owned())
         .unwrap_or_else(|_| cleaned.trim().to_owned());
     let trimmed = collapsed.trim_end_matches(['.', ' ']).trim();
-    let trimmed = trimmed.chars().take(120).collect::<String>();
+    let trimmed = crate::vault::truncate_utf16(trimmed, 120);
     let device = trimmed.split('.').next().unwrap_or("").trim();
     let reserved = matches!(
         device.to_ascii_lowercase().as_str(),
@@ -1299,4 +1337,22 @@ fn civil_date(mut days: u64) -> (i32, u32, u32) {
         month += 1;
     }
     (year, 12, 31)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::safe_segment;
+
+    #[test]
+    fn a_page_title_stops_at_120_utf16_units() {
+        let umlauts = "Ä".repeat(121);
+        assert_eq!(
+            safe_segment(&umlauts, "fallback").encode_utf16().count(),
+            120
+        );
+        let emoji = "😀".repeat(80);
+        let trimmed = safe_segment(&emoji, "fallback");
+        assert_eq!(trimmed.encode_utf16().count(), 120);
+        assert_eq!(trimmed.chars().count(), 60);
+    }
 }
