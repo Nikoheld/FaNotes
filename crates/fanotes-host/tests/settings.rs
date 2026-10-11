@@ -47,4 +47,30 @@ fn invalid_settings_stay_on_the_previous_value() {
     assert!(!settings.contains("unknown"));
     let secrets = host.dispatch("fanotes:load-secure-settings", &[]).unwrap();
     assert_eq!(secrets["openAiApiKey"], "sk-live-secret");
+
+    let mut reopened = Host::open(app.clone());
+    reopened
+        .set_vault(app.parent().unwrap().join("vault"))
+        .unwrap();
+    reopened
+        .dispatch(
+            "fanotes:save-settings",
+            &[json!({ "lastOpenNotePath": "Mathe/Seite.md", "openAiApiKey": "" })],
+        )
+        .unwrap();
+    assert_eq!(
+        reopened
+            .dispatch("fanotes:load-secure-settings", &[])
+            .unwrap()["openAiApiKey"],
+        "sk-live-secret"
+    );
+    reopened
+        .dispatch("fanotes:save-settings", &[json!({ "openAiApiKey": "" })])
+        .unwrap();
+    assert_eq!(
+        reopened
+            .dispatch("fanotes:load-secure-settings", &[])
+            .unwrap()["openAiApiKey"],
+        ""
+    );
 }

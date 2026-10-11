@@ -61,6 +61,8 @@ pub struct Host {
     pub open_log: Option<PathBuf>,
     /// When set, deleted notes go to this trash directory instead of the desktop trash.
     pub trash_dir: Option<PathBuf>,
+    /// True after this session has shown the stored API keys to the page.
+    secrets_loaded: bool,
 }
 
 impl Host {
@@ -76,6 +78,7 @@ impl Host {
             documents_dir: None,
             open_log: None,
             trash_dir: None,
+            secrets_loaded: false,
         };
         host.load_persisted();
         host
@@ -214,10 +217,11 @@ impl Host {
             }
             "fanotes:ai-list-models" => ai::list_models(args.first().unwrap_or(&Value::Null)),
             "fanotes:ai-transform" => ai::transform(args.first().unwrap_or(&Value::Null)),
-            "fanotes:load-secure-settings" => Ok(self.secret_snapshot()),
-            "fanotes:save-settings" => {
-                self.save_settings(args.first().cloned().unwrap_or(Value::Null))
-            }
+            "fanotes:load-secure-settings" => Ok(self.load_secure_settings()),
+            "fanotes:save-settings" => self.save_settings(
+                args.first().cloned().unwrap_or(Value::Null),
+                args.get(1).unwrap_or(&Value::Null),
+            ),
             "fanotes:reset-app-data" => self.reset_app_data(),
             "fanotes:update-get-state"
             | "fanotes:update-check"
@@ -1156,21 +1160,36 @@ impl Host {
         }))
     }
 
-    fn save_settings(&mut self, incoming: Value) -> Result<Value, String> {
+    fn save_settings(&mut self, incoming: Value, options: &Value) -> Result<Value, String> {
         let Some(object) = incoming.as_object() else {
             return Err("Die Einstellungen sind ungültig.".to_owned());
         };
+        let clear = options
+            .get("clearProtectedSecrets")
+            .and_then(Value::as_bool)
+            == Some(true);
         let mut secrets = self.load_secrets();
-        for key in SECRET_KEYS {
-            if let Some(value) = object.get(*key).and_then(Value::as_str) {
+        if clear {
+            for key in SECRET_KEYS {
+                secrets.insert((*key).to_owned(), Value::String(String::new()));
+            }
+        } else {
+            for key in SECRET_KEYS {
+                let Some(value) = object.get(*key).and_then(Value::as_str) else {
+                    continue;
+                };
                 let limit = if *key == "homeworkApiSecret" {
                     256
                 } else {
                     4096
                 };
-                if value.len() <= limit && !value.contains('\0') {
-                    secrets.insert((*key).to_owned(), Value::String(value.to_owned()));
+                if value.contains('\0') || value.len() > limit {
+                    continue;
                 }
+                if value.is_empty() && !self.secrets_loaded {
+                    continue;
+                }
+                secrets.insert((*key).to_owned(), Value::String(value.to_owned()));
             }
         }
         self.store_secrets(&secrets)?;
@@ -1181,6 +1200,11 @@ impl Host {
         }
         self.persist_settings()?;
         Ok(json!(self.settings))
+    }
+
+    fn load_secure_settings(&mut self) -> Value {
+        self.secrets_loaded = true;
+        self.secret_snapshot()
     }
 
     fn secret_snapshot(&self) -> Value {
