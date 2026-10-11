@@ -211,7 +211,12 @@ impl Host {
             ),
             "fanotes:load-handwriting-recognition-resources" => resources::load_handwriting(),
             "fanotes:recognize-native-handwriting-line" => {
-                ocr::recognize_line(args.first().unwrap_or(&Value::Null))
+                let configured = self
+                    .settings
+                    .get("ocrThreadLimit")
+                    .and_then(Value::as_i64)
+                    .unwrap_or(0);
+                ocr::recognize_line(args.first().unwrap_or(&Value::Null), configured)
             }
             "fanotes:enhanced-math-get-state" => Ok(enhanced_math_state()),
             "fanotes:enhanced-math-install" | "fanotes:enhanced-math-recognize" => {
@@ -747,7 +752,7 @@ impl Host {
         }
         let bytes =
             fs::read(&path).map_err(|_| "Die Datei konnte nicht gelesen werden.".to_owned())?;
-        let text = String::from_utf8(bytes).map_err(|_| "Die Datei ist kein Text.".to_owned())?;
+        let text = String::from_utf8_lossy(&bytes);
         Ok(Value::String(fanotes_famd::strip_famd_payload(&text)))
     }
 
@@ -762,10 +767,8 @@ impl Host {
         }
         let path = vault::resolve_note_file(&root, &normalized)?;
         if notes::records_history(&normalized) {
-            if let Ok(previous) = fs::read(&path) {
-                if let Ok(text) = String::from_utf8(previous) {
-                    let _ = notes::record_history(&root, &normalized, &text);
-                }
+            if let Some(text) = notes::read_lossy_string(&path) {
+                let _ = notes::record_history(&root, &normalized, &text);
             }
         }
         let paper = self
@@ -962,7 +965,12 @@ impl Host {
             .and_then(|name| name.to_str())
             .ok_or_else(|| "Ungültiger Name.".to_owned())?
             .to_owned();
-        let mut desired = safe_entry_name(next_name)?;
+        let name_input = if next_name.trim().is_empty() {
+            current_name.as_str()
+        } else {
+            next_name
+        };
+        let mut desired = safe_entry_name(name_input)?;
         if !was_dir {
             if entry_extension(&desired).is_empty() {
                 desired.push_str(&entry_extension(&current_name));
@@ -1105,7 +1113,7 @@ impl Host {
             let raw = if lower.ends_with(".pdf") {
                 String::new()
             } else {
-                fs::read_to_string(&path).unwrap_or_default()
+                notes::read_lossy_string(&path).unwrap_or_default()
             };
             let parsed = fanotes_famd::parse_famd(&raw);
             let mut content = if parsed.markdown.is_empty() {
@@ -1121,7 +1129,7 @@ impl Host {
             if !lower.ends_with(".famd") {
                 let famd = fanotes_famd::companion_note_path(&relative, ".famd");
                 if let Ok(companion_path) = vault::resolve_existing_entry(root, &famd) {
-                    if let Ok(companion) = fs::read_to_string(companion_path) {
+                    if let Some(companion) = notes::read_lossy_string(&companion_path) {
                         let parsed_companion = fanotes_famd::parse_famd(&companion);
                         if lower.ends_with(".pdf") && !parsed_companion.markdown.is_empty() {
                             content = parsed_companion.markdown;
@@ -1131,14 +1139,21 @@ impl Host {
                             .as_ref()
                             .and_then(|payload| payload.ink.clone())
                         {
-                            if transcript.is_empty() {
-                                transcript = ink_transcript(Some(&companion_ink));
+                            // The companion is the handwriting the note opens.
+                            // A string transcript there replaces one embedded in
+                            // the markdown file, including an empty string.
+                            if let Some(text) = companion_ink
+                                .get("searchTranscript")
+                                .and_then(Value::as_str)
+                            {
+                                transcript = bounded_transcript(text);
                             }
                             ink = Some(companion_ink);
                         }
                     }
                 }
             }
+            remember_drawing_owner(&mut owners, &relative, &content, ink.as_ref());
             let haystack = format!("{relative}\n{content}\n{transcript}").to_lowercase();
             if !haystack.contains(&needle) {
                 continue;
@@ -1167,9 +1182,6 @@ impl Host {
             });
             if let Some(anchor) = ink_anchor(&transcript, &query) {
                 hit["inkAnchor"] = json!({ "y": anchor });
-            }
-            if let Some(id) = drawing_owner_id(&content, ink.as_ref()) {
-                owners.entry(id).or_insert_with(|| relative.clone());
             }
             hits.push(hit);
         }
@@ -2178,6 +2190,15 @@ fn file_uri(path: &Path) -> String {
 }
 
 pub(crate) fn compare_names(left: &str, right: &str) -> std::cmp::Ordering {
+    static COLLATOR: std::sync::OnceLock<Option<icu_collator::CollatorBorrowed<'static>>> =
+        std::sync::OnceLock::new();
+    if let Some(collator) = COLLATOR.get_or_init(german_numeric_base_collator).as_ref() {
+        return collator.compare(left, right);
+    }
+    compare_names_fallback(left, right)
+}
+
+fn compare_names_fallback(left: &str, right: &str) -> std::cmp::Ordering {
     use std::cmp::Ordering;
     let left = sort_key(left);
     let right = sort_key(right);
@@ -2271,6 +2292,13 @@ pub(crate) fn dictionary_order(left: &str, right: &str) -> std::cmp::Ordering {
     )
 }
 
+/// German base order without numeric runs, matching `localeCompare(name, 'de', { sensitivity: 'base' })`.
+pub(crate) fn base_dictionary_order(left: &str, right: &str) -> std::cmp::Ordering {
+    static COLLATOR: std::sync::OnceLock<Option<icu_collator::CollatorBorrowed<'static>>> =
+        std::sync::OnceLock::new();
+    compare_with(left, right, COLLATOR.get_or_init(german_base_collator))
+}
+
 /// German dictionary order with numeric runs, matching `localeCompare(name, 'de', { numeric: true })`.
 pub(crate) fn numeric_dictionary_order(left: &str, right: &str) -> std::cmp::Ordering {
     static COLLATOR: std::sync::OnceLock<Option<icu_collator::CollatorBorrowed<'static>>> =
@@ -2290,10 +2318,25 @@ fn compare_with(
     }
 }
 
+fn german_base_collator() -> Option<icu_collator::CollatorBorrowed<'static>> {
+    let mut options = icu_collator::options::CollatorOptions::default();
+    options.strength = Some(icu_collator::options::Strength::Primary);
+    icu_collator::Collator::try_new(icu_locale_core::locale!("de").into(), options).ok()
+}
+
 fn german_numeric_collator() -> Option<icu_collator::CollatorBorrowed<'static>> {
     let mut prefs = icu_collator::CollatorPreferences::from(icu_locale_core::locale!("de"));
     prefs.numeric_ordering = Some(icu_collator::preferences::CollationNumericOrdering::True);
     icu_collator::Collator::try_new(prefs, icu_collator::options::CollatorOptions::default()).ok()
+}
+
+/// `localeCompare(name, 'de', { numeric: true, sensitivity: 'base' })`.
+fn german_numeric_base_collator() -> Option<icu_collator::CollatorBorrowed<'static>> {
+    let mut prefs = icu_collator::CollatorPreferences::from(icu_locale_core::locale!("de"));
+    prefs.numeric_ordering = Some(icu_collator::preferences::CollationNumericOrdering::True);
+    let mut options = icu_collator::options::CollatorOptions::default();
+    options.strength = Some(icu_collator::options::Strength::Primary);
+    icu_collator::Collator::try_new(prefs, options).ok()
 }
 
 fn entry_name_order(left: &Value, right: &Value) -> std::cmp::Ordering {
@@ -2965,20 +3008,25 @@ fn retarget_folder_colors(root: &Path, old: &str, new: &str) -> Result<(), Strin
     Ok(())
 }
 
-fn drawing_owner_id(markdown: &str, ink: Option<&Value>) -> Option<String> {
-    if let Some(id) = markdown.split("fanotes-ink:").nth(1) {
-        let id = id
-            .split(|character: char| {
-                !character.is_ascii_alphanumeric() && character != '_' && character != '-'
-            })
-            .next()
-            .unwrap_or("");
-        if is_drawing_id(id) {
-            return Some(id.to_owned());
-        }
+fn remember_drawing_owner(
+    owners: &mut std::collections::HashMap<String, String>,
+    note: &str,
+    markdown: &str,
+    ink: Option<&Value>,
+) {
+    if let Some(id) = drawings::note_ink_marker_id(markdown) {
+        owners.entry(id).or_insert_with(|| note.to_owned());
     }
-    let id = ink?.get("id")?.as_str()?;
-    is_drawing_id(id).then(|| id.to_owned())
+    let Some(id) = ink
+        .and_then(|value| value.get("id"))
+        .and_then(Value::as_str)
+        .filter(|id| is_drawing_id(id))
+    else {
+        return;
+    };
+    owners
+        .entry(id.to_owned())
+        .or_insert_with(|| note.to_owned());
 }
 
 fn is_drawing_id(value: &str) -> bool {
@@ -3015,10 +3063,10 @@ fn search_drawings(
     };
     for entry in entries.flatten() {
         let name = entry.file_name().to_string_lossy().to_string();
-        let Some(id) = name.strip_suffix(".json") else {
+        let Some((id, extension)) = name.rsplit_once('.') else {
             continue;
         };
-        if !is_drawing_id(id) {
+        if !extension.eq_ignore_ascii_case("json") || !is_drawing_id(id) {
             continue;
         }
         let path = entry.path();
@@ -3263,7 +3311,7 @@ fn ink_anchor(transcript: &str, query: &str) -> Option<f64> {
         return None;
     }
     let lines: Vec<&str> = transcript
-        .lines()
+        .split('\n')
         .map(str::trim)
         .filter(|line| !line.is_empty())
         .collect();
@@ -3272,15 +3320,9 @@ fn ink_anchor(transcript: &str, query: &str) -> Option<f64> {
     }
     let parsed: Vec<(Option<f64>, String)> = lines
         .iter()
-        .map(|line| {
-            if let Some((y, text)) = line.split_once('\t') {
-                if let Ok(value) = y.parse::<f64>() {
-                    if value.is_finite() {
-                        return (Some(value.clamp(0.0, 1.0)), text.trim().to_owned());
-                    }
-                }
-            }
-            (None, (*line).to_owned())
+        .map(|line| match transcript_position(line) {
+            Some((y, text)) => (Some(y), text),
+            None => (None, (*line).to_owned()),
         })
         .collect();
     let index = parsed
@@ -3295,10 +3337,48 @@ fn ink_anchor(transcript: &str, query: &str) -> Option<f64> {
     })
 }
 
+/// `^(\d+(?:\.\d+)?)\t(.*)$` from the desktop handwriting search.
+fn transcript_position(line: &str) -> Option<(f64, String)> {
+    static PATTERN: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let pattern = PATTERN.get_or_init(|| {
+        regex::Regex::new(r"^([0-9]+(?:\.[0-9]+)?)\t(.*)$").expect("transcript line pattern")
+    });
+    let caps = pattern.captures(line)?;
+    let y: f64 = caps.get(1)?.as_str().parse().ok()?;
+    if !y.is_finite() {
+        return None;
+    }
+    Some((y.clamp(0.0, 1.0), caps.get(2)?.as_str().trim().to_owned()))
+}
+
 #[cfg(test)]
 mod sort_tests {
     use super::compare_names;
     use std::cmp::Ordering;
+
+    #[test]
+    fn notebook_folders_use_base_order_without_numeric_runs() {
+        use super::{base_dictionary_order, numeric_dictionary_order};
+        assert_eq!(
+            base_dictionary_order("Seite 2", "Seite 02"),
+            Ordering::Greater
+        );
+        assert_eq!(
+            base_dictionary_order("Mathematik", "mathematik"),
+            Ordering::Equal
+        );
+        assert_eq!(base_dictionary_order("Straße", "Strasse"), Ordering::Equal);
+        assert_eq!(base_dictionary_order("Apfel", "Äpfel"), Ordering::Equal);
+        assert_eq!(
+            base_dictionary_order("Kapitel 10", "Kapitel 2"),
+            Ordering::Less
+        );
+        assert_eq!(
+            numeric_dictionary_order("Kapitel 10", "Kapitel 2"),
+            Ordering::Greater
+        );
+        assert_eq!(compare_names("Seite 2", "Seite 02"), Ordering::Equal);
+    }
 
     #[test]
     fn german_names_use_the_electron_base_order() {
@@ -3309,6 +3389,15 @@ mod sort_tests {
         assert_eq!(compare_names("Seite 2", "Seite 10"), Ordering::Less);
         assert_eq!(compare_names("Äpfel", "Zen"), Ordering::Less);
         assert_eq!(compare_names("Über", "Zen"), Ordering::Less);
+        assert_eq!(compare_names("ð", "d"), Ordering::Equal);
+        assert_eq!(compare_names("ﬁle", "file"), Ordering::Equal);
+        assert_eq!(compare_names("Note2", "Note 2"), Ordering::Greater);
+        assert_eq!(compare_names("2.0", "2"), Ordering::Greater);
+        assert_eq!(compare_names("2.0", "2.00"), Ordering::Equal);
+        assert_eq!(compare_names("1,5", "1.5"), Ordering::Less);
+        assert_eq!(compare_names("Þ", "Th"), Ordering::Greater);
+        assert_eq!(compare_names("łódź", "lodz"), Ordering::Equal);
+        assert_eq!(compare_names("a b", "ab"), Ordering::Less);
     }
 
     #[test]
@@ -3368,6 +3457,30 @@ mod search_span_tests {
         let kept = super::ink_transcript(Some(&ink));
         assert_eq!(crate::vault::utf16_len(&kept), 500_000);
         assert!(!kept.contains("Ziel"));
+    }
+}
+
+#[cfg(test)]
+mod ink_anchor_tests {
+    use super::ink_anchor;
+
+    #[test]
+    fn a_handwriting_anchor_uses_the_desktop_line_pattern() {
+        assert_eq!(ink_anchor("0.4200\tChlorophyll", "chlor"), Some(0.42));
+        assert_eq!(ink_anchor("1e2\tChlorophyll", "chlor"), Some(0.15));
+        assert_eq!(ink_anchor("1.\tHallo", "hallo"), Some(0.15));
+        assert_eq!(
+            ink_anchor("1e2\tChlorophyll\n0.2500\tBlattgrün", "chlor"),
+            Some(0.0)
+        );
+        assert_eq!(
+            ink_anchor("1e2\tChlorophyll\n0.2500\tBlattgrün", "blatt"),
+            Some(0.25)
+        );
+        assert_eq!(
+            ink_anchor("0.2000\twort\r0.8000\tanders", "anders"),
+            Some(0.2)
+        );
     }
 }
 

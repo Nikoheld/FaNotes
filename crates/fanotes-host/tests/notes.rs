@@ -18,6 +18,45 @@ fn host() -> (Host, std::path::PathBuf) {
 }
 
 #[test]
+fn a_note_with_an_invalid_byte_still_opens_and_can_be_found() {
+    let (mut host, vault) = host();
+    let mut bytes = b"Die Photosynthese braucht Licht.\n".to_vec();
+    bytes.insert(4, 0xff);
+    std::fs::write(vault.join("Mathe/Blatt.md"), &bytes).unwrap();
+
+    let text = host
+        .dispatch("fanotes:read-file", &[json!("Mathe/Blatt.md")])
+        .unwrap();
+    let text = text.as_str().unwrap();
+    assert!(text.contains('\u{FFFD}'));
+    assert!(text.contains("Photosynthese"));
+
+    let hits = host
+        .dispatch("fanotes:search", &[json!("Photosynthese")])
+        .unwrap();
+    assert_eq!(hits[0]["relativePath"], "Mathe/Blatt.md");
+
+    host.dispatch(
+        "fanotes:write-file",
+        &[json!("Mathe/Blatt.md"), json!("Neu\n")],
+    )
+    .unwrap();
+    let history = host
+        .dispatch("fanotes:list-note-history", &[json!("Mathe/Blatt.md")])
+        .unwrap();
+    let id = history[0]["id"].as_str().unwrap();
+    let snapshot = host
+        .dispatch(
+            "fanotes:read-note-history",
+            &[json!("Mathe/Blatt.md"), json!(id)],
+        )
+        .unwrap();
+    let content = snapshot["content"].as_str().unwrap();
+    assert!(content.contains('\u{FFFD}'));
+    assert!(content.contains("Photosynthese"));
+}
+
+#[test]
 fn paper_links_books_and_history_round_trip() {
     let (mut host, vault) = host();
     host.dispatch(
