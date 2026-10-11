@@ -932,12 +932,13 @@ impl Host {
     }
 
     fn open_subject_book(&self, relative: &str) -> Result<Value, String> {
-        if relative.is_empty() {
-            return Err("Ungültiger Buchpfad.".to_owned());
-        }
         let root = self.require_vault()?;
         let path = vault::normalize_relative_path(relative, false, false)?;
-        if !path.to_ascii_lowercase().ends_with(".pdf") {
+        let extension = vault::posix_extname(&path).to_ascii_lowercase();
+        if !matches!(extension.as_str(), ".md" | ".markdown" | ".famd" | ".pdf") {
+            return Err("Es dürfen nur Markdown-Dateien, PDF-Notizen und FaNotes-Handschriftdateien (.famd) bearbeitet werden.".to_owned());
+        }
+        if extension != ".pdf" {
             return Err("Nur ein PDF-Buch kann auspoppen.".to_owned());
         }
         let file = vault::resolve_existing_entry(root, &path)?;
@@ -3042,13 +3043,10 @@ fn move_note_companion(root: &Path, old_relative: &str, new_relative: &str) {
 }
 
 fn note_companion_relative(relative: &str) -> Option<String> {
-    let lower = relative.to_lowercase();
-    let extension = if lower.ends_with(".famd") {
-        ".md"
-    } else if lower.ends_with(".md") || lower.ends_with(".markdown") || lower.ends_with(".pdf") {
-        ".famd"
-    } else {
-        return None;
+    let extension = match vault::posix_extname(relative).to_ascii_lowercase().as_str() {
+        ".famd" => ".md",
+        ".md" | ".markdown" | ".pdf" => ".famd",
+        _ => return None,
     };
     Some(fanotes_famd::companion_note_path(relative, extension))
 }
