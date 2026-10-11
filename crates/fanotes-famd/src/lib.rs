@@ -966,5 +966,33 @@ fn civil_from_days(days: i64) -> Option<(i32, i32, i32)> {
 }
 
 fn now_iso() -> String {
-    "1970-01-01T00:00:00.000Z".to_string()
+    let elapsed = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
+    let millis = elapsed.subsec_millis();
+    let Some((year, month, day, hour, minute, second)) = civil_from_unix(elapsed.as_secs() as i64)
+    else {
+        return "1970-01-01T00:00:00.000Z".to_string();
+    };
+    format!("{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}.{millis:03}Z")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{parse_famd, FAMD_SCHEMA};
+
+    #[test]
+    fn a_bad_companion_timestamp_uses_the_current_time() {
+        let json = format!(
+            r#"{{"schema":"{FAMD_SCHEMA}","updatedAt":"not-a-date","ink":null,"worksheets":[]}}"#
+        );
+        let source = format!(
+            "<!-- fanotes-famd:v1 chars={} -->\n{json}\n",
+            super::js_len(&json)
+        );
+        let updated = parse_famd(&source).payload.unwrap().updated_at;
+        assert_ne!(updated, "1970-01-01T00:00:00.000Z");
+        assert!(updated.ends_with('Z'), "{updated}");
+        assert_eq!(updated.len(), 24, "{updated}");
+    }
 }
