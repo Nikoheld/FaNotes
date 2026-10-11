@@ -189,6 +189,10 @@ fn ollama_models(connection: &Value) -> Result<Vec<Value>, String> {
         None,
         Duration::from_secs(20),
     )?;
+    parse_ollama_models(&body)
+}
+
+fn parse_ollama_models(body: &Value) -> Result<Vec<Value>, String> {
     let models = body
         .get("models")
         .and_then(Value::as_array)
@@ -200,11 +204,25 @@ fn ollama_models(connection: &Value) -> Result<Vec<Value>, String> {
                 .get("model")
                 .and_then(Value::as_str)
                 .or_else(|| entry.get("name").and_then(Value::as_str))?;
-            Some(model_record(
-                "ollama",
-                name,
-                entry.get("name").and_then(Value::as_str).unwrap_or(name),
-            ))
+            let display = entry.get("name").and_then(Value::as_str).unwrap_or(name);
+            let mut record = model_record("ollama", name, display);
+            let details = entry.get("details");
+            set_model_details(
+                &mut record,
+                details
+                    .and_then(|details| details.get("family"))
+                    .and_then(Value::as_str),
+                details
+                    .and_then(|details| details.get("quantization_level"))
+                    .and_then(Value::as_str),
+                details
+                    .and_then(|details| details.get("parameter_size"))
+                    .and_then(Value::as_str),
+                None,
+                None,
+                None,
+            );
+            Some(record)
         })
         .take(1000)
         .collect())
@@ -360,9 +378,15 @@ fn parse_gemini_models(body: &Value) -> Result<Vec<Value>, String> {
                 .and_then(Value::as_str)
                 .unwrap_or(key);
             let mut record = model_record("gemini", key, display);
-            if let Some(object) = record.as_object_mut() {
-                object.insert("publisher".into(), Value::String("Google".to_owned()));
-            }
+            set_model_details(
+                &mut record,
+                Some("Google"),
+                None,
+                None,
+                None,
+                finite_number(&entry["inputTokenLimit"]),
+                entry.get("description").and_then(Value::as_str),
+            );
             Some(record)
         })
         .take(1000)
@@ -394,9 +418,15 @@ fn parse_anthropic_models(body: &Value) -> Result<Vec<Value>, String> {
                 .and_then(Value::as_str)
                 .unwrap_or(id);
             let mut record = model_record("anthropic", id, display);
-            if let Some(object) = record.as_object_mut() {
-                object.insert("publisher".into(), Value::String("Anthropic".to_owned()));
-            }
+            set_model_details(
+                &mut record,
+                Some("Anthropic"),
+                None,
+                None,
+                None,
+                finite_number(&entry["max_input_tokens"]),
+                None,
+            );
             Some(record)
         })
         .take(1000)
@@ -463,9 +493,18 @@ fn parse_opencode_models(body: &Value) -> Result<Vec<Value>, String> {
                 &format!("{provider_id}/{id}"),
                 &format!("{provider_name} · {display}"),
             );
-            if let Some(object) = record.as_object_mut() {
-                object.insert("publisher".into(), Value::String(provider_name.to_owned()));
-            }
+            set_model_details(
+                &mut record,
+                Some(provider_name),
+                None,
+                None,
+                None,
+                entry
+                    .get("limit")
+                    .map(|limit| finite_number(&limit["context"]))
+                    .unwrap_or(None),
+                entry.get("description").and_then(Value::as_str),
+            );
             models.push(record);
             if models.len() == 1000 {
                 return Ok(models);
@@ -1320,8 +1359,8 @@ fn unwrap_markdown(value: &str) -> Result<String, String> {
 mod tests {
     use super::{
         build_prompt, finish_models, lm_studio_text, output_token_limit, parse_anthropic_models,
-        parse_gemini_models, parse_lmstudio_models, parse_openai_models, provider_http_error,
-        unwrap_markdown,
+        parse_gemini_models, parse_lmstudio_models, parse_ollama_models, parse_openai_models,
+        provider_http_error, unwrap_markdown,
     };
     use serde_json::json;
 
@@ -1353,6 +1392,16 @@ mod tests {
         assert_eq!(models[0]["loaded"], true);
         assert_eq!(models[1]["key"], "zeta");
         assert_eq!(models[1]["loaded"], false);
+        let ollama = parse_ollama_models(&json!({
+            "models": [{
+                "name": "llama3",
+                "details": { "family": "llama", "parameter_size": "8B", "quantization_level": "Q4_K_M" }
+            }]
+        }))
+        .unwrap();
+        assert_eq!(ollama[0]["publisher"], "llama");
+        assert_eq!(ollama[0]["params"], "8B");
+        assert_eq!(ollama[0]["quantization"], "Q4_K_M");
         assert_eq!(
             provider_http_error(
                 "Ollama",
