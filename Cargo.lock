@@ -1129,6 +1129,7 @@ dependencies = [
  "fanotes-pdf",
  "filetime",
  "getrandom 0.2.17",
+ "regex",
  "rfd",
  "serde",
  "serde_json",

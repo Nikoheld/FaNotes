@@ -9,6 +9,7 @@ mod drawings;
 mod imports;
 mod notes;
 mod ocr;
+mod onenote;
 mod policy;
 mod vault;
 mod worksheets;
@@ -158,9 +159,7 @@ impl Host {
                 worksheets::import_from_data(self, args.first().unwrap_or(&Value::Null))
             }
             "fanotes:import-pdf-note" => imports::import_pdf_note(self, args),
-            "fanotes:import-onenote" => {
-                Err("Dieser Import ist im Tauri-Host noch nicht freigeschaltet.".to_owned())
-            }
+            "fanotes:import-onenote" => onenote::import_onenote(self, args),
             "fanotes:open-subject-book-popout" | "fanotes:close-subject-book-popout" => {
                 Ok(Value::Null)
             }
