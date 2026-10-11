@@ -403,7 +403,7 @@ impl Host {
     fn tree(&self) -> Result<Value, String> {
         let root = self.require_vault()?;
         let colors = read_folder_colors(root)?;
-        read_tree(root, root, &colors)
+        read_tree(root, root, &colors, 0)
     }
 
     fn read_file(&self, relative: &str) -> Result<Value, String> {
@@ -911,7 +911,11 @@ fn read_tree(
     root: &Path,
     directory: &Path,
     colors: &BTreeMap<String, String>,
+    depth: usize,
 ) -> Result<Value, String> {
+    if depth > 80 {
+        return Ok(json!([]));
+    }
     let mut children = Vec::new();
     let entries =
         fs::read_dir(directory).map_err(|_| "Der Vault konnte nicht gelesen werden.".to_owned())?;
@@ -927,37 +931,98 @@ fn read_tree(
             .unwrap_or(&path)
             .to_string_lossy()
             .replace('\\', "/");
-        let meta = entry
-            .metadata()
+        let meta = fs::symlink_metadata(&path)
             .map_err(|_| "Der Vault konnte nicht gelesen werden.".to_owned())?;
+        if meta.file_type().is_symlink() {
+            continue;
+        }
         if meta.is_dir() {
             let mut folder = json!({
                 "name": name,
                 "relativePath": relative,
                 "kind": "folder",
-                "children": read_tree(root, &path, colors)?
+                "children": read_tree(root, &path, colors, depth + 1)?
             });
             if let Some(color) = colors.get(&relative) {
                 folder["color"] = Value::String(color.clone());
             }
             children.push(folder);
-        } else if name.ends_with(".md") {
+        } else if meta.is_file() {
+            let extension = name
+                .rsplit_once('.')
+                .map(|(_, extension)| extension.to_ascii_lowercase())
+                .unwrap_or_default();
+            if !tree_extension(&extension) {
+                continue;
+            }
             children.push(json!({
                 "name": name,
                 "relativePath": relative,
                 "kind": "file",
-                "extension": "md",
+                "extension": extension,
                 "size": meta.len()
             }));
         }
     }
+    children = omit_famd_companions(children);
     children.sort_by(|left, right| {
-        left["name"]
-            .as_str()
-            .unwrap_or("")
-            .cmp(right["name"].as_str().unwrap_or(""))
+        let left_folder = left["kind"].as_str() == Some("folder");
+        let right_folder = right["kind"].as_str() == Some("folder");
+        right_folder.cmp(&left_folder).then_with(|| {
+            left["name"]
+                .as_str()
+                .unwrap_or("")
+                .to_lowercase()
+                .cmp(&right["name"].as_str().unwrap_or("").to_lowercase())
+        })
     });
     Ok(Value::Array(children))
+}
+
+fn tree_extension(extension: &str) -> bool {
+    matches!(
+        extension,
+        "md" | "markdown"
+            | "famd"
+            | "pdf"
+            | "png"
+            | "jpg"
+            | "jpeg"
+            | "webp"
+            | "gif"
+            | "svg"
+            | "mp3"
+            | "wav"
+            | "ogg"
+            | "m4a"
+            | "mp4"
+            | "webm"
+    )
+}
+
+fn omit_famd_companions(entries: Vec<Value>) -> Vec<Value> {
+    let mut stems = std::collections::HashSet::new();
+    for entry in &entries {
+        if entry["kind"].as_str() == Some("file")
+            && matches!(entry["extension"].as_str(), Some("md" | "markdown" | "pdf"))
+        {
+            if let Some(name) = entry["name"].as_str() {
+                let stem = name.rsplit_once('.').map(|(stem, _)| stem).unwrap_or(name);
+                stems.insert(stem.to_lowercase());
+            }
+        }
+    }
+    entries
+        .into_iter()
+        .filter(|entry| {
+            if entry["extension"].as_str() != Some("famd") {
+                return true;
+            }
+            let name = entry["name"].as_str().unwrap_or("");
+            let stem = name.rsplit_once('.').map(|(stem, _)| stem).unwrap_or(name);
+            !stems.contains(&stem.to_lowercase())
+        })
+        .collect()
 }
 
 fn folder_color_hex(value: &str) -> bool {

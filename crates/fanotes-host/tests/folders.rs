@@ -1,5 +1,6 @@
 use fanotes_host::Host;
 use serde_json::json;
+use std::fs;
 
 fn host() -> (Host, std::path::PathBuf, std::path::PathBuf) {
     let dir = std::env::temp_dir().join(format!("fanotes-folders-{}", std::process::id()));
@@ -55,4 +56,32 @@ fn folder_color_survives_a_rename_and_the_vault_is_remembered() {
         restored.dispatch("fanotes:bootstrap", &[]).unwrap()["vaultPath"],
         other.to_string_lossy().as_ref()
     );
+}
+
+#[test]
+fn the_tree_shows_pdf_notes_and_hides_their_famd_companion() {
+    let (mut host, vault, _) = host();
+    fs::write(vault.join("Mathe/Seite.md"), b"Hallo\n").unwrap();
+    fs::write(vault.join("Mathe/Seite.famd"), b"companion").unwrap();
+    fs::write(vault.join("Mathe/Skript.pdf"), b"%PDF-1.4\n").unwrap();
+    fs::write(vault.join("Mathe/lose.famd"), b"alone").unwrap();
+    fs::write(vault.join("Mathe/bild.png"), b"png").unwrap();
+    let tree = host.dispatch("fanotes:get-tree", &[]).unwrap();
+    let folder = &tree[0];
+    assert_eq!(folder["kind"], "folder");
+    let names: Vec<_> = folder["children"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|entry| entry["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        names,
+        vec!["bild.png", "lose.famd", "Seite.md", "Skript.pdf"]
+    );
+    assert!(folder["children"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|entry| entry["extension"] == "pdf"));
 }
