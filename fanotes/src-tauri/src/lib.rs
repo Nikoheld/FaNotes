@@ -138,6 +138,23 @@ fn confirm_close(
     Ok(Value::Null)
 }
 
+#[tauri::command(rename = "fanotes:reset-app-data")]
+fn reset_app_data(app: tauri::AppHandle, state: State<'_, HostState>) -> Result<Value, String> {
+    let result = {
+        let mut host = state
+            .0
+            .lock()
+            .map_err(|_| "Der Host ist belegt.".to_owned())?;
+        host.dispatch("fanotes:reset-app-data", &[])?
+    };
+    let app = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        app.restart();
+    });
+    Ok(result)
+}
+
 #[tauri::command(rename = "fanotes:cancel-close")]
 fn cancel_close(state: State<'_, HostState>) -> Result<Value, String> {
     let mut host = state
@@ -198,7 +215,8 @@ macro_rules! fanotes_commands {
                 capture_window,
                 request_close,
                 confirm_close,
-                cancel_close
+                cancel_close,
+                reset_app_data
             ]
         }
     };
@@ -265,7 +283,6 @@ fanotes_commands! {
     ai_transform => "fanotes:ai-transform",
     load_secure_settings => "fanotes:load-secure-settings",
     save_settings => "fanotes:save-settings",
-    reset_app_data => "fanotes:reset-app-data",
     update_get_state => "fanotes:update-get-state",
     update_check => "fanotes:update-check",
     update_download => "fanotes:update-download",

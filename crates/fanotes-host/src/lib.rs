@@ -73,6 +73,7 @@ pub struct Host {
 
 impl Host {
     pub fn open(app_data: PathBuf) -> Self {
+        complete_pending_app_data_reset(&app_data);
         fs::create_dir_all(&app_data).ok();
         let mut host = Self {
             vault: None,
@@ -1276,14 +1277,25 @@ impl Host {
     }
 
     fn reset_app_data(&mut self) -> Result<Value, String> {
-        let _ = fs::remove_file(self.app_data.join("settings.json"));
-        let _ = fs::remove_file(self.app_data.join("secrets.json"));
-        for key in SECRET_KEYS {
-            let _ = secrets::delete(self.secret_store, &self.secret_account(key));
+        let Some(marker_path) = pending_reset_marker(&self.app_data) else {
+            return Err("Die App-Daten konnten nicht zurückgesetzt werden.".to_owned());
+        };
+        if valid_reset_marker(&marker_path, &self.app_data) {
+            self.allow_close = true;
+            return Ok(json!({ "restarting": true }));
         }
-        let _ = secrets::delete(self.secret_store, &self.secret_account(SYNC_SECRET_ACCOUNT));
-        self.settings = default_settings();
-        Ok(Value::Null)
+        let user_data =
+            std::path::absolute(&self.app_data).unwrap_or_else(|_| self.app_data.clone());
+        let marker = json!({
+            "version": 1,
+            "userDataPath": user_data.to_string_lossy(),
+            "createdAt": notes::iso_from_system_time(SystemTime::now()),
+        });
+        let text = serde_json::to_string(&marker)
+            .map_err(|_| "Die App-Daten konnten nicht zurückgesetzt werden.".to_owned())?;
+        notes::atomic_write(&marker_path, text.as_bytes(), 0o600)?;
+        self.allow_close = true;
+        Ok(json!({ "restarting": true }))
     }
 
     fn open_external(&self, url: &str) -> Result<Value, String> {
@@ -1427,6 +1439,156 @@ impl Host {
 }
 
 const SYNC_SECRET_ACCOUNT: &str = "sync-account";
+const APP_DATA_RESET_MARKER: &str = ".fanotes-reset-pending.json";
+const APP_DATA_RESET_COMPLETE: &str = ".fanotes-reset-complete";
+const RESET_MAX_BYTES: u64 = 4096;
+const RESET_MAX_AGE_MS: u64 = 24 * 60 * 60 * 1000;
+
+fn pending_reset_marker(app_data: &Path) -> Option<PathBuf> {
+    Some(app_data.parent()?.join(APP_DATA_RESET_MARKER))
+}
+
+fn complete_pending_app_data_reset(app_data: &Path) {
+    let Some(marker_path) = pending_reset_marker(app_data) else {
+        return;
+    };
+    if !valid_reset_marker(&marker_path, app_data) {
+        if fs::symlink_metadata(&marker_path).is_ok() {
+            let _ = fs::remove_file(&marker_path);
+        }
+        return;
+    }
+    if fs::symlink_metadata(app_data).is_ok_and(|meta| meta.file_type().is_symlink()) {
+        let _ = fs::remove_file(&marker_path);
+        return;
+    }
+    let mut names = SECRET_KEYS.to_vec();
+    names.push(SYNC_SECRET_ACCOUNT);
+    secrets::forget_profile(app_data, &names);
+    match fs::remove_dir_all(app_data) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(_) => return,
+    }
+    if fs::create_dir_all(app_data).is_err() {
+        return;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(app_data, fs::Permissions::from_mode(0o700));
+    }
+    let stamp = format!("{}\n", notes::iso_from_system_time(SystemTime::now()));
+    if notes::atomic_write(
+        &app_data.join(APP_DATA_RESET_COMPLETE),
+        stamp.as_bytes(),
+        0o600,
+    )
+    .is_err()
+    {
+        return;
+    }
+    let _ = fs::remove_file(&marker_path);
+}
+
+fn valid_reset_marker(marker_path: &Path, app_data: &Path) -> bool {
+    let Ok(meta) = fs::symlink_metadata(marker_path) else {
+        return false;
+    };
+    if meta.file_type().is_symlink() || !meta.is_file() || meta.len() > RESET_MAX_BYTES {
+        return false;
+    }
+    let Ok(text) = fs::read_to_string(marker_path) else {
+        return false;
+    };
+    let Ok(marker) = serde_json::from_str::<Value>(&text) else {
+        return false;
+    };
+    if marker.get("version").and_then(Value::as_u64) != Some(1) {
+        return false;
+    }
+    let Some(recorded) = marker.get("userDataPath").and_then(Value::as_str) else {
+        return false;
+    };
+    let Ok(recorded) = std::path::absolute(recorded) else {
+        return false;
+    };
+    let Ok(current) = std::path::absolute(app_data) else {
+        return false;
+    };
+    if recorded != current {
+        return false;
+    }
+    let Some(created_at) = marker.get("createdAt").and_then(Value::as_str) else {
+        return false;
+    };
+    marker_is_fresh(created_at)
+}
+
+fn marker_is_fresh(created_at: &str) -> bool {
+    let Some(created_ms) = unix_millis_from_iso(created_at) else {
+        return false;
+    };
+    let Ok(now) = SystemTime::now().duration_since(UNIX_EPOCH) else {
+        return false;
+    };
+    let now_ms = now.as_millis() as u64;
+    created_ms > now_ms || now_ms - created_ms <= RESET_MAX_AGE_MS
+}
+
+fn unix_millis_from_iso(value: &str) -> Option<u64> {
+    let (date, time) = value.split_once('T')?;
+    let mut date_parts = date.split('-');
+    let year: i32 = date_parts.next()?.parse().ok()?;
+    let month: u32 = date_parts.next()?.parse().ok()?;
+    let day: u32 = date_parts.next()?.parse().ok()?;
+    if date_parts.next().is_some() {
+        return None;
+    }
+    let time = time.strip_suffix('Z')?;
+    let (clock, millis) = match time.split_once('.') {
+        Some((clock, fraction)) if (1..=3).contains(&fraction.len()) => {
+            let millis: u32 = fraction.parse().ok()?;
+            let scale = 10u32.pow(3 - fraction.len() as u32);
+            (clock, millis * scale)
+        }
+        None => (time, 0),
+        Some(_) => return None,
+    };
+    let mut clock_parts = clock.split(':');
+    let hour: u32 = clock_parts.next()?.parse().ok()?;
+    let minute: u32 = clock_parts.next()?.parse().ok()?;
+    let second: u32 = clock_parts.next()?.parse().ok()?;
+    if clock_parts.next().is_some()
+        || hour > 23
+        || minute > 59
+        || second > 60
+        || !(1..=12).contains(&month)
+        || !(1..=31).contains(&day)
+    {
+        return None;
+    }
+    let days = days_from_civil(year, month, day)?;
+    Some(
+        days * 86_400_000
+            + u64::from(hour) * 3_600_000
+            + u64::from(minute) * 60_000
+            + u64::from(second) * 1000
+            + u64::from(millis),
+    )
+}
+
+fn days_from_civil(year: i32, month: u32, day: u32) -> Option<u64> {
+    let year = if month <= 2 { year - 1 } else { year };
+    let era = if year >= 0 { year } else { year - 399 } / 400;
+    let year_of_era = (year - era * 400) as u64;
+    let month_prime = if month > 2 { month - 3 } else { month + 9 };
+    let day_of_year = (153 * month_prime + 2) / 5 + day - 1;
+    let day_of_era =
+        year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + u64::from(day_of_year);
+    let days = era as i64 * 146_097 + day_of_era as i64 - 719_468;
+    u64::try_from(days).ok()
+}
 
 const PDF_ASSET_MAX: u64 = 96 * 1024 * 1024;
 const HTML_ASSET_MAX: u64 = 128 * 1024 * 1024;

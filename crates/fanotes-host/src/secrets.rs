@@ -61,6 +61,14 @@ pub fn set(store: SecretStore, account: &str, secret: &str) -> Result<(), String
     }
 }
 
+pub fn forget_profile(app_data: &Path, names: &[&str]) {
+    for name in names {
+        let account = account(app_data, name);
+        let _ = delete(SecretStore::Memory, &account);
+        let _ = delete(SecretStore::Keyring, &account);
+    }
+}
+
 pub fn delete(store: SecretStore, account: &str) -> Result<(), String> {
     match store {
         SecretStore::Memory => {
