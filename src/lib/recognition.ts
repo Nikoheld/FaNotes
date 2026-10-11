@@ -12,6 +12,7 @@ import {
 import { SUPPLEMENTAL_CANONICAL_PROPER_NAMES } from '../data/supplementalProperNames'
 import { isStandardRecognitionSample } from './standardRecognition'
 import { normalizeGermanSharpS, preservedReadingCharacters } from './orthography'
+import { fuseRecogModel } from '../../fanotes/src/lib/recogCore'
 
 const SOURCE_WIDTH = 900
 const SOURCE_HEIGHT = 560
@@ -831,7 +832,7 @@ export const buildRecognitionModel = async (samples: Sample[]): Promise<Recognit
       }
     }),
   )
-  suppressSupersededPersonalConflicts(entries)
+  const published = publishRecognitionFusion(entries)
   const personalEntries = entries.filter((entry) => !entry.standard)
   const classifierGroups = new Map<string, RecognitionModelEntry[]>()
   personalEntries.forEach((entry) => {
@@ -852,8 +853,140 @@ export const buildRecognitionModel = async (samples: Sample[]): Promise<Recognit
     ...classifierPersonalEntries,
     ...entries.filter((entry) => entry.standard),
   ] as RecognitionModel
+  model.weights = published.weights
+  model.prototypes = published.prototypes
+  model.prototypeSets = published.prototypeSets
+  model.classifierEntries = published.classifierEntries
+  model.labelStats = published.labelStats
+  model.aspectStats = published.aspectStats
+  model.estimatedAccuracy = published.estimatedAccuracy
+  model.evaluatedSamples = published.evaluatedSamples
+  return model
+}
+
+const floatBits = (values: Float32Array) => Array.from(new Uint32Array(new Float32Array(values).buffer))
+
+const floatsFromBits = (bits: number[]) => new Float32Array(Uint32Array.from(bits).buffer)
+
+const wireFusionEntry = (entry: RecognitionModelEntry) => ({
+  sampleId: entry.sampleId,
+  sessionId: entry.sessionId,
+  labelId: entry.labelId,
+  raster: floatBits(entry.raster),
+  projectionX: floatBits(entry.projectionX),
+  projectionY: floatBits(entry.projectionY),
+  hog: floatBits(entry.hog),
+  shape: floatBits(entry.shape),
+  holes: entry.holes,
+  strokeCount: entry.strokeCount,
+  physicalAspect: entry.physicalAspect,
+  geometry: {
+    directions: floatBits(entry.geometry.directions),
+    normalizedLength: entry.geometry.normalizedLength,
+    closedness: entry.geometry.closedness,
+    cornerness: entry.geometry.cornerness,
+    trajectory: entry.geometry.trajectory.map((path) => floatBits(path)),
+  },
+  standard: entry.standard,
+  trust: entry.trust,
+  createdAt: entry.createdAt,
+})
+
+const prototypeFromFusion = (entry: {
+  sampleId: string
+  sessionId: string
+  labelId: string
+  raster: number[]
+  projectionX: number[]
+  projectionY: number[]
+  hog: number[]
+  shape: number[]
+  holes: number
+  strokeCount: number
+  physicalAspect: number
+  geometry: {
+    directions: number[]
+    normalizedLength: number
+    closedness: number
+    cornerness: number
+    trajectory: number[][]
+  }
+  standard: boolean
+  trust: number
+  createdAt: number
+}): RecognitionModelEntry => ({
+  sampleId: entry.sampleId,
+  sessionId: entry.sessionId,
+  labelId: entry.labelId,
+  raster: floatsFromBits(entry.raster),
+  projectionX: floatsFromBits(entry.projectionX),
+  projectionY: floatsFromBits(entry.projectionY),
+  hog: floatsFromBits(entry.hog),
+  shape: floatsFromBits(entry.shape),
+  holes: entry.holes,
+  strokeCount: entry.strokeCount,
+  physicalAspect: entry.physicalAspect,
+  geometry: {
+    directions: floatsFromBits(entry.geometry.directions),
+    normalizedLength: entry.geometry.normalizedLength,
+    closedness: entry.geometry.closedness,
+    cornerness: entry.geometry.cornerness,
+    trajectory: entry.geometry.trajectory.map((path) => floatsFromBits(path)),
+  },
+  variants: [],
+  standard: entry.standard,
+  trust: entry.trust,
+  createdAt: entry.createdAt,
+})
+
+/**
+ * Publishes prototypes, weights, and holdout stats. The Rust fusion is the one
+ * `buildRecognitionModel` uses. `publishRecognitionFusionFromTypeScript` stays
+ * callable for the parity check.
+ */
+const publishRecognitionFusion = (entries: RecognitionModelEntry[]) => {
+  const fused = fuseRecogModel(entries.map(wireFusionEntry))
+  const byId = new Map(entries.map((entry) => [entry.sampleId, entry]))
+  fused.trusts.forEach((update) => {
+    const entry = byId.get(update.sampleId)
+    if (entry) entry.trust = update.trust
+  })
+  const prototypes = new Map(fused.prototypes.map((entry) => [
+    String(entry.labelId),
+    prototypeFromFusion(entry as Parameters<typeof prototypeFromFusion>[0]),
+  ]))
+  const prototypeSets = new Map(fused.prototypeSets.map((group) => [
+    group.labelId,
+    group.sampleIds.flatMap((sampleId) => {
+      const entry = byId.get(sampleId)
+      return entry ? [entry] : []
+    }),
+  ]))
+  return {
+    weights: fused.weights as FeatureWeights,
+    prototypes,
+    prototypeSets,
+    classifierEntries: fused.classifierIds.flatMap((sampleId) => {
+      const entry = byId.get(sampleId)
+      return entry ? [entry] : []
+    }),
+    labelStats: new Map(fused.labelStats.map((item) => [item.labelId, item.value as RecognitionLabelStats])),
+    aspectStats: new Map(fused.aspectStats.map((item) => [item.labelId, item.value])),
+    estimatedAccuracy: fused.estimatedAccuracy,
+    evaluatedSamples: fused.evaluatedSamples,
+  }
+}
+
+/**
+ * The TypeScript prototype fusion. It stays callable while the Rust scores are
+ * compared with it.
+ */
+export const publishRecognitionFusionFromTypeScript = (entries: RecognitionModelEntry[]) => {
+  suppressSupersededPersonalConflicts(entries)
+  const personalEntries = entries.filter((entry) => !entry.standard)
   const defaultWeights = { ...DEFAULT_WEIGHTS }
   let modelEvaluation: ReturnType<typeof estimateModelAccuracy> | null = null
+  let weights = defaultWeights
   if (personalEntries.length >= 4) {
     const adaptiveWeights = learnAdaptiveWeights(personalEntries)
     const adaptiveEvaluation = estimateModelAccuracy(personalEntries, adaptiveWeights)
@@ -862,20 +995,25 @@ export const buildRecognitionModel = async (samples: Sample[]): Promise<Recognit
     // objectively worse than the robust baseline. The same class-balanced,
     // preferably cross-session holdout decides which weights are published.
     const adaptiveWins = adaptiveEvaluation.score >= defaultEvaluation.score
-    model.weights = adaptiveWins ? adaptiveWeights : defaultWeights
+    weights = adaptiveWins ? adaptiveWeights : defaultWeights
     modelEvaluation = adaptiveWins ? adaptiveEvaluation : defaultEvaluation
-  } else {
-    model.weights = defaultWeights
   }
-  model.prototypes = buildClassPrototypes(entries)
-  model.prototypeSets = buildClassPrototypeSets(entries, model.weights)
-  model.classifierEntries = buildClassifierEntries(entries, model.prototypeSets)
-  model.labelStats = buildLabelStats(personalEntries, model.prototypeSets, model.weights)
-  model.aspectStats = buildAspectStats(entries)
-  const evaluation = modelEvaluation ?? estimateModelAccuracy(personalEntries, model.weights)
-  model.estimatedAccuracy = evaluation.accuracy
-  model.evaluatedSamples = evaluation.count
-  return model
+  const prototypes = buildClassPrototypes(entries)
+  const prototypeSets = buildClassPrototypeSets(entries, weights)
+  const classifierEntries = buildClassifierEntries(entries, prototypeSets)
+  const labelStats = buildLabelStats(personalEntries, prototypeSets, weights)
+  const aspectStats = buildAspectStats(entries)
+  const evaluation = modelEvaluation ?? estimateModelAccuracy(personalEntries, weights)
+  return {
+    weights,
+    prototypes,
+    prototypeSets,
+    classifierEntries,
+    labelStats,
+    aspectStats,
+    estimatedAccuracy: evaluation.accuracy,
+    evaluatedSamples: evaluation.count,
+  }
 }
 
 const strokeBounds = (stroke: Stroke) => {

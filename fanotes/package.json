@@ -20,6 +20,7 @@
     "check:packaged-i18n": "node scripts/check-packaged-i18n.cjs",
     "check:markdown": "node scripts/check-markdown.mjs",
     "check:recognition": "node scripts/check-context-recognition.mjs",
+    "check:recognition:fusion": "node scripts/check-recognition-fusion.mjs",
     "audit:recognition": "node scripts/audit-personal-recognition.mjs",
     "audit:recognition:uji": "node scripts/audit-uji-personal-recognition.mjs",
     "audit:recognition:uji-calibration": "node scripts/analyze-uji-personal-base-calibration.mjs",

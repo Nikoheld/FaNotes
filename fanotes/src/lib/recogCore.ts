@@ -2,7 +2,7 @@
  * Shared PyLaia line tensor and CTC decoder (`fanotes-recog`).
  * Loaded with handwriting recognition, not at application startup.
  */
-import { initSync, decodeCtc, lineTensor, setLexicon } from './recogWasm/fanotes_recog_wasm.js'
+import { initSync, decodeCtc, fuseRecognitionModel, lineTensor, setLexicon } from './recogWasm/fanotes_recog_wasm.js'
 import { RECOG_WASM_BASE64 } from './recogWasm/bytes'
 
 export type RecogCtcRun = { char: string; confidence: number; start: number; end: number }
@@ -35,6 +35,21 @@ export const installRecogLexicon = (language: 'de' | 'en', words: readonly strin
   if (lexicons.has(language)) return
   setLexicon(language, words.slice())
   lexicons.add(language)
+}
+
+export const fuseRecogModel = (entries: unknown) => {
+  ensureRecogWasm()
+  return JSON.parse(fuseRecognitionModel(JSON.stringify(entries))) as {
+    trusts: Array<{ sampleId: string; trust: number }>
+    weights: Record<string, number>
+    prototypes: Array<Record<string, unknown>>
+    prototypeSets: Array<{ labelId: string; sampleIds: string[] }>
+    classifierIds: string[]
+    labelStats: Array<{ labelId: string; value: Record<string, number> }>
+    aspectStats: Array<{ labelId: string; value: { median: number; spread: number; personal: boolean } }>
+    estimatedAccuracy: number | null
+    evaluatedSamples: number
+  }
 }
 
 export const decodeRecogCtc = (

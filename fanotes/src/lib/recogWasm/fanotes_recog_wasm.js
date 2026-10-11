@@ -34,6 +34,33 @@ export function decodeCtc(probabilities, time_steps, classes, characters, langua
 }
 
 /**
+ * Personal prototype fusion for entries that already have features. The TypeScript builder
+ * stays available; callers switch only after the published model matches.
+ * @param {string} payload
+ * @returns {string}
+ */
+export function fuseRecognitionModel(payload) {
+    let deferred3_0;
+    let deferred3_1;
+    try {
+        const ptr0 = passStringToWasm0(payload, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.fuseRecognitionModel(ptr0, len0);
+        var ptr2 = ret[0];
+        var len2 = ret[1];
+        if (ret[3]) {
+            ptr2 = 0; len2 = 0;
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        deferred3_0 = ptr2;
+        deferred3_1 = len2;
+        return getStringFromWasm0(ptr2, len2);
+    } finally {
+        wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
+    }
+}
+
+/**
  * Packed strokes: for each stroke, `baseWidth`, `pointCount`, then that many `x, y` page coordinates.
  * Ratios are `NaN` when the caller wants the default crop.
  * @param {number} min_x
