@@ -51,6 +51,13 @@ fn links_open_and_notes_are_revealed_without_leaving_the_vault() {
         &[json!("https://example.com/card")],
     )
     .unwrap();
+    host.dispatch("fanotes:open-external", &[json!("https://EXAMPLE.COM/a b")])
+        .unwrap();
+    assert_eq!(
+        host.dispatch("fanotes:open-external", &[json!("https://example.com%00")])
+            .unwrap_err(),
+        "Ungültiger externer Link."
+    );
     host.dispatch("fanotes:reveal-in-folder", &[json!("Seite.md")])
         .unwrap();
     assert_eq!(
@@ -61,6 +68,7 @@ fn links_open_and_notes_are_revealed_without_leaving_the_vault() {
 
     let log = fs::read_to_string(dir.join("opened.log")).unwrap();
     assert!(log.contains("open https://example.com/card"));
+    assert!(log.contains("open https://example.com/a%20b"));
     assert!(log.contains(&format!("reveal {}", vault.join("Seite.md").display())));
 
     let hits = host.dispatch("fanotes:search", &[json!("riesig")]).unwrap();

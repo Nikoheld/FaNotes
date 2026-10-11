@@ -69,6 +69,45 @@ fn drawings_round_trip_and_land_in_the_note() {
 }
 
 #[test]
+fn the_drawing_library_uses_one_json_suffix_without_case() {
+    let (dir, mut host) = host();
+    let assets = dir.join("vault/.fanotes/assets");
+    fs::create_dir_all(&assets).unwrap();
+    let document = |title: &str, transcript: &str| {
+        format!(
+            r#"{{"schemaVersion":1,"title":"{title}","strokes":[],"updatedAt":"2026-01-02T03:04:05.000Z","searchTranscript":"0.20\t{transcript}"}}"#
+        )
+    };
+    fs::write(assets.join("keep.json"), document("Behalten", "Echtwort")).unwrap();
+    fs::write(
+        assets.join("keep.json.json"),
+        document("Doppelt", "Doppelwort"),
+    )
+    .unwrap();
+    fs::write(assets.join("Upper.JSON"), document("Gross", "Grosswort")).unwrap();
+    fs::create_dir(assets.join("ordner.json")).unwrap();
+
+    let listed = host.dispatch("fanotes:list-drawings", &[]).unwrap();
+    let titles: Vec<_> = listed
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|item| item["title"].as_str().unwrap().to_owned())
+        .collect();
+    assert_eq!(titles, vec!["Behalten".to_owned(), "Gross".to_owned()]);
+
+    let upper = host
+        .dispatch("fanotes:search", &[json!("Grosswort")])
+        .unwrap();
+    assert_eq!(upper[0]["drawingId"], "Upper");
+    assert_eq!(upper[0]["title"], "Gross");
+    let hidden = host
+        .dispatch("fanotes:search", &[json!("Doppelwort")])
+        .unwrap();
+    assert!(hidden.as_array().unwrap().is_empty());
+}
+
+#[test]
 fn handwriting_is_not_saved_through_a_symlink_folder() {
     let (dir, mut host) = host();
     let outside = dir.join("outside");
@@ -131,6 +170,48 @@ fn pdf_and_markdown_notes_reopen_their_handwriting() {
         .dispatch("fanotes:read-famd-ink", &[json!("Mathe/Leer.pdf")])
         .unwrap()
         .is_null());
+
+    let assets = vault.join(".fanotes/assets");
+    fs::create_dir_all(&assets).unwrap();
+    fs::write(
+        assets.join("alt.json"),
+        r#"{"schemaVersion":1,"title":"Alt","strokes":[]}"#,
+    )
+    .unwrap();
+    filetime::set_file_mtime(
+        assets.join("alt.json"),
+        filetime::FileTime::from_unix_time(1_600_000_000, 0),
+    )
+    .unwrap();
+    fs::write(
+        assets.join("neu.json"),
+        r#"{"schemaVersion":1,"title":"Neu","strokes":[],"updatedAt":"2021-01-01T00:00:00Z"}"#,
+    )
+    .unwrap();
+    fs::write(
+        assets.join("zone.json"),
+        r#"{"schemaVersion":1,"title":"Zone","strokes":[],"updatedAt":"2020-06-01T12:00:00+02:00"}"#,
+    )
+    .unwrap();
+    let listed = host.dispatch("fanotes:list-drawings", &[]).unwrap();
+    let titles: Vec<_> = listed
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|item| item["title"].as_str().unwrap().to_owned())
+        .collect();
+    assert_eq!(titles, vec!["Skizze", "Neu", "Alt", "Zone"]);
+    let by_title = |name: &str| {
+        listed
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["title"] == name)
+            .unwrap()
+    };
+    assert_eq!(by_title("Neu")["updatedAt"], "2021-01-01T00:00:00.000Z");
+    assert_eq!(by_title("Zone")["updatedAt"], "2020-06-01T10:00:00.000Z");
+    assert_eq!(by_title("Alt")["updatedAt"], "2020-09-13T12:26:40.000Z");
 
     fs::write(
         vault.join("Kapitel.markdown"),

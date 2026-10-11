@@ -94,6 +94,18 @@ fn vault_paths_reject_traversal_and_internal_files() {
         .as_str()
         .unwrap()
         .starts_with("data:application/pdf;base64,"));
+    fs::write(
+        dir.0.join("vault").join("skizze.svg"),
+        b"<svg xmlns=\"http://www.w3.org/2000/svg\"/>",
+    )
+    .unwrap();
+    let svg_url = host
+        .dispatch("fanotes:read-asset-data-url", &[json!("skizze.svg")])
+        .unwrap();
+    assert!(svg_url
+        .as_str()
+        .unwrap()
+        .starts_with("data:image/svg+xml;base64,"));
     assert_eq!(
         host.dispatch("fanotes:read-asset-bytes", &[json!("Notiz.md")])
             .unwrap_err(),
@@ -134,10 +146,19 @@ fn vault_paths_reject_traversal_and_internal_files() {
 fn addon_ssrf_blocks_private_and_non_https() {
     assert!(addon_request_allowed("http://example.com").is_err());
     assert!(addon_request_allowed("https://127.0.0.1/hook").is_err());
+    assert!(addon_request_allowed("https://127.1/hook").is_err());
+    assert!(addon_request_allowed("https://0x7f.0.0.1/hook").is_err());
+    assert!(addon_request_allowed("https://0177.0.0.1/hook").is_err());
+    assert!(addon_request_allowed("https://0x7f000001/hook").is_err());
+    assert!(addon_request_allowed("https://[::1]/hook").is_err());
+    assert!(addon_request_allowed("https://[2001:db8::1]/hook").is_err());
     assert!(addon_request_allowed("https://localhost/hook").is_err());
     assert!(addon_request_allowed("https://192.168.1.20/hook").is_err());
+    assert!(addon_request_allowed("https://100.64.0.1/hook").is_err());
+    assert!(addon_request_allowed("https://224.0.0.1/hook").is_err());
     assert!(addon_request_allowed("https://user:pass@example.com").is_err());
     assert!(addon_request_allowed("https://example.com/hook").is_ok());
+    assert!(addon_request_allowed("HTTPS://example.com/hook").is_ok());
     let (_dir, mut host) = host();
     assert!(host
         .dispatch("fanotes:addons-net-fetch", &[json!("https://10.0.0.4/")])
@@ -146,9 +167,40 @@ fn addon_ssrf_blocks_private_and_non_https() {
 
 #[test]
 fn local_ai_urls_stay_on_the_lan() {
-    assert!(local_ai_origin("http://127.0.0.1:1234", "lmstudio").is_ok());
+    assert_eq!(
+        local_ai_origin("HTTP://LOCALHOST:1234/./", "lmstudio").unwrap(),
+        "http://localhost:1234"
+    );
+    assert_eq!(
+        local_ai_origin("http://127.1:1234?", "ollama").unwrap(),
+        "http://127.0.0.1:1234"
+    );
+    assert_eq!(
+        local_ai_origin("http://0x7f.0.0.1:01234", "opencode").unwrap(),
+        "http://127.0.0.1:1234"
+    );
     assert!(local_ai_origin("https://api.openai.com", "lmstudio").is_err());
+    assert!(local_ai_origin("http://100.64.0.1:1234", "ollama").is_err());
+    assert!(local_ai_origin("http://224.0.0.1:1234", "lmstudio").is_err());
+    assert!(local_ai_origin("http://240.0.0.1:1234", "opencode").is_err());
+    assert_eq!(
+        local_ai_origin("http://192.168.1.20:11434", "ollama").unwrap(),
+        "http://192.168.1.20:11434"
+    );
+    assert_eq!(
+        local_ai_origin("http://10.1.2.3:1234", "lmstudio").unwrap(),
+        "http://10.1.2.3:1234"
+    );
     assert!(local_ai_origin("http://127.0.0.1:1234/v1", "ollama").is_err());
+    assert!(local_ai_origin("http://user:pass@127.0.0.1:1234", "lmstudio").is_err());
+    let too_long = "ä".repeat(2049);
+    assert!(local_ai_origin(&too_long, "lmstudio")
+        .unwrap_err()
+        .contains("ungültig"));
+    let within_characters = "ä".repeat(2048);
+    assert!(local_ai_origin(&within_characters, "lmstudio")
+        .unwrap_err()
+        .contains("vollständige"));
 }
 
 #[test]
@@ -187,6 +239,26 @@ fn updater_does_not_replace_the_electron_release() {
     assert_eq!(state["supported"], false);
     assert_eq!(state["releaseHost"], "electron");
     assert_eq!(state["status"], "idle");
+    assert_eq!(state["autoDownloadUpdates"], true);
+    assert_eq!(state["installUpdatesOnQuit"], true);
+    assert_eq!(state["updateChannel"], "stable");
+    assert_eq!(state["installationKind"], "managed-appimage");
+    host.dispatch(
+        "fanotes:save-settings",
+        &[json!({
+            "autoCheckUpdates": false,
+            "autoDownloadUpdates": false,
+            "installUpdatesOnQuit": false,
+            "updateChannel": "beta"
+        })],
+    )
+    .unwrap();
+    let state = host.dispatch("fanotes:update-get-state", &[]).unwrap();
+    assert_eq!(state["autoCheckUpdates"], false);
+    assert_eq!(state["autoDownloadUpdates"], false);
+    assert_eq!(state["installUpdatesOnQuit"], false);
+    assert_eq!(state["updateChannel"], "beta");
+    assert_eq!(state["supported"], false);
 }
 
 #[test]
