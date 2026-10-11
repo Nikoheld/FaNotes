@@ -25,6 +25,13 @@ const MAX_PATH: usize = 500;
 const HISTORY_LIMIT: usize = 30;
 const MAX_SNAPSHOT_BYTES: usize = 16 * 1024 * 1024;
 
+/// Node `Buffer.toString('utf8')`: invalid bytes become U+FFFD and the rest stays.
+pub(crate) fn read_lossy_string(path: &Path) -> Option<String> {
+    fs::read(path)
+        .ok()
+        .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
+}
+
 pub fn records_history(relative: &str) -> bool {
     let lower = relative.to_lowercase();
     lower.ends_with(".md") || lower.ends_with(".markdown") || lower.ends_with(".famd")
@@ -91,8 +98,7 @@ pub fn attach_sidecar(
 ) -> Result<(), String> {
     let famd_relative = companion_note_path(relative, ".famd");
     let famd_path = vault::resolve_note_file(root, &famd_relative)?;
-    let existing = fs::read_to_string(&famd_path)
-        .ok()
+    let existing = read_lossy_string(&famd_path)
         .map(|source| parse_famd(&source))
         .unwrap_or_else(|| parse_famd(""));
     let incoming = parse_famd(content);
@@ -313,8 +319,8 @@ pub fn read_history(host: &Host, relative: &str, snapshot_id: &str) -> Result<Va
                 .cloned()
         })
         .ok_or_else(|| "Dieser Verlaufseintrag existiert nicht mehr.".to_owned())?;
-    let content = fs::read_to_string(directory.join(format!("{snapshot_id}.md")))
-        .map_err(|_| "Dieser Verlaufseintrag existiert nicht mehr.".to_owned())?;
+    let content = read_lossy_string(&directory.join(format!("{snapshot_id}.md")))
+        .ok_or_else(|| "Dieser Verlaufseintrag existiert nicht mehr.".to_owned())?;
     Ok(json!({
         "id": snapshot_id,
         "createdAt": entry.get("createdAt").and_then(Value::as_str).unwrap_or(""),
@@ -340,11 +346,7 @@ pub fn record_history(vault_root: &Path, relative: &str, content: &str) -> Resul
         .and_then(|item| item.get("id"))
         .and_then(Value::as_str)
     {
-        if fs::read_to_string(directory.join(format!("{last}.md")))
-            .ok()
-            .as_deref()
-            == Some(content)
-        {
+        if read_lossy_string(&directory.join(format!("{last}.md"))).as_deref() == Some(content) {
             return Ok(());
         }
     }
@@ -416,7 +418,7 @@ fn load_note(host: &Host, relative: &str) -> Result<(PathBuf, String, FamdPayloa
     let note = note_path(relative)?;
     let famd_relative = companion_note_path(&note, ".famd");
     let famd_path = vault::resolve_note_file(root, &famd_relative)?;
-    let source = fs::read_to_string(&famd_path).unwrap_or_default();
+    let source = read_lossy_string(&famd_path).unwrap_or_default();
     let parsed = if source.is_empty() {
         parse_famd("")
     } else {
@@ -426,7 +428,7 @@ fn load_note(host: &Host, relative: &str) -> Result<(PathBuf, String, FamdPayloa
         parsed.markdown.clone()
     } else {
         let markdown_path = vault::resolve_note_file(root, &note)?;
-        fs::read_to_string(markdown_path).unwrap_or_else(|_| parsed.markdown.clone())
+        read_lossy_string(&markdown_path).unwrap_or_else(|| parsed.markdown.clone())
     };
     let body = strip_famd_payload(&markdown);
     let mut payload = parsed
