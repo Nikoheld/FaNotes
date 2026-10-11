@@ -158,9 +158,29 @@ fn addon_ssrf_blocks_private_and_non_https() {
 
 #[test]
 fn local_ai_urls_stay_on_the_lan() {
-    assert!(local_ai_origin("http://127.0.0.1:1234", "lmstudio").is_ok());
+    assert_eq!(
+        local_ai_origin("HTTP://LOCALHOST:1234/./", "lmstudio").unwrap(),
+        "http://localhost:1234"
+    );
+    assert_eq!(
+        local_ai_origin("http://127.1:1234?", "ollama").unwrap(),
+        "http://127.0.0.1:1234"
+    );
+    assert_eq!(
+        local_ai_origin("http://0x7f.0.0.1:01234", "opencode").unwrap(),
+        "http://127.0.0.1:1234"
+    );
     assert!(local_ai_origin("https://api.openai.com", "lmstudio").is_err());
     assert!(local_ai_origin("http://127.0.0.1:1234/v1", "ollama").is_err());
+    assert!(local_ai_origin("http://user:pass@127.0.0.1:1234", "lmstudio").is_err());
+    let too_long = "ä".repeat(2049);
+    assert!(local_ai_origin(&too_long, "lmstudio")
+        .unwrap_err()
+        .contains("ungültig"));
+    let within_characters = "ä".repeat(2048);
+    assert!(local_ai_origin(&within_characters, "lmstudio")
+        .unwrap_err()
+        .contains("vollständige"));
 }
 
 #[test]

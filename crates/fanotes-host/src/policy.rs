@@ -22,21 +22,27 @@ pub fn local_ai_origin(raw_url: &str, provider: &str) -> Result<String, String> 
         "ollama" => "Ollama",
         _ => "OpenCode",
     };
-    if raw_url.len() > 2048 {
+    if crate::vault::utf16_len(raw_url) > 2048 {
         return Err(format!("Die {label}-Adresse ist ungültig."));
     }
-    let url = raw_url
-        .trim()
-        .parse::<UrlLite>()
+    let url = url::Url::parse(raw_url.trim())
         .map_err(|_| format!("Gib eine vollständige {label}-Adresse ein."))?;
-    if (url.protocol != "http" && url.protocol != "https")
-        || url.has_credentials
-        || url.has_query
-        || url.has_fragment
+    if (url.scheme() != "http" && url.scheme() != "https")
+        || !url.username().is_empty()
+        || url.password().is_some_and(|password| !password.is_empty())
+        || url.query().is_some_and(|query| !query.is_empty())
+        || url.fragment().is_some_and(|fragment| !fragment.is_empty())
     {
         return Err(format!("Die {label}-Adresse darf nur eine lokale HTTP(S)-Adresse ohne eingebettete Zugangsdaten enthalten."));
     }
-    let hostname = url.hostname.trim_matches(['[', ']']).to_lowercase();
+    let hostname = url
+        .host_str()
+        .unwrap_or("")
+        .trim_matches(['[', ']'])
+        .to_lowercase();
+    if hostname.is_empty() {
+        return Err(format!("Gib eine vollständige {label}-Adresse ein."));
+    }
     let private_ipv4 = parse_ipv4(&hostname).is_some_and(is_private_ipv4);
     let private_ipv6 = hostname == "::1"
         || hostname.starts_with("fc")
@@ -47,28 +53,19 @@ pub fn local_ai_origin(raw_url: &str, provider: &str) -> Result<String, String> 
             "{label} darf aus Datenschutzgründen nur auf localhost oder im privaten LAN liegen."
         ));
     }
-    if !url.path.trim_end_matches('/').is_empty() {
+    if !url.path().trim_end_matches('/').is_empty() {
         return Err(format!(
             "Die {label}-Adresse darf keinen zusätzlichen Pfad enthalten."
         ));
     }
-    Ok(format!("{}://{}", url.protocol, url.host_header()))
+    Ok(url.origin().ascii_serialization())
 }
 
 pub(crate) struct UrlLite {
     pub(crate) protocol: String,
     pub(crate) hostname: String,
-    host_with_port: String,
     pub(crate) path: String,
     pub(crate) has_credentials: bool,
-    has_query: bool,
-    has_fragment: bool,
-}
-
-impl UrlLite {
-    fn host_header(&self) -> String {
-        self.host_with_port.clone()
-    }
 }
 
 impl std::str::FromStr for UrlLite {
@@ -79,17 +76,14 @@ impl std::str::FromStr for UrlLite {
         if protocol.is_empty() || rest.is_empty() {
             return Err(());
         }
-        let (before_query, query) = rest
-            .split_once('?')
-            .map(|(a, b)| (a, Some(b)))
-            .unwrap_or((rest, None));
-        let (before_fragment, fragment) = before_query
+        let before_query = rest.split_once('?').map(|(head, _)| head).unwrap_or(rest);
+        let before_fragment = before_query
             .split_once('#')
-            .map(|(a, b)| (a, Some(b)))
-            .unwrap_or((before_query, None));
+            .map(|(head, _)| head)
+            .unwrap_or(before_query);
         let (authority, path) = before_fragment
             .split_once('/')
-            .map(|(a, b)| (a, format!("/{b}")))
+            .map(|(authority, rest)| (authority, format!("/{rest}")))
             .unwrap_or((before_fragment, String::new()));
         if authority.is_empty() {
             return Err(());
@@ -107,11 +101,8 @@ impl std::str::FromStr for UrlLite {
         Ok(Self {
             protocol: protocol.to_owned(),
             hostname: hostname.to_owned(),
-            host_with_port: host.to_owned(),
             path,
             has_credentials,
-            has_query: query.is_some(),
-            has_fragment: fragment.is_some(),
         })
     }
 }
