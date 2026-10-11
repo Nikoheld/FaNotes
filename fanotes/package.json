@@ -89,6 +89,7 @@
     "measure:startup:linux": "node scripts/measure-linux-startup.cjs",
     "measure:efficiency:linux": "node scripts/measure-linux-efficiency.cjs",
     "check:updater": "node scripts/check-updater.cjs",
+    "version:nightly": "node scripts/nightly-version.cjs",
     "release:policy": "node scripts/check-release-policy.mjs",
     "release:github": "python3 scripts/publish-github-releases.py",
     "check:windows": "node scripts/check-windows-release.cjs",

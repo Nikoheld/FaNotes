@@ -2,6 +2,7 @@
 
 ## Unveröffentlicht
 
+- **Nightly-Kanal.** Neben Stable und Beta kann der Update-Kanal auf Nightly stehen. Nightly ist jeder Commit auf main, der kein Stable- oder Beta-Release ist. Diese Stände können unfertig sein. Ein neuerer Stable-Stand wird automatisch bevorzugt.
 - **Suche springt zur Handschrift.** Ein Treffer in der unsichtbaren Transkription merkt sich die Höhe auf der Seite und scrollt dorthin.
 - **Zweite Spalte schreibt mit.** Im Stiftmodus ist die fokussierte Spalte ein eigener Editor mit eigenem Verlauf und eigener Speicherung.
 - **Abschnitte klappen auch den Text.** Der erste Handschrift-Abschnitt faltet die erste Überschrift, der zweite die zweite.

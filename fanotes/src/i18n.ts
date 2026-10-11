@@ -377,17 +377,17 @@ function translateDerived(source: string, catalog: EnglishCatalog): string | nul
   }
   const canvasWith = /^Zeichenfläche mit (.+)$/u.exec(source)
   if (canvasWith) return `Canvas with ${canvasWith[1]}`
-  const currentVersion = /^(FaNotes(?: Web)? \d+(?:\.\d+){2}(?:-beta\.\d+)?) ist aktuell$/u.exec(source)
+  const currentVersion = /^(FaNotes(?: Web)? \d+(?:\.\d+){2}(?:-beta\.\d+|-nightly\.\d{14}\.[a-f0-9]{7,40})?) ist aktuell$/u.exec(source)
   if (currentVersion) return `${currentVersion[1]} is up to date`
-  const availableVersion = /^(FaNotes(?: Web)? \d+(?:\.\d+){2}(?:-beta\.\d+)?) ist verfügbar(\.)?$/u.exec(source)
+  const availableVersion = /^(FaNotes(?: Web)? \d+(?:\.\d+){2}(?:-beta\.\d+|-nightly\.\d{14}\.[a-f0-9]{7,40})?) ist verfügbar(\.)?$/u.exec(source)
   if (availableVersion) return `${availableVersion[1]} is available${availableVersion[2] ?? ''}`
-  const checkedOnExit = /^(FaNotes \d+(?:\.\d+){2}(?:-beta\.\d+)?) ist geprüft und wird beim Beenden installiert\.$/u.exec(source)
+  const checkedOnExit = /^(FaNotes \d+(?:\.\d+){2}(?:-beta\.\d+|-nightly\.\d{14}\.[a-f0-9]{7,40})?) ist geprüft und wird beim Beenden installiert\.$/u.exec(source)
   if (checkedOnExit) return `${checkedOnExit[1]} is checked and will be installed on exit.`
-  const readyToInstall = /^(FaNotes \d+(?:\.\d+){2}(?:-beta\.\d+)?) ist installationsbereit$/u.exec(source)
+  const readyToInstall = /^(FaNotes \d+(?:\.\d+){2}(?:-beta\.\d+|-nightly\.\d{14}\.[a-f0-9]{7,40})?) ist installationsbereit$/u.exec(source)
   if (readyToInstall) return `${readyToInstall[1]} is ready to install`
   const downloadingUpdate = /^Update wird geladen · (\d+) %$/u.exec(source)
   if (downloadingUpdate) return `Loading update · ${downloadingUpdate[1]} %`
-  const installAndRestart = /^(FaNotes \d+(?:\.\d+){2}(?:-beta\.\d+)?) installieren und neu starten$/u.exec(source)
+  const installAndRestart = /^(FaNotes \d+(?:\.\d+){2}(?:-beta\.\d+|-nightly\.\d{14}\.[a-f0-9]{7,40})?) installieren und neu starten$/u.exec(source)
   if (installAndRestart) return `Install ${installAndRestart[1]} and restart`
   const learnedCorrection = /^Korrektur sofort gelernt: (.+)$/u.exec(source)
   if (learnedCorrection) return `Correction learned immediately: ${learnedCorrection[1]}`

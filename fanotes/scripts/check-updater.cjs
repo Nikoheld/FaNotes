@@ -12,6 +12,14 @@ const { applyDeltaPatch } = require('../electron/delta.cjs')
 const { createDeltaPatch } = require('./create-delta.cjs')
 const { EventEmitter } = require('node:events')
 const { compareVersions, createUpdateManager, diagnoseUpdateFailure, INSTALL_HELPER, isPrivateAddress, shouldReplaceManagedDesktopFile, stableStringify, verifyManifest, waitForChildSpawn } = require('../electron/updater.cjs')
+const {
+  EMPTY_NIGHTLY_CHANGELOG,
+  LINUX_PACKAGE_PATTERN,
+  WINDOWS_PACKAGE_PATTERN,
+  channelForPackagedVersion,
+  nightlyVersion,
+  releaseVisibleOnChannel,
+} = require('../electron/releaseVersion.cjs')
 
 async function sha256File(filePath) {
   const hash = crypto.createHash('sha256')
@@ -94,9 +102,36 @@ async function main() {
       resolvedAddress: '10.8.0.1',
     })
     assert.equal(hijack.kind, 'dns-hijack')
+    assert.equal(
+      fs.readFileSync(path.join(__dirname, '../electron/releaseVersion.cjs'), 'utf8'),
+      fs.readFileSync(path.join(__dirname, '../../fanotes-site/releaseVersion.cjs'), 'utf8'),
+      'Die Website muss dieselbe Versionsordnung wie die App ausliefern.',
+    )
     assert.ok(compareVersions('2026.7.1-beta.2', '2026.7.1-beta.1') > 0)
     assert.ok(compareVersions('2026.7.1', '2026.7.1-beta.99') > 0)
     assert.ok(compareVersions('2026.7.2-beta.1', '2026.7.1') > 0)
+    const nightlySample = '2026.10.2-nightly.20261011120000.abcdef0'
+    assert.ok(compareVersions(nightlySample, '2026.10.2') > 0)
+    assert.ok(compareVersions('2026.10.2', '2026.10.2-beta.9') > 0)
+    assert.ok(compareVersions('2026.10.3', nightlySample) > 0)
+    assert.ok(compareVersions('2026.10.2-nightly.20261011120001.aaaaaaa', '2026.10.2-nightly.20261011120000.fffffff') > 0)
+    assert.ok(compareVersions('2026.10.2-nightly.20261011120000.bbbbbbb', '2026.10.2-nightly.20261011120000.aaaaaaa') > 0)
+    assert.equal(releaseVisibleOnChannel(nightlySample, 'stable'), false)
+    assert.equal(releaseVisibleOnChannel(nightlySample, 'beta'), false)
+    assert.equal(releaseVisibleOnChannel(nightlySample, 'nightly'), true)
+    assert.equal(releaseVisibleOnChannel('2026.10.2', 'nightly'), true)
+    assert.equal(releaseVisibleOnChannel('2026.10.2-beta.1', 'nightly'), false)
+    assert.equal(releaseVisibleOnChannel('2026.10.2-beta.1', 'beta'), true)
+    assert.equal(releaseVisibleOnChannel('2026.10.2', 'stable'), true)
+    assert.equal(nightlyVersion('2026.10.2-beta.3', '2026-10-11T12:00:00.000Z', 'ABCDEF0'), nightlySample)
+    assert.equal(channelForPackagedVersion(nightlySample), 'nightly')
+    assert.equal(channelForPackagedVersion('2026.10.2-beta.1'), 'beta')
+    assert.equal(channelForPackagedVersion('2026.10.2'), 'stable')
+    assert.equal(channelForPackagedVersion('nope'), 'stable')
+    assert.equal(LINUX_PACKAGE_PATTERN.test(`FaNotes-${nightlySample}-x86_64.AppImage`), true)
+    assert.equal(LINUX_PACKAGE_PATTERN.test('FaNotes-2026.10.2-nightly.1.abcdef0-x86_64.AppImage'), false)
+    assert.equal(WINDOWS_PACKAGE_PATTERN.test(`FaNotes-Setup-${nightlySample}-x64.exe`), true)
+    assert.equal(EMPTY_NIGHTLY_CHANGELOG.includes('Nightly'), true)
     const sourcePath = path.join(temporary, 'FaNotes-2.16.0-x86_64.AppImage')
     const targetPath = path.join(temporary, 'FaNotes-2.17.0-x86_64.AppImage')
     const patchName = `FaNotes-Delta-linux-x64-${baseVersion}-to-${targetVersion}.fndelta`
@@ -203,6 +238,47 @@ async function main() {
     }
     assert.equal(verifyManifest(signedBetaManifest, baseVersion, publicPem, 'linux', keyId, 'beta').channel, 'beta')
     assert.throws(() => verifyManifest(signedBetaManifest, baseVersion, publicPem, 'linux', keyId, 'stable'), /FaNotes-Ausgabe/u)
+    assert.throws(() => verifyManifest(signedManifest, baseVersion, publicPem, 'linux', keyId, 'nightly'), /FaNotes-Ausgabe/u)
+
+    const nightlyLatest = `${targetVersion}-nightly.20261011120000.abcdef0`
+    const nightlyPayload = structuredClone(payload)
+    nightlyPayload.channel = 'nightly'
+    nightlyPayload.latestVersion = nightlyLatest
+    nightlyPayload.packages.appimage.fileName = `FaNotes-${nightlyLatest}-x86_64.AppImage`
+    nightlyPayload.packages.appimage.url = 'https://fanotes.fasrv.ch/download/nightly/appimage'
+    nightlyPayload.packages.portable.fileName = `FaNotes-${nightlyLatest}-x86_64.tar.gz`
+    nightlyPayload.packages.portable.url = 'https://fanotes.fasrv.ch/download/nightly/portable'
+    nightlyPayload.delta = null
+    const signedNightlyManifest = {
+      ...nightlyPayload,
+      signature: {
+        algorithm: 'ed25519',
+        keyId,
+        value: crypto.sign(null, Buffer.from(stableStringify(nightlyPayload)), privateKey).toString('base64'),
+      },
+    }
+    assert.equal(verifyManifest(signedNightlyManifest, baseVersion, publicPem, 'linux', keyId, 'nightly').channel, 'nightly')
+    assert.equal(verifyManifest(signedNightlyManifest, baseVersion, publicPem, 'linux', keyId, 'nightly').latestVersion, nightlyLatest)
+    assert.throws(() => verifyManifest(signedNightlyManifest, baseVersion, publicPem, 'linux', keyId, 'stable'), /FaNotes-Ausgabe/u)
+    assert.throws(() => verifyManifest(signedNightlyManifest, baseVersion, publicPem, 'linux', keyId, 'beta'), /FaNotes-Ausgabe/u)
+
+    const nightlyStablePayload = structuredClone(payload)
+    nightlyStablePayload.channel = 'nightly'
+    nightlyStablePayload.packages.appimage.url = 'https://fanotes.fasrv.ch/download/nightly/appimage'
+    nightlyStablePayload.packages.portable.url = 'https://fanotes.fasrv.ch/download/nightly/portable'
+    nightlyStablePayload.delta.url = `https://fanotes.fasrv.ch/download/delta/linux-x64/nightly/${baseVersion}`
+    const signedNightlyStableManifest = {
+      ...nightlyStablePayload,
+      signature: {
+        algorithm: 'ed25519',
+        keyId,
+        value: crypto.sign(null, Buffer.from(stableStringify(nightlyStablePayload)), privateKey).toString('base64'),
+      },
+    }
+    const nightlyStableVerified = verifyManifest(signedNightlyStableManifest, baseVersion, publicPem, 'linux', keyId, 'nightly')
+    assert.equal(nightlyStableVerified.channel, 'nightly')
+    assert.equal(nightlyStableVerified.latestVersion, targetVersion)
+    assert.equal(nightlyStableVerified.packages.appimage.url, 'https://fanotes.fasrv.ch/download/nightly/appimage')
 
     const patchBytes = await fsp.readFile(patchPath)
     const manifestUrl = `https://fanotes.fasrv.ch/api/v1/updates/linux-x64?current=${baseVersion}&channel=stable`

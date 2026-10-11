@@ -8,6 +8,7 @@ const { spawn } = require('node:child_process')
 const { Readable, Transform } = require('node:stream')
 const { pipeline } = require('node:stream/promises')
 const { DELTA_FORMAT, applyDeltaPatch } = require('./delta.cjs')
+const { VERSION_PATTERN, compareSemanticVersions, deltaPathname, packagePathname } = require('./releaseVersion.cjs')
 
 const UPDATE_ORIGIN = 'https://fanotes.fasrv.ch'
 const PLATFORM_RELEASES = Object.freeze({
@@ -17,11 +18,11 @@ const PLATFORM_RELEASES = Object.freeze({
     userAgentPlatform: 'Linux',
     installationKind: 'managed-appimage',
     primaryPackage: 'appimage',
-    deltaPath: (version, channel = 'stable') => channel === 'beta' ? `/download/delta/linux-x64/beta/${version}` : `/download/delta/linux-x64/${version}`,
+    deltaPath: (version, channel = 'stable') => deltaPathname('linux', version, channel),
     accept: 'application/vnd.appimage, application/octet-stream;q=0.9',
     packages: Object.freeze({
-      appimage: Object.freeze({ label: 'AppImage', fileName: (version) => `FaNotes-${version}-x86_64.AppImage`, pathname: (channel) => channel === 'beta' ? '/download/beta/appimage' : '/download/appimage' }),
-      portable: Object.freeze({ label: 'Portable', fileName: (version) => `FaNotes-${version}-x86_64.tar.gz`, pathname: (channel) => channel === 'beta' ? '/download/beta/portable' : '/download/portable' }),
+      appimage: Object.freeze({ label: 'AppImage', fileName: (version) => `FaNotes-${version}-x86_64.AppImage`, pathname: (channel) => packagePathname(channel, 'appimage') }),
+      portable: Object.freeze({ label: 'Portable', fileName: (version) => `FaNotes-${version}-x86_64.tar.gz`, pathname: (channel) => packagePathname(channel, 'portable') }),
     }),
   }),
   win32: Object.freeze({
@@ -30,18 +31,17 @@ const PLATFORM_RELEASES = Object.freeze({
     userAgentPlatform: 'Windows',
     installationKind: 'windows-installer',
     primaryPackage: 'installer',
-    deltaPath: (version, channel = 'stable') => channel === 'beta' ? `/download/delta/windows-x64/beta/${version}` : `/download/delta/windows-x64/${version}`,
+    deltaPath: (version, channel = 'stable') => deltaPathname('windows', version, channel),
     accept: 'application/vnd.microsoft.portable-executable, application/octet-stream;q=0.9',
     packages: Object.freeze({
-      installer: Object.freeze({ label: 'Windows-Installer', fileName: (version) => `FaNotes-Setup-${version}-x64.exe`, pathname: (channel) => channel === 'beta' ? '/download/beta/windows-installer' : '/download/windows-installer' }),
-      portable: Object.freeze({ label: 'Windows Portable', fileName: (version) => `FaNotes-Portable-${version}-x64.exe`, pathname: (channel) => channel === 'beta' ? '/download/beta/windows-portable' : '/download/windows-portable' }),
+      installer: Object.freeze({ label: 'Windows-Installer', fileName: (version) => `FaNotes-Setup-${version}-x64.exe`, pathname: (channel) => packagePathname(channel, 'windows-installer') }),
+      portable: Object.freeze({ label: 'Windows Portable', fileName: (version) => `FaNotes-Portable-${version}-x64.exe`, pathname: (channel) => packagePathname(channel, 'windows-portable') }),
     }),
   }),
 })
 const UPDATE_API = PLATFORM_RELEASES.linux.api
 const UPDATE_EVENT = 'fanotes:update-state'
 const EXPECTED_KEY_ID = '33006e5c06939bc9'
-const VERSION_PATTERN = /^\d+\.\d+\.\d+(?:-beta\.\d+)?$/u
 const SHA256_PATTERN = /^[a-f0-9]{64}$/u
 const MAX_MANIFEST_BYTES = 512 * 1024
 const MIN_PACKAGE_BYTES = 10 * 1024 * 1024
@@ -226,26 +226,9 @@ const stableStringify = (value) => {
   return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableStringify(value[key])}`).join(',')}}`
 }
 
-const parseVersion = (value) => {
-  const match = /^(\d+)\.(\d+)\.(\d+)(?:-beta\.(\d+))?$/u.exec(value)
-  if (!match) throw new Error('Ungültige Versionsnummer.')
-  return {
-    numbers: match.slice(1, 4).map(Number),
-    beta: match[4] === undefined ? null : Number(match[4]),
-  }
-}
-
 const compareVersions = (left, right) => {
   if (!VERSION_PATTERN.test(left) || !VERSION_PATTERN.test(right)) throw new Error('Ungültige Versionsnummer.')
-  const a = parseVersion(left)
-  const b = parseVersion(right)
-  for (let index = 0; index < 3; index += 1) {
-    if (a.numbers[index] !== b.numbers[index]) return a.numbers[index] - b.numbers[index]
-  }
-  if (a.beta === b.beta) return 0
-  if (a.beta === null) return 1
-  if (b.beta === null) return -1
-  return a.beta - b.beta
+  return compareSemanticVersions(left, right)
 }
 
 const isPlainObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -356,7 +339,7 @@ const verifyManifest = (candidate, currentVersion, publicKeyPem, targetPlatform 
   if (!verified) throw new Error('Die kryptografische Signatur des Updates ist ungültig.')
 
   if (
-    payload.schemaVersion !== 1 || payload.product !== 'FaNotes' || payload.channel !== expectedChannel || !['stable', 'beta'].includes(payload.channel) ||
+    payload.schemaVersion !== 1 || payload.product !== 'FaNotes' || payload.channel !== expectedChannel || !['stable', 'beta', 'nightly'].includes(payload.channel) ||
     payload.platform !== platformConfig.manifestPlatform || payload.arch !== 'x64'
   ) throw new Error('Das Update-Manifest ist nicht für diese FaNotes-Ausgabe bestimmt.')
   if (payload.currentVersion !== currentVersion) throw new Error('Das Update-Manifest gehört zu einer anderen installierten Version.')
@@ -663,7 +646,7 @@ function createUpdateManager({
   let intervalTimer = null
   let initialTimer = null
   let activeDownloadController = null
-  const highestSeenVersions = { stable: null, beta: null }
+  const highestSeenVersions = { stable: null, beta: null, nightly: null }
   /** Survives restarts so a finished background download can install on next launch. */
   let pendingInstall = null
   let activeChannel = 'stable'
@@ -686,13 +669,17 @@ function createUpdateManager({
     installationKind: fullInstallationKind,
   }
 
-  const settings = () => ({
-    autoCheckUpdates: getSettings()?.autoCheckUpdates !== false,
-    autoDownloadUpdates: getSettings()?.autoDownloadUpdates !== false,
-    // One switch: install a fully verified package when quitting or on the next launch.
-    installUpdatesOnQuit: getSettings()?.installUpdatesOnQuit !== false,
-    updateChannel: getSettings()?.updateChannel === 'beta' ? 'beta' : 'stable',
-  })
+  const settings = () => {
+    const stored = getSettings()
+    const channel = stored?.updateChannel
+    return {
+      autoCheckUpdates: stored?.autoCheckUpdates !== false,
+      autoDownloadUpdates: stored?.autoDownloadUpdates !== false,
+      // One switch: install a fully verified package when quitting or on the next launch.
+      installUpdatesOnQuit: stored?.installUpdatesOnQuit !== false,
+      updateChannel: channel === 'beta' || channel === 'nightly' ? channel : 'stable',
+    }
+  }
 
   const snapshot = () => ({ ...state, releaseNotes: [...state.releaseNotes], ...settings() })
 
@@ -750,7 +737,7 @@ function createUpdateManager({
       const raw = await fsp.readFile(persistentStatePath, 'utf8')
       if (Buffer.byteLength(raw, 'utf8') > 64 * 1024) return
       const parsed = JSON.parse(raw)
-      for (const channel of ['stable', 'beta']) {
+      for (const channel of ['stable', 'beta', 'nightly']) {
         const candidate = parsed?.highestSeenVersions?.[channel]
         if (VERSION_PATTERN.test(candidate || '')) highestSeenVersions[channel] = candidate
       }
@@ -763,7 +750,7 @@ function createUpdateManager({
         pending &&
         typeof pending === 'object' &&
         VERSION_PATTERN.test(pending.version || '') &&
-        (pending.channel === 'stable' || pending.channel === 'beta') &&
+        (pending.channel === 'stable' || pending.channel === 'beta' || pending.channel === 'nightly') &&
         typeof pending.fileName === 'string' &&
         pending.fileName.length > 0 &&
         pending.fileName.length < 240 &&

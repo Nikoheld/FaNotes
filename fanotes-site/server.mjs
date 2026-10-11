@@ -13,6 +13,20 @@ import { handleSyncRequest } from './sync-api.mjs'
 import { handleAiProxyRequest } from './ai-proxy.mjs'
 import { languageForRequest, localizeExactText, localizeResponse } from './i18n.mjs'
 import { createAnalyticsService } from './analytics.mjs'
+import {
+  DELTA_ROUTE_PATTERN,
+  DOWNLOAD_ROUTE_PATTERN,
+  EMPTY_NIGHTLY_CHANGELOG,
+  LINUX_PACKAGE_PATTERN,
+  UPDATE_CHANNELS,
+  VERSION_PATTERN,
+  WINDOWS_PACKAGE_PATTERN,
+  compareSemanticVersions,
+  deltaPathname,
+  packagePathname,
+  releaseVisibleOnChannel,
+  versionChannel,
+} from './releaseVersion.mjs'
 
 const ROOT = fileURLToPath(new URL('.', import.meta.url))
 const PUBLIC_DIR = resolve(process.env.FANOTES_PUBLIC_DIR || join(ROOT, 'public'))
@@ -27,7 +41,6 @@ const ANALYTICS_DIR = resolve(process.env.FANOTES_ANALYTICS_DIR || '/var/lib/fan
 const MAX_STATIC_BYTES = 12 * 1024 * 1024
 const MAX_NEURAL_TEXT_MODEL_BYTES = 32 * 1024 * 1024
 const MAX_TROCR_MODEL_BYTES = 100 * 1024 * 1024
-const VERSION_PATTERN = /^\d+\.\d+\.\d+(?:-beta\.\d+)?$/u
 const SHA256_PATTERN = /^[a-f0-9]{64}$/u
 const DELTA_FORMAT = 'fanotes-delta-v1'
 const MAX_DELTA_TO_TARGET_RATIO = 0.8
@@ -63,33 +76,7 @@ const json = (response, status, value, extraHeaders = {}, localize = true) => {
   response.end(body)
 }
 
-const parseVersion = (value) => {
-  const match = /^(\d+)\.(\d+)\.(\d+)(?:-beta\.(\d+))?$/u.exec(value)
-  if (!match) throw new Error('Ungültige Versionsnummer.')
-  return {
-    numbers: match.slice(1, 4).map(Number),
-    beta: match[4] === undefined ? null : Number(match[4]),
-  }
-}
-
-const compareSemanticVersions = (left, right) => {
-  const a = parseVersion(left)
-  const b = parseVersion(right)
-  for (let index = 0; index < 3; index += 1) {
-    const difference = a.numbers[index] - b.numbers[index]
-    if (difference) return difference
-  }
-  if (a.beta === b.beta) return 0
-  if (a.beta === null) return 1
-  if (b.beta === null) return -1
-  return a.beta - b.beta
-}
-
-const isBetaVersion = (version) => parseVersion(version).beta !== null
-
-const compareVersions = (left, right) => {
-  return compareSemanticVersions(right, left)
-}
+const compareVersions = (left, right) => compareSemanticVersions(right, left)
 
 const stableStringify = (value) => {
   if (value === null || typeof value !== 'object') return JSON.stringify(value)
@@ -200,7 +187,7 @@ const RELEASE_PLATFORMS = Object.freeze({
   linux: Object.freeze({
     manifestPlatform: 'linux',
     label: 'Arch Linux & Linux x86_64',
-    match: /^FaNotes-(\d+\.\d+\.\d+(?:-beta\.\d+)?)-x86_64\.(AppImage|tar\.gz)$/u,
+    match: LINUX_PACKAGE_PATTERN,
     fileKind: (format) => format === 'AppImage' ? 'appimage' : 'portable',
     files: Object.freeze({
       appimage: Object.freeze({ label: 'AppImage', url: '/download/appimage' }),
@@ -211,7 +198,7 @@ const RELEASE_PLATFORMS = Object.freeze({
   windows: Object.freeze({
     manifestPlatform: 'windows',
     label: 'Windows 10/11 x64',
-    match: /^FaNotes-(Setup|Portable)-(\d+\.\d+\.\d+(?:-beta\.\d+)?)-x64\.exe$/u,
+    match: WINDOWS_PACKAGE_PATTERN,
     fileKind: (format) => format === 'Setup' ? 'installer' : 'portable',
     files: Object.freeze({
       installer: Object.freeze({ label: 'Windows-Installer', url: '/download/windows-installer' }),
@@ -237,7 +224,7 @@ const discoverPlatformRelease = async (platform, entries, checksums, channel = '
   const requiredKinds = Object.keys(config.files)
   const version = [...candidates.keys()].sort(compareVersions)
     .find((candidate) => (
-      (channel === 'beta' || !isBetaVersion(candidate)) &&
+      releaseVisibleOnChannel(candidate, channel) &&
       requiredKinds.every((kind) => candidates.get(candidate)?.[kind])
     ))
   if (!version) return null
@@ -257,6 +244,8 @@ const discoverPlatformRelease = async (platform, entries, checksums, channel = '
     }]
   }))
   const packages = Object.fromEntries(described)
+  const changes = await changelogFor(version)
+  if (changes.length === 0 && versionChannel(version) === 'nightly') changes.push(EMPTY_NIGHTLY_CHANGELOG)
   return {
     product: 'FaNotes',
     version,
@@ -266,12 +255,12 @@ const discoverPlatformRelease = async (platform, entries, checksums, channel = '
     packages,
     checksumsUrl: '/download/checksums',
     installGuideUrl: config.installGuideUrl,
-    changes: await changelogFor(version),
+    changes,
   }
 }
 
 const discoverReleases = async (channel = 'stable') => {
-  if (!['stable', 'beta'].includes(channel)) throw new Error('Unbekannter Release-Kanal.')
+  if (!UPDATE_CHANNELS.includes(channel)) throw new Error('Unbekannter Release-Kanal.')
   const [entries, checksums] = await Promise.all([
     fs.readdir(RELEASE_DIR, { withFileTypes: true }),
     checksumMap(),
@@ -354,9 +343,7 @@ const deltaForRelease = async (release, currentVersion, channel = 'stable') => {
   return {
     format: DELTA_FORMAT,
     fileName,
-    url: channel === 'beta'
-      ? `${PUBLIC_ORIGIN}/download/delta/${platform}-x64/beta/${currentVersion}`
-      : `${PUBLIC_ORIGIN}/download/delta/${platform}-x64/${currentVersion}`,
+    url: `${PUBLIC_ORIGIN}${deltaPathname(platform, currentVersion, channel)}`,
     sizeBytes: stats.size,
     sha256: patchSha256,
     source: {
@@ -393,7 +380,7 @@ const signedUpdateManifest = async (release, currentVersion, language, channel =
     releaseNotes: release.changes.map((note) => localizeExactText(note, language)),
     packages: Object.fromEntries(Object.entries(release.packages).map(([kind, candidate]) => [kind, {
       fileName: candidate.fileName,
-      url: `${PUBLIC_ORIGIN}${channel === 'beta' ? `/download/beta/${kind === 'appimage' ? 'appimage' : kind === 'installer' ? 'windows-installer' : release.manifestPlatform === 'windows' ? 'windows-portable' : 'portable'}` : candidate.url}`,
+      url: `${PUBLIC_ORIGIN}${channel === 'stable' ? candidate.url : packagePathname(channel, kind === 'appimage' ? 'appimage' : kind === 'installer' ? 'windows-installer' : release.manifestPlatform === 'windows' ? 'windows-portable' : 'portable')}`,
       sizeBytes: candidate.sizeBytes,
       sha256: candidate.sha256,
     }])),
@@ -605,7 +592,7 @@ const server = createServer(async (request, response) => {
         json(response, 400, { error: 'Der Parameter „current“ muss eine semantische Version sein.' })
         return
       }
-      if (!['stable', 'beta'].includes(channel)) {
+      if (!UPDATE_CHANNELS.includes(channel)) {
         json(response, 400, { error: 'Dieser Update-Kanal wird nicht unterstützt.' })
         return
       }
@@ -615,14 +602,14 @@ const server = createServer(async (request, response) => {
       json(response, 200, await signedUpdateManifest(releases[updatePlatform], currentVersion, response.fanotesLanguage, channel), {}, false)
       return
     }
-    const deltaMatch = /^\/download\/delta\/(linux|windows)-x64\/(?:(beta)\/)?(\d+\.\d+\.\d+(?:-beta\.\d+)?)$/u.exec(url.pathname)
+    const deltaMatch = DELTA_ROUTE_PATTERN.exec(url.pathname)
     if (deltaMatch) {
-      await deltaDownload(request, response, deltaMatch[1], deltaMatch[3], deltaMatch[2] ? 'beta' : 'stable')
+      await deltaDownload(request, response, deltaMatch[1], deltaMatch[3], deltaMatch[2] || 'stable')
       return
     }
-    const downloadMatch = /^\/download\/(?:(beta)\/)?(appimage|portable|windows-installer|windows-portable|checksums|install-guide|windows-guide)$/u.exec(url.pathname)
+    const downloadMatch = DOWNLOAD_ROUTE_PATTERN.exec(url.pathname)
     if (downloadMatch) {
-      await releaseDownload(request, response, downloadMatch[2], downloadMatch[1] ? 'beta' : 'stable')
+      await releaseDownload(request, response, downloadMatch[2], downloadMatch[1] || 'stable')
       return
     }
     if (await serveStatic(request, response, url.pathname)) return

@@ -48,11 +48,12 @@ Die Daten liegen unter `/var/lib/fanotes-sync` (`FANOTES_SYNC_DIR`), gehören `w
 
 ## Update-API
 
-Die Apps fragen Stable oder Beta plattformspezifisch über folgende APIs ab:
+Die Apps fragen Stable, Beta oder Nightly plattformspezifisch über folgende APIs ab:
 
 ```text
 GET /api/v1/updates/linux-x64?current=2026.7.1&channel=stable
 GET /api/v1/updates/windows-x64?current=2026.7.2-beta.1&channel=beta
+GET /api/v1/updates/linux-x64?current=2026.10.2&channel=nightly
 ```
 
-Stable berücksichtigt ausschließlich vollständige Releases; Beta berücksichtigt zusätzlich neuere `-beta.N`-Vorabversionen. Kanalgebundene Paket- und Delta-Pfade verhindern, dass ein Manifest versehentlich Dateien des anderen Kanals lädt. Jedes Manifest enthält die aktuelle Version, Release Notes, Downloadgrößen und SHA-256-Prüfsummen. Es wird nach Sprache und Kanal serverseitig mit Ed25519 signiert; FaNotes enthält ausschließlich den zugehörigen öffentlichen Schlüssel und verwirft unsignierte, veränderte oder für eine andere Plattform beziehungsweise einen anderen Kanal ausgestellte Antworten.
+Stable berücksichtigt ausschließlich vollständige Releases. Beta berücksichtigt zusätzlich neuere `-beta.N`-Vorabversionen. Nightly folgt jedem Commit auf main, der kein Stable- oder Beta-Release ist (`X.Y.Z-nightly.<UTC-Zeitstempel>.<Commit>`), und bevorzugt einen neueren Stable-Stand. Kanalgebundene Paket- und Delta-Pfade verhindern, dass ein Manifest versehentlich Dateien eines anderen Kanals lädt. Nightly liegt unter `/download/nightly/…` und `/download/delta/<plattform>-x64/nightly/<version>`. Jedes Manifest enthält die aktuelle Version, Release Notes, Downloadgrößen und SHA-256-Prüfsummen. Es wird nach Sprache und Kanal serverseitig mit Ed25519 signiert; FaNotes enthält ausschließlich den zugehörigen öffentlichen Schlüssel und verwirft unsignierte, veränderte oder für eine andere Plattform beziehungsweise einen anderen Kanal ausgestellte Antworten.

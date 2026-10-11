@@ -5,8 +5,7 @@ const fsp = require('node:fs/promises')
 const path = require('node:path')
 const asar = require('@electron/asar')
 const { inspectDeltaPatch } = require('../electron/delta.cjs')
-
-const VERSION_PATTERN = /^\d+\.\d+\.\d+(?:-beta\.\d+)?$/u
+const { VERSION_PATTERN } = require('../electron/releaseVersion.cjs')
 
 const argumentsFrom = (values) => {
   const result = {}

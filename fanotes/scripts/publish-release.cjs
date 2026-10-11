@@ -7,6 +7,7 @@ const path = require('node:path')
 const { promisify } = require('node:util')
 
 const execFileAsync = promisify(execFile)
+const { VERSION_PATTERN } = require('../electron/releaseVersion.cjs')
 
 const argumentsFrom = (values) => {
   const result = {}
@@ -42,7 +43,7 @@ void (async () => {
   const stage = path.resolve(args.stage || '')
   const target = path.resolve(args.target || '')
   const version = args.version
-  if (!/^\d+\.\d+\.\d+(?:-beta\.\d+)?$/u.test(version) || !stage || !target || stage === target) {
+  if (!VERSION_PATTERN.test(version) || !stage || !target || stage === target) {
     throw new Error('Stage, Ziel und semantische Version werden benötigt.')
   }
   if (!process.env.GITHUB_TOKEN) {

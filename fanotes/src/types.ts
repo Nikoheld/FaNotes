@@ -136,7 +136,7 @@ export type AppSettings = {
   autoCheckUpdates: boolean
   autoDownloadUpdates: boolean
   installUpdatesOnQuit: boolean
-  updateChannel: 'stable' | 'beta'
+  updateChannel: 'stable' | 'beta' | 'nightly'
   /** 0 keeps Chromium/V8's normal renderer heap budget. */
   memoryBudgetMb: number
   /** 0 selects a conservative hardware-adaptive TrOCR thread count. */
@@ -227,7 +227,7 @@ export type UpdateState = {
   autoCheckUpdates: boolean
   autoDownloadUpdates: boolean
   installUpdatesOnQuit: boolean
-  updateChannel: 'stable' | 'beta'
+  updateChannel: 'stable' | 'beta' | 'nightly'
 }
 
 export type EnhancedMathRecognitionState = {

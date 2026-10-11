@@ -7,8 +7,7 @@ const path = require('node:path')
 const zlib = require('node:zlib')
 const { buildBlockMap } = require('app-builder-lib/out/targets/blockmap/blockmap.js')
 const { DELTA_FORMAT, DELTA_MAGIC, sha256File } = require('../electron/delta.cjs')
-
-const VERSION_PATTERN = /^\d+\.\d+\.\d+(?:-beta\.\d+)?$/u
+const { VERSION_PATTERN } = require('../electron/releaseVersion.cjs')
 
 const readBlockMap = async (filePath) => {
   const parsed = JSON.parse(zlib.gunzipSync(await fsp.readFile(filePath)).toString('utf8'))

@@ -57,6 +57,26 @@ import type { AppSettings, EnhancedMathRecognitionState, OneNoteImportResult, Qw
 import type { SyncEngine, SyncPublicState } from '../lib/sync/engine'
 import { SyncSettingsSection } from './SyncSettingsSection'
 
+const UPDATE_CHANNEL_COPY = {
+  stable: {
+    small: 'Signierter Stable-Kanal',
+    description: 'Stable bündelt gründlich geprüfte Änderungen in zwei bis höchstens vier Releases pro Monat.',
+    auto: 'Prüft kurz nach dem Start und danach alle sechs Stunden den signierten Stable-Kanal.',
+  },
+  beta: {
+    small: 'Signierter Beta-Kanal',
+    description: 'Beta erhält neue Funktionen früher. Vorabversionen können noch Fehler enthalten; der nächste Stable-Stand wird automatisch bevorzugt, sobald er neuer ist.',
+    auto: 'Prüft kurz nach dem Start und danach alle sechs Stunden den signierten Beta-Kanal.',
+  },
+  nightly: {
+    small: 'Signierter Nightly-Kanal',
+    description: 'Nightly folgt jedem Commit auf main, auch ohne Stable- oder Beta-Release. Diese Stände können unfertig sein. Ein neuerer Stable-Stand wird automatisch bevorzugt.',
+    auto: 'Prüft kurz nach dem Start und danach alle sechs Stunden den signierten Nightly-Kanal.',
+  },
+} as const
+
+const updateChannelCopy = (channel: AppSettings['updateChannel']) => UPDATE_CHANNEL_COPY[channel] ?? UPDATE_CHANNEL_COPY.stable
+
 export type SettingsSection = 'appearance' | 'editor' | 'drawing' | 'files' | 'sync' | 'addons' | 'updates' | 'accessibility' | 'experimental' | 'advanced'
 
 export type SettingsModalProps = {
@@ -150,7 +170,7 @@ const SETTINGS_SEARCH_ITEMS: SettingsSearchItem[] = [
   { label: 'Automatisches Speichern', detail: 'Dateien & Vault', section: 'files', target: 'settings-files', keywords: 'autosave verzögerung dateiverhalten' },
   { label: 'Standardordner & Tagesnotizen', detail: 'Dateien & Vault', section: 'files', target: 'settings-files', keywords: 'daily notes datum format folder' },
   { label: 'Automatische Updates', detail: 'Updates', section: 'updates', target: 'settings-update-automation', keywords: 'download installieren starten prüfen version delta' },
-  { label: 'Stable- oder Beta-Kanal', detail: 'Updates', section: 'updates', target: 'settings-update-channel', keywords: 'stable beta prerelease vorabversion kanal channel release' },
+  { label: 'Stable-, Beta- oder Nightly-Kanal', detail: 'Updates', section: 'updates', target: 'settings-update-channel', keywords: 'stable beta nightly prerelease vorabversion kanal channel release commit' },
   { label: 'Update-Sicherheit', detail: 'Updates', section: 'updates', target: 'settings-update-security', keywords: 'signatur sha ed25519 integrität differenziell' },
   { label: 'Bewegung reduzieren', detail: 'Bedienung', section: 'accessibility', target: 'settings-comfort', keywords: 'animation transition barrierefrei fokus' },
   { label: 'Seitenleisten-Breite', detail: 'Bedienung', section: 'accessibility', target: 'settings-comfort', keywords: 'sidebar informationsleiste panel breite layout' },
@@ -948,7 +968,7 @@ export function SettingsModal({
                         : <RefreshCw size={22} />}
                   </span>
                   <div>
-                    <small>{isWeb ? 'Automatisch aktualisierte Web-App' : settings.updateChannel === 'beta' ? 'Signierter Beta-Kanal' : 'Signierter Stable-Kanal'}</small>
+                    <small>{isWeb ? 'Automatisch aktualisierte Web-App' : updateChannelCopy(settings.updateChannel).small}</small>
                     <strong>{updateStatusText(updateState, isWeb)}</strong>
                     <p>{isWeb ? 'Web-Version' : 'Installiert'}: {updateState.currentVersion}{updateState.latestVersion && updateState.latestVersion !== updateState.currentVersion ? ` · Neu: ${updateState.latestVersion}` : ''}</p>
                   </div>
@@ -1026,13 +1046,14 @@ export function SettingsModal({
                     <SettingRow title="Automatische Web-Updates" description="Neue FaNotes-Versionen werden im Hintergrund vorgeladen und beim nächsten Öffnen aktiv."><span>Immer aktiv</span></SettingRow>
                     <SettingRow title="Offline verfügbar" description="Die installierbare Web-App behält Oberfläche, Schriften, Mathematik und Erkennungsengine sicher im lokalen Cache."><span>Service Worker</span></SettingRow>
                   </> : <>
-                    <SettingRow title="Update-Kanal" description={settings.updateChannel === 'beta' ? 'Beta erhält neue Funktionen früher. Vorabversionen können noch Fehler enthalten; der nächste Stable-Stand wird automatisch bevorzugt, sobald er neuer ist.' : 'Stable bündelt gründlich geprüfte Änderungen in zwei bis höchstens vier Releases pro Monat.'}>
+                    <SettingRow title="Update-Kanal" description={updateChannelCopy(settings.updateChannel).description}>
                       <select id="settings-update-channel" value={settings.updateChannel} disabled={updateState.status === 'downloading' || updateState.status === 'installing'} onChange={(event) => update('updateChannel', event.target.value as AppSettings['updateChannel'])}>
                         <option value="stable">Stable · empfohlen</option>
                         <option value="beta">Beta · neue Funktionen früher</option>
+                        <option value="nightly">Nightly · jeder Commit</option>
                       </select>
                     </SettingRow>
-                    <SettingRow title="Automatisch nach Updates suchen" description={settings.updateChannel === 'beta' ? 'Prüft kurz nach dem Start und danach alle sechs Stunden den signierten Beta-Kanal.' : 'Prüft kurz nach dem Start und danach alle sechs Stunden den signierten Stable-Kanal.'}><Toggle label="Automatisch nach Updates suchen" checked={settings.autoCheckUpdates} onChange={(value) => update('autoCheckUpdates', value)} /></SettingRow>
+                    <SettingRow title="Automatisch nach Updates suchen" description={updateChannelCopy(settings.updateChannel).auto}><Toggle label="Automatisch nach Updates suchen" checked={settings.autoCheckUpdates} onChange={(value) => update('autoCheckUpdates', value)} /></SettingRow>
                     <SettingRow title="Updates automatisch herunterladen" description="Lädt geprüfte Updates sofort im Hintergrund (bevorzugt nur geänderte Blöcke) und setzt abgebrochene Übertragungen fort – ohne Popup und ohne Unterbrechung."><Toggle label="Updates automatisch herunterladen" checked={settings.autoDownloadUpdates} onChange={(value) => update('autoDownloadUpdates', value)} /></SettingRow>
                     <SettingRow title="Automatisch installieren" description="Installiert ein fertig geprüftes Update nahtlos: beim Beenden nach dem Speichern aller Notizen, oder still beim nächsten Start, wenn der Download schon abgeschlossen war."><Toggle label="Update automatisch installieren" checked={settings.installUpdatesOnQuit} onChange={(value) => update('installUpdatesOnQuit', value)} /></SettingRow>
                   </>}

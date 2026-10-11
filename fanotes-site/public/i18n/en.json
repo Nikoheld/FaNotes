@@ -2743,5 +2743,12 @@
   "Zwei Notizen nebeneinander oder untereinander": "Two notes side by side or stacked",
   "zweidimensionales lokales Formelmodell": "local two-dimensional formula model",
   "Zweite Akzentfarbe": "Secondary accent color",
-  "Zweite Notiz": "Second note"
+  "Zweite Notiz": "Second note",
+  "Nightly · jeder Commit": "Nightly · every commit",
+  "Nightly folgt jedem Commit auf main, auch ohne Stable- oder Beta-Release. Diese Stände können unfertig sein. Ein neuerer Stable-Stand wird automatisch bevorzugt.": "Nightly follows every commit on main, including commits that are not a Stable or Beta release. These builds can be unfinished. A newer Stable build is preferred automatically.",
+  "Signierter Nightly-Kanal": "Signed Nightly channel",
+  "Prüft kurz nach dem Start und danach alle sechs Stunden den signierten Nightly-Kanal.": "Checks the signed Nightly channel shortly after startup and then every six hours.",
+  "Stable-, Beta- oder Nightly-Kanal": "Stable, Beta, or Nightly channel",
+  "Dieser Nightly-Stand ist ein Commit von main und kein Stable- oder Beta-Release.": "This Nightly build is a commit from main and not a Stable or Beta release.",
+  "Nightly-Kanal.": "Nightly channel."
 }

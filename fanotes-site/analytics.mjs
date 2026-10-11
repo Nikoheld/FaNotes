@@ -1,12 +1,12 @@
 import { createHash, randomBytes } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import { join, resolve } from 'node:path'
+import { VERSION_PATTERN } from './releaseVersion.mjs'
 
 const SCHEMA_VERSION = 1
 const MAX_STORE_BYTES = 8 * 1024 * 1024
 const MAX_EVENT_BYTES = 2048
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/u
-const VERSION_PATTERN = /^\d+\.\d+\.\d+(?:-beta\.\d+)?$/u
 const COUNTRY_PATTERN = /^[A-Z]{2}$/u
 const METRICS = Object.freeze(['websiteViews', 'webAppOpens', 'desktopAppOpens', 'downloads'])
 const PUBLIC_EVENTS = Object.freeze({

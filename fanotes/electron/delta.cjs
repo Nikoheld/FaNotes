@@ -12,7 +12,7 @@ const MAX_DELTA_HEADER_BYTES = 8 * 1024 * 1024
 const MAX_DELTA_OPERATIONS = 100_000
 const MAX_TARGET_BYTES = 1024 * 1024 * 1024
 const HASH_PATTERN = /^[a-f0-9]{64}$/u
-const VERSION_PATTERN = /^\d+\.\d+\.\d+(?:-beta\.\d+)?$/u
+const { VERSION_PATTERN } = require('./releaseVersion.cjs')
 
 const isPlainObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value)
 const isSafeOffset = (value) => Number.isSafeInteger(value) && value >= 0

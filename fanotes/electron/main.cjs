@@ -26,6 +26,7 @@ const { publishNewFile } = require('./exclusive-publish.cjs')
 const { safeEntryName } = require('./entry-names.cjs')
 const { defaultPenOnlyForPlatform } = require('./ink-defaults.cjs')
 const { DEFAULT_TABLET_BUTTON_ACTIONS, sanitizeTabletButtonMap } = require('./tablet-buttons.cjs')
+const { channelForPackagedVersion } = require('./releaseVersion.cjs')
 const { localizeDialogOptions, localizeText, resolveLanguage } = require('./i18n.cjs')
 const {
   onboardingRequiredFromConfig,
@@ -284,7 +285,7 @@ const DEFAULT_SETTINGS = Object.freeze({
   autoCheckUpdates: true,
   autoDownloadUpdates: true,
   installUpdatesOnQuit: true,
-  updateChannel: /-beta\.\d+$/u.test(app.getVersion()) ? 'beta' : 'stable',
+  updateChannel: channelForPackagedVersion(app.getVersion()),
   memoryBudgetMb: 0,
   ocrThreadLimit: 0,
   desktopOcrModel: 'extended',
@@ -378,7 +379,7 @@ const SETTINGS_SCHEMA = Object.freeze({
   autoCheckUpdates: { type: 'boolean' },
   autoDownloadUpdates: { type: 'boolean' },
   installUpdatesOnQuit: { type: 'boolean' },
-  updateChannel: { type: 'enum', values: ['stable', 'beta'] },
+  updateChannel: { type: 'enum', values: ['stable', 'beta', 'nightly'] },
   memoryBudgetMb: { type: 'enum', values: [0, 1536, 2048, 3072, 4096, 6144, 8192] },
   ocrThreadLimit: { type: 'enum', values: [0, 1, 2, 3, 4] },
   desktopOcrModel: { type: 'enum', values: ['compact', 'extended'] },
