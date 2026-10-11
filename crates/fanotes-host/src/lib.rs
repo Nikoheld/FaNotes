@@ -747,7 +747,7 @@ impl Host {
         }
         let bytes =
             fs::read(&path).map_err(|_| "Die Datei konnte nicht gelesen werden.".to_owned())?;
-        let text = String::from_utf8(bytes).map_err(|_| "Die Datei ist kein Text.".to_owned())?;
+        let text = String::from_utf8_lossy(&bytes);
         Ok(Value::String(fanotes_famd::strip_famd_payload(&text)))
     }
 
@@ -762,10 +762,8 @@ impl Host {
         }
         let path = vault::resolve_note_file(&root, &normalized)?;
         if notes::records_history(&normalized) {
-            if let Ok(previous) = fs::read(&path) {
-                if let Ok(text) = String::from_utf8(previous) {
-                    let _ = notes::record_history(&root, &normalized, &text);
-                }
+            if let Some(text) = notes::read_lossy_string(&path) {
+                let _ = notes::record_history(&root, &normalized, &text);
             }
         }
         let paper = self
@@ -1105,7 +1103,7 @@ impl Host {
             let raw = if lower.ends_with(".pdf") {
                 String::new()
             } else {
-                fs::read_to_string(&path).unwrap_or_default()
+                notes::read_lossy_string(&path).unwrap_or_default()
             };
             let parsed = fanotes_famd::parse_famd(&raw);
             let mut content = if parsed.markdown.is_empty() {
@@ -1121,7 +1119,7 @@ impl Host {
             if !lower.ends_with(".famd") {
                 let famd = fanotes_famd::companion_note_path(&relative, ".famd");
                 if let Ok(companion_path) = vault::resolve_existing_entry(root, &famd) {
-                    if let Ok(companion) = fs::read_to_string(companion_path) {
+                    if let Some(companion) = notes::read_lossy_string(&companion_path) {
                         let parsed_companion = fanotes_famd::parse_famd(&companion);
                         if lower.ends_with(".pdf") && !parsed_companion.markdown.is_empty() {
                             content = parsed_companion.markdown;
