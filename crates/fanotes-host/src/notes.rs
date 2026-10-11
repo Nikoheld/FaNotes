@@ -50,14 +50,26 @@ pub fn write_note_file(
     };
     if !is_famd {
         let path = vault::resolve_note_file(root, relative)?;
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)
-                .map_err(|_| "Der Ordner konnte nicht angelegt werden.".to_owned())?;
-        }
+        require_parent_directory(&path)?;
         atomic_write(&path, markdown.as_bytes(), 0o600)?;
     }
     attach_sidecar(root, relative, content, settings_paper)?;
     Ok(now_iso())
+}
+
+fn require_parent_directory(path: &Path) -> Result<(), String> {
+    let Some(parent) = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    else {
+        return Err("Der Zielordner wurde nicht gefunden.".to_owned());
+    };
+    let meta = fs::symlink_metadata(parent)
+        .map_err(|_| "Der Zielordner wurde nicht gefunden.".to_owned())?;
+    if meta.file_type().is_symlink() || !meta.is_dir() {
+        return Err("Der Zielordner wurde nicht gefunden.".to_owned());
+    }
+    Ok(())
 }
 
 pub fn attach_sidecar(

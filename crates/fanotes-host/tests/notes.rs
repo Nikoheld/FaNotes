@@ -10,7 +10,7 @@ fn host() -> (Host, std::path::PathBuf) {
     let dir = std::env::temp_dir().join(format!("fanotes-notes-{}-{id}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     let vault = dir.join("vault");
-    std::fs::create_dir_all(&vault).unwrap();
+    std::fs::create_dir_all(vault.join("Mathe")).unwrap();
     let mut host = Host::open(dir.join("app"));
     host.trash_dir = Some(dir.join("trash"));
     host.set_vault(vault.clone()).unwrap();
@@ -453,4 +453,21 @@ fn a_decomposed_umlaut_is_the_same_note_name() {
         .collect();
     assert!(names.iter().any(|name| name == nfd_note));
     assert!(names.iter().all(|name| name != nfd_ink));
+}
+
+#[test]
+fn a_missing_folder_is_not_created_for_a_new_note() {
+    let (mut host, vault) = host();
+    let created = host
+        .dispatch("fanotes:create-note", &[json!("Fehlt"), json!("Seite")])
+        .unwrap_err();
+    assert!(created.contains("Zielordner"));
+    let written = host
+        .dispatch(
+            "fanotes:write-file",
+            &[json!("Fehlt/Seite.md"), json!("Hallo\n")],
+        )
+        .unwrap_err();
+    assert!(written.contains("Zielordner"));
+    assert!(!vault.join("Fehlt").exists());
 }

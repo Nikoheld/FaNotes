@@ -825,9 +825,13 @@ impl Host {
             root.clone()
         } else {
             vault::reject_symlinks(&root, &parent_relative)?;
-            let path = vault::resolve_inside(&root, &parent_relative)?;
-            fs::create_dir_all(&path)
-                .map_err(|_| "Der Ordner konnte nicht angelegt werden.".to_owned())?;
+            let path = vault::resolve_existing_entry(&root, &parent_relative).map_err(|error| {
+                if error == "Der Eintrag wurde nicht gefunden." {
+                    "Der Zielordner wurde nicht gefunden.".to_owned()
+                } else {
+                    error
+                }
+            })?;
             let meta = fs::symlink_metadata(&path)
                 .map_err(|_| "Der Zielordner wurde nicht gefunden.".to_owned())?;
             if meta.file_type().is_symlink() || !meta.is_dir() {
