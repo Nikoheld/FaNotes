@@ -33,13 +33,16 @@ pub(crate) fn read_lossy_string(path: &Path) -> Option<String> {
 }
 
 pub fn records_history(relative: &str) -> bool {
-    let lower = relative.to_lowercase();
-    lower.ends_with(".md") || lower.ends_with(".markdown") || lower.ends_with(".famd")
+    is_note_text(relative)
 }
 
 pub fn is_note_text(relative: &str) -> bool {
-    let lower = relative.to_lowercase();
-    lower.ends_with(".md") || lower.ends_with(".markdown") || lower.ends_with(".famd")
+    matches!(
+        crate::vault::posix_extname(relative)
+            .to_ascii_lowercase()
+            .as_str(),
+        ".md" | ".markdown" | ".famd"
+    )
 }
 
 pub fn write_note_file(
@@ -48,7 +51,7 @@ pub fn write_note_file(
     content: &str,
     settings_paper: Option<&str>,
 ) -> Result<String, String> {
-    let is_famd = relative.to_lowercase().ends_with(".famd");
+    let is_famd = crate::vault::posix_extname(relative).eq_ignore_ascii_case(".famd");
     let body = strip_famd_payload(content);
     let markdown = if body.ends_with('\n') {
         body
@@ -450,12 +453,7 @@ fn store_note(path: &Path, body: &str, payload: &FamdPayload) -> Result<(), Stri
 
 fn note_path(relative: &str) -> Result<String, String> {
     let path = vault::normalize_relative_path(relative, false, false)?;
-    let lower = path.to_lowercase();
-    if lower.ends_with(".md")
-        || lower.ends_with(".markdown")
-        || lower.ends_with(".famd")
-        || lower.ends_with(".pdf")
-    {
+    if is_note_extension(&path) {
         Ok(path)
     } else {
         Err("Es dürfen nur Markdown-Dateien, PDF-Notizen und FaNotes-Handschriftdateien (.famd) bearbeitet werden.".to_owned())
@@ -464,12 +462,18 @@ fn note_path(relative: &str) -> Result<String, String> {
 
 fn markdown_path(relative: &str) -> Result<String, String> {
     let path = vault::normalize_relative_path(relative, false, false)?;
-    let lower = path.to_lowercase();
-    if lower.ends_with(".md") || lower.ends_with(".markdown") || lower.ends_with(".famd") {
+    if is_note_text(&path) {
         Ok(path)
     } else {
         Err("Es dürfen nur Markdown-Dateien und FaNotes-Handschriftdateien (.famd) bearbeitet werden.".to_owned())
     }
+}
+
+fn is_note_extension(path: &str) -> bool {
+    matches!(
+        vault::posix_extname(path).to_ascii_lowercase().as_str(),
+        ".md" | ".markdown" | ".famd" | ".pdf"
+    )
 }
 
 fn parse_subject_books(value: &Value) -> Vec<Value> {

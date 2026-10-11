@@ -180,6 +180,20 @@ pub(crate) fn has_c0_or_del(value: &str) -> bool {
     value.chars().any(is_c0_or_del)
 }
 
+/// `path.posix.extname`.
+///
+/// `.md` and `..` have no extension. `.hidden.md` is `.md`.
+pub(crate) fn posix_extname(path: &str) -> &str {
+    let base = path.rsplit('/').next().unwrap_or(path);
+    if base == "." || base == ".." {
+        return "";
+    }
+    match base.rfind('.') {
+        Some(index) if index > 0 => &base[index..],
+        _ => "",
+    }
+}
+
 /// JavaScript `String.prototype.trim`.
 ///
 /// U+FEFF is removed. U+0085 is kept. Rust `str::trim` does the reverse.
@@ -329,7 +343,7 @@ fn rename_legacy_internal(root: &Path, directory: &Path) -> Result<bool, String>
 
 #[cfg(test)]
 mod tests {
-    use super::{normalize_relative_path, sync_segments};
+    use super::{normalize_relative_path, posix_extname, sync_segments};
 
     #[test]
     fn path_limits_count_characters() {
@@ -363,5 +377,16 @@ mod tests {
         assert!(normalize_relative_path("C:/", false, false).is_err());
         assert!(normalize_relative_path("C:Notiz.md", false, false).is_ok());
         assert!(normalize_relative_path("Mathe/C:/Notiz.md", false, false).is_ok());
+    }
+
+    #[test]
+    fn a_dotfile_with_one_dot_has_no_extension() {
+        assert_eq!(posix_extname(".md"), "");
+        assert_eq!(posix_extname("foo/.md"), "");
+        assert_eq!(posix_extname(".."), "");
+        assert_eq!(posix_extname(".hidden.md"), ".md");
+        assert_eq!(posix_extname("Note.MD"), ".MD");
+        assert_eq!(posix_extname("a."), ".");
+        assert_eq!(posix_extname("..."), ".");
     }
 }

@@ -198,11 +198,12 @@ pub fn read_famd_ink(host: &Host, relative: &str) -> Result<Value, String> {
 }
 
 fn is_note_path(relative: &str) -> bool {
-    let lower = relative.to_lowercase();
-    lower.ends_with(".md")
-        || lower.ends_with(".markdown")
-        || lower.ends_with(".famd")
-        || lower.ends_with(".pdf")
+    matches!(
+        crate::vault::posix_extname(relative)
+            .to_ascii_lowercase()
+            .as_str(),
+        ".md" | ".markdown" | ".famd" | ".pdf"
+    )
 }
 
 pub(crate) fn note_ink_marker_id(markdown: &str) -> Option<String> {

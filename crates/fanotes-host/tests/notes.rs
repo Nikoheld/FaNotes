@@ -741,3 +741,32 @@ fn a_note_link_trims_a_byte_order_mark_and_keeps_a_next_line() {
         .unwrap();
     assert_eq!(stored, links);
 }
+
+#[test]
+fn a_dotfile_with_one_dot_is_not_a_note() {
+    let (mut host, vault) = host();
+    let error = host
+        .dispatch(
+            "fanotes:write-file",
+            &[json!("Mathe/.md"), json!("Hallo\n")],
+        )
+        .unwrap_err();
+    assert!(error.contains("Markdown"), "{error}");
+    assert!(!vault.join("Mathe/.md").exists());
+
+    host.dispatch(
+        "fanotes:write-file",
+        &[json!("Mathe/.hidden.md"), json!("Geheim\n")],
+    )
+    .unwrap();
+    assert_eq!(
+        host.dispatch("fanotes:read-file", &[json!("Mathe/.hidden.md")])
+            .unwrap(),
+        "Geheim"
+    );
+
+    let ink = host
+        .dispatch("fanotes:read-famd-ink", &[json!("Mathe/.pdf")])
+        .unwrap_err();
+    assert!(ink.contains("PDF-Notizen"), "{ink}");
+}

@@ -2535,7 +2535,7 @@ fn onboarding_open(channel: &str) -> bool {
 }
 
 fn note_byte_limit(relative: &str) -> u64 {
-    if relative.to_ascii_lowercase().ends_with(".famd") {
+    if vault::posix_extname(relative).eq_ignore_ascii_case(".famd") {
         MAX_FAMD_BYTES
     } else {
         MAX_TEXT_BYTES
