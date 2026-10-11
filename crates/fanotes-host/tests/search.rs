@@ -175,18 +175,27 @@ fn search_uses_the_companion_transcript_and_both_drawing_ids() {
     ] {
         std::fs::write(
             assets.join(format!("{id}.json")),
-            format!(
-                r#"{{"schemaVersion":1,"id":"{id}","title":"{id}","strokes":[],"updatedAt":"2026-10-11T00:00:00.000Z","searchTranscript":"{transcript}"}}"#
-            ),
+            serde_json::to_string(&json!({
+                "schemaVersion": 1,
+                "id": id,
+                "title": id,
+                "strokes": [],
+                "updatedAt": "2026-10-11T00:00:00.000Z",
+                "searchTranscript": transcript
+            }))
+            .unwrap(),
         )
         .unwrap();
     }
 
-    let prose = drawing_hit(&host, "Prosewort");
+    let prose = drawing_hit(&mut host, "Prosewort");
     assert!(prose.get("notePath").is_none());
-    assert_eq!(drawing_hit(&host, "Markerwort")["notePath"], "Bio/Blatt.md");
     assert_eq!(
-        drawing_hit(&host, "Librarywort")["notePath"],
+        drawing_hit(&mut host, "Markerwort")["notePath"],
+        "Bio/Blatt.md"
+    );
+    assert_eq!(
+        drawing_hit(&mut host, "Librarywort")["notePath"],
         "Bio/Blatt.md"
     );
 }
@@ -221,7 +230,7 @@ fn ink_with_id(id: &str, transcript: &str) -> String {
     fanotes_famd::serialize_famd("Siehe fanotes-ink:prose", &payload)
 }
 
-fn drawing_hit(host: &Host, query: &str) -> serde_json::Value {
+fn drawing_hit(host: &mut Host, query: &str) -> serde_json::Value {
     host.dispatch("fanotes:search", &[json!(query)])
         .unwrap()
         .as_array()
@@ -232,6 +241,7 @@ fn drawing_hit(host: &Host, query: &str) -> serde_json::Value {
         .unwrap()
 }
 
+#[test]
 fn drawing_search_uses_the_library_title_and_skips_invalid_files() {
     let mut host = host();
     let assets = host.vault.as_ref().unwrap().join(".fanotes/assets");
