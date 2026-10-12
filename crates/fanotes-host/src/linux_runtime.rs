@@ -291,16 +291,16 @@ fn scan_force_zero_scaling(
         let Some((key, value)) = line.split_once('=') else {
             continue;
         };
-        let key = crate::vault::js_trim(key);
+        let key = js_iu_fold(crate::vault::js_trim(key));
         let value = crate::vault::js_trim(value);
-        if key.eq_ignore_ascii_case("source") {
+        if key == "source" {
             for target in source_targets(value, env, from_dir) {
                 if let Some(nested) = scan_force_zero_scaling(&target, env, visited) {
                     last = Some(nested);
                 }
             }
-        } else if key.eq_ignore_ascii_case("force_zero_scaling") {
-            if let Some(enabled) = bool_word(value) {
+        } else if key == "force_zero_scaling" {
+            if let Some(enabled) = scaling_flag(value) {
                 last = Some(enabled);
             }
         }
@@ -613,23 +613,37 @@ fn class_contains(class: &[char], character: char) -> bool {
     false
 }
 
-fn bool_word(value: &str) -> Option<bool> {
-    let word = value
-        .split(|ch: char| !ch.is_ascii_alphanumeric() && ch != '_')
-        .next()
-        .unwrap_or("");
-    match word {
-        "true" | "TRUE" | "True" => Some(true),
-        "false" | "FALSE" | "False" => Some(false),
-        _ => {
-            let lower = word.to_ascii_lowercase();
-            match lower.as_str() {
-                "true" => Some(true),
-                "false" => Some(false),
-                _ => None,
-            }
+/// `/^[a-z]/iu`: the long s and the Kelvin sign fold to ASCII letters.
+fn js_iu_fold(value: &str) -> String {
+    let mut folded = String::with_capacity(value.len());
+    for character in value.chars() {
+        match character {
+            '\u{017F}' => folded.push('s'),
+            '\u{212A}' => folded.push('k'),
+            'A'..='Z' => folded.push(character.to_ascii_lowercase()),
+            other => folded.push(other),
         }
     }
+    folded
+}
+
+fn js_iu_word_char(character: char) -> bool {
+    character.is_ascii_alphanumeric()
+        || character == '_'
+        || matches!(character, '\u{017F}' | '\u{212A}')
+}
+
+/// `(true|false)\b` under the `iu` flags, then `toLocaleLowerCase('en-US') === 'true'`.
+fn scaling_flag(value: &str) -> Option<bool> {
+    let word: String = value
+        .chars()
+        .take_while(|character| js_iu_word_char(*character))
+        .collect();
+    let folded = js_iu_fold(&word);
+    if folded != "true" && folded != "false" {
+        return None;
+    }
+    Some(crate::vault::locale_lower_en_us(&word) == "true")
 }
 
 fn strip_comment(line: &str) -> &str {
@@ -907,6 +921,47 @@ mod tests {
             || panic!("hyprctl"),
         );
         assert_eq!(valued["hyprlandZeroScaling"], true);
+
+        let folded = dir.join("folded.conf");
+        fs::write(
+            &folded,
+            "\u{017F}ource = ./looks.conf\nforce_zero_\u{017F}caling = false\n",
+        )
+        .unwrap();
+        fs::write(dir.join("looks.conf"), "force_zero_scaling = true\n").unwrap();
+        let sourced = report(
+            "linux",
+            &env(&[
+                ("FANOTES_HYPRLAND_CONFIG", folded.to_str().unwrap()),
+                ("HOME", ""),
+            ]),
+            || panic!("hyprctl"),
+        );
+        assert_eq!(sourced["hyprlandZeroScaling"], false);
+
+        let keyword = dir.join("keyword.conf");
+        fs::write(&keyword, "force_zero_\u{017F}caling = true\n").unwrap();
+        let enabled = report(
+            "linux",
+            &env(&[
+                ("FANOTES_HYPRLAND_CONFIG", keyword.to_str().unwrap()),
+                ("HOME", ""),
+            ]),
+            || panic!("hyprctl"),
+        );
+        assert_eq!(enabled["hyprlandZeroScaling"], true);
+
+        let stuck = dir.join("stuck.conf");
+        fs::write(&stuck, "force_zero_scaling = true\u{017F}\n").unwrap();
+        let ignored = report(
+            "linux",
+            &env(&[
+                ("FANOTES_HYPRLAND_CONFIG", stuck.to_str().unwrap()),
+                ("HOME", ""),
+            ]),
+            || panic!("hyprctl"),
+        );
+        assert_eq!(ignored["hyprlandZeroScaling"], false);
 
         let next = dir.join("next.conf");
         fs::write(&next, "\u{0085}force_zero_scaling = true\n").unwrap();
