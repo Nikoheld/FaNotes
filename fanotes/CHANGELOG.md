@@ -1,5 +1,9 @@
 # Änderungsverlauf
 
+## 2026.10.4
+
+- **PDF-Darstellung.** Standardschriften, CMaps und die Bilddecoder für JPEG2000 und JBIG2 werden mitgeliefert. Symbole, asiatische Zeichen und CMYK-Farben erscheinen vollständig.
+
 ## 2026.10.3
 
 - **Handgesten auf dem ganzen Schreibtisch.** Zwei Finger schieben, ziehen zum Zoomen und drehen das Blatt — auch über der Stiftebene, auf dem Fachbuch (inklusive ausgepopptem Fenster) und in GlyphenWerk. Ein Wisch vom Rand springt in der Notiz zurück oder vor, im Kalender und bei Hausaufgaben durch den Zeitraum, bei Karteikarten durch die Bewertung. Eine zweite Fingerspitze bricht den angefangenen Strich ab, statt ihn als Tinte zu lassen. Liegt der Stift auf, schluckt die Fläche die Handfläche, ohne die Seite zu verschieben.
