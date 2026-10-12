@@ -1331,3 +1331,24 @@ fn a_dotfile_with_one_dot_is_not_a_note() {
         .unwrap_err();
     assert!(ink.contains("PDF-Notizen"), "{ink}");
 }
+
+#[test]
+fn a_famd_save_does_not_create_a_missing_folder() {
+    let (mut host, vault) = host();
+    let error = host
+        .dispatch(
+            "fanotes:write-file",
+            &[json!("Neu/Seite.famd"), json!("Hallo\n")],
+        )
+        .unwrap_err();
+    assert_eq!(error, "Der Zielordner wurde nicht gefunden.");
+    assert!(!vault.join("Neu").exists());
+
+    host.dispatch(
+        "fanotes:write-file",
+        &[json!("Mathe/Seite.famd"), json!("Hallo\n")],
+    )
+    .unwrap();
+    assert!(vault.join("Mathe/Seite.famd").is_file());
+    assert!(!vault.join("Neu").exists());
+}
