@@ -611,8 +611,12 @@ fn vault_root(host: &Host) -> Result<&Path, String> {
 fn stat_regular(path: &Path, max: u64) -> Result<(), String> {
     let meta = fs::symlink_metadata(path)
         .map_err(|_| "Das Arbeitsblatt wurde nicht gefunden.".to_owned())?;
-    if meta.file_type().is_symlink() || !meta.is_file() || meta.len() > max {
-        return Err("Die Arbeitsblattquelle ist ungültig.".to_owned());
+    // Desktop `statRegularFileNoFollow`: a non-file fails before the size check.
+    if meta.file_type().is_symlink() || !meta.is_file() {
+        return Err("Die Datei ist keine reguläre Datei.".to_owned());
+    }
+    if meta.len() > max {
+        return Err("Die Datei ist zu groß.".to_owned());
     }
     Ok(())
 }
