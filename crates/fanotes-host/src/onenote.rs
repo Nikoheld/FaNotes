@@ -1204,15 +1204,21 @@ fn signal_name(signal: i32) -> String {
 }
 
 fn unsafe_archive_path(normalized: &str) -> bool {
-    let bytes = normalized.as_bytes();
+    let mut chars = normalized.chars();
+    // `/^[a-z]:\//iu` also matches the long s and the Kelvin sign.
+    let drive = chars.next().is_some_and(js_ascii_letter)
+        && chars.next() == Some(':')
+        && chars.next() == Some('/');
     normalized.starts_with('/')
+        || drive
         || normalized
             .split('/')
             .any(|segment| segment.is_empty() || segment == "..")
-        || (bytes.len() >= 3
-            && bytes[0].is_ascii_alphabetic()
-            && bytes[1] == b':'
-            && bytes[2] == b'/')
+}
+
+/// A character `[a-z]` matches under the JavaScript `iu` flags.
+fn js_ascii_letter(character: char) -> bool {
+    character.is_ascii_alphabetic() || matches!(character, '\u{017F}' | '\u{212A}')
 }
 
 fn walk_files(root: &Path, max_bytes: u64) -> Result<Vec<PathBuf>, String> {
@@ -2005,6 +2011,9 @@ mod tests {
                 .is_ok()
         );
         assert!(validate_listing("Path = C:/secret.txt\nSize = 1\n").is_err());
+        assert!(validate_listing("Path = \u{212A}:/secret.txt\nSize = 1\n").is_err());
+        assert!(validate_listing("Path = \u{017F}:/secret.txt\nSize = 1\n").is_err());
+        assert!(validate_listing("Path = note/\u{017F}:/secret.txt\nSize = 1\n").is_ok());
         assert!(validate_listing("Path = note.one\nSize = 1\n").is_ok());
 
         let root = std::env::temp_dir().join(format!(
