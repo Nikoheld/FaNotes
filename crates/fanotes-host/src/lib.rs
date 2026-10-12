@@ -677,7 +677,9 @@ impl Host {
         self.try_attach_configured_vault();
         if self.vault.is_none() {
             if let Some(path) = self.configured_vault.clone() {
-                return Ok(self.bootstrap_payload(&path));
+                // Desktop `path.resolve` drops `..` and a trailing slash before
+                // the shell shows the vault or looks up its tree cache.
+                return Ok(self.bootstrap_payload(&node_resolve(&path)));
             }
             self.ensure_default_vault()?;
         }
@@ -2983,7 +2985,8 @@ fn strip_trailing_separators(path: PathBuf) -> PathBuf {
 }
 
 fn vault_path_digest(path: &Path) -> String {
-    let absolute = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
+    // Sync ids and the tree cache use `path.resolve`, not a symlink lookup.
+    let absolute = node_resolve(path);
     let digest = Sha256::digest(absolute.to_string_lossy().as_bytes());
     digest.iter().map(|byte| format!("{byte:02x}")).collect()
 }
