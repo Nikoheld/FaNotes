@@ -310,17 +310,14 @@ fn search_skips_companions_links_and_notes_buried_too_deep() {
         std::fs::remove_dir_all(&internal).unwrap();
     }
     std::os::unix::fs::symlink(&outside, &internal).unwrap();
-    let leaked = host
-        .dispatch("fanotes:search", &[json!("Geheimwort")])
-        .unwrap();
-    assert!(leaked.as_array().unwrap().is_empty());
     assert_eq!(
-        std::fs::read(outside.join("assets/leak.json"))
-            .unwrap()
-            .len()
-            > 0,
-        true
+        host.dispatch("fanotes:search", &[json!("Geheimwort")])
+            .unwrap_err(),
+        "Der interne FaNotes-Ordner ist unsicher."
     );
+    assert!(outside.join("assets/leak.json").is_file());
+    std::fs::remove_file(&internal).unwrap();
+    std::fs::create_dir_all(&internal).unwrap();
 
     let mut deep = vault.join("tief");
     for _ in 0..81 {
@@ -613,6 +610,7 @@ fn search_uses_the_desktop_asset_folder_checks() {
     let mut blocked = host();
     let vault = blocked.vault.clone().unwrap();
     std::fs::write(vault.join("Bio/Blatt.md"), "Licht\n").unwrap();
+    std::fs::remove_dir_all(vault.join(".fanotes")).unwrap();
     std::fs::write(vault.join(".fanotes"), b"not a folder").unwrap();
     assert_eq!(
         blocked
