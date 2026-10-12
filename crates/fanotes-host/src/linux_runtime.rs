@@ -5,7 +5,7 @@
 //! Hyprland session is running.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::time::Duration;
 
 use serde_json::{json, Value};
@@ -346,13 +346,53 @@ fn expand_path(raw: &str, env: &BTreeMap<String, String>, from_dir: &Path) -> Op
     if value.is_empty() {
         return None;
     }
-    let path = PathBuf::from(&value);
+    let absolute_input = Path::new(&value).is_absolute();
+    let path = if absolute_input {
+        PathBuf::from(&value)
+    } else {
+        from_dir.join(&value)
+    };
     let path = if path.is_absolute() {
         path
     } else {
-        from_dir.join(path)
+        std::path::absolute(&path).unwrap_or(path)
     };
-    Some(std::path::absolute(path).unwrap_or(PathBuf::from(value)))
+    // `path.normalize` and `path.resolve` drop `..` without opening the
+    // missing directory. The filesystem would otherwise refuse the path.
+    Some(lexical_normalize(
+        &path,
+        absolute_input && value.ends_with('/'),
+    ))
+}
+
+fn lexical_normalize(path: &Path, keep_trailing_slash: bool) -> PathBuf {
+    let mut out = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::Prefix(prefix) => out.push(prefix.as_os_str()),
+            Component::RootDir => out.push("/"),
+            Component::CurDir => {}
+            Component::ParentDir => {
+                let can_pop = matches!(out.components().next_back(), Some(Component::Normal(_)));
+                if can_pop {
+                    out.pop();
+                } else if !out.has_root() {
+                    out.push("..");
+                }
+            }
+            Component::Normal(part) => out.push(part),
+        }
+    }
+    if out.as_os_str().is_empty() {
+        out.push(".");
+    }
+    if keep_trailing_slash && out != Path::new("/") {
+        let text = out.to_string_lossy();
+        if !text.ends_with('/') {
+            return PathBuf::from(format!("{text}/"));
+        }
+    }
+    out
 }
 
 fn expand_env_vars(value: &str, env: &BTreeMap<String, String>, home: &str, xdg: &str) -> String {
@@ -1031,6 +1071,48 @@ mod tests {
         );
         assert_eq!(
             scaling("source = ./pack/[a-c].conf\n")["hyprlandZeroScaling"],
+            true
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_hyprland_source_drops_parent_segments_before_opening() {
+        let dir = std::env::temp_dir().join(format!(
+            "fanotes-hypr-dotdot-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(dir.join("pack")).unwrap();
+        fs::write(dir.join("looks.conf"), "force_zero_scaling = true\n").unwrap();
+        fs::write(dir.join("pack/a.conf"), "force_zero_scaling = true\n").unwrap();
+        let scaling = |body: &str, home: &str| {
+            let config = dir.join("hyprland.conf");
+            fs::write(&config, body).unwrap();
+            report(
+                "linux",
+                &env(&[
+                    ("FANOTES_HYPRLAND_CONFIG", config.to_str().unwrap()),
+                    ("HOME", home),
+                ]),
+                || panic!("hyprctl"),
+            )
+        };
+        assert_eq!(
+            scaling("source = ./missing/../looks.conf\n", "")["hyprlandZeroScaling"],
+            true
+        );
+        assert_eq!(
+            scaling("source = ./missing/../pack/*.conf\n", "")["hyprlandZeroScaling"],
+            true
+        );
+        assert_eq!(
+            scaling("source = ~/gone/../looks.conf\n", dir.to_str().unwrap())
+                ["hyprlandZeroScaling"],
             true
         );
         let _ = fs::remove_dir_all(&dir);
