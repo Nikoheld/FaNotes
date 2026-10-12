@@ -171,9 +171,8 @@ fn import_pdf_file(
     };
     let stem = safe_stem(file_stem(name), fallback)?;
     let desired = format!("{stem}.pdf");
-    let candidate = unique_pdf_name(&parent_path, &desired, kind.no_unique_name())?;
+    let candidate = place_new_pdf(&parent_path, &desired, &bytes, kind.no_unique_name())?;
     let absolute = parent_path.join(&candidate);
-    write_new(&absolute, &bytes, kind.no_unique_name())?;
     let relative = if parent_relative.is_empty() {
         candidate.clone()
     } else {
@@ -240,7 +239,15 @@ fn pdf_payload_is_empty(payload: &Value) -> bool {
     }
 }
 
-fn unique_pdf_name(directory: &Path, desired: &str, exhausted: &str) -> Result<String, String> {
+/// Pick a free PDF name and create it. A name that appears between the
+/// directory listing and the create, the way the desktop `EEXIST` loop does,
+/// is skipped and the next number is tried.
+fn place_new_pdf(
+    directory: &Path,
+    desired: &str,
+    bytes: &[u8],
+    exhausted: &str,
+) -> Result<String, String> {
     let mut occupied = std::collections::HashSet::new();
     if let Ok(entries) = fs::read_dir(directory) {
         for entry in entries.flatten() {
@@ -271,19 +278,15 @@ fn unique_pdf_name(directory: &Path, desired: &str, exhausted: &str) -> Result<S
         {
             continue;
         }
-        return Ok(candidate);
-    }
-    Err(exhausted.to_owned())
-}
-
-fn write_new(path: &Path, bytes: &[u8], exhausted: &str) -> Result<(), String> {
-    match crate::notes::publish_new_file(path, bytes, 0o600) {
-        Ok(()) => Ok(()),
-        Err(crate::notes::NewFileError::Exists) => Err(exhausted.to_owned()),
-        Err(crate::notes::NewFileError::Io) => {
-            Err("Die PDF-Datei konnte nicht gespeichert werden.".to_owned())
+        match crate::notes::publish_new_file(&directory.join(&candidate), bytes, 0o600) {
+            Ok(()) => return Ok(candidate),
+            Err(crate::notes::NewFileError::Exists) => continue,
+            Err(crate::notes::NewFileError::Io) => {
+                return Err("Die PDF-Datei konnte nicht gespeichert werden.".to_owned());
+            }
         }
     }
+    Err(exhausted.to_owned())
 }
 
 fn pick_file(host: &Host, title: &str, extensions: &[&str]) -> Result<Option<PathBuf>, String> {

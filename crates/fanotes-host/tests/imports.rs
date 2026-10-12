@@ -21,6 +21,41 @@ fn b64(bytes: &[u8]) -> String {
 }
 
 #[test]
+fn a_taken_pdf_name_that_the_listing_misses_uses_the_next_number() {
+    let (mut host, vault) = host();
+    let folder = vault.join("Mathe");
+    std::fs::write(folder.join("Skript.pdf"), b"%PDF-1.4\n").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o311)).unwrap();
+    }
+    let imported = host
+        .dispatch(
+            "fanotes:import-pdf-note",
+            &[
+                json!("Mathe"),
+                json!({ "name": "Skript.pdf", "bytesBase64": b64(b"%PDF-1.4\nneu") }),
+            ],
+        )
+        .unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o700)).unwrap();
+    }
+    assert_eq!(imported["relativePath"], "Mathe/Skript 2.pdf");
+    assert_eq!(
+        std::fs::read(folder.join("Skript.pdf")).unwrap(),
+        b"%PDF-1.4\n"
+    );
+    assert_eq!(
+        std::fs::read(folder.join("Skript 2.pdf")).unwrap(),
+        b"%PDF-1.4\nneu"
+    );
+}
+
+#[test]
 fn an_empty_worksheet_name_uses_the_image_id() {
     let (mut host, _) = host();
     let png = json!([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
