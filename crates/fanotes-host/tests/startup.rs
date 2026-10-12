@@ -14,6 +14,38 @@ fn scratch() -> std::path::PathBuf {
 }
 
 #[test]
+fn a_new_profile_and_its_tree_cache_are_private_directories() {
+    let dir = scratch();
+    let app = dir.join("app");
+    let mut host = Host::open(app.clone());
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            fs::metadata(&app).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
+    }
+    let vault = dir.join("vault");
+    fs::create_dir_all(&vault).unwrap();
+    fs::write(vault.join("Seite.md"), b"# Seite\n").unwrap();
+    host.set_vault(vault).unwrap();
+    host.dispatch("fanotes:get-tree", &[]).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            fs::metadata(app.join("tree-cache-v1"))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o700
+        );
+    }
+}
+
+#[test]
 fn a_missing_vault_starts_in_documents_with_a_welcome_note() {
     let dir = scratch();
     let mut host = Host::open(dir.join("app"));
