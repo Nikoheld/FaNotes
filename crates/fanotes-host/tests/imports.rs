@@ -21,6 +21,31 @@ fn b64(bytes: &[u8]) -> String {
 }
 
 #[test]
+fn an_empty_worksheet_name_uses_the_image_id() {
+    let (mut host, _) = host();
+    let png = json!([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    let document = host
+        .dispatch(
+            "fanotes:import-worksheet-from-data",
+            &[json!({ "name": "", "mimeType": "image/png", "bytes": png.clone() })],
+        )
+        .unwrap();
+    let id = document["id"].as_str().unwrap();
+    assert_eq!(document["title"], format!("Bild-{}", &id[..8]));
+    assert!(document["sourceRelativePath"]
+        .as_str()
+        .unwrap()
+        .ends_with(".png"));
+    let spaced = host
+        .dispatch(
+            "fanotes:import-worksheet-from-data",
+            &[json!({ "name": "   ", "bytes": png })],
+        )
+        .unwrap();
+    assert_eq!(spaced["title"], "Arbeitsblatt");
+}
+
+#[test]
 fn a_worksheet_byte_list_follows_buffer_from() {
     let (mut host, vault) = host();
     let document = host
