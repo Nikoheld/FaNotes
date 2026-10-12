@@ -18,6 +18,46 @@ fn host() -> (Host, std::path::PathBuf) {
 }
 
 #[test]
+fn a_file_is_not_a_folder_target() {
+    let (mut host, vault) = host();
+    std::fs::write(vault.join("Seite.md"), b"Hallo\n").unwrap();
+    std::fs::write(vault.join("Andere.md"), b"Welt\n").unwrap();
+    assert_eq!(
+        host.dispatch("fanotes:create-folder", &[json!("Seite.md")])
+            .unwrap_err(),
+        "Der gewählte Pfad ist kein Ordner."
+    );
+    assert_eq!(
+        host.dispatch("fanotes:create-note", &[json!("Seite.md"), json!("Neu")])
+            .unwrap_err(),
+        "Der gewählte Pfad ist kein Ordner."
+    );
+    assert_eq!(
+        host.dispatch(
+            "fanotes:move-entry",
+            &[json!("Andere.md"), json!("Seite.md")],
+        )
+        .unwrap_err(),
+        "Der gewählte Pfad ist kein Ordner."
+    );
+    assert_eq!(
+        host.dispatch(
+            "fanotes:set-folder-color",
+            &[json!("Seite.md"), json!("#112233")],
+        )
+        .unwrap_err(),
+        "Der gewählte Pfad ist kein Ordner."
+    );
+    assert_eq!(
+        host.dispatch("fanotes:create-folder", &[json!("Fehlt")])
+            .unwrap_err(),
+        "Der Zielordner wurde nicht gefunden."
+    );
+    assert!(vault.join("Andere.md").is_file());
+    assert!(!vault.join("Neuer Ordner").exists());
+}
+
+#[test]
 fn a_note_link_reads_page_and_position_with_javascript_number() {
     let (mut host, vault) = host();
     std::fs::write(vault.join("Mathe/Seite.md"), b"\n").unwrap();

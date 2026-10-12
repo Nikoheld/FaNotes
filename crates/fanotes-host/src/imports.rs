@@ -129,7 +129,7 @@ fn import_pdf_file(
         let meta = fs::symlink_metadata(&path)
             .map_err(|_| "Der Zielordner wurde nicht gefunden.".to_owned())?;
         if meta.file_type().is_symlink() || !meta.is_dir() {
-            return Err("Der Zielordner wurde nicht gefunden.".to_owned());
+            return Err("Der gewählte Pfad ist kein Ordner.".to_owned());
         }
         path
     };
