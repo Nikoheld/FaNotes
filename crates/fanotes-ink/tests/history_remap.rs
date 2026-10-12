@@ -142,6 +142,21 @@ fn undo_frames_of_stroke_ids_are_capped_at_80() {
 }
 
 #[test]
+fn a_drawing_schema_of_one_point_zero_still_opens() {
+    let raw = r##"{
+      "schemaVersion": 1.0,
+      "title": "Skizze",
+      "strokes": [{ "points": [{ "x": 0.1, "y": 0.2, "t": 1, "pressure": 0.4 }] }]
+    }"##;
+    let doc = InkDocument::from_json(raw).unwrap();
+    assert_eq!(doc.live_ids().len(), 1);
+    assert!(InkDocument::from_json(
+        r##"{"schemaVersion":1.5,"title":"Halb","strokes":[]}"##
+    )
+    .is_err());
+}
+
+#[test]
 fn drawing_document_json_roundtrip_keeps_live_strokes_and_extra_fields() {
     let raw = r##"{
       "schemaVersion": 1,
