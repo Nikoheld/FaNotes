@@ -6,8 +6,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use base64::Engine;
 use fanotes_famd::{
-    companion_note_path, empty_famd_payload, is_paper_style, parse_famd, serialize_famd,
-    strip_famd_payload, worksheet_ids_from_markdown,
+    companion_note_path, empty_famd_payload, is_js_whitespace, is_paper_style, parse_famd,
+    serialize_famd, strip_famd_payload, worksheet_ids_from_markdown,
 };
 use serde_json::{json, Value};
 
@@ -69,20 +69,16 @@ pub fn list_drawings(host: &Host) -> Result<Value, String> {
 pub fn read_drawing(host: &Host, raw_id: &str) -> Result<Value, String> {
     let id = drawing_id(raw_id)?;
     let path = assets_dir(vault_root(host)?)?.join(format!("{id}.json"));
-    let bytes = read_limited(&path, MAX_DRAWING_JSON_BYTES).map_err(|_| {
-        if path.exists() {
-            "Die gespeicherte Zeichnung ist beschädigt oder kann nicht sicher gelesen werden."
-                .to_owned()
-        } else {
-            "Die gespeicherte Zeichnung wurde nicht gefunden.".to_owned()
-        }
-    })?;
+    let bytes =
+        read_limited(&path, MAX_DRAWING_JSON_BYTES).map_err(|_| drawing_read_error(&path))?;
     let drawing_json = lossy_utf8(bytes);
     let mtime = fs::symlink_metadata(&path)
         .ok()
         .and_then(|meta| meta.modified().ok())
         .map(crate::notes::iso_from_system_time);
-    let mut item = metadata_from_json(&drawing_json, &id, mtime.as_deref())?;
+    // The desktop read handler reports one message for every failure after the file is found.
+    let mut item =
+        metadata_from_json(&drawing_json, &id, mtime.as_deref()).map_err(|_| damaged_drawing())?;
     item["drawingJson"] = Value::String(drawing_json);
     Ok(item)
 }
@@ -105,9 +101,17 @@ pub fn save_drawing(host: &Host, payload: &Value) -> Result<Value, String> {
     if item["title"].as_str() != Some(title.as_str()) {
         return Err("Der Zeichnungstitel stimmt nicht mit den Zeichnungsdaten überein.".to_owned());
     }
+    let png = if object.contains_key("imageData") {
+        let image = object
+            .get("imageData")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "Die Zeichnung enthält kein PNG.".to_owned())?;
+        Some(decode_png(image)?)
+    } else {
+        None
+    };
     let assets = assets_dir(vault_root(host)?)?;
-    if let Some(image) = object.get("imageData").filter(|value| !value.is_null()) {
-        let png = decode_png(image.as_str().unwrap_or(""))?;
+    if let Some(png) = png {
         crate::notes::atomic_write(&assets.join(format!("{id}.png")), &png, 0o600)
             .map_err(|_| "Die Zeichnung konnte nicht gespeichert werden.".to_owned())?;
     }
@@ -118,8 +122,8 @@ pub fn save_drawing(host: &Host, payload: &Value) -> Result<Value, String> {
     )
     .map_err(|_| "Die Zeichnung konnte nicht gespeichert werden.".to_owned())?;
     if let Some(note) = object.get("noteRelativePath").and_then(Value::as_str) {
-        if !note.trim().is_empty() {
-            embed_in_note(host, note.trim(), &document).map_err(|error| {
+        if !vault::js_trim(note).is_empty() {
+            embed_in_note(host, note, &document).map_err(|error| {
                 format!("Handschrift konnte nicht in die Notiz geschrieben werden: {error}")
             })?;
         }
@@ -145,8 +149,11 @@ pub fn read_famd_ink(host: &Host, relative: &str) -> Result<Value, String> {
     let source = match fs::symlink_metadata(&path) {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Value::Null),
         Err(_) => return Err("Die Datei konnte nicht gelesen werden.".to_owned()),
-        Ok(meta) if meta.file_type().is_symlink() || !meta.is_file() => {
-            return Err("Die Notiz ist keine sichere reguläre Datei.".to_owned());
+        Ok(meta) if meta.file_type().is_symlink() => {
+            return Err("Symbolische Links sind innerhalb des Vaults nicht erlaubt.".to_owned());
+        }
+        Ok(meta) if !meta.is_file() => {
+            return Err("Die gewählte Datei ist keine reguläre Datei.".to_owned());
         }
         Ok(meta) if meta.len() as usize > MAX_FAMD_BYTES => {
             return Err("Die Datei ist zu groß.".to_owned());
@@ -198,17 +205,18 @@ pub fn read_famd_ink(host: &Host, relative: &str) -> Result<Value, String> {
 }
 
 fn is_note_path(relative: &str) -> bool {
-    let lower = relative.to_lowercase();
-    lower.ends_with(".md")
-        || lower.ends_with(".markdown")
-        || lower.ends_with(".famd")
-        || lower.ends_with(".pdf")
+    matches!(
+        crate::vault::posix_extname(relative)
+            .to_ascii_lowercase()
+            .as_str(),
+        ".md" | ".markdown" | ".famd" | ".pdf"
+    )
 }
 
 pub(crate) fn note_ink_marker_id(markdown: &str) -> Option<String> {
     let mut rest = markdown;
     while let Some(start) = rest.find("<!--") {
-        let after = rest[start + 4..].trim_start();
+        let after = skip_js_whitespace(&rest[start + 4..]);
         if let Some(id) = ink_marker_at(after) {
             return Some(id);
         }
@@ -227,11 +235,22 @@ fn ink_marker_at(after: &str) -> Option<String> {
         return None;
     }
     let id = &after[..length];
-    if after[length..].trim_start().starts_with("-->") {
+    if skip_js_whitespace(&after[length..]).starts_with("-->") {
         Some(id.to_owned())
     } else {
         None
     }
+}
+
+fn skip_js_whitespace(value: &str) -> &str {
+    let mut rest = value;
+    while let Some(character) = rest.chars().next() {
+        if !is_js_whitespace(character) {
+            break;
+        }
+        rest = &rest[character.len_utf8()..];
+    }
+    rest
 }
 
 fn embed_in_note(host: &Host, note_path: &str, drawing: &Value) -> Result<(), String> {
@@ -296,8 +315,9 @@ pub(crate) fn library_metadata(
     fallback_time: Option<&str>,
 ) -> Result<Value, String> {
     let raw_title = document.get("title").and_then(Value::as_str).unwrap_or("");
-    let title = raw_title.trim();
-    if document.get("schemaVersion").and_then(Value::as_i64) != Some(1)
+    let title = vault::js_trim(raw_title);
+    // `schemaVersion !== 1` treats `1.0` as the same version.
+    if document.get("schemaVersion").and_then(Value::as_f64) != Some(1.0)
         || title.is_empty()
         || crate::vault::utf16_len(raw_title) > 180
         || crate::vault::has_c0_or_del(raw_title)
@@ -318,6 +338,19 @@ pub(crate) fn library_metadata(
         "imageRelativePath": format!(".fanotes/assets/{id}.png"),
         "dataRelativePath": format!(".fanotes/assets/{id}.json"),
     }))
+}
+
+fn drawing_read_error(path: &Path) -> String {
+    match fs::symlink_metadata(path) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            "Die gespeicherte Zeichnung wurde nicht gefunden.".to_owned()
+        }
+        _ => damaged_drawing(),
+    }
+}
+
+fn damaged_drawing() -> String {
+    "Die gespeicherte Zeichnung ist beschädigt oder kann nicht sicher gelesen werden.".to_owned()
 }
 
 fn validate_drawing_json(drawing_json: &str) -> Result<Value, String> {
@@ -346,33 +379,23 @@ fn decode_png(image_data: &str) -> Result<Vec<u8>, String> {
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(encoded)
         .map_err(|_| "Die Zeichnung ist keine gültige PNG-Data-URL.".to_owned())?;
-    if bytes.is_empty() || bytes.len() > MAX_IMAGE_BYTES || !bytes.starts_with(PNG_SIGNATURE) {
+    if bytes.is_empty() || bytes.len() > MAX_IMAGE_BYTES {
+        return Err("Die Zeichnung ist leer oder zu groß.".to_owned());
+    }
+    if !bytes.starts_with(PNG_SIGNATURE) {
         return Err("Die Bilddaten sind keine gültige PNG-Datei.".to_owned());
     }
     Ok(bytes)
 }
 
 fn safe_title(value: &str) -> Result<String, String> {
-    let name = value.trim().trim_end_matches(['.', ' ']).trim();
-    if name.is_empty()
-        || crate::vault::utf16_len(name) > 180
-        || name == "."
-        || name == ".."
-        || name.contains('/')
-        || name.contains('\\')
-        || crate::vault::has_c0_or_del(name)
-        || name.eq_ignore_ascii_case(".fanotes")
-        || name.eq_ignore_ascii_case(".lernwerk")
-    {
-        return Err("Dieser Name ist nicht erlaubt.".to_owned());
-    }
-    Ok(name.to_owned())
+    super::safe_entry_name_or(value, "Zeichnung")
 }
 
 fn drawing_file_id(name: &str) -> Option<&str> {
     let (id, extension) = name.rsplit_once('.')?;
-    extension
-        .eq_ignore_ascii_case("json")
+    // The library opens `${id}.json`. `Upper.JSON` is not that file.
+    (extension == "json")
         .then_some(id)
         .filter(|id| drawing_id(id).is_ok())
 }
@@ -450,6 +473,10 @@ fn now_iso() -> String {
     )
 }
 
+fn is_leap(year: i32) -> bool {
+    (year % 4 == 0 && year % 100 != 0) || year % 400 == 0
+}
+
 fn civil_date(mut days: u64) -> (i32, u32, u32) {
     let mut year = 1970i32;
     loop {
@@ -485,140 +512,14 @@ fn civil_date(mut days: u64) -> (i32, u32, u32) {
     (year, 12, 31)
 }
 
-fn is_leap(year: i32) -> bool {
-    (year % 4 == 0 && year % 100 != 0) || year % 400 == 0
-}
-
 /// `Date.parse` plus `toISOString`: a zoned timestamp becomes UTC with milliseconds.
 pub(crate) fn canonical_iso(value: &str) -> Option<String> {
-    let bytes = value.as_bytes();
-    if bytes.len() < 19
-        || bytes.get(4) != Some(&b'-')
-        || bytes.get(7) != Some(&b'-')
-        || bytes.get(10) != Some(&b'T')
-    {
-        return None;
-    }
-    let year: i32 = value.get(0..4)?.parse().ok()?;
-    let month: i32 = value.get(5..7)?.parse().ok()?;
-    let day: i32 = value.get(8..10)?.parse().ok()?;
-    if bytes.get(13) != Some(&b':') || bytes.get(16) != Some(&b':') {
-        return None;
-    }
-    let hour: i32 = value.get(11..13)?.parse().ok()?;
-    let minute: i32 = value.get(14..16)?.parse().ok()?;
-    let second: i32 = value.get(17..19)?.parse().ok()?;
-    if !(1..=12).contains(&month)
-        || day < 1
-        || day > days_in_month(year, month as u32) as i32
-        || !(0..=23).contains(&hour)
-        || !(0..=59).contains(&minute)
-        || !(0..=59).contains(&second)
-    {
-        return None;
-    }
-    let mut index = 19;
-    let mut millis = 0u32;
-    if bytes.get(index) == Some(&b'.') {
-        index += 1;
-        let start = index;
-        while bytes.get(index).is_some_and(u8::is_ascii_digit) {
-            index += 1;
-        }
-        if index == start || index - start > 9 {
-            return None;
-        }
-        let digits = value.get(start..index)?;
-        let parsed: u32 = digits.parse().ok()?;
-        millis = if digits.len() >= 3 {
-            parsed / 10u32.pow((digits.len() - 3) as u32)
-        } else {
-            parsed * 10u32.pow((3 - digits.len()) as u32)
-        };
-    }
-    let rest = value.get(index..)?;
-    let offset_minutes = if rest == "Z" {
-        0
-    } else if rest.len() == 6
-        && (rest.starts_with('+') || rest.starts_with('-'))
-        && rest.as_bytes().get(3) == Some(&b':')
-    {
-        let sign = if rest.starts_with('+') { 1 } else { -1 };
-        let offset_hour: i32 = rest.get(1..3)?.parse().ok()?;
-        let offset_minute: i32 = rest.get(4..6)?.parse().ok()?;
-        if !(0..=23).contains(&offset_hour) || !(0..=59).contains(&offset_minute) {
-            return None;
-        }
-        sign * (offset_hour * 60 + offset_minute)
-    } else {
-        return None;
-    };
-    let (year, month, day, hour, minute) =
-        shift_minutes(year, month, day, hour, minute, offset_minutes)?;
-    Some(format!(
-        "{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}.{millis:03}Z"
-    ))
-}
-
-fn shift_minutes(
-    mut year: i32,
-    mut month: i32,
-    mut day: i32,
-    hour: i32,
-    minute: i32,
-    offset_minutes: i32,
-) -> Option<(i32, u32, u32, u32, u32)> {
-    let mut total = hour * 60 + minute - offset_minutes;
-    while total < 0 {
-        total += 24 * 60;
-        day -= 1;
-        if day < 1 {
-            month -= 1;
-            if month < 1 {
-                month = 12;
-                year -= 1;
-            }
-            day = days_in_month(year, month as u32) as i32;
-        }
-    }
-    while total >= 24 * 60 {
-        total -= 24 * 60;
-        day += 1;
-        let length = days_in_month(year, month as u32) as i32;
-        if day > length {
-            day = 1;
-            month += 1;
-            if month > 12 {
-                month = 1;
-                year += 1;
-            }
-        }
-    }
-    if !(0..10_000).contains(&year) || day < 1 {
-        return None;
-    }
-    Some((
-        year,
-        month as u32,
-        day as u32,
-        (total / 60) as u32,
-        (total % 60) as u32,
-    ))
-}
-
-fn days_in_month(year: i32, month: u32) -> u32 {
-    match month {
-        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
-        4 | 6 | 9 | 11 => 30,
-        2 if is_leap(year) => 29,
-        2 => 28,
-        _ => 0,
-    }
+    fanotes_famd::canonical_iso(value)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::canonical_iso;
+    use super::{canonical_iso, note_ink_marker_id};
 
     #[test]
     fn drawing_dates_become_utc_with_milliseconds() {
@@ -638,6 +539,73 @@ mod tests {
             canonical_iso("2020-01-01T01:00:00+02:00").as_deref(),
             Some("2019-12-31T23:00:00.000Z")
         );
-        assert_eq!(canonical_iso("2020-02-31T00:00:00Z"), None);
+        assert_eq!(
+            canonical_iso("2020-02-31T00:00:00Z").as_deref(),
+            Some("2020-03-02T00:00:00.000Z")
+        );
+        assert_eq!(
+            canonical_iso("2026-01-02").as_deref(),
+            Some("2026-01-02T00:00:00.000Z")
+        );
+        assert_eq!(
+            canonical_iso("2026-02-31").as_deref(),
+            Some("2026-03-03T00:00:00.000Z")
+        );
+        assert_eq!(canonical_iso("2026-01-32"), None);
+        assert_eq!(
+            canonical_iso("2026-01-02T24:00:00Z").as_deref(),
+            Some("2026-01-03T00:00:00.000Z")
+        );
+        assert_eq!(canonical_iso("2026-01-02T24:00:01Z"), None);
+        assert_eq!(
+            canonical_iso("2026-01-02T03:04:05.1Z").as_deref(),
+            Some("2026-01-02T03:04:05.100Z")
+        );
+        assert_eq!(
+            canonical_iso("2026-01-02T03:04:05.12Z").as_deref(),
+            Some("2026-01-02T03:04:05.120Z")
+        );
+        assert_eq!(
+            canonical_iso("2026-01-02T03:04:05.1234Z").as_deref(),
+            Some("2026-01-02T03:04:05.123Z")
+        );
+        assert_eq!(
+            canonical_iso("2026-01-02T03:04:05+0000").as_deref(),
+            Some("2026-01-02T03:04:05.000Z")
+        );
+        assert_eq!(
+            canonical_iso("2026-01-02t03:04:05z").as_deref(),
+            Some("2026-01-02T03:04:05.000Z")
+        );
+        assert_eq!(
+            canonical_iso("2026-01-02 03:04:05Z").as_deref(),
+            Some("2026-01-02T03:04:05.000Z")
+        );
+        assert_eq!(
+            canonical_iso("2026-04-31T00:00:00Z").as_deref(),
+            Some("2026-05-01T00:00:00.000Z")
+        );
+        assert_eq!(canonical_iso("2026-01-02T03:04:60Z"), None);
+        assert_eq!(canonical_iso("2026-13-01T00:00:00Z"), None);
+    }
+
+    #[test]
+    fn an_ink_marker_uses_javascript_whitespace() {
+        assert_eq!(
+            note_ink_marker_id("<!--\u{FEFF}fanotes-ink:abc\u{FEFF}-->").as_deref(),
+            Some("abc")
+        );
+        assert_eq!(
+            note_ink_marker_id("<!--\u{0085}fanotes-ink:abc-->").as_deref(),
+            None
+        );
+        assert_eq!(
+            note_ink_marker_id("<!--fanotes-ink:abc\u{0085}-->").as_deref(),
+            None
+        );
+        assert_eq!(
+            note_ink_marker_id("<!-- fanotes-ink:marker1 -->").as_deref(),
+            Some("marker1")
+        );
     }
 }
