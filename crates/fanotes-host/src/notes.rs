@@ -206,10 +206,13 @@ pub fn read_paper_style(host: &Host, relative: &str) -> Result<Value, String> {
         .unwrap_or(Value::Null))
 }
 
-pub fn set_paper_style(host: &Host, relative: &str, paper_style: &str) -> Result<Value, String> {
-    if !is_paper_style(paper_style) {
+pub fn set_paper_style(host: &Host, relative: &Value, paper_style: &Value) -> Result<Value, String> {
+    let Some(paper_style) = paper_style.as_str().filter(|style| is_paper_style(style)) else {
         return Err("Diese Papierart wird nicht unterstützt.".to_owned());
-    }
+    };
+    let relative = relative
+        .as_str()
+        .ok_or_else(|| "Ungültiger Notizpfad.".to_owned())?;
     let (path, body, mut payload) = load_note(host, relative)?;
     payload.paper_style = Some(paper_style.to_owned());
     if let Some(object) = payload.ink.as_mut().and_then(Value::as_object_mut) {
@@ -324,11 +327,19 @@ pub fn list_history(host: &Host, relative: &str) -> Result<Value, String> {
     Ok(Value::Array(snapshots.into_iter().rev().collect()))
 }
 
-pub fn read_history(host: &Host, relative: &str, snapshot_id: &str) -> Result<Value, String> {
-    if !is_snapshot_id(snapshot_id) {
+pub fn read_history(
+    host: &Host,
+    relative: &str,
+    snapshot: Option<&Value>,
+) -> Result<Value, String> {
+    let note = markdown_path(relative)?;
+    let pattern = match snapshot {
+        Some(value) => js_regexp_string(value),
+        None => "undefined".to_owned(),
+    };
+    if !is_snapshot_id(&pattern) {
         return Err("Ungültiger Verlaufseintrag.".to_owned());
     }
-    let note = markdown_path(relative)?;
     let directory = history_dir(vault_root(host)?, &note)?;
     let index = read_history_index(&directory)?;
     let entry = index
@@ -337,9 +348,18 @@ pub fn read_history(host: &Host, relative: &str, snapshot_id: &str) -> Result<Va
         .and_then(|items| {
             items
                 .iter()
-                .find(|item| item.get("id").and_then(Value::as_str) == Some(snapshot_id))
+                .find(|item| {
+                    snapshot.is_some_and(|query| {
+                        item.get("id").is_some_and(|id| snapshot_same(id, query))
+                    })
+                })
                 .cloned()
         })
+        .ok_or_else(|| "Dieser Verlaufseintrag existiert nicht mehr.".to_owned())?;
+    let snapshot_id = entry
+        .get("id")
+        .and_then(Value::as_str)
+        .filter(|id| is_snapshot_id(id))
         .ok_or_else(|| "Dieser Verlaufseintrag existiert nicht mehr.".to_owned())?;
     let content = read_lossy_string(&directory.join(format!("{snapshot_id}.md")))
         .ok_or_else(|| "Dieser Verlaufseintrag existiert nicht mehr.".to_owned())?;
@@ -684,6 +704,40 @@ fn is_snapshot_id(value: &str) -> bool {
         && value
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+}
+
+/// JavaScript `RegExp.prototype.test` stringifies its argument before matching.
+fn js_regexp_string(value: &Value) -> String {
+    match value {
+        Value::Null => "null".to_owned(),
+        Value::Bool(true) => "true".to_owned(),
+        Value::Bool(false) => "false".to_owned(),
+        Value::Number(number) => number.to_string(),
+        Value::String(value) => value.clone(),
+        Value::Array(items) => items
+            .iter()
+            .map(|item| {
+                if item.is_null() {
+                    String::new()
+                } else {
+                    js_regexp_string(item)
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(","),
+        Value::Object(_) => "[object Object]".to_owned(),
+    }
+}
+
+/// `===` for the JSON values a history id can be. Objects and arrays compare by identity in JavaScript.
+fn snapshot_same(stored: &Value, query: &Value) -> bool {
+    match (stored, query) {
+        (Value::Null, Value::Null) => true,
+        (Value::Bool(left), Value::Bool(right)) => left == right,
+        (Value::Number(left), Value::Number(right)) => left == right,
+        (Value::String(left), Value::String(right)) => left == right,
+        _ => false,
+    }
 }
 
 fn random_suffix() -> Result<String, String> {
