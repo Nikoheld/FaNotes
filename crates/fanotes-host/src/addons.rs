@@ -51,7 +51,7 @@ pub fn save(host: &Host, record: &Value) -> Result<Value, String> {
     let _guard = lock();
     let stored = bounded_record(record)?;
     let id = safe_id(stored.get("id").and_then(Value::as_str).unwrap_or(""))?;
-    let root = store_root(host)?;
+    let root = ensure_store_root(host)?;
     let mut records = read_records(&root)?;
     records.retain(|item| item.get("id").and_then(Value::as_str) != Some(id.as_str()));
     records.push(stored);
@@ -62,7 +62,7 @@ pub fn save(host: &Host, record: &Value) -> Result<Value, String> {
 pub fn remove(host: &Host, id: &str) -> Result<Value, String> {
     let _guard = lock();
     let id = safe_id(id)?;
-    let root = store_root(host)?;
+    let root = ensure_store_root(host)?;
     let mut records = read_records(&root)?;
     records.retain(|item| item.get("id").and_then(Value::as_str) != Some(id.as_str()));
     write_records(&root, &records)?;
@@ -101,6 +101,7 @@ pub fn write_files(host: &Host, id: &Value, files: &Value) -> Result<Value, Stri
     let _guard = lock();
     let id = safe_id(id.as_str().unwrap_or(""))?;
     let entries = file_entries(files)?;
+    ensure_store_root(host)?;
     let dir = addon_dir(host, &id)?;
     fs::create_dir_all(&dir)
         .map_err(|_| "Der Add-on-Ordner konnte nicht angelegt werden.".to_owned())?;
@@ -157,7 +158,7 @@ pub fn write_data(host: &Host, id: &Value, value: &Value) -> Result<Value, Strin
         return Err("Der Add-on-Speicher ist auf 1 MB begrenzt.".to_owned());
     }
     let id = safe_id(id.as_str().unwrap_or(""))?;
-    let root = store_root(host)?;
+    let root = ensure_store_root(host)?;
     let path = root.join(format!("{id}.data.json"));
     if fs::symlink_metadata(&path)
         .is_ok_and(|meta| meta.file_type().is_symlink() || !meta.is_file())
@@ -582,6 +583,8 @@ fn addon_dir(host: &Host, id: &str) -> Result<PathBuf, String> {
     Ok(dir)
 }
 
+/// The add-on store path. A missing folder stays missing, matching a desktop
+/// `readFile` of `addons.json`.
 fn store_root(host: &Host) -> Result<PathBuf, String> {
     let root = host.app_data.join("addons");
     match fs::symlink_metadata(&root) {
@@ -589,23 +592,29 @@ fn store_root(host: &Host) -> Result<PathBuf, String> {
             Err("Der Add-on-Ordner ist unsicher.".to_owned())
         }
         Ok(_) => Ok(root),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            fs::create_dir(&root)
-                .map_err(|_| "Der Add-on-Ordner konnte nicht angelegt werden.".to_owned())?;
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                let _ = fs::set_permissions(&root, fs::Permissions::from_mode(0o700));
-            }
-            let meta = fs::symlink_metadata(&root)
-                .map_err(|_| "Der Add-on-Ordner konnte nicht angelegt werden.".to_owned())?;
-            if meta.file_type().is_symlink() || !meta.is_dir() {
-                return Err("Der Add-on-Ordner ist unsicher.".to_owned());
-            }
-            Ok(root)
-        }
-        Err(_) => Err("Der Add-on-Ordner konnte nicht angelegt werden.".to_owned()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(root),
+        Err(_) => Err("Der Add-on-Ordner ist unsicher.".to_owned()),
     }
+}
+
+fn ensure_store_root(host: &Host) -> Result<PathBuf, String> {
+    let root = store_root(host)?;
+    if fs::symlink_metadata(&root).is_ok() {
+        return Ok(root);
+    }
+    fs::create_dir(&root)
+        .map_err(|_| "Der Add-on-Ordner konnte nicht angelegt werden.".to_owned())?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(&root, fs::Permissions::from_mode(0o700));
+    }
+    let meta = fs::symlink_metadata(&root)
+        .map_err(|_| "Der Add-on-Ordner konnte nicht angelegt werden.".to_owned())?;
+    if meta.file_type().is_symlink() || !meta.is_dir() {
+        return Err("Der Add-on-Ordner ist unsicher.".to_owned());
+    }
+    Ok(root)
 }
 
 fn safe_id(id: &str) -> Result<String, String> {
