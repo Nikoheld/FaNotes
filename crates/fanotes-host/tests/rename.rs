@@ -214,6 +214,35 @@ fn a_blank_rename_keeps_a_valid_name_and_rejects_a_device_name() {
 }
 
 #[test]
+fn an_unchanged_rename_returns_the_path_the_caller_sent() {
+    let (vault, mut host) = host();
+    fs::write(vault.join("Mathe/Seite.md"), "Hallo\n").unwrap();
+    let slash = host
+        .dispatch(
+            "fanotes:rename-entry",
+            &[json!("Mathe/Seite.md/"), json!("  ")],
+        )
+        .unwrap();
+    assert_eq!(slash, "Mathe/Seite.md/");
+    let prefixed = host
+        .dispatch(
+            "fanotes:rename-entry",
+            &[json!("./Mathe/Seite.md"), json!(1)],
+        )
+        .unwrap();
+    assert_eq!(prefixed, "./Mathe/Seite.md");
+    assert_eq!(fs::read(vault.join("Mathe/Seite.md")).unwrap(), b"Hallo\n");
+    let renamed = host
+        .dispatch(
+            "fanotes:rename-entry",
+            &[json!("Mathe/Seite.md/"), json!("Blatt")],
+        )
+        .unwrap();
+    assert_eq!(renamed, "Mathe/Blatt.md");
+    assert!(vault.join("Mathe/Blatt.md").is_file());
+}
+
+#[test]
 fn a_blank_move_target_returns_the_note_to_the_vault_root() {
     let (vault, mut host) = host();
     fs::write(vault.join("Mathe/Seite.md"), b"\n").unwrap();
