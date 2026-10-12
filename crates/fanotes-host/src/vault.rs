@@ -224,8 +224,12 @@ pub(crate) fn relative_posix(root: &Path, path: &Path) -> String {
 
 /// `path.posix.extname`.
 ///
-/// `.md` and `..` have no extension. `.hidden.md` is `.md`.
+/// Trailing slashes are ignored. `.md` and `..` have no extension. `.hidden.md` is `.md`.
 pub(crate) fn posix_extname(path: &str) -> &str {
+    let path = path.trim_end_matches('/');
+    if path.is_empty() {
+        return "";
+    }
     let base = path.rsplit('/').next().unwrap_or(path);
     if base == "." || base == ".." {
         return "";
@@ -462,6 +466,10 @@ mod tests {
         assert_eq!(posix_extname("Note.MD"), ".MD");
         assert_eq!(posix_extname("a."), ".");
         assert_eq!(posix_extname("..."), ".");
+        assert_eq!(posix_extname("foo.md/"), ".md");
+        assert_eq!(posix_extname("foo.md//"), ".md");
+        assert_eq!(posix_extname("foo.md/."), "");
+        assert_eq!(posix_extname(".md/"), "");
         #[cfg(unix)]
         {
             let root = Path::new("/vault");

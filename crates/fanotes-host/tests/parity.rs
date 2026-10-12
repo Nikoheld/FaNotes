@@ -68,7 +68,7 @@ fn vault_paths_reject_traversal_and_internal_files() {
     assert_eq!(
         host.dispatch("fanotes:read-file", &[json!(".fanotes/settings.json")])
             .unwrap_err(),
-        "Interne FaNotes-Dateien sind geschützt."
+        "Es dürfen nur Markdown-Dateien und FaNotes-Handschriftdateien (.famd) bearbeitet werden."
     );
     fs::write(dir.0.join("vault").join("Notiz.md"), b"\n").unwrap();
     host.dispatch("fanotes:write-file", &[json!("Notiz.md"), json!("Hallo")])
@@ -204,7 +204,7 @@ fn an_internal_worksheet_can_be_previewed() {
             &[json!(".fanotes/worksheets/blatt-1.pdf")]
         )
         .unwrap_err(),
-        "Interne FaNotes-Dateien sind geschützt."
+        "Es dürfen nur Markdown-Dateien und FaNotes-Handschriftdateien (.famd) bearbeitet werden."
     );
 }
 
