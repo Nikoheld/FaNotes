@@ -320,11 +320,10 @@ fn parse_lmstudio_models(body: &Value) -> Result<Vec<Value>, String> {
                 return None;
             }
             let key = crate::vault::truncate_utf16(raw_key, 500);
-            let display_raw = entry.get("display_name").and_then(Value::as_str);
-            let display = match display_raw {
-                Some(name) if !crate::vault::js_trim(name).is_empty() => {
-                    crate::vault::truncate_utf16(crate::vault::js_trim(name), 500)
-                }
+            // `String(displayName || key)` keeps surrounding spaces. Only an
+            // empty string falls back to the key.
+            let display = match entry.get("display_name").and_then(Value::as_str) {
+                Some(name) if !name.is_empty() => crate::vault::truncate_utf16(name, 500),
                 _ => key.clone(),
             };
             let mut record = model_record("lmstudio", &key, &display);
@@ -1686,9 +1685,9 @@ mod tests {
         .unwrap();
         assert_eq!(spaced.len(), 2);
         assert_eq!(spaced[0]["key"], " llama ");
-        assert_eq!(spaced[0]["displayName"], "Llama");
+        assert_eq!(spaced[0]["displayName"], "  Llama  ");
         assert_eq!(spaced[1]["key"], "blank");
-        assert_eq!(spaced[1]["displayName"], "blank");
+        assert_eq!(spaced[1]["displayName"], "   ");
         let named = finish_models(
             parse_lmstudio_models(&json!({
                 "models": [
