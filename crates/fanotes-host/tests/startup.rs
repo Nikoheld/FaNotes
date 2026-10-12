@@ -74,6 +74,47 @@ fn a_missing_vault_starts_in_documents_with_a_welcome_note() {
 }
 
 #[test]
+fn a_missing_configured_vault_is_not_replaced() {
+    let dir = scratch();
+    let app = dir.join("app");
+    fs::create_dir_all(&app).unwrap();
+    let missing = dir.join("nas").join("Notizen");
+    fs::write(app.join("vault-path"), format!("{}\n", missing.display())).unwrap();
+    let mut host = Host::open(app.clone());
+    host.documents_dir = Some(dir.join("docs"));
+    let boot = host.dispatch("fanotes:bootstrap", &[]).unwrap();
+    assert_eq!(boot["vaultPath"], missing.to_string_lossy().as_ref());
+    assert!(host.vault.is_none());
+    assert!(!dir.join("docs").join("FaNotes").exists());
+    assert_eq!(
+        fs::read_to_string(app.join("vault-path")).unwrap().trim(),
+        missing.to_string_lossy()
+    );
+    assert_eq!(
+        host.dispatch("fanotes:get-tree", &[]).unwrap_err(),
+        "Der gewählte Vault ist kein sicherer Ordner."
+    );
+    assert!(!missing.exists());
+
+    fs::create_dir_all(&missing).unwrap();
+    fs::write(missing.join("Seite.md"), b"# Seite\n").unwrap();
+    let tree = host.dispatch("fanotes:get-tree", &[]).unwrap();
+    assert!(tree
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|entry| entry["name"] == "Seite.md"));
+    assert_eq!(
+        host.vault.as_deref(),
+        Some(fs::canonicalize(&missing).unwrap().as_path())
+    );
+    assert_eq!(
+        fs::read_to_string(app.join("vault-path")).unwrap().trim(),
+        missing.to_string_lossy()
+    );
+}
+
+#[test]
 fn an_existing_documents_folder_is_reused() {
     let dir = scratch();
     let vault = dir.join("docs").join("FaNotes");
