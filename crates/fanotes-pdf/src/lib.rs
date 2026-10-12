@@ -76,11 +76,34 @@ struct VaultRenderRequest {
 }
 
 pub fn parse_vault_request(value: &Value) -> Result<(String, RenderRequest), Error> {
-    let parsed: VaultRenderRequest =
-        serde_json::from_value(value.clone()).map_err(|_| Error::Request)?;
-    if parsed.path.is_empty() || parsed.path.len() > 4096 {
-        return Err(Error::Request);
+    let mut value = value.clone();
+    {
+        let Some(object) = value.as_object_mut() else {
+            return Err(Error::Request);
+        };
+        for key in [
+            "pageIndex",
+            "pixelWidth",
+            "pixelHeight",
+            "pagePixelWidth",
+            "pagePixelHeight",
+            "originX",
+            "originY",
+            "rotation",
+        ] {
+            if !object.contains_key(key) {
+                return Err(Error::Request);
+            }
+        }
+        // A non-string password is ignored, the same way the desktop does.
+        if object
+            .get("password")
+            .is_some_and(|password| !password.is_string())
+        {
+            object.insert("password".to_owned(), Value::String(String::new()));
+        }
     }
+    let parsed: VaultRenderRequest = serde_json::from_value(value).map_err(|_| Error::Request)?;
     Ok((parsed.path, parsed.job))
 }
 
@@ -341,6 +364,30 @@ mod tests {
     fn rejects_an_incomplete_vault_request() {
         let error = parse_vault_request(&Value::Null).unwrap_err();
         assert!(matches!(error, Error::Request));
+        let mut request = serde_json::json!({
+            "path": "Seite.pdf",
+            "pageIndex": 0,
+            "pixelWidth": 16,
+            "pixelHeight": 16,
+            "pagePixelWidth": 16,
+            "pagePixelHeight": 16,
+            "originX": 0,
+            "originY": 0,
+            "rotation": 0
+        });
+        request.as_object_mut().unwrap().remove("rotation");
+        assert!(matches!(
+            parse_vault_request(&request).unwrap_err(),
+            Error::Request
+        ));
+        let long = format!("{}.pdf", "ä".repeat(3000));
+        let mut request = request;
+        request["rotation"] = serde_json::json!(0);
+        request["path"] = serde_json::json!(long);
+        request["password"] = serde_json::json!(1);
+        let (path, job) = parse_vault_request(&request).unwrap();
+        assert_eq!(path.chars().count(), 3004);
+        assert!(job.password.is_empty());
     }
 
     #[test]
