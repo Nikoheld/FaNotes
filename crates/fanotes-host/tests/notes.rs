@@ -335,6 +335,49 @@ fn a_new_note_adopts_an_existing_handwriting_companion() {
 }
 
 #[test]
+fn a_companion_read_follows_the_desktop_file_check() {
+    let (mut host, vault) = host();
+    std::fs::create_dir(vault.join("Mathe/Ordner.md")).unwrap();
+    let mut payload = fanotes_famd::empty_famd_payload("2026-01-02T03:04:05.000Z");
+    payload.page_stats = Some(json!({"words": 2}));
+    std::fs::write(
+        vault.join("Mathe/Ordner.famd"),
+        fanotes_famd::serialize_famd("", &payload),
+    )
+    .unwrap();
+    assert_eq!(
+        host.dispatch("fanotes:read-note-page-stats", &[json!("Mathe/Ordner.md")])
+            .unwrap(),
+        json!({"words": 2})
+    );
+    assert_eq!(
+        host.dispatch("fanotes:read-note-links", &[json!("Mathe/Leer.md")])
+            .unwrap(),
+        json!([])
+    );
+
+    std::fs::create_dir(vault.join("Mathe/Kaputt.famd")).unwrap();
+    assert_eq!(
+        host.dispatch("fanotes:read-famd-ink", &[json!("Mathe/Kaputt.md")])
+            .unwrap_err(),
+        "Die gewählte Datei ist keine reguläre Datei."
+    );
+    assert_eq!(
+        host.dispatch("fanotes:read-note-page-stats", &[json!("Mathe/Kaputt.md")])
+            .unwrap_err(),
+        "Die gewählte Datei ist keine reguläre Datei."
+    );
+    assert_eq!(
+        host.dispatch(
+            "fanotes:write-file",
+            &[json!("Mathe/Ordner.md"), json!("Hallo\n")],
+        )
+        .unwrap_err(),
+        "Die Notiz ist keine sichere reguläre Datei."
+    );
+}
+
+#[test]
 fn a_directory_named_like_a_note_cannot_be_read() {
     let (mut host, vault) = host();
     std::fs::create_dir(vault.join("Mathe/Seite.md")).unwrap();

@@ -149,12 +149,21 @@ pub fn read_famd_ink(host: &Host, relative: &str) -> Result<Value, String> {
         return Err("Es dürfen nur Markdown-Dateien, PDF-Notizen und FaNotes-Handschriftdateien (.famd) bearbeitet werden.".to_owned());
     }
     let famd_relative = companion_note_path(&note, ".famd");
-    let path = vault::resolve_note_file(vault_root(host)?, &famd_relative)?;
+    let path = vault::resolve_note_file(vault_root(host)?, &famd_relative).map_err(|error| {
+        if error == "Die Notiz ist keine sichere reguläre Datei." {
+            "Die gewählte Datei ist keine reguläre Datei.".to_owned()
+        } else {
+            error
+        }
+    })?;
     let source = match fs::symlink_metadata(&path) {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Value::Null),
         Err(_) => return Err("Die Datei konnte nicht gelesen werden.".to_owned()),
-        Ok(meta) if meta.file_type().is_symlink() || !meta.is_file() => {
-            return Err("Die Notiz ist keine sichere reguläre Datei.".to_owned());
+        Ok(meta) if meta.file_type().is_symlink() => {
+            return Err("Symbolische Links sind innerhalb des Vaults nicht erlaubt.".to_owned());
+        }
+        Ok(meta) if !meta.is_file() => {
+            return Err("Die gewählte Datei ist keine reguläre Datei.".to_owned());
         }
         Ok(meta) if meta.len() as usize > MAX_FAMD_BYTES => {
             return Err("Die Datei ist zu groß.".to_owned());
