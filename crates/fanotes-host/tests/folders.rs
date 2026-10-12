@@ -18,6 +18,26 @@ fn host() -> (Host, std::path::PathBuf, std::path::PathBuf) {
 }
 
 #[test]
+fn a_kelvin_sign_cannot_name_the_legacy_internal_folder() {
+    let (mut host, vault, _) = host();
+    let kelvin = ".lernwer\u{212A}";
+    assert_eq!(
+        host.dispatch("fanotes:create-folder", &[json!(""), json!(kelvin)])
+            .unwrap_err(),
+        "Dieser Name ist nicht erlaubt."
+    );
+    assert!(!vault.join(kelvin).exists());
+    assert_eq!(
+        host.dispatch(
+            "fanotes:write-file",
+            &[json!(format!("{kelvin}/Notiz.md")), json!("Hallo")]
+        )
+        .unwrap_err(),
+        "Interne FaNotes-Dateien sind geschützt."
+    );
+}
+
+#[test]
 fn folder_color_survives_a_rename_and_the_vault_is_remembered() {
     let (mut host, vault, app) = host();
     let painted = host

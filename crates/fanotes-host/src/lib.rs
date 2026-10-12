@@ -1963,7 +1963,10 @@ fn entry_name_allowed(name: &str) -> bool {
         && !name.contains('/')
         && !name.contains('\\')
         && !vault::has_c0_or_del(name)
-        && !matches!(name.to_ascii_lowercase().as_str(), ".fanotes" | ".lernwerk")
+        && !matches!(
+            vault::locale_lower_en_us(name).as_str(),
+            ".fanotes" | ".lernwerk"
+        )
 }
 
 fn windows_device_name(name: &str) -> bool {

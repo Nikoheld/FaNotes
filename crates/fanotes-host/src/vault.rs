@@ -35,14 +35,30 @@ pub fn normalize_relative_path(
     {
         return Err("Pfad-Traversal ist nicht erlaubt.".to_owned());
     }
-    if !allow_internal
-        && INTERNAL
-            .iter()
-            .any(|name| segments[0].eq_ignore_ascii_case(name))
-    {
+    if !allow_internal && is_protected_internal(segments[0]) {
         return Err("Interne FaNotes-Dateien sind geschützt.".to_owned());
     }
     Ok(segments.join("/"))
+}
+
+/// `toLocaleLowerCase('en-US')` for a name compared with an ASCII constant.
+///
+/// The Kelvin sign U+212A becomes `k`. The long s stays a long s.
+pub(crate) fn locale_lower_en_us(value: &str) -> String {
+    let mut lowered = String::with_capacity(value.len());
+    for character in value.chars() {
+        match character {
+            '\u{212A}' => lowered.push('k'),
+            'A'..='Z' => lowered.push(character.to_ascii_lowercase()),
+            other => lowered.push(other),
+        }
+    }
+    lowered
+}
+
+fn is_protected_internal(segment: &str) -> bool {
+    let lowered = locale_lower_en_us(segment);
+    INTERNAL.iter().any(|name| lowered == *name)
 }
 
 /// `path.win32.isAbsolute`: a drive letter, a colon, then a slash.
@@ -393,6 +409,23 @@ mod tests {
         assert!(normalize_relative_path("C:/", false, false).is_err());
         assert!(normalize_relative_path("C:Notiz.md", false, false).is_ok());
         assert!(normalize_relative_path("Mathe/C:/Notiz.md", false, false).is_ok());
+    }
+
+    #[test]
+    fn a_kelvin_sign_is_the_protected_lernwerk_name() {
+        let kelvin = format!(".lernwer\u{212A}/Notiz.md");
+        assert_eq!(
+            normalize_relative_path(&kelvin, false, false).unwrap_err(),
+            "Interne FaNotes-Dateien sind geschützt."
+        );
+        assert_eq!(
+            normalize_relative_path(".LERNWERK/Notiz.md", false, false).unwrap_err(),
+            "Interne FaNotes-Dateien sind geschützt."
+        );
+        assert_eq!(
+            normalize_relative_path(".fanote\u{017F}/Notiz.md", false, false).unwrap(),
+            ".fanote\u{017F}/Notiz.md"
+        );
     }
 
     #[test]
