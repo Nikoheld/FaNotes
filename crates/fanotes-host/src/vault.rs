@@ -344,7 +344,7 @@ pub(crate) fn ensure_internal_directory(root: &Path) -> Result<PathBuf, String> 
     let directory = root.join(".fanotes");
     match fs::symlink_metadata(&directory) {
         Ok(meta) if meta.file_type().is_symlink() || !meta.is_dir() => {
-            return Err("Interne FaNotes-Dateien sind geschützt.".to_owned());
+            return Err("Der interne FaNotes-Ordner ist unsicher.".to_owned());
         }
         Ok(_) => {}
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {

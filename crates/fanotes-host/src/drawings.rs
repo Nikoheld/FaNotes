@@ -431,11 +431,17 @@ fn random_id() -> Result<String, String> {
     Ok(bytes.iter().map(|byte| format!("{byte:02x}")).collect())
 }
 
-fn assets_dir(vault_root: &Path) -> Result<PathBuf, String> {
-    let internal = crate::vault::ensure_internal_directory(vault_root)
-        .map_err(|_| "Der interne Asset-Ordner ist unsicher.".to_owned())?;
+pub(crate) fn assets_dir(vault_root: &Path) -> Result<PathBuf, String> {
+    let internal = crate::vault::ensure_internal_directory(vault_root)?;
     let assets = internal.join("assets");
     ensure_private_dir(&assets)?;
+    let root_real = fs::canonicalize(vault_root)
+        .map_err(|_| "Der interne Asset-Ordner verlässt den Vault.".to_owned())?;
+    let real = fs::canonicalize(&assets)
+        .map_err(|_| "Der interne Asset-Ordner verlässt den Vault.".to_owned())?;
+    if !crate::vault::is_inside_root(&root_real, &real) {
+        return Err("Der interne Asset-Ordner verlässt den Vault.".to_owned());
+    }
     Ok(assets)
 }
 
