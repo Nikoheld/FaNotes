@@ -1012,6 +1012,19 @@ fn request_json(
         }
     })?;
     let status = response.status().as_u16();
+    if let Some(advertised) = response
+        .headers()
+        .get("content-length")
+        .and_then(|value| value.to_str().ok())
+        .and_then(fanotes_famd::js_tonumber)
+        .filter(|value| value.is_finite())
+    {
+        if advertised > (8 * 1024 * 1024) as f64 {
+            return Err(format!(
+                "{label} hat eine unerwartet große Antwort geliefert."
+            ));
+        }
+    }
     let text = response
         .body_mut()
         .read_to_string()

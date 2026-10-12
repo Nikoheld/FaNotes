@@ -44,6 +44,34 @@ fn serve_ollama() -> String {
 }
 
 #[test]
+fn an_advertised_ai_response_above_the_desktop_limit_is_refused() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    thread::spawn(move || {
+        let Ok((mut stream, _)) = listener.accept() else {
+            return;
+        };
+        let mut buffer = [0u8; 4096];
+        let _ = stream.read(&mut buffer);
+        let response = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 9000000\r\nConnection: close\r\n\r\n{}";
+        let _ = stream.write_all(response.as_bytes());
+    });
+    let mut host = host();
+    let error = host
+        .dispatch(
+            "fanotes:ai-list-models",
+            &[json!({
+                "provider": "ollama",
+                "baseUrl": format!("http://127.0.0.1:{port}"),
+                "apiKey": "",
+                "model": "",
+            })],
+        )
+        .unwrap_err();
+    assert!(error.contains("unerwartet große"), "{error}");
+}
+
+#[test]
 fn ollama_lists_a_model_and_returns_markdown() {
     let origin = serve_ollama();
     let mut host = host();
