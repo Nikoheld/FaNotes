@@ -356,37 +356,47 @@ fn expand_path(raw: &str, env: &BTreeMap<String, String>, from_dir: &Path) -> Op
 }
 
 fn expand_env_vars(value: &str, env: &BTreeMap<String, String>, home: &str, xdg: &str) -> String {
-    let bytes = value.as_bytes();
     let mut out = String::new();
-    let mut index = 0;
-    while index < bytes.len() {
-        if bytes[index] != b'$' {
-            out.push(bytes[index] as char);
-            index += 1;
+    let mut rest = value;
+    while let Some(character) = rest.chars().next() {
+        if character != '$' {
+            out.push(character);
+            rest = &rest[character.len_utf8()..];
             continue;
         }
-        if bytes.get(index + 1) == Some(&b'{') {
-            if let Some(end) = value[index + 2..].find('}') {
-                let name = &value[index + 2..index + 2 + end];
-                out.push_str(&env_value(name, env, home, xdg));
-                index += 2 + end + 1;
-                continue;
-            }
+        rest = &rest[1..];
+        if let Some(name) = braced_env_name(rest) {
+            out.push_str(&env_value(name, env, home, xdg));
+            rest = &rest[name.len() + 2..];
+            continue;
         }
-        let start = index + 1;
-        let mut end = start;
-        while end < bytes.len() && (bytes[end].is_ascii_alphanumeric() || bytes[end] == b'_') {
-            end += 1;
-        }
-        if end > start && (bytes[start].is_ascii_alphabetic() || bytes[start] == b'_') {
-            out.push_str(&env_value(&value[start..end], env, home, xdg));
-            index = end;
+        let name_len = rest
+            .chars()
+            .take_while(|character| character.is_ascii_alphanumeric() || *character == '_')
+            .map(char::len_utf8)
+            .sum::<usize>();
+        let name = &rest[..name_len];
+        if env_name(name) {
+            out.push_str(&env_value(name, env, home, xdg));
+            rest = &rest[name_len..];
         } else {
             out.push('$');
-            index += 1;
         }
     }
     out
+}
+
+fn braced_env_name(value: &str) -> Option<&str> {
+    let inside = value.strip_prefix('{')?;
+    let end = inside.find('}')?;
+    let name = &inside[..end];
+    env_name(name).then_some(name)
+}
+
+fn env_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    matches!(chars.next(), Some(character) if character.is_ascii_alphabetic() || character == '_')
+        && chars.all(|character| character.is_ascii_alphanumeric() || character == '_')
 }
 
 fn env_value(name: &str, env: &BTreeMap<String, String>, home: &str, xdg: &str) -> String {
@@ -871,6 +881,38 @@ mod tests {
         assert_eq!(scaled("1.25e0px")["deviceScaleFactor"], 1.25);
         assert_eq!(scaled("2E-1")["deviceScaleFactor"], 2.0);
         assert_eq!(scaled("2E-1")["deviceScaleSource"], "fallback");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_hyprland_source_keeps_umlauts_in_the_path() {
+        let dir = std::env::temp_dir().join(format!(
+            "fanotes-hypr-umlaut-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        let folder = dir.join("jörg");
+        fs::create_dir_all(&folder).unwrap();
+        fs::write(dir.join("hyprland.conf"), "source = ./jörg/looks.conf\n").unwrap();
+        fs::write(folder.join("looks.conf"), "force_zero_scaling = true\n").unwrap();
+        let config = dir.join("hyprland.conf");
+        let runtime = report(
+            "linux",
+            &env(&[
+                ("FANOTES_HYPRLAND_CONFIG", config.to_str().unwrap()),
+                ("HOME", ""),
+            ]),
+            || panic!("hyprctl"),
+        );
+        assert_eq!(runtime["hyprlandZeroScaling"], true);
+        assert_eq!(
+            expand_env_vars("Notiz ${1abc} $HOME", &env(&[("HOME", "jörg")]), "jörg", ""),
+            "Notiz ${1abc} jörg"
+        );
         let _ = fs::remove_dir_all(&dir);
     }
 }
