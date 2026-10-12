@@ -201,6 +201,13 @@ fn resetting_app_data_waits_for_the_next_launch_and_keeps_the_vault() {
     assert!(app.join("settings.json").is_file());
     let marker = app.parent().unwrap().join(".fanotes-reset-pending.json");
     assert!(marker.is_file());
+    let marker_text = fs::read_to_string(&marker).unwrap();
+    assert!(marker_text.ends_with('\n'), "{marker_text}");
+    assert_eq!(marker_text.chars().filter(|character| *character == '\n').count(), 1);
+    let parsed: serde_json::Value = serde_json::from_str(marker_text.trim_end()).unwrap();
+    assert_eq!(parsed["version"], json!(1));
+    assert!(parsed["userDataPath"].as_str().unwrap().ends_with("app"));
+    assert!(parsed["createdAt"].as_str().unwrap().ends_with('Z'));
     assert_eq!(
         host.dispatch("fanotes:reset-app-data", &[]).unwrap()["restarting"],
         true
