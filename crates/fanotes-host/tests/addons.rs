@@ -182,3 +182,59 @@ fn a_symlinked_addon_store_is_not_followed() {
         assert_eq!(std::fs::read(outside.join("data")).unwrap(), b"leak");
     }
 }
+
+#[test]
+fn an_addon_file_with_a_bad_byte_still_opens() {
+    let (dir, mut host) = scratch("lossy");
+    host.dispatch(
+        "fanotes:addons-save",
+        &[json!({
+            "id": "margin-notes",
+            "enabled": true,
+            "manifest": { "name": "Margin Xotes" }
+        })],
+    )
+    .unwrap();
+    host.dispatch(
+        "fanotes:addons-write-files",
+        &[
+            json!("margin-notes"),
+            json!({ "main.js": "export const mark = \"X\";" }),
+        ],
+    )
+    .unwrap();
+    host.dispatch(
+        "fanotes:addons-write-data",
+        &[json!("margin-notes"), json!("{\"note\":\"X\"}")],
+    )
+    .unwrap();
+    let root = dir.join("app/addons");
+    for relative in [
+        "margin-notes/main.js",
+        "margin-notes.data.json",
+        "addons.json",
+    ] {
+        let path = root.join(relative);
+        let mut bytes = std::fs::read(&path).unwrap();
+        let index = bytes.iter().position(|byte| *byte == b'X').unwrap();
+        bytes[index] = 0xff;
+        std::fs::write(&path, bytes).unwrap();
+    }
+    let script = host
+        .dispatch(
+            "fanotes:addons-read-file",
+            &[json!("margin-notes"), json!("main.js")],
+        )
+        .unwrap();
+    assert!(script.as_str().unwrap().contains('\u{FFFD}'));
+    let data = host
+        .dispatch("fanotes:addons-read-data", &[json!("margin-notes")])
+        .unwrap();
+    assert!(data.as_str().unwrap().contains('\u{FFFD}'));
+    let listed = host.dispatch("fanotes:addons-list", &[]).unwrap();
+    assert_eq!(listed[0]["id"], "margin-notes");
+    assert!(listed[0]["manifest"]["name"]
+        .as_str()
+        .unwrap()
+        .contains('\u{FFFD}'));
+}

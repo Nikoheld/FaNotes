@@ -33,13 +33,16 @@ pub(crate) fn read_lossy_string(path: &Path) -> Option<String> {
 }
 
 pub fn records_history(relative: &str) -> bool {
-    let lower = relative.to_lowercase();
-    lower.ends_with(".md") || lower.ends_with(".markdown") || lower.ends_with(".famd")
+    is_note_text(relative)
 }
 
 pub fn is_note_text(relative: &str) -> bool {
-    let lower = relative.to_lowercase();
-    lower.ends_with(".md") || lower.ends_with(".markdown") || lower.ends_with(".famd")
+    matches!(
+        crate::vault::posix_extname(relative)
+            .to_ascii_lowercase()
+            .as_str(),
+        ".md" | ".markdown" | ".famd"
+    )
 }
 
 pub fn write_note_file(
@@ -48,7 +51,7 @@ pub fn write_note_file(
     content: &str,
     settings_paper: Option<&str>,
 ) -> Result<String, String> {
-    let is_famd = relative.to_lowercase().ends_with(".famd");
+    let is_famd = crate::vault::posix_extname(relative).eq_ignore_ascii_case(".famd");
     let body = strip_famd_payload(content);
     let markdown = if body.ends_with('\n') {
         body
@@ -60,6 +63,11 @@ pub fn write_note_file(
     } else {
         let path = vault::resolve_note_file(root, relative)?;
         require_parent_directory(&path)?;
+        // The desktop creates a missing `.famd` on save. A missing markdown
+        // note is not created here; that is `create-note`.
+        if !path.is_file() {
+            return Err("Der Eintrag wurde nicht gefunden.".to_owned());
+        }
         atomic_write(&path, markdown.as_bytes(), 0o600)?;
         path
     };
@@ -165,12 +173,15 @@ pub fn attach_sidecar(
 }
 
 pub fn read_page_stats(host: &Host, relative: &str) -> Result<Value, String> {
-    let (_path, _body, payload) = load_note(host, relative)?;
-    Ok(payload.page_stats.unwrap_or(Value::Null))
+    Ok(read_companion(host, relative)?
+        .and_then(|payload| payload.page_stats)
+        .unwrap_or(Value::Null))
 }
 
 pub fn read_paper_style(host: &Host, relative: &str) -> Result<Value, String> {
-    let (_path, _body, payload) = load_note(host, relative)?;
+    let Some(payload) = read_companion(host, relative)? else {
+        return Ok(Value::Null);
+    };
     if let Some(style) = payload
         .paper_style
         .as_deref()
@@ -203,9 +214,13 @@ pub fn set_paper_style(host: &Host, relative: &str, paper_style: &str) -> Result
 }
 
 pub fn read_links(host: &Host, relative: &str) -> Result<Value, String> {
-    let (_path, _body, payload) = load_note(host, relative)?;
+    let links = read_companion(host, relative)?.map(|payload| payload.note_links);
     Ok(Value::Array(
-        payload.note_links.iter().map(NoteLink::to_json).collect(),
+        links
+            .unwrap_or_default()
+            .iter()
+            .map(NoteLink::to_json)
+            .collect(),
     ))
 }
 
@@ -225,10 +240,10 @@ pub fn write_links(host: &Host, relative: &str, raw: &Value) -> Result<Value, St
 }
 
 pub fn read_backups(host: &Host, relative: &str) -> Result<Value, String> {
-    let (_path, _body, payload) = load_note(host, relative)?;
+    let backups = read_companion(host, relative)?.map(|payload| payload.note_backups);
     Ok(Value::Array(
-        payload
-            .note_backups
+        backups
+            .unwrap_or_default()
             .iter()
             .map(NoteBackup::to_json)
             .collect(),
@@ -414,6 +429,31 @@ fn trim_history(directory: &Path, index: &mut Value) -> Result<(), String> {
     Ok(())
 }
 
+const MAX_COMPANION_BYTES: u64 = 40 * 1024 * 1024;
+
+/// Reads of page stats, paper, links, and backups look only at the companion.
+///
+/// A missing companion is empty. A directory in its place uses the desktop
+/// file error. The note path itself can be a directory.
+fn read_companion(host: &Host, relative: &str) -> Result<Option<FamdPayload>, String> {
+    let root = vault_root(host)?;
+    let note = note_path(relative)?;
+    let famd_relative = companion_note_path(&note, ".famd");
+    let path = vault::resolve_note_file(root, &famd_relative)?;
+    match fs::symlink_metadata(&path) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(_) => Err("Die Datei konnte nicht gelesen werden.".to_owned()),
+        Ok(meta) if meta.file_type().is_symlink() => {
+            Err("Symbolische Links sind innerhalb des Vaults nicht erlaubt.".to_owned())
+        }
+        Ok(meta) if !meta.is_file() => {
+            Err("Die gewählte Datei ist keine reguläre Datei.".to_owned())
+        }
+        Ok(meta) if meta.len() > MAX_COMPANION_BYTES => Err("Die Datei ist zu groß.".to_owned()),
+        Ok(_) => Ok(read_lossy_string(&path).and_then(|source| parse_famd(&source).payload)),
+    }
+}
+
 fn load_note(host: &Host, relative: &str) -> Result<(PathBuf, String, FamdPayload), String> {
     let root = vault_root(host)?;
     let note = note_path(relative)?;
@@ -450,12 +490,7 @@ fn store_note(path: &Path, body: &str, payload: &FamdPayload) -> Result<(), Stri
 
 fn note_path(relative: &str) -> Result<String, String> {
     let path = vault::normalize_relative_path(relative, false, false)?;
-    let lower = path.to_lowercase();
-    if lower.ends_with(".md")
-        || lower.ends_with(".markdown")
-        || lower.ends_with(".famd")
-        || lower.ends_with(".pdf")
-    {
+    if is_note_extension(&path) {
         Ok(path)
     } else {
         Err("Es dürfen nur Markdown-Dateien, PDF-Notizen und FaNotes-Handschriftdateien (.famd) bearbeitet werden.".to_owned())
@@ -464,12 +499,18 @@ fn note_path(relative: &str) -> Result<String, String> {
 
 fn markdown_path(relative: &str) -> Result<String, String> {
     let path = vault::normalize_relative_path(relative, false, false)?;
-    let lower = path.to_lowercase();
-    if lower.ends_with(".md") || lower.ends_with(".markdown") || lower.ends_with(".famd") {
+    if is_note_text(&path) {
         Ok(path)
     } else {
         Err("Es dürfen nur Markdown-Dateien und FaNotes-Handschriftdateien (.famd) bearbeitet werden.".to_owned())
     }
+}
+
+fn is_note_extension(path: &str) -> bool {
+    matches!(
+        vault::posix_extname(path).to_ascii_lowercase().as_str(),
+        ".md" | ".markdown" | ".famd" | ".pdf"
+    )
 }
 
 fn parse_subject_books(value: &Value) -> Vec<Value> {
@@ -499,16 +540,33 @@ fn sanitize_subject_book(value: &Value) -> Option<Value> {
     let object = value.as_object()?;
     let subject_path = sanitize_folder_path(object.get("subjectPath").and_then(Value::as_str))?;
     let book_path = sanitize_pdf_path(object.get("bookPath").and_then(Value::as_str))?;
-    let page = object
-        .get("lastPage")
-        .and_then(Value::as_i64)
-        .filter(|page| *page >= 1)
-        .unwrap_or(1);
+    let page = subject_book_page(object.get("lastPage"));
     Some(json!({
         "subjectPath": subject_path,
         "bookPath": book_path,
         "lastPage": page,
     }))
+}
+
+/// Desktop `Number(lastPage)` followed by `Number.isSafeInteger`.
+fn subject_book_page(value: Option<&Value>) -> i64 {
+    let number = match value {
+        Some(Value::Number(number)) => number.as_f64().unwrap_or(f64::NAN),
+        Some(Value::String(text)) => vault::js_tonumber(text).unwrap_or(f64::NAN),
+        Some(Value::Bool(true)) => 1.0,
+        Some(Value::Bool(false)) => 0.0,
+        Some(Value::Null) => 0.0,
+        _ => f64::NAN,
+    };
+    if number.is_finite()
+        && number.fract() == 0.0
+        && number.abs() <= 9_007_199_254_740_991.0
+        && number >= 1.0
+    {
+        number as i64
+    } else {
+        1
+    }
 }
 
 fn sanitize_folder_path(value: Option<&str>) -> Option<String> {
@@ -961,6 +1019,7 @@ mod publish_tests {
         ));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("Mathe")).unwrap();
+        std::fs::write(dir.join("Mathe/Seite.md"), b"alt\n").unwrap();
         let stamp = write_note_file(&dir, "Mathe/Seite.md", "Hallo", None).unwrap();
         let path = dir.join("Mathe/Seite.md");
         assert_eq!(stamp, file_mtime_iso(&path));

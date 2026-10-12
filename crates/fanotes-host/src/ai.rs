@@ -38,7 +38,10 @@ pub fn list_lm_studio(base_url: &str, api_token: &str) -> Result<Value, String> 
         "apiKey": clean_lm_studio_token(api_token)?,
         "model": "",
     });
-    list_provider(&connection)
+    // The LM Studio panel uses `lmStudioModelFromNative`, which trims the name.
+    Ok(Value::Array(finish_models(lmstudio_panel_models(
+        &connection,
+    )?)))
 }
 
 pub fn list_models(connection: &Value) -> Result<Value, String> {
@@ -55,7 +58,7 @@ pub fn transform(payload: &Value) -> Result<Value, String> {
     let provider = provider_name(connection)?;
     let model = required_model(connection)?;
     let markdown = required_markdown(object.get("markdown"))?;
-    let actions = required_actions(object.get("actions"))?;
+    let actions = required_actions(object.get("actions"), false)?;
     let instruction = limited_instruction(
         object
             .get("instruction")
@@ -135,7 +138,7 @@ pub fn transform_lm_studio(payload: &Value) -> Result<Value, String> {
     let origin = lm_studio_origin(base_url)?;
     let model = required_model(payload)?;
     let markdown = required_markdown(object.get("markdown"))?;
-    let actions = required_actions(object.get("actions"))?;
+    let actions = required_actions(object.get("actions"), true)?;
     let instruction = limited_instruction(
         object
             .get("instruction")
@@ -184,7 +187,10 @@ pub fn transform_lm_studio(payload: &Value) -> Result<Value, String> {
         output_token_limit(&markdown),
     )?;
     Ok(json!({
-        "markdown": unwrap_markdown(&reply.text)?,
+        "markdown": unwrap_markdown_with(
+            &reply.text,
+            "LM Studio hat kein verwendbares Markdown-Dokument zurückgegeben.",
+        )?,
         "model": model,
         "stats": reply.stats,
     }))
@@ -224,11 +230,18 @@ fn parse_ollama_models(body: &Value) -> Result<Vec<Value>, String> {
     Ok(models
         .iter()
         .filter_map(|entry| {
-            let name = entry
-                .get("model")
-                .and_then(Value::as_str)
-                .or_else(|| entry.get("name").and_then(Value::as_str))?;
-            let display = entry.get("name").and_then(Value::as_str).unwrap_or(name);
+            // `entry.model || entry.name` skips an empty string. The display
+            // name does the same and falls back to the key.
+            let model_name = entry.get("model").and_then(Value::as_str);
+            let name_field = entry.get("name").and_then(Value::as_str);
+            let name = if let Some(model) = model_name.filter(|text| !text.is_empty()) {
+                model
+            } else if let Some(name) = name_field {
+                name
+            } else {
+                model_name?
+            };
+            let display = name_field.filter(|text| !text.is_empty()).unwrap_or(name);
             let mut record = model_record("ollama", name, display);
             let details = entry.get("details");
             set_model_details(
@@ -253,27 +266,46 @@ fn parse_ollama_models(body: &Value) -> Result<Vec<Value>, String> {
 }
 
 fn lmstudio_models(connection: &Value) -> Result<Vec<Value>, String> {
+    load_lmstudio(connection, parse_lmstudio_models, parse_lmstudio_legacy)
+}
+
+fn lmstudio_panel_models(connection: &Value) -> Result<Vec<Value>, String> {
+    load_lmstudio(
+        connection,
+        parse_lmstudio_native,
+        parse_lmstudio_native_legacy,
+    )
+}
+
+fn load_lmstudio(
+    connection: &Value,
+    native: fn(&Value) -> Result<Vec<Value>, String>,
+    legacy: fn(&Value) -> Result<Vec<Value>, String>,
+) -> Result<Vec<Value>, String> {
     let origin = origin(connection, "lmstudio")?;
-    let native = request_json(
+    let response = request_json(
         "GET",
         &format!("{origin}/api/v1/models"),
         connection,
         None,
         Duration::from_secs(20),
     );
-    match native {
-        Ok(body) => return parse_lmstudio_models(&body),
-        Err(error) if error.contains("[HTTP 404]") => {}
-        Err(error) => return Err(error),
+    match response {
+        Ok(body) => native(&body),
+        Err(error) if error.contains("[HTTP 404]") => legacy(&request_json(
+            "GET",
+            &format!("{origin}/v1/models"),
+            connection,
+            None,
+            Duration::from_secs(20),
+        )?),
+        Err(error) => Err(error),
     }
-    let legacy = request_json(
-        "GET",
-        &format!("{origin}/v1/models"),
-        connection,
-        None,
-        Duration::from_secs(20),
-    )?;
-    let models = legacy
+}
+
+/// The `/v1/models` fallback. An id that is only JavaScript whitespace is omitted.
+fn parse_lmstudio_legacy(body: &Value) -> Result<Vec<Value>, String> {
+    let models = body
         .get("data")
         .and_then(Value::as_array)
         .ok_or_else(|| "LM Studio hat keine Modellliste geliefert.".to_owned())?;
@@ -281,7 +313,104 @@ fn lmstudio_models(connection: &Value) -> Result<Vec<Value>, String> {
         .iter()
         .filter_map(|entry| {
             let id = entry.get("id").and_then(Value::as_str)?;
+            if crate::vault::js_trim(id).is_empty() {
+                return None;
+            }
             Some(model_record("lmstudio", id, id))
+        })
+        .take(1000)
+        .collect())
+}
+
+/// The LM Studio panel (`lmStudioModelFromNative`). A padded display name is
+/// trimmed, and a name that is only JavaScript whitespace falls back to the key.
+fn parse_lmstudio_native(body: &Value) -> Result<Vec<Value>, String> {
+    let models = body
+        .get("models")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "LM Studio hat keine Modellliste geliefert.".to_owned())?;
+    Ok(models
+        .iter()
+        .filter_map(|entry| {
+            if entry.get("type").and_then(Value::as_str) != Some("llm") {
+                return None;
+            }
+            let raw_key = entry.get("key").and_then(Value::as_str)?;
+            if crate::vault::js_trim(raw_key).is_empty() {
+                return None;
+            }
+            let key = crate::vault::truncate_utf16(raw_key, 500);
+            let display = match entry.get("display_name").and_then(Value::as_str) {
+                Some(name) => {
+                    let trimmed = crate::vault::js_trim(name);
+                    if trimmed.is_empty() {
+                        key.clone()
+                    } else {
+                        crate::vault::truncate_utf16(trimmed, 500)
+                    }
+                }
+                None => key.clone(),
+            };
+            let publisher = entry
+                .get("publisher")
+                .and_then(Value::as_str)
+                .map(|text| crate::vault::truncate_utf16(text, 200))
+                .unwrap_or_default();
+            let quantization = entry
+                .get("quantization")
+                .and_then(|value| value.get("name"))
+                .and_then(Value::as_str)
+                .map(|text| crate::vault::truncate_utf16(text, 100));
+            let params = entry
+                .get("params_string")
+                .and_then(Value::as_str)
+                .map(|text| crate::vault::truncate_utf16(text, 100));
+            let loaded = entry
+                .get("loaded_instances")
+                .and_then(Value::as_array)
+                .is_some_and(|items| !items.is_empty());
+            let description = entry
+                .get("description")
+                .and_then(Value::as_str)
+                .map(|text| crate::vault::truncate_utf16(text, 1200));
+            Some(json!({
+                "key": key,
+                "displayName": display,
+                "publisher": publisher,
+                "quantization": quantization,
+                "params": params,
+                "loaded": loaded,
+                "maxContextLength": finite_context_length(&entry["max_context_length"]),
+                "description": description,
+            }))
+        })
+        .collect())
+}
+
+/// The panel's `/v1/models` fallback. The id is both key and display name.
+fn parse_lmstudio_native_legacy(body: &Value) -> Result<Vec<Value>, String> {
+    let models = body
+        .get("data")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "LM Studio hat keine Modellliste geliefert.".to_owned())?;
+    Ok(models
+        .iter()
+        .filter_map(|entry| {
+            let id = entry.get("id").and_then(Value::as_str)?;
+            if crate::vault::js_trim(id).is_empty() {
+                return None;
+            }
+            let id = crate::vault::truncate_utf16(id, 500);
+            Some(json!({
+                "key": id,
+                "displayName": id,
+                "publisher": "",
+                "quantization": null,
+                "params": null,
+                "loaded": true,
+                "maxContextLength": null,
+                "description": null,
+            }))
         })
         .take(1000)
         .collect())
@@ -299,15 +428,14 @@ fn parse_lmstudio_models(body: &Value) -> Result<Vec<Value>, String> {
                 return None;
             }
             let raw_key = entry.get("key").and_then(Value::as_str)?;
-            if raw_key.trim().is_empty() {
+            if crate::vault::js_trim(raw_key).is_empty() {
                 return None;
             }
             let key = crate::vault::truncate_utf16(raw_key, 500);
-            let display_raw = entry.get("display_name").and_then(Value::as_str);
-            let display = match display_raw {
-                Some(name) if !name.trim().is_empty() => {
-                    crate::vault::truncate_utf16(name.trim(), 500)
-                }
+            // `String(displayName || key)` keeps surrounding spaces. Only an
+            // empty string falls back to the key.
+            let display = match entry.get("display_name").and_then(Value::as_str) {
+                Some(name) if !name.is_empty() => crate::vault::truncate_utf16(name, 500),
                 _ => key.clone(),
             };
             let mut record = model_record("lmstudio", &key, &display);
@@ -324,7 +452,7 @@ fn parse_lmstudio_models(body: &Value) -> Result<Vec<Value>, String> {
                     .and_then(Value::as_str),
                 entry.get("params_string").and_then(Value::as_str),
                 Some(loaded),
-                finite_number(&entry["max_context_length"]),
+                finite_context_length(&entry["max_context_length"]),
                 entry.get("description").and_then(Value::as_str),
             );
             Some(record)
@@ -356,13 +484,10 @@ fn parse_openai_models(body: &Value) -> Result<Vec<Value>, String> {
             if let Some(object) = record.as_object_mut() {
                 object.insert(
                     "publisher".into(),
-                    Value::String(
-                        entry
-                            .get("owned_by")
-                            .and_then(Value::as_str)
-                            .unwrap_or("")
-                            .to_owned(),
-                    ),
+                    Value::String(crate::vault::truncate_utf16(
+                        entry.get("owned_by").and_then(Value::as_str).unwrap_or(""),
+                        200,
+                    )),
                 );
             }
             Some(record)
@@ -400,10 +525,11 @@ fn parse_gemini_models(body: &Value) -> Result<Vec<Value>, String> {
             {
                 return None;
             }
-            let key = name.trim_start_matches("models/");
+            let key = name.strip_prefix("models/").unwrap_or(name);
             let display = entry
                 .get("displayName")
                 .and_then(Value::as_str)
+                .filter(|text| !text.is_empty())
                 .unwrap_or(key);
             let mut record = model_record("gemini", key, display);
             set_model_details(
@@ -412,7 +538,7 @@ fn parse_gemini_models(body: &Value) -> Result<Vec<Value>, String> {
                 None,
                 None,
                 None,
-                finite_number(&entry["inputTokenLimit"]),
+                finite_context_length(&entry["inputTokenLimit"]),
                 entry.get("description").and_then(Value::as_str),
             );
             Some(record)
@@ -444,6 +570,7 @@ fn parse_anthropic_models(body: &Value) -> Result<Vec<Value>, String> {
             let display = entry
                 .get("display_name")
                 .and_then(Value::as_str)
+                .filter(|text| !text.is_empty())
                 .unwrap_or(id);
             let mut record = model_record("anthropic", id, display);
             set_model_details(
@@ -452,7 +579,7 @@ fn parse_anthropic_models(body: &Value) -> Result<Vec<Value>, String> {
                 None,
                 None,
                 None,
-                finite_number(&entry["max_input_tokens"]),
+                finite_context_length(&entry["max_input_tokens"]),
                 None,
             );
             Some(record)
@@ -529,7 +656,7 @@ fn parse_opencode_models(body: &Value) -> Result<Vec<Value>, String> {
                 None,
                 entry
                     .get("limit")
-                    .map(|limit| finite_number(&limit["context"]))
+                    .map(|limit| finite_context_length(&limit["context"]))
                     .unwrap_or(None),
                 entry.get("description").and_then(Value::as_str),
             );
@@ -755,9 +882,6 @@ fn ollama_chat(
         .and_then(Value::as_str)
         .unwrap_or("")
         .to_owned();
-    if text.is_empty() {
-        return Err("Ollama hat kein verwendbares Markdown-Dokument zurückgegeben.".to_owned());
-    }
     let count = finite_number(&body["eval_count"]);
     let duration = finite_number(&body["eval_duration"]);
     let per_second = match (count, duration) {
@@ -810,35 +934,31 @@ fn lm_studio_chat(
 }
 
 fn lm_studio_text(body: &Value) -> Result<AiReply, String> {
-    let text = body
+    let items = body
         .get("output")
         .and_then(Value::as_array)
-        .map(|items| {
-            items
-                .iter()
-                .filter_map(|item| {
-                    if item.get("type").and_then(Value::as_str) == Some("message") {
-                        item.get("content").and_then(Value::as_str)
-                    } else {
-                        None
-                    }
-                })
-                .collect::<Vec<_>>()
-                .join("\n\n")
+        .ok_or_else(|| "LM Studio hat keine Textantwort geliefert.".to_owned())?;
+    let messages: Vec<&str> = items
+        .iter()
+        .filter_map(|item| {
+            if item.get("type").and_then(Value::as_str) == Some("message") {
+                item.get("content").and_then(Value::as_str)
+            } else {
+                None
+            }
         })
-        .unwrap_or_default();
-    if text.is_empty() {
-        Err("Der AI-Anbieter hat kein verwendbares Markdown-Dokument zurückgegeben.".to_owned())
-    } else {
-        Ok(AiReply {
-            text,
-            stats: stats_object(
-                finite_number(&body["stats"]["input_tokens"]),
-                finite_number(&body["stats"]["total_output_tokens"]),
-                finite_number(&body["stats"]["tokens_per_second"]),
-            ),
-        })
+        .collect();
+    if messages.is_empty() {
+        return Err("LM Studio hat keine Textantwort geliefert.".to_owned());
     }
+    Ok(AiReply {
+        text: messages.join("\n\n"),
+        stats: stats_object(
+            finite_number(&body["stats"]["input_tokens"]),
+            finite_number(&body["stats"]["total_output_tokens"]),
+            finite_number(&body["stats"]["tokens_per_second"]),
+        ),
+    })
 }
 
 fn openai_response(
@@ -934,22 +1054,17 @@ fn chat_completions(
         })),
         Duration::from_secs(600),
     )?;
-    let text = body["choices"][0]["message"]["content"]
-        .as_str()
-        .unwrap_or("")
-        .to_owned();
-    if text.is_empty() {
-        Err("Der AI-Anbieter hat kein verwendbares Markdown-Dokument zurückgegeben.".to_owned())
-    } else {
-        Ok(AiReply {
-            text,
-            stats: stats_object(
-                finite_number(&body["usage"]["prompt_tokens"]),
-                finite_number(&body["usage"]["completion_tokens"]),
-                None,
-            ),
-        })
-    }
+    let Some(text) = body["choices"][0]["message"]["content"].as_str() else {
+        return Err("LM Studio hat keine Textantwort geliefert.".to_owned());
+    };
+    Ok(AiReply {
+        text: text.to_owned(),
+        stats: stats_object(
+            finite_number(&body["usage"]["prompt_tokens"]),
+            finite_number(&body["usage"]["completion_tokens"]),
+            None,
+        ),
+    })
 }
 
 fn finite_number(value: &Value) -> Option<f64> {
@@ -958,6 +1073,12 @@ fn finite_number(value: &Value) -> Option<f64> {
         .or_else(|| value.as_i64().map(|number| number as f64))
         .or_else(|| value.as_u64().map(|number| number as f64))?;
     (number.is_finite() && number >= 0.0).then_some(number)
+}
+
+/// `Number.isFinite` for the LM Studio panel's context length. A negative length stays.
+fn finite_context_length(value: &Value) -> Option<f64> {
+    let number = value.as_f64()?;
+    number.is_finite().then_some(number)
 }
 
 fn stats_object(input: Option<f64>, output: Option<f64>, per_second: Option<f64>) -> Value {
@@ -1018,6 +1139,19 @@ fn request_json(
         }
     })?;
     let status = response.status().as_u16();
+    if let Some(advertised) = response
+        .headers()
+        .get("content-length")
+        .and_then(|value| value.to_str().ok())
+        .and_then(fanotes_famd::js_tonumber)
+        .filter(|value| value.is_finite())
+    {
+        if advertised > (8 * 1024 * 1024) as f64 {
+            return Err(format!(
+                "{label} hat eine unerwartet große Antwort geliefert."
+            ));
+        }
+    }
     let text = response
         .body_mut()
         .read_to_string()
@@ -1117,7 +1251,7 @@ fn clean_secret(value: &str, label: &str) -> Result<String, String> {
     {
         return Err(format!("Der {label} ist ungültig."));
     }
-    Ok(value.trim().to_owned())
+    Ok(crate::vault::js_trim(value).to_owned())
 }
 
 fn clean_lm_studio_token(value: &str) -> Result<String, String> {
@@ -1131,14 +1265,14 @@ fn clean_lm_studio_token(value: &str) -> Result<String, String> {
     {
         return Err("Das LM-Studio-API-Token ist ungültig.".to_owned());
     }
-    Ok(value.trim().to_owned())
+    Ok(crate::vault::js_trim(value).to_owned())
 }
 
 fn opencode_username(value: Option<&str>) -> String {
     let Some(value) = value else {
         return "opencode".to_owned();
     };
-    let trimmed = value.trim();
+    let trimmed = crate::vault::js_trim(value);
     if trimmed.is_empty()
         || crate::vault::utf16_len(value) > 200
         || value
@@ -1204,13 +1338,13 @@ fn set_model_details(
             Value::String(crate::vault::truncate_utf16(publisher, 200)),
         );
     }
-    if let Some(quantization) = quantization {
+    if let Some(quantization) = quantization.filter(|text| !text.is_empty()) {
         object.insert(
             "quantization".into(),
             Value::String(crate::vault::truncate_utf16(quantization, 100)),
         );
     }
-    if let Some(params) = params {
+    if let Some(params) = params.filter(|text| !text.is_empty()) {
         object.insert(
             "params".into(),
             Value::String(crate::vault::truncate_utf16(params, 100)),
@@ -1222,7 +1356,7 @@ fn set_model_details(
     if let Some(max_context) = max_context {
         object.insert("maxContextLength".into(), json!(max_context));
     }
-    if let Some(description) = description {
+    if let Some(description) = description.filter(|text| !text.is_empty()) {
         object.insert(
             "description".into(),
             Value::String(crate::vault::truncate_utf16(description, 1200)),
@@ -1293,7 +1427,7 @@ fn required_model(value: &Value) -> Result<String, String> {
                 .and_then(Value::as_str)
         })
         .unwrap_or("");
-    if model.trim().is_empty()
+    if crate::vault::js_trim(model).is_empty()
         || crate::vault::utf16_len(model) > 500
         || model
             .chars()
@@ -1301,12 +1435,12 @@ fn required_model(value: &Value) -> Result<String, String> {
     {
         Err("Wähle zuerst ein gültiges AI-Modell.".to_owned())
     } else {
-        Ok(model.trim().to_owned())
+        Ok(crate::vault::js_trim(model).to_owned())
     }
 }
 
 fn limited_instruction(value: &str) -> String {
-    crate::vault::truncate_utf16(value.trim(), 12_000)
+    crate::vault::truncate_utf16(crate::vault::js_trim(value), 12_000)
 }
 
 fn build_prompt(
@@ -1413,8 +1547,8 @@ fn vault_notes(value: Option<&Value>) -> Vec<(String, String)> {
             let title = entry.get("title")?.as_str()?;
             let path = entry.get("relativePath")?.as_str()?;
             Some((
-                crate::vault::truncate_utf16(title.trim(), 500),
-                crate::vault::truncate_utf16(path.trim(), 1000),
+                crate::vault::truncate_utf16(crate::vault::js_trim(title), 500),
+                crate::vault::truncate_utf16(crate::vault::js_trim(path), 1000),
             ))
         })
         .collect()
@@ -1429,62 +1563,127 @@ fn required_markdown(value: Option<&Value>) -> Result<String, String> {
     }
 }
 
-fn required_actions(value: Option<&Value>) -> Result<Vec<String>, String> {
+fn required_actions(value: Option<&Value>, lm_studio: bool) -> Result<Vec<String>, String> {
+    let missing = if lm_studio {
+        "Wähle mindestens eine KI-Aktion."
+    } else {
+        "Wähle mindestens eine AI-Aktion."
+    };
+    let invalid = if lm_studio {
+        "Die ausgewählten KI-Aktionen sind ungültig."
+    } else {
+        "Die ausgewählten AI-Aktionen sind ungültig."
+    };
     let actions = value
         .and_then(Value::as_array)
-        .ok_or_else(|| "Wähle mindestens eine AI-Aktion.".to_owned())?;
+        .ok_or_else(|| missing.to_owned())?;
     if actions.is_empty() {
-        return Err("Wähle mindestens eine AI-Aktion.".to_owned());
+        return Err(invalid.to_owned());
     }
     let mut unique = Vec::new();
     for action in actions {
         let name = action
             .as_str()
             .filter(|name| ACTIONS.contains(name))
-            .ok_or_else(|| "Die ausgewählten AI-Aktionen sind ungültig.".to_owned())?;
+            .ok_or_else(|| invalid.to_owned())?;
         if !unique.iter().any(|existing: &String| existing == name) {
             unique.push(name.to_owned());
         }
     }
     if unique.len() != actions.len() {
-        return Err("Die ausgewählten AI-Aktionen sind ungültig.".to_owned());
+        return Err(invalid.to_owned());
     }
     Ok(unique)
 }
 
-fn strip_think_prefix(value: &str) -> Option<String> {
-    let lower = value.to_lowercase();
-    if !lower.starts_with("<think>") {
-        return None;
-    }
-    let end = lower.find("</think>")?;
-    Some(value[end + "</think>".len()..].trim().to_owned())
+fn strip_think_block(value: &str) -> Option<String> {
+    let rest = strip_ascii_prefix_ignore_case(value, "<think>")?;
+    let close = find_ascii_ignore_case(rest, "</think>")?;
+    let rest = &rest[close + "</think>".len()..];
+    Some(skip_js_whitespace(rest).to_owned())
 }
 
 fn outer_markdown_fence(value: &str) -> Option<String> {
-    let rest = value
-        .strip_prefix("```markdown")
-        .or_else(|| value.strip_prefix("```md"))
-        .or_else(|| value.strip_prefix("```"))?;
-    let rest = rest.strip_prefix('\n').unwrap_or(rest);
-    let end = rest.rfind("\n```")?;
-    if rest[end + 4..].trim().is_empty() {
-        Some(rest[..end].trim().to_owned())
-    } else {
-        None
+    let rest = value.strip_prefix("```")?;
+    let rest = skip_fence_language(rest);
+    let rest = skip_opening_fence_line(rest)?;
+    let rest = rest.strip_suffix("```")?;
+    rest.strip_suffix('\n').map(str::to_owned)
+}
+
+fn skip_fence_language(value: &str) -> &str {
+    for language in ["markdown", "md"] {
+        let Some(after) = strip_ascii_prefix_ignore_case(value, language) else {
+            continue;
+        };
+        if skip_opening_fence_line(after).is_some() {
+            return after;
+        }
     }
+    value
+}
+
+fn skip_opening_fence_line(value: &str) -> Option<&str> {
+    let mut rest = value;
+    let mut after_newline = None;
+    while let Some(character) = rest.chars().next() {
+        if !fanotes_famd::is_js_whitespace(character) {
+            break;
+        }
+        rest = &rest[character.len_utf8()..];
+        if character == '\n' {
+            after_newline = Some(rest);
+        }
+    }
+    after_newline
+}
+
+fn strip_ascii_prefix_ignore_case<'a>(value: &'a str, prefix: &str) -> Option<&'a str> {
+    let mut rest = value;
+    for expected in prefix.chars() {
+        let mut chars = rest.chars();
+        let actual = chars.next()?;
+        if !actual.eq_ignore_ascii_case(&expected) {
+            return None;
+        }
+        rest = chars.as_str();
+    }
+    Some(rest)
+}
+
+fn find_ascii_ignore_case(haystack: &str, needle: &str) -> Option<usize> {
+    haystack
+        .as_bytes()
+        .windows(needle.len())
+        .position(|window| window.eq_ignore_ascii_case(needle.as_bytes()))
+}
+
+fn skip_js_whitespace(value: &str) -> &str {
+    let start = value
+        .char_indices()
+        .find(|(_, character)| !fanotes_famd::is_js_whitespace(*character))
+        .map(|(index, _)| index)
+        .unwrap_or(value.len());
+    &value[start..]
 }
 
 fn unwrap_markdown(value: &str) -> Result<String, String> {
-    let mut output = value.trim().to_owned();
-    if let Some(rest) = strip_think_prefix(&output) {
+    unwrap_markdown_with(
+        value,
+        "Der AI-Anbieter hat kein verwendbares Markdown-Dokument zurückgegeben.",
+    )
+}
+
+fn unwrap_markdown_with(value: &str, empty_message: &str) -> Result<String, String> {
+    let mut output = crate::vault::js_trim(value).to_owned();
+    if let Some(rest) = strip_think_block(&output) {
         output = rest;
     }
     if let Some(inner) = outer_markdown_fence(&output) {
         output = inner;
     }
     if output.is_empty() || output.len() > 4 * 1024 * 1024 {
-        Err("Der AI-Anbieter hat kein verwendbares Markdown-Dokument zurückgegeben.".to_owned())
+        Err(empty_message.to_owned())
     } else {
         Ok(output)
     }
@@ -1494,11 +1693,53 @@ fn unwrap_markdown(value: &str) -> Result<String, String> {
 mod tests {
     use super::{
         build_prompt, finish_models, lm_studio_text, output_token_limit, parse_anthropic_models,
-        parse_gemini_models, parse_lmstudio_models, parse_ollama_models, parse_openai_models,
-        provider_http_error, unwrap_markdown,
+        parse_gemini_models, parse_lmstudio_legacy, parse_lmstudio_models, parse_lmstudio_native,
+        parse_lmstudio_native_legacy, parse_ollama_models, parse_openai_models,
+        parse_opencode_models, provider_http_error, unwrap_markdown,
     };
     use base64::Engine;
     use serde_json::json;
+
+    #[test]
+    fn an_ai_model_keeps_a_negative_context_length() {
+        let lmstudio = parse_lmstudio_models(&json!({
+            "models": [{ "type": "llm", "key": "llama", "max_context_length": -4096 }]
+        }))
+        .unwrap();
+        assert_eq!(lmstudio[0]["maxContextLength"], -4096.0);
+        let gemini = parse_gemini_models(&json!({
+            "models": [{
+                "name": "models/gemini-flash",
+                "displayName": "Flash",
+                "supportedGenerationMethods": ["generateContent"],
+                "inputTokenLimit": -2048
+            }]
+        }))
+        .unwrap();
+        assert_eq!(gemini[0]["maxContextLength"], -2048.0);
+        let anthropic = parse_anthropic_models(&json!({
+            "data": [{ "id": "claude", "display_name": "Claude", "max_input_tokens": -1000 }]
+        }))
+        .unwrap();
+        assert_eq!(anthropic[0]["maxContextLength"], -1000.0);
+        let opencode = parse_opencode_models(&json!({
+            "all": [{
+                "id": "local",
+                "name": "Local",
+                "models": { "small": { "name": "Small", "limit": { "context": -512 } } }
+            }]
+        }))
+        .unwrap();
+        assert_eq!(opencode[0]["maxContextLength"], -512.0);
+        let reply = lm_studio_text(&json!({
+            "output": [{ "type": "message", "content": "Fertig" }],
+            "stats": { "input_tokens": -3, "total_output_tokens": 4, "tokens_per_second": -1 }
+        }))
+        .unwrap();
+        assert!(reply.stats.get("inputTokens").is_none());
+        assert!(reply.stats.get("tokensPerSecond").is_none());
+        assert_eq!(reply.stats["outputTokens"], 4.0);
+    }
 
     #[test]
     fn opencode_login_and_model_names_follow_the_desktop_rules() {
@@ -1604,9 +1845,50 @@ mod tests {
         .unwrap();
         assert_eq!(spaced.len(), 2);
         assert_eq!(spaced[0]["key"], " llama ");
-        assert_eq!(spaced[0]["displayName"], "Llama");
+        assert_eq!(spaced[0]["displayName"], "  Llama  ");
         assert_eq!(spaced[1]["key"], "blank");
-        assert_eq!(spaced[1]["displayName"], "blank");
+        assert_eq!(spaced[1]["displayName"], "   ");
+        let panel = parse_lmstudio_native(&json!({
+            "models": [
+                {
+                    "type": "llm",
+                    "key": " llama ",
+                    "display_name": " \u{0085}Llama ",
+                    "publisher": "Meta",
+                    "quantization": { "name": "" },
+                    "params_string": "8B",
+                    "max_context_length": -4096,
+                    "description": "",
+                    "loaded_instances": [{ "id": "1" }]
+                },
+                { "type": "llm", "key": "padded", "display_name": "  Llama  " },
+                { "type": "llm", "key": "blank", "display_name": "\u{FEFF}" },
+                { "type": "embedding", "key": "embed", "display_name": "Embed" }
+            ]
+        }))
+        .unwrap();
+        assert_eq!(panel.len(), 3);
+        assert!(panel[0].get("provider").is_none());
+        assert_eq!(panel[0]["key"], " llama ");
+        assert_eq!(panel[0]["displayName"], "\u{0085}Llama");
+        assert_eq!(panel[0]["publisher"], "Meta");
+        assert_eq!(panel[0]["quantization"], "");
+        assert_eq!(panel[0]["params"], "8B");
+        assert_eq!(panel[0]["loaded"], true);
+        assert_eq!(panel[0]["maxContextLength"], -4096.0);
+        assert_eq!(panel[0]["description"], "");
+        assert_eq!(panel[1]["displayName"], "Llama");
+        assert_eq!(panel[2]["displayName"], "blank");
+        assert_eq!(panel[2]["publisher"], "");
+        assert!(panel[2]["quantization"].is_null());
+        assert!(panel[2]["maxContextLength"].is_null());
+        let legacy = parse_lmstudio_native_legacy(&json!({
+            "data": [{ "id": " llama " }, { "id": "   " }]
+        }))
+        .unwrap();
+        assert_eq!(legacy.len(), 1);
+        assert_eq!(legacy[0]["displayName"], " llama ");
+        assert!(legacy[0].get("provider").is_none());
         let named = finish_models(
             parse_lmstudio_models(&json!({
                 "models": [
@@ -1635,6 +1917,31 @@ mod tests {
         }))
         .unwrap();
         assert_eq!(ollama[0]["publisher"], "llama");
+        let blank_model = parse_ollama_models(&json!({
+            "models": [
+                { "model": "", "name": "llama3" },
+                { "model": "gemma", "name": "" }
+            ]
+        }))
+        .unwrap();
+        assert_eq!(blank_model[0]["key"], "llama3");
+        assert_eq!(blank_model[0]["displayName"], "llama3");
+        assert_eq!(blank_model[1]["key"], "gemma");
+        assert_eq!(blank_model[1]["displayName"], "gemma");
+        let empty_details = parse_ollama_models(&json!({
+            "models": [{
+                "name": "llama",
+                "details": {
+                    "family": "",
+                    "quantization_level": "",
+                    "parameter_size": ""
+                }
+            }]
+        }))
+        .unwrap();
+        assert_eq!(empty_details[0]["publisher"], "");
+        assert!(empty_details[0]["quantization"].is_null());
+        assert!(empty_details[0]["params"].is_null());
         assert_eq!(ollama[0]["params"], "8B");
         assert_eq!(ollama[0]["quantization"], "Q4_K_M");
         assert_eq!(
@@ -1679,6 +1986,67 @@ mod tests {
             unwrap_markdown("<think>geheim</think>\n```markdown\n# Fertig\n```").unwrap(),
             "# Fertig"
         );
+        assert_eq!(
+            unwrap_markdown("```MARKDOWN\n# Fertig\n```").unwrap(),
+            "# Fertig"
+        );
+        assert_eq!(unwrap_markdown("```MD\n# Fertig\n```").unwrap(), "# Fertig");
+        assert_eq!(
+            unwrap_markdown("```markdown\u{FEFF}\n# Fertig\n```").unwrap(),
+            "# Fertig"
+        );
+        assert_eq!(unwrap_markdown("```\nHallo  \n```").unwrap(), "Hallo  ");
+        assert_eq!(unwrap_markdown("```\n\nHallo\n```").unwrap(), "Hallo");
+        assert_eq!(
+            unwrap_markdown("```foo\nHallo\n```").unwrap(),
+            "```foo\nHallo\n```"
+        );
+        assert_eq!(
+            unwrap_markdown("<THINK>x</THINK>\nHallo\n\n").unwrap(),
+            "Hallo"
+        );
+        assert_eq!(
+            unwrap_markdown("<think>x</think>").unwrap_err(),
+            "Der AI-Anbieter hat kein verwendbares Markdown-Dokument zurückgegeben."
+        );
+        assert_eq!(
+            super::unwrap_markdown_with(
+                "<think>x</think>",
+                "LM Studio hat kein verwendbares Markdown-Dokument zurückgegeben."
+            )
+            .unwrap_err(),
+            "LM Studio hat kein verwendbares Markdown-Dokument zurückgegeben."
+        );
+        assert_eq!(
+            lm_studio_text(&json!({ "output": [] })).err().as_deref(),
+            Some("LM Studio hat keine Textantwort geliefert.")
+        );
+        assert_eq!(
+            lm_studio_text(&json!({
+                "output": [{ "type": "message", "content": "" }]
+            }))
+            .ok()
+            .map(|reply| reply.text),
+            Some(String::new())
+        );
+    }
+
+    #[test]
+    fn a_blank_legacy_lm_studio_id_is_omitted() {
+        let models = parse_lmstudio_legacy(&json!({
+            "data": [
+                { "id": "   " },
+                { "id": "\u{FEFF}" },
+                { "id": " llama " },
+                { "id": 3 },
+                "llama"
+            ]
+        }))
+        .unwrap();
+        assert_eq!(models.len(), 1);
+        assert_eq!(models[0]["key"], " llama ");
+        assert_eq!(models[0]["displayName"], " llama ");
+        assert_eq!(models[0]["loaded"], true);
     }
 
     #[test]
@@ -1690,6 +2058,19 @@ mod tests {
         assert_eq!(openai[0]["provider"], "openai");
         assert_eq!(openai[0]["key"], "gpt-4.1");
         assert_eq!(openai[0]["publisher"], "openai");
+        let long_owner = "Ä".repeat(201);
+        let truncated = parse_openai_models(&json!({
+            "data": [{ "id": "gpt", "owned_by": long_owner }]
+        }))
+        .unwrap();
+        assert_eq!(
+            truncated[0]["publisher"]
+                .as_str()
+                .unwrap()
+                .encode_utf16()
+                .count(),
+            200
+        );
 
         let gemini = parse_gemini_models(&json!({
             "models": [
@@ -1710,6 +2091,16 @@ mod tests {
         assert_eq!(gemini[0]["key"], "gemini-2.5-flash");
         assert_eq!(gemini[0]["displayName"], "Gemini Flash");
         assert_eq!(gemini[0]["publisher"], "Google");
+        let nested = parse_gemini_models(&json!({
+            "models": [{
+                "name": "models/models/gemini-2.5-flash",
+                "displayName": "",
+                "supportedGenerationMethods": ["generateContent"]
+            }]
+        }))
+        .unwrap();
+        assert_eq!(nested[0]["key"], "models/gemini-2.5-flash");
+        assert_eq!(nested[0]["displayName"], "models/gemini-2.5-flash");
 
         let anthropic = parse_anthropic_models(&json!({
             "data": [{ "id": "claude-sonnet", "display_name": "Claude Sonnet" }]
@@ -1717,6 +2108,38 @@ mod tests {
         .unwrap();
         assert_eq!(anthropic[0]["provider"], "anthropic");
         assert_eq!(anthropic[0]["displayName"], "Claude Sonnet");
+        let unnamed = parse_anthropic_models(&json!({
+            "data": [{ "id": "claude-haiku", "display_name": "" }]
+        }))
+        .unwrap();
+        assert_eq!(unnamed[0]["key"], "claude-haiku");
+        assert_eq!(unnamed[0]["displayName"], "claude-haiku");
         assert_eq!(anthropic[0]["publisher"], "Anthropic");
+    }
+
+    #[test]
+    fn an_empty_action_list_uses_the_desktop_message() {
+        let empty = json!([]);
+        let repeated = json!(["spelling", "spelling"]);
+        assert_eq!(
+            super::required_actions(None, false).unwrap_err(),
+            "Wähle mindestens eine AI-Aktion."
+        );
+        assert_eq!(
+            super::required_actions(Some(&empty), false).unwrap_err(),
+            "Die ausgewählten AI-Aktionen sind ungültig."
+        );
+        assert_eq!(
+            super::required_actions(None, true).unwrap_err(),
+            "Wähle mindestens eine KI-Aktion."
+        );
+        assert_eq!(
+            super::required_actions(Some(&empty), true).unwrap_err(),
+            "Die ausgewählten KI-Aktionen sind ungültig."
+        );
+        assert_eq!(
+            super::required_actions(Some(&repeated), false).unwrap_err(),
+            "Die ausgewählten AI-Aktionen sind ungültig."
+        );
     }
 }
