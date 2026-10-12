@@ -270,10 +270,9 @@ impl Host {
             "fanotes:qwen-vision-install" | "fanotes:qwen-vision-recognize" => {
                 Err("Qwen Vision ist nicht installiert.".to_owned())
             }
-            "fanotes:lm-studio-list-models" => ai::list_lm_studio(
-                &arg_string(args, 0)?,
-                args.get(1).and_then(Value::as_str).unwrap_or(""),
-            ),
+            "fanotes:lm-studio-list-models" => {
+                ai::list_lm_studio(args.first(), args.get(1))
+            }
             "fanotes:lm-studio-transform" => {
                 ai::transform_lm_studio(args.first().unwrap_or(&Value::Null))
             }
@@ -295,32 +294,41 @@ impl Host {
             "fanotes:open-external" => {
                 self.open_external(&arg_text(args, 0, "Ungültiger externer Link.")?)
             }
-            "fanotes:addons-fetch" => addons::fetch_text(&arg_string(args, 0)?),
+            "fanotes:addons-fetch" => addons::fetch_text(&js_argument_string(args, 0)),
             "fanotes:addons-list" => addons::list(self),
             "fanotes:addons-save" => addons::save(self, args.first().unwrap_or(&Value::Null)),
-            "fanotes:addons-remove" => addons::remove(self, &arg_string(args, 0)?),
-            "fanotes:addons-read-file" => {
-                addons::read_file(self, &arg_string(args, 0)?, &arg_string(args, 1)?)
+            "fanotes:addons-remove" => {
+                addons::remove(self, &arg_text(args, 0, "Ungültige Add-on-ID.")?)
             }
+            "fanotes:addons-read-file" => addons::read_file(
+                self,
+                args.first().unwrap_or(&Value::Null),
+                args.get(1).unwrap_or(&Value::Null),
+            ),
             "fanotes:addons-write-files" => addons::write_files(
                 self,
-                &arg_string(args, 0)?,
+                args.first().unwrap_or(&Value::Null),
                 args.get(1).unwrap_or(&Value::Null),
             ),
-            "fanotes:addons-read-data" => addons::read_data(self, &arg_string(args, 0)?),
+            "fanotes:addons-read-data" => {
+                addons::read_data(self, &arg_text(args, 0, "Ungültige Add-on-ID.")?)
+            }
             "fanotes:addons-write-data" => addons::write_data(
                 self,
-                &arg_string(args, 0)?,
+                args.first().unwrap_or(&Value::Null),
                 args.get(1).unwrap_or(&Value::Null),
             ),
-            "fanotes:addons-net-fetch" => {
-                addons::net_fetch(&arg_string(args, 0)?, args.get(1).unwrap_or(&Value::Null))
-            }
+            "fanotes:addons-net-fetch" => addons::net_fetch(
+                &js_argument_string(args, 0),
+                args.get(1).unwrap_or(&Value::Null),
+            ),
             "fanotes:sync-vault-id" => Ok(Value::String(self.vault_id()?)),
             "fanotes:sync-scan" => self.sync_scan(),
-            "fanotes:sync-read" => self.sync_read(&arg_string(args, 0)?),
+            "fanotes:sync-read" => self.sync_read(&arg_text(args, 0, "Ungültiger Sync-Pfad.")?),
             "fanotes:sync-write" => self.sync_write(args),
-            "fanotes:sync-remove" => self.sync_remove(&arg_string(args, 0)?),
+            "fanotes:sync-remove" => {
+                self.sync_remove(&arg_text(args, 0, "Ungültiger Sync-Pfad.")?)
+            }
             "fanotes:sync-read-state" => {
                 self.read_sync_state(args.first().and_then(Value::as_str).unwrap_or(""))
             }
@@ -394,14 +402,20 @@ impl Host {
     }
 
     fn sync_write(&mut self, args: &[Value]) -> Result<Value, String> {
-        let relative = arg_string(args, 0)?;
-        let encoded = arg_string(args, 1)?;
+        let encoded = args
+            .get(1)
+            .and_then(Value::as_str)
+            .ok_or_else(|| "Der Sync-Inhalt muss binär sein.".to_owned())?;
         let bytes = base64::engine::general_purpose::STANDARD
             .decode(encoded.as_bytes())
             .map_err(|_| "Der Sync-Inhalt muss binär sein.".to_owned())?;
         if bytes.len() as u64 > SYNC_MAX_BYTES {
             return Err("Die Datei ist zu groß für den Sync.".to_owned());
         }
+        let relative = args
+            .get(0)
+            .and_then(Value::as_str)
+            .ok_or_else(|| "Ungültiger Sync-Pfad.".to_owned())?;
         let root = self.require_vault()?.to_path_buf();
         let (path, normalized) = vault::resolve_sync_path(&root, &relative, true)?;
         create_sync_directories(&root, &path)?;
@@ -1767,8 +1781,12 @@ fn read_regular_limited(path: &Path, max: u64) -> Result<Vec<u8>, String> {
     fs::read(path).map_err(|_| "Die Datei konnte nicht gelesen werden.".to_owned())
 }
 
-fn arg_string(args: &[Value], index: usize) -> Result<String, String> {
-    arg_text(args, index, "Ungültiges Argument.")
+/// `String(value)` for an IPC argument. A missing argument is JavaScript `undefined`.
+fn js_argument_string(args: &[Value], index: usize) -> String {
+    match args.get(index) {
+        Some(value) => notes::js_regexp_string(value),
+        None => "undefined".to_owned(),
+    }
 }
 
 fn arg_text(args: &[Value], index: usize, message: &str) -> Result<String, String> {

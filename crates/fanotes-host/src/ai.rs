@@ -30,12 +30,20 @@ struct AiReply {
     stats: Value,
 }
 
-pub fn list_lm_studio(base_url: &str, api_token: &str) -> Result<Value, String> {
+pub fn list_lm_studio(base_url: Option<&Value>, api_token: Option<&Value>) -> Result<Value, String> {
+    let Some(Value::String(base_url)) = base_url else {
+        return Err("Die LM-Studio-Adresse ist ungültig.".to_owned());
+    };
     let origin = lm_studio_origin(base_url)?;
+    let api_token = match api_token {
+        None | Some(Value::Null) => String::new(),
+        Some(Value::String(value)) => clean_lm_studio_token(value)?,
+        Some(_) => return Err("Das LM-Studio-API-Token ist ungültig.".to_owned()),
+    };
     let connection = json!({
         "provider": "lmstudio",
         "baseUrl": origin,
-        "apiKey": clean_lm_studio_token(api_token)?,
+        "apiKey": api_token,
         "model": "",
     });
     // The LM Studio panel uses `lmStudioModelFromNative`, which trims the name.
