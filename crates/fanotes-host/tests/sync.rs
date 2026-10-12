@@ -395,6 +395,33 @@ fn a_sync_time_follows_javascript_number() {
 }
 
 #[test]
+fn a_sync_write_accepts_a_byte_list_like_the_desktop() {
+    let (vault, _app, mut host) = host();
+    let written = host
+        .dispatch(
+            "fanotes:sync-write",
+            &[
+                json!("Seite.md"),
+                json!([72, 97, 108, 108, 111, 10, 1.9, -1, 256]),
+            ],
+        )
+        .unwrap();
+    assert_eq!(written["size"], 9);
+    assert_eq!(
+        fs::read(vault.join("Seite.md")).unwrap(),
+        [72, 97, 108, 108, 111, 10, 1, 255, 0]
+    );
+    host.dispatch("fanotes:sync-write", &[json!("leer.md"), json!([])])
+        .unwrap();
+    assert_eq!(fs::read(vault.join("leer.md")).unwrap(), b"");
+    assert_eq!(
+        host.dispatch("fanotes:sync-write", &[json!("Seite.md"), json!(5)])
+            .unwrap_err(),
+        "Der Sync-Inhalt muss binär sein."
+    );
+}
+
+#[test]
 fn a_sync_state_directory_is_private() {
     let (_vault, app, mut host) = host();
     let id = host

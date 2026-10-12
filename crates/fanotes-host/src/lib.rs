@@ -420,16 +420,7 @@ impl Host {
     }
 
     fn sync_write(&mut self, args: &[Value]) -> Result<Value, String> {
-        let encoded = args
-            .get(1)
-            .and_then(Value::as_str)
-            .ok_or_else(|| "Der Sync-Inhalt muss binär sein.".to_owned())?;
-        let bytes = base64::engine::general_purpose::STANDARD
-            .decode(encoded.as_bytes())
-            .map_err(|_| "Der Sync-Inhalt muss binär sein.".to_owned())?;
-        if bytes.len() as u64 > SYNC_MAX_BYTES {
-            return Err("Die Datei ist zu groß für den Sync.".to_owned());
-        }
+        let bytes = sync_bytes(args.get(1).unwrap_or(&Value::Null))?;
         let relative = args
             .get(0)
             .and_then(Value::as_str)
@@ -2074,6 +2065,47 @@ fn create_sync_directories(root: &Path, file: &Path) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+/// Binary sync payload. A base64 string is the JSON bridge. A list is
+/// `Uint8Array.from`, so a bare number does not become a zero-filled buffer.
+fn sync_bytes(value: &Value) -> Result<Vec<u8>, String> {
+    let invalid = || "Der Sync-Inhalt muss binär sein.".to_owned();
+    let too_big = || "Die Datei ist zu groß für den Sync.".to_owned();
+    match value {
+        Value::String(encoded) => {
+            let bytes = base64::engine::general_purpose::STANDARD
+                .decode(encoded.as_bytes())
+                .map_err(|_| invalid())?;
+            if bytes.len() as u64 > SYNC_MAX_BYTES {
+                return Err(too_big());
+            }
+            Ok(bytes)
+        }
+        Value::Array(items) => {
+            if items.len() as u64 > SYNC_MAX_BYTES {
+                return Err(too_big());
+            }
+            Ok(items.iter().map(js_uint8).collect())
+        }
+        _ => Err(invalid()),
+    }
+}
+
+/// `ToUint8`: truncate toward zero, then the positive remainder modulo 256.
+fn js_uint8(value: &Value) -> u8 {
+    let number = match value {
+        Value::Number(number) => number.as_f64().unwrap_or(f64::NAN),
+        Value::String(text) => fanotes_famd::js_tonumber(text).unwrap_or(f64::NAN),
+        Value::Bool(true) => 1.0,
+        Value::Bool(false) => 0.0,
+        Value::Null => 0.0,
+        other => fanotes_famd::js_tonumber(&notes::js_regexp_string(other)).unwrap_or(f64::NAN),
+    };
+    if !number.is_finite() {
+        return 0;
+    }
+    number.trunc().rem_euclid(256.0) as u8
 }
 
 fn arg_mtime_ms(value: Option<&Value>) -> Option<i64> {
