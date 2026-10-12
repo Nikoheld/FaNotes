@@ -20,6 +20,8 @@ fn host() -> (std::path::PathBuf, Host) {
 #[test]
 fn rename_keeps_the_extension_and_move_numbers_a_collision() {
     let (vault, mut host) = host();
+    fs::write(vault.join("Mathe/Seite.md"), b"\n").unwrap();
+    fs::write(vault.join("Physik/Blatt.md"), b"\n").unwrap();
     host.dispatch(
         "fanotes:write-file",
         &[json!("Mathe/Seite.md"), json!("Hallo\n")],
@@ -148,4 +150,64 @@ fn a_blank_rename_keeps_a_valid_name_and_rejects_a_device_name() {
         "Dieser Name ist nicht erlaubt."
     );
     assert!(vault.join("Mathe/CON.md").is_file());
+
+    let renamed = host
+        .dispatch(
+            "fanotes:rename-entry",
+            &[json!("Mathe/Seite.md"), json!("Notiz\u{FEFF}")],
+        )
+        .unwrap();
+    assert_eq!(renamed, "Mathe/Notiz.md");
+    assert_eq!(
+        host.dispatch(
+            "fanotes:rename-entry",
+            &[json!("Mathe/Notiz.md"), json!("CON\u{FEFF}")]
+        )
+        .unwrap_err(),
+        "Dieser Name ist nicht erlaubt."
+    );
+    let kept_next_line = host
+        .dispatch(
+            "fanotes:rename-entry",
+            &[json!("Mathe/Notiz.md"), json!("Blatt\u{0085}")],
+        )
+        .unwrap();
+    assert_eq!(kept_next_line, "Mathe/Blatt\u{0085}.md");
+}
+
+#[test]
+fn a_blank_move_target_returns_the_note_to_the_vault_root() {
+    let (vault, mut host) = host();
+    fs::write(vault.join("Mathe/Seite.md"), b"\n").unwrap();
+    fs::write(vault.join("Mathe/Andere.md"), b"\n").unwrap();
+    host.dispatch(
+        "fanotes:write-file",
+        &[json!("Mathe/Seite.md"), json!("Hallo\n")],
+    )
+    .unwrap();
+    let moved = host
+        .dispatch(
+            "fanotes:move-entry",
+            &[json!("Mathe/Seite.md"), json!("   ")],
+        )
+        .unwrap();
+    assert_eq!(moved, "Seite.md");
+    assert!(vault.join("Seite.md").is_file());
+    assert!(vault.join("Seite.famd").is_file());
+    assert!(!vault.join("Mathe/Seite.md").exists());
+    assert!(!vault.join("Mathe/Seite.famd").exists());
+
+    host.dispatch(
+        "fanotes:write-file",
+        &[json!("Mathe/Andere.md"), json!("Hallo\n")],
+    )
+    .unwrap();
+    let moved = host
+        .dispatch(
+            "fanotes:move-entry",
+            &[json!("Mathe/Andere.md"), json!("\u{FEFF}")],
+        )
+        .unwrap();
+    assert_eq!(moved, "Andere.md");
+    assert!(vault.join("Andere.md").is_file());
 }
