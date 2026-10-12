@@ -508,9 +508,10 @@ button:disabled {
   width: 100%;
   height: 100%;
   cursor: crosshair;
-  /* Pen/mouse input is captured by DrawingCanvas. Touch remains native so a
-     trackpad or touchscreen can keep scrolling after a Wacom pen was used. */
-  touch-action: pan-x pan-y pinch-zoom;
+  /* Pen/mouse input is captured by DrawingCanvas. One-finger touch stays a
+     scroll. Pinch is bindHandGestures on the shell, because a locked visual
+     zoom would swallow the browser pinch. */
+  touch-action: pan-x pan-y;
 }
 
 .canvas-placeholder {

@@ -27,6 +27,7 @@ import {
 } from '../lib/homeworkStore'
 import { CALENDAR_NOTE_PATH, CALENDAR_NOTE_TITLE } from '../lib/calendarModel'
 import { calendarMarkdownWithHomework } from '../lib/homeworkCalendar'
+import { bindHandGestures } from '../../../src/lib/handGestures'
 import { getUiLanguage } from '../i18n'
 
 export type HomeworkBoardProps = {
@@ -215,6 +216,10 @@ export function HomeworkBoard({ subjects, reloadToken = 0, onClose, onOpenNote, 
   const [notes, setNotes] = useState('')
   const [showDone, setShowDone] = useState(false)
   const [plannerView, setPlannerView] = useState<'list' | 'week' | 'month'>('list')
+  const plannerViewRef = useRef(plannerView)
+  plannerViewRef.current = plannerView
+  const boardRef = useRef<HTMLElement>(null)
+  const shiftCalendarRef = useRef<(delta: number) => void>(() => {})
   const [calendarCursor, setCalendarCursor] = useState(() => {
     const now = new Date()
     return new Date(now.getFullYear(), now.getMonth(), now.getDate())
@@ -420,6 +425,19 @@ export function HomeworkBoard({ subjects, reloadToken = 0, onClose, onOpenNote, 
       return next
     })
   }
+  shiftCalendarRef.current = shiftCalendar
+
+  useEffect(() => {
+    const root = boardRef.current
+    if (!root) return undefined
+    return bindHandGestures(root, {
+      onSwipe: (direction) => {
+        if (plannerViewRef.current === 'list') return
+        if (direction === 'left') shiftCalendarRef.current(1)
+        if (direction === 'right') shiftCalendarRef.current(-1)
+      },
+    })
+  }, [])
 
   const calendarDays = useMemo(() => {
     if (plannerView === 'week') {
@@ -462,7 +480,7 @@ export function HomeworkBoard({ subjects, reloadToken = 0, onClose, onOpenNote, 
   const copy = homeworkText()
 
   return (
-    <section className="homework-board" aria-label={copy.aria} lang={homeworkLocale()} data-i18n-ignore>
+    <section ref={boardRef} className="homework-board" data-hand-gesture-root="" aria-label={copy.aria} lang={homeworkLocale()} data-i18n-ignore>
       <style>{homeworkStyles}</style>
       <div className="homework-shell">
         <header className="homework-header">

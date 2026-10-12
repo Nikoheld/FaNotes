@@ -31,6 +31,7 @@ import {
   type PaperViewSnapshot,
   type PaperViewStore,
 } from '../lib/paperView'
+import { bindHandGestures, shouldTakeSheetZoom } from '../../../src/lib/handGestures'
 import { SCROLL_ROOM } from '../lib/noteCanvas'
 import {
   PAPER_VIEW_RESTORE_SETTLE_MS,
@@ -120,15 +121,20 @@ type PaperViewProps = {
    * land on this pane. In a split the app points them at the focused pane.
    */
   globalShortcuts?: boolean
+  /** One-finger swipe from the left or right screen edge steps through notes. */
+  onEdgeSwipe?: (direction: 'back' | 'forward') => void
 }
 
-export function PaperView({ children, className = '', viewKey, showHud = true, onPointerDownCapture, onFocusCapture, store = sharedPaperViewStore, globalShortcuts = true }: PaperViewProps) {
+export function PaperView({ children, className = '', viewKey, showHud = true, onPointerDownCapture, onFocusCapture, store = sharedPaperViewStore, globalShortcuts = true, onEdgeSwipe }: PaperViewProps) {
   const noteViewRef = useRef<HTMLDivElement>(null)
   const storeRef = useRef(store)
   storeRef.current = store
   const viewRef = useRef(store.read())
   const lastWheelZoomAtRef = useRef(0)
+  const lastPanWheelAtRef = useRef(0)
   const lastZoomOriginRef = useRef<{ x: number; y: number } | null>(null)
+  const onEdgeSwipeRef = useRef(onEdgeSwipe)
+  onEdgeSwipeRef.current = onEdgeSwipe
   const [view, setViewState] = useState(store.read)
   const [recalled, setRecalled] = useState(false)
 
@@ -594,6 +600,7 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
         if (firstTick) onInterceptWheel(event)
         return
       }
+      lastPanWheelAtRef.current = performance.now()
       scheduleRelease()
     }
     const onKeyDown = (event: KeyboardEvent) => {
@@ -628,9 +635,55 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
     if (typeof subscribe !== 'function') return undefined
     return subscribe((direction) => {
       if (performance.now() - lastWheelZoomAtRef.current < 80) return
+      const root = noteViewRef.current
+      if (!root || !shouldTakeSheetZoom(root, true)) return
       zoomBy(sheetZoomStepFromDirection(direction), lastZoomOriginRef.current ?? undefined)
     })
   }, [globalShortcuts, zoomBy])
+
+  useEffect(() => {
+    const root = noteViewRef.current
+    if (!root) return undefined
+    let pendingFactor = 1
+    let pendingOrigin: { x: number; y: number } | null = null
+    let zoomFrame = 0
+    const flushZoom = () => {
+      zoomFrame = 0
+      const factor = pendingFactor
+      const origin = pendingOrigin
+      pendingFactor = 1
+      pendingOrigin = null
+      if (factor === 1) return
+      lastWheelZoomAtRef.current = performance.now()
+      if (origin) lastZoomOriginRef.current = origin
+      zoomTo(viewRef.current.zoom * factor, origin ?? undefined)
+    }
+    const unbind = bindHandGestures(root, {
+      captureNavigation: true,
+      onPan: (dx, dy) => {
+        if (performance.now() - lastPanWheelAtRef.current < 48) return
+        root.scrollLeft -= dx
+        root.scrollTop -= dy
+      },
+      onPinch: (factor, origin) => {
+        pendingFactor *= factor
+        pendingOrigin = origin
+        if (!zoomFrame) zoomFrame = window.requestAnimationFrame(flushZoom)
+      },
+      onRotate: (degrees) => rotateBy(degrees),
+      onSwipe: (direction, origin) => {
+        if (origin.target instanceof Element && getComputedStyle(origin.target).touchAction.split(/\s+/u).includes('none')) return
+        const box = root.getBoundingClientRect()
+        const x = origin.x - box.left
+        if (direction === 'right' && x <= 36) onEdgeSwipeRef.current?.('back')
+        else if (direction === 'left' && x >= root.clientWidth - 36) onEdgeSwipeRef.current?.('forward')
+      },
+    })
+    return () => {
+      if (zoomFrame) window.cancelAnimationFrame(zoomFrame)
+      unbind()
+    }
+  }, [rotateBy, zoomTo])
 
   useEffect(() => {
     if (!showHud || !globalShortcuts) return
@@ -675,6 +728,7 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
       <div
         ref={noteViewRef}
         className={`paper-view ${className}`}
+        data-hand-gesture-root=""
         data-paper-zoom={view.zoom}
         onPointerDownCapture={onPointerDownCapture}
         onFocusCapture={onFocusCapture}

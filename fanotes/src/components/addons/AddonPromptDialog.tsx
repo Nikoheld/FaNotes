@@ -24,8 +24,8 @@ export function AddonPromptDialog({ request }: { request: AddonPromptRequest | n
   const submit = () => request.resolve(value)
   const cancel = () => request.resolve(null)
   return (
-    <div className="modal-backdrop addon-prompt-backdrop" role="presentation" onMouseDown={cancel}>
-      <section className="addon-prompt" role="dialog" aria-modal="true" aria-label={request.title} onMouseDown={(event) => event.stopPropagation()} onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); cancel() } }}>
+    <div className="modal-backdrop addon-prompt-backdrop" role="presentation" onPointerDown={cancel}>
+      <section className="addon-prompt" role="dialog" aria-modal="true" aria-label={request.title} onPointerDown={(event) => event.stopPropagation()} onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); cancel() } }}>
         <header>
           <h3 data-i18n-ignore>{request.title}</h3>
           <p data-i18n-ignore>{request.message}</p>

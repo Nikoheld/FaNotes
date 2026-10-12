@@ -11,6 +11,7 @@ import {
   X,
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { bindHandGestures } from '../../../src/lib/handGestures'
 import { getUiLanguage } from '../i18n'
 import { dueReminders } from '../lib/calendarReminders'
 import { exportIcs, importIcs } from '../lib/icsCalendar'
@@ -185,6 +186,9 @@ export function CalendarView({ reloadToken = 0, onClose, onOpenNote, onOpenDaily
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [view, setView] = useState<CalendarViewId>('week')
+  const viewRef = useRef(view)
+  viewRef.current = view
+  const calRef = useRef<HTMLElement>(null)
   const [cursor, setCursor] = useState(() => startOfDay(new Date()))
   const [query, setQuery] = useState('')
   const [editor, setEditor] = useState<EditorState | null>(null)
@@ -385,6 +389,19 @@ export function CalendarView({ reloadToken = 0, onClose, onOpenNote, onOpenDaily
     }
   }, [document, openComposer, persist])
 
+  useEffect(() => {
+    const root = calRef.current
+    if (!root) return undefined
+    return bindHandGestures(root, {
+      onSwipe: (direction) => {
+        if (direction === 'left') setCursor((current) => shiftCursor(viewRef.current, current, 1))
+        if (direction === 'right') setCursor((current) => shiftCursor(viewRef.current, current, -1))
+        dragRef.current = null
+        setDraftSpan(null)
+      },
+    })
+  }, [])
+
   const onGridPointerDown = (day: Date, event: React.PointerEvent<HTMLDivElement>) => {
     if ((event.target as HTMLElement).closest('.cal-event, .cal-resize')) return
     const startMin = minutesFromPointer(event.currentTarget, event.clientY)
@@ -442,7 +459,7 @@ export function CalendarView({ reloadToken = 0, onClose, onOpenNote, onOpenDaily
   const miniDays = useMemo(() => viewRange('month', cursor).days, [cursor])
 
   return (
-    <section className="cal" aria-label={copy.aria}>
+    <section ref={calRef} className="cal" data-hand-gesture-root="" aria-label={copy.aria}>
       <aside className="cal-side">
         <div className="cal-side-head">
           <strong>{copy.title}</strong>

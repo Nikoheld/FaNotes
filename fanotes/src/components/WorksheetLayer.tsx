@@ -6,6 +6,7 @@ import type { WorksheetDocument, WorksheetHighlight, WorksheetTextBox } from '..
 import { WORKSHEET_INKING_CLASS } from '../lib/pdfInkHit'
 import { createPdfPagePainter, type PdfPagePainter } from '../lib/pdfPagePainter'
 import { resolvePaperZoomScroller, watchSheetZoom } from '../lib/paperView'
+import { HAND_GESTURE_CLAIM } from '../../../src/lib/handGestures'
 
 export type WorksheetLayerHandle = {
   flush: () => Promise<void>
@@ -275,6 +276,18 @@ export const WorksheetLayer = forwardRef<WorksheetLayerHandle, WorksheetLayerPro
   const [highlightTool, setHighlightTool] = useState(false)
   const [draftHighlight, setDraftHighlight] = useState<{ page: number; x: number; y: number; width: number; height: number } | null>(null)
   const highlightOriginRef = useRef<{ page: number; x: number; y: number } | null>(null)
+  const layerRef = useRef<HTMLElement>(null)
+  useEffect(() => {
+    const onClaim = (event: Event) => {
+      const root = (event as CustomEvent<{ root?: Node }>).detail?.root
+      const layer = layerRef.current
+      if (!layer || !(root instanceof Node) || !root.contains(layer)) return
+      highlightOriginRef.current = null
+      setDraftHighlight(null)
+    }
+    window.addEventListener(HAND_GESTURE_CLAIM, onClaim)
+    return () => window.removeEventListener(HAND_GESTURE_CLAIM, onClaim)
+  }, [])
   const [savedPulse, setSavedPulse] = useState(false)
   const [removing, setRemoving] = useState(false)
   const [oneNoteScale, setOneNoteScale] = useState(1)
@@ -544,7 +557,7 @@ export const WorksheetLayer = forwardRef<WorksheetLayerHandle, WorksheetLayerPro
   const pageCount = initialDocument.kind === 'pdf' ? pdf?.numPages ?? 0 : 1
 
   return (
-    <section className={`worksheet-layer ${textTool ? 'is-placing-text' : ''} ${highlightTool ? 'is-highlighting' : ''} ${inputDisabled ? WORKSHEET_INKING_CLASS : ''}`} aria-label={`Arbeitsblatt ${document.title}`}>
+    <section ref={layerRef} className={`worksheet-layer ${textTool ? 'is-placing-text' : ''} ${highlightTool ? 'is-highlighting' : ''} ${inputDisabled ? WORKSHEET_INKING_CLASS : ''}`} aria-label={`Arbeitsblatt ${document.title}`}>
       <header className="worksheet-toolbar">
         <span>{document.kind === 'image' ? <ImageIcon size={15} /> : <FileText size={15} />}<strong>{document.title}</strong><small>{document.kind === 'html' ? 'OneNote · originalgetreu' : `${pageCount || '…'} ${pageCount === 1 ? 'Seite' : 'Seiten'}`}</small></span>
         <span className="worksheet-toolbar-actions">

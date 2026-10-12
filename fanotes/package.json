@@ -50,6 +50,7 @@
     "check:tool-erase": "node scripts/check-tool-erase.mjs",
     "check:ink-select": "node scripts/check-ink-select.mjs",
     "check:trackpad-after-pen": "node scripts/check-trackpad-after-pen.mjs",
+    "check:hand-gestures": "node scripts/check-hand-gestures.mjs",
     "check:wacom-buttons": "node scripts/check-wacom-buttons.mjs",
     "check:jump-filter": "node scripts/check-jump-filter.mjs",
     "check:midstroke-grow": "node scripts/check-midstroke-grow.mjs",

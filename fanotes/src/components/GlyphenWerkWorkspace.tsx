@@ -352,7 +352,20 @@ export function GlyphenWerkWorkspace({ activeView, appearance, onClose, onViewCh
     return () => window.removeEventListener('message', receive)
   }, [activeView, onViewChange, recognizeTextRequest, sendAppearance, sendNavigation, synchronize])
 
-  return <section className="glyphenwerk-workspace" aria-label="GlyphenWerk Training und Test">
+  useEffect(() => {
+    const subscribe = window.fanotes?.onSheetZoom
+    if (typeof subscribe !== 'function') return undefined
+    return subscribe((direction) => {
+      if (direction !== 'in' && direction !== 'out') return
+      iframeRef.current?.contentWindow?.postMessage({
+        type: 'glyphenwerk:sheet-zoom',
+        schemaVersion: 1,
+        direction,
+      }, '*')
+    })
+  }, [])
+
+  return <section className="glyphenwerk-workspace" data-hand-gesture-root="" aria-label="GlyphenWerk Training und Test">
     <header className="glyphenwerk-workspace-header">
       <div className="glyphenwerk-workspace-title">
         <span><Database size={18} /></span>

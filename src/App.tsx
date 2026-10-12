@@ -41,6 +41,7 @@ import {
 import { createStandardRecognitionSamples } from './lib/standardRecognition'
 import type { CanvasState, CategoryId, LabelDefinition, Sample, Stroke } from './types'
 import { getGlyphenWerkLanguage, getGlyphenWerkLocale } from './i18n'
+import { bindHandGestures, pinchFactorFromWheel } from './lib/handGestures'
 
 type ViewId = 'capture' | 'test' | 'collection' | 'export'
 
@@ -262,6 +263,49 @@ const App = () => {
   const [storageUsage, setStorageUsage] = useState(0)
   const [writerId, setWriterId] = useState(() => getOrCreateId(localStorage, 'glyphenwerk-writer-id', 'person'))
   const sessionIdRef = useRef(getOrCreateId(sessionStorage, 'glyphenwerk-session-id', 'session'))
+  const shellRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const shell = shellRef.current
+    if (!shell) return undefined
+    let zoom = 1
+    let lastLocalAt = 0
+    const apply = (factor: number, local: boolean) => {
+      const now = performance.now()
+      if (!local && now - lastLocalAt < 80) return
+      if (local) lastLocalAt = now
+      zoom = Math.min(2.2, Math.max(0.7, Math.round(zoom * factor * 1000) / 1000))
+      if (Math.abs(zoom - 1) < 0.012) {
+        zoom = 1
+        document.documentElement.style.removeProperty('zoom')
+        return
+      }
+      document.documentElement.style.zoom = String(zoom)
+    }
+    const unbind = bindHandGestures(shell, {
+      onPinch: (factor) => apply(factor, true),
+    })
+    const onWheel = (event: WheelEvent) => {
+      if (!event.ctrlKey && !event.metaKey) return
+      if (event.cancelable) event.preventDefault()
+      apply(pinchFactorFromWheel(event.deltaY), true)
+    }
+    const onMessage = (event: MessageEvent) => {
+      if (event.source !== window.parent || !event.data || typeof event.data !== 'object') return
+      const message = event.data as { type?: unknown; schemaVersion?: unknown; direction?: unknown }
+      if (message.schemaVersion !== 1 || message.type !== 'glyphenwerk:sheet-zoom') return
+      if (message.direction !== 'in' && message.direction !== 'out') return
+      apply(message.direction === 'in' ? 1.08 : 1 / 1.08, false)
+    }
+    window.addEventListener('wheel', onWheel, { passive: false })
+    window.addEventListener('message', onMessage)
+    return () => {
+      unbind()
+      window.removeEventListener('wheel', onWheel)
+      window.removeEventListener('message', onMessage)
+      document.documentElement.style.removeProperty('zoom')
+    }
+  }, [])
 
   const labels = useMemo(() => [...BASE_CATALOG, ...customLabels], [customLabels])
   const selectedLabel = labels.find((label) => label.id === selectedLabelId) ?? labels[0]
@@ -1067,7 +1111,7 @@ const App = () => {
   ]
 
   return (
-    <div className={`app-shell ${EMBEDDED_IN_FANOTES ? 'is-fanotes-embedded' : ''}`}>
+    <div ref={shellRef} className={`app-shell ${EMBEDDED_IN_FANOTES ? 'is-fanotes-embedded' : ''}`}>
       <aside className="sidebar">
         <button className="brand" onClick={() => setView('capture')} aria-label="Zur Erfassung">
           <span className="brand-mark"><span>∫</span></span>
@@ -1620,7 +1664,7 @@ const App = () => {
       </main>
 
       {showCustomModal && (
-        <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setShowCustomModal(false) }}>
+        <div className="modal-backdrop" role="presentation" onPointerDown={(event) => { if (event.target === event.currentTarget) setShowCustomModal(false) }}>
           <div className="modal" role="dialog" aria-modal="true" aria-labelledby="custom-label-title">
             <button className="modal-close" onClick={() => setShowCustomModal(false)} aria-label="Schließen"><Icon name="close" /></button>
             <span className="modal-icon"><Icon name="plus" size={22} /></span>

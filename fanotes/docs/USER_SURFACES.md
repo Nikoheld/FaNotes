@@ -104,6 +104,7 @@ Command-palette action ids walked from `src/App.tsx`: `new-note`, `import-pdf-no
 | Text-to-handwriting dialog (text, sliders, paste) | `src/components/TextToHandwritingDialog.tsx` | `data-tth-control="text"` |
 | Dialog chrome on an inline pen board | `src/lib/overlayInteract.ts` | `DRAWING_MODAL_CHROME_SELECTOR` |
 | Pen-only factory default | `src/defaults.ts` | `defaultSettingsForPlatform` |
+| Hand gestures (pinch, two-finger pan, rotate, swipe) | `../src/lib/handGestures.ts` | `export const bindHandGestures` |
 
 ## Recognition
 

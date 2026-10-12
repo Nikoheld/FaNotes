@@ -158,7 +158,7 @@ export function AiPanel({ settings, note, vaultNotes, onSettingsChange, onApply,
     : cloudInWeb ? `Schlüssel wird nur für diese Sitzung über den FaNotes-Proxy an ${definition.title} weitergereicht` : `Direkte verschlüsselte Verbindung zu ${definition.title}`
 
   return (
-    <div className="modal-backdrop lm-studio-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !running) onClose() }}>
+    <div className="modal-backdrop lm-studio-backdrop" role="presentation" onPointerDown={(event) => { if (event.target === event.currentTarget && !running) onClose() }}>
       <section className="lm-studio-panel ai-panel" role="dialog" aria-modal="true" aria-labelledby="ai-panel-title">
         <header className="lm-studio-header"><span className="lm-studio-mark"><Bot size={22} /></span><div><span className="eyebrow">Ein Assistent · sechs Anbieter</span><h2 id="ai-panel-title">AI</h2><p>Anbieter und Modell wählen, Aufgaben kombinieren und jede Änderung vor dem Übernehmen prüfen.</p></div><button type="button" className="icon-button" onClick={onClose} disabled={running} aria-label="AI-Menü schließen"><X size={18} /></button></header>
         <div className="lm-studio-body">

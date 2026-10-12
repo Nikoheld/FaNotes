@@ -80,8 +80,8 @@ export function CommandPalette({ actions, mode = 'commands', rankNotes, activePa
   const noteMode = mode === 'notes'
 
   return (
-    <div className="modal-backdrop palette-backdrop" onMouseDown={onClose}>
-      <section className={`command-palette ${noteMode ? 'is-note-switcher' : ''}`} role="dialog" aria-modal="true" aria-label={noteMode ? 'Notiz öffnen' : 'Befehlspalette'} onMouseDown={(event) => event.stopPropagation()}>
+    <div className="modal-backdrop palette-backdrop" onPointerDown={onClose}>
+      <section className={`command-palette ${noteMode ? 'is-note-switcher' : ''}`} role="dialog" aria-modal="true" aria-label={noteMode ? 'Notiz öffnen' : 'Befehlspalette'} onPointerDown={(event) => event.stopPropagation()}>
         <div className="palette-search">
           <Search size={19} />
           <input

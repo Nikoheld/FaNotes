@@ -49,6 +49,7 @@ import { pdfPageScrollIntoViewBlock } from '../lib/pdfOpenCamera'
 import { PDF_INKING_CLASS, PDF_TOOLBAR_SLOT_ID } from '../lib/pdfInkHit'
 import { VIEW_ZOOM_MIN, readSharedZoomMax, resolvePaperZoomScroller, watchSheetZoom } from '../lib/paperView'
 import { loadPaperViewMemory, recallPaperView } from '../lib/paperViewMemory'
+import { bindHandGestures, pinchFactorFromWheel, shouldTakeSheetZoom } from '../../../src/lib/handGestures'
 import { usePaperView } from './PaperView'
 
 type PdfNoteViewProps = {
@@ -501,6 +502,10 @@ export function PdfNoteView({
   const [pageRatio, setPageRatio] = useState(DEFAULT_PDF_PAGE_RATIO)
   const [fitPageScale, setFitPageScale] = useState(1)
   const pagesRef = useRef<HTMLDivElement>(null)
+  const viewRef = useRef<HTMLElement>(null)
+  const scaleRef = useRef(1)
+  const changeScaleRef = useRef<(next: number) => void>(() => {})
+  const scrollToPageRef = useRef<(page: number) => void>(() => {})
   const searchInputRef = useRef<HTMLInputElement>(null)
   const layoutTimerRef = useRef<number | null>(null)
   const searchTokenRef = useRef(0)
@@ -671,6 +676,7 @@ export function PdfNoteView({
   }, [pageRatio])
 
   const appliedScale = zoomMode === 'fit-page' ? fitPageScale : scale
+  scaleRef.current = appliedScale
   currentPageRef.current = currentPage
 
   useLayoutEffect(() => {
@@ -756,6 +762,7 @@ export function PdfNoteView({
     setCurrentPage(target)
     setPageDraft(String(target))
   }, [pageCount])
+  scrollToPageRef.current = scrollToPage
 
   const handleVisible = useCallback((page: number, ratio: number) => {
     if (ratio < 0.35) return
@@ -772,6 +779,73 @@ export function PdfNoteView({
     setScale(Math.max(MIN_SCALE, Math.min(MAX_SCALE, Math.round(next * 100) / 100)))
     notifyLayout()
   }, [notifyLayout])
+  changeScaleRef.current = changeScale
+
+  useEffect(() => {
+    if (cameraHosted) return undefined
+    const node = viewRef.current
+    if (!node) return undefined
+    const host = (node.closest('[data-hand-gesture-root]') as HTMLElement | null) ?? node
+    let pageCarry = 0
+    let rotateCarry = 0
+    let lastWheelAt = 0
+    const onWheel = (event: WheelEvent) => {
+      if (!event.ctrlKey && !event.metaKey) return
+      if (event.cancelable) event.preventDefault()
+      event.stopPropagation()
+      lastWheelAt = performance.now()
+      const next = Math.max(MIN_SCALE, Math.min(MAX_SCALE, scaleRef.current * pinchFactorFromWheel(event.deltaY)))
+      scaleRef.current = next
+      changeScaleRef.current(next)
+    }
+    host.addEventListener('wheel', onWheel, { capture: true, passive: false })
+    const unbind = bindHandGestures(host, {
+      captureNavigation: true,
+      onPan: (dx, dy) => {
+        const top = node.scrollTop
+        const left = node.scrollLeft
+        node.scrollTop -= dy
+        node.scrollLeft -= dx
+        if (node.scrollTop !== top || node.scrollLeft !== left) {
+          pageCarry = 0
+          return
+        }
+        pageCarry += dy
+        if (Math.abs(pageCarry) < 80) return
+        const delta = pageCarry > 0 ? -1 : 1
+        pageCarry = 0
+        scrollToPageRef.current(currentPageRef.current + delta)
+      },
+      onPinch: (factor) => {
+        const next = Math.max(MIN_SCALE, Math.min(MAX_SCALE, scaleRef.current * factor))
+        scaleRef.current = next
+        changeScaleRef.current(next)
+      },
+      onRotate: (degrees) => {
+        rotateCarry += degrees
+        if (Math.abs(rotateCarry) < 40) return
+        const step = rotateCarry > 0 ? 90 : -90
+        rotateCarry = 0
+        setRotation((value) => (value + step + 360) % 360)
+      },
+    })
+    const subscribe = window.fanotes?.onSheetZoom
+    const unsubscribe = typeof subscribe === 'function'
+      ? subscribe((direction) => {
+        if (performance.now() - lastWheelAt < 80) return
+        if (!shouldTakeSheetZoom(host, document.querySelectorAll('[data-hand-gesture-root]').length === 1)) return
+        const delta = direction === 'in' ? SCALE_STEP : -SCALE_STEP
+        const next = Math.max(MIN_SCALE, Math.min(MAX_SCALE, scaleRef.current + delta))
+        scaleRef.current = next
+        changeScaleRef.current(next)
+      })
+      : undefined
+    return () => {
+      host.removeEventListener('wheel', onWheel, { capture: true })
+      unbind()
+      unsubscribe?.()
+    }
+  }, [cameraHosted])
 
   const runSearch = useCallback(async (query: string) => {
     const needle = query.trim()
@@ -979,6 +1053,7 @@ export function PdfNoteView({
 
   return (
     <section
+      ref={viewRef}
       className={`pdf-note-view ${inputDisabled ? PDF_INKING_CLASS : ''} ${sidebar !== 'none' ? 'has-sidebar' : ''}`}
       aria-label={`PDF ${title}`}
       tabIndex={inputDisabled ? -1 : 0}

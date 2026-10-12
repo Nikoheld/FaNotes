@@ -211,7 +211,7 @@ export function LmStudioPanel({
   ].filter(Boolean).join(' · ') : ''
 
   return (
-    <div className="modal-backdrop lm-studio-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !running) onClose() }}>
+    <div className="modal-backdrop lm-studio-backdrop" role="presentation" onPointerDown={(event) => { if (event.target === event.currentTarget && !running) onClose() }}>
       <section className="lm-studio-panel" role="dialog" aria-modal="true" aria-labelledby="lm-studio-title">
         <header className="lm-studio-header">
           <span className="lm-studio-mark"><Bot size={22} /></span>

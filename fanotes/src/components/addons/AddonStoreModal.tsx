@@ -488,8 +488,8 @@ fanotes.commands.register({
   )
 
   return (
-    <div className="modal-backdrop addon-store-backdrop" role="presentation" onMouseDown={onClose}>
-      <section ref={modalRef} className="addon-store" role="dialog" aria-modal="true" aria-label="Add-on-Store" onMouseDown={(event) => event.stopPropagation()}>
+    <div className="modal-backdrop addon-store-backdrop" role="presentation" onPointerDown={onClose}>
+      <section ref={modalRef} className="addon-store" role="dialog" aria-modal="true" aria-label="Add-on-Store" onPointerDown={(event) => event.stopPropagation()}>
         <header className="addon-store__header">
           <div className="addon-store__title">
             <h2>Add-on-Store</h2>
