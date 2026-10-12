@@ -100,23 +100,37 @@ pub fn read_file(host: &Host, id: &Value, name: &Value) -> Result<Value, String>
 pub fn write_files(host: &Host, id: &Value, files: &Value) -> Result<Value, String> {
     let _guard = lock();
     let id = safe_id(id.as_str().unwrap_or(""))?;
-    let object = files
-        .as_object()
-        .ok_or_else(|| "Keine Dateien übergeben.".to_owned())?;
+    let entries = file_entries(files)?;
     let dir = addon_dir(host, &id)?;
     fs::create_dir_all(&dir)
         .map_err(|_| "Der Add-on-Ordner konnte nicht angelegt werden.".to_owned())?;
-    for (name, content) in object {
+    for (name, content) in entries {
         let Some(content) = content.as_str() else {
             continue;
         };
         if content.len() > MAX_FILE_BYTES {
             return Err(format!("{name} ist größer als 2 MB."));
         }
-        let target = dir.join(safe_file(name)?);
+        let target = dir.join(safe_file(&name)?);
         atomic_write(&target, content.as_bytes())?;
     }
     Ok(Value::Null)
+}
+
+/// `Object.entries`: an array is an object whose keys are `"0"`, `"1"`, …
+fn file_entries(files: &Value) -> Result<Vec<(String, &Value)>, String> {
+    match files {
+        Value::Object(object) => Ok(object
+            .iter()
+            .map(|(name, content)| (name.clone(), content))
+            .collect()),
+        Value::Array(items) => Ok(items
+            .iter()
+            .enumerate()
+            .map(|(index, content)| (index.to_string(), content))
+            .collect()),
+        _ => Err("Keine Dateien übergeben.".to_owned()),
+    }
 }
 
 pub fn read_data(host: &Host, id: &str) -> Result<Value, String> {
