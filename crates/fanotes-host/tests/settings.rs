@@ -252,6 +252,26 @@ fn a_stale_reset_marker_does_not_wipe_the_profile() {
 }
 
 #[test]
+fn a_reset_marker_version_of_one_point_zero_still_wipes_the_profile() {
+    let (app, mut host) = host();
+    host.dispatch("fanotes:save-settings", &[json!({ "theme": "midnight" })])
+        .unwrap();
+    let user_data = std::path::absolute(&app).unwrap();
+    let marker = app.parent().unwrap().join(".fanotes-reset-pending.json");
+    fs::write(
+        &marker,
+        format!(
+            r#"{{"version":1.0,"userDataPath":"{}","createdAt":"2026-10-12T03:00:00.000Z"}}"#,
+            user_data.display()
+        ),
+    )
+    .unwrap();
+    let _ = Host::open(app.clone());
+    assert!(!app.join("settings.json").exists());
+    assert!(!marker.exists());
+}
+
+#[test]
 fn a_symlinked_reset_marker_is_discarded() {
     let (app, mut host) = host();
     host.dispatch("fanotes:save-settings", &[json!({ "theme": "midnight" })])
@@ -417,4 +437,23 @@ fn a_settings_file_with_a_bad_byte_still_loads() {
     host.secret_store = SecretStore::Memory;
     let boot = host.dispatch("fanotes:bootstrap", &[]).unwrap();
     assert_eq!(boot["settings"]["syncDeviceName"], "La\u{FFFD}ptop");
+}
+
+#[test]
+fn custom_css_rejects_an_expression_after_a_byte_order_mark() {
+    let (_app, mut host) = host();
+    let saved = host
+        .dispatch(
+            "fanotes:save-settings",
+            &[json!({ "customCss": "div{color:expression\u{FEFF}(alert(1))}" })],
+        )
+        .unwrap();
+    assert_eq!(saved["customCss"], "");
+    let saved = host
+        .dispatch(
+            "fanotes:save-settings",
+            &[json!({ "customCss": "div{color:expression\u{0085}(alert(1))}" })],
+        )
+        .unwrap();
+    assert!(saved["customCss"].as_str().unwrap().contains("expression"));
 }
