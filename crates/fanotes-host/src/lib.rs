@@ -3164,7 +3164,8 @@ fn search_drawings(
         let Some((id, extension)) = name.rsplit_once('.') else {
             continue;
         };
-        if !extension.eq_ignore_ascii_case("json") || !is_drawing_id(id) {
+        // Search opens `${id}.json`, so only a lowercase suffix is a drawing.
+        if extension != "json" || !is_drawing_id(id) {
             continue;
         }
         let path = entry.path();

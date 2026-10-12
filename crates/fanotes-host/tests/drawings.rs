@@ -170,7 +170,7 @@ fn drawings_round_trip_and_land_in_the_note() {
 }
 
 #[test]
-fn the_drawing_library_uses_one_json_suffix_without_case() {
+fn the_drawing_library_opens_only_a_lowercase_json_suffix() {
     let (dir, mut host) = host();
     let assets = dir.join("vault/.fanotes/assets");
     fs::create_dir_all(&assets).unwrap();
@@ -195,13 +195,12 @@ fn the_drawing_library_uses_one_json_suffix_without_case() {
         .iter()
         .map(|item| item["title"].as_str().unwrap().to_owned())
         .collect();
-    assert_eq!(titles, vec!["Behalten".to_owned(), "Gross".to_owned()]);
+    assert_eq!(titles, vec!["Behalten".to_owned()]);
 
     let upper = host
         .dispatch("fanotes:search", &[json!("Grosswort")])
         .unwrap();
-    assert_eq!(upper[0]["drawingId"], "Upper");
-    assert_eq!(upper[0]["title"], "Gross");
+    assert!(upper.as_array().unwrap().is_empty());
     let hidden = host
         .dispatch("fanotes:search", &[json!("Doppelwort")])
         .unwrap();

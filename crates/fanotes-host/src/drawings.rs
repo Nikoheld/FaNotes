@@ -393,8 +393,8 @@ fn safe_title(value: &str) -> Result<String, String> {
 
 fn drawing_file_id(name: &str) -> Option<&str> {
     let (id, extension) = name.rsplit_once('.')?;
-    extension
-        .eq_ignore_ascii_case("json")
+    // The library opens `${id}.json`. `Upper.JSON` is not that file.
+    (extension == "json")
         .then_some(id)
         .filter(|id| drawing_id(id).is_ok())
 }
