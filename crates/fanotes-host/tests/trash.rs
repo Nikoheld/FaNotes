@@ -64,6 +64,13 @@ fn deleted_notes_go_to_the_trash_and_the_tree_sorts_numbers() {
                 & 0o777,
             0o600
         );
+        for folder in ["trash", "trash/files", "trash/info"] {
+            assert_eq!(
+                fs::metadata(dir.join(folder)).unwrap().permissions().mode() & 0o777,
+                0o700,
+                "{folder}"
+            );
+        }
         let info = dir.join("trash/info");
         fs::set_permissions(&info, fs::Permissions::from_mode(0o500)).unwrap();
         fs::write(vault.join("zurueck.md"), b"bleibt\n").unwrap();

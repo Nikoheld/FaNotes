@@ -2703,6 +2703,28 @@ fn gio_trash(path: &Path) -> Result<(), ()> {
     }
 }
 
+fn make_trash_private(directory: &Path) -> Result<(), String> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = fs::metadata(directory)
+            .map_err(|_| "Der Eintrag konnte nicht in den Papierkorb verschoben werden.".to_owned())?
+            .permissions()
+            .mode()
+            & 0o777;
+        if mode & 0o077 != 0 {
+            fs::set_permissions(directory, fs::Permissions::from_mode(0o700)).map_err(|_| {
+                "Der Eintrag konnte nicht in den Papierkorb verschoben werden.".to_owned()
+            })?;
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = directory;
+    }
+    Ok(())
+}
+
 fn xdg_trash_dir() -> Option<PathBuf> {
     let data = std::env::var_os("XDG_DATA_HOME")
         .map(PathBuf::from)
@@ -2719,6 +2741,11 @@ fn place_in_trash(trash_root: &Path, source: &Path) -> Result<(), String> {
         .map_err(|_| "Der Eintrag konnte nicht in den Papierkorb verschoben werden.".to_owned())?;
     fs::create_dir_all(&info)
         .map_err(|_| "Der Eintrag konnte nicht in den Papierkorb verschoben werden.".to_owned())?;
+    // The desktop trash and the freedesktop spec keep these folders private.
+    // `create_dir_all` follows the umask, which would otherwise leave them listable.
+    for directory in [trash_root, &files, &info] {
+        make_trash_private(directory)?;
+    }
     let base = source
         .file_name()
         .and_then(|name| name.to_str())
