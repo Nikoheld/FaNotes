@@ -59,9 +59,19 @@ void (async () => {
     if (path.resolve(signaturePath).startsWith(`${path.resolve(target)}${path.sep}`)) {
       throw new Error('Die Prüfsummen-Signatur darf nicht im Release-Ordner liegen.')
     }
-    await fsp.mkdir(path.dirname(signaturePath), { recursive: true, mode: 0o700 })
+    await fsp.mkdir(path.dirname(signaturePath), { recursive: true, mode: 0o750 })
     const temporarySignature = `${signaturePath}.${process.pid}.tmp`
-    await fsp.writeFile(temporarySignature, signature, { mode: 0o600 })
+    await fsp.writeFile(temporarySignature, signature)
+    // writeFile applies the process umask, so a root umask of 077 would leave
+    // this signature as mode 0600. The website runs as the group that owns the
+    // signature directory and must be able to read it.
+    await fsp.chmod(temporarySignature, 0o640)
+    if (typeof process.getuid === 'function' && process.getuid() === 0) {
+      const signatureDirectory = path.dirname(signaturePath)
+      await fsp.chmod(signatureDirectory, 0o750)
+      const directory = await fsp.stat(signatureDirectory)
+      await fsp.chown(temporarySignature, directory.uid, directory.gid)
+    }
     await fsp.rename(temporarySignature, signaturePath)
   } else {
     console.warn('FANOTES_UPDATE_SIGNING_KEY fehlt. Der Update-Server signiert keine Pakete, bis SHA256SUMS außerhalb des Release-Ordners signiert wurde.')
