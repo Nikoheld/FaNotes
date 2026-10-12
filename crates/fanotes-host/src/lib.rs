@@ -870,6 +870,25 @@ impl Host {
         } else {
             vault::normalize_relative_path(parent, true, false)?
         };
+        // Desktop resolveVaultPath runs before safeEntryName.
+        let parent_path = if parent_relative.is_empty() {
+            root.clone()
+        } else {
+            vault::reject_symlinks(&root, &parent_relative)?;
+            let path = vault::resolve_existing_entry(&root, &parent_relative).map_err(|error| {
+                if error == "Der Eintrag wurde nicht gefunden." {
+                    "Der Zielordner wurde nicht gefunden.".to_owned()
+                } else {
+                    error
+                }
+            })?;
+            let meta = fs::symlink_metadata(&path)
+                .map_err(|_| "Der Zielordner wurde nicht gefunden.".to_owned())?;
+            if meta.file_type().is_symlink() || !meta.is_dir() {
+                return Err("Der gewählte Pfad ist kein Ordner.".to_owned());
+            }
+            path
+        };
         let english = self.ui_language() == "en";
         let fallback = if note {
             if english {
@@ -895,24 +914,6 @@ impl Host {
                 return Err("Neue Notizen müssen Markdown-Dateien sein.".to_owned());
             }
         }
-        let parent_path = if parent_relative.is_empty() {
-            root.clone()
-        } else {
-            vault::reject_symlinks(&root, &parent_relative)?;
-            let path = vault::resolve_existing_entry(&root, &parent_relative).map_err(|error| {
-                if error == "Der Eintrag wurde nicht gefunden." {
-                    "Der Zielordner wurde nicht gefunden.".to_owned()
-                } else {
-                    error
-                }
-            })?;
-            let meta = fs::symlink_metadata(&path)
-                .map_err(|_| "Der Zielordner wurde nicht gefunden.".to_owned())?;
-            if meta.file_type().is_symlink() || !meta.is_dir() {
-                return Err("Der gewählte Pfad ist kein Ordner.".to_owned());
-            }
-            path
-        };
         let paper = self
             .settings
             .get("paperStyle")

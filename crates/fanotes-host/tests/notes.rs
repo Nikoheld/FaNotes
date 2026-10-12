@@ -929,6 +929,53 @@ fn a_decomposed_umlaut_is_the_same_note_name() {
 }
 
 #[test]
+fn a_new_entry_checks_the_parent_before_the_name() {
+    let (mut host, vault) = host();
+    std::fs::write(vault.join("Seite.md"), b"Hallo\n").unwrap();
+    assert_eq!(
+        host.dispatch("fanotes:create-note", &[json!("Seite.md"), json!("CON")])
+            .unwrap_err(),
+        "Der gewählte Pfad ist kein Ordner."
+    );
+    assert_eq!(
+        host.dispatch(
+            "fanotes:create-note",
+            &[json!("Seite.md"), json!("Blatt.txt")],
+        )
+        .unwrap_err(),
+        "Der gewählte Pfad ist kein Ordner."
+    );
+    assert_eq!(
+        host.dispatch("fanotes:create-folder", &[json!("Seite.md"), json!("CON")])
+            .unwrap_err(),
+        "Der gewählte Pfad ist kein Ordner."
+    );
+    assert_eq!(
+        host.dispatch("fanotes:create-note", &[json!("Fehlt"), json!("CON")])
+            .unwrap_err(),
+        "Der Zielordner wurde nicht gefunden."
+    );
+    assert_eq!(
+        host.dispatch("fanotes:create-note", &[json!("../x"), json!("CON")])
+            .unwrap_err(),
+        "Pfad-Traversal ist nicht erlaubt."
+    );
+    assert_eq!(
+        host.dispatch("fanotes:create-note", &[json!(""), json!("CON")])
+            .unwrap_err(),
+        "Dieser Name ist nicht erlaubt."
+    );
+    assert_eq!(
+        host.dispatch("fanotes:create-note", &[json!("Mathe"), json!("Blatt.txt")])
+            .unwrap_err(),
+        "Neue Notizen müssen Markdown-Dateien sein."
+    );
+    assert!(!vault.join("Fehlt").exists());
+    assert!(vault.join("Seite.md").is_file());
+    assert!(!vault.join("CON").exists());
+}
+
+#[test]
 fn a_missing_folder_is_not_created_for_a_new_note() {
     let (mut host, vault) = host();
     let created = host
