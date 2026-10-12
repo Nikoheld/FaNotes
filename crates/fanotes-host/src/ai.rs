@@ -276,14 +276,18 @@ fn lmstudio_models(connection: &Value) -> Result<Vec<Value>, String> {
         Err(error) if error.contains("[HTTP 404]") => {}
         Err(error) => return Err(error),
     }
-    let legacy = request_json(
+    parse_lmstudio_legacy(&request_json(
         "GET",
         &format!("{origin}/v1/models"),
         connection,
         None,
         Duration::from_secs(20),
-    )?;
-    let models = legacy
+    )?)
+}
+
+/// The `/v1/models` fallback. An id that is only JavaScript whitespace is omitted.
+fn parse_lmstudio_legacy(body: &Value) -> Result<Vec<Value>, String> {
+    let models = body
         .get("data")
         .and_then(Value::as_array)
         .ok_or_else(|| "LM Studio hat keine Modellliste geliefert.".to_owned())?;
@@ -291,6 +295,9 @@ fn lmstudio_models(connection: &Value) -> Result<Vec<Value>, String> {
         .iter()
         .filter_map(|entry| {
             let id = entry.get("id").and_then(Value::as_str)?;
+            if crate::vault::js_trim(id).is_empty() {
+                return None;
+            }
             Some(model_record("lmstudio", id, id))
         })
         .take(1000)
@@ -1569,8 +1576,8 @@ fn unwrap_markdown_with(value: &str, empty_message: &str) -> Result<String, Stri
 mod tests {
     use super::{
         build_prompt, finish_models, lm_studio_text, output_token_limit, parse_anthropic_models,
-        parse_gemini_models, parse_lmstudio_models, parse_ollama_models, parse_openai_models,
-        provider_http_error, unwrap_markdown,
+        parse_gemini_models, parse_lmstudio_legacy, parse_lmstudio_models, parse_ollama_models,
+        parse_openai_models, provider_http_error, unwrap_markdown,
     };
     use base64::Engine;
     use serde_json::json;
@@ -1822,6 +1829,24 @@ mod tests {
             .map(|reply| reply.text),
             Some(String::new())
         );
+    }
+
+    #[test]
+    fn a_blank_legacy_lm_studio_id_is_omitted() {
+        let models = parse_lmstudio_legacy(&json!({
+            "data": [
+                { "id": "   " },
+                { "id": "\u{FEFF}" },
+                { "id": " llama " },
+                { "id": 3 },
+                "llama"
+            ]
+        }))
+        .unwrap();
+        assert_eq!(models.len(), 1);
+        assert_eq!(models[0]["key"], " llama ");
+        assert_eq!(models[0]["displayName"], " llama ");
+        assert_eq!(models[0]["loaded"], true);
     }
 
     #[test]
