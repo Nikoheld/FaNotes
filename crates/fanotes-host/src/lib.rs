@@ -3773,3 +3773,35 @@ mod documents_dir_tests {
         let _ = fs::remove_dir_all(&root);
     }
 }
+
+#[cfg(test)]
+mod folder_color_order_tests {
+    use super::read_folder_colors;
+    use std::fs;
+
+    #[test]
+    fn folder_colors_keep_the_first_entries_in_file_order() {
+        let root = std::env::temp_dir().join(format!(
+            "fanotes-colors-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join(".fanotes")).unwrap();
+        let mut body =
+            String::from("{\n  \"version\": 1,\n  \"colors\": {\n    \"zzz\": \"#112233\"");
+        for index in 0..5000 {
+            body.push_str(&format!(",\n    \"a{index:04}\": \"#abcdef\""));
+        }
+        body.push_str("\n  }\n}\n");
+        fs::write(root.join(".fanotes/folder-colors.json"), body).unwrap();
+        let colors = read_folder_colors(&root).unwrap();
+        assert_eq!(colors.get("zzz").map(String::as_str), Some("#112233"));
+        assert!(colors.get("a4999").is_none());
+        assert_eq!(colors.len(), 5000);
+        let _ = fs::remove_dir_all(&root);
+    }
+}
