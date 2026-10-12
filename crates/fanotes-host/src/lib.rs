@@ -124,7 +124,11 @@ impl Host {
             ChannelKind::Message => return self.dispatch_message(channel),
             ChannelKind::Command => {}
         }
-        if self.onboarding_required && !onboarding_open(channel) {
+        // `write-file` checks the path and the note text before this gate.
+        if self.onboarding_required
+            && channel != "fanotes:write-file"
+            && !onboarding_open(channel)
+        {
             return Err("Bitte schließe zuerst die FaNotes-Ersteinrichtung ab.".to_owned());
         }
         match channel {
@@ -833,6 +837,9 @@ impl Host {
             .ok_or_else(|| "Der Notizinhalt ist ungültig oder zu groß.".to_owned())?;
         if content.len() as u64 > note_byte_limit(&normalized) {
             return Err("Der Notizinhalt ist ungültig oder zu groß.".to_owned());
+        }
+        if self.onboarding_required {
+            return Err("Bitte schließe zuerst die FaNotes-Ersteinrichtung ab.".to_owned());
         }
         let root = self.require_vault()?.to_path_buf();
         let path = vault::resolve_note_file(&root, &normalized)?;
@@ -2682,16 +2689,51 @@ fn percent_encode(path: &Path) -> String {
 }
 
 fn onboarding_open(channel: &str) -> bool {
+    // These commands do not call `ensureBootstrap()`, so the desktop answers
+    // them while the first-run screen is still open.
     matches!(
         channel,
         "fanotes:bootstrap"
             | "fanotes:complete-onboarding"
             | "fanotes:select-vault"
             | "fanotes:get-cached-tree"
+            | "fanotes:close-subject-book-popout"
+            | "fanotes:load-spelling-resources"
+            | "fanotes:load-spelling-word-candidates"
+            | "fanotes:load-handwriting-recognition-resources"
+            | "fanotes:recognize-native-handwriting-line"
+            | "fanotes:enhanced-math-get-state"
+            | "fanotes:enhanced-math-install"
+            | "fanotes:enhanced-math-recognize"
+            | "fanotes:qwen-vision-get-state"
+            | "fanotes:qwen-vision-install"
+            | "fanotes:qwen-vision-recognize"
+            | "fanotes:load-secure-settings"
+            | "fanotes:reset-app-data"
             | "fanotes:update-get-state"
             | "fanotes:update-check"
             | "fanotes:update-download"
             | "fanotes:update-install"
+            | "fanotes:open-external"
+            | "fanotes:capture-window"
+            | "fanotes:addons-fetch"
+            | "fanotes:addons-list"
+            | "fanotes:addons-save"
+            | "fanotes:addons-remove"
+            | "fanotes:addons-read-file"
+            | "fanotes:addons-write-files"
+            | "fanotes:addons-read-data"
+            | "fanotes:addons-write-data"
+            | "fanotes:addons-net-fetch"
+            | "fanotes:sync-vault-id"
+            | "fanotes:sync-scan"
+            | "fanotes:sync-read"
+            | "fanotes:sync-write"
+            | "fanotes:sync-remove"
+            | "fanotes:sync-read-state"
+            | "fanotes:sync-write-state"
+            | "fanotes:sync-read-secrets"
+            | "fanotes:sync-write-secrets"
     )
 }
 

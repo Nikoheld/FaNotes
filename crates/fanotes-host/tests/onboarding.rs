@@ -68,6 +68,65 @@ fn an_english_setup_leaves_a_german_subject_name_uncreated() {
 }
 
 #[test]
+fn setup_still_answers_the_channels_the_desktop_leaves_open() {
+    let (_vault, mut host) = host();
+    assert_eq!(
+        host.dispatch("fanotes:get-tree", &[]).unwrap_err(),
+        "Bitte schließe zuerst die FaNotes-Ersteinrichtung ab."
+    );
+    assert_eq!(
+        host.dispatch("fanotes:write-file", &[json!(1), json!("Text")])
+            .unwrap_err(),
+        "Ungültiger Vault-Pfad."
+    );
+    assert_eq!(
+        host.dispatch(
+            "fanotes:write-file",
+            &[json!("Willkommen.md"), json!("Neu\n")],
+        )
+        .unwrap_err(),
+        "Bitte schließe zuerst die FaNotes-Ersteinrichtung ab."
+    );
+    assert_eq!(
+        host.dispatch("fanotes:open-external", &[json!(1)])
+            .unwrap_err(),
+        "Ungültiger externer Link."
+    );
+    assert_eq!(
+        host.dispatch("fanotes:capture-window", &[]).unwrap_err(),
+        "Das Fensterbild ist ungültig."
+    );
+    assert!(host
+        .dispatch("fanotes:enhanced-math-get-state", &[])
+        .unwrap()
+        .is_object());
+    assert!(host
+        .dispatch("fanotes:qwen-vision-get-state", &[])
+        .unwrap()
+        .is_object());
+    assert!(host
+        .dispatch("fanotes:load-secure-settings", &[])
+        .unwrap()
+        .is_object());
+    assert!(host
+        .dispatch("fanotes:addons-list", &[])
+        .unwrap()
+        .is_array());
+    assert!(host
+        .dispatch("fanotes:sync-vault-id", &[])
+        .unwrap()
+        .as_str()
+        .unwrap()
+        .len()
+        >= 16);
+    assert_eq!(
+        host.dispatch("fanotes:close-subject-book-popout", &[])
+            .unwrap()["open"],
+        false
+    );
+}
+
+#[test]
 fn first_run_creates_the_chosen_subjects_and_stamps_the_tree() {
     let (vault, mut host) = host();
     let bootstrap = host.dispatch("fanotes:bootstrap", &[]).unwrap();
