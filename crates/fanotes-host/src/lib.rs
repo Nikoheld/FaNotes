@@ -52,6 +52,11 @@ const APP_VERSION: &str = "2026.10.2";
 #[derive(Debug)]
 pub struct Host {
     pub vault: Option<PathBuf>,
+    /// Absolute vault from `vault-path` or an imported profile.
+    ///
+    /// Desktop `readConfig` remembers this path before the folder is mounted.
+    /// A missing folder must not be replaced by the documents vault.
+    configured_vault: Option<PathBuf>,
     pub app_data: PathBuf,
     pub settings: Map<String, Value>,
     pub onboarding_required: bool,
@@ -79,6 +84,7 @@ impl Host {
         let _ = ensure_private_profile_dir(&app_data);
         let mut host = Self {
             vault: None,
+            configured_vault: None,
             app_data,
             settings: default_settings(),
             onboarding_required: false,
@@ -103,7 +109,8 @@ impl Host {
         if meta.file_type().is_symlink() || !meta.is_dir() {
             return Err("Der gewählte Vault ist kein sicherer Ordner.".to_owned());
         }
-        self.vault = Some(canonical);
+        self.vault = Some(canonical.clone());
+        self.configured_vault = Some(canonical);
         self.refresh_onboarding();
         if let Some(root) = self.vault.clone() {
             onboarding::upgrade_welcome_notes(&root);
@@ -112,12 +119,17 @@ impl Host {
     }
 
     fn require_vault(&self) -> Result<&Path, String> {
-        self.vault
-            .as_deref()
-            .ok_or_else(|| "Der Vault ist noch nicht initialisiert.".to_owned())
+        self.vault.as_deref().ok_or_else(|| {
+            if self.configured_vault.is_some() {
+                "Der gewählte Vault ist kein sicherer Ordner.".to_owned()
+            } else {
+                "Der Vault ist noch nicht initialisiert.".to_owned()
+            }
+        })
     }
 
     pub fn dispatch(&mut self, channel: &str, args: &[Value]) -> Result<Value, String> {
+        self.try_attach_configured_vault();
         let binding =
             find_channel(channel).ok_or_else(|| format!("Unbekannter Kanal: {channel}"))?;
         match binding.kind {
@@ -662,16 +674,42 @@ impl Host {
     }
 
     fn bootstrap(&mut self) -> Result<Value, String> {
-        self.ensure_default_vault()?;
-        let vault = self.require_vault()?;
-        Ok(json!({
+        self.try_attach_configured_vault();
+        if self.vault.is_none() {
+            if let Some(path) = self.configured_vault.clone() {
+                return Ok(self.bootstrap_payload(&path));
+            }
+            self.ensure_default_vault()?;
+        }
+        let vault = self.require_vault()?.to_path_buf();
+        Ok(self.bootstrap_payload(&vault))
+    }
+
+    fn bootstrap_payload(&self, vault: &Path) -> Value {
+        json!({
             "vaultPath": vault,
             "vaultName": vault.file_name().and_then(|name| name.to_str()).unwrap_or("Vault"),
             "settings": self.settings,
             "onboardingRequired": self.onboarding_required,
             "starterSubjects": onboarding::starter_subjects(self.ui_language()),
             "linuxRuntime": linux_runtime::bootstrap_linux()
-        }))
+        })
+    }
+
+    /// Open a remembered vault once its folder exists.
+    ///
+    /// `readConfig` keeps the path while a network volume is absent. The
+    /// documents folder is only created when no vault path is stored.
+    fn try_attach_configured_vault(&mut self) {
+        if self.vault.is_some() {
+            return;
+        }
+        let Some(path) = self.configured_vault.clone() else {
+            return;
+        };
+        if path.is_dir() {
+            let _ = self.set_vault(path);
+        }
     }
 
     fn ensure_default_vault(&mut self) -> Result<(), String> {
@@ -738,7 +776,11 @@ impl Host {
     }
 
     fn cached_tree(&self) -> Result<Value, String> {
-        let root = self.require_vault()?;
+        let root = self
+            .vault
+            .as_ref()
+            .or(self.configured_vault.as_ref())
+            .ok_or_else(|| "Der Vault ist noch nicht initialisiert.".to_owned())?;
         Ok(read_tree_cache(&self.app_data, root).unwrap_or(Value::Null))
     }
 
@@ -1484,6 +1526,14 @@ impl Host {
         }
         if let Ok(text) = fs::read_to_string(self.app_data.join("vault-path")) {
             let path = PathBuf::from(text.trim());
+            if path.as_os_str().is_empty() {
+                return;
+            }
+            // An absolute path is the configured vault even while it is missing.
+            // A relative path is used only when that folder already exists.
+            if path.is_absolute() {
+                self.configured_vault = Some(path.clone());
+            }
             if path.is_dir() {
                 let _ = self.set_vault(path);
             }
