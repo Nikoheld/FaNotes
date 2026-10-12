@@ -233,38 +233,118 @@ fn parse_ollama_models(body: &Value) -> Result<Vec<Value>, String> {
     Ok(models
         .iter()
         .filter_map(|entry| {
-            // `entry.model || entry.name` skips an empty string. The display
-            // name does the same and falls back to the key.
-            let model_name = entry.get("model").and_then(Value::as_str);
-            let name_field = entry.get("name").and_then(Value::as_str);
-            let name = if let Some(model) = model_name.filter(|text| !text.is_empty()) {
-                model
-            } else if let Some(name) = name_field {
-                name
-            } else {
-                model_name?
+            // `typeof (entry.model || entry.name) === 'string'`. An empty
+            // model with no name is omitted. A truthy non-string model is too.
+            let chosen = js_or(entry.get("model"), entry.get("name"))?;
+            let key = chosen.as_str()?;
+            let display = match js_or(entry.get("name"), entry.get("model")) {
+                Some(value) if !js_falsy(value) => js_string(value),
+                _ => key.to_owned(),
             };
-            let display = name_field.filter(|text| !text.is_empty()).unwrap_or(name);
-            let mut record = model_record("ollama", name, display);
+            let mut record = model_record("ollama", key, &display);
             let details = entry.get("details");
-            set_model_details(
-                &mut record,
-                details
-                    .and_then(|details| details.get("family"))
-                    .and_then(Value::as_str),
-                details
-                    .and_then(|details| details.get("quantization_level"))
-                    .and_then(Value::as_str),
-                details
-                    .and_then(|details| details.get("parameter_size"))
-                    .and_then(Value::as_str),
-                None,
-                None,
-                None,
-            );
+            if let Some(object) = record.as_object_mut() {
+                object.insert(
+                    "publisher".into(),
+                    Value::String(
+                        metadata_text(details.and_then(|details| details.get("family")), 200)
+                            .unwrap_or_default(),
+                    ),
+                );
+                object.insert(
+                    "quantization".into(),
+                    metadata_value(
+                        details.and_then(|details| details.get("quantization_level")),
+                        100,
+                    ),
+                );
+                object.insert(
+                    "params".into(),
+                    metadata_value(
+                        details.and_then(|details| details.get("parameter_size")),
+                        100,
+                    ),
+                );
+            }
             Some(record)
         })
         .collect())
+}
+
+/// JavaScript `||`: null, false, `0`, `NaN`, and `""` fall through.
+fn js_or<'a>(primary: Option<&'a Value>, fallback: Option<&'a Value>) -> Option<&'a Value> {
+    match primary {
+        Some(value) if !js_falsy(value) => Some(value),
+        _ => fallback,
+    }
+}
+
+fn js_falsy(value: &Value) -> bool {
+    match value {
+        Value::Null | Value::Bool(false) => true,
+        Value::String(text) => text.is_empty(),
+        Value::Number(number) => {
+            let number = number.as_f64().unwrap_or(f64::NAN);
+            number == 0.0 || number.is_nan()
+        }
+        _ => false,
+    }
+}
+
+/// `String(value)` for the values an Ollama tag can hold.
+fn js_string(value: &Value) -> String {
+    match value {
+        Value::Null => "null".to_owned(),
+        Value::Bool(true) => "true".to_owned(),
+        Value::Bool(false) => "false".to_owned(),
+        Value::String(text) => text.clone(),
+        Value::Number(number) => js_number_string(number.as_f64().unwrap_or(f64::NAN)),
+        Value::Array(items) => items
+            .iter()
+            .map(|item| {
+                if item.is_null() {
+                    String::new()
+                } else {
+                    js_string(item)
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(","),
+        Value::Object(_) => "[object Object]".to_owned(),
+    }
+}
+
+fn js_number_string(number: f64) -> String {
+    if number.is_nan() {
+        return "NaN".to_owned();
+    }
+    if number.is_infinite() {
+        return if number.is_sign_negative() {
+            "-Infinity".to_owned()
+        } else {
+            "Infinity".to_owned()
+        };
+    }
+    if number == 0.0 {
+        return "0".to_owned();
+    }
+    if number.fract() == 0.0 && number.abs() < 1e21 && number.abs() <= i64::MAX as f64 {
+        return format!("{}", number as i64);
+    }
+    format!("{number}")
+}
+
+/// `value ? String(value).slice(0, max) : null`.
+fn metadata_value(value: Option<&Value>, max: usize) -> Value {
+    match metadata_text(value, max) {
+        Some(text) => Value::String(text),
+        None => Value::Null,
+    }
+}
+
+fn metadata_text(value: Option<&Value>, max: usize) -> Option<String> {
+    let value = value.filter(|value| !js_falsy(value))?;
+    Some(crate::vault::truncate_utf16(&js_string(value), max))
 }
 
 fn lmstudio_models(connection: &Value) -> Result<Vec<Value>, String> {
@@ -1895,6 +1975,48 @@ mod tests {
         assert_eq!(panel.len(), 1001);
         assert_eq!(panel[0]["key"], "p0000");
         assert_eq!(panel[1000]["key"], "p1000");
+    }
+
+    #[test]
+    fn an_empty_ollama_model_without_a_name_is_omitted() {
+        let models = parse_ollama_models(&json!({
+            "models": [
+                { "model": "" },
+                { "model": "", "name": "" },
+                { "model": 1, "name": "llama" },
+                { "model": 0, "name": "llama" },
+                { "model": false, "name": "kept" },
+                {
+                    "model": "id",
+                    "name": 1,
+                    "details": {
+                        "family": 8,
+                        "parameter_size": 0,
+                        "quantization_level": "Q4"
+                    }
+                },
+                { "model": "id", "name": true },
+                { "model": "id", "name": [] },
+                { "name": "" }
+            ]
+        }))
+        .unwrap();
+        let keys: Vec<_> = models
+            .iter()
+            .map(|model| model["key"].as_str().unwrap())
+            .collect();
+        assert_eq!(keys, vec!["", "llama", "kept", "id", "id", "id", ""]);
+        assert_eq!(models[0]["displayName"], "");
+        assert_eq!(models[1]["displayName"], "llama");
+        assert_eq!(models[2]["displayName"], "kept");
+        assert_eq!(models[3]["key"], "id");
+        assert_eq!(models[3]["displayName"], "1");
+        assert_eq!(models[3]["publisher"], "8");
+        assert_eq!(models[3]["quantization"], "Q4");
+        assert!(models[3]["params"].is_null());
+        assert_eq!(models[4]["displayName"], "true");
+        assert_eq!(models[5]["displayName"], "");
+        assert_eq!(models[6]["displayName"], "");
     }
 
     #[test]
