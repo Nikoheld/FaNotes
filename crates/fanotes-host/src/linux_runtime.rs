@@ -278,7 +278,9 @@ fn scan_force_zero_scaling(
     if !meta.is_file() || meta.len() == 0 || meta.len() > MAX_BYTES {
         return None;
     }
-    let text = std::fs::read_to_string(&resolved).ok()?;
+    // Node `readFile(..., 'utf8')` keeps the file and replaces a bad byte.
+    let bytes = std::fs::read(&resolved).ok()?;
+    let text = String::from_utf8_lossy(&bytes);
     let mut last = None;
     let from_dir = resolved.parent().unwrap_or(Path::new("."));
     for raw_line in text.split('\n') {
@@ -1147,6 +1149,35 @@ mod tests {
             "linux",
             &env(&[
                 ("FANOTES_HYPRLAND_CONFIG", configured.to_str().unwrap()),
+                ("HOME", ""),
+            ]),
+            || panic!("hyprctl"),
+        );
+        assert_eq!(runtime["hyprlandZeroScaling"], true);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_bad_byte_in_a_hyprland_config_still_enables_zero_scaling() {
+        let dir = std::env::temp_dir().join(format!(
+            "fanotes-hypr-lossy-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let config = dir.join("hyprland.conf");
+        let mut bytes = b"monitor = DP-1 # ".to_vec();
+        bytes.push(0xe4);
+        bytes.extend_from_slice(b"\nforce_zero_scaling = true\n");
+        fs::write(&config, bytes).unwrap();
+        let runtime = report(
+            "linux",
+            &env(&[
+                ("FANOTES_HYPRLAND_CONFIG", config.to_str().unwrap()),
                 ("HOME", ""),
             ]),
             || panic!("hyprctl"),
