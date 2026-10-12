@@ -96,10 +96,12 @@ pub fn lm_studio_origin(raw_url: &str) -> Result<String, String> {
     Ok(url.origin().ascii_serialization())
 }
 
-/// `parsed.search` and `parsed.hash` are `?` and `#` even when nothing follows.
-/// Those strings are truthy, so an empty query or fragment is refused.
+/// `URL.search` and `URL.hash` are empty strings when the URL only has `?` or `#`.
+/// An empty string is falsy, so that marker does not reject the address.
+/// A query or fragment that contains text is truthy and is refused.
 fn has_search_or_hash(url: &url::Url) -> bool {
-    url.query().is_some() || url.fragment().is_some()
+    url.query().is_some_and(|query| !query.is_empty())
+        || url.fragment().is_some_and(|fragment| !fragment.is_empty())
 }
 
 fn is_private_host(hostname: &str) -> bool {
@@ -240,11 +242,29 @@ mod tests {
             "http://localhost:1234"
         );
         assert!(lm_studio_origin("http://127.0.0.1:1234/v1/models").is_err());
-        assert!(lm_studio_origin("http://127.0.0.1:1234?").is_err());
-        assert!(lm_studio_origin("http://127.0.0.1:1234#").is_err());
-        assert!(lm_studio_origin("http://127.0.0.1:1234/v1?").is_err());
-        assert!(local_ai_origin("http://127.0.0.1:11434?", "ollama").is_err());
-        assert!(local_ai_origin("http://127.0.0.1:4096#", "opencode").is_err());
+        assert_eq!(
+            lm_studio_origin("http://127.0.0.1:1234?").unwrap(),
+            "http://127.0.0.1:1234"
+        );
+        assert_eq!(
+            lm_studio_origin("http://127.0.0.1:1234#").unwrap(),
+            "http://127.0.0.1:1234"
+        );
+        assert_eq!(
+            lm_studio_origin("http://127.0.0.1:1234/v1?").unwrap(),
+            "http://127.0.0.1:1234"
+        );
+        assert_eq!(
+            local_ai_origin("http://127.0.0.1:11434?", "ollama").unwrap(),
+            "http://127.0.0.1:11434"
+        );
+        assert_eq!(
+            local_ai_origin("http://127.0.0.1:4096#", "opencode").unwrap(),
+            "http://127.0.0.1:4096"
+        );
+        assert!(lm_studio_origin("http://127.0.0.1:1234?x").is_err());
+        assert!(lm_studio_origin("http://127.0.0.1:1234#note").is_err());
+        assert!(local_ai_origin("http://127.0.0.1:11434?model=gemma", "ollama").is_err());
         assert!(lm_studio_origin("https://api.openai.com/v1").is_err());
         assert!(local_ai_origin("http://127.0.0.1:1234/v1", "ollama").is_err());
         assert!(local_ai_origin("http://127.0.0.1:1234/v1", "lmstudio").is_err());
