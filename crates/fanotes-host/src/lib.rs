@@ -988,17 +988,18 @@ impl Host {
     fn set_folder_color(&mut self, relative: &str, color: &Value) -> Result<Value, String> {
         let root = self.require_vault()?.to_path_buf();
         let normalized = vault::normalize_relative_path(relative, false, false)?;
+        // Desktop checks the hex color after the path shape and before the folder exists.
+        let stored = match color {
+            Value::Null => None,
+            Value::String(value) if folder_color_hex(value) => Some(value.to_ascii_lowercase()),
+            _ => return Err("Ungültige Ordnerfarbe.".to_owned()),
+        };
         let path = vault::resolve_existing_entry(&root, &normalized)?;
         let meta = fs::symlink_metadata(&path)
             .map_err(|_| "Der Ordner wurde nicht gefunden.".to_owned())?;
         if meta.file_type().is_symlink() || !meta.is_dir() {
             return Err("Der gewählte Pfad ist kein Ordner.".to_owned());
         }
-        let stored = match color {
-            Value::Null => None,
-            Value::String(value) if folder_color_hex(value) => Some(value.to_ascii_lowercase()),
-            _ => return Err("Ungültige Ordnerfarbe.".to_owned()),
-        };
         let mut colors = read_folder_colors(&root)?;
         if let Some(color) = stored.clone() {
             colors.insert(normalized.clone(), color);

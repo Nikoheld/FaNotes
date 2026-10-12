@@ -88,6 +88,71 @@ fn a_kelvin_sign_cannot_name_the_legacy_internal_folder() {
 }
 
 #[test]
+fn an_invalid_folder_color_is_reported_before_the_folder_check() {
+    let (mut host, vault, _) = host();
+    fs::write(vault.join("Seite.md"), b"Hallo\n").unwrap();
+    assert_eq!(
+        host.dispatch("fanotes:set-folder-color", &[json!("Seite.md"), json!(1)])
+            .unwrap_err(),
+        "Ungültige Ordnerfarbe."
+    );
+    assert_eq!(
+        host.dispatch("fanotes:set-folder-color", &[json!("Fehlt"), json!(false)])
+            .unwrap_err(),
+        "Ungültige Ordnerfarbe."
+    );
+    assert_eq!(
+        host.dispatch(
+            "fanotes:set-folder-color",
+            &[json!("Seite.md"), json!("#112233")],
+        )
+        .unwrap_err(),
+        "Der gewählte Pfad ist kein Ordner."
+    );
+    assert_eq!(
+        host.dispatch("fanotes:set-folder-color", &[json!("../x"), json!(1)])
+            .unwrap_err(),
+        "Pfad-Traversal ist nicht erlaubt."
+    );
+    assert_eq!(
+        host.dispatch("fanotes:set-folder-color", &[json!(1), json!("#112233")])
+            .unwrap_err(),
+        "Ungültiger Vault-Pfad."
+    );
+    assert_eq!(
+        host.dispatch(
+            "fanotes:set-folder-color",
+            &[json!("Fehlt"), json!("#112233")],
+        )
+        .unwrap_err(),
+        "Der Eintrag wurde nicht gefunden."
+    );
+    host.dispatch(
+        "fanotes:set-folder-color",
+        &[json!("Mathe"), json!("#A1B2C3")],
+    )
+    .unwrap();
+    assert_eq!(
+        host.dispatch("fanotes:set-folder-color", &[json!("Mathe"), json!("blau")])
+            .unwrap_err(),
+        "Ungültige Ordnerfarbe."
+    );
+    let tree = host.dispatch("fanotes:get-tree", &[]).unwrap();
+    let mathe = tree
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|entry| entry["name"] == "Mathe")
+        .unwrap();
+    assert_eq!(mathe["color"], "#a1b2c3");
+    assert!(vault.join("Seite.md").is_file());
+    let stored = fs::read_to_string(vault.join(".fanotes/folder-colors.json")).unwrap();
+    assert!(stored.contains("Mathe"));
+    assert!(!stored.contains("Seite"));
+    assert!(!stored.contains("Fehlt"));
+}
+
+#[test]
 fn folder_color_survives_a_rename_and_the_vault_is_remembered() {
     let (mut host, vault, app) = host();
     let painted = host
