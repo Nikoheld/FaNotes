@@ -279,6 +279,24 @@ fn a_fast_tree_skips_a_folder_that_cannot_be_listed() {
     drop(restore);
 }
 
+#[test]
+fn a_folder_color_with_a_bad_byte_still_paints_the_folder() {
+    let (mut host, vault, _) = host();
+    fs::create_dir_all(vault.join(".fanotes")).unwrap();
+    let mut bytes = br##"{"version":1,"note":"X","colors":{"Mathe":"#A1B2C3"}}"##.to_vec();
+    let index = bytes.iter().position(|byte| *byte == b'X').unwrap();
+    bytes[index] = 0xff;
+    fs::write(vault.join(".fanotes/folder-colors.json"), &bytes).unwrap();
+
+    let tree = host.dispatch("fanotes:get-tree", &[]).unwrap();
+    assert_eq!(tree[0]["name"], "Mathe");
+    assert_eq!(tree[0]["color"], "#a1b2c3");
+
+    fs::write(vault.join(".fanotes/folder-colors.json"), b"{\xff").unwrap();
+    let tree = host.dispatch("fanotes:get-tree", &[]).unwrap();
+    assert!(tree[0]["color"].is_null());
+}
+
 struct RestoreMode(std::path::PathBuf);
 
 impl Drop for RestoreMode {
