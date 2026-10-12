@@ -760,7 +760,7 @@ fn gemini_generate(
         "POST",
         &format!(
             "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent",
-            urlencoding_encode(model)
+            encode_uri_component(model)
         ),
         connection,
         Some(json!({
@@ -868,10 +868,7 @@ fn opencode_message(
     };
     let response = request_json(
         "POST",
-        &format!(
-            "{origin}/session/{}/message",
-            urlencoding_encode(session_id)
-        ),
+        &format!("{}/message", opencode_session_url(&origin, session_id)),
         connection,
         Some(json!({
             "model": { "providerID": provider_id, "modelID": model_id },
@@ -894,7 +891,7 @@ fn opencode_message(
     );
     let _ = request_json(
         "DELETE",
-        &format!("{origin}/session/{session_id}"),
+        &opencode_session_url(&origin, session_id),
         connection,
         None,
         Duration::from_secs(20),
@@ -1379,16 +1376,26 @@ fn opencode_username(value: Option<&str>) -> String {
     }
 }
 
-fn urlencoding_encode(value: &str) -> String {
+/// `encodeURIComponent`: letters, digits, and `- _ . ! ~ * ' ( )` stay literal.
+fn encode_uri_component(value: &str) -> String {
     let mut encoded = String::new();
     for byte in value.bytes() {
-        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~') {
+        if byte.is_ascii_alphanumeric()
+            || matches!(
+                byte,
+                b'-' | b'_' | b'.' | b'!' | b'~' | b'*' | b'\'' | b'(' | b')'
+            )
+        {
             encoded.push(byte as char);
         } else {
             encoded.push_str(&format!("%{byte:02X}"));
         }
     }
     encoded
+}
+
+fn opencode_session_url(origin: &str, session_id: &str) -> String {
+    format!("{origin}/session/{}", encode_uri_component(session_id))
 }
 
 fn finish_models(mut models: Vec<Value>, limit: Option<usize>) -> Vec<Value> {
@@ -1947,6 +1954,19 @@ mod tests {
         assert_eq!(
             super::required_model(&json!({ "model": " llama " }), true).unwrap(),
             "llama"
+        );
+    }
+
+    #[test]
+    fn an_opencode_session_id_is_encoded_like_the_desktop() {
+        assert_eq!(super::encode_uri_component("ses_abc"), "ses_abc");
+        assert_eq!(super::encode_uri_component("a/b c"), "a%2Fb%20c");
+        assert_eq!(super::encode_uri_component("it's(ok)!~*"), "it's(ok)!~*");
+        assert_eq!(super::encode_uri_component("ä"), "%C3%A4");
+        assert_eq!(super::encode_uri_component("100%"), "100%25");
+        assert_eq!(
+            super::opencode_session_url("http://127.0.0.1:4096", "a/b"),
+            "http://127.0.0.1:4096/session/a%2Fb"
         );
     }
 
