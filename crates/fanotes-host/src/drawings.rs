@@ -87,9 +87,11 @@ pub fn save_drawing(host: &Host, payload: &Value) -> Result<Value, String> {
     let object = payload
         .as_object()
         .ok_or_else(|| "Ungültige Zeichnung.".to_owned())?;
-    let id = match object.get("id").and_then(Value::as_str) {
-        Some(id) if !id.is_empty() => drawing_id(id)?,
-        _ => random_id()?,
+    let id = match object.get("id") {
+        None | Some(Value::Null) => random_id()?,
+        Some(Value::String(id)) if id.is_empty() => random_id()?,
+        Some(Value::String(id)) => drawing_id(id)?,
+        Some(_) => return Err("Ungültige Zeichnungs-ID.".to_owned()),
     };
     let title = safe_title(object.get("title").and_then(Value::as_str).unwrap_or(""))?;
     let drawing_json = object

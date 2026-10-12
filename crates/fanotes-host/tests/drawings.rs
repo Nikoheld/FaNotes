@@ -26,6 +26,37 @@ fn drawing(title: &str) -> String {
 }
 
 #[test]
+fn a_numeric_drawing_id_is_rejected() {
+    let (dir, mut host) = host();
+    let error = host
+        .dispatch(
+            "fanotes:save-drawing",
+            &[json!({
+                "id": 1,
+                "title": "Skizze",
+                "drawingJson": drawing("Skizze")
+            })],
+        )
+        .unwrap_err();
+    assert_eq!(error, "Ungültige Zeichnungs-ID.");
+    assert!(!dir.join("vault/.fanotes/assets").join("1.json").exists());
+
+    let saved = host
+        .dispatch(
+            "fanotes:save-drawing",
+            &[json!({
+                "id": null,
+                "title": "Skizze",
+                "drawingJson": drawing("Skizze")
+            })],
+        )
+        .unwrap();
+    let id = saved["id"].as_str().unwrap();
+    assert!(!id.is_empty());
+    assert!(dir.join("vault/.fanotes/assets").join(format!("{id}.json")).is_file());
+}
+
+#[test]
 fn a_drawing_image_follows_the_desktop_png_checks() {
     let (dir, mut host) = host();
     let assets = dir.join("vault/.fanotes/assets");
