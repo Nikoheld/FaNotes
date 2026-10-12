@@ -1187,6 +1187,8 @@ fn decimal_literal(text: &str) -> Option<f64> {
 }
 
 /// `Number(value)` for a JSON value. A missing value is `NaN`, like `undefined`.
+///
+/// An array uses `ToString`, so `[12]` is `12` and `[1, 2]` is `NaN`.
 fn js_number(value: Option<&Value>) -> f64 {
     match value {
         Some(Value::Number(number)) => number.as_f64().unwrap_or(f64::NAN),
@@ -1194,7 +1196,31 @@ fn js_number(value: Option<&Value>) -> f64 {
         Some(Value::Bool(true)) => 1.0,
         Some(Value::Bool(false)) => 0.0,
         Some(Value::Null) => 0.0,
-        _ => f64::NAN,
+        Some(other) => js_tonumber(&js_value_string(other)).unwrap_or(f64::NAN),
+        None => f64::NAN,
+    }
+}
+
+/// `String(value)` for `RegExp.test` and `Number` on arrays and objects.
+pub fn js_value_string(value: &Value) -> String {
+    match value {
+        Value::Null => "null".to_owned(),
+        Value::Bool(true) => "true".to_owned(),
+        Value::Bool(false) => "false".to_owned(),
+        Value::Number(number) => number.to_string(),
+        Value::String(value) => value.clone(),
+        Value::Array(items) => items
+            .iter()
+            .map(|item| {
+                if item.is_null() {
+                    String::new()
+                } else {
+                    js_value_string(item)
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(","),
+        Value::Object(_) => "[object Object]".to_owned(),
     }
 }
 

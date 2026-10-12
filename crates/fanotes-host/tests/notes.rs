@@ -44,6 +44,15 @@ fn a_note_link_reads_page_and_position_with_javascript_number() {
                         "x": 0.1,
                         "y": 0.2,
                         "label": "Andere"
+                    },
+                    {
+                        "id": "link-c",
+                        "sourcePath": "anders.md",
+                        "targetPath": "Physik/Liste.md",
+                        "page": [9],
+                        "x": [0.5],
+                        "y": [1, 2],
+                        "label": "Liste"
                     }
                 ]),
             ],
@@ -53,6 +62,9 @@ fn a_note_link_reads_page_and_position_with_javascript_number() {
     assert_eq!(links[0]["x"].as_f64(), Some(0.25));
     assert_eq!(links[0]["y"].as_f64(), Some(0.0));
     assert_eq!(links[1]["page"], 1);
+    assert_eq!(links[2]["page"], 9);
+    assert_eq!(links[2]["x"].as_f64(), Some(0.5));
+    assert_eq!(links[2]["y"].as_f64(), Some(0.5));
 }
 
 #[test]
@@ -105,7 +117,9 @@ fn a_subject_book_page_follows_javascript_number() {
                 { "subjectPath": "Mathe", "bookPath": "Mathe/Buch.pdf", "lastPage": "12" },
                 { "subjectPath": "Physik", "bookPath": "Physik/Buch.pdf", "lastPage": " 4 " },
                 { "subjectPath": "Chemie", "bookPath": "Chemie/Buch.pdf", "lastPage": "12.5" },
-                { "subjectPath": "Bio", "bookPath": "Bio/Buch.pdf", "lastPage": 9007199254740992_i64 }
+                { "subjectPath": "Bio", "bookPath": "Bio/Buch.pdf", "lastPage": 9007199254740992_i64 },
+                { "subjectPath": "Kunst", "bookPath": "Kunst/Buch.pdf", "lastPage": [8] },
+                { "subjectPath": "Musik", "bookPath": "Musik/Buch.pdf", "lastPage": [1, 2] }
             ])],
         )
         .unwrap();
@@ -113,6 +127,8 @@ fn a_subject_book_page_follows_javascript_number() {
     assert_eq!(books[1]["lastPage"], 4);
     assert_eq!(books[2]["lastPage"], 1);
     assert_eq!(books[3]["lastPage"], 1);
+    assert_eq!(books[4]["lastPage"], 8);
+    assert_eq!(books[5]["lastPage"], 1);
 }
 
 #[test]

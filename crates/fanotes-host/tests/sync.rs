@@ -255,6 +255,44 @@ fn a_sync_time_follows_javascript_number() {
         )
         .unwrap();
     assert_eq!(written["mtimeMs"], 1_600_000_000_000i64);
+    let from_list = host
+        .dispatch(
+            "fanotes:sync-write",
+            &[
+                json!("Seite.md"),
+                json!("SGFsbG8K"),
+                json!([1_600_000_000_000i64]),
+            ],
+        )
+        .unwrap();
+    assert_eq!(from_list["mtimeMs"], 1_600_000_000_000i64);
+    let before_ignored = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as i64;
+    let ignored_list = host
+        .dispatch(
+            "fanotes:sync-write",
+            &[json!("Seite.md"), json!("SGFsbG8K"), json!([1, 2])],
+        )
+        .unwrap();
+    let ignored_object = host
+        .dispatch(
+            "fanotes:sync-write",
+            &[json!("Seite.md"), json!("SGFsbG8K"), json!({})],
+        )
+        .unwrap();
+    let after_ignored = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as i64;
+    for stamped in [
+        ignored_list["mtimeMs"].as_i64().unwrap(),
+        ignored_object["mtimeMs"].as_i64().unwrap(),
+    ] {
+        assert!(stamped >= before_ignored.saturating_sub(5_000), "{stamped}");
+        assert!(stamped <= after_ignored.saturating_add(5_000), "{stamped}");
+    }
     let fractional = host
         .dispatch(
             "fanotes:sync-write",
