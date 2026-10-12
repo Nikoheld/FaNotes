@@ -2718,6 +2718,18 @@ fn read_tree_cache(app_data: &Path, root: &Path) -> Option<Value> {
     }
 }
 
+/// `Number.isSafeInteger` for a cached file size, from 0 through 1 GiB.
+/// A JSON number `12.0` counts; `12.5` does not.
+fn cached_file_size(value: &Value) -> Option<u64> {
+    let number = value.as_f64()?;
+    let max = (1024 * 1024 * 1024) as f64;
+    if number.is_finite() && number.fract() == 0.0 && (0.0..=max).contains(&number) {
+        Some(number as u64)
+    } else {
+        None
+    }
+}
+
 fn clean_cached_entries(
     candidate: &Value,
     parent: &str,
@@ -2806,10 +2818,8 @@ fn clean_cached_entries(
                     file["modifiedAt"] = json!(text);
                 }
                 if let Some(size) = entry.get("size") {
-                    let size = size
-                        .as_u64()
-                        .filter(|size| *size <= 1024 * 1024 * 1024)
-                        .ok_or(())?;
+                    // `Number.isSafeInteger` keeps a whole size such as `12.0`.
+                    let size = cached_file_size(size).ok_or(())?;
                     file["size"] = json!(size);
                 }
                 cleaned.push(file);
