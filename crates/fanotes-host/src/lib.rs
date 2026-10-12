@@ -79,6 +79,9 @@ pub struct Host {
 
 impl Host {
     pub fn open(app_data: PathBuf) -> Self {
+        // `path.resolve` drops `..` before the profile directory is created.
+        // A missing middle segment must not be created on the way there.
+        let app_data = node_resolve(&app_data);
         complete_pending_app_data_reset(&app_data);
         // Desktop creates the profile with mode `0o700`.
         let _ = ensure_private_profile_dir(&app_data);
@@ -1709,7 +1712,7 @@ fn valid_reset_marker(marker_path: &Path, app_data: &Path) -> bool {
 ///
 /// The path is not opened, so a missing directory and a symlink stay as written
 /// after the lexical cleanup. A trailing slash is not part of the result.
-fn node_resolve(path: &Path) -> PathBuf {
+pub(crate) fn node_resolve(path: &Path) -> PathBuf {
     let absolute = if path.as_os_str().is_empty() {
         std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
     } else if path.is_absolute() {
