@@ -343,9 +343,101 @@ fn title_fallback(page_path: &Path) -> String {
     }
 }
 
-/// JavaScript `\b` is an ASCII word boundary, including in a `u` pattern.
+/// JavaScript `/iu` `\b`: ASCII word characters, plus the long s and Kelvin sign.
+///
+/// `ä` stays outside the word. Those two letters are folded to one ASCII word
+/// character before the built-in ASCII boundary runs, and match indexes are
+/// mapped back onto the original text. A long s inside `script` still matches
+/// `script`; a long s glued to the end of `nav` does not open a new word.
 fn js_regex(pattern: &str) -> Result<Regex, regex::Error> {
     Regex::new(&pattern.replace(r"\b", r"(?-u:\b)"))
+}
+
+struct IuMarked {
+    text: String,
+    /// Original byte offset of each marked byte, plus the original length.
+    origin: Vec<usize>,
+}
+
+fn mark_iu_word(text: &str) -> IuMarked {
+    let mut marked = String::with_capacity(text.len());
+    let mut origin = Vec::with_capacity(text.len() + 1);
+    let mut offset = 0usize;
+    for character in text.chars() {
+        match character {
+            '\u{017F}' => {
+                marked.push('s');
+                origin.push(offset);
+            }
+            '\u{212A}' => {
+                marked.push('k');
+                origin.push(offset);
+            }
+            other => {
+                let before = marked.len();
+                marked.push(other);
+                for byte in 0..(marked.len() - before) {
+                    origin.push(offset + byte);
+                }
+            }
+        }
+        offset += character.len_utf8();
+    }
+    origin.push(text.len());
+    IuMarked {
+        text: marked,
+        origin,
+    }
+}
+
+fn original_range(
+    original: &str,
+    marked: &IuMarked,
+    start: usize,
+    end: usize,
+) -> Option<(usize, usize)> {
+    if start > end || end >= marked.origin.len() {
+        return None;
+    }
+    let start = marked.origin[start];
+    let end = marked.origin[end];
+    if start > end
+        || end > original.len()
+        || !original.is_char_boundary(start)
+        || !original.is_char_boundary(end)
+    {
+        return None;
+    }
+    Some((start, end))
+}
+
+fn original_piece<'a>(original: &'a str, marked: &IuMarked, start: usize, end: usize) -> &'a str {
+    original_range(original, marked, start, end)
+        .map(|(start, end)| &original[start..end])
+        .unwrap_or("")
+}
+
+fn iu_replace(regex: &Regex, text: &str, replacement: &str) -> String {
+    let marked = mark_iu_word(text);
+    let mut out = String::with_capacity(text.len());
+    let mut last = 0usize;
+    for found in regex.find_iter(&marked.text) {
+        let Some((start, end)) = original_range(text, &marked, found.start(), found.end()) else {
+            continue;
+        };
+        if start < last {
+            continue;
+        }
+        out.push_str(&text[last..start]);
+        out.push_str(replacement);
+        last = end;
+    }
+    out.push_str(&text[last..]);
+    out
+}
+
+fn iu_is_match(regex: &Regex, text: &str) -> bool {
+    regex.is_match(&mark_iu_word(text).text)
 }
 
 fn strip_active_html(html: &str) -> String {
@@ -372,7 +464,7 @@ fn strip_active_html(html: &str) -> String {
             } else {
                 ""
             };
-            html = regex.replace_all(&html, replacement).into_owned();
+            html = iu_replace(&regex, &html, replacement);
         }
     }
     html
@@ -388,11 +480,13 @@ fn inline_images(html: &str, page_path: &Path, output_root: &Path) -> String {
         let Ok(regex) = js_regex(pattern) else {
             continue;
         };
+        let marked = mark_iu_word(&html);
         let mut replacements = HashMap::new();
-        for caps in regex.captures_iter(&html) {
-            let Some(source) = caps.get(2).map(|item| item.as_str()) else {
+        for caps in regex.captures_iter(&marked.text) {
+            let Some(source_span) = caps.get(2) else {
                 continue;
             };
+            let source = original_piece(&html, &marked, source_span.start(), source_span.end());
             if replacements.contains_key(source) {
                 continue;
             }
@@ -401,24 +495,42 @@ fn inline_images(html: &str, page_path: &Path, output_root: &Path) -> String {
                 image_data_url(source, page_path, output_root, &mut embedded_bytes),
             );
         }
-        html = regex
-            .replace_all(&html, |caps: &regex::Captures| {
-                let prefix = caps.get(1).map(|item| item.as_str()).unwrap_or("");
-                let source = caps.get(2).map(|item| item.as_str()).unwrap_or("");
-                match replacements.get(source).map(String::as_str) {
-                    Some("") => {
-                        let kept = prefix.trim_end_matches(&format!("src={quote}"));
-                        format!("{kept}data-fanotes-missing-image={quote}blocked{quote}")
-                    }
-                    Some(replacement) => format!("{prefix}{replacement}{quote}"),
-                    None => caps
-                        .get(0)
-                        .map(|item| item.as_str())
-                        .unwrap_or("")
-                        .to_owned(),
+        let marked = mark_iu_word(&html);
+        let mut rebuilt = String::with_capacity(html.len());
+        let mut last = 0usize;
+        for caps in regex.captures_iter(&marked.text) {
+            let Some(whole) = caps.get(0) else {
+                continue;
+            };
+            let Some((start, end)) = original_range(&html, &marked, whole.start(), whole.end())
+            else {
+                continue;
+            };
+            if start < last {
+                continue;
+            }
+            let prefix = caps
+                .get(1)
+                .map(|item| original_piece(&html, &marked, item.start(), item.end()))
+                .unwrap_or("");
+            let source = caps
+                .get(2)
+                .map(|item| original_piece(&html, &marked, item.start(), item.end()))
+                .unwrap_or("");
+            let replacement = match replacements.get(source).map(String::as_str) {
+                Some("") => {
+                    let kept = prefix.trim_end_matches(&format!("src={quote}"));
+                    format!("{kept}data-fanotes-missing-image={quote}blocked{quote}")
                 }
-            })
-            .into_owned();
+                Some(replacement) => format!("{prefix}{replacement}{quote}"),
+                None => html[start..end].to_owned(),
+            };
+            rebuilt.push_str(&html[last..start]);
+            rebuilt.push_str(&replacement);
+            last = end;
+        }
+        rebuilt.push_str(&html[last..]);
+        html = rebuilt;
     }
     html
 }
@@ -514,7 +626,7 @@ fn extract_search_text(html: &str) -> String {
         r"(?is)<head\b[^>]*>.*?</head>",
     ] {
         if let Ok(regex) = js_regex(pattern) {
-            text = regex.replace_all(&text, " ").into_owned();
+            text = iu_replace(&regex, &text, " ");
         }
     }
     if let Ok(regex) = Regex::new(&format!(r"(?i)<br{JS_WS}*/?{JS_WS}*>")) {
@@ -559,7 +671,7 @@ fn page_dimensions(html: &str) -> (i64, i64) {
     let max_or =
         |values: Vec<f64>, fallback: f64| values.into_iter().reduce(f64::max).unwrap_or(fallback);
     let blocks = js_regex(r"(?i)<(?:p|li|tr|h[1-6])\b")
-        .map(|regex| regex.find_iter(html).count())
+        .map(|regex| regex.find_iter(&mark_iu_word(html).text).count())
         .unwrap_or(0);
     let width = (max_or(measured("left"), 0.0) + max_or(measured("width"), 720.0) + 96.0)
         .clamp(720.0, 3000.0);
@@ -570,8 +682,8 @@ fn page_dimensions(html: &str) -> (i64, i64) {
 }
 
 fn preview_is_nav(html: &str) -> bool {
-    js_regex(r"(?i)<nav\b").is_ok_and(|regex| regex.is_match(html))
-        || js_regex(r"(?i)<iframe\b").is_ok_and(|regex| regex.is_match(html))
+    js_regex(r"(?i)<nav\b").is_ok_and(|regex| iu_is_match(&regex, html))
+        || js_regex(r"(?i)<iframe\b").is_ok_and(|regex| iu_is_match(&regex, html))
 }
 
 fn page_parents(html_files: &[PathBuf], output_root: &Path) -> HashMap<PathBuf, Vec<String>> {
@@ -586,12 +698,16 @@ fn page_parents(html_files: &[PathBuf], output_root: &Path) -> HashMap<PathBuf, 
         if !preview_is_nav(&html) && !html.to_ascii_lowercase().contains("<nav") {
             continue;
         }
-        if !js_regex(r"(?i)<nav\b").is_ok_and(|regex| regex.is_match(&html)) {
+        if !js_regex(r"(?i)<nav\b").is_ok_and(|regex| iu_is_match(&regex, &html)) {
             continue;
         }
+        let marked_html = mark_iu_word(&html);
         let mut stack = Vec::new();
-        for caps in anchor.captures_iter(&html) {
-            let attributes = caps.get(1).map(|item| item.as_str()).unwrap_or("");
+        for caps in anchor.captures_iter(&marked_html.text) {
+            let attributes = caps
+                .get(1)
+                .map(|item| original_piece(&html, &marked_html, item.start(), item.end()))
+                .unwrap_or("");
             let Some(href) = attr(attributes, "href") else {
                 continue;
             };
@@ -607,7 +723,16 @@ fn page_parents(html_files: &[PathBuf], output_root: &Path) -> HashMap<PathBuf, 
                         .map(|regex| {
                             regex
                                 .replace_all(
-                                    caps.get(2).map(|item| item.as_str()).unwrap_or(""),
+                                    caps.get(2)
+                                        .map(|item| {
+                                            original_piece(
+                                                &html,
+                                                &marked_html,
+                                                item.start(),
+                                                item.end(),
+                                            )
+                                        })
+                                        .unwrap_or(""),
                                     " ",
                                 )
                                 .into_owned()
@@ -1929,6 +2054,115 @@ mod tests {
             extract_search_text("<styled>SECRET</styled> visible"),
             "SECRET visible"
         );
+    }
+
+    #[test]
+    fn a_long_s_stays_inside_an_onenote_tag_word() {
+        assert!(!preview_is_nav("<nav\u{017F}>"));
+        assert!(!preview_is_nav("<nav\u{212A}>"));
+        assert!(!preview_is_nav("<iframe\u{017F}>"));
+        assert!(!preview_is_nav("<iframe\u{212A}>"));
+        assert!(preview_is_nav("<navä>"));
+        assert_eq!(strip_active_html("<\u{017F}cript>alert(1)</script>"), "");
+        assert!(strip_active_html("<script\u{017F}>alert(1)</script>").contains("alert"));
+        assert!(strip_active_html("<script\u{212A}>alert(1)</script>").contains("alert"));
+        assert_eq!(strip_active_html("java\u{017F}cript:alert(1)"), "alert(1)");
+        assert_eq!(strip_active_html("vb\u{017F}cript:go"), "go");
+        assert_eq!(
+            strip_active_html("<div on\u{017F}click=\"alert(1)\">x</div>"),
+            "<div>x</div>"
+        );
+        assert_eq!(strip_active_html("<lin\u{212A} href=\"x\">"), "");
+        assert_eq!(
+            extract_search_text("<\u{017F}tyle>SECRET</style> visible"),
+            "visible"
+        );
+        assert_eq!(
+            extract_search_text("<style\u{017F}>SECRET</style> visible"),
+            "SECRET visible"
+        );
+        let tall = "height:4000px;";
+        assert_eq!(
+            page_dimensions(&format!("{tall}{}", "<p>".repeat(50))),
+            (816, 1480)
+        );
+        assert_eq!(
+            page_dimensions(&format!("{tall}{}", "<p\u{017F}>".repeat(50))),
+            (816, 900)
+        );
+        assert_eq!(
+            page_dimensions(&format!("{tall}{}", "<p\u{212A}>".repeat(50))),
+            (816, 900)
+        );
+        assert_eq!(
+            page_dimensions(&format!("{tall}{}", "<pä>".repeat(50))),
+            (816, 1480)
+        );
+    }
+
+    #[test]
+    fn a_long_s_in_onenote_text_is_not_rewritten_by_the_tag_scan() {
+        let root = std::env::temp_dir().join(format!(
+            "fanotes-onenote-word-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        let output = root.join("out");
+        let pages = output.join("pages");
+        std::fs::create_dir_all(&pages).unwrap();
+        let png = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0];
+        let picture = "bild\u{017F}.png";
+        std::fs::write(pages.join(picture), png).unwrap();
+        let page = pages.join("note.html");
+        let inlined = inline_images(
+            &format!(r#"<img alt="Lang" src="{picture}">"#),
+            &page,
+            &output,
+        );
+        assert!(inlined.contains(r#"alt="Lang" src="data:image/png;base64,"#));
+        assert!(!inlined.contains("data-fanotes-missing-image"));
+        let glued = inline_images(
+            &format!(
+                "<img\u{017F} alt=\"Nein\" src=\"{picture}\"><img alt=\"Grenze\" \u{212A}src=\"{picture}\">"
+            ),
+            &page,
+            &output,
+        );
+        assert!(glued.contains("img\u{017F}"));
+        assert!(glued.contains("\u{212A}src"));
+        assert!(glued.contains(picture));
+        assert!(!glued.contains("base64"));
+        let nav = pages.join("nav.html");
+        std::fs::write(
+            &nav,
+            "<nav>\n<a class=\"l1\" href=\"seite\u{017F}.html\">Kapit\u{017F}el</a>\n<a class=\"l2\" href=\"child.html\">Unten</a>\n<a\u{017F} class=\"l1\" href=\"nein.html\">Nein</a>\n</nav>",
+        )
+        .unwrap();
+        let ignored = pages.join("glued-nav.html");
+        std::fs::write(
+            &ignored,
+            "<nav\u{017F}><a class=\"l1\" href=\"versteckt.html\">Versteckt</a></nav\u{017F}>",
+        )
+        .unwrap();
+        let parents = page_parents(&[nav, ignored], &output);
+        let parent_of = |name: &str| {
+            parents
+                .iter()
+                .find(|(path, _)| path.ends_with(name))
+                .map(|(_, prefix)| prefix.clone())
+        };
+        assert_eq!(parent_of("seite\u{017F}.html"), Some(Vec::<String>::new()));
+        assert_eq!(
+            parent_of("child.html"),
+            Some(vec!["Kapit\u{017F}el".to_owned()])
+        );
+        assert!(parent_of("nein.html").is_none());
+        assert!(parent_of("versteckt.html").is_none());
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
