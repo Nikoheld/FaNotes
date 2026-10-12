@@ -127,6 +127,29 @@ fn setup_still_answers_the_channels_the_desktop_leaves_open() {
 }
 
 #[test]
+fn a_finished_setup_still_checks_the_subject_selection() {
+    let (vault, mut host) = host();
+    host.dispatch("fanotes:complete-onboarding", &[json!(["Mathematik"])])
+        .unwrap();
+    assert_eq!(
+        host.dispatch("fanotes:complete-onboarding", &[json!(1)])
+            .unwrap_err(),
+        "Die Ordnerauswahl ist ungültig."
+    );
+    assert_eq!(
+        host.dispatch("fanotes:complete-onboarding", &[json!(["Kein Fach"])])
+            .unwrap_err(),
+        "Die Ordnerauswahl enthält einen ungültigen oder doppelten Eintrag."
+    );
+    let again = host
+        .dispatch("fanotes:complete-onboarding", &[json!([])])
+        .unwrap();
+    assert_eq!(again["onboardingRequired"], false);
+    assert!(vault.join("Mathematik").is_dir());
+    assert!(!vault.join("Physik").exists());
+}
+
+#[test]
 fn first_run_creates_the_chosen_subjects_and_stamps_the_tree() {
     let (vault, mut host) = host();
     let bootstrap = host.dispatch("fanotes:bootstrap", &[]).unwrap();

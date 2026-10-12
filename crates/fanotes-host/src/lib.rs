@@ -733,10 +733,10 @@ impl Host {
     }
 
     fn complete_onboarding(&mut self, args: &[Value]) -> Result<Value, String> {
+        let selected = onboarding::validate_selection(args.first().unwrap_or(&Value::Null))?;
         if !self.onboarding_required {
             return self.bootstrap();
         }
-        let selected = onboarding::validate_selection(args.first().unwrap_or(&Value::Null))?;
         let root = self.require_vault()?.to_path_buf();
         let language = self.ui_language();
         for (name, _) in onboarding::folders_to_create(language, &selected) {
