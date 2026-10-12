@@ -71,13 +71,7 @@ fn config_candidates(app_data: &Path) -> Vec<PathBuf> {
 
 /// `Number(config.version)`. A missing version is `NaN`, and `NaN >= 2` is false.
 fn config_version_number(version: Option<&Value>) -> f64 {
-    match version {
-        Some(Value::Number(number)) => number.as_f64().unwrap_or(f64::NAN),
-        Some(Value::String(text)) => crate::vault::js_tonumber(text).unwrap_or(f64::NAN),
-        Some(Value::Bool(true)) => 1.0,
-        Some(Value::Bool(false) | Value::Null) => 0.0,
-        _ => f64::NAN,
-    }
+    fanotes_famd::js_number(version)
 }
 
 fn electron_config_home() -> PathBuf {

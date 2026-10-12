@@ -235,16 +235,9 @@ fn decode_bytes(value: Option<&Value>, max_bytes: usize) -> Result<Vec<u8>, Stri
 /// `Buffer.from(array)` converts each value with `ToUint8`.
 ///
 /// `1.0` and `1.5` become 1, `256` becomes 0, and `-1` becomes 255.
+/// A nested `[80]` is 80. `[1, 2]` is `NaN`, which becomes 0.
 fn worksheet_byte(value: &Value) -> u8 {
-    let number = match value {
-        Value::Number(number) => number.as_f64().unwrap_or(f64::NAN),
-        Value::String(text) => crate::vault::js_tonumber(text).unwrap_or(f64::NAN),
-        Value::Bool(true) => 1.0,
-        Value::Bool(false) => 0.0,
-        Value::Null => 0.0,
-        _ => f64::NAN,
-    };
-    to_uint8(number)
+    to_uint8(fanotes_famd::js_number(Some(value)))
 }
 
 fn to_uint8(number: f64) -> u8 {
@@ -505,14 +498,7 @@ fn json_integer(value: &Value) -> Option<i64> {
 
 /// Desktop `Number(pageWidth)` / `Number(pageHeight)`, then `Math.round`.
 fn page_extent(value: Option<&Value>) -> f64 {
-    match value {
-        Some(Value::Number(number)) => number.as_f64().unwrap_or(f64::NAN),
-        Some(Value::String(text)) => crate::vault::js_tonumber(text).unwrap_or(f64::NAN),
-        Some(Value::Bool(true)) => 1.0,
-        Some(Value::Bool(false)) => 0.0,
-        Some(Value::Null) => 0.0,
-        _ => f64::NAN,
-    }
+    fanotes_famd::js_number(value)
 }
 
 fn number(object: &Map<String, Value>, name: &str, error: &str) -> Result<f64, String> {
