@@ -490,3 +490,37 @@ fn search_trims_a_byte_order_mark_and_keeps_a_next_line() {
         .unwrap();
     assert!(missed.as_array().unwrap().is_empty());
 }
+
+#[test]
+fn a_markdown_note_does_not_hide_its_handwriting_file() {
+    let mut host = host();
+    let vault = host.vault.clone().unwrap();
+    let payload = fanotes_famd::empty_famd_payload("2026-10-11T00:00:00.000Z");
+    std::fs::write(vault.join("Bio/Kapitel.markdown"), b"Nur die Notiz\n").unwrap();
+    std::fs::write(
+        vault.join("Bio/Kapitel.famd"),
+        fanotes_famd::serialize_famd("Nur die Handschrift", &payload),
+    )
+    .unwrap();
+    let hits = host
+        .dispatch("fanotes:search", &[json!("Handschrift")])
+        .unwrap();
+    let paths: Vec<_> = hits
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|hit| hit["relativePath"].as_str())
+        .collect();
+    assert_eq!(paths, ["Bio/Kapitel.famd"]);
+
+    std::fs::write(vault.join("Bio/Seite.md"), b"Notizdatei\n").unwrap();
+    std::fs::write(
+        vault.join("Bio/Seite.famd"),
+        fanotes_famd::serialize_famd("Versteckte Handschrift", &payload),
+    )
+    .unwrap();
+    let hidden = host
+        .dispatch("fanotes:search", &[json!("Versteckte")])
+        .unwrap();
+    assert!(hidden.as_array().unwrap().is_empty());
+}

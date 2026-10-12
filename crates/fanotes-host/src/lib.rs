@@ -1108,9 +1108,10 @@ impl Host {
             let lower = relative.to_lowercase();
             if lower.ends_with(".famd") {
                 let stem = fanotes_famd::note_stem(&relative);
+                // The desktop hides a handwriting file beside `.md` or `.pdf`.
+                // A `.markdown` note does not hide it.
                 if present.contains(&format!("{stem}.md"))
                     || present.contains(&format!("{stem}.pdf"))
-                    || present.contains(&format!("{stem}.markdown"))
                 {
                     continue;
                 }
