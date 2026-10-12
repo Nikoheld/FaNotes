@@ -1299,7 +1299,7 @@ impl Host {
         });
         let text = serde_json::to_string(&marker)
             .map_err(|_| "Die App-Daten konnten nicht zurückgesetzt werden.".to_owned())?;
-        notes::atomic_write(&marker_path, text.as_bytes(), 0o600)?;
+        notes::atomic_write(&marker_path, format!("{text}\n").as_bytes(), 0o600)?;
         self.allow_close = true;
         Ok(json!({ "restarting": true }))
     }
