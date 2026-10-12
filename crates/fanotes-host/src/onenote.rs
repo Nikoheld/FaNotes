@@ -164,11 +164,11 @@ fn import_in_temp(
                 hierarchy.remove(0);
             }
             let mut directory = note_root.clone();
-            for segment in hierarchy
-                .into_iter()
-                .chain(parents.get(page_path).cloned().unwrap_or_default())
-            {
-                directory.push(safe_segment(&segment, "OneNote-Seite"));
+            for segment in note_directory_segments(
+                hierarchy,
+                parents.get(page_path).cloned().unwrap_or_default(),
+            ) {
+                directory.push(segment);
             }
             create_private_dir(&directory)
                 .map_err(|_| "Eine OneNote-Seitenhierarchie ist ungültig.".to_owned())?;
@@ -343,6 +343,11 @@ fn title_fallback(page_path: &Path) -> String {
     }
 }
 
+/// JavaScript `\b` is an ASCII word boundary, including in a `u` pattern.
+fn js_regex(pattern: &str) -> Result<Regex, regex::Error> {
+    Regex::new(&pattern.replace(r"\b", r"(?-u:\b)"))
+}
+
 fn strip_active_html(html: &str) -> String {
     let mut html = html.to_owned();
     let patterns = [
@@ -361,7 +366,7 @@ fn strip_active_html(html: &str) -> String {
         format!(r"(?i)expression{JS_WS}*\([^)]*\)"),
     ];
     for pattern in &patterns {
-        if let Ok(regex) = Regex::new(pattern) {
+        if let Ok(regex) = js_regex(pattern) {
             let replacement = if pattern.starts_with("(?i)url") {
                 "none"
             } else {
@@ -380,7 +385,7 @@ fn inline_images(html: &str, page_path: &Path, output_root: &Path) -> String {
         (r#"(?i)(<img\b[^>]*\bsrc=")([^"]+)""#, "\""),
         (r#"(?i)(<img\b[^>]*\bsrc=')([^']+)'"#, "'"),
     ] {
-        let Ok(regex) = Regex::new(pattern) else {
+        let Ok(regex) = js_regex(pattern) else {
             continue;
         };
         let mut replacements = HashMap::new();
@@ -494,7 +499,7 @@ fn extract_search_text(html: &str) -> String {
         r"(?is)<svg\b[^>]*>.*?</svg>",
         r"(?is)<head\b[^>]*>.*?</head>",
     ] {
-        if let Ok(regex) = Regex::new(pattern) {
+        if let Ok(regex) = js_regex(pattern) {
             text = regex.replace_all(&text, " ").into_owned();
         }
     }
@@ -539,7 +544,7 @@ fn page_dimensions(html: &str) -> (i64, i64) {
     };
     let max_or =
         |values: Vec<f64>, fallback: f64| values.into_iter().reduce(f64::max).unwrap_or(fallback);
-    let blocks = Regex::new(r"(?i)<(?:p|li|tr|h[1-6])\b")
+    let blocks = js_regex(r"(?i)<(?:p|li|tr|h[1-6])\b")
         .map(|regex| regex.find_iter(html).count())
         .unwrap_or(0);
     let width = (max_or(measured("left"), 0.0) + max_or(measured("width"), 720.0) + 96.0)
@@ -551,13 +556,13 @@ fn page_dimensions(html: &str) -> (i64, i64) {
 }
 
 fn preview_is_nav(html: &str) -> bool {
-    Regex::new(r"(?i)<nav\b").is_ok_and(|regex| regex.is_match(html))
-        || Regex::new(r"(?i)<iframe\b").is_ok_and(|regex| regex.is_match(html))
+    js_regex(r"(?i)<nav\b").is_ok_and(|regex| regex.is_match(html))
+        || js_regex(r"(?i)<iframe\b").is_ok_and(|regex| regex.is_match(html))
 }
 
 fn page_parents(html_files: &[PathBuf], output_root: &Path) -> HashMap<PathBuf, Vec<String>> {
     let mut parents = HashMap::new();
-    let Ok(anchor) = Regex::new(r"(?is)<a\b([^>]*)>(.*?)</a>") else {
+    let Ok(anchor) = js_regex(r"(?is)<a\b([^>]*)>(.*?)</a>") else {
         return parents;
     };
     for entry in html_files {
@@ -567,7 +572,7 @@ fn page_parents(html_files: &[PathBuf], output_root: &Path) -> HashMap<PathBuf, 
         if !preview_is_nav(&html) && !html.to_ascii_lowercase().contains("<nav") {
             continue;
         }
-        if !Regex::new(r"(?i)<nav\b").is_ok_and(|regex| regex.is_match(&html)) {
+        if !js_regex(r"(?i)<nav\b").is_ok_and(|regex| regex.is_match(&html)) {
             continue;
         }
         let mut stack = Vec::new();
@@ -669,16 +674,29 @@ fn is_ascii_word(byte: u8) -> bool {
 }
 
 fn attr(attributes: &str, name: &str) -> Option<String> {
-    let needle = format!("{name}=");
+    let needle = format!("{name}=").to_ascii_lowercase();
     let lower = attributes.to_ascii_lowercase();
-    let index = lower.find(&needle.to_ascii_lowercase())?;
+    let bytes = lower.as_bytes();
+    let mut search_from = 0;
+    let index = loop {
+        let found = lower[search_from..].find(&needle)? + search_from;
+        let boundary = found == 0 || !is_ascii_word(bytes[found - 1]);
+        if boundary {
+            break found;
+        }
+        search_from = found + 1;
+    };
     let rest = &attributes[index + needle.len()..];
     let mut chars = rest.chars();
     let quote = chars.next()?;
     if quote != '"' && quote != '\'' {
         return None;
     }
-    Some(rest[quote.len_utf8()..].split(quote).next()?.to_owned())
+    let value = rest[quote.len_utf8()..].split(quote).next()?;
+    if value.is_empty() {
+        return None;
+    }
+    Some(value.to_owned())
 }
 
 fn prepare_input(input: &Path, temporary: &Path, seven_zip: &Path) -> Result<Vec<PathBuf>, String> {
@@ -736,7 +754,7 @@ fn prepare_input(input: &Path, temporary: &Path, seven_zip: &Path) -> Result<Vec
 
 fn validate_listing(stdout: &str) -> Result<(), String> {
     let mut count = 0usize;
-    let mut bytes = 0u64;
+    let mut bytes = 0.0f64;
     let stdout = stdout.replace("\r\n", "\n");
     for record in stdout.split("\n\n") {
         let mut fields = HashMap::new();
@@ -745,10 +763,12 @@ fn validate_listing(stdout: &str) -> Result<(), String> {
                 fields.insert(key.to_owned(), value.to_owned());
             }
         }
-        let Some(entry_path) = fields.get("Path") else {
+        // An empty path is ignored. `Type` skips a record only when it has text,
+        // so `Type =` still counts the file.
+        let Some(entry_path) = fields.get("Path").filter(|path| !path.is_empty()) else {
             continue;
         };
-        if fields.get("Type").is_some() {
+        if fields.get("Type").is_some_and(|kind| !kind.is_empty()) {
             continue;
         }
         let normalized = entry_path.replace('\\', "/");
@@ -756,13 +776,14 @@ fn validate_listing(stdout: &str) -> Result<(), String> {
             return Err("Das OneNote-Archiv enthält einen unsicheren Pfad.".to_owned());
         }
         if fields.get("Folder").map(String::as_str) != Some("+") {
-            bytes += fields
-                .get("Size")
-                .and_then(|value| value.parse::<u64>().ok())
-                .unwrap_or(0);
+            let size = fields.get("Size").map(String::as_str).unwrap_or("0");
+            bytes += crate::vault::js_tonumber(size).unwrap_or(f64::NAN);
         }
         count += 1;
-        if count > 20_000 || bytes > 6 * 1024 * 1024 * 1024 {
+        if count > MAX_ARCHIVE_ENTRIES
+            || !safe_archive_bytes(bytes)
+            || bytes > MAX_EXPANDED_BYTES as f64
+        {
             return Err("Das OneNote-Archiv überschreitet die sicheren Importgrenzen.".to_owned());
         }
     }
@@ -771,6 +792,11 @@ fn validate_listing(stdout: &str) -> Result<(), String> {
     } else {
         Ok(())
     }
+}
+
+/// `Number(size)` then `Number.isSafeInteger` on the running total.
+fn safe_archive_bytes(bytes: f64) -> bool {
+    bytes.is_finite() && bytes.fract() == 0.0 && bytes.abs() <= 9_007_199_254_740_991.0
 }
 
 fn render_inputs(
@@ -840,7 +866,7 @@ fn render_sections(
             if name.is_empty() || name == "." || name == ".." {
                 continue;
             }
-            destination.push(safe_segment(name, "Abschnitt"));
+            destination.push(import_folder_segment(name));
         }
         create_private_dir(&destination)
             .map_err(|_| "Der OneNote-Import konnte nicht vorbereitet werden.".to_owned())?;
@@ -1331,6 +1357,20 @@ fn common_ancestor(paths: &[PathBuf]) -> PathBuf {
     ancestor
 }
 
+/// Export folders and outline parents use the desktop default, `Unbenannt`.
+/// Page titles and markdown file names keep the `OneNote-Seite` fallback.
+fn import_folder_segment(segment: &str) -> String {
+    safe_segment(segment, "Unbenannt")
+}
+
+fn note_directory_segments(hierarchy: Vec<String>, parents: Vec<String>) -> Vec<String> {
+    hierarchy
+        .into_iter()
+        .chain(parents)
+        .map(|segment| import_folder_segment(&segment))
+        .collect()
+}
+
 fn safe_segment(value: &str, fallback: &str) -> String {
     use unicode_normalization::UnicodeNormalization;
     let value: String = value.nfc().collect();
@@ -1623,8 +1663,9 @@ fn civil_date(mut days: u64) -> (i32, u32, u32) {
 #[cfg(test)]
 mod tests {
     use super::{
-        common_ancestor, extract_search_text, inline_images, outline_level, page_dimensions,
-        page_parents, page_title, render_inputs, safe_segment, sanitize_page, stored_relative_path,
+        common_ancestor, extract_search_text, import_folder_segment, inline_images,
+        note_directory_segments, outline_level, page_dimensions, page_parents, page_title,
+        preview_is_nav, render_inputs, safe_segment, sanitize_page, stored_relative_path,
         strip_active_html, tool_failure_message, tool_limit, urlencoding_decode, validate_listing,
         walk_limited,
     };
@@ -1704,6 +1745,27 @@ mod tests {
     }
 
     #[test]
+    fn an_import_folder_uses_the_unnamed_fallback() {
+        assert_eq!(import_folder_segment(""), "Unbenannt");
+        assert_eq!(import_folder_segment("CON"), "Unbenannt");
+        assert_eq!(import_folder_segment(".."), "Unbenannt");
+        assert_eq!(import_folder_segment("Kapitel"), "Kapitel");
+        assert_eq!(import_folder_segment("OneNote-Seite"), "OneNote-Seite");
+        assert_eq!(
+            note_directory_segments(
+                vec!["CON".to_owned(), "Kapitel".to_owned()],
+                vec![String::new(), "Echt".to_owned()],
+            ),
+            vec![
+                "Unbenannt".to_owned(),
+                "Kapitel".to_owned(),
+                "Unbenannt".to_owned(),
+                "Echt".to_owned(),
+            ]
+        );
+    }
+
+    #[test]
     fn a_reserved_import_folder_uses_the_desktop_path_fallback() {
         assert_eq!(
             stored_relative_path(Path::new("/notes/CON/photo.png"), Path::new("/notes")),
@@ -1772,6 +1834,25 @@ mod tests {
         );
         let long = "😀".repeat(1_000_001);
         assert_eq!(extract_search_text(&long).encode_utf16().count(), 2_000_000);
+    }
+
+    #[test]
+    fn an_onenote_tag_boundary_is_ascii() {
+        assert!(preview_is_nav("<navä>"));
+        assert!(preview_is_nav("<IFRAMEÄ>"));
+        assert!(preview_is_nav("<nav>"));
+        assert!(!preview_is_nav("<navigation>"));
+        assert!(!preview_is_nav("<iframeextra>"));
+        assert!(!strip_active_html("<scriptä>alert(1)</script>").contains("alert"));
+        assert!(strip_active_html("<scripted>alert(1)</scripted>").contains("alert"));
+        assert_eq!(
+            extract_search_text("<styleä>SECRET</style> visible"),
+            "visible"
+        );
+        assert_eq!(
+            extract_search_text("<styled>SECRET</styled> visible"),
+            "SECRET visible"
+        );
     }
 
     #[test]
@@ -1854,6 +1935,10 @@ mod tests {
 <a class="foo-l2" href="d.html" title="Bindestrich">Bindestrich</a>
 <a class="l10" href="b.html" title="Zehn">Zehn</a>
 <a class="l1" href="../../secret.html" title="Draussen">Draussen</a>
+<a class="l1" myhref="nope.html" href="real.html" title="Echt">Echt</a>
+<a class="l2" href="" title="Leer">Leer</a>
+<a class="l2" href="inner.html" title="">Inner text</a>
+<a class="l3" href="leaf.html">Leaf</a>
 </nav>"#,
         )
         .unwrap();
@@ -1869,6 +1954,12 @@ mod tests {
         assert_eq!(parent_of("d.html"), Some(vec!["Kapitel".to_owned()]));
         assert_eq!(parent_of("b.html"), Some(Vec::<String>::new()));
         assert!(parent_of("secret.html").is_none());
+        assert!(parent_of("nope.html").is_none());
+        assert_eq!(parent_of("real.html"), Some(Vec::<String>::new()));
+        assert_eq!(
+            parent_of("leaf.html"),
+            Some(vec!["Echt".to_owned(), "Inner text".to_owned()])
+        );
         assert_eq!(outline_level(r#" class="l2 l9""#), 9);
         assert_eq!(outline_level(" class=\"l2\u{FEFF}\""), 2);
         assert_eq!(outline_level(" class=\"l2\u{0085}\""), 2);
@@ -1940,6 +2031,29 @@ mod tests {
             assert!(linked.contains("Symbolische"));
         }
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn an_archive_size_uses_javascript_number() {
+        let limited = "Das OneNote-Archiv überschreitet die sicheren Importgrenzen.";
+        assert_eq!(
+            validate_listing("Path = a.txt\nSize = 1.5\n").unwrap_err(),
+            limited
+        );
+        assert_eq!(
+            validate_listing("Path = a.txt\nSize = abc\n").unwrap_err(),
+            limited
+        );
+        assert!(validate_listing("Path = a.txt\nSize = 1e2\n").is_ok());
+        assert!(validate_listing("Path = a.txt\nSize =  12 \n").is_ok());
+        assert!(validate_listing("Path = a.txt\nSize = 1.0\n").is_ok());
+        assert!(validate_listing("Path = dir\nFolder = +\nSize = 1.5\n").is_ok());
+        assert!(validate_listing("Path = \nSize = 1\n\nPath = note.one\nSize = 2\n").is_ok());
+        assert!(validate_listing("Path = note.one\nType = \nSize = 1\n").is_ok());
+        assert_eq!(
+            validate_listing("Path = archive.zip\nType = zip\n").unwrap_err(),
+            "Das OneNote-Archiv enthält keine importierbaren Dateien."
+        );
     }
 
     #[test]
