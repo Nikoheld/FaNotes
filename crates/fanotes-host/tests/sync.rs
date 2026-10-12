@@ -128,6 +128,76 @@ fn sync_lists_files_and_keeps_account_state_outside_the_vault() {
 }
 
 #[test]
+fn a_blank_sync_secret_file_has_no_login() {
+    let (_vault, app, mut host) = host();
+    fs::create_dir_all(app.join("sync")).unwrap();
+    fs::write(app.join("sync/account.secret"), "").unwrap();
+    assert!(host
+        .dispatch("fanotes:sync-read-secrets", &[])
+        .unwrap()
+        .is_null());
+    assert_eq!(
+        fs::read_to_string(app.join("sync/account.secret")).unwrap(),
+        ""
+    );
+
+    fs::write(app.join("sync/account.secret"), " \n\t").unwrap();
+    assert!(host
+        .dispatch("fanotes:sync-read-secrets", &[])
+        .unwrap()
+        .is_null());
+
+    fs::write(app.join("sync/account.secret"), "safe1:").unwrap();
+    let error = host.dispatch("fanotes:sync-read-secrets", &[]).unwrap_err();
+    assert!(error.contains("Schlüsselbund"), "{error}");
+}
+
+#[test]
+fn a_sync_secret_file_with_a_bad_byte_still_opens() {
+    let (_vault, app, mut host) = host();
+    fs::create_dir_all(app.join("sync")).unwrap();
+    let path = app.join("sync/account.secret");
+
+    fs::write(&path, b"\xff").unwrap();
+    assert!(host
+        .dispatch("fanotes:sync-read-secrets", &[])
+        .unwrap()
+        .is_null());
+    assert_eq!(fs::read(&path).unwrap(), b"\xff");
+
+    fs::write(&path, "\u{FEFF}").unwrap();
+    assert!(host
+        .dispatch("fanotes:sync-read-secrets", &[])
+        .unwrap()
+        .is_null());
+    assert_eq!(fs::read_to_string(&path).unwrap(), "\u{FEFF}");
+
+    fs::write(&path, b"safe1:\xff").unwrap();
+    let error = host.dispatch("fanotes:sync-read-secrets", &[]).unwrap_err();
+    assert!(error.contains("Schlüsselbund"), "{error}");
+
+    let secret = "{\"v\":1,\"token\":\"geheim\"}";
+    fs::write(&path, b"safe1:").unwrap();
+    host.dispatch("fanotes:sync-write-secrets", &[json!(secret)])
+        .unwrap();
+    fs::write(&path, b"safe1:\xff").unwrap();
+    assert_eq!(
+        host.dispatch("fanotes:sync-read-secrets", &[]).unwrap(),
+        secret
+    );
+
+    fs::write(&path, b"plain1:\xff").unwrap();
+    assert!(host
+        .dispatch("fanotes:sync-read-secrets", &[])
+        .unwrap()
+        .is_null());
+    assert!(!path.exists());
+    fs::write(&path, b"safe1:").unwrap();
+    let error = host.dispatch("fanotes:sync-read-secrets", &[]).unwrap_err();
+    assert!(error.contains("Schlüsselbund"), "{error}");
+}
+
+#[test]
 fn sync_credentials_keep_a_long_unicode_secret() {
     let (_vault, _app, mut host) = host();
     let kept = "Ä".repeat(40_000);
@@ -173,6 +243,30 @@ fn sync_secrets_stay_out_of_the_profile_without_a_keyring() {
     let error = host.dispatch("fanotes:sync-read-secrets", &[]).unwrap_err();
     assert!(error.contains("Schlüsselbund"));
     let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_sync_time_follows_javascript_number() {
+    let (vault, _app, mut host) = host();
+    let written = host
+        .dispatch(
+            "fanotes:sync-write",
+            &[json!("Seite.md"), json!("SGFsbG8K"), json!("1600000000000")],
+        )
+        .unwrap();
+    assert_eq!(written["mtimeMs"], 1_600_000_000_000i64);
+    let fractional = host
+        .dispatch(
+            "fanotes:sync-write",
+            &[
+                json!("Seite.md"),
+                json!("SGFsbG8K"),
+                json!(1_600_000_000_000.9_f64),
+            ],
+        )
+        .unwrap();
+    assert_eq!(fractional["mtimeMs"], 1_600_000_000_000i64);
+    assert_eq!(fs::read(vault.join("Seite.md")).unwrap(), b"Hallo\n");
 }
 
 #[test]
