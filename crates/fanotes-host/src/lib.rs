@@ -3017,6 +3017,8 @@ fn clean_cached_entries(
             _ => return Err(()),
         }
     }
+    // Desktop `cleanCachedTreeEntries` sorts every level with `compareEntries`.
+    cleaned.sort_by(entry_name_order);
     Ok(cleaned)
 }
 
