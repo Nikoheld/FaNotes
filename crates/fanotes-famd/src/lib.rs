@@ -232,12 +232,8 @@ pub fn serialize_famd(markdown: &str, payload: &FamdPayload) -> String {
             Value::Array(backups.iter().map(NoteBackup::to_json).collect()),
         );
     }
-    if let Some(stats) = payload
-        .page_stats
-        .as_ref()
-        .filter(|stats| stats.is_object())
-    {
-        object.insert("pageStats".into(), stats.clone());
+    if let Some(stats) = parse_page_stats(payload.page_stats.as_ref()) {
+        object.insert("pageStats".into(), stats);
     }
     let json = Value::Object(object).to_string();
     let header = format!("<!-- fanotes-famd:v1 chars={} -->\n{json}\n", js_len(&json));
@@ -284,10 +280,7 @@ impl FamdPayload {
             .get("noteBackups")
             .map(parse_note_backups_value)
             .unwrap_or_default();
-        let page_stats = object
-            .get("pageStats")
-            .filter(|stats| stats.is_object())
-            .cloned();
+        let page_stats = parse_page_stats(object.get("pageStats"));
         Self {
             schema: FAMD_SCHEMA.to_string(),
             updated_at,
@@ -545,6 +538,45 @@ fn to_base36(mut value: u64) -> String {
     }
     bytes.reverse();
     String::from_utf8(bytes).unwrap_or_else(|_| "0".to_owned())
+}
+
+/// `parsePageStats` from the desktop companion codec.
+fn parse_page_stats(value: Option<&Value>) -> Option<Value> {
+    let object = value?.as_object()?;
+    let created = page_stat_time(object.get("createdAt"))?;
+    let modified = page_stat_time(object.get("modifiedAt")).unwrap_or_else(|| created.clone());
+    let opened = page_stat_time(object.get("lastOpenedAt")).unwrap_or_else(|| created.clone());
+    let mut stats = Map::new();
+    stats.insert("createdAt".into(), Value::String(created));
+    stats.insert("modifiedAt".into(), Value::String(modified));
+    stats.insert("lastOpenedAt".into(), Value::String(opened));
+    stats.insert(
+        "dwellMs".into(),
+        Value::Number(serde_json::Number::from(js_floor_count(
+            object.get("dwellMs"),
+        ))),
+    );
+    stats.insert(
+        "openCount".into(),
+        Value::Number(serde_json::Number::from(js_floor_count(
+            object.get("openCount"),
+        ))),
+    );
+    Some(Value::Object(stats))
+}
+
+fn page_stat_time(value: Option<&Value>) -> Option<String> {
+    value.and_then(Value::as_str).and_then(canonical_iso)
+}
+
+/// `Number.isFinite(n) && n >= 0 ? Math.floor(n) : 0`.
+fn js_floor_count(value: Option<&Value>) -> i64 {
+    let number = js_number(value);
+    if number.is_finite() && number >= 0.0 {
+        number.floor() as i64
+    } else {
+        0
+    }
 }
 
 fn is_record_id(value: &str) -> bool {
@@ -1201,7 +1233,7 @@ fn js_number(value: Option<&Value>) -> f64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_famd, parse_note_links, FAMD_SCHEMA};
+    use super::{parse_famd, parse_note_links, serialize_famd, FamdPayload, FAMD_SCHEMA};
 
     #[test]
     fn a_bad_companion_timestamp_uses_the_current_time() {
@@ -1274,5 +1306,51 @@ mod tests {
             assert!(backup.id.starts_with("nb-"), "{}", backup.id);
             assert_ne!(backup.id, "nb-generated");
         }
+    }
+
+    #[test]
+    fn page_stats_use_the_desktop_dates_and_counts() {
+        let json = format!(
+            r#"{{"schema":"{FAMD_SCHEMA}","updatedAt":"2026-01-02T00:00:00.000Z","ink":null,"worksheets":[],"pageStats":{{"createdAt":"2026-01-02T03:04Z","dwellMs":"12.9","openCount":true}}}}"#
+        );
+        let source = format!(
+            "<!-- fanotes-famd:v1 chars={} -->\n{json}\n",
+            super::js_len(&json)
+        );
+        let stats = parse_famd(&source).payload.unwrap().page_stats.unwrap();
+        assert_eq!(stats["createdAt"], "2026-01-02T03:04:00.000Z");
+        assert_eq!(stats["modifiedAt"], "2026-01-02T03:04:00.000Z");
+        assert_eq!(stats["lastOpenedAt"], "2026-01-02T03:04:00.000Z");
+        assert_eq!(stats["dwellMs"], 12);
+        assert_eq!(stats["openCount"], 1);
+
+        let missing = format!(
+            r#"{{"schema":"{FAMD_SCHEMA}","updatedAt":"2026-01-02T00:00:00.000Z","ink":null,"worksheets":[],"pageStats":{{"dwellMs":4}}}}"#
+        );
+        let source = format!(
+            "<!-- fanotes-famd:v1 chars={} -->\n{missing}\n",
+            super::js_len(&missing)
+        );
+        assert!(parse_famd(&source).payload.unwrap().page_stats.is_none());
+
+        let payload = FamdPayload {
+            schema: FAMD_SCHEMA.to_string(),
+            updated_at: "2026-01-02T00:00:00.000Z".to_string(),
+            ink: None,
+            worksheets: Vec::new(),
+            paper_style: None,
+            note_links: Vec::new(),
+            note_backups: Vec::new(),
+            page_stats: Some(serde_json::json!({
+                "createdAt": "2026-2-31",
+                "dwellMs": -4,
+                "openCount": "3.2"
+            })),
+        };
+        let saved = serialize_famd("", &payload);
+        let again = parse_famd(&saved).payload.unwrap().page_stats.unwrap();
+        assert_eq!(again["createdAt"], "2026-03-03T00:00:00.000Z");
+        assert_eq!(again["dwellMs"], 0);
+        assert_eq!(again["openCount"], 3);
     }
 }
