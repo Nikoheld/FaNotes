@@ -407,8 +407,8 @@ fn boxes(value: Option<&Value>) -> Result<Vec<Value>, String> {
             let id = object
                 .get("id")
                 .and_then(Value::as_str)
+                .filter(|id| matches_record_id(id))
                 .ok_or_else(|| "Ein Arbeitsblatt-Textfeld ist ungültig.".to_owned())?;
-            worksheet_id(id)?;
             let page = object
                 .get("page")
                 .and_then(json_integer)
@@ -464,8 +464,8 @@ fn highlights(value: Option<&Value>) -> Result<Vec<Value>, String> {
             let id = object
                 .get("id")
                 .and_then(Value::as_str)
+                .filter(|id| matches_record_id(id))
                 .ok_or_else(|| "Eine PDF-Markierung ist ungültig.".to_owned())?;
-            worksheet_id(id)?;
             let page = object
                 .get("page")
                 .and_then(json_integer)
@@ -605,13 +605,17 @@ fn file_name(source: &str) -> String {
         .to_owned()
 }
 
-fn worksheet_id(value: &str) -> Result<String, String> {
-    let ok = !value.is_empty()
+/// Shared desktop id pattern. A text box or mark that fails it reports that field.
+fn matches_record_id(value: &str) -> bool {
+    !value.is_empty()
         && value.len() <= 96
         && value
             .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'));
-    if ok {
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+}
+
+fn worksheet_id(value: &str) -> Result<String, String> {
+    if matches_record_id(value) {
         Ok(value.to_owned())
     } else {
         Err("Ungültige Arbeitsblatt-ID.".to_owned())

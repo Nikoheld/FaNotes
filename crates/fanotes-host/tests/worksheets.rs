@@ -538,3 +538,61 @@ fn a_worksheet_folder_uses_the_desktop_directory_checks() {
         "Der interne FaNotes-Ordner ist unsicher."
     );
 }
+
+#[test]
+fn a_text_box_or_mark_with_a_bad_id_keeps_its_own_message() {
+    let (dir, mut host) = host();
+    let worksheets = dir.join("vault/.fanotes/worksheets");
+    let mut document = json!({
+        "schemaVersion": 1,
+        "id": "blatt-1",
+        "title": "Übung",
+        "kind": "pdf",
+        "mimeType": "application/pdf",
+        "sourceRelativePath": ".fanotes/worksheets/blatt-1.pdf",
+        "dataRelativePath": ".fanotes/worksheets/blatt-1.json",
+        "createdAt": "2026-01-02T03:04:05.000Z",
+        "updatedAt": "2026-01-02T03:04:05.000Z",
+        "textBoxes": [{
+            "id": "box 1",
+            "page": 1,
+            "x": 0.1,
+            "y": 0.2,
+            "width": 0.3,
+            "text": "Hallo",
+            "fontSize": 16
+        }],
+        "highlights": []
+    });
+    fs::write(
+        worksheets.join("blatt-1.json"),
+        serde_json::to_string(&document).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        host.dispatch("fanotes:read-worksheet", &[json!("blatt-1")])
+            .unwrap_err(),
+        "Ein Arbeitsblatt-Textfeld ist ungültig."
+    );
+
+    document["textBoxes"] = json!([]);
+    document["highlights"] = json!([{
+        "id": "mark 1",
+        "page": 1,
+        "x": 0.1,
+        "y": 0.2,
+        "width": 0.2,
+        "height": 0.2,
+        "color": "#ffe566"
+    }]);
+    fs::write(
+        worksheets.join("blatt-1.json"),
+        serde_json::to_string(&document).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        host.dispatch("fanotes:read-worksheet", &[json!("blatt-1")])
+            .unwrap_err(),
+        "Eine PDF-Markierung ist ungültig."
+    );
+}
