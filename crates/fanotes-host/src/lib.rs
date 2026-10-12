@@ -2306,7 +2306,7 @@ fn reveal_target(root: &Path, relative: &str) -> Result<PathBuf, String> {
         }
         let last = index + 1 == normalized.split('/').count();
         if !last && !meta.is_dir() {
-            return Err("Der Eintrag wurde nicht gefunden.".to_owned());
+            return Err("Ein Pfadbestandteil ist kein Ordner.".to_owned());
         }
         if last && !meta.is_file() && !meta.is_dir() {
             return Err("Der Eintrag wurde nicht gefunden.".to_owned());
