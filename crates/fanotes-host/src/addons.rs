@@ -82,12 +82,11 @@ pub fn read_file(host: &Host, id: &Value, name: &Value) -> Result<Value, String>
         .as_str()
         .ok_or_else(|| "Ungültiger Dateiname.".to_owned())?;
     let target = addon_file(host, &id, name)?;
+    // Desktop `readFile` returns the file with no size cap. The 2 MB limit
+    // applies only when the host writes the file.
     match fs::symlink_metadata(&target) {
         Ok(meta) if meta.file_type().is_symlink() || !meta.is_file() => {
             Err("Die Add-on-Datei ist unsicher.".to_owned())
-        }
-        Ok(meta) if meta.len() as usize > MAX_FILE_BYTES => {
-            Err("Die Add-on-Datei ist zu groß.".to_owned())
         }
         Ok(_) => fs::read(&target)
             .map(|bytes| Value::String(String::from_utf8_lossy(&bytes).into_owned()))

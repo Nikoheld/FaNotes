@@ -296,3 +296,34 @@ fn listing_addons_does_not_create_the_store() {
     );
     assert!(!dir.join("app/addons").exists());
 }
+
+#[test]
+fn an_oversized_addon_file_still_opens() {
+    let (dir, mut host) = scratch("oversize");
+    let file = dir.join("app/addons/margin-notes/main.js");
+    std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+    // Desktop `readFile` has no size cap. A file placed beside the 2 MB
+    // write limit still comes back as text.
+    let body = vec![b'a'; 2_000_001];
+    std::fs::write(&file, &body).unwrap();
+    let read = host
+        .dispatch(
+            "fanotes:addons-read-file",
+            &[json!("margin-notes"), json!("main.js")],
+        )
+        .unwrap();
+    let text = read.as_str().unwrap();
+    assert_eq!(text.len(), body.len());
+    assert!(text.bytes().all(|byte| byte == b'a'));
+    let refused = host
+        .dispatch(
+            "fanotes:addons-write-files",
+            &[
+                json!("margin-notes"),
+                json!({ "main.js": "a".repeat(2_000_001) }),
+            ],
+        )
+        .unwrap_err();
+    assert_eq!(refused, "main.js ist größer als 2 MB.");
+    assert_eq!(std::fs::metadata(&file).unwrap().len(), 2_000_001);
+}
