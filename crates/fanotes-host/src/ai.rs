@@ -57,7 +57,7 @@ pub fn transform(payload: &Value) -> Result<Value, String> {
         .ok_or_else(|| "Der AI-Auftrag ist ungültig.".to_owned())?;
     let provider = provider_name(connection)?;
     let model = required_model(connection)?;
-    let markdown = required_markdown(object.get("markdown"))?;
+    let markdown = required_markdown(object.get("markdown"), false)?;
     let actions = required_actions(object.get("actions"), false)?;
     let instruction = limited_instruction(
         object
@@ -126,7 +126,7 @@ pub fn transform(payload: &Value) -> Result<Value, String> {
         "markdown": unwrap_markdown(&reply.text)?,
         "model": model,
         "provider": provider,
-        "stats": reply.stats,
+        "stats": non_negative_stats(reply.stats),
     }))
 }
 
@@ -137,7 +137,7 @@ pub fn transform_lm_studio(payload: &Value) -> Result<Value, String> {
     let base_url = object.get("baseUrl").and_then(Value::as_str).unwrap_or("");
     let origin = lm_studio_origin(base_url)?;
     let model = required_model(payload)?;
-    let markdown = required_markdown(object.get("markdown"))?;
+    let markdown = required_markdown(object.get("markdown"), true)?;
     let actions = required_actions(object.get("actions"), true)?;
     let instruction = limited_instruction(
         object
@@ -953,10 +953,11 @@ fn lm_studio_text(body: &Value) -> Result<AiReply, String> {
     }
     Ok(AiReply {
         text: messages.join("\n\n"),
+        // The LM Studio panel keeps every finite stat, including a negative one.
         stats: stats_object(
-            finite_number(&body["stats"]["input_tokens"]),
-            finite_number(&body["stats"]["total_output_tokens"]),
-            finite_number(&body["stats"]["tokens_per_second"]),
+            finite_any(&body["stats"]["input_tokens"]),
+            finite_any(&body["stats"]["total_output_tokens"]),
+            finite_any(&body["stats"]["tokens_per_second"]),
         ),
     })
 }
@@ -1060,19 +1061,38 @@ fn chat_completions(
     Ok(AiReply {
         text: text.to_owned(),
         stats: stats_object(
-            finite_number(&body["usage"]["prompt_tokens"]),
-            finite_number(&body["usage"]["completion_tokens"]),
+            finite_any(&body["usage"]["prompt_tokens"]),
+            finite_any(&body["usage"]["completion_tokens"]),
             None,
         ),
     })
 }
 
 fn finite_number(value: &Value) -> Option<f64> {
+    finite_any(value).filter(|number| *number >= 0.0)
+}
+
+/// `Number.isFinite` without the AI list's `value >= 0` filter.
+fn finite_any(value: &Value) -> Option<f64> {
     let number = value
         .as_f64()
         .or_else(|| value.as_i64().map(|number| number as f64))
         .or_else(|| value.as_u64().map(|number| number as f64))?;
-    (number.is_finite() && number >= 0.0).then_some(number)
+    number.is_finite().then_some(number)
+}
+
+/// The AI provider drops a finite stat that is below zero. The LM Studio panel does not.
+fn non_negative_stats(stats: Value) -> Value {
+    let Some(object) = stats.as_object() else {
+        return json!({});
+    };
+    let mut next = serde_json::Map::new();
+    for (key, value) in object {
+        if finite_number(value).is_some() {
+            next.insert(key.clone(), value.clone());
+        }
+    }
+    Value::Object(next)
 }
 
 /// `Number.isFinite` for the LM Studio panel's context length. A negative length stays.
@@ -1554,13 +1574,20 @@ fn vault_notes(value: Option<&Value>) -> Vec<(String, String)> {
         .collect()
 }
 
-fn required_markdown(value: Option<&Value>) -> Result<String, String> {
-    let markdown = value.and_then(Value::as_str).unwrap_or("");
-    if markdown.len() > 1_500_000 {
-        Err("Die Notiz ist für einen einzelnen AI-Auftrag zu groß.".to_owned())
+fn required_markdown(value: Option<&Value>, lm_studio: bool) -> Result<String, String> {
+    // A missing or non-string note uses the same message as a note past 1.5 MB.
+    let message = if lm_studio {
+        "Die Notiz ist für einen einzelnen LM-Studio-Auftrag zu groß."
     } else {
-        Ok(markdown.to_owned())
+        "Die Notiz ist für einen einzelnen AI-Auftrag zu groß."
+    };
+    let Some(markdown) = value.and_then(Value::as_str) else {
+        return Err(message.to_owned());
+    };
+    if markdown.len() > 1_500_000 {
+        return Err(message.to_owned());
     }
+    Ok(markdown.to_owned())
 }
 
 fn required_actions(value: Option<&Value>, lm_studio: bool) -> Result<Vec<String>, String> {
@@ -1736,9 +1763,13 @@ mod tests {
             "stats": { "input_tokens": -3, "total_output_tokens": 4, "tokens_per_second": -1 }
         }))
         .unwrap();
-        assert!(reply.stats.get("inputTokens").is_none());
-        assert!(reply.stats.get("tokensPerSecond").is_none());
+        assert_eq!(reply.stats["inputTokens"], -3.0);
+        assert_eq!(reply.stats["tokensPerSecond"], -1.0);
         assert_eq!(reply.stats["outputTokens"], 4.0);
+        let ai_stats = super::non_negative_stats(reply.stats);
+        assert!(ai_stats.get("inputTokens").is_none());
+        assert!(ai_stats.get("tokensPerSecond").is_none());
+        assert_eq!(ai_stats["outputTokens"], 4.0);
     }
 
     #[test]
@@ -1790,6 +1821,35 @@ mod tests {
         );
         assert!(
             super::required_model(&json!({ "model": format!(" {}", "a".repeat(500)) })).is_err()
+        );
+    }
+
+    #[test]
+    fn a_note_that_is_not_text_is_too_large_for_the_desktop() {
+        let ai = "Die Notiz ist für einen einzelnen AI-Auftrag zu groß.";
+        let panel = "Die Notiz ist für einen einzelnen LM-Studio-Auftrag zu groß.";
+        assert_eq!(super::required_markdown(None, false).unwrap_err(), ai);
+        assert_eq!(
+            super::required_markdown(Some(&json!(null)), false).unwrap_err(),
+            ai
+        );
+        assert_eq!(
+            super::required_markdown(Some(&json!(12)), true).unwrap_err(),
+            panel
+        );
+        assert_eq!(
+            super::required_markdown(Some(&json!("")), false).unwrap(),
+            ""
+        );
+        assert_eq!(
+            super::required_markdown(Some(&json!("a".repeat(1_500_001))), true).unwrap_err(),
+            panel
+        );
+        assert_eq!(
+            super::required_markdown(Some(&json!("a".repeat(1_500_000))), false)
+                .unwrap()
+                .len(),
+            1_500_000
         );
     }
 
