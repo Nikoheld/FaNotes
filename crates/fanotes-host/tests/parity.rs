@@ -52,13 +52,14 @@ fn vault_paths_reject_traversal_and_internal_files() {
             "fanotes:render-pdf-page",
             &[json!({
                 "path": "../secret.pdf",
-                "pageIndex": 0,
-                "pixelWidth": 16,
+                "pageIndex": 0.0,
+                "pixelWidth": 16.0,
                 "pixelHeight": 16,
                 "pagePixelWidth": 16,
                 "pagePixelHeight": 16,
                 "originX": 0,
-                "originY": 0
+                "originY": 0,
+                "rotation": 0.0
             })]
         )
         .unwrap_err(),
