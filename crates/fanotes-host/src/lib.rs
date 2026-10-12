@@ -1483,11 +1483,13 @@ fn complete_pending_app_data_reset(app_data: &Path) {
     let Some(marker_path) = pending_reset_marker(app_data) else {
         return;
     };
-    if !valid_reset_marker(&marker_path, app_data) {
-        if fs::symlink_metadata(&marker_path).is_ok() {
+    match classify_reset_marker(&marker_path, app_data) {
+        ResetMarker::Absent | ResetMarker::Keep => return,
+        ResetMarker::Discard => {
             let _ = fs::remove_file(&marker_path);
+            return;
         }
-        return;
+        ResetMarker::Ready => {}
     }
     if fs::symlink_metadata(app_data).is_ok_and(|meta| meta.file_type().is_symlink()) {
         let _ = fs::remove_file(&marker_path);
@@ -1522,19 +1524,48 @@ fn complete_pending_app_data_reset(app_data: &Path) {
     let _ = fs::remove_file(&marker_path);
 }
 
-fn valid_reset_marker(marker_path: &Path, app_data: &Path) -> bool {
-    let Ok(meta) = fs::symlink_metadata(marker_path) else {
-        return false;
+enum ResetMarker {
+    Absent,
+    /// A symlink, a non-file, an oversized file, or JSON whose fields are wrong.
+    Discard,
+    /// `JSON.parse` threw. The desktop leaves that file for the next launch.
+    Keep,
+    Ready,
+}
+
+fn classify_reset_marker(marker_path: &Path, app_data: &Path) -> ResetMarker {
+    let meta = match fs::symlink_metadata(marker_path) {
+        Ok(meta) => meta,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return ResetMarker::Absent,
+        Err(_) => return ResetMarker::Keep,
     };
     if meta.file_type().is_symlink() || !meta.is_file() || meta.len() > RESET_MAX_BYTES {
-        return false;
+        return ResetMarker::Discard;
     }
-    let Ok(text) = fs::read_to_string(marker_path) else {
-        return false;
+    // `readFile(..., 'utf8')` replaces a bad byte and still parses the JSON.
+    let text = match fs::read(marker_path) {
+        Ok(bytes) => String::from_utf8_lossy(&bytes).into_owned(),
+        Err(_) => return ResetMarker::Keep,
     };
-    let Ok(marker) = serde_json::from_str::<Value>(&text) else {
-        return false;
+    let marker = match serde_json::from_str::<Value>(&text) {
+        Ok(marker) => marker,
+        Err(_) => return ResetMarker::Keep,
     };
+    if reset_marker_fields_match(&marker, app_data) {
+        ResetMarker::Ready
+    } else {
+        ResetMarker::Discard
+    }
+}
+
+fn valid_reset_marker(marker_path: &Path, app_data: &Path) -> bool {
+    matches!(
+        classify_reset_marker(marker_path, app_data),
+        ResetMarker::Ready
+    )
+}
+
+fn reset_marker_fields_match(marker: &Value, app_data: &Path) -> bool {
     // `marker.version !== 1` still accepts the JSON number `1.0`.
     if marker.get("version").and_then(Value::as_f64) != Some(1.0) {
         return false;
