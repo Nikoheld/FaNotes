@@ -76,6 +76,104 @@ fn a_worksheet_name_with_a_slash_is_not_a_title() {
 }
 
 #[test]
+fn a_pdf_import_checks_the_file_before_the_folder() {
+    let (mut host, vault) = host();
+    std::fs::write(vault.join("Seite.md"), b"Hallo\n").unwrap();
+    let pdf = b"%PDF-1.4\n";
+    assert_eq!(
+        host.dispatch(
+            "fanotes:import-pdf-note",
+            &[
+                json!("Seite.md"),
+                json!({ "name": "notes.txt", "bytes": b"hello".to_vec() }),
+            ],
+        )
+        .unwrap_err(),
+        "Es können nur PDF-Dateien als PDF-Notiz importiert werden."
+    );
+    assert_eq!(
+        host.dispatch(
+            "fanotes:import-pdf-note",
+            &[
+                json!("Fehlt"),
+                json!({ "name": "Skript.pdf", "bytes": [] }),
+            ],
+        )
+        .unwrap_err(),
+        "Die ausgewählte PDF-Datei ist leer."
+    );
+    assert_eq!(
+        host.dispatch(
+            "fanotes:import-pdf-note",
+            &[
+                json!("../geheim"),
+                json!({ "name": "Skript.pdf", "bytes": b"hello".to_vec() }),
+            ],
+        )
+        .unwrap_err(),
+        "Die ausgewählte Datei stimmt nicht mit ihrem Bild- oder PDF-Format überein."
+    );
+    assert_eq!(
+        host.dispatch(
+            "fanotes:import-pdf-note",
+            &[
+                json!("Seite.md"),
+                json!({ "name": "CON.pdf", "bytesBase64": b64(pdf) }),
+            ],
+        )
+        .unwrap_err(),
+        "Der gewählte Pfad ist kein Ordner."
+    );
+    assert_eq!(
+        host.dispatch(
+            "fanotes:import-pdf-note",
+            &[
+                json!("../geheim"),
+                json!({ "name": "Skript.pdf", "bytesBase64": b64(pdf) }),
+            ],
+        )
+        .unwrap_err(),
+        "Pfad-Traversal ist nicht erlaubt."
+    );
+    assert_eq!(
+        host.dispatch(
+            "fanotes:import-subject-book",
+            &[
+                json!("../geheim"),
+                json!({ "name": "Skript.pdf", "bytes": [] }),
+            ],
+        )
+        .unwrap_err(),
+        "Pfad-Traversal ist nicht erlaubt."
+    );
+    assert_eq!(
+        host.dispatch(
+            "fanotes:import-subject-book",
+            &[
+                json!("Fehlt"),
+                json!({ "name": "Skript.pdf", "bytes": [] }),
+            ],
+        )
+        .unwrap_err(),
+        "Die ausgewählte PDF-Datei ist leer."
+    );
+    assert_eq!(
+        host.dispatch(
+            "fanotes:import-subject-book",
+            &[
+                json!("Seite.md"),
+                json!({ "name": "CON.pdf", "bytesBase64": b64(pdf) }),
+            ],
+        )
+        .unwrap_err(),
+        "Der gewählte Pfad ist kein Ordner."
+    );
+    assert!(!vault.join("Fehlt").exists());
+    assert!(vault.join("Seite.md").is_file());
+    assert!(!vault.join("Seite.md/CON.pdf").exists());
+}
+
+#[test]
 fn a_dropped_image_and_a_pdf_note_land_in_the_vault() {
     let (mut host, vault) = host();
     let png = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0];
