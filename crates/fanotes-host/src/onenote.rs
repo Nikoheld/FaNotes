@@ -763,10 +763,12 @@ fn validate_listing(stdout: &str) -> Result<(), String> {
                 fields.insert(key.to_owned(), value.to_owned());
             }
         }
-        let Some(entry_path) = fields.get("Path") else {
+        // An empty path is ignored. `Type` skips a record only when it has text,
+        // so `Type =` still counts the file.
+        let Some(entry_path) = fields.get("Path").filter(|path| !path.is_empty()) else {
             continue;
         };
-        if fields.get("Type").is_some() {
+        if fields.get("Type").is_some_and(|kind| !kind.is_empty()) {
             continue;
         }
         let normalized = entry_path.replace('\\', "/");
@@ -2046,6 +2048,12 @@ mod tests {
         assert!(validate_listing("Path = a.txt\nSize =  12 \n").is_ok());
         assert!(validate_listing("Path = a.txt\nSize = 1.0\n").is_ok());
         assert!(validate_listing("Path = dir\nFolder = +\nSize = 1.5\n").is_ok());
+        assert!(validate_listing("Path = \nSize = 1\n\nPath = note.one\nSize = 2\n").is_ok());
+        assert!(validate_listing("Path = note.one\nType = \nSize = 1\n").is_ok());
+        assert_eq!(
+            validate_listing("Path = archive.zip\nType = zip\n").unwrap_err(),
+            "Das OneNote-Archiv enthält keine importierbaren Dateien."
+        );
     }
 
     #[test]
