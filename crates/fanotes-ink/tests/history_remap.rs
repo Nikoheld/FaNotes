@@ -142,6 +142,18 @@ fn undo_frames_of_stroke_ids_are_capped_at_80() {
 }
 
 #[test]
+fn a_drawing_title_uses_javascript_trim() {
+    let next_line = InkDocument::from_json(
+        "{\"schemaVersion\":1,\"title\":\"\\u0085\",\"strokes\":[{\"points\":[{\"x\":0.1,\"y\":0.2,\"t\":1,\"pressure\":0.4}]}]}",
+    );
+    assert!(next_line.is_ok());
+    let bom = InkDocument::from_json(
+        "{\"schemaVersion\":1,\"title\":\"\\uFEFF\",\"strokes\":[{\"points\":[{\"x\":0.1,\"y\":0.2,\"t\":1,\"pressure\":0.4}]}]}",
+    );
+    assert!(bom.is_err());
+}
+
+#[test]
 fn a_drawing_schema_of_one_point_zero_still_opens() {
     let raw = r##"{
       "schemaVersion": 1.0,
