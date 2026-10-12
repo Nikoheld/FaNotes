@@ -502,7 +502,8 @@ fn comment_pattern() -> &'static regex::Regex {
 fn hex_escape_pattern() -> &'static regex::Regex {
     static PATTERN: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
     PATTERN.get_or_init(|| {
-        regex::Regex::new(r"(?i)\\[0-9a-f]{1,6}\s?").expect("css hex escape pattern")
+        regex::Regex::new(&format!(r"(?i)\\[0-9a-f]{{1,6}}{JS_WS}?"))
+            .expect("css hex escape pattern")
     })
 }
 
@@ -523,9 +524,12 @@ mod tests {
 fn dangerous_css_pattern() -> &'static regex::Regex {
     static PATTERN: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
     PATTERN.get_or_init(|| {
-        regex::Regex::new(
-            r"(?i)(?:@import|@charset|@namespace|@font-face|expression\s*\(|url\s*\(|-moz-binding|behavior\s*:|javascript\s*:|vbscript\s*:|</)",
-        )
+        regex::Regex::new(&format!(
+            r"(?i)(?:@import|@charset|@namespace|@font-face|expression{JS_WS}*\(|url{JS_WS}*\(|-moz-binding|behavior{JS_WS}*:|javascript{JS_WS}*:|vbscript{JS_WS}*:|</)"
+        ))
         .expect("css danger pattern")
     })
 }
+
+/// JavaScript `/u` `\s`: includes U+FEFF and excludes U+0085.
+const JS_WS: &str = r"[\t\n\u{000B}\u{000C}\r \u{00A0}\u{1680}\u{2000}-\u{200A}\u{2028}\u{2029}\u{202F}\u{205F}\u{3000}\u{FEFF}]";
