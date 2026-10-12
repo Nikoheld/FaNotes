@@ -198,6 +198,60 @@ fn a_sync_secret_file_with_a_bad_byte_still_opens() {
 }
 
 #[test]
+fn a_missing_sync_payload_does_not_clear_the_saved_login() {
+    let (_vault, app, mut host) = host();
+    let id = host
+        .dispatch("fanotes:sync-vault-id", &[])
+        .unwrap()
+        .as_str()
+        .unwrap()
+        .to_owned();
+    host.dispatch(
+        "fanotes:sync-write-state",
+        &[json!(id), json!("{\"version\":1}")],
+    )
+    .unwrap();
+    let state_path = app.join(format!("sync/state-{id}.json"));
+    assert_eq!(
+        host.dispatch("fanotes:sync-write-state", &[json!(id)])
+            .unwrap_err(),
+        "Der Sync-Zustand ist ungültig."
+    );
+    assert_eq!(
+        host.dispatch("fanotes:sync-write-state", &[json!("nope")])
+            .unwrap_err(),
+        "Ungültige Vault-ID."
+    );
+    assert!(state_path.is_file());
+    host.dispatch("fanotes:sync-write-state", &[json!(id), json!(null)])
+        .unwrap();
+    assert!(!state_path.exists());
+
+    let secret = "{\"token\":\"geheim\"}";
+    host.dispatch("fanotes:sync-write-secrets", &[json!(secret)])
+        .unwrap();
+    assert_eq!(
+        host.dispatch("fanotes:sync-write-secrets", &[]).unwrap_err(),
+        "Die Sync-Anmeldedaten sind ungültig."
+    );
+    assert_eq!(
+        host.dispatch("fanotes:sync-write-secrets", &[json!(1)])
+            .unwrap_err(),
+        "Die Sync-Anmeldedaten sind ungültig."
+    );
+    assert_eq!(
+        host.dispatch("fanotes:sync-read-secrets", &[]).unwrap(),
+        secret
+    );
+    host.dispatch("fanotes:sync-write-secrets", &[json!(null)])
+        .unwrap();
+    assert!(host
+        .dispatch("fanotes:sync-read-secrets", &[])
+        .unwrap()
+        .is_null());
+}
+
+#[test]
 fn sync_credentials_keep_a_long_unicode_secret() {
     let (_vault, _app, mut host) = host();
     let kept = "Ä".repeat(40_000);

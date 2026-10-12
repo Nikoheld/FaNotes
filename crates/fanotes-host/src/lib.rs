@@ -338,9 +338,7 @@ impl Host {
             }
             "fanotes:sync-write-state" => self.write_sync_state(args),
             "fanotes:sync-read-secrets" => self.read_sync_secrets(),
-            "fanotes:sync-write-secrets" => {
-                self.write_sync_secrets(args.first().cloned().unwrap_or(Value::Null))
-            }
+            "fanotes:sync-write-secrets" => self.write_sync_secrets(args.first()),
             "fanotes:capture-window" => Err("Das Fensterbild ist ungültig.".to_owned()),
             "fanotes:render-pdf-page" => self.render_pdf_page(args),
             _ => Err(format!("Unbekannter Kanal: {channel}")),
@@ -489,8 +487,10 @@ impl Host {
     fn write_sync_state(&self, args: &[Value]) -> Result<Value, String> {
         let vault_id = args.first().and_then(Value::as_str).unwrap_or("");
         let path = self.sync_state_path(vault_id)?;
+        // Desktop `json === null` clears the file. A missing argument is
+        // `undefined` and is rejected before anything is deleted.
         match args.get(1) {
-            None | Some(Value::Null) => {
+            Some(Value::Null) => {
                 if path.is_file() {
                     fs::remove_file(&path)
                         .map_err(|_| "Der Sync-Zustand konnte nicht gelöscht werden.".to_owned())?;
@@ -504,7 +504,7 @@ impl Host {
                 notes::atomic_write(&path, json.as_bytes(), 0o600)?;
                 Ok(Value::Null)
             }
-            Some(_) => Err("Der Sync-Zustand ist ungültig.".to_owned()),
+            _ => Err("Der Sync-Zustand ist ungültig.".to_owned()),
         }
     }
 
@@ -569,27 +569,30 @@ impl Host {
         Ok(Value::String(raw.to_owned()))
     }
 
-    fn write_sync_secrets(&self, incoming: Value) -> Result<Value, String> {
+    fn write_sync_secrets(&self, incoming: Option<&Value>) -> Result<Value, String> {
         let path = self.sync_secrets_path();
         let account = self.secret_account(SYNC_SECRET_ACCOUNT);
-        if incoming.is_null() {
-            secrets::delete(self.secret_store, &account)?;
-            if path.is_file() {
-                fs::remove_file(&path).map_err(|_| {
-                    "Die Sync-Anmeldedaten konnten nicht gelöscht werden.".to_owned()
-                })?;
+        // Only an explicit null clears the login. A missing argument is undefined.
+        match incoming {
+            Some(Value::Null) => {
+                secrets::delete(self.secret_store, &account)?;
+                if path.is_file() {
+                    fs::remove_file(&path).map_err(|_| {
+                        "Die Sync-Anmeldedaten konnten nicht gelöscht werden.".to_owned()
+                    })?;
+                }
+                Ok(Value::Null)
             }
-            return Ok(Value::Null);
+            Some(Value::String(json)) => {
+                if vault::utf16_len(json) > 64 * 1024 {
+                    return Err("Die Sync-Anmeldedaten sind ungültig.".to_owned());
+                }
+                secrets::set(self.secret_store, &account, json)?;
+                notes::atomic_write(&path, b"safe1:", 0o600)?;
+                Ok(Value::Null)
+            }
+            _ => Err("Die Sync-Anmeldedaten sind ungültig.".to_owned()),
         }
-        let Some(json) = incoming.as_str() else {
-            return Err("Die Sync-Anmeldedaten sind ungültig.".to_owned());
-        };
-        if vault::utf16_len(json) > 64 * 1024 {
-            return Err("Die Sync-Anmeldedaten sind ungültig.".to_owned());
-        }
-        secrets::set(self.secret_store, &account, json)?;
-        notes::atomic_write(&path, b"safe1:", 0o600)?;
-        Ok(Value::Null)
     }
 
     fn sync_state_path(&self, vault_id: &str) -> Result<PathBuf, String> {
