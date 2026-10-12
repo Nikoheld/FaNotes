@@ -16,7 +16,13 @@ export const RULER_LENGTH_MM = 160
 export const RULER_MIN_LENGTH_MM = 50
 export const RULER_MAX_LENGTH_MM = 500
 export const RULER_LENGTH_PRESETS_MM = [100, 150, 160, 200, 300]
-export const RULER_HEIGHT_MM = 26
+/** Default width of the ruler body, across the two drawing edges. */
+export const RULER_WIDTH_MM = 26
+export const RULER_MIN_WIDTH_MM = 16
+export const RULER_MAX_WIDTH_MM = 80
+export const RULER_WIDTH_PRESETS_MM = [18, 26, 40, 60]
+/** Default body width. Geometry reads `rulerWidth(pose)`; this stays for callers that mean the default. */
+export const RULER_HEIGHT_MM = RULER_WIDTH_MM
 
 /** Geodreieck: the hypotenuse is the base with the centred scale and the protractor. */
 export const SET_SQUARE_SIZE_MM = 160
@@ -54,6 +60,8 @@ export type DraftingPose = {
   rotation: number
   /** Ruler: length of both drawing edges. */
   lengthMm?: number
+  /** Ruler: distance between the two drawing edges. */
+  widthMm?: number
   /** Set square: length of the base (hypotenuse). */
   sizeMm?: number
   /** Set square: apex on the other side of the base. */
@@ -79,6 +87,8 @@ export type DraftingSettings = {
   /** See-through tool bodies. */
   translucent: boolean
   rulerLengthMm: number
+  /** Distance between the ruler's two drawing edges. */
+  rulerWidthMm: number
   setSquareSizeMm: number
   /** Parallel lines inside the set square (for drawing parallels). */
   setSquareParallels: boolean
@@ -98,6 +108,7 @@ export const DEFAULT_DRAFTING_SETTINGS: DraftingSettings = {
   magnet: 'normal',
   translucent: true,
   rulerLengthMm: RULER_LENGTH_MM,
+  rulerWidthMm: RULER_WIDTH_MM,
   setSquareSizeMm: SET_SQUARE_SIZE_MM,
   setSquareParallels: true,
   attachToRuler: true,
@@ -116,6 +127,8 @@ const clampNumber = (value: unknown, min: number, max: number, fallback: number)
 
 export const clampRulerLength = (mm: number) => clampNumber(mm, RULER_MIN_LENGTH_MM, RULER_MAX_LENGTH_MM, RULER_LENGTH_MM)
 
+export const clampRulerWidth = (mm: number) => clampNumber(mm, RULER_MIN_WIDTH_MM, RULER_MAX_WIDTH_MM, RULER_WIDTH_MM)
+
 export const clampSetSquareSize = (mm: number) => clampNumber(mm, SET_SQUARE_MIN_SIZE_MM, SET_SQUARE_MAX_SIZE_MM, SET_SQUARE_SIZE_MM)
 
 export const normalizeDraftingSettings = (raw: unknown): DraftingSettings => {
@@ -128,6 +141,7 @@ export const normalizeDraftingSettings = (raw: unknown): DraftingSettings => {
     magnet: DRAFTING_MAGNETS.includes(source.magnet as DraftingMagnet) ? source.magnet as DraftingMagnet : defaults.magnet,
     translucent: typeof source.translucent === 'boolean' ? source.translucent : defaults.translucent,
     rulerLengthMm: clampRulerLength(Number(source.rulerLengthMm)),
+    rulerWidthMm: clampRulerWidth(Number(source.rulerWidthMm)),
     setSquareSizeMm: clampSetSquareSize(Number(source.setSquareSizeMm)),
     setSquareParallels: typeof source.setSquareParallels === 'boolean' ? source.setSquareParallels : defaults.setSquareParallels,
     attachToRuler: typeof source.attachToRuler === 'boolean' ? source.attachToRuler : defaults.attachToRuler,
@@ -219,6 +233,8 @@ export const pxPerMmOnDisplay = (
 
 export const rulerLength = (pose: DraftingPose) => clampRulerLength(pose.lengthMm ?? RULER_LENGTH_MM)
 
+export const rulerWidth = (pose: DraftingPose) => clampRulerWidth(pose.widthMm ?? RULER_WIDTH_MM)
+
 export const setSquareSize = (pose: DraftingPose) => clampSetSquareSize(pose.sizeMm ?? SET_SQUARE_SIZE_MM)
 
 /** −1: apex above the base (local −y), +1: flipped, apex below. */
@@ -229,6 +245,7 @@ export const defaultRulerPose = (settings?: Partial<DraftingSettings>): Drafting
   y: 0.22,
   rotation: 0,
   lengthMm: clampRulerLength(settings?.rulerLengthMm ?? RULER_LENGTH_MM),
+  widthMm: clampRulerWidth(settings?.rulerWidthMm ?? RULER_WIDTH_MM),
   pinned: false,
 })
 
@@ -437,6 +454,26 @@ export const draftingLocalToNorm = (
   }
 }
 
+/**
+ * Pulls the ruler's bottom edge to `localYMm` in the pose's own millimetres.
+ * The top edge stays put and the centre walks with the new width.
+ * Whole millimetres by default; `precise` keeps half millimetres.
+ */
+export const resizeRulerWidth = (
+  pose: DraftingPose,
+  localYMm: number,
+  sourceWidth: number,
+  sourceHeight: number,
+  precise = false,
+): DraftingPose => {
+  const current = rulerWidth(pose)
+  const raw = clampRulerWidth(localYMm + current / 2)
+  const stepped = precise ? Math.round(raw * 2) / 2 : Math.round(raw)
+  const widthMm = clampRulerWidth(stepped)
+  const centre = draftingLocalToNorm(0, -current / 2 + widthMm / 2, pose, sourceWidth, sourceHeight)
+  return { ...pose, x: centre.x, y: centre.y, widthMm }
+}
+
 /** Sheet point → tool-local millimetres (x along the tool, y across it). */
 export const normToLocalMm = (
   x: number,
@@ -461,7 +498,7 @@ export const toolExtentMm = (kind: DraftingKind, pose: DraftingPose) => {
   }
   if (kind === 'ruler') {
     const half = rulerLength(pose) / 2
-    const across = RULER_HEIGHT_MM / 2
+    const across = rulerWidth(pose) / 2
     corners = [{ x: -half, y: -across }, { x: half, y: -across }, { x: half, y: across }, { x: -half, y: across }]
   } else {
     const half = setSquareSize(pose) / 2
@@ -522,9 +559,8 @@ const pointInsideRuler = (
 ) => {
   const local = normToLocalMm(x, y, pose, sourceWidth, sourceHeight)
   const half = rulerLength(pose) / 2
-  const top = -RULER_HEIGHT_MM / 2
-  const bottom = RULER_HEIGHT_MM / 2
-  return local.x >= -half && local.x <= half && local.y >= top - 0.6 && local.y <= bottom + 0.6
+  const across = rulerWidth(pose) / 2
+  return local.x >= -half && local.x <= half && local.y >= -across - 0.6 && local.y <= across + 0.6
 }
 
 const pointInsideSetSquare = (
@@ -569,8 +605,9 @@ type LocalLine = {
 
 const rulerLocalLines = (pose: DraftingPose): LocalLine[] => {
   const half = rulerLength(pose) / 2
-  const top = -RULER_HEIGHT_MM / 2
-  const bottom = RULER_HEIGHT_MM / 2
+  const across = rulerWidth(pose) / 2
+  const top = -across
+  const bottom = across
   return [
     { ax: -half, ay: top, bx: half, by: top, originT: 0, outward: { x: 0, y: -1 } },
     { ax: -half, ay: bottom, bx: half, by: bottom, originT: 0, outward: { x: 0, y: 1 } },

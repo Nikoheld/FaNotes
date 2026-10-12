@@ -15,6 +15,9 @@ const {
   PEN_EDGE_ZONE_MM,
   RULER_HEIGHT_MM,
   RULER_LENGTH_MM,
+  RULER_MAX_WIDTH_MM,
+  RULER_MIN_WIDTH_MM,
+  RULER_WIDTH_MM,
   SET_SQUARE_LEG_MM,
   SET_SQUARE_PROTRACTOR_DEGREES,
   SET_SQUARE_SIZE_MM,
@@ -39,6 +42,7 @@ const {
   normalizeDraftingSettings,
   nudgePose,
   presetArcSweep,
+  resizeRulerWidth,
   rulerDrawingEdges,
   sampleCompassArc,
   scaleTicks,
@@ -85,6 +89,31 @@ try {
   near(millimetresAlongEdge(longEdges[0], 1, W, H), 200, 0.5, 'a 20 cm ruler has 20 cm edges')
   const at150 = snapNear('ruler', longRuler, -100 + 150, -RULER_HEIGHT_MM / 2)
   near(at150.millimetres, 150, 0.5, 'reading 15 cm on the long ruler')
+
+  const wideRuler = { ...ruler, widthMm: 40 }
+  const wideTop = normToLocalMm(rulerDrawingEdges(wideRuler, W, H)[0].ax, rulerDrawingEdges(wideRuler, W, H)[0].ay, wideRuler, W, H)
+  const wideBottom = normToLocalMm(rulerDrawingEdges(wideRuler, W, H)[1].ax, rulerDrawingEdges(wideRuler, W, H)[1].ay, wideRuler, W, H)
+  near(wideTop.y, -20, 1e-6, 'a 40 mm ruler puts its top edge 20 mm above the centre')
+  near(wideBottom.y, 20, 1e-6, 'a 40 mm ruler puts its bottom edge 20 mm below the centre')
+  const onWideBody = snapNear('ruler', wideRuler, 0, 16)
+  assert.ok(onWideBody, 'a pen on the extra width of a wide ruler still lands on an edge')
+  assert.equal(onWideBody.edgeIndex, 1, 'below the centre of a wide ruler it comes out on the bottom edge')
+  const beforeTop = draftingLocalToNorm(0, -RULER_WIDTH_MM / 2, ruler, W, H)
+  const widened = resizeRulerWidth(ruler, 20, W, H)
+  assert.equal(widened.widthMm, 33, 'pulling the bottom edge to 20 mm local makes a 33 mm ruler')
+  const afterTop = draftingLocalToNorm(0, -widened.widthMm / 2, widened, W, H)
+  near(afterTop.x, beforeTop.x, 1e-9, 'widening keeps the top edge in place')
+  near(afterTop.y, beforeTop.y, 1e-9, 'widening keeps the top edge in place')
+  const turnedWide = resizeRulerWidth({ ...ruler, rotation: Math.PI / 3 }, 20, W, H)
+  const turnedBefore = draftingLocalToNorm(0, -RULER_WIDTH_MM / 2, { ...ruler, rotation: Math.PI / 3 }, W, H)
+  const turnedAfter = draftingLocalToNorm(0, -turnedWide.widthMm / 2, turnedWide, W, H)
+  near(turnedAfter.x, turnedBefore.x, 1e-9, 'a turned ruler keeps its top edge while the width changes')
+  near(turnedAfter.y, turnedBefore.y, 1e-9, 'a turned ruler keeps its top edge while the width changes')
+  assert.equal(resizeRulerWidth(ruler, -100, W, H).widthMm, RULER_MIN_WIDTH_MM, 'the ruler cannot get thinner than its minimum')
+  assert.equal(resizeRulerWidth(ruler, 500, W, H).widthMm, RULER_MAX_WIDTH_MM, 'the ruler cannot get wider than its maximum')
+  assert.equal(resizeRulerWidth(ruler, 20.4, W, H).widthMm, 33, 'width snaps to whole millimetres')
+  assert.equal(resizeRulerWidth(ruler, 20.4, W, H, true).widthMm, 33.5, 'Alt keeps half millimetres')
+  assert.ok(PEN_EDGE_ZONE_MM < RULER_MIN_WIDTH_MM / 2, 'the narrowest ruler still has a grab zone between the pen edge zones')
 
   // The sheet is 900 × 1273: a turned tool must keep its angle and length on the
   // paper, otherwise the snap edges shear away from the SVG that draws the tool.
@@ -246,10 +275,14 @@ try {
   assert.equal(custom.angleStep, 15)
   assert.equal(custom.magnet, 'strong')
   assert.equal(custom.rulerLengthMm, 500, 'ruler length is clamped')
+  assert.equal(normalizeDraftingSettings({ rulerWidthMm: 1 }).rulerWidthMm, RULER_MIN_WIDTH_MM, 'ruler width is clamped at the minimum')
+  assert.equal(normalizeDraftingSettings({ rulerWidthMm: 999 }).rulerWidthMm, RULER_MAX_WIDTH_MM, 'ruler width is clamped at the maximum')
+  assert.equal(normalizeDraftingSettings({}).rulerWidthMm, RULER_WIDTH_MM, 'saved settings without a width keep the default')
   assert.equal(custom.setSquareSizeMm, 200)
   assert.equal(custom.arcDirection, 'ccw')
   assert.equal(normalizeDraftingSettings({ angleStep: 7 }).angleStep, DEFAULT_DRAFTING_SETTINGS.angleStep, 'unknown steps fall back')
   assert.equal(defaultRulerPose({ rulerLengthMm: 300 }).lengthMm, 300, 'new rulers take the remembered length')
+  assert.equal(defaultRulerPose({ rulerWidthMm: 40 }).widthMm, 40, 'new rulers take the remembered width')
 
   assert.equal(formatMillimetres(160), '16 cm')
   assert.equal(formatMillimetres(35), '3,5 cm')
@@ -304,6 +337,9 @@ try {
   assert.match(boardSource, /keepPoseOnSheet\(\s*kind,/u, 'tools are shown inside the sheet')
   const guidesSource = readFileSync(new URL('../src/components/DraftingGuides.tsx', import.meta.url), 'utf8')
   assert.match(guidesSource, /if \(mode === 'move' && pose && penWantsEdge\(kind, pose, event\)\) return/u, 'a pen near an edge draws instead of dragging the body')
+  assert.match(guidesSource, /beginDrag\('ruler', 'width'/u, 'the ruler has a grip that changes its width')
+  const panelSource = readFileSync(new URL('../src/components/DraftingPanel.tsx', import.meta.url), 'utf8')
+  assert.match(panelSource, /rulerWidthMm/u, 'the options panel stores the ruler width')
 
   console.log(JSON.stringify({
     rulerEdges: rulerEdges.length,
