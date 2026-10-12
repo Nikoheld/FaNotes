@@ -20,6 +20,8 @@ fn host() -> (std::path::PathBuf, Host) {
 #[test]
 fn rename_keeps_the_extension_and_move_numbers_a_collision() {
     let (vault, mut host) = host();
+    fs::write(vault.join("Mathe/Seite.md"), b"\n").unwrap();
+    fs::write(vault.join("Physik/Blatt.md"), b"\n").unwrap();
     host.dispatch(
         "fanotes:write-file",
         &[json!("Mathe/Seite.md"), json!("Hallo\n")],
@@ -176,6 +178,8 @@ fn a_blank_rename_keeps_a_valid_name_and_rejects_a_device_name() {
 #[test]
 fn a_blank_move_target_returns_the_note_to_the_vault_root() {
     let (vault, mut host) = host();
+    fs::write(vault.join("Mathe/Seite.md"), b"\n").unwrap();
+    fs::write(vault.join("Mathe/Andere.md"), b"\n").unwrap();
     host.dispatch(
         "fanotes:write-file",
         &[json!("Mathe/Seite.md"), json!("Hallo\n")],

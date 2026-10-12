@@ -252,6 +252,26 @@ fn a_stale_reset_marker_does_not_wipe_the_profile() {
 }
 
 #[test]
+fn a_reset_marker_version_of_one_point_zero_still_wipes_the_profile() {
+    let (app, mut host) = host();
+    host.dispatch("fanotes:save-settings", &[json!({ "theme": "midnight" })])
+        .unwrap();
+    let user_data = std::path::absolute(&app).unwrap();
+    let marker = app.parent().unwrap().join(".fanotes-reset-pending.json");
+    fs::write(
+        &marker,
+        format!(
+            r#"{{"version":1.0,"userDataPath":"{}","createdAt":"2026-10-12T03:00:00.000Z"}}"#,
+            user_data.display()
+        ),
+    )
+    .unwrap();
+    let _ = Host::open(app.clone());
+    assert!(!app.join("settings.json").exists());
+    assert!(!marker.exists());
+}
+
+#[test]
 fn a_symlinked_reset_marker_is_discarded() {
     let (app, mut host) = host();
     host.dispatch("fanotes:save-settings", &[json!({ "theme": "midnight" })])
@@ -394,4 +414,46 @@ fn a_folder_setting_trims_a_byte_order_mark_and_keeps_a_next_line() {
         .unwrap();
     assert_eq!(saved["defaultFolder"], "\u{0085}Mathe");
     assert_eq!(saved["customCss"], "\u{0085}");
+}
+
+#[test]
+fn a_settings_file_with_a_bad_byte_still_loads() {
+    let dir = std::env::temp_dir().join(format!(
+        "fanotes-settings-byte-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    let app = dir.join("app");
+    fs::create_dir_all(&app).unwrap();
+    let mut bytes = br#"{"syncDeviceName":"LaXptop"}"#.to_vec();
+    let index = bytes.iter().position(|byte| *byte == b'X').unwrap();
+    bytes[index] = 0xff;
+    fs::write(app.join("settings.json"), &bytes).unwrap();
+    let mut host = Host::open(app);
+    host.secret_store = SecretStore::Memory;
+    let boot = host.dispatch("fanotes:bootstrap", &[]).unwrap();
+    assert_eq!(boot["settings"]["syncDeviceName"], "La\u{FFFD}ptop");
+}
+
+#[test]
+fn custom_css_rejects_an_expression_after_a_byte_order_mark() {
+    let (_app, mut host) = host();
+    let saved = host
+        .dispatch(
+            "fanotes:save-settings",
+            &[json!({ "customCss": "div{color:expression\u{FEFF}(alert(1))}" })],
+        )
+        .unwrap();
+    assert_eq!(saved["customCss"], "");
+    let saved = host
+        .dispatch(
+            "fanotes:save-settings",
+            &[json!({ "customCss": "div{color:expression\u{0085}(alert(1))}" })],
+        )
+        .unwrap();
+    assert!(saved["customCss"].as_str().unwrap().contains("expression"));
 }
