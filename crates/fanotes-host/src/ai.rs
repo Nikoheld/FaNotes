@@ -57,7 +57,7 @@ pub fn transform(payload: &Value) -> Result<Value, String> {
         .ok_or_else(|| "Der AI-Auftrag ist ungültig.".to_owned())?;
     let provider = provider_name(connection)?;
     let model = required_model(connection)?;
-    let markdown = required_markdown(object.get("markdown"))?;
+    let markdown = required_markdown(object.get("markdown"), false)?;
     let actions = required_actions(object.get("actions"), false)?;
     let instruction = limited_instruction(
         object
@@ -137,7 +137,7 @@ pub fn transform_lm_studio(payload: &Value) -> Result<Value, String> {
     let base_url = object.get("baseUrl").and_then(Value::as_str).unwrap_or("");
     let origin = lm_studio_origin(base_url)?;
     let model = required_model(payload)?;
-    let markdown = required_markdown(object.get("markdown"))?;
+    let markdown = required_markdown(object.get("markdown"), true)?;
     let actions = required_actions(object.get("actions"), true)?;
     let instruction = limited_instruction(
         object
@@ -1574,13 +1574,20 @@ fn vault_notes(value: Option<&Value>) -> Vec<(String, String)> {
         .collect()
 }
 
-fn required_markdown(value: Option<&Value>) -> Result<String, String> {
-    let markdown = value.and_then(Value::as_str).unwrap_or("");
-    if markdown.len() > 1_500_000 {
-        Err("Die Notiz ist für einen einzelnen AI-Auftrag zu groß.".to_owned())
+fn required_markdown(value: Option<&Value>, lm_studio: bool) -> Result<String, String> {
+    // A missing or non-string note uses the same message as a note past 1.5 MB.
+    let message = if lm_studio {
+        "Die Notiz ist für einen einzelnen LM-Studio-Auftrag zu groß."
     } else {
-        Ok(markdown.to_owned())
+        "Die Notiz ist für einen einzelnen AI-Auftrag zu groß."
+    };
+    let Some(markdown) = value.and_then(Value::as_str) else {
+        return Err(message.to_owned());
+    };
+    if markdown.len() > 1_500_000 {
+        return Err(message.to_owned());
     }
+    Ok(markdown.to_owned())
 }
 
 fn required_actions(value: Option<&Value>, lm_studio: bool) -> Result<Vec<String>, String> {
@@ -1814,6 +1821,35 @@ mod tests {
         );
         assert!(
             super::required_model(&json!({ "model": format!(" {}", "a".repeat(500)) })).is_err()
+        );
+    }
+
+    #[test]
+    fn a_note_that_is_not_text_is_too_large_for_the_desktop() {
+        let ai = "Die Notiz ist für einen einzelnen AI-Auftrag zu groß.";
+        let panel = "Die Notiz ist für einen einzelnen LM-Studio-Auftrag zu groß.";
+        assert_eq!(super::required_markdown(None, false).unwrap_err(), ai);
+        assert_eq!(
+            super::required_markdown(Some(&json!(null)), false).unwrap_err(),
+            ai
+        );
+        assert_eq!(
+            super::required_markdown(Some(&json!(12)), true).unwrap_err(),
+            panel
+        );
+        assert_eq!(
+            super::required_markdown(Some(&json!("")), false).unwrap(),
+            ""
+        );
+        assert_eq!(
+            super::required_markdown(Some(&json!("a".repeat(1_500_001))), true).unwrap_err(),
+            panel
+        );
+        assert_eq!(
+            super::required_markdown(Some(&json!("a".repeat(1_500_000))), false)
+                .unwrap()
+                .len(),
+            1_500_000
         );
     }
 
