@@ -77,7 +77,9 @@ pub fn resolve_note_file(root: &Path, relative: &str) -> Result<PathBuf, String>
                 return Err("Ein Pfadbestandteil ist kein Ordner.".to_owned());
             }
             Ok(info) if last && !info.is_file() => {
-                return Err("Die Notiz ist keine sichere reguläre Datei.".to_owned());
+                // Desktop `resolveVaultPath` with `expected: 'file'` reports this
+                // before the later write check can run.
+                return Err("Die gewählte Datei ist keine reguläre Datei.".to_owned());
             }
             Ok(_) => {}
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => missing = true,

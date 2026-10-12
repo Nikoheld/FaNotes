@@ -367,13 +367,26 @@ fn a_companion_read_follows_the_desktop_file_check() {
             .unwrap_err(),
         "Die gewählte Datei ist keine reguläre Datei."
     );
+    let before = std::fs::read(vault.join("Mathe/Ordner.famd")).unwrap();
+    assert_eq!(
+        host.dispatch(
+            "fanotes:set-note-paper-style",
+            &[json!("Mathe/Ordner.md"), json!("grid")],
+        )
+        .unwrap_err(),
+        "Die gewählte Datei ist keine reguläre Datei."
+    );
     assert_eq!(
         host.dispatch(
             "fanotes:write-file",
             &[json!("Mathe/Ordner.md"), json!("Hallo\n")],
         )
         .unwrap_err(),
-        "Die Notiz ist keine sichere reguläre Datei."
+        "Die gewählte Datei ist keine reguläre Datei."
+    );
+    assert_eq!(
+        std::fs::read(vault.join("Mathe/Ordner.famd")).unwrap(),
+        before
     );
 }
 
@@ -392,7 +405,7 @@ fn a_directory_named_like_a_note_cannot_be_read() {
             &[json!("Mathe/Seite.md"), json!("Hallo\n")],
         )
         .unwrap_err(),
-        "Die Notiz ist keine sichere reguläre Datei."
+        "Die gewählte Datei ist keine reguläre Datei."
     );
 }
 

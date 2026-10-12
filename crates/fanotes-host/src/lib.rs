@@ -743,14 +743,7 @@ impl Host {
         if !notes::is_note_text(&normalized) {
             return Err("Es dürfen nur Markdown-Dateien und FaNotes-Handschriftdateien (.famd) bearbeitet werden.".to_owned());
         }
-        let path =
-            vault::resolve_note_file(self.require_vault()?, &normalized).map_err(|error| {
-                if error == "Die Notiz ist keine sichere reguläre Datei." {
-                    "Die gewählte Datei ist keine reguläre Datei.".to_owned()
-                } else {
-                    error
-                }
-            })?;
+        let path = vault::resolve_note_file(self.require_vault()?, &normalized)?;
         let limit = note_byte_limit(&normalized);
         let meta = fs::symlink_metadata(&path)
             .map_err(|_| "Die Datei konnte nicht gelesen werden.".to_owned())?;
