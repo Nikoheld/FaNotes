@@ -585,10 +585,10 @@ fn a_linux_note_name_keeps_its_backslash() {
 
 #[test]
 fn search_uses_the_desktop_asset_folder_checks() {
-    let mut host = host();
-    let vault = host.vault.clone().unwrap();
+    let mut ready = host();
+    let vault = ready.vault.clone().unwrap();
     std::fs::write(vault.join("Bio/Blatt.md"), "Licht\n").unwrap();
-    assert!(host
+    assert!(ready
         .dispatch("fanotes:search", &[json!("Licht")])
         .unwrap()
         .as_array()
@@ -600,28 +600,28 @@ fn search_uses_the_desktop_asset_folder_checks() {
     std::fs::remove_dir(vault.join(".fanotes/assets")).unwrap();
     std::fs::write(vault.join(".fanotes/assets"), b"not a folder").unwrap();
     assert_eq!(
-        host.dispatch("fanotes:search", &[json!("Licht")])
+        ready
+            .dispatch("fanotes:search", &[json!("Licht")])
             .unwrap_err(),
         "Der interne Asset-Ordner ist unsicher."
     );
     assert_eq!(
-        host.dispatch("fanotes:list-drawings", &[])
-            .unwrap_err(),
+        ready.dispatch("fanotes:list-drawings", &[]).unwrap_err(),
         "Der interne Asset-Ordner ist unsicher."
     );
 
-    let mut host = host();
-    let vault = host.vault.clone().unwrap();
+    let mut blocked = host();
+    let vault = blocked.vault.clone().unwrap();
     std::fs::write(vault.join("Bio/Blatt.md"), "Licht\n").unwrap();
     std::fs::write(vault.join(".fanotes"), b"not a folder").unwrap();
     assert_eq!(
-        host.dispatch("fanotes:search", &[json!("Licht")])
+        blocked
+            .dispatch("fanotes:search", &[json!("Licht")])
             .unwrap_err(),
         "Der interne FaNotes-Ordner ist unsicher."
     );
     assert_eq!(
-        host.dispatch("fanotes:list-drawings", &[])
-            .unwrap_err(),
+        blocked.dispatch("fanotes:list-drawings", &[]).unwrap_err(),
         "Der interne FaNotes-Ordner ist unsicher."
     );
 }
