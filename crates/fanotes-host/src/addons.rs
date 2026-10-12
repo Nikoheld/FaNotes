@@ -239,6 +239,20 @@ struct HttpText {
     url: String,
 }
 
+fn transport_message(error: &str, registry: bool) -> String {
+    // The registry download and an add-on `netFetch` use different timeout
+    // sentences. Other transport failures keep the registry wording.
+    if error.starts_with("timeout:") {
+        if registry {
+            "Zeitüberschreitung beim Laden.".to_owned()
+        } else {
+            "Zeitüberschreitung bei der Anfrage.".to_owned()
+        }
+    } else {
+        format!("Zeitüberschreitung beim Laden oder der Host ist nicht erreichbar: {error}")
+    }
+}
+
 fn request_text(
     raw_url: &str,
     registry: bool,
@@ -287,9 +301,9 @@ fn request_text(
             builder.body(String::new())
         }
         .map_err(|_| "Ungültige URL.".to_owned())?;
-        let mut response = agent.run(request).map_err(|error| {
-            format!("Zeitüberschreitung beim Laden oder der Host ist nicht erreichbar: {error}")
-        })?;
+        let mut response = agent
+            .run(request)
+            .map_err(|error| transport_message(&error.to_string(), registry))?;
         let status = response.status().as_u16();
         let location = response
             .headers()
@@ -321,7 +335,13 @@ fn request_text(
             .limit(max_bytes as u64 + 1)
             .reader()
             .read_to_end(&mut bytes)
-            .map_err(|_| "Zeitüberschreitung beim Laden.".to_owned())?;
+            .map_err(|_| {
+                if registry {
+                    "Zeitüberschreitung beim Laden.".to_owned()
+                } else {
+                    "Zeitüberschreitung bei der Anfrage.".to_owned()
+                }
+            })?;
         if bytes.len() > max_bytes {
             return Err(if registry {
                 "Die Datei ist größer als 2 MB.".to_owned()
@@ -681,7 +701,23 @@ fn lock() -> std::sync::MutexGuard<'static, ()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{redirect_step, resolve_redirect, RedirectStep};
+    use super::{redirect_step, resolve_redirect, transport_message, RedirectStep};
+
+    #[test]
+    fn addon_timeouts_use_the_desktop_messages() {
+        assert_eq!(
+            transport_message("timeout: global", true),
+            "Zeitüberschreitung beim Laden."
+        );
+        assert_eq!(
+            transport_message("timeout: global", false),
+            "Zeitüberschreitung bei der Anfrage."
+        );
+        assert_eq!(
+            transport_message("connection failed", true),
+            "Zeitüberschreitung beim Laden oder der Host ist nicht erreichbar: connection failed"
+        );
+    }
 
     #[test]
     fn redirects_resolve_like_the_desktop_url_parser() {
