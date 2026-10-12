@@ -8,6 +8,7 @@
 - **Nativer Abgleich.** Der eingebaute Host folgt bei Notizen, Suche, OneNote, Arbeitsblättern und Sync derselben Ordnung wie die Desktop-App.
 - **Radierer und Verschieben.** Der Radierer trifft nur den berührten Buchstaben, und Handschrift lässt sich verschieben.
 - **Linealbreite.** Die Breite des Lineals lässt sich wie seine Länge ändern.
+- **Modellliste.** Die ganze AI-Modellliste wird sortiert, bevor die ersten tausend Einträge bleiben. Die LM-Studio-Liste im Fach behält alle Einträge.
 
 ## 2026.10.2
 
