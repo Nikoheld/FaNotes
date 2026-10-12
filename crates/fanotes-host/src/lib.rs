@@ -1526,7 +1526,9 @@ impl Host {
             }
         }
         if let Ok(text) = fs::read_to_string(self.app_data.join("vault-path")) {
-            let path = PathBuf::from(text.trim());
+            // The profile import appends one newline. A trailing space belongs
+            // to the folder name, so this is not `String.prototype.trim`.
+            let path = PathBuf::from(stored_vault_path(&text));
             if path.as_os_str().is_empty() {
                 return;
             }
@@ -2974,6 +2976,14 @@ fn documents_dir_from_line(line: &str, home: &std::ffi::OsStr) -> Option<PathBuf
     }
     path.push(String::from_utf8_lossy(&copied).as_ref());
     Some(PathBuf::from(path))
+}
+
+/// Drop one trailing newline from `vault-path`. A trailing space stays.
+fn stored_vault_path(text: &str) -> &str {
+    let Some(without_newline) = text.strip_suffix('\n') else {
+        return text;
+    };
+    without_newline.strip_suffix('\r').unwrap_or(without_newline)
 }
 
 fn strip_trailing_separators(path: PathBuf) -> PathBuf {

@@ -115,6 +115,40 @@ fn a_missing_configured_vault_is_not_replaced() {
 }
 
 #[test]
+fn a_vault_path_keeps_a_trailing_space_in_the_folder_name() {
+    let dir = scratch();
+    let app = dir.join("app");
+    fs::create_dir_all(&app).unwrap();
+    let plain = dir.join("Notizen");
+    let spaced = dir.join("Notizen ");
+    fs::create_dir_all(&plain).unwrap();
+    fs::create_dir_all(&spaced).unwrap();
+    fs::write(plain.join("Falsch.md"), b"# Falsch\n").unwrap();
+    fs::write(spaced.join("Seite.md"), b"# Seite\n").unwrap();
+    fs::write(
+        app.join("vault-path"),
+        format!("{}\n", spaced.display()),
+    )
+    .unwrap();
+    let mut host = Host::open(app);
+    host.documents_dir = Some(dir.join("docs"));
+    let boot = host.dispatch("fanotes:bootstrap", &[]).unwrap();
+    let canonical = fs::canonicalize(&spaced).unwrap();
+    assert_eq!(boot["vaultPath"], canonical.to_string_lossy().as_ref());
+    assert_eq!(boot["vaultName"], "Notizen ");
+    let tree = host.dispatch("fanotes:get-tree", &[]).unwrap();
+    let names: Vec<&str> = tree
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|entry| entry["name"].as_str())
+        .collect();
+    assert!(names.contains(&"Seite.md"));
+    assert!(!names.contains(&"Falsch.md"));
+    assert!(!dir.join("docs").join("FaNotes").exists());
+}
+
+#[test]
 fn a_missing_vault_path_resolves_before_the_cache_lookup() {
     let dir = scratch();
     let app = dir.join("app");
