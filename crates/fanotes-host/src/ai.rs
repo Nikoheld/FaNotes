@@ -227,11 +227,18 @@ fn parse_ollama_models(body: &Value) -> Result<Vec<Value>, String> {
     Ok(models
         .iter()
         .filter_map(|entry| {
-            let name = entry
-                .get("model")
-                .and_then(Value::as_str)
-                .or_else(|| entry.get("name").and_then(Value::as_str))?;
-            let display = entry.get("name").and_then(Value::as_str).unwrap_or(name);
+            // `entry.model || entry.name` skips an empty string. The display
+            // name does the same and falls back to the key.
+            let model_name = entry.get("model").and_then(Value::as_str);
+            let name_field = entry.get("name").and_then(Value::as_str);
+            let name = if let Some(model) = model_name.filter(|text| !text.is_empty()) {
+                model
+            } else if let Some(name) = name_field {
+                name
+            } else {
+                model_name?
+            };
+            let display = name_field.filter(|text| !text.is_empty()).unwrap_or(name);
             let mut record = model_record("ollama", name, display);
             let details = entry.get("details");
             set_model_details(
@@ -1697,6 +1704,17 @@ mod tests {
         }))
         .unwrap();
         assert_eq!(ollama[0]["publisher"], "llama");
+        let blank_model = parse_ollama_models(&json!({
+            "models": [
+                { "model": "", "name": "llama3" },
+                { "model": "gemma", "name": "" }
+            ]
+        }))
+        .unwrap();
+        assert_eq!(blank_model[0]["key"], "llama3");
+        assert_eq!(blank_model[0]["displayName"], "llama3");
+        assert_eq!(blank_model[1]["key"], "gemma");
+        assert_eq!(blank_model[1]["displayName"], "gemma");
         assert_eq!(ollama[0]["params"], "8B");
         assert_eq!(ollama[0]["quantization"], "Q4_K_M");
         assert_eq!(
