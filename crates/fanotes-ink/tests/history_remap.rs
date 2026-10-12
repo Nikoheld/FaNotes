@@ -191,6 +191,12 @@ fn drawing_document_json_roundtrip_keeps_live_strokes_and_extra_fields() {
     assert_eq!(doc.live_ids().len(), 1);
     assert!((doc.stroke_points(doc.live_ids()[0]).unwrap()[0].y - 0.3).abs() < 1e-6);
     let saved = doc.to_json().unwrap();
+    assert!(saved.contains("\"sourceWidth\":900,"), "{saved}");
+    assert!(saved.contains("\"tiltX\":0,"), "{saved}");
+    assert!(saved.contains("\"tiltY\":1,"), "{saved}");
+    assert!(!saved.contains("900.0"), "{saved}");
+    assert!(!saved.contains("\"tiltX\":0.0"), "{saved}");
+    assert!(!saved.contains("\"tiltY\":1.0"), "{saved}");
     let again = InkDocument::from_json(&saved).unwrap();
     assert_eq!(again.page_width(), 900.0);
     assert_eq!(again.page_height(), 1273.0);

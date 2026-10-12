@@ -119,6 +119,52 @@ fn a_pdf_worksheet_saves_reads_and_deletes() {
 }
 
 #[test]
+fn a_saved_worksheet_uses_javascript_number_text() {
+    let (dir, mut host) = host();
+    host.dispatch(
+        "fanotes:save-worksheet",
+        &[json!({
+            "schemaVersion": 1,
+            "id": "blatt-1",
+            "title": "Übung",
+            "kind": "pdf",
+            "mimeType": "application/pdf",
+            "sourceRelativePath": ".fanotes/worksheets/blatt-1.pdf",
+            "dataRelativePath": ".fanotes/worksheets/blatt-1.json",
+            "createdAt": "2026-01-02T03:04:05.000Z",
+            "updatedAt": "2026-01-02T03:04:05.000Z",
+            "textBoxes": [{
+                "id": "box-1",
+                "page": 1,
+                "x": 0,
+                "y": 1,
+                "width": 0.5,
+                "text": "Hallo",
+                "fontSize": 16
+            }],
+            "highlights": [{
+                "id": "mark-1",
+                "page": 2,
+                "x": 0,
+                "y": 1,
+                "width": 0.2,
+                "height": 0.25,
+                "color": "#FFE566"
+            }]
+        })],
+    )
+    .unwrap();
+    let text =
+        fs::read_to_string(dir.join("vault/.fanotes/worksheets/blatt-1.json")).unwrap();
+    assert!(text.contains("\"fontSize\": 16\n"), "{text}");
+    assert!(text.contains("\"x\": 0,"), "{text}");
+    assert!(text.contains("\"y\": 1,"), "{text}");
+    assert!(!text.contains("16.0"), "{text}");
+    assert!(!text.contains("0.0"), "{text}");
+    assert!(!text.contains("1.0"), "{text}");
+}
+
+#[test]
 fn a_damaged_worksheet_stays_until_it_can_be_read() {
     let (dir, mut host) = host();
     let worksheets = dir.join("vault/.fanotes/worksheets");

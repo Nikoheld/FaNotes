@@ -18,6 +18,27 @@ fn host() -> (std::path::PathBuf, Host) {
 }
 
 #[test]
+fn a_whole_setting_is_stored_like_javascript() {
+    let (app, mut host) = host();
+    host.dispatch(
+        "fanotes:save-settings",
+        &[json!({ "editorFontSize": 18, "smoothing": 0 })],
+    )
+    .unwrap();
+    let settings = fs::read_to_string(app.join("settings.json")).unwrap();
+    assert!(
+        settings.contains("\"editorFontSize\": 18\n") || settings.contains("\"editorFontSize\": 18,"),
+        "{settings}"
+    );
+    assert!(
+        settings.contains("\"smoothing\": 0\n") || settings.contains("\"smoothing\": 0,"),
+        "{settings}"
+    );
+    assert!(!settings.contains("18.0"), "{settings}");
+    assert!(!settings.contains("\"smoothing\": 0.0"), "{settings}");
+}
+
+#[test]
 fn invalid_settings_stay_on_the_previous_value() {
     let (app, mut host) = host();
     let saved = host
