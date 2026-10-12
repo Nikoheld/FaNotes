@@ -546,6 +546,39 @@ mod tests {
             Some("2026-01-02T00:00:00.000Z")
         );
         assert_eq!(
+            canonical_iso("2026-1-2").as_deref(),
+            Some("2026-01-02T00:00:00.000Z")
+        );
+        assert_eq!(
+            canonical_iso(" 2026-01-2 ").as_deref(),
+            Some("2026-01-02T00:00:00.000Z")
+        );
+        assert_eq!(
+            canonical_iso("2026-2-31").as_deref(),
+            Some("2026-03-03T00:00:00.000Z")
+        );
+        assert_eq!(canonical_iso("2026-1-2T00:00:00Z"), None);
+        assert_eq!(
+            canonical_iso("2026-01-02T03:04Z").as_deref(),
+            Some("2026-01-02T03:04:00.000Z")
+        );
+        assert_eq!(
+            canonical_iso("2026-01-02t03:04z").as_deref(),
+            Some("2026-01-02T03:04:00.000Z")
+        );
+        assert_eq!(
+            canonical_iso("2026-01-02T03:04+02:00").as_deref(),
+            Some("2026-01-02T01:04:00.000Z")
+        );
+        assert_eq!(
+            canonical_iso("2026-01-02T24:00Z").as_deref(),
+            Some("2026-01-03T00:00:00.000Z")
+        );
+        assert_eq!(canonical_iso("2026-01-02T24:01Z"), None);
+        assert_eq!(canonical_iso("2026-01-02T03:04.1Z"), None);
+        assert_eq!(canonical_iso("2026-01-02T3:04:05Z"), None);
+        assert_eq!(canonical_iso(" 2026-01-02T03:04Z"), None);
+        assert_eq!(
             canonical_iso("2026-02-31").as_deref(),
             Some("2026-03-03T00:00:00.000Z")
         );
