@@ -452,7 +452,7 @@ fn parse_lmstudio_models(body: &Value) -> Result<Vec<Value>, String> {
                     .and_then(Value::as_str),
                 entry.get("params_string").and_then(Value::as_str),
                 Some(loaded),
-                finite_number(&entry["max_context_length"]),
+                finite_context_length(&entry["max_context_length"]),
                 entry.get("description").and_then(Value::as_str),
             );
             Some(record)
@@ -538,7 +538,7 @@ fn parse_gemini_models(body: &Value) -> Result<Vec<Value>, String> {
                 None,
                 None,
                 None,
-                finite_number(&entry["inputTokenLimit"]),
+                finite_context_length(&entry["inputTokenLimit"]),
                 entry.get("description").and_then(Value::as_str),
             );
             Some(record)
@@ -579,7 +579,7 @@ fn parse_anthropic_models(body: &Value) -> Result<Vec<Value>, String> {
                 None,
                 None,
                 None,
-                finite_number(&entry["max_input_tokens"]),
+                finite_context_length(&entry["max_input_tokens"]),
                 None,
             );
             Some(record)
@@ -656,7 +656,7 @@ fn parse_opencode_models(body: &Value) -> Result<Vec<Value>, String> {
                 None,
                 entry
                     .get("limit")
-                    .map(|limit| finite_number(&limit["context"]))
+                    .map(|limit| finite_context_length(&limit["context"]))
                     .unwrap_or(None),
                 entry.get("description").and_then(Value::as_str),
             );
@@ -1695,10 +1695,51 @@ mod tests {
         build_prompt, finish_models, lm_studio_text, output_token_limit, parse_anthropic_models,
         parse_gemini_models, parse_lmstudio_legacy, parse_lmstudio_models, parse_lmstudio_native,
         parse_lmstudio_native_legacy, parse_ollama_models, parse_openai_models,
-        provider_http_error, unwrap_markdown,
+        parse_opencode_models, provider_http_error, unwrap_markdown,
     };
     use base64::Engine;
     use serde_json::json;
+
+    #[test]
+    fn an_ai_model_keeps_a_negative_context_length() {
+        let lmstudio = parse_lmstudio_models(&json!({
+            "models": [{ "type": "llm", "key": "llama", "max_context_length": -4096 }]
+        }))
+        .unwrap();
+        assert_eq!(lmstudio[0]["maxContextLength"], -4096.0);
+        let gemini = parse_gemini_models(&json!({
+            "models": [{
+                "name": "models/gemini-flash",
+                "displayName": "Flash",
+                "supportedGenerationMethods": ["generateContent"],
+                "inputTokenLimit": -2048
+            }]
+        }))
+        .unwrap();
+        assert_eq!(gemini[0]["maxContextLength"], -2048.0);
+        let anthropic = parse_anthropic_models(&json!({
+            "data": [{ "id": "claude", "display_name": "Claude", "max_input_tokens": -1000 }]
+        }))
+        .unwrap();
+        assert_eq!(anthropic[0]["maxContextLength"], -1000.0);
+        let opencode = parse_opencode_models(&json!({
+            "all": [{
+                "id": "local",
+                "name": "Local",
+                "models": { "small": { "name": "Small", "limit": { "context": -512 } } }
+            }]
+        }))
+        .unwrap();
+        assert_eq!(opencode[0]["maxContextLength"], -512.0);
+        let reply = lm_studio_text(&json!({
+            "output": [{ "type": "message", "content": "Fertig" }],
+            "stats": { "input_tokens": -3, "total_output_tokens": 4, "tokens_per_second": -1 }
+        }))
+        .unwrap();
+        assert!(reply.stats.get("inputTokens").is_none());
+        assert!(reply.stats.get("tokensPerSecond").is_none());
+        assert_eq!(reply.stats["outputTokens"], 4.0);
+    }
 
     #[test]
     fn opencode_login_and_model_names_follow_the_desktop_rules() {
