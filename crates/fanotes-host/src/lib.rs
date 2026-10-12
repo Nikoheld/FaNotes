@@ -1925,13 +1925,14 @@ fn arg_mtime_ms(value: Option<&Value>) -> Option<i64> {
     // Desktop `new Date(Number(mtimeMs))` truncates toward zero, then TimeClip.
     // `0.9` is still positive, so the file is stamped at the Unix epoch.
     // A time past ±8.64e15 ms is an invalid date and is left unset.
+    // `Number([1600000000000])` is that one element. `Number([1, 2])` is NaN.
     let number = match value? {
         Value::Number(number) => number.as_f64()?,
         Value::String(text) => fanotes_famd::js_tonumber(text)?,
         Value::Bool(true) => 1.0,
         Value::Bool(false) => 0.0,
         Value::Null => 0.0,
-        _ => return None,
+        other => fanotes_famd::js_tonumber(&notes::js_regexp_string(other))?,
     };
     if !number.is_finite() || number <= 0.0 {
         return None;

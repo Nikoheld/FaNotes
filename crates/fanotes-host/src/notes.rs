@@ -579,7 +579,8 @@ fn subject_book_page(value: Option<&Value>) -> i64 {
         Some(Value::Bool(true)) => 1.0,
         Some(Value::Bool(false)) => 0.0,
         Some(Value::Null) => 0.0,
-        _ => f64::NAN,
+        Some(other) => vault::js_tonumber(&fanotes_famd::js_value_string(other)).unwrap_or(f64::NAN),
+        None => f64::NAN,
     };
     if number.is_finite()
         && number.fract() == 0.0
@@ -708,25 +709,7 @@ fn is_snapshot_id(value: &str) -> bool {
 
 /// JavaScript `RegExp.prototype.test` and `String()` stringify an argument this way.
 pub(crate) fn js_regexp_string(value: &Value) -> String {
-    match value {
-        Value::Null => "null".to_owned(),
-        Value::Bool(true) => "true".to_owned(),
-        Value::Bool(false) => "false".to_owned(),
-        Value::Number(number) => number.to_string(),
-        Value::String(value) => value.clone(),
-        Value::Array(items) => items
-            .iter()
-            .map(|item| {
-                if item.is_null() {
-                    String::new()
-                } else {
-                    js_regexp_string(item)
-                }
-            })
-            .collect::<Vec<_>>()
-            .join(","),
-        Value::Object(_) => "[object Object]".to_owned(),
-    }
+    fanotes_famd::js_value_string(value)
 }
 
 /// `===` for the JSON values a history id can be. Objects and arrays compare by identity in JavaScript.
