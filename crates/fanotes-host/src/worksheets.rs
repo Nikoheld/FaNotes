@@ -164,7 +164,13 @@ pub(crate) fn import_named_bytes(
     }
     validate_bytes(bytes, extension)?;
     let id = random_id()?;
-    let title = safe_title(file_stem(name), "Arbeitsblatt")?;
+    // An empty dropped name is falsy, so the title uses the new image id.
+    let hint = if name.is_empty() {
+        format!("Bild-{}", &id[..8])
+    } else {
+        name.to_owned()
+    };
+    let title = safe_title(file_stem(&hint), "Arbeitsblatt")?;
     let directory = worksheets_dir(vault_root(host)?)?;
     let source_relative = format!(".fanotes/worksheets/{id}{extension}");
     let data_relative = format!(".fanotes/worksheets/{id}.json");
