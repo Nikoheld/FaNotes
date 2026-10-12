@@ -99,7 +99,9 @@ pub fn lm_studio_origin(raw_url: &str) -> Result<String, String> {
 }
 
 fn is_private_host(hostname: &str) -> bool {
-    let host = hostname.trim_end_matches('.').to_lowercase();
+    // `hostname.toLowerCase().replace(/\.$/u, '')` removes one trailing dot.
+    let lowered = hostname.to_lowercase();
+    let host = lowered.strip_suffix('.').unwrap_or(lowered.as_str());
     if host.is_empty()
         || host == "localhost"
         || host.ends_with(".localhost")
@@ -263,6 +265,26 @@ mod tests {
         );
         assert_eq!(
             addon_request_allowed("https://localhost/hook").unwrap_err(),
+            "Add-ons dürfen nur öffentliche https-Adressen aufrufen."
+        );
+    }
+
+    #[test]
+    fn an_addon_host_drops_only_one_trailing_dot() {
+        assert!(addon_request_allowed("https://localhost../hook").is_ok());
+        assert!(addon_request_allowed("https://127.0.0.1../hook").is_ok());
+        assert!(addon_request_allowed("https://foo.localhost../hook").is_ok());
+        assert!(addon_request_allowed("https://foo.local../hook").is_ok());
+        assert_eq!(
+            addon_request_allowed("https://localhost./hook").unwrap_err(),
+            "Add-ons dürfen nur öffentliche https-Adressen aufrufen."
+        );
+        assert_eq!(
+            addon_request_allowed("https://127.0.0.1./hook").unwrap_err(),
+            "Add-ons dürfen nur öffentliche https-Adressen aufrufen."
+        );
+        assert_eq!(
+            addon_request_allowed("https://foo.localhost/hook").unwrap_err(),
             "Add-ons dürfen nur öffentliche https-Adressen aufrufen."
         );
     }
