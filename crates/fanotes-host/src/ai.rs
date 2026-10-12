@@ -39,9 +39,11 @@ pub fn list_lm_studio(base_url: &str, api_token: &str) -> Result<Value, String> 
         "model": "",
     });
     // The LM Studio panel uses `lmStudioModelFromNative`, which trims the name.
-    Ok(Value::Array(finish_models(lmstudio_panel_models(
-        &connection,
-    )?)))
+    // It sorts the whole list and does not stop at 1,000 models.
+    Ok(Value::Array(finish_models(
+        lmstudio_panel_models(&connection)?,
+        None,
+    )))
 }
 
 pub fn list_models(connection: &Value) -> Result<Value, String> {
@@ -207,7 +209,8 @@ fn list_provider(connection: &Value) -> Result<Value, String> {
         "opencode" => opencode_models(connection)?,
         _ => return Err("Wähle einen unterstützten AI-Anbieter.".to_owned()),
     };
-    Ok(Value::Array(finish_models(models)))
+    // `sort(...).slice(0, 1000)` sorts every model, then keeps the first 1,000.
+    Ok(Value::Array(finish_models(models, Some(1000))))
 }
 
 fn ollama_models(connection: &Value) -> Result<Vec<Value>, String> {
@@ -261,7 +264,6 @@ fn parse_ollama_models(body: &Value) -> Result<Vec<Value>, String> {
             );
             Some(record)
         })
-        .take(1000)
         .collect())
 }
 
@@ -318,7 +320,6 @@ fn parse_lmstudio_legacy(body: &Value) -> Result<Vec<Value>, String> {
             }
             Some(model_record("lmstudio", id, id))
         })
-        .take(1000)
         .collect())
 }
 
@@ -412,7 +413,6 @@ fn parse_lmstudio_native_legacy(body: &Value) -> Result<Vec<Value>, String> {
                 "description": null,
             }))
         })
-        .take(1000)
         .collect())
 }
 
@@ -492,7 +492,6 @@ fn parse_openai_models(body: &Value) -> Result<Vec<Value>, String> {
             }
             Some(record)
         })
-        .take(1000)
         .collect())
 }
 
@@ -543,7 +542,6 @@ fn parse_gemini_models(body: &Value) -> Result<Vec<Value>, String> {
             );
             Some(record)
         })
-        .take(1000)
         .collect())
 }
 
@@ -584,7 +582,6 @@ fn parse_anthropic_models(body: &Value) -> Result<Vec<Value>, String> {
             );
             Some(record)
         })
-        .take(1000)
         .collect())
 }
 
@@ -661,9 +658,6 @@ fn parse_opencode_models(body: &Value) -> Result<Vec<Value>, String> {
                 entry.get("description").and_then(Value::as_str),
             );
             models.push(record);
-            if models.len() == 1000 {
-                return Ok(models);
-            }
         }
     }
     Ok(models)
@@ -1317,7 +1311,7 @@ fn urlencoding_encode(value: &str) -> String {
     encoded
 }
 
-fn finish_models(mut models: Vec<Value>) -> Vec<Value> {
+fn finish_models(mut models: Vec<Value>, limit: Option<usize>) -> Vec<Value> {
     models.sort_by(|left, right| {
         let left_loaded = left.get("loaded").and_then(Value::as_bool).unwrap_or(false);
         let right_loaded = right
@@ -1336,7 +1330,9 @@ fn finish_models(mut models: Vec<Value>) -> Vec<Value> {
             )
         })
     });
-    models.truncate(1000);
+    if let Some(limit) = limit {
+        models.truncate(limit);
+    }
     models
 }
 
@@ -1862,6 +1858,46 @@ mod tests {
     }
 
     #[test]
+    fn a_model_list_sorts_before_keeping_one_thousand() {
+        let models: Vec<_> = (0..=1000)
+            .rev()
+            .map(|index| {
+                json!({
+                    "type": "llm",
+                    "key": format!("n{index:04}"),
+                    "display_name": format!("n{index:04}"),
+                    "loaded_instances": []
+                })
+            })
+            .collect();
+        let parsed = parse_lmstudio_models(&json!({ "models": models })).unwrap();
+        assert_eq!(parsed.len(), 1001);
+        let listed = finish_models(parsed, Some(1000));
+        assert_eq!(listed.len(), 1000);
+        assert_eq!(listed[0]["key"], "n0000");
+        assert_eq!(listed[999]["key"], "n0999");
+        assert!(listed.iter().all(|model| model["key"] != "n1000"));
+
+        let panel_models: Vec<_> = (0..=1000)
+            .map(|index| {
+                json!({
+                    "type": "llm",
+                    "key": format!("p{index:04}"),
+                    "display_name": format!("p{index:04}"),
+                    "loaded_instances": []
+                })
+            })
+            .collect();
+        let panel = finish_models(
+            parse_lmstudio_native(&json!({ "models": panel_models })).unwrap(),
+            None,
+        );
+        assert_eq!(panel.len(), 1001);
+        assert_eq!(panel[0]["key"], "p0000");
+        assert_eq!(panel[1000]["key"], "p1000");
+    }
+
+    #[test]
     fn a_long_note_gets_a_larger_answer_budget() {
         assert_eq!(output_token_limit("kurz"), 2048);
         assert_eq!(output_token_limit(&"a".repeat(4_097)), 2049);
@@ -1889,7 +1925,7 @@ mod tests {
             ]
         }))
         .unwrap();
-        let models = finish_models(models);
+        let models = finish_models(models, Some(1000));
         assert_eq!(models.len(), 2);
         assert_eq!(models[0]["key"], "alpha");
         assert_eq!(models[0]["loaded"], true);
@@ -1960,6 +1996,7 @@ mod tests {
                 ]
             }))
             .unwrap(),
+            Some(1000),
         );
         let names: Vec<_> = named
             .iter()
