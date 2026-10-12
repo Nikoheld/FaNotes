@@ -757,8 +757,17 @@ fn parse_opencode_models(body: &Value) -> Result<Vec<Value>, String> {
                     .get("limit")
                     .map(|limit| finite_context_length(&limit["context"]))
                     .unwrap_or(None),
-                entry.get("description").and_then(Value::as_str),
+                None,
             );
+            // `isObject(entry) ? entry.description : null`, then `String(description)`.
+            if let Some(object) = record.as_object_mut() {
+                let description = if entry.is_object() {
+                    metadata_value(entry.get("description"), 1200)
+                } else {
+                    Value::Null
+                };
+                object.insert("description".into(), description);
+            }
             models.push(record);
         }
     }
@@ -1904,6 +1913,24 @@ mod tests {
         }))
         .unwrap();
         assert_eq!(opencode[0]["maxContextLength"], -512.0);
+        let described = parse_opencode_models(&json!({
+            "all": [{
+                "id": "local",
+                "name": "Local",
+                "models": {
+                    "small": { "name": "Small", "description": 1 },
+                    "blank": { "name": "Blank", "description": [] },
+                    "zero": { "name": "Zero", "description": 0 },
+                    "plain": "Plain"
+                }
+            }]
+        }))
+        .unwrap();
+        assert_eq!(described[0]["description"], "1");
+        assert_eq!(described[1]["description"], "");
+        assert!(described[2]["description"].is_null());
+        assert_eq!(described[3]["displayName"], "Local · plain");
+        assert!(described[3]["description"].is_null());
         let reply = lm_studio_text(
             &json!({
                 "output": [{ "type": "message", "content": "Fertig" }],
