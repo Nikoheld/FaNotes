@@ -1270,6 +1270,72 @@ fn a_recognition_model_file_uses_the_desktop_checks() {
 }
 
 #[test]
+fn reading_a_recognition_model_leaves_a_legacy_internal_folder() {
+    let (mut host, vault) = host();
+    std::fs::remove_dir_all(vault.join(".fanotes")).unwrap();
+    std::fs::create_dir_all(vault.join(".lernwerk")).unwrap();
+    std::fs::write(vault.join(".lernwerk/keep.txt"), b"alt").unwrap();
+
+    assert_eq!(
+        host.dispatch("fanotes:read-recognition-model", &[])
+            .unwrap(),
+        serde_json::Value::Null
+    );
+    assert!(!vault.join(".fanotes").exists());
+    assert_eq!(
+        std::fs::read(vault.join(".lernwerk/keep.txt")).unwrap(),
+        b"alt"
+    );
+
+    host.dispatch("fanotes:write-recognition-model", &[json!("{}")])
+        .unwrap();
+    assert_eq!(
+        std::fs::read(vault.join(".fanotes/recognition-model.json")).unwrap(),
+        b"{}"
+    );
+    assert_eq!(
+        std::fs::read(vault.join(".lernwerk/keep.txt")).unwrap(),
+        b"alt"
+    );
+
+    std::fs::remove_dir_all(vault.join(".fanotes")).unwrap();
+    std::fs::write(vault.join(".fanotes"), b"datei").unwrap();
+    assert_eq!(
+        host.dispatch("fanotes:read-recognition-model", &[])
+            .unwrap_err(),
+        "Ein Pfadbestandteil ist kein Ordner."
+    );
+    assert_eq!(
+        host.dispatch("fanotes:write-recognition-model", &[json!("{}")])
+            .unwrap_err(),
+        "Ein Pfadbestandteil ist kein Ordner."
+    );
+    assert_eq!(std::fs::read(vault.join(".fanotes")).unwrap(), b"datei");
+
+    #[cfg(unix)]
+    {
+        std::fs::remove_file(vault.join(".fanotes")).unwrap();
+        std::os::unix::fs::symlink("elsewhere", vault.join(".fanotes")).unwrap();
+        assert_eq!(
+            host.dispatch("fanotes:read-recognition-model", &[])
+                .unwrap_err(),
+            "Symbolische Links sind innerhalb des Vaults nicht erlaubt."
+        );
+        assert_eq!(
+            host.dispatch("fanotes:write-recognition-model", &[json!("{}")],)
+                .unwrap_err(),
+            "Symbolische Links sind innerhalb des Vaults nicht erlaubt."
+        );
+        assert!(vault
+            .join(".fanotes")
+            .symlink_metadata()
+            .unwrap()
+            .file_type()
+            .is_symlink());
+    }
+}
+
+#[test]
 fn a_subject_book_with_a_bad_byte_stays_in_the_list() {
     let (mut host, vault) = host();
     std::fs::create_dir_all(vault.join(".fanotes")).unwrap();

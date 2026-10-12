@@ -643,6 +643,22 @@ impl Host {
         }
         let root = self.require_vault()?.to_path_buf();
         let path = recognition_model_path(&root)?;
+        // Desktop `mkdir` creates a missing `.fanotes` and leaves `.lernwerk` beside it.
+        if let Some(parent) = path.parent() {
+            match fs::symlink_metadata(parent) {
+                Ok(_) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                    match fs::create_dir(parent) {
+                        Ok(()) => {}
+                        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+                        Err(_) => {
+                            return Err("Der Ordner konnte nicht angelegt werden.".to_owned());
+                        }
+                    }
+                }
+                Err(_) => return Err("Der Ordner konnte nicht angelegt werden.".to_owned()),
+            }
+        }
         notes::atomic_write(&path, content.as_bytes(), 0o600)?;
         let modified = fs::symlink_metadata(&path)
             .ok()
@@ -2144,15 +2160,40 @@ fn internal_directory(root: &Path) -> Result<PathBuf, String> {
 }
 
 /// `resolveVaultPath` for `.fanotes/recognition-model.json` with `expected: 'file'`.
+///
+/// A missing `.fanotes` folder stays missing. This path does not rename a
+/// leftover `.lernwerk` folder. The write creates `.fanotes` with `mkdir`.
 fn recognition_model_path(root: &Path) -> Result<PathBuf, String> {
-    let path = internal_directory(root)?.join("recognition-model.json");
+    let fanotes = root.join(".fanotes");
+    match fs::symlink_metadata(&fanotes) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(_) => return Err("Das Handschriftmodell konnte nicht gelesen werden.".to_owned()),
+        Ok(meta) if meta.file_type().is_symlink() => {
+            return Err("Symbolische Links sind innerhalb des Vaults nicht erlaubt.".to_owned());
+        }
+        Ok(meta) if !meta.is_dir() => {
+            return Err("Ein Pfadbestandteil ist kein Ordner.".to_owned());
+        }
+        Ok(_) => {
+            let root_real = fs::canonicalize(root)
+                .map_err(|_| "Der Pfad verlässt den Vault über einen Link.".to_owned())?;
+            let real = fs::canonicalize(&fanotes)
+                .map_err(|_| "Der Pfad verlässt den Vault über einen Link.".to_owned())?;
+            if !vault::is_inside_root(&root_real, &real) {
+                return Err("Der Pfad verlässt den Vault über einen Link.".to_owned());
+            }
+        }
+    }
+    let path = fanotes.join("recognition-model.json");
     match fs::symlink_metadata(&path) {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(path),
         Err(_) => Err("Das Handschriftmodell konnte nicht gelesen werden.".to_owned()),
         Ok(meta) if meta.file_type().is_symlink() => {
             Err("Symbolische Links sind innerhalb des Vaults nicht erlaubt.".to_owned())
         }
-        Ok(meta) if !meta.is_file() => Err("Die gewählte Datei ist keine reguläre Datei.".to_owned()),
+        Ok(meta) if !meta.is_file() => {
+            Err("Die gewählte Datei ist keine reguläre Datei.".to_owned())
+        }
         Ok(_) => Ok(path),
     }
 }
