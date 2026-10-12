@@ -157,10 +157,8 @@ pub fn attach_sidecar(
     }
     payload.updated_at = now_iso();
     payload.worksheets = worksheet_ids_from_markdown(&body);
-    if let Some(parent) = famd_path.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|_| "Der Ordner konnte nicht angelegt werden.".to_owned())?;
-    }
+    // The desktop `realpath` of the companion's parent fails before the write.
+    require_parent_directory(&famd_path)?;
     atomic_write(
         &famd_path,
         serialize_famd(&body, &payload).as_bytes(),
@@ -508,10 +506,8 @@ fn load_note(host: &Host, relative: &str) -> Result<(PathBuf, String, FamdPayloa
 }
 
 fn store_note(path: &Path, body: &str, payload: &FamdPayload) -> Result<(), String> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|_| "Der Ordner konnte nicht angelegt werden.".to_owned())?;
-    }
+    // Paper, links, and backups use the same parent check as a note save.
+    require_parent_directory(path)?;
     atomic_write(path, serialize_famd(body, payload).as_bytes(), 0o600)
 }
 
