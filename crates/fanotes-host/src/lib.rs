@@ -1167,10 +1167,12 @@ impl Host {
             return Err("Dieser Eintrag kann nicht verschoben werden.".to_owned());
         }
         let was_dir = meta.is_dir();
+        // A blank destination is the vault root. Any other path is normalized
+        // without `allowRoot`, so `./` is the vault itself and is refused.
         let dest_relative = if vault::js_trim(dest_folder).is_empty() {
             String::new()
         } else {
-            vault::normalize_relative_path(dest_folder, true, false)?
+            vault::normalize_relative_path(dest_folder, false, false)?
         };
         let folder = if dest_relative.is_empty() {
             root.clone()
