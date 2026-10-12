@@ -94,15 +94,7 @@ pub fn save_drawing(host: &Host, payload: &Value) -> Result<Value, String> {
         Some(_) => return Err("Ungültige Zeichnungs-ID.".to_owned()),
     };
     let title = safe_title(object.get("title").and_then(Value::as_str).unwrap_or(""))?;
-    let drawing_json = object
-        .get("drawingJson")
-        .and_then(Value::as_str)
-        .ok_or_else(|| "Die Zeichnungsdaten sind ungültig oder zu groß.".to_owned())?;
-    let document = validate_drawing_json(drawing_json)?;
-    let item = metadata_value(&document, &id)?;
-    if item["title"].as_str() != Some(title.as_str()) {
-        return Err("Der Zeichnungstitel stimmt nicht mit den Zeichnungsdaten überein.".to_owned());
-    }
+    // Desktop decodes a present image before it parses the drawing JSON.
     let png = if object.contains_key("imageData") {
         let image = object
             .get("imageData")
@@ -112,6 +104,15 @@ pub fn save_drawing(host: &Host, payload: &Value) -> Result<Value, String> {
     } else {
         None
     };
+    let drawing_json = object
+        .get("drawingJson")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "Die Zeichnungsdaten sind ungültig oder zu groß.".to_owned())?;
+    let document = validate_drawing_json(drawing_json)?;
+    let item = metadata_value(&document, &id)?;
+    if item["title"].as_str() != Some(title.as_str()) {
+        return Err("Der Zeichnungstitel stimmt nicht mit den Zeichnungsdaten überein.".to_owned());
+    }
     let assets = assets_dir(vault_root(host)?)?;
     if let Some(png) = png {
         crate::notes::atomic_write(&assets.join(format!("{id}.png")), &png, 0o600)

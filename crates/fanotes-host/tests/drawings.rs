@@ -106,6 +106,103 @@ fn a_drawing_image_follows_the_desktop_png_checks() {
 }
 
 #[test]
+fn a_bad_drawing_image_is_reported_before_the_drawing_json() {
+    let (dir, mut host) = host();
+    let assets = dir.join("vault/.fanotes/assets");
+    assert_eq!(
+        host.dispatch(
+            "fanotes:save-drawing",
+            &[json!({
+                "id": "kaputt",
+                "title": "Skizze",
+                "drawingJson": "{",
+                "imageData": 1,
+            })],
+        )
+        .unwrap_err(),
+        "Die Zeichnung enthält kein PNG."
+    );
+    assert_eq!(
+        host.dispatch(
+            "fanotes:save-drawing",
+            &[json!({
+                "id": "url",
+                "title": "Skizze",
+                "drawingJson": "{",
+                "imageData": "nope",
+            })],
+        )
+        .unwrap_err(),
+        "Die Zeichnung ist keine gültige PNG-Data-URL."
+    );
+    assert_eq!(
+        host.dispatch(
+            "fanotes:save-drawing",
+            &[json!({
+                "id": "titel",
+                "title": "Andere",
+                "drawingJson": drawing("Skizze"),
+                "imageData": null,
+            })],
+        )
+        .unwrap_err(),
+        "Die Zeichnung enthält kein PNG."
+    );
+    assert!(host
+        .dispatch(
+            "fanotes:save-drawing",
+            &[json!({
+                "id": "con-bild",
+                "title": "CON",
+                "drawingJson": "{",
+                "imageData": 1,
+            })],
+        )
+        .unwrap_err()
+        .contains("nicht erlaubt"));
+    assert_eq!(
+        host.dispatch(
+            "fanotes:save-drawing",
+            &[json!({
+                "id": 1,
+                "title": "Skizze",
+                "drawingJson": "{",
+                "imageData": 1,
+            })],
+        )
+        .unwrap_err(),
+        "Ungültige Zeichnungs-ID."
+    );
+    assert_eq!(
+        host.dispatch(
+            "fanotes:save-drawing",
+            &[json!({
+                "id": "json",
+                "title": "Skizze",
+                "drawingJson": "{",
+                "imageData": "data:image/png;base64,iVBORw0KGgo=",
+            })],
+        )
+        .unwrap_err(),
+        "Die Zeichnungsdaten sind kein gültiges JSON."
+    );
+    assert_eq!(
+        host.dispatch(
+            "fanotes:save-drawing",
+            &[json!({
+                "id": "ohne",
+                "title": "Skizze",
+                "drawingJson": "{",
+            })],
+        )
+        .unwrap_err(),
+        "Die Zeichnungsdaten sind kein gültiges JSON."
+    );
+    assert!(!assets.join("kaputt.json").exists());
+    assert!(!assets.join("json.png").exists());
+}
+
+#[test]
 fn a_drawing_title_uses_the_desktop_entry_name_rules() {
     let (_dir, mut host) = host();
     let saved = host
