@@ -361,10 +361,8 @@ impl InkDocument {
         let Value::Object(raw) = value else {
             return Err(InkError::Schema);
         };
-        let schema = raw
-            .get("schemaVersion")
-            .and_then(Value::as_u64)
-            .unwrap_or(0);
+        // `schemaVersion !== 1` is false for the JSON number `1.0`.
+        let schema = raw.get("schemaVersion").and_then(json_whole_u64).unwrap_or(0);
         if schema != SCHEMA_VERSION {
             return Err(InkError::Schema);
         }
@@ -518,6 +516,19 @@ fn point_json(point: &StrokePoint) -> Value {
     object.insert("tiltY".into(), json_number(f64::from(point.tilt_y)));
     object.insert("pointerType".into(), Value::from(point.pointer.as_str()));
     Value::Object(object)
+}
+
+/// A JSON integer, or a whole number such as `1.0`.
+fn json_whole_u64(value: &Value) -> Option<u64> {
+    if let Some(number) = value.as_u64() {
+        return Some(number);
+    }
+    let number = value.as_f64()?;
+    if number.is_finite() && number.fract() == 0.0 && number >= 0.0 {
+        Some(number as u64)
+    } else {
+        None
+    }
 }
 
 fn points_from_json(value: Option<&Value>) -> Option<Vec<StrokePoint>> {
