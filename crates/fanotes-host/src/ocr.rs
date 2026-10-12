@@ -200,11 +200,10 @@ fn load_characters(directory: &Path, manifest_text: &str) -> Result<Vec<String>,
     let file = manifest["characters"]["file"]
         .as_str()
         .ok_or_else(|| "Unbekanntes natives Handschriftmodell.".to_owned())?;
-    let size = manifest["characters"]["size"]
-        .as_u64()
+    let size = crate::resources::json_safe_u64(manifest["characters"].get("size"))
+        .filter(|size| *size > 0 && *size <= 256 * 1024)
         .ok_or_else(|| "Unbekanntes natives Handschriftmodell.".to_owned())?;
-    let count = manifest["characters"]["count"]
-        .as_u64()
+    let count = crate::resources::json_safe_u64(manifest["characters"].get("count"))
         .ok_or_else(|| "Unbekanntes natives Handschriftmodell.".to_owned())?
         as usize;
     let expected = manifest["characters"]["sha256"]
@@ -311,8 +310,41 @@ fn arch_name() -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::ocr_thread_count;
+    use super::{load_characters, ocr_thread_count};
     use serde_json::json;
+    use sha2::{Digest, Sha256};
+
+    #[test]
+    fn a_character_manifest_keeps_a_whole_size() {
+        let dir = std::env::temp_dir().join(format!(
+            "fanotes-ocr-whole-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let bytes = serde_json::to_vec(&json!(["a"])).unwrap();
+        std::fs::write(dir.join("chars.json"), &bytes).unwrap();
+        let hash = Sha256::digest(&bytes)
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        let size = bytes.len();
+        let manifest = format!(
+            r#"{{"characters":{{"file":"chars.json","size":{size}.0,"count":1.0,"sha256":"{hash}"}}}}"#
+        );
+        assert_eq!(load_characters(&dir, &manifest).unwrap(), vec!["a"]);
+        let fractional =
+            manifest.replace(&format!("\"size\":{size}.0"), &format!("\"size\":{size}.5"));
+        assert_eq!(
+            load_characters(&dir, &fractional).unwrap_err(),
+            "Unbekanntes natives Handschriftmodell."
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn native_ocr_threads_follow_the_desktop_cap() {
