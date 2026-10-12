@@ -89,6 +89,44 @@ fn rename_keeps_the_extension_and_move_numbers_a_collision() {
 }
 
 #[test]
+fn a_missing_child_is_reported_before_a_move_into_itself() {
+    let (vault, mut host) = host();
+    fs::create_dir_all(vault.join("Ordner/Innen")).unwrap();
+    fs::write(vault.join("Ordner/Seite.md"), b"Hallo\n").unwrap();
+    assert_eq!(
+        host.dispatch(
+            "fanotes:move-entry",
+            &[json!("Ordner"), json!("Ordner/Fehlt")],
+        )
+        .unwrap_err(),
+        "Der Eintrag wurde nicht gefunden."
+    );
+    assert_eq!(
+        host.dispatch(
+            "fanotes:move-entry",
+            &[json!("Ordner"), json!("Ordner/Seite.md")],
+        )
+        .unwrap_err(),
+        "Der gewählte Pfad ist kein Ordner."
+    );
+    assert_eq!(
+        host.dispatch(
+            "fanotes:move-entry",
+            &[json!("Ordner"), json!("Ordner/Innen")],
+        )
+        .unwrap_err(),
+        "Ein Ordner kann nicht in sich selbst verschoben werden."
+    );
+    assert_eq!(
+        host.dispatch("fanotes:move-entry", &[json!("Ordner"), json!("../x")])
+            .unwrap_err(),
+        "Pfad-Traversal ist nicht erlaubt."
+    );
+    assert!(vault.join("Ordner/Innen").is_dir());
+    assert!(vault.join("Ordner/Seite.md").is_file());
+}
+
+#[test]
 fn a_symlinked_folder_cannot_rename_move_or_receive_a_note() {
     let dir = std::env::temp_dir().join(format!("fanotes-rename-link-{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
