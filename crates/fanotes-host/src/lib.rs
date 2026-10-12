@@ -1020,18 +1020,15 @@ impl Host {
     }
 
     fn open_subject_book(&self, relative: &str) -> Result<Value, String> {
-        let root = self.require_vault()?;
+        // The desktop opens the popout after the path shape and extension.
+        // The window reads the file later, so a missing book still opens.
+        self.require_vault()?;
         let path = vault::normalize_relative_path(relative, false, false)?;
         let extension = vault::posix_extname_en_us(&path);
         if !matches!(extension.as_str(), ".md" | ".markdown" | ".famd" | ".pdf") {
             return Err("Es dürfen nur Markdown-Dateien, PDF-Notizen und FaNotes-Handschriftdateien (.famd) bearbeitet werden.".to_owned());
         }
         if extension != ".pdf" {
-            return Err("Nur ein PDF-Buch kann auspoppen.".to_owned());
-        }
-        let file = vault::resolve_existing_entry(root, &path)?;
-        let meta = fs::symlink_metadata(&file).map_err(|_| "Ungültiger Buchpfad.".to_owned())?;
-        if meta.file_type().is_symlink() || !meta.is_file() {
             return Err("Nur ein PDF-Buch kann auspoppen.".to_owned());
         }
         Ok(json!({ "open": true, "bookPath": path }))

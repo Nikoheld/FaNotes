@@ -22,6 +22,47 @@ fn a_pdf_book_can_pop_out_and_another_file_cannot() {
         .unwrap();
     assert_eq!(opened["open"], true);
     assert_eq!(opened["bookPath"], "Mathe/Buch.pdf");
+    let missing = host
+        .dispatch(
+            "fanotes:open-subject-book-popout",
+            &[json!("Mathe/Fehlt.pdf")],
+        )
+        .unwrap();
+    assert_eq!(missing["open"], true);
+    assert_eq!(missing["bookPath"], "Mathe/Fehlt.pdf");
+    fs::create_dir(vault.join("Mathe/Ordner.pdf")).unwrap();
+    let folder = host
+        .dispatch(
+            "fanotes:open-subject-book-popout",
+            &[json!("Mathe/Ordner.pdf")],
+        )
+        .unwrap();
+    assert_eq!(folder["open"], true);
+    assert_eq!(folder["bookPath"], "Mathe/Ordner.pdf");
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(
+            vault.join("Mathe/Buch.pdf"),
+            vault.join("Mathe/Link.pdf"),
+        )
+        .unwrap();
+        let link = host
+            .dispatch(
+                "fanotes:open-subject-book-popout",
+                &[json!("Mathe/Link.pdf")],
+            )
+            .unwrap();
+        assert_eq!(link["open"], true);
+        assert_eq!(link["bookPath"], "Mathe/Link.pdf");
+    }
+    assert_eq!(
+        host.dispatch(
+            "fanotes:open-subject-book-popout",
+            &[json!("../geheim.pdf")],
+        )
+        .unwrap_err(),
+        "Pfad-Traversal ist nicht erlaubt."
+    );
     let note = host
         .dispatch(
             "fanotes:open-subject-book-popout",
