@@ -232,10 +232,22 @@ fn a_drawing_with_a_bad_byte_still_opens() {
         .as_str()
         .unwrap()
         .contains("Ski\u{FFFD}ze"));
+    let damaged =
+        "Die gespeicherte Zeichnung ist beschädigt oder kann nicht sicher gelesen werden.";
     assert_eq!(
         host.dispatch("fanotes:read-drawing", &[json!("muell")])
             .unwrap_err(),
-        "Die Zeichnungsdaten sind kein gültiges JSON."
+        damaged
+    );
+    fs::write(
+        assets.join("falsch.json"),
+        br#"{"schemaVersion":2,"title":"Nein","strokes":[]}"#,
+    )
+    .unwrap();
+    assert_eq!(
+        host.dispatch("fanotes:read-drawing", &[json!("falsch")])
+            .unwrap_err(),
+        damaged
     );
 
     let hits = host.dispatch("fanotes:search", &[json!("Wort")]).unwrap();

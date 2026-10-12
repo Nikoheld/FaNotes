@@ -69,20 +69,16 @@ pub fn list_drawings(host: &Host) -> Result<Value, String> {
 pub fn read_drawing(host: &Host, raw_id: &str) -> Result<Value, String> {
     let id = drawing_id(raw_id)?;
     let path = assets_dir(vault_root(host)?)?.join(format!("{id}.json"));
-    let bytes = read_limited(&path, MAX_DRAWING_JSON_BYTES).map_err(|_| {
-        if path.exists() {
-            "Die gespeicherte Zeichnung ist beschädigt oder kann nicht sicher gelesen werden."
-                .to_owned()
-        } else {
-            "Die gespeicherte Zeichnung wurde nicht gefunden.".to_owned()
-        }
-    })?;
+    let bytes =
+        read_limited(&path, MAX_DRAWING_JSON_BYTES).map_err(|_| drawing_read_error(&path))?;
     let drawing_json = lossy_utf8(bytes);
     let mtime = fs::symlink_metadata(&path)
         .ok()
         .and_then(|meta| meta.modified().ok())
         .map(crate::notes::iso_from_system_time);
-    let mut item = metadata_from_json(&drawing_json, &id, mtime.as_deref())?;
+    // The desktop read handler reports one message for every failure after the file is found.
+    let mut item =
+        metadata_from_json(&drawing_json, &id, mtime.as_deref()).map_err(|_| damaged_drawing())?;
     item["drawingJson"] = Value::String(drawing_json);
     Ok(item)
 }
@@ -341,6 +337,19 @@ pub(crate) fn library_metadata(
         "imageRelativePath": format!(".fanotes/assets/{id}.png"),
         "dataRelativePath": format!(".fanotes/assets/{id}.json"),
     }))
+}
+
+fn drawing_read_error(path: &Path) -> String {
+    match fs::symlink_metadata(path) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            "Die gespeicherte Zeichnung wurde nicht gefunden.".to_owned()
+        }
+        _ => damaged_drawing(),
+    }
+}
+
+fn damaged_drawing() -> String {
+    "Die gespeicherte Zeichnung ist beschädigt oder kann nicht sicher gelesen werden.".to_owned()
 }
 
 fn validate_drawing_json(drawing_json: &str) -> Result<Value, String> {
