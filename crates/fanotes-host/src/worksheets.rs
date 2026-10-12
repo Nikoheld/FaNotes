@@ -37,7 +37,8 @@ pub fn read_worksheet(host: &Host, raw_id: &str) -> Result<Value, String> {
     let format = format_for(document["sourceRelativePath"].as_str().unwrap_or(""))?;
     stat_regular(&source, format.max_bytes)?;
     if document["kind"] == "html" {
-        let header = read_text(&source, format.max_bytes as usize).unwrap_or_default();
+        // The desktop reads only the first 8 KiB before looking for the marker.
+        let header = read_prefix(&source, 8192).unwrap_or_default();
         if !header.contains("fanotes-onenote-safe-v1") {
             return Err(
                 "Die importierte OneNote-Seite hat ihre Sicherheitsmarkierung verloren.".to_owned(),
@@ -220,14 +221,7 @@ fn decode_bytes(value: Option<&Value>, max_bytes: usize) -> Result<Vec<u8>, Stri
         if items.len() > max_bytes {
             return Err(too_big.to_owned());
         }
-        let mut bytes = Vec::with_capacity(items.len());
-        for item in items {
-            let Some(number) = item.as_u64().filter(|number| *number <= 255) else {
-                return Err(too_big.to_owned());
-            };
-            bytes.push(number as u8);
-        }
-        bytes
+        items.iter().map(worksheet_byte).collect()
     } else {
         return Err(too_big.to_owned());
     };
@@ -236,6 +230,28 @@ fn decode_bytes(value: Option<&Value>, max_bytes: usize) -> Result<Vec<u8>, Stri
     } else {
         Ok(bytes)
     }
+}
+
+/// `Buffer.from(array)` converts each value with `ToUint8`.
+///
+/// `1.0` and `1.5` become 1, `256` becomes 0, and `-1` becomes 255.
+fn worksheet_byte(value: &Value) -> u8 {
+    let number = match value {
+        Value::Number(number) => number.as_f64().unwrap_or(f64::NAN),
+        Value::String(text) => crate::vault::js_tonumber(text).unwrap_or(f64::NAN),
+        Value::Bool(true) => 1.0,
+        Value::Bool(false) => 0.0,
+        Value::Null => 0.0,
+        _ => f64::NAN,
+    };
+    to_uint8(number)
+}
+
+fn to_uint8(number: f64) -> u8 {
+    if !number.is_finite() || number == 0.0 {
+        return 0;
+    }
+    number.trunc().rem_euclid(256.0) as u8
 }
 
 fn validate_bytes(bytes: &[u8], extension: &str) -> Result<(), String> {
@@ -486,111 +502,12 @@ fn json_integer(value: &Value) -> Option<i64> {
 fn page_extent(value: Option<&Value>) -> f64 {
     match value {
         Some(Value::Number(number)) => number.as_f64().unwrap_or(f64::NAN),
-        Some(Value::String(text)) => js_tonumber(text).unwrap_or(f64::NAN),
+        Some(Value::String(text)) => crate::vault::js_tonumber(text).unwrap_or(f64::NAN),
         Some(Value::Bool(true)) => 1.0,
         Some(Value::Bool(false)) => 0.0,
         Some(Value::Null) => 0.0,
         _ => f64::NAN,
     }
-}
-
-/// `Number(string)`: the whole string is one numeric literal after JavaScript trim.
-///
-/// A sign applies to decimals and `Infinity`. `0x` / `0b` / `0o` are unsigned.
-/// `800px`, `1e`, and `+0x10` are not numbers.
-fn js_tonumber(value: &str) -> Option<f64> {
-    let text = crate::vault::js_trim(value);
-    if text.is_empty() {
-        return Some(0.0);
-    }
-    let bytes = text.as_bytes();
-    if bytes.len() >= 2 && bytes[0] == b'0' {
-        let radix = match bytes[1] {
-            b'x' | b'X' => Some(16),
-            b'b' | b'B' => Some(2),
-            b'o' | b'O' => Some(8),
-            _ => None,
-        };
-        if let Some(radix) = radix {
-            return integer_literal(&text[2..], radix);
-        }
-    }
-    decimal_literal(text)
-}
-
-fn integer_literal(digits: &str, radix: u32) -> Option<f64> {
-    if digits.is_empty() {
-        return None;
-    }
-    let mut value = 0.0_f64;
-    for byte in digits.bytes() {
-        let digit = match byte {
-            b'0'..=b'9' => byte - b'0',
-            b'a'..=b'f' => byte - b'a' + 10,
-            b'A'..=b'F' => byte - b'A' + 10,
-            _ => return None,
-        };
-        if u32::from(digit) >= radix {
-            return None;
-        }
-        value = value.mul_add(f64::from(radix), f64::from(digit));
-        if !value.is_finite() {
-            return Some(f64::INFINITY);
-        }
-    }
-    Some(value)
-}
-
-fn decimal_literal(text: &str) -> Option<f64> {
-    let bytes = text.as_bytes();
-    let mut index = 0;
-    if bytes
-        .first()
-        .is_some_and(|byte| matches!(byte, b'+' | b'-'))
-    {
-        index = 1;
-    }
-    if text[index..].eq("Infinity") {
-        return text.parse().ok();
-    }
-    let mut saw_digit = false;
-    while bytes.get(index).is_some_and(u8::is_ascii_digit) {
-        saw_digit = true;
-        index += 1;
-    }
-    if bytes.get(index) == Some(&b'.') {
-        index += 1;
-        while bytes.get(index).is_some_and(u8::is_ascii_digit) {
-            saw_digit = true;
-            index += 1;
-        }
-    }
-    if !saw_digit {
-        return None;
-    }
-    if bytes
-        .get(index)
-        .is_some_and(|byte| matches!(byte, b'e' | b'E'))
-    {
-        index += 1;
-        if bytes
-            .get(index)
-            .is_some_and(|byte| matches!(byte, b'+' | b'-'))
-        {
-            index += 1;
-        }
-        let exponent = index;
-        while bytes.get(index).is_some_and(u8::is_ascii_digit) {
-            index += 1;
-        }
-        if index == exponent {
-            return None;
-        }
-    }
-    if index != bytes.len() {
-        return None;
-    }
-    text.parse().ok()
 }
 
 fn number(object: &Map<String, Value>, name: &str, error: &str) -> Result<f64, String> {
@@ -709,10 +626,32 @@ fn vault_root(host: &Host) -> Result<&Path, String> {
 fn stat_regular(path: &Path, max: u64) -> Result<(), String> {
     let meta = fs::symlink_metadata(path)
         .map_err(|_| "Das Arbeitsblatt wurde nicht gefunden.".to_owned())?;
-    if meta.file_type().is_symlink() || !meta.is_file() || meta.len() > max {
-        return Err("Die Arbeitsblattquelle ist ungültig.".to_owned());
+    // Desktop `statRegularFileNoFollow`: a non-file fails before the size check.
+    if meta.file_type().is_symlink() || !meta.is_file() {
+        return Err("Die Datei ist keine reguläre Datei.".to_owned());
+    }
+    if meta.len() > max {
+        return Err("Die Datei ist zu groß.".to_owned());
     }
     Ok(())
+}
+
+fn read_prefix(path: &Path, limit: usize) -> Result<String, String> {
+    use std::io::Read;
+    let mut file =
+        fs::File::open(path).map_err(|_| "Die Datei konnte nicht gelesen werden.".to_owned())?;
+    let mut bytes = vec![0u8; limit];
+    let mut read = 0;
+    while read < limit {
+        match file.read(&mut bytes[read..]) {
+            Ok(0) => break,
+            Ok(count) => read += count,
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(_) => return Err("Die Datei konnte nicht gelesen werden.".to_owned()),
+        }
+    }
+    bytes.truncate(read);
+    Ok(lossy_utf8(bytes))
 }
 
 fn read_text(path: &Path, max: usize) -> Result<String, String> {
@@ -796,44 +735,4 @@ fn civil_date(mut days: u64) -> (i32, u32, u32) {
 
 fn is_leap(year: i32) -> bool {
     (year % 4 == 0 && year % 100 != 0) || year % 400 == 0
-}
-
-#[cfg(test)]
-mod tests {
-    use super::js_tonumber;
-
-    #[test]
-    fn a_page_size_string_uses_javascript_number() {
-        assert_eq!(js_tonumber("800"), Some(800.0));
-        assert_eq!(js_tonumber("800.4"), Some(800.4));
-        assert_eq!(js_tonumber("800.5"), Some(800.5));
-        assert_eq!(js_tonumber(" 800 "), Some(800.0));
-        assert_eq!(js_tonumber("\u{FEFF}800"), Some(800.0));
-        assert_eq!(js_tonumber("8e2"), Some(800.0));
-        assert_eq!(js_tonumber("8E+2"), Some(800.0));
-        assert_eq!(js_tonumber("+800"), Some(800.0));
-        assert_eq!(js_tonumber("0x320"), Some(800.0));
-        assert_eq!(js_tonumber("0X10"), Some(16.0));
-        assert_eq!(js_tonumber("0b1010"), Some(10.0));
-        assert_eq!(js_tonumber("0o10"), Some(8.0));
-        assert_eq!(js_tonumber("0800"), Some(800.0));
-        assert_eq!(js_tonumber("1."), Some(1.0));
-        assert_eq!(js_tonumber(" .5"), Some(0.5));
-        assert_eq!(js_tonumber(""), Some(0.0));
-        assert_eq!(js_tonumber("  0x320  "), Some(800.0));
-        assert!(js_tonumber("800px").is_none());
-        assert!(js_tonumber("1.2.3").is_none());
-        assert!(js_tonumber("1e").is_none());
-        assert!(js_tonumber(".").is_none());
-        assert!(js_tonumber("+0x10").is_none());
-        assert!(js_tonumber("0x").is_none());
-        assert!(js_tonumber("0b").is_none());
-        assert!(js_tonumber("1_000").is_none());
-        assert!(js_tonumber("true").is_none());
-        assert!(js_tonumber("\u{0085}800").is_none());
-        assert!(js_tonumber("800\u{0085}").is_none());
-        assert_eq!(js_tonumber("Infinity"), Some(f64::INFINITY));
-        assert_eq!(js_tonumber("+Infinity"), Some(f64::INFINITY));
-        assert_eq!(js_tonumber("-Infinity"), Some(f64::NEG_INFINITY));
-    }
 }
