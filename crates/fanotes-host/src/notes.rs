@@ -949,11 +949,29 @@ fn vault_root(host: &Host) -> Result<&Path, String> {
 }
 
 pub(crate) fn iso_from_system_time(time: SystemTime) -> String {
-    let elapsed = time.duration_since(UNIX_EPOCH).unwrap_or_default();
     // `fs.Stats#mtime.toISOString()` rounds to the nearest millisecond.
     // 0.6 ms becomes `.001`, and 999.5 ms rolls into the next second.
+    format_unix_time(time, true)
+}
+
+/// `new Date(time).toISOString()` for a clock value. The millisecond is truncated.
+pub(crate) fn iso_from_date(time: SystemTime) -> String {
+    format_unix_time(time, false)
+}
+
+/// `new Date().toISOString()`. The clock millisecond is truncated.
+pub(crate) fn iso_now() -> String {
+    iso_from_date(SystemTime::now())
+}
+
+fn format_unix_time(time: SystemTime, round: bool) -> String {
+    let elapsed = time.duration_since(UNIX_EPOCH).unwrap_or_default();
     let mut secs = elapsed.as_secs();
-    let millis = (u64::from(elapsed.subsec_nanos()) + 500_000) / 1_000_000;
+    let millis = if round {
+        (u64::from(elapsed.subsec_nanos()) + 500_000) / 1_000_000
+    } else {
+        u64::from(elapsed.subsec_millis())
+    };
     let millis = if millis == 1000 {
         secs += 1;
         0
@@ -961,18 +979,18 @@ pub(crate) fn iso_from_system_time(time: SystemTime) -> String {
         millis
     };
     let days = secs / 86_400;
-    let time = secs % 86_400;
+    let time_of_day = secs % 86_400;
     let (year, month, day) = civil_date(days);
     format!(
         "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}.{millis:03}Z",
-        time / 3600,
-        (time % 3600) / 60,
-        time % 60
+        time_of_day / 3600,
+        (time_of_day % 3600) / 60,
+        time_of_day % 60
     )
 }
 
 fn now_iso() -> String {
-    iso_from_system_time(SystemTime::now())
+    iso_now()
 }
 
 fn civil_date(mut days: u64) -> (i32, u32, u32) {
@@ -1016,7 +1034,10 @@ fn is_leap(year: i32) -> bool {
 
 #[cfg(test)]
 mod publish_tests {
-    use super::{file_mtime_iso, iso_from_system_time, publish_new_file, write_note_file, NewFileError};
+    use super::{
+        file_mtime_iso, iso_from_date, iso_from_system_time, publish_new_file, write_note_file,
+        NewFileError,
+    };
     use std::time::UNIX_EPOCH;
 
     #[test]
@@ -1088,6 +1109,14 @@ mod publish_tests {
         assert_eq!(
             iso_from_system_time(at(1_700_000_000, 999_500_000)),
             "2023-11-14T22:13:21.000Z"
+        );
+        assert_eq!(
+            iso_from_date(at(1_700_000_000, 600_000)),
+            "2023-11-14T22:13:20.000Z"
+        );
+        assert_eq!(
+            iso_from_date(at(1_700_000_000, 999_600_000)),
+            "2023-11-14T22:13:20.999Z"
         );
     }
 

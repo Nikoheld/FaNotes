@@ -5,7 +5,6 @@
 
 use std::fs;
 use std::path::Path;
-use std::time::SystemTime;
 
 use serde_json::{json, Value};
 
@@ -485,7 +484,7 @@ pub(crate) fn write_status(root: &Path, status: &str) -> Result<(), String> {
         serde_json::to_string_pretty(&json!({
             "version": 1,
             "status": status,
-            "updatedAt": notes::iso_from_system_time(SystemTime::now()),
+            "updatedAt": notes::iso_now(),
         }))
         .unwrap_or_default()
     );
