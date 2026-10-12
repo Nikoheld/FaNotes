@@ -268,7 +268,8 @@ fn scan_force_zero_scaling(
     env: &BTreeMap<String, String>,
     visited: &mut BTreeSet<PathBuf>,
 ) -> Option<bool> {
-    let resolved = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
+    // `path.resolve` drops `..` before the file is opened or remembered.
+    let resolved = resolve_config_path(path);
     if visited.contains(&resolved) || visited.len() >= MAX_FILES {
         return None;
     }
@@ -363,6 +364,15 @@ fn expand_path(raw: &str, env: &BTreeMap<String, String>, from_dir: &Path) -> Op
         &path,
         absolute_input && value.ends_with('/'),
     ))
+}
+
+fn resolve_config_path(path: &Path) -> PathBuf {
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf())
+    };
+    lexical_normalize(&absolute, false)
 }
 
 fn lexical_normalize(path: &Path, keep_trailing_slash: bool) -> PathBuf {
@@ -1115,6 +1125,33 @@ mod tests {
                 ["hyprlandZeroScaling"],
             true
         );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_hyprland_config_path_drops_parent_segments() {
+        let dir = std::env::temp_dir().join(format!(
+            "fanotes-hypr-resolve-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let config = dir.join("hyprland.conf");
+        fs::write(&config, "force_zero_scaling = true\n").unwrap();
+        let configured = dir.join("missing").join("..").join("hyprland.conf");
+        let runtime = report(
+            "linux",
+            &env(&[
+                ("FANOTES_HYPRLAND_CONFIG", configured.to_str().unwrap()),
+                ("HOME", ""),
+            ]),
+            || panic!("hyprctl"),
+        );
+        assert_eq!(runtime["hyprlandZeroScaling"], true);
         let _ = fs::remove_dir_all(&dir);
     }
 }
