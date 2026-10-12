@@ -4,6 +4,8 @@
 //! length-prefixed `<!-- fanotes-famd:v1 chars=N -->` header, then JSON.
 //! `N` is the JavaScript string length of that JSON.
 
+use std::time::{SystemTime, UNIX_EPOCH};
+
 use serde_json::{Map, Value};
 
 pub const FAMD_SCHEMA: &str = "fanotes-famd-v1";
@@ -390,8 +392,8 @@ fn sanitize_note_link(value: &Value) -> Option<NoteLink> {
         .get("id")
         .and_then(Value::as_str)
         .filter(|id| is_record_id(id))
-        .unwrap_or("nl-generated")
-        .to_string();
+        .map(str::to_owned)
+        .unwrap_or_else(|| js_now_id("nl"));
     let appearance = match style {
         "text" => "text",
         "symbol-text" => "symbol-text",
@@ -463,8 +465,8 @@ fn sanitize_note_backup(value: &Value) -> Option<NoteBackup> {
         .get("id")
         .and_then(Value::as_str)
         .filter(|id| is_record_id(id))
-        .unwrap_or("nb-generated")
-        .to_string();
+        .map(str::to_owned)
+        .unwrap_or_else(|| js_now_id("nb"));
     Some(NoteBackup {
         id,
         note_path,
@@ -520,6 +522,29 @@ fn link_stem(target_path: &str) -> String {
     } else {
         stem.to_string()
     }
+}
+
+/// `Date.now().toString(36)`, prefixed like `nl-` and `nb-`.
+fn js_now_id(prefix: &str) -> String {
+    let millis = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as u64)
+        .unwrap_or(0);
+    format!("{prefix}-{}", to_base36(millis))
+}
+
+fn to_base36(mut value: u64) -> String {
+    const DIGITS: &[u8] = b"0123456789abcdefghijklmnopqrstuvwxyz";
+    if value == 0 {
+        return "0".to_owned();
+    }
+    let mut bytes = Vec::new();
+    while value > 0 {
+        bytes.push(DIGITS[(value % 36) as usize]);
+        value /= 36;
+    }
+    bytes.reverse();
+    String::from_utf8(bytes).unwrap_or_else(|_| "0".to_owned())
 }
 
 fn is_record_id(value: &str) -> bool {
@@ -1219,5 +1244,35 @@ mod tests {
         assert_eq!(links[0].x, 0.25);
         assert_eq!(links[0].y, 0.0);
         assert_eq!(links[1].page, 1);
+    }
+
+    #[test]
+    fn a_missing_link_or_backup_id_uses_the_desktop_clock() {
+        assert_eq!(super::to_base36(0), "0");
+        assert_eq!(super::to_base36(35), "z");
+        assert_eq!(super::to_base36(36), "10");
+        assert_eq!(super::to_base36(1_760_270_000_000), "mgnnb4ow");
+
+        let links = parse_note_links(&serde_json::json!([{
+            "sourcePath": "a.md",
+            "targetPath": "b.md"
+        }]));
+        assert!(links[0].id.starts_with("nl-"), "{}", links[0].id);
+        assert_ne!(links[0].id, "nl-generated");
+
+        let backups = super::parse_note_backups(&serde_json::json!([
+            { "notePath": "a.md", "content": "eins" },
+            { "notePath": "a.md", "id": "nb-keep", "content": "zwei" },
+            { "notePath": "a.md", "id": "bad id", "content": "drei" }
+        ]));
+        assert!(backups.iter().any(|backup| backup.id == "nb-keep"));
+        assert!(backups.len() == 2 || backups.len() == 3, "{backups:?}");
+        for backup in &backups {
+            if backup.id == "nb-keep" {
+                continue;
+            }
+            assert!(backup.id.starts_with("nb-"), "{}", backup.id);
+            assert_ne!(backup.id, "nb-generated");
+        }
     }
 }
