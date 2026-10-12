@@ -18,6 +18,64 @@ fn host() -> (Host, std::path::PathBuf) {
 }
 
 #[test]
+fn a_note_link_reads_page_and_position_with_javascript_number() {
+    let (mut host, vault) = host();
+    std::fs::write(vault.join("Mathe/Seite.md"), b"\n").unwrap();
+    let links = host
+        .dispatch(
+            "fanotes:write-note-links",
+            &[
+                json!("Mathe/Seite.md"),
+                json!([
+                    {
+                        "id": "link-a",
+                        "sourcePath": "anders.md",
+                        "targetPath": "Physik/Kraft.md",
+                        "page": "4",
+                        "x": "0.25",
+                        "y": null,
+                        "label": "Kraft"
+                    },
+                    {
+                        "id": "link-b",
+                        "sourcePath": "anders.md",
+                        "targetPath": "Physik/Andere.md",
+                        "page": "4.5",
+                        "x": 0.1,
+                        "y": 0.2,
+                        "label": "Andere"
+                    }
+                ]),
+            ],
+        )
+        .unwrap();
+    assert_eq!(links[0]["page"], 4);
+    assert_eq!(links[0]["x"].as_f64(), Some(0.25));
+    assert_eq!(links[0]["y"].as_f64(), Some(0.0));
+    assert_eq!(links[1]["page"], 1);
+}
+
+#[test]
+fn a_subject_book_page_follows_javascript_number() {
+    let (mut host, _) = host();
+    let books = host
+        .dispatch(
+            "fanotes:write-subject-books",
+            &[json!([
+                { "subjectPath": "Mathe", "bookPath": "Mathe/Buch.pdf", "lastPage": "12" },
+                { "subjectPath": "Physik", "bookPath": "Physik/Buch.pdf", "lastPage": " 4 " },
+                { "subjectPath": "Chemie", "bookPath": "Chemie/Buch.pdf", "lastPage": "12.5" },
+                { "subjectPath": "Bio", "bookPath": "Bio/Buch.pdf", "lastPage": 9007199254740992_i64 }
+            ])],
+        )
+        .unwrap();
+    assert_eq!(books[0]["lastPage"], 12);
+    assert_eq!(books[1]["lastPage"], 4);
+    assert_eq!(books[2]["lastPage"], 1);
+    assert_eq!(books[3]["lastPage"], 1);
+}
+
+#[test]
 fn a_note_with_an_invalid_byte_still_opens_and_can_be_found() {
     let (mut host, vault) = host();
     let mut bytes = b"Die Photosynthese braucht Licht.\n".to_vec();
@@ -59,6 +117,7 @@ fn a_note_with_an_invalid_byte_still_opens_and_can_be_found() {
 #[test]
 fn paper_links_books_and_history_round_trip() {
     let (mut host, vault) = host();
+    std::fs::write(vault.join("Mathe/Seite.md"), b"\n").unwrap();
     host.dispatch(
         "fanotes:write-file",
         &[json!("Mathe/Seite.md"), json!("Hallo\n")],
@@ -183,6 +242,7 @@ fn paper_links_books_and_history_round_trip() {
 #[test]
 fn saving_markdown_keeps_the_handwriting_sidecar() {
     let (mut host, vault) = host();
+    std::fs::write(vault.join("Seite.md"), b"\n").unwrap();
     let saved = host
         .dispatch(
             "fanotes:write-file",
@@ -226,6 +286,7 @@ fn saving_markdown_keeps_the_handwriting_sidecar() {
 #[test]
 fn renaming_and_deleting_a_note_moves_its_companion() {
     let (mut host, vault) = host();
+    std::fs::write(vault.join("Mathe/Seite.md"), b"\n").unwrap();
     host.dispatch(
         "fanotes:write-file",
         &[json!("Mathe/Seite.md"), json!("Hallo\n")],
@@ -263,6 +324,155 @@ fn renaming_and_deleting_a_note_moves_its_companion() {
         .unwrap();
     assert!(!vault.join("Physik/Blatt.md").exists());
     assert!(!vault.join("Physik/Blatt.famd").exists());
+}
+
+#[test]
+fn a_new_note_adopts_an_existing_handwriting_companion() {
+    let (mut host, vault) = host();
+    let mut payload = fanotes_famd::empty_famd_payload("2026-10-11T00:00:00.000Z");
+    payload.ink = Some(json!({
+        "schemaVersion": 1,
+        "title": "Seite",
+        "strokes": [],
+        "searchTranscript": "Handschrift"
+    }));
+    std::fs::write(
+        vault.join("Mathe/Seite.famd"),
+        fanotes_famd::serialize_famd("Alte Handschrift", &payload),
+    )
+    .unwrap();
+
+    let created = host
+        .dispatch("fanotes:create-note", &[json!("Mathe"), json!("Seite")])
+        .unwrap();
+    assert_eq!(created["relativePath"], "Mathe/Seite.md");
+    assert_eq!(
+        std::fs::read_to_string(vault.join("Mathe/Seite.md")).unwrap(),
+        "# Seite\n\n"
+    );
+    let famd = std::fs::read_to_string(vault.join("Mathe/Seite.famd")).unwrap();
+    let parsed = parse_famd(&famd);
+    assert!(parsed.markdown.contains("# Seite"));
+    assert!(!parsed.markdown.contains("Alte Handschrift"));
+    assert_eq!(
+        parsed.payload.unwrap().ink.unwrap()["searchTranscript"],
+        "Handschrift"
+    );
+    let names: Vec<_> = host.dispatch("fanotes:get-tree", &[]).unwrap()[0]["children"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|entry| entry["name"].as_str().unwrap().to_owned())
+        .collect();
+    assert_eq!(names, vec!["Seite.md"]);
+
+    let second = host
+        .dispatch("fanotes:create-note", &[json!("Mathe"), json!("Seite")])
+        .unwrap();
+    assert_eq!(second["relativePath"], "Mathe/Seite 2.md");
+}
+
+#[test]
+fn a_companion_read_follows_the_desktop_file_check() {
+    let (mut host, vault) = host();
+    std::fs::create_dir(vault.join("Mathe/Ordner.md")).unwrap();
+    let mut payload = fanotes_famd::empty_famd_payload("2026-01-02T03:04:05.000Z");
+    payload.page_stats = Some(json!({"words": 2}));
+    std::fs::write(
+        vault.join("Mathe/Ordner.famd"),
+        fanotes_famd::serialize_famd("", &payload),
+    )
+    .unwrap();
+    assert_eq!(
+        host.dispatch("fanotes:read-note-page-stats", &[json!("Mathe/Ordner.md")])
+            .unwrap(),
+        json!({"words": 2})
+    );
+    assert_eq!(
+        host.dispatch("fanotes:read-note-links", &[json!("Mathe/Leer.md")])
+            .unwrap(),
+        json!([])
+    );
+
+    std::fs::create_dir(vault.join("Mathe/Kaputt.famd")).unwrap();
+    assert_eq!(
+        host.dispatch("fanotes:read-famd-ink", &[json!("Mathe/Kaputt.md")])
+            .unwrap_err(),
+        "Die gewählte Datei ist keine reguläre Datei."
+    );
+    assert_eq!(
+        host.dispatch("fanotes:read-note-page-stats", &[json!("Mathe/Kaputt.md")])
+            .unwrap_err(),
+        "Die gewählte Datei ist keine reguläre Datei."
+    );
+    let before = std::fs::read(vault.join("Mathe/Ordner.famd")).unwrap();
+    assert_eq!(
+        host.dispatch(
+            "fanotes:set-note-paper-style",
+            &[json!("Mathe/Ordner.md"), json!("grid")],
+        )
+        .unwrap_err(),
+        "Die gewählte Datei ist keine reguläre Datei."
+    );
+    assert_eq!(
+        host.dispatch(
+            "fanotes:write-file",
+            &[json!("Mathe/Ordner.md"), json!("Hallo\n")],
+        )
+        .unwrap_err(),
+        "Die gewählte Datei ist keine reguläre Datei."
+    );
+    assert_eq!(
+        std::fs::read(vault.join("Mathe/Ordner.famd")).unwrap(),
+        before
+    );
+}
+
+#[test]
+fn a_directory_named_like_a_note_cannot_be_read() {
+    let (mut host, vault) = host();
+    std::fs::create_dir(vault.join("Mathe/Seite.md")).unwrap();
+    assert_eq!(
+        host.dispatch("fanotes:read-file", &[json!("Mathe/Seite.md")])
+            .unwrap_err(),
+        "Die gewählte Datei ist keine reguläre Datei."
+    );
+    assert_eq!(
+        host.dispatch(
+            "fanotes:write-file",
+            &[json!("Mathe/Seite.md"), json!("Hallo\n")],
+        )
+        .unwrap_err(),
+        "Die gewählte Datei ist keine reguläre Datei."
+    );
+}
+
+#[test]
+fn a_missing_markdown_note_is_not_created_by_writing() {
+    let (mut host, vault) = host();
+    let error = host
+        .dispatch(
+            "fanotes:write-file",
+            &[json!("Mathe/Neu.md"), json!("Hallo\n")],
+        )
+        .unwrap_err();
+    assert!(error.contains("nicht gefunden"), "{error}");
+    assert!(!vault.join("Mathe/Neu.md").exists());
+
+    let saved = host
+        .dispatch(
+            "fanotes:write-file",
+            &[json!("Mathe/Neu.famd"), json!("Hallo\n")],
+        )
+        .unwrap();
+    assert!(saved["modifiedAt"].as_str().unwrap().contains('T'));
+    assert!(vault.join("Mathe/Neu.famd").is_file());
+    assert!(!vault.join("Mathe/Neu.md").exists());
+    assert_eq!(
+        host.dispatch("fanotes:read-file", &[json!("Mathe/Neu.famd")])
+            .unwrap(),
+        "Hallo"
+    );
 }
 
 #[test]
@@ -384,6 +594,7 @@ fn a_saved_note_is_private_and_leaves_no_temporary_file() {
     std::fs::create_dir_all(&vault).unwrap();
     let mut host = Host::open(dir.join("app"));
     host.trash_dir = Some(dir.join("trash"));
+    std::fs::write(vault.join("Seite.md"), b"\n").unwrap();
     host.set_vault(vault.clone()).unwrap();
     host.dispatch("fanotes:write-file", &[json!("Seite.md"), json!("Hallo")])
         .unwrap();
@@ -420,6 +631,7 @@ fn page_stats_keep_the_fields_the_editor_stores() {
     let _ = std::fs::remove_dir_all(&dir);
     let vault = dir.join("vault");
     std::fs::create_dir_all(&vault).unwrap();
+    std::fs::write(vault.join("Seite.md"), b"\n").unwrap();
     let mut host = Host::open(dir.join("app"));
     host.trash_dir = Some(dir.join("trash"));
     host.set_vault(vault).unwrap();
@@ -579,6 +791,7 @@ fn a_long_german_title_uses_character_length() {
 #[test]
 fn a_history_index_with_an_invalid_byte_still_lists_its_snapshots() {
     let (mut host, vault) = host();
+    std::fs::write(vault.join("Mathe/Seite.md"), b"\n").unwrap();
     host.dispatch(
         "fanotes:write-file",
         &[json!("Mathe/Seite.md"), json!("Hallo\n")],
@@ -621,7 +834,9 @@ fn a_history_index_with_an_invalid_byte_still_lists_its_snapshots() {
 
 #[test]
 fn history_uses_the_desktop_trim_for_a_blank_note() {
-    let (mut host, _vault) = host();
+    let (mut host, vault) = host();
+    std::fs::write(vault.join("Mathe/Seite.md"), b"\n").unwrap();
+    std::fs::write(vault.join("Mathe/Neben.md"), b"\n").unwrap();
     host.dispatch(
         "fanotes:write-file",
         &[json!("Mathe/Seite.md"), json!("\u{FEFF}")],
@@ -669,6 +884,34 @@ fn a_recognition_model_with_a_bad_byte_still_loads() {
 }
 
 #[test]
+fn a_recognition_model_file_uses_the_desktop_checks() {
+    let (mut host, vault) = host();
+    let directory = vault.join(".fanotes");
+    std::fs::create_dir_all(&directory).unwrap();
+    let path = directory.join("recognition-model.json");
+    std::fs::create_dir(&path).unwrap();
+    assert_eq!(
+        host.dispatch("fanotes:read-recognition-model", &[])
+            .unwrap_err(),
+        "Die Datei ist keine reguläre Datei."
+    );
+    std::fs::remove_dir(&path).unwrap();
+    let file = std::fs::File::create(&path).unwrap();
+    file.set_len(20 * 1024 * 1024 + 1).unwrap();
+    assert_eq!(
+        host.dispatch("fanotes:read-recognition-model", &[])
+            .unwrap_err(),
+        "Die Datei ist zu groß."
+    );
+    std::fs::remove_file(&path).unwrap();
+    assert_eq!(
+        host.dispatch("fanotes:read-recognition-model", &[])
+            .unwrap(),
+        serde_json::Value::Null
+    );
+}
+
+#[test]
 fn a_subject_book_with_a_bad_byte_stays_in_the_list() {
     let (mut host, vault) = host();
     std::fs::create_dir_all(vault.join(".fanotes")).unwrap();
@@ -686,4 +929,89 @@ fn a_subject_book_with_a_bad_byte_stays_in_the_list() {
     std::fs::write(vault.join(".fanotes/subject-books.json"), b"{\xff").unwrap();
     let books = host.dispatch("fanotes:read-subject-books", &[]).unwrap();
     assert!(books.as_array().unwrap().is_empty());
+}
+
+#[test]
+fn a_note_link_trims_a_byte_order_mark_and_keeps_a_next_line() {
+    let (mut host, vault) = host();
+    std::fs::write(vault.join("Mathe/Seite.md"), b"\n").unwrap();
+    host.dispatch(
+        "fanotes:write-file",
+        &[json!("Mathe/Seite.md"), json!("Hallo\n")],
+    )
+    .unwrap();
+    let links = host
+        .dispatch(
+            "fanotes:write-note-links",
+            &[
+                json!("Mathe/Seite.md"),
+                json!([
+                    {
+                        "id": "nl-feff",
+                        "sourcePath": "anders.md",
+                        "targetPath": "\u{FEFF}Physik/Kraft.md",
+                        "label": "A\u{FEFF}B\u{0085}C  "
+                    },
+                    {
+                        "id": "nl-next",
+                        "sourcePath": "anders.md",
+                        "targetPath": "\u{0085}Physik/Andere.md",
+                        "label": "\u{0085}"
+                    },
+                    {
+                        "id": "nl-blank",
+                        "sourcePath": "anders.md",
+                        "targetPath": "Ordner/Ziel.md",
+                        "label": "\u{FEFF}"
+                    },
+                    {
+                        "id": "nl-tail",
+                        "sourcePath": "anders.md",
+                        "targetPath": "Ziel.md\u{0085}"
+                    }
+                ]),
+            ],
+        )
+        .unwrap();
+    assert_eq!(links.as_array().unwrap().len(), 3);
+    assert_eq!(links[0]["targetPath"], "Physik/Kraft.md");
+    assert_eq!(links[0]["label"], "A B\u{0085}C");
+    assert_eq!(links[1]["targetPath"], "\u{0085}Physik/Andere.md");
+    assert_eq!(links[1]["label"], "\u{0085}");
+    assert_eq!(links[2]["targetPath"], "Ordner/Ziel.md");
+    assert_eq!(links[2]["label"], "Ziel");
+    let stored = host
+        .dispatch("fanotes:read-note-links", &[json!("Mathe/Seite.md")])
+        .unwrap();
+    assert_eq!(stored, links);
+}
+
+#[test]
+fn a_dotfile_with_one_dot_is_not_a_note() {
+    let (mut host, vault) = host();
+    let error = host
+        .dispatch(
+            "fanotes:write-file",
+            &[json!("Mathe/.md"), json!("Hallo\n")],
+        )
+        .unwrap_err();
+    assert!(error.contains("Markdown"), "{error}");
+    assert!(!vault.join("Mathe/.md").exists());
+    std::fs::write(vault.join("Mathe/.hidden.md"), b"\n").unwrap();
+
+    host.dispatch(
+        "fanotes:write-file",
+        &[json!("Mathe/.hidden.md"), json!("Geheim\n")],
+    )
+    .unwrap();
+    assert_eq!(
+        host.dispatch("fanotes:read-file", &[json!("Mathe/.hidden.md")])
+            .unwrap(),
+        "Geheim"
+    );
+
+    let ink = host
+        .dispatch("fanotes:read-famd-ink", &[json!("Mathe/.pdf")])
+        .unwrap_err();
+    assert!(ink.contains("PDF-Notizen"), "{ink}");
 }
