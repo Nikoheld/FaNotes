@@ -1132,11 +1132,12 @@ impl Host {
         fs::rename(&source, &destination)
             .map_err(|_| "Der Eintrag konnte nicht umbenannt werden.".to_owned())?;
         let next = relative_from_root(&root, &destination);
-        if was_dir {
-            let _ = retarget_folder_colors(&root, &normalized, &next);
-        } else {
+        if !was_dir {
             move_note_companion(&root, &normalized, &next);
         }
+        // Desktop rename always rewrites folder colors. That read creates
+        // `.fanotes` or renames a leftover `.lernwerk` folder into place.
+        let _ = retarget_folder_colors(&root, &normalized, &next);
         Ok(Value::String(next))
     }
 
@@ -1192,11 +1193,10 @@ impl Host {
         fs::rename(&source, &destination)
             .map_err(|_| "Der Eintrag konnte nicht verschoben werden.".to_owned())?;
         let next = relative_from_root(&root, &destination);
-        if was_dir {
-            let _ = retarget_folder_colors(&root, &normalized, &next);
-        } else {
+        if !was_dir {
             move_note_companion(&root, &normalized, &next);
         }
+        let _ = retarget_folder_colors(&root, &normalized, &next);
         Ok(Value::String(next))
     }
 

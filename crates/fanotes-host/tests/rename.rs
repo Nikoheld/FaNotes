@@ -280,6 +280,34 @@ fn a_blank_move_target_returns_the_note_to_the_vault_root() {
 }
 
 #[test]
+fn renaming_a_note_adopts_a_legacy_internal_folder_and_its_color() {
+    let (vault, mut host) = host();
+    fs::write(vault.join("Mathe/Seite.md"), b"Hallo\n").unwrap();
+    fs::remove_dir_all(vault.join(".fanotes")).unwrap();
+    fs::create_dir_all(vault.join(".lernwerk")).unwrap();
+    fs::write(vault.join(".lernwerk/keep.txt"), b"alt").unwrap();
+    fs::write(
+        vault.join(".lernwerk/folder-colors.json"),
+        "{\n  \"version\": 1,\n  \"colors\": {\n    \"Mathe/Seite.md\": \"#112233\"\n  }\n}\n",
+    )
+    .unwrap();
+    let renamed = host
+        .dispatch(
+            "fanotes:rename-entry",
+            &[json!("Mathe/Seite.md"), json!("Blatt")],
+        )
+        .unwrap();
+    assert_eq!(renamed, "Mathe/Blatt.md");
+    assert!(vault.join("Mathe/Blatt.md").is_file());
+    assert_eq!(fs::read(vault.join(".fanotes/keep.txt")).unwrap(), b"alt");
+    assert!(!vault.join(".lernwerk").exists());
+    let colors = fs::read_to_string(vault.join(".fanotes/folder-colors.json")).unwrap();
+    assert!(colors.contains("Mathe/Blatt.md"), "{colors}");
+    assert!(!colors.contains("Mathe/Seite.md"), "{colors}");
+    assert!(colors.contains("#112233"), "{colors}");
+}
+
+#[test]
 fn a_rename_replaces_an_existing_companion_and_a_move_avoids_it() {
     let (vault, mut host) = host();
     fs::write(vault.join("Mathe/Seite.md"), b"Hallo\n").unwrap();
