@@ -283,12 +283,17 @@ fn safe_title(value: &str, fallback: &str) -> Result<String, String> {
     super::safe_entry_name_or(value, fallback)
 }
 
+/// `splitName(titleHint)` uses `path.extname` on the whole hint.
+///
+/// `Ordner/Foto.png` keeps the slash in the stem. The title check then
+/// refuses that name.
 fn file_stem(name: &str) -> &str {
-    let base = name.rsplit(['/', '\\']).next().unwrap_or(name);
-    base.rsplit_once('.')
-        .map(|(stem, _)| stem)
-        .filter(|stem| !stem.is_empty())
-        .unwrap_or(base)
+    let extension = crate::vault::posix_extname(name);
+    if extension.is_empty() {
+        name
+    } else {
+        &name[..name.len() - extension.len()]
+    }
 }
 
 fn validate_document(candidate: &Value, expected_id: &str) -> Result<Value, String> {
