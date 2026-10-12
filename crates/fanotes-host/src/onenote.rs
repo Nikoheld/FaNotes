@@ -26,6 +26,9 @@ const MAX_EXPANDED_BYTES: u64 = 6 * 1024 * 1024 * 1024;
 const MAX_OUTPUT_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 const TOOL_TIMEOUT: Duration = Duration::from_secs(12 * 60);
 const ARCHIVE_LISTING_TIMEOUT: Duration = Duration::from_secs(90);
+/// JavaScript `/u` `\s`: includes U+FEFF and excludes U+0085.
+const JS_WS: &str = r"[\t\n\u{000B}\u{000C}\r \u{00A0}\u{1680}\u{2000}-\u{200A}\u{2028}\u{2029}\u{202F}\u{205F}\u{3000}\u{FEFF}]";
+const JS_NOT_WS_OR_GT: &str = r"[^\t\n\u{000B}\u{000C}\r \u{00A0}\u{1680}\u{2000}-\u{200A}\u{2028}\u{2029}\u{202F}\u{205F}\u{3000}\u{FEFF}>]";
 
 pub fn import_onenote(host: &Host, args: &[Value]) -> Result<Value, String> {
     if let Some(path) = args
@@ -161,11 +164,11 @@ fn import_in_temp(
                 hierarchy.remove(0);
             }
             let mut directory = note_root.clone();
-            for segment in hierarchy
-                .into_iter()
-                .chain(parents.get(page_path).cloned().unwrap_or_default())
-            {
-                directory.push(safe_segment(&segment, "OneNote-Seite"));
+            for segment in note_directory_segments(
+                hierarchy,
+                parents.get(page_path).cloned().unwrap_or_default(),
+            ) {
+                directory.push(segment);
             }
             create_private_dir(&directory)
                 .map_err(|_| "Eine OneNote-Seitenhierarchie ist ungültig.".to_owned())?;
@@ -326,7 +329,7 @@ fn page_title(html: &str, page_path: &Path) -> String {
     let stripped = Regex::new(r"<[^>]+>")
         .map(|pattern| pattern.replace_all(&decoded, "").into_owned())
         .unwrap_or(decoded);
-    safe_segment(stripped.trim(), "OneNote-Seite")
+    safe_segment(crate::vault::js_trim(&stripped), "OneNote-Seite")
 }
 
 fn title_fallback(page_path: &Path) -> String {
@@ -340,22 +343,31 @@ fn title_fallback(page_path: &Path) -> String {
     }
 }
 
+/// JavaScript `\b` is an ASCII word boundary, including in a `u` pattern.
+fn js_regex(pattern: &str) -> Result<Regex, regex::Error> {
+    Regex::new(&pattern.replace(r"\b", r"(?-u:\b)"))
+}
+
 fn strip_active_html(html: &str) -> String {
     let mut html = html.to_owned();
     let patterns = [
-        r"(?is)<script\b[^>]*>.*?</script>",
-        r"(?is)<(?:iframe|frame|frameset|object|embed|audio|video|source|track|link|base|form|input|button|textarea|select)\b[^>]*>.*?</(?:iframe|frame|frameset|object|embed|audio|video|source|track|link|base|form|input|button|textarea|select)>",
-        r"(?is)<(?:iframe|frame|frameset|object|embed|audio|video|source|track|link|base|form|input|button|textarea|select)\b[^>]*/?>",
-        r#"(?i)\s+on[a-z][a-z0-9_-]*\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)"#,
-        r#"(?i)\s+(?:href|action|formaction|poster)\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)"#,
-        r"(?i)(?:javascript|vbscript)\s*:",
-        r"(?i)@import\s+[^;]+;?",
-        r"(?i)url\s*\([^)]*\)",
-        r"(?i)expression\s*\([^)]*\)",
+        r"(?is)<script\b[^>]*>.*?</script>".to_owned(),
+        r"(?is)<(?:iframe|frame|frameset|object|embed|audio|video|source|track|link|base|form|input|button|textarea|select)\b[^>]*>.*?</(?:iframe|frame|frameset|object|embed|audio|video|source|track|link|base|form|input|button|textarea|select)>".to_owned(),
+        r"(?is)<(?:iframe|frame|frameset|object|embed|audio|video|source|track|link|base|form|input|button|textarea|select)\b[^>]*/?>".to_owned(),
+        format!(
+            r#"(?i){JS_WS}+on[a-z][a-z0-9_-]*{JS_WS}*={JS_WS}*(?:"[^"]*"|'[^']*'|{JS_NOT_WS_OR_GT}+)"#
+        ),
+        format!(
+            r#"(?i){JS_WS}+(?:href|action|formaction|poster){JS_WS}*={JS_WS}*(?:"[^"]*"|'[^']*'|{JS_NOT_WS_OR_GT}+)"#
+        ),
+        format!(r"(?i)(?:javascript|vbscript){JS_WS}*:"),
+        format!(r"(?i)@import{JS_WS}+[^;]+;?"),
+        format!(r"(?i)url{JS_WS}*\([^)]*\)"),
+        format!(r"(?i)expression{JS_WS}*\([^)]*\)"),
     ];
-    for pattern in patterns {
-        if let Ok(regex) = Regex::new(pattern) {
-            let replacement = if pattern.contains("url\\s*") {
+    for pattern in &patterns {
+        if let Ok(regex) = js_regex(pattern) {
+            let replacement = if pattern.starts_with("(?i)url") {
                 "none"
             } else {
                 ""
@@ -373,7 +385,7 @@ fn inline_images(html: &str, page_path: &Path, output_root: &Path) -> String {
         (r#"(?i)(<img\b[^>]*\bsrc=")([^"]+)""#, "\""),
         (r#"(?i)(<img\b[^>]*\bsrc=')([^']+)'"#, "'"),
     ] {
-        let Ok(regex) = Regex::new(pattern) else {
+        let Ok(regex) = js_regex(pattern) else {
             continue;
         };
         let mut replacements = HashMap::new();
@@ -487,11 +499,11 @@ fn extract_search_text(html: &str) -> String {
         r"(?is)<svg\b[^>]*>.*?</svg>",
         r"(?is)<head\b[^>]*>.*?</head>",
     ] {
-        if let Ok(regex) = Regex::new(pattern) {
+        if let Ok(regex) = js_regex(pattern) {
             text = regex.replace_all(&text, " ").into_owned();
         }
     }
-    if let Ok(regex) = Regex::new(r"(?i)<br\s*/?\s*>") {
+    if let Ok(regex) = Regex::new(&format!(r"(?i)<br{JS_WS}*/?{JS_WS}*>")) {
         text = regex.replace_all(&text, "\n").into_owned();
     }
     if let Ok(regex) = Regex::new(r"(?i)</(?:p|h[1-6]|li|tr|td|div|table)>") {
@@ -502,9 +514,9 @@ fn extract_search_text(html: &str) -> String {
     }
     let text = decode_entities(&text);
     let text = replace_all(&text, r"[ \t]+", " ");
-    let text = replace_all(&text, r"\s*\n\s*", "\n");
+    let text = replace_all(&text, &format!(r"{JS_WS}*\n{JS_WS}*"), "\n");
     let text = replace_all(&text, r"\n{3,}", "\n\n");
-    crate::vault::truncate_utf16(text.trim(), 2_000_000)
+    crate::vault::truncate_utf16(crate::vault::js_trim(&text), 2_000_000)
 }
 
 fn replace_all(text: &str, pattern: &str, replacement: &str) -> String {
@@ -515,7 +527,8 @@ fn replace_all(text: &str, pattern: &str, replacement: &str) -> String {
 
 fn page_dimensions(html: &str) -> (i64, i64) {
     let measured = |name: &str| -> Vec<f64> {
-        let pattern = format!(r"(?i)(?:^|[;\s\x22])(?:max-)?{name}\s*:\s*(-?[0-9.]+)px");
+        let pattern =
+            format!(r"(?i)(?:^|[;{JS_WS}\x22])(?:max-)?{name}{JS_WS}*:{JS_WS}*(-?[0-9.]+)px");
         Regex::new(&pattern)
             .map(|regex| {
                 regex
@@ -531,7 +544,7 @@ fn page_dimensions(html: &str) -> (i64, i64) {
     };
     let max_or =
         |values: Vec<f64>, fallback: f64| values.into_iter().reduce(f64::max).unwrap_or(fallback);
-    let blocks = Regex::new(r"(?i)<(?:p|li|tr|h[1-6])\b")
+    let blocks = js_regex(r"(?i)<(?:p|li|tr|h[1-6])\b")
         .map(|regex| regex.find_iter(html).count())
         .unwrap_or(0);
     let width = (max_or(measured("left"), 0.0) + max_or(measured("width"), 720.0) + 96.0)
@@ -543,13 +556,13 @@ fn page_dimensions(html: &str) -> (i64, i64) {
 }
 
 fn preview_is_nav(html: &str) -> bool {
-    Regex::new(r"(?i)<nav\b").is_ok_and(|regex| regex.is_match(html))
-        || Regex::new(r"(?i)<iframe\b").is_ok_and(|regex| regex.is_match(html))
+    js_regex(r"(?i)<nav\b").is_ok_and(|regex| regex.is_match(html))
+        || js_regex(r"(?i)<iframe\b").is_ok_and(|regex| regex.is_match(html))
 }
 
 fn page_parents(html_files: &[PathBuf], output_root: &Path) -> HashMap<PathBuf, Vec<String>> {
     let mut parents = HashMap::new();
-    let Ok(anchor) = Regex::new(r"(?is)<a\b([^>]*)>(.*?)</a>") else {
+    let Ok(anchor) = js_regex(r"(?is)<a\b([^>]*)>(.*?)</a>") else {
         return parents;
     };
     for entry in html_files {
@@ -559,7 +572,7 @@ fn page_parents(html_files: &[PathBuf], output_root: &Path) -> HashMap<PathBuf, 
         if !preview_is_nav(&html) && !html.to_ascii_lowercase().contains("<nav") {
             continue;
         }
-        if !Regex::new(r"(?i)<nav\b").is_ok_and(|regex| regex.is_match(&html)) {
+        if !js_regex(r"(?i)<nav\b").is_ok_and(|regex| regex.is_match(&html)) {
             continue;
         }
         let mut stack = Vec::new();
@@ -568,7 +581,7 @@ fn page_parents(html_files: &[PathBuf], output_root: &Path) -> HashMap<PathBuf, 
             let Some(href) = attr(attributes, "href") else {
                 continue;
             };
-            let level = outline_level(attr(attributes, "class").as_deref());
+            let level = outline_level(attributes);
             let decoded = urlencoding_decode(&href);
             let target = entry.parent().unwrap_or(output_root).join(&decoded);
             if !image_stays_inside(output_root, &target) {
@@ -604,31 +617,86 @@ fn page_parents(html_files: &[PathBuf], output_root: &Path) -> HashMap<PathBuf, 
     parents
 }
 
-fn outline_level(class: Option<&str>) -> usize {
-    class
-        .unwrap_or("")
-        .split_whitespace()
-        .find_map(|token| {
-            let bytes = token.as_bytes();
-            (bytes.len() == 2
-                && bytes[0].eq_ignore_ascii_case(&b'l')
-                && (b'1'..=b'9').contains(&bytes[1]))
-            .then_some((bytes[1] - b'0') as usize)
-        })
-        .unwrap_or(1)
+/// Desktop pattern: the last `\bl[1-9]\b` inside the first matching `class`.
+///
+/// Word boundaries are ASCII, so a hyphen or a byte-order mark still counts.
+/// The `regex` crate has no backreference, so the quote pair is matched here.
+fn outline_level(attributes: &str) -> usize {
+    let bytes = attributes.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        if class_attribute_at(bytes, index) {
+            let quote_at = index + 6;
+            if quote_at < bytes.len() && matches!(bytes[quote_at], b'"' | b'\'') {
+                let quote = bytes[quote_at];
+                let start = quote_at + 1;
+                if let Some(end) = bytes[start..].iter().position(|byte| *byte == quote) {
+                    let interior = &attributes[start..start + end];
+                    let other = if quote == b'"' { '\'' } else { '"' };
+                    if !interior.contains(other) {
+                        if let Some(level) = last_outline_digit(interior) {
+                            return level;
+                        }
+                    }
+                }
+            }
+        }
+        index += 1;
+    }
+    1
+}
+
+fn class_attribute_at(bytes: &[u8], index: usize) -> bool {
+    let boundary = index == 0 || !is_ascii_word(bytes[index - 1]);
+    boundary && index + 6 <= bytes.len() && bytes[index..index + 6].eq_ignore_ascii_case(b"class=")
+}
+
+fn last_outline_digit(interior: &str) -> Option<usize> {
+    let bytes = interior.as_bytes();
+    let mut found = None;
+    for index in 0..bytes.len() {
+        let boundary = index == 0 || !is_ascii_word(bytes[index - 1]);
+        if !boundary || index + 2 > bytes.len() || !bytes[index].eq_ignore_ascii_case(&b'l') {
+            continue;
+        }
+        let digit = bytes[index + 1];
+        let after = index + 2;
+        if (b'1'..=b'9').contains(&digit) && (after == bytes.len() || !is_ascii_word(bytes[after]))
+        {
+            found = Some((digit - b'0') as usize);
+        }
+    }
+    found
+}
+
+fn is_ascii_word(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || byte == b'_'
 }
 
 fn attr(attributes: &str, name: &str) -> Option<String> {
-    let needle = format!("{name}=");
+    let needle = format!("{name}=").to_ascii_lowercase();
     let lower = attributes.to_ascii_lowercase();
-    let index = lower.find(&needle.to_ascii_lowercase())?;
+    let bytes = lower.as_bytes();
+    let mut search_from = 0;
+    let index = loop {
+        let found = lower[search_from..].find(&needle)? + search_from;
+        let boundary = found == 0 || !is_ascii_word(bytes[found - 1]);
+        if boundary {
+            break found;
+        }
+        search_from = found + 1;
+    };
     let rest = &attributes[index + needle.len()..];
     let mut chars = rest.chars();
     let quote = chars.next()?;
     if quote != '"' && quote != '\'' {
         return None;
     }
-    Some(rest[quote.len_utf8()..].split(quote).next()?.to_owned())
+    let value = rest[quote.len_utf8()..].split(quote).next()?;
+    if value.is_empty() {
+        return None;
+    }
+    Some(value.to_owned())
 }
 
 fn prepare_input(input: &Path, temporary: &Path, seven_zip: &Path) -> Result<Vec<PathBuf>, String> {
@@ -686,7 +754,7 @@ fn prepare_input(input: &Path, temporary: &Path, seven_zip: &Path) -> Result<Vec
 
 fn validate_listing(stdout: &str) -> Result<(), String> {
     let mut count = 0usize;
-    let mut bytes = 0u64;
+    let mut bytes = 0.0f64;
     let stdout = stdout.replace("\r\n", "\n");
     for record in stdout.split("\n\n") {
         let mut fields = HashMap::new();
@@ -695,10 +763,12 @@ fn validate_listing(stdout: &str) -> Result<(), String> {
                 fields.insert(key.to_owned(), value.to_owned());
             }
         }
-        let Some(entry_path) = fields.get("Path") else {
+        // An empty path is ignored. `Type` skips a record only when it has text,
+        // so `Type =` still counts the file.
+        let Some(entry_path) = fields.get("Path").filter(|path| !path.is_empty()) else {
             continue;
         };
-        if fields.get("Type").is_some() {
+        if fields.get("Type").is_some_and(|kind| !kind.is_empty()) {
             continue;
         }
         let normalized = entry_path.replace('\\', "/");
@@ -706,13 +776,14 @@ fn validate_listing(stdout: &str) -> Result<(), String> {
             return Err("Das OneNote-Archiv enthält einen unsicheren Pfad.".to_owned());
         }
         if fields.get("Folder").map(String::as_str) != Some("+") {
-            bytes += fields
-                .get("Size")
-                .and_then(|value| value.parse::<u64>().ok())
-                .unwrap_or(0);
+            let size = fields.get("Size").map(String::as_str).unwrap_or("0");
+            bytes += crate::vault::js_tonumber(size).unwrap_or(f64::NAN);
         }
         count += 1;
-        if count > 20_000 || bytes > 6 * 1024 * 1024 * 1024 {
+        if count > MAX_ARCHIVE_ENTRIES
+            || !safe_archive_bytes(bytes)
+            || bytes > MAX_EXPANDED_BYTES as f64
+        {
             return Err("Das OneNote-Archiv überschreitet die sicheren Importgrenzen.".to_owned());
         }
     }
@@ -721,6 +792,11 @@ fn validate_listing(stdout: &str) -> Result<(), String> {
     } else {
         Ok(())
     }
+}
+
+/// `Number(size)` then `Number.isSafeInteger` on the running total.
+fn safe_archive_bytes(bytes: f64) -> bool {
+    bytes.is_finite() && bytes.fract() == 0.0 && bytes.abs() <= 9_007_199_254_740_991.0
 }
 
 fn render_inputs(
@@ -790,7 +866,7 @@ fn render_sections(
             if name.is_empty() || name == "." || name == ".." {
                 continue;
             }
-            destination.push(safe_segment(name, "Abschnitt"));
+            destination.push(import_folder_segment(name));
         }
         create_private_dir(&destination)
             .map_err(|_| "Der OneNote-Import konnte nicht vorbereitet werden.".to_owned())?;
@@ -1094,7 +1170,7 @@ fn tool_failure_message(
         .unwrap_or_default();
     format!(
         "{label} ist fehlgeschlagen{signal}: {}",
-        keep_tail(chosen.trim(), 1800)
+        keep_tail(crate::vault::js_trim(chosen), 1800)
     )
 }
 
@@ -1281,6 +1357,20 @@ fn common_ancestor(paths: &[PathBuf]) -> PathBuf {
     ancestor
 }
 
+/// Export folders and outline parents use the desktop default, `Unbenannt`.
+/// Page titles and markdown file names keep the `OneNote-Seite` fallback.
+fn import_folder_segment(segment: &str) -> String {
+    safe_segment(segment, "Unbenannt")
+}
+
+fn note_directory_segments(hierarchy: Vec<String>, parents: Vec<String>) -> Vec<String> {
+    hierarchy
+        .into_iter()
+        .chain(parents)
+        .map(|segment| import_folder_segment(&segment))
+        .collect()
+}
+
 fn safe_segment(value: &str, fallback: &str) -> String {
     use unicode_normalization::UnicodeNormalization;
     let value: String = value.nfc().collect();
@@ -1298,12 +1388,10 @@ fn safe_segment(value: &str, fallback: &str) -> String {
             }
         })
         .collect();
-    let collapsed = Regex::new(r"\s+")
-        .map(|regex| regex.replace_all(cleaned.trim(), " ").into_owned())
-        .unwrap_or_else(|_| cleaned.trim().to_owned());
-    let trimmed = collapsed.trim_end_matches(['.', ' ']).trim();
+    let collapsed = collapse_js_spaces(&cleaned);
+    let trimmed = crate::vault::js_trim(collapsed.trim_end_matches(['.', ' ']));
     let trimmed = crate::vault::truncate_utf16(trimmed, 120);
-    let device = trimmed.split('.').next().unwrap_or("").trim();
+    let device = crate::vault::js_trim(trimmed.split('.').next().unwrap_or(""));
     let reserved = matches!(
         device.to_ascii_lowercase().as_str(),
         "con" | "prn" | "aux" | "nul"
@@ -1316,6 +1404,26 @@ fn safe_segment(value: &str, fallback: &str) -> String {
     } else {
         trimmed.to_owned()
     }
+}
+
+fn collapse_js_spaces(value: &str) -> String {
+    let mut collapsed = String::new();
+    let mut pending = false;
+    for character in value.chars() {
+        if fanotes_famd::is_js_whitespace(character) {
+            pending = true;
+            continue;
+        }
+        if pending {
+            collapsed.push(' ');
+            pending = false;
+        }
+        collapsed.push(character);
+    }
+    if pending {
+        collapsed.push(' ');
+    }
+    collapsed
 }
 
 fn markdown_title(value: &str) -> String {
@@ -1332,39 +1440,69 @@ fn markdown_title(value: &str) -> String {
 }
 
 fn decode_entities(value: &str) -> String {
+    // The desktop replaces hex, then decimal, then the six named entities.
+    // A later pass sees text produced by an earlier one, so `&#38;amp;` becomes `&`.
+    let value = replace_entities(value, EntityPass::Hex);
+    let value = replace_entities(&value, EntityPass::Decimal);
+    replace_entities(&value, EntityPass::Named)
+}
+
+enum EntityPass {
+    Hex,
+    Decimal,
+    Named,
+}
+
+fn replace_entities(value: &str, pass: EntityPass) -> String {
     let mut output = String::new();
     let mut rest = value;
     while let Some(start) = rest.find('&') {
         output.push_str(&rest[..start]);
-        rest = &rest[start..];
-        let Some(end) = rest.find(';') else {
-            output.push_str(rest);
+        let after = &rest[start + 1..];
+        let Some(end) = after.find(';') else {
+            output.push_str(&rest[start..]);
             return output;
         };
-        let entity = &rest[1..end];
-        let decoded = if let Some(hex) = entity
-            .strip_prefix("#x")
-            .or_else(|| entity.strip_prefix("#X"))
-        {
-            code_point(u32::from_str_radix(hex, 16).ok())
-        } else if let Some(decimal) = entity.strip_prefix('#') {
-            code_point(decimal.parse().ok())
+        if let Some(decoded) = decode_one_entity(&after[..end], &pass) {
+            output.push_str(&decoded);
+            rest = &after[end + 1..];
         } else {
-            match entity.to_ascii_lowercase().as_str() {
-                "nbsp" => " ".to_owned(),
-                "amp" => "&".to_owned(),
-                "lt" => "<".to_owned(),
-                "gt" => ">".to_owned(),
-                "quot" => "\"".to_owned(),
-                "apos" => "'".to_owned(),
-                _ => format!("&{entity};"),
-            }
-        };
-        output.push_str(&decoded);
-        rest = &rest[end + 1..];
+            output.push('&');
+            rest = after;
+        }
     }
     output.push_str(rest);
     output
+}
+
+fn decode_one_entity(entity: &str, pass: &EntityPass) -> Option<String> {
+    match pass {
+        EntityPass::Hex => {
+            let hex = entity
+                .strip_prefix("#x")
+                .or_else(|| entity.strip_prefix("#X"))?;
+            if hex.is_empty() || !hex.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+                return None;
+            }
+            Some(code_point(u32::from_str_radix(hex, 16).ok()))
+        }
+        EntityPass::Decimal => {
+            let decimal = entity.strip_prefix('#')?;
+            if decimal.is_empty() || !decimal.bytes().all(|byte| byte.is_ascii_digit()) {
+                return None;
+            }
+            Some(code_point(decimal.parse().ok()))
+        }
+        EntityPass::Named => match entity.to_ascii_lowercase().as_str() {
+            "nbsp" => Some(" ".to_owned()),
+            "amp" => Some("&".to_owned()),
+            "lt" => Some("<".to_owned()),
+            "gt" => Some(">".to_owned()),
+            "quot" => Some("\"".to_owned()),
+            "apos" => Some("'".to_owned()),
+            _ => None,
+        },
+    }
 }
 
 fn code_point(point: Option<u32>) -> String {
@@ -1378,20 +1516,23 @@ fn code_point(point: Option<u32>) -> String {
     }
 }
 
+/// `decodeURIComponent`. One bad escape keeps the original string.
 fn urlencoding_decode(value: &str) -> String {
     let bytes = value.as_bytes();
     let mut output = Vec::new();
     let mut index = 0;
     while index < bytes.len() {
-        if bytes[index] == b'%' && index + 2 < bytes.len() {
-            if let Ok(byte) = u8::from_str_radix(
-                std::str::from_utf8(&bytes[index + 1..index + 3]).unwrap_or(""),
-                16,
-            ) {
-                output.push(byte);
-                index += 3;
-                continue;
+        if bytes[index] == b'%' {
+            if index + 2 >= bytes.len() {
+                return value.to_owned();
             }
+            let hex = std::str::from_utf8(&bytes[index + 1..index + 3]).unwrap_or("");
+            let Ok(byte) = u8::from_str_radix(hex, 16) else {
+                return value.to_owned();
+            };
+            output.push(byte);
+            index += 3;
+            continue;
         }
         output.push(bytes[index]);
         index += 1;
@@ -1522,9 +1663,11 @@ fn civil_date(mut days: u64) -> (i32, u32, u32) {
 #[cfg(test)]
 mod tests {
     use super::{
-        common_ancestor, extract_search_text, inline_images, page_dimensions, page_parents,
-        page_title, render_inputs, safe_segment, sanitize_page, stored_relative_path,
-        tool_failure_message, tool_limit, validate_listing, walk_limited,
+        common_ancestor, extract_search_text, import_folder_segment, inline_images,
+        note_directory_segments, outline_level, page_dimensions, page_parents, page_title,
+        preview_is_nav, render_inputs, safe_segment, sanitize_page, stored_relative_path,
+        strip_active_html, tool_failure_message, tool_limit, urlencoding_decode, validate_listing,
+        walk_limited,
     };
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -1602,6 +1745,27 @@ mod tests {
     }
 
     #[test]
+    fn an_import_folder_uses_the_unnamed_fallback() {
+        assert_eq!(import_folder_segment(""), "Unbenannt");
+        assert_eq!(import_folder_segment("CON"), "Unbenannt");
+        assert_eq!(import_folder_segment(".."), "Unbenannt");
+        assert_eq!(import_folder_segment("Kapitel"), "Kapitel");
+        assert_eq!(import_folder_segment("OneNote-Seite"), "OneNote-Seite");
+        assert_eq!(
+            note_directory_segments(
+                vec!["CON".to_owned(), "Kapitel".to_owned()],
+                vec![String::new(), "Echt".to_owned()],
+            ),
+            vec![
+                "Unbenannt".to_owned(),
+                "Kapitel".to_owned(),
+                "Unbenannt".to_owned(),
+                "Echt".to_owned(),
+            ]
+        );
+    }
+
+    #[test]
     fn a_reserved_import_folder_uses_the_desktop_path_fallback() {
         assert_eq!(
             stored_relative_path(Path::new("/notes/CON/photo.png"), Path::new("/notes")),
@@ -1637,6 +1801,9 @@ mod tests {
             safe_segment(&format!("Seite{}", '\u{007f}'), "fallback"),
             "Seite"
         );
+        assert_eq!(safe_segment("A\u{FEFF}B", "fallback"), "A B");
+        assert_eq!(safe_segment("\u{FEFF}Seite", "fallback"), "Seite");
+        assert_eq!(safe_segment("A\u{0085}B", "fallback"), "A\u{0085}B");
     }
 
     #[test]
@@ -1644,12 +1811,61 @@ mod tests {
         assert_eq!(extract_search_text("a\n\n\nb"), "a\nb");
         assert_eq!(extract_search_text("a\n\n\n\nb"), "a\nb");
         assert_eq!(extract_search_text("a\n \n \nb"), "a\nb");
+        assert_eq!(extract_search_text("a\u{FEFF}\nb"), "a\nb");
+        assert_eq!(extract_search_text("a\u{0085}\nb"), "a\u{0085}\nb");
+        assert_eq!(extract_search_text("<br\u{FEFF}/>Hi"), "Hi");
+        assert_eq!(extract_search_text("&#65;"), "A");
+        assert_eq!(extract_search_text("&#x26;amp;"), "&");
+        assert_eq!(extract_search_text("&#38;amp;"), "&");
+        assert_eq!(extract_search_text("A&nbsp;B"), "A B");
+        assert_eq!(extract_search_text("&#x;"), "&#x;");
+        assert_eq!(extract_search_text("&#xZZ;"), "&#xZZ;");
+        assert_eq!(urlencoding_decode("a%20b"), "a b");
+        assert_eq!(urlencoding_decode("caf%C3%A9"), "café");
+        assert_eq!(urlencoding_decode("%E2%9C%93"), "✓");
+        assert_eq!(urlencoding_decode("a%20b%"), "a%20b%");
+        assert_eq!(urlencoding_decode("a%2Gb"), "a%2Gb");
+        assert_eq!(urlencoding_decode("%E2%9C"), "%E2%9C");
+        assert_eq!(urlencoding_decode("%"), "%");
+        assert_eq!(extract_search_text("&unknown;"), "&unknown;");
         assert_eq!(
             extract_search_text("<p>Eins</p>\n<p>Zwei</p>"),
             "Eins\nZwei"
         );
         let long = "😀".repeat(1_000_001);
         assert_eq!(extract_search_text(&long).encode_utf16().count(), 2_000_000);
+    }
+
+    #[test]
+    fn an_onenote_tag_boundary_is_ascii() {
+        assert!(preview_is_nav("<navä>"));
+        assert!(preview_is_nav("<IFRAMEÄ>"));
+        assert!(preview_is_nav("<nav>"));
+        assert!(!preview_is_nav("<navigation>"));
+        assert!(!preview_is_nav("<iframeextra>"));
+        assert!(!strip_active_html("<scriptä>alert(1)</script>").contains("alert"));
+        assert!(strip_active_html("<scripted>alert(1)</scripted>").contains("alert"));
+        assert_eq!(
+            extract_search_text("<styleä>SECRET</style> visible"),
+            "visible"
+        );
+        assert_eq!(
+            extract_search_text("<styled>SECRET</styled> visible"),
+            "SECRET visible"
+        );
+    }
+
+    #[test]
+    fn an_event_handler_after_a_byte_order_mark_is_removed() {
+        let stripped = strip_active_html("<div\u{FEFF}onclick=\"alert(1)\">x</div>");
+        assert!(!stripped.to_ascii_lowercase().contains("onclick"));
+        assert!(stripped.contains(">x</div>"));
+        let kept = strip_active_html("<div\u{0085}onclick=\"alert(1)\">x</div>");
+        assert!(kept.contains("onclick"));
+        let styled = strip_active_html("a{background:url(javascript:alert(1))}");
+        assert!(!styled.contains("javascript:"));
+        assert!(!styled.contains("url("));
+        assert!(styled.contains("none"));
     }
 
     #[test]
@@ -1715,9 +1931,14 @@ mod tests {
             &nav,
             r#"<nav>
 <a class="l1" href="a.html" title="Kapitel">Kapitel</a>
-<a class="L2" href="c.html" title="Zweig">Zweig</a>
+<a class="l9 l2" href="c.html" title="Zweig">Zweig</a>
+<a class="foo-l2" href="d.html" title="Bindestrich">Bindestrich</a>
 <a class="l10" href="b.html" title="Zehn">Zehn</a>
 <a class="l1" href="../../secret.html" title="Draussen">Draussen</a>
+<a class="l1" myhref="nope.html" href="real.html" title="Echt">Echt</a>
+<a class="l2" href="" title="Leer">Leer</a>
+<a class="l2" href="inner.html" title="">Inner text</a>
+<a class="l3" href="leaf.html">Leaf</a>
 </nav>"#,
         )
         .unwrap();
@@ -1730,8 +1951,30 @@ mod tests {
         };
         assert_eq!(parent_of("a.html"), Some(Vec::<String>::new()));
         assert_eq!(parent_of("c.html"), Some(vec!["Kapitel".to_owned()]));
+        assert_eq!(parent_of("d.html"), Some(vec!["Kapitel".to_owned()]));
         assert_eq!(parent_of("b.html"), Some(Vec::<String>::new()));
         assert!(parent_of("secret.html").is_none());
+        assert!(parent_of("nope.html").is_none());
+        assert_eq!(parent_of("real.html"), Some(Vec::<String>::new()));
+        assert_eq!(
+            parent_of("leaf.html"),
+            Some(vec!["Echt".to_owned(), "Inner text".to_owned()])
+        );
+        assert_eq!(outline_level(r#" class="l2 l9""#), 9);
+        assert_eq!(outline_level(" class=\"l2\u{FEFF}\""), 2);
+        assert_eq!(outline_level(" class=\"l2\u{0085}\""), 2);
+        assert_eq!(outline_level(" class=\"outline\u{FEFF}l3\""), 3);
+        assert_eq!(outline_level(r#" class="äl2""#), 2);
+        assert_eq!(outline_level(r#" class="l2ä""#), 2);
+        assert_eq!(outline_level(r#" class="xl2""#), 1);
+        assert_eq!(outline_level(r#" class="l2extra""#), 1);
+        assert_eq!(outline_level(r#" class="l10""#), 1);
+        assert_eq!(outline_level(r#" class = "l4""#), 1);
+        assert_eq!(outline_level(r#" CLASS="l5""#), 5);
+        assert_eq!(outline_level(r#" class='l3'"#), 3);
+        assert_eq!(outline_level(r#" data-class="l6" class="page""#), 6);
+        assert_eq!(outline_level(r#" myclass="l6""#), 1);
+        assert_eq!(outline_level(r#" class="_l2""#), 1);
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -1788,6 +2031,29 @@ mod tests {
             assert!(linked.contains("Symbolische"));
         }
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn an_archive_size_uses_javascript_number() {
+        let limited = "Das OneNote-Archiv überschreitet die sicheren Importgrenzen.";
+        assert_eq!(
+            validate_listing("Path = a.txt\nSize = 1.5\n").unwrap_err(),
+            limited
+        );
+        assert_eq!(
+            validate_listing("Path = a.txt\nSize = abc\n").unwrap_err(),
+            limited
+        );
+        assert!(validate_listing("Path = a.txt\nSize = 1e2\n").is_ok());
+        assert!(validate_listing("Path = a.txt\nSize =  12 \n").is_ok());
+        assert!(validate_listing("Path = a.txt\nSize = 1.0\n").is_ok());
+        assert!(validate_listing("Path = dir\nFolder = +\nSize = 1.5\n").is_ok());
+        assert!(validate_listing("Path = \nSize = 1\n\nPath = note.one\nSize = 2\n").is_ok());
+        assert!(validate_listing("Path = note.one\nType = \nSize = 1\n").is_ok());
+        assert_eq!(
+            validate_listing("Path = archive.zip\nType = zip\n").unwrap_err(),
+            "Das OneNote-Archiv enthält keine importierbaren Dateien."
+        );
     }
 
     #[test]
