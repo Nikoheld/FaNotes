@@ -343,6 +343,11 @@ fn title_fallback(page_path: &Path) -> String {
     }
 }
 
+/// JavaScript `\b` is an ASCII word boundary, including in a `u` pattern.
+fn js_regex(pattern: &str) -> Result<Regex, regex::Error> {
+    Regex::new(&pattern.replace(r"\b", r"(?-u:\b)"))
+}
+
 fn strip_active_html(html: &str) -> String {
     let mut html = html.to_owned();
     let patterns = [
@@ -361,7 +366,7 @@ fn strip_active_html(html: &str) -> String {
         format!(r"(?i)expression{JS_WS}*\([^)]*\)"),
     ];
     for pattern in &patterns {
-        if let Ok(regex) = Regex::new(pattern) {
+        if let Ok(regex) = js_regex(pattern) {
             let replacement = if pattern.starts_with("(?i)url") {
                 "none"
             } else {
@@ -380,7 +385,7 @@ fn inline_images(html: &str, page_path: &Path, output_root: &Path) -> String {
         (r#"(?i)(<img\b[^>]*\bsrc=")([^"]+)""#, "\""),
         (r#"(?i)(<img\b[^>]*\bsrc=')([^']+)'"#, "'"),
     ] {
-        let Ok(regex) = Regex::new(pattern) else {
+        let Ok(regex) = js_regex(pattern) else {
             continue;
         };
         let mut replacements = HashMap::new();
@@ -494,7 +499,7 @@ fn extract_search_text(html: &str) -> String {
         r"(?is)<svg\b[^>]*>.*?</svg>",
         r"(?is)<head\b[^>]*>.*?</head>",
     ] {
-        if let Ok(regex) = Regex::new(pattern) {
+        if let Ok(regex) = js_regex(pattern) {
             text = regex.replace_all(&text, " ").into_owned();
         }
     }
@@ -539,7 +544,7 @@ fn page_dimensions(html: &str) -> (i64, i64) {
     };
     let max_or =
         |values: Vec<f64>, fallback: f64| values.into_iter().reduce(f64::max).unwrap_or(fallback);
-    let blocks = Regex::new(r"(?i)<(?:p|li|tr|h[1-6])\b")
+    let blocks = js_regex(r"(?i)<(?:p|li|tr|h[1-6])\b")
         .map(|regex| regex.find_iter(html).count())
         .unwrap_or(0);
     let width = (max_or(measured("left"), 0.0) + max_or(measured("width"), 720.0) + 96.0)
@@ -551,13 +556,13 @@ fn page_dimensions(html: &str) -> (i64, i64) {
 }
 
 fn preview_is_nav(html: &str) -> bool {
-    Regex::new(r"(?i)<nav\b").is_ok_and(|regex| regex.is_match(html))
-        || Regex::new(r"(?i)<iframe\b").is_ok_and(|regex| regex.is_match(html))
+    js_regex(r"(?i)<nav\b").is_ok_and(|regex| regex.is_match(html))
+        || js_regex(r"(?i)<iframe\b").is_ok_and(|regex| regex.is_match(html))
 }
 
 fn page_parents(html_files: &[PathBuf], output_root: &Path) -> HashMap<PathBuf, Vec<String>> {
     let mut parents = HashMap::new();
-    let Ok(anchor) = Regex::new(r"(?is)<a\b([^>]*)>(.*?)</a>") else {
+    let Ok(anchor) = js_regex(r"(?is)<a\b([^>]*)>(.*?)</a>") else {
         return parents;
     };
     for entry in html_files {
@@ -567,7 +572,7 @@ fn page_parents(html_files: &[PathBuf], output_root: &Path) -> HashMap<PathBuf, 
         if !preview_is_nav(&html) && !html.to_ascii_lowercase().contains("<nav") {
             continue;
         }
-        if !Regex::new(r"(?i)<nav\b").is_ok_and(|regex| regex.is_match(&html)) {
+        if !js_regex(r"(?i)<nav\b").is_ok_and(|regex| regex.is_match(&html)) {
             continue;
         }
         let mut stack = Vec::new();
@@ -1652,8 +1657,9 @@ mod tests {
     use super::{
         common_ancestor, extract_search_text, import_folder_segment, inline_images,
         note_directory_segments, outline_level, page_dimensions, page_parents, page_title,
-        render_inputs, safe_segment, sanitize_page, stored_relative_path, strip_active_html,
-        tool_failure_message, tool_limit, urlencoding_decode, validate_listing, walk_limited,
+        preview_is_nav, render_inputs, safe_segment, sanitize_page, stored_relative_path,
+        strip_active_html, tool_failure_message, tool_limit, urlencoding_decode, validate_listing,
+        walk_limited,
     };
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -1820,6 +1826,25 @@ mod tests {
         );
         let long = "😀".repeat(1_000_001);
         assert_eq!(extract_search_text(&long).encode_utf16().count(), 2_000_000);
+    }
+
+    #[test]
+    fn an_onenote_tag_boundary_is_ascii() {
+        assert!(preview_is_nav("<navä>"));
+        assert!(preview_is_nav("<IFRAMEÄ>"));
+        assert!(preview_is_nav("<nav>"));
+        assert!(!preview_is_nav("<navigation>"));
+        assert!(!preview_is_nav("<iframeextra>"));
+        assert!(!strip_active_html("<scriptä>alert(1)</script>").contains("alert"));
+        assert!(strip_active_html("<scripted>alert(1)</scripted>").contains("alert"));
+        assert_eq!(
+            extract_search_text("<styleä>SECRET</style> visible"),
+            "visible"
+        );
+        assert_eq!(
+            extract_search_text("<styled>SECRET</styled> visible"),
+            "SECRET visible"
+        );
     }
 
     #[test]
