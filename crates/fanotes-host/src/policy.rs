@@ -1,18 +1,17 @@
 //! Add-on SSRF policy and local AI URL policy, matching `addons.cjs` and `ai-provider.cjs`.
 
-const ADDON_PRIVATE: &str = "Add-ons dürfen keine privaten oder lokalen Adressen aufrufen.";
 const ADDON_HTTPS: &str = "Add-ons dürfen nur öffentliche https-Adressen aufrufen.";
 
 pub fn addon_request_allowed(raw_url: &str) -> Result<(), String> {
     let url = url::Url::parse(raw_url).map_err(|_| "Ungültige URL.".to_owned())?;
+    // The desktop uses one message for scheme, credentials, and a private host.
+    // DNS answers that point at a private address use the private-address message.
     if url.scheme() != "https"
         || !url.username().is_empty()
         || url.password().is_some_and(|password| !password.is_empty())
+        || is_private_host(url.host_str().unwrap_or(""))
     {
         return Err(ADDON_HTTPS.to_owned());
-    }
-    if is_private_host(url.host_str().unwrap_or("")) {
-        return Err(ADDON_PRIVATE.to_owned());
     }
     Ok(())
 }
@@ -110,13 +109,38 @@ fn is_private_host(hostname: &str) -> bool {
     {
         return true;
     }
-    if let Some(address) = parse_ipv4(&host) {
+    if let Some(address) = parse_net_ipv4(&host) {
         return is_private_ipv4(address);
     }
     if host.contains(':') {
         return is_private_ipv6(&host);
     }
     false
+}
+
+/// `net.isIP(host) === 4`. A label such as `1e1` is not an address.
+fn parse_net_ipv4(value: &str) -> Option<[u8; 4]> {
+    let mut parts = [0u8; 4];
+    let mut count = 0;
+    for part in value.split('.') {
+        if count == 4 {
+            return None;
+        }
+        if part.is_empty()
+            || part.len() > 3
+            || !part.bytes().all(|byte| byte.is_ascii_digit())
+            || (part.len() > 1 && part.starts_with('0'))
+        {
+            return None;
+        }
+        let number: u16 = part.parse().ok()?;
+        if number > 255 {
+            return None;
+        }
+        parts[count] = number as u8;
+        count += 1;
+    }
+    (count == 4).then_some(parts)
 }
 
 fn parse_ipv4(value: &str) -> Option<[u8; 4]> {
@@ -182,7 +206,7 @@ fn is_private_ipv4(address: [u8; 4]) -> bool {
 fn is_private_ipv6(value: &str) -> bool {
     let value = value.split('%').next().unwrap_or(value);
     if let Some(mapped) = value.strip_prefix("::ffff:") {
-        return parse_ipv4(mapped).is_none_or(is_private_ipv4);
+        return parse_net_ipv4(mapped).is_none_or(is_private_ipv4);
     }
     if value == "::" || value == "::1" {
         return true;
@@ -230,7 +254,16 @@ mod tests {
             "http://192.168.0.+1:9"
         );
         assert!(local_ai_origin("http://8.8.8.1e1:11434", "ollama").is_err());
-        assert!(addon_request_allowed("https://10.0.0.1e1/hook").is_err());
+        assert!(addon_request_allowed("https://10.0.0.1e1/hook").is_ok());
+        assert!(addon_request_allowed("https://10.0.0.0b1/hook").is_ok());
         assert!(addon_request_allowed("https://8.8.8.1e1/hook").is_ok());
+        assert_eq!(
+            addon_request_allowed("https://10.0.0.4/hook").unwrap_err(),
+            "Add-ons dürfen nur öffentliche https-Adressen aufrufen."
+        );
+        assert_eq!(
+            addon_request_allowed("https://localhost/hook").unwrap_err(),
+            "Add-ons dürfen nur öffentliche https-Adressen aufrufen."
+        );
     }
 }
