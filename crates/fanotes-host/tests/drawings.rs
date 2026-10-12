@@ -429,3 +429,34 @@ fn handwriting_with_a_bad_byte_still_opens() {
         .unwrap()
         .is_null());
 }
+
+#[test]
+fn a_drawing_schema_version_of_one_point_zero_still_opens() {
+    let (dir, mut host) = host();
+    let assets = dir.join("vault/.fanotes/assets");
+    fs::create_dir_all(&assets).unwrap();
+    fs::write(
+        assets.join("skizze.json"),
+        r#"{"schemaVersion":1.0,"title":"Skizze","strokes":[],"updatedAt":"2026-01-02T03:04:05.000Z"}"#,
+    )
+    .unwrap();
+    let listed = host.dispatch("fanotes:list-drawings", &[]).unwrap();
+    assert_eq!(listed[0]["title"], "Skizze");
+    let loaded = host
+        .dispatch("fanotes:read-drawing", &[json!("skizze")])
+        .unwrap();
+    assert_eq!(loaded["title"], "Skizze");
+
+    fs::write(
+        assets.join("halb.json"),
+        r#"{"schemaVersion":1.5,"title":"Halb","strokes":[],"updatedAt":"2026-01-02T03:04:05.000Z"}"#,
+    )
+    .unwrap();
+    let listed = host.dispatch("fanotes:list-drawings", &[]).unwrap();
+    assert_eq!(listed.as_array().unwrap().len(), 1);
+    assert_eq!(
+        host.dispatch("fanotes:read-drawing", &[json!("halb")])
+            .unwrap_err(),
+        "Die gespeicherte Zeichnung ist beschädigt oder kann nicht sicher gelesen werden."
+    );
+}
