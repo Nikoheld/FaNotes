@@ -764,6 +764,10 @@ fn json_number(value: f64) -> Value {
 /// A date without a time is midnight UTC. A time without a zone is local time.
 /// A day past the end of the month rolls forward, and `24:00:00` is the next midnight.
 pub fn canonical_iso(value: &str) -> Option<String> {
+    let trimmed = trim_js(value);
+    if is_date_only_shape(trimmed) {
+        return date_only_iso(trimmed);
+    }
     let bytes = value.as_bytes();
     if bytes.len() < 10 || bytes[4] != b'-' || bytes[7] != b'-' {
         return None;
@@ -782,16 +786,23 @@ pub fn canonical_iso(value: &str) -> Option<String> {
     if separator != b'T' && separator != b't' && separator != b' ' {
         return None;
     }
-    if bytes.len() < 19 || bytes.get(13) != Some(&b':') || bytes.get(16) != Some(&b':') {
+    if bytes.len() < 16 || bytes.get(13) != Some(&b':') {
         return None;
     }
     let mut hour: i32 = value.get(11..13)?.parse().ok()?;
     let minute: i32 = value.get(14..16)?.parse().ok()?;
-    let second: i32 = value.get(17..19)?.parse().ok()?;
+    // `2026-01-02T03:04Z` has no seconds. A fraction there is not a time.
+    let (second, mut index) = if bytes.get(16) == Some(&b':') {
+        let second = value.get(17..19)?.parse().ok()?;
+        (second, 19)
+    } else if bytes.get(16) == Some(&b'.') {
+        return None;
+    } else {
+        (0, 16)
+    };
     if !(0..=24).contains(&hour) || !(0..=59).contains(&minute) || !(0..=59).contains(&second) {
         return None;
     }
-    let mut index = 19;
     let mut millis = 0u32;
     if bytes.get(index) == Some(&b'.') {
         index += 1;
@@ -827,6 +838,39 @@ pub fn canonical_iso(value: &str) -> Option<String> {
     Some(format!(
         "{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}.{millis:03}Z"
     ))
+}
+
+/// A calendar date with no time. Month and day may be one digit.
+fn is_date_only_shape(value: &str) -> bool {
+    !value
+        .bytes()
+        .any(|byte| matches!(byte, b'T' | b't' | b' ' | b'+'))
+        && value.bytes().filter(|byte| *byte == b'-').count() == 2
+}
+
+fn date_only_iso(value: &str) -> Option<String> {
+    let mut parts = value.split('-');
+    let year = parts.next()?;
+    let month = parts.next()?;
+    let day = parts.next()?;
+    if parts.next().is_some()
+        || year.len() != 4
+        || !(1..=2).contains(&month.len())
+        || !(1..=2).contains(&day.len())
+        || !year.bytes().all(|byte| byte.is_ascii_digit())
+        || !month.bytes().all(|byte| byte.is_ascii_digit())
+        || !day.bytes().all(|byte| byte.is_ascii_digit())
+    {
+        return None;
+    }
+    let year: i32 = year.parse().ok()?;
+    let month: i32 = month.parse().ok()?;
+    let day: i32 = day.parse().ok()?;
+    if !(1..=12).contains(&month) || !(1..=31).contains(&day) {
+        return None;
+    }
+    let (year, month, day) = normalize_ymd(year, month, day)?;
+    Some(format!("{year:04}-{month:02}-{day:02}T00:00:00.000Z"))
 }
 
 fn parse_offset(rest: &str) -> Option<i32> {
