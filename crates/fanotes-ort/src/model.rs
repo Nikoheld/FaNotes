@@ -26,7 +26,11 @@ impl ModelDescriptor {
             return Err(Error::UnknownModel);
         }
         let sha256 = parse_sha256(sha256).ok_or(Error::UnknownModel)?;
-        Ok(Self { file: file.to_owned(), size, sha256 })
+        Ok(Self {
+            file: file.to_owned(),
+            size,
+            sha256,
+        })
     }
 
     /// Reads `models.desktop` from the manifest and rejects it unless the whole manifest passes the
@@ -36,9 +40,13 @@ impl ModelDescriptor {
         let desktop = &manifest["models"]["desktop"];
         let characters = &manifest["characters"];
         let characters_ok = characters["file"].as_str().is_some_and(plain_file_name)
-            && characters["size"].as_u64().is_some_and(|size| size > 0 && size <= MAX_CHARACTERS_BYTES)
-            && characters["count"].as_u64().is_some()
-            && characters["sha256"].as_str().and_then(parse_sha256).is_some();
+            && json_safe_u64(characters.get("size"))
+                .is_some_and(|size| size > 0 && size <= MAX_CHARACTERS_BYTES)
+            && json_safe_u64(characters.get("count")).is_some()
+            && characters["sha256"]
+                .as_str()
+                .and_then(parse_sha256)
+                .is_some();
         if manifest["format"] != MANIFEST_FORMAT
             || desktop["name"] != MODEL_NAME
             || desktop["precision"] != MODEL_PRECISION
@@ -48,7 +56,7 @@ impl ModelDescriptor {
         }
         Self::new(
             desktop["file"].as_str().ok_or(Error::UnknownModel)?,
-            desktop["size"].as_u64().ok_or(Error::UnknownModel)?,
+            json_safe_u64(desktop.get("size")).ok_or(Error::UnknownModel)?,
             desktop["sha256"].as_str().ok_or(Error::UnknownModel)?,
         )
     }
@@ -62,7 +70,10 @@ impl ModelDescriptor {
     }
 
     pub fn sha256_hex(&self) -> String {
-        self.sha256.iter().map(|byte| format!("{byte:02x}")).collect()
+        self.sha256
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect()
     }
 }
 
@@ -87,16 +98,37 @@ pub fn verify_model_file(path: &Path, descriptor: &ModelDescriptor) -> Result<Ve
     Ok(bytes)
 }
 
+/// `Number.isSafeInteger` for a non-negative manifest count. `8.0` counts; `8.5` does not.
+fn json_safe_u64(value: Option<&Value>) -> Option<u64> {
+    let number = value?.as_f64()?;
+    if number.is_finite()
+        && number.fract() == 0.0
+        && (0.0..=9_007_199_254_740_991.0).contains(&number)
+    {
+        Some(number as u64)
+    } else {
+        None
+    }
+}
+
 /// `/^[a-z0-9][a-z0-9._-]*$/u`
 fn plain_file_name(name: &str) -> bool {
     let mut bytes = name.bytes();
-    bytes.next().is_some_and(|first| first.is_ascii_lowercase() || first.is_ascii_digit())
-        && bytes.all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'.' | b'_' | b'-'))
+    bytes
+        .next()
+        .is_some_and(|first| first.is_ascii_lowercase() || first.is_ascii_digit())
+        && bytes.all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'.' | b'_' | b'-')
+        })
 }
 
 /// `/^[a-f0-9]{64}$/u`
 fn parse_sha256(hex: &str) -> Option<[u8; 32]> {
-    if hex.len() != 64 || !hex.bytes().all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)) {
+    if hex.len() != 64
+        || !hex
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    {
         return None;
     }
     let mut digest = [0u8; 32];

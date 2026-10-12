@@ -316,7 +316,8 @@ pub(crate) fn library_metadata(
 ) -> Result<Value, String> {
     let raw_title = document.get("title").and_then(Value::as_str).unwrap_or("");
     let title = vault::js_trim(raw_title);
-    if document.get("schemaVersion").and_then(Value::as_i64) != Some(1)
+    // `schemaVersion !== 1` treats `1.0` as the same version.
+    if document.get("schemaVersion").and_then(Value::as_f64) != Some(1.0)
         || title.is_empty()
         || crate::vault::utf16_len(raw_title) > 180
         || crate::vault::has_c0_or_del(raw_title)
@@ -393,8 +394,8 @@ fn safe_title(value: &str) -> Result<String, String> {
 
 fn drawing_file_id(name: &str) -> Option<&str> {
     let (id, extension) = name.rsplit_once('.')?;
-    extension
-        .eq_ignore_ascii_case("json")
+    // The library opens `${id}.json`. `Upper.JSON` is not that file.
+    (extension == "json")
         .then_some(id)
         .filter(|id| drawing_id(id).is_ok())
 }
