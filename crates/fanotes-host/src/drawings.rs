@@ -282,6 +282,17 @@ fn embed_in_note(host: &Host, note_path: &str, drawing: &Value) -> Result<(), St
             }
         }
     }
+    // The desktop uses the settings paper after the drawing's own style.
+    if payload.paper_style.is_none() {
+        if let Some(style) = host
+            .settings
+            .get("paperStyle")
+            .and_then(Value::as_str)
+            .filter(|style| is_paper_style(style))
+        {
+            payload.paper_style = Some(style.to_owned());
+        }
+    }
     if let Some(parent) = famd_path.parent() {
         fs::create_dir_all(parent)
             .map_err(|_| "Der Ordner konnte nicht angelegt werden.".to_owned())?;
