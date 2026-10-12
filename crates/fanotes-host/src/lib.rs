@@ -151,7 +151,7 @@ impl Host {
                 self.create_entry(&loose_string(args, 0), loose_string_opt(args, 1), true)
             }
             "fanotes:create-folder" => {
-                self.create_entry(&loose_string(args, 0), loose_string_opt(args, 1), false)
+                self.create_entry(&folder_parent(args)?, loose_string_opt(args, 1), false)
             }
             "fanotes:set-folder-color" => self.set_folder_color(
                 &arg_text(args, 0, "Ungültiger Vault-Pfad.")?,
@@ -1859,6 +1859,15 @@ fn loose_string(args: &[Value], index: usize) -> String {
         .and_then(Value::as_str)
         .unwrap_or("")
         .to_owned()
+}
+
+/// A missing folder parent is the vault root. Any other non-string is rejected.
+fn folder_parent(args: &[Value]) -> Result<String, String> {
+    match args.first() {
+        None => Ok(String::new()),
+        Some(Value::String(value)) => Ok(value.clone()),
+        Some(_) => Err("Ungültiger Vault-Pfad.".to_owned()),
+    }
 }
 
 fn loose_string_opt(args: &[Value], index: usize) -> Option<String> {
