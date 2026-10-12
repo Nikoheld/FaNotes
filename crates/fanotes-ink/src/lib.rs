@@ -367,7 +367,8 @@ impl InkDocument {
             return Err(InkError::Schema);
         }
         let title = raw.get("title").and_then(Value::as_str).unwrap_or("");
-        if title.trim().is_empty() {
+        // JavaScript `title.trim()` removes a byte-order mark and keeps U+0085.
+        if js_trim(title).is_empty() {
             return Err(InkError::Title);
         }
         let strokes_json = raw
@@ -516,6 +517,42 @@ fn point_json(point: &StrokePoint) -> Value {
     object.insert("tiltY".into(), json_number(f64::from(point.tilt_y)));
     object.insert("pointerType".into(), Value::from(point.pointer.as_str()));
     Value::Object(object)
+}
+
+/// `String.prototype.trim`: U+FEFF is removed and U+0085 is kept.
+fn js_trim(value: &str) -> &str {
+    let start = value
+        .char_indices()
+        .find(|(_, character)| !is_js_trim_whitespace(*character))
+        .map(|(index, _)| index)
+        .unwrap_or(value.len());
+    let end = value[start..]
+        .char_indices()
+        .rev()
+        .find(|(_, character)| !is_js_trim_whitespace(*character))
+        .map(|(index, character)| start + index + character.len_utf8())
+        .unwrap_or(start);
+    &value[start..end]
+}
+
+fn is_js_trim_whitespace(character: char) -> bool {
+    matches!(
+        character,
+        '\u{0009}'
+            | '\u{000A}'
+            | '\u{000B}'
+            | '\u{000C}'
+            | '\u{000D}'
+            | '\u{0020}'
+            | '\u{00A0}'
+            | '\u{1680}'
+            | '\u{2028}'
+            | '\u{2029}'
+            | '\u{202F}'
+            | '\u{205F}'
+            | '\u{3000}'
+            | '\u{FEFF}'
+    ) || ('\u{2000}'..='\u{200A}').contains(&character)
 }
 
 /// A JSON integer, or a whole number such as `1.0`.
