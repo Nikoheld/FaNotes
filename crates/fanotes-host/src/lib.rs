@@ -2895,11 +2895,11 @@ fn read_tree_cache(app_data: &Path, root: &Path) -> Option<Value> {
             return None;
         }
     };
-    // `version !== 1` keeps a cache whose version is the number `1.0`.
+    // A wrong version or vault identity returns nothing and leaves the file.
+    // A damaged cache is removed, matching the desktop read error path.
     if parsed.get("version").and_then(Value::as_f64) != Some(1.0)
         || parsed.get("vaultIdentity").and_then(Value::as_str) != Some(identity.as_str())
     {
-        let _ = fs::remove_file(&path);
         return None;
     }
     match clean_cached_entries(parsed.get("entries")?, "", 0, &mut 0) {

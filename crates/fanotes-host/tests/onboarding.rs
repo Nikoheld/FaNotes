@@ -502,7 +502,7 @@ fn a_version_of_one_point_zero_still_counts_as_version_one() {
         .dispatch("fanotes:get-cached-tree", &[])
         .unwrap()
         .is_null());
-    assert!(!cache_path.is_file());
+    assert!(cache_path.is_file());
     let _ = fs::remove_dir_all(&dir);
 }
 
