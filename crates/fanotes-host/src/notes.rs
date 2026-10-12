@@ -173,12 +173,15 @@ pub fn attach_sidecar(
 }
 
 pub fn read_page_stats(host: &Host, relative: &str) -> Result<Value, String> {
-    let (_path, _body, payload) = load_note(host, relative)?;
-    Ok(payload.page_stats.unwrap_or(Value::Null))
+    Ok(read_companion(host, relative)?
+        .and_then(|payload| payload.page_stats)
+        .unwrap_or(Value::Null))
 }
 
 pub fn read_paper_style(host: &Host, relative: &str) -> Result<Value, String> {
-    let (_path, _body, payload) = load_note(host, relative)?;
+    let Some(payload) = read_companion(host, relative)? else {
+        return Ok(Value::Null);
+    };
     if let Some(style) = payload
         .paper_style
         .as_deref()
@@ -211,9 +214,13 @@ pub fn set_paper_style(host: &Host, relative: &str, paper_style: &str) -> Result
 }
 
 pub fn read_links(host: &Host, relative: &str) -> Result<Value, String> {
-    let (_path, _body, payload) = load_note(host, relative)?;
+    let links = read_companion(host, relative)?.map(|payload| payload.note_links);
     Ok(Value::Array(
-        payload.note_links.iter().map(NoteLink::to_json).collect(),
+        links
+            .unwrap_or_default()
+            .iter()
+            .map(NoteLink::to_json)
+            .collect(),
     ))
 }
 
@@ -233,10 +240,10 @@ pub fn write_links(host: &Host, relative: &str, raw: &Value) -> Result<Value, St
 }
 
 pub fn read_backups(host: &Host, relative: &str) -> Result<Value, String> {
-    let (_path, _body, payload) = load_note(host, relative)?;
+    let backups = read_companion(host, relative)?.map(|payload| payload.note_backups);
     Ok(Value::Array(
-        payload
-            .note_backups
+        backups
+            .unwrap_or_default()
             .iter()
             .map(NoteBackup::to_json)
             .collect(),
@@ -422,6 +429,31 @@ fn trim_history(directory: &Path, index: &mut Value) -> Result<(), String> {
     Ok(())
 }
 
+const MAX_COMPANION_BYTES: u64 = 40 * 1024 * 1024;
+
+/// Reads of page stats, paper, links, and backups look only at the companion.
+///
+/// A missing companion is empty. A directory in its place uses the desktop
+/// file error. The note path itself can be a directory.
+fn read_companion(host: &Host, relative: &str) -> Result<Option<FamdPayload>, String> {
+    let root = vault_root(host)?;
+    let note = note_path(relative)?;
+    let famd_relative = companion_note_path(&note, ".famd");
+    let path = vault::resolve_note_file(root, &famd_relative)?;
+    match fs::symlink_metadata(&path) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(_) => Err("Die Datei konnte nicht gelesen werden.".to_owned()),
+        Ok(meta) if meta.file_type().is_symlink() => {
+            Err("Symbolische Links sind innerhalb des Vaults nicht erlaubt.".to_owned())
+        }
+        Ok(meta) if !meta.is_file() => {
+            Err("Die gewählte Datei ist keine reguläre Datei.".to_owned())
+        }
+        Ok(meta) if meta.len() > MAX_COMPANION_BYTES => Err("Die Datei ist zu groß.".to_owned()),
+        Ok(_) => Ok(read_lossy_string(&path).and_then(|source| parse_famd(&source).payload)),
+    }
+}
+
 fn load_note(host: &Host, relative: &str) -> Result<(PathBuf, String, FamdPayload), String> {
     let root = vault_root(host)?;
     let note = note_path(relative)?;
@@ -508,16 +540,33 @@ fn sanitize_subject_book(value: &Value) -> Option<Value> {
     let object = value.as_object()?;
     let subject_path = sanitize_folder_path(object.get("subjectPath").and_then(Value::as_str))?;
     let book_path = sanitize_pdf_path(object.get("bookPath").and_then(Value::as_str))?;
-    let page = object
-        .get("lastPage")
-        .and_then(Value::as_i64)
-        .filter(|page| *page >= 1)
-        .unwrap_or(1);
+    let page = subject_book_page(object.get("lastPage"));
     Some(json!({
         "subjectPath": subject_path,
         "bookPath": book_path,
         "lastPage": page,
     }))
+}
+
+/// Desktop `Number(lastPage)` followed by `Number.isSafeInteger`.
+fn subject_book_page(value: Option<&Value>) -> i64 {
+    let number = match value {
+        Some(Value::Number(number)) => number.as_f64().unwrap_or(f64::NAN),
+        Some(Value::String(text)) => vault::js_tonumber(text).unwrap_or(f64::NAN),
+        Some(Value::Bool(true)) => 1.0,
+        Some(Value::Bool(false)) => 0.0,
+        Some(Value::Null) => 0.0,
+        _ => f64::NAN,
+    };
+    if number.is_finite()
+        && number.fract() == 0.0
+        && number.abs() <= 9_007_199_254_740_991.0
+        && number >= 1.0
+    {
+        number as i64
+    } else {
+        1
+    }
 }
 
 fn sanitize_folder_path(value: Option<&str>) -> Option<String> {

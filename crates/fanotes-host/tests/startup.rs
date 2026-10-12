@@ -72,7 +72,7 @@ fn an_oversized_note_is_rejected() {
     assert_eq!(
         host.dispatch("fanotes:read-file", &[json!("gross.md")])
             .unwrap_err(),
-        "Der Notizinhalt ist ungültig oder zu groß."
+        "Die Datei ist zu groß."
     );
     let oversized = "x".repeat(16 * 1024 * 1024 + 1);
     assert_eq!(
