@@ -103,3 +103,47 @@ fn note_text_stops_at_js_character_limits() {
     assert_eq!(backups[0].content, exact);
     assert_eq!(backups[0].content.encode_utf16().count(), 2 * 1024 * 1024);
 }
+
+#[test]
+fn note_links_follow_javascript_whitespace() {
+    let links = parse_note_links(&json!([{
+        "id": "nl-ws",
+        "sourcePath": "\u{FEFF}/Quelle.md",
+        "targetPath": "\u{0085}Ziel.md",
+        "label": "A\u{FEFF}B\u{0085}C  ",
+    }]));
+    assert_eq!(links.len(), 1);
+    assert_eq!(links[0].source_path, "/Quelle.md");
+    assert_eq!(links[0].target_path, "\u{0085}Ziel.md");
+    assert_eq!(links[0].label, "A B\u{0085}C");
+    let mixed = parse_note_links(&json!([{
+        "sourcePath": "A.md",
+        "targetPath": "B.md",
+        "label": "A\u{0085} \u{FEFF}B",
+    }]));
+    assert_eq!(mixed[0].label, "A\u{0085} B");
+
+    let blank_label = parse_note_links(&json!([{
+        "id": "nl-blank",
+        "sourcePath": "A.md",
+        "targetPath": "Ordner/Ziel.md",
+        "label": "\u{FEFF}",
+    }]));
+    assert_eq!(blank_label[0].label, "Ziel");
+
+    assert!(parse_note_links(&json!([{
+        "sourcePath": "A.md",
+        "targetPath": "\u{FEFF}",
+    }]))
+    .is_empty());
+
+    let backups = parse_note_backups(&json!([{
+        "id": "nb-next",
+        "notePath": "\u{0085}",
+    }]));
+    assert_eq!(backups[0].note_path, "\u{0085}");
+    assert!(parse_note_backups(&json!([{
+        "notePath": "\u{FEFF}",
+    }]))
+    .is_empty());
+}

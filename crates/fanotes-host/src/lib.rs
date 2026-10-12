@@ -216,7 +216,11 @@ impl Host {
                     .get("ocrThreadLimit")
                     .and_then(Value::as_i64)
                     .unwrap_or(0);
-                ocr::recognize_line(args.first().unwrap_or(&Value::Null), configured)
+                ocr::recognize_line(
+                    args.first().unwrap_or(&Value::Null),
+                    configured,
+                    self.settings.get("ocrModelKeepAliveSeconds"),
+                )
             }
             "fanotes:enhanced-math-get-state" => Ok(enhanced_math_state()),
             "fanotes:enhanced-math-install" | "fanotes:enhanced-math-recognize" => {
@@ -324,7 +328,7 @@ impl Host {
     }
 
     fn read_asset(&self, relative: &str, max: u64) -> Result<Vec<u8>, String> {
-        let file = vault::resolve_existing_entry(self.require_vault()?, relative)?;
+        let file = vault::resolve_asset_entry(self.require_vault()?, relative)?;
         // Desktop preview returns an existing empty file. A missing file fails above.
         read_regular_limited(&file, max)
     }
@@ -412,8 +416,8 @@ impl Host {
             {
                 Ok(Value::Null)
             }
-            Ok(_) => match fs::read_to_string(&path) {
-                Ok(text) => Ok(Value::String(text)),
+            Ok(_) => match fs::read(&path) {
+                Ok(bytes) => Ok(Value::String(String::from_utf8_lossy(&bytes).into_owned())),
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Value::Null),
                 Err(_) => Err("Der Sync-Zustand konnte nicht gelesen werden.".to_owned()),
             },
@@ -444,37 +448,31 @@ impl Host {
 
     fn read_sync_secrets(&self) -> Result<Value, String> {
         let path = self.sync_secrets_path();
-        let raw = match fs::read_to_string(&path) {
-            Ok(raw) => Some(raw),
+        // `readFile(..., 'utf8')` replaces a bad byte and still sees the prefix.
+        let loaded = match fs::read(&path) {
+            Ok(bytes) => Some(decode_sync_secret(bytes)),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
             Err(_) => {
                 return Err("Die Sync-Anmeldung konnte nicht gelesen werden.".to_owned());
             }
         };
-        if raw
-            .as_ref()
-            .is_some_and(|value| value.starts_with("plain1:"))
-        {
+        let raw = loaded.as_ref().map(|(text, _)| text.as_str());
+        let valid_utf8 = loaded.as_ref().is_none_or(|(_, valid)| *valid);
+        if raw.is_some_and(|value| value.starts_with("plain1:")) {
             let _ = fs::remove_file(&path);
             let _ = secrets::delete(self.secret_store, &self.secret_account(SYNC_SECRET_ACCOUNT));
             return Ok(Value::Null);
         }
         match secrets::get(self.secret_store, &self.secret_account(SYNC_SECRET_ACCOUNT)) {
             Ok(Some(secret)) => {
-                if raw
-                    .as_ref()
-                    .is_some_and(|value| !value.starts_with("safe1:"))
-                {
+                if raw.is_some_and(|value| !value.starts_with("safe1:")) {
                     let _ = notes::atomic_write(&path, b"safe1:", 0o600);
                 }
                 Ok(Value::String(secret))
             }
-            Ok(None) => self.read_legacy_sync_secret(raw.as_deref(), &path),
+            Ok(None) => self.read_legacy_sync_secret(raw, valid_utf8, &path),
             Err(error) => {
-                if raw
-                    .as_ref()
-                    .is_some_and(|value| value.starts_with("safe1:"))
-                {
+                if raw.is_some_and(|value| value.starts_with("safe1:")) {
                     Err(error)
                 } else {
                     Ok(Value::Null)
@@ -483,12 +481,22 @@ impl Host {
         }
     }
 
-    fn read_legacy_sync_secret(&self, raw: Option<&str>, path: &Path) -> Result<Value, String> {
+    fn read_legacy_sync_secret(
+        &self,
+        raw: Option<&str>,
+        valid_utf8: bool,
+        path: &Path,
+    ) -> Result<Value, String> {
         let Some(raw) = raw else {
             return Ok(Value::Null);
         };
-        if raw.starts_with("safe1:") || raw.trim().is_empty() {
+        if raw.starts_with("safe1:") {
             return Err(secrets::KEYRING_UNAVAILABLE.to_owned());
+        }
+        // A file of only JavaScript whitespace has no login. A bad byte is not
+        // a legacy secret either: the desktop returns no login.
+        if !valid_utf8 || vault::js_trim(raw).is_empty() {
+            return Ok(Value::Null);
         }
         secrets::set(
             self.secret_store,
@@ -543,10 +551,10 @@ impl Host {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Value::Null),
             Err(_) => Err("Das Handschriftmodell konnte nicht gelesen werden.".to_owned()),
             Ok(meta) if meta.file_type().is_symlink() || !meta.is_file() => {
-                Err("Das Handschriftmodell konnte nicht gelesen werden.".to_owned())
+                Err("Die Datei ist keine reguläre Datei.".to_owned())
             }
             Ok(meta) if meta.len() > MAX_RECOGNITION_MODEL_BYTES => {
-                Err("Das Handschriftmodell ist ungültig oder zu groß.".to_owned())
+                Err("Die Datei ist zu groß.".to_owned())
             }
             Ok(_) => fs::read(&path)
                 .map(|bytes| Value::String(String::from_utf8_lossy(&bytes).into_owned()))
@@ -604,7 +612,7 @@ impl Host {
         }
         let documents = match self.documents_dir.clone() {
             Some(path) => path,
-            None => default_documents_dir()?,
+            None => default_documents_dir(),
         };
         let vault = documents.join("FaNotes");
         let created = match fs::symlink_metadata(&vault) {
@@ -743,11 +751,14 @@ impl Host {
         let limit = note_byte_limit(&normalized);
         let meta = fs::symlink_metadata(&path)
             .map_err(|_| "Die Datei konnte nicht gelesen werden.".to_owned())?;
-        if meta.file_type().is_symlink() || !meta.is_file() {
-            return Err("Die Datei konnte nicht gelesen werden.".to_owned());
+        if meta.file_type().is_symlink() {
+            return Err("Symbolische Links sind innerhalb des Vaults nicht erlaubt.".to_owned());
+        }
+        if !meta.is_file() {
+            return Err("Die gewählte Datei ist keine reguläre Datei.".to_owned());
         }
         if meta.len() > limit {
-            return Err("Der Notizinhalt ist ungültig oder zu groß.".to_owned());
+            return Err("Die Datei ist zu groß.".to_owned());
         }
         let bytes =
             fs::read(&path).map_err(|_| "Die Datei konnte nicht gelesen werden.".to_owned())?;
@@ -805,8 +816,7 @@ impl Host {
         };
         let preferred = preferred
             .as_deref()
-            .map(str::trim)
-            .filter(|name| !name.is_empty())
+            .filter(|name| !vault::js_trim(name).is_empty())
             .unwrap_or(fallback);
         let mut desired = safe_entry_name(preferred)?;
         if note {
@@ -933,12 +943,13 @@ impl Host {
     }
 
     fn open_subject_book(&self, relative: &str) -> Result<Value, String> {
-        if relative.is_empty() {
-            return Err("Ungültiger Buchpfad.".to_owned());
-        }
         let root = self.require_vault()?;
         let path = vault::normalize_relative_path(relative, false, false)?;
-        if !path.to_ascii_lowercase().ends_with(".pdf") {
+        let extension = vault::posix_extname(&path).to_ascii_lowercase();
+        if !matches!(extension.as_str(), ".md" | ".markdown" | ".famd" | ".pdf") {
+            return Err("Es dürfen nur Markdown-Dateien, PDF-Notizen und FaNotes-Handschriftdateien (.famd) bearbeitet werden.".to_owned());
+        }
+        if extension != ".pdf" {
             return Err("Nur ein PDF-Buch kann auspoppen.".to_owned());
         }
         let file = vault::resolve_existing_entry(root, &path)?;
@@ -964,7 +975,7 @@ impl Host {
             .and_then(|name| name.to_str())
             .ok_or_else(|| "Ungültiger Name.".to_owned())?
             .to_owned();
-        let name_input = if next_name.trim().is_empty() {
+        let name_input = if vault::js_trim(next_name).is_empty() {
             current_name.as_str()
         } else {
             next_name
@@ -1014,7 +1025,7 @@ impl Host {
             return Err("Dieser Eintrag kann nicht verschoben werden.".to_owned());
         }
         let was_dir = meta.is_dir();
-        let dest_relative = if dest_folder.trim().is_empty() {
+        let dest_relative = if vault::js_trim(dest_folder).is_empty() {
             String::new()
         } else {
             vault::normalize_relative_path(dest_folder, true, false)?
@@ -1085,7 +1096,7 @@ impl Host {
     }
 
     fn search(&self, query: &str) -> Result<Value, String> {
-        let query = query.trim();
+        let query = vault::js_trim(query);
         if query.is_empty() {
             return Ok(json!([]));
         }
@@ -1101,9 +1112,10 @@ impl Host {
             let lower = relative.to_lowercase();
             if lower.ends_with(".famd") {
                 let stem = fanotes_famd::note_stem(&relative);
+                // The desktop hides a handwriting file beside `.md` or `.pdf`.
+                // A `.markdown` note does not hide it.
                 if present.contains(&format!("{stem}.md"))
                     || present.contains(&format!("{stem}.pdf"))
-                    || present.contains(&format!("{stem}.markdown"))
                 {
                     continue;
                 }
@@ -1370,7 +1382,8 @@ impl Host {
 
     fn load_persisted(&mut self) {
         profile::import_electron_profile(&self.app_data, self.secret_store);
-        if let Ok(text) = fs::read_to_string(self.app_data.join("settings.json")) {
+        if let Ok(bytes) = fs::read(self.app_data.join("settings.json")) {
+            let text = String::from_utf8_lossy(&bytes);
             if let Ok(parsed) = serde_json::from_str::<Value>(&text) {
                 self.settings = settings::sanitize(&parsed, &default_settings());
                 for key in SECRET_KEYS {
@@ -1451,6 +1464,17 @@ const APP_DATA_RESET_COMPLETE: &str = ".fanotes-reset-complete";
 const RESET_MAX_BYTES: u64 = 4096;
 const RESET_MAX_AGE_MS: u64 = 24 * 60 * 60 * 1000;
 
+/// Node `readFile(..., 'utf8')`: a bad byte becomes U+FFFD and the prefix stays.
+fn decode_sync_secret(bytes: Vec<u8>) -> (String, bool) {
+    match String::from_utf8(bytes) {
+        Ok(text) => (text, true),
+        Err(error) => (
+            String::from_utf8_lossy(error.as_bytes()).into_owned(),
+            false,
+        ),
+    }
+}
+
 fn pending_reset_marker(app_data: &Path) -> Option<PathBuf> {
     Some(app_data.parent()?.join(APP_DATA_RESET_MARKER))
 }
@@ -1511,7 +1535,8 @@ fn valid_reset_marker(marker_path: &Path, app_data: &Path) -> bool {
     let Ok(marker) = serde_json::from_str::<Value>(&text) else {
         return false;
     };
-    if marker.get("version").and_then(Value::as_u64) != Some(1) {
+    // `marker.version !== 1` still accepts the JSON number `1.0`.
+    if marker.get("version").and_then(Value::as_f64) != Some(1.0) {
         return false;
     }
     let Some(recorded) = marker.get("userDataPath").and_then(Value::as_str) else {
@@ -1779,19 +1804,19 @@ fn create_sync_directories(root: &Path, file: &Path) -> Result<(), String> {
 }
 
 fn arg_mtime_ms(value: Option<&Value>) -> Option<i64> {
-    let value = value?;
-    let millis = if let Some(number) = value.as_i64() {
-        number
-    } else if let Some(number) = value.as_u64() {
-        i64::try_from(number).ok()?
-    } else if let Some(number) = value.as_f64() {
-        if !number.is_finite() || number <= 0.0 || number >= i64::MAX as f64 {
-            return None;
-        }
-        return Some(number.round() as i64);
-    } else {
-        return None;
+    // Desktop `new Date(Number(mtimeMs))` truncates a fraction toward zero.
+    let number = match value? {
+        Value::Number(number) => number.as_f64()?,
+        Value::String(text) => fanotes_famd::js_tonumber(text)?,
+        Value::Bool(true) => 1.0,
+        Value::Bool(false) => 0.0,
+        Value::Null => 0.0,
+        _ => return None,
     };
+    if !number.is_finite() || number <= 0.0 || number >= i64::MAX as f64 {
+        return None;
+    }
+    let millis = number.trunc() as i64;
     (millis > 0).then_some(millis)
 }
 
@@ -1867,11 +1892,24 @@ enum CreateAttempt {
 }
 
 fn safe_entry_name(value: &str) -> Result<String, String> {
-    let name = value.trim();
+    safe_entry_name_or(value, "")
+}
+
+/// `safeEntryName` from the desktop host.
+///
+/// A blank name uses `fallback`. Windows device names and the characters
+/// `<>:"|?*` are refused even when the title is not a vault file.
+fn safe_entry_name_or(value: &str, fallback: &str) -> Result<String, String> {
+    let trimmed = vault::js_trim(value);
+    let name = if trimmed.is_empty() {
+        fallback
+    } else {
+        trimmed
+    };
     if !entry_name_allowed(name) {
         return Err("Dieser Name ist nicht erlaubt.".to_owned());
     }
-    let cleaned = name.trim_end_matches(['.', ' ']).trim();
+    let cleaned = vault::js_trim(name.trim_end_matches(['.', ' ']));
     if !entry_name_allowed(cleaned)
         || windows_device_name(cleaned)
         || cleaned.contains(['<', '>', ':', '"', '|', '?', '*'])
@@ -1893,12 +1931,8 @@ fn entry_name_allowed(name: &str) -> bool {
 }
 
 fn windows_device_name(name: &str) -> bool {
-    let label = name
-        .split('.')
-        .next()
-        .unwrap_or(name)
-        .trim()
-        .to_ascii_lowercase();
+    let label = name.split('.').next().unwrap_or(name);
+    let label = vault::js_trim(label).to_ascii_lowercase();
     matches!(label.as_str(), "con" | "prn" | "aux" | "nul")
         || (label.len() == 4
             && (label.starts_with("com") || label.starts_with("lpt"))
@@ -1991,15 +2025,8 @@ fn available_entry_name(parent: &Path, desired: &str, note: bool) -> Result<Stri
         if occupied.contains(&vault::entry_name_key(&candidate)) {
             continue;
         }
-        if note {
-            let lower = candidate.to_lowercase();
-            if lower.ends_with(".md") || lower.ends_with(".markdown") || lower.ends_with(".pdf") {
-                let famd = format!("{}.famd", fanotes_famd::note_stem(&candidate));
-                if occupied.contains(&vault::entry_name_key(&famd)) {
-                    continue;
-                }
-            }
-        }
+        // A free filename is enough. Creating the note rewrites the `.famd`
+        // companion and keeps its handwriting.
         return Ok(candidate);
     }
     Err(if note {
@@ -2104,12 +2131,17 @@ fn http_link(raw: &str) -> Result<String, String> {
     if raw.is_empty() || vault::utf16_len(raw) > 4096 {
         return Err("Ungültiger externer Link.".to_owned());
     }
-    let parsed = url::Url::parse(raw).map_err(|_| "Ungültiger externer Link.".to_owned())?;
+    let mut parsed = url::Url::parse(raw).map_err(|_| "Ungültiger externer Link.".to_owned())?;
+    let password = parsed.password().unwrap_or("");
     if !matches!(parsed.scheme(), "http" | "https")
         || !parsed.username().is_empty()
-        || parsed.password().is_some()
+        || !password.is_empty()
     {
         return Err("Nur sichere HTTP(S)-Links ohne Zugangsdaten sind erlaubt.".to_owned());
+    }
+    // An empty password is falsy in the desktop check, and `href` drops it.
+    if parsed.password().is_some() {
+        let _ = parsed.set_password(None);
     }
     Ok(parsed.to_string())
 }
@@ -2534,40 +2566,103 @@ fn onboarding_open(channel: &str) -> bool {
 }
 
 fn note_byte_limit(relative: &str) -> u64 {
-    if relative.to_ascii_lowercase().ends_with(".famd") {
+    if vault::posix_extname(relative).eq_ignore_ascii_case(".famd") {
         MAX_FAMD_BYTES
     } else {
         MAX_TEXT_BYTES
     }
 }
 
-fn default_documents_dir() -> Result<PathBuf, String> {
-    if let Some(dir) = xdg_documents_dir() {
-        return Ok(dir);
-    }
-    let home = std::env::var_os("HOME")
-        .ok_or_else(|| "Der Standard-Vault kann nicht angelegt werden.".to_owned())?;
-    Ok(PathBuf::from(home).join("Documents"))
+/// Electron `app.getPath('documents')` uses Chromium's `xdg_user_dir_lookup`.
+///
+/// A missing or unquoted documents entry is the home directory. `$HOME/Documents`
+/// is used only when the config file says so. The last matching line wins.
+fn default_documents_dir() -> PathBuf {
+    documents_directory(
+        std::env::var_os("HOME").as_deref(),
+        std::env::var_os("XDG_CONFIG_HOME").as_deref(),
+    )
 }
 
-fn xdg_documents_dir() -> Option<PathBuf> {
-    let home = PathBuf::from(std::env::var_os("HOME")?);
-    let config = std::env::var_os("XDG_CONFIG_HOME")
+fn documents_directory(
+    home: Option<&std::ffi::OsStr>,
+    config_home: Option<&std::ffi::OsStr>,
+) -> PathBuf {
+    let Some(home) = home.filter(|home| !home.is_empty()) else {
+        return PathBuf::from("/tmp");
+    };
+    strip_trailing_separators(
+        xdg_documents_dir(home, config_home).unwrap_or_else(|| PathBuf::from(home)),
+    )
+}
+
+fn xdg_documents_dir(
+    home: &std::ffi::OsStr,
+    config_home: Option<&std::ffi::OsStr>,
+) -> Option<PathBuf> {
+    let config = config_home
+        .filter(|value| !value.is_empty())
         .map(PathBuf::from)
-        .unwrap_or_else(|| home.join(".config"));
-    let text = fs::read_to_string(config.join("user-dirs.dirs")).ok()?;
-    let home_text = home.to_string_lossy();
-    for line in text.lines() {
-        let Some(rest) = line.trim().strip_prefix("XDG_DOCUMENTS_DIR=") else {
-            continue;
-        };
-        let rest = rest.trim().trim_matches('"');
-        if rest.is_empty() {
-            continue;
+        .unwrap_or_else(|| PathBuf::from(home).join(".config"));
+    let bytes = fs::read(config.join("user-dirs.dirs")).ok()?;
+    let text = String::from_utf8_lossy(&bytes);
+    let mut found = None;
+    for line in text.split('\n') {
+        if let Some(dir) = documents_dir_from_line(line, home) {
+            found = Some(dir);
         }
-        return Some(PathBuf::from(rest.replace("$HOME", home_text.as_ref())));
     }
-    None
+    found
+}
+
+fn documents_dir_from_line(line: &str, home: &std::ffi::OsStr) -> Option<PathBuf> {
+    let mut rest = line;
+    while rest.starts_with([' ', '\t']) {
+        rest = &rest[1..];
+    }
+    let rest = rest.strip_prefix("XDG_DOCUMENTS_DIR")?;
+    let mut rest = rest;
+    while rest.starts_with([' ', '\t']) {
+        rest = &rest[1..];
+    }
+    let rest = rest.strip_prefix('=')?;
+    let mut rest = rest;
+    while rest.starts_with([' ', '\t']) {
+        rest = &rest[1..];
+    }
+    let rest = rest.strip_prefix('"')?;
+    let (relative, rest) = if let Some(tail) = rest.strip_prefix("$HOME/") {
+        (true, tail)
+    } else if rest.starts_with('/') {
+        (false, rest)
+    } else {
+        return None;
+    };
+    let bytes = rest.as_bytes();
+    let mut index = 0;
+    let mut copied = Vec::new();
+    while index < bytes.len() && bytes[index] != b'"' {
+        if bytes[index] == b'\\' && index + 1 < bytes.len() {
+            index += 1;
+        }
+        copied.push(bytes[index]);
+        index += 1;
+    }
+    let mut path = std::ffi::OsString::new();
+    if relative {
+        path.push(home);
+        path.push("/");
+    }
+    path.push(String::from_utf8_lossy(&copied).as_ref());
+    Some(PathBuf::from(path))
+}
+
+fn strip_trailing_separators(path: PathBuf) -> PathBuf {
+    let text = path.to_string_lossy();
+    if text.len() <= 1 || !text.ends_with('/') {
+        return path;
+    }
+    PathBuf::from(text.trim_end_matches('/'))
 }
 
 fn vault_path_digest(path: &Path) -> String {
@@ -2613,9 +2708,17 @@ fn read_tree_cache(app_data: &Path, root: &Path) -> Option<Value> {
     if meta.file_type().is_symlink() || !meta.is_file() || meta.len() > MAX_TREE_CACHE_BYTES {
         return None;
     }
-    let text = fs::read_to_string(&path).ok()?;
-    let parsed = serde_json::from_str::<Value>(&text).ok()?;
-    if parsed.get("version").and_then(Value::as_u64) != Some(1)
+    let bytes = fs::read(&path).ok()?;
+    let text = String::from_utf8_lossy(&bytes);
+    let parsed = match serde_json::from_str::<Value>(&text) {
+        Ok(parsed) => parsed,
+        Err(_) => {
+            let _ = fs::remove_file(&path);
+            return None;
+        }
+    };
+    // `version !== 1` keeps a cache whose version is the number `1.0`.
+    if parsed.get("version").and_then(Value::as_f64) != Some(1.0)
         || parsed.get("vaultIdentity").and_then(Value::as_str) != Some(identity.as_str())
     {
         let _ = fs::remove_file(&path);
@@ -2627,6 +2730,18 @@ fn read_tree_cache(app_data: &Path, root: &Path) -> Option<Value> {
             let _ = fs::remove_file(&path);
             None
         }
+    }
+}
+
+/// `Number.isSafeInteger` for a cached file size, from 0 through 1 GiB.
+/// A JSON number `12.0` counts; `12.5` does not.
+fn cached_file_size(value: &Value) -> Option<u64> {
+    let number = value.as_f64()?;
+    let max = (1024 * 1024 * 1024) as f64;
+    if number.is_finite() && number.fract() == 0.0 && (0.0..=max).contains(&number) {
+        Some(number as u64)
+    } else {
+        None
     }
 }
 
@@ -2718,10 +2833,8 @@ fn clean_cached_entries(
                     file["modifiedAt"] = json!(text);
                 }
                 if let Some(size) = entry.get("size") {
-                    let size = size
-                        .as_u64()
-                        .filter(|size| *size <= 1024 * 1024 * 1024)
-                        .ok_or(())?;
+                    // `Number.isSafeInteger` keeps a whole size such as `12.0`.
+                    let size = cached_file_size(size).ok_or(())?;
                     file["size"] = json!(size);
                 }
                 cleaned.push(file);
@@ -2898,7 +3011,13 @@ fn read_folder_colors(root: &Path) -> Result<BTreeMap<String, String>, String> {
     let Ok(parsed) = serde_json::from_str::<Value>(&text) else {
         return Ok(BTreeMap::new());
     };
-    let source = parsed.get("colors").unwrap_or(&parsed);
+    // A nested `colors` object is the current file. A flat map can also use
+    // `colors` as a folder name, and that string is not the nested object.
+    let source = if parsed.get("colors").is_some_and(Value::is_object) {
+        &parsed["colors"]
+    } else {
+        &parsed
+    };
     let Some(object) = source.as_object() else {
         return Ok(BTreeMap::new());
     };
@@ -2971,13 +3090,10 @@ fn move_note_companion(root: &Path, old_relative: &str, new_relative: &str) {
 }
 
 fn note_companion_relative(relative: &str) -> Option<String> {
-    let lower = relative.to_lowercase();
-    let extension = if lower.ends_with(".famd") {
-        ".md"
-    } else if lower.ends_with(".md") || lower.ends_with(".markdown") || lower.ends_with(".pdf") {
-        ".famd"
-    } else {
-        return None;
+    let extension = match vault::posix_extname(relative).to_ascii_lowercase().as_str() {
+        ".famd" => ".md",
+        ".md" | ".markdown" | ".pdf" => ".famd",
+        _ => return None,
     };
     Some(fanotes_famd::companion_note_path(relative, extension))
 }
@@ -3075,7 +3191,8 @@ fn search_drawings(
         let Some((id, extension)) = name.rsplit_once('.') else {
             continue;
         };
-        if !extension.eq_ignore_ascii_case("json") || !is_drawing_id(id) {
+        // Search opens `${id}.json`, so only a lowercase suffix is a drawing.
+        if extension != "json" || !is_drawing_id(id) {
             continue;
         }
         let path = entry.path();
@@ -3362,13 +3479,13 @@ fn byte_range_for_utf16(text: &str, start_units: usize, end_units: usize) -> (us
 }
 
 fn ink_anchor(transcript: &str, query: &str) -> Option<f64> {
-    let needle = query.trim().to_lowercase();
-    if vault::utf16_len(&needle) < 2 || transcript.trim().is_empty() {
+    let needle = vault::js_trim(query).to_lowercase();
+    if vault::utf16_len(&needle) < 2 || vault::js_trim(transcript).is_empty() {
         return None;
     }
     let lines: Vec<&str> = transcript
         .split('\n')
-        .map(str::trim)
+        .map(vault::js_trim)
         .filter(|line| !line.is_empty())
         .collect();
     if lines.is_empty() {
@@ -3404,7 +3521,10 @@ fn transcript_position(line: &str) -> Option<(f64, String)> {
     if !y.is_finite() {
         return None;
     }
-    Some((y.clamp(0.0, 1.0), caps.get(2)?.as_str().trim().to_owned()))
+    Some((
+        y.clamp(0.0, 1.0),
+        vault::js_trim(caps.get(2)?.as_str()).to_owned(),
+    ))
 }
 
 #[cfg(test)]
@@ -3607,5 +3727,147 @@ mod trash_date_tests {
                 && (13 * 3600..=15 * 3600).contains(&(local - after)),
             "{stamp} is not fourteen hours ahead of UTC ({before})"
         );
+    }
+}
+
+#[cfg(test)]
+mod documents_dir_tests {
+    use super::documents_directory;
+    use std::fs;
+    use std::path::Path;
+
+    fn config(home: &Path, body: &str) -> std::ffi::OsString {
+        let dir = home.join("config");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("user-dirs.dirs"), body).unwrap();
+        dir.into_os_string()
+    }
+
+    #[test]
+    fn the_documents_folder_follows_xdg_user_dir_lookup() {
+        let root = std::env::temp_dir().join(format!(
+            "fanotes-docs-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        let home = root.join("home");
+        fs::create_dir_all(&home).unwrap();
+        let home_os = home.as_os_str();
+
+        assert_eq!(
+            documents_directory(Some(home_os), Some(root.join("missing").as_os_str())),
+            home
+        );
+        assert_eq!(documents_directory(None, None), Path::new("/tmp"));
+
+        let quoted = config(&home, "XDG_DOCUMENTS_DIR=\"$HOME/Documents\"\n");
+        assert_eq!(
+            documents_directory(Some(home_os), Some(quoted.as_os_str())),
+            home.join("Documents")
+        );
+
+        let spaced = config(
+            &home,
+            "XDG_DOCUMENTS_DIR = \"$HOME/Notes\"\nXDG_DOCUMENTS_DIR=\"/absolute/Docs\"\n",
+        );
+        assert_eq!(
+            documents_directory(Some(home_os), Some(spaced.as_os_str())),
+            Path::new("/absolute/Docs")
+        );
+
+        let bare = config(
+            &home,
+            "XDG_DOCUMENTS_DIR=\"$HOME\"\nXDG_DOCUMENTS_DIR=$HOME/Nope\n",
+        );
+        assert_eq!(
+            documents_directory(Some(home_os), Some(bare.as_os_str())),
+            home
+        );
+
+        let escaped = config(&home, "XDG_DOCUMENTS_DIR=\"$HOME/My\\\"Docs\"\n");
+        assert_eq!(
+            documents_directory(Some(home_os), Some(escaped.as_os_str())),
+            home.join("My\"Docs")
+        );
+
+        fs::create_dir_all(home.join(".config")).unwrap();
+        fs::write(
+            home.join(".config/user-dirs.dirs"),
+            "XDG_DOCUMENTS_DIR=\"$HOME/Documents/\"\n",
+        )
+        .unwrap();
+        assert_eq!(
+            documents_directory(Some(home_os), Some(std::ffi::OsStr::new(""))),
+            home.join("Documents")
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+}
+
+#[cfg(test)]
+mod folder_color_order_tests {
+    use super::read_folder_colors;
+    use std::fs;
+
+    #[test]
+    fn folder_colors_keep_the_first_entries_in_file_order() {
+        let root = std::env::temp_dir().join(format!(
+            "fanotes-colors-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join(".fanotes")).unwrap();
+        let mut body =
+            String::from("{\n  \"version\": 1,\n  \"colors\": {\n    \"zzz\": \"#112233\"");
+        for index in 0..5000 {
+            body.push_str(&format!(",\n    \"a{index:04}\": \"#abcdef\""));
+        }
+        body.push_str("\n  }\n}\n");
+        fs::write(root.join(".fanotes/folder-colors.json"), body).unwrap();
+        let colors = read_folder_colors(&root).unwrap();
+        assert_eq!(colors.get("zzz").map(String::as_str), Some("#112233"));
+        assert!(colors.get("a4999").is_none());
+        assert_eq!(colors.len(), 5000);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_flat_color_file_can_name_a_folder_colors() {
+        let root = std::env::temp_dir().join(format!(
+            "fanotes-colors-flat-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join(".fanotes")).unwrap();
+        fs::write(
+            root.join(".fanotes/folder-colors.json"),
+            "{\n  \"colors\": \"#112233\",\n  \"Mathe\": \"#abcdef\"\n}\n",
+        )
+        .unwrap();
+        let colors = read_folder_colors(&root).unwrap();
+        assert_eq!(colors.get("colors").map(String::as_str), Some("#112233"));
+        assert_eq!(colors.get("Mathe").map(String::as_str), Some("#abcdef"));
+
+        fs::write(
+            root.join(".fanotes/folder-colors.json"),
+            "{\n  \"version\": 1,\n  \"colors\": {\n    \"Mathe\": \"#445566\"\n  }\n}\n",
+        )
+        .unwrap();
+        let nested = read_folder_colors(&root).unwrap();
+        assert_eq!(nested.get("Mathe").map(String::as_str), Some("#445566"));
+        assert!(nested.get("version").is_none());
+        let _ = fs::remove_dir_all(&root);
     }
 }

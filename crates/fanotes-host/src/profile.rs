@@ -69,6 +69,17 @@ fn config_candidates(app_data: &Path) -> Vec<PathBuf> {
     paths
 }
 
+/// `Number(config.version)`. A missing version is `NaN`, and `NaN >= 2` is false.
+fn config_version_number(version: Option<&Value>) -> f64 {
+    match version {
+        Some(Value::Number(number)) => number.as_f64().unwrap_or(f64::NAN),
+        Some(Value::String(text)) => crate::vault::js_tonumber(text).unwrap_or(f64::NAN),
+        Some(Value::Bool(true)) => 1.0,
+        Some(Value::Bool(false) | Value::Null) => 0.0,
+        _ => f64::NAN,
+    }
+}
+
 fn electron_config_home() -> PathBuf {
     if let Some(config) = std::env::var_os("XDG_CONFIG_HOME") {
         if !config.is_empty() {
@@ -85,8 +96,8 @@ fn apply_config(app_data: &Path, secret_store: SecretStore, config: &Value) {
         return;
     };
     let mut settings_value = object.get("settings").cloned().unwrap_or(Value::Null);
-    let version = object.get("version").and_then(Value::as_u64).unwrap_or(0);
-    if version < 2 {
+    // Desktop `Number(config.version) >= 2`. `NaN >= 2` is false, so a missing version resets.
+    if !(config_version_number(object.get("version")) >= 2.0) {
         if let Some(settings) = settings_value.as_object_mut() {
             let previous = settings
                 .get("recognitionMode")
@@ -170,7 +181,8 @@ fn read_config(path: &Path) -> Option<Value> {
     if meta.len() > MAX_CONFIG_BYTES {
         return None;
     }
-    let text = fs::read_to_string(path).ok()?;
+    let bytes = fs::read(path).ok()?;
+    let text = String::from_utf8_lossy(&bytes);
     serde_json::from_str(&text).ok()
 }
 
@@ -186,6 +198,56 @@ fn same_directory(left: &Path, right: &Path) -> bool {
     let left = std::path::absolute(left).unwrap_or_else(|_| left.to_path_buf());
     let right = std::path::absolute(right).unwrap_or_else(|_| right.to_path_buf());
     left == right
+}
+
+#[cfg(test)]
+mod tests {
+    use super::apply_config;
+    use crate::secrets::SecretStore;
+    use serde_json::Value;
+    use std::fs;
+
+    fn imported_modes(config: &str) -> (String, String) {
+        let dir = std::env::temp_dir().join(format!(
+            "fanotes-profile-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let parsed: Value = serde_json::from_str(config).unwrap();
+        apply_config(&dir, SecretStore::Memory, &parsed);
+        let settings: Value =
+            serde_json::from_str(&fs::read_to_string(dir.join("settings.json")).unwrap()).unwrap();
+        let _ = fs::remove_dir_all(&dir);
+        (
+            settings["recognitionMode"].as_str().unwrap().to_owned(),
+            settings["lastRecognitionMode"].as_str().unwrap().to_owned(),
+        )
+    }
+
+    #[test]
+    fn a_config_version_uses_javascript_number() {
+        assert_eq!(
+            imported_modes(r#"{"version":"2","settings":{"recognitionMode":"math"}}"#),
+            ("math".to_owned(), "text".to_owned())
+        );
+        assert_eq!(
+            imported_modes(r#"{"version":2.5,"settings":{"recognitionMode":"math"}}"#),
+            ("math".to_owned(), "text".to_owned())
+        );
+        assert_eq!(
+            imported_modes(r#"{"version":1.5,"settings":{"recognitionMode":"math"}}"#),
+            ("auto".to_owned(), "math".to_owned())
+        );
+        assert_eq!(
+            imported_modes(r#"{"settings":{"recognitionMode":"math"}}"#),
+            ("auto".to_owned(), "math".to_owned())
+        );
+    }
 }
 
 fn write_marker(path: &Path) -> Result<(), String> {

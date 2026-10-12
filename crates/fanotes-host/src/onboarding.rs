@@ -337,9 +337,10 @@ fn repair_welcome_file(root: &Path, name: &str, repair: impl Fn(&str) -> Option<
     if meta.file_type().is_symlink() || !meta.is_file() || meta.len() > WELCOME_MAX_BYTES {
         return;
     }
-    let Ok(existing) = fs::read_to_string(&path) else {
+    let Ok(bytes) = fs::read(&path) else {
         return;
     };
+    let existing = String::from_utf8_lossy(&bytes);
     let Some(repaired) = repair(&existing) else {
         return;
     };
@@ -461,7 +462,8 @@ pub(crate) fn read_status(root: &Path) -> Option<&'static str> {
     let bytes = fs::read(&path).ok()?;
     let text = String::from_utf8_lossy(&bytes);
     let parsed = serde_json::from_str::<Value>(&text).ok()?;
-    if parsed.get("version").and_then(Value::as_u64) != Some(1) {
+    // `version === 1` is also true for the JSON number `1.0`.
+    if parsed.get("version").and_then(Value::as_f64) != Some(1.0) {
         return None;
     }
     match parsed.get("status").and_then(Value::as_str) {
