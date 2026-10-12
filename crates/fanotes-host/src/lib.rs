@@ -2906,7 +2906,13 @@ fn read_tree_cache(app_data: &Path, root: &Path) -> Option<Value> {
     {
         return None;
     }
-    match clean_cached_entries(parsed.get("entries")?, "", 0, &mut 0) {
+    // A missing entry list fails the same way as a value that is not an array.
+    // The desktop removes that cache.
+    let Some(entries) = parsed.get("entries") else {
+        let _ = fs::remove_file(&path);
+        return None;
+    };
+    match clean_cached_entries(entries, "", 0, &mut 0) {
         Ok(entries) => Some(Value::Array(entries)),
         Err(()) => {
             let _ = fs::remove_file(&path);

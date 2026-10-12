@@ -507,6 +507,30 @@ fn a_version_of_one_point_zero_still_counts_as_version_one() {
 }
 
 #[test]
+fn a_cached_tree_without_entries_is_removed() {
+    let (vault, mut host) = host();
+    host.dispatch("fanotes:complete-onboarding", &[json!([])])
+        .unwrap();
+    host.dispatch("fanotes:get-tree", &[]).unwrap();
+    let cache_dir = vault.parent().unwrap().join("app/tree-cache-v1");
+    let cache_path = fs::read_dir(&cache_dir)
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    let mut parsed: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&cache_path).unwrap()).unwrap();
+    parsed.as_object_mut().unwrap().remove("entries");
+    fs::write(&cache_path, serde_json::to_string(&parsed).unwrap()).unwrap();
+    assert!(host
+        .dispatch("fanotes:get-cached-tree", &[])
+        .unwrap()
+        .is_null());
+    assert!(!cache_path.is_file());
+}
+
+#[test]
 fn a_cached_file_size_of_twelve_point_zero_still_counts() {
     let (vault, mut host) = host();
     host.dispatch("fanotes:complete-onboarding", &[json!(["Mathematik"])])
