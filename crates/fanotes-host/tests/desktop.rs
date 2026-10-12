@@ -18,6 +18,48 @@ fn host() -> (std::path::PathBuf, std::path::PathBuf, Host) {
 }
 
 #[test]
+fn a_file_in_a_reveal_path_is_not_a_folder() {
+    let (dir, vault, mut host) = host();
+    fs::write(vault.join("Seite.md"), b"Notiz\n").unwrap();
+    fs::create_dir(vault.join("Mathe")).unwrap();
+    fs::write(vault.join("Mathe/Kraft.md"), b"Kraft\n").unwrap();
+    assert_eq!(
+        host.dispatch("fanotes:reveal-in-folder", &[json!("Seite.md/innen")])
+            .unwrap_err(),
+        "Ein Pfadbestandteil ist kein Ordner."
+    );
+    assert_eq!(
+        host.dispatch(
+            "fanotes:reveal-in-folder",
+            &[json!("Seite.md/innen/noch")],
+        )
+        .unwrap_err(),
+        "Ein Pfadbestandteil ist kein Ordner."
+    );
+    assert_eq!(
+        host.dispatch("fanotes:reveal-in-folder", &[json!("Fehlt")])
+            .unwrap_err(),
+        "Der Eintrag wurde nicht gefunden."
+    );
+    host.dispatch("fanotes:reveal-in-folder", &[json!("Seite.md")])
+        .unwrap();
+    host.dispatch("fanotes:reveal-in-folder", &[json!("Mathe/Kraft.md")])
+        .unwrap();
+    host.dispatch("fanotes:reveal-in-folder", &[json!(".fanotes")])
+        .unwrap();
+    let log = fs::read_to_string(dir.join("opened.log")).unwrap();
+    assert!(log.contains(&format!("reveal {}", vault.join("Seite.md").display())));
+    assert!(log.contains(&format!(
+        "reveal {}",
+        vault.join("Mathe/Kraft.md").display()
+    )));
+    assert!(log.contains(&format!(
+        "reveal {}",
+        vault.join(".fanotes").display()
+    )));
+}
+
+#[test]
 fn links_open_and_notes_are_revealed_without_leaving_the_vault() {
     let (dir, vault, mut host) = host();
     fs::write(vault.join("Seite.md"), b"Notiz\n").unwrap();
