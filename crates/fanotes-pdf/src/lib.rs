@@ -96,10 +96,11 @@ pub fn render_pdf_page(pdf: &[u8], request: &RenderRequest) -> Result<PageBitmap
     }
     let _render = RENDER.lock().unwrap_or_else(|error| error.into_inner());
     let pdfium = library()?;
-    let password = if request.password.is_empty() {
+    let password = truncate_utf16(&request.password, 1024);
+    let password = if password.is_empty() {
         None
     } else {
-        Some(request.password.as_str())
+        Some(password.as_str())
     };
     let document = pdfium
         .load_pdf_from_byte_slice(pdf, password)
@@ -149,10 +150,22 @@ pub fn render_pdf_page(pdf: &[u8], request: &RenderRequest) -> Result<PageBitmap
 fn validate_request(request: &RenderRequest) -> Result<(), Error> {
     checked_pixels(request.pixel_width, request.pixel_height)?;
     checked_pixels(request.page_pixel_width, request.page_pixel_height)?;
-    if request.password.len() > 1024 {
-        return Err(Error::Request);
-    }
     normalized_rotation(request.rotation).map(|_| ())
+}
+
+/// Desktop `password.slice(0, 1024)` counts UTF-16 units.
+fn truncate_utf16(value: &str, max_units: usize) -> String {
+    let mut units = 0;
+    let mut end = 0;
+    for (index, character) in value.char_indices() {
+        let width = character.len_utf16();
+        if units + width > max_units {
+            break;
+        }
+        units += width;
+        end = index + character.len_utf8();
+    }
+    value[..end].to_owned()
 }
 
 fn checked_pixels(width: i32, height: i32) -> Result<usize, Error> {
@@ -328,5 +341,19 @@ mod tests {
     fn rejects_an_incomplete_vault_request() {
         let error = parse_vault_request(&Value::Null).unwrap_err();
         assert!(matches!(error, Error::Request));
+    }
+
+    #[test]
+    fn a_long_pdf_password_is_shortened_like_the_desktop() {
+        let ascii = "a".repeat(1025);
+        assert_eq!(truncate_utf16(&ascii, 1024).len(), 1024);
+        let marks = "ä".repeat(1025);
+        let shortened = truncate_utf16(&marks, 1024);
+        assert_eq!(shortened.chars().count(), 1024);
+        assert_eq!(shortened.encode_utf16().count(), 1024);
+        let mut job = request(16, 16);
+        job.password = marks;
+        let error = render_pdf_page(b"", &job).unwrap_err();
+        assert!(error.to_string().contains("leer oder zu groß"), "{error}");
     }
 }
