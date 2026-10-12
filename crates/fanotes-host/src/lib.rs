@@ -6,6 +6,7 @@
 
 mod addons;
 mod channels;
+mod dialogs;
 mod drawings;
 mod imports;
 mod linux_runtime;
@@ -34,6 +35,7 @@ use sha2::{Digest, Sha256};
 use serde_json::{json, Map, Value};
 
 pub use channels::{find_channel, ChannelKind, CHANNELS};
+pub use dialogs::{pdf_export_dialog, subject_book_window_title};
 pub use policy::{addon_request_allowed, local_ai_origin};
 pub use secrets::SecretStore;
 
@@ -1035,7 +1037,7 @@ impl Host {
             return Ok(Value::Null);
         } else {
             let Some(path) = rfd::FileDialog::new()
-                .set_title("FaNotes-Vault auswählen")
+                .set_title(crate::dialogs::vault_picker_title(self.ui_language()))
                 .pick_folder()
             else {
                 return Ok(Value::Null);
