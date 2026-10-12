@@ -92,3 +92,26 @@ fn links_open_and_notes_are_revealed_without_leaving_the_vault() {
     assert_eq!(hits.as_array().unwrap().len(), 1);
     assert_eq!(hits[0]["relativePath"], "klein.md");
 }
+
+#[test]
+fn a_non_string_argument_uses_the_desktop_message() {
+    let (_dir, _vault, mut host) = host();
+    assert_eq!(
+        host.dispatch("fanotes:search", &[json!(1)]).unwrap_err(),
+        "Ungültige Suchanfrage."
+    );
+    assert_eq!(
+        host.dispatch("fanotes:read-drawing", &[json!(1)]).unwrap_err(),
+        "Ungültige Zeichnungs-ID."
+    );
+    assert_eq!(
+        host.dispatch("fanotes:read-worksheet", &[json!(false)])
+            .unwrap_err(),
+        "Ungültige Arbeitsblatt-ID."
+    );
+    assert_eq!(
+        host.dispatch("fanotes:delete-worksheet", &[json!(1)])
+            .unwrap_err(),
+        "Ungültige Arbeitsblatt-ID."
+    );
+}

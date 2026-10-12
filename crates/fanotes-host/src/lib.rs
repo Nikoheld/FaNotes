@@ -154,12 +154,14 @@ impl Host {
             }
             "fanotes:move-entry" => self.move_entry(&arg_string(args, 0)?, &arg_string(args, 1)?),
             "fanotes:trash-entry" => self.trash_entry(&arg_string(args, 0)?),
-            "fanotes:search" => self.search(&arg_string(args, 0)?),
+            "fanotes:search" => self.search(&arg_text(args, 0, "Ungültige Suchanfrage.")?),
             "fanotes:list-drawings" => drawings::list_drawings(self),
             "fanotes:save-drawing" => {
                 drawings::save_drawing(self, args.first().unwrap_or(&Value::Null))
             }
-            "fanotes:read-drawing" => drawings::read_drawing(self, &arg_string(args, 0)?),
+            "fanotes:read-drawing" => {
+                drawings::read_drawing(self, &arg_text(args, 0, "Ungültige Zeichnungs-ID.")?)
+            }
             "fanotes:read-famd-ink" => self.read_famd_ink(&arg_string(args, 0)?),
             "fanotes:read-note-page-stats" => notes::read_page_stats(self, &arg_string(args, 0)?),
             "fanotes:read-note-paper-style" => notes::read_paper_style(self, &arg_string(args, 0)?),
@@ -191,11 +193,15 @@ impl Host {
             "fanotes:import-onenote" => onenote::import_onenote(self, args),
             "fanotes:open-subject-book-popout" => self.open_subject_book(&arg_string(args, 0)?),
             "fanotes:close-subject-book-popout" => Ok(json!({ "open": false })),
-            "fanotes:read-worksheet" => worksheets::read_worksheet(self, &arg_string(args, 0)?),
+            "fanotes:read-worksheet" => {
+                worksheets::read_worksheet(self, &arg_text(args, 0, "Ungültige Arbeitsblatt-ID.")?)
+            }
             "fanotes:save-worksheet" => {
                 worksheets::save_worksheet(self, args.first().unwrap_or(&Value::Null))
             }
-            "fanotes:delete-worksheet" => worksheets::delete_worksheet(self, &arg_string(args, 0)?),
+            "fanotes:delete-worksheet" => {
+                worksheets::delete_worksheet(self, &arg_text(args, 0, "Ungültige Arbeitsblatt-ID.")?)
+            }
             "fanotes:list-note-history" => notes::list_history(self, &arg_string(args, 0)?),
             "fanotes:read-note-history" => {
                 notes::read_history(self, &arg_string(args, 0)?, &arg_string(args, 1)?)
@@ -1718,10 +1724,14 @@ fn read_regular_limited(path: &Path, max: u64) -> Result<Vec<u8>, String> {
 }
 
 fn arg_string(args: &[Value], index: usize) -> Result<String, String> {
+    arg_text(args, index, "Ungültiges Argument.")
+}
+
+fn arg_text(args: &[Value], index: usize, message: &str) -> Result<String, String> {
     args.get(index)
         .and_then(Value::as_str)
         .map(str::to_owned)
-        .ok_or_else(|| "Ungültiges Argument.".to_owned())
+        .ok_or_else(|| message.to_owned())
 }
 
 fn default_settings() -> Map<String, Value> {
