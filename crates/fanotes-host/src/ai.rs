@@ -366,13 +366,10 @@ fn parse_openai_models(body: &Value) -> Result<Vec<Value>, String> {
             if let Some(object) = record.as_object_mut() {
                 object.insert(
                     "publisher".into(),
-                    Value::String(
-                        entry
-                            .get("owned_by")
-                            .and_then(Value::as_str)
-                            .unwrap_or("")
-                            .to_owned(),
-                    ),
+                    Value::String(crate::vault::truncate_utf16(
+                        entry.get("owned_by").and_then(Value::as_str).unwrap_or(""),
+                        200,
+                    )),
                 );
             }
             Some(record)
@@ -1220,13 +1217,13 @@ fn set_model_details(
             Value::String(crate::vault::truncate_utf16(publisher, 200)),
         );
     }
-    if let Some(quantization) = quantization {
+    if let Some(quantization) = quantization.filter(|text| !text.is_empty()) {
         object.insert(
             "quantization".into(),
             Value::String(crate::vault::truncate_utf16(quantization, 100)),
         );
     }
-    if let Some(params) = params {
+    if let Some(params) = params.filter(|text| !text.is_empty()) {
         object.insert(
             "params".into(),
             Value::String(crate::vault::truncate_utf16(params, 100)),
@@ -1238,7 +1235,7 @@ fn set_model_details(
     if let Some(max_context) = max_context {
         object.insert("maxContextLength".into(), json!(max_context));
     }
-    if let Some(description) = description {
+    if let Some(description) = description.filter(|text| !text.is_empty()) {
         object.insert(
             "description".into(),
             Value::String(crate::vault::truncate_utf16(description, 1200)),
@@ -1717,6 +1714,20 @@ mod tests {
         assert_eq!(blank_model[0]["displayName"], "llama3");
         assert_eq!(blank_model[1]["key"], "gemma");
         assert_eq!(blank_model[1]["displayName"], "gemma");
+        let empty_details = parse_ollama_models(&json!({
+            "models": [{
+                "name": "llama",
+                "details": {
+                    "family": "",
+                    "quantization_level": "",
+                    "parameter_size": ""
+                }
+            }]
+        }))
+        .unwrap();
+        assert_eq!(empty_details[0]["publisher"], "");
+        assert!(empty_details[0]["quantization"].is_null());
+        assert!(empty_details[0]["params"].is_null());
         assert_eq!(ollama[0]["params"], "8B");
         assert_eq!(ollama[0]["quantization"], "Q4_K_M");
         assert_eq!(
@@ -1815,6 +1826,19 @@ mod tests {
         assert_eq!(openai[0]["provider"], "openai");
         assert_eq!(openai[0]["key"], "gpt-4.1");
         assert_eq!(openai[0]["publisher"], "openai");
+        let long_owner = "Ä".repeat(201);
+        let truncated = parse_openai_models(&json!({
+            "data": [{ "id": "gpt", "owned_by": long_owner }]
+        }))
+        .unwrap();
+        assert_eq!(
+            truncated[0]["publisher"]
+                .as_str()
+                .unwrap()
+                .encode_utf16()
+                .count(),
+            200
+        );
 
         let gemini = parse_gemini_models(&json!({
             "models": [
