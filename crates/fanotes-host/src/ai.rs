@@ -85,8 +85,8 @@ pub fn transform(payload: &Value) -> Result<Value, String> {
             .unwrap_or("Notiz"),
         500,
     );
-    // The cloud and Ollama prompt trims the note path. LM Studio keeps it.
-    let relative_path = prompt_path(object.get("relativePath").and_then(Value::as_str), true);
+    // Desktop `slice(0, 1000)` keeps surrounding spaces on the current note path.
+    let relative_path = prompt_path(object.get("relativePath").and_then(Value::as_str));
     let notes = vault_notes(object.get("vaultNotes"));
     let prompt = build_prompt(
         &markdown,
@@ -158,7 +158,7 @@ pub fn transform_lm_studio(payload: &Value) -> Result<Value, String> {
         Some(title) => crate::vault::truncate_utf16(title, 500),
         None => "Notiz".to_owned(),
     };
-    let relative_path = prompt_path(object.get("relativePath").and_then(Value::as_str), false);
+    let relative_path = prompt_path(object.get("relativePath").and_then(Value::as_str));
     let notes: Vec<_> = vault_notes(object.get("vaultNotes"))
         .into_iter()
         .filter(|(title, path)| !title.is_empty() && !path.is_empty())
@@ -1590,17 +1590,11 @@ fn limited_instruction(value: &str) -> String {
     crate::vault::truncate_utf16(crate::vault::js_trim(value), 12_000)
 }
 
-/// `relativePath.trim().slice(0, 1000)` for a cloud or Ollama note.
+/// `relativePath.slice(0, 1000)` for the current note.
 ///
-/// LM Studio uses `slice` without `trim`, so surrounding spaces stay.
-fn prompt_path(value: Option<&str>, trim: bool) -> String {
-    let text = value.unwrap_or("");
-    let text = if trim {
-        crate::vault::js_trim(text)
-    } else {
-        text
-    };
-    crate::vault::truncate_utf16(text, 1000)
+/// The desktop does not trim this path. Vault-note paths are trimmed separately.
+fn prompt_path(value: Option<&str>) -> String {
+    crate::vault::truncate_utf16(value.unwrap_or(""), 1000)
 }
 
 fn build_prompt(
@@ -1888,7 +1882,7 @@ fn unwrap_markdown_with(value: &str, empty_message: &str) -> Result<String, Stri
 mod tests {
     use super::{
         build_prompt, finish_models, lm_studio_text, output_token_limit, parse_anthropic_models,
-        prompt_path,
+        prompt_path, vault_notes,
         parse_gemini_models, parse_lmstudio_legacy, parse_lmstudio_models, parse_lmstudio_native,
         parse_lmstudio_native_legacy, parse_ollama_models, parse_openai_models,
         parse_opencode_models, provider_http_error, unwrap_markdown,
@@ -2321,16 +2315,12 @@ mod tests {
     }
 
     #[test]
-    fn an_ai_note_path_is_trimmed_before_the_prompt() {
+    fn an_ai_note_path_keeps_spaces_before_the_prompt() {
         let spaced = " \u{feff} Bio/Blatt.md \n";
-        assert_eq!(prompt_path(Some(spaced), true), "Bio/Blatt.md");
-        assert_eq!(prompt_path(Some(spaced), false), spaced);
-        assert_eq!(prompt_path(None, true), "");
+        assert_eq!(prompt_path(Some(spaced)), spaced);
+        assert_eq!(prompt_path(None), "");
         let long = format!("  {}  ", "ä".repeat(1005));
-        let trimmed = prompt_path(Some(&long), true);
-        assert_eq!(crate::vault::utf16_len(&trimmed), 1000);
-        assert!(trimmed.starts_with('ä'));
-        let kept = prompt_path(Some(&long), false);
+        let kept = prompt_path(Some(&long));
         assert_eq!(crate::vault::utf16_len(&kept), 1000);
         assert!(kept.starts_with(' '));
         let prompt = build_prompt(
@@ -2338,11 +2328,18 @@ mod tests {
             &["spelling".to_owned()],
             "",
             "Biologie",
-            &prompt_path(Some(spaced), true),
+            &prompt_path(Some(spaced)),
             &[],
         );
-        assert!(prompt.contains("PFAD: Bio/Blatt.md\n"));
-        assert!(!prompt.contains("PFAD:  \u{feff}"));
+        assert!(prompt.contains("PFAD:  \u{feff} Bio/Blatt.md \n\n"));
+        let notes = vault_notes(Some(&json!([{
+            "title": " \u{feff}Chemie ",
+            "relativePath": " Chemie/Säuren.md "
+        }])));
+        assert_eq!(
+            notes,
+            vec![("Chemie".to_owned(), "Chemie/Säuren.md".to_owned())]
+        );
     }
 
     #[test]
