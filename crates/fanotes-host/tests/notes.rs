@@ -884,6 +884,34 @@ fn a_recognition_model_with_a_bad_byte_still_loads() {
 }
 
 #[test]
+fn a_recognition_model_file_uses_the_desktop_checks() {
+    let (mut host, vault) = host();
+    let directory = vault.join(".fanotes");
+    std::fs::create_dir_all(&directory).unwrap();
+    let path = directory.join("recognition-model.json");
+    std::fs::create_dir(&path).unwrap();
+    assert_eq!(
+        host.dispatch("fanotes:read-recognition-model", &[])
+            .unwrap_err(),
+        "Die Datei ist keine reguläre Datei."
+    );
+    std::fs::remove_dir(&path).unwrap();
+    let file = std::fs::File::create(&path).unwrap();
+    file.set_len(20 * 1024 * 1024 + 1).unwrap();
+    assert_eq!(
+        host.dispatch("fanotes:read-recognition-model", &[])
+            .unwrap_err(),
+        "Die Datei ist zu groß."
+    );
+    std::fs::remove_file(&path).unwrap();
+    assert_eq!(
+        host.dispatch("fanotes:read-recognition-model", &[])
+            .unwrap(),
+        serde_json::Value::Null
+    );
+}
+
+#[test]
 fn a_subject_book_with_a_bad_byte_stays_in_the_list() {
     let (mut host, vault) = host();
     std::fs::create_dir_all(vault.join(".fanotes")).unwrap();
