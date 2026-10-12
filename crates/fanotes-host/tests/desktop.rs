@@ -95,7 +95,11 @@ fn links_open_and_notes_are_revealed_without_leaving_the_vault() {
 
 #[test]
 fn a_non_string_argument_uses_the_desktop_message() {
-    let (_dir, _vault, mut host) = host();
+    let (_dir, vault, mut host) = host();
+    fs::write(vault.join("Seite.md"), b"Hallo\n").unwrap();
+    fs::create_dir(vault.join("Ordner")).unwrap();
+    fs::write(vault.join("Ordner").join("Innen.md"), b"Innen\n").unwrap();
+
     assert_eq!(
         host.dispatch("fanotes:search", &[json!(1)]).unwrap_err(),
         "Ungültige Suchanfrage."
@@ -113,5 +117,153 @@ fn a_non_string_argument_uses_the_desktop_message() {
         host.dispatch("fanotes:delete-worksheet", &[json!(1)])
             .unwrap_err(),
         "Ungültige Arbeitsblatt-ID."
+    );
+    assert_eq!(
+        host.dispatch("fanotes:read-file", &[json!(1)]).unwrap_err(),
+        "Ungültiger Markdown-Pfad."
+    );
+    assert_eq!(
+        host.dispatch("fanotes:write-file", &[json!(1), json!("Text")])
+            .unwrap_err(),
+        "Ungültiger Vault-Pfad."
+    );
+    assert_eq!(
+        host.dispatch("fanotes:write-file", &[json!("Bild.png"), json!(1)])
+            .unwrap_err(),
+        "Es dürfen nur Markdown-Dateien und FaNotes-Handschriftdateien (.famd) bearbeitet werden."
+    );
+    assert_eq!(
+        host.dispatch("fanotes:write-file", &[json!("Seite.md"), json!(1)])
+            .unwrap_err(),
+        "Der Notizinhalt ist ungültig oder zu groß."
+    );
+    assert_eq!(fs::read(vault.join("Seite.md")).unwrap(), b"Hallo\n");
+    assert_eq!(
+        host.dispatch("fanotes:write-recognition-model", &[json!(1)])
+            .unwrap_err(),
+        "Das Handschriftmodell ist ungültig oder zu groß."
+    );
+    for channel in [
+        "fanotes:read-famd-ink",
+        "fanotes:read-note-page-stats",
+        "fanotes:read-note-paper-style",
+        "fanotes:read-note-links",
+        "fanotes:write-note-links",
+        "fanotes:read-note-backups",
+        "fanotes:write-note-backups",
+    ] {
+        assert_eq!(
+            host.dispatch(channel, &[json!(1)]).unwrap_err(),
+            "Ungültiger Notizpfad.",
+            "{channel}"
+        );
+    }
+    assert_eq!(
+        host.dispatch(
+            "fanotes:set-note-paper-style",
+            &[json!(1), json!("kein-papier")],
+        )
+        .unwrap_err(),
+        "Diese Papierart wird nicht unterstützt."
+    );
+    assert_eq!(
+        host.dispatch("fanotes:set-note-paper-style", &[json!(1), json!("dots")])
+            .unwrap_err(),
+        "Ungültiger Notizpfad."
+    );
+    assert_eq!(
+        host.dispatch("fanotes:set-note-paper-style", &[json!("Seite.md"), json!(1)])
+            .unwrap_err(),
+        "Diese Papierart wird nicht unterstützt."
+    );
+    assert_eq!(
+        host.dispatch("fanotes:set-folder-color", &[json!(1), json!("#112233")])
+            .unwrap_err(),
+        "Ungültiger Vault-Pfad."
+    );
+    assert_eq!(
+        host.dispatch("fanotes:rename-entry", &[json!(1), json!("Neu.md")])
+            .unwrap_err(),
+        "Ungültiger Vault-Pfad."
+    );
+    assert_eq!(
+        host.dispatch("fanotes:rename-entry", &[json!("Seite.md"), json!(1)])
+            .unwrap(),
+        json!("Seite.md")
+    );
+    assert!(vault.join("Seite.md").is_file());
+    assert_eq!(
+        host.dispatch("fanotes:move-entry", &[json!(1), json!("Ordner")])
+            .unwrap_err(),
+        "Ungültiger Vault-Pfad."
+    );
+    assert_eq!(
+        host.dispatch("fanotes:move-entry", &[json!("Ordner/Innen.md"), json!(false)])
+            .unwrap(),
+        json!("Innen.md")
+    );
+    assert!(vault.join("Innen.md").is_file());
+    assert_eq!(
+        host.dispatch("fanotes:trash-entry", &[json!(1)]).unwrap_err(),
+        "Ungültiger Vault-Pfad."
+    );
+    assert_eq!(
+        host.dispatch("fanotes:reveal-in-folder", &[json!(false)])
+            .unwrap_err(),
+        "Ungültiger Vault-Pfad."
+    );
+    assert_eq!(
+        host.dispatch("fanotes:open-subject-book-popout", &[json!(1)])
+            .unwrap_err(),
+        "Ungültiger Buchpfad."
+    );
+    assert_eq!(
+        host.dispatch("fanotes:list-note-history", &[json!(1)])
+            .unwrap_err(),
+        "Ungültiger Vault-Pfad."
+    );
+    assert_eq!(
+        host.dispatch("fanotes:read-note-history", &[json!(1), json!("abc")])
+            .unwrap_err(),
+        "Ungültiger Vault-Pfad."
+    );
+    assert_eq!(
+        host.dispatch("fanotes:read-note-history", &[json!("../Seite.md"), json!(" ")])
+            .unwrap_err(),
+        "Pfad-Traversal ist nicht erlaubt."
+    );
+    assert_eq!(
+        host.dispatch("fanotes:read-note-history", &[json!("Seite.txt"), json!(1)])
+            .unwrap_err(),
+        "Es dürfen nur Markdown-Dateien und FaNotes-Handschriftdateien (.famd) bearbeitet werden."
+    );
+    assert_eq!(
+        host.dispatch("fanotes:read-note-history", &[json!("Seite.md"), json!(1)])
+            .unwrap_err(),
+        "Dieser Verlaufseintrag existiert nicht mehr."
+    );
+    assert_eq!(
+        host.dispatch("fanotes:read-note-history", &[json!("Seite.md"), json!({})])
+            .unwrap_err(),
+        "Ungültiger Verlaufseintrag."
+    );
+    assert_eq!(
+        host.dispatch("fanotes:read-note-history", &[json!("Seite.md")])
+            .unwrap_err(),
+        "Dieser Verlaufseintrag existiert nicht mehr."
+    );
+    assert_eq!(
+        host.dispatch("fanotes:read-asset-data-url", &[json!(1)])
+            .unwrap_err(),
+        "Ungültiger Bildpfad."
+    );
+    assert_eq!(
+        host.dispatch("fanotes:read-asset-bytes", &[json!(false)])
+            .unwrap_err(),
+        "Ungültiger Dateipfad."
+    );
+    assert_eq!(
+        host.dispatch("fanotes:open-external", &[json!(1)]).unwrap_err(),
+        "Ungültiger externer Link."
     );
 }

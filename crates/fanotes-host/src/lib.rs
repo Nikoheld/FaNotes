@@ -134,26 +134,38 @@ impl Host {
             "fanotes:get-fast-tree" => self.tree(false),
             "fanotes:get-tree" => self.tree(true),
             "fanotes:select-vault" => self.select_vault(args),
-            "fanotes:read-file" => self.read_file(&arg_string(args, 0)?),
-            "fanotes:write-file" => self.write_file(&arg_string(args, 0)?, &arg_string(args, 1)?),
-            "fanotes:read-recognition-model" => self.read_recognition_model(),
-            "fanotes:write-recognition-model" => {
-                self.write_recognition_model(&arg_string(args, 0)?)
+            "fanotes:read-file" => {
+                self.read_file(&arg_text(args, 0, "Ungültiger Markdown-Pfad.")?)
             }
+            "fanotes:write-file" => self.write_file(
+                args.first().unwrap_or(&Value::Null),
+                args.get(1).unwrap_or(&Value::Null),
+            ),
+            "fanotes:read-recognition-model" => self.read_recognition_model(),
+            "fanotes:write-recognition-model" => self.write_recognition_model(&arg_text(
+                args,
+                0,
+                "Das Handschriftmodell ist ungültig oder zu groß.",
+            )?),
             "fanotes:create-note" => {
                 self.create_entry(&loose_string(args, 0), loose_string_opt(args, 1), true)
             }
             "fanotes:create-folder" => {
                 self.create_entry(&loose_string(args, 0), loose_string_opt(args, 1), false)
             }
-            "fanotes:set-folder-color" => {
-                self.set_folder_color(&arg_string(args, 0)?, args.get(1).unwrap_or(&Value::Null))
-            }
-            "fanotes:rename-entry" => {
-                self.rename_entry(&arg_string(args, 0)?, &arg_string(args, 1)?)
-            }
-            "fanotes:move-entry" => self.move_entry(&arg_string(args, 0)?, &arg_string(args, 1)?),
-            "fanotes:trash-entry" => self.trash_entry(&arg_string(args, 0)?),
+            "fanotes:set-folder-color" => self.set_folder_color(
+                &arg_text(args, 0, "Ungültiger Vault-Pfad.")?,
+                args.get(1).unwrap_or(&Value::Null),
+            ),
+            "fanotes:rename-entry" => self.rename_entry(
+                &arg_text(args, 0, "Ungültiger Vault-Pfad.")?,
+                &loose_string(args, 1),
+            ),
+            "fanotes:move-entry" => self.move_entry(
+                &arg_text(args, 0, "Ungültiger Vault-Pfad.")?,
+                &loose_string(args, 1),
+            ),
+            "fanotes:trash-entry" => self.trash_entry(&arg_text(args, 0, "Ungültiger Vault-Pfad.")?),
             "fanotes:search" => self.search(&arg_text(args, 0, "Ungültige Suchanfrage.")?),
             "fanotes:list-drawings" => drawings::list_drawings(self),
             "fanotes:save-drawing" => {
@@ -162,22 +174,34 @@ impl Host {
             "fanotes:read-drawing" => {
                 drawings::read_drawing(self, &arg_text(args, 0, "Ungültige Zeichnungs-ID.")?)
             }
-            "fanotes:read-famd-ink" => self.read_famd_ink(&arg_string(args, 0)?),
-            "fanotes:read-note-page-stats" => notes::read_page_stats(self, &arg_string(args, 0)?),
-            "fanotes:read-note-paper-style" => notes::read_paper_style(self, &arg_string(args, 0)?),
-            "fanotes:set-note-paper-style" => {
-                notes::set_paper_style(self, &arg_string(args, 0)?, &arg_string(args, 1)?)
+            "fanotes:read-famd-ink" => {
+                self.read_famd_ink(&arg_text(args, 0, "Ungültiger Notizpfad.")?)
             }
-            "fanotes:read-note-links" => notes::read_links(self, &arg_string(args, 0)?),
-            "fanotes:write-note-links" => notes::write_links(
+            "fanotes:read-note-page-stats" => {
+                notes::read_page_stats(self, &arg_text(args, 0, "Ungültiger Notizpfad.")?)
+            }
+            "fanotes:read-note-paper-style" => {
+                notes::read_paper_style(self, &arg_text(args, 0, "Ungültiger Notizpfad.")?)
+            }
+            "fanotes:set-note-paper-style" => notes::set_paper_style(
                 self,
-                &arg_string(args, 0)?,
+                args.first().unwrap_or(&Value::Null),
                 args.get(1).unwrap_or(&Value::Null),
             ),
-            "fanotes:read-note-backups" => notes::read_backups(self, &arg_string(args, 0)?),
+            "fanotes:read-note-links" => {
+                notes::read_links(self, &arg_text(args, 0, "Ungültiger Notizpfad.")?)
+            }
+            "fanotes:write-note-links" => notes::write_links(
+                self,
+                &arg_text(args, 0, "Ungültiger Notizpfad.")?,
+                args.get(1).unwrap_or(&Value::Null),
+            ),
+            "fanotes:read-note-backups" => {
+                notes::read_backups(self, &arg_text(args, 0, "Ungültiger Notizpfad.")?)
+            }
             "fanotes:write-note-backups" => notes::write_backups(
                 self,
-                &arg_string(args, 0)?,
+                &arg_text(args, 0, "Ungültiger Notizpfad.")?,
                 args.get(1).unwrap_or(&Value::Null),
             ),
             "fanotes:read-subject-books" => notes::read_subject_books(self),
@@ -191,7 +215,9 @@ impl Host {
             }
             "fanotes:import-pdf-note" => imports::import_pdf_note(self, args),
             "fanotes:import-onenote" => onenote::import_onenote(self, args),
-            "fanotes:open-subject-book-popout" => self.open_subject_book(&arg_string(args, 0)?),
+            "fanotes:open-subject-book-popout" => {
+                self.open_subject_book(&arg_text(args, 0, "Ungültiger Buchpfad.")?)
+            }
             "fanotes:close-subject-book-popout" => Ok(json!({ "open": false })),
             "fanotes:read-worksheet" => {
                 worksheets::read_worksheet(self, &arg_text(args, 0, "Ungültige Arbeitsblatt-ID.")?)
@@ -202,15 +228,23 @@ impl Host {
             "fanotes:delete-worksheet" => {
                 worksheets::delete_worksheet(self, &arg_text(args, 0, "Ungültige Arbeitsblatt-ID.")?)
             }
-            "fanotes:list-note-history" => notes::list_history(self, &arg_string(args, 0)?),
-            "fanotes:read-note-history" => {
-                notes::read_history(self, &arg_string(args, 0)?, &arg_string(args, 1)?)
+            "fanotes:list-note-history" => {
+                notes::list_history(self, &arg_text(args, 0, "Ungültiger Vault-Pfad.")?)
             }
+            "fanotes:read-note-history" => notes::read_history(
+                self,
+                &arg_text(args, 0, "Ungültiger Vault-Pfad.")?,
+                args.get(1),
+            ),
             "fanotes:export-note-pdf" => {
                 Err("Das Fenster ist nicht bereit für den PDF-Export.".to_owned())
             }
-            "fanotes:read-asset-data-url" => self.read_asset_data_url(&arg_string(args, 0)?),
-            "fanotes:read-asset-bytes" => self.read_asset_bytes(&arg_string(args, 0)?),
+            "fanotes:read-asset-data-url" => {
+                self.read_asset_data_url(&arg_text(args, 0, "Ungültiger Bildpfad.")?)
+            }
+            "fanotes:read-asset-bytes" => {
+                self.read_asset_bytes(&arg_text(args, 0, "Ungültiger Dateipfad.")?)
+            }
             "fanotes:load-spelling-resources" => resources::load_spelling(),
             "fanotes:load-spelling-word-candidates" => resources::load_spelling_candidates(
                 args.first().and_then(Value::as_str).unwrap_or(""),
@@ -255,8 +289,12 @@ impl Host {
             | "fanotes:update-check"
             | "fanotes:update-download"
             | "fanotes:update-install" => Ok(self.update_state()),
-            "fanotes:reveal-in-folder" => self.reveal_in_folder(&arg_string(args, 0)?),
-            "fanotes:open-external" => self.open_external(&arg_string(args, 0)?),
+            "fanotes:reveal-in-folder" => {
+                self.reveal_in_folder(&arg_text(args, 0, "Ungültiger Vault-Pfad.")?)
+            }
+            "fanotes:open-external" => {
+                self.open_external(&arg_text(args, 0, "Ungültiger externer Link.")?)
+            }
             "fanotes:addons-fetch" => addons::fetch_text(&arg_string(args, 0)?),
             "fanotes:addons-list" => addons::list(self),
             "fanotes:addons-save" => addons::save(self, args.first().unwrap_or(&Value::Null)),
@@ -772,15 +810,21 @@ impl Host {
         Ok(Value::String(fanotes_famd::strip_famd_payload(&text)))
     }
 
-    fn write_file(&mut self, relative: &str, content: &str) -> Result<Value, String> {
-        let root = self.require_vault()?.to_path_buf();
+    fn write_file(&mut self, relative: &Value, content: &Value) -> Result<Value, String> {
+        let relative = relative
+            .as_str()
+            .ok_or_else(|| "Ungültiger Vault-Pfad.".to_owned())?;
         let normalized = vault::normalize_relative_path(relative, false, false)?;
         if !notes::is_note_text(&normalized) {
             return Err("Es dürfen nur Markdown-Dateien und FaNotes-Handschriftdateien (.famd) bearbeitet werden.".to_owned());
         }
+        let content = content
+            .as_str()
+            .ok_or_else(|| "Der Notizinhalt ist ungültig oder zu groß.".to_owned())?;
         if content.len() as u64 > note_byte_limit(&normalized) {
             return Err("Der Notizinhalt ist ungültig oder zu groß.".to_owned());
         }
+        let root = self.require_vault()?.to_path_buf();
         let path = vault::resolve_note_file(&root, &normalized)?;
         if notes::records_history(&normalized) {
             if let Some(text) = notes::read_lossy_string(&path) {
