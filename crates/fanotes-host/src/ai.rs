@@ -764,9 +764,6 @@ fn ollama_chat(
         .and_then(Value::as_str)
         .unwrap_or("")
         .to_owned();
-    if text.is_empty() {
-        return Err("Ollama hat kein verwendbares Markdown-Dokument zurückgegeben.".to_owned());
-    }
     let count = finite_number(&body["eval_count"]);
     let duration = finite_number(&body["eval_duration"]);
     let per_second = match (count, duration) {
