@@ -14,17 +14,56 @@ use webkit2gtk::{URIRequestExt, WebViewExt};
 struct HostState(Mutex<Host>);
 
 const CLOSE_WARNING_DELAY: Duration = Duration::from_secs(12);
-const QUIT_WITHOUT_SAVING: &str = "Ohne Speichern beenden";
 static CLOSE_WARNING_GENERATION: AtomicU64 = AtomicU64::new(0);
 static CLOSE_WARNING_ARMED: AtomicBool = AtomicBool::new(false);
+
+struct CloseWarningCopy {
+    title: &'static str,
+    message: &'static str,
+    detail: &'static str,
+    keep_waiting: &'static str,
+    quit_without_saving: &'static str,
+}
+
+impl CloseWarningCopy {
+    fn description(&self) -> String {
+        format!("{}\n\n{}", self.message, self.detail)
+    }
+}
+
+fn close_warning_copy(language: &str) -> CloseWarningCopy {
+    // Electron `localizeDialogOptions` translates these exact catalog strings
+    // when the resolved UI language is English. German and every other
+    // preference stay on the source copy.
+    if language == "en" {
+        CloseWarningCopy {
+            title: "Saving takes longer than expected",
+            message: "FaNotes is still waiting to securely save your changes.",
+            detail: "You can keep waiting. Only exit without saving if you want to consciously discard possible unsaved changes.",
+            keep_waiting: "Keep waiting",
+            quit_without_saving: "Exit without saving",
+        }
+    } else {
+        CloseWarningCopy {
+            title: "Speichern dauert länger als erwartet",
+            message: "FaNotes wartet noch darauf, deine Änderungen sicher zu speichern.",
+            detail: "Du kannst weiter warten. Beende nur ohne Speichern, wenn du mögliche ungespeicherte Änderungen bewusst verwerfen möchtest.",
+            keep_waiting: "Weiter warten",
+            quit_without_saving: "Ohne Speichern beenden",
+        }
+    }
+}
 
 fn invalidate_close_warning() {
     CLOSE_WARNING_GENERATION.fetch_add(1, Ordering::Relaxed);
     CLOSE_WARNING_ARMED.store(false, Ordering::Relaxed);
 }
 
-fn close_warning_discards_changes(choice: &rfd::MessageDialogResult) -> bool {
-    matches!(choice, rfd::MessageDialogResult::Custom(text) if text == QUIT_WITHOUT_SAVING)
+fn close_warning_discards_changes(
+    choice: &rfd::MessageDialogResult,
+    quit_without_saving: &str,
+) -> bool {
+    matches!(choice, rfd::MessageDialogResult::Custom(text) if text == quit_without_saving)
 }
 
 fn arm_close_warning(handle: tauri::AppHandle) {
@@ -52,32 +91,31 @@ fn arm_close_warning(handle: tauri::AppHandle) {
             if CLOSE_WARNING_GENERATION.load(Ordering::Relaxed) != generation {
                 return;
             }
-            let allow = app
+            let (allow, language) = app
                 .state::<HostState>()
                 .0
                 .lock()
-                .map(|host| host.allow_close)
-                .unwrap_or(true);
+                .map(|host| (host.allow_close, host.ui_language()))
+                .unwrap_or((true, "en"));
             if allow {
                 CLOSE_WARNING_ARMED.store(false, Ordering::Relaxed);
                 return;
             }
+            let copy = close_warning_copy(language);
             let choice = rfd::MessageDialog::new()
-                .set_title("Speichern dauert länger als erwartet")
-                .set_description(
-                    "FaNotes wartet noch darauf, deine Änderungen sicher zu speichern.\n\nDu kannst weiter warten. Beende nur ohne Speichern, wenn du mögliche ungespeicherte Änderungen bewusst verwerfen möchtest.",
-                )
+                .set_title(copy.title)
+                .set_description(copy.description())
                 .set_level(rfd::MessageLevel::Warning)
                 .set_buttons(rfd::MessageButtons::OkCancelCustom(
-                    "Weiter warten".to_owned(),
-                    QUIT_WITHOUT_SAVING.to_owned(),
+                    copy.keep_waiting.to_owned(),
+                    copy.quit_without_saving.to_owned(),
                 ))
                 .show();
             CLOSE_WARNING_ARMED.store(false, Ordering::Relaxed);
             if CLOSE_WARNING_GENERATION.load(Ordering::Relaxed) != generation {
                 return;
             }
-            if close_warning_discards_changes(&choice) {
+            if close_warning_discards_changes(&choice, copy.quit_without_saving) {
                 if let Ok(mut host) = app.state::<HostState>().0.lock() {
                     host.allow_close = true;
                 }
@@ -472,15 +510,78 @@ mod tests {
 
     #[test]
     fn quitting_without_saving_is_the_discard_choice() {
+        let german = super::close_warning_copy("de");
         assert!(super::close_warning_discards_changes(
-            &rfd::MessageDialogResult::Custom(super::QUIT_WITHOUT_SAVING.to_owned())
+            &rfd::MessageDialogResult::Custom(german.quit_without_saving.to_owned()),
+            german.quit_without_saving,
         ));
         assert!(!super::close_warning_discards_changes(
-            &rfd::MessageDialogResult::Custom("Weiter warten".to_owned())
+            &rfd::MessageDialogResult::Custom(german.keep_waiting.to_owned()),
+            german.quit_without_saving,
         ));
         assert!(!super::close_warning_discards_changes(
-            &rfd::MessageDialogResult::Cancel
+            &rfd::MessageDialogResult::Cancel,
+            german.quit_without_saving,
         ));
+    }
+
+    #[test]
+    fn english_close_warning_uses_the_catalog() {
+        let english = super::close_warning_copy("en");
+        assert_eq!(english.title, "Saving takes longer than expected");
+        assert_eq!(
+            english.message,
+            "FaNotes is still waiting to securely save your changes."
+        );
+        assert_eq!(
+            english.detail,
+            "You can keep waiting. Only exit without saving if you want to consciously discard possible unsaved changes."
+        );
+        assert_eq!(english.keep_waiting, "Keep waiting");
+        assert_eq!(english.quit_without_saving, "Exit without saving");
+        assert_eq!(
+            english.description(),
+            "FaNotes is still waiting to securely save your changes.\n\nYou can keep waiting. Only exit without saving if you want to consciously discard possible unsaved changes."
+        );
+        assert!(super::close_warning_discards_changes(
+            &rfd::MessageDialogResult::Custom(english.quit_without_saving.to_owned()),
+            english.quit_without_saving,
+        ));
+        assert!(!super::close_warning_discards_changes(
+            &rfd::MessageDialogResult::Custom("Ohne Speichern beenden".to_owned()),
+            english.quit_without_saving,
+        ));
+        assert_eq!(
+            super::close_warning_copy("de").quit_without_saving,
+            "Ohne Speichern beenden"
+        );
+        assert_eq!(
+            super::close_warning_copy("system").title,
+            "Speichern dauert länger als erwartet"
+        );
+    }
+
+    #[test]
+    fn an_english_setting_selects_the_english_close_warning() {
+        let dir = std::env::temp_dir().join(format!(
+            "fanotes-close-warning-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut host = fanotes_host::Host::open(dir.join("app"));
+        host.settings
+            .insert("uiLanguage".to_owned(), serde_json::json!("en"));
+        assert_eq!(
+            super::close_warning_copy(host.ui_language()).quit_without_saving,
+            "Exit without saving"
+        );
+        host.settings
+            .insert("uiLanguage".to_owned(), serde_json::json!("de"));
+        assert_eq!(
+            super::close_warning_copy(host.ui_language()).title,
+            "Speichern dauert länger als erwartet"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
