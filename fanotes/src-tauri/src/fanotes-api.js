@@ -1,5 +1,19 @@
 // Installed by the Tauri host before the React bundle runs. The bundle itself
 // still talks to window.fanotes and is not rebuilt for this host.
+
+// `Buffer.from` / `Uint8Array.from` for a real list. A bare number or a plain
+// object with `length` must not allocate a buffer of that size.
+function listedBytes(value, message) {
+  if (value instanceof Uint8Array) return value
+  if (ArrayBuffer.isView(value)) {
+    return new Uint8Array(value.buffer, value.byteOffset, value.byteLength)
+  }
+  if (value instanceof ArrayBuffer) return new Uint8Array(value)
+  if (Array.isArray(value)) return Uint8Array.from(value)
+  throw new Error(message)
+}
+
+if (typeof window !== 'undefined') {
 (() => {
   const internals = window.__TAURI_INTERNALS__
   if (!internals || typeof internals.invoke !== 'function') return
@@ -18,8 +32,8 @@
     for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index)
     return bytes
   }
-  const bytesToBase64 = (value) => {
-    const bytes = value instanceof Uint8Array ? value : new Uint8Array(value)
+  const bytesToBase64 = (bytes) => {
+    if (!(bytes instanceof Uint8Array)) throw new Error('Der Sync-Inhalt muss binär sein.')
     let binary = ''
     const chunk = 0x2000
     for (let index = 0; index < bytes.length; index += chunk) {
@@ -81,8 +95,8 @@
     onSubjectBookPopoutClosed: (callback) => listen('fanotes:subject-book-popout-closed', callback),
     importWorksheet: () => invoke('fanotes:import-worksheet'),
     importWorksheetFromData: (payload) => {
-      const source = payload && payload.bytes
-      const bytes = source instanceof Uint8Array ? source : new Uint8Array(source || [])
+      const bytes = listedBytes(payload && payload.bytes, 'Das Bild ist leer oder zu groß.')
+      if (bytes.byteLength <= 0) throw new Error('Das Bild ist leer oder zu groß.')
       return invoke('fanotes:import-worksheet-from-data', {
         name: payload && payload.name,
         mimeType: payload && payload.mimeType,
@@ -165,7 +179,7 @@
       vaultId: () => invoke('fanotes:sync-vault-id'),
       scan: () => invoke('fanotes:sync-scan'),
       read: async (relativePath) => bytesFromBase64(await invoke('fanotes:sync-read', relativePath)),
-      write: (relativePath, bytes, mtimeMs) => invoke('fanotes:sync-write', relativePath, bytesToBase64(bytes), mtimeMs),
+      write: (relativePath, bytes, mtimeMs) => invoke('fanotes:sync-write', relativePath, bytesToBase64(listedBytes(bytes, 'Der Sync-Inhalt muss binär sein.')), mtimeMs),
       remove: (relativePath) => invoke('fanotes:sync-remove', relativePath),
       readState: (vaultId) => invoke('fanotes:sync-read-state', vaultId),
       writeState: (vaultId, json) => invoke('fanotes:sync-write-state', vaultId, json),
@@ -175,3 +189,8 @@
     platform,
   })
 })()
+}
+
+if (typeof module === 'object' && module.exports) {
+  module.exports = { listedBytes }
+}
