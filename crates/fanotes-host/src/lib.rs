@@ -1104,11 +1104,6 @@ impl Host {
         } else {
             vault::normalize_relative_path(dest_folder, true, false)?
         };
-        if was_dir
-            && (dest_relative == normalized || dest_relative.starts_with(&format!("{normalized}/")))
-        {
-            return Err("Ein Ordner kann nicht in sich selbst verschoben werden.".to_owned());
-        }
         let folder = if dest_relative.is_empty() {
             root.clone()
         } else {
@@ -1120,6 +1115,12 @@ impl Host {
             }
             path
         };
+        // Desktop resolves the destination before it rejects a move into itself.
+        if was_dir
+            && (dest_relative == normalized || dest_relative.starts_with(&format!("{normalized}/")))
+        {
+            return Err("Ein Ordner kann nicht in sich selbst verschoben werden.".to_owned());
+        }
         if source.parent() == Some(folder.as_path()) {
             return Ok(Value::String(normalized));
         }
