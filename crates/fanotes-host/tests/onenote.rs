@@ -16,6 +16,9 @@ fn host() -> (Host, std::path::PathBuf) {
 #[test]
 fn the_sample_notebook_becomes_a_searchable_note() {
     let (mut host, vault) = host();
+    fs::remove_dir_all(vault.join(".fanotes")).unwrap();
+    fs::create_dir_all(vault.join(".lernwerk")).unwrap();
+    fs::write(vault.join(".lernwerk/keep.txt"), b"alt").unwrap();
     let fixture = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../fanotes/scripts/fixtures/onenote/Open Notebook.onetoc2");
     let result = host
@@ -26,6 +29,8 @@ fn the_sample_notebook_becomes_a_searchable_note() {
         .unwrap();
     assert_eq!(result["pageCount"], 1);
     assert_eq!(result["attachmentCount"], 1);
+    assert_eq!(fs::read(vault.join(".lernwerk/keep.txt")).unwrap(), b"alt");
+    assert!(!vault.join(".fanotes/keep.txt").exists());
     assert!(result["rootFolder"]
         .as_str()
         .unwrap()
