@@ -155,6 +155,59 @@ fn vault_paths_reject_traversal_and_internal_files() {
 }
 
 #[test]
+fn an_internal_worksheet_can_be_previewed() {
+    let (dir, mut host) = host();
+    let worksheets = dir.0.join("vault/.fanotes/worksheets");
+    fs::create_dir_all(&worksheets).unwrap();
+    fs::write(worksheets.join("blatt-1.pdf"), b"%PDF-1.4 intern").unwrap();
+    let encoded = host
+        .dispatch(
+            "fanotes:read-asset-bytes",
+            &[json!(".fanotes/worksheets/blatt-1.pdf")],
+        )
+        .unwrap();
+    assert_eq!(
+        base64::engine::general_purpose::STANDARD
+            .decode(encoded.as_str().unwrap())
+            .unwrap(),
+        b"%PDF-1.4 intern"
+    );
+    fs::create_dir_all(dir.0.join("vault/.lernwerk/worksheets")).unwrap();
+    fs::write(
+        dir.0.join("vault/.lernwerk/worksheets/blatt-1.pdf"),
+        b"%PDF-1.4 alt",
+    )
+    .unwrap();
+    let legacy = host
+        .dispatch(
+            "fanotes:read-asset-data-url",
+            &[json!(".lernwerk/worksheets/blatt-1.pdf")],
+        )
+        .unwrap();
+    assert!(legacy
+        .as_str()
+        .unwrap()
+        .starts_with("data:application/pdf;base64,"));
+    fs::create_dir(worksheets.join("ordner.pdf")).unwrap();
+    assert_eq!(
+        host.dispatch(
+            "fanotes:read-asset-bytes",
+            &[json!(".fanotes/worksheets/ordner.pdf")]
+        )
+        .unwrap_err(),
+        "Die gewählte Datei ist keine reguläre Datei."
+    );
+    assert_eq!(
+        host.dispatch(
+            "fanotes:read-file",
+            &[json!(".fanotes/worksheets/blatt-1.pdf")]
+        )
+        .unwrap_err(),
+        "Interne FaNotes-Dateien sind geschützt."
+    );
+}
+
+#[test]
 fn an_empty_asset_preview_returns_an_empty_payload() {
     let (dir, mut host) = host();
     fs::write(dir.0.join("vault").join("leer.pdf"), b"").unwrap();

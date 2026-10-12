@@ -324,7 +324,7 @@ impl Host {
     }
 
     fn read_asset(&self, relative: &str, max: u64) -> Result<Vec<u8>, String> {
-        let file = vault::resolve_existing_entry(self.require_vault()?, relative)?;
+        let file = vault::resolve_asset_entry(self.require_vault()?, relative)?;
         // Desktop preview returns an existing empty file. A missing file fails above.
         read_regular_limited(&file, max)
     }
