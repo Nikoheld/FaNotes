@@ -69,20 +69,16 @@ pub fn list_drawings(host: &Host) -> Result<Value, String> {
 pub fn read_drawing(host: &Host, raw_id: &str) -> Result<Value, String> {
     let id = drawing_id(raw_id)?;
     let path = assets_dir(vault_root(host)?)?.join(format!("{id}.json"));
-    let bytes = read_limited(&path, MAX_DRAWING_JSON_BYTES).map_err(|_| {
-        if path.exists() {
-            "Die gespeicherte Zeichnung ist beschädigt oder kann nicht sicher gelesen werden."
-                .to_owned()
-        } else {
-            "Die gespeicherte Zeichnung wurde nicht gefunden.".to_owned()
-        }
-    })?;
+    let bytes =
+        read_limited(&path, MAX_DRAWING_JSON_BYTES).map_err(|_| drawing_read_error(&path))?;
     let drawing_json = lossy_utf8(bytes);
     let mtime = fs::symlink_metadata(&path)
         .ok()
         .and_then(|meta| meta.modified().ok())
         .map(crate::notes::iso_from_system_time);
-    let mut item = metadata_from_json(&drawing_json, &id, mtime.as_deref())?;
+    // The desktop read handler reports one message for every failure after the file is found.
+    let mut item =
+        metadata_from_json(&drawing_json, &id, mtime.as_deref()).map_err(|_| damaged_drawing())?;
     item["drawingJson"] = Value::String(drawing_json);
     Ok(item)
 }
@@ -105,9 +101,17 @@ pub fn save_drawing(host: &Host, payload: &Value) -> Result<Value, String> {
     if item["title"].as_str() != Some(title.as_str()) {
         return Err("Der Zeichnungstitel stimmt nicht mit den Zeichnungsdaten überein.".to_owned());
     }
+    let png = if object.contains_key("imageData") {
+        let image = object
+            .get("imageData")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "Die Zeichnung enthält kein PNG.".to_owned())?;
+        Some(decode_png(image)?)
+    } else {
+        None
+    };
     let assets = assets_dir(vault_root(host)?)?;
-    if let Some(image) = object.get("imageData").filter(|value| !value.is_null()) {
-        let png = decode_png(image.as_str().unwrap_or(""))?;
+    if let Some(png) = png {
         crate::notes::atomic_write(&assets.join(format!("{id}.png")), &png, 0o600)
             .map_err(|_| "Die Zeichnung konnte nicht gespeichert werden.".to_owned())?;
     }
@@ -145,8 +149,11 @@ pub fn read_famd_ink(host: &Host, relative: &str) -> Result<Value, String> {
     let source = match fs::symlink_metadata(&path) {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Value::Null),
         Err(_) => return Err("Die Datei konnte nicht gelesen werden.".to_owned()),
-        Ok(meta) if meta.file_type().is_symlink() || !meta.is_file() => {
-            return Err("Die Notiz ist keine sichere reguläre Datei.".to_owned());
+        Ok(meta) if meta.file_type().is_symlink() => {
+            return Err("Symbolische Links sind innerhalb des Vaults nicht erlaubt.".to_owned());
+        }
+        Ok(meta) if !meta.is_file() => {
+            return Err("Die gewählte Datei ist keine reguläre Datei.".to_owned());
         }
         Ok(meta) if meta.len() as usize > MAX_FAMD_BYTES => {
             return Err("Die Datei ist zu groß.".to_owned());
@@ -309,7 +316,8 @@ pub(crate) fn library_metadata(
 ) -> Result<Value, String> {
     let raw_title = document.get("title").and_then(Value::as_str).unwrap_or("");
     let title = vault::js_trim(raw_title);
-    if document.get("schemaVersion").and_then(Value::as_i64) != Some(1)
+    // `schemaVersion !== 1` treats `1.0` as the same version.
+    if document.get("schemaVersion").and_then(Value::as_f64) != Some(1.0)
         || title.is_empty()
         || crate::vault::utf16_len(raw_title) > 180
         || crate::vault::has_c0_or_del(raw_title)
@@ -330,6 +338,19 @@ pub(crate) fn library_metadata(
         "imageRelativePath": format!(".fanotes/assets/{id}.png"),
         "dataRelativePath": format!(".fanotes/assets/{id}.json"),
     }))
+}
+
+fn drawing_read_error(path: &Path) -> String {
+    match fs::symlink_metadata(path) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            "Die gespeicherte Zeichnung wurde nicht gefunden.".to_owned()
+        }
+        _ => damaged_drawing(),
+    }
+}
+
+fn damaged_drawing() -> String {
+    "Die gespeicherte Zeichnung ist beschädigt oder kann nicht sicher gelesen werden.".to_owned()
 }
 
 fn validate_drawing_json(drawing_json: &str) -> Result<Value, String> {
@@ -358,33 +379,23 @@ fn decode_png(image_data: &str) -> Result<Vec<u8>, String> {
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(encoded)
         .map_err(|_| "Die Zeichnung ist keine gültige PNG-Data-URL.".to_owned())?;
-    if bytes.is_empty() || bytes.len() > MAX_IMAGE_BYTES || !bytes.starts_with(PNG_SIGNATURE) {
+    if bytes.is_empty() || bytes.len() > MAX_IMAGE_BYTES {
+        return Err("Die Zeichnung ist leer oder zu groß.".to_owned());
+    }
+    if !bytes.starts_with(PNG_SIGNATURE) {
         return Err("Die Bilddaten sind keine gültige PNG-Datei.".to_owned());
     }
     Ok(bytes)
 }
 
 fn safe_title(value: &str) -> Result<String, String> {
-    let name = vault::js_trim(vault::js_trim(value).trim_end_matches(['.', ' ']));
-    if name.is_empty()
-        || crate::vault::utf16_len(name) > 180
-        || name == "."
-        || name == ".."
-        || name.contains('/')
-        || name.contains('\\')
-        || crate::vault::has_c0_or_del(name)
-        || name.eq_ignore_ascii_case(".fanotes")
-        || name.eq_ignore_ascii_case(".lernwerk")
-    {
-        return Err("Dieser Name ist nicht erlaubt.".to_owned());
-    }
-    Ok(name.to_owned())
+    super::safe_entry_name_or(value, "Zeichnung")
 }
 
 fn drawing_file_id(name: &str) -> Option<&str> {
     let (id, extension) = name.rsplit_once('.')?;
-    extension
-        .eq_ignore_ascii_case("json")
+    // The library opens `${id}.json`. `Upper.JSON` is not that file.
+    (extension == "json")
         .then_some(id)
         .filter(|id| drawing_id(id).is_ok())
 }

@@ -7,7 +7,9 @@ use std::io::{BufReader, BufWriter};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
+use std::thread;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use base64::Engine;
 use fanotes_ort::protocol::{read_frame, write_frame, Reply, Request};
@@ -24,10 +26,24 @@ struct Sidecar {
 
 static SIDECAR: Mutex<Option<Sidecar>> = Mutex::new(None);
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
+static IN_FLIGHT: AtomicU64 = AtomicU64::new(0);
+static SHUTDOWN_DEADLINE_MS: AtomicU64 = AtomicU64::new(0);
 
-pub fn recognize_line(request: &Value, configured_threads: i64) -> Result<Value, String> {
+pub fn recognize_line(
+    request: &Value,
+    configured_threads: i64,
+    keep_alive_seconds: Option<&Value>,
+) -> Result<Value, String> {
     let (width, input) = parse_line(request)?;
     let threads = ocr_thread_count(request.get("threads"), configured_threads, logical_cores());
+    IN_FLIGHT.fetch_add(1, Ordering::Relaxed);
+    let result = recognize_loaded(width, threads, input);
+    IN_FLIGHT.fetch_sub(1, Ordering::Relaxed);
+    schedule_native_ocr_shutdown(keep_alive_seconds);
+    result
+}
+
+fn recognize_loaded(width: usize, threads: usize, input: Vec<f32>) -> Result<Value, String> {
     let mut guard = SIDECAR.lock().unwrap_or_else(|error| error.into_inner());
     if guard.is_none() {
         *guard = Some(start_sidecar()?);
@@ -79,16 +95,81 @@ pub fn recognize_line(request: &Value, configured_threads: i64) -> Result<Value,
     }
 }
 
+/// Desktop `scheduleNativeOcrShutdown`: a safe whole number of seconds from 0
+/// through 600, otherwise two minutes. Zero waits one millisecond.
+pub(crate) fn native_ocr_idle_delay(configured: Option<&Value>) -> Duration {
+    let number = match configured {
+        Some(Value::Number(number)) => number.as_f64().unwrap_or(f64::NAN),
+        Some(Value::String(text)) => crate::vault::js_tonumber(text).unwrap_or(f64::NAN),
+        Some(Value::Bool(true)) => 1.0,
+        Some(Value::Bool(false)) => 0.0,
+        Some(Value::Null) => 0.0,
+        _ => f64::NAN,
+    };
+    if number.is_finite()
+        && number.fract() == 0.0
+        && number.abs() <= 9_007_199_254_740_991.0
+        && (0.0..=600.0).contains(&number)
+    {
+        Duration::from_millis((number as u64).saturating_mul(1_000).max(1))
+    } else {
+        Duration::from_millis(120_000)
+    }
+}
+
+fn schedule_native_ocr_shutdown(configured: Option<&Value>) {
+    let delay = native_ocr_idle_delay(configured);
+    let deadline = now_millis().saturating_add(delay.as_millis() as u64).max(1);
+    SHUTDOWN_DEADLINE_MS.store(deadline, Ordering::Relaxed);
+    static SLEEPER: OnceLock<()> = OnceLock::new();
+    SLEEPER.get_or_init(|| {
+        thread::spawn(|| loop {
+            let deadline = SHUTDOWN_DEADLINE_MS.load(Ordering::Relaxed);
+            let now = now_millis();
+            if deadline == 0 || now < deadline {
+                let wait = if deadline == 0 {
+                    Duration::from_secs(60)
+                } else {
+                    Duration::from_millis(deadline - now)
+                };
+                thread::sleep(wait.min(Duration::from_secs(60)));
+                continue;
+            }
+            let mut guard = SIDECAR.lock().unwrap_or_else(|error| error.into_inner());
+            let expired = SHUTDOWN_DEADLINE_MS.load(Ordering::Relaxed);
+            if expired == 0 || now_millis() < expired || IN_FLIGHT.load(Ordering::Relaxed) != 0 {
+                drop(guard);
+                thread::sleep(Duration::from_millis(20));
+                continue;
+            }
+            if SHUTDOWN_DEADLINE_MS
+                .compare_exchange(expired, 0, Ordering::Relaxed, Ordering::Relaxed)
+                .is_err()
+            {
+                drop(guard);
+                continue;
+            }
+            if let Some(mut sidecar) = guard.take() {
+                let _ = sidecar.child.kill();
+                let _ = sidecar.child.wait();
+            }
+        });
+    });
+}
+
+fn now_millis() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_millis() as u64)
+        .unwrap_or(0)
+}
+
 fn parse_line(request: &Value) -> Result<(usize, Vec<f32>), String> {
     let invalid = || "Die native OCR-Eingabe ist ungültig.".to_owned();
-    let width = request
-        .get("width")
-        .and_then(Value::as_u64)
-        .ok_or_else(invalid)? as usize;
-    let height = request
-        .get("height")
-        .and_then(Value::as_u64)
-        .ok_or_else(invalid)? as usize;
+    // `Number.isSafeInteger` keeps a whole width such as `32.0`, and `128.0 !== 128` is false.
+    let width = crate::resources::json_safe_u64(request.get("width")).ok_or_else(invalid)? as usize;
+    let height =
+        crate::resources::json_safe_u64(request.get("height")).ok_or_else(invalid)? as usize;
     if height != MODEL_HEIGHT || !(32..=4096).contains(&width) {
         return Err(invalid());
     }
@@ -200,11 +281,10 @@ fn load_characters(directory: &Path, manifest_text: &str) -> Result<Vec<String>,
     let file = manifest["characters"]["file"]
         .as_str()
         .ok_or_else(|| "Unbekanntes natives Handschriftmodell.".to_owned())?;
-    let size = manifest["characters"]["size"]
-        .as_u64()
+    let size = crate::resources::json_safe_u64(manifest["characters"].get("size"))
+        .filter(|size| *size > 0 && *size <= 256 * 1024)
         .ok_or_else(|| "Unbekanntes natives Handschriftmodell.".to_owned())?;
-    let count = manifest["characters"]["count"]
-        .as_u64()
+    let count = crate::resources::json_safe_u64(manifest["characters"].get("count"))
         .ok_or_else(|| "Unbekanntes natives Handschriftmodell.".to_owned())?
         as usize;
     let expected = manifest["characters"]["sha256"]
@@ -311,8 +391,99 @@ fn arch_name() -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::ocr_thread_count;
+    use super::{load_characters, native_ocr_idle_delay, ocr_thread_count, parse_line};
+    use base64::Engine;
     use serde_json::json;
+    use sha2::{Digest, Sha256};
+    use std::time::Duration;
+
+    #[test]
+    fn native_ocr_idle_delay_follows_the_desktop() {
+        assert_eq!(native_ocr_idle_delay(None), Duration::from_millis(120_000));
+        assert_eq!(
+            native_ocr_idle_delay(Some(&json!(0))),
+            Duration::from_millis(1)
+        );
+        assert_eq!(
+            native_ocr_idle_delay(Some(&json!(0.0))),
+            Duration::from_millis(1)
+        );
+        assert_eq!(
+            native_ocr_idle_delay(Some(&json!(30))),
+            Duration::from_secs(30)
+        );
+        assert_eq!(
+            native_ocr_idle_delay(Some(&json!(120.0))),
+            Duration::from_secs(120)
+        );
+        assert_eq!(
+            native_ocr_idle_delay(Some(&json!("600"))),
+            Duration::from_secs(600)
+        );
+        assert_eq!(
+            native_ocr_idle_delay(Some(&json!(601))),
+            Duration::from_millis(120_000)
+        );
+        assert_eq!(
+            native_ocr_idle_delay(Some(&json!(30.5))),
+            Duration::from_millis(120_000)
+        );
+        assert_eq!(
+            native_ocr_idle_delay(Some(&json!(-1))),
+            Duration::from_millis(120_000)
+        );
+    }
+
+    #[test]
+    fn a_whole_line_width_still_counts() {
+        let width = 32usize;
+        let encoded = base64::engine::general_purpose::STANDARD.encode(vec![0u8; width * 128 * 4]);
+        let mut request = json!({
+            "width": 32.0,
+            "height": 128.0,
+            "inputBase64": encoded,
+        });
+        let (parsed, input) = parse_line(&request).unwrap();
+        assert_eq!(parsed, width);
+        assert_eq!(input.len(), width * 128);
+        request["width"] = json!(32.5);
+        assert_eq!(
+            parse_line(&request).unwrap_err(),
+            "Die native OCR-Eingabe ist ungültig."
+        );
+    }
+
+    #[test]
+    fn a_character_manifest_keeps_a_whole_size() {
+        let dir = std::env::temp_dir().join(format!(
+            "fanotes-ocr-whole-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let bytes = serde_json::to_vec(&json!(["a"])).unwrap();
+        std::fs::write(dir.join("chars.json"), &bytes).unwrap();
+        let hash = Sha256::digest(&bytes)
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        let size = bytes.len();
+        let manifest = format!(
+            r#"{{"characters":{{"file":"chars.json","size":{size}.0,"count":1.0,"sha256":"{hash}"}}}}"#
+        );
+        assert_eq!(load_characters(&dir, &manifest).unwrap(), vec!["a"]);
+        let fractional =
+            manifest.replace(&format!("\"size\":{size}.0"), &format!("\"size\":{size}.5"));
+        assert_eq!(
+            load_characters(&dir, &fractional).unwrap_err(),
+            "Unbekanntes natives Handschriftmodell."
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn native_ocr_threads_follow_the_desktop_cap() {
