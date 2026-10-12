@@ -21,6 +21,31 @@ fn b64(bytes: &[u8]) -> String {
 }
 
 #[test]
+fn a_worksheet_byte_list_follows_buffer_from() {
+    let (mut host, vault) = host();
+    let document = host
+        .dispatch(
+            "fanotes:import-worksheet-from-data",
+            &[json!({
+                "name": "Tafel.png",
+                "bytes": [137.0, 80, 78, 71, 13, 10, 26, 10, 1.5, 256, -1, "1e1", true, null]
+            })],
+        )
+        .unwrap();
+    let id = document["id"].as_str().unwrap();
+    assert_eq!(
+        std::fs::read(vault.join(format!(".fanotes/worksheets/{id}.png"))).unwrap(),
+        vec![0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 0, 255, 10, 1, 0]
+    );
+    assert!(host
+        .dispatch(
+            "fanotes:import-worksheet-from-data",
+            &[json!({ "name": "Tafel.png", "bytes": 4 })],
+        )
+        .is_err());
+}
+
+#[test]
 fn a_dropped_image_and_a_pdf_note_land_in_the_vault() {
     let (mut host, vault) = host();
     let png = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0];

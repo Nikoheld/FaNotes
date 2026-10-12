@@ -153,6 +153,51 @@ fn a_blank_sync_secret_file_has_no_login() {
 }
 
 #[test]
+fn a_sync_secret_file_with_a_bad_byte_still_opens() {
+    let (_vault, app, mut host) = host();
+    fs::create_dir_all(app.join("sync")).unwrap();
+    let path = app.join("sync/account.secret");
+
+    fs::write(&path, b"\xff").unwrap();
+    assert!(host
+        .dispatch("fanotes:sync-read-secrets", &[])
+        .unwrap()
+        .is_null());
+    assert_eq!(fs::read(&path).unwrap(), b"\xff");
+
+    fs::write(&path, "\u{FEFF}").unwrap();
+    assert!(host
+        .dispatch("fanotes:sync-read-secrets", &[])
+        .unwrap()
+        .is_null());
+    assert_eq!(fs::read_to_string(&path).unwrap(), "\u{FEFF}");
+
+    fs::write(&path, b"safe1:\xff").unwrap();
+    let error = host.dispatch("fanotes:sync-read-secrets", &[]).unwrap_err();
+    assert!(error.contains("Schlüsselbund"), "{error}");
+
+    let secret = "{\"v\":1,\"token\":\"geheim\"}";
+    fs::write(&path, b"safe1:").unwrap();
+    host.dispatch("fanotes:sync-write-secrets", &[json!(secret)])
+        .unwrap();
+    fs::write(&path, b"safe1:\xff").unwrap();
+    assert_eq!(
+        host.dispatch("fanotes:sync-read-secrets", &[]).unwrap(),
+        secret
+    );
+
+    fs::write(&path, b"plain1:\xff").unwrap();
+    assert!(host
+        .dispatch("fanotes:sync-read-secrets", &[])
+        .unwrap()
+        .is_null());
+    assert!(!path.exists());
+    fs::write(&path, b"safe1:").unwrap();
+    let error = host.dispatch("fanotes:sync-read-secrets", &[]).unwrap_err();
+    assert!(error.contains("Schlüsselbund"), "{error}");
+}
+
+#[test]
 fn sync_credentials_keep_a_long_unicode_secret() {
     let (_vault, _app, mut host) = host();
     let kept = "Ä".repeat(40_000);
