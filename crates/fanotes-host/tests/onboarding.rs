@@ -356,17 +356,70 @@ fn a_version_of_one_point_zero_still_counts_as_version_one() {
         .unwrap()
         .path();
     let text = fs::read_to_string(&cache_path).unwrap();
-    fs::write(&cache_path, text.replacen("\"version\":1", "\"version\":1.0", 1)).unwrap();
+    fs::write(
+        &cache_path,
+        text.replacen("\"version\":1", "\"version\":1.0", 1),
+    )
+    .unwrap();
     assert!(host
         .dispatch("fanotes:get-cached-tree", &[])
         .unwrap()
         .is_array());
     let text = fs::read_to_string(&cache_path).unwrap();
-    fs::write(&cache_path, text.replacen("\"version\":1.0", "\"version\":2", 1)).unwrap();
+    fs::write(
+        &cache_path,
+        text.replacen("\"version\":1.0", "\"version\":2", 1),
+    )
+    .unwrap();
     assert!(host
         .dispatch("fanotes:get-cached-tree", &[])
         .unwrap()
         .is_null());
     assert!(!cache_path.is_file());
     let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_cached_file_size_of_twelve_point_zero_still_counts() {
+    let (vault, mut host) = host();
+    host.dispatch("fanotes:complete-onboarding", &[json!(["Mathematik"])])
+        .unwrap();
+    fs::write(vault.join("Mathematik/Notiz.md"), b"Hallo").unwrap();
+    host.dispatch("fanotes:get-tree", &[]).unwrap();
+    let cache_dir = vault.parent().unwrap().join("app/tree-cache-v1");
+    let cache_path = fs::read_dir(&cache_dir)
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    let text = fs::read_to_string(&cache_path).unwrap();
+    fs::write(&cache_path, text.replacen("\"size\":5", "\"size\":12.0", 1)).unwrap();
+    let cached = host.dispatch("fanotes:get-cached-tree", &[]).unwrap();
+    let note = cached
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|entry| entry["name"] == "Mathematik")
+        .unwrap()["children"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|entry| entry["name"] == "Notiz.md")
+        .unwrap();
+    assert_eq!(note["size"], 12);
+    assert!(cache_path.is_file());
+
+    let text = fs::read_to_string(&cache_path).unwrap();
+    fs::write(
+        &cache_path,
+        text.replacen("\"size\":12.0", "\"size\":12.5", 1),
+    )
+    .unwrap();
+    assert!(host
+        .dispatch("fanotes:get-cached-tree", &[])
+        .unwrap()
+        .is_null());
+    assert!(!cache_path.is_file());
+    let _ = fs::remove_dir_all(vault.parent().unwrap());
 }
