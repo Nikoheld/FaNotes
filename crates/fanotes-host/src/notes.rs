@@ -241,7 +241,9 @@ pub fn write_links(host: &Host, relative: &str, raw: &Value) -> Result<Value, St
     for link in &mut links {
         link.source_path = note.clone();
     }
-    let links = parse_note_links(&Value::Array(links.iter().map(NoteLink::to_json).collect()));
+    // The desktop returns the rewritten links before `serializeFamd` checks
+    // them again. A source that is the note itself, or a path longer than 500
+    // characters, is in the reply and is left out of the file.
     let (path, body, mut payload) = load_note(host, &note)?;
     payload.note_links = links;
     store_note(&path, &body, &payload)?;
@@ -267,9 +269,8 @@ pub fn write_backups(host: &Host, relative: &str, raw: &Value) -> Result<Value, 
     for backup in &mut backups {
         backup.note_path = note.clone();
     }
-    let backups = parse_note_backups(&Value::Array(
-        backups.iter().map(NoteBackup::to_json).collect(),
-    ));
+    // Same as note links: the reply keeps the rewritten path, and the file
+    // check runs later inside `serializeFamd`.
     let (path, body, mut payload) = load_note(host, &note)?;
     payload.note_backups = backups;
     store_note(&path, &body, &payload)?;

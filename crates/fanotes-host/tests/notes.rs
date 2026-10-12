@@ -1411,6 +1411,56 @@ fn a_note_link_trims_a_byte_order_mark_and_keeps_a_next_line() {
 }
 
 #[test]
+fn a_rewritten_link_source_is_returned_before_the_file_check() {
+    let (mut host, vault) = host();
+    std::fs::write(vault.join("Mathe/Seite.md"), b"Hallo\n").unwrap();
+    let links = host
+        .dispatch(
+            "fanotes:write-note-links",
+            &[
+                json!("Mathe/Seite.md"),
+                json!([{
+                    "id": "self",
+                    "sourcePath": "anders.md",
+                    "targetPath": "Mathe/Seite.md"
+                }]),
+            ],
+        )
+        .unwrap();
+    assert_eq!(links.as_array().unwrap().len(), 1);
+    assert_eq!(links[0]["sourcePath"], "Mathe/Seite.md");
+    assert_eq!(links[0]["targetPath"], "Mathe/Seite.md");
+    assert_eq!(links[0]["label"], "Seite");
+    let stored = host
+        .dispatch("fanotes:read-note-links", &[json!("Mathe/Seite.md")])
+        .unwrap();
+    assert_eq!(stored, json!([]));
+
+    let segment = "a".repeat(200);
+    let relative = format!("{segment}/{segment}/{segment}/Seite.md");
+    assert!(relative.encode_utf16().count() > 500);
+    let folder = vault.join(&segment).join(&segment).join(&segment);
+    std::fs::create_dir_all(&folder).unwrap();
+    std::fs::write(folder.join("Seite.md"), b"Hallo\n").unwrap();
+    let backups = host
+        .dispatch(
+            "fanotes:write-note-backups",
+            &[
+                json!(relative),
+                json!([{ "id": "nb-long", "notePath": "anders.md", "content": "alt" }]),
+            ],
+        )
+        .unwrap();
+    assert_eq!(backups.as_array().unwrap().len(), 1);
+    assert_eq!(backups[0]["notePath"], relative);
+    assert_eq!(backups[0]["content"], "alt");
+    let stored_backups = host
+        .dispatch("fanotes:read-note-backups", &[json!(relative)])
+        .unwrap();
+    assert_eq!(stored_backups, json!([]));
+}
+
+#[test]
 fn a_dotfile_with_one_dot_is_not_a_note() {
     let (mut host, vault) = host();
     let error = host
