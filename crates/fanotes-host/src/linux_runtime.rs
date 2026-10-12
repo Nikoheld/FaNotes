@@ -421,75 +421,144 @@ fn unquote(value: &str) -> &str {
 }
 
 fn glob_paths(pattern: &str) -> Vec<PathBuf> {
-    let absolute = pattern.starts_with('/');
-    let parts: Vec<&str> = pattern.split('/').filter(|part| !part.is_empty()).collect();
-    let mut current = vec![if absolute {
-        PathBuf::from("/")
+    let (base, pattern) = if let Some(rest) = pattern.strip_prefix('/') {
+        (PathBuf::from("/"), rest)
     } else {
-        PathBuf::new()
-    }];
-    for part in parts {
-        let mut next = Vec::new();
-        for base in &current {
-            let base_path = if base.as_os_str().is_empty() {
-                Path::new(".")
-            } else {
-                base.as_path()
-            };
-            if part.contains(['*', '?', '[']) {
-                let Ok(entries) = std::fs::read_dir(base_path) else {
-                    continue;
-                };
-                let mut matches = Vec::new();
-                for entry in entries.flatten() {
-                    let name = entry.file_name();
-                    let name = name.to_string_lossy();
-                    if glob_component(part, &name) {
-                        matches.push(if base.as_os_str().is_empty() {
-                            PathBuf::from(name.as_ref())
-                        } else {
-                            base.join(name.as_ref())
-                        });
-                    }
-                }
-                matches.sort();
-                next.extend(matches);
-            } else if base.as_os_str().is_empty() {
-                next.push(PathBuf::from(part));
-            } else {
-                next.push(base.join(part));
+        (PathBuf::new(), pattern)
+    };
+    let parts: Vec<&str> = pattern.split('/').filter(|part| !part.is_empty()).collect();
+    let mut found = BTreeSet::new();
+    glob_walk(&base, &parts, &mut found);
+    found.into_iter().collect()
+}
+
+fn glob_walk(base: &Path, parts: &[&str], found: &mut BTreeSet<PathBuf>) {
+    if parts.is_empty() {
+        found.insert(base.to_path_buf());
+        return;
+    }
+    let part = parts[0];
+    let rest = &parts[1..];
+    if part == "**" {
+        glob_walk(base, rest, found);
+        for (name, is_dir) in read_child_names(base) {
+            if name.starts_with('.') {
+                continue;
+            }
+            let next = join_child(base, &name);
+            if is_dir {
+                glob_walk(&next, parts, found);
+            } else if rest.is_empty() || rest.iter().all(|part| *part == "**") {
+                found.insert(next);
             }
         }
-        current = next;
+        return;
     }
-    current
+    if !part.contains(['*', '?', '[']) {
+        let next = join_child(base, part);
+        if std::fs::symlink_metadata(&next).is_ok() {
+            glob_walk(&next, rest, found);
+        }
+        return;
+    }
+    let allow_dot = part.starts_with('.') || part.starts_with("[.]");
+    for (name, _) in read_child_names(base) {
+        if name.starts_with('.') && !allow_dot {
+            continue;
+        }
+        if glob_component(part, &name) {
+            glob_walk(&join_child(base, &name), rest, found);
+        }
+    }
+}
+
+fn read_child_names(base: &Path) -> Vec<(String, bool)> {
+    let directory = if base.as_os_str().is_empty() {
+        Path::new(".")
+    } else {
+        base
+    };
+    let Ok(entries) = std::fs::read_dir(directory) else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .map(|entry| {
+            let is_dir = entry.file_type().is_ok_and(|kind| kind.is_dir());
+            (entry.file_name().to_string_lossy().into_owned(), is_dir)
+        })
+        .collect()
+}
+
+fn join_child(base: &Path, name: &str) -> PathBuf {
+    if base.as_os_str().is_empty() {
+        PathBuf::from(name)
+    } else {
+        base.join(name)
+    }
 }
 
 fn glob_component(pattern: &str, name: &str) -> bool {
-    fn rec(pattern: &[u8], name: &[u8]) -> bool {
+    fn rec(pattern: &[char], name: &[char]) -> bool {
         if pattern.is_empty() {
             return name.is_empty();
         }
         match pattern[0] {
-            b'*' => rec(&pattern[1..], name) || (!name.is_empty() && rec(pattern, &name[1..])),
-            b'?' => !name.is_empty() && rec(&pattern[1..], &name[1..]),
-            b'[' => {
-                let Some(end) = pattern.iter().position(|byte| *byte == b']') else {
+            '*' => rec(&pattern[1..], name) || (!name.is_empty() && rec(pattern, &name[1..])),
+            '?' => !name.is_empty() && rec(&pattern[1..], &name[1..]),
+            '[' => {
+                let mut cursor = 1;
+                if matches!(pattern.get(cursor), Some('!' | '^')) {
+                    cursor += 1;
+                }
+                if pattern.get(cursor) == Some(&']') {
+                    cursor += 1;
+                }
+                let end = pattern[cursor..]
+                    .iter()
+                    .position(|character| *character == ']')
+                    .map(|index| cursor + index);
+                let Some(end) = end else {
                     return false;
                 };
                 if name.is_empty() || end < 2 {
                     return false;
                 }
                 let class = &pattern[1..end];
-                let negated = class[0] == b'!' || class[0] == b'^';
+                let negated = matches!(class.first(), Some('!' | '^'));
                 let class = if negated { &class[1..] } else { class };
-                let hit = class.contains(&name[0]);
+                if class.is_empty() {
+                    return false;
+                }
+                let hit = class_contains(class, name[0]);
                 (hit != negated) && rec(&pattern[end + 1..], &name[1..])
             }
-            byte => !name.is_empty() && name[0] == byte && rec(&pattern[1..], &name[1..]),
+            character => !name.is_empty() && name[0] == character && rec(&pattern[1..], &name[1..]),
         }
     }
-    rec(pattern.as_bytes(), name.as_bytes())
+    let pattern: Vec<char> = pattern.chars().collect();
+    let name: Vec<char> = name.chars().collect();
+    rec(&pattern, &name)
+}
+
+fn class_contains(class: &[char], character: char) -> bool {
+    let mut index = 0;
+    while index < class.len() {
+        if index + 2 < class.len() && class[index + 1] == '-' {
+            let start = class[index];
+            let end = class[index + 2];
+            if start <= end && character >= start && character <= end {
+                return true;
+            }
+            index += 3;
+            continue;
+        }
+        if class[index] == character {
+            return true;
+        }
+        index += 1;
+    }
+    false
 }
 
 fn bool_word(value: &str) -> Option<bool> {
@@ -912,6 +981,57 @@ mod tests {
         assert_eq!(
             expand_env_vars("Notiz ${1abc} $HOME", &env(&[("HOME", "jörg")]), "jörg", ""),
             "Notiz ${1abc} jörg"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_hyprland_source_glob_matches_the_desktop() {
+        let dir = std::env::temp_dir().join(format!(
+            "fanotes-hypr-glob-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        let pack = dir.join("pack");
+        fs::create_dir_all(pack.join("nested/deep")).unwrap();
+        fs::write(pack.join("a.conf"), "force_zero_scaling = false\n").unwrap();
+        fs::write(
+            pack.join("nested/deep/z.conf"),
+            "force_zero_scaling = true\n",
+        )
+        .unwrap();
+        fs::write(pack.join("b.conf"), "force_zero_scaling = true\n").unwrap();
+        let dots = dir.join("dots");
+        fs::create_dir_all(&dots).unwrap();
+        fs::write(dots.join("note.conf"), "monitor = ,preferred,auto,1\n").unwrap();
+        fs::write(dots.join(".hidden.conf"), "force_zero_scaling = true\n").unwrap();
+        let scaling = |body: &str| {
+            let config = dir.join("hyprland.conf");
+            fs::write(&config, body).unwrap();
+            report(
+                "linux",
+                &env(&[
+                    ("FANOTES_HYPRLAND_CONFIG", config.to_str().unwrap()),
+                    ("HOME", ""),
+                ]),
+                || panic!("hyprctl"),
+            )
+        };
+        assert_eq!(
+            scaling("source = ./pack/**/*.conf\n")["hyprlandZeroScaling"],
+            true
+        );
+        assert_eq!(
+            scaling("source = ./dots/*.conf\n")["hyprlandZeroScaling"],
+            false
+        );
+        assert_eq!(
+            scaling("source = ./pack/[a-c].conf\n")["hyprlandZeroScaling"],
+            true
         );
         let _ = fs::remove_dir_all(&dir);
     }
