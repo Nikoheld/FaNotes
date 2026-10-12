@@ -2984,7 +2984,13 @@ fn read_folder_colors(root: &Path) -> Result<BTreeMap<String, String>, String> {
     let Ok(parsed) = serde_json::from_str::<Value>(&text) else {
         return Ok(BTreeMap::new());
     };
-    let source = parsed.get("colors").unwrap_or(&parsed);
+    // A nested `colors` object is the current file. A flat map can also use
+    // `colors` as a folder name, and that string is not the nested object.
+    let source = if parsed.get("colors").is_some_and(Value::is_object) {
+        &parsed["colors"]
+    } else {
+        &parsed
+    };
     let Some(object) = source.as_object() else {
         return Ok(BTreeMap::new());
     };
@@ -3802,6 +3808,38 @@ mod folder_color_order_tests {
         assert_eq!(colors.get("zzz").map(String::as_str), Some("#112233"));
         assert!(colors.get("a4999").is_none());
         assert_eq!(colors.len(), 5000);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_flat_color_file_can_name_a_folder_colors() {
+        let root = std::env::temp_dir().join(format!(
+            "fanotes-colors-flat-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join(".fanotes")).unwrap();
+        fs::write(
+            root.join(".fanotes/folder-colors.json"),
+            "{\n  \"colors\": \"#112233\",\n  \"Mathe\": \"#abcdef\"\n}\n",
+        )
+        .unwrap();
+        let colors = read_folder_colors(&root).unwrap();
+        assert_eq!(colors.get("colors").map(String::as_str), Some("#112233"));
+        assert_eq!(colors.get("Mathe").map(String::as_str), Some("#abcdef"));
+
+        fs::write(
+            root.join(".fanotes/folder-colors.json"),
+            "{\n  \"version\": 1,\n  \"colors\": {\n    \"Mathe\": \"#445566\"\n  }\n}\n",
+        )
+        .unwrap();
+        let nested = read_folder_colors(&root).unwrap();
+        assert_eq!(nested.get("Mathe").map(String::as_str), Some("#445566"));
+        assert!(nested.get("version").is_none());
         let _ = fs::remove_dir_all(&root);
     }
 }
