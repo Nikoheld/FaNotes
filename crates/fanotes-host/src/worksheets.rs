@@ -572,8 +572,14 @@ fn format_for(source: &str) -> Result<Format, String> {
 }
 
 fn extension_of(source: &str) -> String {
-    let base = source.rsplit(['/', '\\']).next().unwrap_or(source);
-    crate::vault::posix_extname(base).to_ascii_lowercase()
+    // Linux `path.extname` keeps a backslash inside the extension.
+    // Windows `path.win32.extname` treats `\` as a separator.
+    let base = if cfg!(windows) {
+        source.rsplit(['/', '\\']).next().unwrap_or(source)
+    } else {
+        source.rsplit('/').next().unwrap_or(source)
+    };
+    crate::vault::posix_extname_en_us(base)
 }
 
 /// A path uses `path.posix.extname`. A suffix that was already chosen, such as
