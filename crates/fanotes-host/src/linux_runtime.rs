@@ -312,11 +312,25 @@ fn source_targets(pattern: &str, env: &BTreeMap<String, String>, from_dir: &Path
     let Some(expanded) = expand_path(pattern, env, from_dir) else {
         return Vec::new();
     };
-    let text = expanded.to_string_lossy();
-    if !text.contains(['*', '?', '[']) {
-        return vec![expanded];
+    let text = expanded.to_string_lossy().into_owned();
+    // `fs.globSync` expands `{a,b}` and `{1..3}` before matching. A brace
+    // group without a comma or a range stays a literal name.
+    let patterns = brace_expand(&text);
+    if patterns.len() == 1 && patterns[0] == text {
+        if !text.contains(['*', '?', '[']) {
+            return vec![expanded];
+        }
+        return glob_paths(&text);
     }
-    glob_paths(&text)
+    let mut found = BTreeSet::new();
+    for pattern in patterns {
+        if pattern.contains(['*', '?', '[']) {
+            found.extend(glob_paths(&pattern));
+        } else if std::fs::symlink_metadata(&pattern).is_ok() {
+            found.insert(PathBuf::from(pattern));
+        }
+    }
+    found.into_iter().collect()
 }
 
 fn expand_path(raw: &str, env: &BTreeMap<String, String>, from_dir: &Path) -> Option<PathBuf> {
@@ -470,6 +484,330 @@ fn unquote(value: &str) -> &str {
         value = &value[..value.len() - 1];
     }
     value
+}
+
+/// `fs.globSync` brace expansion, the same rules as the `brace-expansion` package.
+const BRACE_LIMIT: usize = 100_000;
+const ESC_SLASH: char = '\u{E000}';
+const ESC_OPEN: char = '\u{E001}';
+const ESC_CLOSE: char = '\u{E002}';
+const ESC_COMMA: char = '\u{E003}';
+const ESC_PERIOD: char = '\u{E004}';
+
+fn brace_expand(input: &str) -> Vec<String> {
+    if !input.contains('{') {
+        return vec![input.to_owned()];
+    }
+    let mut raw = input.to_owned();
+    if raw.starts_with("{}") {
+        raw = format!("\\{{\\}}{}", &raw[2..]);
+    }
+    expand_braces(&escape_braces(&raw), true, 0)
+        .into_iter()
+        .map(|item| unescape_braces(&item))
+        .collect()
+}
+
+fn escape_braces(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    let mut chars = value.chars().peekable();
+    while let Some(character) = chars.next() {
+        if character == '\\' {
+            match chars.next() {
+                Some('\\') => out.push(ESC_SLASH),
+                Some('{') => out.push(ESC_OPEN),
+                Some('}') => out.push(ESC_CLOSE),
+                Some(',') => out.push(ESC_COMMA),
+                Some('.') => out.push(ESC_PERIOD),
+                Some(other) => {
+                    out.push('\\');
+                    out.push(other);
+                }
+                None => out.push('\\'),
+            }
+        } else {
+            out.push(character);
+        }
+    }
+    out
+}
+
+fn unescape_braces(value: &str) -> String {
+    value
+        .chars()
+        .map(|character| match character {
+            ESC_SLASH => '\\',
+            ESC_OPEN => '{',
+            ESC_CLOSE => '}',
+            ESC_COMMA => ',',
+            ESC_PERIOD => '.',
+            other => other,
+        })
+        .collect()
+}
+
+struct BraceParts<'a> {
+    pre: &'a str,
+    body: &'a str,
+    post: &'a str,
+}
+
+fn find_braces(value: &str) -> Option<BraceParts<'_>> {
+    let mut depth = 0usize;
+    let mut start = None;
+    for (index, character) in value.char_indices() {
+        if character == '{' && depth == 0 && start.is_none() {
+            start = Some(index);
+            depth = 1;
+            continue;
+        }
+        if start.is_none() {
+            continue;
+        }
+        if character == '{' {
+            depth += 1;
+        } else if character == '}' {
+            depth -= 1;
+            if depth == 0 {
+                let open = start?;
+                return Some(BraceParts {
+                    pre: &value[..open],
+                    body: &value[open + '{'.len_utf8()..index],
+                    post: &value[index + '}'.len_utf8()..],
+                });
+            }
+        }
+    }
+    None
+}
+
+fn expand_braces(input: &str, top: bool, depth: usize) -> Vec<String> {
+    if depth > 64 {
+        return vec![input.to_owned()];
+    }
+    let mut text = input.to_owned();
+    let mut top = top;
+    loop {
+        let Some(found) = find_braces(&text) else {
+            return vec![text];
+        };
+        let pre = found.pre.to_owned();
+        let body = found.body.to_owned();
+        let post = found.post.to_owned();
+        if pre.ends_with('$') {
+            let tails = if post.is_empty() {
+                vec![String::new()]
+            } else {
+                expand_braces(&post, false, depth + 1)
+            };
+            return tails
+                .into_iter()
+                .take(BRACE_LIMIT)
+                .map(|tail| format!("{pre}{{{body}}}{tail}"))
+                .collect();
+        }
+        let numeric = is_numeric_sequence(&body);
+        let alpha = is_alpha_sequence(&body);
+        let sequence = numeric || alpha;
+        let options = body.contains(',');
+        if !sequence && !options {
+            if comma_before_brace(&post) {
+                text = format!("{pre}{{{body}{ESC_CLOSE}{post}");
+                top = true;
+                continue;
+            }
+            return vec![text];
+        }
+        let tails = if post.is_empty() {
+            vec![String::new()]
+        } else {
+            expand_braces(&post, false, depth + 1)
+        };
+        let mut parts = if sequence {
+            body.split("..").map(str::to_owned).collect::<Vec<_>>()
+        } else {
+            parse_comma_parts(&body)
+        };
+        if !sequence && parts.len() == 1 {
+            let nested = expand_braces(&parts[0], false, depth + 1)
+                .into_iter()
+                .map(|item| format!("{{{item}}}"))
+                .collect::<Vec<_>>();
+            if nested.len() == 1 {
+                return tails
+                    .into_iter()
+                    .take(BRACE_LIMIT)
+                    .map(|tail| format!("{pre}{}{tail}", nested[0]))
+                    .collect();
+            }
+            parts = nested;
+        }
+        let generated = if sequence && parts.len() >= 2 {
+            sequence_values(&parts, numeric)
+        } else {
+            let mut values = Vec::new();
+            for part in &parts {
+                if values.len() >= BRACE_LIMIT {
+                    break;
+                }
+                values.extend(expand_braces(part, false, depth + 1));
+            }
+            values
+        };
+        let mut expansions = Vec::new();
+        for value in generated {
+            for tail in &tails {
+                if expansions.len() >= BRACE_LIMIT {
+                    return expansions;
+                }
+                let expansion = format!("{pre}{value}{tail}");
+                if !top || sequence || !expansion.is_empty() {
+                    expansions.push(expansion);
+                }
+            }
+        }
+        return expansions;
+    }
+}
+
+fn comma_before_brace(post: &str) -> bool {
+    let chars: Vec<char> = post.chars().collect();
+    for index in 0..chars.len() {
+        if chars[index] == ',' && chars.get(index + 1) != Some(&',') {
+            return chars[index + 1..].contains(&'}');
+        }
+    }
+    false
+}
+
+fn parse_comma_parts(value: &str) -> Vec<String> {
+    if value.is_empty() {
+        return vec![String::new()];
+    }
+    let Some(found) = find_braces(value) else {
+        return value.split(',').map(str::to_owned).collect();
+    };
+    let mut parts = found.pre.split(',').map(str::to_owned).collect::<Vec<_>>();
+    if let Some(last) = parts.last_mut() {
+        last.push('{');
+        last.push_str(found.body);
+        last.push('}');
+    }
+    if !found.post.is_empty() {
+        let mut post_parts = parse_comma_parts(found.post);
+        if let (Some(last), Some(first)) = (parts.last_mut(), post_parts.first()) {
+            last.push_str(first);
+        }
+        if !post_parts.is_empty() {
+            parts.extend(post_parts.drain(1..));
+        }
+    }
+    parts
+}
+
+fn is_numeric_sequence(body: &str) -> bool {
+    numeric_sequence().is_match(body)
+}
+
+fn is_alpha_sequence(body: &str) -> bool {
+    alpha_sequence().is_match(body)
+}
+
+fn numeric_sequence() -> &'static regex::Regex {
+    static PATTERN: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    PATTERN.get_or_init(|| {
+        regex::Regex::new(r"^-?\d+\.\.-?\d+(?:\.\.-?\d+)?$").expect("numeric brace sequence")
+    })
+}
+
+fn alpha_sequence() -> &'static regex::Regex {
+    static PATTERN: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    PATTERN.get_or_init(|| {
+        regex::Regex::new(r"^[a-zA-Z]\.\.[a-zA-Z](?:\.\.-?\d+)?$").expect("alpha brace sequence")
+    })
+}
+
+fn sequence_values(parts: &[String], numeric: bool) -> Vec<String> {
+    let Some(start) = parts.first() else {
+        return Vec::new();
+    };
+    let Some(end) = parts.get(1) else {
+        return Vec::new();
+    };
+    let start_value = sequence_number(start);
+    let end_value = sequence_number(end);
+    let width = start.len().max(end.len());
+    let mut step = parts
+        .get(2)
+        .map(|value| sequence_number(value).saturating_abs().max(1))
+        .unwrap_or(1);
+    let reverse = end_value < start_value;
+    if reverse {
+        step = step.saturating_neg();
+    }
+    let pad = parts.iter().any(|part| is_padded(part));
+    let mut values = Vec::new();
+    let mut cursor = start_value;
+    while values.len() < BRACE_LIMIT
+        && (if reverse {
+            cursor >= end_value
+        } else {
+            cursor <= end_value
+        })
+    {
+        values.push(if numeric {
+            format_padded(cursor, width, pad)
+        } else {
+            char::from_u32(cursor as u32)
+                .filter(|character| *character != '\\')
+                .map(|character| character.to_string())
+                .unwrap_or_default()
+        });
+        let Some(next) = cursor.checked_add(step) else {
+            break;
+        };
+        if next == cursor {
+            break;
+        }
+        cursor = next;
+    }
+    values
+}
+
+fn sequence_number(value: &str) -> i64 {
+    if let Ok(number) = value.parse::<i64>() {
+        number
+    } else {
+        value
+            .chars()
+            .next()
+            .map(|character| character as i64)
+            .unwrap_or(0)
+    }
+}
+
+fn is_padded(value: &str) -> bool {
+    let digits = value.strip_prefix('-').unwrap_or(value);
+    digits.len() >= 2
+        && digits.starts_with('0')
+        && digits.chars().nth(1).is_some_and(|ch| ch.is_ascii_digit())
+}
+
+fn format_padded(value: i64, width: usize, pad: bool) -> String {
+    let text = value.to_string();
+    if !pad {
+        return text;
+    }
+    let need = width.saturating_sub(text.len());
+    if need == 0 {
+        return text;
+    }
+    let zeros = "0".repeat(need);
+    if value < 0 {
+        format!("-{zeros}{}", &text[1..])
+    } else {
+        format!("{zeros}{text}")
+    }
 }
 
 fn glob_paths(pattern: &str) -> Vec<PathBuf> {
@@ -1139,6 +1477,99 @@ mod tests {
         assert_eq!(
             scaling("source = ./pack/[a-c].conf\n")["hyprlandZeroScaling"],
             true
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_hyprland_source_expands_braces_like_the_desktop() {
+        assert_eq!(brace_expand("{a,b}.conf"), ["a.conf", "b.conf"]);
+        assert_eq!(brace_expand("{a}.conf"), ["{a}.conf"]);
+        assert_eq!(brace_expand("{1..3}.conf"), ["1.conf", "2.conf", "3.conf"]);
+        assert_eq!(brace_expand("{a..c}"), ["a", "b", "c"]);
+        assert_eq!(brace_expand("{c..a}"), ["c", "b", "a"]);
+        assert_eq!(brace_expand("{01..03}"), ["01", "02", "03"]);
+        assert_eq!(brace_expand("{1..10..2}"), ["1", "3", "5", "7", "9"]);
+        assert_eq!(brace_expand("{1..3..0}"), ["1", "2", "3"]);
+        assert_eq!(brace_expand("{a..c..2}"), ["a", "c"]);
+        assert_eq!(
+            brace_expand("{a,{b,c}}.conf"),
+            ["a.conf", "b.conf", "c.conf"]
+        );
+        assert_eq!(brace_expand("{{a,b},c}"), ["a", "b", "c"]);
+        assert_eq!(brace_expand("{a,b{c,d}}"), ["a", "bc", "bd"]);
+        assert_eq!(brace_expand("pre{a,b}post"), ["preapost", "prebpost"]);
+        assert_eq!(brace_expand("{a,}"), ["a"]);
+        assert_eq!(brace_expand("{}"), ["{}"]);
+        assert_eq!(brace_expand("{a,b"), ["{a,b"]);
+        assert_eq!(brace_expand("a{},b}c"), ["a}c", "abc"]);
+        assert_eq!(brace_expand("{},a}b"), ["{},a}b"]);
+        assert_eq!(brace_expand("a{b,c}{d,e}"), ["abd", "abe", "acd", "ace"]);
+        assert_eq!(brace_expand("x{{a,b}}y"), ["x{a}y", "x{b}y"]);
+        assert_eq!(brace_expand("{-2..1}"), ["-2", "-1", "0", "1"]);
+        assert_eq!(
+            brace_expand("{-02..02}"),
+            ["-02", "-01", "000", "001", "002"]
+        );
+        assert_eq!(brace_expand("{9..7..2}"), ["9", "7"]);
+        assert_eq!(brace_expand("*{a,b}.conf"), ["*a.conf", "*b.conf"]);
+        assert_eq!(brace_expand("\\\\{a,b}"), ["\\a", "\\b"]);
+        assert_eq!(brace_expand("{a\\,b}"), ["{a,b}"]);
+
+        let dir = std::env::temp_dir().join(format!(
+            "fanotes-hypr-brace-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        let pack = dir.join("pack");
+        fs::create_dir_all(&pack).unwrap();
+        fs::write(pack.join("a.conf"), "force_zero_scaling = false\n").unwrap();
+        fs::write(pack.join("b.conf"), "force_zero_scaling = true\n").unwrap();
+        fs::write(pack.join("1.conf"), "force_zero_scaling = false\n").unwrap();
+        fs::write(pack.join("2.conf"), "force_zero_scaling = true\n").unwrap();
+        let scaling = |body: &str| {
+            let config = dir.join("hyprland.conf");
+            fs::write(&config, body).unwrap();
+            report(
+                "linux",
+                &env(&[
+                    ("FANOTES_HYPRLAND_CONFIG", config.to_str().unwrap()),
+                    ("HOME", ""),
+                ]),
+                || panic!("hyprctl"),
+            )
+        };
+        // Sorted paths: `a.conf` then `b.conf`, so the later file wins.
+        assert_eq!(
+            scaling("source = ./pack/{a,b}.conf\n")["hyprlandZeroScaling"],
+            true
+        );
+        assert_eq!(
+            scaling("source = ./pack/{b,a}.conf\n")["hyprlandZeroScaling"],
+            true
+        );
+        fs::write(pack.join("b.conf"), "force_zero_scaling = false\n").unwrap();
+        fs::write(pack.join("a.conf"), "force_zero_scaling = true\n").unwrap();
+        assert_eq!(
+            scaling("source = ./pack/{b,a}.conf\n")["hyprlandZeroScaling"],
+            false
+        );
+        // `{a}` has no comma and no range, so it is not `a.conf`.
+        assert_eq!(
+            scaling("source = ./pack/{a}.conf\n")["hyprlandZeroScaling"],
+            false
+        );
+        assert_eq!(
+            scaling("source = ./pack/{1..2}.conf\n")["hyprlandZeroScaling"],
+            true
+        );
+        assert_eq!(
+            scaling("source = ./pack/{a..b}.conf\n")["hyprlandZeroScaling"],
+            false
         );
         let _ = fs::remove_dir_all(&dir);
     }
