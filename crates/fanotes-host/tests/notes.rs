@@ -58,6 +58,54 @@ fn a_file_is_not_a_folder_target() {
 }
 
 #[test]
+fn a_read_checks_the_markdown_extension_before_the_path_shape() {
+    let (mut host, vault) = host();
+    std::fs::write(vault.join("Seite.md"), b"Hallo\n").unwrap();
+    assert_eq!(
+        host.dispatch("fanotes:read-file", &[json!("../secret.txt")])
+            .unwrap_err(),
+        "Es dürfen nur Markdown-Dateien und FaNotes-Handschriftdateien (.famd) bearbeitet werden."
+    );
+    assert_eq!(
+        host.dispatch("fanotes:read-file", &[json!("../secret.md")])
+            .unwrap_err(),
+        "Pfad-Traversal ist nicht erlaubt."
+    );
+    assert_eq!(
+        host.dispatch("fanotes:read-file", &[json!(".fanotes/Notiz.md")])
+            .unwrap_err(),
+        "Interne FaNotes-Dateien sind geschützt."
+    );
+    assert_eq!(
+        host.dispatch("fanotes:read-file", &[json!("notes\\page.txt")])
+            .unwrap_err(),
+        "Es dürfen nur Markdown-Dateien und FaNotes-Handschriftdateien (.famd) bearbeitet werden."
+    );
+    assert_eq!(
+        host.dispatch("fanotes:read-file", &[json!("notes\\page.md")])
+            .unwrap_err(),
+        "Nur relative Vault-Pfade sind erlaubt."
+    );
+    assert_eq!(
+        host.dispatch("fanotes:read-file", &[json!("Seite.md/")]).unwrap(),
+        json!("Hallo")
+    );
+    assert_eq!(
+        host.dispatch("fanotes:write-file", &[json!("../secret.txt"), json!("Text")])
+            .unwrap_err(),
+        "Pfad-Traversal ist nicht erlaubt."
+    );
+    assert_eq!(
+        host.dispatch(
+            "fanotes:list-note-history",
+            &[json!("../secret.txt")],
+        )
+        .unwrap_err(),
+        "Pfad-Traversal ist nicht erlaubt."
+    );
+}
+
+#[test]
 fn a_note_link_reads_page_and_position_with_javascript_number() {
     let (mut host, vault) = host();
     std::fs::write(vault.join("Mathe/Seite.md"), b"\n").unwrap();
