@@ -56,6 +56,46 @@ fn a_note_link_reads_page_and_position_with_javascript_number() {
 }
 
 #[test]
+fn a_saved_note_adopts_links_and_backups_from_the_trailer() {
+    let (mut host, vault) = host();
+    std::fs::write(vault.join("Mathe/Seite.md"), b"Hallo\n").unwrap();
+    host.dispatch(
+        "fanotes:write-note-links",
+        &[
+            json!("Mathe/Seite.md"),
+            json!([{
+                "id": "link-old",
+                "sourcePath": "Mathe/Seite.md",
+                "targetPath": "Physik/Alt.md",
+                "label": "Alt"
+            }]),
+        ],
+    )
+    .unwrap();
+    let json = r#"{"schema":"fanotes-famd-v1","updatedAt":"2026-01-02T00:00:00.000Z","ink":null,"worksheets":[],"noteLinks":[{"id":"link-new","sourcePath":"Mathe/Seite.md","targetPath":"Physik/Neu.md","page":2,"x":0.2,"y":0.3,"style":"symbol","label":"Neu","appearance":"symbol"}],"noteBackups":[{"id":"nb-keep","notePath":"Mathe/Seite.md","createdAt":"2026-01-02T00:00:00.000Z","content":"vorher"}]}"#;
+    let content = format!(
+        "Hallo\n\n<!-- fanotes-famd:v1 chars={} -->\n{json}\n",
+        json.encode_utf16().count()
+    );
+    host.dispatch(
+        "fanotes:write-file",
+        &[json!("Mathe/Seite.md"), json!(content)],
+    )
+    .unwrap();
+    let links = host
+        .dispatch("fanotes:read-note-links", &[json!("Mathe/Seite.md")])
+        .unwrap();
+    assert_eq!(links.as_array().unwrap().len(), 1);
+    assert_eq!(links[0]["id"], "link-new");
+    assert_eq!(links[0]["targetPath"], "Physik/Neu.md");
+    let backups = host
+        .dispatch("fanotes:read-note-backups", &[json!("Mathe/Seite.md")])
+        .unwrap();
+    assert_eq!(backups[0]["id"], "nb-keep");
+    assert_eq!(backups[0]["content"], "vorher");
+}
+
+#[test]
 fn a_subject_book_page_follows_javascript_number() {
     let (mut host, _) = host();
     let books = host

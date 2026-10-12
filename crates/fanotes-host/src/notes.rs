@@ -123,6 +123,14 @@ pub fn attach_sidecar(
         if payload.paper_style.is_none() {
             payload.paper_style = incoming_payload.paper_style;
         }
+        // A saved trailer replaces links and backups when it actually has them.
+        // An empty list is omitted by the parser, so the sidecar copy stays.
+        if !incoming_payload.note_links.is_empty() {
+            payload.note_links = incoming_payload.note_links;
+        }
+        if !incoming_payload.note_backups.is_empty() {
+            payload.note_backups = incoming_payload.note_backups;
+        }
         if incoming_payload.page_stats.is_some() {
             payload.page_stats = incoming_payload.page_stats;
         }
