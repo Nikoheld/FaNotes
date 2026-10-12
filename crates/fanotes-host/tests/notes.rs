@@ -18,6 +18,44 @@ fn host() -> (Host, std::path::PathBuf) {
 }
 
 #[test]
+fn a_note_link_reads_page_and_position_with_javascript_number() {
+    let (mut host, vault) = host();
+    std::fs::write(vault.join("Mathe/Seite.md"), b"\n").unwrap();
+    let links = host
+        .dispatch(
+            "fanotes:write-note-links",
+            &[
+                json!("Mathe/Seite.md"),
+                json!([
+                    {
+                        "id": "link-a",
+                        "sourcePath": "anders.md",
+                        "targetPath": "Physik/Kraft.md",
+                        "page": "4",
+                        "x": "0.25",
+                        "y": null,
+                        "label": "Kraft"
+                    },
+                    {
+                        "id": "link-b",
+                        "sourcePath": "anders.md",
+                        "targetPath": "Physik/Andere.md",
+                        "page": "4.5",
+                        "x": 0.1,
+                        "y": 0.2,
+                        "label": "Andere"
+                    }
+                ]),
+            ],
+        )
+        .unwrap();
+    assert_eq!(links[0]["page"], 4);
+    assert_eq!(links[0]["x"].as_f64(), Some(0.25));
+    assert_eq!(links[0]["y"].as_f64(), Some(0.0));
+    assert_eq!(links[1]["page"], 1);
+}
+
+#[test]
 fn a_subject_book_page_follows_javascript_number() {
     let (mut host, _) = host();
     let books = host
@@ -367,13 +405,26 @@ fn a_companion_read_follows_the_desktop_file_check() {
             .unwrap_err(),
         "Die gewählte Datei ist keine reguläre Datei."
     );
+    let before = std::fs::read(vault.join("Mathe/Ordner.famd")).unwrap();
+    assert_eq!(
+        host.dispatch(
+            "fanotes:set-note-paper-style",
+            &[json!("Mathe/Ordner.md"), json!("grid")],
+        )
+        .unwrap_err(),
+        "Die gewählte Datei ist keine reguläre Datei."
+    );
     assert_eq!(
         host.dispatch(
             "fanotes:write-file",
             &[json!("Mathe/Ordner.md"), json!("Hallo\n")],
         )
         .unwrap_err(),
-        "Die Notiz ist keine sichere reguläre Datei."
+        "Die gewählte Datei ist keine reguläre Datei."
+    );
+    assert_eq!(
+        std::fs::read(vault.join("Mathe/Ordner.famd")).unwrap(),
+        before
     );
 }
 
@@ -392,7 +443,7 @@ fn a_directory_named_like_a_note_cannot_be_read() {
             &[json!("Mathe/Seite.md"), json!("Hallo\n")],
         )
         .unwrap_err(),
-        "Die Notiz ist keine sichere reguläre Datei."
+        "Die gewählte Datei ist keine reguläre Datei."
     );
 }
 
@@ -829,6 +880,34 @@ fn a_recognition_model_with_a_bad_byte_still_loads() {
         host.dispatch("fanotes:read-recognition-model", &[])
             .unwrap(),
         json!("{\"version\":1,\"name\":\"\u{FFFD}\"}")
+    );
+}
+
+#[test]
+fn a_recognition_model_file_uses_the_desktop_checks() {
+    let (mut host, vault) = host();
+    let directory = vault.join(".fanotes");
+    std::fs::create_dir_all(&directory).unwrap();
+    let path = directory.join("recognition-model.json");
+    std::fs::create_dir(&path).unwrap();
+    assert_eq!(
+        host.dispatch("fanotes:read-recognition-model", &[])
+            .unwrap_err(),
+        "Die Datei ist keine reguläre Datei."
+    );
+    std::fs::remove_dir(&path).unwrap();
+    let file = std::fs::File::create(&path).unwrap();
+    file.set_len(20 * 1024 * 1024 + 1).unwrap();
+    assert_eq!(
+        host.dispatch("fanotes:read-recognition-model", &[])
+            .unwrap_err(),
+        "Die Datei ist zu groß."
+    );
+    std::fs::remove_file(&path).unwrap();
+    assert_eq!(
+        host.dispatch("fanotes:read-recognition-model", &[])
+            .unwrap(),
+        serde_json::Value::Null
     );
 }
 

@@ -439,7 +439,7 @@ fn read_companion(host: &Host, relative: &str) -> Result<Option<FamdPayload>, St
     let root = vault_root(host)?;
     let note = note_path(relative)?;
     let famd_relative = companion_note_path(&note, ".famd");
-    let path = vault::resolve_note_file(root, &famd_relative).map_err(companion_read_error)?;
+    let path = vault::resolve_note_file(root, &famd_relative)?;
     match fs::symlink_metadata(&path) {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(_) => Err("Die Datei konnte nicht gelesen werden.".to_owned()),
@@ -451,14 +451,6 @@ fn read_companion(host: &Host, relative: &str) -> Result<Option<FamdPayload>, St
         }
         Ok(meta) if meta.len() > MAX_COMPANION_BYTES => Err("Die Datei ist zu groß.".to_owned()),
         Ok(_) => Ok(read_lossy_string(&path).and_then(|source| parse_famd(&source).payload)),
-    }
-}
-
-fn companion_read_error(error: String) -> String {
-    if error == "Die Notiz ist keine sichere reguläre Datei." {
-        "Die gewählte Datei ist keine reguläre Datei.".to_owned()
-    } else {
-        error
     }
 }
 

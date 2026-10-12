@@ -77,7 +77,9 @@ pub fn resolve_note_file(root: &Path, relative: &str) -> Result<PathBuf, String>
                 return Err("Ein Pfadbestandteil ist kein Ordner.".to_owned());
             }
             Ok(info) if last && !info.is_file() => {
-                return Err("Die Notiz ist keine sichere reguläre Datei.".to_owned());
+                // Desktop `resolveVaultPath` with `expected: 'file'` reports this
+                // before the later write check can run.
+                return Err("Die gewählte Datei ist keine reguläre Datei.".to_owned());
             }
             Ok(_) => {}
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => missing = true,
@@ -97,7 +99,16 @@ pub fn resolve_note_file(root: &Path, relative: &str) -> Result<PathBuf, String>
 
 /// An existing file or folder. A symlink anywhere in the path is rejected.
 pub fn resolve_existing_entry(root: &Path, relative: &str) -> Result<PathBuf, String> {
-    let normalized = normalize_relative_path(relative, false, false)?;
+    resolve_existing(root, relative, false)
+}
+
+/// Asset preview may open files under `.fanotes`, including worksheet pages.
+pub fn resolve_asset_entry(root: &Path, relative: &str) -> Result<PathBuf, String> {
+    resolve_existing(root, relative, true)
+}
+
+fn resolve_existing(root: &Path, relative: &str, allow_internal: bool) -> Result<PathBuf, String> {
+    let normalized = normalize_relative_path(relative, false, allow_internal)?;
     let segments: Vec<&str> = normalized.split('/').collect();
     let mut cursor = root.to_path_buf();
     for (index, segment) in segments.iter().enumerate() {
@@ -341,103 +352,9 @@ fn rename_legacy_internal(root: &Path, directory: &Path) -> Result<bool, String>
     }
 }
 
-/// `Number(string)`: the whole string is one numeric literal after JavaScript trim.
-///
-/// A sign applies to decimals and `Infinity`. `0x` / `0b` / `0o` are unsigned.
-/// `800px`, `1e`, and `+0x10` are not numbers.
+/// `Number(string)`, shared with note links in `fanotes-famd`.
 pub(crate) fn js_tonumber(value: &str) -> Option<f64> {
-    let text = js_trim(value);
-    if text.is_empty() {
-        return Some(0.0);
-    }
-    let bytes = text.as_bytes();
-    if bytes.len() >= 2 && bytes[0] == b'0' {
-        let radix = match bytes[1] {
-            b'x' | b'X' => Some(16),
-            b'b' | b'B' => Some(2),
-            b'o' | b'O' => Some(8),
-            _ => None,
-        };
-        if let Some(radix) = radix {
-            return integer_literal(&text[2..], radix);
-        }
-    }
-    decimal_literal(text)
-}
-
-fn integer_literal(digits: &str, radix: u32) -> Option<f64> {
-    if digits.is_empty() {
-        return None;
-    }
-    let mut value = 0.0_f64;
-    for byte in digits.bytes() {
-        let digit = match byte {
-            b'0'..=b'9' => byte - b'0',
-            b'a'..=b'f' => byte - b'a' + 10,
-            b'A'..=b'F' => byte - b'A' + 10,
-            _ => return None,
-        };
-        if u32::from(digit) >= radix {
-            return None;
-        }
-        value = value.mul_add(f64::from(radix), f64::from(digit));
-        if !value.is_finite() {
-            return Some(f64::INFINITY);
-        }
-    }
-    Some(value)
-}
-
-fn decimal_literal(text: &str) -> Option<f64> {
-    let bytes = text.as_bytes();
-    let mut index = 0;
-    if bytes
-        .first()
-        .is_some_and(|byte| matches!(byte, b'+' | b'-'))
-    {
-        index = 1;
-    }
-    if text[index..].eq("Infinity") {
-        return text.parse().ok();
-    }
-    let mut saw_digit = false;
-    while bytes.get(index).is_some_and(u8::is_ascii_digit) {
-        saw_digit = true;
-        index += 1;
-    }
-    if bytes.get(index) == Some(&b'.') {
-        index += 1;
-        while bytes.get(index).is_some_and(u8::is_ascii_digit) {
-            saw_digit = true;
-            index += 1;
-        }
-    }
-    if !saw_digit {
-        return None;
-    }
-    if bytes
-        .get(index)
-        .is_some_and(|byte| matches!(byte, b'e' | b'E'))
-    {
-        index += 1;
-        if bytes
-            .get(index)
-            .is_some_and(|byte| matches!(byte, b'+' | b'-'))
-        {
-            index += 1;
-        }
-        let exponent = index;
-        while bytes.get(index).is_some_and(u8::is_ascii_digit) {
-            index += 1;
-        }
-        if index == exponent {
-            return None;
-        }
-    }
-    if index != bytes.len() {
-        return None;
-    }
-    text.parse().ok()
+    fanotes_famd::js_tonumber(value)
 }
 
 #[cfg(test)]
