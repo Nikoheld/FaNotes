@@ -327,23 +327,28 @@ fn sanitize_note_link(value: &Value) -> Option<NoteLink> {
     if source_path == target_path || !target_path.to_lowercase().ends_with(".md") {
         return None;
     }
-    let page = object
-        .get("page")
-        .and_then(Value::as_i64)
-        .filter(|page| (1..=10_000).contains(page))
-        .unwrap_or(1);
-    let x = object
-        .get("x")
-        .and_then(Value::as_f64)
-        .filter(|value| value.is_finite())
-        .map(|value| value.clamp(0.0, 1.0))
-        .unwrap_or(0.5);
-    let y = object
-        .get("y")
-        .and_then(Value::as_f64)
-        .filter(|value| value.is_finite())
-        .map(|value| value.clamp(0.0, 1.0))
-        .unwrap_or(0.5);
+    let page_number = js_number(object.get("page"));
+    let page = if page_number.is_finite()
+        && page_number.fract() == 0.0
+        && page_number.abs() <= 9_007_199_254_740_991.0
+        && (1.0..=10_000.0).contains(&page_number)
+    {
+        page_number as i64
+    } else {
+        1
+    };
+    let x_number = js_number(object.get("x"));
+    let x = if x_number.is_finite() {
+        x_number.clamp(0.0, 1.0)
+    } else {
+        0.5
+    };
+    let y_number = js_number(object.get("y"));
+    let y = if y_number.is_finite() {
+        y_number.clamp(0.0, 1.0)
+    } else {
+        0.5
+    };
     let style = object
         .get("style")
         .and_then(Value::as_str)
@@ -993,9 +998,120 @@ fn now_iso() -> String {
     format!("{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}.{millis:03}Z")
 }
 
+/// `Number(string)`: the whole string is one numeric literal after JavaScript trim.
+///
+/// A sign applies to decimals and `Infinity`. `0x` / `0b` / `0o` are unsigned.
+/// `800px`, `1e`, and `+0x10` are not numbers.
+pub fn js_tonumber(value: &str) -> Option<f64> {
+    let text = trim_js(value);
+    if text.is_empty() {
+        return Some(0.0);
+    }
+    let bytes = text.as_bytes();
+    if bytes.len() >= 2 && bytes[0] == b'0' {
+        let radix = match bytes[1] {
+            b'x' | b'X' => Some(16),
+            b'b' | b'B' => Some(2),
+            b'o' | b'O' => Some(8),
+            _ => None,
+        };
+        if let Some(radix) = radix {
+            return integer_literal(&text[2..], radix);
+        }
+    }
+    decimal_literal(text)
+}
+
+fn integer_literal(digits: &str, radix: u32) -> Option<f64> {
+    if digits.is_empty() {
+        return None;
+    }
+    let mut value = 0.0_f64;
+    for byte in digits.bytes() {
+        let digit = match byte {
+            b'0'..=b'9' => byte - b'0',
+            b'a'..=b'f' => byte - b'a' + 10,
+            b'A'..=b'F' => byte - b'A' + 10,
+            _ => return None,
+        };
+        if u32::from(digit) >= radix {
+            return None;
+        }
+        value = value.mul_add(f64::from(radix), f64::from(digit));
+        if !value.is_finite() {
+            return Some(f64::INFINITY);
+        }
+    }
+    Some(value)
+}
+
+fn decimal_literal(text: &str) -> Option<f64> {
+    let bytes = text.as_bytes();
+    let mut index = 0;
+    if bytes
+        .first()
+        .is_some_and(|byte| matches!(byte, b'+' | b'-'))
+    {
+        index = 1;
+    }
+    if text[index..].eq("Infinity") {
+        return text.parse().ok();
+    }
+    let mut saw_digit = false;
+    while bytes.get(index).is_some_and(u8::is_ascii_digit) {
+        saw_digit = true;
+        index += 1;
+    }
+    if bytes.get(index) == Some(&b'.') {
+        index += 1;
+        while bytes.get(index).is_some_and(u8::is_ascii_digit) {
+            saw_digit = true;
+            index += 1;
+        }
+    }
+    if !saw_digit {
+        return None;
+    }
+    if bytes
+        .get(index)
+        .is_some_and(|byte| matches!(byte, b'e' | b'E'))
+    {
+        index += 1;
+        if bytes
+            .get(index)
+            .is_some_and(|byte| matches!(byte, b'+' | b'-'))
+        {
+            index += 1;
+        }
+        let exponent = index;
+        while bytes.get(index).is_some_and(u8::is_ascii_digit) {
+            index += 1;
+        }
+        if index == exponent {
+            return None;
+        }
+    }
+    if index != bytes.len() {
+        return None;
+    }
+    text.parse().ok()
+}
+
+/// `Number(value)` for a JSON value. A missing value is `NaN`, like `undefined`.
+fn js_number(value: Option<&Value>) -> f64 {
+    match value {
+        Some(Value::Number(number)) => number.as_f64().unwrap_or(f64::NAN),
+        Some(Value::String(text)) => js_tonumber(text).unwrap_or(f64::NAN),
+        Some(Value::Bool(true)) => 1.0,
+        Some(Value::Bool(false)) => 0.0,
+        Some(Value::Null) => 0.0,
+        _ => f64::NAN,
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{parse_famd, FAMD_SCHEMA};
+    use super::{parse_famd, parse_note_links, FAMD_SCHEMA};
 
     #[test]
     fn a_bad_companion_timestamp_uses_the_current_time() {
@@ -1010,5 +1126,33 @@ mod tests {
         assert_ne!(updated, "1970-01-01T00:00:00.000Z");
         assert!(updated.ends_with('Z'), "{updated}");
         assert_eq!(updated.len(), 24, "{updated}");
+    }
+
+    #[test]
+    fn a_note_link_reads_page_and_position_with_javascript_number() {
+        let links = parse_note_links(&serde_json::json!([
+            {
+                "id": "link-a",
+                "sourcePath": "anders.md",
+                "targetPath": "Physik/Kraft.md",
+                "page": "4",
+                "x": "0.25",
+                "y": null,
+                "label": "Kraft"
+            },
+            {
+                "id": "link-b",
+                "sourcePath": "anders.md",
+                "targetPath": "Physik/Andere.md",
+                "page": "4.5",
+                "x": 0.1,
+                "y": 0.2,
+                "label": "Andere"
+            }
+        ]));
+        assert_eq!(links[0].page, 4);
+        assert_eq!(links[0].x, 0.25);
+        assert_eq!(links[0].y, 0.0);
+        assert_eq!(links[1].page, 1);
     }
 }
