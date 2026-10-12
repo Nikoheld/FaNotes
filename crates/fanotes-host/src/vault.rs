@@ -99,7 +99,16 @@ pub fn resolve_note_file(root: &Path, relative: &str) -> Result<PathBuf, String>
 
 /// An existing file or folder. A symlink anywhere in the path is rejected.
 pub fn resolve_existing_entry(root: &Path, relative: &str) -> Result<PathBuf, String> {
-    let normalized = normalize_relative_path(relative, false, false)?;
+    resolve_existing(root, relative, false)
+}
+
+/// Asset preview may open files under `.fanotes`, including worksheet pages.
+pub fn resolve_asset_entry(root: &Path, relative: &str) -> Result<PathBuf, String> {
+    resolve_existing(root, relative, true)
+}
+
+fn resolve_existing(root: &Path, relative: &str, allow_internal: bool) -> Result<PathBuf, String> {
+    let normalized = normalize_relative_path(relative, false, allow_internal)?;
     let segments: Vec<&str> = normalized.split('/').collect();
     let mut cursor = root.to_path_buf();
     for (index, segment) in segments.iter().enumerate() {

@@ -378,3 +378,35 @@ fn a_bad_mark_reports_a_different_position_error_than_a_text_box() {
         "Eine Textfeldposition ist ungültig."
     );
 }
+
+#[test]
+fn a_worksheet_source_uses_the_desktop_file_checks() {
+    let (dir, mut host) = host();
+    let worksheets = dir.join("vault/.fanotes/worksheets");
+    let json = r#"{"schemaVersion":1,"id":"blatt-1","title":"Übung","kind":"pdf","mimeType":"application/pdf","sourceRelativePath":".fanotes/worksheets/blatt-1.pdf","dataRelativePath":".fanotes/worksheets/blatt-1.json","createdAt":"2026-01-02T03:04:05.000Z","updatedAt":"2026-01-02T03:04:05.000Z","textBoxes":[],"highlights":[]}"#;
+    fs::write(worksheets.join("blatt-1.json"), json).unwrap();
+    fs::remove_file(worksheets.join("blatt-1.pdf")).unwrap();
+    fs::create_dir(worksheets.join("blatt-1.pdf")).unwrap();
+    assert_eq!(
+        host.dispatch("fanotes:read-worksheet", &[json!("blatt-1")])
+            .unwrap_err(),
+        "Die Datei ist keine reguläre Datei."
+    );
+    assert_eq!(
+        host.dispatch(
+            "fanotes:save-worksheet",
+            &[serde_json::from_str::<serde_json::Value>(json).unwrap()]
+        )
+        .unwrap_err(),
+        "Die Datei ist keine reguläre Datei."
+    );
+
+    fs::remove_dir(worksheets.join("blatt-1.pdf")).unwrap();
+    let file = fs::File::create(worksheets.join("blatt-1.pdf")).unwrap();
+    file.set_len(96 * 1024 * 1024 + 1).unwrap();
+    assert_eq!(
+        host.dispatch("fanotes:read-worksheet", &[json!("blatt-1")])
+            .unwrap_err(),
+        "Die Datei ist zu groß."
+    );
+}
