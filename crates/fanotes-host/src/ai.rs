@@ -1700,9 +1700,9 @@ fn required_actions(value: Option<&Value>, lm_studio: bool) -> Result<Vec<String
 }
 
 fn strip_think_block(value: &str) -> Option<String> {
-    let rest = strip_ascii_prefix_ignore_case(value, "<think>")?;
-    let close = find_ascii_ignore_case(rest, "</think>")?;
-    let rest = &rest[close + "</think>".len()..];
+    let rest = strip_iu_prefix(value, "<think>")?;
+    let (_, end) = find_iu_span(rest, "</think>")?;
+    let rest = &rest[end..];
     Some(skip_js_whitespace(rest).to_owned())
 }
 
@@ -1716,7 +1716,7 @@ fn outer_markdown_fence(value: &str) -> Option<String> {
 
 fn skip_fence_language(value: &str) -> &str {
     for language in ["markdown", "md"] {
-        let Some(after) = strip_ascii_prefix_ignore_case(value, language) else {
+        let Some(after) = strip_iu_prefix(value, language) else {
             continue;
         };
         if skip_opening_fence_line(after).is_some() {
@@ -1741,12 +1741,22 @@ fn skip_opening_fence_line(value: &str) -> Option<&str> {
     after_newline
 }
 
-fn strip_ascii_prefix_ignore_case<'a>(value: &'a str, prefix: &str) -> Option<&'a str> {
+/// JavaScript `/iu`: ASCII case, the long s as `s`, and the Kelvin sign as `k`.
+fn js_iu_char(character: char) -> char {
+    match character {
+        '\u{017F}' => 's',
+        '\u{212A}' => 'k',
+        'A'..='Z' => character.to_ascii_lowercase(),
+        other => other,
+    }
+}
+
+fn strip_iu_prefix<'a>(value: &'a str, prefix: &str) -> Option<&'a str> {
     let mut rest = value;
     for expected in prefix.chars() {
         let mut chars = rest.chars();
         let actual = chars.next()?;
-        if !actual.eq_ignore_ascii_case(&expected) {
+        if js_iu_char(actual) != expected {
             return None;
         }
         rest = chars.as_str();
@@ -1754,11 +1764,29 @@ fn strip_ascii_prefix_ignore_case<'a>(value: &'a str, prefix: &str) -> Option<&'
     Some(rest)
 }
 
-fn find_ascii_ignore_case(haystack: &str, needle: &str) -> Option<usize> {
-    haystack
-        .as_bytes()
-        .windows(needle.len())
-        .position(|window| window.eq_ignore_ascii_case(needle.as_bytes()))
+fn find_iu_span(haystack: &str, needle: &str) -> Option<(usize, usize)> {
+    let needle: Vec<char> = needle.chars().collect();
+    if needle.is_empty() {
+        return Some((0, 0));
+    }
+    let chars: Vec<(usize, char)> = haystack.char_indices().collect();
+    if chars.len() < needle.len() {
+        return None;
+    }
+    for start in 0..=chars.len() - needle.len() {
+        if needle
+            .iter()
+            .enumerate()
+            .all(|(offset, expected)| js_iu_char(chars[start + offset].1) == *expected)
+        {
+            let end = chars
+                .get(start + needle.len())
+                .map(|(index, _)| *index)
+                .unwrap_or(haystack.len());
+            return Some((chars[start].0, end));
+        }
+    }
+    None
 }
 
 fn skip_js_whitespace(value: &str) -> &str {
@@ -2204,6 +2232,22 @@ mod tests {
         assert_eq!(
             unwrap_markdown("<think>geheim</think>\n```markdown\n# Fertig\n```").unwrap(),
             "# Fertig"
+        );
+        assert_eq!(
+            unwrap_markdown("<thin\u{212A}>geheim</thin\u{212A}>\n# Fertig").unwrap(),
+            "# Fertig"
+        );
+        assert_eq!(
+            unwrap_markdown("```mar\u{212A}down\n# Fertig\n```").unwrap(),
+            "# Fertig"
+        );
+        assert_eq!(
+            unwrap_markdown("<thin\u{017F}>geheim</think>\n# Fertig").unwrap(),
+            "<thin\u{017F}>geheim</think>\n# Fertig"
+        );
+        assert_eq!(
+            unwrap_markdown("```m\u{212A}\n# Fertig\n```").unwrap(),
+            "```m\u{212A}\n# Fertig\n```"
         );
         assert_eq!(
             unwrap_markdown("```MARKDOWN\n# Fertig\n```").unwrap(),
