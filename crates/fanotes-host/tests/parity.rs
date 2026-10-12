@@ -52,13 +52,14 @@ fn vault_paths_reject_traversal_and_internal_files() {
             "fanotes:render-pdf-page",
             &[json!({
                 "path": "../secret.pdf",
-                "pageIndex": 0,
-                "pixelWidth": 16,
+                "pageIndex": 0.0,
+                "pixelWidth": 16.0,
                 "pixelHeight": 16,
                 "pagePixelWidth": 16,
                 "pagePixelHeight": 16,
                 "originX": 0,
-                "originY": 0
+                "originY": 0,
+                "rotation": 0.0
             })]
         )
         .unwrap_err(),
@@ -69,6 +70,7 @@ fn vault_paths_reject_traversal_and_internal_files() {
             .unwrap_err(),
         "Interne FaNotes-Dateien sind geschützt."
     );
+    fs::write(dir.0.join("vault").join("Notiz.md"), b"\n").unwrap();
     host.dispatch("fanotes:write-file", &[json!("Notiz.md"), json!("Hallo")])
         .unwrap();
     assert_eq!(
@@ -154,9 +156,86 @@ fn vault_paths_reject_traversal_and_internal_files() {
 }
 
 #[test]
+fn an_internal_worksheet_can_be_previewed() {
+    let (dir, mut host) = host();
+    let worksheets = dir.0.join("vault/.fanotes/worksheets");
+    fs::create_dir_all(&worksheets).unwrap();
+    fs::write(worksheets.join("blatt-1.pdf"), b"%PDF-1.4 intern").unwrap();
+    let encoded = host
+        .dispatch(
+            "fanotes:read-asset-bytes",
+            &[json!(".fanotes/worksheets/blatt-1.pdf")],
+        )
+        .unwrap();
+    assert_eq!(
+        base64::engine::general_purpose::STANDARD
+            .decode(encoded.as_str().unwrap())
+            .unwrap(),
+        b"%PDF-1.4 intern"
+    );
+    fs::create_dir_all(dir.0.join("vault/.lernwerk/worksheets")).unwrap();
+    fs::write(
+        dir.0.join("vault/.lernwerk/worksheets/blatt-1.pdf"),
+        b"%PDF-1.4 alt",
+    )
+    .unwrap();
+    let legacy = host
+        .dispatch(
+            "fanotes:read-asset-data-url",
+            &[json!(".lernwerk/worksheets/blatt-1.pdf")],
+        )
+        .unwrap();
+    assert!(legacy
+        .as_str()
+        .unwrap()
+        .starts_with("data:application/pdf;base64,"));
+    fs::create_dir(worksheets.join("ordner.pdf")).unwrap();
+    assert_eq!(
+        host.dispatch(
+            "fanotes:read-asset-bytes",
+            &[json!(".fanotes/worksheets/ordner.pdf")]
+        )
+        .unwrap_err(),
+        "Die gewählte Datei ist keine reguläre Datei."
+    );
+    assert_eq!(
+        host.dispatch(
+            "fanotes:read-file",
+            &[json!(".fanotes/worksheets/blatt-1.pdf")]
+        )
+        .unwrap_err(),
+        "Interne FaNotes-Dateien sind geschützt."
+    );
+}
+
+#[test]
+fn an_empty_asset_preview_returns_an_empty_payload() {
+    let (dir, mut host) = host();
+    fs::write(dir.0.join("vault").join("leer.pdf"), b"").unwrap();
+    assert_eq!(
+        host.dispatch("fanotes:read-asset-bytes", &[json!("leer.pdf")])
+            .unwrap(),
+        json!("")
+    );
+    assert_eq!(
+        host.dispatch("fanotes:read-asset-data-url", &[json!("leer.pdf")])
+            .unwrap(),
+        json!("data:application/pdf;base64,")
+    );
+    assert_eq!(
+        host.dispatch("fanotes:read-asset-bytes", &[json!("fehlt.pdf")])
+            .unwrap_err(),
+        "Der Eintrag wurde nicht gefunden."
+    );
+}
+
+#[test]
 fn addon_ssrf_blocks_private_and_non_https() {
     assert!(addon_request_allowed("http://example.com").is_err());
-    assert!(addon_request_allowed("https://127.0.0.1/hook").is_err());
+    assert_eq!(
+        addon_request_allowed("https://127.0.0.1/hook").unwrap_err(),
+        "Add-ons dürfen nur öffentliche https-Adressen aufrufen."
+    );
     assert!(addon_request_allowed("https://127.1/hook").is_err());
     assert!(addon_request_allowed("https://0x7f.0.0.1/hook").is_err());
     assert!(addon_request_allowed("https://0177.0.0.1/hook").is_err());
@@ -165,6 +244,8 @@ fn addon_ssrf_blocks_private_and_non_https() {
     assert!(addon_request_allowed("https://[2001:db8::1]/hook").is_err());
     assert!(addon_request_allowed("https://localhost/hook").is_err());
     assert!(addon_request_allowed("https://192.168.1.20/hook").is_err());
+    assert!(addon_request_allowed("https://10.0.0.1e1/hook").is_ok());
+    assert!(addon_request_allowed("https://10.0.0.0b1/hook").is_ok());
     assert!(addon_request_allowed("https://100.64.0.1/hook").is_err());
     assert!(addon_request_allowed("https://224.0.0.1/hook").is_err());
     assert!(addon_request_allowed("https://user:pass@example.com").is_err());
@@ -288,4 +369,45 @@ fn famd_ink_round_trips_through_the_shared_codec() {
         .dispatch("fanotes:read-famd-ink", &[json!("Seite.md")])
         .unwrap();
     assert!(ink["drawingJson"].as_str().unwrap().contains("Seite"));
+}
+
+#[test]
+fn a_pdf_raster_path_uses_the_desktop_vault_rules() {
+    let (_dir, mut host) = host();
+    let mut request = json!({
+        "path": "Seite.pdf",
+        "pageIndex": 0,
+        "pixelWidth": 16,
+        "pixelHeight": 16,
+        "pagePixelWidth": 16,
+        "pagePixelHeight": 16,
+        "originX": 0,
+        "originY": 0,
+        "rotation": 0
+    });
+    request.as_object_mut().unwrap().remove("rotation");
+    assert_eq!(
+        host.dispatch("fanotes:render-pdf-page", &[request.clone()])
+            .unwrap_err(),
+        "Die PDF-Rasteranfrage ist unvollständig."
+    );
+    request["rotation"] = json!(0);
+    request["path"] = json!("");
+    assert_eq!(
+        host.dispatch("fanotes:render-pdf-page", &[request.clone()])
+            .unwrap_err(),
+        "Der Vault selbst ist für diese Aktion nicht erlaubt."
+    );
+    request["path"] = json!("a".repeat(4097));
+    assert_eq!(
+        host.dispatch("fanotes:render-pdf-page", &[request.clone()])
+            .unwrap_err(),
+        "Ungültiger Vault-Pfad."
+    );
+    request["path"] = json!(format!("{}.pdf", "ä".repeat(3000)));
+    assert_eq!(
+        host.dispatch("fanotes:render-pdf-page", &[request])
+            .unwrap_err(),
+        "Der Eintrag wurde nicht gefunden."
+    );
 }

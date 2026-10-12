@@ -27,12 +27,12 @@ pub fn import_worksheet(host: &Host) -> Result<Value, String> {
         .and_then(|name| name.to_str())
         .unwrap_or("Bild.png");
     let bytes = fs::read(&path).map_err(|_| "Das ausgewählte Arbeitsblatt ist leer.".to_owned())?;
-    let extension = match name.rsplit_once('.') {
-        Some((_, extension)) if !extension.is_empty() => {
-            format!(".{}", extension.to_ascii_lowercase())
-        }
-        _ => ".png".to_owned(),
-    };
+    let extension = vault::posix_extname(name).to_ascii_lowercase();
+    if extension.is_empty() {
+        return Err(
+            "Es werden PDF-, PNG-, JPEG-, WebP- und GIF-Arbeitsblätter unterstützt.".to_owned(),
+        );
+    }
     import_named_bytes(host, name, &extension, &bytes)
 }
 
@@ -53,8 +53,8 @@ pub fn import_pdf_note(host: &Host, args: &[Value]) -> Result<Value, String> {
 }
 
 pub fn import_subject_book(host: &Host, args: &[Value]) -> Result<Value, String> {
-    let subject = args.first().and_then(Value::as_str).unwrap_or("").trim();
-    if subject.is_empty() {
+    let subject = args.first().and_then(Value::as_str).unwrap_or("");
+    if vault::js_trim(subject).is_empty() {
         return Err("Wähle zuerst ein Fach für das Buch.".to_owned());
     }
     if let Some(payload) = args.get(1).filter(|value| value.is_object()) {
@@ -117,7 +117,7 @@ fn import_pdf_file(
     kind: PdfKind,
 ) -> Result<Value, String> {
     let root = vault_root(host)?.to_path_buf();
-    let parent_relative = if parent.trim().is_empty() {
+    let parent_relative = if parent.is_empty() {
         String::new()
     } else {
         vault::normalize_relative_path(parent, true, false)?
@@ -139,7 +139,9 @@ fn import_pdf_file(
         .and_then(Value::as_str)
         .filter(|name| !name.is_empty())
         .unwrap_or(fallback);
-    if !name.to_ascii_lowercase().ends_with(".pdf") && payload.get("name").is_some() {
+    if payload.get("name").is_some()
+        && !crate::vault::posix_extname(name).eq_ignore_ascii_case(".pdf")
+    {
         return Err(kind.not_pdf().to_owned());
     }
     let bytes = decode_payload_bytes(payload, 96 * 1024 * 1024)?;
@@ -261,23 +263,7 @@ fn file_stem(name: &str) -> &str {
 }
 
 fn safe_stem(value: &str, fallback: &str) -> Result<String, String> {
-    let raw = value.trim();
-    let name = if raw.is_empty() { fallback } else { raw };
-    let cleaned = name.trim_end_matches(['.', ' ']).trim();
-    if cleaned.is_empty()
-        || crate::vault::utf16_len(cleaned) > 180
-        || cleaned == "."
-        || cleaned == ".."
-        || cleaned.contains('/')
-        || cleaned.contains('\\')
-        || crate::vault::has_c0_or_del(cleaned)
-        || cleaned.eq_ignore_ascii_case(".fanotes")
-        || cleaned.eq_ignore_ascii_case(".lernwerk")
-    {
-        Err("Dieser Name ist nicht erlaubt.".to_owned())
-    } else {
-        Ok(cleaned.to_owned())
-    }
+    super::safe_entry_name_or(value, fallback)
 }
 
 #[cfg(test)]
