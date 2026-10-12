@@ -905,7 +905,7 @@ impl Host {
             let meta = fs::symlink_metadata(&path)
                 .map_err(|_| "Der Zielordner wurde nicht gefunden.".to_owned())?;
             if meta.file_type().is_symlink() || !meta.is_dir() {
-                return Err("Der Zielordner wurde nicht gefunden.".to_owned());
+                return Err("Der gewählte Pfad ist kein Ordner.".to_owned());
             }
             path
         };
@@ -989,7 +989,7 @@ impl Host {
         let meta = fs::symlink_metadata(&path)
             .map_err(|_| "Der Ordner wurde nicht gefunden.".to_owned())?;
         if meta.file_type().is_symlink() || !meta.is_dir() {
-            return Err("Der Ordner wurde nicht gefunden.".to_owned());
+            return Err("Der gewählte Pfad ist kein Ordner.".to_owned());
         }
         let stored = match color {
             Value::Null => None,
@@ -1106,7 +1106,7 @@ impl Host {
             let folder_meta = fs::symlink_metadata(&path)
                 .map_err(|_| "Der Zielordner wurde nicht gefunden.".to_owned())?;
             if folder_meta.file_type().is_symlink() || !folder_meta.is_dir() {
-                return Err("Der Zielordner wurde nicht gefunden.".to_owned());
+                return Err("Der gewählte Pfad ist kein Ordner.".to_owned());
             }
             path
         };
