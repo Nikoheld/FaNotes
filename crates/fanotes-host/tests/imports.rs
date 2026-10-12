@@ -21,6 +21,31 @@ fn b64(bytes: &[u8]) -> String {
 }
 
 #[test]
+fn a_worksheet_byte_list_follows_buffer_from() {
+    let (mut host, vault) = host();
+    let document = host
+        .dispatch(
+            "fanotes:import-worksheet-from-data",
+            &[json!({
+                "name": "Tafel.png",
+                "bytes": [137.0, 80, 78, 71, 13, 10, 26, 10, 1.5, 256, -1, "1e1", true, null]
+            })],
+        )
+        .unwrap();
+    let id = document["id"].as_str().unwrap();
+    assert_eq!(
+        std::fs::read(vault.join(format!(".fanotes/worksheets/{id}.png"))).unwrap(),
+        vec![0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 0, 255, 10, 1, 0]
+    );
+    assert!(host
+        .dispatch(
+            "fanotes:import-worksheet-from-data",
+            &[json!({ "name": "Tafel.png", "bytes": 4 })],
+        )
+        .is_err());
+}
+
+#[test]
 fn a_dropped_image_and_a_pdf_note_land_in_the_vault() {
     let (mut host, vault) = host();
     let png = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0];
@@ -90,6 +115,65 @@ fn a_dropped_image_and_a_pdf_note_land_in_the_vault() {
     assert!(host
         .dispatch("fanotes:import-subject-book", &[json!("")])
         .is_err());
+}
+
+#[test]
+fn a_device_name_cannot_be_imported_as_a_note_or_worksheet() {
+    let (mut host, vault) = host();
+    let pdf = b"%PDF-1.4\n";
+    let note_error = host
+        .dispatch(
+            "fanotes:import-pdf-note",
+            &[
+                json!("Mathe"),
+                json!({ "name": "CON.pdf", "bytesBase64": b64(pdf) }),
+            ],
+        )
+        .unwrap_err();
+    assert!(note_error.contains("nicht erlaubt"), "{note_error}");
+    assert!(!vault.join("Mathe/CON.pdf").exists());
+
+    let allowed = host
+        .dispatch(
+            "fanotes:import-pdf-note",
+            &[
+                json!("Mathe"),
+                json!({ "name": "COM10.pdf", "bytesBase64": b64(pdf) }),
+            ],
+        )
+        .unwrap();
+    assert_eq!(allowed["relativePath"], "Mathe/COM10.pdf");
+
+    let png = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0];
+    let sheet_error = host
+        .dispatch(
+            "fanotes:import-worksheet-from-data",
+            &[json!({
+                "name": "CON.png",
+                "bytesBase64": b64(&png),
+            })],
+        )
+        .unwrap_err();
+    assert!(sheet_error.contains("nicht erlaubt"), "{sheet_error}");
+    let marked = host
+        .dispatch(
+            "fanotes:import-worksheet-from-data",
+            &[json!({
+                "name": "a<b.png",
+                "bytesBase64": b64(&png),
+            })],
+        )
+        .unwrap_err();
+    assert!(marked.contains("nicht erlaubt"), "{marked}");
+    assert!(
+        vault.join(".fanotes/worksheets").read_dir().is_err()
+            || vault
+                .join(".fanotes/worksheets")
+                .read_dir()
+                .unwrap()
+                .next()
+                .is_none()
+    );
 }
 
 #[test]
