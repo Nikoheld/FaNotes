@@ -58,7 +58,7 @@ pub fn transform(payload: &Value) -> Result<Value, String> {
         .get("connection")
         .ok_or_else(|| "Der AI-Auftrag ist ungültig.".to_owned())?;
     let provider = provider_name(connection)?;
-    let model = required_model(connection)?;
+    let model = required_model(connection, false)?;
     let markdown = required_markdown(object.get("markdown"), false)?;
     let actions = required_actions(object.get("actions"), false)?;
     let instruction = limited_instruction(
@@ -138,7 +138,7 @@ pub fn transform_lm_studio(payload: &Value) -> Result<Value, String> {
         .ok_or_else(|| "Der LM-Studio-Auftrag ist ungültig.".to_owned())?;
     let base_url = object.get("baseUrl").and_then(Value::as_str).unwrap_or("");
     let origin = lm_studio_origin(base_url)?;
-    let model = required_model(payload)?;
+    let model = required_model(payload, true)?;
     let markdown = required_markdown(object.get("markdown"), true)?;
     let actions = required_actions(object.get("actions"), true)?;
     let instruction = limited_instruction(
@@ -1512,24 +1512,29 @@ fn require_key(connection: &Value) -> Result<(), String> {
     }
 }
 
-fn required_model(value: &Value) -> Result<String, String> {
-    let model = value
-        .get("model")
-        .and_then(Value::as_str)
-        .or_else(|| {
-            value
-                .get("connection")
-                .and_then(|connection| connection.get("model"))
-                .and_then(Value::as_str)
-        })
-        .unwrap_or("");
+fn required_model(value: &Value, lm_studio: bool) -> Result<String, String> {
+    let model = value.get("model").and_then(Value::as_str).or_else(|| {
+        if lm_studio {
+            return None;
+        }
+        value
+            .get("connection")
+            .and_then(|connection| connection.get("model"))
+            .and_then(Value::as_str)
+    });
+    let model = model.unwrap_or("");
+    let message = if lm_studio {
+        "Wähle zuerst ein gültiges LM-Studio-Modell."
+    } else {
+        "Wähle zuerst ein gültiges AI-Modell."
+    };
     if crate::vault::js_trim(model).is_empty()
         || crate::vault::utf16_len(model) > 500
         || model
             .chars()
             .any(|character| matches!(character, '\0' | '\r' | '\n'))
     {
-        Err("Wähle zuerst ein gültiges AI-Modell.".to_owned())
+        Err(message.to_owned())
     } else {
         Ok(crate::vault::js_trim(model).to_owned())
     }
@@ -1914,17 +1919,34 @@ mod tests {
         assert!(super::clean_lm_studio_token("token\r").is_err());
 
         assert_eq!(
-            super::required_model(&json!({ "model": "gpt\t4" })).unwrap(),
+            super::required_model(&json!({ "model": "gpt\t4" }), false).unwrap(),
             "gpt\t4"
         );
-        assert!(super::required_model(&json!({ "model": "gpt\n4" })).is_err());
+        assert_eq!(
+            super::required_model(&json!({ "model": "gpt\n4" }), false).unwrap_err(),
+            "Wähle zuerst ein gültiges AI-Modell."
+        );
         let padded = format!(" {}", "Ä".repeat(499));
         assert_eq!(
-            super::required_model(&json!({ "model": padded })).unwrap(),
+            super::required_model(&json!({ "model": padded }), false).unwrap(),
             "Ä".repeat(499)
         );
         assert!(
-            super::required_model(&json!({ "model": format!(" {}", "a".repeat(500)) })).is_err()
+            super::required_model(&json!({ "model": format!(" {}", "a".repeat(500)) }), false)
+                .is_err()
+        );
+        assert_eq!(
+            super::required_model(&json!({ "model": "  " }), true).unwrap_err(),
+            "Wähle zuerst ein gültiges LM-Studio-Modell."
+        );
+        assert_eq!(
+            super::required_model(&json!({ "connection": { "model": "llama" } }), true)
+                .unwrap_err(),
+            "Wähle zuerst ein gültiges LM-Studio-Modell."
+        );
+        assert_eq!(
+            super::required_model(&json!({ "model": " llama " }), true).unwrap(),
+            "llama"
         );
     }
 
