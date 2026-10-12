@@ -1521,19 +1521,26 @@ fn unique_directory(parent: &Path, preferred: &str) -> Result<PathBuf, String> {
             format!("{preferred} {}", index + 1)
         };
         let target = parent.join(name);
-        if fs::create_dir(&target).is_ok() {
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                if fs::set_permissions(&target, fs::Permissions::from_mode(0o700)).is_err() {
-                    let _ = fs::remove_dir(&target);
-                    return Err(
-                        "Für den OneNote-Import konnte kein freier Zielordner angelegt werden."
-                            .to_owned(),
-                    );
+        match fs::create_dir(&target) {
+            Ok(()) => {
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    if fs::set_permissions(&target, fs::Permissions::from_mode(0o700)).is_err() {
+                        let _ = fs::remove_dir(&target);
+                        return Err(
+                            "Für den OneNote-Import konnte kein freier Zielordner angelegt werden."
+                                .to_owned(),
+                        );
+                    }
                 }
+                return Ok(target);
             }
-            return Ok(target);
+            // Desktop `mkdir` tries the next name only when the name is taken.
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(_) => {
+                return Err("Der Ordner konnte nicht angelegt werden.".to_owned());
+            }
         }
     }
     Err("Für den OneNote-Import konnte kein freier Zielordner angelegt werden.".to_owned())
@@ -1883,8 +1890,8 @@ mod tests {
         common_ancestor, extract_search_text, import_folder_segment, inline_images,
         note_directory_segments, outline_level, page_dimensions, page_parents, page_title,
         preview_is_nav, render_inputs, safe_segment, sanitize_page, stored_relative_path,
-        strip_active_html, tool_failure_message, tool_limit, urlencoding_decode, validate_listing,
-        walk_limited,
+        strip_active_html, tool_failure_message, tool_limit, unique_directory, urlencoding_decode,
+        validate_listing, walk_limited,
     };
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -1898,6 +1905,42 @@ mod tests {
             tool_limit("OneNote-Abschnitt Gruppe.one").as_secs(),
             12 * 60
         );
+    }
+
+    #[test]
+    fn a_blocked_import_folder_is_not_treated_as_a_taken_name() {
+        let root = std::env::temp_dir().join(format!(
+            "fanotes-onenote-mkdir-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let parent = root.join("not-a-folder");
+        std::fs::write(&parent, b"datei").unwrap();
+        assert_eq!(
+            unique_directory(&parent, "OneNote – Buch").unwrap_err(),
+            "Der Ordner konnte nicht angelegt werden."
+        );
+
+        let vault = root.join("vault");
+        std::fs::create_dir(&vault).unwrap();
+        std::fs::write(vault.join("OneNote – Buch"), b"datei").unwrap();
+        let created = unique_directory(&vault, "OneNote – Buch").unwrap();
+        assert_eq!(created.file_name().unwrap(), "OneNote – Buch 2");
+        assert!(created.is_dir());
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                std::fs::metadata(&created).unwrap().permissions().mode() & 0o777,
+                0o700
+            );
+        }
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
