@@ -238,3 +238,40 @@ fn an_addon_file_with_a_bad_byte_still_opens() {
         .unwrap()
         .contains('\u{FFFD}'));
 }
+
+#[test]
+fn an_addon_file_list_uses_desktop_entry_names() {
+    let (dir, mut host) = scratch("entries");
+    host.dispatch(
+        "fanotes:addons-write-files",
+        &[json!("margin-notes"), json!(["export {}"])],
+    )
+    .unwrap();
+    assert_eq!(
+        host.dispatch(
+            "fanotes:addons-read-file",
+            &[json!("margin-notes"), json!("0")],
+        )
+        .unwrap(),
+        "export {}"
+    );
+    host.dispatch(
+        "fanotes:addons-write-files",
+        &[json!("margin-notes"), json!([1, "zwei"])],
+    )
+    .unwrap();
+    let root = dir.join("app/addons/margin-notes");
+    assert_eq!(std::fs::read_to_string(root.join("0")).unwrap(), "export {}");
+    assert_eq!(std::fs::read_to_string(root.join("1")).unwrap(), "zwei");
+    assert_eq!(
+        host.dispatch("fanotes:addons-write-files", &[json!("margin-notes"), json!(1)])
+            .unwrap_err(),
+        "Keine Dateien übergeben."
+    );
+    host.dispatch(
+        "fanotes:addons-write-files",
+        &[json!("margin-notes"), json!([])],
+    )
+    .unwrap();
+    assert!(root.is_dir());
+}
