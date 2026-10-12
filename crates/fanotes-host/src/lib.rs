@@ -945,7 +945,7 @@ impl Host {
     fn open_subject_book(&self, relative: &str) -> Result<Value, String> {
         let root = self.require_vault()?;
         let path = vault::normalize_relative_path(relative, false, false)?;
-        let extension = vault::posix_extname(&path).to_ascii_lowercase();
+        let extension = vault::posix_extname_en_us(&path);
         if !matches!(extension.as_str(), ".md" | ".markdown" | ".famd" | ".pdf") {
             return Err("Es dürfen nur Markdown-Dateien, PDF-Notizen und FaNotes-Handschriftdateien (.famd) bearbeitet werden.".to_owned());
         }
@@ -1683,9 +1683,18 @@ fn asset_mime(relative: &str) -> Option<&'static str> {
 fn preview_extension(relative: &str) -> String {
     let base = relative.rsplit(['/', '\\']).next().unwrap_or(relative);
     match base.rfind('.') {
-        Some(dot) if dot > 0 => base[dot + 1..].to_ascii_lowercase(),
+        Some(dot) if dot > 0 => vault::locale_lower_en_us(&base[dot + 1..]),
         _ => String::new(),
     }
+}
+
+/// Tree and search store the extension without its dot.
+///
+/// `Notiz.marKdown` is `markdown`, matching `toLocaleLowerCase('en-US')`.
+fn extension_label(name: &str) -> String {
+    vault::posix_extname_en_us(name)
+        .trim_start_matches('.')
+        .to_owned()
 }
 
 fn asset_limit(mime: &str) -> u64 {
@@ -1986,7 +1995,7 @@ fn split_entry_name(name: &str) -> (&str, &str) {
 }
 
 fn entry_extension(name: &str) -> String {
-    split_entry_name(name).1.to_ascii_lowercase()
+    vault::locale_lower_en_us(split_entry_name(name).1)
 }
 
 fn numbered_entry_name(name: &str, number: u32) -> String {
@@ -2605,7 +2614,7 @@ fn onboarding_open(channel: &str) -> bool {
 }
 
 fn note_byte_limit(relative: &str) -> u64 {
-    if vault::posix_extname(relative).eq_ignore_ascii_case(".famd") {
+    if vault::posix_extname_en_us(relative) == ".famd" {
         MAX_FAMD_BYTES
     } else {
         MAX_TEXT_BYTES
@@ -2851,10 +2860,7 @@ fn clean_cached_entries(
                 cleaned.push(folder);
             }
             Some("file") => {
-                let extension = name
-                    .rsplit_once('.')
-                    .map(|(_, extension)| extension.to_ascii_lowercase())
-                    .unwrap_or_default();
+                let extension = extension_label(name);
                 if extension.is_empty() || !tree_extension(&extension) {
                     return Err(());
                 }
@@ -2952,10 +2958,7 @@ fn read_tree(
             }
             children.push(folder);
         } else if meta.is_file() {
-            let extension = name
-                .rsplit_once('.')
-                .map(|(_, extension)| extension.to_ascii_lowercase())
-                .unwrap_or_default();
+            let extension = extension_label(&name);
             if !tree_extension(&extension) {
                 continue;
             }
@@ -3129,7 +3132,8 @@ fn move_note_companion(root: &Path, old_relative: &str, new_relative: &str) {
 }
 
 fn note_companion_relative(relative: &str) -> Option<String> {
-    let extension = match vault::posix_extname(relative).to_ascii_lowercase().as_str() {
+    let extension = vault::posix_extname_en_us(relative);
+    let extension = match extension.as_str() {
         ".famd" => ".md",
         ".md" | ".markdown" | ".pdf" => ".famd",
         _ => return None,
@@ -3322,10 +3326,7 @@ fn collect_search_files(
             collect_search_files(root, &path, files, depth + 1)?;
             continue;
         }
-        let extension = name
-            .rsplit_once('.')
-            .map(|(_, extension)| extension.to_ascii_lowercase())
-            .unwrap_or_default();
+        let extension = extension_label(&name);
         if !matches!(extension.as_str(), "md" | "markdown" | "famd" | "pdf") {
             continue;
         }

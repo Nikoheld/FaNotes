@@ -18,6 +18,56 @@ fn host() -> (Host, std::path::PathBuf, std::path::PathBuf) {
 }
 
 #[test]
+fn a_markdown_note_keeps_a_kelvin_sign_in_its_extension() {
+    let (mut host, vault, _) = host();
+    let name = "Notiz.mar\u{212A}down";
+    fs::write(vault.join("Notiz.mar\u{017F}down"), "langes s\n").unwrap();
+    let created = host
+        .dispatch("fanotes:create-note", &[json!(""), json!(name)])
+        .unwrap();
+    assert_eq!(created["relativePath"], name);
+    assert_eq!(created["entry"]["extension"], "markdown");
+    host.dispatch(
+        "fanotes:write-file",
+        &[json!(name), json!("Kelvinwort in der Notiz\n")],
+    )
+    .unwrap();
+    let tree = host.dispatch("fanotes:get-tree", &[]).unwrap();
+    let file = tree
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|entry| entry["name"] == name)
+        .unwrap();
+    assert_eq!(file["extension"], "markdown");
+    assert!(tree
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|entry| entry["name"] != "Notiz.mar\u{017F}down"));
+    assert_eq!(
+        host.dispatch("fanotes:read-file", &[json!(name)])
+            .unwrap()
+            .as_str(),
+        Some("Kelvinwort in der Notiz")
+    );
+    let hits = host
+        .dispatch("fanotes:search", &[json!("Kelvinwort")])
+        .unwrap();
+    assert!(hits
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|hit| hit["relativePath"] == name));
+    let cached = host.dispatch("fanotes:get-cached-tree", &[]).unwrap();
+    assert!(cached
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|entry| entry["name"] == name && entry["extension"] == "markdown"));
+}
+
+#[test]
 fn a_kelvin_sign_cannot_name_the_legacy_internal_folder() {
     let (mut host, vault, _) = host();
     let kelvin = ".lernwer\u{212A}";

@@ -221,6 +221,13 @@ pub(crate) fn posix_extname(path: &str) -> &str {
     }
 }
 
+/// `path.extname(path).toLocaleLowerCase('en-US')`, including the leading dot.
+///
+/// The Kelvin sign in `.markdown` becomes `k`. The long s stays a long s.
+pub(crate) fn posix_extname_en_us(path: &str) -> String {
+    locale_lower_en_us(posix_extname(path))
+}
+
 /// JavaScript `String.prototype.trim`.
 ///
 /// U+FEFF is removed. U+0085 is kept. Rust `str::trim` does the reverse.
