@@ -456,3 +456,24 @@ fn a_worksheet_json_uses_the_desktop_file_messages() {
         "Das Arbeitsblatt wurde nicht gefunden."
     );
 }
+
+#[test]
+fn a_worksheet_folder_uses_the_desktop_directory_checks() {
+    let (dir, mut host) = host();
+    let internal = dir.join("vault/.fanotes");
+    fs::remove_dir_all(internal.join("worksheets")).unwrap();
+    fs::write(internal.join("worksheets"), b"not a folder").unwrap();
+    assert_eq!(
+        host.dispatch("fanotes:read-worksheet", &[json!("blatt-1")])
+            .unwrap_err(),
+        "Der interne Arbeitsblatt-Ordner ist unsicher."
+    );
+
+    fs::remove_dir_all(&internal).unwrap();
+    fs::write(&internal, b"not a folder").unwrap();
+    assert_eq!(
+        host.dispatch("fanotes:read-worksheet", &[json!("blatt-1")])
+            .unwrap_err(),
+        "Der interne FaNotes-Ordner ist unsicher."
+    );
+}

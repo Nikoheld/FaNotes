@@ -607,10 +607,18 @@ fn worksheet_id(value: &str) -> Result<String, String> {
 }
 
 fn worksheets_dir(vault_root: &Path) -> Result<PathBuf, String> {
-    let internal = crate::vault::ensure_internal_directory(vault_root)
-        .map_err(|_| "Der interne Arbeitsblatt-Ordner ist unsicher.".to_owned())?;
+    // A bad `.fanotes` folder keeps its own message. Only the worksheets
+    // directory itself uses the worksheet-folder message.
+    let internal = crate::vault::ensure_internal_directory(vault_root)?;
     let worksheets = internal.join("worksheets");
     ensure_private_dir(&worksheets)?;
+    let root_real = fs::canonicalize(vault_root)
+        .map_err(|_| "Der interne Arbeitsblatt-Ordner verlässt den Vault.".to_owned())?;
+    let real = fs::canonicalize(&worksheets)
+        .map_err(|_| "Der interne Arbeitsblatt-Ordner verlässt den Vault.".to_owned())?;
+    if !crate::vault::is_inside_root(&root_real, &real) {
+        return Err("Der interne Arbeitsblatt-Ordner verlässt den Vault.".to_owned());
+    }
     Ok(worksheets)
 }
 
