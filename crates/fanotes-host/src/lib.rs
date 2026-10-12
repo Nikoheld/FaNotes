@@ -604,13 +604,10 @@ impl Host {
 
     fn read_recognition_model(&self) -> Result<Value, String> {
         let root = self.require_vault()?.to_path_buf();
-        let path = internal_directory(&root)?.join("recognition-model.json");
+        let path = recognition_model_path(&root)?;
         match fs::symlink_metadata(&path) {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Value::Null),
             Err(_) => Err("Das Handschriftmodell konnte nicht gelesen werden.".to_owned()),
-            Ok(meta) if meta.file_type().is_symlink() || !meta.is_file() => {
-                Err("Die Datei ist keine reguläre Datei.".to_owned())
-            }
             Ok(meta) if meta.len() > MAX_RECOGNITION_MODEL_BYTES => {
                 Err("Die Datei ist zu groß.".to_owned())
             }
@@ -625,8 +622,7 @@ impl Host {
             return Err("Das Handschriftmodell ist ungültig oder zu groß.".to_owned());
         }
         let root = self.require_vault()?.to_path_buf();
-        let directory = internal_directory(&root)?;
-        let path = directory.join("recognition-model.json");
+        let path = recognition_model_path(&root)?;
         notes::atomic_write(&path, content.as_bytes(), 0o600)?;
         let modified = fs::symlink_metadata(&path)
             .ok()
@@ -1957,6 +1953,20 @@ fn mtime_millis(meta: &fs::Metadata) -> i64 {
 
 fn internal_directory(root: &Path) -> Result<PathBuf, String> {
     vault::ensure_internal_directory(root)
+}
+
+/// `resolveVaultPath` for `.fanotes/recognition-model.json` with `expected: 'file'`.
+fn recognition_model_path(root: &Path) -> Result<PathBuf, String> {
+    let path = internal_directory(root)?.join("recognition-model.json");
+    match fs::symlink_metadata(&path) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(path),
+        Err(_) => Err("Das Handschriftmodell konnte nicht gelesen werden.".to_owned()),
+        Ok(meta) if meta.file_type().is_symlink() => {
+            Err("Symbolische Links sind innerhalb des Vaults nicht erlaubt.".to_owned())
+        }
+        Ok(meta) if !meta.is_file() => Err("Die gewählte Datei ist keine reguläre Datei.".to_owned()),
+        Ok(_) => Ok(path),
+    }
 }
 
 fn scan_sync_directory(root: &Path, directory: &Path, depth: usize, out: &mut Vec<Value>) {
