@@ -818,8 +818,13 @@ impl Host {
         let normalized = vault::normalize_relative_path(relative, false, false)?;
         let path = vault::resolve_note_file(self.require_vault()?, &normalized)?;
         let limit = note_byte_limit(&normalized);
-        let meta = fs::symlink_metadata(&path)
-            .map_err(|_| "Die Datei konnte nicht gelesen werden.".to_owned())?;
+        let meta = match fs::symlink_metadata(&path) {
+            Ok(meta) => meta,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return Err("Der Eintrag wurde nicht gefunden.".to_owned());
+            }
+            Err(_) => return Err("Die Datei konnte nicht gelesen werden.".to_owned()),
+        };
         if meta.file_type().is_symlink() {
             return Err("Symbolische Links sind innerhalb des Vaults nicht erlaubt.".to_owned());
         }

@@ -602,6 +602,11 @@ fn a_missing_markdown_note_is_not_created_by_writing() {
         .unwrap_err();
     assert!(error.contains("nicht gefunden"), "{error}");
     assert!(!vault.join("Mathe/Neu.md").exists());
+    assert_eq!(
+        host.dispatch("fanotes:read-file", &[json!("Mathe/Neu.md")])
+            .unwrap_err(),
+        "Der Eintrag wurde nicht gefunden."
+    );
 
     let saved = host
         .dispatch(
