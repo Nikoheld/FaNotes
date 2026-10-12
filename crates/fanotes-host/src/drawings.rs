@@ -206,9 +206,7 @@ pub fn read_famd_ink(host: &Host, relative: &str) -> Result<Value, String> {
 
 fn is_note_path(relative: &str) -> bool {
     matches!(
-        crate::vault::posix_extname(relative)
-            .to_ascii_lowercase()
-            .as_str(),
+        crate::vault::posix_extname_en_us(relative).as_str(),
         ".md" | ".markdown" | ".famd" | ".pdf"
     )
 }

@@ -38,9 +38,7 @@ pub fn records_history(relative: &str) -> bool {
 
 pub fn is_note_text(relative: &str) -> bool {
     matches!(
-        crate::vault::posix_extname(relative)
-            .to_ascii_lowercase()
-            .as_str(),
+        crate::vault::posix_extname_en_us(relative).as_str(),
         ".md" | ".markdown" | ".famd"
     )
 }
@@ -51,7 +49,7 @@ pub fn write_note_file(
     content: &str,
     settings_paper: Option<&str>,
 ) -> Result<String, String> {
-    let is_famd = crate::vault::posix_extname(relative).eq_ignore_ascii_case(".famd");
+    let is_famd = crate::vault::posix_extname_en_us(relative) == ".famd";
     let body = strip_famd_payload(content);
     let markdown = if body.ends_with('\n') {
         body
@@ -508,7 +506,7 @@ fn markdown_path(relative: &str) -> Result<String, String> {
 
 fn is_note_extension(path: &str) -> bool {
     matches!(
-        vault::posix_extname(path).to_ascii_lowercase().as_str(),
+        vault::posix_extname_en_us(path).as_str(),
         ".md" | ".markdown" | ".famd" | ".pdf"
     )
 }
