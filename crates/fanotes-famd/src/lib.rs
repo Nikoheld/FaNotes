@@ -1189,7 +1189,7 @@ fn decimal_literal(text: &str) -> Option<f64> {
 /// `Number(value)` for a JSON value. A missing value is `NaN`, like `undefined`.
 ///
 /// An array uses `ToString`, so `[12]` is `12` and `[1, 2]` is `NaN`.
-fn js_number(value: Option<&Value>) -> f64 {
+pub fn js_number(value: Option<&Value>) -> f64 {
     match value {
         Some(Value::Number(number)) => number.as_f64().unwrap_or(f64::NAN),
         Some(Value::String(text)) => js_tonumber(text).unwrap_or(f64::NAN),

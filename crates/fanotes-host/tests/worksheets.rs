@@ -306,6 +306,26 @@ fn a_string_page_size_opens_like_the_desktop() {
         .dispatch("fanotes:read-worksheet", &[json!("seite-1")])
         .unwrap_err();
     assert!(broken.contains("Größe"), "{broken}");
+
+    fs::write(
+        worksheets.join("seite-1.json"),
+        r#"{"schemaVersion":1,"id":"seite-1","title":"Seite","kind":"html","mimeType":"text/html","sourceRelativePath":".fanotes/worksheets/seite-1.html","dataRelativePath":".fanotes/worksheets/seite-1.json","createdAt":"2026-01-02T03:04:05.000Z","updatedAt":"2026-01-02T03:04:05.000Z","pageWidth":[800.5],"pageHeight":[1200],"textBoxes":[],"highlights":[]}"#,
+    )
+    .unwrap();
+    let listed = host
+        .dispatch("fanotes:read-worksheet", &[json!("seite-1")])
+        .unwrap();
+    assert_eq!(listed["pageWidth"], 801);
+    assert_eq!(listed["pageHeight"], 1200);
+    fs::write(
+        worksheets.join("seite-1.json"),
+        r#"{"schemaVersion":1,"id":"seite-1","title":"Seite","kind":"html","mimeType":"text/html","sourceRelativePath":".fanotes/worksheets/seite-1.html","dataRelativePath":".fanotes/worksheets/seite-1.json","createdAt":"2026-01-02T03:04:05.000Z","updatedAt":"2026-01-02T03:04:05.000Z","pageWidth":[1,2],"pageHeight":900,"textBoxes":[],"highlights":[]}"#,
+    )
+    .unwrap();
+    let pair = host
+        .dispatch("fanotes:read-worksheet", &[json!("seite-1")])
+        .unwrap_err();
+    assert!(pair.contains("Größe"), "{pair}");
 }
 
 #[test]

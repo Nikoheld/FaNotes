@@ -98,14 +98,7 @@ fn recognize_loaded(width: usize, threads: usize, input: Vec<f32>) -> Result<Val
 /// Desktop `scheduleNativeOcrShutdown`: a safe whole number of seconds from 0
 /// through 600, otherwise two minutes. Zero waits one millisecond.
 pub(crate) fn native_ocr_idle_delay(configured: Option<&Value>) -> Duration {
-    let number = match configured {
-        Some(Value::Number(number)) => number.as_f64().unwrap_or(f64::NAN),
-        Some(Value::String(text)) => crate::vault::js_tonumber(text).unwrap_or(f64::NAN),
-        Some(Value::Bool(true)) => 1.0,
-        Some(Value::Bool(false)) => 0.0,
-        Some(Value::Null) => 0.0,
-        _ => f64::NAN,
-    };
+    let number = fanotes_famd::js_number(configured);
     if number.is_finite()
         && number.fract() == 0.0
         && number.abs() <= 9_007_199_254_740_991.0
@@ -419,6 +412,14 @@ mod tests {
         assert_eq!(
             native_ocr_idle_delay(Some(&json!("600"))),
             Duration::from_secs(600)
+        );
+        assert_eq!(
+            native_ocr_idle_delay(Some(&json!([30]))),
+            Duration::from_secs(30)
+        );
+        assert_eq!(
+            native_ocr_idle_delay(Some(&json!([1, 2]))),
+            Duration::from_millis(120_000)
         );
         assert_eq!(
             native_ocr_idle_delay(Some(&json!(601))),
