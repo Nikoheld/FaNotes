@@ -18,6 +18,39 @@ fn host() -> (Host, std::path::PathBuf) {
 }
 
 #[test]
+fn a_tree_modification_time_rounds_to_the_nearest_millisecond() {
+    let (mut host, vault) = host();
+    let path = vault.join("Mathe/Seite.md");
+    std::fs::write(&path, b"Hallo\n").unwrap();
+    let when = std::time::UNIX_EPOCH + std::time::Duration::new(1_700_000_000, 600_000);
+    let file = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
+    file.set_times(std::fs::FileTimes::new().set_modified(when))
+        .unwrap();
+    drop(file);
+    let stored = std::fs::metadata(&path)
+        .unwrap()
+        .modified()
+        .unwrap()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap();
+    assert_eq!(stored.subsec_nanos(), 600_000, "the clock kept 0.6 ms");
+    let tree = host.dispatch("fanotes:get-tree", &[]).unwrap();
+    let folder = tree
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|entry| entry["name"] == "Mathe")
+        .unwrap();
+    let note = folder["children"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|entry| entry["name"] == "Seite.md")
+        .unwrap();
+    assert_eq!(note["modifiedAt"], "2023-11-14T22:13:20.001Z");
+}
+
+#[test]
 fn a_file_is_not_a_folder_target() {
     let (mut host, vault) = host();
     std::fs::write(vault.join("Seite.md"), b"Hallo\n").unwrap();

@@ -950,8 +950,16 @@ fn vault_root(host: &Host) -> Result<&Path, String> {
 
 pub(crate) fn iso_from_system_time(time: SystemTime) -> String {
     let elapsed = time.duration_since(UNIX_EPOCH).unwrap_or_default();
-    let secs = elapsed.as_secs();
-    let millis = elapsed.subsec_millis();
+    // `fs.Stats#mtime.toISOString()` rounds to the nearest millisecond.
+    // 0.6 ms becomes `.001`, and 999.5 ms rolls into the next second.
+    let mut secs = elapsed.as_secs();
+    let millis = (u64::from(elapsed.subsec_nanos()) + 500_000) / 1_000_000;
+    let millis = if millis == 1000 {
+        secs += 1;
+        0
+    } else {
+        millis
+    };
     let days = secs / 86_400;
     let time = secs % 86_400;
     let (year, month, day) = civil_date(days);
@@ -1008,7 +1016,8 @@ fn is_leap(year: i32) -> bool {
 
 #[cfg(test)]
 mod publish_tests {
-    use super::{file_mtime_iso, publish_new_file, write_note_file, NewFileError};
+    use super::{file_mtime_iso, iso_from_system_time, publish_new_file, write_note_file, NewFileError};
+    use std::time::UNIX_EPOCH;
 
     #[test]
     fn a_new_file_stays_private_and_an_existing_name_is_left_alone() {
@@ -1055,6 +1064,31 @@ mod publish_tests {
             .collect();
         assert!(leftovers.is_empty());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_file_time_rounds_like_the_desktop_date() {
+        let at = |secs, nanos| UNIX_EPOCH + std::time::Duration::new(secs, nanos);
+        assert_eq!(
+            iso_from_system_time(at(1_700_000_000, 499_999)),
+            "2023-11-14T22:13:20.000Z"
+        );
+        assert_eq!(
+            iso_from_system_time(at(1_700_000_000, 500_000)),
+            "2023-11-14T22:13:20.001Z"
+        );
+        assert_eq!(
+            iso_from_system_time(at(1_700_000_000, 600_000)),
+            "2023-11-14T22:13:20.001Z"
+        );
+        assert_eq!(
+            iso_from_system_time(at(1_700_000_000, 999_499_999)),
+            "2023-11-14T22:13:20.999Z"
+        );
+        assert_eq!(
+            iso_from_system_time(at(1_700_000_000, 999_500_000)),
+            "2023-11-14T22:13:21.000Z"
+        );
     }
 
     #[test]
