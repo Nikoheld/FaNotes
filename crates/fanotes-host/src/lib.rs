@@ -159,7 +159,7 @@ impl Host {
             }
             "fanotes:set-folder-color" => self.set_folder_color(
                 &arg_text(args, 0, "Ungültiger Vault-Pfad.")?,
-                args.get(1).unwrap_or(&Value::Null),
+                args.get(1),
             ),
             "fanotes:rename-entry" => self.rename_entry(
                 &arg_text(args, 0, "Ungültiger Vault-Pfad.")?,
@@ -985,13 +985,20 @@ impl Host {
         self.bootstrap()
     }
 
-    fn set_folder_color(&mut self, relative: &str, color: &Value) -> Result<Value, String> {
+    fn set_folder_color(
+        &mut self,
+        relative: &str,
+        color: Option<&Value>,
+    ) -> Result<Value, String> {
         let root = self.require_vault()?.to_path_buf();
         let normalized = vault::normalize_relative_path(relative, false, false)?;
         // Desktop checks the hex color after the path shape and before the folder exists.
+        // Only an explicit null clears the color. A missing argument is undefined.
         let stored = match color {
-            Value::Null => None,
-            Value::String(value) if folder_color_hex(value) => Some(value.to_ascii_lowercase()),
+            Some(Value::Null) => None,
+            Some(Value::String(value)) if folder_color_hex(value) => {
+                Some(value.to_ascii_lowercase())
+            }
             _ => return Err("Ungültige Ordnerfarbe.".to_owned()),
         };
         let path = vault::resolve_existing_entry(&root, &normalized)?;

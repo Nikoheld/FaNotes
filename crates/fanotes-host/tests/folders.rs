@@ -133,6 +133,16 @@ fn an_invalid_folder_color_is_reported_before_the_folder_check() {
     )
     .unwrap();
     assert_eq!(
+        host.dispatch("fanotes:set-folder-color", &[json!("Mathe")])
+            .unwrap_err(),
+        "Ungültige Ordnerfarbe."
+    );
+    assert_eq!(
+        host.dispatch("fanotes:set-folder-color", &[json!("Seite.md")])
+            .unwrap_err(),
+        "Ungültige Ordnerfarbe."
+    );
+    assert_eq!(
         host.dispatch("fanotes:set-folder-color", &[json!("Mathe"), json!("blau")])
             .unwrap_err(),
         "Ungültige Ordnerfarbe."
