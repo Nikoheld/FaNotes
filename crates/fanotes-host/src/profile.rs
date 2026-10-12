@@ -189,9 +189,8 @@ fn real_directory(path: &Path) -> bool {
 }
 
 fn same_directory(left: &Path, right: &Path) -> bool {
-    let left = std::path::absolute(left).unwrap_or_else(|_| left.to_path_buf());
-    let right = std::path::absolute(right).unwrap_or_else(|_| right.to_path_buf());
-    left == right
+    // Desktop `path.resolve` drops `..` without creating the missing directory.
+    crate::node_resolve(left) == crate::node_resolve(right)
 }
 
 #[cfg(test)]

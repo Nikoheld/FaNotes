@@ -291,6 +291,33 @@ fn a_welcome_note_with_a_bad_byte_still_receives_the_shortcut_fix() {
 }
 
 #[test]
+fn a_profile_path_drops_a_missing_parent_segment_before_creating_folders() {
+    let dir = scratch();
+    let config_home = dir.join("config");
+    let legacy = config_home.join("Lernwerk Notes");
+    let vault = dir.join("vault");
+    fs::create_dir_all(&legacy).unwrap();
+    fs::create_dir_all(&vault).unwrap();
+    fs::write(
+        legacy.join("config.json"),
+        serde_json::to_string(&json!({
+            "version": 2,
+            "vaultPath": vault,
+            "settings": { "theme": "midnight" }
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    let spelled = config_home.join("missing").join("..").join("FaNotes");
+    let mut host = Host::open(spelled);
+    assert!(!config_home.join("missing").exists());
+    assert!(config_home.join("FaNotes").is_dir());
+    let boot = host.dispatch("fanotes:bootstrap", &[]).unwrap();
+    assert_eq!(boot["vaultPath"], vault.to_string_lossy().as_ref());
+    assert_eq!(boot["settings"]["theme"], "midnight");
+}
+
+#[test]
 fn an_electron_profile_supplies_the_vault_and_settings() {
     let dir = scratch();
     let vault = dir.join("vault");
