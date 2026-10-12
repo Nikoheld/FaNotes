@@ -1067,8 +1067,9 @@ impl Host {
                 return Err("Dieser Dateityp wird nicht unterstützt.".to_owned());
             }
         }
+        // Desktop returns the path the caller sent when the name does not change.
         if desired == current_name {
-            return Ok(Value::String(normalized));
+            return Ok(Value::String(relative.to_owned()));
         }
         let parent = source.parent().unwrap_or(&root).to_path_buf();
         let unique = unique_sibling_name(
