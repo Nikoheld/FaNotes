@@ -252,6 +252,26 @@ fn a_stale_reset_marker_does_not_wipe_the_profile() {
 }
 
 #[test]
+fn a_reset_marker_version_of_one_point_zero_still_wipes_the_profile() {
+    let (app, mut host) = host();
+    host.dispatch("fanotes:save-settings", &[json!({ "theme": "midnight" })])
+        .unwrap();
+    let user_data = std::path::absolute(&app).unwrap();
+    let marker = app.parent().unwrap().join(".fanotes-reset-pending.json");
+    fs::write(
+        &marker,
+        format!(
+            r#"{{"version":1.0,"userDataPath":"{}","createdAt":"2026-10-12T03:00:00.000Z"}}"#,
+            user_data.display()
+        ),
+    )
+    .unwrap();
+    let _ = Host::open(app.clone());
+    assert!(!app.join("settings.json").exists());
+    assert!(!marker.exists());
+}
+
+#[test]
 fn a_symlinked_reset_marker_is_discarded() {
     let (app, mut host) = host();
     host.dispatch("fanotes:save-settings", &[json!({ "theme": "midnight" })])
