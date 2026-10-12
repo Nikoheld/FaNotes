@@ -55,7 +55,7 @@ pub fn transform(payload: &Value) -> Result<Value, String> {
     let provider = provider_name(connection)?;
     let model = required_model(connection)?;
     let markdown = required_markdown(object.get("markdown"))?;
-    let actions = required_actions(object.get("actions"))?;
+    let actions = required_actions(object.get("actions"), false)?;
     let instruction = limited_instruction(
         object
             .get("instruction")
@@ -135,7 +135,7 @@ pub fn transform_lm_studio(payload: &Value) -> Result<Value, String> {
     let origin = lm_studio_origin(base_url)?;
     let model = required_model(payload)?;
     let markdown = required_markdown(object.get("markdown"))?;
-    let actions = required_actions(object.get("actions"))?;
+    let actions = required_actions(object.get("actions"), true)?;
     let instruction = limited_instruction(
         object
             .get("instruction")
@@ -1442,25 +1442,35 @@ fn required_markdown(value: Option<&Value>) -> Result<String, String> {
     }
 }
 
-fn required_actions(value: Option<&Value>) -> Result<Vec<String>, String> {
+fn required_actions(value: Option<&Value>, lm_studio: bool) -> Result<Vec<String>, String> {
+    let missing = if lm_studio {
+        "Wähle mindestens eine KI-Aktion."
+    } else {
+        "Wähle mindestens eine AI-Aktion."
+    };
+    let invalid = if lm_studio {
+        "Die ausgewählten KI-Aktionen sind ungültig."
+    } else {
+        "Die ausgewählten AI-Aktionen sind ungültig."
+    };
     let actions = value
         .and_then(Value::as_array)
-        .ok_or_else(|| "Wähle mindestens eine AI-Aktion.".to_owned())?;
+        .ok_or_else(|| missing.to_owned())?;
     if actions.is_empty() {
-        return Err("Wähle mindestens eine AI-Aktion.".to_owned());
+        return Err(invalid.to_owned());
     }
     let mut unique = Vec::new();
     for action in actions {
         let name = action
             .as_str()
             .filter(|name| ACTIONS.contains(name))
-            .ok_or_else(|| "Die ausgewählten AI-Aktionen sind ungültig.".to_owned())?;
+            .ok_or_else(|| invalid.to_owned())?;
         if !unique.iter().any(|existing: &String| existing == name) {
             unique.push(name.to_owned());
         }
     }
     if unique.len() != actions.len() {
-        return Err("Die ausgewählten AI-Aktionen sind ungültig.".to_owned());
+        return Err(invalid.to_owned());
     }
     Ok(unique)
 }
@@ -1883,5 +1893,31 @@ mod tests {
         assert_eq!(unnamed[0]["key"], "claude-haiku");
         assert_eq!(unnamed[0]["displayName"], "claude-haiku");
         assert_eq!(anthropic[0]["publisher"], "Anthropic");
+    }
+
+    #[test]
+    fn an_empty_action_list_uses_the_desktop_message() {
+        let empty = json!([]);
+        let repeated = json!(["spelling", "spelling"]);
+        assert_eq!(
+            super::required_actions(None, false).unwrap_err(),
+            "Wähle mindestens eine AI-Aktion."
+        );
+        assert_eq!(
+            super::required_actions(Some(&empty), false).unwrap_err(),
+            "Die ausgewählten AI-Aktionen sind ungültig."
+        );
+        assert_eq!(
+            super::required_actions(None, true).unwrap_err(),
+            "Wähle mindestens eine KI-Aktion."
+        );
+        assert_eq!(
+            super::required_actions(Some(&empty), true).unwrap_err(),
+            "Die ausgewählten KI-Aktionen sind ungültig."
+        );
+        assert_eq!(
+            super::required_actions(Some(&repeated), false).unwrap_err(),
+            "Die ausgewählten AI-Aktionen sind ungültig."
+        );
     }
 }
