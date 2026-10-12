@@ -885,6 +885,36 @@ fn history_uses_the_desktop_trim_for_a_blank_note() {
 }
 
 #[test]
+fn a_history_index_uses_the_desktop_indentation() {
+    let (mut host, vault) = host();
+    std::fs::write(vault.join("Mathe/Seite.md"), b"Hallo\n").unwrap();
+    host.dispatch(
+        "fanotes:write-file",
+        &[json!("Mathe/Seite.md"), json!("Welt\n")],
+    )
+    .unwrap();
+    let index = std::fs::read_dir(vault.join(".fanotes/history"))
+        .unwrap()
+        .find_map(|entry| {
+            let path = entry.unwrap().path().join("index.json");
+            path.is_file().then_some(path)
+        })
+        .unwrap();
+    let text = std::fs::read_to_string(index).unwrap();
+    assert!(
+        text.starts_with("{\n  \"format\": \"fanotes-history-v1\",\n  \"snapshots\": [\n"),
+        "{text}"
+    );
+    assert!(text.contains("\n      \"id\": \""), "{text}");
+    assert!(text.contains("\n      \"createdAt\": \""), "{text}");
+    assert!(text.contains("\n      \"bytes\": 6\n"), "{text}");
+    assert!(
+        text.contains("\n  \"path\": \"Mathe/Seite.md\"\n}\n"),
+        "{text}"
+    );
+}
+
+#[test]
 fn a_recognition_model_with_a_bad_byte_still_loads() {
     let (mut host, vault) = host();
     std::fs::create_dir_all(vault.join(".fanotes")).unwrap();
