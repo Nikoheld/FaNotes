@@ -430,3 +430,29 @@ fn a_worksheet_source_uses_the_desktop_file_checks() {
         "Die Datei ist zu groß."
     );
 }
+
+#[test]
+fn a_worksheet_json_uses_the_desktop_file_messages() {
+    let (dir, mut host) = host();
+    let worksheets = dir.join("vault/.fanotes/worksheets");
+    fs::create_dir(worksheets.join("blatt-1.json")).unwrap();
+    assert_eq!(
+        host.dispatch("fanotes:read-worksheet", &[json!("blatt-1")])
+            .unwrap_err(),
+        "Die Datei ist keine reguläre Datei."
+    );
+    fs::remove_dir(worksheets.join("blatt-1.json")).unwrap();
+    let file = fs::File::create(worksheets.join("blatt-1.json")).unwrap();
+    file.set_len(4 * 1024 * 1024 + 1).unwrap();
+    assert_eq!(
+        host.dispatch("fanotes:read-worksheet", &[json!("blatt-1")])
+            .unwrap_err(),
+        "Die Datei ist zu groß."
+    );
+    fs::remove_file(worksheets.join("blatt-1.json")).unwrap();
+    assert_eq!(
+        host.dispatch("fanotes:read-worksheet", &[json!("blatt-1")])
+            .unwrap_err(),
+        "Das Arbeitsblatt wurde nicht gefunden."
+    );
+}
