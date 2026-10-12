@@ -754,7 +754,7 @@ fn prepare_input(input: &Path, temporary: &Path, seven_zip: &Path) -> Result<Vec
 
 fn validate_listing(stdout: &str) -> Result<(), String> {
     let mut count = 0usize;
-    let mut bytes = 0u64;
+    let mut bytes = 0.0f64;
     let stdout = stdout.replace("\r\n", "\n");
     for record in stdout.split("\n\n") {
         let mut fields = HashMap::new();
@@ -774,13 +774,14 @@ fn validate_listing(stdout: &str) -> Result<(), String> {
             return Err("Das OneNote-Archiv enthält einen unsicheren Pfad.".to_owned());
         }
         if fields.get("Folder").map(String::as_str) != Some("+") {
-            bytes += fields
-                .get("Size")
-                .and_then(|value| value.parse::<u64>().ok())
-                .unwrap_or(0);
+            let size = fields.get("Size").map(String::as_str).unwrap_or("0");
+            bytes += crate::vault::js_tonumber(size).unwrap_or(f64::NAN);
         }
         count += 1;
-        if count > 20_000 || bytes > 6 * 1024 * 1024 * 1024 {
+        if count > MAX_ARCHIVE_ENTRIES
+            || !safe_archive_bytes(bytes)
+            || bytes > MAX_EXPANDED_BYTES as f64
+        {
             return Err("Das OneNote-Archiv überschreitet die sicheren Importgrenzen.".to_owned());
         }
     }
@@ -789,6 +790,11 @@ fn validate_listing(stdout: &str) -> Result<(), String> {
     } else {
         Ok(())
     }
+}
+
+/// `Number(size)` then `Number.isSafeInteger` on the running total.
+fn safe_archive_bytes(bytes: f64) -> bool {
+    bytes.is_finite() && bytes.fract() == 0.0 && bytes.abs() <= 9_007_199_254_740_991.0
 }
 
 fn render_inputs(
@@ -2023,6 +2029,23 @@ mod tests {
             assert!(linked.contains("Symbolische"));
         }
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn an_archive_size_uses_javascript_number() {
+        let limited = "Das OneNote-Archiv überschreitet die sicheren Importgrenzen.";
+        assert_eq!(
+            validate_listing("Path = a.txt\nSize = 1.5\n").unwrap_err(),
+            limited
+        );
+        assert_eq!(
+            validate_listing("Path = a.txt\nSize = abc\n").unwrap_err(),
+            limited
+        );
+        assert!(validate_listing("Path = a.txt\nSize = 1e2\n").is_ok());
+        assert!(validate_listing("Path = a.txt\nSize =  12 \n").is_ok());
+        assert!(validate_listing("Path = a.txt\nSize = 1.0\n").is_ok());
+        assert!(validate_listing("Path = dir\nFolder = +\nSize = 1.5\n").is_ok());
     }
 
     #[test]
