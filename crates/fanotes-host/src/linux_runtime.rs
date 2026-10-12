@@ -5,7 +5,7 @@
 //! Hyprland session is running.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::time::Duration;
 
 use serde_json::{json, Value};
@@ -268,7 +268,8 @@ fn scan_force_zero_scaling(
     env: &BTreeMap<String, String>,
     visited: &mut BTreeSet<PathBuf>,
 ) -> Option<bool> {
-    let resolved = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
+    // `path.resolve` drops `..` before the file is opened or remembered.
+    let resolved = resolve_config_path(path);
     if visited.contains(&resolved) || visited.len() >= MAX_FILES {
         return None;
     }
@@ -277,7 +278,9 @@ fn scan_force_zero_scaling(
     if !meta.is_file() || meta.len() == 0 || meta.len() > MAX_BYTES {
         return None;
     }
-    let text = std::fs::read_to_string(&resolved).ok()?;
+    // Node `readFile(..., 'utf8')` keeps the file and replaces a bad byte.
+    let bytes = std::fs::read(&resolved).ok()?;
+    let text = String::from_utf8_lossy(&bytes);
     let mut last = None;
     let from_dir = resolved.parent().unwrap_or(Path::new("."));
     for raw_line in text.split('\n') {
@@ -346,13 +349,62 @@ fn expand_path(raw: &str, env: &BTreeMap<String, String>, from_dir: &Path) -> Op
     if value.is_empty() {
         return None;
     }
-    let path = PathBuf::from(&value);
+    let absolute_input = Path::new(&value).is_absolute();
+    let path = if absolute_input {
+        PathBuf::from(&value)
+    } else {
+        from_dir.join(&value)
+    };
     let path = if path.is_absolute() {
         path
     } else {
-        from_dir.join(path)
+        std::path::absolute(&path).unwrap_or(path)
     };
-    Some(std::path::absolute(path).unwrap_or(PathBuf::from(value)))
+    // `path.normalize` and `path.resolve` drop `..` without opening the
+    // missing directory. The filesystem would otherwise refuse the path.
+    Some(lexical_normalize(
+        &path,
+        absolute_input && value.ends_with('/'),
+    ))
+}
+
+fn resolve_config_path(path: &Path) -> PathBuf {
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf())
+    };
+    lexical_normalize(&absolute, false)
+}
+
+fn lexical_normalize(path: &Path, keep_trailing_slash: bool) -> PathBuf {
+    let mut out = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::Prefix(prefix) => out.push(prefix.as_os_str()),
+            Component::RootDir => out.push("/"),
+            Component::CurDir => {}
+            Component::ParentDir => {
+                let can_pop = matches!(out.components().next_back(), Some(Component::Normal(_)));
+                if can_pop {
+                    out.pop();
+                } else if !out.has_root() {
+                    out.push("..");
+                }
+            }
+            Component::Normal(part) => out.push(part),
+        }
+    }
+    if out.as_os_str().is_empty() {
+        out.push(".");
+    }
+    if keep_trailing_slash && out != Path::new("/") {
+        let text = out.to_string_lossy();
+        if !text.ends_with('/') {
+            return PathBuf::from(format!("{text}/"));
+        }
+    }
+    out
 }
 
 fn expand_env_vars(value: &str, env: &BTreeMap<String, String>, home: &str, xdg: &str) -> String {
@@ -1033,6 +1085,104 @@ mod tests {
             scaling("source = ./pack/[a-c].conf\n")["hyprlandZeroScaling"],
             true
         );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_hyprland_source_drops_parent_segments_before_opening() {
+        let dir = std::env::temp_dir().join(format!(
+            "fanotes-hypr-dotdot-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(dir.join("pack")).unwrap();
+        fs::write(dir.join("looks.conf"), "force_zero_scaling = true\n").unwrap();
+        fs::write(dir.join("pack/a.conf"), "force_zero_scaling = true\n").unwrap();
+        let scaling = |body: &str, home: &str| {
+            let config = dir.join("hyprland.conf");
+            fs::write(&config, body).unwrap();
+            report(
+                "linux",
+                &env(&[
+                    ("FANOTES_HYPRLAND_CONFIG", config.to_str().unwrap()),
+                    ("HOME", home),
+                ]),
+                || panic!("hyprctl"),
+            )
+        };
+        assert_eq!(
+            scaling("source = ./missing/../looks.conf\n", "")["hyprlandZeroScaling"],
+            true
+        );
+        assert_eq!(
+            scaling("source = ./missing/../pack/*.conf\n", "")["hyprlandZeroScaling"],
+            true
+        );
+        assert_eq!(
+            scaling("source = ~/gone/../looks.conf\n", dir.to_str().unwrap())
+                ["hyprlandZeroScaling"],
+            true
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_hyprland_config_path_drops_parent_segments() {
+        let dir = std::env::temp_dir().join(format!(
+            "fanotes-hypr-resolve-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let config = dir.join("hyprland.conf");
+        fs::write(&config, "force_zero_scaling = true\n").unwrap();
+        let configured = dir.join("missing").join("..").join("hyprland.conf");
+        let runtime = report(
+            "linux",
+            &env(&[
+                ("FANOTES_HYPRLAND_CONFIG", configured.to_str().unwrap()),
+                ("HOME", ""),
+            ]),
+            || panic!("hyprctl"),
+        );
+        assert_eq!(runtime["hyprlandZeroScaling"], true);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_bad_byte_in_a_hyprland_config_still_enables_zero_scaling() {
+        let dir = std::env::temp_dir().join(format!(
+            "fanotes-hypr-lossy-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let config = dir.join("hyprland.conf");
+        let mut bytes = b"monitor = DP-1 # ".to_vec();
+        bytes.push(0xe4);
+        bytes.extend_from_slice(b"\nforce_zero_scaling = true\n");
+        fs::write(&config, bytes).unwrap();
+        let runtime = report(
+            "linux",
+            &env(&[
+                ("FANOTES_HYPRLAND_CONFIG", config.to_str().unwrap()),
+                ("HOME", ""),
+            ]),
+            || panic!("hyprctl"),
+        );
+        assert_eq!(runtime["hyprlandZeroScaling"], true);
         let _ = fs::remove_dir_all(&dir);
     }
 }
