@@ -623,16 +623,26 @@ fn worksheets_dir(vault_root: &Path) -> Result<PathBuf, String> {
 }
 
 fn ensure_private_dir(path: &Path) -> Result<(), String> {
+    let unsafe_dir = || "Der interne Arbeitsblatt-Ordner ist unsicher.".to_owned();
     match fs::symlink_metadata(path) {
-        Ok(meta) if meta.file_type().is_symlink() || !meta.is_dir() => {
-            Err("Der interne Arbeitsblatt-Ordner ist unsicher.".to_owned())
-        }
+        Ok(meta) if meta.file_type().is_symlink() || !meta.is_dir() => Err(unsafe_dir()),
         Ok(_) => Ok(()),
-        Err(_) => {
-            fs::create_dir_all(path)
-                .map_err(|_| "Der interne Arbeitsblatt-Ordner ist unsicher.".to_owned())?;
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            fs::create_dir(path).map_err(|_| unsafe_dir())?;
+            // Desktop `mkdir` uses mode `0o700`, then checks the created directory.
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                fs::set_permissions(path, fs::Permissions::from_mode(0o700))
+                    .map_err(|_| unsafe_dir())?;
+            }
+            let created = fs::symlink_metadata(path).map_err(|_| unsafe_dir())?;
+            if created.file_type().is_symlink() || !created.is_dir() {
+                return Err(unsafe_dir());
+            }
             Ok(())
         }
+        Err(_) => Err(unsafe_dir()),
     }
 }
 

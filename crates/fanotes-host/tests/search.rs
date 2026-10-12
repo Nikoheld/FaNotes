@@ -592,7 +592,16 @@ fn search_uses_the_desktop_asset_folder_checks() {
         .unwrap()
         .iter()
         .any(|hit| hit["relativePath"] == "Bio/Blatt.md"));
-    assert!(vault.join(".fanotes/assets").is_dir());
+    let assets = vault.join(".fanotes/assets");
+    assert!(assets.is_dir());
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            std::fs::metadata(&assets).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
+    }
 
     std::fs::remove_dir(vault.join(".fanotes/assets")).unwrap();
     std::fs::write(vault.join(".fanotes/assets"), b"not a folder").unwrap();

@@ -469,6 +469,21 @@ fn a_worksheet_folder_uses_the_desktop_directory_checks() {
         "Der interne Arbeitsblatt-Ordner ist unsicher."
     );
 
+    fs::remove_file(internal.join("worksheets")).unwrap();
+    let _ = host.dispatch("fanotes:read-worksheet", &[json!("blatt-1")]);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            fs::metadata(internal.join("worksheets"))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o700
+        );
+    }
+
     fs::remove_dir_all(&internal).unwrap();
     fs::write(&internal, b"not a folder").unwrap();
     assert_eq!(
