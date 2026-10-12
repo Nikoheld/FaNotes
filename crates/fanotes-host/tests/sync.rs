@@ -395,6 +395,33 @@ fn a_sync_time_follows_javascript_number() {
 }
 
 #[test]
+fn a_sync_state_directory_is_private() {
+    let (_vault, app, mut host) = host();
+    let id = host
+        .dispatch("fanotes:sync-vault-id", &[])
+        .unwrap()
+        .as_str()
+        .unwrap()
+        .to_owned();
+    host.dispatch(
+        "fanotes:sync-write-state",
+        &[json!(id), json!("{\"ok\":true}")],
+    )
+    .unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            fs::metadata(app.join("sync")).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
+    }
+    host.dispatch("fanotes:sync-write-secrets", &[json!("login")])
+        .unwrap();
+    assert!(app.join("sync/account.secret").is_file());
+}
+
+#[test]
 fn sync_write_keeps_the_requested_time_and_a_private_folder() {
     let (vault, _app, mut host) = host();
     let written = host

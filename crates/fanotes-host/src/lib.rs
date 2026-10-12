@@ -75,7 +75,8 @@ pub struct Host {
 impl Host {
     pub fn open(app_data: PathBuf) -> Self {
         complete_pending_app_data_reset(&app_data);
-        fs::create_dir_all(&app_data).ok();
+        // Desktop creates the profile with mode `0o700`.
+        let _ = ensure_private_profile_dir(&app_data);
         let mut host = Self {
             vault: None,
             app_data,
@@ -501,6 +502,9 @@ impl Host {
                 if json.len() > MAX_SYNC_STATE_BYTES as usize {
                     return Err("Der Sync-Zustand ist ungültig.".to_owned());
                 }
+                if let Some(parent) = path.parent() {
+                    ensure_private_profile_dir(parent)?;
+                }
                 notes::atomic_write(&path, json.as_bytes(), 0o600)?;
                 Ok(Value::Null)
             }
@@ -588,6 +592,9 @@ impl Host {
                     return Err("Die Sync-Anmeldedaten sind ungültig.".to_owned());
                 }
                 secrets::set(self.secret_store, &account, json)?;
+                if let Some(parent) = path.parent() {
+                    ensure_private_profile_dir(parent)?;
+                }
                 notes::atomic_write(&path, b"safe1:", 0o600)?;
                 Ok(Value::Null)
             }
@@ -1903,6 +1910,44 @@ fn system_time_from_millis(millis: i64) -> Option<SystemTime> {
     UNIX_EPOCH.checked_add(std::time::Duration::new(seconds as u64, nanos))
 }
 
+/// `mkdir` with mode `0o700` for a profile directory.
+///
+/// The desktop uses that mode for the profile, `tree-cache-v1`, and `sync`.
+/// An existing directory keeps its mode.
+fn ensure_private_profile_dir(path: &Path) -> Result<(), String> {
+    let failed = || "Der Ordner konnte nicht angelegt werden.".to_owned();
+    match fs::symlink_metadata(path) {
+        Ok(meta) if meta.file_type().is_symlink() || !meta.is_dir() => Err(failed()),
+        Ok(_) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            if let Some(parent) = path.parent() {
+                if !parent.as_os_str().is_empty() && fs::symlink_metadata(parent).is_err() {
+                    ensure_private_profile_dir(parent)?;
+                }
+            }
+            let created = match fs::create_dir(path) {
+                Ok(()) => true,
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => false,
+                Err(_) => return Err(failed()),
+            };
+            if created {
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    fs::set_permissions(path, fs::Permissions::from_mode(0o700))
+                        .map_err(|_| failed())?;
+                }
+            }
+            let meta = fs::symlink_metadata(path).map_err(|_| failed())?;
+            if meta.file_type().is_symlink() || !meta.is_dir() {
+                return Err(failed());
+            }
+            Ok(())
+        }
+        Err(_) => Err(failed()),
+    }
+}
+
 fn create_sync_directories(root: &Path, file: &Path) -> Result<(), String> {
     let Some(parent) = file.parent() else {
         return Ok(());
@@ -2877,6 +2922,12 @@ fn write_tree_cache(app_data: &Path, root: &Path, entries: &Value) {
     let snapshot = format!("{text}\n");
     if snapshot.len() as u64 > MAX_TREE_CACHE_BYTES {
         return;
+    }
+    // Desktop `mkdir` uses mode `0o700` for `tree-cache-v1` before the write.
+    if let Some(directory) = path.parent() {
+        if ensure_private_profile_dir(directory).is_err() {
+            return;
+        }
     }
     let _ = notes::atomic_write(&path, snapshot.as_bytes(), 0o600);
 }
