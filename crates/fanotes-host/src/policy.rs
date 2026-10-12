@@ -30,8 +30,7 @@ pub fn local_ai_origin(raw_url: &str, provider: &str) -> Result<String, String> 
     if (url.scheme() != "http" && url.scheme() != "https")
         || !url.username().is_empty()
         || url.password().is_some_and(|password| !password.is_empty())
-        || url.query().is_some_and(|query| !query.is_empty())
-        || url.fragment().is_some_and(|fragment| !fragment.is_empty())
+        || has_search_or_hash(&url)
     {
         return Err(format!("Die {label}-Adresse darf nur eine lokale HTTP(S)-Adresse ohne eingebettete Zugangsdaten enthalten."));
     }
@@ -73,8 +72,7 @@ pub fn lm_studio_origin(raw_url: &str) -> Result<String, String> {
     if (url.scheme() != "http" && url.scheme() != "https")
         || !url.username().is_empty()
         || url.password().is_some_and(|password| !password.is_empty())
-        || url.query().is_some_and(|query| !query.is_empty())
-        || url.fragment().is_some_and(|fragment| !fragment.is_empty())
+        || has_search_or_hash(&url)
     {
         return Err("Die LM-Studio-Adresse darf nur eine lokale HTTP(S)-Adresse ohne Zugangsdaten enthalten.".to_owned());
     }
@@ -96,6 +94,12 @@ pub fn lm_studio_origin(raw_url: &str) -> Result<String, String> {
         return Err("Die LM-Studio-Adresse darf keinen zusätzlichen Pfad enthalten.".to_owned());
     }
     Ok(url.origin().ascii_serialization())
+}
+
+/// `parsed.search` and `parsed.hash` are `?` and `#` even when nothing follows.
+/// Those strings are truthy, so an empty query or fragment is refused.
+fn has_search_or_hash(url: &url::Url) -> bool {
+    url.query().is_some() || url.fragment().is_some()
 }
 
 fn is_private_host(hostname: &str) -> bool {
@@ -236,6 +240,11 @@ mod tests {
             "http://localhost:1234"
         );
         assert!(lm_studio_origin("http://127.0.0.1:1234/v1/models").is_err());
+        assert!(lm_studio_origin("http://127.0.0.1:1234?").is_err());
+        assert!(lm_studio_origin("http://127.0.0.1:1234#").is_err());
+        assert!(lm_studio_origin("http://127.0.0.1:1234/v1?").is_err());
+        assert!(local_ai_origin("http://127.0.0.1:11434?", "ollama").is_err());
+        assert!(local_ai_origin("http://127.0.0.1:4096#", "opencode").is_err());
         assert!(lm_studio_origin("https://api.openai.com/v1").is_err());
         assert!(local_ai_origin("http://127.0.0.1:1234/v1", "ollama").is_err());
         assert!(local_ai_origin("http://127.0.0.1:1234/v1", "lmstudio").is_err());
