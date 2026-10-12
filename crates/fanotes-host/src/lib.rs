@@ -216,7 +216,11 @@ impl Host {
                     .get("ocrThreadLimit")
                     .and_then(Value::as_i64)
                     .unwrap_or(0);
-                ocr::recognize_line(args.first().unwrap_or(&Value::Null), configured)
+                ocr::recognize_line(
+                    args.first().unwrap_or(&Value::Null),
+                    configured,
+                    self.settings.get("ocrModelKeepAliveSeconds"),
+                )
             }
             "fanotes:enhanced-math-get-state" => Ok(enhanced_math_state()),
             "fanotes:enhanced-math-install" | "fanotes:enhanced-math-recognize" => {
