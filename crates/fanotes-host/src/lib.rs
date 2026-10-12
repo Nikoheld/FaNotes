@@ -1788,19 +1788,19 @@ fn create_sync_directories(root: &Path, file: &Path) -> Result<(), String> {
 }
 
 fn arg_mtime_ms(value: Option<&Value>) -> Option<i64> {
-    let value = value?;
-    let millis = if let Some(number) = value.as_i64() {
-        number
-    } else if let Some(number) = value.as_u64() {
-        i64::try_from(number).ok()?
-    } else if let Some(number) = value.as_f64() {
-        if !number.is_finite() || number <= 0.0 || number >= i64::MAX as f64 {
-            return None;
-        }
-        return Some(number.round() as i64);
-    } else {
-        return None;
+    // Desktop `new Date(Number(mtimeMs))` truncates a fraction toward zero.
+    let number = match value? {
+        Value::Number(number) => number.as_f64()?,
+        Value::String(text) => fanotes_famd::js_tonumber(text)?,
+        Value::Bool(true) => 1.0,
+        Value::Bool(false) => 0.0,
+        Value::Null => 0.0,
+        _ => return None,
     };
+    if !number.is_finite() || number <= 0.0 || number >= i64::MAX as f64 {
+        return None;
+    }
+    let millis = number.trunc() as i64;
     (millis > 0).then_some(millis)
 }
 
