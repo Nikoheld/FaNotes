@@ -290,6 +290,28 @@ fn a_stale_reset_marker_does_not_wipe_the_profile() {
 }
 
 #[test]
+fn a_reset_marker_resolves_parent_segments_and_a_trailing_slash() {
+    let (app, mut host) = host();
+    host.dispatch("fanotes:save-settings", &[json!({ "theme": "midnight" })])
+        .unwrap();
+    let parent = app.parent().unwrap();
+    let via_parent = parent.join("other").join("..").join("app");
+    let marker = parent.join(".fanotes-reset-pending.json");
+    fs::write(
+        &marker,
+        format!(
+            r#"{{"version":1,"userDataPath":"{}/","createdAt":"2026-10-12T03:00:00.000Z"}}"#,
+            via_parent.display()
+        ),
+    )
+    .unwrap();
+    let _ = Host::open(app.clone());
+    assert!(!app.join("settings.json").exists());
+    assert!(!marker.exists());
+    assert!(app.join(".fanotes-legacy-migration-v1-complete").is_file());
+}
+
+#[test]
 fn a_reset_marker_version_of_one_point_zero_still_wipes_the_profile() {
     let (app, mut host) = host();
     host.dispatch("fanotes:save-settings", &[json!({ "theme": "midnight" })])

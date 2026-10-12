@@ -1422,8 +1422,7 @@ impl Host {
             self.allow_close = true;
             return Ok(json!({ "restarting": true }));
         }
-        let user_data =
-            std::path::absolute(&self.app_data).unwrap_or_else(|_| self.app_data.clone());
+        let user_data = node_resolve(&self.app_data);
         let marker = json!({
             "version": 1,
             "userDataPath": user_data.to_string_lossy(),
@@ -1702,6 +1701,44 @@ fn valid_reset_marker(marker_path: &Path, app_data: &Path) -> bool {
     )
 }
 
+/// `path.resolve` for one path: make it absolute, then drop `.` and `..`.
+///
+/// The path is not opened, so a missing directory and a symlink stay as written
+/// after the lexical cleanup. A trailing slash is not part of the result.
+fn node_resolve(path: &Path) -> PathBuf {
+    let absolute = if path.as_os_str().is_empty() {
+        std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+    } else if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .map(|cwd| cwd.join(path))
+            .unwrap_or_else(|_| path.to_path_buf())
+    };
+    let mut out = PathBuf::new();
+    for component in absolute.components() {
+        match component {
+            std::path::Component::Prefix(prefix) => out.push(prefix.as_os_str()),
+            std::path::Component::RootDir => out.push(component.as_os_str()),
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                if matches!(
+                    out.components().next_back(),
+                    Some(std::path::Component::Normal(_))
+                ) {
+                    out.pop();
+                }
+            }
+            std::path::Component::Normal(part) => out.push(part),
+        }
+    }
+    if out.as_os_str().is_empty() {
+        PathBuf::from("/")
+    } else {
+        out
+    }
+}
+
 fn reset_marker_fields_match(marker: &Value, app_data: &Path) -> bool {
     // `marker.version !== 1` still accepts the JSON number `1.0`.
     if marker.get("version").and_then(Value::as_f64) != Some(1.0) {
@@ -1710,13 +1747,8 @@ fn reset_marker_fields_match(marker: &Value, app_data: &Path) -> bool {
     let Some(recorded) = marker.get("userDataPath").and_then(Value::as_str) else {
         return false;
     };
-    let Ok(recorded) = std::path::absolute(recorded) else {
-        return false;
-    };
-    let Ok(current) = std::path::absolute(app_data) else {
-        return false;
-    };
-    if recorded != current {
+    // Desktop `path.resolve` drops `.` and `..` and a trailing slash.
+    if node_resolve(Path::new(recorded)) != node_resolve(app_data) {
         return false;
     }
     let Some(created_at) = marker.get("createdAt").and_then(Value::as_str) else {
