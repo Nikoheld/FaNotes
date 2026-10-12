@@ -460,3 +460,68 @@ fn a_drawing_schema_version_of_one_point_zero_still_opens() {
         "Die gespeicherte Zeichnung ist beschädigt oder kann nicht sicher gelesen werden."
     );
 }
+
+#[test]
+fn handwriting_uses_the_settings_paper_when_the_note_has_none() {
+    let (dir, mut host) = host();
+    let vault = dir.join("vault");
+    fs::write(vault.join("Seite.md"), b"Hallo\n").unwrap();
+    host.dispatch(
+        "fanotes:save-settings",
+        &[json!({ "paperStyle": "grid" })],
+    )
+    .unwrap();
+    host.dispatch(
+        "fanotes:save-drawing",
+        &[json!({
+            "id": "skizze",
+            "title": "Skizze",
+            "drawingJson": drawing("Skizze"),
+            "noteRelativePath": "Seite.md"
+        })],
+    )
+    .unwrap();
+    assert_eq!(
+        host.dispatch("fanotes:read-note-paper-style", &[json!("Seite.md")])
+            .unwrap(),
+        "grid"
+    );
+
+    host.dispatch(
+        "fanotes:set-note-paper-style",
+        &[json!("Seite.md"), json!("lines")],
+    )
+    .unwrap();
+    host.dispatch(
+        "fanotes:save-drawing",
+        &[json!({
+            "id": "skizze",
+            "title": "Skizze",
+            "drawingJson": drawing("Skizze"),
+            "noteRelativePath": "Seite.md"
+        })],
+    )
+    .unwrap();
+    assert_eq!(
+        host.dispatch("fanotes:read-note-paper-style", &[json!("Seite.md")])
+            .unwrap(),
+        "lines"
+    );
+
+    fs::write(vault.join("Andere.md"), b"x\n").unwrap();
+    host.dispatch(
+        "fanotes:save-drawing",
+        &[json!({
+            "id": "skizze-2",
+            "title": "Skizze",
+            "drawingJson": r#"{"schemaVersion":1,"title":"Skizze","strokes":[],"updatedAt":"2026-01-02T03:04:05.000Z","paperStyle":"squares"}"#,
+            "noteRelativePath": "Andere.md"
+        })],
+    )
+    .unwrap();
+    assert_eq!(
+        host.dispatch("fanotes:read-note-paper-style", &[json!("Andere.md")])
+            .unwrap(),
+        "squares"
+    );
+}
