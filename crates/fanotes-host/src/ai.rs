@@ -336,6 +336,14 @@ fn js_number_string(number: f64) -> String {
     format!("{number}")
 }
 
+/// `String(value || fallback)`. A falsy value uses the fallback text.
+fn js_display(value: Option<&Value>, fallback: &str) -> String {
+    match value {
+        Some(value) if !js_falsy(value) => js_string(value),
+        _ => fallback.to_owned(),
+    }
+}
+
 /// `value ? String(value).slice(0, max) : null`.
 fn metadata_value(value: Option<&Value>, max: usize) -> Value {
     match metadata_text(value, max) {
@@ -514,12 +522,9 @@ fn parse_lmstudio_models(body: &Value) -> Result<Vec<Value>, String> {
                 return None;
             }
             let key = crate::vault::truncate_utf16(raw_key, 500);
-            // `String(displayName || key)` keeps surrounding spaces. Only an
-            // empty string falls back to the key.
-            let display = match entry.get("display_name").and_then(Value::as_str) {
-                Some(name) if !name.is_empty() => crate::vault::truncate_utf16(name, 500),
-                _ => key.clone(),
-            };
+            // `String(displayName || key)` keeps surrounding spaces. A truthy
+            // number, boolean, array, or object is stringified too.
+            let display = js_display(entry.get("display_name"), &key);
             let mut record = model_record("lmstudio", &key, &display);
             let loaded = entry
                 .get("loaded_instances")
@@ -527,16 +532,36 @@ fn parse_lmstudio_models(body: &Value) -> Result<Vec<Value>, String> {
                 .is_some_and(|items| !items.is_empty());
             set_model_details(
                 &mut record,
-                entry.get("publisher").and_then(Value::as_str),
-                entry
-                    .get("quantization")
-                    .and_then(|value| value.get("name"))
-                    .and_then(Value::as_str),
-                entry.get("params_string").and_then(Value::as_str),
+                None,
+                None,
+                None,
                 Some(loaded),
                 finite_context_length(&entry["max_context_length"]),
-                entry.get("description").and_then(Value::as_str),
+                None,
             );
+            if let Some(object) = record.as_object_mut() {
+                object.insert(
+                    "publisher".into(),
+                    Value::String(metadata_text(entry.get("publisher"), 200).unwrap_or_default()),
+                );
+                object.insert(
+                    "quantization".into(),
+                    metadata_value(
+                        entry
+                            .get("quantization")
+                            .and_then(|value| value.get("name")),
+                        100,
+                    ),
+                );
+                object.insert(
+                    "params".into(),
+                    metadata_value(entry.get("params_string"), 100),
+                );
+                object.insert(
+                    "description".into(),
+                    metadata_value(entry.get("description"), 1200),
+                );
+            }
             Some(record)
         })
         .collect())
@@ -566,10 +591,7 @@ fn parse_openai_models(body: &Value) -> Result<Vec<Value>, String> {
             if let Some(object) = record.as_object_mut() {
                 object.insert(
                     "publisher".into(),
-                    Value::String(crate::vault::truncate_utf16(
-                        entry.get("owned_by").and_then(Value::as_str).unwrap_or(""),
-                        200,
-                    )),
+                    Value::String(metadata_text(entry.get("owned_by"), 200).unwrap_or_default()),
                 );
             }
             Some(record)
@@ -607,12 +629,8 @@ fn parse_gemini_models(body: &Value) -> Result<Vec<Value>, String> {
                 return None;
             }
             let key = name.strip_prefix("models/").unwrap_or(name);
-            let display = entry
-                .get("displayName")
-                .and_then(Value::as_str)
-                .filter(|text| !text.is_empty())
-                .unwrap_or(key);
-            let mut record = model_record("gemini", key, display);
+            let display = js_display(entry.get("displayName"), key);
+            let mut record = model_record("gemini", key, &display);
             set_model_details(
                 &mut record,
                 Some("Google"),
@@ -620,8 +638,14 @@ fn parse_gemini_models(body: &Value) -> Result<Vec<Value>, String> {
                 None,
                 None,
                 finite_context_length(&entry["inputTokenLimit"]),
-                entry.get("description").and_then(Value::as_str),
+                None,
             );
+            if let Some(object) = record.as_object_mut() {
+                object.insert(
+                    "description".into(),
+                    metadata_value(entry.get("description"), 1200),
+                );
+            }
             Some(record)
         })
         .collect())
@@ -647,12 +671,8 @@ fn parse_anthropic_models(body: &Value) -> Result<Vec<Value>, String> {
         .iter()
         .filter_map(|entry| {
             let id = entry.get("id").and_then(Value::as_str)?;
-            let display = entry
-                .get("display_name")
-                .and_then(Value::as_str)
-                .filter(|text| !text.is_empty())
-                .unwrap_or(id);
-            let mut record = model_record("anthropic", id, display);
+            let display = js_display(entry.get("display_name"), id);
+            let mut record = model_record("anthropic", id, &display);
             set_model_details(
                 &mut record,
                 Some("Anthropic"),
@@ -2480,6 +2500,70 @@ mod tests {
         assert_eq!(unnamed[0]["key"], "claude-haiku");
         assert_eq!(unnamed[0]["displayName"], "claude-haiku");
         assert_eq!(anthropic[0]["publisher"], "Anthropic");
+
+        let numbered = parse_gemini_models(&json!({
+            "models": [{
+                "name": "models/gemini-number",
+                "displayName": 1,
+                "description": {},
+                "supportedGenerationMethods": ["generateContent"]
+            }]
+        }))
+        .unwrap();
+        assert_eq!(numbered[0]["displayName"], "1");
+        assert_eq!(numbered[0]["description"], "[object Object]");
+        let blank_display = parse_gemini_models(&json!({
+            "models": [{
+                "name": "models/gemini-blank",
+                "displayName": [],
+                "supportedGenerationMethods": ["generateContent"]
+            }]
+        }))
+        .unwrap();
+        assert_eq!(blank_display[0]["displayName"], "");
+        let zero_display = parse_gemini_models(&json!({
+            "models": [{
+                "name": "models/gemini-zero",
+                "displayName": 0,
+                "supportedGenerationMethods": ["generateContent"]
+            }]
+        }))
+        .unwrap();
+        assert_eq!(zero_display[0]["displayName"], "gemini-zero");
+
+        let named = parse_anthropic_models(&json!({
+            "data": [{ "id": "claude-bool", "display_name": true }]
+        }))
+        .unwrap();
+        assert_eq!(named[0]["displayName"], "true");
+
+        let owner = parse_openai_models(&json!({
+            "data": [
+                { "id": "gpt-number", "owned_by": 12 },
+                { "id": "gpt-zero", "owned_by": 0 }
+            ]
+        }))
+        .unwrap();
+        assert_eq!(owner[0]["publisher"], "12");
+        assert_eq!(owner[1]["publisher"], "");
+
+        let studio = parse_lmstudio_models(&json!({
+            "models": [{
+                "type": "llm",
+                "key": "local",
+                "display_name": 4,
+                "publisher": 9,
+                "quantization": { "name": [] },
+                "params_string": 0,
+                "description": [1, null, "a"]
+            }]
+        }))
+        .unwrap();
+        assert_eq!(studio[0]["displayName"], "4");
+        assert_eq!(studio[0]["publisher"], "9");
+        assert_eq!(studio[0]["quantization"], "");
+        assert!(studio[0]["params"].is_null());
+        assert_eq!(studio[0]["description"], "1,,a");
     }
 
     #[test]
