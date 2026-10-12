@@ -46,6 +46,34 @@ fn a_worksheet_byte_list_follows_buffer_from() {
 }
 
 #[test]
+fn a_worksheet_name_with_a_slash_is_not_a_title() {
+    let (mut host, vault) = host();
+    let png = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+    let error = host
+        .dispatch(
+            "fanotes:import-worksheet-from-data",
+            &[json!({ "name": "Ordner/Foto.png", "bytes": png })],
+        )
+        .unwrap_err();
+    assert_eq!(error, "Dieser Name ist nicht erlaubt.");
+    let backslash = host
+        .dispatch(
+            "fanotes:import-worksheet-from-data",
+            &[json!({ "name": "Ordner\\Foto.png", "bytes": png })],
+        )
+        .unwrap_err();
+    assert_eq!(backslash, "Dieser Name ist nicht erlaubt.");
+    assert!(!vault.join(".fanotes/worksheets").exists());
+    let document = host
+        .dispatch(
+            "fanotes:import-worksheet-from-data",
+            &[json!({ "name": "My.Photo.png", "bytes": png })],
+        )
+        .unwrap();
+    assert_eq!(document["title"], "My.Photo");
+}
+
+#[test]
 fn a_dropped_image_and_a_pdf_note_land_in_the_vault() {
     let (mut host, vault) = host();
     let png = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0];
