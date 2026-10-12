@@ -429,12 +429,14 @@ fn image_data_url(
     output_root: &Path,
     embedded_bytes: &mut u64,
 ) -> String {
-    let lower = source.to_ascii_lowercase();
-    if lower.starts_with("data:")
-        || lower.starts_with("http:")
-        || lower.starts_with("https:")
-        || lower.starts_with("file:")
-        || lower.starts_with("javascript:")
+    // `/^(?:data:|https?:|file:|javascript:)/iu` folds the long s into `s`.
+    // `httpſ://picture.png` is a remote URL, even when that name is also a file.
+    let folded = iu_fold(source);
+    if folded.starts_with("data:")
+        || folded.starts_with("http:")
+        || folded.starts_with("https:")
+        || folded.starts_with("file:")
+        || folded.starts_with("javascript:")
     {
         return if source.starts_with("data:") {
             source.to_owned()
@@ -470,6 +472,18 @@ fn image_data_url(
     }
     *embedded_bytes = embedded_bytes.saturating_add(data.len() as u64);
     format!("data:{mime};base64,{}", base64_encode(&data))
+}
+
+fn iu_fold(value: &str) -> String {
+    value
+        .chars()
+        .map(|character| match character {
+            '\u{017F}' => 's',
+            '\u{212A}' => 'k',
+            'A'..='Z' => character.to_ascii_lowercase(),
+            other => other,
+        })
+        .collect()
 }
 
 fn image_stays_inside(output_root: &Path, image_path: &Path) -> bool {
@@ -1916,6 +1930,22 @@ mod tests {
         assert!(result.contains(r#"data-fanotes-missing-image="blocked" alt="Geheim""#));
         assert!(result.contains(r#"data-fanotes-missing-image="blocked" alt="Netz""#));
         assert!(!result.contains("secret"));
+        let remote_name = "http\u{017F}://example.com/a.png";
+        let script_name = "java\u{017F}cript:alert(1).png";
+        let remote_path = pages.join(remote_name);
+        std::fs::create_dir_all(remote_path.parent().unwrap()).unwrap();
+        std::fs::write(&remote_path, png).unwrap();
+        std::fs::write(pages.join(script_name), png).unwrap();
+        let disguised = format!(
+            r#"<img alt="Fern" src="{remote_name}"><img alt="Skript" src="{script_name}"><img alt="Lokal" src="../images/ok.png">"#
+        );
+        let blocked = inline_images(&disguised, &page, &output);
+        assert!(blocked.contains(r#"data-fanotes-missing-image="blocked""#));
+        assert!(blocked.contains(r#"alt="Fern""#));
+        assert!(blocked.contains(r#"alt="Skript""#));
+        assert!(blocked.contains(r#"alt="Lokal" src="data:image/png;base64,"#));
+        assert!(!blocked.contains("http\u{017F}"));
+        assert!(!blocked.contains("java\u{017F}cript"));
         let _ = std::fs::remove_dir_all(&root);
     }
 
