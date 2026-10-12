@@ -267,6 +267,39 @@ fn a_sync_time_follows_javascript_number() {
         .unwrap();
     assert_eq!(fractional["mtimeMs"], 1_600_000_000_000i64);
     assert_eq!(fs::read(vault.join("Seite.md")).unwrap(), b"Hallo\n");
+
+    let epoch = host
+        .dispatch(
+            "fanotes:sync-write",
+            &[json!("Seite.md"), json!("SGFsbG8K"), json!(0.9_f64)],
+        )
+        .unwrap();
+    assert_eq!(epoch["mtimeMs"], 0);
+    let from_text = host
+        .dispatch(
+            "fanotes:sync-write",
+            &[json!("Seite.md"), json!("SGFsbG8K"), json!("0.9")],
+        )
+        .unwrap();
+    assert_eq!(from_text["mtimeMs"], 0);
+
+    let before = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as i64;
+    let beyond_javascript = host
+        .dispatch(
+            "fanotes:sync-write",
+            &[json!("Seite.md"), json!("SGFsbG8K"), json!(1.0e16_f64)],
+        )
+        .unwrap();
+    let after = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as i64;
+    let stamped = beyond_javascript["mtimeMs"].as_i64().unwrap();
+    assert!(stamped >= before.saturating_sub(5_000), "{stamped}");
+    assert!(stamped <= after.saturating_add(5_000), "{stamped}");
 }
 
 #[test]

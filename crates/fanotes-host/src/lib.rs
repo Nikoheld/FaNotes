@@ -1764,7 +1764,7 @@ fn is_vault_id(value: &str) -> bool {
 }
 
 fn system_time_from_millis(millis: i64) -> Option<SystemTime> {
-    if millis <= 0 {
+    if millis < 0 {
         return None;
     }
     let seconds = millis.div_euclid(1000);
@@ -1804,7 +1804,9 @@ fn create_sync_directories(root: &Path, file: &Path) -> Result<(), String> {
 }
 
 fn arg_mtime_ms(value: Option<&Value>) -> Option<i64> {
-    // Desktop `new Date(Number(mtimeMs))` truncates a fraction toward zero.
+    // Desktop `new Date(Number(mtimeMs))` truncates toward zero, then TimeClip.
+    // `0.9` is still positive, so the file is stamped at the Unix epoch.
+    // A time past ±8.64e15 ms is an invalid date and is left unset.
     let number = match value? {
         Value::Number(number) => number.as_f64()?,
         Value::String(text) => fanotes_famd::js_tonumber(text)?,
@@ -1813,11 +1815,14 @@ fn arg_mtime_ms(value: Option<&Value>) -> Option<i64> {
         Value::Null => 0.0,
         _ => return None,
     };
-    if !number.is_finite() || number <= 0.0 || number >= i64::MAX as f64 {
+    if !number.is_finite() || number <= 0.0 {
         return None;
     }
-    let millis = number.trunc() as i64;
-    (millis > 0).then_some(millis)
+    let millis = number.trunc();
+    if millis.abs() > 8_640_000_000_000_000.0 {
+        return None;
+    }
+    Some(millis as i64)
 }
 
 fn mtime_millis(meta: &fs::Metadata) -> i64 {
@@ -2781,14 +2786,14 @@ fn clean_cached_entries(
         }
         match entry.get("kind").and_then(Value::as_str) {
             Some("folder") => {
-                if let Some(color) = entry.get("color").filter(|color| !color.is_null()) {
-                    if color
+                // `entry.color !== undefined` rejects null. A missing color stays absent.
+                if entry.get("color").is_some_and(|color| {
+                    color
                         .as_str()
                         .filter(|value| folder_color_hex(value))
                         .is_none()
-                    {
-                        return Err(());
-                    }
+                }) {
+                    return Err(());
                 }
                 let empty_children = Value::Array(Vec::new());
                 let children_source = match entry.get("children") {
@@ -3869,5 +3874,25 @@ mod folder_color_order_tests {
         assert_eq!(nested.get("Mathe").map(String::as_str), Some("#445566"));
         assert!(nested.get("version").is_none());
         let _ = fs::remove_dir_all(&root);
+    }
+}
+
+#[cfg(test)]
+mod sync_mtime_tests {
+    use super::arg_mtime_ms;
+    use serde_json::json;
+
+    #[test]
+    fn a_positive_fraction_under_one_millisecond_is_the_epoch() {
+        assert_eq!(arg_mtime_ms(Some(&json!(0.9))), Some(0));
+        assert_eq!(arg_mtime_ms(Some(&json!("0.9"))), Some(0));
+        assert_eq!(arg_mtime_ms(Some(&json!(1.9))), Some(1));
+        assert_eq!(arg_mtime_ms(Some(&json!(0))), None);
+        assert_eq!(arg_mtime_ms(Some(&json!(-1))), None);
+        assert_eq!(
+            arg_mtime_ms(Some(&json!(8_640_000_000_000_000.0_f64))),
+            Some(8_640_000_000_000_000)
+        );
+        assert_eq!(arg_mtime_ms(Some(&json!(1.0e16_f64))), None);
     }
 }
