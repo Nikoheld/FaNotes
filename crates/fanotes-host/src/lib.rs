@@ -547,10 +547,10 @@ impl Host {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Value::Null),
             Err(_) => Err("Das Handschriftmodell konnte nicht gelesen werden.".to_owned()),
             Ok(meta) if meta.file_type().is_symlink() || !meta.is_file() => {
-                Err("Das Handschriftmodell konnte nicht gelesen werden.".to_owned())
+                Err("Die Datei ist keine reguläre Datei.".to_owned())
             }
             Ok(meta) if meta.len() > MAX_RECOGNITION_MODEL_BYTES => {
-                Err("Das Handschriftmodell ist ungültig oder zu groß.".to_owned())
+                Err("Die Datei ist zu groß.".to_owned())
             }
             Ok(_) => fs::read(&path)
                 .map(|bytes| Value::String(String::from_utf8_lossy(&bytes).into_owned()))
