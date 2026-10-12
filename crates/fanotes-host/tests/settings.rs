@@ -284,6 +284,47 @@ fn a_symlinked_reset_marker_is_discarded() {
 }
 
 #[test]
+fn a_broken_reset_marker_stays_until_it_can_be_read() {
+    let (app, mut host) = host();
+    host.dispatch("fanotes:save-settings", &[json!({ "theme": "midnight" })])
+        .unwrap();
+    let marker = app.parent().unwrap().join(".fanotes-reset-pending.json");
+    fs::write(&marker, b"{").unwrap();
+    let _ = Host::open(app.clone());
+    assert!(app.join("settings.json").is_file());
+    assert_eq!(fs::read(&marker).unwrap(), b"{");
+    let mut reopened = Host::open(app.clone());
+    assert_eq!(
+        reopened.dispatch("fanotes:bootstrap", &[]).unwrap()["settings"]["theme"],
+        "midnight"
+    );
+}
+
+#[test]
+fn a_reset_marker_with_a_bad_byte_still_wipes_the_profile() {
+    let (app, mut host) = host();
+    host.dispatch("fanotes:save-settings", &[json!({ "theme": "midnight" })])
+        .unwrap();
+    let user_data = std::path::absolute(&app).unwrap();
+    let marker = app.parent().unwrap().join(".fanotes-reset-pending.json");
+    let mut bytes = format!(
+        r#"{{"version":1,"userDataPath":"{}","createdAt":"2026-10-12T03:00:00.000Z","note":"NOTEMARK"}}"#,
+        user_data.display()
+    )
+    .into_bytes();
+    let needle = b"NOTEMARK";
+    let index = bytes
+        .windows(needle.len())
+        .position(|window| window == needle)
+        .unwrap();
+    bytes[index] = 0xff;
+    fs::write(&marker, bytes).unwrap();
+    let _ = Host::open(app.clone());
+    assert!(!app.join("settings.json").exists());
+    assert!(!marker.exists());
+}
+
+#[test]
 fn an_upgrade_turns_experimental_handwriting_off_once() {
     let dir = std::env::temp_dir().join(format!("fanotes-settings-gate-{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
