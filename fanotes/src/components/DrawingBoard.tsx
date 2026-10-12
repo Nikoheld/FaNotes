@@ -11,6 +11,7 @@ import {
   LoaderCircle,
   ListChecks,
   ListCollapse,
+  Move,
   Paintbrush,
   Palette,
   PenLine,
@@ -101,6 +102,7 @@ import {
   inkNoticeAutoClearDelayMs,
 } from '../lib/inkNotice'
 import { BUG_REPORT_PEN_SAMPLE_MS, buildPenDiagnosticEvent, diagnosticLog } from '../lib/bugReport'
+import { boundsOfInkIndexes, takeInkSelection } from '../lib/inkSelect'
 import { applyToolErase } from '../lib/toolErase'
 import {
   inkPointerSessionFromSample,
@@ -528,7 +530,7 @@ const releaseStuckInputFocus = (preferred?: HTMLElement | null) => {
   }
 }
 
-type DrawingTool = 'pen' | 'eraser'
+type DrawingTool = 'pen' | 'eraser' | 'select'
 type InkMode = 'writing' | 'drawing'
 type ArtStudioTab = 'brushes' | 'colors' | 'symbols'
 type ArtBrush = 'fineliner' | 'pencil' | 'marker' | 'paintbrush' | 'calligraphy' | 'highlighter' | 'watercolor' | 'spray'
@@ -1527,7 +1529,10 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     return () => observer.disconnect()
   }, [inline, inputActive])
   const selectedStrokeIndexesRef = useRef<number[]>([])
-  const inkDragRef = useRef<{ kind: 'move' | 'scale'; startX: number; startY: number; origin: SelectionRect } | null>(null)
+  const inkDragRef = useRef<{ kind: 'move' | 'scale'; startX: number; startY: number; origin: SelectionRect; committed: boolean } | null>(null)
+  const selectionOriginRef = useRef<InkStroke[] | null>(null)
+  const selectionMovedRef = useRef(false)
+  const eraserAnchorRef = useRef<StrokePoint | null>(null)
   const [recognitionScope, setRecognitionScope] = useState<RecognitionScope>('page')
   const [resources, setResources] = useState<RecognitionResources | null>(null)
   const [trainingSampleCount, setTrainingSampleCount] = useState<number | null>(null)
@@ -2239,6 +2244,16 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       redraw()
     })
   }, [redraw])
+
+  const restoreUnmovedSelection = useCallback(() => {
+    if (selectionOriginRef.current && !selectionMovedRef.current) {
+      strokesRef.current = selectionOriginRef.current
+      scheduleRedraw()
+    }
+    selectionOriginRef.current = null
+    selectionMovedRef.current = false
+    selectedStrokeIndexesRef.current = []
+  }, [scheduleRedraw])
 
   useEffect(() => {
     let active = true
@@ -3299,15 +3314,18 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   }, [inline, inputActive, paperView, resetView, wipeLiveInk])
 
   const eraseAt = useCallback((value: StrokePoint | StrokePoint[]) => {
-    const before = strokesRef.current.length
     const points = Array.isArray(value) ? value : [value]
-    strokesRef.current = applyToolErase(strokesRef.current, points, eraserSize, sourceWidth, sourceHeight)
-    if (strokesRef.current.length !== before) {
-      noteStrokesErased(before - strokesRef.current.length)
-      gestureChangedRef.current = true
-      committedCanvasDirtyRef.current = true
-      scheduleRedraw()
-    }
+    const anchor = eraserAnchorRef.current
+    const samples = anchor ? [anchor, ...points] : points
+    const next = applyToolErase(strokesRef.current, samples, eraserSize, sourceWidth, sourceHeight)
+    const last = points.at(-1)
+    if (last) eraserAnchorRef.current = last
+    if (next === strokesRef.current) return
+    noteStrokesErased(Math.max(1, strokesRef.current.length - next.length))
+    strokesRef.current = next
+    gestureChangedRef.current = true
+    committedCanvasDirtyRef.current = true
+    scheduleRedraw()
   }, [eraserSize, scheduleRedraw, sourceHeight, sourceWidth])
 
   const clearShapeDwellTimer = useCallback(() => {
@@ -4029,10 +4047,20 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       }
       commitPendingSolverTap()
     }
-    if (selectionMode) {
+    if (selectionMode && !pointerEraser) {
       if (!firstPoint) return
       selectionStartRef.current = firstPoint
       recognitionStrokesRef.current = null
+      setSelectionRect({ x: firstPoint.x, y: firstPoint.y, width: 0, height: 0 })
+      return
+    }
+    if (tool === 'select' && !pointerEraser) {
+      if (!firstPoint) return
+      restoreUnmovedSelection()
+      selectionStartRef.current = firstPoint
+      recognitionStrokesRef.current = null
+      setSelectionMode(true)
+      setSelectionPurpose('edit')
       setSelectionRect({ x: firstPoint.x, y: firstPoint.y, width: 0, height: 0 })
       return
     }
@@ -4101,6 +4129,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     shapeLastMoveAtRef.current = performance.now()
     beforeGestureRef.current = snapshotStrokes(strokesRef.current)
     gestureChangedRef.current = false
+    eraserAnchorRef.current = null
     gestureToolRef.current = pointerEraser ? 'eraser' : tool
     if (gestureToolRef.current === 'pen') {
       activeRenderedPointCountRef.current = 0
@@ -4132,7 +4161,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   // inputActive is a dependency: a board mounted inert (keyboard mode showing
   // saved ink) kept a handler that still saw inputActive=false after the pen
   // turned on, and every pen-down was refused until an unrelated grow rebuilt it.
-  }, [activeArtBrush.pressure, activeArtSymbol, appendPointerEvent, artBrush, artColor, artEffect, artOpacity, artSymbolRotation, artSymbolSize, artWidth, bumpInkRevision, clearRecognitionScope, clearShapeDwellTimer, closeMathCorrectionSession, closeMathSolverSelection, commitPendingSolverTap, commitStrokeToCanvas, inkMode, inline, inputActive, insertSectionAt, mathSolverEnabled, penColor, penWidth, pointFromEvent, redraw, scheduleRedraw, sectionPlacing, selectionMode, setDirty, settings.penOnly, settings.pressureEnabled, settings.tabletButtons, sourceHeight, sourceWidth, syncInkWindow, tool, updateHistoryState])
+  }, [activeArtBrush.pressure, activeArtSymbol, appendPointerEvent, artBrush, artColor, artEffect, artOpacity, artSymbolRotation, artSymbolSize, artWidth, bumpInkRevision, clearRecognitionScope, clearShapeDwellTimer, closeMathCorrectionSession, closeMathSolverSelection, commitPendingSolverTap, commitStrokeToCanvas, inkMode, inline, inputActive, insertSectionAt, mathSolverEnabled, penColor, penWidth, pointFromEvent, redraw, restoreUnmovedSelection, scheduleRedraw, sectionPlacing, selectionMode, setDirty, settings.penOnly, settings.pressureEnabled, settings.tabletButtons, sourceHeight, sourceWidth, syncInkWindow, tool, updateHistoryState])
 
   const handlePointerMove = useCallback((event: ReactPointerEvent<HTMLElement>) => {
     const pan = tabletPanRef.current
@@ -4206,6 +4235,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         lastContactAt: lastPenContactRef.current,
       })
       pointerBoundsRef.current = null
+      eraserAnchorRef.current = null
       activePointerRef.current = cleanup.session.activePointerId
       inkSessionRef.current = null
       activePointerTargetRef.current = null
@@ -4242,15 +4272,17 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       selectionStartRef.current = null
       endInteraction()
       if (event.type === 'pointercancel' || selection.width < 0.012 || selection.height < 0.012) {
-        setSelectionMode(false)
+        setSelectionMode(selectionPurpose === 'edit')
         setSelectionRect(null)
         if (selectionPurpose === 'math-correction') setMathCorrectorEnabled(false)
-        setNotice({ kind: 'info', text: 'Bereichsauswahl abgebrochen. Ziehe einen Rahmen um die gewünschte Handschrift.' })
+        setNotice({ kind: 'info', text: selectionPurpose === 'edit'
+          ? 'Ziehe einen Rahmen um die Handschrift, die du verschieben möchtest.'
+          : 'Bereichsauswahl abgebrochen. Ziehe einen Rahmen um die gewünschte Handschrift.' })
         return
       }
       const selectedStrokes = handwritingStrokes(strokesRef.current.filter((stroke) => strokeIntersectsSelection(stroke, selection)))
       if (!selectedStrokes.length) {
-        setSelectionMode(false)
+        setSelectionMode(selectionPurpose === 'edit')
         setSelectionRect(null)
         if (selectionPurpose === 'math-correction') setMathCorrectorEnabled(false)
         setNotice({ kind: 'info', text: 'Im gewählten Bereich wurde keine Handschrift gefunden.' })
@@ -4265,12 +4297,28 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         return
       }
       if (selectionPurpose === 'edit') {
-        selectedStrokeIndexesRef.current = strokesRef.current.flatMap((stroke, index) => (
-          selectedStrokes.includes(stroke) ? [index] : []
-        ))
+        const origin = snapshotStrokes(strokesRef.current)
+        const taken = takeInkSelection(strokesRef.current, selection, sourceWidth, sourceHeight)
+        if (!taken.indexes.length) {
+          setSelectionMode(true)
+          setSelectionRect(null)
+          selectedStrokeIndexesRef.current = []
+          setNotice({ kind: 'info', text: 'Im gewählten Bereich wurde keine Handschrift gefunden.' })
+          return
+        }
+        if (taken.strokes !== strokesRef.current) {
+          selectionOriginRef.current = origin
+          selectionMovedRef.current = false
+          strokesRef.current = taken.strokes
+          scheduleRedraw()
+        } else {
+          selectionOriginRef.current = null
+          selectionMovedRef.current = false
+        }
+        selectedStrokeIndexesRef.current = taken.indexes
         setSelectionMode(false)
-        setSelectionRect(selection)
-        setNotice({ kind: 'info', text: 'Ziehen zum Verschieben, Ecke zum Skalieren. Kopieren oder Löschen unten.' })
+        setSelectionRect(boundsOfInkIndexes(taken.strokes, taken.indexes) ?? selection)
+        setNotice({ kind: 'info', text: 'Ziehen zum Verschieben. Esc hebt die Auswahl auf.' })
         return
       }
       recognitionStrokesRef.current = selectedStrokes
@@ -5246,8 +5294,20 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     supportSnapshot: () => ({ tool, inkMode }),
     applySupportTool: (next) => {
       if (next === 'eraser') {
+        restoreUnmovedSelection()
         setTool('eraser')
         setArtPanelOpen(false)
+        setSelectionMode(false)
+        setSelectionRect(null)
+        return
+      }
+      if (next === 'select') {
+        restoreUnmovedSelection()
+        setTool('select')
+        setArtPanelOpen(false)
+        setSelectionMode(true)
+        setSelectionPurpose('edit')
+        setSelectionRect(null)
         return
       }
       if (next === 'drawing') {
@@ -5263,7 +5323,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       }
       setTool('pen')
     },
-  }), [drawingPayload, inkMode, inkRecordExists, setDirty, tool, writeInkPage])
+  }), [drawingPayload, inkMode, inkRecordExists, restoreUnmovedSelection, setDirty, tool, writeInkPage])
 
   useEffect(() => () => {
     if (saveRetryTimerRef.current !== null) window.clearTimeout(saveRetryTimerRef.current)
@@ -5615,26 +5675,40 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         }),
       }
     })
+    committedCanvasDirtyRef.current = true
     scheduleRedraw()
     setDirty(true)
     updateHistoryState()
   }, [scheduleRedraw, setDirty, updateHistoryState])
 
   const beginInkEdit = useCallback(() => {
+    restoreUnmovedSelection()
     closeMathSolverSelection()
     closeMathCorrectionSession()
     setMathCorrectorEnabled(false)
     setConversionOpen(false)
+    setArtPanelOpen(false)
+    setLassoOn(false)
+    setLassoPoints([])
+    setLassoIndexes([])
+    setTool('select')
     selectedStrokeIndexesRef.current = []
     setSelectionMode(true)
     setSelectionPurpose('edit')
     setSelectionRect(null)
-    setNotice({ kind: 'info', text: 'Rahmen um die Tinte ziehen, dann verschieben, kopieren oder skalieren.' })
-  }, [closeMathCorrectionSession, closeMathSolverSelection])
+    setNotice({ kind: 'info', text: 'Ziehe einen Rahmen um die Handschrift. Danach ziehst du sie an die neue Stelle.' })
+  }, [closeMathCorrectionSession, closeMathSolverSelection, restoreUnmovedSelection])
 
   const copySelectedInk = useCallback(() => {
     const indexes = selectedStrokeIndexesRef.current
     if (!indexes.length) return
+    undoRef.current.push(selectionOriginRef.current && !selectionMovedRef.current
+      ? selectionOriginRef.current
+      : snapshotStrokes(strokesRef.current))
+    if (undoRef.current.length > 80) undoRef.current.shift()
+    redoRef.current = []
+    selectionOriginRef.current = null
+    selectionMovedRef.current = true
     const copies: InkStroke[] = []
     for (const index of indexes) {
       const stroke = strokesRef.current[index]
@@ -5648,6 +5722,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     strokesRef.current = [...strokesRef.current, ...copies]
     selectedStrokeIndexesRef.current = copies.map((_, offset) => start + offset)
     setSelectionRect((current) => current && { ...current, x: clamp(current.x + 0.03), y: clamp(current.y + 0.03, 0, 8) })
+    committedCanvasDirtyRef.current = true
     scheduleRedraw()
     setDirty(true)
     updateHistoryState()
@@ -5656,11 +5731,19 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const deleteSelectedInk = useCallback(() => {
     const indexes = new Set(selectedStrokeIndexesRef.current)
     if (!indexes.size) return
+    undoRef.current.push(selectionOriginRef.current && !selectionMovedRef.current
+      ? selectionOriginRef.current
+      : snapshotStrokes(strokesRef.current))
+    if (undoRef.current.length > 80) undoRef.current.shift()
+    redoRef.current = []
+    selectionOriginRef.current = null
+    selectionMovedRef.current = true
     const before = strokesRef.current.length
     strokesRef.current = strokesRef.current.filter((_, index) => !indexes.has(index))
     noteStrokesErased(before - strokesRef.current.length)
     selectedStrokeIndexesRef.current = []
     setSelectionRect(null)
+    committedCanvasDirtyRef.current = true
     scheduleRedraw()
     setDirty(true)
     updateHistoryState()
@@ -6337,6 +6420,9 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   }
 
   const activateWriting = () => {
+    restoreUnmovedSelection()
+    setSelectionMode(false)
+    setSelectionRect(null)
     setInkMode('writing')
     setTool('pen')
     setArtSymbolId(null)
@@ -6345,6 +6431,9 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   }
 
   const activateDrawing = () => {
+    restoreUnmovedSelection()
+    setSelectionMode(false)
+    setSelectionRect(null)
     setInkMode('drawing')
     setTool('pen')
     setArtSymbolId(null)
@@ -6359,6 +6448,9 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   }
 
   const activateEraser = () => {
+    restoreUnmovedSelection()
+    setSelectionMode(false)
+    setSelectionRect(null)
     setTool('eraser')
     setArtPanelOpen(false)
     setNotice(null)
@@ -6397,11 +6489,16 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       closeMathSolverSelection()
       return
     }
-    if (event.key === 'Escape' && selectionMode) {
+    if (event.key === 'Escape' && (selectionMode || (selectionPurpose === 'edit' && selectionRect))) {
       event.preventDefault()
+      restoreUnmovedSelection()
       if (selectionPurpose === 'math-correction') setMathCorrectorEnabled(false)
       clearRecognitionScope()
-      setNotice({ kind: 'info', text: 'Bereichsauswahl abgebrochen.' })
+      if (tool === 'select') {
+        setSelectionMode(true)
+        setSelectionPurpose('edit')
+      }
+      setNotice({ kind: 'info', text: tool === 'select' ? 'Auswahl aufgehoben.' : 'Bereichsauswahl abgebrochen.' })
       return
     }
     if (event.key === 'Escape' && sectionPlacing) {
@@ -6547,8 +6644,11 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
           <button type="button" className={tool === 'pen' && inkMode === 'drawing' ? 'is-active' : ''} aria-pressed={tool === 'pen' && inkMode === 'drawing'} title="Zeichenstudio mit Pinseln und Spezialfarben öffnen" onClick={activateDrawing}>
             <Paintbrush size={16} /> <span className="lw-tool-label">Zeichnen</span>
           </button>
-          <button type="button" className={tool === 'eraser' ? 'is-active' : ''} aria-pressed={tool === 'eraser'} onClick={activateEraser}>
+          <button type="button" className={tool === 'eraser' ? 'is-active' : ''} aria-pressed={tool === 'eraser'} title="Radierer: löscht den Buchstaben, den er wirklich berührt" onClick={activateEraser}>
             <Eraser size={16} /> <span className="lw-tool-label">Radierer</span>
+          </button>
+          <button type="button" className={tool === 'select' ? 'is-active' : ''} aria-pressed={tool === 'select'} title="Handschrift einrahmen und dann verschieben" onClick={beginInkEdit}>
+            <Move size={16} /> <span className="lw-tool-label">Verschieben</span>
           </button>
           <button
             type="button"
@@ -6676,11 +6776,11 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
             <input type="range" min={activeArtSymbol ? 20 : .75} max={activeArtSymbol ? 180 : 42} step={activeArtSymbol ? 2 : .25} value={activeArtSymbol ? artSymbolSize : artWidth} onChange={(event) => activeArtSymbol ? setArtSymbolSize(Number(event.target.value)) : setArtWidth(Number(event.target.value))} />
             <output>{activeArtSymbol ? artSymbolSize : artWidth.toFixed(artWidth % 1 ? 1 : 0)} px</output>
           </label>
-        </> : <label className="lw-draw-range">
+        </> : tool === 'eraser' ? <label className="lw-draw-range">
           <span>Größe</span>
           <input type="range" min="10" max="72" value={eraserSize} onChange={(event) => setEraserSize(Number(event.target.value))} />
           <output>{eraserSize} px</output>
-        </label>}
+        </label> : null}
 
         <label className="lw-paper-select">
           <span className="sr-only">Papierart</span>
@@ -6713,8 +6813,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
               <span className="lw-tool-label">GlyphenWerk</span>
             </button>
           )}
-          {inkMode === 'writing' && <button type="button" className={`lw-draw-subtle ${selectionMode && selectionPurpose === 'edit' ? 'is-active' : ''}`} onClick={beginInkEdit} disabled={!handwritingCount} title="Tinte auswählen, verschieben, kopieren oder skalieren">
-            <Shapes size={14} /> <span className="lw-tool-label">Tinte</span>
+          {inkMode === 'writing' && <button type="button" className={`lw-draw-subtle ${tool === 'select' ? 'is-active' : ''}`} onClick={beginInkEdit} disabled={!handwritingCount} title="Handschrift einrahmen und dann verschieben">
+            <Move size={14} /> <span className="lw-tool-label">Verschieben</span>
           </button>}
           {inkMode === 'writing' && <button type="button" className={`lw-draw-subtle ${lassoOn ? 'is-active' : ''}`} aria-pressed={lassoOn} onClick={() => { setLassoOn((value) => !value); setLassoPoints([]); setLassoIndexes([]) }} disabled={!handwritingCount} title="Lasso: Striche einrahmen, dann verschieben, kopieren, färben oder löschen">
             <ScanSearch size={14} /> <span className="lw-tool-label">Lasso</span>
@@ -6883,8 +6983,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
               className={`lw-tablet-canvas lw-tablet-canvas-live ${selectionMode ? 'tool-select' : tool === 'pen' && inkMode === 'drawing' ? activeArtSymbol ? 'tool-stamp' : 'tool-art' : `tool-${tool}`} ${inputActive ? INLINE_INK_ACTIVE_CLASS : ''}`}
               tabIndex={-1}
               aria-label={selectionMode
-                ? selectionPurpose === 'math-correction' ? 'Rechenweg zur mathematischen Korrektur auswählen' : 'Bereich für Handschrifterkennung auswählen'
-                : inkMode === 'drawing' ? activeArtSymbol ? `Piktogramm ${activeArtSymbol.label} auf Seite platzieren` : `Zeichenfläche mit ${activeArtBrush.label}` : 'Druckempfindliche Handschriftfläche'}
+                ? selectionPurpose === 'math-correction' ? 'Rechenweg zur mathematischen Korrektur auswählen' : selectionPurpose === 'edit' ? 'Handschrift zum Verschieben einrahmen' : 'Bereich für Handschrifterkennung auswählen'
+                : tool === 'select' ? 'Ausgewählte Handschrift verschieben' : inkMode === 'drawing' ? activeArtSymbol ? `Piktogramm ${activeArtSymbol.label} auf Seite platzieren` : `Zeichenfläche mit ${activeArtBrush.label}` : 'Druckempfindliche Handschriftfläche'}
               onPointerDown={inline ? undefined : handlePointerDown}
               onPointerMove={inline ? undefined : handlePointerMove}
               onPointerUp={inline ? undefined : finishPointer}
@@ -6958,9 +7058,10 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
               {sectionPlacing && <div ref={sectionGuideRef} className="lw-ink-section-guide" style={{ top: '-9999px', opacity: 0 }}><span>Neuer Abschnitt</span></div>}
               {sectionPlacing && <div className="lw-selection-hint is-section"><ListCollapse size={18} /> Auf das Blatt tippen, wo der Abschnitt beginnen soll</div>}
             </div>}
+            <div className="lw-page-overlay">
             {selectionMode && !selectionRect && <div className={`lw-selection-hint ${selectionPurpose === 'math-correction' ? 'is-correction' : ''}`}>
-              {selectionPurpose === 'math-correction' ? <ListChecks size={18} /> : <ScanSearch size={18} />}
-              {selectionPurpose === 'math-correction' ? 'Rechenweg mit mehreren Zeilen auswählen' : 'Bereich auf der Seite aufziehen'}
+              {selectionPurpose === 'math-correction' ? <ListChecks size={18} /> : selectionPurpose === 'edit' ? <Move size={18} /> : <ScanSearch size={18} />}
+              {selectionPurpose === 'math-correction' ? 'Rechenweg mit mehreren Zeilen auswählen' : selectionPurpose === 'edit' ? 'Rahmen um die Handschrift ziehen' : 'Bereich auf der Seite aufziehen'}
             </div>}
             {selectionRect && <div
               className={`lw-selection-rect ${selectionMode ? 'is-selecting' : 'is-selected'} ${selectionPurpose === 'edit' && !selectionMode ? 'is-editable' : ''}`}
@@ -6974,23 +7075,35 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
                 if (selectionPurpose !== 'edit' || selectionMode) return
                 event.stopPropagation()
                 event.currentTarget.setPointerCapture(event.pointerId)
-                const surface = surfaceRef.current?.getBoundingClientRect()
-                if (!surface) return
+                const point = pointFromEvent(event.nativeEvent)
+                if (!point) return
                 inkDragRef.current = {
                   kind: (event.target as HTMLElement).dataset.handle === 'scale' ? 'scale' : 'move',
-                  startX: (event.clientX - surface.left) / surface.width,
-                  startY: (event.clientY - surface.top) / surface.height,
+                  startX: point.x,
+                  startY: point.y,
                   origin: selectionRect,
+                  committed: false,
                 }
               }}
               onPointerMove={(event) => {
                 const drag = inkDragRef.current
-                const surface = surfaceRef.current?.getBoundingClientRect()
-                if (!drag || !surface) return
-                const x = (event.clientX - surface.left) / surface.width
-                const y = (event.clientY - surface.top) / surface.height
+                const point = pointFromEvent(event.nativeEvent)
+                if (!drag || !point) return
+                const x = point.x
+                const y = point.y
                 const dx = x - drag.startX
                 const dy = y - drag.startY
+                if (!drag.committed && (Math.abs(dx) > 0.001 || Math.abs(dy) > 0.001)) {
+                  undoRef.current.push(selectionOriginRef.current && !selectionMovedRef.current
+                    ? selectionOriginRef.current
+                    : snapshotStrokes(strokesRef.current))
+                  if (undoRef.current.length > 80) undoRef.current.shift()
+                  redoRef.current = []
+                  selectionOriginRef.current = null
+                  selectionMovedRef.current = true
+                  drag.committed = true
+                  updateHistoryState()
+                }
                 if (drag.kind === 'move') {
                   applyInkTransform((px, py) => ({ x: px + dx, y: py + dy }))
                   setSelectionRect({ ...drag.origin, x: clamp(drag.origin.x + dx), y: clamp(drag.origin.y + dy, 0, 8) })
@@ -7023,10 +7136,11 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
               onPointerCancel={() => { inkDragRef.current = null; fitPageToInk() }}
             >
               <span>{selectionMode
-                ? selectionPurpose === 'math-correction' ? 'Rechenweg auswählen' : selectionPurpose === 'edit' ? 'Tinte auswählen' : 'Auswählen'
-                : selectionPurpose === 'edit' ? 'Ziehen · Ecke skalieren' : 'Wird konvertiert'}</span>
+                ? selectionPurpose === 'math-correction' ? 'Rechenweg auswählen' : selectionPurpose === 'edit' ? 'Handschrift einrahmen' : 'Auswählen'
+                : selectionPurpose === 'edit' ? 'Ziehen zum Verschieben' : 'Wird konvertiert'}</span>
               {selectionPurpose === 'edit' && !selectionMode && <i data-handle="scale" className="lw-selection-scale" />}
             </div>}
+            </div>
             {mathCorrectionSession && <>
               <div
                 className="lw-math-correction-scope"
@@ -7423,8 +7537,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
           <button type="button" className="lw-draw-subtle" onClick={() => void saveDrawing(true)} disabled={!inkCount || isSaving}>
             <Save size={15} /> Seite als Bild einfügen
           </button>
-          {inkMode === 'writing' && <button type="button" className={`lw-draw-subtle ${selectionMode && selectionPurpose === 'edit' ? 'is-active' : ''}`} onClick={beginInkEdit} disabled={!handwritingCount} title="Tinte auswählen, verschieben, kopieren oder skalieren">
-            <Shapes size={14} /> Tinte
+          {inkMode === 'writing' && <button type="button" className={`lw-draw-subtle ${tool === 'select' ? 'is-active' : ''}`} onClick={beginInkEdit} disabled={!handwritingCount} title="Handschrift einrahmen und dann verschieben">
+            <Move size={14} /> Verschieben
           </button>}
           {inkMode === 'writing' && <button type="button" className={`lw-draw-subtle ${lassoOn ? 'is-active' : ''}`} aria-pressed={lassoOn} onClick={() => { setLassoOn((value) => !value); setLassoPoints([]); setLassoIndexes([]) }} disabled={!handwritingCount} title="Lasso: Striche einrahmen, dann verschieben, kopieren, färben oder löschen">
             <ScanSearch size={14} /> Lasso
@@ -7616,7 +7730,7 @@ const drawingBoardStyles = `
 .lw-drafting-panel .lw-draw-subtle{height:26px;padding:0 9px;font-size: 12px}
 .lw-drafting-direction-icon{display:grid;place-items:center;color:var(--text-muted,#9999a7)}
 .lw-drafting-panel-foot{color:var(--text-muted,#8b8b99);font-size: 12px;line-height:1.4}
-.lw-drawing-board.is-inline:not(.is-input-active) .lw-drafting-panel{display:none!important}.lw-tablet-canvas-committed{z-index:1;pointer-events:none}.lw-tablet-canvas-live{z-index:2;pointer-events:auto}.lw-tablet-canvas.tool-pen,.lw-tablet-canvas.tool-select{cursor:crosshair}.lw-tablet-canvas.tool-eraser{cursor:cell}.lw-tablet-canvas:focus-visible{box-shadow:inset 0 0 0 2px var(--draw-accent)}.lw-selection-hint{position:absolute;z-index:3;top:18px;left:50%;display:flex;align-items:center;gap:7px;padding:8px 11px;transform:translateX(-50%);border:1px solid rgba(var(--accent-rgb),.32);border-radius:9px;color:#28233d;background:rgba(255,255,255,.92);box-shadow:0 8px 24px rgba(0,0,0,.18);font:700 12px/1.2 var(--ui-font,system-ui);pointer-events:none;white-space:nowrap}.lw-selection-rect{position:absolute;z-index:3;min-width:2px;min-height:2px;border:2px dashed var(--accent,#2a6f97);background:rgba(var(--accent-rgb),.1);box-shadow:0 0 0 9999px rgba(0,0,0,.08);pointer-events:none}.lw-selection-rect.is-editable{pointer-events:auto;cursor:move;box-shadow:0 0 0 2px rgba(var(--accent-rgb),.2)}.lw-selection-scale{position:absolute;right:-6px;bottom:-6px;width:13px;height:13px;border-radius:3px;background:var(--accent,#2a6f97);cursor:nwse-resize}.lw-selection-rect.is-selected{border-style:solid;background:rgba(var(--accent-rgb),.07);box-shadow:0 0 0 9999px rgba(0,0,0,.04),0 0 0 3px rgba(var(--accent-rgb),.14)}.lw-selection-rect span{position:absolute;bottom:calc(100% + 5px);left:-2px;padding:3px 7px;border-radius:6px;color:#fff;background:var(--accent,#2a6f97);font:700 12px/1.3 var(--ui-font,system-ui);white-space:nowrap}.lw-canvas-meta{display:flex;align-items:center;justify-content:space-between;padding:7px 3px 0;color:var(--text-muted,#9292a0);font-size: 12px}.lw-canvas-meta span{display:flex;align-items:center;gap:6px}.lw-pressure-dot{width:6px;height:6px;border-radius:50%;background:#4bd7a4;box-shadow:0 0 7px #4bd7a4}
+.lw-drawing-board.is-inline:not(.is-input-active) .lw-drafting-panel{display:none!important}.lw-tablet-canvas-committed{z-index:1;pointer-events:none}.lw-tablet-canvas-live{z-index:2;pointer-events:auto}.lw-tablet-canvas.tool-pen,.lw-tablet-canvas.tool-select{cursor:crosshair}.lw-tablet-canvas.tool-eraser{cursor:cell}.lw-tablet-canvas:focus-visible{box-shadow:inset 0 0 0 2px var(--draw-accent)}.lw-selection-hint{position:absolute;z-index:3;top:18px;left:50%;display:flex;align-items:center;gap:7px;padding:8px 11px;transform:translateX(-50%);border:1px solid rgba(var(--accent-rgb),.32);border-radius:9px;color:#28233d;background:rgba(255,255,255,.92);box-shadow:0 8px 24px rgba(0,0,0,.18);font:700 12px/1.2 var(--ui-font,system-ui);pointer-events:none;white-space:nowrap}.lw-selection-rect{position:absolute;z-index:3;min-width:2px;min-height:2px;border:2px dashed var(--accent,#2a6f97);background:rgba(var(--accent-rgb),.1);box-shadow:0 0 0 9999px rgba(0,0,0,.08);pointer-events:none}.lw-selection-rect.is-editable{pointer-events:auto;cursor:move;box-shadow:0 0 0 2px rgba(var(--accent-rgb),.2)}.lw-page-overlay{position:absolute;inset:0;z-index:4;pointer-events:none}.lw-drawing-board.is-inline .lw-page-overlay{inset:var(--paper-scroll-room,0px);width:calc(100% - 2 * var(--paper-scroll-room,0px));height:calc(100% - 2 * var(--paper-scroll-room,0px))}.lw-selection-scale{position:absolute;right:-6px;bottom:-6px;width:13px;height:13px;border-radius:3px;background:var(--accent,#2a6f97);cursor:nwse-resize}.lw-selection-rect.is-selected{border-style:solid;background:rgba(var(--accent-rgb),.07);box-shadow:0 0 0 9999px rgba(0,0,0,.04),0 0 0 3px rgba(var(--accent-rgb),.14)}.lw-selection-rect span{position:absolute;bottom:calc(100% + 5px);left:-2px;padding:3px 7px;border-radius:6px;color:#fff;background:var(--accent,#2a6f97);font:700 12px/1.3 var(--ui-font,system-ui);white-space:nowrap}.lw-canvas-meta{display:flex;align-items:center;justify-content:space-between;padding:7px 3px 0;color:var(--text-muted,#9292a0);font-size: 12px}.lw-canvas-meta span{display:flex;align-items:center;gap:6px}.lw-pressure-dot{width:6px;height:6px;border-radius:50%;background:#4bd7a4;box-shadow:0 0 7px #4bd7a4}
 .lw-selection-hint.is-correction{border-color:rgba(30,142,115,.42);color:#153b32;background:rgba(242,255,250,.95)}.lw-math-correction-scope{position:absolute;z-index:3;border:1px dashed rgba(60,95,178,.5);border-radius:7px;background:rgba(67,102,190,.025);pointer-events:none}.lw-math-step-mark{position:absolute;z-index:4;min-width:5px;min-height:5px;border:2px solid rgba(91,106,151,.5);border-radius:6px;background:rgba(91,106,151,.04);pointer-events:none;transition:border-color .22s,background .22s,box-shadow .22s}.lw-math-step-mark>span{position:absolute;top:-8px;left:-8px;display:grid;width:17px;height:17px;place-items:center;border-radius:50%;color:#fff;background:#667091;font:800 12px/1 var(--ui-font,system-ui);box-shadow:0 3px 8px rgba(0,0,0,.2)}.lw-math-step-mark.is-start{border-color:var(--accent,#2a6f97);background:rgba(var(--accent-rgb),.06)}.lw-math-step-mark.is-start>span{background:var(--accent,#2a6f97)}.lw-math-step-mark.is-correct{border-color:#249671;background:rgba(36,150,113,.07);box-shadow:0 0 0 3px rgba(36,150,113,.09)}.lw-math-step-mark.is-correct>span{background:#208963}.lw-math-step-mark.is-incorrect,.lw-math-step-mark.is-unreadable{border-color:#dc3f59;background:rgba(220,63,89,.09);box-shadow:0 0 0 3px rgba(220,63,89,.12)}.lw-math-step-mark.is-incorrect>span,.lw-math-step-mark.is-unreadable>span{background:#c9354e}.lw-math-step-mark.is-uncertain{border-color:#d18b25;background:rgba(209,139,37,.09)}.lw-math-step-mark.is-uncertain>span{background:#b87518}.lw-math-error-spot{position:absolute;z-index:7;min-width:12px;min-height:12px;border:3px solid #df304d;border-radius:7px;background:rgba(238,45,75,.14);box-shadow:0 0 0 4px rgba(238,45,75,.12),0 0 25px rgba(222,39,69,.3);pointer-events:none;animation:lw-error-pulse 1.35s ease-in-out infinite}.lw-math-error-spot.is-uncertain,.lw-math-error-spot.is-unreadable{border-color:#d38b20;background:rgba(230,151,33,.12);box-shadow:0 0 0 4px rgba(230,151,33,.12)}.lw-math-error-spot>span{position:absolute;bottom:calc(100% + 5px);left:-3px;padding:3px 7px;border-radius:6px;color:#fff;background:#d9304b;font:800 12px/1.2 var(--ui-font,system-ui);white-space:nowrap}.lw-math-error-spot.is-uncertain>span,.lw-math-error-spot.is-unreadable>span{background:#b87518}@keyframes lw-error-pulse{50%{box-shadow:0 0 0 7px rgba(238,45,75,.05),0 0 30px rgba(222,39,69,.34)}}
 .lw-math-correction-popover{position:absolute;z-index:9;display:flex;width:min(390px,calc(100% - 22px));max-height:min(560px,86%);flex-direction:column;gap:9px;overflow:auto;padding:11px;border:1px solid color-mix(in srgb,var(--success,#5dcc78) 42%,var(--draw-border));border-radius:12px;color:var(--text,#f4f2fa);background:linear-gradient(150deg,color-mix(in srgb,var(--background-secondary,#1e1f23) 95%,var(--success,#5dcc78) 5%),var(--background,#191919));box-shadow:0 24px 70px rgba(15,25,23,.42),0 0 0 1px rgba(255,255,255,.03);backdrop-filter:blur(18px);pointer-events:auto}.lw-math-correction-head{display:flex;align-items:center;gap:8px}.lw-math-correction-head>span{display:grid;width:28px;height:28px;flex:0 0 auto;place-items:center;border-radius:9px;color:var(--on-danger,#191919);background:var(--success,#5dcc78)}.lw-math-correction-head>div{display:flex;min-width:0;flex:1;flex-direction:column}.lw-math-correction-head strong{font-size: 12px}.lw-math-correction-head small,.lw-math-correction-footnote{color:var(--text-muted,#aaa);font-size: 12px;line-height:1.45}.lw-math-correction-loading,.lw-math-correction-error{display:flex;min-height:82px;align-items:center;justify-content:center;gap:8px;color:var(--text-muted,#aaa);text-align:center;font-size: 12px}.lw-math-correction-error{flex-direction:column;color:var(--danger,#e16778)}.lw-math-correction-result{display:flex;align-items:flex-start;gap:8px;padding:8px 9px;border:1px solid var(--draw-border);border-radius:9px}.lw-math-correction-result>svg{flex:0 0 auto;margin-top:1px}.lw-math-correction-result>span,.lw-math-correction-result strong,.lw-math-correction-result small{display:block}.lw-math-correction-result strong{font-size: 12px}.lw-math-correction-result small{margin-top:2px;color:var(--text-muted,#aaa);font-size: 12px;line-height:1.45}.lw-math-correction-result.is-correct{color:var(--success,#4bc69d);border-color:color-mix(in srgb,var(--success,#4bc69d) 32%,var(--draw-border));background:color-mix(in srgb,var(--success,#4bc69d) 8%,transparent)}.lw-math-correction-result.is-incorrect,.lw-math-correction-result.is-unreadable{color:var(--danger,#e16778);border-color:color-mix(in srgb,var(--danger,#e16778) 34%,var(--draw-border));background:color-mix(in srgb,var(--danger,#e16778) 8%,transparent)}.lw-math-correction-result.is-uncertain,.lw-math-correction-result.is-editing{color:var(--warning,#d49a48);border-color:color-mix(in srgb,var(--warning,#d49a48) 34%,var(--draw-border));background:color-mix(in srgb,var(--warning,#d49a48) 8%,transparent)}
 .lw-math-step-list{display:flex;flex-direction:column;gap:5px}.lw-math-step-row{display:grid;grid-template-columns:22px minmax(0,1fr) 39px;align-items:center;gap:6px;padding:6px;border:1px solid var(--draw-border);border-radius:9px;background:color-mix(in srgb,var(--background,#191919) 46%,transparent)}.lw-math-step-row.is-incorrect,.lw-math-step-row.is-unreadable{border-color:color-mix(in srgb,var(--danger,#e16778) 48%,var(--draw-border));background:color-mix(in srgb,var(--danger,#e16778) 7%,transparent)}.lw-math-step-row.is-correct{border-color:color-mix(in srgb,var(--success,#4bc69d) 28%,var(--draw-border))}.lw-math-step-number{display:grid;width:20px;height:20px;place-items:center;border-radius:6px;color:var(--text-muted,#aaa);background:color-mix(in srgb,var(--background-modifier-border,#555) 42%,transparent);font:800 12px/1 var(--ui-font,system-ui)}.lw-math-step-input{display:flex;min-width:0;flex-direction:column;gap:2px}.lw-math-step-input input{width:100%;min-width:0;padding:5px 7px;border:1px solid transparent;border-radius:6px;outline:none;color:inherit;background:transparent;font:600 12px/1.2 var(--mono-font,monospace)}.lw-math-step-input input:hover,.lw-math-step-input input:focus{border-color:var(--draw-border);background:color-mix(in srgb,var(--background,#191919) 82%,transparent)}.lw-math-step-input small{overflow:hidden;color:var(--text-muted,#aaa);font-size: 12px;line-height:1.25;text-overflow:ellipsis;white-space:nowrap}.lw-math-step-status{overflow:hidden;color:var(--text-muted,#aaa);font-size: 12px;text-align:right;text-overflow:ellipsis;white-space:nowrap}.lw-math-step-row.is-incorrect .lw-math-step-status,.lw-math-step-row.is-unreadable .lw-math-step-status{color:var(--danger,#e16778)}.lw-math-step-row.is-correct .lw-math-step-status{color:var(--success,#4bc69d)}.lw-math-step-row.is-uncertain .lw-math-step-status{color:var(--warning,#d49a48)}.lw-math-correction-suggestion{display:flex;align-items:center;gap:7px;padding:7px 9px;border-radius:8px;color:var(--text-normal,#ddd);background:color-mix(in srgb,var(--accent,#2a6f97) 11%,transparent);font-size: 12px}.lw-math-correction-suggestion code{overflow:hidden;color:#b9acf9;text-overflow:ellipsis;white-space:nowrap}.lw-math-correction-actions{display:grid;grid-template-columns:1fr 1fr;gap:6px}.lw-math-correction-actions button{display:flex;min-height:30px;align-items:center;justify-content:center;gap:5px;border:1px solid var(--draw-border);border-radius:8px;color:inherit;background:color-mix(in srgb,var(--background-secondary,#18171f) 78%,transparent);font:700 12px/1 var(--ui-font,system-ui);cursor:pointer}.lw-math-correction-actions button:first-child{border-color:color-mix(in srgb,#35b68e 40%,var(--draw-border));background:color-mix(in srgb,#35b68e 11%,transparent)}.lw-math-correction-actions button:hover{filter:brightness(1.12)}.lw-math-correction-actions button:disabled{opacity:.55;cursor:wait}.lw-math-correction-footnote{margin:0}
