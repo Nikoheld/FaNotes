@@ -41,7 +41,11 @@ pub fn import_pdf_note(host: &Host, args: &[Value]) -> Result<Value, String> {
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or("PDF-Notiz.pdf");
-    let bytes = fs::read(&path).map_err(|_| "Die ausgewählte PDF-Datei ist leer.".to_owned())?;
+    let bytes = read_dialog_pdf(
+        &path,
+        name,
+        "Es können nur PDF-Dateien als PDF-Notiz importiert werden.",
+    )?;
     import_pdf_payload(host, parent, &json!({ "name": name, "bytes": bytes }))
 }
 
@@ -50,8 +54,10 @@ pub fn import_subject_book(host: &Host, args: &[Value]) -> Result<Value, String>
     if vault::js_trim(subject).is_empty() {
         return Err("Wähle zuerst ein Fach für das Buch.".to_owned());
     }
+    // The subject path shape is checked before the file dialog opens.
+    let subject = vault::normalize_relative_path(subject, false, false)?;
     if let Some(payload) = args.get(1).filter(|value| value.is_object()) {
-        return import_pdf_file(host, subject, payload, PdfKind::Book);
+        return import_pdf_file(host, &subject, payload, PdfKind::Book);
     }
     let Some(path) = pick_file(host, "PDF-Buch zum Fach hinzufügen", &["pdf"])? else {
         return Ok(Value::Null);
@@ -60,10 +66,14 @@ pub fn import_subject_book(host: &Host, args: &[Value]) -> Result<Value, String>
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or("Buch.pdf");
-    let bytes = fs::read(&path).map_err(|_| "Die ausgewählte PDF-Datei ist leer.".to_owned())?;
+    let bytes = read_dialog_pdf(
+        &path,
+        name,
+        "Es können nur PDF-Dateien als Buch hinzugefügt werden.",
+    )?;
     import_pdf_file(
         host,
-        subject,
+        &subject,
         &json!({ "name": name, "bytes": bytes }),
         PdfKind::Book,
     )
@@ -197,6 +207,28 @@ fn import_pdf_file(
     }))
 }
 
+/// A file dialog PDF is checked the same way as a picked worksheet.
+///
+/// The extension comes first. A directory or symlink is not a regular file,
+/// and a file past 96 MiB is too big before any bytes are read.
+fn read_dialog_pdf(path: &Path, name: &str, not_pdf: &str) -> Result<Vec<u8>, String> {
+    if vault::posix_extname_en_us(name) != ".pdf" {
+        return Err(not_pdf.to_owned());
+    }
+    let meta = fs::symlink_metadata(path)
+        .map_err(|_| "Die Datei konnte nicht gelesen werden.".to_owned())?;
+    if meta.file_type().is_symlink() || !meta.is_file() {
+        return Err("Die Datei ist keine reguläre Datei.".to_owned());
+    }
+    if meta.len() > 96 * 1024 * 1024 {
+        return Err("Die Datei ist zu groß.".to_owned());
+    }
+    if meta.len() == 0 {
+        return Err("Die ausgewählte PDF-Datei ist leer.".to_owned());
+    }
+    fs::read(path).map_err(|_| "Die Datei konnte nicht gelesen werden.".to_owned())
+}
+
 fn pdf_payload_is_empty(payload: &Value) -> bool {
     match payload
         .get("bytesBase64")
@@ -292,7 +324,7 @@ fn safe_stem(value: &str, fallback: &str) -> Result<String, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::import_pdf_payload;
+    use super::{import_pdf_payload, import_subject_book, read_dialog_pdf};
     use crate::Host;
     use serde_json::json;
 
@@ -406,6 +438,85 @@ mod tests {
             .as_str()
             .unwrap()
             .ends_with(".png"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_pdf_dialog_checks_the_extension_before_the_file() {
+        let dir = std::env::temp_dir().join(format!(
+            "fanotes-pdf-dialog-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let note = "Es können nur PDF-Dateien als PDF-Notiz importiert werden.";
+        let text = dir.join("notes.txt");
+        std::fs::create_dir(&text).unwrap();
+        assert_eq!(read_dialog_pdf(&text, "notes.txt", note).unwrap_err(), note);
+        let folder = dir.join("Buch.pdf");
+        std::fs::create_dir(&folder).unwrap();
+        assert_eq!(
+            read_dialog_pdf(&folder, "Buch.pdf", note).unwrap_err(),
+            "Die Datei ist keine reguläre Datei."
+        );
+        let empty = dir.join("Leer.pdf");
+        std::fs::write(&empty, b"").unwrap();
+        assert_eq!(
+            read_dialog_pdf(&empty, "Leer.pdf", note).unwrap_err(),
+            "Die ausgewählte PDF-Datei ist leer."
+        );
+        let huge = dir.join("Gross.pdf");
+        let file = std::fs::File::create(&huge).unwrap();
+        file.set_len(96 * 1024 * 1024 + 1).unwrap();
+        assert_eq!(
+            read_dialog_pdf(&huge, "Gross.pdf", note).unwrap_err(),
+            "Die Datei ist zu groß."
+        );
+        #[cfg(unix)]
+        {
+            let real = dir.join("echt.pdf");
+            std::fs::write(&real, b"%PDF-1.4\n").unwrap();
+            let link = dir.join("Link.pdf");
+            std::os::unix::fs::symlink(&real, &link).unwrap();
+            assert_eq!(
+                read_dialog_pdf(&link, "Link.pdf", note).unwrap_err(),
+                "Die Datei ist keine reguläre Datei."
+            );
+            assert_eq!(std::fs::read(&real).unwrap(), b"%PDF-1.4\n");
+        }
+        let ready = dir.join("Skript.PDF");
+        std::fs::write(&ready, b"%PDF-1.4\n").unwrap();
+        assert_eq!(
+            read_dialog_pdf(&ready, "Skript.PDF", note).unwrap(),
+            b"%PDF-1.4\n"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_subject_book_dialog_rejects_the_folder_shape_before_opening_a_file() {
+        let dir = std::env::temp_dir().join(format!(
+            "fanotes-book-shape-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        let vault = dir.join("vault");
+        std::fs::create_dir_all(&vault).unwrap();
+        let mut host = Host::open(dir.join("app"));
+        host.file_dialogs = false;
+        host.set_vault(vault).unwrap();
+        assert_eq!(
+            import_subject_book(&host, &[json!("../geheim")]).unwrap_err(),
+            "Pfad-Traversal ist nicht erlaubt."
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
