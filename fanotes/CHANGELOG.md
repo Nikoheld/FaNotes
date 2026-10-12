@@ -1,10 +1,13 @@
 # Änderungsverlauf
 
-## Unveröffentlicht
+## 2026.10.3
 
 - **Handgesten auf dem ganzen Schreibtisch.** Zwei Finger schieben, ziehen zum Zoomen und drehen das Blatt — auch über der Stiftebene, auf dem Fachbuch (inklusive ausgepopptem Fenster) und in GlyphenWerk. Ein Wisch vom Rand springt in der Notiz zurück oder vor, im Kalender und bei Hausaufgaben durch den Zeitraum, bei Karteikarten durch die Bewertung. Eine zweite Fingerspitze bricht den angefangenen Strich ab, statt ihn als Tinte zu lassen. Liegt der Stift auf, schluckt die Fläche die Handfläche, ohne die Seite zu verschieben.
 - **Sync ohne Schlüsselbund.** Die Anmeldung wird auf dem Gerät verschlüsselt gespeichert, wenn kein Systemschlüsselbund verfügbar ist. Die Datei bleibt nur für den eigenen Benutzer lesbar.
 - **Stabile Paketnamen.** Die Website erkennt wieder vollständige Stable-Pakete. Der Nightly-Zusatz im Dateinamen ist optional.
+- **Nativer Abgleich.** Der eingebaute Host folgt bei Notizen, Suche, OneNote, Arbeitsblättern und Sync derselben Ordnung wie die Desktop-App.
+- **Radierer und Verschieben.** Der Radierer trifft nur den berührten Buchstaben, und Handschrift lässt sich verschieben.
+- **Linealbreite.** Die Breite des Lineals lässt sich wie seine Länge ändern.
 
 ## 2026.10.2
 

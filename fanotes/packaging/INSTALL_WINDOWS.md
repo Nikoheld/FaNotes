@@ -7,15 +7,15 @@ FaNotes unterstützt Windows 10 und Windows 11 auf `x64`. Installer und portable
 Die zu jeder Veröffentlichung angebotene Datei `SHA256SUMS` enthält die Prüfsummen aller Windows- und Linux-Pakete. In PowerShell lässt sich ein Download so prüfen:
 
 ```powershell
-Get-FileHash .\FaNotes-Setup-2026.10.2-x64.exe -Algorithm SHA256
-Get-FileHash .\FaNotes-Portable-2026.10.2-x64.exe -Algorithm SHA256
+Get-FileHash .\FaNotes-Setup-2026.10.3-x64.exe -Algorithm SHA256
+Get-FileHash .\FaNotes-Portable-2026.10.3-x64.exe -Algorithm SHA256
 ```
 
 Die ausgegebenen Werte müssen exakt mit `SHA256SUMS` übereinstimmen.
 
 ## Variante 1: Installer
 
-1. `FaNotes-Setup-2026.10.2-x64.exe` herunterladen und öffnen.
+1. `FaNotes-Setup-2026.10.3-x64.exe` herunterladen und öffnen.
 2. Den Windows-Sicherheitsdialog bestätigen.
 3. Nach der Installation FaNotes über Startmenü oder Desktop-Verknüpfung öffnen.
 
@@ -23,7 +23,7 @@ Der Installer arbeitet standardmäßig ohne Administratorrechte im aktuellen Ben
 
 ## Variante 2: Portable EXE
 
-`FaNotes-Portable-2026.10.2-x64.exe` kann in einen beliebigen beschreibbaren Ordner oder auf einen USB-Stick kopiert und direkt gestartet werden. Die App-Daten liegen weiterhin im normalen Windows-Benutzerprofil; „portable“ bezieht sich auf die Programmdatei, nicht auf den Vault oder das lokale Erkennungsmodell.
+`FaNotes-Portable-2026.10.3-x64.exe` kann in einen beliebigen beschreibbaren Ordner oder auf einen USB-Stick kopiert und direkt gestartet werden. Die App-Daten liegen weiterhin im normalen Windows-Benutzerprofil; „portable“ bezieht sich auf die Programmdatei, nicht auf den Vault oder das lokale Erkennungsmodell.
 
 ## Grafiktablett
 
@@ -50,15 +50,15 @@ FaNotes supports Windows 10 and Windows 11 on `x64`. The installer and the porta
 The `SHA256SUMS` file published with each release contains the checksums of all Windows and Linux packages. In PowerShell, check a download like this:
 
 ```powershell
-Get-FileHash .\FaNotes-Setup-2026.10.2-x64.exe -Algorithm SHA256
-Get-FileHash .\FaNotes-Portable-2026.10.2-x64.exe -Algorithm SHA256
+Get-FileHash .\FaNotes-Setup-2026.10.3-x64.exe -Algorithm SHA256
+Get-FileHash .\FaNotes-Portable-2026.10.3-x64.exe -Algorithm SHA256
 ```
 
 The printed values must match `SHA256SUMS` exactly.
 
 ## Option 1: Installer
 
-1. Download `FaNotes-Setup-2026.10.2-x64.exe` and open it.
+1. Download `FaNotes-Setup-2026.10.3-x64.exe` and open it.
 2. Confirm the Windows security dialog.
 3. After installation, open FaNotes from the Start menu or the desktop shortcut.
 
@@ -66,7 +66,7 @@ By default the installer runs without administrator rights in the current user a
 
 ## Option 2: Portable EXE
 
-`FaNotes-Portable-2026.10.2-x64.exe` can be copied into any writable folder or onto a USB drive and started directly. App data still lives in the normal Windows user profile. “Portable” refers to the program file, not to the vault or the local recognition model.
+`FaNotes-Portable-2026.10.3-x64.exe` can be copied into any writable folder or onto a USB drive and started directly. App data still lives in the normal Windows user profile. “Portable” refers to the program file, not to the vault or the local recognition model.
 
 ## Graphics tablet
 
