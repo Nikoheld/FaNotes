@@ -188,6 +188,29 @@ fn api_keys_from_a_plaintext_file_move_into_the_secret_store() {
 }
 
 #[test]
+fn an_api_key_follows_the_resolved_profile_path() {
+    let (app, mut host) = host();
+    host.dispatch(
+        "fanotes:save-settings",
+        &[json!({ "openAiApiKey": "sk-same-profile" })],
+    )
+    .unwrap();
+    let parent = app.parent().unwrap();
+    let spelled = std::path::PathBuf::from(format!(
+        "{}/",
+        parent.join("other").join("..").join("app").display()
+    ));
+    let mut reopened = Host::open(spelled);
+    reopened.secret_store = SecretStore::Memory;
+    assert_eq!(
+        reopened
+            .dispatch("fanotes:load-secure-settings", &[])
+            .unwrap()["openAiApiKey"],
+        "sk-same-profile"
+    );
+}
+
+#[test]
 fn a_missing_keyring_does_not_store_api_keys_in_the_profile() {
     let dir = std::env::temp_dir().join(format!("fanotes-settings-locked-{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);

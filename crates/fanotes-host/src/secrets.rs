@@ -26,7 +26,9 @@ pub enum SecretStore {
 }
 
 pub fn account(app_data: &Path, name: &str) -> String {
-    let absolute = std::path::absolute(app_data).unwrap_or_else(|_| app_data.to_path_buf());
+    // The same profile keeps one keyring account when its path is spelled
+    // with `..` or a trailing slash. Desktop `path.resolve` drops both.
+    let absolute = crate::node_resolve(app_data);
     let digest = Sha256::digest(absolute.to_string_lossy().as_bytes());
     let mut hex = String::with_capacity(16);
     for byte in digest.iter().take(8) {
