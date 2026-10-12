@@ -75,9 +75,13 @@ pub fn remove(host: &Host, id: &str) -> Result<Value, String> {
     Ok(Value::Null)
 }
 
-pub fn read_file(host: &Host, id: &str, name: &str) -> Result<Value, String> {
+pub fn read_file(host: &Host, id: &Value, name: &Value) -> Result<Value, String> {
     let _guard = lock();
-    let target = addon_file(host, id, name)?;
+    let id = safe_id(id.as_str().unwrap_or(""))?;
+    let name = name
+        .as_str()
+        .ok_or_else(|| "Ungültiger Dateiname.".to_owned())?;
+    let target = addon_file(host, &id, name)?;
     match fs::symlink_metadata(&target) {
         Ok(meta) if meta.file_type().is_symlink() || !meta.is_file() => {
             Err("Die Add-on-Datei ist unsicher.".to_owned())
@@ -93,12 +97,13 @@ pub fn read_file(host: &Host, id: &str, name: &str) -> Result<Value, String> {
     }
 }
 
-pub fn write_files(host: &Host, id: &str, files: &Value) -> Result<Value, String> {
+pub fn write_files(host: &Host, id: &Value, files: &Value) -> Result<Value, String> {
     let _guard = lock();
+    let id = safe_id(id.as_str().unwrap_or(""))?;
     let object = files
         .as_object()
         .ok_or_else(|| "Keine Dateien übergeben.".to_owned())?;
-    let dir = addon_dir(host, id)?;
+    let dir = addon_dir(host, &id)?;
     fs::create_dir_all(&dir)
         .map_err(|_| "Der Add-on-Ordner konnte nicht angelegt werden.".to_owned())?;
     for (name, content) in object {
@@ -129,7 +134,7 @@ pub fn read_data(host: &Host, id: &str) -> Result<Value, String> {
     }
 }
 
-pub fn write_data(host: &Host, id: &str, value: &Value) -> Result<Value, String> {
+pub fn write_data(host: &Host, id: &Value, value: &Value) -> Result<Value, String> {
     let _guard = lock();
     let text = value
         .as_str()
@@ -137,8 +142,9 @@ pub fn write_data(host: &Host, id: &str, value: &Value) -> Result<Value, String>
     if text.len() > MAX_DATA_BYTES {
         return Err("Der Add-on-Speicher ist auf 1 MB begrenzt.".to_owned());
     }
+    let id = safe_id(id.as_str().unwrap_or(""))?;
     let root = store_root(host)?;
-    let path = root.join(format!("{}.data.json", safe_id(id)?));
+    let path = root.join(format!("{id}.data.json"));
     if fs::symlink_metadata(&path)
         .is_ok_and(|meta| meta.file_type().is_symlink() || !meta.is_file())
     {

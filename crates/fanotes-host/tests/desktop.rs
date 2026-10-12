@@ -267,3 +267,115 @@ fn a_non_string_argument_uses_the_desktop_message() {
         "Ungültiger externer Link."
     );
 }
+
+#[test]
+fn a_non_string_addon_or_sync_argument_uses_the_desktop_message() {
+    let (_dir, vault, mut host) = host();
+    assert_eq!(
+        host.dispatch("fanotes:addons-remove", &[json!(1)])
+            .unwrap_err(),
+        "Ungültige Add-on-ID."
+    );
+    assert_eq!(
+        host.dispatch("fanotes:addons-read-data", &[json!(false)])
+            .unwrap_err(),
+        "Ungültige Add-on-ID."
+    );
+    assert_eq!(
+        host.dispatch(
+            "fanotes:addons-read-file",
+            &[json!("Not An Id"), json!(1)],
+        )
+        .unwrap_err(),
+        "Ungültige Add-on-ID."
+    );
+    assert_eq!(
+        host.dispatch(
+            "fanotes:addons-read-file",
+            &[json!("margin-notes"), json!(1)],
+        )
+        .unwrap_err(),
+        "Ungültiger Dateiname."
+    );
+    assert_eq!(
+        host.dispatch("fanotes:addons-write-files", &[json!(1), json!({})])
+            .unwrap_err(),
+        "Ungültige Add-on-ID."
+    );
+    assert_eq!(
+        host.dispatch(
+            "fanotes:addons-write-files",
+            &[json!("margin-notes"), json!(1)],
+        )
+        .unwrap_err(),
+        "Keine Dateien übergeben."
+    );
+    assert_eq!(
+        host.dispatch("fanotes:addons-write-data", &[json!(1), json!(1)])
+            .unwrap_err(),
+        "Add-on-Daten müssen ein String sein."
+    );
+    assert_eq!(
+        host.dispatch("fanotes:addons-write-data", &[json!(1), json!("{\"ok\":1}")])
+            .unwrap_err(),
+        "Ungültige Add-on-ID."
+    );
+    assert_eq!(
+        host.dispatch("fanotes:addons-fetch", &[json!(1)]).unwrap_err(),
+        "Ungültige Add-on-Adresse."
+    );
+    assert_eq!(
+        host.dispatch("fanotes:addons-net-fetch", &[json!(1)])
+            .unwrap_err(),
+        "Ungültige URL."
+    );
+    assert_eq!(
+        host.dispatch("fanotes:sync-read", &[json!(1)]).unwrap_err(),
+        "Ungültiger Sync-Pfad."
+    );
+    assert_eq!(
+        host.dispatch("fanotes:sync-remove", &[json!(false)])
+            .unwrap_err(),
+        "Ungültiger Sync-Pfad."
+    );
+    assert_eq!(
+        host.dispatch("fanotes:sync-write", &[json!(1), json!(1)])
+            .unwrap_err(),
+        "Der Sync-Inhalt muss binär sein."
+    );
+    let before: Vec<_> = fs::read_dir(&vault)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name())
+        .collect();
+    assert_eq!(
+        host.dispatch("fanotes:sync-write", &[json!(1), json!("aGVsbG8=")])
+            .unwrap_err(),
+        "Ungültiger Sync-Pfad."
+    );
+    let after: Vec<_> = fs::read_dir(&vault)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name())
+        .collect();
+    assert_eq!(before, after);
+    assert_eq!(
+        host.dispatch("fanotes:lm-studio-list-models", &[json!(1)])
+            .unwrap_err(),
+        "Die LM-Studio-Adresse ist ungültig."
+    );
+    assert_eq!(
+        host.dispatch(
+            "fanotes:lm-studio-list-models",
+            &[json!("not a url"), json!(1)],
+        )
+        .unwrap_err(),
+        "Gib eine vollständige LM-Studio-Adresse wie http://127.0.0.1:1234 ein."
+    );
+    assert_eq!(
+        host.dispatch(
+            "fanotes:lm-studio-list-models",
+            &[json!("http://127.0.0.1:1234"), json!(1)],
+        )
+        .unwrap_err(),
+        "Das LM-Studio-API-Token ist ungültig."
+    );
+}

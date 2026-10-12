@@ -706,8 +706,8 @@ fn is_snapshot_id(value: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
 }
 
-/// JavaScript `RegExp.prototype.test` stringifies its argument before matching.
-fn js_regexp_string(value: &Value) -> String {
+/// JavaScript `RegExp.prototype.test` and `String()` stringify an argument this way.
+pub(crate) fn js_regexp_string(value: &Value) -> String {
     match value {
         Value::Null => "null".to_owned(),
         Value::Bool(true) => "true".to_owned(),
