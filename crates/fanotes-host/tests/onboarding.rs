@@ -620,3 +620,39 @@ fn a_null_folder_color_discards_the_tree_cache() {
     assert!(!cache_path.is_file());
     let _ = fs::remove_dir_all(vault.parent().unwrap());
 }
+
+#[test]
+fn a_cached_tree_keeps_the_stored_order() {
+    let (vault, mut host) = host();
+    host.dispatch("fanotes:complete-onboarding", &[json!([])])
+        .unwrap();
+    fs::create_dir(vault.join("Zoo")).unwrap();
+    fs::create_dir(vault.join("Apfel")).unwrap();
+    host.dispatch("fanotes:get-tree", &[]).unwrap();
+    let cache_dir = vault.parent().unwrap().join("app/tree-cache-v1");
+    let cache_path = fs::read_dir(&cache_dir)
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    let mut parsed: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&cache_path).unwrap()).unwrap();
+    let entries = parsed["entries"].as_array_mut().unwrap();
+    entries.reverse();
+    let stored: Vec<_> = entries
+        .iter()
+        .map(|entry| entry["name"].as_str().unwrap().to_owned())
+        .collect();
+    fs::write(&cache_path, serde_json::to_string(&parsed).unwrap()).unwrap();
+    let cached = host.dispatch("fanotes:get-cached-tree", &[]).unwrap();
+    let names: Vec<_> = cached
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|entry| entry["name"].as_str().unwrap().to_owned())
+        .collect();
+    assert_eq!(names, stored);
+    assert!(names.len() >= 2);
+    assert_ne!(names.first(), names.last());
+}
