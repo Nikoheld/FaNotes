@@ -1061,9 +1061,25 @@ fn a_recognition_model_file_uses_the_desktop_checks() {
     assert_eq!(
         host.dispatch("fanotes:read-recognition-model", &[])
             .unwrap_err(),
-        "Die Datei ist keine reguläre Datei."
+        "Die gewählte Datei ist keine reguläre Datei."
     );
+    assert_eq!(
+        host.dispatch("fanotes:write-recognition-model", &[json!("{}")])
+            .unwrap_err(),
+        "Die gewählte Datei ist keine reguläre Datei."
+    );
+    assert!(path.is_dir());
     std::fs::remove_dir(&path).unwrap();
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink("elsewhere", &path).unwrap();
+        assert_eq!(
+            host.dispatch("fanotes:read-recognition-model", &[])
+                .unwrap_err(),
+            "Symbolische Links sind innerhalb des Vaults nicht erlaubt."
+        );
+        std::fs::remove_file(&path).unwrap();
+    }
     let file = std::fs::File::create(&path).unwrap();
     file.set_len(20 * 1024 * 1024 + 1).unwrap();
     assert_eq!(
