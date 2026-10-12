@@ -309,3 +309,64 @@ fn a_cached_tree_with_a_bad_byte_still_opens() {
         .is_null());
     assert!(!cache_path.is_file());
 }
+
+#[test]
+fn a_version_of_one_point_zero_still_counts_as_version_one() {
+    let dir = std::env::temp_dir().join(format!(
+        "fanotes-version-one-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    let vault = dir.join("vault");
+    fs::create_dir_all(vault.join(".fanotes")).unwrap();
+    fs::write(
+        vault.join(".fanotes/onboarding.json"),
+        "{\"version\":1.0,\"status\":\"pending\"}\n",
+    )
+    .unwrap();
+    let mut host = Host::open(dir.join("app"));
+    host.set_vault(vault.clone()).unwrap();
+    assert_eq!(
+        host.dispatch("fanotes:bootstrap", &[]).unwrap()["onboardingRequired"],
+        true
+    );
+    fs::write(
+        vault.join(".fanotes/onboarding.json"),
+        "{\"version\":1.5,\"status\":\"pending\"}\n",
+    )
+    .unwrap();
+    host.set_vault(vault.clone()).unwrap();
+    assert_eq!(
+        host.dispatch("fanotes:bootstrap", &[]).unwrap()["onboardingRequired"],
+        false
+    );
+
+    host.dispatch("fanotes:complete-onboarding", &[json!([])])
+        .unwrap();
+    host.dispatch("fanotes:get-tree", &[]).unwrap();
+    let cache_dir = dir.join("app/tree-cache-v1");
+    let cache_path = fs::read_dir(&cache_dir)
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    let text = fs::read_to_string(&cache_path).unwrap();
+    fs::write(&cache_path, text.replacen("\"version\":1", "\"version\":1.0", 1)).unwrap();
+    assert!(host
+        .dispatch("fanotes:get-cached-tree", &[])
+        .unwrap()
+        .is_array());
+    let text = fs::read_to_string(&cache_path).unwrap();
+    fs::write(&cache_path, text.replacen("\"version\":1.0", "\"version\":2", 1)).unwrap();
+    assert!(host
+        .dispatch("fanotes:get-cached-tree", &[])
+        .unwrap()
+        .is_null());
+    assert!(!cache_path.is_file());
+    let _ = fs::remove_dir_all(&dir);
+}

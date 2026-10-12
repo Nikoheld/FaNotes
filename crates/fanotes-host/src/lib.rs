@@ -1520,7 +1520,8 @@ fn valid_reset_marker(marker_path: &Path, app_data: &Path) -> bool {
     let Ok(marker) = serde_json::from_str::<Value>(&text) else {
         return false;
     };
-    if marker.get("version").and_then(Value::as_u64) != Some(1) {
+    // `marker.version !== 1` still accepts the JSON number `1.0`.
+    if marker.get("version").and_then(Value::as_f64) != Some(1.0) {
         return false;
     }
     let Some(recorded) = marker.get("userDataPath").and_then(Value::as_str) else {
@@ -2701,7 +2702,8 @@ fn read_tree_cache(app_data: &Path, root: &Path) -> Option<Value> {
             return None;
         }
     };
-    if parsed.get("version").and_then(Value::as_u64) != Some(1)
+    // `version !== 1` keeps a cache whose version is the number `1.0`.
+    if parsed.get("version").and_then(Value::as_f64) != Some(1.0)
         || parsed.get("vaultIdentity").and_then(Value::as_str) != Some(identity.as_str())
     {
         let _ = fs::remove_file(&path);
