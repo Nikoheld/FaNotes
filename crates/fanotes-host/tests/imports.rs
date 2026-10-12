@@ -91,6 +91,29 @@ fn a_worksheet_name_with_a_slash_is_not_a_title() {
         .unwrap_err();
     assert_eq!(backslash, "Dieser Name ist nicht erlaubt.");
     assert!(!vault.join(".fanotes/worksheets").exists());
+    #[cfg(unix)]
+    {
+        let embedded = host
+            .dispatch(
+                "fanotes:import-worksheet-from-data",
+                &[json!({ "name": "Notes.png\\extra", "bytes": png })],
+            )
+            .unwrap_err();
+        assert_eq!(
+            embedded,
+            "Dieses Bildformat kann nicht auf das Blatt gelegt werden."
+        );
+        let trailing = host
+            .dispatch(
+                "fanotes:import-worksheet-from-data",
+                &[json!({ "name": "Foto.png\\", "bytes": png })],
+            )
+            .unwrap_err();
+        assert_eq!(
+            trailing,
+            "Dieses Bildformat kann nicht auf das Blatt gelegt werden."
+        );
+    }
     let document = host
         .dispatch(
             "fanotes:import-worksheet-from-data",
