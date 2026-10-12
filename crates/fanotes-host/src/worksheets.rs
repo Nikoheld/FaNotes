@@ -37,7 +37,8 @@ pub fn read_worksheet(host: &Host, raw_id: &str) -> Result<Value, String> {
     let format = format_for(document["sourceRelativePath"].as_str().unwrap_or(""))?;
     stat_regular(&source, format.max_bytes)?;
     if document["kind"] == "html" {
-        let header = read_text(&source, format.max_bytes as usize).unwrap_or_default();
+        // The desktop reads only the first 8 KiB before looking for the marker.
+        let header = read_prefix(&source, 8192).unwrap_or_default();
         if !header.contains("fanotes-onenote-safe-v1") {
             return Err(
                 "Die importierte OneNote-Seite hat ihre Sicherheitsmarkierung verloren.".to_owned(),
@@ -614,6 +615,24 @@ fn stat_regular(path: &Path, max: u64) -> Result<(), String> {
         return Err("Die Arbeitsblattquelle ist ungültig.".to_owned());
     }
     Ok(())
+}
+
+fn read_prefix(path: &Path, limit: usize) -> Result<String, String> {
+    use std::io::Read;
+    let mut file =
+        fs::File::open(path).map_err(|_| "Die Datei konnte nicht gelesen werden.".to_owned())?;
+    let mut bytes = vec![0u8; limit];
+    let mut read = 0;
+    while read < limit {
+        match file.read(&mut bytes[read..]) {
+            Ok(0) => break,
+            Ok(count) => read += count,
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(_) => return Err("Die Datei konnte nicht gelesen werden.".to_owned()),
+        }
+    }
+    bytes.truncate(read);
+    Ok(lossy_utf8(bytes))
 }
 
 fn read_text(path: &Path, max: usize) -> Result<String, String> {
