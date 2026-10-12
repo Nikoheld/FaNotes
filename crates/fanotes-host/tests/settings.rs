@@ -79,6 +79,37 @@ fn invalid_settings_stay_on_the_previous_value() {
 }
 
 #[test]
+fn a_non_object_settings_save_keeps_the_current_settings() {
+    let (_app, mut host) = host();
+    host.dispatch(
+        "fanotes:save-settings",
+        &[json!({ "theme": "midnight", "openAiApiKey": "sk-keep" })],
+    )
+    .unwrap();
+    let kept = host
+        .dispatch("fanotes:save-settings", &[json!(1)])
+        .unwrap();
+    assert_eq!(kept["theme"], "midnight");
+    assert_eq!(
+        host.dispatch("fanotes:load-secure-settings", &[])
+            .unwrap()["openAiApiKey"],
+        "sk-keep"
+    );
+    let cleared = host
+        .dispatch(
+            "fanotes:save-settings",
+            &[json!([]), json!({ "clearProtectedSecrets": true })],
+        )
+        .unwrap();
+    assert_eq!(cleared["theme"], "midnight");
+    assert_eq!(
+        host.dispatch("fanotes:load-secure-settings", &[])
+            .unwrap()["openAiApiKey"],
+        ""
+    );
+}
+
+#[test]
 fn a_long_umlaut_secret_is_kept() {
     let (_app, mut host) = host();
     let secret = "Ä".repeat(2100);
