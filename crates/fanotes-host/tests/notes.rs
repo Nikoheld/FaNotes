@@ -18,6 +18,44 @@ fn host() -> (Host, std::path::PathBuf) {
 }
 
 #[test]
+fn a_note_link_reads_page_and_position_with_javascript_number() {
+    let (mut host, vault) = host();
+    std::fs::write(vault.join("Mathe/Seite.md"), b"\n").unwrap();
+    let links = host
+        .dispatch(
+            "fanotes:write-note-links",
+            &[
+                json!("Mathe/Seite.md"),
+                json!([
+                    {
+                        "id": "link-a",
+                        "sourcePath": "anders.md",
+                        "targetPath": "Physik/Kraft.md",
+                        "page": "4",
+                        "x": "0.25",
+                        "y": null,
+                        "label": "Kraft"
+                    },
+                    {
+                        "id": "link-b",
+                        "sourcePath": "anders.md",
+                        "targetPath": "Physik/Andere.md",
+                        "page": "4.5",
+                        "x": 0.1,
+                        "y": 0.2,
+                        "label": "Andere"
+                    }
+                ]),
+            ],
+        )
+        .unwrap();
+    assert_eq!(links[0]["page"], 4);
+    assert_eq!(links[0]["x"].as_f64(), Some(0.25));
+    assert_eq!(links[0]["y"].as_f64(), Some(0.0));
+    assert_eq!(links[1]["page"], 1);
+}
+
+#[test]
 fn a_subject_book_page_follows_javascript_number() {
     let (mut host, _) = host();
     let books = host
