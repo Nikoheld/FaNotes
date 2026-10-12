@@ -423,3 +423,73 @@ fn a_cached_file_size_of_twelve_point_zero_still_counts() {
     assert!(!cache_path.is_file());
     let _ = fs::remove_dir_all(vault.parent().unwrap());
 }
+
+#[test]
+fn a_null_folder_color_discards_the_tree_cache() {
+    let (vault, mut host) = host();
+    host.dispatch("fanotes:complete-onboarding", &[json!(["Mathematik"])])
+        .unwrap();
+    host.dispatch("fanotes:get-tree", &[]).unwrap();
+    let cache_dir = vault.parent().unwrap().join("app/tree-cache-v1");
+    let cache_path = fs::read_dir(&cache_dir)
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    let identity = fs::read_to_string(&cache_path)
+        .unwrap()
+        .split("\"vaultIdentity\":\"")
+        .nth(1)
+        .unwrap()
+        .split('"')
+        .next()
+        .unwrap()
+        .to_owned();
+    fs::write(
+        &cache_path,
+        format!(
+            "{}\n",
+            json!({
+                "version": 1,
+                "vaultIdentity": identity,
+                "entries": [{
+                    "name": "Ordner",
+                    "relativePath": "Ordner",
+                    "kind": "folder",
+                    "color": "#AABBCC",
+                    "children": []
+                }]
+            })
+        ),
+    )
+    .unwrap();
+    let cached = host.dispatch("fanotes:get-cached-tree", &[]).unwrap();
+    assert_eq!(cached[0]["color"], "#aabbcc");
+    assert!(cache_path.is_file());
+
+    fs::write(
+        &cache_path,
+        format!(
+            "{}\n",
+            json!({
+                "version": 1,
+                "vaultIdentity": identity,
+                "entries": [{
+                    "name": "Ordner",
+                    "relativePath": "Ordner",
+                    "kind": "folder",
+                    "color": null,
+                    "children": []
+                }]
+            })
+        ),
+    )
+    .unwrap();
+    assert!(host
+        .dispatch("fanotes:get-cached-tree", &[])
+        .unwrap()
+        .is_null());
+    assert!(!cache_path.is_file());
+    let _ = fs::remove_dir_all(vault.parent().unwrap());
+}

@@ -2781,14 +2781,14 @@ fn clean_cached_entries(
         }
         match entry.get("kind").and_then(Value::as_str) {
             Some("folder") => {
-                if let Some(color) = entry.get("color").filter(|color| !color.is_null()) {
-                    if color
+                // `entry.color !== undefined` rejects null. A missing color stays absent.
+                if entry.get("color").is_some_and(|color| {
+                    color
                         .as_str()
                         .filter(|value| folder_color_hex(value))
                         .is_none()
-                    {
-                        return Err(());
-                    }
+                }) {
+                    return Err(());
                 }
                 let empty_children = Value::Array(Vec::new());
                 let children_source = match entry.get("children") {
