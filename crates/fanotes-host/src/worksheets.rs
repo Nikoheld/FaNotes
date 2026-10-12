@@ -131,6 +131,30 @@ pub fn import_from_data(host: &Host, payload: &Value) -> Result<Value, String> {
     import_named_bytes(host, name, &extension, &bytes)
 }
 
+pub(crate) fn import_picked_worksheet(
+    host: &Host,
+    path: &Path,
+    name: &str,
+) -> Result<Value, String> {
+    let extension = crate::vault::posix_extname_en_us(name);
+    let format = format_for(&extension).map_err(|_| {
+        "Es werden PDF-, PNG-, JPEG-, WebP- und GIF-Arbeitsblätter unterstützt.".to_owned()
+    })?;
+    let meta = fs::symlink_metadata(path)
+        .map_err(|_| "Die Datei konnte nicht gelesen werden.".to_owned())?;
+    if meta.file_type().is_symlink() || !meta.is_file() {
+        return Err("Die Datei ist keine reguläre Datei.".to_owned());
+    }
+    if meta.len() > format.max_bytes {
+        return Err("Die Datei ist zu groß.".to_owned());
+    }
+    if meta.len() == 0 {
+        return Err("Das ausgewählte Arbeitsblatt ist leer.".to_owned());
+    }
+    let bytes = fs::read(path).map_err(|_| "Die Datei konnte nicht gelesen werden.".to_owned())?;
+    import_named_bytes(host, name, &extension, &bytes)
+}
+
 pub(crate) fn import_named_bytes(
     host: &Host,
     name: &str,
