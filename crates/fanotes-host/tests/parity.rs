@@ -209,6 +209,54 @@ fn an_internal_worksheet_can_be_previewed() {
 }
 
 #[test]
+fn an_asset_preview_uses_the_desktop_extension_before_the_path_shape() {
+    let (dir, mut host) = host();
+    fs::write(dir.0.join("vault").join("seite.pdf"), b"%PDF-1.4 test").unwrap();
+    fs::write(dir.0.join("vault").join("Bild.PDF"), b"%PDF-1.4 gross").unwrap();
+    let encoded = host
+        .dispatch("fanotes:read-asset-bytes", &[json!("seite.pdf/")])
+        .unwrap();
+    assert_eq!(
+        base64::engine::general_purpose::STANDARD
+            .decode(encoded.as_str().unwrap())
+            .unwrap(),
+        b"%PDF-1.4 test"
+    );
+    let data_url = host
+        .dispatch("fanotes:read-asset-data-url", &[json!("Bild.PDF/")])
+        .unwrap();
+    assert!(data_url
+        .as_str()
+        .unwrap()
+        .starts_with("data:application/pdf;base64,"));
+    assert_eq!(
+        host.dispatch("fanotes:read-asset-bytes", &[json!("seite.pdf//")])
+            .unwrap_err(),
+        "Pfad-Traversal ist nicht erlaubt."
+    );
+    assert_eq!(
+        host.dispatch("fanotes:read-asset-data-url", &[json!("../seite.pdf/")])
+            .unwrap_err(),
+        "Pfad-Traversal ist nicht erlaubt."
+    );
+    assert_eq!(
+        host.dispatch("fanotes:read-asset-bytes", &[json!("../seite.txt/")])
+            .unwrap_err(),
+        "Dieser Dateityp ist für die Vorschau nicht erlaubt."
+    );
+    assert_eq!(
+        host.dispatch("fanotes:read-asset-data-url", &[json!("../seite.txt")])
+            .unwrap_err(),
+        "Dieser Bildtyp ist für die Vorschau nicht erlaubt."
+    );
+    assert_eq!(
+        host.dispatch("fanotes:read-asset-bytes", &[json!("notes\\seite.pdf")])
+            .unwrap_err(),
+        "Nur relative Vault-Pfade sind erlaubt."
+    );
+}
+
+#[test]
 fn an_empty_asset_preview_returns_an_empty_payload() {
     let (dir, mut host) = host();
     fs::write(dir.0.join("vault").join("leer.pdf"), b"").unwrap();

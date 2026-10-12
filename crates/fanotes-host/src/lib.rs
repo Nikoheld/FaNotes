@@ -1754,11 +1754,10 @@ fn asset_mime(relative: &str) -> Option<&'static str> {
 }
 
 fn preview_extension(relative: &str) -> String {
-    let base = relative.rsplit(['/', '\\']).next().unwrap_or(relative);
-    match base.rfind('.') {
-        Some(dot) if dot > 0 => vault::locale_lower_en_us(&base[dot + 1..]),
-        _ => String::new(),
-    }
+    // Desktop `path.extname` ignores trailing slashes and keeps a backslash in the name.
+    vault::posix_extname_en_us(relative)
+        .trim_start_matches('.')
+        .to_owned()
 }
 
 /// Tree and search store the extension without its dot.
