@@ -10,7 +10,7 @@ use fanotes_famd::{companion_note_path, empty_famd_payload, serialize_famd};
 use serde_json::{json, Value};
 
 use crate::vault;
-use crate::worksheets::{decode_payload_bytes, import_named_bytes};
+use crate::worksheets::decode_payload_bytes;
 use crate::Host;
 
 pub fn import_worksheet(host: &Host) -> Result<Value, String> {
@@ -26,14 +26,7 @@ pub fn import_worksheet(host: &Host) -> Result<Value, String> {
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or("Bild.png");
-    let bytes = fs::read(&path).map_err(|_| "Das ausgewählte Arbeitsblatt ist leer.".to_owned())?;
-    let extension = vault::posix_extname(name).to_ascii_lowercase();
-    if extension.is_empty() {
-        return Err(
-            "Es werden PDF-, PNG-, JPEG-, WebP- und GIF-Arbeitsblätter unterstützt.".to_owned(),
-        );
-    }
-    import_named_bytes(host, name, &extension, &bytes)
+    crate::worksheets::import_picked_worksheet(host, &path, name)
 }
 
 pub fn import_pdf_note(host: &Host, args: &[Value]) -> Result<Value, String> {
@@ -367,6 +360,52 @@ mod tests {
             assert_eq!(named.unwrap_err(), "Dieser Name ist nicht erlaubt.");
             assert!(!vault.join("Mathe/Notes.pdf").exists());
         }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_picked_worksheet_uses_the_desktop_file_messages() {
+        let dir = std::env::temp_dir().join(format!(
+            "fanotes-worksheet-pick-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        let vault = dir.join("vault");
+        std::fs::create_dir_all(&vault).unwrap();
+        let mut host = Host::open(dir.join("app"));
+        host.set_vault(vault.clone()).unwrap();
+        let empty = dir.join("Leer.PDF");
+        std::fs::write(&empty, b"").unwrap();
+        assert_eq!(
+            crate::worksheets::import_picked_worksheet(&host, &empty, "Leer.PDF").unwrap_err(),
+            "Das ausgewählte Arbeitsblatt ist leer."
+        );
+        let text = dir.join("notes.txt");
+        std::fs::write(&text, b"hello").unwrap();
+        assert_eq!(
+            crate::worksheets::import_picked_worksheet(&host, &text, "notes.txt").unwrap_err(),
+            "Es werden PDF-, PNG-, JPEG-, WebP- und GIF-Arbeitsblätter unterstützt."
+        );
+        let fake = dir.join("Tafel.png");
+        std::fs::write(&fake, b"not a png").unwrap();
+        assert_eq!(
+            crate::worksheets::import_picked_worksheet(&host, &fake, "Tafel.png").unwrap_err(),
+            "Die ausgewählte Datei stimmt nicht mit ihrem Bild- oder PDF-Format überein."
+        );
+        assert!(!vault.join(".fanotes/worksheets").exists());
+        let png = dir.join("Tafel.png");
+        std::fs::write(&png, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).unwrap();
+        let document =
+            crate::worksheets::import_picked_worksheet(&host, &png, "Tafel.PNG").unwrap();
+        assert_eq!(document["title"], "Tafel");
+        assert!(document["sourceRelativePath"]
+            .as_str()
+            .unwrap()
+            .ends_with(".png"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
