@@ -205,16 +205,15 @@ pub(crate) fn ocr_thread_count(
     threads.max(1) as usize
 }
 
+/// `Number(request.threads)` then `Number.isSafeInteger`.
+///
+/// `"2"` and `[2]` are two threads. `2.5` and `[1, 2]` are not safe integers.
 fn integer_threads(value: Option<&Value>) -> Option<i64> {
-    let value = value?;
-    if let Some(number) = value.as_i64() {
-        return Some(number);
-    }
-    if let Some(number) = value.as_u64() {
-        return i64::try_from(number).ok();
-    }
-    let number = value.as_f64()?;
-    if number.is_finite() && number.fract() == 0.0 {
+    let number = fanotes_famd::js_number(value);
+    if number.is_finite()
+        && number.fract() == 0.0
+        && number.abs() <= 9_007_199_254_740_991.0
+    {
         Some(number as i64)
     } else {
         None
@@ -497,5 +496,9 @@ mod tests {
         assert_eq!(ocr_thread_count(Some(&json!(-3)), 4, 8), 1);
         assert_eq!(ocr_thread_count(Some(&json!(2.5)), 4, 8), 4);
         assert_eq!(ocr_thread_count(Some(&json!(8)), 0, 16), 4);
+        assert_eq!(ocr_thread_count(Some(&json!("2")), 4, 8), 2);
+        assert_eq!(ocr_thread_count(Some(&json!([2])), 4, 8), 2);
+        assert_eq!(ocr_thread_count(Some(&json!("2.5")), 4, 8), 4);
+        assert_eq!(ocr_thread_count(Some(&json!([1, 2])), 4, 8), 4);
     }
 }
