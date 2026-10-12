@@ -1,10 +1,11 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import path from 'node:path'
+import { pdfjsAssetsPlugin } from './scripts/pdfjs-assets-plugin.mjs'
 
 export default defineConfig({
   base: './',
-  plugins: [react()],
+  plugins: [react(), pdfjsAssetsPlugin()],
   resolve: {
     alias: [{
       // Transformers.js imports the all-provider ONNX entry by default. FaNotes

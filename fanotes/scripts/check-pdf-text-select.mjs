@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createServer } from 'vite'
+import { pdfjsAssetPath } from './pdfjs-assets-plugin.mjs'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const server = await createServer({
@@ -14,6 +15,7 @@ const server = await createServer({
 
 const {
   applyPdfTextOverlayScale,
+  pdfJsSupportUrls,
   pdfTextOverlayCssVars,
   pdfTextOverlayScale,
 } = await server.ssrLoadModule('/src/lib/pdfDocument.ts')
@@ -81,6 +83,40 @@ const runOnce = () => {
 
   assert.match(board, /applyPdfTextOverlayScale/)
   assert.match(board, /getViewport\(\{ scale: overlayScale, rotation: used \}\)/)
+  const support = pdfJsSupportUrls('file:///opt/fanotes/dist/index.html')
+  assert.equal(support.cMapUrl, 'file:///opt/fanotes/dist/pdfjs/cmaps/')
+  assert.equal(support.standardFontDataUrl, 'file:///opt/fanotes/dist/pdfjs/standard_fonts/')
+  assert.equal(support.wasmUrl, 'file:///opt/fanotes/dist/pdfjs/wasm/')
+  assert.equal(support.iccUrl, 'file:///opt/fanotes/dist/pdfjs/iccs/')
+  for (const href of Object.values(support)) assert.ok(href.endsWith('/'))
+  const devSupport = pdfJsSupportUrls('http://127.0.0.1:5174/')
+  assert.equal(devSupport.cMapUrl, 'http://127.0.0.1:5174/pdfjs/cmaps/')
+
+  const documentSource = readFileSync(join(root, 'src/lib/pdfDocument.ts'), 'utf8')
+  const worksheetSource = readFileSync(join(root, 'src/components/WorksheetLayer.tsx'), 'utf8')
+  for (const source of [documentSource, worksheetSource]) {
+    assert.match(source, /pdfJsDocumentOptions\(\)/)
+    assert.match(source, /getDocument\(\{/)
+  }
+  assert.match(documentSource, /pdfJsDirectoryUrl\(root, 'cmaps'\)/)
+  assert.match(documentSource, /pdfJsDirectoryUrl\(root, 'standard_fonts'\)/)
+  assert.match(documentSource, /pdfJsDirectoryUrl\(root, 'wasm'\)/)
+  assert.match(documentSource, /pdfJsDirectoryUrl\(root, 'iccs'\)/)
+  assert.match(readFileSync(join(root, 'vite.config.ts'), 'utf8'), /pdfjsAssetsPlugin\(\)/)
+
+  const packageRoot = join(root, 'node_modules/pdfjs-dist')
+  assert.ok(existsSync(join(packageRoot, 'cmaps/78-EUC-H.bcmap')))
+  assert.ok(existsSync(join(packageRoot, 'standard_fonts/LiberationSans-Regular.ttf')))
+  assert.ok(existsSync(join(packageRoot, 'wasm/openjpeg.wasm')))
+  assert.ok(existsSync(join(packageRoot, 'wasm/jbig2.wasm')))
+  assert.ok(existsSync(join(packageRoot, 'iccs/CGATS001Compat-v2-micro.icc')))
+  assert.equal(
+    pdfjsAssetPath('/pdfjs/cmaps/78-EUC-H.bcmap', packageRoot),
+    join(packageRoot, 'cmaps/78-EUC-H.bcmap'),
+  )
+  assert.equal(pdfjsAssetPath('/pdfjs/cmaps/../wasm/openjpeg.wasm', packageRoot), null)
+  assert.equal(pdfjsAssetPath('/pdfjs/secret/openjpeg.wasm', packageRoot), null)
+
   assert.equal(pointerEventsForInkLayer('pdf-text', false), 'auto')
   assert.equal(pointerEventsForInkLayer('pdf-text', true), 'none')
   const inking = css.slice(css.indexOf('.pdf-note-view.is-inking,'), css.indexOf('.pdf-note-view.is-inking,') + 900)

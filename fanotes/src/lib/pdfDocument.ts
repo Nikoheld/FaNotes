@@ -390,6 +390,41 @@ export const planPdfPagePaint = (input: PdfPaintPlanInput, current: PdfPaintStat
   return { base, detail: { key, box } }
 }
 
+export type PdfJsSupportUrls = {
+  cMapUrl: string
+  standardFontDataUrl: string
+  wasmUrl: string
+  iccUrl: string
+}
+
+const pdfJsDirectoryUrl = (root: URL, directory: string) => {
+  const href = new URL(`${directory}/`, root).href
+  if (!href.endsWith('/')) throw new Error(`pdf.js ${directory} must end with /`)
+  return href
+}
+
+/** Directory URLs pdf.js fetches. Each one ends with a slash. */
+export const pdfJsSupportUrls = (baseUri: string): PdfJsSupportUrls => {
+  const root = new URL('pdfjs/', baseUri)
+  return {
+    cMapUrl: pdfJsDirectoryUrl(root, 'cmaps'),
+    standardFontDataUrl: pdfJsDirectoryUrl(root, 'standard_fonts'),
+    wasmUrl: pdfJsDirectoryUrl(root, 'wasm'),
+    iccUrl: pdfJsDirectoryUrl(root, 'iccs'),
+  }
+}
+
+export const pdfJsDocumentOptions = (baseUri?: string) => {
+  const base = baseUri || (typeof document !== 'undefined' ? document.baseURI : '')
+  if (!base) throw new Error('pdf.js asset base is missing')
+  return {
+    ...pdfJsSupportUrls(base),
+    cMapPacked: true as const,
+    useWasm: true as const,
+    useSystemFonts: true as const,
+  }
+}
+
 export const openPdfDocument = async (
   bytes: Uint8Array,
   password?: string,
@@ -400,10 +435,10 @@ export const openPdfDocument = async (
   const task = getDocument({
     data: copy,
     password: password || undefined,
-    useSystemFonts: true,
     disableAutoFetch: true,
     disableStream: true,
     disableRange: true,
+    ...pdfJsDocumentOptions(),
   })
   const loaded = await task.promise
   if (loaded.numPages > MAX_PDF_NOTE_PAGES) {

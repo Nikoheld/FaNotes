@@ -3,6 +3,7 @@ import { Check, FileText, Highlighter, Image as ImageIcon, LoaderCircle, Plus, T
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import type { PDFDocumentLoadingTask, PDFDocumentProxy, PDFPageProxy } from 'pdfjs-dist'
 import type { WorksheetDocument, WorksheetHighlight, WorksheetTextBox } from '../types'
+import { pdfJsDocumentOptions } from '../lib/pdfDocument'
 import { WORKSHEET_INKING_CLASS } from '../lib/pdfInkHit'
 import { createPdfPagePainter, type PdfPagePainter } from '../lib/pdfPagePainter'
 import { resolvePaperZoomScroller, watchSheetZoom } from '../lib/paperView'
@@ -383,10 +384,10 @@ export const WorksheetLayer = forwardRef<WorksheetLayerHandle, WorksheetLayerPro
           : payload.bytes.slice()
         const task = getDocument({
           data: copy,
-          useSystemFonts: true,
           disableAutoFetch: true,
           disableStream: true,
           disableRange: true,
+          ...pdfJsDocumentOptions(),
         })
         pdfTaskRef.current = task
         const loaded = await task.promise
