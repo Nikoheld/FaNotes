@@ -524,3 +524,61 @@ fn a_markdown_note_does_not_hide_its_handwriting_file() {
         .unwrap();
     assert!(hidden.as_array().unwrap().is_empty());
 }
+
+#[cfg(unix)]
+#[test]
+fn a_linux_note_name_keeps_its_backslash() {
+    let mut host = host();
+    let vault = host.vault.clone().unwrap();
+    std::fs::create_dir_all(vault.join("Ordner")).unwrap();
+    std::fs::write(vault.join("My\\Notes.md"), b"Backslashwort\n").unwrap();
+    std::fs::write(
+        vault.join("Ordner").join("My\\Notes.md"),
+        b"Verschachtelt\n",
+    )
+    .unwrap();
+
+    let tree = host.dispatch("fanotes:get-tree", &[]).unwrap();
+    let paths: Vec<_> = tree
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|entry| {
+            let mut found = Vec::new();
+            if entry["relativePath"].as_str() == Some("My\\Notes.md") {
+                found.push(entry["relativePath"].as_str().unwrap());
+            }
+            if let Some(children) = entry["children"].as_array() {
+                for child in children {
+                    if let Some(path) = child["relativePath"].as_str() {
+                        found.push(path);
+                    }
+                }
+            }
+            found
+        })
+        .collect();
+    assert!(paths.contains(&"My\\Notes.md"), "{tree}");
+    assert!(paths.contains(&"Ordner/My\\Notes.md"), "{tree}");
+
+    let root_hit = host
+        .dispatch("fanotes:search", &[json!("Backslashwort")])
+        .unwrap();
+    assert_eq!(root_hit[0]["relativePath"], "My\\Notes.md");
+    assert_eq!(root_hit[0]["title"], "My\\Notes");
+    let nested_hit = host
+        .dispatch("fanotes:search", &[json!("Verschachtelt")])
+        .unwrap();
+    assert_eq!(nested_hit[0]["relativePath"], "Ordner/My\\Notes.md");
+    assert_eq!(nested_hit[0]["title"], "My\\Notes");
+
+    let scan = host.dispatch("fanotes:sync-scan", &[]).unwrap();
+    let synced: Vec<_> = scan
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|entry| entry["path"].as_str())
+        .collect();
+    assert!(synced.contains(&"My\\Notes.md"), "{scan}");
+    assert!(synced.contains(&"Ordner/My\\Notes.md"), "{scan}");
+}
