@@ -582,3 +582,46 @@ fn a_linux_note_name_keeps_its_backslash() {
     assert!(synced.contains(&"My\\Notes.md"), "{scan}");
     assert!(synced.contains(&"Ordner/My\\Notes.md"), "{scan}");
 }
+
+#[test]
+fn search_uses_the_desktop_asset_folder_checks() {
+    let mut host = host();
+    let vault = host.vault.clone().unwrap();
+    std::fs::write(vault.join("Bio/Blatt.md"), "Licht\n").unwrap();
+    assert!(host
+        .dispatch("fanotes:search", &[json!("Licht")])
+        .unwrap()
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|hit| hit["relativePath"] == "Bio/Blatt.md"));
+    assert!(vault.join(".fanotes/assets").is_dir());
+
+    std::fs::remove_dir(vault.join(".fanotes/assets")).unwrap();
+    std::fs::write(vault.join(".fanotes/assets"), b"not a folder").unwrap();
+    assert_eq!(
+        host.dispatch("fanotes:search", &[json!("Licht")])
+            .unwrap_err(),
+        "Der interne Asset-Ordner ist unsicher."
+    );
+    assert_eq!(
+        host.dispatch("fanotes:list-drawings", &[])
+            .unwrap_err(),
+        "Der interne Asset-Ordner ist unsicher."
+    );
+
+    let mut host = host();
+    let vault = host.vault.clone().unwrap();
+    std::fs::write(vault.join("Bio/Blatt.md"), "Licht\n").unwrap();
+    std::fs::write(vault.join(".fanotes"), b"not a folder").unwrap();
+    assert_eq!(
+        host.dispatch("fanotes:search", &[json!("Licht")])
+            .unwrap_err(),
+        "Der interne FaNotes-Ordner ist unsicher."
+    );
+    assert_eq!(
+        host.dispatch("fanotes:list-drawings", &[])
+            .unwrap_err(),
+        "Der interne FaNotes-Ordner ist unsicher."
+    );
+}

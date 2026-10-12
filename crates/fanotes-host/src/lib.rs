@@ -1275,7 +1275,7 @@ impl Host {
             }
             hits.push(hit);
         }
-        search_drawings(root, &needle, &query, &owners, &mut hits);
+        search_drawings(root, &needle, &query, &owners, &mut hits)?;
         hits.sort_by(|left, right| {
             right["matches"]
                 .as_u64()
@@ -3348,24 +3348,11 @@ fn search_drawings(
     query: &str,
     owners: &std::collections::HashMap<String, String>,
     hits: &mut Vec<Value>,
-) {
-    let internal = root.join(".fanotes");
-    let Ok(internal_meta) = fs::symlink_metadata(&internal) else {
-        return;
-    };
-    if internal_meta.file_type().is_symlink() || !internal_meta.is_dir() {
-        return;
-    }
-    let assets = internal.join("assets");
-    let Ok(assets_meta) = fs::symlink_metadata(&assets) else {
-        return;
-    };
-    if assets_meta.file_type().is_symlink() || !assets_meta.is_dir() {
-        return;
-    }
-    let Ok(entries) = fs::read_dir(&assets) else {
-        return;
-    };
+) -> Result<(), String> {
+    // Desktop search calls `ensureInternalAssetsDirectory` before it lists drawings.
+    let assets = drawings::assets_dir(root)?;
+    let entries = fs::read_dir(&assets)
+        .map_err(|_| "Der interne Asset-Ordner ist unsicher.".to_owned())?;
     for entry in entries.flatten() {
         let name = entry.file_name().to_string_lossy().to_string();
         let Some((id, extension)) = name.rsplit_once('.') else {
@@ -3422,6 +3409,7 @@ fn search_drawings(
         }
         hits.push(hit);
     }
+    Ok(())
 }
 
 struct SearchFile {
