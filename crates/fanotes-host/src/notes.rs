@@ -670,7 +670,27 @@ fn history_dir(root: &Path, relative: &str) -> Result<PathBuf, String> {
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect::<String>();
-    let history = crate::vault::ensure_internal_directory(root)?.join("history");
+    // Desktop history joins `.fanotes/history` and reads the index. A missing
+    // folder stays missing. `mkdir` on a snapshot creates `.fanotes` beside a
+    // leftover `.lernwerk` folder instead of renaming that folder into place.
+    let fanotes = root.join(".fanotes");
+    match fs::symlink_metadata(&fanotes) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Ok(meta) if meta.file_type().is_symlink() || !meta.is_dir() => {
+            return Err("Der interne FaNotes-Ordner ist unsicher.".to_owned());
+        }
+        Ok(_) => {
+            let root_real = fs::canonicalize(root)
+                .map_err(|_| "Der interne FaNotes-Ordner verlässt den Vault.".to_owned())?;
+            let real = fs::canonicalize(&fanotes)
+                .map_err(|_| "Der interne FaNotes-Ordner verlässt den Vault.".to_owned())?;
+            if real == root_real || !crate::vault::is_inside_root(&root_real, &real) {
+                return Err("Der interne FaNotes-Ordner verlässt den Vault.".to_owned());
+            }
+        }
+        Err(_) => return Err("Der interne FaNotes-Ordner ist unsicher.".to_owned()),
+    }
+    let history = fanotes.join("history");
     if let Ok(meta) = fs::symlink_metadata(&history) {
         if meta.file_type().is_symlink() || !meta.is_dir() {
             return Err("Der Verlaufsordner ist unsicher.".to_owned());
