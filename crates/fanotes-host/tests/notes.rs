@@ -476,6 +476,22 @@ fn a_missing_markdown_note_is_not_created_by_writing() {
 }
 
 #[test]
+fn a_kelvin_markdown_note_stores_handwriting_beside_the_same_stem() {
+    let (mut host, vault) = host();
+    let name = "Notiz.mar\u{212A}down";
+    let created = host
+        .dispatch("fanotes:create-note", &[json!(""), json!(name)])
+        .unwrap();
+    assert_eq!(created["relativePath"], name);
+    assert_eq!(created["entry"]["extension"], "markdown");
+    assert!(vault.join(name).is_file());
+    assert!(vault.join("Notiz.famd").is_file());
+    assert!(!vault.join("Notiz.m.famd").exists());
+    let sidecar = std::fs::read_to_string(vault.join("Notiz.famd")).unwrap();
+    assert!(sidecar.contains("# Notiz"));
+}
+
+#[test]
 fn a_second_note_is_numbered_and_reads_without_the_sidecar() {
     let (mut host, vault) = host();
     let first = host
