@@ -686,17 +686,16 @@ fn a_second_note_is_numbered_and_reads_without_the_sidecar() {
         .dispatch("fanotes:create-note", &[json!(null), json!("Leer")])
         .unwrap();
     assert_eq!(null_note["relativePath"], "Leer.md");
-    assert_eq!(
-        host.dispatch("fanotes:create-folder", &[json!(null)])
-            .unwrap_err(),
-        "Ungültiger Vault-Pfad."
-    );
+    let null_folder = host
+        .dispatch("fanotes:create-folder", &[json!(null), json!(null)])
+        .unwrap();
+    assert_eq!(null_folder["relativePath"], "New folder");
     let numbered_folder = host
         .dispatch("fanotes:create-folder", &[json!(""), json!(1)])
         .unwrap();
-    assert_eq!(numbered_folder["relativePath"], "New folder");
+    assert_eq!(numbered_folder["relativePath"], "New folder 2");
     let omitted_folder = host.dispatch("fanotes:create-folder", &[]).unwrap();
-    assert_eq!(omitted_folder["relativePath"], "New folder 2");
+    assert_eq!(omitted_folder["relativePath"], "New folder 3");
     let folder = host
         .dispatch("fanotes:create-folder", &[json!(""), json!("Ordner")])
         .unwrap();

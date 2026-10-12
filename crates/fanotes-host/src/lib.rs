@@ -1882,9 +1882,12 @@ fn loose_string(args: &[Value], index: usize) -> String {
 }
 
 /// A missing folder parent is the vault root. Any other non-string is rejected.
+///
+/// The React bundle omits the parent with `undefined`. The Tauri bridge encodes
+/// that as JSON `null`, which is the same root as a missing argument.
 fn folder_parent(args: &[Value]) -> Result<String, String> {
     match args.first() {
-        None => Ok(String::new()),
+        None | Some(Value::Null) => Ok(String::new()),
         Some(Value::String(value)) => Ok(value.clone()),
         Some(_) => Err("Ungültiger Vault-Pfad.".to_owned()),
     }
