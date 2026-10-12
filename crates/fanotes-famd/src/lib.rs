@@ -540,43 +540,10 @@ fn to_base36(mut value: u64) -> String {
     String::from_utf8(bytes).unwrap_or_else(|_| "0".to_owned())
 }
 
-/// `parsePageStats` from the desktop companion codec.
+/// The editor stores page stats with fields beyond the five companion keys.
+/// An object is kept whole. An array is not a stats record.
 fn parse_page_stats(value: Option<&Value>) -> Option<Value> {
-    let object = value?.as_object()?;
-    let created = page_stat_time(object.get("createdAt"))?;
-    let modified = page_stat_time(object.get("modifiedAt")).unwrap_or_else(|| created.clone());
-    let opened = page_stat_time(object.get("lastOpenedAt")).unwrap_or_else(|| created.clone());
-    let mut stats = Map::new();
-    stats.insert("createdAt".into(), Value::String(created));
-    stats.insert("modifiedAt".into(), Value::String(modified));
-    stats.insert("lastOpenedAt".into(), Value::String(opened));
-    stats.insert(
-        "dwellMs".into(),
-        Value::Number(serde_json::Number::from(js_floor_count(
-            object.get("dwellMs"),
-        ))),
-    );
-    stats.insert(
-        "openCount".into(),
-        Value::Number(serde_json::Number::from(js_floor_count(
-            object.get("openCount"),
-        ))),
-    );
-    Some(Value::Object(stats))
-}
-
-fn page_stat_time(value: Option<&Value>) -> Option<String> {
-    value.and_then(Value::as_str).and_then(canonical_iso)
-}
-
-/// `Number.isFinite(n) && n >= 0 ? Math.floor(n) : 0`.
-fn js_floor_count(value: Option<&Value>) -> i64 {
-    let number = js_number(value);
-    if number.is_finite() && number >= 0.0 {
-        number.floor() as i64
-    } else {
-        0
-    }
+    value.filter(|stats| stats.is_object()).cloned()
 }
 
 fn is_record_id(value: &str) -> bool {
@@ -1309,29 +1276,17 @@ mod tests {
     }
 
     #[test]
-    fn page_stats_use_the_desktop_dates_and_counts() {
+    fn page_stats_keep_editor_fields_without_a_creation_time() {
         let json = format!(
-            r#"{{"schema":"{FAMD_SCHEMA}","updatedAt":"2026-01-02T00:00:00.000Z","ink":null,"worksheets":[],"pageStats":{{"createdAt":"2026-01-02T03:04Z","dwellMs":"12.9","openCount":true}}}}"#
+            r#"{{"schema":"{FAMD_SCHEMA}","updatedAt":"2026-01-02T00:00:00.000Z","ink":null,"worksheets":[],"pageStats":{{"words":2,"typing":{{"wordsAdded":4}}}}}}"#
         );
         let source = format!(
             "<!-- fanotes-famd:v1 chars={} -->\n{json}\n",
             super::js_len(&json)
         );
         let stats = parse_famd(&source).payload.unwrap().page_stats.unwrap();
-        assert_eq!(stats["createdAt"], "2026-01-02T03:04:00.000Z");
-        assert_eq!(stats["modifiedAt"], "2026-01-02T03:04:00.000Z");
-        assert_eq!(stats["lastOpenedAt"], "2026-01-02T03:04:00.000Z");
-        assert_eq!(stats["dwellMs"], 12);
-        assert_eq!(stats["openCount"], 1);
-
-        let missing = format!(
-            r#"{{"schema":"{FAMD_SCHEMA}","updatedAt":"2026-01-02T00:00:00.000Z","ink":null,"worksheets":[],"pageStats":{{"dwellMs":4}}}}"#
-        );
-        let source = format!(
-            "<!-- fanotes-famd:v1 chars={} -->\n{missing}\n",
-            super::js_len(&missing)
-        );
-        assert!(parse_famd(&source).payload.unwrap().page_stats.is_none());
+        assert_eq!(stats["words"], 2);
+        assert_eq!(stats["typing"]["wordsAdded"], 4);
 
         let payload = FamdPayload {
             schema: FAMD_SCHEMA.to_string(),
@@ -1341,16 +1296,10 @@ mod tests {
             paper_style: None,
             note_links: Vec::new(),
             note_backups: Vec::new(),
-            page_stats: Some(serde_json::json!({
-                "createdAt": "2026-2-31",
-                "dwellMs": -4,
-                "openCount": "3.2"
-            })),
+            page_stats: Some(serde_json::json!({ "words": 2 })),
         };
         let saved = serialize_famd("", &payload);
         let again = parse_famd(&saved).payload.unwrap().page_stats.unwrap();
-        assert_eq!(again["createdAt"], "2026-03-03T00:00:00.000Z");
-        assert_eq!(again["dwellMs"], 0);
-        assert_eq!(again["openCount"], 3);
+        assert_eq!(again["words"], 2);
     }
 }
