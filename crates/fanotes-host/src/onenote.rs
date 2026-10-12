@@ -633,24 +633,26 @@ fn page_parents(html_files: &[PathBuf], output_root: &Path) -> HashMap<PathBuf, 
 
 /// Desktop pattern: the last `\bl[1-9]\b` inside the first matching `class`.
 ///
-/// Word boundaries are ASCII, so a hyphen or a byte-order mark still counts.
-/// The `regex` crate has no backreference, so the quote pair is matched here.
+/// A `/iu` word boundary treats the long s and the Kelvin sign as letters.
+/// A hyphen or a byte-order mark still splits the token. The `regex` crate
+/// has no backreference, so the quote pair is matched here.
 fn outline_level(attributes: &str) -> usize {
     let bytes = attributes.as_bytes();
     let mut index = 0;
     while index < bytes.len() {
-        if class_attribute_at(bytes, index) {
-            let quote_at = index + 6;
-            if quote_at < bytes.len() && matches!(bytes[quote_at], b'"' | b'\'') {
-                let quote = bytes[quote_at];
-                let start = quote_at + 1;
-                if let Some(end) = bytes[start..].iter().position(|byte| *byte == quote) {
-                    let interior = &attributes[start..start + end];
-                    let other = if quote == b'"' { '\'' } else { '"' };
-                    if !interior.contains(other) {
-                        if let Some(level) = last_outline_digit(interior) {
-                            return level;
-                        }
+        let Some(quote_at) = class_value_at(attributes, index) else {
+            index += 1;
+            continue;
+        };
+        if quote_at < bytes.len() && matches!(bytes[quote_at], b'"' | b'\'') {
+            let quote = bytes[quote_at];
+            let start = quote_at + 1;
+            if let Some(end) = bytes[start..].iter().position(|byte| *byte == quote) {
+                let interior = &attributes[start..start + end];
+                let other = if quote == b'"' { '\'' } else { '"' };
+                if !interior.contains(other) {
+                    if let Some(level) = last_outline_digit(interior) {
+                        return level;
                     }
                 }
             }
@@ -660,41 +662,95 @@ fn outline_level(attributes: &str) -> usize {
     1
 }
 
-fn class_attribute_at(bytes: &[u8], index: usize) -> bool {
-    let boundary = index == 0 || !is_ascii_word(bytes[index - 1]);
-    boundary && index + 6 <= bytes.len() && bytes[index..index + 6].eq_ignore_ascii_case(b"class=")
+/// Start of the quoted class value, after `class=`.
+///
+/// `/iu` folds a long s in `class`, and `\b` treats that letter and the Kelvin
+/// sign as word characters.
+fn class_value_at(attributes: &str, index: usize) -> Option<usize> {
+    if !attributes.is_char_boundary(index) {
+        return None;
+    }
+    let boundary = index == 0
+        || attributes[..index]
+            .chars()
+            .next_back()
+            .is_none_or(|character| !is_iu_word_char(character));
+    if !boundary {
+        return None;
+    }
+    let after_name = strip_iu_keyword(&attributes[index..], "class")?;
+    let mut chars = after_name.chars();
+    if chars.next() != Some('=') {
+        return None;
+    }
+    Some(attributes.len() - chars.as_str().len())
+}
+
+fn strip_iu_keyword<'a>(value: &'a str, keyword: &str) -> Option<&'a str> {
+    let mut rest = value;
+    for expected in keyword.chars() {
+        let mut chars = rest.chars();
+        let actual = chars.next()?;
+        let folded = match actual {
+            '\u{017F}' => 's',
+            '\u{212A}' => 'k',
+            'A'..='Z' => actual.to_ascii_lowercase(),
+            other => other,
+        };
+        if folded != expected {
+            return None;
+        }
+        rest = chars.as_str();
+    }
+    Some(rest)
 }
 
 fn last_outline_digit(interior: &str) -> Option<usize> {
-    let bytes = interior.as_bytes();
+    let chars: Vec<char> = interior.chars().collect();
     let mut found = None;
-    for index in 0..bytes.len() {
-        let boundary = index == 0 || !is_ascii_word(bytes[index - 1]);
-        if !boundary || index + 2 > bytes.len() || !bytes[index].eq_ignore_ascii_case(&b'l') {
+    for index in 0..chars.len() {
+        let boundary = index == 0 || !is_iu_word_char(chars[index - 1]);
+        if !boundary || !chars[index].eq_ignore_ascii_case(&'l') {
             continue;
         }
-        let digit = bytes[index + 1];
-        let after = index + 2;
-        if (b'1'..=b'9').contains(&digit) && (after == bytes.len() || !is_ascii_word(bytes[after]))
+        let Some(digit) = chars
+            .get(index + 1)
+            .and_then(|character| character.to_digit(10))
+        else {
+            continue;
+        };
+        if !(1..=9).contains(&digit) {
+            continue;
+        }
+        if chars
+            .get(index + 2)
+            .is_none_or(|character| !is_iu_word_char(*character))
         {
-            found = Some((digit - b'0') as usize);
+            found = Some(digit as usize);
         }
     }
     found
 }
 
-fn is_ascii_word(byte: u8) -> bool {
-    byte.is_ascii_alphanumeric() || byte == b'_'
+/// Word characters for a JavaScript `/iu` `\b`.
+fn is_iu_word_char(character: char) -> bool {
+    character.is_ascii_alphanumeric()
+        || character == '_'
+        || character == '\u{017F}'
+        || character == '\u{212A}'
 }
 
 fn attr(attributes: &str, name: &str) -> Option<String> {
     let needle = format!("{name}=").to_ascii_lowercase();
     let lower = attributes.to_ascii_lowercase();
-    let bytes = lower.as_bytes();
     let mut search_from = 0;
     let index = loop {
         let found = lower[search_from..].find(&needle)? + search_from;
-        let boundary = found == 0 || !is_ascii_word(bytes[found - 1]);
+        let boundary = found == 0
+            || attributes[..found]
+                .chars()
+                .next_back()
+                .is_none_or(|character| !is_iu_word_char(character));
         if boundary {
             break found;
         }
@@ -2011,6 +2067,11 @@ mod tests {
         assert_eq!(outline_level(r#" data-class="l6" class="page""#), 6);
         assert_eq!(outline_level(r#" myclass="l6""#), 1);
         assert_eq!(outline_level(r#" class="_l2""#), 1);
+        assert_eq!(outline_level(" cla\u{017F}s=\"l2\""), 2);
+        assert_eq!(outline_level(" \u{017F}class=\"l2\""), 1);
+        assert_eq!(outline_level(" class=\"\u{017F}l2\""), 1);
+        assert_eq!(outline_level(" class=\"l2\u{017F}\""), 1);
+        assert_eq!(outline_level(" class=\"l2\u{212A}\""), 1);
         let _ = std::fs::remove_dir_all(&root);
     }
 
