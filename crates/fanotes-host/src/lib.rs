@@ -3018,7 +3018,6 @@ fn clean_cached_entries(
             _ => return Err(()),
         }
     }
-    cleaned.sort_by(entry_name_order);
     Ok(cleaned)
 }
 
