@@ -410,10 +410,11 @@ fn parse_gemini_models(body: &Value) -> Result<Vec<Value>, String> {
             {
                 return None;
             }
-            let key = name.trim_start_matches("models/");
+            let key = name.strip_prefix("models/").unwrap_or(name);
             let display = entry
                 .get("displayName")
                 .and_then(Value::as_str)
+                .filter(|text| !text.is_empty())
                 .unwrap_or(key);
             let mut record = model_record("gemini", key, display);
             set_model_details(
@@ -454,6 +455,7 @@ fn parse_anthropic_models(body: &Value) -> Result<Vec<Value>, String> {
             let display = entry
                 .get("display_name")
                 .and_then(Value::as_str)
+                .filter(|text| !text.is_empty())
                 .unwrap_or(id);
             let mut record = model_record("anthropic", id, display);
             set_model_details(
@@ -1833,6 +1835,16 @@ mod tests {
         assert_eq!(gemini[0]["key"], "gemini-2.5-flash");
         assert_eq!(gemini[0]["displayName"], "Gemini Flash");
         assert_eq!(gemini[0]["publisher"], "Google");
+        let nested = parse_gemini_models(&json!({
+            "models": [{
+                "name": "models/models/gemini-2.5-flash",
+                "displayName": "",
+                "supportedGenerationMethods": ["generateContent"]
+            }]
+        }))
+        .unwrap();
+        assert_eq!(nested[0]["key"], "models/gemini-2.5-flash");
+        assert_eq!(nested[0]["displayName"], "models/gemini-2.5-flash");
 
         let anthropic = parse_anthropic_models(&json!({
             "data": [{ "id": "claude-sonnet", "display_name": "Claude Sonnet" }]
@@ -1840,6 +1852,12 @@ mod tests {
         .unwrap();
         assert_eq!(anthropic[0]["provider"], "anthropic");
         assert_eq!(anthropic[0]["displayName"], "Claude Sonnet");
+        let unnamed = parse_anthropic_models(&json!({
+            "data": [{ "id": "claude-haiku", "display_name": "" }]
+        }))
+        .unwrap();
+        assert_eq!(unnamed[0]["key"], "claude-haiku");
+        assert_eq!(unnamed[0]["displayName"], "claude-haiku");
         assert_eq!(anthropic[0]["publisher"], "Anthropic");
     }
 }
