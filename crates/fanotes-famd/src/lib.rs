@@ -70,13 +70,39 @@ pub fn is_paper_style(value: &str) -> bool {
 }
 
 pub fn note_stem(relative_path: &str) -> String {
-    let lower = relative_path.to_lowercase();
     for extension in [".markdown", ".famd", ".pdf", ".md"] {
-        if lower.ends_with(extension) {
-            return relative_path[..relative_path.len() - extension.len()].to_string();
+        if let Some(stem) = strip_iu_suffix(relative_path, extension) {
+            return stem.to_string();
         }
     }
     relative_path.to_string()
+}
+
+/// Drops a suffix matched by JavaScript `/\.(md|markdown|famd|pdf)$/iu`.
+///
+/// The Kelvin sign is `k`, so `.marKdown` is the whole `.markdown` suffix.
+/// Subtracting the ASCII byte length would leave `Notiz.m`.
+fn strip_iu_suffix<'a>(value: &'a str, suffix: &str) -> Option<&'a str> {
+    let suffix: Vec<char> = suffix.chars().collect();
+    let chars: Vec<(usize, char)> = value.char_indices().collect();
+    if chars.len() < suffix.len() {
+        return None;
+    }
+    let start = chars.len() - suffix.len();
+    let matches = suffix
+        .iter()
+        .enumerate()
+        .all(|(offset, expected)| iu_fold(chars[start + offset].1) == *expected);
+    matches.then_some(&value[..chars[start].0])
+}
+
+fn iu_fold(character: char) -> char {
+    match character {
+        '\u{017F}' => 's',
+        '\u{212A}' => 'k',
+        'A'..='Z' => character.to_ascii_lowercase(),
+        other => other,
+    }
 }
 
 pub fn companion_note_path(relative_path: &str, extension: &str) -> String {
@@ -486,14 +512,9 @@ fn collapse_ws(value: &str) -> String {
 
 fn link_stem(target_path: &str) -> String {
     let base = target_path.rsplit('/').next().unwrap_or(target_path);
-    let lower = base.to_lowercase();
-    let stem = if lower.ends_with(".markdown") {
-        &base[..base.len() - ".markdown".len()]
-    } else if lower.ends_with(".md") {
-        &base[..base.len() - 3]
-    } else {
-        base
-    };
+    let stem = strip_iu_suffix(base, ".markdown")
+        .or_else(|| strip_iu_suffix(base, ".md"))
+        .unwrap_or(base);
     if stem.is_empty() {
         "Notiz".to_string()
     } else {

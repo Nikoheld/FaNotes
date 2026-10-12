@@ -78,6 +78,18 @@ fn check_famd_roundtrip_matches_the_electron_codec() {
         companion_note_path("Mathe/Skript.pdf", ".famd"),
         "Mathe/Skript.famd"
     );
+    assert_eq!(
+        companion_note_path("Notiz.mar\u{212A}down", ".famd"),
+        "Notiz.famd"
+    );
+    assert_eq!(
+        companion_note_path("Mathe/Notiz.MARKDOWN", ".famd"),
+        "Mathe/Notiz.famd"
+    );
+    assert_eq!(
+        companion_note_path("Notiz.mar\u{017F}down", ".famd"),
+        "Notiz.mar\u{017F}down.famd"
+    );
 
     let poisoned = format!("{encoded}\n<!-- fanotes-famd:v1 chars=2 -->\n{{}}");
     assert!(parse_famd(&poisoned).payload.is_none());
