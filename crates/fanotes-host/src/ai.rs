@@ -108,6 +108,7 @@ pub fn transform(payload: &Value) -> Result<Value, String> {
             SYSTEM_PROMPT,
             temperature,
             max_tokens,
+            "Der AI-Anbieter hat kein verwendbares Markdown-Dokument zurückgegeben.",
         )?,
         "openai" => openai_response(
             &json!({
@@ -187,6 +188,7 @@ pub fn transform_lm_studio(payload: &Value) -> Result<Value, String> {
         LM_STUDIO_SYSTEM_PROMPT,
         temperature,
         output_token_limit(&markdown),
+        "LM Studio hat keine Textantwort geliefert.",
     )?;
     Ok(json!({
         "markdown": unwrap_markdown_with(
@@ -974,6 +976,7 @@ fn lm_studio_chat(
     system_prompt: &str,
     temperature: f64,
     max_tokens: u64,
+    missing: &str,
 ) -> Result<AiReply, String> {
     let origin = origin(connection, "lmstudio")?;
     match request_json(
@@ -991,7 +994,7 @@ fn lm_studio_chat(
         })),
         Duration::from_secs(600),
     ) {
-        Ok(body) => lm_studio_text(&body),
+        Ok(body) => lm_studio_text(&body, missing),
         Err(error) if error.contains("[HTTP 404]") => chat_completions(
             connection,
             model,
@@ -999,16 +1002,17 @@ fn lm_studio_chat(
             system_prompt,
             temperature,
             max_tokens,
+            missing,
         ),
         Err(error) => Err(error),
     }
 }
 
-fn lm_studio_text(body: &Value) -> Result<AiReply, String> {
+fn lm_studio_text(body: &Value, missing: &str) -> Result<AiReply, String> {
     let items = body
         .get("output")
         .and_then(Value::as_array)
-        .ok_or_else(|| "LM Studio hat keine Textantwort geliefert.".to_owned())?;
+        .ok_or_else(|| missing.to_owned())?;
     let messages: Vec<&str> = items
         .iter()
         .filter_map(|item| {
@@ -1020,7 +1024,7 @@ fn lm_studio_text(body: &Value) -> Result<AiReply, String> {
         })
         .collect();
     if messages.is_empty() {
-        return Err("LM Studio hat keine Textantwort geliefert.".to_owned());
+        return Err(missing.to_owned());
     }
     Ok(AiReply {
         text: messages.join("\n\n"),
@@ -1103,6 +1107,7 @@ fn chat_completions(
     system_prompt: &str,
     temperature: f64,
     max_tokens: u64,
+    missing: &str,
 ) -> Result<AiReply, String> {
     let provider = provider_name(connection)?;
     let origin = if provider == "openai" {
@@ -1126,8 +1131,13 @@ fn chat_completions(
         })),
         Duration::from_secs(600),
     )?;
+    chat_completion_reply(&body, missing)
+}
+
+/// A legacy chat completion. A missing string is the caller's empty-reply error.
+fn chat_completion_reply(body: &Value, missing: &str) -> Result<AiReply, String> {
     let Some(text) = body["choices"][0]["message"]["content"].as_str() else {
-        return Err("LM Studio hat keine Textantwort geliefert.".to_owned());
+        return Err(missing.to_owned());
     };
     Ok(AiReply {
         text: text.to_owned(),
@@ -1874,10 +1884,13 @@ mod tests {
         }))
         .unwrap();
         assert_eq!(opencode[0]["maxContextLength"], -512.0);
-        let reply = lm_studio_text(&json!({
-            "output": [{ "type": "message", "content": "Fertig" }],
-            "stats": { "input_tokens": -3, "total_output_tokens": 4, "tokens_per_second": -1 }
-        }))
+        let reply = lm_studio_text(
+            &json!({
+                "output": [{ "type": "message", "content": "Fertig" }],
+                "stats": { "input_tokens": -3, "total_output_tokens": 4, "tokens_per_second": -1 }
+            }),
+            "LM Studio hat keine Textantwort geliefert.",
+        )
         .unwrap();
         assert_eq!(reply.stats["inputTokens"], -3.0);
         assert_eq!(reply.stats["tokensPerSecond"], -1.0);
@@ -2100,10 +2113,13 @@ mod tests {
             2049
         );
         assert_eq!(output_token_limit(&"a".repeat(100_000)), 16_000);
-        let reply = lm_studio_text(&json!({
-            "output": [{ "type": "message", "content": "# Fertig" }],
-            "stats": { "input_tokens": 12, "total_output_tokens": 4, "tokens_per_second": 8.5 }
-        }))
+        let reply = lm_studio_text(
+            &json!({
+                "output": [{ "type": "message", "content": "# Fertig" }],
+                "stats": { "input_tokens": 12, "total_output_tokens": 4, "tokens_per_second": 8.5 }
+            }),
+            "LM Studio hat keine Textantwort geliefert.",
+        )
         .unwrap();
         assert_eq!(reply.text, "# Fertig");
         assert_eq!(reply.stats["inputTokens"], 12.0);
@@ -2323,16 +2339,60 @@ mod tests {
             "LM Studio hat kein verwendbares Markdown-Dokument zurückgegeben."
         );
         assert_eq!(
-            lm_studio_text(&json!({ "output": [] })).err().as_deref(),
+            lm_studio_text(
+                &json!({ "output": [] }),
+                "LM Studio hat keine Textantwort geliefert."
+            )
+            .err()
+            .as_deref(),
             Some("LM Studio hat keine Textantwort geliefert.")
         );
         assert_eq!(
-            lm_studio_text(&json!({
-                "output": [{ "type": "message", "content": "" }]
-            }))
+            lm_studio_text(
+                &json!({ "output": [] }),
+                "Der AI-Anbieter hat kein verwendbares Markdown-Dokument zurückgegeben."
+            )
+            .err()
+            .as_deref(),
+            Some("Der AI-Anbieter hat kein verwendbares Markdown-Dokument zurückgegeben.")
+        );
+        assert_eq!(
+            lm_studio_text(
+                &json!({
+                    "output": [{ "type": "message", "content": "" }]
+                }),
+                "LM Studio hat keine Textantwort geliefert.",
+            )
             .ok()
             .map(|reply| reply.text),
             Some(String::new())
+        );
+        assert_eq!(
+            super::chat_completion_reply(
+                &json!({ "choices": [{ "message": { "content": 1 } }] }),
+                "Der AI-Anbieter hat kein verwendbares Markdown-Dokument zurückgegeben."
+            )
+            .err()
+            .as_deref(),
+            Some("Der AI-Anbieter hat kein verwendbares Markdown-Dokument zurückgegeben.")
+        );
+        assert_eq!(
+            super::chat_completion_reply(
+                &json!({ "choices": [{ "message": {} }] }),
+                "LM Studio hat keine Textantwort geliefert."
+            )
+            .err()
+            .as_deref(),
+            Some("LM Studio hat keine Textantwort geliefert.")
+        );
+        assert_eq!(
+            super::chat_completion_reply(
+                &json!({ "choices": [{ "message": { "content": "# Hallo" } }] }),
+                "LM Studio hat keine Textantwort geliefert."
+            )
+            .map(|reply| reply.text)
+            .unwrap(),
+            "# Hallo"
         );
     }
 
