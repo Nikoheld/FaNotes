@@ -622,13 +622,15 @@ fn a_null_folder_color_discards_the_tree_cache() {
 }
 
 #[test]
-fn a_cached_tree_keeps_the_stored_order() {
+fn a_cached_tree_sorts_each_level_like_the_desktop() {
     let (vault, mut host) = host();
     host.dispatch("fanotes:complete-onboarding", &[json!([])])
         .unwrap();
     fs::create_dir(vault.join("Zoo")).unwrap();
     fs::create_dir(vault.join("Apfel")).unwrap();
-    host.dispatch("fanotes:get-tree", &[]).unwrap();
+    fs::write(vault.join("Zoo/Zettel.md"), "# Zettel\n").unwrap();
+    fs::write(vault.join("Zoo/Anfang.md"), "# Anfang\n").unwrap();
+    let tree = host.dispatch("fanotes:get-tree", &[]).unwrap();
     let cache_dir = vault.parent().unwrap().join("app/tree-cache-v1");
     let cache_path = fs::read_dir(&cache_dir)
         .unwrap()
@@ -640,19 +642,48 @@ fn a_cached_tree_keeps_the_stored_order() {
         serde_json::from_str(&fs::read_to_string(&cache_path).unwrap()).unwrap();
     let entries = parsed["entries"].as_array_mut().unwrap();
     entries.reverse();
-    let stored: Vec<_> = entries
+    let stored_root: Vec<_> = entries
         .iter()
         .map(|entry| entry["name"].as_str().unwrap().to_owned())
         .collect();
-    fs::write(&cache_path, serde_json::to_string(&parsed).unwrap()).unwrap();
-    let cached = host.dispatch("fanotes:get-cached-tree", &[]).unwrap();
-    let names: Vec<_> = cached
+    let zoo = entries
+        .iter_mut()
+        .find(|entry| entry["name"] == "Zoo")
+        .unwrap();
+    zoo["children"].as_array_mut().unwrap().reverse();
+    let stored_children: Vec<_> = zoo["children"]
         .as_array()
         .unwrap()
         .iter()
         .map(|entry| entry["name"].as_str().unwrap().to_owned())
         .collect();
-    assert_eq!(names, stored);
-    assert!(names.len() >= 2);
-    assert_ne!(names.first(), names.last());
+    fs::write(&cache_path, serde_json::to_string(&parsed).unwrap()).unwrap();
+    let cached = host.dispatch("fanotes:get-cached-tree", &[]).unwrap();
+    let names = |value: &serde_json::Value| -> Vec<String> {
+        value
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|entry| entry["name"].as_str().unwrap().to_owned())
+            .collect()
+    };
+    let tree_names = names(&tree);
+    assert_eq!(names(&cached), tree_names);
+    assert_ne!(tree_names, stored_root);
+    let zoo_tree = tree
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|entry| entry["name"] == "Zoo")
+        .unwrap();
+    let zoo_cached = cached
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|entry| entry["name"] == "Zoo")
+        .unwrap();
+    let child_names = names(&zoo_tree["children"]);
+    assert_eq!(names(&zoo_cached["children"]), child_names);
+    assert_ne!(child_names, stored_children);
+    assert_eq!(child_names, vec!["Anfang.md".to_owned(), "Zettel.md".to_owned()]);
 }
