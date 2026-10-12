@@ -567,6 +567,32 @@ fn a_second_note_is_numbered_and_reads_without_the_sidecar() {
             .unwrap_err(),
         "Neue Notizen müssen Markdown-Dateien sein."
     );
+    assert_eq!(
+        host.dispatch("fanotes:create-folder", &[json!(1), json!("Physik")])
+            .unwrap_err(),
+        "Ungültiger Vault-Pfad."
+    );
+    assert!(!vault.join("Physik").exists());
+    assert!(!vault.join("New folder").exists());
+    let numbered_note = host
+        .dispatch("fanotes:create-note", &[json!(1), json!("Zahl")])
+        .unwrap();
+    assert_eq!(numbered_note["relativePath"], "Zahl.md");
+    let null_note = host
+        .dispatch("fanotes:create-note", &[json!(null), json!("Leer")])
+        .unwrap();
+    assert_eq!(null_note["relativePath"], "Leer.md");
+    assert_eq!(
+        host.dispatch("fanotes:create-folder", &[json!(null)])
+            .unwrap_err(),
+        "Ungültiger Vault-Pfad."
+    );
+    let numbered_folder = host
+        .dispatch("fanotes:create-folder", &[json!(""), json!(1)])
+        .unwrap();
+    assert_eq!(numbered_folder["relativePath"], "New folder");
+    let omitted_folder = host.dispatch("fanotes:create-folder", &[]).unwrap();
+    assert_eq!(omitted_folder["relativePath"], "New folder 2");
     let folder = host
         .dispatch("fanotes:create-folder", &[json!(""), json!("Ordner")])
         .unwrap();
