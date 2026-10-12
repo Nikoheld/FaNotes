@@ -1694,15 +1694,31 @@ fn decode_one_entity(entity: &str, pass: &EntityPass) -> Option<String> {
             }
             Some(code_point(decimal.parse().ok()))
         }
-        EntityPass::Named => match entity.to_ascii_lowercase().as_str() {
-            "nbsp" => Some(" ".to_owned()),
-            "amp" => Some("&".to_owned()),
-            "lt" => Some("<".to_owned()),
-            "gt" => Some(">".to_owned()),
-            "quot" => Some("\"".to_owned()),
-            "apos" => Some("'".to_owned()),
-            _ => None,
-        },
+        EntityPass::Named => {
+            // `/&(nbsp|amp|lt|gt|quot|apos);/giu` folds a long s into `s`.
+            // The lookup then uses `toLocaleLowerCase('en-US')`, which keeps
+            // that letter, so `&nbſp;` misses the map. `String.replace` turns
+            // that missing result into the word `undefined`.
+            let folded = iu_fold(entity);
+            if !matches!(
+                folded.as_str(),
+                "nbsp" | "amp" | "lt" | "gt" | "quot" | "apos"
+            ) {
+                return None;
+            }
+            Some(
+                match entity.to_ascii_lowercase().as_str() {
+                    "nbsp" => " ",
+                    "amp" => "&",
+                    "lt" => "<",
+                    "gt" => ">",
+                    "quot" => "\"",
+                    "apos" => "'",
+                    _ => "undefined",
+                }
+                .to_owned(),
+            )
+        }
     }
 }
 
@@ -2019,6 +2035,12 @@ mod tests {
         assert_eq!(extract_search_text("&#x26;amp;"), "&");
         assert_eq!(extract_search_text("&#38;amp;"), "&");
         assert_eq!(extract_search_text("A&nbsp;B"), "A B");
+        assert_eq!(extract_search_text("A&NBSP;B"), "A B");
+        assert_eq!(extract_search_text("&apos;"), "'");
+        assert_eq!(extract_search_text("&nb\u{017F}p;"), "undefined");
+        assert_eq!(extract_search_text("&apo\u{017F};"), "undefined");
+        assert_eq!(extract_search_text("A&Nb\u{017F}p;B"), "AundefinedB");
+        assert_eq!(extract_search_text("&a\u{017F}p;"), "&a\u{017F}p;");
         assert_eq!(extract_search_text("&#x;"), "&#x;");
         assert_eq!(extract_search_text("&#xZZ;"), "&#xZZ;");
         assert_eq!(urlencoding_decode("a%20b"), "a b");
