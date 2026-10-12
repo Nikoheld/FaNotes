@@ -278,3 +278,41 @@ fn a_blank_move_target_returns_the_note_to_the_vault_root() {
     assert_eq!(moved, "Andere.md");
     assert!(vault.join("Andere.md").is_file());
 }
+
+#[test]
+fn a_rename_replaces_an_existing_companion_and_a_move_avoids_it() {
+    let (vault, mut host) = host();
+    fs::write(vault.join("Mathe/Seite.md"), b"Hallo\n").unwrap();
+    fs::write(vault.join("Mathe/Seite.famd"), b"alt\n").unwrap();
+    fs::write(vault.join("Mathe/Ziel.famd"), b"fremd\n").unwrap();
+    let renamed = host
+        .dispatch(
+            "fanotes:rename-entry",
+            &[json!("Mathe/Seite.md"), json!("Ziel")],
+        )
+        .unwrap();
+    assert_eq!(renamed, "Mathe/Ziel.md");
+    assert_eq!(fs::read(vault.join("Mathe/Ziel.md")).unwrap(), b"Hallo\n");
+    assert_eq!(fs::read(vault.join("Mathe/Ziel.famd")).unwrap(), b"alt\n");
+    assert!(!vault.join("Mathe/Seite.md").exists());
+    assert!(!vault.join("Mathe/Seite.famd").exists());
+
+    fs::write(vault.join("Physik/Andere.famd"), b"bleibt\n").unwrap();
+    fs::write(vault.join("Mathe/Andere.md"), b"Notiz\n").unwrap();
+    fs::write(vault.join("Mathe/Andere.famd"), b"eigen\n").unwrap();
+    let moved = host
+        .dispatch(
+            "fanotes:move-entry",
+            &[json!("Mathe/Andere.md"), json!("Physik")],
+        )
+        .unwrap();
+    assert_eq!(moved, "Physik/Andere 2.md");
+    assert_eq!(
+        fs::read(vault.join("Physik/Andere.famd")).unwrap(),
+        b"bleibt\n"
+    );
+    assert_eq!(
+        fs::read(vault.join("Physik/Andere 2.famd")).unwrap(),
+        b"eigen\n"
+    );
+}
