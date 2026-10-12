@@ -117,7 +117,40 @@ fn import_pdf_file(
     kind: PdfKind,
 ) -> Result<Value, String> {
     let root = vault_root(host)?.to_path_buf();
-    let parent_relative = if parent.is_empty() {
+    let fallback = kind.fallback(host.ui_language() == "en");
+    let name = payload
+        .get("name")
+        .and_then(Value::as_str)
+        .filter(|name| !name.is_empty())
+        .unwrap_or(fallback);
+    if payload.get("name").is_some()
+        && !crate::vault::posix_extname(name).eq_ignore_ascii_case(".pdf")
+    {
+        return Err(kind.not_pdf().to_owned());
+    }
+    // A book subject is shaped before the file is read. A PDF note checks the
+    // file first, then the destination folder.
+    let book_parent = if matches!(kind, PdfKind::Book) {
+        Some(vault::normalize_relative_path(parent, false, false)?)
+    } else {
+        None
+    };
+    if pdf_payload_is_empty(payload) {
+        return Err("Die ausgewählte PDF-Datei ist leer.".to_owned());
+    }
+    let bytes = decode_payload_bytes(payload, 96 * 1024 * 1024)?;
+    if bytes.is_empty() {
+        return Err("Die ausgewählte PDF-Datei ist leer.".to_owned());
+    }
+    if !bytes.starts_with(b"%PDF-") {
+        return Err(
+            "Die ausgewählte Datei stimmt nicht mit ihrem Bild- oder PDF-Format überein."
+                .to_owned(),
+        );
+    }
+    let parent_relative = if let Some(parent) = book_parent {
+        parent
+    } else if parent.is_empty() {
         String::new()
     } else {
         vault::normalize_relative_path(parent, true, false)?
@@ -133,27 +166,6 @@ fn import_pdf_file(
         }
         path
     };
-    let fallback = kind.fallback(host.ui_language() == "en");
-    let name = payload
-        .get("name")
-        .and_then(Value::as_str)
-        .filter(|name| !name.is_empty())
-        .unwrap_or(fallback);
-    if payload.get("name").is_some()
-        && !crate::vault::posix_extname(name).eq_ignore_ascii_case(".pdf")
-    {
-        return Err(kind.not_pdf().to_owned());
-    }
-    let bytes = decode_payload_bytes(payload, 96 * 1024 * 1024)?;
-    if bytes.is_empty() {
-        return Err("Die ausgewählte PDF-Datei ist leer.".to_owned());
-    }
-    if !bytes.starts_with(b"%PDF-") {
-        return Err(
-            "Die ausgewählte Datei stimmt nicht mit ihrem Bild- oder PDF-Format überein."
-                .to_owned(),
-        );
-    }
     let stem = safe_stem(file_stem(name), fallback)?;
     let desired = format!("{stem}.pdf");
     let candidate = unique_pdf_name(&parent_path, &desired, kind.no_unique_name())?;
@@ -190,6 +202,17 @@ fn import_pdf_file(
             "size": meta.len(),
         }
     }))
+}
+
+fn pdf_payload_is_empty(payload: &Value) -> bool {
+    match payload
+        .get("bytesBase64")
+        .or_else(|| payload.get("bytes"))
+    {
+        Some(Value::Array(items)) => items.is_empty(),
+        Some(Value::String(text)) => text.is_empty(),
+        _ => false,
+    }
 }
 
 fn unique_pdf_name(directory: &Path, desired: &str, exhausted: &str) -> Result<String, String> {
