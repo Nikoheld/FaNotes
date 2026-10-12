@@ -339,7 +339,7 @@ pub(crate) fn json_safe_u64(value: Option<&Value>) -> Option<u64> {
 }
 
 /// `Number.isSafeInteger`, including a negative spelling bit count such as `-8`.
-fn json_safe_i64(value: Option<&Value>) -> Option<i64> {
+pub(crate) fn json_safe_i64(value: Option<&Value>) -> Option<i64> {
     let number = value?.as_f64()?;
     if number.is_finite()
         && number.fract() == 0.0

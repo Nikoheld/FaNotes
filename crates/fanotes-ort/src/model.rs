@@ -39,10 +39,12 @@ impl ModelDescriptor {
         let manifest: Value = serde_json::from_str(json).map_err(|_| Error::UnknownModel)?;
         let desktop = &manifest["models"]["desktop"];
         let characters = &manifest["characters"];
+        // `Number.isSafeInteger(count)` keeps a negative count. The charset
+        // length check, not this gate, reports that list as invalid.
         let characters_ok = characters["file"].as_str().is_some_and(plain_file_name)
             && json_safe_u64(characters.get("size"))
                 .is_some_and(|size| size > 0 && size <= MAX_CHARACTERS_BYTES)
-            && json_safe_u64(characters.get("count")).is_some()
+            && json_safe_i64(characters.get("count")).is_some()
             && characters["sha256"]
                 .as_str()
                 .and_then(parse_sha256)
@@ -100,12 +102,18 @@ pub fn verify_model_file(path: &Path, descriptor: &ModelDescriptor) -> Result<Ve
 
 /// `Number.isSafeInteger` for a non-negative manifest count. `8.0` counts; `8.5` does not.
 fn json_safe_u64(value: Option<&Value>) -> Option<u64> {
+    let number = json_safe_i64(value)?;
+    (number >= 0).then_some(number as u64)
+}
+
+/// `Number.isSafeInteger`, including a negative character count.
+fn json_safe_i64(value: Option<&Value>) -> Option<i64> {
     let number = value?.as_f64()?;
     if number.is_finite()
         && number.fract() == 0.0
-        && (0.0..=9_007_199_254_740_991.0).contains(&number)
+        && number.abs() <= 9_007_199_254_740_991.0
     {
-        Some(number as u64)
+        Some(number as i64)
     } else {
         None
     }

@@ -43,6 +43,18 @@ fn a_whole_model_size_still_opens() {
 }
 
 #[test]
+fn a_negative_character_count_is_still_a_known_model() {
+    let mut manifest = manifest();
+    manifest["characters"]["count"] = json!(-1);
+    assert!(ModelDescriptor::from_manifest(&manifest.to_string()).is_ok());
+    manifest["characters"]["count"] = json!(-1.5);
+    assert!(matches!(
+        ModelDescriptor::from_manifest(&manifest.to_string()),
+        Err(Error::UnknownModel)
+    ));
+}
+
+#[test]
 fn reads_the_desktop_entry_of_the_shipped_manifest() {
     let descriptor =
         ModelDescriptor::from_manifest(&fs::read_to_string(manifest_path()).unwrap()).unwrap();
