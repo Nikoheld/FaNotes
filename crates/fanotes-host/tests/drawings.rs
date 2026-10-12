@@ -653,3 +653,39 @@ fn handwriting_uses_the_settings_paper_when_the_note_has_none() {
         "squares"
     );
 }
+
+#[test]
+fn a_drawing_embed_does_not_create_a_missing_folder() {
+    let (dir, mut host) = host();
+    let vault = dir.join("vault");
+    let error = host
+        .dispatch(
+            "fanotes:save-drawing",
+            &[json!({
+                "id": "skizze-neu",
+                "title": "Skizze",
+                "drawingJson": drawing("Skizze"),
+                "noteRelativePath": "Neu/Seite.md"
+            })],
+        )
+        .unwrap_err();
+    assert_eq!(
+        error,
+        "Handschrift konnte nicht in die Notiz geschrieben werden: Der Zielordner wurde nicht gefunden."
+    );
+    assert!(!vault.join("Neu").exists());
+
+    fs::create_dir(vault.join("Mathe")).unwrap();
+    host.dispatch(
+        "fanotes:save-drawing",
+        &[json!({
+            "id": "skizze-mathe",
+            "title": "Skizze",
+            "drawingJson": drawing("Skizze"),
+            "noteRelativePath": "Mathe/Seite.md"
+        })],
+    )
+    .unwrap();
+    assert!(vault.join("Mathe/Seite.famd").is_file());
+    assert!(!vault.join("Neu").exists());
+}
