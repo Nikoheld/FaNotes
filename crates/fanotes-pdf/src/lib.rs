@@ -76,11 +76,36 @@ struct VaultRenderRequest {
 }
 
 pub fn parse_vault_request(value: &Value) -> Result<(String, RenderRequest), Error> {
-    let parsed: VaultRenderRequest =
-        serde_json::from_value(value.clone()).map_err(|_| Error::Request)?;
-    if parsed.path.is_empty() || parsed.path.len() > 4096 {
-        return Err(Error::Request);
+    let mut value = value.clone();
+    {
+        let Some(object) = value.as_object_mut() else {
+            return Err(Error::Request);
+        };
+        for key in [
+            "pageIndex",
+            "pixelWidth",
+            "pixelHeight",
+            "pagePixelWidth",
+            "pagePixelHeight",
+            "originX",
+            "originY",
+            "rotation",
+        ] {
+            // `Number.isSafeInteger` keeps a whole number such as `16.0`.
+            let Some(number) = object.get(key).and_then(json_safe_i32) else {
+                return Err(Error::Request);
+            };
+            object.insert(key.to_owned(), Value::from(number));
+        }
+        // A non-string password is ignored, the same way the desktop does.
+        if object
+            .get("password")
+            .is_some_and(|password| !password.is_string())
+        {
+            object.insert("password".to_owned(), Value::String(String::new()));
+        }
     }
+    let parsed: VaultRenderRequest = serde_json::from_value(value).map_err(|_| Error::Request)?;
     Ok((parsed.path, parsed.job))
 }
 
@@ -96,10 +121,11 @@ pub fn render_pdf_page(pdf: &[u8], request: &RenderRequest) -> Result<PageBitmap
     }
     let _render = RENDER.lock().unwrap_or_else(|error| error.into_inner());
     let pdfium = library()?;
-    let password = if request.password.is_empty() {
+    let password = truncate_utf16(&request.password, 1024);
+    let password = if password.is_empty() {
         None
     } else {
-        Some(request.password.as_str())
+        Some(password.as_str())
     };
     let document = pdfium
         .load_pdf_from_byte_slice(pdf, password)
@@ -146,13 +172,38 @@ pub fn render_pdf_page(pdf: &[u8], request: &RenderRequest) -> Result<PageBitmap
     })
 }
 
+/// `Number.isSafeInteger` for a geometry field, including `16.0` and `-1.0`.
+fn json_safe_i32(value: &Value) -> Option<i32> {
+    let number = value.as_f64()?;
+    if number.is_finite()
+        && number.fract() == 0.0
+        && (i32::MIN as f64..=i32::MAX as f64).contains(&number)
+    {
+        Some(number as i32)
+    } else {
+        None
+    }
+}
+
 fn validate_request(request: &RenderRequest) -> Result<(), Error> {
     checked_pixels(request.pixel_width, request.pixel_height)?;
     checked_pixels(request.page_pixel_width, request.page_pixel_height)?;
-    if request.password.len() > 1024 {
-        return Err(Error::Request);
-    }
     normalized_rotation(request.rotation).map(|_| ())
+}
+
+/// Desktop `password.slice(0, 1024)` counts UTF-16 units.
+fn truncate_utf16(value: &str, max_units: usize) -> String {
+    let mut units = 0;
+    let mut end = 0;
+    for (index, character) in value.char_indices() {
+        let width = character.len_utf16();
+        if units + width > max_units {
+            break;
+        }
+        units += width;
+        end = index + character.len_utf8();
+    }
+    value[..end].to_owned()
 }
 
 fn checked_pixels(width: i32, height: i32) -> Result<usize, Error> {
@@ -328,5 +379,64 @@ mod tests {
     fn rejects_an_incomplete_vault_request() {
         let error = parse_vault_request(&Value::Null).unwrap_err();
         assert!(matches!(error, Error::Request));
+        let mut request = serde_json::json!({
+            "path": "Seite.pdf",
+            "pageIndex": 0,
+            "pixelWidth": 16,
+            "pixelHeight": 16,
+            "pagePixelWidth": 16,
+            "pagePixelHeight": 16,
+            "originX": 0,
+            "originY": 0,
+            "rotation": 0
+        });
+        request.as_object_mut().unwrap().remove("rotation");
+        assert!(matches!(
+            parse_vault_request(&request).unwrap_err(),
+            Error::Request
+        ));
+        let mut whole = serde_json::json!({
+            "path": "../secret.pdf",
+            "pageIndex": 0.0,
+            "pixelWidth": 16.0,
+            "pixelHeight": 16,
+            "pagePixelWidth": 16,
+            "pagePixelHeight": 16,
+            "originX": -1.0,
+            "originY": 0,
+            "rotation": 0.0
+        });
+        let (path, job) = parse_vault_request(&whole).unwrap();
+        assert_eq!(path, "../secret.pdf");
+        assert_eq!(job.pixel_width, 16);
+        assert_eq!(job.origin_x, -1);
+        assert_eq!(job.page_index, 0);
+        whole["pixelWidth"] = serde_json::json!(16.5);
+        assert!(matches!(
+            parse_vault_request(&whole).unwrap_err(),
+            Error::Request
+        ));
+        let long = format!("{}.pdf", "ä".repeat(3000));
+        let mut request = request;
+        request["rotation"] = serde_json::json!(0);
+        request["path"] = serde_json::json!(long);
+        request["password"] = serde_json::json!(1);
+        let (path, job) = parse_vault_request(&request).unwrap();
+        assert_eq!(path.chars().count(), 3004);
+        assert!(job.password.is_empty());
+    }
+
+    #[test]
+    fn a_long_pdf_password_is_shortened_like_the_desktop() {
+        let ascii = "a".repeat(1025);
+        assert_eq!(truncate_utf16(&ascii, 1024).len(), 1024);
+        let marks = "ä".repeat(1025);
+        let shortened = truncate_utf16(&marks, 1024);
+        assert_eq!(shortened.chars().count(), 1024);
+        assert_eq!(shortened.encode_utf16().count(), 1024);
+        let mut job = request(16, 16);
+        job.password = marks;
+        let error = render_pdf_page(b"", &job).unwrap_err();
+        assert!(error.to_string().contains("leer oder zu groß"), "{error}");
     }
 }

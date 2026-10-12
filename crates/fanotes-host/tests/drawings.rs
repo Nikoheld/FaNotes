@@ -26,6 +26,55 @@ fn drawing(title: &str) -> String {
 }
 
 #[test]
+fn a_drawing_image_follows_the_desktop_png_checks() {
+    let (dir, mut host) = host();
+    let assets = dir.join("vault/.fanotes/assets");
+    let missing = host
+        .dispatch(
+            "fanotes:save-drawing",
+            &[json!({
+                "id": "ohne-bild",
+                "title": "Skizze",
+                "drawingJson": drawing("Skizze"),
+                "imageData": null,
+            })],
+        )
+        .unwrap_err();
+    assert!(missing.contains("kein PNG"), "{missing}");
+    assert!(!assets.join("ohne-bild.json").exists());
+
+    let empty = host
+        .dispatch(
+            "fanotes:save-drawing",
+            &[json!({
+                "id": "leer-bild",
+                "title": "Skizze",
+                "drawingJson": drawing("Skizze"),
+                "imageData": "data:image/png;base64,",
+            })],
+        )
+        .unwrap_err();
+    assert!(empty.contains("leer oder zu groß"), "{empty}");
+
+    let saved = host
+        .dispatch(
+            "fanotes:save-drawing",
+            &[json!({
+                "id": "mit-bild",
+                "title": "Skizze",
+                "drawingJson": drawing("Skizze"),
+                "imageData": "data:image/png;base64,iVBORw0KGgo=",
+            })],
+        )
+        .unwrap();
+    assert_eq!(saved["id"], "mit-bild");
+    assert_eq!(
+        std::fs::read(assets.join("mit-bild.png")).unwrap(),
+        [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]
+    );
+}
+
+#[test]
 fn a_drawing_title_uses_the_desktop_entry_name_rules() {
     let (_dir, mut host) = host();
     let saved = host
@@ -121,7 +170,7 @@ fn drawings_round_trip_and_land_in_the_note() {
 }
 
 #[test]
-fn the_drawing_library_uses_one_json_suffix_without_case() {
+fn the_drawing_library_opens_only_a_lowercase_json_suffix() {
     let (dir, mut host) = host();
     let assets = dir.join("vault/.fanotes/assets");
     fs::create_dir_all(&assets).unwrap();
@@ -146,13 +195,12 @@ fn the_drawing_library_uses_one_json_suffix_without_case() {
         .iter()
         .map(|item| item["title"].as_str().unwrap().to_owned())
         .collect();
-    assert_eq!(titles, vec!["Behalten".to_owned(), "Gross".to_owned()]);
+    assert_eq!(titles, vec!["Behalten".to_owned()]);
 
     let upper = host
         .dispatch("fanotes:search", &[json!("Grosswort")])
         .unwrap();
-    assert_eq!(upper[0]["drawingId"], "Upper");
-    assert_eq!(upper[0]["title"], "Gross");
+    assert!(upper.as_array().unwrap().is_empty());
     let hidden = host
         .dispatch("fanotes:search", &[json!("Doppelwort")])
         .unwrap();
@@ -183,10 +231,22 @@ fn a_drawing_with_a_bad_byte_still_opens() {
         .as_str()
         .unwrap()
         .contains("Ski\u{FFFD}ze"));
+    let damaged =
+        "Die gespeicherte Zeichnung ist beschädigt oder kann nicht sicher gelesen werden.";
     assert_eq!(
         host.dispatch("fanotes:read-drawing", &[json!("muell")])
             .unwrap_err(),
-        "Die Zeichnungsdaten sind kein gültiges JSON."
+        damaged
+    );
+    fs::write(
+        assets.join("falsch.json"),
+        br#"{"schemaVersion":2,"title":"Nein","strokes":[]}"#,
+    )
+    .unwrap();
+    assert_eq!(
+        host.dispatch("fanotes:read-drawing", &[json!("falsch")])
+            .unwrap_err(),
+        damaged
     );
 
     let hits = host.dispatch("fanotes:search", &[json!("Wort")]).unwrap();
@@ -368,4 +428,35 @@ fn handwriting_with_a_bad_byte_still_opens() {
         .dispatch("fanotes:read-famd-ink", &[json!("Notiz.md")])
         .unwrap()
         .is_null());
+}
+
+#[test]
+fn a_drawing_schema_version_of_one_point_zero_still_opens() {
+    let (dir, mut host) = host();
+    let assets = dir.join("vault/.fanotes/assets");
+    fs::create_dir_all(&assets).unwrap();
+    fs::write(
+        assets.join("skizze.json"),
+        r#"{"schemaVersion":1.0,"title":"Skizze","strokes":[],"updatedAt":"2026-01-02T03:04:05.000Z"}"#,
+    )
+    .unwrap();
+    let listed = host.dispatch("fanotes:list-drawings", &[]).unwrap();
+    assert_eq!(listed[0]["title"], "Skizze");
+    let loaded = host
+        .dispatch("fanotes:read-drawing", &[json!("skizze")])
+        .unwrap();
+    assert_eq!(loaded["title"], "Skizze");
+
+    fs::write(
+        assets.join("halb.json"),
+        r#"{"schemaVersion":1.5,"title":"Halb","strokes":[],"updatedAt":"2026-01-02T03:04:05.000Z"}"#,
+    )
+    .unwrap();
+    let listed = host.dispatch("fanotes:list-drawings", &[]).unwrap();
+    assert_eq!(listed.as_array().unwrap().len(), 1);
+    assert_eq!(
+        host.dispatch("fanotes:read-drawing", &[json!("halb")])
+            .unwrap_err(),
+        "Die gespeicherte Zeichnung ist beschädigt oder kann nicht sicher gelesen werden."
+    );
 }
