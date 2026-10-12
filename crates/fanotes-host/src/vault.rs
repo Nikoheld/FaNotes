@@ -77,7 +77,9 @@ pub fn resolve_note_file(root: &Path, relative: &str) -> Result<PathBuf, String>
                 return Err("Ein Pfadbestandteil ist kein Ordner.".to_owned());
             }
             Ok(info) if last && !info.is_file() => {
-                return Err("Die Notiz ist keine sichere reguläre Datei.".to_owned());
+                // Desktop `resolveVaultPath` with `expected: 'file'` reports this
+                // before the later write check can run.
+                return Err("Die gewählte Datei ist keine reguläre Datei.".to_owned());
             }
             Ok(_) => {}
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => missing = true,
@@ -97,7 +99,16 @@ pub fn resolve_note_file(root: &Path, relative: &str) -> Result<PathBuf, String>
 
 /// An existing file or folder. A symlink anywhere in the path is rejected.
 pub fn resolve_existing_entry(root: &Path, relative: &str) -> Result<PathBuf, String> {
-    let normalized = normalize_relative_path(relative, false, false)?;
+    resolve_existing(root, relative, false)
+}
+
+/// Asset preview may open files under `.fanotes`, including worksheet pages.
+pub fn resolve_asset_entry(root: &Path, relative: &str) -> Result<PathBuf, String> {
+    resolve_existing(root, relative, true)
+}
+
+fn resolve_existing(root: &Path, relative: &str, allow_internal: bool) -> Result<PathBuf, String> {
+    let normalized = normalize_relative_path(relative, false, allow_internal)?;
     let segments: Vec<&str> = normalized.split('/').collect();
     let mut cursor = root.to_path_buf();
     for (index, segment) in segments.iter().enumerate() {
@@ -178,6 +189,27 @@ pub(crate) fn is_c0_or_del(character: char) -> bool {
 
 pub(crate) fn has_c0_or_del(value: &str) -> bool {
     value.chars().any(is_c0_or_del)
+}
+
+/// `path.posix.extname`.
+///
+/// `.md` and `..` have no extension. `.hidden.md` is `.md`.
+pub(crate) fn posix_extname(path: &str) -> &str {
+    let base = path.rsplit('/').next().unwrap_or(path);
+    if base == "." || base == ".." {
+        return "";
+    }
+    match base.rfind('.') {
+        Some(index) if index > 0 => &base[index..],
+        _ => "",
+    }
+}
+
+/// JavaScript `String.prototype.trim`.
+///
+/// U+FEFF is removed. U+0085 is kept. Rust `str::trim` does the reverse.
+pub(crate) fn js_trim(value: &str) -> &str {
+    fanotes_famd::trim_js(value)
 }
 
 pub(crate) fn truncate_utf16(value: &str, max: usize) -> String {
@@ -320,9 +352,14 @@ fn rename_legacy_internal(root: &Path, directory: &Path) -> Result<bool, String>
     }
 }
 
+/// `Number(string)`, shared with note links in `fanotes-famd`.
+pub(crate) fn js_tonumber(value: &str) -> Option<f64> {
+    fanotes_famd::js_tonumber(value)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{normalize_relative_path, sync_segments};
+    use super::{js_tonumber, normalize_relative_path, posix_extname, sync_segments};
 
     #[test]
     fn path_limits_count_characters() {
@@ -356,5 +393,51 @@ mod tests {
         assert!(normalize_relative_path("C:/", false, false).is_err());
         assert!(normalize_relative_path("C:Notiz.md", false, false).is_ok());
         assert!(normalize_relative_path("Mathe/C:/Notiz.md", false, false).is_ok());
+    }
+
+    #[test]
+    fn a_dotfile_with_one_dot_has_no_extension() {
+        assert_eq!(posix_extname(".md"), "");
+        assert_eq!(posix_extname("foo/.md"), "");
+        assert_eq!(posix_extname(".."), "");
+        assert_eq!(posix_extname(".hidden.md"), ".md");
+        assert_eq!(posix_extname("Note.MD"), ".MD");
+        assert_eq!(posix_extname("a."), ".");
+        assert_eq!(posix_extname("..."), ".");
+    }
+
+    #[test]
+    fn a_page_size_string_uses_javascript_number() {
+        assert_eq!(js_tonumber("800"), Some(800.0));
+        assert_eq!(js_tonumber("800.4"), Some(800.4));
+        assert_eq!(js_tonumber("800.5"), Some(800.5));
+        assert_eq!(js_tonumber(" 800 "), Some(800.0));
+        assert_eq!(js_tonumber("\u{FEFF}800"), Some(800.0));
+        assert_eq!(js_tonumber("8e2"), Some(800.0));
+        assert_eq!(js_tonumber("8E+2"), Some(800.0));
+        assert_eq!(js_tonumber("+800"), Some(800.0));
+        assert_eq!(js_tonumber("0x320"), Some(800.0));
+        assert_eq!(js_tonumber("0X10"), Some(16.0));
+        assert_eq!(js_tonumber("0b1010"), Some(10.0));
+        assert_eq!(js_tonumber("0o10"), Some(8.0));
+        assert_eq!(js_tonumber("0800"), Some(800.0));
+        assert_eq!(js_tonumber("1."), Some(1.0));
+        assert_eq!(js_tonumber(" .5"), Some(0.5));
+        assert_eq!(js_tonumber(""), Some(0.0));
+        assert_eq!(js_tonumber("  0x320  "), Some(800.0));
+        assert!(js_tonumber("800px").is_none());
+        assert!(js_tonumber("1.2.3").is_none());
+        assert!(js_tonumber("1e").is_none());
+        assert!(js_tonumber(".").is_none());
+        assert!(js_tonumber("+0x10").is_none());
+        assert!(js_tonumber("0x").is_none());
+        assert!(js_tonumber("0b").is_none());
+        assert!(js_tonumber("1_000").is_none());
+        assert!(js_tonumber("true").is_none());
+        assert!(js_tonumber("\u{0085}800").is_none());
+        assert!(js_tonumber("800\u{0085}").is_none());
+        assert_eq!(js_tonumber("Infinity"), Some(f64::INFINITY));
+        assert_eq!(js_tonumber("+Infinity"), Some(f64::INFINITY));
+        assert_eq!(js_tonumber("-Infinity"), Some(f64::NEG_INFINITY));
     }
 }

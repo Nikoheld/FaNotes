@@ -37,7 +37,8 @@ pub fn read_worksheet(host: &Host, raw_id: &str) -> Result<Value, String> {
     let format = format_for(document["sourceRelativePath"].as_str().unwrap_or(""))?;
     stat_regular(&source, format.max_bytes)?;
     if document["kind"] == "html" {
-        let header = read_text(&source, format.max_bytes as usize).unwrap_or_default();
+        // The desktop reads only the first 8 KiB before looking for the marker.
+        let header = read_prefix(&source, 8192).unwrap_or_default();
         if !header.contains("fanotes-onenote-safe-v1") {
             return Err(
                 "Die importierte OneNote-Seite hat ihre Sicherheitsmarkierung verloren.".to_owned(),
@@ -100,7 +101,8 @@ fn worksheet_source_name(data_path: &Path, id: &str) -> Result<String, String> {
         }
         Ok(_) => {}
     }
-    let raw = fs::read_to_string(data_path)
+    let raw = fs::read(data_path)
+        .map(lossy_utf8)
         .map_err(|_| "Das Arbeitsblatt konnte nicht gelesen werden.".to_owned())?;
     let candidate = serde_json::from_str::<Value>(&raw)
         .map_err(|_| "Die Arbeitsblattdaten sind beschädigt.".to_owned())?;
@@ -219,14 +221,7 @@ fn decode_bytes(value: Option<&Value>, max_bytes: usize) -> Result<Vec<u8>, Stri
         if items.len() > max_bytes {
             return Err(too_big.to_owned());
         }
-        let mut bytes = Vec::with_capacity(items.len());
-        for item in items {
-            let Some(number) = item.as_u64().filter(|number| *number <= 255) else {
-                return Err(too_big.to_owned());
-            };
-            bytes.push(number as u8);
-        }
-        bytes
+        items.iter().map(worksheet_byte).collect()
     } else {
         return Err(too_big.to_owned());
     };
@@ -235,6 +230,28 @@ fn decode_bytes(value: Option<&Value>, max_bytes: usize) -> Result<Vec<u8>, Stri
     } else {
         Ok(bytes)
     }
+}
+
+/// `Buffer.from(array)` converts each value with `ToUint8`.
+///
+/// `1.0` and `1.5` become 1, `256` becomes 0, and `-1` becomes 255.
+fn worksheet_byte(value: &Value) -> u8 {
+    let number = match value {
+        Value::Number(number) => number.as_f64().unwrap_or(f64::NAN),
+        Value::String(text) => crate::vault::js_tonumber(text).unwrap_or(f64::NAN),
+        Value::Bool(true) => 1.0,
+        Value::Bool(false) => 0.0,
+        Value::Null => 0.0,
+        _ => f64::NAN,
+    };
+    to_uint8(number)
+}
+
+fn to_uint8(number: f64) -> u8 {
+    if !number.is_finite() || number == 0.0 {
+        return 0;
+    }
+    number.trunc().rem_euclid(256.0) as u8
 }
 
 fn validate_bytes(bytes: &[u8], extension: &str) -> Result<(), String> {
@@ -263,23 +280,7 @@ fn random_id() -> Result<String, String> {
 }
 
 fn safe_title(value: &str, fallback: &str) -> Result<String, String> {
-    let raw = value.trim();
-    let name = if raw.is_empty() { fallback } else { raw };
-    let cleaned = name.trim_end_matches(['.', ' ']).trim();
-    if cleaned.is_empty()
-        || crate::vault::utf16_len(cleaned) > 180
-        || cleaned == "."
-        || cleaned == ".."
-        || cleaned.contains('/')
-        || cleaned.contains('\\')
-        || crate::vault::has_c0_or_del(cleaned)
-        || cleaned.eq_ignore_ascii_case(".fanotes")
-        || cleaned.eq_ignore_ascii_case(".lernwerk")
-    {
-        Err("Dieser Name ist nicht erlaubt.".to_owned())
-    } else {
-        Ok(cleaned.to_owned())
-    }
+    super::safe_entry_name_or(value, fallback)
 }
 
 fn file_stem(name: &str) -> &str {
@@ -296,12 +297,12 @@ fn validate_document(candidate: &Value, expected_id: &str) -> Result<Value, Stri
         .ok_or_else(|| "Die Arbeitsblattdaten sind ungültig.".to_owned())?;
     let id = worksheet_id(expected_id)?;
     if object.get("id").and_then(Value::as_str) != Some(id.as_str())
-        || object.get("schemaVersion").and_then(Value::as_i64) != Some(1)
+        || object.get("schemaVersion").and_then(json_integer) != Some(1)
     {
         return Err("Die Arbeitsblattdatei hat ein ungültiges Format.".to_owned());
     }
     let raw_title = object.get("title").and_then(Value::as_str).unwrap_or("");
-    let title = raw_title.trim();
+    let title = crate::vault::js_trim(raw_title);
     if title.is_empty()
         || crate::vault::utf16_len(raw_title) > 180
         || crate::vault::has_c0_or_del(raw_title)
@@ -353,14 +354,8 @@ fn validate_document(candidate: &Value, expected_id: &str) -> Result<Value, Stri
     document.insert("createdAt".into(), Value::String(created));
     document.insert("updatedAt".into(), Value::String(updated));
     if format.kind == "html" {
-        let page_width = object
-            .get("pageWidth")
-            .and_then(Value::as_f64)
-            .unwrap_or(0.0);
-        let page_height = object
-            .get("pageHeight")
-            .and_then(Value::as_f64)
-            .unwrap_or(0.0);
+        let page_width = page_extent(object.get("pageWidth"));
+        let page_height = page_extent(object.get("pageHeight"));
         if !(320.0..=3000.0).contains(&page_width) || !(320.0..=30_000.0).contains(&page_height) {
             return Err("Die Größe der importierten OneNote-Seite ist ungültig.".to_owned());
         }
@@ -392,7 +387,7 @@ fn boxes(value: Option<&Value>) -> Result<Vec<Value>, String> {
             worksheet_id(id)?;
             let page = object
                 .get("page")
-                .and_then(Value::as_i64)
+                .and_then(json_integer)
                 .ok_or_else(|| "Eine Textfeldseite ist ungültig.".to_owned())?;
             if !(1..=2000).contains(&page) {
                 return Err("Eine Textfeldseite ist ungültig.".to_owned());
@@ -429,10 +424,9 @@ fn boxes(value: Option<&Value>) -> Result<Vec<Value>, String> {
 }
 
 fn highlights(value: Option<&Value>) -> Result<Vec<Value>, String> {
-    let items = match value {
-        Some(Value::Array(items)) => items,
-        Some(_) => return Err("Das Arbeitsblatt enthält zu viele Markierungen.".to_owned()),
-        None => return Ok(Vec::new()),
+    // The desktop keeps a missing or non-array list as no marks.
+    let Some(items) = value.and_then(Value::as_array) else {
+        return Ok(Vec::new());
     };
     if items.len() > 4000 {
         return Err("Das Arbeitsblatt enthält zu viele Markierungen.".to_owned());
@@ -450,7 +444,7 @@ fn highlights(value: Option<&Value>) -> Result<Vec<Value>, String> {
             worksheet_id(id)?;
             let page = object
                 .get("page")
-                .and_then(Value::as_i64)
+                .and_then(json_integer)
                 .ok_or_else(|| "Eine Markierungsseite ist ungültig.".to_owned())?;
             if !(1..=2000).contains(&page) {
                 return Err("Eine Markierungsseite ist ungültig.".to_owned());
@@ -491,6 +485,31 @@ fn highlights(value: Option<&Value>) -> Result<Vec<Value>, String> {
         .collect()
 }
 
+/// `Number.isInteger`: a whole JSON number, including `1.0`.
+fn json_integer(value: &Value) -> Option<i64> {
+    if let Some(number) = value.as_i64() {
+        return Some(number);
+    }
+    let number = value.as_f64()?;
+    if number.is_finite() && number.fract() == 0.0 {
+        Some(number as i64)
+    } else {
+        None
+    }
+}
+
+/// Desktop `Number(pageWidth)` / `Number(pageHeight)`, then `Math.round`.
+fn page_extent(value: Option<&Value>) -> f64 {
+    match value {
+        Some(Value::Number(number)) => number.as_f64().unwrap_or(f64::NAN),
+        Some(Value::String(text)) => crate::vault::js_tonumber(text).unwrap_or(f64::NAN),
+        Some(Value::Bool(true)) => 1.0,
+        Some(Value::Bool(false)) => 0.0,
+        Some(Value::Null) => 0.0,
+        _ => f64::NAN,
+    }
+}
+
 fn number(object: &Map<String, Value>, name: &str, error: &str) -> Result<f64, String> {
     object
         .get(name)
@@ -500,7 +519,7 @@ fn number(object: &Map<String, Value>, name: &str, error: &str) -> Result<f64, S
 }
 
 fn format_for(source: &str) -> Result<Format, String> {
-    match extension_of(source).as_str() {
+    match worksheet_suffix(source).as_str() {
         ".png" => Ok(Format {
             kind: "image",
             mime: "image/png",
@@ -536,13 +555,23 @@ fn format_for(source: &str) -> Result<Format, String> {
 }
 
 fn extension_of(source: &str) -> String {
-    source
-        .rsplit(['/', '\\'])
-        .next()
-        .unwrap_or(source)
-        .rsplit_once('.')
-        .map(|(_, extension)| format!(".{}", extension.to_ascii_lowercase()))
-        .unwrap_or_default()
+    let base = source.rsplit(['/', '\\']).next().unwrap_or(source);
+    crate::vault::posix_extname(base).to_ascii_lowercase()
+}
+
+/// A path uses `path.posix.extname`. A suffix that was already chosen, such as
+/// `.png`, is the same string as a one-dot filename, which has no extension.
+fn worksheet_suffix(source: &str) -> String {
+    if let Some(rest) = source.strip_prefix('.') {
+        if !rest.is_empty()
+            && !rest.contains('.')
+            && !source.contains('/')
+            && !source.contains('\\')
+        {
+            return source.to_ascii_lowercase();
+        }
+    }
+    extension_of(source)
 }
 
 fn file_name(source: &str) -> String {
@@ -597,10 +626,32 @@ fn vault_root(host: &Host) -> Result<&Path, String> {
 fn stat_regular(path: &Path, max: u64) -> Result<(), String> {
     let meta = fs::symlink_metadata(path)
         .map_err(|_| "Das Arbeitsblatt wurde nicht gefunden.".to_owned())?;
-    if meta.file_type().is_symlink() || !meta.is_file() || meta.len() > max {
-        return Err("Die Arbeitsblattquelle ist ungültig.".to_owned());
+    // Desktop `statRegularFileNoFollow`: a non-file fails before the size check.
+    if meta.file_type().is_symlink() || !meta.is_file() {
+        return Err("Die Datei ist keine reguläre Datei.".to_owned());
+    }
+    if meta.len() > max {
+        return Err("Die Datei ist zu groß.".to_owned());
     }
     Ok(())
+}
+
+fn read_prefix(path: &Path, limit: usize) -> Result<String, String> {
+    use std::io::Read;
+    let mut file =
+        fs::File::open(path).map_err(|_| "Die Datei konnte nicht gelesen werden.".to_owned())?;
+    let mut bytes = vec![0u8; limit];
+    let mut read = 0;
+    while read < limit {
+        match file.read(&mut bytes[read..]) {
+            Ok(0) => break,
+            Ok(count) => read += count,
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(_) => return Err("Die Datei konnte nicht gelesen werden.".to_owned()),
+        }
+    }
+    bytes.truncate(read);
+    Ok(lossy_utf8(bytes))
 }
 
 fn read_text(path: &Path, max: usize) -> Result<String, String> {
@@ -609,7 +660,15 @@ fn read_text(path: &Path, max: usize) -> Result<String, String> {
     if meta.file_type().is_symlink() || !meta.is_file() || meta.len() as usize > max {
         return Err("Die Datei ist ungültig oder zu groß.".to_owned());
     }
-    fs::read_to_string(path).map_err(|_| "Die Datei konnte nicht gelesen werden.".to_owned())
+    fs::read(path)
+        .map(lossy_utf8)
+        .map_err(|_| "Die Datei konnte nicht gelesen werden.".to_owned())
+}
+
+/// Node `Buffer.toString('utf8')`: invalid bytes become U+FFFD and the rest stays.
+fn lossy_utf8(bytes: Vec<u8>) -> String {
+    String::from_utf8(bytes)
+        .unwrap_or_else(|error| String::from_utf8_lossy(error.as_bytes()).into_owned())
 }
 
 fn unlink_regular(path: &Path) -> Result<(), String> {

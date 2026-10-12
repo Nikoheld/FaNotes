@@ -85,8 +85,8 @@ pub fn read_file(host: &Host, id: &str, name: &str) -> Result<Value, String> {
         Ok(meta) if meta.len() as usize > MAX_FILE_BYTES => {
             Err("Die Add-on-Datei ist zu groß.".to_owned())
         }
-        Ok(_) => fs::read_to_string(target)
-            .map(Value::String)
+        Ok(_) => fs::read(&target)
+            .map(|bytes| Value::String(String::from_utf8_lossy(&bytes).into_owned()))
             .map_err(|_| "Die Add-on-Datei konnte nicht gelesen werden.".to_owned()),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Value::Null),
         Err(_) => Err("Die Add-on-Datei konnte nicht gelesen werden.".to_owned()),
@@ -121,8 +121,8 @@ pub fn read_data(host: &Host, id: &str) -> Result<Value, String> {
         Ok(meta) if meta.file_type().is_symlink() || !meta.is_file() => {
             Err("Die Add-on-Daten sind unsicher.".to_owned())
         }
-        Ok(_) => fs::read_to_string(path)
-            .map(Value::String)
+        Ok(_) => fs::read(&path)
+            .map(|bytes| Value::String(String::from_utf8_lossy(&bytes).into_owned()))
             .map_err(|_| "Die Add-on-Daten konnten nicht gelesen werden.".to_owned()),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Value::Null),
         Err(_) => Err("Die Add-on-Daten konnten nicht gelesen werden.".to_owned()),
@@ -473,7 +473,9 @@ fn read_records(root: &Path) -> Result<Vec<Value>, String> {
     if meta.len() as usize > MAX_RECORDS_FILE_BYTES {
         return Err("Die Add-on-Liste ist zu groß.".to_owned());
     }
-    let raw = fs::read_to_string(path).map_err(|_| "addons.json ist ungültig.".to_owned())?;
+    let raw = fs::read(&path)
+        .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
+        .map_err(|_| "addons.json ist ungültig.".to_owned())?;
     match serde_json::from_str::<Value>(&raw) {
         Ok(Value::Array(items)) => Ok(items),
         Ok(_) => Ok(Vec::new()),
