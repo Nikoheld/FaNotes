@@ -1293,9 +1293,8 @@ impl Host {
     }
 
     fn save_settings(&mut self, incoming: Value, options: &Value) -> Result<Value, String> {
-        let Some(object) = incoming.as_object() else {
-            return Err("Die Einstellungen sind ungültig.".to_owned());
-        };
+        // Desktop sanitizeSettings keeps the current settings when the payload
+        // is not a plain object. Clearing protected secrets still applies.
         let clear = options
             .get("clearProtectedSecrets")
             .and_then(Value::as_bool)
@@ -1305,7 +1304,7 @@ impl Host {
             for key in SECRET_KEYS {
                 secrets.insert((*key).to_owned(), Value::String(String::new()));
             }
-        } else {
+        } else if let Some(object) = incoming.as_object() {
             for key in SECRET_KEYS {
                 let Some(value) = object.get(*key).and_then(Value::as_str) else {
                     continue;
