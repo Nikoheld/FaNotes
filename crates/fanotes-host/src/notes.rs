@@ -386,7 +386,7 @@ pub fn record_history(vault_root: &Path, relative: &str, content: &str) -> Resul
         .push(json!({ "id": id, "createdAt": created_at, "bytes": bytes }));
     if atomic_write(
         &directory.join("index.json"),
-        format!("{}\n", index).as_bytes(),
+        &history_index_bytes(&index)?,
         0o600,
     )
     .is_err()
@@ -408,13 +408,10 @@ fn trim_history(directory: &Path, index: &mut Value) -> Result<(), String> {
     let removed: Vec<Value> = snapshots
         .drain(0..snapshots.len() - HISTORY_LIMIT)
         .collect();
-    if atomic_write(
-        &directory.join("index.json"),
-        format!("{}\n", index).as_bytes(),
-        0o600,
-    )
-    .is_err()
-    {
+    let Ok(bytes) = history_index_bytes(index) else {
+        return Ok(());
+    };
+    if atomic_write(&directory.join("index.json"), &bytes, 0o600).is_err() {
         return Ok(());
     }
     for entry in removed {
@@ -627,6 +624,13 @@ fn ensure_private_history_dir(directory: &Path) -> Result<(), String> {
         }
         Err(_) => Err("Der Verlauf konnte nicht gespeichert werden.".to_owned()),
     }
+}
+
+/// `JSON.stringify(index, null, 2)` plus a trailing newline.
+fn history_index_bytes(index: &Value) -> Result<Vec<u8>, String> {
+    let text = serde_json::to_string_pretty(index)
+        .map_err(|_| "Der Verlauf konnte nicht gespeichert werden.".to_owned())?;
+    Ok(format!("{text}\n").into_bytes())
 }
 
 fn history_dir(root: &Path, relative: &str) -> Result<PathBuf, String> {
