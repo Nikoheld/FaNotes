@@ -257,16 +257,8 @@ const WORK_EN: &[StarterFolder] = &[
     },
 ];
 
-const CATALOGS: &[&[StarterFolder]] = &[
-    SCHOOL_DE,
-    UNIVERSITY_DE,
-    PRIVATE_DE,
-    WORK_DE,
-    SCHOOL_EN,
-    UNIVERSITY_EN,
-    PRIVATE_EN,
-    WORK_EN,
-];
+const CATALOGS_DE: &[&[StarterFolder]] = &[SCHOOL_DE, UNIVERSITY_DE, PRIVATE_DE, WORK_DE];
+const CATALOGS_EN: &[&[StarterFolder]] = &[SCHOOL_EN, UNIVERSITY_EN, PRIVATE_EN, WORK_EN];
 
 pub(crate) fn welcome_note(language: &str) -> &'static str {
     if language == "en" {
@@ -393,26 +385,36 @@ pub(crate) fn folders_to_create(
     language: &str,
     selected: &[String],
 ) -> Vec<(&'static str, &'static str)> {
+    // The desktop validates every language, then creates only the current
+    // language list (`starterFoldersForLanguage`). A German name chosen while
+    // the interface is English stays in the selection and is not a folder.
     let mut folders = vec![if language == "en" {
         (REQUIRED_EN.name, REQUIRED_EN.color)
     } else {
         (REQUIRED_DE.name, REQUIRED_DE.color)
     }];
-    for name in selected {
-        let Some(folder) = find_starter(name) else {
-            continue;
-        };
-        if folders.iter().any(|(existing, _)| *existing == folder.name) {
-            continue;
+    let catalogs = if language == "en" {
+        CATALOGS_EN
+    } else {
+        CATALOGS_DE
+    };
+    for catalog in catalogs {
+        for folder in *catalog {
+            if !selected.iter().any(|name| name == folder.name)
+                || folders.iter().any(|(existing, _)| *existing == folder.name)
+            {
+                continue;
+            }
+            folders.push((folder.name, folder.color));
         }
-        folders.push((folder.name, folder.color));
     }
     folders
 }
 
 fn find_starter(name: &str) -> Option<&'static StarterFolder> {
-    CATALOGS
+    CATALOGS_DE
         .iter()
+        .chain(CATALOGS_EN.iter())
         .flat_map(|catalog| catalog.iter())
         .find(|folder| folder.name == name)
 }

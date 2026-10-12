@@ -23,6 +23,51 @@ fn host() -> (std::path::PathBuf, Host) {
 }
 
 #[test]
+fn an_english_setup_leaves_a_german_subject_name_uncreated() {
+    let (vault, mut english) = host();
+    english
+        .settings
+        .insert("uiLanguage".to_owned(), json!("en"));
+    let done = english
+        .dispatch(
+            "fanotes:complete-onboarding",
+            &[json!(["Mathematik", "Physics", "AMAT"])],
+        )
+        .unwrap();
+    assert_eq!(done["settings"]["defaultFolder"], "Inbox");
+    assert_eq!(done["settings"]["dailyNotesFolder"], "Daily Notes");
+    assert_eq!(done["settings"]["recognitionLanguage"], "en");
+    assert!(vault.join("Inbox").is_dir());
+    assert!(vault.join("Physics").is_dir());
+    assert!(vault.join("AMAT").is_dir());
+    assert!(!vault.join("Mathematik").exists());
+    assert!(!vault.join("Eingang").exists());
+    let tree = english.dispatch("fanotes:get-tree", &[]).unwrap();
+    let physics = tree
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|entry| entry["name"] == "Physics")
+        .unwrap();
+    assert_eq!(physics["color"], "#7c6a9a");
+    let amat = tree
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|entry| entry["name"] == "AMAT")
+        .unwrap();
+    assert_eq!(amat["color"], "#9065b0");
+
+    let (german_vault, mut german) = host();
+    german
+        .dispatch("fanotes:complete-onboarding", &[json!(["Physics"])])
+        .unwrap();
+    assert!(german_vault.join("Eingang").is_dir());
+    assert!(!german_vault.join("Physics").exists());
+    assert!(!german_vault.join("Inbox").exists());
+}
+
+#[test]
 fn first_run_creates_the_chosen_subjects_and_stamps_the_tree() {
     let (vault, mut host) = host();
     let bootstrap = host.dispatch("fanotes:bootstrap", &[]).unwrap();
