@@ -81,14 +81,10 @@ pub fn recognize_line(request: &Value, configured_threads: i64) -> Result<Value,
 
 fn parse_line(request: &Value) -> Result<(usize, Vec<f32>), String> {
     let invalid = || "Die native OCR-Eingabe ist ungültig.".to_owned();
-    let width = request
-        .get("width")
-        .and_then(Value::as_u64)
-        .ok_or_else(invalid)? as usize;
-    let height = request
-        .get("height")
-        .and_then(Value::as_u64)
-        .ok_or_else(invalid)? as usize;
+    // `Number.isSafeInteger` keeps a whole width such as `32.0`, and `128.0 !== 128` is false.
+    let width = crate::resources::json_safe_u64(request.get("width")).ok_or_else(invalid)? as usize;
+    let height =
+        crate::resources::json_safe_u64(request.get("height")).ok_or_else(invalid)? as usize;
     if height != MODEL_HEIGHT || !(32..=4096).contains(&width) {
         return Err(invalid());
     }
@@ -310,9 +306,29 @@ fn arch_name() -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::{load_characters, ocr_thread_count};
+    use super::{load_characters, ocr_thread_count, parse_line};
+    use base64::Engine;
     use serde_json::json;
     use sha2::{Digest, Sha256};
+
+    #[test]
+    fn a_whole_line_width_still_counts() {
+        let width = 32usize;
+        let encoded = base64::engine::general_purpose::STANDARD.encode(vec![0u8; width * 128 * 4]);
+        let mut request = json!({
+            "width": 32.0,
+            "height": 128.0,
+            "inputBase64": encoded,
+        });
+        let (parsed, input) = parse_line(&request).unwrap();
+        assert_eq!(parsed, width);
+        assert_eq!(input.len(), width * 128);
+        request["width"] = json!(32.5);
+        assert_eq!(
+            parse_line(&request).unwrap_err(),
+            "Die native OCR-Eingabe ist ungültig."
+        );
+    }
 
     #[test]
     fn a_character_manifest_keeps_a_whole_size() {
