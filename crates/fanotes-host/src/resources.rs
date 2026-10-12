@@ -19,14 +19,19 @@ const MAX_CHARACTERS_BYTES: u64 = 256 * 1024;
 
 pub(crate) fn load_spelling() -> Result<Value, String> {
     let directory = locate("spell", "Ungültiges Rechtschreibmanifest.")?;
-    let manifest = read_manifest(&directory, "Ungültiges Rechtschreibmanifest.")?;
+    load_spelling_in(&directory)
+}
+
+fn load_spelling_in(directory: &Path) -> Result<Value, String> {
+    let manifest = read_manifest(directory, "Ungültiges Rechtschreibmanifest.")?;
+    // `hashes !== 8` keeps the JSON number `8.0`.
     if manifest.get("format").and_then(Value::as_str) != Some("fanotes-spelling-bloom-v2")
-        || manifest.get("hashes").and_then(Value::as_u64) != Some(8)
+        || manifest.get("hashes").and_then(Value::as_f64) != Some(8.0)
     {
         return Err("Unbekanntes Rechtschreibformat.".to_owned());
     }
-    let de = read_filter(&directory, &manifest, "de", "de.bloom")?;
-    let en = read_filter(&directory, &manifest, "en", "en.bloom")?;
+    let de = read_filter(directory, &manifest, "de", "de.bloom")?;
+    let en = read_filter(directory, &manifest, "en", "en.bloom")?;
     Ok(json!({
         "manifest": manifest,
         "de": encode(&de),
@@ -48,8 +53,8 @@ pub(crate) fn load_spelling_candidates(language: &str) -> Result<Value, String> 
         .cloned()
         .ok_or_else(|| "Ungültige OCR-Wortliste im Rechtschreibmanifest.".to_owned())?;
     let file = descriptor.get("file").and_then(Value::as_str);
-    let size = descriptor.get("size").and_then(Value::as_u64);
-    let word_count = descriptor.get("wordCount").and_then(Value::as_u64);
+    let size = json_safe_u64(descriptor.get("size"));
+    let word_count = json_safe_u64(descriptor.get("wordCount"));
     let hash = descriptor.get("sha256").and_then(Value::as_str);
     let expected = format!("{language}.words");
     if file != Some(expected.as_str())
@@ -95,8 +100,8 @@ pub(crate) fn load_handwriting() -> Result<Value, String> {
     let characters = manifest
         .pointer("/characters")
         .ok_or_else(|| "Unbekanntes Handschriftmodell.".to_owned())?;
-    let desktop_size = desktop.get("size").and_then(Value::as_u64).unwrap_or(0);
-    let web_size = web.get("size").and_then(Value::as_u64).unwrap_or(0);
+    let desktop_size = json_safe_u64(desktop.get("size")).unwrap_or(0);
+    let web_size = json_safe_u64(web.get("size")).unwrap_or(0);
     if manifest.get("format").and_then(Value::as_str) != Some("fanotes-neural-handwriting-v3")
         || desktop.get("name").and_then(Value::as_str) != Some("PyLaia_IAM_CTC")
         || desktop.get("precision").and_then(Value::as_str) != Some("fp32")
@@ -119,9 +124,7 @@ pub(crate) fn load_handwriting() -> Result<Value, String> {
     let (character_file, character_size, character_hash) =
         descriptor(characters, MAX_CHARACTERS_BYTES)
             .map_err(|_| "Ungültige Handschriftmodell-Ressource.".to_owned())?;
-    let count = characters
-        .get("count")
-        .and_then(Value::as_u64)
+    let count = json_safe_u64(characters.get("count"))
         .ok_or_else(|| "Ungültige Handschriftmodell-Ressource.".to_owned())?;
     let model = read_hashed(
         &directory,
@@ -176,7 +179,7 @@ fn read_filter(
     let descriptor = manifest
         .pointer(&format!("/languages/{language}"))
         .ok_or_else(|| "Ungültiges Rechtschreibmanifest.".to_owned())?;
-    let bit_count = descriptor.get("bitCount").and_then(Value::as_u64);
+    let bit_count = json_safe_u64(descriptor.get("bitCount"));
     let hash = descriptor.get("sha256").and_then(Value::as_str);
     if descriptor.get("file").and_then(Value::as_str) != Some(expected_file)
         || bit_count.is_none_or(|count| count == 0 || count % 8 != 0)
@@ -208,7 +211,7 @@ fn read_manifest(directory: &Path, error: &str) -> Result<Value, String> {
 
 fn descriptor<'a>(value: &'a Value, max: u64) -> Result<(&'a str, u64, &'a str), ()> {
     let file = value.get("file").and_then(Value::as_str).ok_or(())?;
-    let size = value.get("size").and_then(Value::as_u64).ok_or(())?;
+    let size = json_safe_u64(value.get("size")).ok_or(())?;
     let hash = value.get("sha256").and_then(Value::as_str).ok_or(())?;
     if !plain_file_name(file) || size == 0 || size > max || !is_sha256(hash) {
         return Err(());
@@ -315,4 +318,79 @@ fn sha256_hex(bytes: &[u8]) -> String {
 
 fn encode(bytes: &[u8]) -> String {
     base64::engine::general_purpose::STANDARD.encode(bytes)
+}
+
+/// `Number.isSafeInteger` for a non-negative manifest count. `8.0` counts; `8.5` does not.
+pub(crate) fn json_safe_u64(value: Option<&Value>) -> Option<u64> {
+    let number = value?.as_f64()?;
+    if number.is_finite()
+        && number.fract() == 0.0
+        && (0.0..=9_007_199_254_740_991.0).contains(&number)
+    {
+        Some(number as u64)
+    } else {
+        None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::load_spelling_in;
+    use base64::Engine;
+    use sha2::{Digest, Sha256};
+
+    #[test]
+    fn a_spelling_manifest_keeps_a_whole_number_of_hashes() {
+        let dir = std::env::temp_dir().join(format!(
+            "fanotes-spell-whole-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let byte = b"x";
+        std::fs::write(dir.join("de.bloom"), byte).unwrap();
+        std::fs::write(dir.join("en.bloom"), byte).unwrap();
+        let hash = Sha256::digest(byte)
+            .iter()
+            .map(|item| format!("{item:02x}"))
+            .collect::<String>();
+        let manifest = serde_json::json!({
+            "format": "fanotes-spelling-bloom-v2",
+            "hashes": 8.0,
+            "languages": {
+                "de": { "file": "de.bloom", "bitCount": 8.0, "sha256": hash },
+                "en": { "file": "en.bloom", "bitCount": 8.0, "sha256": hash }
+            }
+        });
+        std::fs::write(
+            dir.join("manifest.json"),
+            serde_json::to_string(&manifest).unwrap(),
+        )
+        .unwrap();
+        let loaded = load_spelling_in(&dir).unwrap();
+        assert_eq!(loaded["manifest"]["hashes"], 8.0);
+        assert_eq!(
+            base64::engine::general_purpose::STANDARD
+                .decode(loaded["de"].as_str().unwrap())
+                .unwrap(),
+            byte
+        );
+
+        let mut fractional = manifest;
+        fractional["hashes"] = serde_json::json!(8.5);
+        std::fs::write(
+            dir.join("manifest.json"),
+            serde_json::to_string(&fractional).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            load_spelling_in(&dir).unwrap_err(),
+            "Unbekanntes Rechtschreibformat."
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
