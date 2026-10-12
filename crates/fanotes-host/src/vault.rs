@@ -207,6 +207,21 @@ pub(crate) fn has_c0_or_del(value: &str) -> bool {
     value.chars().any(is_c0_or_del)
 }
 
+/// `path.relative(root, path).split(path.sep).join('/')`.
+///
+/// On Linux a backslash is part of the file name, so `My\Notes.md` stays one
+/// segment. On Windows the separator is the component boundary.
+pub(crate) fn relative_posix(root: &Path, path: &Path) -> String {
+    let relative = path.strip_prefix(root).unwrap_or(path);
+    let mut parts = Vec::new();
+    for component in relative.components() {
+        if let Component::Normal(part) = component {
+            parts.push(part.to_string_lossy().into_owned());
+        }
+    }
+    parts.join("/")
+}
+
 /// `path.posix.extname`.
 ///
 /// `.md` and `..` have no extension. `.hidden.md` is `.md`.
@@ -382,7 +397,10 @@ pub(crate) fn js_tonumber(value: &str) -> Option<f64> {
 
 #[cfg(test)]
 mod tests {
-    use super::{js_tonumber, normalize_relative_path, posix_extname, sync_segments};
+    use super::{
+        js_tonumber, normalize_relative_path, posix_extname, relative_posix, sync_segments,
+    };
+    use std::path::Path;
 
     #[test]
     fn path_limits_count_characters() {
@@ -444,6 +462,19 @@ mod tests {
         assert_eq!(posix_extname("Note.MD"), ".MD");
         assert_eq!(posix_extname("a."), ".");
         assert_eq!(posix_extname("..."), ".");
+        #[cfg(unix)]
+        {
+            let root = Path::new("/vault");
+            assert_eq!(
+                relative_posix(root, &root.join("My\\Notes.md")),
+                "My\\Notes.md"
+            );
+            assert_eq!(
+                relative_posix(root, &root.join("Ordner").join("My\\Notes.md")),
+                "Ordner/My\\Notes.md"
+            );
+            assert_eq!(relative_posix(root, &root.join("Notiz.md")), "Notiz.md");
+        }
     }
 
     #[test]

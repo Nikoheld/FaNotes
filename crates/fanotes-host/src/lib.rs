@@ -1105,10 +1105,12 @@ impl Host {
         let needle = query.to_lowercase();
         let mut files = Vec::new();
         collect_search_files(root, root, &mut files, 0)?;
-        let present: std::collections::HashSet<String> = files.iter().cloned().collect();
+        let present: std::collections::HashSet<String> =
+            files.iter().map(|file| file.relative.clone()).collect();
         let mut hits = Vec::new();
         let mut owners = std::collections::HashMap::new();
-        for relative in files {
+        for file in files {
+            let relative = file.relative;
             let lower = relative.to_lowercase();
             if lower.ends_with(".famd") {
                 let stem = fanotes_famd::note_stem(&relative);
@@ -1120,7 +1122,8 @@ impl Host {
                     continue;
                 }
             }
-            let path = vault::resolve_existing_entry(root, &relative)?;
+            // The directory walk already has this file, matching the desktop read of absolutePath.
+            let path = file.path;
             let raw = if lower.ends_with(".pdf") {
                 String::new()
             } else {
@@ -1180,13 +1183,7 @@ impl Host {
             } else {
                 format!("Dateiname · {relative}")
             };
-            let title = relative
-                .rsplit('/')
-                .next()
-                .unwrap_or(&relative)
-                .rsplit_once('.')
-                .map(|(stem, _)| stem)
-                .unwrap_or(&relative);
+            let title = search_title(&relative);
             let mut hit = json!({
                 "relativePath": relative,
                 "title": title,
@@ -1902,11 +1899,7 @@ fn scan_sync_directory(root: &Path, directory: &Path, depth: usize, out: &mut Ve
         if name.starts_with('.') && !(depth == 0 && name == ".fanotes") {
             continue;
         }
-        let relative = path
-            .strip_prefix(root)
-            .unwrap_or(&path)
-            .to_string_lossy()
-            .replace('\\', "/");
+        let relative = vault::relative_posix(root, &path);
         if depth == 1
             && relative.starts_with(".fanotes/")
             && matches!(name.as_str(), "history" | "tree-cache")
@@ -2018,10 +2011,7 @@ fn companion_extension(directory: bool, name: &str) -> Option<&'static str> {
 }
 
 fn relative_from_root(root: &Path, path: &Path) -> String {
-    path.strip_prefix(root)
-        .unwrap_or(path)
-        .to_string_lossy()
-        .replace('\\', "/")
+    vault::relative_posix(root, path)
 }
 
 fn unique_sibling_name(
@@ -2913,11 +2903,7 @@ fn read_tree(
             continue;
         }
         let path = entry.path();
-        let relative = path
-            .strip_prefix(root)
-            .unwrap_or(&path)
-            .to_string_lossy()
-            .replace('\\', "/");
+        let relative = vault::relative_posix(root, &path);
         let Ok(meta) = fs::symlink_metadata(&path) else {
             continue;
         };
@@ -3287,10 +3273,26 @@ fn search_drawings(
     }
 }
 
+struct SearchFile {
+    relative: String,
+    path: PathBuf,
+}
+
+/// `splitName(path.basename(file)).stem` from the desktop search hit.
+fn search_title(relative: &str) -> &str {
+    let base = relative.rsplit('/').next().unwrap_or(relative);
+    let extension = vault::posix_extname(base);
+    if extension.is_empty() {
+        base
+    } else {
+        &base[..base.len() - extension.len()]
+    }
+}
+
 fn collect_search_files(
     root: &Path,
     directory: &Path,
-    files: &mut Vec<String>,
+    files: &mut Vec<SearchFile>,
     depth: usize,
 ) -> Result<(), String> {
     if depth > 80 {
@@ -3338,12 +3340,10 @@ fn collect_search_files(
         if meta.len() > max {
             continue;
         }
-        let relative = path
-            .strip_prefix(root)
-            .unwrap_or(&path)
-            .to_string_lossy()
-            .replace('\\', "/");
-        files.push(relative);
+        files.push(SearchFile {
+            relative: vault::relative_posix(root, &path),
+            path,
+        });
     }
     Ok(())
 }
