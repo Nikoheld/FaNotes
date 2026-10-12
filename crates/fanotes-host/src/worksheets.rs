@@ -21,13 +21,9 @@ pub fn read_worksheet(host: &Host, raw_id: &str) -> Result<Value, String> {
     let id = worksheet_id(raw_id)?;
     let directory = worksheets_dir(vault_root(host)?)?;
     let path = directory.join(format!("{id}.json"));
-    let raw = read_text(&path, MAX_WORKSHEET_JSON_BYTES).map_err(|_| {
-        if path.is_file() {
-            "Das Arbeitsblatt konnte nicht gelesen werden.".to_owned()
-        } else {
-            "Das Arbeitsblatt wurde nicht gefunden.".to_owned()
-        }
-    })?;
+    // Desktop `readRegularFileNoFollow`: a missing file is not found, a
+    // non-file is reported before the size, and an oversized file is too big.
+    let raw = read_worksheet_json(&path)?;
     let candidate: Value = serde_json::from_str(&raw)
         .map_err(|_| "Die Arbeitsblattdaten sind beschädigt.".to_owned())?;
     let document = validate_document(&candidate, &id)?;
@@ -669,15 +665,23 @@ fn read_prefix(path: &Path, limit: usize) -> Result<String, String> {
     Ok(lossy_utf8(bytes))
 }
 
-fn read_text(path: &Path, max: usize) -> Result<String, String> {
-    let meta = fs::symlink_metadata(path)
-        .map_err(|_| "Die Datei konnte nicht gelesen werden.".to_owned())?;
-    if meta.file_type().is_symlink() || !meta.is_file() || meta.len() as usize > max {
-        return Err("Die Datei ist ungültig oder zu groß.".to_owned());
+fn read_worksheet_json(path: &Path) -> Result<String, String> {
+    match fs::symlink_metadata(path) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Err("Das Arbeitsblatt wurde nicht gefunden.".to_owned());
+        }
+        Err(_) => return Err("Das Arbeitsblatt konnte nicht gelesen werden.".to_owned()),
+        Ok(meta) if meta.file_type().is_symlink() || !meta.is_file() => {
+            return Err("Die Datei ist keine reguläre Datei.".to_owned());
+        }
+        Ok(meta) if meta.len() as usize > MAX_WORKSHEET_JSON_BYTES => {
+            return Err("Die Datei ist zu groß.".to_owned());
+        }
+        Ok(_) => {}
     }
     fs::read(path)
         .map(lossy_utf8)
-        .map_err(|_| "Die Datei konnte nicht gelesen werden.".to_owned())
+        .map_err(|_| "Das Arbeitsblatt konnte nicht gelesen werden.".to_owned())
 }
 
 /// Node `Buffer.toString('utf8')`: invalid bytes become U+FFFD and the rest stays.
