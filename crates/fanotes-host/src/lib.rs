@@ -216,7 +216,11 @@ impl Host {
                     .get("ocrThreadLimit")
                     .and_then(Value::as_i64)
                     .unwrap_or(0);
-                ocr::recognize_line(args.first().unwrap_or(&Value::Null), configured)
+                ocr::recognize_line(
+                    args.first().unwrap_or(&Value::Null),
+                    configured,
+                    self.settings.get("ocrModelKeepAliveSeconds"),
+                )
             }
             "fanotes:enhanced-math-get-state" => Ok(enhanced_math_state()),
             "fanotes:enhanced-math-install" | "fanotes:enhanced-math-recognize" => {
@@ -444,37 +448,31 @@ impl Host {
 
     fn read_sync_secrets(&self) -> Result<Value, String> {
         let path = self.sync_secrets_path();
-        let raw = match fs::read_to_string(&path) {
-            Ok(raw) => Some(raw),
+        // `readFile(..., 'utf8')` replaces a bad byte and still sees the prefix.
+        let loaded = match fs::read(&path) {
+            Ok(bytes) => Some(decode_sync_secret(bytes)),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
             Err(_) => {
                 return Err("Die Sync-Anmeldung konnte nicht gelesen werden.".to_owned());
             }
         };
-        if raw
-            .as_ref()
-            .is_some_and(|value| value.starts_with("plain1:"))
-        {
+        let raw = loaded.as_ref().map(|(text, _)| text.as_str());
+        let valid_utf8 = loaded.as_ref().is_none_or(|(_, valid)| *valid);
+        if raw.is_some_and(|value| value.starts_with("plain1:")) {
             let _ = fs::remove_file(&path);
             let _ = secrets::delete(self.secret_store, &self.secret_account(SYNC_SECRET_ACCOUNT));
             return Ok(Value::Null);
         }
         match secrets::get(self.secret_store, &self.secret_account(SYNC_SECRET_ACCOUNT)) {
             Ok(Some(secret)) => {
-                if raw
-                    .as_ref()
-                    .is_some_and(|value| !value.starts_with("safe1:"))
-                {
+                if raw.is_some_and(|value| !value.starts_with("safe1:")) {
                     let _ = notes::atomic_write(&path, b"safe1:", 0o600);
                 }
                 Ok(Value::String(secret))
             }
-            Ok(None) => self.read_legacy_sync_secret(raw.as_deref(), &path),
+            Ok(None) => self.read_legacy_sync_secret(raw, valid_utf8, &path),
             Err(error) => {
-                if raw
-                    .as_ref()
-                    .is_some_and(|value| value.starts_with("safe1:"))
-                {
+                if raw.is_some_and(|value| value.starts_with("safe1:")) {
                     Err(error)
                 } else {
                     Ok(Value::Null)
@@ -483,15 +481,21 @@ impl Host {
         }
     }
 
-    fn read_legacy_sync_secret(&self, raw: Option<&str>, path: &Path) -> Result<Value, String> {
+    fn read_legacy_sync_secret(
+        &self,
+        raw: Option<&str>,
+        valid_utf8: bool,
+        path: &Path,
+    ) -> Result<Value, String> {
         let Some(raw) = raw else {
             return Ok(Value::Null);
         };
         if raw.starts_with("safe1:") {
             return Err(secrets::KEYRING_UNAVAILABLE.to_owned());
         }
-        // A blank file is not a legacy secret. The desktop returns no login.
-        if raw.trim().is_empty() {
+        // A file of only JavaScript whitespace has no login. A bad byte is not
+        // a legacy secret either: the desktop returns no login.
+        if !valid_utf8 || vault::js_trim(raw).is_empty() {
             return Ok(Value::Null);
         }
         secrets::set(
@@ -1459,6 +1463,17 @@ const APP_DATA_RESET_MARKER: &str = ".fanotes-reset-pending.json";
 const APP_DATA_RESET_COMPLETE: &str = ".fanotes-reset-complete";
 const RESET_MAX_BYTES: u64 = 4096;
 const RESET_MAX_AGE_MS: u64 = 24 * 60 * 60 * 1000;
+
+/// Node `readFile(..., 'utf8')`: a bad byte becomes U+FFFD and the prefix stays.
+fn decode_sync_secret(bytes: Vec<u8>) -> (String, bool) {
+    match String::from_utf8(bytes) {
+        Ok(text) => (text, true),
+        Err(error) => (
+            String::from_utf8_lossy(error.as_bytes()).into_owned(),
+            false,
+        ),
+    }
+}
 
 fn pending_reset_marker(app_data: &Path) -> Option<PathBuf> {
     Some(app_data.parent()?.join(APP_DATA_RESET_MARKER))

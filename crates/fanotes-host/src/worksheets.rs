@@ -221,14 +221,7 @@ fn decode_bytes(value: Option<&Value>, max_bytes: usize) -> Result<Vec<u8>, Stri
         if items.len() > max_bytes {
             return Err(too_big.to_owned());
         }
-        let mut bytes = Vec::with_capacity(items.len());
-        for item in items {
-            let Some(number) = item.as_u64().filter(|number| *number <= 255) else {
-                return Err(too_big.to_owned());
-            };
-            bytes.push(number as u8);
-        }
-        bytes
+        items.iter().map(worksheet_byte).collect()
     } else {
         return Err(too_big.to_owned());
     };
@@ -237,6 +230,28 @@ fn decode_bytes(value: Option<&Value>, max_bytes: usize) -> Result<Vec<u8>, Stri
     } else {
         Ok(bytes)
     }
+}
+
+/// `Buffer.from(array)` converts each value with `ToUint8`.
+///
+/// `1.0` and `1.5` become 1, `256` becomes 0, and `-1` becomes 255.
+fn worksheet_byte(value: &Value) -> u8 {
+    let number = match value {
+        Value::Number(number) => number.as_f64().unwrap_or(f64::NAN),
+        Value::String(text) => crate::vault::js_tonumber(text).unwrap_or(f64::NAN),
+        Value::Bool(true) => 1.0,
+        Value::Bool(false) => 0.0,
+        Value::Null => 0.0,
+        _ => f64::NAN,
+    };
+    to_uint8(number)
+}
+
+fn to_uint8(number: f64) -> u8 {
+    if !number.is_finite() || number == 0.0 {
+        return 0;
+    }
+    number.trunc().rem_euclid(256.0) as u8
 }
 
 fn validate_bytes(bytes: &[u8], extension: &str) -> Result<(), String> {
