@@ -178,7 +178,10 @@ fn an_empty_asset_preview_returns_an_empty_payload() {
 #[test]
 fn addon_ssrf_blocks_private_and_non_https() {
     assert!(addon_request_allowed("http://example.com").is_err());
-    assert!(addon_request_allowed("https://127.0.0.1/hook").is_err());
+    assert_eq!(
+        addon_request_allowed("https://127.0.0.1/hook").unwrap_err(),
+        "Add-ons dürfen nur öffentliche https-Adressen aufrufen."
+    );
     assert!(addon_request_allowed("https://127.1/hook").is_err());
     assert!(addon_request_allowed("https://0x7f.0.0.1/hook").is_err());
     assert!(addon_request_allowed("https://0177.0.0.1/hook").is_err());
