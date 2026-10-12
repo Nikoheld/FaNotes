@@ -254,8 +254,16 @@ fn vault_root(host: &Host) -> Result<&Path, String> {
         .ok_or_else(|| "Der Vault ist noch nicht initialisiert.".to_owned())
 }
 
+/// `path.basename`, then the stem from `path.extname`.
+///
+/// Linux `path.basename` leaves a backslash in the name. `My\Notes.pdf` is
+/// refused. Windows `path.basename` treats `\` as a separator.
 fn file_stem(name: &str) -> &str {
-    let base = name.rsplit(['/', '\\']).next().unwrap_or(name);
+    let base = if cfg!(windows) {
+        name.rsplit(['/', '\\']).next().unwrap_or(name)
+    } else {
+        name.rsplit('/').next().unwrap_or(name)
+    };
     base.rsplit_once('.')
         .map(|(stem, _)| stem)
         .filter(|stem| !stem.is_empty())
@@ -299,6 +307,43 @@ mod tests {
             result["entry"]["modifiedAt"],
             crate::notes::iso_from_system_time(modified)
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_backslash_in_a_pdf_name_stays_in_the_linux_file_name() {
+        let dir = std::env::temp_dir().join(format!(
+            "fanotes-pdf-backslash-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        let vault = dir.join("vault");
+        std::fs::create_dir_all(vault.join("Mathe")).unwrap();
+        let mut host = Host::open(dir.join("app"));
+        host.set_vault(vault.clone()).unwrap();
+        let bytes = json!(b"%PDF-1.4\n".to_vec());
+        let slash = import_pdf_payload(
+            &host,
+            "Mathe",
+            &json!({ "name": "Ordner/Foto.pdf", "bytes": bytes }),
+        )
+        .unwrap();
+        assert_eq!(slash["entry"]["name"], "Foto.pdf");
+        let named = import_pdf_payload(
+            &host,
+            "Mathe",
+            &json!({ "name": "My\\Notes.pdf", "bytes": bytes }),
+        );
+        if cfg!(windows) {
+            assert_eq!(named.unwrap()["entry"]["name"], "Notes.pdf");
+        } else {
+            assert_eq!(named.unwrap_err(), "Dieser Name ist nicht erlaubt.");
+            assert!(!vault.join("Mathe/Notes.pdf").exists());
+        }
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
