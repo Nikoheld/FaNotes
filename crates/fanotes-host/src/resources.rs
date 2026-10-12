@@ -179,24 +179,30 @@ fn read_filter(
     let descriptor = manifest
         .pointer(&format!("/languages/{language}"))
         .ok_or_else(|| "Ungültiges Rechtschreibmanifest.".to_owned())?;
-    let bit_count = json_safe_u64(descriptor.get("bitCount"));
+    // `Number.isSafeInteger(bitCount)` allows a negative count. The file is
+    // read next, and `byteLength * 8 !== bitCount` names the filter.
+    let bit_count = json_safe_i64(descriptor.get("bitCount"));
     let hash = descriptor.get("sha256").and_then(Value::as_str);
     if descriptor.get("file").and_then(Value::as_str) != Some(expected_file)
-        || bit_count.is_none_or(|count| count == 0 || count % 8 != 0)
+        || bit_count.is_none()
         || hash.is_none_or(|hash| !is_sha256(hash))
     {
         return Err("Ungültiges Rechtschreibmanifest.".to_owned());
     }
-    let size = bit_count.unwrap_or(0) / 8;
-    read_hashed(
-        directory,
-        expected_file,
-        size,
+    let bit_count = bit_count.unwrap_or(0);
+    let bytes = read_regular(
+        &directory.join(expected_file),
+        1,
         MAX_FILTER_BYTES,
-        hash.unwrap_or(""),
         "Ungültiger Rechtschreibfilter.",
-        "Beschädigter Rechtschreibfilter.",
-    )
+    )?;
+    if (bytes.len() as i64).saturating_mul(8) != bit_count {
+        return Err("Ungültiger Rechtschreibfilter.".to_owned());
+    }
+    if sha256_hex(&bytes) != hash.unwrap_or("") {
+        return Err("Beschädigter Rechtschreibfilter.".to_owned());
+    }
+    Ok(bytes)
 }
 
 fn read_manifest(directory: &Path, error: &str) -> Result<Value, String> {
@@ -322,12 +328,18 @@ fn encode(bytes: &[u8]) -> String {
 
 /// `Number.isSafeInteger` for a non-negative manifest count. `8.0` counts; `8.5` does not.
 pub(crate) fn json_safe_u64(value: Option<&Value>) -> Option<u64> {
+    let number = json_safe_i64(value)?;
+    (number >= 0).then_some(number as u64)
+}
+
+/// `Number.isSafeInteger`, including a negative spelling bit count such as `-8`.
+fn json_safe_i64(value: Option<&Value>) -> Option<i64> {
     let number = value?.as_f64()?;
     if number.is_finite()
         && number.fract() == 0.0
-        && (0.0..=9_007_199_254_740_991.0).contains(&number)
+        && number.abs() <= 9_007_199_254_740_991.0
     {
-        Some(number as u64)
+        Some(number as i64)
     } else {
         None
     }
@@ -391,6 +403,48 @@ mod tests {
             load_spelling_in(&dir).unwrap_err(),
             "Unbekanntes Rechtschreibformat."
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_negative_spelling_bit_count_is_a_bad_filter() {
+        let dir = std::env::temp_dir().join(format!(
+            "fanotes-spell-bits-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let byte = b"x";
+        std::fs::write(dir.join("de.bloom"), byte).unwrap();
+        std::fs::write(dir.join("en.bloom"), byte).unwrap();
+        let hash = Sha256::digest(byte)
+            .iter()
+            .map(|item| format!("{item:02x}"))
+            .collect::<String>();
+        for bit_count in [serde_json::json!(-8), serde_json::json!(1)] {
+            let manifest = serde_json::json!({
+                "format": "fanotes-spelling-bloom-v2",
+                "hashes": 8,
+                "languages": {
+                    "de": { "file": "de.bloom", "bitCount": bit_count, "sha256": hash },
+                    "en": { "file": "en.bloom", "bitCount": 8, "sha256": hash }
+                }
+            });
+            std::fs::write(
+                dir.join("manifest.json"),
+                serde_json::to_string(&manifest).unwrap(),
+            )
+            .unwrap();
+            assert_eq!(
+                load_spelling_in(&dir).unwrap_err(),
+                "Ungültiger Rechtschreibfilter.",
+                "{bit_count}"
+            );
+        }
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
