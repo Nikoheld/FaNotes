@@ -2149,14 +2149,7 @@ fn arg_mtime_ms(value: Option<&Value>) -> Option<i64> {
 }
 
 fn mtime_millis(meta: &fs::Metadata) -> i64 {
-    meta.modified()
-        .ok()
-        .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
-        .map(|duration| {
-            let nanos = duration.as_nanos();
-            ((nanos + 500_000) / 1_000_000) as i64
-        })
-        .unwrap_or(0)
+    meta.modified().map(notes::mtime_millis_of).unwrap_or(0)
 }
 
 fn internal_directory(root: &Path) -> Result<PathBuf, String> {
