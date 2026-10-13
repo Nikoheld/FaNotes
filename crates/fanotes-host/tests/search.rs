@@ -332,6 +332,31 @@ fn search_skips_companions_links_and_notes_buried_too_deep() {
 }
 
 #[test]
+fn search_keeps_a_case_pair_the_desktop_does_not_fold() {
+    let mut host = host();
+    touch(&host, "Bio/Zeichen.md");
+    let upper = "\u{A7CE}";
+    let lower = "\u{A7CF}";
+    host.dispatch(
+        "fanotes:write-file",
+        &[
+            json!("Bio/Zeichen.md"),
+            json!(format!("Vor {upper} nach\n")),
+        ],
+    )
+    .unwrap();
+    let missed = host.dispatch("fanotes:search", &[json!(lower)]).unwrap();
+    assert!(
+        missed.as_array().unwrap().is_empty(),
+        "{missed}"
+    );
+    let found = host.dispatch("fanotes:search", &[json!(upper)]).unwrap();
+    assert_eq!(found[0]["relativePath"], "Bio/Zeichen.md");
+    let nearby = host.dispatch("fanotes:search", &[json!("nach")]).unwrap();
+    assert_eq!(nearby[0]["relativePath"], "Bio/Zeichen.md");
+}
+
+#[test]
 fn search_excerpt_follows_a_case_fold_that_grows() {
     let mut host = host();
     touch(&host, "Bio/Istanbul.md");

@@ -1229,7 +1229,7 @@ impl Host {
         }
         let query = vault::truncate_utf16(query, 500);
         let root = self.require_vault()?;
-        let needle = query.to_lowercase();
+        let needle = vault::locale_lower_de(&query);
         let mut files = Vec::new();
         collect_search_files(root, root, &mut files, 0)?;
         let present: std::collections::HashSet<String> =
@@ -1298,12 +1298,12 @@ impl Host {
                 }
             }
             remember_drawing_owner(&mut owners, &relative, &content, ink.as_ref());
-            let haystack = format!("{relative}\n{content}\n{transcript}").to_lowercase();
+            let haystack = vault::locale_lower_de(&format!("{relative}\n{content}\n{transcript}"));
             if !haystack.contains(&needle) {
                 continue;
             }
             let matches = count_matches(&haystack, &needle);
-            let content_index = content.to_lowercase().find(&needle);
+            let content_index = vault::locale_lower_de(&content).find(&needle);
             let excerpt = if let Some(index) = content_index {
                 let (start, _) = original_match_span(&content, &needle, index);
                 excerpt(&content, start, vault::utf16_len(&query))
@@ -3872,7 +3872,7 @@ fn search_drawings(
                 .unwrap_or(""),
         );
         let searchable = format!("{title}\n{transcript}");
-        let haystack = searchable.to_lowercase();
+        let haystack = vault::locale_lower_de(&searchable);
         let Some(first) = haystack.find(needle) else {
             continue;
         };
@@ -4021,14 +4021,14 @@ fn original_match_span(text: &str, needle: &str, folded_index: usize) -> (usize,
     if folded_end <= text.len()
         && text.is_char_boundary(folded_index)
         && text.is_char_boundary(folded_end)
-        && text[folded_index..folded_end].to_lowercase() == needle
+        && vault::locale_lower_de(&text[folded_index..folded_end]) == needle
     {
         return (folded_index, needle_len);
     }
     let mut produced = 0usize;
     let mut start = None;
     for (offset, ch) in text.char_indices() {
-        let folded_len = ch.to_lowercase().map(char::len_utf8).sum::<usize>();
+        let folded_len = vault::locale_lower_de(ch.encode_utf8(&mut [0; 4])).len();
         let next = produced + folded_len;
         if start.is_none() && next > folded_index {
             start = Some(offset);
@@ -4141,7 +4141,7 @@ fn byte_range_for_utf16(text: &str, start_units: usize, end_units: usize) -> (us
 }
 
 fn ink_anchor(transcript: &str, query: &str) -> Option<f64> {
-    let needle = vault::js_trim(query).to_lowercase();
+    let needle = vault::locale_lower_de(vault::js_trim(query));
     if vault::utf16_len(&needle) < 2 || vault::js_trim(transcript).is_empty() {
         return None;
     }
@@ -4162,7 +4162,7 @@ fn ink_anchor(transcript: &str, query: &str) -> Option<f64> {
         .collect();
     let index = parsed
         .iter()
-        .position(|(_, text)| text.to_lowercase().contains(&needle))?;
+        .position(|(_, text)| vault::locale_lower_de(text).contains(&needle))?;
     parsed[index].0.or_else(|| {
         if parsed.len() == 1 {
             Some(0.15)
