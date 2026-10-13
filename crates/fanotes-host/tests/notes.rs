@@ -210,6 +210,69 @@ fn an_unreadable_history_index_uses_the_desktop_open_error() {
 
 #[cfg(unix)]
 #[test]
+fn an_unreadable_history_snapshot_uses_the_desktop_open_error() {
+    use std::os::unix::fs::PermissionsExt;
+    let (mut host, vault) = host();
+    std::fs::write(vault.join("Mathe/Seite.md"), b"Hallo\n").unwrap();
+    host.dispatch(
+        "fanotes:write-file",
+        &[json!("Mathe/Seite.md"), json!("Welt\n")],
+    )
+    .unwrap();
+    let listed = host
+        .dispatch("fanotes:list-note-history", &[json!("Mathe/Seite.md")])
+        .unwrap();
+    let id = listed[0]["id"].as_str().unwrap().to_owned();
+    let snapshot = std::fs::read_dir(vault.join(".fanotes/history"))
+        .unwrap()
+        .find_map(|entry| {
+            let path = entry.unwrap().path().join(format!("{id}.md"));
+            path.is_file().then_some(path)
+        })
+        .unwrap();
+    let canonical = std::fs::canonicalize(&snapshot).unwrap();
+    std::fs::set_permissions(&snapshot, std::fs::Permissions::from_mode(0o000)).unwrap();
+    struct Restore(std::path::PathBuf);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            let _ = std::fs::set_permissions(&self.0, std::fs::Permissions::from_mode(0o600));
+        }
+    }
+    let _restore = Restore(snapshot.clone());
+    assert_eq!(
+        host.dispatch(
+            "fanotes:read-note-history",
+            &[json!("Mathe/Seite.md"), json!(id)],
+        )
+        .unwrap_err(),
+        format!("EACCES: permission denied, open '{}'", canonical.display())
+    );
+    std::fs::set_permissions(&snapshot, std::fs::Permissions::from_mode(0o600)).unwrap();
+    std::fs::remove_file(&snapshot).unwrap();
+    assert_eq!(
+        host.dispatch(
+            "fanotes:read-note-history",
+            &[json!("Mathe/Seite.md"), json!(&id)],
+        )
+        .unwrap_err(),
+        format!(
+            "ENOENT: no such file or directory, open '{}'",
+            canonical.display()
+        )
+    );
+    std::fs::create_dir(&snapshot).unwrap();
+    assert_eq!(
+        host.dispatch(
+            "fanotes:read-note-history",
+            &[json!("Mathe/Seite.md"), json!(id)],
+        )
+        .unwrap_err(),
+        "EISDIR: illegal operation on a directory, read"
+    );
+}
+
+#[cfg(unix)]
+#[test]
 fn an_unsearchable_vault_reports_the_desktop_history_open_error() {
     use std::os::unix::fs::PermissionsExt;
     let (mut host, _) = host();
