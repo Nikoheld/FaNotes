@@ -1794,14 +1794,14 @@ fn extension_of(path: &Path) -> String {
 }
 
 fn sha256_file(path: &Path) -> Result<String, String> {
-    let mut file = File::open(path)
-        .map_err(|_| "Die OneNote-Datei konnte nicht gelesen werden.".to_owned())?;
+    // Desktop `createReadStream` reports the open error, then read errors.
+    let mut file = File::open(path).map_err(|error| crate::notes::node_open_error(path, &error))?;
     let mut hasher = Sha256::new();
     let mut buffer = [0u8; 64 * 1024];
     loop {
         let read = file
             .read(&mut buffer)
-            .map_err(|_| "Die OneNote-Datei konnte nicht gelesen werden.".to_owned())?;
+            .map_err(|error| crate::vault::node_read_error(path, &error))?;
         if read == 0 {
             break;
         }
@@ -1889,7 +1889,7 @@ fn civil_date(mut days: u64) -> (i32, u32, u32) {
 #[cfg(test)]
 mod tests {
     use super::{
-        common_ancestor, extract_search_text, import_folder_segment, inline_images,
+        common_ancestor, extract_search_text, import_folder_segment, inline_images, sha256_file,
         note_directory_segments, outline_level, page_dimensions, page_parents, page_title,
         preview_is_nav, render_inputs, safe_segment, sanitize_page, stored_relative_path,
         strip_active_html, tool_failure_message, tool_limit, unique_directory, urlencoding_decode,
@@ -2504,5 +2504,41 @@ mod tests {
         let named = render_inputs(&[toc], &output, Path::new("/bin/false")).unwrap_err();
         assert!(named.contains("OneNote-Abschnitt Algebra.one"));
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_unreadable_onenote_file_uses_the_desktop_open_error() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!(
+            "fanotes-onenote-hash-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let source = dir.join("Notiz.one");
+        std::fs::write(&source, b"one-bytes").unwrap();
+        std::fs::set_permissions(&source, std::fs::Permissions::from_mode(0o000)).unwrap();
+        struct Restore(std::path::PathBuf);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                let _ = std::fs::set_permissions(&self.0, std::fs::Permissions::from_mode(0o600));
+            }
+        }
+        let _restore = Restore(source.clone());
+        assert_eq!(
+            sha256_file(&source).unwrap_err(),
+            format!(
+                "EACCES: permission denied, open '{}'",
+                source.display()
+            )
+        );
+        std::fs::set_permissions(&source, std::fs::Permissions::from_mode(0o600)).unwrap();
+        assert_eq!(std::fs::read(&source).unwrap(), b"one-bytes");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
