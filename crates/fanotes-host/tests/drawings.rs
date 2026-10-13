@@ -25,6 +25,48 @@ fn drawing(title: &str) -> String {
     )
 }
 
+#[cfg(unix)]
+#[test]
+fn an_unreadable_drawing_library_is_not_an_empty_list() {
+    use std::os::unix::fs::PermissionsExt;
+    let (dir, mut host) = host();
+    let saved = host
+        .dispatch(
+            "fanotes:save-drawing",
+            &[json!({
+                "id": "skizze",
+                "title": "Skizze",
+                "drawingJson": drawing("Skizze")
+            })],
+        )
+        .unwrap();
+    assert_eq!(saved["id"], "skizze");
+    let assets = dir.join("vault/.fanotes/assets");
+    let canonical = fs::canonicalize(&assets).unwrap();
+    fs::set_permissions(&assets, fs::Permissions::from_mode(0o333)).unwrap();
+    struct Restore(std::path::PathBuf);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            let _ = fs::set_permissions(&self.0, fs::Permissions::from_mode(0o700));
+        }
+    }
+    let _restore = Restore(assets.clone());
+    let expected = format!(
+        "EACCES: permission denied, scandir '{}'",
+        canonical.display()
+    );
+    assert_eq!(
+        host.dispatch("fanotes:list-drawings", &[]).unwrap_err(),
+        expected
+    );
+    assert_eq!(
+        host.dispatch("fanotes:search", &[json!("Skizze")]).unwrap_err(),
+        expected
+    );
+    fs::set_permissions(&assets, fs::Permissions::from_mode(0o700)).unwrap();
+    assert!(assets.join("skizze.json").is_file());
+}
+
 #[test]
 fn a_numeric_drawing_id_is_rejected() {
     let (dir, mut host) = host();
