@@ -542,6 +542,27 @@ fn a_reset_marker_with_second_sixty_keeps_the_profile() {
 }
 
 #[test]
+fn a_reset_marker_with_day_thirty_two_keeps_the_profile() {
+    let (app, mut host) = host();
+    host.dispatch("fanotes:save-settings", &[json!({ "theme": "midnight" })])
+        .unwrap();
+    let user_data = std::path::absolute(&app).unwrap();
+    let marker = app.parent().unwrap().join(".fanotes-reset-pending.json");
+    let created = "2099-10-32";
+    fs::write(
+        &marker,
+        format!(
+            r#"{{"version":1,"userDataPath":"{}","createdAt":"{created}"}}"#,
+            user_data.display()
+        ),
+    )
+    .unwrap();
+    let _ = Host::open(app.clone());
+    assert!(app.join("settings.json").is_file(), "{created}");
+    assert!(!marker.exists());
+}
+
+#[test]
 fn a_symlinked_reset_marker_is_discarded() {
     let (app, mut host) = host();
     host.dispatch("fanotes:save-settings", &[json!({ "theme": "midnight" })])
