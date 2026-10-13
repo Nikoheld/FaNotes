@@ -3469,8 +3469,8 @@ fn read_tree(
         return Ok(json!([]));
     }
     let mut children = Vec::new();
-    let entries =
-        fs::read_dir(directory).map_err(|_| "Der Vault konnte nicht gelesen werden.".to_owned())?;
+    // Desktop `readdir` throws `scandir`. The fast tree omits that folder.
+    let entries = read_sibling_dir(directory)?;
     for entry in entries {
         let Ok(entry) = entry else {
             continue;
@@ -3862,9 +3862,8 @@ fn collect_search_files(
     if depth > 80 {
         return Ok(());
     }
-    for entry in
-        fs::read_dir(directory).map_err(|_| "Der Vault konnte nicht gelesen werden.".to_owned())?
-    {
+    // A nested folder that cannot be listed fails the search, as on the desktop.
+    for entry in read_sibling_dir(directory)? {
         let Ok(entry) = entry else {
             continue;
         };

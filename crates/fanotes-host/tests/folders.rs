@@ -402,7 +402,8 @@ fn a_fast_tree_skips_a_folder_that_cannot_be_listed() {
     let hidden = vault.join("Geheim");
     fs::create_dir(&hidden).unwrap();
     fs::write(hidden.join("versteckt.md"), "x\n").unwrap();
-    fs::write(vault.join("Sichtbar.md"), "x\n").unwrap();
+    fs::write(vault.join("Sichtbar.md"), "Sichtwort\n").unwrap();
+    let canonical = fs::canonicalize(&hidden).unwrap();
     let restore = RestoreMode(hidden.clone());
     let mut permissions = fs::metadata(&hidden).unwrap().permissions();
     permissions.set_readonly(true);
@@ -419,8 +420,18 @@ fn a_fast_tree_skips_a_folder_that_cannot_be_listed() {
         .to_string();
     assert!(fast.contains("Sichtbar.md"), "{fast}");
     assert!(!fast.contains("Geheim"), "{fast}");
-    let error = host.dispatch("fanotes:get-tree", &[]).unwrap_err();
-    assert!(error.contains("nicht gelesen"), "{error}");
+    let expected = format!(
+        "EACCES: permission denied, scandir '{}'",
+        canonical.display()
+    );
+    assert_eq!(
+        host.dispatch("fanotes:get-tree", &[]).unwrap_err(),
+        expected
+    );
+    assert_eq!(
+        host.dispatch("fanotes:search", &[json!("Sichtwort")]).unwrap_err(),
+        expected
+    );
     drop(restore);
 }
 
