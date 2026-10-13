@@ -848,6 +848,19 @@ pub fn js_json_number(value: f64) -> Value {
 /// month rolls forward, and `24:00:00` is the next midnight.
 pub fn canonical_iso(value: &str) -> Option<String> {
     let trimmed = trim_js(value);
+    // A comma is a space. Around a date it makes midnight local. After `T` it
+    // is NaN.
+    if trimmed.contains(',') {
+        if has_iso_t(trimmed) {
+            return None;
+        }
+        let normalized = commas_to_spaces(&trimmed);
+        let edge = trimmed.starts_with(',') || trimmed.ends_with(',');
+        if edge && is_date_only_shape(&normalized) {
+            return date_only_iso(&normalized, true);
+        }
+        return canonical_iso(&normalized);
+    }
     if has_ampm_word(trimmed) {
         // `4:00 PM` is 16:00. A `T` before AM/PM is NaN.
         if has_iso_t(trimmed) {
@@ -1352,6 +1365,26 @@ fn iso_date_year(year: &str) -> bool {
         [b'+' | b'-', rest @ ..] => rest.len() == 6 && rest.iter().all(|byte| byte.is_ascii_digit()),
         _ => false,
     }
+}
+
+/// Turns commas into spaces and collapses repeated separators.
+fn commas_to_spaces(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    let mut pending_space = false;
+    for character in value.chars() {
+        if character == ',' || character == ' ' {
+            if !out.is_empty() {
+                pending_space = true;
+            }
+            continue;
+        }
+        if pending_space {
+            out.push(' ');
+            pending_space = false;
+        }
+        out.push(character);
+    }
+    out
 }
 
 fn has_date_parse_padding(value: &str) -> bool {
@@ -2471,6 +2504,42 @@ mod tests {
                 super::canonical_iso(" -000001-01-01").as_deref(),
                 Some("2001-01-01T05:00:00.000Z")
             );
+        });
+    }
+
+    #[test]
+    fn a_comma_separates_a_date_from_its_clock() {
+        with_tz("America/New_York", || {
+            assert_eq!(
+                super::canonical_iso("2026-10-13").as_deref(),
+                Some("2026-10-13T00:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13,").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso(",2026-10-13").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13,,").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13,16:00").as_deref(),
+                Some("2026-10-13T20:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13,16:00:00Z").as_deref(),
+                Some("2026-10-13T16:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13,,16:00").as_deref(),
+                Some("2026-10-13T20:00:00.000Z")
+            );
+            assert_eq!(super::canonical_iso("2026-10-13T16:00:00Z,"), None);
+            assert_eq!(super::canonical_iso("2026-10-13T16:00:00,"), None);
         });
     }
 
