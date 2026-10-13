@@ -841,7 +841,7 @@ impl Host {
         self.bootstrap()
     }
 
-    fn ui_language(&self) -> &'static str {
+    pub fn ui_language(&self) -> &'static str {
         match self.settings.get("uiLanguage").and_then(Value::as_str) {
             Some("de") => "de",
             Some("en") => "en",
