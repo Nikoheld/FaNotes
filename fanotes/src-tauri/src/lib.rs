@@ -314,14 +314,13 @@ fn capture_window(window: tauri::WebviewWindow) -> Result<Value, String> {
 
 /// JavaScript that points an open book window at `book`.
 ///
-/// `encodeURIComponent` leaves `'` untouched. A single-quoted script would end
-/// at that apostrophe and the window would keep showing the previous book.
+/// Electron `loadURL` reloads the popout. WebKit keeps the same document for a
+/// hash-only load, and the bundle reads the book path only while rendering.
+/// `encodeURIComponent` also leaves `'`, so the hash is a JSON string.
 fn subject_book_hash_assignment(book: &str) -> String {
     let hash = format!("#subject-book={}", encode_uri_component(book));
-    // JSON uses double quotes, so an apostrophe in the book title cannot end
-    // the script the way a single-quoted JavaScript string would.
     let literal = serde_json::to_string(&hash).unwrap_or_else(|_| "\"\"".to_owned());
-    format!("location.hash = {literal}")
+    format!("if (!location.href.includes({literal})) {{ location.hash = {literal}; location.reload(); }}")
 }
 
 fn encode_uri_component(value: &str) -> String {
@@ -667,18 +666,18 @@ mod tests {
     }
 
     #[test]
-    fn an_apostrophe_in_a_book_path_stays_inside_the_hash_assignment() {
+    fn an_open_book_window_reloads_onto_the_next_hash() {
         assert_eq!(
             super::subject_book_hash_assignment("Mathe/O'Brien.pdf"),
-            "location.hash = \"#subject-book=Mathe%2FO'Brien.pdf\""
+            "if (!location.href.includes(\"#subject-book=Mathe%2FO'Brien.pdf\")) { location.hash = \"#subject-book=Mathe%2FO'Brien.pdf\"; location.reload(); }"
         );
         assert_eq!(
             super::subject_book_hash_assignment("Mathe/Buch 1.pdf"),
-            "location.hash = \"#subject-book=Mathe%2FBuch%201.pdf\""
+            "if (!location.href.includes(\"#subject-book=Mathe%2FBuch%201.pdf\")) { location.hash = \"#subject-book=Mathe%2FBuch%201.pdf\"; location.reload(); }"
         );
         assert_eq!(
             super::subject_book_hash_assignment("Say \"Hi\".pdf"),
-            "location.hash = \"#subject-book=Say%20%22Hi%22.pdf\""
+            "if (!location.href.includes(\"#subject-book=Say%20%22Hi%22.pdf\")) { location.hash = \"#subject-book=Say%20%22Hi%22.pdf\"; location.reload(); }"
         );
     }
 }
