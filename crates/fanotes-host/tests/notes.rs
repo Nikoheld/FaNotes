@@ -942,6 +942,19 @@ fn a_pdf_note_keeps_history_of_its_famd_file() {
 }
 
 #[test]
+fn a_newer_capital_does_not_take_the_lowercase_note_name() {
+    let (mut host, vault) = host();
+    let capital = "\u{A7CE}.md";
+    std::fs::write(vault.join(capital), b"bleibt\n").unwrap();
+    let created = host
+        .dispatch("fanotes:create-note", &[json!(""), json!("\u{A7CF}")])
+        .unwrap();
+    assert_eq!(created["relativePath"], "\u{A7CF}.md");
+    assert_eq!(std::fs::read(vault.join(capital)).unwrap(), b"bleibt\n");
+    assert!(vault.join("\u{A7CF}.md").is_file());
+}
+
+#[test]
 fn a_decomposed_umlaut_is_the_same_note_name() {
     let (mut host, vault) = host();
     let nfd_note = "Mu\u{0308}he.md";
