@@ -1430,6 +1430,10 @@ fn rewrite_periods(value: &str) -> String {
             index = next;
             continue;
         }
+        // `p.m.` is not `pm`. Only a period at the end of the text is padding.
+        if chars.get(next).is_some() {
+            out.extend(chars[index..next].iter().copied());
+        }
         index = next;
     }
     out
@@ -2708,6 +2712,26 @@ mod tests {
         };
         let saved = serialize_famd("", &invalid);
         assert!(saved.contains("\"updatedAt\":\"not-a-date\""), "{saved}");
+    }
+
+    #[test]
+    fn a_dotted_meridiem_is_not_a_clock() {
+        with_tz("America/New_York", || {
+            assert_eq!(super::canonical_iso("2026-10-13 4:00:00 p.m."), None);
+            assert_eq!(super::canonical_iso("2026-10-13 4:00:00 P.M."), None);
+            assert_eq!(
+                super::canonical_iso("2026-10-13 4:00:00 pm").as_deref(),
+                Some("2026-10-13T20:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 4:00:00 PM.").as_deref(),
+                Some("2026-10-13T20:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 16:00 EST.").as_deref(),
+                Some("2026-10-13T21:00:00.000Z")
+            );
+        });
     }
 
     fn with_tz(tz: &str, check: impl FnOnce()) {
