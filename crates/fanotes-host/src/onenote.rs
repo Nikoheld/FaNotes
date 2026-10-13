@@ -132,14 +132,16 @@ fn import_in_temp(
     };
     let notebook_name = safe_segment(notebook_source, "OneNote-Notizbuch");
     let note_root = unique_directory(vault, &format!("OneNote – {notebook_name}"))?;
-    // Desktop `mkdir` creates `.fanotes` and leaves a leftover `.lernwerk` folder.
+    // Desktop `mkdir` creates `.fanotes/onenote` and `.fanotes/worksheets`
+    // and leaves a leftover `.lernwerk` folder. A failure is that `mkdir`.
     let internal = vault.join(".fanotes");
-    let batch = internal.join("onenote").join(uuid());
+    let onenote_root = internal.join("onenote");
+    let worksheets = internal.join("worksheets");
+    import_mkdir(&onenote_root)?;
+    import_mkdir(&worksheets)?;
+    let batch = onenote_root.join(uuid());
     let attachment_dir = batch.join("attachments");
-    create_private_dir(&attachment_dir)
-        .map_err(|_| "Der OneNote-Import konnte nicht angelegt werden.".to_owned())?;
-    create_private_dir(&internal.join("worksheets"))
-        .map_err(|_| "Der OneNote-Import konnte nicht angelegt werden.".to_owned())?;
+    import_mkdir(&attachment_dir)?;
 
     let import_result = (|| {
         let attachments = copy_attachments(&output_files, &output_root, &attachment_dir)?;
@@ -1574,6 +1576,62 @@ fn open_exclusive_markdown(path: &Path, bytes: &[u8]) -> Result<(), std::io::Err
     std::io::Write::write_all(&mut file, bytes)?;
     file.sync_all()?;
     Ok(())
+}
+
+/// Node `fs.mkdir(path, { recursive: true, mode: 0o700 })`.
+///
+/// An existing directory keeps its mode. The error names the directory the
+/// desktop was asked to create.
+fn import_mkdir(path: &Path) -> Result<(), String> {
+    import_mkdir_at(path, path)
+}
+
+fn import_mkdir_at(path: &Path, reported: &Path) -> Result<(), String> {
+    match fs::symlink_metadata(path) {
+        Ok(meta) if meta.file_type().is_symlink() => {
+            return match fs::metadata(path) {
+                Ok(followed) if followed.is_dir() => Ok(()),
+                Ok(_) => Err(import_mkdir_code(reported, libc::EEXIST)),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                    Err(import_mkdir_code(reported, libc::ENOENT))
+                }
+                Err(error) => Err(crate::vault::node_mkdir_error(reported, &error)),
+            };
+        }
+        Ok(meta) if meta.is_dir() => return Ok(()),
+        Ok(_) => return Err(import_mkdir_code(reported, libc::EEXIST)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(crate::vault::node_mkdir_error(reported, &error)),
+    }
+    if let Some(parent) = path.parent() {
+        if !parent.as_os_str().is_empty() && parent != path {
+            match fs::symlink_metadata(parent) {
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                    import_mkdir_at(parent, reported)?;
+                }
+                Err(error) => return Err(crate::vault::node_mkdir_error(reported, &error)),
+                Ok(_) => {}
+            }
+        }
+    }
+    match fs::create_dir(path) {
+        Ok(()) => {
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let _ = fs::set_permissions(path, fs::Permissions::from_mode(0o700));
+            }
+            Ok(())
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+            import_mkdir_at(path, reported)
+        }
+        Err(error) => Err(crate::vault::node_mkdir_error(reported, &error)),
+    }
+}
+
+fn import_mkdir_code(path: &Path, code: i32) -> String {
+    crate::vault::node_mkdir_error(path, &std::io::Error::from_raw_os_error(code))
 }
 
 fn create_private_dir(path: &Path) -> Result<(), std::io::Error> {
