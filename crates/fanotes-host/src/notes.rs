@@ -737,6 +737,12 @@ pub(crate) fn node_open_error(path: &Path, error: &std::io::Error) -> String {
                 path.display()
             );
         }
+        Some(libc::ENOENT) => {
+            return format!(
+                "ENOENT: no such file or directory, open '{}'",
+                path.display()
+            );
+        }
         _ => {}
     }
     #[cfg(not(unix))]
