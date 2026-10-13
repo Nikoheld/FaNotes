@@ -840,7 +840,8 @@ pub fn js_json_number(value: f64) -> Value {
 /// `Date.parse` plus `toISOString`. A zoned timestamp becomes UTC with milliseconds.
 ///
 /// `YYYY`, `YYYY-MM`, and `YYYY-MM-DD` are midnight UTC. A one-digit month or
-/// day is local midnight. A time without a zone is local time.
+/// day, or whitespace around the date, is local midnight. A time without a
+/// zone is local time.
 /// In a daylight-saving overlap that is the earlier instant. A skipped hour
 /// keeps the offset from before the transition. A day past the end of the
 /// month rolls forward, and `24:00:00` is the next midnight.
@@ -870,14 +871,20 @@ pub fn canonical_iso(value: &str) -> Option<String> {
             return canonical_iso(&normalized);
         }
     }
-    if is_date_only_shape(trimmed) {
-        return date_only_iso(trimmed);
+    let surrounded = has_date_parse_padding(value);
+    // A space around `T` is NaN. A space around `2026-10-13 16:00:00Z` is ignored.
+    if surrounded && has_iso_t(trimmed) {
+        return None;
     }
-    let (year, month, day, time_at) = split_calendar(value)?;
+    let source = if surrounded { trimmed } else { value };
+    if is_date_only_shape(trimmed) {
+        return date_only_iso(trimmed, surrounded);
+    }
+    let (year, month, day, time_at) = split_calendar(source)?;
     if !(1..=12).contains(&month) || !(1..=31).contains(&day) {
         return None;
     }
-    let (mut hour, minute, second, millis, rest) = parse_clock(value.get(time_at..)?)?;
+    let (mut hour, minute, second, millis, rest) = parse_clock(source.get(time_at..)?)?;
     let (mut year, mut month, mut day) = normalize_ymd(year, month, day)?;
     if hour == 24 {
         if minute != 0 || second != 0 || millis != 0 {
@@ -1334,7 +1341,26 @@ fn is_date_only_shape(value: &str) -> bool {
         && value.bytes().filter(|byte| *byte == b'-').count() <= 2
 }
 
-fn date_only_iso(value: &str) -> Option<String> {
+fn has_date_parse_padding(value: &str) -> bool {
+    value.trim_matches(is_date_parse_space).len() != value.len()
+}
+
+/// `Date.parse` whitespace. U+2028 and U+2029 are not included.
+fn is_date_parse_space(character: char) -> bool {
+    matches!(
+        character,
+        '\t' | '\n' | '\u{000B}' | '\u{000C}' | '\r' | ' '
+            | '\u{00A0}'
+            | '\u{1680}'
+            | '\u{2000}'..='\u{200A}'
+            | '\u{202F}'
+            | '\u{205F}'
+            | '\u{3000}'
+            | '\u{FEFF}'
+    )
+}
+
+fn date_only_iso(value: &str, surrounded: bool) -> Option<String> {
     let mut parts = value.split('-');
     let year = parts.next()?;
     let month = parts.next();
@@ -1345,8 +1371,8 @@ fn date_only_iso(value: &str) -> Option<String> {
     }
     let year: i32 = year.parse().ok()?;
     // `Date.parse` uses UTC only for `YYYY`, `YYYY-MM`, and `YYYY-MM-DD`.
-    // `2026-1` and `2026-10-3` are local midnight.
-    let mut legacy_local = false;
+    // `2026-1`, `2026-10-3`, and ` 2026-10-13 ` are local midnight.
+    let mut legacy_local = surrounded;
     let (month, day) = match (month, day) {
         (None, _) => (1, 1),
         (Some(month), None) => {
@@ -1846,10 +1872,6 @@ mod tests {
             Some("2026-01-01T00:00:00.000Z")
         );
         assert_eq!(
-            super::canonical_iso(" 2026-01 ").as_deref(),
-            Some("2026-01-01T00:00:00.000Z")
-        );
-        assert_eq!(
             super::canonical_iso("2026T00:00:00Z").as_deref(),
             Some("2026-01-01T00:00:00.000Z")
         );
@@ -2041,6 +2063,62 @@ mod tests {
             assert_eq!(
                 super::canonical_iso("2026-02-31").as_deref(),
                 Some("2026-03-03T00:00:00.000Z")
+            );
+        });
+    }
+
+    #[test]
+    fn whitespace_around_a_date_makes_it_local_midnight() {
+        // `2026-10-13` is UTC. The same text with surrounding whitespace is local.
+        with_tz("America/New_York", || {
+            assert_eq!(
+                super::canonical_iso("2026-10-13").as_deref(),
+                Some("2026-10-13T00:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso(" 2026-10-13").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 ").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso(" 2026-10-13 ").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13\n").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13\t").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("\u{00A0}2026-10-13").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso(" 2026-01 ").as_deref(),
+                Some("2026-01-01T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso(" 2026 ").as_deref(),
+                Some("2026-01-01T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso(" 2026-10 ").as_deref(),
+                Some("2026-10-01T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-02-31 ").as_deref(),
+                Some("2026-03-03T05:00:00.000Z")
+            );
+            assert_eq!(super::canonical_iso(" 2026-10-13T16:00:00Z"), None);
+            assert_eq!(
+                super::canonical_iso(" 2026-10-13 16:00:00Z").as_deref(),
+                Some("2026-10-13T16:00:00.000Z")
             );
         });
     }
