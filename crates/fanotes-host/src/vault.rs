@@ -329,6 +329,31 @@ pub(crate) fn node_mkdir_error(path: &Path, error: &std::io::Error) -> String {
     node_fs_error(path, error, "mkdir")
 }
 
+/// Node `fs.rename` failure text. The message names both paths.
+pub(crate) fn node_rename_error(from: &Path, to: &Path, error: &std::io::Error) -> String {
+    #[cfg(unix)]
+    let (name, detail) = match error.raw_os_error() {
+        Some(libc::EISDIR) => ("EISDIR", "illegal operation on a directory"),
+        Some(libc::ENOENT) => ("ENOENT", "no such file or directory"),
+        Some(libc::EACCES) => ("EACCES", "permission denied"),
+        Some(libc::EPERM) => ("EPERM", "operation not permitted"),
+        Some(libc::EIO) => ("EIO", "i/o error"),
+        Some(libc::ENOTDIR) => ("ENOTDIR", "not a directory"),
+        Some(libc::EEXIST) => ("EEXIST", "file already exists"),
+        _ => ("EACCES", "permission denied"),
+    };
+    #[cfg(not(unix))]
+    let (name, detail) = {
+        let _ = error;
+        ("EACCES", "permission denied")
+    };
+    format!(
+        "{name}: {detail}, rename '{}' -> '{}'",
+        from.display(),
+        to.display()
+    )
+}
+
 /// Node `fs.realpath` failure text. A missing parent uses this syscall.
 pub(crate) fn node_realpath_error(path: &Path, error: &std::io::Error) -> String {
     node_fs_error(path, error, "realpath")

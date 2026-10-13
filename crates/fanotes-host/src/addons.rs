@@ -707,7 +707,52 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), String> {
                 .map_err(|error| crate::vault::node_mkdir_error(parent, &error))?;
         }
     }
-    crate::notes::atomic_write(path, bytes, 0o600)
+    // Desktop `writeAtomic` uses `${target}.${pid}.${Date.now()}.tmp`.
+    let millis = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis())
+        .unwrap_or(0);
+    let temporary = PathBuf::from(format!(
+        "{}.{}.{millis}.tmp",
+        path.display(),
+        std::process::id()
+    ));
+    if let Err(error) = write_temp(&temporary, bytes) {
+        let _ = fs::remove_file(&temporary);
+        return Err(error);
+    }
+    if let Err(error) = fs::rename(&temporary, path) {
+        let _ = fs::remove_file(&temporary);
+        return Err(crate::vault::node_rename_error(&temporary, path, &error));
+    }
+    if let Some(parent) = path.parent() {
+        if let Ok(directory) = fs::File::open(parent) {
+            let _ = directory.sync_all();
+        }
+    }
+    Ok(())
+}
+
+fn write_temp(path: &Path, bytes: &[u8]) -> Result<(), String> {
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options
+        .open(path)
+        .map_err(|error| crate::notes::node_open_error(path, &error))?;
+    std::io::Write::write_all(&mut file, bytes)
+        .and_then(|_| file.sync_all())
+        .map_err(|error| crate::notes::node_open_error(path, &error))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(path, fs::Permissions::from_mode(0o600));
+    }
+    Ok(())
 }
 
 fn lock() -> std::sync::MutexGuard<'static, ()> {
