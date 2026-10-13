@@ -1788,7 +1788,7 @@ fn unix_millis_from_iso(value: &str) -> Option<u64> {
     if date_parts.next().is_some() || !datetime_date_fields(year_text, month_text, day_text) {
         return None;
     }
-    let (time, offset_ms) = split_time_zone(time)?;
+    let (time, zone) = split_time_zone(time)?;
     let mut fraction_has_nonzero = false;
     let (clock, millis) = match time.split_once('.') {
         // `Date.parse` keeps the first three fraction digits and ignores the rest.
@@ -1846,7 +1846,12 @@ fn unix_millis_from_iso(value: &str) -> Option<u64> {
         + i64::from(minute) * 60_000
         + i64::from(second) * 1000
         + i64::from(millis);
-    // A positive offset is ahead of UTC, so the UTC instant is earlier.
+    // A missing zone is local time. A positive offset is ahead of UTC, so the
+    // UTC instant is earlier.
+    let offset_ms = match zone {
+        Some(offset) => offset,
+        None => local_offset_east_ms(local)?,
+    };
     u64::try_from(local.checked_sub(offset_ms)?).ok()
 }
 
@@ -1894,11 +1899,14 @@ fn iso_date_time(value: &str) -> IsoDate<'_> {
 }
 
 /// `Z`, `z`, `+HH:MM`, `-HH:MM`, `+HHMM`, or `-HHMM` after the clock.
-fn split_time_zone(time: &str) -> Option<(&str, i64)> {
+/// No zone means local time, the way `Date.parse` reads `YYYY-MM-DDTHH:mm:ss`.
+fn split_time_zone(time: &str) -> Option<(&str, Option<i64>)> {
     if let Some(clock) = time.strip_suffix(['Z', 'z']) {
-        return Some((clock, 0));
+        return Some((clock, Some(0)));
     }
-    let sign_at = time.rfind(['+', '-'])?;
+    let Some(sign_at) = time.rfind(['+', '-']) else {
+        return Some((time, None));
+    };
     if sign_at == 0 {
         return None;
     }
@@ -1923,7 +1931,32 @@ fn split_time_zone(time: &str) -> Option<(&str, i64)> {
     if !(0..=23).contains(&hour) || !(0..=59).contains(&minute) {
         return None;
     }
-    Some((clock, sign * (hour * 3_600_000 + minute * 60_000)))
+    Some((clock, Some(sign * (hour * 3_600_000 + minute * 60_000))))
+}
+
+/// Offset east of UTC, in milliseconds, for a civil time that `Date.parse`
+/// reads in the local zone. `naive_utc_ms` is that civil time counted as UTC.
+#[cfg(unix)]
+fn local_offset_east_ms(naive_utc_ms: i64) -> Option<i64> {
+    let naive_secs = naive_utc_ms.div_euclid(1000);
+    let naive_time = libc::time_t::try_from(naive_secs).ok()?;
+    let mut civil: libc::tm = unsafe { std::mem::zeroed() };
+    if unsafe { libc::gmtime_r(&naive_time, &mut civil) }.is_null() {
+        return None;
+    }
+    civil.tm_isdst = -1;
+    unsafe { *libc::__errno_location() = 0 };
+    let utc = unsafe { libc::mktime(&mut civil) };
+    if utc == -1 && std::io::Error::last_os_error().raw_os_error().unwrap_or(0) != 0 {
+        return None;
+    }
+    let utc_secs = i64::try_from(utc).ok()?;
+    naive_secs.checked_sub(utc_secs)?.checked_mul(1000)
+}
+
+#[cfg(not(unix))]
+fn local_offset_east_ms(_naive_utc_ms: i64) -> Option<i64> {
+    None
 }
 
 /// `Date.parse` date fields before a clock: four-digit year, or a sign and six
@@ -4790,5 +4823,55 @@ mod recognition_model_write_tests {
             )
         );
         assert!(!locked.join(".fanotes").exists());
+    }
+}
+
+#[cfg(all(test, unix))]
+mod local_zone_tests {
+    use super::{TRASH_CLOCK, unix_millis_from_iso};
+    use std::ffi::OsString;
+
+    unsafe extern "C" {
+        fn tzset();
+    }
+
+    struct RestoreTz(Option<OsString>);
+
+    impl Drop for RestoreTz {
+        fn drop(&mut self) {
+            match self.0.take() {
+                Some(value) => unsafe { std::env::set_var("TZ", value) },
+                None => unsafe { std::env::remove_var("TZ") },
+            }
+            unsafe { tzset() }
+        }
+    }
+
+    #[test]
+    fn a_zoneless_clock_uses_the_local_offset() {
+        let _lock = TRASH_CLOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let _restore = RestoreTz(std::env::var_os("TZ"));
+        unsafe { std::env::set_var("TZ", "America/New_York") };
+        unsafe { tzset() };
+        // 2026-10-13 is EDT (UTC−4). `Date.parse` keeps `Z` and a date-only
+        // value in UTC.
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13T16:00:00"),
+            Some(1_791_921_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13T16:00:00.500"),
+            Some(1_791_921_600_500)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13T16:00:00Z"),
+            Some(1_791_907_200_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13"),
+            Some(1_791_849_600_000)
+        );
     }
 }
