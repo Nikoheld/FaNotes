@@ -492,7 +492,7 @@ pub(crate) fn ensure_internal_directory(root: &Path) -> Result<PathBuf, String> 
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
             if !rename_legacy_internal(root, &directory)? {
                 fs::create_dir(&directory)
-                    .map_err(|_| "Der Ordner konnte nicht angelegt werden.".to_owned())?;
+                    .map_err(|error| node_mkdir_error(&directory, &error))?;
                 #[cfg(unix)]
                 {
                     use std::os::unix::fs::PermissionsExt;
@@ -534,7 +534,7 @@ fn rename_legacy_internal(root: &Path, directory: &Path) -> Result<bool, String>
     match fs::rename(&legacy, directory) {
         Ok(()) => Ok(true),
         Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => Ok(false),
-        Err(_) => Err("Der bisherige interne FaNotes-Ordner ist unsicher.".to_owned()),
+        Err(error) => Err(node_rename_error(&legacy, directory, &error)),
     }
 }
 
@@ -546,7 +546,8 @@ pub(crate) fn js_tonumber(value: &str) -> Option<f64> {
 #[cfg(test)]
 mod tests {
     use super::{
-        js_tonumber, normalize_relative_path, posix_extname, relative_posix, sync_segments,
+        ensure_internal_directory, js_tonumber, normalize_relative_path, posix_extname,
+        relative_posix, sync_segments,
     };
     use std::path::Path;
 
@@ -678,5 +679,57 @@ mod tests {
         assert_eq!(js_tonumber("Infinity"), Some(f64::INFINITY));
         assert_eq!(js_tonumber("+Infinity"), Some(f64::INFINITY));
         assert_eq!(js_tonumber("-Infinity"), Some(f64::NEG_INFINITY));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_unwritable_vault_reports_the_desktop_internal_mkdir_error() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = std::env::temp_dir().join(format!(
+            "fanotes-internal-mkdir-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        let vault = root.join("vault");
+        std::fs::create_dir_all(&vault).unwrap();
+        std::fs::set_permissions(&vault, std::fs::Permissions::from_mode(0o555)).unwrap();
+        struct Restore(std::path::PathBuf);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                let _ = std::fs::set_permissions(&self.0, std::fs::Permissions::from_mode(0o700));
+                if let Some(parent) = self.0.parent() {
+                    let _ = std::fs::remove_dir_all(parent);
+                }
+            }
+        }
+        let _restore = Restore(vault.clone());
+        let internal = vault.join(".fanotes");
+        assert_eq!(
+            ensure_internal_directory(&vault).unwrap_err(),
+            format!(
+                "EACCES: permission denied, mkdir '{}'",
+                internal.display()
+            )
+        );
+        assert!(!internal.exists());
+
+        std::fs::set_permissions(&vault, std::fs::Permissions::from_mode(0o700)).unwrap();
+        std::fs::create_dir(vault.join(".lernwerk")).unwrap();
+        std::fs::write(vault.join(".lernwerk/keep.txt"), b"alt").unwrap();
+        std::fs::set_permissions(&vault, std::fs::Permissions::from_mode(0o555)).unwrap();
+        assert_eq!(
+            ensure_internal_directory(&vault).unwrap_err(),
+            format!(
+                "EACCES: permission denied, rename '{}' -> '{}'",
+                vault.join(".lernwerk").display(),
+                internal.display()
+            )
+        );
+        assert!(vault.join(".lernwerk/keep.txt").is_file());
+        assert!(!internal.exists());
     }
 }
