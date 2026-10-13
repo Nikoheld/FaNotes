@@ -839,9 +839,9 @@ pub fn js_json_number(value: f64) -> Value {
 
 /// `Date.parse` plus `toISOString`. A zoned timestamp becomes UTC with milliseconds.
 ///
-/// `YYYY`, `YYYY-MM`, and `YYYY-MM-DD` are midnight UTC. A one-digit month or
-/// day, or whitespace around the date, is local midnight. A time without a
-/// zone is local time.
+/// `YYYY`, `+YYYYYY`, and those forms with a two-digit month and day are
+/// midnight UTC. A wider year, a one-digit month or day, or whitespace around
+/// the date is local midnight. A time without a zone is local time.
 /// In a daylight-saving overlap that is the earlier instant. A skipped hour
 /// keeps the offset from before the transition. A day past the end of the
 /// month rolls forward, and `24:00:00` is the next midnight.
@@ -1332,13 +1332,25 @@ fn month_gmt_suffix(lower: &str) -> Option<String> {
     Some(format!("{sign}{hour:02}:{minute:02}"))
 }
 
-/// A calendar date with no time: `YYYY`, `YYYY-MM`, or `YYYY-MM-DD`.
+/// A calendar date with no time: `YYYY`, `+YYYYYY`, or the same with a month and day.
 fn is_date_only_shape(value: &str) -> bool {
-    !value.is_empty()
-        && !value
-            .bytes()
-            .any(|byte| matches!(byte, b'T' | b't' | b' ' | b'+'))
+    if value.is_empty() {
+        return false;
+    }
+    let body = value.strip_prefix('+').unwrap_or(value);
+    !body
+        .bytes()
+        .any(|byte| matches!(byte, b'T' | b't' | b' ' | b'+'))
         && value.bytes().filter(|byte| *byte == b'-').count() <= 2
+}
+
+/// `YYYY` or `+YYYYYY` / `-YYYYYY`. `02026` and `+2026` are not this form.
+fn iso_date_year(year: &str) -> bool {
+    match year.as_bytes() {
+        [b'0'..=b'9', b'0'..=b'9', b'0'..=b'9', b'0'..=b'9'] => true,
+        [b'+' | b'-', rest @ ..] => rest.len() == 6 && rest.iter().all(|byte| byte.is_ascii_digit()),
+        _ => false,
+    }
 }
 
 fn has_date_parse_padding(value: &str) -> bool {
@@ -1365,14 +1377,14 @@ fn date_only_iso(value: &str, surrounded: bool) -> Option<String> {
     let year = parts.next()?;
     let month = parts.next();
     let day = parts.next();
-    if parts.next().is_some() || year.len() != 4 || !year.bytes().all(|byte| byte.is_ascii_digit())
-    {
+    if parts.next().is_some() {
         return None;
     }
+    let strict_year = iso_date_year(year);
     let year: i32 = year.parse().ok()?;
-    // `Date.parse` uses UTC only for `YYYY`, `YYYY-MM`, and `YYYY-MM-DD`.
-    // `2026-1`, `2026-10-3`, and ` 2026-10-13 ` are local midnight.
-    let mut legacy_local = surrounded;
+    // `YYYY` and `+YYYYYY` are UTC. `02026`, `+2026`, a short month or day,
+    // and whitespace around the date are local midnight.
+    let mut legacy_local = surrounded || !strict_year;
     let (month, day) = match (month, day) {
         (None, _) => (1, 1),
         (Some(month), None) => {
@@ -2120,6 +2132,58 @@ mod tests {
                 super::canonical_iso(" 2026-10-13 16:00:00Z").as_deref(),
                 Some("2026-10-13T16:00:00.000Z")
             );
+        });
+    }
+
+    #[test]
+    fn a_wide_year_is_local_midnight() {
+        // Four digits and `+YYYYYY` stay UTC. Any other year width is local.
+        with_tz("America/New_York", || {
+            assert_eq!(
+                super::canonical_iso("2026-10-13").as_deref(),
+                Some("2026-10-13T00:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("+002026-10-13").as_deref(),
+                Some("2026-10-13T00:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("+002026-11").as_deref(),
+                Some("2026-11-01T00:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("+002026").as_deref(),
+                Some("2026-01-01T00:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-02-31").as_deref(),
+                Some("2026-03-03T00:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("02026-10-13").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("02026-11").as_deref(),
+                Some("2026-11-01T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("02026").as_deref(),
+                Some("2026-01-01T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("002026-10-13").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("+2026-10-13").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("02026-02-31").as_deref(),
+                Some("2026-03-03T05:00:00.000Z")
+            );
+            assert_eq!(super::canonical_iso("02026-10-13T00:00:00Z"), None);
         });
     }
 
