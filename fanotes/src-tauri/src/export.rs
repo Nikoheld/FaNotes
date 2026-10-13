@@ -38,8 +38,7 @@ pub fn print_view(view: &webkit2gtk::WebView, destination: &Path) -> Result<(), 
     settings.set("printer", Some("Print to File"));
     settings.set("output-file-format", Some("pdf"));
     settings.set("output-uri", Some(&file_uri(destination)));
-    let page = gtk::PageSetup::new();
-    page.set_paper_size(&gtk::PaperSize::new(Some("iso_a4")));
+    let page = note_pdf_page_setup();
     let operation = webkit2gtk::PrintOperation::new(view);
     operation.set_print_settings(&settings);
     operation.set_page_setup(&page);
@@ -84,6 +83,21 @@ fn wait_for(receiver: &mpsc::Receiver<()>, timeout: Duration) -> Result<(), Stri
         std::thread::sleep(Duration::from_millis(20));
     }
     Err("Das Fenster ist nicht bereit für den PDF-Export.".to_owned())
+}
+
+/// A4 page for a note PDF.
+///
+/// Electron 43 `printToPDF` reads `margins.top`, `bottom`, `left`, and `right`.
+/// The desktop call only sets `marginType`, so each omitted edge is 0.4 inch.
+fn note_pdf_page_setup() -> gtk::PageSetup {
+    let page = gtk::PageSetup::new();
+    page.set_paper_size(&gtk::PaperSize::new(Some("iso_a4")));
+    let margin = 0.4;
+    page.set_top_margin(margin, gtk::Unit::Inch);
+    page.set_bottom_margin(margin, gtk::Unit::Inch);
+    page.set_left_margin(margin, gtk::Unit::Inch);
+    page.set_right_margin(margin, gtk::Unit::Inch);
+    page
 }
 
 fn pdf_ready(path: &Path) -> bool {
@@ -163,6 +177,21 @@ mod tests {
     #[test]
     fn the_print_class_is_set_before_printing_can_start() {
         gtk::init().unwrap();
+        // GTK allows initialization from one thread. This is that thread, so
+        // the page margins are checked here rather than in a second test.
+        let page = super::note_pdf_page_setup();
+        assert_eq!(page.paper_size().name().as_deref(), Some("iso_a4"));
+        for (edge, margin) in [
+            ("top", page.top_margin(gtk::Unit::Inch)),
+            ("bottom", page.bottom_margin(gtk::Unit::Inch)),
+            ("left", page.left_margin(gtk::Unit::Inch)),
+            ("right", page.right_margin(gtk::Unit::Inch)),
+        ] {
+            assert!(
+                (margin - 0.4).abs() < 0.001,
+                "{edge} margin is {margin} inch"
+            );
+        }
         let window = gtk::Window::new(gtk::WindowType::Toplevel);
         let view = webkit2gtk::WebView::new();
         window.add(&view);
