@@ -521,6 +521,19 @@ fn focus_running_window(window: &tauri::WebviewWindow) {
     let _ = window.set_focus();
 }
 
+/// Window labels Electron closes from the main window's `closed` handler.
+fn companion_windows_closed_with_main() -> &'static [&'static str] {
+    &["subject-book"]
+}
+
+fn close_companion_windows(app: &tauri::AppHandle) {
+    for label in companion_windows_closed_with_main() {
+        if let Some(window) = app.get_webview_window(label) {
+            let _ = window.close();
+        }
+    }
+}
+
 fn install_webview_guards(window: &tauri::WebviewWindow, emit_sheet_zoom: bool) {
     let emit_window = window.clone();
     let _ = window.with_webview(move |webview| {
@@ -678,6 +691,14 @@ mod tests {
     }
 
     #[test]
+    fn closing_the_main_window_closes_the_book_window() {
+        assert_eq!(
+            super::companion_windows_closed_with_main(),
+            ["subject-book"]
+        );
+    }
+
+    #[test]
     fn an_open_book_window_reloads_onto_the_next_hash() {
         assert_eq!(
             super::subject_book_hash_assignment("Mathe/O'Brien.pdf"),
@@ -714,20 +735,25 @@ pub fn run() {
                 install_webview_guards(&window, true);
                 let handle = app.handle().clone();
                 window.on_window_event(move |event| {
-                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                        let allow = handle
-                            .state::<HostState>()
-                            .0
-                            .lock()
-                            .map(|host| host.allow_close)
-                            .unwrap_or(true);
-                        if !allow {
-                            api.prevent_close();
-                            if let Some(main) = handle.get_webview_window("main") {
-                                let _ = main.emit("fanotes:before-close", ());
+                    match event {
+                        tauri::WindowEvent::CloseRequested { api, .. } => {
+                            let allow = handle
+                                .state::<HostState>()
+                                .0
+                                .lock()
+                                .map(|host| host.allow_close)
+                                .unwrap_or(true);
+                            if !allow {
+                                api.prevent_close();
+                                if let Some(main) = handle.get_webview_window("main") {
+                                    let _ = main.emit("fanotes:before-close", ());
+                                }
+                                arm_close_warning(handle.clone());
                             }
-                            arm_close_warning(handle.clone());
                         }
+                        // Electron closes the book popout from the main window's `closed` event.
+                        tauri::WindowEvent::Destroyed => close_companion_windows(&handle),
+                        _ => {}
                     }
                 });
             }
