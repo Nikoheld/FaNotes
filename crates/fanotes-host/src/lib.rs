@@ -1373,16 +1373,18 @@ impl Host {
                 secrets.insert((*key).to_owned(), Value::String(value.to_owned()));
             }
         }
+        // Desktop `persistConfig` finishes before `currentSettings` changes.
+        // A failed atomic write leaves the previous settings in memory.
+        let mut next = settings::sanitize(&incoming, &self.settings);
+        for key in SECRET_KEYS {
+            next.insert((*key).to_owned(), Value::String(String::new()));
+        }
+        settings::gate_experimental_handwriting(&mut next, APP_VERSION);
+        persist_settings_file(&self.app_data, &next)?;
         // A missing keyring must not block the rest of the settings, and must
         // not leave the new key in the profile file.
         let _ = self.store_secrets(&secrets);
-        self.settings = settings::sanitize(&incoming, &self.settings);
-        for key in SECRET_KEYS {
-            self.settings
-                .insert((*key).to_owned(), Value::String(String::new()));
-        }
-        settings::gate_experimental_handwriting(&mut self.settings, APP_VERSION);
-        self.persist_settings()?;
+        self.settings = next;
         Ok(json!(self.settings))
     }
 
@@ -1493,11 +1495,7 @@ impl Host {
     }
 
     fn persist_settings(&self) -> Result<(), String> {
-        let path = self.app_data.join("settings.json");
-        let text = serde_json::to_string_pretty(&self.settings)
-            .map_err(|_| "Die Einstellungen sind ungültig.".to_owned())?;
-        notes::atomic_write(&path, text.as_bytes(), 0o600)
-            .map_err(|_| "Die Einstellungen konnten nicht gespeichert werden.".to_owned())
+        persist_settings_file(&self.app_data, &self.settings)
     }
 
     fn load_persisted(&mut self) {
@@ -1586,6 +1584,14 @@ impl Host {
         let _ = fs::remove_file(self.app_data.join("secrets.json"));
         Ok(())
     }
+}
+
+fn persist_settings_file(app_data: &Path, settings: &Map<String, Value>) -> Result<(), String> {
+    let path = app_data.join("settings.json");
+    let text = serde_json::to_string_pretty(settings)
+        .map_err(|_| "Die Einstellungen sind ungültig.".to_owned())?;
+    // Desktop `atomicWrite` reports the open error of `.settings.json.{pid}.{nonce}.tmp`.
+    notes::atomic_write(&path, text.as_bytes(), 0o600)
 }
 
 const SYNC_SECRET_ACCOUNT: &str = "sync-account";

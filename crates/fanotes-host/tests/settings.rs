@@ -635,3 +635,44 @@ fn custom_css_rejects_an_expression_after_a_byte_order_mark() {
         .unwrap();
     assert!(saved["customCss"].as_str().unwrap().contains("expression"));
 }
+
+#[cfg(unix)]
+#[test]
+fn an_unwritable_profile_keeps_the_saved_theme_and_reports_the_open_error() {
+    use std::os::unix::fs::PermissionsExt;
+    let (app, mut host) = host();
+    host.dispatch("fanotes:save-settings", &[json!({ "theme": "midnight" })])
+        .unwrap();
+    let saved = fs::read_to_string(app.join("settings.json")).unwrap();
+    fs::set_permissions(&app, fs::Permissions::from_mode(0o555)).unwrap();
+    struct Restore(std::path::PathBuf);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            let _ = fs::set_permissions(&self.0, fs::Permissions::from_mode(0o700));
+            let _ = fs::remove_dir_all(self.0.parent().unwrap_or(&self.0));
+        }
+    }
+    let _restore = Restore(app.clone());
+    let error = host
+        .dispatch("fanotes:save-settings", &[json!({ "theme": "light" })])
+        .unwrap_err();
+    let app = fs::canonicalize(&app).unwrap();
+    let prefix = format!(
+        "EACCES: permission denied, open '{}/.settings.json.{}.",
+        app.display(),
+        std::process::id()
+    );
+    assert!(error.starts_with(&prefix), "{error}");
+    let hex = error[prefix.len()..].trim_end_matches(".tmp'");
+    assert_eq!(hex.len(), 20, "{error}");
+    assert!(
+        hex.chars().all(|character| character.is_ascii_hexdigit()),
+        "{error}"
+    );
+    assert!(error.ends_with(".tmp'"), "{error}");
+    assert_eq!(
+        host.dispatch("fanotes:bootstrap", &[]).unwrap()["settings"]["theme"],
+        "midnight"
+    );
+    assert_eq!(fs::read_to_string(app.join("settings.json")).unwrap(), saved);
+}
