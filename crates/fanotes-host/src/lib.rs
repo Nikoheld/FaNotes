@@ -1806,7 +1806,8 @@ fn unix_millis_from_iso(value: &str) -> Option<u64> {
     if clock_parts.next().is_some()
         || hour > 23
         || minute > 59
-        || second > 60
+        // `Date.parse` rejects second 60.
+        || second > 59
         || !(1..=12).contains(&month)
         || !(1..=31).contains(&day)
     {
