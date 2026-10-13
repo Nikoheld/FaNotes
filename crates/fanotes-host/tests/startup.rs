@@ -107,6 +107,80 @@ fn a_read_only_vault_is_refused_like_the_desktop() {
     assert!(host.vault.is_none());
 }
 
+#[cfg(unix)]
+#[test]
+fn a_remembered_read_only_vault_refuses_the_note_tree() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = scratch();
+    let app = dir.join("app");
+    let vault = dir.join("vault");
+    fs::create_dir_all(&vault).unwrap();
+    fs::write(vault.join("Seite.md"), b"# Seite\n").unwrap();
+    struct Restore(std::path::PathBuf);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            let _ = fs::set_permissions(&self.0, fs::Permissions::from_mode(0o700));
+            let _ = fs::remove_dir_all(self.0.parent().unwrap_or(&self.0));
+        }
+    }
+    let _restore = Restore(vault.clone());
+    let canonical = fs::canonicalize(&vault).unwrap();
+    let mut host = Host::open(app.clone());
+    host.dispatch(
+        "fanotes:select-vault",
+        &[json!(canonical.to_string_lossy())],
+    )
+    .unwrap();
+    fs::set_permissions(&vault, fs::Permissions::from_mode(0o555)).unwrap();
+
+    let mut reopened = Host::open(app);
+    let boot = reopened.dispatch("fanotes:bootstrap", &[]).unwrap();
+    assert_eq!(boot["vaultPath"], canonical.to_string_lossy().as_ref());
+    assert!(reopened.vault.is_some());
+    let expected = format!(
+        "EACCES: permission denied, access '{}'",
+        canonical.display()
+    );
+    assert_eq!(
+        reopened.dispatch("fanotes:get-tree", &[]).unwrap_err(),
+        expected
+    );
+    assert_eq!(
+        reopened.dispatch("fanotes:get-fast-tree", &[]).unwrap_err(),
+        expected
+    );
+    assert_eq!(
+        reopened
+            .dispatch("fanotes:read-file", &[json!("nope.txt")])
+            .unwrap_err(),
+        expected
+    );
+    assert!(reopened.vault.is_some());
+    assert!(reopened.dispatch("fanotes:get-cached-tree", &[]).is_ok());
+    assert!(reopened.dispatch("fanotes:sync-scan", &[]).is_ok());
+    assert_eq!(
+        reopened
+            .dispatch("fanotes:write-file", &[json!("Seite.md"), json!(1)])
+            .unwrap_err(),
+        "Der Notizinhalt ist ungültig oder zu groß."
+    );
+    assert_eq!(
+        reopened
+            .dispatch(
+                "fanotes:write-file",
+                &[json!("Seite.md"), json!("# Seite\n")],
+            )
+            .unwrap_err(),
+        expected
+    );
+    assert_eq!(
+        reopened
+            .dispatch("fanotes:complete-onboarding", &[json!(1)])
+            .unwrap_err(),
+        "Die Ordnerauswahl ist ungültig."
+    );
+}
+
 #[test]
 fn a_missing_configured_vault_is_not_replaced() {
     let dir = scratch();
