@@ -445,7 +445,9 @@ pub(crate) fn ensure_internal_directory(root: &Path) -> Result<PathBuf, String> 
                 }
             }
         }
-        Err(_) => return Err("Der Ordner konnte nicht angelegt werden.".to_owned()),
+        // Desktop rethrows every `lstat` error except ENOENT. A vault without
+        // search permission is EACCES here, even when `.fanotes` exists.
+        Err(error) => return Err(node_lstat_error(&directory, &error)),
     }
     let root_real = fs::canonicalize(root)
         .map_err(|_| "Der interne FaNotes-Ordner verlässt den Vault.".to_owned())?;

@@ -509,6 +509,37 @@ fn an_unlistable_vault_metadata_folder_uses_the_desktop_lstat_error() {
     assert_eq!(fs::read(&colors).unwrap(), br##"{"version":1,"colors":{"Mathe":"#A1B2C3"}}"##);
 }
 
+#[cfg(unix)]
+#[test]
+fn an_unsearchable_vault_reports_the_desktop_lstat_for_its_internal_folder() {
+    use std::os::unix::fs::PermissionsExt;
+    let (mut host, vault, _) = host();
+    let vault = fs::canonicalize(&vault).unwrap();
+    let internal = vault.join(".fanotes");
+    fs::create_dir_all(&internal).unwrap();
+    fs::write(internal.join("folder-colors.json"), b"{}\n").unwrap();
+    fs::set_permissions(&vault, fs::Permissions::from_mode(0o666)).unwrap();
+    struct Restore(std::path::PathBuf);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            let _ = fs::set_permissions(&self.0, fs::Permissions::from_mode(0o700));
+        }
+    }
+    let _restore = Restore(vault);
+    let expected = format!(
+        "EACCES: permission denied, lstat '{}'",
+        internal.display()
+    );
+    assert_eq!(
+        host.dispatch("fanotes:get-tree", &[]).unwrap_err(),
+        expected
+    );
+    assert_eq!(
+        host.dispatch("fanotes:read-subject-books", &[]).unwrap_err(),
+        expected
+    );
+}
+
 #[test]
 fn a_folder_color_with_a_bad_byte_still_paints_the_folder() {
     let (mut host, vault, _) = host();
