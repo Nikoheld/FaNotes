@@ -208,6 +208,54 @@ fn an_unreadable_history_index_uses_the_desktop_open_error() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn an_unsearchable_vault_reports_the_desktop_history_open_error() {
+    use std::os::unix::fs::PermissionsExt;
+    let (mut host, _) = host();
+    let vault = host.vault.clone().unwrap();
+    std::fs::write(vault.join("Mathe/Seite.md"), b"Hallo\n").unwrap();
+    host.dispatch(
+        "fanotes:write-file",
+        &[json!("Mathe/Seite.md"), json!("Welt\n")],
+    )
+    .unwrap();
+    let listed = host
+        .dispatch("fanotes:list-note-history", &[json!("Mathe/Seite.md")])
+        .unwrap();
+    let id = listed[0]["id"].as_str().unwrap();
+    let index = std::fs::read_dir(vault.join(".fanotes/history"))
+        .unwrap()
+        .find_map(|entry| {
+            let path = entry.unwrap().path().join("index.json");
+            path.is_file().then_some(path)
+        })
+        .unwrap();
+    let canonical = std::fs::canonicalize(&index).unwrap();
+    std::fs::set_permissions(&vault, std::fs::Permissions::from_mode(0o666)).unwrap();
+    struct Restore(std::path::PathBuf);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            let _ = std::fs::set_permissions(&self.0, std::fs::Permissions::from_mode(0o700));
+        }
+    }
+    let _restore = Restore(vault);
+    let expected = format!("EACCES: permission denied, open '{}'", canonical.display());
+    assert_eq!(
+        host.dispatch("fanotes:list-note-history", &[json!("Mathe/Seite.md")])
+            .unwrap_err(),
+        expected
+    );
+    assert_eq!(
+        host.dispatch(
+            "fanotes:read-note-history",
+            &[json!("Mathe/Seite.md"), json!(id)],
+        )
+        .unwrap_err(),
+        expected
+    );
+}
+
 #[test]
 fn a_tree_modification_time_rounds_to_the_nearest_millisecond() {
     let (mut host, vault) = host();

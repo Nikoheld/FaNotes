@@ -727,8 +727,10 @@ fn history_dir(root: &Path, relative: &str) -> Result<PathBuf, String> {
     // folder stays missing. `mkdir` on a snapshot creates `.fanotes` beside a
     // leftover `.lernwerk` folder instead of renaming that folder into place.
     let fanotes = root.join(".fanotes");
+    // Desktop history does not stat `.fanotes` first. A missing folder and a
+    // folder that cannot be searched both continue to `readFile`, which
+    // returns an empty index or the open error.
     match fs::symlink_metadata(&fanotes) {
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
         Ok(meta) if meta.file_type().is_symlink() || !meta.is_dir() => {
             return Err("Der interne FaNotes-Ordner ist unsicher.".to_owned());
         }
@@ -741,7 +743,7 @@ fn history_dir(root: &Path, relative: &str) -> Result<PathBuf, String> {
                 return Err("Der interne FaNotes-Ordner verlässt den Vault.".to_owned());
             }
         }
-        Err(_) => return Err("Der interne FaNotes-Ordner ist unsicher.".to_owned()),
+        Err(_) => {}
     }
     let history = fanotes.join("history");
     if let Ok(meta) = fs::symlink_metadata(&history) {
