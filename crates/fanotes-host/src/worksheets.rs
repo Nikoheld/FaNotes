@@ -637,21 +637,30 @@ fn ensure_private_dir(path: &Path) -> Result<(), String> {
         Ok(meta) if meta.file_type().is_symlink() || !meta.is_dir() => Err(unsafe_dir()),
         Ok(_) => Ok(()),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            fs::create_dir(path).map_err(|_| unsafe_dir())?;
-            // Desktop `mkdir` uses mode `0o700`, then checks the created directory.
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                fs::set_permissions(path, fs::Permissions::from_mode(0o700))
-                    .map_err(|_| unsafe_dir())?;
+            // Desktop `mkdir` throws unless the directory appeared in between.
+            let made = match fs::create_dir(path) {
+                Ok(()) => true,
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => false,
+                Err(error) => return Err(crate::vault::node_mkdir_error(path, &error)),
+            };
+            if made {
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    fs::set_permissions(path, fs::Permissions::from_mode(0o700))
+                        .map_err(|_| unsafe_dir())?;
+                }
             }
-            let created = fs::symlink_metadata(path).map_err(|_| unsafe_dir())?;
+            let created = fs::symlink_metadata(path)
+                .map_err(|error| crate::vault::node_lstat_error(path, &error))?;
             if created.file_type().is_symlink() || !created.is_dir() {
                 return Err(unsafe_dir());
             }
             Ok(())
         }
-        Err(_) => Err(unsafe_dir()),
+        // A parent without search permission is EACCES from `lstat`, not the
+        // unsafe-folder sentence. That sentence stays for a link or a file.
+        Err(error) => Err(crate::vault::node_lstat_error(path, &error)),
     }
 }
 
