@@ -2374,6 +2374,33 @@ fn relative_from_root(root: &Path, path: &Path) -> String {
     vault::relative_posix(root, path)
 }
 
+/// Node `fs.readdir`, whose failure is `scandir` in the thrown message.
+fn read_sibling_dir(parent: &Path) -> Result<fs::ReadDir, String> {
+    fs::read_dir(parent).map_err(|error| scandir_error(parent, &error))
+}
+
+fn scandir_error(path: &Path, error: &std::io::Error) -> String {
+    #[cfg(unix)]
+    let (name, detail) = match error.raw_os_error() {
+        Some(libc::EACCES) => ("EACCES", "permission denied"),
+        Some(libc::EPERM) => ("EPERM", "operation not permitted"),
+        Some(libc::ENOENT) => ("ENOENT", "no such file or directory"),
+        Some(libc::ENOTDIR) => ("ENOTDIR", "not a directory"),
+        Some(libc::EIO) => ("EIO", "i/o error"),
+        Some(libc::ELOOP) => ("ELOOP", "too many symbolic links encountered"),
+        Some(libc::ENAMETOOLONG) => ("ENAMETOOLONG", "name too long"),
+        Some(libc::EMFILE) => ("EMFILE", "too many open files"),
+        Some(libc::ENFILE) => ("ENFILE", "file table overflow"),
+        _ => ("EACCES", "permission denied"),
+    };
+    #[cfg(not(unix))]
+    let (name, detail) = {
+        let _ = error;
+        ("EACCES", "permission denied")
+    };
+    format!("{name}: {detail}, scandir '{}'", path.display())
+}
+
 fn unique_sibling_name(
     parent: &Path,
     desired: &str,
@@ -2381,16 +2408,16 @@ fn unique_sibling_name(
     companion_extension: Option<&str>,
 ) -> Result<String, String> {
     let mut occupied = std::collections::HashSet::new();
-    if let Ok(entries) = fs::read_dir(parent) {
-        for entry in entries.flatten() {
-            let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
-                continue;
-            };
-            if excluding.is_some_and(|current| current == name) {
-                continue;
-            }
-            occupied.insert(vault::entry_name_key(&name));
+    // Desktop `readdir` throws before a rename or move can replace a file
+    // the process is not allowed to list.
+    for entry in read_sibling_dir(parent)?.flatten() {
+        let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
+            continue;
+        };
+        if excluding.is_some_and(|current| current == name) {
+            continue;
         }
+        occupied.insert(vault::entry_name_key(&name));
     }
     for number in 1..=10_000 {
         let candidate = numbered_entry_name(desired, number);
@@ -2411,11 +2438,9 @@ fn unique_sibling_name(
 
 fn available_entry_name(parent: &Path, desired: &str, note: bool) -> Result<String, String> {
     let mut occupied = std::collections::HashSet::new();
-    if let Ok(entries) = fs::read_dir(parent) {
-        for entry in entries.flatten() {
-            if let Some(name) = entry.file_name().to_str() {
-                occupied.insert(vault::entry_name_key(name));
-            }
+    for entry in read_sibling_dir(parent)?.flatten() {
+        if let Some(name) = entry.file_name().to_str() {
+            occupied.insert(vault::entry_name_key(name));
         }
     }
     for number in 1..=10_000 {

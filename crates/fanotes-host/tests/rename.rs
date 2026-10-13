@@ -382,3 +382,58 @@ fn a_dot_slash_move_target_is_not_the_vault_root() {
     assert_eq!(moved, "Seite.md");
     assert!(vault.join("Seite.md").is_file());
 }
+
+#[cfg(unix)]
+#[test]
+fn an_unreadable_folder_does_not_replace_a_hidden_file() {
+    use std::os::unix::fs::PermissionsExt;
+    let (vault, mut host) = host();
+    let folder = vault.join("Geheim");
+    fs::create_dir_all(&folder).unwrap();
+    fs::write(folder.join("Seite.md"), b"seite\n").unwrap();
+    fs::write(folder.join("Ziel.md"), b"ziel\n").unwrap();
+    fs::write(vault.join("Mathe/Seite.md"), b"mathe\n").unwrap();
+    let canonical = fs::canonicalize(&folder).unwrap();
+    fs::set_permissions(&folder, fs::Permissions::from_mode(0o333)).unwrap();
+    struct Restore(std::path::PathBuf);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            let _ = fs::set_permissions(&self.0, fs::Permissions::from_mode(0o755));
+        }
+    }
+    let _restore = Restore(folder.clone());
+    let expected = format!(
+        "EACCES: permission denied, scandir '{}'",
+        canonical.display()
+    );
+    assert_eq!(
+        host.dispatch(
+            "fanotes:rename-entry",
+            &[json!("Geheim/Seite.md"), json!("Ziel")],
+        )
+        .unwrap_err(),
+        expected
+    );
+    assert_eq!(
+        host.dispatch("fanotes:create-note", &[json!("Geheim"), json!("Ziel")])
+            .unwrap_err(),
+        expected
+    );
+    assert_eq!(
+        host.dispatch(
+            "fanotes:move-entry",
+            &[json!("Mathe/Seite.md"), json!("Geheim")],
+        )
+        .unwrap_err(),
+        expected
+    );
+    fs::set_permissions(&folder, fs::Permissions::from_mode(0o755)).unwrap();
+    assert_eq!(fs::read(folder.join("Ziel.md")).unwrap(), b"ziel\n");
+    assert_eq!(fs::read(folder.join("Seite.md")).unwrap(), b"seite\n");
+    assert!(vault.join("Mathe/Seite.md").is_file());
+    let names: Vec<_> = fs::read_dir(&folder)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(names.len(), 2, "{names:?}");
+}
