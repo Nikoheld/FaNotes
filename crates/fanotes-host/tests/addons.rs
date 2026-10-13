@@ -275,3 +275,24 @@ fn an_addon_file_list_uses_desktop_entry_names() {
     .unwrap();
     assert!(root.is_dir());
 }
+
+#[test]
+fn listing_addons_does_not_create_the_store() {
+    let (dir, mut host) = scratch("list");
+    let listed = host.dispatch("fanotes:addons-list", &[]).unwrap();
+    assert_eq!(listed, json!([]));
+    assert_eq!(
+        host.dispatch(
+            "fanotes:addons-read-file",
+            &[json!("margin-notes"), json!("main.js")],
+        )
+        .unwrap(),
+        json!(null)
+    );
+    assert_eq!(
+        host.dispatch("fanotes:addons-read-data", &[json!("margin-notes")])
+            .unwrap(),
+        json!(null)
+    );
+    assert!(!dir.join("app/addons").exists());
+}
