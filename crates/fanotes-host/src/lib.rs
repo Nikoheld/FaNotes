@@ -142,6 +142,13 @@ impl Host {
             ChannelKind::Message => return self.dispatch_message(channel),
             ChannelKind::Command => {}
         }
+        // Desktop `ensureBootstrap` checks `fs.access(realpath, R_OK | W_OK)`
+        // before the command body. A remembered read-only folder still opens
+        // through the quick bootstrap. `write-file` and `complete-onboarding`
+        // validate their arguments before that access check.
+        if session_revalidates_vault(channel) {
+            ensure_remembered_vault_writable(self)?;
+        }
         // `write-file` checks the path and the note text before this gate.
         if self.onboarding_required
             && channel != "fanotes:write-file"
@@ -714,6 +721,7 @@ impl Host {
     ///
     /// `readConfig` keeps the path while a network volume is absent. The
     /// documents folder is only created when no vault path is stored.
+    /// Write access is checked later, on the commands that call `ensureBootstrap`.
     fn try_attach_configured_vault(&mut self) {
         if self.vault.is_some() {
             return;
@@ -800,6 +808,7 @@ impl Host {
 
     fn complete_onboarding(&mut self, args: &[Value]) -> Result<Value, String> {
         let selected = onboarding::validate_selection(args.first().unwrap_or(&Value::Null))?;
+        ensure_remembered_vault_writable(self)?;
         if !self.onboarding_required {
             return self.bootstrap();
         }
@@ -900,6 +909,7 @@ impl Host {
         if content.len() as u64 > note_byte_limit(&normalized) {
             return Err("Der Notizinhalt ist ungültig oder zu groß.".to_owned());
         }
+        ensure_remembered_vault_writable(self)?;
         if self.onboarding_required {
             return Err("Bitte schließe zuerst die FaNotes-Ersteinrichtung ab.".to_owned());
         }
@@ -2966,9 +2976,29 @@ fn percent_encode(path: &Path) -> String {
     encoded
 }
 
+/// Commands whose desktop handler calls `ensureBootstrap` before reading arguments.
+fn session_revalidates_vault(channel: &str) -> bool {
+    !onboarding_open(channel) && channel != "fanotes:write-file"
+}
+
+/// Node `fs.access(path, R_OK | W_OK)` for a vault that is already attached.
+///
+/// A missing vault keeps the command's own error. The folder stays attached
+/// when access fails, matching a thrown error from `ensureBootstrap`.
+fn ensure_remembered_vault_writable(host: &Host) -> Result<(), String> {
+    let Some(root) = host.vault.as_deref() else {
+        return Ok(());
+    };
+    match vault_write_access_error(root) {
+        Some(error) => Err(error),
+        None => Ok(()),
+    }
+}
+
 fn onboarding_open(channel: &str) -> bool {
-    // These commands do not call `ensureBootstrap()`, so the desktop answers
-    // them while the first-run screen is still open.
+    // The desktop answers these while the first-run screen is still open.
+    // `complete-onboarding` is included here and calls `ensureBootstrap` only
+    // after the subject selection has been validated.
     matches!(
         channel,
         "fanotes:bootstrap"
