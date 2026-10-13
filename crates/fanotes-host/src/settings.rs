@@ -394,7 +394,7 @@ fn apply_rule(rule: &Rule, value: &Value) -> Option<Value> {
             .map(Value::from),
         Rule::Number { min, max } => number(value)
             .filter(|number| number.is_finite() && *number >= *min && *number <= *max)
-            .map(|number| json!(number)),
+            .map(fanotes_famd::js_json_number),
         Rule::String { max } => value
             .as_str()
             .filter(|text| crate::vault::utf16_len(text) <= *max && !text.contains('\0'))

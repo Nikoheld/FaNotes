@@ -437,11 +437,11 @@ fn boxes(value: Option<&Value>) -> Result<Vec<Value>, String> {
             Ok(json!({
                 "id": id,
                 "page": page,
-                "x": x,
-                "y": y,
-                "width": width,
+                "x": fanotes_famd::js_json_number(x),
+                "y": fanotes_famd::js_json_number(y),
+                "width": fanotes_famd::js_json_number(width),
                 "text": text,
-                "fontSize": font_size,
+                "fontSize": fanotes_famd::js_json_number(font_size),
             }))
         })
         .collect()
@@ -499,10 +499,10 @@ fn highlights(value: Option<&Value>) -> Result<Vec<Value>, String> {
             Ok(json!({
                 "id": id,
                 "page": page,
-                "x": x,
-                "y": y,
-                "width": width,
-                "height": height,
+                "x": fanotes_famd::js_json_number(x),
+                "y": fanotes_famd::js_json_number(y),
+                "width": fanotes_famd::js_json_number(width),
+                "height": fanotes_famd::js_json_number(height),
                 "color": color,
             }))
         })

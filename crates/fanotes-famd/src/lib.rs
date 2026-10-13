@@ -778,6 +778,23 @@ fn truncate_js(value: &str, max_units: usize) -> String {
 }
 
 fn json_number(value: f64) -> Value {
+    js_json_number(value)
+}
+
+/// `JSON.stringify` for a finite number.
+///
+/// A whole value that fits in an integer, including `-0`, is written as `16`
+/// or `0`. Other values keep the shortest round trip.
+pub fn js_json_number(value: f64) -> Value {
+    if value == 0.0 {
+        return Value::from(0);
+    }
+    if value.is_finite() && value.fract() == 0.0 {
+        let integer = value as i64;
+        if integer as f64 == value {
+            return Value::from(integer);
+        }
+    }
     serde_json::Number::from_f64(value)
         .map(Value::Number)
         .unwrap_or(Value::from(0))
@@ -1327,5 +1344,29 @@ mod tests {
         let saved = serialize_famd("", &payload);
         let again = parse_famd(&saved).payload.unwrap().page_stats.unwrap();
         assert_eq!(again["words"], 2);
+    }
+
+    #[test]
+    fn a_note_link_position_uses_javascript_number_text() {
+        let link = super::NoteLink {
+            id: "nl-edge".into(),
+            source_path: "a.md".into(),
+            target_path: "b.md".into(),
+            page: 1,
+            x: 0.0,
+            y: 1.0,
+            style: "symbol".into(),
+            label: "Rand".into(),
+            appearance: "symbol".into(),
+        };
+        let json = link.to_json().to_string();
+        assert!(json.contains("\"x\":0"), "{json}");
+        assert!(json.contains("\"y\":1"), "{json}");
+        assert!(!json.contains("0.0"), "{json}");
+        assert!(!json.contains("1.0"), "{json}");
+        assert_eq!(super::js_json_number(-0.0).to_string(), "0");
+        assert_eq!(super::js_json_number(16.0).to_string(), "16");
+        assert_eq!(super::js_json_number(-16.0).to_string(), "-16");
+        assert_eq!(super::js_json_number(0.5).to_string(), "0.5");
     }
 }

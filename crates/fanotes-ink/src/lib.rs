@@ -623,7 +623,17 @@ fn is_hex_color(value: &str) -> bool {
     bytes.len() == 7 && bytes[0] == b'#' && bytes[1..].iter().all(|byte| byte.is_ascii_hexdigit())
 }
 
+/// `JSON.stringify` writes a whole number as `900`, not `900.0`.
 fn json_number(value: f64) -> Value {
+    if value == 0.0 {
+        return Value::from(0);
+    }
+    if value.is_finite() && value.fract() == 0.0 {
+        let integer = value as i64;
+        if integer as f64 == value {
+            return Value::from(integer);
+        }
+    }
     serde_json::Number::from_f64(value)
         .map(Value::Number)
         .unwrap_or(Value::from(0))
