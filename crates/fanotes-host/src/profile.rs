@@ -246,7 +246,7 @@ mod tests {
 fn write_marker(path: &Path) -> Result<(), String> {
     let stamp = format!(
         "{}\n",
-        notes::iso_from_system_time(std::time::SystemTime::now())
+        notes::iso_now()
     );
     notes::atomic_write(path, stamp.as_bytes(), 0o600)
 }

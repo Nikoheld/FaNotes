@@ -657,7 +657,7 @@ impl Host {
             .ok()
             .and_then(|meta| meta.modified().ok())
             .map(notes::iso_from_system_time)
-            .unwrap_or_else(|| notes::iso_from_system_time(SystemTime::now()));
+            .unwrap_or_else(notes::iso_now);
         Ok(json!({ "modifiedAt": modified }))
     }
 
@@ -1431,7 +1431,7 @@ impl Host {
         let marker = json!({
             "version": 1,
             "userDataPath": user_data.to_string_lossy(),
-            "createdAt": notes::iso_from_system_time(SystemTime::now()),
+            "createdAt": notes::iso_now(),
         });
         let text = serde_json::to_string(&marker)
             .map_err(|_| "Die App-Daten konnten nicht zurückgesetzt werden.".to_owned())?;
@@ -1654,7 +1654,7 @@ fn complete_pending_app_data_reset(app_data: &Path) {
         use std::os::unix::fs::PermissionsExt;
         let _ = fs::set_permissions(app_data, fs::Permissions::from_mode(0o700));
     }
-    let stamp = format!("{}\n", notes::iso_from_system_time(SystemTime::now()));
+    let stamp = format!("{}\n", notes::iso_now());
     if notes::atomic_write(
         &app_data.join(APP_DATA_RESET_COMPLETE),
         stamp.as_bytes(),
@@ -2385,7 +2385,7 @@ fn created_entry(relative: &str, path: &Path, note: bool) -> Value {
         .as_ref()
         .and_then(|meta| meta.modified().ok())
         .map(notes::iso_from_system_time)
-        .unwrap_or_else(|| notes::iso_from_system_time(SystemTime::now()));
+        .unwrap_or_else(notes::iso_now);
     if note {
         json!({
             "relativePath": relative,
@@ -2801,7 +2801,7 @@ fn trash_deletion_date_unlocked() -> String {
     if let Some(stamp) = windows_local_stamp() {
         return stamp;
     }
-    let when = notes::iso_from_system_time(SystemTime::now());
+    let when = notes::iso_now();
     when.split('.').next().unwrap_or(when.as_str()).to_owned()
 }
 
@@ -3047,7 +3047,7 @@ fn write_tree_cache(app_data: &Path, root: &Path, entries: &Value) {
     let Ok(text) = serde_json::to_string(&json!({
         "version": 1,
         "vaultIdentity": identity,
-        "updatedAt": notes::iso_from_system_time(SystemTime::now()),
+        "updatedAt": notes::iso_now(),
         "entries": entries,
     })) else {
         return;
