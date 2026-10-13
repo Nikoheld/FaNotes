@@ -2091,40 +2091,63 @@ fn system_time_from_millis(millis: i64) -> Option<SystemTime> {
 
 /// `mkdir` with mode `0o700` for a profile directory.
 ///
-/// The desktop uses that mode for the profile, `tree-cache-v1`, and `sync`.
-/// An existing directory keeps its mode.
+/// The desktop uses `fs.mkdir(directory, { recursive: true, mode: 0o700 })`
+/// for the profile, `tree-cache-v1`, and `sync`. An existing directory keeps
+/// its mode. A symlink to a directory is accepted. Any other failure is
+/// Node's `mkdir` error for the directory that was requested.
 fn ensure_private_profile_dir(path: &Path) -> Result<(), String> {
-    let failed = || "Der Ordner konnte nicht angelegt werden.".to_owned();
+    mkdir_profile(path, path)
+}
+
+fn mkdir_profile(path: &Path, reported: &Path) -> Result<(), String> {
     match fs::symlink_metadata(path) {
-        Ok(meta) if meta.file_type().is_symlink() || !meta.is_dir() => Err(failed()),
-        Ok(_) => Ok(()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            if let Some(parent) = path.parent() {
-                if !parent.as_os_str().is_empty() && fs::symlink_metadata(parent).is_err() {
-                    ensure_private_profile_dir(parent)?;
+        Ok(meta) if meta.file_type().is_symlink() => {
+            return match fs::metadata(path) {
+                Ok(followed) if followed.is_dir() => Ok(()),
+                Ok(_) => Err(profile_mkdir_errno(reported, libc::EEXIST)),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                    Err(profile_mkdir_errno(reported, libc::ENOENT))
                 }
-            }
-            let created = match fs::create_dir(path) {
-                Ok(()) => true,
-                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => false,
-                Err(_) => return Err(failed()),
+                Err(error) => Err(vault::node_mkdir_error(reported, &error)),
             };
-            if created {
-                #[cfg(unix)]
-                {
-                    use std::os::unix::fs::PermissionsExt;
-                    fs::set_permissions(path, fs::Permissions::from_mode(0o700))
-                        .map_err(|_| failed())?;
+        }
+        Ok(meta) if meta.is_dir() => return Ok(()),
+        Ok(_) => return Err(profile_mkdir_errno(reported, libc::EEXIST)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(vault::node_mkdir_error(reported, &error)),
+    }
+    if let Some(parent) = path.parent() {
+        if !parent.as_os_str().is_empty() && parent != path {
+            match fs::symlink_metadata(parent) {
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                    mkdir_profile(parent, reported)?;
                 }
+                Err(error) => return Err(vault::node_mkdir_error(reported, &error)),
+                Ok(_) => {}
             }
-            let meta = fs::symlink_metadata(path).map_err(|_| failed())?;
-            if meta.file_type().is_symlink() || !meta.is_dir() {
-                return Err(failed());
+        }
+    }
+    match fs::create_dir(path) {
+        Ok(()) => {
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                fs::set_permissions(path, fs::Permissions::from_mode(0o700)).map_err(|_| {
+                    "Der Ordner konnte nicht angelegt werden.".to_owned()
+                })?;
             }
             Ok(())
         }
-        Err(_) => Err(failed()),
+        // A name that appeared while this call was creating parents.
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+            mkdir_profile(path, reported)
+        }
+        Err(error) => Err(vault::node_mkdir_error(reported, &error)),
     }
+}
+
+fn profile_mkdir_errno(path: &Path, code: i32) -> String {
+    vault::node_mkdir_error(path, &std::io::Error::from_raw_os_error(code))
 }
 
 fn create_sync_directories(root: &Path, file: &Path) -> Result<(), String> {

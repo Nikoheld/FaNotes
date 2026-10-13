@@ -836,3 +836,66 @@ fn a_nested_sync_folder_reports_the_full_desktop_mkdir_path() {
     fs::set_permissions(&folder, fs::Permissions::from_mode(0o700)).unwrap();
     assert!(!folder.join("Neu").exists());
 }
+
+#[cfg(unix)]
+#[test]
+fn an_unwritable_sync_profile_reports_the_desktop_mkdir_error() {
+    use std::os::unix::fs::PermissionsExt;
+    let (_vault, app, mut host) = host();
+    let id = host
+        .dispatch("fanotes:sync-vault-id", &[])
+        .unwrap()
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let sync_dir = app.join("sync");
+    assert!(!sync_dir.exists());
+    struct Restore(std::path::PathBuf);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            let _ = fs::set_permissions(&self.0, fs::Permissions::from_mode(0o700));
+        }
+    }
+    let _restore = Restore(app.clone());
+    fs::set_permissions(&app, fs::Permissions::from_mode(0o555)).unwrap();
+    let payload = json!("{\"ok\":true}");
+    assert_eq!(
+        host.dispatch("fanotes:sync-write-state", &[json!(id), payload.clone()])
+            .unwrap_err(),
+        format!(
+            "EACCES: permission denied, mkdir '{}'",
+            sync_dir.display()
+        )
+    );
+    assert!(!sync_dir.exists());
+
+    fs::set_permissions(&app, fs::Permissions::from_mode(0o700)).unwrap();
+    fs::write(&sync_dir, b"datei").unwrap();
+    assert_eq!(
+        host.dispatch("fanotes:sync-write-state", &[json!(id), payload.clone()])
+            .unwrap_err(),
+        format!("EEXIST: file already exists, mkdir '{}'", sync_dir.display())
+    );
+    assert_eq!(fs::read(&sync_dir).unwrap(), b"datei");
+    fs::remove_file(&sync_dir).unwrap();
+
+    std::os::unix::fs::symlink("missing-sync-target", &sync_dir).unwrap();
+    assert_eq!(
+        host.dispatch("fanotes:sync-write-state", &[json!(id), payload.clone()])
+            .unwrap_err(),
+        format!(
+            "ENOENT: no such file or directory, mkdir '{}'",
+            sync_dir.display()
+        )
+    );
+    assert!(sync_dir.symlink_metadata().unwrap().file_type().is_symlink());
+    fs::remove_file(&sync_dir).unwrap();
+
+    let elsewhere = app.join("elsewhere");
+    fs::create_dir(&elsewhere).unwrap();
+    std::os::unix::fs::symlink(&elsewhere, &sync_dir).unwrap();
+    host.dispatch("fanotes:sync-write-state", &[json!(id), payload])
+        .unwrap();
+    assert!(elsewhere.join(format!("state-{id}.json")).is_file());
+    assert!(sync_dir.symlink_metadata().unwrap().file_type().is_symlink());
+}
