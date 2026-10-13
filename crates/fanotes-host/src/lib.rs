@@ -3777,8 +3777,7 @@ fn search_drawings(
 ) -> Result<(), String> {
     // Desktop search calls `ensureInternalAssetsDirectory` before it lists drawings.
     let assets = drawings::assets_dir(root)?;
-    let entries = fs::read_dir(&assets)
-        .map_err(|_| "Der interne Asset-Ordner ist unsicher.".to_owned())?;
+    let entries = read_sibling_dir(&assets)?;
     for entry in entries.flatten() {
         let name = entry.file_name().to_string_lossy().to_string();
         let Some((id, extension)) = name.rsplit_once('.') else {

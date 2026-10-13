@@ -27,10 +27,8 @@ fn vault_root(host: &Host) -> Result<&std::path::Path, String> {
 pub fn list_drawings(host: &Host) -> Result<Value, String> {
     let assets = assets_dir(vault_root(host)?)?;
     let mut drawings = Vec::new();
-    let entries = match fs::read_dir(&assets) {
-        Ok(entries) => entries,
-        Err(_) => return Ok(json!([])),
-    };
+    // Desktop `readdir` throws. An unlistable library is not an empty list.
+    let entries = crate::read_sibling_dir(&assets)?;
     for entry in entries.flatten() {
         let name = entry.file_name().to_string_lossy().to_string();
         let Some(id) = drawing_file_id(&name) else {
