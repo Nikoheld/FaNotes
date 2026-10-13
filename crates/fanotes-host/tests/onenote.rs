@@ -254,3 +254,61 @@ fn an_unwritable_onenote_internal_folder_reports_the_desktop_mkdir_error() {
     );
     assert!(!internal.join("onenote").exists());
 }
+
+#[cfg(unix)]
+#[test]
+fn an_unwritable_onenote_worksheet_folder_reports_the_desktop_open_error() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = std::env::temp_dir().join(format!(
+        "fanotes-onenote-page-write-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    let vault = dir.join("vault");
+    let worksheets = vault.join(".fanotes/worksheets");
+    fs::create_dir_all(&worksheets).unwrap();
+    let mut host = Host::open(dir.join("app"));
+    host.set_vault(vault).unwrap();
+    fs::set_permissions(&worksheets, fs::Permissions::from_mode(0o555)).unwrap();
+    struct Restore(std::path::PathBuf);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            let _ = fs::set_permissions(&self.0, fs::Permissions::from_mode(0o700));
+            if let Some(root) = self
+                .0
+                .parent()
+                .and_then(|path| path.parent())
+                .and_then(|path| path.parent())
+            {
+                let _ = fs::remove_dir_all(root);
+            }
+        }
+    }
+    let _restore = Restore(worksheets.clone());
+    let fixture = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../fanotes/scripts/fixtures/onenote/Open Notebook.onetoc2");
+    let error = host
+        .dispatch(
+            "fanotes:import-onenote",
+            &[json!(fixture.to_string_lossy())],
+        )
+        .unwrap_err();
+    let prefix = format!(
+        "EACCES: permission denied, open '{}/",
+        worksheets.display()
+    );
+    assert!(error.starts_with(&prefix), "{error}");
+    let marker = format!(".html.tmp-{}-", std::process::id());
+    assert!(error.contains(&marker), "{error}");
+    let hex = error.trim_end_matches('\'').rsplit('-').next().unwrap();
+    assert_eq!(hex.len(), 12, "{error}");
+    assert!(
+        hex.chars().all(|character| character.is_ascii_hexdigit()),
+        "{error}"
+    );
+    assert!(fs::read_dir(&worksheets).unwrap().next().is_none());
+}
