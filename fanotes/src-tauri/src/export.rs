@@ -92,6 +92,34 @@ fn pdf_ready(path: &Path) -> bool {
         .is_some_and(|bytes| bytes.starts_with(b"%PDF-") && bytes.len() > 8)
 }
 
+/// Run `script` and wait until WebKit finishes it.
+///
+/// `evaluate_javascript` returns before the script runs. Electron awaits
+/// `executeJavaScript`, so the print class is on the page before `printToPDF`.
+pub(crate) fn finish_script(view: &webkit2gtk::WebView, script: &str) -> Result<(), String> {
+    let (done, done_rx) = mpsc::channel();
+    view.evaluate_javascript(
+        script,
+        None::<&str>,
+        None::<&str>,
+        None::<&gio::Cancellable>,
+        move |_| {
+            let _ = done.send(());
+        },
+    );
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while Instant::now() < deadline {
+        while gtk::events_pending() {
+            gtk::main_iteration();
+        }
+        if done_rx.try_recv().is_ok() {
+            return Ok(());
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    Err("Das Fenster ist nicht bereit für den PDF-Export.".to_owned())
+}
+
 fn file_uri(path: &Path) -> String {
     let absolute = if path.is_absolute() {
         path.to_path_buf()
@@ -114,6 +142,11 @@ fn file_uri(path: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use std::path::Path;
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    use gtk::prelude::*;
+    use webkit2gtk::WebViewExt;
 
     #[test]
     fn a_pdf_destination_encodes_the_file_uri() {
@@ -125,5 +158,43 @@ mod tests {
             super::file_uri(Path::new("/tmp/Größe.pdf")),
             "file:///tmp/Gr%C3%B6%C3%9Fe.pdf"
         );
+    }
+
+    #[test]
+    fn the_print_class_is_set_before_printing_can_start() {
+        gtk::init().unwrap();
+        let window = gtk::Window::new(gtk::WindowType::Toplevel);
+        let view = webkit2gtk::WebView::new();
+        window.add(&view);
+        window.show_all();
+        let (loaded, loaded_rx) = mpsc::channel();
+        view.connect_load_changed(move |_view, event| {
+            if event == webkit2gtk::LoadEvent::Finished {
+                let _ = loaded.send(());
+            }
+        });
+        view.load_html("<html><body>Notiz</body></html>", None);
+        super::wait_for(&loaded_rx, Duration::from_secs(15)).unwrap();
+        let (finished, finished_rx) = mpsc::channel();
+        view.evaluate_javascript(
+            "document.documentElement.classList.add('is-printing')",
+            None::<&str>,
+            None::<&str>,
+            None::<&gio::Cancellable>,
+            move |_| {
+                let _ = finished.send(());
+            },
+        );
+        assert!(
+            finished_rx.try_recv().is_err(),
+            "adding is-printing finished before printing could start"
+        );
+        super::finish_script(
+            &view,
+            "document.title = String(document.documentElement.classList.contains('is-printing'))",
+        )
+        .unwrap();
+        assert_eq!(view.title().as_deref(), Some("true"));
+        window.close();
     }
 }
