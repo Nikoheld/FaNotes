@@ -1374,12 +1374,23 @@ fn is_date_parse_space(character: char) -> bool {
 }
 
 fn date_only_iso(value: &str, surrounded: bool) -> Option<String> {
+    if !surrounded {
+        if let Some(instant) = iso_hyphen_date(value) {
+            return Some(instant);
+        }
+    }
+    legacy_hyphen_date(value)
+}
+
+/// `YYYY` and `±YYYYYY`, with optional month and day. A short month or day is
+/// local midnight. Any other shape returns `None` so the legacy order can run.
+fn iso_hyphen_date(value: &str) -> Option<String> {
     let (year, month, day) = split_date_only(value)?;
-    let strict_year = iso_date_year(year);
+    if !iso_date_year(year) {
+        return None;
+    }
     let year: i32 = year.parse().ok()?;
-    // `YYYY` and `+YYYYYY` are UTC. `02026`, `+2026`, a month or day that is
-    // not two digits, and whitespace around the date are local midnight.
-    let mut legacy_local = surrounded || !strict_year;
+    let mut legacy_local = false;
     let (month, day) = match (month, day) {
         (None, _) => (1, 1),
         (Some(month), None) => {
@@ -1421,6 +1432,51 @@ fn date_only_iso(value: &str, surrounded: bool) -> Option<String> {
         return Some(format_civil_iso(year, month, day, hour, minute, second, 0));
     }
     Some(format_civil_iso(year, month, day, 0, 0, 0, 0))
+}
+
+/// A hyphen date that is not `YYYY` or `±YYYYYY`.
+///
+/// `2-1-1` is 1 February 2001. A month and day without a year use 2001.
+/// A leading `+` or `-` is ignored. The result is local midnight.
+fn legacy_hyphen_date(value: &str) -> Option<String> {
+    let body = value.strip_prefix(['+', '-']).unwrap_or(value);
+    if body.is_empty() {
+        return None;
+    }
+    let fields: Vec<&str> = body.split('-').collect();
+    if fields.is_empty()
+        || fields.len() > 3
+        || fields
+            .iter()
+            .any(|field| field.is_empty() || !field.bytes().all(|byte| byte.is_ascii_digit()))
+    {
+        return None;
+    }
+    let numbers = fields
+        .iter()
+        .map(|field| field.parse::<i32>().ok())
+        .collect::<Option<Vec<_>>>()?;
+    let (year, month, day) = match numbers.as_slice() {
+        [year] => (legacy_year_number(*year)?, 1, 1),
+        [first, second] if (1..=12).contains(first) && (1..=31).contains(second) => {
+            (2001, *first, *second)
+        }
+        [first, second] if *first == 0 || *first >= 32 => (legacy_year_number(*first)?, *second, 1),
+        [first, second, third] if (1..=12).contains(first) => {
+            (legacy_year_number(*third)?, *first, *second)
+        }
+        [first, second, third] if *first == 0 || *first >= 32 => {
+            (legacy_year_number(*first)?, *second, *third)
+        }
+        _ => return None,
+    };
+    if !(1..=12).contains(&month) || !(1..=31).contains(&day) {
+        return None;
+    }
+    let (year, month, day) = normalize_ymd(year, month, day)?;
+    let (year, month, day, hour, minute, second) =
+        local_civil_to_utc(year, month, day, 0, 0, 0)?;
+    Some(format_civil_iso(year, month, day, hour, minute, second, 0))
 }
 
 /// `YYYY-MM-DD` or `±YYYYYY-MM-DD`, then optional month and day text.
@@ -2356,6 +2412,64 @@ mod tests {
             assert_eq!(
                 super::canonical_iso("+010000-01-01T00:00:00.500Z").as_deref(),
                 Some("+010000-01-01T00:00:00.500Z")
+            );
+        });
+    }
+
+    #[test]
+    fn a_short_first_field_is_month_day_year() {
+        // A hyphen date that is not `YYYY-MM-DD` or `±YYYYYY-MM-DD` uses the
+        // legacy field order. `2-1-1` is 1 February 2001, local.
+        with_tz("America/New_York", || {
+            assert_eq!(
+                super::canonical_iso("-00001-01-01").as_deref(),
+                Some("2001-01-01T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2-1-1").as_deref(),
+                Some("2001-02-01T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("1-2-3").as_deref(),
+                Some("2003-01-02T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("1-2").as_deref(),
+                Some("2001-01-02T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("1").as_deref(),
+                Some("2001-01-01T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("49-1-1").as_deref(),
+                Some("2049-01-01T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("50-1-1").as_deref(),
+                Some("1950-01-01T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2-31-1").as_deref(),
+                Some("2001-03-03T05:00:00.000Z")
+            );
+            assert_eq!(super::canonical_iso("13-1-1"), None);
+            assert_eq!(super::canonical_iso("-00001-01-01T00:00:00Z"), None);
+            assert_eq!(
+                super::canonical_iso("2026-10-13").as_deref(),
+                Some("2026-10-13T00:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-1").as_deref(),
+                Some("2026-01-01T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("-000001-01-01").as_deref(),
+                Some("-000001-01-01T00:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso(" -000001-01-01").as_deref(),
+                Some("2001-01-01T05:00:00.000Z")
             );
         });
     }
