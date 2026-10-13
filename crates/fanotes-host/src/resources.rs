@@ -87,7 +87,11 @@ pub(crate) fn load_spelling_candidates(language: &str) -> Result<Value, String> 
 
 pub(crate) fn load_handwriting() -> Result<Value, String> {
     let directory = locate("ocr", "Ungültiges Handschriftmodell-Manifest.")?;
-    let manifest = read_manifest(&directory, "Ungültiges Handschriftmodell-Manifest.")?;
+    load_handwriting_in(&directory)
+}
+
+fn load_handwriting_in(directory: &Path) -> Result<Value, String> {
+    let manifest = read_manifest(directory, "Ungültiges Handschriftmodell-Manifest.")?;
     let desktop = manifest
         .pointer("/models/desktop")
         .ok_or_else(|| "Unbekanntes Handschriftmodell.".to_owned())?;
@@ -100,24 +104,26 @@ pub(crate) fn load_handwriting() -> Result<Value, String> {
     let characters = manifest
         .pointer("/characters")
         .ok_or_else(|| "Unbekanntes Handschriftmodell.".to_owned())?;
-    let desktop_size = json_safe_u64(desktop.get("size")).unwrap_or(0);
-    let web_size = json_safe_u64(web.get("size")).unwrap_or(0);
+    // `Number.isSafeInteger(web.size)` keeps a negative size. The desktop
+    // compares it with 40% of the desktop model and does not open the web file.
+    let web_size = json_safe_i64(web.get("size"));
+    let desktop_size = fanotes_famd::js_number(desktop.get("size"));
+    let web_is_too_large = web_size.is_some_and(|size| {
+        desktop_size.is_finite() && size as f64 >= desktop_size * 0.4
+    });
     if manifest.get("format").and_then(Value::as_str) != Some("fanotes-neural-handwriting-v3")
         || desktop.get("name").and_then(Value::as_str) != Some("PyLaia_IAM_CTC")
         || desktop.get("precision").and_then(Value::as_str) != Some("fp32")
         || web.get("name").and_then(Value::as_str) != Some("PyLaia_IAM_CTC")
         || web.get("precision").and_then(Value::as_str) != Some("q8-dynamic")
-        || desktop_size == 0
-        || web_size == 0
-        || web_size as f64 >= desktop_size as f64 * 0.4
+        || web_size.is_none()
+        || web_is_too_large
         || runtime.get("name").and_then(Value::as_str) != Some("onnxruntime-web")
         || runtime.get("version").and_then(Value::as_str) != Some("1.22.0")
     {
         return Err("Unbekanntes Handschriftmodell.".to_owned());
     }
     let (model_file, model_size, model_hash) = descriptor(desktop, MAX_MODEL_BYTES)
-        .map_err(|_| "Ungültige Handschriftmodell-Ressource.".to_owned())?;
-    let (_, _, _) = descriptor(web, MAX_MODEL_BYTES)
         .map_err(|_| "Ungültige Handschriftmodell-Ressource.".to_owned())?;
     let (wasm_file, wasm_size, wasm_hash) = descriptor(runtime, MAX_RUNTIME_BYTES)
         .map_err(|_| "Ungültige Handschriftmodell-Ressource.".to_owned())?;
@@ -347,7 +353,7 @@ fn json_safe_i64(value: Option<&Value>) -> Option<i64> {
 
 #[cfg(test)]
 mod tests {
-    use super::load_spelling_in;
+    use super::{load_handwriting_in, load_spelling_in};
     use base64::Engine;
     use sha2::{Digest, Sha256};
 
@@ -445,6 +451,82 @@ mod tests {
                 "{bit_count}"
             );
         }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_negative_web_model_size_still_loads_handwriting() {
+        let dir = std::env::temp_dir().join(format!(
+            "fanotes-ocr-web-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let model = b"model";
+        let wasm = b"wasm";
+        let characters = br#"["a"]"#;
+        std::fs::write(dir.join("model.onnx"), model).unwrap();
+        std::fs::write(dir.join("runtime.wasm"), wasm).unwrap();
+        std::fs::write(dir.join("characters.json"), characters).unwrap();
+        let hash = |bytes: &[u8]| {
+            Sha256::digest(bytes)
+                .iter()
+                .map(|item| format!("{item:02x}"))
+                .collect::<String>()
+        };
+        let manifest = serde_json::json!({
+            "format": "fanotes-neural-handwriting-v3",
+            "models": {
+                "desktop": {
+                    "name": "PyLaia_IAM_CTC",
+                    "precision": "fp32",
+                    "file": "model.onnx",
+                    "size": model.len(),
+                    "sha256": hash(model)
+                },
+                "web": {
+                    "name": "PyLaia_IAM_CTC",
+                    "precision": "q8-dynamic",
+                    "size": -1
+                }
+            },
+            "runtime": {
+                "name": "onnxruntime-web",
+                "version": "1.22.0",
+                "file": "runtime.wasm",
+                "size": wasm.len(),
+                "sha256": hash(wasm)
+            },
+            "characters": {
+                "file": "characters.json",
+                "size": characters.len(),
+                "count": 1,
+                "sha256": hash(characters)
+            }
+        });
+        std::fs::write(
+            dir.join("manifest.json"),
+            serde_json::to_string(&manifest).unwrap(),
+        )
+        .unwrap();
+        let loaded = load_handwriting_in(&dir).unwrap();
+        assert_eq!(loaded["characters"][0], "a");
+
+        let mut too_big = manifest;
+        too_big["models"]["web"]["size"] = serde_json::json!(model.len());
+        std::fs::write(
+            dir.join("manifest.json"),
+            serde_json::to_string(&too_big).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            load_handwriting_in(&dir).unwrap_err(),
+            "Unbekanntes Handschriftmodell."
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
