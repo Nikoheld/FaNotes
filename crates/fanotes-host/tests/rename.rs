@@ -344,3 +344,41 @@ fn a_rename_replaces_an_existing_companion_and_a_move_avoids_it() {
         b"eigen\n"
     );
 }
+
+#[test]
+fn a_dot_slash_move_target_is_not_the_vault_root() {
+    let (vault, mut host) = host();
+    fs::write(vault.join("Mathe/Seite.md"), b"Hallo\n").unwrap();
+    // Desktop `moveEntry` treats a blank destination as the vault root.
+    // `./` and `.//` still go through `normalizeRelativePath` without
+    // `allowRoot`, so they are the vault itself and are refused.
+    let message = "Der Vault selbst ist für diese Aktion nicht erlaubt.";
+    assert_eq!(
+        host.dispatch("fanotes:move-entry", &[json!("Mathe/Seite.md"), json!("./")])
+            .unwrap_err(),
+        message
+    );
+    assert_eq!(
+        host.dispatch(
+            "fanotes:move-entry",
+            &[json!("Mathe/Seite.md"), json!(".//")],
+        )
+        .unwrap_err(),
+        message
+    );
+    assert_eq!(
+        host.dispatch(
+            "fanotes:move-entry",
+            &[json!("Mathe/Seite.md"), json!(".///")],
+        )
+        .unwrap_err(),
+        "Pfad-Traversal ist nicht erlaubt."
+    );
+    assert!(vault.join("Mathe/Seite.md").is_file());
+    assert!(!vault.join("Seite.md").exists());
+    let moved = host
+        .dispatch("fanotes:move-entry", &[json!("Mathe/Seite.md"), json!("   ")])
+        .unwrap();
+    assert_eq!(moved, "Seite.md");
+    assert!(vault.join("Seite.md").is_file());
+}
