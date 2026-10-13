@@ -1483,7 +1483,7 @@ fn write_unique_markdown(directory: &Path, title: &str, markdown: &str) -> Resul
         match crate::notes::publish_new_file(&target, markdown.as_bytes(), 0o600) {
             Ok(()) => return Ok(target),
             Err(crate::notes::NewFileError::Exists) => continue,
-            Err(crate::notes::NewFileError::Io) => {
+            Err(crate::notes::NewFileError::Io(_)) => {
                 return Err("Die OneNote-Seite konnte nicht geschrieben werden.".to_owned());
             }
         }

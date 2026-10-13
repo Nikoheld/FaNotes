@@ -595,3 +595,43 @@ fn a_subject_book_uses_the_desktop_trim_only_to_reject_a_blank_subject() {
     assert!(!vault.join("Mathe/Skript.pdf").exists());
     assert!(!vault.join("Skript.pdf").exists());
 }
+
+#[cfg(unix)]
+#[test]
+fn an_unwritable_pdf_folder_reports_the_desktop_open_error() {
+    use std::os::unix::fs::PermissionsExt;
+    let (mut host, _) = host();
+    let folder = host.vault.clone().unwrap().join("Mathe");
+    std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o555)).unwrap();
+    struct Restore(std::path::PathBuf);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            let _ = std::fs::set_permissions(&self.0, std::fs::Permissions::from_mode(0o700));
+        }
+    }
+    let _restore = Restore(folder.clone());
+    let error = host
+        .dispatch(
+            "fanotes:import-pdf-note",
+            &[
+                json!("Mathe"),
+                json!({ "name": "Skript.pdf", "bytes": b"%PDF-1.4\n".to_vec() }),
+            ],
+        )
+        .unwrap_err();
+    let prefix = format!(
+        "EACCES: permission denied, open '{}/.Skript.pdf.{}.",
+        folder.display(),
+        std::process::id()
+    );
+    assert!(error.starts_with(&prefix), "{error}");
+    let suffix = error[prefix.len()..].trim_end_matches(".tmp'");
+    assert_eq!(suffix.len(), 20, "{error}");
+    assert!(
+        suffix.chars().all(|character| character.is_ascii_hexdigit()),
+        "{error}"
+    );
+    assert!(error.ends_with(".tmp'"), "{error}");
+    std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o700)).unwrap();
+    assert!(!folder.join("Skript.pdf").exists());
+}

@@ -273,9 +273,7 @@ fn place_new_pdf(
         match crate::notes::publish_new_file(&directory.join(&candidate), bytes, 0o600) {
             Ok(()) => return Ok(candidate),
             Err(crate::notes::NewFileError::Exists) => continue,
-            Err(crate::notes::NewFileError::Io) => {
-                return Err("Die PDF-Datei konnte nicht gespeichert werden.".to_owned());
-            }
+            Err(crate::notes::NewFileError::Io(error)) => return Err(error),
         }
     }
     Err(exhausted.to_owned())

@@ -933,7 +933,7 @@ fn temporary_path(path: &Path, random_bytes: usize) -> Result<PathBuf, String> {
 #[derive(Debug)]
 pub(crate) enum NewFileError {
     Exists,
-    Io,
+    Io(String),
 }
 
 /// Publish bytes at `path` only when that path is absent.
@@ -944,10 +944,11 @@ pub(crate) enum NewFileError {
 /// appears, and the file mode is private.
 pub(crate) fn publish_new_file(path: &Path, bytes: &[u8], mode: u32) -> Result<(), NewFileError> {
     let _parent = parent_directory(path)?;
-    let temporary = temporary_path(path, 10).map_err(|_| NewFileError::Io)?;
-    if write_exclusive(&temporary, bytes, mode).is_err() {
+    let temporary = temporary_path(path, 10)
+        .map_err(|error| NewFileError::Io(error))?;
+    if let Err(error) = write_exclusive(&temporary, bytes, mode) {
         let _ = fs::remove_file(&temporary);
-        return Err(NewFileError::Io);
+        return Err(NewFileError::Io(error));
     }
     match fs::hard_link(&temporary, path) {
         Ok(()) => {
@@ -958,15 +959,17 @@ pub(crate) fn publish_new_file(path: &Path, bytes: &[u8], mode: u32) -> Result<(
             return Err(NewFileError::Exists);
         }
         Err(error) if link_unsupported(&error) => {
-            if write_exclusive(path, bytes, mode).is_err() {
+            if let Err(error) = write_exclusive(path, bytes, mode) {
                 let _ = fs::remove_file(&temporary);
-                return Err(NewFileError::Io);
+                return Err(NewFileError::Io(error));
             }
             let _ = fs::remove_file(&temporary);
         }
         Err(_) => {
             let _ = fs::remove_file(&temporary);
-            return Err(NewFileError::Io);
+            return Err(NewFileError::Io(
+                "Die Datei konnte nicht geschrieben werden.".to_owned(),
+            ));
         }
     }
     sync_parent(path);
@@ -977,10 +980,16 @@ fn parent_directory(path: &Path) -> Result<&Path, NewFileError> {
     let parent = path
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
-        .ok_or(NewFileError::Io)?;
-    let meta = fs::symlink_metadata(parent).map_err(|_| NewFileError::Io)?;
+        .ok_or_else(|| {
+            NewFileError::Io("Die Datei konnte nicht geschrieben werden.".to_owned())
+        })?;
+    let meta = fs::symlink_metadata(parent).map_err(|_| {
+        NewFileError::Io("Die Datei konnte nicht geschrieben werden.".to_owned())
+    })?;
     if meta.file_type().is_symlink() || !meta.is_dir() {
-        return Err(NewFileError::Io);
+        return Err(NewFileError::Io(
+            "Die Datei konnte nicht geschrieben werden.".to_owned(),
+        ));
     }
     Ok(parent)
 }
