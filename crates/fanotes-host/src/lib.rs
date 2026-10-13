@@ -1770,7 +1770,10 @@ fn marker_is_fresh(created_at: &str) -> bool {
 }
 
 fn unix_millis_from_iso(value: &str) -> Option<u64> {
-    let (date, time) = value.split_once('T')?;
+    let Some((date, time)) = value.split_once('T') else {
+        // `Date.parse('YYYY-MM-DD')` is UTC midnight.
+        return date_only_millis(value);
+    };
     let mut date_parts = date.split('-');
     let year: i32 = date_parts.next()?.parse().ok()?;
     let month: u32 = date_parts.next()?.parse().ok()?;
@@ -1809,6 +1812,18 @@ fn unix_millis_from_iso(value: &str) -> Option<u64> {
             + u64::from(second) * 1000
             + u64::from(millis),
     )
+}
+
+fn date_only_millis(value: &str) -> Option<u64> {
+    let mut date_parts = value.split('-');
+    let year: i32 = date_parts.next()?.parse().ok()?;
+    let month: u32 = date_parts.next()?.parse().ok()?;
+    let day: u32 = date_parts.next()?.parse().ok()?;
+    if date_parts.next().is_some() || !(1..=12).contains(&month) || day == 0 {
+        return None;
+    }
+    let days = days_from_civil(year, month, day)?;
+    Some(days.saturating_mul(86_400_000))
 }
 
 fn days_from_civil(year: i32, month: u32, day: u32) -> Option<u64> {
