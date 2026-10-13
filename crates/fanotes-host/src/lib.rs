@@ -2331,17 +2331,9 @@ fn joined_month_parts(token: &str) -> Option<Vec<&str>> {
         return None;
     }
     let parts = split_joined_date(body);
-    if !(2..=3).contains(&parts.len()) || parts.iter().any(|part| part.is_empty()) {
-        return None;
-    }
-    let month_at = parts
-        .iter()
-        .position(|part| english_month(part).is_some())?;
-    if parts
-        .iter()
-        .enumerate()
-        .any(|(index, part)| index != month_at && signed_number(part).is_none())
-    {
+    // `Oct-foo-2026` and `Oct--2026` keep the gap. An empty field after a
+    // number, as in `13-Oct--26`, is rejected by the date scan.
+    if !parts.iter().any(|part| english_month(part).is_some()) {
         return None;
     }
     Some(parts)
@@ -2447,31 +2439,61 @@ fn skip_month_preamble(words: &[&str]) -> usize {
     index
 }
 
-/// The month name can be first or second. A number from 1 to 31 beside it is
-/// the day; any other number is the year. The missing field is day 1 or the
-/// year 2001. `Oct 32 16` is therefore 16 October 2032.
+/// Words and a weekday before the first number are skipped, so `Oct foo 2026`
+/// is 1 October 2026. A word after that number is not a date. The last month
+/// name wins: `Oct 13 2026 Nov` is 13 November 2026. A number from 1 to 31 is
+/// the day; any other number is the year. The missing field is day 1 or 2001.
 fn month_day_year(words: &[&str]) -> Option<(i32, i32, i32, usize)> {
-    let (month, number) = if let Some(month) = english_month(words.first()?) {
-        (month, signed_number(words.get(1)?)?)
-    } else if let Some(month) = english_month(words.get(1)?) {
-        (month, signed_number(words.first()?)?)
-    } else {
-        return None;
-    };
-    if let Some(third) = words.get(2).and_then(|text| unsigned_number(text)) {
-        let (day, year) = if (1..=31).contains(&number) {
-            (number, legacy_year(third)?)
-        } else {
-            (third, legacy_year(number)?)
-        };
-        return Some((month, day, year, 3));
+    let mut index = 0;
+    let mut month = None;
+    let mut numbers = Vec::new();
+    let mut number_started = false;
+    while index < words.len() {
+        let word = words[index];
+        if word.is_empty() {
+            if number_started {
+                return None;
+            }
+            index += 1;
+            continue;
+        }
+        if let Some(found) = english_month(word) {
+            month = Some(found);
+            index += 1;
+            continue;
+        }
+        if !number_started {
+            if is_weekday(word) {
+                index += 1;
+                continue;
+            }
+            if let Some(number) = signed_number(word) {
+                numbers.push(number);
+                number_started = true;
+                index += 1;
+                continue;
+            }
+            index += 1;
+            continue;
+        }
+        if numbers.len() < 2 {
+            if let Some(number) = unsigned_number(word) {
+                numbers.push(number);
+                index += 1;
+                continue;
+            }
+        }
+        break;
     }
-    let (day, year) = if (1..=31).contains(&number) {
-        (number, 2001)
-    } else {
-        (1, legacy_year(number)?)
+    let month = month?;
+    let (day, year) = match numbers.as_slice() {
+        [number] if (1..=31).contains(number) => (*number, 2001),
+        [number] => (1, legacy_year(*number)?),
+        [first, second] if (1..=31).contains(first) => (*first, legacy_year(*second)?),
+        [first, second] => (*second, legacy_year(*first)?),
+        _ => return None,
     };
-    Some((month, day, year, 2))
+    Some((month, day, year, index))
 }
 
 fn legacy_clock_and_zone(rest: &[&str]) -> Option<(String, String)> {
@@ -5852,6 +5874,63 @@ mod local_zone_tests {
         assert_eq!(unix_millis_from_iso("13 foo Oct 2026"), None);
         assert_eq!(unix_millis_from_iso("2026 foo Oct 13"), None);
         assert_eq!(unix_millis_from_iso("Oct 2026 AM"), None);
+    }
+
+    #[test]
+    fn a_word_between_the_month_and_its_number_is_ignored() {
+        let _lock = TRASH_CLOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let _restore = RestoreTz(std::env::var_os("TZ"));
+        unsafe { std::env::set_var("TZ", "America/New_York") };
+        unsafe { tzset() };
+        // Noise is skipped only before the first number. The last month name wins.
+        assert_eq!(unix_millis_from_iso("Oct foo 2026"), Some(1_790_827_200_000));
+        assert_eq!(
+            unix_millis_from_iso("foo Oct foo 2026"),
+            Some(1_790_827_200_000)
+        );
+        assert_eq!(unix_millis_from_iso("Oct foo 13"), Some(1_002_945_600_000));
+        assert_eq!(
+            unix_millis_from_iso("Oct foo 13 2026"),
+            Some(1_791_864_000_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct foo 13 16:00"),
+            Some(1_003_003_200_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct foo 2026 GMT"),
+            Some(1_790_812_800_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct foo 13 2026 16:00 EST"),
+            Some(1_791_925_200_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct Tuesday 2026"),
+            Some(1_790_827_200_000)
+        );
+        assert_eq!(unix_millis_from_iso("Oct foo 32 16"), Some(1_981_512_000_000));
+        assert_eq!(unix_millis_from_iso("Oct-foo-2026"), Some(1_790_827_200_000));
+        assert_eq!(unix_millis_from_iso("foo-Oct-2026"), Some(1_790_827_200_000));
+        assert_eq!(unix_millis_from_iso("Oct--2026"), Some(1_790_827_200_000));
+        assert_eq!(
+            unix_millis_from_iso("Oct foo bar 2026"),
+            Some(1_790_827_200_000)
+        );
+        assert_eq!(unix_millis_from_iso("Oct foo +2026"), Some(1_790_827_200_000));
+        // `Nov` replaces `Oct`. November 2026 is standard time.
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 Nov"),
+            Some(1_794_546_000_000)
+        );
+        assert_eq!(unix_millis_from_iso("Oct-Nov-2026"), Some(1_793_505_600_000));
+        assert_eq!(unix_millis_from_iso("Oct 13 foo 2026"), None);
+        assert_eq!(unix_millis_from_iso("Oct foo 13 foo 2026"), None);
+        assert_eq!(unix_millis_from_iso("13 Oct foo 2026"), None);
+        assert_eq!(unix_millis_from_iso("13-Oct--26"), None);
+        assert_eq!(unix_millis_from_iso("13--Oct"), None);
     }
 
     #[test]
