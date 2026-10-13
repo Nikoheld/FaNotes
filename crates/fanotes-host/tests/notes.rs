@@ -69,6 +69,45 @@ fn an_unreadable_handwriting_file_uses_the_desktop_open_error() {
 
 #[cfg(unix)]
 #[test]
+fn an_unreadable_companion_does_not_look_missing() {
+    use std::os::unix::fs::PermissionsExt;
+    let (mut host, vault) = host();
+    let note = vault.join("Mathe/Seite.md");
+    let famd = vault.join("Mathe/Seite.famd");
+    std::fs::write(&note, b"alt\n").unwrap();
+    std::fs::write(&famd, b"INK-BLEIBT\n").unwrap();
+    let canonical = std::fs::canonicalize(&famd).unwrap();
+    std::fs::set_permissions(&famd, std::fs::Permissions::from_mode(0o000)).unwrap();
+    struct Restore(std::path::PathBuf);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            let _ = std::fs::set_permissions(&self.0, std::fs::Permissions::from_mode(0o600));
+        }
+    }
+    let _restore = Restore(famd.clone());
+    let expected = format!(
+        "EACCES: permission denied, open '{}'",
+        canonical.display()
+    );
+    assert_eq!(
+        host.dispatch("fanotes:read-note-paper-style", &[json!("Mathe/Seite.md")])
+            .unwrap_err(),
+        expected
+    );
+    assert_eq!(
+        host.dispatch(
+            "fanotes:write-file",
+            &[json!("Mathe/Seite.md"), json!("neu\n")],
+        )
+        .unwrap_err(),
+        expected
+    );
+    std::fs::set_permissions(&famd, std::fs::Permissions::from_mode(0o600)).unwrap();
+    assert_eq!(std::fs::read(&famd).unwrap(), b"INK-BLEIBT\n");
+}
+
+#[cfg(unix)]
+#[test]
 fn an_unreadable_history_index_uses_the_desktop_open_error() {
     use std::os::unix::fs::PermissionsExt;
     let (mut host, vault) = host();
