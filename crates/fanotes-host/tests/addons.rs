@@ -453,3 +453,48 @@ fn a_file_named_addons_reports_the_desktop_lstat_error() {
         format!("EEXIST: file already exists, mkdir '{}'", store.display())
     );
 }
+
+#[cfg(unix)]
+#[test]
+fn an_unwritable_addon_store_reports_the_desktop_mkdir_error() {
+    use std::os::unix::fs::PermissionsExt;
+    let (_dir, mut host) = scratch("unwritable-store");
+    let store = host.app_data.join("addons");
+    std::fs::create_dir(&store).unwrap();
+    std::fs::set_permissions(&store, std::fs::Permissions::from_mode(0o555)).unwrap();
+    struct Restore(std::path::PathBuf);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            let _ = std::fs::set_permissions(&self.0, std::fs::Permissions::from_mode(0o700));
+        }
+    }
+    let _restore = Restore(store.clone());
+    let target = store.join("fresh-notes");
+    assert_eq!(
+        host.dispatch(
+            "fanotes:addons-write-files",
+            &[json!("fresh-notes"), json!({ "main.js": "export {}" })],
+        )
+        .unwrap_err(),
+        format!("EACCES: permission denied, mkdir '{}'", target.display())
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_file_named_like_an_addon_reports_the_desktop_mkdir_error() {
+    let (_dir, mut host) = scratch("file-addon");
+    let store = host.app_data.join("addons");
+    std::fs::create_dir(&store).unwrap();
+    let target = store.join("margin-notes");
+    std::fs::write(&target, b"datei").unwrap();
+    assert_eq!(
+        host.dispatch(
+            "fanotes:addons-write-files",
+            &[json!("margin-notes"), json!({ "main.js": "export {}" })],
+        )
+        .unwrap_err(),
+        format!("EEXIST: file already exists, mkdir '{}'", target.display())
+    );
+    assert_eq!(std::fs::read(&target).unwrap(), b"datei");
+}
