@@ -389,7 +389,10 @@ pub fn resolve_sync_path(
                 }
                 return Ok((cursor, segments.join("/")));
             }
-            Err(_) => return Err("Die Datei konnte nicht gelesen werden.".to_owned()),
+            // Desktop `resolveInside` rethrows the `lstat` error. A missing
+            // read is ENOENT, and a name past the filesystem limit is
+            // ENAMETOOLONG.
+            Err(error) => return Err(node_lstat_error(&cursor, &error)),
         }
     }
     Ok((cursor, segments.join("/")))

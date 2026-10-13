@@ -415,7 +415,7 @@ impl Host {
     fn sync_read(&self, relative: &str) -> Result<Value, String> {
         let (file, _) = vault::resolve_sync_path(self.require_vault()?, relative, false)?;
         let meta = fs::symlink_metadata(&file)
-            .map_err(|_| "Die Datei konnte nicht gelesen werden.".to_owned())?;
+            .map_err(|error| vault::node_lstat_error(&file, &error))?;
         if !meta.is_file() {
             return Err("Die Datei ist keine reguläre Datei.".to_owned());
         }
@@ -440,7 +440,7 @@ impl Host {
         let mtime = arg_mtime_ms(args.get(2)).and_then(system_time_from_millis);
         notes::atomic_write_with_mtime(&path, &bytes, 0o600, mtime)?;
         let meta = fs::symlink_metadata(&path)
-            .map_err(|_| "Die Datei konnte nicht gelesen werden.".to_owned())?;
+            .map_err(|error| vault::node_lstat_error(&path, &error))?;
         if meta.file_type().is_symlink() || !meta.is_file() {
             return Err("Die Datei ist keine reguläre Datei.".to_owned());
         }
@@ -456,7 +456,7 @@ impl Host {
         let (path, _) = vault::resolve_sync_path(root, relative, true)?;
         match fs::symlink_metadata(&path) {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Value::Null),
-            Err(_) => Err("Die Datei konnte nicht gelesen werden.".to_owned()),
+            Err(error) => Err(vault::node_lstat_error(&path, &error)),
             Ok(meta) if meta.file_type().is_symlink() => {
                 Err("Symbolische Links sind im Vault nicht erlaubt.".to_owned())
             }
