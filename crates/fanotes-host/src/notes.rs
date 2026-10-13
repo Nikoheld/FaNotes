@@ -727,14 +727,11 @@ fn history_dir(root: &Path, relative: &str) -> Result<PathBuf, String> {
     // folder stays missing. `mkdir` on a snapshot creates `.fanotes` beside a
     // leftover `.lernwerk` folder instead of renaming that folder into place.
     let fanotes = root.join(".fanotes");
-    // Desktop history does not stat `.fanotes` first. A missing folder and a
-    // folder that cannot be searched both continue to `readFile`, which
-    // returns an empty index or the open error.
-    match fs::symlink_metadata(&fanotes) {
-        Ok(meta) if meta.file_type().is_symlink() || !meta.is_dir() => {
-            return Err("Der interne FaNotes-Ordner ist unsicher.".to_owned());
-        }
-        Ok(_) => {
+    // Desktop history joins the path and reads the index. A file in that path
+    // is `ENOTDIR` from `open`. A symlink is followed. A real directory is
+    // still refused when its resolved path leaves the vault.
+    if let Ok(meta) = fs::symlink_metadata(&fanotes) {
+        if meta.is_dir() && !meta.file_type().is_symlink() {
             let root_real = fs::canonicalize(root)
                 .map_err(|_| "Der interne FaNotes-Ordner verlässt den Vault.".to_owned())?;
             let real = fs::canonicalize(&fanotes)
@@ -743,15 +740,8 @@ fn history_dir(root: &Path, relative: &str) -> Result<PathBuf, String> {
                 return Err("Der interne FaNotes-Ordner verlässt den Vault.".to_owned());
             }
         }
-        Err(_) => {}
     }
-    let history = fanotes.join("history");
-    if let Ok(meta) = fs::symlink_metadata(&history) {
-        if meta.file_type().is_symlink() || !meta.is_dir() {
-            return Err("Der Verlaufsordner ist unsicher.".to_owned());
-        }
-    }
-    Ok(history.join(name))
+    Ok(fanotes.join("history").join(name))
 }
 
 /// Node `fs.readFile` / `fs.open` error text. A directory fails on `read` without a path.
@@ -782,6 +772,9 @@ pub(crate) fn node_open_error(path: &Path, error: &std::io::Error) -> String {
                 "ENOENT: no such file or directory, open '{}'",
                 path.display()
             );
+        }
+        Some(libc::ENOTDIR) => {
+            return format!("ENOTDIR: not a directory, open '{}'", path.display());
         }
         _ => {}
     }

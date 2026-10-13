@@ -256,6 +256,72 @@ fn an_unsearchable_vault_reports_the_desktop_history_open_error() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn a_file_in_the_history_path_reports_the_desktop_open_error() {
+    let (mut host, _) = host();
+    let vault = host.vault.clone().unwrap();
+    std::fs::write(vault.join("Mathe/Seite.md"), b"Hallo\n").unwrap();
+    let index = vault.join(
+        ".fanotes/history/5798959f2b2256a0bff452f5e895b16e3a8401da/index.json",
+    );
+    let expected = format!("ENOTDIR: not a directory, open '{}'", index.display());
+    std::fs::remove_dir_all(vault.join(".fanotes")).unwrap();
+    std::fs::write(vault.join(".fanotes"), b"datei").unwrap();
+    assert_eq!(
+        host.dispatch("fanotes:list-note-history", &[json!("Mathe/Seite.md")])
+            .unwrap_err(),
+        expected
+    );
+    assert_eq!(
+        host.dispatch(
+            "fanotes:read-note-history",
+            &[json!("Mathe/Seite.md"), json!("snap")],
+        )
+        .unwrap_err(),
+        expected
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_file_named_history_reports_the_desktop_open_error() {
+    let (mut host, _) = host();
+    let vault = host.vault.clone().unwrap();
+    std::fs::write(vault.join("Mathe/Seite.md"), b"Hallo\n").unwrap();
+    std::fs::write(vault.join(".fanotes/history"), b"datei").unwrap();
+    let index = vault.join(
+        ".fanotes/history/5798959f2b2256a0bff452f5e895b16e3a8401da/index.json",
+    );
+    assert_eq!(
+        host.dispatch("fanotes:list-note-history", &[json!("Mathe/Seite.md")])
+            .unwrap_err(),
+        format!("ENOTDIR: not a directory, open '{}'", index.display())
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_linked_history_folder_still_lists_its_snapshots() {
+    let (mut host, _) = host();
+    let vault = host.vault.clone().unwrap();
+    std::fs::write(vault.join("Mathe/Seite.md"), b"Hallo\n").unwrap();
+    host.dispatch(
+        "fanotes:write-file",
+        &[json!("Mathe/Seite.md"), json!("Welt\n")],
+    )
+    .unwrap();
+    let history = vault.join(".fanotes/history");
+    let stored = vault.join("gespeicherter-verlauf");
+    std::fs::rename(&history, &stored).unwrap();
+    std::os::unix::fs::symlink(&stored, &history).unwrap();
+    let listed = host
+        .dispatch("fanotes:list-note-history", &[json!("Mathe/Seite.md")])
+        .unwrap();
+    assert_eq!(listed.as_array().unwrap().len(), 1);
+    assert_eq!(listed[0]["bytes"], 6);
+}
+
 #[test]
 fn a_tree_modification_time_rounds_to_the_nearest_millisecond() {
     let (mut host, vault) = host();
