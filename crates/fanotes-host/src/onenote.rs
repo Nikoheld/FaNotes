@@ -102,7 +102,8 @@ fn import_in_temp(
     let parents = page_parents(&html_files, &output_root);
     let mut pages = Vec::new();
     for path in &html_files {
-        let preview = crate::notes::read_lossy_string(path).unwrap_or_default();
+        let preview = fs::read(path).map_err(|error| crate::notes::node_open_error(path, &error))?;
+        let preview = String::from_utf8_lossy(&preview);
         if preview_is_nav(&preview) {
             continue;
         }
@@ -282,7 +283,7 @@ struct Page {
 
 fn sanitize_page(page_path: &Path, output_root: &Path) -> Result<Page, String> {
     let meta = fs::symlink_metadata(page_path)
-        .map_err(|_| "Eine OneNote-Seite ist leer oder zu groß.".to_owned())?;
+        .map_err(|error| crate::vault::node_lstat_error(page_path, &error))?;
     if meta.file_type().is_symlink()
         || !meta.is_file()
         || meta.len() == 0
@@ -290,8 +291,9 @@ fn sanitize_page(page_path: &Path, output_root: &Path) -> Result<Page, String> {
     {
         return Err("Eine OneNote-Seite ist leer oder zu groß.".to_owned());
     }
-    let mut html = crate::notes::read_lossy_string(page_path)
-        .ok_or_else(|| "Eine OneNote-Seite ist leer oder zu groß.".to_owned())?;
+    let html_bytes =
+        fs::read(page_path).map_err(|error| crate::notes::node_open_error(page_path, &error))?;
+    let mut html = String::from_utf8_lossy(&html_bytes).into_owned();
     let title = page_title(&html, page_path);
     let transcript = extract_search_text(&html);
     let (width, height) = page_dimensions(&html);
@@ -2539,6 +2541,54 @@ mod tests {
         );
         std::fs::set_permissions(&source, std::fs::Permissions::from_mode(0o600)).unwrap();
         assert_eq!(std::fs::read(&source).unwrap(), b"one-bytes");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_unreadable_onenote_page_uses_the_desktop_read_error() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!(
+            "fanotes-onenote-page-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let missing = dir.join("fehlt.html");
+        assert_eq!(
+            sanitize_page(&missing, &dir).err().expect("missing page"),
+            format!(
+                "ENOENT: no such file or directory, lstat '{}'",
+                missing.display()
+            )
+        );
+        let empty = dir.join("leer.html");
+        std::fs::write(&empty, b"").unwrap();
+        assert_eq!(
+            sanitize_page(&empty, &dir).err().expect("empty page"),
+            "Eine OneNote-Seite ist leer oder zu groß."
+        );
+        let page = dir.join("seite.html");
+        let body = b"<html><title>Seite</title><body>Hallo</body></html>";
+        std::fs::write(&page, body).unwrap();
+        std::fs::set_permissions(&page, std::fs::Permissions::from_mode(0o000)).unwrap();
+        struct Restore(std::path::PathBuf);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                let _ = std::fs::set_permissions(&self.0, std::fs::Permissions::from_mode(0o600));
+            }
+        }
+        let _restore = Restore(page.clone());
+        assert_eq!(
+            sanitize_page(&page, &dir).err().expect("unreadable page"),
+            format!("EACCES: permission denied, open '{}'", page.display())
+        );
+        std::fs::set_permissions(&page, std::fs::Permissions::from_mode(0o600)).unwrap();
+        assert_eq!(std::fs::read(&page).unwrap(), body);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
