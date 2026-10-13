@@ -2497,7 +2497,22 @@ fn month_day_year(words: &[&str]) -> Option<(i32, i32, i32, usize)> {
 }
 
 fn legacy_clock_and_zone(rest: &[&str]) -> Option<(String, String)> {
-    match rest {
+    // One bare number after the day and year is ignored. `Oct 13 2026 16`
+    // is local midnight. `16:00 16 GMT` keeps the clock. Two numbers, `+16`,
+    // and `16.5` are not a date.
+    let ignored = rest
+        .iter()
+        .filter(|word| unsigned_number(word).is_some())
+        .count();
+    if ignored > 1 {
+        return None;
+    }
+    let kept: Vec<&str> = rest
+        .iter()
+        .copied()
+        .filter(|word| unsigned_number(word).is_none())
+        .collect();
+    match kept.as_slice() {
         [] => Some(("00:00:00".to_string(), String::new())),
         [zone] if named_zone_offset(zone).is_some() => {
             Some(("00:00:00".to_string(), named_zone_offset(zone)?))
@@ -5931,6 +5946,73 @@ mod local_zone_tests {
         assert_eq!(unix_millis_from_iso("13 Oct foo 2026"), None);
         assert_eq!(unix_millis_from_iso("13-Oct--26"), None);
         assert_eq!(unix_millis_from_iso("13--Oct"), None);
+    }
+
+    #[test]
+    fn a_trailing_number_after_a_month_date_is_ignored() {
+        let _lock = TRASH_CLOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let _restore = RestoreTz(std::env::var_os("TZ"));
+        unsafe { std::env::set_var("TZ", "America/New_York") };
+        unsafe { tzset() };
+        // One bare number after the day and year is not a time. `Oct 13 16`
+        // is still 13 October 2016, because that 16 is the year.
+        assert_eq!(unix_millis_from_iso("Oct 13 2026 16"), Some(1_791_864_000_000));
+        assert_eq!(
+            unix_millis_from_iso("13 Oct 2026 16"),
+            Some(1_791_864_000_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("foo Oct 13 2026 16"),
+            Some(1_791_864_000_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 16 GMT"),
+            Some(1_791_849_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 16 EST"),
+            Some(1_791_867_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 GMT 16"),
+            Some(1_791_849_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 16:00 16"),
+            Some(1_791_921_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 16:00 16 GMT"),
+            Some(1_791_907_200_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 16 16:00"),
+            Some(1_791_921_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 5 2026"),
+            Some(1_129_176_000_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 2026 16 99"),
+            Some(1_792_123_200_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 Nov 16"),
+            Some(1_794_546_000_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 16:00:00.5 16"),
+            Some(1_791_921_600_500)
+        );
+        assert_eq!(unix_millis_from_iso("Oct 13 16"), Some(1_476_331_200_000));
+        assert_eq!(unix_millis_from_iso("Oct 13 2026 16 17"), None);
+        assert_eq!(unix_millis_from_iso("Oct 13 2026 16 hello"), None);
+        assert_eq!(unix_millis_from_iso("Oct 13 2026 +16"), None);
+        assert_eq!(unix_millis_from_iso("Oct 13 2026 16.5"), None);
+        assert_eq!(unix_millis_from_iso("Oct 13 2026 16:00 16 17"), None);
     }
 
     #[test]
