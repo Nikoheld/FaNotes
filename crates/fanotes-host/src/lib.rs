@@ -2311,7 +2311,64 @@ fn legacy_words(value: &str) -> Vec<&str> {
         .flat_map(|piece| piece.split(','))
         .map(|token| token.trim_matches('.'))
         .filter(|token| !token.is_empty())
+        .flat_map(expand_joined_month)
         .collect()
+}
+
+/// `13-Oct-26`, `13/Oct/26`, and `13.Oct.26` are three date fields. A leading
+/// `+` or `-`, and separators after the year, are padding. An empty field
+/// stays one token so `13-Oct--26` does not become a date.
+fn expand_joined_month(token: &str) -> Vec<&str> {
+    joined_month_parts(token).unwrap_or_else(|| vec![token])
+}
+
+fn joined_month_parts(token: &str) -> Option<Vec<&str>> {
+    let stripped = token.trim_start_matches(['+', '-']);
+    let body = stripped.trim_end_matches(['-', '/', '.']);
+    if !body.contains(['-', '/', '.']) {
+        return None;
+    }
+    let parts = split_joined_date(body);
+    if parts.len() != 3 || parts.iter().any(|part| part.is_empty()) {
+        return None;
+    }
+    let month_at = parts
+        .iter()
+        .position(|part| english_month(part).is_some())?;
+    if parts
+        .iter()
+        .enumerate()
+        .any(|(index, part)| index != month_at && signed_number(part).is_none())
+    {
+        return None;
+    }
+    Some(parts)
+}
+
+fn split_joined_date(body: &str) -> Vec<&str> {
+    let mut parts = Vec::new();
+    let mut start = 0;
+    for (index, character) in body.char_indices() {
+        if matches!(character, '-' | '/' | '.') {
+            parts.push(&body[start..index]);
+            start = index + character.len_utf8();
+        }
+    }
+    parts.push(&body[start..]);
+    parts
+}
+
+fn unsigned_number(text: &str) -> Option<i32> {
+    if text.is_empty() || !text.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    text.parse().ok()
+}
+
+/// A `+` or `-` before a day or a leading year is ignored. The last number
+/// of a month-name date cannot carry one.
+fn signed_number(text: &str) -> Option<i32> {
+    unsigned_number(text.strip_prefix(['+', '-']).unwrap_or(text))
 }
 
 fn english_month(token: &str) -> Option<i32> {
@@ -2354,8 +2411,9 @@ fn is_weekday(token: &str) -> bool {
     )
 }
 
-/// `Oct 13, 2026` and `13 Oct 2026`. A date alone is local midnight. `GMT`
-/// and the US zone names are fixed offsets. The weekday is ignored.
+/// `Oct 13, 2026`, `13 Oct 2026`, and `2026 Oct 13`. `13-Oct-26` is the same
+/// date. A date alone is local midnight. `GMT` and the US zone names are
+/// fixed offsets. The weekday is ignored.
 fn rewrite_month_name(trimmed: &str) -> Option<String> {
     let mut words = legacy_words(trimmed);
     if words.first().is_some_and(|word| is_weekday(word)) {
@@ -2364,20 +2422,31 @@ fn rewrite_month_name(trimmed: &str) -> Option<String> {
     if words.len() < 3 {
         return None;
     }
-    let (month, day_text, year_text, rest_at) = if english_month(words[0]).is_some() {
-        (english_month(words[0])?, words[1], words[2], 3)
-    } else if english_month(words[1]).is_some() {
-        (english_month(words[1])?, words[0], words[2], 3)
-    } else {
-        return None;
-    };
-    let day: i32 = day_text.parse().ok()?;
-    let year = legacy_year(year_text.parse().ok()?)?;
+    let (month, day, year) = month_day_year(&words)?;
     if !(1..=31).contains(&day) {
         return None;
     }
-    let (clock, zone) = legacy_clock_and_zone(&words[rest_at..])?;
+    let (clock, zone) = legacy_clock_and_zone(&words[3..])?;
     Some(format!("{year:04}-{month:02}-{day:02}T{clock}{zone}"))
+}
+
+/// The month name can be first or second. `13 Oct 2026` is day, month, year.
+/// `2026 Oct 13` and `32 Oct 26` are year, month, day. A year of 0–49 is
+/// 2000–2049.
+fn month_day_year(words: &[&str]) -> Option<(i32, i32, i32)> {
+    if let Some(month) = english_month(words[0]) {
+        let day = signed_number(words[1])?;
+        let year = legacy_year(unsigned_number(words[2])?)?;
+        return Some((month, day, year));
+    }
+    let month = english_month(words[1])?;
+    let first = signed_number(words[0])?;
+    let third = unsigned_number(words[2])?;
+    if (1..=31).contains(&first) {
+        Some((month, first, legacy_year(third)?))
+    } else {
+        Some((month, third, legacy_year(first)?))
+    }
 }
 
 fn legacy_clock_and_zone(rest: &[&str]) -> Option<(String, String)> {
@@ -5622,6 +5691,52 @@ mod local_zone_tests {
             unix_millis_from_iso("Oct 13, 2026 16:00:00 EST"),
             Some(1_791_925_200_000)
         );
+    }
+
+    #[test]
+    fn a_hyphenated_month_matches_date_parse() {
+        let _lock = TRASH_CLOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let _restore = RestoreTz(std::env::var_os("TZ"));
+        unsafe { std::env::set_var("TZ", "America/New_York") };
+        unsafe { tzset() };
+        // `Tuesday, 13-Oct-26 16:00:00 GMT` is 13 October 2026 at 16:00 UTC.
+        assert_eq!(
+            unix_millis_from_iso("13-Oct-26 16:00:00 GMT"),
+            Some(1_791_907_200_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Tuesday, 13-Oct-26 16:00:00 GMT"),
+            Some(1_791_907_200_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Wed, 13-Oct-26 16:00:00 GMT"),
+            Some(1_791_907_200_000)
+        );
+        // A date alone is local midnight. `2026 Oct 13` is year, month, day.
+        assert_eq!(unix_millis_from_iso("13-Oct-26"), Some(1_791_864_000_000));
+        assert_eq!(unix_millis_from_iso("2026-Oct-13"), Some(1_791_864_000_000));
+        assert_eq!(unix_millis_from_iso("2026 Oct 13"), Some(1_791_864_000_000));
+        assert_eq!(unix_millis_from_iso("13/Oct/26"), Some(1_791_864_000_000));
+        assert_eq!(unix_millis_from_iso("13.Oct.26"), Some(1_791_864_000_000));
+        assert_eq!(unix_millis_from_iso("32-Oct-26"), Some(1_982_376_000_000));
+        assert_eq!(unix_millis_from_iso("00-Oct-13"), Some(971_409_600_000));
+        assert_eq!(
+            unix_millis_from_iso("13-Oct-26 16:00:00"),
+            Some(1_791_921_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("13-Oct-26 16:00:00 EST"),
+            Some(1_791_925_200_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("13-Oct-26 4:00:00 PM"),
+            Some(1_791_921_600_000)
+        );
+        assert_eq!(unix_millis_from_iso("32-Oct-32"), None);
+        assert_eq!(unix_millis_from_iso("13-Oct-+26"), None);
+        assert_eq!(unix_millis_from_iso("13-Oct-26T16:00:00 GMT"), None);
     }
 
     #[test]
