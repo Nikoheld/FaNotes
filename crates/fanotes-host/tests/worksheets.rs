@@ -20,6 +20,40 @@ fn host() -> (std::path::PathBuf, Host) {
     (dir, host)
 }
 
+#[cfg(unix)]
+#[test]
+fn an_unreadable_worksheet_uses_the_desktop_open_error() {
+    use std::os::unix::fs::PermissionsExt;
+    let (dir, mut host) = host();
+    let path = dir.join("vault/.fanotes/worksheets/blatt-1.json");
+    fs::write(&path, b"{}\n").unwrap();
+    let canonical = fs::canonicalize(&path).unwrap();
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o000)).unwrap();
+    struct Restore(std::path::PathBuf);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            let _ = fs::set_permissions(&self.0, fs::Permissions::from_mode(0o600));
+        }
+    }
+    let _restore = Restore(path.clone());
+    let expected = format!(
+        "EACCES: permission denied, open '{}'",
+        canonical.display()
+    );
+    assert_eq!(
+        host.dispatch("fanotes:read-worksheet", &[json!("blatt-1")])
+            .unwrap_err(),
+        expected
+    );
+    assert_eq!(
+        host.dispatch("fanotes:delete-worksheet", &[json!("blatt-1")])
+            .unwrap_err(),
+        expected
+    );
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+    assert_eq!(fs::read(&path).unwrap(), b"{}\n");
+}
+
 #[test]
 fn a_null_highlight_list_and_a_whole_page_number_still_open() {
     let (dir, mut host) = host();

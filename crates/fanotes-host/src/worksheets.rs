@@ -99,7 +99,7 @@ fn worksheet_source_name(data_path: &Path, id: &str) -> Result<String, String> {
     }
     let raw = fs::read(data_path)
         .map(lossy_utf8)
-        .map_err(|_| "Das Arbeitsblatt konnte nicht gelesen werden.".to_owned())?;
+        .map_err(|error| crate::notes::node_open_error(data_path, &error))?;
     let candidate = serde_json::from_str::<Value>(&raw)
         .map_err(|_| "Die Arbeitsblattdaten sind beschädigt.".to_owned())?;
     let document = validate_document(&candidate, id)?;
@@ -715,7 +715,7 @@ fn read_worksheet_json(path: &Path) -> Result<String, String> {
     }
     fs::read(path)
         .map(lossy_utf8)
-        .map_err(|_| "Das Arbeitsblatt konnte nicht gelesen werden.".to_owned())
+        .map_err(|error| crate::notes::node_open_error(path, &error))
 }
 
 /// Node `Buffer.toString('utf8')`: invalid bytes become U+FFFD and the rest stays.
