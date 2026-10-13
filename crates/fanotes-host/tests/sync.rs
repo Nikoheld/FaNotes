@@ -807,3 +807,32 @@ fn an_unwritable_sync_parent_reports_the_desktop_mkdir_error() {
     assert!(!created.exists());
     assert!(!created.join("Seite.md").exists());
 }
+
+#[cfg(unix)]
+#[test]
+fn a_nested_sync_folder_reports_the_full_desktop_mkdir_path() {
+    use std::os::unix::fs::PermissionsExt;
+    let (vault, _app, mut host) = host();
+    let vault = fs::canonicalize(&vault).unwrap();
+    let folder = vault.join("Mathe");
+    fs::create_dir(&folder).unwrap();
+    fs::set_permissions(&folder, fs::Permissions::from_mode(0o555)).unwrap();
+    struct Restore(std::path::PathBuf);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            let _ = fs::set_permissions(&self.0, fs::Permissions::from_mode(0o700));
+        }
+    }
+    let _restore = Restore(folder.clone());
+    let created = folder.join("Neu/Tief");
+    assert_eq!(
+        host.dispatch(
+            "fanotes:sync-write",
+            &[json!("Mathe/Neu/Tief/Seite.md"), json!("SGFsbG8K")],
+        )
+        .unwrap_err(),
+        format!("EACCES: permission denied, mkdir '{}'", created.display())
+    );
+    fs::set_permissions(&folder, fs::Permissions::from_mode(0o700)).unwrap();
+    assert!(!folder.join("Neu").exists());
+}

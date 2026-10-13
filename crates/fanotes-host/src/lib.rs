@@ -2143,8 +2143,10 @@ fn create_sync_directories(root: &Path, file: &Path) -> Result<(), String> {
             }
             Ok(_) => {}
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                // Node's recursive `mkdir` reports the full directory it was
+                // asked to create, even when an earlier missing piece fails.
                 fs::create_dir(&cursor)
-                    .map_err(|error| vault::node_mkdir_error(&cursor, &error))?;
+                    .map_err(|error| vault::node_mkdir_error(parent, &error))?;
                 #[cfg(unix)]
                 {
                     use std::os::unix::fs::PermissionsExt;
@@ -2156,7 +2158,7 @@ fn create_sync_directories(root: &Path, file: &Path) -> Result<(), String> {
             // searched fails that mkdir.
             Err(_) => {
                 fs::create_dir(&cursor)
-                    .map_err(|error| vault::node_mkdir_error(&cursor, &error))?;
+                    .map_err(|error| vault::node_mkdir_error(parent, &error))?;
             }
         }
     }
