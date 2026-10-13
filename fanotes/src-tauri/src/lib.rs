@@ -16,6 +16,12 @@ struct HostState(Mutex<Host>);
 const CLOSE_WARNING_DELAY: Duration = Duration::from_secs(12);
 static CLOSE_WARNING_GENERATION: AtomicU64 = AtomicU64::new(0);
 static CLOSE_WARNING_ARMED: AtomicBool = AtomicBool::new(false);
+static MAIN_WINDOW_CLOSED: AtomicBool = AtomicBool::new(false);
+
+/// Electron sends `subject-book-popout-closed` only while the main window is open.
+fn subject_book_popout_notifies(main_is_closed: bool) -> bool {
+    !main_is_closed
+}
 
 struct CloseWarningCopy {
     title: &'static str,
@@ -230,7 +236,9 @@ fn open_subject_book_popout(
     install_webview_guards(&window, false);
     let app_handle = app.clone();
     window.on_window_event(move |event| {
-        if matches!(event, tauri::WindowEvent::Destroyed) {
+        if matches!(event, tauri::WindowEvent::Destroyed)
+            && subject_book_popout_notifies(MAIN_WINDOW_CLOSED.load(Ordering::Relaxed))
+        {
             let _ = app_handle.emit("fanotes:subject-book-popout-closed", ());
         }
     });
@@ -691,6 +699,12 @@ mod tests {
     }
 
     #[test]
+    fn a_closed_main_window_does_not_report_the_book_popout() {
+        assert!(super::subject_book_popout_notifies(false));
+        assert!(!super::subject_book_popout_notifies(true));
+    }
+
+    #[test]
     fn closing_the_main_window_closes_the_book_window() {
         assert_eq!(
             super::companion_windows_closed_with_main(),
@@ -752,7 +766,11 @@ pub fn run() {
                             }
                         }
                         // Electron closes the book popout from the main window's `closed` event.
-                        tauri::WindowEvent::Destroyed => close_companion_windows(&handle),
+                        // The popout-closed message is skipped once that window is gone.
+                        tauri::WindowEvent::Destroyed => {
+                            MAIN_WINDOW_CLOSED.store(true, Ordering::Relaxed);
+                            close_companion_windows(&handle);
+                        }
                         _ => {}
                     }
                 });
