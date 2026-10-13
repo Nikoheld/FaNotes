@@ -1927,7 +1927,8 @@ fn read_regular_limited(path: &Path, max: u64) -> Result<Vec<u8>, String> {
     if meta.len() > max {
         return Err("Die Datei ist zu groß.".to_owned());
     }
-    fs::read(path).map_err(|_| "Die Datei konnte nicht gelesen werden.".to_owned())
+    // Desktop `readRegularFileNoFollow` and sync `open` throw Node's open error.
+    fs::read(path).map_err(|error| notes::node_open_error(path, &error))
 }
 
 /// `String(value)` for an IPC argument. A missing argument is JavaScript `undefined`.
