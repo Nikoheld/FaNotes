@@ -44,6 +44,42 @@ fn an_unreadable_note_uses_the_desktop_open_error() {
 
 #[cfg(unix)]
 #[test]
+fn an_unreadable_oversized_note_uses_the_desktop_open_error() {
+    use std::os::unix::fs::PermissionsExt;
+    let (mut host, vault) = host();
+    let note = vault.join("Mathe/Seite.md");
+    let file = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(&note)
+        .unwrap();
+    file.set_len(16 * 1024 * 1024 + 1).unwrap();
+    drop(file);
+    let canonical = std::fs::canonicalize(&note).unwrap();
+    std::fs::set_permissions(&note, std::fs::Permissions::from_mode(0o000)).unwrap();
+    struct Restore(std::path::PathBuf);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            let _ = std::fs::set_permissions(&self.0, std::fs::Permissions::from_mode(0o600));
+        }
+    }
+    let _restore = Restore(note.clone());
+    assert_eq!(
+        host.dispatch("fanotes:read-file", &[json!("Mathe/Seite.md")])
+            .unwrap_err(),
+        format!("EACCES: permission denied, open '{}'", canonical.display())
+    );
+    std::fs::set_permissions(&note, std::fs::Permissions::from_mode(0o600)).unwrap();
+    assert_eq!(
+        host.dispatch("fanotes:read-file", &[json!("Mathe/Seite.md")])
+            .unwrap_err(),
+        "Die Datei ist zu groß."
+    );
+}
+
+#[cfg(unix)]
+#[test]
 fn an_unreadable_handwriting_file_uses_the_desktop_open_error() {
     use std::os::unix::fs::PermissionsExt;
     let (mut host, vault) = host();
