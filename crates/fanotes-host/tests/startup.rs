@@ -736,3 +736,87 @@ fn optional_recognition_models_stay_uninstalled_with_the_renderer_shape() {
         "Qwen Vision ist nicht installiert."
     );
 }
+
+#[cfg(unix)]
+#[test]
+fn a_failed_vault_switch_reports_the_desktop_open_error_and_keeps_the_vault() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = scratch();
+    let app = dir.join("app");
+    let current = dir.join("current");
+    let next = dir.join("next");
+    fs::create_dir_all(&current).unwrap();
+    fs::create_dir_all(&next).unwrap();
+    fs::write(current.join("Seite.md"), b"# Alt\n").unwrap();
+    let current = fs::canonicalize(&current).unwrap();
+    let next = fs::canonicalize(&next).unwrap();
+    let mut host = Host::open(app.clone());
+    host.set_vault(current.clone()).unwrap();
+    fs::write(app.join("vault-path"), format!("{}", current.display())).unwrap();
+    fs::set_permissions(&app, fs::Permissions::from_mode(0o555)).unwrap();
+    struct Restore(std::path::PathBuf);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            let _ = fs::set_permissions(&self.0, fs::Permissions::from_mode(0o700));
+            let _ = fs::remove_dir_all(self.0.parent().unwrap_or(&self.0));
+        }
+    }
+    let _restore = Restore(app.clone());
+    let error = host
+        .dispatch("fanotes:select-vault", &[json!(next.to_string_lossy())])
+        .unwrap_err();
+    let app = fs::canonicalize(&app).unwrap();
+    let prefix = format!(
+        "EACCES: permission denied, open '{}/.vault-path.{}.",
+        app.display(),
+        std::process::id()
+    );
+    assert!(error.starts_with(&prefix), "{error}");
+    let hex = error[prefix.len()..].trim_end_matches(".tmp'");
+    assert_eq!(hex.len(), 20, "{error}");
+    assert!(
+        hex.chars().all(|character| character.is_ascii_hexdigit()),
+        "{error}"
+    );
+    assert!(error.ends_with(".tmp'"), "{error}");
+    assert_eq!(host.vault.as_deref(), Some(current.as_path()));
+    assert_eq!(
+        fs::read_to_string(app.join("vault-path")).unwrap(),
+        current.display().to_string()
+    );
+    assert!(!next.join("Willkommen.md").exists());
+    assert!(!next.join("Welcome.md").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn an_unwritable_profile_reports_the_desktop_vault_path_error() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = scratch();
+    let app = dir.join("app");
+    let mut host = Host::open(app.clone());
+    host.documents_dir = Some(dir.join("docs"));
+    host.settings.insert("uiLanguage".to_owned(), json!("de"));
+    fs::set_permissions(&app, fs::Permissions::from_mode(0o555)).unwrap();
+    struct Restore(std::path::PathBuf);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            let _ = fs::set_permissions(&self.0, fs::Permissions::from_mode(0o700));
+            let _ = fs::remove_dir_all(self.0.parent().unwrap_or(&self.0));
+        }
+    }
+    let _restore = Restore(app.clone());
+    let error = host.dispatch("fanotes:bootstrap", &[]).unwrap_err();
+    let app = fs::canonicalize(&app).unwrap();
+    let prefix = format!(
+        "EACCES: permission denied, open '{}/.vault-path.{}.",
+        app.display(),
+        std::process::id()
+    );
+    assert!(error.starts_with(&prefix), "{error}");
+    let hex = error[prefix.len()..].trim_end_matches(".tmp'");
+    assert_eq!(hex.len(), 20, "{error}");
+    assert!(host.vault.is_none());
+    assert!(dir.join("docs/FaNotes/Willkommen.md").is_file());
+    assert!(!app.join("vault-path").exists());
+}
