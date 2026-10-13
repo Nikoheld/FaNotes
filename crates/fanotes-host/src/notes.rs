@@ -682,6 +682,10 @@ fn books_path(root: &Path) -> Result<PathBuf, String> {
     Ok(crate::vault::ensure_internal_directory(root)?.join("subject-books.json"))
 }
 
+fn history_mkdir_code(path: &Path, code: i32) -> String {
+    crate::vault::node_mkdir_error(path, &std::io::Error::from_raw_os_error(code))
+}
+
 fn ensure_private_history_dir(directory: &Path) -> Result<(), String> {
     if let Some(parent) = directory.parent() {
         if fs::symlink_metadata(parent).is_err() {
@@ -689,9 +693,15 @@ fn ensure_private_history_dir(directory: &Path) -> Result<(), String> {
         }
     }
     match fs::symlink_metadata(directory) {
-        Ok(meta) if meta.file_type().is_symlink() || !meta.is_dir() => {
-            Err("Der Verlauf konnte nicht gespeichert werden.".to_owned())
-        }
+        Ok(meta) if meta.file_type().is_symlink() => match fs::metadata(directory) {
+            Ok(followed) if followed.is_dir() => Ok(()),
+            Ok(_) => Err(history_mkdir_code(directory, libc::EEXIST)),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                Err(history_mkdir_code(directory, libc::ENOENT))
+            }
+            Err(error) => Err(crate::vault::node_mkdir_error(directory, &error)),
+        },
+        Ok(meta) if !meta.is_dir() => Err(history_mkdir_code(directory, libc::EEXIST)),
         Ok(_) => Ok(()),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
             // Desktop `mkdir` is recursive and rethrows that error.
@@ -1350,5 +1360,37 @@ mod publish_tests {
             )
         );
         assert_eq!(std::fs::read(&history).unwrap(), b"datei");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_taken_history_snapshot_folder_reports_the_desktop_mkdir_error() {
+        let root = std::env::temp_dir().join(format!(
+            "fanotes-history-taken-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        let history = root.join(".fanotes/history");
+        std::fs::create_dir_all(&history).unwrap();
+        let directory = history_dir(&root, "Seite.md").unwrap();
+        std::fs::write(&directory, b"datei").unwrap();
+        assert_eq!(
+            record_history(&root, "Seite.md", "Hallo\n").unwrap_err(),
+            format!("EEXIST: file already exists, mkdir '{}'", directory.display())
+        );
+        assert_eq!(std::fs::read(&directory).unwrap(), b"datei");
+        std::fs::remove_file(&directory).unwrap();
+
+        let elsewhere = root.join("elsewhere");
+        std::fs::create_dir(&elsewhere).unwrap();
+        std::os::unix::fs::symlink(&elsewhere, &directory).unwrap();
+        record_history(&root, "Seite.md", "Hallo\n").unwrap();
+        assert!(directory.symlink_metadata().unwrap().file_type().is_symlink());
+        assert!(std::fs::read_dir(&elsewhere).unwrap().next().is_some());
+        let _ = std::fs::remove_dir_all(&root);
     }
 }
