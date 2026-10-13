@@ -197,7 +197,13 @@ pub fn parse_famd(source: &str) -> ParsedFamd {
 
 pub fn serialize_famd(markdown: &str, payload: &FamdPayload) -> String {
     let body = strip_famd_payload(markdown);
-    let updated_at = canonical_iso(&payload.updated_at).unwrap_or_else(now_iso);
+    // `payload.updatedAt || now`. An empty string is the only missing time.
+    // A month name or other text is written unchanged.
+    let updated_at = if payload.updated_at.is_empty() {
+        now_iso()
+    } else {
+        payload.updated_at.clone()
+    };
     let worksheets = if payload.worksheets.is_empty() {
         worksheet_ids_from_markdown(&body)
     } else {
@@ -2677,6 +2683,31 @@ mod tests {
                 Some("2026-10-13T00:00:00.000Z")
             );
         });
+    }
+
+    #[test]
+    fn serialize_keeps_the_update_time_it_was_given() {
+        let payload = FamdPayload {
+            schema: FAMD_SCHEMA.to_string(),
+            updated_at: "Oct 13, 2026".to_string(),
+            ink: None,
+            worksheets: Vec::new(),
+            paper_style: None,
+            note_links: Vec::new(),
+            note_backups: Vec::new(),
+            page_stats: None,
+        };
+        let saved = serialize_famd("", &payload);
+        assert!(
+            saved.contains("\"updatedAt\":\"Oct 13, 2026\""),
+            "{saved}"
+        );
+        let invalid = FamdPayload {
+            updated_at: "not-a-date".to_string(),
+            ..payload
+        };
+        let saved = serialize_famd("", &invalid);
+        assert!(saved.contains("\"updatedAt\":\"not-a-date\""), "{saved}");
     }
 
     fn with_tz(tz: &str, check: impl FnOnce()) {
