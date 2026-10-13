@@ -971,13 +971,20 @@ fn vault_root(host: &Host) -> Result<&Path, String> {
 
 pub(crate) fn iso_from_system_time(time: SystemTime) -> String {
     // `fs.Stats#mtime.toISOString()` rounds to the nearest millisecond.
-    // 0.6 ms becomes `.001`, and 999.5 ms rolls into the next second.
-    format_unix_time(time, true)
+    // 0.6 ms becomes `.001`, 999.5 ms rolls into the next second, and a
+    // time before 1970 stays before 1970. Half milliseconds round toward
+    // positive infinity, so -0.5 ms is the epoch and -1.5 ms is -1 ms.
+    iso_from_unix_millis(unix_millis(time, true))
+}
+
+/// `Math.round(mtimeMs)`, including a timestamp before 1970.
+pub(crate) fn mtime_millis_of(time: SystemTime) -> i64 {
+    unix_millis(time, true)
 }
 
 /// `new Date(time).toISOString()` for a clock value. The millisecond is truncated.
 pub(crate) fn iso_from_date(time: SystemTime) -> String {
-    format_unix_time(time, false)
+    iso_from_unix_millis(unix_millis(time, false))
 }
 
 /// `new Date().toISOString()`. The clock millisecond is truncated.
@@ -985,23 +992,41 @@ pub(crate) fn iso_now() -> String {
     iso_from_date(SystemTime::now())
 }
 
-fn format_unix_time(time: SystemTime, round: bool) -> String {
-    let elapsed = time.duration_since(UNIX_EPOCH).unwrap_or_default();
-    let mut secs = elapsed.as_secs();
-    let millis = if round {
-        (u64::from(elapsed.subsec_nanos()) + 500_000) / 1_000_000
-    } else {
-        u64::from(elapsed.subsec_millis())
-    };
-    let millis = if millis == 1000 {
-        secs += 1;
-        0
-    } else {
-        millis
-    };
-    let days = secs / 86_400;
-    let time_of_day = secs % 86_400;
-    let (year, month, day) = civil_date(days);
+fn unix_millis(time: SystemTime, round: bool) -> i64 {
+    match time.duration_since(UNIX_EPOCH) {
+        Ok(elapsed) => {
+            let secs = elapsed.as_secs() as i64;
+            let nanos = u64::from(elapsed.subsec_nanos());
+            let extra = if round {
+                (nanos + 500_000) / 1_000_000
+            } else {
+                nanos / 1_000_000
+            };
+            secs.saturating_mul(1000).saturating_add(extra as i64)
+        }
+        Err(error) => {
+            let early = error.duration();
+            let abs_ns = early
+                .as_secs()
+                .saturating_mul(1_000_000_000)
+                .saturating_add(u64::from(early.subsec_nanos()));
+            let whole = (abs_ns / 1_000_000) as i64;
+            let extra = (abs_ns % 1_000_000) as i64;
+            if round && extra > 500_000 {
+                -whole - 1
+            } else {
+                -whole
+            }
+        }
+    }
+}
+
+fn iso_from_unix_millis(millis: i64) -> String {
+    let secs = millis.div_euclid(1000);
+    let millis = millis.rem_euclid(1000) as u32;
+    let days = secs.div_euclid(86_400);
+    let time_of_day = secs.rem_euclid(86_400) as u32;
+    let (year, month, day) = civil_date_signed(days);
     format!(
         "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}.{millis:03}Z",
         time_of_day / 3600,
@@ -1014,6 +1039,20 @@ fn now_iso() -> String {
     iso_now()
 }
 
+fn civil_date_signed(mut days: i64) -> (i32, u32, u32) {
+    if days >= 0 {
+        return civil_date(days as u64);
+    }
+    let mut year = 1970i32;
+    while days < 0 {
+        year -= 1;
+        let year_days = if is_leap(year) { 366 } else { 365 };
+        days += i64::from(year_days);
+    }
+    let (month, day) = month_and_day(year, days as u64);
+    (year, month, day)
+}
+
 fn civil_date(mut days: u64) -> (i32, u32, u32) {
     let mut year = 1970i32;
     loop {
@@ -1024,6 +1063,11 @@ fn civil_date(mut days: u64) -> (i32, u32, u32) {
         days -= year_days;
         year += 1;
     }
+    let (month, day) = month_and_day(year, days);
+    (year, month, day)
+}
+
+fn month_and_day(year: i32, mut days: u64) -> (u32, u32) {
     let months = [
         31,
         if is_leap(year) { 29 } else { 28 },
@@ -1041,12 +1085,12 @@ fn civil_date(mut days: u64) -> (i32, u32, u32) {
     let mut month = 1u32;
     for length in months {
         if days < length {
-            return (year, month, days as u32 + 1);
+            return (month, days as u32 + 1);
         }
         days -= length;
         month += 1;
     }
-    (year, 12, 31)
+    (12, 31)
 }
 
 fn is_leap(year: i32) -> bool {
@@ -1056,7 +1100,8 @@ fn is_leap(year: i32) -> bool {
 #[cfg(test)]
 mod publish_tests {
     use super::{
-        file_mtime_iso, iso_from_date, iso_from_system_time, publish_new_file, write_note_file,
+        file_mtime_iso, iso_from_date, iso_from_system_time, mtime_millis_of, publish_new_file,
+        write_note_file,
         NewFileError,
     };
     use std::time::UNIX_EPOCH;
@@ -1135,6 +1180,26 @@ mod publish_tests {
             iso_from_date(at(1_700_000_000, 600_000)),
             "2023-11-14T22:13:20.000Z"
         );
+        let before = |secs, nanos| {
+            UNIX_EPOCH
+                .checked_sub(std::time::Duration::new(secs, nanos))
+                .unwrap()
+        };
+        assert_eq!(
+            iso_from_system_time(before(1, 500_000_000)),
+            "1969-12-31T23:59:58.500Z"
+        );
+        assert_eq!(
+            iso_from_system_time(before(0, 1_500_000)),
+            "1969-12-31T23:59:59.999Z"
+        );
+        assert_eq!(
+            iso_from_system_time(before(0, 500_000)),
+            "1970-01-01T00:00:00.000Z"
+        );
+        assert_eq!(mtime_millis_of(before(1, 500_000_000)), -1500);
+        assert_eq!(mtime_millis_of(before(0, 1_500_000)), -1);
+        assert_eq!(mtime_millis_of(before(0, 500_000)), 0);
         assert_eq!(
             iso_from_date(at(1_700_000_000, 999_600_000)),
             "2023-11-14T22:13:20.999Z"
