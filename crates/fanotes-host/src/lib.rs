@@ -1034,11 +1034,22 @@ impl Host {
             };
             path
         };
+        let previous_vault = self.vault.clone();
+        let previous_configured = self.configured_vault.clone();
+        let previous_onboarding = self.onboarding_required;
         self.set_vault(path)?;
         let stored = self
             .vault
             .clone()
             .ok_or_else(|| "Die Einstellungen konnten nicht gespeichert werden.".to_owned())?;
+        // Desktop `fs.access(realpath, R_OK | W_OK)` rejects a folder the
+        // process cannot write. The thrown message is Node's EACCES text.
+        if let Some(error) = vault_write_access_error(&stored) {
+            self.vault = previous_vault;
+            self.configured_vault = previous_configured;
+            self.onboarding_required = previous_onboarding;
+            return Err(error);
+        }
         notes::atomic_write(
             &self.app_data.join("vault-path"),
             stored.to_string_lossy().as_bytes(),
@@ -1994,6 +2005,37 @@ fn is_vault_id(value: &str) -> bool {
         && value
             .bytes()
             .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+}
+
+/// Node `fs.access(path, R_OK | W_OK)` for the chosen vault directory.
+fn vault_write_access_error(path: &Path) -> Option<String> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStrExt;
+        let mut bytes = path.as_os_str().as_bytes().to_vec();
+        bytes.push(0);
+        let allowed = unsafe {
+            libc::access(
+                bytes.as_ptr().cast::<libc::c_char>(),
+                libc::R_OK | libc::W_OK,
+            ) == 0
+        };
+        if allowed {
+            return None;
+        }
+        let code = std::io::Error::last_os_error().raw_os_error();
+        let (name, detail) = if code == Some(libc::EROFS) {
+            ("EROFS", "read-only file system")
+        } else {
+            ("EACCES", "permission denied")
+        };
+        Some(format!("{name}: {detail}, access '{}'", path.display()))
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+        None
+    }
 }
 
 fn system_time_from_millis(millis: i64) -> Option<SystemTime> {

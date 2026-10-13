@@ -73,6 +73,40 @@ fn a_missing_vault_starts_in_documents_with_a_welcome_note() {
     assert_eq!(restored_boot["onboardingRequired"], true);
 }
 
+#[cfg(unix)]
+#[test]
+fn a_read_only_vault_is_refused_like_the_desktop() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = scratch();
+    let vault = dir.join("vault");
+    fs::create_dir_all(&vault).unwrap();
+    fs::set_permissions(&vault, fs::Permissions::from_mode(0o555)).unwrap();
+    struct Restore(std::path::PathBuf);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            let _ = fs::set_permissions(&self.0, fs::Permissions::from_mode(0o700));
+            let _ = fs::remove_dir_all(self.0.parent().unwrap_or(&self.0));
+        }
+    }
+    let _restore = Restore(vault.clone());
+    let mut host = Host::open(dir.join("app"));
+    let canonical = fs::canonicalize(&vault).unwrap();
+    let error = host
+        .dispatch(
+            "fanotes:select-vault",
+            &[json!(canonical.to_string_lossy())],
+        )
+        .unwrap_err();
+    assert_eq!(
+        error,
+        format!(
+            "EACCES: permission denied, access '{}'",
+            canonical.display()
+        )
+    );
+    assert!(host.vault.is_none());
+}
+
 #[test]
 fn a_missing_configured_vault_is_not_replaced() {
     let dir = scratch();
