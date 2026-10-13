@@ -452,7 +452,13 @@ fn navigation_allowed(url: &tauri::Url) -> bool {
         "tauri" | "asset" | "ipc" => true,
         "http" | "https" => matches!(
             url.host_str(),
-            Some("127.0.0.1") | Some("localhost") | Some("::1") | Some("tauri.localhost")
+            // `host_str` keeps the brackets around an IPv6 address. Electron
+            // `URL.hostname` does the same, and `trustedDevUrl` allows `[::1]`.
+            Some("127.0.0.1")
+                | Some("localhost")
+                | Some("::1")
+                | Some("[::1]")
+                | Some("tauri.localhost")
         ),
         _ => false,
     }
@@ -611,6 +617,9 @@ mod tests {
             "http://127.0.0.1:5174/#subject-book=Mathe%2FBuch.pdf",
             "http://localhost:5174/index.html",
             "https://tauri.localhost/",
+            "http://[::1]:5174/",
+            "https://[::1]/",
+            "http://[0:0:0:0:0:0:0:1]:5174/",
             "tauri://localhost",
             "asset://localhost/index.html",
         ];
@@ -623,6 +632,7 @@ mod tests {
         let blocked = [
             "https://example.com/",
             "http://192.168.1.20/",
+            "http://[2001:db8::1]/",
             "file:///etc/passwd",
             "javascript:alert(1)",
         ];
