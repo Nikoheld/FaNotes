@@ -498,3 +498,79 @@ fn a_file_named_like_an_addon_reports_the_desktop_mkdir_error() {
     );
     assert_eq!(std::fs::read(&target).unwrap(), b"datei");
 }
+
+#[cfg(unix)]
+#[test]
+fn an_unwritable_addon_folder_reports_the_desktop_open_error() {
+    use std::os::unix::fs::PermissionsExt;
+    let (_dir, mut host) = scratch("unwritable-files");
+    host.dispatch(
+        "fanotes:addons-write-files",
+        &[json!("margin-notes"), json!({ "main.js": "export {}" })],
+    )
+    .unwrap();
+    let folder = host.app_data.join("addons/margin-notes");
+    let script = folder.join("main.js");
+    let original = std::fs::read(&script).unwrap();
+    std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o555)).unwrap();
+    struct Restore(std::path::PathBuf);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            let _ = std::fs::set_permissions(&self.0, std::fs::Permissions::from_mode(0o700));
+        }
+    }
+    let _restore = Restore(folder.clone());
+    let error = host
+        .dispatch(
+            "fanotes:addons-write-files",
+            &[json!("margin-notes"), json!({ "main.js": "changed" })],
+        )
+        .unwrap_err();
+    let prefix = format!(
+        "EACCES: permission denied, open '{}/.main.js.{}.",
+        folder.display(),
+        std::process::id()
+    );
+    assert!(error.starts_with(&prefix), "{error}");
+    assert!(error.ends_with(".tmp'"), "{error}");
+    std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o700)).unwrap();
+    assert_eq!(std::fs::read(&script).unwrap(), original);
+}
+
+#[cfg(unix)]
+#[test]
+fn an_unwritable_addon_store_reports_the_desktop_data_open_error() {
+    use std::os::unix::fs::PermissionsExt;
+    let (_dir, mut host) = scratch("unwritable-data");
+    host.dispatch(
+        "fanotes:addons-write-data",
+        &[json!("margin-notes"), json!("{\"open\":1}")],
+    )
+    .unwrap();
+    let store = host.app_data.join("addons");
+    let data = store.join("margin-notes.data.json");
+    let original = std::fs::read(&data).unwrap();
+    std::fs::set_permissions(&store, std::fs::Permissions::from_mode(0o555)).unwrap();
+    struct Restore(std::path::PathBuf);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            let _ = std::fs::set_permissions(&self.0, std::fs::Permissions::from_mode(0o700));
+        }
+    }
+    let _restore = Restore(store.clone());
+    let error = host
+        .dispatch(
+            "fanotes:addons-write-data",
+            &[json!("margin-notes"), json!("replaced")],
+        )
+        .unwrap_err();
+    let prefix = format!(
+        "EACCES: permission denied, open '{}/.margin-notes.data.json.{}.",
+        store.display(),
+        std::process::id()
+    );
+    assert!(error.starts_with(&prefix), "{error}");
+    assert!(error.ends_with(".tmp'"), "{error}");
+    std::fs::set_permissions(&store, std::fs::Permissions::from_mode(0o700)).unwrap();
+    assert_eq!(std::fs::read(&data).unwrap(), original);
+}
