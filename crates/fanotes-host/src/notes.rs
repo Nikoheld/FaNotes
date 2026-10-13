@@ -57,7 +57,11 @@ pub fn write_note_file(
         format!("{body}\n")
     };
     let written = if is_famd {
-        vault::resolve_note_file(root, relative)?
+        let path = vault::resolve_note_file(root, relative)?;
+        // Desktop `realpath` of the parent runs before a new `.famd` is created.
+        // A missing folder stays missing.
+        require_parent_directory(&path)?;
+        path
     } else {
         let path = vault::resolve_note_file(root, relative)?;
         require_parent_directory(&path)?;
