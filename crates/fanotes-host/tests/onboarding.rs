@@ -241,6 +241,36 @@ fn first_run_creates_the_chosen_subjects_and_stamps_the_tree() {
     assert!(!vault.join("Deutsch").exists());
 }
 
+#[cfg(unix)]
+#[test]
+fn an_unreadable_tree_cache_is_removed() {
+    use std::os::unix::fs::PermissionsExt;
+    let (vault, mut host) = host();
+    host.dispatch("fanotes:complete-onboarding", &[json!(["Mathematik"])])
+        .unwrap();
+    host.dispatch("fanotes:get-tree", &[]).unwrap();
+    let cache_dir = vault.parent().unwrap().join("app/tree-cache-v1");
+    let cache_path = fs::read_dir(&cache_dir)
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    fs::set_permissions(&cache_path, fs::Permissions::from_mode(0o000)).unwrap();
+    struct Restore(std::path::PathBuf);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            let _ = fs::set_permissions(&self.0, fs::Permissions::from_mode(0o600));
+        }
+    }
+    let _restore = Restore(cache_path.clone());
+    assert!(host
+        .dispatch("fanotes:get-cached-tree", &[])
+        .unwrap()
+        .is_null());
+    assert!(!cache_path.exists(), "{}", cache_path.display());
+}
+
 #[test]
 fn a_cached_tree_keeps_a_long_unicode_name() {
     let (vault, mut host) = host();
