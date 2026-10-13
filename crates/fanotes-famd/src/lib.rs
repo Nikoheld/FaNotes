@@ -543,7 +543,44 @@ fn to_base36(mut value: u64) -> String {
 /// The editor stores page stats with fields beyond the five companion keys.
 /// An object is kept whole. An array is not a stats record.
 fn parse_page_stats(value: Option<&Value>) -> Option<Value> {
-    value.filter(|stats| stats.is_object()).cloned()
+    let object = value?.as_object()?;
+    let created_at = object
+        .get("createdAt")
+        .and_then(Value::as_str)
+        .and_then(canonical_iso)?;
+    let modified_at = object
+        .get("modifiedAt")
+        .and_then(Value::as_str)
+        .and_then(canonical_iso)
+        .unwrap_or_else(|| created_at.clone());
+    let last_opened_at = object
+        .get("lastOpenedAt")
+        .and_then(Value::as_str)
+        .and_then(canonical_iso)
+        .unwrap_or_else(|| created_at.clone());
+    let dwell = js_number(object.get("dwellMs"));
+    let opens = js_number(object.get("openCount"));
+    let mut stats = object.clone();
+    stats.insert("createdAt".into(), Value::String(created_at));
+    stats.insert("modifiedAt".into(), Value::String(modified_at));
+    stats.insert("lastOpenedAt".into(), Value::String(last_opened_at));
+    stats.insert(
+        "dwellMs".into(),
+        json_number(if dwell.is_finite() && dwell >= 0.0 {
+            dwell.floor()
+        } else {
+            0.0
+        }),
+    );
+    stats.insert(
+        "openCount".into(),
+        json_number(if opens.is_finite() && opens >= 0.0 {
+            opens.floor()
+        } else {
+            0.0
+        }),
+    );
+    Some(Value::Object(stats))
 }
 
 fn is_record_id(value: &str) -> bool {
@@ -2061,7 +2098,7 @@ mod tests {
     }
 
     #[test]
-    fn page_stats_keep_editor_fields_without_a_creation_time() {
+    fn page_stats_without_a_creation_time_are_omitted() {
         let json = format!(
             r#"{{"schema":"{FAMD_SCHEMA}","updatedAt":"2026-01-02T00:00:00.000Z","ink":null,"worksheets":[],"pageStats":{{"words":2,"typing":{{"wordsAdded":4}}}}}}"#
         );
@@ -2069,9 +2106,7 @@ mod tests {
             "<!-- fanotes-famd:v1 chars={} -->\n{json}\n",
             super::js_len(&json)
         );
-        let stats = parse_famd(&source).payload.unwrap().page_stats.unwrap();
-        assert_eq!(stats["words"], 2);
-        assert_eq!(stats["typing"]["wordsAdded"], 4);
+        assert!(parse_famd(&source).payload.unwrap().page_stats.is_none());
 
         let payload = FamdPayload {
             schema: FAMD_SCHEMA.to_string(),
@@ -2084,8 +2119,27 @@ mod tests {
             page_stats: Some(serde_json::json!({ "words": 2 })),
         };
         let saved = serialize_famd("", &payload);
-        let again = parse_famd(&saved).payload.unwrap().page_stats.unwrap();
-        assert_eq!(again["words"], 2);
+        assert!(parse_famd(&saved).payload.unwrap().page_stats.is_none());
+    }
+
+    #[test]
+    fn page_stats_follow_the_desktop_creation_time() {
+        with_tz("America/New_York", || {
+            let json = format!(
+                r#"{{"schema":"{FAMD_SCHEMA}","updatedAt":"2026-01-02T00:00:00.000Z","ink":null,"worksheets":[],"pageStats":{{"createdAt":"Oct 13, 2026","dwellMs":1.9,"openCount":-3,"words":2}}}}"#
+            );
+            let source = format!(
+                "<!-- fanotes-famd:v1 chars={} -->\n{json}\n",
+                super::js_len(&json)
+            );
+            let stats = parse_famd(&source).payload.unwrap().page_stats.unwrap();
+            assert_eq!(stats["createdAt"], "2026-10-13T04:00:00.000Z");
+            assert_eq!(stats["modifiedAt"], "2026-10-13T04:00:00.000Z");
+            assert_eq!(stats["lastOpenedAt"], "2026-10-13T04:00:00.000Z");
+            assert_eq!(stats["dwellMs"], 1);
+            assert_eq!(stats["openCount"], 0);
+            assert_eq!(stats["words"], 2);
+        });
     }
 
     #[test]
