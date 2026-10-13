@@ -1139,6 +1139,48 @@ fn history_uses_the_desktop_trim_for_a_blank_note() {
 }
 
 #[test]
+fn listing_history_does_not_create_the_internal_folder() {
+    let (mut host, vault) = host();
+    std::fs::write(vault.join("Mathe/Seite.md"), b"Hallo\n").unwrap();
+    std::fs::remove_dir_all(vault.join(".fanotes")).unwrap();
+    let history = host
+        .dispatch("fanotes:list-note-history", &[json!("Mathe/Seite.md")])
+        .unwrap();
+    assert_eq!(history, json!([]));
+    assert_eq!(
+        host.dispatch(
+            "fanotes:read-note-history",
+            &[json!("Mathe/Seite.md"), json!("missing-id")],
+        )
+        .unwrap_err(),
+        "Dieser Verlaufseintrag existiert nicht mehr."
+    );
+    assert!(!vault.join(".fanotes").exists());
+    assert!(!vault.join(".lernwerk").exists());
+}
+
+#[test]
+fn recording_history_keeps_a_legacy_internal_folder() {
+    let (mut host, vault) = host();
+    std::fs::write(vault.join("Mathe/Seite.md"), b"Hallo\n").unwrap();
+    std::fs::remove_dir_all(vault.join(".fanotes")).unwrap();
+    std::fs::create_dir_all(vault.join(".lernwerk")).unwrap();
+    std::fs::write(vault.join(".lernwerk/keep.txt"), b"alt").unwrap();
+    host.dispatch(
+        "fanotes:write-file",
+        &[json!("Mathe/Seite.md"), json!("Neu\n")],
+    )
+    .unwrap();
+    assert!(vault.join(".lernwerk/keep.txt").is_file());
+    assert!(!vault.join(".fanotes/keep.txt").exists());
+    let history = host
+        .dispatch("fanotes:list-note-history", &[json!("Mathe/Seite.md")])
+        .unwrap();
+    assert_eq!(history.as_array().unwrap().len(), 1);
+    assert_eq!(history[0]["bytes"], 6);
+}
+
+#[test]
 fn a_history_index_uses_the_desktop_indentation() {
     let (mut host, vault) = host();
     std::fs::write(vault.join("Mathe/Seite.md"), b"Hallo\n").unwrap();
