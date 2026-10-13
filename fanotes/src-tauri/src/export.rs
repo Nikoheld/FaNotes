@@ -194,6 +194,13 @@ mod tests {
         }
         let window = gtk::Window::new(gtk::WindowType::Toplevel);
         let view = webkit2gtk::WebView::new();
+        // A new view is not loading, and its progress is still 0. Showing it
+        // here would be the blank window Electron hides.
+        assert!(
+            !crate::main_window_should_reveal(view.estimated_load_progress(), false, false),
+            "progress {} revealed a page that has not started",
+            view.estimated_load_progress()
+        );
         window.add(&view);
         window.show_all();
         let (loaded, loaded_rx) = mpsc::channel();
@@ -204,6 +211,11 @@ mod tests {
         });
         view.load_html("<html><body>Notiz</body></html>", None);
         super::wait_for(&loaded_rx, Duration::from_secs(15)).unwrap();
+        assert!(
+            crate::main_window_should_reveal(view.estimated_load_progress(), false, false),
+            "progress {} kept a finished page hidden",
+            view.estimated_load_progress()
+        );
         let (finished, finished_rx) = mpsc::channel();
         view.evaluate_javascript(
             "document.documentElement.classList.add('is-printing')",

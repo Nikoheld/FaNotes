@@ -553,6 +553,47 @@ fn system_language_script(language: &str) -> String {
     )
 }
 
+/// Electron `show: false` until `ready-to-show`, and `did-fail-load` still shows it.
+///
+/// A fresh WebKit view is not loading and its progress is `0`, so that must
+/// stay hidden. Progress `1` means the page finished before the guard attached.
+pub(crate) fn main_window_should_reveal(
+    load_progress: f64,
+    load_finished: bool,
+    load_failed: bool,
+) -> bool {
+    load_failed || load_finished || load_progress >= 1.0
+}
+
+fn install_main_window_reveal(window: &tauri::WebviewWindow) {
+    let reveal = window.clone();
+    let installed = window.with_webview(move |webview| {
+        let view = webview.inner();
+        let on_finish = reveal.clone();
+        view.connect_load_changed(move |_view, event| {
+            if event == webkit2gtk::LoadEvent::Finished
+                && main_window_should_reveal(0.0, true, false)
+            {
+                let _ = on_finish.show();
+            }
+        });
+        let on_fail = reveal.clone();
+        view.connect_load_failed(move |_view, _event, _uri, _error| {
+            if main_window_should_reveal(0.0, false, true) {
+                let _ = on_fail.show();
+            }
+            // Leave WebKit's error page in place. Electron still shows the window.
+            false
+        });
+        if main_window_should_reveal(view.estimated_load_progress(), false, false) {
+            let _ = reveal.show();
+        }
+    });
+    if installed.is_err() {
+        let _ = window.show();
+    }
+}
+
 fn install_webview_guards(window: &tauri::WebviewWindow, emit_sheet_zoom: bool) {
     let emit_window = window.clone();
     let _ = window.with_webview(move |webview| {
@@ -667,6 +708,25 @@ mod tests {
     }
 
     #[test]
+    fn the_main_window_stays_hidden_until_the_page_can_paint() {
+        let config: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        assert_eq!(
+            config["app"]["windows"][0]["visible"].as_bool(),
+            Some(false),
+            "the main window is visible before the page can paint"
+        );
+        assert!(
+            !super::main_window_should_reveal(0.0, false, false),
+            "a fresh page reveals the main window"
+        );
+        assert!(!super::main_window_should_reveal(0.1, false, false));
+        assert!(super::main_window_should_reveal(0.0, true, false));
+        assert!(super::main_window_should_reveal(0.0, false, true));
+        assert!(super::main_window_should_reveal(1.0, false, false));
+    }
+
+    #[test]
     fn the_page_reports_the_desktop_system_language() {
         let german = super::system_language_script("de");
         assert!(german.contains("const language=\"de\""));
@@ -773,6 +833,7 @@ pub fn run() {
             app.manage(HostState(Mutex::new(Host::open(app_data))));
             if let Some(window) = app.get_webview_window("main") {
                 install_webview_guards(&window, true);
+                install_main_window_reveal(&window);
                 let handle = app.handle().clone();
                 window.on_window_event(move |event| {
                     match event {
