@@ -847,17 +847,7 @@ impl Host {
         match self.settings.get("uiLanguage").and_then(Value::as_str) {
             Some("de") => "de",
             Some("en") => "en",
-            _ => {
-                let locale = std::env::var("LC_ALL")
-                    .or_else(|_| std::env::var("LC_MESSAGES"))
-                    .or_else(|_| std::env::var("LANG"))
-                    .unwrap_or_default();
-                if german_locale(&locale) {
-                    "de"
-                } else {
-                    "en"
-                }
-            }
+            _ => current_system_ui_language(),
         }
     }
 
@@ -3104,6 +3094,94 @@ fn german_locale(locale: &str) -> bool {
         return false;
     };
     rest.is_empty() || rest.starts_with(['-', '_', '.', '@'])
+}
+
+/// `de` or `en` from the same environment Electron's `app.getLocale()` reads.
+///
+/// `LANGUAGE` wins, including over `LC_ALL`. Its first non-empty `:` item is
+/// the locale. A list with no item, such as `:::`, does not fall through.
+/// An empty `LANGUAGE` is unset, so `LC_ALL`, then `LC_MESSAGES`, then `LANG`.
+pub fn system_ui_language(
+    language: &str,
+    lc_all: &str,
+    lc_messages: &str,
+    lang: &str,
+) -> &'static str {
+    let locale = language_list_choice(language).unwrap_or_else(|| {
+        [lc_all, lc_messages, lang]
+            .into_iter()
+            .find(|value| !value.is_empty())
+            .unwrap_or("")
+    });
+    if german_locale(locale) {
+        "de"
+    } else {
+        "en"
+    }
+}
+
+/// The first non-empty `LANGUAGE` item, or `Some("")` when the list is set
+/// but every item is empty.
+fn language_list_choice(language: &str) -> Option<&str> {
+    if language.is_empty() {
+        return None;
+    }
+    Some(
+        language
+            .split(':')
+            .find(|item| !item.is_empty())
+            .unwrap_or(""),
+    )
+}
+
+fn current_system_ui_language() -> &'static str {
+    system_ui_language(
+        &std::env::var("LANGUAGE").unwrap_or_default(),
+        &std::env::var("LC_ALL").unwrap_or_default(),
+        &std::env::var("LC_MESSAGES").unwrap_or_default(),
+        &std::env::var("LANG").unwrap_or_default(),
+    )
+}
+
+/// `navigator.language` for the system UI. Electron reports `de` for every
+/// German locale and `en-US` when the locale is not German.
+pub fn desktop_navigator_language() -> &'static str {
+    if current_system_ui_language() == "de" {
+        "de"
+    } else {
+        "en-US"
+    }
+}
+
+#[cfg(test)]
+mod system_language_tests {
+    use super::system_ui_language;
+
+    #[test]
+    fn the_language_list_selects_the_desktop_ui_language() {
+        assert_eq!(
+            system_ui_language("de_DE:de", "", "", "en_US.UTF-8"),
+            "de"
+        );
+        assert_eq!(
+            system_ui_language("en", "de_DE.UTF-8", "de_DE.UTF-8", "de_DE.UTF-8"),
+            "en"
+        );
+        assert_eq!(system_ui_language(":de", "", "", "en_US.UTF-8"), "de");
+        assert_eq!(
+            system_ui_language("en_US:de", "", "", "de_DE.UTF-8"),
+            "en"
+        );
+        assert_eq!(system_ui_language(":::", "", "", "de_DE.UTF-8"), "en");
+        assert_eq!(system_ui_language(" ", "", "", "de_DE.UTF-8"), "en");
+        assert_eq!(system_ui_language("", "", "de_CH.UTF-8", "en_US.UTF-8"), "de");
+        assert_eq!(
+            system_ui_language("", "en_US.UTF-8", "de_DE.UTF-8", "de_DE.UTF-8"),
+            "en"
+        );
+        assert_eq!(system_ui_language("", "", "", "de_AT.UTF-8"), "de");
+        assert_eq!(system_ui_language("", "", "", "C"), "en");
+    }
 }
 
 fn write_tree_cache(app_data: &Path, root: &Path, entries: &Value) {
