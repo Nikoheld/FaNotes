@@ -20,17 +20,23 @@ fn b64(bytes: &[u8]) -> String {
     base64::engine::general_purpose::STANDARD.encode(bytes)
 }
 
+#[cfg(unix)]
 #[test]
-fn a_taken_pdf_name_that_the_listing_misses_uses_the_next_number() {
+fn an_unreadable_folder_does_not_receive_the_next_pdf_name() {
+    use std::os::unix::fs::PermissionsExt;
     let (mut host, vault) = host();
     let folder = vault.join("Mathe");
     std::fs::write(folder.join("Skript.pdf"), b"%PDF-1.4\n").unwrap();
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o311)).unwrap();
+    let canonical = std::fs::canonicalize(&folder).unwrap();
+    std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o311)).unwrap();
+    struct Restore(std::path::PathBuf);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            let _ = std::fs::set_permissions(&self.0, std::fs::Permissions::from_mode(0o700));
+        }
     }
-    let imported = host
+    let _restore = Restore(folder.clone());
+    let error = host
         .dispatch(
             "fanotes:import-pdf-note",
             &[
@@ -38,21 +44,17 @@ fn a_taken_pdf_name_that_the_listing_misses_uses_the_next_number() {
                 json!({ "name": "Skript.pdf", "bytesBase64": b64(b"%PDF-1.4\nneu") }),
             ],
         )
-        .unwrap();
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o700)).unwrap();
-    }
-    assert_eq!(imported["relativePath"], "Mathe/Skript 2.pdf");
+        .unwrap_err();
+    assert_eq!(
+        error,
+        format!("EACCES: permission denied, scandir '{}'", canonical.display())
+    );
+    std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o700)).unwrap();
     assert_eq!(
         std::fs::read(folder.join("Skript.pdf")).unwrap(),
         b"%PDF-1.4\n"
     );
-    assert_eq!(
-        std::fs::read(folder.join("Skript 2.pdf")).unwrap(),
-        b"%PDF-1.4\nneu"
-    );
+    assert!(!folder.join("Skript 2.pdf").exists());
 }
 
 #[test]

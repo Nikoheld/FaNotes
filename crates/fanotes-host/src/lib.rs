@@ -2375,7 +2375,7 @@ fn relative_from_root(root: &Path, path: &Path) -> String {
 }
 
 /// Node `fs.readdir`, whose failure is `scandir` in the thrown message.
-fn read_sibling_dir(parent: &Path) -> Result<fs::ReadDir, String> {
+pub(crate) fn read_sibling_dir(parent: &Path) -> Result<fs::ReadDir, String> {
     fs::read_dir(parent).map_err(|error| scandir_error(parent, &error))
 }
 

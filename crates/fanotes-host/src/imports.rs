@@ -247,11 +247,11 @@ fn place_new_pdf(
     exhausted: &str,
 ) -> Result<String, String> {
     let mut occupied = std::collections::HashSet::new();
-    if let Ok(entries) = fs::read_dir(directory) {
-        for entry in entries.flatten() {
-            if let Some(name) = entry.file_name().to_str() {
-                occupied.insert(crate::vault::entry_name_key(name));
-            }
+    // Desktop `siblingNames` throws before the exclusive create, so an
+    // unlistable folder does not receive `Skript 2.pdf` beside a hidden file.
+    for entry in crate::read_sibling_dir(directory)?.flatten() {
+        if let Some(name) = entry.file_name().to_str() {
+            occupied.insert(crate::vault::entry_name_key(name));
         }
     }
     let (stem, extension) = desired
@@ -333,6 +333,53 @@ mod tests {
     use super::{import_pdf_payload, import_subject_book, read_dialog_pdf};
     use crate::Host;
     use serde_json::json;
+
+    #[cfg(unix)]
+    #[test]
+    fn an_unreadable_folder_does_not_receive_a_pdf_note() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!(
+            "fanotes-pdf-unlist-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        let vault = dir.join("vault");
+        let folder = vault.join("Geheim");
+        std::fs::create_dir_all(&folder).unwrap();
+        std::fs::write(folder.join("Skript.pdf"), b"%PDF-1.4\nkeep\n").unwrap();
+        let canonical = std::fs::canonicalize(&folder).unwrap();
+        std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o333)).unwrap();
+        struct Restore(std::path::PathBuf);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                let _ = std::fs::set_permissions(&self.0, std::fs::Permissions::from_mode(0o755));
+                let _ = std::fs::remove_dir_all(self.0.parent().unwrap_or(&self.0));
+            }
+        }
+        let _restore = Restore(folder.clone());
+        let mut host = Host::open(dir.join("app"));
+        host.set_vault(vault).unwrap();
+        let error = import_pdf_payload(
+            &host,
+            "Geheim",
+            &json!({ "name": "Skript.pdf", "bytes": b"%PDF-1.4\nnew\n".to_vec() }),
+        )
+        .unwrap_err();
+        assert_eq!(
+            error,
+            format!("EACCES: permission denied, scandir '{}'", canonical.display())
+        );
+        std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert_eq!(
+            std::fs::read(folder.join("Skript.pdf")).unwrap(),
+            b"%PDF-1.4\nkeep\n"
+        );
+        assert!(!folder.join("Skript 2.pdf").exists());
+    }
 
     #[test]
     fn an_imported_pdf_reports_the_file_modification_time() {
