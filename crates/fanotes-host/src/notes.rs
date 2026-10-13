@@ -85,7 +85,7 @@ fn file_mtime_iso(path: &Path) -> String {
         .unwrap_or_else(now_iso)
 }
 
-fn require_parent_directory(path: &Path) -> Result<(), String> {
+pub(crate) fn require_parent_directory(path: &Path) -> Result<(), String> {
     let Some(parent) = path
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())

@@ -296,10 +296,8 @@ fn embed_in_note(host: &Host, note_path: &str, drawing: &Value) -> Result<(), St
             payload.paper_style = Some(style.to_owned());
         }
     }
-    if let Some(parent) = famd_path.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|_| "Der Ordner konnte nicht angelegt werden.".to_owned())?;
-    }
+    // Desktop `realpath` of the companion parent runs before the embed write.
+    crate::notes::require_parent_directory(&famd_path)?;
     crate::notes::atomic_write(
         &famd_path,
         serialize_famd(&body, &payload).as_bytes(),
