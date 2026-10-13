@@ -288,6 +288,60 @@ fn an_unreadable_preview_uses_the_desktop_open_error() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn an_unreadable_oversized_preview_uses_the_open_error() {
+    use std::os::unix::fs::PermissionsExt;
+    let (dir, mut host) = host();
+    let file_path = dir.0.join("vault").join("seite.pdf");
+    let file = fs::File::create(&file_path).unwrap();
+    file.set_len(96 * 1024 * 1024 + 1).unwrap();
+    drop(file);
+    let canonical = fs::canonicalize(&file_path).unwrap();
+    fs::set_permissions(&file_path, fs::Permissions::from_mode(0o000)).unwrap();
+    struct Restore(std::path::PathBuf);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            let _ = fs::set_permissions(&self.0, fs::Permissions::from_mode(0o600));
+        }
+    }
+    let _restore = Restore(file_path.clone());
+    let denied = format!(
+        "EACCES: permission denied, open '{}'",
+        canonical.display()
+    );
+    assert_eq!(
+        host.dispatch("fanotes:read-asset-bytes", &[json!("seite.pdf")])
+            .unwrap_err(),
+        denied
+    );
+    assert_eq!(
+        host.dispatch("fanotes:read-asset-data-url", &[json!("seite.pdf")])
+            .unwrap_err(),
+        denied
+    );
+    fs::set_permissions(&file_path, fs::Permissions::from_mode(0o600)).unwrap();
+    assert_eq!(
+        host.dispatch("fanotes:read-asset-bytes", &[json!("seite.pdf")])
+            .unwrap_err(),
+        "Die Datei ist zu groß."
+    );
+    let grown = fs::OpenOptions::new().write(true).open(&file_path).unwrap();
+    grown.set_len(100 * 1024 * 1024 + 1).unwrap();
+    drop(grown);
+    fs::set_permissions(&file_path, fs::Permissions::from_mode(0o000)).unwrap();
+    assert_eq!(
+        host.dispatch("fanotes:read-asset-bytes", &[json!("seite.pdf")])
+            .unwrap_err(),
+        denied
+    );
+    assert_eq!(
+        host.dispatch("fanotes:sync-read", &[json!("seite.pdf")])
+            .unwrap_err(),
+        "Die Datei ist zu groß für den Sync."
+    );
+}
+
 #[test]
 fn an_empty_asset_preview_returns_an_empty_payload() {
     let (dir, mut host) = host();

@@ -1910,14 +1910,35 @@ fn read_regular_limited(path: &Path, max: u64) -> Result<Vec<u8>, String> {
     if meta.file_type().is_symlink() {
         return Err("Symbolische Links sind innerhalb des Vaults nicht erlaubt.".to_owned());
     }
+    // A directory is refused before the open, matching `resolveVaultPath`
+    // with `expected: 'file'`.
     if !meta.is_file() {
         return Err("Die gewählte Datei ist keine reguläre Datei.".to_owned());
     }
-    if meta.len() > max {
+    // Desktop preview and PDF raster open with `O_NOFOLLOW` before the size
+    // check. An unreadable oversized file is that open error. Sync rejects
+    // an oversized file from `lstat` before it calls this.
+    let mut options = fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW);
+    }
+    let mut file = options
+        .open(path)
+        .map_err(|error| notes::node_open_error(path, &error))?;
+    let opened = file
+        .metadata()
+        .map_err(|error| notes::node_open_error(path, &error))?;
+    if opened.len() > max {
         return Err("Die Datei ist zu groß.".to_owned());
     }
-    // Desktop `readRegularFileNoFollow` and sync `open` throw Node's open error.
-    fs::read(path).map_err(|error| notes::node_open_error(path, &error))
+    use std::io::Read;
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes)
+        .map_err(|error| notes::node_open_error(path, &error))?;
+    Ok(bytes)
 }
 
 /// `String(value)` for an IPC argument. A missing argument is JavaScript `undefined`.
