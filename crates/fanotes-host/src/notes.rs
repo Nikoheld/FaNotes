@@ -329,8 +329,10 @@ pub fn write_backups(host: &Host, relative: &str, raw: &Value) -> Result<Value, 
 
 pub fn read_subject_books(host: &Host) -> Result<Value, String> {
     let path = books_path(vault_root(host)?)?;
-    let Ok(meta) = fs::symlink_metadata(&path) else {
-        return Ok(json!([]));
+    let meta = match fs::symlink_metadata(&path) {
+        Ok(meta) => meta,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(json!([])),
+        Err(error) => return Err(vault::node_lstat_error(&path, &error)),
     };
     if meta.file_type().is_symlink()
         || !meta.is_file()
