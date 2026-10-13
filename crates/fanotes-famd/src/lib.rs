@@ -1091,7 +1091,7 @@ fn joined_month_parts(token: &str) -> Option<Vec<&str>> {
         return None;
     }
     let parts = split_joined_date(body);
-    if parts.len() != 3 || parts.iter().any(|part| part.is_empty()) {
+    if !(2..=3).contains(&parts.len()) || parts.iter().any(|part| part.is_empty()) {
         return None;
     }
     let month_at = parts
@@ -1186,41 +1186,47 @@ fn legacy_year_number(year: i32) -> Option<i32> {
     None
 }
 
-/// `Oct 13, 2026`, `13 Oct 2026`, and `2026 Oct 13`. `13-Oct-26` is the same
-/// date. A date alone is local midnight, so the result has no `Z`.
+/// `Oct 13, 2026`, `13 Oct 2026`, and `2026 Oct 13`. `13-Oct` is 13 October
+/// 2001 and `Oct 2026` is 1 October 2026. A date alone is local midnight, so
+/// the result has no `Z`.
 fn rewrite_month_name(trimmed: &str) -> Option<String> {
     let mut words = month_words(trimmed);
     if words.first().is_some_and(|word| is_weekday_name(word)) {
         words.remove(0);
     }
-    if words.len() < 3 {
-        return None;
-    }
-    let (month, day, year) = month_day_year(&words)?;
+    let (month, day, year, rest_at) = month_day_year(&words)?;
     if !(1..=31).contains(&day) {
         return None;
     }
-    let (clock, zone) = month_clock_and_zone(&words[3..])?;
+    let (clock, zone) = month_clock_and_zone(&words[rest_at..])?;
     Some(format!("{year:04}-{month:02}-{day:02}T{clock}{zone}"))
 }
 
-/// The month name can be first or second. `13 Oct 2026` is day, month, year.
-/// `2026 Oct 13` and `32 Oct 26` are year, month, day. A year of 0–49 is
-/// 2000–2049.
-fn month_day_year(words: &[&str]) -> Option<(i32, i32, i32)> {
-    if let Some(month) = english_month(words[0]) {
-        let day = signed_number(words[1])?;
-        let year = legacy_year_number(unsigned_number(words[2])?)?;
-        return Some((month, day, year));
-    }
-    let month = english_month(words[1])?;
-    let first = signed_number(words[0])?;
-    let third = unsigned_number(words[2])?;
-    if (1..=31).contains(&first) {
-        Some((month, first, legacy_year_number(third)?))
+/// The month name can be first or second. A number from 1 to 31 beside it is
+/// the day; any other number is the year. The missing field is day 1 or the
+/// year 2001. `Oct 32 16` is therefore 16 October 2032.
+fn month_day_year(words: &[&str]) -> Option<(i32, i32, i32, usize)> {
+    let (month, number) = if let Some(month) = english_month(words.first()?) {
+        (month, signed_number(words.get(1)?)?)
+    } else if let Some(month) = english_month(words.get(1)?) {
+        (month, signed_number(words.first()?)?)
     } else {
-        Some((month, third, legacy_year_number(first)?))
+        return None;
+    };
+    if let Some(third) = words.get(2).and_then(|text| unsigned_number(text)) {
+        let (day, year) = if (1..=31).contains(&number) {
+            (number, legacy_year_number(third)?)
+        } else {
+            (third, legacy_year_number(number)?)
+        };
+        return Some((month, day, year, 3));
     }
+    let (day, year) = if (1..=31).contains(&number) {
+        (number, 2001)
+    } else {
+        (1, legacy_year_number(number)?)
+    };
+    Some((month, day, year, 2))
 }
 
 /// `YYYY/M/D` or `M/D/YYYY`. A date alone is local midnight. `T` is not a separator.
@@ -2327,6 +2333,84 @@ mod tests {
             assert_eq!(super::canonical_iso("32-Oct-32"), None);
             assert_eq!(super::canonical_iso("13-Oct-+26"), None);
             assert_eq!(super::canonical_iso("13-Oct-26T16:00:00 GMT"), None);
+        });
+    }
+
+    #[test]
+    fn a_month_and_one_number_defaults_the_missing_field() {
+        with_tz("America/New_York", || {
+            // A day without a year is 2001. A year without a day is the 1st.
+            assert_eq!(
+                super::canonical_iso("13-Oct").as_deref(),
+                Some("2001-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("13 Oct").as_deref(),
+                Some("2001-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct-26").as_deref(),
+                Some("2001-10-26T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct-2026").as_deref(),
+                Some("2026-10-01T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 2026").as_deref(),
+                Some("2026-10-01T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-Oct").as_deref(),
+                Some("2026-10-01T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("32-Oct").as_deref(),
+                Some("2032-10-01T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("00-Oct").as_deref(),
+                Some("2000-10-01T04:00:00.000Z")
+            );
+            // 32 is a year, so the following number is the day.
+            assert_eq!(
+                super::canonical_iso("Oct 32 16").as_deref(),
+                Some("2032-10-16T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 16").as_deref(),
+                Some("2016-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("13-Oct 2026").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct-2026 16:00 GMT").as_deref(),
+                Some("2026-10-01T16:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("13-Oct 16:00").as_deref(),
+                Some("2001-10-13T20:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("13 Oct 16:00 EST").as_deref(),
+                Some("2001-10-13T21:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 GMT").as_deref(),
+                Some("2001-10-13T00:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Tue, 13-Oct").as_deref(),
+                Some("2001-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct +2026").as_deref(),
+                Some("2026-10-01T04:00:00.000Z")
+            );
+            assert_eq!(super::canonical_iso("13 Oct +16"), None);
+            assert_eq!(super::canonical_iso("Oct"), None);
         });
     }
 
