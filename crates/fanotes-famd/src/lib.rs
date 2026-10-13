@@ -1333,16 +1333,16 @@ fn month_gmt_suffix(lower: &str) -> Option<String> {
     Some(format!("{sign}{hour:02}:{minute:02}"))
 }
 
-/// A calendar date with no time: `YYYY`, `+YYYYYY`, or the same with a month and day.
+/// A calendar date with no time: `YYYY`, `±YYYYYY`, or the same with a month and day.
 fn is_date_only_shape(value: &str) -> bool {
     if value.is_empty() {
         return false;
     }
-    let body = value.strip_prefix('+').unwrap_or(value);
+    let body = value.strip_prefix(['+', '-']).unwrap_or(value);
     !body
         .bytes()
         .any(|byte| matches!(byte, b'T' | b't' | b' ' | b'+'))
-        && value.bytes().filter(|byte| *byte == b'-').count() <= 2
+        && body.bytes().filter(|byte| *byte == b'-').count() <= 2
 }
 
 /// `YYYY` or `+YYYYYY` / `-YYYYYY`. `02026` and `+2026` are not this form.
@@ -1374,13 +1374,7 @@ fn is_date_parse_space(character: char) -> bool {
 }
 
 fn date_only_iso(value: &str, surrounded: bool) -> Option<String> {
-    let mut parts = value.split('-');
-    let year = parts.next()?;
-    let month = parts.next();
-    let day = parts.next();
-    if parts.next().is_some() {
-        return None;
-    }
+    let (year, month, day) = split_date_only(value)?;
     let strict_year = iso_date_year(year);
     let year: i32 = year.parse().ok()?;
     // `YYYY` and `+YYYYYY` are UTC. `02026`, `+2026`, a month or day that is
@@ -1424,11 +1418,54 @@ fn date_only_iso(value: &str, surrounded: bool) -> Option<String> {
     if legacy_local {
         let (year, month, day, hour, minute, second) =
             local_civil_to_utc(year, month, day, 0, 0, 0)?;
-        return Some(format!(
-            "{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}.000Z"
-        ));
+        return Some(format_civil_iso(year, month, day, hour, minute, second));
     }
-    Some(format!("{year:04}-{month:02}-{day:02}T00:00:00.000Z"))
+    Some(format_civil_iso(year, month, day, 0, 0, 0))
+}
+
+/// `YYYY-MM-DD` or `±YYYYYY-MM-DD`, then optional month and day text.
+///
+/// A leading minus is the year sign, not a field separator. `-00001` is not
+/// six digits, so it stays out of this form.
+fn split_date_only(value: &str) -> Option<(&str, Option<&str>, Option<&str>)> {
+    let expanded = value.starts_with(['+', '-'])
+        && value[1..]
+            .bytes()
+            .take_while(|byte| byte.is_ascii_digit())
+            .count()
+            == 6;
+    let (year, rest) = if expanded {
+        let year = &value[..7];
+        match value[7..].strip_prefix('-') {
+            None if value.len() == 7 => return Some((year, None, None)),
+            None => return None,
+            Some(rest) => (year, rest),
+        }
+    } else if let Some((year, rest)) = value.split_once('-') {
+        (year, rest)
+    } else {
+        return Some((value, None, None));
+    };
+    if rest.is_empty() {
+        return None;
+    }
+    if let Some((month, day)) = rest.split_once('-') {
+        if day.is_empty() || day.contains('-') {
+            return None;
+        }
+        Some((year, Some(month), Some(day)))
+    } else {
+        Some((year, Some(rest), None))
+    }
+}
+
+fn format_civil_iso(year: i32, month: i32, day: i32, hour: i32, minute: i32, second: i32) -> String {
+    let year_text = if (0..10_000).contains(&year) {
+        format!("{year:04}")
+    } else {
+        format!("{year:+07}")
+    };
+    format!("{year_text}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}.000Z")
 }
 
 /// `YYYY`, `YYYY-MM`, or `YYYY-MM-DD`, then the index of the clock.
@@ -1537,7 +1574,7 @@ fn normalize_ymd(mut year: i32, mut month: i32, mut day: i32) -> Option<(i32, i3
             year += 1;
         }
     }
-    if !(0..10_000).contains(&year) {
+    if !(-999_999..=999_999).contains(&year) {
         return None;
     }
     Some((year, month, day))
@@ -2219,6 +2256,44 @@ mod tests {
             assert_eq!(super::canonical_iso("2026-010-32"), None);
             assert_eq!(super::canonical_iso("2026-00"), None);
             assert_eq!(super::canonical_iso("2026-010-13T00:00:00Z"), None);
+        });
+    }
+
+    #[test]
+    fn a_negative_expanded_year_stays_utc() {
+        with_tz("America/New_York", || {
+            assert_eq!(
+                super::canonical_iso("-000001-01-01").as_deref(),
+                Some("-000001-01-01T00:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("-000001-01").as_deref(),
+                Some("-000001-01-01T00:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("-000001").as_deref(),
+                Some("-000001-01-01T00:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("-000001-02-31").as_deref(),
+                Some("-000001-03-03T00:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("+000000-01-01").as_deref(),
+                Some("0000-01-01T00:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("+009999-01-01").as_deref(),
+                Some("9999-01-01T00:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("+010000-01-01").as_deref(),
+                Some("+010000-01-01T00:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("-000001-1-1").as_deref(),
+                Some("-000001-01-01T04:56:02.000Z")
+            );
         });
     }
 
