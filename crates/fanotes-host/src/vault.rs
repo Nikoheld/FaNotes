@@ -334,6 +334,11 @@ pub(crate) fn node_mkdtemp_error(path: &Path, error: &std::io::Error) -> String 
     node_fs_error(path, error, "mkdtemp")
 }
 
+/// Node `fs.chmod` failure text.
+pub(crate) fn node_chmod_error(path: &Path, error: &std::io::Error) -> String {
+    node_fs_error(path, error, "chmod")
+}
+
 /// Node `fs.rename` failure text. The message names both paths.
 pub(crate) fn node_rename_error(from: &Path, to: &Path, error: &std::io::Error) -> String {
     node_two_path_error("rename", from, to, error)
