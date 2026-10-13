@@ -61,9 +61,10 @@ fn import_path(host: &Host, input: &Path) -> Result<Value, String> {
     if !matches!(extension.as_str(), ".one" | ".onetoc2" | ".onepkg" | ".zip") {
         return Err("Diese Datei ist kein unterstützter OneNote-Export.".to_owned());
     }
-    let source_meta = fs::symlink_metadata(input).map_err(|_| {
-        "Die OneNote-Quelldatei ist leer, unsicher oder größer als 4 GB.".to_owned()
-    })?;
+    // A failed stat is that stat error. The empty, unsafe, or oversized
+    // sentence applies only after the file has been stated.
+    let source_meta = fs::symlink_metadata(input)
+        .map_err(|error| crate::vault::node_lstat_error(input, &error))?;
     if source_meta.file_type().is_symlink()
         || !source_meta.is_file()
         || source_meta.len() == 0
