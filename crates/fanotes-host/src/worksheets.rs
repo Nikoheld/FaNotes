@@ -76,8 +76,7 @@ pub fn save_worksheet(host: &Host, candidate: &Value) -> Result<Value, String> {
         &directory.join(format!("{id}.json")),
         serialized.as_bytes(),
         0o600,
-    )
-    .map_err(|_| "Das Arbeitsblatt konnte nicht gespeichert werden.".to_owned())?;
+    )?;
     Ok(document)
 }
 
