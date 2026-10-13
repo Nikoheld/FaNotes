@@ -1291,6 +1291,32 @@ fn a_history_index_uses_the_desktop_indentation() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn an_unreadable_recognition_model_uses_the_desktop_open_error() {
+    use std::os::unix::fs::PermissionsExt;
+    let (mut host, vault) = host();
+    let path = vault.join(".fanotes/recognition-model.json");
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(&path, b"{\"version\":1}\n").unwrap();
+    let canonical = std::fs::canonicalize(&path).unwrap();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000)).unwrap();
+    struct Restore(std::path::PathBuf);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            let _ = std::fs::set_permissions(&self.0, std::fs::Permissions::from_mode(0o600));
+        }
+    }
+    let _restore = Restore(path.clone());
+    assert_eq!(
+        host.dispatch("fanotes:read-recognition-model", &[])
+            .unwrap_err(),
+        format!("EACCES: permission denied, open '{}'", canonical.display())
+    );
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+    assert_eq!(std::fs::read(&path).unwrap(), b"{\"version\":1}\n");
+}
+
 #[test]
 fn a_recognition_model_with_a_bad_byte_still_loads() {
     let (mut host, vault) = host();

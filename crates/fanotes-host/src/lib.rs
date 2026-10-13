@@ -637,12 +637,29 @@ impl Host {
         match fs::symlink_metadata(&path) {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Value::Null),
             Err(_) => Err("Das Handschriftmodell konnte nicht gelesen werden.".to_owned()),
-            Ok(meta) if meta.len() > MAX_RECOGNITION_MODEL_BYTES => {
-                Err("Die Datei ist zu groß.".to_owned())
+            Ok(_) => {
+                // Desktop opens with `O_NOFOLLOW`, then checks the size on that handle.
+                let mut options = fs::OpenOptions::new();
+                options.read(true);
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::OpenOptionsExt;
+                    options.custom_flags(libc::O_NOFOLLOW);
+                }
+                let mut file = options
+                    .open(&path)
+                    .map_err(|error| notes::node_open_error(&path, &error))?;
+                let meta = file
+                    .metadata()
+                    .map_err(|error| notes::node_open_error(&path, &error))?;
+                if meta.len() > MAX_RECOGNITION_MODEL_BYTES {
+                    return Err("Die Datei ist zu groß.".to_owned());
+                }
+                let mut bytes = Vec::new();
+                std::io::Read::read_to_end(&mut file, &mut bytes)
+                    .map_err(|error| notes::node_open_error(&path, &error))?;
+                Ok(Value::String(String::from_utf8_lossy(&bytes).into_owned()))
             }
-            Ok(_) => fs::read(&path)
-                .map(|bytes| Value::String(String::from_utf8_lossy(&bytes).into_owned()))
-                .map_err(|_| "Das Handschriftmodell konnte nicht gelesen werden.".to_owned()),
         }
     }
 
