@@ -75,6 +75,50 @@ fn a_missing_vault_starts_in_documents_with_a_welcome_note() {
 
 #[cfg(unix)]
 #[test]
+fn an_unwritable_documents_folder_reports_the_desktop_vault_error() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = scratch();
+    let docs = dir.join("docs");
+    fs::create_dir(&docs).unwrap();
+    fs::set_permissions(&docs, fs::Permissions::from_mode(0o555)).unwrap();
+    struct Restore(std::path::PathBuf);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            let _ = fs::set_permissions(&self.0, fs::Permissions::from_mode(0o700));
+        }
+    }
+    let _restore = Restore(docs.clone());
+    let mut host = Host::open(dir.join("app"));
+    host.documents_dir = Some(docs.clone());
+    let vault = docs.join("FaNotes");
+    assert_eq!(
+        host.dispatch("fanotes:bootstrap", &[]).unwrap_err(),
+        format!("EACCES: permission denied, mkdir '{}'", vault.display())
+    );
+    assert!(!vault.exists());
+
+    fs::set_permissions(&docs, fs::Permissions::from_mode(0o000)).unwrap();
+    let mut hidden = Host::open(dir.join("hidden-app"));
+    hidden.documents_dir = Some(docs.clone());
+    assert_eq!(
+        hidden.dispatch("fanotes:bootstrap", &[]).unwrap_err(),
+        format!("EACCES: permission denied, lstat '{}'", vault.display())
+    );
+
+    fs::set_permissions(&docs, fs::Permissions::from_mode(0o700)).unwrap();
+    fs::remove_dir(&docs).unwrap();
+    fs::write(&docs, b"datei").unwrap();
+    let mut file_host = Host::open(dir.join("file-app"));
+    file_host.documents_dir = Some(docs.clone());
+    assert_eq!(
+        file_host.dispatch("fanotes:bootstrap", &[]).unwrap_err(),
+        format!("ENOTDIR: not a directory, lstat '{}'", vault.display())
+    );
+    assert_eq!(fs::read(&docs).unwrap(), b"datei");
+}
+
+#[cfg(unix)]
+#[test]
 fn a_read_only_vault_is_refused_like_the_desktop() {
     use std::os::unix::fs::PermissionsExt;
     let dir = scratch();

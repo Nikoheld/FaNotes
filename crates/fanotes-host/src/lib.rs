@@ -761,12 +761,9 @@ impl Host {
             }
             Ok(_) => false,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                fs::create_dir_all(&vault).map_err(|_| {
-                    format!(
-                        "Der Standard-Vault kann nicht unter {} angelegt werden.",
-                        vault.display()
-                    )
-                })?;
+                // Desktop `mkdir` is recursive and rethrows that error.
+                fs::create_dir_all(&vault)
+                    .map_err(|error| vault::node_mkdir_error(&vault, &error))?;
                 #[cfg(unix)]
                 {
                     use std::os::unix::fs::PermissionsExt;
@@ -774,12 +771,7 @@ impl Host {
                 }
                 true
             }
-            Err(_) => {
-                return Err(format!(
-                    "Der Standard-Vault kann nicht unter {} angelegt werden.",
-                    vault.display()
-                ));
-            }
+            Err(error) => return Err(vault::node_lstat_error(&vault, &error)),
         };
         if created {
             let language = self.ui_language();
