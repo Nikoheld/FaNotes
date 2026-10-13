@@ -144,86 +144,16 @@ fn import_in_temp(
         let attachments = copy_attachments(&output_files, &output_root, &attachment_dir)?;
         let originals = preserve_sources(input, &batch)?;
         let now = now_iso();
-        let mut imported = Vec::new();
-        let mut created = Vec::new();
-        for page_path in &pages {
-            let page = sanitize_page(page_path, &output_root)?;
-            let relative = page_path.strip_prefix(&output_root).unwrap_or(page_path);
-            let mut hierarchy: Vec<String> = relative
-                .parent()
-                .map(|parent| {
-                    parent
-                        .components()
-                        .filter_map(|component| component.as_os_str().to_str())
-                        .filter(|segment| !segment.is_empty() && *segment != ".")
-                        .map(|segment| segment.to_owned())
-                        .collect()
-                })
-                .unwrap_or_default();
-            if hierarchy.first().is_some_and(|segment| {
-                crate::base_dictionary_order(segment, &notebook_name) == std::cmp::Ordering::Equal
-            }) {
-                hierarchy.remove(0);
-            }
-            let mut directory = note_root.clone();
-            for segment in note_directory_segments(
-                hierarchy,
-                parents.get(page_path).cloned().unwrap_or_default(),
-            ) {
-                directory.push(segment);
-            }
-            ensure_note_directory(&note_root, &directory)?;
-            let id = uuid();
-            let worksheets = vault.join(".fanotes").join("worksheets");
-            let html_path = worksheets.join(format!("{id}.html"));
-            let json_path = worksheets.join(format!("{id}.json"));
-            // Desktop page files use `{target}.tmp-{pid}-{12 hex}` and rethrow
-            // the `writeFile` error.
-            atomic_write_onenote(&html_path, page.html.as_bytes())?;
-            created.push(html_path);
-            let worksheet = json!({
-                "schemaVersion": 1,
-                "id": id,
-                "title": page.title,
-                "kind": "html",
-                "mimeType": "text/html",
-                "sourceRelativePath": format!(".fanotes/worksheets/{id}.html"),
-                "dataRelativePath": format!(".fanotes/worksheets/{id}.json"),
-                "createdAt": now,
-                "updatedAt": now,
-                "pageWidth": page.width,
-                "pageHeight": page.height,
-                "textBoxes": [],
-            });
-            let worksheet_json = format!(
-                "{}\n",
-                serde_json::to_string_pretty(&worksheet).unwrap_or_default()
-            );
-            atomic_write_onenote(&json_path, worksheet_json.as_bytes())?;
-            created.push(json_path);
-            let searchable = if page.transcript.is_empty() {
-                String::new()
-            } else {
-                format!(
-                    "\n<details>\n<summary>Importierter Text · suchbar und bearbeitbar</summary>\n\n```text\n{}\n```\n\n</details>\n",
-                    page.transcript.replace("```", "ˋˋˋ")
-                )
-            };
-            let markdown = format!(
-                "# {}\n\n<!-- fanotes-onenote:{} -->\n<!-- fanotes-worksheet:{id} -->\n{searchable}",
-                markdown_title(&page.title),
-                &source_digest[..24]
-            );
-            let note = write_unique_markdown(&directory, &page.title, &markdown)?;
-            let relative_note = note
-                .strip_prefix(vault)
-                .unwrap_or(&note)
-                .components()
-                .map(|component| component.as_os_str().to_string_lossy())
-                .collect::<Vec<_>>()
-                .join("/");
-            imported.push(relative_note);
-        }
+        let (imported, created_pages) = import_rendered_pages(
+            vault,
+            &note_root,
+            &notebook_name,
+            &output_root,
+            &pages,
+            &parents,
+            &source_digest,
+            &now,
+        )?;
         let manifest = json!({
             "schemaVersion": 1,
             "importedAt": now,
@@ -238,7 +168,12 @@ fn import_in_temp(
             "{}\n",
             serde_json::to_string_pretty(&manifest).unwrap_or_default()
         );
-        atomic_write_onenote(&batch.join("manifest.json"), manifest_json.as_bytes())?;
+        if let Err(error) =
+            atomic_write_onenote(&batch.join("manifest.json"), manifest_json.as_bytes())
+        {
+            remove_import_files(&created_pages);
+            return Err(error);
+        }
         let mut all_warnings = warnings;
         if !attachments.is_empty() {
             all_warnings.push(
@@ -264,6 +199,112 @@ fn import_in_temp(
         let _ = fs::remove_dir_all(&batch);
     }
     import_result
+}
+
+fn import_rendered_pages(
+    vault: &Path,
+    note_root: &Path,
+    notebook_name: &str,
+    output_root: &Path,
+    pages: &[PathBuf],
+    parents: &HashMap<PathBuf, Vec<String>>,
+    source_digest: &str,
+    now: &str,
+) -> Result<(Vec<String>, Vec<PathBuf>), String> {
+    let mut imported = Vec::new();
+    let mut created = Vec::new();
+    let result = (|| -> Result<(), String> {
+        for page_path in pages {
+        let page = sanitize_page(page_path, output_root)?;
+        let relative = page_path.strip_prefix(output_root).unwrap_or(page_path);
+        let mut hierarchy: Vec<String> = relative
+            .parent()
+            .map(|parent| {
+                parent
+                    .components()
+                    .filter_map(|component| component.as_os_str().to_str())
+                    .filter(|segment| !segment.is_empty() && *segment != ".")
+                    .map(|segment| segment.to_owned())
+                    .collect()
+            })
+            .unwrap_or_default();
+        if hierarchy.first().is_some_and(|segment| {
+            crate::base_dictionary_order(segment, notebook_name) == std::cmp::Ordering::Equal
+        }) {
+            hierarchy.remove(0);
+        }
+        let mut directory = note_root.to_path_buf();
+        for segment in note_directory_segments(
+            hierarchy,
+            parents.get(page_path).cloned().unwrap_or_default(),
+        ) {
+            directory.push(segment);
+        }
+        ensure_note_directory(note_root, &directory)?;
+        let id = uuid();
+        let worksheets = vault.join(".fanotes").join("worksheets");
+        let html_path = worksheets.join(format!("{id}.html"));
+        let json_path = worksheets.join(format!("{id}.json"));
+        atomic_write_onenote(&html_path, page.html.as_bytes())?;
+        created.push(html_path);
+        let worksheet = json!({
+            "schemaVersion": 1,
+            "id": id,
+            "title": page.title,
+            "kind": "html",
+            "mimeType": "text/html",
+            "sourceRelativePath": format!(".fanotes/worksheets/{id}.html"),
+            "dataRelativePath": format!(".fanotes/worksheets/{id}.json"),
+            "createdAt": now,
+            "updatedAt": now,
+            "pageWidth": page.width,
+            "pageHeight": page.height,
+            "textBoxes": [],
+        });
+        let worksheet_json = format!(
+            "{}\n",
+            serde_json::to_string_pretty(&worksheet).unwrap_or_default()
+        );
+        atomic_write_onenote(&json_path, worksheet_json.as_bytes())?;
+        created.push(json_path);
+        let searchable = if page.transcript.is_empty() {
+            String::new()
+        } else {
+            format!(
+                "\n<details>\n<summary>Importierter Text · suchbar und bearbeitbar</summary>\n\n```text\n{}\n```\n\n</details>\n",
+                page.transcript.replace("```", "ˋˋˋ")
+            )
+        };
+        let markdown = format!(
+            "# {}\n\n<!-- fanotes-onenote:{} -->\n<!-- fanotes-worksheet:{id} -->\n{searchable}",
+            markdown_title(&page.title),
+            &source_digest[..24]
+        );
+        let note = write_unique_markdown(&directory, &page.title, &markdown)?;
+        let relative_note = note
+            .strip_prefix(vault)
+            .unwrap_or(&note)
+            .components()
+            .map(|component| component.as_os_str().to_string_lossy())
+            .collect::<Vec<_>>()
+            .join("/");
+            imported.push(relative_note);
+        }
+        Ok(())
+    })();
+    if let Err(error) = result {
+        // Desktop `fs.rm(file, { force: true })` drops every worksheet from
+        // this failed import. A missing file is success.
+        remove_import_files(&created);
+        return Err(error);
+    }
+    Ok((imported, created))
+}
+
+fn remove_import_files(paths: &[PathBuf]) {
+    for path in paths {
+        let _ = fs::remove_file(path);
+    }
 }
 
 struct Page {
@@ -2065,7 +2106,7 @@ mod tests {
         strip_active_html, tool_failure_message, tool_limit, unique_directory, urlencoding_decode,
         validate_listing, walk_limited, write_unique_markdown, atomic_copy_onenote,
         atomic_write_onenote, ensure_note_directory, create_onenote_temp_dir,
-        materialize_tools, preserve_sources,
+        materialize_tools, preserve_sources, import_rendered_pages,
         prepare_input, import_in_temp, render_sections,
     };
     use std::path::{Path, PathBuf};
@@ -2599,6 +2640,62 @@ mod tests {
             .unwrap(),
             b"one-bytes"
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_failed_onenote_page_removes_the_worksheet_files() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = std::env::temp_dir().join(format!(
+            "fanotes-onenote-rollback-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        let vault = root.join("vault");
+        let worksheets = vault.join(".fanotes/worksheets");
+        let note_root = vault.join("OneNote – Buch");
+        std::fs::create_dir_all(&worksheets).unwrap();
+        std::fs::create_dir_all(&note_root).unwrap();
+        std::fs::set_permissions(&note_root, std::fs::Permissions::from_mode(0o555)).unwrap();
+        struct Restore(std::path::PathBuf);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                let _ = std::fs::set_permissions(&self.0, std::fs::Permissions::from_mode(0o700));
+                if let Some(root) = self.0.parent().and_then(|path| path.parent()) {
+                    let _ = std::fs::remove_dir_all(root);
+                }
+            }
+        }
+        let _restore = Restore(note_root.clone());
+        let output = root.join("output");
+        std::fs::create_dir_all(&output).unwrap();
+        let page = output.join("Seite.html");
+        std::fs::write(&page, b"<title>Hallo</title><p>Text</p>").unwrap();
+        let error = import_rendered_pages(
+            &vault,
+            &note_root,
+            "Buch",
+            &output,
+            &[page],
+            &std::collections::HashMap::new(),
+            "0123456789abcdef0123456789abcdef",
+            "2026-10-13T00:00:00.000Z",
+        )
+        .unwrap_err();
+        let prefix = format!(
+            "EACCES: permission denied, open '{}/Hallo.md'",
+            note_root.display()
+        );
+        assert!(error.starts_with(&prefix), "{error}");
+        let leftover: Vec<_> = std::fs::read_dir(&worksheets)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect();
+        assert!(leftover.is_empty(), "left {leftover:?}");
     }
 
     #[test]
