@@ -73,9 +73,7 @@ fn import_path(host: &Host, input: &Path) -> Result<Value, String> {
         return Err("Die OneNote-Quelldatei ist leer, unsicher oder größer als 4 GB.".to_owned());
     }
     let (one2html, seven_zip) = materialize_tools(&host.app_data)?;
-    let temporary = std::env::temp_dir().join(format!("fanotes-onenote-{}", uuid()));
-    create_private_dir(&temporary)
-        .map_err(|_| "Der OneNote-Import konnte nicht vorbereitet werden.".to_owned())?;
+    let temporary = create_onenote_temp_dir(&std::env::temp_dir())?;
     let result = import_in_temp(input, vault, &one2html, &seven_zip, &temporary);
     let _ = fs::remove_dir_all(&temporary);
     result
@@ -1582,6 +1580,32 @@ fn open_exclusive_markdown(path: &Path, bytes: &[u8]) -> Result<(), std::io::Err
 /// An existing directory keeps its mode. The error names the directory the
 /// desktop was asked to create.
 /// Desktop page folders stay inside the notebook. `mkdir` errors are rethrown.
+/// Desktop `fs.mkdtemp(path.join(os.tmpdir(), 'fanotes-onenote-'))`.
+///
+/// The created name is the prefix plus six characters. A failure names the
+/// `XXXXXX` template.
+fn create_onenote_temp_dir(parent: &Path) -> Result<PathBuf, String> {
+    let template = format!(
+        "{}XXXXXX",
+        parent.join("fanotes-onenote-").display()
+    );
+    match unix_mkdtemp(&template) {
+        Ok(path) => Ok(path),
+        Err(error) => Err(crate::vault::node_mkdtemp_error(Path::new(&template), &error)),
+    }
+}
+
+fn unix_mkdtemp(template: &str) -> Result<PathBuf, std::io::Error> {
+    let mut bytes = template.as_bytes().to_vec();
+    bytes.push(0);
+    let result = unsafe { libc::mkdtemp(bytes.as_mut_ptr().cast()) };
+    if result.is_null() {
+        return Err(std::io::Error::last_os_error());
+    }
+    let end = bytes.iter().position(|byte| *byte == 0).unwrap_or(bytes.len());
+    Ok(PathBuf::from(String::from_utf8_lossy(&bytes[..end]).into_owned()))
+}
+
 fn ensure_note_directory(note_root: &Path, directory: &Path) -> Result<(), String> {
     if !crate::vault::is_inside_root(note_root, directory) {
         return Err("Eine OneNote-Seitenhierarchie ist ungültig.".to_owned());
@@ -2043,7 +2067,7 @@ mod tests {
         preview_is_nav, render_inputs, safe_segment, sanitize_page, stored_relative_path,
         strip_active_html, tool_failure_message, tool_limit, unique_directory, urlencoding_decode,
         validate_listing, walk_limited, write_unique_markdown, atomic_copy_onenote,
-        atomic_write_onenote, ensure_note_directory,
+        atomic_write_onenote, ensure_note_directory, create_onenote_temp_dir,
     };
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -2250,6 +2274,78 @@ mod tests {
             0o700
         );
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_unwritable_onenote_temp_dir_reports_the_desktop_mkdtemp_error() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = std::env::temp_dir().join(format!(
+            "fanotes-onenote-mkdtemp-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        let locked = root.join("locked");
+        std::fs::create_dir_all(&locked).unwrap();
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o555)).unwrap();
+        struct Restore(std::path::PathBuf);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                let _ = std::fs::set_permissions(&self.0, std::fs::Permissions::from_mode(0o700));
+                if let Some(parent) = self.0.parent() {
+                    let _ = std::fs::remove_dir_all(parent);
+                }
+            }
+        }
+        let _restore = Restore(locked.clone());
+        assert_eq!(
+            create_onenote_temp_dir(&locked).unwrap_err(),
+            format!(
+                "EACCES: permission denied, mkdtemp '{}'",
+                locked.join("fanotes-onenote-XXXXXX").display()
+            )
+        );
+        assert!(std::fs::read_dir(&locked).unwrap().next().is_none());
+
+        let missing = root.join("missing");
+        assert_eq!(
+            create_onenote_temp_dir(&missing).unwrap_err(),
+            format!(
+                "ENOENT: no such file or directory, mkdtemp '{}'",
+                missing.join("fanotes-onenote-XXXXXX").display()
+            )
+        );
+
+        let file = root.join("file");
+        std::fs::write(&file, b"datei").unwrap();
+        assert_eq!(
+            create_onenote_temp_dir(&file).unwrap_err(),
+            format!(
+                "ENOTDIR: not a directory, mkdtemp '{}'",
+                file.join("fanotes-onenote-XXXXXX").display()
+            )
+        );
+
+        let created = create_onenote_temp_dir(&root).unwrap();
+        let name = created.file_name().unwrap().to_string_lossy();
+        assert!(name.starts_with("fanotes-onenote-"), "{name}");
+        let suffix = &name["fanotes-onenote-".len()..];
+        assert_eq!(suffix.len(), 6, "{name}");
+        assert!(
+            suffix
+                .chars()
+                .all(|character| character.is_ascii_alphanumeric()),
+            "{name}"
+        );
+        assert_eq!(
+            std::fs::metadata(&created).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
+        let _ = std::fs::remove_dir_all(&created);
     }
 
     #[test]
