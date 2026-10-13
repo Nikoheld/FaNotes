@@ -2492,9 +2492,9 @@ fn date_only_millis(value: &str, surrounded: bool) -> Option<u64> {
         return None;
     }
     let year: i32 = year_text.parse().ok()?;
-    // `YYYY`, `YYYY-MM`, and `YYYY-MM-DD` are UTC. `2026-1`, `2026-10-3`, and
-    // ` 2026-10-13 ` are local midnight. A field with extra digits is local too.
-    let mut legacy_local = surrounded;
+    // `YYYY` and `+YYYYYY` are UTC. `02026` and `+2026` are local midnight,
+    // as are a short month or day and whitespace around the date.
+    let mut legacy_local = surrounded || !datetime_year_ok(year_text);
     let month = match month_text {
         None => 1,
         Some(text) => {
@@ -5566,5 +5566,28 @@ mod local_zone_tests {
             unix_millis_from_iso(" 2026-10-13 16:00:00Z"),
             Some(1_791_907_200_000)
         );
+    }
+
+    #[test]
+    fn a_wide_year_is_local_midnight() {
+        let _lock = TRASH_CLOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let _restore = RestoreTz(std::env::var_os("TZ"));
+        unsafe { std::env::set_var("TZ", "America/New_York") };
+        unsafe { tzset() };
+        // Four digits and `+YYYYYY` stay UTC. Any other year width is local.
+        assert_eq!(unix_millis_from_iso("2026-10-13"), Some(1_791_849_600_000));
+        assert_eq!(unix_millis_from_iso("+002026-10-13"), Some(1_791_849_600_000));
+        assert_eq!(unix_millis_from_iso("+002026-11"), Some(1_793_491_200_000));
+        assert_eq!(unix_millis_from_iso("+002026"), Some(1_767_225_600_000));
+        assert_eq!(unix_millis_from_iso("2026-02-31"), Some(1_772_496_000_000));
+        assert_eq!(unix_millis_from_iso("02026-10-13"), Some(1_791_864_000_000));
+        assert_eq!(unix_millis_from_iso("02026-11"), Some(1_793_505_600_000));
+        assert_eq!(unix_millis_from_iso("02026"), Some(1_767_243_600_000));
+        assert_eq!(unix_millis_from_iso("002026-10-13"), Some(1_791_864_000_000));
+        assert_eq!(unix_millis_from_iso("+2026-10-13"), Some(1_791_864_000_000));
+        assert_eq!(unix_millis_from_iso("02026-02-31"), Some(1_772_514_000_000));
+        assert_eq!(unix_millis_from_iso("02026-10-13T00:00:00Z"), None);
     }
 }
