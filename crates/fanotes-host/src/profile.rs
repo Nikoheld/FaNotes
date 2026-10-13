@@ -162,7 +162,9 @@ fn remembered_vault(path: &str) -> Option<PathBuf> {
     }
     let path = PathBuf::from(path);
     match fs::symlink_metadata(&path) {
-        Ok(meta) if meta.file_type().is_symlink() || !meta.is_dir() => None,
+        // Desktop `readConfig` stores a symlink and `validateVaultRoot` follows it.
+        Ok(meta) if meta.file_type().is_symlink() => path.is_dir().then_some(path),
+        Ok(meta) if !meta.is_dir() => None,
         Ok(_) | Err(_) => Some(path),
     }
 }

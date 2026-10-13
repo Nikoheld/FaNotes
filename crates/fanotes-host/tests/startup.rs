@@ -440,6 +440,41 @@ fn a_reset_profile_does_not_import_the_electron_config_again() {
 }
 
 #[test]
+fn an_imported_vault_symlink_opens_the_real_folder() {
+    let dir = scratch();
+    let real = dir.join("real");
+    fs::create_dir_all(real.join("Mathe")).unwrap();
+    fs::write(real.join("Seite.md"), b"Hallo\n").unwrap();
+    let link = dir.join("link");
+    std::os::unix::fs::symlink(&real, &link).unwrap();
+    let app = dir.join("app");
+    fs::create_dir_all(&app).unwrap();
+    fs::write(
+        app.join("config.json"),
+        json!({
+            "version": 3,
+            "vaultPath": link,
+            "settings": { "theme": "midnight" }
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let mut host = Host::open(app);
+    let boot = host.dispatch("fanotes:bootstrap", &[]).unwrap();
+    assert_eq!(
+        boot["vaultPath"],
+        fs::canonicalize(&real).unwrap().to_string_lossy().as_ref()
+    );
+    assert_eq!(boot["settings"]["theme"], "midnight");
+    let tree = host.dispatch("fanotes:get-tree", &[]).unwrap();
+    assert!(tree
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|entry| entry["name"] == "Mathe"));
+}
+
+#[test]
 fn reopening_a_linked_vault_uses_the_real_folder_and_refreshes_the_welcome_note() {
     let dir = scratch();
     let real = dir.join("real");
