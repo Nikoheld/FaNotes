@@ -59,11 +59,23 @@ pub(crate) fn read_nofollow_limited(path: &Path, max: u64) -> Result<Vec<u8>, St
 
 /// `readOptionalNoteFile`: a missing file is empty. Any other read error is
 /// Node's open text, so a save cannot rebuild the companion without its ink.
-pub(crate) fn read_optional_text(path: &Path) -> Result<Option<String>, String> {
-    match fs::read(path) {
+///
+/// The desktop opens with `O_NOFOLLOW` and rejects a file above the note limit
+/// before the companion is rewritten.
+pub(crate) fn read_optional_text(path: &Path, max: u64) -> Result<Option<String>, String> {
+    match read_nofollow_limited(path, max) {
         Ok(bytes) => Ok(Some(String::from_utf8_lossy(&bytes).into_owned())),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(error) => Err(node_open_error(path, &error)),
+        Err(error) if error.starts_with("ENOENT:") => Ok(None),
+        Err(error) => Err(error),
+    }
+}
+
+pub(crate) fn optional_note_limit(path: &Path) -> u64 {
+    let name = path.file_name().and_then(|name| name.to_str()).unwrap_or("");
+    if crate::vault::posix_extname_en_us(name) == ".famd" {
+        MAX_COMPANION_BYTES
+    } else {
+        16 * 1024 * 1024
     }
 }
 
@@ -151,7 +163,7 @@ pub fn attach_sidecar(
 ) -> Result<(), String> {
     let famd_relative = companion_note_path(relative, ".famd");
     let famd_path = vault::resolve_note_file(root, &famd_relative)?;
-    let existing = match read_optional_text(&famd_path)? {
+    let existing = match read_optional_text(&famd_path, optional_note_limit(&famd_path))? {
         Some(source) => parse_famd(&source),
         None => parse_famd(""),
     };
@@ -533,7 +545,7 @@ fn load_note(host: &Host, relative: &str) -> Result<(PathBuf, String, FamdPayloa
     let note = note_path(relative)?;
     let famd_relative = companion_note_path(&note, ".famd");
     let famd_path = vault::resolve_note_file(root, &famd_relative)?;
-    let source = read_optional_text(&famd_path)?.unwrap_or_default();
+    let source = read_optional_text(&famd_path, optional_note_limit(&famd_path))?.unwrap_or_default();
     let parsed = if source.is_empty() {
         parse_famd("")
     } else {
@@ -543,7 +555,7 @@ fn load_note(host: &Host, relative: &str) -> Result<(PathBuf, String, FamdPayloa
         parsed.markdown.clone()
     } else {
         let markdown_path = vault::resolve_note_file(root, &note)?;
-        match read_optional_text(&markdown_path)? {
+        match read_optional_text(&markdown_path, optional_note_limit(&markdown_path))? {
             Some(text) => text,
             None => parsed.markdown.clone(),
         }
