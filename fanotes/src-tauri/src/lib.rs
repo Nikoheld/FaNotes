@@ -9,7 +9,7 @@ use std::time::Duration;
 use fanotes_host::{find_channel, Host, CHANNELS};
 use serde_json::{json, Value};
 use tauri::{Emitter, Manager, State};
-use webkit2gtk::{URIRequestExt, WebViewExt};
+use webkit2gtk::{URIRequestExt, WebContextExt, WebViewExt};
 
 struct HostState(Mutex<Host>);
 
@@ -542,10 +542,24 @@ fn close_companion_windows(app: &tauri::AppHandle) {
     }
 }
 
+/// Tell the page which system language Electron would report.
+///
+/// WebKit keeps `navigator.language` on `LANG` and ignores `LANGUAGE` and
+/// `LC_MESSAGES`. The prototype override runs before the bundle reads it.
+fn system_language_script(language: &str) -> String {
+    let language = if language == "de" { "de" } else { "en-US" };
+    format!(
+        "(function(){{const language={language:?};const languages=Object.freeze([language]);const define=(name,value)=>{{try{{Object.defineProperty(Navigator.prototype,name,{{configurable:true,get:()=>value}})}}catch(e){{}}}};define('language',language);define('languages',languages);}})();\n"
+    )
+}
+
 fn install_webview_guards(window: &tauri::WebviewWindow, emit_sheet_zoom: bool) {
     let emit_window = window.clone();
     let _ = window.with_webview(move |webview| {
         let view = webview.inner();
+        if let Some(context) = view.context() {
+            context.set_preferred_languages(&[fanotes_host::desktop_navigator_language()]);
+        }
         view.set_zoom_level(1.0);
         view.connect_zoom_level_notify(move |view| {
             let Some(direction) = sheet_zoom_direction(view.zoom_level()) else {
@@ -650,6 +664,18 @@ mod tests {
             "Speichern dauert länger als erwartet"
         );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_page_reports_the_desktop_system_language() {
+        let german = super::system_language_script("de");
+        assert!(german.contains("const language=\"de\""));
+        assert!(german.contains("define('language',language)"));
+        assert!(german.contains("define('languages',languages)"));
+        let english = super::system_language_script("en-US");
+        assert!(english.contains("const language=\"en-US\""));
+        assert!(!english.contains("const language=\"de\""));
+        assert!(super::system_language_script("fr").contains("const language=\"en-US\""));
     }
 
     #[test]
@@ -778,6 +804,9 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(register())
+        .append_invoke_initialization_script(system_language_script(
+            fanotes_host::desktop_navigator_language(),
+        ))
         .append_invoke_initialization_script(include_str!("fanotes-api.js"))
         .run(tauri::generate_context!())
         .expect("FaNotes Tauri host failed");
