@@ -1122,12 +1122,9 @@ impl Host {
             return Ok(Value::String(relative.to_owned()));
         }
         let parent = source.parent().unwrap_or(&root).to_path_buf();
-        let unique = unique_sibling_name(
-            &parent,
-            &desired,
-            Some(current_name.as_str()),
-            companion_extension(was_dir, &current_name),
-        )?;
+        // Desktop `availableName` ignores the companion. `Ziel.famd` does not
+        // block `Ziel.md`; the companion rename replaces that file.
+        let unique = unique_sibling_name(&parent, &desired, Some(current_name.as_str()), None)?;
         let destination = parent.join(&unique);
         if !vault::is_inside_root(&root, &destination) {
             return Err("Der Pfad liegt außerhalb des Vaults.".to_owned());
