@@ -70,24 +70,12 @@ pub fn write_note_file(
         let path = vault::resolve_note_file(root, relative)?;
         // Desktop `realpath` of the parent runs before a new `.famd` is created.
         // A missing folder stays missing.
-        require_parent_directory(&path)?;
+        require_parent_realpath(&path)?;
         path
     } else {
-        let path = vault::resolve_note_file(root, relative)?;
-        require_parent_directory(&path)?;
-        // The desktop creates a missing `.famd` on save. A missing markdown
-        // note is not created here; that is `create-note`.
-        if !path.is_file() {
-            // A missing markdown note is Node's `lstat` error. A directory was
-            // already refused while the path was resolved.
-            return match fs::symlink_metadata(&path) {
-                Err(error) => Err(vault::node_lstat_error(&path, &error)),
-                Ok(meta) if meta.file_type().is_symlink() => {
-                    Err("Symbolische Links sind innerhalb des Vaults nicht erlaubt.".to_owned())
-                }
-                Ok(_) => Err("Die gewählte Datei ist keine reguläre Datei.".to_owned()),
-            };
-        }
+        // A missing markdown note is not created here; that is `create-note`.
+        // `allowMissing` is false, so the first missing segment is `lstat`.
+        let path = vault::resolve_present_note_file(root, relative)?;
         atomic_write(&path, markdown.as_bytes(), 0o600)?;
         path
     };
@@ -101,6 +89,18 @@ fn file_mtime_iso(path: &Path) -> String {
         .and_then(|meta| meta.modified().ok())
         .map(iso_from_system_time)
         .unwrap_or_else(now_iso)
+}
+
+fn require_parent_realpath(path: &Path) -> Result<(), String> {
+    let Some(parent) = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    else {
+        return Err("Der Zielordner wurde nicht gefunden.".to_owned());
+    };
+    fs::canonicalize(parent)
+        .map(|_| ())
+        .map_err(|error| vault::node_realpath_error(parent, &error))
 }
 
 pub(crate) fn require_parent_directory(path: &Path) -> Result<(), String> {

@@ -888,7 +888,7 @@ impl Host {
             return Err("Es dürfen nur Markdown-Dateien und FaNotes-Handschriftdateien (.famd) bearbeitet werden.".to_owned());
         }
         let normalized = vault::normalize_relative_path(relative, false, false)?;
-        let path = vault::resolve_note_file(self.require_vault()?, &normalized)?;
+        let path = vault::resolve_present_note_file(self.require_vault()?, &normalized)?;
         let limit = note_byte_limit(&normalized);
         let meta = fs::symlink_metadata(&path)
             .map_err(|error| vault::node_lstat_error(&path, &error))?;

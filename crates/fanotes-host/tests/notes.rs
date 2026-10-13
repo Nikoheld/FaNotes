@@ -1219,7 +1219,25 @@ fn a_missing_folder_is_not_created_for_a_new_note() {
             &[json!("Fehlt/Seite.md"), json!("Hallo\n")],
         )
         .unwrap_err();
-    assert!(written.contains("Zielordner"));
+    assert_eq!(
+        written,
+        format!(
+            "ENOENT: no such file or directory, lstat '{}'",
+            missing.display()
+        )
+    );
+    let nested = std::fs::canonicalize(&vault).unwrap().join("Fehlt");
+    assert_eq!(
+        host.dispatch(
+            "fanotes:write-file",
+            &[json!("Fehlt/Innen/Seite.md"), json!("Hallo\n")],
+        )
+        .unwrap_err(),
+        format!(
+            "ENOENT: no such file or directory, lstat '{}'",
+            nested.display()
+        )
+    );
     assert!(!vault.join("Fehlt").exists());
 }
 
@@ -1713,13 +1731,35 @@ fn a_dotfile_with_one_dot_is_not_a_note() {
 #[test]
 fn a_famd_save_does_not_create_a_missing_folder() {
     let (mut host, vault) = host();
+    let missing = std::fs::canonicalize(&vault).unwrap().join("Neu");
     let error = host
         .dispatch(
             "fanotes:write-file",
             &[json!("Neu/Seite.famd"), json!("Hallo\n")],
         )
         .unwrap_err();
-    assert_eq!(error, "Der Zielordner wurde nicht gefunden.");
+    assert_eq!(
+        error,
+        format!(
+            "ENOENT: no such file or directory, realpath '{}'",
+            missing.display()
+        )
+    );
+    let nested = std::fs::canonicalize(&vault)
+        .unwrap()
+        .join("Neu")
+        .join("Innen");
+    assert_eq!(
+        host.dispatch(
+            "fanotes:write-file",
+            &[json!("Neu/Innen/Seite.famd"), json!("Hallo\n")],
+        )
+        .unwrap_err(),
+        format!(
+            "ENOENT: no such file or directory, realpath '{}'",
+            nested.display()
+        )
+    );
     assert!(!vault.join("Neu").exists());
 
     host.dispatch(
