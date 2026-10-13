@@ -484,7 +484,8 @@ impl Host {
         let path = self.sync_state_path(vault_id)?;
         match fs::symlink_metadata(&path) {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Value::Null),
-            Err(_) => Err("Der Sync-Zustand konnte nicht gelesen werden.".to_owned()),
+            // Desktop `readState` rethrows every `lstat` error except ENOENT.
+            Err(error) => Err(vault::node_lstat_error(&path, &error)),
             Ok(meta)
                 if meta.file_type().is_symlink()
                     || !meta.is_file()
@@ -495,7 +496,7 @@ impl Host {
             Ok(_) => match fs::read(&path) {
                 Ok(bytes) => Ok(Value::String(String::from_utf8_lossy(&bytes).into_owned())),
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Value::Null),
-                Err(_) => Err("Der Sync-Zustand konnte nicht gelesen werden.".to_owned()),
+                Err(error) => Err(notes::node_open_error(&path, &error)),
             },
         }
     }
@@ -533,9 +534,7 @@ impl Host {
         let loaded = match fs::read(&path) {
             Ok(bytes) => Some(decode_sync_secret(bytes)),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
-            Err(_) => {
-                return Err("Die Sync-Anmeldung konnte nicht gelesen werden.".to_owned());
-            }
+            Err(error) => return Err(notes::node_open_error(&path, &error)),
         };
         let raw = loaded.as_ref().map(|(text, _)| text.as_str());
         let valid_utf8 = loaded.as_ref().is_none_or(|(_, valid)| *valid);
