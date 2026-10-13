@@ -98,6 +98,32 @@ fn file_uri(path: &Path) -> String {
     } else {
         std::env::current_dir().unwrap_or_default().join(path)
     };
-    let text = absolute.to_string_lossy().replace(' ', "%20");
-    format!("file://{text}")
+    // GTK print-to-file reads this URI. A raw `#` or `?` would cut the path off.
+    let mut uri = String::from("file://");
+    for byte in absolute.to_string_lossy().as_bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'/' | b'-' | b'_' | b'.' | b'~' => {
+                uri.push(*byte as char);
+            }
+            _ => uri.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    uri
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    #[test]
+    fn a_pdf_destination_encodes_the_file_uri() {
+        assert_eq!(
+            super::file_uri(Path::new("/tmp/Notiz #1.pdf")),
+            "file:///tmp/Notiz%20%231.pdf"
+        );
+        assert_eq!(
+            super::file_uri(Path::new("/tmp/Größe.pdf")),
+            "file:///tmp/Gr%C3%B6%C3%9Fe.pdf"
+        );
+    }
 }
