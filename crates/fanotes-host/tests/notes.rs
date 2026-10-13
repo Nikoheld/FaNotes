@@ -1352,3 +1352,45 @@ fn a_famd_save_does_not_create_a_missing_folder() {
     assert!(vault.join("Mathe/Seite.famd").is_file());
     assert!(!vault.join("Neu").exists());
 }
+
+#[test]
+fn a_companion_save_does_not_create_a_missing_folder() {
+    let (mut host, vault) = host();
+    let link = json!([{
+        "id": "link-a",
+        "targetPath": "Physik/Kraft.md",
+        "page": 1,
+        "x": 0.2,
+        "y": 0.3
+    }]);
+    for (channel, args) in [
+        (
+            "fanotes:set-note-paper-style",
+            json!(["Neu/Seite.md", "lines"]),
+        ),
+        ("fanotes:write-note-links", json!(["Neu/Seite.md", link])),
+        (
+            "fanotes:write-note-backups",
+            json!(["Neu/Seite.md", [{ "content": "alt" }]]),
+        ),
+    ] {
+        let error = host
+            .dispatch(channel, args.as_array().unwrap())
+            .unwrap_err();
+        assert_eq!(error, "Der Zielordner wurde nicht gefunden.", "{channel}");
+    }
+    assert!(!vault.join("Neu").exists());
+
+    host.dispatch(
+        "fanotes:set-note-paper-style",
+        &[json!("Mathe/Seite.md"), json!("lines")],
+    )
+    .unwrap();
+    assert_eq!(
+        host.dispatch("fanotes:read-note-paper-style", &[json!("Mathe/Seite.md")])
+            .unwrap(),
+        "lines"
+    );
+    assert!(vault.join("Mathe/Seite.famd").is_file());
+    assert!(!vault.join("Neu").exists());
+}
