@@ -276,9 +276,10 @@ fn load_characters(directory: &Path, manifest_text: &str) -> Result<Vec<String>,
     let size = crate::resources::json_safe_u64(manifest["characters"].get("size"))
         .filter(|size| *size > 0 && *size <= 256 * 1024)
         .ok_or_else(|| "Unbekanntes natives Handschriftmodell.".to_owned())?;
-    let count = crate::resources::json_safe_u64(manifest["characters"].get("count"))
-        .ok_or_else(|| "Unbekanntes natives Handschriftmodell.".to_owned())?
-        as usize;
+    // `Number.isSafeInteger(count)` keeps a negative count. The length check
+    // then reports an invalid charset.
+    let count = crate::resources::json_safe_i64(manifest["characters"].get("count"))
+        .ok_or_else(|| "Unbekanntes natives Handschriftmodell.".to_owned())?;
     let expected = manifest["characters"]["sha256"]
         .as_str()
         .ok_or_else(|| "Unbekanntes natives Handschriftmodell.".to_owned())?;
@@ -297,7 +298,7 @@ fn load_characters(directory: &Path, manifest_text: &str) -> Result<Vec<String>,
     }
     let characters: Vec<String> = serde_json::from_slice(&bytes)
         .map_err(|_| "Der native OCR-Zeichensatz ist ungültig.".to_owned())?;
-    if characters.len() != count
+    if characters.len() as i64 != count
         || characters
             .iter()
             .any(|character| character.chars().count() != 1)
@@ -481,6 +482,11 @@ mod tests {
         assert_eq!(
             load_characters(&dir, &fractional).unwrap_err(),
             "Unbekanntes natives Handschriftmodell."
+        );
+        let negative = manifest.replace("\"count\":1.0", "\"count\":-1");
+        assert_eq!(
+            load_characters(&dir, &negative).unwrap_err(),
+            "Der native OCR-Zeichensatz ist ungültig."
         );
         let _ = std::fs::remove_dir_all(&dir);
     }
