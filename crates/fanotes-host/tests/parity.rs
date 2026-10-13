@@ -302,10 +302,14 @@ fn an_empty_asset_preview_returns_an_empty_payload() {
             .unwrap(),
         json!("data:application/pdf;base64,")
     );
+    let missing = fs::canonicalize(dir.0.join("vault")).unwrap().join("fehlt.pdf");
     assert_eq!(
         host.dispatch("fanotes:read-asset-bytes", &[json!("fehlt.pdf")])
             .unwrap_err(),
-        "Der Eintrag wurde nicht gefunden."
+        format!(
+            "ENOENT: no such file or directory, lstat '{}'",
+            missing.display()
+        )
     );
 }
 
@@ -484,10 +488,14 @@ fn a_pdf_raster_path_uses_the_desktop_vault_rules() {
             .unwrap_err(),
         "Ungültiger Vault-Pfad."
     );
-    request["path"] = json!(format!("{}.pdf", "ä".repeat(3000)));
+    let name = format!("{}.pdf", "ä".repeat(3000));
+    request["path"] = json!(name.clone());
+    let missing = fs::canonicalize(host.vault.as_ref().unwrap())
+        .unwrap()
+        .join(name);
     assert_eq!(
         host.dispatch("fanotes:render-pdf-page", &[request])
             .unwrap_err(),
-        "Der Eintrag wurde nicht gefunden."
+        format!("ENAMETOOLONG: name too long, lstat '{}'", missing.display())
     );
 }

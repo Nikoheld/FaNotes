@@ -36,10 +36,14 @@ fn a_file_in_a_reveal_path_is_not_a_folder() {
         .unwrap_err(),
         "Ein Pfadbestandteil ist kein Ordner."
     );
+    let missing = fs::canonicalize(&vault).unwrap().join("Fehlt");
     assert_eq!(
         host.dispatch("fanotes:reveal-in-folder", &[json!("Fehlt")])
             .unwrap_err(),
-        "Der Eintrag wurde nicht gefunden."
+        format!(
+            "ENOENT: no such file or directory, lstat '{}'",
+            missing.display()
+        )
     );
     host.dispatch("fanotes:reveal-in-folder", &[json!("Seite.md")])
         .unwrap();

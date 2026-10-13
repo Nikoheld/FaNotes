@@ -213,10 +213,14 @@ fn a_file_is_not_a_folder_target() {
         .unwrap_err(),
         "Der gewählte Pfad ist kein Ordner."
     );
+    let missing = std::fs::canonicalize(&vault).unwrap().join("Fehlt");
     assert_eq!(
         host.dispatch("fanotes:create-folder", &[json!("Fehlt")])
             .unwrap_err(),
-        "Der Zielordner wurde nicht gefunden."
+        format!(
+            "ENOENT: no such file or directory, lstat '{}'",
+            missing.display()
+        )
     );
     assert!(vault.join("Andere.md").is_file());
     assert!(!vault.join("Neuer Ordner").exists());
@@ -788,18 +792,23 @@ fn a_directory_named_like_a_note_cannot_be_read() {
 #[test]
 fn a_missing_markdown_note_is_not_created_by_writing() {
     let (mut host, vault) = host();
+    let missing = std::fs::canonicalize(vault.join("Mathe")).unwrap().join("Neu.md");
+    let missing_error = format!(
+        "ENOENT: no such file or directory, lstat '{}'",
+        missing.display()
+    );
     let error = host
         .dispatch(
             "fanotes:write-file",
             &[json!("Mathe/Neu.md"), json!("Hallo\n")],
         )
         .unwrap_err();
-    assert!(error.contains("nicht gefunden"), "{error}");
+    assert_eq!(error, missing_error);
     assert!(!vault.join("Mathe/Neu.md").exists());
     assert_eq!(
         host.dispatch("fanotes:read-file", &[json!("Mathe/Neu.md")])
             .unwrap_err(),
-        "Der Eintrag wurde nicht gefunden."
+        missing_error
     );
 
     let saved = host
@@ -1161,10 +1170,14 @@ fn a_new_entry_checks_the_parent_before_the_name() {
             .unwrap_err(),
         "Der gewählte Pfad ist kein Ordner."
     );
+    let missing = std::fs::canonicalize(&vault).unwrap().join("Fehlt");
     assert_eq!(
         host.dispatch("fanotes:create-note", &[json!("Fehlt"), json!("CON")])
             .unwrap_err(),
-        "Der Zielordner wurde nicht gefunden."
+        format!(
+            "ENOENT: no such file or directory, lstat '{}'",
+            missing.display()
+        )
     );
     assert_eq!(
         host.dispatch("fanotes:create-note", &[json!("../x"), json!("CON")])
@@ -1189,10 +1202,17 @@ fn a_new_entry_checks_the_parent_before_the_name() {
 #[test]
 fn a_missing_folder_is_not_created_for_a_new_note() {
     let (mut host, vault) = host();
+    let missing = std::fs::canonicalize(&vault).unwrap().join("Fehlt");
     let created = host
         .dispatch("fanotes:create-note", &[json!("Fehlt"), json!("Seite")])
         .unwrap_err();
-    assert!(created.contains("Zielordner"));
+    assert_eq!(
+        created,
+        format!(
+            "ENOENT: no such file or directory, lstat '{}'",
+            missing.display()
+        )
+    );
     let written = host
         .dispatch(
             "fanotes:write-file",
