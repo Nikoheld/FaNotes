@@ -3707,8 +3707,8 @@ fn write_folder_colors(root: &Path, colors: &BTreeMap<String, String>) -> Result
         &internal.join("folder-colors.json"),
         snapshot.as_bytes(),
         0o600,
-    )
-    .map_err(|_| "Die Ordnerfarbe konnte nicht gespeichert werden.".to_owned())
+    )?;
+    Ok(())
 }
 
 fn move_note_companion(root: &Path, old_relative: &str, new_relative: &str) {

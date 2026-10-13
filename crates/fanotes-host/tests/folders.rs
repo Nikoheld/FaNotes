@@ -558,6 +558,45 @@ fn a_folder_color_with_a_bad_byte_still_paints_the_folder() {
     assert!(tree[0]["color"].is_null());
 }
 
+#[cfg(unix)]
+#[test]
+fn an_unwritable_internal_folder_reports_the_desktop_color_open_error() {
+    use std::os::unix::fs::PermissionsExt;
+    let (mut host, vault, _) = host();
+    let vault = fs::canonicalize(&vault).unwrap();
+    let internal = vault.join(".fanotes");
+    fs::create_dir_all(&internal).unwrap();
+    fs::set_permissions(&internal, fs::Permissions::from_mode(0o555)).unwrap();
+    struct Restore(std::path::PathBuf);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            let _ = fs::set_permissions(&self.0, fs::Permissions::from_mode(0o700));
+        }
+    }
+    let _restore = Restore(internal.clone());
+    let error = host
+        .dispatch(
+            "fanotes:set-folder-color",
+            &[json!("Mathe"), json!("#A1B2C3")],
+        )
+        .unwrap_err();
+    let prefix = format!(
+        "EACCES: permission denied, open '{}/.folder-colors.json.{}.",
+        internal.display(),
+        std::process::id()
+    );
+    assert!(error.starts_with(&prefix), "{error}");
+    let suffix = error[prefix.len()..].trim_end_matches(".tmp'");
+    assert_eq!(suffix.len(), 20, "{error}");
+    assert!(
+        suffix.chars().all(|character| character.is_ascii_hexdigit()),
+        "{error}"
+    );
+    assert!(error.ends_with(".tmp'"), "{error}");
+    fs::set_permissions(&internal, fs::Permissions::from_mode(0o700)).unwrap();
+    assert!(!internal.join("folder-colors.json").exists());
+}
+
 struct RestoreMode(std::path::PathBuf);
 
 impl Drop for RestoreMode {
