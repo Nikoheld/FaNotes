@@ -450,16 +450,23 @@ fn navigation_allowed(url: &tauri::Url) -> bool {
     match url.scheme() {
         "about" => url.as_str() == "about:blank" || url.path() == "blank",
         "tauri" | "asset" | "ipc" => true,
-        "http" | "https" => matches!(
-            url.host_str(),
-            // `host_str` keeps the brackets around an IPv6 address. Electron
-            // `URL.hostname` does the same, and `trustedDevUrl` allows `[::1]`.
-            Some("127.0.0.1")
-                | Some("localhost")
-                | Some("::1")
-                | Some("[::1]")
-                | Some("tauri.localhost")
-        ),
+        "http" | "https" => {
+            // Electron `will-navigate` stays on the current URL, so a user or
+            // password on localhost is not an app navigation. An empty
+            // `user:password` pair is the same URL as no credentials.
+            url.username().is_empty()
+                && url.password().is_none_or(|password| password.is_empty())
+                && matches!(
+                    url.host_str(),
+                    // `host_str` keeps the brackets around an IPv6 address. Electron
+                    // `URL.hostname` does the same, and `trustedDevUrl` allows `[::1]`.
+                    Some("127.0.0.1")
+                        | Some("localhost")
+                        | Some("::1")
+                        | Some("[::1]")
+                        | Some("tauri.localhost")
+                )
+        }
         _ => false,
     }
 }
@@ -619,6 +626,7 @@ mod tests {
             "https://tauri.localhost/",
             "http://[::1]:5174/",
             "https://[::1]/",
+            "http://:@127.0.0.1:5174/",
             "http://[0:0:0:0:0:0:0:1]:5174/",
             "tauri://localhost",
             "asset://localhost/index.html",
@@ -633,6 +641,9 @@ mod tests {
             "https://example.com/",
             "http://192.168.1.20/",
             "http://[2001:db8::1]/",
+            "http://user@127.0.0.1:5174/",
+            "http://:secret@127.0.0.1:5174/",
+            "http://user:secret@localhost:5174/",
             "file:///etc/passwd",
             "javascript:alert(1)",
         ];
