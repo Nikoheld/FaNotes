@@ -751,7 +751,7 @@ fn unlink_regular(path: &Path) -> Result<(), String> {
     match fs::symlink_metadata(path) {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Ok(meta) if meta.is_file() && !meta.file_type().is_symlink() => {
-            fs::remove_file(path).map_err(|_| "Die Arbeitsblattdatei ist unsicher.".to_owned())
+            fs::remove_file(path).map_err(|error| crate::vault::node_unlink_error(path, &error))
         }
         _ => Err("Die Arbeitsblattdatei ist unsicher.".to_owned()),
     }
