@@ -628,7 +628,7 @@ impl Host {
         let path = recognition_model_path(&root)?;
         match fs::symlink_metadata(&path) {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Value::Null),
-            Err(_) => Err("Das Handschriftmodell konnte nicht gelesen werden.".to_owned()),
+            Err(error) => Err(vault::node_lstat_error(&path, &error)),
             Ok(_) => {
                 // Desktop opens with `O_NOFOLLOW`, then checks the size on that handle.
                 let mut options = fs::OpenOptions::new();
@@ -2238,7 +2238,7 @@ fn recognition_model_path(root: &Path) -> Result<PathBuf, String> {
     let fanotes = root.join(".fanotes");
     match fs::symlink_metadata(&fanotes) {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(_) => return Err("Das Handschriftmodell konnte nicht gelesen werden.".to_owned()),
+        Err(error) => return Err(vault::node_lstat_error(&fanotes, &error)),
         Ok(meta) if meta.file_type().is_symlink() => {
             return Err("Symbolische Links sind innerhalb des Vaults nicht erlaubt.".to_owned());
         }
@@ -2258,7 +2258,7 @@ fn recognition_model_path(root: &Path) -> Result<PathBuf, String> {
     let path = fanotes.join("recognition-model.json");
     match fs::symlink_metadata(&path) {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(path),
-        Err(_) => Err("Das Handschriftmodell konnte nicht gelesen werden.".to_owned()),
+        Err(error) => Err(vault::node_lstat_error(&path, &error)),
         Ok(meta) if meta.file_type().is_symlink() => {
             Err("Symbolische Links sind innerhalb des Vaults nicht erlaubt.".to_owned())
         }

@@ -1448,6 +1448,36 @@ fn an_unreadable_recognition_model_uses_the_desktop_open_error() {
     assert_eq!(std::fs::read(&path).unwrap(), b"{\"version\":1}\n");
 }
 
+#[cfg(unix)]
+#[test]
+fn an_unlistable_recognition_model_uses_the_desktop_lstat_error() {
+    use std::os::unix::fs::PermissionsExt;
+    let (mut host, vault) = host();
+    let directory = vault.join(".fanotes");
+    std::fs::create_dir_all(&directory).unwrap();
+    let path = directory.join("recognition-model.json");
+    std::fs::write(&path, b"{\"version\":1}\n").unwrap();
+    let canonical = std::fs::canonicalize(&path).unwrap();
+    std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o000)).unwrap();
+    struct Restore(std::path::PathBuf);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            let _ = std::fs::set_permissions(&self.0, std::fs::Permissions::from_mode(0o700));
+        }
+    }
+    let _restore = Restore(directory.clone());
+    assert_eq!(
+        host.dispatch("fanotes:read-recognition-model", &[])
+            .unwrap_err(),
+        format!(
+            "EACCES: permission denied, lstat '{}'",
+            canonical.display()
+        )
+    );
+    std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o700)).unwrap();
+    assert_eq!(std::fs::read(&path).unwrap(), b"{\"version\":1}\n");
+}
+
 #[test]
 fn a_recognition_model_with_a_bad_byte_still_loads() {
     let (mut host, vault) = host();
