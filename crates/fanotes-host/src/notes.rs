@@ -837,7 +837,8 @@ fn random_suffix() -> Result<String, String> {
 }
 
 pub(crate) fn atomic_write(path: &Path, bytes: &[u8], mode: u32) -> Result<(), String> {
-    atomic_write_with_mtime(path, bytes, mode, None)
+    // Desktop `atomicWrite` uses `randomBytes(10)`, twenty hex characters.
+    atomic_write_with_mtime(path, bytes, mode, None, 10)
 }
 
 pub(crate) fn atomic_write_with_mtime(
@@ -845,8 +846,9 @@ pub(crate) fn atomic_write_with_mtime(
     bytes: &[u8],
     mode: u32,
     mtime: Option<SystemTime>,
+    random_bytes: usize,
 ) -> Result<(), String> {
-    write_atomic(path, bytes, mode, mtime, true)
+    write_atomic(path, bytes, mode, mtime, true, random_bytes)
 }
 
 /// Desktop `atomicWrite` does not create a missing parent. The open of the
@@ -856,7 +858,7 @@ pub(crate) fn atomic_write_existing_parent(
     bytes: &[u8],
     mode: u32,
 ) -> Result<(), String> {
-    write_atomic(path, bytes, mode, None, false)
+    write_atomic(path, bytes, mode, None, false, 10)
 }
 
 fn write_atomic(
@@ -865,6 +867,7 @@ fn write_atomic(
     mode: u32,
     mtime: Option<SystemTime>,
     create_parent: bool,
+    random_bytes: usize,
 ) -> Result<(), String> {
     if create_parent {
         if let Some(parent) = path.parent() {
@@ -872,7 +875,7 @@ fn write_atomic(
                 .map_err(|_| "Der Ordner konnte nicht angelegt werden.".to_owned())?;
         }
     }
-    let temporary = temporary_path(path)?;
+    let temporary = temporary_path(path, random_bytes)?;
     if let Err(error) = write_exclusive(&temporary, bytes, mode) {
         let _ = fs::remove_file(&temporary);
         return Err(error);
@@ -900,7 +903,7 @@ pub(crate) fn atomic_copy(source: &Path, destination: &Path, mode: u32) -> Resul
         fs::create_dir_all(parent)
             .map_err(|_| "Der Ordner konnte nicht angelegt werden.".to_owned())?;
     }
-    let temporary = temporary_path(destination)?;
+    let temporary = temporary_path(destination, 10)?;
     if let Err(error) = copy_exclusive(&temporary, source, mode) {
         let _ = fs::remove_file(&temporary);
         return Err(error);
@@ -913,8 +916,11 @@ pub(crate) fn atomic_copy(source: &Path, destination: &Path, mode: u32) -> Resul
     Ok(())
 }
 
-fn temporary_path(path: &Path) -> Result<PathBuf, String> {
-    let suffix = random_suffix().unwrap_or_else(|_| std::process::id().to_string());
+fn temporary_path(path: &Path, random_bytes: usize) -> Result<PathBuf, String> {
+    let mut bytes = vec![0u8; random_bytes];
+    getrandom::getrandom(&mut bytes)
+        .map_err(|_| "Die Datei konnte nicht geschrieben werden.".to_owned())?;
+    let suffix: String = bytes.iter().map(|byte| format!("{byte:02x}")).collect();
     Ok(path.with_file_name(format!(
         ".{}.{}.{suffix}.tmp",
         path.file_name()
@@ -938,7 +944,7 @@ pub(crate) enum NewFileError {
 /// appears, and the file mode is private.
 pub(crate) fn publish_new_file(path: &Path, bytes: &[u8], mode: u32) -> Result<(), NewFileError> {
     let _parent = parent_directory(path)?;
-    let temporary = temporary_path(path).map_err(|_| NewFileError::Io)?;
+    let temporary = temporary_path(path, 10).map_err(|_| NewFileError::Io)?;
     if write_exclusive(&temporary, bytes, mode).is_err() {
         let _ = fs::remove_file(&temporary);
         return Err(NewFileError::Io);

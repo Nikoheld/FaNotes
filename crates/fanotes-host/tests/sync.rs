@@ -676,3 +676,41 @@ fn an_undeletable_sync_state_uses_the_desktop_rm_error() {
     fs::set_permissions(&sync_dir, fs::Permissions::from_mode(0o700)).unwrap();
     assert!(secret.is_file());
 }
+
+#[cfg(unix)]
+#[test]
+fn an_unwritable_sync_folder_uses_a_sixteen_hex_temporary_name() {
+    use std::os::unix::fs::PermissionsExt;
+    let (vault, _app, mut host) = host();
+    let vault = fs::canonicalize(&vault).unwrap();
+    fs::write(vault.join("Seite.md"), b"alt\n").unwrap();
+    fs::set_permissions(&vault, fs::Permissions::from_mode(0o555)).unwrap();
+    struct Restore(std::path::PathBuf);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            let _ = fs::set_permissions(&self.0, fs::Permissions::from_mode(0o700));
+        }
+    }
+    let _restore = Restore(vault.clone());
+    let error = host
+        .dispatch(
+            "fanotes:sync-write",
+            &[json!("Seite.md"), json!("SGFsbG8K")],
+        )
+        .unwrap_err();
+    let prefix = format!(
+        "EACCES: permission denied, open '{}/.Seite.md.{}.",
+        vault.display(),
+        std::process::id()
+    );
+    assert!(error.starts_with(&prefix), "{error}");
+    let suffix = error[prefix.len()..].trim_end_matches(".tmp'");
+    assert_eq!(suffix.len(), 16, "{error}");
+    assert!(
+        suffix.chars().all(|character| character.is_ascii_hexdigit()),
+        "{error}"
+    );
+    assert!(error.ends_with(".tmp'"), "{error}");
+    fs::set_permissions(&vault, fs::Permissions::from_mode(0o700)).unwrap();
+    assert_eq!(fs::read(vault.join("Seite.md")).unwrap(), b"alt\n");
+}

@@ -2020,3 +2020,43 @@ fn a_companion_save_does_not_create_a_missing_folder() {
     assert!(vault.join("Mathe/Seite.famd").is_file());
     assert!(!vault.join("Neu").exists());
 }
+
+#[cfg(unix)]
+#[test]
+fn an_unwritable_note_folder_uses_a_twenty_hex_temporary_name() {
+    use std::os::unix::fs::PermissionsExt;
+    let (mut host, _) = host();
+    let vault = host.vault.clone().unwrap();
+    let folder = vault.join("Mathe");
+    let note = folder.join("Seite.md");
+    std::fs::write(&note, b"Hallo\n").unwrap();
+    std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o555)).unwrap();
+    struct Restore(std::path::PathBuf);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            let _ = std::fs::set_permissions(&self.0, std::fs::Permissions::from_mode(0o700));
+        }
+    }
+    let _restore = Restore(folder.clone());
+    let error = host
+        .dispatch(
+            "fanotes:write-file",
+            &[json!("Mathe/Seite.md"), json!("Welt\n")],
+        )
+        .unwrap_err();
+    let prefix = format!(
+        "EACCES: permission denied, open '{}/.Seite.md.{}.",
+        folder.display(),
+        std::process::id()
+    );
+    assert!(error.starts_with(&prefix), "{error}");
+    let suffix = error[prefix.len()..].trim_end_matches(".tmp'");
+    assert_eq!(suffix.len(), 20, "{error}");
+    assert!(
+        suffix.chars().all(|character| character.is_ascii_hexdigit()),
+        "{error}"
+    );
+    assert!(error.ends_with(".tmp'"), "{error}");
+    std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o700)).unwrap();
+    assert_eq!(std::fs::read(&note).unwrap(), b"Hallo\n");
+}
