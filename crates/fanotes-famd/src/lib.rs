@@ -1080,14 +1080,14 @@ fn rewrite_month_name(trimmed: &str) -> Option<String> {
 
 /// `YYYY/M/D` or `M/D/YYYY`. A date alone is local midnight. `T` is not a separator.
 fn rewrite_slash_date(trimmed: &str) -> Option<String> {
-    if trimmed.contains(['T', 't']) {
+    if has_iso_t(trimmed) {
         return None;
     }
     let (date, time) = if let Some(index) = trimmed.find(char::is_whitespace) {
-        let time = trimmed[index..].trim_start();
-        if time.is_empty() || time.contains(char::is_whitespace) {
+        let rest = trimmed[index..].trim_start();
+        let Some(time) = slash_time_and_zone(rest) else {
             return None;
-        }
+        };
         (&trimmed[..index], Some(time))
     } else {
         (trimmed, None)
@@ -1110,10 +1110,42 @@ fn rewrite_slash_date(trimmed: &str) -> Option<String> {
         return None;
     }
     let clock = match time {
-        Some(time) => slash_clock(time)?,
+        Some(time) => slash_clock(&time)?,
         None => "00:00:00".to_string(),
     };
     Some(format!("{year:04}-{month:02}-{day:02}T{clock}"))
+}
+
+/// `16:00 EST` keeps the offset. `(EST)` is a comment, so the clock stays local.
+fn slash_time_and_zone(rest: &str) -> Option<String> {
+    let words: Vec<&str> = rest
+        .split(char::is_whitespace)
+        .filter(|word| !word.is_empty())
+        .collect();
+    if words.is_empty() {
+        return None;
+    }
+    let mut end = words.len();
+    if words[end - 1].starts_with('(') && words[end - 1].ends_with(')') && words[end - 1].len() > 2
+    {
+        end -= 1;
+    }
+    if end == 0 {
+        return None;
+    }
+    let mut zone = String::new();
+    if end >= 2 {
+        if let Some(suffix) = month_zone_suffix(words[end - 1]) {
+            if words[end - 2].contains(':') {
+                zone = suffix;
+                end -= 1;
+            }
+        }
+    }
+    if end != 1 {
+        return None;
+    }
+    Some(format!("{}{zone}", words[0]))
 }
 
 fn slash_clock(time: &str) -> Option<String> {
@@ -1879,6 +1911,20 @@ mod tests {
             assert_eq!(
                 super::canonical_iso("2026/10/13 16:00:00Z").as_deref(),
                 Some("2026-10-13T16:00:00.000Z")
+            );
+        });
+    }
+
+    #[test]
+    fn a_slash_date_keeps_a_named_zone() {
+        with_tz("America/New_York", || {
+            assert_eq!(
+                super::canonical_iso("2026/10/13 16:00 EST").as_deref(),
+                Some("2026-10-13T21:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026/10/13 16:00:00 (EST)").as_deref(),
+                Some("2026-10-13T20:00:00.000Z")
             );
         });
     }
