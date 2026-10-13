@@ -1925,6 +1925,9 @@ fn split_time_zone(time: &str) -> Option<(&str, Option<i64>)> {
 
 /// Offset east of UTC, in milliseconds, for a civil time that `Date.parse`
 /// reads in the local zone. `naive_utc_ms` is that civil time counted as UTC.
+///
+/// When the civil time exists twice, `Date.parse` keeps the earlier instant.
+/// A skipped hour uses the offset from before the transition.
 #[cfg(unix)]
 fn local_offset_east_ms(naive_utc_ms: i64) -> Option<i64> {
     let naive_secs = naive_utc_ms.div_euclid(1000);
@@ -1933,14 +1936,90 @@ fn local_offset_east_ms(naive_utc_ms: i64) -> Option<i64> {
     if unsafe { libc::gmtime_r(&naive_time, &mut civil) }.is_null() {
         return None;
     }
-    civil.tm_isdst = -1;
-    unsafe { *libc::__errno_location() = 0 };
-    let utc = unsafe { libc::mktime(&mut civil) };
-    if utc == -1 && std::io::Error::last_os_error().raw_os_error().unwrap_or(0) != 0 {
-        return None;
-    }
-    let utc_secs = i64::try_from(utc).ok()?;
+    let utc_secs = local_civil_unix(
+        civil.tm_year + 1900,
+        civil.tm_mon + 1,
+        civil.tm_mday,
+        civil.tm_hour,
+        civil.tm_min,
+        civil.tm_sec,
+    )?;
     naive_secs.checked_sub(utc_secs)?.checked_mul(1000)
+}
+
+#[cfg(unix)]
+fn local_civil_unix(
+    year: i32,
+    month: i32,
+    day: i32,
+    hour: i32,
+    minute: i32,
+    second: i32,
+) -> Option<i64> {
+    let mut earliest = None;
+    for isdst in [0, 1] {
+        let Some(utc) = mktime_local(year, month, day, hour, minute, second, isdst) else {
+            continue;
+        };
+        if local_civil_matches(utc, year, month, day, hour, minute, second) {
+            earliest = Some(earliest.map_or(utc, |current: i64| current.min(utc)));
+        }
+    }
+    if let Some(utc) = earliest {
+        return Some(utc);
+    }
+    mktime_local(year, month, day, hour, minute, second, -1)
+}
+
+#[cfg(unix)]
+fn mktime_local(
+    year: i32,
+    month: i32,
+    day: i32,
+    hour: i32,
+    minute: i32,
+    second: i32,
+    isdst: i32,
+) -> Option<i64> {
+    let mut tm = unsafe { std::mem::zeroed::<libc::tm>() };
+    tm.tm_year = year - 1900;
+    tm.tm_mon = month - 1;
+    tm.tm_mday = day;
+    tm.tm_hour = hour;
+    tm.tm_min = minute;
+    tm.tm_sec = second;
+    tm.tm_isdst = isdst;
+    let previous = std::io::Error::last_os_error();
+    unsafe { *libc::__errno_location() = 0 };
+    let result = unsafe { libc::mktime(&mut tm) };
+    let failed = result == -1 && std::io::Error::last_os_error().raw_os_error().unwrap_or(0) != 0;
+    unsafe { *libc::__errno_location() = previous.raw_os_error().unwrap_or(0) };
+    if failed { None } else { Some(i64::from(result)) }
+}
+
+#[cfg(unix)]
+fn local_civil_matches(
+    utc: i64,
+    year: i32,
+    month: i32,
+    day: i32,
+    hour: i32,
+    minute: i32,
+    second: i32,
+) -> bool {
+    let seconds = utc as libc::time_t;
+    let mut tm = unsafe { std::mem::zeroed::<libc::tm>() };
+    unsafe {
+        if libc::localtime_r(&seconds, &mut tm).is_null() {
+            return false;
+        }
+    }
+    tm.tm_year == year - 1900
+        && tm.tm_mon == month - 1
+        && tm.tm_mday == day
+        && tm.tm_hour == hour
+        && tm.tm_min == minute
+        && tm.tm_sec == second
 }
 
 #[cfg(not(unix))]
@@ -4913,6 +4992,27 @@ mod local_zone_tests {
         assert_eq!(
             unix_millis_from_iso("2026-10-13"),
             Some(1_791_849_600_000)
+        );
+    }
+
+    #[test]
+    fn a_daylight_saving_overlap_uses_the_earlier_instant() {
+        let _lock = TRASH_CLOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let _restore = RestoreTz(std::env::var_os("TZ"));
+        unsafe { std::env::set_var("TZ", "Europe/Berlin") };
+        unsafe { tzset() };
+        // 02:30 exists twice on the fall-back Sunday. `Date.parse` keeps the
+        // earlier instant. A skipped spring hour uses the offset from before
+        // the transition.
+        assert_eq!(
+            unix_millis_from_iso("2026-10-25T02:30:00"),
+            Some(1_792_888_200_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-03-29T02:30:00"),
+            Some(1_774_747_800_000)
         );
     }
 }
