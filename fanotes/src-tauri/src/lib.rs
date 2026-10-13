@@ -138,14 +138,24 @@ pub use capture::capture_html;
 pub use export::print_html_to_pdf;
 
 #[tauri::command(rename = "fanotes:export-note-pdf")]
-fn export_note_pdf(window: tauri::WebviewWindow, args: Vec<Value>) -> Result<Value, String> {
+fn export_note_pdf(
+    window: tauri::WebviewWindow,
+    state: State<'_, HostState>,
+    args: Vec<Value>,
+) -> Result<Value, String> {
     let destination = if let Some(path) = args.first().and_then(Value::as_str) {
         std::path::PathBuf::from(path)
     } else {
+        let language = state
+            .0
+            .lock()
+            .map(|host| host.ui_language())
+            .unwrap_or("en");
+        let (title, filter) = fanotes_host::pdf_export_dialog(language);
         let Some(path) = rfd::FileDialog::new()
-            .set_title("Notiz als PDF speichern")
+            .set_title(title)
             .set_file_name("FaNotes-Notiz.pdf")
-            .add_filter("PDF", &["pdf"])
+            .add_filter(filter.0, filter.1)
             .save_file()
         else {
             return Ok(Value::Null);
@@ -175,12 +185,13 @@ fn open_subject_book_popout(
     state: State<'_, HostState>,
     args: Vec<Value>,
 ) -> Result<Value, String> {
-    let result = {
+    let (result, language) = {
         let mut host = state
             .0
             .lock()
             .map_err(|_| "Der Host ist belegt.".to_owned())?;
-        host.dispatch("fanotes:open-subject-book-popout", &args)?
+        let result = host.dispatch("fanotes:open-subject-book-popout", &args)?;
+        (result, host.ui_language())
     };
     let book = result["bookPath"].as_str().unwrap_or("").to_owned();
     let fragment = format!("subject-book={}", encode_uri_component(&book));
@@ -198,7 +209,7 @@ fn open_subject_book_popout(
     url.set_fragment(Some(&fragment));
     let window =
         tauri::WebviewWindowBuilder::new(&app, "subject-book", tauri::WebviewUrl::External(url))
-            .title("Buch")
+            .title(fanotes_host::subject_book_window_title(language))
             .inner_size(980.0, 1080.0)
             .min_inner_size(420.0, 360.0)
             .background_color(paper_color())

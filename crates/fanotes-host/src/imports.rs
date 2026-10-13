@@ -14,12 +14,8 @@ use crate::worksheets::decode_payload_bytes;
 use crate::Host;
 
 pub fn import_worksheet(host: &Host) -> Result<Value, String> {
-    let Some(path) = pick_file(
-        host,
-        "Bild oder PDF als Arbeitsblatt importieren",
-        &["pdf", "png", "jpg", "jpeg", "webp", "gif"],
-    )?
-    else {
+    let (title, filters) = crate::dialogs::worksheet_import_dialog(host.ui_language());
+    let Some(path) = pick_file(host, title, &filters)? else {
         return Ok(Value::Null);
     };
     let name = path
@@ -34,7 +30,8 @@ pub fn import_pdf_note(host: &Host, args: &[Value]) -> Result<Value, String> {
     if let Some(payload) = args.get(1).filter(|value| value.is_object()) {
         return import_pdf_payload(host, parent, payload);
     }
-    let Some(path) = pick_file(host, "PDF als Notiz importieren", &["pdf"])? else {
+    let (title, filters) = crate::dialogs::pdf_note_import_dialog(host.ui_language());
+    let Some(path) = pick_file(host, title, &filters)? else {
         return Ok(Value::Null);
     };
     let name = path
@@ -59,7 +56,8 @@ pub fn import_subject_book(host: &Host, args: &[Value]) -> Result<Value, String>
     if let Some(payload) = args.get(1).filter(|value| value.is_object()) {
         return import_pdf_file(host, &subject, payload, PdfKind::Book);
     }
-    let Some(path) = pick_file(host, "PDF-Buch zum Fach hinzufügen", &["pdf"])? else {
+    let (title, filters) = crate::dialogs::subject_book_import_dialog(host.ui_language());
+    let Some(path) = pick_file(host, title, &filters)? else {
         return Ok(Value::Null);
     };
     let name = path
@@ -289,14 +287,19 @@ fn place_new_pdf(
     Err(exhausted.to_owned())
 }
 
-fn pick_file(host: &Host, title: &str, extensions: &[&str]) -> Result<Option<PathBuf>, String> {
+fn pick_file(
+    host: &Host,
+    title: &str,
+    filters: &[crate::dialogs::DialogFilter],
+) -> Result<Option<PathBuf>, String> {
     if !host.file_dialogs {
         return Err("Die Dateiauswahl ist in dieser Sitzung nicht verfügbar.".to_owned());
     }
-    Ok(rfd::FileDialog::new()
-        .set_title(title)
-        .add_filter("Dateien", extensions)
-        .pick_file())
+    let mut dialog = rfd::FileDialog::new().set_title(title);
+    for (name, extensions) in filters {
+        dialog = dialog.add_filter(*name, *extensions);
+    }
+    Ok(dialog.pick_file())
 }
 
 fn vault_root(host: &Host) -> Result<&Path, String> {

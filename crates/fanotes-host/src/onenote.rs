@@ -41,11 +41,12 @@ pub fn import_onenote(host: &Host, args: &[Value]) -> Result<Value, String> {
     if !host.file_dialogs {
         return Err("Die Dateiauswahl ist in dieser Sitzung nicht verfügbar.".to_owned());
     }
-    let Some(path) = rfd::FileDialog::new()
-        .set_title("Microsoft OneNote in FaNotes importieren")
-        .add_filter("Microsoft OneNote", &["one", "onetoc2", "onepkg", "zip"])
-        .pick_file()
-    else {
+    let (title, filters) = crate::dialogs::onenote_import_dialog(host.ui_language());
+    let mut dialog = rfd::FileDialog::new().set_title(title);
+    for (name, extensions) in filters {
+        dialog = dialog.add_filter(name, extensions);
+    }
+    let Some(path) = dialog.pick_file() else {
         return Ok(Value::Null);
     };
     import_path(host, &path)
