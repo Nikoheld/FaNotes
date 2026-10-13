@@ -518,6 +518,69 @@ fn a_reset_marker_with_a_space_instead_of_t_wipes_the_profile() {
 }
 
 #[test]
+fn a_reset_marker_with_a_tab_instead_of_t_wipes_the_profile() {
+    let (app, mut host) = host();
+    host.dispatch("fanotes:save-settings", &[json!({ "theme": "midnight" })])
+        .unwrap();
+    let user_data = std::path::absolute(&app).unwrap();
+    let marker = app.parent().unwrap().join(".fanotes-reset-pending.json");
+    let created = fresh_reset_time().replacen('T', "\\t", 1);
+    fs::write(
+        &marker,
+        format!(
+            r#"{{"version":1,"userDataPath":"{}","createdAt":"{created}"}}"#,
+            user_data.display()
+        ),
+    )
+    .unwrap();
+    let _ = Host::open(app.clone());
+    assert!(!app.join("settings.json").exists(), "{created}");
+    assert!(!marker.exists());
+}
+
+#[test]
+fn a_date_only_reset_marker_with_trailing_space_wipes_the_profile() {
+    let (app, mut host) = host();
+    host.dispatch("fanotes:save-settings", &[json!({ "theme": "midnight" })])
+        .unwrap();
+    let user_data = std::path::absolute(&app).unwrap();
+    let marker = app.parent().unwrap().join(".fanotes-reset-pending.json");
+    let created = format!("{} ", &fresh_reset_time()[..10]);
+    fs::write(
+        &marker,
+        format!(
+            r#"{{"version":1,"userDataPath":"{}","createdAt":"{created}"}}"#,
+            user_data.display()
+        ),
+    )
+    .unwrap();
+    let _ = Host::open(app.clone());
+    assert!(!app.join("settings.json").exists(), "{created}");
+    assert!(!marker.exists());
+}
+
+#[test]
+fn a_reset_marker_with_a_trailing_space_after_t_keeps_the_profile() {
+    let (app, mut host) = host();
+    host.dispatch("fanotes:save-settings", &[json!({ "theme": "midnight" })])
+        .unwrap();
+    let user_data = std::path::absolute(&app).unwrap();
+    let marker = app.parent().unwrap().join(".fanotes-reset-pending.json");
+    let created = format!("{} ", fresh_reset_time());
+    fs::write(
+        &marker,
+        format!(
+            r#"{{"version":1,"userDataPath":"{}","createdAt":"{created}"}}"#,
+            user_data.display()
+        ),
+    )
+    .unwrap();
+    let _ = Host::open(app.clone());
+    assert!(app.join("settings.json").is_file(), "{created}");
+    assert!(!marker.exists());
+}
+
+#[test]
 fn a_reset_marker_with_second_sixty_keeps_the_profile() {
     let (app, mut host) = host();
     host.dispatch("fanotes:save-settings", &[json!({ "theme": "midnight" })])

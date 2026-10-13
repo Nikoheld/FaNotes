@@ -1770,9 +1770,11 @@ fn marker_is_fresh(created_at: &str) -> bool {
 }
 
 fn unix_millis_from_iso(value: &str) -> Option<u64> {
-    let Some((date, time)) = split_date_time(value) else {
-        // `Date.parse('YYYY-MM-DD')` is UTC midnight.
-        return date_only_millis(value);
+    let (date, time) = match iso_date_time(value) {
+        IsoDate::Invalid => return None,
+        // `Date.parse('YYYY-MM-DD')` is UTC midnight. Surrounding whitespace is ignored.
+        IsoDate::DateOnly(date) => return date_only_millis(date),
+        IsoDate::DateTime(date, time) => (date, time),
     };
     let mut date_parts = date.split('-');
     let year_text = date_parts.next()?;
@@ -1848,17 +1850,47 @@ fn unix_millis_from_iso(value: &str) -> Option<u64> {
     u64::try_from(local.checked_sub(offset_ms)?).ok()
 }
 
-/// `Date.parse` separates the date and the clock with `T`, `t`, or spaces.
-fn split_date_time(value: &str) -> Option<(&str, &str)> {
-    if let Some((date, time)) = value.split_once(['T', 't']) {
-        return Some((date, time));
+enum IsoDate<'a> {
+    DateTime(&'a str, &'a str),
+    DateOnly(&'a str),
+    Invalid,
+}
+
+/// `Date.parse` whitespace is tab, line feed, vertical tab, form feed, carriage
+/// return, space, U+FEFF, and Unicode Space_Separator. U+0085, U+2028, and
+/// U+2029 are not included.
+fn is_date_parse_space(c: char) -> bool {
+    matches!(
+        c,
+        '\t' | '\n' | '\u{000B}' | '\u{000C}' | '\r' | ' '
+            | '\u{00A0}' | '\u{1680}'
+            | '\u{2000}'..='\u{200A}'
+            | '\u{202F}' | '\u{205F}' | '\u{3000}' | '\u{FEFF}'
+    )
+}
+
+/// A clock is introduced by `T`, `t`, or that whitespace. Whitespace around a
+/// `T` form is NaN. The same whitespace around a date-only value, or around a
+/// whitespace-separated clock, is ignored.
+fn iso_date_time(value: &str) -> IsoDate<'_> {
+    let trimmed = value.trim_matches(is_date_parse_space);
+    if trimmed.contains(['T', 't']) {
+        if trimmed.len() != value.len() {
+            return IsoDate::Invalid;
+        }
+        let Some((date, time)) = trimmed.split_once(['T', 't']) else {
+            return IsoDate::Invalid;
+        };
+        return IsoDate::DateTime(date, time);
     }
-    let (date, rest) = value.split_once(' ')?;
-    let time = rest.trim_start_matches(' ');
-    if time.is_empty() || time.contains(' ') {
-        return None;
+    if let Some((date, rest)) = trimmed.split_once(is_date_parse_space) {
+        let time = rest.trim_start_matches(is_date_parse_space);
+        if time.is_empty() || time.contains(is_date_parse_space) {
+            return IsoDate::Invalid;
+        }
+        return IsoDate::DateTime(date, time);
     }
-    Some((date, time))
+    IsoDate::DateOnly(trimmed)
 }
 
 /// `Z`, `z`, `+HH:MM`, `-HH:MM`, `+HHMM`, or `-HHMM` after the clock.
