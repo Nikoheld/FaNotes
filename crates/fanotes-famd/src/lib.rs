@@ -803,7 +803,9 @@ pub fn js_json_number(value: f64) -> Value {
 /// `Date.parse` plus `toISOString`. A zoned timestamp becomes UTC with milliseconds.
 ///
 /// A date without a time is midnight UTC. A time without a zone is local time.
-/// A day past the end of the month rolls forward, and `24:00:00` is the next midnight.
+/// In a daylight-saving overlap that is the earlier instant. A skipped hour
+/// keeps the offset from before the transition. A day past the end of the
+/// month rolls forward, and `24:00:00` is the next midnight.
 pub fn canonical_iso(value: &str) -> Option<String> {
     let trimmed = trim_js(value);
     if is_date_only_shape(trimmed) {
@@ -993,28 +995,72 @@ fn local_civil_to_utc(
     minute: i32,
     second: i32,
 ) -> Option<(i32, i32, i32, i32, i32, i32)> {
-    let assumed = unix_from_utc(year, month, day, hour, minute, second)?;
-    let mut utc = assumed;
-    for _ in 0..3 {
-        let offset = local_offset_seconds(utc);
-        let next = assumed - offset;
-        if next == utc {
-            break;
+    let mut earliest = None;
+    for isdst in [0, 1] {
+        let Some(utc) = mktime_local(year, month, day, hour, minute, second, isdst) else {
+            continue;
+        };
+        if local_civil_is(utc, year, month, day, hour, minute, second) {
+            earliest = Some(earliest.map_or(utc, |current: i64| current.min(utc)));
         }
-        utc = next;
     }
+    let utc = if let Some(utc) = earliest {
+        utc
+    } else {
+        // No instant has this civil time. `mktime` with `tm_isdst == -1`
+        // applies the offset from before the transition.
+        mktime_local(year, month, day, hour, minute, second, -1)?
+    };
     civil_from_unix(utc)
 }
 
-fn local_offset_seconds(utc_secs: i64) -> i64 {
+fn mktime_local(
+    year: i32,
+    month: i32,
+    day: i32,
+    hour: i32,
+    minute: i32,
+    second: i32,
+    isdst: i32,
+) -> Option<i64> {
     let mut tm = unsafe { std::mem::zeroed::<libc::tm>() };
-    let seconds = utc_secs as libc::time_t;
+    tm.tm_year = year - 1900;
+    tm.tm_mon = month - 1;
+    tm.tm_mday = day;
+    tm.tm_hour = hour;
+    tm.tm_min = minute;
+    tm.tm_sec = second;
+    tm.tm_isdst = isdst;
+    let previous = std::io::Error::last_os_error();
+    unsafe { *libc::__errno_location() = 0 };
+    let result = unsafe { libc::mktime(&mut tm) };
+    let failed = result == -1 && std::io::Error::last_os_error().raw_os_error().unwrap_or(0) != 0;
+    unsafe { *libc::__errno_location() = previous.raw_os_error().unwrap_or(0) };
+    if failed { None } else { Some(result as i64) }
+}
+
+fn local_civil_is(
+    utc: i64,
+    year: i32,
+    month: i32,
+    day: i32,
+    hour: i32,
+    minute: i32,
+    second: i32,
+) -> bool {
+    let mut tm = unsafe { std::mem::zeroed::<libc::tm>() };
+    let seconds = utc as libc::time_t;
     unsafe {
         if libc::localtime_r(&seconds, &mut tm).is_null() {
-            return 0;
+            return false;
         }
-        tm.tm_gmtoff as i64
     }
+    tm.tm_year == year - 1900
+        && tm.tm_mon == month - 1
+        && tm.tm_mday == day
+        && tm.tm_hour == hour
+        && tm.tm_min == minute
+        && tm.tm_sec == second
 }
 
 fn shift_seconds(
@@ -1244,6 +1290,87 @@ pub fn js_value_string(value: &Value) -> String {
 #[cfg(test)]
 mod tests {
     use super::{parse_famd, parse_note_links, serialize_famd, FamdPayload, FAMD_SCHEMA};
+
+    #[test]
+    fn a_local_time_uses_the_desktop_daylight_saving_choice() {
+        // `Date.parse` without a zone uses the local zone. In an overlap it
+        // keeps the earlier instant. A skipped hour uses the offset from
+        // before the transition.
+        with_tz("Europe/Berlin", || {
+            assert_eq!(
+                super::canonical_iso("2026-10-25T02:30:00").as_deref(),
+                Some("2026-10-25T00:30:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-25T02:30:00.123").as_deref(),
+                Some("2026-10-25T00:30:00.123Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-03-29T02:30:00").as_deref(),
+                Some("2026-03-29T01:30:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-01-02T03:04:05").as_deref(),
+                Some("2026-01-02T02:04:05.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-07-02T03:04:05").as_deref(),
+                Some("2026-07-02T01:04:05.000Z")
+            );
+        });
+        with_tz("America/New_York", || {
+            assert_eq!(
+                super::canonical_iso("2026-11-01T01:30:00").as_deref(),
+                Some("2026-11-01T05:30:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-03-08T02:30:00").as_deref(),
+                Some("2026-03-08T07:30:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-01-02T03:04:05").as_deref(),
+                Some("2026-01-02T08:04:05.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-07-02T03:04:05").as_deref(),
+                Some("2026-07-02T07:04:05.000Z")
+            );
+        });
+        with_tz("Australia/Lord_Howe", || {
+            assert_eq!(
+                super::canonical_iso("2026-01-02T03:04:05").as_deref(),
+                Some("2026-01-01T16:04:05.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-07-02T03:04:05").as_deref(),
+                Some("2026-07-01T16:34:05.000Z")
+            );
+        });
+    }
+
+    fn with_tz(tz: &str, check: impl FnOnce()) {
+        unsafe extern "C" {
+            fn tzset();
+        }
+        struct Restore(Option<String>);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                unsafe extern "C" {
+                    fn tzset();
+                }
+                match self.0.take() {
+                    Some(value) => unsafe { std::env::set_var("TZ", value) },
+                    None => unsafe { std::env::remove_var("TZ") },
+                }
+                unsafe { tzset() };
+            }
+        }
+        let previous = std::env::var("TZ").ok();
+        let _restore = Restore(previous);
+        unsafe { std::env::set_var("TZ", tz) };
+        unsafe { tzset() };
+        check();
+    }
 
     #[test]
     fn a_bad_companion_timestamp_uses_the_current_time() {
