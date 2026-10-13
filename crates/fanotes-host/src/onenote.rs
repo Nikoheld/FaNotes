@@ -88,8 +88,7 @@ fn import_in_temp(
 ) -> Result<Value, String> {
     let inputs = prepare_input(input, temporary, seven_zip)?;
     let output_root = temporary.join("rendered");
-    create_private_dir(&output_root)
-        .map_err(|_| "Der OneNote-Import konnte nicht vorbereitet werden.".to_owned())?;
+    mkdir_exclusive(&output_root)?;
     let warnings = render_inputs(&inputs, &output_root, one2html)?;
     let output_files = walk_files(&output_root, MAX_OUTPUT_BYTES)?;
     let html_files: Vec<PathBuf> = output_files
@@ -903,8 +902,8 @@ fn prepare_input(input: &Path, temporary: &Path, seven_zip: &Path) -> Result<Vec
         return Err("Unterstützt werden .one, .onetoc2, OneDrive-ZIP und .onepkg.".to_owned());
     }
     let extracted = temporary.join("extracted");
-    create_private_dir(&extracted)
-        .map_err(|_| "Das OneNote-Archiv konnte nicht entpackt werden.".to_owned())?;
+    // Desktop `mkdir` is not recursive and rethrows `EEXIST`.
+    mkdir_exclusive(&extracted)?;
     let listing = run_tool(
         seven_zip,
         &["l", "-slt", "--", &input.to_string_lossy()],
@@ -1020,8 +1019,7 @@ fn render_inputs(
                 return Err(error);
             }
             let _ = fs::remove_dir_all(output_root);
-            create_private_dir(output_root)
-                .map_err(|_| "Der OneNote-Import konnte nicht vorbereitet werden.".to_owned())?;
+            mkdir_exclusive(output_root)?;
             render_sections(&sections, notebook, output_root, one2html)?;
             return Ok(vec!["Verschachtelte OneNote-Abschnittsgruppen wurden abschnittsweise mit ihrer Ordnerhierarchie übernommen.".to_owned()]);
         }
@@ -1063,8 +1061,7 @@ fn render_sections(
             }
             destination.push(import_folder_segment(name));
         }
-        create_private_dir(&destination)
-            .map_err(|_| "Der OneNote-Import konnte nicht vorbereitet werden.".to_owned())?;
+        import_mkdir(&destination)?;
         let section_name = section
             .file_name()
             .and_then(|name| name.to_str())
@@ -1613,6 +1610,21 @@ fn ensure_note_directory(note_root: &Path, directory: &Path) -> Result<(), Strin
     import_mkdir(directory)
 }
 
+/// Desktop `fs.mkdir(path, { mode: 0o700 })` without `recursive`.
+fn mkdir_exclusive(path: &Path) -> Result<(), String> {
+    match fs::create_dir(path) {
+        Ok(()) => {
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let _ = fs::set_permissions(path, fs::Permissions::from_mode(0o700));
+            }
+            Ok(())
+        }
+        Err(error) => Err(crate::vault::node_mkdir_error(path, &error)),
+    }
+}
+
 fn import_mkdir(path: &Path) -> Result<(), String> {
     import_mkdir_at(path, path)
 }
@@ -2068,6 +2080,7 @@ mod tests {
         strip_active_html, tool_failure_message, tool_limit, unique_directory, urlencoding_decode,
         validate_listing, walk_limited, write_unique_markdown, atomic_copy_onenote,
         atomic_write_onenote, ensure_note_directory, create_onenote_temp_dir,
+        prepare_input, import_in_temp, render_sections,
     };
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -2346,6 +2359,89 @@ mod tests {
             0o700
         );
         let _ = std::fs::remove_dir_all(&created);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_unwritable_onenote_render_folder_reports_the_desktop_mkdir_error() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = std::env::temp_dir().join(format!(
+            "fanotes-onenote-render-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        let locked = root.join("locked");
+        std::fs::create_dir_all(&locked).unwrap();
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o555)).unwrap();
+        struct Restore(std::path::PathBuf);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                let _ = std::fs::set_permissions(&self.0, std::fs::Permissions::from_mode(0o700));
+                if let Some(parent) = self.0.parent() {
+                    let _ = std::fs::remove_dir_all(parent);
+                }
+            }
+        }
+        let _restore = Restore(locked.clone());
+        let archive = root.join("Archiv.zip");
+        std::fs::write(&archive, b"zip").unwrap();
+        assert_eq!(
+            prepare_input(&archive, &locked, Path::new("7za")).unwrap_err(),
+            format!(
+                "EACCES: permission denied, mkdir '{}'",
+                locked.join("extracted").display()
+            )
+        );
+        assert!(std::fs::read_dir(&locked).unwrap().next().is_none());
+
+        let open = root.join("open");
+        std::fs::create_dir(&open).unwrap();
+        let extracted = open.join("extracted");
+        std::fs::create_dir(&extracted).unwrap();
+        assert_eq!(
+            prepare_input(&archive, &open, Path::new("7za")).unwrap_err(),
+            format!("EEXIST: file already exists, mkdir '{}'", extracted.display())
+        );
+        assert!(extracted.is_dir());
+
+        let source = root.join("Notiz.onetoc2");
+        std::fs::write(&source, b"toc").unwrap();
+        assert_eq!(
+            import_in_temp(
+                &source,
+                &root.join("vault"),
+                Path::new("one2html"),
+                Path::new("7za"),
+                &locked,
+            )
+            .unwrap_err(),
+            format!(
+                "EACCES: permission denied, mkdir '{}'",
+                locked.join("rendered").display()
+            )
+        );
+
+        let notebook = root.join("notebook");
+        let section = notebook.join("Kapitel/Seite.one");
+        std::fs::create_dir_all(section.parent().unwrap()).unwrap();
+        std::fs::write(&section, b"one").unwrap();
+        let output = root.join("output");
+        std::fs::create_dir(&output).unwrap();
+        std::fs::set_permissions(&output, std::fs::Permissions::from_mode(0o555)).unwrap();
+        let destination = output.join("Kapitel");
+        assert_eq!(
+            render_sections(&[section], &notebook, &output, Path::new("one2html")).unwrap_err(),
+            format!(
+                "EACCES: permission denied, mkdir '{}'",
+                destination.display()
+            )
+        );
+        std::fs::set_permissions(&output, std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(!destination.exists());
     }
 
     #[test]
