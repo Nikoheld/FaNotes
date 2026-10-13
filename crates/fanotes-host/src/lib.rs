@@ -1771,6 +1771,14 @@ fn marker_is_fresh(created_at: &str) -> bool {
 
 fn unix_millis_from_iso(value: &str) -> Option<u64> {
     let trimmed = value.trim_matches(is_date_parse_space);
+    if has_ampm_word(trimmed) {
+        // `4:00 PM` is 16:00. A `T` before AM/PM is NaN.
+        if has_iso_t(trimmed) {
+            return None;
+        }
+        let normalized = fold_ampm(trimmed)?;
+        return unix_millis_from_iso(&normalized);
+    }
     if has_english_month(trimmed) {
         // `Oct 13, 2026` is local midnight. `GMT` and `EST` name an offset.
         let normalized = rewrite_month_name(trimmed)?;
@@ -2087,6 +2095,105 @@ fn two_digits(text: &str) -> bool {
 
 fn has_english_month(value: &str) -> bool {
     legacy_words(value).iter().any(|word| english_month(word).is_some())
+}
+
+fn has_ampm_word(value: &str) -> bool {
+    value
+        .split(is_date_parse_space)
+        .any(|word| is_ampm(word))
+}
+
+fn is_ampm(word: &str) -> bool {
+    word.eq_ignore_ascii_case("am") || word.eq_ignore_ascii_case("pm")
+}
+
+fn has_iso_t(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    bytes.windows(3).any(|window| {
+        window[0].is_ascii_digit()
+            && (window[1] == b'T' || window[1] == b't')
+            && window[2].is_ascii_digit()
+    })
+}
+
+/// `4:00 PM` becomes `16:00`. `12:00 AM` becomes `00:00`. A following zone
+/// name is appended as a numeric offset.
+fn fold_ampm(trimmed: &str) -> Option<String> {
+    let words: Vec<&str> = trimmed
+        .split(is_date_parse_space)
+        .filter(|word| !word.is_empty())
+        .collect();
+    let ampm_at = words.iter().position(|word| is_ampm(word))?;
+    if ampm_at == 0 {
+        return None;
+    }
+    let pm = words[ampm_at].eq_ignore_ascii_case("pm");
+    let mut clock = convert_ampm_clock(words[ampm_at - 1], pm)?;
+    let mut skip_zone = false;
+    if let Some(zone) = words.get(ampm_at + 1) {
+        if let Some(suffix) = named_zone_offset(zone) {
+            clock.push_str(&suffix);
+            skip_zone = true;
+        }
+    }
+    let mut kept = Vec::new();
+    for (index, word) in words.iter().enumerate() {
+        if index == ampm_at - 1 {
+            kept.push(clock.as_str());
+        } else if index == ampm_at || (skip_zone && index == ampm_at + 1) {
+            continue;
+        } else {
+            kept.push(*word);
+        }
+    }
+    Some(kept.join(" "))
+}
+
+fn convert_ampm_clock(clock: &str, pm: bool) -> Option<String> {
+    let (clock_body, fraction) = match clock.split_once('.') {
+        Some((clock_body, fraction))
+            if !fraction.is_empty() && fraction.bytes().all(|byte| byte.is_ascii_digit()) =>
+        {
+            (clock_body, Some(fraction))
+        }
+        None => (clock, None),
+        Some(_) => return None,
+    };
+    let mut numbers = Vec::new();
+    for part in clock_body.split(':') {
+        if part.is_empty() || !part.bytes().all(|byte| byte.is_ascii_digit()) {
+            return None;
+        }
+        numbers.push(part.parse::<u32>().ok()?);
+    }
+    if !(2..=3).contains(&numbers.len()) {
+        return None;
+    }
+    let hour = ampm_hour(numbers[0], pm)?;
+    if numbers[1] > 59 || numbers.get(2).copied().unwrap_or(0) > 59 {
+        return None;
+    }
+    let mut out = if numbers.len() == 3 {
+        format!("{hour:02}:{:02}:{:02}", numbers[1], numbers[2])
+    } else {
+        format!("{hour:02}:{:02}", numbers[1])
+    };
+    if let Some(fraction) = fraction {
+        out.push('.');
+        out.push_str(fraction);
+    }
+    Some(out)
+}
+
+/// `12 AM` and `0 AM` are midnight. `12 PM` and `0 PM` are noon.
+fn ampm_hour(hour: u32, pm: bool) -> Option<u32> {
+    if hour > 12 {
+        return None;
+    }
+    if hour == 0 || hour == 12 {
+        return Some(if pm { 12 } else { 0 });
+    }
+    Some(if pm { hour + 12 } else { hour })
 }
 
 fn legacy_words(value: &str) -> Vec<&str> {
@@ -5306,6 +5413,28 @@ mod local_zone_tests {
         assert_eq!(
             unix_millis_from_iso("Oct 13, 2026 16:00:00 EST"),
             Some(1_791_925_200_000)
+        );
+    }
+
+    #[test]
+    fn a_pm_clock_is_twelve_hours_later() {
+        let _lock = TRASH_CLOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let _restore = RestoreTz(std::env::var_os("TZ"));
+        unsafe { std::env::set_var("TZ", "America/New_York") };
+        unsafe { tzset() };
+        assert_eq!(
+            unix_millis_from_iso("Oct 13, 2026 4:00 PM"),
+            Some(1_791_921_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13, 2026 12:00 AM"),
+            Some(1_791_864_000_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 4:00 PM"),
+            Some(1_791_921_600_000)
         );
     }
 }
