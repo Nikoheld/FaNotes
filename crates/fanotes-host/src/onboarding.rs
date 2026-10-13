@@ -457,7 +457,8 @@ pub(crate) fn read_status(root: &Path) -> Option<&'static str> {
         .ok()?
         .join("onboarding.json");
     let meta = fs::symlink_metadata(&path).ok()?;
-    if meta.file_type().is_symlink() || !meta.is_file() || meta.len() > 16 * 1024 {
+    // Desktop `readOnboardingStatus` ignores a file larger than 4,096 bytes.
+    if meta.file_type().is_symlink() || !meta.is_file() || meta.len() > 4096 {
         return None;
     }
     let bytes = fs::read(&path).ok()?;

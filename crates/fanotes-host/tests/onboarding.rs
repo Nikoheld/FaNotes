@@ -711,3 +711,33 @@ fn a_cached_tree_sorts_each_level_like_the_desktop() {
     assert_ne!(child_names, stored_children);
     assert_eq!(child_names, vec!["Anfang.md".to_owned(), "Zettel.md".to_owned()]);
 }
+
+#[test]
+fn an_oversized_onboarding_file_does_not_keep_setup_open() {
+    let dir = std::env::temp_dir().join(format!(
+        "fanotes-onboarding-size-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    let vault = dir.join("vault");
+    fs::create_dir_all(vault.join(".fanotes")).unwrap();
+    // Desktop `readOnboardingStatus` ignores a file larger than 4,096 bytes.
+    // A pending status past that limit must not block the shell.
+    let padding = " ".repeat(4096);
+    fs::write(
+        vault.join(".fanotes/onboarding.json"),
+        format!("{{\"version\":1,\"status\":\"pending\",\"pad\":\"{padding}\"}}\n"),
+    )
+    .unwrap();
+    assert!(fs::metadata(vault.join(".fanotes/onboarding.json")).unwrap().len() > 4096);
+    let mut host = Host::open(dir.join("app"));
+    host.set_vault(vault).unwrap();
+    assert_eq!(
+        host.dispatch("fanotes:bootstrap", &[]).unwrap()["onboardingRequired"],
+        false
+    );
+}
