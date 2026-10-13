@@ -714,3 +714,38 @@ fn an_unwritable_sync_folder_uses_a_sixteen_hex_temporary_name() {
     fs::set_permissions(&vault, fs::Permissions::from_mode(0o700)).unwrap();
     assert_eq!(fs::read(vault.join("Seite.md")).unwrap(), b"alt\n");
 }
+
+#[test]
+fn a_sync_write_onto_a_directory_reports_the_desktop_rename_error() {
+    let (vault, _app, mut host) = host();
+    let vault = fs::canonicalize(&vault).unwrap();
+    let target = vault.join("Seite.md");
+    fs::create_dir(&target).unwrap();
+    let error = host
+        .dispatch(
+            "fanotes:sync-write",
+            &[json!("Seite.md"), json!("SGFsbG8K")],
+        )
+        .unwrap_err();
+    let prefix = format!(
+        "EISDIR: illegal operation on a directory, rename '{}/.Seite.md.{}.",
+        vault.display(),
+        std::process::id()
+    );
+    assert!(error.starts_with(&prefix), "{error}");
+    let hex = error[prefix.len()..].split(".tmp'").next().unwrap();
+    assert_eq!(hex.len(), 16, "{error}");
+    assert!(hex.chars().all(|character| character.is_ascii_hexdigit()), "{error}");
+    assert!(
+        error.ends_with(&format!(".tmp' -> '{}'", target.display())),
+        "{error}"
+    );
+    assert!(target.is_dir());
+    let leftovers: Vec<_> = fs::read_dir(&vault)
+        .unwrap()
+        .flatten()
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .filter(|name| name.ends_with(".tmp"))
+        .collect();
+    assert!(leftovers.is_empty(), "{leftovers:?}");
+}
