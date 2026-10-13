@@ -296,7 +296,7 @@ pub fn read_subject_books(host: &Host) -> Result<Value, String> {
     }
     let raw = fs::read(&path)
         .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
-        .map_err(|_| "Die Fachbuch-Liste ist ungültig oder zu groß.".to_owned())?;
+        .map_err(|error| node_open_error(&path, &error))?;
     let Ok(parsed) = serde_json::from_str::<Value>(&raw) else {
         return Ok(json!([]));
     };

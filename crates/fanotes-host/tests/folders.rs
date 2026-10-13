@@ -435,6 +435,37 @@ fn a_fast_tree_skips_a_folder_that_cannot_be_listed() {
     drop(restore);
 }
 
+#[cfg(unix)]
+#[test]
+fn an_unreadable_folder_color_file_uses_the_desktop_open_error() {
+    use std::os::unix::fs::PermissionsExt;
+    let (mut host, vault, _) = host();
+    fs::create_dir_all(vault.join(".fanotes")).unwrap();
+    let path = vault.join(".fanotes/folder-colors.json");
+    fs::write(
+        &path,
+        br##"{"version":1,"colors":{"Mathe":"#A1B2C3"}}"##,
+    )
+    .unwrap();
+    let canonical = fs::canonicalize(&path).unwrap();
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o000)).unwrap();
+    struct Restore(std::path::PathBuf);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            let _ = fs::set_permissions(&self.0, fs::Permissions::from_mode(0o600));
+        }
+    }
+    let _restore = Restore(path.clone());
+    assert_eq!(
+        host.dispatch("fanotes:get-tree", &[]).unwrap_err(),
+        format!("EACCES: permission denied, open '{}'", canonical.display())
+    );
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+    let tree = host.dispatch("fanotes:get-tree", &[]).unwrap();
+    assert_eq!(tree[0]["name"], "Mathe");
+    assert_eq!(tree[0]["color"], "#a1b2c3");
+}
+
 #[test]
 fn a_folder_color_with_a_bad_byte_still_paints_the_folder() {
     let (mut host, vault, _) = host();
