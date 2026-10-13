@@ -196,7 +196,7 @@ fn open_subject_book_popout(
     let book = result["bookPath"].as_str().unwrap_or("").to_owned();
     let fragment = format!("subject-book={}", encode_uri_component(&book));
     if let Some(existing) = app.get_webview_window("subject-book") {
-        let _ = existing.eval(&format!("location.hash = '#{fragment}'"));
+        let _ = existing.eval(&subject_book_hash_assignment(&book));
         let _ = existing.set_focus();
         return Ok(result);
     }
@@ -310,6 +310,18 @@ fn capture_window(window: tauri::WebviewWindow) -> Result<Value, String> {
         .recv_timeout(std::time::Duration::from_secs(20))
         .map_err(|_| "Das Fensterbild ist ungültig.".to_owned())??;
     Ok(Value::String(image))
+}
+
+/// JavaScript that points an open book window at `book`.
+///
+/// `encodeURIComponent` leaves `'` untouched. A single-quoted script would end
+/// at that apostrophe and the window would keep showing the previous book.
+fn subject_book_hash_assignment(book: &str) -> String {
+    let hash = format!("#subject-book={}", encode_uri_component(book));
+    // JSON uses double quotes, so an apostrophe in the book title cannot end
+    // the script the way a single-quoted JavaScript string would.
+    let literal = serde_json::to_string(&hash).unwrap_or_else(|_| "\"\"".to_owned());
+    format!("location.hash = {literal}")
 }
 
 fn encode_uri_component(value: &str) -> String {
@@ -652,6 +664,22 @@ mod tests {
             let allowed = parsed.is_ok_and(|url| super::navigation_allowed(&url));
             assert!(!allowed, "{url}");
         }
+    }
+
+    #[test]
+    fn an_apostrophe_in_a_book_path_stays_inside_the_hash_assignment() {
+        assert_eq!(
+            super::subject_book_hash_assignment("Mathe/O'Brien.pdf"),
+            "location.hash = \"#subject-book=Mathe%2FO'Brien.pdf\""
+        );
+        assert_eq!(
+            super::subject_book_hash_assignment("Mathe/Buch 1.pdf"),
+            "location.hash = \"#subject-book=Mathe%2FBuch%201.pdf\""
+        );
+        assert_eq!(
+            super::subject_book_hash_assignment("Say \"Hi\".pdf"),
+            "location.hash = \"#subject-book=Say%20%22Hi%22.pdf\""
+        );
     }
 }
 
