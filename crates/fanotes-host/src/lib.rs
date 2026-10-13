@@ -1771,6 +1771,17 @@ fn marker_is_fresh(created_at: &str) -> bool {
 
 fn unix_millis_from_iso(value: &str) -> Option<u64> {
     let trimmed = value.trim_matches(is_date_parse_space);
+    // A period between numbers is a hyphen. A period before a clock is a space.
+    // Trailing periods make a date local. A `T` form keeps its fraction dot.
+    if !has_iso_t(trimmed) && trimmed.contains('.') {
+        let normalized = rewrite_periods(trimmed);
+        if normalized != trimmed {
+            if !normalized.contains([' ', 'T', 't', ',']) {
+                return date_only_millis(&normalized, true);
+            }
+            return unix_millis_from_iso(&normalized);
+        }
+    }
     if has_ampm_word(trimmed) {
         // `4:00 PM` is 16:00. A `T` before AM/PM is NaN.
         if has_iso_t(trimmed) {
@@ -1876,6 +1887,55 @@ enum IsoDate<'a> {
     DateTime(&'a str, &'a str),
     DateOnly(&'a str),
     Invalid,
+}
+
+/// A `.` before `HH:` is a space. A `.` between date fields is a hyphen.
+/// A `.` after a colon, followed by digits, stays the fraction. Trailing
+/// periods are dropped.
+fn rewrite_periods(value: &str) -> String {
+    let chars: Vec<char> = value.chars().collect();
+    let mut out = String::with_capacity(value.len());
+    let mut index = 0;
+    while index < chars.len() {
+        if chars[index] != '.' {
+            out.push(chars[index]);
+            index += 1;
+            continue;
+        }
+        let mut next = index;
+        while next < chars.len() && chars[next] == '.' {
+            next += 1;
+        }
+        let digits = chars[next..]
+            .iter()
+            .take_while(|character| character.is_ascii_digit())
+            .count();
+        let after_digits = chars.get(next + digits).copied();
+        if digits > 0 && after_digits == Some(':') {
+            if !out.is_empty() && !out.ends_with(' ') {
+                out.push(' ');
+            }
+            index = next;
+            continue;
+        }
+        if digits > 0
+            && !out.contains(':')
+            && after_digits.is_none_or(|character| matches!(character, '.' | '-' | ','))
+        {
+            if !out.is_empty() && !out.ends_with('-') {
+                out.push('-');
+            }
+            index = next;
+            continue;
+        }
+        if digits > 0 && out.contains(':') && next == index + 1 {
+            out.push('.');
+            index = next;
+            continue;
+        }
+        index = next;
+    }
+    out
 }
 
 /// `Date.parse` whitespace is tab, line feed, vertical tab, form feed, carriage
@@ -5725,5 +5785,38 @@ mod local_zone_tests {
         );
         assert_eq!(unix_millis_from_iso("2026-10-13T16:00:00Z,"), None);
         assert_eq!(unix_millis_from_iso("2026-10-13T16:00:00,"), None);
+    }
+
+    #[test]
+    fn a_period_separates_a_reset_date_from_its_clock() {
+        let _lock = TRASH_CLOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let _restore = RestoreTz(std::env::var_os("TZ"));
+        unsafe { std::env::set_var("TZ", "America/New_York") };
+        unsafe { tzset() };
+        assert_eq!(unix_millis_from_iso("2026-10-13"), Some(1_791_849_600_000));
+        assert_eq!(unix_millis_from_iso("2026-10-13."), Some(1_791_864_000_000));
+        assert_eq!(unix_millis_from_iso("2026."), Some(1_767_243_600_000));
+        assert_eq!(unix_millis_from_iso("2026-10."), Some(1_790_827_200_000));
+        assert_eq!(unix_millis_from_iso("2026-10-13..."), Some(1_791_864_000_000));
+        assert_eq!(unix_millis_from_iso("2026.10.13"), Some(1_791_864_000_000));
+        assert_eq!(unix_millis_from_iso("10.13.2026"), Some(1_791_864_000_000));
+        assert_eq!(unix_millis_from_iso("13.10.2026"), None);
+        assert_eq!(unix_millis_from_iso("2026-10-13.16:00"), Some(1_791_921_600_000));
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13.16:00:00Z"),
+            Some(1_791_907_200_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13.16:00:00.5"),
+            Some(1_791_921_600_500)
+        );
+        assert_eq!(unix_millis_from_iso("2-1-1."), Some(981_003_600_000));
+        assert_eq!(unix_millis_from_iso("2026-10-13T16:00:00."), None);
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13T16:00:00.5"),
+            Some(1_791_921_600_500)
+        );
     }
 }
