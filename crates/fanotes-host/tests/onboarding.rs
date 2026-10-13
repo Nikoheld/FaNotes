@@ -22,6 +22,53 @@ fn host() -> (std::path::PathBuf, Host) {
     (vault, host)
 }
 
+#[cfg(unix)]
+#[test]
+fn a_failed_setup_save_keeps_setup_open() {
+    use std::os::unix::fs::PermissionsExt;
+    let (vault, mut host) = host();
+    host.settings.insert("uiLanguage".to_owned(), json!("en"));
+    let app = host.app_data.clone();
+    fs::set_permissions(&app, fs::Permissions::from_mode(0o555)).unwrap();
+    struct Restore(std::path::PathBuf);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            let _ = fs::set_permissions(&self.0, fs::Permissions::from_mode(0o700));
+            let _ = fs::remove_dir_all(self.0.parent().unwrap_or(&self.0));
+        }
+    }
+    let _restore = Restore(app.clone());
+    let error = host
+        .dispatch("fanotes:complete-onboarding", &[json!(["Physics"])])
+        .unwrap_err();
+    let app = fs::canonicalize(&app).unwrap();
+    let prefix = format!(
+        "EACCES: permission denied, open '{}/.settings.json.{}.",
+        app.display(),
+        std::process::id()
+    );
+    assert!(error.starts_with(&prefix), "{error}");
+    let hex = error[prefix.len()..].trim_end_matches(".tmp'");
+    assert_eq!(hex.len(), 20, "{error}");
+    assert!(
+        hex.chars().all(|character| character.is_ascii_hexdigit()),
+        "{error}"
+    );
+    assert!(error.ends_with(".tmp'"), "{error}");
+    assert!(host.onboarding_required);
+    assert_eq!(
+        host.dispatch("fanotes:bootstrap", &[]).unwrap()["onboardingRequired"],
+        true
+    );
+    assert_eq!(
+        host.dispatch("fanotes:get-tree", &[]).unwrap_err(),
+        "Bitte schließe zuerst die FaNotes-Ersteinrichtung ab."
+    );
+    assert!(vault.join("Inbox").is_dir());
+    assert!(vault.join("Physics").is_dir());
+    assert!(!app.join("settings.json").exists());
+}
+
 #[test]
 fn an_english_setup_leaves_a_german_subject_name_uncreated() {
     let (vault, mut english) = host();
