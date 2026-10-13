@@ -129,8 +129,8 @@ fn import_in_temp(
     };
     let notebook_name = safe_segment(notebook_source, "OneNote-Notizbuch");
     let note_root = unique_directory(vault, &format!("OneNote – {notebook_name}"))?;
-    let internal = crate::vault::ensure_internal_directory(vault)
-        .map_err(|_| "Der OneNote-Import konnte nicht angelegt werden.".to_owned())?;
+    // Desktop `mkdir` creates `.fanotes` and leaves a leftover `.lernwerk` folder.
+    let internal = vault.join(".fanotes");
     let batch = internal.join("onenote").join(uuid());
     let attachment_dir = batch.join("attachments");
     create_private_dir(&attachment_dir)
