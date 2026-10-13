@@ -802,7 +802,8 @@ pub fn js_json_number(value: f64) -> Value {
 
 /// `Date.parse` plus `toISOString`. A zoned timestamp becomes UTC with milliseconds.
 ///
-/// A date without a time is midnight UTC. A time without a zone is local time.
+/// A date without a time is midnight UTC. A year or a year and month is the
+/// first day of that period. A time without a zone is local time.
 /// In a daylight-saving overlap that is the earlier instant. A skipped hour
 /// keeps the offset from before the transition. A day past the end of the
 /// month rolls forward, and `24:00:00` is the next midnight.
@@ -811,37 +812,129 @@ pub fn canonical_iso(value: &str) -> Option<String> {
     if is_date_only_shape(trimmed) {
         return date_only_iso(trimmed);
     }
-    let bytes = value.as_bytes();
-    if bytes.len() < 10 || bytes[4] != b'-' || bytes[7] != b'-' {
-        return None;
-    }
-    let year: i32 = value.get(0..4)?.parse().ok()?;
-    let month: i32 = value.get(5..7)?.parse().ok()?;
-    let day: i32 = value.get(8..10)?.parse().ok()?;
+    let (year, month, day, time_at) = split_calendar(value)?;
     if !(1..=12).contains(&month) || !(1..=31).contains(&day) {
         return None;
     }
-    if bytes.len() == 10 {
-        let (year, month, day) = normalize_ymd(year, month, day)?;
-        return Some(format!("{year:04}-{month:02}-{day:02}T00:00:00.000Z"));
+    let (mut hour, minute, second, millis, rest) = parse_clock(value.get(time_at..)?)?;
+    let (mut year, mut month, mut day) = normalize_ymd(year, month, day)?;
+    if hour == 24 {
+        if minute != 0 || second != 0 || millis != 0 {
+            return None;
+        }
+        hour = 0;
+        (year, month, day) = add_day(year, month, day);
     }
-    let separator = *bytes.get(10)?;
-    if separator != b'T' && separator != b't' && separator != b' ' {
+    let (year, month, day, hour, minute, second) = if rest.eq_ignore_ascii_case("Z") {
+        (year, month, day, hour, minute, second)
+    } else if rest.is_empty() {
+        local_civil_to_utc(year, month, day, hour, minute, second)?
+    } else {
+        let offset = parse_offset(rest)?;
+        shift_seconds(year, month, day, hour, minute, second, -(offset as i64))?
+    };
+    Some(format!(
+        "{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}.{millis:03}Z"
+    ))
+}
+
+/// A calendar date with no time: `YYYY`, `YYYY-MM`, or `YYYY-MM-DD`.
+fn is_date_only_shape(value: &str) -> bool {
+    !value.is_empty()
+        && !value
+            .bytes()
+            .any(|byte| matches!(byte, b'T' | b't' | b' ' | b'+'))
+        && value.bytes().filter(|byte| *byte == b'-').count() <= 2
+}
+
+fn date_only_iso(value: &str) -> Option<String> {
+    let mut parts = value.split('-');
+    let year = parts.next()?;
+    let month = parts.next();
+    let day = parts.next();
+    if parts.next().is_some() || year.len() != 4 || !year.bytes().all(|byte| byte.is_ascii_digit())
+    {
         return None;
     }
-    if bytes.len() < 16 || bytes.get(13) != Some(&b':') {
+    let year: i32 = year.parse().ok()?;
+    let (month, day) = match (month, day) {
+        (None, _) => (1, 1),
+        (Some(month), None) => {
+            if !(1..=2).contains(&month.len()) || !month.bytes().all(|byte| byte.is_ascii_digit()) {
+                return None;
+            }
+            let month: i32 = month.parse().ok()?;
+            if !(1..=12).contains(&month) {
+                return None;
+            }
+            (month, 1)
+        }
+        (Some(month), Some(day)) => {
+            if !(1..=2).contains(&month.len())
+                || !(1..=2).contains(&day.len())
+                || !month.bytes().all(|byte| byte.is_ascii_digit())
+                || !day.bytes().all(|byte| byte.is_ascii_digit())
+            {
+                return None;
+            }
+            let month: i32 = month.parse().ok()?;
+            let day: i32 = day.parse().ok()?;
+            if !(1..=12).contains(&month) || !(1..=31).contains(&day) {
+                return None;
+            }
+            (month, day)
+        }
+    };
+    let (year, month, day) = normalize_ymd(year, month, day)?;
+    Some(format!("{year:04}-{month:02}-{day:02}T00:00:00.000Z"))
+}
+
+/// `YYYY`, `YYYY-MM`, or `YYYY-MM-DD`, then the index of the clock.
+///
+/// A date-time month or day is two digits, so `2026-1T...` is not a time.
+fn split_calendar(value: &str) -> Option<(i32, i32, i32, usize)> {
+    let bytes = value.as_bytes();
+    if bytes.len() < 5 || !bytes[..4].iter().all(u8::is_ascii_digit) {
         return None;
     }
-    let mut hour: i32 = value.get(11..13)?.parse().ok()?;
-    let minute: i32 = value.get(14..16)?.parse().ok()?;
+    let year: i32 = value[..4].parse().ok()?;
+    if matches!(bytes[4], b'T' | b't' | b' ') {
+        return Some((year, 1, 1, 5));
+    }
+    if bytes[4] != b'-' || bytes.len() < 8 || !bytes[5..7].iter().all(u8::is_ascii_digit) {
+        return None;
+    }
+    let month: i32 = value[5..7].parse().ok()?;
+    if matches!(bytes.get(7), Some(b'T' | b't' | b' ')) {
+        return Some((year, month, 1, 8));
+    }
+    if bytes.get(7) != Some(&b'-')
+        || bytes.len() < 11
+        || !bytes[8..10].iter().all(u8::is_ascii_digit)
+        || !matches!(bytes.get(10), Some(b'T' | b't' | b' '))
+    {
+        return None;
+    }
+    let day: i32 = value[8..10].parse().ok()?;
+    Some((year, month, day, 11))
+}
+
+/// `HH:mm`, optional seconds, and an optional fraction. The remainder is the zone.
+fn parse_clock(time: &str) -> Option<(i32, i32, i32, u32, &str)> {
+    let bytes = time.as_bytes();
+    if bytes.len() < 5 || bytes.get(2) != Some(&b':') {
+        return None;
+    }
+    let hour: i32 = time.get(0..2)?.parse().ok()?;
+    let minute: i32 = time.get(3..5)?.parse().ok()?;
     // `2026-01-02T03:04Z` has no seconds. A fraction there is not a time.
-    let (second, mut index) = if bytes.get(16) == Some(&b':') {
-        let second = value.get(17..19)?.parse().ok()?;
-        (second, 19)
-    } else if bytes.get(16) == Some(&b'.') {
+    let (second, mut index) = if bytes.get(5) == Some(&b':') {
+        let second = time.get(6..8)?.parse().ok()?;
+        (second, 8)
+    } else if bytes.get(5) == Some(&b'.') {
         return None;
     } else {
-        (0, 16)
+        (0, 5)
     };
     if !(0..=24).contains(&hour) || !(0..=59).contains(&minute) || !(0..=59).contains(&second) {
         return None;
@@ -856,64 +949,12 @@ pub fn canonical_iso(value: &str) -> Option<String> {
         if index == start {
             return None;
         }
-        let digits = value.get(start..index)?;
+        let digits = time.get(start..index)?;
         let taken = digits.chars().take(3).collect::<String>();
         let parsed: u32 = taken.parse().ok()?;
         millis = parsed * 10u32.pow((3 - taken.len()) as u32);
     }
-    let (mut year, mut month, mut day) = normalize_ymd(year, month, day)?;
-    if hour == 24 {
-        if minute != 0 || second != 0 || millis != 0 {
-            return None;
-        }
-        hour = 0;
-        (year, month, day) = add_day(year, month, day);
-    }
-    let rest = value.get(index..)?;
-    let (year, month, day, hour, minute, second) = if rest.eq_ignore_ascii_case("Z") {
-        (year, month, day, hour, minute, second)
-    } else if rest.is_empty() {
-        local_civil_to_utc(year, month, day, hour, minute, second)?
-    } else {
-        let offset = parse_offset(rest)?;
-        shift_seconds(year, month, day, hour, minute, second, -(offset as i64))?
-    };
-    Some(format!(
-        "{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}.{millis:03}Z"
-    ))
-}
-
-/// A calendar date with no time. Month and day may be one digit.
-fn is_date_only_shape(value: &str) -> bool {
-    !value
-        .bytes()
-        .any(|byte| matches!(byte, b'T' | b't' | b' ' | b'+'))
-        && value.bytes().filter(|byte| *byte == b'-').count() == 2
-}
-
-fn date_only_iso(value: &str) -> Option<String> {
-    let mut parts = value.split('-');
-    let year = parts.next()?;
-    let month = parts.next()?;
-    let day = parts.next()?;
-    if parts.next().is_some()
-        || year.len() != 4
-        || !(1..=2).contains(&month.len())
-        || !(1..=2).contains(&day.len())
-        || !year.bytes().all(|byte| byte.is_ascii_digit())
-        || !month.bytes().all(|byte| byte.is_ascii_digit())
-        || !day.bytes().all(|byte| byte.is_ascii_digit())
-    {
-        return None;
-    }
-    let year: i32 = year.parse().ok()?;
-    let month: i32 = month.parse().ok()?;
-    let day: i32 = day.parse().ok()?;
-    if !(1..=12).contains(&month) || !(1..=31).contains(&day) {
-        return None;
-    }
-    let (year, month, day) = normalize_ymd(year, month, day)?;
-    Some(format!("{year:04}-{month:02}-{day:02}T00:00:00.000Z"))
+    Some((hour, minute, second, millis, time.get(index..)?))
 }
 
 fn parse_offset(rest: &str) -> Option<i32> {
@@ -1290,6 +1331,46 @@ pub fn js_value_string(value: &Value) -> String {
 #[cfg(test)]
 mod tests {
     use super::{parse_famd, parse_note_links, serialize_famd, FamdPayload, FAMD_SCHEMA};
+
+    #[test]
+    fn a_year_or_year_month_is_the_first_day() {
+        assert_eq!(
+            super::canonical_iso("2026").as_deref(),
+            Some("2026-01-01T00:00:00.000Z")
+        );
+        assert_eq!(
+            super::canonical_iso("2026-01").as_deref(),
+            Some("2026-01-01T00:00:00.000Z")
+        );
+        assert_eq!(
+            super::canonical_iso("2026-1").as_deref(),
+            Some("2026-01-01T00:00:00.000Z")
+        );
+        assert_eq!(
+            super::canonical_iso(" 2026-01 ").as_deref(),
+            Some("2026-01-01T00:00:00.000Z")
+        );
+        assert_eq!(
+            super::canonical_iso("2026T00:00:00Z").as_deref(),
+            Some("2026-01-01T00:00:00.000Z")
+        );
+        assert_eq!(
+            super::canonical_iso("2026-01T03:04Z").as_deref(),
+            Some("2026-01-01T03:04:00.000Z")
+        );
+        assert_eq!(
+            super::canonical_iso("2026T24:00:00Z").as_deref(),
+            Some("2026-01-02T00:00:00.000Z")
+        );
+        assert_eq!(
+            super::canonical_iso("2026-01T24:00:00+02:00").as_deref(),
+            Some("2026-01-01T22:00:00.000Z")
+        );
+        assert_eq!(super::canonical_iso("2026-1T00:00:00Z"), None);
+        assert_eq!(super::canonical_iso("2026-1-2T00:00:00Z"), None);
+        assert_eq!(super::canonical_iso("2026-00"), None);
+        assert_eq!(super::canonical_iso("2026-13"), None);
+    }
 
     #[test]
     fn a_local_time_uses_the_desktop_daylight_saving_choice() {
