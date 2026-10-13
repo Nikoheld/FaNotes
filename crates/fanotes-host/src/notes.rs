@@ -448,8 +448,8 @@ pub fn record_history(vault_root: &Path, relative: &str, content: &str) -> Resul
         random_suffix()?
     );
     let snapshot_path = directory.join(format!("{id}.md"));
-    atomic_write(&snapshot_path, content.as_bytes(), 0o600)
-        .map_err(|_| "Der Verlauf konnte nicht gespeichert werden.".to_owned())?;
+    // Desktop `writeFile` uses the final snapshot name and rethrows that error.
+    write_history_snapshot(&snapshot_path, content)?;
     index["path"] = Value::String(relative.to_owned());
     index["format"] = Value::String("fanotes-history-v1".to_owned());
     index
@@ -684,6 +684,24 @@ fn books_path(root: &Path) -> Result<PathBuf, String> {
 
 fn history_mkdir_code(path: &Path, code: i32) -> String {
     crate::vault::node_mkdir_error(path, &std::io::Error::from_raw_os_error(code))
+}
+
+fn write_history_snapshot(path: &Path, content: &str) -> Result<(), String> {
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options
+        .open(path)
+        .map_err(|error| node_open_error(path, &error))?;
+    use std::io::Write;
+    file.write_all(content.as_bytes())
+        .map_err(|error| node_open_error(path, &error))?;
+    let _ = file.sync_all();
+    Ok(())
 }
 
 fn ensure_private_history_dir(directory: &Path) -> Result<(), String> {
@@ -1392,5 +1410,47 @@ mod publish_tests {
         assert!(directory.symlink_metadata().unwrap().file_type().is_symlink());
         assert!(std::fs::read_dir(&elsewhere).unwrap().next().is_some());
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_unwritable_history_snapshot_reports_the_desktop_open_error() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = std::env::temp_dir().join(format!(
+            "fanotes-history-write-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        let directory = history_dir(&root, "Seite.md").unwrap();
+        std::fs::create_dir_all(&directory).unwrap();
+        std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o555)).unwrap();
+        struct Restore(std::path::PathBuf);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                let _ = std::fs::set_permissions(&self.0, std::fs::Permissions::from_mode(0o700));
+                if let Some(root) = self
+                    .0
+                    .parent()
+                    .and_then(|path| path.parent())
+                    .and_then(|path| path.parent())
+                {
+                    let _ = std::fs::remove_dir_all(root);
+                }
+            }
+        }
+        let _restore = Restore(directory.clone());
+        let error = record_history(&root, "Seite.md", "Hallo\n").unwrap_err();
+        let prefix = format!(
+            "EACCES: permission denied, open '{}/",
+            directory.display()
+        );
+        assert!(error.starts_with(&prefix), "{error}");
+        assert!(error.trim_end_matches('\'').ends_with(".md"), "{error}");
+        assert!(!error.contains(".tmp"), "{error}");
+        assert!(std::fs::read_dir(&directory).unwrap().next().is_none());
     }
 }
