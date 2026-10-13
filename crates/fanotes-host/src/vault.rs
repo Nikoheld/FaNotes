@@ -270,7 +270,38 @@ pub(crate) fn truncate_utf16(value: &str, max: usize) -> String {
 
 pub(crate) fn entry_name_key(name: &str) -> String {
     use unicode_normalization::UnicodeNormalization;
-    name.nfc().collect::<String>().to_lowercase()
+    let nfc: String = name.nfc().collect();
+    // Desktop sibling names use `normalize('NFC').toLocaleLowerCase('de-DE')`.
+    // V8 leaves these newer case pairs unchanged, and they break a Greek word
+    // the way an uncased character does, so a following sigma is not final.
+    if !nfc.chars().any(js_keeps_case) {
+        return nfc.to_lowercase();
+    }
+    let mut out = String::with_capacity(nfc.len());
+    let mut segment = String::new();
+    for character in nfc.chars() {
+        if js_keeps_case(character) {
+            if !segment.is_empty() {
+                out.push_str(&segment.to_lowercase());
+                segment.clear();
+            }
+            out.push(character);
+        } else {
+            segment.push(character);
+        }
+    }
+    if !segment.is_empty() {
+        out.push_str(&segment.to_lowercase());
+    }
+    out
+}
+
+/// Case pairs in Unicode 16 that Node 22's `toLocaleLowerCase('de-DE')` does not fold.
+fn js_keeps_case(character: char) -> bool {
+    matches!(
+        character,
+        '\u{A7CE}' | '\u{A7D2}' | '\u{A7D4}' | '\u{16EA0}'..='\u{16EB8}'
+    )
 }
 
 pub fn is_inside_root(root: &Path, candidate: &Path) -> bool {
@@ -405,6 +436,22 @@ mod tests {
         js_tonumber, normalize_relative_path, posix_extname, relative_posix, sync_segments,
     };
     use std::path::Path;
+
+    #[test]
+    fn a_name_key_keeps_the_case_pairs_javascript_does_not_fold() {
+        assert_ne!(
+            super::entry_name_key("\u{A7CE}.md"),
+            super::entry_name_key("\u{A7CF}.md")
+        );
+        assert_ne!(
+            super::entry_name_key("\u{16EA0}.md"),
+            super::entry_name_key("\u{16EBB}.md")
+        );
+        assert_eq!(super::entry_name_key("ΑΣ"), "ας");
+        assert_eq!(super::entry_name_key("Α\u{A7CE}Σ"), "α\u{A7CE}σ");
+        assert_eq!(super::entry_name_key("Α\u{A7CE}.Σ"), "α\u{A7CE}.σ");
+        assert_eq!(super::entry_name_key("Mu\u{0308}he"), super::entry_name_key("Mühe"));
+    }
 
     #[test]
     fn path_limits_count_characters() {
