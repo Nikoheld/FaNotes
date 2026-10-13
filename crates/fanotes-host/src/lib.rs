@@ -1879,21 +1879,21 @@ enum IsoDate<'a> {
 }
 
 /// `Date.parse` whitespace is tab, line feed, vertical tab, form feed, carriage
-/// return, space, U+FEFF, and Unicode Space_Separator. U+0085, U+2028, and
-/// U+2029 are not included.
+/// return, space, U+FEFF, and Unicode Space_Separator. A comma separates a
+/// date from a clock the same way. U+0085, U+2028, and U+2029 are not included.
 fn is_date_parse_space(c: char) -> bool {
     matches!(
         c,
-        '\t' | '\n' | '\u{000B}' | '\u{000C}' | '\r' | ' '
+        '\t' | '\n' | '\u{000B}' | '\u{000C}' | '\r' | ' ' | ','
             | '\u{00A0}' | '\u{1680}'
             | '\u{2000}'..='\u{200A}'
             | '\u{202F}' | '\u{205F}' | '\u{3000}' | '\u{FEFF}'
     )
 }
 
-/// A clock is introduced by `T`, `t`, or that whitespace. Whitespace around a
-/// `T` form is NaN. Whitespace around a date-only value makes it local midnight.
-/// Whitespace around a whitespace-separated clock is ignored.
+/// A clock is introduced by `T`, `t`, whitespace, or a comma. Whitespace or a
+/// comma around a `T` form is NaN. The same marks around a date-only value make
+/// it local midnight.
 fn iso_date_time(value: &str) -> IsoDate<'_> {
     let trimmed = value.trim_matches(is_date_parse_space);
     if trimmed.contains(['T', 't']) {
@@ -5699,5 +5699,31 @@ mod local_zone_tests {
             unix_millis_from_iso(" -000001-01-01"),
             Some(978_325_200_000)
         );
+    }
+
+    #[test]
+    fn a_comma_separates_a_reset_date_from_its_clock() {
+        let _lock = TRASH_CLOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let _restore = RestoreTz(std::env::var_os("TZ"));
+        unsafe { std::env::set_var("TZ", "America/New_York") };
+        unsafe { tzset() };
+        // A comma makes `2026-10-13` local. It also introduces a clock.
+        assert_eq!(unix_millis_from_iso("2026-10-13"), Some(1_791_849_600_000));
+        assert_eq!(unix_millis_from_iso("2026-10-13,"), Some(1_791_864_000_000));
+        assert_eq!(unix_millis_from_iso(",2026-10-13"), Some(1_791_864_000_000));
+        assert_eq!(unix_millis_from_iso("2026-10-13,,"), Some(1_791_864_000_000));
+        assert_eq!(unix_millis_from_iso("2026-10-13,16:00"), Some(1_791_921_600_000));
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13,16:00:00Z"),
+            Some(1_791_907_200_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13,,16:00"),
+            Some(1_791_921_600_000)
+        );
+        assert_eq!(unix_millis_from_iso("2026-10-13T16:00:00Z,"), None);
+        assert_eq!(unix_millis_from_iso("2026-10-13T16:00:00,"), None);
     }
 }
