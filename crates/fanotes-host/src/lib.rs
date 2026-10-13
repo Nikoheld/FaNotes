@@ -1782,11 +1782,13 @@ fn unix_millis_from_iso(value: &str) -> Option<u64> {
         return None;
     }
     let (time, offset_ms) = split_time_zone(time)?;
+    let mut fraction_has_nonzero = false;
     let (clock, millis) = match time.split_once('.') {
         // `Date.parse` keeps the first three fraction digits and ignores the rest.
         Some((clock, fraction))
             if !fraction.is_empty() && fraction.bytes().all(|byte| byte.is_ascii_digit()) =>
         {
+            fraction_has_nonzero = fraction.bytes().any(|byte| byte != b'0');
             let digits = &fraction[..fraction.len().min(3)];
             let millis: u32 = digits.parse().ok()?;
             let scale = 10u32.pow(3 - digits.len() as u32);
@@ -1796,15 +1798,27 @@ fn unix_millis_from_iso(value: &str) -> Option<u64> {
         Some(_) => return None,
     };
     let mut clock_parts = clock.split(':');
-    let hour: u32 = clock_parts.next()?.parse().ok()?;
-    let minute: u32 = clock_parts.next()?.parse().ok()?;
+    let hour_text = clock_parts.next()?;
+    let minute_text = clock_parts.next()?;
+    let second_text = clock_parts.next();
+    let hour: u32 = hour_text.parse().ok()?;
+    let minute: u32 = minute_text.parse().ok()?;
     // `Date.parse` treats `Thh:mmZ` as zero seconds.
-    let second: u32 = match clock_parts.next() {
+    let second: u32 = match second_text {
         Some(text) => text.parse().ok()?,
         None => 0,
     };
+    // `24:00:00` is the next midnight. Any other remainder is NaN, including a
+    // later fraction digit that the first three milliseconds would ignore.
+    let hour_24_midnight = hour == 24
+        && hour_text.len() == 2
+        && minute_text.len() == 2
+        && minute == 0
+        && second == 0
+        && second_text.is_none_or(|text| text.len() == 2)
+        && !fraction_has_nonzero;
     if clock_parts.next().is_some()
-        || hour > 23
+        || (hour > 23 && !hour_24_midnight)
         || minute > 59
         // `Date.parse` rejects second 60.
         || second > 59

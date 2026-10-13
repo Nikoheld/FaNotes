@@ -563,6 +563,48 @@ fn a_reset_marker_with_day_thirty_two_keeps_the_profile() {
 }
 
 #[test]
+fn a_reset_marker_at_hour_twenty_four_wipes_the_profile() {
+    let (app, mut host) = host();
+    host.dispatch("fanotes:save-settings", &[json!({ "theme": "midnight" })])
+        .unwrap();
+    let user_data = std::path::absolute(&app).unwrap();
+    let marker = app.parent().unwrap().join(".fanotes-reset-pending.json");
+    let created = format!("{}T24:00:00.000Z", &fresh_reset_time()[..10]);
+    fs::write(
+        &marker,
+        format!(
+            r#"{{"version":1,"userDataPath":"{}","createdAt":"{created}"}}"#,
+            user_data.display()
+        ),
+    )
+    .unwrap();
+    let _ = Host::open(app.clone());
+    assert!(!app.join("settings.json").exists(), "{created}");
+    assert!(!marker.exists());
+}
+
+#[test]
+fn a_reset_marker_at_hour_twenty_four_with_a_later_fraction_digit_keeps_the_profile() {
+    let (app, mut host) = host();
+    host.dispatch("fanotes:save-settings", &[json!({ "theme": "midnight" })])
+        .unwrap();
+    let user_data = std::path::absolute(&app).unwrap();
+    let marker = app.parent().unwrap().join(".fanotes-reset-pending.json");
+    let created = format!("{}T24:00:00.0001Z", &fresh_reset_time()[..10]);
+    fs::write(
+        &marker,
+        format!(
+            r#"{{"version":1,"userDataPath":"{}","createdAt":"{created}"}}"#,
+            user_data.display()
+        ),
+    )
+    .unwrap();
+    let _ = Host::open(app.clone());
+    assert!(app.join("settings.json").is_file(), "{created}");
+    assert!(!marker.exists());
+}
+
+#[test]
 fn a_symlinked_reset_marker_is_discarded() {
     let (app, mut host) = host();
     host.dispatch("fanotes:save-settings", &[json!({ "theme": "midnight" })])
