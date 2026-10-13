@@ -163,18 +163,30 @@ fn export_note_pdf(
         path
     };
     let file_path = destination.display().to_string();
-    let _ = window.eval("document.documentElement.classList.add('is-printing')");
     let (started, started_rx) = std::sync::mpsc::channel();
     window
         .with_webview(move |webview| {
-            let result = export::print_view(&webview.inner(), &destination);
+            let view = webview.inner();
+            let result = (|| {
+                // The class has to be on the document before WebKit snapshots it.
+                // `evaluate_javascript` returns before that script runs.
+                export::finish_script(
+                    &view,
+                    "document.documentElement.classList.add('is-printing')",
+                )?;
+                let printed = export::print_view(&view, &destination);
+                let _ = export::finish_script(
+                    &view,
+                    "document.documentElement.classList.remove('is-printing')",
+                );
+                printed
+            })();
             let _ = started.send(result);
         })
         .map_err(|_| "Das Fenster ist nicht bereit für den PDF-Export.".to_owned())?;
     let printed = started_rx
         .recv_timeout(std::time::Duration::from_secs(25))
         .map_err(|_| "PDF-Export fehlgeschlagen.".to_owned())?;
-    let _ = window.eval("document.documentElement.classList.remove('is-printing')");
     printed?;
     Ok(json!({ "filePath": file_path }))
 }
