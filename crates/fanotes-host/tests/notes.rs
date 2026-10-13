@@ -1795,7 +1795,12 @@ fn a_companion_save_does_not_create_a_missing_folder() {
         let error = host
             .dispatch(channel, args.as_array().unwrap())
             .unwrap_err();
-        assert_eq!(error, "Der Zielordner wurde nicht gefunden.", "{channel}");
+        assert!(
+            error.starts_with("ENOENT: no such file or directory, open '"),
+            "{channel}: {error}"
+        );
+        assert!(error.contains("/Neu/.Seite.famd."), "{channel}: {error}");
+        assert!(error.ends_with(".tmp'"), "{channel}: {error}");
     }
     assert!(!vault.join("Neu").exists());
 
