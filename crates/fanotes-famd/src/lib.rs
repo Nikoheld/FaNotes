@@ -988,6 +988,23 @@ fn fold_ampm(trimmed: &str) -> Option<String> {
 }
 
 fn ampm_clock(clock: &str, pm: bool) -> Option<String> {
+    if let Some(padded) = in_range_ampm_clock(clock, pm) {
+        return Some(padded);
+    }
+    // `4:00:60 PM` is still a clock. The 60 is a date number on a month-name
+    // date, so the hour changes and the rest of the field stays in the text.
+    let (hour_text, rest) = clock.split_once(':')?;
+    if hour_text.is_empty()
+        || rest.is_empty()
+        || !hour_text.bytes().all(|byte| byte.is_ascii_digit())
+    {
+        return None;
+    }
+    let hour = ampm_hour(hour_text.parse().ok()?, pm)?;
+    Some(format!("{hour:02}:{rest}"))
+}
+
+fn in_range_ampm_clock(clock: &str, pm: bool) -> Option<String> {
     let (body, fraction) = match clock.split_once('.') {
         Some((body, fraction))
             if !fraction.is_empty() && fraction.bytes().all(|byte| byte.is_ascii_digit()) =>
@@ -1183,92 +1200,14 @@ fn legacy_year_number(year: i32) -> Option<i32> {
 /// `Oct 13, 2026`, `13 Oct 2026`, and `2026 Oct 13`. `13-Oct` is 13 October
 /// 2001 and `Oct 2026` is 1 October 2026. A date alone is local midnight, so
 /// the result has no `Z`.
+///
+/// An out-of-range time field is not a time. `Oct 13 16:00:60` is 16:00 in
+/// 1960, and `Oct 13 2026 16:00:60` is 16:00 because the day and year are
+/// already set. The third date number is ignored. A fourth is not a date.
 fn rewrite_month_name(trimmed: &str) -> Option<String> {
     let words = month_words(trimmed);
-    let start = skip_month_preamble(&words);
-    let words = &words[start..];
-    let (month, day, year, rest_at) = month_day_year(words)?;
-    if !(1..=31).contains(&day) {
-        return None;
-    }
-    let (clock, zone) = month_clock_and_zone(&words[rest_at..])?;
+    let (month, day, year, clock, zone) = compose_month_date(&words)?;
     Some(format!("{year:04}-{month:02}-{day:02}T{clock}{zone}"))
-}
-
-/// `Date.parse` ignores words, a weekday, and a zone name before the month or
-/// the first number. `foo Oct 2026` is 1 October 2026. `13 foo Oct 2026` is not
-/// a date, because the number has already started it.
-fn skip_month_preamble(words: &[&str]) -> usize {
-    let mut index = 0;
-    while index < words.len() {
-        let word = words[index];
-        if is_weekday_name(word) {
-            index += 1;
-            continue;
-        }
-        if english_month(word).is_some() || signed_number(word).is_some() {
-            break;
-        }
-        index += 1;
-    }
-    index
-}
-
-/// Words and a weekday before the first number are skipped, so `Oct foo 2026`
-/// is 1 October 2026. A word after that number is not a date. The last month
-/// name wins: `Oct 13 2026 Nov` is 13 November 2026. A number from 1 to 31 is
-/// the day; any other number is the year. The missing field is day 1 or 2001.
-fn month_day_year(words: &[&str]) -> Option<(i32, i32, i32, usize)> {
-    let mut index = 0;
-    let mut month = None;
-    let mut numbers = Vec::new();
-    let mut number_started = false;
-    while index < words.len() {
-        let word = words[index];
-        if word.is_empty() {
-            if number_started {
-                return None;
-            }
-            index += 1;
-            continue;
-        }
-        if let Some(found) = english_month(word) {
-            month = Some(found);
-            index += 1;
-            continue;
-        }
-        if !number_started {
-            if is_weekday_name(word) {
-                index += 1;
-                continue;
-            }
-            if let Some(number) = signed_number(word) {
-                numbers.push(number);
-                number_started = true;
-                index += 1;
-                continue;
-            }
-            index += 1;
-            continue;
-        }
-        if numbers.len() < 2 {
-            if let Some(number) = unsigned_number(word) {
-                numbers.push(number);
-                index += 1;
-                continue;
-            }
-        }
-        break;
-    }
-    let month = month?;
-    let (day, year) = match numbers.as_slice() {
-        [number] if (1..=31).contains(number) => (*number, 2001),
-        [number] => (1, legacy_year_number(*number)?),
-        [first, second] if (1..=31).contains(first) => (*first, legacy_year_number(*second)?),
-        [first, second] => (*second, legacy_year_number(*first)?),
-        _ => return None,
-    };
-    Some((month, day, year, index))
 }
 
 /// `YYYY/M/D` or `M/D/YYYY`. A date alone is local midnight. `T` is not a separator.
@@ -1384,63 +1323,312 @@ fn slash_clock(time: &str) -> Option<String> {
     Some(padded)
 }
 
-fn month_clock_and_zone(rest: &[&str]) -> Option<(String, String)> {
-    // One bare number after the day and year is ignored. `Oct 13 2026 16`
-    // is local midnight. `16:00 16 GMT` keeps the clock. Two numbers, `+16`,
-    // and `16.5` are not a date.
-    let ignored = rest
-        .iter()
-        .filter(|word| unsigned_number(word).is_some())
-        .count();
-    if ignored > 1 {
-        return None;
-    }
-    let kept: Vec<&str> = rest
-        .iter()
-        .copied()
-        .filter(|word| unsigned_number(word).is_none())
-        .collect();
-    match kept.as_slice() {
-        [] => Some(("00:00:00".to_string(), String::new())),
-        [zone] if month_zone_suffix(zone).is_some() => {
-            Some(("00:00:00".to_string(), month_zone_suffix(zone)?))
+struct MonthTime {
+    slots: [i32; 4],
+    index: usize,
+}
+
+impl MonthTime {
+    fn new() -> Self {
+        Self {
+            slots: [0; 4],
+            index: 0,
         }
-        [time] => Some((normalize_month_clock(time)?, String::new())),
-        [time, zone] => Some((normalize_month_clock(time)?, month_zone_suffix(zone)?)),
-        _ => None,
+    }
+
+    /// The next field must be a minute, second, or millisecond in range.
+    /// `60` does not qualify, so it falls through to the date numbers.
+    fn expecting(&self, number: i32) -> bool {
+        match self.index {
+            1 => (0..=59).contains(&number),
+            2 => (0..=59).contains(&number),
+            3 => (0..=999).contains(&number),
+            _ => false,
+        }
+    }
+
+    fn add(&mut self, number: i32) -> Option<()> {
+        if self.index >= 4 {
+            return None;
+        }
+        self.slots[self.index] = number;
+        self.index += 1;
+        Some(())
+    }
+
+    fn add_final(&mut self, number: i32) -> Option<()> {
+        self.add(number)?;
+        while self.index < 4 {
+            self.slots[self.index] = 0;
+            self.index += 1;
+        }
+        Some(())
     }
 }
 
-fn normalize_month_clock(time: &str) -> Option<String> {
-    let (body, fraction) = match time.split_once('.') {
-        Some((body, fraction))
-            if !fraction.is_empty() && fraction.bytes().all(|byte| byte.is_ascii_digit()) =>
-        {
-            (body, Some(fraction))
+fn compose_month_date(words: &[&str]) -> Option<(i32, i32, i32, String, String)> {
+    let mut month = None;
+    let mut dates = Vec::new();
+    let mut time = MonthTime::new();
+    let mut zone = String::new();
+    let mut number_seen = false;
+    for word in words {
+        if word.is_empty() {
+            if number_seen {
+                return None;
+            }
+            continue;
         }
-        None => (time, None),
-        Some(_) => return None,
-    };
-    let mut numbers = Vec::new();
-    for part in body.split(':') {
-        if part.is_empty() || !part.bytes().all(|byte| byte.is_ascii_digit()) {
+        if let Some(found) = english_month(word) {
+            month = Some(found);
+            continue;
+        }
+        if is_weekday_name(word) {
+            if number_seen {
+                return None;
+            }
+            continue;
+        }
+        if month_zone_suffix(word).is_some() {
+            if !number_seen {
+                continue;
+            }
+            zone = month_zone_suffix(word)?;
+            continue;
+        }
+        if word.contains(':') && word.starts_with(|character: char| character.is_ascii_digit()) {
+            take_month_clock(word, &mut time, &mut dates, &mut zone)?;
+            number_seen = true;
+            continue;
+        }
+        if let Some((number, signed)) = date_number_word(word) {
+            if signed && number_seen {
+                return None;
+            }
+            if !signed && time.expecting(number) {
+                time.add_final(number)?;
+            } else {
+                push_date_number(&mut dates, number)?;
+            }
+            number_seen = true;
+            continue;
+        }
+        if number_seen {
             return None;
         }
-        numbers.push(part.parse::<u32>().ok()?);
     }
-    if !(2..=3).contains(&numbers.len()) || numbers.iter().any(|number| *number > 99) {
+    let month = month?;
+    if dates.is_empty() {
         return None;
     }
-    let mut out = if numbers.len() == 3 {
-        format!("{:02}:{:02}:{:02}", numbers[0], numbers[1], numbers[2])
+    // A named month uses the first two numbers. The third is ignored.
+    // One number pads the other field with 1, which is day 1 or year 2001.
+    let first = dates[0];
+    let second = dates.get(1).copied().unwrap_or(1);
+    let (day, year) = if (1..=31).contains(&first) {
+        (first, legacy_year_number(second)?)
     } else {
-        format!("{:02}:{:02}:00", numbers[0], numbers[1])
+        (second, legacy_year_number(first)?)
     };
-    if let Some(fraction) = fraction {
-        out.push('.');
-        out.push_str(fraction);
+    if !(1..=31).contains(&day) {
+        return None;
     }
-    Some(out)
+    Some((month, day, year, finish_month_time(&time)?, zone))
+}
+
+/// `+2026` before the first number is 2026. After a number, the sign is not
+/// part of a date field.
+fn date_number_word(word: &str) -> Option<(i32, bool)> {
+    if let Some(number) = unsigned_number(word) {
+        return Some((number, false));
+    }
+    if word.starts_with(['+', '-']) {
+        return Some((signed_number(word)?, true));
+    }
+    None
+}
+
+fn push_date_number(dates: &mut Vec<i32>, number: i32) -> Option<()> {
+    if dates.len() >= 3 {
+        return None;
+    }
+    dates.push(number);
+    Some(())
+}
+
+fn take_month_clock(
+    word: &str,
+    time: &mut MonthTime,
+    dates: &mut Vec<i32>,
+    zone: &mut String,
+) -> Option<()> {
+    let (body, embedded) = split_embedded_zone(word);
+    if !embedded.is_empty() {
+        *zone = embedded.to_string();
+    }
+    let bytes = body.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        let (number, _length, next) = read_clock_number(bytes, index)?;
+        index = next;
+        if index < bytes.len() && bytes[index] == b':' {
+            index += 1;
+            if index < bytes.len() && bytes[index] == b':' {
+                // `16::30` is 16:00:30. A second `::` is not a time.
+                if time.index != 0 {
+                    return None;
+                }
+                time.add(number)?;
+                time.add(0)?;
+                index += 1;
+                continue;
+            }
+            time.add(number)?;
+            // `16:00:.5` ignores the dot and reads 5 as the next field.
+            if index < bytes.len() && bytes[index] == b'.' {
+                index += 1;
+            }
+            continue;
+        }
+        if index < bytes.len() && bytes[index] == b'.' && time.expecting(number) {
+            index += 1;
+            time.add(number)?;
+            let (fraction, length, next) = read_clock_number(bytes, index)?;
+            index = next;
+            time.add_final(clock_milliseconds(fraction, length))?;
+            if index != bytes.len() {
+                return None;
+            }
+            break;
+        }
+        if time.expecting(number) {
+            time.add_final(number)?;
+            if index != bytes.len() {
+                return None;
+            }
+            break;
+        }
+        // `60` is not a second or a minute. It is a date number, and a dot
+        // after it does not make the following digits milliseconds.
+        push_date_number(dates, number)?;
+        if index < bytes.len() && bytes[index] == b'.' {
+            index += 1;
+            continue;
+        }
+        if index != bytes.len() {
+            return None;
+        }
+        break;
+    }
+    Some(())
+}
+
+fn split_embedded_zone(token: &str) -> (&str, &str) {
+    if let Some(body) = token.strip_suffix(['Z', 'z']) {
+        if body.contains(':') {
+            return (body, &token[body.len()..]);
+        }
+    }
+    if let Some(sign_at) = token.rfind(['+', '-']) {
+        if sign_at > 0 {
+            let (body, zone) = token.split_at(sign_at);
+            if body.contains(':') && embedded_zone_suffix(zone) {
+                return (body, zone);
+            }
+        }
+    }
+    (token, "")
+}
+
+fn embedded_zone_suffix(zone: &str) -> bool {
+    let Some(rest) = zone.strip_prefix(['+', '-']) else {
+        return false;
+    };
+    let (hour, minute) = if let Some((hour, minute)) = rest.split_once(':') {
+        if hour.len() != 2 || minute.len() != 2 {
+            return false;
+        }
+        (hour, minute)
+    } else if rest.len() == 4 {
+        (&rest[..2], &rest[2..])
+    } else {
+        return false;
+    };
+    let Ok(hour) = hour.parse::<i32>() else {
+        return false;
+    };
+    let Ok(minute) = minute.parse::<i32>() else {
+        return false;
+    };
+    (0..=23).contains(&hour) && (0..=59).contains(&minute)
+}
+
+/// Leading zeros count in the length and not in the value. Nine significant
+/// digits are kept.
+fn read_clock_number(bytes: &[u8], start: usize) -> Option<(i32, usize, usize)> {
+    if start >= bytes.len() || !bytes[start].is_ascii_digit() {
+        return None;
+    }
+    let mut index = start;
+    while index < bytes.len() && bytes[index] == b'0' {
+        index += 1;
+    }
+    let mut value = 0i32;
+    let mut significant = 0;
+    while index < bytes.len() && bytes[index].is_ascii_digit() {
+        if significant < 9 {
+            value = value * 10 + i32::from(bytes[index] - b'0');
+        }
+        significant += 1;
+        index += 1;
+    }
+    Some((value, index - start, index))
+}
+
+fn clock_milliseconds(number: i32, mut length: usize) -> i32 {
+    if length < 3 {
+        return if length == 1 {
+            number * 100
+        } else if length == 2 {
+            number * 10
+        } else {
+            number
+        };
+    }
+    if length > 9 {
+        length = 9;
+    }
+    let mut factor = 1i32;
+    while length > 3 {
+        factor *= 10;
+        length -= 1;
+    }
+    number / factor
+}
+
+fn finish_month_time(time: &MonthTime) -> Option<String> {
+    let mut slots = time.slots;
+    let mut index = time.index;
+    while index < 4 {
+        slots[index] = 0;
+        index += 1;
+    }
+    let hour = slots[0];
+    let minute = slots[1];
+    let second = slots[2];
+    let millis = slots[3];
+    let midnight = hour == 24 && minute == 0 && second == 0 && millis == 0;
+    if !(0..=23).contains(&hour) && !midnight {
+        return None;
+    }
+    if !(0..=59).contains(&minute) || !(0..=59).contains(&second) || !(0..=999).contains(&millis) {
+        return None;
+    }
+    if millis == 0 {
+        Some(format!("{hour:02}:{minute:02}:{second:02}"))
+    } else {
+        Some(format!("{hour:02}:{minute:02}:{second:02}.{millis:03}"))
+    }
 }
 
 fn month_zone_suffix(token: &str) -> Option<String> {
@@ -2675,6 +2863,162 @@ mod tests {
             assert_eq!(super::canonical_iso("Oct 13 2026 +16"), None);
             assert_eq!(super::canonical_iso("Oct 13 2026 16.5"), None);
             assert_eq!(super::canonical_iso("Oct 13 2026 16:00 16 17"), None);
+        });
+    }
+
+    #[test]
+    fn an_out_of_range_month_time_field_is_a_date_number() {
+        with_tz("America/New_York", || {
+            // `16:00:60` is 16:00. The 60 is a date number. With a day and a
+            // year already set, that extra number is ignored.
+            assert_eq!(
+                super::canonical_iso("Oct 13 2026 16:00:60").as_deref(),
+                Some("2026-10-13T20:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 2026 16:00:100").as_deref(),
+                Some("2026-10-13T20:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 2026 16:01:60").as_deref(),
+                Some("2026-10-13T20:01:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 2026 24:00:60").as_deref(),
+                Some("2026-10-14T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 2026 16:60").as_deref(),
+                Some("2026-10-13T20:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 2026 16:00:59").as_deref(),
+                Some("2026-10-13T20:00:59.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 2026 16:00:60 GMT").as_deref(),
+                Some("2026-10-13T16:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 2026 16:00:60 EST").as_deref(),
+                Some("2026-10-13T21:00:00.000Z")
+            );
+            // No year yet, so the out-of-range field is the year, including 1960.
+            assert_eq!(
+                super::canonical_iso("Oct 13 16:00:60").as_deref(),
+                Some("1960-10-13T20:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 16:00:70").as_deref(),
+                Some("1970-10-13T20:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 16:00:2026").as_deref(),
+                Some("2026-10-13T20:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 16:00:2026").as_deref(),
+                Some("2026-10-01T20:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 16:60").as_deref(),
+                Some("1960-10-01T20:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 16:00:60 GMT").as_deref(),
+                Some("1960-10-13T16:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 16:00:100").as_deref(),
+                Some("0100-10-13T20:56:02.000Z")
+            );
+            // The next in-range number fills the open time slot.
+            assert_eq!(
+                super::canonical_iso("Oct 13 2026 16:00:60 16").as_deref(),
+                Some("2026-10-13T20:00:16.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 2026 16:00:60 16 GMT").as_deref(),
+                Some("2026-10-13T16:00:16.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 16:00:60 16").as_deref(),
+                Some("1960-10-13T20:00:16.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 16:00:2026 61").as_deref(),
+                Some("2026-10-13T20:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 2026 16:60.5").as_deref(),
+                Some("2026-10-13T20:05:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 16:60.5").as_deref(),
+                Some("1960-10-13T20:05:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 2026 16:00:60.5").as_deref(),
+                Some("2026-10-13T20:00:05.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 2026 16:00:60.05").as_deref(),
+                Some("2026-10-13T20:00:05.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 2026 16:00:60.50").as_deref(),
+                Some("2026-10-13T20:00:50.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 16:00:60.5").as_deref(),
+                Some("1960-10-13T20:00:05.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 16:00:60.500").as_deref(),
+                Some("1960-10-13T20:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 2026 16:00:59.5").as_deref(),
+                Some("2026-10-13T20:00:59.500Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 2026 16:00:59.05").as_deref(),
+                Some("2026-10-13T20:00:59.050Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 2026 4:00:60 PM").as_deref(),
+                Some("2026-10-13T20:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 4:00:60 PM").as_deref(),
+                Some("1960-10-13T20:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 2026 4:60 PM").as_deref(),
+                Some("2026-10-13T20:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 2026 4:00:60 PM EST").as_deref(),
+                Some("2026-10-13T21:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 4:00:2026 PM").as_deref(),
+                Some("2026-10-13T20:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 4:5 PM").as_deref(),
+                Some("2026-10-13T20:05:00.000Z")
+            );
+            assert_eq!(super::canonical_iso("2026-10-13T16:00:60Z"), None);
+            assert_eq!(super::canonical_iso("2026-10-13 16:00:60"), None);
+            assert_eq!(super::canonical_iso("2026-10-13 4:00:60 PM"), None);
+            assert_eq!(super::canonical_iso("10/13/2026 16:00:60"), None);
+            assert_eq!(super::canonical_iso("Oct 13 2026 16:60:00"), None);
+            assert_eq!(super::canonical_iso("Oct 13 2026 16:00:60 61"), None);
+            assert_eq!(super::canonical_iso("Oct 13 2026 16:00:60.500"), None);
+            assert_eq!(super::canonical_iso("Oct 2026 16:00:60"), None);
+            assert_eq!(super::canonical_iso("Oct 13 2026 16 16:00:60"), None);
+            assert_eq!(super::canonical_iso("Oct 13 16:00:2026 61 62"), None);
         });
     }
 
