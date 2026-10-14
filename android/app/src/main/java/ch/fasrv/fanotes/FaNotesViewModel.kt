@@ -61,6 +61,8 @@ import ch.fasrv.fanotes.desk.serializeHomeworkMarkdown
 import ch.fasrv.fanotes.desk.Backlink
 import ch.fasrv.fanotes.desk.backlinksFor
 import ch.fasrv.fanotes.desk.resolveWikiTarget
+import ch.fasrv.fanotes.desk.chooseRestoredNote
+import ch.fasrv.fanotes.desk.collectNotePaths
 import ch.fasrv.fanotes.desk.replaceTranscriptWord
 import ch.fasrv.fanotes.desk.addPdfMark
 import ch.fasrv.fanotes.desk.readPdfMarks
@@ -187,7 +189,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
                     loadTree()
                 }
             }
-            if (!restoreWorkspace()) flatNotes().firstOrNull()?.let { openPath(it.path, force = true) }
+            if (!restoreWorkspace()) openRestoredNote()
             refreshTagIndex()
             graph.engine.start()
         }
@@ -256,6 +258,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
                 loadBackdrop(note)
                 refreshBook(note)
                 if (fromHistory == null) noteTrail.value = visitNote(noteTrail.value, path)
+                rememberLastOpen(path)
                 persistWorkspace()
             } catch (error: Exception) {
                 if (generation == openGeneration && fromHistory != null) noteTrail.value = fromHistory
@@ -401,6 +404,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
             pinnedTabs.value = pinnedTabs.value.filterNot { isSelfOrInside(it, path) }.toSet()
             closedTabs.value = closedTabs.value.filterNot { isSelfOrInside(it, path) }
             tagIndex.value = tagIndex.value.filterKeys { !isSelfOrInside(it, path) }
+            if (deskSettings.value["last-open"]?.let { isSelfOrInside(it, path) } == true) updateDesk("last-open", "")
             if (splitPath.value?.let { isSelfOrInside(it, path) } == true) splitPath.value = null
             if (open.value?.path?.let { isSelfOrInside(it, path) } == true) {
                 open.value = null
@@ -937,6 +941,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         openTabs.value = sortPinnedFirst(tabs.map { DeskTab(it, it in pinned) }).map { it.path }
         closedTabs.value = closedTabs.value.map { remapPath(it, from, to) ?: it }
         tagIndex.value = tagIndex.value.mapKeys { (path, _) -> remapPath(path, from, to) ?: path }
+        deskSettings.value["last-open"]?.let { saved -> remapPath(saved, from, to)?.let { updateDesk("last-open", it) } }
         val current = open.value?.path
         if (current != null) {
             val moved = remapPath(current, from, to)
@@ -973,8 +978,19 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
             openTabs.value = emptyList()
             pinnedTabs.value = emptySet()
             splitPath.value = null
-            flatNotes().firstOrNull()?.let { openPath(it.path, force = true) }
+            openRestoredNote()
         }
+    }
+
+    private fun openRestoredNote() {
+        val paths = collectNotePaths(tree.value)
+        val chosen = chooseRestoredNote(deskSettings.value["last-open"], paths, paths.firstOrNull())
+        if (chosen != null) openPath(chosen, force = true)
+    }
+
+    private fun rememberLastOpen(path: String) {
+        if (path.isEmpty() || deskSettings.value["last-open"] == path) return
+        updateDesk("last-open", path)
     }
 
     private fun persistWorkspace() {
