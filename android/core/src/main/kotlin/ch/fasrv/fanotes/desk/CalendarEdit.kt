@@ -270,6 +270,22 @@ fun moveCalendarOccurrence(
     return placeSpan(document, occurrence, key, nextStart, occurrence.end.plus(delta), newId)
 }
 
+/**
+ * Minutes covered by a drag on empty paper. A tap stays a 30 minute block.
+ * A drag follows the desktop grid: the block starts at the earlier minute and
+ * ends 15 minutes past the pointer, never before the press plus 15 minutes.
+ * An end of 1440 is midnight at the start of the next day.
+ */
+fun dragCreateMinutes(origin: Int, pointer: Int, moved: Boolean): Pair<Int, Int> {
+    val day = 24 * 60
+    val startOrigin = origin.coerceIn(0, day - 1)
+    if (!moved) return startOrigin to (startOrigin + 30)
+    val pointed = pointer.coerceIn(0, day)
+    val start = minOf(startOrigin, pointed)
+    val end = maxOf(startOrigin + 15, minOf(day, pointed + 15))
+    return start to end
+}
+
 /** Changes the end of one occurrence. An end at or before the start is ignored. */
 fun resizeCalendarOccurrence(
     document: CalendarDocument,
