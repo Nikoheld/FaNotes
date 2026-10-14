@@ -1225,15 +1225,15 @@ fn install_tool(source: &Path, target: &Path, expected: &str) -> Result<PathBuf,
         .ok()
         .is_some_and(|existing| sha256_bytes(&existing) == expected);
     if !reuse {
+        // Desktop removes any stale file, then writes `{target}.tmp-{pid}-{12 hex}`.
         let _ = fs::remove_file(target);
-        fs::write(target, &data)
-            .map_err(|_| "Der lokale OneNote-Werkzeugcache ist unsicher.".to_owned())?;
+        atomic_write_onenote(target, &data)?;
     }
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         fs::set_permissions(target, fs::Permissions::from_mode(0o700))
-            .map_err(|_| "Der lokale OneNote-Werkzeugcache ist unsicher.".to_owned())?;
+            .map_err(|error| crate::vault::node_chmod_error(target, &error))?;
     }
     Ok(target.to_path_buf())
 }
@@ -2514,6 +2514,54 @@ mod tests {
             .file_type()
             .is_symlink());
         assert!(std::fs::read_dir(&elsewhere).unwrap().next().is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_unwritable_onenote_tool_cache_reports_the_desktop_write_error() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = std::env::temp_dir().join(format!(
+            "fanotes-onenote-tool-write-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        let cache = root.join("app/tool-cache/onenote/v1-linux-x64");
+        std::fs::create_dir_all(&cache).unwrap();
+        std::fs::set_permissions(&cache, std::fs::Permissions::from_mode(0o555)).unwrap();
+        struct Restore(std::path::PathBuf);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                let _ = std::fs::set_permissions(&self.0, std::fs::Permissions::from_mode(0o700));
+                if let Some(root) = self
+                    .0
+                    .parent()
+                    .and_then(|path| path.parent())
+                    .and_then(|path| path.parent())
+                    .and_then(|path| path.parent())
+                {
+                    let _ = std::fs::remove_dir_all(root);
+                }
+            }
+        }
+        let _restore = Restore(cache.clone());
+        let error = materialize_tools(root.join("app").as_path()).unwrap_err();
+        let prefix = format!(
+            "EACCES: permission denied, open '{}/one2html.tmp-{}-",
+            cache.display(),
+            std::process::id()
+        );
+        assert!(error.starts_with(&prefix), "{error}");
+        let hex = error.trim_end_matches('\'').rsplit('-').next().unwrap();
+        assert_eq!(hex.len(), 12, "{error}");
+        assert!(
+            hex.chars().all(|character| character.is_ascii_hexdigit()),
+            "{error}"
+        );
+        assert!(std::fs::read_dir(&cache).unwrap().next().is_none());
     }
 
     #[test]
