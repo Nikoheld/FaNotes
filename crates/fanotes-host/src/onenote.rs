@@ -175,8 +175,7 @@ fn import_in_temp(
             ) {
                 directory.push(segment);
             }
-            create_private_dir(&directory)
-                .map_err(|_| "Eine OneNote-Seitenhierarchie ist ungültig.".to_owned())?;
+            ensure_note_directory(&note_root, &directory)?;
             let id = uuid();
             let worksheets = vault.join(".fanotes").join("worksheets");
             let html_path = worksheets.join(format!("{id}.html"));
@@ -1582,6 +1581,14 @@ fn open_exclusive_markdown(path: &Path, bytes: &[u8]) -> Result<(), std::io::Err
 ///
 /// An existing directory keeps its mode. The error names the directory the
 /// desktop was asked to create.
+/// Desktop page folders stay inside the notebook. `mkdir` errors are rethrown.
+fn ensure_note_directory(note_root: &Path, directory: &Path) -> Result<(), String> {
+    if !crate::vault::is_inside_root(note_root, directory) {
+        return Err("Eine OneNote-Seitenhierarchie ist ungültig.".to_owned());
+    }
+    import_mkdir(directory)
+}
+
 fn import_mkdir(path: &Path) -> Result<(), String> {
     import_mkdir_at(path, path)
 }
@@ -2036,7 +2043,7 @@ mod tests {
         preview_is_nav, render_inputs, safe_segment, sanitize_page, stored_relative_path,
         strip_active_html, tool_failure_message, tool_limit, unique_directory, urlencoding_decode,
         validate_listing, walk_limited, write_unique_markdown, atomic_copy_onenote,
-        atomic_write_onenote,
+        atomic_write_onenote, ensure_note_directory,
     };
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -2198,6 +2205,50 @@ mod tests {
                 0o700
             );
         }
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_unwritable_onenote_page_folder_reports_the_desktop_mkdir_error() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = std::env::temp_dir().join(format!(
+            "fanotes-onenote-page-folder-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let blocked = root.join("Kapitel");
+        std::fs::write(&blocked, b"datei").unwrap();
+        assert_eq!(
+            ensure_note_directory(&root, &blocked).unwrap_err(),
+            format!("EEXIST: file already exists, mkdir '{}'", blocked.display())
+        );
+        assert_eq!(std::fs::read(&blocked).unwrap(), b"datei");
+
+        let nested = blocked.join("Innen");
+        assert_eq!(
+            ensure_note_directory(&root, &nested).unwrap_err(),
+            format!("ENOTDIR: not a directory, mkdir '{}'", nested.display())
+        );
+
+        let outside = root.join("../ausserhalb");
+        assert_eq!(
+            ensure_note_directory(&root, &outside).unwrap_err(),
+            "Eine OneNote-Seitenhierarchie ist ungültig."
+        );
+        assert!(!root.parent().unwrap().join("ausserhalb").exists());
+
+        let created = root.join("Neu");
+        ensure_note_directory(&root, &created).unwrap();
+        assert_eq!(
+            std::fs::metadata(&created).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 
