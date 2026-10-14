@@ -1783,12 +1783,14 @@ fn unix_millis_from_iso(value: &str) -> Option<u64> {
         }
     }
     if has_ampm_word(trimmed) {
-        // `4:00 PM` is 16:00. A `T` before AM/PM is NaN.
+        // `4:00 PM` is 16:00. A `T` before AM/PM is NaN. `AM` before a date
+        // is an ordinary word, so a clock that does not fold falls through.
         if has_iso_t(trimmed) {
             return None;
         }
-        let normalized = fold_ampm(trimmed)?;
-        return unix_millis_from_iso(&normalized);
+        if let Some(normalized) = fold_ampm(trimmed) {
+            return unix_millis_from_iso(&normalized);
+        }
     }
     if let Some(normalized) = fold_trailing_zone(trimmed) {
         // `16:00 EST` is a fixed offset. `(EST)` is a comment, so the clock
@@ -2415,16 +2417,34 @@ fn is_weekday(token: &str) -> bool {
 /// 2001 and `Oct 2026` is 1 October 2026. A date alone is local midnight.
 /// `GMT` and the US zone names are fixed offsets. The weekday is ignored.
 fn rewrite_month_name(trimmed: &str) -> Option<String> {
-    let mut words = legacy_words(trimmed);
-    if words.first().is_some_and(|word| is_weekday(word)) {
-        words.remove(0);
-    }
-    let (month, day, year, rest_at) = month_day_year(&words)?;
+    let words = legacy_words(trimmed);
+    let start = skip_month_preamble(&words);
+    let words = &words[start..];
+    let (month, day, year, rest_at) = month_day_year(words)?;
     if !(1..=31).contains(&day) {
         return None;
     }
     let (clock, zone) = legacy_clock_and_zone(&words[rest_at..])?;
     Some(format!("{year:04}-{month:02}-{day:02}T{clock}{zone}"))
+}
+
+/// `Date.parse` ignores words, a weekday, and a zone name before the month or
+/// the first number. `foo Oct 2026` is 1 October 2026. `13 foo Oct 2026` is not
+/// a date, because the number has already started it.
+fn skip_month_preamble(words: &[&str]) -> usize {
+    let mut index = 0;
+    while index < words.len() {
+        let word = words[index];
+        if is_weekday(word) {
+            index += 1;
+            continue;
+        }
+        if english_month(word).is_some() || signed_number(word).is_some() {
+            break;
+        }
+        index += 1;
+    }
+    index
 }
 
 /// The month name can be first or second. A number from 1 to 31 beside it is
@@ -5779,6 +5799,59 @@ mod local_zone_tests {
         assert_eq!(unix_millis_from_iso("Oct +2026"), Some(1_790_827_200_000));
         assert_eq!(unix_millis_from_iso("13 Oct +16"), None);
         assert_eq!(unix_millis_from_iso("Oct"), None);
+    }
+
+    #[test]
+    fn words_before_a_month_date_are_ignored() {
+        let _lock = TRASH_CLOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let _restore = RestoreTz(std::env::var_os("TZ"));
+        unsafe { std::env::set_var("TZ", "America/New_York") };
+        unsafe { tzset() };
+        // `Date.parse` skips words until the month or a number. A word after
+        // the date is NaN. `GMT` before the date is not a zone.
+        assert_eq!(unix_millis_from_iso("foo Oct 2026"), Some(1_790_827_200_000));
+        assert_eq!(
+            unix_millis_from_iso("foo 13 Oct 2026"),
+            Some(1_791_864_000_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("hello Tuesday, 13-Oct-26 16:00:00 GMT"),
+            Some(1_791_907_200_000)
+        );
+        assert_eq!(unix_millis_from_iso("foo 13-Oct"), Some(1_002_945_600_000));
+        assert_eq!(
+            unix_millis_from_iso("the 13 Oct 16:00 EST"),
+            Some(1_003_006_800_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("EST 13-Oct-26"),
+            Some(1_791_864_000_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("GMT Oct 13 2026"),
+            Some(1_791_864_000_000)
+        );
+        assert_eq!(unix_millis_from_iso("AM Oct 2026"), Some(1_790_827_200_000));
+        assert_eq!(
+            unix_millis_from_iso("foo Oct 2026 4:00 PM"),
+            Some(1_790_884_800_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("foo Monday, Oct 13, 2026"),
+            Some(1_791_864_000_000)
+        );
+        assert_eq!(unix_millis_from_iso("the 32-Oct"), Some(1_980_216_000_000));
+        assert_eq!(
+            unix_millis_from_iso("note Oct 13, 2026 16:00:00.5 GMT"),
+            Some(1_791_907_200_500)
+        );
+        assert_eq!(unix_millis_from_iso("13 Oct 2026 foo"), None);
+        assert_eq!(unix_millis_from_iso("Oct 2026 foo"), None);
+        assert_eq!(unix_millis_from_iso("13 foo Oct 2026"), None);
+        assert_eq!(unix_millis_from_iso("2026 foo Oct 13"), None);
+        assert_eq!(unix_millis_from_iso("Oct 2026 AM"), None);
     }
 
     #[test]
