@@ -1630,6 +1630,7 @@ fn rewrite_slash_date(trimmed: &str) -> Option<String> {
     }
     let mut offset_minutes = None;
     let mut zone_spill = Vec::new();
+    let mut numeric_spill = Vec::new();
     let (date, time) = if let Some(index) = trimmed.find(char::is_whitespace) {
         let rest = trimmed[index..].trim_start();
         let words: Vec<&str> = rest
@@ -1656,9 +1657,7 @@ fn rewrite_slash_date(trimmed: &str) -> Option<String> {
                 zone_spill = spilled;
                 (&trimmed[..index], Some(words[0].to_string()))
             } else if let Some((minutes, spilled)) = parse_legacy_offset(words[1]) {
-                if !spilled.is_empty() {
-                    return None;
-                }
+                numeric_spill = spilled;
                 offset_minutes = Some(minutes);
                 (&trimmed[..index], Some(words[0].to_string()))
             } else {
@@ -1682,6 +1681,7 @@ fn rewrite_slash_date(trimmed: &str) -> Option<String> {
         }
         (date, None)
     };
+    zone_spill.extend(numeric_spill);
     let fields: Vec<&str> = date.split('/').filter(|part| !part.is_empty()).collect();
     if fields.is_empty() || fields.len() > 3 {
         return None;
@@ -1903,14 +1903,27 @@ fn compose_month_date(
             if !number_seen {
                 if let Some(tail) = zone_keyword_tail(word) {
                     let body = tail.strip_prefix(['+', '-']).unwrap_or(tail);
-                    if body.contains(':') {
-                        take_month_clock(body, &mut time, &mut dates, &mut offset)?;
-                    } else if let Some(number) = unsigned_number(body) {
-                        push_date_number(&mut dates, number)?;
-                    } else {
-                        return None;
+                    if body.starts_with(|character: char| character.is_ascii_digit()) {
+                        if body.contains(':') {
+                            take_month_clock(body, &mut time, &mut dates, &mut offset)?;
+                        } else if let Some(number) = unsigned_number(body) {
+                            push_date_number(&mut dates, number)?;
+                        } else {
+                            return None;
+                        }
+                        number_seen = true;
+                        continue;
                     }
-                    number_seen = true;
+                    // `GMT+:30` ignores the keyword, the sign, and the colon.
+                    // 30 is a date number. `GMT+:` ignores the whole token.
+                    match digits_after_offset_marks(body) {
+                        Some(Some(number)) => {
+                            push_date_number(&mut dates, number)?;
+                            number_seen = true;
+                        }
+                        Some(None) => {}
+                        None => return None,
+                    }
                     continue;
                 }
                 if words
@@ -2171,9 +2184,11 @@ fn split_clock_tail(token: &str) -> (&str, &str) {
     (token, "")
 }
 
-/// `+5`, `+0530`, `+5:30`, and `+5:60`. Minutes past 59 in `HHMM` count as
-/// extra hours. A minute after `:` that is past 59 is a date number instead,
-/// and the offset minute stays 0. `+5:30:00` is not an offset.
+/// `+5`, `+0530`, `+:30`, `+5:30`, and `+5:30.5`. A missing hour is 0.
+/// A dot is skipped, so `+5.30` is five hours and 30 is a date number.
+/// `+5:.5` is five hours and five minutes. `+5:60.5` spills 60 and keeps
+/// the 5 as the minutes. A minute followed by `:` is not an offset.
+/// Minutes past 59 in `HHMM` count as extra hours.
 fn parse_legacy_offset(text: &str) -> Option<(i64, Vec<i32>)> {
     let (sign, rest) = if let Some(rest) = text.strip_prefix('+') {
         (1i64, rest)
@@ -2186,32 +2201,47 @@ fn parse_legacy_offset(text: &str) -> Option<(i64, Vec<i32>)> {
         return None;
     }
     let bytes = rest.as_bytes();
-    let (value, length, next) = read_clock_number(bytes, 0)?;
-    let tail = &rest[next..];
-    let (hour, minute, spilled) = if tail.is_empty() {
+    let mut index = 0;
+    let (value, length) = if bytes[0].is_ascii_digit() {
+        let (value, length, next) = read_clock_number(bytes, 0)?;
+        index = next;
+        (value, length)
+    } else {
+        (0, 0)
+    };
+    let mut minute_pending = false;
+    let (hour, mut minute) = if index < bytes.len() && bytes[index] == b':' {
+        index += 1;
+        minute_pending = true;
+        (i64::from(value), 0i64)
+    } else {
         match length {
-            1 | 2 => (i64::from(value), 0i64, Vec::new()),
-            3 | 4 => (i64::from(value / 100), i64::from(value % 100), Vec::new()),
+            1 | 2 => (i64::from(value), 0),
+            3 | 4 => (i64::from(value / 100), i64::from(value % 100)),
             _ => return None,
         }
-    } else if let Some(after) = tail.strip_prefix(':') {
-        if after.is_empty() {
-            (i64::from(value), 0, Vec::new())
-        } else {
-            let (minute_value, _minute_length, minute_next) =
-                read_clock_number(after.as_bytes(), 0)?;
-            if minute_next != after.len() {
-                return None;
-            }
-            if (0..=59).contains(&minute_value) {
-                (i64::from(value), i64::from(minute_value), Vec::new())
-            } else {
-                (i64::from(value), 0, vec![minute_value])
-            }
-        }
-    } else {
-        return None;
     };
+    let mut spilled = Vec::new();
+    while index < bytes.len() {
+        if bytes[index] == b'.' {
+            index += 1;
+            continue;
+        }
+        if !bytes[index].is_ascii_digit() {
+            return None;
+        }
+        let (number, _, next) = read_clock_number(bytes, index)?;
+        index = next;
+        if index < bytes.len() && bytes[index] == b':' {
+            return None;
+        }
+        if minute_pending && (0..=59).contains(&number) {
+            minute = i64::from(number);
+            minute_pending = false;
+        } else {
+            spilled.push(number);
+        }
+    }
     Some((sign * (hour * 60 + minute), spilled))
 }
 
@@ -2392,6 +2422,26 @@ fn zone_keyword_tail(word: &str) -> Option<&str> {
     } else {
         None
     }
+}
+
+/// `GMT+:30` keeps 30. `GMT+:` has no number. `GMT+:30x` is not a date.
+fn digits_after_offset_marks(body: &str) -> Option<Option<i32>> {
+    let bytes = body.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() && matches!(bytes[index], b':' | b'.') {
+        index += 1;
+    }
+    if index == bytes.len() {
+        return Some(None);
+    }
+    if !bytes[index].is_ascii_digit() {
+        return None;
+    }
+    let (number, _, next) = read_clock_number(bytes, index)?;
+    if next != bytes.len() {
+        return None;
+    }
+    Some(Some(number))
 }
 
 /// `GMT+24:00` is 24 hours ahead. `GMT+5:` has no minutes. `GMT+5:60` keeps
@@ -5873,6 +5923,133 @@ mod tests {
             assert_eq!(super::canonical_iso("10/13/2026 GMT+5:60"), None);
             assert_eq!(super::canonical_iso("2026-10-13 GMT+5:60"), None);
             assert_eq!(super::canonical_iso("GMT+24:00"), None);
+        });
+    }
+
+    #[test]
+    fn a_dotted_offset_keeps_the_hour_and_a_later_number() {
+        with_tz("America/New_York", || {
+            // `+:30` is an offset of 30 minutes. `+5:30.5` is +5:30, and the 5
+            // is a date number. `+5.30` is +5 hours. Before any number, `GMT+:30`
+            // ignores the keyword and the colon, so 30 is a day.
+            assert_eq!(
+                super::canonical_iso("Oct 13 2026 16:00 +:").as_deref(),
+                Some("2026-10-13T16:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 2026 16:00 -:").as_deref(),
+                Some("2026-10-13T16:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 2026 16:00 +:30").as_deref(),
+                Some("2026-10-13T15:30:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 2026 16:00 +:3").as_deref(),
+                Some("2026-10-13T15:57:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 2026 16:00 +:00").as_deref(),
+                Some("2026-10-13T16:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 2026 16:00 +000:").as_deref(),
+                Some("2026-10-13T16:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 2026 16:00 +5:30.5").as_deref(),
+                Some("2026-10-13T10:30:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 2026 16:00 +5:30..5").as_deref(),
+                Some("2026-10-13T10:30:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 2026 16:00 +5.30").as_deref(),
+                Some("2026-10-13T11:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 2026 16:00 +5.5").as_deref(),
+                Some("2026-10-13T11:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 2026 16:00 +5:.5").as_deref(),
+                Some("2026-10-13T10:55:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 2026 16:00 +5:30.0").as_deref(),
+                Some("2026-10-13T10:30:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 2026 16:00 +5:60.5").as_deref(),
+                Some("2026-10-13T10:55:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 16:00 +5:30.5").as_deref(),
+                Some("2005-10-13T10:30:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 16:00 +5:60.5").as_deref(),
+                Some("1960-10-13T10:55:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("5 16:00 +5:30.5").as_deref(),
+                Some("2001-05-05T10:30:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 2026 GMT+:").as_deref(),
+                Some("2026-10-13T00:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 2026 GMT+:30").as_deref(),
+                Some("2026-10-12T23:30:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 2026 GMT+5:30.5").as_deref(),
+                Some("2026-10-12T18:30:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 2026 16:00 GMT+5:30.5").as_deref(),
+                Some("2026-10-13T10:30:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 2026 16:00 GMT+5.30").as_deref(),
+                Some("2026-10-13T11:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 2026 16:00 +5:30.5 EST").as_deref(),
+                Some("2026-10-13T21:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("10/13 16:00 +5:30.5").as_deref(),
+                Some("2005-10-13T10:30:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("10/13 16:00 +5:60.5").as_deref(),
+                Some("1960-10-13T10:55:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("10/13 GMT+5:30.5").as_deref(),
+                Some("2005-10-12T18:30:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("GMT+: Oct 13 2026").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("GMT+:30 Oct 13 2026").as_deref(),
+                Some("2013-10-30T04:00:00.000Z")
+            );
+            assert_eq!(super::canonical_iso("Oct 13 2026 16:00 +5:30:00"), None);
+            assert_eq!(super::canonical_iso("Oct 13 2026 GMT+5:30:00"), None);
+            assert_eq!(super::canonical_iso("2026-10-13 16:00 +5:30.5"), None);
+            assert_eq!(super::canonical_iso("10/13/2026 16:00 +5:30.5"), None);
+            assert_eq!(super::canonical_iso("10/13/2026 GMT+5:30.5"), None);
+            assert_eq!(super::canonical_iso("Oct 13 2026 16:00 +5:30x"), None);
+            assert_eq!(super::canonical_iso("Oct 13 2026 +:"), None);
+            assert_eq!(super::canonical_iso("Oct 2026 +5:30.5"), None);
+            assert_eq!(super::canonical_iso("Oct 13 2026 16:00 +."), None);
+            assert_eq!(super::canonical_iso("GMT+:30x Oct 13 2026"), None);
         });
     }
 
