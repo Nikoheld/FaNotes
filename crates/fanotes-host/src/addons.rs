@@ -708,7 +708,6 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), String> {
         }
     }
     crate::notes::atomic_write(path, bytes, 0o600)
-        .map_err(|_| "Die Add-on-Datei konnte nicht geschrieben werden.".to_owned())
 }
 
 fn lock() -> std::sync::MutexGuard<'static, ()> {
