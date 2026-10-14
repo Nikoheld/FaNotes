@@ -1796,6 +1796,10 @@ fn unix_millis_from_iso(value: &str) -> Option<u64> {
         // `4: 5 PM` is `4:5 PM`. An open field takes the next number.
         return unix_millis_from_iso(&next);
     }
+    if let Some(next) = separate_second_offset_sign(value) {
+        // `+5-30` is `+5` and then `-30`. The later sign replaces the offset.
+        return unix_millis_from_iso(&next);
+    }
     let trimmed = value.trim_matches(is_date_parse_space);
     if let Some(rest) = strip_leading_signs(trimmed) {
         // Signs before the first number are padding. The space keeps a
@@ -2070,6 +2074,111 @@ fn join_open_clock_fields(value: &str) -> Option<String> {
     } else {
         None
     }
+}
+
+/// `+5-30` is a later offset of −30, not five hours minus thirty minutes.
+/// A date hyphen such as `Oct-13-2026` is left intact.
+fn separate_second_offset_sign(value: &str) -> Option<String> {
+    let mut changed = false;
+    let mut out = String::with_capacity(value.len());
+    let mut token = String::new();
+    let mut clock_seen = false;
+    for character in value.chars() {
+        if is_date_parse_space(character) {
+            if !token.is_empty() {
+                push_offset_token(&token, clock_seen, &mut out, &mut changed);
+                if token_has_clock(&token) {
+                    clock_seen = true;
+                }
+                token.clear();
+            }
+            out.push(character);
+        } else {
+            token.push(character);
+        }
+    }
+    if !token.is_empty() {
+        push_offset_token(&token, clock_seen, &mut out, &mut changed);
+    }
+    if changed { Some(out) } else { None }
+}
+
+fn token_has_clock(token: &str) -> bool {
+    if has_iso_t(token) {
+        return false;
+    }
+    token
+        .as_bytes()
+        .windows(2)
+        .any(|pair| pair[0].is_ascii_digit() && pair[1] == b':')
+}
+
+fn push_offset_token(token: &str, clock_before: bool, out: &mut String, changed: &mut bool) {
+    if let Some(split) = split_second_offset_sign(token, clock_before) {
+        out.push_str(&split);
+        *changed = true;
+    } else {
+        out.push_str(token);
+    }
+}
+
+fn split_second_offset_sign(token: &str, clock_before: bool) -> Option<String> {
+    // `+5-30` before a clock is 30 May. After a clock it is UTC−30.
+    // A `T` form does not take a second sign.
+    if has_iso_t(token) {
+        return None;
+    }
+    let bytes = token.as_bytes();
+    let mut offset_started = false;
+    let mut seen_clock = clock_before;
+    let mut split_at = None;
+    for (index, byte) in bytes.iter().copied().enumerate() {
+        if byte == b':' {
+            if index > 0 && bytes[index - 1].is_ascii_digit() {
+                seen_clock = true;
+            }
+            continue;
+        }
+        if byte != b'+' && byte != b'-' {
+            continue;
+        }
+        let starts_offset = seen_clock
+            && (index == 0 || offset_started || sign_starts_offset(&token[..index]));
+        if !starts_offset {
+            continue;
+        }
+        if offset_started
+            && bytes[index - 1].is_ascii_digit()
+            && bytes.get(index + 1).is_some_and(|next| next.is_ascii_digit())
+        {
+            split_at = Some(index);
+            break;
+        }
+        offset_started = true;
+    }
+    let index = split_at?;
+    let mut split = String::with_capacity(token.len() + 1);
+    split.push_str(&token[..index]);
+    split.push(' ');
+    split.push_str(&token[index..]);
+    Some(split)
+}
+
+/// A sign after a clock or a zone word starts an offset. A sign after `Oct`
+/// is a date hyphen.
+fn sign_starts_offset(before: &str) -> bool {
+    if before.contains(':') {
+        return true;
+    }
+    let start = before
+        .rfind(|character: char| !character.is_ascii_alphabetic())
+        .map(|index| index + 1)
+        .unwrap_or(0);
+    matches!(
+        before[start..].to_ascii_lowercase().as_str(),
+        "ut" | "utc" | "z" | "gmt" | "cdt" | "cst" | "edt" | "est" | "mdt" | "mst"
+            | "pdt" | "pst" | "am" | "pm"
+    )
 }
 
 fn is_date_parse_space(c: char) -> bool {
@@ -3704,10 +3813,20 @@ fn fold_spaced_numeric_offset(trimmed: &str) -> Option<String> {
     if !parsed.spilled.is_empty() {
         return None;
     }
-    let clock = pad_legacy_clock(words[1])?;
+    // `16:00+5 -30` keeps `-30`. The sign glued to the clock was replaced.
+    let clock = pad_legacy_clock(strip_glued_offset(words[1]))?;
     let (delta, suffix) = fold_offset_days(parsed.minutes)?;
     let date = shift_hyphen_date(words[0], delta)?;
     Some(format!("{date}T{clock}{suffix}"))
+}
+
+fn strip_glued_offset(clock: &str) -> &str {
+    if let Some(sign_at) = clock.rfind(['+', '-']) {
+        if sign_at > 0 && clock[..sign_at].contains(':') {
+            return &clock[..sign_at];
+        }
+    }
+    clock
 }
 
 fn shift_hyphen_date(date: &str, delta: i32) -> Option<String> {
@@ -9312,6 +9431,74 @@ mod local_zone_tests {
             unix_millis_from_iso("2026-10-13 :16:00"),
             Some(1_791_921_600_000)
         );
+    }
+
+    #[test]
+    fn a_later_sign_replaces_a_glued_offset() {
+        let _lock = TRASH_CLOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let _restore = RestoreTz(std::env::var_os("TZ"));
+        unsafe { std::env::set_var("TZ", "America/New_York") };
+        unsafe { tzset() };
+        // `+5-30` is UTC−30, not five hours minus thirty minutes. A date
+        // hyphen stays a date. Two signs in a row are still empty.
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 16:00 +5-30"),
+            Some(1_792_015_200_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 16:00 +5-3"),
+            Some(1_791_918_000_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 16:00+5-30"),
+            Some(1_792_015_200_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 16:00 GMT+5-30"),
+            Some(1_792_015_200_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 16:00 GMT+5-3:30"),
+            Some(1_791_919_800_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 16:00 +5:30-8"),
+            Some(1_791_936_000_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 16:00 -5+8"),
+            Some(1_791_878_400_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("10/13/2026 16:00 +5-30"),
+            Some(1_792_015_200_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 16:00 +5-3"),
+            Some(1_791_918_000_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 4:00 PM+5-3"),
+            Some(1_791_918_000_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 16:00 +5-30 EST"),
+            Some(1_791_925_200_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 16:00 EST+5-3"),
+            Some(1_791_918_000_000)
+        );
+        assert_eq!(unix_millis_from_iso("Oct-13-2026"), Some(1_791_864_000_000));
+        assert_eq!(unix_millis_from_iso("+5-30"), Some(991_195_200_000));
+        assert_eq!(unix_millis_from_iso("GMT+5-30"), Some(991_195_200_000));
+        assert_eq!(unix_millis_from_iso("2026-10-13T16:00+5-30"), None);
+        assert_eq!(unix_millis_from_iso("2026-10-13-5"), None);
+        assert_eq!(unix_millis_from_iso("2026-10-13 16:00 --5"), None);
+        assert_eq!(unix_millis_from_iso("2026-10-13 16:00 +-5"), None);
+        assert_eq!(unix_millis_from_iso("2026-10-13 16:00 +5-+8"), None);
     }
 
     #[test]
