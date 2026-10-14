@@ -157,6 +157,9 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     val foldedHeadings = MutableStateFlow<Set<Int>>(emptySet())
     val confirmRequest = MutableStateFlow<ch.fasrv.fanotes.desk.PendingConfirm?>(null)
     private var confirmAction: (() -> Unit)? = null
+    private val bugLog = ch.fasrv.fanotes.desk.BugReportLog()
+    val bugReportOpen = MutableStateFlow(false)
+    val bugReportMessage = MutableStateFlow<String?>(null)
     private var paperViews: Map<String, ch.fasrv.fanotes.desk.PaperViewMemoryEntry> =
         ch.fasrv.fanotes.desk.parsePaperViewMemory(graph.readPaperViews())
     val showList = MutableStateFlow(true)
@@ -267,6 +270,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
                 if (fromHistory == null) noteTrail.value = visitNote(noteTrail.value, path)
                 rememberLastOpen(path)
                 persistWorkspace()
+                recordBug("note", path)
             } catch (error: Exception) {
                 if (generation == openGeneration && fromHistory != null) noteTrail.value = fromHistory
                 message.value = error.message ?: "Die Notiz konnte nicht geöffnet werden."
@@ -721,6 +725,89 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         val action = confirmAction
         dismissConfirm()
         action?.invoke()
+    }
+
+    fun recordPenSample(x: Double, y: Double) {
+        val now = System.currentTimeMillis()
+        bugLog.recordPen(
+            ch.fasrv.fanotes.desk.BugReportEvent(
+                at = now,
+                kind = "pen",
+                noteId = open.value?.path,
+                x = ch.fasrv.fanotes.desk.compactCoord(x),
+                y = ch.fasrv.fanotes.desk.compactCoord(y),
+                pointerType = "pen",
+                tool = tool.value.name.lowercase(),
+                version = "2026.10.7",
+                platform = "android",
+            ),
+            now,
+        )
+    }
+
+    fun recordBugTool(name: String) {
+        recordBug("tool", open.value?.path, name)
+    }
+
+    fun openBugReport() {
+        bugReportOpen.value = true
+        bugReportMessage.value = null
+    }
+
+    fun closeBugReport() {
+        bugReportOpen.value = false
+    }
+
+    fun sendBugReport(description: String) {
+        val now = System.currentTimeMillis()
+        val request = ch.fasrv.fanotes.desk.buildBugReportRequest(
+            description = description,
+            events = bugLog.snapshot(now),
+            version = "2026.10.7",
+            platform = "android",
+            now = now,
+        )
+        if (request.body.description.isBlank() || request.body.events.isEmpty()) {
+            bugReportMessage.value = "Bitte beschreibe den Fehler kurz. Die letzten fünf Minuten müssen am Bericht hängen."
+            return
+        }
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    val call = okhttp3.Request.Builder()
+                        .url(request.url)
+                        .header("Accept", "application/json")
+                        .header("Content-Type", "application/json")
+                        .post(request.json.toByteArray().toRequestBody("application/json".toMediaType()))
+                        .build()
+                    okhttp3.OkHttpClient().newCall(call).execute().use { response ->
+                        when {
+                            response.isSuccessful -> "Bericht gesendet."
+                            response.code == 400 -> "Bitte beschreibe den Fehler kurz. Die letzten fünf Minuten müssen am Bericht hängen."
+                            else -> "Der Bericht konnte nicht gesendet werden. Prüfe die Verbindung zu fanotes.fasrv.ch."
+                        }
+                    }
+                }.getOrElse { "Der Bericht konnte nicht gesendet werden. Prüfe die Verbindung zu fanotes.fasrv.ch." }
+            }
+            bugReportMessage.value = result
+            message.value = result
+            if (result == "Bericht gesendet.") bugReportOpen.value = false
+        }
+    }
+
+    private fun recordBug(kind: String, noteId: String?, tool: String? = null) {
+        val now = System.currentTimeMillis()
+        bugLog.record(
+            ch.fasrv.fanotes.desk.BugReportEvent(
+                at = now,
+                kind = kind,
+                noteId = noteId,
+                tool = tool,
+                version = "2026.10.7",
+                platform = "android",
+            ),
+            now,
+        )
     }
 
     fun dismissConfirm() {
