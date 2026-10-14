@@ -872,10 +872,9 @@ impl Host {
         if !meta.is_file() {
             return Err("Die gewählte Datei ist keine reguläre Datei.".to_owned());
         }
-        if meta.len() > limit {
-            return Err("Die Datei ist zu groß.".to_owned());
-        }
-        let bytes = fs::read(&path).map_err(|error| notes::node_open_error(&path, &error))?;
+        // Desktop `readRegularFileNoFollow` opens before the size check. An
+        // unreadable oversized note is that open error.
+        let bytes = notes::read_nofollow_limited(&path, limit)?;
         let text = String::from_utf8_lossy(&bytes);
         Ok(Value::String(fanotes_famd::strip_famd_payload(&text)))
     }
