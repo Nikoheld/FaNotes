@@ -1573,7 +1573,17 @@ fn rewrite_slash_date(trimmed: &str) -> Option<String> {
             .split(char::is_whitespace)
             .filter(|word| !word.is_empty())
             .collect();
-        if words.len() == 2 && words[0].contains(':') {
+        if words.len() == 1 {
+            if let Some(suffix) = month_zone_suffix(words[0]) {
+                offset_minutes = Some(suffix_east_minutes(&suffix)?);
+                (&trimmed[..index], None)
+            } else {
+                let Some(time) = slash_time_and_zone(rest) else {
+                    return None;
+                };
+                (&trimmed[..index], Some(time))
+            }
+        } else if words.len() == 2 && words[0].contains(':') {
             if let Some((minutes, spilled)) = parse_legacy_offset(words[1]) {
                 if !spilled.is_empty() {
                     return None;
@@ -1593,7 +1603,12 @@ fn rewrite_slash_date(trimmed: &str) -> Option<String> {
             (&trimmed[..index], Some(time))
         }
     } else {
-        (trimmed, None)
+        let (date, zone) = split_glued_slash_zone(trimmed);
+        if let Some(zone) = zone {
+            let suffix = month_zone_suffix(zone)?;
+            offset_minutes = Some(suffix_east_minutes(&suffix)?);
+        }
+        (date, None)
     };
     let mut parts = date.split('/');
     let first: i32 = parts.next()?.parse().ok()?;
@@ -1625,6 +1640,25 @@ fn rewrite_slash_date(trimmed: &str) -> Option<String> {
         }
     };
     Some(format!("{year:04}-{month:02}-{day:02}T{clock}{suffix}"))
+}
+
+/// `10/13/2026EST` is the slash date plus `EST`. The zone starts at the first
+/// character that is not a digit or a slash.
+fn split_glued_slash_zone(token: &str) -> (&str, Option<&str>) {
+    let bytes = token.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() && (bytes[index].is_ascii_digit() || bytes[index] == b'/') {
+        index += 1;
+    }
+    if index == 0 || index == bytes.len() {
+        return (token, None);
+    }
+    let zone = &token[index..];
+    if month_zone_suffix(zone).is_some() {
+        (&token[..index], Some(zone))
+    } else {
+        (token, None)
+    }
 }
 
 /// `16:00 EST` keeps the offset. `(EST)` is a comment, so the clock stays local.
@@ -4738,6 +4772,76 @@ mod tests {
                 super::canonical_iso("2026/10/13 16:00:00 (EST)").as_deref(),
                 Some("2026-10-13T20:00:00.000Z")
             );
+        });
+    }
+
+    #[test]
+    fn a_slash_date_keeps_a_zone_keyword() {
+        with_tz("America/New_York", || {
+            // `10/13/2026` is local midnight. `GMT` makes that midnight UTC, and
+            // `EST` makes it Eastern. A fourth number is not a date.
+            assert_eq!(
+                super::canonical_iso("10/13/2026").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026/10/13 GMT").as_deref(),
+                Some("2026-10-13T00:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026/10/13GMT").as_deref(),
+                Some("2026-10-13T00:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("10/13/2026 GMT").as_deref(),
+                Some("2026-10-13T00:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("10/13/2026EST").as_deref(),
+                Some("2026-10-13T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("10/13/2026 EST").as_deref(),
+                Some("2026-10-13T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("10/13/2026Z").as_deref(),
+                Some("2026-10-13T00:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("10/13/2026 Z").as_deref(),
+                Some("2026-10-13T00:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("10/13/2026UTC").as_deref(),
+                Some("2026-10-13T00:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("5/1/01 GMT").as_deref(),
+                Some("2001-05-01T00:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2/31/1 GMT").as_deref(),
+                Some("2001-03-03T00:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("10/13/2026 16:00 GMT").as_deref(),
+                Some("2026-10-13T16:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("10/13/2026 16:00 EST").as_deref(),
+                Some("2026-10-13T21:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("10/13/2026 GMT+5").as_deref(),
+                Some("2026-10-12T19:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026/10/13 16:00:00.5 GMT").as_deref(),
+                Some("2026-10-13T16:00:00.500Z")
+            );
+            assert_eq!(super::canonical_iso("10/13/2026 GMT5"), None);
+            assert_eq!(super::canonical_iso("10/13/2026EST5"), None);
         });
     }
 
