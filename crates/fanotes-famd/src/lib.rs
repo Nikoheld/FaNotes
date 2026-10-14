@@ -870,6 +870,15 @@ pub fn canonical_iso(value: &str) -> Option<String> {
         SymbolRewrite::Changed(next) => return canonical_iso(&next),
         SymbolRewrite::Same => {}
     }
+    if let Some(next) = strip_leading_field_marks(value) {
+        // `4: :5` is 4:05. `+5: :30` is +5:30. A colon or dot at the start
+        // of a field is only a separator.
+        return canonical_iso(&next);
+    }
+    if let Some(next) = join_open_clock_fields(value) {
+        // `4: 5 PM` is `4:5 PM`. An open field takes the next number.
+        return canonical_iso(&next);
+    }
     // U+2028 and U+2029 are JavaScript trim characters, and `Date.parse` rejects
     // them. Only the date-parse spaces are padding.
     let trimmed = value.trim_matches(is_date_parse_space);
@@ -3064,6 +3073,52 @@ fn commas_to_spaces(value: &str) -> String {
 
 fn has_date_parse_padding(value: &str) -> bool {
     value.trim_matches(is_date_parse_space).len() != value.len()
+}
+
+/// `:30` and `.5` at the start of a field are the numbers 30 and 5.
+fn strip_leading_field_marks(value: &str) -> Option<String> {
+    let mut changed = false;
+    let mut out = String::with_capacity(value.len());
+    let mut at_token_start = true;
+    for character in value.chars() {
+        if is_date_parse_space(character) {
+            at_token_start = true;
+            out.push(character);
+            continue;
+        }
+        if at_token_start && matches!(character, ':' | '.') {
+            changed = true;
+            continue;
+        }
+        at_token_start = false;
+        out.push(character);
+    }
+    if changed { Some(out) } else { None }
+}
+
+/// `4: 5: 6` is `4:5:6`. A field that ends in `:` takes the next number.
+fn join_open_clock_fields(value: &str) -> Option<String> {
+    let words: Vec<&str> = value
+        .split(is_date_parse_space)
+        .filter(|word| !word.is_empty())
+        .collect();
+    let mut joined: Vec<String> = Vec::new();
+    let mut changed = false;
+    for word in words {
+        if joined.last().is_some_and(|previous| previous.ends_with(':'))
+            && word.bytes().next().is_some_and(|byte| byte.is_ascii_digit())
+        {
+            joined.last_mut().unwrap().push_str(word);
+            changed = true;
+        } else {
+            joined.push(word.to_string());
+        }
+    }
+    if changed {
+        Some(joined.join(" "))
+    } else {
+        None
+    }
 }
 
 /// `Date.parse` whitespace. U+2028 and U+2029 are not included.
@@ -6025,6 +6080,74 @@ mod tests {
             assert_eq!(
                 super::canonical_iso("1950-10-13 4:00:00.5PM+5::30").as_deref(),
                 Some("1950-10-13T10:30:00.500Z")
+            );
+        });
+    }
+
+    #[test]
+    fn a_field_may_start_with_a_colon() {
+        with_tz("America/New_York", || {
+            // `4: :5` is 4:05. `+5: :30` is +5:30. The colon at the start of
+            // the next field is only a separator.
+            assert_eq!(
+                super::canonical_iso("2026-10-13 4: :5").as_deref(),
+                Some("2026-10-13T08:05:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 4: :5 PM").as_deref(),
+                Some("2026-10-13T20:05:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 16:00 +5: :30").as_deref(),
+                Some("2026-10-13T10:30:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 16:00 +5:. :5").as_deref(),
+                Some("2026-10-13T10:55:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("10/13/2026 4: :5 PM").as_deref(),
+                Some("2026-10-13T20:05:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 2026 4: :5 PM").as_deref(),
+                Some("2026-10-13T20:05:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct :13 2026").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 :16:00").as_deref(),
+                Some("2026-10-13T20:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("1950-10-13 4: :5").as_deref(),
+                Some("1950-10-13T09:05:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("1950-10-13 4: :5 PM").as_deref(),
+                Some("1950-10-13T21:05:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("1950-10-13 16:00 +5: :30").as_deref(),
+                Some("1950-10-13T10:30:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("1950-10-13 16:00 +5:. :5").as_deref(),
+                Some("1950-10-13T10:55:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("10/13/1950 4: :5 PM").as_deref(),
+                Some("1950-10-13T21:05:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct :13 1950").as_deref(),
+                Some("1950-10-13T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("1950-10-13 :16:00").as_deref(),
+                Some("1950-10-13T21:00:00.000Z")
             );
         });
     }
