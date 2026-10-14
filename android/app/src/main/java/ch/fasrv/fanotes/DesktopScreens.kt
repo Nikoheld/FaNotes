@@ -20,6 +20,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -36,9 +38,11 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import ch.fasrv.fanotes.desk.parseNoteTags
 import ch.fasrv.fanotes.desk.Breadcrumb
 import ch.fasrv.fanotes.desk.SwitcherNote
 import ch.fasrv.fanotes.desk.dueCards
@@ -743,6 +747,44 @@ fun SettingsScreen(model: FaNotesViewModel, onSync: () -> Unit, onOpenVault: () 
                 runCatching { context.startActivity(intent) }
             }) { Text("Fehler melden") }
         }
+    }
+}
+
+@Composable
+fun NoteTagBar(model: FaNotesViewModel) {
+    val markdown by model.markdown.collectAsStateWithLifecycle()
+    val tags = parseNoteTags(markdown)
+    var draft by remember(model.open.collectAsStateWithLifecycle().value?.path) { mutableStateOf("") }
+    fun addTag() {
+        if (draft.isBlank()) return
+        model.setNoteTags(tags + draft)
+        draft = ""
+    }
+    Row(
+        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp, vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        tags.forEach { tag ->
+            Text(
+                "#$tag  ×",
+                fontSize = 12.sp,
+                modifier = Modifier
+                    .padding(end = 4.dp)
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                    .clickable { model.setNoteTags(tags.filter { it != tag }) }
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+            )
+        }
+        OutlinedTextField(
+            draft,
+            { draft = it.take(40) },
+            modifier = Modifier.width(180.dp),
+            singleLine = true,
+            label = { Text("Tag hinzufügen") },
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+            keyboardActions = KeyboardActions(onDone = { addTag() }),
+        )
+        TextButton(onClick = { addTag() }) { Text("Hinzufügen") }
     }
 }
 
