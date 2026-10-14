@@ -438,7 +438,8 @@ pub(crate) fn ensure_folder(root: &Path, name: &str) -> Result<(), String> {
                 return Err(starter_folder_error(name));
             }
         }
-        Err(_) => return Err(starter_folder_error(name)),
+        // Desktop `mkdir` rethrows every error other than `EEXIST`.
+        Err(error) => return Err(crate::vault::node_mkdir_error(&target, &error)),
     }
     let real = fs::canonicalize(&target).map_err(|_| starter_folder_error(name))?;
     let root_real = fs::canonicalize(root).map_err(|_| starter_folder_error(name))?;
@@ -490,4 +491,69 @@ pub(crate) fn write_status(root: &Path, status: &str) -> Result<(), String> {
         .unwrap_or_default()
     );
     notes::atomic_write(&path, snapshot.as_bytes(), 0o600)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ensure_folder;
+
+    #[cfg(unix)]
+    #[test]
+    fn an_unwritable_starter_folder_reports_the_desktop_mkdir_error() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = std::env::temp_dir().join(format!(
+            "fanotes-starter-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        let locked = root.join("locked");
+        std::fs::create_dir_all(&locked).unwrap();
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o555)).unwrap();
+        struct Restore(std::path::PathBuf);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                let _ = std::fs::set_permissions(&self.0, std::fs::Permissions::from_mode(0o700));
+                if let Some(parent) = self.0.parent() {
+                    let _ = std::fs::remove_dir_all(parent);
+                }
+            }
+        }
+        let _restore = Restore(locked.clone());
+        assert_eq!(
+            ensure_folder(&locked, "Mathe").unwrap_err(),
+            format!(
+                "EACCES: permission denied, mkdir '{}'",
+                locked.join("Mathe").display()
+            )
+        );
+        assert!(std::fs::read_dir(&locked).unwrap().next().is_none());
+
+        let file = root.join("file");
+        std::fs::write(&file, b"datei").unwrap();
+        assert_eq!(
+            ensure_folder(&file, "Mathe").unwrap_err(),
+            format!(
+                "ENOTDIR: not a directory, mkdir '{}'",
+                file.join("Mathe").display()
+            )
+        );
+
+        let open = root.join("open");
+        std::fs::create_dir(&open).unwrap();
+        std::fs::write(open.join("Mathe"), b"datei").unwrap();
+        assert_eq!(
+            ensure_folder(&open, "Mathe").unwrap_err(),
+            "Der vorbereitete Ordner „Mathe“ kann nicht sicher angelegt werden."
+        );
+        assert_eq!(std::fs::read(open.join("Mathe")).unwrap(), b"datei");
+
+        std::fs::remove_file(open.join("Mathe")).unwrap();
+        std::fs::create_dir(open.join("Mathe")).unwrap();
+        ensure_folder(&open, "Mathe").unwrap();
+        assert!(open.join("Mathe").is_dir());
+    }
 }
