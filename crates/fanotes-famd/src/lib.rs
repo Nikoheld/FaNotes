@@ -860,9 +860,18 @@ pub fn canonical_iso(value: &str) -> Option<String> {
             return canonical_iso(&omitted);
         }
     }
+    match rewrite_ignored_symbols(value) {
+        SymbolRewrite::Illegal => return None,
+        SymbolRewrite::Changed(next) => return canonical_iso(&next),
+        SymbolRewrite::Same => {}
+    }
     // U+2028 and U+2029 are JavaScript trim characters, and `Date.parse` rejects
     // them. Only the date-parse spaces are padding.
     let trimmed = value.trim_matches(is_date_parse_space);
+    if let Some(next) = strip_leading_word(trimmed) {
+        // `hello 2026-10-13` is local. The word is not part of the date.
+        return canonical_iso(&next);
+    }
     // A period between numbers is a hyphen. A period before a clock is a space.
     // Trailing periods make a date local. A `T` form keeps its fraction dot.
     if !has_iso_t(&trimmed) && trimmed.contains('.') {
@@ -926,11 +935,18 @@ pub fn canonical_iso(value: &str) -> Option<String> {
     if is_date_only_shape(trimmed) {
         return date_only_iso(trimmed, surrounded);
     }
-    let (year, month, day, time_at) = split_calendar(source)?;
+    // `2026 10 13` is not a year plus a clock. A space-separated number list
+    // is a legacy date, and a clock that does not parse is not an ISO time.
+    let Some((year, month, day, time_at)) = split_calendar(source) else {
+        return legacy_spaced_numbers(trimmed);
+    };
     if !(1..=12).contains(&month) || !(1..=31).contains(&day) {
         return None;
     }
-    let (mut hour, minute, second, millis, rest) = parse_clock(source.get(time_at..)?)?;
+    let Some((mut hour, minute, second, millis, rest)) = parse_clock(source.get(time_at..)?)
+    else {
+        return legacy_spaced_numbers(trimmed);
+    };
     let (mut year, mut month, mut day) = normalize_ymd(year, month, day)?;
     if hour == 24 {
         if minute != 0 || second != 0 || millis != 0 {
@@ -1129,6 +1145,148 @@ fn split_unmatched_paren(token: &str) -> Vec<&str> {
         parts.push(&token[start..]);
     }
     parts
+}
+
+enum SymbolRewrite {
+    Same,
+    Changed(String),
+    Illegal,
+}
+
+/// Characters below `A` that are not date syntax are ignored, like `!` and `#`.
+/// A `)` after a digit, or `16:00!`, is not a date. Replacing a symbol with a
+/// space makes a date-only value local.
+fn rewrite_ignored_symbols(value: &str) -> SymbolRewrite {
+    let chars: Vec<char> = value.chars().collect();
+    let mut out = String::with_capacity(value.len());
+    let mut changed = false;
+    for (index, character) in chars.iter().copied().enumerate() {
+        if character == ')' {
+            if previous_significant(&chars, index).is_some_and(|item| item.is_ascii_digit()) {
+                return SymbolRewrite::Illegal;
+            }
+            changed = true;
+            push_separator(&mut out);
+            continue;
+        }
+        if is_ignored_legacy_symbol(character) {
+            if symbol_ends_a_clock(&chars, index) {
+                return SymbolRewrite::Illegal;
+            }
+            changed = true;
+            push_separator(&mut out);
+            continue;
+        }
+        out.push(character);
+    }
+    if changed {
+        SymbolRewrite::Changed(out)
+    } else {
+        SymbolRewrite::Same
+    }
+}
+
+fn previous_significant(chars: &[char], index: usize) -> Option<char> {
+    let mut cursor = index;
+    while cursor > 0 {
+        cursor -= 1;
+        if !is_date_parse_space(chars[cursor]) {
+            return Some(chars[cursor]);
+        }
+    }
+    None
+}
+
+fn push_separator(out: &mut String) {
+    if !out.ends_with(is_date_parse_space) {
+        out.push(' ');
+    }
+}
+
+fn is_ignored_legacy_symbol(character: char) -> bool {
+    (character as u32) < u32::from(b'A')
+        && !character.is_ascii_digit()
+        && !is_date_parse_space(character)
+        && !matches!(character, ':' | '-' | '+' | '.' | '/' | '(' | ')')
+}
+
+/// `16:00!` finalizes the clock and then sees junk. `2026-10-13!16:00` does not,
+/// because the mark is before the clock.
+fn symbol_ends_a_clock(chars: &[char], index: usize) -> bool {
+    let mut cursor = index;
+    let mut saw_colon = false;
+    while cursor > 0 {
+        cursor -= 1;
+        if is_date_parse_space(chars[cursor]) {
+            break;
+        }
+        if chars[cursor] == ':' {
+            saw_colon = true;
+        }
+    }
+    if !saw_colon {
+        return false;
+    }
+    let mut ahead = index + 1;
+    while ahead < chars.len() && is_ignored_legacy_symbol(chars[ahead]) {
+        ahead += 1;
+    }
+    ahead >= chars.len() || is_date_parse_space(chars[ahead])
+}
+
+/// `hello 2026-10-13` drops `hello`. The space in front of the date stays, so
+/// a date-only value is local.
+fn strip_leading_word(trimmed: &str) -> Option<String> {
+    let end = trimmed
+        .char_indices()
+        .find(|(_, character)| is_date_parse_space(*character))?
+        .0;
+    let word = &trimmed[..end];
+    if word.is_empty()
+        || !word.chars().all(|character| character.is_ascii_alphabetic())
+        || english_month(word).is_some()
+    {
+        return None;
+    }
+    let rest = trimmed[end..].trim_start_matches(is_date_parse_space);
+    if rest.is_empty() {
+        return None;
+    }
+    Some(format!(" {rest}"))
+}
+
+/// `10 13 2026` is month, day, year. `2026 10 13` is year, month, day.
+/// One number is 1 January of that legacy year. Two numbers are not a date.
+fn legacy_spaced_numbers(trimmed: &str) -> Option<String> {
+    let words: Vec<&str> = trimmed
+        .split(is_date_parse_space)
+        .filter(|word| !word.is_empty())
+        .collect();
+    if words.is_empty() || words.iter().any(|word| unsigned_number(word).is_none()) {
+        return None;
+    }
+    let numbers: Vec<i32> = words
+        .iter()
+        .map(|word| unsigned_number(word).unwrap())
+        .collect();
+    let (year, month, day) = match numbers.as_slice() {
+        [year] => (legacy_year_number(*year)?, 1, 1),
+        [month, day, year] if (1..=12).contains(month) => {
+            (legacy_year_number(*year)?, *month, *day)
+        }
+        [year, month, day] if *year == 0 || *year >= 32 => {
+            (legacy_year_number(*year)?, *month, *day)
+        }
+        _ => return None,
+    };
+    if !(1..=12).contains(&month) || day < 1 {
+        return None;
+    }
+    let (year, month, day) = normalize_ymd(year, month, day)?;
+    let (year, month, day, hour, minute, second) = local_civil_to_utc(year, month, day, 0, 0, 0)?;
+    Some(format_civil_iso(
+        year, month, day, hour, minute, second, 0,
+    ))
 }
 
 /// Drop balanced parenthetical groups. An unclosed `(` drops the rest of the
@@ -3646,6 +3804,116 @@ mod tests {
             assert_eq!(super::canonical_iso("Oct 13 2026 )"), None);
             assert_eq!(super::canonical_iso("13 (Oct) 2026"), None);
             assert_eq!(super::canonical_iso("2026-10-13)"), None);
+        });
+    }
+
+    #[test]
+    fn ignored_symbols_and_leading_words_make_a_legacy_date() {
+        with_tz("America/New_York", || {
+            // A pure ISO date is UTC. The same fields with ignored symbols or a
+            // leading word are local. `16:00!` and a `)` after a digit are not dates.
+            assert_eq!(
+                super::canonical_iso("2026-10-13").as_deref(),
+                Some("2026-10-13T00:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13!").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("#2026-10-13").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso(")2026-10-13").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("*2026-10-13*").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("!!2026-10-13!!").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("#2026-10-13 16:00").as_deref(),
+                Some("2026-10-13T20:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13!16:00").as_deref(),
+                Some("2026-10-13T20:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("foo 2026-10-13 16:00:00Z").as_deref(),
+                Some("2026-10-13T16:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("foo 10/13/2026").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("#10/13/2026").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("hello 2026-10").as_deref(),
+                Some("2026-10-01T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("*2026*").as_deref(),
+                Some("2026-01-01T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("hello 2026").as_deref(),
+                Some("2026-01-01T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("foo bar 2026").as_deref(),
+                Some("2026-01-01T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("hello 99").as_deref(),
+                Some("1999-01-01T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("hello 0").as_deref(),
+                Some("2000-01-01T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("hello 50").as_deref(),
+                Some("1950-01-01T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("10 13 2026").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026 10 13").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("hello 10 13 2026").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("hello 2026 10 13").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("hello 32 1 2").as_deref(),
+                Some("2032-01-02T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("hello 2 31 1").as_deref(),
+                Some("2001-03-03T05:00:00.000Z")
+            );
+            assert_eq!(super::canonical_iso("2026-10-13 16:00!"), None);
+            assert_eq!(super::canonical_iso("2026-10-13)"), None);
+            assert_eq!(super::canonical_iso("x2026-10-13"), None);
+            assert_eq!(super::canonical_iso("2026 hello"), None);
+            assert_eq!(super::canonical_iso("hello 13 2026"), None);
+            assert_eq!(super::canonical_iso("~2026-10-13"), None);
         });
     }
 
