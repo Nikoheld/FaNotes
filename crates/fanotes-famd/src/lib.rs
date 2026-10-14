@@ -977,10 +977,12 @@ pub fn canonical_iso(value: &str) -> Option<String> {
     }
     let time_text = source.get(time_at..)?;
     let Some((mut hour, minute, second, millis, rest)) = parse_clock(time_text) else {
-        // `2026-10-13 16:00:60` is a broken ISO clock. `2026 10 13 16:00`
-        // is a legacy date whose tail is not one clock. `2026-10-13 GMT+24:00`
-        // is a legacy offset; the colon does not make that word a clock.
-        if time_text.contains(':')
+        // A `T` clock that is not `HH:MM` is empty. A space before the clock
+        // is legacy: `16:` is 16:00, `4:5` is 4:05, and `16:.5` is 16:05.
+        // `2026-10-13 16:00:60` is a broken clock. `2026 10 13 16:00` is a
+        // legacy date whose tail is not one clock.
+        if has_iso_t(source)
+            && time_text.contains(':')
             && !time_text.contains(is_date_parse_space)
             && time_text.starts_with(|character: char| character.is_ascii_digit())
         {
@@ -1010,9 +1012,13 @@ pub fn canonical_iso(value: &str) -> Option<String> {
     } else if rest.contains(is_date_parse_space) {
         // `2026-10-13 16:00 +5: 1` is a legacy offset, not an ISO zone.
         return legacy_numeric_iso(trimmed);
-    } else {
-        let offset = parse_offset(rest)?;
+    } else if let Some(offset) = parse_offset(rest) {
         shift_seconds(year, month, day, hour, minute, second, -(offset as i64))?
+    } else if !has_iso_t(source) {
+        // `16:000` is 16:00. The extra digit is not an ISO zone.
+        return legacy_numeric_iso(trimmed);
+    } else {
+        return None;
     };
     Some(format_civil_iso(
         year, month, day, hour, minute, second, millis,
@@ -1961,17 +1967,17 @@ fn slash_clock(time: &str) -> Option<String> {
             (clock, Some(fraction))
         }
         None => (body, None),
-        Some(_) => return None,
+        Some(_) => return legacy_clock_text(time),
     };
     let mut numbers = Vec::new();
     for part in clock.split(':') {
         if part.is_empty() || !part.bytes().all(|byte| byte.is_ascii_digit()) {
-            return None;
+            return legacy_clock_text(time);
         }
         numbers.push(part.parse::<u32>().ok()?);
     }
     if !(2..=3).contains(&numbers.len()) || numbers.iter().any(|number| *number > 99) {
-        return None;
+        return legacy_clock_text(time);
     }
     let mut padded = if numbers.len() == 3 {
         format!("{:02}:{:02}:{:02}", numbers[0], numbers[1], numbers[2])
@@ -1984,6 +1990,29 @@ fn slash_clock(time: &str) -> Option<String> {
     }
     padded.push_str(zone);
     Some(padded)
+}
+
+/// `16:` is 16:00:00. `16::30` is 16:00:30. `16:.5` skips the dot and is 16:05.
+fn legacy_clock_text(time: &str) -> Option<String> {
+    let mut legacy = MonthTime::new();
+    let mut dates = Vec::new();
+    let mut offset = None;
+    let mut minute_sign = 0i64;
+    take_month_clock(time, &mut legacy, &mut dates, &mut offset, &mut minute_sign)?;
+    if legacy.index == 0 || !dates.is_empty() || minute_sign != 0 {
+        return None;
+    }
+    let clock = finish_month_time(&legacy, None)?;
+    match offset {
+        None => Some(clock),
+        Some(minutes) => {
+            let (delta, suffix) = fold_offset_days(minutes)?;
+            if delta != 0 {
+                return None;
+            }
+            Some(format!("{clock}{suffix}"))
+        }
+    }
 }
 
 struct MonthTime {
@@ -5224,6 +5253,129 @@ mod tests {
             assert_eq!(super::canonical_iso("2026-10-13T16:00:00Z(EST)"), None);
             assert_eq!(super::canonical_iso("2026-10-13T16:00(EST"), None);
             assert_eq!(super::canonical_iso("1950-10-13 16:00(EST)"), None);
+        });
+    }
+
+    #[test]
+    fn a_space_before_an_open_clock_fills_the_missing_fields() {
+        with_tz("America/New_York", || {
+            // A legacy clock may leave a field empty. `16:` is 16:00, `16::30`
+            // is 16:00:30, and `16:.5` is 16:05. A `T` clock still needs two digits.
+            assert_eq!(
+                super::canonical_iso("2026-10-13 16:").as_deref(),
+                Some("2026-10-13T20:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 16:00:").as_deref(),
+                Some("2026-10-13T20:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 16::").as_deref(),
+                Some("2026-10-13T20:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 16::00").as_deref(),
+                Some("2026-10-13T20:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 16::30").as_deref(),
+                Some("2026-10-13T20:00:30.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 4:00").as_deref(),
+                Some("2026-10-13T08:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 4:5").as_deref(),
+                Some("2026-10-13T08:05:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 4:5:6").as_deref(),
+                Some("2026-10-13T08:05:06.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 016:00").as_deref(),
+                Some("2026-10-13T20:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 16:000").as_deref(),
+                Some("2026-10-13T20:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 16:.5").as_deref(),
+                Some("2026-10-13T20:05:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 16:00:.5").as_deref(),
+                Some("2026-10-13T20:00:05.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 16:00:00:.5").as_deref(),
+                Some("2026-10-13T20:00:00.005Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 16:00:00:123").as_deref(),
+                Some("2026-10-13T20:00:00.123Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 16:00:00:5").as_deref(),
+                Some("2026-10-13T20:00:00.005Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 16:00:00.5").as_deref(),
+                Some("2026-10-13T20:00:00.500Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 16:(EST)").as_deref(),
+                Some("2026-10-13T20:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 4: PM").as_deref(),
+                Some("2026-10-13T20:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 16: GMT").as_deref(),
+                Some("2026-10-13T16:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 16: EST").as_deref(),
+                Some("2026-10-13T21:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 24:").as_deref(),
+                Some("2026-10-14T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 24::").as_deref(),
+                Some("2026-10-14T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 2026 16:").as_deref(),
+                Some("2026-10-13T20:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("10/13/2026 16:").as_deref(),
+                Some("2026-10-13T20:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("1950-10-13 16:").as_deref(),
+                Some("1950-10-13T21:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("1950-10-13 16::30").as_deref(),
+                Some("1950-10-13T21:00:30.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("1950-10-13 4:5").as_deref(),
+                Some("1950-10-13T09:05:00.000Z")
+            );
+            assert_eq!(super::canonical_iso("2026-10-13 16:00::"), None);
+            assert_eq!(super::canonical_iso("2026-10-13 16:60:"), None);
+            assert_eq!(super::canonical_iso("2026-10-13 16:00:00:1234"), None);
+            assert_eq!(super::canonical_iso("2026-10-13T16:"), None);
+            assert_eq!(super::canonical_iso("2026-10-13T4:00"), None);
+            assert_eq!(super::canonical_iso("2026-10-13T016:00"), None);
+            assert_eq!(super::canonical_iso("1950-10-13T16:"), None);
         });
     }
 
