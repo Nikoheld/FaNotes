@@ -661,20 +661,13 @@ impl Host {
         }
         let root = self.require_vault()?.to_path_buf();
         let path = recognition_model_path(&root)?;
-        // Desktop `mkdir` creates a missing `.fanotes` and leaves `.lernwerk` beside it.
+        // Desktop `mkdir` is recursive, creates a missing `.fanotes`, and
+        // leaves a leftover `.lernwerk` folder. Any other failure is that mkdir.
         if let Some(parent) = path.parent() {
-            match fs::symlink_metadata(parent) {
-                Ok(_) => {}
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                    match fs::create_dir(parent) {
-                        Ok(()) => {}
-                        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
-                        Err(_) => {
-                            return Err("Der Ordner konnte nicht angelegt werden.".to_owned());
-                        }
-                    }
-                }
-                Err(_) => return Err("Der Ordner konnte nicht angelegt werden.".to_owned()),
+            match fs::create_dir(parent) {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+                Err(error) => return Err(vault::node_mkdir_error(parent, &error)),
             }
         }
         notes::atomic_write(&path, content.as_bytes(), 0o600)?;
@@ -4552,5 +4545,48 @@ mod sync_mtime_tests {
             Some(8_640_000_000_000_000)
         );
         assert_eq!(arg_mtime_ms(Some(&json!(1.0e16_f64))), None);
+    }
+}
+
+#[cfg(test)]
+mod recognition_model_write_tests {
+    use super::Host;
+
+    #[cfg(unix)]
+    #[test]
+    fn an_unwritable_recognition_folder_reports_the_desktop_mkdir_error() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = std::env::temp_dir().join(format!(
+            "fanotes-recognition-mkdir-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        let locked = root.join("vault");
+        std::fs::create_dir_all(&locked).unwrap();
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o555)).unwrap();
+        struct Restore(std::path::PathBuf);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                let _ = std::fs::set_permissions(&self.0, std::fs::Permissions::from_mode(0o700));
+                if let Some(parent) = self.0.parent() {
+                    let _ = std::fs::remove_dir_all(parent);
+                }
+            }
+        }
+        let _restore = Restore(locked.clone());
+        let mut host = Host::open(root.join("app"));
+        host.vault = Some(locked.clone());
+        assert_eq!(
+            host.write_recognition_model("{}").unwrap_err(),
+            format!(
+                "EACCES: permission denied, mkdir '{}'",
+                locked.join(".fanotes").display()
+            )
+        );
+        assert!(!locked.join(".fanotes").exists());
     }
 }
