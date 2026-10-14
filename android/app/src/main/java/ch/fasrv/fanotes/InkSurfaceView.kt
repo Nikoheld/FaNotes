@@ -124,7 +124,11 @@ class InkSurfaceView @JvmOverloads constructor(
     var onPlaceHighlight: (ch.fasrv.fanotes.desk.WorksheetHighlight) -> Unit = {}
     var onRemoveHighlight: (String) -> Unit = {}
     var onPlaceSection: (Double) -> Unit = { _ -> }
-    var onPlaceLink: (Double, Double) -> Unit = { _, _ -> }
+    var noteLinkStyle: String = "symbol"
+    var selectedLinkId: String? = null
+    var onPlaceLink: (Int, Double, Double) -> Unit = { _, _, _ -> }
+    var onOpenLink: (String) -> Unit = {}
+    var onRemoveLink: (String) -> Unit = {}
     var onToggleSection: (String) -> Unit = { _ -> }
     var onEditBox: (String) -> Unit = { _ -> }
     private val lassoPoints = mutableListOf<StrokePoint>()
@@ -442,10 +446,19 @@ class InkSurfaceView @JvmOverloads constructor(
                 inkPointer = MotionEvent.INVALID_POINTER_ID
             }
             placingLink -> {
-                onPlaceLink(x, y)
+                val point = ch.fasrv.fanotes.desk.noteLinkPointOnSheet(x, y, pageFrames, sessionWidth().toDouble(), sessionHeight().toDouble())
+                onPlaceLink(point.page, point.x, point.y)
                 placingLink = false
                 onPenActive(false)
                 inkPointer = MotionEvent.INVALID_POINTER_ID
+            }
+            linkHit(x, y) != null && !eraser -> {
+                linkHit(x, y)?.let { link ->
+                    selectedLinkId = link.id
+                    onOpenLink(link.targetPath)
+                    onPenActive(false)
+                    inkPointer = MotionEvent.INVALID_POINTER_ID
+                }
             }
             worksheetBoxes.firstOrNull { x >= it.x && x <= it.x + it.width && kotlin.math.abs(y - it.y) < 0.04 } != null && !eraser -> {
                 onEditBox(worksheetBoxes.first { x >= it.x && x <= it.x + it.width && kotlin.math.abs(y - it.y) < 0.04 }.id)
@@ -704,12 +717,18 @@ class InkSurfaceView @JvmOverloads constructor(
             textPaint.color = Color.parseColor("#252630")
         }
         linkMarks.forEach { link ->
-            val (sx, sy) = normToScreen(link.x, link.y)
-            canvas.drawCircle(sx, sy, 10f * resources.displayMetrics.density, hoverPaint)
-            textPaint.color = Color.parseColor("#2A6F97")
-            textPaint.textSize = 14f * resources.displayMetrics.density
-            canvas.drawText(link.label.ifBlank { "Notiz" }, sx + 14f, sy + 6f, textPaint)
-            textPaint.color = Color.parseColor("#252630")
+            val sheet = ch.fasrv.fanotes.desk.noteLinkToSheet(link, pageFrames, sessionWidth().toDouble(), sessionHeight().toDouble())
+            val (sx, sy) = normToScreen(sheet.first, sheet.second)
+            val appearance = ch.fasrv.fanotes.desk.noteLinkAppearanceToken(link.style)
+            if (appearance != "text") {
+                canvas.drawCircle(sx, sy, 10f * resources.displayMetrics.density, hoverPaint)
+            }
+            if (appearance != "symbol") {
+                textPaint.color = Color.parseColor("#2A6F97")
+                textPaint.textSize = 14f * resources.displayMetrics.density
+                canvas.drawText(link.label.ifBlank { "Notiz" }, sx + if (appearance == "text") 0f else 14f, sy + 6f, textPaint)
+                textPaint.color = Color.parseColor("#252630")
+            }
         }
         drawHighlights(canvas)
         worksheetBoxes.forEach { box ->
@@ -1041,6 +1060,15 @@ class InkSurfaceView @JvmOverloads constructor(
     private fun pixelsPerPageUnit(): Float {
         val available = (width - padding() * 2).coerceAtLeast(1f)
         return available / PAGE_START_WIDTH.toFloat() * zoom
+    }
+
+    private fun linkHit(x: Double, y: Double): ch.fasrv.fanotes.desk.NoteLinkMark? {
+        val width = sessionWidth().toDouble()
+        val height = sessionHeight().toDouble()
+        return linkMarks.firstOrNull { link ->
+            val sheet = ch.fasrv.fanotes.desk.noteLinkToSheet(link, pageFrames, width, height)
+            kotlin.math.hypot(sheet.first - x, sheet.second - y) < 0.04
+        }
     }
 
     private fun sessionWidth() = session?.document?.sourceWidth ?: PAGE_START_WIDTH

@@ -619,28 +619,48 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun placeNoteLink(x: Double, y: Double) {
+    fun placeNoteLink(page: Int, x: Double, y: Double, style: String) {
         val source = open.value ?: return
         viewModelScope.launch {
-            val created = withContext(Dispatchers.IO) {
-                graph.store.createMarkdown("", "${source.title} Notiz")
+            try {
+                val created = withContext(Dispatchers.IO) {
+                    graph.store.createMarkdown(ch.fasrv.fanotes.desk.linkedNoteParent(source.path), ch.fasrv.fanotes.desk.linkedNotePreferredName(source.path))
+                }
+                val link = ch.fasrv.fanotes.desk.placeNewNoteLink(
+                    sourcePath = source.path,
+                    targetPath = created,
+                    page = page,
+                    x = x,
+                    y = y,
+                    style = style,
+                )
+                val links = ch.fasrv.fanotes.desk.parseNoteLinkMarks(source.payload) + link
+                val payload = (source.payload.deepCopy() as ch.fasrv.fanotes.json.JsonValue.Obj)
+                payload.put("noteLinks", ch.fasrv.fanotes.desk.noteLinksJson(links))
+                open.value = source.copy(payload = payload)
+                noteLinks.value = links
+                noteChanged()
+                refreshTree()
+                message.value = "Verlinkung gesetzt."
+            } catch (error: IllegalArgumentException) {
+                message.value = error.message
             }
-            val link = ch.fasrv.fanotes.desk.NoteLinkMark(
-                id = "nl-${System.currentTimeMillis().toString(36)}",
-                sourcePath = source.path,
-                targetPath = created,
-                x = x.coerceIn(0.0, 1.0),
-                y = y.coerceIn(0.0, 1.0),
-                label = created.substringAfterLast('/').substringBeforeLast('.'),
-            )
-            val links = ch.fasrv.fanotes.desk.parseNoteLinkMarks(source.payload) + link
-            val payload = (source.payload.deepCopy() as ch.fasrv.fanotes.json.JsonValue.Obj)
-            payload.put("noteLinks", ch.fasrv.fanotes.desk.noteLinksJson(links))
-            open.value = source.copy(payload = payload)
-            noteLinks.value = links
-            noteChanged()
-            refreshTree()
         }
+    }
+
+    fun removePlacedNoteLink(id: String) {
+        val source = open.value ?: return
+        val links = try {
+            ch.fasrv.fanotes.desk.removeNoteLink(noteLinks.value, id)
+        } catch (error: IllegalArgumentException) {
+            message.value = error.message
+            return
+        }
+        val payload = (source.payload.deepCopy() as ch.fasrv.fanotes.json.JsonValue.Obj)
+        payload.put("noteLinks", ch.fasrv.fanotes.desk.noteLinksJson(links))
+        open.value = source.copy(payload = payload)
+        noteLinks.value = links
+        noteChanged()
     }
 
     fun updateWorksheetBox(id: String, text: String) {
