@@ -27,7 +27,10 @@ import ch.fasrv.fanotes.desk.FOLDER_COLOR_CHOICES
 import ch.fasrv.fanotes.desk.FOLDER_COLORS_PATH
 import ch.fasrv.fanotes.desk.isMarkdownConflictPath
 import ch.fasrv.fanotes.desk.TEMPLATES_FOLDER
+import ch.fasrv.fanotes.desk.openPageStats
+import ch.fasrv.fanotes.desk.mergePageStats
 import ch.fasrv.fanotes.desk.parseFolderColors
+import ch.fasrv.fanotes.desk.parsePageStats
 import ch.fasrv.fanotes.desk.profileFolders
 import ch.fasrv.fanotes.desk.templatePath
 import ch.fasrv.fanotes.desk.templatesToSeed
@@ -163,7 +166,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
             if (!force) saveNow()
             val note = withContext(Dispatchers.IO) { graph.store.readNote(path) }
             session.replace(note.document)
-            open.value = note
+            open.value = noteOpened(note)
             markdown.value = note.markdown
             rememberTab(path)
             refreshOverlays()
@@ -186,6 +189,37 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    private fun withDwell(note: OpenNote): OpenNote {
+        if (openedAtMs <= 0L) return note
+        val now = System.currentTimeMillis()
+        val elapsed = (now - openedAtMs).coerceAtLeast(0)
+        openedAtMs = now
+        val stats = parsePageStats(note.payload.obj("pageStats"), now)
+        val payload = (note.payload.deepCopy() as ch.fasrv.fanotes.json.JsonValue.Obj)
+        payload.put(
+            "pageStats",
+            mergePageStats(
+                note.payload.obj("pageStats"),
+                stats.copy(
+                    dwellMs = stats.dwellMs + elapsed,
+                    focusMs = stats.focusMs + elapsed,
+                    lastSessionMs = elapsed,
+                    longestSessionMs = maxOf(stats.longestSessionMs, elapsed),
+                ),
+            ),
+        )
+        return note.copy(payload = payload)
+    }
+
+    private fun noteOpened(note: OpenNote): OpenNote {
+        val now = System.currentTimeMillis()
+        openedAtMs = now
+        val stats = openPageStats(parsePageStats(note.payload.obj("pageStats"), now), now)
+        val payload = (note.payload.deepCopy() as ch.fasrv.fanotes.json.JsonValue.Obj)
+        payload.put("pageStats", mergePageStats(note.payload.obj("pageStats"), stats))
+        return note.copy(payload = payload)
+    }
+
     fun updateMarkdown(value: String) {
         markdown.value = value
         noteChanged()
@@ -205,7 +239,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         saveMutex.withLock {
             if (!dirty) return
             while (true) {
-                val note = open.value ?: return
+                val note = open.value?.let(::withDwell) ?: return
                 val revision = editRevision
                 val document = session.document
                 val text = markdown.value
@@ -631,6 +665,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     val splitPath = MutableStateFlow<String?>(null)
     val splitSession = InkSession(newInkDocument("Spalte", "dots", isoNow()))
     private var splitNote: OpenNote? = null
+    private var openedAtMs = 0L
     val aiReply = MutableStateFlow("")
     val paletteOpen = MutableStateFlow(false)
     val updateLabel = MutableStateFlow("2026.10.7")

@@ -10,6 +10,9 @@ import ch.fasrv.fanotes.famd.parseFamd
 import ch.fasrv.fanotes.famd.serializeFamd
 import ch.fasrv.fanotes.famd.stripFamdPayload
 import ch.fasrv.fanotes.famd.worksheetIdsFromMarkdown
+import ch.fasrv.fanotes.desk.mergePageStats
+import ch.fasrv.fanotes.desk.parsePageStats
+import ch.fasrv.fanotes.desk.recordPageSaved
 import ch.fasrv.fanotes.ink.InkDocument
 import ch.fasrv.fanotes.ink.newInkDocument
 import ch.fasrv.fanotes.ink.parseInkDocument
@@ -109,6 +112,16 @@ class NoteStore(private val io: VaultIo) {
             val sheets = worksheetIdsFromMarkdown(withMarker)
             obj.put("worksheets", JsonValue.Arr(sheets.map { jsonString(it) }.toMutableList()))
             obj.put("paperStyle", jsonString(document.paperStyle))
+            val nowMs = runCatching { java.time.Instant.parse(now).toEpochMilli() }.getOrElse { System.currentTimeMillis() }
+            val stats = recordPageSaved(
+                parsePageStats(note.payload.obj("pageStats"), nowMs),
+                stripFamdPayload(withMarker),
+                document.strokes,
+                document.sourceWidth,
+                document.sourceHeight,
+                nowMs,
+            )
+            obj.put("pageStats", mergePageStats(note.payload.obj("pageStats"), stats))
         }
         val famdPath = if (note.path.endsWith(FAMD_EXTENSION)) note.path else companionPath(note.path, FAMD_EXTENSION)
         val historyPath = if (note.kind == NoteKind.PDF || note.path.endsWith(FAMD_EXTENSION)) famdPath else note.path
