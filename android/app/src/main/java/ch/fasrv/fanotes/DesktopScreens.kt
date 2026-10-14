@@ -216,7 +216,7 @@ fun CalendarScreen(model: FaNotesViewModel, onOpenNote: (String) -> Unit) {
             }
         }
         Text("Am $day", modifier = Modifier.padding(top = 8.dp), fontWeight = FontWeight.SemiBold)
-        document.events.filter { it.start.startsWith(day) }.forEach { event ->
+        document.events.filter { ch.fasrv.fanotes.desk.occurrencesOn(it, java.time.LocalDate.parse(day)) }.forEach { event ->
             Text(
                 event.title + if (event.notePath.isNotBlank()) "  →" else "",
                 modifier = Modifier.clickable(enabled = event.notePath.isNotBlank()) { onOpenNote(event.notePath) }.padding(vertical = 4.dp),

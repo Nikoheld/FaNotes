@@ -134,7 +134,7 @@ private val DOCUMENT_KEYS = setOf(
     "createdAt", "updatedAt", "overlayQuality", "overlayQualityZoom", "strokes",
 )
 
-private fun parseStroke(obj: JsonValue.Obj): InkStroke? {
+internal fun parseStroke(obj: JsonValue.Obj): InkStroke? {
     val points = obj.array("points")?.items?.mapNotNull { item ->
         val point = item as? JsonValue.Obj ?: return@mapNotNull null
         val x = point.double("x") ?: return@mapNotNull null

@@ -1,6 +1,9 @@
 package ch.fasrv.fanotes.desk
 
 import ch.fasrv.fanotes.json.JsonValue
+import ch.fasrv.fanotes.json.jsonNumber
+import ch.fasrv.fanotes.json.jsonObject
+import ch.fasrv.fanotes.json.jsonString
 import ch.fasrv.fanotes.json.parseJson
 import java.time.LocalDate
 import java.time.ZoneId
@@ -103,6 +106,9 @@ data class CalendarEvent(
     val location: String = "",
     val notes: String = "",
     val notePath: String = "",
+    val recurrence: String = "none",
+    val recurrenceUntil: String? = null,
+    val exceptionDates: List<String> = emptyList(),
 )
 data class CalendarDocument(val calendars: List<CalendarDef>, val events: List<CalendarEvent>)
 
@@ -146,6 +152,9 @@ fun parseCalendarMarkdown(markdown: String): CalendarDocument {
                 location = obj.string("location").orEmpty(),
                 notes = obj.string("notes").orEmpty(),
                 notePath = obj.string("notePath").orEmpty(),
+                recurrence = obj.string("recurrence")?.takeIf { it in setOf("daily", "weekly", "monthly", "yearly") } ?: "none",
+                recurrenceUntil = obj.string("recurrenceUntil"),
+                exceptionDates = obj.array("exceptionDates")?.items.orEmpty().mapNotNull { (it as? JsonValue.Str)?.value },
             )
         }
         CalendarDocument(calendars, events)
@@ -159,7 +168,7 @@ fun serializeCalendarMarkdown(document: CalendarDocument): String {
         """{"id":${json(it.id)},"name":${json(it.name)},"color":${json(it.color)},"visible":${it.visible}}"""
     }
     val events = document.events.joinToString(",\n") {
-        """{"id":${json(it.id)},"calendarId":${json(it.calendarId)},"title":${json(it.title)},"start":${json(it.start)},"end":${json(it.end)},"allDay":${it.allDay},"location":${json(it.location)},"notes":${json(it.notes)},"notePath":${json(it.notePath)},"recurrence":"none","recurrenceUntil":null,"exceptionDates":[]}"""
+        """{"id":${json(it.id)},"calendarId":${json(it.calendarId)},"title":${json(it.title)},"start":${json(it.start)},"end":${json(it.end)},"allDay":${it.allDay},"location":${json(it.location)},"notes":${json(it.notes)},"notePath":${json(it.notePath)},"recurrence":${json(it.recurrence)},"recurrenceUntil":${it.recurrenceUntil?.let(::json) ?: "null"},"exceptionDates":[${it.exceptionDates.joinToString(",") { date -> json(date) }}]}"""
     }
     return """
         |# Kalender
@@ -302,6 +311,87 @@ fun outlineOf(markdown: String) = ch.fasrv.fanotes.text.paperLines(markdown)
 fun wordCount(markdown: String) = markdown.replace(Regex("""<!--[\s\S]*?-->"""), " ")
     .split(Regex("""\s+"""))
     .count { it.any(Char::isLetterOrDigit) }
+
+fun occurrencesOn(event: CalendarEvent, day: java.time.LocalDate): Boolean {
+    val startDay = runCatching { java.time.LocalDate.parse(event.start.take(10)) }.getOrNull() ?: return false
+    if (day < startDay) return false
+    if (event.exceptionDates.contains(day.toString())) return false
+    val until = event.recurrenceUntil?.let { runCatching { java.time.LocalDate.parse(it) }.getOrNull() }
+    if (until != null && day > until) return false
+    if (event.recurrence == "none" || event.recurrence.isBlank()) return day == startDay
+    return when (event.recurrence) {
+        "daily" -> true
+        "weekly" -> day.dayOfWeek == startDay.dayOfWeek
+        "monthly" -> day.dayOfMonth == startDay.dayOfMonth
+        "yearly" -> day.dayOfMonth == startDay.dayOfMonth && day.month == startDay.month
+        else -> day == startDay
+    }
+}
+
+data class NoteLinkMark(
+    val id: String,
+    val sourcePath: String,
+    val targetPath: String,
+    val x: Double,
+    val y: Double,
+    val style: String = "symbol",
+    val label: String = "",
+)
+
+fun parseNoteLinkMarks(payload: JsonValue.Obj?): List<NoteLinkMark> {
+    val items = payload?.array("noteLinks")?.items ?: return emptyList()
+    return items.mapNotNull { item ->
+        val obj = item as? JsonValue.Obj ?: return@mapNotNull null
+        val source = obj.string("sourcePath").orEmpty()
+        val target = obj.string("targetPath").orEmpty()
+        if (source.isEmpty() || !target.endsWith(".md")) return@mapNotNull null
+        NoteLinkMark(
+            id = obj.string("id") ?: "nl",
+            sourcePath = source,
+            targetPath = target,
+            x = obj.double("x") ?: 0.5,
+            y = obj.double("y") ?: 0.5,
+            style = obj.string("style") ?: "symbol",
+            label = obj.string("label").orEmpty(),
+        )
+    }
+}
+
+fun noteLinksJson(links: List<NoteLinkMark>): JsonValue.Arr = JsonValue.Arr(links.map { link ->
+    jsonObject(
+        "id" to jsonString(link.id),
+        "sourcePath" to jsonString(link.sourcePath),
+        "targetPath" to jsonString(link.targetPath),
+        "page" to jsonNumber(1.0),
+        "x" to jsonNumber(link.x),
+        "y" to jsonNumber(link.y),
+        "style" to jsonString(link.style),
+        "label" to jsonString(link.label.ifBlank { link.targetPath.substringAfterLast('/').substringBeforeLast('.') }),
+        "appearance" to jsonString(when (link.style) {
+            "text" -> "text"
+            "symbol-text" -> "symbol-text"
+            else -> "symbol"
+        }),
+    )
+}.toMutableList())
+
+data class WorksheetBox(val id: String, val page: Int, val x: Double, val y: Double, val width: Double, val text: String, val fontSize: Double)
+
+fun parseWorksheetBoxes(json: String): List<WorksheetBox> {
+    val root = parseJson(json) as? JsonValue.Obj ?: return emptyList()
+    return root.array("textBoxes")?.items.orEmpty().mapNotNull { item ->
+        val obj = item as? JsonValue.Obj ?: return@mapNotNull null
+        WorksheetBox(
+            id = obj.string("id") ?: return@mapNotNull null,
+            page = obj.double("page")?.toInt() ?: 1,
+            x = obj.double("x") ?: 0.1,
+            y = obj.double("y") ?: 0.1,
+            width = obj.double("width") ?: 0.4,
+            text = obj.string("text").orEmpty(),
+            fontSize = obj.double("fontSize") ?: 18.0,
+        )
+    }
+}
 
 fun wikiTargets(markdown: String) = Regex("""\[\[([^\]|#]+)(?:#[^\]|]+)?(?:\|[^\]]+)?]]""")
     .findAll(markdown)

@@ -20,6 +20,7 @@ import ch.fasrv.fanotes.desk.parseCalendarMarkdown
 import ch.fasrv.fanotes.desk.parseFolderColors
 import ch.fasrv.fanotes.desk.parseHomeworkMarkdown
 import ch.fasrv.fanotes.desk.parseSubjectBooks
+import ch.fasrv.fanotes.desk.parseWorksheetBoxes
 import ch.fasrv.fanotes.desk.searchVault
 import ch.fasrv.fanotes.desk.serializeCalendarMarkdown
 import ch.fasrv.fanotes.desk.serializeHomeworkMarkdown
@@ -35,7 +36,12 @@ import ch.fasrv.fanotes.ink.layoutPdfStack
 import ch.fasrv.fanotes.ink.newInkDocument
 import ch.fasrv.fanotes.ink.pdfStackHeight
 import ch.fasrv.fanotes.json.JsonValue
+import ch.fasrv.fanotes.json.deepCopy
+import ch.fasrv.fanotes.json.jsonNumber
+import ch.fasrv.fanotes.json.jsonObject
+import ch.fasrv.fanotes.json.jsonString
 import ch.fasrv.fanotes.json.parseJson
+import ch.fasrv.fanotes.json.stringify
 import ch.fasrv.fanotes.sync.SyncStatus
 import ch.fasrv.fanotes.vault.NoteKind
 import ch.fasrv.fanotes.vault.OpenNote
@@ -117,6 +123,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
             open.value = note
             markdown.value = note.markdown
             rememberTab(path)
+            refreshOverlays()
             style.value = style.value.copy()
             showList.value = false
             loadBackdrop(note)
@@ -281,6 +288,86 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         noteChanged()
     }
 
+    fun insertSection(y: Double) {
+        session.replace(ch.fasrv.fanotes.ink.insertSection(session.document, y))
+        noteChanged()
+    }
+
+    fun toggleInkSection(id: String) {
+        session.replace(ch.fasrv.fanotes.ink.toggleSection(session.document, id))
+        noteChanged()
+    }
+
+    val noteLinks = MutableStateFlow<List<ch.fasrv.fanotes.desk.NoteLinkMark>>(emptyList())
+    val worksheetBoxes = MutableStateFlow<List<ch.fasrv.fanotes.desk.WorksheetBox>>(emptyList())
+
+    fun refreshOverlays() {
+        val note = open.value
+        viewModelScope.launch {
+            val links = ch.fasrv.fanotes.desk.parseNoteLinkMarks(note?.payload)
+            val boxes = withContext(Dispatchers.IO) {
+                val worksheet = note?.worksheets?.firstOrNull() ?: return@withContext emptyList()
+                graph.vault.read(".fanotes/worksheets/$worksheet.json")?.decodeToString()?.let(::parseWorksheetBoxes).orEmpty()
+            }
+            noteLinks.value = links
+            worksheetBoxes.value = boxes
+        }
+    }
+
+    fun placeNoteLink(x: Double, y: Double) {
+        val source = open.value ?: return
+        viewModelScope.launch {
+            val created = withContext(Dispatchers.IO) {
+                graph.store.createMarkdown("", "${source.title} Notiz")
+            }
+            val link = ch.fasrv.fanotes.desk.NoteLinkMark(
+                id = "nl-${System.currentTimeMillis().toString(36)}",
+                sourcePath = source.path,
+                targetPath = created,
+                x = x.coerceIn(0.0, 1.0),
+                y = y.coerceIn(0.0, 1.0),
+                label = created.substringAfterLast('/').substringBeforeLast('.'),
+            )
+            val links = ch.fasrv.fanotes.desk.parseNoteLinkMarks(source.payload) + link
+            val payload = (source.payload.deepCopy() as ch.fasrv.fanotes.json.JsonValue.Obj)
+            payload.put("noteLinks", ch.fasrv.fanotes.desk.noteLinksJson(links))
+            open.value = source.copy(payload = payload)
+            noteLinks.value = links
+            noteChanged()
+            refreshTree()
+        }
+    }
+
+    fun updateWorksheetBox(id: String, text: String) {
+        val worksheet = open.value?.worksheets?.firstOrNull() ?: return
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) {
+                val raw = graph.vault.read(".fanotes/worksheets/$worksheet.json")?.decodeToString() ?: return@withContext
+                val root = parseJson(raw) as? ch.fasrv.fanotes.json.JsonValue.Obj ?: return@withContext
+                val boxes = root.array("textBoxes") ?: ch.fasrv.fanotes.json.JsonValue.Arr()
+                val existing = boxes.items.indexOfFirst { (it as? ch.fasrv.fanotes.json.JsonValue.Obj)?.string("id") == id }
+                if (existing >= 0) {
+                    (boxes.items[existing] as ch.fasrv.fanotes.json.JsonValue.Obj).put("text", ch.fasrv.fanotes.json.jsonString(text))
+                } else {
+                    boxes.items += ch.fasrv.fanotes.json.jsonObject(
+                        "id" to ch.fasrv.fanotes.json.jsonString(id),
+                        "page" to ch.fasrv.fanotes.json.jsonNumber(1.0),
+                        "x" to ch.fasrv.fanotes.json.jsonNumber(0.12),
+                        "y" to ch.fasrv.fanotes.json.jsonNumber(0.12),
+                        "width" to ch.fasrv.fanotes.json.jsonNumber(0.5),
+                        "text" to ch.fasrv.fanotes.json.jsonString(text),
+                        "fontSize" to ch.fasrv.fanotes.json.jsonNumber(18.0),
+                    )
+                }
+                root.put("textBoxes", boxes)
+                root.put("updatedAt", ch.fasrv.fanotes.json.jsonString(isoNow()))
+                graph.vault.write(".fanotes/worksheets/$worksheet.json", root.stringify().encodeToByteArray())
+            }
+            refreshOverlays()
+            graph.engine.notifyLocalChange()
+        }
+    }
+
     fun flatNotes(): List<VaultNode> {
         val found = mutableListOf<VaultNode>()
         fun visit(nodes: List<VaultNode>) {
@@ -383,6 +470,8 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     val historyPaths = MutableStateFlow<List<String>>(emptyList())
     val deskSettings = MutableStateFlow(graph.readDesk())
     val splitPath = MutableStateFlow<String?>(null)
+    val splitSession = InkSession(newInkDocument("Spalte", "dots", isoNow()))
+    private var splitNote: OpenNote? = null
     val aiReply = MutableStateFlow("")
     val paletteOpen = MutableStateFlow(false)
     val updateLabel = MutableStateFlow("2026.10.7")
@@ -445,6 +534,23 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         val next = calendar.value.copy(events = calendar.value.events + event)
         calendar.value = next
         persistSpecial(ch.fasrv.fanotes.desk.CALENDAR_NOTE_PATH, "Kalender", serializeCalendarMarkdown(next))
+    }
+
+    fun loadSplit(path: String) {
+        viewModelScope.launch {
+            val note = withContext(Dispatchers.IO) { graph.store.readNote(path) }
+            splitSession.replace(note.document)
+            splitNote = note
+            splitPath.value = path
+        }
+    }
+
+    fun splitChanged() {
+        val note = splitNote ?: return
+        viewModelScope.launch {
+            splitNote = withContext(Dispatchers.IO) { graph.store.save(note, splitSession.document, note.markdown) }
+            graph.engine.notifyLocalChange()
+        }
     }
 
     fun openDaily() {

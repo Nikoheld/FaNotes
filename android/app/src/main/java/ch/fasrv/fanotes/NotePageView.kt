@@ -156,6 +156,18 @@ class NotePageView(context: Context) : FrameLayout(context) {
         }
     }
 
+    private fun wrapSelection(before: String, after: String) {
+        val start = editor.selectionStart.coerceAtLeast(0)
+        val end = editor.selectionEnd.coerceAtLeast(start)
+        val selected = editor.text?.substring(start, end).orEmpty().ifEmpty { "Text" }
+        editor.text?.replace(start, end, "$before$selected$after")
+    }
+
+    private fun insertLine(prefix: String) {
+        val start = editor.selectionStart.coerceAtLeast(0)
+        editor.text?.insert(start, prefix)
+    }
+
     private fun setChromeOpen(open: Boolean) {
         userOpen = open
         applyChromeVisibility()
@@ -202,6 +214,13 @@ class NotePageView(context: Context) : FrameLayout(context) {
             toolSignature = ""
             if (!followPen) setChromeOpen(true) else applyChromeVisibility()
         })
+        tools.addView(chip("Abschnitt") { ink.placingSection = true })
+        tools.addView(chip("Lasso") { onTool(ch.fasrv.fanotes.ink.InkTool.LASSO) })
+        tools.addView(chip("Verknüpfung") { ink.placingLink = true })
+        tools.addView(chip("Fett") { wrapSelection("**", "**") })
+        tools.addView(chip("Liste") { insertLine("- ") })
+        tools.addView(chip("Aufgabe") { insertLine("- [ ] ") })
+        tools.addView(chip("Zitat") { insertLine("> ") })
         tools.addView(chip("Lineal") { ink.toggleRuler() })
         tools.addView(chip("+") { ink.zoomBy(1.15f) })
         tools.addView(chip("−") { ink.zoomBy(1f / 1.15f) })

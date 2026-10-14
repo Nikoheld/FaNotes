@@ -33,7 +33,9 @@ import ch.fasrv.fanotes.ink.PAGE_START_WIDTH
 import ch.fasrv.fanotes.ink.StrokePoint
 import ch.fasrv.fanotes.ink.StrokeStyle
 import ch.fasrv.fanotes.ink.brushOpacity
+import ch.fasrv.fanotes.ink.lassoHits
 import ch.fasrv.fanotes.ink.ribbonOutline
+import ch.fasrv.fanotes.ink.sectionsOf
 import ch.fasrv.fanotes.input.POST_PEN_IGNORE_MS
 import ch.fasrv.fanotes.input.PalmState
 import ch.fasrv.fanotes.input.PointerAction
@@ -76,6 +78,16 @@ class InkSurfaceView @JvmOverloads constructor(
     var onSwipeNote: (Int) -> Unit = {}
     var onCamera: (Float, Float, Float) -> Unit = { _, _, _ -> }
     var onPenActive: (Boolean) -> Unit = {}
+    var placingSection = false
+    var placingLink = false
+    var linkMarks: List<ch.fasrv.fanotes.desk.NoteLinkMark> = emptyList()
+    var worksheetBoxes: List<ch.fasrv.fanotes.desk.WorksheetBox> = emptyList()
+    var onPlaceSection: (Double) -> Unit = { _ -> }
+    var onPlaceLink: (Double, Double) -> Unit = { _, _ -> }
+    var onToggleSection: (String) -> Unit = { _ -> }
+    var onEditBox: (String) -> Unit = { _ -> }
+    private val lassoPoints = mutableListOf<StrokePoint>()
+    private var lassoing = false
     /** Styled note text, drawn under the ink at the desktop column. */
     var markdown: String = ""
         set(value) {
@@ -308,7 +320,35 @@ class InkSurfaceView @JvmOverloads constructor(
         trackNib(event, index)
         val eraser = tool == PointerTool.ERASER || inkTool == InkTool.ERASER
         val (x, y) = screenToNorm(event.getX(index), event.getY(index))
+        val sectionHit = sectionsOf(current.document).firstOrNull { y >= it.top && y < it.bodyTop && x < 0.08 }
         when {
+            sectionHit != null && !eraser -> {
+                onToggleSection(sectionHit.id)
+                onPenActive(false)
+                inkPointer = MotionEvent.INVALID_POINTER_ID
+            }
+            placingSection -> {
+                onPlaceSection(y)
+                placingSection = false
+                onPenActive(false)
+                inkPointer = MotionEvent.INVALID_POINTER_ID
+            }
+            placingLink -> {
+                onPlaceLink(x, y)
+                placingLink = false
+                onPenActive(false)
+                inkPointer = MotionEvent.INVALID_POINTER_ID
+            }
+            worksheetBoxes.firstOrNull { x >= it.x && x <= it.x + it.width && kotlin.math.abs(y - it.y) < 0.04 } != null && !eraser -> {
+                onEditBox(worksheetBoxes.first { x >= it.x && x <= it.x + it.width && kotlin.math.abs(y - it.y) < 0.04 }.id)
+                onPenActive(false)
+                inkPointer = MotionEvent.INVALID_POINTER_ID
+            }
+            inkTool == InkTool.LASSO -> {
+                lassoing = true
+                lassoPoints.clear()
+                lassoPoints += StrokePoint(x, y, 0.0, 0.0, 0.0, 0.0, "pen")
+            }
             eraser -> {
                 erasing = true
                 current.beginErase()
@@ -336,7 +376,10 @@ class InkSurfaceView @JvmOverloads constructor(
         trackNib(event, index)
         predictor?.record(event)
         val history = event.historySize
-        if (erasing) {
+        if (lassoing) {
+            val (x, y) = screenToNorm(event.getX(index), event.getY(index))
+            lassoPoints += StrokePoint(x, y, 0.0, 0.0, 0.0, 0.0, "pen")
+        } else if (erasing) {
             val samples = ArrayList<StrokePoint>(history + 1)
             for (h in 0 until history) samples += point(event, index, historical = h)
             samples += point(event, index)
@@ -370,6 +413,14 @@ class InkSurfaceView @JvmOverloads constructor(
         val current = session ?: return
         predicted = emptyList()
         onPenActive(false)
+        if (lassoing) {
+            lassoing = false
+            current.selectIndices(lassoHits(current.document.strokes, lassoPoints.toList()))
+            lassoPoints.clear()
+            invalidateTiles()
+            invalidate()
+            return
+        }
         when {
             erasing -> {
                 erasing = false
@@ -503,6 +554,42 @@ class InkSurfaceView @JvmOverloads constructor(
         } else if (!hoverX.isNaN()) {
             hoverPaint.style = Paint.Style.STROKE
             canvas.drawCircle(hoverX, hoverY, 8f * resources.displayMetrics.density, hoverPaint)
+        }
+        sectionsOf(current.document).forEach { section ->
+            val top = pageTop + (section.top * current.document.sourceHeight * scale).toFloat()
+            val bottom = pageTop + (section.bodyTop * current.document.sourceHeight * scale).toFloat()
+            ruling.color = Color.parseColor("#2A6F97")
+            ruling.alpha = 40
+            canvas.drawRect(pageLeft, top, pageLeft + pageWidth, bottom, ruling)
+            textPaint.color = Color.parseColor("#2A6F97")
+            textPaint.textSize = 18f * resources.displayMetrics.density
+            canvas.drawText(if (section.collapsed) "▸" else "▾", pageLeft + 8f, bottom - 8f, textPaint)
+            textPaint.color = Color.parseColor("#252630")
+        }
+        linkMarks.forEach { link ->
+            val (sx, sy) = normToScreen(link.x, link.y)
+            canvas.drawCircle(sx, sy, 10f * resources.displayMetrics.density, hoverPaint)
+            textPaint.color = Color.parseColor("#2A6F97")
+            textPaint.textSize = 14f * resources.displayMetrics.density
+            canvas.drawText(link.label.ifBlank { "Notiz" }, sx + 14f, sy + 6f, textPaint)
+            textPaint.color = Color.parseColor("#252630")
+        }
+        worksheetBoxes.forEach { box ->
+            val (sx, sy) = normToScreen(box.x, box.y)
+            textPaint.color = Color.parseColor("#202333")
+            textPaint.textSize = (box.fontSize * scale).toFloat().coerceAtLeast(12f)
+            canvas.drawText(box.text, sx, sy, textPaint)
+        }
+        if (lassoPoints.size > 1) {
+            val path = Path()
+            val first = lassoPoints.first()
+            val (sx, sy) = normToScreen(first.x, first.y)
+            path.moveTo(sx, sy)
+            lassoPoints.drop(1).forEach { point ->
+                val (px, py) = normToScreen(point.x, point.y)
+                path.lineTo(px, py)
+            }
+            canvas.drawPath(path, selectPaint)
         }
         if (rulerOn && !rulerY.isNaN()) {
             ruling.color = Color.parseColor("#2A6F97")

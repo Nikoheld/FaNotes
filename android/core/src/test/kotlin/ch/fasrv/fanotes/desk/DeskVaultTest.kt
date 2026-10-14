@@ -25,6 +25,8 @@ class DeskVaultTest {
         val parsed = parseCalendarMarkdown(serializeCalendarMarkdown(document))
         assertEquals("Probe", parsed.events.single().title)
         assertEquals("school", parsed.events.single().calendarId)
+        assertTrue(occurrencesOn(parsed.events.single().copy(recurrence = "weekly"), java.time.LocalDate.parse("2026-10-28")))
+        assertTrue(!occurrencesOn(parsed.events.single().copy(recurrence = "weekly"), java.time.LocalDate.parse("2026-10-22")))
     }
 
     @Test

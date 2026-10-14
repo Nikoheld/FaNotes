@@ -200,6 +200,8 @@ fun FaNotesScreen(
     val palette by model.paletteOpen.collectAsStateWithLifecycle()
     val context = LocalContext.current
     var firstRun by remember { mutableStateOf(desk["welcomed"] != "yes") }
+    var editingBox by remember { mutableStateOf<String?>(null) }
+    var boxText by remember { mutableStateOf("") }
     var syncOpen by remember { mutableStateOf(false) }
     var createNote by remember { mutableStateOf(false) }
     var createFolder by remember { mutableStateOf(false) }
@@ -293,14 +295,31 @@ fun FaNotesScreen(
                     dark = isSystemInDarkTheme(),
                     onSync = { requestSync() },
                     onToggleRail = { model.showList.value = !showList },
+                    onEditBox = { editingBox = it },
                     modifier = Modifier.weight(1f).fillMaxHeight().clipToBounds(),
                 )
                 if (destination == "notes" && split != null) {
-                    Column(Modifier.width(320.dp).fillMaxHeight().padding(12.dp)) {
-                        Text("Zweite Spalte", fontWeight = FontWeight.SemiBold)
-                        Text(split ?: "", fontSize = 12.sp)
-                        TextButton(onClick = { split?.let { model.openPath(it) }; model.splitPath.value = null }) { Text("Nach vorn") }
-                        TextButton(onClick = { model.splitPath.value = null }) { Text("Schließen") }
+                    Column(Modifier.width(360.dp).fillMaxHeight()) {
+                        Row(Modifier.padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text("Zweite Spalte", fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                            TextButton(onClick = { model.splitPath.value = null }) { Text("Schließen") }
+                        }
+                        AndroidView(
+                            modifier = Modifier.weight(1f).fillMaxWidth(),
+                            factory = { context ->
+                                InkSurfaceView(context).apply {
+                                    session = model.splitSession
+                                    onChanged = { model.splitChanged() }
+                                }
+                            },
+                            update = { view ->
+                                view.session = model.splitSession
+                                view.inkTool = tool
+                                view.style = style
+                                view.fingerDraws = finger
+                                view.onChanged = { model.splitChanged() }
+                            },
+                        )
                     }
                 }
                 if (destination == "notes" && wide && desk["outline"] != "off" && !focus) {
@@ -315,13 +334,24 @@ fun FaNotesScreen(
             CommandPalette(onDismiss = { model.paletteOpen.value = false }) { id ->
                 when (id) {
                     "daily" -> model.openDaily()
-                    "split" -> model.splitPath.value = open?.path
+                    "split" -> tabs.firstOrNull { it != open?.path }?.let { model.loadSplit(it) }
                     "focus" -> model.updateDesk("focus", if (desk["focus"] == "on") "off" else "on")
                     "sync" -> requestSync()
                     else -> model.showDestination(id)
                 }
             }
         }, title = { Text("Befehle") })
+    }
+    editingBox?.let { id ->
+        AlertDialog(
+            onDismissRequest = { editingBox = null },
+            title = { Text("Textfeld") },
+            text = { OutlinedTextField(boxText, { boxText = it }, label = { Text("Text") }) },
+            confirmButton = {
+                TextButton(onClick = { model.updateWorksheetBox(id, boxText); editingBox = null }) { Text("Speichern") }
+            },
+            dismissButton = { TextButton(onClick = { editingBox = null }) { Text("Abbrechen") } },
+        )
     }
     if (firstRun) {
         AlertDialog(
@@ -545,9 +575,12 @@ private fun PageSurface(
     dark: Boolean,
     onSync: () -> Unit,
     onToggleRail: () -> Unit,
+    onEditBox: (String) -> Unit,
     modifier: Modifier,
 ) {
     var bound by remember { mutableStateOf("") }
+    val links by model.noteLinks.collectAsStateWithLifecycle()
+    val boxes by model.worksheetBoxes.collectAsStateWithLifecycle()
     AndroidView(
         modifier = modifier,
         factory = { context ->
@@ -576,6 +609,12 @@ private fun PageSurface(
             page.onDeleteSelection = { model.deleteSelection() }
             page.onDuplicate = { model.duplicateSelection() }
             page.onClear = { model.clearInk() }
+            page.ink.onPlaceSection = { model.insertSection(it) }
+            page.ink.onPlaceLink = { x, y -> model.placeNoteLink(x, y) }
+            page.ink.onToggleSection = { model.toggleInkSection(it) }
+            page.ink.onEditBox = onEditBox
+            page.ink.linkMarks = links
+            page.ink.worksheetBoxes = boxes
             page.onFinger = { model.fingerDraws.value = it }
             page.apply(
                 path = path ?: "",
