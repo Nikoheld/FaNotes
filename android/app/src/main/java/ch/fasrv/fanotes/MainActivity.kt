@@ -878,6 +878,7 @@ private fun PageSurface(
     val links by model.noteLinks.collectAsStateWithLifecycle()
     val boxes by model.worksheetBoxes.collectAsStateWithLifecycle()
     val highlights by model.worksheetHighlights.collectAsStateWithLifecycle()
+    val outlineJump by model.outlineJump.collectAsStateWithLifecycle()
     AndroidView(
         modifier = modifier,
         factory = { context ->
@@ -936,6 +937,11 @@ private fun PageSurface(
                 canRedo = model.session.canRedo,
                 darkChrome = dark,
             )
+            val jump = outlineJump
+            if (jump != null) {
+                page.revealLine(jump)
+                model.consumeOutlineJump()
+            }
             val current = path ?: ""
             if (bound != current) {
                 bound = current

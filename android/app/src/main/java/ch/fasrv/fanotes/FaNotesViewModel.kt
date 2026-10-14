@@ -153,6 +153,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     val style = MutableStateFlow(StrokeStyle())
     val fingerDraws = MutableStateFlow(false)
     val showText = MutableStateFlow(false)
+    val outlineJump = MutableStateFlow<Int?>(null)
     val showList = MutableStateFlow(true)
     val message = MutableStateFlow<String?>(null)
     val backdrop = MutableStateFlow<List<BackdropSlice>>(emptyList())
@@ -298,6 +299,15 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         val payload = (note.payload.deepCopy() as ch.fasrv.fanotes.json.JsonValue.Obj)
         payload.put("pageStats", mergePageStats(note.payload.obj("pageStats"), stats))
         return note.copy(payload = payload)
+    }
+
+    fun jumpToOutline(line: Int) {
+        showText.value = true
+        outlineJump.value = line
+    }
+
+    fun consumeOutlineJump() {
+        outlineJump.value = null
     }
 
     fun updateMarkdown(value: String) {

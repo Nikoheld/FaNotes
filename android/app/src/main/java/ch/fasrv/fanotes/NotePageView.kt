@@ -93,6 +93,20 @@ class NotePageView(context: Context) : FrameLayout(context) {
         applyChromeColors()
     }
 
+    fun revealLine(line: Int) {
+        val text = editor.text?.toString().orEmpty()
+        val offset = ch.fasrv.fanotes.desk.revealLineStart(text, line).coerceIn(0, text.length)
+        if (!textMode) setTextMode(true)
+        editor.requestFocus()
+        editor.setSelection(offset)
+        editor.post {
+            val layout = editor.layout ?: return@post
+            val safe = offset.coerceAtMost(layout.text.length)
+            val top = layout.getLineTop(layout.getLineForOffset(safe))
+            editor.scrollTo(0, (top - editor.paddingTop).coerceAtLeast(0))
+        }
+    }
+
     fun apply(
         path: String,
         markdown: String,
