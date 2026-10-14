@@ -12,13 +12,18 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.drag
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.KeyboardActions
@@ -31,6 +36,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -39,15 +45,20 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -62,11 +73,16 @@ import ch.fasrv.fanotes.desk.dueCards
 import ch.fasrv.fanotes.desk.fuzzyScore
 import ch.fasrv.fanotes.desk.CALENDAR_NOTE_PATH
 import ch.fasrv.fanotes.desk.CalendarEvent
+import ch.fasrv.fanotes.desk.LaidOutSpan
+import ch.fasrv.fanotes.desk.allDaySpans
 import ch.fasrv.fanotes.desk.calendarOccurrenceWindow
+import ch.fasrv.fanotes.desk.timedDayLayout
 import ch.fasrv.fanotes.desk.outlineOf
 import ch.fasrv.fanotes.desk.taskLines
 import java.time.LocalDate
+import java.time.LocalDateTime
 import java.time.YearMonth
+import kotlin.math.roundToInt
 
 private val RibbonDestinations = listOf(
     "notes" to "Notizen",
@@ -370,7 +386,15 @@ fun CalendarScreen(model: FaNotesViewModel, onOpenNote: (String) -> Unit, onImpo
         when (view) {
             "month" -> MonthGrid(month, anchor, shown) { anchor = it }
             "agenda" -> AgendaList(anchor, shown) { event, date -> editor = draftFor(event, date) }
-            else -> DayColumns(ch.fasrv.fanotes.desk.calendarRange(view, anchor), anchor, shown, { event, date -> editor = draftFor(event, date) }) { anchor = it }
+            else -> DayColumns(
+                ch.fasrv.fanotes.desk.calendarRange(view, anchor),
+                anchor,
+                shown,
+                { event, date -> editor = draftFor(event, date) },
+                { anchor = it },
+                { key, start -> model.moveCalendarOccurrence(key, start) },
+                { key, end -> model.resizeCalendarOccurrence(key, end) },
+            )
         }
         Text("Am $day", modifier = Modifier.padding(top = 8.dp), fontWeight = FontWeight.SemiBold)
         EventsOn(model, shown, anchor) { editor = draftFor(it, anchor) }
@@ -449,6 +473,8 @@ private fun MonthGrid(month: YearMonth, anchor: LocalDate, document: ch.fasrv.fa
     }
 }
 
+private const val HOUR_DP = 48
+
 @Composable
 private fun DayColumns(
     days: List<LocalDate>,
@@ -456,38 +482,160 @@ private fun DayColumns(
     document: ch.fasrv.fanotes.desk.CalendarDocument,
     onEdit: (CalendarEvent, LocalDate) -> Unit,
     onPick: (LocalDate) -> Unit,
+    onMove: (String, LocalDateTime) -> Unit,
+    onResize: (String, LocalDateTime) -> Unit,
 ) {
-    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
-        days.forEach { date ->
-            Column(
-                Modifier.width(148.dp).padding(end = 8.dp).clickable { onPick(date) }.background(if (date == anchor) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent).padding(6.dp),
-            ) {
-                Text("${date.dayOfMonth}. ${date.monthValue}", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-                document.events.filter { ch.fasrv.fanotes.desk.occurrencesOn(it, date) && it.allDay }.forEach { event ->
-                    Text(event.title, fontSize = 12.sp, color = calendarSwatch(document.calendars.find { it.id == event.calendarId }?.color ?: "#2a6f97"), modifier = Modifier.clickable { onEdit(event, date) })
-                }
-                for (hour in 7..20) {
-                    val hits = document.events.filter { event ->
-                        ch.fasrv.fanotes.desk.occurrencesOn(event, date) && ch.fasrv.fanotes.desk.eventClock(event)?.startsWith("%02d".format(hour)) == true
-                    }
+    val scroll = rememberScrollState()
+    val density = LocalDensity.current
+    LaunchedEffect(days) {
+        scroll.scrollTo(with(density) { (7 * HOUR_DP).dp.roundToPx() })
+    }
+    Column(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+        Row {
+            Box(Modifier.width(44.dp))
+            days.forEach { date ->
+                Column(Modifier.width(148.dp).padding(end = 4.dp).clickable { onPick(date) }.padding(bottom = 4.dp)) {
                     Text(
-                        "$hour",
-                        fontSize = 11.sp,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f),
-                        modifier = Modifier.padding(vertical = 1.dp),
+                        "${date.dayOfMonth}. ${date.monthValue}.",
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 13.sp,
+                        color = if (date == anchor) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
                     )
-                    hits.forEach { event ->
+                    allDaySpans(document, date).forEach { span ->
+                        val tint = document.calendars.find { it.id == span.event.calendarId }?.color ?: "#7f6df2"
                         Text(
-                            event.title,
+                            span.event.title,
                             fontSize = 12.sp,
-                            color = calendarSwatch(document.calendars.find { it.id == event.calendarId }?.color ?: "#2a6f97"),
-                            modifier = Modifier.clickable { onEdit(event, date) }.padding(bottom = 2.dp),
+                            color = inkOn(tint),
+                            modifier = Modifier.fillMaxWidth().padding(top = 2.dp).background(calendarSwatch(tint)).clickable { onEdit(span.event, date) }.padding(horizontal = 4.dp, vertical = 2.dp),
                         )
                     }
                 }
             }
         }
+        Row(Modifier.height(420.dp).verticalScroll(scroll)) {
+            Column(Modifier.width(44.dp)) {
+                for (hour in 0..23) {
+                    Text(
+                        "%02d:00".format(hour),
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
+                        modifier = Modifier.height(HOUR_DP.dp),
+                    )
+                }
+            }
+            days.forEach { date ->
+                HourColumn(date, timedDayLayout(document, date), document, onEdit, onMove, onResize)
+            }
+        }
     }
+}
+
+@Composable
+private fun HourColumn(
+    day: LocalDate,
+    slices: List<LaidOutSpan>,
+    document: ch.fasrv.fanotes.desk.CalendarDocument,
+    onEdit: (CalendarEvent, LocalDate) -> Unit,
+    onMove: (String, LocalDateTime) -> Unit,
+    onResize: (String, LocalDateTime) -> Unit,
+) {
+    Box(Modifier.width(148.dp).height((24 * HOUR_DP).dp).padding(end = 4.dp)) {
+        for (hour in 0..23) {
+            Box(
+                Modifier.fillMaxWidth().height(1.dp).offset(y = (hour * HOUR_DP).dp).background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)),
+            )
+        }
+        if (day == LocalDate.now()) {
+            val minutes = java.time.LocalTime.now().hour * 60 + java.time.LocalTime.now().minute
+            Box(
+                Modifier.fillMaxWidth().height(2.dp).offset(y = (minutes / 60f * HOUR_DP).dp).background(MaterialTheme.colorScheme.primary),
+            )
+        }
+        BoxWithConstraints(Modifier.fillMaxWidth().height((24 * HOUR_DP).dp)) {
+            slices.forEach { slice ->
+                TimedBlock(slice, maxWidth, day, document, onEdit, onMove, onResize)
+            }
+        }
+    }
+}
+
+@Composable
+private fun TimedBlock(
+    slice: LaidOutSpan,
+    width: androidx.compose.ui.unit.Dp,
+    day: LocalDate,
+    document: ch.fasrv.fanotes.desk.CalendarDocument,
+    onEdit: (CalendarEvent, LocalDate) -> Unit,
+    onMove: (String, LocalDateTime) -> Unit,
+    onResize: (String, LocalDateTime) -> Unit,
+) {
+    val density = LocalDensity.current
+    var dragOffset by remember(slice.key, slice.start, slice.end) { mutableStateOf(Offset.Zero) }
+    var extraPx by remember(slice.key, slice.start, slice.end) { mutableFloatStateOf(0f) }
+    val minutes = slice.start.hour * 60 + slice.start.minute
+    val duration = java.time.Duration.between(slice.start, slice.end).toMinutes().coerceAtLeast(15)
+    val top = minutes / 60f * HOUR_DP
+    val height = (duration / 60f * HOUR_DP).coerceAtLeast(18f)
+    val extra = with(density) { extraPx.toDp() }
+    val columnWidth = width / slice.columns
+    val tint = document.calendars.find { it.id == slice.event.calendarId }?.color ?: "#7f6df2"
+    Box(
+        Modifier
+            .offset { IntOffset((columnWidth * slice.column).roundToPx(), top.dp.roundToPx()) }
+            .offset { IntOffset(dragOffset.x.roundToInt(), dragOffset.y.roundToInt()) }
+            .width(columnWidth)
+            .height((height.dp + extra).coerceAtLeast(18.dp))
+            .background(calendarSwatch(tint).copy(alpha = 0.9f))
+            .pointerInput(slice.key, slice.originStart, slice.originEnd) {
+                val hourPx = HOUR_DP.dp.toPx()
+                val columnPx = size.width.toFloat().coerceAtLeast(1f)
+                val handlePx = 16.dp.toPx()
+                val slop = viewConfiguration.touchSlop
+                awaitEachGesture {
+                    val down = awaitFirstDown()
+                    val resizing = down.position.y >= size.height - handlePx
+                    var total = Offset.Zero
+                    var moved = false
+                    val finished = drag(down.id) { change ->
+                        total += change.positionChange()
+                        if (total.getDistance() > slop) {
+                            moved = true
+                            if (resizing) extraPx = total.y else dragOffset = total
+                            change.consume()
+                        }
+                    }
+                    dragOffset = Offset.Zero
+                    extraPx = 0f
+                    if (!finished || !moved) {
+                        if (!moved) onEdit(slice.event, day)
+                        return@awaitEachGesture
+                    }
+                    val deltaMinutes = (total.y / hourPx * 60f).toInt()
+                    if (resizing) {
+                        val nextEnd = slice.originEnd.plusMinutes(deltaMinutes.toLong())
+                        val earliest = slice.originStart.plusMinutes(15)
+                        onResize(slice.key, if (nextEnd.isBefore(earliest)) earliest else nextEnd)
+                    } else {
+                        val dayDelta = (total.x / columnPx).roundToInt()
+                        if (kotlin.math.abs(deltaMinutes) >= 15 || dayDelta != 0) {
+                            onMove(slice.key, slice.originStart.plusDays(dayDelta.toLong()).plusMinutes(deltaMinutes.toLong()))
+                        }
+                    }
+                }
+            }
+            .padding(horizontal = 4.dp, vertical = 2.dp),
+    ) {
+        Text(slice.event.title, color = inkOn(tint), fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 2)
+        Text("%02d:%02d".format(slice.originStart.hour, slice.originStart.minute), color = inkOn(tint), fontSize = 11.sp)
+        Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(4.dp).background(inkOn(tint).copy(alpha = 0.45f)))
+    }
+}
+
+private fun inkOn(hex: String): Color {
+    val color = calendarSwatch(hex)
+    val luminance = 0.2126f * color.red + 0.7152f * color.green + 0.0722f * color.blue
+    return if (luminance > 0.62f) Color(0xFF1A1A1A) else Color.White
 }
 
 @Composable

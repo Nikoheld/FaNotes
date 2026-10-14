@@ -1238,6 +1238,14 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         saveCalendar(ch.fasrv.fanotes.desk.saveCalendarOccurrence(calendar.value, key, event))
     }
 
+    fun moveCalendarOccurrence(key: String, start: java.time.LocalDateTime) {
+        saveCalendar(ch.fasrv.fanotes.desk.moveCalendarOccurrence(calendar.value, key, start))
+    }
+
+    fun resizeCalendarOccurrence(key: String, end: java.time.LocalDateTime) {
+        saveCalendar(ch.fasrv.fanotes.desk.resizeCalendarOccurrence(calendar.value, key, end))
+    }
+
     private fun saveCalendar(next: ch.fasrv.fanotes.desk.CalendarDocument) {
         calendar.value = next
         persistSpecial(ch.fasrv.fanotes.desk.CALENDAR_NOTE_PATH, "Kalender", serializeCalendarMarkdown(next))

@@ -1,6 +1,7 @@
 package ch.fasrv.fanotes.desk
 
 import java.time.LocalDate
+import java.time.LocalDateTime
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertSame
@@ -138,5 +139,66 @@ class CalendarEditTest {
         val healed = saveCalendarOccurrence(emptyCalendar(), null, allDay)
         assertEquals("2026-10-14", healed.events.single().start)
         assertEquals("2026-10-14", healed.events.single().end)
+    }
+
+    @Test
+    fun movingAndResizingMatchTheDesktopDayGrid() {
+        val lecture = CalendarEvent(
+            "lecture",
+            "school",
+            "Vorlesung",
+            "2026-09-14T09:00",
+            "2026-09-14T10:30",
+            allDay = false,
+            recurrence = "weekly",
+        )
+        val focus = CalendarEvent("focus", "personal", "Fokus", "2026-09-14T09:15", "2026-09-14T10:00", allDay = false)
+        val document = emptyCalendar().copy(events = listOf(lecture, focus))
+        val slices = layoutDayColumns(
+            listOf(
+                CalendarSpan("a", lecture, LocalDateTime.parse("2026-09-14T09:00"), LocalDateTime.parse("2026-09-14T10:30"), LocalDateTime.parse("2026-09-14T09:00"), LocalDateTime.parse("2026-09-14T10:30")),
+                CalendarSpan("b", focus, LocalDateTime.parse("2026-09-14T09:15"), LocalDateTime.parse("2026-09-14T10:00"), LocalDateTime.parse("2026-09-14T09:15"), LocalDateTime.parse("2026-09-14T10:00")),
+            ),
+        )
+        assertEquals(2, slices.size)
+        assertEquals(setOf(0, 1), slices.map { it.column }.toSet())
+        assertTrue(slices.all { it.columns == 2 })
+        val packed = timedDayLayout(document, LocalDate.parse("2026-09-14"))
+        assertEquals(2, packed.size)
+        assertTrue(packed.all { it.columns == 2 })
+
+        val moved = moveCalendarOccurrence(document, "focus@2026-09-14", LocalDateTime.parse("2026-09-14T11:00"))
+        val movedFocus = moved.events.first { it.id == "focus" }
+        assertEquals("2026-09-14T11:00", movedFocus.start)
+        assertEquals("2026-09-14T11:45", movedFocus.end)
+        val resized = resizeCalendarOccurrence(moved, "focus@2026-09-14", LocalDateTime.parse("2026-09-14T12:00"))
+        assertEquals("2026-09-14T11:00", resized.events.first { it.id == "focus" }.start)
+        assertEquals("2026-09-14T12:00", resized.events.first { it.id == "focus" }.end)
+
+        val detached = moveCalendarOccurrence(
+            document,
+            "lecture@2026-09-21",
+            LocalDateTime.parse("2026-09-21T15:00"),
+            newId = "copy",
+        )
+        assertEquals(listOf("2026-09-21"), detached.events.first { it.id == "lecture" }.exceptionDates)
+        val copy = detached.events.first { it.id == "copy" }
+        assertEquals("Vorlesung", copy.title)
+        assertEquals("none", copy.recurrence)
+        assertEquals("2026-09-21T15:00", copy.start)
+        assertEquals("2026-09-21T16:30", copy.end)
+
+        assertSame(document, moveCalendarOccurrence(document, "focus@2026-09-14", LocalDateTime.parse("2026-09-14T09:15")))
+        assertSame(document, resizeCalendarOccurrence(document, "focus@2026-09-14", LocalDateTime.parse("2026-09-14T09:15")))
+        assertSame(document, moveCalendarOccurrence(document, "missing@2026-09-14", LocalDateTime.parse("2026-09-14T12:00")))
+
+        val allDay = CalendarEvent("a", "personal", "Abgabe", "2026-09-14", "2026-09-14", allDay = true)
+        val shifted = moveCalendarOccurrence(
+            emptyCalendar().copy(events = listOf(allDay)),
+            "a@2026-09-14",
+            LocalDateTime.parse("2026-09-15T00:00"),
+        )
+        assertEquals("2026-09-15", shifted.events.single().start)
+        assertEquals("2026-09-15", shifted.events.single().end)
     }
 }
