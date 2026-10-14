@@ -21,8 +21,8 @@ Nur Dateien verwenden, die mit `OK` bestätigt werden.
 Das AppImage ist der einfachste Weg und verändert keine Systemdateien:
 
 ```bash
-chmod +x FaNotes-2026.10.4-x86_64.AppImage
-./FaNotes-2026.10.4-x86_64.AppImage
+chmod +x FaNotes-2026.10.5-x86_64.AppImage
+./FaNotes-2026.10.5-x86_64.AppImage
 ```
 
 Für eine dauerhafte Installation im Benutzerkonto:
@@ -30,7 +30,7 @@ Für eine dauerhafte Installation im Benutzerkonto:
 ```bash
 mkdir -p "$HOME/.local/bin" "$HOME/.local/share/applications" \
   "$HOME/.local/share/icons/hicolor/scalable/apps"
-install -m755 FaNotes-2026.10.4-x86_64.AppImage \
+install -m755 FaNotes-2026.10.5-x86_64.AppImage \
   "$HOME/.local/bin/fanotes"
 install -m644 packaging/fanotes.desktop \
   "$HOME/.local/share/applications/fanotes.desktop"
@@ -53,7 +53,7 @@ sudo pacman -S --needed fuse2
 Ohne FUSE kann es als langsamere Ausweichlösung direkt extrahiert und gestartet werden:
 
 ```bash
-./FaNotes-2026.10.4-x86_64.AppImage --appimage-extract-and-run
+./FaNotes-2026.10.5-x86_64.AppImage --appimage-extract-and-run
 ```
 
 ## Variante 2: Portables tar.gz
@@ -62,9 +62,9 @@ Das portable Archiv besitzt genau einen Top-Level-Ordner. Es kann vollständig i
 
 ```bash
 mkdir -p "$HOME/.local/opt" "$HOME/.local/bin"
-tar -xzf FaNotes-2026.10.4-x86_64.tar.gz -C "$HOME/.local/opt"
+tar -xzf FaNotes-2026.10.5-x86_64.tar.gz -C "$HOME/.local/opt"
 ln -sfn \
-  "$HOME/.local/opt/FaNotes-2026.10.4-x86_64/fanotes" \
+  "$HOME/.local/opt/FaNotes-2026.10.5-x86_64/fanotes" \
   "$HOME/.local/bin/fanotes"
 "$HOME/.local/bin/fanotes"
 ```
@@ -74,7 +74,7 @@ Die Desktop-Datei wird wie bei der AppImage-Variante installiert. Zum Entfernen 
 ```bash
 rm -f "$HOME/.local/bin/fanotes"
 rm -f "$HOME/.local/share/applications/fanotes.desktop"
-rm -rf "$HOME/.local/opt/FaNotes-2026.10.4-x86_64"
+rm -rf "$HOME/.local/opt/FaNotes-2026.10.5-x86_64"
 ```
 
 Vault und Einstellungen werden dadurch absichtlich nicht gelöscht.
@@ -83,7 +83,7 @@ Vault und Einstellungen werden dadurch absichtlich nicht gelöscht.
 
 Das mitgelieferte `PKGBUILD` verpackt exakt das portable tar.gz. Es lädt nichts aus dem Internet nach und baut Electron nicht erneut.
 
-1. `FaNotes-2026.10.4-x86_64.tar.gz`, `PKGBUILD`, `fanotes.desktop`, `fanotes.svg` und `LICENSE` gemeinsam in einen leeren Arbeitsordner kopieren.
+1. `FaNotes-2026.10.5-x86_64.tar.gz`, `PKGBUILD`, `fanotes.desktop`, `fanotes.svg` und `LICENSE` gemeinsam in einen leeren Arbeitsordner kopieren.
 2. Die Build-Werkzeuge installieren:
 
    ```bash
@@ -234,8 +234,8 @@ Use only files that are confirmed with `OK`.
 The AppImage is the simplest path and does not change system files:
 
 ```bash
-chmod +x FaNotes-2026.10.4-x86_64.AppImage
-./FaNotes-2026.10.4-x86_64.AppImage
+chmod +x FaNotes-2026.10.5-x86_64.AppImage
+./FaNotes-2026.10.5-x86_64.AppImage
 ```
 
 For a lasting install in the user account:
@@ -243,7 +243,7 @@ For a lasting install in the user account:
 ```bash
 mkdir -p "$HOME/.local/bin" "$HOME/.local/share/applications" \
   "$HOME/.local/share/icons/hicolor/scalable/apps"
-install -m755 FaNotes-2026.10.4-x86_64.AppImage \
+install -m755 FaNotes-2026.10.5-x86_64.AppImage \
   "$HOME/.local/bin/fanotes"
 install -m644 packaging/fanotes.desktop \
   "$HOME/.local/share/applications/fanotes.desktop"
@@ -266,7 +266,7 @@ sudo pacman -S --needed fuse2
 Without FUSE it can be extracted and started directly as a slower fallback:
 
 ```bash
-./FaNotes-2026.10.4-x86_64.AppImage --appimage-extract-and-run
+./FaNotes-2026.10.5-x86_64.AppImage --appimage-extract-and-run
 ```
 
 ## Option 2: Portable tar.gz
@@ -275,9 +275,9 @@ The portable archive has exactly one top-level folder. It can be installed entir
 
 ```bash
 mkdir -p "$HOME/.local/opt" "$HOME/.local/bin"
-tar -xzf FaNotes-2026.10.4-x86_64.tar.gz -C "$HOME/.local/opt"
+tar -xzf FaNotes-2026.10.5-x86_64.tar.gz -C "$HOME/.local/opt"
 ln -sfn \
-  "$HOME/.local/opt/FaNotes-2026.10.4-x86_64/fanotes" \
+  "$HOME/.local/opt/FaNotes-2026.10.5-x86_64/fanotes" \
   "$HOME/.local/bin/fanotes"
 "$HOME/.local/bin/fanotes"
 ```
@@ -287,7 +287,7 @@ Install the desktop file the same way as for the AppImage. To remove it:
 ```bash
 rm -f "$HOME/.local/bin/fanotes"
 rm -f "$HOME/.local/share/applications/fanotes.desktop"
-rm -rf "$HOME/.local/opt/FaNotes-2026.10.4-x86_64"
+rm -rf "$HOME/.local/opt/FaNotes-2026.10.5-x86_64"
 ```
 
 The vault and settings are intentionally left in place.
@@ -296,7 +296,7 @@ The vault and settings are intentionally left in place.
 
 The included `PKGBUILD` packages exactly the portable tar.gz. It does not download anything from the internet and does not rebuild Electron.
 
-1. Copy `FaNotes-2026.10.4-x86_64.tar.gz`, `PKGBUILD`, `fanotes.desktop`, `fanotes.svg`, and `LICENSE` together into an empty working directory.
+1. Copy `FaNotes-2026.10.5-x86_64.tar.gz`, `PKGBUILD`, `fanotes.desktop`, `fanotes.svg`, and `LICENSE` together into an empty working directory.
 2. Install the build tools:
 
    ```bash

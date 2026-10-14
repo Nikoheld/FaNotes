@@ -1,5 +1,10 @@
 # Änderungsverlauf
 
+## 2026.10.5
+
+- **PDF-Seiten bleiben sichtbar.** Ein erneutes Zeichnen der Notiz baut die Seite nicht mehr leer neu auf. Die Seite bleibt sichtbar, auch während Text markiert ist.
+- **Nativer Abgleich.** Der eingebaute Host meldet Datei- und Ordnerfehler wie die Desktop-App und liest Datum, Zurücksetzen-Markierung und Handschrift-Zeitstempel auf dieselbe Weise.
+
 ## 2026.10.4
 
 - **PDF-Darstellung.** Standardschriften, CMaps und die Bilddecoder für JPEG2000 und JBIG2 werden mitgeliefert. Symbole, asiatische Zeichen und CMYK-Farben erscheinen vollständig.
