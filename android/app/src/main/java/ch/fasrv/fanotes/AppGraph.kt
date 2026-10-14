@@ -77,6 +77,7 @@ class AppGraph(context: Context) {
                 automatic = { prefs.getBoolean("sync-automatic", true) },
                 isPathBusy = { path -> path in busyPaths },
                 excludedPrefixes = { syncPrefixesFromSetting(readDesk()["sync-excluded"]) },
+                includeHistory = { readDesk()["sync-history"] == "on" },
                 onApplied = { written, removed ->
                     synchronized(remoteListeners) { remoteListeners.toList() }.forEach { it(written, removed) }
                 },

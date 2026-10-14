@@ -43,6 +43,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import ch.fasrv.fanotes.desk.measureDocument
 import ch.fasrv.fanotes.desk.marginLinesFromTranscript
 import ch.fasrv.fanotes.desk.readPdfMarks
 import ch.fasrv.fanotes.desk.wikiTargets
@@ -751,6 +752,13 @@ fun SettingsScreen(model: FaNotesViewModel, onSync: () -> Unit, onOpenVault: () 
                         modifier = Modifier.fillMaxWidth(),
                     )
                     Text("Ein Ordner je Zeile. Dateien darunter bleiben auf diesem Tablet.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
+                    val historySync = settings["sync-history"] == "on"
+                    Text(
+                        "Versionsverlauf synchronisieren: ${if (historySync) "an" else "aus"}",
+                        modifier = Modifier.clickable { model.updateDesk("sync-history", if (historySync) "off" else "on") }.padding(vertical = 6.dp),
+                        fontWeight = if (historySync) FontWeight.Bold else FontWeight.Normal,
+                    )
+                    Text("Die lokalen Sicherungen unter .fanotes/history mitnehmen. Aus: der Verlauf bleibt auf diesem Gerät.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
                     ConflictList(model)
                 }
                 "addons" -> Text("Add-ons des Desktops bleiben Dateien im Vault. GlyphenWerk ist auf dem Tablet nicht enthalten. Andere Erweiterungen werden nicht ausgeführt.")
@@ -936,9 +944,17 @@ fun NoteRelations(model: FaNotesViewModel, onOpen: (String) -> Unit) {
 fun Inspector(model: FaNotesViewModel, onOpen: (String) -> Unit) {
     val markdown by model.markdown.collectAsStateWithLifecycle()
     val settings by model.deskSettings.collectAsStateWithLifecycle()
+    val path = model.open.collectAsStateWithLifecycle().value?.path
     if (settings["outline"] == "off") return
     Column(Modifier.fillMaxSize().padding(12.dp).verticalScroll(rememberScrollState())) {
-        Text("Gliederung", fontWeight = FontWeight.SemiBold)
+        val stats = measureDocument(markdown)
+        Text("Dokument", fontWeight = FontWeight.SemiBold)
+        Text("${stats.words} Wörter", fontSize = 13.sp)
+        Text("${stats.characters} Zeichen", fontSize = 13.sp)
+        Text("Lesezeit ~ ${stats.readingMinutes} min", fontSize = 13.sp)
+        Text("${stats.headings} Überschriften · ${stats.tasksDone}/${stats.tasks} Aufgaben", fontSize = 13.sp)
+        if (path != null) Text(path, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f))
+        Text("Gliederung", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 12.dp))
         outlineOf(markdown).forEach { (level, text) ->
             Text(text, modifier = Modifier.padding(start = (level * 8).dp, top = 4.dp), fontSize = 13.sp)
         }
