@@ -17,6 +17,14 @@ class WorkspaceNavTest {
         assertNull(swappedSplit("A.md", null))
         assertNull(swappedSplit("A.md", "A.md"))
         assertEquals("B.md" to "A.md", swappedSplit("A.md", "B.md"))
+        assertEquals(
+            listOf("Archiv", "Archiv/Alt", "Schule/Unter"),
+            movableFolderTargets(listOf("Schule", "Archiv", "Archiv/Alt", "Schule/Unter"), "Schule/Mathe.md"),
+        )
+        assertEquals(
+            listOf("Archiv"),
+            movableFolderTargets(listOf("Schule", "Schule/Unter", "Archiv"), "Schule"),
+        )
     }
 
     @Test

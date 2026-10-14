@@ -20,5 +20,10 @@ class MarkdownConflictTest {
         assertEquals("#c4554d", parsed["Arbeit"])
         assertEquals(mapOf("Schule" to "#337ea9"), withFolderColor(parsed, "Schule", "#337EA9").filterKeys { it == "Schule" })
         assertEquals(false, withFolderColor(parsed, "Schule", null).containsKey("Schule"))
+        val moved = remapFolderColors(parsed, "Schule", "Archiv/Schule")
+        assertEquals("#2a6f97", moved["Archiv/Schule"])
+        assertEquals(false, moved.containsKey("Schule"))
+        assertEquals("#c4554d", moved["Arbeit"])
+        assertEquals(parsed, remapFolderColors(parsed, "Schule", "Schule"))
     }
 }

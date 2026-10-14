@@ -2,6 +2,7 @@ package ch.fasrv.fanotes
 
 import android.content.Context
 import android.net.Uri
+import android.provider.DocumentsContract
 import androidx.documentfile.provider.DocumentFile
 import ch.fasrv.fanotes.vault.VaultEntry
 import ch.fasrv.fanotes.vault.VaultIo
@@ -29,9 +30,28 @@ class SafVault(private val context: Context, private val tree: Uri) : VaultIo {
     }
 
     override fun move(from: String, to: String) {
-        val file = locate(normalize(from), create = false) ?: return
-        val name = normalize(to).substringAfterLast('/')
-        if (name.isEmpty() || !file.renameTo(name)) error("Umbenennen ist fehlgeschlagen.")
+        val source = locate(normalize(from), create = false) ?: return
+        val target = normalize(to)
+        val targetName = target.substringAfterLast('/')
+        if (targetName.isEmpty()) error("Verschieben ist fehlgeschlagen.")
+        val targetParentPath = target.substringBeforeLast('/', "")
+        val targetParent = if (targetParentPath.isEmpty()) root else {
+            locate(targetParentPath, create = false) ?: error("Der Zielordner wurde nicht gefunden.")
+        }
+        val sourceParent = source.parentFile ?: root
+        if (sourceParent.uri == targetParent.uri) {
+            if (source.name != targetName && !source.renameTo(targetName)) error("Umbenennen ist fehlgeschlagen.")
+            return
+        }
+        DocumentsContract.moveDocument(
+            context.contentResolver,
+            source.uri,
+            sourceParent.uri,
+            targetParent.uri,
+        ) ?: error("Verschieben ist fehlgeschlagen.")
+        if (source.name == targetName) return
+        val moved = targetParent.findFile(source.name ?: return) ?: error("Verschieben ist fehlgeschlagen.")
+        if (!moved.renameTo(targetName)) error("Umbenennen ist fehlgeschlagen.")
     }
 
     override fun exists(path: String): Boolean = locate(normalize(path), create = false) != null

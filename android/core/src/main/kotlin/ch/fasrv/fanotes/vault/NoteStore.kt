@@ -226,6 +226,25 @@ class NoteStore(private val io: VaultIo) {
         return next
     }
 
+    fun moveEntry(path: String, destFolder: String): String {
+        val dest = destFolder.trim('/').replace('\\', '/')
+        if (dest.isNotEmpty() && !isDirectory(dest)) {
+            throw IllegalArgumentException("Der Zielordner wurde nicht gefunden.")
+        }
+        val folder = isDirectory(path)
+        val next = movedVaultPath(path, dest) { io.exists(it) }
+        if (next == path) return path
+        io.move(path, next)
+        if (!folder) moveCompanions(path, next)
+        return next
+    }
+
+    private fun isDirectory(path: String): Boolean {
+        if (path.isBlank()) return true
+        val parent = path.substringBeforeLast('/', "")
+        return io.list(parent).any { it.directory && it.path.trim('/') == path.trim('/') }
+    }
+
     private fun moveCompanions(path: String, next: String) {
         val extension = extensionOf(path).ifBlank { ".md" }
         val companionExt = if (extension == FAMD_EXTENSION) ".md" else FAMD_EXTENSION
@@ -287,6 +306,41 @@ private fun jsonObject(vararg pairs: Pair<String, JsonValue>) = JsonValue.Obj().
  * New path for a rename in the same folder. A file keeps its extension even
  * when the typed name includes `.md` or `.pdf`. A folder stays a folder.
  */
+/**
+ * Destination of a move into [destFolder]. A name that is already there,
+ * or whose companion is already there, becomes "Name 2", then "Name 3".
+ * Moving a folder into itself is refused. The same parent is a no-op.
+ */
+fun movedVaultPath(path: String, destFolder: String, occupied: (String) -> Boolean): String {
+    val normalized = path.replace('\\', '/').trim('/')
+    val dest = destFolder.replace('\\', '/').trim('/')
+    if (normalized.isEmpty()) throw IllegalArgumentException("Der Eintrag wurde nicht gefunden.")
+    if (dest == normalized || dest.startsWith("$normalized/")) {
+        throw IllegalArgumentException("Ein Ordner kann nicht in sich selbst verschoben werden.")
+    }
+    if (normalized.substringBeforeLast('/', "") == dest) return normalized
+    val name = normalized.substringAfterLast('/')
+    val extension = extensionOf(name)
+    val base = if (extension.isEmpty()) name else name.removeSuffix(extension)
+    val companionExt = when {
+        name.endsWith(".md", true) || name.endsWith(".markdown", true) || name.endsWith(".pdf", true) -> ".famd"
+        name.endsWith(".famd", true) -> ".md"
+        else -> ""
+    }
+    fun join(folder: String, leaf: String) = if (folder.isEmpty()) leaf else "$folder/$leaf"
+    fun companionOf(candidate: String): String {
+        if (companionExt.isEmpty()) return ""
+        return candidate.replace(Regex("""\.[^.]+$"""), "") + companionExt
+    }
+    for (index in 1..10_000) {
+        val candidateName = if (index == 1) name else "$base $index$extension"
+        val candidate = join(dest, candidateName)
+        val companion = companionOf(candidate)
+        if (!occupied(candidate) && (companion.isEmpty() || !occupied(companion))) return candidate
+    }
+    throw IllegalArgumentException("Es konnte kein eindeutiger Name erzeugt werden.")
+}
+
 fun renamedVaultPath(path: String, nextName: String, folder: Boolean): String {
     val trimmed = nextName.trim()
     if (trimmed.isEmpty()) throw IllegalArgumentException("Der Name darf nicht leer sein.")
