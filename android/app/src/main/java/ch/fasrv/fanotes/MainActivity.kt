@@ -822,9 +822,11 @@ private fun NotePage(
     modifier: Modifier,
     showRelations: Boolean = true,
 ) {
+    val noteKind = model.open.collectAsStateWithLifecycle().value?.kind
     Column(modifier) {
         if (path != null) {
             NoteTagBar(model)
+            if (noteKind == NoteKind.PDF) PdfQuoteMarks(model)
             if (showRelations) NoteRelations(model) { model.openPath(it); model.showDestination("notes") }
         }
         PageSurface(

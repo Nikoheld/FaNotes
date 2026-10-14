@@ -61,6 +61,9 @@ import ch.fasrv.fanotes.desk.serializeHomeworkMarkdown
 import ch.fasrv.fanotes.desk.Backlink
 import ch.fasrv.fanotes.desk.backlinksFor
 import ch.fasrv.fanotes.desk.resolveWikiTarget
+import ch.fasrv.fanotes.desk.addPdfMark
+import ch.fasrv.fanotes.desk.readPdfMarks
+import ch.fasrv.fanotes.desk.writePdfMarks
 import ch.fasrv.fanotes.desk.formatNoteDiff
 import ch.fasrv.fanotes.desk.applyNoteTags
 import ch.fasrv.fanotes.desk.parseNoteTags
@@ -297,6 +300,16 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         markdown.value = value
         open.value?.path?.let { rememberTags(it, value) }
         noteChanged()
+    }
+
+    fun addPdfQuote(page: Int, quote: String, kind: String) {
+        if (open.value?.kind != NoteKind.PDF) return
+        updateMarkdown(writePdfMarks(markdown.value, addPdfMark(readPdfMarks(markdown.value), page, quote, kind)))
+    }
+
+    fun removePdfQuote(id: String) {
+        if (open.value?.kind != NoteKind.PDF) return
+        updateMarkdown(writePdfMarks(markdown.value, readPdfMarks(markdown.value).filter { it.id != id }))
     }
 
     fun setNoteTags(tags: List<String>) {
