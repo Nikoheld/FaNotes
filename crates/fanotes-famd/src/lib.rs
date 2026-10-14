@@ -1210,11 +1210,22 @@ fn legacy_meridiem_clock(clock: &str, pm: bool) -> Option<String> {
     let mut dates = Vec::new();
     let mut offset = None;
     let mut minute_sign = 0i64;
-    take_month_clock(clock, &mut time, &mut dates, &mut offset, &mut minute_sign)?;
+    let mut glued_meridiem = None;
+    take_month_clock(
+        clock,
+        &mut time,
+        &mut dates,
+        &mut offset,
+        &mut minute_sign,
+        &mut glued_meridiem,
+    )?;
     if time.index == 0 || !dates.is_empty() || offset.is_some() || minute_sign != 0 {
         return None;
     }
-    finish_month_time(&time, Some(if pm { 12 } else { 0 }))
+    finish_month_time(
+        &time,
+        Some(glued_meridiem.unwrap_or(if pm { 12 } else { 0 })),
+    )
 }
 
 fn in_range_ampm_clock(clock: &str, pm: bool) -> Option<String> {
@@ -1926,8 +1937,17 @@ fn finish_slash_offset(
         }
         if minute_sign == 0 {
             if let Some(zone) = legacy_zone_offset(word) {
-                if zone.minute_sign == 0 && zone.spilled.is_empty() {
+                if zone.minute_sign == 0 && zone.spilled.is_empty() && zone.time_fields.is_empty()
+                {
                     minutes = zone.minutes;
+                    continue;
+                }
+            }
+            // `+5 +6` keeps the later offset.
+            if let Some(next) = parse_legacy_offset(word) {
+                if next.minute_sign == 0 && next.spilled.is_empty() && next.time_fields.is_empty()
+                {
+                    minutes = next.minutes;
                     continue;
                 }
             }
@@ -2117,11 +2137,19 @@ fn legacy_clock_text(time: &str) -> Option<String> {
     let mut dates = Vec::new();
     let mut offset = None;
     let mut minute_sign = 0i64;
-    take_month_clock(time, &mut legacy, &mut dates, &mut offset, &mut minute_sign)?;
+    let mut meridiem = None;
+    take_month_clock(
+        time,
+        &mut legacy,
+        &mut dates,
+        &mut offset,
+        &mut minute_sign,
+        &mut meridiem,
+    )?;
     if legacy.index == 0 || !dates.is_empty() || minute_sign != 0 {
         return None;
     }
-    let clock = finish_month_time(&legacy, None)?;
+    let clock = finish_month_time(&legacy, meridiem)?;
     match offset {
         None => Some(clock),
         Some(minutes) => {
@@ -2225,6 +2253,7 @@ fn compose_month_date(
                                 &mut dates,
                                 &mut offset,
                                 &mut minute_sign,
+                                &mut hour_offset,
                             )?;
                         } else if let Some(number) = unsigned_number(body) {
                             push_date_number(&mut dates, number)?;
@@ -2267,7 +2296,14 @@ fn compose_month_date(
             continue;
         }
         if word.contains(':') && word.starts_with(|character: char| character.is_ascii_digit()) {
-            take_month_clock(word, &mut time, &mut dates, &mut offset, &mut minute_sign)?;
+            take_month_clock(
+                word,
+                &mut time,
+                &mut dates,
+                &mut offset,
+                &mut minute_sign,
+                &mut hour_offset,
+            )?;
             number_seen = true;
             continue;
         }
@@ -2407,6 +2443,7 @@ fn take_month_clock(
     dates: &mut Vec<i32>,
     offset: &mut Option<i64>,
     minute_sign: &mut i64,
+    hour_offset: &mut Option<i32>,
 ) -> Option<()> {
     let (body, embedded) = split_clock_tail(word);
     let mut time_fields = Vec::new();
@@ -2454,6 +2491,11 @@ fn take_month_clock(
             let (fraction, length, next) = read_clock_number(bytes, index)?;
             index = next;
             time.add_final(clock_milliseconds(fraction, length))?;
+            // `4:00:00.5PM` is 16:00:00.500. The fraction finished the clock,
+            // so a meridiem may touch it. `4:00PM` is still empty.
+            if consume_fraction_meridiem(bytes, index, hour_offset) {
+                break;
+            }
             if index != bytes.len() && !consume_glued_z(bytes, index, dates, offset)? {
                 return None;
             }
@@ -2486,6 +2528,25 @@ fn take_month_clock(
 
 /// `16:00Z` and `16:00Z5`. `16:00EST` is not a date: only `Z` may touch a
 /// finished clock.
+/// `4:00:00.5PM` and `4:00:00.5AM`. An empty tail is also finished.
+fn consume_fraction_meridiem(bytes: &[u8], index: usize, hour_offset: &mut Option<i32>) -> bool {
+    let Ok(rest) = std::str::from_utf8(&bytes[index..]) else {
+        return false;
+    };
+    if rest.is_empty() {
+        return true;
+    }
+    if rest.eq_ignore_ascii_case("pm") {
+        *hour_offset = Some(12);
+        return true;
+    }
+    if rest.eq_ignore_ascii_case("am") {
+        *hour_offset = Some(0);
+        return true;
+    }
+    false
+}
+
 fn consume_glued_z(
     bytes: &[u8],
     index: usize,
@@ -5839,6 +5900,78 @@ mod tests {
             assert_eq!(super::canonical_iso("2026-10-13 4:00PM AM"), None);
             assert_eq!(super::canonical_iso("2026-10-13 4:00 PMAM"), None);
             assert_eq!(super::canonical_iso("1950-10-13 PM 4:00 AM"), None);
+        });
+    }
+
+    #[test]
+    fn a_fraction_can_carry_a_glued_meridiem() {
+        with_tz("America/New_York", || {
+            // `4:00:00.5PM` is 16:00:00.500. The fraction finished the clock, so
+            // `PM` may touch it. `4:00PM` and `4:00.5PM` are still empty.
+            // A later slash offset replaces the earlier one: `+5 +6` is UTC+6.
+            assert_eq!(
+                super::canonical_iso("2026-10-13 4:00:00.5PM").as_deref(),
+                Some("2026-10-13T20:00:00.500Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 4:00:00.5pm").as_deref(),
+                Some("2026-10-13T20:00:00.500Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 4:00:00.5AM").as_deref(),
+                Some("2026-10-13T08:00:00.500Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 12:00:00.5AM").as_deref(),
+                Some("2026-10-13T04:00:00.500Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 4:00:00.123PM").as_deref(),
+                Some("2026-10-13T20:00:00.123Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 4:00:00.5PM+5").as_deref(),
+                Some("2026-10-13T11:00:00.500Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 4:00:00.5PM EST").as_deref(),
+                Some("2026-10-13T21:00:00.500Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 2026 4:00:00.5PM").as_deref(),
+                Some("2026-10-13T20:00:00.500Z")
+            );
+            assert_eq!(
+                super::canonical_iso("10/13/2026 4:00:00.5PM").as_deref(),
+                Some("2026-10-13T20:00:00.500Z")
+            );
+            assert_eq!(
+                super::canonical_iso("10/13/2026 16:00 +5 +6").as_deref(),
+                Some("2026-10-13T10:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("10/13/2026 16:00 +6 +5").as_deref(),
+                Some("2026-10-13T11:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("10/13/2026 16:00 +5 +6 EST").as_deref(),
+                Some("2026-10-13T21:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("1950-10-13 4:00:00.5PM").as_deref(),
+                Some("1950-10-13T21:00:00.500Z")
+            );
+            assert_eq!(
+                super::canonical_iso("1950-10-13 4:00:00.5AM").as_deref(),
+                Some("1950-10-13T09:00:00.500Z")
+            );
+            assert_eq!(
+                super::canonical_iso("1950-10-13 4:00:00.5PM EST").as_deref(),
+                Some("1950-10-13T21:00:00.500Z")
+            );
+            assert_eq!(super::canonical_iso("2026-10-13 4:00.5PM"), None);
+            assert_eq!(super::canonical_iso("2026-10-13 4:00:00PM"), None);
+            assert_eq!(super::canonical_iso("1950-10-13 4:00:00PM"), None);
         });
     }
 
