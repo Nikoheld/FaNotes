@@ -8,6 +8,7 @@ import android.os.Build
 import ch.fasrv.fanotes.sync.SyncApi
 import ch.fasrv.fanotes.sync.SyncEngine
 import ch.fasrv.fanotes.sync.SyncEngineOptions
+import ch.fasrv.fanotes.sync.syncPrefixesFromSetting
 import ch.fasrv.fanotes.vault.DirectoryVault
 import ch.fasrv.fanotes.vault.NoteStore
 import ch.fasrv.fanotes.vault.VaultIo
@@ -75,6 +76,7 @@ class AppGraph(context: Context) {
                 deviceName = { prefs.getString("device-name", null)?.ifBlank { null } ?: android.os.Build.MODEL.ifBlank { "Android tablet" } },
                 automatic = { prefs.getBoolean("sync-automatic", true) },
                 isPathBusy = { path -> path in busyPaths },
+                excludedPrefixes = { syncPrefixesFromSetting(readDesk()["sync-excluded"]) },
                 onApplied = { written, removed ->
                     synchronized(remoteListeners) { remoteListeners.toList() }.forEach { it(written, removed) }
                 },

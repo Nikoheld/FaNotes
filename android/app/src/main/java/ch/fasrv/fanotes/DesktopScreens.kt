@@ -742,6 +742,13 @@ fun SettingsScreen(model: FaNotesViewModel, onSync: () -> Unit, onOpenVault: () 
                 "sync" -> {
                     TextButton(onClick = onSync) { Text("Konto und Abgleich") }
                     Text("Ein Konflikt behält die Serverfassung auf dem ursprünglichen Pfad. Die Tablet-Fassung liegt daneben.", fontSize = 13.sp)
+                    OutlinedTextField(
+                        settings["sync-excluded"].orEmpty(),
+                        { model.updateDesk("sync-excluded", it) },
+                        label = { Text("Ordner nur auf diesem Gerät") },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Text("Ein Ordner je Zeile. Dateien darunter bleiben auf diesem Tablet.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
                     ConflictList(model)
                 }
                 "addons" -> Text("Add-ons des Desktops bleiben Dateien im Vault. GlyphenWerk ist auf dem Tablet nicht enthalten. Andere Erweiterungen werden nicht ausgeführt.")
