@@ -42,6 +42,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import ch.fasrv.fanotes.desk.wikiTargets
 import ch.fasrv.fanotes.desk.parseNoteTags
 import ch.fasrv.fanotes.desk.Breadcrumb
 import ch.fasrv.fanotes.desk.SwitcherNote
@@ -789,6 +790,39 @@ fun NoteTagBar(model: FaNotesViewModel) {
 }
 
 @Composable
+fun NoteRelations(model: FaNotesViewModel, onOpen: (String) -> Unit) {
+    val markdown by model.markdown.collectAsStateWithLifecycle()
+    val incoming by model.backlinks.collectAsStateWithLifecycle()
+    val outgoing = wikiTargets(markdown)
+    if (outgoing.isEmpty() && incoming.isEmpty()) return
+    Column(Modifier.fillMaxWidth().padding(top = 8.dp)) {
+        if (outgoing.isNotEmpty()) {
+            Text("Verweise", fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+            outgoing.forEach { target ->
+                Text(
+                    "[[$target]]",
+                    color = MaterialTheme.colorScheme.primary,
+                    fontSize = 13.sp,
+                    modifier = Modifier.clickable { model.openWikiTarget(target) }.padding(vertical = 2.dp),
+                )
+            }
+        }
+        Text("Rückverweise", fontWeight = FontWeight.SemiBold, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
+        if (incoming.isEmpty()) {
+            Text("Keine Wiki-Links auf diese Notiz.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+        }
+        incoming.forEach { link ->
+            Column(Modifier.fillMaxWidth().clickable { onOpen(link.path) }.padding(vertical = 4.dp)) {
+                Text(link.title, fontSize = 13.sp)
+                if (link.excerpt.isNotEmpty()) {
+                    Text(link.excerpt, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f), maxLines = 2)
+                }
+            }
+        }
+    }
+}
+
+@Composable
 fun Inspector(model: FaNotesViewModel, onOpen: (String) -> Unit) {
     val markdown by model.markdown.collectAsStateWithLifecycle()
     val settings by model.deskSettings.collectAsStateWithLifecycle()
@@ -802,11 +836,7 @@ fun Inspector(model: FaNotesViewModel, onOpen: (String) -> Unit) {
         taskLines(markdown).forEach { (index, done, text) ->
             Text("${if (done) "☑" else "☐"} $text", modifier = Modifier.clickable { model.updateMarkdown(ch.fasrv.fanotes.desk.toggleTask(markdown, index)) }.padding(vertical = 4.dp), fontSize = 13.sp)
         }
-        Text("Verweise", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 16.dp))
-        model.linksNow().forEach { target ->
-            Text("[[$target]]", modifier = Modifier.clickable { model.searchVaultText(target); model.showDestination("search") }.padding(vertical = 4.dp), color = MaterialTheme.colorScheme.primary, fontSize = 13.sp)
-        }
-        TextButton(onClick = { model.findBacklinks(); model.showDestination("search") }) { Text("Rückverweise suchen") }
+        NoteRelations(model, onOpen)
     }
 }
 

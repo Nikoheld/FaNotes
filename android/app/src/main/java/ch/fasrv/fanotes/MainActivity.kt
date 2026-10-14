@@ -345,6 +345,7 @@ fun FaNotesScreen(
                                     model, tool, style, finger, showText, markdown, backdrop, token, open?.path, syncText,
                                     syncPending || sync.status == SyncStatus.SYNCING, { requestSync() }, { model.showList.value = !showList },
                                     { editingBox = it }, { mathOpen = true }, it.clipToBounds(),
+                                    showRelations = !(wide && desk["outline"] != "off" && !focus),
                                 )
                             }
                             if (bookPlacement == "unten") BookPane(model, Modifier.height(220.dp).fillMaxWidth(), openBook)
@@ -355,6 +356,7 @@ fun FaNotesScreen(
                                 model, tool, style, finger, showText, markdown, backdrop, token, open?.path, syncText,
                                 syncPending || sync.status == SyncStatus.SYNCING, { requestSync() }, { model.showList.value = !showList },
                                 { editingBox = it }, { mathOpen = true }, it.clipToBounds(),
+                                showRelations = !(wide && desk["outline"] != "off" && !focus),
                             )
                         }
                     }
@@ -801,9 +803,13 @@ private fun NotePage(
     onEditBox: (String) -> Unit,
     onMath: () -> Unit,
     modifier: Modifier,
+    showRelations: Boolean = true,
 ) {
     Column(modifier) {
-        if (path != null) NoteTagBar(model)
+        if (path != null) {
+            NoteTagBar(model)
+            if (showRelations) NoteRelations(model) { model.openPath(it); model.showDestination("notes") }
+        }
         PageSurface(
         model = model,
         tool = tool,
