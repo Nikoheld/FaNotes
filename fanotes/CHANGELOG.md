@@ -2,9 +2,9 @@
 
 ## 2026.10.7
 
-- Android-Tablet: Der Text liegt auf dem Papier, die Leiste klappt beim Schreiben ein, und der Radierer folgt der Spitze.
-- Sync zeigt den Fortschritt, und ein zweiter Start geht nicht verloren.
-- Die Version lässt sich in GitHub Actions unter Update version setzen. Der Android-Release installiert das SDK, ohne am Lizenzdialog abzubrechen.
+- **Android-Tablet.** Der Text liegt auf dem Papier, die Leiste klappt beim Schreiben ein, und der Radierer folgt der Spitze.
+- **Sync.** Der Abgleich zeigt den Fortschritt, und ein zweiter Start geht nicht verloren.
+- **Version.** Die Version lässt sich in GitHub Actions unter Update version setzen. Der Android-Release installiert das SDK, ohne am Lizenzdialog abzubrechen.
 
 ## 2026.10.6
 
