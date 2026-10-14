@@ -840,8 +840,9 @@ pub fn js_json_number(value: f64) -> Value {
 /// `Date.parse` plus `toISOString`. A zoned timestamp becomes UTC with milliseconds.
 ///
 /// `YYYY`, `+YYYYYY`, and those forms with a two-digit month and day are
-/// midnight UTC. A wider year, a one-digit month or day, or whitespace around
-/// the date is local midnight. A time without a zone is local time.
+/// midnight UTC. A wider year, a month or day that is not two digits, or
+/// whitespace around the date is local midnight. A time without a zone is
+/// local time.
 /// In a daylight-saving overlap that is the earlier instant. A skipped hour
 /// keeps the offset from before the transition. A day past the end of the
 /// month rolls forward, and `24:00:00` is the next midnight.
@@ -1382,13 +1383,13 @@ fn date_only_iso(value: &str, surrounded: bool) -> Option<String> {
     }
     let strict_year = iso_date_year(year);
     let year: i32 = year.parse().ok()?;
-    // `YYYY` and `+YYYYYY` are UTC. `02026`, `+2026`, a short month or day,
-    // and whitespace around the date are local midnight.
+    // `YYYY` and `+YYYYYY` are UTC. `02026`, `+2026`, a month or day that is
+    // not two digits, and whitespace around the date are local midnight.
     let mut legacy_local = surrounded || !strict_year;
     let (month, day) = match (month, day) {
         (None, _) => (1, 1),
         (Some(month), None) => {
-            if !(1..=2).contains(&month.len()) || !month.bytes().all(|byte| byte.is_ascii_digit()) {
+            if month.is_empty() || !month.bytes().all(|byte| byte.is_ascii_digit()) {
                 return None;
             }
             if month.len() != 2 {
@@ -1401,8 +1402,8 @@ fn date_only_iso(value: &str, surrounded: bool) -> Option<String> {
             (month, 1)
         }
         (Some(month), Some(day)) => {
-            if !(1..=2).contains(&month.len())
-                || !(1..=2).contains(&day.len())
+            if month.is_empty()
+                || day.is_empty()
                 || !month.bytes().all(|byte| byte.is_ascii_digit())
                 || !day.bytes().all(|byte| byte.is_ascii_digit())
             {
@@ -2184,6 +2185,40 @@ mod tests {
                 Some("2026-03-03T05:00:00.000Z")
             );
             assert_eq!(super::canonical_iso("02026-10-13T00:00:00Z"), None);
+        });
+    }
+
+    #[test]
+    fn an_extra_month_digit_is_local_midnight() {
+        // Two digits stay UTC. Any other month or day width is local.
+        with_tz("America/New_York", || {
+            assert_eq!(
+                super::canonical_iso("2026-10-13").as_deref(),
+                Some("2026-10-13T00:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-010-13").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-010").as_deref(),
+                Some("2026-10-01T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-003").as_deref(),
+                Some("2026-10-03T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-0010-13").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-02-31").as_deref(),
+                Some("2026-03-03T00:00:00.000Z")
+            );
+            assert_eq!(super::canonical_iso("2026-010-32"), None);
+            assert_eq!(super::canonical_iso("2026-00"), None);
+            assert_eq!(super::canonical_iso("2026-010-13T00:00:00Z"), None);
         });
     }
 
