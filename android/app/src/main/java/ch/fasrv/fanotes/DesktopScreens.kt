@@ -43,6 +43,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import ch.fasrv.fanotes.desk.marginLinesFromTranscript
 import ch.fasrv.fanotes.desk.readPdfMarks
 import ch.fasrv.fanotes.desk.wikiTargets
 import ch.fasrv.fanotes.desk.parseNoteTags
@@ -813,6 +814,50 @@ fun NoteTagBar(model: FaNotesViewModel) {
             keyboardActions = KeyboardActions(onDone = { addTag() }),
         )
         TextButton(onClick = { addTag() }) { Text("Hinzufügen") }
+    }
+}
+
+@Composable
+fun MarginTranscript(model: FaNotesViewModel) {
+    val token by model.canvasToken.collectAsStateWithLifecycle()
+    val path = model.open.collectAsStateWithLifecycle().value?.path
+    val transcript = remember(token, path) { model.session.document.extras.string("searchTranscript").orEmpty() }
+    val lines = marginLinesFromTranscript(transcript)
+    if (lines.isEmpty()) return
+    var editing by remember(token, path) { mutableStateOf<String?>(null) }
+    var draft by remember(token, path) { mutableStateOf("") }
+    Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)) {
+        Text("Randtranskript", fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+        lines.forEachIndexed { index, line ->
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically) {
+                line.text.split(Regex("""(\s+)""")).forEach { part ->
+                    if (part.isBlank()) {
+                        Text(part)
+                    } else if (editing == "$index:$part") {
+                        OutlinedTextField(
+                            draft,
+                            { draft = it },
+                            modifier = Modifier.width(140.dp),
+                            singleLine = true,
+                            label = { Text("Wort korrigieren") },
+                        )
+                        TextButton(onClick = {
+                            model.correctTranscriptWord(part, draft)
+                            editing = null
+                        }) { Text("OK") }
+                    } else {
+                        Text(
+                            part,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.clickable {
+                                editing = "$index:$part"
+                                draft = part
+                            }.padding(horizontal = 2.dp),
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 
