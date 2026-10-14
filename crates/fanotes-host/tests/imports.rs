@@ -536,7 +536,8 @@ fn a_next_line_import_folder_is_not_the_vault_root() {
             ],
         )
         .unwrap_err();
-    assert!(error.contains("nicht gefunden"), "{error}");
+    assert!(error.starts_with("ENOENT:"), "{error}");
+    assert!(error.contains("lstat"), "{error}");
     assert!(!vault.join("Skript.pdf").exists());
 }
 
@@ -578,7 +579,8 @@ fn a_subject_book_uses_the_desktop_trim_only_to_reject_a_blank_subject() {
             &[json!(" Mathe"), pdf.clone()],
         )
         .unwrap_err();
-    assert!(spaced.contains("nicht gefunden"), "{spaced}");
+    assert!(spaced.starts_with("ENOENT:"), "{spaced}");
+    assert!(spaced.contains(" Mathe"), "{spaced}");
     assert!(!vault.join("Mathe/Skript.pdf").exists());
 
     let next_line = host
@@ -587,7 +589,8 @@ fn a_subject_book_uses_the_desktop_trim_only_to_reject_a_blank_subject() {
             &[json!("\u{0085}Mathe"), pdf],
         )
         .unwrap_err();
-    assert!(next_line.contains("nicht gefunden"), "{next_line}");
+    assert!(next_line.starts_with("ENOENT:"), "{next_line}");
+    assert!(next_line.contains('\u{0085}'), "{next_line}");
     assert!(!next_line.contains("Wähle zuerst ein Fach"), "{next_line}");
     assert!(!vault.join("Mathe/Skript.pdf").exists());
     assert!(!vault.join("Skript.pdf").exists());

@@ -140,11 +140,11 @@ fn resolve_existing(root: &Path, relative: &str, allow_internal: bool) -> Result
             Ok(info) if !last && !info.is_dir() => {
                 return Err("Ein Pfadbestandteil ist kein Ordner.".to_owned());
             }
-            Ok(info) if last && !info.is_file() && !info.is_dir() => {
-                return Err("Der Eintrag wurde nicht gefunden.".to_owned());
-            }
+            // Desktop `resolveVaultPath` throws the `lstat` error. A missing
+            // path is ENOENT, and a name past the filesystem limit is
+            // ENAMETOOLONG.
+            Err(error) => return Err(node_lstat_error(&cursor, &error)),
             Ok(_) => {}
-            Err(_) => return Err("Der Eintrag wurde nicht gefunden.".to_owned()),
         }
     }
     Ok(cursor)
@@ -302,6 +302,27 @@ fn js_keeps_case(character: char) -> bool {
         character,
         '\u{A7CE}' | '\u{A7D2}' | '\u{A7D4}' | '\u{16EA0}'..='\u{16EB8}'
     )
+}
+
+/// Node `fs.lstat` failure text, including the path that could not be stated.
+pub(crate) fn node_lstat_error(path: &Path, error: &std::io::Error) -> String {
+    #[cfg(unix)]
+    let (name, detail) = match error.raw_os_error() {
+        Some(libc::ENOENT) => ("ENOENT", "no such file or directory"),
+        Some(libc::EACCES) => ("EACCES", "permission denied"),
+        Some(libc::EPERM) => ("EPERM", "operation not permitted"),
+        Some(libc::EIO) => ("EIO", "i/o error"),
+        Some(libc::ELOOP) => ("ELOOP", "too many symbolic links encountered"),
+        Some(libc::ENOTDIR) => ("ENOTDIR", "not a directory"),
+        Some(libc::ENAMETOOLONG) => ("ENAMETOOLONG", "name too long"),
+        _ => ("EACCES", "permission denied"),
+    };
+    #[cfg(not(unix))]
+    let (name, detail) = {
+        let _ = error;
+        ("ENOENT", "no such file or directory")
+    };
+    format!("{name}: {detail}, lstat '{}'", path.display())
 }
 
 pub fn is_inside_root(root: &Path, candidate: &Path) -> bool {

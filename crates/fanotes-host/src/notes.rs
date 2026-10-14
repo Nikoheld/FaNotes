@@ -78,7 +78,15 @@ pub fn write_note_file(
         // The desktop creates a missing `.famd` on save. A missing markdown
         // note is not created here; that is `create-note`.
         if !path.is_file() {
-            return Err("Der Eintrag wurde nicht gefunden.".to_owned());
+            // A missing markdown note is Node's `lstat` error. A directory was
+            // already refused while the path was resolved.
+            return match fs::symlink_metadata(&path) {
+                Err(error) => Err(vault::node_lstat_error(&path, &error)),
+                Ok(meta) if meta.file_type().is_symlink() => {
+                    Err("Symbolische Links sind innerhalb des Vaults nicht erlaubt.".to_owned())
+                }
+                Ok(_) => Err("Die gewählte Datei ist keine reguläre Datei.".to_owned()),
+            };
         }
         atomic_write(&path, markdown.as_bytes(), 0o600)?;
         path

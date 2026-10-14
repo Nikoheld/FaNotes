@@ -890,13 +890,8 @@ impl Host {
         let normalized = vault::normalize_relative_path(relative, false, false)?;
         let path = vault::resolve_note_file(self.require_vault()?, &normalized)?;
         let limit = note_byte_limit(&normalized);
-        let meta = match fs::symlink_metadata(&path) {
-            Ok(meta) => meta,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                return Err("Der Eintrag wurde nicht gefunden.".to_owned());
-            }
-            Err(_) => return Err("Die Datei konnte nicht gelesen werden.".to_owned()),
-        };
+        let meta = fs::symlink_metadata(&path)
+            .map_err(|error| vault::node_lstat_error(&path, &error))?;
         if meta.file_type().is_symlink() {
             return Err("Symbolische Links sind innerhalb des Vaults nicht erlaubt.".to_owned());
         }
@@ -962,13 +957,7 @@ impl Host {
             root.clone()
         } else {
             vault::reject_symlinks(&root, &parent_relative)?;
-            let path = vault::resolve_existing_entry(&root, &parent_relative).map_err(|error| {
-                if error == "Der Eintrag wurde nicht gefunden." {
-                    "Der Zielordner wurde nicht gefunden.".to_owned()
-                } else {
-                    error
-                }
-            })?;
+            let path = vault::resolve_existing_entry(&root, &parent_relative)?;
             let meta = fs::symlink_metadata(&path)
                 .map_err(|_| "Der Zielordner wurde nicht gefunden.".to_owned())?;
             if meta.file_type().is_symlink() || !meta.is_dir() {
@@ -1137,7 +1126,7 @@ impl Host {
         let source = vault::resolve_existing_entry(&root, relative)?;
         let normalized = vault::normalize_relative_path(relative, false, false)?;
         let meta = fs::symlink_metadata(&source)
-            .map_err(|_| "Der Eintrag wurde nicht gefunden.".to_owned())?;
+            .map_err(|error| vault::node_lstat_error(&source, &error))?;
         if meta.file_type().is_symlink() || (!meta.is_file() && !meta.is_dir()) {
             return Err("Dieser Eintrag kann nicht umbenannt werden.".to_owned());
         }
@@ -1191,7 +1180,7 @@ impl Host {
         let source = vault::resolve_existing_entry(&root, relative)?;
         let normalized = vault::normalize_relative_path(relative, false, false)?;
         let meta = fs::symlink_metadata(&source)
-            .map_err(|_| "Der Eintrag wurde nicht gefunden.".to_owned())?;
+            .map_err(|error| vault::node_lstat_error(&source, &error))?;
         if meta.file_type().is_symlink() || (!meta.is_file() && !meta.is_dir()) {
             return Err("Dieser Eintrag kann nicht verschoben werden.".to_owned());
         }
@@ -2595,7 +2584,7 @@ fn reveal_target(root: &Path, relative: &str) -> Result<PathBuf, String> {
     for (index, segment) in normalized.split('/').enumerate() {
         target.push(segment);
         let meta = fs::symlink_metadata(&target)
-            .map_err(|_| "Der Eintrag wurde nicht gefunden.".to_owned())?;
+            .map_err(|error| vault::node_lstat_error(&target, &error))?;
         if meta.file_type().is_symlink() {
             return Err("Symbolische Links sind innerhalb des Vaults nicht erlaubt.".to_owned());
         }

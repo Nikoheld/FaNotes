@@ -119,13 +119,17 @@ fn an_invalid_folder_color_is_reported_before_the_folder_check() {
             .unwrap_err(),
         "Ungültiger Vault-Pfad."
     );
+    let missing = fs::canonicalize(&vault).unwrap().join("Fehlt");
     assert_eq!(
         host.dispatch(
             "fanotes:set-folder-color",
             &[json!("Fehlt"), json!("#112233")],
         )
         .unwrap_err(),
-        "Der Eintrag wurde nicht gefunden."
+        format!(
+            "ENOENT: no such file or directory, lstat '{}'",
+            missing.display()
+        )
     );
     host.dispatch(
         "fanotes:set-folder-color",

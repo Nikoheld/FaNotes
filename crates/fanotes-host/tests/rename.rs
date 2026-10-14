@@ -93,13 +93,17 @@ fn a_missing_child_is_reported_before_a_move_into_itself() {
     let (vault, mut host) = host();
     fs::create_dir_all(vault.join("Ordner/Innen")).unwrap();
     fs::write(vault.join("Ordner/Seite.md"), b"Hallo\n").unwrap();
+    let missing = fs::canonicalize(vault.join("Ordner")).unwrap().join("Fehlt");
     assert_eq!(
         host.dispatch(
             "fanotes:move-entry",
             &[json!("Ordner"), json!("Ordner/Fehlt")],
         )
         .unwrap_err(),
-        "Der Eintrag wurde nicht gefunden."
+        format!(
+            "ENOENT: no such file or directory, lstat '{}'",
+            missing.display()
+        )
     );
     assert_eq!(
         host.dispatch(
