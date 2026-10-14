@@ -1777,7 +1777,16 @@ fn unix_millis_from_iso(value: &str) -> Option<u64> {
             return unix_millis_from_iso(&omitted);
         }
     }
+    match rewrite_ignored_symbols(value) {
+        SymbolRewrite::Illegal => return None,
+        SymbolRewrite::Changed(next) => return unix_millis_from_iso(&next),
+        SymbolRewrite::Same => {}
+    }
     let trimmed = value.trim_matches(is_date_parse_space);
+    if let Some(next) = strip_leading_word(trimmed) {
+        // `hello 2026-10-13` is local. The word is not part of the date.
+        return unix_millis_from_iso(&next);
+    }
     // A period between numbers is a hyphen. A period before a clock is a space.
     // Trailing periods make a date local. A `T` form keeps its fraction dot.
     if !has_iso_t(trimmed) && trimmed.contains('.') {
@@ -1819,7 +1828,7 @@ fn unix_millis_from_iso(value: &str) -> Option<u64> {
         return unix_millis_from_iso(&normalized);
     }
     let (date, time) = match iso_date_time(value) {
-        IsoDate::Invalid => return None,
+        IsoDate::Invalid => return legacy_spaced_numbers(trimmed),
         // `YYYY-MM-DD` is UTC midnight. A short field, or whitespace around the
         // date, makes that midnight local.
         IsoDate::DateOnly(date) => {
@@ -2371,6 +2380,137 @@ fn split_unmatched_paren(token: &str) -> Vec<&str> {
 
 /// Drop balanced parenthetical groups. An unclosed `(` drops the rest of the
 /// text. A `)` with no `(` stays, so `Oct 13) 2026` is not a date.
+enum SymbolRewrite {
+    Same,
+    Changed(String),
+    Illegal,
+}
+
+/// Characters below `A` that are not date syntax are ignored, like `!` and `#`.
+/// A `)` after a digit, or `16:00!`, is not a date. Replacing a symbol with a
+/// space makes a date-only value local.
+fn rewrite_ignored_symbols(value: &str) -> SymbolRewrite {
+    let chars: Vec<char> = value.chars().collect();
+    let mut out = String::with_capacity(value.len());
+    let mut changed = false;
+    for (index, character) in chars.iter().copied().enumerate() {
+        if character == ')' {
+            if previous_significant(&chars, index).is_some_and(|item| item.is_ascii_digit()) {
+                return SymbolRewrite::Illegal;
+            }
+            changed = true;
+            push_separator(&mut out);
+            continue;
+        }
+        if is_ignored_legacy_symbol(character) {
+            if symbol_ends_a_clock(&chars, index) {
+                return SymbolRewrite::Illegal;
+            }
+            changed = true;
+            push_separator(&mut out);
+            continue;
+        }
+        out.push(character);
+    }
+    if changed {
+        SymbolRewrite::Changed(out)
+    } else {
+        SymbolRewrite::Same
+    }
+}
+
+fn previous_significant(chars: &[char], index: usize) -> Option<char> {
+    let mut cursor = index;
+    while cursor > 0 {
+        cursor -= 1;
+        if !is_date_parse_space(chars[cursor]) {
+            return Some(chars[cursor]);
+        }
+    }
+    None
+}
+
+fn push_separator(out: &mut String) {
+    if !out.ends_with(is_date_parse_space) {
+        out.push(' ');
+    }
+}
+
+fn is_ignored_legacy_symbol(character: char) -> bool {
+    (character as u32) < u32::from(b'A')
+        && !character.is_ascii_digit()
+        && !is_date_parse_space(character)
+        && !matches!(character, ':' | '-' | '+' | '.' | '/' | '(' | ')')
+}
+
+/// `16:00!` finalizes the clock and then sees junk. `2026-10-13!16:00` does not,
+/// because the mark is before the clock.
+fn symbol_ends_a_clock(chars: &[char], index: usize) -> bool {
+    let mut cursor = index;
+    let mut saw_colon = false;
+    while cursor > 0 {
+        cursor -= 1;
+        if is_date_parse_space(chars[cursor]) {
+            break;
+        }
+        if chars[cursor] == ':' {
+            saw_colon = true;
+        }
+    }
+    if !saw_colon {
+        return false;
+    }
+    let mut ahead = index + 1;
+    while ahead < chars.len() && is_ignored_legacy_symbol(chars[ahead]) {
+        ahead += 1;
+    }
+    ahead >= chars.len() || is_date_parse_space(chars[ahead])
+}
+
+/// `hello 2026-10-13` drops `hello`. The space in front of the date stays, so
+/// a date-only value is local.
+fn strip_leading_word(trimmed: &str) -> Option<String> {
+    let end = trimmed
+        .char_indices()
+        .find(|(_, character)| is_date_parse_space(*character))?
+        .0;
+    let word = &trimmed[..end];
+    if word.is_empty()
+        || !word.chars().all(|character| character.is_ascii_alphabetic())
+        || english_month(word).is_some()
+    {
+        return None;
+    }
+    let rest = trimmed[end..].trim_start_matches(is_date_parse_space);
+    if rest.is_empty() {
+        return None;
+    }
+    Some(format!(" {rest}"))
+}
+
+/// `10 13 2026` is month, day, year. `2026 10 13` is year, month, day.
+/// One number is 1 January of that legacy year. Two numbers are not a date.
+fn legacy_spaced_numbers(trimmed: &str) -> Option<u64> {
+    let words: Vec<&str> = trimmed
+        .split(is_date_parse_space)
+        .filter(|word| !word.is_empty())
+        .collect();
+    if words.is_empty() || words.iter().any(|word| unsigned_number(word).is_none()) {
+        return None;
+    }
+    let numbers: Vec<i32> = words.iter().map(|word| unsigned_number(word).unwrap()).collect();
+    let (year, month, day) = match numbers.as_slice() {
+        [year] => (legacy_year(*year)?, 1, 1),
+        [first, month, day] if (1..=12).contains(first) => (legacy_year(*day)?, *first, *month),
+        [year, month, day] if *year == 0 || *year >= 32 => (legacy_year(*year)?, *month, *day),
+        _ => return None,
+    };
+    if !(1..=12).contains(&month) || day < 1 {
+        return None;
+    }
+    midnight_millis(year, month as u32, day as u32, true)
+}
+
 fn omit_parentheticals(value: &str) -> String {
     let chars: Vec<char> = value.chars().collect();
     let mut out = String::with_capacity(value.len());
@@ -7083,6 +7223,56 @@ mod local_zone_tests {
         assert_eq!(unix_millis_from_iso("Oct 13 2026 )"), None);
         assert_eq!(unix_millis_from_iso("13 (Oct) 2026"), None);
         assert_eq!(unix_millis_from_iso("2026-10-13)"), None);
+    }
+
+    #[test]
+    fn ignored_symbols_and_leading_words_make_a_legacy_date() {
+        let _lock = TRASH_CLOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let _restore = RestoreTz(std::env::var_os("TZ"));
+        unsafe { std::env::set_var("TZ", "America/New_York") };
+        unsafe { tzset() };
+        // A pure ISO date is UTC. The same fields with ignored symbols or a
+        // leading word are local. `16:00!` and a `)` after a digit are not dates.
+        assert_eq!(unix_millis_from_iso("2026-10-13"), Some(1_791_849_600_000));
+        assert_eq!(unix_millis_from_iso("2026-10-13!"), Some(1_791_864_000_000));
+        assert_eq!(unix_millis_from_iso("#2026-10-13"), Some(1_791_864_000_000));
+        assert_eq!(unix_millis_from_iso(")2026-10-13"), Some(1_791_864_000_000));
+        assert_eq!(unix_millis_from_iso("*2026-10-13*"), Some(1_791_864_000_000));
+        assert_eq!(unix_millis_from_iso("!!2026-10-13!!"), Some(1_791_864_000_000));
+        assert_eq!(
+            unix_millis_from_iso("#2026-10-13 16:00"),
+            Some(1_791_921_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13!16:00"),
+            Some(1_791_921_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("foo 2026-10-13 16:00:00Z"),
+            Some(1_791_907_200_000)
+        );
+        assert_eq!(unix_millis_from_iso("foo 10/13/2026"), Some(1_791_864_000_000));
+        assert_eq!(unix_millis_from_iso("#10/13/2026"), Some(1_791_864_000_000));
+        assert_eq!(unix_millis_from_iso("hello 2026-10"), Some(1_790_827_200_000));
+        assert_eq!(unix_millis_from_iso("*2026*"), Some(1_767_243_600_000));
+        assert_eq!(unix_millis_from_iso("hello 2026"), Some(1_767_243_600_000));
+        assert_eq!(unix_millis_from_iso("foo bar 2026"), Some(1_767_243_600_000));
+        assert_eq!(unix_millis_from_iso("hello 99"), Some(915_166_800_000));
+        assert_eq!(unix_millis_from_iso("hello 0"), Some(946_702_800_000));
+        assert_eq!(unix_millis_from_iso("10 13 2026"), Some(1_791_864_000_000));
+        assert_eq!(unix_millis_from_iso("2026 10 13"), Some(1_791_864_000_000));
+        assert_eq!(unix_millis_from_iso("hello 10 13 2026"), Some(1_791_864_000_000));
+        assert_eq!(unix_millis_from_iso("hello 2026 10 13"), Some(1_791_864_000_000));
+        assert_eq!(unix_millis_from_iso("hello 32 1 2"), Some(1_956_632_400_000));
+        assert_eq!(unix_millis_from_iso("hello 2 31 1"), Some(983_595_600_000));
+        assert_eq!(unix_millis_from_iso("2026-10-13 16:00!"), None);
+        assert_eq!(unix_millis_from_iso("2026-10-13)"), None);
+        assert_eq!(unix_millis_from_iso("x2026-10-13"), None);
+        assert_eq!(unix_millis_from_iso("2026 hello"), None);
+        assert_eq!(unix_millis_from_iso("hello 13 2026"), None);
+        assert_eq!(unix_millis_from_iso("~2026-10-13"), None);
     }
 
     #[test]
