@@ -852,7 +852,63 @@ pub fn js_json_number(value: f64) -> Value {
 /// In a daylight-saving overlap that is the earlier instant. A skipped hour
 /// keeps the offset from before the transition. A day past the end of the
 /// month rolls forward, and `24:00:00` is the next midnight.
+/// `16:00,30` is empty. The comma touches a clock field that already finished.
+/// `16:,30` is 16:30, and `16:00:00.5,1` keeps the fraction.
+fn comma_glued_to_final_clock(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index].is_ascii_digit() && (index == 0 || !bytes[index - 1].is_ascii_digit())
+            && clock_ends_on_comma(bytes, index)
+        {
+            return true;
+        }
+        index += 1;
+    }
+    false
+}
+
+fn clock_ends_on_comma(bytes: &[u8], start: usize) -> bool {
+    let mut index = skip_clock_digits(bytes, start);
+    if index >= bytes.len() || bytes[index] != b':' {
+        return false;
+    }
+    loop {
+        index += 1;
+        if index < bytes.len() && bytes[index] == b':' {
+            index += 1;
+        }
+        if index < bytes.len() && bytes[index] == b'.' {
+            index += 1;
+        }
+        if index >= bytes.len() || !bytes[index].is_ascii_digit() {
+            return false;
+        }
+        index = skip_clock_digits(bytes, index);
+        if index < bytes.len() && bytes[index] == b':' {
+            continue;
+        }
+        if index < bytes.len() && bytes[index] == b'.' {
+            return false;
+        }
+        return index < bytes.len() && bytes[index] == b',';
+    }
+}
+
+fn skip_clock_digits(bytes: &[u8], start: usize) -> usize {
+    let mut index = start;
+    while index < bytes.len() && bytes[index].is_ascii_digit() {
+        index += 1;
+    }
+    index
+}
+
 pub fn canonical_iso(value: &str) -> Option<String> {
+    if comma_glued_to_final_clock(value) {
+        // `16:00,30` finalized the clock and then saw a comma. `16:00 ,30`
+        // has a space first, and `16:00:00.5,1` finalized through the fraction.
+        return None;
+    }
     if value.contains('(') {
         // `(comment)` is skipped, and an unclosed `(` consumes the rest.
         // The mark is a separator: `2026-10-13(EST)` stays local, while
@@ -6673,6 +6729,84 @@ mod tests {
             assert_eq!(super::canonical_iso("1950-10-13 16:00 +5ä"), None);
             assert_eq!(super::canonical_iso("1950-10-13 16:00 GMT+5ä"), None);
             assert_eq!(super::canonical_iso("1950-10-13 16:00 ESTö"), None);
+        });
+    }
+
+    #[test]
+    fn a_comma_glued_to_a_finished_clock_is_empty() {
+        with_tz("America/New_York", || {
+            // `16:00,30` finished the clock on the comma. A space before the
+            // comma is an ordinary separator, and a fraction may keep the comma.
+            assert_eq!(super::canonical_iso("Oct 13 2026 16:00,30"), None);
+            assert_eq!(super::canonical_iso("Oct 13 2026 16:00, 30"), None);
+            assert_eq!(super::canonical_iso("Oct 13 16:00,30"), None);
+            assert_eq!(super::canonical_iso("Oct 13 2026 16:00,"), None);
+            assert_eq!(super::canonical_iso("2026-10-13 16:00,"), None);
+            assert_eq!(super::canonical_iso("2026-10-13 16:00,30"), None);
+            assert_eq!(super::canonical_iso("Oct 13 2026 16::30,"), None);
+            assert_eq!(super::canonical_iso("Oct 13 2026 16:.5,"), None);
+            assert_eq!(super::canonical_iso("Oct 13 2026 16:00:30,5"), None);
+            assert_eq!(super::canonical_iso("10/13/2026 16:00,30"), None);
+            assert_eq!(
+                super::canonical_iso("Oct 13 2026 16:00 ,30").as_deref(),
+                Some("2026-10-13T20:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 2026 16:00 , 30").as_deref(),
+                Some("2026-10-13T20:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13, 2026 16:00").as_deref(),
+                Some("2026-10-13T20:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 2026 16:00:00.5,1").as_deref(),
+                Some("2026-10-13T20:00:00.500Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 2026 16:00.05,1").as_deref(),
+                Some("2026-10-13T20:00:50.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 2026 4:00 PM,5").as_deref(),
+                Some("2026-10-13T20:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 2026 16:,30").as_deref(),
+                Some("2026-10-13T20:30:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13, 2026,").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
+            assert_eq!(super::canonical_iso("Oct 13 1950 16:00,30"), None);
+            assert_eq!(super::canonical_iso("1950-10-13 16:00,"), None);
+            assert_eq!(super::canonical_iso("Oct 13 1950 16::30,"), None);
+            assert_eq!(super::canonical_iso("10/13/1950 16:00,30"), None);
+            assert_eq!(
+                super::canonical_iso("Oct 13 1950 16:00 ,30").as_deref(),
+                Some("1950-10-13T21:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 1950 16:00:00.5,1").as_deref(),
+                Some("1950-10-13T21:00:00.500Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 1950 16:00.05,1").as_deref(),
+                Some("1950-10-13T21:00:50.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 1950 4:00 PM,5").as_deref(),
+                Some("1950-10-13T21:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 1950 16:,30").as_deref(),
+                Some("1950-10-13T21:30:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13, 1950,").as_deref(),
+                Some("1950-10-13T05:00:00.000Z")
+            );
         });
     }
 
