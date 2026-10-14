@@ -10,10 +10,26 @@ const { pipeline } = require('node:stream/promises')
 const { DELTA_FORMAT, applyDeltaPatch } = require('./delta.cjs')
 const { VERSION_PATTERN, compareSemanticVersions, deltaPathname, packagePathname } = require('./releaseVersion.cjs')
 
-const UPDATE_ORIGIN = 'https://fanotes.fasrv.ch'
+const PRODUCT_ORIGIN = 'https://fanotes.fasrv.ch'
+const GITHUB_REPOSITORY = 'Nikoheld/FaNotes'
+const GITHUB_API_RELEASES = 'https://api.github.com/repos/Nikoheld/FaNotes/releases'
+const ALLOWED_UPDATE_HOSTS = new Set([
+  'github.com',
+  'api.github.com',
+  'objects.githubusercontent.com',
+  'release-assets.githubusercontent.com',
+])
+const githubReleaseAssetUrl = (version, fileName) => (
+  `https://github.com/${GITHUB_REPOSITORY}/releases/download/v${version}/${fileName}`
+)
+const updateManifestName = (manifestPlatform, channel) => (
+  channel === 'stable'
+    ? `FaNotes-update-${manifestPlatform}-x64.json`
+    : `FaNotes-update-${manifestPlatform}-x64-${channel}.json`
+)
 const PLATFORM_RELEASES = Object.freeze({
   linux: Object.freeze({
-    api: `${UPDATE_ORIGIN}/api/v1/updates/linux-x64`,
+    api: GITHUB_API_RELEASES,
     manifestPlatform: 'linux',
     userAgentPlatform: 'Linux',
     installationKind: 'managed-appimage',
@@ -26,7 +42,7 @@ const PLATFORM_RELEASES = Object.freeze({
     }),
   }),
   win32: Object.freeze({
-    api: `${UPDATE_ORIGIN}/api/v1/updates/windows-x64`,
+    api: GITHUB_API_RELEASES,
     manifestPlatform: 'windows',
     userAgentPlatform: 'Windows',
     installationKind: 'windows-installer',
@@ -239,7 +255,24 @@ const strictBase64 = (value) => {
   return decoded.toString('base64') === value ? decoded : null
 }
 
-const validatePackage = (candidate, version, kind, platformConfig, channel) => {
+const assertGithubReleaseUrl = (value, version, fileName, label) => {
+  let parsedUrl
+  try {
+    parsedUrl = new URL(value)
+  } catch {
+    throw new Error(`${label} ist ungültig.`)
+  }
+  const expected = new URL(githubReleaseAssetUrl(version, fileName))
+  if (
+    parsedUrl.protocol !== 'https:' || parsedUrl.host !== expected.host || parsedUrl.pathname !== expected.pathname ||
+    parsedUrl.username || parsedUrl.password || parsedUrl.search || parsedUrl.hash
+  ) {
+    throw new Error(`${label} ist nicht vertrauenswürdig.`)
+  }
+  return parsedUrl.href
+}
+
+const validatePackage = (candidate, version, kind, platformConfig) => {
   const descriptor = platformConfig?.packages?.[kind]
   if (!descriptor) throw new Error('Das Update-Manifest enthält einen unbekannten Pakettyp.')
   if (!isPlainObject(candidate)) throw new Error(`Das ${descriptor.label}-Paket fehlt im Update-Manifest.`)
@@ -251,23 +284,11 @@ const validatePackage = (candidate, version, kind, platformConfig, channel) => {
   if (typeof candidate.sha256 !== 'string' || !SHA256_PATTERN.test(candidate.sha256)) {
     throw new Error(`Die ${descriptor.label}-Prüfsumme ist ungültig.`)
   }
-  let parsedUrl
-  try {
-    parsedUrl = new URL(candidate.url)
-  } catch {
-    throw new Error(`Die ${descriptor.label}-Downloadadresse ist ungültig.`)
-  }
-  if (
-    parsedUrl.origin !== UPDATE_ORIGIN || parsedUrl.pathname !== descriptor.pathname(channel) ||
-    parsedUrl.username || parsedUrl.password || parsedUrl.search || parsedUrl.hash
-  ) {
-    throw new Error(`Die ${descriptor.label}-Downloadadresse ist nicht vertrauenswürdig.`)
-  }
   return {
     fileName: candidate.fileName,
     sizeBytes: candidate.sizeBytes,
     sha256: candidate.sha256,
-    url: parsedUrl.href,
+    url: assertGithubReleaseUrl(candidate.url, version, expectedName, `Die ${descriptor.label}-Downloadadresse`),
   }
 }
 
@@ -290,15 +311,7 @@ const validateDelta = (candidate, payload, platformConfig, packages) => {
   if (candidate.fileName !== expectedFileName) throw new Error('Der Dateiname des Delta-Updates ist ungültig.')
   if (!Number.isSafeInteger(candidate.sizeBytes) || candidate.sizeBytes < 256 || candidate.sizeBytes > MAX_PACKAGE_BYTES) throw new Error('Die Größe des Delta-Updates ist ungültig.')
   if (typeof candidate.sha256 !== 'string' || !SHA256_PATTERN.test(candidate.sha256)) throw new Error('Die Prüfsumme des Delta-Updates ist ungültig.')
-  let parsedUrl
-  try {
-    parsedUrl = new URL(candidate.url)
-  } catch {
-    throw new Error('Die Adresse des Delta-Updates ist ungültig.')
-  }
-  if (parsedUrl.origin !== UPDATE_ORIGIN || parsedUrl.pathname !== platformConfig.deltaPath(payload.currentVersion, payload.channel) || parsedUrl.search || parsedUrl.hash || parsedUrl.username || parsedUrl.password) {
-    throw new Error('Die Adresse des Delta-Updates ist nicht vertrauenswürdig.')
-  }
+  const deltaUrl = assertGithubReleaseUrl(candidate.url, payload.latestVersion, expectedFileName, 'Die Adresse des Delta-Updates')
   const expectedKind = payload.platform === 'linux' ? 'appimage' : 'app-asar'
   const source = validateDeltaFile(candidate.source, 'Quelldatei', expectedKind)
   const target = validateDeltaFile(candidate.target, 'Zieldatei', expectedKind)
@@ -312,7 +325,7 @@ const validateDelta = (candidate, payload, platformConfig, packages) => {
     fileName: candidate.fileName,
     sizeBytes: candidate.sizeBytes,
     sha256: candidate.sha256,
-    url: parsedUrl.href,
+    url: deltaUrl,
     source,
     target,
   }
@@ -342,10 +355,17 @@ const verifyManifest = (candidate, currentVersion, publicKeyPem, targetPlatform 
     payload.schemaVersion !== 1 || payload.product !== 'FaNotes' || payload.channel !== expectedChannel || !['stable', 'beta', 'nightly'].includes(payload.channel) ||
     payload.platform !== platformConfig.manifestPlatform || payload.arch !== 'x64'
   ) throw new Error('Das Update-Manifest ist nicht für diese FaNotes-Ausgabe bestimmt.')
-  if (payload.currentVersion !== currentVersion) throw new Error('Das Update-Manifest gehört zu einer anderen installierten Version.')
   if (typeof payload.latestVersion !== 'string' || !VERSION_PATTERN.test(payload.latestVersion)) throw new Error('Die angebotene Version ist ungültig.')
   const updateAvailable = compareVersions(payload.latestVersion, currentVersion) > 0
-  if (payload.updateAvailable !== updateAvailable || typeof payload.mandatory !== 'boolean') throw new Error('Der Update-Status im Manifest ist widersprüchlich.')
+  if (typeof payload.mandatory !== 'boolean') throw new Error('Der Update-Status im Manifest ist widersprüchlich.')
+  // A GitHub release manifest is one file for every install. It names the
+  // release, and this client decides whether that release is newer. A manifest
+  // that still names currentVersion is the older per-request shape and must
+  // match this install.
+  if (payload.currentVersion != null || payload.updateAvailable != null) {
+    if (payload.currentVersion !== currentVersion) throw new Error('Das Update-Manifest gehört zu einer anderen installierten Version.')
+    if (payload.updateAvailable !== updateAvailable) throw new Error('Der Update-Status im Manifest ist widersprüchlich.')
+  }
   if (typeof payload.publishedAt !== 'string' || !Number.isFinite(Date.parse(payload.publishedAt))) throw new Error('Das Veröffentlichungsdatum ist ungültig.')
   if (!Array.isArray(payload.releaseNotes) || payload.releaseNotes.length > 20 || payload.releaseNotes.some((note) => typeof note !== 'string' || note.length > 4000)) {
     throw new Error('Die Release Notes sind ungültig.')
@@ -353,10 +373,10 @@ const verifyManifest = (candidate, currentVersion, publicKeyPem, targetPlatform 
   if (!isPlainObject(payload.packages)) throw new Error('Das Update enthält keine Pakete.')
   const packages = Object.fromEntries(Object.keys(platformConfig.packages).map((kind) => [
     kind,
-    validatePackage(payload.packages[kind], payload.latestVersion, kind, platformConfig, payload.channel),
+    validatePackage(payload.packages[kind], payload.latestVersion, kind, platformConfig),
   ]))
   const delta = validateDelta(payload.delta, payload, platformConfig, packages)
-  if (payload.websiteUrl !== `${UPDATE_ORIGIN}/`) throw new Error('Die Website-Adresse im Update-Manifest ist ungültig.')
+  if (payload.websiteUrl !== `${PRODUCT_ORIGIN}/`) throw new Error('Die Website-Adresse im Update-Manifest ist ungültig.')
 
   return {
     schemaVersion: 1,
@@ -490,7 +510,7 @@ const readFailureBody = async (response, limit = 8192) => {
 
 const diagnoseUpdateFailure = ({
   phase = 'download',
-  url = UPDATE_ORIGIN,
+  url = PRODUCT_ORIGIN,
   error = null,
   response = null,
   bodyText = '',
@@ -879,7 +899,7 @@ function createUpdateManager({
     let diagnosis = error?.diagnosis
     if (!diagnosis) {
       let resolvedAddress = extras.resolvedAddress ?? null
-      const requestUrl = extras.url || url || error?.updateUrl || platformConfig?.api || UPDATE_ORIGIN
+      const requestUrl = extras.url || url || error?.updateUrl || platformConfig?.api || GITHUB_API_RELEASES
       if (!resolvedAddress) {
         const host = hostOf(requestUrl)
         if (host) resolvedAddress = await lookupHost(host)
@@ -897,51 +917,88 @@ function createUpdateManager({
     return diagnosis
   }
 
+  const fetchGithub = async (url, options, redirectsLeft = 4) => {
+    const parsed = new URL(url)
+    if (parsed.protocol !== 'https:' || !ALLOWED_UPDATE_HOSTS.has(parsed.host)) {
+      throw new Error('Die Downloadadresse ist nicht vertrauenswürdig.')
+    }
+    const response = await fetchImpl(url, { ...options, redirect: 'manual' })
+    if (response.status < 300 || response.status >= 400 || redirectsLeft <= 0) return response
+    const location = response.headers.get('location')
+    let next = null
+    try {
+      next = location ? new URL(location, parsed) : null
+    } catch {
+      next = null
+    }
+    if (!next || next.protocol !== 'https:' || !ALLOWED_UPDATE_HOSTS.has(next.host)) return response
+    return fetchGithub(next.href, options, redirectsLeft - 1)
+  }
+
+  const readJsonResponse = async (response, url, emptyMessage) => {
+    if (response.status >= 300 && response.status < 400) {
+      const bodyText = await readFailureBody(response)
+      const diagnosis = diagnoseUpdateFailure({ phase: 'check', url, response, bodyText })
+      throw attachDiagnosis(new Error(diagnosis.message), diagnosis)
+    }
+    const advertisedLength = Number(response.headers.get('content-length'))
+    if (Number.isFinite(advertisedLength) && advertisedLength > MAX_MANIFEST_BYTES) throw new Error('Das Update-Manifest ist unerwartet groß.')
+    const text = await response.text()
+    if (Buffer.byteLength(text, 'utf8') > MAX_MANIFEST_BYTES) throw new Error('Das Update-Manifest ist unerwartet groß.')
+    if (!response.ok) {
+      const diagnosis = diagnoseUpdateFailure({ phase: 'check', url, response, bodyText: text })
+      throw attachDiagnosis(new Error(diagnosis.message), diagnosis)
+    }
+    if (looksLikeHtml(response.headers.get('content-type'), text)) {
+      const diagnosis = diagnoseUpdateFailure({ phase: 'check', url, response, bodyText: text })
+      throw attachDiagnosis(new Error(diagnosis.message), diagnosis)
+    }
+    try {
+      return JSON.parse(text)
+    } catch {
+      throw new Error(emptyMessage)
+    }
+  }
+
   const fetchManifest = async (channel) => {
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), 25_000)
-    const url = new URL(platformConfig.api)
-    url.searchParams.set('current', currentVersion)
-    url.searchParams.set('channel', channel)
+    const listUrl = channel === 'stable' ? `${platformConfig.api}/latest` : `${platformConfig.api}?per_page=30`
+    const userAgent = `FaNotes/${currentVersion} ${platformConfig.userAgentPlatform} updater`
     try {
       if (!platformConfig) throw new Error('Automatische Updates werden auf dieser Plattform nicht unterstützt.')
-      const response = await fetchImpl(url, {
-        headers: { Accept: 'application/json', 'User-Agent': `FaNotes/${currentVersion} ${platformConfig.userAgentPlatform} updater` },
-        redirect: 'manual',
+      const listResponse = await fetchGithub(listUrl, {
+        headers: {
+          Accept: 'application/vnd.github+json',
+          'User-Agent': userAgent,
+          'X-GitHub-Api-Version': '2022-11-28',
+        },
         signal: controller.signal,
       })
-      const status = response.status
-      if (status >= 300 && status < 400) {
-        const bodyText = await readFailureBody(response)
-        const diagnosis = diagnoseUpdateFailure({ phase: 'check', url: url.href, response, bodyText })
-        throw attachDiagnosis(new Error(diagnosis.message), diagnosis)
-      }
-      const advertisedLength = Number(response.headers.get('content-length'))
-      if (Number.isFinite(advertisedLength) && advertisedLength > MAX_MANIFEST_BYTES) throw new Error('Das Update-Manifest ist unerwartet groß.')
-      const text = await response.text()
-      if (Buffer.byteLength(text, 'utf8') > MAX_MANIFEST_BYTES) throw new Error('Das Update-Manifest ist unerwartet groß.')
-      if (!response.ok) {
-        const diagnosis = diagnoseUpdateFailure({ phase: 'check', url: url.href, response, bodyText: text })
-        throw attachDiagnosis(new Error(diagnosis.message), diagnosis)
-      }
-      if (looksLikeHtml(response.headers.get('content-type'), text)) {
-        const diagnosis = diagnoseUpdateFailure({ phase: 'check', url: url.href, response, bodyText: text })
-        throw attachDiagnosis(new Error(diagnosis.message), diagnosis)
-      }
-      let candidate
-      try {
-        candidate = JSON.parse(text)
-      } catch {
-        throw new Error('Der Update-Server hat kein gültiges JSON-Manifest geliefert.')
-      }
+      const listed = await readJsonResponse(listResponse, listUrl, 'GitHub hat keine gültige Release-Liste geliefert.')
+      const releases = Array.isArray(listed) ? listed : [listed]
+      const assetName = updateManifestName(platformConfig.manifestPlatform, channel)
+      const release = releases.find((item) => (
+        item && item.draft !== true && Array.isArray(item.assets) && item.assets.some((asset) => asset?.name === assetName)
+      ))
+      if (!release) throw new Error('GitHub bietet für diesen Update-Kanal kein FaNotes-Release an.')
+      const tagVersion = typeof release.tag_name === 'string' && release.tag_name.startsWith('v') ? release.tag_name.slice(1) : ''
+      if (!VERSION_PATTERN.test(tagVersion)) throw new Error('Das GitHub-Release hat keine gültige Versionsnummer.')
+      const asset = release.assets.find((item) => item?.name === assetName)
+      const manifestUrl = assertGithubReleaseUrl(asset?.browser_download_url, tagVersion, assetName, 'Die Manifest-Adresse')
+      const manifestResponse = await fetchGithub(manifestUrl, {
+        headers: { Accept: 'application/json', 'User-Agent': userAgent },
+        signal: controller.signal,
+      })
+      const candidate = await readJsonResponse(manifestResponse, manifestUrl, 'GitHub hat kein gültiges JSON-Manifest geliefert.')
       return verifyManifest(candidate, currentVersion, publicKeyPem, platform, expectedKeyId, channel)
     } catch (error) {
       if (!error?.diagnosis) {
-        const resolvedAddress = await lookupHost(url.hostname)
-        error.updateUrl = url.href
+        const resolvedAddress = await lookupHost(hostOf(listUrl))
+        error.updateUrl = listUrl
         attachDiagnosis(error, diagnoseUpdateFailure({
           phase: 'check',
-          url: url.href,
+          url: listUrl,
           error,
           resolvedAddress,
         }))
@@ -1072,13 +1129,12 @@ function createUpdateManager({
     activeDownloadController = controller
     const timeout = setTimeout(() => controller.abort(), DOWNLOAD_TIMEOUT_MS)
     try {
-      const response = await fetchImpl(transferInfo.url, {
+      const response = await fetchGithub(transferInfo.url, {
         headers: {
           Accept: accept,
           'User-Agent': `FaNotes/${currentVersion} ${platformConfig.userAgentPlatform} updater`,
           ...(offset ? { Range: `bytes=${offset}-` } : {}),
         },
-        redirect: 'manual',
         signal: controller.signal,
       })
       const rejectDownloadResponse = async (reasonStatus) => {
@@ -1562,5 +1618,6 @@ module.exports = {
   diagnoseUpdateFailure,
   isPrivateAddress,
   stableStringify,
+  githubReleaseAssetUrl,
   verifyManifest,
 }
