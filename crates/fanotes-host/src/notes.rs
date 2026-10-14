@@ -889,8 +889,9 @@ fn random_suffix() -> Result<String, String> {
 }
 
 pub(crate) fn atomic_write(path: &Path, bytes: &[u8], mode: u32) -> Result<(), String> {
-    // Desktop `atomicWrite` uses `randomBytes(10)`, twenty hex characters.
-    atomic_write_with_mtime(path, bytes, mode, None, 10)
+    // Desktop `atomicWrite` uses `randomBytes(10)` and does not create a
+    // missing parent. The open of `.{name}.{pid}.{nonce}.tmp` reports it.
+    write_atomic(path, bytes, mode, None, false, 10)
 }
 
 pub(crate) fn atomic_write_with_mtime(
@@ -1230,8 +1231,8 @@ fn is_leap(year: i32) -> bool {
 #[cfg(test)]
 mod publish_tests {
     use super::{
-        file_mtime_iso, history_dir, iso_from_date, iso_from_system_time, mtime_millis_of,
-        publish_new_file, record_history, write_note_file,
+        atomic_write, file_mtime_iso, history_dir, iso_from_date, iso_from_system_time,
+        mtime_millis_of, publish_new_file, record_history, write_note_file,
         NewFileError,
     };
     use std::time::UNIX_EPOCH;
@@ -1505,6 +1506,50 @@ mod publish_tests {
             .collect();
         names.sort();
         assert_eq!(names, vec![format!(".index-{}.tmp", std::process::id())]);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn an_atomic_write_does_not_create_a_missing_parent() {
+        let root = std::env::temp_dir().join(format!(
+            "fanotes-atomic-parent-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let missing = root.join("missing/Seite.md");
+        let error = atomic_write(&missing, b"Hallo\n", 0o600)
+            .expect_err("atomic write created a missing parent");
+        let prefix = format!(
+            "ENOENT: no such file or directory, open '{}/.Seite.md.{}.",
+            root.join("missing").display(),
+            std::process::id()
+        );
+        assert!(error.starts_with(&prefix), "{error}");
+        assert!(error.trim_end_matches('\'').ends_with(".tmp"), "{error}");
+        let hex = error.trim_end_matches(".tmp'").rsplit('.').next().unwrap();
+        assert_eq!(hex.len(), 20, "{error}");
+        assert!(!root.join("missing").exists());
+
+        let blocked = root.join("not-a-folder");
+        std::fs::write(&blocked, b"datei").unwrap();
+        let blocked_error = atomic_write(&blocked.join("Seite.md"), b"Hallo\n", 0o600).unwrap_err();
+        let blocked_prefix = format!(
+            "ENOTDIR: not a directory, open '{}/.Seite.md.{}.",
+            blocked.display(),
+            std::process::id()
+        );
+        assert!(blocked_error.starts_with(&blocked_prefix), "{blocked_error}");
+        assert_eq!(std::fs::read(&blocked).unwrap(), b"datei");
+
+        let folder = root.join("Mathe");
+        std::fs::create_dir(&folder).unwrap();
+        atomic_write(&folder.join("Seite.md"), b"Hallo\n", 0o600).unwrap();
+        assert_eq!(std::fs::read(folder.join("Seite.md")).unwrap(), b"Hallo\n");
         let _ = std::fs::remove_dir_all(&root);
     }
 }
