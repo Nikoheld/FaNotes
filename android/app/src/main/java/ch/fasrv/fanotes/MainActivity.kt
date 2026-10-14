@@ -108,6 +108,17 @@ class MainActivity : ComponentActivity() {
     private val importImage = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         import(uri, pdf = false)
     }
+    private val importIcs = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null) return@registerForActivityResult
+        val text = contentResolver.openInputStream(uri)?.use { it.readBytes() }?.toString(Charsets.UTF_8) ?: return@registerForActivityResult
+        model.importCalendarIcs(text)
+    }
+    private val exportIcs = registerForActivityResult(ActivityResultContracts.CreateDocument("text/calendar")) { uri ->
+        if (uri == null) return@registerForActivityResult
+        contentResolver.openOutputStream(uri)?.use { stream ->
+            stream.write(model.calendarIcs().toByteArray(Charsets.UTF_8))
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -126,6 +137,8 @@ class MainActivity : ComponentActivity() {
                     onOpenVault = { openTree.launch(null) },
                     onImportPdf = { importPdf.launch(arrayOf("application/pdf")) },
                     onImportImage = { importImage.launch(arrayOf("image/*")) },
+                    onImportIcs = { importIcs.launch(arrayOf("text/calendar", "text/plain", "*/*")) },
+                    onExportIcs = { exportIcs.launch("fanotes.ics") },
                 )
             }
         }
@@ -184,6 +197,8 @@ fun FaNotesScreen(
     onOpenVault: () -> Unit,
     onImportPdf: () -> Unit,
     onImportImage: () -> Unit,
+    onImportIcs: () -> Unit,
+    onExportIcs: () -> Unit,
 ) {
     val tree by model.tree.collectAsStateWithLifecycle()
     val open by model.open.collectAsStateWithLifecycle()
@@ -296,7 +311,7 @@ fun FaNotesScreen(
                         when (destination) {
                             "search" -> SearchScreen(model) { model.openPath(it); model.showDestination("notes") }
                             "tasks" -> HomeworkScreen(model)
-                            "calendar" -> CalendarScreen(model) { model.openPath(it); model.showDestination("notes") }
+                            "calendar" -> CalendarScreen(model, { model.openPath(it); model.showDestination("notes") }, onImportIcs, onExportIcs)
                             "overview" -> OverviewScreen(model) { model.openPath(it); model.showDestination("notes") }
                             "cards" -> CardsScreen(model)
                             "books" -> BooksScreen(model) { model.openPath(it); model.showDestination("notes") }

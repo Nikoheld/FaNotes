@@ -272,8 +272,11 @@ fun HomeworkScreen(model: FaNotesViewModel) {
 }
 
 @Composable
-fun CalendarScreen(model: FaNotesViewModel, onOpenNote: (String) -> Unit) {
+fun CalendarScreen(model: FaNotesViewModel, onOpenNote: (String) -> Unit, onImportIcs: () -> Unit = {}, onExportIcs: () -> Unit = {}) {
     val document by model.calendar.collectAsStateWithLifecycle()
+    val status by model.message.collectAsStateWithLifecycle()
+    var dismissedReminders by remember { mutableStateOf(setOf<String>()) }
+    val reminder = ch.fasrv.fanotes.desk.dueReminders(document, java.time.ZonedDateTime.now()).firstOrNull { it.key !in dismissedReminders }
     var month by remember { mutableStateOf(YearMonth.now()) }
     var title by remember { mutableStateOf("") }
     var time by remember { mutableStateOf("") }
@@ -285,6 +288,18 @@ fun CalendarScreen(model: FaNotesViewModel, onOpenNote: (String) -> Unit) {
     Column(Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState())) {
         Text("Kalender", style = MaterialTheme.typography.titleLarge)
         Text("Gespeichert in Kalender.md.", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
+        if (reminder != null) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "${reminder.title} beginnt ${if (reminder.minutesUntil == 0) "jetzt" else "in ${reminder.minutesUntil} min"}.",
+                    color = MaterialTheme.colorScheme.error,
+                    fontSize = 13.sp,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(onClick = { dismissedReminders = dismissedReminders + reminder.key }) { Text("Schließen") }
+            }
+        }
+        if (!status.isNullOrBlank()) Text(status.orEmpty(), fontSize = 13.sp, color = MaterialTheme.colorScheme.primary)
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
             listOf("day" to "Tag", "three" to "3 Tage", "week" to "Woche", "month" to "Monat", "agenda" to "Agenda").forEach { (id, label) ->
                 TextButton(onClick = {
@@ -339,6 +354,8 @@ fun CalendarScreen(model: FaNotesViewModel, onOpenNote: (String) -> Unit) {
                     title = ""
                 }
             }) { Text("Eintragen") }
+            TextButton(onClick = onExportIcs) { Text("Exportieren") }
+            TextButton(onClick = onImportIcs) { Text("Importieren") }
         }
     }
 }

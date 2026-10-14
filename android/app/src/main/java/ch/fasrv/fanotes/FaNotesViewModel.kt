@@ -58,6 +58,9 @@ import ch.fasrv.fanotes.desk.parseWorksheetBoxes
 import ch.fasrv.fanotes.desk.searchVault
 import ch.fasrv.fanotes.desk.serializeCalendarMarkdown
 import ch.fasrv.fanotes.desk.serializeHomeworkMarkdown
+import ch.fasrv.fanotes.desk.applyHomeworkToCalendar
+import ch.fasrv.fanotes.desk.exportIcs
+import ch.fasrv.fanotes.desk.importIcs
 import ch.fasrv.fanotes.desk.DeskTab
 import ch.fasrv.fanotes.desk.NoteTrail
 import ch.fasrv.fanotes.desk.SwitcherNote
@@ -948,19 +951,64 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         val next = homework.value.copy(tasks = listOf(task) + homework.value.tasks)
         homework.value = next
         persistSpecial(ch.fasrv.fanotes.desk.HOMEWORK_NOTE_PATH, "Hausaufgaben", serializeHomeworkMarkdown(next))
+        publishHomeworkCalendar(next)
     }
 
     fun toggleHomework(id: String) {
         val next = homework.value.copy(tasks = homework.value.tasks.map { if (it.id == id) it.copy(done = !it.done, updatedAt = isoNow()) else it })
         homework.value = next
         persistSpecial(ch.fasrv.fanotes.desk.HOMEWORK_NOTE_PATH, "Hausaufgaben", serializeHomeworkMarkdown(next))
+        publishHomeworkCalendar(next)
     }
 
     fun loadCalendar() {
         viewModelScope.launch {
-            calendar.value = withContext(Dispatchers.IO) {
-                parseCalendarMarkdown(graph.vault.read(ch.fasrv.fanotes.desk.CALENDAR_NOTE_PATH)?.decodeToString().orEmpty())
+            val loaded = withContext(Dispatchers.IO) { calendarWithHomework() }
+            calendar.value = loaded.second
+            if (loaded.first != loaded.second) {
+                persistSpecial(ch.fasrv.fanotes.desk.CALENDAR_NOTE_PATH, "Kalender", serializeCalendarMarkdown(loaded.second))
             }
+        }
+    }
+
+    fun importCalendarIcs(text: String) {
+        viewModelScope.launch {
+            val current = withContext(Dispatchers.IO) { calendarWithHomework().second }
+            val calendarId = current.calendars.firstOrNull()?.id
+            if (calendarId.isNullOrBlank()) {
+                message.value = "Kein Kalender vorhanden."
+                return@launch
+            }
+            val imported = importIcs(text, calendarId)
+            if (imported.isEmpty()) {
+                message.value = "Keine Termine in der ICS-Datei."
+                return@launch
+            }
+            val next = current.copy(events = (current.events + imported).take(2_000))
+            calendar.value = next
+            persistSpecial(ch.fasrv.fanotes.desk.CALENDAR_NOTE_PATH, "Kalender", serializeCalendarMarkdown(next))
+            message.value = if (imported.size == 1) "1 Termin importiert." else "${imported.size} Termine importiert."
+        }
+    }
+
+    fun calendarIcs(): String = exportIcs(calendar.value)
+
+    private suspend fun calendarWithHomework(): Pair<ch.fasrv.fanotes.desk.CalendarDocument, ch.fasrv.fanotes.desk.CalendarDocument> {
+        val current = parseCalendarMarkdown(graph.vault.read(ch.fasrv.fanotes.desk.CALENDAR_NOTE_PATH)?.decodeToString().orEmpty())
+        val tasks = parseHomeworkMarkdown(graph.vault.read(ch.fasrv.fanotes.desk.HOMEWORK_NOTE_PATH)?.decodeToString().orEmpty())
+        return current to applyHomeworkToCalendar(current, tasks)
+    }
+
+    private fun publishHomeworkCalendar(tasks: HomeworkDocument) {
+        viewModelScope.launch {
+            val next = withContext(Dispatchers.IO) {
+                applyHomeworkToCalendar(
+                    parseCalendarMarkdown(graph.vault.read(ch.fasrv.fanotes.desk.CALENDAR_NOTE_PATH)?.decodeToString().orEmpty()),
+                    tasks,
+                )
+            }
+            calendar.value = next
+            persistSpecial(ch.fasrv.fanotes.desk.CALENDAR_NOTE_PATH, "Kalender", serializeCalendarMarkdown(next))
         }
     }
 
