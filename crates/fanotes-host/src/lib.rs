@@ -3496,13 +3496,19 @@ fn rewrite_slash_date(trimmed: &str) -> Option<String> {
         let suffix = named_zone_offset(zone)?;
         offset_minutes = Some(suffix_east_minutes(&suffix)?);
     }
-    let mut parts = date.split('/');
-    let first: i32 = parts.next()?.parse().ok()?;
-    let second: i32 = parts.next()?.parse().ok()?;
-    let third: i32 = parts.next()?.parse().ok()?;
-    if parts.next().is_some() {
+    let fields: Vec<&str> = date.split('/').filter(|part| !part.is_empty()).collect();
+    if fields.is_empty() || fields.len() > 3 {
         return None;
     }
+    let numbers = fields
+        .iter()
+        .map(|part| part.parse::<i32>().ok())
+        .collect::<Option<Vec<_>>>()?;
+    let first = numbers[0];
+    // A missing day or year is 1. `2026/10` is 1 October, and `10/13` is
+    // 13 October 2001. `2026/` is 1 January 2026.
+    let second = numbers.get(1).copied().unwrap_or(1);
+    let third = numbers.get(2).copied().unwrap_or(1);
     let (year, month, day) = if (1..=12).contains(&first) {
         (legacy_year(third)?, first, second)
     } else if first == 0 || first >= 32 {
@@ -7844,6 +7850,51 @@ mod local_zone_tests {
         );
         assert_eq!(unix_millis_from_iso("10/13/2026 GMT5"), None);
         assert_eq!(unix_millis_from_iso("10/13/2026EST5"), None);
+    }
+
+    #[test]
+    fn a_two_field_slash_date_is_a_legacy_date() {
+        let _lock = TRASH_CLOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let _restore = RestoreTz(std::env::var_os("TZ"));
+        unsafe { std::env::set_var("TZ", "America/New_York") };
+        unsafe { tzset() };
+        // A slash is only a separator. Two fields follow the numeric rule, and
+        // a missing field is 1. `2026/10/13` stays the three-field local date.
+        assert_eq!(unix_millis_from_iso("2026/10/13"), Some(1_791_864_000_000));
+        assert_eq!(unix_millis_from_iso("10/13/2026"), Some(1_791_864_000_000));
+        assert_eq!(unix_millis_from_iso("2026/10"), Some(1_790_827_200_000));
+        assert_eq!(unix_millis_from_iso("2026/10 GMT"), Some(1_790_812_800_000));
+        assert_eq!(unix_millis_from_iso("2026/10GMT"), Some(1_790_812_800_000));
+        assert_eq!(unix_millis_from_iso("2026/10Z"), Some(1_790_812_800_000));
+        assert_eq!(unix_millis_from_iso("2026/1"), Some(1_767_243_600_000));
+        assert_eq!(unix_millis_from_iso("10/13"), Some(1_002_945_600_000));
+        assert_eq!(unix_millis_from_iso("5/1"), Some(988_689_600_000));
+        assert_eq!(unix_millis_from_iso("5/1 GMT"), Some(988_675_200_000));
+        assert_eq!(unix_millis_from_iso("01/02"), Some(978_411_600_000));
+        assert_eq!(unix_millis_from_iso("2/31"), Some(983_595_600_000));
+        assert_eq!(unix_millis_from_iso("2/31 GMT"), Some(983_577_600_000));
+        assert_eq!(unix_millis_from_iso("0/1"), Some(946_702_800_000));
+        assert_eq!(unix_millis_from_iso("32/1"), Some(1_956_546_000_000));
+        assert_eq!(unix_millis_from_iso("99/1"), Some(915_166_800_000));
+        assert_eq!(unix_millis_from_iso("2026/10 EST"), Some(1_790_830_800_000));
+        assert_eq!(unix_millis_from_iso("10/13 EST"), Some(1_002_949_200_000));
+        assert_eq!(
+            unix_millis_from_iso("2026/10 16:00"),
+            Some(1_790_884_800_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026/10 16:00 GMT"),
+            Some(1_790_870_400_000)
+        );
+        assert_eq!(unix_millis_from_iso("2026/"), Some(1_767_243_600_000));
+        assert_eq!(unix_millis_from_iso("/10"), Some(1_001_908_800_000));
+        assert_eq!(unix_millis_from_iso("10/2026"), None);
+        assert_eq!(unix_millis_from_iso("13/1"), None);
+        assert_eq!(unix_millis_from_iso("2026/13"), None);
+        assert_eq!(unix_millis_from_iso("13/2026"), None);
+        assert_eq!(unix_millis_from_iso("2026/10/13/1"), None);
     }
 
     #[test]
