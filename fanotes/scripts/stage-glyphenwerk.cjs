@@ -10,9 +10,10 @@ const destination = path.resolve(appRoot, 'public', 'glyphenwerk')
 const glyphenwerkReady = () => fs.existsSync(path.join(source, 'index.html')) && fs.existsSync(path.join(source, 'assets'))
 
 if (!glyphenwerkReady()) {
-  const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm'
   const run = (args) => {
-    const result = spawnSync(npm, args, { cwd: repoRoot, stdio: 'inherit' })
+    // Windows needs a shell so Node can launch npm.cmd. spawnSync("npm.cmd")
+    // without a shell fails with EINVAL.
+    const result = spawnSync('npm', args, { cwd: repoRoot, stdio: 'inherit', shell: true, windowsHide: true })
     if (result.error) throw result.error
     if (result.status !== 0) throw new Error(`GlyphenWerk: npm ${args.join(' ')} wurde mit Status ${result.status} beendet.`)
   }
