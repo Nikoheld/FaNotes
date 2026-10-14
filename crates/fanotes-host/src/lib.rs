@@ -2699,10 +2699,49 @@ fn file_uri(path: &Path) -> String {
 pub(crate) fn compare_names(left: &str, right: &str) -> std::cmp::Ordering {
     static COLLATOR: std::sync::OnceLock<Option<icu_collator::CollatorBorrowed<'static>>> =
         std::sync::OnceLock::new();
+    let left = collation_text(left);
+    let right = collation_text(right);
     if let Some(collator) = COLLATOR.get_or_init(german_numeric_base_collator).as_ref() {
-        return collator.compare(left, right);
+        return collator.compare(left.as_ref(), right.as_ref());
     }
-    compare_names_fallback(left, right)
+    compare_names_fallback(left.as_ref(), right.as_ref())
+}
+
+/// Characters whose primary weights in Node's German sort differ from ICU.
+///
+/// V8 keeps these case pairs distinct and orders them after Han characters.
+/// ICU folds each pair together and sorts the pair before Han. The sentinels
+/// are private-use characters in that desktop order.
+fn collation_text(value: &str) -> std::borrow::Cow<'_, str> {
+    if !value.chars().any(needs_collation_sentinel) {
+        return std::borrow::Cow::Borrowed(value);
+    }
+    let mut out = String::with_capacity(value.len());
+    for character in value.chars() {
+        if let Some(rank) = collation_sentinel_rank(character) {
+            out.push(char::from_u32(0xF0000 + rank).expect("collation rank fits"));
+        } else {
+            out.push(character);
+        }
+    }
+    std::borrow::Cow::Owned(out)
+}
+
+fn needs_collation_sentinel(character: char) -> bool {
+    collation_sentinel_rank(character).is_some()
+}
+
+fn collation_sentinel_rank(character: char) -> Option<u32> {
+    Some(match character {
+        '\u{A7D3}' => 0,
+        '\u{A7D5}' => 1,
+        '\u{A7CE}' => 2,
+        '\u{A7CF}' => 3,
+        '\u{A7D2}' => 4,
+        '\u{A7D4}' => 5,
+        '\u{16EA0}'..='\u{16ED3}' => 6 + (u32::from(character) - 0x16EA0),
+        _ => return None,
+    })
 }
 
 fn compare_names_fallback(left: &str, right: &str) -> std::cmp::Ordering {
@@ -2818,10 +2857,12 @@ fn compare_with(
     right: &str,
     collator: &Option<icu_collator::CollatorBorrowed<'static>>,
 ) -> std::cmp::Ordering {
+    let left = collation_text(left);
+    let right = collation_text(right);
     if let Some(collator) = collator {
-        collator.compare(left, right)
+        collator.compare(left.as_ref(), right.as_ref())
     } else {
-        left.cmp(right)
+        left.cmp(&right)
     }
 }
 
@@ -4216,6 +4257,17 @@ mod sort_tests {
             Ordering::Greater
         );
         assert_eq!(compare_names("Seite 2", "Seite 02"), Ordering::Equal);
+        assert_eq!(compare_names("Apfel", "apfel"), Ordering::Equal);
+        assert_eq!(compare_names("\u{A7D3}", "\u{A7CE}"), Ordering::Less);
+        assert_eq!(compare_names("\u{A7CE}", "\u{A7CF}"), Ordering::Less);
+        assert_eq!(compare_names("\u{A7CF}", "\u{A7D2}"), Ordering::Less);
+        assert_eq!(compare_names("\u{A7D4}", "\u{16EA0}"), Ordering::Less);
+        assert_eq!(compare_names("\u{16EA0}", "\u{16EBB}"), Ordering::Less);
+        assert_eq!(compare_names("字", "\u{A7CE}"), Ordering::Less);
+        assert_eq!(
+            base_dictionary_order("\u{A7CE}", "\u{A7CF}"),
+            Ordering::Less
+        );
     }
 
     #[test]
