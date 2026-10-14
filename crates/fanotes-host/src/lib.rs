@@ -1156,7 +1156,7 @@ impl Host {
             return Err("Der Pfad liegt außerhalb des Vaults.".to_owned());
         }
         fs::rename(&source, &destination)
-            .map_err(|_| "Der Eintrag konnte nicht umbenannt werden.".to_owned())?;
+            .map_err(|error| vault::node_rename_error(&source, &destination, &error))?;
         let next = relative_from_root(&root, &destination);
         if !was_dir {
             move_note_companion(&root, &normalized, &next);
@@ -1219,7 +1219,7 @@ impl Host {
             return Err("Das Verschiebeziel liegt außerhalb des Vaults.".to_owned());
         }
         fs::rename(&source, &destination)
-            .map_err(|_| "Der Eintrag konnte nicht verschoben werden.".to_owned())?;
+            .map_err(|error| vault::node_rename_error(&source, &destination, &error))?;
         let next = relative_from_root(&root, &destination);
         if !was_dir {
             move_note_companion(&root, &normalized, &next);

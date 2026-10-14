@@ -441,3 +441,67 @@ fn an_unreadable_folder_does_not_replace_a_hidden_file() {
         .collect();
     assert_eq!(names.len(), 2, "{names:?}");
 }
+
+#[cfg(unix)]
+#[test]
+fn an_unwritable_folder_reports_the_desktop_rename_error() {
+    use std::os::unix::fs::PermissionsExt;
+    let (_dir, mut host) = host();
+    let vault = host.vault.clone().unwrap();
+    let folder = vault.join("Mathe");
+    let note = folder.join("Seite.md");
+    fs::write(&note, b"Hallo\n").unwrap();
+    fs::set_permissions(&folder, fs::Permissions::from_mode(0o555)).unwrap();
+    struct Restore(std::path::PathBuf);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            let _ = fs::set_permissions(&self.0, fs::Permissions::from_mode(0o700));
+        }
+    }
+    let _restore = Restore(folder.clone());
+    let destination = folder.join("Andere.md");
+    assert_eq!(
+        host.dispatch("fanotes:rename-entry", &[json!("Mathe/Seite.md"), json!("Andere")])
+            .unwrap_err(),
+        format!(
+            "EACCES: permission denied, rename '{}' -> '{}'",
+            note.display(),
+            destination.display()
+        )
+    );
+    fs::set_permissions(&folder, fs::Permissions::from_mode(0o700)).unwrap();
+    assert_eq!(fs::read(&note).unwrap(), b"Hallo\n");
+    assert!(!destination.exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn an_unwritable_destination_reports_the_desktop_move_error() {
+    use std::os::unix::fs::PermissionsExt;
+    let (_dir, mut host) = host();
+    let vault = host.vault.clone().unwrap();
+    let note = vault.join("Mathe/Seite.md");
+    let destination_dir = vault.join("Physik");
+    let destination = destination_dir.join("Seite.md");
+    fs::write(&note, b"Hallo\n").unwrap();
+    fs::set_permissions(&destination_dir, fs::Permissions::from_mode(0o555)).unwrap();
+    struct Restore(std::path::PathBuf);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            let _ = fs::set_permissions(&self.0, fs::Permissions::from_mode(0o700));
+        }
+    }
+    let _restore = Restore(destination_dir);
+    assert_eq!(
+        host.dispatch("fanotes:move-entry", &[json!("Mathe/Seite.md"), json!("Physik")])
+            .unwrap_err(),
+        format!(
+            "EACCES: permission denied, rename '{}' -> '{}'",
+            note.display(),
+            destination.display()
+        )
+    );
+    fs::set_permissions(&vault.join("Physik"), fs::Permissions::from_mode(0o700)).unwrap();
+    assert_eq!(fs::read(&note).unwrap(), b"Hallo\n");
+    assert!(!destination.exists());
+}
