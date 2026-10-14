@@ -885,9 +885,9 @@ fn write_atomic(
         // sync time already set, matching the Electron sync host.
         let _ = filetime::set_file_mtime(&temporary, filetime::FileTime::from_system_time(mtime));
     }
-    if fs::rename(&temporary, path).is_err() {
+    if let Err(error) = fs::rename(&temporary, path) {
         let _ = fs::remove_file(&temporary);
-        return Err("Die Datei konnte nicht geschrieben werden.".to_owned());
+        return Err(vault::node_rename_error(&temporary, path, &error));
     }
     sync_parent(path);
     Ok(())
@@ -908,9 +908,9 @@ pub(crate) fn atomic_copy(source: &Path, destination: &Path, mode: u32) -> Resul
         let _ = fs::remove_file(&temporary);
         return Err(error);
     }
-    if fs::rename(&temporary, destination).is_err() {
+    if let Err(error) = fs::rename(&temporary, destination) {
         let _ = fs::remove_file(&temporary);
-        return Err("Die Datei konnte nicht geschrieben werden.".to_owned());
+        return Err(vault::node_rename_error(&temporary, destination, &error));
     }
     sync_parent(destination);
     Ok(())
