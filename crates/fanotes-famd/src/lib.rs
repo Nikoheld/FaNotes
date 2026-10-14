@@ -839,8 +839,8 @@ pub fn js_json_number(value: f64) -> Value {
 
 /// `Date.parse` plus `toISOString`. A zoned timestamp becomes UTC with milliseconds.
 ///
-/// A date without a time is midnight UTC. A year or a year and month is the
-/// first day of that period. A time without a zone is local time.
+/// `YYYY`, `YYYY-MM`, and `YYYY-MM-DD` are midnight UTC. A one-digit month or
+/// day is local midnight. A time without a zone is local time.
 /// In a daylight-saving overlap that is the earlier instant. A skipped hour
 /// keeps the offset from before the transition. A day past the end of the
 /// month rolls forward, and `24:00:00` is the next midnight.
@@ -1344,11 +1344,17 @@ fn date_only_iso(value: &str) -> Option<String> {
         return None;
     }
     let year: i32 = year.parse().ok()?;
+    // `Date.parse` uses UTC only for `YYYY`, `YYYY-MM`, and `YYYY-MM-DD`.
+    // `2026-1` and `2026-10-3` are local midnight.
+    let mut legacy_local = false;
     let (month, day) = match (month, day) {
         (None, _) => (1, 1),
         (Some(month), None) => {
             if !(1..=2).contains(&month.len()) || !month.bytes().all(|byte| byte.is_ascii_digit()) {
                 return None;
+            }
+            if month.len() != 2 {
+                legacy_local = true;
             }
             let month: i32 = month.parse().ok()?;
             if !(1..=12).contains(&month) {
@@ -1364,6 +1370,9 @@ fn date_only_iso(value: &str) -> Option<String> {
             {
                 return None;
             }
+            if month.len() != 2 || day.len() != 2 {
+                legacy_local = true;
+            }
             let month: i32 = month.parse().ok()?;
             let day: i32 = day.parse().ok()?;
             if !(1..=12).contains(&month) || !(1..=31).contains(&day) {
@@ -1373,6 +1382,13 @@ fn date_only_iso(value: &str) -> Option<String> {
         }
     };
     let (year, month, day) = normalize_ymd(year, month, day)?;
+    if legacy_local {
+        let (year, month, day, hour, minute, second) =
+            local_civil_to_utc(year, month, day, 0, 0, 0)?;
+        return Some(format!(
+            "{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}.000Z"
+        ));
+    }
     Some(format!("{year:04}-{month:02}-{day:02}T00:00:00.000Z"))
 }
 
@@ -1830,10 +1846,6 @@ mod tests {
             Some("2026-01-01T00:00:00.000Z")
         );
         assert_eq!(
-            super::canonical_iso("2026-1").as_deref(),
-            Some("2026-01-01T00:00:00.000Z")
-        );
-        assert_eq!(
             super::canonical_iso(" 2026-01 ").as_deref(),
             Some("2026-01-01T00:00:00.000Z")
         );
@@ -1994,6 +2006,41 @@ mod tests {
             assert_eq!(
                 super::canonical_iso("2026-10-13 16:00:00 (EST)").as_deref(),
                 Some("2026-10-13T20:00:00.000Z")
+            );
+        });
+    }
+
+    #[test]
+    fn a_short_hyphen_date_is_local_midnight() {
+        // `2026-01` and `2026-10-03` are UTC. A one-digit month or day is local.
+        with_tz("America/New_York", || {
+            assert_eq!(
+                super::canonical_iso("2026-1").as_deref(),
+                Some("2026-01-01T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-3").as_deref(),
+                Some("2026-10-03T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-01-1").as_deref(),
+                Some("2026-01-01T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-2-31").as_deref(),
+                Some("2026-03-03T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-01").as_deref(),
+                Some("2026-01-01T00:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-03").as_deref(),
+                Some("2026-10-03T00:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-02-31").as_deref(),
+                Some("2026-03-03T00:00:00.000Z")
             );
         });
     }
