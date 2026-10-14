@@ -55,6 +55,11 @@ class InkSession(document: InkDocument) {
         livePoints = emptyList()
     }
 
+    /** Replaces the stroke still under the pen, used when a figure snaps clean. */
+    fun replaceLive(points: List<StrokePoint>) {
+        livePoints = points
+    }
+
     /**
      * Adds a sample in the current 0–1 space. Returns false when the sample
      * is a corridor leap and was dropped.

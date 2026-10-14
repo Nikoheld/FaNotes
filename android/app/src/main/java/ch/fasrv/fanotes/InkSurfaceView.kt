@@ -58,7 +58,10 @@ import ch.fasrv.fanotes.ink.rulerLength
 import ch.fasrv.fanotes.ink.rulerWidth
 import ch.fasrv.fanotes.ink.sampleCompassCircle
 import ch.fasrv.fanotes.ink.scaleTicks
+import ch.fasrv.fanotes.ink.inkStrokeAllowsShapeSnap
+import ch.fasrv.fanotes.ink.isStrokeDwelling
 import ch.fasrv.fanotes.ink.sectionsOf
+import ch.fasrv.fanotes.ink.snapStrokeToShape
 import ch.fasrv.fanotes.ink.setSquareApexSign
 import ch.fasrv.fanotes.ink.setSquareSize
 import ch.fasrv.fanotes.ink.shortestAngleDelta
@@ -183,6 +186,7 @@ class InkSurfaceView @JvmOverloads constructor(
     var compassPose: DraftingPose? = null
     private var guideDrag: GuideDrag? = null
     private var snapLock: DraftingSnapLock? = null
+    private var shapeSnapped = false
     private val guideFill = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL; color = Color.parseColor("#D7E4F2") }
     private val guideEdge = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
@@ -467,6 +471,7 @@ class InkSurfaceView @JvmOverloads constructor(
                 selectRect = floatArrayOf(x.toFloat(), y.toFloat(), x.toFloat(), y.toFloat())
             }
             else -> {
+                shapeSnapped = false
                 val raw = pageNorm(event.getX(index), event.getY(index))
                 val hit = snapToDraftingTools(raw.first, raw.second, visibleTools(), sessionWidth(), sessionHeight(), null, sheetDisplay())
                 snapLock = hit?.let { DraftingSnapLock(it.kind, it.edgeIndex) }
@@ -510,9 +515,12 @@ class InkSurfaceView @JvmOverloads constructor(
                 selectRect = floatArrayOf(anchorX.toFloat(), anchorY.toFloat(), x.toFloat(), y.toFloat())
             }
         } else {
-            for (h in 0 until history) current.addSample(penSample(event, index, h))
-            current.addSample(penSample(event, index))
-            predicted = predict(event)
+            if (!shapeSnapped) {
+                for (h in 0 until history) current.addSample(penSample(event, index, h))
+                current.addSample(penSample(event, index))
+                if (isStrokeDwelling(current.livePoints, sessionWidth(), sessionHeight())) trySnapLive()
+                predicted = if (shapeSnapped) emptyList() else predict(event)
+            }
         }
         invalidate()
     }
@@ -563,8 +571,13 @@ class InkSurfaceView @JvmOverloads constructor(
                 selectRect = null
                 invalidateTiles()
             }
-            cancel -> current.cancelStroke()
+            cancel -> {
+                shapeSnapped = false
+                current.cancelStroke()
+            }
             else -> {
+                if (!shapeSnapped) trySnapLive()
+                shapeSnapped = false
                 val stroke = current.endStroke(style, nowIso())
                 if (stroke != null) {
                     invalidateTiles(stroke)
@@ -1254,6 +1267,15 @@ class InkSurfaceView @JvmOverloads constructor(
         block(this)
     } finally {
         recycle()
+    }
+
+    private fun trySnapLive() {
+        val current = session ?: return
+        if (!inkStrokeAllowsShapeSnap("handwriting", null)) return
+        if (style.brush in setOf("marker", "highlighter", "watercolor", "spray", "paintbrush")) return
+        val snapped = snapStrokeToShape(current.livePoints, sessionWidth(), sessionHeight()) ?: return
+        current.replaceLive(snapped.points)
+        shapeSnapped = true
     }
 
     private fun penSample(event: MotionEvent, index: Int, historical: Int = -1): StrokePoint {
