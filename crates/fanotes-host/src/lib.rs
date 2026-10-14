@@ -1787,6 +1787,15 @@ fn unix_millis_from_iso(value: &str) -> Option<u64> {
         SymbolRewrite::Changed(next) => return unix_millis_from_iso(&next),
         SymbolRewrite::Same => {}
     }
+    if let Some(next) = strip_leading_field_marks(value) {
+        // `4: :5` is 4:05. `+5: :30` is +5:30. A colon or dot at the start
+        // of a field is only a separator.
+        return unix_millis_from_iso(&next);
+    }
+    if let Some(next) = join_open_clock_fields(value) {
+        // `4: 5 PM` is `4:5 PM`. An open field takes the next number.
+        return unix_millis_from_iso(&next);
+    }
     let trimmed = value.trim_matches(is_date_parse_space);
     if let Some(rest) = strip_leading_signs(trimmed) {
         // Signs before the first number are padding. The space keeps a
@@ -2017,6 +2026,52 @@ fn rewrite_periods(value: &str) -> String {
 /// `Date.parse` whitespace is tab, line feed, vertical tab, form feed, carriage
 /// return, space, U+FEFF, and Unicode Space_Separator. A comma separates a
 /// date from a clock the same way. U+0085, U+2028, and U+2029 are not included.
+/// `:30` and `.5` at the start of a field are the numbers 30 and 5.
+fn strip_leading_field_marks(value: &str) -> Option<String> {
+    let mut changed = false;
+    let mut out = String::with_capacity(value.len());
+    let mut at_token_start = true;
+    for character in value.chars() {
+        if is_date_parse_space(character) {
+            at_token_start = true;
+            out.push(character);
+            continue;
+        }
+        if at_token_start && matches!(character, ':' | '.') {
+            changed = true;
+            continue;
+        }
+        at_token_start = false;
+        out.push(character);
+    }
+    if changed { Some(out) } else { None }
+}
+
+/// `4: 5: 6` is `4:5:6`. A field that ends in `:` takes the next number.
+fn join_open_clock_fields(value: &str) -> Option<String> {
+    let words: Vec<&str> = value
+        .split(is_date_parse_space)
+        .filter(|word| !word.is_empty())
+        .collect();
+    let mut joined: Vec<String> = Vec::new();
+    let mut changed = false;
+    for word in words {
+        if joined.last().is_some_and(|previous| previous.ends_with(':'))
+            && word.bytes().next().is_some_and(|byte| byte.is_ascii_digit())
+        {
+            joined.last_mut().unwrap().push_str(word);
+            changed = true;
+        } else {
+            joined.push(word.to_string());
+        }
+    }
+    if changed {
+        Some(joined.join(" "))
+    } else {
+        None
+    }
+}
+
 fn is_date_parse_space(c: char) -> bool {
     matches!(
         c,
@@ -9218,6 +9273,44 @@ mod local_zone_tests {
         assert_eq!(
             unix_millis_from_iso("2026-10-13 16:00 GMT+5::30"),
             Some(1_791_887_400_000)
+        );
+    }
+
+    #[test]
+    fn a_field_may_start_with_a_colon() {
+        let _lock = TRASH_CLOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let _restore = RestoreTz(std::env::var_os("TZ"));
+        unsafe { std::env::set_var("TZ", "America/New_York") };
+        unsafe { tzset() };
+        // `4: :5` is 4:05. `+5: :30` is +5:30. The colon at the start of
+        // the next field is only a separator.
+        assert_eq!(unix_millis_from_iso("2026-10-13 4: :5"), Some(1_791_878_700_000));
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 4: :5 PM"),
+            Some(1_791_921_900_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 16:00 +5: :30"),
+            Some(1_791_887_400_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 16:00 +5:. :5"),
+            Some(1_791_888_900_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("10/13/2026 4: :5 PM"),
+            Some(1_791_921_900_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 4: :5 PM"),
+            Some(1_791_921_900_000)
+        );
+        assert_eq!(unix_millis_from_iso("Oct :13 2026"), Some(1_791_864_000_000));
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 :16:00"),
+            Some(1_791_921_600_000)
         );
     }
 
