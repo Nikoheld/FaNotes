@@ -1480,15 +1480,33 @@ fn write_unique_markdown(directory: &Path, title: &str, markdown: &str) -> Resul
             format!("{stem} {}.md", index + 1)
         };
         let target = directory.join(name);
-        match crate::notes::publish_new_file(&target, markdown.as_bytes(), 0o600) {
+        // Desktop opens the final name with `O_CREAT | O_EXCL | O_NOFOLLOW`.
+        // `EEXIST` tries the next name. Every other open error is returned.
+        match open_exclusive_markdown(&target, markdown.as_bytes()) {
             Ok(()) => return Ok(target),
-            Err(crate::notes::NewFileError::Exists) => continue,
-            Err(crate::notes::NewFileError::Io(_)) => {
-                return Err("Die OneNote-Seite konnte nicht geschrieben werden.".to_owned());
+            Err(error) if error.raw_os_error() == Some(libc::EEXIST) => continue,
+            Err(error) => {
+                let _ = fs::remove_file(&target);
+                return Err(crate::notes::node_open_error(&target, &error));
             }
         }
     }
     Err("Für die OneNote-Seite konnte kein freier Dateiname erzeugt werden.".to_owned())
+}
+
+fn open_exclusive_markdown(path: &Path, bytes: &[u8]) -> Result<(), std::io::Error> {
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+        options.custom_flags(libc::O_NOFOLLOW);
+    }
+    let mut file = options.open(path)?;
+    std::io::Write::write_all(&mut file, bytes)?;
+    file.sync_all()?;
+    Ok(())
 }
 
 fn create_private_dir(path: &Path) -> Result<(), std::io::Error> {
@@ -1894,7 +1912,7 @@ mod tests {
         note_directory_segments, outline_level, page_dimensions, page_parents, page_title,
         preview_is_nav, render_inputs, safe_segment, sanitize_page, stored_relative_path,
         strip_active_html, tool_failure_message, tool_limit, unique_directory, urlencoding_decode,
-        validate_listing, walk_limited,
+        validate_listing, walk_limited, write_unique_markdown,
     };
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -1908,6 +1926,38 @@ mod tests {
             tool_limit("OneNote-Abschnitt Gruppe.one").as_secs(),
             12 * 60
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_unwritable_onenote_folder_reports_the_desktop_open_error() {
+        use std::os::unix::fs::PermissionsExt;
+        let directory = std::env::temp_dir().join(format!(
+            "fanotes-onenote-page-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&directory);
+        std::fs::create_dir_all(&directory).unwrap();
+        std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o555)).unwrap();
+        struct Restore(std::path::PathBuf);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                let _ = std::fs::set_permissions(&self.0, std::fs::Permissions::from_mode(0o700));
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+        let _restore = Restore(directory.clone());
+        let page = directory.join("Seite.md");
+        assert_eq!(
+            write_unique_markdown(&directory, "Seite", "# Seite\n").unwrap_err(),
+            format!("EACCES: permission denied, open '{}'", page.display())
+        );
+        std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(!page.exists());
     }
 
     #[test]
