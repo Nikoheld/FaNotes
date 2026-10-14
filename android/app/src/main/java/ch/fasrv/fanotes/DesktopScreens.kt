@@ -1,7 +1,5 @@
 package ch.fasrv.fanotes
 
-import android.content.Intent
-import android.net.Uri
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -62,7 +60,6 @@ import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontFamily
@@ -1051,6 +1048,34 @@ private fun CalendarEventEditor(
 }
 
 @Composable
+fun BugReportDialog(model: FaNotesViewModel) {
+    val status by model.bugReportMessage.collectAsStateWithLifecycle()
+    var description by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = { model.closeBugReport() },
+        title = { Text("Fehler melden") },
+        text = {
+            Column {
+                Text("Die letzten fünf Minuten (Stift, Notiz, Werkzeug) werden automatisch angehängt und nur an fanotes.fasrv.ch geschickt.", fontSize = 13.sp)
+                OutlinedTextField(
+                    description,
+                    { description = it.take(2000) },
+                    label = { Text("Was ist passiert?") },
+                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                )
+                if (!status.isNullOrBlank() && status != "Bericht gesendet.") {
+                    Text(status.orEmpty(), color = MaterialTheme.colorScheme.error, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { model.sendBugReport(description) }, enabled = description.isNotBlank()) { Text("Bericht senden") }
+        },
+        dismissButton = { TextButton(onClick = { model.closeBugReport() }) { Text("Abbrechen") } },
+    )
+}
+
+@Composable
 fun FaNotesConfirmDialog(request: PendingConfirm, onConfirm: () -> Unit, onDismiss: () -> Unit) {
     val cancel = remember { FocusRequester() }
     val confirm = remember { FocusRequester() }
@@ -1323,7 +1348,6 @@ fun AiScreen(model: FaNotesViewModel) {
 fun SettingsScreen(model: FaNotesViewModel, onSync: () -> Unit, onOpenVault: () -> Unit, onPrivate: () -> Unit) {
     val settings by model.deskSettings.collectAsStateWithLifecycle()
     val update by model.updateLabel.collectAsStateWithLifecycle()
-    val context = LocalContext.current
     val sections = listOf(
         "appearance" to "Erscheinungsbild",
         "editor" to "Editor",
@@ -1431,10 +1455,8 @@ fun SettingsScreen(model: FaNotesViewModel, onSync: () -> Unit, onOpenVault: () 
                 }
                 "advanced" -> Text("Der Gerätename für Konfliktdateien steht in den Sync-Einstellungen. Secrets liegen im Android-Keystore, nicht im Vault.")
             }
-            TextButton(onClick = {
-                val intent = Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:support@fanotes.fasrv.ch?subject=FaNotes%20Android%202026.10.7"))
-                runCatching { context.startActivity(intent) }
-            }) { Text("Fehler melden") }
+            TextButton(onClick = { model.openBugReport() }) { Text("Fehler melden") }
+            Text("Die letzten fünf Minuten (Stift, Notiz, Werkzeug) werden an fanotes.fasrv.ch geschickt.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
         }
     }
 }
@@ -1673,6 +1695,7 @@ fun CommandPalette(
         "split-orient" to "Teilung drehen",
         "focus" to "Fokusmodus",
         "sync" to "Sync",
+        "bug-report" to "Fehler melden",
     )
     val commands = if (query.isBlank()) actions else actions.filter { (_, label) -> fuzzyScore(query, label) > 0 }
     Column(Modifier.fillMaxWidth().heightIn(max = 480.dp).verticalScroll(rememberScrollState()).background(MaterialTheme.colorScheme.surface).padding(12.dp)) {

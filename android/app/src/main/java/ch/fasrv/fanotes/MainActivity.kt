@@ -400,6 +400,7 @@ fun FaNotesScreen(
                     "split-orient" -> model.toggleSplitOrientation()
                     "focus" -> model.updateDesk("focus", if (desk["focus"] == "on") "off" else "on")
                     "sync" -> requestSync()
+                    "bug-report" -> model.openBugReport()
                     "nav-back" -> model.navigateHistory(-1)
                     "nav-forward" -> model.navigateHistory(1)
                     "reopen-tab" -> model.reopenClosedTab()
@@ -412,6 +413,8 @@ fun FaNotesScreen(
             }
         }, title = { Text("Befehle") })
     }
+    val bugReportOpen by model.bugReportOpen.collectAsStateWithLifecycle()
+    if (bugReportOpen) BugReportDialog(model)
     val confirm by model.confirmRequest.collectAsStateWithLifecycle()
     confirm?.let { request ->
         FaNotesConfirmDialog(request, onConfirm = { model.acceptConfirm() }, onDismiss = { model.dismissConfirm() })
@@ -888,15 +891,20 @@ private fun PageSurface(
             NotePageView(context).apply {
                 attachSession(model.session)
                 ink.onChanged = { model.noteChanged() }
+                ink.onPenSample = { x, y -> model.recordPenSample(x, y) }
                 ink.onSwipeNote = { model.swipe(it) }
             }
         },
         update = { page ->
             page.attachSession(model.session)
             page.ink.onChanged = { model.noteChanged() }
+            page.ink.onPenSample = { x, y -> model.recordPenSample(x, y) }
             page.ink.onSwipeNote = { model.swipe(it) }
             if (page.ink.backdrop !== backdrop) page.ink.backdrop = backdrop
-            page.onTool = { model.tool.value = it }
+            page.onTool = {
+                model.tool.value = it
+                model.recordBugTool(it.name)
+            }
             page.onSync = onSync
             page.onMarkdown = { model.updateMarkdown(it) }
             page.onVisibleMarkdown = { previous, next -> model.updateVisibleMarkdown(previous, next) }

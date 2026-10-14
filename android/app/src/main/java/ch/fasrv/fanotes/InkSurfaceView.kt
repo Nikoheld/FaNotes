@@ -120,6 +120,7 @@ class InkSurfaceView @JvmOverloads constructor(
             invalidateTiles()
         }
     var onChanged: () -> Unit = {}
+    var onPenSample: (Double, Double) -> Unit = { _, _ -> }
     var onSwipeNote: (Int) -> Unit = {}
     var onCamera: (Float, Float, Float) -> Unit = { _, _, _ -> }
     var onPenActive: (Boolean) -> Unit = {}
@@ -584,7 +585,8 @@ class InkSurfaceView @JvmOverloads constructor(
         } else {
             if (!shapeSnapped) {
                 for (h in 0 until history) current.addSample(penSample(event, index, h))
-                current.addSample(penSample(event, index))
+                val samplePoint = penSample(event, index)
+                if (current.addSample(samplePoint)) onPenSample(samplePoint.x, samplePoint.y)
                 if (isStrokeDwelling(current.livePoints, sessionWidth(), sessionHeight())) trySnapLive()
                 predicted = if (shapeSnapped) emptyList() else predict(event)
             }
