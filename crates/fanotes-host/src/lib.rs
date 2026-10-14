@@ -1810,6 +1810,10 @@ fn unix_millis_from_iso(value: &str) -> Option<u64> {
             return unix_millis_from_iso(&normalized);
         }
     }
+    if let Some(next) = separate_meridiem_offset(value) {
+        // `PM+5` and `PM+5:30` are a meridiem and then an offset.
+        return unix_millis_from_iso(&next);
+    }
     if has_ampm_word(trimmed) {
         // `4:00 PM` is 16:00. A `T` before AM/PM is NaN. `AM` before a date
         // is an ordinary word, so a clock that does not fold falls through.
@@ -2250,6 +2254,43 @@ fn is_ampm(word: &str) -> bool {
     word.eq_ignore_ascii_case("am") || word.eq_ignore_ascii_case("pm")
 }
 
+/// `4:00 PM+5:30` is 16:00 at UTC+5:30. The sign starts the offset. `4:00PM+5`
+/// stays one word, and `PMGMT` is not an offset.
+fn separate_meridiem_offset(value: &str) -> Option<String> {
+    let chars: Vec<char> = value.chars().collect();
+    let mut out = String::with_capacity(value.len() + 1);
+    let mut changed = false;
+    let mut index = 0;
+    while index < chars.len() {
+        if meridiem_boundary(&chars, index)
+            && index + 2 < chars.len()
+            && matches!(chars[index + 2], '+' | '-')
+        {
+            out.push(chars[index]);
+            out.push(chars[index + 1]);
+            out.push(' ');
+            changed = true;
+            index += 2;
+            continue;
+        }
+        out.push(chars[index]);
+        index += 1;
+    }
+    if changed { Some(out) } else { None }
+}
+
+fn meridiem_boundary(chars: &[char], index: usize) -> bool {
+    if index + 1 >= chars.len() {
+        return false;
+    }
+    let first = chars[index].to_ascii_lowercase();
+    let second = chars[index + 1].to_ascii_lowercase();
+    if !matches!((first, second), ('a', 'm') | ('p', 'm')) {
+        return false;
+    }
+    index == 0 || !chars[index - 1].is_ascii_alphanumeric()
+}
+
 fn has_iso_t(value: &str) -> bool {
     let bytes = value.as_bytes();
     bytes.windows(3).any(|window| {
@@ -2299,14 +2340,27 @@ fn convert_ampm_clock(clock: &str, pm: bool) -> Option<String> {
     // `4:00:60 PM` is still a clock. The 60 is a date number on a month-name
     // date, so the hour changes and the rest of the field stays in the text.
     let (hour_text, rest) = clock.split_once(':')?;
-    if hour_text.is_empty()
-        || rest.is_empty()
-        || !hour_text.bytes().all(|byte| byte.is_ascii_digit())
-    {
+    if hour_text.is_empty() || !hour_text.bytes().all(|byte| byte.is_ascii_digit()) {
         return None;
+    }
+    if rest.is_empty() {
+        // `4: PM` is 16:00. The missing minute is zero.
+        return legacy_meridiem_clock(clock, pm);
     }
     let hour = ampm_hour(hour_text.parse().ok()?, pm)?;
     Some(format!("{hour:02}:{rest}"))
+}
+
+fn legacy_meridiem_clock(clock: &str, pm: bool) -> Option<String> {
+    let mut time = LegacyTime::new();
+    let mut dates = Vec::new();
+    let mut offset = None;
+    let mut minute_sign = 0i64;
+    take_clock_word(clock, &mut time, &mut dates, &mut offset, &mut minute_sign)?;
+    if time.index == 0 || !dates.is_empty() || offset.is_some() || minute_sign != 0 {
+        return None;
+    }
+    finish_legacy_time(&time, Some(if pm { 12 } else { 0 }))
 }
 
 fn convert_in_range_ampm_clock(clock: &str, pm: bool) -> Option<String> {
@@ -8747,6 +8801,103 @@ mod local_zone_tests {
         assert_eq!(unix_millis_from_iso("2026-10-13 16:00+5GMT5"), None);
         assert_eq!(unix_millis_from_iso("2026-10-13 16:00+5Z5"), None);
         assert_eq!(unix_millis_from_iso("2026-10-13T16:00+5"), None);
+    }
+
+    #[test]
+    fn a_meridiem_can_carry_an_offset() {
+        let _lock = TRASH_CLOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let _restore = RestoreTz(std::env::var_os("TZ"));
+        unsafe { std::env::set_var("TZ", "America/New_York") };
+        unsafe { tzset() };
+        // `PM+5` is the meridiem and then an offset. `4:00PM+5` is empty
+        // because the meridiem touches the clock. A `T` form is empty too.
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 4:00 PM+5"),
+            Some(1_791_889_200_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 4:00 PM+5:30"),
+            Some(1_791_887_400_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 4:00 PM+5:3"),
+            Some(1_791_889_020_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 4:00 PM+0530"),
+            Some(1_791_887_400_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 4:00 PM-5"),
+            Some(1_791_925_200_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 4:00 AM+5"),
+            Some(1_791_846_000_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 12:00 AM+5"),
+            Some(1_791_831_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 12:00 PM+5"),
+            Some(1_791_874_800_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 4:00 PM+24"),
+            Some(1_791_820_800_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 4:00 PM+5 EST"),
+            Some(1_791_925_200_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 4:00 PM+5EST"),
+            Some(1_791_925_200_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 4:00 PM+5GMT"),
+            Some(1_791_907_200_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 4:00 pm+5"),
+            Some(1_791_889_200_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 4:5 PM+5"),
+            Some(1_791_889_500_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 4: PM+5"),
+            Some(1_791_889_200_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 4:00 PM+5"),
+            Some(1_791_889_200_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 4: PM+5"),
+            Some(1_791_889_200_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("10/13/2026 4:00 PM+5"),
+            Some(1_791_889_200_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("10/13/2026 4: PM+5"),
+            Some(1_791_889_200_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 4:00 PM +5"),
+            Some(1_791_889_200_000)
+        );
+        assert_eq!(unix_millis_from_iso("2026-10-13 4:00PM+5"), None);
+        assert_eq!(unix_millis_from_iso("2026-10-13 4:00 PMGMT"), None);
+        assert_eq!(unix_millis_from_iso("2026-10-13 4:00 PM+"), None);
+        assert_eq!(unix_millis_from_iso("2026-10-13 16:00 PM+5"), None);
+        assert_eq!(unix_millis_from_iso("2026-10-13T4:00 PM+5"), None);
     }
 
     #[test]
