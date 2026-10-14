@@ -1859,6 +1859,11 @@ fn unix_millis_from_iso(value: &str) -> Option<u64> {
             }
             return legacy_numeric_millis(trimmed);
         }
+        // A `T` clock is strict. A space before the clock is legacy: `16:` is
+        // 16:00, `4:5` is 4:05, and `16:.5` is 16:05.
+        IsoDate::DateTime(_date, _time) if !has_iso_t(value) => {
+            return legacy_numeric_millis(trimmed);
+        }
         IsoDate::DateTime(date, time) => (date, time),
     };
     let (year, month, day) = datetime_calendar(date)?;
@@ -1904,8 +1909,8 @@ fn unix_millis_from_iso(value: &str) -> Option<u64> {
         && second == 0
         && second_text.is_none_or(|text| text.len() == 2)
         && !hour_24_fraction_rejected;
-    // `Date.parse` requires each present clock field to be exactly two digits.
-    // `016` is the same hour as `16`, and it is still NaN.
+    // A `T` clock requires each present field to be exactly two digits.
+    // `2026-10-13T016:00` is empty. A space before `016:00` is 16:00.
     let clock_fields_are_two_digits = hour_text.len() == 2
         && minute_text.len() == 2
         && second_text.is_none_or(|text| text.len() == 2);
@@ -3909,17 +3914,17 @@ fn pad_legacy_clock(time: &str) -> Option<String> {
             (clock, Some(fraction))
         }
         None => (body, None),
-        Some(_) => return None,
+        Some(_) => return legacy_clock_text(time),
     };
     let mut numbers = Vec::new();
     for part in clock.split(':') {
         if part.is_empty() || !part.bytes().all(|byte| byte.is_ascii_digit()) {
-            return None;
+            return legacy_clock_text(time);
         }
         numbers.push(part.parse::<u32>().ok()?);
     }
     if !(2..=3).contains(&numbers.len()) || numbers.iter().any(|number| *number > 99) {
-        return None;
+        return legacy_clock_text(time);
     }
     let mut padded = if numbers.len() == 3 {
         format!("{:02}:{:02}:{:02}", numbers[0], numbers[1], numbers[2])
@@ -3932,6 +3937,29 @@ fn pad_legacy_clock(time: &str) -> Option<String> {
     }
     padded.push_str(zone);
     Some(padded)
+}
+
+/// `16:` is 16:00:00. `16::30` is 16:00:30. `16:.5` skips the dot and is 16:05.
+fn legacy_clock_text(time: &str) -> Option<String> {
+    let mut legacy = LegacyTime::new();
+    let mut dates = Vec::new();
+    let mut offset = None;
+    let mut minute_sign = 0i64;
+    take_clock_word(time, &mut legacy, &mut dates, &mut offset, &mut minute_sign)?;
+    if legacy.index == 0 || !dates.is_empty() || minute_sign != 0 {
+        return None;
+    }
+    let clock = finish_legacy_time(&legacy, None)?;
+    match offset {
+        None => Some(clock),
+        Some(minutes) => {
+            let (delta, suffix) = fold_offset_days(minutes)?;
+            if delta != 0 {
+                return None;
+            }
+            Some(format!("{clock}{suffix}"))
+        }
+    }
 }
 
 fn finished_date_has_an_extra_hyphen(trimmed: &str) -> bool {
@@ -8535,6 +8563,60 @@ mod local_zone_tests {
         assert_eq!(unix_millis_from_iso("2026-10-13T16:00(EST)"), None);
         assert_eq!(unix_millis_from_iso("2026-10-13T16:00:00Z(EST)"), None);
         assert_eq!(unix_millis_from_iso("2026-10-13T16:00(EST"), None);
+    }
+
+    #[test]
+    fn a_space_before_an_open_clock_fills_the_missing_fields() {
+        let _lock = TRASH_CLOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let _restore = RestoreTz(std::env::var_os("TZ"));
+        unsafe { std::env::set_var("TZ", "America/New_York") };
+        unsafe { tzset() };
+        // A legacy clock may leave a field empty. `16:` is 16:00, `16::30`
+        // is 16:00:30, and `16:.5` is 16:05. A `T` clock still needs two digits.
+        assert_eq!(unix_millis_from_iso("2026-10-13 16:"), Some(1_791_921_600_000));
+        assert_eq!(unix_millis_from_iso("2026-10-13 16:00:"), Some(1_791_921_600_000));
+        assert_eq!(unix_millis_from_iso("2026-10-13 16::"), Some(1_791_921_600_000));
+        assert_eq!(unix_millis_from_iso("2026-10-13 16::00"), Some(1_791_921_600_000));
+        assert_eq!(unix_millis_from_iso("2026-10-13 16::30"), Some(1_791_921_630_000));
+        assert_eq!(unix_millis_from_iso("2026-10-13 4:00"), Some(1_791_878_400_000));
+        assert_eq!(unix_millis_from_iso("2026-10-13 4:5"), Some(1_791_878_700_000));
+        assert_eq!(unix_millis_from_iso("2026-10-13 4:5:6"), Some(1_791_878_706_000));
+        assert_eq!(unix_millis_from_iso("2026-10-13 016:00"), Some(1_791_921_600_000));
+        assert_eq!(unix_millis_from_iso("2026-10-13 16:000"), Some(1_791_921_600_000));
+        assert_eq!(unix_millis_from_iso("2026-10-13 16:.5"), Some(1_791_921_900_000));
+        assert_eq!(unix_millis_from_iso("2026-10-13 16:00:.5"), Some(1_791_921_605_000));
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 16:00:00:.5"),
+            Some(1_791_921_600_005)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 16:00:00:123"),
+            Some(1_791_921_600_123)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 16:00:00:5"),
+            Some(1_791_921_600_005)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 16:00:00.5"),
+            Some(1_791_921_600_500)
+        );
+        assert_eq!(unix_millis_from_iso("2026-10-13 16:(EST)"), Some(1_791_921_600_000));
+        assert_eq!(unix_millis_from_iso("2026-10-13 4: PM"), Some(1_791_921_600_000));
+        assert_eq!(unix_millis_from_iso("2026-10-13 16: GMT"), Some(1_791_907_200_000));
+        assert_eq!(unix_millis_from_iso("2026-10-13 16: EST"), Some(1_791_925_200_000));
+        assert_eq!(unix_millis_from_iso("2026-10-13 24:"), Some(1_791_950_400_000));
+        assert_eq!(unix_millis_from_iso("2026-10-13 24::"), Some(1_791_950_400_000));
+        assert_eq!(unix_millis_from_iso("Oct 13 2026 16:"), Some(1_791_921_600_000));
+        assert_eq!(unix_millis_from_iso("10/13/2026 16:"), Some(1_791_921_600_000));
+        assert_eq!(unix_millis_from_iso("2026-10-13 16:00::"), None);
+        assert_eq!(unix_millis_from_iso("2026-10-13 16:60:"), None);
+        assert_eq!(unix_millis_from_iso("2026-10-13 16:00:00:1234"), None);
+        assert_eq!(unix_millis_from_iso("2026-10-13T16:"), None);
+        assert_eq!(unix_millis_from_iso("2026-10-13T4:00"), None);
+        assert_eq!(unix_millis_from_iso("2026-10-13T016:00"), None);
     }
 
     #[test]
