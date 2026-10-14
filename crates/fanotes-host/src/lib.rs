@@ -107,13 +107,7 @@ impl Host {
     }
 
     pub fn set_vault(&mut self, path: PathBuf) -> Result<(), String> {
-        let canonical = fs::canonicalize(&path)
-            .map_err(|_| "Der gewählte Vault ist kein sicherer Ordner.".to_owned())?;
-        let meta = fs::symlink_metadata(&canonical)
-            .map_err(|_| "Der gewählte Vault ist kein sicherer Ordner.".to_owned())?;
-        if meta.file_type().is_symlink() || !meta.is_dir() {
-            return Err("Der gewählte Vault ist kein sicherer Ordner.".to_owned());
-        }
+        let canonical = validated_vault_directory(&path)?;
         self.vault = Some(canonical.clone());
         self.configured_vault = Some(canonical);
         self.refresh_onboarding();
@@ -772,14 +766,15 @@ impl Host {
             notes::atomic_write(&note, onboarding::welcome_note(language).as_bytes(), 0o600)?;
             onboarding::write_status(&vault, "pending")?;
         }
-        self.set_vault(vault.clone())?;
-        let stored = self.vault.clone().unwrap_or(vault);
+        // Desktop `persistConfig` runs before `setCurrentVaultPath`. A failed
+        // write of the remembered path leaves the vault unset.
+        let stored = validated_vault_directory(&vault)?;
         notes::atomic_write(
             &self.app_data.join("vault-path"),
             stored.to_string_lossy().as_bytes(),
             0o600,
-        )
-        .map_err(|_| "Die Einstellungen konnten nicht gespeichert werden.".to_owned())?;
+        )?;
+        self.set_vault(stored)?;
         Ok(())
     }
 
@@ -1026,28 +1021,19 @@ impl Host {
             };
             path
         };
-        let previous_vault = self.vault.clone();
-        let previous_configured = self.configured_vault.clone();
-        let previous_onboarding = self.onboarding_required;
-        self.set_vault(path)?;
-        let stored = self
-            .vault
-            .clone()
-            .ok_or_else(|| "Die Einstellungen konnten nicht gespeichert werden.".to_owned())?;
+        let stored = validated_vault_directory(&path)?;
         // Desktop `fs.access(realpath, R_OK | W_OK)` rejects a folder the
         // process cannot write. The thrown message is Node's EACCES text.
+        // The profile write then has to succeed before the vault changes.
         if let Some(error) = vault_write_access_error(&stored) {
-            self.vault = previous_vault;
-            self.configured_vault = previous_configured;
-            self.onboarding_required = previous_onboarding;
             return Err(error);
         }
         notes::atomic_write(
             &self.app_data.join("vault-path"),
             stored.to_string_lossy().as_bytes(),
             0o600,
-        )
-        .map_err(|_| "Die Einstellungen konnten nicht gespeichert werden.".to_owned())?;
+        )?;
+        self.set_vault(stored)?;
         self.bootstrap()
     }
 
@@ -2032,6 +2018,18 @@ fn is_vault_id(value: &str) -> bool {
         && value
             .bytes()
             .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+}
+
+/// A vault directory the desktop would accept in `validateVaultRoot`.
+fn validated_vault_directory(path: &Path) -> Result<PathBuf, String> {
+    let canonical = fs::canonicalize(path)
+        .map_err(|_| "Der gewählte Vault ist kein sicherer Ordner.".to_owned())?;
+    let meta = fs::symlink_metadata(&canonical)
+        .map_err(|_| "Der gewählte Vault ist kein sicherer Ordner.".to_owned())?;
+    if meta.file_type().is_symlink() || !meta.is_dir() {
+        return Err("Der gewählte Vault ist kein sicherer Ordner.".to_owned());
+    }
+    Ok(canonical)
 }
 
 /// Node `fs.access(path, R_OK | W_OK)` for the chosen vault directory.
