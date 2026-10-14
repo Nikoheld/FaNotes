@@ -49,6 +49,16 @@ fun pathIsSyncExcluded(path: String, prefixes: List<String>): Boolean {
     return prefixes.any { prefix -> normalized == prefix || normalized.startsWith("$prefix/") }
 }
 
+/** Add or remove one folder from the newline-separated local-only list. */
+fun toggleSyncPrefix(value: String, folder: String): String {
+    val prefixes = syncPrefixesFromSetting(value)
+    val next = folder.replace('\\', '/').trim().trim('/')
+    if (next.isEmpty()) return prefixes.joinToString("\n")
+    val without = prefixes.filter { it != next }
+    val list = if (without.size == prefixes.size) without + next else without
+    return list.joinToString("\n")
+}
+
 private val CONFLICT_STAMP = DateTimeFormatter.ofPattern("yyyy-MM-dd HH-mm")
 
 /** `<name> (Konflikt <device> <YYYY-MM-DD HH-MM>).<ext>`, local time, matching the desktop client. */

@@ -1382,6 +1382,10 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    fun toggleLocalFolder(path: String) {
+        updateDesk("sync-excluded", ch.fasrv.fanotes.sync.toggleSyncPrefix(deskSettings.value["sync-excluded"].orEmpty(), path))
+    }
+
     fun updateDesk(key: String, value: String) {
         val next = deskSettings.value + (key to value)
         deskSettings.value = next

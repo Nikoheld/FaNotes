@@ -84,6 +84,8 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ch.fasrv.fanotes.desk.solveMathExpression
+import ch.fasrv.fanotes.sync.pathIsSyncExcluded
+import ch.fasrv.fanotes.sync.syncPrefixesFromSetting
 import ch.fasrv.fanotes.desk.collectVaultTags
 import ch.fasrv.fanotes.desk.filterVaultByTag
 import ch.fasrv.fanotes.desk.breadcrumbsFor
@@ -306,6 +308,8 @@ fun FaNotesScreen(
                     onOpenVault = onOpenVault,
                     onPrivateVault = { model.usePrivateVault() },
                     onDelete = { model.delete(it) },
+                    localFolders = syncPrefixesFromSetting(desk["sync-excluded"]),
+                    onToggleLocal = { model.toggleLocalFolder(it) },
                     colors = model.folderColors.collectAsStateWithLifecycle().value,
                     onFolderColor = { model.cycleFolderColor(it) },
                     conflicts = sync.conflicts,
@@ -523,6 +527,8 @@ private fun VaultPane(
     onOpenVault: () -> Unit,
     onPrivateVault: () -> Unit,
     onDelete: (String) -> Unit,
+    localFolders: List<String> = emptyList(),
+    onToggleLocal: (String) -> Unit = {},
     colors: Map<String, String>,
     onFolderColor: (String) -> Unit,
     conflicts: List<ch.fasrv.fanotes.sync.SyncConflict>,
@@ -593,7 +599,7 @@ private fun VaultPane(
         }
         LazyColumn(Modifier.weight(1f).padding(top = 8.dp)) {
             items(tree, key = { it.path }) { node ->
-                NoteRow(node, selected, colors, onOpen, onDelete, onFolderColor, depth = 0)
+                NoteRow(node, selected, colors, onOpen, onDelete, onFolderColor, localFolders, onToggleLocal, depth = 0)
             }
         }
         TextButton(onClick = onOpenVault) { Text("Vault-Ordner öffnen") }
@@ -609,6 +615,8 @@ private fun NoteRow(
     onOpen: (String) -> Unit,
     onDelete: (String) -> Unit,
     onFolderColor: (String) -> Unit,
+    localFolders: List<String>,
+    onToggleLocal: (String) -> Unit,
     depth: Int,
 ) {
     val folderColor = colors[node.path]
@@ -632,6 +640,15 @@ private fun NoteRow(
             tint = folderColor?.let { Color(android.graphics.Color.parseColor(it)) } ?: MaterialTheme.colorScheme.primary,
         )
         Text(node.name, modifier = Modifier.weight(1f).padding(start = 8.dp), maxLines = 1)
+        if (node.kind == NoteKind.FOLDER) {
+            val local = pathIsSyncExcluded(node.path, localFolders)
+            Text(
+                if (local) "Lokal" else "Nur hier",
+                fontSize = 11.sp,
+                color = if (local) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+                modifier = Modifier.clickable { onToggleLocal(node.path) }.padding(horizontal = 6.dp),
+            )
+        }
         if (node.kind != NoteKind.FOLDER) {
             IconButton(onClick = { onDelete(node.path) }) {
                 Icon(Icons.Filled.Delete, contentDescription = "Delete ${node.name}")
@@ -639,7 +656,7 @@ private fun NoteRow(
         }
     }
     if (node.kind == NoteKind.FOLDER) {
-        node.children.forEach { NoteRow(it, selected, colors, onOpen, onDelete, onFolderColor, depth + 1) }
+        node.children.forEach { NoteRow(it, selected, colors, onOpen, onDelete, onFolderColor, localFolders, onToggleLocal, depth + 1) }
     }
 }
 
