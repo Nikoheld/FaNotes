@@ -1473,6 +1473,18 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    fun syncDeviceName(): String = graph.deviceName()
+
+    fun setSyncDeviceName(name: String) {
+        graph.setDeviceName(name)
+    }
+
+    fun syncAutomatic(): Boolean = graph.automatic()
+
+    fun setSyncAutomatic(enabled: Boolean) {
+        graph.setAutomatic(enabled)
+    }
+
     fun toggleLocalFolder(path: String) {
         updateDesk("sync-excluded", ch.fasrv.fanotes.sync.toggleSyncPrefix(deskSettings.value["sync-excluded"].orEmpty(), path))
     }
