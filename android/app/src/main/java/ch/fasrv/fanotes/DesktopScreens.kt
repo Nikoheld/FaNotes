@@ -43,6 +43,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import ch.fasrv.fanotes.desk.readPdfMarks
 import ch.fasrv.fanotes.desk.wikiTargets
 import ch.fasrv.fanotes.desk.parseNoteTags
 import ch.fasrv.fanotes.desk.Breadcrumb
@@ -812,6 +813,44 @@ fun NoteTagBar(model: FaNotesViewModel) {
             keyboardActions = KeyboardActions(onDone = { addTag() }),
         )
         TextButton(onClick = { addTag() }) { Text("Hinzufügen") }
+    }
+}
+
+@Composable
+fun PdfQuoteMarks(model: FaNotesViewModel) {
+    val markdown by model.markdown.collectAsStateWithLifecycle()
+    val marks = readPdfMarks(markdown)
+    var page by remember { mutableStateOf("1") }
+    var quote by remember { mutableStateOf("") }
+    var underline by remember { mutableStateOf(false) }
+    Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)) {
+        Text("PDF-Markierungen", fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+        Text("Zitate bleiben in der Notiz, dieselbe Datei wie auf dem Desktop.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f))
+        marks.forEach { mark ->
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "S. ${mark.page}  ${if (mark.kind == "underline") "Unterstrichen" else "Markiert"}  ${mark.quote}",
+                    modifier = Modifier.weight(1f),
+                    fontSize = 13.sp,
+                    maxLines = 2,
+                )
+                TextButton(onClick = { model.removePdfQuote(mark.id) }) { Text("Entfernen") }
+            }
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            OutlinedTextField(page, { page = it.take(4) }, label = { Text("Seite") }, modifier = Modifier.width(88.dp), singleLine = true)
+            OutlinedTextField(quote, { quote = it.take(400) }, label = { Text("Zitat") }, modifier = Modifier.weight(1f), singleLine = true)
+        }
+        Row {
+            TextButton(onClick = { underline = !underline }) { Text(if (underline) "Unterstreichen" else "Markieren") }
+            TextButton(onClick = {
+                val number = page.toIntOrNull() ?: return@TextButton
+                if (quote.isNotBlank()) {
+                    model.addPdfQuote(number, quote, if (underline) "underline" else "highlight")
+                    quote = ""
+                }
+            }) { Text("Hinzufügen") }
+        }
     }
 }
 
