@@ -436,6 +436,100 @@ fn an_unreadable_html_worksheet_is_not_a_missing_safety_marker() {
     assert_eq!(fs::read(&html).unwrap(), b"fanotes-onenote-safe-v1");
 }
 
+#[cfg(unix)]
+#[test]
+fn a_linked_or_unreadable_worksheet_source_uses_the_desktop_open_error() {
+    use std::os::unix::fs::{PermissionsExt, symlink};
+    let (dir, mut host) = host();
+    let worksheets = dir.join("vault/.fanotes/worksheets");
+    let json = r#"{"schemaVersion":1,"id":"blatt-1","title":"Übung","kind":"pdf","mimeType":"application/pdf","sourceRelativePath":".fanotes/worksheets/blatt-1.pdf","dataRelativePath":".fanotes/worksheets/blatt-1.json","createdAt":"2026-01-02T03:04:05.000Z","updatedAt":"2026-01-02T03:04:05.000Z","textBoxes":[],"highlights":[]}"#;
+    let json_path = worksheets.join("blatt-1.json");
+    fs::write(&json_path, json).unwrap();
+    let pdf = worksheets.join("blatt-1.pdf");
+    let opened = |name: &str| {
+        let parent = fs::canonicalize(&worksheets).unwrap();
+        format!("{}", parent.join(name).display())
+    };
+    let document = serde_json::from_str::<serde_json::Value>(json).unwrap();
+
+    fs::remove_file(&pdf).unwrap();
+    fs::write(worksheets.join("ziel.pdf"), b"%PDF-1.4\n").unwrap();
+    symlink("ziel.pdf", &pdf).unwrap();
+    let eloop = format!(
+        "ELOOP: too many symbolic links encountered, open '{}'",
+        opened("blatt-1.pdf")
+    );
+    assert_eq!(
+        host.dispatch("fanotes:read-worksheet", &[json!("blatt-1")])
+            .unwrap_err(),
+        eloop
+    );
+    assert_eq!(
+        host.dispatch("fanotes:save-worksheet", &[document.clone()])
+            .unwrap_err(),
+        eloop
+    );
+    assert_eq!(fs::read(&json_path).unwrap(), json.as_bytes());
+
+    fs::remove_file(&pdf).unwrap();
+    let file = fs::File::create(&pdf).unwrap();
+    file.set_len(96 * 1024 * 1024 + 1).unwrap();
+    drop(file);
+    fs::set_permissions(&pdf, fs::Permissions::from_mode(0o000)).unwrap();
+    struct Restore(std::path::PathBuf, u32);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            let _ = fs::set_permissions(&self.0, fs::Permissions::from_mode(self.1));
+        }
+    }
+    let _restore_pdf = Restore(pdf.clone(), 0o600);
+    assert_eq!(
+        host.dispatch("fanotes:read-worksheet", &[json!("blatt-1")])
+            .unwrap_err(),
+        format!("EACCES: permission denied, open '{}'", opened("blatt-1.pdf"))
+    );
+    fs::set_permissions(&pdf, fs::Permissions::from_mode(0o600)).unwrap();
+    fs::remove_file(&pdf).unwrap();
+    fs::create_dir(&pdf).unwrap();
+    fs::set_permissions(&pdf, fs::Permissions::from_mode(0o000)).unwrap();
+    let _restore_dir = Restore(pdf.clone(), 0o700);
+    assert_eq!(
+        host.dispatch("fanotes:read-worksheet", &[json!("blatt-1")])
+            .unwrap_err(),
+        format!("EACCES: permission denied, open '{}'", opened("blatt-1.pdf"))
+    );
+    fs::set_permissions(&pdf, fs::Permissions::from_mode(0o700)).unwrap();
+    fs::remove_dir(&pdf).unwrap();
+    assert_eq!(
+        host.dispatch("fanotes:save-worksheet", &[document])
+            .unwrap_err(),
+        format!(
+            "ENOENT: no such file or directory, open '{}'",
+            opened("blatt-1.pdf")
+        )
+    );
+    assert_eq!(fs::read(&json_path).unwrap(), json.as_bytes());
+
+    fs::remove_file(&json_path).unwrap();
+    fs::write(worksheets.join("ziel.json"), json).unwrap();
+    symlink("ziel.json", &json_path).unwrap();
+    let json_eloop = format!(
+        "ELOOP: too many symbolic links encountered, open '{}'",
+        opened("blatt-1.json")
+    );
+    assert_eq!(
+        host.dispatch("fanotes:read-worksheet", &[json!("blatt-1")])
+            .unwrap_err(),
+        json_eloop
+    );
+    assert_eq!(
+        host.dispatch("fanotes:delete-worksheet", &[json!("blatt-1")])
+            .unwrap_err(),
+        json_eloop
+    );
+    assert!(json_path.symlink_metadata().unwrap().file_type().is_symlink());
+}
+
 #[test]
 fn an_html_safety_marker_must_sit_in_the_desktop_prefix() {
     let (dir, mut host) = host();

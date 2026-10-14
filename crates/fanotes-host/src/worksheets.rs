@@ -31,7 +31,14 @@ pub fn read_worksheet(host: &Host, raw_id: &str) -> Result<Value, String> {
         document["sourceRelativePath"].as_str().unwrap_or(""),
     ));
     let format = format_for(document["sourceRelativePath"].as_str().unwrap_or(""))?;
-    stat_regular(&source, format.max_bytes)?;
+    // A missing source is folded into the worksheet-not-found sentence. Every
+    // other open result, including a link or an unreadable file, is kept.
+    if let Err(error) = stat_regular(&source, format.max_bytes) {
+        if error.starts_with("ENOENT:") {
+            return Err("Das Arbeitsblatt wurde nicht gefunden.".to_owned());
+        }
+        return Err(error);
+    }
     if document["kind"] == "html" {
         // The desktop reads only the first 8 KiB before looking for the marker.
         // A failed open is that open error, not a missing safety marker.
@@ -87,20 +94,12 @@ pub fn delete_worksheet(host: &Host, raw_id: &str) -> Result<Value, String> {
 }
 
 fn worksheet_source_name(data_path: &Path, id: &str) -> Result<String, String> {
-    match fs::symlink_metadata(data_path) {
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(String::new()),
-        Err(_) => return Err("Das Arbeitsblatt konnte nicht gelesen werden.".to_owned()),
-        Ok(meta) if meta.file_type().is_symlink() || !meta.is_file() => {
-            return Err("Die Datei ist keine reguläre Datei.".to_owned());
-        }
-        Ok(meta) if meta.len() as usize > MAX_WORKSHEET_JSON_BYTES => {
-            return Err("Die Datei ist zu groß.".to_owned());
-        }
-        Ok(_) => {}
-    }
-    let raw = fs::read(data_path)
-        .map(lossy_utf8)
-        .map_err(|error| crate::notes::node_open_error(data_path, &error))?;
+    let raw = match read_opened_regular(data_path, MAX_WORKSHEET_JSON_BYTES as u64) {
+        Ok(bytes) => lossy_utf8(bytes),
+        // Delete ignores a missing worksheet and still removes the data file.
+        Err(error) if error.starts_with("ENOENT:") => return Ok(String::new()),
+        Err(error) => return Err(error),
+    };
     let candidate = serde_json::from_str::<Value>(&raw)
         .map_err(|_| "Die Arbeitsblattdaten sind beschädigt.".to_owned())?;
     let document = validate_document(&candidate, id)?;
@@ -669,17 +668,48 @@ fn vault_root(host: &Host) -> Result<&Path, String> {
         .ok_or_else(|| "Der Vault ist noch nicht initialisiert.".to_owned())
 }
 
-fn stat_regular(path: &Path, max: u64) -> Result<(), String> {
-    let meta = fs::symlink_metadata(path)
-        .map_err(|_| "Das Arbeitsblatt wurde nicht gefunden.".to_owned())?;
-    // Desktop `statRegularFileNoFollow`: a non-file fails before the size check.
-    if meta.file_type().is_symlink() || !meta.is_file() {
+fn open_nofollow(path: &Path) -> Result<fs::File, String> {
+    // Desktop `statRegularFileNoFollow` / `readRegularFileNoFollow` open with
+    // `O_NOFOLLOW` before they classify the file. A link is ELOOP, and an
+    // unreadable oversized file is EACCES, both before the size sentence.
+    let mut options = fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW);
+    }
+    options
+        .open(path)
+        .map_err(|error| crate::notes::node_open_error(path, &error))
+}
+
+fn classify_opened(path: &Path, file: &fs::File, max: u64) -> Result<(), String> {
+    let meta = file
+        .metadata()
+        .map_err(|error| crate::notes::node_open_error(path, &error))?;
+    if !meta.is_file() {
         return Err("Die Datei ist keine reguläre Datei.".to_owned());
     }
     if meta.len() > max {
         return Err("Die Datei ist zu groß.".to_owned());
     }
     Ok(())
+}
+
+fn stat_regular(path: &Path, max: u64) -> Result<(), String> {
+    let file = open_nofollow(path)?;
+    classify_opened(path, &file, max)
+}
+
+fn read_opened_regular(path: &Path, max: u64) -> Result<Vec<u8>, String> {
+    use std::io::Read;
+    let mut file = open_nofollow(path)?;
+    classify_opened(path, &file, max)?;
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes)
+        .map_err(|error| crate::notes::node_open_error(path, &error))?;
+    Ok(bytes)
 }
 
 fn read_prefix(path: &Path, limit: usize) -> Result<String, String> {
@@ -701,22 +731,13 @@ fn read_prefix(path: &Path, limit: usize) -> Result<String, String> {
 }
 
 fn read_worksheet_json(path: &Path) -> Result<String, String> {
-    match fs::symlink_metadata(path) {
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            return Err("Das Arbeitsblatt wurde nicht gefunden.".to_owned());
+    match read_opened_regular(path, MAX_WORKSHEET_JSON_BYTES as u64) {
+        Ok(bytes) => Ok(lossy_utf8(bytes)),
+        Err(error) if error.starts_with("ENOENT:") => {
+            Err("Das Arbeitsblatt wurde nicht gefunden.".to_owned())
         }
-        Err(_) => return Err("Das Arbeitsblatt konnte nicht gelesen werden.".to_owned()),
-        Ok(meta) if meta.file_type().is_symlink() || !meta.is_file() => {
-            return Err("Die Datei ist keine reguläre Datei.".to_owned());
-        }
-        Ok(meta) if meta.len() as usize > MAX_WORKSHEET_JSON_BYTES => {
-            return Err("Die Datei ist zu groß.".to_owned());
-        }
-        Ok(_) => {}
+        Err(error) => Err(error),
     }
-    fs::read(path)
-        .map(lossy_utf8)
-        .map_err(|error| crate::notes::node_open_error(path, &error))
 }
 
 /// Node `Buffer.toString('utf8')`: invalid bytes become U+FFFD and the rest stays.
