@@ -1751,6 +1751,22 @@ fn split_joined_date(body: &str) -> Vec<&str> {
     parts
 }
 
+/// `10/13/2026` and `10//13` are the numbers 10, 13, 2026 and 10, 13.
+/// An empty slash is only a separator.
+fn slash_date_numbers(word: &str) -> Option<Vec<i32>> {
+    if !word.contains('/') || word.bytes().any(|byte| byte.is_ascii_alphabetic()) {
+        return None;
+    }
+    let mut numbers = Vec::new();
+    for part in word.split('/') {
+        if part.is_empty() {
+            continue;
+        }
+        numbers.push(unsigned_number(part)?);
+    }
+    Some(numbers)
+}
+
 fn unsigned_number(text: &str) -> Option<i32> {
     if text.is_empty() || !text.bytes().all(|byte| byte.is_ascii_digit()) {
         return None;
@@ -2238,6 +2254,19 @@ fn compose_month_date(
         }
         if glued_non_month(word) {
             return None;
+        }
+        if !numeric {
+            if let Some(numbers) = slash_date_numbers(word) {
+                // `10/13/2026 January` keeps 10 and 13. The month name
+                // replaces the slash month, and a third number is ignored.
+                if !numbers.is_empty() {
+                    for number in numbers {
+                        push_date_number(&mut dates, number)?;
+                    }
+                    number_seen = true;
+                }
+                continue;
+            }
         }
         if let Some(found) = english_month(word) {
             month = Some(found);
@@ -6378,6 +6407,113 @@ mod tests {
             assert_eq!(
                 super::canonical_iso("1950-10-13 16:00 EST+5-3").as_deref(),
                 Some("1950-10-13T19:00:00.000Z")
+            );
+        });
+    }
+
+    #[test]
+    fn a_month_name_replaces_a_slash_date() {
+        with_tz("America/New_York", || {
+            // `10/13/2026 January` is 10 January 2013. The first number is the
+            // day, the second is the year, and the slash month is replaced.
+            assert_eq!(
+                super::canonical_iso("10/13/2026 January").as_deref(),
+                Some("2013-01-10T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026/10/13 January").as_deref(),
+                Some("2026-01-10T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("10/13 January").as_deref(),
+                Some("2013-01-10T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("10/13/2026 January 16:00").as_deref(),
+                Some("2013-01-10T21:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("10/13/2026 16:00 January").as_deref(),
+                Some("2013-01-10T21:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("1/2/3 January").as_deref(),
+                Some("2002-01-01T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("13/10/2026 January").as_deref(),
+                Some("2010-01-13T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("10/32/2026 January").as_deref(),
+                Some("2032-01-10T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("10/13/2026 January EST").as_deref(),
+                Some("2013-01-10T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026/13/01 January").as_deref(),
+                Some("2026-01-13T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("99/1/2 January").as_deref(),
+                Some("1999-01-01T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("10/13/2026 Oct").as_deref(),
+                Some("2013-10-10T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("January 10/13/2026").as_deref(),
+                Some("2013-01-10T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("10//13 January").as_deref(),
+                Some("2013-01-10T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("10/ January").as_deref(),
+                Some("2001-01-10T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("/10/13/2026 January").as_deref(),
+                Some("2013-01-10T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("10/13/50 January").as_deref(),
+                Some("2013-01-10T05:00:00.000Z")
+            );
+            assert_eq!(super::canonical_iso("10/13/2026 January +5"), None);
+            assert_eq!(super::canonical_iso("10/13/2026 January PM"), None);
+            assert_eq!(super::canonical_iso("10/13/2026/1 January"), None);
+            assert_eq!(
+                super::canonical_iso("10/13/2026").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("1950/10/13 January").as_deref(),
+                Some("1950-01-10T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("10/13/1950 January").as_deref(),
+                Some("2013-01-10T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("1950/13/01 January").as_deref(),
+                Some("1950-01-13T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("10/13/1950 Oct").as_deref(),
+                Some("2013-10-10T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("1950/10/13 January 16:00").as_deref(),
+                Some("1950-01-10T21:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("10/13/1950 January EST").as_deref(),
+                Some("2013-01-10T05:00:00.000Z")
             );
         });
     }
