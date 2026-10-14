@@ -18,7 +18,7 @@ fun isInkCorridorLeap(previous: StrokePoint?, next: StrokePoint): Boolean {
     return dy > INK_JUMP_DY || hypot(next.x - previous.x, next.y - previous.y) > INK_JUMP_HYPOT
 }
 
-enum class InkTool { PEN, ERASER, SELECT }
+enum class InkTool { PEN, ERASER, SELECT, LASSO }
 
 data class NormalizedRect(val x: Double, val y: Double, val width: Double, val height: Double) {
     val right get() = x + width
@@ -155,6 +155,10 @@ class InkSession(document: InkDocument) {
         selection = document.strokes.mapIndexedNotNull { index, stroke ->
             if (strokeHitsRect(stroke, rect)) index else null
         }.toSet()
+    }
+
+    fun selectIndices(indices: Set<Int>) {
+        selection = indices
     }
 
     fun selectAt(x: Double, y: Double, slop: Double) {
