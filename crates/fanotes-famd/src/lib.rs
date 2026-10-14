@@ -848,6 +848,17 @@ pub fn js_json_number(value: f64) -> Value {
 /// month rolls forward, and `24:00:00` is the next midnight.
 pub fn canonical_iso(value: &str) -> Option<String> {
     let trimmed = trim_js(value);
+    // A period between numbers is a hyphen. A period before a clock is a space.
+    // Trailing periods make a date local. A `T` form keeps its fraction dot.
+    if !has_iso_t(&trimmed) && trimmed.contains('.') {
+        let normalized = rewrite_periods(&trimmed);
+        if normalized != trimmed {
+            if is_date_only_shape(&normalized) && !normalized.contains(',') {
+                return date_only_iso(&normalized, true);
+            }
+            return canonical_iso(&normalized);
+        }
+    }
     // A comma is a space. Around a date it makes midnight local. After `T` it
     // is NaN.
     if trimmed.contains(',') {
@@ -1365,6 +1376,55 @@ fn iso_date_year(year: &str) -> bool {
         [b'+' | b'-', rest @ ..] => rest.len() == 6 && rest.iter().all(|byte| byte.is_ascii_digit()),
         _ => false,
     }
+}
+
+/// A `.` before `HH:` is a space. A `.` between date fields is a hyphen.
+/// A `.` after a colon, followed by digits, stays the fraction. Trailing
+/// periods are dropped.
+fn rewrite_periods(value: &str) -> String {
+    let chars: Vec<char> = value.chars().collect();
+    let mut out = String::with_capacity(value.len());
+    let mut index = 0;
+    while index < chars.len() {
+        if chars[index] != '.' {
+            out.push(chars[index]);
+            index += 1;
+            continue;
+        }
+        let mut next = index;
+        while next < chars.len() && chars[next] == '.' {
+            next += 1;
+        }
+        let digits = chars[next..]
+            .iter()
+            .take_while(|character| character.is_ascii_digit())
+            .count();
+        let after_digits = chars.get(next + digits).copied();
+        if digits > 0 && after_digits == Some(':') {
+            if !out.is_empty() && !out.ends_with(' ') {
+                out.push(' ');
+            }
+            index = next;
+            continue;
+        }
+        if digits > 0
+            && !out.contains(':')
+            && after_digits.is_none_or(|character| matches!(character, '.' | '-' | ','))
+        {
+            if !out.is_empty() && !out.ends_with('-') {
+                out.push('-');
+            }
+            index = next;
+            continue;
+        }
+        if digits > 0 && out.contains(':') && next == index + 1 {
+            out.push('.');
+            index = next;
+            continue;
+        }
+        index = next;
+    }
+    out
 }
 
 /// Turns commas into spaces and collapses repeated separators.
@@ -2540,6 +2600,62 @@ mod tests {
             );
             assert_eq!(super::canonical_iso("2026-10-13T16:00:00Z,"), None);
             assert_eq!(super::canonical_iso("2026-10-13T16:00:00,"), None);
+        });
+    }
+
+    #[test]
+    fn a_period_separates_a_date_from_its_clock() {
+        with_tz("America/New_York", || {
+            assert_eq!(
+                super::canonical_iso("2026-10-13").as_deref(),
+                Some("2026-10-13T00:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13.").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026.").as_deref(),
+                Some("2026-01-01T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10.").as_deref(),
+                Some("2026-10-01T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13...").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026.10.13").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("10.13.2026").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
+            assert_eq!(super::canonical_iso("13.10.2026"), None);
+            assert_eq!(
+                super::canonical_iso("2026-10-13.16:00").as_deref(),
+                Some("2026-10-13T20:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13.16:00:00Z").as_deref(),
+                Some("2026-10-13T16:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13.16:00:00.5").as_deref(),
+                Some("2026-10-13T20:00:00.500Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2-1-1.").as_deref(),
+                Some("2001-02-01T05:00:00.000Z")
+            );
+            assert_eq!(super::canonical_iso("2026-10-13T16:00:00."), None);
+            assert_eq!(
+                super::canonical_iso("2026-10-13T16:00:00.5").as_deref(),
+                Some("2026-10-13T20:00:00.500Z")
+            );
         });
     }
 
