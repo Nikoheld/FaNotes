@@ -900,6 +900,10 @@ private fun PageSurface(
             page.onSync = onSync
             page.onMarkdown = { model.updateMarkdown(it) }
             page.onVisibleMarkdown = { previous, next -> model.updateVisibleMarkdown(previous, next) }
+            page.onRememberCamera = { path, zoom, rotation, centreX, centreY, pageWidth, pageHeight, anchor ->
+                model.rememberPaperCamera(path, zoom, rotation, centreX, centreY, pageWidth, pageHeight, anchor)
+            }
+            page.onRecallCamera = { model.recallPaperCamera(it) }
             page.onUndo = { model.undo() }
             page.onRedo = { model.redo() }
             page.onColor = { model.style.value = style.copy(color = it) }
@@ -949,9 +953,11 @@ private fun PageSurface(
             }
             val current = path ?: ""
             if (bound != current) {
+                page.rememberCamera(bound)
                 bound = current
                 page.ink.tag = token
                 page.ink.reload()
+                page.restoreCamera(current, model.open.value?.kind == NoteKind.PDF)
             } else if (page.ink.tag != token) {
                 page.ink.tag = token
                 page.ink.refresh()
