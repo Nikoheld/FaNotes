@@ -107,8 +107,10 @@ class AppGraph(context: Context) {
     fun savedTree(): String? = prefs.getString("vault-uri", null)
 
     fun setDeviceName(name: String) {
-        prefs.edit().putString("device-name", name).apply()
+        prefs.edit().putString("device-name", name.take(80)).apply()
     }
+
+    fun deviceName(): String = prefs.getString("device-name", null).orEmpty()
 
     fun setAutomatic(enabled: Boolean) {
         prefs.edit().putBoolean("sync-automatic", enabled).apply()

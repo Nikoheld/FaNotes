@@ -55,5 +55,10 @@ class CalendarEditTest {
         val withEvent = hidden.copy(events = listOf(CalendarEvent("e", "personal", "Privat", "2026-10-12", "2026-10-12")))
         assertTrue(visibleCalendarEvents(withEvent).isEmpty())
         assertEquals(1, visibleCalendarEvents(toggleCalendarVisible(withEvent, "personal")).size)
+        val located = CalendarEvent("e", "school", "Turnen", "2026-10-12", "2026-10-12", location = "Halle")
+        assertTrue(calendarEventMatches(located, "Schule", "halle"))
+        assertTrue(calendarEventMatches(located, "Schule", "schule"))
+        assertEquals(false, calendarEventMatches(located, "Schule", "Physik"))
+        assertTrue(calendarEventMatches(located, "Schule", "  "))
     }
 }

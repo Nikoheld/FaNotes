@@ -100,6 +100,15 @@ fun toggleCalendarVisible(document: CalendarDocument, id: String): CalendarDocum
         if (calendar.id == id) calendar.copy(visible = !calendar.visible) else calendar
     })
 
+fun calendarEventMatches(event: CalendarEvent, calendarName: String, query: String): Boolean {
+    val needle = query.trim().lowercase(java.util.Locale.GERMAN)
+    if (needle.isEmpty()) return true
+    val haystack = listOf(event.title, event.location, event.notes, event.notePath, calendarName)
+        .joinToString("\n")
+        .lowercase(java.util.Locale.GERMAN)
+    return haystack.contains(needle)
+}
+
 fun visibleCalendarEvents(document: CalendarDocument): List<CalendarEvent> {
     val shown = document.calendars.filter { it.visible }.map { it.id }.toSet()
     return document.events.filter { it.calendarId in shown }

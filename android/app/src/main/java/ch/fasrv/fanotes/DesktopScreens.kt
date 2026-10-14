@@ -292,8 +292,14 @@ fun CalendarScreen(model: FaNotesViewModel, onOpenNote: (String) -> Unit, onImpo
     var anchor by remember { mutableStateOf(LocalDate.now()) }
     var view by remember { mutableStateOf("month") }
     var recurrence by remember { mutableStateOf("none") }
+    var calendarQuery by remember { mutableStateOf("") }
     val calendarId = document.calendars.firstOrNull { it.visible }?.id ?: document.calendars.firstOrNull()?.id ?: "personal"
-    val shown = document.copy(events = ch.fasrv.fanotes.desk.visibleCalendarEvents(document))
+    val shown = document.copy(
+        events = ch.fasrv.fanotes.desk.visibleCalendarEvents(document).filter { event ->
+            val name = document.calendars.find { it.id == event.calendarId }?.name.orEmpty()
+            ch.fasrv.fanotes.desk.calendarEventMatches(event, name, calendarQuery)
+        },
+    )
     var calendarName by remember { mutableStateOf("") }
     val day = anchor.toString()
     Column(Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState())) {
@@ -319,6 +325,7 @@ fun CalendarScreen(model: FaNotesViewModel, onOpenNote: (String) -> Unit, onImpo
                 }
             }) { Text("Hinzufügen") }
         }
+        OutlinedTextField(calendarQuery, { calendarQuery = it }, label = { Text("Im Kalender suchen") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
         if (reminder != null) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
@@ -776,6 +783,28 @@ fun SettingsScreen(model: FaNotesViewModel, onSync: () -> Unit, onOpenVault: () 
                 }
                 "sync" -> {
                     TextButton(onClick = onSync) { Text("Konto und Abgleich") }
+                    var deviceName by remember { mutableStateOf(model.syncDeviceName()) }
+                    var automatic by remember { mutableStateOf(model.syncAutomatic()) }
+                    OutlinedTextField(
+                        deviceName,
+                        {
+                            deviceName = it.take(80)
+                            model.setSyncDeviceName(it.take(80))
+                        },
+                        label = { Text("Name dieses Geräts") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                    )
+                    Text("Erscheint in der Geräteliste und im Namen von Konfliktkopien.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
+                    Text(
+                        "Automatisch synchronisieren: ${if (automatic) "an" else "aus"}",
+                        modifier = Modifier.clickable {
+                            automatic = !automatic
+                            model.setSyncAutomatic(automatic)
+                        }.padding(vertical = 6.dp),
+                        fontWeight = if (automatic) FontWeight.Bold else FontWeight.Normal,
+                    )
+                    Text("Nach jedem Speichern und im Hintergrund. Aus: nur über Konto und Abgleich.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
                     Text("Ein Konflikt behält die Serverfassung auf dem ursprünglichen Pfad. Die Tablet-Fassung liegt daneben.", fontSize = 13.sp)
                     OutlinedTextField(
                         settings["sync-excluded"].orEmpty(),
