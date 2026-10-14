@@ -113,15 +113,13 @@ pub fn save_drawing(host: &Host, payload: &Value) -> Result<Value, String> {
     }
     let assets = assets_dir(vault_root(host)?)?;
     if let Some(png) = png {
-        crate::notes::atomic_write(&assets.join(format!("{id}.png")), &png, 0o600)
-            .map_err(|_| "Die Zeichnung konnte nicht gespeichert werden.".to_owned())?;
+        crate::notes::atomic_write(&assets.join(format!("{id}.png")), &png, 0o600)?;
     }
     crate::notes::atomic_write(
         assets.join(format!("{id}.json")).as_path(),
         drawing_json.as_bytes(),
         0o600,
-    )
-    .map_err(|_| "Die Zeichnung konnte nicht gespeichert werden.".to_owned())?;
+    )?;
     if let Some(note) = object.get("noteRelativePath").and_then(Value::as_str) {
         if !vault::js_trim(note).is_empty() {
             embed_in_note(host, note, &document).map_err(|error| {

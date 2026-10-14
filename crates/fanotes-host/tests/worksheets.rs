@@ -788,3 +788,53 @@ fn a_text_box_or_mark_with_a_bad_id_keeps_its_own_message() {
         "Eine PDF-Markierung ist ungültig."
     );
 }
+
+#[cfg(unix)]
+#[test]
+fn an_unwritable_worksheet_folder_reports_the_desktop_open_error() {
+    use std::os::unix::fs::PermissionsExt;
+    let (_dir, mut host) = host();
+    let worksheets = host.vault.clone().unwrap().join(".fanotes/worksheets");
+    fs::set_permissions(&worksheets, fs::Permissions::from_mode(0o555)).unwrap();
+    struct Restore(std::path::PathBuf);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            let _ = fs::set_permissions(&self.0, fs::Permissions::from_mode(0o700));
+        }
+    }
+    let _restore = Restore(worksheets.clone());
+    let error = host
+        .dispatch(
+            "fanotes:save-worksheet",
+            &[json!({
+                "schemaVersion": 1,
+                "id": "blatt-1",
+                "title": "Übung",
+                "kind": "pdf",
+                "mimeType": "application/pdf",
+                "sourceRelativePath": ".fanotes/worksheets/blatt-1.pdf",
+                "dataRelativePath": ".fanotes/worksheets/blatt-1.json",
+                "createdAt": "2026-01-02T03:04:05.000Z",
+                "updatedAt": "2026-01-02T03:04:05.000Z",
+                "textBoxes": [],
+                "highlights": []
+            })],
+        )
+        .unwrap_err();
+    let prefix = format!(
+        "EACCES: permission denied, open '{}/.blatt-1.json.{}.",
+        worksheets.display(),
+        std::process::id()
+    );
+    assert!(error.starts_with(&prefix), "{error}");
+    let suffix = error[prefix.len()..].trim_end_matches(".tmp'");
+    assert_eq!(suffix.len(), 20, "{error}");
+    assert!(
+        suffix.chars().all(|character| character.is_ascii_hexdigit()),
+        "{error}"
+    );
+    assert!(error.ends_with(".tmp'"), "{error}");
+    fs::set_permissions(&worksheets, fs::Permissions::from_mode(0o700)).unwrap();
+    assert!(!worksheets.join("blatt-1.json").exists());
+    assert_eq!(fs::read(worksheets.join("blatt-1.pdf")).unwrap(), b"%PDF-1.4\n");
+}

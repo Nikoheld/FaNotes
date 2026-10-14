@@ -776,3 +776,45 @@ fn a_drawing_embed_does_not_create_a_missing_folder() {
     assert!(vault.join("Mathe/Seite.famd").is_file());
     assert!(!vault.join("Neu").exists());
 }
+
+#[cfg(unix)]
+#[test]
+fn an_unwritable_drawing_library_reports_the_desktop_open_error() {
+    use std::os::unix::fs::PermissionsExt;
+    let (_dir, mut host) = host();
+    let saved = json!({
+        "id": "skizze",
+        "title": "Skizze",
+        "drawingJson": drawing("Skizze")
+    });
+    host.dispatch("fanotes:save-drawing", &[saved.clone()])
+        .unwrap();
+    let assets = host.vault.clone().unwrap().join(".fanotes/assets");
+    let stored = fs::read(assets.join("skizze.json")).unwrap();
+    fs::set_permissions(&assets, fs::Permissions::from_mode(0o555)).unwrap();
+    struct Restore(std::path::PathBuf);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            let _ = fs::set_permissions(&self.0, fs::Permissions::from_mode(0o700));
+        }
+    }
+    let _restore = Restore(assets.clone());
+    let error = host
+        .dispatch("fanotes:save-drawing", &[saved])
+        .unwrap_err();
+    let prefix = format!(
+        "EACCES: permission denied, open '{}/.skizze.json.{}.",
+        assets.display(),
+        std::process::id()
+    );
+    assert!(error.starts_with(&prefix), "{error}");
+    let suffix = error[prefix.len()..].trim_end_matches(".tmp'");
+    assert_eq!(suffix.len(), 20, "{error}");
+    assert!(
+        suffix.chars().all(|character| character.is_ascii_hexdigit()),
+        "{error}"
+    );
+    assert!(error.ends_with(".tmp'"), "{error}");
+    fs::set_permissions(&assets, fs::Permissions::from_mode(0o700)).unwrap();
+    assert_eq!(fs::read(assets.join("skizze.json")).unwrap(), stored);
+}
