@@ -324,6 +324,11 @@ pub(crate) fn node_lstat_error(path: &Path, error: &std::io::Error) -> String {
     node_fs_error(path, error, "lstat")
 }
 
+/// Node `fs.mkdir` failure text. `EEXIST` is handled by the caller.
+pub(crate) fn node_mkdir_error(path: &Path, error: &std::io::Error) -> String {
+    node_fs_error(path, error, "mkdir")
+}
+
 /// Node `fs.realpath` failure text. A missing parent uses this syscall.
 pub(crate) fn node_realpath_error(path: &Path, error: &std::io::Error) -> String {
     node_fs_error(path, error, "realpath")

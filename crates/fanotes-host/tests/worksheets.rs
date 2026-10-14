@@ -22,6 +22,42 @@ fn host() -> (std::path::PathBuf, Host) {
 
 #[cfg(unix)]
 #[test]
+fn an_unsearchable_worksheet_parent_uses_the_desktop_lstat_and_mkdir_errors() {
+    use std::os::unix::fs::PermissionsExt;
+    let (dir, mut host) = host();
+    let internal = fs::canonicalize(dir.join("vault/.fanotes")).unwrap();
+    let worksheets = internal.join("worksheets");
+    fs::remove_dir_all(&worksheets).unwrap();
+    fs::set_permissions(&internal, fs::Permissions::from_mode(0o555)).unwrap();
+    struct Restore(std::path::PathBuf);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            let _ = fs::set_permissions(&self.0, fs::Permissions::from_mode(0o700));
+        }
+    }
+    let _restore = Restore(internal.clone());
+    let mkdir_error = format!(
+        "EACCES: permission denied, mkdir '{}'",
+        worksheets.display()
+    );
+    assert_eq!(
+        host.dispatch("fanotes:read-worksheet", &[json!("blatt")])
+            .unwrap_err(),
+        mkdir_error
+    );
+    fs::set_permissions(&internal, fs::Permissions::from_mode(0o666)).unwrap();
+    assert_eq!(
+        host.dispatch("fanotes:read-worksheet", &[json!("blatt")])
+            .unwrap_err(),
+        format!(
+            "EACCES: permission denied, lstat '{}'",
+            worksheets.display()
+        )
+    );
+}
+
+#[cfg(unix)]
+#[test]
 fn an_unreadable_worksheet_uses_the_desktop_open_error() {
     use std::os::unix::fs::PermissionsExt;
     let (dir, mut host) = host();

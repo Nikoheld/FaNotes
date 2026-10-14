@@ -67,6 +67,47 @@ fn an_unreadable_drawing_library_is_not_an_empty_list() {
     assert!(assets.join("skizze.json").is_file());
 }
 
+#[cfg(unix)]
+#[test]
+fn an_unsearchable_asset_parent_uses_the_desktop_lstat_and_mkdir_errors() {
+    use std::os::unix::fs::PermissionsExt;
+    let (_dir, mut host) = host();
+    let vault = host.vault.clone().unwrap();
+    let internal = vault.join(".fanotes");
+    let assets = internal.join("assets");
+    assert!(internal.is_dir());
+    assert!(!assets.exists());
+    fs::set_permissions(&internal, fs::Permissions::from_mode(0o555)).unwrap();
+    struct Restore(std::path::PathBuf);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            let _ = fs::set_permissions(&self.0, fs::Permissions::from_mode(0o700));
+        }
+    }
+    let _restore = Restore(internal.clone());
+    let mkdir_error = format!(
+        "EACCES: permission denied, mkdir '{}'",
+        assets.display()
+    );
+    assert_eq!(
+        host.dispatch("fanotes:list-drawings", &[]).unwrap_err(),
+        mkdir_error
+    );
+    fs::set_permissions(&internal, fs::Permissions::from_mode(0o666)).unwrap();
+    let lstat_error = format!(
+        "EACCES: permission denied, lstat '{}'",
+        assets.display()
+    );
+    assert_eq!(
+        host.dispatch("fanotes:list-drawings", &[]).unwrap_err(),
+        lstat_error
+    );
+    assert_eq!(
+        host.dispatch("fanotes:search", &[json!("Skizze")]).unwrap_err(),
+        lstat_error
+    );
+}
+
 #[test]
 fn a_numeric_drawing_id_is_rejected() {
     let (dir, mut host) = host();
