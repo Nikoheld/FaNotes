@@ -2967,6 +2967,9 @@ fn compose_month_date(
             }
             offset = Some(parsed.minutes);
             minute_sign = parsed.minute_sign;
+            for number in parsed.time_fields {
+                time.add(number)?;
+            }
             continue;
         }
         if word.contains(':') && word.starts_with(|character: char| character.is_ascii_digit()) {
@@ -2986,6 +2989,9 @@ fn compose_month_date(
             }
             offset = Some(parsed.minutes);
             minute_sign = parsed.minute_sign;
+            for number in parsed.time_fields {
+                time.add(number)?;
+            }
             number_seen = true;
             continue;
         }
@@ -3111,6 +3117,7 @@ fn take_clock_word(
     minute_sign: &mut i64,
 ) -> Option<()> {
     let (body, embedded) = split_clock_tail(word);
+    let mut time_fields = Vec::new();
     if !embedded.is_empty() {
         if embedded.eq_ignore_ascii_case("Z") {
             *offset = Some(0);
@@ -3122,6 +3129,7 @@ fn take_clock_word(
             }
             *offset = Some(parsed.minutes);
             *minute_sign = parsed.minute_sign;
+            time_fields = parsed.time_fields;
         }
     }
     let bytes = body.as_bytes();
@@ -3178,6 +3186,9 @@ fn take_clock_word(
         }
         break;
     }
+    for number in time_fields {
+        time.add(number)?;
+    }
     Some(())
 }
 
@@ -3228,6 +3239,9 @@ struct LegacyOffset {
     /// `+5:` still needs its minutes. `1` means the next minute is added;
     /// `-1` means it is subtracted. `0` means the minute is already final.
     minute_sign: i64,
+    /// Numbers followed by `:` after the offset hour. `GMT+5:3:0` stores 3
+    /// here and keeps 0 as the offset minute.
+    time_fields: Vec<i32>,
 }
 
 /// `+5`, `+0530`, `+:30`, `+5:30`, and `+5:30.5`. A missing hour is 0.
@@ -3269,6 +3283,7 @@ fn parse_legacy_offset(text: &str) -> Option<LegacyOffset> {
         }
     };
     let mut spilled = Vec::new();
+    let mut time_fields = Vec::new();
     while index < bytes.len() {
         if bytes[index] == b'.' {
             index += 1;
@@ -3280,7 +3295,10 @@ fn parse_legacy_offset(text: &str) -> Option<LegacyOffset> {
         let (number, _, next) = read_clock_number(bytes, index)?;
         index = next;
         if index < bytes.len() && bytes[index] == b':' {
-            return None;
+            // `GMT+5:3:0` uses 3 as the hour of a clock, not as the minutes.
+            index += 1;
+            time_fields.push(number);
+            continue;
         }
         if minute_pending && (0..=59).contains(&number) {
             minute = i64::from(number);
@@ -3293,6 +3311,7 @@ fn parse_legacy_offset(text: &str) -> Option<LegacyOffset> {
         minutes: sign * (hour * 60 + minute),
         spilled,
         minute_sign: if minute_pending { sign } else { 0 },
+        time_fields,
     })
 }
 
@@ -3527,6 +3546,7 @@ fn legacy_zone_offset(word: &str) -> Option<LegacyOffset> {
         minutes: suffix_east_minutes(&suffix)?,
         spilled: Vec::new(),
         minute_sign: 0,
+        time_fields: Vec::new(),
     })
 }
 
@@ -3620,11 +3640,60 @@ fn slash_offset_words(words: &[&str]) -> Option<(Option<String>, Option<i64>, Ve
     finish_slash_offset(clock, parsed, &words[index + 1..])
 }
 
+/// `16:` plus a later `3` is `16:03:00`. A finished `16:00` cannot take another
+/// field. Four fields are hour, minute, second, and milliseconds.
+fn merge_offset_clock(clock: Option<String>, fields: &[i32]) -> Option<Option<String>> {
+    if fields.is_empty() {
+        return Some(clock);
+    }
+    let mut parts = Vec::new();
+    if let Some(clock) = clock {
+        if !clock.ends_with(':') {
+            return None;
+        }
+        let body = clock.trim_end_matches(':');
+        if !body.is_empty() {
+            for part in body.split(':') {
+                if part.is_empty() || !part.bytes().all(|byte| byte.is_ascii_digit()) {
+                    return None;
+                }
+                parts.push(part.parse::<i32>().ok()?);
+            }
+        }
+    }
+    parts.extend(fields);
+    if parts.len() > 4 {
+        return None;
+    }
+    while parts.len() < 3 {
+        parts.push(0);
+    }
+    let hour = parts[0];
+    let minute = parts[1];
+    let second = parts[2];
+    let millis = if parts.len() == 4 { parts[3] } else { 0 };
+    let midnight = hour == 24 && minute == 0 && second == 0 && millis == 0;
+    if (!(0..=23).contains(&hour) && !midnight)
+        || !(0..=59).contains(&minute)
+        || !(0..=59).contains(&second)
+        || !(0..=999).contains(&millis)
+    {
+        return None;
+    }
+    let text = if millis == 0 {
+        format!("{hour:02}:{minute:02}:{second:02}")
+    } else {
+        format!("{hour:02}:{minute:02}:{second:02}.{millis:03}")
+    };
+    Some(Some(text))
+}
+
 fn finish_slash_offset(
     clock: Option<String>,
     parsed: LegacyOffset,
     rest: &[&str],
 ) -> Option<(Option<String>, Option<i64>, Vec<i32>)> {
+    let clock = merge_offset_clock(clock, &parsed.time_fields)?;
     let mut minutes = parsed.minutes;
     let mut spill = parsed.spilled;
     let mut minute_sign = parsed.minute_sign;
@@ -3677,10 +3746,13 @@ fn rewrite_slash_date(trimmed: &str) -> Option<String> {
         let (date, zone) = split_glued_slash_zone(trimmed);
         if let Some(zone) = zone {
             let parsed = legacy_zone_offset(zone)?;
+            let clock = merge_offset_clock(None, &parsed.time_fields)?;
             zone_spill = parsed.spilled;
             offset_minutes = Some(parsed.minutes);
+            (date, clock)
+        } else {
+            (date, None)
         }
-        (date, None)
     };
     let fields: Vec<&str> = date.split('/').filter(|part| !part.is_empty()).collect();
     if fields.is_empty() || fields.len() > 3 {
@@ -8882,5 +8954,139 @@ mod local_zone_tests {
         assert_eq!(unix_millis_from_iso("Oct 13 2026 +5: 1"), None);
         assert_eq!(unix_millis_from_iso("10/13/2026 GMT+5:60 1"), None);
         assert_eq!(unix_millis_from_iso("2026/10 GMT+5:60 1"), None);
+    }
+
+    #[test]
+    fn a_colon_after_an_offset_starts_a_clock() {
+        let _lock = TRASH_CLOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let _restore = RestoreTz(std::env::var_os("TZ"));
+        unsafe { std::env::set_var("TZ", "America/New_York") };
+        unsafe { tzset() };
+        // `GMT+5:3:0` is 03:00 at UTC+5. The 3 starts a clock, and the last 0
+        // is the offset minute. `GMT+24:00:00` is midnight 24 hours ahead.
+        // A clock that is already finished cannot grow.
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 GMT+24:00:00"),
+            Some(1_791_763_200_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 GMT+5:3:0"),
+            Some(1_791_842_400_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 GMT+0:0:0"),
+            Some(1_791_849_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 GMT+24:0:0"),
+            Some(1_791_763_200_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 GMT+5:0:0"),
+            Some(1_791_831_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 GMT+05:03:00"),
+            Some(1_791_842_400_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 GMT+5:3:15:0"),
+            Some(1_791_843_300_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 GMT+5:3:0:15"),
+            Some(1_791_841_500_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 GMT+24:00:00:30"),
+            Some(1_791_761_400_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 GMT+5:3:4:5:6"),
+            Some(1_791_842_285_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 GMT+5:1:2:3:4:5"),
+            Some(1_791_835_023_004)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 GMT+5:3:4:5:6:7"),
+            Some(1_791_842_225_006)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 GMT+5:3:"),
+            Some(1_791_842_400_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 GMT+5:3: 1"),
+            Some(1_791_842_340_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 GMT+5:3:0 EST"),
+            Some(1_791_878_400_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 16: GMT+5:3:0"),
+            Some(1_791_889_380_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 16:00: GMT+5:3:0"),
+            Some(1_791_889_203_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("5 GMT+24:00:00"),
+            Some(988_588_800_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("5 GMT+5:3:0"),
+            Some(988_668_000_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("10/13/2026 GMT+5:3:0"),
+            Some(1_791_842_400_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("10/13/2026 GMT+24:00:00"),
+            Some(1_791_763_200_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("10/13 GMT+5:3:0"),
+            Some(1_002_924_000_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026/10/13 GMT+5:3:0"),
+            Some(1_791_842_400_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 GMT+5:3:0"),
+            Some(1_791_842_400_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 GMT+24:00:00"),
+            Some(1_791_763_200_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("10/13/2026 GMT+5:3: 1"),
+            Some(1_791_842_340_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Wed Oct 13 2026 GMT+5:3:0"),
+            Some(1_791_842_400_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("GMT+5:3:0 Oct 13 2026"),
+            Some(1_791_882_180_000)
+        );
+        assert_eq!(unix_millis_from_iso("Oct 13 2026 16:00 GMT+5:3:0"), None);
+        assert_eq!(unix_millis_from_iso("Oct 13 2026 GMT+5:30:0"), None);
+        assert_eq!(unix_millis_from_iso("Oct 13 2026 GMT+5:60:0"), None);
+        assert_eq!(unix_millis_from_iso("Oct 13 2026 GMT+5:99:0"), None);
+        assert_eq!(unix_millis_from_iso("Oct 13 2026 GMT+5:1:2:3:4:5:6"), None);
+        assert_eq!(unix_millis_from_iso("Oct 13 2026 16:00 GMT+24:00:00"), None);
+        assert_eq!(unix_millis_from_iso("Oct 13 2026 16:00 GMT+0:0:0"), None);
+        assert_eq!(unix_millis_from_iso("10/13/2026 16:00 GMT+5:3:0"), None);
+        assert_eq!(unix_millis_from_iso("2026-10-13 16:00 GMT+24:00:00"), None);
     }
 }
