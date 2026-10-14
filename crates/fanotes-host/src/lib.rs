@@ -836,8 +836,10 @@ impl Host {
                     .insert("recognitionLanguage".to_owned(), json!("en"));
             }
         }
-        self.onboarding_required = false;
+        // Desktop `persistConfig` finishes before `currentOnboardingRequired`
+        // becomes false. A failed settings write leaves setup open.
         self.persist_settings()?;
+        self.onboarding_required = false;
         self.bootstrap()
     }
 
