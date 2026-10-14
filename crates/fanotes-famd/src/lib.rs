@@ -1642,13 +1642,19 @@ fn rewrite_slash_date(trimmed: &str) -> Option<String> {
         }
         (date, None)
     };
-    let mut parts = date.split('/');
-    let first: i32 = parts.next()?.parse().ok()?;
-    let second: i32 = parts.next()?.parse().ok()?;
-    let third: i32 = parts.next()?.parse().ok()?;
-    if parts.next().is_some() {
+    let fields: Vec<&str> = date.split('/').filter(|part| !part.is_empty()).collect();
+    if fields.is_empty() || fields.len() > 3 {
         return None;
     }
+    let numbers = fields
+        .iter()
+        .map(|part| part.parse::<i32>().ok())
+        .collect::<Option<Vec<_>>>()?;
+    let first = numbers[0];
+    // A missing day or year is 1. `2026/10` is 1 October, and `10/13` is
+    // 13 October 2001. `2026/` is 1 January 2026.
+    let second = numbers.get(1).copied().unwrap_or(1);
+    let third = numbers.get(2).copied().unwrap_or(1);
     let (year, month, day) = if (1..=12).contains(&first) {
         (legacy_year_number(third)?, first, second)
     } else if first == 0 || first >= 32 {
@@ -4874,6 +4880,111 @@ mod tests {
             );
             assert_eq!(super::canonical_iso("10/13/2026 GMT5"), None);
             assert_eq!(super::canonical_iso("10/13/2026EST5"), None);
+        });
+    }
+
+    #[test]
+    fn a_two_field_slash_date_is_a_legacy_date() {
+        with_tz("America/New_York", || {
+            // A slash is only a separator. Two fields follow the numeric rule, and
+            // a missing field is 1. `2026/10/13` stays the three-field local date.
+            assert_eq!(
+                super::canonical_iso("2026/10/13").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("10/13/2026").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026/10").as_deref(),
+                Some("2026-10-01T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026/10 GMT").as_deref(),
+                Some("2026-10-01T00:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026/10GMT").as_deref(),
+                Some("2026-10-01T00:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026/10Z").as_deref(),
+                Some("2026-10-01T00:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026/1").as_deref(),
+                Some("2026-01-01T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("10/13").as_deref(),
+                Some("2001-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("5/1").as_deref(),
+                Some("2001-05-01T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("5/1 GMT").as_deref(),
+                Some("2001-05-01T00:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("01/02").as_deref(),
+                Some("2001-01-02T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2/31").as_deref(),
+                Some("2001-03-03T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2/31 GMT").as_deref(),
+                Some("2001-03-03T00:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("0/1").as_deref(),
+                Some("2000-01-01T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("32/1").as_deref(),
+                Some("2032-01-01T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("99/1").as_deref(),
+                Some("1999-01-01T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("50/1").as_deref(),
+                Some("1950-01-01T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026/10 EST").as_deref(),
+                Some("2026-10-01T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("10/13 EST").as_deref(),
+                Some("2001-10-13T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026/10 16:00").as_deref(),
+                Some("2026-10-01T20:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026/10 16:00 GMT").as_deref(),
+                Some("2026-10-01T16:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026/").as_deref(),
+                Some("2026-01-01T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("/10").as_deref(),
+                Some("2001-10-01T04:00:00.000Z")
+            );
+            assert_eq!(super::canonical_iso("10/2026"), None);
+            assert_eq!(super::canonical_iso("13/1"), None);
+            assert_eq!(super::canonical_iso("2026/13"), None);
+            assert_eq!(super::canonical_iso("13/2026"), None);
+            assert_eq!(super::canonical_iso("2026/10/13/1"), None);
         });
     }
 
