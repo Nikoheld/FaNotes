@@ -1097,7 +1097,70 @@ fn month_words(value: &str) -> Vec<&str> {
         .map(|token| token.trim_matches('.'))
         .filter(|token| !token.is_empty())
         .flat_map(expand_joined_month)
+        .flat_map(expand_glued_month)
         .collect()
+}
+
+/// `13Oct2026` and `Oct2026` are separate fields. A non-month word glued to a
+/// digit, as in `foo13` or `Oct13th`, stays one token so the date scan rejects it.
+fn expand_glued_month(token: &str) -> Vec<&str> {
+    if token.contains(':')
+        || !token.bytes().any(|byte| byte.is_ascii_digit())
+        || !token.bytes().any(|byte| byte.is_ascii_alphabetic())
+    {
+        return vec![token];
+    }
+    let bytes = token.as_bytes();
+    let mut runs = Vec::new();
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index].is_ascii_alphabetic() {
+            let start = index;
+            while index < bytes.len() && bytes[index].is_ascii_alphabetic() {
+                index += 1;
+            }
+            if english_month(&token[start..index]).is_none() {
+                return vec![token];
+            }
+            runs.push(&token[start..index]);
+        } else if bytes[index].is_ascii_digit() {
+            let start = index;
+            while index < bytes.len() && bytes[index].is_ascii_digit() {
+                index += 1;
+            }
+            runs.push(&token[start..index]);
+        } else if bytes[index] == b'+' {
+            let start = index;
+            index += 1;
+            if index >= bytes.len() || !bytes[index].is_ascii_digit() {
+                return vec![token];
+            }
+            while index < bytes.len() && bytes[index].is_ascii_digit() {
+                index += 1;
+            }
+            runs.push(&token[start..index]);
+        } else if matches!(bytes[index], b'-' | b'/' | b'.') {
+            if index + 1 < bytes.len() && matches!(bytes[index + 1], b'-' | b'/' | b'.') {
+                return vec![token];
+            }
+            index += 1;
+        } else {
+            return vec![token];
+        }
+    }
+    if runs.is_empty() {
+        vec![token]
+    } else {
+        runs
+    }
+}
+
+fn glued_non_month(word: &str) -> bool {
+    if word.contains(':') || month_zone_suffix(word).is_some() {
+        return false;
+    }
+    word.bytes().any(|byte| byte.is_ascii_digit())
+        && word.bytes().any(|byte| byte.is_ascii_alphabetic())
 }
 
 /// `13-Oct-26`, `13/Oct/26`, and `13.Oct.26` are three date fields. A leading
@@ -1148,20 +1211,30 @@ fn signed_number(text: &str) -> Option<i32> {
     unsigned_number(text.strip_prefix(['+', '-']).unwrap_or(text))
 }
 
+/// The first three letters name the month. `Octopus` is October and `Maybe`
+/// is May. A shorter word is not a month.
 fn english_month(token: &str) -> Option<i32> {
-    match token.to_ascii_lowercase().as_str() {
-        "jan" | "january" => Some(1),
-        "feb" | "february" => Some(2),
-        "mar" | "march" => Some(3),
-        "apr" | "april" => Some(4),
-        "may" => Some(5),
-        "jun" | "june" => Some(6),
-        "jul" | "july" => Some(7),
-        "aug" | "august" => Some(8),
-        "sep" | "sept" | "september" => Some(9),
-        "oct" | "october" => Some(10),
-        "nov" | "november" => Some(11),
-        "dec" | "december" => Some(12),
+    let mut letters = token.chars();
+    let first = letters.next()?.to_ascii_lowercase();
+    let second = letters.next()?.to_ascii_lowercase();
+    let third = letters.next()?.to_ascii_lowercase();
+    if !first.is_ascii_alphabetic() || !second.is_ascii_alphabetic() || !third.is_ascii_alphabetic()
+    {
+        return None;
+    }
+    match (first, second, third) {
+        ('j', 'a', 'n') => Some(1),
+        ('f', 'e', 'b') => Some(2),
+        ('m', 'a', 'r') => Some(3),
+        ('a', 'p', 'r') => Some(4),
+        ('m', 'a', 'y') => Some(5),
+        ('j', 'u', 'n') => Some(6),
+        ('j', 'u', 'l') => Some(7),
+        ('a', 'u', 'g') => Some(8),
+        ('s', 'e', 'p') => Some(9),
+        ('o', 'c', 't') => Some(10),
+        ('n', 'o', 'v') => Some(11),
+        ('d', 'e', 'c') => Some(12),
         _ => None,
     }
 }
@@ -1419,6 +1492,9 @@ fn compose_month_date(words: &[&str]) -> Option<(i32, i32, i32, String, Option<i
                 return None;
             }
             continue;
+        }
+        if glued_non_month(word) {
+            return None;
         }
         if let Some(found) = english_month(word) {
             month = Some(found);
@@ -3317,6 +3393,104 @@ mod tests {
             assert_eq!(super::canonical_iso("Oct 13 2026 16:00 +5:30:00"), None);
             assert_eq!(super::canonical_iso("Oct 13 2026 16:00 PM +5"), None);
             assert_eq!(super::canonical_iso("2026-10-13T16:00+24:00"), None);
+        });
+    }
+
+    #[test]
+    fn a_longer_month_word_uses_its_first_three_letters() {
+        with_tz("America/New_York", || {
+            // `Date.parse` treats any word whose first three letters name a month
+            // as that month. Digits glued to that word are separate fields.
+            assert_eq!(
+                super::canonical_iso("Octopus 13 2026").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Octxxx 2026").as_deref(),
+                Some("2026-10-01T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("OCTOPUS 13 2026").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Market 13 2026").as_deref(),
+                Some("2026-03-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Maybe 13 2026").as_deref(),
+                Some("2026-05-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Julian 4 2026").as_deref(),
+                Some("2026-07-04T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Janitor 2026").as_deref(),
+                Some("2026-01-01T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Decemberish 13 2026").as_deref(),
+                Some("2026-12-13T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Septober 13 2026").as_deref(),
+                Some("2026-09-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Augusto 13 2026").as_deref(),
+                Some("2026-08-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Aprilfool 2026").as_deref(),
+                Some("2026-04-01T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("13-Octopus-26").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("13.Octopus.26").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("13/Octopus/26").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("13octopus2026").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct2026").as_deref(),
+                Some("2026-10-01T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("4Jul2026").as_deref(),
+                Some("2026-07-04T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026Oct13").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Octopus Novemberish 2026").as_deref(),
+                Some("2026-11-01T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("foo Octopus 13 2026 16:00 EST").as_deref(),
+                Some("2026-10-13T21:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Octopus 32 16").as_deref(),
+                Some("2032-10-16T04:00:00.000Z")
+            );
+            assert_eq!(super::canonical_iso("Ma 13 2026"), None);
+            assert_eq!(super::canonical_iso("Octopus"), None);
+            assert_eq!(super::canonical_iso("Octopus 13 foo 2026"), None);
+            assert_eq!(super::canonical_iso("foo13 Oct 2026"), None);
+            assert_eq!(super::canonical_iso("Oct13th"), None);
+            assert_eq!(super::canonical_iso("13th Oct 2026"), None);
         });
     }
 
