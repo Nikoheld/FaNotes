@@ -711,10 +711,14 @@ fn a_drawing_embed_does_not_create_a_missing_folder() {
             })],
         )
         .unwrap_err();
-    assert_eq!(
-        error,
-        "Handschrift konnte nicht in die Notiz geschrieben werden: Der Zielordner wurde nicht gefunden."
+    assert!(
+        error.starts_with(
+            "Handschrift konnte nicht in die Notiz geschrieben werden: ENOENT: no such file or directory, open '"
+        ),
+        "{error}"
     );
+    assert!(error.contains("/Neu/.Seite.famd."), "{error}");
+    assert!(error.ends_with(".tmp'"), "{error}");
     assert!(!vault.join("Neu").exists());
 
     fs::create_dir(vault.join("Mathe")).unwrap();

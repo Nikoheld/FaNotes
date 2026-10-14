@@ -297,9 +297,9 @@ fn embed_in_note(host: &Host, note_path: &str, drawing: &Value) -> Result<(), St
             payload.paper_style = Some(style.to_owned());
         }
     }
-    // Desktop `realpath` of the companion parent runs before the embed write.
-    crate::notes::require_parent_directory(&famd_path)?;
-    crate::notes::atomic_write(
+    // Desktop `atomicWrite` opens the temporary companion. A missing folder
+    // stays missing and the open error is wrapped for the drawing save.
+    crate::notes::atomic_write_existing_parent(
         &famd_path,
         serialize_famd(&body, &payload).as_bytes(),
         0o600,

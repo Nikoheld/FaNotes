@@ -529,9 +529,8 @@ fn load_note(host: &Host, relative: &str) -> Result<(PathBuf, String, FamdPayloa
 }
 
 fn store_note(path: &Path, body: &str, payload: &FamdPayload) -> Result<(), String> {
-    // Paper, links, and backups use the same parent check as a note save.
-    require_parent_directory(path)?;
-    atomic_write(path, serialize_famd(body, payload).as_bytes(), 0o600)
+    // Paper, links, and backups reach `atomicWrite` without creating the folder.
+    atomic_write_existing_parent(path, serialize_famd(body, payload).as_bytes(), 0o600)
 }
 
 fn note_path(relative: &str) -> Result<String, String> {
@@ -821,9 +820,31 @@ pub(crate) fn atomic_write_with_mtime(
     mode: u32,
     mtime: Option<SystemTime>,
 ) -> Result<(), String> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|_| "Der Ordner konnte nicht angelegt werden.".to_owned())?;
+    write_atomic(path, bytes, mode, mtime, true)
+}
+
+/// Desktop `atomicWrite` does not create a missing parent. The open of the
+/// temporary file is the error the companion save reports.
+pub(crate) fn atomic_write_existing_parent(
+    path: &Path,
+    bytes: &[u8],
+    mode: u32,
+) -> Result<(), String> {
+    write_atomic(path, bytes, mode, None, false)
+}
+
+fn write_atomic(
+    path: &Path,
+    bytes: &[u8],
+    mode: u32,
+    mtime: Option<SystemTime>,
+    create_parent: bool,
+) -> Result<(), String> {
+    if create_parent {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)
+                .map_err(|_| "Der Ordner konnte nicht angelegt werden.".to_owned())?;
+        }
     }
     let temporary = temporary_path(path)?;
     if let Err(error) = write_exclusive(&temporary, bytes, mode) {
@@ -1008,7 +1029,7 @@ fn open_new_file(path: &Path, mode: u32) -> Result<fs::File, String> {
     }
     options
         .open(path)
-        .map_err(|_| "Die Datei konnte nicht geschrieben werden.".to_owned())
+        .map_err(|error| node_open_error(path, &error))
 }
 
 fn set_private_mode(path: &Path, mode: u32) {
