@@ -50,6 +50,8 @@ class NotePageView(context: Context) : FrameLayout(context) {
     var onToggleRail: () -> Unit = {}
     var onTextMode: (Boolean) -> Unit = {}
     var onDeleteSelection: () -> Unit = {}
+    var onDuplicate: () -> Unit = {}
+    var onClear: () -> Unit = {}
     var onFinger: (Boolean) -> Unit = {}
 
     init {
@@ -200,6 +202,13 @@ class NotePageView(context: Context) : FrameLayout(context) {
             toolSignature = ""
             if (!followPen) setChromeOpen(true) else applyChromeVisibility()
         })
+        tools.addView(chip("Lineal") { ink.toggleRuler() })
+        tools.addView(chip("+") { ink.zoomBy(1.15f) })
+        tools.addView(chip("−") { ink.zoomBy(1f / 1.15f) })
+        tools.addView(chip("Drehen") { ink.rotatePage() })
+        tools.addView(chip("Ansicht") { ink.resetView() })
+        tools.addView(chip("Kopieren") { onDuplicate() })
+        tools.addView(chip("Leeren") { onClear() })
         tools.addView(chip("Einklappen") { setChromeOpen(false) })
         tools.addView(syncPill)
     }

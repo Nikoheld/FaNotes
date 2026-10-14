@@ -176,6 +176,23 @@ class InkSession(document: InkDocument) {
         )
     }
 
+    fun duplicateSelection(now: String) {
+        if (selection.isEmpty()) return
+        pushUndo()
+        val copies = document.strokes.mapIndexedNotNull { index, stroke ->
+            if (index !in selection) null
+            else stroke.copy(points = stroke.points.map { it.copy(x = (it.x + 0.03).coerceAtMost(0.98), y = (it.y + 0.03).coerceAtMost(0.98)) })
+        }
+        document = document.copy(strokes = document.strokes + copies, updatedAt = now)
+    }
+
+    fun clearInk(now: String) {
+        if (document.strokes.isEmpty()) return
+        pushUndo()
+        document = document.copy(strokes = emptyList(), updatedAt = now)
+        selection = emptySet()
+    }
+
     fun deleteSelection(now: String) {
         if (selection.isEmpty()) return
         pushUndo()

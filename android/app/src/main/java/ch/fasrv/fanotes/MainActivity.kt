@@ -17,6 +17,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -76,6 +77,7 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
@@ -112,7 +114,8 @@ class MainActivity : ComponentActivity() {
             requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 21)
         }
         setContent {
-            FaNotesTheme {
+            val desk by model.deskSettings.collectAsStateWithLifecycle()
+            FaNotesTheme(desk["theme"] ?: if (androidx.compose.foundation.isSystemInDarkTheme()) "dark" else "light") {
                 FaNotesScreen(
                     model = model,
                     onOpenVault = { openTree.launch(null) },
@@ -161,12 +164,11 @@ private val Brushes = listOf(
 )
 
 @Composable
-fun FaNotesTheme(content: @Composable () -> Unit) {
-    val dark = isSystemInDarkTheme()
-    val scheme = if (dark) {
-        darkColorScheme(primary = Color(0xFF8EC5E8), secondary = Accent, background = Color(0xFF15171C), surface = Color(0xFF1E2128))
-    } else {
-        lightColorScheme(primary = Accent, secondary = Color(0xFF6B7280), background = Color(0xFFF4F1EA), surface = Color(0xFFFFFCF7))
+fun FaNotesTheme(themeName: String, content: @Composable () -> Unit) {
+    val scheme = when (themeName) {
+        "light" -> lightColorScheme(primary = Accent, onSurface = Color(0xFF252630), background = Color(0xFFFFFFFF), surface = Color(0xFFF7F6F3), surfaceVariant = Color(0xFFE7E4DE))
+        "sepia" -> lightColorScheme(primary = Color(0xFF8A5A2B), onSurface = Color(0xFF3E3428), background = Color(0xFFF4EFE4), surface = Color(0xFFEFE6D6), surfaceVariant = Color(0xFFE4D7C3))
+        else -> darkColorScheme(primary = Color(0xFF8EC5E8), onSurface = Color(0xFFEDEDEC), background = Color(0xFF191919), surface = Color(0xFF202020), surfaceVariant = Color(0xFF2A2A2A))
     }
     MaterialTheme(colorScheme = scheme, content = content)
 }
@@ -191,7 +193,13 @@ fun FaNotesScreen(
     val backdrop by model.backdrop.collectAsStateWithLifecycle()
     val token by model.canvasToken.collectAsStateWithLifecycle()
     val vaultLabel by model.vaultLabel.collectAsStateWithLifecycle()
+    val destination by model.destination.collectAsStateWithLifecycle()
+    val tabs by model.openTabs.collectAsStateWithLifecycle()
+    val desk by model.deskSettings.collectAsStateWithLifecycle()
+    val split by model.splitPath.collectAsStateWithLifecycle()
+    val palette by model.paletteOpen.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    var firstRun by remember { mutableStateOf(desk["welcomed"] != "yes") }
     var syncOpen by remember { mutableStateOf(false) }
     var createNote by remember { mutableStateOf(false) }
     var createFolder by remember { mutableStateOf(false) }
@@ -220,8 +228,23 @@ fun FaNotesScreen(
         }
     }
 
-    Row(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-            if (wide || showList) {
+    val focus = desk["focus"] == "on"
+    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+        if (!focus) {
+            DeskRibbon(
+                destination = destination,
+                focus = false,
+                onDestination = { model.showDestination(it) },
+                onPalette = { model.paletteOpen.value = true },
+                onFocus = { model.updateDesk("focus", "on") },
+                onDaily = { model.openDaily() },
+            )
+            NoteTabs(tabs, open?.path, { model.openPath(it); model.showDestination("notes") }, { model.openTabs.value = tabs.filterNot { path -> path == it } })
+        } else {
+            DeskRibbon(destination, true, { model.showDestination(it) }, { model.paletteOpen.value = true }, { model.updateDesk("focus", "off") }, { model.openDaily() })
+        }
+        Row(Modifier.weight(1f).fillMaxWidth()) {
+            if (!focus && (wide || showList) && destination == "notes") {
                 VaultPane(
                     modifier = Modifier.width(if (wide) 320.dp else 360.dp).fillMaxHeight(),
                     tree = tree,
@@ -239,8 +262,22 @@ fun FaNotesScreen(
                     onDelete = { model.delete(it) },
                 )
             }
-            if (wide || !showList) {
-                PageSurface(
+            if (focus || wide || !showList || destination != "notes") {
+                if (destination != "notes") {
+                    Box(Modifier.weight(1f).fillMaxHeight()) {
+                        when (destination) {
+                            "search" -> SearchScreen(model) { model.openPath(it); model.showDestination("notes") }
+                            "tasks" -> HomeworkScreen(model)
+                            "calendar" -> CalendarScreen(model) { model.openPath(it); model.showDestination("notes") }
+                            "overview" -> OverviewScreen(model) { model.openPath(it); model.showDestination("notes") }
+                            "cards" -> CardsScreen(model)
+                            "books" -> BooksScreen(model) { model.openPath(it); model.showDestination("notes") }
+                            "history" -> HistoryScreen(model) { model.openPath(it); model.showDestination("notes") }
+                            "ai" -> AiScreen(model)
+                            "settings" -> SettingsScreen(model, { requestSync() }, onOpenVault, { model.usePrivateVault() })
+                        }
+                    }
+                } else PageSurface(
                     model = model,
                     tool = tool,
                     style = style,
@@ -258,7 +295,41 @@ fun FaNotesScreen(
                     onToggleRail = { model.showList.value = !showList },
                     modifier = Modifier.weight(1f).fillMaxHeight().clipToBounds(),
                 )
+                if (destination == "notes" && split != null) {
+                    Column(Modifier.width(320.dp).fillMaxHeight().padding(12.dp)) {
+                        Text("Zweite Spalte", fontWeight = FontWeight.SemiBold)
+                        Text(split ?: "", fontSize = 12.sp)
+                        TextButton(onClick = { split?.let { model.openPath(it) }; model.splitPath.value = null }) { Text("Nach vorn") }
+                        TextButton(onClick = { model.splitPath.value = null }) { Text("Schließen") }
+                    }
+                }
+                if (destination == "notes" && wide && desk["outline"] != "off" && !focus) {
+                    Box(Modifier.width(240.dp).fillMaxHeight()) { Inspector(model) { model.openPath(it) } }
+                }
             }
+        }
+        DeskStatusBar(model.wordCountNow(), syncText, if ((markdown).contains(Regex("[äöüÄÖÜß]"))) "Deutsch" else "DE / EN", desk["words"] != "off")
+    }
+    if (palette) {
+        AlertDialog(onDismissRequest = { model.paletteOpen.value = false }, confirmButton = {}, text = {
+            CommandPalette(onDismiss = { model.paletteOpen.value = false }) { id ->
+                when (id) {
+                    "daily" -> model.openDaily()
+                    "split" -> model.splitPath.value = open?.path
+                    "focus" -> model.updateDesk("focus", if (desk["focus"] == "on") "off" else "on")
+                    "sync" -> requestSync()
+                    else -> model.showDestination(id)
+                }
+            }
+        }, title = { Text("Befehle") })
+    }
+    if (firstRun) {
+        AlertDialog(
+            onDismissRequest = { firstRun = false; model.updateDesk("welcomed", "yes") },
+            title = { Text("FaNotes") },
+            text = { Text("Stift schreibt, Finger blättert. Notizen, Aufgaben, Kalender, Karten, Fachbuch, Suche und Sync benutzen dieselben Dateien wie der Desktop. GlyphenWerk gibt es hier nicht.") },
+            confirmButton = { TextButton(onClick = { firstRun = false; model.updateDesk("welcomed", "yes") }) { Text("Los") } },
+        )
     }
     if (syncOpen) {
         SyncDialog(
@@ -503,6 +574,8 @@ private fun PageSurface(
             page.onToggleRail = onToggleRail
             page.onTextMode = { model.showText.value = it }
             page.onDeleteSelection = { model.deleteSelection() }
+            page.onDuplicate = { model.duplicateSelection() }
+            page.onClear = { model.clearInk() }
             page.onFinger = { model.fingerDraws.value = it }
             page.apply(
                 path = path ?: "",

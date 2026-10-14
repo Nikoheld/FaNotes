@@ -113,6 +113,19 @@ class AppGraph(context: Context) {
 
     fun automatic(): Boolean = prefs.getBoolean("sync-automatic", true)
 
+    fun readDesk(): Map<String, String> = prefs.getString("desk-settings", null).orEmpty()
+        .lineSequence()
+        .mapNotNull { line ->
+            val cut = line.indexOf('=')
+            if (cut <= 0) null else line.substring(0, cut) to line.substring(cut + 1)
+        }
+        .toMap()
+
+    fun writeDesk(values: Map<String, String>) {
+        val text = values.entries.joinToString("\n") { (key, value) -> "$key=${value.replace("\n", " ")}" }
+        prefs.edit().putString("desk-settings", text).apply()
+    }
+
     private fun host() = IoSyncHost(
         io = { vault },
         currentVaultId = { vaultId },
