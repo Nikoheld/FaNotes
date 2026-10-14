@@ -131,6 +131,13 @@ function PdfPageCanvas({
   const textEnabledRef = useRef(textEnabled)
   textEnabledRef.current = textEnabled
   const lastBaseRef = useRef<PdfBasePaintInfo | null>(null)
+  // Parent renders pass a fresh quotes array. That must not rebuild the painter:
+  // the page proxy lives in the other effect, so a new painter would stay blank.
+  const quotesRef = useRef(quotes)
+  quotesRef.current = quotes
+  const pageRef = useRef<PDFPageProxy | null>(null)
+  const rotationRef = useRef(rotation)
+  rotationRef.current = rotation
 
   // The selectable text layer follows the page box, not the camera: it is
   // rebuilt with the base bitmap and left alone by scroll and zoom.
@@ -151,7 +158,7 @@ function PdfPageCanvas({
     textLayerRef.current = layer
     try {
       await layer.render()
-      for (const quote of quotes) {
+      for (const quote of quotesRef.current) {
         if (!quote) continue
         textHost.querySelectorAll('span').forEach((span) => {
           const text = span.textContent?.trim() ?? ''
@@ -163,7 +170,7 @@ function PdfPageCanvas({
         console.error(`Textebene der PDF-Seite ${number} konnte nicht aufgebaut werden.`, error)
       }
     }
-  }, [number, quotes])
+  }, [number])
 
   useEffect(() => {
     const host = hostRef.current
@@ -182,6 +189,11 @@ function PdfPageCanvas({
       onFirstPaint: () => onReadyRef.current(),
     })
     painterRef.current = painter
+    const loadedPage = pageRef.current
+    if (loadedPage) {
+      painter.setPage(loadedPage, rotationRef.current)
+      void painter.paint()
+    }
     return () => {
       painterRef.current = null
       lastBaseRef.current = null
@@ -198,6 +210,14 @@ function PdfPageCanvas({
     void paintTextLayer(info)
   }, [paintTextLayer, textEnabled])
 
+  // Marks arrive after the bitmap. Rebuild the text layer only, not the painter.
+  const quotesKey = quotes.join('\u0001')
+  useEffect(() => {
+    const info = lastBaseRef.current
+    if (!textEnabledRef.current || !info) return
+    void paintTextLayer(info)
+  }, [paintTextLayer, quotesKey])
+
   useEffect(() => {
     let alive = true
     let loaded: PDFPageProxy | null = null
@@ -207,6 +227,7 @@ function PdfPageCanvas({
         return
       }
       loaded = page
+      pageRef.current = page
       const viewport = page.getViewport({ scale: 1, rotation })
       onRatio(viewport.height / Math.max(1, viewport.width))
       painterRef.current?.setPage(page, rotation)
@@ -216,6 +237,7 @@ function PdfPageCanvas({
     })
     return () => {
       alive = false
+      pageRef.current = null
       painterRef.current?.setPage(null, rotation)
       try { loaded?.cleanup() } catch { /* ignore */ }
       loaded = null

@@ -56,6 +56,11 @@ const runOnce = () => {
   assert.doesNotMatch(pdfView, /textEnabled \? 1 : 0/)
   assert.doesNotMatch(pdfView, /else if \(textHost\) \{\s*textHost\.replaceChildren\(\)/)
   assert.match(pdfView, /textEnabledRef\.current \|\| textHost\.childElementCount > 0/)
+  // A fresh quotes array every parent render used to dispose the painter and
+  // leave the replacement with no page, so every PDF opened as a white sheet.
+  assert.match(pdfView, /quotesRef\.current/)
+  assert.match(pdfView, /const paintTextLayer = useCallback\(async \(info: PdfBasePaintInfo\) => \{[\s\S]*?\}, \[number\]\)/)
+  assert.match(pdfView, /if \(loadedPage\) \{\s*painter\.setPage\(loadedPage, rotationRef\.current\)/)
   const painter = readFileSync(join(root, 'src/lib/pdfPagePainter.ts'), 'utf8')
   assert.match(painter, /canvas\.style\.width = `\$\{box\.cssWidth\.toFixed\(2\)\}px`/)
   assert.match(painter, /canvas\.style\.height = `\$\{box\.cssHeight\.toFixed\(2\)\}px`/)
