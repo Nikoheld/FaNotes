@@ -410,8 +410,12 @@ pub fn read_history(
         .and_then(Value::as_str)
         .filter(|id| is_snapshot_id(id))
         .ok_or_else(|| "Dieser Verlaufseintrag existiert nicht mehr.".to_owned())?;
-    let content = read_lossy_string(&directory.join(format!("{snapshot_id}.md")))
-        .ok_or_else(|| "Dieser Verlaufseintrag existiert nicht mehr.".to_owned())?;
+    // Desktop `readFile` throws. A missing or unreadable snapshot is that
+    // open error, not the message used when the id is absent from the index.
+    let snapshot_path = directory.join(format!("{snapshot_id}.md"));
+    let content = fs::read(&snapshot_path)
+        .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
+        .map_err(|error| node_open_error(&snapshot_path, &error))?;
     Ok(json!({
         "id": snapshot_id,
         "createdAt": entry.get("createdAt").and_then(Value::as_str).unwrap_or(""),
