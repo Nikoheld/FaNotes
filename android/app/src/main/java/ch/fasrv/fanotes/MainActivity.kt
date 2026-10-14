@@ -268,6 +268,10 @@ fun FaNotesScreen(
                     onOpenVault = onOpenVault,
                     onPrivateVault = { model.usePrivateVault() },
                     onDelete = { model.delete(it) },
+                    colors = model.folderColors.collectAsStateWithLifecycle().value,
+                    onFolderColor = { model.cycleFolderColor(it) },
+                    conflicts = sync.conflicts,
+                    onResolve = { conflict, choice -> model.resolveConflict(conflict, choice) },
                 )
             }
             if (focus || wide || !showList || destination != "notes") {
@@ -280,7 +284,7 @@ fun FaNotesScreen(
                             "overview" -> OverviewScreen(model) { model.openPath(it); model.showDestination("notes") }
                             "cards" -> CardsScreen(model)
                             "books" -> BooksScreen(model) { model.openPath(it); model.showDestination("notes") }
-                            "history" -> HistoryScreen(model) { model.openPath(it); model.showDestination("notes") }
+                            "history" -> HistoryScreen(model)
                             "ai" -> AiScreen(model)
                             "settings" -> SettingsScreen(model, { requestSync() }, onOpenVault, { model.usePrivateVault() })
                         }
@@ -334,7 +338,14 @@ fun FaNotesScreen(
                 }
             }
         }
-        DeskStatusBar(model.wordCountNow(), syncText, if ((markdown).contains(Regex("[äöüÄÖÜß]"))) "Deutsch" else "DE / EN", desk["words"] != "off")
+        DeskStatusBar(
+            model.wordCountNow(),
+            syncText,
+            if (markdown.contains(Regex("[äöüÄÖÜß]"))) "Deutsch" else "DE / EN",
+            desk["words"] != "off",
+            sync.conflicts.size,
+            onConflicts = { model.showDestination("settings") },
+        )
     }
     if (palette) {
         AlertDialog(onDismissRequest = { model.paletteOpen.value = false }, confirmButton = {}, text = {
@@ -444,6 +455,10 @@ private fun VaultPane(
     onOpenVault: () -> Unit,
     onPrivateVault: () -> Unit,
     onDelete: (String) -> Unit,
+    colors: Map<String, String>,
+    onFolderColor: (String) -> Unit,
+    conflicts: List<ch.fasrv.fanotes.sync.SyncConflict>,
+    onResolve: (ch.fasrv.fanotes.sync.SyncConflict, String) -> Unit,
 ) {
     Column(modifier.background(MaterialTheme.colorScheme.surface).padding(16.dp)) {
         Text("FaNotes", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
@@ -472,9 +487,24 @@ private fun VaultPane(
             TextButton(onClick = onImportPdf) { Text("PDF") }
             TextButton(onClick = onImportImage) { Text("Bild") }
         }
+        if (conflicts.isNotEmpty()) {
+            Text("Konflikte", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
+            conflicts.forEach { conflict ->
+                Column(Modifier.padding(vertical = 4.dp)) {
+                    Text(conflict.path.substringAfterLast('/'), maxLines = 1, fontSize = 13.sp)
+                    Row {
+                        TextButton(onClick = { onResolve(conflict, "remote") }) { Text("Server") }
+                        TextButton(onClick = { onResolve(conflict, "local") }) { Text("Tablet") }
+                        if (ch.fasrv.fanotes.desk.isMarkdownConflictPath(conflict.path)) {
+                            TextButton(onClick = { onResolve(conflict, "both") }) { Text("Beide") }
+                        }
+                    }
+                }
+            }
+        }
         LazyColumn(Modifier.weight(1f).padding(top = 8.dp)) {
             items(tree, key = { it.path }) { node ->
-                NoteRow(node, selected, onOpen, onDelete, depth = 0)
+                NoteRow(node, selected, colors, onOpen, onDelete, onFolderColor, depth = 0)
             }
         }
         TextButton(onClick = onOpenVault) { Text("Vault-Ordner öffnen") }
@@ -483,14 +513,23 @@ private fun VaultPane(
 }
 
 @Composable
-private fun NoteRow(node: VaultNode, selected: String?, onOpen: (String) -> Unit, onDelete: (String) -> Unit, depth: Int) {
+private fun NoteRow(
+    node: VaultNode,
+    selected: String?,
+    colors: Map<String, String>,
+    onOpen: (String) -> Unit,
+    onDelete: (String) -> Unit,
+    onFolderColor: (String) -> Unit,
+    depth: Int,
+) {
+    val folderColor = colors[node.path]
     Row(
         Modifier
             .fillMaxWidth()
             .padding(start = (depth * 12).dp, top = 2.dp, bottom = 2.dp)
             .clip(RoundedCornerShape(10.dp))
             .background(if (node.path == selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f) else Color.Transparent)
-            .clickable(enabled = node.kind != NoteKind.FOLDER) { onOpen(node.path) }
+            .clickable { if (node.kind == NoteKind.FOLDER) onFolderColor(node.path) else onOpen(node.path) }
             .padding(horizontal = 8.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -501,7 +540,7 @@ private fun NoteRow(node: VaultNode, selected: String?, onOpen: (String) -> Unit
                 NoteKind.MARKDOWN -> Icons.Filled.Description
             },
             contentDescription = null,
-            tint = MaterialTheme.colorScheme.primary,
+            tint = folderColor?.let { Color(android.graphics.Color.parseColor(it)) } ?: MaterialTheme.colorScheme.primary,
         )
         Text(node.name, modifier = Modifier.weight(1f).padding(start = 8.dp), maxLines = 1)
         if (node.kind != NoteKind.FOLDER) {
@@ -511,7 +550,7 @@ private fun NoteRow(node: VaultNode, selected: String?, onOpen: (String) -> Unit
         }
     }
     if (node.kind == NoteKind.FOLDER) {
-        node.children.forEach { NoteRow(it, selected, onOpen, onDelete, depth + 1) }
+        node.children.forEach { NoteRow(it, selected, colors, onOpen, onDelete, onFolderColor, depth + 1) }
     }
 }
 

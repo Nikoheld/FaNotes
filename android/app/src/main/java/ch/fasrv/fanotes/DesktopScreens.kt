@@ -88,13 +88,23 @@ fun DeskRibbon(
 }
 
 @Composable
-fun DeskStatusBar(words: Int, syncText: String, language: String, showWords: Boolean) {
+fun DeskStatusBar(words: Int, syncText: String, language: String, showWords: Boolean, conflicts: Int = 0, onConflicts: () -> Unit = {}) {
     Row(
         Modifier.fillMaxWidth().height(28.dp).background(MaterialTheme.colorScheme.surface).padding(horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween,
     ) {
-        Text(syncText, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(syncText, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
+            if (conflicts > 0) {
+                Text(
+                    "$conflicts Konflikte",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.clickable(onClick = onConflicts),
+                )
+            }
+        }
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(language, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
             if (showWords) Text("$words Wörter", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
@@ -325,16 +335,47 @@ fun BooksScreen(model: FaNotesViewModel, onOpen: (String) -> Unit) {
 }
 
 @Composable
-fun HistoryScreen(model: FaNotesViewModel, onOpen: (String) -> Unit) {
-    val paths by model.historyPaths.collectAsStateWithLifecycle()
-    Column(Modifier.fillMaxSize().padding(16.dp)) {
+fun HistoryScreen(model: FaNotesViewModel) {
+    val history by model.noteHistory.collectAsStateWithLifecycle()
+    val open by model.open.collectAsStateWithLifecycle()
+    Column(Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState())) {
         Text("Versionsverlauf", style = MaterialTheme.typography.titleLarge)
-        LazyColumn {
-            items(paths) { path ->
-                Text(path.removePrefix(".fanotes/history/"), modifier = Modifier.fillMaxWidth().clickable { onOpen(path) }.padding(vertical = 8.dp))
+        Text(open?.path ?: "Keine Notiz geöffnet.", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
+        Text("Dieselbe Ablage wie auf dem Desktop: .fanotes/history, höchstens 30 Fassungen je Notiz.", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
+        if (history.isEmpty()) {
+            Text("Für diese Notiz liegt noch keine ältere Fassung vor. Sie entsteht, sobald die Notiz erneut gespeichert wird.", modifier = Modifier.padding(top = 12.dp))
+        }
+        history.forEach { snapshot ->
+            Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(snapshot.createdAt, fontSize = 14.sp)
+                    Text("${snapshot.bytes} Bytes", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
+                }
+                TextButton(onClick = { model.restoreHistory(snapshot.id) }) { Text("Wiederherstellen") }
             }
         }
-        if (paths.isEmpty()) Text("Auf diesem Tablet liegt noch kein Verlauf unter .fanotes/history.", modifier = Modifier.padding(top = 8.dp))
+    }
+}
+
+@Composable
+fun ConflictList(model: FaNotesViewModel) {
+    val sync by model.sync.collectAsStateWithLifecycle()
+    if (sync.conflicts.isEmpty()) {
+        Text("Keine offenen Konflikte.", fontSize = 13.sp)
+        return
+    }
+    sync.conflicts.forEach { conflict ->
+        Column(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+            Text(conflict.path, fontSize = 14.sp)
+            Text(conflict.copyPath, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
+            Row {
+                TextButton(onClick = { model.resolveConflict(conflict, "remote") }) { Text("Server") }
+                TextButton(onClick = { model.resolveConflict(conflict, "local") }) { Text("Tablet") }
+                if (ch.fasrv.fanotes.desk.isMarkdownConflictPath(conflict.path)) {
+                    TextButton(onClick = { model.resolveConflict(conflict, "both") }) { Text("Beide") }
+                }
+            }
+        }
     }
 }
 
@@ -400,7 +441,11 @@ fun SettingsScreen(model: FaNotesViewModel, onSync: () -> Unit, onOpenVault: () 
                     TextButton(onClick = onOpenVault) { Text("Vault-Ordner öffnen") }
                     TextButton(onClick = onPrivate) { Text("Tablet-Vault verwenden") }
                 }
-                "sync" -> TextButton(onClick = onSync) { Text("Konto und Abgleich") }
+                "sync" -> {
+                    TextButton(onClick = onSync) { Text("Konto und Abgleich") }
+                    Text("Ein Konflikt behält die Serverfassung auf dem ursprünglichen Pfad. Die Tablet-Fassung liegt daneben.", fontSize = 13.sp)
+                    ConflictList(model)
+                }
                 "addons" -> Text("Add-ons des Desktops bleiben Dateien im Vault. GlyphenWerk ist auf dem Tablet nicht enthalten. Andere Erweiterungen werden nicht ausgeführt.")
                 "updates" -> {
                     Text("Installiert: 2026.10.7")

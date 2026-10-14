@@ -295,13 +295,45 @@ fun parseSubjectBooks(json: String): List<SubjectBook> {
     }
 }
 
+const val FOLDER_COLORS_PATH = ".fanotes/folder-colors.json"
+
+/** Swatches from the desktop file tree. */
+val FOLDER_COLOR_CHOICES = listOf(
+    "#6b7280", "#2a6f97", "#337ea9", "#0f7b6c", "#448361",
+    "#ba9b4a", "#d9730d", "#c4554d", "#9065b0", "#787774",
+)
+
 fun parseFolderColors(json: String): Map<String, String> {
     val root = parseJson(json) as? JsonValue.Obj ?: return emptyMap()
     val colors = root.obj("colors") ?: return emptyMap()
     return colors.fields.mapNotNull { (path, value) ->
-        val color = (value as? JsonValue.Str)?.value ?: return@mapNotNull null
+        val color = (value as? JsonValue.Str)?.value?.lowercase() ?: return@mapNotNull null
+        if (!Regex("#[0-9a-f]{6}").matches(color)) return@mapNotNull null
         path to color
     }.toMap()
+}
+
+fun serializeFolderColors(colors: Map<String, String>): String {
+    val entries = colors.mapNotNull { (rawPath, rawColor) ->
+        val color = rawColor.trim().lowercase()
+        val path = rawPath.replace('\\', '/').trim('/')
+        if (!Regex("#[0-9a-f]{6}").matches(color) || path.isEmpty() || path.split('/').any { it == "." || it == ".." }) {
+            null
+        } else {
+            path to color
+        }
+    }.sortedWith(compareBy(java.text.Collator.getInstance(java.util.Locale.GERMAN)) { it.first })
+    val body = entries.joinToString(",\n") { (path, color) -> "    ${ch.fasrv.fanotes.json.escapeJson(path)}: ${ch.fasrv.fanotes.json.escapeJson(color)}" }
+    val colorsJson = if (body.isEmpty()) "{}" else "{\n$body\n  }"
+    return "{\n  \"version\": 1,\n  \"colors\": $colorsJson\n}\n"
+}
+
+fun withFolderColor(colors: Map<String, String>, path: String, color: String?): Map<String, String> {
+    val key = path.replace('\\', '/').trim('/')
+    if (color == null) return colors - key
+    val hex = color.trim().lowercase()
+    if (!Regex("#[0-9a-f]{6}").matches(hex)) throw IllegalArgumentException("Ungültige Ordnerfarbe.")
+    return colors + (key to hex)
 }
 
 fun outlineOf(markdown: String) = ch.fasrv.fanotes.text.paperLines(markdown)
