@@ -26,16 +26,45 @@ import android.view.MotionEvent
 import android.view.MotionPredictor
 import android.view.VelocityTracker
 import android.view.View
+import ch.fasrv.fanotes.ink.A4_WIDTH_MM
+import ch.fasrv.fanotes.ink.DraftingDisplay
+import ch.fasrv.fanotes.ink.DraftingKind
+import ch.fasrv.fanotes.ink.DraftingPose
+import ch.fasrv.fanotes.ink.DraftingSnapLock
+import ch.fasrv.fanotes.ink.DraftingToolState
 import ch.fasrv.fanotes.ink.InkSession
 import ch.fasrv.fanotes.ink.InkStroke
 import ch.fasrv.fanotes.ink.InkTool
 import ch.fasrv.fanotes.ink.PAGE_START_WIDTH
+import ch.fasrv.fanotes.ink.SOURCE_A4_PX
 import ch.fasrv.fanotes.ink.StrokePoint
 import ch.fasrv.fanotes.ink.StrokeStyle
+import ch.fasrv.fanotes.ink.angleToPoint
+import ch.fasrv.fanotes.ink.attachSetSquareToRuler
 import ch.fasrv.fanotes.ink.brushOpacity
+import ch.fasrv.fanotes.ink.clampCompassRadius
+import ch.fasrv.fanotes.ink.compassPencilPoint
+import ch.fasrv.fanotes.ink.defaultCompassPose
+import ch.fasrv.fanotes.ink.defaultRulerPose
+import ch.fasrv.fanotes.ink.defaultSetSquarePose
+import ch.fasrv.fanotes.ink.keepPoseOnSheet
 import ch.fasrv.fanotes.ink.lassoHits
+import ch.fasrv.fanotes.ink.normToLocalMm
+import ch.fasrv.fanotes.ink.pointInsideRuler
+import ch.fasrv.fanotes.ink.pointInsideSetSquare
+import ch.fasrv.fanotes.ink.radiusMmBetween
 import ch.fasrv.fanotes.ink.ribbonOutline
+import ch.fasrv.fanotes.ink.rulerLength
+import ch.fasrv.fanotes.ink.rulerWidth
+import ch.fasrv.fanotes.ink.sampleCompassCircle
+import ch.fasrv.fanotes.ink.scaleTicks
 import ch.fasrv.fanotes.ink.sectionsOf
+import ch.fasrv.fanotes.ink.setSquareApexSign
+import ch.fasrv.fanotes.ink.setSquareSize
+import ch.fasrv.fanotes.ink.shortestAngleDelta
+import ch.fasrv.fanotes.ink.snapAngle
+import ch.fasrv.fanotes.ink.snapRadiusMm
+import ch.fasrv.fanotes.ink.snapToDraftingTools
 import ch.fasrv.fanotes.input.POST_PEN_IGNORE_MS
 import ch.fasrv.fanotes.input.PalmState
 import ch.fasrv.fanotes.input.PointerAction
@@ -49,9 +78,11 @@ import ch.fasrv.fanotes.input.touchPalmState
 import ch.fasrv.fanotes.text.PaperKind
 import ch.fasrv.fanotes.text.paperLines
 import kotlin.math.abs
+import kotlin.math.cos
 import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.sin
 
 /**
  * Low-latency paper. Stylus (and an optional mouse) writes; fingers scroll,
@@ -130,8 +161,21 @@ class InkSurfaceView @JvmOverloads constructor(
     private var nibX = Float.NaN
     private var nibY = Float.NaN
     private var rotation = 0f
-    var rulerOn = false
-    private var rulerY = Float.NaN
+    var rulerPose: DraftingPose? = null
+    var setSquarePose: DraftingPose? = null
+    var compassPose: DraftingPose? = null
+    private var guideDrag: GuideDrag? = null
+    private var snapLock: DraftingSnapLock? = null
+    private val guideFill = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL; color = Color.parseColor("#D7E4F2") }
+    private val guideEdge = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        color = Color.parseColor("#1B4F82")
+    }
+    private val guideTick = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#1B4F82") }
+    private val guideLabel = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.parseColor("#1B4F82")
+        textAlign = Paint.Align.CENTER
+    }
     private val tiles = HashMap<Long, Bitmap>()
     private var palm = PalmState()
     private var inkPointer = MotionEvent.INVALID_POINTER_ID
@@ -212,9 +256,30 @@ class InkSurfaceView @JvmOverloads constructor(
         publishCamera()
     }
 
-    fun toggleRuler() {
-        rulerOn = !rulerOn
-        if (rulerY.isNaN()) rulerY = height * 0.42f
+    fun guideOn(kind: DraftingKind) = when (kind) {
+        DraftingKind.RULER -> rulerPose != null
+        DraftingKind.SET_SQUARE -> setSquarePose != null
+        DraftingKind.COMPASS -> compassPose != null
+    }
+
+    fun toggleGuide(kind: DraftingKind) {
+        when (kind) {
+            DraftingKind.RULER -> rulerPose = if (rulerPose == null) defaultRulerPose() else null
+            DraftingKind.SET_SQUARE -> setSquarePose = if (setSquarePose == null) defaultSetSquarePose() else null
+            DraftingKind.COMPASS -> compassPose = if (compassPose == null) defaultCompassPose() else null
+        }
+        invalidate()
+    }
+
+    /** Drops a full circle at the compass radius, the same construction the desktop commits. */
+    fun drawCompassCircle() {
+        val pose = compassPose ?: defaultCompassPose().also { compassPose = it }
+        val current = session ?: return
+        val samples = sampleCompassCircle(pose, sessionWidth(), sessionHeight(), sheetDisplay())
+        val points = samples.map { sample -> StrokePoint(sample.x, sample.y, 0.0, 0.45, 0.0, 0.0, "pen") }
+        val stroke = current.commitShape(points, style, nowIso()) ?: return
+        invalidateTiles(stroke)
+        onChanged()
         invalidate()
     }
 
@@ -267,8 +332,12 @@ class InkSurfaceView @JvmOverloads constructor(
                     inkPointer = id
                     if (isPenTool(tool)) requestUnbufferedDispatch(event)
                     beginInk(event, index, tool)
+                } else if (guideDrag != null) {
+                    // A tool already owns this gesture. A second finger does not pan it away.
                 } else if (fingerMayNavigate(palm, now)) {
-                    fingers[id] = event.getX(index) to event.getY(index)
+                    if (fingers.isEmpty() && tryBeginGuideDrag(id, event, index)) {
+                        // The finger grabbed a ruler, set square or compass.
+                    } else fingers[id] = event.getX(index) to event.getY(index)
                     if (fingers.size == 1) {
                         velocity?.recycle()
                         velocity = VelocityTracker.obtain()
@@ -284,12 +353,15 @@ class InkSurfaceView @JvmOverloads constructor(
                 if (inkPointer != MotionEvent.INVALID_POINTER_ID) {
                     val inkIndex = event.findPointerIndex(inkPointer)
                     if (inkIndex >= 0) moveInk(event, inkIndex)
+                } else if (guideDrag != null) {
+                    moveGuide(event)
                 } else if (fingerMayNavigate(palm, now)) {
                     moveFingers(event)
                     if (fingers.size == 1) gestures.onTouchEvent(event)
                 }
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_POINTER_UP, MotionEvent.ACTION_CANCEL -> {
+                if (guideDrag?.pointerId == id || action == MotionEvent.ACTION_CANCEL) guideDrag = null
                 val endingInk = id == inkPointer || action == MotionEvent.ACTION_CANCEL
                 if (endingInk && inkPointer != MotionEvent.INVALID_POINTER_ID) {
                     val inkIndex = event.findPointerIndex(inkPointer).coerceAtLeast(0)
@@ -363,8 +435,11 @@ class InkSurfaceView @JvmOverloads constructor(
                 selectRect = floatArrayOf(x.toFloat(), y.toFloat(), x.toFloat(), y.toFloat())
             }
             else -> {
+                val raw = pageNorm(event.getX(index), event.getY(index))
+                val hit = snapToDraftingTools(raw.first, raw.second, visibleTools(), sessionWidth(), sessionHeight(), null, sheetDisplay())
+                snapLock = hit?.let { DraftingSnapLock(it.kind, it.edgeIndex) }
                 current.beginStroke()
-                current.addSample(point(event, index, x, y))
+                current.addSample(penSample(event, index))
             }
         }
         predictor?.record(event)
@@ -399,11 +474,8 @@ class InkSurfaceView @JvmOverloads constructor(
                 selectRect = floatArrayOf(anchorX.toFloat(), anchorY.toFloat(), x.toFloat(), y.toFloat())
             }
         } else {
-            for (h in 0 until history) {
-                current.addSample(point(event, index, historical = h))
-            }
-            val (x, y) = screenToNorm(event.getX(index), event.getY(index))
-            current.addSample(point(event, index, x, y))
+            for (h in 0 until history) current.addSample(penSample(event, index, h))
+            current.addSample(penSample(event, index))
             predicted = predict(event)
         }
         invalidate()
@@ -412,6 +484,7 @@ class InkSurfaceView @JvmOverloads constructor(
     private fun finishInk(cancel: Boolean) {
         val current = session ?: return
         predicted = emptyList()
+        snapLock = null
         onPenActive(false)
         if (lassoing) {
             lassoing = false
@@ -505,8 +578,9 @@ class InkSurfaceView @JvmOverloads constructor(
         val predictedEvent = predictor?.predict(futureNanos) ?: return emptyList()
         predictedEvent.use { motion ->
             if (motion.pointerCount == 0) return emptyList()
-            val (x, y) = screenToNorm(motion.x, motion.y)
-            return listOf(point(motion, 0, x, y, predicted = true))
+            val raw = pageNorm(motion.x, motion.y)
+            val snapped = snapPen(raw.first, raw.second)
+            return listOf(point(motion, 0, snapped.first, snapped.second, predicted = true))
         }
     }
 
@@ -591,12 +665,7 @@ class InkSurfaceView @JvmOverloads constructor(
             }
             canvas.drawPath(path, selectPaint)
         }
-        if (rulerOn && !rulerY.isNaN()) {
-            ruling.color = Color.parseColor("#2A6F97")
-            ruling.alpha = 180
-            ruling.strokeWidth = 2f
-            canvas.drawLine(0f, rulerY, width.toFloat(), rulerY, ruling)
-        }
+        drawGuides(canvas)
         canvas.restore()
         canvas.restore()
     }
@@ -863,7 +932,7 @@ class InkSurfaceView @JvmOverloads constructor(
     private fun point(event: MotionEvent, index: Int, x: Double? = null, y: Double? = null, historical: Int = -1, predicted: Boolean = false): StrokePoint {
         val sx = if (historical >= 0) event.getHistoricalX(index, historical) else event.getX(index)
         val sy = if (historical >= 0) event.getHistoricalY(index, historical) else event.getY(index)
-        val mapped = if (x != null && y != null && historical < 0) x to y else screenToNorm(sx, sy)
+        val mapped = if (x != null && y != null) x to y else screenToNorm(sx, sy)
         val pressure = if (historical >= 0) event.getHistoricalPressure(index, historical) else event.getPressure(index)
         val tilt = event.getAxisValue(MotionEvent.AXIS_TILT, index)
         val orientation = event.getAxisValue(MotionEvent.AXIS_ORIENTATION, index)
@@ -880,13 +949,12 @@ class InkSurfaceView @JvmOverloads constructor(
         ).also { if (predicted) Unit }
     }
 
-    private fun screenToNorm(x: Float, y: Float): Pair<Double, Double> {
+    private fun screenToNorm(x: Float, y: Float) = pageNorm(x, y)
+
+    private fun pageNorm(x: Float, y: Float): Pair<Double, Double> {
         val (ux, uy) = unrotate(x, y)
-        val snappedY = if (rulerOn && !rulerY.isNaN() && kotlin.math.abs(uy - rulerY) < 18f * resources.displayMetrics.density) rulerY else uy
         val scale = pixelsPerPageUnit().toDouble().coerceAtLeast(0.0001)
-        val pageX = (ux - pageLeft) / scale
-        val pageY = (snappedY - pageTop) / scale
-        return pageX / sessionWidth() to pageY / sessionHeight()
+        return (ux - pageLeft) / scale / sessionWidth() to (uy - pageTop) / scale / sessionHeight()
     }
 
     private fun unrotate(x: Float, y: Float): Pair<Float, Float> {
@@ -1065,6 +1133,215 @@ class InkSurfaceView @JvmOverloads constructor(
         recycle()
     }
 
+    private fun penSample(event: MotionEvent, index: Int, historical: Int = -1): StrokePoint {
+        val sx = if (historical >= 0) event.getHistoricalX(index, historical) else event.getX(index)
+        val sy = if (historical >= 0) event.getHistoricalY(index, historical) else event.getY(index)
+        val raw = pageNorm(sx, sy)
+        val snapped = snapPen(raw.first, raw.second)
+        return point(event, index, snapped.first, snapped.second, historical)
+    }
+
+    private fun snapPen(x: Double, y: Double): Pair<Double, Double> {
+        val tools = visibleTools()
+        if (tools.isEmpty()) return x to y
+        val hit = snapToDraftingTools(x, y, tools, sessionWidth(), sessionHeight(), snapLock, sheetDisplay())
+        return if (hit == null) x to y else hit.x to hit.y
+    }
+
+    private fun visibleTools(): List<DraftingToolState> = buildList {
+        rulerPose?.let { add(DraftingToolState(DraftingKind.RULER, it)) }
+        setSquarePose?.let { add(DraftingToolState(DraftingKind.SET_SQUARE, it)) }
+        compassPose?.let { add(DraftingToolState(DraftingKind.COMPASS, it)) }
+    }
+
+    private fun poseOf(kind: DraftingKind) = when (kind) {
+        DraftingKind.RULER -> rulerPose
+        DraftingKind.SET_SQUARE -> setSquarePose
+        DraftingKind.COMPASS -> compassPose
+    }
+
+    private fun tryBeginGuideDrag(pointerId: Int, event: MotionEvent, index: Int): Boolean {
+        val (nx, ny) = pageNorm(event.getX(index), event.getY(index))
+        val kind = hitGuide(nx, ny) ?: return false
+        val pose = poseOf(kind) ?: return false
+        val local = normToLocalMm(nx, ny, pose, sessionWidth(), sessionHeight())
+        val mode = when (kind) {
+            DraftingKind.RULER -> if (abs(abs(local.x) - rulerLength(pose) / 2) < 14 && abs(local.y) <= rulerWidth(pose) / 2 + 1) "rotate" else "move"
+            DraftingKind.SET_SQUARE -> {
+                val apexY = setSquareApexSign(pose) * setSquareSize(pose) / 2
+                if (hypot(local.x, local.y - apexY) < 14) "rotate" else "move"
+            }
+            DraftingKind.COMPASS -> {
+                val pencil = compassPencilPoint(pose, sessionWidth(), sessionHeight(), sheetDisplay())
+                if (radiusMmBetween(pencil.x, pencil.y, nx, ny, sessionWidth(), sessionHeight(), sheetDisplay()) < 12) "radius" else "move"
+            }
+        }
+        val startAngle = angleToPoint(pose.x, pose.y, nx, ny, sessionWidth(), sessionHeight(), sheetDisplay())
+        guideDrag = GuideDrag(pointerId, kind, mode, nx, ny, pose, startAngle)
+        return true
+    }
+
+    private fun hitGuide(x: Double, y: Double): DraftingKind? {
+        val sheetWidth = sessionWidth()
+        val sheetHeight = sessionHeight()
+        compassPose?.let { pose ->
+            val centre = radiusMmBetween(pose.x, pose.y, x, y, sheetWidth, sheetHeight, sheetDisplay())
+            val pencil = compassPencilPoint(pose, sheetWidth, sheetHeight, sheetDisplay())
+            val nearPencil = radiusMmBetween(pencil.x, pencil.y, x, y, sheetWidth, sheetHeight, sheetDisplay()) < 12
+            if (centre < 18 || nearPencil) return DraftingKind.COMPASS
+        }
+        setSquarePose?.let { if (pointInsideSetSquare(x, y, it, sheetWidth, sheetHeight)) return DraftingKind.SET_SQUARE }
+        rulerPose?.let { if (pointInsideRuler(x, y, it, sheetWidth, sheetHeight)) return DraftingKind.RULER }
+        return null
+    }
+
+    private fun moveGuide(event: MotionEvent) {
+        val drag = guideDrag ?: return
+        val index = event.findPointerIndex(drag.pointerId)
+        if (index < 0) return
+        val (nx, ny) = pageNorm(event.getX(index), event.getY(index))
+        val origin = drag.origin
+        val next = when (drag.mode) {
+            "rotate" -> {
+                val angle = angleToPoint(origin.x, origin.y, nx, ny, sessionWidth(), sessionHeight(), sheetDisplay())
+                origin.copy(rotation = snapAngle(origin.rotation + shortestAngleDelta(drag.startAngle, angle), 1))
+            }
+            "radius" -> origin.copy(
+                radiusMm = snapRadiusMm(
+                    clampCompassRadius(radiusMmBetween(origin.x, origin.y, nx, ny, sessionWidth(), sessionHeight(), sheetDisplay())),
+                ),
+            )
+            else -> origin.copy(x = origin.x + (nx - drag.grabX), y = origin.y + (ny - drag.grabY))
+        }
+        placeGuide(drag.kind, next)
+        invalidate()
+    }
+
+    private fun placeGuide(kind: DraftingKind, pose: DraftingPose) {
+        var next = keepPoseOnSheet(kind, pose, sessionWidth(), sessionHeight())
+        if (kind == DraftingKind.SET_SQUARE) {
+            rulerPose?.let { ruler ->
+                attachSetSquareToRuler(next, ruler, sessionWidth(), sessionHeight())?.let { next = it }
+            }
+        }
+        when (kind) {
+            DraftingKind.RULER -> rulerPose = next
+            DraftingKind.SET_SQUARE -> setSquarePose = next
+            DraftingKind.COMPASS -> compassPose = next
+        }
+    }
+
+    private fun drawGuides(canvas: Canvas) {
+        val px = pxPerMm()
+        if (px <= 0f) return
+        rulerPose?.let { drawRuler(canvas, it, px) }
+        setSquarePose?.let { drawSetSquare(canvas, it, px) }
+        compassPose?.let { drawCompass(canvas, it, px) }
+    }
+
+    private fun drawRuler(canvas: Canvas, pose: DraftingPose, px: Float) {
+        val half = (rulerLength(pose) / 2.0 * px).toFloat()
+        val across = (rulerWidth(pose) / 2.0 * px).toFloat()
+        val corner = 5f * resources.displayMetrics.density
+        withPose(canvas, pose) {
+            guideFill.color = Color.parseColor("#D7E4F2")
+            guideFill.alpha = 176
+            guideEdge.color = Color.parseColor("#1B4F82")
+            guideEdge.strokeWidth = max(1.5f, px * 0.35f)
+            guideTick.color = Color.parseColor("#1B4F82")
+            guideTick.strokeWidth = max(1f, px * 0.18f)
+            guideLabel.textSize = 9f * resources.displayMetrics.density
+            canvas.drawRoundRect(-half, -across, half, across, corner, corner, guideFill)
+            canvas.drawRoundRect(-half, -across, half, across, corner, corner, guideEdge)
+            for (tick in scaleTicks(rulerLength(pose))) {
+                val x = ((-rulerLength(pose) / 2.0 + tick.mm) * px).toFloat()
+                val mark = when (tick.level) {
+                    2 -> 4.2f
+                    1 -> 2.6f
+                    else -> 1.5f
+                } * px
+                canvas.drawLine(x, -across, x, -across + mark, guideTick)
+                canvas.drawLine(x, across, x, across - mark, guideTick)
+                val label = tick.label
+                if (label != null) {
+                    canvas.drawText(label, x, -across + mark + guideLabel.textSize * 0.85f, guideLabel)
+                }
+            }
+        }
+    }
+
+    private fun drawSetSquare(canvas: Canvas, pose: DraftingPose, px: Float) {
+        val half = (setSquareSize(pose) / 2.0 * px).toFloat()
+        val sign = setSquareApexSign(pose).toFloat()
+        withPose(canvas, pose) {
+            val path = Path()
+            path.moveTo(-half, 0f)
+            path.lineTo(half, 0f)
+            path.lineTo(0f, sign * half)
+            path.close()
+            guideFill.color = Color.parseColor("#D7E4F2")
+            guideFill.alpha = 150
+            guideEdge.color = Color.parseColor("#1B4F82")
+            guideEdge.strokeWidth = max(1.6f, px * 0.4f)
+            guideTick.strokeWidth = max(1f, px * 0.18f)
+            canvas.drawPath(path, guideFill)
+            canvas.drawPath(path, guideEdge)
+            canvas.drawLine(0f, 0f, 0f, sign * half * 0.92f, guideTick)
+            val radius = half * 0.62f
+            for (deg in 0..180 step 10) {
+                val rad = Math.toRadians(deg.toDouble())
+                val cosine = cos(rad).toFloat()
+                val sine = sin(rad).toFloat()
+                val inner = radius - (if (deg % 90 == 0) 3.4f else if (deg % 30 == 0) 2.4f else 1.4f) * px
+                canvas.drawLine(cosine * inner, sign * sine * inner, cosine * radius, sign * sine * radius, guideTick)
+            }
+            guideLabel.textSize = 9f * resources.displayMetrics.density
+            val halfMm = setSquareSize(pose) / 2.0
+            var mark = -kotlin.math.floor(halfMm / 10.0) * 10.0
+            while (mark <= halfMm + 0.1) {
+                val x = (mark * px).toFloat()
+                canvas.drawLine(x, 0f, x, -sign * 3.2f * px, guideTick)
+                if (abs(mark) > 0.1 && abs(mark) < halfMm - 4) {
+                    canvas.drawText((mark / 10.0).toInt().toString(), x, -sign * 3.2f * px - 2f, guideLabel)
+                }
+                mark += 10.0
+            }
+        }
+    }
+
+    private fun drawCompass(canvas: Canvas, pose: DraftingPose, px: Float) {
+        val radius = clampCompassRadius(pose.radiusMm).toFloat() * px
+        val density = resources.displayMetrics.density
+        withPose(canvas, pose) {
+            guideEdge.color = Color.parseColor("#1B4F82")
+            guideEdge.strokeWidth = max(1.5f, px * 0.35f)
+            canvas.drawCircle(0f, 0f, radius, guideEdge)
+            guideEdge.color = Color.parseColor("#9A3412")
+            canvas.drawLine(0f, 0f, radius, 0f, guideEdge)
+            guideFill.color = Color.parseColor("#1B4F82")
+            guideFill.alpha = 255
+            canvas.drawCircle(0f, 0f, 3.5f * density, guideFill)
+            guideFill.color = Color.parseColor("#9A3412")
+            canvas.drawCircle(radius, 0f, 4.2f * density, guideFill)
+        }
+    }
+
+    private inline fun withPose(canvas: Canvas, pose: DraftingPose, draw: () -> Unit) {
+        val (ox, oy) = normToScreen(pose.x, pose.y)
+        canvas.save()
+        canvas.translate(ox, oy)
+        canvas.rotate(Math.toDegrees(pose.rotation).toFloat())
+        draw()
+        canvas.restore()
+    }
+
+    private fun sheetDisplay() = DraftingDisplay(
+        sessionWidth() * pixelsPerPageUnit().toDouble(),
+        sessionHeight() * pixelsPerPageUnit().toDouble(),
+    )
+
+    private fun pxPerMm() = pixelsPerPageUnit() * (SOURCE_A4_PX / A4_WIDTH_MM).toFloat()
+
     private companion object {
         const val TILE_PAGE = 192
         const val MAX_TILES = 36
@@ -1075,6 +1352,16 @@ class InkSurfaceView @JvmOverloads constructor(
         const val TEXT_COLUMN = 900f - 144f
     }
 }
+
+private data class GuideDrag(
+    val pointerId: Int,
+    val kind: DraftingKind,
+    val mode: String,
+    val grabX: Double,
+    val grabY: Double,
+    val origin: DraftingPose,
+    val startAngle: Double,
+)
 
 data class BackdropSlice(
     val topPagePx: Float,

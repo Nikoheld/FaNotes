@@ -114,9 +114,9 @@ data class CalendarDocument(val calendars: List<CalendarDef>, val events: List<C
 
 fun emptyCalendar(): CalendarDocument = CalendarDocument(
     listOf(
-        CalendarDef("personal", "Persönlich", "#2a6f97"),
-        CalendarDef("school", "Schule", "#1f8a4c"),
-        CalendarDef("work", "Arbeit", "#d23b4a"),
+        CalendarDef("personal", "Persönlich", "#7f6df2"),
+        CalendarDef("school", "Schule", "#3d8bfd"),
+        CalendarDef("work", "Arbeit", "#2f9e6b"),
     ),
     emptyList(),
 )

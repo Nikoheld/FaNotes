@@ -83,6 +83,36 @@ class InkSession(document: InkDocument) {
         return true
     }
 
+    /** A constructed shape (compass circle, arc) bypasses the pointer corridor filter. */
+    fun commitShape(points: List<StrokePoint>, style: StrokeStyle, now: String): InkStroke? {
+        if (points.size < 2) return null
+        val width0 = document.sourceWidth
+        val height0 = document.sourceHeight
+        val page = points.map { it.x * width0 to it.y * height0 }
+        var doc = document
+        for ((px, py) in page) doc = growDocument(doc, px, py).first
+        val mapped = points.zip(page).map { (point, pixel) ->
+            point.copy(
+                x = pixel.first / doc.sourceWidth,
+                y = pixel.second / doc.sourceHeight,
+                pressure = point.pressure.coerceIn(0.0, 1.0),
+            )
+        }
+        val stroke = InkStroke(
+            points = mapped,
+            baseWidth = style.baseWidth,
+            pressureEnabled = style.pressureEnabled,
+            color = style.color,
+            purpose = "handwriting",
+            brush = style.brush,
+            opacity = style.opacity ?: brushOpacity(style.brush) ?: 1.0,
+            colorEffect = style.colorEffect,
+        )
+        pushUndo()
+        document = doc.copy(strokes = doc.strokes + stroke, updatedAt = now)
+        return stroke
+    }
+
     fun endStroke(style: StrokeStyle, now: String): InkStroke? {
         val points = livePoints
         livePoints = emptyList()

@@ -10,6 +10,12 @@ import androidx.lifecycle.viewModelScope
 import ch.fasrv.fanotes.desk.CalendarEvent
 import ch.fasrv.fanotes.desk.HomeworkDocument
 import ch.fasrv.fanotes.desk.HomeworkTask
+import ch.fasrv.fanotes.desk.homeworkChannelIdValid
+import ch.fasrv.fanotes.desk.homeworkPublishBody
+import ch.fasrv.fanotes.desk.homeworkPublishUrl
+import ch.fasrv.fanotes.desk.homeworkSecretReady
+import ch.fasrv.fanotes.desk.newHomeworkChannelId
+import ch.fasrv.fanotes.desk.newHomeworkSecret
 import ch.fasrv.fanotes.desk.SearchHit
 import ch.fasrv.fanotes.desk.SubjectBook
 import ch.fasrv.fanotes.desk.applyReview
@@ -529,8 +535,65 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun addCalendarEvent(title: String, day: String, calendarId: String) {
-        val event = CalendarEvent(java.util.UUID.randomUUID().toString(), calendarId, title.trim(), day, day)
+    fun insertMath(expression: String) {
+        val block = expression.trim()
+        if (block.isEmpty()) return
+        updateMarkdown(markdown.value.trimEnd() + "\n\n$$\n$block\n$$\n")
+    }
+
+    fun generateHomeworkAccess() {
+        val channel = newHomeworkChannelId()
+        val secret = newHomeworkSecret()
+        val next = deskSettings.value + mapOf("homework-channel" to channel, "homework-secret" to secret, "homework-previous" to "")
+        deskSettings.value = next
+        graph.writeDesk(next)
+    }
+
+    fun publishHomework() {
+        val channel = deskSettings.value["homework-channel"].orEmpty().trim()
+        val secret = deskSettings.value["homework-secret"].orEmpty().trim()
+        val previous = deskSettings.value["homework-previous"].orEmpty().trim()
+        if (!homeworkChannelIdValid(channel)) {
+            message.value = "Die Kanal-ID muss 32 Hex-Zeichen sein."
+            return
+        }
+        if (!homeworkSecretReady(secret)) {
+            message.value = "Das Geheimnis braucht mindestens 12 Zeichen."
+            return
+        }
+        val tasks = homework.value.tasks
+        val authorization = previous.ifBlank { secret }
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    val body = homeworkPublishBody(true, secret, previous.ifBlank { null }, tasks)
+                    val request = okhttp3.Request.Builder()
+                        .url(homeworkPublishUrl(channel))
+                        .header("Accept", "application/json")
+                        .header("Content-Type", "application/json")
+                        .header("X-FaNotes-Homework", "1")
+                        .header("Authorization", "Bearer $authorization")
+                        .put(body.toByteArray().toRequestBody("application/json".toMediaType()))
+                        .build()
+                    okhttp3.OkHttpClient().newCall(request).execute().use { response ->
+                        if (response.isSuccessful) "Hausaufgaben veröffentlicht." else "Veröffentlichen fehlgeschlagen (${response.code})."
+                    }
+                }.getOrElse { "Veröffentlichen fehlgeschlagen." }
+            }
+            message.value = result
+            if (result == "Hausaufgaben veröffentlicht.") updateDesk("homework-previous", "")
+        }
+    }
+
+    fun addCalendarEvent(title: String, day: String, calendarId: String, recurrence: String = "none") {
+        val event = CalendarEvent(
+            java.util.UUID.randomUUID().toString(),
+            calendarId,
+            title.trim(),
+            day,
+            day,
+            recurrence = if (recurrence in setOf("daily", "weekly", "monthly", "yearly")) recurrence else "none",
+        )
         val next = calendar.value.copy(events = calendar.value.events + event)
         calendar.value = next
         persistSpecial(ch.fasrv.fanotes.desk.CALENDAR_NOTE_PATH, "Kalender", serializeCalendarMarkdown(next))
