@@ -46,6 +46,17 @@ class NotePageView(context: Context) : FrameLayout(context) {
     var onSync: () -> Unit = {}
     var onMarkdown: (String) -> Unit = {}
     var onVisibleMarkdown: (String, String) -> Unit = { _, next -> onMarkdown(next) }
+    var onRememberCamera: (
+        String,
+        Double,
+        Double,
+        Double,
+        Double,
+        Double,
+        Double,
+        ch.fasrv.fanotes.desk.PaperTextAnchor?,
+    ) -> Unit = { _, _, _, _, _, _, _, _ -> }
+    var onRecallCamera: (String) -> ch.fasrv.fanotes.desk.PaperViewMemoryEntry? = { null }
     var onUndo: () -> Unit = {}
     var onRedo: () -> Unit = {}
     var onColor: (String) -> Unit = {}
@@ -103,6 +114,48 @@ class NotePageView(context: Context) : FrameLayout(context) {
             applyChromeVisibility()
         }
         applyChromeColors()
+    }
+
+    fun rememberCamera(path: String) {
+        if (path.isEmpty()) return
+        val sample = ink.cameraSample() ?: return
+        onRememberCamera(
+            path,
+            sample.zoom,
+            sample.rotation,
+            sample.centreX,
+            sample.centreY,
+            sample.pageWidth,
+            sample.pageHeight,
+            textAnchor(),
+        )
+    }
+
+    fun restoreCamera(path: String, proportional: Boolean) {
+        val entry = onRecallCamera(path) ?: return
+        ink.restoreCamera(entry.zoom, entry.rotation, entry.centreX, entry.centreY, entry.pageWidth, proportional)
+        val anchor = entry.anchor ?: return
+        editor.post { scrollToAnchor(anchor) }
+    }
+
+    private fun textAnchor(): ch.fasrv.fanotes.desk.PaperTextAnchor? {
+        if (editor.visibility != VISIBLE) return null
+        val layout = editor.layout ?: return null
+        if (layout.lineCount <= 0) return null
+        val line = layout.getLineForVertical(editor.scrollY.coerceAtLeast(0)).coerceIn(0, layout.lineCount - 1)
+        val scale = (editor.textSize / 16f).coerceAtLeast(0.01f)
+        val offset = (editor.scrollY - layout.getLineTop(line)) / scale
+        return ch.fasrv.fanotes.desk.PaperTextAnchor(layout.getLineStart(line), kotlin.math.floor(offset * 100.0 + 0.5) / 100.0)
+    }
+
+    private fun scrollToAnchor(anchor: ch.fasrv.fanotes.desk.PaperTextAnchor) {
+        val layout = editor.layout ?: return
+        val length = layout.text?.length ?: editor.text?.length ?: 0
+        val pos = anchor.pos.coerceIn(0, length)
+        val line = layout.getLineForOffset(pos)
+        val scale = editor.textSize / 16f
+        val y = layout.getLineTop(line) + (anchor.offset * scale).toInt()
+        editor.scrollTo(0, y.coerceAtLeast(0))
     }
 
     fun revealLine(line: Int) {

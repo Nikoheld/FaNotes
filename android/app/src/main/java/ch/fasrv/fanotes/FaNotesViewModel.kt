@@ -157,6 +157,8 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     val foldedHeadings = MutableStateFlow<Set<Int>>(emptySet())
     val confirmRequest = MutableStateFlow<ch.fasrv.fanotes.desk.PendingConfirm?>(null)
     private var confirmAction: (() -> Unit)? = null
+    private var paperViews: Map<String, ch.fasrv.fanotes.desk.PaperViewMemoryEntry> =
+        ch.fasrv.fanotes.desk.parsePaperViewMemory(graph.readPaperViews())
     val showList = MutableStateFlow(true)
     val message = MutableStateFlow<String?>(null)
     val backdrop = MutableStateFlow<List<BackdropSlice>>(emptyList())
@@ -450,6 +452,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
                 val folder = graph.vault.list(parent).any { it.directory && it.path.trim('/') == path.trim('/') }
                 if (folder) graph.vault.delete(path) else graph.store.delete(path)
             }
+            forgetPaperCamerasUnder(path)
             loadTree()
             graph.engine.notifyLocalChange()
             persistWorkspace()
@@ -723,6 +726,51 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     fun dismissConfirm() {
         confirmRequest.value = null
         confirmAction = null
+    }
+
+    fun rememberPaperCamera(
+        path: String,
+        zoom: Double,
+        rotation: Double,
+        centreX: Double,
+        centreY: Double,
+        pageWidth: Double,
+        pageHeight: Double,
+        anchor: ch.fasrv.fanotes.desk.PaperTextAnchor?,
+    ) {
+        val key = ch.fasrv.fanotes.desk.paperViewMemoryKey(path)
+        if (key.isEmpty()) return
+        paperViews = ch.fasrv.fanotes.desk.rememberPaperView(
+            paperViews,
+            key,
+            zoom = zoom,
+            rotation = rotation,
+            centreX = centreX,
+            centreY = centreY,
+            pageWidth = pageWidth,
+            pageHeight = pageHeight,
+            anchor = anchor,
+        )
+        graph.writePaperViews(ch.fasrv.fanotes.desk.serializePaperViewMemory(paperViews))
+    }
+
+    fun recallPaperCamera(path: String): ch.fasrv.fanotes.desk.PaperViewMemoryEntry? =
+        ch.fasrv.fanotes.desk.recallPaperView(paperViews, ch.fasrv.fanotes.desk.paperViewMemoryKey(path))
+
+    private fun forgetPaperCamerasUnder(path: String) {
+        val prefix = path.trim('/')
+        if (prefix.isEmpty()) return
+        val next = paperViews.filterKeys { it != prefix && !it.startsWith("$prefix/") }
+        if (next.size == paperViews.size) return
+        paperViews = next
+        graph.writePaperViews(ch.fasrv.fanotes.desk.serializePaperViewMemory(paperViews))
+    }
+
+    private fun remapPaperCameras(from: String, to: String) {
+        val next = paperViews.mapKeys { (key, _) -> remapPath(key, from, to) ?: key }
+        if (next == paperViews) return
+        paperViews = next
+        graph.writePaperViews(ch.fasrv.fanotes.desk.serializePaperViewMemory(paperViews))
     }
 
     fun askDelete(path: String, folder: Boolean, name: String) {
@@ -1013,6 +1061,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         openTabs.value = sortPinnedFirst(tabs.map { DeskTab(it, it in pinned) }).map { it.path }
         closedTabs.value = closedTabs.value.map { remapPath(it, from, to) ?: it }
         tagIndex.value = tagIndex.value.mapKeys { (path, _) -> remapPath(path, from, to) ?: path }
+        remapPaperCameras(from, to)
         deskSettings.value["last-open"]?.let { saved -> remapPath(saved, from, to)?.let { updateDesk("last-open", it) } }
         val current = open.value?.path
         if (current != null) {

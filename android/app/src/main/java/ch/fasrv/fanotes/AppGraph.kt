@@ -137,6 +137,12 @@ class AppGraph(context: Context) {
         prefs.edit().putString("workspace-$vaultId", json).apply()
     }
 
+    fun readPaperViews(): String? = prefs.getString(ch.fasrv.fanotes.desk.PAPER_VIEW_MEMORY_KEY, null)
+
+    fun writePaperViews(json: String) {
+        prefs.edit().putString(ch.fasrv.fanotes.desk.PAPER_VIEW_MEMORY_KEY, json).apply()
+    }
+
     private fun host() = IoSyncHost(
         io = { vault },
         currentVaultId = { vaultId },

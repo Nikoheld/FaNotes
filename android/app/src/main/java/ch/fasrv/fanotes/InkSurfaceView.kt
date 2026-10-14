@@ -97,6 +97,15 @@ import kotlin.math.sin
  * Committed ink is cached in page-pixel tiles. The stroke under the nib is
  * drawn on top of that cache, including predicted motion on Android 14+.
  */
+data class PaperCameraSample(
+    val zoom: Double,
+    val rotation: Double,
+    val centreX: Double,
+    val centreY: Double,
+    val pageWidth: Double,
+    val pageHeight: Double,
+)
+
 class InkSurfaceView @JvmOverloads constructor(
     context: Context,
     attrs: AttributeSet? = null,
@@ -225,6 +234,9 @@ class InkSurfaceView @JvmOverloads constructor(
     private var zoom = 1f
     private var pageLeft = 0f
     private var pageTop = 0f
+    private var pendingCamera: PendingCamera? = null
+
+    private data class PendingCamera(val zoom: Float, val rotation: Float, val centreX: Double, val centreY: Double)
     private var velocity: VelocityTracker? = null
     private val gestures = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
         override fun onLongPress(event: MotionEvent) {
@@ -296,6 +308,40 @@ class InkSurfaceView @JvmOverloads constructor(
         publishCamera()
     }
 
+    /** Page point under the middle of the screen, in source pixels. */
+    fun cameraSample(): PaperCameraSample? {
+        if (width <= 0 || height <= 0) return null
+        val scale = pixelsPerPageUnit().toDouble().coerceAtLeast(0.0001)
+        return PaperCameraSample(
+            zoom = zoom.toDouble(),
+            rotation = rotation.toDouble(),
+            centreX = ((width / 2f - pageLeft) / scale).coerceAtLeast(0.0),
+            centreY = ((height / 2f - pageTop) / scale).coerceAtLeast(0.0),
+            pageWidth = sessionWidth(),
+            pageHeight = sessionHeight(),
+        )
+    }
+
+    fun restoreCamera(zoom: Double, rotation: Double, centreX: Double, centreY: Double, savedPageWidth: Double?, proportional: Boolean) {
+        val scaled = ch.fasrv.fanotes.desk.scaledPaperCentre(centreX, centreY, savedPageWidth, sessionWidth(), proportional)
+        pendingCamera = PendingCamera(zoom.toFloat(), rotation.toFloat(), scaled.centreX, scaled.centreY)
+        if (width > 0 && height > 0) applyPendingCamera()
+    }
+
+    private fun applyPendingCamera() {
+        val request = pendingCamera ?: return
+        if (width <= 0 || height <= 0) return
+        pendingCamera = null
+        zoom = request.zoom.coerceIn(0.5f, 4f)
+        rotation = request.rotation
+        val scale = pixelsPerPageUnit()
+        pageLeft = width / 2f - (request.centreX * scale).toFloat()
+        pageTop = height / 2f - (request.centreY * scale).toFloat()
+        settleZoom()
+        invalidate()
+        publishCamera()
+    }
+
     fun guideOn(kind: DraftingKind) = when (kind) {
         DraftingKind.RULER -> rulerPose != null
         DraftingKind.SET_SQUARE -> setSquarePose != null
@@ -331,7 +377,7 @@ class InkSurfaceView @JvmOverloads constructor(
         }
         clipBounds = android.graphics.Rect(0, 0, w, h)
         invalidateTiles()
-        publishCamera()
+        if (w > 0 && h > 0 && pendingCamera != null) applyPendingCamera() else publishCamera()
     }
 
     override fun onHoverEvent(event: MotionEvent): Boolean {
@@ -364,6 +410,7 @@ class InkSurfaceView @JvmOverloads constructor(
         val now = SystemClock.uptimeMillis()
         when (action) {
             MotionEvent.ACTION_DOWN, MotionEvent.ACTION_POINTER_DOWN -> {
+                pendingCamera = null
                 val sample = sample(event, index, PointerAction.DOWN)
                 palm = touchPalmState(palm, sample)
                 if (isPenTool(tool) || tool == PointerTool.MOUSE || (tool == PointerTool.FINGER && fingerDraws)) {
