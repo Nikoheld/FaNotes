@@ -707,6 +707,27 @@ fn a_reset_marker_with_slashes_wipes_the_profile() {
 }
 
 #[test]
+fn a_reset_marker_with_a_month_name_wipes_the_profile() {
+    let (app, mut host) = host();
+    host.dispatch("fanotes:save-settings", &[json!({ "theme": "midnight" })])
+        .unwrap();
+    let user_data = std::path::absolute(&app).unwrap();
+    let marker = app.parent().unwrap().join(".fanotes-reset-pending.json");
+    let created = "Oct 13, 2026";
+    fs::write(
+        &marker,
+        format!(
+            r#"{{"version":1,"userDataPath":"{}","createdAt":"{created}"}}"#,
+            user_data.display()
+        ),
+    )
+    .unwrap();
+    let _ = Host::open(app.clone());
+    assert!(!app.join("settings.json").exists(), "{created}");
+    assert!(!marker.exists());
+}
+
+#[test]
 fn a_reset_marker_with_second_sixty_keeps_the_profile() {
     let (app, mut host) = host();
     host.dispatch("fanotes:save-settings", &[json!({ "theme": "midnight" })])

@@ -1771,6 +1771,11 @@ fn marker_is_fresh(created_at: &str) -> bool {
 
 fn unix_millis_from_iso(value: &str) -> Option<u64> {
     let trimmed = value.trim_matches(is_date_parse_space);
+    if has_english_month(trimmed) {
+        // `Oct 13, 2026` is local midnight. `GMT` and `EST` name an offset.
+        let normalized = rewrite_month_name(trimmed)?;
+        return unix_millis_from_iso(&normalized);
+    }
     if trimmed.contains('/') {
         // `2026/10/13` is local midnight. `10/13/2026` is the same legacy form.
         let normalized = rewrite_slash_date(trimmed)?;
@@ -2078,6 +2083,154 @@ fn datetime_year_ok(year_text: &str) -> bool {
 fn two_digits(text: &str) -> bool {
     let bytes = text.as_bytes();
     bytes.len() == 2 && bytes.iter().all(|byte| byte.is_ascii_digit())
+}
+
+fn has_english_month(value: &str) -> bool {
+    legacy_words(value).iter().any(|word| english_month(word).is_some())
+}
+
+fn legacy_words(value: &str) -> Vec<&str> {
+    value
+        .split(is_date_parse_space)
+        .flat_map(|piece| piece.split(','))
+        .map(|token| token.trim_matches('.'))
+        .filter(|token| !token.is_empty())
+        .collect()
+}
+
+fn english_month(token: &str) -> Option<i32> {
+    match token.to_ascii_lowercase().as_str() {
+        "jan" | "january" => Some(1),
+        "feb" | "february" => Some(2),
+        "mar" | "march" => Some(3),
+        "apr" | "april" => Some(4),
+        "may" => Some(5),
+        "jun" | "june" => Some(6),
+        "jul" | "july" => Some(7),
+        "aug" | "august" => Some(8),
+        "sep" | "sept" | "september" => Some(9),
+        "oct" | "october" => Some(10),
+        "nov" | "november" => Some(11),
+        "dec" | "december" => Some(12),
+        _ => None,
+    }
+}
+
+fn is_weekday(token: &str) -> bool {
+    matches!(
+        token.to_ascii_lowercase().as_str(),
+        "sun" | "sunday"
+            | "mon"
+            | "monday"
+            | "tue"
+            | "tues"
+            | "tuesday"
+            | "wed"
+            | "wednesday"
+            | "thu"
+            | "thur"
+            | "thurs"
+            | "thursday"
+            | "fri"
+            | "friday"
+            | "sat"
+            | "saturday"
+    )
+}
+
+/// `Oct 13, 2026` and `13 Oct 2026`. A date alone is local midnight. `GMT`
+/// and the US zone names are fixed offsets. The weekday is ignored.
+fn rewrite_month_name(trimmed: &str) -> Option<String> {
+    let mut words = legacy_words(trimmed);
+    if words.first().is_some_and(|word| is_weekday(word)) {
+        words.remove(0);
+    }
+    if words.len() < 3 {
+        return None;
+    }
+    let (month, day_text, year_text, rest_at) = if english_month(words[0]).is_some() {
+        (english_month(words[0])?, words[1], words[2], 3)
+    } else if english_month(words[1]).is_some() {
+        (english_month(words[1])?, words[0], words[2], 3)
+    } else {
+        return None;
+    };
+    let day: i32 = day_text.parse().ok()?;
+    let year = legacy_year(year_text.parse().ok()?)?;
+    if !(1..=31).contains(&day) {
+        return None;
+    }
+    let (clock, zone) = legacy_clock_and_zone(&words[rest_at..])?;
+    Some(format!("{year:04}-{month:02}-{day:02}T{clock}{zone}"))
+}
+
+fn legacy_clock_and_zone(rest: &[&str]) -> Option<(String, String)> {
+    match rest {
+        [] => Some(("00:00:00".to_string(), String::new())),
+        [zone] if named_zone_offset(zone).is_some() => {
+            Some(("00:00:00".to_string(), named_zone_offset(zone)?))
+        }
+        [time] => Some((pad_legacy_clock(time)?, String::new())),
+        [time, zone] => Some((pad_legacy_clock(time)?, named_zone_offset(zone)?)),
+        _ => None,
+    }
+}
+
+fn named_zone_offset(token: &str) -> Option<String> {
+    let lower = token.to_ascii_lowercase();
+    let hours = match lower.as_str() {
+        "gmt" | "utc" | "ut" | "z" => return Some("Z".to_string()),
+        "est" => -5,
+        "edt" => -4,
+        "cst" => -6,
+        "cdt" => -5,
+        "mst" => -7,
+        "mdt" => -6,
+        "pst" => -8,
+        "pdt" => -7,
+        _ => return gmt_offset_suffix(&lower),
+    };
+    Some(format_hour_offset(hours))
+}
+
+fn format_hour_offset(hours: i32) -> String {
+    let sign = if hours < 0 { '-' } else { '+' };
+    format!("{sign}{:02}:00", hours.abs())
+}
+
+fn gmt_offset_suffix(lower: &str) -> Option<String> {
+    let rest = if let Some(rest) = lower.strip_prefix("gmt") {
+        rest
+    } else if let Some(rest) = lower.strip_prefix("utc") {
+        rest
+    } else if let Some(rest) = lower.strip_prefix("ut") {
+        rest
+    } else {
+        return None;
+    };
+    if rest.is_empty() {
+        return Some("Z".to_string());
+    }
+    let (sign, body) = if let Some(body) = rest.strip_prefix('+') {
+        ('+', body)
+    } else if let Some(body) = rest.strip_prefix('-') {
+        ('-', body)
+    } else {
+        return None;
+    };
+    let (hour, minute) = if let Some((hour, minute)) = body.split_once(':') {
+        (hour.parse::<i32>().ok()?, minute.parse::<i32>().ok()?)
+    } else if body.len() <= 2 && body.bytes().all(|byte| byte.is_ascii_digit()) {
+        (body.parse().ok()?, 0)
+    } else if body.len() == 4 && body.bytes().all(|byte| byte.is_ascii_digit()) {
+        (body[..2].parse().ok()?, body[2..].parse().ok()?)
+    } else {
+        return None;
+    };
+    if !(0..=23).contains(&hour) || !(0..=59).contains(&minute) {
+        return None;
+    }
+    Some(format!("{sign}{hour:02}:{minute:02}"))
 }
 
 /// `YYYY/M/D` or `M/D/YYYY`, then an optional legacy clock. A date alone is
@@ -5134,6 +5287,25 @@ mod local_zone_tests {
         assert_eq!(
             unix_millis_from_iso("2026/10/13 16:00:00Z"),
             Some(1_791_907_200_000)
+        );
+    }
+
+    #[test]
+    fn a_month_name_is_local_midnight_unless_the_zone_is_named() {
+        let _lock = TRASH_CLOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let _restore = RestoreTz(std::env::var_os("TZ"));
+        unsafe { std::env::set_var("TZ", "America/New_York") };
+        unsafe { tzset() };
+        assert_eq!(unix_millis_from_iso("Oct 13, 2026"), Some(1_791_864_000_000));
+        assert_eq!(
+            unix_millis_from_iso("Oct 13, 2026 GMT"),
+            Some(1_791_849_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13, 2026 16:00:00 EST"),
+            Some(1_791_925_200_000)
         );
     }
 }
