@@ -154,3 +154,58 @@ fn the_sample_notebook_becomes_a_searchable_note() {
     assert_eq!(zipped["pageCount"], 1);
     assert_eq!(zipped["attachmentCount"], 1);
 }
+
+#[cfg(unix)]
+#[test]
+fn a_missing_onenote_source_uses_the_desktop_lstat_error() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = std::env::temp_dir().join(format!(
+        "fanotes-onenote-lstat-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    let vault = dir.join("vault");
+    fs::create_dir_all(&vault).unwrap();
+    let mut host = Host::open(dir.join("app"));
+    host.set_vault(vault).unwrap();
+    let missing = dir.join("fehlt.one");
+    assert_eq!(
+        host.dispatch("fanotes:import-onenote", &[json!(missing.display().to_string())])
+            .unwrap_err(),
+        format!(
+            "ENOENT: no such file or directory, lstat '{}'",
+            missing.display()
+        )
+    );
+    let empty = dir.join("leer.one");
+    fs::write(&empty, b"").unwrap();
+    assert_eq!(
+        host.dispatch("fanotes:import-onenote", &[json!(empty.display().to_string())])
+            .unwrap_err(),
+        "Die OneNote-Quelldatei ist leer, unsicher oder größer als 4 GB."
+    );
+    let locked = dir.join("locked");
+    fs::create_dir(&locked).unwrap();
+    let source = locked.join("Notiz.one");
+    fs::write(&source, b"one").unwrap();
+    fs::set_permissions(&locked, fs::Permissions::from_mode(0o000)).unwrap();
+    struct Restore(std::path::PathBuf);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            let _ = fs::set_permissions(&self.0, fs::Permissions::from_mode(0o700));
+        }
+    }
+    let _restore = Restore(locked);
+    assert_eq!(
+        host.dispatch("fanotes:import-onenote", &[json!(source.display().to_string())])
+            .unwrap_err(),
+        format!(
+            "EACCES: permission denied, lstat '{}'",
+            source.display()
+        )
+    );
+}
