@@ -287,14 +287,20 @@ pub(crate) fn entry_name_key(name: &str) -> String {
     use unicode_normalization::UnicodeNormalization;
     let nfc: String = name.nfc().collect();
     // Desktop sibling names use `normalize('NFC').toLocaleLowerCase('de-DE')`.
-    // V8 leaves these newer case pairs unchanged, and they break a Greek word
-    // the way an uncased character does, so a following sigma is not final.
-    if !nfc.chars().any(js_keeps_case) {
-        return nfc.to_lowercase();
+    locale_lower_de(&nfc)
+}
+
+/// `toLocaleLowerCase('de-DE')`.
+///
+/// V8 leaves these newer case pairs unchanged. They break a Greek word the
+/// way an uncased character does, so a sigma before one of them is final.
+pub(crate) fn locale_lower_de(value: &str) -> String {
+    if !value.chars().any(js_keeps_case) {
+        return value.to_lowercase();
     }
-    let mut out = String::with_capacity(nfc.len());
+    let mut out = String::with_capacity(value.len());
     let mut segment = String::new();
-    for character in nfc.chars() {
+    for character in value.chars() {
         if js_keeps_case(character) {
             if !segment.is_empty() {
                 out.push_str(&segment.to_lowercase());
