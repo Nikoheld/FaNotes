@@ -34,7 +34,8 @@ pub fn read_worksheet(host: &Host, raw_id: &str) -> Result<Value, String> {
     stat_regular(&source, format.max_bytes)?;
     if document["kind"] == "html" {
         // The desktop reads only the first 8 KiB before looking for the marker.
-        let header = read_prefix(&source, 8192).unwrap_or_default();
+        // A failed open is that open error, not a missing safety marker.
+        let header = read_prefix(&source, 8192)?;
         if !header.contains("fanotes-onenote-safe-v1") {
             return Err(
                 "Die importierte OneNote-Seite hat ihre Sicherheitsmarkierung verloren.".to_owned(),
@@ -684,7 +685,7 @@ fn stat_regular(path: &Path, max: u64) -> Result<(), String> {
 fn read_prefix(path: &Path, limit: usize) -> Result<String, String> {
     use std::io::Read;
     let mut file =
-        fs::File::open(path).map_err(|_| "Die Datei konnte nicht gelesen werden.".to_owned())?;
+        fs::File::open(path).map_err(|error| crate::notes::node_open_error(path, &error))?;
     let mut bytes = vec![0u8; limit];
     let mut read = 0;
     while read < limit {
@@ -692,7 +693,7 @@ fn read_prefix(path: &Path, limit: usize) -> Result<String, String> {
             Ok(0) => break,
             Ok(count) => read += count,
             Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
-            Err(_) => return Err("Die Datei konnte nicht gelesen werden.".to_owned()),
+            Err(error) => return Err(crate::notes::node_open_error(path, &error)),
         }
     }
     bytes.truncate(read);

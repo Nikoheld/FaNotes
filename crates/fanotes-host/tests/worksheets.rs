@@ -408,6 +408,34 @@ fn a_string_page_size_opens_like_the_desktop() {
     assert!(pair.contains("Größe"), "{pair}");
 }
 
+#[cfg(unix)]
+#[test]
+fn an_unreadable_html_worksheet_is_not_a_missing_safety_marker() {
+    use std::os::unix::fs::PermissionsExt;
+    let (dir, mut host) = host();
+    let worksheets = dir.join("vault/.fanotes/worksheets");
+    let json = r#"{"schemaVersion":1,"id":"seite-1","title":"Seite","kind":"html","mimeType":"text/html","sourceRelativePath":".fanotes/worksheets/seite-1.html","dataRelativePath":".fanotes/worksheets/seite-1.json","createdAt":"2026-01-02T03:04:05.000Z","updatedAt":"2026-01-02T03:04:05.000Z","pageWidth":800,"pageHeight":900,"textBoxes":[],"highlights":[]}"#;
+    fs::write(worksheets.join("seite-1.json"), json).unwrap();
+    let html = worksheets.join("seite-1.html");
+    fs::write(&html, b"fanotes-onenote-safe-v1").unwrap();
+    let canonical = fs::canonicalize(&html).unwrap();
+    fs::set_permissions(&html, fs::Permissions::from_mode(0o000)).unwrap();
+    struct Restore(std::path::PathBuf);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            let _ = fs::set_permissions(&self.0, fs::Permissions::from_mode(0o600));
+        }
+    }
+    let _restore = Restore(html.clone());
+    assert_eq!(
+        host.dispatch("fanotes:read-worksheet", &[json!("seite-1")])
+            .unwrap_err(),
+        format!("EACCES: permission denied, open '{}'", canonical.display())
+    );
+    fs::set_permissions(&html, fs::Permissions::from_mode(0o600)).unwrap();
+    assert_eq!(fs::read(&html).unwrap(), b"fanotes-onenote-safe-v1");
+}
+
 #[test]
 fn an_html_safety_marker_must_sit_in_the_desktop_prefix() {
     let (dir, mut host) = host();
