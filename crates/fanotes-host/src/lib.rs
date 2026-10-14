@@ -1783,9 +1783,13 @@ fn unix_millis_from_iso(value: &str) -> Option<u64> {
     }
     let (time, offset_ms) = split_time_zone(time)?;
     let (clock, millis) = match time.split_once('.') {
-        Some((clock, fraction)) if (1..=3).contains(&fraction.len()) => {
-            let millis: u32 = fraction.parse().ok()?;
-            let scale = 10u32.pow(3 - fraction.len() as u32);
+        // `Date.parse` keeps the first three fraction digits and ignores the rest.
+        Some((clock, fraction))
+            if !fraction.is_empty() && fraction.bytes().all(|byte| byte.is_ascii_digit()) =>
+        {
+            let digits = &fraction[..fraction.len().min(3)];
+            let millis: u32 = digits.parse().ok()?;
+            let scale = 10u32.pow(3 - digits.len() as u32);
             (clock, millis * scale)
         }
         None => (time, 0),
