@@ -1817,7 +1817,13 @@ fn unix_millis_from_iso(value: &str) -> Option<u64> {
         && second == 0
         && second_text.is_none_or(|text| text.len() == 2)
         && !fraction_has_nonzero;
+    // `Date.parse` requires each present clock field to be exactly two digits.
+    // `016` is the same hour as `16`, and it is still NaN.
+    let clock_fields_are_two_digits = hour_text.len() == 2
+        && minute_text.len() == 2
+        && second_text.is_none_or(|text| text.len() == 2);
     if clock_parts.next().is_some()
+        || !clock_fields_are_two_digits
         || (hour > 23 && !hour_24_midnight)
         || minute > 59
         // `Date.parse` rejects second 60.
