@@ -2892,8 +2892,9 @@ fn parse_legacy_offset(text: &str) -> Option<LegacyOffset> {
     let mut time_fields = Vec::new();
     while index < bytes.len() {
         // `+5::30` is +5:30. Extra colons before the minute are ignored.
-        // A dot is skipped too, so `+5:.5` is five hours and five minutes.
-        if bytes[index] == b'.' || bytes[index] == b':' {
+        // A dot or slash is skipped, so `+5:.5` and `+5:/30` fill the minute.
+        // `+5/30` has no open minute, so 30 is a date number.
+        if bytes[index] == b'.' || bytes[index] == b':' || bytes[index] == b'/' {
             index += 1;
             continue;
         }
@@ -7043,6 +7044,65 @@ mod tests {
             assert_eq!(
                 super::canonical_iso("Oct 13 1950 16:00:00.5.").as_deref(),
                 Some("1950-10-13T21:00:00.500Z")
+            );
+        });
+    }
+
+    #[test]
+    fn a_slash_inside_an_offset_is_a_separator() {
+        with_tz("America/New_York", || {
+            // `+5/30` is five hours, and 30 is a date number. `+5:/30` is
+            // five hours and thirty minutes because the minute was still open.
+            assert_eq!(
+                super::canonical_iso("Oct 13 2026 16:00 +5/30").as_deref(),
+                Some("2026-10-13T11:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 2026 16:00 +5:/30").as_deref(),
+                Some("2026-10-13T10:30:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 2026 16:00 +5:30/1").as_deref(),
+                Some("2026-10-13T10:30:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 16:00 +5/30").as_deref(),
+                Some("2030-10-13T11:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 2026 16:00 GMT+5/30").as_deref(),
+                Some("2026-10-13T11:00:00.000Z")
+            );
+            assert_eq!(super::canonical_iso("2026-10-13 16:00 +5/30"), None);
+            assert_eq!(super::canonical_iso("2026-10-13 16:00 GMT+5/30"), None);
+            assert_eq!(
+                super::canonical_iso("Oct 13 16:00:00.5/1").as_deref(),
+                Some("2001-10-13T20:00:00.500Z")
+            );
+            assert_eq!(
+                super::canonical_iso("10/13/2026").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 1950 16:00 +5/30").as_deref(),
+                Some("1950-10-13T11:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 1950 16:00 +5:/30").as_deref(),
+                Some("1950-10-13T10:30:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 1950 16:00 +5:30/1").as_deref(),
+                Some("1950-10-13T10:30:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 1950 16:00 GMT+5/30").as_deref(),
+                Some("1950-10-13T11:00:00.000Z")
+            );
+            assert_eq!(super::canonical_iso("1950-10-13 16:00 +5/30"), None);
+            assert_eq!(
+                super::canonical_iso("10/13/1950").as_deref(),
+                Some("1950-10-13T05:00:00.000Z")
             );
         });
     }
