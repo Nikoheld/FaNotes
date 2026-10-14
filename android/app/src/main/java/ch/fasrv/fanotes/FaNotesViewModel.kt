@@ -61,6 +61,7 @@ import ch.fasrv.fanotes.desk.serializeHomeworkMarkdown
 import ch.fasrv.fanotes.desk.Backlink
 import ch.fasrv.fanotes.desk.backlinksFor
 import ch.fasrv.fanotes.desk.resolveWikiTarget
+import ch.fasrv.fanotes.desk.formatNoteDiff
 import ch.fasrv.fanotes.desk.applyNoteTags
 import ch.fasrv.fanotes.desk.parseNoteTags
 import ch.fasrv.fanotes.desk.applyHomeworkToCalendar
@@ -765,6 +766,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     val tagFilter = MutableStateFlow<String?>(null)
     val backlinks = MutableStateFlow<List<Backlink>>(emptyList())
     val noteHistory = MutableStateFlow<List<HistorySnapshot>>(emptyList())
+    val historyComparison = MutableStateFlow<Pair<String, String>?>(null)
     val study = MutableStateFlow<StudyPicture?>(null)
     val deskSettings = MutableStateFlow(graph.readDesk())
     val splitPath = MutableStateFlow<String?>(null)
@@ -1235,12 +1237,28 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
 
     fun refreshNoteHistory() {
         val note = open.value
+        historyComparison.value = null
         if (note == null) {
             noteHistory.value = emptyList()
             return
         }
         viewModelScope.launch {
             noteHistory.value = withContext(Dispatchers.IO) { listNoteHistory(graph.vault, historyPathFor(note)) }
+        }
+    }
+
+    fun compareHistory(snapshotId: String) {
+        val note = open.value ?: return
+        val current = markdown.value
+        viewModelScope.launch {
+            val text = withContext(Dispatchers.IO) {
+                runCatching { formatNoteDiff(readNoteHistory(graph.vault, historyPathFor(note), snapshotId).content, current) }
+                    .getOrElse { error ->
+                        message.value = error.message ?: "Der Vergleich ist fehlgeschlagen."
+                        return@withContext null
+                    }
+            } ?: return@launch
+            historyComparison.value = snapshotId to text
         }
     }
 
