@@ -935,17 +935,22 @@ pub fn canonical_iso(value: &str) -> Option<String> {
     if is_date_only_shape(trimmed) {
         return date_only_iso(trimmed, surrounded);
     }
-    // `2026 10 13` is not a year plus a clock. A space-separated number list
-    // is a legacy date, and a clock that does not parse is not an ISO time.
+    // `2026 10 13` is not a year plus a clock. A tail with no colon is a legacy
+    // number, such as `2026 10`. A clock that fails to parse is not an ISO time.
     let Some((year, month, day, time_at)) = split_calendar(source) else {
-        return legacy_spaced_numbers(trimmed);
+        return legacy_numeric_iso(trimmed);
     };
     if !(1..=12).contains(&month) || !(1..=31).contains(&day) {
         return None;
     }
-    let Some((mut hour, minute, second, millis, rest)) = parse_clock(source.get(time_at..)?)
-    else {
-        return legacy_spaced_numbers(trimmed);
+    let time_text = source.get(time_at..)?;
+    let Some((mut hour, minute, second, millis, rest)) = parse_clock(time_text) else {
+        // `2026-10-13 16:00:60` is a broken ISO clock. `2026 10 13 16:00`
+        // is a legacy date whose tail is not one clock.
+        if time_text.contains(':') && !time_text.contains(is_date_parse_space) {
+            return None;
+        }
+        return legacy_numeric_iso(trimmed);
     };
     let (mut year, mut month, mut day) = normalize_ymd(year, month, day)?;
     if hour == 24 {
@@ -1255,37 +1260,21 @@ fn strip_leading_word(trimmed: &str) -> Option<String> {
     Some(format!(" {rest}"))
 }
 
-/// `10 13 2026` is month, day, year. `2026 10 13` is year, month, day.
-/// One number is 1 January of that legacy year. Two numbers are not a date.
-fn legacy_spaced_numbers(trimmed: &str) -> Option<String> {
-    let words: Vec<&str> = trimmed
-        .split(is_date_parse_space)
-        .filter(|word| !word.is_empty())
-        .collect();
-    if words.is_empty() || words.iter().any(|word| unsigned_number(word).is_none()) {
-        return None;
-    }
-    let numbers: Vec<i32> = words
-        .iter()
-        .map(|word| unsigned_number(word).unwrap())
-        .collect();
-    let (year, month, day) = match numbers.as_slice() {
-        [year] => (legacy_year_number(*year)?, 1, 1),
-        [month, day, year] if (1..=12).contains(month) => {
-            (legacy_year_number(*year)?, *month, *day)
+/// A date with no month name. `5` is 1 May 2001. `10 13 2026 GMT` is
+/// 13 October 2026 at midnight UTC. `4:00 PM5` is 16:00 that May.
+fn legacy_numeric_iso(trimmed: &str) -> Option<String> {
+    let words = month_words(trimmed);
+    let (month, day, year, clock, offset) = compose_month_date(&words, true)?;
+    let (year, month, day, suffix) = match offset {
+        None => (year, month, day, String::new()),
+        Some(minutes) => {
+            let (delta, suffix) = fold_offset_days(minutes)?;
+            let (year, month, day) = shift_ymd(year, month, day, delta)?;
+            (year, month, day, suffix)
         }
-        [year, month, day] if *year == 0 || *year >= 32 => {
-            (legacy_year_number(*year)?, *month, *day)
-        }
-        _ => return None,
     };
-    if !(1..=12).contains(&month) || day < 1 {
-        return None;
-    }
-    let (year, month, day) = normalize_ymd(year, month, day)?;
-    let (year, month, day, hour, minute, second) = local_civil_to_utc(year, month, day, 0, 0, 0)?;
-    Some(format_civil_iso(
-        year, month, day, hour, minute, second, 0,
+    canonical_iso(&format!(
+        "{year:04}-{month:02}-{day:02}T{clock}{suffix}"
     ))
 }
 
@@ -1530,7 +1519,7 @@ fn legacy_year_number(year: i32) -> Option<i32> {
 /// already set. The third date number is ignored. A fourth is not a date.
 fn rewrite_month_name(trimmed: &str) -> Option<String> {
     let words = month_words(trimmed);
-    let (month, day, year, clock, offset) = compose_month_date(&words)?;
+    let (month, day, year, clock, offset) = compose_month_date(&words, false)?;
     let (year, month, day, suffix) = match offset {
         None => (year, month, day, String::new()),
         Some(minutes) => {
@@ -1726,7 +1715,10 @@ impl MonthTime {
     }
 }
 
-fn compose_month_date(words: &[&str]) -> Option<(i32, i32, i32, String, Option<i64>)> {
+fn compose_month_date(
+    words: &[&str],
+    numeric: bool,
+) -> Option<(i32, i32, i32, String, Option<i64>)> {
     let mut month = None;
     let mut dates = Vec::new();
     let mut time = MonthTime::new();
@@ -1824,22 +1816,30 @@ fn compose_month_date(words: &[&str]) -> Option<(i32, i32, i32, String, Option<i
             return None;
         }
     }
-    let month = month?;
     if dates.is_empty() {
         return None;
     }
     // A named month uses the first two numbers. The third is ignored.
-    // One number pads the other field with 1, which is day 1 or year 2001.
-    let first = dates[0];
-    let second = dates.get(1).copied().unwrap_or(1);
-    let (day, year) = if (1..=31).contains(&first) {
-        (first, legacy_year_number(second)?)
+    // With no month name, one to three numbers are month-day-year unless the
+    // first number cannot be a day, in which case they are year-month-day.
+    // A missing field is 1, so `5` is 1 May 2001 and `2026` is 1 January.
+    let (month, day, year) = if let Some(month) = month {
+        let first = dates[0];
+        let second = dates.get(1).copied().unwrap_or(1);
+        let (day, year) = if (1..=31).contains(&first) {
+            (first, legacy_year_number(second)?)
+        } else {
+            (second, legacy_year_number(first)?)
+        };
+        if !(1..=31).contains(&day) {
+            return None;
+        }
+        (month, day, year)
+    } else if numeric {
+        numeric_month_day_year(&dates)?
     } else {
-        (second, legacy_year_number(first)?)
-    };
-    if !(1..=31).contains(&day) {
         return None;
-    }
+    };
     Some((
         month,
         day,
@@ -1847,6 +1847,23 @@ fn compose_month_date(words: &[&str]) -> Option<(i32, i32, i32, String, Option<i
         finish_month_time(&time, hour_offset)?,
         offset,
     ))
+}
+
+/// No month name. `10 13 2026` is month, day, year. `2026 10 13` is
+/// year, month, day. A missing field is 1.
+fn numeric_month_day_year(dates: &[i32]) -> Option<(i32, i32, i32)> {
+    let first = dates[0];
+    let second = dates.get(1).copied().unwrap_or(1);
+    let third = dates.get(2).copied().unwrap_or(1);
+    let (year, month, day) = if !(1..=31).contains(&first) {
+        (legacy_year_number(first)?, second, third)
+    } else {
+        (legacy_year_number(third)?, first, second)
+    };
+    if !(1..=12).contains(&month) || day < 1 {
+        return None;
+    }
+    Some((month, day, year))
 }
 
 /// `+2026` before the first number is 2026. After a number, the sign is not
@@ -2439,6 +2456,9 @@ fn legacy_hyphen_date(value: &str) -> Option<String> {
         .map(|field| field.parse::<i32>().ok())
         .collect::<Option<Vec<_>>>()?;
     let (year, month, day) = match numbers.as_slice() {
+        // `5` is 1 May 2001. `13` is not a month, so it is not a date.
+        // `32` and `0` are 1 January of that legacy year.
+        [first] if (1..=31).contains(first) => (2001, *first, 1),
         [year] => (legacy_year_number(*year)?, 1, 1),
         [first, second] if (1..=12).contains(first) && (1..=31).contains(second) => {
             (2001, *first, *second)
@@ -4055,6 +4075,171 @@ mod tests {
             assert_eq!(super::canonical_iso("Oct 13 2026 4:00 p.m.5"), None);
             assert_eq!(super::canonical_iso("Oct 13 2026 11 PM5"), None);
             assert_eq!(super::canonical_iso("16:00 PM5 Oct 13 2026"), None);
+        });
+    }
+
+    #[test]
+    fn a_number_without_a_month_is_a_legacy_date() {
+        with_tz("America/New_York", || {
+            // One number from 1 to 31 is that month in 2001. A larger number is
+            // 1 January of that year. A zone or a clock does not need a month name.
+            assert_eq!(
+                super::canonical_iso("5").as_deref(),
+                Some("2001-05-01T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("hello 5").as_deref(),
+                Some("2001-05-01T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("12").as_deref(),
+                Some("2001-12-01T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("32").as_deref(),
+                Some("2032-01-01T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("50").as_deref(),
+                Some("1950-01-01T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("5 GMT").as_deref(),
+                Some("2001-05-01T00:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("5GMT").as_deref(),
+                Some("2001-05-01T00:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("5EST").as_deref(),
+                Some("2001-05-01T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("50GMT").as_deref(),
+                Some("1950-01-01T00:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("1 GMT").as_deref(),
+                Some("2001-01-01T00:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("12 GMT").as_deref(),
+                Some("2001-12-01T00:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("32 GMT").as_deref(),
+                Some("2032-01-01T00:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("10 13").as_deref(),
+                Some("2001-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("10 13 GMT").as_deref(),
+                Some("2001-10-13T00:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("hello 10 13").as_deref(),
+                Some("2001-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026 10").as_deref(),
+                Some("2026-10-01T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026 10 GMT").as_deref(),
+                Some("2026-10-01T00:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("10 13 2026 GMT").as_deref(),
+                Some("2026-10-13T00:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("10 13 2026 EST").as_deref(),
+                Some("2026-10-13T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("10 13 2026 16:00").as_deref(),
+                Some("2026-10-13T20:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("10 13 2026 16:00 GMT").as_deref(),
+                Some("2026-10-13T16:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("10 13 2026 16:00 EST").as_deref(),
+                Some("2026-10-13T21:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026 10 13 16:00 EST").as_deref(),
+                Some("2026-10-13T21:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("10 13 2026 4:00 PM").as_deref(),
+                Some("2026-10-13T20:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("4:00 PM5").as_deref(),
+                Some("2001-05-01T20:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("4:00:60 PM5").as_deref(),
+                Some("1960-01-01T21:00:05.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("5GMT5").as_deref(),
+                Some("2001-05-05T00:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("5EST13").as_deref(),
+                Some("2001-05-13T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026EST").as_deref(),
+                Some("2026-01-01T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("0 1 2").as_deref(),
+                Some("2000-01-02T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("99 1 2").as_deref(),
+                Some("1999-01-02T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("10 13 2026 GMT+5").as_deref(),
+                Some("2026-10-12T19:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("10 13 2026 16:00 +5").as_deref(),
+                Some("2026-10-13T11:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("10 13 2026 24:00 GMT").as_deref(),
+                Some("2026-10-14T00:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026").as_deref(),
+                Some("2026-01-01T00:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("1").as_deref(),
+                Some("2001-01-01T05:00:00.000Z")
+            );
+            assert_eq!(super::canonical_iso("13"), None);
+            assert_eq!(super::canonical_iso("31"), None);
+            assert_eq!(super::canonical_iso("hello 13"), None);
+            assert_eq!(super::canonical_iso("13 GMT"), None);
+            assert_eq!(super::canonical_iso("13 2026 GMT"), None);
+            assert_eq!(super::canonical_iso("10 13 2026 GMT5"), None);
+            assert_eq!(super::canonical_iso("10 13 2026 4:00 PM5"), None);
+            assert_eq!(super::canonical_iso("4:00 PM"), None);
+            assert_eq!(super::canonical_iso("16:00"), None);
+            assert_eq!(super::canonical_iso("16:00 GMT"), None);
+            assert_eq!(super::canonical_iso("13 1 2026"), None);
+            assert_eq!(super::canonical_iso("10 13 2026 16:00:60"), None);
+            assert_eq!(super::canonical_iso("10 13 2026 16:60"), None);
         });
     }
 
