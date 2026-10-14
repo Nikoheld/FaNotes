@@ -1779,6 +1779,11 @@ fn unix_millis_from_iso(value: &str) -> Option<u64> {
         let normalized = fold_ampm(trimmed)?;
         return unix_millis_from_iso(&normalized);
     }
+    if let Some(normalized) = fold_trailing_zone(trimmed) {
+        // `16:00 EST` is a fixed offset. `(EST)` is a comment, so the clock
+        // stays local.
+        return unix_millis_from_iso(&normalized);
+    }
     if has_english_month(trimmed) {
         // `Oct 13, 2026` is local midnight. `GMT` and `EST` name an offset.
         let normalized = rewrite_month_name(trimmed)?;
@@ -2194,6 +2199,42 @@ fn ampm_hour(hour: u32, pm: bool) -> Option<u32> {
         return Some(if pm { 12 } else { 0 });
     }
     Some(if pm { hour + 12 } else { hour })
+}
+
+/// Attach `EST` or `GMT+5` to the clock, and drop one trailing `(comment)`.
+fn fold_trailing_zone(trimmed: &str) -> Option<String> {
+    let words: Vec<&str> = trimmed
+        .split(is_date_parse_space)
+        .filter(|word| !word.is_empty())
+        .collect();
+    if words.len() < 2 {
+        return None;
+    }
+    let mut end = words.len();
+    let mut changed = false;
+    if let Some(token) = words.last() {
+        if token.starts_with('(') && token.ends_with(')') && token.len() > 2 {
+            end -= 1;
+            changed = true;
+        }
+    }
+    if end >= 2 && words[end - 2].contains(':') && named_zone_offset(words[end - 1]).is_some() {
+        let suffix = named_zone_offset(words[end - 1])?;
+        let clock = format!("{}{suffix}", words[end - 2]);
+        let mut kept = Vec::new();
+        for (index, word) in words.iter().enumerate() {
+            if index == end - 2 {
+                kept.push(clock.clone());
+            } else if index < end - 2 {
+                kept.push((*word).to_string());
+            }
+        }
+        return Some(kept.join(" "));
+    }
+    if changed && end > 0 {
+        return Some(words[..end].join(" "));
+    }
+    None
 }
 
 fn legacy_words(value: &str) -> Vec<&str> {
@@ -5434,6 +5475,24 @@ mod local_zone_tests {
         );
         assert_eq!(
             unix_millis_from_iso("2026-10-13 4:00 PM"),
+            Some(1_791_921_600_000)
+        );
+    }
+
+    #[test]
+    fn a_named_zone_after_a_hyphen_date_is_a_fixed_offset() {
+        let _lock = TRASH_CLOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let _restore = RestoreTz(std::env::var_os("TZ"));
+        unsafe { std::env::set_var("TZ", "America/New_York") };
+        unsafe { tzset() };
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 16:00 EST"),
+            Some(1_791_925_200_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 16:00:00 (EST)"),
             Some(1_791_921_600_000)
         );
     }
