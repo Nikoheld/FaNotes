@@ -2505,16 +2505,15 @@ fn create_exclusive_note(path: &Path, markdown: &str) -> Result<(), CreateAttemp
     {
         use std::os::unix::fs::OpenOptionsExt;
         options.mode(0o600);
+        options.custom_flags(libc::O_NOFOLLOW);
     }
     let mut file = match options.open(path) {
         Ok(file) => file,
         Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
             return Err(CreateAttempt::Taken);
         }
-        Err(_) => {
-            return Err(CreateAttempt::Failed(
-                "Die Notiz konnte nicht angelegt werden.".to_owned(),
-            ));
+        Err(error) => {
+            return Err(CreateAttempt::Failed(notes::node_open_error(path, &error)));
         }
     };
     use std::io::Write;
@@ -2542,9 +2541,7 @@ fn create_exclusive_folder(path: &Path) -> Result<(), CreateAttempt> {
         Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
             Err(CreateAttempt::Taken)
         }
-        Err(_) => Err(CreateAttempt::Failed(
-            "Der Ordner konnte nicht angelegt werden.".to_owned(),
-        )),
+        Err(error) => Err(CreateAttempt::Failed(vault::node_mkdir_error(path, &error))),
     }
 }
 

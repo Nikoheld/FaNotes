@@ -2060,3 +2060,34 @@ fn an_unwritable_note_folder_uses_a_twenty_hex_temporary_name() {
     std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o700)).unwrap();
     assert_eq!(std::fs::read(&note).unwrap(), b"Hallo\n");
 }
+
+#[cfg(unix)]
+#[test]
+fn an_unwritable_folder_reports_the_desktop_create_errors() {
+    use std::os::unix::fs::PermissionsExt;
+    let (mut host, _) = host();
+    let folder = host.vault.clone().unwrap().join("Mathe");
+    std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o555)).unwrap();
+    struct Restore(std::path::PathBuf);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            let _ = std::fs::set_permissions(&self.0, std::fs::Permissions::from_mode(0o700));
+        }
+    }
+    let _restore = Restore(folder.clone());
+    let note = folder.join("Seite.md");
+    let created = folder.join("Neu");
+    assert_eq!(
+        host.dispatch("fanotes:create-note", &[json!("Mathe"), json!("Seite")])
+            .unwrap_err(),
+        format!("EACCES: permission denied, open '{}'", note.display())
+    );
+    assert_eq!(
+        host.dispatch("fanotes:create-folder", &[json!("Mathe"), json!("Neu")])
+            .unwrap_err(),
+        format!("EACCES: permission denied, mkdir '{}'", created.display())
+    );
+    std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o700)).unwrap();
+    assert!(!note.exists());
+    assert!(!created.exists());
+}
