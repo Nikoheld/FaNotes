@@ -209,3 +209,48 @@ fn a_missing_onenote_source_uses_the_desktop_lstat_error() {
         )
     );
 }
+
+#[cfg(unix)]
+#[test]
+fn an_unwritable_onenote_internal_folder_reports_the_desktop_mkdir_error() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = std::env::temp_dir().join(format!(
+        "fanotes-onenote-internal-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    let vault = dir.join("vault");
+    let internal = vault.join(".fanotes");
+    fs::create_dir_all(&internal).unwrap();
+    let mut host = Host::open(dir.join("app"));
+    host.set_vault(vault).unwrap();
+    fs::set_permissions(&internal, fs::Permissions::from_mode(0o555)).unwrap();
+    struct Restore(std::path::PathBuf);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            let _ = fs::set_permissions(&self.0, fs::Permissions::from_mode(0o700));
+            if let Some(root) = self.0.parent().and_then(|path| path.parent()) {
+                let _ = fs::remove_dir_all(root);
+            }
+        }
+    }
+    let _restore = Restore(internal.clone());
+    let fixture = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../fanotes/scripts/fixtures/onenote/Open Notebook.onetoc2");
+    assert_eq!(
+        host.dispatch(
+            "fanotes:import-onenote",
+            &[json!(fixture.to_string_lossy())],
+        )
+        .unwrap_err(),
+        format!(
+            "EACCES: permission denied, mkdir '{}'",
+            internal.join("onenote").display()
+        )
+    );
+    assert!(!internal.join("onenote").exists());
+}
