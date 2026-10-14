@@ -1770,7 +1770,7 @@ fn marker_is_fresh(created_at: &str) -> bool {
 }
 
 fn unix_millis_from_iso(value: &str) -> Option<u64> {
-    let Some((date, time)) = value.split_once('T') else {
+    let Some((date, time)) = split_date_time(value) else {
         // `Date.parse('YYYY-MM-DD')` is UTC midnight.
         return date_only_millis(value);
     };
@@ -1820,6 +1820,19 @@ fn unix_millis_from_iso(value: &str) -> Option<u64> {
         + i64::from(millis);
     // A positive offset is ahead of UTC, so the UTC instant is earlier.
     u64::try_from(local.checked_sub(offset_ms)?).ok()
+}
+
+/// `Date.parse` separates the date and the clock with `T`, `t`, or spaces.
+fn split_date_time(value: &str) -> Option<(&str, &str)> {
+    if let Some((date, time)) = value.split_once(['T', 't']) {
+        return Some((date, time));
+    }
+    let (date, rest) = value.split_once(' ')?;
+    let time = rest.trim_start_matches(' ');
+    if time.is_empty() || time.contains(' ') {
+        return None;
+    }
+    Some((date, time))
 }
 
 /// `Z`, `z`, `+HH:MM`, `-HH:MM`, `+HHMM`, or `-HHMM` after the clock.
