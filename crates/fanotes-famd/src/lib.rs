@@ -908,6 +908,10 @@ pub fn canonical_iso(value: &str) -> Option<String> {
         }
         return canonical_iso(&normalized);
     }
+    if let Some(next) = separate_meridiem_offset(value) {
+        // `PM+5` and `PM+5:30` are a meridiem and then an offset.
+        return canonical_iso(&next);
+    }
     if has_ampm_word(trimmed) {
         // `4:00 PM` is 16:00. A `T` before AM/PM is NaN. `AM` before a date
         // is an ordinary word, so a clock that does not fold falls through.
@@ -1029,6 +1033,43 @@ fn has_english_month(value: &str) -> bool {
     month_words(value).iter().any(|word| english_month(word).is_some())
 }
 
+/// `4:00 PM+5:30` is 16:00 at UTC+5:30. The sign starts the offset. `4:00PM+5`
+/// stays one word, and `PMGMT` is not an offset.
+fn separate_meridiem_offset(value: &str) -> Option<String> {
+    let chars: Vec<char> = value.chars().collect();
+    let mut out = String::with_capacity(value.len() + 1);
+    let mut changed = false;
+    let mut index = 0;
+    while index < chars.len() {
+        if meridiem_boundary(&chars, index)
+            && index + 2 < chars.len()
+            && matches!(chars[index + 2], '+' | '-')
+        {
+            out.push(chars[index]);
+            out.push(chars[index + 1]);
+            out.push(' ');
+            changed = true;
+            index += 2;
+            continue;
+        }
+        out.push(chars[index]);
+        index += 1;
+    }
+    if changed { Some(out) } else { None }
+}
+
+fn meridiem_boundary(chars: &[char], index: usize) -> bool {
+    if index + 1 >= chars.len() {
+        return false;
+    }
+    let first = chars[index].to_ascii_lowercase();
+    let second = chars[index + 1].to_ascii_lowercase();
+    if !matches!((first, second), ('a', 'm') | ('p', 'm')) {
+        return false;
+    }
+    index == 0 || !chars[index - 1].is_ascii_alphanumeric()
+}
+
 fn has_ampm_word(value: &str) -> bool {
     value
         .split(char::is_whitespace)
@@ -1090,14 +1131,27 @@ fn ampm_clock(clock: &str, pm: bool) -> Option<String> {
     // `4:00:60 PM` is still a clock. The 60 is a date number on a month-name
     // date, so the hour changes and the rest of the field stays in the text.
     let (hour_text, rest) = clock.split_once(':')?;
-    if hour_text.is_empty()
-        || rest.is_empty()
-        || !hour_text.bytes().all(|byte| byte.is_ascii_digit())
-    {
+    if hour_text.is_empty() || !hour_text.bytes().all(|byte| byte.is_ascii_digit()) {
         return None;
+    }
+    if rest.is_empty() {
+        // `4: PM` is 16:00. The missing minute is zero.
+        return legacy_meridiem_clock(clock, pm);
     }
     let hour = ampm_hour(hour_text.parse().ok()?, pm)?;
     Some(format!("{hour:02}:{rest}"))
+}
+
+fn legacy_meridiem_clock(clock: &str, pm: bool) -> Option<String> {
+    let mut time = MonthTime::new();
+    let mut dates = Vec::new();
+    let mut offset = None;
+    let mut minute_sign = 0i64;
+    take_month_clock(clock, &mut time, &mut dates, &mut offset, &mut minute_sign)?;
+    if time.index == 0 || !dates.is_empty() || offset.is_some() || minute_sign != 0 {
+        return None;
+    }
+    finish_month_time(&time, Some(if pm { 12 } else { 0 }))
 }
 
 fn in_range_ampm_clock(clock: &str, pm: bool) -> Option<String> {
@@ -5515,6 +5569,112 @@ mod tests {
             assert_eq!(super::canonical_iso("2026-10-13 16:00+5Z5"), None);
             assert_eq!(super::canonical_iso("2026-10-13T16:00+5"), None);
             assert_eq!(super::canonical_iso("1950-10-13 16:00EST"), None);
+        });
+    }
+
+    #[test]
+    fn a_meridiem_can_carry_an_offset() {
+        with_tz("America/New_York", || {
+            // `PM+5` is the meridiem and then an offset. `4:00PM+5` is empty
+            // because the meridiem touches the clock. A `T` form is empty too.
+            assert_eq!(
+                super::canonical_iso("2026-10-13 4:00 PM+5").as_deref(),
+                Some("2026-10-13T11:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 4:00 PM+5:30").as_deref(),
+                Some("2026-10-13T10:30:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 4:00 PM+5:3").as_deref(),
+                Some("2026-10-13T10:57:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 4:00 PM+0530").as_deref(),
+                Some("2026-10-13T10:30:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 4:00 PM-5").as_deref(),
+                Some("2026-10-13T21:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 4:00 AM+5").as_deref(),
+                Some("2026-10-12T23:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 12:00 AM+5").as_deref(),
+                Some("2026-10-12T19:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 12:00 PM+5").as_deref(),
+                Some("2026-10-13T07:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 4:00 PM+24").as_deref(),
+                Some("2026-10-12T16:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 4:00 PM+5 EST").as_deref(),
+                Some("2026-10-13T21:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 4:00 PM+5EST").as_deref(),
+                Some("2026-10-13T21:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 4:00 PM+5GMT").as_deref(),
+                Some("2026-10-13T16:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 4:00 pm+5").as_deref(),
+                Some("2026-10-13T11:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 4:5 PM+5").as_deref(),
+                Some("2026-10-13T11:05:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 4: PM+5").as_deref(),
+                Some("2026-10-13T11:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 2026 4:00 PM+5").as_deref(),
+                Some("2026-10-13T11:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 2026 4: PM+5").as_deref(),
+                Some("2026-10-13T11:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("10/13/2026 4:00 PM+5").as_deref(),
+                Some("2026-10-13T11:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("10/13/2026 4: PM+5").as_deref(),
+                Some("2026-10-13T11:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 4:00 PM +5").as_deref(),
+                Some("2026-10-13T11:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("1950-10-13 4:00 PM+5").as_deref(),
+                Some("1950-10-13T11:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("1950-10-13 4:00 PM+5EST").as_deref(),
+                Some("1950-10-13T21:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("1950-10-13 12:00 AM+5").as_deref(),
+                Some("1950-10-12T19:00:00.000Z")
+            );
+            assert_eq!(super::canonical_iso("2026-10-13 4:00PM+5"), None);
+            assert_eq!(super::canonical_iso("2026-10-13 4:00 PMGMT"), None);
+            assert_eq!(super::canonical_iso("2026-10-13 4:00 PM+"), None);
+            assert_eq!(super::canonical_iso("2026-10-13 16:00 PM+5"), None);
+            assert_eq!(super::canonical_iso("2026-10-13T4:00 PM+5"), None);
+            assert_eq!(super::canonical_iso("1950-10-13T4:00 PM+5"), None);
         });
     }
 
