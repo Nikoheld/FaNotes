@@ -111,6 +111,11 @@ class NoteStore(private val io: VaultIo) {
             obj.put("paperStyle", jsonString(document.paperStyle))
         }
         val famdPath = if (note.path.endsWith(FAMD_EXTENSION)) note.path else companionPath(note.path, FAMD_EXTENSION)
+        val historyPath = if (note.kind == NoteKind.PDF || note.path.endsWith(FAMD_EXTENSION)) famdPath else note.path
+        val previous = io.read(historyPath)?.decodeToString()
+        if (previous != null) {
+            runCatching { recordNoteHistory(io, historyPath, previous) }
+        }
         io.write(famdPath, serializeFamd(withMarker, payload).encodeToByteArray())
         if (note.kind == NoteKind.MARKDOWN && !note.path.endsWith(FAMD_EXTENSION)) {
             val body = stripFamdPayload(withMarker)

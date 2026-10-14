@@ -23,7 +23,13 @@ import ch.fasrv.fanotes.desk.cardsFromMarkdown
 import ch.fasrv.fanotes.desk.dailyNotePath
 import ch.fasrv.fanotes.desk.emptyCalendar
 import ch.fasrv.fanotes.desk.parseCalendarMarkdown
+import ch.fasrv.fanotes.desk.FOLDER_COLOR_CHOICES
+import ch.fasrv.fanotes.desk.FOLDER_COLORS_PATH
+import ch.fasrv.fanotes.desk.isMarkdownConflictPath
 import ch.fasrv.fanotes.desk.parseFolderColors
+import ch.fasrv.fanotes.desk.resolveMarkdownConflict
+import ch.fasrv.fanotes.desk.serializeFolderColors
+import ch.fasrv.fanotes.desk.withFolderColor
 import ch.fasrv.fanotes.desk.parseHomeworkMarkdown
 import ch.fasrv.fanotes.desk.parseSubjectBooks
 import ch.fasrv.fanotes.desk.parseWorksheetBoxes
@@ -33,12 +39,15 @@ import ch.fasrv.fanotes.desk.serializeHomeworkMarkdown
 import ch.fasrv.fanotes.desk.wikiTargets
 import ch.fasrv.fanotes.desk.wordCount
 import ch.fasrv.fanotes.famd.companionPath
+import ch.fasrv.fanotes.famd.parseFamd
+import ch.fasrv.fanotes.famd.stripFamdPayload
 import ch.fasrv.fanotes.famd.isoNow
 import ch.fasrv.fanotes.ink.InkSession
 import ch.fasrv.fanotes.ink.InkTool
 import ch.fasrv.fanotes.ink.PAGE_START_WIDTH
 import ch.fasrv.fanotes.ink.StrokeStyle
 import ch.fasrv.fanotes.ink.layoutPdfStack
+import ch.fasrv.fanotes.ink.parseInkDocument
 import ch.fasrv.fanotes.ink.newInkDocument
 import ch.fasrv.fanotes.ink.pdfStackHeight
 import ch.fasrv.fanotes.json.JsonValue
@@ -48,8 +57,12 @@ import ch.fasrv.fanotes.json.jsonObject
 import ch.fasrv.fanotes.json.jsonString
 import ch.fasrv.fanotes.json.parseJson
 import ch.fasrv.fanotes.json.stringify
+import ch.fasrv.fanotes.sync.SyncConflict
 import ch.fasrv.fanotes.sync.SyncStatus
+import ch.fasrv.fanotes.vault.HistorySnapshot
 import ch.fasrv.fanotes.vault.NoteKind
+import ch.fasrv.fanotes.vault.listNoteHistory
+import ch.fasrv.fanotes.vault.readNoteHistory
 import ch.fasrv.fanotes.vault.OpenNote
 import ch.fasrv.fanotes.vault.VaultNode
 import kotlinx.coroutines.Dispatchers
@@ -117,7 +130,11 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
 
     fun refreshTree() {
         viewModelScope.launch {
-            tree.value = withContext(Dispatchers.IO) { graph.store.tree() }
+            val loaded = withContext(Dispatchers.IO) {
+                graph.store.tree() to (graph.vault.read(FOLDER_COLORS_PATH)?.decodeToString()?.let(::parseFolderColors).orEmpty())
+            }
+            tree.value = loaded.first
+            folderColors.value = loaded.second
         }
     }
 
@@ -171,9 +188,13 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
                 val revision = editRevision
                 val document = session.document
                 val text = markdown.value
-                val saved = withContext(Dispatchers.IO) { graph.store.save(note, document, text) }
+                val saved = withContext(Dispatchers.IO) {
+                    val written = graph.store.save(note, document, text)
+                    written to listNoteHistory(graph.vault, historyPathFor(written))
+                }
                 if (revision != editRevision) continue
-                open.value = saved
+                open.value = saved.first
+                noteHistory.value = saved.second
                 dirty = false
                 graph.busyPaths = emptySet()
                 graph.engine.notifyLocalChange()
@@ -473,7 +494,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     val calendar = MutableStateFlow(emptyCalendar())
     val books = MutableStateFlow<List<SubjectBook>>(emptyList())
     val folderColors = MutableStateFlow<Map<String, String>>(emptyMap())
-    val historyPaths = MutableStateFlow<List<String>>(emptyList())
+    val noteHistory = MutableStateFlow<List<HistorySnapshot>>(emptyList())
     val deskSettings = MutableStateFlow(graph.readDesk())
     val splitPath = MutableStateFlow<String?>(null)
     val splitSession = InkSession(newInkDocument("Spalte", "dots", isoNow()))
@@ -487,7 +508,8 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         when (id) {
             "tasks" -> loadHomework()
             "calendar" -> loadCalendar()
-            "overview", "books", "history" -> loadVaultMeta()
+            "overview", "books" -> loadVaultMeta()
+            "history" -> refreshNoteHistory()
         }
     }
 
@@ -644,15 +666,90 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             val loaded = withContext(Dispatchers.IO) {
                 val books = graph.vault.read(".fanotes/subject-books.json")?.decodeToString()?.let(::parseSubjectBooks).orEmpty()
-                val colors = graph.vault.read(".fanotes/folder-colors.json")?.decodeToString()?.let(::parseFolderColors).orEmpty()
-                val history = graph.vault.walkFiles().map { it.path }.filter { it.startsWith(".fanotes/history/") }.sortedDescending().take(80)
-                Triple(books, colors, history)
+                val colors = graph.vault.read(FOLDER_COLORS_PATH)?.decodeToString()?.let(::parseFolderColors).orEmpty()
+                books to colors
             }
             books.value = loaded.first
             folderColors.value = loaded.second
-            historyPaths.value = loaded.third
         }
     }
+
+    fun refreshNoteHistory() {
+        val note = open.value
+        if (note == null) {
+            noteHistory.value = emptyList()
+            return
+        }
+        viewModelScope.launch {
+            noteHistory.value = withContext(Dispatchers.IO) { listNoteHistory(graph.vault, historyPathFor(note)) }
+        }
+    }
+
+    fun restoreHistory(snapshotId: String) {
+        val note = open.value ?: return
+        viewModelScope.launch {
+            val file = withContext(Dispatchers.IO) { readNoteHistory(graph.vault, historyPathFor(note), snapshotId) }
+            val payload = runCatching { parseFamd(file.content) }.getOrNull()?.payload
+            val ink = payload?.obj("ink")
+            if (payload != null && ink != null) {
+                session.replace(parseInkDocument(ink, note.title, payload.string("paperStyle") ?: note.document.paperStyle, isoNow()))
+                canvasToken.value += 1
+            }
+            updateMarkdown(stripFamdPayload(file.content))
+            message.value = "Ältere Version wiederhergestellt. Speichern sichert sie."
+            destination.value = "notes"
+        }
+    }
+
+    fun cycleFolderColor(path: String) {
+        viewModelScope.launch {
+            val updated = withContext(Dispatchers.IO) {
+                val current = folderColors.value
+                val index = FOLDER_COLOR_CHOICES.indexOf(current[path])
+                val color = if (index < 0) FOLDER_COLOR_CHOICES.first() else FOLDER_COLOR_CHOICES.getOrNull(index + 1)
+                val next = withFolderColor(current, path, color)
+                graph.vault.write(FOLDER_COLORS_PATH, serializeFolderColors(next).encodeToByteArray())
+                next
+            }
+            folderColors.value = updated
+            graph.engine.notifyLocalChange()
+        }
+    }
+
+    fun resolveConflict(conflict: SyncConflict, choice: String) {
+        viewModelScope.launch {
+            val messageText = withContext(Dispatchers.IO) {
+                runCatching {
+                    val remote = graph.vault.read(conflict.path)?.decodeToString()
+                    val local = graph.vault.read(conflict.copyPath)?.decodeToString()
+                    when (choice) {
+                        "remote" -> graph.vault.delete(conflict.copyPath)
+                        "local" -> {
+                            if (local != null) graph.vault.write(conflict.path, local.encodeToByteArray())
+                            graph.vault.delete(conflict.copyPath)
+                        }
+                        "both" -> {
+                            if (remote != null && local != null && isMarkdownConflictPath(conflict.path)) {
+                                graph.vault.write(conflict.path, resolveMarkdownConflict(remote, local, "both").encodeToByteArray())
+                                graph.vault.delete(conflict.copyPath)
+                            }
+                        }
+                    }
+                    "Konflikt gelöst."
+                }.getOrElse { "Der Konflikt konnte nicht gelöst werden." }
+            }
+            if (messageText == "Konflikt gelöst.") {
+                graph.engine.dismissConflict(conflict.copyPath)
+                graph.engine.notifyLocalChange()
+                refreshTree()
+                if (open.value?.path == conflict.path) openPath(conflict.path, force = true)
+            }
+            message.value = messageText
+        }
+    }
+
+    private fun historyPathFor(note: OpenNote): String =
+        if (note.kind == NoteKind.PDF) companionPath(note.path, ".famd") else note.path
 
     fun backlinks(): List<String> {
         val title = open.value?.title ?: return emptyList()
