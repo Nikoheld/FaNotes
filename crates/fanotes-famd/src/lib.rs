@@ -813,6 +813,11 @@ pub fn canonical_iso(value: &str) -> Option<String> {
         let normalized = rewrite_month_name(trimmed)?;
         return canonical_iso(&normalized);
     }
+    if trimmed.contains('/') {
+        // `2026/10/13` is local midnight. `10/13/2026` is the same day.
+        let normalized = rewrite_slash_date(trimmed)?;
+        return canonical_iso(&normalized);
+    }
     if is_date_only_shape(trimmed) {
         return date_only_iso(trimmed);
     }
@@ -931,6 +936,87 @@ fn rewrite_month_name(trimmed: &str) -> Option<String> {
     }
     let (clock, zone) = month_clock_and_zone(&words[rest_at..])?;
     Some(format!("{year:04}-{month:02}-{day:02}T{clock}{zone}"))
+}
+
+/// `YYYY/M/D` or `M/D/YYYY`. A date alone is local midnight. `T` is not a separator.
+fn rewrite_slash_date(trimmed: &str) -> Option<String> {
+    if trimmed.contains(['T', 't']) {
+        return None;
+    }
+    let (date, time) = if let Some(index) = trimmed.find(char::is_whitespace) {
+        let time = trimmed[index..].trim_start();
+        if time.is_empty() || time.contains(char::is_whitespace) {
+            return None;
+        }
+        (&trimmed[..index], Some(time))
+    } else {
+        (trimmed, None)
+    };
+    let mut parts = date.split('/');
+    let first: i32 = parts.next()?.parse().ok()?;
+    let second: i32 = parts.next()?.parse().ok()?;
+    let third: i32 = parts.next()?.parse().ok()?;
+    if parts.next().is_some() {
+        return None;
+    }
+    let (year, month, day) = if (1..=12).contains(&first) {
+        (legacy_year_number(third)?, first, second)
+    } else if first == 0 || first >= 32 {
+        (legacy_year_number(first)?, second, third)
+    } else {
+        return None;
+    };
+    if !(1..=12).contains(&month) || !(1..=31).contains(&day) {
+        return None;
+    }
+    let clock = match time {
+        Some(time) => slash_clock(time)?,
+        None => "00:00:00".to_string(),
+    };
+    Some(format!("{year:04}-{month:02}-{day:02}T{clock}"))
+}
+
+fn slash_clock(time: &str) -> Option<String> {
+    let (body, zone) = if let Some(clock) = time.strip_suffix(['Z', 'z']) {
+        (clock, &time[clock.len()..])
+    } else if let Some(sign_at) = time.rfind(['+', '-']) {
+        if sign_at == 0 {
+            return None;
+        }
+        (&time[..sign_at], &time[sign_at..])
+    } else {
+        (time, "")
+    };
+    let (clock, fraction) = match body.split_once('.') {
+        Some((clock, fraction))
+            if !fraction.is_empty() && fraction.bytes().all(|byte| byte.is_ascii_digit()) =>
+        {
+            (clock, Some(fraction))
+        }
+        None => (body, None),
+        Some(_) => return None,
+    };
+    let mut numbers = Vec::new();
+    for part in clock.split(':') {
+        if part.is_empty() || !part.bytes().all(|byte| byte.is_ascii_digit()) {
+            return None;
+        }
+        numbers.push(part.parse::<u32>().ok()?);
+    }
+    if !(2..=3).contains(&numbers.len()) || numbers.iter().any(|number| *number > 99) {
+        return None;
+    }
+    let mut padded = if numbers.len() == 3 {
+        format!("{:02}:{:02}:{:02}", numbers[0], numbers[1], numbers[2])
+    } else {
+        format!("{:02}:{:02}:00", numbers[0], numbers[1])
+    };
+    if let Some(fraction) = fraction {
+        padded.push('.');
+        padded.push_str(fraction);
+    }
+    padded.push_str(zone);
+    Some(padded)
 }
 
 fn month_clock_and_zone(rest: &[&str]) -> Option<(String, String)> {
@@ -1635,6 +1721,24 @@ mod tests {
             assert_eq!(
                 super::canonical_iso("Oct 13, 2026 16:00 EST").as_deref(),
                 Some("2026-10-13T21:00:00.000Z")
+            );
+        });
+    }
+
+    #[test]
+    fn a_slash_date_is_local_midnight() {
+        with_tz("America/New_York", || {
+            assert_eq!(
+                super::canonical_iso("2026/10/13").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("10/13/2026").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026/10/13 16:00:00Z").as_deref(),
+                Some("2026-10-13T16:00:00.000Z")
             );
         });
     }
