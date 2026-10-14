@@ -3333,7 +3333,15 @@ fn read_tree_cache(app_data: &Path, root: &Path) -> Option<Value> {
     if meta.file_type().is_symlink() || !meta.is_file() || meta.len() > MAX_TREE_CACHE_BYTES {
         return None;
     }
-    let bytes = fs::read(&path).ok()?;
+    let bytes = match fs::read(&path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return None,
+        // Desktop discards a cache it cannot read, then returns nothing.
+        Err(_) => {
+            let _ = fs::remove_file(&path);
+            return None;
+        }
+    };
     let text = String::from_utf8_lossy(&bytes);
     let parsed = match serde_json::from_str::<Value>(&text) {
         Ok(parsed) => parsed,
