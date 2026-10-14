@@ -1145,8 +1145,8 @@ fn preserve_sources(input: &Path, batch: &Path) -> Result<Vec<Value>, String> {
             .collect();
     }
     let directory = batch.join("original");
-    create_private_dir(&directory)
-        .map_err(|_| "Die OneNote-Quelle konnte nicht verwahrt werden.".to_owned())?;
+    // Desktop `fs.mkdir(directory, { recursive: true, mode: 0o700 })`.
+    import_mkdir(&directory)?;
     let mut preserved = Vec::new();
     for source in sources {
         let digest = sha256_file(&source)?;
@@ -1687,31 +1687,6 @@ fn import_mkdir_code(path: &Path, code: i32) -> String {
     crate::vault::node_mkdir_error(path, &std::io::Error::from_raw_os_error(code))
 }
 
-fn create_private_dir(path: &Path) -> Result<(), std::io::Error> {
-    if let Some(parent) = path.parent() {
-        if !parent.as_os_str().is_empty() && !parent.exists() {
-            create_private_dir(parent)?;
-        }
-    }
-    match fs::symlink_metadata(path) {
-        Ok(meta) if meta.file_type().is_symlink() || !meta.is_dir() => {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::AlreadyExists,
-                "unsafe directory",
-            ));
-        }
-        Ok(_) => {}
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => fs::create_dir(path)?,
-        Err(error) => return Err(error),
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(path, fs::Permissions::from_mode(0o700))?;
-    }
-    Ok(())
-}
-
 fn unique_directory(parent: &Path, preferred: &str) -> Result<PathBuf, String> {
     for index in 0..10_000 {
         let name = if index == 0 {
@@ -2090,7 +2065,7 @@ mod tests {
         strip_active_html, tool_failure_message, tool_limit, unique_directory, urlencoding_decode,
         validate_listing, walk_limited, write_unique_markdown, atomic_copy_onenote,
         atomic_write_onenote, ensure_note_directory, create_onenote_temp_dir,
-        materialize_tools,
+        materialize_tools, preserve_sources,
         prepare_input, import_in_temp, render_sections,
     };
     use std::path::{Path, PathBuf};
@@ -2562,6 +2537,68 @@ mod tests {
             "{error}"
         );
         assert!(std::fs::read_dir(&cache).unwrap().next().is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_unwritable_onenote_source_folder_reports_the_desktop_mkdir_error() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = std::env::temp_dir().join(format!(
+            "fanotes-onenote-source-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        let batch = root.join("batch");
+        std::fs::create_dir_all(&batch).unwrap();
+        std::fs::set_permissions(&batch, std::fs::Permissions::from_mode(0o555)).unwrap();
+        struct Restore(std::path::PathBuf);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                let _ = std::fs::set_permissions(&self.0, std::fs::Permissions::from_mode(0o700));
+                if let Some(parent) = self.0.parent() {
+                    let _ = std::fs::remove_dir_all(parent);
+                }
+            }
+        }
+        let _restore = Restore(batch.clone());
+        let source = root.join("Seite.one");
+        let original = batch.join("original");
+        assert_eq!(
+            preserve_sources(&source, &batch).unwrap_err(),
+            format!(
+                "EACCES: permission denied, mkdir '{}'",
+                original.display()
+            )
+        );
+        assert!(std::fs::read_dir(&batch).unwrap().next().is_none());
+
+        std::fs::set_permissions(&batch, std::fs::Permissions::from_mode(0o700)).unwrap();
+        std::fs::write(&original, b"datei").unwrap();
+        assert_eq!(
+            preserve_sources(&source, &batch).unwrap_err(),
+            format!("EEXIST: file already exists, mkdir '{}'", original.display())
+        );
+        assert_eq!(std::fs::read(&original).unwrap(), b"datei");
+        std::fs::remove_file(&original).unwrap();
+
+        std::fs::write(&source, b"one-bytes").unwrap();
+        let preserved = preserve_sources(&source, &batch).unwrap();
+        assert_eq!(preserved.len(), 1);
+        assert_eq!(
+            std::fs::metadata(&original).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
+        assert_eq!(
+            std::fs::read(original.join(
+                preserved[0]["storedName"].as_str().unwrap()
+            ))
+            .unwrap(),
+            b"one-bytes"
+        );
     }
 
     #[test]
