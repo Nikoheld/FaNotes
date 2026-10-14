@@ -15,6 +15,7 @@ import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
 import android.widget.SeekBar
 import android.widget.TextView
+import ch.fasrv.fanotes.ink.DraftingKind
 import ch.fasrv.fanotes.ink.InkTool
 import ch.fasrv.fanotes.ink.StrokeStyle
 
@@ -53,6 +54,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
     var onDuplicate: () -> Unit = {}
     var onClear: () -> Unit = {}
     var onFinger: (Boolean) -> Unit = {}
+    var onMath: () -> Unit = {}
 
     init {
         clipChildren = true
@@ -221,7 +223,14 @@ class NotePageView(context: Context) : FrameLayout(context) {
         tools.addView(chip("Liste") { insertLine("- ") })
         tools.addView(chip("Aufgabe") { insertLine("- [ ] ") })
         tools.addView(chip("Zitat") { insertLine("> ") })
-        tools.addView(chip("Lineal") { ink.toggleRuler() })
+        tools.addView(guideChip("Lineal", DraftingKind.RULER))
+        tools.addView(guideChip("Geodreieck", DraftingKind.SET_SQUARE))
+        tools.addView(guideChip("Zirkel", DraftingKind.COMPASS))
+        tools.addView(chip("Kreis") {
+            if (!ink.guideOn(DraftingKind.COMPASS)) ink.toggleGuide(DraftingKind.COMPASS)
+            ink.drawCompassCircle()
+        })
+        tools.addView(chip("Mathe") { onMath() })
         tools.addView(chip("+") { ink.zoomBy(1.15f) })
         tools.addView(chip("−") { ink.zoomBy(1f / 1.15f) })
         tools.addView(chip("Drehen") { ink.rotatePage() })
@@ -252,6 +261,15 @@ class NotePageView(context: Context) : FrameLayout(context) {
         view.setTextColor(if (dark) 0xFFEDEDEC.toInt() else 0xFF252630.toInt())
         if (selected) view.background = rounded(if (dark) 0xFF3A3A3A.toInt() else 0xFFFFFFFF.toInt(), dp(7))
         view.setOnClickListener { click() }
+        return view
+    }
+
+    private fun guideChip(label: String, kind: DraftingKind): TextView {
+        val view = chip(if (ink.guideOn(kind)) "$label ●" else label) {}
+        view.setOnClickListener {
+            ink.toggleGuide(kind)
+            view.text = if (ink.guideOn(kind)) "$label ●" else label
+        }
         return view
     }
 

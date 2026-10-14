@@ -14,6 +14,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -82,6 +83,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import ch.fasrv.fanotes.desk.solveMathExpression
 import ch.fasrv.fanotes.ink.InkTool
 import ch.fasrv.fanotes.sync.SyncStatus
 import ch.fasrv.fanotes.vault.NoteKind
@@ -206,6 +208,10 @@ fun FaNotesScreen(
     var createNote by remember { mutableStateOf(false) }
     var createFolder by remember { mutableStateOf(false) }
     var syncPending by remember { mutableStateOf(false) }
+    var mathOpen by remember { mutableStateOf(false) }
+    var mathInput by remember { mutableStateOf("") }
+    var mathOutput by remember { mutableStateOf("") }
+    var mathOk by remember { mutableStateOf(false) }
     val wide = LocalConfiguration.current.screenWidthDp >= 840
     val signedIn = sync.account != null
     val syncText = if (syncPending && sync.status != SyncStatus.SYNCING) "Startet…" else syncDetail(sync)
@@ -296,6 +302,7 @@ fun FaNotesScreen(
                     onSync = { requestSync() },
                     onToggleRail = { model.showList.value = !showList },
                     onEditBox = { editingBox = it },
+                    onMath = { mathOpen = true },
                     modifier = Modifier.weight(1f).fillMaxHeight().clipToBounds(),
                 )
                 if (destination == "notes" && split != null) {
@@ -341,6 +348,45 @@ fun FaNotesScreen(
                 }
             }
         }, title = { Text("Befehle") })
+    }
+    if (mathOpen) {
+        AlertDialog(
+            onDismissRequest = { mathOpen = false },
+            title = { Text("Mathe") },
+            text = {
+                Column(Modifier.verticalScroll(rememberScrollState())) {
+                    Text("Ausrechnen, Vereinfachen, Ausmultiplizieren, Faktorisieren und Gleichungen bis Grad 2.", fontSize = 13.sp)
+                    OutlinedTextField(mathInput, { mathInput = it }, label = { Text("Ausdruck") }, modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
+                    listOf(
+                        "calculate" to "Ausrechnen",
+                        "solve" to "Lösen",
+                        "simplify" to "Vereinfachen",
+                        "expand" to "Ausmultiplizieren",
+                        "factor" to "Faktorisieren",
+                    ).forEach { (action, label) ->
+                        TextButton(onClick = {
+                            runCatching { solveMathExpression(mathInput, action) }
+                                .onSuccess { result ->
+                                    mathOk = true
+                                    mathOutput = result.steps.joinToString("\n") { it.display }
+                                }
+                                .onFailure { error ->
+                                    mathOk = false
+                                    mathOutput = error.message ?: "Der Ausdruck ist ungültig."
+                                }
+                        }) { Text(label) }
+                    }
+                    if (mathOutput.isNotBlank()) Text(mathOutput, modifier = Modifier.padding(top = 8.dp))
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    if (mathOk) model.insertMath(mathOutput)
+                    mathOpen = false
+                }, enabled = mathOk) { Text("In die Notiz") }
+            },
+            dismissButton = { TextButton(onClick = { mathOpen = false }) { Text("Schließen") } },
+        )
     }
     editingBox?.let { id ->
         AlertDialog(
@@ -576,6 +622,7 @@ private fun PageSurface(
     onSync: () -> Unit,
     onToggleRail: () -> Unit,
     onEditBox: (String) -> Unit,
+    onMath: () -> Unit,
     modifier: Modifier,
 ) {
     var bound by remember { mutableStateOf("") }
@@ -613,6 +660,7 @@ private fun PageSurface(
             page.ink.onPlaceLink = { x, y -> model.placeNoteLink(x, y) }
             page.ink.onToggleSection = { model.toggleInkSection(it) }
             page.ink.onEditBox = onEditBox
+            page.onMath = onMath
             page.ink.linkMarks = links
             page.ink.worksheetBoxes = boxes
             page.onFinger = { model.fingerDraws.value = it }

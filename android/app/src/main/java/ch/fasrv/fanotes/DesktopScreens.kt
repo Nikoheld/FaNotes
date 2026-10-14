@@ -139,12 +139,33 @@ fun SearchScreen(model: FaNotesViewModel, onOpen: (String) -> Unit) {
 @Composable
 fun HomeworkScreen(model: FaNotesViewModel) {
     val document by model.homework.collectAsStateWithLifecycle()
+    val settings by model.deskSettings.collectAsStateWithLifecycle()
+    val status by model.message.collectAsStateWithLifecycle()
     var title by remember { mutableStateOf("") }
     var subject by remember { mutableStateOf("") }
     var due by remember { mutableStateOf(LocalDate.now().plusDays(1).toString()) }
-    Column(Modifier.fillMaxSize().padding(16.dp)) {
+    Column(Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState())) {
         Text("Hausaufgaben & Termine", style = MaterialTheme.typography.titleLarge)
         Text("Gespeichert in Hausaufgaben.md, dieselbe Datei wie auf dem Desktop.", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
+        Text("Freigabe", modifier = Modifier.padding(top = 12.dp), fontWeight = FontWeight.SemiBold)
+        Text("Dieselbe Schnittstelle wie der Desktop: PUT an fanotes.fasrv.ch, Kanal-ID und Geheimnis bleiben auf diesem Tablet.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
+        OutlinedTextField(
+            settings["homework-channel"].orEmpty(),
+            { model.updateDesk("homework-channel", it.trim()) },
+            label = { Text("Kanal-ID") },
+            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+        )
+        OutlinedTextField(
+            settings["homework-secret"].orEmpty(),
+            { model.updateDesk("homework-secret", it.trim()) },
+            label = { Text("Geheimnis") },
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Row {
+            TextButton(onClick = { model.generateHomeworkAccess() }) { Text("Kanal erzeugen") }
+            TextButton(onClick = { model.publishHomework() }) { Text("Veröffentlichen") }
+        }
+        if (!status.isNullOrBlank()) Text(status.orEmpty(), fontSize = 13.sp, color = MaterialTheme.colorScheme.primary)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 12.dp)) {
             OutlinedTextField(title, { title = it }, label = { Text("Aufgabe") }, modifier = Modifier.weight(1f))
             OutlinedTextField(subject, { subject = it }, label = { Text("Fach") }, modifier = Modifier.weight(0.6f))
@@ -164,14 +185,12 @@ fun HomeworkScreen(model: FaNotesViewModel) {
                 }
             }) { Text("Termin") }
         }
-        LazyColumn {
-            items(document.tasks, key = { it.id }) { task ->
-                Row(Modifier.fillMaxWidth().clickable { model.toggleHomework(task.id) }.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text(if (task.done) "☑" else "☐", modifier = Modifier.padding(end = 8.dp))
-                    Column {
-                        Text(task.title, fontWeight = if (task.priority == "high") FontWeight.Bold else FontWeight.Normal)
-                        Text(listOf(task.subject, task.dueDate, if (task.kind == "appointment") "Termin" else "Aufgabe").filter { !it.isNullOrBlank() }.joinToString(" · "), fontSize = 12.sp)
-                    }
+        document.tasks.forEach { task ->
+            Row(Modifier.fillMaxWidth().clickable { model.toggleHomework(task.id) }.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(if (task.done) "☑" else "☐", modifier = Modifier.padding(end = 8.dp))
+                Column {
+                    Text(task.title, fontWeight = if (task.priority == "high") FontWeight.Bold else FontWeight.Normal)
+                    Text(listOf(task.subject, task.dueDate, if (task.kind == "appointment") "Termin" else "Aufgabe").filter { !it.isNullOrBlank() }.joinToString(" · "), fontSize = 12.sp)
                 }
             }
         }
@@ -184,6 +203,7 @@ fun CalendarScreen(model: FaNotesViewModel, onOpenNote: (String) -> Unit) {
     var month by remember { mutableStateOf(YearMonth.now()) }
     var title by remember { mutableStateOf("") }
     var day by remember { mutableStateOf(LocalDate.now().toString()) }
+    var recurrence by remember { mutableStateOf("none") }
     val calendarId = document.calendars.firstOrNull()?.id ?: "personal"
     Column(Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState())) {
         Text("Kalender", style = MaterialTheme.typography.titleLarge)
@@ -205,7 +225,7 @@ fun CalendarScreen(model: FaNotesViewModel, onOpenNote: (String) -> Unit) {
                     val index = week * 7 + column
                     val date = if (index >= offset && index < offset + month.lengthOfMonth()) month.atDay(index - offset + 1) else null
                     val key = date?.toString()
-                    val count = document.events.count { it.start.startsWith(key ?: " ") }
+                    val count = if (date == null) 0 else document.events.count { ch.fasrv.fanotes.desk.occurrencesOn(it, date) }
                     Text(
                         if (date == null) "" else "${date.dayOfMonth}${if (count > 0) " ·$count" else ""}",
                         modifier = Modifier.weight(1f).clickable(enabled = date != null) { if (key != null) day = key }.padding(4.dp),
@@ -217,16 +237,30 @@ fun CalendarScreen(model: FaNotesViewModel, onOpenNote: (String) -> Unit) {
         }
         Text("Am $day", modifier = Modifier.padding(top = 8.dp), fontWeight = FontWeight.SemiBold)
         document.events.filter { ch.fasrv.fanotes.desk.occurrencesOn(it, java.time.LocalDate.parse(day)) }.forEach { event ->
+            val repeat = when (event.recurrence) {
+                "daily" -> " · täglich"
+                "weekly" -> " · wöchentlich"
+                "monthly" -> " · monatlich"
+                "yearly" -> " · jährlich"
+                else -> ""
+            }
             Text(
-                event.title + if (event.notePath.isNotBlank()) "  →" else "",
+                event.title + repeat + if (event.notePath.isNotBlank()) "  →" else "",
                 modifier = Modifier.clickable(enabled = event.notePath.isNotBlank()) { onOpenNote(event.notePath) }.padding(vertical = 4.dp),
             )
+        }
+        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+            listOf("none" to "Einmal", "daily" to "Täglich", "weekly" to "Wöchentlich", "monthly" to "Monatlich", "yearly" to "Jährlich").forEach { (id, label) ->
+                TextButton(onClick = { recurrence = id }) {
+                    Text(label, color = if (recurrence == id) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
+                }
+            }
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
             OutlinedTextField(title, { title = it }, label = { Text("Neuer Termin") })
             TextButton(onClick = {
                 if (title.isNotBlank()) {
-                    model.addCalendarEvent(title, day, calendarId)
+                    model.addCalendarEvent(title, day, calendarId, recurrence)
                     title = ""
                 }
             }) { Text("Eintragen") }
