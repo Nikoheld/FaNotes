@@ -2484,26 +2484,34 @@ fn pad_legacy_clock(time: &str) -> Option<String> {
 }
 
 fn date_only_millis(value: &str, surrounded: bool) -> Option<u64> {
-    let mut date_parts = value.split('-');
-    let year_text = date_parts.next()?;
-    let month_text = date_parts.next();
-    let day_text = date_parts.next();
-    if date_parts.next().is_some() {
-        return None;
+    if !surrounded {
+        if let Ok(millis) = iso_hyphen_millis(value) {
+            return millis;
+        }
     }
-    let year: i32 = year_text.parse().ok()?;
-    // `YYYY` and `+YYYYYY` are UTC. `02026` and `+2026` are local midnight,
-    // as are a short month or day and whitespace around the date.
-    let mut legacy_local = surrounded || !datetime_year_ok(year_text);
+    legacy_hyphen_millis(value)
+}
+
+/// `YYYY` and `±YYYYYY`. A short month or day is local. Any other shape is `Err`.
+fn iso_hyphen_millis(value: &str) -> Result<Option<u64>, ()> {
+    let (year_text, month_text, day_text) = split_hyphen_fields(value).ok_or(())?;
+    if !datetime_year_ok(year_text) {
+        return Err(());
+    }
+    let year: i32 = year_text.parse().map_err(|_| ())?;
+    let mut legacy_local = false;
     let month = match month_text {
         None => 1,
         Some(text) => {
+            if text.is_empty() || !text.bytes().all(|byte| byte.is_ascii_digit()) {
+                return Ok(None);
+            }
             if text.len() != 2 {
                 legacy_local = true;
             }
-            let month: u32 = text.parse().ok()?;
+            let month: u32 = text.parse().map_err(|_| ())?;
             if !(1..=12).contains(&month) {
-                return None;
+                return Ok(None);
             }
             month
         }
@@ -2511,23 +2519,100 @@ fn date_only_millis(value: &str, surrounded: bool) -> Option<u64> {
     let day = match day_text {
         None => 1,
         Some(text) => {
+            if text.is_empty() || !text.bytes().all(|byte| byte.is_ascii_digit()) {
+                return Ok(None);
+            }
             if text.len() != 2 {
                 legacy_local = true;
             }
-            let day: u32 = text.parse().ok()?;
-            // Days 29–31 still roll. A day outside 1..=31 is rejected.
+            let day: u32 = text.parse().map_err(|_| ())?;
             if !(1..=31).contains(&day) {
-                return None;
+                return Ok(None);
             }
             day
         }
     };
-    let days = days_from_civil(year, month, day)?;
-    let naive = days.saturating_mul(86_400_000);
-    if !legacy_local {
-        return Some(naive);
+    Ok(midnight_millis(year, month, day, legacy_local))
+}
+
+/// `2-1-1` is 1 February 2001. A month and day without a year use 2001.
+/// A leading `+` or `-` is ignored. The result is local midnight.
+fn legacy_hyphen_millis(value: &str) -> Option<u64> {
+    let body = value.strip_prefix(['+', '-']).unwrap_or(value);
+    if body.is_empty() {
+        return None;
     }
-    let naive = i64::try_from(naive).ok()?;
+    let fields: Vec<&str> = body.split('-').collect();
+    if fields.is_empty()
+        || fields.len() > 3
+        || fields
+            .iter()
+            .any(|field| field.is_empty() || !field.bytes().all(|byte| byte.is_ascii_digit()))
+    {
+        return None;
+    }
+    let numbers = fields
+        .iter()
+        .map(|field| field.parse::<i32>().ok())
+        .collect::<Option<Vec<_>>>()?;
+    let (year, month, day) = match numbers.as_slice() {
+        [year] => (legacy_year(*year)?, 1, 1),
+        [first, second] if (1..=12).contains(first) && (1..=31).contains(second) => {
+            (2001, *first, *second)
+        }
+        [first, second] if *first == 0 || *first >= 32 => (legacy_year(*first)?, *second, 1),
+        [first, second, third] if (1..=12).contains(first) => {
+            (legacy_year(*third)?, *first, *second)
+        }
+        [first, second, third] if *first == 0 || *first >= 32 => {
+            (legacy_year(*first)?, *second, *third)
+        }
+        _ => return None,
+    };
+    if !(1..=12).contains(&month) || !(1..=31).contains(&day) {
+        return None;
+    }
+    midnight_millis(year, month as u32, day as u32, true)
+}
+
+fn split_hyphen_fields(value: &str) -> Option<(&str, Option<&str>, Option<&str>)> {
+    let expanded = value.starts_with(['+', '-'])
+        && value[1..]
+            .bytes()
+            .take_while(|byte| byte.is_ascii_digit())
+            .count()
+            == 6;
+    let (year, rest) = if expanded {
+        let year = &value[..7];
+        match value[7..].strip_prefix('-') {
+            None if value.len() == 7 => return Some((year, None, None)),
+            None => return None,
+            Some(rest) => (year, rest),
+        }
+    } else if let Some((year, rest)) = value.split_once('-') {
+        (year, rest)
+    } else {
+        return Some((value, None, None));
+    };
+    if rest.is_empty() {
+        return None;
+    }
+    if let Some((month, day)) = rest.split_once('-') {
+        if day.is_empty() || day.contains('-') {
+            return None;
+        }
+        Some((year, Some(month), Some(day)))
+    } else {
+        Some((year, Some(rest), None))
+    }
+}
+
+fn midnight_millis(year: i32, month: u32, day: u32, local: bool) -> Option<u64> {
+    let days = days_from_civil(year, month, day)?;
+    let naive = i64::try_from(days.saturating_mul(86_400_000)).ok()?;
+    if !local {
+        return u64::try_from(naive).ok();
+    }
     let offset = local_offset_east_ms(naive)?;
     u64::try_from(naive.checked_sub(offset)?).ok()
 }
@@ -5589,5 +5674,30 @@ mod local_zone_tests {
         assert_eq!(unix_millis_from_iso("+2026-10-13"), Some(1_791_864_000_000));
         assert_eq!(unix_millis_from_iso("02026-02-31"), Some(1_772_514_000_000));
         assert_eq!(unix_millis_from_iso("02026-10-13T00:00:00Z"), None);
+    }
+
+    #[test]
+    fn a_short_first_field_is_month_day_year() {
+        let _lock = TRASH_CLOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let _restore = RestoreTz(std::env::var_os("TZ"));
+        unsafe { std::env::set_var("TZ", "America/New_York") };
+        unsafe { tzset() };
+        // `2-1-1` is 1 February 2001, local. `2026-10-13` stays UTC.
+        assert_eq!(unix_millis_from_iso("-00001-01-01"), Some(978_325_200_000));
+        assert_eq!(unix_millis_from_iso("2-1-1"), Some(981_003_600_000));
+        assert_eq!(unix_millis_from_iso("1-2"), Some(978_411_600_000));
+        assert_eq!(unix_millis_from_iso("1"), Some(978_325_200_000));
+        assert_eq!(unix_millis_from_iso("49-1-1"), Some(2_493_090_000_000));
+        assert_eq!(unix_millis_from_iso("2-31-1"), Some(983_595_600_000));
+        assert_eq!(unix_millis_from_iso("13-1-1"), None);
+        assert_eq!(unix_millis_from_iso("-00001-01-01T00:00:00Z"), None);
+        assert_eq!(unix_millis_from_iso("2026-10-13"), Some(1_791_849_600_000));
+        assert_eq!(unix_millis_from_iso("2026-1"), Some(1_767_243_600_000));
+        assert_eq!(
+            unix_millis_from_iso(" -000001-01-01"),
+            Some(978_325_200_000)
+        );
     }
 }
