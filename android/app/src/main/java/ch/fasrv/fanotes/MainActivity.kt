@@ -84,6 +84,8 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ch.fasrv.fanotes.desk.solveMathExpression
+import ch.fasrv.fanotes.desk.collectVaultTags
+import ch.fasrv.fanotes.desk.filterVaultByTag
 import ch.fasrv.fanotes.desk.breadcrumbsFor
 import ch.fasrv.fanotes.desk.canGoBack
 import ch.fasrv.fanotes.desk.canGoForward
@@ -215,6 +217,8 @@ fun FaNotesScreen(
     val vaultLabel by model.vaultLabel.collectAsStateWithLifecycle()
     val destination by model.destination.collectAsStateWithLifecycle()
     val tabs by model.openTabs.collectAsStateWithLifecycle()
+    val tagIndex by model.tagIndex.collectAsStateWithLifecycle()
+    val tagFilter by model.tagFilter.collectAsStateWithLifecycle()
     val pinned by model.pinnedTabs.collectAsStateWithLifecycle()
     val trail by model.noteTrail.collectAsStateWithLifecycle()
     val desk by model.deskSettings.collectAsStateWithLifecycle()
@@ -286,7 +290,10 @@ fun FaNotesScreen(
             if (!focus && (wide || showList) && destination == "notes") {
                 VaultPane(
                     modifier = Modifier.width(if (wide) 320.dp else 360.dp).fillMaxHeight(),
-                    tree = tree,
+                    tree = filterVaultByTag(tree, tagFilter, tagIndex),
+                    tags = collectVaultTags(tagIndex.values.map { noteTags -> noteTags.joinToString(" ") { "#$it" } }),
+                    tagFilter = tagFilter,
+                    onToggleTag = { model.toggleTagFilter(it) },
                     selected = open?.path,
                     vaultLabel = vaultLabel,
                     syncLabel = syncText,
@@ -499,6 +506,9 @@ fun FaNotesScreen(
 private fun VaultPane(
     modifier: Modifier,
     tree: List<VaultNode>,
+    tags: List<String> = emptyList(),
+    tagFilter: String? = null,
+    onToggleTag: (String) -> Unit = {},
     selected: String?,
     vaultLabel: String,
     syncLabel: String,
@@ -555,6 +565,27 @@ private fun VaultPane(
                             TextButton(onClick = { onResolve(conflict, "both") }) { Text("Beide") }
                         }
                     }
+                }
+            }
+        }
+        if (tags.isNotEmpty()) {
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                tags.forEach { tag ->
+                    val selectedTag = tag == tagFilter
+                    Text(
+                        "#$tag",
+                        fontSize = 12.sp,
+                        fontWeight = if (selectedTag) FontWeight.SemiBold else FontWeight.Normal,
+                        color = if (selectedTag) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier
+                            .padding(end = 4.dp)
+                            .background(if (selectedTag) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f) else MaterialTheme.colorScheme.surfaceVariant)
+                            .clickable { onToggleTag(tag) }
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                    )
+                }
+                if (tagFilter != null) {
+                    TextButton(onClick = { onToggleTag(tagFilter) }) { Text("Filter aus") }
                 }
             }
         }
@@ -771,7 +802,9 @@ private fun NotePage(
     onMath: () -> Unit,
     modifier: Modifier,
 ) {
-    PageSurface(
+    Column(modifier) {
+        if (path != null) NoteTagBar(model)
+        PageSurface(
         model = model,
         tool = tool,
         style = style,
@@ -789,8 +822,9 @@ private fun NotePage(
         onToggleRail = onToggleRail,
         onEditBox = onEditBox,
         onMath = onMath,
-        modifier = modifier,
+        modifier = Modifier.weight(1f).fillMaxWidth(),
     )
+    }
 }
 
 @Composable

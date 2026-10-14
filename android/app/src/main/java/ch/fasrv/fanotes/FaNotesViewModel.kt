@@ -58,6 +58,8 @@ import ch.fasrv.fanotes.desk.parseWorksheetBoxes
 import ch.fasrv.fanotes.desk.searchVault
 import ch.fasrv.fanotes.desk.serializeCalendarMarkdown
 import ch.fasrv.fanotes.desk.serializeHomeworkMarkdown
+import ch.fasrv.fanotes.desk.applyNoteTags
+import ch.fasrv.fanotes.desk.parseNoteTags
 import ch.fasrv.fanotes.desk.applyHomeworkToCalendar
 import ch.fasrv.fanotes.desk.exportIcs
 import ch.fasrv.fanotes.desk.importIcs
@@ -178,6 +180,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
                 }
             }
             if (!restoreWorkspace()) flatNotes().firstOrNull()?.let { openPath(it.path, force = true) }
+            refreshTagIndex()
             graph.engine.start()
         }
     }
@@ -194,6 +197,36 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         folderColors.value = loaded.second
     }
 
+    private suspend fun refreshTagIndex() {
+        val nodes = tree.value
+        tagIndex.value = withContext(Dispatchers.IO) { indexTags(nodes) }
+    }
+
+    private fun indexTags(nodes: List<VaultNode>): Map<String, List<String>> {
+        val index = linkedMapOf<String, List<String>>()
+        fun walk(list: List<VaultNode>) {
+            for (node in list) {
+                if (node.kind == NoteKind.FOLDER) walk(node.children)
+                else {
+                    val tags = runCatching { parseNoteTags(graph.store.readNote(node.path).markdown) }.getOrDefault(emptyList())
+                    if (tags.isNotEmpty()) index[node.path] = tags
+                }
+            }
+        }
+        walk(nodes)
+        return index
+    }
+
+    private fun rememberTags(path: String, content: String) {
+        val tags = parseNoteTags(content)
+        tagIndex.value = if (tags.isEmpty()) tagIndex.value - path else tagIndex.value + (path to tags)
+    }
+
+    fun toggleTagFilter(tag: String) {
+        val wanted = ch.fasrv.fanotes.desk.normalizeTag(tag)
+        tagFilter.value = if (tagFilter.value == wanted || wanted.isEmpty()) null else wanted
+    }
+
     private var openGeneration = 0
 
     fun openPath(path: String, force: Boolean = false, fromHistory: NoteTrail? = null) {
@@ -206,6 +239,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
                 session.replace(note.document)
                 open.value = noteOpened(note)
                 markdown.value = note.markdown
+                rememberTags(path, note.markdown)
                 rememberTab(path)
                 refreshOverlays()
                 style.value = style.value.copy()
@@ -256,7 +290,13 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
 
     fun updateMarkdown(value: String) {
         markdown.value = value
+        open.value?.path?.let { rememberTags(it, value) }
         noteChanged()
+    }
+
+    fun setNoteTags(tags: List<String>) {
+        if (open.value == null) return
+        updateMarkdown(applyNoteTags(markdown.value, tags))
     }
 
     fun setPaper(styleId: String) {
@@ -328,6 +368,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
             openTabs.value = openTabs.value.filterNot { isSelfOrInside(it, path) }
             pinnedTabs.value = pinnedTabs.value.filterNot { isSelfOrInside(it, path) }.toSet()
             closedTabs.value = closedTabs.value.filterNot { isSelfOrInside(it, path) }
+            tagIndex.value = tagIndex.value.filterKeys { !isSelfOrInside(it, path) }
             if (splitPath.value?.let { isSelfOrInside(it, path) } == true) splitPath.value = null
             if (open.value?.path?.let { isSelfOrInside(it, path) } == true) {
                 open.value = null
@@ -365,6 +406,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
             graph.engine.switchVault()
             loadTree()
             adoptWorkspace()
+            refreshTagIndex()
         }
     }
 
@@ -376,6 +418,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
             graph.engine.switchVault()
             loadTree()
             adoptWorkspace()
+            refreshTagIndex()
         }
     }
 
@@ -714,6 +757,8 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     val calendar = MutableStateFlow(emptyCalendar())
     val books = MutableStateFlow<List<SubjectBook>>(emptyList())
     val folderColors = MutableStateFlow<Map<String, String>>(emptyMap())
+    val tagIndex = MutableStateFlow<Map<String, List<String>>>(emptyMap())
+    val tagFilter = MutableStateFlow<String?>(null)
     val noteHistory = MutableStateFlow<List<HistorySnapshot>>(emptyList())
     val study = MutableStateFlow<StudyPicture?>(null)
     val deskSettings = MutableStateFlow(graph.readDesk())
@@ -837,6 +882,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         pinnedTabs.value = pinned
         openTabs.value = sortPinnedFirst(tabs.map { DeskTab(it, it in pinned) }).map { it.path }
         closedTabs.value = closedTabs.value.map { remapPath(it, from, to) ?: it }
+        tagIndex.value = tagIndex.value.mapKeys { (path, _) -> remapPath(path, from, to) ?: path }
         val current = open.value?.path
         if (current != null) {
             val moved = remapPath(current, from, to)
