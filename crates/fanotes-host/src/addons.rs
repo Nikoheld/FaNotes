@@ -105,8 +105,7 @@ pub fn write_files(host: &Host, id: &Value, files: &Value) -> Result<Value, Stri
     let entries = file_entries(files)?;
     ensure_store_root(host)?;
     let dir = addon_dir(host, &id)?;
-    fs::create_dir_all(&dir)
-        .map_err(|_| "Der Add-on-Ordner konnte nicht angelegt werden.".to_owned())?;
+    fs::create_dir_all(&dir).map_err(|error| crate::vault::node_mkdir_error(&dir, &error))?;
     for (name, content) in entries {
         let Some(content) = content.as_str() else {
             continue;
@@ -531,8 +530,7 @@ fn read_records(root: &Path) -> Result<Vec<Value>, String> {
 }
 
 fn write_records(root: &Path, records: &[Value]) -> Result<(), String> {
-    fs::create_dir_all(root)
-        .map_err(|_| "Der Add-on-Ordner konnte nicht angelegt werden.".to_owned())?;
+    fs::create_dir_all(root).map_err(|error| crate::vault::node_mkdir_error(root, &error))?;
     let snapshot =
         serde_json::to_string_pretty(&records.iter().take(MAX_RECORDS).collect::<Vec<_>>())
             .map_err(|_| "Die Add-on-Liste ist zu groß.".to_owned())?;
@@ -706,7 +704,7 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         if fs::symlink_metadata(parent).is_err() {
             fs::create_dir_all(parent)
-                .map_err(|_| "Der Add-on-Ordner konnte nicht angelegt werden.".to_owned())?;
+                .map_err(|error| crate::vault::node_mkdir_error(parent, &error))?;
         }
     }
     crate::notes::atomic_write(path, bytes, 0o600)
