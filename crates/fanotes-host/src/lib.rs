@@ -3880,8 +3880,9 @@ fn parse_legacy_offset(text: &str) -> Option<LegacyOffset> {
     let mut time_fields = Vec::new();
     while index < bytes.len() {
         // `+5::30` is +5:30. Extra colons before the minute are ignored.
-        // A dot is skipped too, so `+5:.5` is five hours and five minutes.
-        if bytes[index] == b'.' || bytes[index] == b':' {
+        // A dot or slash is skipped, so `+5:.5` and `+5:/30` fill the minute.
+        // `+5/30` has no open minute, so 30 is a date number.
+        if bytes[index] == b'.' || bytes[index] == b':' || bytes[index] == b'/' {
             index += 1;
             continue;
         }
@@ -10015,6 +10016,49 @@ mod local_zone_tests {
             unix_millis_from_iso("Oct 13 2026 16:00:00.5."),
             Some(1_791_921_600_500)
         );
+    }
+
+    #[test]
+    fn a_slash_inside_an_offset_is_a_separator() {
+        let _lock = TRASH_CLOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let _restore = RestoreTz(std::env::var_os("TZ"));
+        unsafe { std::env::set_var("TZ", "America/New_York") };
+        unsafe { tzset() };
+        // `+5/30` is five hours, and 30 is a date number. `+5:/30` is
+        // five hours and thirty minutes because the minute was still open.
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 16:00 +5/30"),
+            Some(1_791_889_200_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 16:00 +5:/30"),
+            Some(1_791_887_400_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 16:00 +5:30/1"),
+            Some(1_791_887_400_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 16:00 +5/30"),
+            Some(1_918_119_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 16:00 GMT+5/30"),
+            Some(1_791_889_200_000)
+        );
+        assert_eq!(unix_millis_from_iso("2026-10-13 16:00 +5/30"), None);
+        assert_eq!(unix_millis_from_iso("2026-10-13 16:00 GMT+5/30"), None);
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 16:00:00.5/1"),
+            Some(1_003_003_200_500)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 16:00:00.5/13"),
+            Some(1_381_694_400_500)
+        );
+        assert_eq!(unix_millis_from_iso("10/13/2026"), Some(1_791_864_000_000));
     }
 
     #[test]
