@@ -17,6 +17,49 @@ fn host() -> (Host, std::path::PathBuf) {
     (host, vault)
 }
 
+#[cfg(unix)]
+#[test]
+fn an_unreadable_history_index_uses_the_desktop_open_error() {
+    use std::os::unix::fs::PermissionsExt;
+    let (mut host, vault) = host();
+    std::fs::write(vault.join("Mathe/Seite.md"), b"Hallo\n").unwrap();
+    host.dispatch(
+        "fanotes:write-file",
+        &[json!("Mathe/Seite.md"), json!("Welt\n")],
+    )
+    .unwrap();
+    let history = vault.join(".fanotes/history");
+    let index = std::fs::read_dir(&history)
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path()
+        .join("index.json");
+    let canonical = std::fs::canonicalize(&index).unwrap();
+    std::fs::set_permissions(&index, std::fs::Permissions::from_mode(0o000)).unwrap();
+    struct Restore(std::path::PathBuf);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            let _ = std::fs::set_permissions(&self.0, std::fs::Permissions::from_mode(0o600));
+        }
+    }
+    let _restore = Restore(index.clone());
+    assert_eq!(
+        host.dispatch("fanotes:list-note-history", &[json!("Mathe/Seite.md")])
+            .unwrap_err(),
+        format!("EACCES: permission denied, open '{}'", canonical.display())
+    );
+    std::fs::set_permissions(&index, std::fs::Permissions::from_mode(0o600)).unwrap();
+    std::fs::remove_file(&index).unwrap();
+    std::fs::create_dir(&index).unwrap();
+    assert_eq!(
+        host.dispatch("fanotes:list-note-history", &[json!("Mathe/Seite.md")])
+            .unwrap_err(),
+        "EISDIR: illegal operation on a directory, read"
+    );
+}
+
 #[test]
 fn a_tree_modification_time_rounds_to_the_nearest_millisecond() {
     let (mut host, vault) = host();

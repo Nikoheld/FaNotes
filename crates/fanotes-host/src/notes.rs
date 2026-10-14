@@ -700,6 +700,36 @@ fn history_dir(root: &Path, relative: &str) -> Result<PathBuf, String> {
     Ok(history.join(name))
 }
 
+/// Node `fs.readFile` error text. A directory fails on `read` without a path.
+fn node_open_error(path: &Path, error: &std::io::Error) -> String {
+    #[cfg(unix)]
+    match error.raw_os_error() {
+        Some(libc::EISDIR) => {
+            return "EISDIR: illegal operation on a directory, read".to_owned();
+        }
+        Some(libc::EACCES) => {
+            return format!("EACCES: permission denied, open '{}'", path.display());
+        }
+        Some(libc::EPERM) => {
+            return format!(
+                "EPERM: operation not permitted, open '{}'",
+                path.display()
+            );
+        }
+        Some(libc::EIO) => return format!("EIO: i/o error, open '{}'", path.display()),
+        Some(libc::ELOOP) => {
+            return format!(
+                "ELOOP: too many symbolic links encountered, open '{}'",
+                path.display()
+            );
+        }
+        _ => {}
+    }
+    #[cfg(not(unix))]
+    let _ = error;
+    format!("EACCES: permission denied, open '{}'", path.display())
+}
+
 fn read_history_index(directory: &Path) -> Result<Value, String> {
     let path = directory.join("index.json");
     let bytes = match fs::read(&path) {
@@ -707,7 +737,9 @@ fn read_history_index(directory: &Path) -> Result<Value, String> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
             return Ok(json!({ "format": "fanotes-history-v1", "snapshots": [] }));
         }
-        Err(_) => return Err("Der Verlauf konnte nicht gelesen werden.".to_owned()),
+        // A missing or damaged index starts empty. Any other read error is
+        // Node's `readFile` text, so the next snapshot cannot hide revisions.
+        Err(error) => return Err(node_open_error(&path, &error)),
     };
     let raw = String::from_utf8_lossy(&bytes);
     match serde_json::from_str::<Value>(&raw) {
