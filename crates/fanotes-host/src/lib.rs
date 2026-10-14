@@ -1781,7 +1781,7 @@ fn unix_millis_from_iso(value: &str) -> Option<u64> {
     if date_parts.next().is_some() {
         return None;
     }
-    let time = time.strip_suffix('Z')?;
+    let (time, offset_ms) = split_time_zone(time)?;
     let (clock, millis) = match time.split_once('.') {
         Some((clock, fraction)) if (1..=3).contains(&fraction.len()) => {
             let millis: u32 = fraction.parse().ok()?;
@@ -1805,13 +1805,46 @@ fn unix_millis_from_iso(value: &str) -> Option<u64> {
         return None;
     }
     let days = days_from_civil(year, month, day)?;
-    Some(
-        days * 86_400_000
-            + u64::from(hour) * 3_600_000
-            + u64::from(minute) * 60_000
-            + u64::from(second) * 1000
-            + u64::from(millis),
-    )
+    let local = (days as i64) * 86_400_000
+        + i64::from(hour) * 3_600_000
+        + i64::from(minute) * 60_000
+        + i64::from(second) * 1000
+        + i64::from(millis);
+    // A positive offset is ahead of UTC, so the UTC instant is earlier.
+    u64::try_from(local.checked_sub(offset_ms)?).ok()
+}
+
+/// `Z`, `z`, `+HH:MM`, `-HH:MM`, `+HHMM`, or `-HHMM` after the clock.
+fn split_time_zone(time: &str) -> Option<(&str, i64)> {
+    if let Some(clock) = time.strip_suffix(['Z', 'z']) {
+        return Some((clock, 0));
+    }
+    let sign_at = time.rfind(['+', '-'])?;
+    if sign_at == 0 {
+        return None;
+    }
+    let (clock, zone) = time.split_at(sign_at);
+    let (sign, rest) = if let Some(rest) = zone.strip_prefix('+') {
+        (1i64, rest)
+    } else {
+        (-1i64, zone.strip_prefix('-')?)
+    };
+    let (hour_text, minute_text) = if let Some((hour, minute)) = rest.split_once(':') {
+        if hour.len() != 2 || minute.len() != 2 {
+            return None;
+        }
+        (hour, minute)
+    } else if rest.len() == 4 && rest.bytes().all(|byte| byte.is_ascii_digit()) {
+        (&rest[..2], &rest[2..])
+    } else {
+        return None;
+    };
+    let hour: i64 = hour_text.parse().ok()?;
+    let minute: i64 = minute_text.parse().ok()?;
+    if !(0..=23).contains(&hour) || !(0..=59).contains(&minute) {
+        return None;
+    }
+    Some((clock, sign * (hour * 3_600_000 + minute * 60_000)))
 }
 
 fn date_only_millis(value: &str) -> Option<u64> {
