@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -31,6 +32,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -44,9 +46,17 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isShiftPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.graphics.asImageBitmap
@@ -58,6 +68,7 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -71,6 +82,9 @@ import ch.fasrv.fanotes.desk.Breadcrumb
 import ch.fasrv.fanotes.desk.SwitcherNote
 import ch.fasrv.fanotes.desk.dueCards
 import ch.fasrv.fanotes.desk.fuzzyScore
+import ch.fasrv.fanotes.desk.PendingConfirm
+import ch.fasrv.fanotes.desk.confirmDialogKeyAction
+import ch.fasrv.fanotes.desk.confirmDialogTabTarget
 import ch.fasrv.fanotes.desk.CALENDAR_NOTE_PATH
 import ch.fasrv.fanotes.desk.CalendarEvent
 import ch.fasrv.fanotes.desk.LaidOutSpan
@@ -1034,6 +1048,48 @@ private fun CalendarEventEditor(
             }
         },
     )
+}
+
+@Composable
+fun FaNotesConfirmDialog(request: PendingConfirm, onConfirm: () -> Unit, onDismiss: () -> Unit) {
+    val cancel = remember { FocusRequester() }
+    val confirm = remember { FocusRequester() }
+    var focused by remember(request.message) { mutableStateOf(0) }
+    LaunchedEffect(request.message) { runCatching { cancel.requestFocus() } }
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(Modifier.widthIn(max = 440.dp).onPreviewKeyEvent { event ->
+            if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+            val keyName = when (event.key) {
+                Key.Escape -> "Escape"
+                else -> ""
+            }
+            if (confirmDialogKeyAction(keyName) == "cancel") {
+                onDismiss()
+                return@onPreviewKeyEvent true
+            }
+            if (event.key != Key.Tab) return@onPreviewKeyEvent false
+            val next = confirmDialogTabTarget(2, focused, event.isShiftPressed) ?: return@onPreviewKeyEvent false
+            focused = next
+            if (next == 0) cancel.requestFocus() else confirm.requestFocus()
+            true
+        }) {
+            Column(Modifier.padding(20.dp)) {
+                Text("Achtung", fontSize = 12.sp, color = MaterialTheme.colorScheme.error)
+                Text(request.title, style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(top = 4.dp))
+                Text(request.message, modifier = Modifier.padding(top = 12.dp, bottom = 16.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    TextButton(
+                        onClick = onDismiss,
+                        modifier = Modifier.focusRequester(cancel).onFocusChanged { if (it.isFocused) focused = 0 },
+                    ) { Text(request.cancelLabel) }
+                    TextButton(
+                        onClick = onConfirm,
+                        modifier = Modifier.focusRequester(confirm).onFocusChanged { if (it.isFocused) focused = 1 },
+                    ) { Text(request.confirmLabel, color = MaterialTheme.colorScheme.error) }
+                }
+            }
+        }
+    }
 }
 
 @Composable

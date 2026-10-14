@@ -307,7 +307,7 @@ fun FaNotesScreen(
                     onImportImage = onImportImage,
                     onOpenVault = onOpenVault,
                     onPrivateVault = { model.usePrivateVault() },
-                    onDelete = { model.delete(it) },
+                    onDelete = { path, folder, name -> model.askDelete(path, folder, name) },
                     localFolders = syncPrefixesFromSetting(desk["sync-excluded"]),
                     onToggleLocal = { model.toggleLocalFolder(it) },
                     colors = model.folderColors.collectAsStateWithLifecycle().value,
@@ -411,6 +411,10 @@ fun FaNotesScreen(
                 }
             }
         }, title = { Text("Befehle") })
+    }
+    val confirm by model.confirmRequest.collectAsStateWithLifecycle()
+    confirm?.let { request ->
+        FaNotesConfirmDialog(request, onConfirm = { model.acceptConfirm() }, onDismiss = { model.dismissConfirm() })
     }
     if (mathOpen) {
         AlertDialog(
@@ -526,7 +530,7 @@ private fun VaultPane(
     onImportImage: () -> Unit,
     onOpenVault: () -> Unit,
     onPrivateVault: () -> Unit,
-    onDelete: (String) -> Unit,
+    onDelete: (String, Boolean, String) -> Unit,
     localFolders: List<String> = emptyList(),
     onToggleLocal: (String) -> Unit = {},
     colors: Map<String, String>,
@@ -613,7 +617,7 @@ private fun NoteRow(
     selected: String?,
     colors: Map<String, String>,
     onOpen: (String) -> Unit,
-    onDelete: (String) -> Unit,
+    onDelete: (String, Boolean, String) -> Unit,
     onFolderColor: (String) -> Unit,
     localFolders: List<String>,
     onToggleLocal: (String) -> Unit,
@@ -649,10 +653,8 @@ private fun NoteRow(
                 modifier = Modifier.clickable { onToggleLocal(node.path) }.padding(horizontal = 6.dp),
             )
         }
-        if (node.kind != NoteKind.FOLDER) {
-            IconButton(onClick = { onDelete(node.path) }) {
-                Icon(Icons.Filled.Delete, contentDescription = "Delete ${node.name}")
-            }
+        IconButton(onClick = { onDelete(node.path, node.kind == NoteKind.FOLDER, node.name) }) {
+            Icon(Icons.Filled.Delete, contentDescription = "Löschen")
         }
     }
     if (node.kind == NoteKind.FOLDER) {
@@ -912,7 +914,7 @@ private fun PageSurface(
             page.ink.onPlaceSection = { model.insertSection(it) }
             page.ink.onPlaceLink = { linkPage, x, y -> model.placeNoteLink(linkPage, x, y, page.ink.noteLinkStyle) }
             page.ink.onOpenLink = { model.openPath(it); model.showDestination("notes") }
-            page.ink.onRemoveLink = { model.removePlacedNoteLink(it) }
+            page.ink.onRemoveLink = { model.askRemoveNoteLink(it) }
             page.ink.onToggleSection = { model.toggleInkSection(it) }
             page.ink.onEditBox = onEditBox
             page.onMath = onMath
