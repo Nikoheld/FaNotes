@@ -256,6 +256,38 @@ fn an_asset_preview_uses_the_desktop_extension_before_the_path_shape() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn an_unreadable_preview_uses_the_desktop_open_error() {
+    use std::os::unix::fs::PermissionsExt;
+    let (dir, mut host) = host();
+    let file = dir.0.join("vault").join("seite.pdf");
+    fs::write(&file, b"%PDF-1.4\n").unwrap();
+    let canonical = fs::canonicalize(&file).unwrap();
+    fs::set_permissions(&file, fs::Permissions::from_mode(0o000)).unwrap();
+    struct Restore(std::path::PathBuf);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            let _ = fs::set_permissions(&self.0, fs::Permissions::from_mode(0o600));
+        }
+    }
+    let _restore = Restore(file);
+    let expected = format!(
+        "EACCES: permission denied, open '{}'",
+        canonical.display()
+    );
+    assert_eq!(
+        host.dispatch("fanotes:read-asset-bytes", &[json!("seite.pdf")])
+            .unwrap_err(),
+        expected
+    );
+    assert_eq!(
+        host.dispatch("fanotes:sync-read", &[json!("seite.pdf")])
+            .unwrap_err(),
+        expected
+    );
+}
+
 #[test]
 fn an_empty_asset_preview_returns_an_empty_payload() {
     let (dir, mut host) = host();
