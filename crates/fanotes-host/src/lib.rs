@@ -3109,6 +3109,22 @@ fn split_joined_date(body: &str) -> Vec<&str> {
     parts
 }
 
+/// `10/13/2026` and `10//13` are the numbers 10, 13, 2026 and 10, 13.
+/// An empty slash is only a separator.
+fn slash_date_numbers(word: &str) -> Option<Vec<i32>> {
+    if !word.contains('/') || word.bytes().any(|byte| byte.is_ascii_alphabetic()) {
+        return None;
+    }
+    let mut numbers = Vec::new();
+    for part in word.split('/') {
+        if part.is_empty() {
+            continue;
+        }
+        numbers.push(unsigned_number(part)?);
+    }
+    Some(numbers)
+}
+
 fn unsigned_number(text: &str) -> Option<i32> {
     if text.is_empty() || !text.bytes().all(|byte| byte.is_ascii_digit()) {
         return None;
@@ -3258,6 +3274,19 @@ fn compose_month_date(
         }
         if glued_non_month(word) {
             return None;
+        }
+        if !numeric {
+            if let Some(numbers) = slash_date_numbers(word) {
+                // `10/13/2026 January` keeps 10 and 13. The month name
+                // replaces the slash month, and a third number is ignored.
+                if !numbers.is_empty() {
+                    for number in numbers {
+                        push_date_number(&mut dates, number)?;
+                    }
+                    number_seen = true;
+                }
+                continue;
+            }
         }
         if let Some(found) = english_month(word) {
             month = Some(found);
@@ -9499,6 +9528,75 @@ mod local_zone_tests {
         assert_eq!(unix_millis_from_iso("2026-10-13 16:00 --5"), None);
         assert_eq!(unix_millis_from_iso("2026-10-13 16:00 +-5"), None);
         assert_eq!(unix_millis_from_iso("2026-10-13 16:00 +5-+8"), None);
+    }
+
+    #[test]
+    fn a_month_name_replaces_a_slash_date() {
+        let _lock = TRASH_CLOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let _restore = RestoreTz(std::env::var_os("TZ"));
+        unsafe { std::env::set_var("TZ", "America/New_York") };
+        unsafe { tzset() };
+        // `10/13/2026 January` is 10 January 2013. The first number is the
+        // day, the second is the year, and the slash month is replaced.
+        assert_eq!(
+            unix_millis_from_iso("10/13/2026 January"),
+            Some(1_357_794_000_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026/10/13 January"),
+            Some(1_768_021_200_000)
+        );
+        assert_eq!(unix_millis_from_iso("10/13 January"), Some(1_357_794_000_000));
+        assert_eq!(
+            unix_millis_from_iso("10/13/2026 January 16:00"),
+            Some(1_357_851_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("10/13/2026 16:00 January"),
+            Some(1_357_851_600_000)
+        );
+        assert_eq!(unix_millis_from_iso("1/2/3 January"), Some(1_009_861_200_000));
+        assert_eq!(
+            unix_millis_from_iso("13/10/2026 January"),
+            Some(1_263_358_800_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("10/32/2026 January"),
+            Some(1_957_323_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("10/13/2026 January EST"),
+            Some(1_357_794_000_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026/13/01 January"),
+            Some(1_768_280_400_000)
+        );
+        assert_eq!(unix_millis_from_iso("99/1/2 January"), Some(915_166_800_000));
+        assert_eq!(
+            unix_millis_from_iso("10/13/2026 Oct"),
+            Some(1_381_377_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("January 10/13/2026"),
+            Some(1_357_794_000_000)
+        );
+        assert_eq!(unix_millis_from_iso("10//13 January"), Some(1_357_794_000_000));
+        assert_eq!(unix_millis_from_iso("10/ January"), Some(979_102_800_000));
+        assert_eq!(
+            unix_millis_from_iso("/10/13/2026 January"),
+            Some(1_357_794_000_000)
+        );
+        assert_eq!(unix_millis_from_iso("10/13/50 January"), Some(1_357_794_000_000));
+        assert_eq!(unix_millis_from_iso("10/13/2026 January +5"), None);
+        assert_eq!(unix_millis_from_iso("10/13/2026 January PM"), None);
+        assert_eq!(unix_millis_from_iso("10/13/2026/1 January"), None);
+        assert_eq!(
+            unix_millis_from_iso("10/13/2026"),
+            Some(1_791_864_000_000)
+        );
     }
 
     #[test]
