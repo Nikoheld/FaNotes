@@ -2850,7 +2850,21 @@ fn compose_month_date(
         }
         if named_zone_offset(word).is_some() {
             // `GMT5` before any number is not a date. `GMT 5` ignores `GMT`.
+            // `GMT+5` before a number ignores the keyword and the sign, so the
+            // 5 is a date field. `5:30` in that position is a clock.
             if !number_seen {
+                if let Some(tail) = zone_keyword_tail(word) {
+                    let body = tail.strip_prefix(['+', '-']).unwrap_or(tail);
+                    if body.contains(':') {
+                        take_clock_word(body, &mut time, &mut dates, &mut offset)?;
+                    } else if let Some(number) = unsigned_number(body) {
+                        push_date_number(&mut dates, number)?;
+                    } else {
+                        return None;
+                    }
+                    number_seen = true;
+                    continue;
+                }
                 if words
                     .get(index + 1)
                     .copied()
@@ -3326,6 +3340,25 @@ fn finish_legacy_time(time: &LegacyTime, hour_offset: Option<i32>) -> Option<Str
         Some(format!(
             "{hour:02}:{minute:02}:{second:02}.{millis:03}"
         ))
+    }
+}
+
+/// `GMT+5` and `UTC+5:30` keep the signed tail. `EST` and `GMT` have none.
+fn zone_keyword_tail(word: &str) -> Option<&str> {
+    let prefix = if word.len() >= 3 && word[..3].eq_ignore_ascii_case("gmt") {
+        3
+    } else if word.len() >= 3 && word[..3].eq_ignore_ascii_case("utc") {
+        3
+    } else if word.len() >= 2 && word[..2].eq_ignore_ascii_case("ut") {
+        2
+    } else {
+        return None;
+    };
+    let rest = &word[prefix..];
+    if rest.starts_with(['+', '-']) && rest.len() > 1 {
+        Some(rest)
+    } else {
+        None
     }
 }
 
@@ -7564,6 +7597,104 @@ mod local_zone_tests {
         assert_eq!(unix_millis_from_iso("2026-10-13 GMT5"), None);
         assert_eq!(unix_millis_from_iso("2026-10-13 EST5"), None);
         assert_eq!(unix_millis_from_iso("13-1-2026 GMT"), None);
+    }
+
+    #[test]
+    fn a_leading_gmt_offset_is_a_date_field() {
+        let _lock = TRASH_CLOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let _restore = RestoreTz(std::env::var_os("TZ"));
+        unsafe { std::env::set_var("TZ", "America/New_York") };
+        unsafe { tzset() };
+        // Before any number, `GMT+5` ignores the keyword and the sign. The 5
+        // is a date field. After a number, the same token is an offset.
+        assert_eq!(
+            unix_millis_from_iso("GMT+5 Oct 13 2026"),
+            Some(1_380_945_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("GMT-5 Oct 13 2026"),
+            Some(1_380_945_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("UTC+5 Oct 13 2026"),
+            Some(1_380_945_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("UT+5 Oct 13 2026"),
+            Some(1_380_945_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("hello GMT+5 Oct 13 2026"),
+            Some(1_380_945_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("GMT+05 Oct 13 2026"),
+            Some(1_380_945_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("GMT+24 Oct 13 2026"),
+            Some(1_382_587_200_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("+5 Oct 13 2026"),
+            Some(1_380_945_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("-5 Oct 13 2026"),
+            Some(1_380_945_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("GMT +5 Oct 13 2026"),
+            Some(1_380_945_600_000)
+        );
+        assert_eq!(unix_millis_from_iso("GMT+5"), Some(988_689_600_000));
+        assert_eq!(unix_millis_from_iso("GMT-5"), Some(988_689_600_000));
+        assert_eq!(unix_millis_from_iso("GMT +5"), Some(988_689_600_000));
+        assert_eq!(unix_millis_from_iso("5 GMT+5"), Some(988_657_200_000));
+        assert_eq!(
+            unix_millis_from_iso("GMT+5:30 Oct 13 2026"),
+            Some(1_791_883_800_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 GMT+5"),
+            Some(1_791_831_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 GMT-5"),
+            Some(1_791_867_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 GMT+24"),
+            Some(1_791_763_200_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 GMT+5:30"),
+            Some(1_791_829_800_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 GMT+5"),
+            Some(1_791_831_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 GMT-5"),
+            Some(1_791_867_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 16:00 GMT+5"),
+            Some(1_791_889_200_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 16:00 GMT-5"),
+            Some(1_791_925_200_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 16:00 GMT+05:30"),
+            Some(1_791_887_400_000)
+        );
+        assert_eq!(unix_millis_from_iso("GMT+ Oct 13 2026"), Some(1_791_864_000_000));
+        assert_eq!(unix_millis_from_iso("Oct 13 2026 +5"), None);
     }
 
     #[test]
