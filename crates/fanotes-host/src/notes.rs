@@ -461,15 +461,9 @@ pub fn record_history(vault_root: &Path, relative: &str, content: &str) -> Resul
         .as_array_mut()
         .ok_or_else(|| "Der Verlauf konnte nicht gespeichert werden.".to_owned())?
         .push(json!({ "id": id, "createdAt": created_at, "bytes": bytes }));
-    if atomic_write(
-        &directory.join("index.json"),
-        &history_index_bytes(&index)?,
-        0o600,
-    )
-    .is_err()
-    {
+    if let Err(error) = write_history_index(&directory, &history_index_bytes(&index)?) {
         let _ = fs::remove_file(&snapshot_path);
-        return Err("Der Verlauf konnte nicht gespeichert werden.".to_owned());
+        return Err(error);
     }
     trim_history(&directory, &mut index)?;
     Ok(())
@@ -488,7 +482,7 @@ fn trim_history(directory: &Path, index: &mut Value) -> Result<(), String> {
     let Ok(bytes) = history_index_bytes(index) else {
         return Ok(());
     };
-    if atomic_write(&directory.join("index.json"), &bytes, 0o600).is_err() {
+    if write_history_index(directory, &bytes).is_err() {
         return Ok(());
     }
     for entry in removed {
@@ -684,6 +678,35 @@ fn books_path(root: &Path) -> Result<PathBuf, String> {
 
 fn history_mkdir_code(path: &Path, code: i32) -> String {
     crate::vault::node_mkdir_error(path, &std::io::Error::from_raw_os_error(code))
+}
+
+fn write_history_index(directory: &Path, bytes: &[u8]) -> Result<(), String> {
+    let temporary = directory.join(format!(".index-{}.tmp", std::process::id()));
+    let index = directory.join("index.json");
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options.open(&temporary).map_err(|error| {
+        if error.raw_os_error() == Some(libc::EISDIR) {
+            format!(
+                "EISDIR: illegal operation on a directory, open '{}'",
+                temporary.display()
+            )
+        } else {
+            node_open_error(&temporary, &error)
+        }
+    })?;
+    use std::io::Write;
+    file.write_all(bytes)
+        .map_err(|error| node_open_error(&temporary, &error))?;
+    let _ = file.sync_all();
+    drop(file);
+    fs::rename(&temporary, &index)
+        .map_err(|error| crate::vault::node_rename_error(&temporary, &index, &error))
 }
 
 fn write_history_snapshot(path: &Path, content: &str) -> Result<(), String> {
@@ -1452,5 +1475,36 @@ mod publish_tests {
         assert!(error.trim_end_matches('\'').ends_with(".md"), "{error}");
         assert!(!error.contains(".tmp"), "{error}");
         assert!(std::fs::read_dir(&directory).unwrap().next().is_none());
+    }
+
+    #[test]
+    fn a_history_index_directory_reports_the_desktop_open_error() {
+        let root = std::env::temp_dir().join(format!(
+            "fanotes-history-index-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        let directory = history_dir(&root, "Seite.md").unwrap();
+        std::fs::create_dir_all(&directory).unwrap();
+        let temporary = directory.join(format!(".index-{}.tmp", std::process::id()));
+        std::fs::create_dir(&temporary).unwrap();
+        assert_eq!(
+            record_history(&root, "Seite.md", "Hallo\n").expect_err("history index write succeeded"),
+            format!(
+                "EISDIR: illegal operation on a directory, open '{}'",
+                temporary.display()
+            )
+        );
+        let mut names: Vec<_> = std::fs::read_dir(&directory)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        assert_eq!(names, vec![format!(".index-{}.tmp", std::process::id())]);
+        let _ = std::fs::remove_dir_all(&root);
     }
 }
