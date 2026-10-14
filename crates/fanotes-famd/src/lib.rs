@@ -809,6 +809,10 @@ pub fn js_json_number(value: f64) -> Value {
 /// month rolls forward, and `24:00:00` is the next midnight.
 pub fn canonical_iso(value: &str) -> Option<String> {
     let trimmed = trim_js(value);
+    if has_english_month(trimmed) {
+        let normalized = rewrite_month_name(trimmed)?;
+        return canonical_iso(&normalized);
+    }
     if is_date_only_shape(trimmed) {
         return date_only_iso(trimmed);
     }
@@ -836,6 +840,194 @@ pub fn canonical_iso(value: &str) -> Option<String> {
     Some(format!(
         "{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}.{millis:03}Z"
     ))
+}
+
+fn has_english_month(value: &str) -> bool {
+    month_words(value).iter().any(|word| english_month(word).is_some())
+}
+
+fn month_words(value: &str) -> Vec<&str> {
+    value
+        .split(|c: char| c.is_whitespace() || c == ',')
+        .map(|token| token.trim_matches('.'))
+        .filter(|token| !token.is_empty())
+        .collect()
+}
+
+fn english_month(token: &str) -> Option<i32> {
+    match token.to_ascii_lowercase().as_str() {
+        "jan" | "january" => Some(1),
+        "feb" | "february" => Some(2),
+        "mar" | "march" => Some(3),
+        "apr" | "april" => Some(4),
+        "may" => Some(5),
+        "jun" | "june" => Some(6),
+        "jul" | "july" => Some(7),
+        "aug" | "august" => Some(8),
+        "sep" | "sept" | "september" => Some(9),
+        "oct" | "october" => Some(10),
+        "nov" | "november" => Some(11),
+        "dec" | "december" => Some(12),
+        _ => None,
+    }
+}
+
+fn is_weekday_name(token: &str) -> bool {
+    matches!(
+        token.to_ascii_lowercase().as_str(),
+        "sun" | "sunday"
+            | "mon"
+            | "monday"
+            | "tue"
+            | "tues"
+            | "tuesday"
+            | "wed"
+            | "wednesday"
+            | "thu"
+            | "thur"
+            | "thurs"
+            | "thursday"
+            | "fri"
+            | "friday"
+            | "sat"
+            | "saturday"
+    )
+}
+
+fn legacy_year_number(year: i32) -> Option<i32> {
+    if year >= 100 {
+        return Some(year);
+    }
+    if (0..=49).contains(&year) {
+        return Some(2000 + year);
+    }
+    if (50..=99).contains(&year) {
+        return Some(1900 + year);
+    }
+    None
+}
+
+/// `Oct 13, 2026` becomes a hyphen time the rest of `canonical_iso` understands.
+/// A date alone is local midnight, so the result has no `Z`.
+fn rewrite_month_name(trimmed: &str) -> Option<String> {
+    let mut words = month_words(trimmed);
+    if words.first().is_some_and(|word| is_weekday_name(word)) {
+        words.remove(0);
+    }
+    if words.len() < 3 {
+        return None;
+    }
+    let (month, day_text, year_text, rest_at) = if english_month(words[0]).is_some() {
+        (english_month(words[0])?, words[1], words[2], 3)
+    } else if words.len() > 1 && english_month(words[1]).is_some() {
+        (english_month(words[1])?, words[0], words[2], 3)
+    } else {
+        return None;
+    };
+    let day: i32 = day_text.parse().ok()?;
+    let year = legacy_year_number(year_text.parse().ok()?)?;
+    if !(1..=31).contains(&day) {
+        return None;
+    }
+    let (clock, zone) = month_clock_and_zone(&words[rest_at..])?;
+    Some(format!("{year:04}-{month:02}-{day:02}T{clock}{zone}"))
+}
+
+fn month_clock_and_zone(rest: &[&str]) -> Option<(String, String)> {
+    match rest {
+        [] => Some(("00:00:00".to_string(), String::new())),
+        [zone] if month_zone_suffix(zone).is_some() => {
+            Some(("00:00:00".to_string(), month_zone_suffix(zone)?))
+        }
+        [time] => Some((normalize_month_clock(time)?, String::new())),
+        [time, zone] => Some((normalize_month_clock(time)?, month_zone_suffix(zone)?)),
+        _ => None,
+    }
+}
+
+fn normalize_month_clock(time: &str) -> Option<String> {
+    let (body, fraction) = match time.split_once('.') {
+        Some((body, fraction))
+            if !fraction.is_empty() && fraction.bytes().all(|byte| byte.is_ascii_digit()) =>
+        {
+            (body, Some(fraction))
+        }
+        None => (time, None),
+        Some(_) => return None,
+    };
+    let mut numbers = Vec::new();
+    for part in body.split(':') {
+        if part.is_empty() || !part.bytes().all(|byte| byte.is_ascii_digit()) {
+            return None;
+        }
+        numbers.push(part.parse::<u32>().ok()?);
+    }
+    if !(2..=3).contains(&numbers.len()) || numbers.iter().any(|number| *number > 99) {
+        return None;
+    }
+    let mut out = if numbers.len() == 3 {
+        format!("{:02}:{:02}:{:02}", numbers[0], numbers[1], numbers[2])
+    } else {
+        format!("{:02}:{:02}:00", numbers[0], numbers[1])
+    };
+    if let Some(fraction) = fraction {
+        out.push('.');
+        out.push_str(fraction);
+    }
+    Some(out)
+}
+
+fn month_zone_suffix(token: &str) -> Option<String> {
+    let lower = token.to_ascii_lowercase();
+    let hours: i32 = match lower.as_str() {
+        "gmt" | "utc" | "ut" | "z" => return Some("Z".to_string()),
+        "est" => -5,
+        "edt" => -4,
+        "cst" => -6,
+        "cdt" => -5,
+        "mst" => -7,
+        "mdt" => -6,
+        "pst" => -8,
+        "pdt" => -7,
+        _ => return month_gmt_suffix(&lower),
+    };
+    let sign = if hours < 0 { '-' } else { '+' };
+    Some(format!("{sign}{:02}:00", hours.abs()))
+}
+
+fn month_gmt_suffix(lower: &str) -> Option<String> {
+    let rest = if let Some(rest) = lower.strip_prefix("gmt") {
+        rest
+    } else if let Some(rest) = lower.strip_prefix("utc") {
+        rest
+    } else if let Some(rest) = lower.strip_prefix("ut") {
+        rest
+    } else {
+        return None;
+    };
+    if rest.is_empty() {
+        return Some("Z".to_string());
+    }
+    let (sign, body) = if let Some(body) = rest.strip_prefix('+') {
+        ('+', body)
+    } else if let Some(body) = rest.strip_prefix('-') {
+        ('-', body)
+    } else {
+        return None;
+    };
+    let (hour, minute) = if let Some((hour, minute)) = body.split_once(':') {
+        (hour.parse::<i32>().ok()?, minute.parse::<i32>().ok()?)
+    } else if body.len() <= 2 && body.bytes().all(|byte| byte.is_ascii_digit()) {
+        (body.parse().ok()?, 0)
+    } else if body.len() == 4 && body.bytes().all(|byte| byte.is_ascii_digit()) {
+        (body[..2].parse().ok()?, body[2..].parse().ok()?)
+    } else {
+        return None;
+    };
+    if !(0..=23).contains(&hour) || !(0..=59).contains(&minute) {
+        return None;
+    }
+    Some(format!("{sign}{hour:02}:{minute:02}"))
 }
 
 /// A calendar date with no time: `YYYY`, `YYYY-MM`, or `YYYY-MM-DD`.
@@ -1429,7 +1621,27 @@ mod tests {
         });
     }
 
+    #[test]
+    fn a_month_name_is_local_midnight() {
+        with_tz("America/New_York", || {
+            assert_eq!(
+                super::canonical_iso("Oct 13, 2026").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13, 2026 GMT").as_deref(),
+                Some("2026-10-13T00:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13, 2026 16:00 EST").as_deref(),
+                Some("2026-10-13T21:00:00.000Z")
+            );
+        });
+    }
+
     fn with_tz(tz: &str, check: impl FnOnce()) {
+        static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let _guard = LOCK.lock().unwrap_or_else(|error| error.into_inner());
         unsafe extern "C" {
             fn tzset();
         }
