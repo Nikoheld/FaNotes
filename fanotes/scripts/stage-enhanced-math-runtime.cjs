@@ -59,6 +59,11 @@ const buildRoot = requestedBuildRoot ? path.resolve(requestedBuildRoot) : os.tmp
 fs.mkdirSync(buildRoot, { recursive: true, mode: 0o700 })
 const build = fs.mkdtempSync(path.join(buildRoot, 'fanotes-crispembed-build-'))
 const destination = path.join(appRoot, 'native-math', `${platform}-${arch}`)
+const stagedBinary = path.join(destination, platform === 'win32' ? 'crispembed.exe' : 'crispembed')
+if (process.env.FANOTES_NATIVE_MATH_REUSE === '1' && fs.existsSync(stagedBinary)) {
+  console.log(`Native Formelmodell-Laufzeit wird wiederverwendet: ${destination}`)
+  process.exit(0)
+}
 
 try {
   if (!requestedSource) {

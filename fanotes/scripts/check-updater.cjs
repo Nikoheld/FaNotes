@@ -11,7 +11,7 @@ const { pipeline } = require('node:stream/promises')
 const { applyDeltaPatch } = require('../electron/delta.cjs')
 const { createDeltaPatch } = require('./create-delta.cjs')
 const { EventEmitter } = require('node:events')
-const { compareVersions, createUpdateManager, diagnoseUpdateFailure, INSTALL_HELPER, isPrivateAddress, shouldReplaceManagedDesktopFile, stableStringify, verifyManifest, waitForChildSpawn } = require('../electron/updater.cjs')
+const { compareVersions, createUpdateManager, diagnoseUpdateFailure, githubReleaseAssetUrl, INSTALL_HELPER, isPrivateAddress, shouldReplaceManagedDesktopFile, stableStringify, verifyManifest, waitForChildSpawn } = require('../electron/updater.cjs')
 const {
   EMPTY_NIGHTLY_CHANGELOG,
   DELTA_ROUTE_PATTERN,
@@ -193,13 +193,13 @@ async function main() {
       packages: {
         appimage: {
           fileName: path.basename(targetPath),
-          url: 'https://fanotes.fasrv.ch/download/appimage',
+          url: githubReleaseAssetUrl(targetVersion, path.basename(targetPath)),
           sizeBytes: targetBytes.length,
           sha256: delta.target.sha256,
         },
         portable: {
           fileName: `FaNotes-${targetVersion}-x86_64.tar.gz`,
-          url: 'https://fanotes.fasrv.ch/download/portable',
+          url: githubReleaseAssetUrl(targetVersion, `FaNotes-${targetVersion}-x86_64.tar.gz`),
           sizeBytes: 11 * 1024 * 1024,
           sha256: 'b'.repeat(64),
         },
@@ -207,7 +207,7 @@ async function main() {
       delta: {
         format: delta.format,
         fileName: patchName,
-        url: `https://fanotes.fasrv.ch/download/delta/linux-x64/${baseVersion}`,
+        url: githubReleaseAssetUrl(targetVersion, patchName),
         sizeBytes: delta.patchSizeBytes,
         sha256: delta.patchSha256,
         source: delta.source,
@@ -224,6 +224,18 @@ async function main() {
       },
     }
     const verified = verifyManifest(signedManifest, baseVersion, publicPem, 'linux', keyId)
+    assert.equal(verified.packages.appimage.url, githubReleaseAssetUrl(targetVersion, path.basename(targetPath)))
+    const serverPayload = structuredClone(payload)
+    serverPayload.packages.appimage.url = 'https://fanotes.fasrv.ch/download/appimage'
+    const signedServerPayload = {
+      ...serverPayload,
+      signature: {
+        algorithm: 'ed25519',
+        keyId,
+        value: crypto.sign(null, Buffer.from(stableStringify(serverPayload)), privateKey).toString('base64'),
+      },
+    }
+    assert.throws(() => verifyManifest(signedServerPayload, baseVersion, publicPem, 'linux', keyId), /vertrauenswürdig/u)
     assert.equal(verified.delta.sizeBytes, delta.patchSizeBytes)
     assert.equal(verified.delta.target.sha256, delta.target.sha256)
     const tampered = structuredClone(signedManifest)
@@ -232,9 +244,9 @@ async function main() {
 
     const betaPayload = structuredClone(payload)
     betaPayload.channel = 'beta'
-    betaPayload.packages.appimage.url = 'https://fanotes.fasrv.ch/download/beta/appimage'
-    betaPayload.packages.portable.url = 'https://fanotes.fasrv.ch/download/beta/portable'
-    betaPayload.delta.url = `https://fanotes.fasrv.ch/download/delta/linux-x64/beta/${baseVersion}`
+    betaPayload.packages.appimage.url = githubReleaseAssetUrl(targetVersion, path.basename(targetPath))
+    betaPayload.packages.portable.url = githubReleaseAssetUrl(targetVersion, `FaNotes-${targetVersion}-x86_64.tar.gz`)
+    betaPayload.delta.url = githubReleaseAssetUrl(targetVersion, patchName)
     const signedBetaManifest = {
       ...betaPayload,
       signature: {
@@ -252,9 +264,9 @@ async function main() {
     nightlyPayload.channel = 'nightly'
     nightlyPayload.latestVersion = nightlyLatest
     nightlyPayload.packages.appimage.fileName = `FaNotes-${nightlyLatest}-x86_64.AppImage`
-    nightlyPayload.packages.appimage.url = 'https://fanotes.fasrv.ch/download/nightly/appimage'
+    nightlyPayload.packages.appimage.url = githubReleaseAssetUrl(nightlyLatest, `FaNotes-${nightlyLatest}-x86_64.AppImage`)
     nightlyPayload.packages.portable.fileName = `FaNotes-${nightlyLatest}-x86_64.tar.gz`
-    nightlyPayload.packages.portable.url = 'https://fanotes.fasrv.ch/download/nightly/portable'
+    nightlyPayload.packages.portable.url = githubReleaseAssetUrl(nightlyLatest, `FaNotes-${nightlyLatest}-x86_64.tar.gz`)
     nightlyPayload.delta = null
     const signedNightlyManifest = {
       ...nightlyPayload,
@@ -271,9 +283,9 @@ async function main() {
 
     const nightlyStablePayload = structuredClone(payload)
     nightlyStablePayload.channel = 'nightly'
-    nightlyStablePayload.packages.appimage.url = 'https://fanotes.fasrv.ch/download/nightly/appimage'
-    nightlyStablePayload.packages.portable.url = 'https://fanotes.fasrv.ch/download/nightly/portable'
-    nightlyStablePayload.delta.url = `https://fanotes.fasrv.ch/download/delta/linux-x64/nightly/${baseVersion}`
+    nightlyStablePayload.packages.appimage.url = githubReleaseAssetUrl(targetVersion, path.basename(targetPath))
+    nightlyStablePayload.packages.portable.url = githubReleaseAssetUrl(targetVersion, `FaNotes-${targetVersion}-x86_64.tar.gz`)
+    nightlyStablePayload.delta.url = githubReleaseAssetUrl(targetVersion, patchName)
     const signedNightlyStableManifest = {
       ...nightlyStablePayload,
       signature: {
@@ -285,18 +297,40 @@ async function main() {
     const nightlyStableVerified = verifyManifest(signedNightlyStableManifest, baseVersion, publicPem, 'linux', keyId, 'nightly')
     assert.equal(nightlyStableVerified.channel, 'nightly')
     assert.equal(nightlyStableVerified.latestVersion, targetVersion)
-    assert.equal(nightlyStableVerified.packages.appimage.url, 'https://fanotes.fasrv.ch/download/nightly/appimage')
+    assert.equal(nightlyStableVerified.packages.appimage.url, githubReleaseAssetUrl(targetVersion, path.basename(targetPath)))
 
     const patchBytes = await fsp.readFile(patchPath)
-    const manifestUrl = `https://fanotes.fasrv.ch/api/v1/updates/linux-x64?current=${baseVersion}&channel=stable`
-    const betaManifestUrl = `https://fanotes.fasrv.ch/api/v1/updates/linux-x64?current=${baseVersion}&channel=beta`
+    const releaseListUrl = 'https://api.github.com/repos/Nikoheld/FaNotes/releases/latest'
+    const betaReleaseListUrl = 'https://api.github.com/repos/Nikoheld/FaNotes/releases?per_page=30'
+    const manifestAssetUrl = githubReleaseAssetUrl(targetVersion, 'FaNotes-update-linux-x64.json')
+    const betaManifestAssetUrl = githubReleaseAssetUrl(targetVersion, 'FaNotes-update-linux-x64-beta.json')
     const patchUrl = payload.delta.url
     const betaPatchUrl = betaPayload.delta.url
     const fullPackageUrl = payload.packages.appimage.url
+    const jsonResponse = (body) => {
+      const text = JSON.stringify(body)
+      return new Response(text, { status: 200, headers: { 'content-type': 'application/json', 'content-length': String(Buffer.byteLength(text)) } })
+    }
     const fetchImpl = async (input, options = {}) => {
       const url = String(input)
-      if (url === manifestUrl) return new Response(JSON.stringify(signedManifest), { status: 200, headers: { 'content-length': String(Buffer.byteLength(JSON.stringify(signedManifest))) } })
-      if (url === betaManifestUrl) return new Response(JSON.stringify(signedBetaManifest), { status: 200, headers: { 'content-length': String(Buffer.byteLength(JSON.stringify(signedBetaManifest))) } })
+      if (url === releaseListUrl) {
+        return jsonResponse({
+          tag_name: `v${targetVersion}`,
+          draft: false,
+          prerelease: false,
+          assets: [{ name: 'FaNotes-update-linux-x64.json', browser_download_url: manifestAssetUrl }],
+        })
+      }
+      if (url === betaReleaseListUrl) {
+        return jsonResponse([{
+          tag_name: `v${targetVersion}`,
+          draft: false,
+          prerelease: true,
+          assets: [{ name: 'FaNotes-update-linux-x64-beta.json', browser_download_url: betaManifestAssetUrl }],
+        }])
+      }
+      if (url === manifestAssetUrl) return jsonResponse(signedManifest)
+      if (url === betaManifestAssetUrl) return jsonResponse(signedBetaManifest)
       if (url === fullPackageUrl) return new Response(targetBytes, { status: 200, headers: { 'content-length': String(targetBytes.length) } })
       if (url !== patchUrl && url !== betaPatchUrl) return new Response('not found', { status: 404 })
       const range = /^bytes=(\d+)-$/u.exec(options.headers?.Range || '')

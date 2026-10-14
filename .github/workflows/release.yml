@@ -1,0 +1,172 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+env:
+  CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+  CI: 'true'
+
+jobs:
+  linux:
+    name: Linux
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: fanotes/package-lock.json
+      - name: Install AppImage tools
+        run: sudo apt-get update && sudo apt-get install -y libfuse2 xz-utils
+      - name: Install dependencies
+        working-directory: fanotes
+        run: npm ci
+      - name: Build Linux packages
+        working-directory: fanotes
+        run: npm run dist:linux:ci
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          if-no-files-found: error
+          path: |
+            fanotes/release/FaNotes-*-x86_64.AppImage
+            fanotes/release/FaNotes-*-x86_64.tar.gz
+
+  windows:
+    name: Windows
+    runs-on: windows-2022
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: fanotes/package-lock.json
+      - name: Install dependencies
+        working-directory: fanotes
+        run: npm ci
+      - name: Build Windows packages
+        working-directory: fanotes
+        run: npm run dist:windows:ci
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          if-no-files-found: error
+          path: |
+            fanotes/release/FaNotes-Setup-*-x64.exe
+            fanotes/release/FaNotes-Portable-*-x64.exe
+
+  macos:
+    name: macOS
+    runs-on: macos-14
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: fanotes/package-lock.json
+      - name: Install dependencies
+        working-directory: fanotes
+        run: npm ci
+      - name: Build macOS packages
+        working-directory: fanotes
+        run: npm run dist:mac:ci
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          if-no-files-found: error
+          path: |
+            fanotes/release/FaNotes-*-arm64.dmg
+            fanotes/release/FaNotes-*-arm64.zip
+            fanotes/release/FaNotes-*-x64.dmg
+            fanotes/release/FaNotes-*-x64.zip
+
+  android:
+    name: Android
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - name: Install Android SDK
+        run: |
+          set -euo pipefail
+          sdk_root="$RUNNER_TEMP/android-sdk"
+          mkdir -p "$sdk_root/cmdline-tools"
+          curl -fsSL -o "$RUNNER_TEMP/cmdline.zip" https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
+          unzip -q "$RUNNER_TEMP/cmdline.zip" -d "$sdk_root/cmdline-tools"
+          mv "$sdk_root/cmdline-tools/cmdline-tools" "$sdk_root/cmdline-tools/latest"
+          echo "ANDROID_HOME=$sdk_root" >> "$GITHUB_ENV"
+          echo "$sdk_root/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
+          echo "$sdk_root/platform-tools" >> "$GITHUB_PATH"
+          yes | "$sdk_root/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$sdk_root" --licenses >/dev/null
+          "$sdk_root/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$sdk_root" "platforms;android-37" "build-tools;36.0.0" "platform-tools"
+      - name: Test and build the Android app
+        working-directory: android
+        run: |
+          set -euo pipefail
+          chmod +x gradlew
+          ./gradlew :core:test :app:assembleDebug --stacktrace
+          version="$(node -p "require('../fanotes/package.json').version")"
+          cp app/build/outputs/apk/debug/app-debug.apk "FaNotes-${version}-android.apk"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android
+          if-no-files-found: error
+          path: android/FaNotes-*-android.apk
+
+  publish:
+    name: Publish GitHub release
+    needs: [linux, windows, macos, android]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist-artifacts
+          merge-multiple: true
+      - name: Sign update manifests
+        working-directory: fanotes
+        env:
+          FANOTES_UPDATE_SIGNING_KEY: ${{ secrets.FANOTES_UPDATE_SIGNING_KEY }}
+        run: node scripts/write-update-manifests.mjs --dir "$GITHUB_WORKSPACE/dist-artifacts" --version "${GITHUB_REF_NAME#v}"
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          notes="$(mktemp)"
+          awk -v version="$version" '
+            $0 == "## " version { keep = 1; next }
+            keep && $0 ~ /^## / { exit }
+            keep { print }
+          ' fanotes/CHANGELOG.md > "$notes"
+          if [ ! -s "$notes" ]; then echo "FaNotes ${version}" > "$notes"; fi
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" dist-artifacts/* --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" dist-artifacts/* --title "FaNotes ${version}" --notes-file "$notes" --verify-tag
+          fi
+          gh release edit "$GITHUB_REF_NAME" --draft=false --prerelease=false --title "FaNotes ${version}" --notes-file "$notes"
