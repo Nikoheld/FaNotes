@@ -3420,35 +3420,50 @@ fn gmt_offset_suffix(lower: &str) -> Option<String> {
 }
 
 /// `YYYY/M/D` or `M/D/YYYY`, then an optional legacy clock. A date alone is
-/// local midnight. `T` is not a separator in this form.
+/// local midnight. `GMT` and `EST` name an offset. The `T` inside those words
+/// is not a time separator.
 fn rewrite_slash_date(trimmed: &str) -> Option<String> {
-    if trimmed.contains(['T', 't']) {
+    if has_iso_t(trimmed) {
         return None;
     }
     let mut offset_minutes = None;
-    let (date, time) = match trimmed.split_once(is_date_parse_space) {
-        Some((date, rest)) => {
-            let time = rest.trim_start_matches(is_date_parse_space);
-            if time.is_empty() {
+    let mut zone_word = None;
+    let (date, time) = if let Some((date, rest)) = trimmed.split_once(is_date_parse_space) {
+        let rest = rest.trim_start_matches(is_date_parse_space);
+        if rest.is_empty() {
+            return None;
+        }
+        if let Some((clock, tail)) = rest.split_once(is_date_parse_space) {
+            let tail = tail.trim_start_matches(is_date_parse_space);
+            if tail.is_empty() || tail.contains(is_date_parse_space) {
                 return None;
             }
-            if let Some((clock, tail)) = time.split_once(is_date_parse_space) {
-                let tail = tail.trim_start_matches(is_date_parse_space);
-                if tail.is_empty() || tail.contains(is_date_parse_space) {
-                    return None;
-                }
+            if named_zone_offset(tail).is_some() {
+                zone_word = Some(tail);
+                (date, Some(clock))
+            } else {
                 let (minutes, spilled) = parse_legacy_offset(tail)?;
                 if !spilled.is_empty() {
                     return None;
                 }
                 offset_minutes = Some(minutes);
                 (date, Some(clock))
-            } else {
-                (date, Some(time))
             }
+        } else if named_zone_offset(rest).is_some() {
+            zone_word = Some(rest);
+            (date, None)
+        } else {
+            (date, Some(rest))
         }
-        None => (trimmed, None),
+    } else {
+        let (date, zone) = split_glued_slash_zone(trimmed);
+        zone_word = zone;
+        (date, None)
     };
+    if let Some(zone) = zone_word {
+        let suffix = named_zone_offset(zone)?;
+        offset_minutes = Some(suffix_east_minutes(&suffix)?);
+    }
     let mut parts = date.split('/');
     let first: i32 = parts.next()?.parse().ok()?;
     let second: i32 = parts.next()?.parse().ok()?;
@@ -3479,6 +3494,25 @@ fn rewrite_slash_date(trimmed: &str) -> Option<String> {
         }
     };
     Some(format!("{year:04}-{month:02}-{day:02}T{clock}{suffix}"))
+}
+
+/// `10/13/2026EST` is the slash date plus `EST`. The zone starts at the first
+/// character that is not a digit or a slash.
+fn split_glued_slash_zone(token: &str) -> (&str, Option<&str>) {
+    let bytes = token.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() && (bytes[index].is_ascii_digit() || bytes[index] == b'/') {
+        index += 1;
+    }
+    if index == 0 || index == bytes.len() {
+        return (token, None);
+    }
+    let zone = &token[index..];
+    if named_zone_offset(zone).is_some() {
+        (&token[..index], Some(zone))
+    } else {
+        (token, None)
+    }
 }
 
 /// Two-digit years use `Date.parse`'s window: 0–49 are 2000–2049 and 50–99
@@ -7695,6 +7729,47 @@ mod local_zone_tests {
         );
         assert_eq!(unix_millis_from_iso("GMT+ Oct 13 2026"), Some(1_791_864_000_000));
         assert_eq!(unix_millis_from_iso("Oct 13 2026 +5"), None);
+    }
+
+    #[test]
+    fn a_slash_date_keeps_a_zone_keyword() {
+        let _lock = TRASH_CLOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let _restore = RestoreTz(std::env::var_os("TZ"));
+        unsafe { std::env::set_var("TZ", "America/New_York") };
+        unsafe { tzset() };
+        // `10/13/2026` is local midnight. `GMT` makes that midnight UTC, and
+        // `EST` makes it Eastern. A fourth number is not a date.
+        assert_eq!(unix_millis_from_iso("10/13/2026"), Some(1_791_864_000_000));
+        assert_eq!(unix_millis_from_iso("2026/10/13 GMT"), Some(1_791_849_600_000));
+        assert_eq!(unix_millis_from_iso("2026/10/13GMT"), Some(1_791_849_600_000));
+        assert_eq!(unix_millis_from_iso("10/13/2026 GMT"), Some(1_791_849_600_000));
+        assert_eq!(unix_millis_from_iso("10/13/2026EST"), Some(1_791_867_600_000));
+        assert_eq!(unix_millis_from_iso("10/13/2026 EST"), Some(1_791_867_600_000));
+        assert_eq!(unix_millis_from_iso("10/13/2026Z"), Some(1_791_849_600_000));
+        assert_eq!(unix_millis_from_iso("10/13/2026 Z"), Some(1_791_849_600_000));
+        assert_eq!(unix_millis_from_iso("10/13/2026UTC"), Some(1_791_849_600_000));
+        assert_eq!(unix_millis_from_iso("5/1/01 GMT"), Some(988_675_200_000));
+        assert_eq!(unix_millis_from_iso("2/31/1 GMT"), Some(983_577_600_000));
+        assert_eq!(
+            unix_millis_from_iso("10/13/2026 16:00 GMT"),
+            Some(1_791_907_200_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("10/13/2026 16:00 EST"),
+            Some(1_791_925_200_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("10/13/2026 GMT+5"),
+            Some(1_791_831_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026/10/13 16:00:00.5 GMT"),
+            Some(1_791_907_200_500)
+        );
+        assert_eq!(unix_millis_from_iso("10/13/2026 GMT5"), None);
+        assert_eq!(unix_millis_from_iso("10/13/2026EST5"), None);
     }
 
     #[test]
