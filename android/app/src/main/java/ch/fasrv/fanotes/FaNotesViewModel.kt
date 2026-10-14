@@ -155,6 +155,8 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     val showText = MutableStateFlow(false)
     val outlineJump = MutableStateFlow<Int?>(null)
     val foldedHeadings = MutableStateFlow<Set<Int>>(emptySet())
+    val confirmRequest = MutableStateFlow<ch.fasrv.fanotes.desk.PendingConfirm?>(null)
+    private var confirmAction: (() -> Unit)? = null
     val showList = MutableStateFlow(true)
     val message = MutableStateFlow<String?>(null)
     val backdrop = MutableStateFlow<List<BackdropSlice>>(emptyList())
@@ -443,7 +445,11 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
                 session.replace(newInkDocument("Note", "dots", isoNow()))
                 openTabs.value.firstOrNull()?.let { openPath(it, force = true) }
             }
-            withContext(Dispatchers.IO) { graph.store.delete(path) }
+            withContext(Dispatchers.IO) {
+                val parent = path.substringBeforeLast('/', "")
+                val folder = graph.vault.list(parent).any { it.directory && it.path.trim('/') == path.trim('/') }
+                if (folder) graph.vault.delete(path) else graph.store.delete(path)
+            }
             loadTree()
             graph.engine.notifyLocalChange()
             persistWorkspace()
@@ -701,6 +707,34 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
                 message.value = error.message
             }
         }
+    }
+
+    fun askConfirm(request: ch.fasrv.fanotes.desk.PendingConfirm, action: () -> Unit) {
+        confirmAction = action
+        confirmRequest.value = request
+    }
+
+    fun acceptConfirm() {
+        val action = confirmAction
+        dismissConfirm()
+        action?.invoke()
+    }
+
+    fun dismissConfirm() {
+        confirmRequest.value = null
+        confirmAction = null
+    }
+
+    fun askDelete(path: String, folder: Boolean, name: String) {
+        askConfirm(
+            ch.fasrv.fanotes.desk.PendingConfirm("Löschen", ch.fasrv.fanotes.desk.vaultDeleteMessage(folder, name), "Löschen"),
+        ) { delete(path) }
+    }
+
+    fun askRemoveNoteLink(id: String) {
+        askConfirm(
+            ch.fasrv.fanotes.desk.PendingConfirm("Verlinkung entfernen", ch.fasrv.fanotes.desk.noteLinkRemoveMessage(), "Entfernen"),
+        ) { removePlacedNoteLink(id) }
     }
 
     fun removePlacedNoteLink(id: String) {
