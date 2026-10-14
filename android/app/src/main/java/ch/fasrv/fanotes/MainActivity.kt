@@ -70,6 +70,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalConfiguration
@@ -194,42 +195,41 @@ fun FaNotesScreen(
     var syncOpen by remember { mutableStateOf(false) }
     var createNote by remember { mutableStateOf(false) }
     var createFolder by remember { mutableStateOf(false) }
+    var syncPending by remember { mutableStateOf(false) }
     val wide = LocalConfiguration.current.screenWidthDp >= 840
-
+    val signedIn = sync.account != null
+    val syncText = if (syncPending && sync.status != SyncStatus.SYNCING) "Startet…" else syncDetail(sync)
     LaunchedEffect(sync.status) {
-        if (sync.status != SyncStatus.SIGNED_OUT && sync.status != SyncStatus.UNAVAILABLE) {
-            try {
-                ContextCompat.startForegroundService(context, Intent(context, SyncService::class.java))
-            } catch (_: Exception) {
-                // Background limits can refuse a foreground service. Sync still runs while the app is open.
-            }
+        if (sync.status == SyncStatus.SYNCING) syncPending = false
+    }
+
+    LaunchedEffect(signedIn) {
+        if (!signedIn) return@LaunchedEffect
+        try {
+            ContextCompat.startForegroundService(context, Intent(context, SyncService::class.java))
+        } catch (_: Exception) {
+            // Background limits can refuse a foreground service. Sync still runs while the app is open.
         }
     }
 
-    Scaffold(
-        bottomBar = {
-            EditorTools(
-                tool = tool,
-                onTool = { model.tool.value = it },
-                canUndo = model.session.canUndo,
-                canRedo = model.session.canRedo,
-                onUndo = { model.undo(); model.canvasToken.value += 1 },
-                onRedo = { model.redo(); model.canvasToken.value += 1 },
-                onText = { model.showText.value = !showText },
-                textOn = showText,
-            )
-        },
-    ) { padding ->
-        Row(Modifier.fillMaxSize().padding(padding).background(MaterialTheme.colorScheme.background)) {
+    fun requestSync() {
+        if (sync.account == null) syncOpen = true
+        else {
+            syncPending = true
+            model.syncNow()
+        }
+    }
+
+    Row(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
             if (wide || showList) {
                 VaultPane(
                     modifier = Modifier.width(if (wide) 320.dp else 360.dp).fillMaxHeight(),
                     tree = tree,
                     selected = open?.path,
                     vaultLabel = vaultLabel,
-                    syncLabel = model.syncLabel(),
+                    syncLabel = syncText,
                     onOpen = { model.openPath(it) },
-                    onSync = { syncOpen = true },
+                    onSync = { requestSync() },
                     onCreateNote = { createNote = true },
                     onCreateFolder = { createFolder = true },
                     onImportPdf = onImportPdf,
@@ -240,48 +240,30 @@ fun FaNotesScreen(
                 )
             }
             if (wide || !showList) {
-                Column(Modifier.weight(1f).fillMaxHeight()) {
-                    EditorHeader(
-                        title = open?.title ?: "FaNotes",
-                        paper = model.session.document.paperStyle,
-                        style = style,
-                        fingerDraws = finger,
-                        showMenu = !wide,
-                        onMenu = { model.showList.value = true },
-                        onPaper = { model.setPaper(it) },
-                        onColor = { model.style.value = style.copy(color = it) },
-                        onWidth = { model.style.value = style.copy(baseWidth = it.toDouble()) },
-                        onBrush = { model.style.value = style.copy(brush = it) },
-                        onFinger = { model.fingerDraws.value = it },
-                        onDeleteSelection = { model.deleteSelection(); model.canvasToken.value += 1 },
-                    )
-                    Row(Modifier.weight(1f).fillMaxWidth()) {
-                        InkCanvas(
-                            model = model,
-                            tool = tool,
-                            style = style,
-                            finger = finger,
-                            backdrop = backdrop,
-                            token = token,
-                            path = open?.path,
-                            modifier = Modifier.weight(1f).fillMaxHeight(),
-                        )
-                        if (showText) {
-                            MarkdownPanel(
-                                text = markdown,
-                                onChange = { model.updateMarkdown(it) },
-                                modifier = Modifier.width(360.dp).fillMaxHeight(),
-                            )
-                        }
-                    }
-                }
+                PageSurface(
+                    model = model,
+                    tool = tool,
+                    style = style,
+                    finger = finger,
+                    textMode = showText,
+                    markdown = markdown,
+                    backdrop = backdrop,
+                    token = token,
+                    path = open?.path,
+                    paper = model.session.document.paperStyle,
+                    syncText = syncText,
+                    syncBusy = syncPending || sync.status == SyncStatus.SYNCING,
+                    dark = isSystemInDarkTheme(),
+                    onSync = { requestSync() },
+                    onToggleRail = { model.showList.value = !showList },
+                    modifier = Modifier.weight(1f).fillMaxHeight().clipToBounds(),
+                )
             }
-        }
     }
     if (syncOpen) {
         SyncDialog(
             email = sync.account?.email,
-            status = model.syncLabel(),
+            status = syncText,
             error = sync.error ?: message,
             onDismiss = { syncOpen = false },
             onLogin = { email, password, register -> model.login(email, password, register) },
@@ -323,8 +305,15 @@ private fun VaultPane(
         FilledTonalButton(onClick = onSync, modifier = Modifier.fillMaxWidth()) {
             Icon(Icons.Filled.Sync, contentDescription = null)
             Spacer(Modifier.width(8.dp))
-            Text(syncLabel)
+            Text("Sync")
         }
+        Text(
+            syncLabel,
+            maxLines = 1,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+            modifier = Modifier.padding(top = 4.dp),
+        )
         Spacer(Modifier.height(8.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             FilledTonalButton(onClick = onCreateNote, modifier = Modifier.weight(1f)) { Text("Notiz") }
@@ -465,6 +454,103 @@ private fun EditorTools(
         NavigationBarItem(selected = false, onClick = onUndo, enabled = canUndo, icon = { Icon(Icons.AutoMirrored.Filled.Undo, contentDescription = "Rückgängig") }, label = { Text("Zurück") })
         NavigationBarItem(selected = false, onClick = onRedo, enabled = canRedo, icon = { Icon(Icons.AutoMirrored.Filled.Redo, contentDescription = "Wiederholen") }, label = { Text("Vor") })
         NavigationBarItem(selected = textOn, onClick = onText, icon = { Icon(Icons.Filled.Description, contentDescription = "Text") }, label = { Text("Text") })
+    }
+}
+
+@Composable
+private fun PageSurface(
+    model: FaNotesViewModel,
+    tool: InkTool,
+    style: ch.fasrv.fanotes.ink.StrokeStyle,
+    finger: Boolean,
+    textMode: Boolean,
+    markdown: String,
+    backdrop: List<BackdropSlice>,
+    token: Int,
+    path: String?,
+    paper: String,
+    syncText: String,
+    syncBusy: Boolean,
+    dark: Boolean,
+    onSync: () -> Unit,
+    onToggleRail: () -> Unit,
+    modifier: Modifier,
+) {
+    var bound by remember { mutableStateOf("") }
+    AndroidView(
+        modifier = modifier,
+        factory = { context ->
+            NotePageView(context).apply {
+                attachSession(model.session)
+                ink.onChanged = { model.noteChanged() }
+                ink.onSwipeNote = { model.swipe(it) }
+            }
+        },
+        update = { page ->
+            page.attachSession(model.session)
+            page.ink.onChanged = { model.noteChanged() }
+            page.ink.onSwipeNote = { model.swipe(it) }
+            if (page.ink.backdrop !== backdrop) page.ink.backdrop = backdrop
+            page.onTool = { model.tool.value = it }
+            page.onSync = onSync
+            page.onMarkdown = { model.updateMarkdown(it) }
+            page.onUndo = { model.undo() }
+            page.onRedo = { model.redo() }
+            page.onColor = { model.style.value = style.copy(color = it) }
+            page.onWidth = { model.style.value = style.copy(baseWidth = it.toDouble()) }
+            page.onPaper = { model.setPaper(it) }
+            page.onBrush = { model.style.value = style.copy(brush = it) }
+            page.onToggleRail = onToggleRail
+            page.onTextMode = { model.showText.value = it }
+            page.onDeleteSelection = { model.deleteSelection() }
+            page.onFinger = { model.fingerDraws.value = it }
+            page.apply(
+                path = path ?: "",
+                markdown = markdown,
+                tool = tool,
+                style = style,
+                paper = paper,
+                fingerDraws = finger,
+                text = textMode,
+                syncLabel = syncText,
+                syncBusy = syncBusy,
+                canUndo = model.session.canUndo,
+                canRedo = model.session.canRedo,
+                darkChrome = dark,
+            )
+            val current = path ?: ""
+            if (bound != current) {
+                bound = current
+                page.ink.tag = token
+                page.ink.reload()
+            } else if (page.ink.tag != token) {
+                page.ink.tag = token
+                page.ink.refresh()
+            }
+        },
+    )
+}
+
+private fun syncDetail(state: ch.fasrv.fanotes.sync.SyncPublicState): String {
+    if (state.status == SyncStatus.SYNCING) {
+        val progress = state.progress
+        if (progress != null && progress.total > 0) {
+            val verb = when (progress.phase) {
+                "pull" -> "Laden"
+                "push" -> "Senden"
+                else -> "Prüfen"
+            }
+            return "$verb ${progress.done}/${progress.total}"
+        }
+        return "Synchronisiert…"
+    }
+    return when (state.status) {
+        SyncStatus.IDLE -> "Synchron"
+        SyncStatus.OFFLINE -> "Offline"
+        SyncStatus.ERROR -> state.error?.take(42) ?: "Sync-Fehler"
+        SyncStatus.SIGNED_OUT -> "Anmelden"
+        SyncStatus.PAUSED -> "Pausiert"
+        else -> "Sync"
     }
 }
 

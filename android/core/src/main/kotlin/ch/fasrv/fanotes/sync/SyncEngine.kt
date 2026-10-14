@@ -278,23 +278,22 @@ class SyncEngine(
     }
 
     private suspend fun syncNowOnEngine(reason: String) {
-        if (session == null || host == null) return
-        if (!cycleLock.tryLock()) {
-            queued = true
-            cycleLock.lock()
-            cycleLock.unlock()
+        if (session == null || host == null) {
+            publish(state.value.copy(status = SyncStatus.SIGNED_OUT, error = "Nicht angemeldet."))
             return
         }
-        try {
+        // Mark the request before waiting. A cycle that is already running
+        // sees [queued] and continues; a request that arrives as the lock is
+        // released still runs, instead of being acknowledged and dropped.
+        queued = true
+        publish(state.value.copy(status = SyncStatus.SYNCING, error = null))
+        cycleLock.withLock {
             var why = reason
-            do {
-                val followUp = queued
+            while (queued && !disposed) {
                 queued = false
-                runCycle(if (followUp && why == reason) reason else why)
+                runCycle(why)
                 why = "queued"
-            } while (queued && !disposed)
-        } finally {
-            cycleLock.unlock()
+            }
         }
     }
 

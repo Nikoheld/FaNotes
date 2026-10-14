@@ -83,6 +83,8 @@ Hover paints a ring and is not committed. On API 34+, `MotionPredictor.predict(u
 
 The page scale is `(view width − padding) / 900 * zoom`. Growing `sourceWidth` lengthens the page; it does not shrink existing ink.
 
+Committed ink is cached in fixed page-pixel tiles (192×192, rasterized at most at 1.75×). A pinch only changes the destination rectangle. Tiles are rebuilt when the zoom settles, and an eraser drops only the tiles under the nib. Ruling is drawn for the visible window. Typed Markdown is a `StaticLayout` under the ink, in the desktop column (72×78 padding inside the 900-wide sheet), rebuilt when the zoom changes so the glyphs are not a stretched bitmap. The tool bar is a sibling drawn above the page and hides while the pen is down.
+
 ## Sync
 
 The protocol is `fanotes/docs/SYNC.md`. Origin `https://fanotes.fasrv.ch`, path `/api/v1/sync`. This client implements the same cryptographic construction and was checked against WebCrypto vectors (PBKDF2-SHA256, 600 000 iterations, HKDF-SHA256 with salt `fanotes-sync-v1`, AES-256-GCM, HMAC file ids).
