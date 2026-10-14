@@ -9,7 +9,8 @@ const { Arch } = require('builder-util')
 const { getAppImageTools } = require('app-builder-lib/out/toolsets/linux')
 const { linuxOzoneAppRunExecLine } = require('../electron/startup-preflight.cjs')
 
-const appImagePath = path.resolve(process.argv[2] ?? '')
+const { version } = require('../package.json')
+const appImagePath = path.resolve(process.argv[2] || path.join(__dirname, '..', 'release', `FaNotes-${version}-x86_64.AppImage`))
 
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, {

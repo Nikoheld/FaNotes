@@ -28,15 +28,18 @@ The maintainer decides when a beta cohort is promoted after reviewing the change
 
 ## Required publication
 
+GitHub Actions builds every app when the version tag is pushed. The server does not package Linux, Windows, macOS, or Android. Desktop auto-update reads the signed manifest and the packages from that GitHub release. Vault sync stays on `fanotes.fasrv.ch`.
+
 Every release must include:
 
 1. Linux AppImage and portable tar archive.
-2. Windows installer, blockmap and portable executable.
-3. Linux and Windows application ASAR files used by differential updates.
-4. Incoming Linux and Windows delta packages when a compatible base exists.
-5. SHA-256 checksums, changelog, installation guides, license and third-party notices.
+2. Windows installer and portable executable.
+3. macOS disk images and zip archives for Apple Silicon and Intel.
+4. The Android APK.
+5. `SHA256SUMS` and the signed Linux and Windows update manifests, attached to the GitHub release.
 6. A GitHub tag and release; beta releases are GitHub prereleases.
-7. The signed Stable/Beta update manifests on `fanotes.fasrv.ch`.
+
+Differential packages are optional. When the manifest has no delta, the app downloads the full package from GitHub and checks its SHA-256 and signature. Copies older than 2026.10.6 still ask the server feed, so that one release is also published there and later updates come from GitHub.
 
 Private signing keys, API keys, user vaults, analytics, backups, dependency folders and temporary build output are never publication artifacts.
 

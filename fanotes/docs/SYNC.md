@@ -15,6 +15,7 @@ guarantees and where the code lives. User-facing surfaces are listed in `USER_SU
 | Engine | `src/lib/sync/engine.ts` | Scan → pull → push cycle, conflict handling, cursors, an external store for React. |
 | Host (desktop) | `electron/sync.cjs` + `preload.cjs` | Raw vault file access and `safeStorage`-encrypted secrets over IPC. |
 | Host (web) | `src/lib/sync/browserSyncHost.ts` | Maps IndexedDB stores to a virtual file tree; secrets and state live in the `meta` store. |
+| Host (Android) | `android/` | Native tablet client. Same account, crypto, and `/api/v1/sync` routes. The device platform token is `android`. |
 | UI | `src/components/SyncSettingsSection.tsx`, `src/App.tsx` | Settings → Sync, status-bar item, palette commands, remote-change application. |
 | Check | `scripts/check-sync.mjs` (`npm run check:sync`) | Crypto unit tests, path rules, transport retry, and a three-device end-to-end run against the real server module. |
 
