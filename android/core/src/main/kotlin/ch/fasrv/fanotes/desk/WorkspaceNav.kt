@@ -158,6 +158,22 @@ fun snapToDevicePixels(cssPx: Double, devicePixelRatio: Double): Double {
 fun nudgeSplitRatio(ratio: Double, direction: Int): Double =
     clampSplitRatio(floor((ratio + direction * SPLIT_RATIO_STEP) * 100.0 + 0.5) / 100.0)
 
+/** Folder that contains a note. A root note has no parent. */
+fun parentFolderOf(path: String): String {
+    val normalized = path.replace('\\', '/').trim('/')
+    val slash = normalized.lastIndexOf('/')
+    return if (slash < 0) "" else normalized.substring(0, slash)
+}
+
+/**
+ * Opening the note that is already in the second pane swaps the panes.
+ * The pair is the new main path, then the note that moves into the split.
+ */
+fun swappedSplit(active: String?, split: String?): Pair<String, String>? {
+    if (active.isNullOrBlank() || split.isNullOrBlank() || active == split) return null
+    return split to active
+}
+
 fun normalizeSplitLayout(value: Any?): SplitLayout {
     val raw = value as? Map<*, *> ?: return DEFAULT_SPLIT_LAYOUT
     val ratio = (raw["ratio"] as? Number)?.toDouble() ?: Double.NaN
