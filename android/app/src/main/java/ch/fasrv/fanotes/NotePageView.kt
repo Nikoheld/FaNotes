@@ -219,6 +219,14 @@ class NotePageView(context: Context) : FrameLayout(context) {
         tools.addView(chip("Abschnitt") { ink.placingSection = true })
         tools.addView(chip("Lasso") { onTool(ch.fasrv.fanotes.ink.InkTool.LASSO) })
         tools.addView(chip("Verknüpfung") { ink.placingLink = true })
+        ch.fasrv.fanotes.desk.NOTE_LINK_STYLES.forEach { style ->
+            tools.addView(chip(style.label) { ink.noteLinkStyle = style.id })
+        }
+        tools.addView(chip("Entfernen") {
+            val id = ink.selectedLinkId ?: ink.linkMarks.lastOrNull()?.id ?: return@chip
+            ink.onRemoveLink(id)
+            ink.selectedLinkId = null
+        })
         tools.addView(chip("Fett") { wrapSelection("**", "**") })
         tools.addView(chip("Liste") { insertLine("- ") })
         tools.addView(chip("Aufgabe") { insertLine("- [ ] ") })

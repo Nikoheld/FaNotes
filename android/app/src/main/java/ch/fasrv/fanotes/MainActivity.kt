@@ -906,7 +906,9 @@ private fun PageSurface(
             page.onDuplicate = { model.duplicateSelection() }
             page.onClear = { model.clearInk() }
             page.ink.onPlaceSection = { model.insertSection(it) }
-            page.ink.onPlaceLink = { x, y -> model.placeNoteLink(x, y) }
+            page.ink.onPlaceLink = { linkPage, x, y -> model.placeNoteLink(linkPage, x, y, page.ink.noteLinkStyle) }
+            page.ink.onOpenLink = { model.openPath(it); model.showDestination("notes") }
+            page.ink.onRemoveLink = { model.removePlacedNoteLink(it) }
             page.ink.onToggleSection = { model.toggleInkSection(it) }
             page.ink.onEditBox = onEditBox
             page.onMath = onMath

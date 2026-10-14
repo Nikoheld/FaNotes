@@ -493,44 +493,24 @@ data class NoteLinkMark(
     val targetPath: String,
     val x: Double,
     val y: Double,
+    val page: Int = 1,
     val style: String = "symbol",
     val label: String = "",
 )
 
-fun parseNoteLinkMarks(payload: JsonValue.Obj?): List<NoteLinkMark> {
-    val items = payload?.array("noteLinks")?.items ?: return emptyList()
-    return items.mapNotNull { item ->
-        val obj = item as? JsonValue.Obj ?: return@mapNotNull null
-        val source = obj.string("sourcePath").orEmpty()
-        val target = obj.string("targetPath").orEmpty()
-        if (source.isEmpty() || !target.endsWith(".md")) return@mapNotNull null
-        NoteLinkMark(
-            id = obj.string("id") ?: "nl",
-            sourcePath = source,
-            targetPath = target,
-            x = obj.double("x") ?: 0.5,
-            y = obj.double("y") ?: 0.5,
-            style = obj.string("style") ?: "symbol",
-            label = obj.string("label").orEmpty(),
-        )
-    }
-}
+fun parseNoteLinkMarks(payload: JsonValue.Obj?): List<NoteLinkMark> = parseNoteLinks(payload?.array("noteLinks"))
 
 fun noteLinksJson(links: List<NoteLinkMark>): JsonValue.Arr = JsonValue.Arr(links.map { link ->
     jsonObject(
         "id" to jsonString(link.id),
         "sourcePath" to jsonString(link.sourcePath),
         "targetPath" to jsonString(link.targetPath),
-        "page" to jsonNumber(1.0),
+        "page" to jsonNumber(link.page.toDouble()),
         "x" to jsonNumber(link.x),
         "y" to jsonNumber(link.y),
         "style" to jsonString(link.style),
-        "label" to jsonString(link.label.ifBlank { link.targetPath.substringAfterLast('/').substringBeforeLast('.') }),
-        "appearance" to jsonString(when (link.style) {
-            "text" -> "text"
-            "symbol-text" -> "symbol-text"
-            else -> "symbol"
-        }),
+        "label" to jsonString(link.label.ifBlank { linkedNoteDefaultLabel(link.targetPath) }),
+        "appearance" to jsonString(noteLinkAppearanceToken(link.style)),
     )
 }.toMutableList())
 
