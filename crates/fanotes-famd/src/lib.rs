@@ -868,6 +868,11 @@ pub fn canonical_iso(value: &str) -> Option<String> {
     // U+2028 and U+2029 are JavaScript trim characters, and `Date.parse` rejects
     // them. Only the date-parse spaces are padding.
     let trimmed = value.trim_matches(is_date_parse_space);
+    if let Some(rest) = strip_leading_signs(trimmed) {
+        // Signs before the first number are padding. The space keeps a
+        // date-only value local and rejects a `T` form.
+        return canonical_iso(&format!(" {rest}"));
+    }
     if let Some(next) = strip_leading_word(trimmed) {
         // `hello 2026-10-13` is local. The word is not part of the date.
         return canonical_iso(&next);
@@ -1267,6 +1272,33 @@ fn symbol_ends_a_clock(chars: &[char], index: usize) -> bool {
         ahead += 1;
     }
     ahead >= chars.len() || is_date_parse_space(chars[ahead])
+}
+
+/// `++2026-10-13` drops both signs. One sign and six digits, as in
+/// `+002026`, stays an expanded ISO year.
+fn strip_leading_signs(trimmed: &str) -> Option<&str> {
+    let bytes = trimmed.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() && matches!(bytes[index], b'+' | b'-') {
+        index += 1;
+    }
+    if index == 0 {
+        return None;
+    }
+    if index == 1 {
+        let digits = trimmed[index..]
+            .bytes()
+            .take_while(|byte| byte.is_ascii_digit())
+            .count();
+        if digits == 6 {
+            return None;
+        }
+    }
+    let rest = trimmed[index..].trim_start_matches(is_date_parse_space);
+    if rest.is_empty() {
+        return None;
+    }
+    Some(rest)
 }
 
 /// `hello 2026-10-13` drops `hello`. The space in front of the date stays, so
@@ -4842,6 +4874,92 @@ mod tests {
             );
             assert_eq!(super::canonical_iso("10/13/2026 GMT5"), None);
             assert_eq!(super::canonical_iso("10/13/2026EST5"), None);
+        });
+    }
+
+    #[test]
+    fn repeated_leading_signs_are_padding() {
+        with_tz("America/New_York", || {
+            // Signs before the first number are padding. The date is local unless
+            // a zone says otherwise. A `T` after those signs is not a date.
+            assert_eq!(
+                super::canonical_iso("++2026-10-13").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("+++2026-10-13").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("--2026-10-13").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("-+2026-10-13").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("+-2026-10-13").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("+2026-10-13").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("-2026-10-13").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("++2026-10-13 GMT").as_deref(),
+                Some("2026-10-13T00:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("++2026-1-1").as_deref(),
+                Some("2026-01-01T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("++5").as_deref(),
+                Some("2001-05-01T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("++10/13/2026").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("++Oct 13 2026").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("++ 2026-10-13").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("++2026-10-13 16:00").as_deref(),
+                Some("2026-10-13T20:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("++++2026").as_deref(),
+                Some("2026-01-01T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("--2026").as_deref(),
+                Some("2026-01-01T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("-+5 Oct 13 2026").as_deref(),
+                Some("2013-10-05T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("++2026-02-31").as_deref(),
+                Some("2026-03-03T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("+002026-10-13").as_deref(),
+                Some("2026-10-13T00:00:00.000Z")
+            );
+            assert_eq!(super::canonical_iso("2026-10-13 ++"), None);
+            assert_eq!(super::canonical_iso("++2026-10-13T16:00"), None);
         });
     }
 
