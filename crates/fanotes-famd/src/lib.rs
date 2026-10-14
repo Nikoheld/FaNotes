@@ -853,6 +853,13 @@ pub fn js_json_number(value: f64) -> Value {
 /// keeps the offset from before the transition. A day past the end of the
 /// month rolls forward, and `24:00:00` is the next midnight.
 pub fn canonical_iso(value: &str) -> Option<String> {
+    if value.contains('(') {
+        // `(comment)` is skipped, and an unclosed `(` consumes the rest.
+        let omitted = omit_parentheticals(value);
+        if omitted != value {
+            return canonical_iso(&omitted);
+        }
+    }
     // U+2028 and U+2029 are JavaScript trim characters, and `Date.parse` rejects
     // them. Only the date-parse spaces are padding.
     let trimmed = value.trim_matches(is_date_parse_space);
@@ -1098,7 +1105,58 @@ fn month_words(value: &str) -> Vec<&str> {
         .filter(|token| !token.is_empty())
         .flat_map(expand_joined_month)
         .flat_map(expand_glued_month)
+        .flat_map(split_unmatched_paren)
         .collect()
+}
+
+/// `13)` is the number 13 and then a `)`. The `)` is its own word.
+fn split_unmatched_paren(token: &str) -> Vec<&str> {
+    if !token.contains(')') {
+        return vec![token];
+    }
+    let mut parts = Vec::new();
+    let mut start = 0;
+    for (index, character) in token.char_indices() {
+        if character == ')' {
+            if index > start {
+                parts.push(&token[start..index]);
+            }
+            parts.push(")");
+            start = index + character.len_utf8();
+        }
+    }
+    if start < token.len() {
+        parts.push(&token[start..]);
+    }
+    parts
+}
+
+/// Drop balanced parenthetical groups. An unclosed `(` drops the rest of the
+/// text. A `)` with no `(` stays, so `Oct 13) 2026` is not a date.
+fn omit_parentheticals(value: &str) -> String {
+    let chars: Vec<char> = value.chars().collect();
+    let mut out = String::with_capacity(value.len());
+    let mut index = 0;
+    while index < chars.len() {
+        if chars[index] != '(' {
+            out.push(chars[index]);
+            index += 1;
+            continue;
+        }
+        let mut balance = 0;
+        while index < chars.len() {
+            if chars[index] == '(' {
+                balance += 1;
+            } else if chars[index] == ')' {
+                balance -= 1;
+            }
+            index += 1;
+            if balance == 0 {
+                break;
+            }
+        }
+    }
+    out
 }
 
 /// `13Oct2026` and `Oct2026` are separate fields. A non-month word glued to a
@@ -3491,6 +3549,103 @@ mod tests {
             assert_eq!(super::canonical_iso("foo13 Oct 2026"), None);
             assert_eq!(super::canonical_iso("Oct13th"), None);
             assert_eq!(super::canonical_iso("13th Oct 2026"), None);
+        });
+    }
+
+    #[test]
+    fn parentheses_are_comments_in_a_date() {
+        with_tz("America/New_York", || {
+            // A parenthetical group is skipped, including an unclosed one. A `)`
+            // with no `(`, after a number, is not a date.
+            assert_eq!(
+                super::canonical_iso("Oct 13 (2026)").as_deref(),
+                Some("2001-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct (13) 2026").as_deref(),
+                Some("2026-10-01T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 (foo) 2026").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 2026 (comment) 16:00").as_deref(),
+                Some("2026-10-13T20:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 2026 16:00 (EST)").as_deref(),
+                Some("2026-10-13T20:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 2026 (foo (bar) baz) 16:00 EST").as_deref(),
+                Some("2026-10-13T21:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 (2026").as_deref(),
+                Some("2001-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 2026 16:00 (EST) GMT").as_deref(),
+                Some("2026-10-13T16:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso(") Oct 13 2026").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("foo(bar) Oct 13 2026").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("(EST) Oct 13 2026").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 2026 (16:00)").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 2026 (16) 16:00").as_deref(),
+                Some("2026-10-13T20:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("((EST)) Oct 13 2026 16:00").as_deref(),
+                Some("2026-10-13T20:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 2026 4:00 (PM)").as_deref(),
+                Some("2026-10-13T08:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 2026 4:00 PM (EST)").as_deref(),
+                Some("2026-10-13T20:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 (foo)").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 16:00 (EST)").as_deref(),
+                Some("2026-10-13T20:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 16:00 (EST) GMT").as_deref(),
+                Some("2026-10-13T16:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("10/13/2026 16:00 (EST)").as_deref(),
+                Some("2026-10-13T20:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("10/13/2026 (comment)").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
+            assert_eq!(super::canonical_iso("Oct 13) 2026"), None);
+            assert_eq!(super::canonical_iso("Oct 13 2026 ) 16:00"), None);
+            assert_eq!(super::canonical_iso("Oct 13 2026 )"), None);
+            assert_eq!(super::canonical_iso("13 (Oct) 2026"), None);
+            assert_eq!(super::canonical_iso("2026-10-13)"), None);
         });
     }
 
