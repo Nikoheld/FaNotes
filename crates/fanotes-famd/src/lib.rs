@@ -826,6 +826,13 @@ pub fn canonical_iso(value: &str) -> Option<String> {
         let normalized = rewrite_slash_date(trimmed)?;
         return canonical_iso(&normalized);
     }
+    if !has_iso_t(trimmed) {
+        if let Some(normalized) = fold_trailing_zone(trimmed) {
+            // `16:00 EST` is a fixed offset. `(EST)` is a comment, so the
+            // clock stays local.
+            return canonical_iso(&normalized);
+        }
+    }
     if is_date_only_shape(trimmed) {
         return date_only_iso(trimmed);
     }
@@ -945,6 +952,43 @@ fn ampm_hour(hour: u32, pm: bool) -> Option<u32> {
         return Some(if pm { 12 } else { 0 });
     }
     Some(if pm { hour + 12 } else { hour })
+}
+
+/// Attach `EST` or `GMT+5` to the clock, and drop one trailing `(comment)`.
+fn fold_trailing_zone(trimmed: &str) -> Option<String> {
+    let words: Vec<&str> = trimmed
+        .split(char::is_whitespace)
+        .filter(|word| !word.is_empty())
+        .collect();
+    if words.len() < 2 {
+        return None;
+    }
+    let mut end = words.len();
+    let mut changed = false;
+    if let Some(token) = words.last() {
+        if token.starts_with('(') && token.ends_with(')') && token.len() > 2 {
+            end -= 1;
+            changed = true;
+        }
+    }
+    if end >= 2 && words[end - 2].contains(':') {
+        if let Some(suffix) = month_zone_suffix(words[end - 1]) {
+            let clock = format!("{}{suffix}", words[end - 2]);
+            let mut kept = Vec::new();
+            for (index, word) in words.iter().enumerate() {
+                if index == end - 2 {
+                    kept.push(clock.clone());
+                } else if index < end - 2 {
+                    kept.push((*word).to_string());
+                }
+            }
+            return Some(kept.join(" "));
+        }
+    }
+    if changed && end > 0 {
+        return Some(words[..end].join(" "));
+    }
+    None
 }
 
 fn month_words(value: &str) -> Vec<&str> {
@@ -1852,6 +1896,20 @@ mod tests {
             );
             assert_eq!(
                 super::canonical_iso("2026-10-13 4:00 PM").as_deref(),
+                Some("2026-10-13T20:00:00.000Z")
+            );
+        });
+    }
+
+    #[test]
+    fn a_named_zone_after_a_hyphen_date_is_a_fixed_offset() {
+        with_tz("America/New_York", || {
+            assert_eq!(
+                super::canonical_iso("2026-10-13 16:00 EST").as_deref(),
+                Some("2026-10-13T21:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 16:00:00 (EST)").as_deref(),
                 Some("2026-10-13T20:00:00.000Z")
             );
         });
