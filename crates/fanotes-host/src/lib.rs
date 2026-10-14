@@ -3641,7 +3641,7 @@ fn read_folder_colors(root: &Path) -> Result<BTreeMap<String, String>, String> {
     // Desktop reads this file with Buffer.toString('utf8') and checks the byte size.
     let text = match fs::symlink_metadata(&path) {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(BTreeMap::new()),
-        Err(_) => return Err("Die Ordnerfarben sind ungültig oder zu groß.".to_owned()),
+        Err(error) => return Err(vault::node_lstat_error(&path, &error)),
         Ok(meta) if meta.file_type().is_symlink() || !meta.is_file() || meta.len() > 512 * 1024 => {
             return Err("Die Ordnerfarben sind ungültig oder zu groß.".to_owned());
         }
