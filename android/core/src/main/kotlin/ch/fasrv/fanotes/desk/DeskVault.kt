@@ -552,12 +552,7 @@ fun parseWorksheetBoxes(json: String): List<WorksheetBox> {
     }
 }
 
-fun wikiTargets(markdown: String) = Regex("""\[\[([^\]|#]+)(?:#[^\]|]+)?(?:\|[^\]]+)?]]""")
-    .findAll(markdown)
-    .map { it.groupValues[1].trim() }
-    .filter { it.isNotEmpty() }
-    .distinct()
-    .toList()
+fun wikiTargets(markdown: String) = wikilinkTargets(markdown)
 
 fun taskLines(markdown: String) = markdown.replace("\r\n", "\n").lineSequence()
     .mapIndexedNotNull { index, line ->

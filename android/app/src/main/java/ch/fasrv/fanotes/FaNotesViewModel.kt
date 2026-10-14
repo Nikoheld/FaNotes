@@ -58,6 +58,9 @@ import ch.fasrv.fanotes.desk.parseWorksheetBoxes
 import ch.fasrv.fanotes.desk.searchVault
 import ch.fasrv.fanotes.desk.serializeCalendarMarkdown
 import ch.fasrv.fanotes.desk.serializeHomeworkMarkdown
+import ch.fasrv.fanotes.desk.Backlink
+import ch.fasrv.fanotes.desk.backlinksFor
+import ch.fasrv.fanotes.desk.resolveWikiTarget
 import ch.fasrv.fanotes.desk.applyNoteTags
 import ch.fasrv.fanotes.desk.parseNoteTags
 import ch.fasrv.fanotes.desk.applyHomeworkToCalendar
@@ -240,6 +243,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
                 open.value = noteOpened(note)
                 markdown.value = note.markdown
                 rememberTags(path, note.markdown)
+                refreshBacklinks(path)
                 rememberTab(path)
                 refreshOverlays()
                 style.value = style.value.copy()
@@ -759,6 +763,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     val folderColors = MutableStateFlow<Map<String, String>>(emptyMap())
     val tagIndex = MutableStateFlow<Map<String, List<String>>>(emptyMap())
     val tagFilter = MutableStateFlow<String?>(null)
+    val backlinks = MutableStateFlow<List<Backlink>>(emptyList())
     val noteHistory = MutableStateFlow<List<HistorySnapshot>>(emptyList())
     val study = MutableStateFlow<StudyPicture?>(null)
     val deskSettings = MutableStateFlow(graph.readDesk())
@@ -1305,14 +1310,26 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     private fun historyPathFor(note: OpenNote): String =
         if (note.kind == NoteKind.PDF) companionPath(note.path, ".famd") else note.path
 
-    fun backlinks(): List<String> {
-        val title = open.value?.title ?: return emptyList()
-        return searchHits.value.filter { it.text.contains("[[$title") }.map { it.path }.distinct()
+    fun openWikiTarget(target: String) {
+        val path = resolveWikiTarget(target, flatNotes().map { it.path }, open.value?.path)
+        if (path == null) {
+            message.value = "Keine Notiz für [[${target.trim()}]]."
+            return
+        }
+        openPath(path)
+        destination.value = "notes"
     }
 
-    fun findBacklinks() {
-        val title = open.value?.title ?: return
-        searchVaultText("[[$title")
+    private fun refreshBacklinks(path: String) {
+        viewModelScope.launch {
+            val notes = withContext(Dispatchers.IO) {
+                flatNotes().map { node ->
+                    node.path to runCatching { graph.store.readNote(node.path).markdown }.getOrDefault("")
+                }
+            }
+            if (open.value?.path != path) return@launch
+            backlinks.value = backlinksFor(path, notes)
+        }
     }
 
     fun wordCountNow() = wordCount(markdown.value)
