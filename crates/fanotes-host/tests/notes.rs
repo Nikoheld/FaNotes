@@ -69,6 +69,65 @@ fn an_unreadable_handwriting_file_uses_the_desktop_open_error() {
 
 #[cfg(unix)]
 #[test]
+fn an_unlistable_companion_uses_the_desktop_lstat_error() {
+    use std::os::unix::fs::PermissionsExt;
+    let (mut host, vault) = host();
+    let folder = vault.join("Mathe");
+    let famd = folder.join("Seite.famd");
+    std::fs::write(&famd, b"INK-BLEIBT").unwrap();
+    let canonical = std::fs::canonicalize(&famd).unwrap();
+    std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o000)).unwrap();
+    struct Restore(std::path::PathBuf, u32);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            let _ = std::fs::set_permissions(&self.0, std::fs::Permissions::from_mode(self.1));
+        }
+    }
+    let _restore_folder = Restore(folder.clone(), 0o700);
+    let lstat_error = format!(
+        "EACCES: permission denied, lstat '{}'",
+        canonical.display()
+    );
+    for channel in ["fanotes:read-note-paper-style", "fanotes:read-famd-ink"] {
+        assert_eq!(
+            host.dispatch(channel, &[json!("Mathe/Seite.md")])
+                .unwrap_err(),
+            lstat_error,
+            "{channel}"
+        );
+    }
+    std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o700)).unwrap();
+    assert_eq!(std::fs::read(&famd).unwrap(), b"INK-BLEIBT");
+    let file = std::fs::OpenOptions::new().write(true).open(&famd).unwrap();
+    file.set_len(40 * 1024 * 1024 + 1).unwrap();
+    drop(file);
+    std::fs::set_permissions(&famd, std::fs::Permissions::from_mode(0o000)).unwrap();
+    let _restore_file = Restore(famd.clone(), 0o600);
+    let open_error = format!(
+        "EACCES: permission denied, open '{}'",
+        canonical.display()
+    );
+    for channel in ["fanotes:read-note-paper-style", "fanotes:read-famd-ink"] {
+        assert_eq!(
+            host.dispatch(channel, &[json!("Mathe/Seite.md")])
+                .unwrap_err(),
+            open_error,
+            "{channel}"
+        );
+    }
+    std::fs::set_permissions(&famd, std::fs::Permissions::from_mode(0o600)).unwrap();
+    for channel in ["fanotes:read-note-paper-style", "fanotes:read-famd-ink"] {
+        assert_eq!(
+            host.dispatch(channel, &[json!("Mathe/Seite.md")])
+                .unwrap_err(),
+            "Die Datei ist zu groß.",
+            "{channel}"
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
 fn an_unreadable_companion_does_not_look_missing() {
     use std::os::unix::fs::PermissionsExt;
     let (mut host, vault) = host();

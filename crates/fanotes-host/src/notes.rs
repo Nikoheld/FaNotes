@@ -32,6 +32,31 @@ pub(crate) fn read_lossy_string(path: &Path) -> Option<String> {
         .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
 }
 
+/// Desktop `readRegularFileNoFollow`: open with `O_NOFOLLOW`, then size.
+pub(crate) fn read_nofollow_limited(path: &Path, max: u64) -> Result<Vec<u8>, String> {
+    use std::io::Read;
+    let mut options = fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW);
+    }
+    let mut file = options
+        .open(path)
+        .map_err(|error| node_open_error(path, &error))?;
+    let meta = file
+        .metadata()
+        .map_err(|error| node_open_error(path, &error))?;
+    if meta.len() > max {
+        return Err("Die Datei ist zu groß.".to_owned());
+    }
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes)
+        .map_err(|error| node_open_error(path, &error))?;
+    Ok(bytes)
+}
+
 /// `readOptionalNoteFile`: a missing file is empty. Any other read error is
 /// Node's open text, so a save cannot rebuild the companion without its ink.
 pub(crate) fn read_optional_text(path: &Path) -> Result<Option<String>, String> {
@@ -487,15 +512,19 @@ fn read_companion(host: &Host, relative: &str) -> Result<Option<FamdPayload>, St
     let path = vault::resolve_note_file(root, &famd_relative)?;
     match fs::symlink_metadata(&path) {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(_) => Err("Die Datei konnte nicht gelesen werden.".to_owned()),
+        Err(error) => Err(vault::node_lstat_error(&path, &error)),
         Ok(meta) if meta.file_type().is_symlink() => {
             Err("Symbolische Links sind innerhalb des Vaults nicht erlaubt.".to_owned())
         }
         Ok(meta) if !meta.is_file() => {
             Err("Die gewählte Datei ist keine reguläre Datei.".to_owned())
         }
-        Ok(meta) if meta.len() > MAX_COMPANION_BYTES => Err("Die Datei ist zu groß.".to_owned()),
-        Ok(_) => Ok(read_optional_text(&path)?.and_then(|source| parse_famd(&source).payload)),
+        // Desktop `readRegularFileNoFollow` opens before the size check.
+        Ok(_) => {
+            let bytes = read_nofollow_limited(&path, MAX_COMPANION_BYTES)?;
+            let source = String::from_utf8_lossy(&bytes);
+            Ok(parse_famd(&source).payload)
+        }
     }
 }
 

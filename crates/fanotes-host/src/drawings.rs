@@ -149,19 +149,18 @@ pub fn read_famd_ink(host: &Host, relative: &str) -> Result<Value, String> {
     let path = vault::resolve_note_file(vault_root(host)?, &famd_relative)?;
     let source = match fs::symlink_metadata(&path) {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Value::Null),
-        Err(_) => return Err("Die Datei konnte nicht gelesen werden.".to_owned()),
+        Err(error) => return Err(vault::node_lstat_error(&path, &error)),
         Ok(meta) if meta.file_type().is_symlink() => {
             return Err("Symbolische Links sind innerhalb des Vaults nicht erlaubt.".to_owned());
         }
         Ok(meta) if !meta.is_file() => {
             return Err("Die gewählte Datei ist keine reguläre Datei.".to_owned());
         }
-        Ok(meta) if meta.len() as usize > MAX_FAMD_BYTES => {
-            return Err("Die Datei ist zu groß.".to_owned());
-        }
-        Ok(_) => lossy_utf8(
-            fs::read(&path).map_err(|error| crate::notes::node_open_error(&path, &error))?,
-        ),
+        // Desktop `readRegularFileNoFollow` opens before the size check.
+        Ok(_) => lossy_utf8(crate::notes::read_nofollow_limited(
+            &path,
+            MAX_FAMD_BYTES as u64,
+        )?),
     };
     let parsed = parse_famd(&source);
     let Some(payload) = parsed.payload else {
