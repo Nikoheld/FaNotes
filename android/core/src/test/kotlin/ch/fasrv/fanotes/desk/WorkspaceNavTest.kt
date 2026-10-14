@@ -9,6 +9,17 @@ import kotlin.test.assertTrue
 
 class WorkspaceNavTest {
     @Test
+    fun aSubfolderSitsBesideTheOpenNoteAndTheSplitSwaps() {
+        assertEquals("", parentFolderOf("Mathe.md"))
+        assertEquals("Schule", parentFolderOf("Schule/Mathe.md"))
+        assertEquals("Schule/Unter", parentFolderOf("Schule/Unter/Blatt.md"))
+        assertNull(swappedSplit(null, "B.md"))
+        assertNull(swappedSplit("A.md", null))
+        assertNull(swappedSplit("A.md", "A.md"))
+        assertEquals("B.md" to "A.md", swappedSplit("A.md", "B.md"))
+    }
+
+    @Test
     fun visitedNotesWalkBackAndDropTheForwardTail() {
         var history = EMPTY_NOTE_TRAIL
         assertEquals(false, canGoBack(history))

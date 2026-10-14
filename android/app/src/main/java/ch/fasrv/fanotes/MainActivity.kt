@@ -234,6 +234,7 @@ fun FaNotesScreen(
     var syncOpen by remember { mutableStateOf(false) }
     var createNote by remember { mutableStateOf(false) }
     var createFolder by remember { mutableStateOf(false) }
+    var createParent by remember { mutableStateOf("") }
     var syncPending by remember { mutableStateOf(false) }
     var mathOpen by remember { mutableStateOf(false) }
     var mathInput by remember { mutableStateOf("") }
@@ -301,8 +302,8 @@ fun FaNotesScreen(
                     syncLabel = syncText,
                     onOpen = { model.openPath(it) },
                     onSync = { requestSync() },
-                    onCreateNote = { createNote = true },
-                    onCreateFolder = { createFolder = true },
+                    onCreateNote = { createParent = ""; createNote = true },
+                    onCreateFolder = { createParent = ""; createFolder = true },
                     onImportPdf = onImportPdf,
                     onImportImage = onImportImage,
                     onOpenVault = onOpenVault,
@@ -398,6 +399,15 @@ fun FaNotesScreen(
                     "daily" -> model.openDaily()
                     "split" -> tabs.firstOrNull { it != open?.path }?.let { model.loadSplit(it) }
                     "split-orient" -> model.toggleSplitOrientation()
+                    "split-swap" -> model.swapSplit()
+                    "note-here" -> {
+                        createParent = model.currentFolder()
+                        createNote = true
+                    }
+                    "subfolder" -> {
+                        createParent = model.currentFolder()
+                        createFolder = true
+                    }
                     "focus" -> model.updateDesk("focus", if (desk["focus"] == "on") "off" else "on")
                     "sync" -> requestSync()
                     "bug-report" -> model.openBugReport()
@@ -505,13 +515,15 @@ fun FaNotesScreen(
             onSync = { model.syncNow() },
         )
     }
-    if (createNote) NameDialog("Neue Notiz", "Vorlesung") { name ->
+    if (createNote) NameDialog(if (createParent.isBlank()) "Neue Notiz" else "Notiz in diesem Ordner", "Vorlesung") { name ->
         createNote = false
-        if (name != null) model.createNote(name)
+        if (name != null) model.createNote(name, createParent)
+        createParent = ""
     }
-    if (createFolder) NameDialog("Neuer Ordner", "Schule") { name ->
+    if (createFolder) NameDialog(if (createParent.isBlank()) "Neuer Ordner" else "Unterordner", "Schule") { name ->
         createFolder = false
-        if (name != null) model.createFolder(name)
+        if (name != null) model.createFolder(name, createParent)
+        createParent = ""
     }
 }
 
@@ -785,6 +797,7 @@ private fun SplitPane(
     Column(modifier) {
         Row(Modifier.padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("Zweite Spalte", fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+            TextButton(onClick = { model.swapSplit() }) { Text("Tauschen") }
             TextButton(onClick = { model.toggleSplitOrientation() }) { Text("Drehen") }
             TextButton(onClick = { model.splitPath.value = null }) { Text("Schließen") }
         }

@@ -89,6 +89,8 @@ import ch.fasrv.fanotes.desk.sortPinnedFirst
 import ch.fasrv.fanotes.desk.stepNoteHistory
 import ch.fasrv.fanotes.desk.tabsToClose
 import ch.fasrv.fanotes.desk.togglePinnedTab
+import ch.fasrv.fanotes.desk.parentFolderOf
+import ch.fasrv.fanotes.desk.swappedSplit
 import ch.fasrv.fanotes.desk.visitNote
 import ch.fasrv.fanotes.desk.wikiTargets
 import ch.fasrv.fanotes.desk.wordCount
@@ -252,6 +254,10 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         val generation = ++openGeneration
         viewModelScope.launch {
             try {
+                if (swappedSplit(open.value?.path, splitPath.value)?.first == path) {
+                    swapSplitNow()
+                    return@launch
+                }
                 if (!force) saveNow()
                 val note = withContext(Dispatchers.IO) { graph.store.readNote(path) }
                 if (generation != openGeneration) return@launch
@@ -406,17 +412,29 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun createNote(title: String) {
+    fun currentFolder(): String = parentFolderOf(open.value?.path.orEmpty())
+
+    fun createNote(title: String, parent: String = "") {
         viewModelScope.launch {
-            val path = withContext(Dispatchers.IO) { graph.store.createMarkdown("", title) }
+            val path = try {
+                withContext(Dispatchers.IO) { graph.store.createMarkdown(parent.trim('/'), title) }
+            } catch (_: Exception) {
+                message.value = "Eine Notiz mit diesem Namen gibt es schon."
+                return@launch
+            }
             refreshTree()
             openPath(path, force = true)
         }
     }
 
-    fun createFolder(title: String) {
+    fun createFolder(title: String, parent: String = "") {
         viewModelScope.launch {
-            withContext(Dispatchers.IO) { graph.store.createFolder("", title) }
+            try {
+                withContext(Dispatchers.IO) { graph.store.createFolder(parent.trim('/'), title) }
+            } catch (_: Exception) {
+                message.value = "Ein Ordner mit diesem Namen gibt es schon."
+                return@launch
+            }
             refreshTree()
         }
     }
@@ -1457,6 +1475,41 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     private fun saveCalendar(next: ch.fasrv.fanotes.desk.CalendarDocument) {
         calendar.value = next
         persistSpecial(ch.fasrv.fanotes.desk.CALENDAR_NOTE_PATH, "Kalender", serializeCalendarMarkdown(next))
+    }
+
+    fun swapSplit() {
+        val target = swappedSplit(open.value?.path, splitPath.value)?.first ?: return
+        openPath(target, force = true)
+    }
+
+    private suspend fun swapSplitNow() {
+        val split = splitNote ?: return
+        val main = open.value ?: return
+        if (swappedSplit(main.path, split.path) == null) return
+        saveNow()
+        val savedSplit = withContext(Dispatchers.IO) {
+            graph.store.save(split, splitSession.document, split.markdown)
+        }
+        val mainDocument = session.document
+        val mainMarkdown = markdown.value
+        val mainNote = open.value ?: main
+        session.replace(savedSplit.document)
+        splitSession.replace(mainDocument)
+        splitNote = mainNote.copy(markdown = mainMarkdown, document = mainDocument)
+        splitPath.value = mainNote.path
+        open.value = noteOpened(savedSplit)
+        markdown.value = savedSplit.markdown
+        foldedHeadings.value = foldsForSections(savedSplit.markdown, savedSplit.document)
+        rememberTab(savedSplit.path)
+        rememberTags(savedSplit.path, savedSplit.markdown)
+        refreshBacklinks(savedSplit.path)
+        refreshOverlays()
+        loadBackdrop(savedSplit)
+        refreshBook(savedSplit)
+        noteTrail.value = visitNote(noteTrail.value, savedSplit.path)
+        rememberLastOpen(savedSplit.path)
+        canvasToken.value += 1
+        persistWorkspace()
     }
 
     fun loadSplit(path: String) {
