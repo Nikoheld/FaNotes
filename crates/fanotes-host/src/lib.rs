@@ -1798,7 +1798,9 @@ fn unix_millis_from_iso(value: &str) -> Option<u64> {
         let normalized = rewrite_periods(trimmed);
         if normalized != trimmed {
             if !normalized.contains([' ', 'T', 't', ',']) {
-                return date_only_millis(&normalized, true);
+                if let Some(millis) = date_only_millis(&normalized, true) {
+                    return Some(millis);
+                }
             }
             return unix_millis_from_iso(&normalized);
         }
@@ -1951,7 +1953,11 @@ fn rewrite_periods(value: &str) -> String {
         }
         if digits > 0
             && !out.contains(':')
-            && after_digits.is_none_or(|character| matches!(character, '.' | '-' | ','))
+            && after_digits.is_none_or(|character| {
+                matches!(character, '.' | '-' | ',')
+                    || is_date_parse_space(character)
+                    || character.is_ascii_alphabetic()
+            })
         {
             if !out.is_empty() && !out.ends_with('-') {
                 out.push('-');
@@ -7895,6 +7901,46 @@ mod local_zone_tests {
         assert_eq!(unix_millis_from_iso("2026/13"), None);
         assert_eq!(unix_millis_from_iso("13/2026"), None);
         assert_eq!(unix_millis_from_iso("2026/10/13/1"), None);
+    }
+
+    #[test]
+    fn a_dotted_date_keeps_a_zone_keyword() {
+        let _lock = TRASH_CLOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let _restore = RestoreTz(std::env::var_os("TZ"));
+        unsafe { std::env::set_var("TZ", "America/New_York") };
+        unsafe { tzset() };
+        // A dot between numbers is a separator. The date is local unless a
+        // zone says otherwise. `13.10.2026` is not a month-day-year date.
+        assert_eq!(unix_millis_from_iso("2026.10.13"), Some(1_791_864_000_000));
+        assert_eq!(unix_millis_from_iso("10.13.2026"), Some(1_791_864_000_000));
+        assert_eq!(unix_millis_from_iso("2026.10"), Some(1_790_827_200_000));
+        assert_eq!(unix_millis_from_iso("2026."), Some(1_767_243_600_000));
+        assert_eq!(unix_millis_from_iso("2026..10.13"), Some(1_791_864_000_000));
+        assert_eq!(unix_millis_from_iso("2.31.1"), Some(983_595_600_000));
+        assert_eq!(unix_millis_from_iso("2026.10.13 GMT"), Some(1_791_849_600_000));
+        assert_eq!(unix_millis_from_iso("2026.10.13GMT"), Some(1_791_849_600_000));
+        assert_eq!(unix_millis_from_iso("2026.10.13 EST"), Some(1_791_867_600_000));
+        assert_eq!(unix_millis_from_iso("2026.10.13EST"), Some(1_791_867_600_000));
+        assert_eq!(unix_millis_from_iso("10.13.2026 GMT"), Some(1_791_849_600_000));
+        assert_eq!(unix_millis_from_iso("10.13.2026EST"), Some(1_791_867_600_000));
+        assert_eq!(unix_millis_from_iso("2026.10 GMT"), Some(1_790_812_800_000));
+        assert_eq!(unix_millis_from_iso("2026.10GMT"), Some(1_790_812_800_000));
+        assert_eq!(unix_millis_from_iso("2.31.1 GMT"), Some(983_577_600_000));
+        assert_eq!(
+            unix_millis_from_iso("2026.10.13 16:00"),
+            Some(1_791_921_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026.10.13.16:00"),
+            Some(1_791_921_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026.10.13 16:00 GMT"),
+            Some(1_791_907_200_000)
+        );
+        assert_eq!(unix_millis_from_iso("13.10.2026"), None);
     }
 
     #[test]
