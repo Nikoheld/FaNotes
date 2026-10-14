@@ -893,29 +893,6 @@ fn write_atomic(
     Ok(())
 }
 
-/// Copy `source` onto `destination` as a private file.
-///
-/// The bytes are flushed before the final name appears, and the mode is the
-/// requested one. A world-readable OneNote export therefore does not stay
-/// world-readable inside the vault.
-pub(crate) fn atomic_copy(source: &Path, destination: &Path, mode: u32) -> Result<(), String> {
-    if let Some(parent) = destination.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|_| "Der Ordner konnte nicht angelegt werden.".to_owned())?;
-    }
-    let temporary = temporary_path(destination, 10)?;
-    if let Err(error) = copy_exclusive(&temporary, source, mode) {
-        let _ = fs::remove_file(&temporary);
-        return Err(error);
-    }
-    if let Err(error) = fs::rename(&temporary, destination) {
-        let _ = fs::remove_file(&temporary);
-        return Err(vault::node_rename_error(&temporary, destination, &error));
-    }
-    sync_parent(destination);
-    Ok(())
-}
-
 fn temporary_path(path: &Path, random_bytes: usize) -> Result<PathBuf, String> {
     let mut bytes = vec![0u8; random_bytes];
     getrandom::getrandom(&mut bytes)
@@ -1018,27 +995,6 @@ fn write_exclusive(path: &Path, bytes: &[u8], mode: u32) -> Result<(), String> {
         .is_err()
     {
         drop(file);
-        let _ = fs::remove_file(path);
-        return Err("Die Datei konnte nicht geschrieben werden.".to_owned());
-    }
-    set_private_mode(path, mode);
-    Ok(())
-}
-
-fn copy_exclusive(path: &Path, source: &Path, mode: u32) -> Result<(), String> {
-    let meta = fs::symlink_metadata(source)
-        .map_err(|_| "Die Datei konnte nicht geschrieben werden.".to_owned())?;
-    if meta.file_type().is_symlink() || !meta.is_file() {
-        return Err("Die Datei konnte nicht geschrieben werden.".to_owned());
-    }
-    let mut input = fs::File::open(source)
-        .map_err(|_| "Die Datei konnte nicht geschrieben werden.".to_owned())?;
-    let mut output = open_new_file(path, mode)?;
-    if std::io::copy(&mut input, &mut output)
-        .and_then(|_| output.sync_all())
-        .is_err()
-    {
-        drop(output);
         let _ = fs::remove_file(path);
         return Err("Die Datei konnte nicht geschrieben werden.".to_owned());
     }

@@ -240,12 +240,7 @@ fn import_in_temp(
             "{}\n",
             serde_json::to_string_pretty(&manifest).unwrap_or_default()
         );
-        crate::notes::atomic_write(
-            &batch.join("manifest.json"),
-            manifest_json.as_bytes(),
-            0o600,
-        )
-        .map_err(|_| "Der OneNote-Import konnte nicht gespeichert werden.".to_owned())?;
+        atomic_write_onenote(&batch.join("manifest.json"), manifest_json.as_bytes())?;
         let mut all_warnings = warnings;
         if !attachments.is_empty() {
             all_warnings.push(
@@ -1130,8 +1125,7 @@ fn copy_attachments(
         let already_stored = fs::symlink_metadata(&target)
             .is_ok_and(|meta| meta.is_file() && !meta.file_type().is_symlink());
         if !already_stored {
-            crate::notes::atomic_copy(path, &target, 0o600)
-                .map_err(|_| "Eine OneNote-Anlage konnte nicht verwahrt werden.".to_owned())?;
+            atomic_copy_onenote(path, &target)?;
         }
         let size = fs::metadata(path).map(|meta| meta.len()).unwrap_or(0);
         attachments.push(json!({
@@ -1172,8 +1166,7 @@ fn preserve_sources(input: &Path, batch: &Path) -> Result<Vec<Value>, String> {
                 "OneNote"
             )
         );
-        crate::notes::atomic_copy(&source, &directory.join(&stored), 0o600)
-            .map_err(|_| "Die OneNote-Quelle konnte nicht verwahrt werden.".to_owned())?;
+        atomic_copy_onenote(&source, &directory.join(&stored))?;
         let size = fs::metadata(&source).map(|meta| meta.len()).unwrap_or(0);
         preserved.push(json!({
             "originalPath": relative,
@@ -1492,6 +1485,80 @@ fn write_unique_markdown(directory: &Path, title: &str, markdown: &str) -> Resul
         }
     }
     Err("Für die OneNote-Seite konnte kein freier Dateiname erzeugt werden.".to_owned())
+}
+
+fn atomic_write_onenote(target: &Path, bytes: &[u8]) -> Result<(), String> {
+    let temporary = onenote_temporary(target)?;
+    if let Err(error) = write_onenote_temp(&temporary, bytes) {
+        return Err(crate::notes::node_open_error(&temporary, &error));
+    }
+    if let Err(error) = fs::rename(&temporary, target) {
+        return Err(crate::vault::node_rename_error(&temporary, target, &error));
+    }
+    Ok(())
+}
+
+fn atomic_copy_onenote(source: &Path, target: &Path) -> Result<(), String> {
+    let temporary = onenote_temporary(target)?;
+    if let Err(error) = copy_onenote_temp(source, &temporary) {
+        return Err(crate::vault::node_copyfile_error(source, &temporary, &error));
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(&temporary, fs::Permissions::from_mode(0o600));
+    }
+    if let Err(error) = fs::rename(&temporary, target) {
+        return Err(crate::vault::node_rename_error(&temporary, target, &error));
+    }
+    Ok(())
+}
+
+/// Desktop OneNote writer: `${target}.tmp-${pid}-${randomBytes(6).hex}`.
+fn onenote_temporary(target: &Path) -> Result<PathBuf, String> {
+    let mut bytes = [0u8; 6];
+    getrandom::getrandom(&mut bytes)
+        .map_err(|_| "Der OneNote-Import konnte nicht gespeichert werden.".to_owned())?;
+    let suffix: String = bytes.iter().map(|byte| format!("{byte:02x}")).collect();
+    Ok(PathBuf::from(format!(
+        "{}.tmp-{}-{suffix}",
+        target.display(),
+        std::process::id()
+    )))
+}
+
+fn write_onenote_temp(path: &Path, bytes: &[u8]) -> Result<(), std::io::Error> {
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options.open(path)?;
+    std::io::Write::write_all(&mut file, bytes)?;
+    file.sync_all()?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(path, fs::Permissions::from_mode(0o600));
+    }
+    Ok(())
+}
+
+fn copy_onenote_temp(source: &Path, destination: &Path) -> Result<(), std::io::Error> {
+    let mut input = File::open(source)?;
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut output = options.open(destination)?;
+    std::io::copy(&mut input, &mut output)?;
+    output.sync_all()?;
+    Ok(())
 }
 
 fn open_exclusive_markdown(path: &Path, bytes: &[u8]) -> Result<(), std::io::Error> {
@@ -1912,7 +1979,8 @@ mod tests {
         note_directory_segments, outline_level, page_dimensions, page_parents, page_title,
         preview_is_nav, render_inputs, safe_segment, sanitize_page, stored_relative_path,
         strip_active_html, tool_failure_message, tool_limit, unique_directory, urlencoding_decode,
-        validate_listing, walk_limited, write_unique_markdown,
+        validate_listing, walk_limited, write_unique_markdown, atomic_copy_onenote,
+        atomic_write_onenote,
     };
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -1958,6 +2026,68 @@ mod tests {
         );
         std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o700)).unwrap();
         assert!(!page.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_unwritable_onenote_batch_uses_the_desktop_temporary_name() {
+        use std::os::unix::fs::PermissionsExt;
+        let directory = std::env::temp_dir().join(format!(
+            "fanotes-onenote-atomic-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&directory);
+        std::fs::create_dir_all(&directory).unwrap();
+        let source = directory.join("quelle.bin");
+        std::fs::write(&source, b"anlage").unwrap();
+        let locked = directory.join("locked");
+        std::fs::create_dir(&locked).unwrap();
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o555)).unwrap();
+        struct Restore(std::path::PathBuf);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                let _ = std::fs::set_permissions(&self.0, std::fs::Permissions::from_mode(0o700));
+                let _ = std::fs::remove_dir_all(self.0.parent().unwrap());
+            }
+        }
+        let _restore = Restore(locked.clone());
+        let manifest = locked.join("manifest.json");
+        let written = atomic_write_onenote(&manifest, b"{}\n").unwrap_err();
+        let write_prefix = format!(
+            "EACCES: permission denied, open '{}.tmp-{}-",
+            manifest.display(),
+            std::process::id()
+        );
+        assert!(
+            written.starts_with(&write_prefix),
+            "prefix {write_prefix}\nerror {written}"
+        );
+        let write_hex = written[write_prefix.len()..].trim_end_matches('\'');
+        assert_eq!(write_hex.len(), 12, "hex {write_hex:?} error {written}");
+        assert!(
+            write_hex.chars().all(|character| character.is_ascii_hexdigit()),
+            "{written}"
+        );
+
+        let stored = locked.join("anlage.fanotes-attachment");
+        let copied = atomic_copy_onenote(&source, &stored).unwrap_err();
+        let copy_prefix = format!(
+            "EACCES: permission denied, copyfile '{}' -> '{}.tmp-{}-",
+            source.display(),
+            stored.display(),
+            std::process::id()
+        );
+        assert!(copied.starts_with(&copy_prefix), "{copied}");
+        let copy_hex = copied[copy_prefix.len()..].trim_end_matches('\'');
+        assert_eq!(copy_hex.len(), 12, "{copied}");
+        assert!(
+            copy_hex.chars().all(|character| character.is_ascii_hexdigit()),
+            "{copied}"
+        );
     }
 
     #[test]

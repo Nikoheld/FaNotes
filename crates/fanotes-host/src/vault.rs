@@ -331,6 +331,20 @@ pub(crate) fn node_mkdir_error(path: &Path, error: &std::io::Error) -> String {
 
 /// Node `fs.rename` failure text. The message names both paths.
 pub(crate) fn node_rename_error(from: &Path, to: &Path, error: &std::io::Error) -> String {
+    node_two_path_error("rename", from, to, error)
+}
+
+/// Node `fs.copyFile` failure text. The message names both paths.
+pub(crate) fn node_copyfile_error(from: &Path, to: &Path, error: &std::io::Error) -> String {
+    node_two_path_error("copyfile", from, to, error)
+}
+
+fn node_two_path_error(
+    syscall: &str,
+    from: &Path,
+    to: &Path,
+    error: &std::io::Error,
+) -> String {
     #[cfg(unix)]
     let (name, detail) = match error.raw_os_error() {
         Some(libc::EISDIR) => ("EISDIR", "illegal operation on a directory"),
@@ -348,7 +362,7 @@ pub(crate) fn node_rename_error(from: &Path, to: &Path, error: &std::io::Error) 
         ("EACCES", "permission denied")
     };
     format!(
-        "{name}: {detail}, rename '{}' -> '{}'",
+        "{name}: {detail}, {syscall} '{}' -> '{}'",
         from.display(),
         to.display()
     )
