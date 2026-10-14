@@ -809,6 +809,14 @@ pub fn js_json_number(value: f64) -> Value {
 /// month rolls forward, and `24:00:00` is the next midnight.
 pub fn canonical_iso(value: &str) -> Option<String> {
     let trimmed = trim_js(value);
+    if has_ampm_word(trimmed) {
+        // `4:00 PM` is 16:00. A `T` before AM/PM is NaN.
+        if has_iso_t(trimmed) {
+            return None;
+        }
+        let normalized = fold_ampm(trimmed)?;
+        return canonical_iso(&normalized);
+    }
     if has_english_month(trimmed) {
         let normalized = rewrite_month_name(trimmed)?;
         return canonical_iso(&normalized);
@@ -849,6 +857,94 @@ pub fn canonical_iso(value: &str) -> Option<String> {
 
 fn has_english_month(value: &str) -> bool {
     month_words(value).iter().any(|word| english_month(word).is_some())
+}
+
+fn has_ampm_word(value: &str) -> bool {
+    value
+        .split(char::is_whitespace)
+        .any(|word| word.eq_ignore_ascii_case("am") || word.eq_ignore_ascii_case("pm"))
+}
+
+fn has_iso_t(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    bytes.windows(3).any(|window| {
+        window[0].is_ascii_digit()
+            && (window[1] == b'T' || window[1] == b't')
+            && window[2].is_ascii_digit()
+    })
+}
+
+/// `4:00 PM` becomes `16:00`. `12:00 AM` and `0:00 AM` become `00:00`.
+fn fold_ampm(trimmed: &str) -> Option<String> {
+    let words: Vec<&str> = trimmed
+        .split(char::is_whitespace)
+        .filter(|word| !word.is_empty())
+        .collect();
+    let ampm_at = words.iter().position(|word| {
+        word.eq_ignore_ascii_case("am") || word.eq_ignore_ascii_case("pm")
+    })?;
+    if ampm_at == 0 {
+        return None;
+    }
+    let pm = words[ampm_at].eq_ignore_ascii_case("pm");
+    let clock = ampm_clock(words[ampm_at - 1], pm)?;
+    let mut kept = Vec::new();
+    for (index, word) in words.iter().enumerate() {
+        if index == ampm_at - 1 {
+            kept.push(clock.as_str());
+        } else if index == ampm_at {
+            continue;
+        } else {
+            kept.push(*word);
+        }
+    }
+    Some(kept.join(" "))
+}
+
+fn ampm_clock(clock: &str, pm: bool) -> Option<String> {
+    let (body, fraction) = match clock.split_once('.') {
+        Some((body, fraction))
+            if !fraction.is_empty() && fraction.bytes().all(|byte| byte.is_ascii_digit()) =>
+        {
+            (body, Some(fraction))
+        }
+        None => (clock, None),
+        Some(_) => return None,
+    };
+    let mut numbers = Vec::new();
+    for part in body.split(':') {
+        if part.is_empty() || !part.bytes().all(|byte| byte.is_ascii_digit()) {
+            return None;
+        }
+        numbers.push(part.parse::<u32>().ok()?);
+    }
+    if !(2..=3).contains(&numbers.len()) {
+        return None;
+    }
+    let hour = ampm_hour(numbers[0], pm)?;
+    if numbers[1] > 59 || numbers.get(2).copied().unwrap_or(0) > 59 {
+        return None;
+    }
+    let mut out = if numbers.len() == 3 {
+        format!("{hour:02}:{:02}:{:02}", numbers[1], numbers[2])
+    } else {
+        format!("{hour:02}:{:02}", numbers[1])
+    };
+    if let Some(fraction) = fraction {
+        out.push('.');
+        out.push_str(fraction);
+    }
+    Some(out)
+}
+
+fn ampm_hour(hour: u32, pm: bool) -> Option<u32> {
+    if hour > 12 {
+        return None;
+    }
+    if hour == 0 || hour == 12 {
+        return Some(if pm { 12 } else { 0 });
+    }
+    Some(if pm { hour + 12 } else { hour })
 }
 
 fn month_words(value: &str) -> Vec<&str> {
@@ -1739,6 +1835,24 @@ mod tests {
             assert_eq!(
                 super::canonical_iso("2026/10/13 16:00:00Z").as_deref(),
                 Some("2026-10-13T16:00:00.000Z")
+            );
+        });
+    }
+
+    #[test]
+    fn a_pm_clock_is_twelve_hours_later() {
+        with_tz("America/New_York", || {
+            assert_eq!(
+                super::canonical_iso("Oct 13, 2026 4:00 PM").as_deref(),
+                Some("2026-10-13T20:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13, 2026 12:00 AM").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 4:00 PM").as_deref(),
+                Some("2026-10-13T20:00:00.000Z")
             );
         });
     }
