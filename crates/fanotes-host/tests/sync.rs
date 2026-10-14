@@ -749,3 +749,31 @@ fn a_sync_write_onto_a_directory_reports_the_desktop_rename_error() {
         .collect();
     assert!(leftovers.is_empty(), "{leftovers:?}");
 }
+
+#[cfg(unix)]
+#[test]
+fn an_unwritable_sync_folder_reports_the_desktop_unlink_error() {
+    use std::os::unix::fs::PermissionsExt;
+    let (vault, app, mut host) = host();
+    let vault = fs::canonicalize(&vault).unwrap();
+    host.trash_dir = Some(app.join("trash"));
+    let folder = vault.join("Mathe");
+    fs::create_dir(&folder).unwrap();
+    let note = folder.join("Seite.md");
+    fs::write(&note, b"Hallo\n").unwrap();
+    fs::set_permissions(&folder, fs::Permissions::from_mode(0o555)).unwrap();
+    struct Restore(std::path::PathBuf);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            let _ = fs::set_permissions(&self.0, fs::Permissions::from_mode(0o700));
+        }
+    }
+    let _restore = Restore(folder.clone());
+    assert_eq!(
+        host.dispatch("fanotes:sync-remove", &[json!("Mathe/Seite.md")])
+            .unwrap_err(),
+        format!("EACCES: permission denied, unlink '{}'", note.display())
+    );
+    fs::set_permissions(&folder, fs::Permissions::from_mode(0o700)).unwrap();
+    assert_eq!(fs::read(&note).unwrap(), b"Hallo\n");
+}

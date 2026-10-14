@@ -838,3 +838,32 @@ fn an_unwritable_worksheet_folder_reports_the_desktop_open_error() {
     assert!(!worksheets.join("blatt-1.json").exists());
     assert_eq!(fs::read(worksheets.join("blatt-1.pdf")).unwrap(), b"%PDF-1.4\n");
 }
+
+#[cfg(unix)]
+#[test]
+fn an_unwritable_worksheet_folder_reports_the_desktop_unlink_error() {
+    use std::os::unix::fs::PermissionsExt;
+    let (_dir, mut host) = host();
+    let worksheets = host.vault.clone().unwrap().join(".fanotes/worksheets");
+    fs::write(
+        worksheets.join("blatt-1.json"),
+        r#"{"schemaVersion":1,"id":"blatt-1","title":"Übung","kind":"pdf","mimeType":"application/pdf","sourceRelativePath":".fanotes/worksheets/blatt-1.pdf","dataRelativePath":".fanotes/worksheets/blatt-1.json","createdAt":"2026-01-02T03:04:05.000Z","updatedAt":"2026-01-02T03:04:05.000Z","textBoxes":[],"highlights":[]}"#,
+    )
+    .unwrap();
+    let pdf = worksheets.join("blatt-1.pdf");
+    fs::set_permissions(&worksheets, fs::Permissions::from_mode(0o555)).unwrap();
+    struct Restore(std::path::PathBuf);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            let _ = fs::set_permissions(&self.0, fs::Permissions::from_mode(0o700));
+        }
+    }
+    let _restore = Restore(worksheets.clone());
+    assert_eq!(
+        host.dispatch("fanotes:delete-worksheet", &[json!("blatt-1")])
+            .unwrap_err(),
+        format!("EACCES: permission denied, unlink '{}'", pdf.display())
+    );
+    fs::set_permissions(&worksheets, fs::Permissions::from_mode(0o700)).unwrap();
+    assert_eq!(fs::read(&pdf).unwrap(), b"%PDF-1.4\n");
+}

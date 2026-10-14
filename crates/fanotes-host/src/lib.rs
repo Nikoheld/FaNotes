@@ -466,7 +466,7 @@ impl Host {
             Ok(_) => {
                 if send_to_trash(self, &path).is_err() {
                     fs::remove_file(&path)
-                        .map_err(|_| "Der Eintrag konnte nicht entfernt werden.".to_owned())?;
+                        .map_err(|error| vault::node_unlink_error(&path, &error))?;
                 }
                 Ok(Value::Null)
             }
