@@ -1198,7 +1198,27 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
             allDay = clock == null,
             recurrence = if (recurrence in setOf("daily", "weekly", "monthly", "yearly")) recurrence else "none",
         )
-        val next = calendar.value.copy(events = calendar.value.events + event)
+        saveCalendar(calendar.value.copy(events = calendar.value.events + event))
+    }
+
+    fun deleteCalendarEvent(eventId: String) {
+        saveCalendar(ch.fasrv.fanotes.desk.deleteCalendarEvent(calendar.value, eventId))
+    }
+
+    fun duplicateCalendarEvent(eventId: String) {
+        saveCalendar(ch.fasrv.fanotes.desk.duplicateCalendarEvent(calendar.value, eventId))
+    }
+
+    fun shiftCalendarEvent(eventId: String, days: Long) {
+        saveCalendar(ch.fasrv.fanotes.desk.shiftCalendarEvent(calendar.value, eventId, days))
+    }
+
+    fun skipCalendarOccurrence(eventId: String, day: String) {
+        val date = runCatching { java.time.LocalDate.parse(day) }.getOrNull() ?: return
+        saveCalendar(ch.fasrv.fanotes.desk.skipCalendarOccurrence(calendar.value, eventId, date))
+    }
+
+    private fun saveCalendar(next: ch.fasrv.fanotes.desk.CalendarDocument) {
         calendar.value = next
         persistSpecial(ch.fasrv.fanotes.desk.CALENDAR_NOTE_PATH, "Kalender", serializeCalendarMarkdown(next))
     }
