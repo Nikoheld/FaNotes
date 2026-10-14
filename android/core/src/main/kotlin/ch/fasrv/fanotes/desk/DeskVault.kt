@@ -455,6 +455,21 @@ fun serializeFolderColors(colors: Map<String, String>): String {
     return "{\n  \"version\": 1,\n  \"colors\": $colorsJson\n}\n"
 }
 
+/** Folder colours follow a rename or move, the way a desktop folder record keeps its colour. */
+fun remapFolderColors(colors: Map<String, String>, from: String, to: String): Map<String, String> {
+    val source = from.replace('\\', '/').trim('/')
+    val target = to.replace('\\', '/').trim('/')
+    if (source.isEmpty() || source == target) return colors
+    var changed = false
+    val next = LinkedHashMap<String, String>(colors.size)
+    for ((path, color) in colors) {
+        val mapped = if (path == source || path.startsWith("$source/")) target + path.substring(source.length) else path
+        if (mapped != path) changed = true
+        if (mapped !in next) next[mapped] = color
+    }
+    return if (changed) next else colors
+}
+
 fun withFolderColor(colors: Map<String, String>, path: String, color: String?): Map<String, String> {
     val key = path.replace('\\', '/').trim('/')
     if (color == null) return colors - key

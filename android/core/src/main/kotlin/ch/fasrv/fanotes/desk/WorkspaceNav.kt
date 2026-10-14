@@ -95,6 +95,18 @@ private fun collapseHistoryRepeats(history: NoteTrail): NoteTrail {
 fun isSelfOrInside(candidate: String, ancestor: String) =
     candidate == ancestor || candidate.startsWith("$ancestor/")
 
+/**
+ * Folders a move dialog can offer. The current parent is omitted (that move
+ * is a no-op), and a folder cannot be moved into itself or a descendant.
+ */
+fun movableFolderTargets(folders: List<String>, moving: String): List<String> {
+    val path = moving.replace('\\', '/').trim('/')
+    val parent = path.substringBeforeLast('/', "")
+    return folders.map { it.replace('\\', '/').trim('/') }.filter { folder ->
+        folder.isNotEmpty() && folder != parent && folder != path && !folder.startsWith("$path/")
+    }
+}
+
 /** The path after `from` was renamed or moved to `to`, or null when unaffected. */
 fun remapPath(path: String, from: String, to: String): String? =
     if (isSelfOrInside(path, from)) to + path.substring(from.length) else null

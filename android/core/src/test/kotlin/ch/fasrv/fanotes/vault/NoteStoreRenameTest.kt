@@ -16,6 +16,15 @@ class NoteStoreRenameTest {
         assertEquals("Physik", renamedVaultPath("Schule", "Physik", folder = true))
         val error = assertFailsWith<IllegalArgumentException> { renamedVaultPath("A.md", "   ", folder = false) }
         assertEquals("Der Name darf nicht leer sein.", error.message)
+        assertEquals("Schule/Mathe.md", movedVaultPath("Schule/Mathe.md", "Schule") { false })
+        assertEquals("Archiv/Mathe.md", movedVaultPath("Schule/Mathe.md", "Archiv") { false })
+        assertEquals(
+            "Archiv/Mathe 2.md",
+            movedVaultPath("Schule/Mathe.md", "Archiv") { it == "Archiv/Mathe.md" || it == "Archiv/Mathe.famd" },
+        )
+        assertEquals("Archiv/Schule", movedVaultPath("Schule", "Archiv") { false })
+        val intoSelf = assertFailsWith<IllegalArgumentException> { movedVaultPath("Schule", "Schule/Unter") { false } }
+        assertEquals("Ein Ordner kann nicht in sich selbst verschoben werden.", intoSelf.message)
     }
 
     @Test
@@ -41,6 +50,20 @@ class NoteStoreRenameTest {
             val taken = assertFailsWith<IllegalArgumentException> { store.rename("Physik/Algebra.md", "Andere") }
             assertEquals("An diesem Ort existiert bereits ein Eintrag mit diesem Namen.", taken.message)
             assertEquals("Physik/Algebra.md", store.rename("Physik/Algebra.md", "Algebra"))
+            store.createFolder("", "Archiv")
+            val moved = store.moveEntry("Physik/Algebra.md", "Archiv")
+            assertEquals("Archiv/Algebra.md", moved)
+            assertTrue(vault.exists(companionPath("Archiv/Algebra.md", ".famd")))
+            assertFalse(vault.exists("Physik/Algebra.md"))
+            store.createMarkdown("Archiv", "Andere")
+            val bumped = store.moveEntry("Physik/Andere.md", "Archiv")
+            assertEquals("Archiv/Andere 2.md", bumped)
+            assertTrue(vault.exists(companionPath("Archiv/Andere 2.md", ".famd")))
+            val folderMove = store.moveEntry("Physik", "Archiv")
+            assertEquals("Archiv/Physik", folderMove)
+            assertTrue(vault.exists("Archiv/Physik/.keep"))
+            val missing = assertFailsWith<IllegalArgumentException> { store.moveEntry("Archiv/Algebra.md", "Fehlt") }
+            assertEquals("Der Zielordner wurde nicht gefunden.", missing.message)
         } finally {
             root.toFile().deleteRecursively()
         }

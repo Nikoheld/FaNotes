@@ -84,6 +84,7 @@ import ch.fasrv.fanotes.desk.pruneWorkspaceMemory
 import ch.fasrv.fanotes.desk.rankSwitcherNotes
 import ch.fasrv.fanotes.desk.rememberClosedTab
 import ch.fasrv.fanotes.desk.remapNoteHistory
+import ch.fasrv.fanotes.desk.remapFolderColors
 import ch.fasrv.fanotes.desk.remapPath
 import ch.fasrv.fanotes.desk.sortPinnedFirst
 import ch.fasrv.fanotes.desk.stepNoteHistory
@@ -446,6 +447,20 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
                 withContext(Dispatchers.IO) { graph.store.rename(path, title) }
             } catch (error: Exception) {
                 message.value = error.message ?: "Umbenennen ist fehlgeschlagen."
+                return@launch
+            }
+            if (next != path) moveReferences(path, next)
+            loadTree()
+        }
+    }
+
+    fun moveEntry(path: String, destFolder: String) {
+        viewModelScope.launch {
+            if (open.value?.path?.let { isSelfOrInside(it, path) } == true) saveNow()
+            val next = try {
+                withContext(Dispatchers.IO) { graph.store.moveEntry(path, destFolder) }
+            } catch (error: Exception) {
+                message.value = error.message ?: "Verschieben ist fehlgeschlagen."
                 return@launch
             }
             if (next != path) moveReferences(path, next)
@@ -1175,6 +1190,16 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         }
         splitPath.value?.let { split ->
             remapPath(split, from, to)?.let { moved -> if (moved != split) loadSplit(moved) }
+        }
+        val colors = remapFolderColors(folderColors.value, from, to)
+        if (colors != folderColors.value) {
+            folderColors.value = colors
+            viewModelScope.launch {
+                withContext(Dispatchers.IO) {
+                    graph.vault.write(FOLDER_COLORS_PATH, serializeFolderColors(colors).encodeToByteArray())
+                }
+                graph.engine.notifyLocalChange()
+            }
         }
         persistWorkspace()
     }

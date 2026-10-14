@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -236,6 +237,7 @@ fun FaNotesScreen(
     var createFolder by remember { mutableStateOf(false) }
     var createParent by remember { mutableStateOf("") }
     var renaming by remember { mutableStateOf<Pair<String, String>?>(null) }
+    var moving by remember { mutableStateOf<String?>(null) }
     var syncPending by remember { mutableStateOf(false) }
     var mathOpen by remember { mutableStateOf(false) }
     var mathInput by remember { mutableStateOf("") }
@@ -311,6 +313,7 @@ fun FaNotesScreen(
                     onPrivateVault = { model.usePrivateVault() },
                     onDelete = { path, folder, name -> model.askDelete(path, folder, name) },
                     onRename = { path, name -> renaming = path to name },
+                    onMove = { moving = it },
                     localFolders = syncPrefixesFromSetting(desk["sync-excluded"]),
                     onToggleLocal = { model.toggleLocalFolder(it) },
                     colors = model.folderColors.collectAsStateWithLifecycle().value,
@@ -533,6 +536,45 @@ fun FaNotesScreen(
             if (name != null && name.trim() != current) model.rename(path, name)
         }
     }
+    moving?.let { path ->
+        val folders = remember(tree, path) {
+            ch.fasrv.fanotes.desk.movableFolderTargets(collectFolders(tree), path)
+        }
+        val atRoot = !path.contains('/')
+        AlertDialog(
+            onDismissRequest = { moving = null },
+            title = { Text("Verschieben") },
+            text = {
+                Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState())) {
+                    Text(path.substringAfterLast('/'), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
+                    if (!atRoot) {
+                        TextButton(onClick = { model.moveEntry(path, ""); moving = null }) { Text("Vault-Wurzel") }
+                    }
+                    folders.forEach { folder ->
+                        TextButton(onClick = { model.moveEntry(path, folder); moving = null }) { Text(folder) }
+                    }
+                    if (atRoot && folders.isEmpty()) {
+                        Text("Es gibt noch keinen anderen Ordner.", fontSize = 13.sp)
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = { TextButton(onClick = { moving = null }) { Text("Abbrechen") } },
+        )
+    }
+}
+
+private fun collectFolders(nodes: List<VaultNode>): List<String> {
+    val found = mutableListOf<String>()
+    fun walk(list: List<VaultNode>) {
+        for (node in list) {
+            if (node.kind != NoteKind.FOLDER) continue
+            found += node.path
+            walk(node.children)
+        }
+    }
+    walk(nodes)
+    return found
 }
 
 @Composable
@@ -555,6 +597,7 @@ private fun VaultPane(
     onPrivateVault: () -> Unit,
     onDelete: (String, Boolean, String) -> Unit,
     onRename: (String, String) -> Unit,
+    onMove: (String) -> Unit,
     localFolders: List<String> = emptyList(),
     onToggleLocal: (String) -> Unit = {},
     colors: Map<String, String>,
@@ -627,7 +670,7 @@ private fun VaultPane(
         }
         LazyColumn(Modifier.weight(1f).padding(top = 8.dp)) {
             items(tree, key = { it.path }) { node ->
-                NoteRow(node, selected, colors, onOpen, onDelete, onRename, onFolderColor, localFolders, onToggleLocal, depth = 0)
+                NoteRow(node, selected, colors, onOpen, onDelete, onRename, onMove, onFolderColor, localFolders, onToggleLocal, depth = 0)
             }
         }
         TextButton(onClick = onOpenVault) { Text("Vault-Ordner öffnen") }
@@ -643,6 +686,7 @@ private fun NoteRow(
     onOpen: (String) -> Unit,
     onDelete: (String, Boolean, String) -> Unit,
     onRename: (String, String) -> Unit,
+    onMove: (String) -> Unit,
     onFolderColor: (String) -> Unit,
     localFolders: List<String>,
     onToggleLocal: (String) -> Unit,
@@ -681,12 +725,15 @@ private fun NoteRow(
         IconButton(onClick = { onRename(node.path, node.name) }) {
             Icon(Icons.Filled.Edit, contentDescription = "Umbenennen")
         }
+        IconButton(onClick = { onMove(node.path) }) {
+            Icon(Icons.AutoMirrored.Filled.DriveFileMove, contentDescription = "Verschieben")
+        }
         IconButton(onClick = { onDelete(node.path, node.kind == NoteKind.FOLDER, node.name) }) {
             Icon(Icons.Filled.Delete, contentDescription = "Löschen")
         }
     }
     if (node.kind == NoteKind.FOLDER) {
-        node.children.forEach { NoteRow(it, selected, colors, onOpen, onDelete, onRename, onFolderColor, localFolders, onToggleLocal, depth + 1) }
+        node.children.forEach { NoteRow(it, selected, colors, onOpen, onDelete, onRename, onMove, onFolderColor, localFolders, onToggleLocal, depth + 1) }
     }
 }
 
