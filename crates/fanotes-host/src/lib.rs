@@ -1796,7 +1796,7 @@ fn unix_millis_from_iso(value: &str) -> Option<u64> {
     }
     let (date, time) = match iso_date_time(value) {
         IsoDate::Invalid => return None,
-        // `Date.parse('YYYY-MM-DD')` is UTC midnight. Surrounding whitespace is ignored.
+        // `YYYY-MM-DD` is UTC midnight. A short month or day is local midnight.
         IsoDate::DateOnly(date) => return date_only_millis(date),
         IsoDate::DateTime(date, time) => (date, time),
     };
@@ -2488,10 +2488,15 @@ fn date_only_millis(value: &str) -> Option<u64> {
         return None;
     }
     let year: i32 = year_text.parse().ok()?;
-    // `YYYY` is 1 January and `YYYY-MM` is the first of that month, UTC.
+    // `YYYY`, `YYYY-MM`, and `YYYY-MM-DD` are UTC. `2026-1` and `2026-10-3`
+    // are local midnight. A field with extra digits is local too.
+    let mut legacy_local = false;
     let month = match month_text {
         None => 1,
         Some(text) => {
+            if text.len() != 2 {
+                legacy_local = true;
+            }
             let month: u32 = text.parse().ok()?;
             if !(1..=12).contains(&month) {
                 return None;
@@ -2502,6 +2507,9 @@ fn date_only_millis(value: &str) -> Option<u64> {
     let day = match day_text {
         None => 1,
         Some(text) => {
+            if text.len() != 2 {
+                legacy_local = true;
+            }
             let day: u32 = text.parse().ok()?;
             // Days 29–31 still roll. A day outside 1..=31 is rejected.
             if !(1..=31).contains(&day) {
@@ -2511,7 +2519,13 @@ fn date_only_millis(value: &str) -> Option<u64> {
         }
     };
     let days = days_from_civil(year, month, day)?;
-    Some(days.saturating_mul(86_400_000))
+    let naive = days.saturating_mul(86_400_000);
+    if !legacy_local {
+        return Some(naive);
+    }
+    let naive = i64::try_from(naive).ok()?;
+    let offset = local_offset_east_ms(naive)?;
+    u64::try_from(naive.checked_sub(offset)?).ok()
 }
 
 fn days_from_civil(year: i32, month: u32, day: u32) -> Option<u64> {
@@ -5495,5 +5509,25 @@ mod local_zone_tests {
             unix_millis_from_iso("2026-10-13 16:00:00 (EST)"),
             Some(1_791_921_600_000)
         );
+    }
+
+    #[test]
+    fn a_short_hyphen_date_is_local_midnight() {
+        let _lock = TRASH_CLOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let _restore = RestoreTz(std::env::var_os("TZ"));
+        unsafe { std::env::set_var("TZ", "America/New_York") };
+        unsafe { tzset() };
+        // Two-digit `YYYY-MM` and `YYYY-MM-DD` stay UTC. A field that is not
+        // two digits is local midnight, including a day that rolls forward.
+        assert_eq!(unix_millis_from_iso("2026-1"), Some(1_767_243_600_000));
+        assert_eq!(unix_millis_from_iso("2026-10-3"), Some(1_791_000_000_000));
+        assert_eq!(unix_millis_from_iso("2026-01-1"), Some(1_767_243_600_000));
+        assert_eq!(unix_millis_from_iso("2026-2-31"), Some(1_772_514_000_000));
+        assert_eq!(unix_millis_from_iso("2026-010-13"), Some(1_791_864_000_000));
+        assert_eq!(unix_millis_from_iso("2026-01"), Some(1_767_225_600_000));
+        assert_eq!(unix_millis_from_iso("2026-10-03"), Some(1_790_985_600_000));
+        assert_eq!(unix_millis_from_iso("2026-02-31"), Some(1_772_496_000_000));
     }
 }
