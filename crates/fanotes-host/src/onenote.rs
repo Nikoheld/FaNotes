@@ -1430,12 +1430,10 @@ fn walk_limited(root: &Path, max_bytes: u64, max_entries: usize) -> Result<Vec<P
     let mut total_bytes = 0u64;
     while let Some(directory) = pending.pop() {
         let mut listed = Vec::new();
-        for entry in fs::read_dir(&directory).map_err(|_| {
-            "Der OneNote-Export enthält einen nicht unterstützten Dateityp.".to_owned()
-        })? {
-            listed.push(entry.map_err(|_| {
-                "Der OneNote-Export enthält einen nicht unterstützten Dateityp.".to_owned()
-            })?);
+        for entry in fs::read_dir(&directory)
+            .map_err(|error| crate::scandir_error(&directory, &error))?
+        {
+            listed.push(entry.map_err(|error| crate::scandir_error(&directory, &error))?);
         }
         if files.len() + listed.len() > max_entries {
             return Err("Der OneNote-Export enthält zu viele Dateien.".to_owned());
@@ -1445,9 +1443,8 @@ fn walk_limited(root: &Path, max_bytes: u64, max_entries: usize) -> Result<Vec<P
             if !image_stays_inside(root, &target) {
                 return Err("Ein OneNote-Pfad verlässt das Importverzeichnis.".to_owned());
             }
-            let meta = fs::symlink_metadata(&target).map_err(|_| {
-                "Der OneNote-Export enthält einen nicht unterstützten Dateityp.".to_owned()
-            })?;
+            let meta = fs::symlink_metadata(&target)
+                .map_err(|error| crate::vault::node_lstat_error(&target, &error))?;
             if meta.file_type().is_symlink() {
                 return Err(
                     "Symbolische Verknüpfungen sind in einem OneNote-Import nicht erlaubt."
@@ -2433,6 +2430,45 @@ mod tests {
             let linked = walk_limited(&root, 1_000, 20).unwrap_err();
             assert!(linked.contains("Symbolische"));
         }
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_unlistable_onenote_export_uses_the_desktop_scandir_error() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = std::env::temp_dir().join(format!(
+            "fanotes-onenote-scandir-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        let hidden = root.join("geheim");
+        std::fs::create_dir_all(&hidden).unwrap();
+        std::fs::write(hidden.join("seite.html"), b"<html></html>").unwrap();
+        std::fs::set_permissions(&hidden, std::fs::Permissions::from_mode(0o000)).unwrap();
+        struct Restore(std::path::PathBuf);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                let _ = std::fs::set_permissions(&self.0, std::fs::Permissions::from_mode(0o700));
+            }
+        }
+        let _restore = Restore(hidden.clone());
+        assert_eq!(
+            walk_limited(&root, 1_000_000, 20).err().expect("scandir"),
+            format!(
+                "EACCES: permission denied, scandir '{}'",
+                hidden.display()
+            )
+        );
+        std::fs::set_permissions(&hidden, std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert_eq!(
+            std::fs::read(hidden.join("seite.html")).unwrap(),
+            b"<html></html>"
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 
