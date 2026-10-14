@@ -1776,18 +1776,7 @@ fn unix_millis_from_iso(value: &str) -> Option<u64> {
         IsoDate::DateOnly(date) => return date_only_millis(date),
         IsoDate::DateTime(date, time) => (date, time),
     };
-    let mut date_parts = date.split('-');
-    let year_text = date_parts.next()?;
-    let month_text = date_parts.next()?;
-    let day_text = date_parts.next()?;
-    let year: i32 = year_text.parse().ok()?;
-    let month: u32 = month_text.parse().ok()?;
-    let day: u32 = day_text.parse().ok()?;
-    // A datetime uses `YYYY-MM-DD` or `±YYYYYY-MM-DD`. Date-only values keep
-    // the wider `Date.parse` forms in `date_only_millis`.
-    if date_parts.next().is_some() || !datetime_date_fields(year_text, month_text, day_text) {
-        return None;
-    }
+    let (year, month, day) = datetime_calendar(date)?;
     let (time, zone) = split_time_zone(time)?;
     let mut fraction_has_nonzero = false;
     let (clock, millis) = match time.split_once('.') {
@@ -1959,32 +1948,84 @@ fn local_offset_east_ms(_naive_utc_ms: i64) -> Option<i64> {
     None
 }
 
-/// `Date.parse` date fields before a clock: four-digit year, or a sign and six
-/// digits, then a two-digit month and day.
-fn datetime_date_fields(year_text: &str, month_text: &str, day_text: &str) -> bool {
-    let year_ok = match year_text.as_bytes() {
-        [b'0'..=b'9', b'0'..=b'9', b'0'..=b'9', b'0'..=b'9'] => true,
-        [b'+' | b'-', rest @ ..] => {
-            rest.len() == 6 && rest.iter().all(|byte| byte.is_ascii_digit())
+/// `Date.parse` date fields before a clock: `YYYY`, `YYYY-MM`, or
+/// `±YYYYYY-MM-DD`. An omitted month or day is 1. A month written before a
+/// clock is exactly two digits, so `2026-1T...` is NaN.
+fn datetime_calendar(date: &str) -> Option<(i32, u32, u32)> {
+    let mut parts = date.split('-');
+    let year_text = parts.next()?;
+    let month_text = parts.next();
+    let day_text = parts.next();
+    if parts.next().is_some() || !datetime_year_ok(year_text) {
+        return None;
+    }
+    let year: i32 = year_text.parse().ok()?;
+    let (month, day) = match (month_text, day_text) {
+        (None, _) => (1, 1),
+        (Some(month_text), None) => {
+            if !two_digits(month_text) {
+                return None;
+            }
+            let month: u32 = month_text.parse().ok()?;
+            if !(1..=12).contains(&month) {
+                return None;
+            }
+            (month, 1)
         }
+        (Some(month_text), Some(day_text)) => {
+            if !two_digits(month_text) || !two_digits(day_text) {
+                return None;
+            }
+            (month_text.parse().ok()?, day_text.parse().ok()?)
+        }
+    };
+    Some((year, month, day))
+}
+
+fn datetime_year_ok(year_text: &str) -> bool {
+    match year_text.as_bytes() {
+        [b'0'..=b'9', b'0'..=b'9', b'0'..=b'9', b'0'..=b'9'] => true,
+        [b'+' | b'-', rest @ ..] => rest.len() == 6 && rest.iter().all(|byte| byte.is_ascii_digit()),
         _ => false,
-    };
-    let two_digits = |text: &str| {
-        let bytes = text.as_bytes();
-        bytes.len() == 2 && bytes.iter().all(|byte| byte.is_ascii_digit())
-    };
-    year_ok && two_digits(month_text) && two_digits(day_text)
+    }
+}
+
+fn two_digits(text: &str) -> bool {
+    let bytes = text.as_bytes();
+    bytes.len() == 2 && bytes.iter().all(|byte| byte.is_ascii_digit())
 }
 
 fn date_only_millis(value: &str) -> Option<u64> {
     let mut date_parts = value.split('-');
-    let year: i32 = date_parts.next()?.parse().ok()?;
-    let month: u32 = date_parts.next()?.parse().ok()?;
-    let day: u32 = date_parts.next()?.parse().ok()?;
-    // `Date.parse` rejects a date-only day outside 1..=31. Days 29–31 still roll.
-    if date_parts.next().is_some() || !(1..=12).contains(&month) || !(1..=31).contains(&day) {
+    let year_text = date_parts.next()?;
+    let month_text = date_parts.next();
+    let day_text = date_parts.next();
+    if date_parts.next().is_some() {
         return None;
     }
+    let year: i32 = year_text.parse().ok()?;
+    // `YYYY` is 1 January and `YYYY-MM` is the first of that month, UTC.
+    let month = match month_text {
+        None => 1,
+        Some(text) => {
+            let month: u32 = text.parse().ok()?;
+            if !(1..=12).contains(&month) {
+                return None;
+            }
+            month
+        }
+    };
+    let day = match day_text {
+        None => 1,
+        Some(text) => {
+            let day: u32 = text.parse().ok()?;
+            // Days 29–31 still roll. A day outside 1..=31 is rejected.
+            if !(1..=31).contains(&day) {
+                return None;
+            }
+            day
+        }
+    };
     let days = days_from_civil(year, month, day)?;
     Some(days.saturating_mul(86_400_000))
 }
