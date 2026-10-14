@@ -154,6 +154,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     val fingerDraws = MutableStateFlow(false)
     val showText = MutableStateFlow(false)
     val outlineJump = MutableStateFlow<Int?>(null)
+    val foldedHeadings = MutableStateFlow<Set<Int>>(emptySet())
     val showList = MutableStateFlow(true)
     val message = MutableStateFlow<String?>(null)
     val backdrop = MutableStateFlow<List<BackdropSlice>>(emptyList())
@@ -250,6 +251,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
                 session.replace(note.document)
                 open.value = noteOpened(note)
                 markdown.value = note.markdown
+                foldedHeadings.value = foldsForSections(note.markdown, note.document)
                 rememberTags(path, note.markdown)
                 refreshBacklinks(path)
                 rememberTab(path)
@@ -314,6 +316,24 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         markdown.value = value
         open.value?.path?.let { rememberTags(it, value) }
         noteChanged()
+    }
+
+    /** An edit of the text the user can see, with folded heading bodies still in the note. */
+    fun updateVisibleMarkdown(previousVisible: String, nextVisible: String) {
+        if (foldedHeadings.value.isEmpty()) {
+            updateMarkdown(nextVisible)
+            return
+        }
+        val full = ch.fasrv.fanotes.desk.applyFoldedEdit(markdown.value, foldedHeadings.value, previousVisible, nextVisible)
+        foldedHeadings.value = ch.fasrv.fanotes.desk.shiftFoldedLines(markdown.value, full, foldedHeadings.value)
+        updateMarkdown(full)
+    }
+
+    private fun foldsForSections(markdown: String, document: ch.fasrv.fanotes.ink.InkDocument): Set<Int> {
+        val sorted = ch.fasrv.fanotes.ink.sectionsOf(document).sortedBy { it.top }
+        return sorted.mapIndexedNotNull { index, section ->
+            if (!section.collapsed) null else ch.fasrv.fanotes.desk.headingLineForSection(markdown, index)
+        }.toSet()
     }
 
     fun addPdfQuote(page: Int, quote: String, kind: String) {
@@ -419,6 +439,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
             if (open.value?.path?.let { isSelfOrInside(it, path) } == true) {
                 open.value = null
                 markdown.value = ""
+                foldedHeadings.value = emptySet()
                 session.replace(newInkDocument("Note", "dots", isoNow()))
                 openTabs.value.firstOrNull()?.let { openPath(it, force = true) }
             }
@@ -516,7 +537,13 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun toggleInkSection(id: String) {
+        val index = ch.fasrv.fanotes.ink.sectionsOf(session.document).sortedBy { it.top }.indexOfFirst { it.id == id }
         session.replace(ch.fasrv.fanotes.ink.toggleSection(session.document, id))
+        val collapsed = ch.fasrv.fanotes.ink.sectionsOf(session.document).find { it.id == id }?.collapsed == true
+        val line = if (index >= 0) ch.fasrv.fanotes.desk.headingLineForSection(markdown.value, index) else null
+        if (line != null) {
+            foldedHeadings.value = if (collapsed) foldedHeadings.value + line else foldedHeadings.value - line
+        }
         noteChanged()
     }
 
@@ -888,6 +915,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
             else {
                 open.value = null
                 markdown.value = ""
+                foldedHeadings.value = emptySet()
                 session.replace(newInkDocument("Note", "dots", isoNow()))
             }
         }
@@ -1393,7 +1421,9 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
                 session.replace(parseInkDocument(ink, note.title, payload.string("paperStyle") ?: note.document.paperStyle, isoNow()))
                 canvasToken.value += 1
             }
-            updateMarkdown(stripFamdPayload(file.content))
+            val restored = stripFamdPayload(file.content)
+            updateMarkdown(restored)
+            foldedHeadings.value = foldsForSections(restored, session.document)
             message.value = "Ältere Version wiederhergestellt. Speichern sichert sie."
             destination.value = "notes"
         }
