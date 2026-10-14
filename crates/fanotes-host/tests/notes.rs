@@ -296,6 +296,35 @@ fn a_saved_note_adopts_links_and_backups_from_the_trailer() {
     assert_eq!(backups[0]["content"], "vorher");
 }
 
+#[cfg(unix)]
+#[test]
+fn an_unreadable_subject_book_list_uses_the_desktop_open_error() {
+    use std::os::unix::fs::PermissionsExt;
+    let (mut host, vault) = host();
+    std::fs::create_dir_all(vault.join(".fanotes")).unwrap();
+    let path = vault.join(".fanotes/subject-books.json");
+    std::fs::write(&path, b"{\"version\":1,\"books\":[]}\n").unwrap();
+    let canonical = std::fs::canonicalize(&path).unwrap();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000)).unwrap();
+    struct Restore(std::path::PathBuf);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            let _ = std::fs::set_permissions(&self.0, std::fs::Permissions::from_mode(0o600));
+        }
+    }
+    let _restore = Restore(path.clone());
+    assert_eq!(
+        host.dispatch("fanotes:read-subject-books", &[])
+            .unwrap_err(),
+        format!("EACCES: permission denied, open '{}'", canonical.display())
+    );
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+    assert_eq!(
+        host.dispatch("fanotes:read-subject-books", &[]).unwrap(),
+        json!([])
+    );
+}
+
 #[test]
 fn a_subject_book_page_follows_javascript_number() {
     let (mut host, _) = host();

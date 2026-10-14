@@ -3627,7 +3627,8 @@ fn read_folder_colors(root: &Path) -> Result<BTreeMap<String, String>, String> {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 return Ok(BTreeMap::new());
             }
-            Err(_) => return Err("Die Ordnerfarben sind ungültig oder zu groß.".to_owned()),
+            // Desktop rethrows the `readFile` error. Invalid JSON stays empty.
+            Err(error) => return Err(notes::node_open_error(&path, &error)),
         },
     };
     let Ok(parsed) = serde_json::from_str::<Value>(&text) else {
