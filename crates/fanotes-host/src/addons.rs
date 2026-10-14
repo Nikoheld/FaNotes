@@ -85,14 +85,17 @@ pub fn read_file(host: &Host, id: &Value, name: &Value) -> Result<Value, String>
     // Desktop `readFile` returns the file with no size cap. The 2 MB limit
     // applies only when the host writes the file.
     match fs::symlink_metadata(&target) {
-        Ok(meta) if meta.file_type().is_symlink() || !meta.is_file() => {
+        Ok(meta) if meta.file_type().is_symlink() => {
             Err("Die Add-on-Datei ist unsicher.".to_owned())
         }
-        Ok(_) => fs::read(&target)
-            .map(|bytes| Value::String(String::from_utf8_lossy(&bytes).into_owned()))
-            .map_err(|_| "Die Add-on-Datei konnte nicht gelesen werden.".to_owned()),
+        // Node `readFile` of a directory is EISDIR with no path.
+        Ok(meta) if meta.is_dir() => {
+            Err("EISDIR: illegal operation on a directory, read".to_owned())
+        }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Value::Null),
-        Err(_) => Err("Die Add-on-Datei konnte nicht gelesen werden.".to_owned()),
+        Ok(_) | Err(_) => fs::read(&target)
+            .map(|bytes| Value::String(String::from_utf8_lossy(&bytes).into_owned()))
+            .map_err(|error| crate::notes::node_open_error(&target, &error)),
     }
 }
 
@@ -137,14 +140,16 @@ pub fn read_data(host: &Host, id: &str) -> Result<Value, String> {
     let _guard = lock();
     let path = store_root(host)?.join(format!("{}.data.json", safe_id(id)?));
     match fs::symlink_metadata(&path) {
-        Ok(meta) if meta.file_type().is_symlink() || !meta.is_file() => {
+        Ok(meta) if meta.file_type().is_symlink() => {
             Err("Die Add-on-Daten sind unsicher.".to_owned())
         }
-        Ok(_) => fs::read(&path)
-            .map(|bytes| Value::String(String::from_utf8_lossy(&bytes).into_owned()))
-            .map_err(|_| "Die Add-on-Daten konnten nicht gelesen werden.".to_owned()),
+        Ok(meta) if meta.is_dir() => {
+            Err("EISDIR: illegal operation on a directory, read".to_owned())
+        }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Value::Null),
-        Err(_) => Err("Die Add-on-Daten konnten nicht gelesen werden.".to_owned()),
+        Ok(_) | Err(_) => fs::read(&path)
+            .map(|bytes| Value::String(String::from_utf8_lossy(&bytes).into_owned()))
+            .map_err(|error| crate::notes::node_open_error(&path, &error)),
     }
 }
 

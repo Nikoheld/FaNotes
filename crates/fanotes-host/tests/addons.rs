@@ -327,3 +327,56 @@ fn an_oversized_addon_file_still_opens() {
     assert_eq!(refused, "main.js ist größer als 2 MB.");
     assert_eq!(std::fs::metadata(&file).unwrap().len(), 2_000_001);
 }
+
+#[cfg(unix)]
+#[test]
+fn an_unreadable_addon_file_uses_the_desktop_open_error() {
+    use std::os::unix::fs::PermissionsExt;
+    let (dir, mut host) = scratch("unreadable");
+    host.dispatch(
+        "fanotes:addons-write-files",
+        &[json!("margin-notes"), json!({ "main.js": "export {}" })],
+    )
+    .unwrap();
+    host.dispatch(
+        "fanotes:addons-write-data",
+        &[json!("margin-notes"), json!("{\"open\":1}")],
+    )
+    .unwrap();
+    let script = dir.join("app/addons/margin-notes/main.js");
+    let data = dir.join("app/addons/margin-notes.data.json");
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o000)).unwrap();
+    std::fs::set_permissions(&data, std::fs::Permissions::from_mode(0o000)).unwrap();
+    struct Restore(std::path::PathBuf);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            let _ = std::fs::set_permissions(&self.0, std::fs::Permissions::from_mode(0o600));
+        }
+    }
+    let _restore_script = Restore(script.clone());
+    let _restore_data = Restore(data.clone());
+    assert_eq!(
+        host.dispatch(
+            "fanotes:addons-read-file",
+            &[json!("margin-notes"), json!("main.js")],
+        )
+        .unwrap_err(),
+        format!("EACCES: permission denied, open '{}'", script.display())
+    );
+    assert_eq!(
+        host.dispatch("fanotes:addons-read-data", &[json!("margin-notes")])
+            .unwrap_err(),
+        format!("EACCES: permission denied, open '{}'", data.display())
+    );
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o600)).unwrap();
+    std::fs::remove_file(&script).unwrap();
+    std::fs::create_dir(&script).unwrap();
+    assert_eq!(
+        host.dispatch(
+            "fanotes:addons-read-file",
+            &[json!("margin-notes"), json!("main.js")],
+        )
+        .unwrap_err(),
+        "EISDIR: illegal operation on a directory, read"
+    );
+}
