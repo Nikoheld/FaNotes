@@ -201,4 +201,13 @@ class CalendarEditTest {
         assertEquals("2026-09-15", shifted.events.single().start)
         assertEquals("2026-09-15", shifted.events.single().end)
     }
+
+    @Test
+    fun draggingEmptyPaperUsesTheDesktopCreateRange() {
+        assertEquals(9 * 60 + 15 to 9 * 60 + 45, dragCreateMinutes(9 * 60 + 15, 9 * 60 + 15, moved = false))
+        assertEquals(23 * 60 + 50 to 24 * 60 + 20, dragCreateMinutes(23 * 60 + 50, 23 * 60 + 50, moved = false))
+        assertEquals(2 * 60 to 3 * 60 + 15, dragCreateMinutes(2 * 60, 3 * 60, moved = true))
+        assertEquals(1 * 60 to 2 * 60 + 15, dragCreateMinutes(2 * 60, 1 * 60, moved = true))
+        assertEquals(23 * 60 to 24 * 60, dragCreateMinutes(23 * 60, 24 * 60, moved = true))
+    }
 }

@@ -76,6 +76,7 @@ import ch.fasrv.fanotes.desk.CalendarEvent
 import ch.fasrv.fanotes.desk.LaidOutSpan
 import ch.fasrv.fanotes.desk.allDaySpans
 import ch.fasrv.fanotes.desk.calendarOccurrenceWindow
+import ch.fasrv.fanotes.desk.dragCreateMinutes
 import ch.fasrv.fanotes.desk.timedDayLayout
 import ch.fasrv.fanotes.desk.outlineOf
 import ch.fasrv.fanotes.desk.taskLines
@@ -394,6 +395,7 @@ fun CalendarScreen(model: FaNotesViewModel, onOpenNote: (String) -> Unit, onImpo
                 { anchor = it },
                 { key, start -> model.moveCalendarOccurrence(key, start) },
                 { key, end -> model.resizeCalendarOccurrence(key, end) },
+                { date, start, end, allDay -> editor = draftForCreate(document, date, start, end, allDay) },
             )
         }
         Text("Am $day", modifier = Modifier.padding(top = 8.dp), fontWeight = FontWeight.SemiBold)
@@ -405,7 +407,7 @@ fun CalendarScreen(model: FaNotesViewModel, onOpenNote: (String) -> Unit, onImpo
                 onChange = { editor = it },
                 onDismiss = { editor = null },
                 onSave = {
-                    model.saveCalendarOccurrence(current.key, current.toEvent())
+                    model.saveCalendarOccurrence(if (current.creating) null else current.key, current.toEvent())
                     editor = null
                 },
                 onDuplicate = {
@@ -484,6 +486,7 @@ private fun DayColumns(
     onPick: (LocalDate) -> Unit,
     onMove: (String, LocalDateTime) -> Unit,
     onResize: (String, LocalDateTime) -> Unit,
+    onCreate: (LocalDate, LocalDateTime, LocalDateTime, Boolean) -> Unit,
 ) {
     val scroll = rememberScrollState()
     val density = LocalDensity.current
@@ -494,13 +497,23 @@ private fun DayColumns(
         Row {
             Box(Modifier.width(44.dp))
             days.forEach { date ->
-                Column(Modifier.width(148.dp).padding(end = 4.dp).clickable { onPick(date) }.padding(bottom = 4.dp)) {
-                    Text(
-                        "${date.dayOfMonth}. ${date.monthValue}.",
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize = 13.sp,
-                        color = if (date == anchor) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                    )
+                Column(Modifier.width(148.dp).padding(end = 4.dp).padding(bottom = 4.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            "${date.dayOfMonth}. ${date.monthValue}.",
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 13.sp,
+                            color = if (date == anchor) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.weight(1f).clickable { onPick(date) },
+                        )
+                        Text(
+                            "+",
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.clickable {
+                                onCreate(date, date.atStartOfDay(), date.plusDays(1).atStartOfDay(), true)
+                            }.padding(horizontal = 6.dp),
+                        )
+                    }
                     allDaySpans(document, date).forEach { span ->
                         val tint = document.calendars.find { it.id == span.event.calendarId }?.color ?: "#7f6df2"
                         Text(
@@ -525,7 +538,7 @@ private fun DayColumns(
                 }
             }
             days.forEach { date ->
-                HourColumn(date, timedDayLayout(document, date), document, onEdit, onMove, onResize)
+                HourColumn(date, timedDayLayout(document, date), document, onEdit, onMove, onResize, onCreate)
             }
         }
     }
@@ -539,7 +552,9 @@ private fun HourColumn(
     onEdit: (CalendarEvent, LocalDate) -> Unit,
     onMove: (String, LocalDateTime) -> Unit,
     onResize: (String, LocalDateTime) -> Unit,
+    onCreate: (LocalDate, LocalDateTime, LocalDateTime, Boolean) -> Unit,
 ) {
+    var draftRange by remember(day) { mutableStateOf<Pair<Int, Int>?>(null) }
     Box(Modifier.width(148.dp).height((24 * HOUR_DP).dp).padding(end = 4.dp)) {
         for (hour in 0..23) {
             Box(
@@ -552,7 +567,45 @@ private fun HourColumn(
                 Modifier.fillMaxWidth().height(2.dp).offset(y = (minutes / 60f * HOUR_DP).dp).background(MaterialTheme.colorScheme.primary),
             )
         }
-        BoxWithConstraints(Modifier.fillMaxWidth().height((24 * HOUR_DP).dp)) {
+        BoxWithConstraints(
+            Modifier.fillMaxWidth().height((24 * HOUR_DP).dp).pointerInput(day, slices) {
+                val hourPx = HOUR_DP.dp.toPx()
+                val minHeight = 18.dp.toPx()
+                val slop = viewConfiguration.touchSlop
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    if (coversSlice(down.position.x, down.position.y, slices, size.width.toFloat(), hourPx, minHeight)) {
+                        return@awaitEachGesture
+                    }
+                    val origin = ((down.position.y / hourPx) * 60f).toInt().coerceIn(0, 24 * 60 - 1)
+                    var pointer = origin
+                    var total = Offset.Zero
+                    var moved = false
+                    draftRange = dragCreateMinutes(origin, pointer, false)
+                    val finished = drag(down.id) { change ->
+                        total += change.positionChange()
+                        pointer = (((down.position.y + total.y) / hourPx) * 60f).toInt()
+                        if (total.getDistance() > slop) {
+                            moved = true
+                            change.consume()
+                        }
+                        draftRange = dragCreateMinutes(origin, pointer, moved)
+                    }
+                    val range = dragCreateMinutes(origin, pointer, finished && moved)
+                    draftRange = null
+                    if (!finished) return@awaitEachGesture
+                    onCreate(day, minutesOn(day, range.first), minutesOn(day, range.second), false)
+                }
+            },
+        ) {
+            draftRange?.let { (startMin, endMin) ->
+                val visualEnd = endMin.coerceAtMost(24 * 60)
+                val top = startMin / 60f * HOUR_DP
+                val block = ((visualEnd - startMin) / 60f * HOUR_DP).coerceAtLeast(18f)
+                Box(
+                    Modifier.fillMaxWidth().offset(y = top.dp).height(block.dp).background(MaterialTheme.colorScheme.primary.copy(alpha = 0.28f)),
+                )
+            }
             slices.forEach { slice ->
                 TimedBlock(slice, maxWidth, day, document, onEdit, onMove, onResize)
             }
@@ -783,6 +836,7 @@ private data class CalendarDraft(
     val recurrenceUntil: String,
     val exceptionDates: List<String>,
     val detaches: Boolean,
+    val creating: Boolean = false,
 )
 
 private fun draftFor(event: CalendarEvent, day: LocalDate): CalendarDraft {
@@ -809,6 +863,63 @@ private fun draftFor(event: CalendarEvent, day: LocalDate): CalendarDraft {
         exceptionDates = event.exceptionDates,
         detaches = repeating && day.toString() != event.start.take(10),
     )
+}
+
+private fun draftForCreate(
+    document: ch.fasrv.fanotes.desk.CalendarDocument,
+    day: LocalDate,
+    start: LocalDateTime,
+    end: LocalDateTime,
+    allDay: Boolean,
+): CalendarDraft {
+    val calendarId = document.calendars.firstOrNull { it.visible }?.id ?: document.calendars.firstOrNull()?.id ?: "personal"
+    val id = java.util.UUID.randomUUID().toString()
+    return CalendarDraft(
+        key = "$id@$day",
+        id = id,
+        calendarId = calendarId,
+        title = "Neuer Termin",
+        startDate = if (allDay) day.toString() else start.toLocalDate().toString(),
+        endDate = if (allDay) day.toString() else end.toLocalDate().toString(),
+        startTime = "%02d:%02d".format(start.hour, start.minute),
+        endTime = "%02d:%02d".format(end.hour, end.minute),
+        allDay = allDay,
+        location = "",
+        notes = "",
+        notePath = "",
+        recurrence = "none",
+        recurrenceUntil = "",
+        exceptionDates = emptyList(),
+        detaches = false,
+        creating = true,
+    )
+}
+
+private fun minutesOn(day: LocalDate, minute: Int): LocalDateTime {
+    val dayMinutes = 24 * 60
+    val extra = minute.floorDiv(dayMinutes)
+    val clock = minute.mod(dayMinutes)
+    return day.plusDays(extra.toLong()).atStartOfDay().plusMinutes(clock.toLong())
+}
+
+private fun coversSlice(
+    x: Float,
+    y: Float,
+    slices: List<LaidOutSpan>,
+    widthPx: Float,
+    hourPx: Float,
+    minHeightPx: Float,
+): Boolean {
+    if (widthPx <= 0f || hourPx <= 0f) return false
+    return slices.any { slice ->
+        val startMin = slice.start.hour * 60 + slice.start.minute
+        val top = startMin / 60f * hourPx
+        val duration = java.time.Duration.between(slice.start, slice.end).toMinutes().coerceAtLeast(15)
+        val height = (duration / 60f * hourPx).coerceAtLeast(minHeightPx)
+        val column = widthPx / slice.columns
+        val left = column * slice.column
+        x in left..(left + column) && y in top..(top + height)
+    }
 }
 
 private fun CalendarDraft.toEvent(): CalendarEvent {
@@ -863,7 +974,15 @@ private fun CalendarEventEditor(
             }) { Text("Speichern") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Abbrechen") } },
-        title = { Text(if (draft.detaches) "Diesen Termin" else "Termin") },
+        title = {
+            Text(
+                when {
+                    draft.creating -> "Neuer Termin"
+                    draft.detaches -> "Diesen Termin"
+                    else -> "Termin"
+                },
+            )
+        },
         text = {
             Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
                 if (draft.detaches) {
@@ -904,11 +1023,13 @@ private fun CalendarEventEditor(
                 OutlinedTextField(draft.notes, { onChange(draft.copy(notes = it.take(4000))) }, label = { Text("Notizen") }, modifier = Modifier.fillMaxWidth())
                 OutlinedTextField(draft.notePath, { onChange(draft.copy(notePath = it.take(400))) }, label = { Text("Notizpfad") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
                 if (error.isNotEmpty()) Text(error, color = MaterialTheme.colorScheme.error, fontSize = 13.sp)
-                Row(Modifier.horizontalScroll(rememberScrollState())) {
-                    TextButton(onClick = onDuplicate) { Text("Duplizieren") }
-                    if (draft.notePath.isNotBlank()) TextButton(onClick = onOpenNote) { Text("Notiz öffnen") }
-                    TextButton(onClick = onDeleteOne) { Text("Nur diesen löschen") }
-                    if (draft.recurrence != "none") TextButton(onClick = onDeleteSeries) { Text("Serie löschen") }
+                if (!draft.creating) {
+                    Row(Modifier.horizontalScroll(rememberScrollState())) {
+                        TextButton(onClick = onDuplicate) { Text("Duplizieren") }
+                        if (draft.notePath.isNotBlank()) TextButton(onClick = onOpenNote) { Text("Notiz öffnen") }
+                        TextButton(onClick = onDeleteOne) { Text("Nur diesen löschen") }
+                        if (draft.recurrence != "none") TextButton(onClick = onDeleteSeries) { Text("Serie löschen") }
+                    }
                 }
             }
         },
