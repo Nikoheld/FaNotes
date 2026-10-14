@@ -268,11 +268,14 @@ fn embed_in_note(host: &Host, note_path: &str, drawing: &Value) -> Result<(), St
         note
     };
     let source_path = vault::resolve_note_file(vault_root, &source_relative)?;
-    let markdown = crate::notes::read_lossy_string(&source_path).unwrap_or_default();
+    let markdown = crate::notes::read_optional_text(&source_path)?.unwrap_or_default();
     let body = strip_famd_payload(&markdown);
-    let mut payload = crate::notes::read_lossy_string(&famd_path)
-        .and_then(|source| parse_famd(&source).payload)
-        .unwrap_or_else(|| empty_famd_payload(now_iso()));
+    let mut payload = match crate::notes::read_optional_text(&famd_path)? {
+        Some(source) => parse_famd(&source)
+            .payload
+            .unwrap_or_else(|| empty_famd_payload(now_iso())),
+        None => empty_famd_payload(now_iso()),
+    };
     payload.ink = Some(drawing.clone());
     payload.updated_at = now_iso();
     payload.worksheets = worksheet_ids_from_markdown(&body);

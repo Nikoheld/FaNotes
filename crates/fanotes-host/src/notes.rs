@@ -32,6 +32,16 @@ pub(crate) fn read_lossy_string(path: &Path) -> Option<String> {
         .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
 }
 
+/// `readOptionalNoteFile`: a missing file is empty. Any other read error is
+/// Node's open text, so a save cannot rebuild the companion without its ink.
+pub(crate) fn read_optional_text(path: &Path) -> Result<Option<String>, String> {
+    match fs::read(path) {
+        Ok(bytes) => Ok(Some(String::from_utf8_lossy(&bytes).into_owned())),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(node_open_error(path, &error)),
+    }
+}
+
 pub fn records_history(relative: &str) -> bool {
     is_note_text(relative)
 }
@@ -108,9 +118,10 @@ pub fn attach_sidecar(
 ) -> Result<(), String> {
     let famd_relative = companion_note_path(relative, ".famd");
     let famd_path = vault::resolve_note_file(root, &famd_relative)?;
-    let existing = read_lossy_string(&famd_path)
-        .map(|source| parse_famd(&source))
-        .unwrap_or_else(|| parse_famd(""));
+    let existing = match read_optional_text(&famd_path)? {
+        Some(source) => parse_famd(&source),
+        None => parse_famd(""),
+    };
     let incoming = parse_famd(content);
     let body = if incoming.markdown.is_empty() {
         strip_famd_payload(content)
@@ -476,7 +487,7 @@ fn read_companion(host: &Host, relative: &str) -> Result<Option<FamdPayload>, St
             Err("Die gewählte Datei ist keine reguläre Datei.".to_owned())
         }
         Ok(meta) if meta.len() > MAX_COMPANION_BYTES => Err("Die Datei ist zu groß.".to_owned()),
-        Ok(_) => Ok(read_lossy_string(&path).and_then(|source| parse_famd(&source).payload)),
+        Ok(_) => Ok(read_optional_text(&path)?.and_then(|source| parse_famd(&source).payload)),
     }
 }
 
@@ -485,7 +496,7 @@ fn load_note(host: &Host, relative: &str) -> Result<(PathBuf, String, FamdPayloa
     let note = note_path(relative)?;
     let famd_relative = companion_note_path(&note, ".famd");
     let famd_path = vault::resolve_note_file(root, &famd_relative)?;
-    let source = read_lossy_string(&famd_path).unwrap_or_default();
+    let source = read_optional_text(&famd_path)?.unwrap_or_default();
     let parsed = if source.is_empty() {
         parse_famd("")
     } else {
@@ -495,7 +506,10 @@ fn load_note(host: &Host, relative: &str) -> Result<(PathBuf, String, FamdPayloa
         parsed.markdown.clone()
     } else {
         let markdown_path = vault::resolve_note_file(root, &note)?;
-        read_lossy_string(&markdown_path).unwrap_or_else(|| parsed.markdown.clone())
+        match read_optional_text(&markdown_path)? {
+            Some(text) => text,
+            None => parsed.markdown.clone(),
+        }
     };
     let body = strip_famd_payload(&markdown);
     let mut payload = parsed
