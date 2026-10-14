@@ -1,0 +1,78 @@
+name: Update version
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Calendar version, for example 2026.10.7
+        required: true
+        type: string
+      notes:
+        description: Changelog lines, one change per line
+        required: true
+        type: string
+      publish:
+        description: Tag the commit and build the GitHub release
+        required: true
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    name: Write the version
+    runs-on: ubuntu-24.04
+    outputs:
+      sha: ${{ steps.tag.outputs.sha }}
+      version: ${{ steps.tag.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Check the calendar version
+        working-directory: fanotes
+        run: node scripts/check-release-policy.mjs --version "${{ inputs.version }}"
+      - name: Update the version files
+        working-directory: fanotes
+        env:
+          VERSION_NOTES: ${{ inputs.notes }}
+        run: node scripts/set-version.mjs --version "${{ inputs.version }}" --notes "$VERSION_NOTES"
+      - name: Commit and tag
+        id: tag
+        env:
+          VERSION: ${{ inputs.version }}
+          PUBLISH: ${{ inputs.publish }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add fanotes/package.json fanotes/package-lock.json fanotes/src-tauri/tauri.conf.json fanotes/CHANGELOG.md android/app/build.gradle.kts
+          if ! git diff --cached --quiet; then
+            git commit -m "Set the version to ${VERSION}."
+            git push origin HEAD:main
+          fi
+          sha="$(git rev-parse HEAD)"
+          echo "sha=${sha}" >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          if [ "$PUBLISH" != "true" ]; then
+            exit 0
+          fi
+          tag="v${VERSION}"
+          git tag -a "$tag" "$sha" -m "FaNotes ${VERSION}"
+          git push origin "$tag"
+
+  release:
+    name: Build the release
+    needs: update
+    if: ${{ inputs.publish }}
+    uses: ./.github/workflows/release.yml
+    with:
+      version: ${{ needs.update.outputs.version }}
+      sha: ${{ needs.update.outputs.sha }}
+    secrets: inherit

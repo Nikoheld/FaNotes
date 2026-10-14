@@ -30,6 +30,10 @@ The maintainer decides when a beta cohort is promoted after reviewing the change
 
 GitHub Actions builds every app when the version tag is pushed. The server does not package Linux, Windows, macOS, or Android. Desktop auto-update reads the signed manifest and the packages from that GitHub release. Vault sync stays on `fanotes.fasrv.ch`.
 
+## Updating the version
+
+Run **Update version** from the Actions tab. Give it a calendar version such as `2026.10.7` and one changelog line per change. The workflow writes that version into `fanotes/package.json`, the lockfile, the Tauri config, and the Android app, commits it on `main`, tags `v<version>`, and builds the GitHub release. Leave “Publish the release” off to only update the files.
+
 Every release must include:
 
 1. Linux AppImage and portable tar archive.
