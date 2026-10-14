@@ -78,6 +78,27 @@ fn an_unreadable_oversized_note_uses_the_desktop_open_error() {
     );
 }
 
+#[test]
+fn an_oversized_companion_fails_the_note_save() {
+    let (mut host, vault) = host();
+    let note = vault.join("Mathe/Seite.md");
+    std::fs::write(&note, b"Hallo\n").unwrap();
+    let famd = vault.join("Mathe/Seite.famd");
+    let file = std::fs::File::create(&famd).unwrap();
+    file.set_len(40 * 1024 * 1024 + 1).unwrap();
+    drop(file);
+    assert_eq!(
+        host.dispatch(
+            "fanotes:write-file",
+            &[json!("Mathe/Seite.md"), json!("Neu\n")],
+        )
+        .unwrap_err(),
+        "Die Datei ist zu groß."
+    );
+    assert_eq!(std::fs::read(&note).unwrap(), b"Neu\n");
+    assert_eq!(std::fs::metadata(&famd).unwrap().len(), 40 * 1024 * 1024 + 1);
+}
+
 #[cfg(unix)]
 #[test]
 fn an_unreadable_handwriting_file_uses_the_desktop_open_error() {

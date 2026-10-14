@@ -265,9 +265,16 @@ fn embed_in_note(host: &Host, note_path: &str, drawing: &Value) -> Result<(), St
         note
     };
     let source_path = vault::resolve_note_file(vault_root, &source_relative)?;
-    let markdown = crate::notes::read_optional_text(&source_path)?.unwrap_or_default();
+    let markdown = crate::notes::read_optional_text(
+        &source_path,
+        crate::notes::optional_note_limit(&source_path),
+    )?
+    .unwrap_or_default();
     let body = strip_famd_payload(&markdown);
-    let mut payload = match crate::notes::read_optional_text(&famd_path)? {
+    let mut payload = match crate::notes::read_optional_text(
+        &famd_path,
+        crate::notes::optional_note_limit(&famd_path),
+    )? {
         Some(source) => parse_famd(&source)
             .payload
             .unwrap_or_else(|| empty_famd_payload(now_iso())),
