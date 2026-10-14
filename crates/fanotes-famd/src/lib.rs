@@ -881,12 +881,14 @@ pub fn canonical_iso(value: &str) -> Option<String> {
         return canonical_iso(&normalized);
     }
     if has_ampm_word(trimmed) {
-        // `4:00 PM` is 16:00. A `T` before AM/PM is NaN.
+        // `4:00 PM` is 16:00. A `T` before AM/PM is NaN. `AM` before a date
+        // is an ordinary word, so a clock that does not fold falls through.
         if has_iso_t(trimmed) {
             return None;
         }
-        let normalized = fold_ampm(trimmed)?;
-        return canonical_iso(&normalized);
+        if let Some(normalized) = fold_ampm(trimmed) {
+            return canonical_iso(&normalized);
+        }
     }
     if has_english_month(trimmed) {
         let normalized = rewrite_month_name(trimmed)?;
@@ -1190,16 +1192,34 @@ fn legacy_year_number(year: i32) -> Option<i32> {
 /// 2001 and `Oct 2026` is 1 October 2026. A date alone is local midnight, so
 /// the result has no `Z`.
 fn rewrite_month_name(trimmed: &str) -> Option<String> {
-    let mut words = month_words(trimmed);
-    if words.first().is_some_and(|word| is_weekday_name(word)) {
-        words.remove(0);
-    }
-    let (month, day, year, rest_at) = month_day_year(&words)?;
+    let words = month_words(trimmed);
+    let start = skip_month_preamble(&words);
+    let words = &words[start..];
+    let (month, day, year, rest_at) = month_day_year(words)?;
     if !(1..=31).contains(&day) {
         return None;
     }
     let (clock, zone) = month_clock_and_zone(&words[rest_at..])?;
     Some(format!("{year:04}-{month:02}-{day:02}T{clock}{zone}"))
+}
+
+/// `Date.parse` ignores words, a weekday, and a zone name before the month or
+/// the first number. `foo Oct 2026` is 1 October 2026. `13 foo Oct 2026` is not
+/// a date, because the number has already started it.
+fn skip_month_preamble(words: &[&str]) -> usize {
+    let mut index = 0;
+    while index < words.len() {
+        let word = words[index];
+        if is_weekday_name(word) {
+            index += 1;
+            continue;
+        }
+        if english_month(word).is_some() || signed_number(word).is_some() {
+            break;
+        }
+        index += 1;
+    }
+    index
 }
 
 /// The month name can be first or second. A number from 1 to 31 beside it is
@@ -2411,6 +2431,67 @@ mod tests {
             );
             assert_eq!(super::canonical_iso("13 Oct +16"), None);
             assert_eq!(super::canonical_iso("Oct"), None);
+        });
+    }
+
+    #[test]
+    fn words_before_a_month_date_are_ignored() {
+        with_tz("America/New_York", || {
+            // `Date.parse` skips words until the month or a number. A word after
+            // the date is NaN. `GMT` before the date is not a zone.
+            assert_eq!(
+                super::canonical_iso("foo Oct 2026").as_deref(),
+                Some("2026-10-01T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("foo 13 Oct 2026").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("hello Tuesday, 13-Oct-26 16:00:00 GMT").as_deref(),
+                Some("2026-10-13T16:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("foo 13-Oct").as_deref(),
+                Some("2001-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("the 13 Oct 16:00 EST").as_deref(),
+                Some("2001-10-13T21:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("EST 13-Oct-26").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("GMT Oct 13 2026").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("AM Oct 2026").as_deref(),
+                Some("2026-10-01T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("foo Oct 2026 4:00 PM").as_deref(),
+                Some("2026-10-01T20:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("foo Monday, Oct 13, 2026").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("the 32-Oct").as_deref(),
+                Some("2032-10-01T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("note Oct 13, 2026 16:00:00.5 GMT").as_deref(),
+                Some("2026-10-13T16:00:00.500Z")
+            );
+            assert_eq!(super::canonical_iso("13 Oct 2026 foo"), None);
+            assert_eq!(super::canonical_iso("Oct 2026 foo"), None);
+            assert_eq!(super::canonical_iso("13 foo Oct 2026"), None);
+            assert_eq!(super::canonical_iso("2026 foo Oct 13"), None);
+            assert_eq!(super::canonical_iso("Oct 2026 AM"), None);
         });
     }
 
