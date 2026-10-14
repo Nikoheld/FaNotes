@@ -614,3 +614,65 @@ fn an_unreadable_sync_state_uses_the_desktop_open_error() {
         format!("EACCES: permission denied, open '{}'", secret.display())
     );
 }
+
+#[cfg(unix)]
+#[test]
+fn an_undeletable_sync_state_uses_the_desktop_rm_error() {
+    use std::os::unix::fs::PermissionsExt;
+    let (_vault, app, mut host) = host();
+    let id = host
+        .dispatch("fanotes:sync-vault-id", &[])
+        .unwrap()
+        .as_str()
+        .unwrap()
+        .to_owned();
+    host.dispatch(
+        "fanotes:sync-write-state",
+        &[json!(id), json!("{\"version\":1}")],
+    )
+    .unwrap();
+    let state = app.join(format!("sync/state-{id}.json"));
+    let sync_dir = app.join("sync");
+    fs::set_permissions(&sync_dir, fs::Permissions::from_mode(0o000)).unwrap();
+    struct Restore(std::path::PathBuf, u32);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            let _ = fs::set_permissions(&self.0, fs::Permissions::from_mode(self.1));
+        }
+    }
+    let _restore_dir = Restore(sync_dir.clone(), 0o700);
+    assert_eq!(
+        host.dispatch("fanotes:sync-write-state", &[json!(id), json!(null)])
+            .unwrap_err(),
+        format!("EACCES: permission denied, lstat '{}'", state.display())
+    );
+    fs::set_permissions(&sync_dir, fs::Permissions::from_mode(0o555)).unwrap();
+    assert_eq!(
+        host.dispatch("fanotes:sync-write-state", &[json!(id), json!(null)])
+            .unwrap_err(),
+        format!("EACCES: permission denied, unlink '{}'", state.display())
+    );
+    fs::set_permissions(&sync_dir, fs::Permissions::from_mode(0o700)).unwrap();
+    assert!(state.is_file());
+    fs::remove_file(&state).unwrap();
+    fs::create_dir(&state).unwrap();
+    assert_eq!(
+        host.dispatch("fanotes:sync-write-state", &[json!(id), json!(null)])
+            .unwrap_err(),
+        format!(
+            "Path is a directory: rm returned EISDIR (is a directory) {}",
+            state.display()
+        )
+    );
+    assert!(state.is_dir());
+    let secret = app.join("sync/account.secret");
+    fs::write(&secret, b"safe1:aaaa").unwrap();
+    fs::set_permissions(&sync_dir, fs::Permissions::from_mode(0o555)).unwrap();
+    assert_eq!(
+        host.dispatch("fanotes:sync-write-secrets", &[json!(null)])
+            .unwrap_err(),
+        format!("EACCES: permission denied, unlink '{}'", secret.display())
+    );
+    fs::set_permissions(&sync_dir, fs::Permissions::from_mode(0o700)).unwrap();
+    assert!(secret.is_file());
+}

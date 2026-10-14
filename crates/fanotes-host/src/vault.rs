@@ -329,6 +329,10 @@ pub(crate) fn node_realpath_error(path: &Path, error: &std::io::Error) -> String
     node_fs_error(path, error, "realpath")
 }
 
+pub(crate) fn node_unlink_error(path: &Path, error: &std::io::Error) -> String {
+    node_fs_error(path, error, "unlink")
+}
+
 fn node_fs_error(path: &Path, error: &std::io::Error, syscall: &str) -> String {
     #[cfg(unix)]
     let (name, detail) = match error.raw_os_error() {

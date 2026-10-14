@@ -508,10 +508,7 @@ impl Host {
         // `undefined` and is rejected before anything is deleted.
         match args.get(1) {
             Some(Value::Null) => {
-                if path.is_file() {
-                    fs::remove_file(&path)
-                        .map_err(|_| "Der Sync-Zustand konnte nicht gelöscht werden.".to_owned())?;
-                }
+                remove_force(&path)?;
                 Ok(Value::Null)
             }
             Some(Value::String(json)) => {
@@ -594,11 +591,7 @@ impl Host {
         match incoming {
             Some(Value::Null) => {
                 secrets::delete(self.secret_store, &account)?;
-                if path.is_file() {
-                    fs::remove_file(&path).map_err(|_| {
-                        "Die Sync-Anmeldedaten konnten nicht gelöscht werden.".to_owned()
-                    })?;
-                }
+                remove_force(&path)?;
                 Ok(Value::Null)
             }
             Some(Value::String(json)) => {
@@ -1900,6 +1893,19 @@ fn asset_limit(mime: &str) -> u64 {
         "application/pdf" => PDF_ASSET_MAX,
         "text/html" => HTML_ASSET_MAX,
         _ => IMAGE_ASSET_MAX,
+    }
+}
+
+/// Node `fs.rm(path, { force: true })` without `recursive`.
+fn remove_force(path: &Path) -> Result<(), String> {
+    match fs::symlink_metadata(path) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(vault::node_lstat_error(path, &error)),
+        Ok(meta) if meta.is_dir() => Err(format!(
+            "Path is a directory: rm returned EISDIR (is a directory) {}",
+            path.display()
+        )),
+        Ok(_) => fs::remove_file(path).map_err(|error| vault::node_unlink_error(path, &error)),
     }
 }
 
