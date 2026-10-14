@@ -206,24 +206,18 @@ fn import_pdf_file(
 
 /// A file dialog PDF is checked the same way as a picked worksheet.
 ///
-/// The extension comes first. A directory or symlink is not a regular file,
-/// and a file past 96 MiB is too big before any bytes are read.
+/// The extension comes first. The desktop then opens with `O_NOFOLLOW`.
+/// A readable directory is not a regular file, and a readable file past
+/// 96 MiB is too big. A link or an unreadable file keeps the open error.
 fn read_dialog_pdf(path: &Path, name: &str, not_pdf: &str) -> Result<Vec<u8>, String> {
     if vault::posix_extname_en_us(name) != ".pdf" {
         return Err(not_pdf.to_owned());
     }
-    let meta = fs::symlink_metadata(path)
-        .map_err(|_| "Die Datei konnte nicht gelesen werden.".to_owned())?;
-    if meta.file_type().is_symlink() || !meta.is_file() {
-        return Err("Die Datei ist keine reguläre Datei.".to_owned());
-    }
-    if meta.len() > 96 * 1024 * 1024 {
-        return Err("Die Datei ist zu groß.".to_owned());
-    }
-    if meta.len() == 0 {
+    let bytes = crate::worksheets::read_opened_regular(path, 96 * 1024 * 1024)?;
+    if bytes.is_empty() {
         return Err("Die ausgewählte PDF-Datei ist leer.".to_owned());
     }
-    fs::read(path).map_err(|_| "Die Datei konnte nicht gelesen werden.".to_owned())
+    Ok(bytes)
 }
 
 fn pdf_payload_is_empty(payload: &Value) -> bool {
@@ -491,6 +485,48 @@ mod tests {
             .as_str()
             .unwrap()
             .ends_with(".png"));
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::{symlink, PermissionsExt};
+            let real = dir.join("echt.png");
+            std::fs::write(&real, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).unwrap();
+            let link = dir.join("Link.png");
+            symlink(&real, &link).unwrap();
+            assert_eq!(
+                crate::worksheets::import_picked_worksheet(&host, &link, "Link.png").unwrap_err(),
+                format!(
+                    "ELOOP: too many symbolic links encountered, open '{}'",
+                    link.display()
+                )
+            );
+            let locked = dir.join("Gesperrt.png");
+            std::fs::write(&locked, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).unwrap();
+            std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
+            struct Restore(std::path::PathBuf);
+            impl Drop for Restore {
+                fn drop(&mut self) {
+                    let _ = std::fs::set_permissions(
+                        &self.0,
+                        std::fs::Permissions::from_mode(0o600),
+                    );
+                }
+            }
+            let _restore = Restore(locked.clone());
+            assert_eq!(
+                crate::worksheets::import_picked_worksheet(&host, &locked, "Gesperrt.png")
+                    .unwrap_err(),
+                format!("EACCES: permission denied, open '{}'", locked.display())
+            );
+            let missing = dir.join("Fehlt.png");
+            assert_eq!(
+                crate::worksheets::import_picked_worksheet(&host, &missing, "Fehlt.png")
+                    .unwrap_err(),
+                format!(
+                    "ENOENT: no such file or directory, open '{}'",
+                    missing.display()
+                )
+            );
+        }
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -537,9 +573,48 @@ mod tests {
             std::os::unix::fs::symlink(&real, &link).unwrap();
             assert_eq!(
                 read_dialog_pdf(&link, "Link.pdf", note).unwrap_err(),
-                "Die Datei ist keine reguläre Datei."
+                format!(
+                    "ELOOP: too many symbolic links encountered, open '{}'",
+                    link.display()
+                )
             );
             assert_eq!(std::fs::read(&real).unwrap(), b"%PDF-1.4\n");
+            let missing = dir.join("Fehlt.pdf");
+            assert_eq!(
+                read_dialog_pdf(&missing, "Fehlt.pdf", note).unwrap_err(),
+                format!(
+                    "ENOENT: no such file or directory, open '{}'",
+                    missing.display()
+                )
+            );
+            let locked = dir.join("Gesperrt.pdf");
+            let file = std::fs::File::create(&locked).unwrap();
+            file.set_len(96 * 1024 * 1024 + 1).unwrap();
+            drop(file);
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
+            struct Restore(std::path::PathBuf);
+            impl Drop for Restore {
+                fn drop(&mut self) {
+                    let _ = std::fs::set_permissions(
+                        &self.0,
+                        std::fs::Permissions::from_mode(0o700),
+                    );
+                }
+            }
+            let _restore = Restore(locked.clone());
+            assert_eq!(
+                read_dialog_pdf(&locked, "Gesperrt.pdf", note).unwrap_err(),
+                format!("EACCES: permission denied, open '{}'", locked.display())
+            );
+            std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o600)).unwrap();
+            std::fs::remove_file(&locked).unwrap();
+            std::fs::create_dir(&locked).unwrap();
+            std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
+            assert_eq!(
+                read_dialog_pdf(&locked, "Gesperrt.pdf", note).unwrap_err(),
+                format!("EACCES: permission denied, open '{}'", locked.display())
+            );
         }
         let ready = dir.join("Skript.PDF");
         std::fs::write(&ready, b"%PDF-1.4\n").unwrap();
