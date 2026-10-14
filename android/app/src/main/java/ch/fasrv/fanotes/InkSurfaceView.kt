@@ -117,6 +117,9 @@ class InkSurfaceView @JvmOverloads constructor(
     private var cacheScale = 0f
     private var nibX = Float.NaN
     private var nibY = Float.NaN
+    private var rotation = 0f
+    var rulerOn = false
+    private var rulerY = Float.NaN
     private val tiles = HashMap<Long, Bitmap>()
     private var palm = PalmState()
     private var inkPointer = MotionEvent.INVALID_POINTER_ID
@@ -174,6 +177,34 @@ class InkSurfaceView @JvmOverloads constructor(
     fun cameraLeft(): Float = pageLeft
     fun cameraTop(): Float = pageTop
     fun cameraScale(): Float = pixelsPerPageUnit()
+
+    fun zoomBy(multiplier: Float) {
+        zoom = (zoom * multiplier).coerceIn(0.5f, 4f)
+        settleZoom()
+        invalidate()
+        publishCamera()
+    }
+
+    fun rotatePage() {
+        rotation = (rotation + 90f) % 360f
+        invalidate()
+    }
+
+    fun resetView() {
+        zoom = 1f
+        rotation = 0f
+        pageLeft = padding()
+        pageTop = padding()
+        settleZoom()
+        invalidate()
+        publishCamera()
+    }
+
+    fun toggleRuler() {
+        rulerOn = !rulerOn
+        if (rulerY.isNaN()) rulerY = height * 0.42f
+        invalidate()
+    }
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
@@ -432,7 +463,10 @@ class InkSurfaceView @JvmOverloads constructor(
         canvas.save()
         canvas.clipRect(0f, 0f, width.toFloat(), height.toFloat())
         canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), desk)
+        canvas.save()
+        if (rotation != 0f) canvas.rotate(rotation, width / 2f, height / 2f)
         val current = session ?: run {
+            canvas.restore()
             canvas.restore()
             return
         }
@@ -470,6 +504,13 @@ class InkSurfaceView @JvmOverloads constructor(
             hoverPaint.style = Paint.Style.STROKE
             canvas.drawCircle(hoverX, hoverY, 8f * resources.displayMetrics.density, hoverPaint)
         }
+        if (rulerOn && !rulerY.isNaN()) {
+            ruling.color = Color.parseColor("#2A6F97")
+            ruling.alpha = 180
+            ruling.strokeWidth = 2f
+            canvas.drawLine(0f, rulerY, width.toFloat(), rulerY, ruling)
+        }
+        canvas.restore()
         canvas.restore()
     }
 
@@ -753,10 +794,24 @@ class InkSurfaceView @JvmOverloads constructor(
     }
 
     private fun screenToNorm(x: Float, y: Float): Pair<Double, Double> {
+        val (ux, uy) = unrotate(x, y)
+        val snappedY = if (rulerOn && !rulerY.isNaN() && kotlin.math.abs(uy - rulerY) < 18f * resources.displayMetrics.density) rulerY else uy
         val scale = pixelsPerPageUnit().toDouble().coerceAtLeast(0.0001)
-        val pageX = (x - pageLeft) / scale
-        val pageY = (y - pageTop) / scale
+        val pageX = (ux - pageLeft) / scale
+        val pageY = (snappedY - pageTop) / scale
         return pageX / sessionWidth() to pageY / sessionHeight()
+    }
+
+    private fun unrotate(x: Float, y: Float): Pair<Float, Float> {
+        if (rotation == 0f) return x to y
+        val cx = width / 2f
+        val cy = height / 2f
+        val radians = Math.toRadians(-rotation.toDouble())
+        val dx = (x - cx).toDouble()
+        val dy = (y - cy).toDouble()
+        val cosine = kotlin.math.cos(radians)
+        val sine = kotlin.math.sin(radians)
+        return (dx * cosine - dy * sine).toFloat() + cx to (dx * sine + dy * cosine).toFloat() + cy
     }
 
     private fun normToScreen(x: Double, y: Double): Pair<Float, Float> {
@@ -832,6 +887,8 @@ class InkSurfaceView @JvmOverloads constructor(
             val start = builder.length
             val content: CharSequence = when (line.kind) {
                 PaperKind.BULLET -> inline("•  ${line.text}")
+                PaperKind.TASK -> inline(if (line.text.startsWith("x|")) "☑  ${line.text.removePrefix("x|")}" else "☐  ${line.text.removePrefix(" |").removePrefix("|")}")
+                PaperKind.MATH -> inline(line.text)
                 PaperKind.SPACER -> ""
                 PaperKind.RULE -> " "
                 else -> inline(line.text)
@@ -853,7 +910,7 @@ class InkSurfaceView @JvmOverloads constructor(
                         builder.setSpan(StyleSpan(Typeface.BOLD), start, end, 0)
                     }
                     PaperKind.QUOTE -> builder.setSpan(StyleSpan(Typeface.ITALIC), start, end, 0)
-                    PaperKind.CODE -> builder.setSpan(TypefaceSpan("monospace"), start, end, 0)
+                    PaperKind.CODE, PaperKind.MATH -> builder.setSpan(TypefaceSpan("monospace"), start, end, 0)
                     else -> Unit
                 }
             }

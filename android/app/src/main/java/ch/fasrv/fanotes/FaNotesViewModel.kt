@@ -7,6 +7,24 @@ import android.net.Uri
 import android.os.ParcelFileDescriptor
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import ch.fasrv.fanotes.desk.CalendarEvent
+import ch.fasrv.fanotes.desk.HomeworkDocument
+import ch.fasrv.fanotes.desk.HomeworkTask
+import ch.fasrv.fanotes.desk.SearchHit
+import ch.fasrv.fanotes.desk.SubjectBook
+import ch.fasrv.fanotes.desk.applyReview
+import ch.fasrv.fanotes.desk.cardsFromMarkdown
+import ch.fasrv.fanotes.desk.dailyNotePath
+import ch.fasrv.fanotes.desk.emptyCalendar
+import ch.fasrv.fanotes.desk.parseCalendarMarkdown
+import ch.fasrv.fanotes.desk.parseFolderColors
+import ch.fasrv.fanotes.desk.parseHomeworkMarkdown
+import ch.fasrv.fanotes.desk.parseSubjectBooks
+import ch.fasrv.fanotes.desk.searchVault
+import ch.fasrv.fanotes.desk.serializeCalendarMarkdown
+import ch.fasrv.fanotes.desk.serializeHomeworkMarkdown
+import ch.fasrv.fanotes.desk.wikiTargets
+import ch.fasrv.fanotes.desk.wordCount
 import ch.fasrv.fanotes.famd.companionPath
 import ch.fasrv.fanotes.famd.isoNow
 import ch.fasrv.fanotes.ink.InkSession
@@ -32,6 +50,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.MediaType.Companion.toMediaType
 import java.io.File
 
 class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
@@ -96,6 +116,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
             session.replace(note.document)
             open.value = note
             markdown.value = note.markdown
+            rememberTab(path)
             style.value = style.value.copy()
             showList.value = false
             loadBackdrop(note)
@@ -250,6 +271,16 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         noteChanged()
     }
 
+    fun duplicateSelection() {
+        session.duplicateSelection(isoNow())
+        noteChanged()
+    }
+
+    fun clearInk() {
+        session.clearInk(isoNow())
+        noteChanged()
+    }
+
     fun flatNotes(): List<VaultNode> {
         val found = mutableListOf<VaultNode>()
         fun visit(nodes: List<VaultNode>) {
@@ -339,6 +370,194 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         return listOf(
             BackdropSlice(0f, note.document.sourceHeight.toFloat(), note.document.sourceWidth.toFloat(), bitmap),
         )
+    }
+
+    val destination = MutableStateFlow("notes")
+    val openTabs = MutableStateFlow<List<String>>(emptyList())
+    val searchQuery = MutableStateFlow("")
+    val searchHits = MutableStateFlow<List<SearchHit>>(emptyList())
+    val homework = MutableStateFlow(HomeworkDocument(emptyList()))
+    val calendar = MutableStateFlow(emptyCalendar())
+    val books = MutableStateFlow<List<SubjectBook>>(emptyList())
+    val folderColors = MutableStateFlow<Map<String, String>>(emptyMap())
+    val historyPaths = MutableStateFlow<List<String>>(emptyList())
+    val deskSettings = MutableStateFlow(graph.readDesk())
+    val splitPath = MutableStateFlow<String?>(null)
+    val aiReply = MutableStateFlow("")
+    val paletteOpen = MutableStateFlow(false)
+    val updateLabel = MutableStateFlow("2026.10.7")
+
+    fun showDestination(id: String) {
+        destination.value = id
+        when (id) {
+            "tasks" -> loadHomework()
+            "calendar" -> loadCalendar()
+            "overview", "books", "history" -> loadVaultMeta()
+        }
+    }
+
+    fun rememberTab(path: String) {
+        openTabs.value = (listOf(path) + openTabs.value.filterNot { it == path }).take(12)
+    }
+
+    fun searchVaultText(query: String) {
+        searchQuery.value = query
+        viewModelScope.launch {
+            searchHits.value = withContext(Dispatchers.IO) {
+                val files = graph.vault.walkFiles().filter { it.path.endsWith(".md") || it.path.endsWith(".markdown") }
+                searchVault(files.map { it.path to (graph.vault.read(it.path)?.decodeToString().orEmpty()) }, query)
+            }
+        }
+    }
+
+    fun loadHomework() {
+        viewModelScope.launch {
+            homework.value = withContext(Dispatchers.IO) {
+                parseHomeworkMarkdown(graph.vault.read(ch.fasrv.fanotes.desk.HOMEWORK_NOTE_PATH)?.decodeToString().orEmpty())
+            }
+        }
+    }
+
+    fun addHomework(title: String, subject: String, due: String, kind: String) {
+        val now = isoNow()
+        val task = HomeworkTask(java.util.UUID.randomUUID().toString(), title.trim(), subject = subject.trim(), dueDate = due.ifBlank { null }, kind = kind, createdAt = now, updatedAt = now)
+        val next = homework.value.copy(tasks = listOf(task) + homework.value.tasks)
+        homework.value = next
+        persistSpecial(ch.fasrv.fanotes.desk.HOMEWORK_NOTE_PATH, "Hausaufgaben", serializeHomeworkMarkdown(next))
+    }
+
+    fun toggleHomework(id: String) {
+        val next = homework.value.copy(tasks = homework.value.tasks.map { if (it.id == id) it.copy(done = !it.done, updatedAt = isoNow()) else it })
+        homework.value = next
+        persistSpecial(ch.fasrv.fanotes.desk.HOMEWORK_NOTE_PATH, "Hausaufgaben", serializeHomeworkMarkdown(next))
+    }
+
+    fun loadCalendar() {
+        viewModelScope.launch {
+            calendar.value = withContext(Dispatchers.IO) {
+                parseCalendarMarkdown(graph.vault.read(ch.fasrv.fanotes.desk.CALENDAR_NOTE_PATH)?.decodeToString().orEmpty())
+            }
+        }
+    }
+
+    fun addCalendarEvent(title: String, day: String, calendarId: String) {
+        val event = CalendarEvent(java.util.UUID.randomUUID().toString(), calendarId, title.trim(), day, day)
+        val next = calendar.value.copy(events = calendar.value.events + event)
+        calendar.value = next
+        persistSpecial(ch.fasrv.fanotes.desk.CALENDAR_NOTE_PATH, "Kalender", serializeCalendarMarkdown(next))
+    }
+
+    fun openDaily() {
+        val folder = deskSettings.value["daily-folder"].orEmpty().ifBlank { "Daily Notes" }
+        val path = dailyNotePath(folder)
+        viewModelScope.launch {
+            val exists = withContext(Dispatchers.IO) { graph.vault.exists(path) }
+            if (!exists) {
+                val created = withContext(Dispatchers.IO) { graph.store.createMarkdown(folder, path.substringAfterLast('/').removeSuffix(".md")) }
+                val note = withContext(Dispatchers.IO) { graph.store.readNote(created) }
+                withContext(Dispatchers.IO) { graph.store.save(note, note.document, "# ${path.substringAfterLast('/').removeSuffix(".md")}\n") }
+            }
+            refreshTree()
+            openPath(path, force = true)
+            destination.value = "notes"
+        }
+    }
+
+    fun reviewFlashcard(cardId: String, grade: String) {
+        val today = java.time.LocalDate.now().toString()
+        val next = applyReview(markdown.value, cardId, grade, today)
+        updateMarkdown(next)
+    }
+
+    fun cardsToday() = cardsFromMarkdown(markdown.value, java.time.LocalDate.now().toString())
+
+    fun loadVaultMeta() {
+        viewModelScope.launch {
+            val loaded = withContext(Dispatchers.IO) {
+                val books = graph.vault.read(".fanotes/subject-books.json")?.decodeToString()?.let(::parseSubjectBooks).orEmpty()
+                val colors = graph.vault.read(".fanotes/folder-colors.json")?.decodeToString()?.let(::parseFolderColors).orEmpty()
+                val history = graph.vault.walkFiles().map { it.path }.filter { it.startsWith(".fanotes/history/") }.sortedDescending().take(80)
+                Triple(books, colors, history)
+            }
+            books.value = loaded.first
+            folderColors.value = loaded.second
+            historyPaths.value = loaded.third
+        }
+    }
+
+    fun backlinks(): List<String> {
+        val title = open.value?.title ?: return emptyList()
+        return searchHits.value.filter { it.text.contains("[[$title") }.map { it.path }.distinct()
+    }
+
+    fun findBacklinks() {
+        val title = open.value?.title ?: return
+        searchVaultText("[[$title")
+    }
+
+    fun wordCountNow() = wordCount(markdown.value)
+    fun linksNow() = wikiTargets(markdown.value)
+
+    fun updateDesk(key: String, value: String) {
+        val next = deskSettings.value + (key to value)
+        deskSettings.value = next
+        graph.writeDesk(next)
+    }
+
+    fun askAi(prompt: String) {
+        val settings = deskSettings.value
+        val base = settings["ai-url"].orEmpty().ifBlank { "https://api.openai.com/v1" }.trimEnd('/')
+        val key = settings["ai-key"].orEmpty()
+        val modelName = settings["ai-model"].orEmpty().ifBlank { "gpt-4o-mini" }
+        if (key.isBlank()) {
+            aiReply.value = "Kein API-Schlüssel. Trag ihn unter Einstellungen ein. Der Schlüssel bleibt auf diesem Tablet."
+            return
+        }
+        viewModelScope.launch {
+            aiReply.value = withContext(Dispatchers.IO) {
+                runCatching {
+                    val body = """{"model":${ch.fasrv.fanotes.json.escapeJson(modelName)},"messages":[{"role":"user","content":${ch.fasrv.fanotes.json.escapeJson(prompt.take(12000))}}]}"""
+                    val request = okhttp3.Request.Builder()
+                        .url("$base/chat/completions")
+                        .header("Authorization", "Bearer $key")
+                        .post(body.toByteArray().toRequestBody("application/json".toMediaType()))
+                        .build()
+                    okhttp3.OkHttpClient().newCall(request).execute().use { response ->
+                        val text = response.body?.string().orEmpty()
+                        if (!response.isSuccessful) "Der Anbieter antwortete mit ${response.code}."
+                        else Regex(""""content"\s*:\s*"((?:\\.|[^"])*)"""").find(text)?.groupValues?.get(1)
+                            ?.replace("\\n", "\n")?.replace("\\\"", "\"")
+                            ?: text.take(2000)
+                    }
+                }.getOrElse { it.message ?: "Die Anfrage ist fehlgeschlagen." }
+            }
+        }
+    }
+
+    fun checkUpdate() {
+        viewModelScope.launch {
+            updateLabel.value = withContext(Dispatchers.IO) {
+                runCatching {
+                    val request = okhttp3.Request.Builder().url("https://api.github.com/repos/Nikoheld/FaNotes/releases/latest").header("Accept", "application/vnd.github+json").build()
+                    okhttp3.OkHttpClient().newCall(request).execute().use { response ->
+                        val tag = Regex(""""tag_name"\s*:\s*"([^"]+)"""").find(response.body?.string().orEmpty())?.groupValues?.get(1)
+                        if (tag.isNullOrBlank()) "2026.10.7" else if (tag == "v2026.10.7") "2026.10.7 ist aktuell" else "Neu: $tag"
+                    }
+                }.getOrDefault("2026.10.7")
+            }
+        }
+    }
+
+    private fun persistSpecial(path: String, title: String, text: String) {
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) {
+                if (!graph.vault.exists(path)) graph.store.createMarkdown("", title)
+                val note = graph.store.readNote(path)
+                graph.store.save(note, note.document, text)
+            }
+            graph.engine.notifyLocalChange()
+            refreshTree()
+        }
     }
 
     fun syncLabel(): String = when (sync.value.status) {
