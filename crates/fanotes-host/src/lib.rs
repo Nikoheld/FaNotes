@@ -1783,6 +1783,11 @@ fn unix_millis_from_iso(value: &str) -> Option<u64> {
         SymbolRewrite::Same => {}
     }
     let trimmed = value.trim_matches(is_date_parse_space);
+    if let Some(rest) = strip_leading_signs(trimmed) {
+        // Signs before the first number are padding. The space keeps a
+        // date-only value local and rejects a `T` form.
+        return unix_millis_from_iso(&format!(" {rest}"));
+    }
     if let Some(next) = strip_leading_word(trimmed) {
         // `hello 2026-10-13` is local. The word is not part of the date.
         return unix_millis_from_iso(&next);
@@ -2494,6 +2499,33 @@ fn symbol_ends_a_clock(chars: &[char], index: usize) -> bool {
         ahead += 1;
     }
     ahead >= chars.len() || is_date_parse_space(chars[ahead])
+}
+
+/// `++2026-10-13` drops both signs. One sign and six digits, as in
+/// `+002026`, stays an expanded ISO year.
+fn strip_leading_signs(trimmed: &str) -> Option<&str> {
+    let bytes = trimmed.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() && matches!(bytes[index], b'+' | b'-') {
+        index += 1;
+    }
+    if index == 0 {
+        return None;
+    }
+    if index == 1 {
+        let digits = trimmed[index..]
+            .bytes()
+            .take_while(|byte| byte.is_ascii_digit())
+            .count();
+        if digits == 6 {
+            return None;
+        }
+    }
+    let rest = trimmed[index..].trim_start_matches(is_date_parse_space);
+    if rest.is_empty() {
+        return None;
+    }
+    Some(rest)
 }
 
 /// `hello 2026-10-13` drops `hello`. The space in front of the date stays, so
@@ -7729,6 +7761,48 @@ mod local_zone_tests {
         );
         assert_eq!(unix_millis_from_iso("GMT+ Oct 13 2026"), Some(1_791_864_000_000));
         assert_eq!(unix_millis_from_iso("Oct 13 2026 +5"), None);
+    }
+
+    #[test]
+    fn repeated_leading_signs_are_padding() {
+        let _lock = TRASH_CLOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let _restore = RestoreTz(std::env::var_os("TZ"));
+        unsafe { std::env::set_var("TZ", "America/New_York") };
+        unsafe { tzset() };
+        // Signs before the first number are padding. The date is local unless
+        // a zone says otherwise. A `T` after those signs is not a date.
+        assert_eq!(unix_millis_from_iso("++2026-10-13"), Some(1_791_864_000_000));
+        assert_eq!(unix_millis_from_iso("+++2026-10-13"), Some(1_791_864_000_000));
+        assert_eq!(unix_millis_from_iso("--2026-10-13"), Some(1_791_864_000_000));
+        assert_eq!(unix_millis_from_iso("-+2026-10-13"), Some(1_791_864_000_000));
+        assert_eq!(unix_millis_from_iso("+-2026-10-13"), Some(1_791_864_000_000));
+        assert_eq!(unix_millis_from_iso("+2026-10-13"), Some(1_791_864_000_000));
+        assert_eq!(unix_millis_from_iso("-2026-10-13"), Some(1_791_864_000_000));
+        assert_eq!(
+            unix_millis_from_iso("++2026-10-13 GMT"),
+            Some(1_791_849_600_000)
+        );
+        assert_eq!(unix_millis_from_iso("++2026-1-1"), Some(1_767_243_600_000));
+        assert_eq!(unix_millis_from_iso("++5"), Some(988_689_600_000));
+        assert_eq!(unix_millis_from_iso("++10/13/2026"), Some(1_791_864_000_000));
+        assert_eq!(unix_millis_from_iso("++Oct 13 2026"), Some(1_791_864_000_000));
+        assert_eq!(unix_millis_from_iso("++ 2026-10-13"), Some(1_791_864_000_000));
+        assert_eq!(
+            unix_millis_from_iso("++2026-10-13 16:00"),
+            Some(1_791_921_600_000)
+        );
+        assert_eq!(unix_millis_from_iso("++++2026"), Some(1_767_243_600_000));
+        assert_eq!(unix_millis_from_iso("--2026"), Some(1_767_243_600_000));
+        assert_eq!(
+            unix_millis_from_iso("-+5 Oct 13 2026"),
+            Some(1_380_945_600_000)
+        );
+        assert_eq!(unix_millis_from_iso("++2026-02-31"), Some(1_772_514_000_000));
+        assert_eq!(unix_millis_from_iso("+002026-10-13"), Some(1_791_849_600_000));
+        assert_eq!(unix_millis_from_iso("2026-10-13 ++"), None);
+        assert_eq!(unix_millis_from_iso("++2026-10-13T16:00"), None);
     }
 
     #[test]
