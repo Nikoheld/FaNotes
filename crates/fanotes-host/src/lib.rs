@@ -1834,6 +1834,14 @@ fn unix_millis_from_iso(value: &str) -> Option<u64> {
         // `2026-10-13 16:00 +5` is 16:00 at a fixed offset.
         return unix_millis_from_iso(&normalized);
     }
+    if finished_date_has_an_extra_hyphen(trimmed) {
+        // `2026-10-13-` and `2026-10-13-EST` already finished the strict date.
+        return None;
+    }
+    if let Some(millis) = trailing_hyphen_millis(trimmed) {
+        // `2026-10-` stops before a strict ISO date, so that midnight is local.
+        return Some(millis);
+    }
     let (date, time) = match iso_date_time(value) {
         IsoDate::Invalid => return legacy_numeric_millis(trimmed),
         // `YYYY-MM-DD` is UTC midnight. A short field, or whitespace around the
@@ -3878,6 +3886,131 @@ fn pad_legacy_clock(time: &str) -> Option<String> {
     }
     padded.push_str(zone);
     Some(padded)
+}
+
+fn finished_date_has_an_extra_hyphen(trimmed: &str) -> bool {
+    let head = trimmed
+        .split_once(is_date_parse_space)
+        .map(|(head, _)| head)
+        .unwrap_or(trimmed);
+    let expanded = head.starts_with(['+', '-'])
+        && head[1..].bytes().take_while(|byte| byte.is_ascii_digit()).count() == 6;
+    let date_at = if expanded { 7 } else { 4 };
+    let bytes = head.as_bytes();
+    if bytes.len() < date_at + 6 {
+        return false;
+    }
+    let year_ok = if expanded {
+        datetime_year_ok(&head[..7])
+    } else {
+        datetime_year_ok(&head[..4])
+    };
+    year_ok
+        && bytes[date_at] == b'-'
+        && bytes[date_at + 1].is_ascii_digit()
+        && bytes[date_at + 2].is_ascii_digit()
+        && bytes[date_at + 3] == b'-'
+        && bytes[date_at + 4].is_ascii_digit()
+        && bytes[date_at + 5].is_ascii_digit()
+        && bytes.get(date_at + 6) == Some(&b'-')
+}
+
+/// `2026-` and `2026-10-` stop before a strict ISO date, so midnight is local.
+/// `2026- GMT` is that midnight at GMT. A finished `2026-10-13-` is empty.
+fn trailing_hyphen_millis(trimmed: &str) -> Option<u64> {
+    let (head, zone) = if let Some((head, rest)) = trimmed.split_once(is_date_parse_space) {
+        let rest = rest.trim_start_matches(is_date_parse_space);
+        if rest.is_empty() || rest.contains(is_date_parse_space) {
+            return None;
+        }
+        (head, Some(rest))
+    } else {
+        (trimmed, None)
+    };
+    if !head.ends_with('-') || head.ends_with("--") {
+        return None;
+    }
+    let body = &head[..head.len() - 1];
+    if body.is_empty() || body.ends_with('-') {
+        return None;
+    }
+    let (year, month, day) = unfinished_hyphen_ymd(body)?;
+    if let Some(zone) = zone {
+        let parsed = legacy_zone_offset(zone).or_else(|| parse_legacy_offset(zone))?;
+        if !parsed.time_fields.is_empty() || !parsed.spilled.is_empty() {
+            return None;
+        }
+        let days = days_from_civil(year, month as u32, day as u32)?;
+        let naive = i64::try_from(days).ok()?.checked_mul(86_400_000)?;
+        let offset_ms = parsed.minutes.checked_mul(60_000)?;
+        return u64::try_from(naive.checked_sub(offset_ms)?).ok();
+    }
+    midnight_millis(year, month as u32, day as u32, true)
+}
+
+fn unfinished_hyphen_ymd(body: &str) -> Option<(i32, i32, i32)> {
+    let expanded = body.starts_with(['+', '-'])
+        && body[1..].bytes().take_while(|byte| byte.is_ascii_digit()).count() == 6
+        && (body.len() == 7 || body.as_bytes().get(7) == Some(&b'-'));
+    let (year_text, rest) = if expanded {
+        (&body[..7], body[7..].strip_prefix('-').unwrap_or(""))
+    } else if let Some(rest) = body.strip_prefix(['+', '-']) {
+        if let Some((year, rest)) = rest.split_once('-') {
+            (year, rest)
+        } else {
+            (rest, "")
+        }
+    } else if let Some((year, rest)) = body.split_once('-') {
+        (year, rest)
+    } else {
+        (body, "")
+    };
+    if year_text.is_empty() || rest.split('-').any(|part| part.is_empty() && !rest.is_empty()) {
+        return None;
+    }
+    let mut parts = vec![year_text];
+    if !rest.is_empty() {
+        parts.extend(rest.split('-'));
+    }
+    if parts.len() > 3 {
+        return None;
+    }
+    if parts.len() == 3 && datetime_year_ok(parts[0]) && parts[1].len() == 2 && parts[2].len() == 2
+    {
+        return None;
+    }
+    let numbers = parts
+        .iter()
+        .map(|part| part.parse::<i32>().ok())
+        .collect::<Option<Vec<_>>>()?;
+    let iso_year = datetime_year_ok(parts[0]);
+    match numbers.as_slice() {
+        [first] if !iso_year && (1..=31).contains(first) => {
+            if !(1..=12).contains(first) {
+                return None;
+            }
+            Some((2001, *first, 1))
+        }
+        [first] => {
+            let year = if iso_year { *first } else { legacy_year(*first)? };
+            Some((year, 1, 1))
+        }
+        [first, month] => {
+            let year = if iso_year { *first } else { legacy_year(*first)? };
+            if !(1..=12).contains(month) {
+                return None;
+            }
+            Some((year, *month, 1))
+        }
+        [first, month, day] => {
+            let year = if iso_year { *first } else { legacy_year(*first)? };
+            if !(1..=12).contains(month) || !(1..=31).contains(day) {
+                return None;
+            }
+            Some((year, *month, *day))
+        }
+        _ => None,
+    }
 }
 
 fn date_only_millis(value: &str, surrounded: bool) -> Option<u64> {
@@ -9154,5 +9287,53 @@ mod local_zone_tests {
         assert_eq!(unix_millis_from_iso("2026-10-13T24:00:00.000000001Z"), None);
         assert_eq!(unix_millis_from_iso("2026-10-13T24:00:00.1"), None);
         assert_eq!(unix_millis_from_iso("Oct 13 2026 24:00:00.001"), None);
+    }
+
+    #[test]
+    fn a_trailing_hyphen_keeps_an_unfinished_date_local() {
+        let _lock = TRASH_CLOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let _restore = RestoreTz(std::env::var_os("TZ"));
+        unsafe { std::env::set_var("TZ", "America/New_York") };
+        unsafe { tzset() };
+        // A trailing hyphen stops a strict ISO date, so the midnight is local.
+        // `2026-10-13-` already has a day, and that extra hyphen is empty.
+        assert_eq!(unix_millis_from_iso("2026-"), Some(1_767_243_600_000));
+        assert_eq!(unix_millis_from_iso("2026-10-"), Some(1_790_827_200_000));
+        assert_eq!(unix_millis_from_iso("2026-1-"), Some(1_767_243_600_000));
+        assert_eq!(unix_millis_from_iso("2026-10-1-"), Some(1_790_827_200_000));
+        assert_eq!(unix_millis_from_iso("-2026-"), Some(1_767_243_600_000));
+        assert_eq!(unix_millis_from_iso("+002026-"), Some(1_767_243_600_000));
+        assert_eq!(
+            unix_millis_from_iso("+002026-10-"),
+            Some(1_790_827_200_000)
+        );
+        assert_eq!(unix_millis_from_iso("5-"), Some(988_689_600_000));
+        assert_eq!(unix_millis_from_iso("0-"), Some(946_702_800_000));
+        assert_eq!(unix_millis_from_iso("32-"), Some(1_956_546_000_000));
+        assert_eq!(unix_millis_from_iso("99-"), Some(915_166_800_000));
+        assert_eq!(unix_millis_from_iso("99-10-"), Some(938_750_400_000));
+        assert_eq!(
+            unix_millis_from_iso("2026- GMT"),
+            Some(1_767_225_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026- GMT+5"),
+            Some(1_767_207_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10- EST"),
+            Some(1_790_830_800_000)
+        );
+        assert_eq!(unix_millis_from_iso("2026-10-13-"), None);
+        assert_eq!(unix_millis_from_iso("2026-10-01-"), None);
+        assert_eq!(unix_millis_from_iso("2026--"), None);
+        assert_eq!(unix_millis_from_iso("2026-10--"), None);
+        assert_eq!(unix_millis_from_iso("13-"), None);
+        assert_eq!(unix_millis_from_iso("2026-13-"), None);
+        assert_eq!(unix_millis_from_iso("2026-10-13-1"), None);
+        assert_eq!(unix_millis_from_iso("2026-10-13 -"), None);
+        assert_eq!(unix_millis_from_iso("2026-10-13-EST"), None);
     }
 }
