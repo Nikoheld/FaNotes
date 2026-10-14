@@ -1876,15 +1876,21 @@ fn unix_millis_from_iso(value: &str) -> Option<u64> {
         Some(text) => text.parse().ok()?,
         None => 0,
     };
-    // `24:00:00` is the next midnight. Any other remainder is NaN, including a
-    // later fraction digit that the first three milliseconds would ignore.
+    // `24:00:00` is the next midnight. A `T` form rejects any later nonzero
+    // fraction digit. A space before the clock keeps only the first three
+    // millisecond digits, so `.000000001` is still zero.
+    let hour_24_fraction_rejected = if has_iso_t(value) {
+        fraction_has_nonzero
+    } else {
+        millis != 0
+    };
     let hour_24_midnight = hour == 24
         && hour_text.len() == 2
         && minute_text.len() == 2
         && minute == 0
         && second == 0
         && second_text.is_none_or(|text| text.len() == 2)
-        && !fraction_has_nonzero;
+        && !hour_24_fraction_rejected;
     // `Date.parse` requires each present clock field to be exactly two digits.
     // `016` is the same hour as `16`, and it is still NaN.
     let clock_fields_are_two_digits = hour_text.len() == 2
@@ -9088,5 +9094,65 @@ mod local_zone_tests {
         assert_eq!(unix_millis_from_iso("Oct 13 2026 16:00 GMT+0:0:0"), None);
         assert_eq!(unix_millis_from_iso("10/13/2026 16:00 GMT+5:3:0"), None);
         assert_eq!(unix_millis_from_iso("2026-10-13 16:00 GMT+24:00:00"), None);
+    }
+
+    #[test]
+    fn a_space_before_hour_24_ignores_later_fraction_digits() {
+        let _lock = TRASH_CLOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let _restore = RestoreTz(std::env::var_os("TZ"));
+        unsafe { std::env::set_var("TZ", "America/New_York") };
+        unsafe { tzset() };
+        // A `T` form rejects any later nonzero fraction digit. A space before
+        // the clock keeps the first three millisecond digits, so
+        // `24:00:00.000000001` is still the next midnight.
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 24:00:00.000000001"),
+            Some(1_791_950_400_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 24:00:00.0001"),
+            Some(1_791_950_400_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 24:00:00.000"),
+            Some(1_791_950_400_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 24:00:00.0"),
+            Some(1_791_950_400_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 24:00:00.000000001Z"),
+            Some(1_791_936_000_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 24:00:00.0001Z"),
+            Some(1_791_936_000_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 24:00:00.000000001"),
+            Some(1_791_950_400_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 24:00:00.0001"),
+            Some(1_791_950_400_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 16:00:00.000000001"),
+            Some(1_791_921_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13T24:00:00.000"),
+            Some(1_791_950_400_000)
+        );
+        assert_eq!(unix_millis_from_iso("2026-10-13 24:00:00.001"), None);
+        assert_eq!(unix_millis_from_iso("2026-10-13 24:00:00.100000000"), None);
+        assert_eq!(unix_millis_from_iso("2026-10-13T24:00:00.000000001"), None);
+        assert_eq!(unix_millis_from_iso("2026-10-13T24:00:00.0001"), None);
+        assert_eq!(unix_millis_from_iso("2026-10-13T24:00:00.000000001Z"), None);
+        assert_eq!(unix_millis_from_iso("2026-10-13T24:00:00.1"), None);
+        assert_eq!(unix_millis_from_iso("Oct 13 2026 24:00:00.001"), None);
     }
 }
