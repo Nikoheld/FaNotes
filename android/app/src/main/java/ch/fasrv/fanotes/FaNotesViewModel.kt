@@ -26,7 +26,11 @@ import ch.fasrv.fanotes.desk.parseCalendarMarkdown
 import ch.fasrv.fanotes.desk.FOLDER_COLOR_CHOICES
 import ch.fasrv.fanotes.desk.FOLDER_COLORS_PATH
 import ch.fasrv.fanotes.desk.isMarkdownConflictPath
+import ch.fasrv.fanotes.desk.TEMPLATES_FOLDER
 import ch.fasrv.fanotes.desk.parseFolderColors
+import ch.fasrv.fanotes.desk.profileFolders
+import ch.fasrv.fanotes.desk.templatePath
+import ch.fasrv.fanotes.desk.templatesToSeed
 import ch.fasrv.fanotes.desk.resolveMarkdownConflict
 import ch.fasrv.fanotes.desk.serializeFolderColors
 import ch.fasrv.fanotes.desk.withFolderColor
@@ -902,6 +906,35 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
 
     fun wordCountNow() = wordCount(markdown.value)
     fun linksNow() = wikiTargets(markdown.value)
+
+    fun applyProfile(profile: String) {
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) {
+                val existing = graph.vault.walkFiles().map { it.path }
+                val templates = templatesToSeed(existing, profile)
+                var colors = graph.vault.read(FOLDER_COLORS_PATH)?.decodeToString()?.let(::parseFolderColors).orEmpty()
+                for (folder in profileFolders(profile)) {
+                    runCatching { graph.store.createFolder("", folder.name) }
+                    colors = withFolderColor(colors, folder.name, folder.color)
+                }
+                graph.vault.write(FOLDER_COLORS_PATH, serializeFolderColors(colors).encodeToByteArray())
+                if (templates.isNotEmpty()) {
+                    runCatching { graph.store.createFolder("", TEMPLATES_FOLDER) }
+                    for (template in templates) {
+                        val path = runCatching { graph.store.createMarkdown(TEMPLATES_FOLDER, template.fileName) }.getOrNull()
+                            ?: templatePath(template)
+                        if (!graph.vault.exists(path)) continue
+                        val note = graph.store.readNote(path)
+                        graph.store.save(note, note.document, template.markdown)
+                    }
+                }
+            }
+            updateDesk("profile", profile)
+            updateDesk("welcomed", "yes")
+            refreshTree()
+            message.value = "Profil eingerichtet."
+        }
+    }
 
     fun updateDesk(key: String, value: String) {
         val next = deskSettings.value + (key to value)

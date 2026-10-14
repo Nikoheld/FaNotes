@@ -202,6 +202,7 @@ fun FaNotesScreen(
     val palette by model.paletteOpen.collectAsStateWithLifecycle()
     val context = LocalContext.current
     var firstRun by remember { mutableStateOf(desk["welcomed"] != "yes") }
+    var profile by remember { mutableStateOf(desk["profile"].orEmpty().ifBlank { "school" }) }
     var editingBox by remember { mutableStateOf<String?>(null) }
     var boxText by remember { mutableStateOf("") }
     var syncOpen by remember { mutableStateOf(false) }
@@ -423,8 +424,25 @@ fun FaNotesScreen(
         AlertDialog(
             onDismissRequest = { firstRun = false; model.updateDesk("welcomed", "yes") },
             title = { Text("FaNotes") },
-            text = { Text("Stift schreibt, Finger blättert. Notizen, Aufgaben, Kalender, Karten, Fachbuch, Suche und Sync benutzen dieselben Dateien wie der Desktop. GlyphenWerk gibt es hier nicht.") },
-            confirmButton = { TextButton(onClick = { firstRun = false; model.updateDesk("welcomed", "yes") }) { Text("Los") } },
+            text = {
+                Column {
+                    Text("Welches Profil passt? Ordner und Vorlagen sind dieselben wie auf dem Desktop.")
+                    listOf("school" to "Schule", "university" to "UNI", "private" to "Privat", "work" to "Arbeit").forEach { (id, label) ->
+                        Text(
+                            label,
+                            modifier = Modifier.fillMaxWidth().clickable { profile = id }.padding(vertical = 6.dp),
+                            fontWeight = if (profile == id) FontWeight.Bold else FontWeight.Normal,
+                            color = if (profile == id) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    firstRun = false
+                    model.applyProfile(profile)
+                }) { Text("Einrichten") }
+            },
         )
     }
     if (syncOpen) {

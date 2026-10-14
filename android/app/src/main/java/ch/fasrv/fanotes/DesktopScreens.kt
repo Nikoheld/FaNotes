@@ -581,6 +581,14 @@ fun SettingsScreen(model: FaNotesViewModel, onSync: () -> Unit, onOpenVault: () 
                 "files" -> {
                     TextButton(onClick = onOpenVault) { Text("Vault-Ordner öffnen") }
                     TextButton(onClick = onPrivate) { Text("Tablet-Vault verwenden") }
+                    Text("Profil", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
+                    listOf("school" to "Schule", "university" to "UNI", "private" to "Privat", "work" to "Arbeit").forEach { (id, label) ->
+                        Text(
+                            label,
+                            modifier = Modifier.clickable { model.applyProfile(id) }.padding(vertical = 4.dp),
+                            fontWeight = if (settings["profile"] == id) FontWeight.Bold else FontWeight.Normal,
+                        )
+                    }
                 }
                 "sync" -> {
                     TextButton(onClick = onSync) { Text("Konto und Abgleich") }
