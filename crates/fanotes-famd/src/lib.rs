@@ -902,8 +902,8 @@ pub fn canonical_iso(value: &str) -> Option<String> {
         let offset = parse_offset(rest)?;
         shift_seconds(year, month, day, hour, minute, second, -(offset as i64))?
     };
-    Some(format!(
-        "{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}.{millis:03}Z"
+    Some(format_civil_iso(
+        year, month, day, hour, minute, second, millis,
     ))
 }
 
@@ -1418,9 +1418,9 @@ fn date_only_iso(value: &str, surrounded: bool) -> Option<String> {
     if legacy_local {
         let (year, month, day, hour, minute, second) =
             local_civil_to_utc(year, month, day, 0, 0, 0)?;
-        return Some(format_civil_iso(year, month, day, hour, minute, second));
+        return Some(format_civil_iso(year, month, day, hour, minute, second, 0));
     }
-    Some(format_civil_iso(year, month, day, 0, 0, 0))
+    Some(format_civil_iso(year, month, day, 0, 0, 0, 0))
 }
 
 /// `YYYY-MM-DD` or `±YYYYYY-MM-DD`, then optional month and day text.
@@ -1459,43 +1459,63 @@ fn split_date_only(value: &str) -> Option<(&str, Option<&str>, Option<&str>)> {
     }
 }
 
-fn format_civil_iso(year: i32, month: i32, day: i32, hour: i32, minute: i32, second: i32) -> String {
+fn format_civil_iso(
+    year: i32,
+    month: i32,
+    day: i32,
+    hour: i32,
+    minute: i32,
+    second: i32,
+    millis: u32,
+) -> String {
     let year_text = if (0..10_000).contains(&year) {
         format!("{year:04}")
     } else {
         format!("{year:+07}")
     };
-    format!("{year_text}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}.000Z")
+    format!("{year_text}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}.{millis:03}Z")
 }
 
-/// `YYYY`, `YYYY-MM`, or `YYYY-MM-DD`, then the index of the clock.
+/// `YYYY`, `±YYYYYY`, then an optional two-digit month and day, then the clock.
 ///
 /// A date-time month or day is two digits, so `2026-1T...` is not a time.
+/// `02026-10-13T...` is not a year.
 fn split_calendar(value: &str) -> Option<(i32, i32, i32, usize)> {
     let bytes = value.as_bytes();
-    if bytes.len() < 5 || !bytes[..4].iter().all(u8::is_ascii_digit) {
-        return None;
+    let (year, mut index) = if bytes.first().is_some_and(|byte| matches!(byte, b'+' | b'-')) {
+        if bytes.len() < 8 || !bytes[1..7].iter().all(u8::is_ascii_digit) {
+            return None;
+        }
+        (value[..7].parse().ok()?, 7)
+    } else {
+        if bytes.len() < 5 || !bytes[..4].iter().all(u8::is_ascii_digit) {
+            return None;
+        }
+        (value[..4].parse().ok()?, 4)
+    };
+    if matches!(bytes.get(index), Some(b'T' | b't' | b' ')) {
+        return Some((year, 1, 1, index + 1));
     }
-    let year: i32 = value[..4].parse().ok()?;
-    if matches!(bytes[4], b'T' | b't' | b' ') {
-        return Some((year, 1, 1, 5));
-    }
-    if bytes[4] != b'-' || bytes.len() < 8 || !bytes[5..7].iter().all(u8::is_ascii_digit) {
-        return None;
-    }
-    let month: i32 = value[5..7].parse().ok()?;
-    if matches!(bytes.get(7), Some(b'T' | b't' | b' ')) {
-        return Some((year, month, 1, 8));
-    }
-    if bytes.get(7) != Some(&b'-')
-        || bytes.len() < 11
-        || !bytes[8..10].iter().all(u8::is_ascii_digit)
-        || !matches!(bytes.get(10), Some(b'T' | b't' | b' '))
+    if bytes.get(index) != Some(&b'-')
+        || bytes.len() < index + 4
+        || !bytes[index + 1..index + 3].iter().all(u8::is_ascii_digit)
     {
         return None;
     }
-    let day: i32 = value[8..10].parse().ok()?;
-    Some((year, month, day, 11))
+    let month: i32 = value[index + 1..index + 3].parse().ok()?;
+    index += 3;
+    if matches!(bytes.get(index), Some(b'T' | b't' | b' ')) {
+        return Some((year, month, 1, index + 1));
+    }
+    if bytes.get(index) != Some(&b'-')
+        || bytes.len() < index + 4
+        || !bytes[index + 1..index + 3].iter().all(u8::is_ascii_digit)
+        || !matches!(bytes.get(index + 3), Some(b'T' | b't' | b' '))
+    {
+        return None;
+    }
+    let day: i32 = value[index + 1..index + 3].parse().ok()?;
+    Some((year, month, day, index + 4))
 }
 
 /// `HH:mm`, optional seconds, and an optional fraction. The remainder is the zone.
@@ -2293,6 +2313,49 @@ mod tests {
             assert_eq!(
                 super::canonical_iso("-000001-1-1").as_deref(),
                 Some("-000001-01-01T04:56:02.000Z")
+            );
+        });
+    }
+
+    #[test]
+    fn an_expanded_year_keeps_its_clock() {
+        with_tz("America/New_York", || {
+            assert_eq!(
+                super::canonical_iso("-000001-01-01T00:00:00Z").as_deref(),
+                Some("-000001-01-01T00:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("-000001-01-01T00:00:00").as_deref(),
+                Some("-000001-01-01T04:56:02.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("+002026-10-13T00:00:00Z").as_deref(),
+                Some("2026-10-13T00:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("+002026-10-13T16:00:00").as_deref(),
+                Some("2026-10-13T20:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("-000001-02-31T00:00:00Z").as_deref(),
+                Some("-000001-03-03T00:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("-000001T00:00:00Z").as_deref(),
+                Some("-000001-01-01T00:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("+002026-11T00:00:00Z").as_deref(),
+                Some("2026-11-01T00:00:00.000Z")
+            );
+            assert_eq!(super::canonical_iso("02026-10-13T00:00:00Z"), None);
+            assert_eq!(
+                super::canonical_iso("-000001-01-01T24:00:00Z").as_deref(),
+                Some("-000001-01-02T00:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("+010000-01-01T00:00:00.500Z").as_deref(),
+                Some("+010000-01-01T00:00:00.500Z")
             );
         });
     }
