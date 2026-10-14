@@ -1775,10 +1775,15 @@ fn unix_millis_from_iso(value: &str) -> Option<u64> {
         return date_only_millis(value);
     };
     let mut date_parts = date.split('-');
-    let year: i32 = date_parts.next()?.parse().ok()?;
-    let month: u32 = date_parts.next()?.parse().ok()?;
-    let day: u32 = date_parts.next()?.parse().ok()?;
-    if date_parts.next().is_some() {
+    let year_text = date_parts.next()?;
+    let month_text = date_parts.next()?;
+    let day_text = date_parts.next()?;
+    let year: i32 = year_text.parse().ok()?;
+    let month: u32 = month_text.parse().ok()?;
+    let day: u32 = day_text.parse().ok()?;
+    // A datetime uses `YYYY-MM-DD` or `±YYYYYY-MM-DD`. Date-only values keep
+    // the wider `Date.parse` forms in `date_only_millis`.
+    if date_parts.next().is_some() || !datetime_date_fields(year_text, month_text, day_text) {
         return None;
     }
     let (time, offset_ms) = split_time_zone(time)?;
@@ -1887,6 +1892,23 @@ fn split_time_zone(time: &str) -> Option<(&str, i64)> {
         return None;
     }
     Some((clock, sign * (hour * 3_600_000 + minute * 60_000)))
+}
+
+/// `Date.parse` date fields before a clock: four-digit year, or a sign and six
+/// digits, then a two-digit month and day.
+fn datetime_date_fields(year_text: &str, month_text: &str, day_text: &str) -> bool {
+    let year_ok = match year_text.as_bytes() {
+        [b'0'..=b'9', b'0'..=b'9', b'0'..=b'9', b'0'..=b'9'] => true,
+        [b'+' | b'-', rest @ ..] => {
+            rest.len() == 6 && rest.iter().all(|byte| byte.is_ascii_digit())
+        }
+        _ => false,
+    };
+    let two_digits = |text: &str| {
+        let bytes = text.as_bytes();
+        bytes.len() == 2 && bytes.iter().all(|byte| byte.is_ascii_digit())
+    };
+    year_ok && two_digits(month_text) && two_digits(day_text)
 }
 
 fn date_only_millis(value: &str) -> Option<u64> {
