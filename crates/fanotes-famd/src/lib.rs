@@ -957,6 +957,10 @@ pub fn canonical_iso(value: &str) -> Option<String> {
         // `16:00:00.5/1` keeps the fraction. The slash is only a separator.
         return canonical_iso(&next);
     }
+    if let Some(next) = separate_dot_after_fraction(value) {
+        // `16:00:00.5.1` keeps the fraction. The second dot starts a new field.
+        return canonical_iso(&next);
+    }
     match rewrite_ignored_symbols(value) {
         SymbolRewrite::Illegal => return None,
         SymbolRewrite::Changed(next) => return canonical_iso(&next),
@@ -1575,6 +1579,31 @@ fn separate_slash_after_fraction(value: &str) -> Option<String> {
         } else {
             out.push(character);
         }
+    }
+    if changed { Some(out) } else { None }
+}
+
+fn separate_dot_after_fraction(value: &str) -> Option<String> {
+    let chars: Vec<char> = value.chars().collect();
+    let mut changed = false;
+    let mut out = String::with_capacity(value.len());
+    let mut token_has_colon = false;
+    for (index, character) in chars.iter().copied().enumerate() {
+        if is_date_parse_space(character) {
+            token_has_colon = false;
+            out.push(character);
+            continue;
+        }
+        if character == ':' {
+            token_has_colon = true;
+        }
+        if character == '.' && token_has_colon && fraction_digits_before(&chars, index) {
+            out.push(' ');
+            changed = true;
+            token_has_colon = false;
+            continue;
+        }
+        out.push(character);
     }
     if changed { Some(out) } else { None }
 }
@@ -6957,6 +6986,63 @@ mod tests {
             assert_eq!(
                 super::canonical_iso("Oct 13 1950 (16:00)").as_deref(),
                 Some("1950-10-13T05:00:00.000Z")
+            );
+        });
+    }
+
+    #[test]
+    fn a_dot_after_a_fraction_starts_a_new_field() {
+        with_tz("America/New_York", || {
+            // `16:00:00.5.1` keeps 16:00:00.500. The second dot starts a date
+            // field. A full date has no room for that field.
+            assert_eq!(
+                super::canonical_iso("Oct 13 2026 16:00:00.5.1").as_deref(),
+                Some("2026-10-13T20:00:00.500Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 16:00:00.5.1").as_deref(),
+                Some("2001-10-13T20:00:00.500Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 2026 16:00.05.1").as_deref(),
+                Some("2026-10-13T20:00:50.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 2026 16:00:00.50.1").as_deref(),
+                Some("2026-10-13T20:00:00.500Z")
+            );
+            assert_eq!(super::canonical_iso("2026-10-13 16:00:00.5.1"), None);
+            assert_eq!(super::canonical_iso("2026-10-13 16:00.05.1"), None);
+            assert_eq!(super::canonical_iso("Oct 13 2026 16:00:00.5.1.2"), None);
+            assert_eq!(
+                super::canonical_iso("10.13.2026").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 2026 16:00:00.5.").as_deref(),
+                Some("2026-10-13T20:00:00.500Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 1950 16:00:00.5.1").as_deref(),
+                Some("1950-10-13T21:00:00.500Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 1950 16:00.05.1").as_deref(),
+                Some("1950-10-13T21:00:50.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 1950 16:00:00.50.1").as_deref(),
+                Some("1950-10-13T21:00:00.500Z")
+            );
+            assert_eq!(super::canonical_iso("1950-10-13 16:00:00.5.1"), None);
+            assert_eq!(super::canonical_iso("Oct 13 1950 16:00:00.5.1.2"), None);
+            assert_eq!(
+                super::canonical_iso("10.13.1950").as_deref(),
+                Some("1950-10-13T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 1950 16:00:00.5.").as_deref(),
+                Some("1950-10-13T21:00:00.500Z")
             );
         });
     }
