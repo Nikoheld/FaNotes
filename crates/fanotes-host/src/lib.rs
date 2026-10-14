@@ -1772,6 +1772,11 @@ fn marker_is_fresh(created_at: &str) -> bool {
 fn unix_millis_from_iso(value: &str) -> Option<u64> {
     if value.contains('(') {
         // `(comment)` is skipped, and an unclosed `(` consumes the rest.
+        // The mark is a separator: `2026-10-13(EST)` stays local, while
+        // `16:00(EST)` finalized the clock and is empty.
+        if parenthetical_breaks_final_time(value) {
+            return None;
+        }
         let omitted = omit_parentheticals(value);
         if omitted != value {
             return unix_millis_from_iso(&omitted);
@@ -2595,6 +2600,45 @@ fn legacy_numeric_millis(trimmed: &str) -> Option<u64> {
     ))
 }
 
+/// `16:00(EST)` finalizes the minutes and then sees a comment, which is empty.
+/// `16:00:00.5(EST)` already finished through the fraction. `+05:30(EST)` is
+/// an offset, and `16:(EST)` never finalized a field.
+fn parenthetical_breaks_final_time(value: &str) -> bool {
+    let chars: Vec<char> = value.chars().collect();
+    chars.iter().enumerate().any(|(index, character)| {
+        *character == '(' && finalized_time_before(&chars, index)
+    })
+}
+
+fn finalized_time_before(chars: &[char], paren: usize) -> bool {
+    if paren == 0 || !chars[paren - 1].is_ascii_digit() {
+        return false;
+    }
+    let mut start = paren;
+    while start > 0 && chars[start - 1].is_ascii_digit() {
+        start -= 1;
+    }
+    if start > 0 && chars[start - 1] == '.' {
+        return false;
+    }
+    if start == 0 || chars[start - 1] != ':' {
+        return false;
+    }
+    let mut head = start;
+    while head > 0 && chars[head - 1] == ':' {
+        let colon = head - 1;
+        if colon == 0 || !chars[colon - 1].is_ascii_digit() {
+            return false;
+        }
+        let mut number = colon;
+        while number > 0 && chars[number - 1].is_ascii_digit() {
+            number -= 1;
+        }
+        head = number;
+    }
+    !(head > 0 && matches!(chars[head - 1], '+' | '-'))
+}
+
 fn omit_parentheticals(value: &str) -> String {
     let chars: Vec<char> = value.chars().collect();
     let mut out = String::with_capacity(value.len());
@@ -2605,6 +2649,8 @@ fn omit_parentheticals(value: &str) -> String {
             index += 1;
             continue;
         }
+        // The comment is a separator, so `2026-10-13(EST)` is not strict ISO.
+        push_separator(&mut out);
         let mut balance = 0;
         while index < chars.len() {
             if chars[index] == '(' {
@@ -8426,6 +8472,69 @@ mod local_zone_tests {
         assert_eq!(unix_millis_from_iso("Oct 13 2026 )"), None);
         assert_eq!(unix_millis_from_iso("13 (Oct) 2026"), None);
         assert_eq!(unix_millis_from_iso("2026-10-13)"), None);
+    }
+
+    #[test]
+    fn a_glued_parenthetical_keeps_a_date_local() {
+        let _lock = TRASH_CLOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let _restore = RestoreTz(std::env::var_os("TZ"));
+        unsafe { std::env::set_var("TZ", "America/New_York") };
+        unsafe { tzset() };
+        // A `(` stops a strict ISO date, so the calendar stays local. The
+        // same mark after a finished clock is empty. A fraction, `Z`, or a
+        // real zone after the comment still counts.
+        assert_eq!(unix_millis_from_iso("2026-10-13(EST)"), Some(1_791_864_000_000));
+        assert_eq!(unix_millis_from_iso("2026-10-13(GMT)"), Some(1_791_864_000_000));
+        assert_eq!(unix_millis_from_iso("2026-10-13()"), Some(1_791_864_000_000));
+        assert_eq!(unix_millis_from_iso("2026(EST)"), Some(1_767_243_600_000));
+        assert_eq!(unix_millis_from_iso("2026-10(EST)"), Some(1_790_827_200_000));
+        assert_eq!(
+            unix_millis_from_iso("(EST)2026-10-13"),
+            Some(1_791_864_000_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("((EST))2026-10-13"),
+            Some(1_791_864_000_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13(EST"),
+            Some(1_791_864_000_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13(EST)16:00"),
+            Some(1_791_921_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13(EST)GMT"),
+            Some(1_791_849_600_000)
+        );
+        assert_eq!(unix_millis_from_iso("2026-10-13Z(EST)"), Some(1_791_849_600_000));
+        assert_eq!(unix_millis_from_iso("10/13/2026(EST)"), Some(1_791_864_000_000));
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 16:00:00.5(EST)"),
+            Some(1_791_921_600_500)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 16:00Z(EST)"),
+            Some(1_791_907_200_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 16:00+05:00(EST)"),
+            Some(1_791_889_200_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 4:00 PM(EST)"),
+            Some(1_791_921_600_000)
+        );
+        assert_eq!(unix_millis_from_iso("2026-10-13 16:00(EST)"), None);
+        assert_eq!(unix_millis_from_iso("Oct 13 2026 16:00(EST)"), None);
+        assert_eq!(unix_millis_from_iso("2026-10-13 16:00:00(EST)"), None);
+        assert_eq!(unix_millis_from_iso("2026-10-13 16:00:00:123(EST)"), None);
+        assert_eq!(unix_millis_from_iso("2026-10-13T16:00(EST)"), None);
+        assert_eq!(unix_millis_from_iso("2026-10-13T16:00:00Z(EST)"), None);
+        assert_eq!(unix_millis_from_iso("2026-10-13T16:00(EST"), None);
     }
 
     #[test]
