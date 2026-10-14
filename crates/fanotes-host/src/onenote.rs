@@ -1175,13 +1175,14 @@ fn preserve_sources(input: &Path, batch: &Path) -> Result<Vec<Value>, String> {
 }
 
 fn materialize_tools(app_data: &Path) -> Result<(PathBuf, PathBuf), String> {
+    // Desktop `mkdir` creates `tool-cache/onenote`, then the platform folder.
+    // A symlink or non-directory is still the unsafe-cache sentence.
+    let cache_root = app_data.join("tool-cache").join("onenote");
+    import_mkdir(&cache_root)?;
+    let cache = require_tool_cache(&cache_root)?.join("v1-linux-x64");
+    import_mkdir(&cache)?;
+    require_tool_cache(&cache)?;
     let embedded = embedded_root()?;
-    let cache = app_data
-        .join("tool-cache")
-        .join("onenote")
-        .join("v1-linux-x64");
-    create_private_dir(&cache)
-        .map_err(|_| "Der lokale OneNote-Werkzeugcache ist unsicher.".to_owned())?;
     let one2html = install_tool(
         &embedded.join("linux").join("one2html"),
         &cache.join("one2html"),
@@ -1193,6 +1194,15 @@ fn materialize_tools(app_data: &Path) -> Result<(PathBuf, PathBuf), String> {
         SEVENZIP_SHA,
     )?;
     Ok((one2html, seven_zip))
+}
+
+fn require_tool_cache(path: &Path) -> Result<PathBuf, String> {
+    let info = fs::symlink_metadata(path)
+        .map_err(|error| crate::vault::node_lstat_error(path, &error))?;
+    if info.file_type().is_symlink() || !info.is_dir() {
+        return Err("Der lokale OneNote-Werkzeugcache ist unsicher.".to_owned());
+    }
+    fs::canonicalize(path).map_err(|error| crate::vault::node_realpath_error(path, &error))
 }
 
 fn install_tool(source: &Path, target: &Path, expected: &str) -> Result<PathBuf, String> {
@@ -2080,6 +2090,7 @@ mod tests {
         strip_active_html, tool_failure_message, tool_limit, unique_directory, urlencoding_decode,
         validate_listing, walk_limited, write_unique_markdown, atomic_copy_onenote,
         atomic_write_onenote, ensure_note_directory, create_onenote_temp_dir,
+        materialize_tools,
         prepare_input, import_in_temp, render_sections,
     };
     use std::path::{Path, PathBuf};
@@ -2442,6 +2453,67 @@ mod tests {
         );
         std::fs::set_permissions(&output, std::fs::Permissions::from_mode(0o700)).unwrap();
         assert!(!destination.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_unwritable_onenote_tool_cache_reports_the_desktop_mkdir_error() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = std::env::temp_dir().join(format!(
+            "fanotes-onenote-tools-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        let locked = root.join("locked");
+        std::fs::create_dir_all(&locked).unwrap();
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o555)).unwrap();
+        struct Restore(std::path::PathBuf);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                let _ = std::fs::set_permissions(&self.0, std::fs::Permissions::from_mode(0o700));
+                if let Some(parent) = self.0.parent() {
+                    let _ = std::fs::remove_dir_all(parent);
+                }
+            }
+        }
+        let _restore = Restore(locked.clone());
+        let cache = locked.join("tool-cache/onenote");
+        assert_eq!(
+            materialize_tools(&locked).unwrap_err(),
+            format!("EACCES: permission denied, mkdir '{}'", cache.display())
+        );
+        assert!(std::fs::read_dir(&locked).unwrap().next().is_none());
+
+        let open = root.join("open");
+        std::fs::create_dir_all(open.join("tool-cache")).unwrap();
+        let taken = open.join("tool-cache/onenote");
+        std::fs::write(&taken, b"datei").unwrap();
+        assert_eq!(
+            materialize_tools(&open).unwrap_err(),
+            format!("EEXIST: file already exists, mkdir '{}'", taken.display())
+        );
+        assert_eq!(std::fs::read(&taken).unwrap(), b"datei");
+
+        let linked = root.join("linked");
+        let elsewhere = root.join("elsewhere");
+        std::fs::create_dir_all(linked.join("tool-cache")).unwrap();
+        std::fs::create_dir(&elsewhere).unwrap();
+        std::os::unix::fs::symlink(&elsewhere, linked.join("tool-cache/onenote")).unwrap();
+        assert_eq!(
+            materialize_tools(&linked).unwrap_err(),
+            "Der lokale OneNote-Werkzeugcache ist unsicher."
+        );
+        assert!(linked
+            .join("tool-cache/onenote")
+            .symlink_metadata()
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert!(std::fs::read_dir(&elsewhere).unwrap().next().is_none());
     }
 
     #[test]
