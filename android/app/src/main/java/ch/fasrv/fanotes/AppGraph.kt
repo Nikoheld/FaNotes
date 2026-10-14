@@ -126,6 +126,12 @@ class AppGraph(context: Context) {
         prefs.edit().putString("desk-settings", text).apply()
     }
 
+    fun readWorkspace(vaultId: String): String? = prefs.getString("workspace-$vaultId", null)
+
+    fun writeWorkspace(vaultId: String, json: String) {
+        prefs.edit().putString("workspace-$vaultId", json).apply()
+    }
+
     private fun host() = IoSyncHost(
         io = { vault },
         currentVaultId = { vaultId },

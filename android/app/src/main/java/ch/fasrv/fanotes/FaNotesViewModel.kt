@@ -58,8 +58,26 @@ import ch.fasrv.fanotes.desk.parseWorksheetBoxes
 import ch.fasrv.fanotes.desk.searchVault
 import ch.fasrv.fanotes.desk.serializeCalendarMarkdown
 import ch.fasrv.fanotes.desk.serializeHomeworkMarkdown
+import ch.fasrv.fanotes.desk.DeskTab
+import ch.fasrv.fanotes.desk.NoteTrail
+import ch.fasrv.fanotes.desk.SwitcherNote
+import ch.fasrv.fanotes.desk.WorkspaceMemory
+import ch.fasrv.fanotes.desk.forgetNoteHistory
+import ch.fasrv.fanotes.desk.isSelfOrInside
+import ch.fasrv.fanotes.desk.parseWorkspaceMemory
+import ch.fasrv.fanotes.desk.pruneWorkspaceMemory
+import ch.fasrv.fanotes.desk.rankSwitcherNotes
+import ch.fasrv.fanotes.desk.rememberClosedTab
+import ch.fasrv.fanotes.desk.remapNoteHistory
+import ch.fasrv.fanotes.desk.remapPath
+import ch.fasrv.fanotes.desk.sortPinnedFirst
+import ch.fasrv.fanotes.desk.stepNoteHistory
+import ch.fasrv.fanotes.desk.tabsToClose
+import ch.fasrv.fanotes.desk.togglePinnedTab
+import ch.fasrv.fanotes.desk.visitNote
 import ch.fasrv.fanotes.desk.wikiTargets
 import ch.fasrv.fanotes.desk.wordCount
+import ch.fasrv.fanotes.desk.workspaceMemoryJson
 import ch.fasrv.fanotes.famd.companionPath
 import ch.fasrv.fanotes.famd.parseFamd
 import ch.fasrv.fanotes.famd.stripFamdPayload
@@ -144,44 +162,59 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
         viewModelScope.launch {
-            refreshTree()
-            if (tree.value.isEmpty()) {
+            loadTree()
+            if (tree.value.none { it.kind != NoteKind.FOLDER }) {
                 val path = withContext(Dispatchers.IO) {
-                    graph.store.createMarkdown("", "Welcome")
+                    runCatching { graph.store.createMarkdown("", "Welcome") }.getOrNull()
                 }
-                val note = withContext(Dispatchers.IO) { graph.store.readNote(path) }
-                val welcome = "# Willkommen\n\nDer Stift schreibt. Ein Finger blättert, zwei Finger zoomen, und ein Wisch wechselt die Notiz.\n"
-                withContext(Dispatchers.IO) { graph.store.save(note, note.document, welcome) }
-                refreshTree()
+                if (path != null) {
+                    val note = withContext(Dispatchers.IO) { graph.store.readNote(path) }
+                    val welcome = "# Willkommen\n\nDer Stift schreibt. Ein Finger blättert, zwei Finger zoomen, und ein Wisch wechselt die Notiz.\n"
+                    withContext(Dispatchers.IO) { graph.store.save(note, note.document, welcome) }
+                    loadTree()
+                }
             }
-            tree.value.firstOrNull { it.kind != NoteKind.FOLDER }?.let { openPath(it.path, force = true) }
+            if (!restoreWorkspace()) flatNotes().firstOrNull()?.let { openPath(it.path, force = true) }
             graph.engine.start()
         }
     }
 
     fun refreshTree() {
-        viewModelScope.launch {
-            val loaded = withContext(Dispatchers.IO) {
-                graph.store.tree() to (graph.vault.read(FOLDER_COLORS_PATH)?.decodeToString()?.let(::parseFolderColors).orEmpty())
-            }
-            tree.value = loaded.first
-            folderColors.value = loaded.second
-        }
+        viewModelScope.launch { loadTree() }
     }
 
-    fun openPath(path: String, force: Boolean = false) {
+    private suspend fun loadTree() {
+        val loaded = withContext(Dispatchers.IO) {
+            graph.store.tree() to (graph.vault.read(FOLDER_COLORS_PATH)?.decodeToString()?.let(::parseFolderColors).orEmpty())
+        }
+        tree.value = loaded.first
+        folderColors.value = loaded.second
+    }
+
+    private var openGeneration = 0
+
+    fun openPath(path: String, force: Boolean = false, fromHistory: NoteTrail? = null) {
+        val generation = ++openGeneration
         viewModelScope.launch {
-            if (!force) saveNow()
-            val note = withContext(Dispatchers.IO) { graph.store.readNote(path) }
-            session.replace(note.document)
-            open.value = noteOpened(note)
-            markdown.value = note.markdown
-            rememberTab(path)
-            refreshOverlays()
-            style.value = style.value.copy()
-            showList.value = false
-            loadBackdrop(note)
-            refreshBook(note)
+            try {
+                if (!force) saveNow()
+                val note = withContext(Dispatchers.IO) { graph.store.readNote(path) }
+                if (generation != openGeneration) return@launch
+                session.replace(note.document)
+                open.value = noteOpened(note)
+                markdown.value = note.markdown
+                rememberTab(path)
+                refreshOverlays()
+                style.value = style.value.copy()
+                showList.value = false
+                loadBackdrop(note)
+                refreshBook(note)
+                if (fromHistory == null) noteTrail.value = visitNote(noteTrail.value, path)
+                persistWorkspace()
+            } catch (error: Exception) {
+                if (generation == openGeneration && fromHistory != null) noteTrail.value = fromHistory
+                message.value = error.message ?: "Die Notiz konnte nicht geöffnet werden."
+            }
         }
     }
 
@@ -274,20 +307,35 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
 
     fun rename(path: String, title: String) {
         viewModelScope.launch {
-            withContext(Dispatchers.IO) { graph.store.rename(path, title) }
-            refreshTree()
+            if (open.value?.path?.let { isSelfOrInside(it, path) } == true) saveNow()
+            val next = try {
+                withContext(Dispatchers.IO) { graph.store.rename(path, title) }
+            } catch (error: Exception) {
+                message.value = error.message ?: "Umbenennen ist fehlgeschlagen."
+                return@launch
+            }
+            if (next != path) moveReferences(path, next)
+            loadTree()
         }
     }
 
     fun delete(path: String) {
         viewModelScope.launch {
-            if (open.value?.path == path) {
+            noteTrail.value = forgetNoteHistory(noteTrail.value, path)
+            openTabs.value = openTabs.value.filterNot { isSelfOrInside(it, path) }
+            pinnedTabs.value = pinnedTabs.value.filterNot { isSelfOrInside(it, path) }.toSet()
+            closedTabs.value = closedTabs.value.filterNot { isSelfOrInside(it, path) }
+            if (splitPath.value?.let { isSelfOrInside(it, path) } == true) splitPath.value = null
+            if (open.value?.path?.let { isSelfOrInside(it, path) } == true) {
                 open.value = null
+                markdown.value = ""
                 session.replace(newInkDocument("Note", "dots", isoNow()))
+                openTabs.value.firstOrNull()?.let { openPath(it, force = true) }
             }
             withContext(Dispatchers.IO) { graph.store.delete(path) }
-            refreshTree()
+            loadTree()
             graph.engine.notifyLocalChange()
+            persistWorkspace()
         }
     }
 
@@ -312,7 +360,8 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         _vaultLabel.value = "Ausgewählter Ordner"
         viewModelScope.launch {
             graph.engine.switchVault()
-            refreshTree()
+            loadTree()
+            adoptWorkspace()
         }
     }
 
@@ -322,7 +371,8 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         _vaultLabel.value = "Auf diesem Tablet"
         viewModelScope.launch {
             graph.engine.switchVault()
-            refreshTree()
+            loadTree()
+            adoptWorkspace()
         }
     }
 
@@ -652,6 +702,9 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
 
     val destination = MutableStateFlow("notes")
     val openTabs = MutableStateFlow<List<String>>(emptyList())
+    val pinnedTabs = MutableStateFlow<Set<String>>(emptySet())
+    val noteTrail = MutableStateFlow(NoteTrail())
+    val closedTabs = MutableStateFlow<List<String>>(emptyList())
     val searchQuery = MutableStateFlow("")
     val searchHits = MutableStateFlow<List<SearchHit>>(emptyList())
     val homework = MutableStateFlow(HomeworkDocument(emptyList()))
@@ -682,7 +735,155 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun rememberTab(path: String) {
-        openTabs.value = (listOf(path) + openTabs.value.filterNot { it == path }).take(12)
+        if (path in openTabs.value) return
+        var next = openTabs.value + path
+        while (next.size > 12) {
+            val drop = next.firstOrNull { it !in pinnedTabs.value } ?: next.first()
+            next = next.filterNot { it == drop }
+            if (drop in pinnedTabs.value) pinnedTabs.value = pinnedTabs.value - drop
+        }
+        openTabs.value = sortPinnedFirst(next.map { DeskTab(it, it in pinnedTabs.value) }).map { it.path }
+    }
+
+    /** Point the trail at the target before opening, so the visit records nothing new. */
+    fun navigateHistory(direction: Int) {
+        if (direction != -1 && direction != 1) return
+        val known = (flatNotes().map { it.path } + openTabs.value).toSet()
+        val before = noteTrail.value
+        val step = stepNoteHistory(before, direction) { it in known }
+        val path = step.path ?: return
+        if (path == open.value?.path) return
+        noteTrail.value = step.history
+        openPath(path, fromHistory = before)
+        destination.value = "notes"
+    }
+
+    fun closeTab(path: String) {
+        closedTabs.value = rememberClosedTab(closedTabs.value, path)
+        val current = openTabs.value
+        val index = current.indexOf(path)
+        val remaining = current.filterNot { it == path }
+        openTabs.value = remaining
+        pinnedTabs.value = pinnedTabs.value - path
+        if (splitPath.value == path) splitPath.value = null
+        if (open.value?.path == path) {
+            val next = if (remaining.isEmpty()) null else remaining[index.coerceIn(0, remaining.lastIndex)]
+            if (next != null) openPath(next)
+            else {
+                open.value = null
+                markdown.value = ""
+                session.replace(newInkDocument("Note", "dots", isoNow()))
+            }
+        }
+        persistWorkspace()
+    }
+
+    fun closeTabs(scope: String) {
+        val anchor = open.value?.path ?: return
+        val tabs = openTabs.value.map { DeskTab(it, it in pinnedTabs.value) }
+        tabsToClose(tabs, anchor, scope).forEach { closeTab(it) }
+    }
+
+    fun reopenClosedTab() {
+        val existing = flatNotes().map { it.path }.toSet()
+        val stack = closedTabs.value.toMutableList()
+        while (stack.isNotEmpty()) {
+            val path = stack.removeAt(0)
+            if (path in existing && path !in openTabs.value) {
+                closedTabs.value = stack
+                destination.value = "notes"
+                openPath(path)
+                return
+            }
+        }
+        closedTabs.value = stack
+        message.value = "Kein kürzlich geschlossener Tab."
+    }
+
+    fun togglePinTab(path: String? = open.value?.path) {
+        if (path == null || path !in openTabs.value) return
+        val next = togglePinnedTab(openTabs.value.map { DeskTab(it, it in pinnedTabs.value) }, path)
+        openTabs.value = next.map { it.path }
+        pinnedTabs.value = next.filter { it.pinned }.map { it.path }.toSet()
+        persistWorkspace()
+    }
+
+    fun cycleTabs(direction: Int) {
+        val tabs = openTabs.value
+        if (tabs.size < 2) return
+        val index = tabs.indexOf(open.value?.path).coerceAtLeast(0)
+        val next = (index + direction + tabs.size) % tabs.size
+        openPath(tabs[next])
+        destination.value = "notes"
+    }
+
+    fun toggleSplitOrientation() {
+        val next = if (deskSettings.value["split-orientation"] == "rows") "columns" else "rows"
+        updateDesk("split-orientation", next)
+    }
+
+    fun rankNotes(query: String, limit: Int = 8): List<SwitcherNote> {
+        val recent = noteTrail.value.entries.asReversed()
+        return rankSwitcherNotes(flatNotes().map { it.path }, query, recent, limit)
+    }
+
+    private fun moveReferences(from: String, to: String) {
+        noteTrail.value = remapNoteHistory(noteTrail.value, from, to)
+        val pinned = pinnedTabs.value.map { remapPath(it, from, to) ?: it }.toSet()
+        val tabs = openTabs.value.map { remapPath(it, from, to) ?: it }
+        pinnedTabs.value = pinned
+        openTabs.value = sortPinnedFirst(tabs.map { DeskTab(it, it in pinned) }).map { it.path }
+        closedTabs.value = closedTabs.value.map { remapPath(it, from, to) ?: it }
+        val current = open.value?.path
+        if (current != null) {
+            val moved = remapPath(current, from, to)
+            if (moved != null) openPath(moved, force = true)
+        }
+        splitPath.value?.let { split ->
+            remapPath(split, from, to)?.let { moved -> if (moved != split) loadSplit(moved) }
+        }
+        persistWorkspace()
+    }
+
+    private fun restoreWorkspace(): Boolean {
+        val memory = graph.readWorkspace(graph.vaultId)?.let(::parseWorkspaceMemory) ?: return false
+        val exists = flatNotes().map { it.path }.toSet()
+        val pruned = pruneWorkspaceMemory(memory, exists::contains)
+        if (pruned.tabs.isEmpty()) return false
+        pinnedTabs.value = pruned.pinned.toSet()
+        openTabs.value = sortPinnedFirst(pruned.tabs.map { DeskTab(it, it in pinnedTabs.value) }).map { it.path }
+        noteTrail.value = NoteTrail()
+        closedTabs.value = emptyList()
+        val active = pruned.active ?: pruned.tabs.first()
+        if (pruned.split != null) splitPath.value = pruned.split
+        openPath(active, force = true)
+        pruned.split?.let { loadSplit(it) }
+        return true
+    }
+
+    private fun adoptWorkspace() {
+        noteTrail.value = NoteTrail()
+        closedTabs.value = emptyList()
+        open.value = null
+        splitPath.value = null
+        if (!restoreWorkspace()) {
+            openTabs.value = emptyList()
+            pinnedTabs.value = emptySet()
+            splitPath.value = null
+            flatNotes().firstOrNull()?.let { openPath(it.path, force = true) }
+        }
+    }
+
+    private fun persistWorkspace() {
+        val tabs = openTabs.value
+        val active = open.value?.path?.takeIf { it in tabs }
+        val memory = WorkspaceMemory(
+            tabs = tabs,
+            pinned = tabs.filter { it in pinnedTabs.value },
+            active = active,
+            split = splitPath.value?.takeIf { it in tabs && it != active },
+        )
+        graph.writeWorkspace(graph.vaultId, workspaceMemoryJson(memory))
     }
 
     fun openSearchHit(hit: SearchHit) {
@@ -843,7 +1044,9 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
             val note = withContext(Dispatchers.IO) { graph.store.readNote(path) }
             splitSession.replace(note.document)
             splitNote = note
+            rememberTab(path)
             splitPath.value = path
+            persistWorkspace()
         }
     }
 

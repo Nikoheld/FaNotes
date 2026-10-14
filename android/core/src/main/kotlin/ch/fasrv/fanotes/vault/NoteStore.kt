@@ -214,12 +214,12 @@ class NoteStore(private val io: VaultIo) {
         return path
     }
 
-    fun rename(path: String, title: String) {
+    fun rename(path: String, title: String): String {
         val name = safeNoteName(title)
         val parent = path.substringBeforeLast('/', "")
         val extension = extensionOf(path).ifBlank { ".md" }
         val next = if (parent.isEmpty()) "$name$extension" else "$parent/$name$extension"
-        if (next == path) return
+        if (next == path) return path
         if (io.exists(next)) throw IllegalStateException("That name is already used")
         moveTree(path, next)
         val companionExt = if (extension == FAMD_EXTENSION) ".md" else FAMD_EXTENSION
@@ -229,6 +229,7 @@ class NoteStore(private val io: VaultIo) {
             val md = companionPath(path, ".md")
             if (io.exists(md)) moveTree(md, companionPath(next, ".md"))
         }
+        return next
     }
 
     fun delete(path: String) {
