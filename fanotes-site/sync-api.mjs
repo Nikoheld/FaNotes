@@ -116,10 +116,17 @@ const parseKeyWrap = (raw) => {
   return { iv: raw.iv, data: raw.data }
 }
 
+// Desktop sends linux, win32, or darwin. The website sends web. The Android
+// tablet client sends android. Any other short token is stored as given so a
+// new client is not rejected; a missing or unsafe value becomes unknown.
+export const normalizeSyncPlatform = (value) => {
+  const platform = typeof value === 'string' ? value.trim().toLowerCase() : ''
+  return /^[a-z0-9-]{1,24}$/u.test(platform) ? platform : 'unknown'
+}
+
 const parseDevice = (raw) => {
   const name = typeof raw?.name === 'string' ? raw.name.trim().replace(/[\0-\x1f\x7f]/gu, '').slice(0, 80) : ''
-  const platform = typeof raw?.platform === 'string' && /^[a-z0-9-]{1,24}$/u.test(raw.platform) ? raw.platform : 'unknown'
-  return { name: name || 'Gerät', platform }
+  return { name: name || 'Gerät', platform: normalizeSyncPlatform(raw?.platform) }
 }
 
 const safeJoin = (root, ...segments) => {
