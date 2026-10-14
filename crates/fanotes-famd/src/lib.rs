@@ -1163,11 +1163,13 @@ fn fold_trailing_zone(trimmed: &str) -> Option<String> {
             changed = true;
         }
     }
-    // `16:00 EST` is a clock. `GMT+24:00 EST` is two zones; the colon belongs
-    // to the offset, and the later zone still wins in the legacy date.
+    // `16:00 EST` is a clock. `16:00+5 EST` already names an offset, so the
+    // later zone replaces it instead of being glued onto the number.
+    // `GMT+24:00 EST` is two zones; the colon belongs to the offset.
     if end >= 2
         && words[end - 2].starts_with(|character: char| character.is_ascii_digit())
         && words[end - 2].contains(':')
+        && !words[end - 2].contains(['+', '-'])
     {
         if let Some(suffix) = month_zone_suffix(words[end - 1]) {
             let clock = format!("{}{suffix}", words[end - 2]);
@@ -2396,7 +2398,8 @@ fn consume_glued_z(
 
 fn split_clock_tail(token: &str) -> (&str, &str) {
     if let Some(body) = token.strip_suffix(['Z', 'z']) {
-        if body.contains(':') {
+        // `16:00Z` is UTC. `16:00+5Z` keeps the sign so `Z` can replace `+5`.
+        if body.contains(':') && !body.contains(['+', '-']) {
             return (body, &token[body.len()..]);
         }
     }
@@ -2419,6 +2422,28 @@ struct LegacyOffset {
     time_fields: Vec<i32>,
 }
 
+/// `+5EST` and `+5:30Z` end in a zone keyword. `+5` and `+5GMT5` do not.
+fn offset_zone_suffix(text: &str) -> Option<&str> {
+    const KEYWORDS: [&str; 12] = [
+        "gmt", "utc", "est", "edt", "cst", "cdt", "mst", "mdt", "pst", "pdt", "ut", "z",
+    ];
+    for keyword in KEYWORDS {
+        if text.len() <= keyword.len() {
+            continue;
+        }
+        let (prefix, suffix) = text.split_at(text.len() - keyword.len());
+        if !suffix.eq_ignore_ascii_case(keyword) {
+            continue;
+        }
+        let before = prefix.chars().next_back()?;
+        if before.is_ascii_alphabetic() || !prefix.bytes().any(|byte| byte.is_ascii_digit()) {
+            continue;
+        }
+        return Some(suffix);
+    }
+    None
+}
+
 /// `+5`, `+0530`, `+:30`, `+5:30`, and `+5:30.5`. A missing hour is 0.
 /// A dot is skipped, so `+5.30` is five hours and 30 is a date number.
 /// `+5:.5` is five hours and five minutes. `+5:60.5` spills 60 and keeps
@@ -2426,6 +2451,10 @@ struct LegacyOffset {
 /// `+5:` leaves the minute open for a later number. Minutes past 59 in
 /// `HHMM` count as extra hours.
 fn parse_legacy_offset(text: &str) -> Option<LegacyOffset> {
+    // `+5EST` is EST. The keyword comes last, so it replaces the number.
+    if let Some(zone) = offset_zone_suffix(text) {
+        return legacy_zone_offset(zone);
+    }
     let (sign, rest) = if let Some(rest) = text.strip_prefix('+') {
         (1i64, rest)
     } else if let Some(rest) = text.strip_prefix('-') {
@@ -5376,6 +5405,116 @@ mod tests {
             assert_eq!(super::canonical_iso("2026-10-13T4:00"), None);
             assert_eq!(super::canonical_iso("2026-10-13T016:00"), None);
             assert_eq!(super::canonical_iso("1950-10-13T16:"), None);
+        });
+    }
+
+    #[test]
+    fn a_later_zone_replaces_a_numeric_offset() {
+        with_tz("America/New_York", || {
+            // `+5` is an offset until a zone keyword follows it. That keyword
+            // replaces the offset, including `+24`, so the day does not move.
+            // `16:00EST` is still empty: only `Z` may touch a finished clock.
+            assert_eq!(
+                super::canonical_iso("2026-10-13 16:00+5 GMT").as_deref(),
+                Some("2026-10-13T16:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 16:00+5 EST").as_deref(),
+                Some("2026-10-13T21:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 16:00+5:30 EST").as_deref(),
+                Some("2026-10-13T21:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 16:00 +5 GMT").as_deref(),
+                Some("2026-10-13T16:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 16:+5 GMT").as_deref(),
+                Some("2026-10-13T16:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 16:00+24 GMT").as_deref(),
+                Some("2026-10-13T16:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 16:00-5 GMT").as_deref(),
+                Some("2026-10-13T16:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 16:00+5GMT").as_deref(),
+                Some("2026-10-13T16:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 16:00+5EST").as_deref(),
+                Some("2026-10-13T21:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 16:00+5Z").as_deref(),
+                Some("2026-10-13T16:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 16:00+5UTC").as_deref(),
+                Some("2026-10-13T16:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 16:00+5EDT").as_deref(),
+                Some("2026-10-13T20:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 16:00+5PST").as_deref(),
+                Some("2026-10-14T00:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 16:00+24EST").as_deref(),
+                Some("2026-10-13T21:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 2026 16:00+5 GMT").as_deref(),
+                Some("2026-10-13T16:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 2026 16:00+5EST").as_deref(),
+                Some("2026-10-13T21:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("10/13/2026 16:00+5 GMT").as_deref(),
+                Some("2026-10-13T16:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("10/13/2026 16:00+5EST").as_deref(),
+                Some("2026-10-13T21:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 16:00 GMT EST").as_deref(),
+                Some("2026-10-13T21:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 16:00 EST GMT").as_deref(),
+                Some("2026-10-13T16:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 16:00+5").as_deref(),
+                Some("2026-10-13T11:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("1950-10-13 16:00+5 GMT").as_deref(),
+                Some("1950-10-13T16:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("1950-10-13 16:00+5EST").as_deref(),
+                Some("1950-10-13T21:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("1950-10-13 16:00+24EST").as_deref(),
+                Some("1950-10-13T21:00:00.000Z")
+            );
+            assert_eq!(super::canonical_iso("2026-10-13 16:00EST"), None);
+            assert_eq!(super::canonical_iso("2026-10-13 16:00+5GMT5"), None);
+            assert_eq!(super::canonical_iso("2026-10-13 16:00+5Z5"), None);
+            assert_eq!(super::canonical_iso("2026-10-13T16:00+5"), None);
+            assert_eq!(super::canonical_iso("1950-10-13 16:00EST"), None);
         });
     }
 
