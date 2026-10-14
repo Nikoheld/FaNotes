@@ -933,7 +933,19 @@ pub fn canonical_iso(value: &str) -> Option<String> {
     }
     let source = if surrounded { trimmed } else { value };
     if is_date_only_shape(trimmed) {
-        return date_only_iso(trimmed, surrounded);
+        // `2026-10-13` is UTC. `2026-10-13Z` is the same instant with a zone
+        // glued on, so a failed date-only parse continues as a legacy number.
+        // U+2028 and U+2029 are not date separators, so they stay empty.
+        if let Some(iso) = date_only_iso(trimmed, surrounded) {
+            return Some(iso);
+        }
+        if !trimmed
+            .chars()
+            .any(|character| matches!(character, '\u{0085}' | '\u{2028}' | '\u{2029}'))
+        {
+            return legacy_numeric_iso(trimmed);
+        }
+        return None;
     }
     // `2026 10 13` is not a year plus a clock. A tail with no colon is a legacy
     // number, such as `2026 10`. A clock that fails to parse is not an ISO time.
@@ -1126,8 +1138,26 @@ fn month_words(value: &str) -> Vec<&str> {
         .filter(|token| !token.is_empty())
         .flat_map(expand_joined_month)
         .flat_map(expand_glued_month)
+        .flat_map(expand_hyphen_numbers)
         .flat_map(split_unmatched_paren)
         .collect()
+}
+
+/// `2026-10-13` next to `GMT` is three numbers and a zone. A month word such
+/// as `13-Oct-26` stays one token for the month scan.
+fn expand_hyphen_numbers(token: &str) -> Vec<&str> {
+    if token.contains(':') || !token.contains('-') {
+        return vec![token];
+    }
+    let body = token.strip_prefix('-').unwrap_or(token);
+    if !body.contains('-') {
+        return vec![token];
+    }
+    let parts: Vec<&str> = body.split('-').collect();
+    if parts.len() < 2 || parts.iter().any(|part| unsigned_number(part).is_none()) {
+        return vec![token];
+    }
+    parts
 }
 
 /// `13)` is the number 13 and then a `)`. The `)` is its own word.
@@ -4240,6 +4270,89 @@ mod tests {
             assert_eq!(super::canonical_iso("13 1 2026"), None);
             assert_eq!(super::canonical_iso("10 13 2026 16:00:60"), None);
             assert_eq!(super::canonical_iso("10 13 2026 16:60"), None);
+        });
+    }
+
+    #[test]
+    fn a_hyphen_date_keeps_a_zone_keyword() {
+        with_tz("America/New_York", || {
+            // `2026-10-13` alone is UTC. The same fields with `GMT` stay UTC, and
+            // `EST` is midnight Eastern. A fourth number is not a date.
+            assert_eq!(
+                super::canonical_iso("2026-10-13").as_deref(),
+                Some("2026-10-13T00:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 GMT").as_deref(),
+                Some("2026-10-13T00:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13GMT").as_deref(),
+                Some("2026-10-13T00:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 EST").as_deref(),
+                Some("2026-10-13T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13EST").as_deref(),
+                Some("2026-10-13T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 16:00 GMT").as_deref(),
+                Some("2026-10-13T16:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 UTC").as_deref(),
+                Some("2026-10-13T00:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13Z").as_deref(),
+                Some("2026-10-13T00:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13 Z").as_deref(),
+                Some("2026-10-13T00:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-1 GMT").as_deref(),
+                Some("2026-01-01T00:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-1GMT").as_deref(),
+                Some("2026-01-01T00:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10 GMT").as_deref(),
+                Some("2026-10-01T00:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10GMT").as_deref(),
+                Some("2026-10-01T00:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2-31-1 GMT").as_deref(),
+                Some("2001-03-03T00:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2-31-1GMT").as_deref(),
+                Some("2001-03-03T00:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-02-31 GMT").as_deref(),
+                Some("2026-03-03T00:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("49-1-1 GMT").as_deref(),
+                Some("2049-01-01T00:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("99-1-2 EST").as_deref(),
+                Some("1999-01-02T05:00:00.000Z")
+            );
+            assert_eq!(super::canonical_iso("2026-10-13 GMT5"), None);
+            assert_eq!(super::canonical_iso("2026-10-13 EST5"), None);
+            assert_eq!(super::canonical_iso("13-1-2026 GMT"), None);
         });
     }
 
