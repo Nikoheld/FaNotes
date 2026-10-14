@@ -78,7 +78,7 @@ import ch.fasrv.fanotes.desk.allDaySpans
 import ch.fasrv.fanotes.desk.calendarOccurrenceWindow
 import ch.fasrv.fanotes.desk.dragCreateMinutes
 import ch.fasrv.fanotes.desk.timedDayLayout
-import ch.fasrv.fanotes.desk.outlineOf
+import ch.fasrv.fanotes.desk.parseNoteOutline
 import ch.fasrv.fanotes.desk.taskLines
 import java.time.LocalDate
 import java.time.LocalDateTime
@@ -1551,8 +1551,24 @@ fun Inspector(model: FaNotesViewModel, onOpen: (String) -> Unit) {
         Text("${stats.headings} Überschriften · ${stats.tasksDone}/${stats.tasks} Aufgaben", fontSize = 13.sp)
         if (path != null) Text(path, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f))
         Text("Gliederung", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 12.dp))
-        outlineOf(markdown).forEach { (level, text) ->
-            Text(text, modifier = Modifier.padding(start = (level * 8).dp, top = 4.dp), fontSize = 13.sp)
+        val headings = parseNoteOutline(markdown)
+        if (headings.isEmpty()) {
+            Text("Überschriften erscheinen hier automatisch.", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+        }
+        headings.forEach { heading ->
+            val inset = (10 + (heading.level - 1).coerceAtLeast(0) * 12).dp
+            Text(
+                "› ${heading.title}",
+                modifier = Modifier.padding(start = inset, top = 4.dp).clickable { model.jumpToOutline(heading.line) },
+                fontSize = 13.sp,
+            )
+        }
+        Text("Tags", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 16.dp))
+        val tags = parseNoteTags(markdown)
+        if (tags.isEmpty()) {
+            Text("Noch keine Tags.", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+        } else {
+            Text(tags.joinToString("  ") { "#$it" }, fontSize = 13.sp, modifier = Modifier.padding(top = 4.dp))
         }
         Text("Aufgaben", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 16.dp))
         taskLines(markdown).forEach { (index, done, text) ->
