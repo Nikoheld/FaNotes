@@ -33,6 +33,9 @@ class NotePageView(context: Context) : FrameLayout(context) {
     private val syncPill = TextView(context)
     private var boundPath = ""
     private var writing = false
+    private var editBefore = ""
+    private var sourceMarkdown = ""
+    private var foldedLines: Set<Int> = emptySet()
     private var textMode = false
     private var followPen = true
     private var userOpen = true
@@ -42,6 +45,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
     var onTool: (InkTool) -> Unit = {}
     var onSync: () -> Unit = {}
     var onMarkdown: (String) -> Unit = {}
+    var onVisibleMarkdown: (String, String) -> Unit = { _, next -> onMarkdown(next) }
     var onUndo: () -> Unit = {}
     var onRedo: () -> Unit = {}
     var onColor: (String) -> Unit = {}
@@ -70,7 +74,15 @@ class NotePageView(context: Context) : FrameLayout(context) {
         editor.gravity = Gravity.TOP or Gravity.START
         editor.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
         editor.visibility = GONE
-        editor.addTextChangedListener(simpleWatcher { if (!writing) onMarkdown(editor.text?.toString().orEmpty()) })
+        editor.addTextChangedListener(object : android.text.TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {
+                if (!writing) editBefore = s?.toString().orEmpty()
+            }
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
+            override fun afterTextChanged(s: android.text.Editable?) {
+                if (!writing) onVisibleMarkdown(editBefore, s?.toString().orEmpty())
+            }
+        })
         addView(editor, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT))
         tools.orientation = LinearLayout.HORIZONTAL
         tools.gravity = Gravity.CENTER_VERTICAL
@@ -94,8 +106,9 @@ class NotePageView(context: Context) : FrameLayout(context) {
     }
 
     fun revealLine(line: Int) {
-        val text = editor.text?.toString().orEmpty()
-        val offset = ch.fasrv.fanotes.desk.revealLineStart(text, line).coerceIn(0, text.length)
+        val sourceOffset = ch.fasrv.fanotes.desk.revealLineStart(sourceMarkdown, line)
+        val offset = ch.fasrv.fanotes.desk.visibleOffsetForSource(sourceMarkdown, foldedLines, sourceOffset)
+            .coerceIn(0, editor.text?.length ?: 0)
         if (!textMode) setTextMode(true)
         editor.requestFocus()
         editor.setSelection(offset)
@@ -120,6 +133,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
         canUndo: Boolean,
         canRedo: Boolean,
         darkChrome: Boolean,
+        folded: Set<Int> = emptySet(),
     ) {
         if (dark != darkChrome) {
             dark = darkChrome
@@ -128,14 +142,22 @@ class NotePageView(context: Context) : FrameLayout(context) {
         ink.inkTool = tool
         ink.style = style
         ink.fingerDraws = fingerDraws
-        if (path != boundPath) {
+        sourceMarkdown = markdown
+        foldedLines = folded
+        val visible = ch.fasrv.fanotes.desk.markdownWithFolds(markdown, folded)
+        val shown = editor.text?.toString().orEmpty()
+        if (path != boundPath || shown != visible) {
+            val cursor = if (path != boundPath) visible.length else editor.selectionStart.coerceIn(0, visible.length)
             boundPath = path
             writing = true
-            editor.setText(markdown)
-            editor.setSelection(editor.text?.length ?: 0)
+            editor.setText(visible)
+            editor.setSelection(cursor)
             writing = false
         }
-        ink.markdown = markdown
+        if (ink.markdown != visible) {
+            ink.markdown = visible
+            ink.invalidate()
+        }
         if (textMode != text) setTextMode(text)
         syncPill.text = if (syncBusy && !syncLabel.contains('/')) "Startet…" else syncLabel
         val signature = "$tool|${style.color}|${style.brush}|$paper|$fingerDraws|$text|$canUndo|$canRedo|$dark|$followPen"
@@ -433,9 +455,3 @@ class NotePageView(context: Context) : FrameLayout(context) {
 }
 
 private fun android.text.Editable?.orEmpty() = this?.toString().orEmpty()
-
-private fun simpleWatcher(onChange: () -> Unit) = object : android.text.TextWatcher {
-    override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
-    override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
-    override fun afterTextChanged(s: android.text.Editable?) = onChange()
-}

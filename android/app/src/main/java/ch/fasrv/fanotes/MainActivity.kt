@@ -879,6 +879,7 @@ private fun PageSurface(
     val boxes by model.worksheetBoxes.collectAsStateWithLifecycle()
     val highlights by model.worksheetHighlights.collectAsStateWithLifecycle()
     val outlineJump by model.outlineJump.collectAsStateWithLifecycle()
+    val foldedHeadings by model.foldedHeadings.collectAsStateWithLifecycle()
     AndroidView(
         modifier = modifier,
         factory = { context ->
@@ -896,6 +897,7 @@ private fun PageSurface(
             page.onTool = { model.tool.value = it }
             page.onSync = onSync
             page.onMarkdown = { model.updateMarkdown(it) }
+            page.onVisibleMarkdown = { previous, next -> model.updateVisibleMarkdown(previous, next) }
             page.onUndo = { model.undo() }
             page.onRedo = { model.redo() }
             page.onColor = { model.style.value = style.copy(color = it) }
@@ -936,6 +938,7 @@ private fun PageSurface(
                 canUndo = model.session.canUndo,
                 canRedo = model.session.canRedo,
                 darkChrome = dark,
+                folded = foldedHeadings,
             )
             val jump = outlineJump
             if (jump != null) {

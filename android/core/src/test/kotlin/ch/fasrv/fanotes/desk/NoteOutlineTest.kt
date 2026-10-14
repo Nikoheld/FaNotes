@@ -46,4 +46,18 @@ class NoteOutlineTest {
         assertTrue(parseNoteOutline("#nope").isEmpty())
         assertTrue(parseNoteOutline(" # eingerückt").isEmpty())
     }
+
+    @Test
+    fun foldingAHeadingHidesItsBodyAndKeepsTheNextHeading() {
+        val note = "# Einleitung\n\nAbsatz.\n\n## Aufgabe 1\n\nText\n\n# Nächstes\n"
+        val fold = headingFoldRange(note, 1)
+        assertEquals(note.indexOf("\n\nAbsatz") + 1, fold?.from)
+        assertEquals(note.indexOf("# Nächstes") - 1, fold?.to)
+        val visible = markdownWithFolds(note, setOf(1))
+        assertEquals("# Einleitung\n\n# Nächstes\n", visible)
+        val edited = applyFoldedEdit(note, setOf(1), visible, visible.replace("# Einleitung", "# Einleitung!"))
+        assertEquals("# Einleitung!\n\nAbsatz.\n\n## Aufgabe 1\n\nText\n\n# Nächstes\n", edited)
+        assertEquals(setOf(1), shiftFoldedLines(note, edited, setOf(1)))
+        assertNull(headingFoldRange("# Nur\n", 1))
+    }
 }
