@@ -37,6 +37,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
@@ -561,6 +562,7 @@ fun BookPane(model: FaNotesViewModel, modifier: Modifier = Modifier, onOpen: (St
 fun HistoryScreen(model: FaNotesViewModel) {
     val history by model.noteHistory.collectAsStateWithLifecycle()
     val open by model.open.collectAsStateWithLifecycle()
+    val comparison by model.historyComparison.collectAsStateWithLifecycle()
     Column(Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState())) {
         Text("Versionsverlauf", style = MaterialTheme.typography.titleLarge)
         Text(open?.path ?: "Keine Notiz geöffnet.", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
@@ -569,12 +571,29 @@ fun HistoryScreen(model: FaNotesViewModel) {
             Text("Für diese Notiz liegt noch keine ältere Fassung vor. Sie entsteht, sobald die Notiz erneut gespeichert wird.", modifier = Modifier.padding(top = 12.dp))
         }
         history.forEach { snapshot ->
-            Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text(snapshot.createdAt, fontSize = 14.sp)
-                    Text("${snapshot.bytes} Bytes", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
+            Column(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(snapshot.createdAt, fontSize = 14.sp)
+                        Text("${snapshot.bytes} Bytes", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
+                    }
+                    TextButton(onClick = { model.compareHistory(snapshot.id) }) { Text("Vergleichen") }
+                    TextButton(onClick = { model.restoreHistory(snapshot.id) }) { Text("Wiederherstellen") }
                 }
-                TextButton(onClick = { model.restoreHistory(snapshot.id) }) { Text("Wiederherstellen") }
+                if (comparison?.first == snapshot.id) {
+                    val diff = comparison?.second.orEmpty()
+                    diff.lineSequence().forEach { line ->
+                        val color = when {
+                            line.startsWith("+") -> MaterialTheme.colorScheme.primary
+                            line.startsWith("-") -> MaterialTheme.colorScheme.error
+                            else -> MaterialTheme.colorScheme.onSurface
+                        }
+                        Text(line, color = color, fontFamily = FontFamily.Monospace, fontSize = 12.sp)
+                    }
+                    if (ch.fasrv.fanotes.desk.timelineHasInk(diff)) {
+                        Text("Enthält Handschrift.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
+                    }
+                }
             }
         }
         val backupsOn = model.deskSettings.collectAsStateWithLifecycle().value["experimental-backup"] == "on"
