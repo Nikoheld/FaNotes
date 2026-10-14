@@ -181,8 +181,9 @@ fn import_in_temp(
             let worksheets = vault.join(".fanotes").join("worksheets");
             let html_path = worksheets.join(format!("{id}.html"));
             let json_path = worksheets.join(format!("{id}.json"));
-            crate::notes::atomic_write(&html_path, page.html.as_bytes(), 0o600)
-                .map_err(|_| "Eine OneNote-Seite konnte nicht gespeichert werden.".to_owned())?;
+            // Desktop page files use `{target}.tmp-{pid}-{12 hex}` and rethrow
+            // the `writeFile` error.
+            atomic_write_onenote(&html_path, page.html.as_bytes())?;
             created.push(html_path);
             let worksheet = json!({
                 "schemaVersion": 1,
@@ -202,8 +203,7 @@ fn import_in_temp(
                 "{}\n",
                 serde_json::to_string_pretty(&worksheet).unwrap_or_default()
             );
-            crate::notes::atomic_write(&json_path, worksheet_json.as_bytes(), 0o600)
-                .map_err(|_| "Eine OneNote-Seite konnte nicht gespeichert werden.".to_owned())?;
+            atomic_write_onenote(&json_path, worksheet_json.as_bytes())?;
             created.push(json_path);
             let searchable = if page.transcript.is_empty() {
                 String::new()
