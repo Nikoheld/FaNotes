@@ -2704,18 +2704,44 @@ fn legacy_words(value: &str) -> Vec<&str> {
 /// `2026-10-13` next to `GMT` is three numbers and a zone. A month word such
 /// as `13-Oct-26` stays one token for the month scan.
 fn expand_hyphen_numbers(token: &str) -> Vec<&str> {
-    if token.contains(':') || !token.contains('-') {
+    if token.contains(':') || !token.contains('-') || finished_iso_hyphen(token) {
+        // `2026-10-13-` already finished a strict date. The extra hyphen
+        // makes `2026-10-13- January` empty.
         return vec![token];
     }
     let body = token.strip_prefix('-').unwrap_or(token);
-    if !body.contains('-') {
+    if !body.contains('-') && !body.ends_with('-') {
         return vec![token];
     }
-    let parts: Vec<&str> = body.split('-').collect();
-    if parts.len() < 2 || parts.iter().any(|part| unsigned_number(part).is_none()) {
+    let mut parts: Vec<&str> = body.split('-').collect();
+    // `10-13-` is 10 and 13. `10-13--` and `10--13` are not dates.
+    let trailing = parts.last() == Some(&"");
+    if trailing {
+        parts.pop();
+    }
+    if parts.is_empty()
+        || parts.iter().any(|part| unsigned_number(part).is_none())
+        || (parts.len() < 2 && !trailing)
+    {
         return vec![token];
     }
     parts
+}
+
+/// `2026-10-13-` is a finished strict date plus one hyphen.
+fn finished_iso_hyphen(token: &str) -> bool {
+    let Some(body) = token.strip_suffix('-') else {
+        return false;
+    };
+    if body.ends_with('-') {
+        return false;
+    }
+    let parts: Vec<&str> = body.split('-').collect();
+    parts.len() == 3
+        && parts[0].len() == 4
+        && parts[1].len() == 2
+        && parts[2].len() == 2
+        && parts.iter().all(|part| unsigned_number(part).is_some())
 }
 
 /// `13)` is the number 13 and then a `)`. The `)` is its own word.
@@ -9595,6 +9621,53 @@ mod local_zone_tests {
         assert_eq!(unix_millis_from_iso("10/13/2026/1 January"), None);
         assert_eq!(
             unix_millis_from_iso("10/13/2026"),
+            Some(1_791_864_000_000)
+        );
+    }
+
+    #[test]
+    fn a_trailing_hyphen_is_padding_before_a_month() {
+        let _lock = TRASH_CLOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let _restore = RestoreTz(std::env::var_os("TZ"));
+        unsafe { std::env::set_var("TZ", "America/New_York") };
+        unsafe { tzset() };
+        // `10-13- January` is 10 January 2013. The last hyphen is padding.
+        // `2026-10-13- January` already finished a strict date, so it is empty.
+        assert_eq!(
+            unix_millis_from_iso("10-13- January"),
+            Some(1_357_794_000_000)
+        );
+        assert_eq!(unix_millis_from_iso("10- January"), Some(979_102_800_000));
+        assert_eq!(
+            unix_millis_from_iso("10-13-2026- January"),
+            Some(1_357_794_000_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10- January"),
+            Some(1_768_021_200_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("-10-13- January"),
+            Some(1_357_794_000_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("10-13- January 16:00"),
+            Some(1_357_851_600_000)
+        );
+        assert_eq!(unix_millis_from_iso("10-13- Oct"), Some(1_381_377_600_000));
+        assert_eq!(unix_millis_from_iso("1-2- January"), Some(1_009_861_200_000));
+        assert_eq!(unix_millis_from_iso("99-1- January"), Some(915_166_800_000));
+        assert_eq!(
+            unix_millis_from_iso("10-13-50- January"),
+            Some(1_357_794_000_000)
+        );
+        assert_eq!(unix_millis_from_iso("2026-10-13- January"), None);
+        assert_eq!(unix_millis_from_iso("10-13-- January"), None);
+        assert_eq!(unix_millis_from_iso("10--13 January"), None);
+        assert_eq!(
+            unix_millis_from_iso("10-13-2026-"),
             Some(1_791_864_000_000)
         );
     }
