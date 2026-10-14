@@ -510,7 +510,7 @@ fn read_records(root: &Path) -> Result<Vec<Value>, String> {
     let meta = match fs::symlink_metadata(&path) {
         Ok(meta) => meta,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(_) => return Err("addons.json ist ungültig.".to_owned()),
+        Err(error) => return Err(crate::vault::node_lstat_error(&path, &error)),
     };
     if meta.file_type().is_symlink() || !meta.is_file() {
         return Err("addons.json ist ungültig.".to_owned());
@@ -518,9 +518,11 @@ fn read_records(root: &Path) -> Result<Vec<Value>, String> {
     if meta.len() as usize > MAX_RECORDS_FILE_BYTES {
         return Err("Die Add-on-Liste ist zu groß.".to_owned());
     }
-    let raw = fs::read(&path)
-        .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
-        .map_err(|_| "addons.json ist ungültig.".to_owned())?;
+    let raw = match fs::read(&path) {
+        Ok(bytes) => String::from_utf8_lossy(&bytes).into_owned(),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(crate::notes::node_open_error(&path, &error)),
+    };
     match serde_json::from_str::<Value>(&raw) {
         Ok(Value::Array(items)) => Ok(items),
         Ok(_) => Ok(Vec::new()),
@@ -612,29 +614,41 @@ fn addon_dir(host: &Host, id: &str) -> Result<PathBuf, String> {
 fn store_root(host: &Host) -> Result<PathBuf, String> {
     let root = host.app_data.join("addons");
     match fs::symlink_metadata(&root) {
-        Ok(meta) if meta.file_type().is_symlink() || !meta.is_dir() => {
-            Err("Der Add-on-Ordner ist unsicher.".to_owned())
-        }
-        Ok(_) => Ok(root),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(root),
-        Err(_) => Err("Der Add-on-Ordner ist unsicher.".to_owned()),
+        Ok(meta) if meta.file_type().is_symlink() => Err("Der Add-on-Ordner ist unsicher.".to_owned()),
+        // A missing folder, a file, and a folder that cannot be searched all
+        // continue. Listing then stats `addons.json`. Saving calls `mkdir`.
+        _ => Ok(root),
     }
 }
 
 fn ensure_store_root(host: &Host) -> Result<PathBuf, String> {
     let root = store_root(host)?;
-    if fs::symlink_metadata(&root).is_ok() {
-        return Ok(root);
+    if let Ok(meta) = fs::symlink_metadata(&root) {
+        if meta.file_type().is_symlink() {
+            return Err("Der Add-on-Ordner ist unsicher.".to_owned());
+        }
+        if meta.is_dir() {
+            return Ok(root);
+        }
     }
-    fs::create_dir(&root)
-        .map_err(|_| "Der Add-on-Ordner konnte nicht angelegt werden.".to_owned())?;
+    match fs::create_dir(&root) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+            if fs::symlink_metadata(&root).is_ok_and(|meta| meta.is_dir() && !meta.file_type().is_symlink())
+            {
+                return Ok(root);
+            }
+            return Err(crate::vault::node_mkdir_error(&root, &error));
+        }
+        Err(error) => return Err(crate::vault::node_mkdir_error(&root, &error)),
+    }
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         let _ = fs::set_permissions(&root, fs::Permissions::from_mode(0o700));
     }
     let meta = fs::symlink_metadata(&root)
-        .map_err(|_| "Der Add-on-Ordner konnte nicht angelegt werden.".to_owned())?;
+        .map_err(|error| crate::vault::node_lstat_error(&root, &error))?;
     if meta.file_type().is_symlink() || !meta.is_dir() {
         return Err("Der Add-on-Ordner ist unsicher.".to_owned());
     }

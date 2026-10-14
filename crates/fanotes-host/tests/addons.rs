@@ -380,3 +380,76 @@ fn an_unreadable_addon_file_uses_the_desktop_open_error() {
         "EISDIR: illegal operation on a directory, read"
     );
 }
+
+#[cfg(unix)]
+#[test]
+fn an_unsearchable_profile_reports_the_desktop_addon_list_error() {
+    use std::os::unix::fs::PermissionsExt;
+    let (_dir, mut host) = scratch("unsearchable-profile");
+    let app = host.app_data.clone();
+    let list = app.join("addons/addons.json");
+    let store = app.join("addons");
+    std::fs::set_permissions(&app, std::fs::Permissions::from_mode(0o666)).unwrap();
+    struct Restore(std::path::PathBuf);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            let _ = std::fs::set_permissions(&self.0, std::fs::Permissions::from_mode(0o700));
+        }
+    }
+    let _restore = Restore(app);
+    assert_eq!(
+        host.dispatch("fanotes:addons-list", &[]).unwrap_err(),
+        format!("EACCES: permission denied, lstat '{}'", list.display())
+    );
+    assert_eq!(
+        host.dispatch(
+            "fanotes:addons-save",
+            &[json!({ "id": "margin-notes", "enabled": true })],
+        )
+        .unwrap_err(),
+        format!("EACCES: permission denied, mkdir '{}'", store.display())
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn an_unreadable_addon_list_uses_the_desktop_open_error() {
+    use std::os::unix::fs::PermissionsExt;
+    let (_dir, mut host) = scratch("unreadable-list");
+    let list = host.app_data.join("addons/addons.json");
+    std::fs::create_dir_all(list.parent().unwrap()).unwrap();
+    std::fs::write(&list, b"[]\n").unwrap();
+    std::fs::set_permissions(&list, std::fs::Permissions::from_mode(0o000)).unwrap();
+    struct Restore(std::path::PathBuf);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            let _ = std::fs::set_permissions(&self.0, std::fs::Permissions::from_mode(0o600));
+        }
+    }
+    let _restore = Restore(list.clone());
+    assert_eq!(
+        host.dispatch("fanotes:addons-list", &[]).unwrap_err(),
+        format!("EACCES: permission denied, open '{}'", list.display())
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_file_named_addons_reports_the_desktop_lstat_error() {
+    let (_dir, mut host) = scratch("file-store");
+    let list = host.app_data.join("addons/addons.json");
+    let store = host.app_data.join("addons");
+    std::fs::write(&store, b"datei").unwrap();
+    assert_eq!(
+        host.dispatch("fanotes:addons-list", &[]).unwrap_err(),
+        format!("ENOTDIR: not a directory, lstat '{}'", list.display())
+    );
+    assert_eq!(
+        host.dispatch(
+            "fanotes:addons-save",
+            &[json!({ "id": "margin-notes", "enabled": true })],
+        )
+        .unwrap_err(),
+        format!("EEXIST: file already exists, mkdir '{}'", store.display())
+    );
+}

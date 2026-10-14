@@ -351,6 +351,7 @@ fn node_fs_error(path: &Path, error: &std::io::Error, syscall: &str) -> String {
         Some(libc::EIO) => ("EIO", "i/o error"),
         Some(libc::ELOOP) => ("ELOOP", "too many symbolic links encountered"),
         Some(libc::ENOTDIR) => ("ENOTDIR", "not a directory"),
+        Some(libc::EEXIST) => ("EEXIST", "file already exists"),
         Some(libc::ENAMETOOLONG) => ("ENAMETOOLONG", "name too long"),
         _ => ("EACCES", "permission denied"),
     };
