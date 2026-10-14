@@ -37,7 +37,12 @@ import ch.fasrv.fanotes.desk.templatesToSeed
 import ch.fasrv.fanotes.desk.resolveMarkdownConflict
 import ch.fasrv.fanotes.desk.serializeFolderColors
 import ch.fasrv.fanotes.desk.withFolderColor
+import ch.fasrv.fanotes.desk.createNoteBackup
+import ch.fasrv.fanotes.desk.noteBackupsJson
 import ch.fasrv.fanotes.desk.parseHomeworkMarkdown
+import ch.fasrv.fanotes.desk.parseNoteBackups
+import ch.fasrv.fanotes.desk.restoreNoteBackup
+import ch.fasrv.fanotes.desk.searchTranscriptHits
 import ch.fasrv.fanotes.desk.SUBJECT_BOOKS_PATH
 import ch.fasrv.fanotes.desk.WorksheetHighlight
 import ch.fasrv.fanotes.desk.attachSubjectBook
@@ -666,6 +671,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     val splitSession = InkSession(newInkDocument("Spalte", "dots", isoNow()))
     private var splitNote: OpenNote? = null
     private var openedAtMs = 0L
+    private var reveal: Pair<String, Double>? = null
     val aiReply = MutableStateFlow("")
     val paletteOpen = MutableStateFlow(false)
     val updateLabel = MutableStateFlow("2026.10.7")
@@ -684,12 +690,50 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         openTabs.value = (listOf(path) + openTabs.value.filterNot { it == path }).take(12)
     }
 
+    fun openSearchHit(hit: SearchHit) {
+        reveal = hit.anchorY?.let { hit.path to it }
+        openPath(hit.path)
+        destination.value = "notes"
+    }
+
+    fun takeReveal(path: String): Double? {
+        val pending = reveal ?: return null
+        if (pending.first != path) return null
+        reveal = null
+        return pending.second
+    }
+
+    fun snapshotNote() {
+        val note = open.value ?: return
+        val list = createNoteBackup(parseNoteBackups(note.payload.array("noteBackups")), note.path, stripFamdPayload(markdown.value))
+        val payload = (note.payload.deepCopy() as ch.fasrv.fanotes.json.JsonValue.Obj)
+        payload.put("noteBackups", noteBackupsJson(list))
+        open.value = note.copy(payload = payload)
+        noteChanged()
+        message.value = "Sicherung angelegt."
+    }
+
+    fun restoreNoteBackup(id: String) {
+        val note = open.value ?: return
+        val content = restoreNoteBackup(parseNoteBackups(note.payload.array("noteBackups")), id, note.path) ?: return
+        updateMarkdown(content)
+        message.value = "Sicherung wiederhergestellt."
+        destination.value = "notes"
+    }
+
     fun searchVaultText(query: String) {
         searchQuery.value = query
         viewModelScope.launch {
             searchHits.value = withContext(Dispatchers.IO) {
                 val files = graph.vault.walkFiles().filter { it.path.endsWith(".md") || it.path.endsWith(".markdown") }
-                searchVault(files.map { it.path to (graph.vault.read(it.path)?.decodeToString().orEmpty()) }, query)
+                val texts = files.map { it.path to (graph.vault.read(it.path)?.decodeToString().orEmpty()) }
+                val transcripts = texts.mapNotNull { (path, _) ->
+                    val famdPath = if (path.endsWith(".famd")) path else companionPath(path, ".famd")
+                    val ink = ch.fasrv.fanotes.famd.parseFamd(graph.vault.read(famdPath)?.decodeToString().orEmpty()).payload?.obj("ink")
+                    val transcript = ink?.string("searchTranscript") ?: return@mapNotNull null
+                    path to transcript
+                }
+                (searchVault(texts, query) + searchTranscriptHits(transcripts, query)).take(200)
             }
         }
     }

@@ -263,6 +263,13 @@ class InkSurfaceView @JvmOverloads constructor(
     fun cameraTop(): Float = pageTop
     fun cameraScale(): Float = pixelsPerPageUnit()
 
+    fun revealY(y: Double) {
+        val scale = pixelsPerPageUnit()
+        pageTop = height / 2f - (y.coerceIn(0.0, 1.0) * sessionHeight() * scale).toFloat()
+        invalidate()
+        publishCamera()
+    }
+
     fun zoomBy(multiplier: Float) {
         zoom = (zoom * multiplier).coerceIn(0.5f, 4f)
         settleZoom()

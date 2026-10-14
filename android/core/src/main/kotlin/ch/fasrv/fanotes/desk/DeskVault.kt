@@ -259,7 +259,7 @@ fun applyReview(markdown: String, cardId: String, grade: String, today: String):
     return embedCards(markdown, next)
 }
 
-data class SearchHit(val path: String, val line: Int, val text: String)
+data class SearchHit(val path: String, val line: Int, val text: String, val anchorY: Double? = null)
 
 fun searchVault(files: List<Pair<String, String>>, query: String): List<SearchHit> {
     val needle = query.trim()
