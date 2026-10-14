@@ -2538,8 +2538,9 @@ fn omit_parentheticals(value: &str) -> String {
 }
 
 /// `13Oct2026` and `Oct2026` are separate fields. `GMT5` is the zone `GMT`
-/// and the number 5. A non-keyword glued to a digit, as in `foo13` or
-/// `Oct13th`, stays one token so the date scan rejects it.
+/// and the number 5. `PM5` is the meridiem and the number 5. A non-keyword
+/// glued to a digit, as in `foo13` or `Oct13th`, stays one token so the date
+/// scan rejects it.
 fn expand_glued_month(token: &str) -> Vec<&str> {
     // `GMT+5` is one zone. Splitting it would turn the 5 into a date number.
     if named_zone_offset(token).is_some()
@@ -2559,7 +2560,10 @@ fn expand_glued_month(token: &str) -> Vec<&str> {
                 index += 1;
             }
             let letters = &token[start..index];
-            if english_month(letters).is_none() && !exact_zone_keyword(letters) {
+            if english_month(letters).is_none()
+                && !exact_zone_keyword(letters)
+                && !is_ampm(letters)
+            {
                 return vec![token];
             }
             runs.push(letters);
@@ -2854,6 +2858,14 @@ fn compose_month_date(words: &[&str]) -> Option<(i32, i32, i32, String, Option<i
         if is_ampm(word) {
             if time.index == 0 {
                 if number_seen {
+                    return None;
+                }
+                // `PM5` before a clock is not a date. `PM 5` ignores `PM`.
+                if words
+                    .get(index + 1)
+                    .copied()
+                    .is_some_and(|next| digits_follow_zone(word, next))
+                {
                     return None;
                 }
                 continue;
@@ -7295,6 +7307,90 @@ mod local_zone_tests {
         assert_eq!(unix_millis_from_iso("foo5 Oct 13 2026"), None);
         assert_eq!(unix_millis_from_iso("AM5 Oct 13 2026"), None);
         assert_eq!(unix_millis_from_iso("Oct 13 2026 4:00PM5"), None);
+    }
+
+    #[test]
+    fn a_meridiem_glued_to_digits_is_still_a_meridiem() {
+        let _lock = TRASH_CLOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let _restore = RestoreTz(std::env::var_os("TZ"));
+        unsafe { std::env::set_var("TZ", "America/New_York") };
+        unsafe { tzset() };
+        // `PM5` is `PM` and then the number 5. Before a clock, that glue is
+        // not a date. `4:00PM5` stays empty because the meridiem touches the clock.
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 4:00 PM5"),
+            Some(1_791_921_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 4:00 AM5"),
+            Some(1_791_878_400_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 4:00 PM50"),
+            Some(1_791_921_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 4:00 PM 5"),
+            Some(1_791_921_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("4:00 PM5 Oct 13 2026"),
+            Some(1_381_003_200_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 12:00 AM5"),
+            Some(1_791_864_000_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 12:00 PM5"),
+            Some(1_791_907_200_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 4:5 PM5"),
+            Some(1_791_921_900_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 4:00:30 PM5"),
+            Some(1_791_921_630_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 4:00:60 PM5"),
+            Some(1_791_921_605_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 4:60 PM5"),
+            Some(1_791_921_900_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("hello 4:00 PM5 Oct 13 2026"),
+            Some(1_381_003_200_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 11:00 PM5"),
+            Some(1_791_946_800_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("PM 5 Oct 13 2026"),
+            Some(1_380_945_600_000)
+        );
+        assert_eq!(unix_millis_from_iso("AM Oct 13 2026"), Some(1_791_864_000_000));
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 4:00 PM EST5"),
+            Some(1_791_925_200_000)
+        );
+        assert_eq!(unix_millis_from_iso("Oct 13 2026 4:00PM5"), None);
+        assert_eq!(unix_millis_from_iso("Oct 13 2026 4:00AM5"), None);
+        assert_eq!(unix_millis_from_iso("4:00PM5 Oct 13 2026"), None);
+        assert_eq!(unix_millis_from_iso("PM5 Oct 13 2026"), None);
+        assert_eq!(unix_millis_from_iso("AM5 Oct 13 2026"), None);
+        assert_eq!(unix_millis_from_iso("Oct 13 2026 PM5"), None);
+        assert_eq!(unix_millis_from_iso("Oct 13 2026 4 PM5"), None);
+        assert_eq!(unix_millis_from_iso("Oct 13 2026 4:00 PMX5"), None);
+        assert_eq!(unix_millis_from_iso("Oct 13 2026 4:00 p.m.5"), None);
+        assert_eq!(unix_millis_from_iso("Oct 13 2026 11 PM5"), None);
+        assert_eq!(unix_millis_from_iso("16:00 PM5 Oct 13 2026"), None);
     }
 
     #[test]
