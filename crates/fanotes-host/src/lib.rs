@@ -1769,14 +1769,15 @@ fn marker_is_fresh(created_at: &str) -> bool {
     created_ms > now_ms || now_ms - created_ms <= RESET_MAX_AGE_MS
 }
 
-/// `16:00,30` is empty. The comma touches a clock field that already finished.
-/// `16:,30` is 16:30, and `16:00:00.5,1` keeps the fraction.
-fn comma_glued_to_final_clock(value: &str) -> bool {
+/// `16:00,30` and `16:00!` are empty. The mark touches a finished clock field.
+/// `16:,30` is 16:30, and `16:00:00.5!` keeps the fraction.
+fn junk_glued_to_final_clock(value: &str) -> bool {
     let bytes = value.as_bytes();
     let mut index = 0;
     while index < bytes.len() {
-        if bytes[index].is_ascii_digit() && (index == 0 || !bytes[index - 1].is_ascii_digit())
-            && clock_ends_on_comma(bytes, index)
+        if bytes[index].is_ascii_digit()
+            && (index == 0 || !matches!(bytes[index - 1], b'0'..=b'9' | b'+' | b'-'))
+            && clock_ends_on_junk(bytes, index)
         {
             return true;
         }
@@ -1785,11 +1786,23 @@ fn comma_glued_to_final_clock(value: &str) -> bool {
     false
 }
 
-fn clock_ends_on_comma(bytes: &[u8], start: usize) -> bool {
+fn allowed_after_final_clock(bytes: &[u8], index: usize) -> bool {
+    match bytes[index] {
+        b'Z' | b'z' | b'+' | b'-' | b'\t' | b'\n' | 0x0B | 0x0C | b'\r' | b' ' => true,
+        byte if byte.is_ascii() => false,
+        _ => std::str::from_utf8(&bytes[index..])
+            .ok()
+            .and_then(|rest| rest.chars().next())
+            .is_some_and(is_date_parse_space),
+    }
+}
+
+fn clock_ends_on_junk(bytes: &[u8], start: usize) -> bool {
     let mut index = skip_clock_digits(bytes, start);
     if index >= bytes.len() || bytes[index] != b':' {
         return false;
     }
+    let mut field = 1;
     loop {
         index += 1;
         if index < bytes.len() && bytes[index] == b':' {
@@ -1801,15 +1814,33 @@ fn clock_ends_on_comma(bytes: &[u8], start: usize) -> bool {
         if index >= bytes.len() || !bytes[index].is_ascii_digit() {
             return false;
         }
-        index = skip_clock_digits(bytes, index);
+        let (value, end) = clock_field_value(bytes, index);
+        index = end;
+        // `60` is not a second, so `16:00:60.` keeps the dot. `00` is.
+        let finishes = (1..=2).contains(&field) && (0..=59).contains(&value);
+        field += 1;
         if index < bytes.len() && bytes[index] == b':' {
             continue;
         }
         if index < bytes.len() && bytes[index] == b'.' {
-            return false;
+            let after = index + 1;
+            // `16:00:00.5!` is a fraction. `16:00.` has no fraction digit.
+            if after < bytes.len() && bytes[after].is_ascii_digit() {
+                return false;
+            }
+            return finishes;
         }
-        return index < bytes.len() && bytes[index] == b',';
+        return finishes && index < bytes.len() && !allowed_after_final_clock(bytes, index);
     }
+}
+
+fn clock_field_value(bytes: &[u8], start: usize) -> (i32, usize) {
+    let end = skip_clock_digits(bytes, start);
+    let value = std::str::from_utf8(&bytes[start..end])
+        .ok()
+        .and_then(|text| text.parse().ok())
+        .unwrap_or(i32::MAX);
+    (value, end)
 }
 
 fn skip_clock_digits(bytes: &[u8], start: usize) -> usize {
@@ -1821,11 +1852,6 @@ fn skip_clock_digits(bytes: &[u8], start: usize) -> usize {
 }
 
 fn unix_millis_from_iso(value: &str) -> Option<u64> {
-    if comma_glued_to_final_clock(value) {
-        // `16:00,30` finalized the clock and then saw a comma. `16:00 ,30`
-        // has a space first, and `16:00:00.5,1` finalized through the fraction.
-        return None;
-    }
     if value.contains('(') {
         // `(comment)` is skipped, and an unclosed `(` consumes the rest.
         // The mark is a separator: `2026-10-13(EST)` stays local, while
@@ -1837,6 +1863,16 @@ fn unix_millis_from_iso(value: &str) -> Option<u64> {
         if omitted != value {
             return unix_millis_from_iso(&omitted);
         }
+    }
+    if junk_glued_to_final_clock(value) {
+        // `16:00,30` and `16:00!` finalized the clock. `16:00 ,30` has a
+        // space first, and `16:00:00.5!` finalized through the fraction.
+        // A clock inside `(...)` is a comment, so it is removed first.
+        return None;
+    }
+    if let Some(next) = separate_slash_after_fraction(value) {
+        // `16:00:00.5/1` keeps the fraction. The slash is only a separator.
+        return unix_millis_from_iso(&next);
     }
     match rewrite_ignored_symbols(value) {
         SymbolRewrite::Illegal => return None,
@@ -2880,6 +2916,29 @@ fn push_separator(out: &mut String) {
     }
 }
 
+fn fraction_digits_before(chars: &[char], index: usize) -> bool {
+    let mut digit = index;
+    while digit > 0 && chars[digit - 1].is_ascii_digit() {
+        digit -= 1;
+    }
+    digit > 0 && digit < index && chars[digit - 1] == '.'
+}
+
+fn separate_slash_after_fraction(value: &str) -> Option<String> {
+    let chars: Vec<char> = value.chars().collect();
+    let mut changed = false;
+    let mut out = String::with_capacity(value.len());
+    for (index, character) in chars.iter().copied().enumerate() {
+        if character == '/' && fraction_digits_before(&chars, index) {
+            out.push(' ');
+            changed = true;
+        } else {
+            out.push(character);
+        }
+    }
+    if changed { Some(out) } else { None }
+}
+
 fn is_ignored_legacy_symbol(character: char) -> bool {
     (character as u32) < u32::from(b'A')
         && !character.is_ascii_digit()
@@ -2902,6 +2961,10 @@ fn symbol_ends_a_clock(chars: &[char], index: usize) -> bool {
         }
     }
     if !saw_colon {
+        return false;
+    }
+    // `16:00:00.5!` finished through the fraction. The mark is ignored.
+    if fraction_digits_before(chars, index) {
         return false;
     }
     let mut ahead = index + 1;
@@ -9821,6 +9884,72 @@ mod local_zone_tests {
             Some(1_791_923_400_000)
         );
         assert_eq!(unix_millis_from_iso("Oct 13, 2026,"), Some(1_791_864_000_000));
+    }
+
+    #[test]
+    fn junk_glued_to_a_finished_clock_is_empty() {
+        let _lock = TRASH_CLOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let _restore = RestoreTz(std::env::var_os("TZ"));
+        unsafe { std::env::set_var("TZ", "America/New_York") };
+        unsafe { tzset() };
+        // `16:00!` and `16:00.` finished the clock. A space before the mark
+        // is ordinary, and a fraction may keep the mark.
+        assert_eq!(unix_millis_from_iso("Oct 13 2026 16:00!"), None);
+        assert_eq!(unix_millis_from_iso("Oct 13 2026 16:00."), None);
+        assert_eq!(unix_millis_from_iso("Oct 13 2026 16:00/"), None);
+        assert_eq!(unix_millis_from_iso("Oct 13 2026 16:00#"), None);
+        assert_eq!(unix_millis_from_iso("Oct 13 2026 16:00;"), None);
+        assert_eq!(unix_millis_from_iso("Oct 13 2026 16:00?"), None);
+        assert_eq!(unix_millis_from_iso("Oct 13 2026 16:00*"), None);
+        assert_eq!(unix_millis_from_iso("Oct 13 2026 16:00["), None);
+        assert_eq!(unix_millis_from_iso("Oct 13 2026 16::30."), None);
+        assert_eq!(unix_millis_from_iso("Oct 13 2026 16:.5."), None);
+        assert_eq!(unix_millis_from_iso("2026-10-13 16:00."), None);
+        assert_eq!(unix_millis_from_iso("2026-10-13 16:00!"), None);
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 16:00 !"),
+            Some(1_791_921_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 16:00 ."),
+            Some(1_791_921_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 16:00 /"),
+            Some(1_791_921_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 16:00Z"),
+            Some(1_791_907_200_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 16:00+5"),
+            Some(1_791_889_200_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 16:00:00.5!"),
+            Some(1_791_921_600_500)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 16:00:00.5."),
+            Some(1_791_921_600_500)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 16:00:00.5/"),
+            Some(1_791_921_600_500)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 4:00 PM!"),
+            Some(1_791_921_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 16:,"),
+            Some(1_791_921_600_000)
+        );
+        assert_eq!(unix_millis_from_iso("Oct 13 2026 16:00 )"), None);
+        assert_eq!(unix_millis_from_iso("Oct 13 2026 16:00 x"), None);
     }
 
     #[test]
