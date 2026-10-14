@@ -1,0 +1,587 @@
+package ch.fasrv.fanotes
+
+import android.Manifest
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.net.Uri
+import android.os.Build
+import android.os.Bundle
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.viewModels
+import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.DriveFileMove
+import androidx.compose.material.icons.automirrored.filled.Redo
+import androidx.compose.material.icons.automirrored.filled.Undo
+import androidx.compose.material.icons.filled.CleaningServices
+import androidx.compose.material.icons.filled.CreateNewFolder
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.PictureAsPdf
+import androidx.compose.material.icons.filled.Sync
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Slider
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.content.ContextCompat
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import ch.fasrv.fanotes.ink.InkTool
+import ch.fasrv.fanotes.sync.SyncStatus
+import ch.fasrv.fanotes.vault.NoteKind
+import ch.fasrv.fanotes.vault.VaultNode
+
+class MainActivity : ComponentActivity() {
+    private val model: FaNotesViewModel by viewModels()
+    private val openTree = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        if (uri == null) return@registerForActivityResult
+        contentResolver.takePersistableUriPermission(
+            uri,
+            Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+        )
+        model.useTree(uri)
+    }
+    private val importPdf = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        import(uri, pdf = true)
+    }
+    private val importImage = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        import(uri, pdf = false)
+    }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        if (Build.VERSION.SDK_INT >= 30) {
+            val best = display?.supportedModes?.maxByOrNull { it.refreshRate }
+            if (best != null) window.attributes = window.attributes.apply { preferredDisplayModeId = best.modeId }
+        }
+        if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 21)
+        }
+        setContent {
+            FaNotesTheme {
+                FaNotesScreen(
+                    model = model,
+                    onOpenVault = { openTree.launch(null) },
+                    onImportPdf = { importPdf.launch(arrayOf("application/pdf")) },
+                    onImportImage = { importImage.launch(arrayOf("image/*")) },
+                )
+            }
+        }
+    }
+
+    override fun onPause() {
+        try {
+            kotlinx.coroutines.runBlocking {
+                kotlinx.coroutines.withTimeout(4_000) { model.saveNow() }
+            }
+        } catch (_: Exception) {
+            // A slow disk must not take the activity down. The next edit saves again.
+        }
+        super.onPause()
+    }
+
+    private fun import(uri: Uri?, pdf: Boolean) {
+        if (uri == null) return
+        val name = uri.lastPathSegment?.substringAfterLast('/') ?: if (pdf) "Document.pdf" else "Image.jpg"
+        val bytes = model.readUri(uri) ?: return
+        model.importBytes(name, bytes, pdf)
+    }
+}
+
+private val Accent = Color(0xFF2A6F97)
+private val PenColors = listOf("#202333", "#2457D6", "#D23B4A", "#1F8A4C", "#E2A21B", "#7A4DD6")
+private val Papers = listOf(
+    "blank" to "Leer",
+    "dots" to "Punkte",
+    "squares" to "Häuschen",
+    "grid" to "Kariert",
+    "lines" to "Linien",
+    "millimeter" to "mm",
+)
+private val Brushes = listOf(
+    "fineliner" to "Fein",
+    "pencil" to "Blei",
+    "marker" to "Marker",
+    "highlighter" to "Textmarker",
+    "calligraphy" to "Feder",
+)
+
+@Composable
+fun FaNotesTheme(content: @Composable () -> Unit) {
+    val dark = isSystemInDarkTheme()
+    val scheme = if (dark) {
+        darkColorScheme(primary = Color(0xFF8EC5E8), secondary = Accent, background = Color(0xFF15171C), surface = Color(0xFF1E2128))
+    } else {
+        lightColorScheme(primary = Accent, secondary = Color(0xFF6B7280), background = Color(0xFFF4F1EA), surface = Color(0xFFFFFCF7))
+    }
+    MaterialTheme(colorScheme = scheme, content = content)
+}
+
+@Composable
+fun FaNotesScreen(
+    model: FaNotesViewModel,
+    onOpenVault: () -> Unit,
+    onImportPdf: () -> Unit,
+    onImportImage: () -> Unit,
+) {
+    val tree by model.tree.collectAsStateWithLifecycle()
+    val open by model.open.collectAsStateWithLifecycle()
+    val tool by model.tool.collectAsStateWithLifecycle()
+    val style by model.style.collectAsStateWithLifecycle()
+    val finger by model.fingerDraws.collectAsStateWithLifecycle()
+    val showText by model.showText.collectAsStateWithLifecycle()
+    val showList by model.showList.collectAsStateWithLifecycle()
+    val markdown by model.markdown.collectAsStateWithLifecycle()
+    val sync by model.sync.collectAsStateWithLifecycle()
+    val message by model.message.collectAsStateWithLifecycle()
+    val backdrop by model.backdrop.collectAsStateWithLifecycle()
+    val token by model.canvasToken.collectAsStateWithLifecycle()
+    val vaultLabel by model.vaultLabel.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    var syncOpen by remember { mutableStateOf(false) }
+    var createNote by remember { mutableStateOf(false) }
+    var createFolder by remember { mutableStateOf(false) }
+    val wide = LocalConfiguration.current.screenWidthDp >= 840
+
+    LaunchedEffect(sync.status) {
+        if (sync.status != SyncStatus.SIGNED_OUT && sync.status != SyncStatus.UNAVAILABLE) {
+            try {
+                ContextCompat.startForegroundService(context, Intent(context, SyncService::class.java))
+            } catch (_: Exception) {
+                // Background limits can refuse a foreground service. Sync still runs while the app is open.
+            }
+        }
+    }
+
+    Scaffold(
+        bottomBar = {
+            EditorTools(
+                tool = tool,
+                onTool = { model.tool.value = it },
+                canUndo = model.session.canUndo,
+                canRedo = model.session.canRedo,
+                onUndo = { model.undo(); model.canvasToken.value += 1 },
+                onRedo = { model.redo(); model.canvasToken.value += 1 },
+                onText = { model.showText.value = !showText },
+                textOn = showText,
+            )
+        },
+    ) { padding ->
+        Row(Modifier.fillMaxSize().padding(padding).background(MaterialTheme.colorScheme.background)) {
+            if (wide || showList) {
+                VaultPane(
+                    modifier = Modifier.width(if (wide) 320.dp else 360.dp).fillMaxHeight(),
+                    tree = tree,
+                    selected = open?.path,
+                    vaultLabel = vaultLabel,
+                    syncLabel = model.syncLabel(),
+                    onOpen = { model.openPath(it) },
+                    onSync = { syncOpen = true },
+                    onCreateNote = { createNote = true },
+                    onCreateFolder = { createFolder = true },
+                    onImportPdf = onImportPdf,
+                    onImportImage = onImportImage,
+                    onOpenVault = onOpenVault,
+                    onPrivateVault = { model.usePrivateVault() },
+                    onDelete = { model.delete(it) },
+                )
+            }
+            if (wide || !showList) {
+                Column(Modifier.weight(1f).fillMaxHeight()) {
+                    EditorHeader(
+                        title = open?.title ?: "FaNotes",
+                        paper = model.session.document.paperStyle,
+                        style = style,
+                        fingerDraws = finger,
+                        showMenu = !wide,
+                        onMenu = { model.showList.value = true },
+                        onPaper = { model.setPaper(it) },
+                        onColor = { model.style.value = style.copy(color = it) },
+                        onWidth = { model.style.value = style.copy(baseWidth = it.toDouble()) },
+                        onBrush = { model.style.value = style.copy(brush = it) },
+                        onFinger = { model.fingerDraws.value = it },
+                        onDeleteSelection = { model.deleteSelection(); model.canvasToken.value += 1 },
+                    )
+                    Row(Modifier.weight(1f).fillMaxWidth()) {
+                        InkCanvas(
+                            model = model,
+                            tool = tool,
+                            style = style,
+                            finger = finger,
+                            backdrop = backdrop,
+                            token = token,
+                            path = open?.path,
+                            modifier = Modifier.weight(1f).fillMaxHeight(),
+                        )
+                        if (showText) {
+                            MarkdownPanel(
+                                text = markdown,
+                                onChange = { model.updateMarkdown(it) },
+                                modifier = Modifier.width(360.dp).fillMaxHeight(),
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if (syncOpen) {
+        SyncDialog(
+            email = sync.account?.email,
+            status = model.syncLabel(),
+            error = sync.error ?: message,
+            onDismiss = { syncOpen = false },
+            onLogin = { email, password, register -> model.login(email, password, register) },
+            onLogout = { model.logout() },
+            onSync = { model.syncNow() },
+        )
+    }
+    if (createNote) NameDialog("Neue Notiz", "Vorlesung") { name ->
+        createNote = false
+        if (name != null) model.createNote(name)
+    }
+    if (createFolder) NameDialog("Neuer Ordner", "Schule") { name ->
+        createFolder = false
+        if (name != null) model.createFolder(name)
+    }
+}
+
+@Composable
+private fun VaultPane(
+    modifier: Modifier,
+    tree: List<VaultNode>,
+    selected: String?,
+    vaultLabel: String,
+    syncLabel: String,
+    onOpen: (String) -> Unit,
+    onSync: () -> Unit,
+    onCreateNote: () -> Unit,
+    onCreateFolder: () -> Unit,
+    onImportPdf: () -> Unit,
+    onImportImage: () -> Unit,
+    onOpenVault: () -> Unit,
+    onPrivateVault: () -> Unit,
+    onDelete: (String) -> Unit,
+) {
+    Column(modifier.background(MaterialTheme.colorScheme.surface).padding(16.dp)) {
+        Text("FaNotes", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
+        Text(vaultLabel, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
+        Spacer(Modifier.height(12.dp))
+        FilledTonalButton(onClick = onSync, modifier = Modifier.fillMaxWidth()) {
+            Icon(Icons.Filled.Sync, contentDescription = null)
+            Spacer(Modifier.width(8.dp))
+            Text(syncLabel)
+        }
+        Spacer(Modifier.height(8.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FilledTonalButton(onClick = onCreateNote, modifier = Modifier.weight(1f)) { Text("Notiz") }
+            FilledTonalButton(onClick = onCreateFolder, modifier = Modifier.weight(1f)) {
+                Icon(Icons.Filled.CreateNewFolder, contentDescription = "New folder")
+            }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 8.dp)) {
+            TextButton(onClick = onImportPdf) { Text("PDF") }
+            TextButton(onClick = onImportImage) { Text("Bild") }
+        }
+        LazyColumn(Modifier.weight(1f).padding(top = 8.dp)) {
+            items(tree, key = { it.path }) { node ->
+                NoteRow(node, selected, onOpen, onDelete, depth = 0)
+            }
+        }
+        TextButton(onClick = onOpenVault) { Text("Vault-Ordner öffnen") }
+        TextButton(onClick = onPrivateVault) { Text("Tablet-Vault verwenden") }
+    }
+}
+
+@Composable
+private fun NoteRow(node: VaultNode, selected: String?, onOpen: (String) -> Unit, onDelete: (String) -> Unit, depth: Int) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(start = (depth * 12).dp, top = 2.dp, bottom = 2.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .background(if (node.path == selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f) else Color.Transparent)
+            .clickable(enabled = node.kind != NoteKind.FOLDER) { onOpen(node.path) }
+            .padding(horizontal = 8.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            when (node.kind) {
+                NoteKind.FOLDER -> Icons.Filled.Folder
+                NoteKind.PDF -> Icons.Filled.PictureAsPdf
+                NoteKind.MARKDOWN -> Icons.Filled.Description
+            },
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary,
+        )
+        Text(node.name, modifier = Modifier.weight(1f).padding(start = 8.dp), maxLines = 1)
+        if (node.kind != NoteKind.FOLDER) {
+            IconButton(onClick = { onDelete(node.path) }) {
+                Icon(Icons.Filled.Delete, contentDescription = "Delete ${node.name}")
+            }
+        }
+    }
+    if (node.kind == NoteKind.FOLDER) {
+        node.children.forEach { NoteRow(it, selected, onOpen, onDelete, depth + 1) }
+    }
+}
+
+@Composable
+private fun EditorHeader(
+    title: String,
+    paper: String,
+    style: ch.fasrv.fanotes.ink.StrokeStyle,
+    fingerDraws: Boolean,
+    showMenu: Boolean,
+    onMenu: () -> Unit,
+    onPaper: (String) -> Unit,
+    onColor: (String) -> Unit,
+    onWidth: (Float) -> Unit,
+    onBrush: (String) -> Unit,
+    onFinger: (Boolean) -> Unit,
+    onDeleteSelection: () -> Unit,
+) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            if (showMenu) IconButton(onClick = onMenu) { Icon(Icons.Filled.Menu, contentDescription = "Notizen") }
+            Text(title, style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f), maxLines = 1)
+            TextButton(onClick = onDeleteSelection) { Text("Auswahl löschen") }
+            TextButton(onClick = { onFinger(!fingerDraws) }) { Text(if (fingerDraws) "Finger zeichnet" else "Finger blättert") }
+        }
+        Row(
+            Modifier.horizontalScroll(rememberScrollState()),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            PenColors.forEach { color ->
+                Box(
+                    Modifier
+                        .size(28.dp)
+                        .clip(CircleShape)
+                        .background(Color(android.graphics.Color.parseColor(color)))
+                        .clickable { onColor(color) },
+                )
+            }
+            Slider(
+                value = style.baseWidth.toFloat(),
+                onValueChange = onWidth,
+                valueRange = 1.2f..14f,
+                modifier = Modifier.width(160.dp),
+            )
+            Brushes.forEach { (id, label) ->
+                Text(
+                    label,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(if (id == style.brush) MaterialTheme.colorScheme.primary.copy(alpha = 0.2f) else Color.Transparent)
+                        .clickable { onBrush(id) }
+                        .padding(horizontal = 6.dp, vertical = 4.dp),
+                    style = MaterialTheme.typography.labelMedium,
+                )
+            }
+            Papers.forEach { (id, label) ->
+                Text(
+                    label,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(if (id == paper) MaterialTheme.colorScheme.primary.copy(alpha = 0.2f) else Color.Transparent)
+                        .clickable { onPaper(id) }
+                        .padding(horizontal = 6.dp, vertical = 4.dp),
+                    style = MaterialTheme.typography.labelMedium,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun EditorTools(
+    tool: InkTool,
+    onTool: (InkTool) -> Unit,
+    canUndo: Boolean,
+    canRedo: Boolean,
+    onUndo: () -> Unit,
+    onRedo: () -> Unit,
+    onText: () -> Unit,
+    textOn: Boolean,
+) {
+    NavigationBar {
+        NavigationBarItem(selected = tool == InkTool.PEN, onClick = { onTool(InkTool.PEN) }, icon = { Icon(Icons.Filled.Edit, contentDescription = "Stift") }, label = { Text("Stift") })
+        NavigationBarItem(selected = tool == InkTool.ERASER, onClick = { onTool(InkTool.ERASER) }, icon = { Icon(Icons.Filled.CleaningServices, contentDescription = "Radierer") }, label = { Text("Radierer") })
+        NavigationBarItem(selected = tool == InkTool.SELECT, onClick = { onTool(InkTool.SELECT) }, icon = { Icon(Icons.AutoMirrored.Filled.DriveFileMove, contentDescription = "Auswahl") }, label = { Text("Auswahl") })
+        NavigationBarItem(selected = false, onClick = onUndo, enabled = canUndo, icon = { Icon(Icons.AutoMirrored.Filled.Undo, contentDescription = "Rückgängig") }, label = { Text("Zurück") })
+        NavigationBarItem(selected = false, onClick = onRedo, enabled = canRedo, icon = { Icon(Icons.AutoMirrored.Filled.Redo, contentDescription = "Wiederholen") }, label = { Text("Vor") })
+        NavigationBarItem(selected = textOn, onClick = onText, icon = { Icon(Icons.Filled.Description, contentDescription = "Text") }, label = { Text("Text") })
+    }
+}
+
+@Composable
+private fun InkCanvas(
+    model: FaNotesViewModel,
+    tool: InkTool,
+    style: ch.fasrv.fanotes.ink.StrokeStyle,
+    finger: Boolean,
+    backdrop: List<BackdropSlice>,
+    token: Int,
+    path: String?,
+    modifier: Modifier,
+) {
+    var bound by remember { mutableStateOf("") }
+    AndroidView(
+        modifier = modifier,
+        factory = { context ->
+            InkSurfaceView(context).apply {
+                session = model.session
+                onChanged = { model.noteChanged() }
+                onSwipeNote = { model.swipe(it) }
+            }
+        },
+        update = { view ->
+            view.session = model.session
+            view.inkTool = tool
+            view.style = style
+            view.fingerDraws = finger
+            if (view.backdrop !== backdrop) view.backdrop = backdrop
+            view.onChanged = { model.noteChanged() }
+            view.onSwipeNote = { model.swipe(it) }
+            val current = path ?: ""
+            if (bound != current) {
+                bound = current
+                view.tag = token
+                view.reload()
+            } else if (view.tag != token) {
+                view.tag = token
+                view.refresh()
+            }
+        },
+    )
+}
+
+@Composable
+private fun MarkdownPanel(text: String, onChange: (String) -> Unit, modifier: Modifier) {
+    Surface(modifier, color = MaterialTheme.colorScheme.surface, tonalElevation = 2.dp) {
+        Column(Modifier.padding(16.dp)) {
+            Text("Markdown", style = MaterialTheme.typography.titleMedium)
+            Text("Getippter Text liegt in der Notiz. Die Tinte bleibt in der .famd-Datei.", style = MaterialTheme.typography.bodySmall)
+            Spacer(Modifier.height(8.dp))
+            BasicTextField(
+                value = text,
+                onValueChange = onChange,
+                modifier = Modifier.fillMaxSize(),
+                textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
+                cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+            )
+        }
+    }
+}
+
+@Composable
+private fun SyncDialog(
+    email: String?,
+    status: String,
+    error: String?,
+    onDismiss: () -> Unit,
+    onLogin: (String, String, Boolean) -> Unit,
+    onLogout: () -> Unit,
+    onSync: () -> Unit,
+) {
+    var address by remember { mutableStateOf(email ?: "") }
+    var password by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Sync") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(status)
+                Text("Notizen werden auf diesem Tablet verschlüsselt, bevor sie das Gerät verlassen. Ein vergessenes Passwort kann nicht wiederhergestellt werden.")
+                if (error != null) Text(error, color = MaterialTheme.colorScheme.error)
+                if (email == null) {
+                    OutlinedTextField(address, { address = it }, label = { Text("Email") }, singleLine = true)
+                    OutlinedTextField(password, { password = it }, label = { Text("Password") }, singleLine = true)
+                } else {
+                    Text(email)
+                }
+            }
+        },
+        confirmButton = {
+            if (email == null) {
+                Button(onClick = { onLogin(address, password, false) }) { Text("Anmelden") }
+            } else {
+                Button(onClick = onSync) { Text("Jetzt synchronisieren") }
+            }
+        },
+        dismissButton = {
+            if (email == null) {
+                TextButton(onClick = { onLogin(address, password, true) }) { Text("Konto erstellen") }
+            } else {
+                TextButton(onClick = onLogout) { Text("Abmelden") }
+            }
+        },
+    )
+}
+
+@Composable
+private fun NameDialog(title: String, placeholder: String, onDone: (String?) -> Unit) {
+    var name by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = { onDone(null) },
+        title = { Text(title) },
+        text = { OutlinedTextField(name, { name = it }, placeholder = { Text(placeholder) }, singleLine = true) },
+        confirmButton = { Button(onClick = { onDone(name) }, enabled = name.isNotBlank()) { Text("Erstellen") } },
+        dismissButton = { TextButton(onClick = { onDone(null) }) { Text("Abbrechen") } },
+    )
+}
+
