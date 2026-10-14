@@ -27,6 +27,9 @@ import ch.fasrv.fanotes.desk.FOLDER_COLOR_CHOICES
 import ch.fasrv.fanotes.desk.FOLDER_COLORS_PATH
 import ch.fasrv.fanotes.desk.isMarkdownConflictPath
 import ch.fasrv.fanotes.desk.TEMPLATES_FOLDER
+import ch.fasrv.fanotes.desk.NOTE_TEMPLATES
+import ch.fasrv.fanotes.desk.StudyPicture
+import ch.fasrv.fanotes.desk.aggregateStudy
 import ch.fasrv.fanotes.desk.openPageStats
 import ch.fasrv.fanotes.desk.mergePageStats
 import ch.fasrv.fanotes.desk.parseFolderColors
@@ -200,19 +203,9 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         val elapsed = (now - openedAtMs).coerceAtLeast(0)
         openedAtMs = now
         val stats = parsePageStats(note.payload.obj("pageStats"), now)
+        val weekday = java.time.Instant.ofEpochMilli(now).atZone(java.time.ZoneId.systemDefault()).dayOfWeek.value % 7
         val payload = (note.payload.deepCopy() as ch.fasrv.fanotes.json.JsonValue.Obj)
-        payload.put(
-            "pageStats",
-            mergePageStats(
-                note.payload.obj("pageStats"),
-                stats.copy(
-                    dwellMs = stats.dwellMs + elapsed,
-                    focusMs = stats.focusMs + elapsed,
-                    lastSessionMs = elapsed,
-                    longestSessionMs = maxOf(stats.longestSessionMs, elapsed),
-                ),
-            ),
-        )
+        payload.put("pageStats", mergePageStats(note.payload.obj("pageStats"), ch.fasrv.fanotes.desk.addDwell(stats, elapsed, weekday)))
         return note.copy(payload = payload)
     }
 
@@ -666,6 +659,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     val books = MutableStateFlow<List<SubjectBook>>(emptyList())
     val folderColors = MutableStateFlow<Map<String, String>>(emptyMap())
     val noteHistory = MutableStateFlow<List<HistorySnapshot>>(emptyList())
+    val study = MutableStateFlow<StudyPicture?>(null)
     val deskSettings = MutableStateFlow(graph.readDesk())
     val splitPath = MutableStateFlow<String?>(null)
     val splitSession = InkSession(newInkDocument("Spalte", "dots", isoNow()))
@@ -683,6 +677,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
             "calendar" -> loadCalendar()
             "overview", "books" -> loadVaultMeta()
             "history" -> refreshNoteHistory()
+            "study" -> loadStudy()
         }
     }
 
@@ -893,6 +888,46 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
             }
             books.value = loaded.first
             folderColors.value = loaded.second
+        }
+    }
+
+    fun loadStudy() {
+        viewModelScope.launch {
+            study.value = withContext(Dispatchers.IO) {
+                val notes = graph.vault.walkFiles()
+                    .filter { it.path.endsWith(".md") || it.path.endsWith(".markdown") }
+                    .take(240)
+                    .map { entry ->
+                        val famdPath = companionPath(entry.path, ".famd")
+                        val stats = parsePageStats(
+                            ch.fasrv.fanotes.famd.parseFamd(graph.vault.read(famdPath)?.decodeToString().orEmpty()).payload?.obj("pageStats"),
+                        )
+                        entry.path to stats
+                    }
+                aggregateStudy(notes)
+            }
+        }
+    }
+
+    fun createFromTemplate(id: String) {
+        val template = NOTE_TEMPLATES.find { it.id == id } ?: return
+        val folder = open.value?.path?.substringBeforeLast('/', "").orEmpty()
+        viewModelScope.launch {
+            val path = withContext(Dispatchers.IO) {
+                runCatching {
+                    val created = graph.store.createMarkdown(folder, template.fileName)
+                    val note = graph.store.readNote(created)
+                    graph.store.save(note, note.document, template.markdown)
+                    created
+                }.getOrNull()
+            }
+            if (path == null) {
+                message.value = "Die Vorlage existiert in diesem Ordner schon."
+            } else {
+                refreshTree()
+                openPath(path, force = true)
+                destination.value = "notes"
+            }
         }
     }
 

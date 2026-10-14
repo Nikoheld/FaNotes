@@ -286,6 +286,7 @@ fun FaNotesScreen(
                             "cards" -> CardsScreen(model)
                             "books" -> BooksScreen(model) { model.openPath(it); model.showDestination("notes") }
                             "history" -> HistoryScreen(model)
+                            "study" -> StudyScreen(model)
                             "ai" -> AiScreen(model)
                             "settings" -> SettingsScreen(model, { requestSync() }, onOpenVault, { model.usePrivateVault() })
                         }
@@ -365,7 +366,7 @@ fun FaNotesScreen(
                     "split" -> tabs.firstOrNull { it != open?.path }?.let { model.loadSplit(it) }
                     "focus" -> model.updateDesk("focus", if (desk["focus"] == "on") "off" else "on")
                     "sync" -> requestSync()
-                    else -> model.showDestination(id)
+                    else -> if (id.startsWith("template-")) model.createFromTemplate(id.removePrefix("template-")) else model.showDestination(id)
                 }
             }
         }, title = { Text("Befehle") })

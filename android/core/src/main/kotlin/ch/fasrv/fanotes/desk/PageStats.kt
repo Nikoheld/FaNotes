@@ -63,7 +63,10 @@ data class PageStats(
     val lastSessionMs: Long,
     val activeDays: List<String>,
     val opensByHour: List<Int>,
+    val dwellByWeekday: List<Long> = List(7) { 0 },
     val typingKeystrokes: Int,
+    val typingMs: Long = 0,
+    val inkMs: Long = 0,
     val inkStrokes: Int,
     val inkPoints: Int,
     val inkLengthMm: Double,
@@ -123,7 +126,10 @@ fun parsePageStats(value: JsonValue.Obj?, nowMs: Long = System.currentTimeMillis
         lastSessionMs = countLong(value, "lastSessionMs"),
         activeDays = value.array("activeDays")?.items.orEmpty().mapNotNull { (it as? JsonValue.Str)?.value }.filter { DAY.matches(it) }.takeLast(400),
         opensByHour = hourCounts(value.array("opensByHour")),
+        dwellByWeekday = weekCounts(value.array("dwellByWeekday")),
         typingKeystrokes = count(value.obj("typing"), "keystrokes"),
+        typingMs = countLong(value.obj("typing"), "ms"),
+        inkMs = countLong(ink, "ms"),
         inkStrokes = count(ink, "strokes"),
         inkPoints = count(ink, "points"),
         inkLengthMm = ink?.double("lengthMm") ?: 0.0,
@@ -181,6 +187,7 @@ fun recordPageSaved(
         inkPoints = stats.inkPoints + (summary.points - stats.current.points).coerceAtLeast(0),
         inkLengthMm = round1(stats.inkLengthMm + (summary.lengthMm - stats.current.lengthMm).coerceAtLeast(0.0)),
         inkPenDownMs = stats.inkPenDownMs + (summary.penDownMs - stats.current.penDownMs).coerceAtLeast(0),
+        inkMs = max(stats.inkMs, stats.inkPenDownMs + (summary.penDownMs - stats.current.penDownMs).coerceAtLeast(0)),
         strokesErased = stats.strokesErased + removedStrokes,
         current = summary.copy(savedAt = isoNow(nowMs)),
         document = document,
@@ -315,14 +322,20 @@ fun mergePageStats(existing: JsonValue.Obj?, stats: PageStats): JsonValue.Obj {
     num("lastSessionMs", stats.lastSessionMs.toDouble())
     root.put("activeDays", jsonArray(*stats.activeDays.map(::jsonString).toTypedArray()))
     root.put("opensByHour", jsonArray(*stats.opensByHour.map { jsonNumber(it.toDouble()) }.toTypedArray()))
+    if (stats.dwellByWeekday.any { it > 0 } || root.array("dwellByWeekday") == null) {
+        root.put("dwellByWeekday", jsonArray(*stats.dwellByWeekday.map { jsonNumber(it.toDouble()) }.toTypedArray()))
+    }
     val typing = root.obj("typing") ?: JsonValue.Obj()
     typing.put("keystrokes", jsonNumber(stats.typingKeystrokes.toDouble()))
+    val keptTyping = max(stats.typingMs.toDouble(), typing.double("ms") ?: 0.0)
+    typing.put("ms", jsonNumber(keptTyping))
     root.put("typing", typing)
     val ink = root.obj("ink") ?: JsonValue.Obj()
     ink.put("strokes", jsonNumber(stats.inkStrokes.toDouble()))
     ink.put("points", jsonNumber(stats.inkPoints.toDouble()))
     ink.put("lengthMm", jsonNumber(round1(stats.inkLengthMm)))
     ink.put("penDownMs", jsonNumber(stats.inkPenDownMs.toDouble()))
+    ink.put("ms", jsonNumber(stats.inkMs.toDouble()))
     ink.put("strokesErased", jsonNumber(stats.strokesErased.toDouble()))
     val current = ink.obj("current") ?: JsonValue.Obj()
     current.put("strokes", jsonNumber(stats.current.strokes.toDouble()))
@@ -457,9 +470,29 @@ private fun documentStatsFrom(value: JsonValue.Obj?): DocumentStats {
 private fun count(obj: JsonValue.Obj?, key: String) = obj?.double(key)?.toInt()?.coerceAtLeast(0) ?: 0
 private fun countLong(obj: JsonValue.Obj?, key: String) = obj?.double(key)?.toLong()?.coerceAtLeast(0) ?: 0L
 
+fun addDwell(stats: PageStats, elapsedMs: Long, weekday: Int): PageStats {
+    if (elapsedMs <= 0) return stats
+    val week = stats.dwellByWeekday.toMutableList()
+    while (week.size < 7) week += 0L
+    val index = weekday.coerceIn(0, 6)
+    week[index] = week[index] + elapsedMs
+    return stats.copy(
+        dwellMs = stats.dwellMs + elapsedMs,
+        focusMs = stats.focusMs + elapsedMs,
+        lastSessionMs = elapsedMs,
+        longestSessionMs = max(stats.longestSessionMs, elapsedMs),
+        dwellByWeekday = week,
+    )
+}
+
 private fun hourCounts(array: JsonValue.Arr?): List<Int> {
     val values = array?.items.orEmpty().map { (it as? JsonValue.Num)?.value?.toInt()?.coerceAtLeast(0) ?: 0 }
     return List(24) { index -> values.getOrElse(index) { 0 } }
+}
+
+private fun weekCounts(array: JsonValue.Arr?): List<Long> {
+    val values = array?.items.orEmpty().map { (it as? JsonValue.Num)?.value?.toLong()?.coerceAtLeast(0) ?: 0L }
+    return List(7) { index -> values.getOrElse(index) { 0L } }
 }
 
 private fun round1(value: Double) = round(value * 10.0) / 10.0
