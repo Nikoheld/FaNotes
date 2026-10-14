@@ -28,7 +28,7 @@ FaNotes verbindet eine echte Markdown-Wissensbasis mit einer papierartigen Schre
 - **Arbeitsblätter:** PDF- und Bildseiten in neue oder bestehende Notizen importieren und mit Tastatur oder Stift ausfüllen.
 - **AI nach Wahl:** LM Studio, Ollama, OpenAI, Gemini, Anthropic und OpenCode mit kombinierbaren Aktionen.
 - **Für jeden Lebensbereich:** Profile und Vorlagen für Schule, Universität, Privatleben und Arbeit.
-- **Desktop und Web:** Linux, Windows und eine installierbare Web-App mit gemeinsamer Oberfläche und Erkennungslogik.
+- **Desktop, Web und Tablet:** Linux, Windows, eine installierbare Web-App und ein nativer Android-Tablet-Client mit gemeinsamer Vault-Struktur und Sync.
 - **Anpassbar:** Themes, Schriften, Papier, Pinsel, Farben, Abstände, Ressourcenlimits und eigenes CSS.
 - **Privat by design:** Vault und persönliches Handschrifttraining bleiben lokal; ein abgesichertes Server-Backup ist optional.
 
@@ -79,7 +79,18 @@ npm run check:connected-recognition
 src/                  GlyphenWerk-Oberfläche und gemeinsame Erkennungsengine
 fanotes/       FaNotes React-/Electron-/Web-App, Tests und Packaging
 fanotes-site/         Produktwebsite, Update-API, AI-Proxy und Backup-Dienst
+android/              Nativer Android-Tablet-Client (Kotlin, Jetpack Compose)
 deliverables/         kleine, veröffentlichbare Begleitdateien
+```
+
+### Android-Tablet
+
+Der Client unter [`android/`](android/README.md) ist eine native Schreibfläche für Tablets (S-Pen: Druck, Neigung, Radierer; die Hand blättert). Notizen bleiben `.md` plus `.famd` und synchronisieren mit dem bestehenden Konto. Bauen und der Formatvertrag stehen in [`android/README.md`](android/README.md) und [`android/ARCHITECTURE.md`](android/ARCHITECTURE.md).
+
+```bash
+cd android
+./gradlew :core:test
+./gradlew :app:assembleDebug
 ```
 
 Erzeugte Builds, `node_modules`, private Schlüssel, lokale Vaults, Analytics und Server-Backups gehören nicht in Git. Release-Binärdateien werden vollständig und mit Prüfsummen an den jeweiligen GitHub-Release angehängt.
@@ -106,7 +117,7 @@ FaNotes combines an open Markdown knowledge base with a paper-like writing surfa
 - **PDF and image worksheets** that can be completed with the keyboard or a drawing tablet.
 - **Provider-neutral AI** through LM Studio, Ollama, OpenAI, Gemini, Anthropic or OpenCode.
 - **Profiles for school, university, personal use and work.**
-- **Linux, Windows and an installable web app** with a shared interface and recognition pipeline.
+- **Linux, Windows, an installable web app, and a native Android tablet client** with the same vault files and sync.
 - **Deep customization** for themes, fonts, paper, brushes, colors, spacing, resource limits and custom CSS.
 - **Private by design:** local vault and local personal training, with an optional hardened server backup.
 
@@ -150,7 +161,18 @@ npm run check:connected-recognition
 src/                  GlyphenWerk interface and the shared recognition engine
 fanotes/              FaNotes React, Electron, and web app, tests, and packaging
 fanotes-site/         Product website, update API, AI proxy, and backup service
+android/              Native Android tablet client (Kotlin, Jetpack Compose)
 deliverables/         Small publishable companion files
+```
+
+### Android tablet
+
+The client in [`android/`](android/README.md) is a native writing surface for tablets (S-Pen pressure, tilt, and eraser; the hand navigates). Notes stay `.md` plus `.famd` and sync with an existing account. Build steps and the format contract are in [`android/README.md`](android/README.md) and [`android/ARCHITECTURE.md`](android/ARCHITECTURE.md).
+
+```bash
+cd android
+./gradlew :core:test
+./gradlew :app:assembleDebug
 ```
 
 Generated builds, `node_modules`, private keys, local vaults, analytics, and server backups do not belong in Git. Release binaries are attached in full, with checksums, to the matching GitHub release.
