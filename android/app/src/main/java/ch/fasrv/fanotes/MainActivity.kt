@@ -826,6 +826,7 @@ private fun NotePage(
     Column(modifier) {
         if (path != null) {
             NoteTagBar(model)
+            MarginTranscript(model)
             if (noteKind == NoteKind.PDF) PdfQuoteMarks(model)
             if (showRelations) NoteRelations(model) { model.openPath(it); model.showDestination("notes") }
         }

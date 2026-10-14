@@ -61,6 +61,7 @@ import ch.fasrv.fanotes.desk.serializeHomeworkMarkdown
 import ch.fasrv.fanotes.desk.Backlink
 import ch.fasrv.fanotes.desk.backlinksFor
 import ch.fasrv.fanotes.desk.resolveWikiTarget
+import ch.fasrv.fanotes.desk.replaceTranscriptWord
 import ch.fasrv.fanotes.desk.addPdfMark
 import ch.fasrv.fanotes.desk.readPdfMarks
 import ch.fasrv.fanotes.desk.writePdfMarks
@@ -310,6 +311,19 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     fun removePdfQuote(id: String) {
         if (open.value?.kind != NoteKind.PDF) return
         updateMarkdown(writePdfMarks(markdown.value, readPdfMarks(markdown.value).filter { it.id != id }))
+    }
+
+    fun correctTranscriptWord(from: String, to: String) {
+        val replacement = to.trim()
+        if (from.isBlank() || replacement.isEmpty() || from == replacement) return
+        val document = session.document
+        val transcript = document.extras.string("searchTranscript") ?: return
+        val next = replaceTranscriptWord(transcript, from, replacement)
+        if (next == transcript) return
+        val extras = document.extras.deepCopy() as ch.fasrv.fanotes.json.JsonValue.Obj
+        extras.put("searchTranscript", ch.fasrv.fanotes.json.jsonString(next))
+        session.replace(document.copy(extras = extras, updatedAt = isoNow()))
+        noteChanged()
     }
 
     fun setNoteTags(tags: List<String>) {
