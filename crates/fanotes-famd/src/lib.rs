@@ -1318,8 +1318,9 @@ fn omit_parentheticals(value: &str) -> String {
 }
 
 /// `13Oct2026` and `Oct2026` are separate fields. `GMT5` is the zone `GMT`
-/// and the number 5. A non-keyword glued to a digit, as in `foo13` or
-/// `Oct13th`, stays one token so the date scan rejects it.
+/// and the number 5. `PM5` is the meridiem and the number 5. A non-keyword
+/// glued to a digit, as in `foo13` or `Oct13th`, stays one token so the date
+/// scan rejects it.
 fn expand_glued_month(token: &str) -> Vec<&str> {
     // `GMT+5` is one zone. Splitting it would turn the 5 into a date number.
     if month_zone_suffix(token).is_some()
@@ -1339,7 +1340,11 @@ fn expand_glued_month(token: &str) -> Vec<&str> {
                 index += 1;
             }
             let letters = &token[start..index];
-            if english_month(letters).is_none() && !exact_zone_keyword(letters) {
+            if english_month(letters).is_none()
+                && !exact_zone_keyword(letters)
+                && !letters.eq_ignore_ascii_case("am")
+                && !letters.eq_ignore_ascii_case("pm")
+            {
                 return vec![token];
             }
             runs.push(letters);
@@ -1785,6 +1790,14 @@ fn compose_month_date(words: &[&str]) -> Option<(i32, i32, i32, String, Option<i
         if word.eq_ignore_ascii_case("am") || word.eq_ignore_ascii_case("pm") {
             if time.index == 0 {
                 if number_seen {
+                    return None;
+                }
+                // `PM5` before a clock is not a date. `PM 5` ignores `PM`.
+                if words
+                    .get(index + 1)
+                    .copied()
+                    .is_some_and(|next| digits_follow_zone(word, next))
+                {
                     return None;
                 }
                 continue;
@@ -3951,6 +3964,97 @@ mod tests {
             assert_eq!(super::canonical_iso("foo5 Oct 13 2026"), None);
             assert_eq!(super::canonical_iso("AM5 Oct 13 2026"), None);
             assert_eq!(super::canonical_iso("Oct 13 2026 4:00PM5"), None);
+        });
+    }
+
+    #[test]
+    fn a_meridiem_glued_to_digits_is_still_a_meridiem() {
+        with_tz("America/New_York", || {
+            // `PM5` is `PM` and then the number 5. Before a clock, that glue is
+            // not a date. `4:00PM5` stays empty because the meridiem touches the clock.
+            assert_eq!(
+                super::canonical_iso("Oct 13 2026 4:00 PM5").as_deref(),
+                Some("2026-10-13T20:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 2026 4:00 AM5").as_deref(),
+                Some("2026-10-13T08:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 2026 4:00 PM50").as_deref(),
+                Some("2026-10-13T20:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 2026 4:00 PM 5").as_deref(),
+                Some("2026-10-13T20:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("4:00 PM5 Oct 13 2026").as_deref(),
+                Some("2013-10-05T20:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 2026 12:00 AM5").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 2026 12:00 PM5").as_deref(),
+                Some("2026-10-13T16:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 2026 4:5 PM5").as_deref(),
+                Some("2026-10-13T20:05:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 2026 4:00:30 PM5").as_deref(),
+                Some("2026-10-13T20:00:30.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 2026 4:00:60 PM5").as_deref(),
+                Some("2026-10-13T20:00:05.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 2026 4:60 PM5").as_deref(),
+                Some("2026-10-13T20:05:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("hello 4:00 PM5 Oct 13 2026").as_deref(),
+                Some("2013-10-05T20:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 2026 11:00 PM5").as_deref(),
+                Some("2026-10-14T03:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("PM 5 Oct 13 2026").as_deref(),
+                Some("2013-10-05T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("AM Oct 13 2026").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 2026 4:00 PM EST5").as_deref(),
+                Some("2026-10-13T21:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 4:00 PM5").as_deref(),
+                Some("2005-10-13T20:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 4:00:60 PM5").as_deref(),
+                Some("1960-10-13T20:00:05.000Z")
+            );
+            assert_eq!(super::canonical_iso("Oct 13 2026 4:00PM5"), None);
+            assert_eq!(super::canonical_iso("Oct 13 2026 4:00AM5"), None);
+            assert_eq!(super::canonical_iso("4:00PM5 Oct 13 2026"), None);
+            assert_eq!(super::canonical_iso("PM5 Oct 13 2026"), None);
+            assert_eq!(super::canonical_iso("AM5 Oct 13 2026"), None);
+            assert_eq!(super::canonical_iso("Oct 13 2026 PM5"), None);
+            assert_eq!(super::canonical_iso("Oct 13 2026 4 PM5"), None);
+            assert_eq!(super::canonical_iso("Oct 13 2026 4:00 PMX5"), None);
+            assert_eq!(super::canonical_iso("Oct 13 2026 4:00 p.m.5"), None);
+            assert_eq!(super::canonical_iso("Oct 13 2026 11 PM5"), None);
+            assert_eq!(super::canonical_iso("16:00 PM5 Oct 13 2026"), None);
         });
     }
 
