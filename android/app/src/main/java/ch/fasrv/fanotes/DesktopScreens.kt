@@ -346,7 +346,7 @@ fun CalendarScreen(model: FaNotesViewModel, onOpenNote: (String) -> Unit, onImpo
             else -> DayColumns(ch.fasrv.fanotes.desk.calendarRange(view, anchor), anchor, document, onOpenNote) { anchor = it }
         }
         Text("Am $day", modifier = Modifier.padding(top = 8.dp), fontWeight = FontWeight.SemiBold)
-        EventsOn(document, anchor, onOpenNote)
+        EventsOn(model, document, anchor, onOpenNote)
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
             listOf("none" to "Einmal", "daily" to "Täglich", "weekly" to "Wöchentlich", "monthly" to "Monatlich", "yearly" to "Jährlich").forEach { (id, label) ->
                 TextButton(onClick = { recurrence = id }) {
@@ -445,7 +445,7 @@ private fun AgendaList(anchor: LocalDate, document: ch.fasrv.fanotes.desk.Calend
 }
 
 @Composable
-private fun EventsOn(document: ch.fasrv.fanotes.desk.CalendarDocument, day: LocalDate, onOpenNote: (String) -> Unit) {
+private fun EventsOn(model: FaNotesViewModel, document: ch.fasrv.fanotes.desk.CalendarDocument, day: LocalDate, onOpenNote: (String) -> Unit) {
     document.events.filter { ch.fasrv.fanotes.desk.occurrencesOn(it, day) }.forEach { event ->
         val repeat = when (event.recurrence) {
             "daily" -> " · täglich"
@@ -455,10 +455,20 @@ private fun EventsOn(document: ch.fasrv.fanotes.desk.CalendarDocument, day: Loca
             else -> ""
         }
         val clock = ch.fasrv.fanotes.desk.eventClock(event)?.let { "$it " }.orEmpty()
-        Text(
-            clock + event.title + repeat + if (event.notePath.isNotBlank()) "  →" else "",
-            modifier = Modifier.clickable(enabled = event.notePath.isNotBlank()) { onOpenNote(event.notePath) }.padding(vertical = 4.dp),
-        )
+        Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+            Text(
+                clock + event.title + repeat + if (event.notePath.isNotBlank()) "  →" else "",
+                modifier = Modifier.clickable(enabled = event.notePath.isNotBlank()) { onOpenNote(event.notePath) },
+            )
+            Row(Modifier.horizontalScroll(rememberScrollState())) {
+                TextButton(onClick = { model.shiftCalendarEvent(event.id, 1) }) { Text("+1 Tag") }
+                TextButton(onClick = { model.duplicateCalendarEvent(event.id) }) { Text("Kopie") }
+                if (event.recurrence != "none" && event.recurrence.isNotBlank()) {
+                    TextButton(onClick = { model.skipCalendarOccurrence(event.id, day.toString()) }) { Text("Auslassen") }
+                }
+                TextButton(onClick = { model.deleteCalendarEvent(event.id) }) { Text("Löschen") }
+            }
+        }
     }
 }
 
