@@ -158,16 +158,14 @@ class NotePageView(context: Context) : FrameLayout(context) {
         }
     }
 
-    private fun wrapSelection(before: String, after: String) {
+    private fun format(action: String) {
         val start = editor.selectionStart.coerceAtLeast(0)
         val end = editor.selectionEnd.coerceAtLeast(start)
-        val selected = editor.text?.substring(start, end).orEmpty().ifEmpty { "Text" }
-        editor.text?.replace(start, end, "$before$selected$after")
-    }
-
-    private fun insertLine(prefix: String) {
-        val start = editor.selectionStart.coerceAtLeast(0)
-        editor.text?.insert(start, prefix)
+        val result = ch.fasrv.fanotes.desk.applyMarkdownFormat(editor.text?.toString().orEmpty(), start, end, action)
+        editor.setText(result.text)
+        val from = result.selectionStart.coerceIn(0, result.text.length)
+        val to = result.selectionEnd.coerceIn(from, result.text.length)
+        editor.setSelection(from, to)
     }
 
     private fun setChromeOpen(open: Boolean) {
@@ -227,11 +225,26 @@ class NotePageView(context: Context) : FrameLayout(context) {
             ink.onRemoveLink(id)
             ink.selectedLinkId = null
         })
-        tools.addView(chip("Fett") { wrapSelection("**", "**") })
-        tools.addView(chip("Liste") { insertLine("- ") })
-        tools.addView(chip("Aufgabe") { insertLine("- [ ] ") })
-        tools.addView(chip("Zitat") { insertLine("> ") })
-        tools.addView(chip("Tabelle") { insertLine("\n| Thema | Notiz |\n| --- | --- |\n|  |  |\n") })
+        tools.addView(chip("Fett") { format("bold") })
+        tools.addView(chip("Liste") { format("bulletList") })
+        tools.addView(chip("Aufgabe") { format("checklist") })
+        tools.addView(chip("Zitat") { format("quote") })
+        tools.addView(chip("Tabelle") { format("table") })
+        if (textMode) {
+            listOf(
+                "heading1" to "H1",
+                "heading2" to "H2",
+                "italic" to "Kursiv",
+                "strike" to "Durchgestrichen",
+                "inlineCode" to "Code",
+                "link" to "Link",
+                "numberedList" to "Nummer",
+                "mathBlock" to "Matheblock",
+                "codeBlock" to "Codeblock",
+                "details" to "Details",
+                "horizontalRule" to "Linie",
+            ).forEach { (action, label) -> tools.addView(chip(label) { format(action) }) }
+        }
         tools.addView(guideChip("Lineal", DraftingKind.RULER))
         tools.addView(guideChip("Geodreieck", DraftingKind.SET_SQUARE))
         tools.addView(guideChip("Zirkel", DraftingKind.COMPASS))
