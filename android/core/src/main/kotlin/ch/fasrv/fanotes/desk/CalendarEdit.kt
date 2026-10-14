@@ -71,6 +71,40 @@ private fun shiftCalendarWhen(value: String, allDay: Boolean, days: Long): Strin
     return LocalDateTime.parse(value.take(16)).plusDays(days).format(WALL)
 }
 
+/** Colors cycle in the same order as the desktop calendar lists. */
+val CALENDAR_LIST_COLORS = listOf(
+    "#7f6df2",
+    "#3d8bfd",
+    "#2f9e6b",
+    "#e0ac39",
+    "#e15b64",
+    "#d06ad6",
+    "#5aa6a6",
+    "#c47b4a",
+)
+
+fun createCalendarList(document: CalendarDocument, name: String, id: String = UUID.randomUUID().toString()): CalendarDocument {
+    val clean = name.replace(Regex("""\s+"""), " ").trim().take(80)
+    if (clean.isEmpty()) return document
+    val calendar = CalendarDef(
+        id = id,
+        name = clean,
+        color = CALENDAR_LIST_COLORS[document.calendars.size % CALENDAR_LIST_COLORS.size],
+        visible = true,
+    )
+    return document.copy(calendars = document.calendars + calendar)
+}
+
+fun toggleCalendarVisible(document: CalendarDocument, id: String): CalendarDocument =
+    document.copy(calendars = document.calendars.map { calendar ->
+        if (calendar.id == id) calendar.copy(visible = !calendar.visible) else calendar
+    })
+
+fun visibleCalendarEvents(document: CalendarDocument): List<CalendarEvent> {
+    val shown = document.calendars.filter { it.visible }.map { it.id }.toSet()
+    return document.events.filter { it.calendarId in shown }
+}
+
 private fun advanceCalendarWhen(value: String, allDay: Boolean, recurrence: String): String {
     val moment = if (allDay || !value.contains('T')) {
         LocalDate.parse(value.take(10)).atStartOfDay()

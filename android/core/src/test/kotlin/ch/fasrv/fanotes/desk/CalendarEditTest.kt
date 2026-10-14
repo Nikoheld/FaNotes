@@ -3,6 +3,7 @@ package ch.fasrv.fanotes.desk
 import java.time.LocalDate
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 class CalendarEditTest {
@@ -40,5 +41,19 @@ class CalendarEditTest {
         assertEquals("2026-10-19T10:00", first.events.single().end)
         val once = CalendarEvent("o", "personal", "Einmal", "2026-10-12", "2026-10-12")
         assertTrue(skipCalendarOccurrence(emptyCalendar().copy(events = listOf(once)), "o", LocalDate.parse("2026-10-12")).events.isEmpty())
+    }
+
+    @Test
+    fun aNewListTakesTheNextDesktopColorAndCanBeHidden() {
+        val empty = emptyCalendar()
+        assertSame(empty, createCalendarList(empty, "   "))
+        val created = createCalendarList(empty, "  Schule  Extra  ", "school-extra")
+        assertEquals("Schule Extra", created.calendars.last().name)
+        assertEquals("#e0ac39", created.calendars.last().color)
+        assertEquals("school-extra", created.calendars.last().id)
+        val hidden = toggleCalendarVisible(created, "personal")
+        val withEvent = hidden.copy(events = listOf(CalendarEvent("e", "personal", "Privat", "2026-10-12", "2026-10-12")))
+        assertTrue(visibleCalendarEvents(withEvent).isEmpty())
+        assertEquals(1, visibleCalendarEvents(toggleCalendarVisible(withEvent, "personal")).size)
     }
 }

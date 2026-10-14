@@ -292,11 +292,33 @@ fun CalendarScreen(model: FaNotesViewModel, onOpenNote: (String) -> Unit, onImpo
     var anchor by remember { mutableStateOf(LocalDate.now()) }
     var view by remember { mutableStateOf("month") }
     var recurrence by remember { mutableStateOf("none") }
-    val calendarId = document.calendars.firstOrNull()?.id ?: "personal"
+    val calendarId = document.calendars.firstOrNull { it.visible }?.id ?: document.calendars.firstOrNull()?.id ?: "personal"
+    val shown = document.copy(events = ch.fasrv.fanotes.desk.visibleCalendarEvents(document))
+    var calendarName by remember { mutableStateOf("") }
     val day = anchor.toString()
     Column(Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState())) {
         Text("Kalender", style = MaterialTheme.typography.titleLarge)
         Text("Gespeichert in Kalender.md.", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
+        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically) {
+            document.calendars.forEach { calendar ->
+                Text(
+                    calendar.name,
+                    fontSize = 13.sp,
+                    fontWeight = if (calendar.visible) FontWeight.SemiBold else FontWeight.Normal,
+                    color = if (calendar.visible) androidx.compose.ui.graphics.Color(android.graphics.Color.parseColor(calendar.color)) else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
+                    modifier = Modifier.clickable { model.toggleCalendarVisible(calendar.id) }.padding(horizontal = 8.dp, vertical = 4.dp),
+                )
+            }
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            OutlinedTextField(calendarName, { calendarName = it.take(80) }, label = { Text("Neue Liste") }, modifier = Modifier.weight(1f), singleLine = true)
+            TextButton(onClick = {
+                if (calendarName.isNotBlank()) {
+                    model.createCalendarList(calendarName)
+                    calendarName = ""
+                }
+            }) { Text("Hinzufügen") }
+        }
         if (reminder != null) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
@@ -341,12 +363,12 @@ fun CalendarScreen(model: FaNotesViewModel, onOpenNote: (String) -> Unit, onImpo
             }) { Text("›") }
         }
         when (view) {
-            "month" -> MonthGrid(month, anchor, document) { anchor = it }
-            "agenda" -> AgendaList(anchor, document, onOpenNote)
-            else -> DayColumns(ch.fasrv.fanotes.desk.calendarRange(view, anchor), anchor, document, onOpenNote) { anchor = it }
+            "month" -> MonthGrid(month, anchor, shown) { anchor = it }
+            "agenda" -> AgendaList(anchor, shown, onOpenNote)
+            else -> DayColumns(ch.fasrv.fanotes.desk.calendarRange(view, anchor), anchor, shown, onOpenNote) { anchor = it }
         }
         Text("Am $day", modifier = Modifier.padding(top = 8.dp), fontWeight = FontWeight.SemiBold)
-        EventsOn(model, document, anchor, onOpenNote)
+        EventsOn(model, shown, anchor, onOpenNote)
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
             listOf("none" to "Einmal", "daily" to "Täglich", "weekly" to "Wöchentlich", "monthly" to "Monatlich", "yearly" to "Jährlich").forEach { (id, label) ->
                 TextButton(onClick = { recurrence = id }) {
