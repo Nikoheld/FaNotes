@@ -7,6 +7,7 @@
 - **Updates von GitHub.** Die Desktop-App lädt das signierte Update und die Pakete von den GitHub-Releases. Der Notizabgleich bleibt auf fanotes.fasrv.ch. Installierte Exemplare von 2026.10.5 holen sich dieses eine Update noch über den Server und fragen danach GitHub.
 - **Sync für Android.** Der Server nimmt die Plattform `android` an und lässt den verschlüsselten Metadaten-Header der Tablet-App durch.
 - **Handschrift-Datum.** Schrägstrich, Bruch und Uhrzeit in einer handschriftlichen Zeitangabe folgen derselben Lesart wie die Zurücksetzen-Markierung.
+- **Englische Dialoge unter Windows.** Der englische Übersetzungskatalog liegt im Windows-Paket direkt beim Hauptprozess, damit Notiz- und Ordnerdialoge bei englischer Sprache vollständig übersetzt sind.
 
 ## 2026.10.5
 

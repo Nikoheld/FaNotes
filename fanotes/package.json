@@ -108,7 +108,7 @@
     "check:spelling": "node scripts/check-spelling.mjs",
     "check:orthography": "node scripts/check-swiss-orthography.mjs",
     "check:onenote": "node scripts/check-onenote-import.cjs",
-    "build:web": "npm run build:glyphenwerk && npm run build:spelling && npm run build:proper-names && npm run stage:trocr-runtime && tsc -b && vite build && node scripts/build-web-pwa.mjs",
+    "build:web": "npm run build:glyphenwerk && npm run build:spelling && npm run build:proper-names && npm run stage:trocr-runtime && node scripts/stage-main-i18n.cjs && tsc -b && vite build && node scripts/build-web-pwa.mjs",
     "build": "npm run build:web",
     "start": "electron .",
     "dist:linux": "npm run build:web && npm run stage:enhanced-math-runtime && electron-builder --linux AppImage --x64 --publish never && npm run check:packaged-i18n -- release/linux-unpacked/resources/app.asar && npm run dist:harden-appimage && npm run dist:portable",
@@ -271,6 +271,7 @@
       "!dist/ocr/fanotes-trocr-web/**/*",
       "!dist/ocr/pylaia-iam-q8.onnx",
       "electron/**/*",
+      "electron/i18n-en.json",
       "resources/i18n/**/*",
       "resources/onenote/**/*",
       "package.json"

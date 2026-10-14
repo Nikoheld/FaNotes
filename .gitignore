@@ -11,6 +11,7 @@ vite.config.d.ts
 # Generated mirrors and historical binary archives
 fanotes/delivery/
 fanotes/public/glyphenwerk/
+fanotes/electron/i18n-en.json
 fanotes/public/spell/
 fanotes-site/public/notes/
 

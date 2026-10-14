@@ -15,19 +15,26 @@ const CORE_ENGLISH_CATALOG = Object.freeze({
 })
 
 function loadEnglishCatalog() {
-  try {
-    const loaded = require('../resources/i18n/en.json')
-    if (!loaded || typeof loaded !== 'object' || Array.isArray(loaded)) {
-      throw new TypeError('The English localization catalog is not an object.')
+  // electron/i18n-en.json sits in the same directory as this file. The Windows
+  // packager includes that directory and has been dropping resources/i18n.
+  const candidates = ['./i18n-en.json', '../resources/i18n/en.json']
+  let lastError = null
+  for (const candidate of candidates) {
+    try {
+      const loaded = require(candidate)
+      if (!loaded || typeof loaded !== 'object' || Array.isArray(loaded)) {
+        throw new TypeError('The English localization catalog is not an object.')
+      }
+      return Object.freeze(Object.assign(Object.create(null), CORE_ENGLISH_CATALOG, loaded))
+    } catch (error) {
+      lastError = error
     }
-    return Object.freeze(Object.assign(Object.create(null), CORE_ENGLISH_CATALOG, loaded))
-  } catch (error) {
-    // Do not turn a missing translation asset into a vault I/O failure. This is
-    // intentionally a narrow fallback rather than a silent replacement for the
-    // complete catalog, so packaging checks still catch the missing resource.
-    console.warn('FaNotes: Englischer Übersetzungskatalog fehlt; Kern-Fallback aktiv:', error?.message ?? error)
-    return CORE_ENGLISH_CATALOG
   }
+  // Do not turn a missing translation asset into a vault I/O failure. This is
+  // intentionally a narrow fallback rather than a silent replacement for the
+  // complete catalog, so packaging checks still catch the missing resource.
+  console.warn('FaNotes: Englischer Übersetzungskatalog fehlt; Kern-Fallback aktiv:', lastError?.message ?? lastError)
+  return CORE_ENGLISH_CATALOG
 }
 
 const EXACT_ONLY_REPLACEMENTS = new Set(['Frei', 'Breite', 'Pinsel', 'Farben', 'Strich', 'gespeichert', 'werden', 'Holt'])

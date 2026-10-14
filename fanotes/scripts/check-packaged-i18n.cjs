@@ -15,7 +15,7 @@ for (const archive of archives) {
   assert.ok(fs.existsSync(archive), `Das Paketarchiv fehlt: ${archive}`)
 
   const packedI18n = asar.extractFile(archive, 'electron/i18n.cjs')
-  const packedEnglish = asar.extractFile(archive, 'resources/i18n/en.json')
+  const packedEnglish = asar.extractFile(archive, 'electron/i18n-en.json')
   const englishCatalog = JSON.parse(packedEnglish.toString('utf8'))
 
   assert.equal(englishCatalog['Unbenannte Notiz'], 'Untitled note')
