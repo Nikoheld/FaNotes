@@ -2373,11 +2373,13 @@ fn fold_trailing_zone(trimmed: &str) -> Option<String> {
             changed = true;
         }
     }
-    // `16:00 EST` is a clock. `GMT+24:00 EST` is two zones; the colon belongs
-    // to the offset, and the later zone still wins in the legacy date.
+    // `16:00 EST` is a clock. `16:00+5 EST` already names an offset, so the
+    // later zone replaces it instead of being glued onto the number.
+    // `GMT+24:00 EST` is two zones; the colon belongs to the offset.
     if end >= 2
         && words[end - 2].starts_with(|character: char| character.is_ascii_digit())
         && words[end - 2].contains(':')
+        && !words[end - 2].contains(['+', '-'])
         && named_zone_offset(words[end - 1]).is_some()
     {
         let suffix = named_zone_offset(words[end - 1])?;
@@ -3286,7 +3288,8 @@ fn consume_glued_z(
 
 fn split_clock_tail(token: &str) -> (&str, &str) {
     if let Some(body) = token.strip_suffix(['Z', 'z']) {
-        if body.contains(':') {
+        // `16:00Z` is UTC. `16:00+5Z` keeps the sign so `Z` can replace `+5`.
+        if body.contains(':') && !body.contains(['+', '-']) {
             return (body, &token[body.len()..]);
         }
     }
@@ -3316,6 +3319,10 @@ struct LegacyOffset {
 /// `+5:` leaves the minute open for a later number. Minutes past 59 in
 /// `HHMM` count as extra hours.
 fn parse_legacy_offset(text: &str) -> Option<LegacyOffset> {
+    // `+5EST` is EST. The keyword comes last, so it replaces the number.
+    if let Some(zone) = offset_zone_suffix(text) {
+        return legacy_zone_offset(zone);
+    }
     let (sign, rest) = if let Some(rest) = text.strip_prefix('+') {
         (1i64, rest)
     } else if let Some(rest) = text.strip_prefix('-') {
@@ -3378,6 +3385,28 @@ fn parse_legacy_offset(text: &str) -> Option<LegacyOffset> {
         minute_sign: if minute_pending { sign } else { 0 },
         time_fields,
     })
+}
+
+/// `+5EST` and `+5:30Z` end in a zone keyword. `+5` and `+5GMT5` do not.
+fn offset_zone_suffix(text: &str) -> Option<&str> {
+    const KEYWORDS: [&str; 12] = [
+        "gmt", "utc", "est", "edt", "cst", "cdt", "mst", "mdt", "pst", "pdt", "ut", "z",
+    ];
+    for keyword in KEYWORDS {
+        if text.len() <= keyword.len() {
+            continue;
+        }
+        let (prefix, suffix) = text.split_at(text.len() - keyword.len());
+        if !suffix.eq_ignore_ascii_case(keyword) {
+            continue;
+        }
+        let before = prefix.chars().next_back()?;
+        if before.is_ascii_alphabetic() || !prefix.bytes().any(|byte| byte.is_ascii_digit()) {
+            continue;
+        }
+        return Some(suffix);
+    }
+    None
 }
 
 fn suffix_east_minutes(suffix: &str) -> Option<i64> {
@@ -8617,6 +8646,107 @@ mod local_zone_tests {
         assert_eq!(unix_millis_from_iso("2026-10-13T16:"), None);
         assert_eq!(unix_millis_from_iso("2026-10-13T4:00"), None);
         assert_eq!(unix_millis_from_iso("2026-10-13T016:00"), None);
+    }
+
+    #[test]
+    fn a_later_zone_replaces_a_numeric_offset() {
+        let _lock = TRASH_CLOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let _restore = RestoreTz(std::env::var_os("TZ"));
+        unsafe { std::env::set_var("TZ", "America/New_York") };
+        unsafe { tzset() };
+        // `+5` is an offset until a zone keyword follows it. That keyword
+        // replaces the offset, including `+24`, so the day does not move.
+        // `16:00EST` is still empty: only `Z` may touch a finished clock.
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 16:00+5 GMT"),
+            Some(1_791_907_200_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 16:00+5 EST"),
+            Some(1_791_925_200_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 16:00+5:30 EST"),
+            Some(1_791_925_200_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 16:00 +5 GMT"),
+            Some(1_791_907_200_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 16:+5 GMT"),
+            Some(1_791_907_200_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 16:00+24 GMT"),
+            Some(1_791_907_200_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 16:00-5 GMT"),
+            Some(1_791_907_200_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 16:00+5GMT"),
+            Some(1_791_907_200_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 16:00+5EST"),
+            Some(1_791_925_200_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 16:00+5Z"),
+            Some(1_791_907_200_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 16:00+5UTC"),
+            Some(1_791_907_200_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 16:00+5EDT"),
+            Some(1_791_921_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 16:00+5PST"),
+            Some(1_791_936_000_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 16:00+24EST"),
+            Some(1_791_925_200_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 16:00+5 GMT"),
+            Some(1_791_907_200_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 16:00+5EST"),
+            Some(1_791_925_200_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("10/13/2026 16:00+5 GMT"),
+            Some(1_791_907_200_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("10/13/2026 16:00+5EST"),
+            Some(1_791_925_200_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 16:00 GMT EST"),
+            Some(1_791_925_200_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 16:00 EST GMT"),
+            Some(1_791_907_200_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 16:00+5"),
+            Some(1_791_889_200_000)
+        );
+        assert_eq!(unix_millis_from_iso("2026-10-13 16:00EST"), None);
+        assert_eq!(unix_millis_from_iso("2026-10-13 16:00+5GMT5"), None);
+        assert_eq!(unix_millis_from_iso("2026-10-13 16:00+5Z5"), None);
+        assert_eq!(unix_millis_from_iso("2026-10-13T16:00+5"), None);
     }
 
     #[test]
