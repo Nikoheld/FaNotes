@@ -511,3 +511,55 @@ fn a_sync_state_with_a_bad_byte_still_loads() {
         .unwrap();
     assert_eq!(state, "{\"note\":\"\u{FFFD}\"}");
 }
+
+#[cfg(unix)]
+#[test]
+fn a_missing_sync_file_uses_the_desktop_lstat_error() {
+    use std::os::unix::fs::PermissionsExt;
+    let (vault, _app, mut host) = host();
+    let root = fs::canonicalize(&vault).unwrap();
+    let missing = root.join("fehlt.md");
+    assert_eq!(
+        host.dispatch("fanotes:sync-read", &[json!("fehlt.md")])
+            .unwrap_err(),
+        format!(
+            "ENOENT: no such file or directory, lstat '{}'",
+            missing.display()
+        )
+    );
+    assert_eq!(
+        host.dispatch("fanotes:sync-read", &[json!("Fehlt/Seite.md")])
+            .unwrap_err(),
+        format!(
+            "ENOENT: no such file or directory, lstat '{}'",
+            root.join("Fehlt").display()
+        )
+    );
+    let long_name = format!("{}.md", "ä".repeat(300));
+    assert_eq!(
+        host.dispatch("fanotes:sync-read", &[json!(long_name.clone())])
+            .unwrap_err(),
+        format!(
+            "ENAMETOOLONG: name too long, lstat '{}'",
+            root.join(long_name).display()
+        )
+    );
+    let hidden = root.join("Geheim");
+    fs::create_dir(&hidden).unwrap();
+    fs::set_permissions(&hidden, fs::Permissions::from_mode(0o000)).unwrap();
+    struct Restore(std::path::PathBuf);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            let _ = fs::set_permissions(&self.0, fs::Permissions::from_mode(0o700));
+        }
+    }
+    let _restore = Restore(hidden.clone());
+    assert_eq!(
+        host.dispatch("fanotes:sync-read", &[json!("Geheim/Seite.md")])
+            .unwrap_err(),
+        format!(
+            "EACCES: permission denied, lstat '{}'",
+            hidden.join("Seite.md").display()
+        )
+    );
+}
