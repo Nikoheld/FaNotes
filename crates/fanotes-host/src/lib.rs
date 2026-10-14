@@ -1828,12 +1828,16 @@ fn unix_millis_from_iso(value: &str) -> Option<u64> {
         return unix_millis_from_iso(&normalized);
     }
     let (date, time) = match iso_date_time(value) {
-        IsoDate::Invalid => return legacy_spaced_numbers(trimmed),
+        IsoDate::Invalid => return legacy_numeric_millis(trimmed),
         // `YYYY-MM-DD` is UTC midnight. A short field, or whitespace around the
-        // date, makes that midnight local.
+        // date, makes that midnight local. A value that is not a date, such as
+        // `5GMT`, continues as a legacy number.
         IsoDate::DateOnly(date) => {
             let surrounded = value.trim_matches(is_date_parse_space).len() != value.len();
-            return date_only_millis(date, surrounded);
+            if let Some(millis) = date_only_millis(date, surrounded) {
+                return Some(millis);
+            }
+            return legacy_numeric_millis(trimmed);
         }
         IsoDate::DateTime(date, time) => (date, time),
     };
@@ -1982,7 +1986,8 @@ fn is_date_parse_space(c: char) -> bool {
 /// it local midnight.
 fn iso_date_time(value: &str) -> IsoDate<'_> {
     let trimmed = value.trim_matches(is_date_parse_space);
-    if trimmed.contains(['T', 't']) {
+    // `2026-10-13T16:00` has a time separator. The `T` inside `GMT` does not.
+    if has_iso_t(trimmed) {
         if trimmed.len() != value.len() {
             return IsoDate::Invalid;
         }
@@ -1993,7 +1998,13 @@ fn iso_date_time(value: &str) -> IsoDate<'_> {
     }
     if let Some((date, rest)) = trimmed.split_once(is_date_parse_space) {
         let time = rest.trim_start_matches(is_date_parse_space);
-        if time.is_empty() || time.contains(is_date_parse_space) {
+        // `2026 16:00` is an ISO time. `2026 10` is a legacy month, and the `T`
+        // inside `GMT` is not a time separator.
+        if time.is_empty()
+            || time.contains(is_date_parse_space)
+            || !time.contains(':')
+            || datetime_calendar(date).is_none()
+        {
             return IsoDate::Invalid;
         }
         return IsoDate::DateTime(date, time);
@@ -2488,27 +2499,22 @@ fn strip_leading_word(trimmed: &str) -> Option<String> {
     Some(format!(" {rest}"))
 }
 
-/// `10 13 2026` is month, day, year. `2026 10 13` is year, month, day.
-/// One number is 1 January of that legacy year. Two numbers are not a date.
-fn legacy_spaced_numbers(trimmed: &str) -> Option<u64> {
-    let words: Vec<&str> = trimmed
-        .split(is_date_parse_space)
-        .filter(|word| !word.is_empty())
-        .collect();
-    if words.is_empty() || words.iter().any(|word| unsigned_number(word).is_none()) {
-        return None;
-    }
-    let numbers: Vec<i32> = words.iter().map(|word| unsigned_number(word).unwrap()).collect();
-    let (year, month, day) = match numbers.as_slice() {
-        [year] => (legacy_year(*year)?, 1, 1),
-        [first, month, day] if (1..=12).contains(first) => (legacy_year(*day)?, *first, *month),
-        [year, month, day] if *year == 0 || *year >= 32 => (legacy_year(*year)?, *month, *day),
-        _ => return None,
+/// A date with no month name. `5` is 1 May 2001. `10 13 2026 GMT` is
+/// 13 October 2026 at midnight UTC. `4:00 PM5` is 16:00 that May.
+fn legacy_numeric_millis(trimmed: &str) -> Option<u64> {
+    let words = legacy_words(trimmed);
+    let (month, day, year, clock, offset) = compose_month_date(&words, true)?;
+    let (year, month, day, suffix) = match offset {
+        None => (year, month, day, String::new()),
+        Some(minutes) => {
+            let (delta, suffix) = fold_offset_days(minutes)?;
+            let (year, month, day) = shift_ymd(year, month, day, delta)?;
+            (year, month, day, suffix)
+        }
     };
-    if !(1..=12).contains(&month) || day < 1 {
-        return None;
-    }
-    midnight_millis(year, month as u32, day as u32, true)
+    unix_millis_from_iso(&format!(
+        "{year:04}-{month:02}-{day:02}T{clock}{suffix}"
+    ))
 }
 
 fn omit_parentheticals(value: &str) -> String {
@@ -2737,7 +2743,7 @@ fn is_weekday(token: &str) -> bool {
 /// already set. The third date number is ignored. A fourth is not a date.
 fn rewrite_month_name(trimmed: &str) -> Option<String> {
     let words = legacy_words(trimmed);
-    let (month, day, year, clock, offset) = compose_month_date(&words)?;
+    let (month, day, year, clock, offset) = compose_month_date(&words, false)?;
     let (year, month, day, suffix) = match offset {
         None => (year, month, day, String::new()),
         Some(minutes) => {
@@ -2794,7 +2800,10 @@ impl LegacyTime {
     }
 }
 
-fn compose_month_date(words: &[&str]) -> Option<(i32, i32, i32, String, Option<i64>)> {
+fn compose_month_date(
+    words: &[&str],
+    numeric: bool,
+) -> Option<(i32, i32, i32, String, Option<i64>)> {
     let mut month = None;
     let mut dates = Vec::new();
     let mut time = LegacyTime::new();
@@ -2892,22 +2901,30 @@ fn compose_month_date(words: &[&str]) -> Option<(i32, i32, i32, String, Option<i
             return None;
         }
     }
-    let month = month?;
     if dates.is_empty() {
         return None;
     }
     // A named month uses the first two numbers. The third is ignored.
-    // One number pads the other field with 1, which is day 1 or year 2001.
-    let first = dates[0];
-    let second = dates.get(1).copied().unwrap_or(1);
-    let (day, year) = if (1..=31).contains(&first) {
-        (first, legacy_year(second)?)
+    // With no month name, one to three numbers are month-day-year unless the
+    // first number cannot be a day, in which case they are year-month-day.
+    // A missing field is 1, so `5` is 1 May 2001 and `2026` is 1 January.
+    let (month, day, year) = if let Some(month) = month {
+        let first = dates[0];
+        let second = dates.get(1).copied().unwrap_or(1);
+        let (day, year) = if (1..=31).contains(&first) {
+            (first, legacy_year(second)?)
+        } else {
+            (second, legacy_year(first)?)
+        };
+        if !(1..=31).contains(&day) {
+            return None;
+        }
+        (month, day, year)
+    } else if numeric {
+        numeric_month_day_year(&dates)?
     } else {
-        (second, legacy_year(first)?)
-    };
-    if !(1..=31).contains(&day) {
         return None;
-    }
+    };
     Some((
         month,
         day,
@@ -2915,6 +2932,23 @@ fn compose_month_date(words: &[&str]) -> Option<(i32, i32, i32, String, Option<i
         finish_legacy_time(&time, hour_offset)?,
         offset,
     ))
+}
+
+/// No month name. `10 13 2026` is month, day, year. `2026 10 13` is
+/// year, month, day. A missing field is 1.
+fn numeric_month_day_year(dates: &[i32]) -> Option<(i32, i32, i32)> {
+    let first = dates[0];
+    let second = dates.get(1).copied().unwrap_or(1);
+    let third = dates.get(2).copied().unwrap_or(1);
+    let (year, month, day) = if !(1..=31).contains(&first) {
+        (legacy_year(first)?, second, third)
+    } else {
+        (legacy_year(third)?, first, second)
+    };
+    if !(1..=12).contains(&month) || day < 1 {
+        return None;
+    }
+    Some((month, day, year))
 }
 
 /// `+2026` before the first number is 2026. After a number, the sign is not
@@ -3527,6 +3561,9 @@ fn legacy_hyphen_millis(value: &str) -> Option<u64> {
         .map(|field| field.parse::<i32>().ok())
         .collect::<Option<Vec<_>>>()?;
     let (year, month, day) = match numbers.as_slice() {
+        // `5` is 1 May 2001. `13` is not a month, so it is not a date.
+        // `32` and `0` are 1 January of that legacy year.
+        [first] if (1..=31).contains(first) => (2001, *first, 1),
         [year] => (legacy_year(*year)?, 1, 1),
         [first, second] if (1..=12).contains(first) && (1..=31).contains(second) => {
             (2001, *first, *second)
@@ -7391,6 +7428,88 @@ mod local_zone_tests {
         assert_eq!(unix_millis_from_iso("Oct 13 2026 4:00 p.m.5"), None);
         assert_eq!(unix_millis_from_iso("Oct 13 2026 11 PM5"), None);
         assert_eq!(unix_millis_from_iso("16:00 PM5 Oct 13 2026"), None);
+    }
+
+    #[test]
+    fn a_number_without_a_month_is_a_legacy_date() {
+        let _lock = TRASH_CLOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let _restore = RestoreTz(std::env::var_os("TZ"));
+        unsafe { std::env::set_var("TZ", "America/New_York") };
+        unsafe { tzset() };
+        // One number from 1 to 31 is that month in 2001. A larger number is
+        // 1 January of that year. A zone or a clock does not need a month name.
+        assert_eq!(unix_millis_from_iso("5"), Some(988_689_600_000));
+        assert_eq!(unix_millis_from_iso("hello 5"), Some(988_689_600_000));
+        assert_eq!(unix_millis_from_iso("12"), Some(1_007_182_800_000));
+        assert_eq!(unix_millis_from_iso("32"), Some(1_956_546_000_000));
+        assert_eq!(unix_millis_from_iso("5 GMT"), Some(988_675_200_000));
+        assert_eq!(unix_millis_from_iso("5GMT"), Some(988_675_200_000));
+        assert_eq!(unix_millis_from_iso("5EST"), Some(988_693_200_000));
+        assert_eq!(unix_millis_from_iso("1 GMT"), Some(978_307_200_000));
+        assert_eq!(unix_millis_from_iso("12 GMT"), Some(1_007_164_800_000));
+        assert_eq!(unix_millis_from_iso("32 GMT"), Some(1_956_528_000_000));
+        assert_eq!(unix_millis_from_iso("10 13"), Some(1_002_945_600_000));
+        assert_eq!(unix_millis_from_iso("10 13 GMT"), Some(1_002_931_200_000));
+        assert_eq!(unix_millis_from_iso("hello 10 13"), Some(1_002_945_600_000));
+        assert_eq!(unix_millis_from_iso("2026 10"), Some(1_790_827_200_000));
+        assert_eq!(unix_millis_from_iso("2026 10 GMT"), Some(1_790_812_800_000));
+        assert_eq!(unix_millis_from_iso("10 13 2026 GMT"), Some(1_791_849_600_000));
+        assert_eq!(unix_millis_from_iso("10 13 2026 EST"), Some(1_791_867_600_000));
+        assert_eq!(
+            unix_millis_from_iso("10 13 2026 16:00"),
+            Some(1_791_921_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("10 13 2026 16:00 GMT"),
+            Some(1_791_907_200_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("10 13 2026 16:00 EST"),
+            Some(1_791_925_200_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026 10 13 16:00 EST"),
+            Some(1_791_925_200_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("10 13 2026 4:00 PM"),
+            Some(1_791_921_600_000)
+        );
+        assert_eq!(unix_millis_from_iso("4:00 PM5"), Some(988_747_200_000));
+        assert_eq!(unix_millis_from_iso("5GMT5"), Some(989_020_800_000));
+        assert_eq!(unix_millis_from_iso("5EST13"), Some(989_730_000_000));
+        assert_eq!(unix_millis_from_iso("2026EST"), Some(1_767_243_600_000));
+        assert_eq!(unix_millis_from_iso("0 1 2"), Some(946_789_200_000));
+        assert_eq!(unix_millis_from_iso("99 1 2"), Some(915_253_200_000));
+        assert_eq!(
+            unix_millis_from_iso("10 13 2026 GMT+5"),
+            Some(1_791_831_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("10 13 2026 16:00 +5"),
+            Some(1_791_889_200_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("10 13 2026 24:00 GMT"),
+            Some(1_791_936_000_000)
+        );
+        assert_eq!(unix_millis_from_iso("2026"), Some(1_767_225_600_000));
+        assert_eq!(unix_millis_from_iso("1"), Some(978_325_200_000));
+        assert_eq!(unix_millis_from_iso("13"), None);
+        assert_eq!(unix_millis_from_iso("31"), None);
+        assert_eq!(unix_millis_from_iso("hello 13"), None);
+        assert_eq!(unix_millis_from_iso("13 GMT"), None);
+        assert_eq!(unix_millis_from_iso("13 2026 GMT"), None);
+        assert_eq!(unix_millis_from_iso("10 13 2026 GMT5"), None);
+        assert_eq!(unix_millis_from_iso("10 13 2026 4:00 PM5"), None);
+        assert_eq!(unix_millis_from_iso("4:00 PM"), None);
+        assert_eq!(unix_millis_from_iso("16:00"), None);
+        assert_eq!(unix_millis_from_iso("16:00 GMT"), None);
+        assert_eq!(unix_millis_from_iso("13 1 2026"), None);
+        assert_eq!(unix_millis_from_iso("10 13 2026 16:00:60"), None);
+        assert_eq!(unix_millis_from_iso("10 13 2026 16:60"), None);
     }
 
     #[test]
