@@ -1794,7 +1794,11 @@ fn unix_millis_from_iso(value: &str) -> Option<u64> {
     let mut clock_parts = clock.split(':');
     let hour: u32 = clock_parts.next()?.parse().ok()?;
     let minute: u32 = clock_parts.next()?.parse().ok()?;
-    let second: u32 = clock_parts.next()?.parse().ok()?;
+    // `Date.parse` treats `Thh:mmZ` as zero seconds.
+    let second: u32 = match clock_parts.next() {
+        Some(text) => text.parse().ok()?,
+        None => 0,
+    };
     if clock_parts.next().is_some()
         || hour > 23
         || minute > 59
