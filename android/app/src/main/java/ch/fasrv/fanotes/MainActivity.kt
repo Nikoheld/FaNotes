@@ -235,6 +235,7 @@ fun FaNotesScreen(
     var createNote by remember { mutableStateOf(false) }
     var createFolder by remember { mutableStateOf(false) }
     var createParent by remember { mutableStateOf("") }
+    var renaming by remember { mutableStateOf<Pair<String, String>?>(null) }
     var syncPending by remember { mutableStateOf(false) }
     var mathOpen by remember { mutableStateOf(false) }
     var mathInput by remember { mutableStateOf("") }
@@ -309,6 +310,7 @@ fun FaNotesScreen(
                     onOpenVault = onOpenVault,
                     onPrivateVault = { model.usePrivateVault() },
                     onDelete = { path, folder, name -> model.askDelete(path, folder, name) },
+                    onRename = { path, name -> renaming = path to name },
                     localFolders = syncPrefixesFromSetting(desk["sync-excluded"]),
                     onToggleLocal = { model.toggleLocalFolder(it) },
                     colors = model.folderColors.collectAsStateWithLifecycle().value,
@@ -525,6 +527,12 @@ fun FaNotesScreen(
         if (name != null) model.createFolder(name, createParent)
         createParent = ""
     }
+    renaming?.let { (path, current) ->
+        NameDialog("Umbenennen", current, initial = current, confirm = "Umbenennen") { name ->
+            renaming = null
+            if (name != null && name.trim() != current) model.rename(path, name)
+        }
+    }
 }
 
 @Composable
@@ -546,6 +554,7 @@ private fun VaultPane(
     onOpenVault: () -> Unit,
     onPrivateVault: () -> Unit,
     onDelete: (String, Boolean, String) -> Unit,
+    onRename: (String, String) -> Unit,
     localFolders: List<String> = emptyList(),
     onToggleLocal: (String) -> Unit = {},
     colors: Map<String, String>,
@@ -618,7 +627,7 @@ private fun VaultPane(
         }
         LazyColumn(Modifier.weight(1f).padding(top = 8.dp)) {
             items(tree, key = { it.path }) { node ->
-                NoteRow(node, selected, colors, onOpen, onDelete, onFolderColor, localFolders, onToggleLocal, depth = 0)
+                NoteRow(node, selected, colors, onOpen, onDelete, onRename, onFolderColor, localFolders, onToggleLocal, depth = 0)
             }
         }
         TextButton(onClick = onOpenVault) { Text("Vault-Ordner öffnen") }
@@ -633,6 +642,7 @@ private fun NoteRow(
     colors: Map<String, String>,
     onOpen: (String) -> Unit,
     onDelete: (String, Boolean, String) -> Unit,
+    onRename: (String, String) -> Unit,
     onFolderColor: (String) -> Unit,
     localFolders: List<String>,
     onToggleLocal: (String) -> Unit,
@@ -668,12 +678,15 @@ private fun NoteRow(
                 modifier = Modifier.clickable { onToggleLocal(node.path) }.padding(horizontal = 6.dp),
             )
         }
+        IconButton(onClick = { onRename(node.path, node.name) }) {
+            Icon(Icons.Filled.Edit, contentDescription = "Umbenennen")
+        }
         IconButton(onClick = { onDelete(node.path, node.kind == NoteKind.FOLDER, node.name) }) {
             Icon(Icons.Filled.Delete, contentDescription = "Löschen")
         }
     }
     if (node.kind == NoteKind.FOLDER) {
-        node.children.forEach { NoteRow(it, selected, colors, onOpen, onDelete, onFolderColor, localFolders, onToggleLocal, depth + 1) }
+        node.children.forEach { NoteRow(it, selected, colors, onOpen, onDelete, onRename, onFolderColor, localFolders, onToggleLocal, depth + 1) }
     }
 }
 
@@ -1117,13 +1130,19 @@ private fun SyncDialog(
 }
 
 @Composable
-private fun NameDialog(title: String, placeholder: String, onDone: (String?) -> Unit) {
-    var name by remember { mutableStateOf("") }
+private fun NameDialog(
+    title: String,
+    placeholder: String,
+    initial: String = "",
+    confirm: String = "Erstellen",
+    onDone: (String?) -> Unit,
+) {
+    var name by remember(initial) { mutableStateOf(initial) }
     AlertDialog(
         onDismissRequest = { onDone(null) },
         title = { Text(title) },
         text = { OutlinedTextField(name, { name = it }, placeholder = { Text(placeholder) }, singleLine = true) },
-        confirmButton = { Button(onClick = { onDone(name) }, enabled = name.isNotBlank()) { Text("Erstellen") } },
+        confirmButton = { Button(onClick = { onDone(name) }, enabled = name.isNotBlank()) { Text(confirm) } },
         dismissButton = { TextButton(onClick = { onDone(null) }) { Text("Abbrechen") } },
     )
 }

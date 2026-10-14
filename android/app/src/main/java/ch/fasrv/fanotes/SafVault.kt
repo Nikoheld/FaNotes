@@ -28,6 +28,12 @@ class SafVault(private val context: Context, private val tree: Uri) : VaultIo {
         locate(normalize(path), create = false)?.delete()
     }
 
+    override fun move(from: String, to: String) {
+        val file = locate(normalize(from), create = false) ?: return
+        val name = normalize(to).substringAfterLast('/')
+        if (name.isEmpty() || !file.renameTo(name)) error("Umbenennen ist fehlgeschlagen.")
+    }
+
     override fun exists(path: String): Boolean = locate(normalize(path), create = false) != null
 
     override fun mtime(path: String): Long = locate(normalize(path), create = false)?.lastModified() ?: 0L
