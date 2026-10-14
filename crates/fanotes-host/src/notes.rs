@@ -694,8 +694,9 @@ fn ensure_private_history_dir(directory: &Path) -> Result<(), String> {
         }
         Ok(_) => Ok(()),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            // Desktop `mkdir` is recursive and rethrows that error.
             fs::create_dir(directory)
-                .map_err(|_| "Der Verlauf konnte nicht gespeichert werden.".to_owned())?;
+                .map_err(|error| crate::vault::node_mkdir_error(directory, &error))?;
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;
@@ -704,7 +705,7 @@ fn ensure_private_history_dir(directory: &Path) -> Result<(), String> {
             }
             Ok(())
         }
-        Err(_) => Err("Der Verlauf konnte nicht gespeichert werden.".to_owned()),
+        Err(error) => Err(crate::vault::node_mkdir_error(directory, &error)),
     }
 }
 
@@ -1178,8 +1179,8 @@ fn is_leap(year: i32) -> bool {
 #[cfg(test)]
 mod publish_tests {
     use super::{
-        file_mtime_iso, iso_from_date, iso_from_system_time, mtime_millis_of, publish_new_file,
-        write_note_file,
+        file_mtime_iso, history_dir, iso_from_date, iso_from_system_time, mtime_millis_of,
+        publish_new_file, record_history, write_note_file,
         NewFileError,
     };
     use std::time::UNIX_EPOCH;
@@ -1300,5 +1301,54 @@ mod publish_tests {
         let famd = write_note_file(&dir, "Mathe/Seite.famd", "Rand\n", None).unwrap();
         assert_eq!(famd, file_mtime_iso(&dir.join("Mathe/Seite.famd")));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_unwritable_history_folder_reports_the_desktop_mkdir_error() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = std::env::temp_dir().join(format!(
+            "fanotes-history-mkdir-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        let history = root.join(".fanotes/history");
+        std::fs::create_dir_all(&history).unwrap();
+        std::fs::set_permissions(&history, std::fs::Permissions::from_mode(0o555)).unwrap();
+        struct Restore(std::path::PathBuf);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                let _ = std::fs::set_permissions(&self.0, std::fs::Permissions::from_mode(0o700));
+                if let Some(root) = self.0.parent().and_then(|path| path.parent()) {
+                    let _ = std::fs::remove_dir_all(root);
+                }
+            }
+        }
+        let _restore = Restore(history.clone());
+        let directory = history_dir(&root, "Seite.md").unwrap();
+        assert_eq!(
+            record_history(&root, "Seite.md", "Hallo\n").unwrap_err(),
+            format!(
+                "EACCES: permission denied, mkdir '{}'",
+                directory.display()
+            )
+        );
+        assert!(std::fs::read_dir(&history).unwrap().next().is_none());
+
+        std::fs::set_permissions(&history, std::fs::Permissions::from_mode(0o700)).unwrap();
+        std::fs::remove_dir(&history).unwrap();
+        std::fs::write(&history, b"datei").unwrap();
+        assert_eq!(
+            record_history(&root, "Seite.md", "Hallo\n").unwrap_err(),
+            format!(
+                "ENOTDIR: not a directory, mkdir '{}'",
+                directory.display()
+            )
+        );
+        assert_eq!(std::fs::read(&history).unwrap(), b"datei");
     }
 }
