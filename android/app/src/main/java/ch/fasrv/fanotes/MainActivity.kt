@@ -801,6 +801,7 @@ private fun PageSurface(
                 page.ink.tag = token
                 page.ink.refresh()
             }
+            model.takeReveal(current)?.let { page.ink.revealY(it) }
         },
     )
 }

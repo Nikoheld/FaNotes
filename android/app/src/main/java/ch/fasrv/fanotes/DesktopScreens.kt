@@ -140,9 +140,9 @@ fun SearchScreen(model: FaNotesViewModel, onOpen: (String) -> Unit) {
     Column(Modifier.fillMaxSize().padding(16.dp)) {
         OutlinedTextField(query, { model.searchVaultText(it) }, modifier = Modifier.fillMaxWidth(), label = { Text("Im Vault suchen") }, singleLine = true)
         LazyColumn(Modifier.padding(top = 8.dp)) {
-            items(hits, key = { "${it.path}:${it.line}:${it.text}" }) { hit ->
-                Column(Modifier.fillMaxWidth().clickable { onOpen(hit.path) }.padding(vertical = 8.dp)) {
-                    Text(hit.path, fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
+            items(hits, key = { "${it.path}:${it.line}:${it.anchorY}:${it.text}" }) { hit ->
+                Column(Modifier.fillMaxWidth().clickable { model.openSearchHit(hit); onOpen(hit.path) }.padding(vertical = 8.dp)) {
+                    Text(hit.path + if (hit.anchorY != null) "  · Handschrift" else "", fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
                     Text(hit.text, maxLines = 2)
                 }
             }
@@ -495,6 +495,19 @@ fun HistoryScreen(model: FaNotesViewModel) {
                 TextButton(onClick = { model.restoreHistory(snapshot.id) }) { Text("Wiederherstellen") }
             }
         }
+        val backupsOn = model.deskSettings.collectAsStateWithLifecycle().value["experimental-backup"] == "on"
+        if (backupsOn && open != null) {
+            val backups = ch.fasrv.fanotes.desk.parseNoteBackups(open?.payload?.array("noteBackups")).filter { it.notePath == open?.path }.asReversed()
+            Text("Sicherungen", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 16.dp))
+            Text("Liegen in der Notiz selbst, höchstens 40, wie auf dem Desktop.", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
+            TextButton(onClick = { model.snapshotNote() }) { Text("Sicherung anlegen") }
+            backups.forEach { backup ->
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text(backup.createdAt, modifier = Modifier.weight(1f), fontSize = 13.sp)
+                    TextButton(onClick = { model.restoreNoteBackup(backup.id) }) { Text("Wiederherstellen") }
+                }
+            }
+        }
     }
 }
 
@@ -602,7 +615,15 @@ fun SettingsScreen(model: FaNotesViewModel, onSync: () -> Unit, onOpenVault: () 
                     TextButton(onClick = { model.checkUpdate() }) { Text("Nach einem Release suchen") }
                 }
                 "accessibility" -> Text("Größere Ziele: ${settings["large"] == "on"}", modifier = Modifier.clickable { model.updateDesk("large", if (settings["large"] == "on") "off" else "on") })
-                "experimental" -> Text("Geteilte Ansicht ist über die Befehlsleiste erreichbar. Bewegungen lassen sich mit Fokus beruhigen.")
+                "experimental" -> {
+                    Text("Geteilte Ansicht ist über die Befehlsleiste erreichbar. Bewegungen lassen sich mit Fokus beruhigen.")
+                    val backups = settings["experimental-backup"] == "on"
+                    Text(
+                        "Notiz-Sicherungen: ${if (backups) "an" else "aus"}",
+                        modifier = Modifier.clickable { model.updateDesk("experimental-backup", if (backups) "off" else "on") }.padding(vertical = 6.dp),
+                        fontWeight = if (backups) FontWeight.Bold else FontWeight.Normal,
+                    )
+                }
                 "advanced" -> Text("Der Gerätename für Konfliktdateien steht in den Sync-Einstellungen. Secrets liegen im Android-Keystore, nicht im Vault.")
             }
             TextButton(onClick = {
