@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
@@ -52,6 +53,7 @@ private val RibbonDestinations = listOf(
     "cards" to "Karten",
     "books" to "Fachbuch",
     "history" to "Verlauf",
+    "study" to "Lernzeit",
     "ai" to "AI",
     "settings" to "Einstellungen",
 )
@@ -512,6 +514,41 @@ fun HistoryScreen(model: FaNotesViewModel) {
 }
 
 @Composable
+fun StudyScreen(model: FaNotesViewModel) {
+    val picture by model.study.collectAsStateWithLifecycle()
+    val overview = picture
+    Column(Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState())) {
+        Text("Lernzeit", style = MaterialTheme.typography.titleLarge)
+        Text("Aus den stillen Seitenstatistiken auf diesem Gerät. Nichts wird gesendet.", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
+        if (overview == null) {
+            Text("Wird gelesen …", modifier = Modifier.padding(top = 12.dp))
+        } else {
+            Text("${overview.notes} Seiten", modifier = Modifier.padding(top = 12.dp))
+            Text("Auf Seiten  ${ch.fasrv.fanotes.desk.formatStudyDuration(overview.dwellMs)}", modifier = Modifier.padding(top = 8.dp))
+            Text("Tippen  ${ch.fasrv.fanotes.desk.formatStudyDuration(overview.typingMs)}")
+            Text("Handschrift  ${ch.fasrv.fanotes.desk.formatStudyDuration(overview.inkMs)}")
+            Text("Tinte  ${kotlin.math.round(overview.inkMm).toInt()} mm")
+            val peak = overview.dwellByWeekday.maxOrNull()?.coerceAtLeast(1) ?: 1L
+            Row(Modifier.fillMaxWidth().padding(top = 16.dp).height(120.dp), verticalAlignment = Alignment.Bottom) {
+                listOf("So", "Mo", "Di", "Mi", "Do", "Fr", "Sa").forEachIndexed { index, label ->
+                    val value = overview.dwellByWeekday.getOrElse(index) { 0L }
+                    val bar = (4 + (value.toFloat() / peak.toFloat()) * 88).dp
+                    Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Box(Modifier.fillMaxWidth().padding(horizontal = 4.dp).height(bar).background(MaterialTheme.colorScheme.primary))
+                        Text(label, fontSize = 11.sp)
+                    }
+                }
+            }
+            Text("Fächer", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 16.dp))
+            if (overview.subjects.isEmpty()) Text("Noch keine Seitenstatistik.")
+            overview.subjects.forEach { row ->
+                Text("${row.subject}  ·  ${row.notes}  ·  ${ch.fasrv.fanotes.desk.formatStudyDuration(row.dwellMs)}  ·  ${ch.fasrv.fanotes.desk.formatStudyDuration(row.inkMs)} Stift")
+            }
+        }
+    }
+}
+
+@Composable
 fun ConflictList(model: FaNotesViewModel) {
     val sync by model.sync.collectAsStateWithLifecycle()
     if (sync.conflicts.isEmpty()) {
@@ -667,6 +704,13 @@ fun CommandPalette(onDismiss: () -> Unit, onRun: (String) -> Unit) {
         "cards" to "Karteikarten",
         "books" to "Fachbuch",
         "history" to "Versionsverlauf",
+        "study" to "Lernzeit",
+        "template-protocol" to "Vorlage: Protokoll",
+        "template-proof" to "Vorlage: Beweis",
+        "template-cornell" to "Vorlage: Cornell",
+        "template-vocabulary" to "Vorlage: Vokabeln",
+        "template-journal" to "Vorlage: Tagebuch",
+        "template-meeting" to "Vorlage: Besprechung",
         "ai" to "AI",
         "settings" to "Einstellungen",
         "daily" to "Tägliche Notiz",
