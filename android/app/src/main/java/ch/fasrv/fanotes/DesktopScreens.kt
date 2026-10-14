@@ -2,6 +2,7 @@ package ch.fasrv.fanotes
 
 import android.content.Intent
 import android.net.Uri
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -12,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -28,6 +30,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -212,53 +216,53 @@ fun CalendarScreen(model: FaNotesViewModel, onOpenNote: (String) -> Unit) {
     val document by model.calendar.collectAsStateWithLifecycle()
     var month by remember { mutableStateOf(YearMonth.now()) }
     var title by remember { mutableStateOf("") }
-    var day by remember { mutableStateOf(LocalDate.now().toString()) }
+    var time by remember { mutableStateOf("") }
+    var anchor by remember { mutableStateOf(LocalDate.now()) }
+    var view by remember { mutableStateOf("month") }
     var recurrence by remember { mutableStateOf("none") }
     val calendarId = document.calendars.firstOrNull()?.id ?: "personal"
+    val day = anchor.toString()
     Column(Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState())) {
         Text("Kalender", style = MaterialTheme.typography.titleLarge)
         Text("Gespeichert in Kalender.md.", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = { month = month.minusMonths(1) }) { Text("‹") }
-            Text(month.toString(), modifier = Modifier.padding(horizontal = 8.dp))
-            TextButton(onClick = { month = month.plusMonths(1) }) { Text("›") }
-        }
-        val start = month.atDay(1)
-        val offset = (start.dayOfWeek.value + 6) % 7
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            listOf("Mo", "Di", "Mi", "Do", "Fr", "Sa", "So").forEach { Text(it, fontSize = 12.sp) }
-        }
-        val cells = offset + month.lengthOfMonth()
-        for (week in 0 until (cells + 6) / 7) {
-            Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-                for (column in 0 until 7) {
-                    val index = week * 7 + column
-                    val date = if (index >= offset && index < offset + month.lengthOfMonth()) month.atDay(index - offset + 1) else null
-                    val key = date?.toString()
-                    val count = if (date == null) 0 else document.events.count { ch.fasrv.fanotes.desk.occurrencesOn(it, date) }
-                    Text(
-                        if (date == null) "" else "${date.dayOfMonth}${if (count > 0) " ·$count" else ""}",
-                        modifier = Modifier.weight(1f).clickable(enabled = date != null) { if (key != null) day = key }.padding(4.dp),
-                        fontSize = 13.sp,
-                        color = if (key == day) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                    )
+        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+            listOf("day" to "Tag", "three" to "3 Tage", "week" to "Woche", "month" to "Monat", "agenda" to "Agenda").forEach { (id, label) ->
+                TextButton(onClick = {
+                    view = id
+                    if (id == "month") month = YearMonth.from(anchor)
+                }) {
+                    Text(label, color = if (view == id) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface, fontWeight = if (view == id) FontWeight.SemiBold else FontWeight.Normal)
                 }
             }
         }
-        Text("Am $day", modifier = Modifier.padding(top = 8.dp), fontWeight = FontWeight.SemiBold)
-        document.events.filter { ch.fasrv.fanotes.desk.occurrencesOn(it, java.time.LocalDate.parse(day)) }.forEach { event ->
-            val repeat = when (event.recurrence) {
-                "daily" -> " · täglich"
-                "weekly" -> " · wöchentlich"
-                "monthly" -> " · monatlich"
-                "yearly" -> " · jährlich"
-                else -> ""
-            }
-            Text(
-                event.title + repeat + if (event.notePath.isNotBlank()) "  →" else "",
-                modifier = Modifier.clickable(enabled = event.notePath.isNotBlank()) { onOpenNote(event.notePath) }.padding(vertical = 4.dp),
-            )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            TextButton(onClick = {
+                anchor = when (view) {
+                    "day" -> anchor.minusDays(1)
+                    "three" -> anchor.minusDays(3)
+                    "week" -> anchor.minusWeeks(1)
+                    "agenda" -> anchor.minusDays(28)
+                    else -> month.minusMonths(1).atDay(1).also { month = YearMonth.from(it) }
+                }
+            }) { Text("‹") }
+            Text(if (view == "month") month.toString() else day, modifier = Modifier.padding(horizontal = 8.dp))
+            TextButton(onClick = {
+                anchor = when (view) {
+                    "day" -> anchor.plusDays(1)
+                    "three" -> anchor.plusDays(3)
+                    "week" -> anchor.plusWeeks(1)
+                    "agenda" -> anchor.plusDays(28)
+                    else -> month.plusMonths(1).atDay(1).also { month = YearMonth.from(it) }
+                }
+            }) { Text("›") }
         }
+        when (view) {
+            "month" -> MonthGrid(month, anchor, document) { anchor = it }
+            "agenda" -> AgendaList(anchor, document, onOpenNote)
+            else -> DayColumns(ch.fasrv.fanotes.desk.calendarRange(view, anchor), anchor, document, onOpenNote) { anchor = it }
+        }
+        Text("Am $day", modifier = Modifier.padding(top = 8.dp), fontWeight = FontWeight.SemiBold)
+        EventsOn(document, anchor, onOpenNote)
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
             listOf("none" to "Einmal", "daily" to "Täglich", "weekly" to "Wöchentlich", "monthly" to "Monatlich", "yearly" to "Jährlich").forEach { (id, label) ->
                 TextButton(onClick = { recurrence = id }) {
@@ -267,14 +271,108 @@ fun CalendarScreen(model: FaNotesViewModel, onOpenNote: (String) -> Unit) {
             }
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
-            OutlinedTextField(title, { title = it }, label = { Text("Neuer Termin") })
+            OutlinedTextField(title, { title = it }, label = { Text("Neuer Termin") }, modifier = Modifier.weight(1f))
+            OutlinedTextField(time, { time = it }, label = { Text("Uhrzeit") }, modifier = Modifier.weight(0.5f))
             TextButton(onClick = {
                 if (title.isNotBlank()) {
-                    model.addCalendarEvent(title, day, calendarId, recurrence)
+                    model.addCalendarEvent(title, day, calendarId, recurrence, time)
                     title = ""
                 }
             }) { Text("Eintragen") }
         }
+    }
+}
+
+@Composable
+private fun MonthGrid(month: YearMonth, anchor: LocalDate, document: ch.fasrv.fanotes.desk.CalendarDocument, onPick: (LocalDate) -> Unit) {
+    val start = month.atDay(1)
+    val offset = (start.dayOfWeek.value + 6) % 7
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+        listOf("Mo", "Di", "Mi", "Do", "Fr", "Sa", "So").forEach { Text(it, fontSize = 12.sp, modifier = Modifier.weight(1f)) }
+    }
+    val cells = offset + month.lengthOfMonth()
+    for (week in 0 until (cells + 6) / 7) {
+        Row(Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
+            for (column in 0 until 7) {
+                val index = week * 7 + column
+                val date = if (index >= offset && index < offset + month.lengthOfMonth()) month.atDay(index - offset + 1) else null
+                val count = if (date == null) 0 else document.events.count { ch.fasrv.fanotes.desk.occurrencesOn(it, date) }
+                Text(
+                    if (date == null) "" else "${date.dayOfMonth}${if (count > 0) " ·$count" else ""}",
+                    modifier = Modifier.weight(1f).clickable(enabled = date != null) { if (date != null) onPick(date) }.padding(4.dp),
+                    fontSize = 13.sp,
+                    color = if (date == anchor) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun DayColumns(
+    days: List<LocalDate>,
+    anchor: LocalDate,
+    document: ch.fasrv.fanotes.desk.CalendarDocument,
+    onOpenNote: (String) -> Unit,
+    onPick: (LocalDate) -> Unit,
+) {
+    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+        days.forEach { date ->
+            Column(
+                Modifier.width(148.dp).padding(end = 8.dp).clickable { onPick(date) }.background(if (date == anchor) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent).padding(6.dp),
+            ) {
+                Text("${date.dayOfMonth}. ${date.monthValue}", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                document.events.filter { ch.fasrv.fanotes.desk.occurrencesOn(it, date) && it.allDay }.forEach { event ->
+                    Text(event.title, fontSize = 12.sp, modifier = Modifier.clickable(enabled = event.notePath.isNotBlank()) { onOpenNote(event.notePath) })
+                }
+                for (hour in 7..20) {
+                    val hits = document.events.filter { event ->
+                        ch.fasrv.fanotes.desk.occurrencesOn(event, date) && ch.fasrv.fanotes.desk.eventClock(event)?.startsWith("%02d".format(hour)) == true
+                    }
+                    Text(
+                        "$hour ${hits.joinToString { it.title }}".trim(),
+                        fontSize = 11.sp,
+                        color = if (hits.isEmpty()) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f) else MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.padding(vertical = 1.dp),
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AgendaList(anchor: LocalDate, document: ch.fasrv.fanotes.desk.CalendarDocument, onOpenNote: (String) -> Unit) {
+    ch.fasrv.fanotes.desk.calendarRange("agenda", anchor).forEach { date ->
+        val events = document.events.filter { ch.fasrv.fanotes.desk.occurrencesOn(it, date) }
+        if (events.isNotEmpty()) {
+            Text(date.toString(), fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
+            events.forEach { event ->
+                val clock = ch.fasrv.fanotes.desk.eventClock(event)?.let { "$it " }.orEmpty()
+                Text(
+                    clock + event.title + if (event.notePath.isNotBlank()) "  →" else "",
+                    modifier = Modifier.clickable(enabled = event.notePath.isNotBlank()) { onOpenNote(event.notePath) }.padding(vertical = 2.dp),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun EventsOn(document: ch.fasrv.fanotes.desk.CalendarDocument, day: LocalDate, onOpenNote: (String) -> Unit) {
+    document.events.filter { ch.fasrv.fanotes.desk.occurrencesOn(it, day) }.forEach { event ->
+        val repeat = when (event.recurrence) {
+            "daily" -> " · täglich"
+            "weekly" -> " · wöchentlich"
+            "monthly" -> " · monatlich"
+            "yearly" -> " · jährlich"
+            else -> ""
+        }
+        val clock = ch.fasrv.fanotes.desk.eventClock(event)?.let { "$it " }.orEmpty()
+        Text(
+            clock + event.title + repeat + if (event.notePath.isNotBlank()) "  →" else "",
+            modifier = Modifier.clickable(enabled = event.notePath.isNotBlank()) { onOpenNote(event.notePath) }.padding(vertical = 4.dp),
+        )
     }
 }
 
@@ -321,9 +419,29 @@ fun CardsScreen(model: FaNotesViewModel) {
 @Composable
 fun BooksScreen(model: FaNotesViewModel, onOpen: (String) -> Unit) {
     val books by model.books.collectAsStateWithLifecycle()
-    Column(Modifier.fillMaxSize().padding(16.dp)) {
+    val settings by model.deskSettings.collectAsStateWithLifecycle()
+    var folder by remember { mutableStateOf("") }
+    var pdf by remember { mutableStateOf("") }
+    val placement = settings["book-placement"].orEmpty().ifBlank { "rechts" }
+    Column(Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState())) {
         Text("Fachbuch", style = MaterialTheme.typography.titleLarge)
-        Text("Dieselbe Liste wie .fanotes/subject-books.json.", fontSize = 13.sp)
+        Text("Dieselbe Liste wie .fanotes/subject-books.json. Die Seite bleibt erhalten.", fontSize = 13.sp)
+        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+            listOf("links" to "Links", "rechts" to "Rechts", "oben" to "Oben", "unten" to "Unten", "popout" to "Auspoppen").forEach { (id, label) ->
+                TextButton(onClick = { model.updateDesk("book-placement", id) }) {
+                    Text(label, color = if (placement == id) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
+                }
+            }
+        }
+        OutlinedTextField(folder, { folder = it }, label = { Text("Ordner") }, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(pdf, { pdf = it }, label = { Text("PDF") }, modifier = Modifier.fillMaxWidth())
+        TextButton(onClick = {
+            if (folder.isNotBlank() && pdf.isNotBlank()) {
+                model.attachSubjectBook(folder, pdf)
+                folder = ""
+                pdf = ""
+            }
+        }) { Text("Verbinden") }
         books.forEach { book ->
             Column(Modifier.clickable { onOpen(book.bookPath) }.padding(vertical = 10.dp)) {
                 Text(book.subjectPath, fontWeight = FontWeight.SemiBold)
@@ -331,6 +449,29 @@ fun BooksScreen(model: FaNotesViewModel, onOpen: (String) -> Unit) {
             }
         }
         if (books.isEmpty()) Text("Noch kein Fachbuch mit einem Ordner verbunden.", modifier = Modifier.padding(top = 12.dp))
+    }
+}
+
+@Composable
+fun BookPane(model: FaNotesViewModel, modifier: Modifier = Modifier, onOpen: (String) -> Unit) {
+    val pane by model.bookPane.collectAsStateWithLifecycle()
+    val page = pane ?: return
+    Column(modifier.padding(8.dp)) {
+        Text(page.title, maxLines = 1, fontWeight = FontWeight.SemiBold)
+        Text("Seite ${page.page} / ${page.pageCount}", fontSize = 12.sp)
+        page.bitmap?.let { bitmap ->
+            Image(
+                bitmap.asImageBitmap(),
+                contentDescription = page.title,
+                modifier = Modifier.weight(1f).fillMaxWidth(),
+                contentScale = ContentScale.Fit,
+            )
+        }
+        Row {
+            TextButton(onClick = { model.turnBook(-1) }) { Text("‹") }
+            TextButton(onClick = { model.turnBook(1) }) { Text("›") }
+            TextButton(onClick = { onOpen(page.bookPath) }) { Text("Öffnen") }
+        }
     }
 }
 

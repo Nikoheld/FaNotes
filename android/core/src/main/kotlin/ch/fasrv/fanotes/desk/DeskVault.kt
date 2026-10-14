@@ -283,6 +283,9 @@ fun dailyNotePath(folder: String, day: LocalDate = LocalDate.now(ZoneId.systemDe
 
 data class SubjectBook(val subjectPath: String, val bookPath: String, val lastPage: Int)
 
+const val SUBJECT_BOOKS_PATH = ".fanotes/subject-books.json"
+val SUBJECT_BOOK_PLACEMENTS = listOf("links", "rechts", "oben", "unten", "popout")
+
 fun parseSubjectBooks(json: String): List<SubjectBook> {
     val root = parseJson(json) as? JsonValue.Obj ?: return emptyList()
     val items = root.array("books")?.items ?: (root as? JsonValue.Arr)?.items ?: return emptyList()
@@ -293,6 +296,130 @@ fun parseSubjectBooks(json: String): List<SubjectBook> {
         if (subject.isEmpty() || !book.endsWith(".pdf", true)) return@mapNotNull null
         SubjectBook(subject, book, obj.double("lastPage")?.toInt()?.coerceAtLeast(1) ?: 1)
     }
+}
+
+fun serializeSubjectBooks(books: List<SubjectBook>): String {
+    val body = books.take(200).mapNotNull { book ->
+        val subject = book.subjectPath.trim('/')
+        val path = book.bookPath.trim('/')
+        if (subject.isEmpty() || subject.contains("..") || !path.endsWith(".pdf", true)) null
+        else """{"subjectPath":${json(subject)},"bookPath":${json(path)},"lastPage":${book.lastPage.coerceAtLeast(1)}}"""
+    }.joinToString(",\n")
+    return "{\n  \"version\": 1,\n  \"books\": [\n$body\n  ]\n}\n"
+}
+
+fun subjectBookForNote(books: List<SubjectBook>, notePath: String): SubjectBook? {
+    val normalized = notePath.replace('\\', '/').trim('/')
+    if (normalized.isEmpty() || normalized.contains("..")) return null
+    books.find { it.subjectPath == normalized }?.let { return it }
+    val parts = normalized.split('/').filter { it.isNotEmpty() }
+    for (index in parts.size - 1 downTo 1) {
+        val folder = parts.take(index).joinToString("/")
+        books.find { it.subjectPath == folder }?.let { return it }
+    }
+    return null
+}
+
+fun attachSubjectBook(books: List<SubjectBook>, subjectPath: String, bookPath: String, lastPage: Int = 1): List<SubjectBook> {
+    val subject = subjectPath.trim('/')
+    val book = bookPath.trim('/')
+    if (subject.isEmpty() || !book.endsWith(".pdf", true)) throw IllegalArgumentException("Das Buch konnte dem Fach nicht zugeordnet werden.")
+    val next = SubjectBook(subject, book, lastPage.coerceAtLeast(1))
+    return (books.filter { it.subjectPath != subject } + next).take(200)
+}
+
+fun recordSubjectBookPage(books: List<SubjectBook>, subjectPath: String, page: Int): List<SubjectBook> {
+    if (page < 1) return books
+    return books.map { if (it.subjectPath == subjectPath) it.copy(lastPage = page) else it }
+}
+
+/** Tag, 3 Tage, Woche and Agenda windows. Monday starts the week, matching the desktop grid. */
+fun calendarRange(view: String, anchor: java.time.LocalDate): List<java.time.LocalDate> = when (view) {
+    "day" -> listOf(anchor)
+    "three" -> (0..2).map { anchor.plusDays(it.toLong()) }
+    "week" -> {
+        val monday = anchor.minusDays(((anchor.dayOfWeek.value + 6) % 7).toLong())
+        (0..6).map { monday.plusDays(it.toLong()) }
+    }
+    "agenda" -> (0..27).map { anchor.plusDays(it.toLong()) }
+    else -> emptyList()
+}
+
+fun eventClock(event: CalendarEvent): String? {
+    if (event.allDay || !event.start.contains('T')) return null
+    val start = event.start.substringAfter('T').take(5)
+    if (!Regex("""\d{2}:\d{2}""").matches(start)) return null
+    val end = event.end.substringAfter('T', "").take(5)
+    return if (Regex("""\d{2}:\d{2}""").matches(end)) "$start–$end" else start
+}
+
+data class WorksheetHighlight(
+    val id: String,
+    val page: Int,
+    val x: Double,
+    val y: Double,
+    val width: Double,
+    val height: Double,
+    val color: String = "#ffe566",
+)
+
+data class PageFrame(val page: Int, val top: Double, val height: Double, val width: Double)
+
+data class SheetRect(val x: Double, val y: Double, val width: Double, val height: Double)
+
+fun parseWorksheetHighlights(json: String): List<WorksheetHighlight> {
+    val root = parseJson(json) as? JsonValue.Obj ?: return emptyList()
+    return root.array("highlights")?.items.orEmpty().mapNotNull { item ->
+        val obj = item as? JsonValue.Obj ?: return@mapNotNull null
+        val id = obj.string("id") ?: return@mapNotNull null
+        WorksheetHighlight(
+            id = id,
+            page = obj.double("page")?.toInt()?.coerceAtLeast(1) ?: 1,
+            x = (obj.double("x") ?: 0.0).coerceIn(0.0, 1.0),
+            y = (obj.double("y") ?: 0.0).coerceIn(0.0, 1.0),
+            width = (obj.double("width") ?: 0.0).coerceIn(0.0, 1.0),
+            height = (obj.double("height") ?: 0.0).coerceIn(0.0, 1.0),
+            color = obj.string("color")?.takeIf { Regex("""#[0-9a-fA-F]{6}""").matches(it) } ?: "#ffe566",
+        )
+    }
+}
+
+/** Page-local highlight → 0–1 of the stacked sheet. One frame uses the whole sheet. */
+fun highlightToSheet(mark: WorksheetHighlight, frames: List<PageFrame>, sourceWidth: Double, sourceHeight: Double): SheetRect {
+    val frame = frames.firstOrNull { it.page == mark.page } ?: frames.singleOrNull()
+    if (frame == null || sourceWidth <= 0 || sourceHeight <= 0 || frame.height <= 0 || frame.width <= 0) {
+        return SheetRect(mark.x, mark.y, mark.width, mark.height)
+    }
+    return SheetRect(
+        x = (mark.x * frame.width) / sourceWidth,
+        y = (frame.top + mark.y * frame.height) / sourceHeight,
+        width = (mark.width * frame.width) / sourceWidth,
+        height = (mark.height * frame.height) / sourceHeight,
+    )
+}
+
+/** A drag on the stacked sheet becomes a page-local highlight, pages numbered from 1. */
+fun highlightFromDrag(
+    x: Double,
+    y: Double,
+    width: Double,
+    height: Double,
+    frames: List<PageFrame>,
+    sourceWidth: Double,
+    sourceHeight: Double,
+    id: String,
+): WorksheetHighlight? {
+    if (width < 0.012 || height < 0.008) return null
+    val centerPx = (y + height / 2) * sourceHeight
+    val frame = frames.firstOrNull { centerPx >= it.top && centerPx <= it.top + it.height }
+        ?: return WorksheetHighlight(id, 1, x.coerceIn(0.0, 1.0), y.coerceIn(0.0, 1.0), width.coerceIn(0.0, 1.0), height.coerceIn(0.0, 1.0))
+    if (frame.width <= 0 || frame.height <= 0) return null
+    val localX = ((x * sourceWidth) / frame.width).coerceIn(0.0, 1.0)
+    val localY = (((y * sourceHeight) - frame.top) / frame.height).coerceIn(0.0, 1.0)
+    val localW = ((width * sourceWidth) / frame.width).coerceIn(0.008, 1.0)
+    val localH = ((height * sourceHeight) / frame.height).coerceIn(0.008, 1.0)
+    if (localW < 0.012 || localH < 0.008) return null
+    return WorksheetHighlight(id, frame.page, localX, localY, localW, localH)
 }
 
 const val FOLDER_COLORS_PATH = ".fanotes/folder-colors.json"

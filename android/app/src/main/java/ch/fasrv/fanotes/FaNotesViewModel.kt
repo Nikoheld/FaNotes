@@ -31,7 +31,14 @@ import ch.fasrv.fanotes.desk.resolveMarkdownConflict
 import ch.fasrv.fanotes.desk.serializeFolderColors
 import ch.fasrv.fanotes.desk.withFolderColor
 import ch.fasrv.fanotes.desk.parseHomeworkMarkdown
+import ch.fasrv.fanotes.desk.SUBJECT_BOOKS_PATH
+import ch.fasrv.fanotes.desk.WorksheetHighlight
+import ch.fasrv.fanotes.desk.attachSubjectBook
 import ch.fasrv.fanotes.desk.parseSubjectBooks
+import ch.fasrv.fanotes.desk.parseWorksheetHighlights
+import ch.fasrv.fanotes.desk.recordSubjectBookPage
+import ch.fasrv.fanotes.desk.serializeSubjectBooks
+import ch.fasrv.fanotes.desk.subjectBookForNote
 import ch.fasrv.fanotes.desk.parseWorksheetBoxes
 import ch.fasrv.fanotes.desk.searchVault
 import ch.fasrv.fanotes.desk.serializeCalendarMarkdown
@@ -78,6 +85,15 @@ import kotlinx.coroutines.withContext
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.MediaType.Companion.toMediaType
 import java.io.File
+
+data class BookPaneState(
+    val bookPath: String,
+    val subjectPath: String,
+    val page: Int,
+    val pageCount: Int,
+    val bitmap: Bitmap?,
+    val title: String,
+)
 
 class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     private val graph = (app as FaNotesApplication).graph
@@ -150,6 +166,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
             style.value = style.value.copy()
             showList.value = false
             loadBackdrop(note)
+            refreshBook(note)
         }
     }
 
@@ -327,17 +344,128 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
 
     val noteLinks = MutableStateFlow<List<ch.fasrv.fanotes.desk.NoteLinkMark>>(emptyList())
     val worksheetBoxes = MutableStateFlow<List<ch.fasrv.fanotes.desk.WorksheetBox>>(emptyList())
+    val worksheetHighlights = MutableStateFlow<List<WorksheetHighlight>>(emptyList())
+    val bookPane = MutableStateFlow<BookPaneState?>(null)
 
     fun refreshOverlays() {
         val note = open.value
         viewModelScope.launch {
             val links = ch.fasrv.fanotes.desk.parseNoteLinkMarks(note?.payload)
-            val boxes = withContext(Dispatchers.IO) {
-                val worksheet = note?.worksheets?.firstOrNull() ?: return@withContext emptyList()
-                graph.vault.read(".fanotes/worksheets/$worksheet.json")?.decodeToString()?.let(::parseWorksheetBoxes).orEmpty()
+            val overlay = withContext(Dispatchers.IO) {
+                val worksheet = note?.worksheets?.firstOrNull() ?: return@withContext emptyList<ch.fasrv.fanotes.desk.WorksheetBox>() to emptyList()
+                val raw = graph.vault.read(".fanotes/worksheets/$worksheet.json")?.decodeToString().orEmpty()
+                parseWorksheetBoxes(raw) to parseWorksheetHighlights(raw)
             }
             noteLinks.value = links
-            worksheetBoxes.value = boxes
+            worksheetBoxes.value = overlay.first
+            worksheetHighlights.value = overlay.second
+        }
+    }
+
+    fun addWorksheetHighlight(mark: WorksheetHighlight) {
+        val worksheet = open.value?.worksheets?.firstOrNull() ?: return
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) { mutateHighlights(worksheet) { it + mark } }
+            refreshOverlays()
+            graph.engine.notifyLocalChange()
+        }
+    }
+
+    fun removeWorksheetHighlight(id: String) {
+        val worksheet = open.value?.worksheets?.firstOrNull() ?: return
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) { mutateHighlights(worksheet) { marks -> marks.filter { it.id != id } } }
+            refreshOverlays()
+            graph.engine.notifyLocalChange()
+        }
+    }
+
+    private fun mutateHighlights(worksheet: String, transform: (List<WorksheetHighlight>) -> List<WorksheetHighlight>) {
+        val path = ".fanotes/worksheets/$worksheet.json"
+        val raw = graph.vault.read(path)?.decodeToString() ?: return
+        val root = parseJson(raw) as? ch.fasrv.fanotes.json.JsonValue.Obj ?: return
+        val next = transform(parseWorksheetHighlights(raw))
+        root.put("highlights", ch.fasrv.fanotes.json.JsonValue.Arr(next.map { mark ->
+            ch.fasrv.fanotes.json.jsonObject(
+                "id" to ch.fasrv.fanotes.json.jsonString(mark.id),
+                "page" to ch.fasrv.fanotes.json.jsonNumber(mark.page.toDouble()),
+                "x" to ch.fasrv.fanotes.json.jsonNumber(mark.x),
+                "y" to ch.fasrv.fanotes.json.jsonNumber(mark.y),
+                "width" to ch.fasrv.fanotes.json.jsonNumber(mark.width),
+                "height" to ch.fasrv.fanotes.json.jsonNumber(mark.height),
+                "color" to ch.fasrv.fanotes.json.jsonString(mark.color),
+            )
+        }.toMutableList()))
+        root.put("updatedAt", ch.fasrv.fanotes.json.jsonString(isoNow()))
+        graph.vault.write(path, root.stringify().encodeToByteArray())
+    }
+
+    fun attachSubjectBook(folder: String, pdf: String) {
+        viewModelScope.launch {
+            books.value = withContext(Dispatchers.IO) {
+                val current = graph.vault.read(SUBJECT_BOOKS_PATH)?.decodeToString()?.let(::parseSubjectBooks).orEmpty()
+                val next = attachSubjectBook(current, folder, pdf, 1)
+                graph.vault.write(SUBJECT_BOOKS_PATH, serializeSubjectBooks(next).encodeToByteArray())
+                next
+            }
+            graph.engine.notifyLocalChange()
+            open.value?.let { refreshBook(it) }
+        }
+    }
+
+    fun turnBook(delta: Int) {
+        val current = bookPane.value ?: return
+        val nextPage = (current.page + delta).coerceIn(1, current.pageCount)
+        if (nextPage == current.page) return
+        viewModelScope.launch {
+            val next = withContext(Dispatchers.IO) {
+                val stored = graph.vault.read(SUBJECT_BOOKS_PATH)?.decodeToString()?.let(::parseSubjectBooks).orEmpty()
+                val updated = recordSubjectBookPage(stored, current.subjectPath, nextPage)
+                graph.vault.write(SUBJECT_BOOKS_PATH, serializeSubjectBooks(updated).encodeToByteArray())
+                books.value = updated
+                renderBookPage(updated.first { it.subjectPath == current.subjectPath })
+            }
+            val old = bookPane.value?.bitmap
+            bookPane.value = next
+            if (old != null && old !== next?.bitmap) old.recycle()
+            graph.engine.notifyLocalChange()
+        }
+    }
+
+    private fun refreshBook(note: OpenNote) {
+        viewModelScope.launch {
+            val next = withContext(Dispatchers.IO) {
+                val stored = graph.vault.read(SUBJECT_BOOKS_PATH)?.decodeToString()?.let(::parseSubjectBooks).orEmpty()
+                books.value = stored
+                val record = subjectBookForNote(stored, note.path) ?: return@withContext null
+                renderBookPage(record)
+            }
+            val old = bookPane.value?.bitmap
+            bookPane.value = next
+            if (old != null && old !== next?.bitmap) old.recycle()
+        }
+    }
+
+    private fun renderBookPage(record: SubjectBook): BookPaneState? {
+        val bytes = graph.vault.read(record.bookPath) ?: return null
+        val file = java.io.File.createTempFile("fanotes-book", ".pdf")
+        return try {
+            file.writeBytes(bytes)
+            android.os.ParcelFileDescriptor.open(file, android.os.ParcelFileDescriptor.MODE_READ_ONLY).use { descriptor ->
+                android.graphics.pdf.PdfRenderer(descriptor).use { renderer ->
+                    if (renderer.pageCount == 0) return null
+                    val index = (record.lastPage - 1).coerceIn(0, renderer.pageCount - 1)
+                    val page = renderer.openPage(index)
+                    val width = 900
+                    val height = (width * page.height.toFloat() / page.width.toFloat()).toInt().coerceAtLeast(1)
+                    val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+                    page.render(bitmap, null, null, android.graphics.pdf.PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                    page.close()
+                    BookPaneState(record.bookPath, record.subjectPath, index + 1, renderer.pageCount, bitmap, record.bookPath.substringAfterLast('/'))
+                }
+            }
+        } finally {
+            file.delete()
         }
     }
 
@@ -607,13 +735,24 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun addCalendarEvent(title: String, day: String, calendarId: String, recurrence: String = "none") {
+    fun addCalendarEvent(title: String, day: String, calendarId: String, recurrence: String = "none", time: String = "") {
+        val clock = time.trim().takeIf { Regex("""\d{2}:\d{2}""").matches(it) }
+        val start = if (clock == null) day else "${day}T$clock"
+        val end = if (clock == null) {
+            day
+        } else {
+            val hour = clock.take(2).toInt().coerceIn(0, 23)
+            val minute = clock.drop(3)
+            val nextHour = (hour + 1).coerceAtMost(23).toString().padStart(2, '0')
+            "${day}T$nextHour:$minute"
+        }
         val event = CalendarEvent(
             java.util.UUID.randomUUID().toString(),
             calendarId,
             title.trim(),
-            day,
-            day,
+            start,
+            end,
+            allDay = clock == null,
             recurrence = if (recurrence in setOf("daily", "weekly", "monthly", "yearly")) recurrence else "none",
         )
         val next = calendar.value.copy(events = calendar.value.events + event)
