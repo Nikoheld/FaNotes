@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -22,21 +23,28 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -52,6 +60,9 @@ import ch.fasrv.fanotes.desk.Breadcrumb
 import ch.fasrv.fanotes.desk.SwitcherNote
 import ch.fasrv.fanotes.desk.dueCards
 import ch.fasrv.fanotes.desk.fuzzyScore
+import ch.fasrv.fanotes.desk.CALENDAR_NOTE_PATH
+import ch.fasrv.fanotes.desk.CalendarEvent
+import ch.fasrv.fanotes.desk.calendarOccurrenceWindow
 import ch.fasrv.fanotes.desk.outlineOf
 import ch.fasrv.fanotes.desk.taskLines
 import java.time.LocalDate
@@ -301,30 +312,13 @@ fun CalendarScreen(model: FaNotesViewModel, onOpenNote: (String) -> Unit, onImpo
         },
     )
     var calendarName by remember { mutableStateOf("") }
+    var editor by remember { mutableStateOf<CalendarDraft?>(null) }
     val day = anchor.toString()
     Column(Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState())) {
         Text("Kalender", style = MaterialTheme.typography.titleLarge)
         Text("Gespeichert in Kalender.md.", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
-        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically) {
-            document.calendars.forEach { calendar ->
-                Text(
-                    calendar.name,
-                    fontSize = 13.sp,
-                    fontWeight = if (calendar.visible) FontWeight.SemiBold else FontWeight.Normal,
-                    color = if (calendar.visible) androidx.compose.ui.graphics.Color(android.graphics.Color.parseColor(calendar.color)) else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
-                    modifier = Modifier.clickable { model.toggleCalendarVisible(calendar.id) }.padding(horizontal = 8.dp, vertical = 4.dp),
-                )
-            }
-        }
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            OutlinedTextField(calendarName, { calendarName = it.take(80) }, label = { Text("Neue Liste") }, modifier = Modifier.weight(1f), singleLine = true)
-            TextButton(onClick = {
-                if (calendarName.isNotBlank()) {
-                    model.createCalendarList(calendarName)
-                    calendarName = ""
-                }
-            }) { Text("Hinzufügen") }
-        }
+        TextButton(onClick = { onOpenNote(CALENDAR_NOTE_PATH) }) { Text("Als Notiz öffnen") }
+        CalendarLists(model, document, calendarName) { calendarName = it }
         OutlinedTextField(calendarQuery, { calendarQuery = it }, label = { Text("Im Kalender suchen") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
         if (reminder != null) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -350,6 +344,10 @@ fun CalendarScreen(model: FaNotesViewModel, onOpenNote: (String) -> Unit, onImpo
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
             TextButton(onClick = {
+                anchor = LocalDate.now()
+                month = YearMonth.now()
+            }) { Text("Heute") }
+            TextButton(onClick = {
                 anchor = when (view) {
                     "day" -> anchor.minusDays(1)
                     "three" -> anchor.minusDays(3)
@@ -371,11 +369,39 @@ fun CalendarScreen(model: FaNotesViewModel, onOpenNote: (String) -> Unit, onImpo
         }
         when (view) {
             "month" -> MonthGrid(month, anchor, shown) { anchor = it }
-            "agenda" -> AgendaList(anchor, shown, onOpenNote)
-            else -> DayColumns(ch.fasrv.fanotes.desk.calendarRange(view, anchor), anchor, shown, onOpenNote) { anchor = it }
+            "agenda" -> AgendaList(anchor, shown) { event, date -> editor = draftFor(event, date) }
+            else -> DayColumns(ch.fasrv.fanotes.desk.calendarRange(view, anchor), anchor, shown, { event, date -> editor = draftFor(event, date) }) { anchor = it }
         }
         Text("Am $day", modifier = Modifier.padding(top = 8.dp), fontWeight = FontWeight.SemiBold)
-        EventsOn(model, shown, anchor, onOpenNote)
+        EventsOn(model, shown, anchor) { editor = draftFor(it, anchor) }
+        editor?.let { current ->
+            CalendarEventEditor(
+                document = document,
+                draft = current,
+                onChange = { editor = it },
+                onDismiss = { editor = null },
+                onSave = {
+                    model.saveCalendarOccurrence(current.key, current.toEvent())
+                    editor = null
+                },
+                onDuplicate = {
+                    model.duplicateCalendarEvent(current.id)
+                    editor = null
+                },
+                onDeleteOne = {
+                    model.skipCalendarOccurrence(current.id, current.key.substringAfter('@'))
+                    editor = null
+                },
+                onDeleteSeries = {
+                    model.deleteCalendarEvent(current.id)
+                    editor = null
+                },
+                onOpenNote = {
+                    if (current.notePath.isNotBlank()) onOpenNote(current.notePath)
+                    editor = null
+                },
+            )
+        }
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
             listOf("none" to "Einmal", "daily" to "Täglich", "weekly" to "Wöchentlich", "monthly" to "Monatlich", "yearly" to "Jährlich").forEach { (id, label) ->
                 TextButton(onClick = { recurrence = id }) {
@@ -428,7 +454,7 @@ private fun DayColumns(
     days: List<LocalDate>,
     anchor: LocalDate,
     document: ch.fasrv.fanotes.desk.CalendarDocument,
-    onOpenNote: (String) -> Unit,
+    onEdit: (CalendarEvent, LocalDate) -> Unit,
     onPick: (LocalDate) -> Unit,
 ) {
     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
@@ -438,18 +464,26 @@ private fun DayColumns(
             ) {
                 Text("${date.dayOfMonth}. ${date.monthValue}", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
                 document.events.filter { ch.fasrv.fanotes.desk.occurrencesOn(it, date) && it.allDay }.forEach { event ->
-                    Text(event.title, fontSize = 12.sp, modifier = Modifier.clickable(enabled = event.notePath.isNotBlank()) { onOpenNote(event.notePath) })
+                    Text(event.title, fontSize = 12.sp, color = calendarSwatch(document.calendars.find { it.id == event.calendarId }?.color ?: "#2a6f97"), modifier = Modifier.clickable { onEdit(event, date) })
                 }
                 for (hour in 7..20) {
                     val hits = document.events.filter { event ->
                         ch.fasrv.fanotes.desk.occurrencesOn(event, date) && ch.fasrv.fanotes.desk.eventClock(event)?.startsWith("%02d".format(hour)) == true
                     }
                     Text(
-                        "$hour ${hits.joinToString { it.title }}".trim(),
+                        "$hour",
                         fontSize = 11.sp,
-                        color = if (hits.isEmpty()) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f) else MaterialTheme.colorScheme.onSurface,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f),
                         modifier = Modifier.padding(vertical = 1.dp),
                     )
+                    hits.forEach { event ->
+                        Text(
+                            event.title,
+                            fontSize = 12.sp,
+                            color = calendarSwatch(document.calendars.find { it.id == event.calendarId }?.color ?: "#2a6f97"),
+                            modifier = Modifier.clickable { onEdit(event, date) }.padding(bottom = 2.dp),
+                        )
+                    }
                 }
             }
         }
@@ -457,7 +491,7 @@ private fun DayColumns(
 }
 
 @Composable
-private fun AgendaList(anchor: LocalDate, document: ch.fasrv.fanotes.desk.CalendarDocument, onOpenNote: (String) -> Unit) {
+private fun AgendaList(anchor: LocalDate, document: ch.fasrv.fanotes.desk.CalendarDocument, onEdit: (CalendarEvent, LocalDate) -> Unit) {
     ch.fasrv.fanotes.desk.calendarRange("agenda", anchor).forEach { date ->
         val events = document.events.filter { ch.fasrv.fanotes.desk.occurrencesOn(it, date) }
         if (events.isNotEmpty()) {
@@ -465,8 +499,9 @@ private fun AgendaList(anchor: LocalDate, document: ch.fasrv.fanotes.desk.Calend
             events.forEach { event ->
                 val clock = ch.fasrv.fanotes.desk.eventClock(event)?.let { "$it " }.orEmpty()
                 Text(
-                    clock + event.title + if (event.notePath.isNotBlank()) "  →" else "",
-                    modifier = Modifier.clickable(enabled = event.notePath.isNotBlank()) { onOpenNote(event.notePath) }.padding(vertical = 2.dp),
+                    clock + event.title,
+                    color = calendarSwatch(document.calendars.find { it.id == event.calendarId }?.color ?: "#2a6f97"),
+                    modifier = Modifier.clickable { onEdit(event, date) }.padding(vertical = 2.dp),
                 )
             }
         }
@@ -474,7 +509,82 @@ private fun AgendaList(anchor: LocalDate, document: ch.fasrv.fanotes.desk.Calend
 }
 
 @Composable
-private fun EventsOn(model: FaNotesViewModel, document: ch.fasrv.fanotes.desk.CalendarDocument, day: LocalDate, onOpenNote: (String) -> Unit) {
+private fun CalendarLists(
+    model: FaNotesViewModel,
+    document: ch.fasrv.fanotes.desk.CalendarDocument,
+    calendarName: String,
+    onName: (String) -> Unit,
+) {
+    val focus = LocalFocusManager.current
+    Column(
+        Modifier.fillMaxWidth().padding(top = 8.dp).background(MaterialTheme.colorScheme.surfaceVariant).padding(8.dp),
+    ) {
+        Text("Kalender", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+        document.calendars.forEach { calendar ->
+            var name by remember(calendar.id) { mutableStateOf(calendar.name) }
+            var focused by remember(calendar.id) { mutableStateOf(false) }
+            LaunchedEffect(calendar.name, focused) {
+                if (!focused) name = calendar.name
+            }
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    Modifier.padding(end = 8.dp).size(12.dp).clip(CircleShape).background(calendarSwatch(calendar.color)),
+                )
+                Checkbox(
+                    checked = calendar.visible,
+                    onCheckedChange = { model.toggleCalendarVisible(calendar.id) },
+                )
+                OutlinedTextField(
+                    name,
+                    { name = it.take(80) },
+                    label = { Text("Umbenennen") },
+                    modifier = Modifier.weight(1f).onFocusChanged { state ->
+                        val wasFocused = focused
+                        focused = state.isFocused
+                        if (wasFocused && !state.isFocused) {
+                            val clean = name.replace(Regex("""\s+"""), " ").trim()
+                            if (clean.isEmpty()) name = calendar.name
+                            else if (clean != calendar.name) model.renameCalendarList(calendar.id, clean)
+                        }
+                    },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                    keyboardActions = KeyboardActions(onDone = { focus.clearFocus() }),
+                )
+                if (document.calendars.size > 1) {
+                    TextButton(onClick = { model.deleteCalendarList(calendar.id) }) { Text("Entfernen") }
+                }
+            }
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            OutlinedTextField(
+                calendarName,
+                { onName(it.take(80)) },
+                label = { Text("Neuer Kalender") },
+                modifier = Modifier.weight(1f),
+                singleLine = true,
+            )
+            TextButton(onClick = {
+                if (calendarName.isNotBlank()) {
+                    model.createCalendarList(calendarName)
+                    onName("")
+                }
+            }) { Text("Hinzufügen") }
+        }
+    }
+}
+
+private fun calendarSwatch(hex: String): Color = runCatching {
+    Color(android.graphics.Color.parseColor(hex))
+}.getOrDefault(Color(0xFF2A6F97))
+
+@Composable
+private fun EventsOn(
+    model: FaNotesViewModel,
+    document: ch.fasrv.fanotes.desk.CalendarDocument,
+    day: LocalDate,
+    onEdit: (CalendarEvent) -> Unit,
+) {
     document.events.filter { ch.fasrv.fanotes.desk.occurrencesOn(it, day) }.forEach { event ->
         val repeat = when (event.recurrence) {
             "daily" -> " · täglich"
@@ -484,12 +594,19 @@ private fun EventsOn(model: FaNotesViewModel, document: ch.fasrv.fanotes.desk.Ca
             else -> ""
         }
         val clock = ch.fasrv.fanotes.desk.eventClock(event)?.let { "$it " }.orEmpty()
+        val swatch = document.calendars.find { it.id == event.calendarId }?.color
         Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-            Text(
-                clock + event.title + repeat + if (event.notePath.isNotBlank()) "  →" else "",
-                modifier = Modifier.clickable(enabled = event.notePath.isNotBlank()) { onOpenNote(event.notePath) },
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (swatch != null) {
+                    Box(Modifier.padding(end = 8.dp).size(10.dp).clip(CircleShape).background(calendarSwatch(swatch)))
+                }
+                Text(
+                    clock + event.title + repeat + if (event.notePath.isNotBlank()) "  →" else "",
+                    modifier = Modifier.weight(1f).clickable { onEdit(event) },
+                )
+            }
             Row(Modifier.horizontalScroll(rememberScrollState())) {
+                TextButton(onClick = { onEdit(event) }) { Text("Bearbeiten") }
                 TextButton(onClick = { model.shiftCalendarEvent(event.id, 1) }) { Text("+1 Tag") }
                 TextButton(onClick = { model.duplicateCalendarEvent(event.id) }) { Text("Kopie") }
                 if (event.recurrence != "none" && event.recurrence.isNotBlank()) {
@@ -499,6 +616,155 @@ private fun EventsOn(model: FaNotesViewModel, document: ch.fasrv.fanotes.desk.Ca
             }
         }
     }
+}
+
+private data class CalendarDraft(
+    val key: String,
+    val id: String,
+    val calendarId: String,
+    val title: String,
+    val startDate: String,
+    val endDate: String,
+    val startTime: String,
+    val endTime: String,
+    val allDay: Boolean,
+    val location: String,
+    val notes: String,
+    val notePath: String,
+    val recurrence: String,
+    val recurrenceUntil: String,
+    val exceptionDates: List<String>,
+    val detaches: Boolean,
+)
+
+private fun draftFor(event: CalendarEvent, day: LocalDate): CalendarDraft {
+    val window = calendarOccurrenceWindow(event, day)
+    val start = window.first
+    val end = window.second
+    val allDay = event.allDay || !start.contains('T')
+    val repeating = event.recurrence == "daily" || event.recurrence == "weekly" || event.recurrence == "monthly" || event.recurrence == "yearly"
+    return CalendarDraft(
+        key = "${event.id}@$day",
+        id = event.id,
+        calendarId = event.calendarId,
+        title = event.title,
+        startDate = start.take(10),
+        endDate = end.take(10),
+        startTime = if (allDay) "09:00" else start.substringAfter('T').take(5).ifBlank { "09:00" },
+        endTime = if (allDay) "10:00" else end.substringAfter('T').take(5).ifBlank { "10:00" },
+        allDay = allDay,
+        location = event.location,
+        notes = event.notes,
+        notePath = event.notePath,
+        recurrence = if (repeating) event.recurrence else "none",
+        recurrenceUntil = event.recurrenceUntil.orEmpty(),
+        exceptionDates = event.exceptionDates,
+        detaches = repeating && day.toString() != event.start.take(10),
+    )
+}
+
+private fun CalendarDraft.toEvent(): CalendarEvent {
+    val cleanTitle = title.replace(Regex("""\s+"""), " ").trim().ifEmpty { "Neuer Termin" }
+    return CalendarEvent(
+        id = id,
+        calendarId = calendarId,
+        title = cleanTitle,
+        start = if (allDay) startDate.trim() else "${startDate.trim()}T${startTime.trim()}",
+        end = if (allDay) endDate.trim() else "${endDate.trim()}T${endTime.trim()}",
+        allDay = allDay,
+        location = location,
+        notes = notes,
+        notePath = notePath,
+        recurrence = recurrence,
+        recurrenceUntil = recurrenceUntil.trim().ifBlank { null },
+        exceptionDates = exceptionDates,
+    )
+}
+
+@Composable
+private fun CalendarEventEditor(
+    document: ch.fasrv.fanotes.desk.CalendarDocument,
+    draft: CalendarDraft,
+    onChange: (CalendarDraft) -> Unit,
+    onDismiss: () -> Unit,
+    onSave: () -> Unit,
+    onDuplicate: () -> Unit,
+    onDeleteOne: () -> Unit,
+    onDeleteSeries: () -> Unit,
+    onOpenNote: () -> Unit,
+) {
+    var error by remember(draft.key) { mutableStateOf("") }
+    val calendarName = document.calendars.find { it.id == draft.calendarId }?.name ?: "Kalender"
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            TextButton(onClick = {
+                val dates = runCatching {
+                    LocalDate.parse(draft.startDate.trim())
+                    LocalDate.parse(draft.endDate.trim())
+                    if (!draft.allDay) {
+                        java.time.LocalTime.parse(draft.startTime.trim())
+                        java.time.LocalTime.parse(draft.endTime.trim())
+                    }
+                }
+                if (dates.isFailure) {
+                    error = "Beginn oder Ende ist kein Datum."
+                } else {
+                    onSave()
+                }
+            }) { Text("Speichern") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Abbrechen") } },
+        title = { Text(if (draft.detaches) "Diesen Termin" else "Termin") },
+        text = {
+            Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
+                if (draft.detaches) {
+                    Text("Dieser Termin wird aus der Serie gelöst.", fontSize = 13.sp, modifier = Modifier.padding(bottom = 8.dp))
+                }
+                OutlinedTextField(draft.title, { onChange(draft.copy(title = it.take(240))) }, label = { Text("Neuer Termin") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+                TextButton(onClick = {
+                    val ids = document.calendars
+                    if (ids.isEmpty()) return@TextButton
+                    val index = ids.indexOfFirst { it.id == draft.calendarId }.let { if (it < 0) 0 else it }
+                    onChange(draft.copy(calendarId = ids[(index + 1) % ids.size].id))
+                }) { Text("Kalender: $calendarName") }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(checked = draft.allDay, onCheckedChange = { onChange(draft.copy(allDay = it)) })
+                    Text("Ganztägig")
+                }
+                OutlinedTextField(draft.startDate, { onChange(draft.copy(startDate = it.take(10))) }, label = { Text("Beginn") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+                if (!draft.allDay) {
+                    OutlinedTextField(draft.startTime, { onChange(draft.copy(startTime = it.take(5))) }, label = { Text("Beginn Uhrzeit") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+                }
+                OutlinedTextField(draft.endDate, { onChange(draft.copy(endDate = it.take(10))) }, label = { Text("Ende") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+                if (!draft.allDay) {
+                    OutlinedTextField(draft.endTime, { onChange(draft.copy(endTime = it.take(5))) }, label = { Text("Ende Uhrzeit") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+                }
+                if (!draft.detaches) {
+                    Row(Modifier.horizontalScroll(rememberScrollState())) {
+                        listOf("none" to "Nie", "daily" to "Täglich", "weekly" to "Wöchentlich", "monthly" to "Monatlich", "yearly" to "Jährlich").forEach { (id, label) ->
+                            TextButton(onClick = { onChange(draft.copy(recurrence = id)) }) {
+                                Text(label, color = if (draft.recurrence == id) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
+                            }
+                        }
+                    }
+                    if (draft.recurrence != "none") {
+                        OutlinedTextField(draft.recurrenceUntil, { onChange(draft.copy(recurrenceUntil = it.take(10))) }, label = { Text("Bis") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+                    }
+                }
+                OutlinedTextField(draft.location, { onChange(draft.copy(location = it.take(160))) }, label = { Text("Ort") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+                OutlinedTextField(draft.notes, { onChange(draft.copy(notes = it.take(4000))) }, label = { Text("Notizen") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(draft.notePath, { onChange(draft.copy(notePath = it.take(400))) }, label = { Text("Notizpfad") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+                if (error.isNotEmpty()) Text(error, color = MaterialTheme.colorScheme.error, fontSize = 13.sp)
+                Row(Modifier.horizontalScroll(rememberScrollState())) {
+                    TextButton(onClick = onDuplicate) { Text("Duplizieren") }
+                    if (draft.notePath.isNotBlank()) TextButton(onClick = onOpenNote) { Text("Notiz öffnen") }
+                    TextButton(onClick = onDeleteOne) { Text("Nur diesen löschen") }
+                    if (draft.recurrence != "none") TextButton(onClick = onDeleteSeries) { Text("Serie löschen") }
+                }
+            }
+        },
+    )
 }
 
 @Composable

@@ -1226,6 +1226,18 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         saveCalendar(ch.fasrv.fanotes.desk.toggleCalendarVisible(calendar.value, id))
     }
 
+    fun renameCalendarList(id: String, name: String) {
+        saveCalendar(ch.fasrv.fanotes.desk.renameCalendarList(calendar.value, id, name))
+    }
+
+    fun deleteCalendarList(id: String) {
+        saveCalendar(ch.fasrv.fanotes.desk.deleteCalendarList(calendar.value, id))
+    }
+
+    fun saveCalendarOccurrence(key: String?, event: CalendarEvent) {
+        saveCalendar(ch.fasrv.fanotes.desk.saveCalendarOccurrence(calendar.value, key, event))
+    }
+
     private fun saveCalendar(next: ch.fasrv.fanotes.desk.CalendarDocument) {
         calendar.value = next
         persistSpecial(ch.fasrv.fanotes.desk.CALENDAR_NOTE_PATH, "Kalender", serializeCalendarMarkdown(next))
