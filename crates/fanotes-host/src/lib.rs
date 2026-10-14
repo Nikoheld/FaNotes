@@ -1770,6 +1770,12 @@ fn marker_is_fresh(created_at: &str) -> bool {
 }
 
 fn unix_millis_from_iso(value: &str) -> Option<u64> {
+    let trimmed = value.trim_matches(is_date_parse_space);
+    if trimmed.contains('/') {
+        // `2026/10/13` is local midnight. `10/13/2026` is the same legacy form.
+        let normalized = rewrite_slash_date(trimmed)?;
+        return unix_millis_from_iso(&normalized);
+    }
     let (date, time) = match iso_date_time(value) {
         IsoDate::Invalid => return None,
         // `Date.parse('YYYY-MM-DD')` is UTC midnight. Surrounding whitespace is ignored.
@@ -2072,6 +2078,104 @@ fn datetime_year_ok(year_text: &str) -> bool {
 fn two_digits(text: &str) -> bool {
     let bytes = text.as_bytes();
     bytes.len() == 2 && bytes.iter().all(|byte| byte.is_ascii_digit())
+}
+
+/// `YYYY/M/D` or `M/D/YYYY`, then an optional legacy clock. A date alone is
+/// local midnight. `T` is not a separator in this form.
+fn rewrite_slash_date(trimmed: &str) -> Option<String> {
+    if trimmed.contains(['T', 't']) {
+        return None;
+    }
+    let (date, time) = match trimmed.split_once(is_date_parse_space) {
+        Some((date, rest)) => {
+            let time = rest.trim_start_matches(is_date_parse_space);
+            if time.is_empty() || time.contains(is_date_parse_space) {
+                return None;
+            }
+            (date, Some(time))
+        }
+        None => (trimmed, None),
+    };
+    let mut parts = date.split('/');
+    let first: i32 = parts.next()?.parse().ok()?;
+    let second: i32 = parts.next()?.parse().ok()?;
+    let third: i32 = parts.next()?.parse().ok()?;
+    if parts.next().is_some() {
+        return None;
+    }
+    let (year, month, day) = if (1..=12).contains(&first) {
+        (legacy_year(third)?, first, second)
+    } else if first == 0 || first >= 32 {
+        (legacy_year(first)?, second, third)
+    } else {
+        return None;
+    };
+    if !(1..=12).contains(&month) || !(1..=31).contains(&day) {
+        return None;
+    }
+    let clock = match time {
+        Some(time) => pad_legacy_clock(time)?,
+        None => "00:00:00".to_string(),
+    };
+    Some(format!("{year:04}-{month:02}-{day:02}T{clock}"))
+}
+
+/// Two-digit years use `Date.parse`'s window: 0–49 are 2000–2049 and 50–99
+/// are 1950–1999.
+fn legacy_year(year: i32) -> Option<i32> {
+    if year >= 100 {
+        return Some(year);
+    }
+    if (0..=49).contains(&year) {
+        return Some(2000 + year);
+    }
+    if (50..=99).contains(&year) {
+        return Some(1900 + year);
+    }
+    None
+}
+
+fn pad_legacy_clock(time: &str) -> Option<String> {
+    let (body, zone) = if let Some(clock) = time.strip_suffix(['Z', 'z']) {
+        (clock, &time[clock.len()..])
+    } else if let Some(sign_at) = time.rfind(['+', '-']) {
+        if sign_at == 0 {
+            return None;
+        }
+        (&time[..sign_at], &time[sign_at..])
+    } else {
+        (time, "")
+    };
+    let (clock, fraction) = match body.split_once('.') {
+        Some((clock, fraction))
+            if !fraction.is_empty() && fraction.bytes().all(|byte| byte.is_ascii_digit()) =>
+        {
+            (clock, Some(fraction))
+        }
+        None => (body, None),
+        Some(_) => return None,
+    };
+    let mut numbers = Vec::new();
+    for part in clock.split(':') {
+        if part.is_empty() || !part.bytes().all(|byte| byte.is_ascii_digit()) {
+            return None;
+        }
+        numbers.push(part.parse::<u32>().ok()?);
+    }
+    if !(2..=3).contains(&numbers.len()) || numbers.iter().any(|number| *number > 99) {
+        return None;
+    }
+    let mut padded = if numbers.len() == 3 {
+        format!("{:02}:{:02}:{:02}", numbers[0], numbers[1], numbers[2])
+    } else {
+        format!("{:02}:{:02}", numbers[0], numbers[1])
+    };
+    if let Some(fraction) = fraction {
+        padded.push('.');
+        padded.push_str(fraction);
+    }
+    padded.push_str(zone);
+    Some(padded)
 }
 
 fn date_only_millis(value: &str) -> Option<u64> {
@@ -5013,6 +5117,23 @@ mod local_zone_tests {
         assert_eq!(
             unix_millis_from_iso("2026-03-29T02:30:00"),
             Some(1_774_747_800_000)
+        );
+    }
+
+    #[test]
+    fn a_slash_date_is_local_midnight() {
+        let _lock = TRASH_CLOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let _restore = RestoreTz(std::env::var_os("TZ"));
+        unsafe { std::env::set_var("TZ", "America/New_York") };
+        unsafe { tzset() };
+        // `2026/10/13` is local midnight, not the UTC midnight of `2026-10-13`.
+        assert_eq!(unix_millis_from_iso("2026/10/13"), Some(1_791_864_000_000));
+        assert_eq!(unix_millis_from_iso("10/13/2026"), Some(1_791_864_000_000));
+        assert_eq!(
+            unix_millis_from_iso("2026/10/13 16:00:00Z"),
+            Some(1_791_907_200_000)
         );
     }
 }
