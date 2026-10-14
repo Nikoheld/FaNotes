@@ -1626,9 +1626,7 @@ fn unique_directory(parent: &Path, preferred: &str) -> Result<PathBuf, String> {
             }
             // Desktop `mkdir` tries the next name only when the name is taken.
             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
-            Err(_) => {
-                return Err("Der Ordner konnte nicht angelegt werden.".to_owned());
-            }
+            Err(error) => return Err(crate::vault::node_mkdir_error(&target, &error)),
         }
     }
     Err("Für den OneNote-Import konnte kein freier Zielordner angelegt werden.".to_owned())
@@ -2106,8 +2104,27 @@ mod tests {
         std::fs::write(&parent, b"datei").unwrap();
         assert_eq!(
             unique_directory(&parent, "OneNote – Buch").unwrap_err(),
-            "Der Ordner konnte nicht angelegt werden."
+            format!(
+                "ENOTDIR: not a directory, mkdir '{}'",
+                parent.join("OneNote – Buch").display()
+            )
         );
+
+        let locked = root.join("locked");
+        std::fs::create_dir(&locked).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o555)).unwrap();
+            assert_eq!(
+                unique_directory(&locked, "OneNote – Buch").unwrap_err(),
+                format!(
+                    "EACCES: permission denied, mkdir '{}'",
+                    locked.join("OneNote – Buch").display()
+                )
+            );
+            std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
 
         let vault = root.join("vault");
         std::fs::create_dir(&vault).unwrap();
