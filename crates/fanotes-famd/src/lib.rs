@@ -847,7 +847,9 @@ pub fn js_json_number(value: f64) -> Value {
 /// keeps the offset from before the transition. A day past the end of the
 /// month rolls forward, and `24:00:00` is the next midnight.
 pub fn canonical_iso(value: &str) -> Option<String> {
-    let trimmed = trim_js(value);
+    // U+2028 and U+2029 are JavaScript trim characters, and `Date.parse` rejects
+    // them. Only the date-parse spaces are padding.
+    let trimmed = value.trim_matches(is_date_parse_space);
     // A period between numbers is a hyphen. A period before a clock is a space.
     // Trailing periods make a date local. A `T` form keeps its fraction dot.
     if !has_iso_t(&trimmed) && trimmed.contains('.') {
@@ -2655,6 +2657,24 @@ mod tests {
             assert_eq!(
                 super::canonical_iso("2026-10-13T16:00:00.5").as_deref(),
                 Some("2026-10-13T20:00:00.500Z")
+            );
+        });
+    }
+
+    #[test]
+    fn a_line_separator_is_not_date_padding() {
+        with_tz("America/New_York", || {
+            assert_eq!(super::canonical_iso("\u{2028}2026-10-13"), None);
+            assert_eq!(super::canonical_iso("2026-10-13\u{2028}"), None);
+            assert_eq!(super::canonical_iso("\u{2029}2026-10-13"), None);
+            assert_eq!(super::canonical_iso("2026-10-13\u{2029}"), None);
+            assert_eq!(
+                super::canonical_iso("\u{FEFF}2026-10-13").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-13").as_deref(),
+                Some("2026-10-13T00:00:00.000Z")
             );
         });
     }
