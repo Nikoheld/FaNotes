@@ -700,8 +700,8 @@ fn history_dir(root: &Path, relative: &str) -> Result<PathBuf, String> {
     Ok(history.join(name))
 }
 
-/// Node `fs.readFile` error text. A directory fails on `read` without a path.
-fn node_open_error(path: &Path, error: &std::io::Error) -> String {
+/// Node `fs.readFile` / `fs.open` error text. A directory fails on `read` without a path.
+pub(crate) fn node_open_error(path: &Path, error: &std::io::Error) -> String {
     #[cfg(unix)]
     match error.raw_os_error() {
         Some(libc::EISDIR) => {

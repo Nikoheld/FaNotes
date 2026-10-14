@@ -889,8 +889,7 @@ impl Host {
         if meta.len() > limit {
             return Err("Die Datei ist zu groß.".to_owned());
         }
-        let bytes =
-            fs::read(&path).map_err(|_| "Die Datei konnte nicht gelesen werden.".to_owned())?;
+        let bytes = fs::read(&path).map_err(|error| notes::node_open_error(&path, &error))?;
         let text = String::from_utf8_lossy(&bytes);
         Ok(Value::String(fanotes_famd::strip_famd_payload(&text)))
     }

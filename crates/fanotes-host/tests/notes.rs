@@ -19,6 +19,31 @@ fn host() -> (Host, std::path::PathBuf) {
 
 #[cfg(unix)]
 #[test]
+fn an_unreadable_note_uses_the_desktop_open_error() {
+    use std::os::unix::fs::PermissionsExt;
+    let (mut host, vault) = host();
+    let note = vault.join("Mathe/Seite.md");
+    std::fs::write(&note, b"Hallo\n").unwrap();
+    let canonical = std::fs::canonicalize(&note).unwrap();
+    std::fs::set_permissions(&note, std::fs::Permissions::from_mode(0o000)).unwrap();
+    struct Restore(std::path::PathBuf);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            let _ = std::fs::set_permissions(&self.0, std::fs::Permissions::from_mode(0o600));
+        }
+    }
+    let _restore = Restore(note.clone());
+    assert_eq!(
+        host.dispatch("fanotes:read-file", &[json!("Mathe/Seite.md")])
+            .unwrap_err(),
+        format!("EACCES: permission denied, open '{}'", canonical.display())
+    );
+    std::fs::set_permissions(&note, std::fs::Permissions::from_mode(0o600)).unwrap();
+    assert_eq!(std::fs::read(&note).unwrap(), b"Hallo\n");
+}
+
+#[cfg(unix)]
+#[test]
 fn an_unreadable_history_index_uses_the_desktop_open_error() {
     use std::os::unix::fs::PermissionsExt;
     let (mut host, vault) = host();
