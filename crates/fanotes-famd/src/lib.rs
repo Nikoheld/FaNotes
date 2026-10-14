@@ -2675,7 +2675,13 @@ fn offset_zone_suffix(text: &str) -> Option<&str> {
         if text.len() <= keyword.len() {
             continue;
         }
-        let (prefix, suffix) = text.split_at(text.len() - keyword.len());
+        let split_at = text.len() - keyword.len();
+        // `UTä` ends inside a multibyte letter. The suffix has to start
+        // on a character boundary.
+        if !text.is_char_boundary(split_at) {
+            continue;
+        }
+        let (prefix, suffix) = text.split_at(split_at);
         if !suffix.eq_ignore_ascii_case(keyword) {
             continue;
         }
@@ -2936,12 +2942,22 @@ fn finish_month_time(time: &MonthTime, hour_offset: Option<i32>) -> Option<Strin
 }
 
 /// `GMT+5` and `UTC+5:30` keep the signed tail. `EST` and `GMT` have none.
+fn ascii_prefix(word: &str, length: usize) -> Option<&str> {
+    if word.len() >= length && word.is_char_boundary(length) {
+        Some(&word[..length])
+    } else {
+        None
+    }
+}
+
 fn zone_keyword_tail(word: &str) -> Option<&str> {
-    let prefix = if word.len() >= 3 && word[..3].eq_ignore_ascii_case("gmt") {
+    // `Mäy` is two bytes into the second letter. A prefix slice has to land
+    // on a character boundary, or the date parser panics.
+    let prefix = if ascii_prefix(word, 3).is_some_and(|text| text.eq_ignore_ascii_case("gmt")) {
         3
-    } else if word.len() >= 3 && word[..3].eq_ignore_ascii_case("utc") {
+    } else if ascii_prefix(word, 3).is_some_and(|text| text.eq_ignore_ascii_case("utc")) {
         3
-    } else if word.len() >= 2 && word[..2].eq_ignore_ascii_case("ut") {
+    } else if ascii_prefix(word, 2).is_some_and(|text| text.eq_ignore_ascii_case("ut")) {
         2
     } else {
         return None;
@@ -6613,6 +6629,50 @@ mod tests {
                 super::canonical_iso("10-13-1950-").as_deref(),
                 Some("1950-10-13T05:00:00.000Z")
             );
+        });
+    }
+
+    #[test]
+    fn a_non_ascii_letter_does_not_panic() {
+        with_tz("America/New_York", || {
+            // `Octöber` is October because the first three letters match and a
+            // longer word is still a month. `Mäy` is not May, and it must not panic.
+            assert_eq!(
+                super::canonical_iso("Octöber 13 2026").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Octöber 13 2026 16:00").as_deref(),
+                Some("2026-10-13T20:00:00.000Z")
+            );
+            assert_eq!(super::canonical_iso("Mäy 13 2026"), None);
+            assert_eq!(
+                super::canonical_iso("ä 2026-10-13").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
+            assert_eq!(super::canonical_iso("2026-10-13 ä"), None);
+            assert_eq!(super::canonical_iso("xä 13 2026"), None);
+            assert_eq!(super::canonical_iso("2026-10-13 16:00 UTä"), None);
+            assert_eq!(super::canonical_iso("2026-10-13 16:00 +5ä"), None);
+            assert_eq!(super::canonical_iso("2026-10-13 16:00 GMT+5ä"), None);
+            assert_eq!(super::canonical_iso("2026-10-13 16:00 ESTö"), None);
+            assert_eq!(
+                super::canonical_iso("Octöber 13 1950").as_deref(),
+                Some("1950-10-13T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Octöber 13 1950 16:00").as_deref(),
+                Some("1950-10-13T21:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("ä 1950-10-13").as_deref(),
+                Some("1950-10-13T05:00:00.000Z")
+            );
+            assert_eq!(super::canonical_iso("1950-10-13 ä"), None);
+            assert_eq!(super::canonical_iso("1950-10-13 16:00 UTä"), None);
+            assert_eq!(super::canonical_iso("1950-10-13 16:00 +5ä"), None);
+            assert_eq!(super::canonical_iso("1950-10-13 16:00 GMT+5ä"), None);
+            assert_eq!(super::canonical_iso("1950-10-13 16:00 ESTö"), None);
         });
     }
 
