@@ -2144,7 +2144,7 @@ fn create_sync_directories(root: &Path, file: &Path) -> Result<(), String> {
             Ok(_) => {}
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 fs::create_dir(&cursor)
-                    .map_err(|_| "Der Ordner konnte nicht angelegt werden.".to_owned())?;
+                    .map_err(|error| vault::node_mkdir_error(&cursor, &error))?;
                 #[cfg(unix)]
                 {
                     use std::os::unix::fs::PermissionsExt;
@@ -2152,7 +2152,12 @@ fn create_sync_directories(root: &Path, file: &Path) -> Result<(), String> {
                         .map_err(|_| "Der Ordner konnte nicht angelegt werden.".to_owned())?;
                 }
             }
-            Err(_) => return Err("Der Ordner konnte nicht angelegt werden.".to_owned()),
+            // Desktop `mkdir` does not lstat first. A parent that cannot be
+            // searched fails that mkdir.
+            Err(_) => {
+                fs::create_dir(&cursor)
+                    .map_err(|error| vault::node_mkdir_error(&cursor, &error))?;
+            }
         }
     }
     Ok(())
