@@ -3772,7 +3772,13 @@ fn offset_zone_suffix(text: &str) -> Option<&str> {
         if text.len() <= keyword.len() {
             continue;
         }
-        let (prefix, suffix) = text.split_at(text.len() - keyword.len());
+        let split_at = text.len() - keyword.len();
+        // `UTä` ends inside a multibyte letter. The suffix has to start
+        // on a character boundary.
+        if !text.is_char_boundary(split_at) {
+            continue;
+        }
+        let (prefix, suffix) = text.split_at(split_at);
         if !suffix.eq_ignore_ascii_case(keyword) {
             continue;
         }
@@ -3976,13 +3982,23 @@ fn finish_legacy_time(time: &LegacyTime, hour_offset: Option<i32>) -> Option<Str
     }
 }
 
+fn ascii_prefix(word: &str, length: usize) -> Option<&str> {
+    if word.len() >= length && word.is_char_boundary(length) {
+        Some(&word[..length])
+    } else {
+        None
+    }
+}
+
 /// `GMT+5` and `UTC+5:30` keep the signed tail. `EST` and `GMT` have none.
 fn zone_keyword_tail(word: &str) -> Option<&str> {
-    let prefix = if word.len() >= 3 && word[..3].eq_ignore_ascii_case("gmt") {
+    // `Mäy` is two bytes into the second letter. A prefix slice has to land
+    // on a character boundary, or the date parser panics.
+    let prefix = if ascii_prefix(word, 3).is_some_and(|text| text.eq_ignore_ascii_case("gmt")) {
         3
-    } else if word.len() >= 3 && word[..3].eq_ignore_ascii_case("utc") {
+    } else if ascii_prefix(word, 3).is_some_and(|text| text.eq_ignore_ascii_case("utc")) {
         3
-    } else if word.len() >= 2 && word[..2].eq_ignore_ascii_case("ut") {
+    } else if ascii_prefix(word, 2).is_some_and(|text| text.eq_ignore_ascii_case("ut")) {
         2
     } else {
         return None;
@@ -9670,6 +9686,34 @@ mod local_zone_tests {
             unix_millis_from_iso("10-13-2026-"),
             Some(1_791_864_000_000)
         );
+    }
+
+    #[test]
+    fn a_non_ascii_letter_does_not_panic() {
+        let _lock = TRASH_CLOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let _restore = RestoreTz(std::env::var_os("TZ"));
+        unsafe { std::env::set_var("TZ", "America/New_York") };
+        unsafe { tzset() };
+        // `Octöber` is October because the first three letters match and a
+        // longer word is still a month. `Mäy` is not May, and it must not panic.
+        assert_eq!(
+            unix_millis_from_iso("Octöber 13 2026"),
+            Some(1_791_864_000_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Octöber 13 2026 16:00"),
+            Some(1_791_921_600_000)
+        );
+        assert_eq!(unix_millis_from_iso("Mäy 13 2026"), None);
+        assert_eq!(unix_millis_from_iso("ä 2026-10-13"), Some(1_791_864_000_000));
+        assert_eq!(unix_millis_from_iso("2026-10-13 ä"), None);
+        assert_eq!(unix_millis_from_iso("xä 13 2026"), None);
+        assert_eq!(unix_millis_from_iso("2026-10-13 16:00 UTä"), None);
+        assert_eq!(unix_millis_from_iso("2026-10-13 16:00 +5ä"), None);
+        assert_eq!(unix_millis_from_iso("2026-10-13 16:00 GMT+5ä"), None);
+        assert_eq!(unix_millis_from_iso("2026-10-13 16:00 ESTö"), None);
     }
 
     #[test]
