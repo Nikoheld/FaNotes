@@ -438,7 +438,7 @@ impl Host {
         let (path, normalized) = vault::resolve_sync_path(&root, &relative, true)?;
         create_sync_directories(&root, &path)?;
         let mtime = arg_mtime_ms(args.get(2)).and_then(system_time_from_millis);
-        notes::atomic_write_with_mtime(&path, &bytes, 0o600, mtime)?;
+        notes::atomic_write_with_mtime(&path, &bytes, 0o600, mtime, 8)?;
         let meta = fs::symlink_metadata(&path)
             .map_err(|error| vault::node_lstat_error(&path, &error))?;
         if meta.file_type().is_symlink() || !meta.is_file() {
