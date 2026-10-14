@@ -223,6 +223,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
         tools.addView(chip("Liste") { insertLine("- ") })
         tools.addView(chip("Aufgabe") { insertLine("- [ ] ") })
         tools.addView(chip("Zitat") { insertLine("> ") })
+        tools.addView(chip("Tabelle") { insertLine("\n| Thema | Notiz |\n| --- | --- |\n|  |  |\n") })
         tools.addView(guideChip("Lineal", DraftingKind.RULER))
         tools.addView(guideChip("Geodreieck", DraftingKind.SET_SQUARE))
         tools.addView(guideChip("Zirkel", DraftingKind.COMPASS))

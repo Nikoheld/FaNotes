@@ -76,7 +76,9 @@ import ch.fasrv.fanotes.input.shouldRejectFinger
 import ch.fasrv.fanotes.input.tiltDegrees
 import ch.fasrv.fanotes.input.touchPalmState
 import ch.fasrv.fanotes.text.PaperKind
+import ch.fasrv.fanotes.text.PaperLine
 import ch.fasrv.fanotes.text.paperLines
+import ch.fasrv.fanotes.text.tableRows
 import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.hypot
@@ -162,6 +164,16 @@ class InkSurfaceView @JvmOverloads constructor(
     }
     private var textLayout: Layout? = null
     private var textStamp = -1f
+    private var cachedMarkdown = ""
+    private var paperBlocks: List<PaperBlock> = emptyList()
+    private val tableLine = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        color = Color.parseColor("#D5D0C8")
+    }
+    private val tableHead = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL
+        color = Color.parseColor("#F3F0EA")
+    }
     private var cacheScale = 0f
     private var nibX = Float.NaN
     private var nibY = Float.NaN
@@ -228,6 +240,8 @@ class InkSurfaceView @JvmOverloads constructor(
     fun reload() {
         cacheScale = 0f
         textStamp = -1f
+        cachedMarkdown = ""
+        paperBlocks = emptyList()
         invalidateTiles()
         pageLeft = padding()
         pageTop = padding()
@@ -1042,33 +1056,112 @@ class InkSurfaceView @JvmOverloads constructor(
     }
 
     private fun drawMarkdown(canvas: Canvas, scale: Float) {
-        val layout = markdownLayout(scale) ?: return
+        val blocks = paperBlocks(scale)
+        if (blocks.isEmpty()) return
         canvas.save()
         canvas.translate(pageLeft + TEXT_PAD_X * scale, pageTop + TEXT_PAD_Y * scale)
-        layout.draw(canvas)
+        for (block in blocks) {
+            when (block) {
+                is PaperBlock.Text -> {
+                    block.layout.draw(canvas)
+                    canvas.translate(0f, block.layout.height.toFloat())
+                }
+                is PaperBlock.Table -> drawTable(canvas, block, scale)
+            }
+        }
         canvas.restore()
     }
 
-    private fun markdownLayout(scale: Float): Layout? {
-        if (scale <= 0f || markdown.isBlank()) return null
-        if (textLayout != null && kotlin.math.abs(scale - textStamp) < scale * 0.03f) return textLayout
+    private fun paperBlocks(scale: Float): List<PaperBlock> {
+        if (scale <= 0f || markdown.isBlank()) return emptyList()
+        if (paperBlocks.isNotEmpty() && markdown == cachedMarkdown && kotlin.math.abs(scale - textStamp) < scale * 0.03f) return paperBlocks
+        val built = ArrayList<PaperBlock>()
+        val textLines = ArrayList<PaperLine>()
+        fun flush() {
+            if (textLines.isEmpty()) return
+            built += PaperBlock.Text(textLayoutFor(styledLines(textLines), scale))
+            textLines.clear()
+        }
+        for (line in paperLines(markdown)) {
+            if (line.kind == PaperKind.TABLE) {
+                flush()
+                built += tableBlock(line.text, scale)
+            } else {
+                textLines += line
+            }
+        }
+        flush()
+        paperBlocks = built
+        cachedMarkdown = markdown
+        textStamp = scale
+        return built
+    }
+
+    private fun textLayoutFor(text: CharSequence, scale: Float): StaticLayout {
         val width = (TEXT_COLUMN * scale).toInt().coerceAtLeast(1)
         textPaint.textSize = 16f * scale
-        val text = styledMarkdown(markdown)
-        textLayout = StaticLayout.Builder.obtain(text, 0, text.length, textPaint, width)
+        textPaint.typeface = Typeface.create("sans-serif", Typeface.NORMAL)
+        return StaticLayout.Builder.obtain(text, 0, text.length, textPaint, width)
             .setAlignment(Layout.Alignment.ALIGN_NORMAL)
             .setIncludePad(false)
             .setLineSpacing(0f, 1.55f)
             .setBreakStrategy(Layout.BREAK_STRATEGY_HIGH_QUALITY)
             .setHyphenationFrequency(Layout.HYPHENATION_FREQUENCY_NONE)
             .build()
-        textStamp = scale
-        return textLayout
     }
 
-    private fun styledMarkdown(markdown: String): CharSequence {
+    private fun tableBlock(text: String, scale: Float): PaperBlock.Table {
+        val rows = tableRows(text)
+        val columns = rows.maxOf { it.size }.coerceAtLeast(1)
+        val colWidth = TEXT_COLUMN * scale / columns
+        val inner = (colWidth - 12f * scale).toInt().coerceAtLeast(1)
+        val layouts = rows.mapIndexed { rowIndex, row ->
+            val face = if (rowIndex == 0) Typeface.BOLD else Typeface.NORMAL
+            textPaint.typeface = Typeface.create("sans-serif", face)
+            textPaint.textSize = 15f * scale
+            List(columns) { column ->
+                val cell = row.getOrElse(column) { "" }
+                StaticLayout.Builder.obtain(cell, 0, cell.length, textPaint, inner)
+                    .setIncludePad(false)
+                    .setBreakStrategy(Layout.BREAK_STRATEGY_HIGH_QUALITY)
+                    .build()
+            }
+        }
+        textPaint.typeface = Typeface.create("sans-serif", Typeface.NORMAL)
+        val heights = FloatArray(rows.size) { row ->
+            val content = layouts[row].maxOf { it.height }.toFloat()
+            max(content + 10f * scale, 28f * scale)
+        }
+        return PaperBlock.Table(rows, heights, layouts)
+    }
+
+    private fun drawTable(canvas: Canvas, block: PaperBlock.Table, scale: Float) {
+        val columns = block.rows.maxOf { it.size }.coerceAtLeast(1)
+        val width = TEXT_COLUMN * scale
+        val colWidth = width / columns
+        tableLine.strokeWidth = max(1f, scale * 0.6f)
+        var y = 0f
+        block.rows.forEachIndexed { rowIndex, _ ->
+            val height = block.rowHeights[rowIndex]
+            if (rowIndex == 0) canvas.drawRect(0f, y, width, y + height, tableHead)
+            canvas.drawRect(0f, y, width, y + height, tableLine)
+            for (column in 0 until columns) {
+                val x = column * colWidth
+                if (column > 0) canvas.drawLine(x, y, x, y + height, tableLine)
+                val layout = block.cellLayouts[rowIndex][column]
+                canvas.save()
+                canvas.translate(x + 6f * scale, y + 4f * scale)
+                layout.draw(canvas)
+                canvas.restore()
+            }
+            y += height
+        }
+        canvas.translate(0f, y + 10f * scale)
+    }
+
+    private fun styledLines(lines: List<PaperLine>): CharSequence {
         val builder = SpannableStringBuilder()
-        for (line in paperLines(markdown)) {
+        for (line in lines) {
             val start = builder.length
             val content: CharSequence = when (line.kind) {
                 PaperKind.BULLET -> inline("•  ${line.text}")
@@ -1427,6 +1520,11 @@ class InkSurfaceView @JvmOverloads constructor(
         const val TEXT_PAD_Y = 78f
         const val TEXT_COLUMN = 900f - 144f
     }
+}
+
+private sealed class PaperBlock {
+    class Text(val layout: StaticLayout) : PaperBlock()
+    class Table(val rows: List<List<String>>, val rowHeights: FloatArray, val cellLayouts: List<List<StaticLayout>>) : PaperBlock()
 }
 
 private data class GuideDrag(

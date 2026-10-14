@@ -27,6 +27,18 @@ class PaperMarkdownTest {
     }
 
     @Test
+    fun aMarkdownTableBecomesOneGridWithoutTheRuleRow() {
+        val table = paperLines(
+            """
+            | Stichworte | Notizen |
+            | --- | --- |
+            | Begriff | Erklärung |
+            """.trimIndent(),
+        ).single { it.kind == PaperKind.TABLE }
+        assertEquals(listOf(listOf("Stichworte", "Notizen"), listOf("Begriff", "Erklärung")), tableRows(table.text))
+    }
+
+    @Test
     fun codeFencesStayTogether() {
         val lines = paperLines("Text\n\n```\nalpha\nbeta\n```\n")
         val code = lines.first { it.kind == PaperKind.CODE }

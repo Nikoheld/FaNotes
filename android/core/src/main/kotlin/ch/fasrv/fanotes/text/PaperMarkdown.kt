@@ -5,7 +5,7 @@ package ch.fasrv.fanotes.text
  * and code, with the ink marker and other HTML comments left off the page.
  * Inline markers such as `**bold**` stay in the text for the renderer.
  */
-enum class PaperKind { H1, H2, H3, H4, PARAGRAPH, BULLET, NUMBER, TASK, QUOTE, CODE, MATH, RULE, SPACER }
+enum class PaperKind { H1, H2, H3, H4, PARAGRAPH, BULLET, NUMBER, TASK, QUOTE, CODE, MATH, RULE, TABLE, SPACER }
 
 data class PaperLine(val kind: PaperKind, val text: String)
 
@@ -13,6 +13,7 @@ private val COMMENT = Regex("""<!--[\s\S]*?-->""")
 private val BULLET = Regex("""^\s*[-*+]\s+""")
 private val NUMBER = Regex("""^\s*(\d+)\.\s+""")
 private val TASK = Regex("""^\s*[-*+]\s+\[([ xX])](?:\s+(.*))?$""")
+private val TABLE_RULE = Regex("""^:?-{3,}:?$""")
 
 fun paperLines(markdown: String): List<PaperLine> {
     val source = markdown.replace("\r\n", "\n").replace(COMMENT, "")
@@ -22,7 +23,9 @@ fun paperLines(markdown: String): List<PaperLine> {
     var inMath = false
     val code = StringBuilder()
     val math = StringBuilder()
-    for (raw in lines) {
+    var index = 0
+    while (index < lines.size) {
+        val raw = lines[index]
         val fence = raw.trimStart().startsWith("```")
         if (fence) {
             if (inCode) {
@@ -32,11 +35,13 @@ fun paperLines(markdown: String): List<PaperLine> {
             } else {
                 inCode = true
             }
+            index += 1
             continue
         }
         if (inCode) {
             if (code.isNotEmpty()) code.append('\n')
             code.append(raw)
+            index += 1
             continue
         }
         if (raw.trim() == "$$") {
@@ -47,11 +52,23 @@ fun paperLines(markdown: String): List<PaperLine> {
             } else {
                 inMath = true
             }
+            index += 1
             continue
         }
         if (inMath) {
             if (math.isNotEmpty()) math.append('\n')
             math.append(raw)
+            index += 1
+            continue
+        }
+        if (isTableRow(raw)) {
+            val rows = ArrayList<List<String>>()
+            while (index < lines.size && isTableRow(lines[index])) {
+                val cells = tableCells(lines[index])
+                if (cells.isNotEmpty() && !cells.all { TABLE_RULE.matches(it) }) rows += cells
+                index += 1
+            }
+            if (rows.isNotEmpty()) out += PaperLine(PaperKind.TABLE, encodeTable(rows))
             continue
         }
         val trimmed = raw.trim()
@@ -72,8 +89,41 @@ fun paperLines(markdown: String): List<PaperLine> {
             BULLET.containsMatchIn(raw) -> out += PaperLine(PaperKind.BULLET, BULLET.replace(raw, "").trim())
             else -> out += PaperLine(PaperKind.PARAGRAPH, raw.trimEnd())
         }
+        index += 1
     }
     if (inCode && code.isNotEmpty()) out += PaperLine(PaperKind.CODE, code.toString().trimEnd())
     if (inMath && math.isNotEmpty()) out += PaperLine(PaperKind.MATH, math.toString().trimEnd())
     return out
 }
+
+fun tableRows(text: String): List<List<String>> = text.split('\n').map { row -> row.split('\u001f') }
+
+private fun isTableRow(line: String): Boolean {
+    val trimmed = line.trim()
+    return trimmed.startsWith("|") && trimmed.indexOf('|', 1) > 0
+}
+
+private fun tableCells(line: String): List<String> {
+    val body = line.trim().removePrefix("|").removeSuffix("|")
+    val cells = ArrayList<String>()
+    val current = StringBuilder()
+    var escaped = false
+    for (char in body) {
+        when {
+            escaped -> {
+                current.append(char)
+                escaped = false
+            }
+            char == '\\' -> escaped = true
+            char == '|' -> {
+                cells += current.toString().trim()
+                current.clear()
+            }
+            else -> current.append(char)
+        }
+    }
+    cells += current.toString().trim()
+    return cells
+}
+
+private fun encodeTable(rows: List<List<String>>) = rows.joinToString("\n") { it.joinToString("\u001f") }
