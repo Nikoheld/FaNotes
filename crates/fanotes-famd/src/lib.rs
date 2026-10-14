@@ -1346,18 +1346,44 @@ fn month_words(value: &str) -> Vec<&str> {
 /// `2026-10-13` next to `GMT` is three numbers and a zone. A month word such
 /// as `13-Oct-26` stays one token for the month scan.
 fn expand_hyphen_numbers(token: &str) -> Vec<&str> {
-    if token.contains(':') || !token.contains('-') {
+    if token.contains(':') || !token.contains('-') || finished_iso_hyphen(token) {
+        // `2026-10-13-` already finished a strict date. The extra hyphen
+        // makes `2026-10-13- January` empty.
         return vec![token];
     }
     let body = token.strip_prefix('-').unwrap_or(token);
-    if !body.contains('-') {
+    if !body.contains('-') && !body.ends_with('-') {
         return vec![token];
     }
-    let parts: Vec<&str> = body.split('-').collect();
-    if parts.len() < 2 || parts.iter().any(|part| unsigned_number(part).is_none()) {
+    let mut parts: Vec<&str> = body.split('-').collect();
+    // `10-13-` is 10 and 13. `10-13--` and `10--13` are not dates.
+    let trailing = parts.last() == Some(&"");
+    if trailing {
+        parts.pop();
+    }
+    if parts.is_empty()
+        || parts.iter().any(|part| unsigned_number(part).is_none())
+        || (parts.len() < 2 && !trailing)
+    {
         return vec![token];
     }
     parts
+}
+
+/// `2026-10-13-` is a finished strict date plus one hyphen.
+fn finished_iso_hyphen(token: &str) -> bool {
+    let Some(body) = token.strip_suffix('-') else {
+        return false;
+    };
+    if body.ends_with('-') {
+        return false;
+    }
+    let parts: Vec<&str> = body.split('-').collect();
+    parts.len() == 3
+        && parts[0].len() == 4
+        && parts[1].len() == 2
+        && parts[2].len() == 2
+        && parts.iter().all(|part| unsigned_number(part).is_some())
 }
 
 /// `13)` is the number 13 and then a `)`. The `)` is its own word.
@@ -6514,6 +6540,78 @@ mod tests {
             assert_eq!(
                 super::canonical_iso("10/13/1950 January EST").as_deref(),
                 Some("2013-01-10T05:00:00.000Z")
+            );
+        });
+    }
+
+    #[test]
+    fn a_trailing_hyphen_is_padding_before_a_month() {
+        with_tz("America/New_York", || {
+            // `10-13- January` is 10 January 2013. The last hyphen is padding.
+            // `2026-10-13- January` already finished a strict date, so it is empty.
+            assert_eq!(
+                super::canonical_iso("10-13- January").as_deref(),
+                Some("2013-01-10T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("10- January").as_deref(),
+                Some("2001-01-10T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("10-13-2026- January").as_deref(),
+                Some("2013-01-10T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10- January").as_deref(),
+                Some("2026-01-10T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("-10-13- January").as_deref(),
+                Some("2013-01-10T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("10-13- January 16:00").as_deref(),
+                Some("2013-01-10T21:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("10-13- Oct").as_deref(),
+                Some("2013-10-10T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("1-2- January").as_deref(),
+                Some("2002-01-01T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("99-1- January").as_deref(),
+                Some("1999-01-01T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("10-13-50- January").as_deref(),
+                Some("2013-01-10T05:00:00.000Z")
+            );
+            assert_eq!(super::canonical_iso("2026-10-13- January"), None);
+            assert_eq!(super::canonical_iso("10-13-- January"), None);
+            assert_eq!(super::canonical_iso("10--13 January"), None);
+            assert_eq!(
+                super::canonical_iso("10-13-2026-").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("1950-10- January").as_deref(),
+                Some("1950-01-10T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("1950-13- January").as_deref(),
+                Some("1950-01-13T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("10-13-1950- January").as_deref(),
+                Some("2013-01-10T05:00:00.000Z")
+            );
+            assert_eq!(super::canonical_iso("1950-10-13- January"), None);
+            assert_eq!(
+                super::canonical_iso("10-13-1950-").as_deref(),
+                Some("1950-10-13T05:00:00.000Z")
             );
         });
     }
