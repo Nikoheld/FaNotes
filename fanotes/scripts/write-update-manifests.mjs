@@ -1,16 +1,19 @@
 #!/usr/bin/env node
-'use strict'
 
 // Build the signed update manifests that the desktop app downloads from a
 // GitHub release. Package bytes stay on GitHub. This script never talks to
 // the FaNotes server.
 
-const crypto = require('node:crypto')
-const fs = require('node:fs')
-const path = require('node:path')
+import crypto from 'node:crypto'
+import fs from 'node:fs'
+import path from 'node:path'
+import { createRequire } from 'node:module'
+import { fileURLToPath } from 'node:url'
+
+const require = createRequire(import.meta.url)
 const { githubReleaseAssetUrl, stableStringify } = require('../electron/updater.cjs')
 
-const appRoot = path.resolve(__dirname, '..')
+const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const websiteUrl = 'https://fanotes.fasrv.ch/'
 
 const readArg = (name) => {
