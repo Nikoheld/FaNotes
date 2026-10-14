@@ -37,6 +37,7 @@ interface VaultIo {
     fun read(path: String): ByteArray?
     fun write(path: String, bytes: ByteArray)
     fun delete(path: String)
+    fun move(from: String, to: String)
     fun exists(path: String): Boolean
     fun mtime(path: String): Long
     fun list(directory: String): List<VaultEntry>
@@ -215,21 +216,25 @@ class NoteStore(private val io: VaultIo) {
     }
 
     fun rename(path: String, title: String): String {
-        val name = safeNoteName(title)
         val parent = path.substringBeforeLast('/', "")
-        val extension = extensionOf(path).ifBlank { ".md" }
-        val next = if (parent.isEmpty()) "$name$extension" else "$parent/$name$extension"
+        val folder = io.list(parent).any { it.directory && it.path.trim('/') == path.trim('/') }
+        val next = renamedVaultPath(path, title, folder)
         if (next == path) return path
-        if (io.exists(next)) throw IllegalStateException("That name is already used")
-        moveTree(path, next)
+        if (io.exists(next)) throw IllegalArgumentException("An diesem Ort existiert bereits ein Eintrag mit diesem Namen.")
+        io.move(path, next)
+        if (!folder) moveCompanions(path, next)
+        return next
+    }
+
+    private fun moveCompanions(path: String, next: String) {
+        val extension = extensionOf(path).ifBlank { ".md" }
         val companionExt = if (extension == FAMD_EXTENSION) ".md" else FAMD_EXTENSION
         val companion = companionPath(path, companionExt)
-        if (io.exists(companion)) moveTree(companion, companionPath(next, companionExt))
+        if (io.exists(companion)) io.move(companion, companionPath(next, companionExt))
         if (extension == ".pdf") {
             val md = companionPath(path, ".md")
-            if (io.exists(md)) moveTree(md, companionPath(next, ".md"))
+            if (io.exists(md)) io.move(md, companionPath(next, ".md"))
         }
-        return next
     }
 
     fun delete(path: String) {
@@ -272,16 +277,24 @@ class NoteStore(private val io: VaultIo) {
             .sortedWith(compareBy<VaultNode> { it.kind != NoteKind.FOLDER }.thenBy { it.name.lowercase() })
     }
 
-    private fun moveTree(from: String, to: String) {
-        val bytes = io.read(from) ?: return
-        io.write(to, bytes)
-        io.delete(from)
-    }
-
 }
 
 private fun jsonObject(vararg pairs: Pair<String, JsonValue>) = JsonValue.Obj().also { obj ->
     for ((key, value) in pairs) obj.fields[key] = value
+}
+
+/**
+ * New path for a rename in the same folder. A file keeps its extension even
+ * when the typed name includes `.md` or `.pdf`. A folder stays a folder.
+ */
+fun renamedVaultPath(path: String, nextName: String, folder: Boolean): String {
+    val trimmed = nextName.trim()
+    if (trimmed.isEmpty()) throw IllegalArgumentException("Der Name darf nicht leer sein.")
+    val stemInput = if (folder) trimmed else trimmed.replace(Regex("""\.(md|markdown|pdf)$""", RegexOption.IGNORE_CASE), "")
+    val stem = safeNoteName(stemInput)
+    val leaf = if (folder) stem else stem + extensionOf(path).ifBlank { ".md" }
+    val parent = path.substringBeforeLast('/', "")
+    return if (parent.isEmpty()) leaf else "$parent/$leaf"
 }
 
 fun safeNoteName(raw: String): String {
@@ -333,6 +346,15 @@ class DirectoryVault(val root: Path) : VaultIo {
         } else {
             Files.deleteIfExists(target)
         }
+    }
+
+    override fun move(from: String, to: String) {
+        val source = resolve(from)
+        val target = resolve(to)
+        if (!Files.exists(source)) return
+        if (Files.exists(target)) throw IllegalArgumentException("An diesem Ort existiert bereits ein Eintrag mit diesem Namen.")
+        Files.createDirectories(target.parent)
+        Files.move(source, target)
     }
 
     override fun exists(path: String) = Files.exists(resolve(path))
