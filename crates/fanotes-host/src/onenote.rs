@@ -99,7 +99,7 @@ fn import_in_temp(
         .filter(|path| extension_of(path) == ".html")
         .cloned()
         .collect();
-    let parents = page_parents(&html_files, &output_root);
+    let parents = page_parents(&html_files, &output_root)?;
     let mut pages = Vec::new();
     for path in &html_files {
         let preview = fs::read(path).map_err(|error| crate::notes::node_open_error(path, &error))?;
@@ -690,15 +690,17 @@ fn preview_is_nav(html: &str) -> bool {
         || js_regex(r"(?i)<iframe\b").is_ok_and(|regex| iu_is_match(&regex, html))
 }
 
-fn page_parents(html_files: &[PathBuf], output_root: &Path) -> HashMap<PathBuf, Vec<String>> {
+fn page_parents(
+    html_files: &[PathBuf],
+    output_root: &Path,
+) -> Result<HashMap<PathBuf, Vec<String>>, String> {
     let mut parents = HashMap::new();
     let Ok(anchor) = js_regex(r"(?is)<a\b([^>]*)>(.*?)</a>") else {
-        return parents;
+        return Ok(parents);
     };
     for entry in html_files {
-        let Some(html) = crate::notes::read_lossy_string(entry) else {
-            continue;
-        };
+        let html = fs::read(entry).map_err(|error| crate::notes::node_open_error(entry, &error))?;
+        let html = String::from_utf8_lossy(&html);
         if !preview_is_nav(&html) && !html.to_ascii_lowercase().contains("<nav") {
             continue;
         }
@@ -757,7 +759,7 @@ fn page_parents(html_files: &[PathBuf], output_root: &Path) -> HashMap<PathBuf, 
             parents.insert(target, prefix);
         }
     }
-    parents
+    Ok(parents)
 }
 
 /// Desktop pattern: the last `\bl[1-9]\b` inside the first matching `class`.
@@ -2214,7 +2216,7 @@ mod tests {
             "<nav\u{017F}><a class=\"l1\" href=\"versteckt.html\">Versteckt</a></nav\u{017F}>",
         )
         .unwrap();
-        let parents = page_parents(&[nav, ignored], &output);
+        let parents = page_parents(&[nav, ignored], &output).unwrap();
         let parent_of = |name: &str| {
             parents
                 .iter()
@@ -2334,7 +2336,7 @@ mod tests {
 </nav>"#,
         )
         .unwrap();
-        let parents = page_parents(&[nav], &root);
+        let parents = page_parents(&[nav], &root).unwrap();
         let parent_of = |name: &str| {
             parents
                 .iter()
@@ -2493,6 +2495,52 @@ mod tests {
             validate_listing("Path = archive.zip\nType = zip\n").unwrap_err(),
             "Das OneNote-Archiv enthält keine importierbaren Dateien."
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_unreadable_onenote_outline_uses_the_desktop_open_error() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!(
+            "fanotes-onenote-outline-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let missing = dir.join("fehlt.html");
+        assert_eq!(
+            page_parents(&[missing.clone()], &dir)
+                .err()
+                .expect("missing outline"),
+            format!(
+                "ENOENT: no such file or directory, open '{}'",
+                missing.display()
+            )
+        );
+        let nav = dir.join("nav.html");
+        let body = b"<nav><a class=\"l1\" href=\"seite.html\" title=\"Kapitel\">Kapitel</a></nav>";
+        std::fs::write(&nav, body).unwrap();
+        std::fs::set_permissions(&nav, std::fs::Permissions::from_mode(0o000)).unwrap();
+        struct Restore(std::path::PathBuf);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                let _ = std::fs::set_permissions(&self.0, std::fs::Permissions::from_mode(0o600));
+            }
+        }
+        let _restore = Restore(nav.clone());
+        assert_eq!(
+            page_parents(&[nav.clone()], &dir)
+                .err()
+                .expect("unreadable outline"),
+            format!("EACCES: permission denied, open '{}'", nav.display())
+        );
+        std::fs::set_permissions(&nav, std::fs::Permissions::from_mode(0o600)).unwrap();
+        assert_eq!(std::fs::read(&nav).unwrap(), body);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
