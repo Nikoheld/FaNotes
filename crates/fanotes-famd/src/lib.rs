@@ -933,6 +933,14 @@ pub fn canonical_iso(value: &str) -> Option<String> {
             return canonical_iso(&normalized);
         }
     }
+    if finished_date_has_an_extra_hyphen(trimmed) {
+        // `2026-10-13-` and `2026-10-13-EST` already finished the strict date.
+        return None;
+    }
+    if let Some(iso) = trailing_hyphen_iso(trimmed) {
+        // `2026-10-` stops before a strict ISO date, so that midnight is local.
+        return Some(iso);
+    }
     let surrounded = has_date_parse_padding(value);
     // A space around `T` is NaN. A space around `2026-10-13 16:00:00Z` is ignored.
     if surrounded && has_iso_t(trimmed) {
@@ -2789,6 +2797,131 @@ fn is_date_parse_space(character: char) -> bool {
             | '\u{3000}'
             | '\u{FEFF}'
     )
+}
+
+fn finished_date_has_an_extra_hyphen(trimmed: &str) -> bool {
+    let head = trimmed
+        .split_once(is_date_parse_space)
+        .map(|(head, _)| head)
+        .unwrap_or(trimmed);
+    let expanded = head.starts_with(['+', '-'])
+        && head[1..].bytes().take_while(|byte| byte.is_ascii_digit()).count() == 6;
+    let date_at = if expanded { 7 } else { 4 };
+    let bytes = head.as_bytes();
+    if bytes.len() < date_at + 6 {
+        return false;
+    }
+    let year_ok = if expanded {
+        iso_date_year(&head[..7])
+    } else {
+        iso_date_year(&head[..4])
+    };
+    year_ok
+        && bytes[date_at] == b'-'
+        && bytes[date_at + 1].is_ascii_digit()
+        && bytes[date_at + 2].is_ascii_digit()
+        && bytes[date_at + 3] == b'-'
+        && bytes[date_at + 4].is_ascii_digit()
+        && bytes[date_at + 5].is_ascii_digit()
+        && bytes.get(date_at + 6) == Some(&b'-')
+}
+
+/// `2026-` and `2026-10-` stop before a strict ISO date, so midnight is local.
+/// `2026- GMT` is that midnight at GMT. A finished `2026-10-13-` is empty.
+fn trailing_hyphen_iso(trimmed: &str) -> Option<String> {
+    let (head, zone) = if let Some((head, rest)) = trimmed.split_once(is_date_parse_space) {
+        let rest = rest.trim_start_matches(is_date_parse_space);
+        if rest.is_empty() || rest.contains(is_date_parse_space) {
+            return None;
+        }
+        (head, Some(rest))
+    } else {
+        (trimmed, None)
+    };
+    if !head.ends_with('-') || head.ends_with("--") {
+        return None;
+    }
+    let body = &head[..head.len() - 1];
+    if body.is_empty() || body.ends_with('-') {
+        return None;
+    }
+    let (year, month, day) = unfinished_hyphen_ymd(body)?;
+    if let Some(zone) = zone {
+        let parsed = legacy_zone_offset(zone).or_else(|| parse_legacy_offset(zone))?;
+        if !parsed.time_fields.is_empty() || !parsed.spilled.is_empty() {
+            return None;
+        }
+        let delta = parsed.minutes.checked_mul(-60)?;
+        let (year, month, day, hour, minute, second) =
+            shift_seconds(year, month, day, 0, 0, 0, delta)?;
+        return Some(format_civil_iso(year, month, day, hour, minute, second, 0));
+    }
+    let (year, month, day, hour, minute, second) = local_civil_to_utc(year, month, day, 0, 0, 0)?;
+    Some(format_civil_iso(year, month, day, hour, minute, second, 0))
+}
+
+fn unfinished_hyphen_ymd(body: &str) -> Option<(i32, i32, i32)> {
+    let expanded = body.starts_with(['+', '-'])
+        && body[1..].bytes().take_while(|byte| byte.is_ascii_digit()).count() == 6
+        && (body.len() == 7 || body.as_bytes().get(7) == Some(&b'-'));
+    let (year_text, rest) = if expanded {
+        (&body[..7], body[7..].strip_prefix('-').unwrap_or(""))
+    } else if let Some(rest) = body.strip_prefix(['+', '-']) {
+        if let Some((year, rest)) = rest.split_once('-') {
+            (year, rest)
+        } else {
+            (rest, "")
+        }
+    } else if let Some((year, rest)) = body.split_once('-') {
+        (year, rest)
+    } else {
+        (body, "")
+    };
+    if year_text.is_empty() || rest.split('-').any(|part| part.is_empty() && !rest.is_empty()) {
+        return None;
+    }
+    let mut parts = vec![year_text];
+    if !rest.is_empty() {
+        parts.extend(rest.split('-'));
+    }
+    if parts.len() > 3 {
+        return None;
+    }
+    if parts.len() == 3 && iso_date_year(parts[0]) && parts[1].len() == 2 && parts[2].len() == 2 {
+        return None;
+    }
+    let numbers = parts
+        .iter()
+        .map(|part| part.parse::<i32>().ok())
+        .collect::<Option<Vec<_>>>()?;
+    let iso_year = iso_date_year(parts[0]);
+    match numbers.as_slice() {
+        [first] if !iso_year && (1..=31).contains(first) => {
+            if !(1..=12).contains(first) {
+                return None;
+            }
+            Some((2001, *first, 1))
+        }
+        [first] => {
+            let year = if iso_year { *first } else { legacy_year_number(*first)? };
+            Some((year, 1, 1))
+        }
+        [first, month] => {
+            let year = if iso_year { *first } else { legacy_year_number(*first)? };
+            if !(1..=12).contains(month) {
+                return None;
+            }
+            Some((year, *month, 1))
+        }
+        [first, month, day] => {
+            let year = if iso_year { *first } else { legacy_year_number(*first)? };
+            if !(1..=12).contains(month) || !(1..=31).contains(day) {
+                return None;
+            }
+            Some((year, *month, *day))
+        }
+        _ => None,
+    }
 }
 
 fn date_only_iso(value: &str, surrounded: bool) -> Option<String> {
@@ -6546,6 +6679,87 @@ mod tests {
             assert_eq!(super::canonical_iso("2026-10-13 24:00:00.100000000"), None);
             assert_eq!(super::canonical_iso("Oct 13 2026 24:00:00.001"), None);
             assert_eq!(super::canonical_iso("1950-10-13T24:00:00.000000001"), None);
+        });
+    }
+
+    #[test]
+    fn a_trailing_hyphen_keeps_an_unfinished_date_local() {
+        with_tz("America/New_York", || {
+            // A trailing hyphen stops a strict ISO date, so the midnight is local.
+            // `2026-10-13-` already has a day, and that extra hyphen is empty.
+            assert_eq!(
+                super::canonical_iso("2026-").as_deref(),
+                Some("2026-01-01T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-").as_deref(),
+                Some("2026-10-01T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-1-").as_deref(),
+                Some("2026-01-01T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10-1-").as_deref(),
+                Some("2026-10-01T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("-2026-").as_deref(),
+                Some("2026-01-01T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("+002026-").as_deref(),
+                Some("2026-01-01T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("+002026-10-").as_deref(),
+                Some("2026-10-01T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("5-").as_deref(),
+                Some("2001-05-01T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("0-").as_deref(),
+                Some("2000-01-01T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("32-").as_deref(),
+                Some("2032-01-01T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("50-").as_deref(),
+                Some("1950-01-01T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("99-").as_deref(),
+                Some("1999-01-01T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("99-10-").as_deref(),
+                Some("1999-10-01T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026- GMT").as_deref(),
+                Some("2026-01-01T00:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026- GMT+5").as_deref(),
+                Some("2025-12-31T19:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("2026-10- EST").as_deref(),
+                Some("2026-10-01T05:00:00.000Z")
+            );
+            assert_eq!(super::canonical_iso("2026-10-13-"), None);
+            assert_eq!(super::canonical_iso("2026-10-01-"), None);
+            assert_eq!(super::canonical_iso("2026--"), None);
+            assert_eq!(super::canonical_iso("2026-10--"), None);
+            assert_eq!(super::canonical_iso("13-"), None);
+            assert_eq!(super::canonical_iso("2026-13-"), None);
+            assert_eq!(super::canonical_iso("2026-10-13-1"), None);
+            assert_eq!(super::canonical_iso("2026-10-13 -"), None);
+            assert_eq!(super::canonical_iso("2026-10-13-EST"), None);
         });
     }
 
