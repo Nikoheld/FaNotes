@@ -231,6 +231,12 @@ class NotePageView(context: Context) : FrameLayout(context) {
             ink.drawCompassCircle()
         })
         tools.addView(chip("Mathe") { onMath() })
+        val mark = chip("Markieren") {}
+        mark.setOnClickListener {
+            ink.placingHighlight = !ink.placingHighlight
+            mark.text = if (ink.placingHighlight) "Markieren ●" else "Markieren"
+        }
+        tools.addView(mark)
         tools.addView(chip("+") { ink.zoomBy(1.15f) })
         tools.addView(chip("−") { ink.zoomBy(1f / 1.15f) })
         tools.addView(chip("Drehen") { ink.rotatePage() })

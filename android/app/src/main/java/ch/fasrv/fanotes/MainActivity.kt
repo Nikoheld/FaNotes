@@ -289,26 +289,35 @@ fun FaNotesScreen(
                             "settings" -> SettingsScreen(model, { requestSync() }, onOpenVault, { model.usePrivateVault() })
                         }
                     }
-                } else PageSurface(
-                    model = model,
-                    tool = tool,
-                    style = style,
-                    finger = finger,
-                    textMode = showText,
-                    markdown = markdown,
-                    backdrop = backdrop,
-                    token = token,
-                    path = open?.path,
-                    paper = model.session.document.paperStyle,
-                    syncText = syncText,
-                    syncBusy = syncPending || sync.status == SyncStatus.SYNCING,
-                    dark = isSystemInDarkTheme(),
-                    onSync = { requestSync() },
-                    onToggleRail = { model.showList.value = !showList },
-                    onEditBox = { editingBox = it },
-                    onMath = { mathOpen = true },
-                    modifier = Modifier.weight(1f).fillMaxHeight().clipToBounds(),
-                )
+                } else {
+                    val book by model.bookPane.collectAsStateWithLifecycle()
+                    val bookPlacement = desk["book-placement"].orEmpty().ifBlank { "rechts" }
+                    val showBook = book != null && bookPlacement != "popout"
+                    val openBook = { path: String -> model.openPath(path); model.showDestination("notes") }
+                    if (showBook && bookPlacement == "links") {
+                        BookPane(model, Modifier.width(280.dp).fillMaxHeight(), openBook)
+                    }
+                    if (showBook && (bookPlacement == "oben" || bookPlacement == "unten")) {
+                        Column(Modifier.weight(1f).fillMaxHeight()) {
+                            if (bookPlacement == "oben") BookPane(model, Modifier.height(220.dp).fillMaxWidth(), openBook)
+                            NotePage(
+                                model, tool, style, finger, showText, markdown, backdrop, token, open?.path, syncText,
+                                syncPending || sync.status == SyncStatus.SYNCING, { requestSync() }, { model.showList.value = !showList },
+                                { editingBox = it }, { mathOpen = true }, Modifier.weight(1f).fillMaxHeight().clipToBounds(),
+                            )
+                            if (bookPlacement == "unten") BookPane(model, Modifier.height(220.dp).fillMaxWidth(), openBook)
+                        }
+                    } else {
+                        NotePage(
+                            model, tool, style, finger, showText, markdown, backdrop, token, open?.path, syncText,
+                            syncPending || sync.status == SyncStatus.SYNCING, { requestSync() }, { model.showList.value = !showList },
+                            { editingBox = it }, { mathOpen = true }, Modifier.weight(1f).fillMaxHeight().clipToBounds(),
+                        )
+                    }
+                    if (showBook && bookPlacement == "rechts") {
+                        BookPane(model, Modifier.width(280.dp).fillMaxHeight(), openBook)
+                    }
+                }
                 if (destination == "notes" && split != null) {
                     Column(Modifier.width(360.dp).fillMaxHeight()) {
                         Row(Modifier.padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -644,6 +653,47 @@ private fun EditorTools(
 }
 
 @Composable
+private fun NotePage(
+    model: FaNotesViewModel,
+    tool: InkTool,
+    style: ch.fasrv.fanotes.ink.StrokeStyle,
+    finger: Boolean,
+    textMode: Boolean,
+    markdown: String,
+    backdrop: List<BackdropSlice>,
+    token: Int,
+    path: String?,
+    syncText: String,
+    syncBusy: Boolean,
+    onSync: () -> Unit,
+    onToggleRail: () -> Unit,
+    onEditBox: (String) -> Unit,
+    onMath: () -> Unit,
+    modifier: Modifier,
+) {
+    PageSurface(
+        model = model,
+        tool = tool,
+        style = style,
+        finger = finger,
+        textMode = textMode,
+        markdown = markdown,
+        backdrop = backdrop,
+        token = token,
+        path = path,
+        paper = model.session.document.paperStyle,
+        syncText = syncText,
+        syncBusy = syncBusy,
+        dark = isSystemInDarkTheme(),
+        onSync = onSync,
+        onToggleRail = onToggleRail,
+        onEditBox = onEditBox,
+        onMath = onMath,
+        modifier = modifier,
+    )
+}
+
+@Composable
 private fun PageSurface(
     model: FaNotesViewModel,
     tool: InkTool,
@@ -667,6 +717,7 @@ private fun PageSurface(
     var bound by remember { mutableStateOf("") }
     val links by model.noteLinks.collectAsStateWithLifecycle()
     val boxes by model.worksheetBoxes.collectAsStateWithLifecycle()
+    val highlights by model.worksheetHighlights.collectAsStateWithLifecycle()
     AndroidView(
         modifier = modifier,
         factory = { context ->
@@ -702,6 +753,12 @@ private fun PageSurface(
             page.onMath = onMath
             page.ink.linkMarks = links
             page.ink.worksheetBoxes = boxes
+            page.ink.worksheetHighlights = highlights
+            page.ink.pageFrames = backdrop.mapIndexed { index, slice ->
+                ch.fasrv.fanotes.desk.PageFrame(index + 1, slice.topPagePx.toDouble(), slice.heightPagePx.toDouble(), slice.widthPagePx.toDouble())
+            }
+            page.ink.onPlaceHighlight = { model.addWorksheetHighlight(it) }
+            page.ink.onRemoveHighlight = { model.removeWorksheetHighlight(it) }
             page.onFinger = { model.fingerDraws.value = it }
             page.apply(
                 path = path ?: "",

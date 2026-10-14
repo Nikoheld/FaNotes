@@ -113,6 +113,11 @@ class InkSurfaceView @JvmOverloads constructor(
     var placingLink = false
     var linkMarks: List<ch.fasrv.fanotes.desk.NoteLinkMark> = emptyList()
     var worksheetBoxes: List<ch.fasrv.fanotes.desk.WorksheetBox> = emptyList()
+    var worksheetHighlights: List<ch.fasrv.fanotes.desk.WorksheetHighlight> = emptyList()
+    var pageFrames: List<ch.fasrv.fanotes.desk.PageFrame> = emptyList()
+    var placingHighlight = false
+    var onPlaceHighlight: (ch.fasrv.fanotes.desk.WorksheetHighlight) -> Unit = {}
+    var onRemoveHighlight: (String) -> Unit = {}
     var onPlaceSection: (Double) -> Unit = { _ -> }
     var onPlaceLink: (Double, Double) -> Unit = { _, _ -> }
     var onToggleSection: (String) -> Unit = { _ -> }
@@ -172,6 +177,12 @@ class InkSurfaceView @JvmOverloads constructor(
         color = Color.parseColor("#1B4F82")
     }
     private val guideTick = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#1B4F82") }
+    private var highlighting = false
+    private var highlightStartX = 0.0
+    private var highlightStartY = 0.0
+    private var highlightEndX = 0.0
+    private var highlightEndY = 0.0
+    private val highlightPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#FFE566") }
     private val guideLabel = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.parseColor("#1B4F82")
         textAlign = Paint.Align.CENTER
@@ -427,6 +438,13 @@ class InkSurfaceView @JvmOverloads constructor(
                 current.eraseSamples(listOf(point(event, index, x, y)), eraserRadius(), nowIso())
                 onChanged()
             }
+            placingHighlight -> {
+                highlighting = true
+                highlightStartX = x
+                highlightStartY = y
+                highlightEndX = x
+                highlightEndY = y
+            }
             inkTool == InkTool.SELECT -> {
                 selecting = true
                 movingSelection = hitSelection(x, y)
@@ -451,7 +469,11 @@ class InkSurfaceView @JvmOverloads constructor(
         trackNib(event, index)
         predictor?.record(event)
         val history = event.historySize
-        if (lassoing) {
+        if (highlighting) {
+            val (x, y) = screenToNorm(event.getX(index), event.getY(index))
+            highlightEndX = x
+            highlightEndY = y
+        } else if (lassoing) {
             val (x, y) = screenToNorm(event.getX(index), event.getY(index))
             lassoPoints += StrokePoint(x, y, 0.0, 0.0, 0.0, 0.0, "pen")
         } else if (erasing) {
@@ -486,6 +508,13 @@ class InkSurfaceView @JvmOverloads constructor(
         predicted = emptyList()
         snapLock = null
         onPenActive(false)
+        if (highlighting) {
+            highlighting = false
+            placingHighlight = false
+            if (!cancel) commitHighlight()
+            invalidate()
+            return
+        }
         if (lassoing) {
             lassoing = false
             current.selectIndices(lassoHits(current.document.strokes, lassoPoints.toList()))
@@ -648,6 +677,7 @@ class InkSurfaceView @JvmOverloads constructor(
             canvas.drawText(link.label.ifBlank { "Notiz" }, sx + 14f, sy + 6f, textPaint)
             textPaint.color = Color.parseColor("#252630")
         }
+        drawHighlights(canvas)
         worksheetBoxes.forEach { box ->
             val (sx, sy) = normToScreen(box.x, box.y)
             textPaint.color = Color.parseColor("#202333")
@@ -1333,6 +1363,52 @@ class InkSurfaceView @JvmOverloads constructor(
         canvas.rotate(Math.toDegrees(pose.rotation).toFloat())
         draw()
         canvas.restore()
+    }
+
+    private fun commitHighlight() {
+        val left = min(highlightStartX, highlightEndX)
+        val top = min(highlightStartY, highlightEndY)
+        val width = abs(highlightEndX - highlightStartX)
+        val height = abs(highlightEndY - highlightStartY)
+        val frames = pageFrames
+        val existing = worksheetHighlights.firstOrNull { mark ->
+            val rect = ch.fasrv.fanotes.desk.highlightToSheet(mark, frames, sessionWidth(), sessionHeight())
+            left >= rect.x && left <= rect.x + rect.width && top >= rect.y && top <= rect.y + rect.height && width < 0.02 && height < 0.02
+        }
+        if (existing != null) {
+            onRemoveHighlight(existing.id)
+            return
+        }
+        val mark = ch.fasrv.fanotes.desk.highlightFromDrag(
+            left,
+            top,
+            width,
+            height,
+            frames,
+            sessionWidth(),
+            sessionHeight(),
+            "hl-${System.currentTimeMillis().toString(36)}",
+        ) ?: return
+        onPlaceHighlight(mark)
+    }
+
+    private fun drawHighlights(canvas: Canvas) {
+        highlightPaint.style = Paint.Style.FILL
+        worksheetHighlights.forEach { mark ->
+            val rect = ch.fasrv.fanotes.desk.highlightToSheet(mark, pageFrames, sessionWidth(), sessionHeight())
+            val (x1, y1) = normToScreen(rect.x, rect.y)
+            val (x2, y2) = normToScreen(rect.x + rect.width, rect.y + rect.height)
+            highlightPaint.color = parseColor(mark.color)
+            highlightPaint.alpha = 96
+            canvas.drawRect(x1, y1, x2, y2, highlightPaint)
+        }
+        if (highlighting) {
+            val (x1, y1) = normToScreen(min(highlightStartX, highlightEndX), min(highlightStartY, highlightEndY))
+            val (x2, y2) = normToScreen(max(highlightStartX, highlightEndX), max(highlightStartY, highlightEndY))
+            highlightPaint.color = Color.parseColor("#FFE566")
+            highlightPaint.alpha = 70
+            canvas.drawRect(x1, y1, x2, y2, highlightPaint)
+        }
     }
 
     private fun sheetDisplay() = DraftingDisplay(
