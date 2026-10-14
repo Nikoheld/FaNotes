@@ -1933,6 +1933,10 @@ fn rewrite_periods(value: &str) -> String {
             index = next;
             continue;
         }
+        // `p.m.` is not `pm`. Only a period at the end of the text is padding.
+        if chars.get(next).is_some() {
+            out.extend(chars[index..next].iter().copied());
+        }
         index = next;
     }
     out
@@ -5817,6 +5821,30 @@ mod local_zone_tests {
         assert_eq!(
             unix_millis_from_iso("2026-10-13T16:00:00.5"),
             Some(1_791_921_600_500)
+        );
+    }
+
+    #[test]
+    fn a_dotted_meridiem_is_not_a_clock() {
+        let _lock = TRASH_CLOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let _restore = RestoreTz(std::env::var_os("TZ"));
+        unsafe { std::env::set_var("TZ", "America/New_York") };
+        unsafe { tzset() };
+        assert_eq!(unix_millis_from_iso("2026-10-13 4:00:00 p.m."), None);
+        assert_eq!(unix_millis_from_iso("2026-10-13 4:00:00 P.M."), None);
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 4:00:00 pm"),
+            Some(1_791_921_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 4:00:00 PM."),
+            Some(1_791_921_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 16:00 EST."),
+            Some(1_791_925_200_000)
         );
     }
 }
