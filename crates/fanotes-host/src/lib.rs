@@ -1796,8 +1796,12 @@ fn unix_millis_from_iso(value: &str) -> Option<u64> {
     }
     let (date, time) = match iso_date_time(value) {
         IsoDate::Invalid => return None,
-        // `YYYY-MM-DD` is UTC midnight. A short month or day is local midnight.
-        IsoDate::DateOnly(date) => return date_only_millis(date),
+        // `YYYY-MM-DD` is UTC midnight. A short field, or whitespace around the
+        // date, makes that midnight local.
+        IsoDate::DateOnly(date) => {
+            let surrounded = value.trim_matches(is_date_parse_space).len() != value.len();
+            return date_only_millis(date, surrounded);
+        }
         IsoDate::DateTime(date, time) => (date, time),
     };
     let (year, month, day) = datetime_calendar(date)?;
@@ -1888,8 +1892,8 @@ fn is_date_parse_space(c: char) -> bool {
 }
 
 /// A clock is introduced by `T`, `t`, or that whitespace. Whitespace around a
-/// `T` form is NaN. The same whitespace around a date-only value, or around a
-/// whitespace-separated clock, is ignored.
+/// `T` form is NaN. Whitespace around a date-only value makes it local midnight.
+/// Whitespace around a whitespace-separated clock is ignored.
 fn iso_date_time(value: &str) -> IsoDate<'_> {
     let trimmed = value.trim_matches(is_date_parse_space);
     if trimmed.contains(['T', 't']) {
@@ -2479,7 +2483,7 @@ fn pad_legacy_clock(time: &str) -> Option<String> {
     Some(padded)
 }
 
-fn date_only_millis(value: &str) -> Option<u64> {
+fn date_only_millis(value: &str, surrounded: bool) -> Option<u64> {
     let mut date_parts = value.split('-');
     let year_text = date_parts.next()?;
     let month_text = date_parts.next();
@@ -2488,9 +2492,9 @@ fn date_only_millis(value: &str) -> Option<u64> {
         return None;
     }
     let year: i32 = year_text.parse().ok()?;
-    // `YYYY`, `YYYY-MM`, and `YYYY-MM-DD` are UTC. `2026-1` and `2026-10-3`
-    // are local midnight. A field with extra digits is local too.
-    let mut legacy_local = false;
+    // `YYYY`, `YYYY-MM`, and `YYYY-MM-DD` are UTC. `2026-1`, `2026-10-3`, and
+    // ` 2026-10-13 ` are local midnight. A field with extra digits is local too.
+    let mut legacy_local = surrounded;
     let month = match month_text {
         None => 1,
         Some(text) => {
@@ -5529,5 +5533,38 @@ mod local_zone_tests {
         assert_eq!(unix_millis_from_iso("2026-01"), Some(1_767_225_600_000));
         assert_eq!(unix_millis_from_iso("2026-10-03"), Some(1_790_985_600_000));
         assert_eq!(unix_millis_from_iso("2026-02-31"), Some(1_772_496_000_000));
+    }
+
+    #[test]
+    fn whitespace_around_a_date_makes_it_local_midnight() {
+        let _lock = TRASH_CLOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let _restore = RestoreTz(std::env::var_os("TZ"));
+        unsafe { std::env::set_var("TZ", "America/New_York") };
+        unsafe { tzset() };
+        // `2026-10-13` is UTC. The same text with surrounding whitespace is local.
+        assert_eq!(unix_millis_from_iso("2026-10-13"), Some(1_791_849_600_000));
+        assert_eq!(unix_millis_from_iso(" 2026-10-13"), Some(1_791_864_000_000));
+        assert_eq!(unix_millis_from_iso("2026-10-13 "), Some(1_791_864_000_000));
+        assert_eq!(
+            unix_millis_from_iso(" 2026-10-13 "),
+            Some(1_791_864_000_000)
+        );
+        assert_eq!(unix_millis_from_iso("2026-10-13\n"), Some(1_791_864_000_000));
+        assert_eq!(unix_millis_from_iso("2026-10-13\t"), Some(1_791_864_000_000));
+        assert_eq!(
+            unix_millis_from_iso("\u{00A0}2026-10-13"),
+            Some(1_791_864_000_000)
+        );
+        assert_eq!(unix_millis_from_iso(" 2026-01 "), Some(1_767_243_600_000));
+        assert_eq!(unix_millis_from_iso(" 2026 "), Some(1_767_243_600_000));
+        assert_eq!(unix_millis_from_iso(" 2026-10 "), Some(1_790_827_200_000));
+        assert_eq!(unix_millis_from_iso("2026-02-31 "), Some(1_772_514_000_000));
+        assert_eq!(unix_millis_from_iso(" 2026-10-13T16:00:00Z"), None);
+        assert_eq!(
+            unix_millis_from_iso(" 2026-10-13 16:00:00Z"),
+            Some(1_791_907_200_000)
+        );
     }
 }
