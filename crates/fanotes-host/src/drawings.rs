@@ -160,7 +160,7 @@ pub fn read_famd_ink(host: &Host, relative: &str) -> Result<Value, String> {
             return Err("Die Datei ist zu groß.".to_owned());
         }
         Ok(_) => lossy_utf8(
-            fs::read(&path).map_err(|_| "Die Datei konnte nicht gelesen werden.".to_owned())?,
+            fs::read(&path).map_err(|error| crate::notes::node_open_error(&path, &error))?,
         ),
     };
     let parsed = parse_famd(&source);

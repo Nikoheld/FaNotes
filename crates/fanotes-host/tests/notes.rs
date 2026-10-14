@@ -44,6 +44,31 @@ fn an_unreadable_note_uses_the_desktop_open_error() {
 
 #[cfg(unix)]
 #[test]
+fn an_unreadable_handwriting_file_uses_the_desktop_open_error() {
+    use std::os::unix::fs::PermissionsExt;
+    let (mut host, vault) = host();
+    let famd = vault.join("Mathe/Seite.famd");
+    std::fs::write(&famd, b"<!-- fanotes-famd:v1 chars=0 -->\n").unwrap();
+    let canonical = std::fs::canonicalize(&famd).unwrap();
+    std::fs::set_permissions(&famd, std::fs::Permissions::from_mode(0o000)).unwrap();
+    struct Restore(std::path::PathBuf);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            let _ = std::fs::set_permissions(&self.0, std::fs::Permissions::from_mode(0o600));
+        }
+    }
+    let _restore = Restore(famd.clone());
+    assert_eq!(
+        host.dispatch("fanotes:read-famd-ink", &[json!("Mathe/Seite.md")])
+            .unwrap_err(),
+        format!("EACCES: permission denied, open '{}'", canonical.display())
+    );
+    std::fs::set_permissions(&famd, std::fs::Permissions::from_mode(0o600)).unwrap();
+    assert!(famd.is_file());
+}
+
+#[cfg(unix)]
+#[test]
 fn an_unreadable_history_index_uses_the_desktop_open_error() {
     use std::os::unix::fs::PermissionsExt;
     let (mut host, vault) = host();
