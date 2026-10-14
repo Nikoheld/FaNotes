@@ -1874,7 +1874,8 @@ fn date_only_millis(value: &str) -> Option<u64> {
     let year: i32 = date_parts.next()?.parse().ok()?;
     let month: u32 = date_parts.next()?.parse().ok()?;
     let day: u32 = date_parts.next()?.parse().ok()?;
-    if date_parts.next().is_some() || !(1..=12).contains(&month) || day == 0 {
+    // `Date.parse` rejects a date-only day outside 1..=31. Days 29–31 still roll.
+    if date_parts.next().is_some() || !(1..=12).contains(&month) || !(1..=31).contains(&day) {
         return None;
     }
     let days = days_from_civil(year, month, day)?;
