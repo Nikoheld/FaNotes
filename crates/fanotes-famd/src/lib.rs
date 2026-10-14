@@ -1385,7 +1385,22 @@ fn slash_clock(time: &str) -> Option<String> {
 }
 
 fn month_clock_and_zone(rest: &[&str]) -> Option<(String, String)> {
-    match rest {
+    // One bare number after the day and year is ignored. `Oct 13 2026 16`
+    // is local midnight. `16:00 16 GMT` keeps the clock. Two numbers, `+16`,
+    // and `16.5` are not a date.
+    let ignored = rest
+        .iter()
+        .filter(|word| unsigned_number(word).is_some())
+        .count();
+    if ignored > 1 {
+        return None;
+    }
+    let kept: Vec<&str> = rest
+        .iter()
+        .copied()
+        .filter(|word| unsigned_number(word).is_none())
+        .collect();
+    match kept.as_slice() {
         [] => Some(("00:00:00".to_string(), String::new())),
         [zone] if month_zone_suffix(zone).is_some() => {
             Some(("00:00:00".to_string(), month_zone_suffix(zone)?))
@@ -2591,6 +2606,75 @@ mod tests {
             assert_eq!(super::canonical_iso("13 Oct foo 2026"), None);
             assert_eq!(super::canonical_iso("13-Oct--26"), None);
             assert_eq!(super::canonical_iso("13--Oct"), None);
+        });
+    }
+
+    #[test]
+    fn a_trailing_number_after_a_month_date_is_ignored() {
+        with_tz("America/New_York", || {
+            // One bare number after the day and year is not a time. `Oct 13 16`
+            // is still 13 October 2016, because that 16 is the year.
+            assert_eq!(
+                super::canonical_iso("Oct 13 2026 16").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("13 Oct 2026 16").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("foo Oct 13 2026 16").as_deref(),
+                Some("2026-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 2026 16 GMT").as_deref(),
+                Some("2026-10-13T00:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 2026 16 EST").as_deref(),
+                Some("2026-10-13T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 2026 GMT 16").as_deref(),
+                Some("2026-10-13T00:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 2026 16:00 16").as_deref(),
+                Some("2026-10-13T20:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 2026 16:00 16 GMT").as_deref(),
+                Some("2026-10-13T16:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 2026 16 16:00").as_deref(),
+                Some("2026-10-13T20:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 5 2026").as_deref(),
+                Some("2005-10-13T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 2026 16 99").as_deref(),
+                Some("2026-10-16T04:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 2026 Nov 16").as_deref(),
+                Some("2026-11-13T05:00:00.000Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 2026 16:00:00.5 16").as_deref(),
+                Some("2026-10-13T20:00:00.500Z")
+            );
+            assert_eq!(
+                super::canonical_iso("Oct 13 16").as_deref(),
+                Some("2016-10-13T04:00:00.000Z")
+            );
+            assert_eq!(super::canonical_iso("Oct 13 2026 16 17"), None);
+            assert_eq!(super::canonical_iso("Oct 13 2026 16 hello"), None);
+            assert_eq!(super::canonical_iso("Oct 13 2026 +16"), None);
+            assert_eq!(super::canonical_iso("Oct 13 2026 16.5"), None);
+            assert_eq!(super::canonical_iso("Oct 13 2026 16:00 16 17"), None);
         });
     }
 
