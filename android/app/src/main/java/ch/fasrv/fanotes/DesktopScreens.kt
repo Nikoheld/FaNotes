@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -38,7 +39,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import ch.fasrv.fanotes.desk.Breadcrumb
+import ch.fasrv.fanotes.desk.SwitcherNote
 import ch.fasrv.fanotes.desk.dueCards
+import ch.fasrv.fanotes.desk.fuzzyScore
 import ch.fasrv.fanotes.desk.outlineOf
 import ch.fasrv.fanotes.desk.taskLines
 import java.time.LocalDate
@@ -94,13 +98,26 @@ fun DeskRibbon(
 }
 
 @Composable
-fun DeskStatusBar(words: Int, syncText: String, language: String, showWords: Boolean, conflicts: Int = 0, onConflicts: () -> Unit = {}) {
+fun DeskStatusBar(
+    words: Int,
+    syncText: String,
+    language: String,
+    showWords: Boolean,
+    conflicts: Int = 0,
+    onConflicts: () -> Unit = {},
+    crumbs: List<Breadcrumb> = emptyList(),
+    onCrumb: (String) -> Unit = {},
+) {
     Row(
         Modifier.fillMaxWidth().height(28.dp).background(MaterialTheme.colorScheme.surface).padding(horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween,
     ) {
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            Modifier.weight(1f).horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             Text(syncText, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
             if (conflicts > 0) {
                 Text(
@@ -109,6 +126,20 @@ fun DeskStatusBar(words: Int, syncText: String, language: String, showWords: Boo
                     color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.clickable(onClick = onConflicts),
                 )
+            }
+            crumbs.forEachIndexed { index, crumb ->
+                if (index > 0) Text("›", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f))
+                if (crumb.isNote) {
+                    Text(crumb.label, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                } else {
+                    Text(
+                        crumb.label,
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.primary,
+                        maxLines = 1,
+                        modifier = Modifier.clickable { onCrumb(crumb.path) },
+                    )
+                }
             }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -119,15 +150,42 @@ fun DeskStatusBar(words: Int, syncText: String, language: String, showWords: Boo
 }
 
 @Composable
-fun NoteTabs(paths: List<String>, selected: String?, onOpen: (String) -> Unit, onClose: (String) -> Unit) {
-    if (paths.isEmpty()) return
-    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).background(MaterialTheme.colorScheme.surface).padding(horizontal = 8.dp, vertical = 2.dp)) {
+fun NoteTabs(
+    paths: List<String>,
+    selected: String?,
+    pinned: Set<String>,
+    canBack: Boolean,
+    canForward: Boolean,
+    onOpen: (String) -> Unit,
+    onClose: (String) -> Unit,
+    onBack: () -> Unit,
+    onForward: () -> Unit,
+) {
+    if (paths.isEmpty() && !canBack && !canForward) return
+    val muted = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+    Row(
+        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).background(MaterialTheme.colorScheme.surface).padding(horizontal = 8.dp, vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            "← Zurück",
+            fontSize = 12.sp,
+            color = if (canBack) MaterialTheme.colorScheme.onSurface else muted,
+            modifier = Modifier.padding(end = 4.dp).then(if (canBack) Modifier.clickable(onClick = onBack) else Modifier).padding(horizontal = 6.dp, vertical = 4.dp),
+        )
+        Text(
+            "→",
+            fontSize = 12.sp,
+            color = if (canForward) MaterialTheme.colorScheme.onSurface else muted,
+            modifier = Modifier.padding(end = 8.dp).then(if (canForward) Modifier.clickable(onClick = onForward) else Modifier).padding(horizontal = 6.dp, vertical = 4.dp),
+        )
         paths.forEach { path ->
             val name = path.substringAfterLast('/').substringBeforeLast('.')
             Row(
                 Modifier.padding(end = 4.dp).background(if (path == selected) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent).clickable { onOpen(path) }.padding(horizontal = 8.dp, vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                if (path in pinned) Text("● ", fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
                 Text(name, fontSize = 12.sp, maxLines = 1)
                 Text("  ×", modifier = Modifier.clickable { onClose(path) }, fontSize = 12.sp)
             }
@@ -694,7 +752,14 @@ fun Inspector(model: FaNotesViewModel, onOpen: (String) -> Unit) {
 }
 
 @Composable
-fun CommandPalette(onDismiss: () -> Unit, onRun: (String) -> Unit) {
+fun CommandPalette(
+    onDismiss: () -> Unit,
+    rankNotes: (String) -> List<SwitcherNote>,
+    onOpenNote: (String) -> Unit,
+    onRun: (String) -> Unit,
+) {
+    var query by remember { mutableStateOf("") }
+    val notes = if (query.isBlank()) emptyList() else rankNotes(query)
     val actions = listOf(
         "notes" to "Notizen",
         "search" to "Im Vault suchen",
@@ -705,6 +770,13 @@ fun CommandPalette(onDismiss: () -> Unit, onRun: (String) -> Unit) {
         "books" to "Fachbuch",
         "history" to "Versionsverlauf",
         "study" to "Lernzeit",
+        "nav-back" to "Zurück",
+        "nav-forward" to "Vorwärts",
+        "reopen-tab" to "Geschlossenen Tab wieder öffnen",
+        "pin-tab" to "Tab anheften",
+        "close-others" to "Andere Tabs schließen",
+        "close-right" to "Tabs rechts schließen",
+        "cycle-tab" to "Nächster Tab",
         "template-protocol" to "Vorlage: Protokoll",
         "template-proof" to "Vorlage: Beweis",
         "template-cornell" to "Vorlage: Cornell",
@@ -715,12 +787,24 @@ fun CommandPalette(onDismiss: () -> Unit, onRun: (String) -> Unit) {
         "settings" to "Einstellungen",
         "daily" to "Tägliche Notiz",
         "split" to "Zweite Spalte",
+        "split-orient" to "Teilung drehen",
         "focus" to "Fokusmodus",
         "sync" to "Sync",
     )
-    Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface).padding(12.dp)) {
-        Text("Befehle", fontWeight = FontWeight.SemiBold)
-        actions.forEach { (id, label) ->
+    val commands = if (query.isBlank()) actions else actions.filter { (_, label) -> fuzzyScore(query, label) > 0 }
+    Column(Modifier.fillMaxWidth().heightIn(max = 480.dp).verticalScroll(rememberScrollState()).background(MaterialTheme.colorScheme.surface).padding(12.dp)) {
+        OutlinedTextField(query, { query = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Notiz oder Befehl") }, singleLine = true)
+        if (notes.isNotEmpty()) {
+            Text("Notizen", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp), fontSize = 12.sp)
+            notes.forEach { note ->
+                Column(Modifier.fillMaxWidth().clickable { onOpenNote(note.path); onDismiss() }.padding(vertical = 6.dp)) {
+                    Text(note.title)
+                    if (note.folder.isNotEmpty()) Text(note.folder, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+                }
+            }
+        }
+        Text("Befehle", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp), fontSize = 12.sp)
+        commands.forEach { (id, label) ->
             Text(label, modifier = Modifier.fillMaxWidth().clickable { onRun(id); onDismiss() }.padding(vertical = 8.dp))
         }
     }

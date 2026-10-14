@@ -84,6 +84,9 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ch.fasrv.fanotes.desk.solveMathExpression
+import ch.fasrv.fanotes.desk.breadcrumbsFor
+import ch.fasrv.fanotes.desk.canGoBack
+import ch.fasrv.fanotes.desk.canGoForward
 import ch.fasrv.fanotes.ink.InkTool
 import ch.fasrv.fanotes.sync.SyncStatus
 import ch.fasrv.fanotes.vault.NoteKind
@@ -197,6 +200,8 @@ fun FaNotesScreen(
     val vaultLabel by model.vaultLabel.collectAsStateWithLifecycle()
     val destination by model.destination.collectAsStateWithLifecycle()
     val tabs by model.openTabs.collectAsStateWithLifecycle()
+    val pinned by model.pinnedTabs.collectAsStateWithLifecycle()
+    val trail by model.noteTrail.collectAsStateWithLifecycle()
     val desk by model.deskSettings.collectAsStateWithLifecycle()
     val split by model.splitPath.collectAsStateWithLifecycle()
     val palette by model.paletteOpen.collectAsStateWithLifecycle()
@@ -248,7 +253,17 @@ fun FaNotesScreen(
                 onFocus = { model.updateDesk("focus", "on") },
                 onDaily = { model.openDaily() },
             )
-            NoteTabs(tabs, open?.path, { model.openPath(it); model.showDestination("notes") }, { model.openTabs.value = tabs.filterNot { path -> path == it } })
+            NoteTabs(
+                tabs,
+                open?.path,
+                pinned,
+                canGoBack(trail),
+                canGoForward(trail),
+                { model.openPath(it); model.showDestination("notes") },
+                { model.closeTab(it) },
+                { model.navigateHistory(-1) },
+                { model.navigateHistory(1) },
+            )
         } else {
             DeskRibbon(destination, true, { model.showDestination(it) }, { model.paletteOpen.value = true }, { model.updateDesk("focus", "off") }, { model.openDaily() })
         }
@@ -299,50 +314,34 @@ fun FaNotesScreen(
                     if (showBook && bookPlacement == "links") {
                         BookPane(model, Modifier.width(280.dp).fillMaxHeight(), openBook)
                     }
+                    val splitRows = split != null && desk["split-orientation"] == "rows"
                     if (showBook && (bookPlacement == "oben" || bookPlacement == "unten")) {
                         Column(Modifier.weight(1f).fillMaxHeight()) {
                             if (bookPlacement == "oben") BookPane(model, Modifier.height(220.dp).fillMaxWidth(), openBook)
-                            NotePage(
-                                model, tool, style, finger, showText, markdown, backdrop, token, open?.path, syncText,
-                                syncPending || sync.status == SyncStatus.SYNCING, { requestSync() }, { model.showList.value = !showList },
-                                { editingBox = it }, { mathOpen = true }, Modifier.weight(1f).fillMaxHeight().clipToBounds(),
-                            )
+                            NoteWithSplit(splitRows, model, tool, style, finger, Modifier.weight(1f).fillMaxHeight()) {
+                                NotePage(
+                                    model, tool, style, finger, showText, markdown, backdrop, token, open?.path, syncText,
+                                    syncPending || sync.status == SyncStatus.SYNCING, { requestSync() }, { model.showList.value = !showList },
+                                    { editingBox = it }, { mathOpen = true }, it.clipToBounds(),
+                                )
+                            }
                             if (bookPlacement == "unten") BookPane(model, Modifier.height(220.dp).fillMaxWidth(), openBook)
                         }
                     } else {
-                        NotePage(
-                            model, tool, style, finger, showText, markdown, backdrop, token, open?.path, syncText,
-                            syncPending || sync.status == SyncStatus.SYNCING, { requestSync() }, { model.showList.value = !showList },
-                            { editingBox = it }, { mathOpen = true }, Modifier.weight(1f).fillMaxHeight().clipToBounds(),
-                        )
+                        NoteWithSplit(splitRows, model, tool, style, finger, Modifier.weight(1f).fillMaxHeight()) {
+                            NotePage(
+                                model, tool, style, finger, showText, markdown, backdrop, token, open?.path, syncText,
+                                syncPending || sync.status == SyncStatus.SYNCING, { requestSync() }, { model.showList.value = !showList },
+                                { editingBox = it }, { mathOpen = true }, it.clipToBounds(),
+                            )
+                        }
                     }
                     if (showBook && bookPlacement == "rechts") {
                         BookPane(model, Modifier.width(280.dp).fillMaxHeight(), openBook)
                     }
                 }
-                if (destination == "notes" && split != null) {
-                    Column(Modifier.width(360.dp).fillMaxHeight()) {
-                        Row(Modifier.padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Text("Zweite Spalte", fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-                            TextButton(onClick = { model.splitPath.value = null }) { Text("Schließen") }
-                        }
-                        AndroidView(
-                            modifier = Modifier.weight(1f).fillMaxWidth(),
-                            factory = { context ->
-                                InkSurfaceView(context).apply {
-                                    session = model.splitSession
-                                    onChanged = { model.splitChanged() }
-                                }
-                            },
-                            update = { view ->
-                                view.session = model.splitSession
-                                view.inkTool = tool
-                                view.style = style
-                                view.fingerDraws = finger
-                                view.onChanged = { model.splitChanged() }
-                            },
-                        )
-                    }
+                if (destination == "notes" && split != null && desk["split-orientation"] != "rows") {
+                    SplitPane(model, tool, style, finger, Modifier.width(360.dp).fillMaxHeight())
                 }
                 if (destination == "notes" && wide && desk["outline"] != "off" && !focus) {
                     Box(Modifier.width(240.dp).fillMaxHeight()) { Inspector(model) { model.openPath(it) } }
@@ -356,16 +355,30 @@ fun FaNotesScreen(
             desk["words"] != "off",
             sync.conflicts.size,
             onConflicts = { model.showDestination("settings") },
+            crumbs = if (destination == "notes" && open?.path != null) breadcrumbsFor(open?.path.orEmpty()) else emptyList(),
+            onCrumb = { model.showList.value = true },
         )
     }
     if (palette) {
         AlertDialog(onDismissRequest = { model.paletteOpen.value = false }, confirmButton = {}, text = {
-            CommandPalette(onDismiss = { model.paletteOpen.value = false }) { id ->
+            CommandPalette(
+                onDismiss = { model.paletteOpen.value = false },
+                rankNotes = { model.rankNotes(it) },
+                onOpenNote = { model.openPath(it); model.showDestination("notes") },
+            ) { id ->
                 when (id) {
                     "daily" -> model.openDaily()
                     "split" -> tabs.firstOrNull { it != open?.path }?.let { model.loadSplit(it) }
+                    "split-orient" -> model.toggleSplitOrientation()
                     "focus" -> model.updateDesk("focus", if (desk["focus"] == "on") "off" else "on")
                     "sync" -> requestSync()
+                    "nav-back" -> model.navigateHistory(-1)
+                    "nav-forward" -> model.navigateHistory(1)
+                    "reopen-tab" -> model.reopenClosedTab()
+                    "pin-tab" -> model.togglePinTab()
+                    "close-others" -> model.closeTabs("others")
+                    "close-right" -> model.closeTabs("right")
+                    "cycle-tab" -> model.cycleTabs(1)
                     else -> if (id.startsWith("template-")) model.createFromTemplate(id.removePrefix("template-")) else model.showDestination(id)
                 }
             }
@@ -668,6 +681,59 @@ private fun EditorTools(
         NavigationBarItem(selected = false, onClick = onUndo, enabled = canUndo, icon = { Icon(Icons.AutoMirrored.Filled.Undo, contentDescription = "Rückgängig") }, label = { Text("Zurück") })
         NavigationBarItem(selected = false, onClick = onRedo, enabled = canRedo, icon = { Icon(Icons.AutoMirrored.Filled.Redo, contentDescription = "Wiederholen") }, label = { Text("Vor") })
         NavigationBarItem(selected = textOn, onClick = onText, icon = { Icon(Icons.Filled.Description, contentDescription = "Text") }, label = { Text("Text") })
+    }
+}
+
+@Composable
+private fun NoteWithSplit(
+    rows: Boolean,
+    model: FaNotesViewModel,
+    tool: InkTool,
+    style: ch.fasrv.fanotes.ink.StrokeStyle,
+    finger: Boolean,
+    modifier: Modifier,
+    page: @Composable (Modifier) -> Unit,
+) {
+    if (!rows) {
+        page(modifier)
+        return
+    }
+    Column(modifier) {
+        page(Modifier.weight(1f).fillMaxWidth())
+        SplitPane(model, tool, style, finger, Modifier.fillMaxWidth().height(240.dp))
+    }
+}
+
+@Composable
+private fun SplitPane(
+    model: FaNotesViewModel,
+    tool: InkTool,
+    style: ch.fasrv.fanotes.ink.StrokeStyle,
+    finger: Boolean,
+    modifier: Modifier,
+) {
+    Column(modifier) {
+        Row(Modifier.padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("Zweite Spalte", fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+            TextButton(onClick = { model.toggleSplitOrientation() }) { Text("Drehen") }
+            TextButton(onClick = { model.splitPath.value = null }) { Text("Schließen") }
+        }
+        AndroidView(
+            modifier = Modifier.weight(1f).fillMaxWidth(),
+            factory = { context ->
+                InkSurfaceView(context).apply {
+                    session = model.splitSession
+                    onChanged = { model.splitChanged() }
+                }
+            },
+            update = { view ->
+                view.session = model.splitSession
+                view.inkTool = tool
+                view.style = style
+                view.fingerDraws = finger
+                view.onChanged = { model.splitChanged() }
+            },
+        )
     }
 }
 
