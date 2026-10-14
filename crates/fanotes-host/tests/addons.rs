@@ -527,7 +527,7 @@ fn an_unwritable_addon_folder_reports_the_desktop_open_error() {
         )
         .unwrap_err();
     let prefix = format!(
-        "EACCES: permission denied, open '{}/.main.js.{}.",
+        "EACCES: permission denied, open '{}/main.js.{}.",
         folder.display(),
         std::process::id()
     );
@@ -565,7 +565,7 @@ fn an_unwritable_addon_store_reports_the_desktop_data_open_error() {
         )
         .unwrap_err();
     let prefix = format!(
-        "EACCES: permission denied, open '{}/.margin-notes.data.json.{}.",
+        "EACCES: permission denied, open '{}/margin-notes.data.json.{}.",
         store.display(),
         std::process::id()
     );
@@ -573,4 +573,43 @@ fn an_unwritable_addon_store_reports_the_desktop_data_open_error() {
     assert!(error.ends_with(".tmp'"), "{error}");
     std::fs::set_permissions(&store, std::fs::Permissions::from_mode(0o700)).unwrap();
     assert_eq!(std::fs::read(&data).unwrap(), original);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_directory_named_like_an_addon_file_reports_the_desktop_rename_error() {
+    let (_dir, mut host) = scratch("dir-file");
+    host.dispatch(
+        "fanotes:addons-write-files",
+        &[json!("margin-notes"), json!({ "main.js": "export {}" })],
+    )
+    .unwrap();
+    let folder = host.app_data.join("addons/margin-notes");
+    let script = folder.join("main.js");
+    std::fs::remove_file(&script).unwrap();
+    std::fs::create_dir(&script).unwrap();
+    let error = host
+        .dispatch(
+            "fanotes:addons-write-files",
+            &[json!("margin-notes"), json!({ "main.js": "changed" })],
+        )
+        .unwrap_err();
+    let source_prefix = format!(
+        "EISDIR: illegal operation on a directory, rename '{}.{}",
+        script.display(),
+        std::process::id()
+    );
+    assert!(error.starts_with(&source_prefix), "{error}");
+    assert!(
+        error.ends_with(&format!(".tmp' -> '{}'", script.display())),
+        "{error}"
+    );
+    assert!(script.is_dir());
+    let leftovers: Vec<_> = std::fs::read_dir(&folder)
+        .unwrap()
+        .flatten()
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .filter(|name| name.ends_with(".tmp"))
+        .collect();
+    assert!(leftovers.is_empty(), "{leftovers:?}");
 }
