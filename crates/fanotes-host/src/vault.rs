@@ -71,7 +71,20 @@ fn is_windows_drive_path(value: &str) -> bool {
 }
 
 /// A note path may not follow a symlink, including a symlink directory.
+///
+/// A missing final file is allowed. A `.famd` save uses that to create the
+/// companion after `realpath` of its parent.
 pub fn resolve_note_file(root: &Path, relative: &str) -> Result<PathBuf, String> {
+    resolve_note_path(root, relative, true)
+}
+
+/// `resolveVaultPath` with `allowMissing: false`. The first missing segment
+/// is Node's `lstat` error, not a walk that continues to the final name.
+pub fn resolve_present_note_file(root: &Path, relative: &str) -> Result<PathBuf, String> {
+    resolve_note_path(root, relative, false)
+}
+
+fn resolve_note_path(root: &Path, relative: &str, allow_missing: bool) -> Result<PathBuf, String> {
     let normalized = normalize_relative_path(relative, false, false)?;
     let segments: Vec<&str> = normalized.split('/').collect();
     let mut cursor = root.to_path_buf();
@@ -98,8 +111,10 @@ pub fn resolve_note_file(root: &Path, relative: &str) -> Result<PathBuf, String>
                 return Err("Die gewählte Datei ist keine reguläre Datei.".to_owned());
             }
             Ok(_) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => missing = true,
-            Err(_) => return Err("Die Datei konnte nicht gelesen werden.".to_owned()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound && allow_missing => {
+                missing = true;
+            }
+            Err(error) => return Err(node_lstat_error(&cursor, &error)),
         }
     }
     if let Some(parent) = cursor.parent() {
@@ -306,6 +321,15 @@ fn js_keeps_case(character: char) -> bool {
 
 /// Node `fs.lstat` failure text, including the path that could not be stated.
 pub(crate) fn node_lstat_error(path: &Path, error: &std::io::Error) -> String {
+    node_fs_error(path, error, "lstat")
+}
+
+/// Node `fs.realpath` failure text. A missing parent uses this syscall.
+pub(crate) fn node_realpath_error(path: &Path, error: &std::io::Error) -> String {
+    node_fs_error(path, error, "realpath")
+}
+
+fn node_fs_error(path: &Path, error: &std::io::Error, syscall: &str) -> String {
     #[cfg(unix)]
     let (name, detail) = match error.raw_os_error() {
         Some(libc::ENOENT) => ("ENOENT", "no such file or directory"),
@@ -322,7 +346,7 @@ pub(crate) fn node_lstat_error(path: &Path, error: &std::io::Error) -> String {
         let _ = error;
         ("ENOENT", "no such file or directory")
     };
-    format!("{name}: {detail}, lstat '{}'", path.display())
+    format!("{name}: {detail}, {syscall} '{}'", path.display())
 }
 
 pub fn is_inside_root(root: &Path, candidate: &Path) -> bool {
