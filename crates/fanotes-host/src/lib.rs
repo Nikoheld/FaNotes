@@ -1769,7 +1769,63 @@ fn marker_is_fresh(created_at: &str) -> bool {
     created_ms > now_ms || now_ms - created_ms <= RESET_MAX_AGE_MS
 }
 
+/// `16:00,30` is empty. The comma touches a clock field that already finished.
+/// `16:,30` is 16:30, and `16:00:00.5,1` keeps the fraction.
+fn comma_glued_to_final_clock(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index].is_ascii_digit() && (index == 0 || !bytes[index - 1].is_ascii_digit())
+            && clock_ends_on_comma(bytes, index)
+        {
+            return true;
+        }
+        index += 1;
+    }
+    false
+}
+
+fn clock_ends_on_comma(bytes: &[u8], start: usize) -> bool {
+    let mut index = skip_clock_digits(bytes, start);
+    if index >= bytes.len() || bytes[index] != b':' {
+        return false;
+    }
+    loop {
+        index += 1;
+        if index < bytes.len() && bytes[index] == b':' {
+            index += 1;
+        }
+        if index < bytes.len() && bytes[index] == b'.' {
+            index += 1;
+        }
+        if index >= bytes.len() || !bytes[index].is_ascii_digit() {
+            return false;
+        }
+        index = skip_clock_digits(bytes, index);
+        if index < bytes.len() && bytes[index] == b':' {
+            continue;
+        }
+        if index < bytes.len() && bytes[index] == b'.' {
+            return false;
+        }
+        return index < bytes.len() && bytes[index] == b',';
+    }
+}
+
+fn skip_clock_digits(bytes: &[u8], start: usize) -> usize {
+    let mut index = start;
+    while index < bytes.len() && bytes[index].is_ascii_digit() {
+        index += 1;
+    }
+    index
+}
+
 fn unix_millis_from_iso(value: &str) -> Option<u64> {
+    if comma_glued_to_final_clock(value) {
+        // `16:00,30` finalized the clock and then saw a comma. `16:00 ,30`
+        // has a space first, and `16:00:00.5,1` finalized through the fraction.
+        return None;
+    }
     if value.contains('(') {
         // `(comment)` is skipped, and an unclosed `(` consumes the rest.
         // The mark is a separator: `2026-10-13(EST)` stays local, while
@@ -9714,6 +9770,57 @@ mod local_zone_tests {
         assert_eq!(unix_millis_from_iso("2026-10-13 16:00 +5ä"), None);
         assert_eq!(unix_millis_from_iso("2026-10-13 16:00 GMT+5ä"), None);
         assert_eq!(unix_millis_from_iso("2026-10-13 16:00 ESTö"), None);
+    }
+
+    #[test]
+    fn a_comma_glued_to_a_finished_clock_is_empty() {
+        let _lock = TRASH_CLOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let _restore = RestoreTz(std::env::var_os("TZ"));
+        unsafe { std::env::set_var("TZ", "America/New_York") };
+        unsafe { tzset() };
+        // `16:00,30` finished the clock on the comma. A space before the
+        // comma is an ordinary separator, and a fraction may keep the comma.
+        assert_eq!(unix_millis_from_iso("Oct 13 2026 16:00,30"), None);
+        assert_eq!(unix_millis_from_iso("Oct 13 2026 16:00, 30"), None);
+        assert_eq!(unix_millis_from_iso("Oct 13 16:00,30"), None);
+        assert_eq!(unix_millis_from_iso("Oct 13 2026 16:00,"), None);
+        assert_eq!(unix_millis_from_iso("2026-10-13 16:00,"), None);
+        assert_eq!(unix_millis_from_iso("2026-10-13 16:00,30"), None);
+        assert_eq!(unix_millis_from_iso("Oct 13 2026 16::30,"), None);
+        assert_eq!(unix_millis_from_iso("Oct 13 2026 16:.5,"), None);
+        assert_eq!(unix_millis_from_iso("Oct 13 2026 16:00:30,5"), None);
+        assert_eq!(unix_millis_from_iso("10/13/2026 16:00,30"), None);
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 16:00 ,30"),
+            Some(1_791_921_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 16:00 , 30"),
+            Some(1_791_921_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13, 2026 16:00"),
+            Some(1_791_921_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 16:00:00.5,1"),
+            Some(1_791_921_600_500)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 16:00.05,1"),
+            Some(1_791_921_650_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 4:00 PM,5"),
+            Some(1_791_921_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 16:,30"),
+            Some(1_791_923_400_000)
+        );
+        assert_eq!(unix_millis_from_iso("Oct 13, 2026,"), Some(1_791_864_000_000));
     }
 
     #[test]
