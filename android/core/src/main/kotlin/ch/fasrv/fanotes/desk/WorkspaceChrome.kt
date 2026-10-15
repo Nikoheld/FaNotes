@@ -34,6 +34,29 @@ fun uiFontId(raw: String?): String {
         ?: "inter"
 }
 
+/**
+ * Which note-workspace panels are on screen.
+ * Focus hides both. A wide window uses the sidebar and outline toggles.
+ * A narrow window keeps the existing list toggle and has no outline column.
+ */
+data class NoteWorkspacePanels(val sidebar: Boolean, val inspector: Boolean)
+
+fun noteWorkspacePanels(
+    focus: Boolean,
+    wide: Boolean,
+    showList: Boolean,
+    sidebarOpen: Boolean,
+    inspectorOpen: Boolean,
+    outlineEnabled: Boolean,
+    notes: Boolean,
+): NoteWorkspacePanels {
+    if (!notes || focus) return NoteWorkspacePanels(sidebar = false, inspector = false)
+    return NoteWorkspacePanels(
+        sidebar = if (wide) sidebarOpen else showList,
+        inspector = wide && inspectorOpen && outlineEnabled,
+    )
+}
+
 /** Desktop compact mode is off until the setting is turned on. */
 fun compactChrome(raw: String?) = raw == "on"
 

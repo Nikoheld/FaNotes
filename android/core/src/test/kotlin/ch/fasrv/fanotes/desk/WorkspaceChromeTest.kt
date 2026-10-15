@@ -7,6 +7,15 @@ import kotlin.test.assertTrue
 
 class WorkspaceChromeTest {
     @Test
+    fun theSidebarAndOutlineCanHideWithoutFocusMode() {
+        assertEquals(NoteWorkspacePanels(true, false), noteWorkspacePanels(focus = false, wide = true, showList = true, sidebarOpen = true, inspectorOpen = false, outlineEnabled = true, notes = true))
+        assertEquals(NoteWorkspacePanels(false, true), noteWorkspacePanels(focus = false, wide = true, showList = true, sidebarOpen = false, inspectorOpen = true, outlineEnabled = true, notes = true))
+        assertEquals(NoteWorkspacePanels(false, false), noteWorkspacePanels(focus = true, wide = true, showList = true, sidebarOpen = true, inspectorOpen = true, outlineEnabled = true, notes = true))
+        assertEquals(NoteWorkspacePanels(true, false), noteWorkspacePanels(focus = false, wide = false, showList = true, sidebarOpen = false, inspectorOpen = true, outlineEnabled = true, notes = true))
+        assertEquals(NoteWorkspacePanels(false, false), noteWorkspacePanels(focus = false, wide = true, showList = true, sidebarOpen = true, inspectorOpen = true, outlineEnabled = true, notes = false))
+    }
+
+    @Test
     fun chromeDefaultsMatchTheDesktopShell() {
         assertEquals("clean", workspaceBackground(null))
         assertEquals("clean", workspaceBackground("linen"))

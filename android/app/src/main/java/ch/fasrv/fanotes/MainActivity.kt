@@ -391,6 +391,8 @@ fun FaNotesScreen(
     val finger by model.fingerDraws.collectAsStateWithLifecycle()
     val showText by model.showText.collectAsStateWithLifecycle()
     val showList by model.showList.collectAsStateWithLifecycle()
+    val sidebarOpen by model.sidebarOpen.collectAsStateWithLifecycle()
+    val inspectorOpen by model.inspectorOpen.collectAsStateWithLifecycle()
     val markdown by model.markdown.collectAsStateWithLifecycle()
     val sync by model.sync.collectAsStateWithLifecycle()
     val message by model.message.collectAsStateWithLifecycle()
@@ -526,8 +528,17 @@ fun FaNotesScreen(
         } else {
             DeskRibbon(destination, true, { model.showDestination(it) }, { model.paletteOpen.value = true }, { model.updateDesk("focus", "off") }, { model.openDaily() })
         }
+        val panels = ch.fasrv.fanotes.desk.noteWorkspacePanels(
+            focus = focus,
+            wide = wide,
+            showList = showList,
+            sidebarOpen = sidebarOpen,
+            inspectorOpen = inspectorOpen,
+            outlineEnabled = desk["outline"] != "off",
+            notes = destination == "notes",
+        )
         Row(Modifier.weight(1f).fillMaxWidth()) {
-            if (!focus && (wide || showList) && destination == "notes") {
+            if (panels.sidebar) {
                 VaultPane(
                     modifier = Modifier.width((chrome.sidebarDp ?: ch.fasrv.fanotes.desk.sidebarWidthDp(desk["sidebar-width"])).dp).fillMaxHeight(),
                     tree = filterVaultByTag(tree, tagFilter, tagIndex),
@@ -570,6 +581,7 @@ fun FaNotesScreen(
                     radiusDp = chrome.radiusDp ?: 10,
                     conflicts = sync.conflicts,
                     onResolve = { conflict, choice -> model.resolveConflict(conflict, choice) },
+                    onCollapse = { model.setSidebarOpen(false) },
                 )
             }
             if (focus || wide || !showList || destination != "notes") {
@@ -608,9 +620,9 @@ fun FaNotesScreen(
                         ) {
                                 NotePage(
                                     model, tool, style, finger, showText, markdown, backdrop, token, open?.path, syncText,
-                                    syncPending || sync.status == SyncStatus.SYNCING, { requestSync() }, { model.showList.value = !showList },
+                                    syncPending || sync.status == SyncStatus.SYNCING, { requestSync() }, { model.setSidebarOpen(!(if (wide) sidebarOpen else showList)) },
                                     editWorksheetBox, { mathOpen = true }, it.clipToBounds(),
-                                    showRelations = !(wide && desk["outline"] != "off" && !focus),
+                                    showRelations = !panels.inspector,
                                     onExportPdf = onExportPdf,
                                     onImportSheet = onImportSheet,
                                     onDownload = onDownload,
@@ -627,9 +639,9 @@ fun FaNotesScreen(
                         ) {
                             NotePage(
                                 model, tool, style, finger, showText, markdown, backdrop, token, open?.path, syncText,
-                                syncPending || sync.status == SyncStatus.SYNCING, { requestSync() }, { model.showList.value = !showList },
+                                syncPending || sync.status == SyncStatus.SYNCING, { requestSync() }, { model.setSidebarOpen(!(if (wide) sidebarOpen else showList)) },
                                 editWorksheetBox, { mathOpen = true }, it.clipToBounds(),
-                                showRelations = !(wide && desk["outline"] != "off" && !focus),
+                                showRelations = !panels.inspector,
                                 onExportPdf = onExportPdf,
                                 onImportSheet = onImportSheet,
                                 onDownload = onDownload,
@@ -640,7 +652,7 @@ fun FaNotesScreen(
                         BookPane(model, Modifier.width(280.dp).fillMaxHeight(), openBook)
                     }
                 }
-                if (destination == "notes" && wide && desk["outline"] != "off" && !focus) {
+                if (panels.inspector) {
                     Box(Modifier.width(ch.fasrv.fanotes.desk.rightPanelWidthDp(desk["panel-width"]).dp).fillMaxHeight()) { Inspector(model) { model.openPath(it) } }
                 }
             }
@@ -653,7 +665,12 @@ fun FaNotesScreen(
             sync.conflicts.size,
             onConflicts = { model.showDestination("settings") },
             crumbs = if (destination == "notes" && open?.path != null) breadcrumbsFor(open?.path.orEmpty()) else emptyList(),
-            onCrumb = { model.showList.value = true },
+            onCrumb = {
+                model.showList.value = true
+                model.sidebarOpen.value = true
+            },
+            sidebarOpen = if (wide) sidebarOpen else showList,
+            onToggleSidebar = { model.setSidebarOpen(!(if (wide) sidebarOpen else showList)) },
             notice = message,
             onDismissNotice = { model.message.value = null },
         )
@@ -681,6 +698,8 @@ fun FaNotesScreen(
                         createFolder = true
                     }
                     "focus" -> model.updateDesk("focus", if (desk["focus"] == "on") "off" else "on")
+                    "sidebar" -> model.setSidebarOpen(!(if (wide) sidebarOpen else showList))
+                    "inspector" -> model.toggleInspector()
                     "sync" -> requestSync()
                     "bug-report" -> model.openBugReport()
                     "export-pdf" -> onExportPdf()
@@ -894,10 +913,16 @@ private fun VaultPane(
     compact: Boolean = false,
     rowHeightDp: Int? = null,
     radiusDp: Int = 10,
+    onCollapse: () -> Unit = {},
 ) {
     Column(modifier.background(MaterialTheme.colorScheme.surface).padding(16.dp)) {
-        Text("FaNotes", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
-        Text(vaultLabel, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("FaNotes", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
+                Text(vaultLabel, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
+            }
+            TextButton(onClick = onCollapse) { Text("Einklappen") }
+        }
         Spacer(Modifier.height(12.dp))
         FilledTonalButton(onClick = onSync, modifier = Modifier.fillMaxWidth()) {
             Icon(Icons.Filled.Sync, contentDescription = null)

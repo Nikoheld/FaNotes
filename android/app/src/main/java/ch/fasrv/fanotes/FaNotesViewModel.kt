@@ -184,6 +184,8 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     private var paperViews: Map<String, ch.fasrv.fanotes.desk.PaperViewMemoryEntry> =
         ch.fasrv.fanotes.desk.parsePaperViewMemory(graph.readPaperViews())
     val showList = MutableStateFlow(true)
+    val sidebarOpen = MutableStateFlow(true)
+    val inspectorOpen = MutableStateFlow(false)
     val message = MutableStateFlow<String?>(null)
     val backdrop = MutableStateFlow<List<BackdropSlice>>(emptyList())
     val sync = graph.engine.state.stateIn(viewModelScope, SharingStarted.Eagerly, graph.engine.state.value)
@@ -2276,6 +2278,17 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     private fun rememberLastOpen(path: String) {
         if (path.isEmpty() || deskSettings.value["last-open"] == path) return
         updateDesk("last-open", path)
+    }
+
+    fun setSidebarOpen(open: Boolean) {
+        sidebarOpen.value = open
+        showList.value = open
+    }
+
+    fun toggleInspector() {
+        val next = !inspectorOpen.value
+        inspectorOpen.value = next
+        if (next && deskSettings.value["outline"] == "off") updateDesk("outline", "on")
     }
 
     fun toggleFolder(path: String) {
