@@ -29,3 +29,26 @@ private fun clampDouble(raw: String?, fallback: Double, min: Double, max: Double
     val value = raw?.toDoubleOrNull() ?: fallback
     return value.coerceIn(min, max)
 }
+
+data class PenSettings(
+    val width: Double,
+    val pressure: Boolean,
+    val paper: String,
+    val shapeSnap: Int,
+    val scribble: Int,
+    val color: String,
+)
+
+fun penSettings(settings: Map<String, String>): PenSettings {
+    val width = (settings["pen-width"]?.toDoubleOrNull() ?: 3.5).coerceIn(1.0, 18.0)
+    val paper = settings["paper"]?.takeIf { ch.fasrv.fanotes.famd.isPaperStyle(it) } ?: "dots"
+    val color = settings["pen-color"]?.trim()?.lowercase()?.takeIf { Regex("#[0-9a-f]{6}").matches(it) } ?: "#202333"
+    return PenSettings(
+        width = width,
+        pressure = settings["pressure"] != "off",
+        paper = paper,
+        shapeSnap = (settings["shape-snap"]?.toIntOrNull() ?: 50).coerceIn(0, 100),
+        scribble = (settings["scribble"]?.toIntOrNull() ?: 50).coerceIn(0, 100),
+        color = color,
+    )
+}

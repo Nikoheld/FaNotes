@@ -60,6 +60,7 @@ import ch.fasrv.fanotes.ink.rulerWidth
 import ch.fasrv.fanotes.ink.sampleCompassCircle
 import ch.fasrv.fanotes.ink.scaleTicks
 import ch.fasrv.fanotes.ink.inkStrokeAllowsShapeSnap
+import ch.fasrv.fanotes.ink.detectScribbleErase
 import ch.fasrv.fanotes.ink.isStrokeDwelling
 import ch.fasrv.fanotes.ink.sectionsOf
 import ch.fasrv.fanotes.ink.snapStrokeToShape
@@ -154,6 +155,8 @@ class InkSurfaceView @JvmOverloads constructor(
     var contentWidthPx: Float = 820f
         set(value) { if (field != value) { field = value; paperBlocks = emptyList(); invalidate() } }
     var zoomMax: Float = 3.25f
+    var shapeSnapSensitivity: Int = 50
+    var scribbleSensitivity: Int = 50
         set(value) {
             if (field == value) return
             field = value
@@ -658,10 +661,28 @@ class InkSurfaceView @JvmOverloads constructor(
             else -> {
                 if (!shapeSnapped) trySnapLive()
                 shapeSnapped = false
-                val stroke = current.endStroke(style, nowIso())
-                if (stroke != null) {
-                    invalidateTiles(stroke)
+                val live = current.livePoints
+                val scribble = if (inkTool == InkTool.PEN && live.size >= 8) {
+                    detectScribbleErase(
+                        InkStroke(live, style.baseWidth, style.pressureEnabled, style.color),
+                        current.document.strokes,
+                        sessionWidth(),
+                        sessionHeight(),
+                        scribbleSensitivity,
+                    )
+                } else {
+                    null
+                }
+                if (scribble != null && current.dropStrokes(scribble.indexes.toSet(), nowIso())) {
+                    current.cancelStroke()
+                    invalidateTiles()
                     onChanged()
+                } else {
+                    val stroke = current.endStroke(style, nowIso())
+                    if (stroke != null) {
+                        invalidateTiles(stroke)
+                        onChanged()
+                    }
                 }
             }
         }
@@ -1394,7 +1415,7 @@ class InkSurfaceView @JvmOverloads constructor(
         val current = session ?: return
         if (!inkStrokeAllowsShapeSnap("handwriting", null)) return
         if (style.brush in setOf("marker", "highlighter", "watercolor", "spray", "paintbrush")) return
-        val snapped = snapStrokeToShape(current.livePoints, sessionWidth(), sessionHeight()) ?: return
+        val snapped = snapStrokeToShape(current.livePoints, sessionWidth(), sessionHeight(), shapeSnapSensitivity) ?: return
         current.replaceLive(snapped.points)
         shapeSnapped = true
     }

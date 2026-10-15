@@ -186,6 +186,8 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     private val saveMutex = Mutex()
 
     init {
+        val pen = ch.fasrv.fanotes.desk.penSettings(graph.readDesk())
+        style.value = style.value.copy(baseWidth = pen.width, pressureEnabled = pen.pressure, color = pen.color)
         synchronized(graph.remoteListeners) {
             graph.remoteListeners += { written, _ ->
                 viewModelScope.launch {
@@ -433,6 +435,24 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         updateMarkdown(applyNoteTags(markdown.value, tags))
     }
 
+    fun setPenWidth(width: Double) {
+        val next = width.coerceIn(1.0, 18.0)
+        updateDesk("pen-width", next.toString())
+        style.value = style.value.copy(baseWidth = next)
+    }
+
+    fun setPenPressure(enabled: Boolean) {
+        updateDesk("pressure", if (enabled) "on" else "off")
+        style.value = style.value.copy(pressureEnabled = enabled)
+    }
+
+    fun setPenColor(color: String) {
+        val hex = color.trim().lowercase()
+        if (!Regex("#[0-9a-f]{6}").matches(hex)) return
+        updateDesk("pen-color", hex)
+        style.value = style.value.copy(color = hex)
+    }
+
     fun setPaper(styleId: String) {
         session.setPaperStyle(styleId, isoNow())
         noteChanged()
@@ -476,7 +496,8 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     fun createNote(title: String, parent: String = "") {
         viewModelScope.launch {
             val path = try {
-                withContext(Dispatchers.IO) { graph.store.createMarkdown(parent.trim('/'), title) }
+                val paper = ch.fasrv.fanotes.desk.penSettings(deskSettings.value).paper
+                withContext(Dispatchers.IO) { graph.store.createMarkdown(parent.trim('/'), title, paper = paper) }
             } catch (_: Exception) {
                 message.value = "Eine Notiz mit diesem Namen gibt es schon."
                 return@launch

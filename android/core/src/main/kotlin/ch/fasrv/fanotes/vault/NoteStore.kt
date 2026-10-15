@@ -140,7 +140,7 @@ class NoteStore(private val io: VaultIo) {
         return note.copy(markdown = withMarker, document = document.copy(updatedAt = now), payload = payload, worksheets = worksheetIdsFromMarkdown(withMarker))
     }
 
-    fun createMarkdown(directory: String, title: String, now: String = isoNow()): String {
+    fun createMarkdown(directory: String, title: String, now: String = isoNow(), paper: String = "dots"): String {
         val name = safeNoteName(title)
         val folder = directory.trim('/')
         val path = if (folder.isEmpty()) "$name.md" else "$folder/$name.md"
@@ -148,7 +148,7 @@ class NoteStore(private val io: VaultIo) {
             throw IllegalStateException("A note named $name already exists")
         }
         val body = "# $name\n"
-        val document = newInkDocument(name, "dots", now)
+        val document = newInkDocument(name, paper, now)
         val note = OpenNote(path, NoteKind.MARKDOWN, name, body, document, emptyFamdPayload(now), emptyList(), UUID.randomUUID().toString())
         save(note, document, body, now)
         return path

@@ -161,6 +161,18 @@ class InkSession(document: InkDocument) {
     }
 
     /** Object eraser: drops or splits strokes the nib passes through. */
+    /** Drops the strokes a scribble covered. One undo step restores them. */
+    fun dropStrokes(indexes: Set<Int>, now: String): Boolean {
+        if (indexes.isEmpty() || indexes.none { it in document.strokes.indices }) return false
+        pushUndo()
+        document = document.copy(
+            strokes = document.strokes.filterIndexed { index, _ -> index !in indexes },
+            updatedAt = now,
+        )
+        selection = emptySet()
+        return true
+    }
+
     fun erase(samples: List<StrokePoint>, radiusPagePx: Double, now: String): Boolean {
         beginErase()
         val changed = eraseSamples(samples, radiusPagePx, now)

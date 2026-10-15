@@ -1462,7 +1462,30 @@ fun SettingsScreen(model: FaNotesViewModel, onSync: () -> Unit, onOpenVault: () 
                     EditorSlider("Maximaler Zoom", (metrics.zoomMax * 100).toFloat(), 50f, 600f, 5f, " %") { model.updateDesk("zoom-max", it.toInt().toString()) }
                     EditorSlider("Automatisch speichern", metrics.autosaveMs.toFloat(), 250f, 3000f, 250f, " ms") { model.updateDesk("autosave", it.toInt().toString()) }
                 }
-                "drawing" -> Text("Stift, Radierer, Auswahl, Druck und Papier sitzen auf der Notiz. Der Finger blättert, bis du das in der Leiste umschaltest.")
+                "drawing" -> {
+                    val pen = ch.fasrv.fanotes.desk.penSettings(settings)
+                    Text("Druckempfindlichkeit: ${if (pen.pressure) "an" else "aus"}", modifier = Modifier.clickable { model.setPenPressure(!pen.pressure) })
+                    EditorSlider("Stiftbreite", pen.width.toFloat(), 1f, 18f, 0.5f, " px") { model.setPenWidth(it.toDouble()) }
+                    EditorSlider("Form-Erkennung", pen.shapeSnap.toFloat(), 0f, 100f, 5f, " %") { model.updateDesk("shape-snap", it.toInt().toString()) }
+                    EditorSlider("Durchkritzel-Empfindlichkeit", pen.scribble.toFloat(), 0f, 100f, 5f, " %") { model.updateDesk("scribble", it.toInt().toString()) }
+                    Text("Papier neuer Notizen", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
+                    listOf("dots" to "Punkte", "lines" to "Linien", "grid" to "Karo", "squares" to "Quadrat", "blank" to "Leer", "millimeter" to "Millimeter").forEach { (id, label) ->
+                        Text(
+                            label,
+                            fontWeight = if (pen.paper == id) FontWeight.SemiBold else FontWeight.Normal,
+                            modifier = Modifier.clickable { model.updateDesk("paper", id) }.padding(vertical = 4.dp),
+                        )
+                    }
+                    Text("Stiftfarbe", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
+                    listOf("#202333", "#2457d6", "#d23b4a", "#1f8a4c", "#e2a21b", "#7a4dd6").forEach { color ->
+                        Text(
+                            color,
+                            color = Color(android.graphics.Color.parseColor(color)),
+                            fontWeight = if (pen.color == color) FontWeight.SemiBold else FontWeight.Normal,
+                            modifier = Modifier.clickable { model.setPenColor(color) }.padding(vertical = 4.dp),
+                        )
+                    }
+                }
                 "files" -> {
                     TextButton(onClick = onOpenVault) { Text("Vault-Ordner öffnen") }
                     TextButton(onClick = onPrivate) { Text("Tablet-Vault verwenden") }
