@@ -1081,15 +1081,24 @@ class InkSurfaceView @JvmOverloads constructor(
             val sheet = ch.fasrv.fanotes.desk.boxOnFrame(anchored.box, place, sessionWidth(), sessionHeight())
             val (sx, sy) = normToScreen(sheet.first, sheet.second)
             val boxWidth = (anchored.box.width * place.width * scale).toFloat().coerceAtLeast(48f * scale)
-            val boxHeight = (28f * scale).coerceAtLeast(textPaint.textSize + 8f)
+            val fontSize = (anchored.box.fontSize * scale).toFloat().coerceAtLeast(12f)
+            val chars = ch.fasrv.fanotes.desk.worksheetCharsPerLine(boxWidth, fontSize, scale)
+            val lines = ch.fasrv.fanotes.desk.wrapBoxLines(anchored.box.text.ifEmpty { "Text" }, chars)
+            val lineHeight = fontSize * 1.35f
+            val boxHeight = ch.fasrv.fanotes.desk.worksheetCardHeightPx(anchored.box.text, boxWidth, fontSize, scale)
+            val top = sy - boxHeight + 8f * scale
             cardFill.color = Color.argb(184, 255, 255, 255)
-            canvas.drawRect(sx, sy - boxHeight + 6f * scale, sx + boxWidth, sy + 8f * scale, cardFill)
+            canvas.drawRect(sx, top, sx + boxWidth, sy + 8f * scale, cardFill)
             cardEdge.strokeWidth = max(1f, scale * 0.6f)
-            canvas.drawRect(sx, sy - boxHeight + 6f * scale, sx + boxWidth, sy + 8f * scale, cardEdge)
+            canvas.drawRect(sx, top, sx + boxWidth, sy + 8f * scale, cardEdge)
             cardFill.color = Color.WHITE
             textPaint.color = if (anchored.box.text.isEmpty()) Color.parseColor("#747887") else Color.parseColor("#202333")
-            textPaint.textSize = (anchored.box.fontSize * scale).toFloat().coerceAtLeast(12f)
-            canvas.drawText(anchored.box.text.ifEmpty { "Text" }, sx + 6f * scale, sy, textPaint)
+            textPaint.textSize = fontSize
+            var baseline = top + 6f * scale + fontSize
+            for (line in lines) {
+                canvas.drawText(line, sx + 6f * scale, baseline, textPaint)
+                baseline += lineHeight
+            }
             textPaint.color = Color.parseColor("#252630")
         }
         if (lassoPoints.size > 1) {
@@ -2031,8 +2040,13 @@ class InkSurfaceView @JvmOverloads constructor(
         val width = sessionWidth()
         if (width <= 0.0) return false
         val sheet = ch.fasrv.fanotes.desk.boxOnFrame(anchored.box, place, width, sessionHeight())
-        val boxWidth = anchored.box.width * place.width / width
-        return x >= sheet.first && x <= sheet.first + boxWidth && kotlin.math.abs(y - sheet.second) < 0.04
+        val scale = pixelsPerPageUnit()
+        val boxWidth = (anchored.box.width * place.width * scale).toFloat().coerceAtLeast(48f * scale)
+        val fontSize = (anchored.box.fontSize * scale).toFloat().coerceAtLeast(12f)
+        val card = ch.fasrv.fanotes.desk.worksheetCardHeightPx(anchored.box.text, boxWidth, fontSize, scale)
+        val normHeight = if (sessionHeight() > 0.0) card / (sessionHeight() * scale) else 0.04
+        val boxSpan = anchored.box.width * place.width / width
+        return x >= sheet.first && x <= sheet.first + boxSpan && y >= sheet.second - normHeight && y <= sheet.second + 0.02
     }
 
     private fun commitHighlight() {

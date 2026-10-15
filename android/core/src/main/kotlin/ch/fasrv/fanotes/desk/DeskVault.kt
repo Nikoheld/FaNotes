@@ -612,6 +612,43 @@ fun placeWorksheetTextBox(page: Int, localX: Double, localY: Double, id: String)
 fun worksheetBoxTextError(text: String): String? =
     if (text.indexOf('\u0000') >= 0 || text.length > 20_000) "Ein Arbeitsblatt-Text ist ungültig." else null
 
+/** Wrapped lines for a worksheet text box. Existing line breaks stay. */
+fun wrapBoxLines(text: String, maxChars: Int): List<String> {
+    val width = maxChars.coerceAtLeast(1)
+    if (text.isEmpty()) return listOf("")
+    val lines = mutableListOf<String>()
+    for (paragraph in text.replace("\r\n", "\n").replace('\r', '\n').split('\n')) {
+        if (paragraph.isEmpty()) {
+            lines += ""
+            continue
+        }
+        var rest = paragraph
+        while (rest.length > width) {
+            val space = rest.lastIndexOf(' ', width)
+            val breakAt = if (space > 0) space else width
+            lines += rest.substring(0, breakAt).trimEnd()
+            rest = rest.substring(if (space > 0) space + 1 else breakAt).trimStart()
+            if (rest.isEmpty()) break
+        }
+        if (rest.isNotEmpty()) lines += rest
+    }
+    return lines.ifEmpty { listOf("") }
+}
+
+/** How many characters fit on one line of a worksheet card. */
+fun worksheetCharsPerLine(widthPx: Float, fontSizePx: Float, scale: Float): Int {
+    val font = fontSizePx.coerceAtLeast(1f)
+    val inner = (widthPx - 12f * scale).coerceAtLeast(font)
+    return (inner / (font * 0.52f)).toInt().coerceAtLeast(1)
+}
+
+/** Card height in screen pixels. Line height 1.35 matches the desktop textarea. */
+fun worksheetCardHeightPx(text: String, widthPx: Float, fontSizePx: Float, scale: Float): Float {
+    val font = fontSizePx.coerceAtLeast(1f)
+    val lines = wrapBoxLines(text.ifEmpty { "Text" }, worksheetCharsPerLine(widthPx, font, scale))
+    return (lines.size * font * 1.35f + 10f * scale).coerceAtLeast(38f * scale)
+}
+
 fun parseWorksheetBoxes(json: String): List<WorksheetBox> {
     val root = parseJson(json) as? JsonValue.Obj ?: return emptyList()
     return root.array("textBoxes")?.items.orEmpty().mapNotNull { item ->

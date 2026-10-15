@@ -74,4 +74,14 @@ class DeskVaultTest {
         assertEquals("Schule", defaultNoteParent("Schule", setOf("Eingang", "Schule")))
         assertEquals("", defaultNoteParent("Fehlt", setOf("Eingang")))
     }
+
+    @Test
+    fun worksheetTextWrapsInsideTheCard() {
+        assertEquals(listOf("hello", "world"), wrapBoxLines("hello world", 5))
+        assertEquals(listOf("abcd", "efgh", "ij"), wrapBoxLines("abcdefghij", 4))
+        assertEquals(listOf("one", "two"), wrapBoxLines("one\ntwo", 20))
+        assertEquals(listOf(""), wrapBoxLines("", 8))
+        assertTrue(worksheetCharsPerLine(400f, 16f, 1f) > worksheetCharsPerLine(80f, 16f, 1f))
+        assertTrue(worksheetCardHeightPx("eine lange antwort die umbrechen muss", 80f, 16f, 1f) > worksheetCardHeightPx("kurz", 80f, 16f, 1f))
+    }
 }
