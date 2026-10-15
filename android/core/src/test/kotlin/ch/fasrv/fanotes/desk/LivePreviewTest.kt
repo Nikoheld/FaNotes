@@ -181,4 +181,31 @@ class LivePreviewTest {
         assertFalse(nextOccurrenceShortcut(true, false, false, true, 'd'))
         assertFalse(nextOccurrenceShortcut(true, false, false, false, 'b'))
     }
+
+    @Test
+    fun openDetailsKeepThePictureSourceAndFrame() {
+        val lines = detailsReadingLines("![Tafel](bilder/tafel.png)\n\nText")
+        assertEquals(listOf("image", "paragraph"), lines.map { it.kind })
+        assertEquals("Tafel", lines[0].text)
+        assertEquals("bilder/tafel.png", lines[0].source)
+        assertEquals("", lines[1].source)
+        assertEquals("Tafel\nText", detailsReading("![Tafel](bilder/tafel.png)\n\nText"))
+        val bare = detailsReadingLines("![](ordner/scan.png)")
+        assertEquals("scan.png", bare[0].text)
+        assertEquals("ordner/scan.png", bare[0].source)
+        val web = detailsReadingLines("![Foto](https://example.com/a.png)")
+        assertEquals("https://example.com/a.png", web[0].source)
+        val note = "<details open>\n<summary>Bild</summary>\n![Tafel](bilder/tafel.png)\n</details>"
+        val card = livePreviewMarks(note, 0, 0).first { it.kind == LiveKind.DETAILS_SUMMARY }
+        assertEquals(listOf("image"), card.readingKinds)
+        assertEquals(listOf("bilder/tafel.png"), card.readingSources)
+        assertEquals("Tafel", card.body)
+        assertEquals(240f to 120f, detailsImageFrame(800, 400, 240f))
+        assertEquals(100f to 96f, detailsImageFrame(0, 10, 100f))
+        val tall = detailsImageFrame(10, 1000, 100f)
+        assertEquals(100f * DETAILS_IMAGE_MAX_RATIO, tall.second)
+        assertEquals(8f, tall.first)
+        assertEquals(12f, detailsImageRadius(16f))
+        assertEquals(16f * DETAILS_CARD_FONT * DETAILS_IMAGE_MARGIN_EM, detailsImageMargin(16f))
+    }
 }

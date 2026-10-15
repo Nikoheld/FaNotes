@@ -1,6 +1,8 @@
 package ch.fasrv.fanotes.desk
 
 import ch.fasrv.fanotes.text.PaperKind
+import ch.fasrv.fanotes.text.paperImageCaption
+import ch.fasrv.fanotes.text.paperImageSource
 import ch.fasrv.fanotes.text.tableRows
 
 /**
@@ -48,6 +50,7 @@ data class LiveMark(
     val readingScales: List<Float> = emptyList(),
     val readingHeadings: List<Boolean> = emptyList(),
     val readingKinds: List<String> = emptyList(),
+    val readingSources: List<String> = emptyList(),
 )
 
 /**
@@ -174,6 +177,7 @@ fun livePreviewMarks(text: String, selectionStart: Int, selectionEnd: Int): List
                 readingScales = reading.map { it.scale },
                 readingHeadings = reading.map { it.heading },
                 readingKinds = reading.map { it.kind },
+                readingSources = reading.map { it.source },
             )
         }
     }
@@ -208,7 +212,13 @@ fun livePreviewMarks(text: String, selectionStart: Int, selectionEnd: Int): List
  * Reading text for an open details card. The source stays in the note and is
  * hidden, the same way the desktop card renders the body with MarkdownPreview.
  */
-data class DetailsReadingLine(val text: String, val scale: Float, val heading: Boolean, val kind: String = "paragraph")
+data class DetailsReadingLine(
+    val text: String,
+    val scale: Float,
+    val heading: Boolean,
+    val kind: String = "paragraph",
+    val source: String = "",
+)
 
 /** `.cm-live-details-content .markdown-preview { font-size: .96em }`. */
 const val DETAILS_CARD_FONT = 0.96f
@@ -226,6 +236,39 @@ fun detailsCardEm(kind: PaperKind): Float = when (kind) {
 }
 
 fun detailsCardScale(kind: PaperKind): Float = detailsCardEm(kind) * DETAILS_CARD_FONT
+
+/**
+ * `.markdown-preview img` is a block at most as wide as the card, with its
+ * own aspect ratio, 12px corners, and 1.4em of space above and below.
+ * A picture taller than eight card-widths is scaled down so one image cannot
+ * stretch the editor without a bound.
+ */
+const val DETAILS_IMAGE_MAX_RATIO = 8f
+const val DETAILS_IMAGE_MARGIN_EM = 1.4f
+
+fun detailsImageMargin(textSizePx: Float): Float {
+    val base = if (textSizePx <= 0f) 16f else textSizePx
+    return base * DETAILS_CARD_FONT * DETAILS_IMAGE_MARGIN_EM
+}
+
+fun detailsImageRadius(textSizePx: Float): Float {
+    val base = if (textSizePx <= 0f) 16f else textSizePx
+    return (12f * base / 16f).coerceAtLeast(1f)
+}
+
+fun detailsImageFrame(pixelWidth: Int, pixelHeight: Int, contentPx: Float): Pair<Float, Float> {
+    val column = contentPx.coerceAtLeast(1f)
+    if (pixelWidth <= 0 || pixelHeight <= 0) return column to 96f
+    var frameW = column
+    var frameH = column * pixelHeight.toFloat() / pixelWidth.toFloat()
+    val limit = column * DETAILS_IMAGE_MAX_RATIO
+    if (frameH > limit && frameH > 0f) {
+        val scale = limit / frameH
+        frameW *= scale
+        frameH = limit
+    }
+    return frameW to frameH
+}
 
 /** Block kind drawn inside an open details card, matching the desktop preview. */
 fun detailsReadingKind(kind: PaperKind): String = when (kind) {
@@ -246,6 +289,15 @@ fun detailsReadingLines(body: String): List<DetailsReadingLine> {
     val lines = aiPreviewLines(body).flatMap { line ->
         when (line.kind) {
             PaperKind.RULE -> listOf(DetailsReadingLine("", detailsCardScale(line.kind), false, "rule"))
+            PaperKind.IMAGE -> listOf(
+                DetailsReadingLine(
+                    paperImageCaption(line.text),
+                    detailsCardScale(line.kind),
+                    false,
+                    "image",
+                    paperImageSource(line.text),
+                ),
+            )
             PaperKind.TABLE -> tableRows(line.text).mapIndexedNotNull { index, cells ->
                 val text = cells.joinToString("\u001f") { stripPreviewMarkers(it) }
                 if (text.isBlank()) null

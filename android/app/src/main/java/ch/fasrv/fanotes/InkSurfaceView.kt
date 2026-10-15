@@ -294,6 +294,7 @@ class InkSurfaceView @JvmOverloads constructor(
     private var paperBlocks: List<PaperBlock> = emptyList()
     private var cachedImageEpoch = 0
     private var imageEpoch = 0
+    var onPaperImages: () -> Unit = {}
     var paperImages: Map<String, android.graphics.Bitmap> = emptyMap()
         set(value) {
             if (field == value) return
@@ -301,6 +302,7 @@ class InkSurfaceView @JvmOverloads constructor(
             imageEpoch += 1
             paperBlocks = emptyList()
             invalidate()
+            onPaperImages()
         }
     private val tableLine = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
