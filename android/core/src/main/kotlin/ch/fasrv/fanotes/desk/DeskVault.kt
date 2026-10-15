@@ -452,13 +452,24 @@ fun calendarRange(view: String, anchor: java.time.LocalDate): List<java.time.Loc
         val monday = anchor.minusDays(((anchor.dayOfWeek.value + 6) % 7).toLong())
         (0..6).map { monday.plusDays(it.toLong()) }
     }
-    "agenda" -> (0..27).map { anchor.plusDays(it.toLong()) }
+    "agenda" -> {
+        val start = anchor.minusDays(1)
+        (0..20).map { start.plusDays(it.toLong()) }
+    }
     "month" -> {
         val first = anchor.withDayOfMonth(1)
         val start = first.minusDays(((first.dayOfWeek.value + 6) % 7).toLong())
         (0..41).map { start.plusDays(it.toLong()) }
     }
     else -> emptyList()
+}
+
+/** How far the desktop calendar moves: a week for Woche and Agenda, a month for Monat. */
+fun calendarShift(view: String, anchor: java.time.LocalDate, step: Int): java.time.LocalDate = when (view) {
+    "three" -> anchor.plusDays(3L * step)
+    "week", "agenda" -> anchor.plusDays(7L * step)
+    "month" -> anchor.plusMonths(step.toLong())
+    else -> anchor.plusDays(step.toLong())
 }
 
 /** Month chip: the start clock, then the title. All-day events are the title alone. */
