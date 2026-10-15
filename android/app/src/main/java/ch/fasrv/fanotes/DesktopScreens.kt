@@ -1429,6 +1429,27 @@ fun BookPane(model: FaNotesViewModel, modifier: Modifier = Modifier, onOpen: (St
     val page = pane ?: return
     Column(modifier.padding(8.dp)) {
         Text(page.title, maxLines = 1, fontWeight = FontWeight.SemiBold)
+        if (page.needsPassword) {
+            val rejected by model.bookPasswordRejected.collectAsStateWithLifecycle()
+            var draft by remember(page.bookPath) { mutableStateOf("") }
+            val supported = ch.fasrv.fanotes.desk.pdfPasswordSupported(android.os.Build.VERSION.SDK_INT)
+            Text(ch.fasrv.fanotes.desk.PDF_PASSWORD_TITLE, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
+            if (!supported) {
+                Text(ch.fasrv.fanotes.desk.PDF_PASSWORD_NEEDS_ANDROID_15, fontSize = 13.sp)
+            } else {
+                OutlinedTextField(
+                    draft,
+                    { draft = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                    label = { Text("Passwort") },
+                )
+                if (rejected) Text(ch.fasrv.fanotes.desk.PDF_PASSWORD_WRONG, fontSize = 13.sp, color = MaterialTheme.colorScheme.error)
+                TextButton(onClick = { model.submitBookPassword(draft) }) { Text(ch.fasrv.fanotes.desk.PDF_PASSWORD_ACTION) }
+            }
+            return@Column
+        }
         Text("Seite ${page.page} / ${page.pageCount}", fontSize = 12.sp)
         page.bitmap?.let { bitmap ->
             Image(

@@ -159,6 +159,7 @@ data class BookPaneState(
     val pageCount: Int,
     val bitmap: Bitmap?,
     val title: String,
+    val needsPassword: Boolean = false,
 )
 
 class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
@@ -409,6 +410,8 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     val pdfNeedsPassword = MutableStateFlow(false)
     val pdfPasswordRejected = MutableStateFlow(false)
     private var pdfPassword: String = ""
+    val bookPasswordRejected = MutableStateFlow(false)
+    private val bookPasswords = mutableMapOf<String, String>()
     private var pdfSearchJob: kotlinx.coroutines.Job? = null
     private var pdfTextCache: Pair<String, List<String>>? = null
 
@@ -1322,6 +1325,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
 
     fun turnBook(delta: Int) {
         val current = bookPane.value ?: return
+        if (current.needsPassword || current.pageCount <= 0) return
         val nextPage = (current.page + delta).coerceIn(1, current.pageCount)
         if (nextPage == current.page) return
         viewModelScope.launch {
@@ -1334,6 +1338,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
             }
             val old = bookPane.value?.bitmap
             bookPane.value = next
+            bookPasswordRejected.value = next?.needsPassword == true && bookPasswords[next.bookPath].orEmpty().isNotEmpty()
             if (old != null && old !== next?.bitmap) old.recycle()
             graph.engine.notifyLocalChange()
         }
@@ -1349,6 +1354,21 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
             }
             val old = bookPane.value?.bitmap
             bookPane.value = next
+            bookPasswordRejected.value = next?.needsPassword == true && bookPasswords[next.bookPath].orEmpty().isNotEmpty()
+            if (old != null && old !== next?.bitmap) old.recycle()
+        }
+    }
+
+    fun submitBookPassword(value: String) {
+        val current = bookPane.value ?: return
+        bookPasswords[current.bookPath] = value
+        bookPasswordRejected.value = false
+        val record = books.value.find { it.subjectPath == current.subjectPath } ?: return
+        viewModelScope.launch {
+            val next = withContext(Dispatchers.IO) { renderBookPage(record) }
+            val old = bookPane.value?.bitmap
+            bookPane.value = next
+            bookPasswordRejected.value = next?.needsPassword == true && value.isNotEmpty()
             if (old != null && old !== next?.bitmap) old.recycle()
         }
     }
@@ -1359,7 +1379,8 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         return try {
             file.writeBytes(bytes)
             android.os.ParcelFileDescriptor.open(file, android.os.ParcelFileDescriptor.MODE_READ_ONLY).use { descriptor ->
-                android.graphics.pdf.PdfRenderer(descriptor).use { renderer ->
+                try {
+                openBookPdf(descriptor, record.bookPath).use { renderer ->
                     if (renderer.pageCount == 0) return null
                     val index = (record.lastPage - 1).coerceIn(0, renderer.pageCount - 1)
                     val page = renderer.openPage(index)
@@ -1370,10 +1391,23 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
                     page.close()
                     BookPaneState(record.bookPath, record.subjectPath, index + 1, renderer.pageCount, bitmap, record.bookPath.substringAfterLast('/'))
                 }
+                } catch (error: Exception) {
+                    if (!ch.fasrv.fanotes.desk.pdfNeedsPassword(error.javaClass.simpleName, error.message.orEmpty())) throw error
+                    BookPaneState(record.bookPath, record.subjectPath, record.lastPage.coerceAtLeast(1), 0, null, record.bookPath.substringAfterLast('/'), needsPassword = true)
+                }
             }
         } finally {
             file.delete()
         }
+    }
+
+    private fun openBookPdf(descriptor: android.os.ParcelFileDescriptor, path: String): android.graphics.pdf.PdfRenderer {
+        val password = bookPasswords[path].orEmpty()
+        if (password.isNotEmpty() && android.os.Build.VERSION.SDK_INT >= 35) {
+            val params = android.graphics.pdf.LoadParams.Builder().setPassword(password).build()
+            return android.graphics.pdf.PdfRenderer(descriptor, params)
+        }
+        return android.graphics.pdf.PdfRenderer(descriptor)
     }
 
     fun placeNoteLink(page: Int, x: Double, y: Double, style: String) {
