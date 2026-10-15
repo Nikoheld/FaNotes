@@ -24,7 +24,7 @@ import kotlin.math.abs
  * details block.
  */
 class SplitEditorView(context: Context) : EditText(context) {
-    var onCommit: (String) -> Unit = {}
+    var onVisibleEdit: (String, String) -> Unit = { _, _ -> }
     var accent: Int = 0xFF2A6F97.toInt()
     var showLineNumbers: Boolean = false
         set(value) {
@@ -37,6 +37,7 @@ class SplitEditorView(context: Context) : EditText(context) {
     private var ready = false
     private var downX = 0f
     private var downY = 0f
+    private var editBefore = ""
 
     init {
         background = null
@@ -47,12 +48,14 @@ class SplitEditorView(context: Context) : EditText(context) {
         inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
         setPadding(0, 0, 0, 0)
         addTextChangedListener(object : TextWatcher {
-            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {
+                if (!writing) editBefore = s?.toString().orEmpty()
+            }
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
             override fun afterTextChanged(s: Editable?) {
                 if (!ready) return
                 paintPreview()
-                if (!writing) onCommit(s?.toString().orEmpty())
+                if (!writing) onVisibleEdit(editBefore, s?.toString().orEmpty())
             }
         })
         ready = true
@@ -68,6 +71,7 @@ class SplitEditorView(context: Context) : EditText(context) {
         setText(markdown)
         setSelection(cursor)
         writing = false
+        editBefore = markdown
         paintPreview()
     }
 
@@ -129,7 +133,7 @@ class SplitEditorView(context: Context) : EditText(context) {
         setSelection(start.coerceIn(0, next.length), end.coerceIn(0, next.length))
         writing = false
         paintPreview()
-        onCommit(next)
+        onVisibleEdit(before, next)
         return true
     }
 
