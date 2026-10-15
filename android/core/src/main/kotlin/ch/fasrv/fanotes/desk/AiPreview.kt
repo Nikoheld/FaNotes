@@ -63,9 +63,11 @@ fun detailsPlain(text: String, collapseImages: Boolean = true): Pair<String, Lis
         var guard = 0
         for (match in pattern.findAll(value)) {
             val from = match.range.first
+            val to = match.range.last + 1
             if (from < guard) continue
+            if (kind == "math" && marks.any { it.kind == "code" && from >= it.start && to <= it.end }) continue
             found += match
-            guard = match.range.last + 1
+            guard = to
         }
         if (found.isEmpty()) return
         val builder = StringBuilder()
@@ -98,7 +100,8 @@ fun detailsPlain(text: String, collapseImages: Boolean = true): Pair<String, Lis
     rewrite(LINK, "link", { it.groupValues[1] }, { 1 }, ::linkTarget)
     rewrite(BOLD, "strong", { it.groupValues[2] }, { it.groupValues[1].length })
     rewrite(STRIKE, "strike", { it.groupValues[1] }, { 2 })
-    rewrite(CODE, "code", { it.groupValues[1] }, { 1 })
+    rewrite(CODE, "code", { it.groupValues[2] }, { it.groupValues[1].length })
+    rewrite(MATH, "math", { it.groupValues[1] }, { 1 })
     rewrite(ITALIC_STAR, "emphasis", { it.groupValues[1] }, { 1 })
     rewrite(ITALIC_UNDER, "emphasis", { it.groupValues[1] }, { 1 })
     return value to marks.filter { it.start >= 0 && it.end <= value.length && it.end > it.start }
@@ -141,6 +144,7 @@ private val WIKI = Regex("""\[\[([^\]|\n]+)(?:\|([^\]]+))?]]""")
 private val LINK = Regex("""\[([^\]\n]+)]\([^)\n]*\)""")
 private val BOLD = Regex("""(\*\*|__)(?=\S)(.+?\S)\1""")
 private val STRIKE = Regex("""~~(?=\S)(.+?\S)~~""")
-private val CODE = Regex("""`([^`\n]+)`""")
+private val CODE = Regex("""(`+)([^`\n]+?)\1""")
+private val MATH = Regex("""(?<!\$)\$([^$\n]+?)\$(?!\$)""")
 private val ITALIC_STAR = Regex("""(?<!\*)\*(?!\*)(\S(?:.*?\S)?)\*(?!\*)""")
 private val ITALIC_UNDER = Regex("""(?<!_)_(?!_)(\S(?:.*?\S)?)_(?!_)""")
