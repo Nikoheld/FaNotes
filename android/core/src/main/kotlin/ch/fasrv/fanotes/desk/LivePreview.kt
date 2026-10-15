@@ -1,6 +1,7 @@
 package ch.fasrv.fanotes.desk
 
 import ch.fasrv.fanotes.text.PaperKind
+import ch.fasrv.fanotes.text.tableRows
 
 /**
  * Marks for the desktop editor's live preview.
@@ -237,18 +238,28 @@ fun detailsReadingKind(kind: PaperKind): String = when (kind) {
     PaperKind.CODE -> "code"
     PaperKind.MATH -> "math"
     PaperKind.IMAGE -> "image"
+    PaperKind.TABLE -> "table"
     else -> "paragraph"
 }
 
 fun detailsReadingLines(body: String): List<DetailsReadingLine> {
-    val lines = aiPreviewLines(body).mapNotNull { line ->
-        if (line.kind == PaperKind.RULE) {
-            return@mapNotNull DetailsReadingLine("", detailsCardScale(line.kind), false, "rule")
+    val lines = aiPreviewLines(body).flatMap { line ->
+        when (line.kind) {
+            PaperKind.RULE -> listOf(DetailsReadingLine("", detailsCardScale(line.kind), false, "rule"))
+            PaperKind.TABLE -> tableRows(line.text).mapIndexedNotNull { index, cells ->
+                val text = cells.joinToString("\u001f") { stripPreviewMarkers(it) }
+                if (text.isBlank()) null
+                else DetailsReadingLine(text, detailsCardScale(line.kind), index == 0, "table")
+            }
+            else -> {
+                val plain = aiPreviewLineText(line)
+                if (plain.isBlank()) emptyList()
+                else {
+                    val text = if (line.kind == PaperKind.BULLET) "• $plain" else plain
+                    listOf(DetailsReadingLine(text, detailsCardScale(line.kind), aiPreviewHeading(line.kind), detailsReadingKind(line.kind)))
+                }
+            }
         }
-        val plain = aiPreviewLineText(line)
-        if (plain.isBlank()) return@mapNotNull null
-        val text = if (line.kind == PaperKind.BULLET) "• $plain" else plain
-        DetailsReadingLine(text, detailsCardScale(line.kind), aiPreviewHeading(line.kind), detailsReadingKind(line.kind))
     }
     return if (lines.isEmpty()) {
         listOf(DetailsReadingLine("Dieser Klappbereich ist leer.", DETAILS_CARD_FONT, false))
@@ -258,8 +269,14 @@ fun detailsReadingLines(body: String): List<DetailsReadingLine> {
 }
 
 fun detailsReading(body: String): String {
-    val visible = detailsReadingLines(body).filter { it.kind != "rule" && it.text.isNotBlank() }
-    return if (visible.isEmpty()) "Dieser Klappbereich ist leer." else visible.joinToString("\n") { it.text }
+    val visible = detailsReadingLines(body).mapNotNull { line ->
+        when {
+            line.kind == "rule" || line.text.isBlank() -> null
+            line.kind == "table" -> line.text.split('\u001f').joinToString(" · ")
+            else -> line.text
+        }
+    }
+    return if (visible.isEmpty()) "Dieser Klappbereich ist leer." else visible.joinToString("\n")
 }
 
 /** Adds or removes the `open` attribute on the details block covering [offset]. */

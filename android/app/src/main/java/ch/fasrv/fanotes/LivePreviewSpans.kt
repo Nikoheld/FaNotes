@@ -308,6 +308,28 @@ internal class DetailsSummarySpan(
                         paint.color = PAPER_MATH_INK
                         canvas.drawText(line.removePrefix(mark), textX + paint.measureText(mark), cursor, paint)
                     }
+                    "table" -> {
+                        val cells = line.split('\u001f')
+                        val count = cells.size.coerceAtLeast(1)
+                        val span = ((rect.right - box.padX) - textX) / count
+                        val top = cursor + lineMetrics.ascent
+                        val bottom = cursor + lineMetrics.descent
+                        cells.forEachIndexed { cellIndex, cell ->
+                            val left = textX + cellIndex * span
+                            if (heading) {
+                                paint.style = Paint.Style.FILL
+                                paint.color = PAPER_DETAILS_BUTTON
+                                canvas.drawRect(left, top, left + span, bottom, paint)
+                            }
+                            paint.style = Paint.Style.STROKE
+                            paint.strokeWidth = box.border
+                            paint.color = PAPER_RULE_ARGB
+                            canvas.drawRect(left, top, left + span, bottom, paint)
+                            paint.style = Paint.Style.FILL
+                            paint.color = PAPER_MATH_INK
+                            canvas.drawText(cell, left + previousSize * 0.25f, cursor, paint)
+                        }
+                    }
                     else -> canvas.drawText(line, textX, cursor, paint)
                 }
                 cursor += lineMetrics.descent
