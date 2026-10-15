@@ -25,6 +25,11 @@ import ch.fasrv.fanotes.desk.PAPER_CODE_BACKGROUND
 import ch.fasrv.fanotes.desk.PAPER_QUOTE_INK
 import ch.fasrv.fanotes.desk.PAPER_RULE_ARGB
 import ch.fasrv.fanotes.desk.PAPER_RULE_STRONG_ARGB
+import ch.fasrv.fanotes.desk.layoutDisplayMath
+import ch.fasrv.fanotes.desk.paperMathBorderArgb
+import ch.fasrv.fanotes.desk.paperMathBox
+import ch.fasrv.fanotes.desk.paperMathFillArgb
+import ch.fasrv.fanotes.desk.paperMathInlinePad
 import ch.fasrv.fanotes.desk.paperTableFillArgb
 import ch.fasrv.fanotes.desk.tablePadPx
 import ch.fasrv.fanotes.desk.tableRulePx
@@ -92,7 +97,8 @@ private fun spanFor(mark: LiveMark, readable: Int, accent: Int, textSizePx: Floa
     LiveKind.EMPHASIS -> EmphasisSpan()
     LiveKind.STRIKE -> StrikeSpan()
     LiveKind.CODE -> PaperCodeSpan(paperCodeInkArgb(accent), textSizePx)
-    LiveKind.MATH -> MathSpan()
+    LiveKind.MATH -> PaperInlineMathSpan(textSizePx)
+    LiveKind.MATH_BLOCK -> PaperMathBlockSpan(mark.label, paperMathFillArgb(accent), paperMathBorderArgb(accent), textSizePx)
     LiveKind.LINK -> LinkSpan(readable)
     LiveKind.DETAILS_SUMMARY -> DetailsSummarySpan(mark.label, mark.body)
     LiveKind.TABLE_ROW -> TableRowSpan(paperTableFillArgb(accent), textSizePx)
@@ -458,7 +464,100 @@ internal class PaperCodeSpan(private val ink: Int, private val textSizePx: Float
         paint.strokeWidth = previousStroke
     }
 }
-private class MathSpan : TypefaceSpan("monospace"), LivePreviewSpan
+internal class PaperInlineMathSpan(private val textSizePx: Float) : ReplacementSpan(), LivePreviewSpan {
+    override fun getSize(paint: Paint, text: CharSequence, start: Int, end: Int, fm: Paint.FontMetricsInt?): Int {
+        val extent = measureMath(paint, layoutDisplayMath(text.subSequence(start, end).toString()), textSizePx)
+        val pad = paperMathInlinePad(textSizePx)
+        val drop = textSizePx * 0.08f
+        if (fm != null) {
+            fm.ascent = -(extent.ascent + drop).toInt()
+            fm.descent = (extent.descent + drop).toInt()
+            fm.top = fm.ascent
+            fm.bottom = fm.descent
+        }
+        return (extent.width + pad * 2f).toInt().coerceAtLeast(1)
+    }
+
+    override fun draw(canvas: Canvas, text: CharSequence, start: Int, end: Int, x: Float, top: Int, y: Int, bottom: Int, paint: Paint) {
+        val previous = paint.color
+        paint.color = PAPER_MATH_INK
+        drawMath(canvas, paint, layoutDisplayMath(text.subSequence(start, end).toString()), x + paperMathInlinePad(textSizePx), y + textSizePx * 0.08f, textSizePx)
+        paint.color = previous
+    }
+}
+
+/**
+ * Desktop paper display math: a rounded card in a light accent wash, with the
+ * formula centred. The opening fence is replaced; the source lines collapse.
+ */
+internal class PaperMathBlockSpan(
+    private val source: String?,
+    private val fill: Int,
+    private val border: Int,
+    private val textSizePx: Float,
+) : ReplacementSpan(), LineBackgroundSpan, LivePreviewSpan {
+    override fun getSize(paint: Paint, text: CharSequence, start: Int, end: Int, fm: Paint.FontMetricsInt?): Int {
+        val extent = measureMath(paint, layoutDisplayMath(formula(text, start, end)), textSizePx)
+        val box = paperMathBox(textSizePx)
+        val total = maxOf(extent.height, textSizePx) + box.padY * 2f + box.marginY * 2f
+        if (fm != null) {
+            val half = (total / 2f).toInt().coerceAtLeast(1)
+            fm.ascent = -half
+            fm.descent = half
+            fm.top = fm.ascent
+            fm.bottom = fm.descent
+        }
+        return 1
+    }
+
+    override fun draw(canvas: Canvas, text: CharSequence, start: Int, end: Int, x: Float, top: Int, y: Int, bottom: Int, paint: Paint) = Unit
+
+    override fun drawBackground(
+        canvas: Canvas,
+        paint: Paint,
+        left: Int,
+        right: Int,
+        top: Int,
+        baseline: Int,
+        bottom: Int,
+        text: CharSequence,
+        start: Int,
+        end: Int,
+        lineNumber: Int,
+    ) {
+        if (right <= left) return
+        val box = paperMathBox(textSizePx)
+        val contentTop = top + box.marginY
+        val contentBottom = bottom - box.marginY
+        if (contentBottom <= contentTop) return
+        val rect = RectF(left + box.border, contentTop, right - box.border, contentBottom)
+        val previousColor = paint.color
+        val previousStyle = paint.style
+        val previousStroke = paint.strokeWidth
+        paint.style = Paint.Style.FILL
+        paint.color = fill
+        canvas.drawRoundRect(rect, box.radius, box.radius, paint)
+        paint.style = Paint.Style.STROKE
+        paint.strokeWidth = box.border
+        paint.color = border
+        canvas.drawRoundRect(rect, box.radius, box.radius, paint)
+        val node = layoutDisplayMath(formula(text, start, end))
+        val extent = measureMath(paint, node, textSizePx)
+        val formulaX = left + (right - left - extent.width) / 2f
+        val formulaBaseline = (contentTop + contentBottom) / 2f + (extent.ascent - extent.descent) / 2f
+        paint.style = Paint.Style.FILL
+        paint.color = PAPER_MATH_INK
+        drawMath(canvas, paint, node, formulaX, formulaBaseline, textSizePx)
+        paint.color = previousColor
+        paint.style = previousStyle
+        paint.strokeWidth = previousStroke
+    }
+
+    private fun formula(text: CharSequence, start: Int, end: Int): String =
+        source ?: text.subSequence(start, end).toString()
+}
+
+private const val PAPER_MATH_INK = 0xFF252630.toInt()
 
 private class LinkSpan(private val color: Int) : CharacterStyle(), LivePreviewSpan {
     override fun updateDrawState(paint: android.text.TextPaint) {

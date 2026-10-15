@@ -1704,10 +1704,17 @@ class InkSurfaceView @JvmOverloads constructor(
                     )
                     PaperKind.RULE -> builder.setSpan(PaperThematicRuleSpan(textSize), start, end, 0)
                     PaperKind.CODE -> builder.setSpan(TypefaceSpan("monospace"), start, end, 0)
-                    PaperKind.MATH -> {
-                        builder.setSpan(TypefaceSpan("monospace"), start, end, 0)
-                        builder.setSpan(ForegroundColorSpan(accentSecondary), start, end, 0)
-                    }
+                    PaperKind.MATH -> builder.setSpan(
+                        PaperMathBlockSpan(
+                            null,
+                            ch.fasrv.fanotes.desk.paperMathFillArgb(accentColor),
+                            ch.fasrv.fanotes.desk.paperMathBorderArgb(accentColor),
+                            textSize,
+                        ),
+                        start,
+                        end,
+                        0,
+                    )
                     else -> Unit
                 }
             }

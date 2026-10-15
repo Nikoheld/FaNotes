@@ -24,6 +24,7 @@ enum class LiveKind {
     CODE,
     LINK,
     MATH,
+    MATH_BLOCK,
     DETAILS_SUMMARY,
     TABLE_ROW,
     TABLE_RULE,
@@ -157,6 +158,17 @@ fun livePreviewMarks(text: String, selectionStart: Int, selectionEnd: Int): List
                 concealLine(marks, text, line)
                 hidden += number
             }
+        }
+    }
+    for (block in displayMathBlocks(text)) {
+        if (displayMathIntersects(block, from, to)) continue
+        if ((block.openLine..block.closeLine).any { it in hidden }) continue
+        val host = lines[block.openLine - 1]
+        if (host.to > host.from) marks += LiveMark(host.from, host.to, LiveKind.MATH_BLOCK, block.source)
+        hidden += block.openLine
+        for (number in (block.openLine + 1)..block.closeLine) {
+            concealLine(marks, text, lines[number - 1])
+            hidden += number
         }
     }
     for (line in lines) {
