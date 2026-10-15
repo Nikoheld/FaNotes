@@ -104,7 +104,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlin.math.abs
@@ -2401,6 +2403,11 @@ fun AiScreen(model: FaNotesViewModel) {
                             }
                         }
                         else -> if (line.text.isNotEmpty()) {
+                            val headingBox = if (line.kind == "heading") {
+                                ch.fasrv.fanotes.desk.previewHeadingBox(line.scale, lineIndex == 0)
+                            } else {
+                                null
+                            }
                             PreviewRich(
                                 line.text,
                                 line.inlines,
@@ -2411,10 +2418,17 @@ fun AiScreen(model: FaNotesViewModel) {
                                 codeFill,
                                 codeBorder,
                                 line.kind,
-                                Modifier.previewFootnote(lineIndex),
+                                Modifier
+                                    .padding(
+                                        top = ((base * line.scale) * (headingBox?.marginTopEm ?: 0f)).dp,
+                                        bottom = ((base * line.scale) * (headingBox?.marginBottomEm ?: 0f)).dp,
+                                    )
+                                    .previewFootnote(lineIndex),
                                 color = if (line.kind == "footnote") muted else MaterialTheme.colorScheme.onSurface,
                                 fontWeight = if (line.heading) FontWeight.Bold else FontWeight.Normal,
                                 fontFamily = if (line.kind == "code" || line.kind == "math") FontFamily.Monospace else FontFamily.Default,
+                                letterSpacing = if (headingBox != null) headingBox.trackingEm.em else TextUnit.Unspecified,
+                                lineHeight = if (headingBox != null) (base * line.scale * headingBox.lineHeight).sp else TextUnit.Unspecified,
                                 onTextLayout = { previewLayouts[lineIndex] = it },
                             )
                         }
@@ -2516,6 +2530,8 @@ private fun PreviewRich(
     fontWeight: FontWeight? = null,
     fontFamily: FontFamily? = null,
     textAlign: TextAlign = TextAlign.Start,
+    letterSpacing: TextUnit = TextUnit.Unspecified,
+    lineHeight: TextUnit = TextUnit.Unspecified,
     onTextLayout: (TextLayoutResult) -> Unit = {},
 ) {
     val (expanded, expandedMarks) = ch.fasrv.fanotes.desk.expandFieldSeparators(text, marks)
@@ -2573,6 +2589,8 @@ private fun PreviewRich(
         fontSize = (base * scale).sp,
         fontWeight = fontWeight,
         fontFamily = fontFamily,
+        letterSpacing = letterSpacing,
+        lineHeight = lineHeight,
         textAlign = textAlign,
         inlineContent = chips,
         onTextLayout = onTextLayout,

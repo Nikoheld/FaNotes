@@ -46,6 +46,29 @@ fun aiPreviewReadingScale(kind: PaperKind): Float = when (kind) {
 }
 
 /**
+ * Schön heading rhythm from `.markdown-preview`. Tracking is -0.025em and
+ * the line height is 1.25. Margins are ems of the heading size. The first
+ * block drops its top margin, and the later paper rule clears the h1 rule.
+ */
+data class PreviewHeadingBox(
+    val marginTopEm: Float,
+    val marginBottomEm: Float,
+    val trackingEm: Float,
+    val lineHeight: Float,
+)
+
+fun previewHeadingBox(scale: Float, first: Boolean): PreviewHeadingBox {
+    val (top, bottom) = when {
+        scale >= 2f -> 0f to 0.8f
+        scale >= 1.5f -> 1.65f to 0.62f
+        scale >= 1.2f -> 1.4f to 0.5f
+        scale > 1f -> 1.25f to 0.45f
+        else -> 0f to 0f
+    }
+    return PreviewHeadingBox(if (first) 0f else top, bottom, -0.025f, 1.25f)
+}
+
+/**
  * Turns a table-cell separator into a visible divider and keeps inline marks
  * on the words they styled.
  */
