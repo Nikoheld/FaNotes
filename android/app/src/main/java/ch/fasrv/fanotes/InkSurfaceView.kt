@@ -71,6 +71,12 @@ import ch.fasrv.fanotes.ink.snapAngle
 import ch.fasrv.fanotes.ink.snapRadiusMm
 import ch.fasrv.fanotes.ink.snapToDraftingTools
 import ch.fasrv.fanotes.input.POST_PEN_IGNORE_MS
+import ch.fasrv.fanotes.input.parseTabletButtonMap
+import ch.fasrv.fanotes.input.pointerButtonFromAndroid
+import ch.fasrv.fanotes.input.rejectsUnmappedMouseButton
+import ch.fasrv.fanotes.input.shouldInterceptTabletButton
+import ch.fasrv.fanotes.input.tabletButtonAction
+import ch.fasrv.fanotes.input.tabletButtonIdentityFromPointer
 import ch.fasrv.fanotes.input.PalmState
 import ch.fasrv.fanotes.input.PointerAction
 import ch.fasrv.fanotes.input.PointerSample
@@ -158,6 +164,8 @@ class InkSurfaceView @JvmOverloads constructor(
         set(value) { if (field != value) { field = value; paperBlocks = emptyList(); invalidate() } }
     var zoomMax: Float = 3.25f
     var zoomSpeed: Int = 5
+    /** Desk setting `tablet-buttons`, empty until the factory map is read. */
+    var tabletButtons: String = ""
     var shapeSnapSensitivity: Int = 50
     var scribbleSensitivity: Int = 50
     /** Selection rings, hover, and placed links follow the desktop accent. */
@@ -241,6 +249,9 @@ class InkSurfaceView @JvmOverloads constructor(
     private var palm = PalmState()
     private var inkPointer = MotionEvent.INVALID_POINTER_ID
     private var erasing = false
+    private var tabletPanId = MotionEvent.INVALID_POINTER_ID
+    private var tabletPanX = 0f
+    private var tabletPanY = 0f
     private var selecting = false
     private var movingSelection = false
     private var anchorX = 0.0
@@ -445,12 +456,40 @@ class InkSurfaceView @JvmOverloads constructor(
                 pendingCamera = null
                 val sample = sample(event, index, PointerAction.DOWN)
                 palm = touchPalmState(palm, sample)
+                val asStylus = isPenTool(tool) || (palm.lastStylusAt > 0L && now - palm.lastStylusAt < POST_PEN_IGNORE_MS)
+                val identity = tabletButtonIdentityFromPointer(
+                    pointerButtonFromAndroid(event.getToolType(index), event.buttonState),
+                    asStylus,
+                )
+                val buttonAction = tabletButtonAction(parseTabletButtonMap(tabletButtons), identity)
+                if (identity != null && !shouldInterceptTabletButton(buttonAction)) return true
+                if (identity != null && buttonAction in setOf("none", "undo", "redo", "pan")) {
+                    when (buttonAction) {
+                        "undo" -> if (session?.undo() == true) {
+                            invalidateTiles()
+                            onChanged()
+                        }
+                        "redo" -> if (session?.redo() == true) {
+                            invalidateTiles()
+                            onChanged()
+                        }
+                        "pan" -> {
+                            tabletPanId = id
+                            tabletPanX = event.getX(index)
+                            tabletPanY = event.getY(index)
+                            if (isPenTool(tool)) requestUnbufferedDispatch(event)
+                        }
+                    }
+                    invalidate()
+                    return true
+                }
+                if (rejectsUnmappedMouseButton(identity, event.getToolType(index), event.buttonState)) return true
                 if (isPenTool(tool) || tool == PointerTool.MOUSE || (tool == PointerTool.FINGER && fingerDraws)) {
                     if (shouldRejectFinger(tool, palm, now, fingerDraws)) return true
                     if (inkPointer != MotionEvent.INVALID_POINTER_ID) return true
                     inkPointer = id
                     if (isPenTool(tool)) requestUnbufferedDispatch(event)
-                    beginInk(event, index, tool)
+                    beginInk(event, index, tool, identity, buttonAction)
                 } else if (guideDrag != null) {
                     // A tool already owns this gesture. A second finger does not pan it away.
                 } else if (fingerMayNavigate(palm, now)) {
@@ -469,6 +508,20 @@ class InkSurfaceView @JvmOverloads constructor(
                 }
             }
             MotionEvent.ACTION_MOVE -> {
+                if (tabletPanId != MotionEvent.INVALID_POINTER_ID) {
+                    val panIndex = event.findPointerIndex(tabletPanId)
+                    if (panIndex >= 0) {
+                        val x = event.getX(panIndex)
+                        val y = event.getY(panIndex)
+                        pageLeft += x - tabletPanX
+                        pageTop += y - tabletPanY
+                        tabletPanX = x
+                        tabletPanY = y
+                        invalidate()
+                        publishCamera()
+                    }
+                    return true
+                }
                 if (inkPointer != MotionEvent.INVALID_POINTER_ID) {
                     val inkIndex = event.findPointerIndex(inkPointer)
                     if (inkIndex >= 0) moveInk(event, inkIndex)
@@ -480,6 +533,7 @@ class InkSurfaceView @JvmOverloads constructor(
                 }
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_POINTER_UP, MotionEvent.ACTION_CANCEL -> {
+                if (id == tabletPanId || action == MotionEvent.ACTION_CANCEL) tabletPanId = MotionEvent.INVALID_POINTER_ID
                 if (guideDrag?.pointerId == id || action == MotionEvent.ACTION_CANCEL) guideDrag = null
                 val endingInk = id == inkPointer || action == MotionEvent.ACTION_CANCEL
                 if (endingInk && inkPointer != MotionEvent.INVALID_POINTER_ID) {
@@ -505,11 +559,15 @@ class InkSurfaceView @JvmOverloads constructor(
         return true
     }
 
-    private fun beginInk(event: MotionEvent, index: Int, tool: PointerTool) {
+    private fun beginInk(event: MotionEvent, index: Int, tool: PointerTool, identity: String?, action: String) {
         val current = session ?: return
         onPenActive(true)
         trackNib(event, index)
-        val eraser = tool == PointerTool.ERASER || inkTool == InkTool.ERASER
+        val eraser = when {
+            identity != null && action == "eraser" -> true
+            identity != null -> inkTool == InkTool.ERASER
+            else -> tool == PointerTool.ERASER || inkTool == InkTool.ERASER
+        }
         val (x, y) = screenToNorm(event.getX(index), event.getY(index))
         val sectionHit = sectionsOf(current.document).firstOrNull { y >= it.top && y < it.bodyTop && x < 0.08 }
         when {
@@ -1090,11 +1148,9 @@ class InkSurfaceView @JvmOverloads constructor(
     }
 
     private fun toolOf(event: MotionEvent, index: Int): PointerTool {
-        val buttons = event.buttonState
-        val barrel = buttons and MotionEvent.BUTTON_STYLUS_PRIMARY != 0 || buttons and MotionEvent.BUTTON_STYLUS_SECONDARY != 0
         return when (event.getToolType(index)) {
             MotionEvent.TOOL_TYPE_ERASER -> PointerTool.ERASER
-            MotionEvent.TOOL_TYPE_STYLUS -> if (barrel) PointerTool.ERASER else PointerTool.STYLUS
+            MotionEvent.TOOL_TYPE_STYLUS -> PointerTool.STYLUS
             MotionEvent.TOOL_TYPE_MOUSE -> PointerTool.MOUSE
             MotionEvent.TOOL_TYPE_FINGER -> PointerTool.FINGER
             else -> PointerTool.UNKNOWN

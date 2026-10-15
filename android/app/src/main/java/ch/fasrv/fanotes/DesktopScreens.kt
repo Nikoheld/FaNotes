@@ -1532,6 +1532,23 @@ fun SettingsScreen(model: FaNotesViewModel, onSync: () -> Unit, onOpenVault: () 
                             modifier = Modifier.clickable { model.updateDesk("paper", id) }.padding(vertical = 4.dp),
                         )
                     }
+                    Text("Grafiktablett", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
+                    Text("Belegt die Tasten, die FaNotes vom Stift und vom Tablett empfängt.", fontSize = 12.sp)
+                    val tabletMap = ch.fasrv.fanotes.input.parseTabletButtonMap(settings["tablet-buttons"])
+                    listOf("pen" to "Stift", "tablet" to "Tablett").forEach { (group, title) ->
+                        Text(title, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 4.dp))
+                        ch.fasrv.fanotes.input.TABLET_BUTTON_CONTROLS.filter { it.group == group }.forEach { control ->
+                            val action = tabletMap[control.id].orEmpty()
+                            Text(
+                                "${control.label}: ${ch.fasrv.fanotes.input.TABLET_BUTTON_ACTION_LABELS[action] ?: action}",
+                                modifier = Modifier.clickable {
+                                    val next = tabletMap + (control.id to ch.fasrv.fanotes.input.nextTabletButtonAction(action))
+                                    model.updateDesk("tablet-buttons", ch.fasrv.fanotes.input.serializeTabletButtonMap(next))
+                                }.padding(vertical = 4.dp),
+                            )
+                            Text(control.hint, fontSize = 12.sp)
+                        }
+                    }
                     Text("Stiftfarbe", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
                     listOf("#202333", "#2457d6", "#d23b4a", "#1f8a4c", "#e2a21b", "#7a4dd6").forEach { color ->
                         Text(
