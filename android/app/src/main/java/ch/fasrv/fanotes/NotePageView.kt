@@ -77,15 +77,36 @@ class NotePageView(context: Context) : FrameLayout(context) {
 
         fun redoTyping(): Boolean = restoreHistory(history.redo(text?.toString().orEmpty()))
 
+        fun trackSelection(anchor: Int, head: Int) {
+            if (applyingHistory) return
+            history.noteSelection(anchor, head, text?.length ?: 0, System.currentTimeMillis())
+        }
+
+        fun undoSelectionMove(): Boolean = moveSelectionHistory(history.undoSelection(selectionStart, selectionEnd, text?.length ?: 0))
+
+        fun redoSelectionMove(): Boolean = moveSelectionHistory(history.redoSelection(selectionStart, selectionEnd, text?.length ?: 0))
+
+        private var applyingHistory = false
+
+        private fun moveSelectionHistory(mark: Pair<Int, Int>?): Boolean {
+            if (mark == null) return false
+            applyingHistory = true
+            setSelection(mark.first, mark.second)
+            applyingHistory = false
+            return true
+        }
+
         private fun restoreHistory(edit: ch.fasrv.fanotes.desk.MarkdownEdit?): Boolean {
             if (edit == null) return false
             val origin = text?.toString().orEmpty()
             writing = true
+            applyingHistory = true
             setText(edit.text)
             setSelection(
                 edit.selectionStart.coerceIn(0, edit.text.length),
                 edit.selectionEnd.coerceIn(0, edit.text.length),
             )
+            applyingHistory = false
             writing = false
             editBefore = edit.text
             onVisibleMarkdown(origin, edit.text)
@@ -115,6 +136,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
 
         override fun onSelectionChanged(selStart: Int, selEnd: Int) {
             super.onSelectionChanged(selStart, selEnd)
+            trackSelection(selStart, selEnd)
             invalidate()
             if (previewReady && !paintingPreview) paintLivePreview()
             tags?.onCaretMoved()
@@ -168,21 +190,35 @@ class NotePageView(context: Context) : FrameLayout(context) {
                 }
             }
             if (tags?.onKey(keyCode, event) == true) return true
+            val historyKey = when (keyCode) {
+                KeyEvent.KEYCODE_Z -> "z"
+                KeyEvent.KEYCODE_Y -> "y"
+                KeyEvent.KEYCODE_U -> "u"
+                else -> ""
+            }
             val historyCommand = ch.fasrv.fanotes.desk.editorHistoryCommand(
                 event.isCtrlPressed,
                 event.isShiftPressed,
                 event.isAltPressed,
                 event.isMetaPressed,
-                when (keyCode) {
-                    KeyEvent.KEYCODE_Z -> "z"
-                    KeyEvent.KEYCODE_Y -> "y"
-                    else -> ""
-                },
+                historyKey,
             )
-            if (historyCommand != null) {
+            val selectionCommand = ch.fasrv.fanotes.desk.editorSelectionCommand(
+                event.isCtrlPressed,
+                event.isShiftPressed,
+                event.isAltPressed,
+                event.isMetaPressed,
+                historyKey,
+            )
+            if (historyCommand != null || selectionCommand != null) {
                 if (event.action == KeyEvent.ACTION_DOWN) {
                     tags?.hide()
-                    if (historyCommand == "undo") undoTyping() else redoTyping()
+                    when {
+                        historyCommand == "undo" -> undoTyping()
+                        historyCommand == "redo" -> redoTyping()
+                        selectionCommand == "undo-selection" -> undoSelectionMove()
+                        selectionCommand == "redo-selection" -> redoSelectionMove()
+                    }
                 }
                 return true
             }
