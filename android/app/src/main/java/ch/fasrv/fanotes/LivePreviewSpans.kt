@@ -479,6 +479,7 @@ internal class DetailsSummarySpan(
             val strong = active.any { it.kind == "strong" }
             val emphasis = active.any { it.kind == "emphasis" }
             val code = active.any { it.kind == "code" }
+            val math = active.any { it.kind == "math" }
             val strike = active.any { it.kind == "strike" }
             val link = active.any { it.kind == "link" }
             val bold = strong || ((baseFace?.style ?: 0) and Typeface.BOLD) != 0
@@ -490,7 +491,15 @@ internal class DetailsSummarySpan(
                 emphasis -> Typeface.create(baseFace, Typeface.ITALIC)
                 else -> baseFace
             }
-            if (code) {
+            if (math && !code) {
+                paint.textSize = baseSize
+                paint.style = Paint.Style.FILL
+                paint.color = PAPER_MATH_INK
+                val formula = layoutDisplayMath(segment)
+                val pad = paperMathInlinePad(baseSize)
+                drawMath(canvas, paint, formula, cursor + pad, y + baseSize * 0.08f, baseSize)
+                cursor += measureMath(paint, formula, baseSize).width + pad * 2f
+            } else if (code) {
                 val box = paperCodeBox(baseSize)
                 paint.textSize = box.textPx
                 val width = paint.measureText(segment)

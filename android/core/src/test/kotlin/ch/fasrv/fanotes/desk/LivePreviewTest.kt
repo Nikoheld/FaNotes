@@ -276,4 +276,19 @@ class LivePreviewTest {
         assertEquals("Siehe alt", detailsPlain("Siehe ![alt](bild.png)").first)
         assertEquals("a * b", detailsPlain("a * b", collapseImages = false).first)
     }
+
+    @Test
+    fun inlineMathAndLongerCodeMarksMatchTheEditor() {
+        val line = "Siehe ``wort`` und \$x^2\$"
+        val (plain, marks) = detailsPlain(line)
+        assertEquals("Siehe wort und x^2", plain)
+        val code = marks.single { it.kind == "code" }
+        assertEquals("wort", plain.substring(code.start, code.end))
+        val math = marks.single { it.kind == "math" }
+        assertEquals("x^2", plain.substring(math.start, math.end))
+        val protected = detailsPlain("`\$a\$`")
+        assertEquals("\$a\$", protected.first)
+        assertEquals("code", protected.second.single().kind)
+        assertEquals("y", detailsPlain("\$y\$").first)
+    }
 }

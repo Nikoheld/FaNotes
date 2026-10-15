@@ -1993,6 +1993,7 @@ class InkSurfaceView @JvmOverloads constructor(
                 "emphasis" -> StyleSpan(Typeface.ITALIC)
                 "strike" -> StrikeSpan()
                 "code" -> PaperCodeSpan(codeInk, textSize)
+                "math" -> PaperInlineMathSpan(textSize)
                 "link" -> LinkSpan(readable, textSize)
                 else -> null
             } ?: continue
