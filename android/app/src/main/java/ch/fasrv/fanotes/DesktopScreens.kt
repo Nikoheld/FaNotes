@@ -1078,7 +1078,7 @@ fun BugReportDialog(model: FaNotesViewModel) {
 }
 
 @Composable
-fun FaNotesConfirmDialog(request: PendingConfirm, onConfirm: () -> Unit, onDismiss: () -> Unit) {
+fun FaNotesConfirmDialog(request: PendingConfirm, onConfirm: () -> Unit, onDismiss: () -> Unit, glass: Boolean = false) {
     val cancel = remember { FocusRequester() }
     val confirm = remember { FocusRequester() }
     var focused by remember(request.message) { mutableStateOf(0) }
@@ -1099,7 +1099,7 @@ fun FaNotesConfirmDialog(request: PendingConfirm, onConfirm: () -> Unit, onDismi
             focused = next
             if (next == 0) cancel.requestFocus() else confirm.requestFocus()
             true
-        }) {
+        }, color = if (glass) MaterialTheme.colorScheme.surface.copy(alpha = 0.88f) else MaterialTheme.colorScheme.surface) {
             Column(Modifier.padding(20.dp)) {
                 Text("Achtung", fontSize = 12.sp, color = MaterialTheme.colorScheme.error)
                 Text(request.title, style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(top = 4.dp))
@@ -1448,8 +1448,31 @@ fun SettingsScreen(model: FaNotesViewModel, onSync: () -> Unit, onOpenVault: () 
                     listOf("dark" to "Dunkel", "light" to "Hell", "sepia" to "Sepia").forEach { (id, label) ->
                         Text(label, modifier = Modifier.clickable { model.updateDesk("theme", id) }.padding(vertical = 6.dp), fontWeight = if (settings["theme"] == id || (id == "dark" && settings["theme"] == null)) FontWeight.Bold else FontWeight.Normal)
                     }
-                    listOf("clean", "gradient", "mesh", "paper").forEach { id ->
-                        Text(id, modifier = Modifier.clickable { model.updateDesk("background", id) }.padding(vertical = 4.dp))
+                    Text("Arbeitsflächen-Design", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
+                    val background = ch.fasrv.fanotes.desk.workspaceBackground(settings["background"])
+                    ch.fasrv.fanotes.desk.WORKSPACE_BACKGROUNDS.forEach { (id, label) ->
+                        Text(
+                            label,
+                            fontWeight = if (background == id) FontWeight.SemiBold else FontWeight.Normal,
+                            modifier = Modifier.clickable { model.updateDesk("background", id) }.padding(vertical = 4.dp),
+                        )
+                    }
+                    Text(
+                        "Kompakte Oberfläche: ${if (ch.fasrv.fanotes.desk.compactChrome(settings["compact"])) "an" else "aus"}",
+                        modifier = Modifier.clickable { model.updateDesk("compact", if (ch.fasrv.fanotes.desk.compactChrome(settings["compact"])) "off" else "on") }.padding(vertical = 4.dp),
+                    )
+                    Text(
+                        "Glas-Effekte: ${if (ch.fasrv.fanotes.desk.glassChrome(settings["glass"])) "an" else "aus"}",
+                        modifier = Modifier.clickable { model.updateDesk("glass", if (ch.fasrv.fanotes.desk.glassChrome(settings["glass"])) "off" else "on") }.padding(vertical = 4.dp),
+                    )
+                    Text("Oberflächen-Schrift", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
+                    val uiFont = ch.fasrv.fanotes.desk.uiFontId(settings["ui-font"])
+                    ch.fasrv.fanotes.desk.UI_FONTS.forEach { face ->
+                        Text(
+                            face.label,
+                            fontWeight = if (uiFont == face.id) FontWeight.SemiBold else FontWeight.Normal,
+                            modifier = Modifier.clickable { model.updateDesk("ui-font", face.stack) }.padding(vertical = 4.dp),
+                        )
                     }
                     Text("Akzentfarbe", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
                     val accent = ch.fasrv.fanotes.desk.normalizeAccent(settings["accent"])

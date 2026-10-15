@@ -170,6 +170,15 @@ class InkSurfaceView @JvmOverloads constructor(
             paperBlocks = emptyList()
             invalidate()
         }
+    var workspaceKind: String = "clean"
+
+    fun applyWorkspaceKind(kind: String) {
+        val next = ch.fasrv.fanotes.desk.workspaceBackground(kind)
+        if (workspaceKind == next) return
+        workspaceKind = next
+        setBackgroundColor(android.graphics.Color.TRANSPARENT)
+        invalidate()
+    }
     var editorFontId: String = "jetbrains"
     var editorTypeface: Typeface = Typeface.MONOSPACE
         private set
@@ -849,7 +858,7 @@ class InkSurfaceView @JvmOverloads constructor(
     override fun onDraw(canvas: Canvas) {
         canvas.save()
         canvas.clipRect(0f, 0f, width.toFloat(), height.toFloat())
-        canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), desk)
+        if (workspaceKind == "clean") canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), desk)
         canvas.save()
         if (rotation != 0f) canvas.rotate(rotation, width / 2f, height / 2f)
         val current = session ?: run {
