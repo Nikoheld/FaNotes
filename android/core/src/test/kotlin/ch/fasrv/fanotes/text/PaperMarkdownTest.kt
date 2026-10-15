@@ -44,6 +44,27 @@ class PaperMarkdownTest {
             """.trimIndent(),
         ).single { it.kind == PaperKind.TABLE }
         assertEquals(listOf(listOf("Stichworte", "Notizen"), listOf("Begriff", "Erklärung")), tableRows(table.text))
+        assertEquals(listOf(TableAlign.LEFT, TableAlign.LEFT), tableAlignments(table.text))
+    }
+
+    @Test
+    fun aMarkdownTableKeepsThePreviewColumnAlignment() {
+        val table = paperLines(
+            """
+            | Links | Mitte | Rechts |
+            | :--- | :---: | ---: |
+            | a | b | c |
+            """.trimIndent(),
+        ).single { it.kind == PaperKind.TABLE }
+        assertEquals(listOf(listOf("Links", "Mitte", "Rechts"), listOf("a", "b", "c")), tableRows(table.text))
+        assertEquals(listOf(TableAlign.LEFT, TableAlign.CENTER, TableAlign.RIGHT), tableAlignments(table.text))
+        assertEquals("left\u001fcenter\u001fright", tableAlignWire(table.text))
+        assertEquals(TableAlign.RIGHT, tableAlignAt(tableAlignWire(table.text), 2))
+        assertEquals(TableAlign.LEFT, tableAlignAt("", 0))
+        assertEquals(6f, tableCellOrigin(TableAlign.LEFT, 0f, 100f, 20f, 6f))
+        assertEquals(40f, tableCellOrigin(TableAlign.CENTER, 0f, 100f, 20f, 6f))
+        assertEquals(74f, tableCellOrigin(TableAlign.RIGHT, 0f, 100f, 20f, 6f))
+        assertEquals(6f, tableCellOrigin(TableAlign.RIGHT, 0f, 100f, 200f, 6f))
     }
 
     @Test

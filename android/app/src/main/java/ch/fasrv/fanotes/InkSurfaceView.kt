@@ -101,7 +101,9 @@ import ch.fasrv.fanotes.text.PaperLine
 import ch.fasrv.fanotes.text.paperImageFrame
 import ch.fasrv.fanotes.text.paperImageCaption
 import ch.fasrv.fanotes.text.paperImageSource
+import ch.fasrv.fanotes.text.TableAlign
 import ch.fasrv.fanotes.text.paperLines
+import ch.fasrv.fanotes.text.tableAlignments
 import ch.fasrv.fanotes.text.tableRows
 import kotlin.math.abs
 import kotlin.math.cos
@@ -1817,6 +1819,7 @@ class InkSurfaceView @JvmOverloads constructor(
 
     private fun tableBlock(text: String, scale: Float): PaperBlock.Table {
         val rows = tableRows(text)
+        val aligns = tableAlignments(text)
         val columns = rows.maxOf { it.size }.coerceAtLeast(1)
         val colWidth = TEXT_COLUMN * scale / columns
         val inner = (colWidth - 12f * scale).toInt().coerceAtLeast(1)
@@ -1826,7 +1829,13 @@ class InkSurfaceView @JvmOverloads constructor(
             textPaint.textSize = editorFontPx * scale
             List(columns) { column ->
                 val cell = row.getOrElse(column) { "" }
+                val align = when (aligns.getOrElse(column) { TableAlign.LEFT }) {
+                    TableAlign.CENTER -> Layout.Alignment.ALIGN_CENTER
+                    TableAlign.RIGHT -> Layout.Alignment.ALIGN_OPPOSITE
+                    TableAlign.LEFT -> Layout.Alignment.ALIGN_NORMAL
+                }
                 StaticLayout.Builder.obtain(cell, 0, cell.length, textPaint, inner)
+                    .setAlignment(align)
                     .setIncludePad(false)
                     .setBreakStrategy(Layout.BREAK_STRATEGY_HIGH_QUALITY)
                     .build()

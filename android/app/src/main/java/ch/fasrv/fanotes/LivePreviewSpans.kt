@@ -57,6 +57,8 @@ import ch.fasrv.fanotes.desk.SYNTAX_COMMENT_ARGB
 import ch.fasrv.fanotes.desk.SYNTAX_ESCAPE_ARGB
 import ch.fasrv.fanotes.desk.SourceSyntax
 import ch.fasrv.fanotes.desk.DetailsInline
+import ch.fasrv.fanotes.text.tableAlignAt
+import ch.fasrv.fanotes.text.tableCellOrigin
 import ch.fasrv.fanotes.desk.detailsImageFrame
 import ch.fasrv.fanotes.desk.followedTarget
 import ch.fasrv.fanotes.desk.detailsImageMargin
@@ -427,6 +429,8 @@ internal class DetailsSummarySpan(
                         val span = ((rect.right - box.padX) - textX) / count
                         val top = cursor + lineMetrics.ascent
                         val bottom = cursor + lineMetrics.descent
+                        val alignLine = readingSources.getOrElse(index) { "" }
+                        val pad = previousSize * 0.25f
                         cells.forEachIndexed { cellIndex, cell ->
                             val left = textX + cellIndex * span
                             if (heading) {
@@ -440,15 +444,11 @@ internal class DetailsSummarySpan(
                             canvas.drawRect(left, top, left + span, bottom, paint)
                             paint.style = Paint.Style.FILL
                             paint.color = PAPER_MATH_INK
-                            drawRichText(
-                                canvas,
-                                paint,
-                                cell,
-                                left + previousSize * 0.25f,
-                                cursor,
-                                cellInlines(lineInlines, cells, cellIndex),
-                                paint.typeface,
-                            )
+                            val marks = cellInlines(lineInlines, cells, cellIndex)
+                            val face = paint.typeface
+                            val width = drawRichText(canvas, paint, cell, 0f, cursor, marks, face, measureOnly = true)
+                            val origin = tableCellOrigin(tableAlignAt(alignLine, cellIndex), left, span, width, pad)
+                            drawRichText(canvas, paint, cell, origin, cursor, marks, face)
                         }
                     }
                     else -> drawRichText(canvas, paint, line, textX, cursor, lineInlines, paint.typeface)
@@ -522,11 +522,12 @@ internal class DetailsSummarySpan(
         y: Float,
         marks: List<DetailsInline>,
         baseFace: Typeface?,
-    ) {
-        if (text.isEmpty()) return
+        measureOnly: Boolean = false,
+    ): Float {
+        if (text.isEmpty()) return x
         if (marks.isEmpty()) {
-            canvas.drawText(text, x, y, paint)
-            return
+            if (!measureOnly) canvas.drawText(text, x, y, paint)
+            return x + paint.measureText(text)
         }
         val cuts = sortedSetOf(0, text.length)
         for (mark in marks) {
@@ -565,9 +566,9 @@ internal class DetailsSummarySpan(
                 paint.color = PAPER_MATH_INK
                 val formula = layoutDisplayMath(segment)
                 val pad = paperMathInlinePad(baseSize)
-                drawMath(canvas, paint, formula, cursor + pad, y + baseSize * 0.08f, baseSize)
+                if (!measureOnly) drawMath(canvas, paint, formula, cursor + pad, y + baseSize * 0.08f, baseSize)
                 val width = measureMath(paint, formula, baseSize).width + pad * 2f
-                rememberLink(active, cursor, width, y, paint)
+                if (!measureOnly) rememberLink(active, cursor, width, y, paint)
                 cursor += width
             } else if (code) {
                 val box = paperCodeBox(baseSize)
@@ -575,31 +576,34 @@ internal class DetailsSummarySpan(
                 val width = paint.measureText(segment)
                 val metrics = paint.fontMetrics
                 val rect = RectF(cursor, y + metrics.ascent - box.padY, cursor + width + box.padX * 2f, y + metrics.descent + box.padY)
-                paint.style = Paint.Style.FILL
-                paint.color = PAPER_CODE_BACKGROUND
-                canvas.drawRoundRect(rect, box.radius, box.radius, paint)
-                paint.style = Paint.Style.STROKE
-                paint.strokeWidth = box.border
-                paint.color = PAPER_RULE_ARGB
-                canvas.drawRoundRect(rect, box.radius, box.radius, paint)
-                paint.style = Paint.Style.FILL
-                paint.color = paperCodeInkArgb(accent)
-                canvas.drawText(segment, cursor + box.padX, y, paint)
-                val chip = width + box.padX * 2f
-                rememberLink(active, cursor, chip, y, paint)
-                cursor += chip
+                if (!measureOnly) {
+                    paint.style = Paint.Style.FILL
+                    paint.color = PAPER_CODE_BACKGROUND
+                    canvas.drawRoundRect(rect, box.radius, box.radius, paint)
+                    paint.style = Paint.Style.STROKE
+                    paint.strokeWidth = box.border
+                    paint.color = PAPER_RULE_ARGB
+                    canvas.drawRoundRect(rect, box.radius, box.radius, paint)
+                    paint.style = Paint.Style.FILL
+                    paint.color = paperCodeInkArgb(accent)
+                    canvas.drawText(segment, cursor + box.padX, y, paint)
+                    rememberLink(active, cursor, width + box.padX * 2f, y, paint)
+                }
+                cursor += width + box.padX * 2f
             } else {
                 paint.textSize = baseSize
                 paint.style = Paint.Style.FILL
                 paint.color = if (link) accent else baseColor
-                canvas.drawText(segment, cursor, y, paint)
                 val width = paint.measureText(segment)
-                if (link) {
-                    val offset = paperLinkUnderlineOffset(textSizePx)
-                    val thickness = (textSizePx / 16f).coerceAtLeast(1f)
-                    paint.color = paperLinkUnderlineArgb(accent)
-                    canvas.drawRect(cursor, y + offset, cursor + width, y + offset + thickness, paint)
-                    rememberLink(active, cursor, width, y, paint)
+                if (!measureOnly) {
+                    canvas.drawText(segment, cursor, y, paint)
+                    if (link) {
+                        val offset = paperLinkUnderlineOffset(textSizePx)
+                        val thickness = (textSizePx / 16f).coerceAtLeast(1f)
+                        paint.color = paperLinkUnderlineArgb(accent)
+                        canvas.drawRect(cursor, y + offset, cursor + width, y + offset + thickness, paint)
+                        rememberLink(active, cursor, width, y, paint)
+                    }
                 }
                 cursor += width
             }
@@ -609,6 +613,7 @@ internal class DetailsSummarySpan(
         paint.typeface = baseFace
         paint.isStrikeThruText = baseStrike
         paint.style = Paint.Style.FILL
+        return cursor
     }
 
     private fun imageSlot(index: Int): Bitmap? {
