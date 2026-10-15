@@ -822,7 +822,7 @@ fun FaNotesScreen(
         DeskStatusBar(
             model.wordCountNow(),
             syncText,
-            if (markdown.contains(Regex("[äöüÄÖÜß]"))) "Deutsch" else "DE / EN",
+            ch.fasrv.fanotes.desk.statusLanguageLabel(ch.fasrv.fanotes.desk.detectNoteLanguage(markdown)).orEmpty(),
             desk["words"] != "off",
             sync.conflicts.size,
             onConflicts = { model.showDestination("settings") },

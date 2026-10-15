@@ -270,7 +270,7 @@ fun DeskStatusBar(
             }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text(language, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
+            if (language.isNotBlank()) Text(language, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
             if (showWords) Text("$words Wörter", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
         }
     }
