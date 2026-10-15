@@ -21,4 +21,10 @@ class VaultOrderTest {
         val sorted = names.sortedWith(::compareVaultNames)
         assertEquals(listOf("2", "10", "Äpfel", "note 2", "Note 10", "Ordner"), sorted)
     }
+
+    @Test
+    fun anEmptyTreeUsesTheDesktopMessage() {
+        assertEquals("Noch keine Notizen vorhanden", EMPTY_VAULT_MESSAGE)
+        assertEquals("Erste Notiz erstellen", EMPTY_VAULT_ACTION)
+    }
 }

@@ -1226,7 +1226,20 @@ private fun VaultPane(
         var dropDest by remember { mutableStateOf<String?>(null) }
         val rowBounds = remember { androidx.compose.runtime.mutableStateMapOf<String, TreeRowBox>() }
         var listBounds by remember { mutableStateOf<TreeBox?>(null) }
-        LazyColumn(
+        if (tree.isEmpty()) {
+            Column(
+                Modifier.weight(1f).fillMaxWidth().padding(top = 28.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+            ) {
+                Text(
+                    ch.fasrv.fanotes.desk.EMPTY_VAULT_MESSAGE,
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                )
+                TextButton(onClick = onCreateNote) { Text(ch.fasrv.fanotes.desk.EMPTY_VAULT_ACTION) }
+            }
+        } else LazyColumn(
             Modifier
                 .weight(1f)
                 .padding(top = 8.dp)
