@@ -762,16 +762,24 @@ class NotePageView(context: Context) : FrameLayout(context) {
         val shown = editor.text?.toString().orEmpty()
         val pending = pendingCursor
         if (path != boundPath || shown != visible || pending != null) {
-            val cursor = when {
-                path != boundPath -> visible.length
-                pending != null -> pending.coerceIn(0, visible.length)
-                else -> editor.selectionStart.coerceIn(0, visible.length)
+            val selection = when {
+                path != boundPath -> visible.length to visible.length
+                pending != null -> {
+                    val cursor = pending.coerceIn(0, visible.length)
+                    cursor to cursor
+                }
+                else -> ch.fasrv.fanotes.desk.mapSelectionThroughReplacement(
+                    shown,
+                    visible,
+                    editor.selectionStart,
+                    editor.selectionEnd,
+                )
             }
             pendingCursor = null
             boundPath = path
             writing = true
-            editor.setText(visible)
-            editor.setSelection(cursor)
+            replaceEditorText(shown, visible)
+            editor.setSelection(selection.first, selection.second)
             writing = false
             paintLivePreview()
         }
@@ -789,6 +797,20 @@ class NotePageView(context: Context) : FrameLayout(context) {
             widthBar?.progress = widthProgress(style.baseWidth.toFloat())
         }
         placeEditor()
+    }
+
+    /**
+     * Applies an external note the way the desktop editor does: only the span
+     * that differs is replaced, then the selection is mapped through it.
+     */
+    private fun replaceEditorText(current: String, next: String) {
+        val editable = editor.text
+        val change = ch.fasrv.fanotes.desk.minimalReplacement(current, next)
+        if (editable == null || change.from == 0 && change.to == current.length) {
+            editor.setText(next)
+            return
+        }
+        editable.replace(change.from, change.to.coerceAtMost(editable.length), change.insert)
     }
 
     private var toolSignature = ""

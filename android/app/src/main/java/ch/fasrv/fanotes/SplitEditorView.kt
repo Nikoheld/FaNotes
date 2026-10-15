@@ -154,11 +154,19 @@ class SplitEditorView(context: Context) : EditText(context) {
             paintPreview()
             return
         }
-        val cursor = (pending ?: selectionStart.coerceAtLeast(0)).coerceIn(0, markdown.length)
+        val current = text?.toString().orEmpty()
+        val selection = if (pending != null) {
+            val cursor = pending.coerceIn(0, markdown.length)
+            cursor to cursor
+        } else {
+            ch.fasrv.fanotes.desk.mapSelectionThroughReplacement(current, markdown, selectionStart, selectionEnd)
+        }
         pendingCursor = null
         writing = true
-        setText(markdown)
-        setSelection(cursor)
+        val change = ch.fasrv.fanotes.desk.minimalReplacement(current, markdown)
+        if (change.from == 0 && change.to == current.length) setText(markdown)
+        else text?.replace(change.from, change.to.coerceAtMost(text?.length ?: 0), change.insert)
+        setSelection(selection.first, selection.second)
         writing = false
         editBefore = markdown
         paintPreview()

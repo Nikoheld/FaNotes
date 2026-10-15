@@ -117,7 +117,7 @@ fun applyFoldedEdit(source: String, foldedLines: Set<Int>, previousVisible: Stri
     if (previousVisible == nextVisible) return source
     if (foldedLines.isEmpty()) return nextVisible
     val normalized = normalizeNewlines(source)
-    val change = minimalTextReplacement(previousVisible, nextVisible)
+    val change = minimalReplacement(previousVisible, nextVisible)
     val from = sourceOffsetForVisible(normalized, foldedLines, change.from)
     val to = sourceOffsetForVisible(normalized, foldedLines, change.to)
     return normalized.replaceRange(from, to.coerceAtLeast(from), change.insert)
@@ -126,7 +126,7 @@ fun applyFoldedEdit(source: String, foldedLines: Set<Int>, previousVisible: Stri
 /** Keeps folded headings on the same lines after an edit of the full note. */
 fun shiftFoldedLines(before: String, after: String, foldedLines: Set<Int>): Set<Int> {
     if (foldedLines.isEmpty() || before == after) return foldedLines
-    val change = minimalTextReplacement(before, after)
+    val change = minimalReplacement(before, after)
     val line = before.take(change.from).count { it == '\n' } + 1
     val removed = before.substring(change.from, change.to.coerceAtMost(before.length)).count { it == '\n' }
     val delta = change.insert.count { it == '\n' } - removed
@@ -275,20 +275,3 @@ private fun hiddenMask(text: String, foldedLines: Set<Int>): BooleanArray {
 }
 
 private fun normalizeNewlines(markdown: String) = markdown.replace("\r\n", "\n").replace('\r', '\n')
-
-private data class TextReplacement(val from: Int, val to: Int, val insert: String)
-
-private fun minimalTextReplacement(current: String, next: String): TextReplacement {
-    val limit = minOf(current.length, next.length)
-    var prefix = 0
-    while (prefix < limit && current[prefix] == next[prefix]) prefix += 1
-    if (prefix in 1 until limit && current[prefix].isLowSurrogate()) prefix -= 1
-    var suffix = 0
-    val suffixLimit = limit - prefix
-    while (
-        suffix < suffixLimit &&
-        current[current.length - 1 - suffix] == next[next.length - 1 - suffix]
-    ) suffix += 1
-    if (suffix in 1 until suffixLimit && current[current.length - suffix].isHighSurrogate()) suffix -= 1
-    return TextReplacement(prefix, current.length - suffix, next.substring(prefix, next.length - suffix))
-}
