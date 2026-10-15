@@ -57,7 +57,41 @@ class NotePageView(context: Context) : FrameLayout(context) {
         private var detailsDownX = 0f
         private var detailsDownY = 0f
         private var tabFocusMode = false
+        private val history = ch.fasrv.fanotes.desk.EditorHistory()
+        private var cursorBeforeEdit = 0
         private val activeLinePaint = Paint()
+
+        fun captureCursor() {
+            cursorBeforeEdit = selectionEnd.coerceAtLeast(0)
+        }
+
+        fun resetHistory() {
+            history.reset()
+        }
+
+        fun rememberChange(before: String, after: String, cursorBefore: Int = cursorBeforeEdit) {
+            history.record(before, after, cursorBefore, selectionEnd.coerceAtLeast(0), System.currentTimeMillis())
+        }
+
+        fun undoTyping(): Boolean = restoreHistory(history.undo(text?.toString().orEmpty()))
+
+        fun redoTyping(): Boolean = restoreHistory(history.redo(text?.toString().orEmpty()))
+
+        private fun restoreHistory(edit: ch.fasrv.fanotes.desk.MarkdownEdit?): Boolean {
+            if (edit == null) return false
+            val origin = text?.toString().orEmpty()
+            writing = true
+            setText(edit.text)
+            setSelection(
+                edit.selectionStart.coerceIn(0, edit.text.length),
+                edit.selectionEnd.coerceIn(0, edit.text.length),
+            )
+            writing = false
+            editBefore = edit.text
+            onVisibleMarkdown(origin, edit.text)
+            paintLivePreview()
+            return true
+        }
 
         override fun onDraw(canvas: Canvas) {
             val textLayout = layout
@@ -134,6 +168,24 @@ class NotePageView(context: Context) : FrameLayout(context) {
                 }
             }
             if (tags?.onKey(keyCode, event) == true) return true
+            val historyCommand = ch.fasrv.fanotes.desk.editorHistoryCommand(
+                event.isCtrlPressed,
+                event.isShiftPressed,
+                event.isAltPressed,
+                event.isMetaPressed,
+                when (keyCode) {
+                    KeyEvent.KEYCODE_Z -> "z"
+                    KeyEvent.KEYCODE_Y -> "y"
+                    else -> ""
+                },
+            )
+            if (historyCommand != null) {
+                if (event.action == KeyEvent.ACTION_DOWN) {
+                    tags?.hide()
+                    if (historyCommand == "undo") undoTyping() else redoTyping()
+                }
+                return true
+            }
             if (ch.fasrv.fanotes.desk.togglesEditorTabFocus(
                     event.isCtrlPressed,
                     event.isShiftPressed,
@@ -529,11 +581,13 @@ class NotePageView(context: Context) : FrameLayout(context) {
             if (pasted.isNullOrEmpty() || writing) return false
             val edit = pasteUrlAsMarkdownLink(text?.toString().orEmpty(), selectionStart, selectionEnd, pasted) ?: return false
             val origin = text?.toString().orEmpty()
+            val cursor = selectionEnd.coerceAtLeast(0)
             writing = true
             setText(edit.text)
             setSelection(edit.selectionStart, edit.selectionEnd)
             writing = false
             editBefore = edit.text
+            rememberChange(origin, edit.text, cursor)
             onVisibleMarkdown(origin, edit.text)
             return true
         }
@@ -606,12 +660,15 @@ class NotePageView(context: Context) : FrameLayout(context) {
 
     init {
         tags = HtmlTagAssist(editor) { block ->
+            val origin = editor.text?.toString().orEmpty()
+            val cursor = editor.selectionEnd.coerceAtLeast(0)
             writing = true
             try {
                 block()
             } finally {
                 writing = false
             }
+            editor.rememberChange(origin, editor.text?.toString().orEmpty(), cursor)
         }
         clipChildren = true
         clipToPadding = true
@@ -654,6 +711,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
                     editBefore = s?.toString().orEmpty()
                     changeStart = start
                     changeDeleted = count
+                    editor.captureCursor()
                 }
             }
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
@@ -676,6 +734,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
                         closedBrackets.addAll(bracket.closedAt)
                         val origin = editBefore
                         editBefore = bracket.text
+                        editor.rememberChange(origin, bracket.text)
                         onVisibleMarkdown(origin, bracket.text)
                     } else {
                         val replacement = ch.fasrv.fanotes.desk.markdownEnterReplacement(editBefore, next)
@@ -688,6 +747,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
                             closedBrackets.clear()
                             val origin = editBefore
                             editBefore = replacement.text
+                            editor.rememberChange(origin, replacement.text)
                             onVisibleMarkdown(origin, replacement.text)
                         } else {
                             val inserted = next.length - editBefore.length + changeDeleted
@@ -701,6 +761,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
                             closedBrackets.addAll(
                                 ch.fasrv.fanotes.desk.bracketsOnCursorLine(next, editor.selectionStart, shifted),
                             )
+                            editor.rememberChange(editBefore, next)
                             onVisibleMarkdown(editBefore, next)
                         }
                     }
@@ -783,10 +844,12 @@ class NotePageView(context: Context) : FrameLayout(context) {
             .firstOrNull { offset >= it.from && offset < it.to }
             ?.from
             ?: 0
+        val caret = editor.selectionEnd.coerceAtLeast(0)
         writing = true
         editor.setText(next)
         editor.setSelection(cursor.coerceIn(0, next.length))
         writing = false
+        editor.rememberChange(before, next, caret)
         paintLivePreview()
         onVisibleMarkdown(before, next)
         return true
@@ -808,6 +871,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
         editor.setText(next)
         editor.setSelection(start.coerceIn(0, next.length), end.coerceIn(0, next.length))
         writing = false
+        editor.rememberChange(before, next, end)
         paintLivePreview()
         onVisibleMarkdown(before, next)
         return true
@@ -920,6 +984,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
         }
         if (opened) {
             val visible = ch.fasrv.fanotes.desk.markdownWithFolds(sourceMarkdown, foldedLines)
+            editor.resetHistory()
             writing = true
             editor.setText(visible)
             writing = false
@@ -946,6 +1011,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
             onUnfoldHeading(hiding)
             val visible = ch.fasrv.fanotes.desk.markdownWithFolds(sourceMarkdown, foldedLines)
             val cursor = editor.selectionStart.coerceAtLeast(0).coerceAtMost(visible.length)
+            editor.resetHistory()
             writing = true
             editor.setText(visible)
             editor.setSelection(cursor)
@@ -1017,6 +1083,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
                 )
             }
             pendingCursor = null
+            if (path != boundPath || shown != visible) editor.resetHistory()
             boundPath = path
             writing = true
             replaceEditorText(shown, visible)
