@@ -15,8 +15,10 @@ import android.text.style.LeadingMarginSpan
 import android.text.style.LineBackgroundSpan
 import android.text.style.LineHeightSpan
 import android.text.style.MetricAffectingSpan
+import android.text.style.ForegroundColorSpan
 import android.text.style.ReplacementSpan
 import android.text.style.StyleSpan
+import android.text.style.UnderlineSpan
 import android.text.style.TypefaceSpan
 import ch.fasrv.fanotes.desk.LiveKind
 import ch.fasrv.fanotes.desk.LiveMark
@@ -47,7 +49,12 @@ import ch.fasrv.fanotes.desk.MATCHING_BRACKET_ARGB
 import ch.fasrv.fanotes.desk.NONMATCHING_BRACKET_ARGB
 import ch.fasrv.fanotes.desk.SPECIAL_CHAR_ARGB
 import ch.fasrv.fanotes.desk.bracketHighlight
+import ch.fasrv.fanotes.desk.SYNTAX_ATOM_ARGB
+import ch.fasrv.fanotes.desk.SYNTAX_COMMENT_ARGB
+import ch.fasrv.fanotes.desk.SYNTAX_ESCAPE_ARGB
+import ch.fasrv.fanotes.desk.SourceSyntax
 import ch.fasrv.fanotes.desk.livePreviewMarks
+import ch.fasrv.fanotes.desk.sourceSyntaxMarks
 import ch.fasrv.fanotes.desk.specialCharMarks
 import ch.fasrv.fanotes.desk.paperAccentReadableArgb
 import ch.fasrv.fanotes.desk.quoteMargins
@@ -79,6 +86,12 @@ fun applyLivePreview(
         if (start == end) continue
         editable.setSpan(spanFor(mark, readable, accent, textSizePx), start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
     }
+    for (mark in sourceSyntaxMarks(editable.toString(), selectionStart, selectionEnd)) {
+        val start = mark.start.coerceIn(0, length)
+        val end = mark.end.coerceIn(start, length)
+        if (start == end) continue
+        editable.setSpan(syntaxSpan(mark.style), start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+    }
     if (focused && selectionStart == selectionEnd) {
         val highlight = bracketHighlight(editable.toString(), selectionStart)
         if (highlight != null) {
@@ -103,6 +116,23 @@ fun applyLivePreview(
         editable.setSpan(SelectionMatchSpan(), from, to, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
     }
 }
+
+private fun syntaxSpan(style: SourceSyntax): Any = when (style) {
+    SourceSyntax.HEADING -> SyntaxUnderlineSpan()
+    SourceSyntax.STRONG -> SyntaxBoldSpan()
+    SourceSyntax.EMPHASIS -> SyntaxItalicSpan()
+    SourceSyntax.ATOM -> SyntaxColorSpan(SYNTAX_ATOM_ARGB)
+    SourceSyntax.COMMENT -> SyntaxColorSpan(SYNTAX_COMMENT_ARGB)
+    SourceSyntax.ESCAPE -> SyntaxColorSpan(SYNTAX_ESCAPE_ARGB)
+}
+
+private class SyntaxUnderlineSpan : UnderlineSpan(), LivePreviewSpan
+
+private class SyntaxBoldSpan : StyleSpan(Typeface.BOLD), LivePreviewSpan
+
+private class SyntaxItalicSpan : StyleSpan(Typeface.ITALIC), LivePreviewSpan
+
+private class SyntaxColorSpan(color: Int) : ForegroundColorSpan(color), LivePreviewSpan
 
 private fun paintBracket(editable: Editable, index: Int, color: Int, length: Int) {
     val from = index.coerceIn(0, length)
