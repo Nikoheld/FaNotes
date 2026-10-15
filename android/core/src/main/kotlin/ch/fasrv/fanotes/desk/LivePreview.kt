@@ -68,6 +68,54 @@ fun selectionMatchRanges(
     return hits
 }
 
+/**
+ * The desktop Mod-d command for one selection.
+ * A cursor expands to the surrounding word. A selection jumps to the next copy,
+ * and wraps. A selection that is itself a whole word only lands on whole words.
+ */
+fun nextEditorOccurrence(text: String, selectionStart: Int, selectionEnd: Int): Pair<Int, Int>? {
+    val forward = selectionEnd >= selectionStart
+    val from = minOf(selectionStart, selectionEnd).coerceIn(0, text.length)
+    val to = maxOf(selectionStart, selectionEnd).coerceIn(from, text.length)
+    if (from == to) return editorWordRange(text, from)
+    val query = text.substring(from, to)
+    if (query.isEmpty()) return null
+    val head = if (forward) to else from
+    val around = editorWordRange(text, head)
+    val wholeWord = around != null && around.first == from && around.second == to
+    fun acceptable(start: Int): Boolean {
+        if (!wholeWord) return true
+        val word = editorWordRange(text, start)
+        return word != null && word.first == start && word.second == start + query.length
+    }
+    fun scan(startAt: Int, stopBefore: Int): Pair<Int, Int>? {
+        var cursor = startAt
+        while (cursor < stopBefore) {
+            val index = text.indexOf(query, cursor)
+            if (index < 0 || index >= stopBefore) return null
+            if (acceptable(index)) return index to index + query.length
+            cursor = (index + query.length).coerceAtLeast(cursor + 1)
+        }
+        return null
+    }
+    return scan(to, text.length + 1) ?: scan(0, from)
+}
+
+/** The word touching [offset], using the desktop word classes: letters, digits, and `_`. */
+fun editorWordRange(text: String, offset: Int): Pair<Int, Int>? {
+    if (text.isEmpty()) return null
+    val pos = offset.coerceIn(0, text.length)
+    var start = pos
+    var end = pos
+    while (start > 0 && isEditorWordChar(text[start - 1])) start -= 1
+    while (end < text.length && isEditorWordChar(text[end])) end += 1
+    if (start == end) return null
+    return start to end
+}
+
+private fun isEditorWordChar(ch: Char): Boolean =
+    ch == '_' || Character.isLetter(ch) || Character.isDigit(ch)
+
 /** One `<details>` block, in the same shape the desktop editor folds into a widget. */
 data class DetailsBlock(
     val from: Int,
