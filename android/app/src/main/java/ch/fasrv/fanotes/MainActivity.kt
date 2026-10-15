@@ -1763,6 +1763,7 @@ private fun SplitPane(
                     editor.showLineNumbers = metrics.showLineNumbers
                     editor.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, metrics.fontSizePx.toFloat())
                     editor.setLineSpacing(0f, metrics.lineHeight.toFloat())
+                    applyPaperCaret(editor, editor.accent, metrics.fontSizePx.toFloat())
                     editor.foldMarkers = ch.fasrv.fanotes.desk.foldMarkerGlyphs(markdown, folded)
                     editor.foldSource = markdown
                     editor.foldState = folded

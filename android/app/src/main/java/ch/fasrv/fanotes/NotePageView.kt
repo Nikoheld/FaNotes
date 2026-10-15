@@ -1411,6 +1411,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
         val scale = ink.cameraScale().coerceAtLeast(0.2f)
         editor.setTextSize(TypedValue.COMPLEX_UNIT_PX, ink.editorFontPx * scale)
         editor.setLineSpacing(0f, ink.editorLineHeight)
+        applyPaperCaret(editor, ink.accentColor, ink.editorFontPx * scale)
         editor.highlightColor = selectionWashArgb(ink.accentColor)
         val x = (ink.cameraLeft() + 72f * scale).toInt()
         val y = (ink.cameraTop() + 78f * scale).toInt()

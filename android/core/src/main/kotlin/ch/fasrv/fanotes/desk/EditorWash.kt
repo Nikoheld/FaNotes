@@ -85,6 +85,12 @@ fun paperTaskBox(textSizePx: Float): PaperTaskBox {
     )
 }
 
+/** Desktop editor caret is a 2px accent bar, and it scales with the editor font. */
+fun paperCaretWidthPx(textSizePx: Float): Int {
+    val base = if (textSizePx <= 0f) 16f else textSizePx
+    return kotlin.math.round(2f * base / 16f).toInt().coerceAtLeast(1)
+}
+
 /** Bullet marker weight from the paper stylesheet. */
 const val PAPER_BULLET_WEIGHT = 800
 
