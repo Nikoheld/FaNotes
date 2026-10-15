@@ -15,7 +15,9 @@ import android.view.inputmethod.InputConnectionWrapper
 import android.widget.EditText
 import ch.fasrv.fanotes.desk.editorLineNumberLabels
 import ch.fasrv.fanotes.desk.findDetailsBlocks
+import ch.fasrv.fanotes.desk.copyMarkdownLines
 import ch.fasrv.fanotes.desk.indentMarkdownLines
+import ch.fasrv.fanotes.desk.moveMarkdownLines
 import ch.fasrv.fanotes.desk.pasteUrlAsMarkdownLink
 import ch.fasrv.fanotes.desk.lineNumberColumnPx
 import ch.fasrv.fanotes.desk.lineStartOffsets
@@ -159,11 +161,34 @@ class SplitEditorView(context: Context) : EditText(context) {
     }
 
     override fun onKeyPreIme(keyCode: Int, event: KeyEvent): Boolean {
+        if (event.isAltPressed && !event.isCtrlPressed && !event.isMetaPressed &&
+            (keyCode == KeyEvent.KEYCODE_DPAD_UP || keyCode == KeyEvent.KEYCODE_DPAD_DOWN)
+        ) {
+            if (event.action == KeyEvent.ACTION_DOWN) {
+                val forward = keyCode == KeyEvent.KEYCODE_DPAD_DOWN
+                val edit = if (event.isShiftPressed) {
+                    copyMarkdownLines(text?.toString().orEmpty(), selectionStart, selectionEnd, forward)
+                } else {
+                    moveMarkdownLines(text?.toString().orEmpty(), selectionStart, selectionEnd, forward)
+                }
+                applyLineEdit(edit)
+            }
+            return true
+        }
         if (keyCode == KeyEvent.KEYCODE_TAB && !event.isCtrlPressed && !event.isAltPressed && !event.isMetaPressed) {
             if (event.action == KeyEvent.ACTION_DOWN) indentSelection(event.isShiftPressed)
             return true
         }
         return super.onKeyPreIme(keyCode, event)
+    }
+
+    private fun applyLineEdit(edit: ch.fasrv.fanotes.desk.MarkdownEdit?) {
+        if (writing || edit == null) return
+        setText(edit.text)
+        setSelection(
+            edit.selectionStart.coerceIn(0, edit.text.length),
+            edit.selectionEnd.coerceIn(0, edit.text.length),
+        )
     }
 
     private fun indentSelection(outdent: Boolean) {

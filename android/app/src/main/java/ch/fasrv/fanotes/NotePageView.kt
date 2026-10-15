@@ -20,7 +20,9 @@ import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
 import android.widget.SeekBar
 import android.widget.TextView
+import ch.fasrv.fanotes.desk.copyMarkdownLines
 import ch.fasrv.fanotes.desk.indentMarkdownLines
+import ch.fasrv.fanotes.desk.moveMarkdownLines
 import ch.fasrv.fanotes.desk.pasteUrlAsMarkdownLink
 import ch.fasrv.fanotes.ink.DraftingKind
 import ch.fasrv.fanotes.ink.InkTool
@@ -78,11 +80,37 @@ class NotePageView(context: Context) : FrameLayout(context) {
         }
 
         override fun onKeyPreIme(keyCode: Int, event: KeyEvent): Boolean {
+            if (event.isAltPressed && !event.isCtrlPressed && !event.isMetaPressed &&
+                (keyCode == KeyEvent.KEYCODE_DPAD_UP || keyCode == KeyEvent.KEYCODE_DPAD_DOWN)
+            ) {
+                if (event.action == KeyEvent.ACTION_DOWN) {
+                    val forward = keyCode == KeyEvent.KEYCODE_DPAD_DOWN
+                    if (event.isShiftPressed) copySelection(forward) else moveSelection(forward)
+                }
+                return true
+            }
             if (keyCode == KeyEvent.KEYCODE_TAB && !event.isCtrlPressed && !event.isAltPressed && !event.isMetaPressed) {
                 if (event.action == KeyEvent.ACTION_DOWN) indentSelection(event.isShiftPressed)
                 return true
             }
             return super.onKeyPreIme(keyCode, event)
+        }
+
+        fun moveSelection(forward: Boolean) {
+            applyLineEdit(moveMarkdownLines(text?.toString().orEmpty(), selectionStart, selectionEnd, forward))
+        }
+
+        fun copySelection(forward: Boolean) {
+            applyLineEdit(copyMarkdownLines(text?.toString().orEmpty(), selectionStart, selectionEnd, forward))
+        }
+
+        private fun applyLineEdit(edit: ch.fasrv.fanotes.desk.MarkdownEdit?) {
+            if (writing || edit == null) return
+            setText(edit.text)
+            setSelection(
+                edit.selectionStart.coerceIn(0, edit.text.length),
+                edit.selectionEnd.coerceIn(0, edit.text.length),
+            )
         }
 
         fun indentSelection(outdent: Boolean) {
@@ -555,6 +583,11 @@ class NotePageView(context: Context) : FrameLayout(context) {
         editor.indentSelection(outdent)
     }
 
+    private fun moveLines(forward: Boolean) {
+        if (!textMode) setTextMode(true)
+        editor.moveSelection(forward)
+    }
+
     private fun format(action: String) {
         val start = editor.selectionStart.coerceAtLeast(0)
         val end = editor.selectionEnd.coerceAtLeast(start)
@@ -674,6 +707,8 @@ class NotePageView(context: Context) : FrameLayout(context) {
             ).forEach { (action, label) -> tools.addView(chip(label) { format(action) }) }
             tools.addView(chip("Einzug") { indentLines(false) })
             tools.addView(chip("Ausrücken") { indentLines(true) })
+            tools.addView(chip("Zeile hoch") { moveLines(false) })
+            tools.addView(chip("Zeile runter") { moveLines(true) })
         }
         tools.addView(guideChip("Lineal", DraftingKind.RULER))
         tools.addView(guideChip("Geodreieck", DraftingKind.SET_SQUARE))
