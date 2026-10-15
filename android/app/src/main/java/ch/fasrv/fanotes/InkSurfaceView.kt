@@ -144,6 +144,8 @@ class InkSurfaceView @JvmOverloads constructor(
     var onStroke: (ch.fasrv.fanotes.ink.InkStroke) -> Unit = {}
     var onErased: (Int) -> Unit = {}
     var onInkNotice: (InkNotice) -> Unit = {}
+    var onDismissInkNotice: () -> Unit = {}
+    var onWorksheetTool: (Boolean, Boolean) -> Unit = { _, _ -> }
     var onSelection: (Int) -> Unit = {}
     var onPageGrew: (Double, Double, Double, Double, Double, Double) -> Unit = { _, _, _, _, _, _ -> }
     var onPenSample: (Double, Double) -> Unit = { _, _ -> }
@@ -173,6 +175,22 @@ class InkSurfaceView @JvmOverloads constructor(
         }
     var placingHighlight = false
     var placingText = false
+
+    fun armWorksheetText(enabled: Boolean) {
+        placingText = enabled
+        if (enabled) placingHighlight = false
+        publishWorksheetTool()
+    }
+
+    fun armWorksheetHighlight(enabled: Boolean) {
+        placingHighlight = enabled
+        if (enabled) placingText = false
+        publishWorksheetTool()
+    }
+
+    private fun publishWorksheetTool() {
+        onWorksheetTool(placingText, placingHighlight)
+    }
     var onPlaceBox: (String, Int, Double, Double) -> Unit = { _, _, _, _ -> }
     var onPlaceHighlight: (String, ch.fasrv.fanotes.desk.WorksheetHighlight) -> Unit = { _, _ -> }
     var onRemoveHighlight: (String) -> Unit = {}
@@ -821,7 +839,7 @@ class InkSurfaceView @JvmOverloads constructor(
                     val local = pointOnFrame(x, y, frame, width, height)
                     if (local != null) {
                         onPlaceBox(frame.id, frame.page, local.first, local.second)
-                        placingText = false
+                        armWorksheetText(false)
                     }
                 }
                 onPenActive(false)
@@ -925,7 +943,6 @@ class InkSurfaceView @JvmOverloads constructor(
         onPenActive(false)
         if (highlighting) {
             highlighting = false
-            placingHighlight = false
             if (!cancel) commitHighlight()
             invalidate()
             return

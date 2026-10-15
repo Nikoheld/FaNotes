@@ -88,4 +88,12 @@ class WorksheetLayoutTest {
         assertNull(worksheetBoxTextError("Hallo"))
         assertEquals("Ein Arbeitsblatt-Text ist ungültig.", worksheetBoxTextError("a".repeat(20_001)))
     }
+
+    @Test
+    fun worksheetToolsShowTheDesktopHintWhileArmed() {
+        assertEquals(null, worksheetPlaceHint(false, false))
+        assertEquals(WORKSHEET_TEXT_HINT, worksheetPlaceHint(true, false))
+        assertEquals(WORKSHEET_HIGHLIGHT_HINT, worksheetPlaceHint(false, true))
+        assertEquals(WORKSHEET_HIGHLIGHT_HINT, worksheetPlaceHint(true, true))
+    }
 }
