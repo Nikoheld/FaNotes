@@ -96,5 +96,7 @@ class EditorMetricsTest {
         assertEquals(listOf(0), lineStartOffsets(""))
         assertEquals(listOf(0, 2), lineStartOffsets("a\n"))
         assertEquals(listOf("1", "2"), editorLineNumberLabels("a\nb"))
+        assertEquals(18, lineNumberColumnPx("a\nb", 10f, 18))
+        assertEquals(186, lineNumberColumnPx((1..100).joinToString("\n") { "x" }, 100f, 18))
     }
 }

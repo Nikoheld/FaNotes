@@ -61,6 +61,12 @@ fun lineStartOffsets(text: String): List<Int> {
 fun editorLineNumberLabels(text: String): List<String> =
     lineStartOffsets(text).indices.map { (it + 1).toString() }
 
+/** Width of the line-number column. A trailing newline is its own number. */
+fun lineNumberColumnPx(text: String, textSizePx: Float, minPx: Int): Int {
+    val widest = editorLineNumberLabels(text).maxOf { it.length }.coerceAtLeast(1)
+    return (widest * textSizePx * 0.62f).toInt().coerceAtLeast(minPx)
+}
+
 /**
  * Desktop `--content-width`: the setting when readable lines are on, otherwise
  * the page column inside the text pads.

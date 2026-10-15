@@ -743,7 +743,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
             lineNumbers.setTextSize(TypedValue.COMPLEX_UNIT_PX, ink.editorFontPx * scale * 0.82f)
             lineNumbers.setLineSpacing(0f, ink.editorLineHeight)
             lineNumbers.visibility = VISIBLE
-            val gutter = (labels.maxOf { it.length } * ink.editorFontPx * scale * 0.62f).toInt().coerceAtLeast(dp(18))
+            val gutter = ch.fasrv.fanotes.desk.lineNumberColumnPx(editor.text?.toString().orEmpty(), ink.editorFontPx * scale, dp(18))
             lineNumbers.measure(
                 MeasureSpec.makeMeasureSpec(gutter, MeasureSpec.EXACTLY),
                 MeasureSpec.makeMeasureSpec(height, MeasureSpec.EXACTLY),
