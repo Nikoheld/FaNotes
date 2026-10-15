@@ -725,7 +725,12 @@ fun FaNotesScreen(
                             "search" -> SearchScreen(model) { model.openPath(it); model.showDestination("notes") }
                             "tasks" -> HomeworkScreen(model)
                             "calendar" -> CalendarScreen(model, { model.openPath(it); model.showDestination("notes") }, onImportIcs, onExportIcs)
-                            "overview" -> OverviewScreen(model) { model.openPath(it); model.showDestination("notes") }
+                            "overview" -> OverviewScreen(
+                                model,
+                                onOpen = { model.openPath(it); model.showDestination("notes") },
+                                onCreate = { createParent = model.defaultCreateFolder(); createNote = true; model.showDestination("notes") },
+                                onClose = { model.showDestination("notes") },
+                            )
                             "cards" -> CardsScreen(model)
                             "books" -> BooksScreen(model) { model.openPath(it); model.showDestination("notes") }
                             "history" -> HistoryScreen(model)

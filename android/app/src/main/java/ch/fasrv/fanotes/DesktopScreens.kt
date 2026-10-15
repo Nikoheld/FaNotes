@@ -1644,14 +1644,92 @@ fun FaNotesConfirmDialog(request: PendingConfirm, onConfirm: () -> Unit, onDismi
 }
 
 @Composable
-fun OverviewScreen(model: FaNotesViewModel, onOpen: (String) -> Unit) {
+fun OverviewScreen(
+    model: FaNotesViewModel,
+    onOpen: (String) -> Unit,
+    onCreate: () -> Unit = {},
+    onClose: () -> Unit = {},
+) {
     val tree by model.tree.collectAsStateWithLifecycle()
     val colors by model.folderColors.collectAsStateWithLifecycle()
+    val tabs by model.openTabs.collectAsStateWithLifecycle()
+    val open by model.open.collectAsStateWithLifecycle()
+    val unsaved by model.unsaved.collectAsStateWithLifecycle()
+    val picture = ch.fasrv.fanotes.desk.vaultOverview(tree, colors)
+    val recent = ch.fasrv.fanotes.desk.overviewRecent(tabs)
     Column(Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState())) {
-        Text("Vault-Übersicht", style = MaterialTheme.typography.titleLarge)
-        tree.forEach { node ->
-            val tint = colors[node.path]
-            Text("${node.name}${if (node.children.isNotEmpty()) "  (${node.children.size})" else ""}${tint?.let { "  $it" } ?: ""}", modifier = Modifier.clickable { if (node.kind.name != "FOLDER") onOpen(node.path) }.padding(vertical = 6.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Ordnerübersicht", style = MaterialTheme.typography.titleLarge)
+                Text(
+                    "Alle Ordner auf einen Blick. Tippe eine Zeile an, um die letzte Notiz zu öffnen.",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                )
+            }
+            TextButton(onClick = onCreate) { Text("Neue Notiz") }
+            TextButton(onClick = onClose) { Text("Schließen") }
+        }
+        Text(ch.fasrv.fanotes.desk.overviewStatsLine(picture.topFolders, picture.noteCount), modifier = Modifier.padding(top = 12.dp))
+        Row(Modifier.fillMaxWidth().padding(top = 16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            Column(Modifier.weight(1.6f)) {
+                Text("Deine Ordner", fontWeight = FontWeight.SemiBold)
+                Text(ch.fasrv.fanotes.desk.overviewFolderCountLabel(picture.folders.size), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f))
+                if (picture.folders.isEmpty()) {
+                    Text("Noch keine Ordner", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 12.dp))
+                    Text("Lege einen Fachordner an oder schreibe eine Notiz. Die Übersicht füllt sich automatisch.", fontSize = 13.sp)
+                    TextButton(onClick = onCreate) { Text("Erste Notiz erstellen") }
+                }
+                picture.folders.forEach { folder ->
+                    val tint = folder.color?.let { runCatching { Color(android.graphics.Color.parseColor(it)) }.getOrNull() }
+                    Column(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(start = (folder.depth * 16).dp, top = 8.dp)
+                            .clickable { folder.latestPath?.let(onOpen) ?: onCreate() }
+                            .padding(vertical = 4.dp),
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                folder.name,
+                                fontWeight = FontWeight.SemiBold,
+                                color = tint ?: MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.weight(1f),
+                            )
+                            Text("${folder.noteCount}", fontSize = 13.sp)
+                        }
+                        ch.fasrv.fanotes.desk.overviewSubfolderLabel(folder.subfolders)?.let { Text(it, fontSize = 12.sp) }
+                        Text(ch.fasrv.fanotes.desk.overviewLatestLabel(folder), fontSize = 13.sp)
+                        Text(ch.fasrv.fanotes.desk.overviewModifiedLabel(folder.latestModifiedMs), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f))
+                    }
+                }
+            }
+            Column(Modifier.weight(1f)) {
+                Text("Zuletzt geöffnet", fontWeight = FontWeight.SemiBold)
+                Text(
+                    if (recent.isEmpty()) "Noch leer" else "${recent.size} im Verlauf",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f),
+                )
+                if (recent.isEmpty()) {
+                    Text("Noch keine offenen Notizen", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 12.dp))
+                    Text("Geöffnete Dokumente bleiben hier griffbereit.", fontSize = 13.sp)
+                }
+                recent.forEach { path ->
+                    Row(
+                        Modifier.fillMaxWidth().clickable { onOpen(path) }.padding(vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(ch.fasrv.fanotes.desk.overviewRecentTitle(path), fontWeight = FontWeight.SemiBold)
+                            Text(ch.fasrv.fanotes.desk.overviewPathParent(path), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f))
+                        }
+                        if (unsaved && open?.path == path) {
+                            Text("●", color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(start = 6.dp))
+                        }
+                    }
+                }
+            }
         }
     }
 }
