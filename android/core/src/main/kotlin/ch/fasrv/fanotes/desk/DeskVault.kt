@@ -276,9 +276,42 @@ fun searchVault(files: List<Pair<String, String>>, query: String): List<SearchHi
     return hits.take(200)
 }
 
-fun dailyNotePath(folder: String, day: LocalDate = LocalDate.now(ZoneId.systemDefault())): String {
-    val dir = folder.trim().trim('/').ifBlank { "Daily Notes" }
-    return "$dir/${day}.md"
+fun dailyNotePath(
+    folder: String,
+    day: LocalDate = LocalDate.now(ZoneId.systemDefault()),
+    pattern: String = "YYYY-MM-DD",
+): String {
+    val dir = folder.trim().trim('/').ifBlank { "Tagesnotizen" }
+    return "$dir/${dailyNoteFileName(pattern, day)}.md"
+}
+
+/** `YYYY` `YY` `MM` `DD`, in that order, matching the desktop daily-note title. */
+fun formatNoteDate(pattern: String, day: LocalDate): String {
+    val source = pattern.trim().ifBlank { "YYYY-MM-DD" }.take(80)
+    return source
+        .replace("YYYY", day.year.toString())
+        .replace("YY", day.year.toString().takeLast(2))
+        .replace("MM", day.monthValue.toString().padStart(2, '0'))
+        .replace("DD", day.dayOfMonth.toString().padStart(2, '0'))
+}
+
+/** A date title that would become a path is replaced by the ISO day. */
+fun dailyNoteFileName(pattern: String, day: LocalDate): String {
+    val formatted = formatNoteDate(pattern, day).trim()
+    val illegal = formatted.isEmpty() || formatted == "." || formatted == ".." ||
+        formatted.any { it == '/' || it == '\\' || it.code < 32 }
+    return if (illegal) day.toString() else formatted.take(120)
+}
+
+/**
+ * Folder for a new root note. A missing setting is Eingang when that folder
+ * exists. A blank setting, or a folder that is not in the vault, is the root.
+ */
+fun defaultNoteParent(setting: String?, folders: Set<String>): String {
+    if (setting != null && setting.isBlank()) return ""
+    val raw = (setting ?: "Eingang").replace('\\', '/').trim().trim('/')
+    if (raw.isEmpty() || raw.split('/').any { it.isEmpty() || it == "." || it == ".." }) return ""
+    return if (raw in folders) raw else ""
 }
 
 data class SubjectBook(val subjectPath: String, val bookPath: String, val lastPage: Int)

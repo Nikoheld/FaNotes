@@ -56,6 +56,16 @@ class DeskVaultTest {
         assertTrue(toggled.startsWith("- [x]"))
         val books = parseSubjectBooks("""{"version":1,"books":[{"subjectPath":"Schule","bookPath":"Schule/Buch.pdf","lastPage":3}]}""")
         assertEquals(3, books.single().lastPage)
-        assertEquals("Daily Notes/2026-10-14.md", dailyNotePath("Daily Notes", java.time.LocalDate.parse("2026-10-14")))
+        val day = java.time.LocalDate.parse("2026-10-14")
+        assertEquals("Daily Notes/2026-10-14.md", dailyNotePath("Daily Notes", day))
+        assertEquals("14.10.2026", formatNoteDate("DD.MM.YYYY", day))
+        assertEquals("26", formatNoteDate("YY", day))
+        assertEquals("Tagesnotizen/14.10.2026.md", dailyNotePath("", day, "DD.MM.YYYY"))
+        assertEquals("Tagesnotizen/2026-10-14.md", dailyNotePath("", day, "YYYY/MM/DD"))
+        assertEquals("Eingang", defaultNoteParent(null, setOf("Eingang", "Schule")))
+        assertEquals("", defaultNoteParent(null, setOf("Schule")))
+        assertEquals("", defaultNoteParent("", setOf("Eingang")))
+        assertEquals("Schule", defaultNoteParent("Schule", setOf("Eingang", "Schule")))
+        assertEquals("", defaultNoteParent("Fehlt", setOf("Eingang")))
     }
 }
