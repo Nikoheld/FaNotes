@@ -84,6 +84,10 @@ import ch.fasrv.fanotes.desk.pruneWorkspaceMemory
 import ch.fasrv.fanotes.desk.rankSwitcherNotes
 import ch.fasrv.fanotes.desk.rememberClosedTab
 import ch.fasrv.fanotes.desk.remapNoteHistory
+import ch.fasrv.fanotes.desk.PDF_EXPORT_FAILED
+import ch.fasrv.fanotes.desk.PDF_EXPORT_NEEDS_NOTE
+import ch.fasrv.fanotes.desk.PDF_EXPORT_SAVED
+import ch.fasrv.fanotes.desk.markdownWithFolds
 import ch.fasrv.fanotes.desk.remapFolderColors
 import ch.fasrv.fanotes.desk.remapPath
 import ch.fasrv.fanotes.desk.sortPinnedFirst
@@ -451,6 +455,30 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
             }
             if (next != path) moveReferences(path, next)
             loadTree()
+        }
+    }
+
+    fun exportOpenNotePdf(uri: Uri) {
+        val note = open.value
+        if (note == null) {
+            message.value = PDF_EXPORT_NEEDS_NOTE
+            return
+        }
+        val visible = markdownWithFolds(markdown.value, foldedHeadings.value)
+        val document = session.document
+        val pages = backdrop.value
+        val boxes = worksheetBoxes.value
+        val marks = worksheetHighlights.value
+        val links = noteLinks.value
+        viewModelScope.launch {
+            message.value = withContext(Dispatchers.IO) {
+                runCatching {
+                    val stream = getApplication<Application>().contentResolver.openOutputStream(uri)
+                        ?: error(PDF_EXPORT_FAILED)
+                    stream.use { writeNotePdf(it, visible, document, pages, boxes, marks, links) }
+                    PDF_EXPORT_SAVED
+                }.getOrElse { PDF_EXPORT_FAILED }
+            }
         }
     }
 
