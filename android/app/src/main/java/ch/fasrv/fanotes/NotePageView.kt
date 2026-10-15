@@ -175,6 +175,21 @@ class NotePageView(context: Context) : FrameLayout(context) {
         editor.scrollTo(0, y.coerceAtLeast(0))
     }
 
+    fun revealRange(start: Int, end: Int) {
+        if (!textMode) setTextMode(true)
+        val length = editor.text?.length ?: 0
+        val from = start.coerceIn(0, length)
+        val to = end.coerceIn(from, length)
+        editor.requestFocus()
+        editor.setSelection(from, to)
+        editor.post {
+            val layout = editor.layout ?: return@post
+            val safe = from.coerceAtMost(layout.text.length)
+            val top = layout.getLineTop(layout.getLineForOffset(safe))
+            editor.scrollTo(0, (top - editor.paddingTop).coerceAtLeast(0))
+        }
+    }
+
     fun revealLine(line: Int) {
         val sourceOffset = ch.fasrv.fanotes.desk.revealLineStart(sourceMarkdown, line)
         val offset = ch.fasrv.fanotes.desk.visibleOffsetForSource(sourceMarkdown, foldedLines, sourceOffset)
