@@ -72,6 +72,22 @@ fun paperMathBox(textSizePx: Float): PaperMathBox {
     )
 }
 
+data class PaperTaskBox(val size: Float, val gap: Float, val border: Float)
+
+/** Desktop paper task checkbox: 15px box and 7px before the label. */
+fun paperTaskBox(textSizePx: Float): PaperTaskBox {
+    val base = if (textSizePx <= 0f) 16f else textSizePx
+    val scale = base / 16f
+    return PaperTaskBox(
+        size = 15f * scale,
+        gap = 7f * scale,
+        border = scale.coerceAtLeast(1f),
+    )
+}
+
+/** Bullet marker weight from the paper stylesheet. */
+const val PAPER_BULLET_WEIGHT = 800
+
 data class PaperHeading(
     val scale: Float,
     val padTop: Float,

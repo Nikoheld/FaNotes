@@ -944,7 +944,8 @@ class InkSurfaceView @JvmOverloads constructor(
         if (textX < -8f || textY < 0f) return false
         textPaint.textSize = editorFontPx * scale
         textPaint.typeface = editorTypeface
-        val boxWidth = textPaint.measureText("☑  ") + 8f
+        val taskBox = ch.fasrv.fanotes.desk.paperTaskBox(editorFontPx * scale)
+        val boxWidth = taskBox.size + taskBox.gap
         var top = 0f
         for (block in paperBlocks(scale)) {
             when (block) {
@@ -1672,7 +1673,7 @@ class InkSurfaceView @JvmOverloads constructor(
             starts[index] = start
             val content: CharSequence = when (line.kind) {
                 PaperKind.BULLET -> inline("•  ${line.text}")
-                PaperKind.TASK -> inline(if (line.text.startsWith("x|")) "☑  ${line.text.removePrefix("x|")}" else "☐  ${line.text.removePrefix(" |").removePrefix("|")}")
+                PaperKind.TASK -> taskLine(line.text, readable, textSize)
                 PaperKind.MATH -> inline(line.text)
                 PaperKind.SPACER -> ""
                 PaperKind.RULE -> " "
@@ -1741,6 +1742,15 @@ class InkSurfaceView @JvmOverloads constructor(
         numberPaint.textSize = editorFontPx * scale * 0.82f
         numberPaint.typeface = editorTypeface
         canvas.drawText(label, -8f * scale, baseline, numberPaint)
+    }
+
+    private fun taskLine(raw: String, readable: Int, textSize: Float): CharSequence {
+        val done = raw.startsWith("x|")
+        val label = raw.removePrefix("x|").removePrefix(" |").removePrefix("|")
+        val builder = SpannableStringBuilder(" ")
+        builder.setSpan(TaskSpan(done, readable, textSize), 0, 1, 0)
+        if (label.isNotEmpty()) builder.append(label)
+        return builder
     }
 
     private fun inline(text: String): CharSequence {

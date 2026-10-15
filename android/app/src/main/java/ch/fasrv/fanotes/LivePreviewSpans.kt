@@ -36,7 +36,9 @@ import ch.fasrv.fanotes.desk.paperTableFillArgb
 import ch.fasrv.fanotes.desk.tablePadPx
 import ch.fasrv.fanotes.desk.tableRulePx
 import ch.fasrv.fanotes.desk.PAPER_STRONG_WEIGHT
+import ch.fasrv.fanotes.desk.PAPER_BULLET_WEIGHT
 import ch.fasrv.fanotes.desk.paperCodeBox
+import ch.fasrv.fanotes.desk.paperTaskBox
 import ch.fasrv.fanotes.desk.paperLinkUnderlineArgb
 import ch.fasrv.fanotes.desk.paperLinkUnderlineOffset
 import ch.fasrv.fanotes.desk.paperHeading
@@ -91,8 +93,8 @@ private fun spanFor(mark: LiveMark, readable: Int, accent: Int, textSizePx: Floa
     LiveKind.HIDE -> HideSpan()
     LiveKind.COLLAPSE -> CollapseSpan()
     LiveKind.BULLET -> AccentSwapSpan("• ", readable)
-    LiveKind.TASK_OPEN -> TaskSpan("☐ ")
-    LiveKind.TASK_DONE -> TaskSpan("☑ ")
+    LiveKind.TASK_OPEN -> TaskSpan(false, readable, textSizePx)
+    LiveKind.TASK_DONE -> TaskSpan(true, readable, textSizePx)
     LiveKind.H1 -> HeadingSpan(1, textSizePx)
     LiveKind.H2 -> HeadingSpan(2, textSizePx)
     LiveKind.H3 -> HeadingSpan(3, textSizePx)
@@ -332,14 +334,64 @@ internal open class SwapSpan(private val drawn: String) : ReplacementSpan(), Liv
     }
 }
 
-internal class TaskSpan(drawn: String) : SwapSpan(drawn)
+/**
+ * Desktop paper task box: a 15px control, 7px before the words, filled with
+ * the readable accent when the task is done.
+ */
+internal class TaskSpan(
+    private val checked: Boolean,
+    private val accent: Int,
+    private val textSizePx: Float,
+) : ReplacementSpan(), LivePreviewSpan {
+    override fun getSize(paint: Paint, text: CharSequence, start: Int, end: Int, fm: Paint.FontMetricsInt?): Int {
+        val box = paperTaskBox(textSizePx)
+        return (box.size + box.gap).toInt().coerceAtLeast(1)
+    }
+
+    override fun draw(canvas: Canvas, text: CharSequence, start: Int, end: Int, x: Float, top: Int, y: Int, bottom: Int, paint: Paint) {
+        val box = paperTaskBox(textSizePx)
+        val mid = (top + bottom) / 2f
+        val rect = RectF(x, mid - box.size / 2f, x + box.size, mid + box.size / 2f)
+        val radius = box.size * 0.22f
+        val previousColor = paint.color
+        val previousStyle = paint.style
+        val previousStroke = paint.strokeWidth
+        val previousCap = paint.strokeCap
+        if (checked) {
+            paint.style = Paint.Style.FILL
+            paint.color = accent
+            canvas.drawRoundRect(rect, radius, radius, paint)
+            paint.color = 0xFFFFFFFF.toInt()
+            paint.style = Paint.Style.STROKE
+            paint.strokeWidth = (box.border * 1.6f).coerceAtLeast(1.5f)
+            paint.strokeCap = Paint.Cap.ROUND
+            val left = rect.left + box.size * 0.22f
+            val right = rect.right - box.size * 0.22f
+            val midY = rect.centerY() + box.size * 0.08f
+            canvas.drawLine(left, midY, left + box.size * 0.22f, midY + box.size * 0.18f, paint)
+            canvas.drawLine(left + box.size * 0.22f, midY + box.size * 0.18f, right, midY - box.size * 0.22f, paint)
+        } else {
+            paint.style = Paint.Style.FILL
+            paint.color = 0xFFFFFFFF.toInt()
+            canvas.drawRoundRect(rect, radius, radius, paint)
+            paint.style = Paint.Style.STROKE
+            paint.strokeWidth = box.border
+            paint.color = 0xFF6D7180.toInt()
+            canvas.drawRoundRect(rect, radius, radius, paint)
+        }
+        paint.color = previousColor
+        paint.style = previousStyle
+        paint.strokeWidth = previousStroke
+        paint.strokeCap = previousCap
+    }
+}
 
 internal class AccentSwapSpan(drawn: String, private val color: Int) : SwapSpan(drawn) {
     override fun draw(canvas: Canvas, text: CharSequence, start: Int, end: Int, x: Float, top: Int, y: Int, bottom: Int, paint: Paint) {
         val previousColor = paint.color
         val previousFace = paint.typeface
         paint.color = color
-        paint.typeface = Typeface.create(previousFace, Typeface.BOLD)
+        paint.typeface = Typeface.create(previousFace, PAPER_BULLET_WEIGHT, false)
         super.draw(canvas, text, start, end, x, top, y, bottom, paint)
         paint.color = previousColor
         paint.typeface = previousFace
