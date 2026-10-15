@@ -109,11 +109,12 @@ data class PaperHeading(
 /**
  * Paper heading rhythm. Padding in the stylesheet is `em` of the heading's
  * own size, so a level-1 top pad of 0.5em is one body em. Tracking is -0.025em.
+ * The later paper rule clears the level-1 bottom pad and its border.
  */
 fun paperHeading(level: Int, textSizePx: Float): PaperHeading {
     val base = if (textSizePx <= 0f) 16f else textSizePx
     val (scale, padTopEm, padBottomEm) = when (level) {
-        1 -> Triple(2f, 0.5f, 0.28f)
+        1 -> Triple(2f, 0.5f, 0f)
         2 -> Triple(1.55f, 0.62f, 0f)
         3 -> Triple(1.28f, 0.45f, 0f)
         4 -> Triple(1.1f, 0.35f, 0f)

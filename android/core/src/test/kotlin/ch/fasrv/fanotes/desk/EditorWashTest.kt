@@ -35,7 +35,7 @@ class EditorWashTest {
         val h1 = paperHeading(1, 16f)
         assertEquals(2f, h1.scale)
         assertEquals(16f, h1.padTop, 0.01f)
-        assertEquals(8.96f, h1.padBottom, 0.01f)
+        assertEquals(0f, h1.padBottom)
         assertEquals(-0.025f, h1.letterSpacing)
         val h2 = paperHeading(2, 16f)
         assertEquals(1.55f, h2.scale)

@@ -3,11 +3,9 @@ package ch.fasrv.fanotes
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
-import android.graphics.LinearGradient
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.RectF
-import android.graphics.Shader
 import android.graphics.Typeface
 import android.text.Editable
 import android.text.Layout
@@ -68,7 +66,6 @@ import ch.fasrv.fanotes.desk.sourceSyntaxMarks
 import ch.fasrv.fanotes.desk.specialCharMarks
 import ch.fasrv.fanotes.desk.paperAccentReadableArgb
 import ch.fasrv.fanotes.desk.quoteMargins
-import ch.fasrv.fanotes.desk.quoteWashArgb
 import ch.fasrv.fanotes.desk.selectionMatchRanges
 
 /** A span the live preview owns, so the next pass can remove only its own marks. */
@@ -184,7 +181,7 @@ private fun spanFor(
     LiveKind.H4 -> HeadingSpan(4, textSizePx)
     LiveKind.H5 -> HeadingSpan(5, textSizePx)
     LiveKind.H6 -> HeadingSpan(6, textSizePx)
-    LiveKind.QUOTE -> PaperQuoteSpan(readable, quoteWashArgb(accent), textSizePx)
+    LiveKind.QUOTE -> PaperQuoteSpan(readable, textSizePx)
     LiveKind.STRONG -> StrongSpan()
     LiveKind.EMPHASIS -> EmphasisSpan()
     LiveKind.STRIKE -> StrikeSpan()
@@ -948,7 +945,7 @@ private class CollapseSpan : LineHeightSpan, LivePreviewSpan {
 }
 
 internal class HeadingSpan(private val level: Int, private val baseTextPx: Float) :
-    MetricAffectingSpan(), LineHeightSpan, LineBackgroundSpan, LivePreviewSpan {
+    MetricAffectingSpan(), LineHeightSpan, LivePreviewSpan {
     override fun updateDrawState(paint: android.text.TextPaint) = apply(paint)
     override fun updateMeasureState(paint: android.text.TextPaint) = apply(paint)
 
@@ -968,27 +965,6 @@ internal class HeadingSpan(private val level: Int, private val baseTextPx: Float
         fm.top -= top
         fm.descent += bottom
         fm.bottom += bottom
-    }
-
-    override fun drawBackground(
-        canvas: Canvas,
-        paint: Paint,
-        left: Int,
-        right: Int,
-        top: Int,
-        baseline: Int,
-        bottom: Int,
-        text: CharSequence,
-        start: Int,
-        end: Int,
-        lineNumber: Int,
-    ) {
-        if (level != 1 || right <= left) return
-        val thickness = (baseTextPx / 16f).coerceAtLeast(1f)
-        val previous = paint.color
-        paint.color = PAPER_RULE_ARGB
-        canvas.drawRect(left.toFloat(), bottom - thickness, right.toFloat(), bottom.toFloat(), paint)
-        paint.color = previous
     }
 }
 
@@ -1102,11 +1078,11 @@ internal class PaperThematicRuleSpan(private val textSizePx: Float) : LineBackgr
     }
 }
 
+/** Desktop paper quote: a 3px accent bar, 13px of space, and soft text. The line fill stays clear. */
 internal class PaperQuoteSpan(
     private val barColor: Int,
-    private val washColor: Int,
     private val textSizePx: Float,
-) : CharacterStyle(), LeadingMarginSpan, LineBackgroundSpan, LivePreviewSpan {
+) : CharacterStyle(), LeadingMarginSpan, LivePreviewSpan {
     private val barPx = quoteMargins(textSizePx).first
     private val marginPx = quoteMargins(textSizePx).second
 
@@ -1135,36 +1111,6 @@ internal class PaperQuoteSpan(
         val left = if (dir > 0) x else x - barPx
         canvas.drawRect(left.toFloat(), top.toFloat(), (left + barPx).toFloat(), bottom.toFloat(), paint)
         paint.color = previous
-    }
-
-    override fun drawBackground(
-        canvas: Canvas,
-        paint: Paint,
-        left: Int,
-        right: Int,
-        top: Int,
-        baseline: Int,
-        bottom: Int,
-        text: CharSequence,
-        start: Int,
-        end: Int,
-        lineNumber: Int,
-    ) {
-        if (right <= left) return
-        val previousShader = paint.shader
-        val previousColor = paint.color
-        paint.shader = LinearGradient(
-            left.toFloat(),
-            0f,
-            right.toFloat(),
-            0f,
-            washColor,
-            0x00000000,
-            Shader.TileMode.CLAMP,
-        )
-        canvas.drawRect(left.toFloat(), top.toFloat(), right.toFloat(), bottom.toFloat(), paint)
-        paint.shader = previousShader
-        paint.color = previousColor
     }
 }
 
