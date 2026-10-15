@@ -2,6 +2,7 @@ package ch.fasrv.fanotes.desk
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 class EditorMetricsTest {
     @Test
@@ -12,6 +13,7 @@ class EditorMetricsTest {
         assertEquals(820, defaults.contentWidthPx)
         assertEquals(3.25, defaults.zoomMax)
         assertEquals(750L, defaults.autosaveMs)
+        assertEquals(5, defaults.zoomSpeed)
         val clamped = editorMetrics(
             mapOf(
                 "editor-font" to "8",
@@ -43,5 +45,24 @@ class EditorMetricsTest {
         assertEquals(0, custom.scribble)
         assertEquals(1.0, penSettings(mapOf("smoothing" to "4")).smoothing)
         assertEquals("#2457d6", custom.color)
+    }
+
+    @Test
+    fun zoomSpeedMatchesTheDesktopWheelAndButtonSteps() {
+        assertEquals(5, clampViewZoomSpeed(null))
+        assertEquals(5, clampViewZoomSpeed(""))
+        assertEquals(5, clampViewZoomSpeed("0"))
+        assertEquals(1, clampViewZoomSpeed("-4"))
+        assertEquals(10, clampViewZoomSpeed("12"))
+        assertEquals(6, clampViewZoomSpeed("5.6"))
+        assertEquals(0.28, zoomSensitivityFromSpeed(1))
+        assertEquals(2.0, zoomSensitivityFromSpeed(10))
+        assertEquals(0.125, zoomStepFromSpeed(5))
+        assertEquals(2.0, pinchZoom(1.0, 2.0, 5))
+        val slow = pinchZoom(1.0, 2.0, 1)
+        val fast = pinchZoom(1.0, 2.0, 10)
+        assertTrue(slow < 2.0)
+        assertTrue(fast > 2.0)
+        assertEquals(1, editorMetrics(mapOf("zoom-speed" to "1")).zoomSpeed)
     }
 }

@@ -201,6 +201,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
         ink.editorLineHeight = metrics.lineHeight.toFloat()
         ink.contentWidthPx = metrics.contentWidthPx.toFloat()
         ink.zoomMax = metrics.zoomMax.toFloat()
+        ink.zoomSpeed = metrics.zoomSpeed
         sourceMarkdown = markdown
         foldedLines = folded
         val visible = ch.fasrv.fanotes.desk.markdownWithFolds(markdown, folded)
@@ -357,8 +358,8 @@ class NotePageView(context: Context) : FrameLayout(context) {
             mark.text = if (ink.placingHighlight) "Markieren ●" else "Markieren"
         }
         tools.addView(mark)
-        tools.addView(chip("+") { ink.zoomBy(1.15f) })
-        tools.addView(chip("−") { ink.zoomBy(1f / 1.15f) })
+        tools.addView(chip("+") { ink.zoomByStep(1) })
+        tools.addView(chip("−") { ink.zoomByStep(-1) })
         tools.addView(chip("Drehen") { ink.rotatePage() })
         tools.addView(chip("Ansicht") { ink.resetView() })
         tools.addView(chip("Kopieren") { onDuplicate() })
