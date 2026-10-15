@@ -155,6 +155,7 @@ class MainActivity : ComponentActivity() {
             FaNotesTheme(
                 desk["theme"] ?: if (androidx.compose.foundation.isSystemInDarkTheme()) "dark" else "light",
                 desk["accent"].orEmpty(),
+                desk["accent-secondary"].orEmpty(),
             ) {
                 FaNotesScreen(
                     model = model,
@@ -214,13 +215,15 @@ private val Brushes = listOf(
 )
 
 @Composable
-fun FaNotesTheme(themeName: String, accentHex: String = ch.fasrv.fanotes.desk.DEFAULT_ACCENT, content: @Composable () -> Unit) {
+fun FaNotesTheme(themeName: String, accentHex: String = ch.fasrv.fanotes.desk.DEFAULT_ACCENT, accentSecondaryHex: String = ch.fasrv.fanotes.desk.DEFAULT_ACCENT_SECONDARY, content: @Composable () -> Unit) {
     val accent = Color(android.graphics.Color.parseColor(ch.fasrv.fanotes.desk.normalizeAccent(accentHex)))
     val onAccent = Color(android.graphics.Color.parseColor(ch.fasrv.fanotes.desk.accentInk(accentHex)))
+    val secondary = Color(android.graphics.Color.parseColor(ch.fasrv.fanotes.desk.normalizeAccentSecondary(accentSecondaryHex)))
+    val onSecondary = Color(android.graphics.Color.parseColor(ch.fasrv.fanotes.desk.accentInk(accentSecondaryHex)))
     val scheme = when (themeName) {
-        "light" -> lightColorScheme(primary = accent, onPrimary = onAccent, onSurface = Color(0xFF252630), background = Color(0xFFFFFFFF), surface = Color(0xFFF7F6F3), surfaceVariant = Color(0xFFE7E4DE))
-        "sepia" -> lightColorScheme(primary = accent, onPrimary = onAccent, onSurface = Color(0xFF3E3428), background = Color(0xFFF4EFE4), surface = Color(0xFFEFE6D6), surfaceVariant = Color(0xFFE4D7C3))
-        else -> darkColorScheme(primary = accent, onPrimary = onAccent, onSurface = Color(0xFFEDEDEC), background = Color(0xFF191919), surface = Color(0xFF202020), surfaceVariant = Color(0xFF2A2A2A))
+        "light" -> lightColorScheme(primary = accent, onPrimary = onAccent, secondary = secondary, onSecondary = onSecondary, onSurface = Color(0xFF252630), background = Color(0xFFFFFFFF), surface = Color(0xFFF7F6F3), surfaceVariant = Color(0xFFE7E4DE))
+        "sepia" -> lightColorScheme(primary = accent, onPrimary = onAccent, secondary = secondary, onSecondary = onSecondary, onSurface = Color(0xFF3E3428), background = Color(0xFFF4EFE4), surface = Color(0xFFEFE6D6), surfaceVariant = Color(0xFFE4D7C3))
+        else -> darkColorScheme(primary = accent, onPrimary = onAccent, secondary = secondary, onSecondary = onSecondary, onSurface = Color(0xFFEDEDEC), background = Color(0xFF191919), surface = Color(0xFF202020), surfaceVariant = Color(0xFF2A2A2A))
     }
     MaterialTheme(colorScheme = scheme, content = content)
 }
@@ -998,6 +1001,9 @@ private fun SplitPane(
                 view.editorLineHeight = metrics.lineHeight.toFloat()
                 view.contentWidthPx = metrics.contentWidthPx.toFloat()
                 view.readableLineLength = metrics.readableLineLength
+                view.setEditorFont(metrics.editorFontId)
+                view.showLineNumbers = metrics.showLineNumbers
+                view.accentSecondary = android.graphics.Color.parseColor(ch.fasrv.fanotes.desk.normalizeAccentSecondary(model.deskSettings.value["accent-secondary"]))
                 view.zoomMax = metrics.zoomMax.toFloat()
                 view.zoomSpeed = metrics.zoomSpeed
                 val pen = ch.fasrv.fanotes.desk.penSettings(model.deskSettings.value)
@@ -1202,6 +1208,7 @@ private fun PageSurface(
             page.ink.scribbleSensitivity = pen.scribble
             page.ink.strokeSmoothing = pen.smoothing.toFloat()
             page.ink.tabletButtons = model.deskSettings.value["tablet-buttons"].orEmpty()
+            page.ink.accentSecondary = android.graphics.Color.parseColor(ch.fasrv.fanotes.desk.normalizeAccentSecondary(model.deskSettings.value["accent-secondary"]))
             page.ink.onPlaceHighlight = { model.addWorksheetHighlight(it) }
             page.ink.onRemoveHighlight = { model.removeWorksheetHighlight(it) }
             page.onFinger = { model.fingerDraws.value = it }

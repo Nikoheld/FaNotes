@@ -1,0 +1,13 @@
+Editor fonts bundled with the Android app, matching the desktop editor choices.
+
+JetBrains Mono
+Copyright 2020 The JetBrains Mono Project Authors (https://github.com/JetBrains/JetBrainsMono)
+SIL Open Font License 1.1. See JetBrainsMono-OFL.txt.
+
+Fira Code
+Copyright 2014-2021 The Fira Code Project Authors (https://github.com/tonsky/FiraCode)
+SIL Open Font License 1.1. The license terms are the same text as JetBrainsMono-OFL.txt.
+
+IBM Plex Mono
+Copyright 2017 IBM Corp. All rights reserved.
+SIL Open Font License 1.1. The license terms are the same text as JetBrainsMono-OFL.txt.

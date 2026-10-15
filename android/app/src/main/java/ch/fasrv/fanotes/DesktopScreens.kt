@@ -1400,7 +1400,7 @@ fun AiScreen(model: FaNotesViewModel) {
             if (preview != null) TextButton(onClick = { model.applyAiPreview() }) { Text("Übernehmen") }
         }
         if (status.isNotBlank()) Text(status, fontSize = 13.sp)
-        if (preview != null) Text(preview.orEmpty(), fontSize = 13.sp)
+        if (preview != null) Text(preview.orEmpty(), fontSize = ch.fasrv.fanotes.desk.editorMetrics(settings).previewFontPx.sp)
     }
 }
 
@@ -1479,6 +1479,33 @@ fun SettingsScreen(model: FaNotesViewModel, onSync: () -> Unit, onOpenVault: () 
                         singleLine = true,
                     )
                     Text(accent, fontSize = 12.sp)
+                    Text("Zweite Akzentfarbe", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
+                    val secondary = ch.fasrv.fanotes.desk.normalizeAccentSecondary(settings["accent-secondary"])
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        ch.fasrv.fanotes.desk.ACCENT_COLORS.forEach { color ->
+                            val selected = color == secondary
+                            Box(
+                                Modifier
+                                    .size(28.dp)
+                                    .border(if (selected) 2.dp else 1.dp, if (selected) MaterialTheme.colorScheme.onSurface else Color(0x33000000), CircleShape)
+                                    .padding(3.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(android.graphics.Color.parseColor(color)))
+                                    .clickable { model.updateDesk("accent-secondary", color) },
+                            )
+                        }
+                    }
+                    var customSecondary by remember(secondary) { mutableStateOf(secondary) }
+                    OutlinedTextField(
+                        customSecondary,
+                        { next ->
+                            customSecondary = next
+                            ch.fasrv.fanotes.desk.parseAccent(next)?.let { model.updateDesk("accent-secondary", it) }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Eigene zweite Akzentfarbe") },
+                        singleLine = true,
+                    )
                 }
                 "editor" -> {
                     val metrics = ch.fasrv.fanotes.desk.editorMetrics(settings)
@@ -1506,7 +1533,20 @@ fun SettingsScreen(model: FaNotesViewModel, onSync: () -> Unit, onOpenVault: () 
                         label = { Text("Standardordner neuer Notizen") },
                         singleLine = true,
                     )
+                    Text("Editor-Schrift", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
+                    ch.fasrv.fanotes.desk.EDITOR_FONTS.forEach { face ->
+                        Text(
+                            face.label,
+                            fontWeight = if (metrics.editorFontId == face.id) FontWeight.SemiBold else FontWeight.Normal,
+                            modifier = Modifier.clickable { model.updateDesk("editor-face", face.stack) }.padding(vertical = 4.dp),
+                        )
+                    }
                     EditorSlider("Editor-Schriftgröße", metrics.fontSizePx.toFloat(), 12f, 26f, 1f, " px") { model.updateDesk("editor-font", it.toInt().toString()) }
+                    EditorSlider("KI-Vorschau-Schriftgröße", metrics.previewFontPx.toFloat(), 13f, 28f, 1f, " px") { model.updateDesk("preview-font", it.toInt().toString()) }
+                    Text(
+                        "Zeilennummern: ${if (metrics.showLineNumbers) "an" else "aus"}",
+                        modifier = Modifier.clickable { model.updateDesk("line-numbers", if (metrics.showLineNumbers) "off" else "on") },
+                    )
                     EditorSlider("Zeilenhöhe", metrics.lineHeight.toFloat(), 1.3f, 2.2f, 0.05f, "") { model.updateDesk("line-height", "%.2f".format(java.util.Locale.US, it)) }
                     Text(
                         "Lesbare Zeilenlänge: ${if (metrics.readableLineLength) "an" else "aus"}",

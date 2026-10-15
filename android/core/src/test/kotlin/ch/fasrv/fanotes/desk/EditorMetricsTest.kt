@@ -74,4 +74,27 @@ class EditorMetricsTest {
         assertEquals(1056f, effectiveContentWidth(820, 1200f, readable = false))
         assertEquals(856f, effectiveContentWidth(2000, 1000f, readable = true))
     }
+
+    @Test
+    fun editorFontPreviewSizeAndLineNumbersFollowTheDesktop() {
+        val defaults = editorMetrics(emptyMap())
+        assertEquals("jetbrains", defaults.editorFontId)
+        assertEquals(17, defaults.previewFontPx)
+        assertEquals(false, defaults.showLineNumbers)
+        val chosen = editorMetrics(
+            mapOf(
+                "editor-face" to "'Fira Code', ui-monospace, monospace",
+                "preview-font" to "40",
+                "line-numbers" to "on",
+            ),
+        )
+        assertEquals("fira", chosen.editorFontId)
+        assertEquals(28, chosen.previewFontPx)
+        assertEquals(true, chosen.showLineNumbers)
+        assertEquals("plex", editorFontId("IBM Plex Mono"))
+        assertEquals("system", editorFontId("ui-monospace, SFMono-Regular, monospace"))
+        assertEquals(listOf(0), lineStartOffsets(""))
+        assertEquals(listOf(0, 2), lineStartOffsets("a\n"))
+        assertEquals(listOf("1", "2"), editorLineNumberLabels("a\nb"))
+    }
 }

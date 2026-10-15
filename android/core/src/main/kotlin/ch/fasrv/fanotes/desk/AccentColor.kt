@@ -4,6 +4,7 @@ package ch.fasrv.fanotes.desk
 val ACCENT_COLORS = listOf("#2a6f97", "#6b7280", "#0f7b6c", "#d9730d", "#c4554d", "#9065b0", "#ba9b4a")
 
 const val DEFAULT_ACCENT = "#2a6f97"
+const val DEFAULT_ACCENT_SECONDARY = "#6b7280"
 
 private val ACCENT_HEX = Regex("^#[0-9a-f]{6}$")
 
@@ -17,6 +18,8 @@ fun parseAccent(raw: String?): String? {
 }
 
 fun normalizeAccent(raw: String?): String = parseAccent(raw) ?: DEFAULT_ACCENT
+
+fun normalizeAccentSecondary(raw: String?): String = parseAccent(raw) ?: DEFAULT_ACCENT_SECONDARY
 
 /**
  * True when `#11131a` has at least as much contrast on this accent as white.

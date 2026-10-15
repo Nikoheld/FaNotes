@@ -27,6 +27,7 @@ import ch.fasrv.fanotes.ink.StrokeStyle
 class NotePageView(context: Context) : FrameLayout(context) {
     val ink = InkSurfaceView(context)
     private val editor = EditText(context)
+    private val lineNumbers = TextView(context)
     private val toolbar = HorizontalScrollView(context)
     private val tools = LinearLayout(context)
     private val handle = TextView(context)
@@ -84,6 +85,11 @@ class NotePageView(context: Context) : FrameLayout(context) {
         editor.typeface = Typeface.create("sans-serif", Typeface.NORMAL)
         editor.setLineSpacing(0f, 1.72f)
         editor.gravity = Gravity.TOP or Gravity.START
+        editor.setPadding(0, 0, 0, 0)
+        lineNumbers.setTextColor(0xFF8A8D98.toInt())
+        lineNumbers.gravity = Gravity.TOP or Gravity.END
+        lineNumbers.setPadding(0, 0, 0, 0)
+        lineNumbers.visibility = GONE
         editor.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
         editor.visibility = GONE
         editor.addTextChangedListener(object : android.text.TextWatcher {
@@ -92,9 +98,11 @@ class NotePageView(context: Context) : FrameLayout(context) {
             }
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
             override fun afterTextChanged(s: android.text.Editable?) {
+                if (lineNumbers.visibility == VISIBLE) placeEditor()
                 if (!writing) onVisibleMarkdown(editBefore, s?.toString().orEmpty())
             }
         })
+        addView(lineNumbers, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT))
         addView(editor, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT))
         tools.orientation = LinearLayout.HORIZONTAL
         tools.gravity = Gravity.CENTER_VERTICAL
@@ -201,6 +209,9 @@ class NotePageView(context: Context) : FrameLayout(context) {
         ink.editorLineHeight = metrics.lineHeight.toFloat()
         ink.contentWidthPx = metrics.contentWidthPx.toFloat()
         ink.readableLineLength = metrics.readableLineLength
+        ink.setEditorFont(metrics.editorFontId)
+        ink.showLineNumbers = metrics.showLineNumbers
+        editor.typeface = ink.editorTypeface
         ink.zoomMax = metrics.zoomMax.toFloat()
         ink.zoomSpeed = metrics.zoomSpeed
         sourceMarkdown = markdown
@@ -472,7 +483,10 @@ class NotePageView(context: Context) : FrameLayout(context) {
     }
 
     private fun placeEditor() {
-        if (editor.visibility != VISIBLE) return
+        if (editor.visibility != VISIBLE) {
+            lineNumbers.visibility = GONE
+            return
+        }
         val scale = ink.cameraScale().coerceAtLeast(0.2f)
         editor.setTextSize(TypedValue.COMPLEX_UNIT_PX, ink.editorFontPx * scale)
         editor.setLineSpacing(0f, ink.editorLineHeight)
@@ -485,6 +499,22 @@ class NotePageView(context: Context) : FrameLayout(context) {
             MeasureSpec.makeMeasureSpec(height, MeasureSpec.EXACTLY),
         )
         editor.layout(x, y, x + width, y + height)
+        if (ink.showLineNumbers) {
+            val labels = ch.fasrv.fanotes.desk.editorLineNumberLabels(editor.text?.toString().orEmpty())
+            lineNumbers.text = labels.joinToString("\n")
+            lineNumbers.typeface = ink.editorTypeface
+            lineNumbers.setTextSize(TypedValue.COMPLEX_UNIT_PX, ink.editorFontPx * scale * 0.82f)
+            lineNumbers.setLineSpacing(0f, ink.editorLineHeight)
+            lineNumbers.visibility = VISIBLE
+            val gutter = (labels.maxOf { it.length } * ink.editorFontPx * scale * 0.62f).toInt().coerceAtLeast(dp(18))
+            lineNumbers.measure(
+                MeasureSpec.makeMeasureSpec(gutter, MeasureSpec.EXACTLY),
+                MeasureSpec.makeMeasureSpec(height, MeasureSpec.EXACTLY),
+            )
+            lineNumbers.layout(x - gutter - dp(4), y, x - dp(4), y + height)
+        } else {
+            lineNumbers.visibility = GONE
+        }
     }
 
     override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {

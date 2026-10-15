@@ -586,6 +586,8 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
                                 metrics.readableLineLength,
                             ),
                             smoothing = ch.fasrv.fanotes.desk.penSettings(deskSettings.value).smoothing.toFloat(),
+                            editorTypeface = loadEditorTypeface(getApplication(), metrics.editorFontId),
+                            showLineNumbers = metrics.showLineNumbers,
                         )
                     }
                     PDF_EXPORT_SAVED

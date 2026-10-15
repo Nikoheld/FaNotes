@@ -14,6 +14,7 @@ import android.text.Layout
 import android.text.SpannableStringBuilder
 import android.text.StaticLayout
 import android.text.TextPaint
+import android.text.style.ForegroundColorSpan
 import android.text.style.RelativeSizeSpan
 import android.text.style.StyleSpan
 import android.text.style.TypefaceSpan
@@ -162,6 +163,34 @@ class InkSurfaceView @JvmOverloads constructor(
         set(value) { if (field != value) { field = value; paperBlocks = emptyList(); invalidate() } }
     var readableLineLength: Boolean = true
         set(value) { if (field != value) { field = value; paperBlocks = emptyList(); invalidate() } }
+    var showLineNumbers: Boolean = false
+        set(value) {
+            if (field == value) return
+            field = value
+            paperBlocks = emptyList()
+            invalidate()
+        }
+    var editorFontId: String = "jetbrains"
+    var editorTypeface: Typeface = Typeface.MONOSPACE
+        private set
+    var accentSecondary: Int = Color.parseColor("#6B7280")
+        set(value) {
+            if (field == value) return
+            field = value
+            if (isAttachedToWindow) {
+                paperBlocks = emptyList()
+                invalidate()
+            }
+        }
+
+    fun setEditorFont(id: String) {
+        val next = ch.fasrv.fanotes.desk.editorFontId(id)
+        if (editorFontId == next && editorTypeface != Typeface.MONOSPACE) return
+        editorFontId = next
+        editorTypeface = loadEditorTypeface(context, next)
+        paperBlocks = emptyList()
+        invalidate()
+    }
     var zoomMax: Float = 3.25f
     var zoomSpeed: Int = 5
     /** Desk setting `tablet-buttons`, empty until the factory map is read. */
@@ -1296,13 +1325,20 @@ class InkSurfaceView @JvmOverloads constructor(
         val originX = (session?.document?.originX ?: 0.0).toFloat()
         val originY = (session?.document?.originY ?: 0.0).toFloat()
         canvas.translate(pageLeft + (TEXT_PAD_X + originX) * scale, pageTop + (TEXT_PAD_Y + originY) * scale)
+        var number = 1
         for (block in blocks) {
             when (block) {
                 is PaperBlock.Text -> {
+                    if (showLineNumbers) drawLineNumbers(canvas, block, number, scale)
+                    number += block.paragraphStarts.size
                     block.layout.draw(canvas)
                     canvas.translate(0f, block.layout.height.toFloat())
                 }
-                is PaperBlock.Table -> drawTable(canvas, block, scale)
+                is PaperBlock.Table -> {
+                    if (showLineNumbers) drawNumber(canvas, number.toString(), editorFontPx * scale, scale)
+                    number += 1
+                    drawTable(canvas, block, scale)
+                }
             }
         }
         canvas.restore()
@@ -1315,7 +1351,8 @@ class InkSurfaceView @JvmOverloads constructor(
         val textLines = ArrayList<PaperLine>()
         fun flush() {
             if (textLines.isEmpty()) return
-            built += PaperBlock.Text(textLayoutFor(styledLines(textLines), scale))
+            val (styled, starts) = styledLines(textLines)
+            built += PaperBlock.Text(textLayoutFor(styled, scale), starts)
             textLines.clear()
         }
         for (line in paperLines(markdown)) {
@@ -1336,7 +1373,7 @@ class InkSurfaceView @JvmOverloads constructor(
     private fun textLayoutFor(text: CharSequence, scale: Float): StaticLayout {
         val width = (textColumnPx() * scale).toInt().coerceAtLeast(1)
         textPaint.textSize = editorFontPx * scale
-        textPaint.typeface = Typeface.create("sans-serif", Typeface.NORMAL)
+        textPaint.typeface = editorTypeface
         return StaticLayout.Builder.obtain(text, 0, text.length, textPaint, width)
             .setAlignment(Layout.Alignment.ALIGN_NORMAL)
             .setIncludePad(false)
@@ -1353,7 +1390,7 @@ class InkSurfaceView @JvmOverloads constructor(
         val inner = (colWidth - 12f * scale).toInt().coerceAtLeast(1)
         val layouts = rows.mapIndexed { rowIndex, row ->
             val face = if (rowIndex == 0) Typeface.BOLD else Typeface.NORMAL
-            textPaint.typeface = Typeface.create("sans-serif", face)
+            textPaint.typeface = Typeface.create(editorTypeface, face)
             textPaint.textSize = editorFontPx * scale
             List(columns) { column ->
                 val cell = row.getOrElse(column) { "" }
@@ -1363,7 +1400,7 @@ class InkSurfaceView @JvmOverloads constructor(
                     .build()
             }
         }
-        textPaint.typeface = Typeface.create("sans-serif", Typeface.NORMAL)
+        textPaint.typeface = editorTypeface
         val heights = FloatArray(rows.size) { row ->
             val content = layouts[row].maxOf { it.height }.toFloat()
             max(content + 10f * scale, 28f * scale)
@@ -1395,10 +1432,12 @@ class InkSurfaceView @JvmOverloads constructor(
         canvas.translate(0f, y + 10f * scale)
     }
 
-    private fun styledLines(lines: List<PaperLine>): CharSequence {
+    private fun styledLines(lines: List<PaperLine>): Pair<CharSequence, IntArray> {
         val builder = SpannableStringBuilder()
-        for (line in lines) {
+        val starts = IntArray(lines.size)
+        for ((index, line) in lines.withIndex()) {
             val start = builder.length
+            starts[index] = start
             val content: CharSequence = when (line.kind) {
                 PaperKind.BULLET -> inline("•  ${line.text}")
                 PaperKind.TASK -> inline(if (line.text.startsWith("x|")) "☑  ${line.text.removePrefix("x|")}" else "☐  ${line.text.removePrefix(" |").removePrefix("|")}")
@@ -1424,13 +1463,36 @@ class InkSurfaceView @JvmOverloads constructor(
                         builder.setSpan(StyleSpan(Typeface.BOLD), start, end, 0)
                     }
                     PaperKind.QUOTE -> builder.setSpan(StyleSpan(Typeface.ITALIC), start, end, 0)
-                    PaperKind.CODE, PaperKind.MATH -> builder.setSpan(TypefaceSpan("monospace"), start, end, 0)
+                    PaperKind.CODE -> builder.setSpan(TypefaceSpan("monospace"), start, end, 0)
+                    PaperKind.MATH -> {
+                        builder.setSpan(TypefaceSpan("monospace"), start, end, 0)
+                        builder.setSpan(ForegroundColorSpan(accentSecondary), start, end, 0)
+                    }
                     else -> Unit
                 }
             }
             builder.append('\n')
         }
-        return builder
+        return builder to starts
+    }
+
+    private val numberPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.parseColor("#8A8D98")
+        textAlign = Paint.Align.RIGHT
+    }
+
+    private fun drawLineNumbers(canvas: Canvas, block: PaperBlock.Text, first: Int, scale: Float) {
+        block.paragraphStarts.forEachIndexed { index, offset ->
+            val safe = offset.coerceIn(0, block.layout.text.length)
+            val visual = block.layout.getLineForOffset(safe)
+            drawNumber(canvas, (first + index).toString(), block.layout.getLineBaseline(visual).toFloat(), scale)
+        }
+    }
+
+    private fun drawNumber(canvas: Canvas, label: String, baseline: Float, scale: Float) {
+        numberPaint.textSize = editorFontPx * scale * 0.82f
+        numberPaint.typeface = editorTypeface
+        canvas.drawText(label, -8f * scale, baseline, numberPaint)
     }
 
     private fun inline(text: String): CharSequence {
@@ -1768,7 +1830,7 @@ class InkSurfaceView @JvmOverloads constructor(
 }
 
 private sealed class PaperBlock {
-    class Text(val layout: StaticLayout) : PaperBlock()
+    class Text(val layout: StaticLayout, val paragraphStarts: IntArray) : PaperBlock()
     class Table(val rows: List<List<String>>, val rowHeights: FloatArray, val cellLayouts: List<List<StaticLayout>>) : PaperBlock()
 }
 
