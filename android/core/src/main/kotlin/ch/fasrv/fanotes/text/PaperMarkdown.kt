@@ -5,7 +5,7 @@ package ch.fasrv.fanotes.text
  * and code, with the ink marker and other HTML comments left off the page.
  * Inline markers such as `**bold**` stay in the text for the renderer.
  */
-enum class PaperKind { H1, H2, H3, H4, PARAGRAPH, BULLET, NUMBER, TASK, QUOTE, CODE, MATH, RULE, TABLE, SPACER }
+enum class PaperKind { H1, H2, H3, H4, H5, H6, PARAGRAPH, BULLET, NUMBER, TASK, QUOTE, CODE, MATH, RULE, TABLE, SPACER }
 
 data class PaperLine(val kind: PaperKind, val text: String, val sourceLine: Int = -1)
 
@@ -80,8 +80,8 @@ fun paperLines(markdown: String): List<PaperLine> {
         val task = TASK.find(raw)
         when {
             trimmed.isEmpty() -> out += PaperLine(PaperKind.SPACER, "", index)
-            trimmed.startsWith("###### ") -> out += PaperLine(PaperKind.H4, trimmed.drop(7).trim(), index)
-            trimmed.startsWith("##### ") -> out += PaperLine(PaperKind.H4, trimmed.drop(6).trim(), index)
+            trimmed.startsWith("###### ") -> out += PaperLine(PaperKind.H6, trimmed.drop(7).trim(), index)
+            trimmed.startsWith("##### ") -> out += PaperLine(PaperKind.H5, trimmed.drop(6).trim(), index)
             trimmed.startsWith("#### ") -> out += PaperLine(PaperKind.H4, trimmed.drop(5).trim(), index)
             trimmed.startsWith("### ") -> out += PaperLine(PaperKind.H3, trimmed.drop(4).trim(), index)
             trimmed.startsWith("## ") -> out += PaperLine(PaperKind.H2, trimmed.drop(3).trim(), index)

@@ -72,6 +72,34 @@ fun paperMathBox(textSizePx: Float): PaperMathBox {
     )
 }
 
+data class PaperHeading(
+    val scale: Float,
+    val padTop: Float,
+    val padBottom: Float,
+    val letterSpacing: Float,
+)
+
+/**
+ * Paper heading rhythm. Padding in the stylesheet is `em` of the heading's
+ * own size, so a level-1 top pad of 0.5em is one body em. Tracking is -0.025em.
+ */
+fun paperHeading(level: Int, textSizePx: Float): PaperHeading {
+    val base = if (textSizePx <= 0f) 16f else textSizePx
+    val (scale, padTopEm, padBottomEm) = when (level) {
+        1 -> Triple(2f, 0.5f, 0.28f)
+        2 -> Triple(1.55f, 0.62f, 0f)
+        3 -> Triple(1.28f, 0.45f, 0f)
+        4 -> Triple(1.1f, 0.35f, 0f)
+        else -> Triple(1f, 0.25f, 0f)
+    }
+    return PaperHeading(
+        scale = scale,
+        padTop = base * scale * padTopEm,
+        padBottom = base * scale * padBottomEm,
+        letterSpacing = -0.025f,
+    )
+}
+
 data class PaperDetailsBox(
     val radius: Float,
     val marginY: Float,

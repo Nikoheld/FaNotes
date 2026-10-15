@@ -15,7 +15,6 @@ import android.text.SpannableStringBuilder
 import android.text.StaticLayout
 import android.text.TextPaint
 import android.text.style.ForegroundColorSpan
-import android.text.style.RelativeSizeSpan
 import android.text.style.StyleSpan
 import android.text.style.TypefaceSpan
 import android.os.Build
@@ -1678,19 +1677,12 @@ class InkSurfaceView @JvmOverloads constructor(
             val end = builder.length
             if (end > start) {
                 when (line.kind) {
-                    PaperKind.H1 -> {
-                        builder.setSpan(RelativeSizeSpan(2f), start, end, 0)
-                        builder.setSpan(StyleSpan(Typeface.BOLD), start, end, 0)
-                        builder.setSpan(PaperRuleSpan(textSize), start, end, 0)
-                    }
-                    PaperKind.H2 -> {
-                        builder.setSpan(RelativeSizeSpan(1.55f), start, end, 0)
-                        builder.setSpan(StyleSpan(Typeface.BOLD), start, end, 0)
-                    }
-                    PaperKind.H3, PaperKind.H4 -> {
-                        builder.setSpan(RelativeSizeSpan(1.28f), start, end, 0)
-                        builder.setSpan(StyleSpan(Typeface.BOLD), start, end, 0)
-                    }
+                    PaperKind.H1 -> builder.setSpan(HeadingSpan(1, textSize), start, end, 0)
+                    PaperKind.H2 -> builder.setSpan(HeadingSpan(2, textSize), start, end, 0)
+                    PaperKind.H3 -> builder.setSpan(HeadingSpan(3, textSize), start, end, 0)
+                    PaperKind.H4 -> builder.setSpan(HeadingSpan(4, textSize), start, end, 0)
+                    PaperKind.H5 -> builder.setSpan(HeadingSpan(5, textSize), start, end, 0)
+                    PaperKind.H6 -> builder.setSpan(HeadingSpan(6, textSize), start, end, 0)
                     PaperKind.BULLET -> {
                         val marker = (start + 2).coerceAtMost(end)
                         builder.setSpan(ForegroundColorSpan(readable), start, marker, 0)

@@ -24,6 +24,19 @@ class EditorWashTest {
         assertEquals(5f, code.radius, 0.01f)
         assertEquals(1f, code.border, 0.01f)
         assertTrue(paperCodeBox(32f).textPx > code.textPx)
+        val h1 = paperHeading(1, 16f)
+        assertEquals(2f, h1.scale)
+        assertEquals(16f, h1.padTop, 0.01f)
+        assertEquals(8.96f, h1.padBottom, 0.01f)
+        assertEquals(-0.025f, h1.letterSpacing)
+        val h2 = paperHeading(2, 16f)
+        assertEquals(1.55f, h2.scale)
+        assertEquals(16f * 1.55f * 0.62f, h2.padTop, 0.01f)
+        assertEquals(0f, h2.padBottom)
+        assertEquals(1.28f, paperHeading(3, 16f).scale)
+        assertEquals(1.1f, paperHeading(4, 16f).scale)
+        assertEquals(1f, paperHeading(5, 16f).scale)
+        assertEquals(16f * 0.25f, paperHeading(6, 16f).padTop, 0.01f)
     }
 
     @Test
