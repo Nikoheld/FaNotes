@@ -168,6 +168,14 @@ fun listFollowsSelection(reduceMotion: Boolean): String = if (reduceMotion) "ins
 /** File-tree row height from the desktop `--row-height`. */
 fun chromeRowHeightDp(compact: Boolean, overrideDp: Int? = null) = overrideDp ?: if (compact) 27 else 31
 
+/** File-tree row from the stylesheet: 7px corners, 13px per level, and a 2×17 accent mark. */
+const val TREE_ROW_RADIUS_DP = 7
+const val TREE_DEPTH_DP = 13
+const val TREE_MARK_WIDTH_DP = 2
+const val TREE_MARK_HEIGHT_DP = 17
+const val TREE_DRAG_ALPHA = 0.42f
+const val TREE_SPLIT_MARK_ALPHA = 0.45f
+
 /** The shell grid row is 44px. Ribbon buttons are 30px tall with 6px corners and 8px of side padding. */
 const val RIBBON_HEIGHT_DP = 44
 const val RIBBON_BUTTON_DP = 30
