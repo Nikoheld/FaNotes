@@ -1166,6 +1166,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     val study = MutableStateFlow<StudyPicture?>(null)
     val deskSettings = MutableStateFlow(graph.readDesk())
     val splitPath = MutableStateFlow<String?>(null)
+    val splitMarkdown = MutableStateFlow("")
     val splitSession = InkSession(newInkDocument("Spalte", "dots", isoNow()))
     private var splitNote: OpenNote? = null
     private var openedAtMs = 0L
@@ -1273,6 +1274,26 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     fun toggleSplitOrientation() {
         val next = if (deskSettings.value["split-orientation"] == "rows") "columns" else "rows"
         updateDesk("split-orientation", next)
+    }
+
+    fun setSplitRatio(ratio: Double) {
+        updateDesk("split-ratio", ch.fasrv.fanotes.desk.clampSplitRatio(ratio).toString())
+    }
+
+    fun closeSplit() {
+        splitPath.value = null
+        splitNote = null
+        splitMarkdown.value = ""
+        persistWorkspace()
+    }
+
+    /** The split note becomes the only open note. The previous main note stays in the tabs. */
+    fun promoteSplit() {
+        val path = splitPath.value ?: return
+        splitPath.value = null
+        splitNote = null
+        splitMarkdown.value = ""
+        openPath(path, force = true)
     }
 
     fun rankNotes(query: String, limit: Int = 8): List<SwitcherNote> {
@@ -1628,6 +1649,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         session.replace(savedSplit.document)
         splitSession.replace(mainDocument)
         splitNote = mainNote.copy(markdown = mainMarkdown, document = mainDocument)
+        splitMarkdown.value = mainMarkdown
         splitPath.value = mainNote.path
         open.value = noteOpened(savedSplit)
         markdown.value = savedSplit.markdown
@@ -1649,6 +1671,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
             val note = withContext(Dispatchers.IO) { graph.store.readNote(path) }
             splitSession.replace(note.document)
             splitNote = note
+            splitMarkdown.value = note.markdown
             rememberTab(path)
             splitPath.value = path
             persistWorkspace()

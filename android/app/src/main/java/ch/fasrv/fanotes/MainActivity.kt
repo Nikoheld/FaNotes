@@ -23,6 +23,9 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -77,7 +80,10 @@ import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.dp
@@ -370,7 +376,12 @@ fun FaNotesScreen(
                     if (showBook && (bookPlacement == "oben" || bookPlacement == "unten")) {
                         Column(Modifier.weight(1f).fillMaxHeight()) {
                             if (bookPlacement == "oben") BookPane(model, Modifier.height(220.dp).fillMaxWidth(), openBook)
-                            NoteWithSplit(splitRows, model, tool, style, finger, Modifier.weight(1f).fillMaxHeight()) {
+                            NoteWithSplit(
+                            splitRows,
+                            ch.fasrv.fanotes.desk.splitRatioFromSetting(desk["split-ratio"]),
+                            { model.setSplitRatio(it) },
+                            model, tool, style, finger, Modifier.weight(1f).fillMaxHeight(),
+                        ) {
                                 NotePage(
                                     model, tool, style, finger, showText, markdown, backdrop, token, open?.path, syncText,
                                     syncPending || sync.status == SyncStatus.SYNCING, { requestSync() }, { model.showList.value = !showList },
@@ -383,7 +394,12 @@ fun FaNotesScreen(
                             if (bookPlacement == "unten") BookPane(model, Modifier.height(220.dp).fillMaxWidth(), openBook)
                         }
                     } else {
-                        NoteWithSplit(splitRows, model, tool, style, finger, Modifier.weight(1f).fillMaxHeight()) {
+                        NoteWithSplit(
+                            splitRows,
+                            ch.fasrv.fanotes.desk.splitRatioFromSetting(desk["split-ratio"]),
+                            { model.setSplitRatio(it) },
+                            model, tool, style, finger, Modifier.weight(1f).fillMaxHeight(),
+                        ) {
                             NotePage(
                                 model, tool, style, finger, showText, markdown, backdrop, token, open?.path, syncText,
                                 syncPending || sync.status == SyncStatus.SYNCING, { requestSync() }, { model.showList.value = !showList },
@@ -397,9 +413,6 @@ fun FaNotesScreen(
                     if (showBook && bookPlacement == "rechts") {
                         BookPane(model, Modifier.width(280.dp).fillMaxHeight(), openBook)
                     }
-                }
-                if (destination == "notes" && split != null && desk["split-orientation"] != "rows") {
-                    SplitPane(model, tool, style, finger, Modifier.width(360.dp).fillMaxHeight())
                 }
                 if (destination == "notes" && wide && desk["outline"] != "off" && !focus) {
                     Box(Modifier.width(240.dp).fillMaxHeight()) { Inspector(model) { model.openPath(it) } }
@@ -855,6 +868,8 @@ private fun EditorTools(
 @Composable
 private fun NoteWithSplit(
     rows: Boolean,
+    ratio: Double,
+    onRatio: (Double) -> Unit,
     model: FaNotesViewModel,
     tool: InkTool,
     style: ch.fasrv.fanotes.ink.StrokeStyle,
@@ -862,13 +877,81 @@ private fun NoteWithSplit(
     modifier: Modifier,
     page: @Composable (Modifier) -> Unit,
 ) {
-    if (!rows) {
+    val split = model.splitPath.collectAsStateWithLifecycle().value
+    if (split == null) {
         page(modifier)
         return
     }
-    Column(modifier) {
-        page(Modifier.weight(1f).fillMaxWidth())
-        SplitPane(model, tool, style, finger, Modifier.fillMaxWidth().height(240.dp))
+    var live by remember(ratio) { mutableStateOf(ratio) }
+    val ratioNow = remember { object { var value: Double = ratio } }
+    ratioNow.value = live
+    BoxWithConstraints(modifier) {
+        val density = LocalDensity.current
+        val totalPx = if (rows) constraints.maxHeight.toDouble() else constraints.maxWidth.toDouble()
+        val dividerPx = with(density) { 8.dp.toPx().toDouble() }
+        val firstPx = ch.fasrv.fanotes.desk.splitFirstPaneSize(totalPx, dividerPx, live, density.density.toDouble())
+        val first = with(density) { firstPx.toFloat().toDp() }
+        var box by remember { mutableStateOf(androidx.compose.ui.unit.IntSize.Zero) }
+        val positioned = Modifier.fillMaxSize().onGloballyPositioned { box = it.size }
+        if (rows) {
+            Column(positioned) {
+                page(Modifier.height(first).fillMaxWidth())
+                SplitDivider(true, box, live, { ratioNow.value = it; live = it }, { onRatio(ratioNow.value) }, { ratioNow.value = 0.5; live = 0.5; onRatio(0.5) })
+                SplitPane(model, tool, style, finger, Modifier.weight(1f).fillMaxWidth())
+            }
+        } else {
+            Row(positioned) {
+                page(Modifier.width(first).fillMaxHeight())
+                SplitDivider(false, box, live, { ratioNow.value = it; live = it }, { onRatio(ratioNow.value) }, { ratioNow.value = 0.5; live = 0.5; onRatio(0.5) })
+                SplitPane(model, tool, style, finger, Modifier.weight(1f).fillMaxHeight())
+            }
+        }
+    }
+}
+
+@Composable
+private fun SplitDivider(
+    rows: Boolean,
+    box: androidx.compose.ui.unit.IntSize,
+    ratio: Double,
+    onLive: (Double) -> Unit,
+    onCommit: () -> Unit,
+    onReset: () -> Unit,
+) {
+    val liveChange = androidx.compose.runtime.rememberUpdatedState(onLive)
+    val commitChange = androidx.compose.runtime.rememberUpdatedState(onCommit)
+    val resetChange = androidx.compose.runtime.rememberUpdatedState(onReset)
+    val ratioNow = androidx.compose.runtime.rememberUpdatedState(ratio)
+    val boxState = androidx.compose.runtime.rememberUpdatedState(box)
+    Box(
+        Modifier
+            .then(if (rows) Modifier.fillMaxWidth().height(8.dp) else Modifier.fillMaxHeight().width(8.dp))
+            .background(MaterialTheme.colorScheme.outline.copy(alpha = 0.45f))
+            .pointerInput(rows) {
+                detectTapGestures(onDoubleTap = { resetChange.value() })
+            }
+            .pointerInput(rows) {
+                var current = 0.5
+                detectDragGestures(
+                    onDragStart = { current = ratioNow.value },
+                    onDragEnd = { commitChange.value() },
+                    onDrag = { change, drag ->
+                        val size = boxState.value
+                        val total = (if (rows) size.height else size.width).coerceAtLeast(1)
+                        val delta = if (rows) drag.y else drag.x
+                        current = ch.fasrv.fanotes.desk.clampSplitRatio(current + delta / total.toDouble())
+                        liveChange.value(current)
+                        change.consume()
+                    },
+                )
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            Modifier
+                .then(if (rows) Modifier.width(28.dp).height(3.dp) else Modifier.width(3.dp).height(28.dp))
+                .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f)),
+        )
     }
 }
 
@@ -880,27 +963,62 @@ private fun SplitPane(
     finger: Boolean,
     modifier: Modifier,
 ) {
+    val path = model.splitPath.collectAsStateWithLifecycle().value
+    val markdown = model.splitMarkdown.collectAsStateWithLifecycle().value
+    val title = path?.let { ch.fasrv.fanotes.vault.titleOf(it) }.orEmpty()
     Column(modifier) {
         Row(Modifier.padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("Zweite Spalte", fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+            Text(title.ifBlank { "Zweite Spalte" }, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f), maxLines = 1)
             TextButton(onClick = { model.swapSplit() }) { Text("Tauschen") }
             TextButton(onClick = { model.toggleSplitOrientation() }) { Text("Drehen") }
-            TextButton(onClick = { model.splitPath.value = null }) { Text("Schließen") }
+            TextButton(onClick = { model.promoteSplit() }) { Text("Einzeln") }
+            TextButton(onClick = { model.closeSplit() }) { Text("Schließen") }
         }
         AndroidView(
             modifier = Modifier.weight(1f).fillMaxWidth(),
             factory = { context ->
                 InkSurfaceView(context).apply {
                     session = model.splitSession
+                    showMarkdown = true
                     onChanged = { model.splitChanged() }
                 }
             },
             update = { view ->
                 view.session = model.splitSession
+                view.markdown = markdown
+                view.showMarkdown = markdown.isNotBlank()
                 view.inkTool = tool
                 view.style = style
                 view.fingerDraws = finger
                 view.onChanged = { model.splitChanged() }
+                view.onCamera = camera@{ _, _, _ ->
+                    val current = path ?: return@camera
+                    val sample = view.cameraSample() ?: return@camera
+                    model.rememberPaperCamera(
+                        current,
+                        sample.zoom,
+                        sample.rotation,
+                        sample.centreX,
+                        sample.centreY,
+                        sample.pageWidth,
+                        sample.pageHeight,
+                        null,
+                    )
+                }
+                if (view.tag != path) {
+                    view.tag = path
+                    val entry = path?.let { model.recallPaperCamera(it) }
+                    if (entry != null) {
+                        view.restoreCamera(
+                            entry.zoom,
+                            entry.rotation,
+                            entry.centreX,
+                            entry.centreY,
+                            entry.pageWidth,
+                            path.endsWith(".pdf", ignoreCase = true),
+                        )
+                    }
+                }
             },
         )
     }
