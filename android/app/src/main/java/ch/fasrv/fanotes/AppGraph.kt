@@ -143,6 +143,12 @@ class AppGraph(context: Context) {
         prefs.edit().putString("workspace-$vaultId", json).apply()
     }
 
+    fun readExpandedFolders(vaultId: String): String? = prefs.getString("fanotes.treeExpanded.v1-$vaultId", null)
+
+    fun writeExpandedFolders(vaultId: String, json: String) {
+        prefs.edit().putString("fanotes.treeExpanded.v1-$vaultId", json).apply()
+    }
+
     fun readPaperViews(): String? = prefs.getString(ch.fasrv.fanotes.desk.PAPER_VIEW_MEMORY_KEY, null)
 
     fun writePaperViews(json: String) {

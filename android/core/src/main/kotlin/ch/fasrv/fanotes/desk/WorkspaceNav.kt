@@ -111,6 +111,40 @@ fun movableFolderTargets(folders: List<String>, moving: String): List<String> {
 fun remapPath(path: String, from: String, to: String): String? =
     if (isSelfOrInside(path, from)) to + path.substring(from.length) else null
 
+/** Folders above a note, outermost first. A root note has none. */
+fun parentFolders(path: String): List<String> {
+    val parts = path.replace('\\', '/').split('/').filter { it.isNotEmpty() }
+    if (parts.size < 2) return emptyList()
+    return (1 until parts.size).map { index -> parts.take(index).joinToString("/") }
+}
+
+/** Clicking a folder opens it, or closes it when it is already open. */
+fun toggleExpandedFolder(expanded: Set<String>, path: String, forceOpen: Boolean? = null): Set<String> {
+    if (path.isEmpty()) return expanded
+    val open = forceOpen ?: (path !in expanded)
+    return if (open) expanded + path else expanded - path
+}
+
+/** The note that just opened stays visible: every folder above it is open. */
+fun revealExpandedFolders(expanded: Set<String>, path: String): Set<String> =
+    expanded + parentFolders(path)
+
+fun remapExpandedFolders(expanded: Set<String>, from: String, to: String): Set<String> =
+    expanded.map { remapPath(it, from, to) ?: it }.toSet()
+
+/** Same JSON array the desktop keeps in `fanotes.treeExpanded.v1`. */
+fun expandedFoldersJson(folders: Collection<String>): String {
+    val items = mutableListOf<JsonValue>()
+    folders.filter { it.isNotEmpty() }.distinct().forEach { items += jsonString(it) }
+    return JsonValue.Arr(items).stringify()
+}
+
+fun parseExpandedFolders(raw: String?): Set<String> {
+    if (raw.isNullOrBlank()) return emptySet()
+    val parsed = runCatching { parseJson(raw) }.getOrNull() as? JsonValue.Arr ?: return emptySet()
+    return parsed.items.mapNotNull { (it as? JsonValue.Str)?.value?.takeIf { path -> path.isNotEmpty() } }.toSet()
+}
+
 data class Breadcrumb(val label: String, val path: String, val isNote: Boolean)
 
 private val NOTE_EXTENSION = Regex("\\.(md|markdown|famd|pdf)$", RegexOption.IGNORE_CASE)

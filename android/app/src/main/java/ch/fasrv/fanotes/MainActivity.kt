@@ -477,6 +477,8 @@ fun FaNotesScreen(
                     onToggleLocal = { model.toggleLocalFolder(it) },
                     colors = model.folderColors.collectAsStateWithLifecycle().value,
                     onFolderColor = { model.cycleFolderColor(it) },
+                    expanded = model.expandedFolders.collectAsStateWithLifecycle().value,
+                    onToggleFolder = { model.toggleFolder(it) },
                     onOpenSplit = { model.openInSplit(it) },
                     compact = compact,
                     rowHeightDp = chrome.rowHeightDp,
@@ -790,6 +792,8 @@ private fun VaultPane(
     onToggleLocal: (String) -> Unit = {},
     colors: Map<String, String>,
     onFolderColor: (String) -> Unit,
+    expanded: Set<String>,
+    onToggleFolder: (String) -> Unit,
     onOpenSplit: (String) -> Unit,
     conflicts: List<ch.fasrv.fanotes.sync.SyncConflict>,
     onResolve: (ch.fasrv.fanotes.sync.SyncConflict, String) -> Unit,
@@ -863,7 +867,7 @@ private fun VaultPane(
         }
         LazyColumn(Modifier.weight(1f).padding(top = 8.dp)) {
             items(tree, key = { it.path }) { node ->
-                NoteRow(node, selected, colors, onOpen, onDelete, onRename, onMove, onFolderColor, onOpenSplit, localFolders, onToggleLocal, compact, rowHeightDp, radiusDp, depth = 0)
+                NoteRow(node, selected, colors, expanded, onOpen, onDelete, onRename, onMove, onFolderColor, onToggleFolder, onOpenSplit, localFolders, onToggleLocal, compact, rowHeightDp, radiusDp, depth = 0)
             }
         }
         TextButton(onClick = onOpenVault) { Text("Vault-Ordner öffnen") }
@@ -876,11 +880,13 @@ private fun NoteRow(
     node: VaultNode,
     selected: String?,
     colors: Map<String, String>,
+    expanded: Set<String>,
     onOpen: (String) -> Unit,
     onDelete: (String, Boolean, String) -> Unit,
     onRename: (String, String) -> Unit,
     onMove: (String) -> Unit,
     onFolderColor: (String) -> Unit,
+    onToggleFolder: (String) -> Unit,
     onOpenSplit: (String) -> Unit,
     localFolders: List<String>,
     onToggleLocal: (String) -> Unit,
@@ -890,6 +896,8 @@ private fun NoteRow(
     depth: Int,
 ) {
     val folderColor = colors[node.path]
+    val folder = node.kind == NoteKind.FOLDER
+    val openFolder = folder && node.path in expanded
     Row(
         Modifier
             .fillMaxWidth()
@@ -897,18 +905,27 @@ private fun NoteRow(
             .height(ch.fasrv.fanotes.desk.chromeRowHeightDp(compact, rowHeightDp).dp)
             .clip(RoundedCornerShape(radiusDp.dp))
             .background(if (node.path == selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f) else Color.Transparent)
-            .clickable { if (node.kind == NoteKind.FOLDER) onFolderColor(node.path) else onOpen(node.path) }
+            .clickable(onClickLabel = if (folder) { if (openFolder) "Zuklappen" else "Aufklappen" } else "Öffnen") {
+                if (folder) onToggleFolder(node.path) else onOpen(node.path)
+            }
             .padding(horizontal = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        Text(
+            if (!folder) "" else if (openFolder) "▾" else "▸",
+            fontSize = 12.sp,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+            modifier = Modifier.width(14.dp),
+        )
         Icon(
             when (node.kind) {
                 NoteKind.FOLDER -> Icons.Filled.Folder
                 NoteKind.PDF -> Icons.Filled.PictureAsPdf
                 NoteKind.MARKDOWN -> Icons.Filled.Description
             },
-            contentDescription = null,
+            contentDescription = if (folder) "Ordnerfarbe" else null,
             tint = folderColor?.let { Color(android.graphics.Color.parseColor(it)) } ?: MaterialTheme.colorScheme.primary,
+            modifier = if (folder) Modifier.clickable(onClickLabel = "Ordnerfarbe") { onFolderColor(node.path) } else Modifier,
         )
         Text(node.name, modifier = Modifier.weight(1f).padding(start = 8.dp), maxLines = 1)
         if (node.kind != NoteKind.FOLDER) {
@@ -940,8 +957,8 @@ private fun NoteRow(
             Icon(Icons.Filled.Delete, contentDescription = "Löschen")
         }
     }
-    if (node.kind == NoteKind.FOLDER) {
-        node.children.forEach { NoteRow(it, selected, colors, onOpen, onDelete, onRename, onMove, onFolderColor, onOpenSplit, localFolders, onToggleLocal, compact, rowHeightDp, radiusDp, depth + 1) }
+    if (openFolder) {
+        node.children.forEach { NoteRow(it, selected, colors, expanded, onOpen, onDelete, onRename, onMove, onFolderColor, onToggleFolder, onOpenSplit, localFolders, onToggleLocal, compact, rowHeightDp, radiusDp, depth + 1) }
     }
 }
 

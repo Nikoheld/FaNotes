@@ -17,6 +17,16 @@ class WorkspaceNavTest {
         assertNull(swappedSplit("A.md", null))
         assertNull(swappedSplit("A.md", "A.md"))
         assertEquals("B.md" to "A.md", swappedSplit("A.md", "B.md"))
+        assertEquals(emptyList(), parentFolders("Note.md"))
+        assertEquals(listOf("Schule", "Schule/Unter"), parentFolders("Schule/Unter/Blatt.md"))
+        assertEquals(setOf("Schule"), toggleExpandedFolder(emptySet(), "Schule"))
+        assertEquals(emptySet(), toggleExpandedFolder(setOf("Schule"), "Schule"))
+        assertEquals(setOf("Schule"), toggleExpandedFolder(setOf("Schule"), "Schule", forceOpen = true))
+        assertEquals(setOf("Schule", "Schule/Unter"), revealExpandedFolders(setOf("Schule"), "Schule/Unter/Blatt.md"))
+        assertEquals(setOf("Archiv", "Archiv/Alt"), remapExpandedFolders(setOf("Schule", "Schule/Alt"), "Schule", "Archiv"))
+        assertEquals(setOf("Schule", "Schule/Unter"), parseExpandedFolders(expandedFoldersJson(listOf("Schule", "Schule/Unter", ""))))
+        assertEquals(emptySet(), parseExpandedFolders("{"))
+        assertEquals(emptySet(), parseExpandedFolders(null))
         assertEquals(
             listOf("Archiv", "Archiv/Alt", "Schule/Unter"),
             movableFolderTargets(listOf("Schule", "Archiv", "Archiv/Alt", "Schule/Unter"), "Schule/Mathe.md"),
