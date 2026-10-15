@@ -32,6 +32,7 @@ import ch.fasrv.fanotes.ink.DraftingKind
 import ch.fasrv.fanotes.ink.DraftingPose
 import ch.fasrv.fanotes.ink.DraftingSnapLock
 import ch.fasrv.fanotes.ink.DraftingToolState
+import ch.fasrv.fanotes.ink.InkDocument
 import ch.fasrv.fanotes.ink.InkSession
 import ch.fasrv.fanotes.ink.InkStroke
 import ch.fasrv.fanotes.ink.InkTool
@@ -120,6 +121,7 @@ class InkSurfaceView @JvmOverloads constructor(
             invalidateTiles()
         }
     var onChanged: () -> Unit = {}
+    var onPageGrew: (Double, Double, Double, Double, Double, Double) -> Unit = { _, _, _, _, _, _ -> }
     var onPenSample: (Double, Double) -> Unit = { _, _ -> }
     var onSwipeNote: (Int) -> Unit = {}
     var onCamera: (Float, Float, Float) -> Unit = { _, _, _ -> }
@@ -364,7 +366,9 @@ class InkSurfaceView @JvmOverloads constructor(
         val current = session ?: return
         val samples = sampleCompassCircle(pose, sessionWidth(), sessionHeight(), sheetDisplay())
         val points = samples.map { sample -> StrokePoint(sample.x, sample.y, 0.0, 0.45, 0.0, 0.0, "pen") }
+        val before = current.document
         val stroke = current.commitShape(points, style, nowIso()) ?: return
+        settleGrownPage(before)
         invalidateTiles(stroke)
         onChanged()
         invalidate()
@@ -544,7 +548,7 @@ class InkSurfaceView @JvmOverloads constructor(
                 val hit = snapToDraftingTools(raw.first, raw.second, visibleTools(), sessionWidth(), sessionHeight(), null, sheetDisplay())
                 snapLock = hit?.let { DraftingSnapLock(it.kind, it.edgeIndex) }
                 current.beginStroke()
-                current.addSample(penSample(event, index))
+                addGrownSample(current, penSample(event, index))
             }
         }
         predictor?.record(event)
@@ -584,9 +588,9 @@ class InkSurfaceView @JvmOverloads constructor(
             }
         } else {
             if (!shapeSnapped) {
-                for (h in 0 until history) current.addSample(penSample(event, index, h))
+                for (h in 0 until history) addGrownSample(current, penSample(event, index, h))
                 val samplePoint = penSample(event, index)
-                if (current.addSample(samplePoint)) onPenSample(samplePoint.x, samplePoint.y)
+                if (addGrownSample(current, samplePoint)) onPenSample(samplePoint.x, samplePoint.y)
                 if (isStrokeDwelling(current.livePoints, sessionWidth(), sessionHeight())) trySnapLive()
                 predicted = if (shapeSnapped) emptyList() else predict(event)
             }
@@ -1152,11 +1156,33 @@ class InkSurfaceView @JvmOverloads constructor(
         onCamera(pageLeft, pageTop, pixelsPerPageUnit())
     }
 
+    private fun addGrownSample(current: InkSession, sample: StrokePoint): Boolean {
+        val before = current.document
+        val accepted = current.addSample(sample)
+        settleGrownPage(before)
+        return accepted
+    }
+
+    /** Pan by a new left or top pad so the marks already on the page stay put. */
+    private fun settleGrownPage(before: InkDocument) {
+        val document = session?.document ?: return
+        val padX = document.originX - before.originX
+        val padY = document.originY - before.originY
+        if (padX == 0.0 && padY == 0.0 && document.sourceWidth == before.sourceWidth && document.sourceHeight == before.sourceHeight) return
+        val scale = pixelsPerPageUnit()
+        if (padX != 0.0) pageLeft -= (ch.fasrv.fanotes.ink.paperOriginScrollDelta(padX) * scale).toFloat()
+        if (padY != 0.0) pageTop -= (ch.fasrv.fanotes.ink.paperOriginScrollDelta(padY) * scale).toFloat()
+        invalidateTiles()
+        onPageGrew(before.sourceWidth, before.sourceHeight, document.sourceWidth, document.sourceHeight, padX, padY)
+    }
+
     private fun drawMarkdown(canvas: Canvas, scale: Float) {
         val blocks = paperBlocks(scale)
         if (blocks.isEmpty()) return
         canvas.save()
-        canvas.translate(pageLeft + TEXT_PAD_X * scale, pageTop + TEXT_PAD_Y * scale)
+        val originX = (session?.document?.originX ?: 0.0).toFloat()
+        val originY = (session?.document?.originY ?: 0.0).toFloat()
+        canvas.translate(pageLeft + (TEXT_PAD_X + originX) * scale, pageTop + (TEXT_PAD_Y + originY) * scale)
         for (block in blocks) {
             when (block) {
                 is PaperBlock.Text -> {

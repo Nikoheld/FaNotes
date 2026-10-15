@@ -7,7 +7,6 @@ import ch.fasrv.fanotes.json.jsonBool
 import ch.fasrv.fanotes.json.jsonNumber
 import ch.fasrv.fanotes.json.jsonString
 import kotlin.math.max
-import kotlin.math.min
 
 /** Drawing document stored as `payload.ink` and as `.fanotes/assets/<id>.json`. */
 const val INK_SCHEMA_VERSION = 1
@@ -62,6 +61,9 @@ data class InkDocument(
     val strokes: List<InkStroke>,
     val createdAt: String,
     val updatedAt: String,
+    /** Paper already inserted on the left and top. Stored as `sourceOriginX` / `sourceOriginY`. */
+    val originX: Double = 0.0,
+    val originY: Double = 0.0,
     val extras: JsonValue.Obj = JsonValue.Obj(),
 ) {
     fun toJson(): JsonValue.Obj {
@@ -71,6 +73,8 @@ data class InkDocument(
         obj.put("paperStyle", jsonString(paperStyle))
         obj.put("sourceWidth", jsonNumber(sourceWidth))
         obj.put("sourceHeight", jsonNumber(sourceHeight))
+        if (originX > 0.0) obj.put("sourceOriginX", jsonNumber(originX))
+        if (originY > 0.0) obj.put("sourceOriginY", jsonNumber(originY))
         obj.put("createdAt", jsonString(createdAt))
         obj.put("updatedAt", jsonString(updatedAt))
         obj.put("overlayQuality", jsonNumber(OVERLAY_QUALITY))
@@ -123,6 +127,8 @@ fun parseInkDocument(value: JsonValue.Obj?, title: String, paperStyle: String, n
         sourceWidth = value.double("sourceWidth")?.takeIf { it >= 64 } ?: PAGE_START_WIDTH,
         sourceHeight = value.double("sourceHeight")?.takeIf { it >= 64 } ?: PAGE_START_HEIGHT,
         strokes = strokes,
+        originX = value.double("sourceOriginX")?.takeIf { it.isFinite() && it > 0.0 } ?: 0.0,
+        originY = value.double("sourceOriginY")?.takeIf { it.isFinite() && it > 0.0 } ?: 0.0,
         createdAt = value.string("createdAt") ?: now,
         updatedAt = value.string("updatedAt") ?: now,
         extras = extras,
@@ -131,6 +137,7 @@ fun parseInkDocument(value: JsonValue.Obj?, title: String, paperStyle: String, n
 
 private val DOCUMENT_KEYS = setOf(
     "schemaVersion", "title", "paperStyle", "sourceWidth", "sourceHeight",
+    "sourceOriginX", "sourceOriginY",
     "createdAt", "updatedAt", "overlayQuality", "overlayQualityZoom", "strokes",
 )
 
@@ -178,21 +185,44 @@ fun newInkDocument(title: String, paperStyle: String, now: String) = InkDocument
 )
 
 /**
- * Grows the page when a sample in current page pixels would land inside the
- * write margin, then returns that sample in the new 0–1 space. Existing
- * strokes keep their page-pixel position.
+ * Grows the page around a sample in current page pixels. A mark inside the
+ * left or top margin inserts origin paper; a mark inside the right or bottom
+ * margin extends that edge. Existing strokes keep their page-pixel position.
  */
-fun growDocument(document: InkDocument, pageX: Double, pageY: Double): Pair<InkDocument, StrokePoint?> {
-    var width = document.sourceWidth
-    var height = document.sourceHeight
-    if (pageX > width - WRITE_MARGIN_X) {
-        width = min(WRITE_CAP_WIDTH, max(width + GROW_STEP_X, pageX + WRITE_MARGIN_X))
+fun growDocument(document: InkDocument, pageX: Double, pageY: Double): GrownInk {
+    val width = document.sourceWidth
+    val height = document.sourceHeight
+    if (width < 1.0 || height < 1.0 || !pageX.isFinite() || !pageY.isFinite()) return GrownInk(document, 0.0, 0.0)
+    val grown = growPageFromMark(width, height, document.originX, document.originY, pageX / width, pageY / height)
+    if (grown.padX == 0.0 && grown.padY == 0.0 && grown.width == width && grown.height == height) {
+        return GrownInk(document, 0.0, 0.0)
     }
-    if (pageY > height - WRITE_MARGIN_Y) {
-        height = min(WRITE_CAP_HEIGHT, max(height + GROW_STEP_Y, pageY + WRITE_MARGIN_Y))
-    }
-    if (width == document.sourceWidth && height == document.sourceHeight) return document to null
-    return rescale(document, width, height) to null
+    val remapped = document.copy(
+        sourceWidth = grown.width,
+        sourceHeight = grown.height,
+        originX = document.originX + grown.padX.coerceAtLeast(0.0),
+        originY = document.originY + grown.padY.coerceAtLeast(0.0),
+        strokes = document.strokes.map { stroke ->
+            stroke.copy(points = stroke.points.map { point ->
+                point.copy(
+                    x = keepMarkOnPage(point.x, width, grown.width, grown.padX),
+                    y = keepMarkOnPage(point.y, height, grown.height, grown.padY),
+                )
+            })
+        },
+    )
+    return GrownInk(remapSectionBands(remapped, height, grown.height, grown.padY), grown.padX, grown.padY)
+}
+
+private fun remapSectionBands(document: InkDocument, prevHeight: Double, nextHeight: Double, padY: Double): InkDocument {
+    val sections = sectionsOf(document)
+    if (sections.isEmpty()) return document
+    return withSections(document, sections.map { section ->
+        section.copy(
+            top = keepMarkOnPage(section.top, prevHeight, nextHeight, padY),
+            bodyTop = keepMarkOnPage(section.bodyTop, prevHeight, nextHeight, padY),
+        )
+    })
 }
 
 fun rescale(document: InkDocument, width: Double, height: Double): InkDocument {

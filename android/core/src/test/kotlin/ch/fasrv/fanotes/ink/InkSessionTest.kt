@@ -17,11 +17,11 @@ class InkSessionTest {
         val now = "2026-01-02T03:04:05.000Z"
         val session = InkSession(newInkDocument("Hello", "dots", now))
         session.beginStroke()
-        session.addSample(StrokePoint(0.1, 0.2, 12.5, 0.5, 0.0, 0.0, "pen"))
+        session.addSample(StrokePoint(0.2, 0.3, 12.5, 0.5, 0.0, 0.0, "pen"))
         session.endStroke(StrokeStyle(), now)
         val json = session.document.toJson().stringify()
         assertEquals(
-            """{"schemaVersion":1,"title":"Hello","paperStyle":"dots","sourceWidth":900,"sourceHeight":1273,"createdAt":"2026-01-02T03:04:05.000Z","updatedAt":"2026-01-02T03:04:05.000Z","overlayQuality":1.75,"overlayQualityZoom":6,"strokes":[{"points":[{"x":0.1,"y":0.2,"t":12.5,"pressure":0.5,"tiltX":0,"tiltY":0,"pointerType":"pen"}],"baseWidth":3.5,"pressureEnabled":true,"color":"#202333","purpose":"handwriting","brush":"fineliner","opacity":1,"colorEffect":"solid"}]}""",
+            """{"schemaVersion":1,"title":"Hello","paperStyle":"dots","sourceWidth":900,"sourceHeight":1273,"createdAt":"2026-01-02T03:04:05.000Z","updatedAt":"2026-01-02T03:04:05.000Z","overlayQuality":1.75,"overlayQualityZoom":6,"strokes":[{"points":[{"x":0.2,"y":0.3,"t":12.5,"pressure":0.5,"tiltX":0,"tiltY":0,"pointerType":"pen"}],"baseWidth":3.5,"pressureEnabled":true,"color":"#202333","purpose":"handwriting","brush":"fineliner","opacity":1,"colorEffect":"solid"}]}""",
             json,
         )
     }
@@ -56,6 +56,22 @@ class InkSessionTest {
         assertTrue(session.document.sourceHeight > PAGE_START_HEIGHT)
         val afterY = session.document.strokes[0].points[0].y * session.document.sourceHeight
         assertEquals(beforeY, afterY, 0.01)
+    }
+
+    @Test
+    fun writingInTheLeftMarginInsertsOriginPaper() {
+        val session = InkSession(newInkDocument("Page", "dots", isoNow(0)))
+        session.beginStroke()
+        session.addSample(point(0.5, 0.5))
+        session.endStroke(StrokeStyle(), isoNow(1))
+        val beforeX = session.document.strokes[0].points[0].x * session.document.sourceWidth
+        session.beginStroke()
+        session.addSample(point(0.02, 0.5))
+        assertEquals(108.0, session.document.originX)
+        assertEquals(PAGE_START_WIDTH + 108.0, session.document.sourceWidth)
+        val afterX = session.document.strokes[0].points[0].x * session.document.sourceWidth
+        assertEquals(beforeX + 108.0, afterX, 0.01)
+        assertEquals(108.0, paperOriginScrollDelta(session.document.originX))
     }
 
     @Test

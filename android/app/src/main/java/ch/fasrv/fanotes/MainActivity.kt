@@ -996,6 +996,9 @@ private fun PageSurface(
             NotePageView(context).apply {
                 attachSession(model.session)
                 ink.onChanged = { model.noteChanged() }
+                ink.onPageGrew = { prevWidth, prevHeight, nextWidth, nextHeight, padX, padY ->
+                    model.pageGrew(prevWidth, prevHeight, nextWidth, nextHeight, padX, padY)
+                }
                 ink.onPenSample = { x, y -> model.recordPenSample(x, y) }
                 ink.onSwipeNote = { model.swipe(it) }
             }
@@ -1003,6 +1006,9 @@ private fun PageSurface(
         update = { page ->
             page.attachSession(model.session)
             page.ink.onChanged = { model.noteChanged() }
+            page.ink.onPageGrew = { prevWidth, prevHeight, nextWidth, nextHeight, padX, padY ->
+                model.pageGrew(prevWidth, prevHeight, nextWidth, nextHeight, padX, padY)
+            }
             page.ink.onPenSample = { x, y -> model.recordPenSample(x, y) }
             page.ink.onSwipeNote = { model.swipe(it) }
             if (page.ink.backdrop !== backdrop) page.ink.backdrop = backdrop
