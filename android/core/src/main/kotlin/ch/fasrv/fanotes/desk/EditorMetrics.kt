@@ -12,6 +12,9 @@ data class EditorMetrics(
     val autosaveMs: Long,
     val zoomSpeed: Int,
     val readableLineLength: Boolean,
+    val editorFontId: String,
+    val previewFontPx: Int,
+    val showLineNumbers: Boolean,
 )
 
 fun editorMetrics(settings: Map<String, String>): EditorMetrics = EditorMetrics(
@@ -22,7 +25,41 @@ fun editorMetrics(settings: Map<String, String>): EditorMetrics = EditorMetrics(
     autosaveMs = clampInt(settings["autosave"], 750, 250, 3000).toLong(),
     zoomSpeed = clampViewZoomSpeed(settings["zoom-speed"]),
     readableLineLength = settings["readable-lines"] != "off",
+    editorFontId = editorFontId(settings["editor-face"]),
+    previewFontPx = clampInt(settings["preview-font"], 17, 13, 28),
+    showLineNumbers = settings["line-numbers"] == "on",
 )
+
+data class EditorFontChoice(val id: String, val label: String, val stack: String)
+
+/** Desktop editor font menu. The stack is what the desktop stores. */
+val EDITOR_FONTS = listOf(
+    EditorFontChoice("jetbrains", "JetBrains Mono", "'JetBrains Mono', ui-monospace, monospace"),
+    EditorFontChoice("fira", "Fira Code", "'Fira Code', ui-monospace, monospace"),
+    EditorFontChoice("plex", "IBM Plex Mono", "'IBM Plex Mono', ui-monospace, monospace"),
+    EditorFontChoice("system", "System Mono", "ui-monospace, SFMono-Regular, monospace"),
+)
+
+fun editorFontId(raw: String?): String {
+    val value = raw?.trim().orEmpty()
+    if (value.isEmpty()) return "jetbrains"
+    return EDITOR_FONTS.firstOrNull { it.id == value || it.stack == value || it.label.equals(value, ignoreCase = true) }?.id
+        ?: "jetbrains"
+}
+
+/** CodeMirror counts a trailing newline as its own line. An empty note is line 1. */
+fun lineStartOffsets(text: String): List<Int> {
+    if (text.isEmpty()) return listOf(0)
+    val starts = ArrayList<Int>()
+    starts += 0
+    for (index in text.indices) {
+        if (text[index] == '\n') starts += index + 1
+    }
+    return starts
+}
+
+fun editorLineNumberLabels(text: String): List<String> =
+    lineStartOffsets(text).indices.map { (it + 1).toString() }
 
 /**
  * Desktop `--content-width`: the setting when readable lines are on, otherwise

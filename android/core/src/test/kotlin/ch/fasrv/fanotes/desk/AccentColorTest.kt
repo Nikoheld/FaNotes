@@ -20,5 +20,8 @@ class AccentColorTest {
         assertTrue(accentNeedsDarkText("#ffffff"))
         assertEquals(ACCENT_LIGHT_INK, accentInk("#2a6f97"))
         assertEquals(ACCENT_DARK_INK, accentInk("#d9730d"))
+        assertEquals(DEFAULT_ACCENT_SECONDARY, normalizeAccentSecondary(null))
+        assertEquals("#9065b0", normalizeAccentSecondary("#9065B0"))
+        assertEquals(DEFAULT_ACCENT_SECONDARY, normalizeAccentSecondary("nope"))
     }
 }

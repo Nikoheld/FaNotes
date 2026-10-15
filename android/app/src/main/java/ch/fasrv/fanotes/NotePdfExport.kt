@@ -50,6 +50,8 @@ fun writeNotePdf(
     lineHeight: Float = 1.72f,
     contentWidthPx: Float = 820f,
     smoothing: Float = 0.68f,
+    editorTypeface: Typeface = Typeface.create("sans-serif", Typeface.NORMAL),
+    showLineNumbers: Boolean = false,
 ) {
     val sourceWidth = document.sourceWidth.coerceAtLeast(1.0)
     val sourceHeight = document.sourceHeight.coerceAtLeast(1.0)
@@ -66,7 +68,7 @@ fun writeNotePdf(
     val ink = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
     val text = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.parseColor("#252630")
-        typeface = Typeface.create("sans-serif", Typeface.NORMAL)
+        typeface = editorTypeface
     }
     val highlightPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
     val linkPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#2A6F97"); style = Paint.Style.FILL }
@@ -95,7 +97,7 @@ fun writeNotePdf(
             canvas.drawRect(0f, 0f, pageWidth, pageHeight, paper)
             backdrops.forEach { backdrop -> drawBackdrop(canvas, backdrop, scale) }
             if (backdrops.none { it.bitmap != null }) drawRuling(canvas, document.paperStyle, pageWidth, pageHeight, scale, ruling)
-            drawMarkdown(canvas, markdown, scale, text, document.originX, document.originY, fontSizePx, lineHeight, contentWidthPx)
+            drawMarkdown(canvas, markdown, scale, text, document.originX, document.originY, fontSizePx, lineHeight, contentWidthPx, showLineNumbers)
             highlights.forEach { mark ->
                 val rect = highlightToSheet(mark, frames, sourceWidth, sourceHeight)
                 highlightPaint.color = parsePdfColor(mark.color)
@@ -237,12 +239,12 @@ private fun drawMarkdown(
     fontSizePx: Float,
     lineHeight: Float,
     contentWidthPx: Float,
+    showLineNumbers: Boolean,
 ) {
     val text = pdfPaperText(markdown)
     if (text.isEmpty()) return
     paint.color = Color.parseColor("#252630")
     paint.textSize = fontSizePx * scale
-    paint.typeface = Typeface.create("sans-serif", Typeface.NORMAL)
     val width = (contentWidthPx * scale).toInt().coerceAtLeast(1)
     val layout = StaticLayout.Builder.obtain(text, 0, text.length, paint, width)
         .setAlignment(Layout.Alignment.ALIGN_NORMAL)
@@ -253,6 +255,19 @@ private fun drawMarkdown(
         .build()
     canvas.save()
     canvas.translate((TEXT_PAD_X + originX.toFloat()) * scale, (TEXT_PAD_Y + originY.toFloat()) * scale)
+    if (showLineNumbers) {
+        val numbers = TextPaint(paint)
+        numbers.color = Color.parseColor("#8A8D98")
+        numbers.textAlign = Paint.Align.RIGHT
+        numbers.textSize = fontSizePx * scale * 0.82f
+        val labels = ch.fasrv.fanotes.desk.editorLineNumberLabels(text)
+        val starts = ch.fasrv.fanotes.desk.lineStartOffsets(text)
+        labels.forEachIndexed { index, label ->
+            val offset = starts[index].coerceIn(0, text.length)
+            val visual = layout.getLineForOffset(offset)
+            canvas.drawText(label, -8f * scale, layout.getLineBaseline(visual).toFloat(), numbers)
+        }
+    }
     layout.draw(canvas)
     canvas.restore()
 }
