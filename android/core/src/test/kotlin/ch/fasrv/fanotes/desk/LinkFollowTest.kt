@@ -34,4 +34,20 @@ class LinkFollowTest {
         assertNull(followedTarget("   "))
         assertNull(followedTarget("#nur-anker"))
     }
+
+    @Test
+    fun aPaperTapHitsTheRenderedLinkLabel() {
+        assertNull(paperLinkTarget(-1, listOf(PaperTextLink(0, 4, "A"))))
+        assertEquals("A", paperLinkTarget(0, listOf(PaperTextLink(0, 4, "A"))))
+        assertNull(paperLinkTarget(4, listOf(PaperTextLink(0, 4, "A"))))
+        assertEquals("B", paperLinkTarget(5, listOf(PaperTextLink(0, 4, "A"), PaperTextLink(5, 8, "B"))))
+        assertNull(paperLinkTarget(1, listOf(PaperTextLink(0, 4, "  "))))
+        val (plain, marks) = detailsPlain("Siehe [Text](https://fanotes.example) und [[Algebra#Beweis|Name]]")
+        val links = marks.filter { it.kind == "link" }.map { PaperTextLink(it.start, it.end, it.target) }
+        val web = paperLinkTarget(plain.indexOf("Text"), links)
+        assertEquals(FollowedLink("https://fanotes.example", true), followedTarget(web!!))
+        val note = paperLinkTarget(plain.indexOf("Name"), links)
+        assertEquals(FollowedLink("Algebra", false, "Beweis"), followedTarget(note!!))
+        assertNull(paperLinkTarget(plain.indexOf("Siehe"), links))
+    }
 }

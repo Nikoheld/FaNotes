@@ -1882,6 +1882,9 @@ private fun SplitPane(
                     val next = ch.fasrv.fanotes.desk.toggleTask(shown, line)
                     if (next != shown) model.updateSplitVisible(shown, next)
                 }
+                view.onFollowMarkdown = { target, web, anchor ->
+                    openFollowedLink(view.context, model, target, web, anchor)
+                }
                 view.onCamera = camera@{ _, _, _ ->
                     val current = path ?: return@camera
                     val sample = view.cameraSample() ?: return@camera
