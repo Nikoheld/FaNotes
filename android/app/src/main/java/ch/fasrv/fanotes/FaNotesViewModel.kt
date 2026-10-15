@@ -3199,13 +3199,19 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun cycleFolderColor(path: String) {
+        val current = folderColors.value
+        val index = FOLDER_COLOR_CHOICES.indexOf(current[path])
+        val color = if (index < 0) FOLDER_COLOR_CHOICES.first() else FOLDER_COLOR_CHOICES.getOrNull(index + 1)
+        setFolderColor(path, color)
+    }
+
+    fun setFolderColor(path: String, color: String?) {
         viewModelScope.launch {
             val updated = withContext(Dispatchers.IO) {
-                val current = folderColors.value
-                val index = FOLDER_COLOR_CHOICES.indexOf(current[path])
-                val color = if (index < 0) FOLDER_COLOR_CHOICES.first() else FOLDER_COLOR_CHOICES.getOrNull(index + 1)
-                val next = withFolderColor(current, path, color)
-                graph.vault.write(FOLDER_COLORS_PATH, serializeFolderColors(next).encodeToByteArray())
+                val next = runCatching { withFolderColor(folderColors.value, path, color) }.getOrDefault(folderColors.value)
+                if (next != folderColors.value) {
+                    graph.vault.write(FOLDER_COLORS_PATH, serializeFolderColors(next).encodeToByteArray())
+                }
                 next
             }
             folderColors.value = updated

@@ -32,6 +32,7 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -62,6 +63,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -716,7 +718,7 @@ fun FaNotesScreen(
                     localFolders = syncPrefixesFromSetting(desk["sync-excluded"]),
                     onToggleLocal = { model.toggleLocalFolder(it) },
                     colors = model.folderColors.collectAsStateWithLifecycle().value,
-                    onFolderColor = { model.cycleFolderColor(it) },
+                    onFolderColor = { path, color -> model.setFolderColor(path, color) },
                     expanded = model.expandedFolders.collectAsStateWithLifecycle().value,
                     onToggleFolder = { model.toggleFolder(it) },
                     onSetFolderExpanded = { path, open -> model.setFolderExpanded(path, open) },
@@ -1112,7 +1114,7 @@ private fun VaultPane(
     localFolders: List<String> = emptyList(),
     onToggleLocal: (String) -> Unit = {},
     colors: Map<String, String>,
-    onFolderColor: (String) -> Unit,
+    onFolderColor: (String, String?) -> Unit,
     expanded: Set<String>,
     onToggleFolder: (String) -> Unit,
     onSetFolderExpanded: (String, Boolean) -> Unit = { _, _ -> },
@@ -1318,7 +1320,7 @@ private fun NoteRow(
     onDelete: (String, Boolean, String) -> Unit,
     onRename: (String, String) -> Unit,
     onMove: (String) -> Unit,
-    onFolderColor: (String) -> Unit,
+    onFolderColor: (String, String?) -> Unit,
     onToggleFolder: (String) -> Unit,
     onOpenSplit: (String) -> Unit,
     onCreateNoteIn: (String) -> Unit,
@@ -1383,16 +1385,62 @@ private fun NoteRow(
                 if (folder) onToggleFolder(node.path) else onOpen(node.path)
             },
         )
-        Icon(
-            when (node.kind) {
-                NoteKind.FOLDER -> Icons.Filled.Folder
-                NoteKind.PDF -> Icons.Filled.PictureAsPdf
-                NoteKind.MARKDOWN -> Icons.Filled.Description
-            },
-            contentDescription = if (folder) "Ordnerfarbe" else null,
-            tint = folderColor?.let { Color(android.graphics.Color.parseColor(it)) } ?: MaterialTheme.colorScheme.primary,
-            modifier = if (folder) Modifier.clickable(onClickLabel = "Ordnerfarbe") { onFolderColor(node.path) } else Modifier,
-        )
+        if (folder) {
+            var colorMenu by remember(node.path) { mutableStateOf(false) }
+            Box {
+                Icon(
+                    Icons.Filled.Folder,
+                    contentDescription = "Ordnerfarbe",
+                    tint = folderColor?.let { Color(android.graphics.Color.parseColor(it)) } ?: MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.clickable(onClickLabel = "Ordnerfarbe wählen") { colorMenu = true },
+                )
+                DropdownMenu(expanded = colorMenu, onDismissRequest = { colorMenu = false }) {
+                    Text(
+                        ch.fasrv.fanotes.desk.FOLDER_COLOR_MENU,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                    )
+                    FlowRow(
+                        Modifier.width(196.dp).padding(horizontal = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        ch.fasrv.fanotes.desk.FOLDER_COLOR_CHOICES.forEach { color ->
+                            val selectedColor = folderColor == color
+                            Box(
+                                Modifier
+                                    .size(22.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(android.graphics.Color.parseColor(color)))
+                                    .clickable(onClickLabel = "Ordnerfarbe $color") {
+                                        onFolderColor(node.path, color)
+                                        colorMenu = false
+                                    },
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                if (selectedColor) {
+                                    Text("✓", fontSize = 12.sp, color = Color(android.graphics.Color.parseColor(ch.fasrv.fanotes.desk.accentInk(color))))
+                                }
+                            }
+                        }
+                    }
+                    TextButton(onClick = {
+                        onFolderColor(node.path, null)
+                        colorMenu = false
+                    }) { Text(ch.fasrv.fanotes.desk.FOLDER_COLOR_CLEAR) }
+                }
+            }
+        } else {
+            Icon(
+                when (node.kind) {
+                    NoteKind.PDF -> Icons.Filled.PictureAsPdf
+                    else -> Icons.Filled.Description
+                },
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+            )
+        }
         Text(
             node.name,
             maxLines = 1,
