@@ -35,6 +35,22 @@ class WorkspaceNavTest {
             listOf("Archiv"),
             movableFolderTargets(listOf("Schule", "Schule/Unter", "Archiv"), "Schule"),
         )
+        val rows = listOf(
+            TreeRowBox("Archiv", true, TreeBox(0f, 0f, 100f, 20f)),
+            TreeRowBox("Archiv/A.md", false, TreeBox(0f, 20f, 100f, 40f)),
+            TreeRowBox("Schule", true, TreeBox(0f, 40f, 100f, 60f)),
+        )
+        val list = TreeBox(0f, 0f, 100f, 80f)
+        assertEquals("Archiv", resolveTreeDrop("Note.md", false, rows, 10f, 10f, list))
+        assertEquals("Archiv", resolveTreeDrop("Note.md", false, rows, 10f, 30f, list))
+        assertEquals("", resolveTreeDrop("Archiv/A.md", false, rows, 10f, 70f, list))
+        assertNull(resolveTreeDrop("Archiv/A.md", false, rows, 10f, 10f, list))
+        assertEquals("Archiv", resolveTreeDrop("Schule", true, rows, 10f, 30f, list))
+        assertNull(resolveTreeDrop("Schule", true, rows, 10f, 50f, list))
+        assertNull(resolveTreeDrop("Note.md", false, rows, 200f, 10f, list))
+        assertEquals("", treeDropFolder("root", "ignored"))
+        assertEquals("Archiv", treeDropFolder("folder", "Archiv"))
+        assertEquals("Archiv", treeDropFolder("file", "Archiv/A.md"))
     }
 
     @Test

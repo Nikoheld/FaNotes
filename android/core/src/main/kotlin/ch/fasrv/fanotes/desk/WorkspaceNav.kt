@@ -107,6 +107,56 @@ fun movableFolderTargets(folders: List<String>, moving: String): List<String> {
     }
 }
 
+data class TreeBox(val left: Float, val top: Float, val right: Float, val bottom: Float) {
+    fun contains(x: Float, y: Float) = x in left..right && y in top..bottom
+}
+
+data class TreeRowBox(val path: String, val folder: Boolean, val box: TreeBox)
+
+/** Folder a sidebar drop lands in. A file drops into its parent. The vault root is empty. */
+fun treeDropFolder(targetKind: String, targetPath: String): String = when (targetKind) {
+    "root" -> ""
+    "folder" -> targetPath.replace('\\', '/').trim('/')
+    else -> parentFolderOf(targetPath)
+}
+
+/** A folder cannot land inside itself, and a drop into the current parent is a no-op. */
+fun canDropEntry(sourcePath: String, sourceIsFolder: Boolean, destFolder: String): Boolean {
+    val source = sourcePath.replace('\\', '/').trim('/')
+    val dest = destFolder.replace('\\', '/').trim('/')
+    if (source.isEmpty()) return false
+    if (sourceIsFolder && (dest == source || dest.startsWith("$source/"))) return false
+    return parentFolderOf(source) != dest
+}
+
+/**
+ * Destination folder for a pointer over the sidebar, or null when the drop
+ * is outside the list or would not move the entry.
+ */
+fun resolveTreeDrop(
+    sourcePath: String,
+    sourceIsFolder: Boolean,
+    rows: List<TreeRowBox>,
+    x: Float,
+    y: Float,
+    listBounds: TreeBox?,
+): String? {
+    val hit = rows.firstOrNull { it.box.contains(x, y) }
+    val kind: String
+    val path: String
+    if (hit != null) {
+        kind = if (hit.folder) "folder" else "file"
+        path = hit.path
+    } else if (listBounds != null && listBounds.contains(x, y)) {
+        kind = "root"
+        path = ""
+    } else {
+        return null
+    }
+    val dest = treeDropFolder(kind, path)
+    return if (canDropEntry(sourcePath, sourceIsFolder, dest)) dest else null
+}
+
 /** The path after `from` was renamed or moved to `to`, or null when unaffected. */
 fun remapPath(path: String, from: String, to: String): String? =
     if (isSelfOrInside(path, from)) to + path.substring(from.length) else null
