@@ -187,6 +187,16 @@ fun paperImageCaption(text: String): String {
 
 fun paperImageSource(text: String): String = text.substringAfter('\u001f')
 
+/** Whole-line pictures in a note, in order, without repeats. Inline images stay in their paragraph. */
+fun paperImageSources(markdown: String): List<String> =
+    paperLines(markdown)
+        .asSequence()
+        .filter { it.kind == PaperKind.IMAGE }
+        .map { paperImageSource(it.text) }
+        .filter { it.isNotBlank() }
+        .distinct()
+        .toList()
+
 /** Spaces or tabs before a list marker or quote, kept so a nested item stays indented. */
 private fun listIndent(raw: String): String = raw.takeWhile { it == ' ' || it == '\t' }
 

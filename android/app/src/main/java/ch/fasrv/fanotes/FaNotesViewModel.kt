@@ -195,7 +195,9 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     val message = MutableStateFlow<String?>(null)
     val backdrop = MutableStateFlow<List<BackdropSlice>>(emptyList())
     val paperImages = MutableStateFlow<Map<String, Bitmap>>(emptyMap())
+    val splitPaperImages = MutableStateFlow<Map<String, Bitmap>>(emptyMap())
     private var paperImageTicket = 0
+    private var splitImageTicket = 0
     val sync = graph.engine.state.stateIn(viewModelScope, SharingStarted.Eagerly, graph.engine.state.value)
     private val _vaultLabel = MutableStateFlow(graph.initialVaultLabel)
     val vaultLabel = _vaultLabel.asStateFlow()
@@ -252,29 +254,45 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         val path = open.value?.path.orEmpty()
         val text = markdown.value
         viewModelScope.launch {
-            val next = withContext(Dispatchers.IO) {
-                ch.fasrv.fanotes.text.paperLines(text)
-                    .filter { it.kind == ch.fasrv.fanotes.text.PaperKind.IMAGE }
-                    .map { ch.fasrv.fanotes.text.paperImageSource(it.text) }
-                    .distinct()
-                    .mapNotNull { source ->
-                        val bytes = ch.fasrv.fanotes.text.resolvePaperImagePaths(path, source)
-                            .firstNotNullOfOrNull { candidate -> runCatching { graph.vault.read(candidate) }.getOrNull() }
-                        val bitmap = bytes?.let { decodePaperImage(it) } ?: return@mapNotNull null
-                        source to bitmap
-                    }
-                    .toMap()
-            }
+            val next = withContext(Dispatchers.IO) { loadPaperImages(path, text) }
             if (ticket != paperImageTicket) {
-                next.values.forEach { if (!it.isRecycled) it.recycle() }
+                recycleBitmaps(next.values)
                 return@launch
             }
             val previous = paperImages.value
             paperImages.value = next
-            previous.values.forEach { bitmap ->
-                if (bitmap !in next.values && !bitmap.isRecycled) bitmap.recycle()
-            }
+            recycleBitmaps(previous.values.filter { it !in next.values })
         }
+    }
+
+    private fun reloadSplitPaperImages() {
+        val ticket = ++splitImageTicket
+        val path = splitPath.value.orEmpty()
+        val text = if (path.isEmpty()) "" else splitMarkdown.value
+        viewModelScope.launch {
+            val next = withContext(Dispatchers.IO) { loadPaperImages(path, text) }
+            if (ticket != splitImageTicket) {
+                recycleBitmaps(next.values)
+                return@launch
+            }
+            val previous = splitPaperImages.value
+            splitPaperImages.value = next
+            recycleBitmaps(previous.values.filter { it !in next.values })
+        }
+    }
+
+    private fun loadPaperImages(path: String, text: String): Map<String, Bitmap> {
+        if (path.isEmpty() || text.isEmpty()) return emptyMap()
+        return ch.fasrv.fanotes.text.paperImageSources(text).mapNotNull { source ->
+            val bytes = ch.fasrv.fanotes.text.resolvePaperImagePaths(path, source)
+                .firstNotNullOfOrNull { candidate -> runCatching { graph.vault.read(candidate) }.getOrNull() }
+            val bitmap = bytes?.let { decodePaperImage(it) } ?: return@mapNotNull null
+            source to bitmap
+        }.toMap()
+    }
+
+    private fun recycleBitmaps(bitmaps: Iterable<Bitmap>) {
+        bitmaps.forEach { bitmap -> if (!bitmap.isRecycled) bitmap.recycle() }
     }
 
     private fun decodePaperImage(bytes: ByteArray): Bitmap? {
@@ -2205,6 +2223,14 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     val splitUnsaved = MutableStateFlow(false)
     val splitMarkdown = MutableStateFlow("")
     val splitFolded = MutableStateFlow<Set<Int>>(emptySet())
+
+    init {
+        viewModelScope.launch {
+            combine(splitPath, splitMarkdown) { path, text -> path.orEmpty() to text }
+                .distinctUntilChanged()
+                .collect { reloadSplitPaperImages() }
+        }
+    }
     val splitSession = InkSession(newInkDocument("Spalte", "dots", isoNow()))
     private var splitNote: OpenNote? = null
     private var splitSaveJob: kotlinx.coroutines.Job? = null

@@ -1818,6 +1818,7 @@ private fun SplitPane(
     val title = path?.let { ch.fasrv.fanotes.vault.titleOf(it) }.orEmpty()
     var typing by remember(path) { mutableStateOf(false) }
     var splitEditor by remember(path) { mutableStateOf<SplitEditorView?>(null) }
+    val splitImages by model.splitPaperImages.collectAsStateWithLifecycle()
     Column(modifier) {
         Row(Modifier.padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(title.ifBlank { "Zweite Spalte" }, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f), maxLines = 1)
@@ -1885,6 +1886,7 @@ private fun SplitPane(
                 view.onFollowMarkdown = { target, web, anchor ->
                     openFollowedLink(view.context, model, target, web, anchor)
                 }
+                if (view.paperImages !== splitImages) view.paperImages = splitImages
                 view.onCamera = camera@{ _, _, _ ->
                     val current = path ?: return@camera
                     val sample = view.cameraSample() ?: return@camera
@@ -1926,6 +1928,7 @@ private fun SplitPane(
                     splitEditor = editor
                     editor.onVisibleEdit = { previous, next -> model.updateSplitVisible(previous, next) }
                     editor.onFollowLink = { target, web, anchor -> openFollowedLink(editor.context, model, target, web, anchor) }
+                    if (editor.paperImages !== splitImages) editor.paperImages = splitImages
                     editor.accent = android.graphics.Color.parseColor(
                         ch.fasrv.fanotes.desk.normalizeAccent(model.effectiveDesk()["accent"]),
                     )

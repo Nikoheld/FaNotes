@@ -13,6 +13,8 @@ import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
 import android.view.inputmethod.InputConnectionWrapper
 import android.widget.EditText
+import android.graphics.Bitmap
+import ch.fasrv.fanotes.desk.paperDetailsBox
 import ch.fasrv.fanotes.desk.selectionWashArgb
 import ch.fasrv.fanotes.desk.editorLineNumberLabels
 import ch.fasrv.fanotes.desk.findDetailsBlocks
@@ -47,6 +49,12 @@ import kotlin.math.abs
 class SplitEditorView(context: Context) : EditText(context) {
     var onVisibleEdit: (String, String) -> Unit = { _, _ -> }
     var onFollowLink: (String, Boolean, String?) -> Unit = { _, _, _ -> }
+    var paperImages: Map<String, Bitmap> = emptyMap()
+        set(value) {
+            if (field === value) return
+            field = value
+            paintPreview()
+        }
     var onToggleFold: (Int) -> Unit = {}
     var onEditorFold: (String, Int) -> Unit = { _, _ -> }
     var foldSource: String = ""
@@ -737,12 +745,30 @@ class SplitEditorView(context: Context) : EditText(context) {
         return true
     }
 
+    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+        super.onSizeChanged(w, h, oldw, oldh)
+        if (w != oldw && paperImages.isNotEmpty()) paintPreview()
+    }
+
     private fun paintPreview() {
         if (painting) return
         val editable = text ?: return
         painting = true
         try {
-            applyLivePreview(editable, selectionStart, selectionEnd, accent, textSize, isFocused)
+            val box = paperDetailsBox(textSize)
+            val textWidth = layout?.width?.toFloat()
+                ?: (width - paddingLeft - paddingRight).toFloat()
+            val imageColumn = (textWidth - box.border * 2f - box.padX * 2f).coerceAtLeast(0f)
+            applyLivePreview(
+                editable,
+                selectionStart,
+                selectionEnd,
+                accent,
+                textSize,
+                isFocused,
+                paperImages,
+                imageColumn,
+            )
         } finally {
             painting = false
         }
