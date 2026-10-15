@@ -65,18 +65,23 @@ class InkSession(document: InkDocument) {
      * is a corridor leap and was dropped.
      */
     fun addSample(point: StrokePoint): Boolean {
-        val pageX = point.x * document.sourceWidth
-        val pageY = point.y * document.sourceHeight
-        val (grown, _) = growDocument(document, pageX, pageY)
-        if (grown !== document) {
-            val scaleX = document.sourceWidth / grown.sourceWidth
-            val scaleY = document.sourceHeight / grown.sourceHeight
-            document = grown
-            livePoints = rescalePoints(livePoints, scaleX, scaleY)
+        val prevWidth = document.sourceWidth
+        val prevHeight = document.sourceHeight
+        val pageX = point.x * prevWidth
+        val pageY = point.y * prevHeight
+        val grown = growDocument(document, pageX, pageY)
+        if (grown.document !== document) {
+            livePoints = livePoints.map { sample ->
+                sample.copy(
+                    x = keepMarkOnPage(sample.x, prevWidth, grown.document.sourceWidth, grown.padX),
+                    y = keepMarkOnPage(sample.y, prevHeight, grown.document.sourceHeight, grown.padY),
+                )
+            }
+            document = grown.document
         }
         val mapped = point.copy(
-            x = pageX / document.sourceWidth,
-            y = pageY / document.sourceHeight,
+            x = keepMarkOnPage(point.x, prevWidth, document.sourceWidth, grown.padX),
+            y = keepMarkOnPage(point.y, prevHeight, document.sourceHeight, grown.padY),
             pressure = point.pressure.coerceIn(0.0, 1.0),
         )
         val action = classify(livePoints, mapped)
@@ -93,13 +98,18 @@ class InkSession(document: InkDocument) {
         if (points.size < 2) return null
         val width0 = document.sourceWidth
         val height0 = document.sourceHeight
-        val page = points.map { it.x * width0 to it.y * height0 }
+        val originX0 = document.originX
+        val originY0 = document.originY
         var doc = document
-        for ((px, py) in page) doc = growDocument(doc, px, py).first
-        val mapped = points.zip(page).map { (point, pixel) ->
+        for (point in points) {
+            val normX = keepMarkOnPage(point.x, width0, doc.sourceWidth, doc.originX - originX0)
+            val normY = keepMarkOnPage(point.y, height0, doc.sourceHeight, doc.originY - originY0)
+            doc = growDocument(doc, normX * doc.sourceWidth, normY * doc.sourceHeight).document
+        }
+        val mapped = points.map { point ->
             point.copy(
-                x = pixel.first / doc.sourceWidth,
-                y = pixel.second / doc.sourceHeight,
+                x = keepMarkOnPage(point.x, width0, doc.sourceWidth, doc.originX - originX0),
+                y = keepMarkOnPage(point.y, height0, doc.sourceHeight, doc.originY - originY0),
                 pressure = point.pressure.coerceIn(0.0, 1.0),
             )
         }

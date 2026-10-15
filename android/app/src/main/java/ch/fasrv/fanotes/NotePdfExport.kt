@@ -92,7 +92,7 @@ fun writeNotePdf(
             canvas.drawRect(0f, 0f, pageWidth, pageHeight, paper)
             backdrops.forEach { backdrop -> drawBackdrop(canvas, backdrop, scale) }
             if (backdrops.none { it.bitmap != null }) drawRuling(canvas, document.paperStyle, pageWidth, pageHeight, scale, ruling)
-            drawMarkdown(canvas, markdown, scale, text)
+            drawMarkdown(canvas, markdown, scale, text, document.originX, document.originY)
             highlights.forEach { mark ->
                 val rect = highlightToSheet(mark, frames, sourceWidth, sourceHeight)
                 highlightPaint.color = parsePdfColor(mark.color)
@@ -224,7 +224,7 @@ private fun drawRuling(canvas: Canvas, style: String, pageWidth: Float, pageHeig
     }
 }
 
-private fun drawMarkdown(canvas: Canvas, markdown: String, scale: Float, paint: TextPaint) {
+private fun drawMarkdown(canvas: Canvas, markdown: String, scale: Float, paint: TextPaint, originX: Double, originY: Double) {
     val text = pdfPaperText(markdown)
     if (text.isEmpty()) return
     paint.color = Color.parseColor("#252630")
@@ -239,7 +239,7 @@ private fun drawMarkdown(canvas: Canvas, markdown: String, scale: Float, paint: 
         .setHyphenationFrequency(Layout.HYPHENATION_FREQUENCY_NONE)
         .build()
     canvas.save()
-    canvas.translate(TEXT_PAD_X * scale, TEXT_PAD_Y * scale)
+    canvas.translate((TEXT_PAD_X + originX.toFloat()) * scale, (TEXT_PAD_Y + originY.toFloat()) * scale)
     layout.draw(canvas)
     canvas.restore()
 }

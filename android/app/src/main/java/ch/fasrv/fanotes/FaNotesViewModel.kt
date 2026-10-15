@@ -108,6 +108,7 @@ import ch.fasrv.fanotes.famd.parseFamd
 import ch.fasrv.fanotes.famd.stripFamdPayload
 import ch.fasrv.fanotes.famd.isoNow
 import ch.fasrv.fanotes.ink.InkSession
+import ch.fasrv.fanotes.ink.keepMarkOnPage
 import ch.fasrv.fanotes.ink.InkTool
 import ch.fasrv.fanotes.ink.PAGE_START_WIDTH
 import ch.fasrv.fanotes.ink.StrokeStyle
@@ -292,6 +293,36 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    fun pageGrew(prevWidth: Double, prevHeight: Double, nextWidth: Double, nextHeight: Double, padX: Double, padY: Double) {
+        if (prevWidth == nextWidth && prevHeight == nextHeight && padX == 0.0 && padY == 0.0) return
+        if (backdrop.value.isEmpty()) {
+            val source = open.value
+            val links = noteLinks.value
+            if (source != null && links.isNotEmpty()) {
+                val moved = links.map { link ->
+                    link.copy(
+                        x = keepMarkOnPage(link.x, prevWidth, nextWidth, padX),
+                        y = keepMarkOnPage(link.y, prevHeight, nextHeight, padY),
+                    )
+                }
+                val payload = (source.payload.deepCopy() as ch.fasrv.fanotes.json.JsonValue.Obj)
+                payload.put("noteLinks", ch.fasrv.fanotes.desk.noteLinksJson(moved))
+                open.value = source.copy(payload = payload)
+                noteLinks.value = moved
+            }
+        }
+        if (worksheetBoxes.value.isNotEmpty()) {
+            worksheetBoxes.value = worksheetBoxes.value.map { box ->
+                box.copy(
+                    x = keepMarkOnPage(box.x, prevWidth, nextWidth, padX),
+                    y = keepMarkOnPage(box.y, prevHeight, nextHeight, padY),
+                )
+            }
+            boxesNeedSave = true
+        }
+        noteChanged()
+    }
+
     fun noteChanged() {
         dirty = true
         editRevision += 1
@@ -302,6 +333,22 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
             kotlinx.coroutines.delay(750)
             saveNow()
         }
+    }
+
+    private fun writeMovedBoxes(worksheetId: String, boxes: List<ch.fasrv.fanotes.desk.WorksheetBox>) {
+        val path = ".fanotes/worksheets/$worksheetId.json"
+        val raw = graph.vault.read(path)?.decodeToString() ?: return
+        val root = ch.fasrv.fanotes.json.parseJson(raw) as? ch.fasrv.fanotes.json.JsonValue.Obj ?: return
+        val stored = root.array("textBoxes") ?: return
+        val byId = boxes.associateBy { it.id }
+        for (item in stored.items) {
+            val obj = item as? ch.fasrv.fanotes.json.JsonValue.Obj ?: continue
+            val box = byId[obj.string("id")] ?: continue
+            obj.put("x", ch.fasrv.fanotes.json.jsonNumber(box.x))
+            obj.put("y", ch.fasrv.fanotes.json.jsonNumber(box.y))
+        }
+        root.put("updatedAt", ch.fasrv.fanotes.json.jsonString(isoNow()))
+        graph.vault.write(path, root.stringify().encodeToByteArray())
     }
 
     private fun withDwell(note: OpenNote): OpenNote {
@@ -404,7 +451,11 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
                 val revision = editRevision
                 val document = session.document
                 val text = markdown.value
+                val boxes = if (boxesNeedSave) worksheetBoxes.value else emptyList()
+                val worksheetId = note.worksheets.firstOrNull()
+                boxesNeedSave = false
                 val saved = withContext(Dispatchers.IO) {
+                    if (worksheetId != null && boxes.isNotEmpty()) writeMovedBoxes(worksheetId, boxes)
                     val written = graph.store.save(note, document, text)
                     written to listNoteHistory(graph.vault, historyPathFor(written))
                 }
@@ -1119,6 +1170,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     private var splitNote: OpenNote? = null
     private var openedAtMs = 0L
     private var reveal: Pair<String, Double>? = null
+    private var boxesNeedSave = false
     val aiReply = MutableStateFlow("")
     val paletteOpen = MutableStateFlow(false)
     val updateLabel = MutableStateFlow("2026.10.7")
