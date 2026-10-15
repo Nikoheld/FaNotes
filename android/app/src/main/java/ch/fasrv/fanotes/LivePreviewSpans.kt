@@ -451,6 +451,10 @@ internal class DetailsSummarySpan(
                             drawRichText(canvas, paint, cell, origin, cursor, marks, face)
                         }
                     }
+                    "footnote" -> {
+                        paint.color = PAPER_QUOTE_INK
+                        drawRichText(canvas, paint, line, textX, cursor, lineInlines, paint.typeface)
+                    }
                     else -> drawRichText(canvas, paint, line, textX, cursor, lineInlines, paint.typeface)
                 }
                 cursor += lineMetrics.descent
@@ -551,6 +555,7 @@ internal class DetailsSummarySpan(
             val math = active.any { it.kind == "math" }
             val strike = active.any { it.kind == "strike" }
             val link = active.any { it.kind == "link" }
+            val footnote = active.any { it.kind == "footnote" }
             val bold = strong || ((baseFace?.style ?: 0) and Typeface.BOLD) != 0
             paint.isStrikeThruText = strike
             paint.typeface = when {
@@ -590,6 +595,14 @@ internal class DetailsSummarySpan(
                     rememberLink(active, cursor, width + box.padX * 2f, y, paint)
                 }
                 cursor += width + box.padX * 2f
+            } else if (footnote) {
+                val sup = baseSize * 0.7f
+                paint.textSize = sup
+                paint.style = Paint.Style.FILL
+                paint.color = accent
+                val width = paint.measureText(segment)
+                if (!measureOnly) canvas.drawText(segment, cursor, y - baseSize * 0.35f, paint)
+                cursor += width
             } else {
                 paint.textSize = baseSize
                 paint.style = Paint.Style.FILL
