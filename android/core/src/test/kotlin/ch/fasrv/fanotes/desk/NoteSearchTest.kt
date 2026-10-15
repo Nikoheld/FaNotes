@@ -2,6 +2,7 @@ package ch.fasrv.fanotes.desk
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class NoteSearchTest {
@@ -75,5 +76,27 @@ class NoteSearchTest {
         assertEquals(emptyList(), searchNoteText(shown, "beta"))
         assertEquals(listOf(note.indexOf("beta")), searchNoteText(note, "beta").map { it.start })
         assertTrue(replaceAllNoteMatches(note, "beta", "X").contains("Absatz X."))
+    }
+
+    @Test
+    fun searchKeysOpenFindAndGoToLine() {
+        assertEquals("open", editorSearchShortcut(true, false, false, false, "f"))
+        assertEquals("next", editorSearchShortcut(true, false, false, false, "g"))
+        assertEquals("previous", editorSearchShortcut(true, true, false, false, "g"))
+        assertEquals("next", editorSearchShortcut(false, false, false, false, "f3"))
+        assertEquals("previous", editorSearchShortcut(false, true, false, false, "f3"))
+        assertEquals("goto", editorSearchShortcut(true, false, true, false, "g"))
+        assertNull(editorSearchShortcut(true, true, false, false, "f"))
+        assertNull(editorSearchShortcut(true, false, false, true, "g"))
+        assertEquals("beta", searchQueryFromSelection("alt", "beta"))
+        assertEquals("a\\nb", searchQueryFromSelection("", "a\nb"))
+        assertEquals("alt", searchQueryFromSelection("alt", ""))
+        assertEquals("alt", searchQueryFromSelection("alt", "x".repeat(101)))
+        val hits = listOf(NoteSearchHit(0, 4, ""), NoteSearchHit(10, 14, ""))
+        assertEquals(1, nextSearchHitIndex(hits, 4, true))
+        assertEquals(0, nextSearchHitIndex(hits, 20, true))
+        assertEquals(0, nextSearchHitIndex(hits, 4, false))
+        assertEquals(1, nextSearchHitIndex(hits, 0, false))
+        assertEquals(-1, nextSearchHitIndex(emptyList(), 0, true))
     }
 }

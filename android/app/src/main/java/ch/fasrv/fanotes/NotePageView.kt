@@ -156,6 +156,25 @@ class NotePageView(context: Context) : FrameLayout(context) {
                 if (event.action == KeyEvent.ACTION_DOWN) toggleComment()
                 return true
             }
+            val searchKey = when (keyCode) {
+                KeyEvent.KEYCODE_F -> "f"
+                KeyEvent.KEYCODE_G -> "g"
+                KeyEvent.KEYCODE_F3 -> "f3"
+                else -> null
+            }
+            if (searchKey != null) {
+                val command = ch.fasrv.fanotes.desk.editorSearchShortcut(
+                    event.isCtrlPressed,
+                    event.isShiftPressed,
+                    event.isAltPressed,
+                    event.isMetaPressed,
+                    searchKey,
+                )
+                if (command != null) {
+                    if (event.action == KeyEvent.ACTION_DOWN) searchKeys(command)
+                    return true
+                }
+            }
             if (keyCode == KeyEvent.KEYCODE_D && ch.fasrv.fanotes.desk.nextOccurrenceShortcut(
                     event.isCtrlPressed,
                     event.isShiftPressed,
@@ -333,6 +352,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
     var onUnfoldHeading: (Int) -> Unit = {}
     var onToggleHeading: (Int) -> Unit = {}
     var onEditorFold: (String, Int) -> Unit = { _, _ -> }
+    var onSearchCommand: (String, String, Int) -> Unit = { _, _, _ -> }
     private var pendingCursor: Int? = null
     var onPdfPage: (Int) -> Unit = {}
     var onSymbolSize: (Double) -> Unit = {}
@@ -747,6 +767,15 @@ class NotePageView(context: Context) : FrameLayout(context) {
             val imm = context.getSystemService(InputMethodManager::class.java)
             imm.hideSoftInputFromWindow(windowToken, 0)
         }
+    }
+
+    private fun searchKeys(command: String) {
+        val text = editor.text?.toString().orEmpty()
+        val start = editor.selectionStart.coerceAtLeast(0)
+        val end = editor.selectionEnd.coerceAtLeast(start)
+        val selected = if (end <= text.length) text.substring(start, end) else ""
+        val offset = if (command == "previous") start else end
+        onSearchCommand(command, selected, offset)
     }
 
     private fun foldKeys(command: String) {

@@ -27,6 +27,41 @@ data class NoteSearchOptions(
 )
 
 /**
+ * Desktop search keymap. Ctrl-F opens the panel, Ctrl-G and F3 move to the
+ * next hit, Shift reverses that, and Ctrl-Alt-G opens go-to-line.
+ */
+fun editorSearchShortcut(ctrl: Boolean, shift: Boolean, alt: Boolean, meta: Boolean, key: String): String? {
+    if (meta) return null
+    if (key == "f3" && !ctrl && !alt) return if (shift) "previous" else "next"
+    if (!ctrl) return null
+    if (key == "g" && alt && !shift) return "goto"
+    if (alt) return null
+    return when (key) {
+        "f" -> if (shift) null else "open"
+        "g" -> if (shift) "previous" else "next"
+        else -> null
+    }
+}
+
+/** A short selection becomes the search query. An empty or long selection keeps the current query. */
+fun searchQueryFromSelection(current: String, selected: String): String {
+    if (selected.isEmpty() || selected.length > 100) return current
+    return selected.replace("\n", "\\n")
+}
+
+/** Next or previous hit relative to a source offset, wrapping like the desktop search. */
+fun nextSearchHitIndex(hits: List<NoteSearchHit>, sourceOffset: Int, forward: Boolean): Int {
+    if (hits.isEmpty()) return -1
+    return if (forward) {
+        val found = hits.indexOfFirst { it.start >= sourceOffset }
+        if (found >= 0) found else 0
+    } else {
+        val found = hits.indexOfLast { it.end <= sourceOffset }
+        if (found >= 0) found else hits.lastIndex
+    }
+}
+
+/**
  * Find in the text the editor is showing.
  * German case folding when case does not matter, at most [limit] hits, with the
  * same excerpt window as PDF search. An invalid regular expression matches nothing.
