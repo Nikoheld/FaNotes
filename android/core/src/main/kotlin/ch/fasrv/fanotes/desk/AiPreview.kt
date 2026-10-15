@@ -97,6 +97,18 @@ fun previewTableCells(text: String, inlines: List<DetailsInline>, alignTokens: S
     }
 }
 
+/** Accent list marker from `.markdown-preview li::marker`, including the trailing space. */
+fun previewMarkerEnd(text: String, kind: String): Int {
+    val indent = text.takeWhile { it == ' ' || it == '\t' }.length
+    val rest = text.drop(indent)
+    val marker = when (kind) {
+        "bullet" -> if (rest.startsWith("• ")) "• " else ""
+        "number" -> Regex("""^\d+\.\s+""").find(rest)?.value.orEmpty()
+        else -> ""
+    }
+    return if (marker.isEmpty()) 0 else indent + marker.length
+}
+
 fun aiPreviewHeading(kind: PaperKind): Boolean = kind == PaperKind.H1 || kind == PaperKind.H2 ||
     kind == PaperKind.H3 || kind == PaperKind.H4 || kind == PaperKind.H5 || kind == PaperKind.H6
 

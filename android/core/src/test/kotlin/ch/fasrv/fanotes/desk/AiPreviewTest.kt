@@ -61,5 +61,9 @@ class AiPreviewTest {
         assertEquals(TableAlign.RIGHT, row[1].align)
         assertEquals("https://example.com", row[1].inlines.single().target)
         assertEquals(0 to 4, row[1].inlines.single().let { it.start to it.end })
+        assertEquals(2, previewMarkerEnd("• Punkt", "bullet"))
+        assertEquals(6, previewMarkerEnd("  12. Zwei", "number"))
+        assertEquals(0, previewMarkerEnd("Satz", "paragraph"))
+        assertEquals(0, previewMarkerEnd("•Punkt", "bullet"))
     }
 }
