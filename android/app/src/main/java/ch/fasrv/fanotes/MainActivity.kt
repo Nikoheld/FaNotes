@@ -25,6 +25,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -83,6 +85,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -98,13 +101,18 @@ import ch.fasrv.fanotes.sync.pathIsSyncExcluded
 import ch.fasrv.fanotes.sync.syncPrefixesFromSetting
 import ch.fasrv.fanotes.desk.collectVaultTags
 import ch.fasrv.fanotes.desk.filterVaultByTag
+import ch.fasrv.fanotes.desk.TreeBox
+import ch.fasrv.fanotes.desk.TreeRowBox
 import ch.fasrv.fanotes.desk.breadcrumbsFor
+import ch.fasrv.fanotes.desk.resolveTreeDrop
 import ch.fasrv.fanotes.desk.canGoBack
 import ch.fasrv.fanotes.desk.canGoForward
 import ch.fasrv.fanotes.ink.InkTool
 import ch.fasrv.fanotes.sync.SyncStatus
 import ch.fasrv.fanotes.vault.NoteKind
 import ch.fasrv.fanotes.vault.VaultNode
+import kotlin.math.abs
+import kotlinx.coroutines.withTimeoutOrNull
 
 class MainActivity : ComponentActivity() {
     private val model: FaNotesViewModel by viewModels()
@@ -473,6 +481,7 @@ fun FaNotesScreen(
                     onDelete = { path, folder, name -> model.askDelete(path, folder, name) },
                     onRename = { path, name -> renaming = path to name },
                     onMove = { moving = it },
+                    onDrop = { path, folder, dest -> model.dropTreeEntry(path, folder, dest) },
                     localFolders = syncPrefixesFromSetting(desk["sync-excluded"]),
                     onToggleLocal = { model.toggleLocalFolder(it) },
                     colors = model.folderColors.collectAsStateWithLifecycle().value,
@@ -788,6 +797,7 @@ private fun VaultPane(
     onDelete: (String, Boolean, String) -> Unit,
     onRename: (String, String) -> Unit,
     onMove: (String) -> Unit,
+    onDrop: (String, Boolean, String) -> Unit,
     localFolders: List<String> = emptyList(),
     onToggleLocal: (String) -> Unit = {},
     colors: Map<String, String>,
@@ -865,9 +875,51 @@ private fun VaultPane(
                 }
             }
         }
-        LazyColumn(Modifier.weight(1f).padding(top = 8.dp)) {
+        var dragPath by remember { mutableStateOf<String?>(null) }
+        var dragFolder by remember { mutableStateOf(false) }
+        var dropDest by remember { mutableStateOf<String?>(null) }
+        val rowBounds = remember { androidx.compose.runtime.mutableStateMapOf<String, TreeRowBox>() }
+        var listBounds by remember { mutableStateOf<TreeBox?>(null) }
+        LazyColumn(
+            Modifier
+                .weight(1f)
+                .padding(top = 8.dp)
+                .onGloballyPositioned {
+                    val bounds = it.boundsInRoot()
+                    listBounds = TreeBox(bounds.left, bounds.top, bounds.right, bounds.bottom)
+                }
+                .background(if (dropDest == "") MaterialTheme.colorScheme.primary.copy(alpha = 0.08f) else Color.Transparent),
+            userScrollEnabled = dragPath == null,
+        ) {
             items(tree, key = { it.path }) { node ->
-                NoteRow(node, selected, colors, expanded, onOpen, onDelete, onRename, onMove, onFolderColor, onToggleFolder, onOpenSplit, localFolders, onToggleLocal, compact, rowHeightDp, radiusDp, depth = 0)
+                NoteRow(
+                    node, selected, colors, expanded, onOpen, onDelete, onRename, onMove, onFolderColor, onToggleFolder, onOpenSplit,
+                    localFolders, onToggleLocal, compact, rowHeightDp, radiusDp,
+                    dragPath = dragPath,
+                    dropDest = dropDest,
+                    onRowBounds = { box -> rowBounds[node.path] = box },
+                    onDragStart = { path, folder ->
+                        dragPath = path
+                        dragFolder = folder
+                        dropDest = null
+                    },
+                    onDrag = { path, folder, x, y ->
+                        dropDest = resolveTreeDrop(path, folder, rowBounds.values.toList(), x, y, listBounds)
+                    },
+                    onDragEnd = {
+                        val path = dragPath
+                        val folder = dragFolder
+                        val dest = dropDest
+                        dragPath = null
+                        dropDest = null
+                        if (path != null && dest != null) onDrop(path, folder, dest)
+                    },
+                    onDragCancel = {
+                        dragPath = null
+                        dropDest = null
+                    },
+                    depth = 0,
+                )
             }
         }
         TextButton(onClick = onOpenVault) { Text("Vault-Ordner öffnen") }
@@ -893,20 +945,38 @@ private fun NoteRow(
     compact: Boolean,
     rowHeightDp: Int?,
     radiusDp: Int,
+    dragPath: String?,
+    dropDest: String?,
+    onRowBounds: (TreeRowBox) -> Unit,
+    onDragStart: (String, Boolean) -> Unit,
+    onDrag: (String, Boolean, Float, Float) -> Unit,
+    onDragEnd: () -> Unit,
+    onDragCancel: () -> Unit,
     depth: Int,
 ) {
     val folderColor = colors[node.path]
     val folder = node.kind == NoteKind.FOLDER
     val openFolder = folder && node.path in expanded
+    val dragging = dragPath == node.path
+    val dropHere = !dropDest.isNullOrEmpty() && folder && node.path == dropDest
+    val handleOrigin = remember { floatArrayOf(0f, 0f) }
     Row(
         Modifier
             .fillMaxWidth()
             .padding(start = (depth * 12).dp)
             .height(ch.fasrv.fanotes.desk.chromeRowHeightDp(compact, rowHeightDp).dp)
             .clip(RoundedCornerShape(radiusDp.dp))
-            .background(if (node.path == selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f) else Color.Transparent)
-            .clickable(onClickLabel = if (folder) { if (openFolder) "Zuklappen" else "Aufklappen" } else "Öffnen") {
-                if (folder) onToggleFolder(node.path) else onOpen(node.path)
+            .background(
+                when {
+                    dropHere -> MaterialTheme.colorScheme.primary.copy(alpha = 0.28f)
+                    dragging -> MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+                    node.path == selected -> MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
+                    else -> Color.Transparent
+                },
+            )
+            .onGloballyPositioned {
+                val bounds = it.boundsInRoot()
+                onRowBounds(TreeRowBox(node.path, folder, TreeBox(bounds.left, bounds.top, bounds.right, bounds.bottom)))
             }
             .padding(horizontal = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -915,7 +985,9 @@ private fun NoteRow(
             if (!folder) "" else if (openFolder) "▾" else "▸",
             fontSize = 12.sp,
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
-            modifier = Modifier.width(14.dp),
+            modifier = Modifier.width(14.dp).clickable {
+                if (folder) onToggleFolder(node.path) else onOpen(node.path)
+            },
         )
         Icon(
             when (node.kind) {
@@ -927,7 +999,56 @@ private fun NoteRow(
             tint = folderColor?.let { Color(android.graphics.Color.parseColor(it)) } ?: MaterialTheme.colorScheme.primary,
             modifier = if (folder) Modifier.clickable(onClickLabel = "Ordnerfarbe") { onFolderColor(node.path) } else Modifier,
         )
-        Text(node.name, modifier = Modifier.weight(1f).padding(start = 8.dp), maxLines = 1)
+        Text(
+            node.name,
+            maxLines = 1,
+            modifier = Modifier
+                .weight(1f)
+                .padding(start = 8.dp)
+                .onGloballyPositioned {
+                    val bounds = it.boundsInRoot()
+                    handleOrigin[0] = bounds.left
+                    handleOrigin[1] = bounds.top
+                }
+                .pointerInput(node.path) {
+                    awaitEachGesture {
+                        val down = awaitFirstDown()
+                        val slop = viewConfiguration.touchSlop
+                        val held = withTimeoutOrNull(viewConfiguration.longPressTimeoutMillis) {
+                            while (true) {
+                                val event = awaitPointerEvent()
+                                val change = event.changes.firstOrNull { it.id == down.id } ?: return@withTimeoutOrNull "cancel"
+                                val dx = change.position.x - down.position.x
+                                val dy = change.position.y - down.position.y
+                                if (dx * dx + dy * dy > slop * slop) return@withTimeoutOrNull "scroll"
+                                if (!change.pressed) return@withTimeoutOrNull "tap"
+                            }
+                            "tap"
+                        }
+                        when (held) {
+                            "tap" -> if (folder) onToggleFolder(node.path) else onOpen(node.path)
+                            "scroll", "cancel" -> Unit
+                            else -> {
+                                onDragStart(node.path, folder)
+                                var moved = false
+                                var ended = false
+                                while (true) {
+                                    val event = awaitPointerEvent()
+                                    val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                                    change.consume()
+                                    onDrag(node.path, folder, handleOrigin[0] + change.position.x, handleOrigin[1] + change.position.y)
+                                    if (abs(change.position.x - down.position.x) > slop || abs(change.position.y - down.position.y) > slop) moved = true
+                                    if (!change.pressed) {
+                                        ended = true
+                                        break
+                                    }
+                                }
+                                if (ended && moved) onDragEnd() else onDragCancel()
+                            }
+                        }
+                    }
+                },
+        )
         if (node.kind != NoteKind.FOLDER) {
             Text(
                 "Rechts",
@@ -958,7 +1079,20 @@ private fun NoteRow(
         }
     }
     if (openFolder) {
-        node.children.forEach { NoteRow(it, selected, colors, expanded, onOpen, onDelete, onRename, onMove, onFolderColor, onToggleFolder, onOpenSplit, localFolders, onToggleLocal, compact, rowHeightDp, radiusDp, depth + 1) }
+        node.children.forEach {
+            NoteRow(
+                it, selected, colors, expanded, onOpen, onDelete, onRename, onMove, onFolderColor, onToggleFolder, onOpenSplit,
+                localFolders, onToggleLocal, compact, rowHeightDp, radiusDp,
+                dragPath = dragPath,
+                dropDest = dropDest,
+                onRowBounds = onRowBounds,
+                onDragStart = onDragStart,
+                onDrag = onDrag,
+                onDragEnd = onDragEnd,
+                onDragCancel = onDragCancel,
+                depth = depth + 1,
+            )
+        }
     }
 }
 

@@ -97,6 +97,7 @@ import ch.fasrv.fanotes.desk.sortPinnedFirst
 import ch.fasrv.fanotes.desk.stepNoteHistory
 import ch.fasrv.fanotes.desk.tabsToClose
 import ch.fasrv.fanotes.desk.togglePinnedTab
+import ch.fasrv.fanotes.desk.canDropEntry
 import ch.fasrv.fanotes.desk.expandedFoldersJson
 import ch.fasrv.fanotes.desk.moveTab
 import ch.fasrv.fanotes.desk.parseExpandedFolders
@@ -949,6 +950,18 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
                 }.getOrElse { PDF_EXPORT_FAILED }
             }
         }
+    }
+
+    fun dropTreeEntry(path: String, sourceIsFolder: Boolean, destFolder: String) {
+        if (!canDropEntry(path, sourceIsFolder, destFolder)) return
+        if (destFolder.isNotEmpty()) {
+            val opened = toggleExpandedFolder(expandedFolders.value, destFolder, forceOpen = true)
+            if (opened != expandedFolders.value) {
+                expandedFolders.value = opened
+                persistExpandedFolders()
+            }
+        }
+        moveEntry(path, destFolder)
     }
 
     fun moveEntry(path: String, destFolder: String) {
