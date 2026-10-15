@@ -11,6 +11,21 @@ import kotlin.test.assertTrue
 
 class NoteStoreTest {
     @Test
+    fun untitledNotesAndFoldersGetTheDesktopNumber() {
+        val root = Files.createTempDirectory("fanotes-unique")
+        val store = NoteStore(DirectoryVault(root))
+        val first = store.createUniqueMarkdown("Schule")
+        val second = store.createUniqueMarkdown("Schule")
+        assertEquals("Schule/Unbenannte Notiz.md", first)
+        assertEquals("Schule/Unbenannte Notiz 2.md", second)
+        assertTrue(store.readNote(first).markdown.startsWith("# Unbenannte Notiz\n\n"))
+        store.createUniqueFolder("Schule")
+        store.createUniqueFolder("Schule")
+        val names = store.tree().single { it.name == "Schule" }.children.map { it.name }
+        assertEquals(listOf("Neuer Ordner", "Neuer Ordner 2", "Unbenannte Notiz", "Unbenannte Notiz 2"), names.sorted())
+    }
+
+    @Test
     fun markdownAndInkSurviveAReload() {
         val root = Files.createTempDirectory("fanotes-vault")
         val vault = DirectoryVault(root)
