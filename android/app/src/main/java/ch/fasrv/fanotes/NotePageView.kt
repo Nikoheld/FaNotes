@@ -544,6 +544,15 @@ class NotePageView(context: Context) : FrameLayout(context) {
         val probeEnd = (offset + 1).coerceAtMost(editable.length)
         if (editable.getSpans(probeStart, probeEnd, DetailsSummarySpan::class.java).isEmpty()) return false
         val before = editable.toString()
+        val right = (editor.layout?.width ?: editor.width).toFloat()
+        if (ch.fasrv.fanotes.desk.detailsTapAction(right, x, editor.textSize) == "edit") {
+            val block = ch.fasrv.fanotes.desk.findDetailsBlocks(before)
+                .firstOrNull { offset >= it.from && offset < it.to }
+                ?: return false
+            val cursor = (block.from + 1).coerceAtMost(before.length)
+            editor.setSelection(cursor)
+            return true
+        }
         val next = ch.fasrv.fanotes.desk.toggleDetailsOpen(before, offset) ?: return false
         val cursor = ch.fasrv.fanotes.desk.findDetailsBlocks(before)
             .firstOrNull { offset >= it.from && offset < it.to }

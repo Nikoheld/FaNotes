@@ -72,6 +72,43 @@ fun paperMathBox(textSizePx: Float): PaperMathBox {
     )
 }
 
+data class PaperDetailsBox(
+    val radius: Float,
+    val marginY: Float,
+    val padX: Float,
+    val padY: Float,
+    val border: Float,
+)
+
+/**
+ * Folded details card from the paper stylesheet: 10px corners, 0.7em margin,
+ * and summary padding of 0.72em by 0.9em.
+ */
+fun paperDetailsBox(textSizePx: Float): PaperDetailsBox {
+    val base = if (textSizePx <= 0f) 16f else textSizePx
+    return PaperDetailsBox(
+        radius = (10f * base / 16f).coerceAtLeast(1f),
+        marginY = base * 0.7f,
+        padX = base * 0.9f,
+        padY = base * 0.72f,
+        border = (base / 16f).coerceAtLeast(1f),
+    )
+}
+
+/**
+ * A tap on the summary toggles the block. A tap on „Bearbeiten“, which sits
+ * between the chevron and the title, opens the source instead.
+ */
+fun detailsTapAction(viewRight: Float, tapX: Float, textSizePx: Float): String {
+    val base = if (textSizePx <= 0f) 16f else textSizePx
+    val fromRight = viewRight - tapX
+    val chevron = base * 2.2f
+    val button = base * 4.6f
+    if (fromRight <= chevron) return "toggle"
+    if (fromRight <= chevron + button) return "edit"
+    return "toggle"
+}
+
 /** Side padding of an inline formula, 0.14em. */
 fun paperMathInlinePad(textSizePx: Float): Float {
     val base = if (textSizePx <= 0f) 16f else textSizePx

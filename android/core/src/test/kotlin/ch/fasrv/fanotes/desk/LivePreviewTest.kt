@@ -55,6 +55,8 @@ class LivePreviewTest {
         val closed = "<details>\n<summary>**Titel**</summary>\n\nGeheim\n</details>\nNachher"
         val folded = livePreviewMarks(closed, closed.length, closed.length)
         assertEquals("Titel", folded.first { it.kind == LiveKind.DETAILS_SUMMARY }.label)
+        assertFalse(folded.first { it.kind == LiveKind.DETAILS_SUMMARY }.open)
+        assertFalse(folded.any { it.kind == LiveKind.DETAILS_END })
         assertTrue(folded.any { it.kind == LiveKind.HIDE && it.start == closed.indexOf("Geheim") })
         assertTrue(folded.any { it.kind == LiveKind.HIDE && it.start == closed.indexOf("</details>") })
         val inside = livePreviewMarks(closed, closed.indexOf("Geheim"), closed.indexOf("Geheim"))
@@ -69,10 +71,26 @@ class LivePreviewTest {
 
         val multi = "<details open>\n<summary>Titel</summary>\nGeheim\n</details>"
         val openMarks = livePreviewMarks(multi, multi.length, multi.length)
-        assertEquals("Titel", openMarks.first { it.kind == LiveKind.DETAILS_SUMMARY }.label)
+        val summary = openMarks.first { it.kind == LiveKind.DETAILS_SUMMARY }
+        assertEquals("Titel", summary.label)
+        assertTrue(summary.open)
+        assertTrue(summary.continues)
+        assertTrue(openMarks.any { it.kind == LiveKind.DETAILS_END && it.start == multi.indexOf("Geheim") })
         assertFalse(openMarks.any { it.kind == LiveKind.HIDE && it.start == multi.indexOf("Geheim") })
         assertTrue(openMarks.any { it.kind == LiveKind.HIDE && it.start == multi.indexOf("<summary>") })
         assertTrue(openMarks.any { it.kind == LiveKind.HIDE && it.start == multi.indexOf("</details>") })
+        val inlineOpen = livePreviewMarks(opened, 0, 0).first { it.kind == LiveKind.DETAILS_SUMMARY }
+        assertTrue(inlineOpen.open)
+        assertFalse(inlineOpen.continues)
+        assertEquals("toggle", detailsTapAction(400f, 390f, 16f))
+        assertEquals("edit", detailsTapAction(400f, 400f - 16f * 4f, 16f))
+        assertEquals("toggle", detailsTapAction(400f, 20f, 16f))
+        val box = paperDetailsBox(16f)
+        assertEquals(10f, box.radius)
+        assertEquals(16f * 0.7f, box.marginY)
+        assertEquals(16f * 0.9f, box.padX)
+        assertEquals(16f * 0.72f, box.padY)
+        assertEquals(mixColors(PAPER_PANEL_STRONG, "#ffffff", 0.76), paperDetailsFill())
     }
 
     @Test
