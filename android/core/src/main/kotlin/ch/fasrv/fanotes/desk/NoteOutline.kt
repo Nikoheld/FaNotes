@@ -1,10 +1,48 @@
 package ch.fasrv.fanotes.desk
 
+import java.text.Normalizer
+import java.util.Locale
+
 /**
  * Headings in a note, in the same shape as `noteOutline.ts`.
  * Line numbers are 1-based and point at the raw markdown line.
  */
 data class NoteOutlineHeading(val level: Int, val title: String, val line: Int)
+
+private val HEADING_LOCALE = Locale.forLanguageTag("de-DE")
+
+/**
+ * The id the desktop preview puts on a heading (`headingSlug` in MarkdownPreview).
+ * A repeated title becomes `name-2`, then `name-3`.
+ */
+fun headingSlug(value: String): String {
+    val folded = Normalizer.normalize(value, Normalizer.Form.NFKD)
+        .replace(Regex("[\\u0300-\\u036f]"), "")
+        .lowercase(HEADING_LOCALE)
+    val cleaned = buildString {
+        for (ch in folded) {
+            if (ch.isLetterOrDigit() || ch == ' ' || ch == '-') append(ch)
+        }
+    }.trim().replace(Regex("\\s+"), "-").replace(Regex("-+"), "-")
+    return cleaned.ifEmpty { "abschnitt" }
+}
+
+/** The 1-based line of the heading a wiki anchor names, or null. */
+fun headingAnchorLine(markdown: String, anchor: String): Int? {
+    val wanted = anchor.trim().removePrefix("#")
+    if (wanted.isEmpty()) return null
+    val counts = HashMap<String, Int>()
+    for (heading in parseNoteOutline(markdown)) {
+        val base = headingSlug(heading.title)
+        val seen = counts.getOrDefault(base, 0)
+        counts[base] = seen + 1
+        val id = if (seen == 0) base else "$base-${seen + 1}"
+        if (id == wanted || id.equals(wanted, ignoreCase = true) || heading.title.equals(wanted, ignoreCase = true)) {
+            return heading.line
+        }
+    }
+    return null
+}
 
 private val HEADING = Regex("""^(#{1,6})\s+(.+?)\s*#*$""")
 

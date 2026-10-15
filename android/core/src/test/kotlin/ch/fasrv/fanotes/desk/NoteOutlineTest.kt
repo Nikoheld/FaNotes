@@ -40,6 +40,18 @@ class NoteOutlineTest {
     }
 
     @Test
+    fun aHeadingAnchorUsesTheDesktopSlug() {
+        assertEquals("uber-die-menge", headingSlug("Über die Menge"))
+        assertEquals("aufgabe-1", headingSlug("Aufgabe 1"))
+        assertEquals("abschnitt", headingSlug("..."))
+        val note = "# Beweis\n\nText\n\n# Beweis\n"
+        assertEquals(1, headingAnchorLine(note, "Beweis"))
+        assertEquals(1, headingAnchorLine(note, "beweis"))
+        assertEquals(5, headingAnchorLine(note, "beweis-2"))
+        assertEquals(null, headingAnchorLine(note, "fehlt"))
+    }
+
+    @Test
     fun closingHashesAreNotPartOfTheTitle() {
         assertEquals("Aufgabe 1", parseNoteOutline("## Aufgabe 1 ##").single().title)
         assertEquals(6, parseNoteOutline("###### Tief").single().level)
