@@ -3160,6 +3160,9 @@ fun CommandPalette(
     onOpenNote: (String) -> Unit,
     onOpenNoteInSplit: (String) -> Unit = {},
     splitOpen: Boolean = false,
+    splitRows: Boolean = false,
+    focus: Boolean = false,
+    dailyFolder: String = "",
     notesOnly: Boolean = false,
     reduceMotion: Boolean = false,
     penOpen: Boolean = false,
@@ -3169,55 +3172,9 @@ fun CommandPalette(
     var query by remember { mutableStateOf("") }
     var selected by remember { mutableIntStateOf(0) }
     val notes = if (notesOnly) rankNotes(query, 40) else if (query.isBlank()) emptyList() else rankNotes(query, 6)
-    val actions = listOf(
-        "new-note" to "Neue Notiz",
-        "import-pdf" to "PDF importieren",
-        "new-folder" to "Neuer Ordner",
-        "save" to "Aktuelle Notiz speichern",
-        "pen" to if (penOpen) "Zur Tastatur wechseln" else "Mit Stift schreiben",
-        "note-link" to "Verlinkung setzen",
-        "book" to if (bookOpen) "Buch ausblenden" else "Buch einblenden",
-        "worksheet" to "Bild oder PDF als Arbeitsblatt",
-        "notes" to "Notizen",
-        "search" to "Im Vault suchen",
-        "tasks" to "Hausaufgaben & Termine",
-        "calendar" to "Kalender",
-        "overview" to "Vault-Übersicht",
-        "cards" to "Karteikarten",
-        "books" to "Fachbuch",
-        "history" to "Versionsverlauf",
-        "study" to "Lernzeit",
-        "nav-back" to "Zurück",
-        "nav-forward" to "Vorwärts",
-        "reopen-tab" to "Geschlossenen Tab wieder öffnen",
-        "pin-tab" to "Tab anheften",
-        "close-others" to "Andere Tabs schließen",
-        "close-right" to "Tabs rechts schließen",
-        "cycle-tab" to "Nächster Tab",
-        "template-protocol" to "Vorlage: Protokoll",
-        "template-proof" to "Vorlage: Beweis",
-        "template-cornell" to "Vorlage: Cornell",
-        "template-vocabulary" to "Vorlage: Vokabeln",
-        "template-journal" to "Vorlage: Tagebuch",
-        "template-meeting" to "Vorlage: Besprechung",
-        "ai" to "AI",
-        "settings" to "Einstellungen",
-        "daily" to "Tägliche Notiz",
-        "split" to if (splitOpen) "Geteilte Ansicht schließen" else "Geteilte Ansicht öffnen",
-        "split-orient" to "Teilung drehen",
-        "split-swap" to "Geteilte Ansicht tauschen",
-        "note-here" to "Notiz in diesem Ordner",
-        "subfolder" to "Unterordner",
-        "focus" to "Fokusmodus",
-        "sidebar" to "Dateileiste umschalten",
-        "inspector" to "Gliederung umschalten",
-        "sync" to "Sync",
-        "bug-report" to "Fehler melden",
-        "export-pdf" to "Notiz als PDF exportieren",
-        "download-note" to "Notiz herunterladen",
-    )
-    val commands = if (notesOnly) emptyList() else if (query.isBlank()) actions else actions.filter { (_, label) -> fuzzyScore(query, label) > 0 }
-    val rows = commands.map { PaletteRow.Command(it.first, it.second) } + notes.map { PaletteRow.Note(it.path, it.title, it.folder) }
+    val actions = ch.fasrv.fanotes.desk.paletteCommands(penOpen, bookOpen, splitOpen, splitRows, focus, dailyFolder)
+    val commands = if (notesOnly) emptyList() else actions.filter { ch.fasrv.fanotes.desk.paletteCommandMatches(it, query) }
+    val rows = commands.map { PaletteRow.Command(it) } + notes.map { PaletteRow.Note(it.path, it.title, it.folder) }
     androidx.compose.runtime.LaunchedEffect(query, notesOnly) { selected = 0 }
     val listState = rememberLazyListState()
     androidx.compose.runtime.LaunchedEffect(selected, rows.size, reduceMotion) {
@@ -3230,7 +3187,7 @@ fun CommandPalette(
     fun openRow(index: Int, split: Boolean) {
         val row = rows.getOrNull(index) ?: return
         when (row) {
-            is PaletteRow.Command -> onRun(row.id)
+            is PaletteRow.Command -> onRun(row.command.id)
             is PaletteRow.Note -> if (ch.fasrv.fanotes.desk.paletteOpensInSplit("note", split)) onOpenNoteInSplit(row.path) else onOpenNote(row.path)
         }
         onDismiss()
@@ -3279,12 +3236,12 @@ fun CommandPalette(
         LazyColumn(state = listState, modifier = Modifier.fillMaxWidth().heightIn(max = 360.dp).padding(top = 8.dp)) {
             itemsIndexed(rows) { index, row ->
                 val group = when (row) {
-                    is PaletteRow.Command -> "Befehle"
+                    is PaletteRow.Command -> row.command.group
                     is PaletteRow.Note -> if (notesOnly && query.isBlank()) "Zuletzt geöffnet" else "Notizen"
                 }
                 val previous = rows.getOrNull(index - 1)
                 val previousGroup = when (previous) {
-                    is PaletteRow.Command -> "Befehle"
+                    is PaletteRow.Command -> previous.command.group
                     is PaletteRow.Note -> if (notesOnly && query.isBlank()) "Zuletzt geöffnet" else "Notizen"
                     null -> null
                 }
@@ -3299,9 +3256,19 @@ fun CommandPalette(
                         Text(group, fontWeight = FontWeight.SemiBold, fontSize = 12.sp, modifier = Modifier.padding(bottom = 4.dp))
                     }
                     when (row) {
-                        is PaletteRow.Command -> Text(row.label)
+                        is PaletteRow.Command -> Row(verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text(row.command.label, fontWeight = FontWeight.SemiBold)
+                                if (row.command.detail.isNotEmpty()) {
+                                    Text(row.command.detail, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+                                }
+                            }
+                            if (row.command.shortcut.isNotEmpty()) {
+                                Text(row.command.shortcut, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f), modifier = Modifier.padding(start = 8.dp))
+                            }
+                        }
                         is PaletteRow.Note -> {
-                            Text(row.title)
+                            Text(row.title, fontWeight = FontWeight.SemiBold)
                             if (row.folder.isNotEmpty()) Text(row.folder, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
                         }
                     }
@@ -3337,6 +3304,6 @@ private suspend fun androidx.compose.ui.input.pointer.PointerInputScope.detectDe
 }
 
 private sealed class PaletteRow {
-    data class Command(val id: String, val label: String) : PaletteRow()
+    data class Command(val command: ch.fasrv.fanotes.desk.PaletteCommand) : PaletteRow()
     data class Note(val path: String, val title: String, val folder: String) : PaletteRow()
 }

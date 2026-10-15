@@ -852,6 +852,9 @@ fun FaNotesScreen(
                 onOpenNote = { model.openPath(it); model.showDestination("notes") },
                 onOpenNoteInSplit = { model.openInSplit(it); model.showDestination("notes") },
                 splitOpen = split != null,
+                splitRows = desk["split-orientation"] == "rows",
+                focus = desk["focus"] == "on",
+                dailyFolder = desk["daily-folder"].orEmpty(),
                 penOpen = !showText,
                 bookOpen = model.bookOpen.collectAsStateWithLifecycle().value,
             ) { id ->
@@ -886,6 +889,25 @@ fun FaNotesScreen(
                     "sidebar" -> model.setSidebarOpen(!(if (wide) sidebarOpen else showList))
                     "inspector" -> model.toggleInspector()
                     "sync" -> requestSync()
+                    "sync-settings" -> model.showDestination("settings")
+                    "reveal" -> {
+                        val path = open?.path
+                        if (path == null) {
+                            model.message.value = "Öffne zuerst eine Notiz."
+                        } else if (!model.selectedFolderVault()) {
+                            model.message.value = "Diese Notiz liegt im Tablet-Vault und hat keinen Ordner im Dateimanager."
+                        } else {
+                            val uri = model.revealInFolder(path)
+                            if (uri == null) {
+                                model.message.value = "Der Eintrag wurde nicht gefunden."
+                            } else {
+                                val intent = Intent(Intent.ACTION_VIEW).setData(uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                runCatching { context.startActivity(intent) }.onFailure {
+                                    model.message.value = "Der Dateimanager konnte den Eintrag nicht öffnen."
+                                }
+                            }
+                        }
+                    }
                     "bug-report" -> model.openBugReport()
                     "export-pdf" -> onExportPdf()
                     "download-note" -> onDownload()
