@@ -81,6 +81,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
             super.onSelectionChanged(selStart, selEnd)
             invalidate()
             if (previewReady && !paintingPreview) paintLivePreview()
+            tags?.onCaretMoved()
         }
 
         override fun onTouchEvent(event: MotionEvent): Boolean {
@@ -117,6 +118,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
         }
 
         override fun onKeyPreIme(keyCode: Int, event: KeyEvent): Boolean {
+            if (tags?.onKey(keyCode, event) == true) return true
             if (event.isAltPressed && !event.isCtrlPressed && !event.isMetaPressed &&
                 (keyCode == KeyEvent.KEYCODE_DPAD_UP || keyCode == KeyEvent.KEYCODE_DPAD_DOWN)
             ) {
@@ -477,6 +479,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
     private val syncPill = TextView(context)
     private var boundPath = ""
     private var writing = false
+    private var tags: HtmlTagAssist? = null
     private var editBefore = ""
     private var changeStart = 0
     private var changeDeleted = 0
@@ -535,6 +538,14 @@ class NotePageView(context: Context) : FrameLayout(context) {
     var onRestyleLink: (String, String) -> Unit = { _, _ -> }
 
     init {
+        tags = HtmlTagAssist(editor) { block ->
+            writing = true
+            try {
+                block()
+            } finally {
+                writing = false
+            }
+        }
         clipChildren = true
         clipToPadding = true
         setBackgroundColor(0xFFE8E6E1.toInt())
@@ -565,7 +576,10 @@ class NotePageView(context: Context) : FrameLayout(context) {
             true
         }
         editor.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
-        editor.setOnFocusChangeListener { _, _ -> paintLivePreview() }
+        editor.setOnFocusChangeListener { _, focused ->
+            paintLivePreview()
+            if (!focused) tags?.hide()
+        }
         editor.visibility = GONE
         editor.addTextChangedListener(object : android.text.TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {
@@ -622,6 +636,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
                     }
                 }
                 if (previewReady) paintLivePreview()
+                if (!writing) tags?.onUserEdit()
             }
         })
         addView(lineNumbers, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT))
@@ -630,6 +645,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
         editor.setOnScrollChangeListener { _, _, scrollY, _, _ ->
             lineNumbers.scrollTo(0, scrollY)
             foldMarks.scrollTo(0, scrollY)
+            tags?.onCaretMoved()
         }
         tools.orientation = LinearLayout.HORIZONTAL
         tools.gravity = Gravity.CENTER_VERTICAL
@@ -1474,6 +1490,11 @@ class NotePageView(context: Context) : FrameLayout(context) {
         } else {
             lineNumbers.visibility = GONE
         }
+    }
+
+    override fun onDetachedFromWindow() {
+        tags?.hide()
+        super.onDetachedFromWindow()
     }
 
     override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
