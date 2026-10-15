@@ -42,5 +42,8 @@ class MarkdownConflictTest {
         assertEquals(mixColors("#c4554d", "#37352f", 0.54), folderNameInk("#C4554D", "#2a6f97", "#37352f"))
         assertEquals(mixColors("#2a6f97", "#ededec", 0.54), folderNameInk(null, "#2a6f97", "#ededec"))
         assertEquals(mixColors("#2a6f97", "#37352f", 0.54), folderNameInk("nope", "blue", "#37352f"))
+        assertEquals("#c4554d", folderIconInk("#c4554d", "#2a6f97", "#37352f"))
+        assertEquals(mixColors("#2a6f97", "#37352f", 0.72), folderIconInk(null, "#2a6f97", "#37352f"))
+        assertEquals(mixColors("#2a6f97", "#5e5c57", 0.52), fileIconInk("#2a6f97", "#5e5c57"))
     }
 }

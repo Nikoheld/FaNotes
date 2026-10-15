@@ -591,6 +591,19 @@ fun folderNameInk(folderColor: String?, accent: String, text: String): String {
     return mixColors(source, body, 0.54)
 }
 
+/** A chosen folder color is used as-is. Otherwise the icon is 72% accent mixed into the text. */
+fun folderIconInk(folderColor: String?, accent: String, text: String): String {
+    parseAccent(folderColor)?.let { return it }
+    val body = parseAccent(text) ?: "#37352f"
+    return mixColors(normalizeAccent(accent), body, 0.72)
+}
+
+/** Note and PDF icons mix 52% of the accent into the muted text. */
+fun fileIconInk(accent: String, muted: String): String {
+    val faint = parseAccent(muted) ?: "#5e5c57"
+    return mixColors(normalizeAccent(accent), faint, 0.52)
+}
+
 val FOLDER_COLOR_CHOICES = listOf(
     "#6b7280", "#2a6f97", "#337ea9", "#0f7b6c", "#448361",
     "#ba9b4a", "#d9730d", "#c4554d", "#9065b0", "#787774",

@@ -1386,14 +1386,15 @@ private fun NoteRow(
             .height(ch.fasrv.fanotes.desk.chromeRowHeightDp(compact, rowHeightDp).dp)
             .alpha(if (dragging) ch.fasrv.fanotes.desk.TREE_DRAG_ALPHA else 1f)
             .border(
-                if (node.path == treeFocus) 1.dp else 0.dp,
-                MaterialTheme.colorScheme.primary,
+                if (dropHere || node.path == treeFocus) 1.dp else 0.dp,
+                if (dropHere) MaterialTheme.colorScheme.primary.copy(alpha = ch.fasrv.fanotes.desk.TREE_DROP_BORDER_ALPHA)
+                else MaterialTheme.colorScheme.primary,
                 treeShape,
             )
             .clip(treeShape)
             .background(
                 when {
-                    dropHere -> MaterialTheme.colorScheme.primary.copy(alpha = 0.28f)
+                    dropHere -> MaterialTheme.colorScheme.primary.copy(alpha = ch.fasrv.fanotes.desk.TREE_DROP_ALPHA)
                     node.path == selected -> MaterialTheme.colorScheme.surfaceVariant
                     else -> Color.Transparent
                 },
@@ -1418,11 +1419,14 @@ private fun NoteRow(
                     ),
             )
         }
+        val accentHex = "#%06x".format(MaterialTheme.colorScheme.primary.toArgb() and 0xFFFFFF)
+        val textHex = "#%06x".format(MaterialTheme.colorScheme.onSurface.toArgb() and 0xFFFFFF)
+        val mutedHex = "#%06x".format(LocalStatusInk.current.muted.toArgb() and 0xFFFFFF)
         Text(
             if (!folder) "" else if (openFolder) "▾" else "▸",
             fontSize = 12.sp,
-            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
-            modifier = Modifier.width(14.dp).clickable {
+            color = LocalStatusInk.current.muted,
+            modifier = Modifier.width(ch.fasrv.fanotes.desk.TREE_CHEVRON_DP.dp).clickable {
                 onTreeFocus(node.path)
                 if (folder) onToggleFolder(node.path) else onOpen(node.path)
             },
@@ -1433,8 +1437,14 @@ private fun NoteRow(
                 Icon(
                     Icons.Filled.Folder,
                     contentDescription = "Ordnerfarbe",
-                    tint = folderColor?.let { Color(android.graphics.Color.parseColor(it)) } ?: MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.clickable(onClickLabel = "Ordnerfarbe wählen") { colorMenu = true },
+                    tint = Color(
+                        android.graphics.Color.parseColor(
+                            ch.fasrv.fanotes.desk.folderIconInk(folderColor, accentHex, textHex),
+                        ),
+                    ),
+                    modifier = Modifier
+                        .size(ch.fasrv.fanotes.desk.TREE_ICON_DP.dp)
+                        .clickable(onClickLabel = "Ordnerfarbe wählen") { colorMenu = true },
                 )
                 DropdownMenu(expanded = colorMenu, onDismissRequest = { colorMenu = false }) {
                     Text(
@@ -1480,7 +1490,8 @@ private fun NoteRow(
                     else -> Icons.Filled.Description
                 },
                 contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
+                tint = Color(android.graphics.Color.parseColor(ch.fasrv.fanotes.desk.fileIconInk(accentHex, mutedHex))),
+                modifier = Modifier.size(ch.fasrv.fanotes.desk.TREE_ICON_DP.dp),
             )
         }
         val nameInk = when {
