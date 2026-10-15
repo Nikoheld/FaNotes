@@ -379,6 +379,9 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         noteSearchHits.value = emptyList()
         noteSearchIndex.value = 0
         noteSearchSelection = null
+        noteSearchCaseSensitive.value = false
+        noteSearchRegexp.value = false
+        noteSearchWholeWord.value = false
         val stats = openPageStats(parsePageStats(note.payload.obj("pageStats"), now), now)
         val payload = (note.payload.deepCopy() as ch.fasrv.fanotes.json.JsonValue.Obj)
         payload.put("pageStats", mergePageStats(note.payload.obj("pageStats"), stats))
@@ -567,7 +570,16 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     val noteSearchQuery = MutableStateFlow("")
     val noteSearchHits = MutableStateFlow<List<ch.fasrv.fanotes.desk.NoteSearchHit>>(emptyList())
     val noteSearchIndex = MutableStateFlow(0)
+    val noteSearchCaseSensitive = MutableStateFlow(false)
+    val noteSearchRegexp = MutableStateFlow(false)
+    val noteSearchWholeWord = MutableStateFlow(false)
     private var noteSearchSelection: Pair<Int, Int>? = null
+
+    private fun noteSearchOptions() = ch.fasrv.fanotes.desk.NoteSearchOptions(
+        caseSensitive = noteSearchCaseSensitive.value,
+        wholeWord = noteSearchWholeWord.value,
+        regexp = noteSearchRegexp.value,
+    )
 
     /** Finds in the text the editor is showing and selects the first hit. */
     fun updateNoteSearch(query: String) {
@@ -578,10 +590,28 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
             return
         }
         val shown = ch.fasrv.fanotes.desk.markdownWithFolds(markdown.value, foldedHeadings.value)
-        val hits = ch.fasrv.fanotes.desk.searchNoteText(shown, query)
+        val hits = ch.fasrv.fanotes.desk.searchNoteText(shown, query, options = noteSearchOptions())
         noteSearchHits.value = hits
         noteSearchIndex.value = 0
         if (hits.isNotEmpty()) revealNoteSearch(0) else canvasToken.value += 1
+    }
+
+    fun setNoteSearchCaseSensitive(enabled: Boolean) {
+        if (noteSearchCaseSensitive.value == enabled) return
+        noteSearchCaseSensitive.value = enabled
+        updateNoteSearch(noteSearchQuery.value)
+    }
+
+    fun setNoteSearchRegexp(enabled: Boolean) {
+        if (noteSearchRegexp.value == enabled) return
+        noteSearchRegexp.value = enabled
+        updateNoteSearch(noteSearchQuery.value)
+    }
+
+    fun setNoteSearchWholeWord(enabled: Boolean) {
+        if (noteSearchWholeWord.value == enabled) return
+        noteSearchWholeWord.value = enabled
+        updateNoteSearch(noteSearchQuery.value)
     }
 
     fun stepNoteSearch(direction: Int) {
@@ -613,7 +643,8 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         if (noteSearchQuery.value.trim().isEmpty()) return
         val shown = ch.fasrv.fanotes.desk.markdownWithFolds(markdown.value, foldedHeadings.value)
         val hit = noteSearchHits.value.getOrNull(noteSearchIndex.value) ?: return
-        val next = ch.fasrv.fanotes.desk.replaceNoteMatch(shown, hit, replacement)
+        val options = noteSearchOptions()
+        val next = ch.fasrv.fanotes.desk.replaceNoteMatch(shown, hit, replacement, options.regexp)
         if (next == shown) return
         updateVisibleMarkdown(shown, next)
         updateNoteSearch(noteSearchQuery.value)
@@ -624,7 +655,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         val query = noteSearchQuery.value
         if (query.trim().isEmpty()) return
         val shown = ch.fasrv.fanotes.desk.markdownWithFolds(markdown.value, foldedHeadings.value)
-        val next = ch.fasrv.fanotes.desk.replaceAllNoteMatches(shown, query, replacement)
+        val next = ch.fasrv.fanotes.desk.replaceAllNoteMatches(shown, query, replacement, noteSearchOptions())
         if (next == shown) return
         updateVisibleMarkdown(shown, next)
         updateNoteSearch(query)
