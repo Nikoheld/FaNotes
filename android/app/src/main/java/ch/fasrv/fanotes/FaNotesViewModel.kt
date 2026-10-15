@@ -375,6 +375,10 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         pdfPassword = ""
         pdfNeedsPassword.value = false
         pdfPasswordRejected.value = false
+        noteSearchQuery.value = ""
+        noteSearchHits.value = emptyList()
+        noteSearchIndex.value = 0
+        noteSearchSelection = null
         val stats = openPageStats(parsePageStats(note.payload.obj("pageStats"), now), now)
         val payload = (note.payload.deepCopy() as ch.fasrv.fanotes.json.JsonValue.Obj)
         payload.put("pageStats", mergePageStats(note.payload.obj("pageStats"), stats))
@@ -558,6 +562,50 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         } finally {
             file.delete()
         }
+    }
+
+    val noteSearchQuery = MutableStateFlow("")
+    val noteSearchHits = MutableStateFlow<List<ch.fasrv.fanotes.desk.NoteSearchHit>>(emptyList())
+    val noteSearchIndex = MutableStateFlow(0)
+    private var noteSearchSelection: Pair<Int, Int>? = null
+
+    /** Finds in the text the editor is showing and selects the first hit. */
+    fun updateNoteSearch(query: String) {
+        noteSearchQuery.value = query
+        if (query.trim().isEmpty()) {
+            noteSearchHits.value = emptyList()
+            noteSearchIndex.value = 0
+            return
+        }
+        val shown = ch.fasrv.fanotes.desk.markdownWithFolds(markdown.value, foldedHeadings.value)
+        val hits = ch.fasrv.fanotes.desk.searchNoteText(shown, query)
+        noteSearchHits.value = hits
+        noteSearchIndex.value = 0
+        if (hits.isNotEmpty()) revealNoteSearch(0) else canvasToken.value += 1
+    }
+
+    fun stepNoteSearch(direction: Int) {
+        val hits = noteSearchHits.value
+        if (hits.isEmpty() || (direction != 1 && direction != -1)) return
+        revealNoteSearch((noteSearchIndex.value + direction).mod(hits.size))
+    }
+
+    fun showNoteSearchHit(index: Int) {
+        revealNoteSearch(index)
+    }
+
+    fun takeNoteSearchSelection(): Pair<Int, Int>? {
+        val pending = noteSearchSelection ?: return null
+        noteSearchSelection = null
+        return pending
+    }
+
+    private fun revealNoteSearch(index: Int) {
+        val hit = noteSearchHits.value.getOrNull(index) ?: return
+        noteSearchIndex.value = index
+        showText.value = true
+        noteSearchSelection = hit.start to hit.end
+        canvasToken.value += 1
     }
 
     fun jumpToOutline(line: Int) {

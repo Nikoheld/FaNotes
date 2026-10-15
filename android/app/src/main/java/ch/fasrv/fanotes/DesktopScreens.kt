@@ -1855,6 +1855,49 @@ fun PdfThumbStrip(model: FaNotesViewModel) {
 }
 
 @Composable
+fun NoteSearchBar(model: FaNotesViewModel) {
+    val query by model.noteSearchQuery.collectAsStateWithLifecycle()
+    val hits by model.noteSearchHits.collectAsStateWithLifecycle()
+    val index by model.noteSearchIndex.collectAsStateWithLifecycle()
+    val status = when {
+        query.trim().isEmpty() -> ""
+        hits.isEmpty() -> "Keine Treffer"
+        else -> "${index + 1} / ${hits.size}"
+    }
+    Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 2.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            OutlinedTextField(
+                query,
+                { model.updateNoteSearch(it) },
+                modifier = Modifier.weight(1f),
+                singleLine = true,
+                label = { Text("Im Text suchen …") },
+            )
+            if (status.isNotEmpty()) Text(status, fontSize = 12.sp, modifier = Modifier.padding(start = 8.dp))
+        }
+        if (query.isNotEmpty()) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                TextButton(onClick = { model.stepNoteSearch(-1) }, enabled = hits.isNotEmpty()) { Text("Vorheriger Treffer") }
+                TextButton(onClick = { model.stepNoteSearch(1) }, enabled = hits.isNotEmpty()) { Text("Nächster Treffer") }
+            }
+            val windowStart = (index - 2).coerceAtLeast(0)
+            hits.drop(windowStart).take(6).forEachIndexed { offset, hit ->
+                val hitIndex = windowStart + offset
+                val selected = hitIndex == index
+                Text(
+                    hit.excerpt,
+                    fontSize = 13.sp,
+                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                    color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                    maxLines = 2,
+                    modifier = Modifier.fillMaxWidth().clickable { model.showNoteSearchHit(hitIndex) }.padding(vertical = 2.dp),
+                )
+            }
+        }
+    }
+}
+
+@Composable
 fun PdfPasswordPrompt(model: FaNotesViewModel) {
     val needed by model.pdfNeedsPassword.collectAsStateWithLifecycle()
     val rejected by model.pdfPasswordRejected.collectAsStateWithLifecycle()

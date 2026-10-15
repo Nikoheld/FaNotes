@@ -1229,6 +1229,8 @@ private fun NotePage(
                 PdfSearchBar(model)
                 PdfThumbStrip(model)
                 PdfQuoteMarks(model)
+            } else {
+                NoteSearchBar(model)
             }
             if (showRelations) NoteRelations(model) { model.openPath(it); model.showDestination("notes") }
         }
@@ -1397,6 +1399,7 @@ private fun PageSurface(
                 page.revealLine(jump)
                 model.consumeOutlineJump()
             }
+            model.takeNoteSearchSelection()?.let { (start, end) -> page.revealRange(start, end) }
             val current = path ?: ""
             if (bound != current) {
                 page.rememberCamera(bound)
