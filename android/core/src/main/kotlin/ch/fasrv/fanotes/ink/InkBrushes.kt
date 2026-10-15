@@ -1,7 +1,9 @@
 package ch.fasrv.fanotes.ink
 
 import kotlin.math.acos
+import kotlin.math.cos
 import kotlin.math.hypot
+import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.sin
 
@@ -128,3 +130,18 @@ fun markerCenterline(
     commands += MarkerCommand.Line(x[to], y[to])
     return commands
 }
+
+/** Slant of the desktop broad nib, −0.22π. */
+const val CALLIGRAPHY_ANGLE = -Math.PI * 0.22
+
+data class CalligraphyOffset(val x: Double, val y: Double)
+
+/** Half-nib offset in page pixels. */
+fun calligraphyNibOffset(nibWidth: Double): CalligraphyOffset {
+    val half = nibWidth / 2.0
+    return CalligraphyOffset(cos(CALLIGRAPHY_ANGLE) * half, sin(CALLIGRAPHY_ANGLE) * half)
+}
+
+/** Dot radii: full nib across, 16% along the slant, at least half a pixel. */
+fun calligraphyDotRadii(nibWidth: Double): Pair<Double, Double> =
+    nibWidth / 2.0 to max(0.5, nibWidth * 0.16)
